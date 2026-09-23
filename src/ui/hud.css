@@ -113,7 +113,7 @@
   justify-content: space-between;
 }
 .timing .pbig {
-  font-size: 44px;
+  font-size: var(--t-hero);
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.02em;
@@ -280,7 +280,7 @@
   background: var(--well);
   display: grid;
   place-items: center;
-  font-size: 44px;
+  font-size: var(--t-hero);
   font-weight: 700;
   line-height: 1;
 }
