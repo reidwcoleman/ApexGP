@@ -465,3 +465,14 @@
   color: var(--ink3);
   letter-spacing: 0.04em;
 }
+
+.replay-badge.flashback {
+  left: 50%;
+  transform: translate(-50%, -8px);
+}
+.replay-badge.flashback.on {
+  transform: translate(-50%, 0);
+}
+.replay-badge.flashback .rdot {
+  background: #6cb8ff;
+}

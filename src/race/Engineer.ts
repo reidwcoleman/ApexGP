@@ -52,7 +52,10 @@ export class Engineer {
           this.say(`Personal best, ${fmtTime(e.value!)}. Keep that rhythm.`);
           break;
         case 'track-limits':
-          this.say(`Track limits at ${cornerName()}. That lap is gone.`);
+          this.say(e.value === 3 ? `That's your last warning for track limits. Keep it inside the white lines.` : `Track limits at ${cornerName()}.${e.value ? ` Warning ${e.value}.` : ' That lap is gone.'}`);
+          break;
+        case 'penalty':
+          this.say(`We have a ${e.value} second penalty for track limits. Push, we need to pull a gap.`, true);
           break;
         case 'final-lap':
           this.say('Final lap. Bring it home.', true);

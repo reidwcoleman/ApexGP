@@ -77,6 +77,21 @@ export class ReplayBuffer {
     this.count = Math.min(cap, this.count + 1);
   }
 
+  /** forget every frame recorded after session time t (after a flashback) */
+  truncate(t: number) {
+    const cap = this.times.length;
+    while (this.count > 0) {
+      const last = (this.head - 1 + cap) % cap;
+      if (this.times[last] <= t) break;
+      this.head = last;
+      this.count--;
+    }
+  }
+
+  get endTime(): number {
+    return this.count ? this.times[(this.head - 1 + this.times.length) % this.times.length] : 0;
+  }
+
   /** set the ghosts to the recorded state at absolute session time t */
   apply(t: number, trackLength: number) {
     if (this.count < 2) return;

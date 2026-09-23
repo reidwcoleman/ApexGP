@@ -5,6 +5,7 @@ import { CAMERA_LABEL, CAMERA_ORDER } from '../game/Cameras.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
+import { ASSIST_PRESETS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 
 export type TimeOfDay = 'golden' | 'day' | 'overcast';
 
@@ -15,13 +16,12 @@ export interface RaceSetup {
   difficulty: number; // index into DIFFICULTY
   grid: number; // index into GRID
   time: TimeOfDay;
-  assists: number; // index into ASSISTS
+  assists: AssistConfig;
 }
 
 export interface Settings {
   quality: QualityLevel;
   camera: CameraMode;
-  gearbox: 'auto' | 'manual';
   volume: number;
 }
 
@@ -37,11 +37,6 @@ export const GRID = [
   { label: 'Midfield', slot: 9 },
   { label: 'Back of the grid', slot: 19 },
 ];
-export const ASSISTS = [
-  { label: 'Casual', desc: 'TC, ABS, stability, auto gears', traction: true, abs: true, stability: true },
-  { label: 'Standard', desc: 'TC and ABS', traction: true, abs: true, stability: false },
-  { label: 'Pro', desc: 'No assists', traction: false, abs: false, stability: false },
-];
 const TIMES: { v: TimeOfDay; label: string }[] = [
   { v: 'golden', label: 'Golden hour' },
   { v: 'day', label: 'Midday' },
@@ -49,7 +44,7 @@ const TIMES: { v: TimeOfDay; label: string }[] = [
 ];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
-type ScreenId = 'title' | 'setup' | 'settings' | 'pause' | 'results' | 'none';
+type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'pause' | 'results' | 'none';
 
 interface Item {
   el: HTMLElement;
@@ -65,6 +60,7 @@ export interface MenuCallbacks {
   onResume(): void;
   onRestart(): void;
   onQuit(): void;
+  onResetCar(): void;
   onUi(kind: 'move' | 'select' | 'back'): void;
 }
 
@@ -115,15 +111,19 @@ export class Menu {
   private items: Item[] = [];
   private sel = 0;
   private settingsReturn: ScreenId = 'title';
+  private assistsReturn: ScreenId = 'setup';
   private driverCard!: HTMLDivElement;
 
   constructor(parent: HTMLElement, cb: MenuCallbacks) {
     this.cb = cb;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, time: 'golden', assists: 0 });
-    this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', gearbox: 'auto', volume: 0.8 });
-    for (const id of ['title', 'setup', 'settings', 'pause', 'results'] as ScreenId[]) {
+    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, time: 'golden', assists: { ...ASSIST_PRESETS.casual } });
+    // saves from before per-assist settings stored a preset index
+    if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...ASSIST_PRESETS.casual };
+    else this.setup.assists = { ...ASSIST_PRESETS.casual, ...this.setup.assists };
+    this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', volume: 0.8 });
+    for (const id of ['title', 'setup', 'settings', 'assists', 'pause', 'results'] as ScreenId[]) {
       const s = el('div', 'screen', this.root);
       this.screens.set(id, s);
     }
@@ -139,6 +139,7 @@ export class Menu {
     if (id === 'title') this.buildTitle();
     if (id === 'setup') this.buildSetup();
     if (id === 'settings') this.buildSettings();
+    if (id === 'assists') this.buildAssists();
     if (id === 'pause') this.buildPause();
     this.highlight();
   }
@@ -163,7 +164,7 @@ export class Menu {
       this.mode = 'timetrial';
       this.show('setup');
     });
-    add('Settings', 'Graphics, camera, gearbox, sound', () => {
+    add('Settings', 'Graphics, camera, sound, driving assists', () => {
       this.settingsReturn = 'title';
       this.show('settings');
     });
@@ -206,9 +207,24 @@ export class Menu {
       const i = TIMES.findIndex((t) => t.v === st.time);
       st.time = TIMES[(i + d + TIMES.length) % TIMES.length].v;
     });
-    this.opt(p, 'Assists', () => ASSISTS[st.assists].label, (d) => {
-      st.assists = (st.assists + d + ASSISTS.length) % ASSISTS.length;
-    });
+    this.opt(
+      p,
+      'Assists',
+      () => {
+        const pr = presetOf(st.assists);
+        return pr === 'custom' ? 'Custom' : PRESET_LABEL[pr];
+      },
+      (d) => {
+        const pr = presetOf(st.assists);
+        const i = pr === 'custom' ? 0 : PRESET_ORDER.indexOf(pr);
+        st.assists = { ...ASSIST_PRESETS[PRESET_ORDER[(i + d + PRESET_ORDER.length) % PRESET_ORDER.length]] };
+      },
+      false,
+      () => {
+        this.assistsReturn = 'setup';
+        this.show('assists');
+      },
+    );
     const cta = el('div', 'cta', p, this.mode === 'race' ? 'Start race' : 'Start time trial');
     this.items.push({ el: cta, kind: 'action', select: () => this.cb.onStart(this.mode, { ...this.setup }) });
     cta.addEventListener('click', () => this.cb.onStart(this.mode, { ...this.setup }));
@@ -242,14 +258,58 @@ export class Menu {
       const i = CAMERA_ORDER.indexOf(st.camera);
       st.camera = CAMERA_ORDER[(i + d + CAMERA_ORDER.length) % CAMERA_ORDER.length];
     }, true);
-    this.opt(p, 'Gearbox', () => (st.gearbox === 'auto' ? 'Automatic' : 'Manual (Q / E)'), () => {
-      st.gearbox = st.gearbox === 'auto' ? 'manual' : 'auto';
-    }, true);
+    const as = el('div', 'opt', p);
+    el('span', 'k', as, 'Driving assists');
+    el('span', 'v', as, `${(() => {
+      const pr = presetOf(this.setup.assists);
+      return pr === 'custom' ? 'Custom' : PRESET_LABEL[pr];
+    })()}<span class="chev">›</span>`);
+    const openAssists = () => {
+      this.assistsReturn = 'settings';
+      this.show('assists');
+    };
+    as.addEventListener('click', openAssists);
+    this.items.push({ el: as, kind: 'action', select: openAssists });
     this.opt(p, 'Volume', () => `${Math.round(st.volume * 100)}%`, (d) => {
       st.volume = Math.max(0, Math.min(1, Math.round((st.volume + d * 0.1) * 10) / 10));
     }, true);
     const cta = el('div', 'cta', p, 'Done');
     const done = () => this.show(this.settingsReturn);
+    this.items.push({ el: cta, kind: 'action', select: done });
+    cta.addEventListener('click', done);
+  }
+
+  private buildAssists() {
+    const s = this.screens.get('assists')!;
+    s.innerHTML = '';
+    el('div', 'scrim', s);
+    const p = el('div', 'panel glass', s);
+    el('h2', '', p, 'Assists');
+    const lede = el('p', 'lede', p, '');
+    const a = this.setup.assists;
+    const updateLede = () => {
+      const pr = presetOf(a);
+      lede.textContent = pr === 'custom' ? 'Custom set-up.' : `${PRESET_LABEL[pr]} preset.`;
+    };
+    updateLede();
+    const cycle = <T,>(list: T[], cur: T, d: number) => list[(list.indexOf(cur) + d + list.length) % list.length];
+    const onOff = (b: boolean) => (b ? 'On' : 'Off');
+    const row = (k: string, v: () => string, ch: (d: number) => void) =>
+      this.opt(p, k, v, (d) => {
+        ch(d);
+        updateLede();
+      });
+    row('Traction control', () => ({ off: 'Off', medium: 'Medium', full: 'Full' })[a.traction], (d) => (a.traction = cycle(['off', 'medium', 'full'] as const, a.traction, d)));
+    row('Anti-lock brakes', () => onOff(a.abs), () => (a.abs = !a.abs));
+    row('Stability control', () => onOff(a.stability), () => (a.stability = !a.stability));
+    row('Steering assist', () => onOff(a.steering), () => (a.steering = !a.steering));
+    row('Braking assist', () => ({ off: 'Off', low: 'Low', medium: 'Medium', high: 'High' })[a.braking], (d) => (a.braking = cycle(['off', 'low', 'medium', 'high'] as const, a.braking, d)));
+    row('Racing line', () => ({ off: 'Off', corners: 'Corners only', full: 'Full' })[a.line], (d) => (a.line = cycle(['off', 'corners', 'full'] as const, a.line, d)));
+    row('Gearbox', () => (a.gearbox === 'auto' ? 'Automatic' : 'Manual (Q / E)'), () => (a.gearbox = a.gearbox === 'auto' ? 'manual' : 'auto'));
+    row('DRS', () => (a.drs === 'auto' ? 'Automatic' : 'Manual (Space)'), () => (a.drs = a.drs === 'auto' ? 'manual' : 'auto'));
+    row('Keyboard steering', () => (a.keyboard === 'rate' ? 'Assisted' : 'Direct'), () => (a.keyboard = a.keyboard === 'rate' ? 'direct' : 'rate'));
+    const cta = el('div', 'cta', p, 'Done');
+    const done = () => this.show(this.assistsReturn);
     this.items.push({ el: cta, kind: 'action', select: done });
     cta.addEventListener('click', done);
   }
@@ -266,6 +326,7 @@ export class Menu {
       this.items.push({ el: e, kind: 'action', select: fn });
     };
     add('Resume', () => this.cb.onResume());
+    add('Reset car to track', () => this.cb.onResetCar());
     add('Restart', () => this.cb.onRestart());
     add('Settings', () => {
       this.settingsReturn = 'pause';
@@ -312,7 +373,7 @@ export class Menu {
     this.highlight();
   }
 
-  private opt(parent: HTMLElement, key: string, value: () => string, change: (dir: number) => void, isSetting = false) {
+  private opt(parent: HTMLElement, key: string, value: () => string, change: (dir: number) => void, isSetting = false, onSelect?: () => void) {
     const row = el('div', 'opt', parent);
     el('span', 'k', row, key);
     const v = el('span', 'v', row);
@@ -345,7 +406,7 @@ export class Menu {
       this.sel = idx;
       this.highlight();
     });
-    this.items.push({ el: row, kind: 'option', change: doChange, select: () => doChange(1) });
+    this.items.push({ el: row, kind: 'option', change: doChange, select: onSelect ?? (() => doChange(1)) });
   }
 
   private highlight() {
@@ -383,6 +444,7 @@ export class Menu {
       this.cb.onUi('back');
       if (this.screen === 'setup') this.show('title');
       else if (this.screen === 'settings') this.show(this.settingsReturn);
+      else if (this.screen === 'assists') this.show(this.assistsReturn);
       else if (this.screen === 'pause') this.cb.onResume();
     }
   }

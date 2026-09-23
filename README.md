@@ -26,11 +26,23 @@ npm run check    # tsc --noEmit
 - **Timing like the broadcast** — position tower with intervals, sectors in purple/green/yellow,
   fastest lap, DRS detection (within 1.0 s at the detection line), track limits delete the lap,
   race-engineer radio.
-- **Car physics** — bicycle model with Pacejka-style tyres, load sensitivity, downforce and drag
-  (DRS changes both), friction circle per axle, longitudinal load transfer, 8-speed seamless
-  gearbox, ERS deploy/harvest, traction control / ABS / stability assists, kerbs, grass and gravel.
-- **AI** — K1999 racing line, grip-limited speed profile, curvature-feedforward + Stanley steering,
-  overtaking and defending.
+- **Car physics** — four-wheel model: per-tyre loads (weight, aero, longitudinal and lateral load
+  transfer), combined-slip tyres with load sensitivity (wider, stiffer rears), wheel-spin dynamics so
+  wheelspin and lock-ups come from the physics, downforce/drag with DRS, slipstream tow and dirty
+  air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter,
+  grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
+  Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.2 s, 300→80 km/h in 83 m at
+  5.8 g, 1.8 g cornering at 60 km/h up to 5 g at 300 km/h, stable at full lock at any speed.
+- **Driving like the F1 games** — full steering input maps to the front tyres' peak-grip angle at
+  the current speed; keyboard steering is yaw-rate assisted (release a key and the car straightens);
+  countersteer opens up when the rear slides. Assists: traction control Off/Medium/Full, ABS,
+  stability, steering assist, braking assist, racing line Off/Corners/Full (the dynamic
+  green/yellow/red line), auto/manual gears, DRS assist — as presets (Casual / Standard / Expert)
+  or one by one.
+- **F1-game mechanics** — flashback (rewind up to 12 s and resume), track-limit warnings and
+  5-second penalties, DRS within a second, tow and dirty air, damage, tyre wear, car-status widget.
+- **AI** — K1999 racing line, friction-ellipse speed profile, curvature-feedforward + Stanley
+  steering capped at the grip limit, overtaking and defending, backs off in dirty air.
 
 ## Controls
 
@@ -43,8 +55,8 @@ npm run check    # tsc --noEmit
 | Gear up / down (manual gearbox) | E / Q | RB / LB |
 | Change camera | C | D-pad up |
 | Look back | B | click a stick |
-| Reset onto the track | R | View / Share |
-| Pause | Esc / P | Menu / Options |
+| Flashback (rewind; ← → scrub, Enter resume) | R | View / Share |
+| Pause (also: reset car to track) | Esc / P | Menu / Options |
 
 Menus: arrows + Enter, or the mouse. Enter twice from the title starts a race.
 
@@ -66,5 +78,9 @@ src/
 tools/     shot.mjs (headless screenshots), simtest.mjs (headless 20-car race), trackplot
 ```
 
-`node tools/simtest.mjs 20 3` runs a 20-car, 3-lap race headlessly and reports lap times,
-wall hits and off-tracks — the regression check for physics and AI changes.
+Regression checks (all headless, no browser):
+- `node tools/handling.mjs` — acceleration, top speed, braking, step steer, full lock, power oversteer.
+- `node tools/kbbot.mjs 2` — a simulated keyboard player (binary keys, reaction delay) drives laps
+  on each assist preset through the real control layer; reports off-tracks and spins.
+- `node tools/simtest.mjs 20 3` / `node tools/racetest.mjs 3` — 20 AI cars racing: lap times,
+  wall hits, off-tracks, penalties, classification.

@@ -103,20 +103,22 @@ export class Cameras {
     if (this.mode === 'chase' || this.mode === 'far') {
       const far = this.mode === 'far';
       const [wx, wz] = car.worldVelocity();
+      // F1-game chase cam: locked to the car's heading with a short lag, so a
+      // slide shows as the car rotating in frame (only a hint of the travel direction)
       let target = car.yaw;
       if (speed > 6) {
         const velYaw = Math.atan2(wx, wz);
         let d = velYaw - car.yaw;
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
-        target = car.yaw + d * 0.45;
+        target = car.yaw + d * 0.15;
       }
       if (this.lookBack) target += Math.PI;
       if (!this.initialized) this.camYaw = target;
       let dy = target - this.camYaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
-      this.camYaw += dy * Math.min(1, dt * (far ? 4.5 : 6.5));
+      this.camYaw += dy * Math.min(1, dt * (far ? 7 : 10));
 
       const dist = (far ? 8.4 : 5.35) + Math.max(-0.45, Math.min(0.6, -car.ax * 0.025)) + speed * 0.003;
       const height = far ? 2.5 : 1.42;

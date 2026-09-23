@@ -51,6 +51,9 @@ export interface Competitor {
   drsZone: number;
   lapValid: boolean;
   penalty: number;
+  /** track-limit warnings this race (reset after each penalty) */
+  warnings: number;
+  limitsOff: boolean;
   /** ring of checkpoint pass times (every CP metres) for timing gaps */
   cpTimes: Float64Array;
   cpIndex: number;
@@ -58,7 +61,7 @@ export interface Competitor {
 }
 
 export interface RaceEvent {
-  kind: 'fastest-lap' | 'personal-best' | 'sector' | 'drs-enabled' | 'track-limits' | 'final-lap' | 'finish' | 'lap' | 'contact' | 'lights-out';
+  kind: 'fastest-lap' | 'personal-best' | 'sector' | 'drs-enabled' | 'track-limits' | 'penalty' | 'final-lap' | 'finish' | 'lap' | 'contact' | 'lights-out';
   car: number;
   value?: number;
   sector?: number;
@@ -92,6 +95,8 @@ export class Race {
   playerInput: DriveInput = { throttle: 0, brake: 0, steer: 0, ers: false, shiftUp: false, shiftDown: false };
   /** player's DRS button edge */
   playerDrsRequest = false;
+  /** DRS assist: open automatically whenever allowed */
+  playerDrsAuto = false;
   /** live delta to the player's best lap (s, NaN until there is one) */
   playerDelta = NaN;
   private deltaCur = new Float32Array(1).fill(-1);
@@ -161,6 +166,8 @@ export class Race {
         drsZone: -1,
         lapValid: true,
         penalty: 0,
+        warnings: 0,
+        limitsOff: false,
         cpTimes: new Float64Array(CP_RING).fill(-1),
         cpIndex: -1,
         contactTimer: 0,
@@ -171,7 +178,7 @@ export class Race {
     });
     this.player = this.cars.find((c) => c.isPlayer)!;
     if (opts.mode === 'timetrial') {
-      this.player.car.vx = 60;
+      this.player.car.setSpeed(60);
       this.player.car.gear = 7;
       this.player.laps = -1;
       this.phase = 'racing';
@@ -217,6 +224,8 @@ export class Race {
     const racing = this.phase === 'racing' || this.phase === 'finished';
     if (racing) this.raceTime += dt;
 
+    this.aeroWake();
+
     const h = dt / SUBSTEPS;
     for (let k = 0; k < SUBSTEPS; k++) {
       this.neighbours.length = 0;
@@ -226,7 +235,7 @@ export class Race {
         const inZone = !!zone && c.drsEligible && this.inRange(c.lapDist, zone.start, zone.end);
         if (c.isPlayer) {
           const inp = this.playerInput;
-          if (this.playerDrsRequest && inZone) c.car.drsOpen = true;
+          if ((this.playerDrsRequest || this.playerDrsAuto) && inZone) c.car.drsOpen = true;
           if (!inZone) c.car.drsOpen = false;
           if (this.phase === 'grid' || this.phase === 'lights') {
             // held on the grid; the throttle only revs the engine
@@ -248,10 +257,36 @@ export class Race {
     this.rankCars();
   }
 
+  /**
+   * Slipstream and dirty air from the car directly ahead on the road:
+   * tow (less drag) builds from ~50 m and peaks close behind; dirty air (less
+   * downforce) only matters within ~25 m and mostly in corners.
+   */
+  private aeroWake() {
+    const cars = this.cars;
+    for (const c of cars) {
+      let tow = 0;
+      let dirty = 0;
+      for (const o of cars) {
+        if (o === c) continue;
+        const ds = this.track.delta(c.car.s, o.car.s);
+        if (ds <= 2 || ds > 55) continue;
+        const dl = Math.abs(o.car.lateral - c.car.lateral);
+        if (dl > 3.2) continue;
+        const align = 1 - dl / 3.2;
+        const speed = Math.min(1, Math.max(0, (c.car.vx - 30) / 40));
+        tow = Math.max(tow, align * speed * Math.min(1, (55 - ds) / 40));
+        dirty = Math.max(dirty, align * Math.max(0, 1 - ds / 26));
+      }
+      c.car.tow = tow;
+      c.car.dirty = dirty;
+    }
+  }
+
   resetCar(c: Competitor) {
     const s = c.car.s - 15;
     c.car.placeOnTrack(this.track, s, this.track.racingLineAt(s));
-    c.car.vx = 8;
+    c.car.setSpeed(8);
     c.car.gear = 2;
     c.ai?.startFrom(c.car, this.track);
   }
@@ -321,11 +356,24 @@ export class Race {
       if (c.sector === 0 && this.crossed(prev, d, this.sectorLapDist[0])) this.closeSector(c, 0, t);
       else if (c.sector === 1 && this.crossed(prev, d, this.sectorLapDist[1])) this.closeSector(c, 1, t);
     }
-    // track limits: all four wheels beyond the kerbs
-    if (c.car.offTrack && c.car.speed > 15 && c.lapValid && c.laps >= 0) {
+    // track limits, F1-game style: all four wheels off at speed deletes the lap;
+    // in a race each offence is a warning, and after three the next is +5 s
+    const off = c.car.offTrack && c.car.speed > 15 && c.laps >= 0;
+    if (off && !c.limitsOff) {
+      c.limitsOff = true;
       c.lapValid = false;
-      if (c.isPlayer) this.events.push({ kind: 'track-limits', car: c.id });
+      if (this.isTimeTrial) {
+        if (c.isPlayer) this.events.push({ kind: 'track-limits', car: c.id, value: 0 });
+      } else {
+        c.warnings++;
+        if (c.warnings > 3) {
+          c.warnings = 0;
+          c.penalty += 5;
+          if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 5 });
+        } else if (c.isPlayer) this.events.push({ kind: 'track-limits', car: c.id, value: c.warnings });
+      }
     }
+    if (!c.car.offTrack) c.limitsOff = false;
     // DRS detection
     for (let zi = 0; zi < this.drsLapDist.length; zi++) {
       const z = this.drsLapDist[zi];
@@ -406,7 +454,8 @@ export class Race {
 
   private rankCars() {
     const sorted = this.cars.slice().sort((a, b) => {
-      if (a.finished && b.finished) return this.finishOrder.indexOf(a.id) - this.finishOrder.indexOf(b.id);
+      // finished cars: more laps first, then total time including penalties
+      if (a.finished && b.finished) return b.laps - a.laps || a.finishTime - b.finishTime;
       if (a.finished !== b.finished) {
         // a finished car is ahead of anyone on the same or fewer laps
         return a.finished ? -1 : 1;
@@ -428,58 +477,86 @@ export class Race {
     });
   }
 
-  /** two circles per car along its heading; equal-mass impulse + separation */
+  /**
+   * Car-to-car contact: each car is three discs along its centreline (nose,
+   * middle, gearbox). Overlaps are separated and resolved with an impulse at the
+   * contact point — including rotation and tyre-on-tyre friction — so a tap on
+   * the rear wheel turns a car around and a side-by-side rub just scrubs speed.
+   */
   private collideCars() {
     const cars = this.cars;
-    const R = 0.98;
-    const OFF = 1.35;
+    const R = 0.86;
+    const OFFS = [1.75, 0, -1.8];
     for (let i = 0; i < cars.length; i++) {
       const A = cars[i].car;
       for (let j = i + 1; j < cars.length; j++) {
         const B = cars[j].car;
         const dxc = A.x - B.x;
         const dzc = A.z - B.z;
-        if (dxc * dxc + dzc * dzc > 49) continue;
+        if (dxc * dxc + dzc * dzc > 36) continue;
         const sa = Math.sin(A.yaw), ca = Math.cos(A.yaw);
         const sb = Math.sin(B.yaw), cb = Math.cos(B.yaw);
-        let hit = false;
-        for (const oa of [OFF, -OFF]) {
-          for (const ob of [OFF, -OFF]) {
-            const ax = A.x + sa * oa, az = A.z + ca * oa;
+        // deepest disc pair
+        let best = 0, nx = 0, nz = 0, px = 0, pz = 0;
+        for (const oa of OFFS) {
+          const ax = A.x + sa * oa, az = A.z + ca * oa;
+          for (const ob of OFFS) {
             const bx = B.x + sb * ob, bz = B.z + cb * ob;
-            let nx = ax - bx, nz = az - bz;
-            const d = Math.hypot(nx, nz);
-            if (d >= R * 2 || d < 1e-4) continue;
-            nx /= d;
-            nz /= d;
+            const ddx = ax - bx, ddz = az - bz;
+            const d = Math.hypot(ddx, ddz);
             const pen = R * 2 - d;
-            A.x += nx * pen * 0.5;
-            A.z += nz * pen * 0.5;
-            B.x -= nx * pen * 0.5;
-            B.z -= nz * pen * 0.5;
-            const [avx, avz] = A.worldVelocity();
-            const [bvx, bvz] = B.worldVelocity();
-            const rel = (avx - bvx) * nx + (avz - bvz) * nz;
-            if (rel < 0) {
-              const jimp = (-(1 + 0.25) * rel) / 2;
-              A.setWorldVelocity(avx + jimp * nx, avz + jimp * nz);
-              B.setWorldVelocity(bvx - jimp * nx, bvz - jimp * nz);
-              // off-centre hits rotate the cars
-              const torqueA = (oa > 0 ? 1 : -1) * (nx * ca - nz * sa) * jimp * 0.05;
-              const torqueB = (ob > 0 ? 1 : -1) * (-nx * cb + nz * sb) * jimp * 0.05;
-              A.r += torqueA;
-              B.r += torqueB;
-              hit = true;
-              if (-rel > 2) {
-                const strength = -rel;
-                if (cars[i].isPlayer || cars[j].isPlayer) this.events.push({ kind: 'contact', car: cars[i].isPlayer ? i : j, value: strength });
-              }
+            if (pen > best && d > 1e-4) {
+              best = pen;
+              nx = ddx / d;
+              nz = ddz / d;
+              px = (ax + bx) / 2;
+              pz = (az + bz) / 2;
             }
           }
         }
-        if (hit) {
-          cars[i].contactTimer = 0.3;
-          cars[j].contactTimer = 0.3;
+        if (best <= 0) continue;
+        // separate (equal masses)
+        A.x += nx * best * 0.5;
+        A.z += nz * best * 0.5;
+        B.x -= nx * best * 0.5;
+        B.z -= nz * best * 0.5;
+        // relative velocity at the contact point (n points from B to A)
+        const [avx, avz] = A.pointVelocity(px, pz);
+        const [bvx, bvz] = B.pointVelocity(px, pz);
+        const rvx = avx - bvx, rvz = avz - bvz;
+        const vn = rvx * nx + rvz * nz;
+        cars[i].contactTimer = 0.3;
+        cars[j].contactTimer = 0.3;
+        if (vn >= 0) continue;
+        const m = A.spec.mass;
+        const I = A.spec.iz;
+        const rAn = (pz - A.z) * nx - (px - A.x) * nz;
+        const rBn = (pz - B.z) * nx - (px - B.x) * nz;
+        const e = 0.18;
+        const jn = (-(1 + e) * vn) / (2 / m + (rAn * rAn) / I + (rBn * rBn) / I);
+        // friction along the tangent (tyre on tyre / bodywork rub)
+        let tx = rvx - vn * nx, tz = rvz - vn * nz;
+        const vt = Math.hypot(tx, tz);
+        let jt = 0;
+        if (vt > 1e-3) {
+          tx /= vt;
+          tz /= vt;
+          const rAt = (pz - A.z) * tx - (px - A.x) * tz;
+          const rBt = (pz - B.z) * tx - (px - B.x) * tz;
+          jt = Math.min(0.35 * jn, vt / (2 / m + (rAt * rAt) / I + (rBt * rBt) / I));
+        }
+        const jx = nx * jn - tx * jt;
+        const jz = nz * jn - tz * jt;
+        A.applyImpulse(px, pz, jx, jz);
+        B.applyImpulse(px, pz, -jx, -jz);
+        const strength = -vn;
+        if (strength > 2 && (cars[i].isPlayer || cars[j].isPlayer)) this.events.push({ kind: 'contact', car: cars[i].isPlayer ? i : j, value: strength });
+        // nose into something hard enough breaks the front wing
+        if (strength > 6) {
+          const frontA = (px - A.x) * sa + (pz - A.z) * ca > 1.2;
+          const frontB = (px - B.x) * sb + (pz - B.z) * cb > 1.2;
+          if (frontA) A.wingDamage = Math.min(1, A.wingDamage + strength * 0.03);
+          if (frontB) B.wingDamage = Math.min(1, B.wingDamage + strength * 0.03);
         }
       }
     }

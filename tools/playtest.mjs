@@ -79,6 +79,17 @@ await shot('launch');
 await drive(25000);
 console.log('30 s in', JSON.stringify(await state()));
 await shot('t1');
+// flashback: press R, scrub back a bit, resume
+const before = await state();
+await page.keyboard.press('KeyR');
+await page.waitForTimeout(1200);
+const during = await page.evaluate(() => ({ state: window.__game.state, t: window.__game.fbT, entry: window.__game.fbEntry }));
+await shot('flashback');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(400);
+const after = await state();
+console.log('flashback', JSON.stringify({ before: before.s, during, after: after.s, state: after.state, used: await page.evaluate(() => window.__game.flashbacksUsed) }));
+await drive(4000);
 await page.keyboard.press('KeyC');
 await page.waitForTimeout(800);
 await shot('cam2');

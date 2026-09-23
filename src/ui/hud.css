@@ -342,6 +342,40 @@
   box-shadow: 0 0 14px rgba(34, 209, 122, 0.6);
 }
 
+/* ---------- car status (tyres + wing), left of the cluster ---------- */
+.carstatus {
+  position: absolute;
+  right: calc(var(--s5) + 332px + var(--s2));
+  bottom: var(--s5);
+  width: 64px;
+  padding: var(--s2) var(--s2) 6px;
+  text-align: center;
+}
+.carstatus svg {
+  width: 100%;
+  display: block;
+}
+.carstatus .body {
+  fill: rgba(255, 255, 255, 0.14);
+}
+.carstatus .rw {
+  fill: rgba(255, 255, 255, 0.22);
+}
+.carstatus .ty,
+.carstatus .fw {
+  fill: rgba(255, 255, 255, 0.22);
+  transition: fill 0.4s;
+}
+.carstatus .ok { fill: var(--green); }
+.carstatus .warn { fill: var(--yellow); }
+.carstatus .bad { fill: var(--accent); }
+.carstatus .wear {
+  margin-top: 4px;
+  font-size: var(--t-cap);
+  font-weight: 700;
+  color: var(--ink2);
+}
+
 /* ---------- ahead/behind (bottom-centre) ---------- */
 .gaps {
   position: absolute;

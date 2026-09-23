@@ -26,7 +26,7 @@ auto.startFrom(race.player.car, track);
 const hud = new HUD(ui);
 hud.setup(race, track);
 hud.show(true);
-const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onUi() {} });
+const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onResetCar() {}, onUi() {} });
 
 const simT = Number(params.get('t') ?? 95);
 race.startLights();

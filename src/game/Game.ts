@@ -14,12 +14,18 @@ import { Race } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
 import { Cameras, CAMERA_LABEL, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer } from './Replay.ts';
+import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
-import { Menu, ASSISTS, DIFFICULTY, GRID, type RaceSetup, type Settings, type TimeOfDay } from '../ui/Menu.ts';
+import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings, type TimeOfDay } from '../ui/Menu.ts';
+import { PlayerControl } from '../sim/PlayerControl.ts';
+import { RacingProfile } from '../sim/RacingProfile.ts';
+import { F1_SPEC } from '../sim/CarPhysics.ts';
+import { RacingLineAssist } from './RacingLineAssist.ts';
+import type { AssistConfig } from './Assists.ts';
 
-type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay';
+type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay' | 'flashback';
 
 const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'tv', 'tcam', 'tv', 'far'];
 
@@ -65,12 +71,21 @@ export class Game {
   private replayShot = -1;
   private replayBadge: HTMLDivElement;
   private replayBar: HTMLElement;
+  private flash = new Flashback();
+  private fbT = 0;
+  private fbEntry = 0;
+  private fbSat = 1;
+  private fbBadge: HTMLDivElement;
+  private fbBar: HTMLElement;
+  flashbacksUsed = 0;
   private prevCamPos = new THREE.Vector3();
   private fpsAvg = 60;
   private dofTarget = new THREE.Vector3();
   private lastDt = 0.016;
   private engineer = new Engineer();
   private autopilot: AIDriver | null = null;
+  private control = new PlayerControl();
+  private line!: RacingLineAssist;
   private driverHidden = false;
   private qualityCheck = 0;
 
@@ -83,6 +98,11 @@ export class Game {
     this.replayBadge.innerHTML = '<span class="rdot"></span><b>Replay</b><span class="rtrack"><i></i></span><span class="rskip">Enter to skip</span>';
     uiRoot.appendChild(this.replayBadge);
     this.replayBar = this.replayBadge.querySelector('i')!;
+    this.fbBadge = document.createElement('div');
+    this.fbBadge.className = 'replay-badge flashback';
+    this.fbBadge.innerHTML = '<span class="rdot"></span><b>Flashback</b><span class="rtrack"><i></i></span><span class="rskip">← → scrub · Enter resume · Esc cancel</span>';
+    uiRoot.appendChild(this.fbBadge);
+    this.fbBar = this.fbBadge.querySelector('i')!;
     this.menu = new Menu(uiRoot, {
       onSetupChange: (s) => this.applySetupPreview(s),
       onStart: (mode, s) => this.startRace(mode, s),
@@ -90,6 +110,10 @@ export class Game {
       onResume: () => this.resume(),
       onRestart: () => this.startRace(this.mode, this.menu.setup),
       onQuit: () => this.toMenu(),
+      onResetCar: () => {
+        this.resume();
+        this.resetPlayer();
+      },
       onUi: (k) => this.audioReady && this.audio.ui(k),
     });
     addEventListener('resize', () => this.gfx.resize());
@@ -158,6 +182,8 @@ export class Game {
     this.particles.setLight(SMOKE_LIGHT[this.time]);
 
     this.cams = new Cameras(this.camera, this.track);
+    this.line = new RacingLineAssist(this.track, new RacingProfile(this.track, F1_SPEC));
+    this.scene.add(this.line.mesh);
     this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
 
     progress(0.9, 'Warming up shaders');
@@ -191,13 +217,8 @@ export class Game {
       playerGrid: GRID[setup.grid].slot,
       entries: this.entries,
     });
-    const as = ASSISTS[setup.assists];
-    this.race.player.car.assists = {
-      traction: as.traction,
-      abs: as.abs,
-      stability: as.stability,
-      autoGear: this.menu.settings.gearbox === 'auto',
-    };
+    this.control.reset();
+    this.applyAssists(setup.assists);
     // show only the cars in this session
     const inRace = new Set(this.race.cars.map((c) => c.entry));
     for (const [e, rig] of this.rigs) {
@@ -207,6 +228,8 @@ export class Game {
     this.driverHidden = false;
     this.particles.clear();
     this.replay.reset(this.race);
+    this.flash.reset();
+    this.flashbacksUsed = 0;
     return this.race;
   }
 
@@ -235,7 +258,6 @@ export class Game {
     if (s.quality !== this.gfx.qualityLevel) this.gfx.setQuality(s.quality);
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
     if (this.audioReady) this.audio.setVolume(s.volume);
-    if (this.race) this.race.player.car.assists.autoGear = s.gearbox === 'auto';
   }
 
   private startRace(mode: 'race' | 'timetrial', setup: RaceSetup) {
@@ -344,7 +366,7 @@ export class Game {
         this.cams.lookBack = st.lookBack;
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
         if (race.isTimeTrial && this.stateTime > 4) this.hud.setHint(null);
-        if (st.reset) this.resetPlayer();
+        if (st.reset) this.startFlashback();
         // chequered flag → results
         if (race.player.finished && !race.isTimeTrial) {
           if (this.finishTimer < 0) {
@@ -369,6 +391,18 @@ export class Game {
       race.update(dt);
       this.syncAllViews(dt);
       this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
+    } else if (this.state === 'flashback') {
+      // scrub with left/right (hold), confirm or cancel
+      const auto = this.stateTime < 0.7 ? -3.5 : 0;
+      this.fbT += (auto + -st.steer * 4) * dt;
+      const oldest = Math.max(this.flash.oldest, this.replay.startTime);
+      this.fbT = Math.max(oldest, Math.min(this.fbEntry, this.fbT));
+      this.replay.apply(this.fbT, this.track.length);
+      this.syncAllViews(dt, this.replay.ghosts);
+      this.cams.update(dt, this.replay.ghosts[race.player.id], this.rigs.get(race.player.entry)!, this.track);
+      this.fbBar.style.width = `${((this.fbT - oldest) / Math.max(0.1, this.fbEntry - oldest)) * 100}%`;
+      if (this.input.nav.accept || (st.reset && this.stateTime > 0.2)) this.endFlashback(true);
+      else if (this.input.nav.back) this.endFlashback(false);
     } else if (this.state === 'replay') {
       this.replayT += dt;
       const shot = Math.floor(this.stateTime / 4.5);
@@ -384,8 +418,12 @@ export class Game {
       if (this.replayT >= this.replayEnd || st.pause || this.input.nav.accept || this.input.nav.back) this.endReplay();
     }
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results') this.replay.record(dt, race);
+    if (this.state === 'race' && race.phase === 'racing' && !race.player.finished) this.flash.record(dt, race);
 
     this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
+    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && !race.player.finished;
+    this.line.mesh.visible = showLine;
+    if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx));
     this.env.update(dt, this.camera);
     this.env.focusShadow(this.playerRigPos());
     this.trackside.update(dt, this.camera);
@@ -436,24 +474,35 @@ export class Game {
       race.playerInput.shiftUp = race.playerInput.shiftDown = false;
       return;
     }
-    const v = Math.max(0, car.vx);
-    // speed-sensitive steering lock; the pad gets a little more at speed
-    const lock = (st.usingPad ? 0.4 : 0.36) / (1 + v / (st.usingPad ? 34 : 30));
-    race.playerInput.steer = st.steer * lock;
-    race.playerInput.throttle = st.throttle;
-    race.playerInput.brake = st.brake;
-    race.playerInput.ers = st.ers;
-    race.playerInput.shiftUp = st.shiftUp;
-    race.playerInput.shiftDown = st.shiftDown;
+    // pads drive the wheel angle directly; the keyboard uses the chosen mode
+    const a = this.menu.setup.assists;
+    this.control.aids.steeringMode = st.usingPad ? 'direct' : a.keyboard;
+    const out = this.control.update(
+      dt,
+      { steer: st.steer, throttle: st.throttle, brake: st.brake, usingPad: st.usingPad, ers: st.ers, shiftUp: st.shiftUp, shiftDown: st.shiftDown },
+      car,
+      this.track,
+      race.profile,
+    );
+    Object.assign(race.playerInput, out);
     if (st.drs) race.playerDrsRequest = true;
-    void dt;
+  }
+
+  private applyAssists(a: AssistConfig) {
+    const car = this.race.player.car;
+    car.assists = { traction: a.traction, abs: a.abs, stability: a.stability, autoGear: a.gearbox === 'auto' };
+    this.control.aids.steeringAssist = a.steering;
+    this.control.aids.brakingAssist = a.braking;
+    this.control.aids.steeringMode = a.keyboard;
+    this.race.playerDrsAuto = a.drs === 'auto';
+    this.line.setMode(a.line);
   }
 
   private resetPlayer() {
     const c = this.race.player;
     const s = c.car.s - 10;
     c.car.placeOnTrack(this.track, s, this.track.racingLineAt(s));
-    c.car.vx = 10;
+    c.car.setSpeed(10);
     c.car.gear = 2;
     this.hud.flash('Reset', '', '', 1.2);
   }
@@ -511,6 +560,43 @@ export class Game {
     } catch {
       /* storage unavailable */
     }
+  }
+
+  private startFlashback() {
+    if (!this.flash.available || this.race.player.finished) {
+      this.hud.flash('Flashback unavailable', '', '', 1.2);
+      return;
+    }
+    this.state = 'flashback';
+    this.stateTime = 0;
+    this.fbEntry = this.race.time;
+    this.fbT = this.race.time;
+    this.fbSat = this.gfx.grade.uniforms.get('saturation')!.value as number;
+    this.gfx.grade.set({ saturation: 0.25 });
+    this.gfx.setSpeedBlur(0);
+    this.gfx.setAberration(0);
+    this.particles.clear();
+    this.fbBadge.classList.add('on');
+    this.input.releaseAll();
+    if (this.audioReady) this.audio.suspend();
+  }
+
+  private endFlashback(apply: boolean) {
+    const race = this.race;
+    if (apply && this.fbT < this.fbEntry - 0.2) {
+      const t = this.flash.restore(race, this.fbT);
+      this.replay.truncate(t);
+      this.control.reset();
+      this.flashbacksUsed++;
+      this.hud.flash('Flashback', `${this.flashbacksUsed} used`, '', 1.4);
+    }
+    this.gfx.grade.set({ saturation: this.fbSat });
+    this.fbBadge.classList.remove('on');
+    this.state = 'race';
+    this.stateTime = 5;
+    this.input.releaseAll();
+    this.syncAllViews(0.016);
+    if (this.audioReady) this.audio.resume();
   }
 
   private startReplay() {

@@ -96,14 +96,14 @@ export class Input {
     const s = this.state;
     const edge = (b: Bind) => (this.pressed.get(b) ?? 0) > 0;
 
-    // keyboard ramps
+    // keyboard: steering is the raw key direction (PlayerControl ramps it with
+    // speed); pedals get a short ramp so a tap isn't a full stamp
     const left = this.held.has('left') ? 1 : 0;
     const right = this.held.has('right') ? 1 : 0;
     const target = left - right;
-    const rate = target === 0 ? 6.5 : Math.sign(target) !== Math.sign(this.kbSteer) && this.kbSteer !== 0 ? 9 : 3.6;
-    this.kbSteer = approach(this.kbSteer, target, rate * dt);
-    this.kbThrottle = approach(this.kbThrottle, this.held.has('up') ? 1 : 0, (this.held.has('up') ? 7 : 10) * dt);
-    this.kbBrake = approach(this.kbBrake, this.held.has('down') ? 1 : 0, (this.held.has('down') ? 9 : 12) * dt);
+    this.kbSteer = target;
+    this.kbThrottle = approach(this.kbThrottle, this.held.has('up') ? 1 : 0, (this.held.has('up') ? 6 : 10) * dt);
+    this.kbBrake = approach(this.kbBrake, this.held.has('down') ? 1 : 0, (this.held.has('down') ? 8 : 12) * dt);
 
     let steer = this.kbSteer;
     let throttle = this.kbThrottle;

@@ -116,9 +116,10 @@ export class AIDriver {
     const fz = car.z + cyaw * a;
     const pf = track.project(fx, fz, car.hint);
     const sF = pf.s;
+    // AI keeps ~0.6 m of margin off the extreme racing line (kerb to kerb)
     const pathLat = (ss: number) => {
       const hwS = track.halfWidthAt(ss);
-      return Math.max(-hwS + 1.1, Math.min(hwS - 1.1, track.racingLineAt(ss) + this.offset));
+      return Math.max(-hwS + 1.1, Math.min(hwS - 1.1, track.racingLineAt(ss) * 0.9 + this.offset));
     };
     const latP = pathLat(sF);
     const dlat = (pathLat(sF + 2) - pathLat(sF - 2)) / 4;
@@ -139,18 +140,32 @@ export class AIDriver {
     // small human wobble
     this.wobblePhase += dt;
     steer += Math.sin(this.wobblePhase * 1.7) * 0.002;
-    const maxSteer = 0.42 / (1 + v / 30);
-    inp.steer = Math.max(-maxSteer, Math.min(maxSteer, steer));
+    // never steer past the front tyres' peak — more lock only plows the car wide —
+    // except to countersteer a slide
+    const lim = car.gripSteerLimit(v) * 1.04;
+    // a sliding rear (rear slip angle past its peak) is what calls for countersteer
+    const aR = Math.atan2(car.vy - car.spec.b * car.r, Math.max(3, v));
+    const room = Math.min(0.3, Math.max(0, Math.abs(aR) - 0.09) * 1.4);
+    const hiLim = lim + (aR > 0 ? room : 0);
+    const loLim = lim + (aR < 0 ? room : 0);
+    inp.steer = Math.max(-loLim, Math.min(hiLim, steer));
 
     // ---- speed
     const offLine = Math.abs(this.offset);
     const corner = Math.abs(track.kappaAt(car.s + v * 0.5)) > 1 / 300 ? 1 : 0;
-    let vt = profile.at(car.s + v * 0.12) * this.pace * (1 - corner * Math.min(0.06, offLine * 0.012));
+    // dirty air costs downforce: carry less speed through corners when close behind someone
+    const dirtyLoss = corner * car.dirty * 0.085;
+    let vt = profile.at(car.s + v * 0.12) * this.pace * (1 - corner * Math.min(0.06, offLine * 0.012)) * (1 - dirtyLoss);
     vt = Math.min(vt, followSpeed);
     const err = vt - v;
     if (err > 0) {
       inp.throttle = Math.min(1, 0.35 + err * 0.3);
       inp.brake = 0;
+      // running wide on the exit: ease off like a driver would to hold the line
+      if (Math.abs(kPath) > 1 / 400) {
+        const wide = crossErr * Math.sign(kPath);
+        if (wide > 0.35) inp.throttle *= Math.max(0.15, 1 - (wide - 0.35) * 0.7);
+      }
     } else {
       inp.throttle = err > -0.6 ? 0.25 : 0;
       inp.brake = err < -0.8 ? Math.min(1, -err * 0.22) : 0;

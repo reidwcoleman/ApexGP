@@ -73,6 +73,23 @@ class RadialBlurEffect extends Effect {
   }
 }
 
+// One NaN/Inf pixel (a degenerate normal, a divide by zero in some shader) is
+// enough for bloom's blur chain to black out the whole frame. Scrub them first.
+const SANITIZE_FRAG = /* glsl */ `
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 c = inputColor.rgb;
+  bvec3 bad = bvec3(c.r != c.r || abs(c.r) > 1e6, c.g != c.g || abs(c.g) > 1e6, c.b != c.b || abs(c.b) > 1e6);
+  if (any(bad)) c = vec3(0.0);
+  outputColor = vec4(min(max(c, 0.0), vec3(200.0)), inputColor.a);
+}
+`;
+
+class SanitizeEffect extends Effect {
+  constructor() {
+    super('SanitizeEffect', SANITIZE_FRAG, { blendFunction: BlendFunction.SET });
+  }
+}
+
 const GRADE_FRAG = /* glsl */ `
 uniform float exposure;
 uniform float saturation;
@@ -178,6 +195,7 @@ export class Renderer {
     this.ao.configuration.color = new THREE.Color(0x0a0a0c);
     this.ao.setQualityMode('Medium');
     this.composer.addPass(this.ao);
+    this.composer.addPass(new EffectPass(camera, new SanitizeEffect()));
 
     this.radial = new RadialBlurEffect();
     this.radialPass = new EffectPass(camera, this.radial);

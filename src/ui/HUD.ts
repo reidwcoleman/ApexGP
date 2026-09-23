@@ -61,6 +61,10 @@ export class HUD {
   private lightCols: HTMLElement[] = [];
   private hint: HTMLDivElement;
   private camLabel: HTMLDivElement;
+  private statusEl!: HTMLDivElement;
+  private tyreEls: SVGRectElement[] = [];
+  private wingEl!: SVGRectElement;
+  private wearEl!: HTMLDivElement;
   private camLabelTimer = 0;
   private deltaEl: HTMLDivElement;
   private radioEl: HTMLDivElement;
@@ -133,6 +137,20 @@ export class HUD {
     this.hint = el('div', 'hint glass', this.root);
     this.camLabel = el('div', 'camlabel glass', this.root);
     this.radioEl = el('div', 'radio glass', this.root);
+    // car status: tyre wear and front-wing damage, like the F1 game's car diagram
+    this.statusEl = el('div', 'carstatus glass', this.root);
+    this.statusEl.innerHTML = `<svg viewBox="0 0 56 96" aria-hidden="true">
+      <rect class="fw" x="6" y="3" width="44" height="6" rx="2"/>
+      <path class="body" d="M24 10h8l3 22 5 8v30l-4 12h-16l-4-12V40l5-8z"/>
+      <rect class="ty" data-i="0" x="3" y="14" width="11" height="18" rx="3"/>
+      <rect class="ty" data-i="1" x="42" y="14" width="11" height="18" rx="3"/>
+      <rect class="ty" data-i="2" x="1" y="60" width="13" height="22" rx="3"/>
+      <rect class="ty" data-i="3" x="42" y="60" width="13" height="22" rx="3"/>
+      <rect class="rw" x="12" y="88" width="32" height="5" rx="2"/>
+    </svg><div class="wear">100%</div>`;
+    this.tyreEls = Array.from(this.statusEl.querySelectorAll('.ty')) as SVGRectElement[];
+    this.wingEl = this.statusEl.querySelector('.fw') as SVGRectElement;
+    this.wearEl = this.statusEl.querySelector('.wear') as HTMLDivElement;
   }
 
   show(on: boolean) {
@@ -270,7 +288,10 @@ export class HUD {
           this.flash('DRS enabled', 'press Space in the zone', 'green', 2);
           break;
         case 'track-limits':
-          this.flash('Track limits', 'lap time deleted', 'red', 2.4);
+          this.flash('Track limits', e.value ? `warning ${e.value} of 3 · lap time deleted` : 'lap time deleted', 'red', 2.6);
+          break;
+        case 'penalty':
+          this.flash(`${e.value} second penalty`, 'track limits', 'red', 3.2);
           break;
         case 'final-lap':
           this.flash('Final lap', '', '', 2.4);
@@ -321,6 +342,18 @@ export class HUD {
     this.ersWrap.classList.toggle('deploy', car.ersDeploying);
     const zoneOn = p.drsEligible;
     this.drsEl.className = 'drs' + (car.drsAnim > 0.5 ? ' open' : zoneOn ? ' avail' : '');
+
+    // tyres & damage (colour = meaning: fine / worn / critical)
+    const tone = (w: number) => (w < 0.4 ? 'ok' : w < 0.7 ? 'warn' : 'bad');
+    let avg = 0;
+    for (let i = 0; i < 4; i++) {
+      const cls = 'ty ' + tone(car.wear[i]);
+      if (this.tyreEls[i].getAttribute('class') !== cls) this.tyreEls[i].setAttribute('class', cls);
+      avg += car.wear[i] / 4;
+    }
+    const wcls = 'fw ' + (car.wingDamage < 0.15 ? 'ok' : car.wingDamage < 0.5 ? 'warn' : 'bad');
+    if (this.wingEl.getAttribute('class') !== wcls) this.wingEl.setAttribute('class', wcls);
+    this.setText(this.wearEl, `${Math.round((1 - avg) * 100)}%`);
 
     // timing
     const t = race.phase === 'racing' || race.phase === 'finished' ? race.raceTime : 0;

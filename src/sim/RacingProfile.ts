@@ -57,13 +57,22 @@ export class RacingProfile {
         vv = 40;
         for (let it = 0; it < 6; it++) {
           const Fz = m * g + kA * vv * vv;
-          const mu = muAt(Fz) * grip;
+          // slow corners lose more to lateral load transfer
+          const mu = muAt(Fz) * grip * (0.93 + 0.07 * Math.min(1, vv / 50));
           const den = m * kk - mu * kA;
           vv = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((mu * m * g) / den));
         }
       }
       v[i] = vv;
     }
+    // friction ellipse: the share of grip left for braking/accelerating once
+    // the corner has taken its lateral share at this speed
+    const latLeft = (vv: number, kk: number) => {
+      const Fz = m * g + kA * vv * vv;
+      const aLatMax = (muAt(Fz) * grip * Fz) / m;
+      const use = (vv * vv * kk) / aLatMax;
+      return Math.sqrt(Math.max(0.12, 1 - use * use));
+    };
     // backward (braking) pass, twice around for wrap
     for (let pass = 0; pass < 2; pass++) {
       for (let j = n - 1; j >= 0; j--) {
@@ -71,7 +80,7 @@ export class RacingProfile {
         const nx = (i + 1) % n;
         const vn = v[nx];
         const Fz = m * g + kA * vn * vn;
-        const aBrake = (muAt(Fz) * brakeGrip * Fz + kD * vn * vn) / m;
+        const aBrake = (muAt(Fz) * brakeGrip * Fz * latLeft(vn, Math.abs(this.lineK[nx])) + kD * vn * vn) / m;
         const lim = Math.sqrt(vn * vn + 2 * aBrake);
         if (v[i] > lim) v[i] = lim;
       }
@@ -82,7 +91,7 @@ export class RacingProfile {
         const pv = (i - 1 + n) % n;
         const vp = Math.max(1, v[pv]);
         const Fz = m * g * (spec.a / (spec.a + spec.b)) + kA * vp * vp * (1 - spec.aeroFront);
-        const aTrac = (muAt(Fz * 2) * Fz * 0.9) / m;
+        const aTrac = ((muAt(Fz * 2) * Fz * 0.9) / m) * latLeft(vp, Math.abs(this.lineK[pv]));
         const aPow = spec.power / (m * vp);
         const a = Math.min(aTrac, aPow) - (kD * vp * vp) / m;
         const lim = Math.sqrt(vp * vp + 2 * Math.max(0, a));
