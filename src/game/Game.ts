@@ -24,6 +24,7 @@ import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
 import { RacingLineAssist } from './RacingLineAssist.ts';
 import type { AssistConfig } from './Assists.ts';
+import { COMPOUNDS } from '../race/Pit.ts';
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay' | 'flashback';
 
@@ -216,6 +217,7 @@ export class Game {
       playerEntry,
       playerGrid: GRID[setup.grid].slot,
       entries: this.entries,
+      playerCompound: setup.compound,
     });
     this.control.reset();
     this.applyAssists(setup.assists);
@@ -328,6 +330,7 @@ export class Game {
       st.pause = false;
       st.camera = false;
       st.drs = false;
+      st.pit = false;
     }
 
     if (this.state === 'menu') {
@@ -367,6 +370,13 @@ export class Game {
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
         if (race.isTimeTrial && this.stateTime > 4) this.hud.setHint(null);
         if (st.reset) this.startFlashback();
+        if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none') {
+          race.playerPitRequest = !race.playerPitRequest;
+          const next = COMPOUNDS[race.playerNextCompound()].label;
+          if (race.playerPitRequest) this.hud.flash('Box this lap', `${next} tyres`, 'green', 2.2);
+          else this.hud.flash('Pit request cancelled', '', '', 1.4);
+          if (this.audioReady) this.audio.ui('select');
+        }
         // chequered flag → results
         if (race.player.finished && !race.isTimeTrial) {
           if (this.finishTimer < 0) {

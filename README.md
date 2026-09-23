@@ -40,7 +40,11 @@ npm run check    # tsc --noEmit
   green/yellow/red line), auto/manual gears, DRS assist — as presets (Casual / Standard / Expert)
   or one by one.
 - **F1-game mechanics** — flashback (rewind up to 12 s and resume), track-limit warnings and
-  5-second penalties, DRS within a second, tow and dirty air, damage, tyre wear, car-status widget.
+  5-second penalties, DRS within a second, tow and dirty air, front-wing damage.
+- **Tyres & pit stops** — Soft / Medium / Hard (grip vs life: ~9 / ~14 / ~23 laps), wear that
+  costs grip, the two-compound rule for races of 10+ laps (+30 s if you don't), pit assist: request
+  a stop, the car drives the pit lane at the 80 km/h limiter, ~2.5 s stop in the team's box (new
+  tyres, front wing fixed), ~20 s lost overall. The AI runs its own one-stop strategies.
 - **AI** — K1999 racing line, friction-ellipse speed profile, curvature-feedforward + Stanley
   steering capped at the grip limit, overtaking and defending, backs off in dirty air.
 
@@ -55,6 +59,7 @@ npm run check    # tsc --noEmit
 | Gear up / down (manual gearbox) | E / Q | RB / LB |
 | Change camera | C | D-pad up |
 | Look back | B | click a stick |
+| Box this lap (pit stop, auto pit lane) | I | D-pad down |
 | Flashback (rewind; ← → scrub, Enter resume) | R | View / Share |
 | Pause (also: reset car to track) | Esc / P | Menu / Options |
 

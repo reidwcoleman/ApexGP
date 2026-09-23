@@ -1,6 +1,7 @@
 import type { Race, RaceEvent, Competitor } from '../race/Race.ts';
 import type { Track } from '../world/Track.ts';
 import { uiColor } from '../race/Teams.ts';
+import { COMPOUNDS } from '../race/Pit.ts';
 
 export function fmtTime(t: number, plusSign = false): string {
   if (!isFinite(t) || t <= 0) return '—';
@@ -62,6 +63,7 @@ export class HUD {
   private hint: HTMLDivElement;
   private camLabel: HTMLDivElement;
   private statusEl!: HTMLDivElement;
+  private pitEl!: HTMLSpanElement;
   private tyreEls: SVGRectElement[] = [];
   private wingEl!: SVGRectElement;
   private wearEl!: HTMLDivElement;
@@ -115,7 +117,7 @@ export class HUD {
     this.thrEl = el('b', '', thr);
     const brk = el('div', 'meter brk', ped);
     this.brkEl = el('b', '', brk);
-    el('span', 'lbl', bars, '');
+    this.pitEl = el('span', 'lbl pitlbl', bars, '');
     this.ersWrap = el('div', 'meter ers', bars);
     this.ersEl = el('b', '', this.ersWrap);
     this.drsEl = el('div', 'drs', bars, 'DRS');
@@ -290,6 +292,12 @@ export class HUD {
         case 'track-limits':
           this.flash('Track limits', e.value ? `warning ${e.value} of 3 · lap time deleted` : 'lap time deleted', 'red', 2.6);
           break;
+        case 'pit-in':
+          this.flash('Pit limiter', '80 km/h', '', 2);
+          break;
+        case 'pit-stop':
+          this.flash('Pit stop', `${(e.value ?? 0).toFixed(1)} s · ${COMPOUNDS[c.compound].label} tyres`, 'green', 3);
+          break;
         case 'penalty':
           this.flash(`${e.value} second penalty`, 'track limits', 'red', 3.2);
           break;
@@ -353,7 +361,16 @@ export class HUD {
     }
     const wcls = 'fw ' + (car.wingDamage < 0.15 ? 'ok' : car.wingDamage < 0.5 ? 'warn' : 'bad');
     if (this.wingEl.getAttribute('class') !== wcls) this.wingEl.setAttribute('class', wcls);
-    this.setText(this.wearEl, `${Math.round((1 - avg) * 100)}%`);
+    const cmp = COMPOUNDS[p.compound];
+    const wearHtml = `<span class="cmp" style="color:${cmp.color}">${cmp.short}</span> ${Math.round((1 - avg) * 100)}%`;
+    if (this.lastText.get(this.wearEl) !== wearHtml) {
+      this.wearEl.innerHTML = wearHtml;
+      this.lastText.set(this.wearEl, wearHtml);
+    }
+    // pit status in the cluster: BOX when requested, PIT in the lane
+    const pitTxt = p.pit.phase !== 'none' ? 'PIT' : race.playerPitRequest ? 'BOX' : '';
+    this.setText(this.pitEl, pitTxt);
+    this.pitEl.classList.toggle('on', pitTxt !== '');
 
     // timing
     const t = race.phase === 'racing' || race.phase === 'finished' ? race.raceTime : 0;

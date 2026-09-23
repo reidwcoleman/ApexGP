@@ -6,6 +6,7 @@ import { fmtTime } from './HUD.ts';
 import { POINTS } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
 import { ASSIST_PRESETS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
+import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 
 export type TimeOfDay = 'golden' | 'day' | 'overcast';
 
@@ -17,6 +18,7 @@ export interface RaceSetup {
   grid: number; // index into GRID
   time: TimeOfDay;
   assists: AssistConfig;
+  compound: Compound;
 }
 
 export interface Settings {
@@ -118,8 +120,9 @@ export class Menu {
     this.cb = cb;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, time: 'golden', assists: { ...ASSIST_PRESETS.casual } });
+    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, time: 'golden', assists: { ...ASSIST_PRESETS.casual }, compound: 'medium' });
     // saves from before per-assist settings stored a preset index
+    if (!this.setup.compound) this.setup.compound = 'medium';
     if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...ASSIST_PRESETS.casual };
     else this.setup.assists = { ...ASSIST_PRESETS.casual, ...this.setup.assists };
     this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', volume: 0.8 });
@@ -201,6 +204,12 @@ export class Menu {
       });
       this.opt(p, 'Start from', () => GRID[st.grid].label, (d) => {
         st.grid = (st.grid + d + GRID.length) % GRID.length;
+      });
+    }
+    if (this.mode === 'race') {
+      this.opt(p, 'Starting tyres', () => `<span class="tyredot" style="background:${COMPOUNDS[st.compound].color}"></span>${COMPOUNDS[st.compound].label}`, (d) => {
+        const i = COMPOUND_ORDER.indexOf(st.compound);
+        st.compound = COMPOUND_ORDER[(i + d + COMPOUND_ORDER.length) % COMPOUND_ORDER.length];
       });
     }
     this.opt(p, 'Time of day', () => TIMES.find((t) => t.v === st.time)!.label, (d) => {

@@ -2,7 +2,8 @@ import type { Track } from '../world/Track.ts';
 import { CarPhysics, F1_SPEC, type DriveInput } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
-import type { Entry } from './Teams.ts';
+import { TEAMS, type Entry } from './Teams.ts';
+import { PitLane, fitTyres, COMPOUND_ORDER, type Compound, type PitState } from './Pit.ts';
 
 /**
  * Race session: grid, start lights, the physics/AI step, timing & scoring,
@@ -21,6 +22,8 @@ export interface RaceOptions {
   /** 0-based grid slot for the player */
   playerGrid: number;
   entries: Entry[];
+  /** the player's starting compound (AI choose their own) */
+  playerCompound?: Compound;
 }
 
 export interface Competitor {
@@ -54,6 +57,12 @@ export interface Competitor {
   /** track-limit warnings this race (reset after each penalty) */
   warnings: number;
   limitsOff: boolean;
+  compound: Compound;
+  compoundsUsed: Compound[];
+  pit: PitState;
+  /** AI: lap on which to stop (−1 = no stop planned) */
+  pitLap: number;
+  stops: number;
   /** ring of checkpoint pass times (every CP metres) for timing gaps */
   cpTimes: Float64Array;
   cpIndex: number;
@@ -61,7 +70,22 @@ export interface Competitor {
 }
 
 export interface RaceEvent {
-  kind: 'fastest-lap' | 'personal-best' | 'sector' | 'drs-enabled' | 'track-limits' | 'penalty' | 'final-lap' | 'finish' | 'lap' | 'contact' | 'lights-out';
+  kind:
+    | 'fastest-lap'
+    | 'personal-best'
+    | 'sector'
+    | 'drs-enabled'
+    | 'track-limits'
+    | 'penalty'
+    | 'final-lap'
+    | 'finish'
+    | 'lap'
+    | 'contact'
+    | 'lights-out'
+    | 'pit-in'
+    | 'pit-stop'
+    | 'pit-out'
+    | 'box-now';
   car: number;
   value?: number;
   sector?: number;
@@ -97,6 +121,13 @@ export class Race {
   playerDrsRequest = false;
   /** DRS assist: open automatically whenever allowed */
   playerDrsAuto = false;
+  /** player asked the team to box this lap */
+  playerPitRequest = false;
+  /** compound the player will get at the next stop (null = the team picks) */
+  playerPitCompound: Compound | null = null;
+  readonly pitLane: PitLane;
+  /** races this long must use two dry compounds (F1 rule, as in the game) */
+  readonly twoCompoundRule: boolean;
   /** live delta to the player's best lap (s, NaN until there is one) */
   playerDelta = NaN;
   private deltaCur = new Float32Array(1).fill(-1);
@@ -168,6 +199,11 @@ export class Race {
         penalty: 0,
         warnings: 0,
         limitsOff: false,
+        compound: 'medium',
+        compoundsUsed: [],
+        pit: { phase: 'none', s: 0, v: 0, timer: 0, stopTime: 2.4, fromLat: 0, boxS: 0, next: 'medium' },
+        pitLap: -1,
+        stops: 0,
         cpTimes: new Float64Array(CP_RING).fill(-1),
         cpIndex: -1,
         contactTimer: 0,
@@ -177,6 +213,24 @@ export class Race {
       this.gridStartDist.push(c.lapDist);
     });
     this.player = this.cars.find((c) => c.isPlayer)!;
+
+    // tyres & strategy
+    this.pitLane = new PitLane(track);
+    this.twoCompoundRule = opts.mode === 'race' && opts.laps >= 10;
+    for (const c of this.cars) {
+      let start: Compound;
+      if (c.isPlayer) start = opts.playerCompound ?? (opts.laps >= 10 ? 'medium' : 'soft');
+      else if (opts.laps < 8) start = 'soft';
+      else start = Math.random() < 0.6 ? 'medium' : Math.random() < 0.5 ? 'soft' : 'hard';
+      c.compound = start;
+      c.compoundsUsed = [start];
+      fitTyres(c.car, start);
+      if (!c.isPlayer && opts.laps >= 8) {
+        // one stop, placed by the starting compound's life with a little variety
+        const frac = start === 'soft' ? 0.35 : start === 'medium' ? 0.5 : 0.62;
+        c.pitLap = Math.max(2, Math.min(opts.laps - 1, Math.round(opts.laps * frac + (Math.random() - 0.5) * 2)));
+      }
+    }
     if (opts.mode === 'timetrial') {
       this.player.car.setSpeed(60);
       this.player.car.gear = 7;
@@ -233,6 +287,34 @@ export class Race {
       for (const c of this.cars) {
         const zone = this.drsLapDist[c.drsZone];
         const inZone = !!zone && c.drsEligible && this.inRange(c.lapDist, zone.start, zone.end);
+        // pit assist: requested stop + crossing the takeover point → scripted pit lane
+        if (c.pit.phase === 'none' && (this.phase === 'racing' || this.phase === 'finished') && !c.finished) {
+          const want = c.isPlayer ? this.playerPitRequest : c.pitLap >= 0 && c.laps + 1 >= c.pitLap;
+          const d = this.track.delta(this.track.wrap(this.pitLane.takeoverS), c.car.s);
+          if (want && d >= 0 && d < 25) {
+            const teamIdx = TEAMS.indexOf(c.entry.team);
+            this.pitLane.begin(c.pit, c.car, this.pitLane.boxFor(teamIdx), c.isPlayer ? this.playerNextCompound() : this.aiNextCompound(c));
+            c.pit.stopTime = 2.2 + Math.random() * (c.isPlayer ? 0.4 : 0.9);
+            if (c.isPlayer) this.events.push({ kind: 'pit-in', car: c.id });
+          }
+        }
+        if (c.pit.phase !== 'none') {
+          const released = this.pitLane.update(h, c.pit, c.car, () => {
+            fitTyres(c.car, c.pit.next);
+            c.compound = c.pit.next;
+            if (!c.compoundsUsed.includes(c.pit.next)) c.compoundsUsed.push(c.pit.next);
+            c.car.wingDamage = 0;
+            c.stops++;
+            if (c.isPlayer) this.playerPitRequest = false;
+            else c.pitLap = -1;
+            if (c.isPlayer) this.events.push({ kind: 'pit-stop', car: c.id, value: c.pit.stopTime });
+          });
+          if (released) {
+            c.ai?.startFrom(c.car, this.track);
+            if (c.isPlayer) this.events.push({ kind: 'pit-out', car: c.id });
+          }
+          continue;
+        }
         if (c.isPlayer) {
           const inp = this.playerInput;
           if ((this.playerDrsRequest || this.playerDrsAuto) && inZone) c.car.drsOpen = true;
@@ -268,7 +350,7 @@ export class Race {
       let tow = 0;
       let dirty = 0;
       for (const o of cars) {
-        if (o === c) continue;
+        if (o === c || o.pit.phase !== 'none' || c.pit.phase !== 'none') continue;
         const ds = this.track.delta(c.car.s, o.car.s);
         if (ds <= 2 || ds > 55) continue;
         const dl = Math.abs(o.car.lateral - c.car.lateral);
@@ -281,6 +363,31 @@ export class Race {
       c.car.tow = tow;
       c.car.dirty = dirty;
     }
+  }
+
+  /** the compound the player gets at the next stop: their pick, else one that satisfies the rules */
+  playerNextCompound(): Compound {
+    const p = this.player;
+    if (this.playerPitCompound) return this.playerPitCompound;
+    const lapsLeft = this.opts.laps - Math.max(0, p.laps);
+    const unused = COMPOUND_ORDER.filter((c) => !p.compoundsUsed.includes(c));
+    if (this.twoCompoundRule && unused.length === 3 - 1) {
+      // still on the first compound: pick a different one that fits the stint
+      return lapsLeft > 12 && unused.includes('hard') ? 'hard' : unused.includes('medium') ? 'medium' : unused[0];
+    }
+    return lapsLeft > 12 ? 'hard' : lapsLeft > 7 ? 'medium' : 'soft';
+  }
+
+  private aiNextCompound(c: Competitor): Compound {
+    const lapsLeft = this.opts.laps - Math.max(0, c.laps);
+    const want: Compound = lapsLeft > 12 ? 'hard' : lapsLeft > 7 ? 'medium' : 'soft';
+    if (want === c.compound && this.twoCompoundRule && c.compoundsUsed.length < 2) return c.compound === 'medium' ? 'hard' : 'medium';
+    return want;
+  }
+
+  /** mean tyre wear of a competitor, 0..1 */
+  wearOf(c: Competitor): number {
+    return (c.car.wear[0] + c.car.wear[1] + c.car.wear[2] + c.car.wear[3]) / 4;
   }
 
   resetCar(c: Competitor) {
@@ -342,6 +449,11 @@ export class Race {
         if (c.isPlayer && c.laps === this.opts.laps - 1) this.events.push({ kind: 'final-lap', car: c.id });
         if (!c.finished && (c.laps >= this.opts.laps || (this.phase === 'finished' && c.laps >= 1))) {
           c.finished = true;
+          // two-compound rule: finishing a long race on one compound costs 30 s
+          if (this.twoCompoundRule && c.compoundsUsed.length < 2) {
+            c.penalty += 30;
+            if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 30 });
+          }
           c.finishTime = t + c.penalty;
           // cool-down lap
           if (c.ai) c.ai.pace *= 0.72;
@@ -489,7 +601,9 @@ export class Race {
     const OFFS = [1.75, 0, -1.8];
     for (let i = 0; i < cars.length; i++) {
       const A = cars[i].car;
+      if (cars[i].pit.phase !== 'none') continue;
       for (let j = i + 1; j < cars.length; j++) {
+        if (cars[j].pit.phase !== 'none') continue;
         const B = cars[j].car;
         const dxc = A.x - B.x;
         const dzc = A.z - B.z;

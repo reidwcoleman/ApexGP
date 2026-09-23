@@ -154,7 +154,10 @@ export class AIDriver {
     const offLine = Math.abs(this.offset);
     const corner = Math.abs(track.kappaAt(car.s + v * 0.5)) > 1 / 300 ? 1 : 0;
     // dirty air costs downforce: carry less speed through corners when close behind someone
-    const dirtyLoss = corner * car.dirty * 0.085;
+    // tyre compound and wear set how much grip there is today (the profile assumes new softs)
+    const w = (car.wear[0] + car.wear[1] + car.wear[2] + car.wear[3]) / 4;
+    const tyreGrip = car.compoundGrip * (1 - 0.14 * Math.pow(w, 1.6));
+    const dirtyLoss = corner * car.dirty * 0.085 + corner * (1 - Math.sqrt(tyreGrip));
     let vt = profile.at(car.s + v * 0.12) * this.pace * (1 - corner * Math.min(0.06, offLine * 0.012)) * (1 - dirtyLoss);
     vt = Math.min(vt, followSpeed);
     const err = vt - v;

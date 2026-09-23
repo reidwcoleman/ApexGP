@@ -17,11 +17,12 @@ export interface Controls {
   camera: boolean; // edge
   lookBack: boolean; // held
   pause: boolean; // edge
-  reset: boolean; // edge
+  reset: boolean; // edge (flashback)
+  pit: boolean; // edge (box request)
   usingPad: boolean;
 }
 
-type Bind = 'up' | 'down' | 'left' | 'right' | 'shiftUp' | 'shiftDown' | 'drs' | 'ers' | 'camera' | 'lookBack' | 'pause' | 'reset' | 'accept' | 'back';
+type Bind = 'up' | 'down' | 'left' | 'right' | 'shiftUp' | 'shiftDown' | 'drs' | 'ers' | 'camera' | 'lookBack' | 'pause' | 'reset' | 'pit' | 'accept' | 'back';
 
 const KEYMAP: Record<string, Bind> = {
   ArrowUp: 'up',
@@ -44,6 +45,7 @@ const KEYMAP: Record<string, Bind> = {
   Escape: 'pause',
   KeyP: 'pause',
   KeyR: 'reset',
+  KeyI: 'pit',
   Enter: 'accept',
   Backspace: 'back',
 };
@@ -61,6 +63,7 @@ export class Input {
     lookBack: false,
     pause: false,
     reset: false,
+    pit: false,
     usingPad: false,
   };
 
@@ -116,6 +119,7 @@ export class Input {
     let lookBack = this.held.has('lookBack');
     let pause = edge('pause');
     let reset = edge('reset');
+    let pit = edge('pit');
 
     this.nav.up = edge('up');
     this.nav.down = edge('down');
@@ -152,6 +156,7 @@ export class Input {
       lookBack ||= pressedNow(10) || pressedNow(11);
       pause ||= pEdge(9);
       reset ||= pEdge(8);
+      pit ||= pEdge(13);
 
       // menu navigation from the pad
       this.padNavCooldown -= dt;
@@ -183,6 +188,7 @@ export class Input {
     s.lookBack = lookBack;
     s.pause = pause;
     s.reset = reset;
+    s.pit = pit;
 
     for (const [b, n] of this.pressed) {
       if (n <= 1) this.pressed.delete(b);

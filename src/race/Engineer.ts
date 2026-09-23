@@ -11,6 +11,9 @@ export class Engineer {
   private lastLapSaid = -1;
   private behindWarned = -10;
   private lowErsWarned = false;
+  private saidTyres = false;
+  private saidRule = false;
+  private lastStops = 0;
   private queue: string[] = [];
 
   reset(race: Race) {
@@ -19,6 +22,9 @@ export class Engineer {
     this.lastLapSaid = -1;
     this.behindWarned = -10;
     this.lowErsWarned = false;
+    this.saidTyres = false;
+    this.saidRule = false;
+    this.lastStops = 0;
     this.queue = [];
   }
 
@@ -72,6 +78,12 @@ export class Engineer {
             true,
           );
           break;
+        case 'pit-stop':
+          this.say(`${(e.value ?? 0).toFixed(1)} second stop, good job boys. ${race.player.compound[0].toUpperCase() + race.player.compound.slice(1)}s are on — bring them in gently.`, true);
+          break;
+        case 'pit-out':
+          this.say(`Out of the pits in P${race.player.position}. Push now.`);
+          break;
         case 'contact':
           if ((e.value ?? 0) > 6) this.say('Contact! Check the car — we see no damage, keep going.');
           break;
@@ -111,6 +123,24 @@ export class Engineer {
         this.say('Battery is low. Lift and coast a little, it recharges on the brakes.');
       }
       if (p.car.ers > 0.5) this.lowErsWarned = false;
+
+      // strategy calls
+      if (p.stops !== this.lastStops) {
+        this.lastStops = p.stops;
+        this.saidTyres = false;
+      }
+      if (p.pit.phase === 'none' && !race.playerPitRequest && !p.finished) {
+        const lapsLeft = race.opts.laps - Math.max(0, p.laps);
+        const wear = race.wearOf(p);
+        if (wear > 0.55 && lapsLeft > 2 && !this.saidTyres) {
+          this.saidTyres = true;
+          this.say(`The tyres are going off — ${Math.round(wear * 100)}% worn. Box this lap, press I.`, true);
+        }
+        if (race.twoCompoundRule && p.compoundsUsed.length < 2 && lapsLeft <= Math.ceil(race.opts.laps * 0.4) && lapsLeft > 1 && !this.saidRule) {
+          this.saidRule = true;
+          this.say('We still have to run a second compound. Box, box — press I.', true);
+        }
+      }
     }
 
     this.cooldown -= dt;

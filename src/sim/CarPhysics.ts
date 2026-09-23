@@ -644,7 +644,7 @@ export class CarPhysics {
 
       // tyre wear from sliding energy
       const slipPower = Math.abs(Fl * (w1 * R - vl)) + Math.abs(Ft * vt);
-      this.wear[i] = Math.min(1, this.wear[i] + slipPower * dt * 5e-8 * this.compoundWear);
+      this.wear[i] = Math.min(1, this.wear[i] + slipPower * dt * 8.5e-8 * this.compoundWear);
     }
     this.slipFront = slipF;
     this.slipRear = slipR;

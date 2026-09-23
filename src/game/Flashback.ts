@@ -17,9 +17,10 @@ function snapshotOf(obj: object): Snap {
     if (SKIP.has(k)) continue;
     if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') out[k] = v;
     else if (Array.isArray(v)) {
-      if (v.every((x) => typeof x === 'number')) out[k] = v.slice();
+      if (v.every((x) => typeof x === 'number' || typeof x === 'string')) out[k] = v.slice();
     } else if (v instanceof Float32Array || v instanceof Float64Array) out[k] = v.slice();
     else if (v === null) out[k] = null;
+    else if (typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) out[k] = { ...(v as object) }; // e.g. pit state
   }
   return out;
 }
@@ -35,6 +36,8 @@ function restoreInto(obj: object, snap: Snap) {
       cur.set(v);
     } else if (v instanceof Float32Array || v instanceof Float64Array) {
       o[k] = v.slice();
+    } else if (v && typeof v === 'object' && cur && typeof cur === 'object') {
+      Object.assign(cur, v);
     } else o[k] = v;
   }
 }

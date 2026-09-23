@@ -369,6 +369,16 @@
 .carstatus .ok { fill: var(--green); }
 .carstatus .warn { fill: var(--yellow); }
 .carstatus .bad { fill: var(--accent); }
+.carstatus .cmp {
+  font-weight: 700;
+}
+.pitlbl.on {
+  color: var(--ink-dark);
+  background: var(--yellow);
+  border-radius: var(--r-pill);
+  padding: 1px 6px;
+  font-weight: 700;
+}
 .carstatus .wear {
   margin-top: 4px;
   font-size: var(--t-cap);
