@@ -1,0 +1,10 @@
+import * as THREE from 'three';
+import { createDevStage, studioLighting } from './devkit.ts';
+const stage = createDevStage();
+studioLighting(stage);
+const m = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 32), new THREE.MeshPhysicalMaterial({ color: 0xc8102e, clearcoat: 1, clearcoatRoughness: 0.05, roughness: 0.35, metalness: 0.3 }));
+m.position.y = 1; m.castShadow = true;
+stage.scene.add(m);
+const e = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial({ emissive: 0xff2020, emissiveIntensity: 20 }));
+e.position.set(2, 0.4, 0); stage.scene.add(e);
+stage.start();

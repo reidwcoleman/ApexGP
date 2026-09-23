@@ -1,0 +1,55 @@
+/* APEX GP design tokens — one typeface, 4 sizes per screen, 2 weights, one accent. */
+:root {
+  --font: 'Titillium Web', system-ui, sans-serif;
+
+  /* ground: tinted near-black (never grey), glass over the 3D scene */
+  --ground: rgba(10, 12, 17, 0.78);
+  --ground-solid: #0a0c11;
+  --raised: rgba(24, 27, 35, 0.86);
+  --well: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  /* ink */
+  --ink: rgba(255, 255, 255, 0.92);
+  --ink2: rgba(255, 255, 255, 0.62);
+  --ink3: rgba(255, 255, 255, 0.4);
+  --ink-dark: #0a0c11;
+
+  /* the one accent */
+  --accent: #ff2b3f;
+  --accent-wash: rgba(255, 43, 63, 0.16);
+
+  /* semantic timing colours (meaning only, never decoration) */
+  --purple: #b249f8;
+  --green: #22d17a;
+  --yellow: #f7c948;
+  --drs: #22d17a;
+
+  /* type scale */
+  --t-cap: 12px;
+  --t-row: 15px;
+  --t-time: 22px;
+  --t-hero: 64px;
+
+  /* spacing (4pt) */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --r-pill: 6px;
+  --r-panel: 12px;
+
+  --spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --spring: linear;
+    --ease-out: linear;
+  }
+}

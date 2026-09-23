@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Lab</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; --bg: #0d0f12; --panel: #161a20; --line: #262c35; --text: #e6e9ee; --dim: #8a93a0; --accent: #e10600; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: .02em; }
+  p.sub { margin: 0 0 16px; color: var(--dim); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { background: #222831; color: var(--text); border: 1px solid #323a46; border-radius: 7px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #4a5566; }
+  button.on { background: var(--accent); border-color: var(--accent); }
+  button#start { background: var(--accent); border-color: var(--accent); font-weight: 600; padding: 10px 18px; }
+  label { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+  label input[type=range] { width: 150px; accent-color: var(--accent); }
+  label span.v { color: var(--text); font-variant-numeric: tabular-nums; min-width: 44px; }
+  #readout { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; color: var(--text); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 16px; }
+  a { color: #ff6b63; }
+  .disabled { opacity: .45; pointer-events: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>APEX GP · Audio Lab</h1>
+  <p class="sub">Synthesized V6 turbo-hybrid, tyres, surfaces, crowd and UI. Everything is generated live with the Web Audio API.</p>
+  <section>
+    <div class="row">
+      <button id="start">Start audio</button>
+      <label>Volume <input id="vol" type="range" min="0" max="1.2" step="0.01" value="0.8"><span class="v" id="volv">0.80</span></label>
+      <span id="status" style="color:var(--dim)">not started</span>
+    </div>
+  </section>
+  <section>
+    <h2>Drive</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button id="auto" class="on">Auto lap</button>
+      <button id="park">Park (idle)</button>
+      <button id="up">Shift up</button>
+      <button id="down">Shift down</button>
+    </div>
+    <div id="manual" class="grid disabled">
+      <label>RPM <input id="m_rpm" type="range" min="4000" max="12400" step="10" value="8000"><span class="v" id="m_rpmv"></span></label>
+      <label>Throttle <input id="m_thr" type="range" min="0" max="1" step="0.01" value="0.6"><span class="v" id="m_thrv"></span></label>
+      <label>Speed km/h <input id="m_spd" type="range" min="0" max="340" step="1" value="180"><span class="v" id="m_spdv"></span></label>
+      <label>Slip <input id="m_slip" type="range" min="0" max="1.4" step="0.01" value="0"><span class="v" id="m_slipv"></span></label>
+      <label>Surface <select id="m_surf"><option value="0">road</option><option value="1">kerb</option><option value="2">asphalt runoff</option><option value="3">grass</option><option value="4">gravel</option></select></label>
+      <label><input id="m_drs" type="checkbox"> DRS</label>
+      <label><input id="m_ers" type="checkbox"> ERS deploy</label>
+      <label><input id="m_lim" type="checkbox"> Limiter</label>
+    </div>
+  </section>
+  <section>
+    <h2>View</h2>
+    <div class="row">
+      <button data-view="chase" class="on">Chase</button>
+      <button data-view="cockpit">Cockpit</button>
+      <button data-view="tv">TV</button>
+    </div>
+  </section>
+  <section>
+    <h2>Events</h2>
+    <div class="row">
+      <button id="flyby">Fly-by opponent</button>
+      <button id="imp1">Impact light</button>
+      <button id="imp2">Impact heavy</button>
+      <button id="lights">Start lights</button>
+      <label>Crowd <input id="crowd" type="range" min="0" max="1" step="0.01" value="0"><span class="v" id="crowdv">0.00</span></label>
+      <button data-ui="move">UI move</button>
+      <button data-ui="select">UI select</button>
+      <button data-ui="back">UI back</button>
+    </div>
+  </section>
+  <section>
+    <h2>Offline render</h2>
+    <div class="row">
+      <button id="render">Render 8 s WAV</button>
+      <span id="renderOut" style="color:var(--dim)"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Telemetry</h2>
+    <div id="readout">–</div>
+  </section>
+</main>
+<script type="module" src="./audio.ts"></script>
+</body>
+</html>

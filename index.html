@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>APEX GP</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #06070a; overflow: hidden; }
+      #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="ui"></div>
+    <div id="loading">
+      <div class="lwrap">
+        <div class="logo">Apex <span class="gp">GP</span></div>
+        <div class="lbar"><b></b></div>
+        <div class="lstep">Starting</div>
+        <div class="lerr"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
