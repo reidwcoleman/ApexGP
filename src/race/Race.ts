@@ -24,6 +24,28 @@ export interface RaceOptions {
   entries: Entry[];
   /** the player's starting compound (AI choose their own) */
   playerCompound?: Compound;
+  /** starting order from qualifying (overrides playerGrid) */
+  gridOrder?: Entry[];
+}
+
+/**
+ * An AI driver's pace factor: difficulty × car × driver. The car and driver
+ * spreads are compressed so the field covers ~2% like a real grid, not ~6%.
+ */
+export function aiPace(entry: Entry, difficulty: number): number {
+  const car = 1 - (1 - entry.team.pace) * 0.45;
+  const driver = 0.988 + entry.driver.skill * 0.012;
+  return difficulty * car * driver;
+}
+
+/**
+ * AI qualifying laps: each driver's one-lap pace from the same pace factor the
+ * race AI uses, with low fuel and a little randomness. Returns seconds.
+ */
+export function aiQualifyingTime(entry: Entry, difficulty: number): number {
+  const pace = aiPace(entry, difficulty);
+  const g = (Math.random() + Math.random() + Math.random() - 1.5) * 0.25;
+  return 67.6 / pace - 0.35 + g;
 }
 
 export interface Competitor {
@@ -89,6 +111,7 @@ export interface RaceEvent {
   car: number;
   value?: number;
   sector?: number;
+  valid?: boolean;
   color?: 'purple' | 'green' | 'yellow';
 }
 
@@ -146,12 +169,17 @@ export class Race {
     this.drsLapDist = track.drs.map((z) => ({ detect: track.lapDistance(z.detect), start: track.lapDistance(z.start), end: track.lapDistance(z.end) }));
 
     const entries = opts.mode === 'timetrial' ? [opts.playerEntry] : opts.entries;
-    // grid order: AI by pace (fastest first), player dropped into their chosen slot
-    const ai = entries.filter((e) => e !== opts.playerEntry);
-    ai.sort((a, b) => b.team.pace * b.driver.skill - a.team.pace * a.driver.skill);
-    const order: Entry[] = ai.slice();
-    const pSlot = opts.mode === 'timetrial' ? 0 : Math.max(0, Math.min(order.length, opts.playerGrid));
-    order.splice(pSlot, 0, opts.playerEntry);
+    // grid order: from qualifying if we have it, else AI by pace with the player
+    // dropped into their chosen slot
+    let order: Entry[];
+    if (opts.gridOrder && opts.mode === 'race') order = opts.gridOrder.slice();
+    else {
+      const ai = entries.filter((e) => e !== opts.playerEntry);
+      ai.sort((a, b) => b.team.pace * b.driver.skill - a.team.pace * a.driver.skill);
+      order = ai.slice();
+      const pSlot = opts.mode === 'timetrial' ? 0 : Math.max(0, Math.min(order.length, opts.playerGrid));
+      order.splice(pSlot, 0, opts.playerEntry);
+    }
 
     order.forEach((entry, i) => {
       const car = new CarPhysics(F1_SPEC);
@@ -165,7 +193,7 @@ export class Race {
       }
       let aiDriver: AIDriver | null = null;
       if (!isPlayer) {
-        const pace = opts.difficulty * entry.team.pace * (0.975 + entry.driver.skill * 0.025);
+        const pace = aiPace(entry, opts.difficulty);
         aiDriver = new AIDriver(pace, entry.driver.aggression);
         aiDriver.startFrom(car, track);
         car.allowReverse = false;
@@ -438,7 +466,7 @@ export class Race {
             this.events.push({ kind: 'fastest-lap', car: c.id, value: lapTime });
           } else if (c.isPlayer) this.events.push({ kind: 'personal-best', car: c.id, value: lapTime });
         }
-        if (c.isPlayer) this.events.push({ kind: 'lap', car: c.id, value: lapTime });
+        if (c.isPlayer) this.events.push({ kind: 'lap', car: c.id, value: lapTime, valid });
       }
       c.lapStart = t;
       c.sectorStart = t;

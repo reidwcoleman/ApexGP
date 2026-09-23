@@ -38,6 +38,7 @@ export const GRID = [
   { label: 'Pole position', slot: 0 },
   { label: 'Midfield', slot: 9 },
   { label: 'Back of the grid', slot: 19 },
+  { label: 'Qualifying lap', slot: -1 },
 ];
 const TIMES: { v: TimeOfDay; label: string }[] = [
   { v: 'golden', label: 'Golden hour' },
@@ -342,6 +343,42 @@ export class Menu {
       this.show('settings');
     });
     add('Quit to menu', () => this.cb.onQuit());
+  }
+
+  /** qualifying classification → grid; primary action starts the race */
+  showQualifying(rows: { pos: number; entry: Entry; isPlayer: boolean; time: number; gap: number }[], title: string, lede: string, onStart: () => void, onMenu: () => void) {
+    this.show('results');
+    const s = this.screens.get('results')!;
+    s.innerHTML = '';
+    el('div', 'pause-bg', s);
+    const box = el('div', 'results glass', s);
+    const head = el('div', '', box);
+    el('h2', '', head, title);
+    el('p', 'lede', head, lede);
+    const table = el('div', 'rtable', box);
+    el('div', 'rrow head', table, '<span class="p">Pos</span><span></span><span>Driver</span><span>Team</span><span class="gap">Time</span><span class="best">Gap</span><span class="pts"></span>');
+    rows.forEach((r, i) => {
+      const t = isFinite(r.time) ? fmtTime(r.time) : 'No time';
+      const gap = r.pos === 1 ? '' : isFinite(r.gap) ? `+${r.gap.toFixed(3)}` : '';
+      const row = el(
+        'div',
+        'rrow' + (r.isPlayer ? ' me' : ''),
+        table,
+        `<span class="p">${r.pos}</span><span class="bar" style="background:${uiColor(r.entry.team)}"></span><span>${r.entry.driver.first} ${r.entry.driver.last}</span><span class="team">${r.entry.team.name}</span><span class="gap">${t}</span><span class="best${r.pos === 1 ? ' purple' : ''}">${gap}</span><span class="pts"></span>`,
+      );
+      row.style.animationDelay = `${0.15 + i * 0.035}s`;
+    });
+    const act = el('div', 'actions', box);
+    const start = el('div', 'cta', act, 'Start race');
+    const menu = el('div', 'cta ghost', act, 'Main menu');
+    this.items = [
+      { el: start, kind: 'action', select: onStart },
+      { el: menu, kind: 'action', select: onMenu },
+    ];
+    start.addEventListener('click', onStart);
+    menu.addEventListener('click', onMenu);
+    this.sel = 0;
+    this.highlight();
   }
 
   showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void) {

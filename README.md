@@ -21,8 +21,8 @@ npm run check    # tsc --noEmit
 - **Autódromo Costa del Sol** — a 4.7 km clockwise cliff-top circuit: pit straight, the Faro
   lighthouse hairpin-entry, the drop to the harbour hairpin, the pine esses, Curva Grande, the
   Bus Stop chicane and the Parabólica.
-- **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, four AI levels, choose
-  your grid slot. **Time trial** — flying laps against your own best with a live delta.
+- **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, four AI levels, start
+  from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.
 - **Timing like the broadcast** — position tower with intervals, sectors in purple/green/yellow,
   fastest lap, DRS detection (within 1.0 s at the detection line), track limits delete the lap,
   race-engineer radio.

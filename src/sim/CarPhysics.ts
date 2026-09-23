@@ -543,7 +543,8 @@ export class CarPhysics {
     const apR = sp.slipAnglePeakRear;
     // TC keeps the rear tyre's combined slip under a target: full never lets it
     // pass the peak (so power can't spin the car), medium allows a slide
-    const tcCombined = this.assists.traction === 'full' ? 0.92 : this.assists.traction === 'medium' ? 1.6 : Infinity;
+    const tcCombined = this.assists.traction === 'full' ? 0.92 : this.assists.traction === 'medium' ? 1.3 : Infinity;
+    const tcMinSlip = this.assists.traction === 'full' ? 0.12 : 0.75;
     const cd = Math.cos(delta);
     const sd = Math.sin(delta);
     for (let i = 0; i < 4; i++) {
@@ -566,7 +567,7 @@ export class CarPhysics {
       let tb = Tb[i];
       // traction control: never ask for more than the grip at the target slip
       if (!front && td > 0 && tcCombined < Infinity) {
-        const sxT = Math.max(this.assists.traction === 'full' ? 0.12 : 1.1, Math.sqrt(Math.max(0, tcCombined * tcCombined - sy * sy)));
+        const sxT = Math.max(tcMinSlip, Math.sqrt(Math.max(0, tcCombined * tcCombined - sy * sy)));
         this.tyre(sxT, sy, Fmax, tmp2);
         const tMax = tmp2[0] * R * 1.02 + (I * Math.max(0, vl / R - this.omega[i])) / dt * 0.2;
         if (td > tMax) {
@@ -611,7 +612,7 @@ export class CarPhysics {
         }
       }
       if (!front && td > 0 && tcCombined < Infinity) {
-        const sxT = Math.max(this.assists.traction === 'full' ? 0.12 : 1.1, Math.sqrt(Math.max(0, tcCombined * tcCombined - sy * sy)));
+        const sxT = Math.max(tcMinSlip, Math.sqrt(Math.max(0, tcCombined * tcCombined - sy * sy)));
         const wMax = (vl + sxT * kp * vref) / R;
         if (w1 > wMax) {
           w1 = wMax;

@@ -10,7 +10,7 @@ import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
-import { Race } from '../race/Race.ts';
+import { Race, aiQualifyingTime } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
 import { Cameras, CAMERA_LABEL, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer } from './Replay.ts';
@@ -85,6 +85,8 @@ export class Game {
   private lastDt = 0.016;
   private engineer = new Engineer();
   private autopilot: AIDriver | null = null;
+  private quali: { setup: RaceSetup } | null = null;
+  private gridOrder: Entry[] | null = null;
   private control = new PlayerControl();
   private line!: RacingLineAssist;
   private driverHidden = false;
@@ -218,6 +220,7 @@ export class Game {
       playerGrid: GRID[setup.grid].slot,
       entries: this.entries,
       playerCompound: setup.compound,
+      gridOrder: this.gridOrder ?? undefined,
     });
     this.control.reset();
     this.applyAssists(setup.assists);
@@ -238,6 +241,8 @@ export class Game {
   private toMenu() {
     this.state = 'menu';
     this.stateTime = 0;
+    this.quali = null;
+    this.gridOrder = null;
     this.makeRace('race', this.menu.setup);
     this.hud.show(false);
     this.menu.show('title');
@@ -262,8 +267,46 @@ export class Game {
     if (this.audioReady) this.audio.setVolume(s.volume);
   }
 
-  private startRace(mode: 'race' | 'timetrial', setup: RaceSetup) {
-    this.mode = mode;
+  /** one-shot qualifying: a flying lap sets the grid against the AI's times */
+  private startQualifying(setup: RaceSetup) {
+    this.quali = { setup };
+    this.startRace('timetrial', setup, true);
+    this.hud.setHint('Qualifying · one flying lap — make it count');
+    this.hud.flash('Qualifying', 'one flying lap', '', 2.5);
+  }
+
+  private endQualifying(time: number, valid: boolean) {
+    const setup = this.quali!.setup;
+    this.quali = null;
+    const player = this.race.player.entry;
+    const diff = DIFFICULTY[setup.difficulty].value;
+    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff) }));
+    times.sort((a, b) => a.time - b.time);
+    const order = times.map((t) => t.entry);
+    const pos = order.indexOf(player) + 1;
+    this.state = 'results';
+    this.autopilot = new AIDriver(0.7, 0.2);
+    this.autopilot.startFrom(this.race.player.car, this.track);
+    this.hud.show(false);
+    const pole = times[0].time;
+    this.menu.showQualifying(
+      times.map((t, i) => ({ pos: i + 1, entry: t.entry, isPlayer: t.entry === player, time: t.time, gap: t.time - pole })),
+      pos === 1 ? 'Pole position!' : `Qualified P${pos}`,
+      valid ? `${fmtTime(time)} · ${COSTA_DEL_SOL.name}` : 'Lap deleted for track limits — you start from the back',
+      () => {
+        this.gridOrder = order;
+        this.startRace('race', setup);
+      },
+      () => this.toMenu(),
+    );
+  }
+
+  private startRace(mode: 'race' | 'timetrial', setup: RaceSetup, qualifying = false) {
+    if (mode === 'race' && GRID[setup.grid].slot === -1 && !this.gridOrder && !qualifying) {
+      this.startQualifying(setup);
+      return;
+    }
+    this.mode = qualifying ? 'race' : mode;
     this.autopilot = null;
     if (setup.time !== this.time) {
       this.time = setup.time;
@@ -320,7 +363,6 @@ export class Game {
     this.lastDt = dt;
     this.input.update(dt);
     this.stateTime += dt;
-    const race = this.race;
     const st = this.input.state;
 
     // the key that closes a menu must not also act in the game this frame
@@ -332,6 +374,8 @@ export class Game {
       st.drs = false;
       st.pit = false;
     }
+    // read the session after the menu acted — it may have started a new one
+    const race = this.race;
 
     if (this.state === 'menu') {
       race.update(dt);
@@ -529,6 +573,10 @@ export class Game {
       if (this.audioReady) this.audio.ui('select');
     }
     for (const e of ev) {
+      if (this.quali && e.kind === 'lap') {
+        this.endQualifying(e.value ?? Infinity, e.valid !== false);
+        return;
+      }
       // time trial record, kept across sessions
       if (this.race.isTimeTrial && e.kind === 'lap' && this.race.player.lapValid !== undefined) {
         const lapTime = e.value ?? Infinity;
