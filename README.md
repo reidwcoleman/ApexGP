@@ -2,6 +2,10 @@
 
 A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 
+**▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
+
+Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
+
 **Everything is generated in code at startup** — the circuit, the cars and their liveries, the
 coast, the crowds, the engine note. No model files, no image files, no audio files.
 
