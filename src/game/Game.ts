@@ -12,12 +12,16 @@ import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL } from './Cameras.ts';
+import { Cameras, CAMERA_LABEL, type CameraMode } from './Cameras.ts';
+import { ReplayBuffer } from './Replay.ts';
+import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
 import { Menu, ASSISTS, DIFFICULTY, GRID, type RaceSetup, type Settings, type TimeOfDay } from '../ui/Menu.ts';
 
-type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results';
+type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay';
+
+const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'tv', 'tcam', 'tv', 'far'];
 
 const SMOKE_LIGHT: Record<TimeOfDay, THREE.Color> = {
   golden: new THREE.Color(1.0, 0.86, 0.72),
@@ -54,6 +58,13 @@ export class Game {
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   private readonly camPos = new THREE.Vector3();
+  private replay = new ReplayBuffer();
+  private replayT = 0;
+  private replayStart = 0;
+  private replayEnd = 0;
+  private replayShot = -1;
+  private replayBadge: HTMLDivElement;
+  private replayBar: HTMLElement;
   private prevCamPos = new THREE.Vector3();
   private fpsAvg = 60;
   private dofTarget = new THREE.Vector3();
@@ -67,6 +78,11 @@ export class Game {
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
     this.hud = new HUD(uiRoot);
+    this.replayBadge = document.createElement('div');
+    this.replayBadge.className = 'replay-badge';
+    this.replayBadge.innerHTML = '<span class="rdot"></span><b>Replay</b><span class="rtrack"><i></i></span><span class="rskip">Enter to skip</span>';
+    uiRoot.appendChild(this.replayBadge);
+    this.replayBar = this.replayBadge.querySelector('i')!;
     this.menu = new Menu(uiRoot, {
       onSetupChange: (s) => this.applySetupPreview(s),
       onStart: (mode, s) => this.startRace(mode, s),
@@ -190,6 +206,7 @@ export class Game {
     }
     this.driverHidden = false;
     this.particles.clear();
+    this.replay.reset(this.race);
     return this.race;
   }
 
@@ -270,7 +287,7 @@ export class Game {
     const laps = this.race.opts.laps;
     const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${COSTA_DEL_SOL.name}`;
     this.hud.show(false);
-    this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu());
+    this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu(), () => this.startReplay());
   }
 
   // ------------------------------------------------------------------ frame
@@ -330,7 +347,12 @@ export class Game {
         if (st.reset) this.resetPlayer();
         // chequered flag → results
         if (race.player.finished && !race.isTimeTrial) {
-          if (this.finishTimer < 0) this.finishTimer = 0;
+          if (this.finishTimer < 0) {
+            this.finishTimer = 0;
+            // the car drives itself on the cool-down lap
+            this.autopilot = new AIDriver(0.7, 0.2);
+            this.autopilot.startFrom(race.player.car, this.track);
+          }
           this.finishTimer += dt;
           if (this.finishTimer > 1.5 && this.cams.mode !== 'tv') this.cams.set('tv');
           if (this.finishTimer > 6) this.showResults();
@@ -343,10 +365,25 @@ export class Game {
       this.effects(dt);
       this.speedFx();
     } else if (this.state === 'results') {
+      this.driveInput(dt);
       race.update(dt);
       this.syncAllViews(dt);
       this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
+    } else if (this.state === 'replay') {
+      this.replayT += dt;
+      const shot = Math.floor(this.stateTime / 4.5);
+      if (shot !== this.replayShot) {
+        this.replayShot = shot;
+        this.cams.set(REPLAY_SHOTS[shot % REPLAY_SHOTS.length]);
+      }
+      this.replay.apply(this.replayT, this.track.length);
+      this.syncAllViews(dt, this.replay.ghosts);
+      this.cams.update(dt, this.replay.ghosts[race.player.id], this.rigs.get(race.player.entry)!, this.track);
+      const span = Math.max(1, this.replayEnd - this.replayStart);
+      this.replayBar.style.width = `${Math.min(100, ((this.replayT - this.replayStart) / span) * 100)}%`;
+      if (this.replayT >= this.replayEnd || st.pause || this.input.nav.accept || this.input.nav.back) this.endReplay();
     }
+    if (this.state === 'race' || this.state === 'intro' || this.state === 'results') this.replay.record(dt, race);
 
     this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
     this.env.update(dt, this.camera);
@@ -476,7 +513,31 @@ export class Game {
     }
   }
 
-  private syncAllViews(dt: number) {
+  private startReplay() {
+    if (this.replay.duration < 3) return;
+    this.state = 'replay';
+    this.stateTime = 0;
+    this.replayShot = -1;
+    this.replayEnd = this.race.time - 0.1;
+    this.replayStart = Math.max(this.replay.startTime, this.replayEnd - 45);
+    this.replayT = this.replayStart;
+    this.menu.show('none');
+    this.hud.show(false);
+    this.gfx.setDepthOfField(false);
+    this.gfx.setSpeedBlur(0);
+    this.gfx.setAberration(0);
+    this.particles.clear();
+    this.replayBadge.classList.add('on');
+  }
+
+  private endReplay() {
+    this.replayBadge.classList.remove('on');
+    this.cams.set('tv');
+    this.input.releaseAll();
+    this.showResults();
+  }
+
+  private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
     this.camPos.copy(this.camera.position);
     const cockpit = (this.state === 'race' || this.state === 'intro') && this.cams.mode === 'cockpit';
     if (cockpit !== this.driverHidden) {
@@ -485,7 +546,7 @@ export class Game {
     }
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
-      view.sync(c.car, this.track, dt, this.camPos, c.isPlayer, this.time === 'overcast');
+      view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, this.time === 'overcast');
     }
   }
 
@@ -569,7 +630,9 @@ export class Game {
       a.update(dt);
       return;
     }
-    const car = race.player.car;
+    const replaying = this.state === 'replay';
+    const carOf = (c: (typeof race.cars)[number]) => (replaying ? this.replay.ghosts[c.id] : c.car);
+    const car = carOf(race.player);
     a.setView(this.cams.mode === 'cockpit' || this.cams.mode === 'tcam' || this.cams.mode === 'nose' ? 'cockpit' : this.cams.mode === 'tv' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
@@ -599,7 +662,7 @@ export class Game {
           const p = this.rigs.get(c.entry)!.root.position;
           const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
           const d = Math.hypot(dx, dy, dz);
-          const [wx, wz] = c.car.worldVelocity();
+          const [wx, wz] = carOf(c).worldVelocity();
           a.setTvCamera(d, -(wx * dx + wz * dz) / Math.max(d, 1), Math.max(-1, Math.min(1, (dx * camRight.x + dz * camRight.z) / Math.max(d, 1))));
         }
         continue;
@@ -609,11 +672,11 @@ export class Game {
       const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
       const d = Math.hypot(dx, dy, dz);
       if (d > 320) continue;
-      const [wx, wz] = c.car.worldVelocity();
+      const [wx, wz] = carOf(c).worldVelocity();
       // closing speed along the line of sight (+ = approaching)
       const relVel = -((wx - camVel.x) * dx + (wz - camVel.z) * dz) / Math.max(d, 1);
       const pan = Math.max(-1, Math.min(1, (dx * camRight.x + dz * camRight.z) / Math.max(d, 1)));
-      list.push({ id: c.id, rpm: c.car.rpm, throttle: c.car.throttle, distance: d, relVel, pan });
+      list.push({ id: c.id, rpm: carOf(c).rpm, throttle: carOf(c).throttle, distance: d, relVel, pan });
     }
     list.sort((x, y) => x.distance - y.distance);
     a.updateOpponents(list.slice(0, 4));

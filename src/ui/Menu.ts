@@ -274,7 +274,7 @@ export class Menu {
     add('Quit to menu', () => this.cb.onQuit());
   }
 
-  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void) {
+  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void) {
     this.show('results');
     const s = this.screens.get('results')!;
     s.innerHTML = '';
@@ -296,14 +296,17 @@ export class Menu {
       );
       row.style.animationDelay = `${0.15 + i * 0.035}s`;
     });
-    const act = el('div', 'actions', box);
+    const act = el('div', 'actions' + (onReplay ? ' three' : ''), box);
     const again = el('div', 'cta', act, 'Race again');
-    const menu = el('div', 'cta ghost', act, 'Main menu');
-    this.items = [
-      { el: again, kind: 'action', select: onAgain },
-      { el: menu, kind: 'action', select: onMenu },
-    ];
+    this.items = [{ el: again, kind: 'action', select: onAgain }];
     again.addEventListener('click', onAgain);
+    if (onReplay) {
+      const rp = el('div', 'cta ghost', act, 'Watch replay');
+      this.items.push({ el: rp, kind: 'action', select: onReplay });
+      rp.addEventListener('click', onReplay);
+    }
+    const menu = el('div', 'cta ghost', act, 'Main menu');
+    this.items.push({ el: menu, kind: 'action', select: onMenu });
     menu.addEventListener('click', onMenu);
     this.sel = 0;
     this.highlight();
