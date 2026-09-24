@@ -39,7 +39,7 @@ export class AIDriver {
   constructor(pace: number, aggression: number) {
     this.pace = pace;
     this.aggression = aggression;
-    this.reaction = 0.16 + Math.random() * 0.22;
+    this.reaction = 0.18 + Math.random() * 0.08;
   }
 
   /** start from wherever the car is (e.g. a grid slot) and merge onto the line gradually */
@@ -71,6 +71,8 @@ export class AIDriver {
     const v = Math.max(0, car.vx);
     const L = car.spec.a + car.spec.b;
     const hw = track.halfWidthAt(car.s);
+    // opening seconds: hold station in grid lanes, leave bigger gaps, no dive-bombs
+    const calm = Math.max(0, 1 - this.startTimer / 15);
 
     // ---- racecraft: traffic ahead / alongside
     let followSpeed = Infinity;
@@ -88,7 +90,7 @@ export class AIDriver {
       }
       if (ds > 0 && ds < 45 && Math.abs(dl) < 2.1) {
         const closing = v - o.speed;
-        if (ds < 28 && closing > -1) {
+        if (ds < 28 && closing > -1 && calm === 0) {
           // decide a side once and commit for a while
           if (this.passTimer <= 0) {
             const roomL = o.lateral + hw;
@@ -101,7 +103,8 @@ export class AIDriver {
         }
         // don't run into the back of it
         const tGap = ds / Math.max(1, v);
-        if (tGap < 0.45 || ds < 9) followSpeed = Math.min(followSpeed, o.speed - (9 - ds) * 0.4);
+        const minGap = 9 + 7 * calm;
+        if (tGap < 0.45 + 0.4 * calm || ds < minGap) followSpeed = Math.min(followSpeed, o.speed - (minGap - ds) * 0.4);
       }
     }
     this.passTimer -= dt;
@@ -109,7 +112,7 @@ export class AIDriver {
     // tight corner instead of trying to go round it two abreast
     const vAhead = profile.at(car.s + Math.max(30, v * 1.2));
     const tight = Math.max(0, Math.min(1, (48 - vAhead) / 18));
-    if (this.passTimer <= 0 || tight > 0.3) this.targetOffset *= Math.max(0, 1 - dt * (0.6 + 2.4 * tight));
+    if (this.passTimer <= 0 || tight > 0.3) this.targetOffset *= Math.max(0, 1 - dt * (0.6 * (1 - 0.7 * calm) + 2.4 * tight));
     // blue flag: move over on the straight to let the leaders through
     if (this.yieldSide !== 0 && tight < 0.3) this.targetOffset = this.yieldSide * (hw - 2.3) - track.racingLineAt(car.s + 20);
     const maxOff = 5.5 - 3.8 * tight;
@@ -177,7 +180,7 @@ export class AIDriver {
     const vAt = (ss: number) => profile.atGrip(ss, g);
     // off the line = a tighter radius: slow corners punish it far more than fast ones
     const offLoss = corner * Math.min(0.2, offLine * (0.012 + 0.05 * tight));
-    let vt = vAt(car.s + v * 0.12) * this.pace * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1);
+    let vt = vAt(car.s + v * 0.12) * this.pace * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
     vt = Math.min(vt, followSpeed);
     const err = vt - v;
     if (err > 0) {

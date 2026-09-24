@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, PLAYER_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
@@ -136,7 +136,6 @@ export class Race {
   readonly track: Track;
   readonly opts: RaceOptions;
   readonly profile: RacingProfile;
-  readonly playerProfile: RacingProfile;
   readonly cars: Competitor[] = [];
   readonly player: Competitor;
   phase: RacePhase = 'grid';
@@ -182,7 +181,6 @@ export class Race {
     this.track = track;
     this.opts = opts;
     this.profile = RacingProfile.for(track, F1_SPEC);
-    this.playerProfile = RacingProfile.for(track, PLAYER_SPEC);
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
     this.deltaCur = new Float32Array(Math.ceil(track.length / 10) + 2).fill(-1);
@@ -204,7 +202,7 @@ export class Race {
 
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
-      const car = new CarPhysics(isPlayer ? PLAYER_SPEC : F1_SPEC);
+      const car = new CarPhysics(F1_SPEC);
       car.weather = this.weather;
       if (opts.mode === 'timetrial') {
         car.fuel = 5;

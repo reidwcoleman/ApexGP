@@ -91,17 +91,17 @@ export const F1_SPEC: CarSpec = {
   trackR: 1.55,
   wheelR: 0.36,
   wheelI: 1.1,
-  clA: 4.9,
+  clA: 9.5,
   cdA: 1.1,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 1.95,
-  loadSens: 0.075,
-  slipAnglePeak: 0.1,
-  slipAnglePeakRear: 0.082,
-  muRear: 1.12,
+  mu: 2.5,
+  loadSens: 0.03,
+  slipAnglePeak: 0.13,
+  slipAnglePeakRear: 0.11,
+  muRear: 1.3,
   slipRatioPeak: 0.09,
   tyreShape: 1.28,
   rollFront: 0.56,
@@ -113,22 +113,11 @@ export const F1_SPEC: CarSpec = {
   gears: [17.2, 14.0, 11.6, 9.75, 8.25, 7.0, 5.9, 4.86],
   brakeTorque: 17500,
   brakeBias: 0.57,
-  maxSteer: 0.38,
+  maxSteer: 0.65,
   halfLength: 2.7,
   halfWidth: 0.95,
 };
 
-/** player car: heavy downforce, more grip, a forgiving rear and extra steering lock */
-export const PLAYER_SPEC: CarSpec = {
-  ...F1_SPEC,
-  clA: 9.5,
-  loadSens: 0.03,
-  mu: 2.5,
-  muRear: 1.3,
-  slipAnglePeak: 0.13,
-  slipAnglePeakRear: 0.11,
-  maxSteer: 0.65,
-};
 
 export interface DriveInput {
   throttle: number;
