@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, PLAYER_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
@@ -201,13 +201,13 @@ export class Race {
     }
 
     order.forEach((entry, i) => {
-      const car = new CarPhysics(F1_SPEC);
+      const isPlayer = entry === opts.playerEntry;
+      const car = new CarPhysics(isPlayer ? PLAYER_SPEC : F1_SPEC);
       car.weather = this.weather;
       if (opts.mode === 'timetrial') {
         car.fuel = 5;
         car.burnFuel = false;
       } else car.fuel = opts.laps * FUEL_PER_LAP + 1.5;
-      const isPlayer = entry === opts.playerEntry;
       if (opts.mode === 'timetrial') {
         // flying lap: start on the pit straight behind the line at speed
         car.placeOnTrack(track, track.startS - 420, track.racingLineAt(track.startS - 420));

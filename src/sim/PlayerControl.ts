@@ -71,8 +71,8 @@ export class PlayerControl {
       // keyboard: ramp toward the key direction; slower as speed rises
       const target = raw.steer;
       const t = Math.min(1, kmh / 260);
-      const onRate = 7 - 3.8 * t; // 7/s at a standstill → 3.2/s at 260 km/h
-      const offRate = 7.5;
+      const onRate = 9.5 - 4.3 * t; // 9.5/s at a standstill → 5.2/s at 260 km/h
+      const offRate = 8.5;
       const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.u) && this.u !== 0;
       const rate = target === 0 ? offRate : reversing ? offRate + onRate : onRate;
       const d = target - this.u;
@@ -81,7 +81,7 @@ export class PlayerControl {
     this.steerInput = this.u;
 
     // ---- map to a road-wheel angle: full input = peak-grip angle at this speed
-    const limit = car.gripSteerLimit(v) * 1.2;
+    const limit = car.gripSteerLimit(v) * 1.45;
     // when the rear is sliding, countersteer may go as far as the slide needs
     // (the wheels have to point where the car is going). Rear slip angle > 0 →
     // the rear is stepping out to the left → countersteer left.
@@ -92,7 +92,7 @@ export class PlayerControl {
     if (this.aids.steeringMode === 'rate' && v > 4) {
       // yaw-rate command: input → share of the maximum sustainable yaw rate
       const L = car.spec.a + car.spec.b;
-      const rMax = Math.min(car.lateralGrip(v) * 1.15 / v, (v * Math.tan(car.spec.maxSteer)) / L);
+      const rMax = Math.min(car.lateralGrip(v) * 1.3 / v, (v * Math.tan(car.spec.maxSteer)) / L);
       const rDes = this.u * rMax;
       const load = Math.min(1, Math.abs(rDes) / rMax);
       const ff = Math.atan((L * rDes) / v) + Math.sign(rDes) * 0.05 * load * load;
@@ -117,7 +117,7 @@ export class PlayerControl {
     }
 
     // ---- steering rack speed (≈ 60°/s at the wheels at low speed, less at high)
-    const rack = 1.1 - 0.6 * Math.min(1, kmh / 250);
+    const rack = 1.5 - 0.7 * Math.min(1, kmh / 250);
     this.delta += Math.max(-rack * dt, Math.min(rack * dt, delta - this.delta));
     const o = this.out;
     o.steer = Math.max(-car.spec.maxSteer, Math.min(car.spec.maxSteer, this.delta));
