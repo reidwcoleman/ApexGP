@@ -136,6 +136,7 @@ export class Race {
   readonly track: Track;
   readonly opts: RaceOptions;
   readonly profile: RacingProfile;
+  readonly playerProfile: RacingProfile;
   readonly cars: Competitor[] = [];
   readonly player: Competitor;
   phase: RacePhase = 'grid';
@@ -181,6 +182,7 @@ export class Race {
     this.track = track;
     this.opts = opts;
     this.profile = RacingProfile.for(track, F1_SPEC);
+    this.playerProfile = RacingProfile.for(track, PLAYER_SPEC);
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
     this.deltaCur = new Float32Array(Math.ceil(track.length / 10) + 2).fill(-1);

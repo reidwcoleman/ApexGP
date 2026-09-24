@@ -81,7 +81,7 @@ export class PlayerControl {
     this.steerInput = this.u;
 
     // ---- map to a road-wheel angle: full input = peak-grip angle at this speed
-    const limit = car.gripSteerLimit(v) * 1.45;
+    const limit = car.gripSteerLimit(v) * 1.75;
     // when the rear is sliding, countersteer may go as far as the slide needs
     // (the wheels have to point where the car is going). Rear slip angle > 0 →
     // the rear is stepping out to the left → countersteer left.

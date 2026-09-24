@@ -118,14 +118,16 @@ export const F1_SPEC: CarSpec = {
   halfWidth: 0.95,
 };
 
-/** player car: more grip, a more forgiving rear and extra steering lock */
+/** player car: heavy downforce, more grip, a forgiving rear and extra steering lock */
 export const PLAYER_SPEC: CarSpec = {
   ...F1_SPEC,
-  mu: 2.35,
-  muRear: 1.25,
-  slipAnglePeak: 0.12,
-  slipAnglePeakRear: 0.1,
-  maxSteer: 0.52,
+  clA: 9.5,
+  loadSens: 0.03,
+  mu: 2.5,
+  muRear: 1.3,
+  slipAnglePeak: 0.13,
+  slipAnglePeakRear: 0.11,
+  maxSteer: 0.65,
 };
 
 export interface DriveInput {

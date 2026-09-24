@@ -578,7 +578,7 @@ export class Game {
       { steer: st.steer, throttle: st.throttle, brake: st.brake, usingPad: st.usingPad, ers: st.ers, shiftUp: st.shiftUp, shiftDown: st.shiftDown },
       car,
       this.track,
-      race.profile,
+      race.playerProfile,
     );
     Object.assign(race.playerInput, out);
     if (st.drs) race.playerDrsRequest = true;
