@@ -1,7 +1,7 @@
 /**
  * Car dev page.
  *   ?team=<id>&seat=0|1   livery (default rossa, seat 0)
- *   ?grid=1               all 10 teams in two rows
+ *   ?grid=1               every team, in rows of six
  *   ?spin=1               spin wheels + sweep steering     ?speed=<m/s> fixed wheel speed (blur)
  *   ?drs=1  ?brake=1  ?rain=1 (rain light)  ?detail=0|1|2  ?driver=0  ?yaw=<deg>
  *   ?compound=soft|medium|hard|inter|wet   tyres (grid: ?compound=all cycles them)
@@ -78,9 +78,9 @@ if (grid) {
   TEAMS.forEach((team, i) => {
     const seat = (Number(P.get('seat') ?? 0) as 0 | 1);
     const car = createCar(team, team.drivers[seat], seat);
-    const row = Math.floor(i / 5);
-    const col = i % 5;
-    car.root.position.set((col - 2) * 3.7 + (row ? 1.2 : 0), 0, row === 0 ? 3.4 : -3.6);
+    const row = Math.floor(i / 6);
+    const col = i % 6;
+    car.root.position.set((col - 2.5) * 3.4 + (row ? 1.2 : 0), 0, row === 0 ? 3.4 : -3.6);
     car.root.rotation.y = Number(P.get('yaw') ?? 22) * (Math.PI / 180);
     scene.add(car.root);
     cars.push(car);

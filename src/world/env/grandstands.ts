@@ -46,86 +46,138 @@ const SEAT_SCHEMES: number[][] = [
 // ---------------------------------------------------------------- crowd atlas + material
 
 function crowdAtlas(): THREE.CanvasTexture {
-  const CW = 64, CH = 128, COLS = 8, ROWS = 2;
+  // 8 fans × 2 poses (sitting / on their feet); the shirt is drawn near-white and tinted per instance
+  const CW = 96, CH = 192, COLS = 8, ROWS = 2;
   const { canvas, ctx } = canvas2d(CW * COLS, CH * ROWS);
   const r = rng(99);
-  const skins = ['#f1c9a5', '#d9a47a', '#b07a52', '#7a4e32', '#e8b890', '#c68d63'];
-  const hairs = ['#2a1d14', '#5a3a22', '#b08850', '#141414', '#7d6a55', '#8a2a1a'];
-  const caps = ['#c8102e', '#c8102e', '#ffffff', '#ffd400', '#111111', '#c8102e'];
+  const skins = ['#f1c9a5', '#d9a47a', '#b07a52', '#7a4e32', '#e8b890', '#c68d63', '#f5d2b8', '#8d5a3b'];
+  const hairs = ['#2a1d14', '#5a3a22', '#b08850', '#141414', '#7d6a55', '#8a2a1a', '#d8c08a', '#3b2a20'];
+  const caps = ['#c8102e', '#ff7b00', '#ffffff', '#ffd400', '#111111', '#1b2552', '#ff7b00'];
+  const k = CW / 64;
+  const shade = (y0: number, y1: number, cx: number, w: number) => {
+    // soft side shading and fold shadows, kept light so the tint mask survives
+    const g = ctx.createLinearGradient(cx - w, 0, cx + w, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0.12)');
+    g.addColorStop(0.3, 'rgba(0,0,0,0)');
+    g.addColorStop(0.75, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.14)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - w, y0, 2 * w, y1 - y0);
+  };
   for (let col = 0; col < COLS; col++) {
     const skin = skins[Math.floor(r() * skins.length)];
     const hair = hairs[Math.floor(r() * hairs.length)];
     const cap = r() < 0.45 ? caps[Math.floor(r() * caps.length)] : null;
+    const shades = r() < 0.4;
+    const beard = r() < 0.25;
+    const longHair = !cap && r() < 0.35;
+    const phone = col === 3 || col === 6;
     const broad = 0.85 + r() * 0.3;
     for (let row = 0; row < ROWS; row++) {
       const ox = col * CW, oy = row * CH;
       const cx = ox + CW / 2;
-      ctx.fillStyle = r() < 0.5 ? '#2b3140' : '#4a4038';
-      ctx.fillRect(cx - 18 * broad, oy + 100, 36 * broad, 28);
+      ctx.save();
+      ctx.translate(0, oy);
+      ctx.scale(1, CH / 128);
+      ctx.translate(0, -oy);
+      const Y = (v: number) => oy + v;
+      // legs / lap
+      ctx.fillStyle = r() < 0.5 ? '#2b3140' : r() < 0.5 ? '#4a4038' : '#3a4a5c';
+      ctx.fillRect(cx - 17 * broad * k * 0.66, Y(100), 34 * broad * k * 0.66, 28);
+      // torso: rounded shoulders, narrowing to the waist
       ctx.fillStyle = '#ffffff';
+      const sw = 16 * broad * k * 0.66, ww = 13 * broad * k * 0.66;
       ctx.beginPath();
-      ctx.moveTo(cx - 13 * broad, oy + 40);
-      ctx.lineTo(cx + 13 * broad, oy + 40);
-      ctx.lineTo(cx + 17 * broad, oy + 104);
-      ctx.lineTo(cx - 17 * broad, oy + 104);
+      ctx.moveTo(cx - sw * 0.7, Y(38));
+      ctx.quadraticCurveTo(cx - sw * 1.1, Y(40), cx - sw, Y(52));
+      ctx.lineTo(cx - ww, Y(104));
+      ctx.lineTo(cx + ww, Y(104));
+      ctx.lineTo(cx + sw, Y(52));
+      ctx.quadraticCurveTo(cx + sw * 1.1, Y(40), cx + sw * 0.7, Y(38));
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 8;
-      ctx.lineCap = 'round';
-      if (row === 0) {
-        ctx.beginPath();
-        ctx.moveTo(cx - 15 * broad, oy + 46);
-        ctx.lineTo(cx - 19 * broad, oy + 78);
-        ctx.moveTo(cx + 15 * broad, oy + 46);
-        ctx.lineTo(cx + 19 * broad, oy + 78);
-        ctx.stroke();
-        ctx.strokeStyle = skin;
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.moveTo(cx - 19 * broad, oy + 78);
-        ctx.lineTo(cx - 12, oy + 96);
-        ctx.moveTo(cx + 19 * broad, oy + 78);
-        ctx.lineTo(cx + 12, oy + 96);
-        ctx.stroke();
-      } else {
-        const both = col % 2 === 0;
-        ctx.beginPath();
-        ctx.moveTo(cx + 14 * broad, oy + 46);
-        ctx.lineTo(cx + 22, oy + 26);
-        if (both) {
-          ctx.moveTo(cx - 14 * broad, oy + 46);
-          ctx.lineTo(cx - 22, oy + 26);
-        } else {
-          ctx.moveTo(cx - 15 * broad, oy + 46);
-          ctx.lineTo(cx - 19 * broad, oy + 78);
-        }
-        ctx.stroke();
-        ctx.strokeStyle = skin;
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.moveTo(cx + 22, oy + 26);
-        ctx.lineTo(cx + 25, oy + 6);
-        if (both) {
-          ctx.moveTo(cx - 22, oy + 26);
-          ctx.lineTo(cx - 25, oy + 6);
-        }
-        ctx.stroke();
-      }
-      ctx.fillStyle = skin;
-      ctx.fillRect(cx - 4, oy + 32, 8, 10);
+      shade(Y(38), Y(104), cx, sw * 1.1);
+      // collar
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
       ctx.beginPath();
-      ctx.ellipse(cx, oy + 25, 10, 12, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, Y(39), 6, 3, 0, 0, Math.PI);
       ctx.fill();
+      // arms (sleeves near-white so they take the shirt colour, forearms skin)
+      const arm = (x0: number, y0: number, x1: number, y1: number, x2: number, y2: number) => {
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+        ctx.strokeStyle = skin;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.fillStyle = skin;
+        ctx.beginPath();
+        ctx.arc(x2, y2, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      };
+      if (row === 0) {
+        // sitting: hands in the lap, or holding a phone up to film
+        arm(cx - sw * 0.95, Y(46), cx - sw * 1.2, Y(76), cx - 10, Y(96));
+        if (phone) {
+          arm(cx + sw * 0.95, Y(46), cx + sw * 1.25, Y(70), cx + 8, Y(48));
+          ctx.fillStyle = '#111';
+          ctx.fillRect(cx + 3, Y(38), 10, 16);
+        } else arm(cx + sw * 0.95, Y(46), cx + sw * 1.2, Y(76), cx + 10, Y(96));
+      } else {
+        // on their feet: both arms up, or one arm punching the air
+        const both = col % 2 === 0;
+        arm(cx + sw * 0.9, Y(46), cx + sw * 1.4, Y(26), cx + sw * 1.5, Y(6));
+        if (both) arm(cx - sw * 0.9, Y(46), cx - sw * 1.4, Y(26), cx - sw * 1.5, Y(6));
+        else arm(cx - sw * 0.95, Y(46), cx - sw * 1.2, Y(76), cx - 10, Y(92));
+      }
+      // neck + head
+      ctx.fillStyle = skin;
+      ctx.fillRect(cx - 4, Y(31), 8, 9);
+      ctx.beginPath();
+      ctx.ellipse(cx, Y(24), 10, 12.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // cheek shading
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.beginPath();
+      ctx.ellipse(cx + 4, Y(27), 5, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // hair / cap
       ctx.fillStyle = cap ?? hair;
       ctx.beginPath();
-      ctx.ellipse(cx, oy + 19, 11, cap ? 8 : 9, 0, Math.PI, Math.PI * 2);
+      ctx.ellipse(cx, Y(18), 11, cap ? 8 : 9, 0, Math.PI, Math.PI * 2);
       ctx.fill();
-      if (cap) ctx.fillRect(cx - 12, oy + 17, 24, 4);
-      if (r() < 0.3) {
-        ctx.fillStyle = '#111';
-        ctx.fillRect(cx - 8, oy + 23, 16, 4);
+      if (longHair) {
+        ctx.fillRect(cx - 11, Y(18), 5, 20);
+        ctx.fillRect(cx + 6, Y(18), 5, 20);
       }
+      if (cap) {
+        ctx.fillRect(cx - 12, Y(16), 24, 4);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(cx - 12, Y(19), 24, 2);
+      }
+      if (beard) {
+        ctx.fillStyle = hair;
+        ctx.beginPath();
+        ctx.ellipse(cx, Y(31), 8, 5, 0, 0, Math.PI);
+        ctx.fill();
+      }
+      if (shades) {
+        ctx.fillStyle = '#111';
+        ctx.fillRect(cx - 9, Y(22), 8, 4);
+        ctx.fillRect(cx + 1, Y(22), 8, 4);
+      } else {
+        ctx.fillStyle = '#2a1d14';
+        ctx.fillRect(cx - 6, Y(23), 3, 2);
+        ctx.fillRect(cx + 3, Y(23), 3, 2);
+      }
+      ctx.restore();
     }
   }
   return canvasTexture(canvas, true, 4);
@@ -175,29 +227,32 @@ varying float vShade;`,
         '#include <map_fragment>',
         `{
   vec4 t = texture2D( uCrowd, vCrowdUv );
-  float shirt = smoothstep( 0.8, 0.97, min( min( t.r, t.g ), t.b ) );
+  // near-white = shirt (the palest skin tone stays below 0.76); keep the drawn folds under the tint
+  float shirt = smoothstep( 0.76, 0.84, min( min( t.r, t.g ), t.b ) );
   #if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA ) || defined( USE_INSTANCING_COLOR )
     vec3 tint = vColor.rgb;
   #else
     vec3 tint = vec3( 1.0 );
   #endif
-  diffuseColor.rgb = mix( t.rgb, tint, shirt ) * vShade;
+  diffuseColor.rgb = mix( t.rgb, tint * ( dot( t.rgb, vec3( 0.3333 ) ) / 0.97 ), shirt ) * vShade;
   diffuseColor.a = t.a;
 }`,
       )
       .replace('#include <color_fragment>', '');
   };
-  mat.customProgramCacheKey = () => 'apex-crowd-v2';
+  mat.customProgramCacheKey = () => 'apex-crowd-v3';
   return mat;
 }
 
 // ---------------------------------------------------------------- flags
 
-const FLAG_DESIGNS = 8;
+const FLAG_DESIGNS = 16;
+/** flags 0–3 are the venue's own, 4 … 14 one per team, 15 the chequered flag */
+const TEAM_FLAG0 = 4;
 
-function flagAtlas(): THREE.CanvasTexture {
+function flagAtlas(venue: 'park' | 'ardennes'): THREE.CanvasTexture {
   const S = 256;
-  const { canvas, ctx } = canvas2d(S * 4, S * 2);
+  const { canvas, ctx } = canvas2d(S * 4, S * 4);
   const at = (k: number) => [(k % 4) * S, Math.floor(k / 4) * S] as const;
   const txt = (x: number, y: number, s: string, size: number, col: string) => {
     ctx.fillStyle = col;
@@ -206,8 +261,37 @@ function flagAtlas(): THREE.CanvasTexture {
     ctx.textBaseline = 'middle';
     ctx.fillText(s, x, y);
   };
+  if (venue === 'ardennes') {
+    // 0: Dutch tricolour, 1: Belgian, 2: ORANJE, 3: black-yellow-red banner
+    const bars = (k: number, cols: string[], vertical: boolean) => {
+      const [x, y] = at(k);
+      cols.forEach((c, i) => {
+        ctx.fillStyle = c;
+        if (vertical) ctx.fillRect(x + (i * S) / cols.length, y, S / cols.length + 1, S);
+        else ctx.fillRect(x, y + (i * S) / cols.length, S, S / cols.length + 1);
+      });
+    };
+    bars(0, ['#ae1c28', '#f4f4f4', '#21468b'], false);
+    bars(1, ['#1a1a1a', '#fdda24', '#ef3340'], true);
+    {
+      const [x, y] = at(2);
+      ctx.fillStyle = '#ff7b00';
+      ctx.fillRect(x, y, S, S);
+      txt(x + S / 2, y + S * 0.48, 'ORANJE', 58, '#ffffff');
+    }
+    {
+      const [x, y] = at(3);
+      ctx.fillStyle = '#fdda24';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(x, y, S, S * 0.2);
+      ctx.fillStyle = '#ef3340';
+      ctx.fillRect(x, y + S * 0.8, S, S * 0.2);
+      txt(x + S / 2, y + S * 0.5, 'SPA', 90, '#1a1a1a');
+    }
+  }
   // 0: tifosi red, yellow disc with a black "R"
-  {
+  else {
     const [x, y] = at(0);
     ctx.fillStyle = '#c8102e';
     ctx.fillRect(x, y, S, S);
@@ -218,7 +302,7 @@ function flagAtlas(): THREE.CanvasTexture {
     txt(x + S / 2, y + S / 2 + 6, 'R', 110, '#141414');
   }
   // 1: tricolore
-  {
+  if (venue === 'park') {
     const [x, y] = at(1);
     for (const [k, c] of ['#009246', '#f1f2f1', '#ce2b37'].entries()) {
       ctx.fillStyle = c;
@@ -226,7 +310,7 @@ function flagAtlas(): THREE.CanvasTexture {
     }
   }
   // 2: FORZA ROSSA banner flag
-  {
+  if (venue === 'park') {
     const [x, y] = at(2);
     ctx.fillStyle = '#b50f25';
     ctx.fillRect(x, y, S, S);
@@ -236,7 +320,7 @@ function flagAtlas(): THREE.CanvasTexture {
     txt(x + S / 2, y + S * 0.56, 'ROSSA', 64, '#ffffff');
   }
   // 3: yellow with red band
-  {
+  if (venue === 'park') {
     const [x, y] = at(3);
     ctx.fillStyle = '#ffd400';
     ctx.fillRect(x, y, S, S);
@@ -244,19 +328,35 @@ function flagAtlas(): THREE.CanvasTexture {
     ctx.fillRect(x, y + S * 0.38, S, S * 0.24);
   }
   // 4–7: team flags
+  // a flag for every team: primary field, secondary + accent bands, the name
   const teamFlag = (k: number, team: number) => {
     const [x, y] = at(k);
     const t = TEAMS[team % TEAMS.length];
     ctx.fillStyle = t.primary;
     ctx.fillRect(x, y, S, S);
+    ctx.fillStyle = t.secondary;
+    ctx.fillRect(x, y + S * 0.66, S, S * 0.18);
     ctx.fillStyle = t.accent;
-    ctx.fillRect(x, y + S * 0.7, S, S * 0.12);
-    txt(x + S / 2, y + S * 0.42, t.short, 58, t.ink);
+    ctx.fillRect(x, y + S * 0.62, S, S * 0.04);
+    ctx.save();
+    ctx.font = `900 58px "Titillium Web", "Arial Narrow", Arial, sans-serif`;
+    const w = ctx.measureText(t.short).width;
+    const k2 = Math.min(1, (S * 0.88) / w);
+    ctx.translate(x + S / 2, y + S * 0.38);
+    ctx.scale(k2, 1);
+    txt(0, 0, t.short, 58, t.ink);
+    ctx.restore();
   };
-  teamFlag(4, 2);
-  teamFlag(5, 3);
-  teamFlag(6, 1);
-  teamFlag(7, 5);
+  for (let k = 0; k < Math.min(11, TEAMS.length); k++) teamFlag(TEAM_FLAG0 + k, k);
+  // chequered
+  {
+    const [x, y] = at(15);
+    for (let i = 0; i < 8; i++)
+      for (let j = 0; j < 8; j++) {
+        ctx.fillStyle = (i + j) % 2 ? '#111' : '#f4f4f4';
+        ctx.fillRect(x + (i * S) / 8, y + (j * S) / 8, S / 8 + 1, S / 8 + 1);
+      }
+  }
   return canvasTexture(canvas, true, 4);
 }
 
@@ -271,7 +371,7 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
         '#include <uv_vertex>',
         `#include <uv_vertex>
 #ifdef USE_MAP
-  vMapUv = vec2( ( mod( aDesign, 4.0 ) + uv.x ) / 4.0, ( 1.0 - floor( aDesign / 4.0 ) + uv.y ) / 2.0 );
+  vMapUv = vec2( ( mod( aDesign, 4.0 ) + uv.x ) / 4.0, ( 3.0 - floor( aDesign / 4.0 ) + uv.y ) / 4.0 );
 #endif`,
       )
       .replace(
@@ -291,7 +391,7 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-flag-v2';
+  mat.customProgramCacheKey = () => 'apex-flag-v3';
   return mat;
 }
 
@@ -372,13 +472,39 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const others = [
     ...TEAMS.map((t) => t.primary), '#ffd400', '#ffd400', '#ffffff', '#f2f2f2', '#1a1a1a', '#2b2b2b', '#7a7a7a', '#1b2552', '#6fa8dc', '#d9c7a0', '#2e7d32',
   ].map((h) => new THREE.Color(h));
+  // Monza: a sea of red. Spa: the orange army from over the border, Belgian colours, every team's shirts
+  const oranges = ['#ff7b00', '#ff8c1a', '#f26b00', '#ff9933', '#e86a10'].map((h) => new THREE.Color(h));
+  const belgian = ['#1a1a1a', '#fdda24', '#ef3340'].map((h) => new THREE.Color(h));
   const fanColor = () => {
-    const c = r() < 0.55 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)];
+    const q = r();
+    const c =
+      map.venue === 'ardennes'
+        ? q < 0.34 ? oranges[Math.floor(r() * oranges.length)] : q < 0.44 ? belgian[Math.floor(r() * belgian.length)] : q < 0.52 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : q < 0.45 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)];
+    // a good share of every crowd wears team kit
+    if (q > 0.7) {
+      const sh = teamShirts[pickTeam()];
+      return sh[Math.floor(r() * sh.length)].clone().multiplyScalar(0.85 + r() * 0.2);
+    }
     return c.clone().multiplyScalar(0.82 + r() * 0.25);
   };
+  // every team has its following, bigger for the big names
+  const FOLLOWING = [3.2, 1.8, 1.8, 2.2, 1.1, 0.8, 0.9, 0.7, 0.7, 0.8, 0.7];
+  const totalF = FOLLOWING.slice(0, TEAMS.length).reduce((a, b) => a + b, 0);
+  const pickTeam = () => {
+    let x = r() * totalF;
+    for (let k = 0; k < TEAMS.length; k++) {
+      x -= FOLLOWING[k] ?? 0.7;
+      if (x <= 0) return k;
+    }
+    return 0;
+  };
+  const teamShirts = TEAMS.map((t) => [t.primary, t.primary, t.secondary].map((h) => new THREE.Color(h)));
   const flagDesign = () => {
     const q = r();
-    return q < 0.42 ? 0 : q < 0.6 ? 1 : q < 0.76 ? 2 : q < 0.84 ? 3 : 4 + Math.floor(r() * 4);
+    if (q < 0.4) return q < 0.18 ? 0 : q < 0.28 ? 1 : q < 0.35 ? 2 : 3;
+    if (q < 0.43) return 15;
+    return TEAM_FLAG0 + pickTeam();
   };
 
   let sponsorK = 0;
@@ -637,7 +763,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   });
   flagGeo.setAttribute('aDesign', new THREE.InstancedBufferAttribute(design, 1));
   flagGeo.setAttribute('aBig', new THREE.InstancedBufferAttribute(big, 1));
-  const flagMesh = new THREE.InstancedMesh(flagGeo, flagMaterial(flagAtlas(), uniforms), Math.max(1, flags.length));
+  const flagMesh = new THREE.InstancedMesh(flagGeo, flagMaterial(flagAtlas(map.venue), uniforms), Math.max(1, flags.length));
   flags.forEach((f, i) => flagMesh.setMatrixAt(i, f.m));
   flagMesh.count = flags.length;
   flagMesh.instanceMatrix.needsUpdate = true;

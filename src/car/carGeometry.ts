@@ -278,6 +278,8 @@ interface Buckets {
   carbon: MB;
   trim: MB;
   driver: MB;
+  /** helmet + visor, pivot-local around NECK_PIVOT (animated) */
+  head: MB;
   decals: MB;
 }
 
@@ -374,11 +376,12 @@ function frontWing(b: Buckets, level: Level) {
   const xs2 = level === 2 ? [0.1, 0.5, 0.87] : [0.1, 0.2, 0.3, 0.42, 0.54, 0.66, 0.76, 0.84, 0.87];
   const e2 = xs2.map((x) => {
     const t = x / 0.87;
-    return { x, z: 2.665 - 0.07 * t * t, y: 0.165 + 0.05 * t * t, c: lerp(0.14, 0.155, t), a: lerp(22, 32, t), t: 0.1, cam: 0.07 };
+    // flaps sweep up hard toward the endplates (current regs), deeper chord at the tips
+    return { x, z: 2.665 - 0.07 * t * t, y: 0.165 + 0.085 * t ** 2.4, c: lerp(0.14, 0.175, t * t), a: lerp(22, 36, t), t: 0.1, cam: 0.08 };
   });
   const e3 = xs2.map((x) => {
     const t = x / 0.87;
-    return { x, z: 2.555 - 0.06 * t * t, y: 0.21 + 0.075 * t * t, c: lerp(0.11, 0.13, t), a: lerp(34, 46, t), t: 0.1, cam: 0.07 };
+    return { x, z: 2.555 - 0.06 * t * t, y: 0.21 + 0.12 * t ** 2.4, c: lerp(0.11, 0.15, t * t), a: lerp(34, 52, t), t: 0.1, cam: 0.08 };
   });
   for (const side of [1, -1]) {
     const e2s = e2.map((s) => ({ ...s, x: s.x * side }));
@@ -395,9 +398,9 @@ function frontWing(b: Buckets, level: Level) {
       [
         [3.03, 0.03],
         [2.44, 0.03],
-        [2.42, 0.22],
-        [2.52, 0.29],
-        [2.75, 0.235],
+        [2.4, 0.26],
+        [2.5, 0.345],
+        [2.72, 0.29],
         [2.97, 0.12],
         [3.05, 0.07],
       ],
@@ -772,6 +775,8 @@ function cockpitBits(b: Buckets, level: Level) {
 // ------------------------------------------------------------------------------------ driver
 export const HELMET_C: V3 = [0, 0.758, 0.085];
 export const HELMET_R: V3 = [0.124, 0.138, 0.148];
+/** the driver's head turns and leans about this point (top of the neck) */
+export const NECK_PIVOT: V3 = [0, 0.655, 0.055];
 function driver(b: Buckets, level: Level) {
   const ws = [32, 18, 10][level];
   const hs = [24, 12, 7][level];
@@ -783,7 +788,8 @@ function driver(b: Buckets, level: Level) {
   if (level === 2) {
     b.trim.addGeometry(g, m, trimUV(TC.helmet));
   } else {
-    b.driver.addGeometry(g, m, (_p, _n, uv) => drvUV(R_HELMET, uv[0], uv[1]));
+    m.premultiply(new THREE.Matrix4().makeTranslation(-NECK_PIVOT[0], -NECK_PIVOT[1], -NECK_PIVOT[2]));
+    b.head.addGeometry(g, m, (_p, _n, uv) => drvUV(R_HELMET, uv[0], uv[1]));
   }
   g.dispose();
   // visor band (front), slightly proud
@@ -798,14 +804,14 @@ function driver(b: Buckets, level: Level) {
         const lon = lerp(-1.0, 1.0, j / nu);
         const k = 1.012;
         row.push([
-          HELMET_C[0] + Math.sin(lon) * Math.cos(lat) * HELMET_R[0] * k,
-          HELMET_C[1] + Math.sin(lat) * HELMET_R[1] * k,
-          HELMET_C[2] + Math.cos(lon) * Math.cos(lat) * HELMET_R[2] * k,
+          HELMET_C[0] - NECK_PIVOT[0] + Math.sin(lon) * Math.cos(lat) * HELMET_R[0] * k,
+          HELMET_C[1] - NECK_PIVOT[1] + Math.sin(lat) * HELMET_R[1] * k,
+          HELMET_C[2] - NECK_PIVOT[2] + Math.cos(lon) * Math.cos(lat) * HELMET_R[2] * k,
         ]);
       }
       rows.push(row);
     }
-    b.driver.grid(rows, () => drvCellUV(DC.visor), { orient: true });
+    b.head.grid(rows, () => drvCellUV(DC.visor), { orient: true });
     // HANS collar + shoulders + arms + gloves
     ellipsoid(b.driver, [0, 0.64, 0.01], [0.15, 0.04, 0.12], 12, 6, drvCellUV(DC.hans));
     for (const side of [1, -1]) {
@@ -1254,7 +1260,7 @@ function blurDisc(mb: MB, w: number) {
 
 // ================================================================================================ public
 export interface CarGeoLevel {
-  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null };
+  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null };
   flap: THREE.BufferGeometry;
   steer: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
@@ -1269,7 +1275,7 @@ export interface CarGeoLevel {
 }
 
 export function buildCarGeometry(level: Level): CarGeoLevel {
-  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), decals: new MB() };
+  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB() };
   buildHull(b.paint, level);
   frontWing(b, level);
   rearWing(b, level);
@@ -1371,7 +1377,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     driverAll = dAll.build();
   }
   const out: CarGeoLevel = {
-    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, decals: decalsOnly },
+    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly },
     flap: flap.build(),
     steer: steer ? steer.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
@@ -1386,7 +1392,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   };
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
-    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.flap) + tri(out.steer) +
+    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.steer) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;
 }

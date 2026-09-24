@@ -738,7 +738,7 @@ export class Particles {
       else L.ambient.copy(this.fallback).multiplyScalar(0.8);
       // lightning lights up the spray
       const flash = weatherUniforms.uLightning.value;
-      if (flash > 0) L.ambient.multiplyScalar(1 + flash * 5);
+      if (flash > 0) L.ambient.multiplyScalar(1 + flash * 2.5);
     }
     const u = this.softMat.uniforms;
     // π: the sun term in the shader is a lambert-ish radiance

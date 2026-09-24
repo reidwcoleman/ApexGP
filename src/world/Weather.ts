@@ -10,7 +10,7 @@
  * imports: the physics tools run this under plain Node.
  */
 
-export type WeatherKind = 'clear' | 'haze' | 'cloudy' | 'overcast' | 'fog' | 'sunshower' | 'drizzle' | 'rain' | 'storm' | 'thunderstorm';
+export type WeatherKind = 'clear' | 'haze' | 'windy' | 'cloudy' | 'overcast' | 'mist' | 'fog' | 'drying' | 'sunshower' | 'drizzle' | 'rain' | 'storm' | 'thunderstorm';
 export type TimeOfDay = 'dawn' | 'morning' | 'midday' | 'afternoon' | 'golden' | 'sunset';
 export type WeatherChoice = 'random' | 'changeable' | WeatherKind;
 export type TimeChoice = 'random' | TimeOfDay;
@@ -18,9 +18,12 @@ export type TimeChoice = 'random' | TimeOfDay;
 export const WEATHER_LABEL: Record<WeatherKind, string> = {
   clear: 'Clear',
   haze: 'Hazy sun',
+  windy: 'Windy',
   cloudy: 'Light cloud',
   overcast: 'Overcast',
+  mist: 'Morning mist',
   fog: 'Fog',
+  drying: 'Drying track',
   sunshower: 'Sun shower',
   drizzle: 'Light rain',
   rain: 'Rain',
@@ -92,6 +95,9 @@ export interface WeatherPlan {
 const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number }> = {
   clear: { cloud: 0.06, rain: 0, fog: 0 },
   haze: { cloud: 0.12, rain: 0, fog: 0.7 },
+  windy: { cloud: 0.5, rain: 0, fog: 0.04 },
+  mist: { cloud: 0.5, rain: 0, fog: 0.9 },
+  drying: { cloud: 0.35, rain: 0, fog: 0.15 },
   cloudy: { cloud: 0.45, rain: 0, fog: 0.05 },
   overcast: { cloud: 0.86, rain: 0, fog: 0.18 },
   fog: { cloud: 0.78, rain: 0, fog: 1 },
@@ -103,7 +109,7 @@ const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number }> 
 };
 
 /** regimes that can't be told apart from cloud + rain alone */
-const NAMED: Partial<Record<WeatherKind, true>> = { haze: true, fog: true, sunshower: true, thunderstorm: true };
+const NAMED: Partial<Record<WeatherKind, true>> = { haze: true, windy: true, mist: true, fog: true, drying: true, sunshower: true, thunderstorm: true };
 const WET: WeatherKind[] = ['sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm'];
 export const isWetKind = (k: WeatherKind) => WET.includes(k);
 
@@ -143,6 +149,9 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
     resolved = pick<WeatherChoice>(r, [
       ['clear', 20],
       ['haze', 7],
+      ['windy', 6],
+      ['mist', 5],
+      ['drying', 6],
       ['cloudy', 18],
       ['overcast', 10],
       ['fog', 5],
@@ -201,7 +210,10 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
       // push a key exactly at the change and one at its end, so the ramp is ~75 s
       k = end;
     }
-    keys.push({ t, ...wob(k) });
+    const key = { t, ...wob(k) };
+    // morning mist burns off over the first half hour or so
+    if (k === 'mist') key.fog *= Math.max(0.3, 1 - t / 1800);
+    keys.push(key);
   }
   if (isFinite(changeAt)) {
     const a = wob(start);
@@ -214,7 +226,7 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
 
   const windDir = r() * Math.PI * 2;
   const stormy = (k: WeatherKind) => k === 'storm' || k === 'thunderstorm';
-  const windSpeed = stormy(end) || stormy(start) ? 7 + r() * 6 : start === 'fog' || start === 'haze' ? 0.3 + r() * 1.2 : 1 + r() * 4.5;
+  const windSpeed = stormy(end) || stormy(start) ? 7 + r() * 6 : start === 'windy' ? 10 + r() * 5 : start === 'fog' || start === 'mist' || start === 'haze' ? 0.3 + r() * 1.2 : 1 + r() * 4.5;
   return { choice, start, end, changeAt, time, keys, windX: Math.sin(windDir) * windSpeed, windZ: Math.cos(windDir) * windSpeed, seed };
 }
 
@@ -229,7 +241,8 @@ export class Weather {
   constructor(plan: WeatherPlan) {
     this.plan = plan;
     const k0 = this.sample(0);
-    const wet0 = isWetKind(plan.start) ? this.wetTarget(k0.rain) : 0;
+    // a drying track: the rain has just passed, the surface is still wet
+    const wet0 = isWetKind(plan.start) ? this.wetTarget(k0.rain) : plan.start === 'drying' ? 0.7 : 0;
     this.state = {
       kind: plan.start,
       time: plan.time,
@@ -304,6 +317,8 @@ export class Weather {
     if (s.wetness <= 0.03) s.dryLine = 0;
 
     s.kind = this.kindOf(k);
+    // once the track is dry it's just a sunny day
+    if (s.kind === 'drying' && s.wetness < 0.04) s.kind = s.cloud > 0.28 ? 'cloudy' : 'clear';
 
     // lightning: a bright double flicker every 10–30 s in heavy rain, every 3–10 s in a thunderstorm
     this.flashT += dt;

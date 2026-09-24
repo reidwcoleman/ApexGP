@@ -1,3 +1,4 @@
+import { TEAM_COUNT } from './layout.ts';
 import * as THREE from 'three';
 import { weatherUniforms } from '../weatherUniforms.ts';
 import { pitU } from './materials.ts';
@@ -96,7 +97,7 @@ export function buildDrips(plan: PitPlan, ts: TrackSpace): THREE.Mesh {
   d.edge(ts.P(plan.podiumS0, plan.podiumTip - 0.05, H.slab1 - 0.81), ts.P(plan.podiumS1, plan.podiumTip - 0.05, H.slab1 - 0.81), 0.45, H.slab1 - 0.82);
   // pit-wall stand roofs: lane side falls to the lane, track side onto the wall top
   const w1 = L.wall + L.wallT;
-  for (let k = 0; k < 10; k++) {
+  for (let k = 0; k < TEAM_COUNT; k++) {
     const s = plan.boxS(k);
     d.edge(ts.P(s - 3.75, w1 + 1.58, 2.8), ts.P(s + 3.75, w1 + 1.58, 2.8), 0.32, 2.78);
     d.edge(ts.P(s - 3.75, w1 - 0.34, 2.8), ts.P(s + 3.75, w1 - 0.34, 2.8), 0.32, 2.8 - L.wallH);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { EVENT } from '../event.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { Rng } from './noise.ts';
 
@@ -246,9 +247,9 @@ export class PrintAtlas {
       ctx.font = `italic 700 50px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText("GRAN PREMIO D'ITALIA", x + W / 2, y + 44, W - 30);
+      ctx.fillText(EVENT.gp, x + W / 2, y + 44, W - 30);
       ctx.font = `700 20px ${FONT}`;
-      ctx.fillText('MONZA  ·  APEX GP', x + W / 2, y + H - 11);
+      ctx.fillText(`${EVENT.place}  ·  APEX GP`, x + W / 2, y + H - 11);
     }
     {
       const [x, y] = this.origin('monitor');
@@ -573,7 +574,7 @@ function drawScreen(ctx: CanvasRenderingContext2D, x: number, y: number, W: numb
   ctx.fillText('LAP 1 / 58', x + 14, y + 20);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#ffd400';
-  ctx.fillText('MONZA', x + W - 10, y + 20);
+  ctx.fillText(EVENT.place, x + W - 10, y + 20);
   const rows = TEAMS.slice(0, 6);
   rows.forEach((t, k) => {
     const col = k % 2;

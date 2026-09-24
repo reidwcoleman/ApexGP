@@ -15,7 +15,7 @@
  */
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, type CarGeoLevel } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, type CarGeoLevel } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, type Compound } from './carTextures.ts';
 import { WET_PARS, wetUniforms, wetClearcoatBeads } from './carWet.ts';
@@ -39,6 +39,8 @@ export interface CarRig {
   setDrs(open: number): void;
   setDetail(level: 0 | 1 | 2): void;
   setDriverVisible(v: boolean): void;
+  /** the driver's head reacts: lateral and longitudinal G (m/s², + = left / accelerating), wheel angle (rad) */
+  setG(lateral: number, longitudinal: number, steer: number): void;
   update(dt: number): void;
   readonly anchors: {
     cockpit: THREE.Object3D;
@@ -360,7 +362,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const bodyL: THREE.Group[] = [];
   const unsprungL: THREE.Group[] = [];
   const flapPivots: THREE.Object3D[] = [];
-  const driverMeshes: { all: THREE.Mesh; decals: THREE.Mesh | null }[] = [];
+  const driverMeshes: { all: THREE.Mesh; decals: THREE.Mesh | null; head: THREE.Mesh | null }[] = [];
+  const headPivots: THREE.Object3D[] = [];
   let steerSpin: THREE.Object3D | null = null;
   for (let lv = 0; lv < 3; lv++) {
     const L = geo[lv];
@@ -378,7 +381,16 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
         dec.visible = false;
         g.add(dec);
       }
-      driverMeshes.push({ all, decals: dec });
+      let head: THREE.Mesh | null = null;
+      if (L.body.head) {
+        const pv = new THREE.Group();
+        pv.position.set(NECK_PIVOT[0], NECK_PIVOT[1], NECK_PIVOT[2]);
+        head = mesh(L.body.head, driverMat);
+        pv.add(head);
+        g.add(pv);
+        headPivots.push(pv);
+      }
+      driverMeshes.push({ all, decals: dec, head });
     }
     const fp = new THREE.Group();
     fp.position.set(FLAP_PIVOT[0], FLAP_PIVOT[1], FLAP_PIVOT[2]);
@@ -520,6 +532,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   let rainT = 0;
   let rainLevel = 0;
   let driverVisible = true;
+  const head = { roll: 0, pitch: 0, yaw: 0 };
+  const headT = { roll: 0, pitch: 0, yaw: 0 };
 
   const applyVisibility = () => {
     bodyL.forEach((g, i) => (g.visible = i === detail));
@@ -542,6 +556,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     }
     for (const d of driverMeshes) {
       d.all.visible = driverVisible;
+      if (d.head) d.head.visible = driverVisible;
       if (d.decals) d.decals.visible = !driverVisible;
     }
   };
@@ -612,7 +627,18 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       driverVisible = v;
       applyVisibility();
     },
+    setG(lateral, longitudinal, steer) {
+      // pushed toward the outside of the corner, nodding under braking, eyes into the turn
+      headT.roll = THREE.MathUtils.clamp(lateral * 0.0045, -0.2, 0.2);
+      headT.pitch = THREE.MathUtils.clamp(-longitudinal * 0.004, -0.08, 0.16);
+      headT.yaw = THREE.MathUtils.clamp(steer * 1.3, -0.35, 0.35);
+    },
     update(dt) {
+      const k = Math.min(1, dt * 7);
+      head.roll += (headT.roll - head.roll) * k;
+      head.pitch += (headT.pitch - head.pitch) * k;
+      head.yaw += (headT.yaw - head.yaw) * Math.min(1, dt * 4);
+      for (const p of headPivots) p.rotation.set(head.pitch, head.yaw, head.roll, 'YXZ');
       if (rainOn) {
         // ~4 Hz LED blink: on 55 % of the cycle
         rainT += dt;

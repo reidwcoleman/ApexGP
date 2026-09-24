@@ -59,6 +59,8 @@ export class AIDriver {
       return false;
     }
     inp.hold = false;
+    // taking over a car that's already moving (cool-down lap, pit exit): no launch, no calm start
+    if (this.startTimer === 0 && car.vx > 3) this.startTimer = 15;
     this.startTimer += dt;
     if (this.startTimer < this.reaction) {
       inp.throttle = 0.55;

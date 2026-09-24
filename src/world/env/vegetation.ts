@@ -79,13 +79,15 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const c = new THREE.Color(1 + j, 1 + j * 0.9, 1 + j * 0.5);
     // a few trees already turning (September): planes go yellow-brown, chestnuts brown
     if (h2 < 0.05 && (sp === 'plane' || sp === 'chestnut' || sp === 'poplar')) c.setRGB(1.28, 1.02, 0.5);
-    else if (h2 < 0.09 && sp !== 'shrub') c.setRGB(1.12, 1.03, 0.78);
+    else if (h2 < 0.09 && sp !== 'shrub' && sp !== 'spruce') c.setRGB(1.12, 1.03, 0.78);
     return c;
   };
   /** species by stand type */
   const speciesAt = (x: number, z: number, h: number): SpeciesId => {
     const n = fbm2(x / 260 + 4.1, z / 260 - 2.7, 3);
     const n2 = fbm2(x / 90 - 1.3, z / 90 + 8.8, 2);
+    // the Ardennes: spruce plantations with stands of beech/oak (the chestnut crowns stand in for beech)
+    if (map.venue === 'ardennes') return n < 0.22 || h > 0.3 ? 'spruce' : n2 > 0 ? 'chestnut' : 'oak';
     let sp: SpeciesId;
     if (n < -0.18) sp = 'plane';
     else if (n < 0.12) sp = 'oak';
@@ -199,7 +201,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     add('poplar', q.x, q.z, 0.9 + r() * 0.2, r(), r() * 0.5 + 0.3);
   }
   // saplings growing out of the abandoned banking's edges
-  {
+  if (layout.oval) {
     const o = layout.oval;
     for (let i = 20; i < o.n - 20; i += 23) {
       if (Math.abs(i - o.bridgeU) < 40) continue;

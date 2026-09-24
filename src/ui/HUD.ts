@@ -15,6 +15,9 @@ const WX_ICON: Record<WeatherKind, string> = {
   thunderstorm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M8.6 10.5 6.8 13h2.4l-1.6 2.5"/>',
   haze: '<circle cx="8" cy="6.5" r="2.6"/><path d="M2 11h12M3.5 13.5h9"/>',
   fog: '<path d="M2 5.5h12M3 8h10M2 10.5h12M4 13h8"/>',
+  mist: '<circle cx="8" cy="5.5" r="2.4"/><path d="M2 10h12M3.5 12.5h9"/>',
+  windy: '<path d="M2 6h8.5a2 2 0 1 0-2-2M2 9.5h11a2 2 0 1 1-2 2M2 13h6"/>',
+  drying: '<circle cx="8" cy="6" r="2.8"/><path d="M8 1v1.2M3 6h1.2M11.8 6H13M4.5 2.5l.8.8M11.5 2.5l-.8.8"/><path d="M2.5 12.5c1.5-1 3-1 4.5 0s3 1 4.5 0"/>',
   sunshower: '<circle cx="5.5" cy="5" r="2.2"/><path d="M5.5 1v.9M1.5 5h.9M2.7 2.2l.6.6"/><path d="M7.5 10.5h5a2 2 0 0 0 .2-4 2.8 2.8 0 0 0-5.3-.3A2.2 2.2 0 0 0 7.5 10.5z"/><path d="M9 12.3l-.5 1.7M12 12.3l-.5 1.7"/>',
 };
 const isWet = (k: WeatherKind) => isWetKind(k);

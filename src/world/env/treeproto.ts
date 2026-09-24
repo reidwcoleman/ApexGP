@@ -9,6 +9,7 @@ import { finish, heightToNormal } from './textures.ts';
  *   chestnut   Aesculus hippocastanum — dense dark dome (a little leaf-miner browning in September)
  *   poplar     Populus nigra 'Italica' — the Lombardy poplar, a narrow column
  *   shrub      hazel / bramble understorey at the woodland edge
+ *   spruce     Picea abies — the Ardennes conifer: a tall narrow cone of drooping whorls
  *
  * Each prototype = a branch skeleton (tapered tubes: trunk, scaffold limbs,
  * branches) + clumped leaf-cluster cards around branch ends. Cards carry
@@ -22,7 +23,7 @@ import { finish, heightToNormal } from './textures.ts';
  *   aTree = (wind weight, kind, ao, phase) with kind 1 = leaf, 0 = bark, −1 = mottled plane bark.
  */
 
-export type SpeciesId = 'plane' | 'oak' | 'chestnut' | 'poplar' | 'shrub';
+export type SpeciesId = 'plane' | 'oak' | 'chestnut' | 'poplar' | 'shrub' | 'spruce';
 
 export interface TreeProto {
   index: number;
@@ -53,7 +54,7 @@ const CELL = 512;
 const ATLAS_COLS = 4;
 const ATLAS_ROWS = 2;
 /** atlas cell index per species variant (col + row * 4) */
-const LEAF_CELLS: Record<SpeciesId, number[]> = { plane: [0, 4], oak: [1, 5], chestnut: [2, 6], poplar: [3], shrub: [7] };
+const LEAF_CELLS: Record<SpeciesId, number[]> = { plane: [0], oak: [1, 5], chestnut: [2, 6], poplar: [3], shrub: [7], spruce: [4] };
 
 type LeafShape = (ctx: CanvasRenderingContext2D, len: number, r: () => number) => void;
 
@@ -115,6 +116,8 @@ const SHAPES: Record<SpeciesId, LeafShape> = {
   },
   poplar: (ctx, len) => outline(ctx, len, (t) => 0.55 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.5)), 0.9) * Math.pow(1 - t, 0.5), 16),
   shrub: (ctx, len) => outline(ctx, len, (t) => 0.4 * Math.pow(Math.sin(Math.PI * t), 0.75) * (1 - 0.25 * t), 16),
+  // a needle
+  spruce: (ctx, len) => outline(ctx, len, (t) => 0.1 * Math.sin(Math.PI * Math.min(1, t * 1.15)), 8),
 };
 
 interface LeafStyle {
@@ -132,6 +135,7 @@ const STYLES: Record<SpeciesId, LeafStyle> = {
   chestnut: { cols: ['#4f7630', '#5a8236', '#466c2a', '#65893a', '#557c32'], len: [46, 62], count: 150, twig: '#5d4a38', brown: 0.14 },
   poplar: { cols: ['#86a540', '#95b24c', '#779838', '#a2b855', '#8aa846'], len: [20, 28], count: 420, twig: '#6f6555', yellow: 0.08 },
   shrub: { cols: ['#62803a', '#6e8e42', '#577434', '#7a944a'], len: [26, 36], count: 300, twig: '#5a4a38', yellow: 0.05 },
+  spruce: { cols: ['#2a4a2c', '#325534', '#26432a', '#3a5e3a', '#2f5032'], len: [18, 26], count: 2400, twig: '#4a3a2c' },
 };
 
 function jitterColor(hex: string, r: () => number, amt: number): [number, number, number] {
@@ -215,9 +219,27 @@ function drawCluster(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D,
     c.rect(ox + 1, oy + 1, S - 2, S - 2);
     c.clip();
   }
-  // twigs
   ca.lineCap = 'round';
   cn.lineCap = 'round';
+  // conifer sprays: a solid mass of shoot under the needles, so the foliage survives
+  // the mip chain (thin needles alone vanish at distance and leave bare trunks)
+  if (sp === 'spruce') {
+    for (const tw of twigs) {
+      ca.strokeStyle = '#1f3a24';
+      ca.lineWidth = tw.w === 5 ? 70 : tw.w === 3 ? 52 : 34;
+      ca.beginPath();
+      ca.moveTo(px(tw.x0), py(tw.y0));
+      ca.lineTo(px(tw.x1), py(tw.y1));
+      ca.stroke();
+      cn.strokeStyle = 'rgb(128,150,230)';
+      cn.lineWidth = ca.lineWidth;
+      cn.beginPath();
+      cn.moveTo(px(tw.x0), py(tw.y0));
+      cn.lineTo(px(tw.x1), py(tw.y1));
+      cn.stroke();
+    }
+  }
+  // twigs
   for (const tw of twigs) {
     ca.strokeStyle = st.twig;
     ca.lineWidth = tw.w;
@@ -317,7 +339,7 @@ function buildLeafAtlas(): { map: THREE.DataTexture; normal: THREE.DataTexture; 
   };
   const ca = mk();
   const cn = mk();
-  const order: SpeciesId[] = ['plane', 'oak', 'chestnut', 'poplar', 'plane', 'oak', 'chestnut', 'shrub'];
+  const order: SpeciesId[] = ['plane', 'oak', 'chestnut', 'poplar', 'spruce', 'oak', 'chestnut', 'shrub'];
   order.forEach((sp, k) => {
     const col = k % ATLAS_COLS, row = Math.floor(k / ATLAS_COLS);
     drawCluster(ca, cn, col * CELL, row * CELL, sp, 1000 + k * 77);
@@ -434,6 +456,8 @@ interface Params {
   barkKind: number;
   leafTint: THREE.Color;
   column?: boolean;
+  /** conifer: a cone, widest at the bottom, whorls all the way up */
+  cone?: boolean;
 }
 
 const P: Record<SpeciesId, Params> = {
@@ -456,6 +480,10 @@ const P: Record<SpeciesId, Params> = {
   shrub: {
     H: [2.6, 3.8], bole: [0.05, 0.1], crownR: [1.9, 2.6], crownRy: 0.95, lump: 0.25, trunkR: [0.05, 0.07], limbs: [4, 5], limbElev: [0.9, 1.2],
     clusters: 6, cards: 7, cardSize: [1.2, 1.6], spread: 0.45, bark: new THREE.Color(0x4d4236), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
+  },
+  spruce: {
+    H: [22, 32], bole: [0.08, 0.14], crownR: [3.4, 4.4], crownRy: 1.0, lump: 0.08, trunkR: [0.3, 0.4], limbs: [18, 24], limbElev: [-0.3, 0.08],
+    clusters: 46, cards: 13, cardSize: [2.3, 3.1], spread: 0.3, bark: new THREE.Color(0x4e3d33), barkKind: 0, leafTint: new THREE.Color(1, 1, 1), cone: true,
   },
 };
 
@@ -487,7 +515,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   const boleY = H * R(p.bole);
   const crownR = R(p.crownR);
   const crownH = H - boleY;
-  const cy = boleY + crownH * (p.column ? 0.5 : 0.5);
+  const cy = boleY + crownH * (p.cone ? 0.42 : 0.5);
   const ry = (crownH / 2) * p.crownRy;
   const rx = crownR * (0.92 + r() * 0.16), rz = crownR * (0.92 + r() * 0.16);
   const lumpSeed = r() * 100;
@@ -501,6 +529,12 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
       const w = Math.pow(Math.sin(Math.PI * Math.min(1, 0.15 + t * 0.95)), 0.8);
       ex *= 0.35 + 0.75 * w;
       ez *= 0.35 + 0.75 * w;
+    } else if (p.cone) {
+      // straight-sided cone from a broad skirt to a spire
+      const t = (d.y + 1) / 2;
+      const w = 0.16 + 0.95 * Math.pow(1 - t, 1.1);
+      ex *= w;
+      ez *= w;
     } else if (d.y < 0) ey *= 0.78;
     const k = 1 / Math.sqrt((d.x / ex) ** 2 + (d.y / ey) ** 2 + (d.z / ez) ** 2);
     const n = Math.sin(d.x * 3.1 + lumpSeed) * Math.sin(d.y * 2.7 - lumpSeed * 0.7) + Math.sin(d.z * 3.7 + d.x * 1.3 + lumpSeed * 1.3) * 0.6;
@@ -511,7 +545,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   const tubes: Tube[] = [];
   // trunk (leader up into the crown)
   const trunkR = R(p.trunkR);
-  const topY = p.column ? H * 0.94 : cy + ry * 0.25;
+  const topY = p.column ? H * 0.94 : p.cone ? H * 0.68 : cy + ry * 0.25;
   {
     const pts: [number, number, number, number][] = [];
     const segs = 7;
@@ -520,7 +554,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
       const y = -0.3 + t * (topY + 0.3);
       const flare = i === 0 ? 1.45 : i === 1 ? 1.12 : 1;
       const wob = Math.sin(t * 5 + lumpSeed) * 0.12 * t;
-      pts.push([lean.x * y + wob, y, lean.z * y + wob * 0.5, trunkR * flare * (1 - t * (p.column ? 0.85 : 0.62))]);
+      pts.push([lean.x * y + wob, y, lean.z * y + wob * 0.5, trunkR * flare * (1 - t * (p.column || p.cone ? 0.85 : 0.62))]);
     }
     tubes.push({ pts, sides: 9, level: 0, phase: 0 });
   }
@@ -532,7 +566,9 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   const ga = Math.PI * (3 - Math.sqrt(5));
   for (let k = 0; k < K; k++) {
     const yy = 1 - (2 * (k + 0.5)) / K;
-    if (!p.column && yy < -0.62) continue;
+    if (!p.column && !p.cone && yy < -0.62) continue;
+    // a conifer's leader tip is bare needles, not a branch end
+    if (p.cone && yy > 0.93) continue;
     const rr = Math.sqrt(1 - yy * yy);
     const th = k * ga + r() * 0.5;
     const d = new THREE.Vector3(Math.cos(th) * rr, yy, Math.sin(th) * rr).normalize();
@@ -547,11 +583,11 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   const limbs: { a: THREE.Vector3; b: THREE.Vector3; dir: THREE.Vector3 }[] = [];
   for (let k = 0; k < nL; k++) {
     const az = k * 2.39996 + r() * 0.5;
-    const y0 = p.column ? boleY + ((k + r()) / nL) * (H * 0.82 - boleY) : boleY + (r() * 0.45 + 0.05 * k / nL) * (cy - boleY);
+    const y0 = p.column || p.cone ? boleY + ((k + r()) / nL) * (H * 0.82 - boleY) : boleY + (r() * 0.45 + 0.05 * k / nL) * (cy - boleY);
     const el = R(p.limbElev);
     const dir = new THREE.Vector3(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).normalize();
     const a = trunkAt(y0);
-    const Lr = (p.column ? 0.9 : 0.62) * env(dir.clone());
+    const Lr = (p.column ? 0.9 : p.cone ? 0.95 : 0.62) * env(dir.clone());
     const b = a.clone().addScaledVector(dir, Lr);
     // keep limb ends inside the crown
     const rel = b.clone().sub(center);
@@ -559,7 +595,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
     if (rel.length() > e * 0.8) b.copy(center).addScaledVector(rel.normalize(), e * 0.8);
     limbs.push({ a, b, dir });
     const m = a.clone().lerp(b, 0.5).add(new THREE.Vector3((r() - 0.5) * 0.8, 0.4 + r() * 0.4, (r() - 0.5) * 0.8));
-    const r0 = trunkR * (p.column ? 0.22 : 0.48) * (0.8 + r() * 0.3);
+    const r0 = trunkR * (p.column ? 0.22 : p.cone ? 0.16 : 0.48) * (0.8 + r() * 0.3);
     tubes.push({ pts: [[a.x, a.y, a.z, r0], [m.x, m.y, m.z, r0 * 0.7], [b.x, b.y, b.z, r0 * 0.4]], sides: 6, level: 1, phase: r() * 6.28 });
   }
   for (const c of clusters) {
@@ -571,7 +607,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
     const a = best.a.clone().lerp(best.b, 0.55 + r() * 0.4);
     const end = a.clone().lerp(c, 0.85);
     const m = a.clone().lerp(end, 0.5).add(new THREE.Vector3(0, 0.3 + r() * 0.5, 0));
-    const r0 = trunkR * (p.column ? 0.1 : 0.2) * (0.8 + r() * 0.3);
+    const r0 = trunkR * (p.column || p.cone ? 0.1 : 0.2) * (0.8 + r() * 0.3);
     tubes.push({ pts: [[a.x, a.y, a.z, r0], [m.x, m.y, m.z, r0 * 0.65], [end.x, end.y, end.z, r0 * 0.3]], sides: 4, level: 2, phase: r() * 6.28 });
   }
 
@@ -691,7 +727,7 @@ function emitCard(b: TB, c: Card, s: number, windAt: (x: number, y: number, z: n
 
 // ---------------------------------------------------------------- kit
 
-export const VARIANTS: Record<SpeciesId, number> = { plane: 3, oak: 3, chestnut: 3, poplar: 2, shrub: 2 };
+export const VARIANTS: Record<SpeciesId, number> = { plane: 3, oak: 3, chestnut: 3, poplar: 2, shrub: 2, spruce: 3 };
 
 let _kit: TreeKit | null = null;
 
@@ -701,8 +737,8 @@ export function buildTreeKit(): TreeKit {
   const atlas = buildLeafAtlas();
   const t1 = performance.now();
   const protos: TreeProto[] = [];
-  const bySpecies = { plane: [], oak: [], chestnut: [], poplar: [], shrub: [] } as Record<SpeciesId, number[]>;
-  for (const sp of ['plane', 'oak', 'chestnut', 'poplar', 'shrub'] as SpeciesId[]) {
+  const bySpecies = { plane: [], oak: [], chestnut: [], poplar: [], shrub: [], spruce: [] } as Record<SpeciesId, number[]>;
+  for (const sp of ['plane', 'oak', 'chestnut', 'poplar', 'shrub', 'spruce'] as SpeciesId[]) {
     for (let v = 0; v < VARIANTS[sp]; v++) {
       const t = makeTree(sp, v, protos.length);
       bySpecies[sp].push(protos.length);

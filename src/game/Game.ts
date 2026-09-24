@@ -3,7 +3,8 @@ import { Renderer, type QualityLevel } from '../core/Renderer.ts';
 import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
-import { MONZA } from '../world/Circuits.ts';
+import { CIRCUITS, MONZA } from '../world/Circuits.ts';
+import { setEvent } from '../world/event.ts';
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment } from '../world/Environment.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
@@ -12,7 +13,7 @@ import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL, type CameraMode } from './Cameras.ts';
+import { Cameras, CAMERA_LABEL, ONBOARD, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer } from './Replay.ts';
 import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
@@ -27,14 +28,15 @@ import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
 import { RacingLineAssist } from './RacingLineAssist.ts';
+import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
 
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
-type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay' | 'flashback';
+type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback';
 
-const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'tv', 'tcam', 'tv', 'far'];
+const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'heli', 'tcam', 'tv', 'wheel', 'tv', 'far'];
 
 /** colour of the light on smoke/dust for the weather */
 function smokeLight(w: WeatherState): THREE.Color {
@@ -170,7 +172,11 @@ export class Game {
 
     progress(0.08, 'Surveying the circuit');
     await tick();
-    this.track = new Track(MONZA);
+    // ?track=<id> (dev/demo links) overrides the saved choice
+    const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
+    this.track = new Track(CIRCUITS.find((c) => c.id === want) ?? MONZA);
+    setEvent(this.track.def);
+    this.menu.setup.track = this.track.def.id;
 
     progress(0.22, 'Laying asphalt, kerbs and barriers');
     await tick();
@@ -296,6 +302,11 @@ export class Game {
   }
 
   private applySetupPreview(s: RaceSetup) {
+    // a different circuit means a different world: rebuild it from scratch (the setup is saved)
+    if (s.track !== this.track.def.id) {
+      location.reload();
+      return;
+    }
     if (`${s.weather}/${s.time}` !== this.planKey) this.rollWeather(s);
     this.makeRace('race', s);
   }
@@ -315,13 +326,21 @@ export class Game {
     this.hud.flash('Qualifying', 'one flying lap', '', 2.5);
   }
 
+  /** this circuit's lap relative to Monza's, from the speed profiles (AI qualifying is fitted at Monza) */
+  private trackLapScale(): number {
+    if (this.track.def.id === 'monza') return 1;
+    this.monzaLap ||= RacingProfile.for(new Track(MONZA), F1_SPEC).lapTime;
+    return this.race.profile.lapTime / this.monzaLap;
+  }
+  private monzaLap = 0;
+
   private endQualifying(time: number, valid: boolean) {
     const setup = this.quali!.setup;
     this.quali = null;
     const player = this.race.player.entry;
     const diff = DIFFICULTY[setup.difficulty].value;
     const wf = this.race.conditionsLapFactor();
-    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff, wf) }));
+    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff, wf, this.trackLapScale()) }));
     times.sort((a, b) => a.time - b.time);
     const order = times.map((t) => t.entry);
     const pos = order.indexOf(player) + 1;
@@ -333,7 +352,7 @@ export class Game {
     this.menu.showQualifying(
       times.map((t, i) => ({ pos: i + 1, entry: t.entry, isPlayer: t.entry === player, time: t.time, gap: t.time - pole })),
       pos === 1 ? 'Pole position!' : `Qualified P${pos}`,
-      valid ? `${fmtTime(time)} · ${MONZA.name}` : 'Lap deleted for track limits — you start from the back',
+      valid ? `${fmtTime(time)} · ${this.track.def.name}` : 'Lap deleted for track limits — you start from the back',
       () => {
         this.gridOrder = order;
         this.startRace('race', setup);
@@ -383,13 +402,35 @@ export class Game {
     if (this.audioReady) this.audio.resume();
   }
 
+  /** the podium: top three celebrating, then the results */
+  private startCelebration() {
+    const top = this.race.classification().slice(0, 3).map((r) => r.entry);
+    if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
+    this.celebration = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
+    this.scene.add(this.celebration.group);
+    // the cars have gone to parc fermé
+    this.carsGroup.visible = false;
+    this.state = 'celebration';
+    this.stateTime = 0;
+    this.hud.show(false);
+    if (this.audioReady) this.audio.crowd(1);
+  }
+  private endCelebration() {
+    this.celebration?.dispose();
+    this.celebration = null;
+    this.carsGroup.visible = true;
+    this.gfx.setDepthOfField(false);
+    this.showResults();
+  }
+  private celebration: Celebration | null = null;
+
   private showResults() {
     this.state = 'results';
     const rows = this.race.classification();
     const p = this.race.player;
     const title = p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
     const laps = this.race.opts.laps;
-    const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${MONZA.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
+    const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${this.track.def.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
     // the next race gets new weather
     this.rollWeather(this.menu.setup);
@@ -470,7 +511,7 @@ export class Game {
           }
           this.finishTimer += dt;
           if (this.finishTimer > 1.5 && this.cams.mode !== 'tv') this.cams.set('tv');
-          if (this.finishTimer > 6) this.showResults();
+          if (this.finishTimer > 6) this.startCelebration();
         }
       }
     }
@@ -479,6 +520,13 @@ export class Game {
       this.hud.update(dt, race);
       this.effects(dt);
       this.speedFx();
+    } else if (this.state === 'celebration') {
+      this.driveInput(dt);
+      race.update(dt);
+      this.syncAllViews(dt);
+      const done = this.celebration!.update(dt, this.camera);
+      this.gfx.setDepthOfField(true, this.celebration!.focus(this.dofTarget), 6, 1.6);
+      if (done || this.input.nav.accept || this.input.nav.back) this.endCelebration();
     } else if (this.state === 'results') {
       this.driveInput(dt);
       race.update(dt);
@@ -514,14 +562,14 @@ export class Game {
     if (this.state === 'race' && race.phase === 'racing' && !race.player.finished) this.flash.record(dt, race);
 
     this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
-    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && !race.player.finished;
+    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && this.cams.mode !== 'heli' && !race.player.finished;
     this.line.mesh.visible = showLine;
     // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
     if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
     applyWeatherUniforms(race.weatherState);
     this.env.setWeather(race.weatherState);
     this.env.update(dt, this.camera);
-    this.env.focusShadow(this.playerRigPos());
+    this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos());
     this.updatePits(dt, race);
     this.trackside.update(dt, this.camera);
     this.particles.update(this.state === 'paused' ? 0 : dt);
@@ -588,7 +636,7 @@ export class Game {
 
   private applyAssists(a: AssistConfig) {
     const car = this.race.player.car;
-    car.assists = { traction: a.traction, abs: a.abs, stability: a.stability, autoGear: a.gearbox === 'auto' };
+    car.assists = { traction: a.traction, abs: a.abs, stability: a.stability, autoGear: a.gearbox === 'auto', arcade: a.arcade };
     this.control.aids.brakingAssist = a.braking;
     this.control.aids.steeringMode = a.keyboard;
     this.race.playerDrsAuto = a.drs === 'auto';
@@ -794,14 +842,14 @@ export class Game {
   private speedFx() {
     const car = this.race.player.car;
     const kmh = Math.max(0, car.vx * 3.6);
-    const onboard = this.cams.mode === 'cockpit' || this.cams.mode === 'tcam' || this.cams.mode === 'nose' || this.cams.mode === 'chase' || this.cams.mode === 'far';
+    const onboard = !!ONBOARD[this.cams.mode] || this.cams.mode === 'chase' || this.cams.mode === 'far';
     const k = onboard ? Math.max(0, Math.min(1, (kmh - 170) / 170)) : 0;
     this.gfx.setSpeedBlur(k * k * 0.014 + (car.ersDeploying ? 0.002 : 0));
     this.gfx.setAberration(k * 0.0011);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
     const cam = this.cams.mode;
-    const lensCam = cam === 'cockpit' || cam === 'tcam' || cam === 'nose' ? 1 : cam === 'chase' ? 0.35 : 0;
+    const lensCam = ONBOARD[cam] ? 1 : cam === 'chase' ? 0.35 : 0;
     const spray = car.dirty * Math.min(1, car.speed / 40) * w.wetness;
     const lens = lensCam * Math.min(1, w.rain * (0.55 + 0.45 * Math.min(1, car.speed / 45)) + spray * 0.8);
     (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0);
@@ -825,7 +873,7 @@ export class Game {
     const replaying = this.state === 'replay';
     const carOf = (c: (typeof race.cars)[number]) => (replaying ? this.replay.ghosts[c.id] : c.car);
     const car = carOf(race.player);
-    a.setView(this.cams.mode === 'cockpit' || this.cams.mode === 'tcam' || this.cams.mode === 'nose' ? 'cockpit' : this.cams.mode === 'tv' ? 'tv' : 'chase');
+    a.setView(ONBOARD[this.cams.mode] ? 'cockpit' : this.cams.mode === 'tv' || this.cams.mode === 'heli' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
     a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ));
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
@@ -851,7 +899,7 @@ export class Game {
     const list: { id: number; rpm: number; throttle: number; distance: number; relVel: number; pan: number }[] = [];
     for (const c of race.cars) {
       if (c.isPlayer) {
-        if (this.cams.mode === 'tv') {
+        if (this.cams.mode === 'tv' || this.cams.mode === 'heli') {
           const p = this.rigs.get(c.entry)!.root.position;
           const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
           const d = Math.hypot(dx, dy, dz);

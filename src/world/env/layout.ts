@@ -62,7 +62,8 @@ export interface Layout {
   grandstands: GrandstandSpec[];
   banks: SpectatorBank[];
   screens: ScreenSpec[];
-  oval: OvalPath;
+  /** Monza's old banked oval (null elsewhere) */
+  oval: OvalPath | null;
   /** pit complex band (kept free for the pit agent's buildings) */
   pit: { sA: number; sB: number; side: number; front: number; depth: number; paddockTo: number; y0: number; y1: number };
   /** tall flagpoles with big flags (world points) */
@@ -79,8 +80,9 @@ const ROW_DEPTH = 0.86;
 const ROW_RISE = 0.46;
 
 export function planLayout(track: Track, map: WorldMap): Layout {
-  const oval = planOval(track, (x, z) => map.naturalExact(x, z));
-  map.setOval(oval);
+  const monza = track.def.id !== 'spa';
+  const oval = monza ? planOval(track, (x, z) => map.naturalExact(x, z)) : null;
+  if (oval) map.setOval(oval);
   const p = new THREE.Vector3();
   const corner = (name: string) => track.corners.find((c) => c.name === name)!;
 
@@ -137,6 +139,7 @@ export function planLayout(track: Track, map: WorldMap): Layout {
     }
   };
   const L = -1, R = 1;
+  if (!oval) return planSpa(track, map, addStand, gs);
   // main straight: west side, opposite the pits
   addStand('Tribuna Centrale', 452, 660, L, 28, 'centrale', 8, 105);
   addStand('Laterale Nord', 668, 880, L, 22, 'covered', 7, 72);
@@ -355,6 +358,131 @@ export function planLayout(track: Track, map: WorldMap): Layout {
   };
 
   return { grandstands: gs, banks, screens, oval, pit: pitSpec, flagpoles, poplarRows, avenueTrees, villages };
+}
+
+/**
+ * Spa-Francorchamps: the circuit runs through spruce forest on the valley sides, with
+ * grandstands where the real ones are and fans on the grass banks all round
+ * (Raidillon's hillside, the Kemmel straight, Pouhon, Blanchimont).
+ */
+function planSpa(
+  track: Track,
+  map: WorldMap,
+  addStand: (name: string, sA: number, sB: number, side: number, rows: number, style: StandStyle, gap?: number, segLen?: number) => void,
+  gs: GrandstandSpec[],
+): Layout {
+  const L = -1, R = 1;
+  const corner = (name: string) => track.corners.find((c) => c.name === name)!;
+  const p = new THREE.Vector3();
+  const at = (s: number, lat: number) => track.point(s, lat, 0, new THREE.Vector3());
+  const clear = (x: number, z: number, r: number, soft: number, keep: number) => map.clearings.push({ x, z, r, soft, keep });
+
+  // start/finish straight: the main grandstand opposite the pits (pit wall on the left)
+  addStand('Tribune Principale', 440, 700, R, 26, 'centrale', 8, 100);
+  const bus = corner('Bus Stop');
+  addStand('Bus Stop', bus.sStart - 150, bus.sStart - 10, L, 18, 'covered', 8, 70);
+  const ls = corner('La Source');
+  addStand('La Source', ls.sStart - 140, ls.sApex, L, 20, 'covered', 8, 70);
+  addStand('La Source Sortie', ls.sEnd + 10, ls.sEnd + 120, R, 14, 'open', 7, 60);
+  const er = corner('Eau Rouge');
+  addStand('Eau Rouge', er.sStart - 130, er.sStart - 5, R, 20, 'covered', 8, 65);
+  const lc = corner('Les Combes');
+  addStand('Les Combes', lc.sStart - 130, lc.sApex, L, 16, 'open', 7, 65);
+  const rv = corner('Rivage');
+  addStand('Rivage', rv.sStart - 30, rv.sApex + 10, L, 14, 'open', 7, 55);
+  const po = corner('Pouhon');
+  addStand('Pouhon', po.sStart - 40, po.sApex + 40, R, 16, 'open', 7, 60);
+  const st = corner('Stavelot');
+  addStand('Stavelot', st.sStart - 110, st.sStart - 5, L, 14, 'open', 7, 60);
+  const bl = corner('Blanchimont');
+  addStand('Blanchimont', bl.sStart - 60, bl.sApex + 20, R, 14, 'open', 7, 60);
+
+  // grass banks: fans on the hillsides
+  const banks: SpectatorBank[] = [];
+  const addBank = (sA: number, sB: number, side: number, rise: number, density: number, gap = 5, width = 16) => {
+    let bar = 0;
+    for (let s = sA; s <= sB; s += 3) bar = Math.max(bar, track.barrierAt(s, side));
+    const latA = side * (bar + gap), latB = side * (bar + gap + width);
+    banks.push({ sA, sB, side, latA, latB, rise, density });
+    map.trackPads.push({ sA, sB, latA, latB, offset: rise, blend: 9 });
+    for (let s = sA; s <= sB; s += 18) {
+      track.point(s, (latA + latB) / 2, 0, p);
+      map.clearings.push({ x: p.x, z: p.z, r: width * 0.75, soft: 10, keep: 0.05 });
+    }
+  };
+  const rd = corner('Raidillon');
+  addBank(rd.sStart - 20, rd.sEnd + 60, L, 3.2, 0.95, 5, 22);
+  addBank(er.sEnd + 10, rd.sEnd + 30, R, 2.4, 0.85, 6, 18);
+  addBank(rd.sEnd + 150, rd.sEnd + 520, L, 1.6, 0.6, 5, 16);
+  addBank(lc.sStart - 380, lc.sStart - 150, R, 1.4, 0.5, 5, 14);
+  addBank(po.sStart - 160, po.sStart - 50, R, 2.0, 0.75, 5, 18);
+  addBank(po.sApex, corner('Turn 11').sEnd, L, 1.8, 0.7, 6, 20);
+  addBank(corner('Fagnes').sStart - 80, corner('Fagnes').sApex, L, 1.5, 0.55, 5, 14);
+  addBank(bl.sStart - 220, bl.sStart - 70, R, 1.6, 0.6, 5, 16);
+  addBank(bus.sStart - 240, bus.sStart - 160, L, 1.4, 0.55, 5, 14);
+
+  // open ground: the paddock and car parks behind the main stand, the valley floor at Eau Rouge
+  for (let s = 420; s <= 720; s += 40) { const q = at(s, 120); clear(q.x, q.z, 48, 28, 0.15); }
+  { const q = at(er.sApex, -70); clear(q.x, q.z, 55, 35, 0.25); }
+  { const q = at(po.sApex + 60, -110); clear(q.x, q.z, 70, 45, 0.2); }
+  { const q = at(ls.sApex, 70); clear(q.x, q.z, 50, 30, 0.2); }
+
+  // service road behind the main stands, walkways along the banks
+  const trackLine = (sA: number, sB: number, latFn: (s: number) => number, step = 10): V2[] => {
+    const pts: V2[] = [];
+    for (let s = sA; s <= sB; s += step) {
+      track.point(s, latFn(s), 0, p);
+      pts.push({ x: p.x, z: p.z });
+    }
+    return pts;
+  };
+  map.paths.push({ pts: trackLine(420, 740, (s) => track.barrierAt(s, 1) + 60, 12), width: 7, kind: 2 });
+  const walk = (sA: number, sB: number, side: number, off: number) => {
+    map.paths.push({ pts: trackLine(sA, sB, (s) => side * (track.barrierAt(s, side) + off + 2.5 * Math.sin(s * 0.013)), 9), width: 3.2, kind: 1 });
+  };
+  walk(rd.sEnd + 60, lc.sStart - 160, L, 24);
+  walk(po.sStart - 300, po.sEnd + 150, R, 26);
+  walk(bl.sStart - 400, bl.sEnd + 80, R, 20);
+
+  // big screens facing the stands
+  const screens: ScreenSpec[] = [];
+  const screenAt = (s: number, side: number, lookS: number, lookSide: number, lookLat: number, w = 12, h = 7, back = 6) => {
+    const lat = side * (track.barrierAt(s, side) + back);
+    const q = at(s, lat);
+    const look = at(lookS, lookSide * lookLat);
+    const rot = Math.atan2(look.x - q.x, look.z - q.z);
+    screens.push({ x: q.x, z: q.z, y: track.heightAt(s), rot, w, h });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: w / 2 + 3, halfL: 4, angle: rot });
+    map.clearings.push({ x: q.x, z: q.z, r: 12, soft: 10, keep: 0.2 });
+  };
+  screenAt(740, L, 570, R, 30, 14, 8, 30);
+  screenAt(er.sStart - 60, L, er.sStart - 70, R, 40);
+  screenAt(po.sStart - 80, L, po.sStart - 60, R, 40);
+  screenAt(bus.sStart - 90, R, bus.sStart - 80, L, 40, 10, 6);
+
+  const flagpoles: V2[] = [];
+  for (const g of gs) {
+    if (g.style === 'open') continue;
+    const n = Math.max(2, Math.round(g.length / 24));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n - 0.5;
+      const along = new THREE.Vector3(g.facing.z, 0, -g.facing.x);
+      flagpoles.push({ x: g.center.x + along.x * t * g.length - g.facing.x * (g.depth / 2 + 1.5), z: g.center.z + along.z * t * g.length - g.facing.z * (g.depth / 2 + 1.5) });
+    }
+  }
+
+  const pit = track.pit;
+  const pitSpec = {
+    sA: pit.sStart,
+    sB: pit.sEnd,
+    side: pit.side,
+    front: pit.garageOffset + 0.5,
+    depth: 26,
+    paddockTo: 125,
+    y0: track.heightAt(pit.sStart),
+    y1: track.heightAt(pit.sEnd),
+  };
+  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages: [] };
 }
 
 export const STAND_ROW_DEPTH = ROW_DEPTH;

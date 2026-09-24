@@ -1,5 +1,6 @@
 import type { CircuitDef } from './CircuitGen.ts';
 import { MONZA_LINE } from './circuits/monzaLine.ts';
+import { SPA_LINE } from './circuits/spaLine.ts';
 
 /**
  * Autodromo Nazionale Monza — the Temple of Speed. 5.79 km, clockwise, 11
@@ -60,4 +61,86 @@ export const MONZA: CircuitDef = {
   ],
 };
 
-export const CIRCUITS: CircuitDef[] = [MONZA];
+/**
+ * Circuit de Spa-Francorchamps — 7.0 km through the Ardennes forest, clockwise,
+ * 19 turns and ~95 m of elevation. The real centreline (see circuits/spaLine.ts);
+ * s = 0 is on the run from Blanchimont to the Bus Stop, so the pit lane never wraps.
+ *
+ * Lap, in s:
+ *    200  T18/T19 Bus Stop chicane
+ *    560  start/finish line (grid back to the Bus Stop exit), pit lane on the left from 300 to 760
+ *    834  T1   La Source (hairpin)
+ *   1493  T2   Eau Rouge, T3 Raidillon (the climb), T4 at the crest
+ *   2867  T5–T7 Les Combes, Malmedy at the end of the Kemmel straight
+ *   3522  T8   Rivage (hairpin)
+ *   4321  T10/T11 Pouhon (double-apex left)
+ *   4976  T12–T13 Fagnes, Campus
+ *   5386  T14–T15 Stavelot, Paul Frère — the lowest point
+ *   6645  T17  Blanchimont (flat out)
+ */
+export const SPA: CircuitDef = {
+  id: 'spa',
+  name: 'Circuit de Spa-Francorchamps',
+  short: 'Spa',
+  country: 'BEL',
+  centerline: { points: SPA_LINE, smooth: 3 },
+  corners: [
+    { name: 'Bus Stop', at: 200, dir: -1, runoff: 'asphalt', runoffDepth: 40 },
+    { name: 'Turn 19', at: 244, dir: 1, runoff: 'asphalt', runoffDepth: 30 },
+    { name: 'La Source', at: 834, dir: -1, runoff: 'asphalt', runoffDepth: 48 },
+    { name: 'Eau Rouge', at: 1493, dir: 1, runoff: 'asphalt', runoffDepth: 30 },
+    { name: 'Raidillon', at: 1573, dir: -1, runoff: 'asphalt', runoffDepth: 44 },
+    { name: 'Turn 4', at: 1723, dir: 1, runoff: 'asphalt', runoffDepth: 30 },
+    { name: 'Les Combes', at: 2867, dir: -1, runoff: 'asphalt', runoffDepth: 50 },
+    { name: 'Turn 6', at: 2952, dir: 1, runoff: 'asphalt', runoffDepth: 34 },
+    { name: 'Malmedy', at: 3107, dir: -1, runoff: 'gravel', runoffDepth: 36 },
+    { name: 'Rivage', at: 3522, dir: -1, runoff: 'asphalt', runoffDepth: 44 },
+    { name: 'Turn 9', at: 3737, dir: 1, runoff: 'gravel', runoffDepth: 34 },
+    { name: 'Pouhon', at: 4321, dir: 1, runoff: 'gravel', runoffDepth: 52 },
+    { name: 'Turn 11', at: 4456, dir: 1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Fagnes', at: 4976, dir: -1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Campus', at: 5106, dir: 1, runoff: 'gravel', runoffDepth: 36 },
+    { name: 'Stavelot', at: 5386, dir: -1, runoff: 'gravel', runoffDepth: 44 },
+    { name: 'Paul Frère', at: 5645, dir: -1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Turn 16', at: 6390, dir: 1, runoff: 'grass', runoffDepth: 30 },
+    { name: 'Blanchimont', at: 6645, dir: 1, runoff: 'gravel', runoffDepth: 46 },
+  ],
+  halfWidth: 6.0,
+  startOffset: 560,
+  // the Ardennes: down from La Source into Eau Rouge, 35 m straight up Raidillon, on up the
+  // Kemmel straight to Les Combes, then all the way down through Pouhon to Stavelot and back up
+  elevation: [
+    [0.0, -4],
+    [0.035, -3],
+    [0.063, 0],
+    [0.119, 2.5],
+    [0.17, -9],
+    [0.205, -19],
+    [0.213, -20],
+    [0.228, -7],
+    [0.246, 13],
+    [0.27, 22],
+    [0.33, 34],
+    [0.406, 46],
+    [0.444, 38],
+    [0.503, 27],
+    [0.534, 19],
+    [0.58, 8],
+    [0.627, -4],
+    [0.711, -20],
+    [0.77, -37],
+    [0.807, -44],
+    [0.85, -38],
+    [0.913, -22],
+    [0.96, -10],
+  ],
+  pitSide: -1,
+  pit: { start: 300, end: 760 },
+  sectors: [0.33, 0.72],
+  drs: [
+    { detect: 60, start: 320, end: 760 },
+    { detect: 1350, start: 1850, end: 2790 },
+  ],
+};
+
+export const CIRCUITS: CircuitDef[] = [MONZA, SPA];

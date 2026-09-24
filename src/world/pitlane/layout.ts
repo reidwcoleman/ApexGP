@@ -1,3 +1,4 @@
+import { TEAMS } from '../../race/Teams.ts';
 import type { Track } from '../Track.ts';
 import { PIT_HANDOFF } from '../trackside/context.ts';
 
@@ -36,7 +37,7 @@ export const L = {
 };
 
 export const GARAGE_W = 18;
-export const TEAM_COUNT = 10;
+export const TEAM_COUNT = TEAMS.length;
 
 export interface PitPlan {
   track: Track;
@@ -110,7 +111,7 @@ export function makePlan(track: Track): PitPlan {
     podiumTip: 1.5,
     towerS0: mid + 196,
     towerS1: mid + 216,
-    boxS: (k: number) => mid + (k - 4.5) * GARAGE_W,
+    boxS: (k: number) => mid + (k - (TEAM_COUNT - 1) / 2) * GARAGE_W,
     outer(s: number) {
       if (s < s0) return road + (bEntry - road) * sm(entryS, s0, s);
       if (s < mid) return bEntry + (L.front - bEntry) * sm(p.sStart - 70, p.sStart + 20, s);

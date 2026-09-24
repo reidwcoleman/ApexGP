@@ -315,8 +315,8 @@ export function buildWall(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, out:
     solid.color(0x0d0d0f).mat(0.5, 0.2, 0, 0.8);
     F.box(solid, 0.05, 2.75, -2.3, 0.35, 1.0, 0.45);
     const n = F.dir(-1, 0, 0).normalize();
-    signal.lamp(F.p(-0.14, 3.0, -2.3), n, 0.14, new THREE.Color(8, 0.25, 0.1), 10, 0);
-    signal.lamp(F.p(-0.14, 2.55, -2.3), n, 0.14, new THREE.Color(0.25, 7, 1.2), 10, 1);
+    signal.lamp(F.p(-0.14, 3.0, -2.3), n, 0.14, new THREE.Color(8, 0.25, 0.1), 11, 0);
+    signal.lamp(F.p(-0.14, 2.55, -2.3), n, 0.14, new THREE.Color(0.25, 7, 1.2), 11, 1);
     // PIT EXIT board over the lane
     print.rgb(1, 1, 1).mat(0.5, 0, 0.4, 0.8);
     F.panel(print, 0.02, 3.95, -1.2, -1, 0, 0, 3.2, 0.8, atlas.uv('pitexit'));

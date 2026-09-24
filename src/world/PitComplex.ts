@@ -133,7 +133,8 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
   const garages: GarageSlot[] = TEAMS.map((_, k) => ({ team: k, s: plan.boxS(k), lateral: plan.side * L.box }));
   const garageCentre = ts.P(plan.mid, L.front + 8, 2);
   const cam = new THREE.Vector3();
-  signalU.uSig.value[10] = 2;
+  // slot 11: the pit-exit light (0 … 10 are the team release lights)
+  signalU.uSig.value[11] = 2;
 
   let tris = 0;
   for (const m of meshes) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;

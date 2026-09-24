@@ -37,6 +37,8 @@ export interface Assists {
   abs: boolean;
   stability: boolean;
   autoGear: boolean;
+  /** arcade handling: the car goes where the wheels point, up to a generous grip limit, without sliding */
+  arcade?: boolean;
 }
 
 export interface CarSpec {
@@ -91,17 +93,17 @@ export const F1_SPEC: CarSpec = {
   trackR: 1.55,
   wheelR: 0.36,
   wheelI: 1.1,
-  clA: 8,
+  clA: 4.9,
   cdA: 1.1,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 3.4,
-  loadSens: 0,
-  slipAnglePeak: 0.13,
-  slipAnglePeakRear: 0.11,
-  muRear: 1.2,
+  mu: 1.95,
+  loadSens: 0.075,
+  slipAnglePeak: 0.1,
+  slipAnglePeakRear: 0.082,
+  muRear: 1.12,
   slipRatioPeak: 0.09,
   tyreShape: 1.28,
   rollFront: 0.56,
@@ -113,7 +115,7 @@ export const F1_SPEC: CarSpec = {
   gears: [17.2, 14.0, 11.6, 9.75, 8.25, 7.0, 5.9, 4.86],
   brakeTorque: 17500,
   brakeBias: 0.57,
-  maxSteer: 0.65,
+  maxSteer: 0.38,
   halfLength: 2.7,
   halfWidth: 0.95,
 };
@@ -787,6 +789,16 @@ export class CarPhysics {
     this.vx += (axBody + this.vy * this.r) * dt;
     this.vy += (ayBody - this.vx * this.r) * dt;
     this.r += (Mz / sp.iz) * dt;
+
+    // arcade handling: rotate at the rate the steering asks for (capped by grip, far less on the grass)
+    // and keep the rear axle from sliding, so the car holds the corner instead of pushing or spinning
+    if (this.assists.arcade && this.vx > 2) {
+      const L = sp.a + sp.b;
+      const cap = ((this.offTrack ? 0.55 : 1) * Math.max(this.lateralGrip(this.vx) * 1.6, 22)) / this.vx;
+      const rT = Math.max(-cap, Math.min(cap, (this.vx * Math.tan(this.steer)) / L));
+      this.r += (rT - this.r) * (1 - Math.exp(-dt * 10));
+      this.vy += (this.r * sp.b - this.vy) * (1 - Math.exp(-dt * 7));
+    }
 
     // settle at a standstill instead of creeping
     if (Math.abs(this.vx) < 0.4 && throttle < 0.05 && !this.reverse) {

@@ -76,8 +76,8 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   const stands = buildGrandstands(layout, track, map);
   group.add(stands.group);
   lap('stands');
-  const banking = buildBanking(layout.oval, track, map, terrain.material);
-  group.add(banking.group);
+  const banking = layout.oval ? buildBanking(layout.oval, track, map, terrain.material) : null;
+  if (banking) group.add(banking.group);
   lap('banking');
   const villages = buildVillages(map, layout);
   group.add(villages.group);
@@ -100,6 +100,6 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
     setQuality(q) {
       veg.setDetail(q);
     },
-    stats: { timings, trees: veg.count, treesNear: veg.near, people: stands.people, flags: stands.flags, banking: banking.stats, buildings: villages.count, buildMs: Math.round(performance.now() - t0), map: map.timings, veg: veg.timings, masks: masks.timings },
+    stats: { timings, trees: veg.count, treesNear: veg.near, people: stands.people, flags: stands.flags, banking: banking?.stats ?? null, buildings: villages.count, buildMs: Math.round(performance.now() - t0), map: map.timings, veg: veg.timings, masks: masks.timings },
   };
 }

@@ -449,8 +449,8 @@ export function createEnvironment(
     (sky.uniforms.uFlashCol.value as THREE.Vector3).set(0.9, 0.95, 1.15).multiplyScalar(Math.max(0.12, lightInfo.deckRad ?? 0.2) * 4.5);
     // the channel stays lit through the restrikes, fading with them
     sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
-    scene.environmentIntensity = look.envIntensity * (1 + L * 0.9);
-    gfx.setFlash(L * 0.18);
+    scene.environmentIntensity = look.envIntensity * (1 + L * 0.6);
+    gfx.setFlash(L * 0.1);
   }
 
   function update(dt: number, camera: THREE.Camera) {

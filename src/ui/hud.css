@@ -195,11 +195,11 @@
   font-weight: 700;
 }
 
-/* ---------- team radio (above the minimap) ---------- */
+/* ---------- team radio (beside the minimap, clear of the 22-car tower) ---------- */
 .radio {
   position: absolute;
-  left: var(--s5);
-  bottom: calc(var(--s5) + 234px + var(--s2));
+  left: calc(var(--s5) + 214px + var(--s3));
+  bottom: var(--s5);
   max-width: 320px;
   padding: 10px 14px 10px 10px;
   display: flex;

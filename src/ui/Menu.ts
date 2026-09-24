@@ -2,6 +2,7 @@ import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
 import { CAMERA_LABEL, CAMERA_ORDER } from '../game/Cameras.ts';
+import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
@@ -19,6 +20,8 @@ export interface RaceSetup {
   time: TimeChoice;
   assists: AssistConfig;
   compound: Compound | 'auto';
+  /** circuit id (see CIRCUITS) */
+  track: string;
 }
 
 export interface Settings {
@@ -38,11 +41,11 @@ export const DIFFICULTY = [
 ];
 export const GRID = [
   { label: 'Pole position', slot: 0 },
-  { label: 'Midfield', slot: 9 },
-  { label: 'Back of the grid', slot: 19 },
+  { label: 'Midfield', slot: 10 },
+  { label: 'Back of the grid', slot: 21 },
   { label: 'Qualifying lap', slot: -1 },
 ];
-const WEATHERS: WeatherChoice[] = ['random', 'clear', 'haze', 'cloudy', 'overcast', 'fog', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm', 'changeable'];
+const WEATHERS: WeatherChoice[] = ['random', 'clear', 'haze', 'windy', 'cloudy', 'overcast', 'mist', 'fog', 'drying', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm', 'changeable'];
 const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
 const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
@@ -125,9 +128,10 @@ export class Menu {
     this.cb = cb;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'random', time: 'random', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto' });
+    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'random', time: 'random', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto', track: 'monza' });
     // saves from before per-assist settings stored a preset index
     if (!this.setup.compound) this.setup.compound = 'auto';
+    if (!CIRCUITS.some((c) => c.id === this.setup.track)) this.setup.track = CIRCUITS[0].id;
     // saves from before the weather system
     if (!WEATHERS.includes(this.setup.weather)) this.setup.weather = 'random';
     if (!TIMES.includes(this.setup.time)) this.setup.time = 'random';
@@ -226,6 +230,10 @@ export class Menu {
         },
       );
     }
+    this.opt(p, 'Circuit', () => (CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
+      const i = Math.max(0, CIRCUITS.findIndex((c) => c.id === st.track));
+      st.track = CIRCUITS[(i + d + CIRCUITS.length) % CIRCUITS.length].id;
+    });
     this.opt(p, 'Weather', () => (st.weather === 'random' || st.weather === 'changeable' ? `${weatherLabel(st.weather)} <span class="dim">· ${this.cb.forecast().weather}</span>` : weatherLabel(st.weather)), (d) => {
       const i = WEATHERS.indexOf(st.weather);
       st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
@@ -327,6 +335,7 @@ export class Menu {
         ch(d);
         updateLede();
       });
+    row('Handling', () => (a.arcade ? 'Arcade' : 'Simulation'), () => (a.arcade = !a.arcade));
     row('Traction control', () => ({ off: 'Off', medium: 'Medium', full: 'Full' })[a.traction], (d) => (a.traction = cycle(['off', 'medium', 'full'] as const, a.traction, d)));
     row('Anti-lock brakes', () => onOff(a.abs), () => (a.abs = !a.abs));
     row('Stability control', () => onOff(a.stability), () => (a.stability = !a.stability));

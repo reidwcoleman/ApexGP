@@ -29,7 +29,7 @@ const num = (k: string, d: number) => (params.get(k) !== null ? Number(params.ge
 
 const track = new Track(MONZA);
 const kind = (params.get('weather') ?? 'clear') as WeatherKind;
-const REG: Record<WeatherKind, [number, number]> = { clear: [0.06, 0], haze: [0.12, 0], cloudy: [0.45, 0], overcast: [0.86, 0], fog: [0.78, 0], sunshower: [0.38, 0.3], drizzle: [0.93, 0.26], rain: [0.97, 0.62], storm: [1, 1], thunderstorm: [1, 0.9] };
+const REG: Record<WeatherKind, [number, number]> = { clear: [0.06, 0], haze: [0.12, 0], windy: [0.5, 0], mist: [0.5, 0], drying: [0.35, 0], cloudy: [0.45, 0], overcast: [0.86, 0], fog: [0.78, 0], sunshower: [0.38, 0.3], drizzle: [0.93, 0.26], rain: [0.97, 0.62], storm: [1, 1], thunderstorm: [1, 0.9] };
 const [cloud, rain] = REG[kind] ?? REG.clear;
 const weather: WeatherState = {
   kind,

@@ -49,6 +49,7 @@ export class CarView {
     rig.body.position.y = car.heave;
 
     rig.setSteer(car.steer);
+    rig.setG(car.ay, car.ax, car.steer);
     rig.setWheelSpin(car.wheelAngleF, car.wheelAngleR);
     rig.setWheelSpeed(Math.abs(car.vx));
     rig.setBrakeGlow(car.brakeHeat);

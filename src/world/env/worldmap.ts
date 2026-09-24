@@ -74,6 +74,8 @@ export class WorldMap {
   readonly FAR: Bounds;
   /** the Parco di Monza boundary (inside = park) */
   readonly park: { cx: number; cz: number; rx: number; rz: number };
+  /** the land the circuit sits in: Monza's flat royal park or the hills and spruce woods of the Ardennes */
+  readonly venue: 'park' | 'ardennes';
   private pitBox!: Bounds;
   private readonly proj = { s: 0, lat: 0 };
   private readonly platform: Float32Array;
@@ -115,7 +117,9 @@ export class WorldMap {
       z1: ceilTo(bb.z1 + 420, 16),
     };
     // the park: the circuit sits in its northern half, the Villa Reale lawns to the south
-    this.park = { cx: center.x - 40, cz: center.z + 420, rx: 1450, rz: 2250 };
+    this.venue = track.def.id === 'spa' ? 'ardennes' : 'park';
+    // (in the Ardennes the "park" is the whole forest: no plain, no towns)
+    this.park = this.venue === 'ardennes' ? { cx: center.x, cz: center.z, rx: 1e5, rz: 1e5 } : { cx: center.x - 40, cz: center.z + 420, rx: 1450, rz: 2250 };
     this.dfFar = track.buildDistanceField(40, 700, 560);
     this.dfNear = track.buildDistanceField(8, 170, 124);
     {
@@ -333,6 +337,15 @@ export class WorldMap {
     const dT = this.distToTrack(x, z);
     const far = smoothstep(40, 380, dT);
     let h = P;
+    if (this.venue === 'ardennes') {
+      // wooded valley sides near the circuit, rolling ridges of 100–200 m further out
+      h += (0.3 + 0.7 * far) * (14 * fbm2(x / 700 + 2.3, z / 700 - 4.1, 4) + 4 * fbm2(x / 180 - 3.3, z / 180 + 1.9, 2));
+      const Rh = Math.hypot(x - center.x, z - center.z);
+      const hills = smoothstep(1400, 6000, Rh);
+      const m = ridged2(x / 3800 + 0.7, z / 3800 - 2.9, 4, 2.0, 0.5);
+      h += hills * (30 + 170 * Math.pow(m, 1.4) * (0.6 + 0.4 * (fbm2(x / 7000 - 1.1, z / 7000 + 2.6, 2) * 0.5 + 0.5)));
+      return h;
+    }
     // gentle park undulation (never more than a couple of metres)
     h += (0.25 + 0.75 * far) * (1.3 * fbm2(x / 340 + 5.2, z / 340 - 2.4, 3) + 0.35 * fbm2(x / 95 - 1.3, z / 95 + 7.1, 2));
     // the plain drops very slowly towards Milan (south) and the Lambro valley (east)

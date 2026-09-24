@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { EVENT } from '../event.ts';
 import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/700-italic.css';
 import '@fontsource/titillium-web/400.css';
@@ -179,7 +180,7 @@ export class PrintAtlas extends Atlas {
     this.lightCell();
     this.banner('pitexit', 'PIT EXIT', '#101216', '#ffffff', true);
     this.banner('pitin', 'PIT IN', '#101216', '#ffffff', true);
-    this.banner('podium', 'GRAN PREMIO · MONZA', '#b0001e', '#ffffff', false);
+    this.banner('podium', `${EVENT.gp} · ${EVENT.place}`, '#b0001e', '#ffffff', false);
     this.banner('paddock', 'PADDOCK CLUB', '#15181d', '#e8e8e8', false);
     this.banner('timing', 'LIVE TIMING', '#050608', '#ffd21f', false);
     this.podiumBackdrop();
@@ -328,12 +329,12 @@ export class PrintAtlas extends Atlas {
     g.fillStyle = bg;
     g.fillRect(c.x, c.y, c.w, c.h);
     if (name === 'MONZA') {
-      // tricolore band
-      g.fillStyle = '#008c45';
+      // national colours band
+      g.fillStyle = EVENT.colours[0];
       g.fillRect(c.x, c.y, c.w / 3, c.h);
-      g.fillStyle = '#f4f5f0';
+      g.fillStyle = EVENT.colours[1];
       g.fillRect(c.x + c.w / 3, c.y, c.w / 3, c.h);
-      g.fillStyle = '#cd212a';
+      g.fillStyle = EVENT.colours[2];
       g.fillRect(c.x + (2 * c.w) / 3, c.y, c.w / 3, c.h);
       g.fillStyle = 'rgba(0,0,0,0.55)';
       g.fillRect(c.x, c.y + c.h * 0.18, c.w, c.h * 0.64);
@@ -341,8 +342,9 @@ export class PrintAtlas extends Atlas {
     g.fillStyle = fg;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    fitText(g, name, (px) => `italic 700 ${px}px ${FONT}`, c.w - 50, 84);
-    g.fillText(name, c.x + c.w / 2, c.y + c.h / 2 + 4);
+    const label = name === 'MONZA' ? EVENT.place : name;
+    fitText(g, label, (px) => `italic 700 ${px}px ${FONT}`, c.w - 50, 84);
+    g.fillText(label, c.x + c.w / 2, c.y + c.h / 2 + 4);
     g.restore();
   }
 
@@ -565,9 +567,9 @@ export class PrintAtlas extends Atlas {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.font = `italic 700 88px ${FONT}`;
-    g.fillText('MONZA', c.x + c.w / 2, c.y + 100);
+    g.fillText(EVENT.place, c.x + c.w / 2, c.y + 100);
     g.font = `700 30px ${FONT}`;
-    g.fillText('GRAN PREMIO D’ITALIA', c.x + c.w / 2, c.y + 170);
+    g.fillText(EVENT.gp, c.x + c.w / 2, c.y + 170);
     g.fillStyle = '#008c45';
     g.fillRect(c.x + c.w / 2 - 90, c.y + 200, 60, 10);
     g.fillStyle = '#f4f5f0';
