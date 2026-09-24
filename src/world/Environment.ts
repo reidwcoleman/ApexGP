@@ -320,7 +320,7 @@ export function createEnvironment(
     // day or a golden evening stays readable while keeping its mood
     const skyE = THREE.MathUtils.lerp(C.skyIrr, Math.PI * deckRad * 1.15, ov);
     const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE;
-    const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.5), 0.7, 4);
+    const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, 4.5);
     gradeLook.exposure = L.exposure * adapt;
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
     sky.uniforms.uHalo.value = (L.time === 'golden' ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
