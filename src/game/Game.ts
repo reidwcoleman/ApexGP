@@ -3,7 +3,7 @@ import { Renderer } from '../core/Renderer.ts';
 import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
-import { COSTA_DEL_SOL } from '../world/Circuits.ts';
+import { MONZA } from '../world/Circuits.ts';
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment } from '../world/Environment.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
@@ -17,8 +17,12 @@ import { ReplayBuffer } from './Replay.ts';
 import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
+import { CarEffects } from '../fx/CarEffects.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
-import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings, type TimeOfDay } from '../ui/Menu.ts';
+import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
+import { Weather, planWeather, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
+import { applyWeatherUniforms } from '../world/weatherUniforms.ts';
+import { buildPitComplex, type PitComplex, type BoxState } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
@@ -30,11 +34,14 @@ type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 're
 
 const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'tv', 'tcam', 'tv', 'far'];
 
-const SMOKE_LIGHT: Record<TimeOfDay, THREE.Color> = {
-  golden: new THREE.Color(1.0, 0.86, 0.72),
-  day: new THREE.Color(1, 1, 1),
-  overcast: new THREE.Color(0.82, 0.84, 0.88),
-};
+/** colour of the light on smoke/dust for the weather */
+function smokeLight(w: WeatherState): THREE.Color {
+  const sun = w.time === 'golden' ? new THREE.Color(1.0, 0.86, 0.72) : new THREE.Color(1, 1, 1);
+  const grey = new THREE.Color(0.74, 0.77, 0.82);
+  return sun.lerp(grey, Math.min(1, w.cloud * 0.9 + w.rain * 0.3));
+}
+
+type CompoundRig = CarRig & { setCompound?: (c: string) => void };
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -47,6 +54,7 @@ export class Game {
   private track!: Track;
   private trackside!: Trackside;
   private env!: Environment;
+  private pits!: PitComplex;
   private entries: Entry[] = allEntries();
   private rigs = new Map<Entry, CarRig>();
   private views = new Map<Entry, CarView>();
@@ -54,13 +62,17 @@ export class Game {
   private race!: Race;
   private cams!: Cameras;
   private particles = new Particles();
+  private carFx = new CarEffects(this.particles);
   private hud: HUD;
   private menu: Menu;
   private state: GameState = 'boot';
   private stateTime = 0;
   private timer = new THREE.Timer();
   private mode: 'race' | 'timetrial' = 'race';
-  private time: TimeOfDay = 'golden';
+  /** the forecast for the next/current session (re-rolled for every new race) */
+  private plan!: WeatherPlan;
+  private planKey = '';
+  private readonly rigCompound = new Map<Entry, string>();
   private finishTimer = -1;
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
@@ -108,6 +120,7 @@ export class Game {
     this.fbBar = this.fbBadge.querySelector('i')!;
     this.menu = new Menu(uiRoot, {
       onSetupChange: (s) => this.applySetupPreview(s),
+      forecast: () => this.forecastLabel(),
       onStart: (mode, s) => this.startRace(mode, s),
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.resume(),
@@ -151,20 +164,27 @@ export class Game {
       /* fallback fonts are fine */
     }
     this.applySettings(this.menu.settings);
-    this.time = this.menu.setup.time;
+    this.rollWeather(this.menu.setup);
 
     progress(0.08, 'Surveying the circuit');
     await tick();
-    this.track = new Track(COSTA_DEL_SOL);
+    this.track = new Track(MONZA);
 
     progress(0.22, 'Laying asphalt, kerbs and barriers');
     await tick();
     this.trackside = buildTrackside(this.track, this.gfx);
     this.scene.add(this.trackside.group);
 
-    progress(0.42, 'Building the coast');
+    progress(0.36, 'Opening the pit lane');
     await tick();
-    this.env = createEnvironment(this.track, this.gfx, this.scene, this.time);
+    this.pits = buildPitComplex(this.track, this.gfx);
+    this.scene.add(this.pits.group);
+
+    progress(0.42, 'Growing the park');
+    await tick();
+    const w0 = new Weather(this.plan).state;
+    applyWeatherUniforms(w0);
+    this.env = createEnvironment(this.track, this.gfx, this.scene, w0);
     this.scene.add(this.env.group);
 
     progress(0.62, 'Rolling out the cars');
@@ -182,10 +202,10 @@ export class Game {
       }
     }
     this.scene.add(this.particles.group);
-    this.particles.setLight(SMOKE_LIGHT[this.time]);
+    this.particles.setLight(smokeLight(w0));
 
     this.cams = new Cameras(this.camera, this.track);
-    this.line = new RacingLineAssist(this.track, new RacingProfile(this.track, F1_SPEC));
+    this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
     this.scene.add(this.line.mesh);
     this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
 
@@ -221,7 +241,10 @@ export class Game {
       entries: this.entries,
       playerCompound: setup.compound,
       gridOrder: this.gridOrder ?? undefined,
+      weather: this.plan,
     });
+    this.particles.setLight(smokeLight(this.race.weatherState));
+    this.rigCompound.clear();
     this.control.reset();
     this.applyAssists(setup.assists);
     // show only the cars in this session
@@ -232,13 +255,31 @@ export class Game {
     }
     this.driverHidden = false;
     this.particles.clear();
+    this.carFx.reset();
     this.replay.reset(this.race);
     this.flash.reset();
     this.flashbacksUsed = 0;
     return this.race;
   }
 
+  /** roll a new forecast for the setup's weather/time choices */
+  private rollWeather(setup: RaceSetup) {
+    const laps = setup.laps;
+    this.plan = planWeather(setup.weather, setup.time, laps * 85 + 60);
+    this.planKey = `${setup.weather}/${setup.time}`;
+  }
+
+  /** what a Random choice rolled: "Rain", "Overcast → Rain" / "Golden hour" */
+  private forecastLabel(): { weather: string; time: string } {
+    if (!this.plan) return { weather: '', time: '' };
+    const p = this.plan;
+    const w = p.start === p.end ? WEATHER_LABEL[p.start] : `${WEATHER_LABEL[p.start]} → ${WEATHER_LABEL[p.end]}`;
+    return { weather: w, time: TIME_LABEL[p.time] };
+  }
+
   private toMenu() {
+    // a fresh forecast every time we come back from a session
+    if (this.state !== 'boot') this.rollWeather(this.menu.setup);
     this.state = 'menu';
     this.stateTime = 0;
     this.quali = null;
@@ -253,16 +294,13 @@ export class Game {
   }
 
   private applySetupPreview(s: RaceSetup) {
-    if (s.time !== this.time) {
-      this.time = s.time;
-      this.env.setTimeOfDay(s.time);
-      this.particles.setLight(SMOKE_LIGHT[s.time]);
-    }
+    if (`${s.weather}/${s.time}` !== this.planKey) this.rollWeather(s);
     this.makeRace('race', s);
   }
 
   private applySettings(s: Settings) {
     if (s.quality !== this.gfx.qualityLevel) this.gfx.setQuality(s.quality);
+    this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6 }[s.quality];
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
     if (this.audioReady) this.audio.setVolume(s.volume);
   }
@@ -280,7 +318,8 @@ export class Game {
     this.quali = null;
     const player = this.race.player.entry;
     const diff = DIFFICULTY[setup.difficulty].value;
-    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff) }));
+    const wf = this.race.conditionsLapFactor();
+    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff, wf) }));
     times.sort((a, b) => a.time - b.time);
     const order = times.map((t) => t.entry);
     const pos = order.indexOf(player) + 1;
@@ -292,7 +331,7 @@ export class Game {
     this.menu.showQualifying(
       times.map((t, i) => ({ pos: i + 1, entry: t.entry, isPlayer: t.entry === player, time: t.time, gap: t.time - pole })),
       pos === 1 ? 'Pole position!' : `Qualified P${pos}`,
-      valid ? `${fmtTime(time)} · ${COSTA_DEL_SOL.name}` : 'Lap deleted for track limits — you start from the back',
+      valid ? `${fmtTime(time)} · ${MONZA.name}` : 'Lap deleted for track limits — you start from the back',
       () => {
         this.gridOrder = order;
         this.startRace('race', setup);
@@ -308,11 +347,7 @@ export class Game {
     }
     this.mode = qualifying ? 'race' : mode;
     this.autopilot = null;
-    if (setup.time !== this.time) {
-      this.time = setup.time;
-      this.env.setTimeOfDay(setup.time);
-      this.particles.setLight(SMOKE_LIGHT[setup.time]);
-    }
+    if (`${setup.weather}/${setup.time}` !== this.planKey) this.rollWeather(setup);
     this.makeRace(mode, setup);
     this.hud.setup(this.race, this.track);
     this.engineer.reset(this.race);
@@ -352,8 +387,10 @@ export class Game {
     const p = this.race.player;
     const title = p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
     const laps = this.race.opts.laps;
-    const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${COSTA_DEL_SOL.name}`;
+    const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${MONZA.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
+    // the next race gets new weather
+    this.rollWeather(this.menu.setup);
     this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu(), () => this.startReplay());
   }
 
@@ -477,9 +514,13 @@ export class Game {
     this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
     const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && !race.player.finished;
     this.line.mesh.visible = showLine;
-    if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx));
+    // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
+    if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
+    applyWeatherUniforms(race.weatherState);
+    this.env.setWeather(race.weatherState);
     this.env.update(dt, this.camera);
     this.env.focusShadow(this.playerRigPos());
+    this.updatePits(dt, race);
     this.trackside.update(dt, this.camera);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
@@ -491,8 +532,9 @@ export class Game {
    * Dev/demo hook: start a session immediately, optionally with the player on
    * autopilot and the race fast-forwarded (e.g. ?demo=race&cam=tcam&skip=40).
    */
-  debugStart(opts: { mode?: 'race' | 'timetrial'; camera?: string; autopilot?: boolean; skip?: number; time?: TimeOfDay; grid?: number; laps?: number }) {
+  debugStart(opts: { mode?: 'race' | 'timetrial'; camera?: string; autopilot?: boolean; skip?: number; weather?: WeatherChoice; time?: TimeChoice; grid?: number; laps?: number }) {
     const setup = { ...this.menu.setup };
+    if (opts.weather) setup.weather = opts.weather;
     if (opts.time) setup.time = opts.time;
     if (opts.grid !== undefined) setup.grid = opts.grid;
     if (opts.laps) setup.laps = opts.laps;
@@ -605,7 +647,7 @@ export class Game {
 
   private loadRecord(): number {
     try {
-      const v = Number(localStorage.getItem('apexgp.tt.costa'));
+      const v = Number(localStorage.getItem('apexgp.tt.monza'));
       return v > 0 ? v : Infinity;
     } catch {
       return Infinity;
@@ -614,7 +656,7 @@ export class Game {
 
   private saveRecord(t: number) {
     try {
-      localStorage.setItem('apexgp.tt.costa', String(t));
+      localStorage.setItem('apexgp.tt.monza', String(t));
     } catch {
       /* storage unavailable */
     }
@@ -645,6 +687,7 @@ export class Game {
       const t = this.flash.restore(race, this.fbT);
       this.replay.truncate(t);
       this.control.reset();
+      this.carFx.reset();
       this.flashbacksUsed++;
       this.hud.flash('Flashback', `${this.flashbacksUsed} used`, '', 1.4);
     }
@@ -688,9 +731,15 @@ export class Game {
       this.driverHidden = cockpit;
       this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit);
     }
+    const w = this.race.weatherState;
+    const rainLight = w.wetness > 0.22 || w.rain > 0.08;
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
-      view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, this.time === 'overcast');
+      view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight);
+      if (this.rigCompound.get(c.entry) !== c.compound) {
+        this.rigCompound.set(c.entry, c.compound);
+        (this.rigs.get(c.entry) as CompoundRig).setCompound?.(c.compound);
+      }
     }
   }
 
@@ -702,55 +751,43 @@ export class Game {
   // ------------------------------------------------------------------ fx
 
   private effects(dt: number) {
-    const cam = this.camera.position;
-    for (const c of this.race.cars) {
-      const car = c.car;
-      const rig = this.rigs.get(c.entry)!;
-      rig.root.getWorldPosition(this.tmp);
-      if (this.tmp.distanceToSquared(cam) > 260 * 260) continue;
-      const [wx, wz] = car.worldVelocity();
-      const vel = this.tmp2.set(wx, 0, wz);
-      const speed = car.speed;
-      const emit = (amount: number) => Math.random() < amount * dt * 60;
-      const wheelPos = (a: THREE.Object3D) => a.getWorldPosition(this.tmp);
+    this.carFx.update(dt, this.race, this.rigs, this.camera.position, this.race.weather.state);
+  }
 
-      // lock-ups & wheelspin → tyre smoke (sparingly: F1 tyres rarely smoke)
-      if (car.lockup > 0.35 && speed > 8 && emit(car.lockup * 0.5)) {
-        this.particles.smoke(wheelPos(rig.anchors.wheelFL), vel, car.lockup);
-        this.particles.smoke(wheelPos(rig.anchors.wheelFR), vel, car.lockup);
-      }
-      if (car.wheelspin > 0.3 && emit(car.wheelspin * 0.6)) {
-        this.particles.smoke(wheelPos(rig.anchors.wheelRL), vel, car.wheelspin);
-        this.particles.smoke(wheelPos(rig.anchors.wheelRR), vel, car.wheelspin);
-      }
-      // big slides only
-      const slide = Math.max(0, car.slipRear - 2.2) + Math.max(0, car.slipFront - 2.6);
-      if (slide > 0.2 && speed > 10 && emit(Math.min(0.4, slide * 0.3))) {
-        this.particles.smoke(wheelPos(rig.anchors.wheelRL), vel, Math.min(1, slide) * 0.6);
-        this.particles.smoke(wheelPos(rig.anchors.wheelRR), vel, Math.min(1, slide) * 0.6);
-      }
-      // dirt off track
-      const wheels: [number, THREE.Object3D][] = [
-        [car.surfaceFL, rig.anchors.wheelFL],
-        [car.surfaceFR, rig.anchors.wheelFR],
-        [car.surfaceRL, rig.anchors.wheelRL],
-        [car.surfaceRR, rig.anchors.wheelRR],
-      ];
-      for (const [sf, a] of wheels) {
-        if ((sf === SURF.GRASS || sf === SURF.GRAVEL) && speed > 6 && emit(Math.min(1, speed / 30) * (sf === SURF.GRAVEL ? 0.7 : 0.3))) {
-          this.particles.dust(wheelPos(a), vel, sf === SURF.GRAVEL, Math.min(1, speed / 25));
-        }
-      }
-      // sparks: plank on the kerbs / compressions at high speed, walls, contact
-      const hi = speed > 62;
-      if ((hi && car.onKerb && emit(0.6)) || (speed > 75 && car.heave < -0.02 && emit(0.25)) || (car.contact.wallHit > 1 && emit(1)) || (c.contactTimer > 0 && speed > 20 && emit(0.8))) {
-        rig.root.getWorldPosition(this.tmp);
-        const back = this.tmp2.set(Math.sin(car.yaw), 0, Math.cos(car.yaw)).multiplyScalar(-0.6);
-        this.tmp.add(back);
-        this.particles.sparks(this.tmp, vel.set(wx, 0, wz), 6 + Math.floor(Math.random() * 8));
-      }
-      if (c.contactTimer > 0) c.contactTimer -= dt;
+  /** pit crews: which boxes are expecting, servicing or releasing a car */
+  private readonly boxState: BoxState[] = [];
+  private readonly boxProgress: number[] = [];
+  private readonly releaseTimer = new Map<number, number>();
+  private updatePits(dt: number, race: Race) {
+    const rank: Record<BoxState, number> = { idle: 0, release: 1, ready: 2, service: 3 };
+    for (let k = 0; k < TEAMS.length; k++) {
+      this.boxState[k] = 'idle';
+      this.boxProgress[k] = 0;
     }
+    for (const c of race.cars) {
+      const k = TEAMS.indexOf(c.entry.team);
+      let st: BoxState = 'idle';
+      let prog = 0;
+      const ps = c.pit;
+      if (ps.phase === 'in') st = 'ready';
+      else if (ps.phase === 'stop') {
+        st = 'service';
+        prog = Math.min(1, ps.timer / Math.max(0.1, ps.stopTime));
+      } else if (ps.phase === 'out') {
+        st = 'release';
+        this.releaseTimer.set(c.id, 1.5);
+      } else {
+        const t = (this.releaseTimer.get(c.id) ?? 0) - dt;
+        this.releaseTimer.set(c.id, t);
+        if (t > 0) st = 'release';
+      }
+      if (rank[st] > rank[this.boxState[k]]) {
+        this.boxState[k] = st;
+        this.boxProgress[k] = prog;
+      }
+    }
+    for (let k = 0; k < TEAMS.length; k++) this.pits.setBox(k, this.boxState[k], this.boxProgress[k]);
+    this.pits.update(dt, this.camera);
   }
 
   private speedFx() {
@@ -760,6 +797,13 @@ export class Game {
     const k = onboard ? Math.max(0, Math.min(1, (kmh - 170) / 170)) : 0;
     this.gfx.setSpeedBlur(k * k * 0.014 + (car.ersDeploying ? 0.002 : 0));
     this.gfx.setAberration(k * 0.0011);
+    // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
+    const w = this.race.weatherState;
+    const cam = this.cams.mode;
+    const lensCam = cam === 'cockpit' || cam === 'tcam' || cam === 'nose' ? 1 : cam === 'chase' ? 0.35 : 0;
+    const spray = car.dirty * Math.min(1, car.speed / 40) * w.wetness;
+    const lens = lensCam * Math.min(1, w.rain * (0.55 + 0.45 * Math.min(1, car.speed / 45)) + spray * 0.8);
+    (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0);
   }
 
   // ------------------------------------------------------------------ audio
@@ -768,7 +812,9 @@ export class Game {
     if (!this.audioReady) return;
     const a = this.audio;
     const race = this.race;
+    const w = race.weatherState;
     if (this.state === 'menu' || this.state === 'results' || this.state === 'paused') {
+      a.weather(this.state === 'paused' ? 0 : w.rain, w.wetness, 0, this.state === 'paused' ? 0 : w.lightning);
       a.updatePlayer({ rpm: 4200, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false });
       a.updateOpponents([]);
       a.update(dt);
@@ -779,6 +825,7 @@ export class Game {
     const car = carOf(race.player);
     a.setView(this.cams.mode === 'cockpit' || this.cams.mode === 'tcam' || this.cams.mode === 'nose' ? 'cockpit' : this.cams.mode === 'tv' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
+    a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning);
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
     const surf = Math.max(car.surfaceFL, car.surfaceFR, car.surfaceRL, car.surfaceRR);
     a.updatePlayer({
@@ -844,8 +891,25 @@ export class Game {
     const gfx = this.gfx;
     if (this.fpsAvg < 52) {
       if (this.headroom < 3 && gfx.dynamicScale < this.scaleCeiling) this.scaleCeiling = gfx.dynamicScale - 0.01;
-      gfx.setDynamicScale(gfx.dynamicScale - 0.07);
+      gfx.setDynamicScale(gfx.dynamicScale - (this.fpsAvg < 40 ? 0.12 : 0.07));
       this.headroom = 0;
+      // still slow at the lowest resolution for a few seconds: step the graphics level down
+      // (only while the player hasn't chosen one themselves)
+      const st = this.menu.settings;
+      if (gfx.dynamicScale <= 0.56 && this.fpsAvg < 45 && st.autoQuality && st.quality !== 'low' && this.state === 'race') {
+        if (++this.slowAtFloor >= 4) {
+          this.slowAtFloor = 0;
+          const order = ['low', 'medium', 'high', 'ultra'] as const;
+          st.quality = order[order.indexOf(st.quality) - 1];
+          try {
+            localStorage.setItem('apexgp.settings', JSON.stringify(st));
+          } catch {
+            /* storage unavailable */
+          }
+          this.applySettings(st);
+          this.scaleCeiling = 1;
+        }
+      } else this.slowAtFloor = 0;
     } else if (this.fpsAvg > 58.5) {
       this.headroom++;
       if (this.headroom >= 4 && gfx.dynamicScale < this.scaleCeiling) {
@@ -855,5 +919,6 @@ export class Game {
     }
   }
   private headroom = 0;
+  private slowAtFloor = 0;
   private scaleCeiling = 1;
 }

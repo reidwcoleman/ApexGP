@@ -199,25 +199,16 @@ export class Track {
     }
 
     // Race geometry.
-    const segS = (segIdx: number, frac: number) => (d.segStart[segIdx] + frac * d.segLen[segIdx]) % n;
     this.startS = def.startOffset % n;
     this.sectorS = [
       (this.startS + def.sectors[0] * n) % n,
       (this.startS + def.sectors[1] * n) % n,
     ];
-    this.drs = def.drs.map((z) => ({
-      detect: segS(z.detect[0], z.detect[1]),
-      start: segS(z.start[0], z.start[1]),
-      end: segS(z.end[0], z.end[1]),
-    }));
-
-    // Pit lane: most of segment 0.
-    const s0 = d.segStart[0];
-    const L0 = d.segLen[0];
+    this.drs = def.drs.map((z) => ({ detect: z.detect % n, start: z.start % n, end: z.end % n }));
     this.pit = {
       side: def.pitSide,
-      sStart: s0 + 70,
-      sEnd: s0 + L0 - 90,
+      sStart: def.pit.start,
+      sEnd: def.pit.end,
       wallOffset: def.halfWidth + 3.2,
       laneInner: def.halfWidth + 4.2,
       laneOuter: def.halfWidth + 16,
@@ -685,6 +676,22 @@ export class Track {
     for (let i = 0; i < n; i++) {
       this.barrierL[i] = Math.min(L[i], Ls[i] + 0.5);
       this.barrierR[i] = Math.min(R[i], Rs[i] + 0.5);
+    }
+    // Walls may not swing in or out faster than ~0.45 m per metre of track: a
+    // deep run-off meeting the inside cap of the next corner otherwise makes the
+    // offset line fold back on itself. Only ever pulls walls in (min-envelope).
+    const SLOPE = 0.45;
+    for (const arr of [this.barrierL, this.barrierR]) {
+      for (let pass = 0; pass < 2; pass++) {
+        for (let k = 0; k < n; k++) {
+          const i = k, p = (k - 1 + n) % n;
+          if (arr[i] > arr[p] + SLOPE) arr[i] = arr[p] + SLOPE;
+        }
+        for (let k = n - 1; k >= 0; k--) {
+          const i = k, q = (k + 1) % n;
+          if (arr[i] > arr[q] + SLOPE) arr[i] = arr[q] + SLOPE;
+        }
+      }
     }
     for (let s = Math.floor(this.pit.sStart); s <= this.pit.sEnd; s++) {
       const i = ((s % n) + n) % n;

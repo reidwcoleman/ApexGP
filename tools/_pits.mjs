@@ -1,12 +1,13 @@
 // 12-lap race with pit stops: check AI strategy, pit timing, compounds, classification.
 import { Track } from '../src/world/Track.ts';
 import { CIRCUITS } from '../src/world/Circuits.ts';
+import { planWeather } from '../src/world/Weather.ts';
 import { Race } from '../src/race/Race.ts';
 import { allEntries } from '../src/race/Teams.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';
 const track = new Track(CIRCUITS[0]);
 const entries = allEntries();
-const race = new Race(track, { mode: 'race', laps: 12, difficulty: 0.97, playerEntry: entries[4], playerGrid: 9, entries, playerCompound: 'soft' });
+const race = new Race(track, { mode: 'race', laps: 12, difficulty: 0.97, playerEntry: entries[4], playerGrid: 9, entries, playerCompound: 'soft', weather: planWeather('clear', 'afternoon', 1000, 1) });
 const auto = new AIDriver(0.985, 0.6); auto.startFrom(race.player.car, track);
 race.startLights();
 const kinds = {};

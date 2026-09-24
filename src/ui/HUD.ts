@@ -2,6 +2,18 @@ import type { Race, RaceEvent, Competitor } from '../race/Race.ts';
 import type { Track } from '../world/Track.ts';
 import { uiColor } from '../race/Teams.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
+import { WEATHER_LABEL, type WeatherKind } from '../world/Weather.ts';
+
+/** 16px line icons for the weather row (stroke = currentColor) */
+const WX_ICON: Record<WeatherKind, string> = {
+  clear: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/>',
+  cloudy: '<path d="M6 3.2a2.6 2.6 0 0 1 4.3 1.2"/><path d="M4.5 13h7a2.6 2.6 0 0 0 .3-5.2 3.6 3.6 0 0 0-6.9-.6A2.9 2.9 0 0 0 4.5 13z"/>',
+  overcast: '<path d="M4 12.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 12.5z"/>',
+  drizzle: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M6 12v1M10 12v1"/>',
+  rain: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M5 11.5l-.8 2.5M8 11.5l-.8 2.5M11 11.5l-.8 2.5"/>',
+  storm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M8.6 10.5 6.8 13h2.4l-1.6 2.5"/>',
+};
+const isWet = (k: WeatherKind) => k === 'drizzle' || k === 'rain' || k === 'storm';
 
 export function fmtTime(t: number, plusSign = false): string {
   if (!isFinite(t) || t <= 0) return '—';
@@ -63,6 +75,10 @@ export class HUD {
   private hint: HTMLDivElement;
   private camLabel: HTMLDivElement;
   private statusEl!: HTMLDivElement;
+  private wxIcon!: HTMLElement;
+  private wxLabel!: HTMLElement;
+  private wxInfo!: HTMLElement;
+  private wxKind: WeatherKind | '' = '';
   private pitEl!: HTMLSpanElement;
   private tyreEls: SVGRectElement[] = [];
   private wingEl!: SVGRectElement;
@@ -101,6 +117,11 @@ export class HUD {
     const l2 = el('div', 'tline', timing);
     el('span', '', l2, 'Best');
     this.bestEl = el('span', '', l2, '—');
+    // weather: now, track temperature, and a heads-up when it's about to change
+    const wx = el('div', 'wx', timing);
+    this.wxIcon = el('span', 'wxi', wx);
+    this.wxLabel = el('span', 'wxl', wx, '');
+    this.wxInfo = el('span', 'wxr', wx, '');
 
     // cluster
     const cl = el('div', 'cluster glass', this.root);
@@ -247,7 +268,7 @@ export class HUD {
     }
   }
 
-  flash(title: string, sub = '', tone: '' | 'purple' | 'green' | 'red' = '', secs = 2.6) {
+  flash(title: string, sub = '', tone: '' | 'purple' | 'green' | 'red' | 'blue' = '', secs = 2.6) {
     this.banner.className = `banner glass show ${tone}`;
     this.banner.innerHTML = `<span class="k">${title}</span>${sub ? `<span class="sub">${sub}</span>` : ''}`;
     this.bannerTimer = secs;
@@ -288,6 +309,9 @@ export class HUD {
           break;
         case 'drs-enabled':
           this.flash('DRS enabled', 'press Space in the zone', 'green', 2);
+          break;
+        case 'blue-flag':
+          if (e.car === race.player.id) this.flash('Blue flag', 'let the leaders through', 'blue', 2.4);
           break;
         case 'track-limits':
           this.flash('Track limits', e.value ? `warning ${e.value} of 3 · lap time deleted` : 'lap time deleted', 'red', 2.6);
@@ -351,11 +375,13 @@ export class HUD {
     const zoneOn = p.drsEligible;
     this.drsEl.className = 'drs' + (car.drsAnim > 0.5 ? ' open' : zoneOn ? ' avail' : '');
 
-    // tyres & damage (colour = meaning: fine / worn / critical)
-    const tone = (w: number) => (w < 0.4 ? 'ok' : w < 0.7 ? 'warn' : 'bad');
+    // tyres, as in the F1 game: colour = temperature (cold / in the window / hot / overheating),
+    // the number underneath = life left; wing colour = damage
+    const opt = car.tyreOpt;
+    const tone = (T: number) => (T < opt - 22 ? 'cold' : T <= opt + 14 ? 'ok' : T <= opt + 26 ? 'warn' : 'bad');
     let avg = 0;
     for (let i = 0; i < 4; i++) {
-      const cls = 'ty ' + tone(car.wear[i]);
+      const cls = 'ty ' + tone(car.tyreTemp[i]);
       if (this.tyreEls[i].getAttribute('class') !== cls) this.tyreEls[i].setAttribute('class', cls);
       avg += car.wear[i] / 4;
     }
@@ -367,6 +393,19 @@ export class HUD {
       this.wearEl.innerHTML = wearHtml;
       this.lastText.set(this.wearEl, wearHtml);
     }
+    // weather row
+    const w = race.weatherState;
+    if (w.kind !== this.wxKind) {
+      this.wxKind = w.kind;
+      this.wxIcon.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${WX_ICON[w.kind]}</svg>`;
+      this.setText(this.wxLabel, WEATHER_LABEL[w.kind]);
+    }
+    const soon = race.weather.forecast(150);
+    const change = isWet(soon) !== isWet(w.kind) && !race.isTimeTrial;
+    const info = change ? (isWet(soon) ? 'Rain coming' : 'Drying soon') : `Track ${Math.round(w.trackTemp)}°`;
+    this.setText(this.wxInfo, info);
+    this.wxInfo.classList.toggle('warn', change);
+
     // pit status in the cluster: BOX when requested, PIT in the lane
     const pitTxt = p.pit.phase !== 'none' ? 'PIT' : race.playerPitRequest ? 'BOX' : '';
     this.setText(this.pitEl, pitTxt);

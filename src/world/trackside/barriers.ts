@@ -188,7 +188,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
 
   // ------------------------------------------------------------------ segments: merge rows while nothing changes
   const same = (a: number, b: number) =>
-    P.kind[a] === P.kind[b] && P.front[a] === P.front[b] && P.fence[a] === P.fence[b] && P.palette[a] === P.palette[b] && Math.abs(P.backOff[a] - P.backOff[b]) < 0.02;
+    P.kind[a] === P.kind[b] && P.front[a] === P.front[b] && P.fence[a] === P.fence[b] && P.gate[a] === P.gate[b] && P.palette[a] === P.palette[b] && Math.abs(P.backOff[a] - P.backOff[b]) < 0.02;
   const segs: [number, number][] = [];
   for (let r = 0; r < n; ) {
     if (jump(r)) {
@@ -214,7 +214,9 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     const prevOk = segs[(si - 1 + segs.length) % segs.length][1] >= 0;
     const nextOk = segs[(si + 1) % segs.length][1] >= 0;
     const kind = P.kind[i];
+    if (kind === 'none') continue;
     const front = P.front[i];
+    const gate = P.gate[i] === 1;
     const xb0 = P.backOff[i], xb1 = P.backOff[iB];
     const props = cs.get(i, 'props');
     const print = cs.get(i, 'print');
@@ -252,18 +254,19 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       const capB = kind === 'pitwall' ? print : props;
       if (!isWallK(P.kind[W(rA - 1)]) || !prevOk) cap(capB, rA, xb0, xb0 + T, 0, H, -1, kind === 'pitwall' ? chev : undefined);
       if (!isWallK(P.kind[iB]) || !nextOk) cap(capB, rB, xb1, xb1 + T, 0, H, 1, kind === 'pitwall' ? chev : undefined);
-    } else {
+    } else if (!gate) {
       // armco: two W-beam rails
       props.color(0xaeb2b6).mat(0.36, 0.85, 0);
       for (const y0 of [0.46, 0.83]) armcoRail(props, rA, rB, y0, xb0, xb1);
     }
 
     // ---------------- fence (behind the backing wall)
-    if (P.fence[i]) {
+    if (P.fence[i] && !gate) {
       const fx0 = xb0 + 0.62, fx1 = xb1 + 0.62;
       const fb = cs.get(i, 'fence');
       const pl0 = path.len[rA], pl1 = path.len[rB];
-      const HV = 3.6, OH = 0.75, OT = 4.35;
+      const tall = P.fence[i] === 2;
+      const HV = tall ? 5.2 : 3.6, OH = tall ? 0.9 : 0.75, OT = tall ? 6.05 : 4.35;
       at(rA, fx0, 0, V[0]); at(rB, fx1, 0, V[1]); at(rB, fx1, HV, V[2]); at(rA, fx0, HV, V[3]);
       const u0 = pl0 / 0.5, u1 = pl1 / 0.5;
       const nx = -path.ox[rA], nz = -path.oz[rA];
@@ -288,7 +291,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
   for (let p = 1; p < total; p += 2.5) {
     const rf = rowAt(p);
     const i = W(Math.floor(rf));
-    if (P.kind[i] !== 'armco') continue;
+    if (P.kind[i] !== 'armco' || P.gate[i]) continue;
     const props = cs.get(i, 'props');
     props.color(0x8f9398).mat(0.45, 0.8, 0);
     frameAt(rf, P.backOff[i] + 0.2, 0);
@@ -302,15 +305,62 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     const rf = rowAt(p);
     const i = W(Math.floor(rf));
     if (!P.fence[i]) continue;
+    if (P.gate[i]) continue;
     const props = cs.get(i, 'props');
     props.color(0x4a4e52).mat(0.5, 0.7, 0);
     const x = P.backOff[i] + 0.66;
+    const tall = P.fence[i] === 2;
     atF(rf, x, 0, V[0]);
-    atF(rf, x, 3.62, V[1]);
-    atF(rf, x - 0.78, 4.4, V[2]);
+    atF(rf, x, tall ? 5.22 : 3.62, V[1]);
+    atF(rf, x - (tall ? 0.93 : 0.78), tall ? 6.1 : 4.4, V[2]);
     beam(props, V[0], V[1], 0.11, 0.11);
     beam(props, V[1], V[2], 0.08, 0.08);
   }
+  // marshal gates: heavy posts either side, a closed mesh gate set back, and an overlapping rail behind the opening
+  for (let r = 0; r < n; r++) {
+    if (!P.gate[r] || P.gate[W(r - 1)]) continue;
+    let e = r;
+    while (P.gate[W(e + 1)] && e - r < 10) e++;
+    const rEnd = Math.min(n, e + 1);
+    const i = W(r);
+    const props = cs.get(i, 'props');
+    const fb = cs.get(i, 'fence');
+    const x = P.backOff[i] + 0.66;
+    props.color(0x3c4044).mat(0.5, 0.7, 0);
+    for (const rr of [r, rEnd]) {
+      atF(rr, x, 0, V[0]);
+      atF(rr, x, 3.9, V[1]);
+      beam(props, V[0], V[1], 0.16, 0.16);
+    }
+    // gate leaf: frame + mesh, set 0.9 m back from the fence line
+    const gx = x + 0.9;
+    props.color(0x6a6e72).mat(0.45, 0.75, 0);
+    for (const y of [0.1, 2.3]) {
+      atF(r, gx, y, V[0]);
+      atF(rEnd, gx, y, V[1]);
+      beam(props, V[0], V[1], 0.06, 0.06);
+    }
+    for (const rr of [r, rEnd]) {
+      atF(rr, gx, 0.05, V[0]);
+      atF(rr, gx, 2.35, V[1]);
+      beam(props, V[0], V[1], 0.06, 0.06);
+    }
+    atF(r, gx, 0.1, V[0]); atF(rEnd, gx, 0.1, V[1]); atF(rEnd, gx, 2.3, V[2]); atF(r, gx, 2.3, V[3]);
+    const nx = -path.ox[r], nz = -path.oz[r];
+    const u0 = path.len[r] / 0.5, u1 = path.len[rEnd] / 0.5;
+    const a = fb.v(V[0].x, V[0].y, V[0].z, nx, 0, nz, u0, 0.03);
+    const c = fb.v(V[1].x, V[1].y, V[1].z, nx, 0, nz, u1, 0.03);
+    const d = fb.v(V[2].x, V[2].y, V[2].z, nx, 0, nz, u1, 0.58);
+    const f = fb.v(V[3].x, V[3].y, V[3].z, nx, 0, nz, u0, 0.58);
+    fb.quadN(a, c, d, f, nx, 0, nz);
+    // overlapping armco section behind the gap (the classic staggered opening)
+    if (P.kind[i] === 'armco') {
+      const r0 = Math.max(0, r - 3), r1 = Math.min(n, rEnd + 3);
+      props.color(0xaeb2b6).mat(0.36, 0.85, 0);
+      for (let q = r0; q < r1; q++) for (const y0 of [0.46, 0.83]) armcoRail(props, q, q + 1, y0, P.backOff[W(q)] + 2.2, P.backOff[W(q + 1)] + 2.2);
+    }
+  }
+
   // TecPro blocks every 1.5 m
   let blockIdx = 0;
   for (let p = 0.75; p < total; p += 1.5) {
@@ -344,7 +394,16 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     const print = cs.get(i, 'print');
     print.rgb(1, 1, 1).mat(0.6, 0, 0);
     const c0 = adCell(k * 3, sd * 29 + 7);
-    const cell = sd > 0 ? { u0: c0.u1, u1: c0.u0, v0: c0.v0, v1: c0.v1 } : c0;
+    // read left→right for someone on the track: their right is +tangent on the left side, −tangent on the right.
+    // (Measured on the actual banner ends, so it stays right where the barrier line folds back around a tight apex.)
+    atF(r0, 0, 0, V[0]);
+    atF(r1, 0, 0, V[1]);
+    const tk = W(Math.floor(r0));
+    const along = (V[1].x - V[0].x) * ctx.track.tx[tk] + (V[1].z - V[0].z) * ctx.track.tz[tk];
+    // skip where the barrier line folds round a tight apex (it no longer runs alongside the track)
+    if (Math.abs(along) < 0.8 * Math.hypot(V[1].x - V[0].x, V[1].z - V[0].z)) continue;
+    const flip = along * -sd < 0;
+    const cell = flip ? { u0: c0.u1, u1: c0.u0, v0: c0.v0, v1: c0.v1 } : c0;
     const pieces = 3;
     for (let q = 0; q < pieces; q++) {
       const fa = q / pieces, fb = (q + 1) / pieces;
@@ -352,8 +411,9 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       const xa = P.backOff[W(Math.floor(ra))] + 0.58, xb = P.backOff[W(Math.floor(rb))] + 0.58;
       atF(ra, xa, 1.25, V[0]); atF(rb, xb, 1.25, V[1]); atF(rb, xb, 2.45, V[2]); atF(ra, xa, 2.45, V[3]);
       const ua = cell.u0 + (cell.u1 - cell.u0) * fa, ub = cell.u0 + (cell.u1 - cell.u0) * fb;
-      const rr = Math.floor(ra);
-      const nx = -path.ox[rr], nz = -path.oz[rr];
+      const rr = W(Math.floor(ra));
+      // face the track (its centreline), whatever the barrier line is doing
+      const nx = -ctx.track.rx[rr] * sd, nz = -ctx.track.rz[rr] * sd;
       const a = print.v(V[0].x, V[0].y, V[0].z, nx, 0, nz, ua, cell.v0);
       const c = print.v(V[1].x, V[1].y, V[1].z, nx, 0, nz, ub, cell.v0);
       const d = print.v(V[2].x, V[2].y, V[2].z, nx, 0, nz, ub, cell.v1);

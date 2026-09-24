@@ -1,0 +1,16 @@
+import { Track } from '../src/world/Track.ts';
+import { MONZA } from '../src/world/Circuits.ts';
+import { WorldMap } from '../src/world/env/worldmap.ts';
+import { planLayout } from '../src/world/env/layout.ts';
+const t = new Track(MONZA);
+let t0 = performance.now();
+const lap = (k) => { const n = performance.now(); console.log(k.padEnd(10), (n - t0).toFixed(0), 'ms'); t0 = n; };
+const map = new WorldMap(t); lap('map');
+const layout = planLayout(t, map); lap('layout');
+map.bakeMasks(); lap('forest');
+map.bake(); lap('heights'); console.log(map.timings);
+let c = 0; for (let i = 0; i < 200000; i++) { c += map.pathDistance(-500 + (i % 400) * 3, -900 + Math.floor(i / 400) * 4).d; } lap('200k pathDist');
+c = 0; for (let i = 0; i < 200000; i++) { c += map.trackClearance(-500 + (i % 400) * 3, -900 + Math.floor(i / 400) * 4); } lap('200k clearance');
+c = 0; for (let i = 0; i < 200000; i++) { c += map.excluded(-500 + (i % 400) * 3, -900 + Math.floor(i / 400) * 4, 1) ? 1 : 0; } lap('200k excluded');
+c = 0; for (let i = 0; i < 200000; i++) { c += map.ovalClearance(-500 + (i % 400) * 3, -900 + Math.floor(i / 400) * 4); } lap('200k oval');
+c = 0; for (let i = 0; i < 20000; i++) { c += map.inPitZone(-600 + (i % 100) * 2, -100 + Math.floor(i / 100) * 4, 8) ? 1 : 0; } lap('20k pitzone');

@@ -28,6 +28,7 @@ const PRESETS = process.env.MATRIX ? {
   pro: { assists: { traction: 'off', abs: false, stability: false, autoGear: true }, aids: { steeringAssist: false, brakingAssist: 'off', steeringMode: 'rate' } },
 };
 
+const cornerOf = (s) => { let b = track.corners[0], bd = 1e9; for (const c of track.corners) { const d = Math.abs(track.delta(c.sApex, s)); if (d < bd) { bd = d; b = c; } } return b.name; };
 function run(name, preset, seed) {
   let rnd = seed;
   const rand = () => ((rnd = (rnd * 16807) % 2147483647) / 2147483647);
@@ -47,6 +48,8 @@ function run(name, preset, seed) {
   let decisionT = 0;
   const hist = [];
   let brakeMargin = 1;
+  const where = {}, whereOff = {};
+  let wallTraced = false;
   while (times.length < LAPS && t < LAPS * 140 + 20) {
     // human decisions every ~50 ms, applied after a reaction delay
     decisionT -= DT;
@@ -85,13 +88,14 @@ function run(name, preset, seed) {
     const inp = pc.update(DT, raw, car, track, profile);
     car.step(DT, inp, track, false);
     t += DT;
-    if (car.contact.wallHit > 1) walls++;
-    if (car.offTrack && !wasOff) offs++;
+    if (car.contact.wallHit > 1 && process.env.WALLTRACE && !wallTraced) { wallTraced = true; console.log('  WALL at', cornerOf(car.s), 's', car.s.toFixed(0), 'lat', car.lateral.toFixed(1)); for (const h of hist) console.log('     ', h.join(' ')); }
+    if (car.contact.wallHit > 1) { walls++; if (process.env.WHERE) where[cornerOf(car.s)] = (where[cornerOf(car.s)] ?? 0) + 1; }
+    if (car.offTrack && !wasOff) { offs++; if (process.env.WHERE) whereOff[cornerOf(car.s)] = (whereOff[cornerOf(car.s)] ?? 0) + 1; }
     wasOff = car.offTrack;
     const beta = Math.abs(Math.atan2(car.vy, Math.max(1, Math.abs(car.vx))));
     maxBeta = Math.max(maxBeta, beta);
     if (beta > 0.6 && !spinning) { spins++; if (process.env.TRACE && name === process.env.TRACE) console.log('  spin at s', car.s.toFixed(0)); for (const h of hist) console.log('     ', h.join(' ')); }
-    if (Math.round(t / DT) % 15 === 0) hist.push([(car.vx * 3.6).toFixed(0), 'T' + raw.throttle, 'B' + raw.brake, 'S' + raw.steer, 'δ' + inp.steer.toFixed(3), 'β' + (Math.atan2(car.vy, Math.max(1, car.vx)) * 57.3).toFixed(0), 'r' + car.r.toFixed(2), 'sF' + car.slipFront.toFixed(1), 'sR' + car.slipRear.toFixed(1), 'g' + car.gear, car.surface.join('')]);
+    if (Math.round(t / DT) % 15 === 0) hist.push(['s' + car.s.toFixed(0), 'lat' + car.lateral.toFixed(1), 'rl' + track.racingLineAt(car.s).toFixed(1), (car.vx * 3.6).toFixed(0), 'T' + raw.throttle, 'B' + raw.brake, 'S' + raw.steer, 'δ' + inp.steer.toFixed(3), 'β' + (Math.atan2(car.vy, Math.max(1, car.vx)) * 57.3).toFixed(0), 'r' + car.r.toFixed(2), 'sF' + car.slipFront.toFixed(1), 'sR' + car.slipRear.toFixed(1), 'g' + car.gear, car.surface.join('')]);
     if (hist.length > 18) hist.shift();
     spinning = beta > 0.6;
     // recover like a player would after a spin: reset onto the line
@@ -109,6 +113,7 @@ function run(name, preset, seed) {
     }
     lastLd = ld;
   }
+  if (process.env.WHERE) console.log('   walls', JSON.stringify(where), 'offs', JSON.stringify(whereOff));
   console.log(`${name.padEnd(15)} laps ${times.length}  times ${times.map((x) => x.toFixed(1)).join(' ').padEnd(12)} offTrack ${offs}  wallHits ${walls}  spins ${spins}  max β ${(maxBeta * 57.3).toFixed(0)}°  key flips/s ${(keyFlips / t).toFixed(1)}`);
 }
 

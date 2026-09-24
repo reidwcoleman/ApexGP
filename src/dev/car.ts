@@ -3,13 +3,16 @@
  *   ?team=<id>&seat=0|1   livery (default rossa, seat 0)
  *   ?grid=1               all 10 teams in two rows
  *   ?spin=1               spin wheels + sweep steering     ?speed=<m/s> fixed wheel speed (blur)
- *   ?drs=1  ?brake=1  ?rain=1  ?detail=0|1|2  ?driver=0  ?yaw=<deg>
+ *   ?drs=1  ?brake=1  ?rain=1 (rain light)  ?detail=0|1|2  ?driver=0  ?yaw=<deg>
+ *   ?compound=soft|medium|hard|inter|wet   tyres (grid: ?compound=all cycles them)
+ *   ?wet=0.8  ?rainfall=0.7                weather uniforms (wet paint/carbon/tyres)
  */
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { createDevStage, studioLighting } from './devkit.ts';
 import { TEAMS } from '../race/Teams.ts';
-import { createCar, preloadCarAssets, carTriangles, type CarRig } from '../car/CarModel.ts';
+import { createCar, preloadCarAssets, carTriangles, type CarRig, type Compound } from '../car/CarModel.ts';
+import { weatherUniforms } from '../world/weatherUniforms.ts';
 
 const grid = new URLSearchParams(location.search).get('grid') === '1';
 const stage = createDevStage({
@@ -116,6 +119,14 @@ if (P.get('hide')) {
       if (m && m.name.includes(h)) m.visible = false;
     });
 }
+weatherUniforms.uWetness.value = Number(P.get('wet') ?? 0);
+weatherUniforms.uRain.value = Number(P.get('rainfall') ?? P.get('wet') ?? 0);
+const ALL: Compound[] = ['soft', 'medium', 'hard', 'inter', 'wet'];
+cars.forEach((c, i) => {
+  const cp = P.get('compound');
+  if (cp === 'all') c.setCompound(ALL[i % ALL.length]);
+  else if (cp) c.setCompound(cp as Compound);
+});
 for (const c of cars) {
   c.setDetail(detail);
   c.setDrs(P.get('drs') === '1' ? 1 : 0);

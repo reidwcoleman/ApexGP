@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GRAVEL_EDGE, SURF, VERGE } from '../Track.ts';
 import type { GeoBuilder } from './builder.ts';
 import type { Ctx, SidePlan } from './context.ts';
-import { Z_KERB, Z_PIT, Z_ROAD, Z_RUNOFF, Z_VERGE } from './materials.ts';
+import { Z_KERB, Z_ROAD, Z_RUNOFF, Z_VERGE } from './materials.ts';
 
 /**
  * Ground ribbons: road, kerbs, painted verge, run-off (tarmac / gravel / grass),
@@ -12,16 +12,22 @@ import { Z_KERB, Z_PIT, Z_ROAD, Z_RUNOFF, Z_VERGE } from './materials.ts';
  * cross-section of sample i, exactly like Track.surfaceAt(), so what you see is
  * what the physics feels. Continuous quantities (barrier distance) are
  * interpolated between the two rows.
+ *
+ * On the pit side of the main straight (Ctx.pitOwned) only the road is built:
+ * the pit module owns everything beyond its edge there.
  */
 
 const UP = new THREE.Vector3();
 
-// kerb cross-section: fraction of width → height (m)
-const KERB_X = [0, 0.05, 0.16, 0.32, 0.84, 0.93, 1.0];
-const KERB_H = [0, 0.012, 0.036, 0.05, 0.05, 0.03, 0.0];
+// Monza kerb cross-section: fraction of width → height (m). A short lip at the
+// road edge, a ramp up to a 45 mm ridged top, a rounded fall-off at the back.
+const KERB_X = [0, 0.03, 0.1, 0.2, 0.3, 0.86, 0.92, 0.97, 1.0];
+const KERB_H = [0, 0.008, 0.022, 0.036, 0.045, 0.045, 0.036, 0.015, 0.0];
+// the wide exit kerbs are flatter (cars use all of them)
+const KERBW_H = [0, 0.006, 0.016, 0.026, 0.032, 0.032, 0.026, 0.012, 0.0];
 
-const GRASS_Y = -0.03;
-const GRAVEL_Y = -0.012;
+const GRASS_Y = -0.035;
+const GRAVEL_Y = -0.02;
 
 export function buildSurfaces(ctx: Ctx) {
   const t = ctx.track;
@@ -52,12 +58,13 @@ export function buildSurfaces(ctx: Ctx) {
     b.quadN(A, B, C, D, UP.x, UP.y, UP.z);
   };
 
-  // ---------------------------------------------------------------- road
+  // ---------------------------------------------------------------- road (two quads across so the crown/camber can be lit)
   for (let i = 0; i < n; i++) {
     const b = cs.get(i, 'asphalt');
     const hw0 = t.halfWidth[i];
     const hw1 = t.halfWidth[(i + 1) % n];
-    band(b, i, -hw0, hw0, -hw1, hw1, 0, (r) => setRoadAttr(b, r, Z_ROAD, 0, 0));
+    band(b, i, -hw0, 0, -hw1, 0, 0, (r) => setRoadAttr(b, r, Z_ROAD, 0, 0));
+    band(b, i, 0, hw0, 0, hw1, 0, (r) => setRoadAttr(b, r, Z_ROAD, 0, 0));
   }
 
   for (const P of [ctx.L, ctx.R]) {
@@ -65,6 +72,7 @@ export function buildSurfaces(ctx: Ctx) {
     const ramp = kerbRamp(P, n);
 
     for (let i = 0; i < n; i++) {
+      if (ctx.pitOwned(i, sd)) continue;
       const i1 = i + 1;
       const hw = t.halfWidth[i];
       const kw = P.kerb[i];
@@ -73,18 +81,20 @@ export function buildSurfaces(ctx: Ctx) {
       // ------------------------------------------------ kerb
       if (kw > 0) {
         const b = cs.get(i, 'asphalt');
+        const style = P.kerbStyle[i] || 1;
+        const H = style === 3 ? KERBW_H : KERB_H;
         const cols = KERB_X.length;
         const base = b.count;
         for (const [row, rp] of [[i, ramp[i]], [i1, ramp[ab]]] as [number, number][]) {
-          setRoadAttr(b, row, Z_KERB, hw + kw, 0);
+          setRoadAttr(b, row, Z_KERB, hw + kw, style);
           const k = ctx.wrap(row);
           for (let c = 0; c < cols; c++) {
             const lat = sd * (hw + KERB_X[c] * kw);
-            const h = KERB_H[c] * rp;
+            const h = H[c] * rp;
             // profile normal in the (outward, up) plane
             const cPrev = Math.max(0, c - 1), cNext = Math.min(cols - 1, c + 1);
             const dx = (KERB_X[cNext] - KERB_X[cPrev]) * kw;
-            const dh = (KERB_H[cNext] - KERB_H[cPrev]) * rp;
+            const dh = (H[cNext] - H[cPrev]) * rp;
             const l = Math.hypot(dx, dh) || 1;
             const nu = dx / l, no = -dh / l; // up and outward components
             const nx = t.ux[k] * nu + t.rx[k] * sd * no;
@@ -100,19 +110,16 @@ export function buildSurfaces(ctx: Ctx) {
         }
         ctx.upOf(i, UP);
         for (let c = 0; c < cols - 1; c++) b.quadN(base + c, base + c + 1, base + cols + c + 1, base + cols + c, UP.x, UP.y, UP.z);
+        // end faces where a kerb run starts/stops (the ramp keeps them tiny, but close the gap)
       }
 
       // ------------------------------------------------ verge
       const vIn = hw + kw;
       const vOut = vIn + VERGE;
-      const pitZ = P.pitZone[i] === 1;
       {
         const b = cs.get(i, 'asphalt');
-        const zone = pitZ ? Z_PIT : Z_VERGE;
-        band(b, i, sd * vIn, sd * vOut, sd * vIn, sd * vOut, 0, (r) => {
-          setRoadAttr(b, r, zone, vIn, pitZ ? 0 : P.paint[i] && P.runoff[i] === SURF.ASPHALT ? 2 : 1);
-          if (pitZ) { b.s0[0] = 99; b.s0[1] = 0; b.s0[2] = 0; b.s0[3] = 0; }
-        });
+        const vp = P.vergePaint[i] ? (P.paint[i] && P.runoff[i] === SURF.ASPHALT ? 2 : 1) : 0;
+        band(b, i, sd * vIn, sd * vOut, sd * vIn, sd * vOut, 0, (r) => setRoadAttr(b, r, Z_VERGE, vIn, vp));
       }
 
       // ------------------------------------------------ run-off
@@ -121,17 +128,12 @@ export function buildSurfaces(ctx: Ctx) {
       const ext0 = Math.max(bar0 + 0.1, P.ext[i]);
       const ext1 = Math.max(bar1 + 0.1, P.ext[ab]);
       const ro = P.runoff[i];
-      const inPitLane = P.kind[i] === 'pitwall';
       let grassFrom0 = vOut, grassFrom1 = vOut;
       let grassEdge = 0; // lateral where grass wear starts (|m|), per-quad constant
 
-      if (ro === SURF.ASPHALT || inPitLane) {
+      if (ro === SURF.ASPHALT) {
         const b = cs.get(i, 'asphalt');
-        const zone = pitZ ? Z_PIT : Z_RUNOFF;
-        band(b, i, sd * vOut, sd * bar0, sd * vOut, sd * bar1, 0, (r) => {
-          setRoadAttr(b, r, zone, vOut, P.paint[i]);
-          if (pitZ) { b.s0[0] = 99; b.s0[1] = 0; b.s0[2] = 0; b.s0[3] = 0; }
-        });
+        band(b, i, sd * vOut, sd * bar0, sd * vOut, sd * bar1, 0, (r) => setRoadAttr(b, r, Z_RUNOFF, vOut, P.paint[i]));
         grassFrom0 = bar0;
         grassFrom1 = bar1;
         grassEdge = bar0;
@@ -140,14 +142,22 @@ export function buildSurfaces(ctx: Ctx) {
         const g1 = P.bar[ab] - GRAVEL_EDGE;
         if (g0 > vOut + 0.3 && g1 > vOut + 0.3) {
           const b = cs.get(i, 'gravel');
-          // gravel: vA1.y = distance to its outer edge
-          // vA1.x = distance from its inner edge
-          const A = ((b.s1[0] = 0), (b.s1[1] = g0 - vOut), ctx.gv(b, i, sd * vOut, GRAVEL_Y));
-          const B = ((b.s1[0] = g0 - vOut), (b.s1[1] = 0), ctx.gv(b, i, sd * g0, GRAVEL_Y));
-          const C = ((b.s1[0] = g1 - vOut), (b.s1[1] = 0), ctx.gv(b, i1, sd * g1, GRAVEL_Y));
-          const D = ((b.s1[0] = 0), (b.s1[1] = g1 - vOut), ctx.gv(b, i1, sd * vOut, GRAVEL_Y));
+          // vA1.x = distance from its inner edge, vA1.y = distance to its outer edge
+          // (four quads across so the bed can dish slightly: deeper in the middle)
+          const cuts = [0, 0.08, 0.35, 0.8, 1];
+          const dip = [0, -0.02, -0.05, -0.04, 0];
+          const base = b.count;
+          for (const [row, g] of [[i, g0], [i1, g1]] as [number, number][]) {
+            for (let c = 0; c < cuts.length; c++) {
+              const lat = vOut + (g - vOut) * cuts[c];
+              b.s1[0] = lat - vOut;
+              b.s1[1] = g - lat;
+              ctx.gv(b, row, sd * lat, GRAVEL_Y + dip[c]);
+            }
+          }
           ctx.upOf(i, UP);
-          b.quadN(A, B, C, D, UP.x, UP.y, UP.z);
+          const C = cuts.length;
+          for (let c = 0; c < C - 1; c++) b.quadN(base + c, base + c + 1, base + C + c + 1, base + C + c, UP.x, UP.y, UP.z);
           grassFrom0 = Math.max(vOut, g0 - 0.9);
           grassFrom1 = Math.max(vOut, g1 - 0.9);
           grassEdge = grassFrom0;
@@ -159,13 +169,12 @@ export function buildSurfaces(ctx: Ctx) {
       }
 
       // ------------------------------------------------ grass to the outer reach (+ skirt)
-      if (!inPitLane) {
+      {
         const b = cs.get(i, 'grass');
-        const w0 = grassFrom0 - grassEdge;
-        const A = (b.s1[1] = Math.max(0, w0), ctx.gv(b, i, sd * grassFrom0, GRASS_Y));
-        const B = (b.s1[1] = ext0 - grassEdge, ctx.gv(b, i, sd * ext0, GRASS_Y));
-        const C = (b.s1[1] = ext1 - grassEdge, ctx.gv(b, i1, sd * ext1, GRASS_Y));
-        const D = (b.s1[1] = Math.max(0, grassFrom1 - grassEdge), ctx.gv(b, i1, sd * grassFrom1, GRASS_Y));
+        const A = ((b.s1[1] = Math.max(0, grassFrom0 - grassEdge)), ctx.gv(b, i, sd * grassFrom0, GRASS_Y));
+        const B = ((b.s1[1] = ext0 - grassEdge), ctx.gv(b, i, sd * ext0, GRASS_Y));
+        const C = ((b.s1[1] = ext1 - grassEdge), ctx.gv(b, i1, sd * ext1, GRASS_Y));
+        const D = ((b.s1[1] = Math.max(0, grassFrom1 - grassEdge)), ctx.gv(b, i1, sd * grassFrom1, GRASS_Y));
         ctx.upOf(i, UP);
         b.quadN(A, B, C, D, UP.x, UP.y, UP.z);
         // skirt
@@ -185,18 +194,20 @@ function kerbRamp(P: SidePlan, n: number): Float32Array {
   const out = new Float32Array(n);
   const has = (i: number) => P.kerb[((i % n) + n) % n] > 0;
   const RAMP = 1.6;
-  // distance (in rows) to the nearest boundary where kerb presence changes
   const dist = new Float32Array(n).fill(1e9);
-  for (let pass = 0; pass < 2; pass++) {
-    let last = -1e9;
-    for (let s = -n; s < n; s++) {
-      const r = pass === 0 ? s : -s;
-      const boundary = pass === 0 ? has(r) !== has(r - 1) : has(r) !== has(r - 1);
-      if (boundary) last = r;
-      const i = ((r % n) + n) % n;
-      const d = Math.abs(r - last);
-      if (d < dist[i]) dist[i] = d;
-    }
+  let last = -1e9;
+  for (let s = -n; s < n; s++) {
+    if (has(s) !== has(s - 1)) last = s;
+    const i = ((s % n) + n) % n;
+    const d = Math.abs(s - last);
+    if (d < dist[i]) dist[i] = d;
+  }
+  last = 1e9;
+  for (let s = 2 * n; s > -n; s--) {
+    if (has(s) !== has(s - 1)) last = s;
+    const i = ((s % n) + n) % n;
+    const d = Math.abs(last - s);
+    if (d < dist[i]) dist[i] = d;
   }
   for (let i = 0; i < n; i++) out[i] = Math.min(1, dist[i] / RAMP);
   return out;

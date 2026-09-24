@@ -466,3 +466,76 @@ export function uiSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNode, 
     whoosh(2600, 600, 0.14, 0.04);
   }
 }
+
+/**
+ * Weather: rain hiss and droplet patter (world bus — muffled in the cockpit
+ * like everything outside), tyre spray hiss near the car, and thunder rolling
+ * in a moment after each lightning flash.
+ */
+export class WeatherSound {
+  /** world sounds: rain bed + thunder */
+  readonly out: GainNode;
+  /** close to the player: spray off the tyres */
+  readonly near: GainNode;
+  private ctx: BaseAudioContext;
+  private b: AudioBuffers;
+  private bedG: GainNode;
+  private patterG: GainNode;
+  private sprayG: GainNode;
+  private sprayBP: BiquadFilterNode;
+  private lastFlash = 0;
+
+  constructor(ctx: BaseAudioContext, b: AudioBuffers) {
+    this.ctx = ctx;
+    this.b = b;
+    this.out = gainNode(ctx, 1);
+    this.near = gainNode(ctx, 1);
+    this.bedG = gainNode(ctx, 0);
+    chain(loopSource(ctx, b.white), biquad(ctx, 'highpass', 900, 0.5), biquad(ctx, 'lowpass', 7000, 0.5), this.bedG, this.out);
+    this.patterG = gainNode(ctx, 0);
+    chain(loopSource(ctx, b.crackle, 1.7), biquad(ctx, 'highpass', 1800, 0.7), this.patterG, this.out);
+    this.sprayG = gainNode(ctx, 0);
+    this.sprayBP = biquad(ctx, 'bandpass', 700, 0.6);
+    chain(loopSource(ctx, b.pink), this.sprayBP, this.sprayG, this.near);
+  }
+
+  /** rain rate, water on track 0..1, player speed m/s, lightning flash 0..1 */
+  set(rain: number, wet: number, speed: number, flash: number, now: number): void {
+    setT(this.bedG.gain, 0.2 * Math.pow(clamp(rain, 0, 1), 0.8), now, 0.6);
+    setT(this.patterG.gain, 0.1 * clamp(rain, 0, 1), now, 0.6);
+    const spray = clamp(wet, 0, 1) * clamp(speed / 60, 0, 1);
+    setT(this.sprayG.gain, 0.3 * spray, now, 0.08);
+    setT(this.sprayBP.frequency, 450 + speed * 11, now, 0.1);
+    if (flash > 0.9 && this.lastFlash < 0.5) this.thunder(now + 0.5 + Math.random() * 2.5);
+    this.lastFlash = flash;
+  }
+
+  private thunder(at: number): void {
+    const ctx = this.ctx;
+    const close = at - ctx.currentTime < 1.2;
+    const len = 5 + Math.random() * 3;
+    const src = new AudioBufferSourceNode(ctx, { buffer: this.b.pink, loop: true, playbackRate: 0.55 });
+    const lp = biquad(ctx, 'lowpass', close ? 320 : 170, 0.7);
+    const g = gainNode(ctx, 0);
+    chain(src, lp, g, this.out);
+    const peak = close ? 1.1 : 0.7;
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(peak, at + 0.25);
+    // a few rolls as the sound comes off the clouds
+    g.gain.setTargetAtTime(peak * 0.45, at + 0.3, 0.5);
+    g.gain.setTargetAtTime(peak * 0.7, at + 1.4, 0.3);
+    g.gain.setTargetAtTime(0, at + 1.9, len / 4);
+    src.start(at, Math.random() * 3);
+    src.stop(at + len + 1);
+    if (close) {
+      const cr = new AudioBufferSourceNode(ctx, { buffer: this.b.white });
+      const hp = biquad(ctx, 'highpass', 1800, 0.6);
+      const cg = gainNode(ctx, 0);
+      chain(cr, hp, cg, this.out);
+      cg.gain.setValueAtTime(0.5, at);
+      cg.gain.setTargetAtTime(0, at + 0.02, 0.09);
+      cr.start(at);
+      cr.stop(at + 0.8);
+    }
+  }
+}

@@ -18,7 +18,7 @@
  */
 import { type AudioBuffers, biquad, chain, clamp, gainNode, loopSource, makeBuffers, setT, softClipCurve } from './audio/dsp.ts';
 import { createEngineSource, type EngineMix, loadEngineWorklet, OpponentVoice, PlayerEngine } from './audio/engine.ts';
-import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, uiSound } from './audio/fx.ts';
+import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, uiSound, WeatherSound } from './audio/fx.ts';
 
 export type AudioView = 'chase' | 'cockpit' | 'tv';
 
@@ -119,6 +119,7 @@ export class GameAudio {
   private engine!: PlayerEngine;
   private fx!: CarFx;
   private crowdFx!: Crowd;
+  private weatherFx!: WeatherSound;
   private voices: OpponentVoice[] = [];
 
   // player state
@@ -240,6 +241,11 @@ export class GameAudio {
     this.crowdFx = new Crowd(ctx, this.b);
     this.crowdFx.out.connect(this.outside);
 
+    // --- weather
+    this.weatherFx = new WeatherSound(ctx, this.b);
+    this.weatherFx.out.connect(this.outside);
+    this.weatherFx.near.connect(this.fxBus);
+
     this.ready = true;
     this.applyView(ctx.currentTime);
   }
@@ -338,6 +344,12 @@ export class GameAudio {
   startBeep(final: boolean): void {
     if (!this.live()) return;
     beepSound(this.ctx!, this.fxBus, final, this.now());
+  }
+
+  /** rain rate and track water 0..1, player speed (m/s), lightning flash 0..1 — every frame */
+  weather(rain: number, wet: number, speed: number, flash: number): void {
+    if (!this.ready) return;
+    this.weatherFx.set(rain, wet, speed, flash, this.now());
   }
 
   crowd(level: number): void {

@@ -47,6 +47,7 @@ export class PlayerControl {
   aids: ControlAids = { steeringAssist: false, brakingAssist: 'off', steeringMode: 'rate' };
   private u = 0; // filtered steering −1..1
   private delta = 0; // road-wheel angle actually commanded
+  private prevLat = 0;
   /** exposed for the HUD / steering-wheel visuals */
   steerInput = 0;
   brakeAssisting = false;
@@ -55,6 +56,7 @@ export class PlayerControl {
   reset() {
     this.u = 0;
     this.delta = 0;
+    this.prevLat = 0;
   }
 
   update(dt: number, raw: RawControls, car: CarPhysics, track: Track, profile: RacingProfile): DriveInput {
@@ -142,7 +144,7 @@ export class PlayerControl {
     if (this.aids.brakingAssist !== 'off' && v > 12) {
       const m = BRAKE_MARGIN[this.aids.brakingAssist];
       // the profile already contains braking curves: compare slightly ahead
-      const target = Math.min(profile.at(car.s + v * 0.12), profile.at(car.s + v * 0.3)) * m;
+      const target = Math.min(profile.atGrip(car.s + v * 0.12, car.gripFactor), profile.atGrip(car.s + v * 0.3, car.gripFactor)) * m;
       if (v > target + 0.5) {
         const need = Math.min(1, (v - target) * 0.22);
         o.brake = Math.max(o.brake, need);
@@ -150,6 +152,19 @@ export class PlayerControl {
         this.brakeAssisting = need > 0.05;
       }
     }
+    // run-off guard (part of the steering assist): drifting toward the edge faster
+    // than the steering can pull it back → lift, then brush the brakes
+    if (this.aids.steeringAssist && v > 20) {
+      const side = car.lateral >= 0 ? 1 : -1;
+      const outward = ((car.lateral - this.prevLat) / Math.max(dt, 1e-3)) * side;
+      const room = track.halfWidthAt(car.s) + track.kerbAt(car.s, side) - Math.abs(car.lateral) - 0.6;
+      if (outward > 0.8 && room < outward * 1.1) {
+        const k = Math.min(1, (outward * 1.1 - room) / Math.max(1.5, outward));
+        o.throttle = Math.min(o.throttle, 1 - k);
+        if (k > 0.5 && car.slipFront > 0.95) o.brake = Math.max(o.brake, (k - 0.5) * 0.5);
+      }
+    }
+    this.prevLat = car.lateral;
     o.ers = raw.ers;
     o.shiftUp = raw.shiftUp;
     o.shiftDown = raw.shiftDown;

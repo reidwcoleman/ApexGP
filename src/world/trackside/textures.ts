@@ -4,22 +4,30 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
 /**
  * Procedural ground textures for the circuit (all generated in code).
  *
- *   asphalt  — aggregate stones in dark binder: albedo / normal / roughness, 2.4 m tile
+ *   asphalt  — PACKED aggregate texture, 1.7 m tile (1.7 mm/px), one fetch gives everything:
+ *              R = albedo (linear luminance / ASPHALT_ALB_MAX, stored as sqrt for precision)
+ *              G = height (0 binder … 1 top of the biggest stones)
+ *              B,A = tangent-space normal xy (0.5 = flat)
+ *              The road shader samples it twice (two scales/rotations, histogram-preserving
+ *              blend) so it never tiles visibly.
  *   macro    — R large fBm, G sealed cracks, B medium fBm, A tint fBm (sampled at several scales)
- *   gravel   — rounded beige-grey stones, 1.6 m tile
+ *   macroN   — metre-scale unevenness: RG = height gradient (normal xy), B = height, A = fBm
+ *   gravel   — packed like asphalt: RGB albedo (sRGB) + A height; normal from gravelNormal
  *   grass    — short mown blades, 1.5 m tile
  *   fence    — chain-link debris fence with tension cables (RGBA, 0.5 m × 4 m)
  */
 
-export const ASPHALT_TILE = 2.4;
+export const ASPHALT_TILE = 1.7;
+export const ASPHALT_ALB_MAX = 0.16;
 export const GRAVEL_TILE = 1.6;
 export const GRASS_TILE = 1.5;
 
 export interface GroundTextures {
-  asphaltAlbedo: THREE.DataTexture;
-  asphaltNormal: THREE.DataTexture;
-  asphaltRough: THREE.DataTexture;
+  asphalt: THREE.DataTexture;
+  /** mean of the packed albedo (R) and height (G) channels, for histogram-preserving blends */
+  asphaltMean: THREE.Vector2;
   macro: THREE.DataTexture;
+  macroN: THREE.DataTexture;
   gravelAlbedo: THREE.DataTexture;
   gravelNormal: THREE.DataTexture;
   grassAlbedo: THREE.DataTexture;
@@ -45,16 +53,13 @@ function makeAsphalt(size: number, aniso: number) {
   const N = size * size;
   const h = new Float32Array(N);
   const lum = new Float32Array(N);
-  const tint = new Float32Array(N);
-  const rgh = new Float32Array(N);
   const g1 = tileNoise(size, size / 4, 7);
   const g2 = tileNoise(size, size / 2, 8);
   const mid = tileFbm(size, 24, 4, 9);
   for (let i = 0; i < N; i++) {
     const g = g1[i] * 0.55 + g2[i] * 0.45;
     h[i] = 0.1 * g + 0.12 * mid[i];
-    lum[i] = 0.034 + 0.01 * g + 0.012 * mid[i];
-    rgh[i] = 0.94 - 0.06 * g;
+    lum[i] = 0.034 + 0.008 * g + 0.01 * mid[i];
   }
   // aggregate: jittered grid of irregular stones, some half-buried
   const rng = new Rng(1234);
@@ -62,19 +67,18 @@ function makeAsphalt(size: number, aniso: number) {
   const cells = size / cell;
   for (let gy = 0; gy < cells; gy++) {
     for (let gx = 0; gx < cells; gx++) {
-      const count = rng.next() < 0.45 ? 2 : 1;
+      const count = rng.next() < 0.5 ? 2 : 1;
       for (let k = 0; k < count; k++) {
         const cx = (gx + rng.next()) * cell;
         const cy = (gy + rng.next()) * cell;
-        const r = 0.9 + 2.9 * Math.pow(rng.next(), 1.8);
+        const r = 0.9 + 3.1 * Math.pow(rng.next(), 1.9);
         const ecc = 0.55 + 0.45 * rng.next();
         const ang = rng.next() * Math.PI;
         const ca = Math.cos(ang), sa = Math.sin(ang);
         const p = rng.next();
-        const tone = p < 0.66 ? rng.range(0.055, 0.08) : p < 0.9 ? rng.range(0.08, 0.108) : rng.range(0.038, 0.05);
-        const tn = rng.range(-1, 1);
+        // mostly grey basalt/porphyry chips, a few pale quartz ones, a few near-black
+        const tone = p < 0.62 ? rng.range(0.052, 0.072) : p < 0.9 ? rng.range(0.072, 0.094) : rng.range(0.038, 0.048);
         const top = 0.45 + 0.55 * rng.next();
-        const polish = rng.range(0.55, 0.78);
         const wob = rng.range(-0.35, 0.35);
         const R = Math.ceil(r + 0.5);
         const fcx = Math.floor(cx), fcy = Math.floor(cy);
@@ -88,7 +92,6 @@ function makeAsphalt(size: number, aniso: number) {
             const v = (-dx * sa + dy * ca) * ire;
             const q = u * u + v * v;
             if (q >= 1.4) continue;
-            // cheap irregularity: skew the ellipse with a u·v term (no trig per pixel)
             const d2 = q * (1 + wob * u * v);
             if (d2 >= 1) continue;
             const px = (fcx + ox + size) % size;
@@ -97,9 +100,7 @@ function makeAsphalt(size: number, aniso: number) {
             const o = py * size + px;
             if (z > h[o]) {
               h[o] = z;
-              lum[o] = tone * (0.78 + 0.32 * dome);
-              tint[o] = tn;
-              rgh[o] = polish + 0.1 * (1 - dome);
+              lum[o] = tone * (0.86 + 0.2 * dome);
             }
           }
         }
@@ -108,27 +109,24 @@ function makeAsphalt(size: number, aniso: number) {
   }
   // binder darkening in the crevices (dirt/rubber collects low)
   const hb = blurWrap(Float32Array.from(h), size, 3);
-  const alb = new Uint8Array(N * 4);
-  const rough = new Uint8Array(N * 4);
+  let hmax = 0;
+  for (let i = 0; i < N; i++) hmax = Math.max(hmax, h[i]);
+  const nrm = normalFromHeight(h, size, 1.5);
+  const out = new Uint8Array(N * 4);
+  let sumA = 0, sumH = 0;
   for (let i = 0; i < N; i++) {
     const cav = Math.max(0, hb[i] - h[i]);
-    const l = lum[i] * (1 - Math.min(0.5, cav * 2.2));
-    const t = tint[i] * 0.05;
-    alb[i * 4] = srgb8(l * (1.02 + t));
-    alb[i * 4 + 1] = srgb8(l);
-    alb[i * 4 + 2] = srgb8(l * (0.97 - t));
-    alb[i * 4 + 3] = 255;
-    rough[i * 4] = 255;
-    rough[i * 4 + 1] = Math.round(Math.min(1, rgh[i] + cav * 0.3) * 255);
-    rough[i * 4 + 2] = 0;
-    rough[i * 4 + 3] = 255;
+    const l = lum[i] * (1 - Math.min(0.32, cav * 1.6));
+    const a = Math.round(Math.sqrt(Math.min(1, l / ASPHALT_ALB_MAX)) * 255);
+    const hh = Math.round((h[i] / hmax) * 255);
+    out[i * 4] = a;
+    out[i * 4 + 1] = hh;
+    out[i * 4 + 2] = nrm[i * 4];
+    out[i * 4 + 3] = nrm[i * 4 + 1];
+    sumA += a;
+    sumH += hh;
   }
-  const nrm = normalFromHeight(h, size, 1.5);
-  return {
-    albedo: dataTex(alb, size, size, true, aniso),
-    normal: dataTex(nrm, size, size, false, aniso),
-    rough: dataTex(rough, size, size, false, aniso),
-  };
+  return { tex: dataTex(out, size, size, false, aniso), mean: new THREE.Vector2(sumA / N / 255, sumH / N / 255) };
 }
 
 // ------------------------------------------------------------------ macro
@@ -178,6 +176,28 @@ function makeMacro(size: number, aniso: number) {
   return dataTex(out, size, size, false, aniso);
 }
 
+/** Metre-scale unevenness (sampled at ~14 m per tile): gradient + height + a spare fBm. */
+function makeMacroN(size: number, aniso: number) {
+  const N = size * size;
+  const H = tileFbm(size, 4, 5, 91, 0.5);
+  const F = tileFbm(size, 6, 4, 97, 0.55);
+  const out = new Uint8Array(N * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const xm = y * size + ((x - 1 + size) % size), xp = y * size + ((x + 1) % size);
+      const ym = ((y - 1 + size) % size) * size + x, yp = ((y + 1) % size) * size + x;
+      const gx = (H[xp] - H[xm]) * 0.5 * size * 0.05;
+      const gy = (H[yp] - H[ym]) * 0.5 * size * 0.05;
+      out[i * 4] = Math.max(0, Math.min(255, Math.round(128 + gx * 127)));
+      out[i * 4 + 1] = Math.max(0, Math.min(255, Math.round(128 + gy * 127)));
+      out[i * 4 + 2] = Math.round(H[i] * 255);
+      out[i * 4 + 3] = Math.round(F[i] * 255);
+    }
+  }
+  return dataTex(out, size, size, false, aniso);
+}
+
 // ------------------------------------------------------------------ gravel
 
 function makeGravel(size: number, aniso: number) {
@@ -187,27 +207,28 @@ function makeGravel(size: number, aniso: number) {
   const base = tileNoise(size, 64, 5);
   for (let i = 0; i < N; i++) {
     h[i] = 0.05 * base[i];
-    col[i * 3] = 0.1; col[i * 3 + 1] = 0.09; col[i * 3 + 2] = 0.075;
+    col[i * 3] = 0.07; col[i * 3 + 1] = 0.062; col[i * 3 + 2] = 0.05;
   }
+  // Monza's gravel: rounded river pebbles, warm beige/grey, 1–3 cm
   const palette = [
-    [0.3, 0.26, 0.2], [0.36, 0.32, 0.26], [0.24, 0.225, 0.2], [0.4, 0.35, 0.27],
-    [0.27, 0.23, 0.18], [0.33, 0.31, 0.28], [0.2, 0.18, 0.15], [0.42, 0.38, 0.32],
+    [0.36, 0.31, 0.24], [0.42, 0.37, 0.29], [0.3, 0.28, 0.25], [0.46, 0.41, 0.33],
+    [0.33, 0.28, 0.21], [0.39, 0.37, 0.33], [0.25, 0.22, 0.19], [0.5, 0.45, 0.37], [0.28, 0.29, 0.28],
   ];
   const rng = new Rng(4242);
-  const cell = 3;
+  const cell = 7;
   const cells = Math.floor(size / cell);
-  for (let pass = 0; pass < 2; pass++)
+  for (let pass = 0; pass < 3; pass++)
     for (let gy = 0; gy < cells; gy++)
       for (let gx = 0; gx < cells; gx++) {
         const cx = (gx + rng.next()) * cell;
         const cy = (gy + rng.next()) * cell;
-        const r = 1.2 + 1.8 * Math.pow(rng.next(), 1.3);
+        const r = 2.4 + 3.6 * Math.pow(rng.next(), 1.2);
         const ecc = 0.6 + 0.4 * rng.next();
         const ang = rng.next() * Math.PI;
         const ca = Math.cos(ang), sa = Math.sin(ang);
         const c = rng.pick(palette);
-        const shade = rng.range(0.8, 1.15);
-        const top = 0.5 + 0.5 * rng.next();
+        const shade = rng.range(0.78, 1.18);
+        const top = 0.55 + 0.45 * rng.next();
         const R = Math.ceil(r + 0.5);
         for (let oy = -R; oy <= R; oy++) {
           const py = ((Math.floor(cy) + oy) % size + size) % size;
@@ -220,29 +241,32 @@ function makeGravel(size: number, aniso: number) {
             const d2 = u * u + v * v;
             if (d2 >= 1) continue;
             const dome = Math.sqrt(1 - d2);
-            const z = top * (0.35 + 0.65 * dome) + pass * 0.05;
+            const z = top * (0.3 + 0.7 * dome) * (0.8 + 0.1 * pass) + pass * 0.04;
             const o = py * size + px;
             if (z > h[o]) {
               h[o] = z;
-              const l = shade * (0.7 + 0.4 * dome);
+              // pebbles are lit from above: brighter tops, a small specular-ish highlight baked soft
+              const l = shade * (0.62 + 0.5 * dome);
               col[o * 3] = c[0] * l; col[o * 3 + 1] = c[1] * l; col[o * 3 + 2] = c[2] * l;
             }
           }
         }
       }
-  const hb = blurWrap(Float32Array.from(h), size, 3);
+  const hb = blurWrap(Float32Array.from(h), size, 4);
+  let hmax = 0;
+  for (let i = 0; i < N; i++) hmax = Math.max(hmax, h[i]);
   const alb = new Uint8Array(N * 4);
   for (let i = 0; i < N; i++) {
     const cav = Math.max(0, hb[i] - h[i]);
-    const k = 1 - Math.min(0.65, cav * 2.5);
+    const k = 1 - Math.min(0.75, cav * 3.2);
     alb[i * 4] = srgb8(col[i * 3] * k);
     alb[i * 4 + 1] = srgb8(col[i * 3 + 1] * k);
     alb[i * 4 + 2] = srgb8(col[i * 3 + 2] * k);
-    alb[i * 4 + 3] = 255;
+    alb[i * 4 + 3] = Math.round((h[i] / hmax) * 255);
   }
   return {
     albedo: dataTex(alb, size, size, true, aniso),
-    normal: dataTex(normalFromHeight(h, size, 2.2), size, size, false, aniso),
+    normal: dataTex(normalFromHeight(h, size, 3.2), size, size, false, aniso),
   };
 }
 
@@ -312,9 +336,8 @@ function makeFence(aniso: number) {
   const cables = [0.05, 1.0, 2.0, 3.0, 3.93].map((m) => (m / 4) * H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const u = ((x + 0.5) % pitchU) / pitchU; // 0..1 inside a diamond cell
+      const u = ((x + 0.5) % pitchU) / pitchU;
       const v = ((y + 0.5) % pitchV) / pitchV;
-      // diamond lattice: lines u = v and u = 1 − v (in cell coords), measured in pixels
       const d1 = Math.abs(((u - v + 1.5) % 1) - 0.5) * pitchU * 0.62;
       const d2 = Math.abs(((u + v + 0.5) % 1) - 0.5) * pitchU * 0.62;
       let a = Math.max(wire(d1, 0.85), wire(d2, 0.85));
@@ -336,30 +359,29 @@ function makeFence(aniso: number) {
   return dataTex(data, W, H, true, aniso);
 }
 
+let cached: GroundTextures | null = null;
+
 export function makeGroundTextures(aniso: number): GroundTextures {
-  const t0 = performance.now();
+  if (cached) return cached;
   const a = makeAsphalt(1024, aniso);
-  const t1 = performance.now();
-  const g = makeGravel(512, aniso);
-  const t2 = performance.now();
-  const gr = makeGrass(512, aniso);
-  const t3 = performance.now();
-  const macro = makeMacro(1024, aniso);
-  const t4 = performance.now();
+  // low-frequency data needs no anisotropic filtering (it is 4 fetches per road pixel: keep them cheap)
+  const g = makeGravel(512, Math.min(aniso, 8));
+  const gr = makeGrass(512, Math.min(aniso, 8));
+  const macro = makeMacro(1024, 1);
+  const macroN = makeMacroN(512, 1);
   const fence = makeFence(aniso);
-  const t5 = performance.now();
-  void t0; void t1; void t2; void t3; void t4; void t5;
-  return {
-    asphaltAlbedo: a.albedo,
-    asphaltNormal: a.normal,
-    asphaltRough: a.rough,
+  cached = {
+    asphalt: a.tex,
+    asphaltMean: a.mean,
     macro,
+    macroN,
     gravelAlbedo: g.albedo,
     gravelNormal: g.normal,
     grassAlbedo: gr.albedo,
     grassNormal: gr.normal,
     fence,
   };
+  return cached;
 }
 
 export { hash2 };

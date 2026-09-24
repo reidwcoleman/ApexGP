@@ -130,37 +130,63 @@ export function buildMarkings(ctx: Ctx, atlas: DecalAtlas) {
     lineAcross(z.start, -hwA, hwA, 0.2);
   }
 
-  // ---------------------------------------------------------------- pit lines
+  // ---------------------------------------------------------------- pit entry / exit lines on the main road
+  // (the lane-side lines beyond the road edge belong to the pit module)
   const pit = t.pit;
   const sd = pit.side;
-  const hw = t.halfWidthAt(pit.sStart);
   const ease = (x: number) => x * x * (3 - 2 * x);
-  // entry: from the road edge diverging to the pit wall nose
-  const entryLen = 90;
-  lineAlong(pit.sStart - entryLen, pit.sStart, (s) => sd * (hw + 0.1 + (pit.wallOffset - 0.25 - hw - 0.1) * ease((s - (pit.sStart - entryLen)) / entryLen)), 0.2);
-  // exit: from the pit wall end converging back to the road edge
-  const exitLen = 100;
-  lineAlong(pit.sEnd, pit.sEnd + exitLen, (s) => sd * (pit.wallOffset - 0.25 - (pit.wallOffset - 0.25 - hw - 0.1) * ease((s - pit.sEnd) / exitLen)), 0.2);
-  // lane lines
-  const fastEdge = pit.laneInner + (pit.laneOuter - pit.laneInner) * 0.5;
-  // (the three long lane lines are drawn analytically by the asphalt shader)
-  // speed-limit lines across the lane with PIT / 80
-  const limIn = pit.sStart + 28, limOut = pit.sEnd - 28;
-  const l0 = sd > 0 ? pit.laneInner : -pit.laneOuter;
-  const l1 = sd > 0 ? pit.laneOuter : -pit.laneInner;
-  lineAcross(limIn, l0, l1, 0.3);
-  lineAcross(limOut, l0, l1, 0.3);
-  const laneMid = sd * (pit.laneInner + fastEdge) * 0.5;
-  rect(limIn + 2.2, limIn + 4.2, laneMid - 2.0, laneMid + 2.0, atlas.pit);
-  rect(limIn + 5.0, limIn + 7.0, laneMid - 1.0, laneMid + 1.0, atlas.eighty);
-  rect(limOut - 7.0, limOut - 5.0, laneMid - 1.0, laneMid + 1.0, atlas.eighty);
-  // pit box stop marks in the working lane (a white T per team slot)
-  const mid = (pit.sStart + pit.sEnd) / 2;
-  const work = sd * (fastEdge + (pit.laneOuter - fastEdge) * 0.5);
-  for (let k = 0; k < 10; k++) {
-    const s = mid + (k - 4.5) * 18;
-    rect(s - 0.06, s + 0.06, work - 1.1, work + 1.1, white);
-    rect(s - 2.4, s + 2.4, work - 0.05, work + 0.05, white, [0.6, 0.6, 0.58]);
+  {
+    // entry: a solid line peeling off the road toward the edge where the entry lane leaves
+    const s1 = pit.sStart - 70, s0 = s1 - 70;
+    const hwE = t.halfWidthAt(s1);
+    lineAlong(s0, s1, (s) => sd * (hwE - 1.6 + 1.4 * ease((s - s0) / (s1 - s0))), 0.2);
+    // exit: the blend line keeps the car on the right until the lane has merged
+    const e0 = pit.sEnd + 60, e1 = pit.sEnd + 170;
+    lineAlong(e0, e0 + 40, (s) => sd * (t.halfWidthAt(s) - 0.2 - 1.3 * ease((s - e0) / 40)), 0.2);
+    lineAlong(e0 + 40, e1, (s) => sd * (t.halfWidthAt(s) - 1.5), 0.2);
+  }
+
+  // ---------------------------------------------------------------- sponsor logos painted on the big tarmac run-offs
+  // (read from the TV cameras / aerials: text runs along the track)
+  const logoAt = (name: string, _ds: number, k: number) => {
+    const c = t.corners.find((x) => x.name === name);
+    if (!c) return;
+    const side = c.dir;
+    const P = ctx.side(side);
+    // the widest 16 m of tarmac run-off around the corner
+    let s0 = c.sStart, best = -1;
+    for (let ds = -20; ds <= 70; ds += 2) {
+      let m = Infinity;
+      for (let q = 0; q <= 16; q += 2) {
+        const j = ctx.wrap(Math.floor(c.sStart + ds + q));
+        m = Math.min(m, P.runoff[j] === 2 ? P.bar[j] : 0);
+      }
+      if (m > best) { best = m; s0 = c.sStart + ds; }
+    }
+    const i = ctx.wrap(Math.floor(s0));
+    const i1 = ctx.wrap(Math.floor(s0 + 16));
+    const inner = t.halfWidth[i] + P.kerb[i] + 1.5 + 3.4;
+    const room = Math.min(P.bar[i], P.bar[i1]) - inner - 2;
+    if (room < 5 || P.runoff[i] !== 2 || P.runoff[i1] !== 2) return;
+    const w = Math.min(4.5, room);
+    const l0 = side * inner, l1 = side * (inner + w);
+    const uv = atlas.logo(k);
+    // rot: u runs along s, v across; oriented to read upright for someone on the track looking out at it
+    const u = side > 0 ? { u0: uv.u0, u1: uv.u1, v0: uv.v1, v1: uv.v0 } : { u0: uv.u1, u1: uv.u0, v0: uv.v0, v1: uv.v1 };
+    rect(s0, s0 + 16, Math.min(l0, l1), Math.max(l0, l1), u, [0.8, 0.8, 0.78], true);
+  };
+  logoAt('Turn 1', 18, 0);
+  logoAt('Roggia', 10, 1);
+  logoAt('Turn 10', 8, 0);
+
+  // ---------------------------------------------------------------- timing loops (sealed saw cuts across the road)
+  const loops: number[] = [t.startS - 0.9, t.sectorS[0], t.sectorS[1], pit.sStart - 40, pit.sEnd + 40];
+  for (let s = 180; s < t.length; s += 370) loops.push(s);
+  for (const z of t.drs) loops.push(z.detect + 1.4, z.start + 1.4);
+  const dark = [0.02, 0.02, 0.022];
+  for (const s of loops) {
+    const hwL = t.halfWidthAt(s);
+    for (const off of [0, 0.55]) rect(s + off - 0.022, s + off + 0.022, -hwL + 0.25, hwL - 0.25, white, dark);
   }
 }
 

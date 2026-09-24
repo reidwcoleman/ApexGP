@@ -8,9 +8,8 @@ import { perlin2, tileFbm } from './noise.ts';
 
 let _noise: THREE.DataTexture | null = null;
 let _detailNormal: THREE.DataTexture | null = null;
-let _waterNormal: THREE.DataTexture | null = null;
 
-function finish(tex: THREE.DataTexture, aniso = 8) {
+export function finish(tex: THREE.DataTexture, aniso = 8) {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -48,14 +47,14 @@ export function noiseTexture(): THREE.DataTexture {
   return _noise;
 }
 
-function heightToNormal(h: Float32Array, N: number, strength: number): Uint8Array {
-  const data = new Uint8Array(N * N * 4);
-  for (let j = 0; j < N; j++) {
+export function heightToNormal(h: Float32Array, N: number, strength: number, M = N): Uint8Array {
+  const data = new Uint8Array(N * M * 4);
+  for (let j = 0; j < M; j++) {
     for (let i = 0; i < N; i++) {
       const l = h[j * N + ((i - 1 + N) % N)];
       const r = h[j * N + ((i + 1) % N)];
-      const d = h[((j - 1 + N) % N) * N + i];
-      const u = h[((j + 1) % N) * N + i];
+      const d = h[((j - 1 + M) % M) * N + i];
+      const u = h[((j + 1) % M) * N + i];
       let nx = (l - r) * strength;
       let nz = (d - u) * strength;
       let ny = 1;
@@ -86,42 +85,6 @@ export function detailNormalTexture(): THREE.DataTexture {
     }
   _detailNormal = finish(new THREE.DataTexture(heightToNormal(h, N, 2.2), N, N, THREE.RGBAFormat, THREE.UnsignedByteType));
   return _detailNormal;
-}
-
-/**
- * Water normal map: a sum of directional, periodic wave trains plus fbm chop.
- * RGB = normal (x, z, up), A = height.
- */
-export function waterNormalTexture(): THREE.DataTexture {
-  if (_waterNormal) return _waterNormal;
-  const N = 256;
-  const h = new Float32Array(N * N);
-  // integer wave vectors keep the texture tileable
-  const waves: [number, number, number, number][] = [
-    [3, 1, 1.0, 0.0],
-    [2, -3, 0.7, 1.3],
-    [5, 2, 0.45, 2.1],
-    [-4, 5, 0.35, 0.7],
-    [7, -2, 0.25, 4.0],
-    [1, 8, 0.2, 5.2],
-    [-9, -4, 0.14, 2.9],
-    [11, 5, 0.1, 1.9],
-  ];
-  for (let j = 0; j < N; j++)
-    for (let i = 0; i < N; i++) {
-      const u = i / N, v = j / N;
-      let s = 0;
-      for (const [kx, kz, amp, ph] of waves) {
-        const t = (kx * u + kz * v) * Math.PI * 2 + ph;
-        // sharpened crests (trochoid-ish)
-        const w = Math.sin(t);
-        s += amp * (w > 0 ? Math.pow(w, 1.35) : -Math.pow(-w, 0.85) * 0.8);
-      }
-      s = s * 0.45 + tileFbm(u, v, 6, 5, 0.58, 21) * 1.6 + tileFbm(u, v, 13, 3, 0.5, 23) * 0.35;
-      h[j * N + i] = s * 0.35;
-    }
-  _waterNormal = finish(new THREE.DataTexture(heightToNormal(h, N, 3.2), N, N, THREE.RGBAFormat, THREE.UnsignedByteType), 16);
-  return _waterNormal;
 }
 
 /** Canvas helper: returns a 2D context of the requested size. */

@@ -7,8 +7,7 @@ import { POINTS } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
 import { ASSIST_PRESETS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
-
-export type TimeOfDay = 'golden' | 'day' | 'overcast';
+import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 
 export interface RaceSetup {
   team: number;
@@ -16,13 +15,16 @@ export interface RaceSetup {
   laps: number;
   difficulty: number; // index into DIFFICULTY
   grid: number; // index into GRID
-  time: TimeOfDay;
+  weather: WeatherChoice;
+  time: TimeChoice;
   assists: AssistConfig;
-  compound: Compound;
+  compound: Compound | 'auto';
 }
 
 export interface Settings {
   quality: QualityLevel;
+  /** true until the player picks a graphics level themselves: the game may step it down */
+  autoQuality?: boolean;
   camera: CameraMode;
   volume: number;
 }
@@ -40,11 +42,11 @@ export const GRID = [
   { label: 'Back of the grid', slot: 19 },
   { label: 'Qualifying lap', slot: -1 },
 ];
-const TIMES: { v: TimeOfDay; label: string }[] = [
-  { v: 'golden', label: 'Golden hour' },
-  { v: 'day', label: 'Midday' },
-  { v: 'overcast', label: 'Overcast' },
-];
+const WEATHERS: WeatherChoice[] = ['random', 'clear', 'cloudy', 'overcast', 'drizzle', 'rain', 'storm', 'changeable'];
+const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
+const TIMES: TimeChoice[] = ['random', 'morning', 'afternoon', 'golden'];
+const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
+const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'pause' | 'results' | 'none';
@@ -58,6 +60,8 @@ interface Item {
 
 export interface MenuCallbacks {
   onSetupChange(setup: RaceSetup): void;
+  /** what the rolled forecast is, shown next to a 'Random' weather / time choice */
+  forecast(): { weather: string; time: string };
   onStart(mode: 'race' | 'timetrial', setup: RaceSetup): void;
   onSettings(s: Settings): void;
   onResume(): void;
@@ -121,12 +125,16 @@ export class Menu {
     this.cb = cb;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, time: 'golden', assists: { ...ASSIST_PRESETS.casual }, compound: 'medium' });
+    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'random', time: 'random', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto' });
     // saves from before per-assist settings stored a preset index
-    if (!this.setup.compound) this.setup.compound = 'medium';
+    if (!this.setup.compound) this.setup.compound = 'auto';
+    // saves from before the weather system
+    if (!WEATHERS.includes(this.setup.weather)) this.setup.weather = 'random';
+    if (!TIMES.includes(this.setup.time)) this.setup.time = 'random';
     if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...ASSIST_PRESETS.casual };
     else this.setup.assists = { ...ASSIST_PRESETS.casual, ...this.setup.assists };
-    this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', volume: 0.8 });
+    this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', volume: 0.8, autoQuality: true });
+    if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
     for (const id of ['title', 'setup', 'settings', 'assists', 'pause', 'results'] as ScreenId[]) {
       const s = el('div', 'screen', this.root);
       this.screens.set(id, s);
@@ -154,7 +162,7 @@ export class Menu {
     el('div', 'scrim', s);
     const w = el('div', 'title-wrap', s);
     el('div', 'logo', w, 'Apex <span class="gp">GP</span>');
-    el('div', 'logo-sub', w, 'Autódromo Costa del Sol · 4.7 km · 13 corners');
+    el('div', 'logo-sub', w, 'Autodromo Nazionale Monza · 5.793 km · 11 turns');
     const list = el('div', 'mlist', w);
     const add = (label: string, desc: string, fn: () => void) => {
       const e = el('div', 'mitem', list, `${label}<span class="desc">${desc}</span>`);
@@ -208,14 +216,23 @@ export class Menu {
       });
     }
     if (this.mode === 'race') {
-      this.opt(p, 'Starting tyres', () => `<span class="tyredot" style="background:${COMPOUNDS[st.compound].color}"></span>${COMPOUNDS[st.compound].label}`, (d) => {
-        const i = COMPOUND_ORDER.indexOf(st.compound);
-        st.compound = COMPOUND_ORDER[(i + d + COMPOUND_ORDER.length) % COMPOUND_ORDER.length];
-      });
+      this.opt(
+        p,
+        'Starting tyres',
+        () => (st.compound === 'auto' ? 'Team choice' : `<span class="tyredot" style="background:${COMPOUNDS[st.compound].color}"></span>${COMPOUNDS[st.compound].label}`),
+        (d) => {
+          const i = TYRE_CHOICES.indexOf(st.compound);
+          st.compound = TYRE_CHOICES[(i + d + TYRE_CHOICES.length) % TYRE_CHOICES.length];
+        },
+      );
     }
-    this.opt(p, 'Time of day', () => TIMES.find((t) => t.v === st.time)!.label, (d) => {
-      const i = TIMES.findIndex((t) => t.v === st.time);
-      st.time = TIMES[(i + d + TIMES.length) % TIMES.length].v;
+    this.opt(p, 'Weather', () => (st.weather === 'random' || st.weather === 'changeable' ? `${weatherLabel(st.weather)} <span class="dim">· ${this.cb.forecast().weather}</span>` : weatherLabel(st.weather)), (d) => {
+      const i = WEATHERS.indexOf(st.weather);
+      st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
+    });
+    this.opt(p, 'Time of day', () => (st.time === 'random' ? `Random <span class="dim">· ${this.cb.forecast().time}</span>` : timeLabel(st.time)), (d) => {
+      const i = TIMES.indexOf(st.time);
+      st.time = TIMES[(i + d + TIMES.length) % TIMES.length];
     });
     this.opt(
       p,
@@ -260,9 +277,10 @@ export class Menu {
     el('p', 'lede', p, 'Changes apply straight away.');
     const st = this.settings;
     const label: Record<QualityLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra' };
-    this.opt(p, 'Graphics', () => label[st.quality], (d) => {
+    this.opt(p, 'Graphics', () => label[st.quality] + (st.autoQuality ? ' <span class="dim">· auto</span>' : ''), (d) => {
       const i = QUALITY.indexOf(st.quality);
       st.quality = QUALITY[(i + d + QUALITY.length) % QUALITY.length];
+      st.autoQuality = false;
     }, true);
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
       const i = CAMERA_ORDER.indexOf(st.camera);

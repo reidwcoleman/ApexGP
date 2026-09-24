@@ -1,527 +1,375 @@
 import * as THREE from 'three';
-import { MeshBuilder, srgb } from './geom.ts';
 import { WorldMap } from './worldmap.ts';
 import { fbm2, hash2i, rng, smoothstep } from './noise.ts';
+import { buildTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
+import { bakeImpostors, createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
+import type { Layout } from './layout.ts';
 
 /**
- * Mediterranean vegetation: umbrella pines, cypresses, olive trees (in orchard rows),
- * palms along the promenades and the harbour, macchia shrubs.
+ * The woods of the Parco di Monza.
  *
- * All procedural geometry (lumpy lat-long canopies with outward normals + tapered
- * trunks), 2–3 variants per species, 3 LODs. Two BatchedMeshes:
- *   near  — within ~450 m of the track: per-instance frustum culling, casts shadows,
- *           LOD0/LOD1 switched by camera distance every few frames
- *   far   — the hills beyond: static LOD2, no culling cost, no shadows
- * Wind sway + back-lit leaf translucency are patched into MeshStandardMaterial.
+ * Placement: a jittered grid over the park driven by the forest density
+ * (dense right up to the catch fences for most of the lap, open lawns at the
+ * stands, Ascari and the Parabolica, big meadows further out, farmland with
+ * copses outside the park wall), species by stand-type noise, a layered
+ * woodland edge (hazel/bramble understorey and young trees in front of the
+ * mature ones), plane-tree avenues and rows of Lombardy poplars.
+ *
+ * Rendering (≈ 3 draw calls + shadows):
+ *   near  one BatchedMesh with every prototype's LOD0/LOD1; only trees within
+ *         ~120 m of the circuit are in it, and only those within ~180 m of the
+ *         camera are visible (LOD0 < 70 m). Casts leafy shadows.
+ *   far   one instanced impostor card per tree (all of them), cross-faded with
+ *         the 3D tree by a matched dither between 158 and 182 m.
  */
-
-export type Species = 'pine' | 'cypress' | 'olive' | 'palm' | 'shrub';
 
 export interface VegetationBuild {
   group: THREE.Group;
-  uniforms: { uTime: THREE.IUniform; uSunDir: THREE.IUniform; uSunCol: THREE.IUniform; uWind: THREE.IUniform };
-  update(camera: THREE.Camera): void;
+  uniforms: TreeUniforms;
+  update(camera: THREE.Camera, elapsed: number): void;
+  /** how far the 3D trees reach before the impostors take over (quality level) */
+  setDetail(q: 'low' | 'medium' | 'high' | 'ultra'): void;
   count: number;
-  nearCount: number;
+  near: number;
+  /** crown shade discs for the ground mask */
+  shade: { x: number; z: number; r: number }[];
+  kit: TreeKit;
+  timings: Record<string, number>;
+  /** placed trees (debug / props) */
+  trees: { x: number; y: number; z: number; proto: number; s: number }[];
 }
 
-interface Proto {
-  lods: THREE.BufferGeometry[];
-}
-
-// ---------------------------------------------------------------- geometry
-
-const PINE_LEAF = srgb(0x3b5230);
-const PINE_BARK = srgb(0x6e4c3a);
-const PINE_BARK_FAR = srgb(0x3f362e);
-const CYP_LEAF = srgb(0x2b4121);
-const OLIVE_LEAF = srgb(0x6c775a);
-const OLIVE_BARK = srgb(0x5e554a);
-const PALM_LEAF = srgb(0x5c7a30);
-const PALM_BARK = srgb(0x8c7862);
-const SHRUB_LEAF = [srgb(0x4b5e2e), srgb(0x6a6d3e), srgb(0x3d5130)];
-
-function umbrellaPine(seed: number, lod: number): MeshBuilder {
-  const r = rng(seed * 7919 + 13);
-  const mb = new MeshBuilder();
-  // Pinus pinea: stout, often leaning trunk (~60 % of the height), broad dense dome
-  const H = 7.2 + r() * 2.2;
-  const total = H + 4.2;
-  const lean = (r() - 0.5) * 2.2;
-  const leanZ = (r() - 0.5) * 1.6;
-  const wind = (y: number) => Math.pow(Math.max(0, y / total), 2);
-  const sides = lod === 0 ? 7 : lod === 1 ? 5 : 3;
-  const segs = lod === 0 ? 5 : 2;
-  const bark = lod === 0 ? PINE_BARK : PINE_BARK_FAR;
-  const path: number[][] = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
-    const bend = Math.sin(t * Math.PI) * 0.5 * (r() - 0.5);
-    path.push([lean * t * t + bend, -0.4 + t * (H + 0.4), leanZ * t * t, (lod === 2 ? 0.5 : 0.42) * (1 - t * 0.45)]);
-  }
-  mb.tube(path, sides, bark, wind);
-  const top = path[path.length - 1];
-  if (lod === 0) {
-    // limbs fanning into the umbrella
-    for (let k = 0; k < 4; k++) {
-      const a = (k / 4) * Math.PI * 2 + r();
-      const L = 2.4 + r() * 1.4;
-      mb.tube(
-        [
-          [top[0], top[1] - 1.2, top[2], 0.22],
-          [top[0] + Math.cos(a) * L * 0.55, top[1] + 0.3, top[2] + Math.sin(a) * L * 0.55, 0.14],
-          [top[0] + Math.cos(a) * L, top[1] + 1.1, top[2] + Math.sin(a) * L, 0.08],
-        ],
-        4,
-        bark,
-        wind,
-      );
-    }
-  }
-  const cy = top[1] + 1.9;
-  const R = 5.4 + r() * 1.6;
-  const leaf = PINE_LEAF;
-  const opts = (s: number, lumps: number) => ({ lumps, seed: s, wind, flatTop: 0.3, shade: [0.34, 1.25] as [number, number], normalUp: 0.55 });
-  if (lod === 0) {
-    // dense umbrella of clumps: a core dome, a ring of big clumps, small tufts on the rim
-    mb.blob(top[0], cy + 0.2, top[2], R * 0.72, 2.2, R * 0.68, 16, 7, leaf, opts(seed + 0.3, 0.2));
-    for (let k = 0; k < 7; k++) {
-      const a = (k / 7) * Math.PI * 2 + r() * 0.6;
-      const d = R * (0.52 + r() * 0.18);
-      const rr = R * (0.36 + r() * 0.1);
-      mb.blob(top[0] + Math.cos(a) * d, cy - 0.3 + r() * 0.6, top[2] + Math.sin(a) * d, rr, 1.5 + r() * 0.5, rr, 9, 5, leaf, opts(seed + k * 1.7, 0.3));
-    }
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * Math.PI * 2 + r() * 0.9 + 0.4;
-      const d = R * (0.86 + r() * 0.12);
-      const rr = R * (0.18 + r() * 0.06);
-      mb.blob(top[0] + Math.cos(a) * d, cy - 0.5 + r() * 0.5, top[2] + Math.sin(a) * d, rr, 0.9, rr, 7, 4, leaf, opts(seed + k * 2.9, 0.3));
-    }
-  } else if (lod === 1) {
-    mb.blob(top[0], cy, top[2], R * 1.12, 2.5, R * 1.05, 12, 6, leaf, opts(seed, 0.26));
-  } else {
-    // far: a fuller mass sitting lower on the trunk so hillsides read as forest, not lollipops
-    mb.blob(top[0], cy - 1.6, top[2], R * 1.15, 3.6, R * 1.1, 7, 4, leaf, opts(seed, 0.22));
-  }
-  return mb;
-}
-
-function cypress(seed: number, lod: number): MeshBuilder {
-  const r = rng(seed * 104729 + 7);
-  const mb = new MeshBuilder();
-  const H = 13 + r() * 5;
-  const wind = (y: number) => Math.pow(Math.max(0, y / H), 1.6) * 0.8;
-  if (lod === 0) mb.tube([[0, -0.4, 0, 0.35], [0, 1.2, 0, 0.3]], 5, PINE_BARK);
-  const lon = lod === 0 ? 10 : lod === 1 ? 7 : 5;
-  const lat = lod === 0 ? 10 : lod === 1 ? 6 : 4;
-  // flame-shaped spindle: blob stretched, narrowed toward the tip
-  const start = mb.vertexCount;
-  mb.blob(0, H * 0.52, 0, 1.55 + r() * 0.35, H * 0.5, 1.5 + r() * 0.3, lon, lat, CYP_LEAF, { lumps: 0.12, seed, wind, shade: [0.5, 1.1], normalUp: 0.15 });
-  for (let v = start; v < mb.vertexCount; v++) {
-    const y = mb.pos[v * 3 + 1];
-    const t = Math.max(0, Math.min(1, (y - 0.5) / H));
-    const k = t < 0.25 ? 0.75 + t : Math.pow(1 - (t - 0.25) / 0.75, 0.7) * 1.0 + 0.02;
-    mb.pos[v * 3] *= k;
-    mb.pos[v * 3 + 2] *= k;
-  }
-  return mb;
-}
-
-function olive(seed: number, lod: number): MeshBuilder {
-  const r = rng(seed * 15485863 + 3);
-  const mb = new MeshBuilder();
-  const H = 4.2 + r() * 1.5;
-  const wind = (y: number) => Math.pow(Math.max(0, y / H), 2) * 0.7;
-  const sides = lod === 0 ? 6 : 3;
-  // gnarled split trunk
-  const forks = lod === 0 ? 2 : 1;
-  for (let k = 0; k < forks; k++) {
-    const a = r() * Math.PI * 2;
-    const d = forks > 1 ? 0.25 : 0;
-    mb.tube(
-      [
-        [Math.cos(a) * d * 0.3, -0.3, Math.sin(a) * d * 0.3, 0.32],
-        [Math.cos(a) * d + (r() - 0.5) * 0.4, 1.2, Math.sin(a) * d + (r() - 0.5) * 0.4, 0.24],
-        [Math.cos(a) * (d + 0.7), 2.4, Math.sin(a) * (d + 0.7), 0.14],
-      ],
-      sides,
-      OLIVE_BARK,
-      wind,
-    );
-  }
-  const cy = H * 0.72;
-  if (lod === 0) {
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2 + r();
-      mb.blob(Math.cos(a) * 0.9, cy + r() * 0.5, Math.sin(a) * 0.9, 1.6 + r() * 0.4, 1.2 + r() * 0.3, 1.6 + r() * 0.4, 10, 5, OLIVE_LEAF, { lumps: 0.32, seed: seed + k * 3, wind, shade: [0.45, 1.1], normalUp: 0.35 });
-    }
-  } else {
-    mb.blob(0, cy + 0.2, 0, 2.5, 1.6, 2.5, lod === 1 ? 8 : 6, lod === 1 ? 4 : 3, OLIVE_LEAF, { lumps: 0.25, seed, wind, shade: [0.45, 1.08], normalUp: 0.35 });
-  }
-  return mb;
-}
-
-function palm(seed: number, lod: number): MeshBuilder {
-  const r = rng(seed * 32452843 + 11);
-  const mb = new MeshBuilder();
-  const H = 9 + r() * 4;
-  const bendX = (r() - 0.5) * 2.2;
-  const wind = (y: number) => Math.pow(Math.max(0, y / H), 2.5);
-  const segs = lod === 0 ? 8 : 3;
-  const path: number[][] = [];
-  for (let i = 0; i <= segs; i++) {
-    const t = i / segs;
-    path.push([bendX * t * t, -0.3 + t * (H + 0.3), 0, 0.3 - t * 0.1 + (i === 0 ? 0.12 : 0)]);
-  }
-  mb.tube(path, lod === 0 ? 7 : 4, (t) => PALM_BARK.clone().multiplyScalar(0.8 + 0.3 * t), wind);
-  const top = path[path.length - 1];
-  const fronds = lod === 0 ? 13 : 7;
-  const fl = new THREE.Color();
-  for (let k = 0; k < fronds; k++) {
-    const a = (k / fronds) * Math.PI * 2 + r() * 0.3;
-    const up = 0.35 + r() * 0.5;
-    const L = 3.6 + r() * 1.2;
-    const segsF = lod === 0 ? 6 : 3;
-    const dirx = Math.cos(a), dirz = Math.sin(a);
-    const sx = -dirz, sz = dirx;
-    const ids: number[][] = [];
-    for (let i = 0; i <= segsF; i++) {
-      const t = i / segsF;
-      const x = top[0] + dirx * L * t;
-      const z = top[2] + dirz * L * t;
-      const y = top[1] + up * L * t - 2.4 * t * t * L * 0.35;
-      const w = Math.sin(Math.PI * Math.min(1, t * 1.1 + 0.05)) * 0.75 + 0.05;
-      fl.copy(PALM_LEAF).multiplyScalar(0.75 + 0.35 * t);
-      // V-shaped cross section (reads as leaflets from both sides)
-      const droop = 0.18 * w;
-      const row = [
-        mb.vertex(x - sx * w, y - droop, z - sz * w, 0, 1, 0, fl, wind(y), 1),
-        mb.vertex(x, y + 0.04, z, 0, 1, 0, fl, wind(y), 1),
-        mb.vertex(x + sx * w, y - droop, z + sz * w, 0, 1, 0, fl, wind(y), 1),
-      ];
-      ids.push(row);
-    }
-    for (let i = 0; i < segsF; i++) {
-      const a0 = ids[i], a1 = ids[i + 1];
-      // both faces
-      mb.idx.push(a0[0], a1[0], a0[1], a0[1], a1[0], a1[1], a0[1], a1[1], a0[2], a0[2], a1[1], a1[2]);
-      mb.idx.push(a0[0], a0[1], a1[0], a0[1], a1[1], a1[0], a0[1], a0[2], a1[1], a0[2], a1[2], a1[1]);
-    }
-  }
-  if (lod === 0) mb.blob(top[0], top[1] - 0.2, top[2], 0.55, 0.6, 0.55, 6, 3, PALM_BARK.clone().multiplyScalar(0.7), { lumps: 0.2, seed, wind });
-  return mb;
-}
-
-function shrub(seed: number, lod: number): MeshBuilder {
-  const r = rng(seed * 49979687 + 5);
-  const mb = new MeshBuilder();
-  const c = SHRUB_LEAF[seed % SHRUB_LEAF.length];
-  const wind = (y: number) => Math.max(0, y / 2) * 0.35;
-  if (lod === 0) {
-    mb.blob(0, 0.55, 0, 1.3 + r() * 0.4, 0.9, 1.2 + r() * 0.4, 9, 4, c, { lumps: 0.3, seed, wind, shade: [0.55, 1.1], normalUp: 0.5 });
-    mb.blob(0.9, 0.4, 0.5, 0.9, 0.7, 0.9, 7, 3, c, { lumps: 0.3, seed: seed + 1, wind, shade: [0.55, 1.1], normalUp: 0.5 });
-  } else {
-    mb.blob(0.3, 0.5, 0.2, 1.7, 0.9, 1.5, 6, 3, c, { lumps: 0.25, seed, wind, shade: [0.55, 1.1], normalUp: 0.5 });
-  }
-  return mb;
-}
-
-const MAKERS: Record<Species, (seed: number, lod: number) => MeshBuilder> = {
-  pine: umbrellaPine,
-  cypress,
-  olive,
-  palm,
-  shrub,
-};
-const VARIANTS: Record<Species, number> = { pine: 3, cypress: 2, olive: 2, palm: 2, shrub: 3 };
-
-// ---------------------------------------------------------------- material
-
-function vegMaterial(uniforms: VegetationBuild['uniforms'], depth = false): THREE.Material {
-  const mat = depth
-    ? new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking })
-    : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
-  mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, uniforms);
-    sh.vertexShader = sh.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-attribute float aWind;
-attribute float aLeaf;
-uniform float uTime;
-uniform vec2 uWind;
-varying float vLeaf;
-varying vec3 vVegW;`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-{
-  #ifdef USE_BATCHING
-    mat4 bm = getBatchingMatrix( getIndirectIndex( gl_DrawID ) );
-  #else
-    mat4 bm = mat4( 1.0 );
-  #endif
-  vec3 ip = bm[ 3 ].xyz;
-  float ph = dot( ip.xz, vec2( 0.071, 0.053 ) );
-  float gust = 0.6 + 0.4 * sin( uTime * 0.37 + ip.x * 0.004 );
-  float sway = ( sin( uTime * 1.25 + ph ) * 0.7 + sin( uTime * 2.9 + ph * 1.7 ) * 0.3 ) * gust;
-  float flutter = sin( uTime * 7.0 + position.x * 3.1 + position.z * 2.3 + ph ) * 0.05 * aLeaf;
-  vec3 wd = vec3( uWind.x, 0.0, uWind.y ) * ( sway * 0.45 * aWind ) + vec3( flutter, flutter * 0.4, flutter * 0.7 ) * aWind;
-  float s2 = max( dot( bm[ 0 ].xyz, bm[ 0 ].xyz ), 1e-4 );
-  transformed += ( transpose( mat3( bm ) ) * wd ) / s2;
-  vLeaf = aLeaf;
-  vVegW = ( bm * vec4( transformed, 1.0 ) ).xyz;
-}`,
-      );
-    if (!depth) {
-      sh.fragmentShader = sh.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform vec3 uSunDir;
-uniform vec3 uSunCol;
-varying float vLeaf;
-varying vec3 vVegW;`,
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-{
-  // light shining through the needles when the sun is behind the canopy
-  vec3 V = normalize( cameraPosition - vVegW );
-  float back = pow( max( dot( -V, uSunDir ), 0.0 ), 6.0 );
-  totalEmissiveRadiance += diffuseColor.rgb * uSunCol * ( back * 0.22 + 0.015 ) * vLeaf;
-}`,
-        );
-    }
-  };
-  mat.customProgramCacheKey = () => (depth ? 'apex-veg-depth' : 'apex-veg');
-  return mat;
-}
-
-// ---------------------------------------------------------------- placement
-
-interface Inst {
-  sp: Species;
-  v: number;
+interface Tree {
   x: number;
   y: number;
   z: number;
-  rot: number;
+  proto: number;
   s: number;
-  col: THREE.Color;
+  rot: number;
+  tint: THREE.Color;
+  flip: boolean;
 }
 
-export interface VegOptions {
-  /** explicit palm lines (world points, spacing handled by caller) */
-  palms: { x: number; z: number }[];
-  /** cypress rows */
-  cypresses: { x: number; z: number }[];
-}
+const NEAR_BAND = 125; // trees closer than this to the circuit get a 3D version
+const R3D = 170;
+const LOD0 = 72;
 
-export function buildVegetation(map: WorldMap, opts: VegOptions): VegetationBuild {
-  const { SQUARE } = map;
+export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.WebGLRenderer): VegetationBuild {
+  const timings: Record<string, number> = {};
+  let tl = performance.now();
+  const lap = (k: string) => {
+    const n = performance.now();
+    timings[k] = Math.round(n - tl);
+    tl = n;
+  };
+  const kit = buildTreeKit();
+  lap('kit');
+  Object.assign(timings, kit.timings);
   const r = rng(424242);
-  const near: Inst[] = [];
-  const far: Inst[] = [];
+  const trees: Tree[] = [];
+  const S = map.SQUARE;
+  const track = map.track;
 
-  const ok = (x: number, z: number, clearance: number, minH = 1.2) => {
-    if (x < SQUARE.x0 + 40 || x > SQUARE.x1 - 40 || z < SQUARE.z0 + 40 || z > SQUARE.z1 - 40) return false;
-    const h = map.height(x, z);
-    if (h < minH) return false;
-    if (map.excluded(x, z, 2)) return false;
-    if (map.trackClearance(x, z) < clearance) return false;
+  const pick = (sp: SpeciesId, h: number) => {
+    const list = kit.bySpecies[sp];
+    return list[Math.floor(h * list.length) % list.length];
+  };
+  const tintFor = (sp: SpeciesId, h: number, h2: number) => {
+    const j = (h - 0.5) * 0.18;
+    const c = new THREE.Color(1 + j, 1 + j * 0.9, 1 + j * 0.5);
+    // a few trees already turning (September): planes go yellow-brown, chestnuts brown
+    if (h2 < 0.05 && (sp === 'plane' || sp === 'chestnut' || sp === 'poplar')) c.setRGB(1.28, 1.02, 0.5);
+    else if (h2 < 0.09 && sp !== 'shrub') c.setRGB(1.12, 1.03, 0.78);
+    return c;
+  };
+  /** species by stand type */
+  const speciesAt = (x: number, z: number, h: number): SpeciesId => {
+    const n = fbm2(x / 260 + 4.1, z / 260 - 2.7, 3);
+    const n2 = fbm2(x / 90 - 1.3, z / 90 + 8.8, 2);
+    let sp: SpeciesId;
+    if (n < -0.18) sp = 'plane';
+    else if (n < 0.12) sp = 'oak';
+    else if (n < 0.34) sp = 'chestnut';
+    else sp = n2 > 0.25 ? 'poplar' : 'plane';
+    // mixed woods: a quarter of the trees are something else
+    if (h < 0.12) sp = 'oak';
+    else if (h < 0.2) sp = 'plane';
+    else if (h < 0.26) sp = 'chestnut';
+    return sp;
+  };
+
+  const okTree = (x: number, z: number, trackGap: number) => {
+    if (x < S.x0 + 30 || x > S.x1 - 30 || z < S.z0 + 30 || z > S.z1 - 30) return false;
+    if (map.trackClearance(x, z) < trackGap) return false;
+    if (map.excluded(x, z, 1)) return false;
+    if (map.ovalClearance(x, z) < 1.5) return false;
+    if (map.pathDistance(x, z).d < 1.2) return false;
+    if (map.inPitZone(x, z, 8)) return false;
     return true;
   };
-  const push = (sp: Species, x: number, z: number, scale: number, colJitter: number, farOnly = false) => {
-    const y = map.height(x, z);
-    const slopeY = map.slope(x, z, 2);
-    if (slopeY < 0.72 && sp !== 'shrub') return;
-    const d = map.distToTrack(x, z);
-    const v = Math.floor(r() * VARIANTS[sp]);
-    const c = new THREE.Color();
-    const j = (r() - 0.5) * colJitter;
-    c.setRGB(1 + j + (r() - 0.5) * 0.05, 1 + j, 1 + j - (r() - 0.5) * 0.06);
-    const inst: Inst = { sp, v, x, y: y - 0.05, z, rot: r() * Math.PI * 2, s: scale, col: c };
-    // near set (culled per instance, shadows, LOD0/1) only close to the track
-    if (!farOnly && d < 330) near.push(inst);
-    else far.push(inst);
+  const add = (sp: SpeciesId, x: number, z: number, scale: number, h: number, h2: number) => {
+    const y = map.height(x, z) - 0.12;
+    trees.push({ x, y, z, proto: pick(sp, h), s: scale, rot: h2 * Math.PI * 2 * 7.3, tint: tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2), flip: h > 0.5 });
   };
 
-  // pines: jittered grid, forest density; denser + bigger on hills, sparse far out
+  // ---------------------------------------------------------------- the woods (jittered grid)
   {
-    const C = 13;
-    for (let z = SQUARE.z0 + 60; z < SQUARE.z1 - 60; z += C)
-      for (let x = SQUARE.x0 + 60; x < SQUARE.x1 - 60; x += C) {
-        const hx = hash2i(Math.floor(x / C), Math.floor(z / C), 1);
-        const hz = hash2i(Math.floor(x / C), Math.floor(z / C), 2);
-        const px = x + (hx - 0.5) * C * 0.9;
-        const pz = z + (hz - 0.5) * C * 0.9;
-        const f = map.forest(px, pz);
-        if (f < 0.05) continue;
-        const d = map.distToTrack(px, pz);
-        // far away only the canopy mass matters: thin it out
-        const keep = d < 470 ? 0.62 : d < 1300 ? 0.2 : 0.08;
-        if (hash2i(Math.floor(px), Math.floor(pz), 3) > f * keep) continue;
-        if (!ok(px, pz, 12, 2.5)) continue;
-        const sc = (d < 470 ? 0.85 : 1.05) + hash2i(Math.floor(px), Math.floor(pz), 4) * 0.45;
-        push('pine', px, pz, d < 1300 ? sc : sc * 1.35, 0.22);
-      }
-  }
-  // lone pines on open ground near the track (silhouettes against the sky)
-  for (let k = 0; k < 900; k++) {
-    const x = SQUARE.x0 + 1800 + r() * 2600;
-    const z = SQUARE.z0 + 1600 + r() * 3000;
-    if (map.distToTrack(x, z) > 380) continue;
-    if (map.town(x, z) > 0.2) continue;
-    if (!ok(x, z, 12, 2.5)) continue;
-    push('pine', x, z, 0.95 + r() * 0.4, 0.2);
-  }
-  // olive orchards: rows in noise-masked patches
-  {
-    const C = 8.5;
-    for (let z = SQUARE.z0 + 60; z < SQUARE.z1 - 60; z += C)
-      for (let x = SQUARE.x0 + 60; x < SQUARE.x1 - 60; x += C) {
-        const d = map.distToTrack(x, z);
-        if (d > 1600) continue;
-        const grove = fbm2(x / 380 + 3.3, z / 380 - 8.1, 3) * 0.5 + 0.5;
-        if (grove < 0.6) continue;
-        if (map.forest(x, z) > 0.35 || map.town(x, z) > 0.15) continue;
-        const px = x + (hash2i(Math.floor(x), Math.floor(z), 5) - 0.5) * 1.2;
-        const pz = z + (hash2i(Math.floor(x), Math.floor(z), 6) - 0.5) * 1.2;
-        if (hash2i(Math.floor(x), Math.floor(z), 7) < 0.12) continue; // gaps
-        if (d > 470 && hash2i(Math.floor(x), Math.floor(z), 8) > 0.45) continue;
-        // keep orchards off the seafront so the sea stays visible from the track
-        if (map.coastExact(px, pz).dc < 240) continue;
-        if (!ok(px, pz, 22, 3)) continue;
-        push('olive', px, pz, 0.85 + hash2i(Math.floor(x), Math.floor(z), 9) * 0.35, 0.15);
-      }
-  }
-  // shrubs (macchia) scattered on open land + forest edges
-  {
-    const C = 11;
-    for (let z = SQUARE.z0 + 60; z < SQUARE.z1 - 60; z += C)
-      for (let x = SQUARE.x0 + 60; x < SQUARE.x1 - 60; x += C) {
-        const d = map.distToTrack(x, z);
-        if (d > 1500) continue;
-        const px = x + (hash2i(Math.floor(x / C), Math.floor(z / C), 11) - 0.5) * C;
-        const pz = z + (hash2i(Math.floor(x / C), Math.floor(z / C), 12) - 0.5) * C;
-        const f = map.forest(px, pz);
-        const patch = fbm2(px / 90 - 1.1, pz / 90 + 5.5, 2) * 0.5 + 0.5;
-        const p = (0.16 + 0.4 * Math.min(1, f * 2.5) * (1 - f)) * smoothstep(0.3, 0.65, patch) * (d < 470 ? 1 : 0.55);
-        if (hash2i(Math.floor(px), Math.floor(pz), 13) > p) continue;
-        if (map.town(px, pz) > 0.4) continue;
-        if (!ok(px, pz, 7, 1.5)) continue;
-        push('shrub', px, pz, 0.7 + hash2i(Math.floor(px), Math.floor(pz), 14) * 0.9, 0.25);
-      }
-  }
-  // cypress: explicit rows + around the towns
-  for (const p of opts.cypresses) if (ok(p.x, p.z, 8, 1.5)) push('cypress', p.x, p.z, 0.85 + r() * 0.3, 0.12);
-  for (let k = 0; k < 2600; k++) {
-    const x = SQUARE.x0 + 1500 + r() * 3600;
-    const z = SQUARE.z0 + 1000 + r() * 3600;
-    const t = map.town(x, z);
-    if (t < 0.12 || t > 0.75) continue;
-    if (!ok(x, z, 10, 2)) continue;
-    push('cypress', x, z, 0.8 + r() * 0.35, 0.12);
-  }
-  // palms
-  for (const p of opts.palms) if (ok(p.x, p.z, 6, 0.8)) push('palm', p.x, p.z, 0.85 + r() * 0.35, 0.15);
-
-  // ---------------------------------------------------------------- batches
-  const uniforms: VegetationBuild['uniforms'] = {
-    uTime: { value: 0 },
-    uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-    uSunCol: { value: new THREE.Color(1, 1, 1) },
-    uWind: { value: new THREE.Vector2(0.8, 0.6) },
-  };
-  const material = vegMaterial(uniforms);
-  const depthMat = vegMaterial(uniforms, true);
-
-  const species: Species[] = ['pine', 'cypress', 'olive', 'palm', 'shrub'];
-  const protos = new Map<string, Proto>();
-  for (const sp of species)
-    for (let v = 0; v < VARIANTS[sp]; v++) {
-      const lods: THREE.BufferGeometry[] = [];
-      for (let l = 0; l < 3; l++) lods.push(MAKERS[sp](v + 1, l).geometry());
-      protos.set(sp + v, { lods });
+    const bb = map.A.bb;
+    for (let pass = 0; pass < 3; pass++) {
+      const C = pass === 0 ? 8.6 : pass === 1 ? 12 : 17;
+      // pass 0 only needs the circuit's bounding box (+ its 360 m reach)
+      const X0 = pass === 0 ? Math.max(S.x0 + 40, Math.floor((bb.x0 - 380) / C) * C) : S.x0 + 40;
+      const X1 = pass === 0 ? Math.min(S.x1 - 40, bb.x1 + 380) : S.x1 - 40;
+      const Z0 = pass === 0 ? Math.max(S.z0 + 40, Math.floor((bb.z0 - 380) / C) * C) : S.z0 + 40;
+      const Z1 = pass === 0 ? Math.min(S.z1 - 40, bb.z1 + 380) : S.z1 - 40;
+      for (let z = Z0; z < Z1; z += C)
+        for (let x = X0; x < X1; x += C) {
+          const d = map.distToTrack(x, z);
+          // pass 0: within 360 m of the track, pass 1: 360–1300 m, pass 2: beyond
+          if (pass === 0 && d > 360) continue;
+          if (pass === 1 && (d <= 360 || d > 1300)) continue;
+          if (pass === 2 && d <= 1300) continue;
+          const ix = Math.floor(x / C), iz = Math.floor(z / C);
+          const px = x + (hash2i(ix, iz, 1 + pass) - 0.5) * C * 0.92;
+          const pz = z + (hash2i(ix, iz, 5 + pass) - 0.5) * C * 0.92;
+          const f = map.forest(px, pz);
+          if (f < 0.04) continue;
+          const keep = pass === 0 ? 0.95 : pass === 1 ? 0.85 : 0.75;
+          const h = hash2i(ix, iz, 9 + pass);
+          if (h > f * keep) continue;
+          if (!okTree(px, pz, 4.2)) continue;
+          const h2 = hash2i(ix, iz, 13 + pass);
+          const sp = speciesAt(px, pz, hash2i(ix, iz, 17 + pass));
+          // lone trees on lawns grow bigger; young trees mix into the woods
+          const lone = f < 0.35 ? 1.12 : 1;
+          const young = h2 > 0.86 ? 0.62 + h2 * 0.2 : 1;
+          add(sp, px, pz, (0.84 + hash2i(ix, iz, 19) * 0.32) * lone * young * (pass === 2 ? 1.1 : 1), h / Math.max(f * keep, 1e-3), h2);
+        }
     }
-
-  const makeBatch = (list: Inst[], lodSet: number[], name: string) => {
-    let maxV = 0, maxI = 0;
-    for (const p of protos.values())
-      for (const l of lodSet) {
-        maxV += p.lods[l].attributes.position.count;
-        maxI += p.lods[l].index!.count;
+  }
+  // ---------------------------------------------------------------- layered woodland edge along the circuit
+  {
+    const p = new THREE.Vector3();
+    for (const side of [-1, 1]) {
+      for (let s = 0; s < track.n; s += 3.2) {
+        const hs = hash2i(Math.floor(s), side, 31);
+        const bar = track.barrierAt(s, side);
+        track.point(s, side * (bar + 7), 0, p);
+        const f = map.forest(p.x, p.z);
+        if (f < 0.35) continue;
+        // understorey shrubs right behind the fence line, and a second, taller band further in
+        if (hs < 0.8) {
+          const lat = side * (bar + 2.8 + hash2i(Math.floor(s), side, 32) * 5);
+          track.point(s + (hs - 0.5) * 3, lat, 0, p);
+          if (okTree(p.x, p.z, 2.4)) add('shrub', p.x, p.z, 0.8 + hash2i(Math.floor(s), side, 33) * 0.7, hs, 0.5);
+        }
+        if (hs > 0.25) {
+          const lat = side * (bar + 8 + hash2i(Math.floor(s), side, 38) * 9);
+          track.point(s + 1.6, lat, 0, p);
+          if (okTree(p.x, p.z, 3)) add('shrub', p.x, p.z, 1.2 + hash2i(Math.floor(s), side, 39) * 0.8, 1 - hs, 0.5);
+        }
+        // young trees between the shrubs and the big trees
+        if (hs > 0.5) {
+          const lat = side * (bar + 5 + hash2i(Math.floor(s), side, 34) * 7);
+          track.point(s, lat, 0, p);
+          const sp = speciesAt(p.x, p.z, hash2i(Math.floor(s), side, 35));
+          if (okTree(p.x, p.z, 4)) add(sp, p.x, p.z, 0.45 + hash2i(Math.floor(s), side, 36) * 0.25, hash2i(Math.floor(s), side, 37), 0.5);
+        }
       }
-    const bm = new THREE.BatchedMesh(Math.max(1, list.length), maxV, maxI, material);
-    bm.name = name;
-    const ids = new Map<string, number>();
-    for (const [key, p] of protos) for (const l of lodSet) ids.set(key + ':' + l, bm.addGeometry(p.lods[l]));
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const sv = new THREE.Vector3();
-    const pv = new THREE.Vector3();
-    const instGeo: number[][] = [];
-    for (const it of list) {
-      const geos = lodSet.map((l) => ids.get(it.sp + it.v + ':' + l)!);
-      const id = bm.addInstance(geos[0]);
-      q.setFromAxisAngle(up, it.rot);
-      sv.setScalar(it.s);
-      pv.set(it.x, it.y, it.z);
-      m.compose(pv, q, sv);
-      bm.setMatrixAt(id, m);
-      bm.setColorAt(id, it.col);
-      instGeo.push(geos);
     }
-    bm.computeBoundingBox();
-    bm.computeBoundingSphere();
-    return { bm, instGeo };
-  };
+  }
+  // scattered understorey inside the woods near the circuit
+  for (let k = 0; k < 5000; k++) {
+    const i = Math.floor(r() * track.n);
+    const side = r() < 0.5 ? -1 : 1;
+    const lat = side * (track.barrierAt(i, side) + 8 + r() * 70);
+    const q = track.point(i, lat, 0);
+    if (map.forest(q.x, q.z) < 0.5) continue;
+    if (!okTree(q.x, q.z, 3)) continue;
+    add('shrub', q.x, q.z, 0.6 + r() * 0.7, r(), 0.5);
+  }
+  // ---------------------------------------------------------------- avenues & poplar rows
+  for (const q of layout.avenueTrees) {
+    if (!okTree(q.x, q.z, 6)) continue;
+    add('plane', q.x, q.z, 0.95 + r() * 0.15, r(), r() * 0.3 + 0.2);
+  }
+  for (const q of layout.poplarRows) {
+    if (q.x < S.x0 + 30 || q.x > S.x1 - 30 || q.z < S.z0 + 30 || q.z > S.z1 - 30) continue;
+    if (map.trackClearance(q.x, q.z) < 8 || map.excluded(q.x, q.z, 1) || map.ovalClearance(q.x, q.z) < 2) continue;
+    add('poplar', q.x, q.z, 0.9 + r() * 0.2, r(), r() * 0.5 + 0.3);
+  }
+  // saplings growing out of the abandoned banking's edges
+  {
+    const o = layout.oval;
+    for (let i = 20; i < o.n - 20; i += 23) {
+      if (Math.abs(i - o.bridgeU) < 40) continue;
+      const h = hash2i(i, 3, 41);
+      if (h > 0.55) continue;
+      const side = h < 0.3 ? -1 : 1;
+      const off = side * (o.width / 2 + 0.6);
+      const x = o.x[i] + o.tz[i] * -off, z = o.z[i] + o.tx[i] * off;
+      trees.push({ x, y: map.height(x, z), z, proto: pick(h < 0.2 ? 'shrub' : 'oak', h * 3), s: h < 0.2 ? 0.8 : 0.35 + h * 0.3, rot: h * 40, tint: new THREE.Color(1, 1, 1), flip: h > 0.3 });
+    }
+  }
 
+  lap('place');
+  // ---------------------------------------------------------------- render: near batch + impostors
+  const uniforms = createTreeUniforms();
+  uniforms.uFade.value.set(R3D - 12, R3D + 12);
   const group = new THREE.Group();
   group.name = 'Vegetation';
-  const nearB = makeBatch(near, [0, 1], 'veg_near');
-  nearB.bm.castShadow = true;
-  nearB.bm.receiveShadow = true;
-  nearB.bm.customDepthMaterial = depthMat;
-  nearB.bm.sortObjects = false;
-  nearB.bm.perObjectFrustumCulled = true;
-  group.add(nearB.bm);
-  const farB = makeBatch(far, [2], 'veg_far');
-  farB.bm.castShadow = false;
-  farB.bm.receiveShadow = true;
-  farB.bm.sortObjects = false;
-  farB.bm.perObjectFrustumCulled = false;
-  group.add(farB.bm);
 
-  // LOD switching for the near batch
-  const lodNow = new Uint8Array(near.length);
-  let frame = 0;
-  const camPos = new THREE.Vector3();
-  const LOD0 = 175 * 175;
-  const update = (camera: THREE.Camera) => {
-    frame++;
-    if (frame % 6 !== 1) return;
-    camera.getWorldPosition(camPos);
-    for (let i = 0; i < near.length; i++) {
-      const it = near[i];
-      const dx = it.x - camPos.x, dz = it.z - camPos.z;
-      const l = dx * dx + dz * dz < LOD0 ? 0 : 1;
-      if (l !== lodNow[i]) {
-        lodNow[i] = l;
-        nearB.bm.setGeometryIdAt(i, nearB.instGeo[i][l]);
+  const nearIdx: number[] = [];
+  for (let i = 0; i < trees.length; i++) {
+    const t = trees[i];
+    if (map.distToTrack(t.x, t.z) < NEAR_BAND) nearIdx.push(i);
+  }
+  const isNear = new Uint8Array(trees.length);
+  for (const i of nearIdx) isNear[i] = 1;
+
+  // BatchedMesh
+  let maxV = 0, maxI = 0;
+  for (const p of kit.protos)
+    for (const g of p.lods) {
+      maxV += g.attributes.position.count;
+      maxI += g.index!.count;
+    }
+  const mat = treeMaterial(kit, uniforms);
+  const bm = new THREE.BatchedMesh(Math.max(1, nearIdx.length), maxV, maxI, mat);
+  bm.name = 'trees_near';
+  const geoIds: number[][] = kit.protos.map((p) => p.lods.map((g) => bm.addGeometry(g)));
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const upA = new THREE.Vector3(0, 1, 0);
+  const sv = new THREE.Vector3();
+  const pv = new THREE.Vector3();
+  const nearInst: number[] = [];
+  for (const i of nearIdx) {
+    const t = trees[i];
+    const id = bm.addInstance(geoIds[t.proto][1]);
+    q.setFromAxisAngle(upA, t.rot);
+    sv.set(t.s * (t.flip ? -1 : 1), t.s * (0.94 + ((t.rot * 13.7) % 1) * 0.12), t.s);
+    pv.set(t.x, t.y, t.z);
+    m4.compose(pv, q, sv);
+    bm.setMatrixAt(id, m4);
+    bm.setColorAt(id, t.tint);
+    bm.setVisibleAt(id, false);
+    nearInst.push(id);
+  }
+  bm.perObjectFrustumCulled = true;
+  bm.sortObjects = false;
+  bm.castShadow = true;
+  bm.receiveShadow = true;
+  bm.customDepthMaterial = treeDepthMaterial(kit, uniforms);
+  bm.computeBoundingBox();
+  bm.computeBoundingSphere();
+  bm.frustumCulled = false;
+  bm.renderOrder = -1;
+  group.add(bm);
+
+  lap('batch');
+  // impostors
+  const atlas = bakeImpostors(renderer, kit, 512);
+  lap('bake');
+  const base = new THREE.InstancedBufferGeometry();
+  base.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0], 3));
+  base.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+  base.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+  base.setIndex([0, 1, 2, 0, 2, 3]);
+  // small shrubs don't matter beyond the 3D range, but the big understorey bushes
+  // hide the bare trunks of the woodland edge when seen from afar
+  const shrubSet = new Set(kit.bySpecies.shrub);
+  const impList: number[] = [];
+  for (let i = 0; i < trees.length; i++) if (!shrubSet.has(trees[i].proto) || trees[i].s >= 1.1) impList.push(i);
+  const N = impList.length;
+  const iPos = new Float32Array(N * 4);
+  const iInfo = new Float32Array(N * 4);
+  const iTint = new Float32Array(N * 3);
+  impList.forEach((ti, i) => {
+    const t = trees[ti];
+    iPos.set([t.x, t.y, t.z, t.s], i * 4);
+    iInfo.set([t.proto, t.flip ? 1 : 0, isNear[ti], 0], i * 4);
+    iTint.set([t.tint.r, t.tint.g, t.tint.b], i * 3);
+  });
+  base.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 4));
+  base.setAttribute('iInfo', new THREE.InstancedBufferAttribute(iInfo, 4));
+  base.setAttribute('iTint', new THREE.InstancedBufferAttribute(iTint, 3));
+  base.instanceCount = N;
+  base.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  const imp = new THREE.Mesh(base, impostorMaterial(atlas, uniforms));
+  imp.name = 'trees_impostors';
+  imp.frustumCulled = false;
+  imp.castShadow = false;
+  imp.receiveShadow = false;
+  imp.renderOrder = 1;
+  group.add(imp);
+
+  // ---------------------------------------------------------------- LOD manager (cells of 64 m)
+  const CELL = 64;
+  const cells = new Map<number, number[]>();
+  nearIdx.forEach((ti, k) => {
+    const t = trees[ti];
+    const key = (Math.floor(t.x / CELL) + 1024) * 2048 + Math.floor(t.z / CELL) + 1024;
+    let a = cells.get(key);
+    if (!a) cells.set(key, (a = []));
+    a.push(k);
+  });
+  const lodNow = new Int8Array(nearIdx.length).fill(-1);
+  let active: number[] = [];
+  const cam = new THREE.Vector3();
+  const last = new THREE.Vector3(1e9, 0, 0);
+  let frames = 0;
+  let reach = R3D + 16;
+  let lod0 = LOD0;
+  // 3D range per quality level: [impostor fade start, fade end, LOD0 distance]
+  const DETAIL = { low: [62, 78, 30], medium: [92, 110, 44], high: [122, 142, 56], ultra: [158, 182, 72] } as const;
+  const setDetail = (q: keyof typeof DETAIL) => {
+    const [f0, f1, l0] = DETAIL[q];
+    uniforms.uFade.value.set(f0, f1);
+    reach = f1 + 4;
+    lod0 = l0;
+    last.set(1e9, 0, 0);
+  };
+  const update = (camera: THREE.Camera, elapsed: number) => {
+    uniforms.uTime.value = elapsed;
+    camera.getWorldPosition(cam);
+    frames++;
+    if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0) return;
+    last.copy(cam);
+    const next: number[] = [];
+    const c0x = Math.floor((cam.x - reach) / CELL), c1x = Math.floor((cam.x + reach) / CELL);
+    const c0z = Math.floor((cam.z - reach) / CELL), c1z = Math.floor((cam.z + reach) / CELL);
+    for (let cx = c0x; cx <= c1x; cx++)
+      for (let cz = c0z; cz <= c1z; cz++) {
+        const arr = cells.get((cx + 1024) * 2048 + cz + 1024);
+        if (!arr) continue;
+        for (const k of arr) {
+          const t = trees[nearIdx[k]];
+          const dx = t.x - cam.x, dz = t.z - cam.z, dy = t.y - cam.y;
+          const d = Math.sqrt(dx * dx + dz * dz + dy * dy);
+          if (d > reach) continue;
+          const want = d < (lodNow[k] === 0 ? lod0 + 4 : lod0 - 4) ? 0 : 1;
+          if (lodNow[k] !== want) {
+            if (lodNow[k] === -1) bm.setVisibleAt(nearInst[k], true);
+            bm.setGeometryIdAt(nearInst[k], geoIds[t.proto][want]);
+            lodNow[k] = want;
+          }
+          next.push(k);
+        }
+      }
+    // hide the ones that dropped out
+    const keep = new Set(next);
+    for (const k of active) {
+      if (!keep.has(k)) {
+        bm.setVisibleAt(nearInst[k], false);
+        lodNow[k] = -1;
       }
     }
+    active = next;
   };
-  // start everyone at LOD1 so the first frame isn't all LOD0
-  for (let i = 0; i < near.length; i++) {
-    lodNow[i] = 1;
-    nearB.bm.setGeometryIdAt(i, nearB.instGeo[i][1]);
-  }
 
-  return { group, uniforms, update, count: near.length + far.length, nearCount: near.length };
+  const shade = trees.map((t) => ({ x: t.x, z: t.z, r: kit.protos[t.proto].crownR * t.s }));
+  return { group, uniforms, update, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings };
 }
+
+void smoothstep;

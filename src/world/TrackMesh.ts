@@ -20,27 +20,40 @@ import {
 import { buildSurfaces } from './trackside/surfaces.ts';
 import { buildBarriers } from './trackside/barriers.ts';
 import { buildMarkings } from './trackside/markings.ts';
-import { buildPit, preparePit } from './trackside/pit.ts';
-import { buildStructures } from './trackside/structures.ts';
+import { buildStructures, type PanelSpot } from './trackside/structures.ts';
+import { RoadSSR } from './trackside/ssr.ts';
 
 /**
- * Everything from the centreline out to (and a few metres behind) the barriers:
- * road, kerbs, verges, run-off, gravel, grass, barriers, fences, markings, pit
- * lane + pit wall, start gantry, bridges, marshal posts, cameras, boards.
+ * Everything from the centreline out to (and a few metres behind) the barriers
+ * at Monza: road, kerbs, verges, run-off, gravel, grass, barriers, debris
+ * fences, markings, start gantry, footbridges, marshal posts, cameras, boards.
+ * (The pit wall, pit lane and its entry/exit spurs belong to the pit module —
+ * see PIT_HANDOFF in trackside/context.ts.)
  *
- * The lap is cut into ~240 m chunks; inside a chunk everything merges into one
+ * The lap is cut into ~360 m chunks; inside a chunk everything merges into one
  * mesh per material (asphalt / gravel / grass / decal / props / print / fence),
- * so a chase-cam view draws a few dozen calls and the whole circuit ≈ 150.
+ * so the whole circuit is ~100 draws and a chase-cam view a few dozen.
+ *
+ * Weather: every material reads the shared weatherUniforms (wetness, rain,
+ * dry line, clock). The wet road gets screen-space reflections (trackside/ssr.ts).
  */
 
 export interface StartLights {
   set(lit: number): void;
 }
 
+export type PanelState = 'off' | 'green' | 'yellow' | 'blue' | 'red' | 'white';
+
 export interface Trackside {
   group: THREE.Group;
   startLights: StartLights;
   update(dt: number, camera: THREE.Camera): void;
+  /** marshal LED panels: all posts, or one post by index */
+  setPanels?(state: PanelState, post?: number): void;
+  /** turn the wet-road screen-space reflections on/off (quality setting) */
+  setReflections?(on: boolean): void;
+  /** the wet-road reflection pass (tuning/debug) */
+  ssr?: RoadSSR;
 }
 
 export interface TracksideStats {
@@ -50,6 +63,58 @@ export interface TracksideStats {
   chunks: number;
   byKey: Record<string, number>;
   phases: Record<string, number>;
+}
+
+const PANEL_COLORS: Record<PanelState, [number, number, number]> = {
+  off: [0, 0, 0],
+  green: [0.1, 3.2, 0.35],
+  yellow: [3.4, 2.4, 0.05],
+  blue: [0.15, 0.6, 3.6],
+  red: [3.6, 0.12, 0.08],
+  white: [2.6, 2.6, 2.6],
+};
+
+function makePanels(spots: PanelSpot[]): THREE.InstancedMesh {
+  const geo = new THREE.PlaneGeometry(0.96, 0.66);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vPUv;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          // LED dot matrix: 32 × 22 dots, off = dark grey dots on black
+          vec2 g = vPUv * vec2(32.0, 22.0);
+          vec2 f = fract(g) - 0.5;
+          float dotm = 1.0 - smoothstep(0.26, 0.4, length(f));
+          float far = smoothstep(0.02, 0.08, length(fwidth(vPUv)));
+          dotm = mix(dotm, 0.55, far);
+          vec3 on = diffuseColor.rgb;
+          float lit = step(0.001, dot(on, vec3(1.0)));
+          diffuseColor.rgb = mix(vec3(0.012) * dotm + vec3(0.004), on * dotm, lit);
+        }`,
+      );
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vPUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPUv = uv;');
+  };
+  mat.customProgramCacheKey = () => 'apex-ts-ledpanel-1';
+  const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, spots.length));
+  const m = new THREE.Matrix4();
+  const up = new THREE.Vector3();
+  spots.forEach((p, k) => {
+    // basis: x = right, y = up, z = normal (the plane faces +z)
+    up.crossVectors(p.normal, p.right).normalize();
+    m.makeBasis(p.right, up, p.normal);
+    m.setPosition(p.pos);
+    mesh.setMatrixAt(k, m);
+    mesh.setColorAt(k, new THREE.Color(0, 0, 0));
+  });
+  mesh.count = spots.length;
+  mesh.name = 'ts_panels';
+  mesh.frustumCulled = false;
+  return mesh;
 }
 
 export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats: TracksideStats } {
@@ -63,31 +128,38 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
   const lamp = lampMaterial();
 
   const defs: Record<string, MatDef> = {
-    asphalt: { material: asphaltMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
+    // the road draws after the other opaques so its wet reflections can see them (ssr.ts)
+    asphalt: { material: asphaltMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true, renderOrder: 1 },
     gravel: { material: gravelMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     grass: { material: grassMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
-    decal: { material: decalMaterial(decals.texture), spec: { uv: true, color: true, pbr: true }, cast: false, receive: true, renderOrder: 1 },
+    decal: { material: decalMaterial(decals.texture), spec: { uv: true, color: true, pbr: true }, cast: false, receive: true, renderOrder: 2 },
     props: { material: propsMaterial(), spec: { color: true, pbr: true }, cast: true, receive: true },
     print: { material: printMaterial(print.texture), spec: { uv: true, color: true, pbr: true }, cast: true, receive: true },
-    fence: { material: fenceMaterial(tex.fence), spec: { uv: true }, cast: false, receive: true, renderOrder: 2 },
+    fence: { material: fenceMaterial(tex.fence), spec: { uv: true }, cast: false, receive: true, renderOrder: 3 },
     lamp: { material: lamp.material, spec: { a0: true }, cast: false, receive: false },
   };
 
-  const cs = new ChunkSet(track.length, 240, defs);
+  const cs = new ChunkSet(track.length, 360, defs);
   const ctx = new Ctx(track, cs);
   const tCtx = performance.now();
-  preparePit(ctx);
   buildSurfaces(ctx);
-  buildPit(ctx, print);
   buildBarriers(ctx, print);
   buildMarkings(ctx, decals);
-  buildStructures(ctx, print);
+  const st = buildStructures(ctx, print);
 
   const tGeo = performance.now();
   const group = new THREE.Group();
   group.name = 'trackside';
   const { meshes, triangles, byKey } = cs.finish(group);
+  const panels = makePanels(st.panels);
+  group.add(panels);
   group.matrixAutoUpdate = false;
+
+  // wet-road reflections: hook every road chunk (the first one drawn each frame does the copy)
+  const ssr = new RoadSSR();
+  group.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && o.name.startsWith('ts_asphalt_')) ssr.hook(o as THREE.Mesh);
+  });
 
   // redraw printed textures once the display font is available (skipped if it already was)
   const fontReady = typeof document !== 'undefined' && !!document.fonts && document.fonts.check('italic 700 64px "Titillium Web"') && document.fonts.check('700 64px "Titillium Web"');
@@ -103,11 +175,20 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
   const tEnd = performance.now();
   const stats: TracksideStats = {
     buildMs: tEnd - t0,
-    meshes,
+    meshes: meshes + 1,
     triangles,
     chunks: cs.count,
     byKey,
     phases: { textures: Math.round(tTex - t0), analysis: Math.round(tCtx - tTex), geometry: Math.round(tGeo - tCtx), upload: Math.round(tEnd - tGeo) },
+  };
+
+  const col = new THREE.Color();
+  let reflections = true;
+  const setPanels = (state: PanelState, post?: number) => {
+    const [r, g, b] = PANEL_COLORS[state] ?? PANEL_COLORS.off;
+    col.setRGB(r, g, b);
+    for (let k = 0; k < panels.count; k++) if (post === undefined || post === k) panels.setColorAt(k, col);
+    if (panels.instanceColor) panels.instanceColor.needsUpdate = true;
   };
 
   return {
@@ -118,8 +199,17 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
         lamp.lit.value = Math.max(0, Math.min(5, Math.round(lit)));
       },
     },
-    update(_dt: number, _camera: THREE.Camera) {
-      // static geometry; nothing per frame yet
+    setPanels,
+    setReflections(on: boolean) {
+      reflections = on;
+    },
+    ssr,
+    update(_dt: number, camera: THREE.Camera) {
+      ssr.mainCamera = camera;
+      // wet-road reflections scale with the quality preset: off on low/medium, 1/3-res copy on high, 1/2 on ultra
+      const q = gfx.qualityLevel;
+      ssr.enabled = reflections && (q === 'high' || q === 'ultra');
+      ssr.downscale = ssr.fixedDownscale ?? (q === 'ultra' ? 2 : 3);
     },
   };
 }

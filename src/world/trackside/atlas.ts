@@ -40,7 +40,7 @@ export const SPONSORS: [string, string, string, number, string][] = [
   ['NORTHWIND', '#0e3b43', '#ffffff', 1, '#7fd1c7'],
   ['MIRAFLO', '#00a3e0', '#ffffff', 5, '#ffffff'],
   ['VALTREO TYRES', '#111111', '#ffd400', 2, '#ffd400'],
-  ['COSTA DEL SOL', '#f2a900', '#0b2a5b', 3, '#0b2a5b'],
+  ['VERDANO', '#f2a900', '#0b2a5b', 3, '#0b2a5b'],
   ['BRAVANTE', '#8a0f2e', '#ffffff', 0, '#e8c07a'],
   ['ARBOR', '#2d5a27', '#f1f1e6', 4, '#a5d86e'],
 ];
@@ -72,7 +72,7 @@ export class PrintAtlas {
     const list: string[] = [];
     SPONSORS.forEach((_, i) => list.push('ad' + i));
     list.push(...BELTS, 'belt_logo0', 'belt_logo1', 'belt_logo2');
-    list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall');
+    list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall', 'signs2', 'posts0', 'posts1', 'posts2');
     TEAMS.forEach((t) => list.push('team_' + t.id));
     list.forEach((n, i) => this.names.set(n, i));
     if (list.length > (this.size / this.cw) * (this.size / this.ch)) throw new Error('atlas overflow');
@@ -168,21 +168,29 @@ export class PrintAtlas {
       ctx.restore();
     }
     {
-      // distance boards: 100 / 200 / 300 / 50 — each 128×128
+      // braking boards: 150 / 100 / 50 / 200 — each 128×128, white with a sponsor strip
       const [x, y] = this.origin('boards');
-      ['100', '200', '300', '50'].forEach((t, k) => {
+      ['150', '100', '50', '200'].forEach((t, k) => {
         const bx = x + k * 128;
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#f4f4f2';
         ctx.fillRect(bx, y, 128, 128);
-        ctx.fillStyle = '#101010';
-        ctx.fillRect(bx + 6, y + 6, 116, 116);
+        ctx.fillStyle = '#c8102e';
+        ctx.fillRect(bx, y + 100, 128, 28);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(bx + 12, y + 12, 104, 104);
-        ctx.fillStyle = '#111111';
-        ctx.font = `700 ${t.length > 2 ? 60 : 72}px ${FONT}`;
+        ctx.font = `italic 700 20px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(t, bx + 64, y + 68);
+        ctx.fillText('VELOCE', bx + 64, y + 115);
+        ctx.fillStyle = '#111111';
+        ctx.font = `700 ${t.length > 2 ? 58 : 70}px ${FONT}`;
+        ctx.save();
+        ctx.translate(bx + 64, y + 54);
+        ctx.scale(t.length > 2 ? 0.86 : 1, 1);
+        ctx.fillText(t, 0, 0);
+        ctx.restore();
+        ctx.strokeStyle = '#111111';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(bx + 2, y + 2, 124, 124);
       });
     }
     {
@@ -238,9 +246,9 @@ export class PrintAtlas {
       ctx.font = `italic 700 50px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('COSTA DEL SOL', x + W / 2, y + 44);
+      ctx.fillText("GRAN PREMIO D'ITALIA", x + W / 2, y + 44, W - 30);
       ctx.font = `700 20px ${FONT}`;
-      ctx.fillText('GRAN PREMIO  ·  AUTÓDROMO', x + W / 2, y + H - 11);
+      ctx.fillText('MONZA  ·  APEX GP', x + W / 2, y + H - 11);
     }
     {
       const [x, y] = this.origin('monitor');
@@ -283,6 +291,46 @@ export class PrintAtlas {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('APEX GP', x + W / 2, y + 50);
+    }
+    {
+      // sector boards S1/S2/S3 + a marshal-post header
+      const [x, y] = this.origin('signs2');
+      ['S1', 'S2', 'S3'].forEach((t, k) => {
+        const bx = x + k * 128;
+        ctx.fillStyle = '#15151e';
+        ctx.fillRect(bx, y, 128, 128);
+        ctx.fillStyle = ['#e10600', '#ffd400', '#00a3e0'][k];
+        ctx.fillRect(bx, y + 104, 128, 24);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `700 64px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(t, bx + 64, y + 54);
+      });
+      ctx.fillStyle = '#e8641c';
+      ctx.fillRect(x + 384, y, 128, 128);
+      ctx.fillStyle = '#111';
+      ctx.font = `700 34px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('POST', x + 448, y + 64);
+    }
+    for (let c = 0; c < 3; c++) {
+      // marshal post numbers: 8 per cell, 64×128 each, white on orange
+      const [x, y] = this.origin('posts' + c);
+      for (let k = 0; k < 8; k++) {
+        const bx = x + k * 64;
+        ctx.fillStyle = '#e8641c';
+        ctx.fillRect(bx, y, 64, 128);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(bx + 4, y + 4, 56, 120);
+        ctx.fillStyle = '#111111';
+        const num = String(c * 8 + k + 1);
+        ctx.font = `700 ${num.length > 1 ? 44 : 60}px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(num, bx + 32, y + 66);
+      }
     }
     TEAMS.forEach((t) => {
       const [x, y] = this.origin('team_' + t.id);
@@ -525,7 +573,7 @@ function drawScreen(ctx: CanvasRenderingContext2D, x: number, y: number, W: numb
   ctx.fillText('LAP 1 / 58', x + 14, y + 20);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#ffd400';
-  ctx.fillText('COSTA DEL SOL', x + W - 10, y + 20);
+  ctx.fillText('MONZA', x + W - 10, y + 20);
   const rows = TEAMS.slice(0, 6);
   rows.forEach((t, k) => {
     const col = k % 2;
@@ -586,6 +634,10 @@ export class DecalAtlas {
   get streak(): UVRect {
     return this.rect(512, 448, 512, 64, 2);
   }
+  /** painted run-off logos (white on transparent, 4:1), k = 0..1 */
+  logo(k: number): UVRect {
+    return this.rect(0, 512 + k * 256, 1024, 256, 4);
+  }
 
   draw() {
     const ctx = this.canvas.getContext('2d')!;
@@ -640,6 +692,44 @@ export class DecalAtlas {
     c2.fillStyle = gv;
     c2.fillRect(0, 0, 512, 64);
     ctx.drawImage(sc, 512, 448);
+    // run-off logos: big italic sponsor names, painted white
+    const logos: [string, string][] = [['VELOCE', 'swoosh'], ['APEX GP', 'chev']];
+    logos.forEach(([text, style], k) => {
+      const y = 512 + k * 256;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, y, 1024, 256);
+      ctx.clip();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `italic 700 190px ${FONT}`;
+      ctx.fillText(text, 512 + (style === 'swoosh' ? 60 : 0), y + 136, 880);
+      if (style === 'swoosh') {
+        ctx.beginPath();
+        ctx.moveTo(40, y + 220);
+        ctx.lineTo(150, y + 220);
+        ctx.lineTo(250, y + 40);
+        ctx.lineTo(140, y + 40);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        for (const side of [0, 1]) {
+          const bx = side ? 1024 - 70 : 70;
+          const d = side ? -1 : 1;
+          ctx.beginPath();
+          ctx.moveTo(bx, y + 50);
+          ctx.lineTo(bx + 40 * d, y + 128);
+          ctx.lineTo(bx, y + 206);
+          ctx.lineTo(bx + 26 * d, y + 206);
+          ctx.lineTo(bx + 66 * d, y + 128);
+          ctx.lineTo(bx + 26 * d, y + 50);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    });
     this.texture.needsUpdate = true;
   }
 }

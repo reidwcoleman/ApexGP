@@ -147,8 +147,12 @@ export type Compound = keyof typeof COMPOUNDS;
 export interface WheelSet {
   map: THREE.Texture;
   orm: THREE.Texture;
+  /** tangent-space normals: moulded sidewall lettering, tread grooves (inters/wets) */
+  normal: THREE.Texture;
   blur: THREE.Texture;
 }
+const COMPOUND_LINE: Record<Compound, string> = { soft: 'CORSA', medium: 'CORSA', hard: 'CORSA', inter: 'ACQUA', wet: 'ACQUA' };
+const COMPOUND_NAME: Record<Compound, string> = { soft: 'SOFT', medium: 'MEDIUM', hard: 'HARD', inter: 'INTERMEDIATE', wet: 'FULL WET' };
 const wheelCache = new Map<string, WheelSet>();
 export function wheelTextures(compound: Compound = 'soft'): WheelSet {
   const hit = wheelCache.get(compound);
@@ -157,11 +161,18 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
   const c = canvas(WHEEL_TEX_W, WHEEL_TEX_H);
   const o = canvas(WHEEL_TEX_W, WHEEL_TEX_H);
   const bl = canvas(512, 512);
-  const set: WheelSet = { map: tex(c, true), orm: tex(o, false), blur: tex(bl, true) };
+  const hc = canvas(WHEEL_TEX_W, 352);
+  const nc = canvas(WHEEL_TEX_W, WHEEL_TEX_H);
+  const set: WheelSet = { map: tex(c, true), orm: tex(o, false), normal: tex(nc, false), blur: tex(bl, true) };
   set.map.anisotropy = 8;
+  set.normal.anisotropy = 8;
   const paint = () => {
     const g = ctx2d(c);
     const go = ctx2d(o);
+    const gh = ctx2d(hc);
+    // height field (sidewall + tread rows only): 200 = rubber, 255 = moulded relief, 0 = groove floor
+    gh.fillStyle = 'rgb(200,200,200)';
+    gh.fillRect(0, 0, WHEEL_TEX_W, 352);
     // base rubber
     g.fillStyle = '#131313';
     g.fillRect(0, 0, WHEEL_TEX_W, WHEEL_TEX_H);
@@ -213,14 +224,29 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
       go.fillStyle = 'rgb(0, 140, 0)';
       go.fillText(s, 0, 0);
       go.restore();
+      gh.save();
+      gh.translate(sw.x + u * sw.w, rowOf(rMid));
+      gh.scale(sq, 1);
+      gh.font = `${weight} ${fontPx}px ${FONT}`;
+      gh.textAlign = 'center';
+      gh.textBaseline = 'middle';
+      (gh as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${fontPx * track}px`;
+      gh.fillStyle = 'rgb(236,236,236)';
+      gh.fillText(s, 0, 0);
+      gh.restore();
     };
+    // moulded rings in the height map too
+    for (const r of [0.238, 0.248, 0.334]) {
+      gh.fillStyle = 'rgb(226,226,226)';
+      gh.fillRect(sw.x, rowOf(r) - 1, sw.w, 2);
+    }
     for (const u of [0.25, 0.75]) {
       text('VELTRA', u, 0.297, 0.052, '#e9e9e9', 900, 0.1);
     }
     for (const u of [0.0, 0.5, 1.0]) {
-      text('CORSA', u, 0.297, 0.052, band, 900, 0.06);
+      text(COMPOUND_LINE[compound], u, 0.297, 0.052, band, 900, 0.06);
     }
-    for (const u of [0.125, 0.375, 0.625, 0.875]) text(compound.toUpperCase(), u, 0.279, 0.016, '#bdbdbd', 700, 0.3);
+    for (const u of [0.125, 0.375, 0.625, 0.875]) text(COMPOUND_NAME[compound], u, 0.279, 0.016, '#bdbdbd', 700, 0.3);
     // tread: slight scuffing/graining
     const tr = R_TREAD;
     g.fillStyle = '#161616';
@@ -233,6 +259,8 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     }
     go.fillStyle = 'rgb(0, 190, 0)';
     go.fillRect(tr.x, tr.y, tr.w, tr.h);
+    if (compound === 'inter' || compound === 'wet') treadGrooves(compound, g, go, gh);
+    normalFromHeight(hc, nc);
     // metal palette cells
     const cells: Record<number, string> = {
       [WC.rimMetal]: '#26282c',
@@ -265,13 +293,43 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
       g.fillStyle = col;
       g.fill();
     };
-    ring(0, RIM_R + 0.006, '#1a1b1e');
-    ring(0.06, RIM_R - 0.006, '#2e3034');
+    // 2022+ wheel cover (near LODs map their cover disc here, the far LOD its flat face):
+    // satin anthracite with a faint moulded five-spoke relief, a bright rim lip, the nut
+    g.save();
+    g.beginPath();
+    g.rect(rf.x, rf.y, rf.w, rf.h);
+    g.clip();
+    const cg = g.createRadialGradient(cx, cy, 0, cx, cy, rr(RIM_R));
+    cg.addColorStop(0, '#16171a');
+    cg.addColorStop(0.55, '#1e2023');
+    cg.addColorStop(1, '#2a2c30');
+    g.fillStyle = cg;
+    g.beginPath();
+    g.arc(cx, cy, rr(RIM_R + 0.006), 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = 'rgba(70,74,80,0.35)';
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a - 0.2) * rr(0.05), cy + Math.sin(a - 0.2) * rr(0.05));
+      g.lineTo(cx + Math.cos(a - 0.16) * rr(RIM_R - 0.02), cy + Math.sin(a - 0.16) * rr(RIM_R - 0.02));
+      g.arc(cx, cy, rr(RIM_R - 0.02), a - 0.16, a + 0.16);
+      g.lineTo(cx + Math.cos(a + 0.2) * rr(0.05), cy + Math.sin(a + 0.2) * rr(0.05));
+      g.closePath();
+      g.fill();
+    }
+    g.restore();
+    ring(RIM_R - 0.016, RIM_R - 0.012, '#3a3d42');
     ring(RIM_R - 0.006, RIM_R + 0.006, '#8c9097');
-    ring(0, 0.062, '#34373c');
+    ring(0, 0.05, '#101113');
     ring(0, 0.035, '#b52024');
-    go.fillStyle = 'rgb(0, 110, 180)';
+    go.fillStyle = 'rgb(0, 95, 70)';
     go.fillRect(rf.x, rf.y, rf.w, rf.h);
+    go.beginPath();
+    go.arc(cx, cy, rr(RIM_R + 0.006), 0, Math.PI * 2);
+    go.arc(cx, cy, rr(RIM_R - 0.006), 0, Math.PI * 2, true);
+    go.fillStyle = 'rgb(0, 56, 255)';
+    go.fill();
 
     // ------------------------------------------ blur disc (transparent), radius ↔ WHEEL_R − 0.006
     const b = ctx2d(bl);
@@ -285,16 +343,7 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
       b.fillStyle = col;
       b.fill();
     };
-    // spokes smeared: ~30% coverage of dark anthracite
-    const sg = b.createRadialGradient(256, 256, br(0.06), 256, 256, br(RIM_R - 0.004));
-    sg.addColorStop(0, 'rgba(40,42,46,0.55)');
-    sg.addColorStop(0.5, 'rgba(38,40,44,0.32)');
-    sg.addColorStop(1, 'rgba(36,38,42,0.3)');
-    b.fillStyle = sg;
-    b.beginPath();
-    b.arc(256, 256, br(RIM_R - 0.004), 0, Math.PI * 2);
-    b.arc(256, 256, br(0.064), 0, Math.PI * 2, true);
-    b.fill();
+    // (inside the rim the wheel cover shows through: rotationally symmetric, needs no smear)
     // sidewall smear: rubber + text ring + band
     bring(RIM_R + 0.004, 0.346, 'rgba(22,22,22,1)');
     bring(0.254, 0.262, band);
@@ -322,11 +371,118 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     b.fill();
     set.map.needsUpdate = true;
     set.orm.needsUpdate = true;
+    set.normal.needsUpdate = true;
     set.blur.needsUpdate = true;
   };
   paintWithFonts(paint);
   wheelCache.set(compound, set);
   return set;
+}
+
+/**
+ * Rain-tyre tread: directional chevron grooves (full wet: deep, wide, sweeping from a
+ * centre zig-zag to the shoulders; intermediate: shallower, narrower, more numerous
+ * slots with sipes). u (x) runs round the tyre, v (y) across the tread.
+ */
+function treadGrooves(compound: Compound, g: CanvasRenderingContext2D, go: CanvasRenderingContext2D, gh: CanvasRenderingContext2D) {
+  const tr = R_TREAD;
+  const wet = compound === 'wet';
+  const period = wet ? 2048 / 28 : 2048 / 40;
+  const lw = wet ? 7 : 4.5;
+  const mid = tr.y + tr.h / 2;
+  const draw = (fn: (c: CanvasRenderingContext2D) => void) => {
+    for (const [ctx, col] of [
+      [g, '#050505'],
+      [go, 'rgb(0, 245, 0)'],
+      [gh, 'rgb(0,0,0)'],
+    ] as [CanvasRenderingContext2D, string][]) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(tr.x, tr.y, tr.w, tr.h);
+      ctx.clip();
+      ctx.strokeStyle = col;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      fn(ctx);
+      ctx.restore();
+    }
+  };
+  draw((ctx) => {
+    for (let k = -1; k <= 2048 / period + 1; k++) {
+      const u = tr.x + k * period;
+      for (const side of [-1, 1]) {
+        // chevron arm: from near the centre sweeping back to the shoulder
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        const y0 = mid + side * (wet ? 5 : 12);
+        const y1 = mid + side * (tr.h / 2 + 4);
+        ctx.moveTo(u, y0);
+        ctx.bezierCurveTo(u + period * 0.25, y0 + side * 10, u + period * 0.55, y1 - side * 14, u + period * (wet ? 0.95 : 0.75), y1);
+        ctx.stroke();
+        if (!wet) {
+          // sipes between the slots
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(u + period * 0.45, mid + side * 6);
+          ctx.lineTo(u + period * 0.7, mid + side * 22);
+          ctx.stroke();
+        }
+      }
+      if (wet) {
+        // centre zig-zag
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(u, mid - 5);
+        ctx.lineTo(u + period * 0.5, mid + 5);
+        ctx.lineTo(u + period, mid - 5);
+        ctx.stroke();
+      }
+    }
+    if (wet) {
+      // two circumferential channels
+      ctx.lineWidth = 5;
+      for (const f of [0.27, 0.73]) {
+        ctx.beginPath();
+        ctx.moveTo(tr.x, tr.y + tr.h * f);
+        ctx.lineTo(tr.x + tr.w, tr.y + tr.h * f);
+        ctx.stroke();
+      }
+    }
+  });
+}
+
+/** Sobel the height canvas (rows 0‥352 of the atlas) into a tangent-space normal map */
+function normalFromHeight(hc: HTMLCanvasElement, nc: HTMLCanvasElement) {
+  const W = hc.width;
+  const H = hc.height;
+  const blur = canvas(W, H);
+  const gb = ctx2d(blur);
+  gb.filter = 'blur(0.8px)';
+  gb.drawImage(hc, 0, 0);
+  const src = gb.getImageData(0, 0, W, H).data;
+  const out = new ImageData(W, WHEEL_TEX_H);
+  const k = 2.2 / 255;
+  const h = (x: number, y: number) => src[(Math.min(H - 1, Math.max(0, y)) * W + ((x + W) % W)) * 4];
+  for (let y = 0; y < WHEEL_TEX_H; y++)
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4;
+      if (y >= H) {
+        out.data[o] = 128;
+        out.data[o + 1] = 128;
+        out.data[o + 2] = 255;
+        out.data[o + 3] = 255;
+        continue;
+      }
+      // canvas y runs down, texture v runs up
+      const nx = -(h(x + 1, y) - h(x - 1, y)) * k;
+      const ny = (h(x, y + 1) - h(x, y - 1)) * k;
+      const l = Math.hypot(nx, ny, 1);
+      out.data[o] = Math.round((nx / l) * 127 + 128);
+      out.data[o + 1] = Math.round((ny / l) * 127 + 128);
+      out.data[o + 2] = Math.round((1 / l) * 127 + 128);
+      out.data[o + 3] = 255;
+    }
+  ctx2d(nc).putImageData(out, 0, 0);
 }
 
 // ------------------------------------------------------------------------------------ trim palette

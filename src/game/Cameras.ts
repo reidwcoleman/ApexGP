@@ -48,15 +48,18 @@ export class Cameras {
 
   constructor(camera: THREE.PerspectiveCamera, track: Track) {
     this.camera = camera;
-    // TV cameras: alternate sides every ~170 m, on poles behind the barriers
+    // TV cameras: alternate sides every ~170 m, on platforms just inside the
+    // barriers (Monza's woods grow right up to the fences behind them)
     const n = Math.floor(track.length / 170);
     for (let i = 0; i < n; i++) {
       const s = track.wrap(track.startS + i * 170 + 40);
       const k = track.kappaAt(s + 60);
-      // prefer the outside of the next corner
-      const side = Math.abs(k) > 1 / 400 ? (k > 0 ? 1 : -1) : i % 2 === 0 ? 1 : -1;
+      // prefer the outside of the next corner; never the pit-wall side of the straight
+      let side = Math.abs(k) > 1 / 400 ? (k > 0 ? 1 : -1) : i % 2 === 0 ? 1 : -1;
+      if (track.inPit(s) || track.inPit(s + 60)) side = -track.pit.side;
       const bar = track.barrierAt(s, side);
-      const pos = track.point(s, side * (bar + 4), 4.5 + (i % 3) * 1.6);
+      const lat = Math.max(track.halfWidthAt(s) + 4, Math.min(bar - 2.2, track.halfWidthAt(s) + 22));
+      const pos = track.point(s, side * lat, 4.2 + (i % 3) * 1.2);
       this.tv.push({ s, pos });
     }
   }

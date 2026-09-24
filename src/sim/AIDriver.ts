@@ -29,6 +29,11 @@ export class AIDriver {
   private passTimer = 0;
   /** true once the race has started for this driver */
   launched = false;
+  /** blue flags: side of the road to move to (−1 left, 1 right, 0 = racing) */
+  yieldSide = 0;
+  /** the grip the driver believes the car has (lags the real thing) */
+  gripEst = 1;
+  private prevLat = 0;
   readonly input: DriveInput = { throttle: 0, brake: 0, steer: 0, ers: false, shiftUp: false, shiftDown: false };
 
   constructor(pace: number, aggression: number) {
@@ -100,12 +105,22 @@ export class AIDriver {
       }
     }
     this.passTimer -= dt;
-    if (this.passTimer <= 0) this.targetOffset *= Math.max(0, 1 - dt * 0.6);
+    // chicanes and hairpins are single file: squeeze back toward the line before a
+    // tight corner instead of trying to go round it two abreast
+    const vAhead = profile.at(car.s + Math.max(30, v * 1.2));
+    const tight = Math.max(0, Math.min(1, (48 - vAhead) / 18));
+    if (this.passTimer <= 0 || tight > 0.3) this.targetOffset *= Math.max(0, 1 - dt * (0.6 + 2.4 * tight));
+    // blue flag: move over on the straight to let the leaders through
+    if (this.yieldSide !== 0 && tight < 0.3) this.targetOffset = this.yieldSide * (hw - 2.3) - track.racingLineAt(car.s + 20);
+    const maxOff = 5.5 - 3.8 * tight;
+    this.targetOffset = Math.max(-maxOff, Math.min(maxOff, this.targetOffset));
     if (blockL) this.targetOffset = Math.max(this.targetOffset, myLat - track.racingLineAt(car.s) + 0.6);
     if (blockR) this.targetOffset = Math.min(this.targetOffset, myLat - track.racingLineAt(car.s) - 0.6);
 
-    // lateral offset eases toward its target
-    const maxRate = 2.2;
+    // lateral offset eases toward its target — moving across mid-corner tightens the
+    // path beyond the grip the speed target assumes, so do it on the straights
+    const kHere = Math.max(Math.abs(track.kappaAt(car.s)), Math.abs(track.kappaAt(car.s + v * 0.6)));
+    const maxRate = 2.2 * Math.max(0.15, 1 - kHere * 180);
     this.offset += Math.max(-maxRate * dt, Math.min(maxRate * dt, this.targetOffset - this.offset));
 
     // ---- steering: curvature feedforward + Stanley feedback at the front axle
@@ -153,12 +168,16 @@ export class AIDriver {
     // ---- speed
     const offLine = Math.abs(this.offset);
     const corner = Math.abs(track.kappaAt(car.s + v * 0.5)) > 1 / 300 ? 1 : 0;
-    // dirty air costs downforce: carry less speed through corners when close behind someone
-    // tyre compound and wear set how much grip there is today (the profile assumes new softs)
-    const w = (car.wear[0] + car.wear[1] + car.wear[2] + car.wear[3]) / 4;
-    const tyreGrip = car.compoundGrip * (1 - 0.14 * Math.pow(w, 1.6));
-    const dirtyLoss = corner * car.dirty * 0.085 + corner * (1 - Math.sqrt(tyreGrip));
-    let vt = profile.at(car.s + v * 0.12) * this.pace * (1 - corner * Math.min(0.06, offLine * 0.012)) * (1 - dirtyLoss);
+    // dirty air costs downforce: carry less speed through corners when close behind someone.
+    // The grip the tyres have today (weather, temperature, compound, wear) picks the profile —
+    // judged with a lag and a little caution, the way a driver feels it out
+    this.gripEst += (car.gripFactor - this.gripEst) * Math.min(1, dt * 0.8);
+    const g = Math.min(car.gripFactor, this.gripEst) * (car.gripFactor < 0.9 ? 0.985 : 1);
+    const dirtyLoss = corner * car.dirty * 0.085;
+    const vAt = (ss: number) => profile.atGrip(ss, g);
+    // off the line = a tighter radius: slow corners punish it far more than fast ones
+    const offLoss = corner * Math.min(0.2, offLine * (0.012 + 0.05 * tight));
+    let vt = vAt(car.s + v * 0.12) * this.pace * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1);
     vt = Math.min(vt, followSpeed);
     const err = vt - v;
     if (err > 0) {
@@ -169,10 +188,17 @@ export class AIDriver {
         const wide = crossErr * Math.sign(kPath);
         if (wide > 0.35) inp.throttle *= Math.max(0.15, 1 - (wide - 0.35) * 0.7);
       }
+      // about to run out of road (outer wheels at the kerb's edge and drifting out): lift
+      const side = car.lateral >= 0 ? 1 : -1;
+      const edge = hw + track.kerbAt(car.s + v * 0.2, side) - 0.95;
+      const outward = ((car.lateral - this.prevLat) / Math.max(dt, 1e-3)) * side;
+      const near = Math.abs(car.lateral) - (edge - 1.2);
+      if (near > 0 && outward > 0.4) inp.throttle *= Math.max(0.1, 1 - near * 0.55 - outward * 0.06);
     } else {
       inp.throttle = err > -0.6 ? 0.25 : 0;
       inp.brake = err < -0.8 ? Math.min(1, -err * 0.22) : 0;
     }
+    this.prevLat = car.lateral;
     // ERS in the second half of straights when behind someone
     inp.ers = followSpeed < Infinity && corner === 0 && car.ers > 0.3;
 

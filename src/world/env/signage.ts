@@ -24,11 +24,11 @@ export const SPONSORS: { name: string; bg: string; fg: string; accent?: string }
   { name: 'HELIX OIL', bg: '#ffd400', fg: '#1a1a1a' },
   { name: 'MAREA TELECOM', bg: '#5b2c83', fg: '#ffffff' },
   { name: 'AZURA TIME', bg: '#0b0b0d', fg: '#d9b56b' },
-  { name: 'COSTA AIR', bg: '#e6f1fb', fg: '#0a4c8c' },
+  { name: 'LAMBRO AIR', bg: '#e6f1fb', fg: '#0a4c8c' },
   { name: 'SOLARA', bg: '#ff4a1c', fg: '#fff5e0' },
   { name: 'APEX GP', bg: '#111317', fg: '#ffffff', accent: '#e10600' },
-  { name: 'GRAN HOTEL MIRAMAR', bg: '#f4efe4', fg: '#1f3a5a' },
-  { name: 'LA LONJA', bg: '#1f3a5a', fg: '#f4efe4' },
+  { name: 'BRIANZA BANCA', bg: '#f4efe4', fg: '#1f3a5a' },
+  { name: 'CAFFÈ VILLORESI', bg: '#1f3a5a', fg: '#f4efe4' },
 ];
 
 const ATLAS_W = 2048;

@@ -568,8 +568,9 @@ function floorAndDiffuser(b: Buckets, level: Level) {
     }
     rows.push(row);
   }
-  // underside (visible from behind) and top — two grids facing opposite ways
-  b.carbon.grid(rows, (i, j) => [rows[i][j][0] / CARBON_TILE, rows[i][j][2] / CARBON_TILE]);
+  // underside (visible from behind: a dark satin cavity, like the real thing in its own shadow)
+  // and top (carbon) — two grids facing opposite ways
+  b.trim.grid(rows, () => trimUV(TC.blackSatin));
   const rowsTop = rows.map((r) => r.map((p) => [p[0], p[1] + 0.012, p[2]] as V3));
   b.carbon.grid(rowsTop, (i, j) => [rowsTop[i][j][0] / CARBON_TILE, rowsTop[i][j][2] / CARBON_TILE], { flip: true });
   // fix orientation: first grid should face down — check one normal
@@ -592,7 +593,7 @@ function floorAndDiffuser(b: Buckets, level: Level) {
           st.push([z, roofY(z) + 0.004]);
         }
         st.push([-2.3, 0.05], [lerp(-1.36, -2.3, 2 / n), 0.05]);
-        plate(b.carbon, st, [xs * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.008, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+        plate(b.trim, st, [xs * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.008, () => trimUV(TC.blackSatin));
       }
     }
   }
@@ -754,8 +755,9 @@ function exhaustAndLight(b: Buckets, level: Level) {
   g.translate(0, 0.458, -2.235);
   b.trim.addGeometry(g, undefined, trimUV(TC.blackSatin));
   g.dispose();
-  // rain light on the crash-structure tail
-  box(b.trim, [0, 0.316, -2.372], [0.1, 0.03, 0.01], trimUV(TC.rainLight));
+  // rain light on the crash-structure tail: a dark housing with the LED panel proud of it
+  box(b.trim, [0, 0.318, -2.368], [0.13, 0.062, 0.014], trimUV(TC.blackGloss));
+  box(b.trim, [0, 0.318, -2.377], [0.112, 0.046, 0.006], trimUV(TC.rainLight));
 }
 
 function cockpitBits(b: Buckets, level: Level) {
@@ -1051,7 +1053,7 @@ function tyreProfile(w: number): V2[] {
   return pts;
 }
 
-function wheelSpin(mb: MB, w: number, level: Level, spokesMb?: MB) {
+function wheelSpin(mb: MB, w: number, level: Level) {
   const seg = [72, 40, 20][level];
   const prof = tyreProfile(w);
   // uv per profile point
@@ -1115,19 +1117,38 @@ function wheelSpin(mb: MB, w: number, level: Level, spokesMb?: MB) {
     ]);
   }
   mb.grid(lip, () => wheelCellUV(WC.rimLip));
-  // spokes: 5 twin spokes
+  // 2022+ wheel cover: a shallow dished disc over the rim face, printed in the rim-face
+  // image (same art as the far LOD), open in the middle round the wheel nut
   const spokeX = h - 0.045;
-  for (let k = 0; k < 10; k++) {
-    const a = (Math.floor(k / 2) / 5) * Math.PI * 2 + (k % 2 ? 0.2 : -0.2);
-    const ah = (Math.floor(k / 2) / 5) * Math.PI * 2;
-    const inner: V3 = [spokeX + 0.012, 0.058 * Math.cos(ah), 0.058 * Math.sin(ah)];
-    const outer: V3 = [spokeX, (RIM_R - 0.006) * Math.cos(a), (RIM_R - 0.006) * Math.sin(a)];
-    const d = norm3(sub3(outer, inner));
-    const st: SweepSt[] = [inner, lerp3(inner, outer, 0.5), outer].map((p, i) => {
-      const side = norm3(cross3(d, [1, 0, 0]));
-      return { o: p, d: side, u: [1, 0, 0] as V3, sx: [0.017, 0.012, 0.011][i], sy: 0.012 };
-    });
-    sweep(spokesMb ?? mb, st, roundedRect(level === 0 ? 8 : 6, 0.5), () => wheelCellUV(WC.rimMetal));
+  {
+    const R = RIM_R + 0.006;
+    const prof: V2[] = [];
+    const nr = level === 0 ? 7 : 4;
+    for (let i = 0; i <= nr; i++) {
+      const t = i / nr;
+      const r = lerp(0.043, RIM_R - 0.002, t);
+      prof.push([r, h - 0.036 + 0.02 * t * t]);
+    }
+    const cs = level === 0 ? 48 : 28;
+    const P: V3[][] = [];
+    for (let j = 0; j <= cs; j++) {
+      const a = (j / cs) * Math.PI * 2;
+      P.push(prof.map(([r, x]) => [x, r * Math.cos(a), r * Math.sin(a)] as V3));
+    }
+    mb.grid(P, (j, i) => {
+      const p = P[j][i];
+      return wheelRectUV(R_RIMFACE, 0.5 - p[2] / (2 * R), 0.5 + p[1] / (2 * R));
+    }, { flip: true }); // (angle × radius winding faces inboard; flip → +X)
+    // the nut well
+    const well: V3[][] = [];
+    for (let j = 0; j <= cs; j++) {
+      const a = (j / cs) * Math.PI * 2;
+      well.push([
+        [h - 0.036, 0.043 * Math.cos(a), 0.043 * Math.sin(a)],
+        [spokeX + 0.02, 0.043 * Math.cos(a), 0.043 * Math.sin(a)],
+      ]);
+    }
+    mb.grid(well, () => wheelCellUV(WC.hub));
   }
   // hub + nut
   cylinderX(mb, [spokeX + 0.005, 0, 0], 0.062, 0.03, 20, wheelCellUV(WC.hub));
@@ -1303,19 +1324,15 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   let wheelF: MB | null = null;
   let wheelR: MB | null = null;
   let wheelsMerged: MB | null = null;
-  let spokesF: MB | null = null;
-  let spokesR: MB | null = null;
   if (level < 2) {
     frontAssy = new MB();
     cornerAssembly(frontAssy, TYRE_W_F, true, level);
     blurFront = new MB();
     blurDisc(blurFront, TYRE_W_F);
     wheelF = new MB();
-    spokesF = new MB();
-    wheelSpin(wheelF, TYRE_W_F, level, spokesF);
+    wheelSpin(wheelF, TYRE_W_F, level);
     wheelR = new MB();
-    spokesR = new MB();
-    wheelSpin(wheelR, TYRE_W_R, level, spokesR);
+    wheelSpin(wheelR, TYRE_W_R, level);
   } else {
     wheelsMerged = new MB();
     const wf = new MB();
@@ -1362,8 +1379,8 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     blurFront: blurFront ? blurFront.build() : null,
     wheelF: wheelF ? wheelF.build() : null,
     wheelR: wheelR ? wheelR.build() : null,
-    spokesF: spokesF ? spokesF.build() : null,
-    spokesR: spokesR ? spokesR.build() : null,
+    spokesF: null,
+    spokesR: null,
     wheelsMerged: wheelsMerged ? wheelsMerged.build() : null,
     triangles: 0,
   };

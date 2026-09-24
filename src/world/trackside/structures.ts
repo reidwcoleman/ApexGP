@@ -1,16 +1,19 @@
 import * as THREE from 'three';
 import { VERGE } from '../Track.ts';
 import { Frame3, beam, box, cylinder, disc, printQuadX, printQuadZ, type GeoBuilder } from './builder.ts';
-import type { Ctx } from './context.ts';
+import { styleOf, type Ctx } from './context.ts';
 import { SPONSORS, type PrintAtlas } from './atlas.ts';
+import { Rng } from './noise.ts';
 
 /**
- * Bigger trackside structures: the start gantry with its five light columns,
- * advertising bridges, marshal posts, TV camera platforms, braking distance
- * boards, DRS signs and a few sausage kerbs.
+ * Bigger trackside structures for Monza: the start gantry with its five light
+ * columns, two sponsor footbridges, marshal posts (cabin, marshals in orange,
+ * LED flag panels), TV camera platforms, 150/100/50 braking boards, DRS and
+ * sector boards, big corner billboards and the chicanes' sausage kerbs.
  */
 
 const F = new Frame3();
+const G = new Frame3();
 const A = new THREE.Vector3(), B = new THREE.Vector3();
 
 function frameAt(ctx: Ctx, s: number, lat: number, f = F): Frame3 {
@@ -58,45 +61,59 @@ function truss(b: GeoBuilder, f: Frame3, x0: number, x1: number, y0: number, h: 
   }
 }
 
-export function buildStructures(ctx: Ctx, atlas: PrintAtlas) {
+export interface PanelSpot {
+  /** world position of the panel face centre */
+  pos: THREE.Vector3;
+  /** unit normal the panel faces (toward oncoming cars) */
+  normal: THREE.Vector3;
+  /** unit horizontal right vector of the panel face */
+  right: THREE.Vector3;
+}
+
+export interface StructuresOut {
+  panels: PanelSpot[];
+}
+
+export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
+  const out: StructuresOut = { panels: [] };
   buildGantry(ctx, atlas);
-  const t = ctx.track;
-  const seg = t.data.segStart;
-  if (seg[10] !== undefined) buildBridge(ctx, atlas, seg[10] + 200, 0);
-  if (seg[20] !== undefined) buildBridge(ctx, atlas, seg[20] + 110, 1);
-  buildMarshalPosts(ctx);
+  // sponsor footbridges: the main straight past the pit exit, and the back straight toward the Parabolica
+  buildBridge(ctx, atlas, 1048, 0);
+  buildBridge(ctx, atlas, 4700, 1);
+  buildMarshalPosts(ctx, atlas, out);
   buildCameras(ctx);
   buildBoards(ctx, atlas);
+  buildBillboards(ctx, atlas);
   buildSausages(ctx);
+  return out;
 }
 
 // ------------------------------------------------------------------ start gantry
 
 function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
   const t = ctx.track;
-  const s = t.startS + 12;
+  const s = t.startS + 6;
   const cs = ctx.cs;
   const props = cs.get(s, 'props');
   const print = cs.get(s, 'print');
   const lamps = cs.get(s, 'lamp');
   const i = ctx.wrap(Math.floor(s));
   const pit = t.pit;
-  const Lp = ctx.side(-pit.side), Rp = ctx.side(pit.side);
-  // leg positions (local x = right of travel)
+  const Lp = ctx.side(-pit.side);
+  // leg positions (local x = right of travel): outside the grandstand wall, and inside the pit wall
   const farX = -pit.side * (Lp.bar[i] + Lp.backOff[i] + 1.4);
-  const wallX = pit.side * (pit.wallOffset + 0.3);
-  void Rp;
+  const wallX = pit.side * (pit.wallOffset + 0.32);
   const x0 = Math.min(farX, wallX), x1 = Math.max(farX, wallX);
   frameAt(ctx, s, 0);
   const ground = (x: number) => t.point(s, x, 0, A).y - F.o.y;
-  const TOP = 8.4, BOT = 7.1;
+  const TOP = 8.6, BOT = 7.2;
 
   props.color(0x1d1f23).mat(0.45, 0.75, 0);
-  latticeColumn(props, F, farX, 0, 0.8, ground(farX), TOP + 0.1, 0.12);
-  latticeColumn(props, F, wallX, 0, 0.5, ground(wallX) + 1.1, TOP + 0.1, 0.1);
-  // base plates
+  latticeColumn(props, F, farX, 0, 0.9, ground(farX), TOP + 0.1, 0.13);
+  latticeColumn(props, F, wallX, 0, 0.45, ground(wallX), TOP + 0.1, 0.1);
   props.color(0x6d6f72).mat(0.8, 0.2, 0);
-  box(props, F, farX, ground(farX) + 0.15, 0, 1.2, 0.3, 1.2);
+  box(props, F, farX, ground(farX) + 0.15, 0, 1.3, 0.3, 1.3);
+  props.color(0x1d1f23).mat(0.45, 0.75, 0);
   truss(props, F, x0 - 0.3, x1 + 0.3, BOT, TOP - BOT, 1.0, 0.14);
 
   // sponsor banner across the truss, both faces
@@ -128,7 +145,6 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
     box(props, F, cx, BOT - 0.02, -0.35, 0.12, 0.08, 0.12);
     for (let r = 0; r < 4; r++) {
       const y = BOT - 0.35 - r * 0.45;
-      // visor
       props.color(0x050505).mat(0.5, 0.2, 0);
       box(props, F, cx, y + 0.2, -0.62, 0.42, 0.03, 0.22, 0b111111);
       // lamp: the top two are the red pair driven by StartLights; the rest stay dark
@@ -136,9 +152,16 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
       disc(lamps, F, cx, y, -0.525, 0.15, 14, -1);
     }
   });
+  // repeater column on the far leg, facing the back of the grid
+  props.color(0x0b0b0c).mat(0.4, 0.3, 0);
+  box(props, F, farX + pit.side * 0.9, 4.2, -0.2, 0.5, 1.6, 0.3, 0b111111);
+  cols.forEach((_, c) => {
+    lamps.s0[0] = c;
+    disc(lamps, F, farX + pit.side * 0.9, 4.85 - c * 0.3, -0.36, 0.1, 10, -1);
+  });
 }
 
-// ------------------------------------------------------------------ advertising bridges
+// ------------------------------------------------------------------ sponsor footbridges
 
 function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const t = ctx.track;
@@ -146,102 +169,182 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const props = ctx.cs.get(s, 'props');
   const print = ctx.cs.get(s, 'print');
   const L = ctx.L, R = ctx.R;
-  const xl = -(L.bar[i] + L.backOff[i] + 1.6);
-  const xr = R.bar[i] + R.backOff[i] + 1.6;
+  const reach = (P: typeof L) => (P.kind[i] === 'none' ? Math.max(P.bar[i], t.pit.garageOffset + 1.5) : P.bar[i] + P.backOff[i]) + 2.2;
+  const xl = -reach(L);
+  const xr = reach(R);
   frameAt(ctx, s, 0);
   const ground = (x: number) => t.point(s, x, 0, A).y - F.o.y;
-  const Y0 = 6.1, H = 1.3, D = 1.8;
-  props.color(0xe6e6e2).mat(0.5, 0.3, 0);
+  const Y0 = 6.4, H = 1.6, D = 2.6;
+
+  // stair towers: a concrete core with a steel stair cage
   for (const x of [xl, xr]) {
-    for (const z of [-0.7, 0.7]) box(props, F, x, (ground(x) + Y0 + H) / 2, z, 0.45, Y0 + H - ground(x), 0.45, 0b110111);
-    box(props, F, x, Y0 - 0.9, 0, 0.3, 0.3, 1.8);
-    props.color(0x8a8c8e).mat(0.8, 0.1, 0);
-    box(props, F, x, ground(x) + 0.2, 0, 1.4, 0.4, 2.4);
-    props.color(0xe6e6e2).mat(0.5, 0.3, 0);
+    const g = ground(x);
+    const away = Math.sign(x);
+    const tx = x + away * 1.6;
+    props.color(0xbdbab2).mat(0.85, 0, 0);
+    box(props, F, tx, (g + Y0 + H) / 2, 0, 3.2, Y0 + H - g, 3.0, 0b110111);
+    props.color(0x2b2e33).mat(0.5, 0.6, 0);
+    box(props, F, tx, Y0 + H + 0.12, 0, 3.5, 0.24, 3.3, 0b111111);
+    // stair flights on the outer face
+    props.color(0x55595e).mat(0.5, 0.6, 0);
+    for (let k = 0; k < 3; k++) {
+      const y0 = g + k * ((Y0 - g) / 3), y1 = g + (k + 1) * ((Y0 - g) / 3);
+      const zA = k % 2 ? 1.7 : -1.7, zB = -zA;
+      F.p(tx + away * 1.75, y0 + 0.1, zA, A);
+      F.p(tx + away * 1.75, y1, zB, B);
+      beam(props, A, B, 0.9, 0.12);
+    }
+    // printed panels on the tower faces
+    print.rgb(1, 1, 1).mat(0.55, 0, 0.1);
+    const c = atlas.cell('ad' + ((salt * 7 + (x < 0 ? 3 : 11)) % SPONSORS.length));
+    printQuadZ(print, F, -1.52, tx - 1.55, tx + 1.55, Y0 - 1.2, Y0 - 0.43, -1, c);
+    printQuadZ(print, F, 1.52, tx - 1.55, tx + 1.55, Y0 - 1.2, Y0 - 0.43, 1, c);
   }
-  // deck: a box girder
+  // deck: a box girder with glazed sides
   props.color(0x2b2e33).mat(0.55, 0.4, 0);
-  box(props, F, (xl + xr) / 2, Y0 + H / 2, 0, xr - xl + 0.6, H, D, 0b111111);
+  box(props, F, (xl + xr) / 2, Y0 + 0.12, 0, xr - xl + 0.6, 0.24, D, 0b111111);
+  box(props, F, (xl + xr) / 2, Y0 + H + 0.9, 0, xr - xl + 0.6, 0.18, D + 0.4, 0b111111);
+  props.color(0x9fb6c4).mat(0.08, 0.2, 0);
+  for (const z of [-D / 2 + 0.06, D / 2 - 0.06]) box(props, F, (xl + xr) / 2, Y0 + H + 0.35, z, xr - xl, 0.7, 0.03, 0b110011);
+  props.color(0xd8d8d6).mat(0.4, 0.7, 0);
+  for (let x = xl; x <= xr; x += 3) for (const z of [-D / 2, D / 2]) box(props, F, x, Y0 + H * 0.5 + 0.45, z, 0.1, H + 0.9, 0.1, 0b110011);
   // printed faces
-  const w = 5.2;
+  const w = 5.6;
   const count = Math.floor((xr - xl - 0.8) / w);
   const start = (xl + xr) / 2 - (count * w) / 2;
   print.rgb(1, 1, 1).mat(0.55, 0, 0.25);
   for (let k = 0; k < count; k++) {
     const cellA = atlas.cell('ad' + ((k + salt * 5) % SPONSORS.length));
     const cellB = atlas.cell('ad' + ((k * 7 + 3 + salt * 3) % SPONSORS.length));
-    printQuadZ(print, F, -D / 2 - 0.02, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.05, Y0 + H - 0.05, -1, cellA);
-    printQuadZ(print, F, D / 2 + 0.02, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.05, Y0 + H - 0.05, 1, cellB);
-  }
-  // railings on top
-  props.color(0xc9cbcd).mat(0.4, 0.7, 0);
-  for (const z of [-D / 2 + 0.05, D / 2 - 0.05]) {
-    box(props, F, (xl + xr) / 2, Y0 + H + 1.0, z, xr - xl, 0.05, 0.05, 0b111111);
-    for (let x = xl; x <= xr; x += 2) box(props, F, x, Y0 + H + 0.5, z, 0.05, 1.0, 0.05, 0b110011);
+    printQuadZ(print, F, -D / 2 - 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, -1, cellA);
+    printQuadZ(print, F, D / 2 + 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, 1, cellB);
   }
 }
 
-// ------------------------------------------------------------------ marshal posts
+// ------------------------------------------------------------------ marshals
 
-function buildMarshalPosts(ctx: Ctx) {
+const ORANGE = 0xe8561a;
+const SKIN = [0xc58d6b, 0xa8744f, 0xe0b090, 0x7a5236];
+
+/** a standing marshal in orange overalls; `f` origin at the feet, facing local −z → rotated by yaw */
+function marshal(b: GeoBuilder, base: Frame3, x: number, z: number, yaw: number, rng: Rng) {
+  G.copy(base);
+  G.o.copy(base.p(x, 0, z, A));
+  G.yaw(yaw);
+  const s = rng.range(0.92, 1.06);
+  const armUp = rng.next() < 0.25;
+  // boots, legs
+  b.color(0x151515).mat(0.7, 0, 0);
+  for (const lx of [-0.1, 0.1]) box(b, G, lx * s, 0.05 * s, 0.03, 0.13 * s, 0.1 * s, 0.26 * s);
+  b.color(ORANGE).mat(0.78, 0, 0);
+  for (const lx of [-0.1, 0.1]) box(b, G, lx * s, 0.5 * s, 0, 0.15 * s, 0.82 * s, 0.17 * s, 0b110111);
+  // torso with reflective bands
+  box(b, G, 0, 1.2 * s, 0, 0.44 * s, 0.62 * s, 0.26 * s, 0b111111);
+  b.color(0xd8d8d0).mat(0.3, 0.2, 0.05);
+  box(b, G, 0, 1.08 * s, 0, 0.45 * s, 0.05 * s, 0.27 * s, 0b110011);
+  box(b, G, 0, 0.62 * s, 0, 0.36 * s, 0.05 * s, 0.19 * s, 0b110011);
+  // arms
+  b.color(ORANGE).mat(0.78, 0, 0);
+  box(b, G, -0.28 * s, 1.18 * s, 0, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
+  if (armUp) {
+    box(b, G, 0.28 * s, 1.55 * s, -0.05, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
+  } else {
+    box(b, G, 0.28 * s, 1.18 * s, 0, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
+  }
+  // head + cap
+  b.color(SKIN[rng.int(SKIN.length)]).mat(0.7, 0, 0);
+  box(b, G, 0, 1.62 * s, 0, 0.19 * s, 0.22 * s, 0.21 * s, 0b111111);
+  b.color(rng.next() < 0.5 ? ORANGE : 0xf2f2f2).mat(0.6, 0, 0);
+  box(b, G, 0, 1.76 * s, -0.03, 0.21 * s, 0.07 * s, 0.26 * s, 0b111111);
+  // a furled flag in some hands
+  if (!armUp && rng.next() < 0.5) {
+    b.color(0x3a3a3a).mat(0.5, 0.3, 0);
+    G.p(0.3 * s, 0.9 * s, -0.08, A);
+    G.p(0.3 * s, 1.75 * s, -0.12, B);
+    beam(b, A, B, 0.025, 0.025);
+    b.color(rng.next() < 0.5 ? 0xf2d000 : 0x1f5fd0).mat(0.8, 0, 0);
+    box(b, G, 0.3 * s, 1.5 * s, -0.12, 0.07, 0.42 * s, 0.07, 0b111111);
+  }
+}
+
+function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
   const t = ctx.track;
-  const n = ctx.n;
-  let side = -1;
-  let post = 0;
-  for (let s = 180; s < n - 100; s += 350) {
-    side = -side;
-    let P = ctx.side(side);
-    let i = ctx.wrap(s);
-    if (P.kind[i] === 'pitwall' || P.pitZone[i]) {
-      side = -side;
-      P = ctx.side(side);
-    }
-    i = ctx.wrap(s);
-    if (ctx.clear[i] < P.bar[i] + 8) continue;
-    const off = P.bar[i] + P.backOff[i] + 2.0;
+  const rng = new Rng(314);
+  for (const post of ctx.posts) {
+    const { s, side } = post;
+    const P = ctx.side(side);
+    const i = ctx.wrap(s);
+    const off = P.bar[i] + P.backOff[i] + 2.3;
     const props = ctx.cs.get(s, 'props');
+    const print = ctx.cs.get(s, 'print');
     frameAt(ctx, s, side * off);
     const X = (v: number) => -side * v; // v > 0 → toward the track
     // slab (reaching down so it sits on terrain that may be lower than the run-off)
     props.color(0x9a9892).mat(0.9, 0, 0);
-    box(props, F, 0, -0.62, 0, 2.2, 1.56, 2.8, 0b111111);
-    // cabin
+    box(props, F, 0, -0.62, 0, 2.6, 1.56, 4.2, 0b111111);
+    // shelter: open-fronted cabin with an orange roof
     props.color(0xe9e7e1).mat(0.6, 0, 0);
-    box(props, F, X(-0.2), 1.25, 0, 1.5, 2.2, 2.2);
-    props.color(0xe8641c).mat(0.55, 0, 0);
-    box(props, F, X(-0.2), 1.9, 0, 1.52, 0.18, 2.22, 0b110011);
-    // window band facing the track
-    props.color(0x1a232c).mat(0.1, 0.1, 0);
-    box(props, F, X(0.56), 1.55, 0, 0.04, 0.6, 1.9, 0b110011);
-    // roof
+    box(props, F, X(-0.75), 1.2, 0, 0.12, 2.4, 3.2);
+    box(props, F, X(-0.1), 1.2, -1.55, 1.4, 2.4, 0.1);
+    box(props, F, X(-0.1), 1.2, 1.55, 1.4, 2.4, 0.1);
     props.color(0xe8641c).mat(0.6, 0.1, 0);
-    box(props, F, X(-0.1), 2.42, 0, 2.0, 0.12, 2.7, 0b111111);
-    // flag-light panel on a pole at the barrier, facing oncoming cars
-    const pole = P.backOff[i] + 0.35;
-    frameAt(ctx, s + 1, side * (P.bar[ctx.wrap(s + 1)] + pole));
+    box(props, F, X(-0.05), 2.45, 0, 2.0, 0.12, 3.6, 0b111111);
     props.color(0x2d2f33).mat(0.5, 0.6, 0);
-    box(props, F, 0, 1.4, 0, 0.1, 2.8, 0.1);
-    props.color(0x111111).mat(0.5, 0.2, 0);
-    box(props, F, X(0.25), 2.8, -0.02, 1.0, 0.7, 0.12, 0b111111);
-    props.color(0x19ff4a).mat(0.4, 0, 3.2);
-    box(props, F, X(0.25), 2.8, -0.085, 0.86, 0.56, 0.02, 0b100000);
-    // post number
-    post++;
+    for (const z of [-1.7, 1.7]) box(props, F, X(0.85), 1.2, z, 0.08, 2.4, 0.08);
+    // bench + fire extinguisher + broom
+    props.color(0x55595e).mat(0.6, 0.4, 0);
+    box(props, F, X(-0.5), 0.45, 0.2, 0.4, 0.06, 1.8, 0b111111);
+    props.color(0xc41010).mat(0.4, 0.1, 0);
+    cylinder(props, F, X(-0.55), 0, -1.3, 0.09, 0.6, 8);
+    // post number plate on the roof edge, facing the track
+    const num = post.num;
+    if (num <= 24) {
+      const c = Math.floor((num - 1) / 8), k = (num - 1) % 8;
+      const uv = atlas.sub('posts' + c, k / 8 + 0.004, (k + 1) / 8 - 0.004, 0.02, 0.98);
+      print.rgb(1, 1, 1).mat(0.5, 0, 0.12);
+      printQuadX(print, F, X(0.98), -0.3, 0.3, 2.62, 3.82, -side, uv);
+      props.color(0x2d2f33).mat(0.5, 0.6, 0);
+      box(props, F, X(1.0), 3.2, 0, 0.04, 1.26, 0.66, 0b111111);
+    }
+    // marshals: two or three, one at the fence watching
+    const count = 2 + (rng.next() < 0.5 ? 1 : 0);
+    for (let m = 0; m < count; m++) {
+      const mx = m === 0 ? X(0.95) : X(0.1 + rng.next() * 0.5);
+      const mz = m === 0 ? rng.range(-0.8, 0.8) : rng.range(-1.2, 1.2);
+      // face the track (local −x·side … rotate so −z points toward the track)
+      marshal(props, F, mx, mz, (side > 0 ? -Math.PI / 2 : Math.PI / 2) + rng.range(-0.6, 0.6), rng);
+    }
+
+    // LED flag panel on a pole at the barrier, facing oncoming cars
+    const sp = s + 2;
+    const k2 = ctx.wrap(sp);
+    const pole = P.backOff[k2] + 0.4;
+    frameAt(ctx, sp, side * (P.bar[k2] + pole));
+    props.color(0x2d2f33).mat(0.5, 0.6, 0);
+    box(props, F, 0, 1.55, 0, 0.1, 3.1, 0.1);
+    props.color(0x111214).mat(0.5, 0.2, 0);
+    box(props, F, X(0.3), 3.0, 0.0, 1.1, 0.8, 0.14, 0b111111);
+    // the lit face itself is an instanced LED panel (see TrackMesh), 1 cm in front of the housing
+    const pos = F.p(X(0.3), 3.0, -0.075, new THREE.Vector3());
+    const normal = F.d(0, 0, -1, new THREE.Vector3()).normalize();
+    const right = F.d(1, 0, 0, new THREE.Vector3()).normalize();
+    out.panels.push({ pos, normal, right });
+    void t;
   }
 }
 
 // ------------------------------------------------------------------ TV camera platforms
 
 function buildCameras(ctx: Ctx) {
-  const t = ctx.track;
-  const names = ['Faro', 'Horquilla del Puerto', 'Lonja', 'Curva Grande', 'Bus Stop', 'Parabólica', 'Mirador'];
-  for (const c of t.corners) {
+  const names = ['Turn 1', 'Curva Grande', 'Roggia', 'Lesmo 2', 'Ascari', 'Parabolica'];
+  for (const c of ctx.track.corners) {
     if (!names.includes(c.name)) continue;
-    const side = c.dir;
-    const s = c.sApex;
+    const side = c.dir as -1 | 1;
+    const s = c.sApex + 8;
     const i = ctx.wrap(s);
     const P = ctx.side(side);
-    const off = P.bar[i] + P.backOff[i] + 1.9;
+    if (P.kind[i] === 'none') continue;
+    const off = P.bar[i] + P.backOff[i] + 2.1;
     const props = ctx.cs.get(s, 'props');
     frameAt(ctx, s, side * off);
     const H = 3.6;
@@ -260,19 +363,17 @@ function buildCameras(ctx: Ctx) {
     box(props, F, 0, H + 1.05, 0.8, 1.6, 0.05, 0.05, 0b111111);
     box(props, F, -0.8, H + 1.05, 0, 0.05, 0.05, 1.6, 0b111111);
     box(props, F, 0.8, H + 1.05, 0, 0.05, 0.05, 1.6, 0b111111);
-    // tripod + camera pointing at the track
     const X = (v: number) => -side * v;
     props.color(0x1b1c1e).mat(0.5, 0.3, 0);
     box(props, F, X(0.1), H + 0.75, 0, 0.08, 1.4, 0.08);
     box(props, F, X(0.15), H + 1.55, 0, 0.55, 0.32, 0.26, 0b111111);
     const lensF = new Frame3().copy(F);
-    // lens: short cylinder along the toward-track axis
     F.p(X(0.15), H + 1.55, 0, lensF.o);
     lensF.y.copy(F.x).multiplyScalar(-side);
     lensF.x.copy(F.y);
     cylinder(props, lensF, 0, 0.25, 0, 0.09, 0.62, 10);
-    // operator: torso + head
-    props.color(0xf2f2f2).mat(0.8, 0, 0);
+    // operator in a rain jacket
+    props.color(0x20252c).mat(0.6, 0, 0);
     box(props, F, X(-0.45), H + 0.8, 0, 0.35, 0.75, 0.45);
     props.color(0xc58d6b).mat(0.7, 0, 0);
     box(props, F, X(-0.45), H + 1.35, 0, 0.22, 0.26, 0.22, 0b111111);
@@ -283,40 +384,70 @@ function buildCameras(ctx: Ctx) {
   }
 }
 
-// ------------------------------------------------------------------ distance boards + DRS signs
+// ------------------------------------------------------------------ braking boards, DRS and sector boards
 
 function buildBoards(ctx: Ctx, atlas: PrintAtlas) {
   const t = ctx.track;
-  const board = (s: number, side: number, cellIdx: number, cellName: string, size: number, yBase: number) => {
+  const board = (s: number, side: number, uv: { u0: number; u1: number; v0: number; v1: number }, size: number, yBase: number) => {
     const i = ctx.wrap(Math.floor(s));
     const P = ctx.side(side);
-    const x = P.bar[i] + P.backOff[i] + 0.32;
+    if (P.kind[i] === 'none') return;
+    // stand the board just in front of the barrier where there's room, else behind it
+    const room = P.bar[i] - (t.halfWidth[i] + P.kerb[i] + VERGE);
+    const x = room > 3 ? P.bar[i] - 0.9 : P.bar[i] + P.backOff[i] + 0.32;
     const props = ctx.cs.get(s, 'props');
     const print = ctx.cs.get(s, 'print');
     frameAt(ctx, s, side * x);
-    F.yaw(side * 0.26); // turn the face a little toward the track
+    F.yaw(side * 0.22); // turn the face a little toward the track
     props.color(0x8d9196).mat(0.4, 0.8, 0);
     for (const px of [-size * 0.35, size * 0.35]) box(props, F, px, (yBase + 0.1) / 2, 0.06, 0.07, yBase + 0.1, 0.07);
     props.color(0x202020).mat(0.6, 0.2, 0);
     box(props, F, 0, yBase + size / 2, 0.035, size + 0.04, size + 0.04, 0.04, 0b111111);
     print.rgb(1, 1, 1).mat(0.5, 0, 0.15);
-    printQuadZ(print, F, 0, -size / 2, size / 2, yBase, yBase + size, -1, atlas.sub(cellName, cellIdx * 0.25, cellIdx * 0.25 + 0.25, 0, 1));
+    printQuadZ(print, F, 0, -size / 2, size / 2, yBase, yBase + size, -1, uv);
   };
-  const big = ['Faro', 'Horquilla del Puerto', 'Lonja', 'Bus Stop', 'Mirador', 'Parabólica'];
-  t.corners.forEach((c, ci) => {
-    if (!big.includes(c.name)) return;
-    const ref = c.sStart + 12;
-    const prev = t.corners[(ci - 1 + t.corners.length) % t.corners.length];
-    const straight = t.delta(prev.sEnd, c.sStart); // length of the approach
+  for (const c of t.corners) {
+    const sty = styleOf(c.name);
+    if (!sty.boards) continue;
+    const ref = c.sStart;
     const side = c.dir; // outside of the corner = the side you brake on
-    [[100, 0], [200, 1], [300, 2]].forEach(([d, k]) => {
-      if (d + 30 < straight) board(ref - d, side, k, 'boards', 1.15, 1.35);
-    });
-    if ((c.name === 'Faro' || c.name === 'Bus Stop') && straight > 80) board(ref - 50, side, 3, 'boards', 1.0, 1.35);
-  });
+    [[150, 0], [100, 1], [50, 2]].forEach(([d, k]) => board(ref - d, side, atlas.sub('boards', k * 0.25, k * 0.25 + 0.25, 0, 1), 1.2, 0.95));
+  }
+  const drsSide = -t.pit.side;
   for (const z of t.drs) {
-    board(z.detect - 2, -1, 1, 'signs', 1.2, 2.0);
-    board(z.start - 2, -1, 0, 'signs', 1.2, 2.0);
+    board(z.detect - 2, drsSide, atlas.sub('signs', 0.25, 0.5, 0, 1), 1.2, 1.9);
+    board(z.start - 2, drsSide, atlas.sub('signs', 0, 0.25, 0, 1), 1.2, 1.9);
+  }
+  t.sectorS.forEach((s, k) => board(s - 1, drsSide, atlas.sub('signs2', (k + 1) * 0.25, (k + 2) * 0.25, 0, 1), 1.0, 2.1));
+  board(t.startS - 1, drsSide, atlas.sub('signs2', 0, 0.25, 0, 1), 1.0, 2.1);
+}
+
+// ------------------------------------------------------------------ big corner billboards
+
+function buildBillboards(ctx: Ctx, atlas: PrintAtlas) {
+  const t = ctx.track;
+  const spots: [string, number][] = [['Turn 1', 0], ['Roggia', 4], ['Ascari', 8], ['Parabolica', 12], ['Lesmo 1', 2]];
+  for (const [name, salt] of spots) {
+    const c = ctx.corner(name);
+    if (!c) continue;
+    const side = c.dir;
+    const P = ctx.side(side);
+    // at the end of the run-off, facing the braking zone
+    const s = c.sStart - 10;
+    const i = ctx.wrap(s);
+    if (P.kind[i] === 'none') continue;
+    const off = P.bar[i] + P.backOff[i] + 3.2;
+    if (ctx.clear[i] < off + 8) continue;
+    const props = ctx.cs.get(s, 'props');
+    const print = ctx.cs.get(s, 'print');
+    frameAt(ctx, s, side * off);
+    F.yaw(side * 0.5);
+    const W = 12, H = 3, Y = 2.4;
+    props.color(0x3a3d42).mat(0.5, 0.6, 0);
+    for (const x of [-W * 0.35, 0, W * 0.35]) box(props, F, x, Y / 2 + H / 2, 0.25, 0.18, Y + H, 0.18);
+    box(props, F, 0, Y + H / 2, 0.12, W + 0.2, H + 0.2, 0.12, 0b111111);
+    print.rgb(1, 1, 1).mat(0.55, 0, 0.2);
+    printQuadZ(print, F, 0.04, -W / 2, W / 2, Y, Y + H, -1, atlas.cell('ad' + ((salt + 5) % SPONSORS.length)));
   }
 }
 
@@ -325,29 +456,31 @@ function buildBoards(ctx: Ctx, atlas: PrintAtlas) {
 function buildSausages(ctx: Ctx) {
   const t = ctx.track;
   for (const c of t.corners) {
-    if (!c.name.startsWith('Bus Stop')) continue;
+    if (!styleOf(c.name).chicane) continue;
     const inside = -c.dir;
     const P = ctx.side(inside);
-    for (const ds of [-4, 2.5]) {
+    for (const ds of [-5.5, -2.9, -0.3, 2.3, 4.9]) {
       const s0 = c.sApex + ds;
       const i = ctx.wrap(Math.floor(s0));
-      const lat = inside * (t.halfWidth[i] + P.kerb[i] + VERGE * 0.4);
+      if (P.kerb[i] <= 0) continue;
+      const lat = inside * (t.halfWidth[i] + P.kerb[i] + 0.35);
       const props = ctx.cs.get(s0, 'props');
-      props.color(0xf2c200).mat(0.55, 0, 0);
-      // half-round profile swept along 2.4 m of track with tapered ends
-      const N = 7;
-      const segs = 6;
-      const len = 2.4;
+      // half-round yellow profile swept along 2.2 m of track with tapered, black-striped ends
+      const N = 8;
+      const segs = 10;
+      const len = 2.2;
       const base = props.count;
       for (let r = 0; r <= segs; r++) {
         const f = r / segs;
         const s = s0 + f * len;
-        const taper = Math.min(1, f / 0.2, (1 - f) / 0.2);
+        const taper = Math.min(1, f / 0.18, (1 - f) / 0.18);
         const fr = t.frame(s);
+        const endBand = f < 0.12 || f > 0.88;
+        props.color(endBand ? 0x151515 : 0xf2c200).mat(0.5, 0, 0);
         for (let k = 0; k <= N; k++) {
           const a = (k / N) * Math.PI;
-          const lx = Math.cos(a) * 0.16;
-          const ly = Math.sin(a) * 0.1 * taper;
+          const lx = Math.cos(a) * 0.17;
+          const ly = Math.sin(a) * 0.11 * Math.sqrt(Math.max(0, taper));
           const p = t.point(s, lat + lx, ly, A);
           const nx = fr.right.x * Math.cos(a) + fr.up.x * Math.sin(a);
           const ny = fr.right.y * Math.cos(a) + fr.up.y * Math.sin(a);
@@ -364,5 +497,3 @@ function buildSausages(ctx: Ctx) {
     }
   }
 }
-
-export { printQuadX };

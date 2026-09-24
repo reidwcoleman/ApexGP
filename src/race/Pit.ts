@@ -11,19 +11,47 @@ import type { CarPhysics } from '../sim/CarPhysics.ts';
  *    back out and released to the physics after the pit exit.
  */
 
-export type Compound = 'soft' | 'medium' | 'hard';
-export const COMPOUND_ORDER: Compound[] = ['soft', 'medium', 'hard'];
+export type Compound = 'soft' | 'medium' | 'hard' | 'inter' | 'wet';
+/** dry slicks, softest first */
+export const DRY_COMPOUNDS: Compound[] = ['soft', 'medium', 'hard'];
+/** every compound, in menu order */
+export const COMPOUND_ORDER: Compound[] = ['soft', 'medium', 'hard', 'inter', 'wet'];
 
-export const COMPOUNDS: Record<Compound, { label: string; short: string; color: string; grip: number; wear: number }> = {
-  soft: { label: 'Soft', short: 'S', color: '#ff2d3c', grip: 1.0, wear: 1.6 },
-  medium: { label: 'Medium', short: 'M', color: '#ffd21f', grip: 0.983, wear: 1.0 },
-  hard: { label: 'Hard', short: 'H', color: '#eeeeee', grip: 0.966, wear: 0.62 },
+/**
+ * grip: peak μ multiplier on a dry track at working temperature; wear: wear
+ * rate multiplier; type: 0 slick, 1 intermediate, 2 full wet (the physics
+ * looks up wet-track grip by type); tOpt: centre of the working window (°C).
+ */
+export const COMPOUNDS: Record<Compound, { label: string; short: string; color: string; grip: number; wear: number; type: 0 | 1 | 2; tOpt: number }> = {
+  soft: { label: 'Soft', short: 'S', color: '#ff2d3c', grip: 1.0, wear: 1.6, type: 0, tOpt: 98 },
+  medium: { label: 'Medium', short: 'M', color: '#ffd21f', grip: 0.983, wear: 1.0, type: 0, tOpt: 104 },
+  hard: { label: 'Hard', short: 'H', color: '#eeeeee', grip: 0.966, wear: 0.62, type: 0, tOpt: 110 },
+  inter: { label: 'Intermediate', short: 'I', color: '#35c95a', grip: 1.0, wear: 1.15, type: 1, tOpt: 80 },
+  wet: { label: 'Wet', short: 'W', color: '#2f8cff', grip: 1.0, wear: 0.9, type: 2, tOpt: 65 },
 };
 
+export const isDry = (c: Compound) => COMPOUNDS[c].type === 0;
+
+/**
+ * The tyre the conditions call for at a given water level under the racing
+ * line (crossovers from the physics' grip tables: slick/inter ≈ 0.2,
+ * inter/wet ≈ 0.72).
+ */
+export function tyreTypeFor(wetOnLine: number): 0 | 1 | 2 {
+  return wetOnLine < 0.2 ? 0 : wetOnLine < 0.72 ? 1 : 2;
+}
+
+/** fresh tyres: out of the blankets (~80 °C for slicks) */
 export function fitTyres(car: CarPhysics, c: Compound) {
-  car.compoundGrip = COMPOUNDS[c].grip;
-  car.compoundWear = COMPOUNDS[c].wear;
-  for (let i = 0; i < 4; i++) car.wear[i] = 0;
+  const k = COMPOUNDS[c];
+  car.compoundGrip = k.grip;
+  car.compoundWear = k.wear;
+  car.tyreType = k.type;
+  car.tyreOpt = k.tOpt;
+  for (let i = 0; i < 4; i++) {
+    car.wear[i] = 0;
+    car.tyreTemp[i] = k.type === 0 ? 80 : 60;
+  }
 }
 
 export type PitPhase = 'none' | 'in' | 'stop' | 'out';

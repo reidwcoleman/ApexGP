@@ -37,11 +37,40 @@ Performance target: 60 fps at 1080p on an Apple-silicon MacBook with 20 cars on 
   `point(s, lateral, lift)`, `project(x, z, hint)`, `surfaceAt(s, lat)`, `buildDistanceField()`,
   `Track.sampleField()`. Cross-section: road → kerb → 1.5 m verge (`VERGE`) → runoff → barrier.
   Gravel beds stop `GRAVEL_EDGE` m short of the barrier (grass there).
-- `src/world/Circuits.ts` — `COSTA_DEL_SOL` (4.8 km, coastal, clockwise). Theme: Mediterranean cliff-top
-  circuit. Pit straight on the cliff top (segment 0, runs toward +Z); the sea lies to the south/south-west
-  (+Z / −X side of the map, below the Bajada/hairpin at the harbour); hills with pines to the north/west.
-  Corner names: Faro (lighthouse, T1), Faro II, Mirador, Horquilla del Puerto (harbour hairpin), Lonja,
-  Pinos I–IV (pine esses), Curva Grande, Bus Stop chicane, Parabólica.
+- `src/world/Circuits.ts` — `MONZA`: the **real Autodromo Nazionale Monza** (5.79 km, clockwise), built
+  from a surveyed centreline (`src/world/circuits/monzaLine.ts`, within ~4 m of the real thing).
+  Map orientation: world **x = east, z = south** (north = −Z). s = 0 is just after the Parabolica exit.
+  - Main straight on the **west** side, running **north** (toward −Z) from the Parabolica (south end,
+    s≈5380) to the Rettifilo chicane. Start/finish line **s = 550**. Pit lane on the **right (east, inside)**,
+    s 120 → 960; the pit building/garages/paddock are east of it. Main grandstand (Tribuna Centrale)
+    opposite the pits on the west side of the straight.
+  - T1/T2 **Variante del Rettifilo** (s≈1180/1225, right–left, big asphalt runoff straight on).
+  - T3 **Curva Grande** (s 1300–2010, long flat-out right sweeping north-east, lined by tall trees).
+  - T4/T5 **Variante della Roggia** (s≈2395/2440, left–right).
+  - T6 **Lesmo 1** (s≈2850), T7 **Lesmo 2** (s≈3127) — the north-east corner, deep in the woods.
+  - **Serraglio** straight running south-west (s 3160–4180) — passes **under the old banking**
+    (the 1955 high-speed oval, "Sopraelevata", crumbling banked concrete in the trees) around s≈3450.
+  - T8–T10 **Variante Ascari** (s≈4200/4346/4392, left–right–left), then the back straight south.
+  - T11 **Parabolica / Curva Alboreto** (s 5364–5723, long right, tightening then opening onto the straight).
+  - Corner names in `track.corners`: 'Turn 1', 'Turn 2', 'Curva Grande', 'Roggia', 'Turn 5', 'Lesmo 1',
+    'Lesmo 2', 'Ascari', 'Turn 9', 'Turn 10', 'Parabolica'. Nearly flat (≤ 6.3 m elevation).
+  - Setting: the **Parco di Monza** — a royal park: dense mature deciduous forest (plane trees, oaks,
+    horse chestnuts, 20–30 m tall) right up to the catch fences for most of the lap, open lawns, gravel
+    paths, the old oval, big grandstands at the main straight, T1, Roggia, Lesmo, Ascari and Parabolica,
+    tifosi in red. Lombardy light: hazy, warm.
+  - `track.data.segStart/segLen` still exist (straights/corners auto-derived) but **don't index them by
+    number** — use corner names or s values. Old Costa del Sol assumptions (sea, harbour, lighthouse,
+    town, cliffs, segment 10/20/26) are gone.
+- `src/world/Weather.ts` — **weather model** (no three.js). `WeatherState` (read its comments): `kind`
+  ('clear'|'cloudy'|'overcast'|'drizzle'|'rain'|'storm'), `time` ('morning'|'afternoon'|'golden'),
+  `cloud` 0–1, `rain` 0–1, `wetness` 0–1 (standing water), `dryLine` 0–1, `fog` 0–1, `windX/windZ`,
+  `lightning` 0–1 (flash this frame), `airTemp`, `trackTemp`, `t` (clock). A new random forecast is
+  rolled for every race; it can change mid-race (e.g. dry → rain, rain → drying with a dry line).
+  Build a state for testing: `new Weather(planWeather('rain', 'afternoon', 600)).state`, or just write a
+  literal `WeatherState` object.
+- `src/world/weatherUniforms.ts` — `weatherUniforms` { uWetness, uRain, uDryLine, uCloud, uLightning,
+  uWind, uWeatherTime }: shared uniform objects the game updates every frame. **Any material that should
+  react to rain puts these same objects into its uniforms** (ShaderMaterial or `onBeforeCompile`).
 - `src/core/Renderer.ts` — renderer + post chain. `gfx.grade.set({...})`, `gfx.bloom`, `gfx.ao`,
   `gfx.maxAnisotropy`, `gfx.renderer`.
 - `src/race/Teams.ts` — 10 teams × 2 drivers, colours, livery pattern, sponsor, helmet colours.
@@ -84,6 +113,13 @@ export interface CarRig {
 export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts?: { envMap?: THREE.Texture }): CarRig;
 ```
 
+### Weather hooks every visual module must honour (round 3)
+
+The game calls, every frame: `applyWeatherUniforms(state)` then `env.setWeather(state)`. Wet look targets
+(F1 game in the rain): dark saturated asphalt with sky/car/light reflections and puddles, a visibly drier
+racing line once `dryLine` rises, rooster-tail spray and mist behind cars, rain streaks, grey soft
+light, lightning flashes in storms. Dry look: crisp Lombardy sun, long soft shadows at golden hour.
+
 ### Trackside — `src/world/TrackMesh.ts` (+ helpers `src/world/trackside/*`), dev page `src/dev/track.*`
 
 ```ts
@@ -96,7 +132,7 @@ export interface Trackside {
 export function buildTrackside(track: Track, gfx: Renderer): Trackside;
 ```
 Everything from the centreline out to the barriers (+ a few metres behind them): road, kerbs, verges,
-runoff, gravel, grass inside the barriers, barriers, fences, markings, pit lane + pit wall, start gantry.
+runoff, gravel, grass inside the barriers, barriers, fences, markings, start gantry, footbridges, marshal posts, boards. (The pit lane, pit wall, spur lanes and garages belong to `src/world/PitComplex.ts`; hand-off constant `PIT_HANDOFF` in trackside/context.ts.)
 
 ### World — `src/world/Environment.ts` (+ `src/world/env/*`), dev page `src/dev/world.*`
 

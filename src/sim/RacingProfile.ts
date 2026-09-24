@@ -7,13 +7,27 @@ import type { CarSpec } from './CarPhysics.ts';
  *  1. curvature of the line itself (not the centreline),
  *  2. corner speed from μ(g + downforce/m)·κ⁻¹,
  *  3. backward pass (braking limit) and forward pass (traction/power limit).
- * `vmax[i]` is the target speed at s = i metres.
+ * `vmax[i]` is the target speed at s = i metres on a dry track with warm new
+ * tyres. The same profile is also built at lower grip levels (rain, cold or
+ * worn tyres, inters…) and `atGrip` interpolates between them.
  */
+const LEVELS = [1, 0.86, 0.74, 0.63, 0.54, 0.46];
+
 export class RacingProfile {
   readonly n: number;
   readonly lineK: Float32Array;
   readonly vmax: Float32Array;
   readonly lapTime: number;
+  private readonly tables: Float32Array[];
+
+  private static cache = new Map<string, RacingProfile>();
+  /** shared profile per track + spec + grip settings (they take a few ms to build) */
+  static for(track: Track, spec: CarSpec, grip = 0.94, brakeGrip = 0.8): RacingProfile {
+    const key = `${track.def.id}/${spec.mu}/${spec.clA}/${spec.mass}/${grip}/${brakeGrip}`;
+    let p = RacingProfile.cache.get(key);
+    if (!p || p.n !== track.n) RacingProfile.cache.set(key, (p = new RacingProfile(track, spec, grip, brakeGrip)));
+    return p;
+  }
 
   constructor(track: Track, spec: CarSpec, grip = 0.94, brakeGrip = 0.8) {
     const n = (this.n = track.n);
@@ -38,7 +52,15 @@ export class RacingProfile {
       k[i] = dh / ds;
     }
     this.lineK = smoothCircular(k, 4, 2);
+    this.tables = LEVELS.map((l) => this.build(spec, grip * l, brakeGrip * l));
+    this.vmax = this.tables[0];
+    let t = 0;
+    for (let i = 0; i < n; i++) t += 1 / Math.max(1, this.vmax[i]);
+    this.lapTime = t;
+  }
 
+  private build(spec: CarSpec, grip: number, brakeGrip: number): Float32Array {
+    const n = this.n;
     const m = spec.mass;
     const g = 9.81;
     const kA = 0.5 * 1.225 * spec.clA;
@@ -98,17 +120,37 @@ export class RacingProfile {
         if (v[i] > lim) v[i] = lim;
       }
     }
-    this.vmax = v;
-    let t = 0;
-    for (let i = 0; i < n; i++) t += 1 / Math.max(1, v[i]);
-    this.lapTime = t;
+    return v;
   }
 
   at(s: number): number {
+    return this.sample(this.vmax, s);
+  }
+
+  /** ideal lap time (s) at grip level g */
+  lapTimeAt(g: number): number {
+    let t = 0;
+    for (let i = 0; i < this.n; i += 2) t += 2 / Math.max(1, this.atGrip(i, g));
+    return t;
+  }
+
+  /** target speed at s for a car whose tyres have `g` of the dry, warm, new grip */
+  atGrip(s: number, g: number): number {
+    if (g >= 1) return this.at(s);
+    const L = LEVELS;
+    const last = L.length - 1;
+    if (g <= L[last]) return this.sample(this.tables[last], s) * Math.sqrt(Math.max(0.2, g) / L[last]);
+    let k = 0;
+    while (L[k + 1] > g) k++;
+    const f = (L[k] - g) / (L[k] - L[k + 1]);
+    return this.sample(this.tables[k], s) * (1 - f) + this.sample(this.tables[k + 1], s) * f;
+  }
+
+  private sample(arr: Float32Array, s: number): number {
     const n = this.n;
     const w = ((s % n) + n) % n;
     const i = Math.floor(w);
     const f = w - i;
-    return this.vmax[i] * (1 - f) + this.vmax[(i + 1) % n] * f;
+    return arr[i] * (1 - f) + arr[(i + 1) % n] * f;
   }
 }

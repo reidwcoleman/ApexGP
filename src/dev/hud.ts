@@ -5,7 +5,7 @@ import '../ui/tokens.css';
 import '../ui/hud.css';
 import '../ui/menu.css';
 import { Track } from '../world/Track.ts';
-import { COSTA_DEL_SOL } from '../world/Circuits.ts';
+import { MONZA } from '../world/Circuits.ts';
 import { Race } from '../race/Race.ts';
 import { allEntries } from '../race/Teams.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
@@ -13,20 +13,21 @@ import { HUD } from '../ui/HUD.ts';
 import { Menu } from '../ui/Menu.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { uiColor } from '../race/Teams.ts';
+import { planWeather } from '../world/Weather.ts';
 const eng = new Engineer();
 
 // ?t=seconds of race to simulate before the screenshot, ?screen=title|setup|results
 const params = new URLSearchParams(location.search);
 const ui = document.getElementById('ui')!;
-const track = new Track(COSTA_DEL_SOL);
+const track = new Track(MONZA);
 const entries = allEntries();
-const race = new Race(track, { mode: 'race', laps: 5, difficulty: 0.97, playerEntry: entries[6], playerGrid: 9, entries });
+const race = new Race(track, { mode: 'race', laps: 5, difficulty: 0.97, playerEntry: entries[6], playerGrid: 9, entries, weather: planWeather((params.get('weather') as never) ?? 'drizzle', 'afternoon', 500, 4) });
 const auto = new AIDriver(0.99, 0.6);
 auto.startFrom(race.player.car, track);
 const hud = new HUD(ui);
 hud.setup(race, track);
 hud.show(true);
-const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onResetCar() {}, onUi() {} });
+const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onResetCar() {}, onUi() {}, forecast: () => ({ weather: 'Light rain', time: 'Afternoon' }) });
 
 const simT = Number(params.get('t') ?? 95);
 race.startLights();
@@ -45,7 +46,7 @@ while (t < simT) {
 }
 const screen = params.get('screen');
 if (screen === 'results') {
-  menu.showResults(race.classification(), 'Podium · P3', '5 laps · Autódromo Costa del Sol', () => {}, () => {});
+  menu.showResults(race.classification(), 'Podium · P3', '5 laps · Autodromo Nazionale Monza', () => {}, () => {});
   hud.show(false);
 } else if (screen) {
   menu.show(screen as 'title');

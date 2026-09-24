@@ -36,22 +36,50 @@ export interface SegDef {
   flex?: number;
 }
 
+/** A real circuit: a surveyed centreline plus where its named corners are. */
+export interface CenterlineDef {
+  /** flat [x0, z0, x1, z1, …] in world metres, in driving order, closed (last joins first) */
+  points: number[];
+  /** box radius (m) of the curvature smoothing, three passes (default 3) */
+  smooth?: number;
+}
+
+export interface CornerDef {
+  name: string;
+  /** approximate apex, in s (metres from the first centreline point) */
+  at: number;
+  /** −1 right, 1 left */
+  dir: 1 | -1;
+  runoff?: RunoffKind;
+  runoffDepth?: number;
+  /** explicit [start, end] in s, for long multi-radius bends the detector would clip */
+  span?: [number, number];
+}
+
 export interface CircuitDef {
   id: string;
   name: string;
+  /** short name for menus and radio ("Monza") */
+  short: string;
   country: string;
-  segments: SegDef[];
+  /** authored layout (fictional circuits) … */
+  segments?: SegDef[];
+  /** … or a surveyed one (real circuits), with its corners */
+  centerline?: CenterlineDef;
+  corners?: CornerDef[];
   halfWidth: number;
-  /** distance of the start/finish line from the beginning of segment 0 (m) */
+  /** s of the start/finish line (m) */
   startOffset: number;
-  /** [fraction of lap from segment 0 start, height m], periodic */
+  /** [fraction of lap from s = 0, height m], periodic */
   elevation: [number, number][];
-  /** pit lane side along segment 0: 1 = right, −1 = left */
+  /** pit lane side of the main straight: 1 = right, −1 = left */
   pitSide: 1 | -1;
+  /** pit lane (wall) extent in s; must not wrap past s = 0 */
+  pit: { start: number; end: number };
   /** sector boundaries as fractions of the lap measured from the start line */
   sectors: [number, number];
-  /** DRS zones: [detection, activation, end] as segment index + fraction within it */
-  drs: { detect: [number, number]; start: [number, number]; end: [number, number] }[];
+  /** DRS zones: detection, activation and end points, in s */
+  drs: { detect: number; start: number; end: number }[];
 }
 
 export interface CornerInfo {
@@ -174,9 +202,14 @@ function periodicCatmull(keys: [number, number][], f: number): number {
 }
 
 export function generateCircuit(def: CircuitDef): CircuitData {
+  if (def.centerline) return fromCenterline(def);
+  return fromSegments(def);
+}
+
+function fromSegments(def: CircuitDef): CircuitData {
   const SMOOTH_R = 7;
   const PASSES = 3;
-  const segs = def.segments;
+  const segs = def.segments!;
 
   // Straights long enough to have a κ=0 middle after smoothing can flex.
   const flex = segs.map((s) => {
@@ -304,4 +337,136 @@ export function generateCircuit(def: CircuitDef): CircuitData {
   });
 
   return { def, n, ds: 1, length: n, x, z, y, heading, kappa: k, seg, segStart, segLen: finalLens, corners };
+}
+
+/**
+ * Real circuits: curvature is measured on the surveyed polyline (turn angle at
+ * each vertex over the mean of its two chords), resampled every metre,
+ * smoothed, rescaled to exactly one clockwise/anticlockwise revolution and
+ * integrated again from the first point and heading. That keeps heading, κ
+ * and position consistent with each other. The small position residual left
+ * by smoothing is spread along the lap, mostly on the straights.
+ */
+function fromCenterline(def: CircuitDef): CircuitData {
+  const P = def.centerline!.points;
+  const m = P.length / 2;
+  const px = (i: number) => P[((i % m) + m) % m * 2];
+  const pz = (i: number) => P[((i % m) + m) % m * 2 + 1];
+  const chord = new Float64Array(m);
+  const cum = new Float64Array(m + 1);
+  const th = new Float64Array(m);
+  for (let i = 0; i < m; i++) {
+    const dx = px(i + 1) - px(i), dz = pz(i + 1) - pz(i);
+    chord[i] = Math.hypot(dx, dz);
+    cum[i + 1] = cum[i] + chord[i];
+    th[i] = Math.atan2(dx, dz);
+  }
+  const total = cum[m];
+  const wrapA = (a: number) => {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  };
+  // curvature at each vertex
+  const kv = new Float64Array(m);
+  for (let i = 0; i < m; i++) {
+    const prev = (i - 1 + m) % m;
+    kv[i] = wrapA(th[i] - th[prev]) / ((chord[prev] + chord[i]) / 2);
+  }
+  const n = Math.round(total);
+  const scaleS = total / n;
+  let raw = new Float64Array(n);
+  let v = 0;
+  for (let j = 0; j < n; j++) {
+    const sj = j * scaleS;
+    while (v < m - 1 && cum[v + 1] <= sj) v++;
+    const f = (sj - cum[v]) / chord[v];
+    raw[j] = kv[v] * (1 - f) + kv[(v + 1) % m] * f;
+  }
+  const k = boxSmoothCircular(raw, def.centerline!.smooth ?? 3, 3);
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += k[i];
+  const sc = (Math.sign(sum) * Math.PI * 2) / sum;
+  for (let i = 0; i < n; i++) k[i] *= sc;
+
+  const integ = integrate(k);
+  const th0 = th[m - 1] + wrapA(th[0] - th[m - 1]) / 2;
+  const c0 = Math.cos(th0), s0 = Math.sin(th0);
+  const x = new Float64Array(n);
+  const z = new Float64Array(n);
+  const heading = new Float64Array(n);
+  // rotate the integrated path onto the survey: local (x, z) with heading 0 = +z
+  const rot = (lx: number, lz: number): [number, number] => [lx * c0 + lz * s0, -lx * s0 + lz * c0];
+  const [ex, ez] = rot(integ.x[n], integ.z[n]);
+  // spread the closure residual, weighted toward straights
+  const w = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) w[i + 1] = w[i] + (Math.abs(k[i]) < 1 / 600 ? 1 : 0.08);
+  for (let i = 0; i < n; i++) {
+    const [lx, lz] = rot(integ.x[i], integ.z[i]);
+    const t = w[i] / w[n];
+    x[i] = px(0) + lx - ex * t;
+    z[i] = pz(0) + lz - ez * t;
+    heading[i] = th0 + integ.heading[i];
+  }
+
+  const y = new Float64Array(n);
+  for (let i = 0; i < n; i++) y[i] = periodicCatmull(def.elevation, i / n);
+
+  const wrapI = (i: number) => ((i % n) + n) % n;
+  const corners: CornerInfo[] = [];
+  for (const cd of def.corners ?? []) {
+    const at = Math.round(cd.at / scaleS);
+    const dir = cd.dir;
+    let peak = 0;
+    let apex = at;
+    for (let j = at - 35; j <= at + 35; j++) {
+      const val = k[wrapI(j)] * dir;
+      if (val > peak) {
+        peak = val;
+        apex = j;
+      }
+    }
+    let a0 = apex, a1 = apex;
+    while (k[wrapI(a0 - 1)] * dir > peak * 0.985 && a0 > apex - 60) a0--;
+    while (k[wrapI(a1 + 1)] * dir > peak * 0.985 && a1 < apex + 60) a1++;
+    apex = Math.round((a0 + a1) / 2);
+    let st = apex, en = apex;
+    while (k[wrapI(st - 1)] * dir > peak * 0.18 && st > apex - 300) st--;
+    while (k[wrapI(en + 1)] * dir > peak * 0.18 && en < apex + 400) en++;
+    if (cd.span) {
+      st = Math.round(cd.span[0] / scaleS);
+      en = Math.round(cd.span[1] / scaleS);
+    }
+    const radius = Math.round(1 / Math.max(peak, 1e-4));
+    corners.push({
+      name: cd.name,
+      dir,
+      radius,
+      sStart: wrapI(st),
+      sApex: wrapI(apex),
+      sEnd: wrapI(en),
+      peak,
+      runoff: cd.runoff ?? 'grass',
+      runoffDepth: cd.runoffDepth ?? (radius < 60 ? 28 : radius < 150 ? 34 : 42),
+    });
+  }
+
+  // Straights and corners as segments, for code that likes to walk the lap that way.
+  const label = new Int16Array(n).fill(-1);
+  corners.forEach((c, ci) => {
+    for (let j = c.sStart, cnt = 0; cnt <= wrapI(c.sEnd - c.sStart); j++, cnt++) label[wrapI(j)] = ci;
+  });
+  const seg = new Int16Array(n);
+  const segStart: number[] = [];
+  const segLen: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i === 0 || label[i] !== label[i - 1]) {
+      segStart.push(i);
+      segLen.push(0);
+    }
+    segLen[segLen.length - 1]++;
+    seg[i] = segStart.length - 1;
+  }
+
+  return { def, n, ds: 1, length: n, x, z, y, heading, kappa: k, seg, segStart, segLen, corners };
 }

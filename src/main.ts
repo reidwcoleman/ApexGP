@@ -38,7 +38,8 @@ game
         camera: q.get('cam') ?? undefined,
         autopilot: q.get('auto') !== '0',
         skip: Number(q.get('skip') ?? 0),
-        time: (q.get('time') as 'golden' | 'day' | 'overcast') ?? undefined,
+        weather: (q.get('weather') as never) ?? undefined,
+        time: (q.get('time') as never) ?? undefined,
         grid: q.get('grid') ? Number(q.get('grid')) : undefined,
         laps: q.get('laps') ? Number(q.get('laps')) : undefined,
       });

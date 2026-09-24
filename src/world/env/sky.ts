@@ -1,14 +1,15 @@
 import * as THREE from 'three';
-import { noiseTexture } from './textures.ts';
 
 /**
- * Sky dome: atmosphere LUT + sun disc + two procedural cloud layers
- * (cumulus deck with self-shadowing, and high streaky cirrus), slowly drifting.
+ * Sky dome: physically based atmosphere LUT (clear sky), blended toward a grey
+ * overcast gradient as the cloud deck closes, with the ray-marched cloud
+ * panorama (see skyClouds.ts) composited over it, plus the sun disc/aureole and
+ * lightning (a flash lighting the deck from inside, and a bolt).
  *
  * The dome is a unit sphere that follows the camera and is written at the far
  * plane (gl_Position.z = w), so it works with any camera near/far. A second
  * material instance with `uEnv = 1` (no sun disc, ground below the horizon) is
- * used to render the PMREM environment map.
+ * rendered into the cube map the PMREM environment is filtered from.
  */
 
 const VERT = /* glsl */ `
@@ -29,14 +30,20 @@ uniform vec3 uSunDir;
 uniform vec3 uSunDisc;
 uniform float uSunRadius;
 uniform float uTime;
-uniform sampler2D uNoise;
-uniform vec4 uCloud;      // x coverage overhead, y coverage toward horizon, z cirrus, w opacity
-uniform vec3 uCloudSun;   // radiance of a sunlit cloud facing the sun
-uniform vec3 uCloudAmb;   // ambient radiance on clouds
-uniform vec3 uCloudDark;  // darkest cloud base (overcast)
-uniform vec3 uGround;     // env mode: ground radiance
+uniform sampler2D uPano;
+uniform float uOvercast;
+uniform vec3 uOvZenith;
+uniform vec3 uOvHorizon;
+uniform vec3 uGround;
 uniform float uEnv;
-uniform vec2 uWind;
+uniform float uFlash;
+uniform vec3 uFlashDir;
+uniform vec3 uFlashCol;
+uniform float uBolt;
+uniform float uBoltSeed;
+uniform float uBoltTop;
+uniform float uHalo;
+uniform float uSkyComp;
 
 #define PI 3.141592653589793
 
@@ -52,109 +59,121 @@ vec3 skyLut( vec3 d ) {
   return texture2D( uLut, vec2( u, v ) ).rgb * uSkyScale;
 }
 
+vec3 skyBg( vec3 d ) {
+  vec3 c = skyLut( d );
+  if ( uOvercast > 0.001 ) {
+    float k = pow( 1.0 - max( d.y, 0.0 ), 3.0 );
+    c = mix( c, mix( uOvZenith, uOvHorizon, k ), uOvercast );
+  }
+  return c;
+}
+
+uniform vec2 uPanoSize;
+// Catmull-Rom (5 bilinear taps): crisper cloud edges than plain bilinear magnification
+vec4 panoCubic( vec2 uv ) {
+  vec2 sp = uv * uPanoSize;
+  vec2 tp = floor( sp - 0.5 ) + 0.5;
+  vec2 f = sp - tp;
+  vec2 w0 = f * ( -0.5 + f * ( 1.0 - 0.5 * f ) );
+  vec2 w1 = 1.0 + f * f * ( -2.5 + 1.5 * f );
+  vec2 w2 = f * ( 0.5 + f * ( 2.0 - 1.5 * f ) );
+  vec2 w3 = f * f * ( -0.5 + 0.5 * f );
+  vec2 w12 = w1 + w2;
+  vec2 tc0 = ( tp - 1.0 ) / uPanoSize;
+  vec2 tc3 = ( tp + 2.0 ) / uPanoSize;
+  vec2 tc12 = ( tp + w2 / w12 ) / uPanoSize;
+  vec4 r = texture2D( uPano, vec2( tc12.x, tc0.y ) ) * ( w12.x * w0.y )
+         + texture2D( uPano, vec2( tc0.x, tc12.y ) ) * ( w0.x * w12.y )
+         + texture2D( uPano, vec2( tc12.x, tc12.y ) ) * ( w12.x * w12.y )
+         + texture2D( uPano, vec2( tc3.x, tc12.y ) ) * ( w3.x * w12.y )
+         + texture2D( uPano, vec2( tc12.x, tc3.y ) ) * ( w12.x * w3.y );
+  float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  return max( r / wsum, 0.0 );
+}
+
+vec4 pano( vec3 d ) {
+  float el = asin( clamp( d.y, 0.0, 1.0 ) );
+  float u = atan( d.z, d.x ) * ( 0.5 / PI );
+  float v = sqrt( el / ( PI * 0.5 ) );
+  vec2 uv = vec2( fract( u ), v );
+  if ( uEnv > 0.5 ) return texture2D( uPano, uv );
+  vec4 c = panoCubic( uv );
+  c.a = min( c.a, 1.0 );
+  return c;
+}
+
+float hash11( float p ) {
+  p = fract( p * 0.1031 );
+  p *= p + 33.33;
+  p *= p + p;
+  return fract( p );
+}
 float hash12( vec2 p ) {
   vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
   p3 += dot( p3, p3.yzx + 33.33 );
   return fract( ( p3.x + p3.y ) * p3.z );
 }
-
-// distance (km) to a spherical shell at altitude H (km) above a 6360 km planet
-float shellDist( float sy, float H ) {
-  float R = 6360.0;
-  return -R * sy + sqrt( R * R * sy * sy + 2.0 * R * H + H * H );
+float vnoise( float x ) {
+  float i = floor( x );
+  float f = x - i;
+  return mix( hash11( i + uBoltSeed ), hash11( i + 1.0 + uBoltSeed ), f * f * ( 3.0 - 2.0 * f ) ) * 2.0 - 1.0;
 }
 
-float cumulusNoise( vec2 p ) {
-  float n = texture2D( uNoise, p * 0.045 ).r * 0.55
-          + texture2D( uNoise, p * 0.13 + vec2( 0.31, 0.72 ) ).g * 0.28
-          + texture2D( uNoise, p * 0.41 + vec2( 0.12, 0.43 ) ).b * 0.17;
-  float billow = texture2D( uNoise, p * 0.09 + vec2( 0.5, 0.2 ) ).a;
-  return n * 0.8 + billow * 0.2;
-}
-float cumulusDensity( vec2 p, float cov ) {
-  return smoothstep( 1.0 - cov, 1.0 - cov + 0.22, cumulusNoise( p ) );
+// lightning bolt: a jagged vertical filament at the flash azimuth, from the deck to the ground
+float bolt( vec3 d ) {
+  vec2 fd = normalize( uFlashDir.xz );
+  vec2 dh = normalize( d.xz );
+  float az = atan( dh.x * fd.y - dh.y * fd.x, dot( dh, fd ) );
+  float el = asin( clamp( d.y, -1.0, 1.0 ) );
+  if ( el < -0.002 || el > uBoltTop ) return 0.0;
+  float y = el / uBoltTop;
+  float x = ( vnoise( y * 7.0 ) * 0.5 + vnoise( y * 19.0 ) * 0.25 + vnoise( y * 53.0 ) * 0.12 ) * 0.02;
+  float w = abs( az - x );
+  float core = exp( -w * w / 1.4e-6 );
+  float glow = exp( -w / 0.006 ) * 0.22;
+  // a side branch
+  float bx = x + ( y - 0.55 ) * 0.03 * sign( hash11( uBoltSeed * 3.1 ) - 0.5 ) + vnoise( y * 31.0 + 7.0 ) * 0.004;
+  float bw = abs( az - bx );
+  float branch = y > 0.2 && y < 0.55 ? exp( -bw * bw / 7e-7 ) * smoothstep( 0.2, 0.5, y ) : 0.0;
+  return ( core + glow + branch * 0.6 ) * smoothstep( 0.0, 0.02, y + 0.01 );
 }
 
 void main() {
   vec3 d = normalize( vDir );
   float sy = d.y;
   vec3 dUp = normalize( vec3( d.x, max( sy, 0.0015 ), d.z ) );
-  vec3 col = skyLut( dUp );
-  vec3 horizon = col;
+  vec3 col = skyBg( dUp );
 
-  float cs = dot( d, uSunDir );
-
-  // ---------------- sun disc (main view only)
+  // sun disc + aureole (main view only; the direct light carries it in reflections)
   if ( uEnv < 0.5 && sy > -0.02 ) {
+    float cs = dot( d, uSunDir );
     float ang = sqrt( max( 0.0, 2.0 * ( 1.0 - cs ) ) );
-    float disc = 1.0 - smoothstep( uSunRadius * 0.92, uSunRadius * 1.04, ang );
+    float disc = 1.0 - smoothstep( uSunRadius * 0.9, uSunRadius * 1.05, ang );
     float r = clamp( ang / uSunRadius, 0.0, 1.0 );
-    float limb = 0.45 + 0.55 * sqrt( max( 0.0, 1.0 - r * r ) );
+    float limb = 0.4 + 0.6 * sqrt( max( 0.0, 1.0 - r * r ) );
     col += uSunDisc * disc * limb;
-    // tight aureole the bloom can grab
-    col += uSunDisc * 0.0025 * exp( - ang * 60.0 );
+    // aureole: the forward-scattering glow of haze around the sun (the LUT is too coarse for it)
+    col += uSunDisc * uHalo * ( 0.012 * exp( -ang * 38.0 ) + 0.0035 * exp( -ang * 9.0 ) );
   }
 
-  // ---------------- clouds
-  if ( sy > 0.0 ) {
-    float horizonFade = smoothstep( 0.0, 0.035, sy );
-    // cirrus (8 km)
-    if ( uCloud.z > 0.001 ) {
-      float t = shellDist( sy, 8.0 );
-      vec2 p = d.xz / max( length( d.xz ), 1e-4 ) * sqrt( max( 0.0, t * t - 64.0 ) ) + uWind * uTime * 0.6;
-      vec2 w = normalize( vec2( 0.8, 0.35 ) );
-      vec2 q = vec2( dot( p, w ), dot( p, vec2( -w.y, w.x ) ) * 3.5 );
-      float n = texture2D( uNoise, q * 0.006 ).a * texture2D( uNoise, q * 0.017 + vec2( 0.2, 0.6 ) ).g;
-      n += texture2D( uNoise, p * 0.02 ).r * 0.25;
-      // patchy: cirrus only in some regions of the sky
-      float patchK = smoothstep( 0.45, 0.7, texture2D( uNoise, p * 0.0023 + vec2( 0.61, 0.17 ) ).r );
-      float a = smoothstep( 0.32, 0.75, n ) * uCloud.z * horizonFade * patchK;
-      float ph = 0.35 + 1.6 * pow( max( cs, 0.0 ), 8.0 );
-      vec3 cc = uCloudAmb * 1.1 + uCloudSun * 0.55 * ph;
-      cc = mix( cc, horizon, 1.0 - exp( - t / 120.0 ) );
-      col = mix( col, cc, a * 0.85 );
-    }
-    // cumulus (1.6 km)
-    if ( uCloud.w > 0.001 ) {
-      float t = shellDist( sy, 1.6 );
-      vec2 dir2 = d.xz / max( length( d.xz ), 1e-4 );
-      vec2 p = dir2 * sqrt( max( 0.0, t * t - 2.56 ) ) + uWind * uTime;
-      float cov = mix( uCloud.x, uCloud.y, smoothstep( 4.0, 45.0, t ) );
-      float nRaw = cumulusNoise( p );
-      float dens = smoothstep( 1.0 - cov, 1.0 - cov + 0.22, nRaw );
-      if ( dens > 0.002 ) {
-        // light march toward the sun through the deck (2 taps)
-        vec2 sd = normalize( uSunDir.xz + vec2( 1e-4 ) );
-        float s1 = cumulusDensity( p + sd * 0.35, cov );
-        float s2 = cumulusDensity( p + sd * 0.9, cov );
-        float shade = exp( - ( s1 * 1.4 + s2 * 0.9 ) * ( 1.2 - uSunDir.y ) );
-        float powder = 1.0 - exp( - dens * 3.0 );
-        float ph = 0.55 + 2.2 * pow( max( cs, 0.0 ), 6.0 ) + 0.25 * pow( max( -cs, 0.0 ), 2.0 );
-        vec3 lit = uCloudSun * shade * ph * mix( 0.6, 1.0, powder );
-        // thick parts darker; in a full overcast the raw noise still shapes the deck
-        float thick = smoothstep( 1.0 - cov, 1.0, nRaw );
-        vec3 amb = mix( uCloudDark, uCloudAmb, clamp( 0.35 + 0.65 * ( 1.0 - dens ) + 0.55 * ( 1.0 - thick ) - 0.15, 0.0, 1.0 ) );
-        vec3 cc = amb + lit;
-        // aerial perspective on distant clouds
-        cc = mix( cc, horizon, 1.0 - exp( - t / 160.0 ) );
-        float a = clamp( dens * 1.25, 0.0, 1.0 ) * uCloud.w * horizonFade;
-        col = mix( col, cc, a );
-      }
-    }
+  vec4 cl = pano( dUp );
+  col = col * cl.a + cl.rgb;
+  // the visible sky is held back a little on dim days (a graduated filter), the env map is not
+  if ( uEnv < 0.5 ) col *= uSkyComp;
+
+  if ( uFlash > 0.001 ) {
+    float fd = max( dot( dUp, uFlashDir ), 0.0 );
+    float lobe = pow( fd, 16.0 ) + 0.25 * pow( fd, 4.0 );
+    col += uFlashCol * uFlash * ( 1.0 - cl.a * 0.85 ) * ( 0.1 + 1.3 * lobe );
+    if ( uBolt > 0.001 && uEnv < 0.5 ) col += uFlashCol * uBolt * bolt( d ) * 16.0;
   }
 
-  // ---------------- below the horizon
-  if ( sy < 0.0 ) {
-    if ( uEnv > 0.5 ) {
-      float k = smoothstep( 0.0, -0.12, sy );
-      col = mix( horizon, uGround, k );
-    } else {
-      col = horizon;
-    }
+  if ( sy < 0.0 && uEnv > 0.5 ) {
+    col = mix( col, uGround, smoothstep( 0.0, -0.1, sy ) );
   }
 
   // dither (kills banding after tone mapping)
-  col *= 1.0 + ( hash12( gl_FragCoord.xy + fract( uTime ) * 17.0 ) - 0.5 ) * 0.012;
+  col *= 1.0 + ( hash12( gl_FragCoord.xy + fract( uTime ) * 17.0 ) - 0.5 ) * 0.01;
   gl_FragColor = vec4( max( col, 0.0 ), 1.0 );
 }
 `;
@@ -173,14 +192,21 @@ export function createSkyDome(): SkyDome {
     uSunDisc: { value: new THREE.Vector3(40, 30, 20) },
     uSunRadius: { value: 0.0095 },
     uTime: { value: 0 },
-    uNoise: { value: noiseTexture() },
-    uCloud: { value: new THREE.Vector4(0.2, 0.5, 0.4, 1) },
-    uCloudSun: { value: new THREE.Vector3(1, 1, 1) },
-    uCloudAmb: { value: new THREE.Vector3(0.2, 0.25, 0.3) },
-    uCloudDark: { value: new THREE.Vector3(0.1, 0.1, 0.12) },
+    uPano: { value: null },
+    uPanoSize: { value: new THREE.Vector2(1792, 448) },
+    uOvercast: { value: 0 },
+    uOvZenith: { value: new THREE.Vector3(0.3, 0.3, 0.32) },
+    uOvHorizon: { value: new THREE.Vector3(0.4, 0.4, 0.42) },
     uGround: { value: new THREE.Vector3(0.05, 0.05, 0.04) },
     uEnv: { value: 0 },
-    uWind: { value: new THREE.Vector2(0.012, 0.004) },
+    uFlash: { value: 0 },
+    uFlashDir: { value: new THREE.Vector3(1, 0.2, 0).normalize() },
+    uFlashCol: { value: new THREE.Vector3(0.8, 0.85, 1.0) },
+    uBolt: { value: 0 },
+    uBoltSeed: { value: 1 },
+    uBoltTop: { value: 0.12 },
+    uHalo: { value: 1 },
+    uSkyComp: { value: 1 },
   };
   const geo = new THREE.SphereGeometry(1, 96, 48);
   const mat = new THREE.ShaderMaterial({
@@ -202,6 +228,7 @@ export function createSkyDome(): SkyDome {
     fragmentShader: FRAG,
     side: THREE.BackSide,
     depthWrite: false,
+    depthTest: false,
     fog: false,
   });
   const envMesh = new THREE.Mesh(geo, envMat);

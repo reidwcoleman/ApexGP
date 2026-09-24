@@ -1,9 +1,10 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, type DriveInput } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
-import { PitLane, fitTyres, COMPOUND_ORDER, type Compound, type PitState } from './Pit.ts';
+import { PitLane, fitTyres, DRY_COMPOUNDS, COMPOUNDS, isDry, tyreTypeFor, type Compound, type PitState } from './Pit.ts';
+import { Weather, type WeatherPlan, type WeatherState } from '../world/Weather.ts';
 
 /**
  * Race session: grid, start lights, the physics/AI step, timing & scoring,
@@ -22,8 +23,10 @@ export interface RaceOptions {
   /** 0-based grid slot for the player */
   playerGrid: number;
   entries: Entry[];
-  /** the player's starting compound (AI choose their own) */
-  playerCompound?: Compound;
+  /** the player's starting compound ('auto' = the team picks for the conditions; AI choose their own) */
+  playerCompound?: Compound | 'auto';
+  /** the session's forecast */
+  weather: WeatherPlan;
   /** starting order from qualifying (overrides playerGrid) */
   gridOrder?: Entry[];
 }
@@ -39,13 +42,15 @@ export function aiPace(entry: Entry, difficulty: number): number {
 }
 
 /**
- * AI qualifying laps: each driver's one-lap pace from the same pace factor the
- * race AI uses, with low fuel and a little randomness. Returns seconds.
+ * AI qualifying laps at Monza: fitted to the AI's own flying laps on softs with
+ * low fuel (T ≈ 26.9 + 50.8 / pace s in the dry), scaled for the conditions by
+ * the speed profile at the grip the right tyre would have, plus a little
+ * randomness. `gripNow` is that grip (1 = dry).
  */
-export function aiQualifyingTime(entry: Entry, difficulty: number): number {
+export function aiQualifyingTime(entry: Entry, difficulty: number, wetFactor = 1): number {
   const pace = aiPace(entry, difficulty);
   const g = (Math.random() + Math.random() + Math.random() - 1.5) * 0.25;
-  return 67.6 / pace - 0.35 + g;
+  return (26.9 + 50.8 / pace - 0.15) * wetFactor + g;
 }
 
 export interface Competitor {
@@ -84,11 +89,15 @@ export interface Competitor {
   pit: PitState;
   /** AI: lap on which to stop (−1 = no stop planned) */
   pitLap: number;
+  /** the planned stop is a weather call (cancelled if conditions swing back) */
+  weatherCall: boolean;
   stops: number;
   /** ring of checkpoint pass times (every CP metres) for timing gaps */
   cpTimes: Float64Array;
   cpIndex: number;
   contactTimer: number;
+  /** being lapped by a car close behind: blue flags */
+  blueFlag: boolean;
 }
 
 export interface RaceEvent {
@@ -107,13 +116,17 @@ export interface RaceEvent {
     | 'pit-in'
     | 'pit-stop'
     | 'pit-out'
-    | 'box-now';
+    | 'box-now'
+    | 'blue-flag';
   car: number;
   value?: number;
   sector?: number;
   valid?: boolean;
   color?: 'purple' | 'green' | 'yellow';
 }
+
+/** fuel for a lap of Monza at racing speed (kg) */
+export const FUEL_PER_LAP = 1.8;
 
 const CP = 20;
 const CP_RING = 1024;
@@ -159,11 +172,17 @@ export class Race {
   private drsLapDist: { detect: number; start: number; end: number }[];
   private neighbours: Neighbour[] = [];
   private gridStartDist: number[] = [];
+  /** the session's weather; `weatherState` is the same object as weather.state (flashbacks snapshot it) */
+  readonly weather: Weather;
+  weatherState: WeatherState;
+  private strategyTimer = 0;
 
   constructor(track: Track, opts: RaceOptions) {
     this.track = track;
     this.opts = opts;
-    this.profile = new RacingProfile(track, F1_SPEC);
+    this.profile = RacingProfile.for(track, F1_SPEC);
+    this.weather = new Weather(opts.weather);
+    this.weatherState = this.weather.state;
     this.deltaCur = new Float32Array(Math.ceil(track.length / 10) + 2).fill(-1);
     this.sectorLapDist = [track.lapDistance(track.sectorS[0]), track.lapDistance(track.sectorS[1])];
     this.drsLapDist = track.drs.map((z) => ({ detect: track.lapDistance(z.detect), start: track.lapDistance(z.start), end: track.lapDistance(z.end) }));
@@ -183,6 +202,11 @@ export class Race {
 
     order.forEach((entry, i) => {
       const car = new CarPhysics(F1_SPEC);
+      car.weather = this.weather;
+      if (opts.mode === 'timetrial') {
+        car.fuel = 5;
+        car.burnFuel = false;
+      } else car.fuel = opts.laps * FUEL_PER_LAP + 1.5;
       const isPlayer = entry === opts.playerEntry;
       if (opts.mode === 'timetrial') {
         // flying lap: start on the pit straight behind the line at speed
@@ -231,10 +255,12 @@ export class Race {
         compoundsUsed: [],
         pit: { phase: 'none', s: 0, v: 0, timer: 0, stopTime: 2.4, fromLat: 0, boxS: 0, next: 'medium' },
         pitLap: -1,
+        weatherCall: false,
         stops: 0,
         cpTimes: new Float64Array(CP_RING).fill(-1),
         cpIndex: -1,
         contactTimer: 0,
+        blueFlag: false,
       };
       c.raceDist = c.laps * track.length + c.lapDist;
       this.cars.push(c);
@@ -245,15 +271,20 @@ export class Race {
     // tyres & strategy
     this.pitLane = new PitLane(track);
     this.twoCompoundRule = opts.mode === 'race' && opts.laps >= 10;
+    const startType = tyreTypeFor(this.weather.wetnessAt(0, 0));
     for (const c of this.cars) {
       let start: Compound;
-      if (c.isPlayer) start = opts.playerCompound ?? (opts.laps >= 10 ? 'medium' : 'soft');
-      else if (opts.laps < 8) start = 'soft';
+      const pick = c.isPlayer ? (opts.playerCompound ?? 'auto') : 'auto';
+      if (pick !== 'auto') start = pick;
+      else if (startType === 1) start = 'inter';
+      else if (startType === 2) start = 'wet';
+      else if (opts.mode === 'timetrial' || opts.laps < 8) start = 'soft';
+      else if (c.isPlayer) start = opts.laps >= 10 ? 'medium' : 'soft';
       else start = Math.random() < 0.6 ? 'medium' : Math.random() < 0.5 ? 'soft' : 'hard';
       c.compound = start;
       c.compoundsUsed = [start];
       fitTyres(c.car, start);
-      if (!c.isPlayer && opts.laps >= 8) {
+      if (!c.isPlayer && opts.laps >= 8 && isDry(start)) {
         // one stop, placed by the starting compound's life with a little variety
         const frac = start === 'soft' ? 0.35 : start === 'medium' ? 0.5 : 0.62;
         c.pitLap = Math.max(2, Math.min(opts.laps - 1, Math.round(opts.laps * frac + (Math.random() - 0.5) * 2)));
@@ -283,6 +314,12 @@ export class Race {
   update(dt: number) {
     this.events.length = 0;
     this.time += dt;
+    this.weather.update(dt, this.phase === 'racing' ? 1 : 0.2);
+    this.strategyTimer -= dt;
+    if (this.strategyTimer <= 0) {
+      this.strategyTimer = 1;
+      this.weatherStrategy();
+    }
 
     if (this.phase === 'lights') {
       this.lightsTimer += dt;
@@ -307,6 +344,7 @@ export class Race {
     if (racing) this.raceTime += dt;
 
     this.aeroWake();
+    if (racing && !this.isTimeTrial) this.blueFlags();
 
     const h = dt / SUBSTEPS;
     for (let k = 0; k < SUBSTEPS; k++) {
@@ -334,7 +372,10 @@ export class Race {
             c.car.wingDamage = 0;
             c.stops++;
             if (c.isPlayer) this.playerPitRequest = false;
-            else c.pitLap = -1;
+            else {
+              c.pitLap = -1;
+              c.weatherCall = false;
+            }
             if (c.isPlayer) this.events.push({ kind: 'pit-stop', car: c.id, value: c.pit.stopTime });
           });
           if (released) {
@@ -393,24 +434,111 @@ export class Race {
     }
   }
 
-  /** the compound the player gets at the next stop: their pick, else one that satisfies the rules */
+  /** how much slower than dry a lap is right now on the tyre the conditions call for */
+  conditionsLapFactor(): number {
+    const wet = this.lineWetness;
+    if (wet < 0.02) return 1;
+    const type = tyreTypeFor(wet);
+    const g = wetGrip(type, wet) * (type === 0 ? 1 : 0.985);
+    return this.profile.lapTimeAt(g) / this.profile.lapTimeAt(1);
+  }
+
+  /** water level on the racing line right now */
+  get lineWetness(): number {
+    return this.weather.wetnessAt(0, 0);
+  }
+
+  /** the tyre type the conditions call for, looking `ahead` seconds into the forecast for rain arriving */
+  conditionsType(): 0 | 1 | 2 {
+    return tyreTypeFor(this.lineWetness);
+  }
+
+  /** the dry-race two-compound rule still applies (no inters/wets used) and isn't met yet */
+  owesSecondCompound(c: Competitor): boolean {
+    if (!this.twoCompoundRule) return false;
+    if (c.compoundsUsed.some((k) => !isDry(k))) return false;
+    return new Set(c.compoundsUsed).size < 2;
+  }
+
+  /**
+   * Blue flags: a car about to be lapped (the car close behind is a lap or more
+   * ahead in the race) is shown blue; the AI moves off the line and lifts a
+   * touch on the next straight to let it by.
+   */
+  private blueFlags() {
+    const L = this.track.length;
+    for (const c of this.cars) {
+      let blue = false;
+      if (!c.finished && c.pit.phase === 'none') {
+        for (const o of this.cars) {
+          if (o === c || o.finished || o.pit.phase !== 'none') continue;
+          if (o.raceDist - c.raceDist < L * 0.6) continue;
+          const behind = this.track.delta(o.car.s, c.car.s);
+          if (behind > 0 && behind < 70) {
+            blue = true;
+            break;
+          }
+        }
+      }
+      if (blue && !c.blueFlag && c.isPlayer) this.events.push({ kind: 'blue-flag', car: c.id });
+      c.blueFlag = blue;
+      if (c.ai) c.ai.yieldSide = blue ? -Math.sign(this.track.racingLineAt(c.car.s + 60) || 1) : 0;
+    }
+  }
+
+  /** the compound the player gets at the next stop: their pick, else one that suits conditions and rules */
   playerNextCompound(): Compound {
     const p = this.player;
     if (this.playerPitCompound) return this.playerPitCompound;
-    const lapsLeft = this.opts.laps - Math.max(0, p.laps);
-    const unused = COMPOUND_ORDER.filter((c) => !p.compoundsUsed.includes(c));
-    if (this.twoCompoundRule && unused.length === 3 - 1) {
-      // still on the first compound: pick a different one that fits the stint
-      return lapsLeft > 12 && unused.includes('hard') ? 'hard' : unused.includes('medium') ? 'medium' : unused[0];
+    return this.nextCompoundFor(p);
+  }
+
+  private nextCompoundFor(c: Competitor): Compound {
+    const type = this.conditionsType();
+    if (type === 1) return 'inter';
+    if (type === 2) return 'wet';
+    const lapsLeft = this.opts.laps - Math.max(0, c.laps);
+    const want: Compound = lapsLeft > 12 ? 'hard' : lapsLeft > 7 ? 'medium' : 'soft';
+    if (this.owesSecondCompound(c) && want === c.compound) {
+      const others = DRY_COMPOUNDS.filter((k) => k !== c.compound);
+      return lapsLeft > 12 && others.includes('hard') ? 'hard' : others.includes('medium') ? 'medium' : others[0];
     }
-    return lapsLeft > 12 ? 'hard' : lapsLeft > 7 ? 'medium' : 'soft';
+    return want;
   }
 
   private aiNextCompound(c: Competitor): Compound {
-    const lapsLeft = this.opts.laps - Math.max(0, c.laps);
-    const want: Compound = lapsLeft > 12 ? 'hard' : lapsLeft > 7 ? 'medium' : 'soft';
-    if (want === c.compound && this.twoCompoundRule && c.compoundsUsed.length < 2) return c.compound === 'medium' ? 'hard' : 'medium';
-    return want;
+    return this.nextCompoundFor(c);
+  }
+
+  /**
+   * AI weather calls, once a second: when the conditions want a different kind
+   * of tyre (slick ↔ inter ↔ wet), box at the next opportunity — with a little
+   * spread between drivers so they don't all come in on the same lap.
+   */
+  private weatherStrategy() {
+    if (this.isTimeTrial || this.phase !== 'racing') return;
+    const want = this.conditionsType();
+    for (const c of this.cars) {
+      if (c.isPlayer || c.finished || c.pit.phase !== 'none') continue;
+      const have = COMPOUNDS[c.compound].type;
+      const lapsLeft = this.opts.laps - Math.max(0, c.laps);
+      if (have === want || lapsLeft < 1) {
+        if (c.pitLap >= 0 && c.weatherCall) {
+          c.pitLap = -1;
+          c.weatherCall = false;
+        }
+        continue;
+      }
+      // how wrong is the tyre? a gamble on slicks in a drizzle, never slicks in a downpour
+      const gap = Math.abs(want - have);
+      const brave = c.entry.driver.aggression;
+      if (c.pitLap < 0 || c.pitLap > c.laps + 1) {
+        if (gap >= 2 || Math.random() < 0.08 + (1 - brave) * 0.12) {
+          c.pitLap = c.laps + 1;
+          c.weatherCall = true;
+        }
+      }
+    }
   }
 
   /** mean tyre wear of a competitor, 0..1 */
@@ -478,7 +606,7 @@ export class Race {
         if (!c.finished && (c.laps >= this.opts.laps || (this.phase === 'finished' && c.laps >= 1))) {
           c.finished = true;
           // two-compound rule: finishing a long race on one compound costs 30 s
-          if (this.twoCompoundRule && c.compoundsUsed.length < 2) {
+          if (this.owesSecondCompound(c)) {
             c.penalty += 30;
             if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 30 });
           }

@@ -1,4 +1,5 @@
 import { SURF, type Track } from '../world/Track.ts';
+import type { Weather } from '../world/Weather.ts';
 
 /**
  * Vehicle dynamics — a four-wheel model in the style of modern F1 games.
@@ -18,6 +19,12 @@ import { SURF, type Track } from '../world/Track.ts';
  *    control), ABS, stability (countersteer + yaw damping), automatic gears.
  *  - Surfaces per wheel (kerb chatter, grass, gravel), gravity on slopes and
  *    banking, impulse-based barrier contact with friction and yaw.
+ *  - Weather: water under each tyre (with a drier racing line once it stops
+ *    raining) sets grip by tyre type — slicks, intermediates, full wets — plus
+ *    aquaplaning on standing water; painted kerbs and grass get treacherous.
+ *  - Tyre temperatures: sliding and rolling heat them, speed and water cool
+ *    them; grip peaks in each compound's working window, wear rises when hot.
+ *  - Fuel: the car carries and burns it, so it gets lighter through a race.
  *
  * Body frame: vx forward, vy LEFT, r = yaw rate (+ turns left, same as heading).
  * World: heading θ → forward (sin θ, cos θ) in XZ; yaw is rotation about +Y.
@@ -84,19 +91,19 @@ export const F1_SPEC: CarSpec = {
   trackR: 1.55,
   wheelR: 0.36,
   wheelI: 1.1,
-  clA: 4.8,
+  clA: 4.9,
   cdA: 1.1,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 1.85,
+  mu: 1.95,
   loadSens: 0.075,
   slipAnglePeak: 0.1,
   slipAnglePeakRear: 0.082,
   muRear: 1.06,
   slipRatioPeak: 0.09,
-  tyreShape: 1.34,
+  tyreShape: 1.28,
   rollFront: 0.56,
   power: 735_000,
   ersBoost: 90_000,
@@ -138,6 +145,52 @@ const SURF_GRIP = [1.0, 0.93, 0.95, 0.56, 0.5];
 const SURF_RR = [0.012, 0.015, 0.016, 0.07, 0.2];
 const SURF_RR_V = [0, 0, 0, 0.0012, 0.006];
 const SURF_BOG = [0, 0, 0, 0.3, 1.6];
+
+/**
+ * Grip on a wet track by tyre type (0 slick, 1 inter, 2 wet), tabulated over
+ * the water level under the tyre. Crossovers: slick/inter ≈ 0.2, inter/wet ≈ 0.72.
+ * Inters and wets on a dry track are slower and overheat (see the temperature model).
+ */
+const WET_X = [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0];
+const WET_GRIP = [
+  [1.0, 0.93, 0.8, 0.66, 0.57, 0.52, 0.48],
+  [0.9, 0.88, 0.84, 0.79, 0.74, 0.69, 0.64],
+  [0.85, 0.83, 0.8, 0.77, 0.745, 0.73, 0.72],
+];
+/** aquaplaning sensitivity by tyre type */
+const AQUA = [0.34, 0.14, 0.04];
+
+export function wetGrip(type: number, wet: number): number {
+  const t = WET_GRIP[type] ?? WET_GRIP[0];
+  if (wet <= 0) return t[0];
+  if (wet >= 1) return t[6];
+  let i = 0;
+  while (WET_X[i + 1] < wet) i++;
+  const f = (wet - WET_X[i]) / (WET_X[i + 1] - WET_X[i]);
+  return t[i] + (t[i + 1] - t[i]) * f;
+}
+
+/** grip multiplier from tyre temperature: peaks in the working window */
+export function tempGrip(T: number, opt: number): number {
+  const x = (T - opt) / (T < opt ? 40 : 30);
+  return Math.max(0.8, 1 - 0.09 * x * x);
+}
+
+/**
+ * Tyre thermal model (K/s). Heat: sliding power (lateral fully, longitudinal
+ * at 30% — wheelspin heats the surface less than cornering scrub) plus a
+ * little rolling hysteresis; cooling: air (∝ speed) and water. The wider rears
+ * shed heat 25% faster. Calibrated so a hard-pushed lap at Monza sits in the
+ * window (~100 °C) and the tyres cool on the long straights.
+ */
+const TYRE_HEAT_SLIP = 0.000515;
+const TYRE_HEAT_ROLL = 0.000002;
+const TYRE_COOL_0 = 0.012;
+const TYRE_COOL_V = 0.00042;
+const TYRE_COOL_WET = 0.05;
+
+/** fuel burn at full throttle (kg/s): ~100 kg/h, the regulation flow limit */
+export const FUEL_FLOW = 0.0275;
 
 // wheel order: 0 FL, 1 FR, 2 RL, 3 RR
 const FRONT = [true, true, false, false];
@@ -185,6 +238,28 @@ export class CarPhysics {
   readonly wear = [0, 0, 0, 0];
   compoundGrip = 1;
   compoundWear = 1;
+  /** 0 slick, 1 intermediate, 2 full wet */
+  tyreType = 0;
+  /** centre of the compound's working window (°C) */
+  tyreOpt = 100;
+  /** tyre surface/carcass temperature per wheel (°C) */
+  readonly tyreTemp = [80, 80, 80, 80];
+  /** water under each tyre, 0 … 1 */
+  readonly wetW = [0, 0, 0, 0];
+  /** sliding power per tyre right now (W): longitudinal and lateral */
+  readonly slipPowL = [0, 0, 0, 0];
+  readonly slipPowT = [0, 0, 0, 0];
+  /** fuel on board (kg) and whether it burns */
+  fuel = 0;
+  burnFuel = true;
+  /** the session's weather (null = dry, 25 °C) */
+  weather: Weather | null = null;
+  /**
+   * Mean grip of the four tyres relative to new, warm slicks on a dry track
+   * (weather × temperature × wear × compound; not the surface). The steering
+   * limit and the AI use it to drive to the conditions.
+   */
+  gripFactor = 1;
 
   // wheels
   readonly omega = [0, 0, 0, 0];
@@ -239,6 +314,11 @@ export class CarPhysics {
     this.tyreBC = this.tyreB * this.tyreC;
     this.wx = [spec.a, spec.a, -spec.b, -spec.b];
     this.wy = [spec.trackF / 2, -spec.trackF / 2, spec.trackR / 2, -spec.trackR / 2];
+  }
+
+  /** mass including fuel (kg) */
+  get mass(): number {
+    return this.spec.mass + this.fuel;
   }
 
   get speed(): number {
@@ -298,8 +378,8 @@ export class CarPhysics {
   /** world-space impulse (N·s) at world point (px, pz) */
   applyImpulse(px: number, pz: number, jx: number, jz: number) {
     const [wx, wz] = this.worldVelocity();
-    const nvx = wx + jx / this.spec.mass;
-    const nvz = wz + jz / this.spec.mass;
+    const nvx = wx + jx / this.mass;
+    const nvz = wz + jz / this.mass;
     const rcx = px - this.x;
     const rcz = pz - this.z;
     this.r += (rcz * jx - rcx * jz) / this.spec.iz;
@@ -344,7 +424,7 @@ export class CarPhysics {
   lateralGrip(v: number): number {
     const sp = this.spec;
     const q = 0.5 * RHO * v * v;
-    return sp.mu * 0.87 * (G + (0.73 * q * sp.clA) / sp.mass);
+    return sp.mu * 0.87 * this.gripFactor * (G + (0.73 * q * sp.clA) / this.mass);
   }
 
   /**
@@ -362,7 +442,7 @@ export class CarPhysics {
 
   step(dt: number, input: DriveInput, track: Track, drsAllowed: boolean) {
     const sp = this.spec;
-    const m = sp.mass;
+    const m = this.mass;
     const L = sp.a + sp.b;
     this.lastShift = 0;
     this.contact.wallHit = 0;
@@ -418,8 +498,10 @@ export class CarPhysics {
       const along = this.wx[i];
       const side = this.wy[i]; // + left
       const lat = this.lateral + fwdLat * along - side * fwdAlong;
-      const sc = track.surfaceAt(this.s + fwdAlong * along - Math.sin(this.relYaw) * side, lat);
+      const sw = this.s + fwdAlong * along - Math.sin(this.relYaw) * side;
+      const sc = track.surfaceAt(sw, lat);
       this.surface[i] = sc;
+      this.wetW[i] = this.weather ? this.weather.wetnessAt(lat, track.racingLineAt(sw)) : 0;
       if (sc === SURF.KERB) onKerb = true;
       if (!(sc === SURF.GRASS || sc === SURF.GRAVEL || sc === SURF.ASPHALT)) allOff = false;
     }
@@ -445,7 +527,7 @@ export class CarPhysics {
     const downR = down * (1 - balance);
 
     // ---- loads
-    const Fz0 = (m * G) / 4;
+    const Fz0 = (sp.mass * G) / 4;
     const axleF = (m * G * sp.b) / L + downF - (m * this.ax * sp.cgH) / L;
     const axleR = (m * G * sp.a) / L + downR + (m * this.ax * sp.cgH) / L;
     const latT = (m * this.ay * sp.cgH) / ((sp.trackF + sp.trackR) / 2);
@@ -538,6 +620,7 @@ export class CarPhysics {
     let slipR = 0;
     let spin = 0;
     let lock = 0;
+    let gripSum = 0;
     const kp = sp.slipRatioPeak;
     const ap = sp.slipAnglePeak;
     const apR = sp.slipAnglePeakRear;
@@ -547,6 +630,7 @@ export class CarPhysics {
     const tcMinSlip = this.assists.traction === 'full' ? 0.12 : 0.75;
     const cd = Math.cos(delta);
     const sd = Math.sin(delta);
+    const tAmb = this.weather ? 0.35 * this.weather.state.airTemp + 0.65 * this.weather.state.trackTemp : 36;
     for (let i = 0; i < 4; i++) {
       const front = FRONT[i];
       const c = front ? cd : 1;
@@ -560,7 +644,16 @@ export class CarPhysics {
       const sc = this.surface[i];
       const Fz = this.load[i];
       const wearGrip = 1 - 0.14 * Math.pow(this.wear[i], 1.6);
-      const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * SURF_GRIP[sc] * wearGrip * this.compoundGrip;
+      // weather: water level under this tyre → grip for this tyre type, aquaplaning on standing water
+      const wet = this.wetW[i];
+      let weatherGrip = wetGrip(this.tyreType, wet);
+      if (wet > 0.45 && v > 45) weatherGrip *= 1 - AQUA[this.tyreType] * Math.min(1, (wet - 0.45) / 0.55) * Math.min(1, (v - 45) / 35);
+      // wet paint and wet grass are far worse than wet asphalt
+      const surfGrip = SURF_GRIP[sc] * (sc === SURF.KERB ? 1 - 0.3 * wet : sc === SURF.GRASS ? 1 - 0.4 * wet : 1);
+      const tGrip = tempGrip(this.tyreTemp[i], this.tyreOpt);
+      const cond = weatherGrip * tGrip * wearGrip * this.compoundGrip;
+      gripSum += cond;
+      const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond;
       const Fmax = muI * Fz;
 
       let td = Tdrive[i];
@@ -643,10 +736,23 @@ export class CarPhysics {
       if (!front && k1 > kp * 1.4) spin = Math.max(spin, Math.min(1, (k1 - kp * 1.4) / (kp * 4)));
       if (k1 < -kp * 1.6 && vl > 3) lock = Math.max(lock, Math.min(1, (-k1 - kp * 1.6) / (kp * 5)));
 
-      // tyre wear from sliding energy
-      const slipPower = Math.abs(Fl * (w1 * R - vl)) + Math.abs(Ft * vt);
-      this.wear[i] = Math.min(1, this.wear[i] + slipPower * dt * 8.5e-8 * this.compoundWear);
+      // tyre wear from sliding energy, faster when overheating
+      const pL = Math.abs(Fl * (w1 * R - vl));
+      const pT = Math.abs(Ft * vt);
+      this.slipPowL[i] = pL;
+      this.slipPowT[i] = pT;
+      const slipPower = pL + pT;
+      const T = this.tyreTemp[i];
+      const hot = Math.min(2, Math.max(0, T - this.tyreOpt - 15) / 25);
+      this.wear[i] = Math.min(1, this.wear[i] + slipPower * dt * 8.5e-8 * this.compoundWear * (1 + hot));
+      // temperature: sliding + rolling heat in; air (speed) and water carry it away
+      // treaded inters/wets build more heat (and overheat on a dry track)
+      const heat = ((0.3 * pL + pT) * TYRE_HEAT_SLIP + Fz * Math.abs(vl) * TYRE_HEAT_ROLL) * (1 + 0.15 * this.tyreType);
+      const cool = ((TYRE_COOL_0 + TYRE_COOL_V * Math.abs(vl)) * (T - tAmb) + TYRE_COOL_WET * wet * (T - tAmb * 0.8)) * (front ? 1 : 1.25);
+      this.tyreTemp[i] = T + (heat - cool) * dt;
     }
+    this.gripFactor = gripSum / 4;
+    if (this.burnFuel && this.fuel > 0) this.fuel = Math.max(0, this.fuel - FUEL_FLOW * throttle * (this.ersDeploying ? 1 : 0.97) * dt);
     this.slipFront = slipF;
     this.slipRear = slipR;
     this.wheelspin = spin;
@@ -799,7 +905,7 @@ export class CarPhysics {
     if (vn <= 0) return;
     const rcx = px - this.x;
     const rcz = pz - this.z;
-    const m = sp.mass;
+    const m = this.mass;
     const Iz = sp.iz;
     // impulse along −n
     const rn = rcz * -nx - rcx * -nz;

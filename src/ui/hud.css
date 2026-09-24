@@ -161,6 +161,40 @@
   background: var(--accent-wash);
 }
 
+/* weather row, bottom of the timing panel */
+.timing .wx {
+  margin-top: var(--s3);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink2);
+}
+.timing .wxi svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.timing .wxl {
+  color: var(--ink);
+  font-size: var(--t-row);
+}
+.timing .wxr {
+  margin-left: auto;
+}
+.timing .wxr.warn {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
 /* ---------- team radio (above the minimap) ---------- */
 .radio {
   position: absolute;
@@ -366,6 +400,7 @@
   fill: rgba(255, 255, 255, 0.22);
   transition: fill 0.4s;
 }
+.carstatus .cold { fill: var(--cold); }
 .carstatus .ok { fill: var(--green); }
 .carstatus .warn { fill: var(--yellow); }
 .carstatus .bad { fill: var(--accent); }
@@ -476,6 +511,7 @@
 .banner.purple .k { color: var(--purple); }
 .banner.green .k { color: var(--green); }
 .banner.red .k { color: var(--accent); }
+.banner.blue .k { color: var(--cold); }
 
 .lights {
   position: absolute;
