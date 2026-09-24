@@ -71,7 +71,7 @@ export class PlayerControl {
       // keyboard: ramp toward the key direction; slower as speed rises
       const target = raw.steer;
       const t = Math.min(1, kmh / 260);
-      const onRate = 5.5 - 3.3 * t; // 5.5/s at a standstill → 2.2/s at 260 km/h
+      const onRate = 7 - 3.8 * t; // 7/s at a standstill → 3.2/s at 260 km/h
       const offRate = 7.5;
       const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.u) && this.u !== 0;
       const rate = target === 0 ? offRate : reversing ? offRate + onRate : onRate;
@@ -81,7 +81,7 @@ export class PlayerControl {
     this.steerInput = this.u;
 
     // ---- map to a road-wheel angle: full input = peak-grip angle at this speed
-    const limit = car.gripSteerLimit(v) * 1.06;
+    const limit = car.gripSteerLimit(v) * 1.2;
     // when the rear is sliding, countersteer may go as far as the slide needs
     // (the wheels have to point where the car is going). Rear slip angle > 0 →
     // the rear is stepping out to the left → countersteer left.
@@ -92,7 +92,7 @@ export class PlayerControl {
     if (this.aids.steeringMode === 'rate' && v > 4) {
       // yaw-rate command: input → share of the maximum sustainable yaw rate
       const L = car.spec.a + car.spec.b;
-      const rMax = Math.min(car.lateralGrip(v) * 1.04 / v, (v * Math.tan(car.spec.maxSteer)) / L);
+      const rMax = Math.min(car.lateralGrip(v) * 1.15 / v, (v * Math.tan(car.spec.maxSteer)) / L);
       const rDes = this.u * rMax;
       const load = Math.min(1, Math.abs(rDes) / rMax);
       const ff = Math.atan((L * rDes) / v) + Math.sign(rDes) * 0.05 * load * load;
@@ -104,23 +104,8 @@ export class PlayerControl {
       delta = delta * w + this.u * limit * (1 - w);
     }
 
-    // ---- steering assist: nudge toward the racing line, keep it on the road
+    // ---- steering assist: only keeps the car on the road (no pull toward the racing line)
     if (this.aids.steeringAssist && v > 5) {
-      const lookS = car.s + 8 + v * 0.45;
-      const lineLat = track.racingLineAt(lookS);
-      const tp = track.point(lookS, lineLat);
-      const dx = tp.x - car.x;
-      const dz = tp.z - car.z;
-      const sy = Math.sin(car.yaw);
-      const cy = Math.cos(car.yaw);
-      const fwd = dx * sy + dz * cy;
-      const lft = dx * cy - dz * sy;
-      const L = car.spec.a + car.spec.b;
-      const pursuit = Math.atan((2 * L * lft) / Math.max(9, fwd * fwd + lft * lft));
-      const want = Math.max(-limit, Math.min(limit, pursuit));
-      // blend strongest when the player isn't steering against it
-      const agree = Math.sign(want) === Math.sign(delta) || Math.abs(this.u) < 0.15;
-      delta += (want - delta) * (agree ? 0.35 : 0.12);
       // edge guard: heading off the road → steer back in
       const hw = track.halfWidthAt(car.s);
       const edge = Math.abs(car.lateral) - (hw - 1.4);

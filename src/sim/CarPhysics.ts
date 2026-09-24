@@ -101,7 +101,7 @@ export const F1_SPEC: CarSpec = {
   loadSens: 0.075,
   slipAnglePeak: 0.1,
   slipAnglePeakRear: 0.082,
-  muRear: 1.06,
+  muRear: 1.12,
   slipRatioPeak: 0.09,
   tyreShape: 1.28,
   rollFront: 0.56,
@@ -417,7 +417,7 @@ export class CarPhysics {
     const L = sp.a + sp.b;
     const kin = Math.atan((L * this.lateralGrip(vv)) / (vv * vv));
     // + the understeer angle the car needs at the limit (measured: ~0.05 rad)
-    return Math.min(sp.maxSteer, kin + 0.05);
+    return Math.min(sp.maxSteer, kin + 0.07);
   }
 
   /** approximate peak steady-state lateral acceleration at speed v (m/s²), fitted to the sim */

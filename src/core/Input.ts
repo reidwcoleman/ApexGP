@@ -136,7 +136,7 @@ export class Input {
       const pressedNow = (i: number) => (pad.buttons[i] ? pad.buttons[i].pressed : false);
       const pEdge = (i: number) => pressedNow(i) && !this.padPrev[i];
       const ax = pad.axes[0] ?? 0;
-      const dz = 0.08;
+      const dz = 0.15;
       const axd = Math.abs(ax) < dz ? 0 : (Math.sign(ax) * (Math.abs(ax) - dz)) / (1 - dz);
       const padSteer = -Math.sign(axd) * Math.pow(Math.abs(axd), 1.35);
       const padThrottle = btn(7);
