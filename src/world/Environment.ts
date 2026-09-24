@@ -11,7 +11,7 @@ import { createSun, cloudShadowA, cloudShadowB } from './env/lightShadows.ts';
 import { createRain } from './env/rain.ts';
 import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } from './env/presets.ts';
 import { buildScenery, type Scenery, type SceneryLight } from './env/scenery.ts';
-import type { TimeOfDay, WeatherState } from './Weather.ts';
+import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -237,7 +237,7 @@ export function createEnvironment(
     const skyGrey = C.zenith.r * 0.2 + C.zenith.g * 0.7 + C.zenith.b * 0.1;
     // deck colour: cool neutral grey, a touch warm at golden hour
     deck.setRGB(0.93, 0.97, 1.05).multiplyScalar(deckRad);
-    if (L.time === 'golden') deck.multiply(tmpA.setRGB(1.06, 1.0, 0.94));
+    if (isLowSun(L.time)) deck.multiply(tmpA.setRGB(1.06, 1.0, 0.94));
 
     // ---- clouds
     const cu = clouds.uniforms;
@@ -253,7 +253,7 @@ export function createEnvironment(
     // sunlight reaching the cloud layer (not dimmed by the clouds themselves)
     const sunRad = C.E0 * 7.5 * 0.24;
     // evening light on cloud undersides reads pinker than the direct beam (it has crossed more air)
-    const cw = L.time === 'golden' ? [1.06, 0.86, 0.78] : [1, 1, 1];
+    const cw = L.time === 'sunset' ? [1.1, 0.78, 0.7] : isLowSun(L.time) ? [1.06, 0.86, 0.78] : [1, 1, 1];
     (cu.uSunCol.value as THREE.Vector3).set(C.sunCol.r * sunRad * cw[0], C.sunCol.g * sunRad * cw[1], C.sunCol.b * sunRad * cw[2]);
     const clearTop = tmpA.copy(C.zenith).multiplyScalar(1.25).add(tmpB.copy(C.sunCol).multiplyScalar((P.sunIntensity * Math.max(0.1, Math.sin(el)) / Math.PI) * 0.22));
     const clearBase = tmpB.copy(C.horizonAway).multiplyScalar(0.36).multiply(deckTint.setRGB(0.92, 0.97, 1.08));
@@ -323,7 +323,7 @@ export function createEnvironment(
     const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, 4.5);
     gradeLook.exposure = L.exposure * adapt;
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
-    sky.uniforms.uHalo.value = (L.time === 'golden' ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
+    sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
     gradeLook.saturation = L.saturation;
     gradeLook.contrast = L.contrast;
     gradeLook.tint = L.tint;
@@ -430,18 +430,25 @@ export function createEnvironment(
     // lightning: a flicker that lights the deck, the scene and the exposure
     const L = Math.max(0, Math.min(1, w.lightning));
     if (L > 0.5 && lastLightning <= 0.5 && flashLevel < 0.3) {
-      // new strike: somewhere in the sky, a bolt for the first flicker
-      const a = debug.boltAz !== null ? Math.atan2(-Math.cos((debug.boltAz * Math.PI) / 180), Math.sin((debug.boltAz * Math.PI) / 180)) : Math.random() * Math.PI * 2;
+      // new strike: mostly somewhere ahead of the camera so it is actually seen
+      const ahead = Math.atan2(camFwd.z, camFwd.x);
+      const a =
+        debug.boltAz !== null
+          ? Math.atan2(-Math.cos((debug.boltAz * Math.PI) / 180), Math.sin((debug.boltAz * Math.PI) / 180))
+          : haveCam && Math.random() < 0.8
+            ? ahead + (Math.random() - 0.5) * 1.4
+            : Math.random() * Math.PI * 2;
       (sky.uniforms.uFlashDir.value as THREE.Vector3).set(Math.cos(a), 0.12 + Math.random() * 0.1, Math.sin(a)).normalize();
       sky.uniforms.uBoltSeed.value = Math.random() * 100;
-      sky.uniforms.uBoltTop.value = Math.atan2(look.cloudBase, 1800 + Math.random() * 4500);
+      sky.uniforms.uBoltTop.value = Math.atan2(look.cloudBase, 700 + Math.random() * 1900);
     }
     lastLightning = L;
     flashLevel = L;
     sky.uniforms.uFlash.value = L;
     // the deck lit from inside: several times its own brightness, cold white
     (sky.uniforms.uFlashCol.value as THREE.Vector3).set(0.9, 0.95, 1.15).multiplyScalar(Math.max(0.12, lightInfo.deckRad ?? 0.2) * 4.5);
-    sky.uniforms.uBolt.value = L > 0.6 ? L : 0;
+    // the channel stays lit through the restrikes, fading with them
+    sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
     scene.environmentIntensity = look.envIntensity * (1 + L * 0.9);
     gfx.setFlash(L * 0.18);
   }

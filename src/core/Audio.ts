@@ -346,10 +346,10 @@ export class GameAudio {
     beepSound(this.ctx!, this.fxBus, final, this.now());
   }
 
-  /** rain rate and track water 0..1, player speed (m/s), lightning flash 0..1 — every frame */
-  weather(rain: number, wet: number, speed: number, flash: number): void {
+  /** rain rate and track water 0..1, player speed (m/s), lightning flash 0..1, wind (m/s) — every frame */
+  weather(rain: number, wet: number, speed: number, flash: number, wind = 0): void {
     if (!this.ready) return;
-    this.weatherFx.set(rain, wet, speed, flash, this.now());
+    this.weatherFx.set(rain, wet, speed, flash, wind, this.now());
   }
 
   crowd(level: number): void {

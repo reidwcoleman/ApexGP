@@ -42,9 +42,9 @@ export const GRID = [
   { label: 'Back of the grid', slot: 19 },
   { label: 'Qualifying lap', slot: -1 },
 ];
-const WEATHERS: WeatherChoice[] = ['random', 'clear', 'cloudy', 'overcast', 'drizzle', 'rain', 'storm', 'changeable'];
+const WEATHERS: WeatherChoice[] = ['random', 'clear', 'haze', 'cloudy', 'overcast', 'fog', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm', 'changeable'];
 const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
-const TIMES: TimeChoice[] = ['random', 'morning', 'afternoon', 'golden'];
+const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
@@ -330,7 +330,6 @@ export class Menu {
     row('Traction control', () => ({ off: 'Off', medium: 'Medium', full: 'Full' })[a.traction], (d) => (a.traction = cycle(['off', 'medium', 'full'] as const, a.traction, d)));
     row('Anti-lock brakes', () => onOff(a.abs), () => (a.abs = !a.abs));
     row('Stability control', () => onOff(a.stability), () => (a.stability = !a.stability));
-    row('Steering assist', () => onOff(a.steering), () => (a.steering = !a.steering));
     row('Braking assist', () => ({ off: 'Off', low: 'Low', medium: 'Medium', high: 'High' })[a.braking], (d) => (a.braking = cycle(['off', 'low', 'medium', 'high'] as const, a.braking, d)));
     row('Racing line', () => ({ off: 'Off', corners: 'Corners only', full: 'Full' })[a.line], (d) => (a.line = cycle(['off', 'corners', 'full'] as const, a.line, d)));
     row('Gearbox', () => (a.gearbox === 'auto' ? 'Automatic' : 'Manual (Q / E)'), () => (a.gearbox = a.gearbox === 'auto' ? 'manual' : 'auto'));

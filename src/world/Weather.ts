@@ -10,25 +10,35 @@
  * imports: the physics tools run this under plain Node.
  */
 
-export type WeatherKind = 'clear' | 'cloudy' | 'overcast' | 'drizzle' | 'rain' | 'storm';
-export type TimeOfDay = 'morning' | 'afternoon' | 'golden';
+export type WeatherKind = 'clear' | 'haze' | 'cloudy' | 'overcast' | 'fog' | 'sunshower' | 'drizzle' | 'rain' | 'storm' | 'thunderstorm';
+export type TimeOfDay = 'dawn' | 'morning' | 'midday' | 'afternoon' | 'golden' | 'sunset';
 export type WeatherChoice = 'random' | 'changeable' | WeatherKind;
 export type TimeChoice = 'random' | TimeOfDay;
 
 export const WEATHER_LABEL: Record<WeatherKind, string> = {
   clear: 'Clear',
+  haze: 'Hazy sun',
   cloudy: 'Light cloud',
   overcast: 'Overcast',
+  fog: 'Fog',
+  sunshower: 'Sun shower',
   drizzle: 'Light rain',
   rain: 'Rain',
   storm: 'Heavy rain',
+  thunderstorm: 'Thunderstorm',
 };
 
 export const TIME_LABEL: Record<TimeOfDay, string> = {
+  dawn: 'Dawn',
   morning: 'Morning',
+  midday: 'Midday',
   afternoon: 'Afternoon',
   golden: 'Golden hour',
+  sunset: 'Sunset',
 };
+
+/** the sun is low and warm: long shadows, orange light, pink cloud undersides */
+export const isLowSun = (t: TimeOfDay) => t === 'golden' || t === 'sunset' || t === 'dawn';
 
 export interface WeatherState {
   /** what it looks like right now (derived from cloud + rain) */
@@ -61,6 +71,8 @@ interface Key {
   cloud: number;
   rain: number;
   fog: number;
+  /** the regime this key was rolled from */
+  k: WeatherKind;
 }
 
 export interface WeatherPlan {
@@ -79,14 +91,20 @@ export interface WeatherPlan {
 
 const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number }> = {
   clear: { cloud: 0.06, rain: 0, fog: 0 },
+  haze: { cloud: 0.12, rain: 0, fog: 0.7 },
   cloudy: { cloud: 0.45, rain: 0, fog: 0.05 },
   overcast: { cloud: 0.86, rain: 0, fog: 0.18 },
+  fog: { cloud: 0.78, rain: 0, fog: 1 },
+  sunshower: { cloud: 0.38, rain: 0.3, fog: 0.08 },
   drizzle: { cloud: 0.93, rain: 0.26, fog: 0.35 },
   rain: { cloud: 0.97, rain: 0.62, fog: 0.5 },
   storm: { cloud: 1, rain: 1, fog: 0.7 },
+  thunderstorm: { cloud: 1, rain: 0.9, fog: 0.62 },
 };
 
-const WET: WeatherKind[] = ['drizzle', 'rain', 'storm'];
+/** regimes that can't be told apart from cloud + rain alone */
+const NAMED: Partial<Record<WeatherKind, true>> = { haze: true, fog: true, sunshower: true, thunderstorm: true };
+const WET: WeatherKind[] = ['sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm'];
 export const isWetKind = (k: WeatherKind) => WET.includes(k);
 
 /** tiny deterministic RNG so a plan can be replayed from its seed */
@@ -123,13 +141,17 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
   let resolved: WeatherChoice = choice;
   if (resolved === 'random') {
     resolved = pick<WeatherChoice>(r, [
-      ['clear', 26],
-      ['cloudy', 24],
-      ['overcast', 13],
-      ['drizzle', 10],
-      ['rain', 10],
-      ['storm', 4],
-      ['changeable', 13],
+      ['clear', 20],
+      ['haze', 7],
+      ['cloudy', 18],
+      ['overcast', 10],
+      ['fog', 5],
+      ['sunshower', 5],
+      ['drizzle', 8],
+      ['rain', 8],
+      ['storm', 3],
+      ['thunderstorm', 4],
+      ['changeable', 12],
     ]);
   }
   let start: WeatherKind;
@@ -138,11 +160,11 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
   if (resolved === 'changeable') {
     // rain arriving is more fun (and more common) than rain stopping
     if (r() < 0.65) {
-      start = r() < 0.5 ? 'cloudy' : 'overcast';
-      end = pick<WeatherKind>(r, [['drizzle', 4], ['rain', 4], ['storm', 1]]);
+      start = pick<WeatherKind>(r, [['cloudy', 4], ['overcast', 4], ['haze', 1]]);
+      end = pick<WeatherKind>(r, [['drizzle', 4], ['rain', 4], ['storm', 1], ['thunderstorm', 2]]);
     } else {
-      start = r() < 0.6 ? 'drizzle' : 'rain';
-      end = r() < 0.5 ? 'cloudy' : 'overcast';
+      start = pick<WeatherKind>(r, [['drizzle', 3], ['rain', 2], ['thunderstorm', 1]]);
+      end = pick<WeatherKind>(r, [['cloudy', 3], ['overcast', 3], ['sunshower', 1]]);
     }
     changeAt = Math.max(45, duration * (0.28 + r() * 0.34));
   } else {
@@ -152,9 +174,12 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
     timeChoice !== 'random'
       ? timeChoice
       : pick<TimeOfDay>(r, [
-          ['morning', 25],
-          ['afternoon', 50],
-          ['golden', 25],
+          ['dawn', 8],
+          ['morning', 18],
+          ['midday', 16],
+          ['afternoon', 30],
+          ['golden', 18],
+          ['sunset', 10],
         ]);
 
   // keyframes: gentle wobble around the regime, plus the change if any
@@ -165,7 +190,8 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
     return {
       cloud: Math.min(1, Math.max(0, g.cloud + (r() - 0.5) * (k === 'cloudy' ? 0.25 : 0.08))),
       rain: g.rain > 0 ? Math.max(0.12, g.rain * (0.8 + r() * 0.4)) : 0,
-      fog: Math.max(0, g.fog + (r() - 0.5) * 0.1),
+      fog: Math.min(1, Math.max(0, g.fog + (r() - 0.5) * 0.1)),
+      k,
     };
   };
   for (let t = 0; t <= span; t += 90) {
@@ -187,7 +213,8 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
   }
 
   const windDir = r() * Math.PI * 2;
-  const windSpeed = end === 'storm' || start === 'storm' ? 7 + r() * 5 : 1 + r() * 4.5;
+  const stormy = (k: WeatherKind) => k === 'storm' || k === 'thunderstorm';
+  const windSpeed = stormy(end) || stormy(start) ? 7 + r() * 6 : start === 'fog' || start === 'haze' ? 0.3 + r() * 1.2 : 1 + r() * 4.5;
   return { choice, start, end, changeAt, time, keys, windX: Math.sin(windDir) * windSpeed, windZ: Math.cos(windDir) * windSpeed, seed };
 }
 
@@ -221,17 +248,23 @@ export class Weather {
     this.temps();
   }
 
-  private sample(t: number): { cloud: number; rain: number; fog: number } {
+  private sample(t: number): Key {
     const K = this.plan.keys;
     if (t <= K[0].t) return K[0];
     for (let i = 0; i < K.length - 1; i++) {
       const a = K[i], b = K[i + 1];
       if (t <= b.t) {
         const f = smooth((t - a.t) / Math.max(1e-6, b.t - a.t));
-        return { cloud: a.cloud + (b.cloud - a.cloud) * f, rain: a.rain + (b.rain - a.rain) * f, fog: a.fog + (b.fog - a.fog) * f };
+        return { t, cloud: a.cloud + (b.cloud - a.cloud) * f, rain: a.rain + (b.rain - a.rain) * f, fog: a.fog + (b.fog - a.fog) * f, k: f < 0.5 ? a.k : b.k };
       }
     }
     return K[K.length - 1];
+  }
+
+  /** what a sample looks like: the named regime if it is one, else read off cloud + rain */
+  private kindOf(k: Key): WeatherKind {
+    if (NAMED[k.k]) return k.k;
+    return k.rain > 0.8 ? 'storm' : k.rain > 0.42 ? 'rain' : k.rain > 0.06 ? 'drizzle' : k.cloud > 0.72 ? 'overcast' : k.cloud > 0.28 ? 'cloudy' : 'clear';
   }
 
   /** water level the track settles at for a given rain rate */
@@ -241,10 +274,10 @@ export class Weather {
 
   private temps() {
     const s = this.state;
-    const base = s.time === 'afternoon' ? 27 : s.time === 'golden' ? 23 : 19;
+    const base = { dawn: 15, morning: 19, midday: 28, afternoon: 27, golden: 23, sunset: 21 }[s.time];
     const sun = Math.max(0, 1 - s.cloud * 1.05);
     s.airTemp = base - s.cloud * 4 - s.rain * 5;
-    s.trackTemp = s.airTemp + (s.time === 'golden' ? 7 : 17) * sun + 3 * (1 - s.wetness) - s.wetness * 4;
+    s.trackTemp = s.airTemp + (isLowSun(s.time) ? 7 : s.time === 'midday' ? 21 : 17) * sun + 3 * (1 - s.wetness) - s.wetness * 4;
   }
 
   /** advance by dt seconds; `traffic` 0 … 1 is how many cars are running (dries the line) */
@@ -270,15 +303,16 @@ export class Weather {
     else if (s.rain > 0.3) s.dryLine = Math.max(0, s.dryLine - dt / 25);
     if (s.wetness <= 0.03) s.dryLine = 0;
 
-    s.kind = s.rain > 0.8 ? 'storm' : s.rain > 0.42 ? 'rain' : s.rain > 0.06 ? 'drizzle' : s.cloud > 0.72 ? 'overcast' : s.cloud > 0.28 ? 'cloudy' : 'clear';
+    s.kind = this.kindOf(k);
 
-    // lightning in heavy rain: a bright double flicker every 10–30 s
+    // lightning: a bright double flicker every 10–30 s in heavy rain, every 3–10 s in a thunderstorm
     this.flashT += dt;
-    if (s.rain > 0.78) {
+    const thunder = s.kind === 'thunderstorm';
+    if (s.rain > 0.78 || thunder) {
       this.nextFlash -= dt;
       if (this.nextFlash <= 0) {
         this.flashT = 0;
-        this.nextFlash = 10 + Math.random() * 20;
+        this.nextFlash = thunder ? 3 + Math.random() * 7 : 10 + Math.random() * 20;
       }
     }
     const f = this.flashT;
@@ -299,7 +333,6 @@ export class Weather {
 
   /** the regime expected `ahead` seconds from now (for the engineer and HUD) */
   forecast(ahead: number): WeatherKind {
-    const k = this.sample(this.state.t + ahead);
-    return k.rain > 0.8 ? 'storm' : k.rain > 0.42 ? 'rain' : k.rain > 0.06 ? 'drizzle' : k.cloud > 0.72 ? 'overcast' : k.cloud > 0.28 ? 'cloudy' : 'clear';
+    return this.kindOf(this.sample(this.state.t + ahead));
   }
 }

@@ -47,10 +47,13 @@ export function aiPace(entry: Entry, difficulty: number): number {
  * the speed profile at the grip the right tyre would have, plus a little
  * randomness. `gripNow` is that grip (1 = dry).
  */
+const QUALI_PACE = 0.83;
+
 export function aiQualifyingTime(entry: Entry, difficulty: number, wetFactor = 1): number {
   const pace = aiPace(entry, difficulty);
   const g = (Math.random() + Math.random() + Math.random() - 1.5) * 0.25;
-  return (26.9 + 50.8 / pace - 0.15) * wetFactor + g;
+  // the fit is for the original low-downforce car; the current setup laps ~17% quicker
+  return (26.9 + 50.8 / pace - 0.15) * QUALI_PACE * wetFactor + g;
 }
 
 export interface Competitor {

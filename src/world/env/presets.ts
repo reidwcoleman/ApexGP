@@ -45,6 +45,28 @@ export interface TimePreset {
 }
 
 export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
+  dawn: {
+    azimuth: 96,
+    elevation: 4.5,
+    mie: 1.9,
+    g: 0.82,
+    ms: 0.42,
+    sunIntensity: 3.3,
+    skyBoost: 2.1,
+    sunDisc: 20,
+    cirrus: 0.5,
+    fogDensity: 1.9e-4,
+    fogFalloff: 1 / 700,
+    fogLobe: 1.4,
+    exposure: 0.92,
+    saturation: 1.12,
+    contrast: 1.08,
+    tint: [1.0, 0.93, 0.88],
+    shadowTint: [0.9, 0.95, 1.14],
+    bloom: 1.05,
+    bloomThreshold: 1.0,
+    shafts: 1.0,
+  },
   morning: {
     azimuth: 112,
     elevation: 30,
@@ -66,6 +88,28 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     bloom: 0.8,
     bloomThreshold: 1.1,
     shafts: 0.45,
+  },
+  midday: {
+    azimuth: 186,
+    elevation: 60,
+    mie: 1.0,
+    g: 0.76,
+    ms: 0.33,
+    sunIntensity: 4.8,
+    skyBoost: 1.65,
+    sunDisc: 32,
+    cirrus: 0.25,
+    fogDensity: 0.7e-4,
+    fogFalloff: 1 / 1400,
+    fogLobe: 0.3,
+    exposure: 0.95,
+    saturation: 1.09,
+    contrast: 1.13,
+    tint: [1.0, 0.995, 0.98],
+    shadowTint: [0.95, 0.98, 1.05],
+    bloom: 0.6,
+    bloomThreshold: 1.2,
+    shafts: 0.1,
   },
   afternoon: {
     azimuth: 222,
@@ -110,6 +154,28 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     bloom: 1.0,
     bloomThreshold: 1.05,
     shafts: 1.0,
+  },
+  sunset: {
+    azimuth: 274,
+    elevation: 3.5,
+    mie: 1.8,
+    g: 0.82,
+    ms: 0.42,
+    sunIntensity: 3.1,
+    skyBoost: 2.3,
+    sunDisc: 18,
+    cirrus: 0.55,
+    fogDensity: 1.6e-4,
+    fogFalloff: 1 / 900,
+    fogLobe: 1.5,
+    exposure: 0.86,
+    saturation: 1.22,
+    contrast: 1.1,
+    tint: [1.0, 0.87, 0.72],
+    shadowTint: [0.85, 0.92, 1.16],
+    bloom: 1.15,
+    bloomThreshold: 1.0,
+    shafts: 1.2,
   },
 };
 
@@ -183,8 +249,11 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const rain = clamp01(w.rain);
   const fog = clamp01(w.fog);
   const wetK = smooth(0.02, 0.7, rain);
-  // direct sun: survives broken cumulus, dies under a deck, gone in rain
-  const sunVis = (1 - smooth(0.6, 0.94, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain));
+  // dense fog: the ground layer eats the view and most of the sun
+  const thick = smooth(0.7, 1, fog);
+  // direct sun: survives broken cumulus, dies under a deck, gone in rain from a full deck
+  // (a shower from broken cloud keeps the sun: a sun shower)
+  const sunVis = (1 - smooth(0.6, 0.94, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain) * smooth(0.45, 0.85, cloud)) * (1 - 0.75 * thick);
   const overcast = smooth(0.62, 0.95, cloud);
   const dim = 1 - sunVis;
 
@@ -197,15 +266,16 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const deckLight = mix(1, mix(0.62, 0.3, wetK), overcast);
 
   // grey gradient visibility: 25 km clear → ~2.5 km drizzle → ~0.9 km downpour
-  const fogDensity = P.fogDensity * (1 + overcast * 0.8) + fog * 3.2e-4 + rain * rain * 5.5e-4;
+  // fog 1: ~200 m to half-visibility, ~650 m to nothing
+  const fogDensity = P.fogDensity * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
   const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK));
-  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim);
-  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim);
+  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick);
+  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick);
   const tintK = dim;
   const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK), mix(P.tint[1], 0.99, tintK), mix(P.tint[2], 1.02, tintK)];
   const shadowTint: [number, number, number] = [

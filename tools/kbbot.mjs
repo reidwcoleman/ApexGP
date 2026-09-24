@@ -13,19 +13,19 @@ const track = new Track(CIRCUITS[0]);
 const profile = new RacingProfile(track, F1_SPEC);
 const DT = 1 / 300;
 
-const base = { assists: { traction: 'full', abs: true, stability: true, autoGear: true }, aids: { steeringAssist: true, brakingAssist: 'medium', steeringMode: 'rate' } };
+const base = { assists: { traction: 'full', abs: true, stability: true, autoGear: true }, aids: { brakingAssist: 'medium', steeringMode: 'rate' } };
 const variant = (a, b) => ({ assists: { ...base.assists, ...a }, aids: { ...base.aids, ...b } });
 const PRESETS = process.env.MATRIX ? {
   casual: base,
-  noSteerAssist: variant({}, { steeringAssist: false }),
+  noSteerAssist: variant({}, {}),
   noStability: variant({ stability: false }, {}),
   noBrakeAssist: variant({}, { brakingAssist: 'off' }),
   tcMedium: variant({ traction: 'medium' }, {}),
-  noSA_noBA: variant({}, { steeringAssist: false, brakingAssist: 'off' }),
+  noSA_noBA: variant({}, { brakingAssist: 'off' }),
 } : {
   casual: base,
-  standard: { assists: { traction: 'medium', abs: true, stability: false, autoGear: true }, aids: { steeringAssist: false, brakingAssist: 'off', steeringMode: 'rate' } },
-  pro: { assists: { traction: 'off', abs: false, stability: false, autoGear: true }, aids: { steeringAssist: false, brakingAssist: 'off', steeringMode: 'rate' } },
+  standard: { assists: { traction: 'medium', abs: true, stability: false, autoGear: true }, aids: { brakingAssist: 'off', steeringMode: 'rate' } },
+  pro: { assists: { traction: 'off', abs: false, stability: false, autoGear: true }, aids: { brakingAssist: 'off', steeringMode: 'rate' } },
 };
 
 const cornerOf = (s) => { let b = track.corners[0], bd = 1e9; for (const c of track.corners) { const d = Math.abs(track.delta(c.sApex, s)); if (d < bd) { bd = d; b = c; } } return b.name; };

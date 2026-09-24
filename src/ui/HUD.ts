@@ -2,7 +2,7 @@ import type { Race, RaceEvent, Competitor } from '../race/Race.ts';
 import type { Track } from '../world/Track.ts';
 import { uiColor } from '../race/Teams.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
-import { WEATHER_LABEL, type WeatherKind } from '../world/Weather.ts';
+import { WEATHER_LABEL, isWetKind, type WeatherKind } from '../world/Weather.ts';
 
 /** 16px line icons for the weather row (stroke = currentColor) */
 const WX_ICON: Record<WeatherKind, string> = {
@@ -11,9 +11,13 @@ const WX_ICON: Record<WeatherKind, string> = {
   overcast: '<path d="M4 12.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 12.5z"/>',
   drizzle: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M6 12v1M10 12v1"/>',
   rain: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M5 11.5l-.8 2.5M8 11.5l-.8 2.5M11 11.5l-.8 2.5"/>',
-  storm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M8.6 10.5 6.8 13h2.4l-1.6 2.5"/>',
+  storm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M5 11.5l-.8 2.5M8 11.5l-.8 2.5M11 11.5l-.8 2.5"/><path d="M6.5 11l-.6 1.6M9.5 11l-.6 1.6"/>',
+  thunderstorm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M8.6 10.5 6.8 13h2.4l-1.6 2.5"/>',
+  haze: '<circle cx="8" cy="6.5" r="2.6"/><path d="M2 11h12M3.5 13.5h9"/>',
+  fog: '<path d="M2 5.5h12M3 8h10M2 10.5h12M4 13h8"/>',
+  sunshower: '<circle cx="5.5" cy="5" r="2.2"/><path d="M5.5 1v.9M1.5 5h.9M2.7 2.2l.6.6"/><path d="M7.5 10.5h5a2 2 0 0 0 .2-4 2.8 2.8 0 0 0-5.3-.3A2.2 2.2 0 0 0 7.5 10.5z"/><path d="M9 12.3l-.5 1.7M12 12.3l-.5 1.7"/>',
 };
-const isWet = (k: WeatherKind) => k === 'drizzle' || k === 'rain' || k === 'storm';
+const isWet = (k: WeatherKind) => isWetKind(k);
 
 export function fmtTime(t: number, plusSign = false): string {
   if (!isFinite(t) || t <= 0) return '—';

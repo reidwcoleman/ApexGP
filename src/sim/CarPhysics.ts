@@ -91,17 +91,17 @@ export const F1_SPEC: CarSpec = {
   trackR: 1.55,
   wheelR: 0.36,
   wheelI: 1.1,
-  clA: 9.5,
+  clA: 8,
   cdA: 1.1,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 2.5,
-  loadSens: 0.03,
+  mu: 3.4,
+  loadSens: 0,
   slipAnglePeak: 0.13,
   slipAnglePeakRear: 0.11,
-  muRear: 1.3,
+  muRear: 1.2,
   slipRatioPeak: 0.09,
   tyreShape: 1.28,
   rollFront: 0.56,
@@ -417,8 +417,8 @@ export class CarPhysics {
     const vv = Math.max(4, v);
     const L = sp.a + sp.b;
     const kin = Math.atan((L * this.lateralGrip(vv)) / (vv * vv));
-    // + the understeer angle the car needs at the limit (measured: ~0.05 rad)
-    return Math.min(sp.maxSteer, kin + 0.07);
+    // + the front slip angle the tyres need at the limit (0.07 rad for a 0.1 rad peak)
+    return Math.min(sp.maxSteer, kin + 0.7 * sp.slipAnglePeak);
   }
 
   /** approximate peak steady-state lateral acceleration at speed v (m/s²), fitted to the sim */
@@ -484,7 +484,7 @@ export class CarPhysics {
     const vabs = Math.abs(this.vx);
     const beta = Math.atan2(this.vy, Math.max(vabs, V_MIN));
     if (this.assists.stability && vabs > 6) {
-      const over = Math.abs(beta) - 0.035;
+      const over = Math.abs(beta) - 0.065;
       if (over > 0) delta += Math.sign(beta) * over * 0.85;
       delta = Math.max(-sp.maxSteer, Math.min(sp.maxSteer, delta));
     }

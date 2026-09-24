@@ -127,15 +127,19 @@ float bolt( vec3 d ) {
   float el = asin( clamp( d.y, -1.0, 1.0 ) );
   if ( el < -0.002 || el > uBoltTop ) return 0.0;
   float y = el / uBoltTop;
-  float x = ( vnoise( y * 7.0 ) * 0.5 + vnoise( y * 19.0 ) * 0.25 + vnoise( y * 53.0 ) * 0.12 ) * 0.02;
+  float x = ( vnoise( y * 7.0 ) * 0.5 + vnoise( y * 19.0 ) * 0.25 + vnoise( y * 53.0 ) * 0.12 ) * 0.035;
   float w = abs( az - x );
-  float core = exp( -w * w / 1.4e-6 );
-  float glow = exp( -w / 0.006 ) * 0.22;
-  // a side branch
-  float bx = x + ( y - 0.55 ) * 0.03 * sign( hash11( uBoltSeed * 3.1 ) - 0.5 ) + vnoise( y * 31.0 + 7.0 ) * 0.004;
+  float core = exp( -w * w / 5e-6 );
+  float glow = exp( -w / 0.006 ) * 0.1;
+  // two side branches forking off the upper channel
+  float s1 = sign( hash11( uBoltSeed * 3.1 ) - 0.5 );
+  float bx = x + ( y - 0.55 ) * 0.06 * s1 + vnoise( y * 31.0 + 7.0 ) * 0.008;
   float bw = abs( az - bx );
-  float branch = y > 0.2 && y < 0.55 ? exp( -bw * bw / 7e-7 ) * smoothstep( 0.2, 0.5, y ) : 0.0;
-  return ( core + glow + branch * 0.6 ) * smoothstep( 0.0, 0.02, y + 0.01 );
+  float branch = y > 0.2 && y < 0.55 ? exp( -bw * bw / 5e-6 ) * smoothstep( 0.2, 0.5, y ) : 0.0;
+  float cx = x - ( y - 0.8 ) * 0.05 * s1 + vnoise( y * 23.0 + 3.0 ) * 0.006;
+  float cw = abs( az - cx );
+  float branch2 = y > 0.45 && y < 0.8 ? exp( -cw * cw / 3e-6 ) * smoothstep( 0.45, 0.75, y ) : 0.0;
+  return ( core + glow + branch * 0.7 + branch2 * 0.5 ) * smoothstep( 0.0, 0.02, y + 0.01 );
 }
 
 void main() {
@@ -165,7 +169,7 @@ void main() {
     float fd = max( dot( dUp, uFlashDir ), 0.0 );
     float lobe = pow( fd, 16.0 ) + 0.25 * pow( fd, 4.0 );
     col += uFlashCol * uFlash * ( 1.0 - cl.a * 0.85 ) * ( 0.1 + 1.3 * lobe );
-    if ( uBolt > 0.001 && uEnv < 0.5 ) col += uFlashCol * uBolt * bolt( d ) * 16.0;
+    if ( uBolt > 0.001 && uEnv < 0.5 ) col += uFlashCol * uBolt * bolt( d ) * 12.0;
   }
 
   if ( sy < 0.0 && uEnv > 0.5 ) {

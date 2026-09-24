@@ -7,7 +7,6 @@ export interface AssistConfig {
   traction: TCMode;
   abs: boolean;
   stability: boolean;
-  steering: boolean;
   braking: BrakingAssist;
   line: LineMode;
   gearbox: 'auto' | 'manual';
@@ -19,9 +18,9 @@ export interface AssistConfig {
 export type AssistPreset = 'casual' | 'standard' | 'expert';
 
 export const ASSIST_PRESETS: Record<AssistPreset, AssistConfig> = {
-  casual: { traction: 'full', abs: true, stability: true, steering: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
-  standard: { traction: 'medium', abs: true, stability: false, steering: false, braking: 'off', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
-  expert: { traction: 'off', abs: false, stability: false, steering: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
+  casual: { traction: 'full', abs: true, stability: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
+  standard: { traction: 'medium', abs: true, stability: false, braking: 'off', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  expert: { traction: 'off', abs: false, stability: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
 };
 
 export const PRESET_ORDER: AssistPreset[] = ['casual', 'standard', 'expert'];

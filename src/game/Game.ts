@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Renderer } from '../core/Renderer.ts';
+import { Renderer, type QualityLevel } from '../core/Renderer.ts';
 import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
@@ -20,7 +20,7 @@ import { Particles } from '../fx/Particles.ts';
 import { CarEffects } from '../fx/CarEffects.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
 import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
-import { Weather, planWeather, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
+import { Weather, planWeather, isLowSun, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms } from '../world/weatherUniforms.ts';
 import { buildPitComplex, type PitComplex, type BoxState } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
@@ -30,13 +30,15 @@ import { RacingLineAssist } from './RacingLineAssist.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
 
+const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'results' | 'replay' | 'flashback';
 
 const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'tv', 'tcam', 'tv', 'far'];
 
 /** colour of the light on smoke/dust for the weather */
 function smokeLight(w: WeatherState): THREE.Color {
-  const sun = w.time === 'golden' ? new THREE.Color(1.0, 0.86, 0.72) : new THREE.Color(1, 1, 1);
+  const sun = isLowSun(w.time) ? new THREE.Color(1.0, 0.86, 0.72) : new THREE.Color(1, 1, 1);
   const grey = new THREE.Color(0.74, 0.77, 0.82);
   return sun.lerp(grey, Math.min(1, w.cloud * 0.9 + w.rain * 0.3));
 }
@@ -587,7 +589,6 @@ export class Game {
   private applyAssists(a: AssistConfig) {
     const car = this.race.player.car;
     car.assists = { traction: a.traction, abs: a.abs, stability: a.stability, autoGear: a.gearbox === 'auto' };
-    this.control.aids.steeringAssist = a.steering;
     this.control.aids.brakingAssist = a.braking;
     this.control.aids.steeringMode = a.keyboard;
     this.race.playerDrsAuto = a.drs === 'auto';
@@ -732,7 +733,7 @@ export class Game {
       this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit);
     }
     const w = this.race.weatherState;
-    const rainLight = w.wetness > 0.22 || w.rain > 0.08;
+    const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.85;
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
       view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight);
@@ -814,7 +815,8 @@ export class Game {
     const race = this.race;
     const w = race.weatherState;
     if (this.state === 'menu' || this.state === 'results' || this.state === 'paused') {
-      a.weather(this.state === 'paused' ? 0 : w.rain, w.wetness, 0, this.state === 'paused' ? 0 : w.lightning);
+      const paused = this.state === 'paused';
+      a.weather(paused ? 0 : w.rain, w.wetness, 0, paused ? 0 : w.lightning, paused ? 0 : Math.hypot(w.windX, w.windZ));
       a.updatePlayer({ rpm: 4200, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false });
       a.updateOpponents([]);
       a.update(dt);
@@ -825,7 +827,7 @@ export class Game {
     const car = carOf(race.player);
     a.setView(this.cams.mode === 'cockpit' || this.cams.mode === 'tcam' || this.cams.mode === 'nose' ? 'cockpit' : this.cams.mode === 'tv' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
-    a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning);
+    a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ));
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
     const surf = Math.max(car.surfaceFL, car.surfaceFR, car.surfaceRL, car.surfaceRR);
     a.updatePlayer({
@@ -889,25 +891,26 @@ export class Game {
     (window as unknown as { __fps: number }).__fps = Math.round(this.fpsAvg);
     if (this.state !== 'race' && this.state !== 'intro' && this.state !== 'menu') return;
     const gfx = this.gfx;
+    const st = this.menu.settings;
+    this.sinceStepUp++;
+    // a step up that didn't hold 60 fps goes straight back, and that level is off the table
+    if (this.stepUpFrom && this.fpsAvg < 52 && this.sinceStepUp <= 20) {
+      this.qualityCap = st.quality;
+      this.setAutoQuality(this.stepUpFrom);
+      this.stepUpFrom = null;
+      return;
+    }
     if (this.fpsAvg < 52) {
       if (this.headroom < 3 && gfx.dynamicScale < this.scaleCeiling) this.scaleCeiling = gfx.dynamicScale - 0.01;
       gfx.setDynamicScale(gfx.dynamicScale - (this.fpsAvg < 40 ? 0.12 : 0.07));
       this.headroom = 0;
       // still slow at the lowest resolution for a few seconds: step the graphics level down
       // (only while the player hasn't chosen one themselves)
-      const st = this.menu.settings;
       if (gfx.dynamicScale <= 0.56 && this.fpsAvg < 45 && st.autoQuality && st.quality !== 'low' && this.state === 'race') {
         if (++this.slowAtFloor >= 4) {
           this.slowAtFloor = 0;
-          const order = ['low', 'medium', 'high', 'ultra'] as const;
-          st.quality = order[order.indexOf(st.quality) - 1];
-          try {
-            localStorage.setItem('apexgp.settings', JSON.stringify(st));
-          } catch {
-            /* storage unavailable */
-          }
-          this.applySettings(st);
-          this.scaleCeiling = 1;
+          this.qualityCap = st.quality;
+          this.setAutoQuality(QUALITY_ORDER[QUALITY_ORDER.indexOf(st.quality) - 1]);
         }
       } else this.slowAtFloor = 0;
     } else if (this.fpsAvg > 58.5) {
@@ -915,9 +918,33 @@ export class Game {
       if (this.headroom >= 4 && gfx.dynamicScale < this.scaleCeiling) {
         gfx.setDynamicScale(Math.min(this.scaleCeiling, gfx.dynamicScale + 0.05));
         this.headroom = 0;
+      } else if (this.headroom >= 10 && gfx.dynamicScale >= 1 && st.autoQuality && this.state === 'race') {
+        // smooth at full resolution for a while: try the next graphics level up
+        const next = QUALITY_ORDER[QUALITY_ORDER.indexOf(st.quality) + 1];
+        if (next && next !== this.qualityCap) {
+          this.stepUpFrom = st.quality;
+          this.sinceStepUp = 0;
+          this.setAutoQuality(next);
+        }
+        this.headroom = 0;
       }
     }
   }
+  private setAutoQuality(q: QualityLevel) {
+    const st = this.menu.settings;
+    st.quality = q;
+    try {
+      localStorage.setItem('apexgp.settings', JSON.stringify(st));
+    } catch {
+      /* storage unavailable */
+    }
+    this.applySettings(st);
+    this.scaleCeiling = 1;
+  }
+  /** a level that proved too slow this session (auto quality won't step back up into it) */
+  private qualityCap: QualityLevel | null = null;
+  private stepUpFrom: QualityLevel | null = null;
+  private sinceStepUp = 0;
   private headroom = 0;
   private slowAtFloor = 0;
   private scaleCeiling = 1;

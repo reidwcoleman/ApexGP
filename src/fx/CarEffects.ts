@@ -145,9 +145,9 @@ export class CarEffects {
       }
       // sparks: plank on the kerbs / compressions at high speed, walls, contact
       const hi = speed > 62;
-      if ((hi && car.onKerb && emit(0.6)) || (speed > 75 && car.heave < -0.02 && emit(0.25)) || (car.contact.wallHit > 1 && emit(1)) || (c.contactTimer > 0 && speed > 20 && emit(0.8))) {
+      if ((hi && car.onKerb && emit(0.15)) || (speed > 80 && car.heave < -0.05 && emit(0.05)) || (car.contact.wallHit > 1 && emit(0.6)) || (c.contactTimer > 0 && speed > 20 && emit(0.35))) {
         this.tmp.set(root.x - Math.sin(car.yaw) * 0.6, g + 0.03, root.z - Math.cos(car.yaw) * 0.6);
-        P.sparks(this.tmp, vel.set(wx, 0, wz), 8 + Math.floor(Math.random() * 10), g);
+        P.sparks(this.tmp, vel.set(wx, 0, wz), 3 + Math.floor(Math.random() * 4), g);
       }
       if (c.contactTimer > 0) c.contactTimer -= dt;
     }

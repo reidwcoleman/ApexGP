@@ -64,6 +64,8 @@ export class RacingProfile {
     const m = spec.mass;
     const g = 9.81;
     const kA = 0.5 * 1.225 * spec.clA;
+    // cornering gets ~73% of the downforce as extra grip (same fit as CarPhysics.lateralGrip)
+    const kAL = 0.73 * kA;
     const kD = 0.5 * 1.225 * spec.cdA;
     const tyreRef = (m * g) / 4;
     const muAt = (Fz: number) => spec.mu * Math.max(0.6, 1 - spec.loadSens * (Fz / 4 / tyreRef - 1));
@@ -78,10 +80,10 @@ export class RacingProfile {
         // fixed-point iterate for load-sensitive μ
         vv = 40;
         for (let it = 0; it < 6; it++) {
-          const Fz = m * g + kA * vv * vv;
+          const Fz = m * g + kAL * vv * vv;
           // slow corners lose more to lateral load transfer
           const mu = muAt(Fz) * grip * (0.93 + 0.07 * Math.min(1, vv / 50));
-          const den = m * kk - mu * kA;
+          const den = m * kk - mu * kAL;
           vv = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((mu * m * g) / den));
         }
       }
@@ -90,7 +92,7 @@ export class RacingProfile {
     // friction ellipse: the share of grip left for braking/accelerating once
     // the corner has taken its lateral share at this speed
     const latLeft = (vv: number, kk: number) => {
-      const Fz = m * g + kA * vv * vv;
+      const Fz = m * g + kAL * vv * vv;
       const aLatMax = (muAt(Fz) * grip * Fz) / m;
       const use = (vv * vv * kk) / aLatMax;
       return Math.sqrt(Math.max(0.12, 1 - use * use));
