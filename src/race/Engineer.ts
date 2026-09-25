@@ -102,8 +102,22 @@ export class Engineer {
         case 'pit-out':
           this.say(`Out of the pits in P${race.player.position}. Push now.`);
           break;
-        case 'contact':
-          if ((e.value ?? 0) > 6) this.say('Contact! Check the car — we see no damage, keep going.');
+        case 'contact': {
+          if ((e.value ?? 0) <= 6) break;
+          const car = race.player.car;
+          const worst = Math.max(...car.dmg);
+          if (car.destroyed) break;
+          if (car.wingDamage > 0.45) this.say('Contact! Front wing is damaged — box this lap for a new nose.', true);
+          else if (worst > 0.3 || car.integrity < 0.7) this.say("Contact. We've got damage on the car, we're checking. Keep it on the road.");
+          else this.say('Contact! Check the car — we see no damage, keep going.');
+          break;
+        }
+        case 'retired':
+          if (e.car === p.id) this.say(e.value ? "Stop the car, stop the car! There's a fire — get out, get out now." : "That's it, the car's too badly damaged. Bring it to a stop.", true);
+          else this.say(`${code(e.car)} is out of the race${e.value ? ', car on fire' : ''}. Watch for debris.`);
+          break;
+        case 'damage':
+          this.say('Front wing damage, front wing damage. Box this lap, we have a new nose ready.', true);
           break;
         case 'blue-flag':
           this.say("Blue flags — you're being lapped. Let them through on the straight.");

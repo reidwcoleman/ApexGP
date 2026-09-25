@@ -391,6 +391,84 @@ export function impactSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNo
   }
 }
 
+/**
+ * A car going up: a sharp crack, a deep chest-thump boom that rolls away (duller
+ * with distance), then the roar and crackle of the fire. `near` 0..1 (1 = right
+ * there, 0 = far away).
+ */
+export function explosionSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNode, near: number, now: number): void {
+  const n = clamp(near, 0, 1);
+  if (n < 0.02) return;
+  const r = Math.random;
+  const bus = gainNode(ctx, 0.9 * n);
+  // distance takes the top end off
+  const air = biquad(ctx, 'lowpass', 900 + 9000 * n * n, 0.6);
+  chain(bus, air, out);
+  // the crack (fuel cell rupturing)
+  const ck = new AudioBufferSourceNode(ctx, { buffer: b.white });
+  const ckHP = biquad(ctx, 'highpass', 900, 0.7);
+  const ckG = gainNode(ctx, 0);
+  chain(ck, ckHP, ckG, bus);
+  ckG.gain.setValueAtTime(0, now);
+  ckG.gain.linearRampToValueAtTime(0.8, now + 0.002);
+  ckG.gain.setTargetAtTime(0, now + 0.004, 0.035);
+  ck.start(now, r() * 2, 0.4);
+  // the boom: a falling sine plus a big low noise swell
+  const bo = new OscillatorNode(ctx, { type: 'sine', frequency: 70 });
+  bo.frequency.setValueAtTime(78, now);
+  bo.frequency.exponentialRampToValueAtTime(24, now + 0.9);
+  const boG = gainNode(ctx, 0);
+  const boSh = new WaveShaperNode(ctx, { curve: tanhCurve(1.8) });
+  chain(bo, boSh, boG, bus);
+  boG.gain.setValueAtTime(0, now);
+  boG.gain.linearRampToValueAtTime(1.1, now + 0.012);
+  boG.gain.setTargetAtTime(0, now + 0.05, 0.35);
+  bo.start(now);
+  bo.stop(now + 2.5);
+  const rum = new AudioBufferSourceNode(ctx, { buffer: b.white });
+  const rumLP = biquad(ctx, 'lowpass', 420, 0.8);
+  rumLP.frequency.setValueAtTime(1600, now);
+  rumLP.frequency.exponentialRampToValueAtTime(140, now + 1.8);
+  const rumG = gainNode(ctx, 0);
+  chain(rum, rumLP, rumG, bus);
+  rumG.gain.setValueAtTime(0, now);
+  rumG.gain.linearRampToValueAtTime(0.95, now + 0.02);
+  rumG.gain.setTargetAtTime(0, now + 0.15, 0.6);
+  rum.start(now, r() * 2, 4);
+  // the fire: a breathy roar with crackle, dying down over a few seconds
+  const fr = new AudioBufferSourceNode(ctx, { buffer: b.white, loop: true });
+  const frBP = biquad(ctx, 'bandpass', 520, 0.5);
+  const frG = gainNode(ctx, 0);
+  chain(fr, frBP, frG, bus);
+  frG.gain.setValueAtTime(0, now);
+  frG.gain.linearRampToValueAtTime(0.28, now + 0.4);
+  frG.gain.setTargetAtTime(0.1, now + 1, 1.5);
+  frG.gain.setTargetAtTime(0, now + 5, 1.2);
+  fr.start(now, r() * 2);
+  fr.stop(now + 10);
+  const cr = new AudioBufferSourceNode(ctx, { buffer: b.crackle, loop: true, playbackRate: 0.6 + 0.3 * r() });
+  const crBP = biquad(ctx, 'bandpass', 1800, 0.7);
+  const crG = gainNode(ctx, 0);
+  chain(cr, crBP, crG, bus);
+  crG.gain.setValueAtTime(0, now);
+  crG.gain.linearRampToValueAtTime(0.45, now + 0.3);
+  crG.gain.setTargetAtTime(0, now + 3, 1.5);
+  cr.start(now);
+  cr.stop(now + 10);
+  // debris raining down
+  for (let i = 0; i < 14; i++) {
+    const tt = now + 0.4 + r() * 1.6;
+    const o = new OscillatorNode(ctx, { type: 'triangle', frequency: 900 + r() * 3200 });
+    const og = gainNode(ctx, 0);
+    chain(o, og, bus);
+    og.gain.setValueAtTime(0, tt);
+    og.gain.linearRampToValueAtTime(0.05 * (0.4 + r()), tt + 0.002);
+    og.gain.setTargetAtTime(0, tt + 0.003, 0.02);
+    o.start(tt);
+    o.stop(tt + 0.15);
+  }
+}
+
 /** Start-light beep. final = lights out: brighter two-tone and longer. */
 export function beepSound(ctx: BaseAudioContext, out: AudioNode, final: boolean, now: number): void {
   const freqs = final ? [1318.5, 1975.5] : [987.8];

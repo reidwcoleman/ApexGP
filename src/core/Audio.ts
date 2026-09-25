@@ -18,7 +18,7 @@
  */
 import { type AudioBuffers, biquad, chain, clamp, gainNode, loopSource, makeBuffers, setT, softClipCurve } from './audio/dsp.ts';
 import { createEngineSource, type EngineMix, loadEngineWorklet, OpponentVoice, PlayerEngine } from './audio/engine.ts';
-import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, uiSound, WeatherSound } from './audio/fx.ts';
+import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, explosionSound, uiSound, WeatherSound } from './audio/fx.ts';
 
 export type AudioView = 'chase' | 'cockpit' | 'tv';
 
@@ -339,6 +339,12 @@ export class GameAudio {
   impact(strength: number): void {
     if (!this.live()) return;
     impactSound(this.ctx!, this.b, this.fxBus, strength, this.now());
+  }
+
+  /** a car exploding; near 0..1 by distance */
+  explosion(near: number): void {
+    if (!this.live()) return;
+    explosionSound(this.ctx!, this.b, this.fxBus, near, this.now());
   }
 
   startBeep(final: boolean): void {

@@ -81,6 +81,13 @@
   font-weight: 600;
   text-align: right;
 }
+.trow.out {
+  opacity: 0.42;
+}
+.trow.out .gap {
+  color: #ff5a4e;
+  letter-spacing: 0.06em;
+}
 .trow.me {
   background: var(--ink);
   color: var(--ink-dark);

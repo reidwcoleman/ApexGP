@@ -281,7 +281,20 @@ interface Buckets {
   /** helmet + visor, pivot-local around NECK_PIVOT (animated) */
   head: MB;
   decals: MB;
+  /** parts that bend and break off in a crash (body space, own meshes) */
+  parts: Record<PartId, PartMB>;
 }
+
+/** breakable parts: the two halves of the front wing and the rear wing (upper) */
+export type PartId = 'fwL' | 'fwR' | 'rw';
+export const PART_IDS: PartId[] = ['fwL', 'fwR', 'rw'];
+interface PartMB {
+  paint: MB;
+  carbon: MB;
+  trim: MB;
+}
+/** where each part hinges when it's bent (body space) */
+export const PART_HINGE: Record<PartId, V3> = { fwL: [0.13, 0.11, 2.8], fwR: [-0.13, 0.11, 2.8], rw: [0, 0.72, -1.97] };
 
 const CUV = (p: V3, n: V3) => cuvPlanar(p, n);
 
@@ -369,9 +382,14 @@ function frontWing(b: Buckets, level: Level) {
   const carbonUV = (_s: number, _c: number, p: V3): V2 => [p[0] / CARBON_TILE, (p[2] + p[1]) / CARBON_TILE];
   // main plane (full span, neutral centre section raised)
   const e0 = E((x, t) => ({ x, z: 3.04 - 0.1 * t * t, y: lerp(0.098, 0.07, smooth(0.12, 0.4, x)), c: lerp(0.3, 0.27, t), a: lerp(3, 7, t), t: 0.09, cam: 0.05 }));
-  wingElement(b.carbon, mirrorStations(e0), nAf, carbonUV);
   const e1 = E((x, t) => ({ x, z: 2.815 - 0.08 * t * t, y: lerp(0.13, 0.115, smooth(0.12, 0.4, x)) + 0.012 * t, c: lerp(0.18, 0.2, t), a: lerp(12, 20, t), t: 0.09, cam: 0.06 }));
-  wingElement(b.carbon, mirrorStations(e1), nAf, carbonUV);
+  // each half is its own part (it can break off): the lower elements split at the centreline
+  const half = (st: WingSt[], side: number) => (side > 0 ? st : st.map((q) => ({ ...q, x: -q.x })).reverse());
+  for (const side of [1, -1]) {
+    const P = b.parts[side > 0 ? 'fwL' : 'fwR'];
+    wingElement(P.carbon, half(e0, side), nAf, carbonUV);
+    wingElement(P.carbon, half(e1, side), nAf, carbonUV);
+  }
   // upper flaps (painted), span from the nose outwards
   const xs2 = level === 2 ? [0.1, 0.5, 0.87] : [0.1, 0.2, 0.3, 0.42, 0.54, 0.66, 0.76, 0.84, 0.87];
   const e2 = xs2.map((x) => {
@@ -384,6 +402,7 @@ function frontWing(b: Buckets, level: Level) {
     return { x, z: 2.555 - 0.06 * t * t, y: 0.21 + 0.12 * t ** 2.4, c: lerp(0.11, 0.15, t * t), a: lerp(34, 52, t), t: 0.1, cam: 0.08 };
   });
   for (const side of [1, -1]) {
+    const P = b.parts[side > 0 ? 'fwL' : 'fwR'];
     const e2s = e2.map((s) => ({ ...s, x: s.x * side }));
     const e3s = e3.map((s) => ({ ...s, x: s.x * side }));
     if (side < 0) {
@@ -391,8 +410,8 @@ function frontWing(b: Buckets, level: Level) {
       e3s.reverse();
     }
     const fwuv = (st: number, c: number) => rectUV(R_FWING, side > 0 ? 0.5 + st * 0.5 : st * 0.5, c);
-    wingElement(b.paint, e2s, nAf, (s, c) => fwuv(s, c * 0.5), CUV);
-    wingElement(b.paint, e3s, nAf, (s, c) => fwuv(s, 0.5 + c * 0.5), CUV);
+    wingElement(P.paint, e2s, nAf, (s, c) => fwuv(s, c * 0.5), CUV);
+    wingElement(P.paint, e3s, nAf, (s, c) => fwuv(s, 0.5 + c * 0.5), CUV);
     // endplate (carbon) — rounded outline in (z, y)
     const ep = roundPoly(
       [
@@ -407,12 +426,12 @@ function frontWing(b: Buckets, level: Level) {
       [0.02, 0.03, 0.06, 0.06, 0.1, 0.05, 0.03],
       level === 2 ? 1 : 3,
     );
-    plate(b.carbon, ep, [0.875 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+    plate(P.carbon, ep, [0.875 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     if (level < 2) {
       // footplate + canard on the endplate
-      plate(b.carbon, roundPoly([[3.0, 0], [2.5, 0], [2.5, 0.09], [3.0, 0.09]], 0.02, 2), [0.84 * side, 0.034, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      plate(P.carbon, roundPoly([[3.0, 0], [2.5, 0], [2.5, 0.09], [3.0, 0.09]], 0.02, 2), [0.84 * side, 0.034, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
       // tyre-wake winglet on the outer face
-      wingElement(b.carbon, [
+      wingElement(P.carbon, [
         { x: 0.88 * side, z: 2.62, y: 0.2, c: 0.12, a: 30, t: 0.08 },
         { x: 0.925 * side, z: 2.605, y: 0.212, c: 0.1, a: 34, t: 0.08 },
       ].sort((p, q) => p.x - q.x), 6, (_s, _c, p) => [p[0] / CARBON_TILE, p[2] / CARBON_TILE]);
@@ -428,7 +447,8 @@ function rearWing(b: Buckets, level: Level) {
     const t = x / 0.49;
     return { x, z: -1.845 + 0.02 * t * t, y: 0.708 + 0.05 * t ** 4, c: 0.3, a: 9 + 4 * t * t, t: 0.12, cam: 0.075 };
   });
-  wingElement(b.paint, mirrorStations(main), nAf, (s, c) => rectUV(R_MAIN, s, c), CUV);
+  const P = b.parts.rw;
+  wingElement(P.paint, mirrorStations(main), nAf, (s, c) => rectUV(R_MAIN, s, c), CUV);
   // beam wing (two elements, carbon)
   const bx = level === 2 ? [0, 0.36] : [0, 0.12, 0.24, 0.36];
   const beamUV = (_s: number, _c: number, p: V3): V2 => [p[0] / CARBON_TILE, (p[2] + p[1]) / CARBON_TILE];
@@ -455,7 +475,7 @@ function rearWing(b: Buckets, level: Level) {
   const EY1 = 0.97;
   for (const side of [1, -1]) {
     plate(
-      b.paint,
+      P.paint,
       ep,
       [0.5 * side, 0, 0],
       [0, 0, 1],
@@ -487,7 +507,7 @@ function rearWing(b: Buckets, level: Level) {
     sweep(b.carbon, st, aeroSection(level === 2 ? 4 : 8), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
   }
   // LED rain-light strips on endplate trailing edges
-  for (const side of [1, -1]) box(b.trim, [0.5 * side, 0.74, -2.418], [0.016, 0.16, 0.008], trimUV(TC.rainLight));
+  for (const side of [1, -1]) box(P.trim, [0.5 * side, 0.74, -2.418], [0.016, 0.16, 0.008], trimUV(TC.rainLight));
 }
 
 /** DRS flap in pivot-local coordinates (pivot at the flap trailing edge) */
@@ -1261,6 +1281,8 @@ function blurDisc(mb: MB, w: number) {
 // ================================================================================================ public
 export interface CarGeoLevel {
   body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null };
+  /** breakable parts, body space */
+  parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
   steer: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
@@ -1275,7 +1297,8 @@ export interface CarGeoLevel {
 }
 
 export function buildCarGeometry(level: Level): CarGeoLevel {
-  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB() };
+  const pm = (): PartMB => ({ paint: new MB(true), carbon: new MB(), trim: new MB() });
+  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB(), parts: { fwL: pm(), fwR: pm(), rw: pm() } };
   buildHull(b.paint, level);
   frontWing(b, level);
   rearWing(b, level);
@@ -1378,6 +1401,12 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   }
   const out: CarGeoLevel = {
     body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly },
+    parts: Object.fromEntries(
+      PART_IDS.map((k) => {
+        const q = b.parts[k];
+        return [k, { paint: q.paint.count ? q.paint.build() : null, carbon: q.carbon.count ? q.carbon.build() : null, trim: q.trim.count ? q.trim.build() : null }];
+      }),
+    ) as CarGeoLevel['parts'],
     flap: flap.build(),
     steer: steer ? steer.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
@@ -1392,6 +1421,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   };
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
+    PART_IDS.reduce((n, k) => n + tri(out.parts[k].paint) + tri(out.parts[k].carbon) + tri(out.parts[k].trim), 0) +
     tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.steer) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;

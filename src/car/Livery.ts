@@ -178,7 +178,141 @@ function arrow(t: Tx, p: Pal): RGB {
   return c;
 }
 
-const PATTERNS: Record<Team['pattern'], Pattern> = { sweep, split, fade, stripe, block, arrow };
+// ------------------------------------------------------------------------------------ the real teams' layouts
+// Each follows how that team's current car is painted (blocks of colour, where the
+// dark lower bodywork starts, the pinstripes) — no logos.
+/** height of the dark lower bodywork along the car (sidepod undercut rising to the engine cover) */
+const lowLine = (z: number, a = 0.24, b = 0.08) => a + b * smooth(0.4, -1.4, z);
+/** a thin line at height yl (pinstripe), width w (m) */
+const line = (t: Tx, yl: number, w: number) => cov(Math.abs(t.y - yl) / Math.max(0.2, t.nx) - w);
+
+function ferrari(t: Tx, p: Pal): RGB {
+  // red, black lower flanks, a white line along the sidepod shoulder into the engine cover
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  c = mix(c, p.K, cov((t.y - lowLine(t.z, 0.25, 0.1)) / slope) * smooth(2.2, 1.6, t.z));
+  const yl = 0.48 + 0.16 * smooth(0.2, -1.7, t.z);
+  c = mix(c, p.W, line(t, yl, 0.011) * smooth(0.55, 0.35, t.z) * smooth(-2.1, -1.8, t.z));
+  // white on the nose tip
+  c = mix(c, p.W, cov(2.72 - t.z));
+  return c;
+}
+
+function mercedes(t: Tx, p: Pal): RGB {
+  // silver on top and above the shoulder line, black flanks and lower body, a teal line between
+  const slope = Math.max(0.2, t.nx);
+  const ys = 0.46 + 0.14 * smooth(0.3, -1.4, t.z) - 0.1 * smooth(0.8, 2.4, t.z);
+  // the silver spine: nose, cockpit surround, engine cover; the sidepods are black
+  const top = t.ny > 0.42 && t.y > 0.36 && Math.abs(t.x) < 0.3 ? 1 : 0;
+  let c = mix(p.S, p.P, Math.max(top, cov((ys - t.y) / slope) * (Math.abs(t.x) < 0.42 ? 1 : 0)));
+  c = mix(c, p.A, line(t, ys, 0.008) * (1 - top));
+  // teal washing across the back of the engine cover
+  c = mix(c, p.A, smooth(-1.55, -2.05, t.z) * top * 0.6);
+  return c;
+}
+
+function redbull(t: Tx, p: Pal): RGB {
+  // matte navy; a red flash along the engine cover, red and yellow on the nose, red floor line
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const band = Math.min(cov(-1.95 - t.z), cov(t.z + 0.25)) * Math.min(cov((0.5 + 0.06 * (t.z + 1) - t.y) / slope), cov((t.y - 0.78) / slope));
+  c = mix(c, p.S, band * smooth(0.3, 0.6, t.nx));
+  c = mix(c, p.S, cov(2.25 - t.z) * cov((t.y - 0.34) / slope));
+  c = mix(c, p.A, cov(2.7 - t.z));
+  c = mix(c, p.S, line(t, lowLine(t.z, 0.2, 0.05), 0.012) * smooth(1.6, 1.2, t.z));
+  return c;
+}
+
+function mclaren(t: Tx, p: Pal): RGB {
+  // papaya top and nose, anthracite sidepods and lower body, papaya engine-cover fin
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const ys = 0.52 + 0.12 * smooth(0.3, -1.5, t.z);
+  const dark = cov((t.y - ys) / slope) * smooth(1.3, 0.8, t.z) * (t.ny > 0.55 ? 0.15 : 1);
+  c = mix(c, p.S, dark);
+  // papaya line along the top of the dark section
+  c = mix(c, p.P, line(t, ys, 0.009) * smooth(1.3, 0.8, t.z));
+  return c;
+}
+
+function aston(t: Tx, p: Pal): RGB {
+  // racing green, lime pinstripe along the sidepod into the nose, black lower body
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  c = mix(c, p.S, cov((t.y - lowLine(t.z, 0.26, 0.1)) / slope));
+  const ys = 0.42 + 0.2 * smooth(0.3, -1.6, t.z) - 0.18 * smooth(0.6, 2.7, t.z);
+  c = mix(c, p.A, line(t, ys, 0.012) * smooth(-2.0, -1.7, t.z));
+  // lime along the centre of the nose
+  c = mix(c, p.A, cov(Math.abs(t.s) - 0.012) * smooth(0.9, 1.3, t.z));
+  return c;
+}
+
+function alpine(t: Tx, p: Pal): RGB {
+  // blue at the front, a diagonal into pink along the sidepods and engine cover, black lower
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const diag = cov(t.z - 0.1 + (t.y - 0.45) * 1.1);
+  c = mix(c, p.S, diag);
+  c = mix(c, p.W, cov(Math.abs(t.z - 0.1 + (t.y - 0.45) * 1.1) - 0.012) * smooth(0.25, 0.5, t.y));
+  c = mix(c, p.K, cov((t.y - lowLine(t.z, 0.24, 0.08)) / slope));
+  return c;
+}
+
+function williams(t: Tx, p: Pal): RGB {
+  // dark navy upper, bright blue sidepods sweeping up to the engine cover, white pinstripe
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const ys = 0.36 + 0.3 * smooth(0.5, -1.6, t.z) - 0.1 * smooth(0.6, 2.5, t.z);
+  c = mix(c, p.S, cov((t.y - ys) / slope) * (t.ny > 0.7 ? 0.2 : 1));
+  c = mix(c, p.W, line(t, ys, 0.007) * smooth(-2.0, -1.7, t.z));
+  c = mix(c, p.K, cov((t.y - lowLine(t.z, 0.2, 0.05)) / slope));
+  return c;
+}
+
+function haas(t: Tx, p: Pal): RGB {
+  // white front half, black rear half, a red slash where they meet
+  const k = t.z + 0.1 + (t.y - 0.45) * 0.9;
+  let c = mix(p.S, p.P, cov(-k));
+  c = mix(c, p.A, cov(Math.abs(k + 0.03) - 0.028));
+  return c;
+}
+
+function racingbulls(t: Tx, p: Pal): RGB {
+  // white, a sweep of blue from the sidepod inlet up over the engine cover, red flash
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const base = 0.2 + 0.5 * smooth(0.6, -1.5, t.z);
+  c = mix(c, p.S, cov((t.y - base - 0.2) / slope) * smooth(0.9, 0.5, t.z));
+  // blue under the nose
+  c = mix(c, p.S, cov((t.y - 0.3) / slope) * smooth(0.9, 1.3, t.z));
+  c = mix(c, p.A, line(t, base + 0.2, 0.01) * smooth(0.9, 0.5, t.z));
+  return c;
+}
+
+function audi(t: Tx, p: Pal): RGB {
+  // titanium front, black rear, lava-red line on the break and red around the airbox
+  const k = t.z + 0.35 + (t.y - 0.45) * 0.6;
+  let c = mix(p.S, p.P, cov(-k));
+  c = mix(c, p.A, cov(Math.abs(k) - 0.013));
+  c = mix(c, p.A, cov(-0.35 - t.z) * cov(t.z - 0.1) * (t.y > 0.8 ? 1 : 0));
+  return c;
+}
+
+function cadillac(t: Tx, p: Pal): RGB {
+  // black, a white band sweeping from the nose along the sidepods, a thin gold line
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const ys = 0.34 + 0.24 * smooth(0.4, -1.6, t.z) - 0.12 * smooth(0.6, 2.6, t.z);
+  const band = Math.min(cov((ys - t.y) / slope), cov((t.y - ys - 0.1) / slope));
+  c = mix(c, p.S, band * smooth(-2.0, -1.6, t.z));
+  c = mix(c, p.A, line(t, ys + 0.115, 0.006) * smooth(-2.0, -1.6, t.z));
+  return c;
+}
+
+const PATTERNS: Record<Team['pattern'], Pattern> = {
+  sweep, split, fade, stripe, block, arrow,
+  ferrari, mercedes, redbull, mclaren, aston, alpine, williams, haas, racingbulls, audi, cadillac,
+};
 
 // ------------------------------------------------------------------------------------ hull text
 interface HullTextOpts {

@@ -27,9 +27,21 @@ function spring(x: THREE.Vector3, v: THREE.Vector3, t: THREE.Vector3, w: number,
   x.addScaledVector(v, h);
 }
 
+/**
+ * A broadcast camera position: a tower on the outside of a braking zone (sees the
+ * car arrive, brake and turn in), a low apex camera on the inside kerb (the car
+ * sweeps past close), an exit camera, or a panning camera on a straight.
+ */
+type ShotKind = 'tower' | 'apex' | 'exit' | 'pan';
 interface TvCam {
   s: number;
   pos: THREE.Vector3;
+  kind: ShotKind;
+  /** track distance this camera covers (s, wrapped: from → to) */
+  from: number;
+  to: number;
+  /** metres of scene the operator frames around the car (the zoom) */
+  frame: number;
 }
 
 /**
@@ -63,23 +75,47 @@ export class Cameras {
   private camVel = new THREE.Vector3();
   private lookQ = new THREE.Quaternion();
   private orbitT = 0;
+  private readonly chaseLook = new THREE.Vector3();
 
   constructor(camera: THREE.PerspectiveCamera, track: Track) {
     this.camera = camera;
-    // TV cameras: alternate sides every ~170 m, on platforms just inside the
-    // barriers (Monza's woods grow right up to the fences behind them)
-    const n = Math.floor(track.length / 170);
-    for (let i = 0; i < n; i++) {
-      const s = track.wrap(track.startS + i * 170 + 40);
-      const k = track.kappaAt(s + 60);
-      // prefer the outside of the next corner; never the pit-wall side of the straight
-      let side = Math.abs(k) > 1 / 400 ? (k > 0 ? 1 : -1) : i % 2 === 0 ? 1 : -1;
-      if (track.inPit(s) || track.inPit(s + 60)) side = -track.pit.side;
+    this.buildTv(track);
+  }
+
+  /** place the broadcast cameras around the lap from the corners, then fill the straights */
+  private buildTv(track: Track) {
+    const L = track.length;
+    const add = (s: number, side: number, lat: number, h: number, kind: ShotKind, from: number, to: number, frame: number) => {
+      s = track.wrap(s);
+      // never on the pit-wall side of the pit straight
+      if (track.inPit(s)) side = -track.pit.side;
+      const hw = track.halfWidthAt(s);
       const bar = track.barrierAt(s, side);
-      const lat = Math.max(track.halfWidthAt(s) + 4, Math.min(bar - 2.2, track.halfWidthAt(s) + 22));
-      const pos = track.point(s, side * lat, 4.2 + (i % 3) * 1.2);
-      this.tv.push({ s, pos });
+      const l = Math.max(hw + 1.6, Math.min(bar - 1.4, lat));
+      const pos = track.point(s, side * l, h);
+      this.tv.push({ s, pos, kind, from: track.wrap(from), to: track.wrap(to), frame });
+    };
+    const covered: [number, number][] = [];
+    for (const c of track.corners) {
+      const outside = -c.dir;
+      const slow = c.radius < 90;
+      // tower on the outside before the braking zone, looking back up the straight
+      add(c.sStart - 55, outside, track.halfWidthAt(c.sStart) + 14, slow ? 9 : 7, 'tower', c.sStart - 230, c.sApex + 10, slow ? 10 : 12);
+      // low camera on the inside at the apex (tight corners: the car sweeps right past)
+      if (c.radius < 260) add(c.sApex, c.dir, track.halfWidthAt(c.sApex) + 2.6, 0.75, 'apex', c.sApex - 45, c.sApex + 28, 0);
+      // exit: outside, a little up, watching it put the power down
+      add(c.sEnd + 45, outside, track.halfWidthAt(c.sEnd) + 8, 3.6, 'exit', c.sApex + 10, c.sEnd + 150, 7.5);
+      covered.push([c.sStart - 230, c.sEnd + 150]);
     }
+    // straights the corner cameras don't reach: panning cameras every ~230 m
+    const inCover = (s: number) => covered.some(([a, b]) => track.delta(a, s) >= 0 && track.delta(s, b) >= 0);
+    let flip = 1;
+    for (let s = 0; s < L; s += 230) {
+      if (inCover(s + 60)) continue;
+      add(s, flip, track.halfWidthAt(s) + 9, 3.2 + (flip > 0 ? 1.5 : 0), 'pan', s - 170, s + 150, 6.5);
+      flip = -flip;
+    }
+    this.tv.sort((a, b) => a.s - b.s);
   }
 
   next() {
@@ -165,24 +201,30 @@ export class Cameras {
       // pulls back under acceleration, closes in under braking, stretches a little with speed
       const dist = (far ? 8.4 : 5.35) + Math.max(-0.5, Math.min(0.7, -car.ax * 0.028)) + speed * 0.003;
       const height = (far ? 2.5 : 1.42) + car.heave * 0.6;
-      const want = this.v3.set(carPos.x - Math.sin(this.camYaw) * dist, carPos.y + height, carPos.z - Math.cos(this.camYaw) * dist);
-      // keep above the road surface
-      const ground = track.point(car.s, car.lateral).y;
-      want.y = Math.max(want.y, ground + 0.9);
+      // spring the camera's offset from the car (not its world position): a world-space spring
+      // trails a car at 300 km/h by ~2v/ω ≈ 12 m; the offset only lags the car's turns and surges
+      const want = this.v3.set(-Math.sin(this.camYaw) * dist, height, -Math.cos(this.camYaw) * dist);
       if (!this.initialized) {
         this.camPos.copy(want);
         this.camVel.set(0, 0, 0);
       }
       spring(this.camPos, this.camVel, want, far ? 11 : 14, far ? 7 : 8.5, dt);
+      this.v4.copy(carPos).add(this.camPos);
+      // keep above the road surface
+      const ground = track.point(car.s, car.lateral).y;
+      this.v4.y = Math.max(this.v4.y, ground + 0.9);
       // look a touch into the corner (from the yaw rate), easing in and out
       const leadT = speed > 8 && !this.lookBack ? THREE.MathUtils.clamp(car.r * 0.16, -0.14, 0.14) : 0;
       this.lead += (leadT - this.lead) * Math.min(1, dt * 3);
       const ly = this.camYaw + this.lead;
       const look = this.v3.set(carPos.x + Math.sin(ly) * 3.4, carPos.y + (far ? 0.75 : 0.88), carPos.z + Math.cos(ly) * 3.4);
       if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 3.0, carPos.y + 0.9, carPos.z + Math.cos(this.camYaw) * 3.0);
-      if (!this.initialized) this.camLook.copy(look);
-      this.camLook.lerp(look, Math.min(1, dt * 20));
-      cam.position.copy(this.camPos);
+      // (also relative to the car, or it trails v/20 m behind at speed)
+      look.sub(carPos);
+      if (!this.initialized) this.chaseLook.copy(look);
+      this.chaseLook.lerp(look, Math.min(1, dt * 20));
+      this.camLook.copy(carPos).add(this.chaseLook);
+      cam.position.copy(this.v4);
       cam.position.x += sx;
       cam.position.y += sy;
       cam.lookAt(this.camLook);
@@ -192,38 +234,7 @@ export class Cameras {
     }
 
     if (this.mode === 'tv') {
-      // choose the next camera that has the car in front of or just past it
-      const L = track.length;
-      let best = this.tvIndex;
-      if (best < 0 || track.delta(this.tv[best].s, car.s) > 70) {
-        let bd = Infinity;
-        this.tv.forEach((c, i) => {
-          const d = track.delta(car.s, c.s);
-          if (d > -40 && d < bd) {
-            bd = d;
-            best = i;
-          }
-        });
-        if (best < 0) best = 0;
-        void L;
-      }
-      if (best !== this.tvIndex) this.initialized = false;
-      this.tvIndex = best;
-      const tc = this.tv[best];
-      cam.position.copy(tc.pos);
-      const look = this.v3.copy(carPos).addScaledVector(fwdCar, Math.min(8, speed * 0.08));
-      look.y += 0.6;
-      const dist = cam.position.distanceTo(carPos);
-      // a camera operator: pans a beat behind the car, with a little hand-held drift
-      const t = this.shakeT;
-      look.x += (Math.sin(t * 0.9) + Math.sin(t * 2.3) * 0.4) * dist * 0.0022;
-      look.y += Math.sin(t * 1.3 + 1) * dist * 0.0016;
-      if (!this.initialized) this.camLook.copy(look);
-      this.camLook.lerp(look, Math.min(1, dt * 7));
-      cam.lookAt(this.camLook);
-      const fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(5.5 / dist)), 7, 55);
-      this.setFov(fov, dt, !this.initialized);
-      this.initialized = true;
+      this.tvShot(dt, car, carPos, fwdCar, speed, track);
       return;
     }
 
@@ -275,6 +286,90 @@ export class Cameras {
     this.setFov(baseFov + Math.min(1, kmh / 330) * 6, dt, !this.initialized);
     this.initialized = true;
   }
+
+  /** TV director + operator: cut between the cameras that cover the car, frame and follow like a person on a long lens */
+  private tvShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number, track: Track) {
+    const cam = this.camera;
+    this.tvAge += dt;
+    const covers = (c: TvCam) => track.delta(c.from, car.s) >= 0 && track.delta(car.s, c.to) >= 0;
+    const cur = this.tvIndex >= 0 ? this.tv[this.tvIndex] : null;
+    // hold a shot at least ~2.5 s; cut when the car leaves it, or to a fresher angle after a while
+    let pick = this.tvIndex;
+    const stale = !cur || !covers(cur) || (this.tvAge > 7.5 && cur.kind !== 'apex');
+    if (stale || this.tvAge > 2.5) {
+      let best = -1;
+      let bestScore = -Infinity;
+      this.tv.forEach((c, i) => {
+        if (!covers(c)) return;
+        // the camera the car is heading toward (least of its coverage used), with a bonus for the dramatic ones
+        const used = track.delta(c.from, car.s) / Math.max(1, track.delta(c.from, c.to));
+        const dAhead = track.delta(car.s, c.s);
+        let score = -used + (c.kind === 'apex' && dAhead > 8 && dAhead < 40 ? 0.6 : 0) + (c.kind === 'tower' ? 0.15 : 0);
+        if (i === this.tvIndex) score += stale ? -5 : 0.35;
+        const d = c.pos.distanceTo(carPos);
+        if (d > 420) score -= 2;
+        if (score > bestScore) {
+          bestScore = score;
+          best = i;
+        }
+      });
+      if (best < 0) {
+        // nothing covers this bit: nearest camera ahead
+        let bd = Infinity;
+        this.tv.forEach((c, i) => {
+          const dd = track.delta(car.s, c.s);
+          if (dd > -30 && dd < bd) {
+            bd = dd;
+            best = i;
+          }
+        });
+      }
+      if (best >= 0 && (stale || best !== this.tvIndex)) pick = best;
+    }
+    if (pick !== this.tvIndex) {
+      this.tvIndex = pick;
+      this.tvAge = 0;
+      this.initialized = false;
+    }
+    const tc = this.tv[Math.max(0, this.tvIndex)];
+    const dist = tc.pos.distanceTo(carPos);
+    // the operator leads the car a little and trails its moves by a beat
+    const look = this.v3.copy(carPos).addScaledVector(fwdCar, Math.min(tc.kind === 'apex' ? 2 : 6, speed * 0.06));
+    look.y += tc.kind === 'apex' ? 0.45 : 0.55;
+    const t = this.shakeT;
+    const hand = tc.kind === 'apex' ? 0 : dist * 0.0018;
+    look.x += (Math.sin(t * 0.83) + Math.sin(t * 2.1) * 0.35) * hand;
+    look.y += Math.sin(t * 1.27 + 1) * hand * 0.7;
+    look.z += Math.sin(t * 0.61 + 2) * hand * 0.6;
+    if (!this.initialized) {
+      this.camLook.copy(look);
+      this.tvLookV.set(0, 0, 0);
+    }
+    // a critically damped pan: smooth starts and stops, a slight lag on a fast car
+    spring(this.camLook, this.tvLookV, look, tc.kind === 'apex' ? 14 : 8.5, 8.5, dt);
+    cam.position.copy(tc.pos);
+    // the platform sways in the wind; the apex camera shakes as the car thunders past
+    const pass = tc.kind === 'apex' ? Math.max(0, 1 - dist / 25) * Math.min(1, speed / 60) : 0;
+    cam.position.x += Math.sin(t * 0.7) * 0.02 + Math.sin(t * 47) * 0.012 * pass;
+    cam.position.y += Math.sin(t * 0.9 + 2) * 0.015 + Math.sin(t * 59) * 0.012 * pass;
+    cam.lookAt(this.camLook);
+    // zoom: hold the car at a set size in frame (apex cam: fixed wide lens)
+    const aspect = Math.max(0.5, cam.aspect);
+    const fov = tc.kind === 'apex' ? 46 : THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(tc.frame / (2 * dist * aspect))), 2.2, 50);
+    this.setFov(fov, dt * 0.6, !this.initialized);
+    this.initialized = true;
+    // focus pull on the car; a long lens has a shallow depth of field
+    this.tvFocus.copy(carPos);
+    this.tvFocus.y += 0.5;
+    this.tvDof = tc.kind === 'apex' ? 0.5 : THREE.MathUtils.clamp(8 / Math.max(3, this.fov), 0.5, 2.4);
+    this.tvRange = Math.max(4, dist * 0.1);
+  }
+  private tvAge = 0;
+  private readonly tvLookV = new THREE.Vector3();
+  /** TV camera focus (for the game's depth of field) */
+  readonly tvFocus = new THREE.Vector3();
+  tvDof = 1;
+  tvRange = 5;
 
   private setFov(target: number, dt: number, snap: boolean) {
     this.fov = snap ? target : this.fov + (target - this.fov) * Math.min(1, dt * 4);

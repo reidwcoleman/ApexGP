@@ -166,6 +166,7 @@ varying float vAlpha;
 varying float vStreak;
 varying float vViewZ;
 varying float vSize;
+varying float vFlame;
 void main() {
   vec4 mv = viewMatrix * vec4( iPos, 1.0 );
   float dist = -mv.z;
@@ -193,11 +194,20 @@ void main() {
     ax = vec2( ay.y, -ay.x );
     sy = size + min( l * iData.w, 0.9 );
   }
+  if ( iData.w < 0.0 ) {
+    // flames stand up: taller than wide, rooted at the bottom
+    sy = size * 1.9;
+    mv.y += size * 0.7;
+    ax = vec2( 1.0, 0.0 );
+    ay = vec2( 0.0, 1.0 );
+  }
   mv.xy += ax * corner.x * size + ay * corner.y * sy;
   vC = corner;
   vTint = iTint.rgb;
   vAlpha = alpha;
   vStreak = iData.w > 0.0 ? 1.0 : 0.0;
+  // stretch < 0 marks a flame: soft body, no hot core
+  vFlame = iData.w < 0.0 ? 1.0 : 0.0;
   vViewZ = -mv.z;
   vSize = size;
   gl_Position = projectionMatrix * mv;
@@ -209,11 +219,19 @@ varying vec2 vC;
 varying vec3 vTint;
 varying float vAlpha;
 varying float vStreak;
+varying float vFlame;
 void main() {
   float r2 = dot( vC, vC );
   float core;
   if ( vStreak > 0.5 ) {
     core = exp( -( vC.x * vC.x * 4.5 + vC.y * vC.y * 1.1 ) * 2.4 );
+  } else if ( vFlame > 0.5 ) {
+    // a tongue of flame: narrows to a tip at the top, white-hot at the root
+    float h = vC.y * 0.5 + 0.5;
+    float w = mix( 0.95, 0.12, h * h );
+    float x = vC.x / w;
+    float body = clamp( 1.0 - x * x, 0.0, 1.0 ) * smoothstep( 1.0, 0.55, h ) * smoothstep( 0.0, 0.18, h );
+    core = body * body * ( 0.55 + 1.2 * ( 1.0 - h ) * ( 1.0 - h ) );
   } else {
     core = ( exp( -r2 * 9.0 ) + 0.22 * exp( -r2 * 2.2 ) ) * clamp( 1.0 - r2, 0.0, 1.0 );
   }
@@ -831,6 +849,102 @@ export class Particles {
         0.22 + Math.random() * 0.4, 0.016, 0.008, 1, 26 * heat, 10 * heat * heat, 2.4 * heat * heat, 1.6, 9.8, 0.022, ground, 0, 0, 0.01, 0.2, 0.3,
       );
     }
+  }
+
+  /**
+   * Flames licking off a burning car: short-lived additive tongues that rise and
+   * cool from yellow-white through orange to dull red. `amount` 0..1.
+   */
+  fire(p: THREE.Vector3, v: THREE.Vector3, amount: number, spread = 0.5) {
+    const n = 1 + Math.floor(amount * 1.5 + Math.random());
+    for (let i = 0; i < n; i++) {
+      const heat = 0.6 + Math.random() * 0.4;
+      const s = 0.12 + Math.random() * 0.22 * (0.5 + amount);
+      this.hot.spawn(
+        p.x + (Math.random() - 0.5) * spread, p.y + Math.random() * 0.2, p.z + (Math.random() - 0.5) * spread,
+        v.x * 0.6 + (Math.random() - 0.5) * 0.8, 1.2 + Math.random() * 2.2, v.z * 0.6 + (Math.random() - 0.5) * 0.8,
+        0.3 + Math.random() * 0.45, s, s * (1.4 + Math.random() * 0.8), 0.45 * amount + 0.2, 4.2 * heat, 1.5 * heat * heat, 0.26 * heat * heat * heat,
+        1.4, -2.5, -1, -1e3, 0, 0.6, 0.06,
+      );
+    }
+    // a lick of dull red higher up, where the flame dies into smoke
+    if (Math.random() < 0.5 * amount) {
+      this.hot.spawn(
+        p.x + (Math.random() - 0.5) * spread, p.y + 0.4 + Math.random() * 0.4, p.z + (Math.random() - 0.5) * spread,
+        v.x * 0.5, 1.5 + Math.random(), v.z * 0.5,
+        0.5, 0.35, 0.8, 0.2 * amount, 1.2, 0.28, 0.05, 1.2, -1.5, -1, -1e3, 0, 0.6, 0.15,
+      );
+    }
+  }
+
+  /** thick oily smoke from burning bodywork and fuel (dark, rises and spreads with the wind) */
+  blackSmoke(p: THREE.Vector3, v: THREE.Vector3, amount: number, ground = p.y - 0.3) {
+    const k = 0.035 + Math.random() * 0.04;
+    this.soft.spawn(
+      p.x + (Math.random() - 0.5) * 0.6, p.y + 0.2, p.z + (Math.random() - 0.5) * 0.6,
+      v.x * 0.35 + (Math.random() - 0.5) * 1.2, 1.6 + Math.random() * 1.8, v.z * 0.35 + (Math.random() - 0.5) * 1.2,
+      4 + Math.random() * 4, 0.6, 3.6 + Math.random() * 3.4, 0.95 * amount, k, k * 0.97, k * 0.95, 0.9, -0.45, 0, ground, 0.3, 1, 0.1, 0.2,
+    );
+  }
+
+  /** grey-white smoke trailing a damaged engine / leaking oil onto hot parts */
+  engineSmoke(p: THREE.Vector3, v: THREE.Vector3, amount: number, ground = p.y - 0.4) {
+    const k = 0.5 + Math.random() * 0.15;
+    this.soft.spawn(
+      p.x + (Math.random() - 0.5) * 0.2, p.y, p.z + (Math.random() - 0.5) * 0.2,
+      v.x * 0.55 + (Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.8, v.z * 0.55 + (Math.random() - 0.5) * 0.8,
+      1.4 + Math.random() * 1.4, 0.3, 1.6 + Math.random() * 1.4, 0.4 * amount, k, k, k * 1.02, 1.6, -0.2, 0, ground, 0.55, 1, 0.08,
+    );
+  }
+
+  /**
+   * A car going up: a fuel fireball that swells and rolls upward, a shock of
+   * sparks and glowing fragments, then a column of black smoke.
+   */
+  explosion(p: THREE.Vector3, v: THREE.Vector3, ground = p.y - 0.3) {
+    // fireball: layered, hottest at the core
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const u = Math.random() * 2 - 1;
+      const r = Math.sqrt(1 - u * u);
+      const sp = 2 + Math.random() * 7;
+      const heat = 0.55 + Math.random() * 0.45;
+      const core = i < 18;
+      this.hot.spawn(
+        p.x, p.y + 0.4, p.z,
+        v.x * 0.5 + Math.cos(a) * r * sp, Math.abs(u) * sp * 0.8 + 2.5, v.z * 0.5 + Math.sin(a) * r * sp,
+        (core ? 0.45 : 0.7) + Math.random() * 0.6, core ? 0.8 : 0.5, (core ? 2.4 : 3.2) + Math.random() * 1.6, core ? 0.55 : 0.35,
+        (core ? 6 : 3.6) * heat, (core ? 3 : 1.3) * heat * heat, (core ? 0.9 : 0.25) * heat * heat * heat,
+        2.6, -3.5, -1, -1e3, 0, 0.3, 0.02,
+      );
+    }
+    // glowing bits flung out (burning carbon, hot metal)
+    for (let i = 0; i < 46; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 4 + Math.random() * 14;
+      const heat = 0.6 + Math.random() * 0.4;
+      this.hot.spawn(
+        p.x, p.y + 0.3, p.z,
+        v.x * 0.6 + Math.cos(a) * sp, 3 + Math.random() * 9, v.z * 0.6 + Math.sin(a) * sp,
+        0.8 + Math.random() * 1.4, 0.03, 0.02, 1, 22 * heat, 8 * heat * heat, 1.8 * heat * heat, 0.5, 9.8, 0.03, ground, 0, 0, 0.01, 0.1, 0.35,
+      );
+    }
+    // the smoke it leaves: a dark, fast-growing cloud
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 1 + Math.random() * 4;
+      const k = 0.03 + Math.random() * 0.04;
+      this.soft.spawn(
+        p.x + Math.cos(a) * 0.5, p.y + 0.6 + Math.random() * 0.8, p.z + Math.sin(a) * 0.5,
+        v.x * 0.3 + Math.cos(a) * sp, 2 + Math.random() * 4, v.z * 0.3 + Math.sin(a) * sp,
+        4 + Math.random() * 4, 1.2, 4.5 + Math.random() * 3.5, 0.85, k, k * 0.96, k * 0.93, 1.1, -0.4, 0, ground, 0.35, 1, 0.1 + Math.random() * 0.25,
+      );
+    }
+  }
+
+  /** a flash of light from a fireball / an impact, this frame only */
+  flashGlow(p: THREE.Vector3, size: number, level: number) {
+    this.hot.addTransient(p.x, p.y, p.z, size, 1, 5 * level, 2.2 * level, 0.6 * level, 0.5);
   }
 
   /** generic soft puff (spray): see Spray.ts for the recipes */

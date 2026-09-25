@@ -6,6 +6,7 @@ import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
+import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
@@ -22,9 +23,13 @@ export interface RaceSetup {
   compound: Compound | 'auto';
   /** circuit id (see CIRCUITS) */
   track: string;
+  /** crash damage */
+  damage: DamageMode;
 }
 
 export interface Settings {
+  /** save format: bumped when the defaults change in a way old saves should pick up */
+  v?: number;
   quality: QualityLevel;
   /** true until the player picks a graphics level themselves: the game may step it down */
   autoQuality?: boolean;
@@ -51,6 +56,9 @@ const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon',
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+const SETTINGS_V = 3;
+const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
+const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
 
 type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'pause' | 'results' | 'none';
 
@@ -84,6 +92,8 @@ export interface ResultRow {
   best: number;
   penalty: number;
   fastest: boolean;
+  /** retired from the race */
+  dnf?: boolean;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, parent?: HTMLElement, html?: string): HTMLElementTagNameMap[K] {
@@ -128,7 +138,8 @@ export class Menu {
     this.cb = cb;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'random', time: 'random', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto', track: 'monza' });
+    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'clear', time: 'afternoon', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto', track: 'monza', damage: 'full' });
+    if (!DAMAGE.includes(this.setup.damage)) this.setup.damage = 'full';
     // saves from before per-assist settings stored a preset index
     if (!this.setup.compound) this.setup.compound = 'auto';
     if (!CIRCUITS.some((c) => c.id === this.setup.track)) this.setup.track = CIRCUITS[0].id;
@@ -137,8 +148,13 @@ export class Menu {
     if (!TIMES.includes(this.setup.time)) this.setup.time = 'random';
     if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...ASSIST_PRESETS.casual };
     else this.setup.assists = { ...ASSIST_PRESETS.casual, ...this.setup.assists };
-    this.settings = load<Settings>('apexgp.settings', { quality: 'high', camera: 'chase', volume: 0.8, autoQuality: true });
+    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'high', camera: 'chase', volume: 0.8, autoQuality: true });
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
+    // older saves may have been stepped down by the automatic quality: start again from High
+    if ((this.settings.v ?? 0) < SETTINGS_V) {
+      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' ? 'ultra' : 'high', autoQuality: true };
+      save('apexgp.settings', this.settings);
+    }
     for (const id of ['title', 'setup', 'settings', 'assists', 'pause', 'results'] as ScreenId[]) {
       const s = el('div', 'screen', this.root);
       this.screens.set(id, s);
@@ -229,6 +245,12 @@ export class Menu {
           st.compound = TYRE_CHOICES[(i + d + TYRE_CHOICES.length) % TYRE_CHOICES.length];
         },
       );
+    }
+    if (this.mode === 'race') {
+      this.opt(p, 'Damage', () => DAMAGE_LABEL[st.damage], (d) => {
+        const i = DAMAGE.indexOf(st.damage);
+        st.damage = DAMAGE[(i + d + DAMAGE.length) % DAMAGE.length];
+      });
     }
     this.opt(p, 'Circuit', () => (CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
       const i = Math.max(0, CIRCUITS.findIndex((c) => c.id === st.track));
@@ -419,8 +441,8 @@ export class Menu {
     const table = el('div', 'rtable', box);
     el('div', 'rrow head', table, '<span class="p">Pos</span><span></span><span>Driver</span><span>Team</span><span class="gap">Time</span><span class="best">Best lap</span><span class="pts">Pts</span>');
     rows.forEach((r, i) => {
-      const gap = r.pos === 1 ? fmtTime(r.time) : r.gap < 0 ? `+${-r.gap} lap${r.gap < -1 ? 's' : ''}` : isFinite(r.gap) && r.gap > 0 ? `+${r.gap.toFixed(3)}` : 'DNF';
-      const pts = r.pos <= 10 ? POINTS[r.pos - 1] + (r.fastest && r.pos <= 10 ? 1 : 0) : 0;
+      const gap = r.dnf ? 'DNF' : r.pos === 1 ? (isFinite(r.time) ? fmtTime(r.time) : 'Leader') : r.gap < 0 ? `+${-r.gap} lap${r.gap < -1 ? 's' : ''}` : isFinite(r.gap) && r.gap > 0 ? `+${r.gap.toFixed(3)}` : '—';
+      const pts = r.pos <= 10 && !r.dnf ? POINTS[r.pos - 1] + (r.fastest && r.pos <= 10 ? 1 : 0) : 0;
       const row = el(
         'div',
         'rrow' + (r.isPlayer ? ' me' : ''),

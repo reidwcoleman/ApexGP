@@ -338,6 +338,13 @@ export class HUD {
         case 'finish':
           if (c.isPlayer) this.flash('Chequered flag', `P${c.position}`, '', 4);
           break;
+        case 'retired':
+          if (c.isPlayer) this.flash('Retired', e.value ? 'the car is destroyed' : 'the car is too badly damaged', 'red', 6);
+          else this.flash(`${c.entry.driver.code} out`, `${c.entry.driver.last} · ${e.value ? 'car on fire' : 'crash damage'}`, 'red', 3);
+          break;
+        case 'damage':
+          this.flash('Front wing damage', 'box for a new nose — press P', 'red', 3.2);
+          break;
         case 'sector':
           if (e.sector !== undefined) this.sectorEls[e.sector].className = e.color ?? '';
           break;
@@ -489,7 +496,9 @@ export class HUD {
       else if (c.gapLeader < 0) gap = `+${-c.gapLeader} Lap${c.gapLeader < -1 ? 's' : ''}`;
       else gap = race.phase === 'grid' || race.phase === 'lights' || c.gapLeader <= 0 ? '' : `+${c.gapLeader.toFixed(3)}`;
       if (c.finished) gap = c.position === 1 ? 'Winner' : gap;
+      if (c.retired) gap = 'OUT';
       this.setText(row.gap, gap);
+      if (c.retired !== row.el.classList.contains('out')) row.el.classList.toggle('out', c.retired);
       const fl = c.id === race.bestLapCar;
       if (fl !== row.code.classList.contains('hasfl')) {
         row.code.classList.toggle('hasfl', fl);

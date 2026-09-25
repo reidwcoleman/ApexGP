@@ -15,13 +15,16 @@
  */
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, type CarGeoLevel } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
+export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, type Compound } from './carTextures.ts';
 import { WET_PARS, wetUniforms, wetClearcoatBeads } from './carWet.ts';
 
 export type { Compound } from './carTextures.ts';
 import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH } from './carLayout.ts';
+
+export type WheelId = 'wFL' | 'wFR' | 'wRL' | 'wRR';
 
 export interface CarRig {
   root: THREE.Group;
@@ -41,6 +44,15 @@ export interface CarRig {
   setDriverVisible(v: boolean): void;
   /** the driver's head reacts: lateral and longitudinal G (m/s², + = left / accelerating), wheel angle (rad) */
   setG(lateral: number, longitudinal: number, steer: number): void;
+  /**
+   * Crash damage: bend the wing halves / rear wing by 0..1 (≥ 1 = gone), camber each
+   * corner by its suspension damage (FL FR RL RR, 1 = broken), burn the paint (0..1).
+   */
+  setDamage(parts: Record<PartId, number>, susp: readonly number[], char: number): void;
+  /** a copy of a part (or a wheel: 'wFL' …) as it sits on the car right now, in world space — for debris */
+  cloneBroken(part: PartId | WheelId): THREE.Object3D;
+  /** hide a wheel that came off */
+  setWheelLost(w: WheelId, lost: boolean): void;
   update(dt: number): void;
   readonly anchors: {
     cockpit: THREE.Object3D;
@@ -78,6 +90,7 @@ function releaseGeo() {
     const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, l.steer, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
+    for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
   }
   GEO = null;
 }
@@ -364,6 +377,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const flapPivots: THREE.Object3D[] = [];
   const driverMeshes: { all: THREE.Mesh; decals: THREE.Mesh | null; head: THREE.Mesh | null }[] = [];
   const headPivots: THREE.Object3D[] = [];
+  const partPivots: Record<PartId, THREE.Group[]> = { fwL: [], fwR: [], rw: [] };
   let steerSpin: THREE.Object3D | null = null;
   for (let lv = 0; lv < 3; lv++) {
     const L = geo[lv];
@@ -392,10 +406,30 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       }
       driverMeshes.push({ all, decals: dec, head });
     }
+    // breakable parts: each on a hinge so it can bend before it breaks off
+    const partMats = { paint: paintMat, carbon, trim } as const;
+    const pivOf: Record<PartId, THREE.Group> = {} as Record<PartId, THREE.Group>;
+    for (const k of PART_IDS) {
+      const h = PART_HINGE[k];
+      const pv = new THREE.Group();
+      pv.name = `part-${k}`;
+      pv.position.set(h[0], h[1], h[2]);
+      const inner = new THREE.Group();
+      inner.position.set(-h[0], -h[1], -h[2]);
+      for (const mk of ['paint', 'carbon', 'trim'] as const) {
+        const pg = L.parts[k][mk];
+        if (pg) inner.add(mesh(pg, partMats[mk]));
+      }
+      pv.add(inner);
+      g.add(pv);
+      pivOf[k] = pv;
+      partPivots[k].push(pv);
+    }
     const fp = new THREE.Group();
-    fp.position.set(FLAP_PIVOT[0], FLAP_PIVOT[1], FLAP_PIVOT[2]);
+    fp.position.set(FLAP_PIVOT[0] - PART_HINGE.rw[0], FLAP_PIVOT[1] - PART_HINGE.rw[1], FLAP_PIVOT[2] - PART_HINGE.rw[2]);
     fp.add(mesh(L.flap, paintMat));
-    g.add(fp);
+    // the DRS flap goes wherever the rear wing goes
+    pivOf.rw.add(fp);
     flapPivots.push(fp);
     if (L.steer) {
       const pv = new THREE.Group();
@@ -534,6 +568,40 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   let driverVisible = true;
   const head = { roll: 0, pitch: 0, yaw: 0 };
   const headT = { roll: 0, pitch: 0, yaw: 0 };
+  const partState: Record<PartId, number> = { fwL: 0, fwR: 0, rw: 0 };
+  const wheelLost: Record<WheelId, boolean> = { wFL: false, wFR: false, wRL: false, wRR: false };
+  const cornerOf: Record<WheelId, Corner> = { wFL: FL, wFR: FR, wRL: RL, wRR: RR };
+  const cornerHome = corners.map((c) => c.group.position.clone());
+  let charLevel = 0;
+  // materials this car owns outright (so burning one car doesn't burn the whole team)
+  const charMats: { m: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial; color: THREE.Color; rough: number; cc: number; sheen: number; env: number }[] = [];
+  const ensureCharMats = () => {
+    if (charMats.length) return;
+    const swap = (m: THREE.Material): THREE.Material => {
+      if (own.includes(m)) return m;
+      const src = m as THREE.MeshPhysicalMaterial;
+      const c = src.clone();
+      c.onBeforeCompile = src.onBeforeCompile;
+      c.customProgramCacheKey = src.customProgramCacheKey;
+      own.push(c);
+      return c;
+    };
+    const remap = new Map<THREE.Material, THREE.Material>();
+    root.traverse((o) => {
+      const me = o as THREE.Mesh;
+      if (!me.isMesh || me.material === blurMat) return;
+      const m = me.material as THREE.Material;
+      let r = remap.get(m);
+      if (!r) {
+        r = swap(m);
+        remap.set(m, r);
+      }
+      me.material = r;
+    });
+    for (const m of new Set(remap.values()) as Set<THREE.MeshPhysicalMaterial>) {
+      charMats.push({ m, color: m.color.clone(), rough: m.roughness, cc: m.clearcoat ?? 0, sheen: m.sheen ?? 0, env: m.envMapIntensity });
+    }
+  };
 
   const applyVisibility = () => {
     bodyL.forEach((g, i) => (g.visible = i === detail));
@@ -541,7 +609,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     wheelsFar.visible = detail === 2;
     const showBlur = blur > 0.02;
     for (const c of corners) {
-      c.group.visible = detail < 2;
+      c.group.visible = detail < 2 && !(wheelLost as Record<string, boolean>)[`w${c.front ? 'F' : 'R'}${c.side > 0 ? 'L' : 'R'}`];
       c.lv.forEach((m, i) => {
         const on = i === detail;
         m.tyre.visible = on;
@@ -647,6 +715,75 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
         // bright enough to bloom, not so bright the bloom swallows your own car in chase view
         uniforms.uRainLight.value = on ? 8 : 0.25;
       }
+    },
+    setDamage(parts, susp, char) {
+      for (const k of PART_IDS) {
+        const d = parts[k];
+        if (d === partState[k]) continue;
+        partState[k] = d;
+        const gone = d >= 1;
+        const b = Math.min(1, d);
+        for (const pv of partPivots[k]) {
+          pv.visible = !gone;
+          if (k === 'rw') {
+            // the upper rear wing folds back and leans
+            pv.rotation.set(-0.5 * b * b, 0, 0.12 * b * b);
+          } else {
+            // the wing half droops at its tip, bends back and twists
+            const side = k === 'fwL' ? 1 : -1;
+            pv.rotation.set(0.22 * b * b, 0.22 * b * b * side, -0.2 * b * b * side);
+            pv.position.y = PART_HINGE[k][1] - 0.04 * b;
+          }
+        }
+      }
+      // suspension: the wheel leans in and gets pushed back as the corner folds
+      corners.forEach((c, i) => {
+        const d = Math.min(1, susp[i] ?? 0);
+        const home = cornerHome[i];
+        c.group.rotation.z = d * d * 0.38 * -c.side;
+        c.group.position.set(home.x - c.side * 0.12 * d * d, home.y - 0.05 * d * d, home.z - (c.front ? 0.18 : 0.08) * d * d);
+      });
+      if (char !== charLevel) {
+        if (char > 0) ensureCharMats();
+        charLevel = char;
+        const soot = new THREE.Color(0.035, 0.032, 0.03);
+        for (const q of charMats) {
+          q.m.color.copy(q.color).lerp(soot, Math.min(1, char * 1.1));
+          q.m.roughness = THREE.MathUtils.lerp(q.rough, 0.95, char);
+          q.m.envMapIntensity = q.env * (1 - 0.75 * char);
+          const pm = q.m as THREE.MeshPhysicalMaterial;
+          if ('clearcoat' in pm) pm.clearcoat = q.cc * (1 - char);
+          if ('sheen' in pm) pm.sheen = q.sheen * (1 - char);
+        }
+      }
+    },
+    cloneBroken(part) {
+      root.updateWorldMatrix(true, true);
+      const out = new THREE.Group();
+      const lv = Math.min(detail, 1);
+      const isWheel = part in cornerOf;
+      const src: THREE.Object3D = isWheel ? cornerOf[part as WheelId].spin : partPivots[part as PartId][lv];
+      const wheelMesh = isWheel ? cornerOf[part as WheelId].lv[lv].tyre : null;
+      // copy the meshes (the detailed level), baked into one transform relative to the part
+      const inv = new THREE.Matrix4().copy(src.matrixWorld).invert();
+      src.traverse((o) => {
+        const me = o as THREE.Mesh;
+        if (!me.isMesh || me.material === blurMat) return;
+        if (wheelMesh && me !== wheelMesh) return;
+        const c = new THREE.Mesh(me.geometry, me.material);
+        c.castShadow = true;
+        c.receiveShadow = true;
+        c.matrixAutoUpdate = false;
+        c.matrix.multiplyMatrices(inv, me.matrixWorld);
+        out.add(c);
+      });
+      src.matrixWorld.decompose(out.position, out.quaternion, out.scale);
+      return out;
+    },
+    setWheelLost(w, lost) {
+      if (wheelLost[w] === lost) return;
+      wheelLost[w] = lost;
+      applyVisibility();
     },
     dispose() {
       root.removeFromParent();

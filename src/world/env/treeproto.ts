@@ -507,7 +507,134 @@ interface Card {
   keep1: boolean;
 }
 
+/**
+ * A Norway spruce, built the way it grows: a straight trunk to a leader, and
+ * whorls of branches every half metre or so — long and drooping at the skirt,
+ * shorter and upswept toward the spire. Each branch is a frond (a flat spray card
+ * plus a crossed vertical one, so it has body seen from the side as well as from
+ * above). The result is the dense, dark, layered cone of an Ardennes plantation.
+ */
+function makeConifer(variant: number, index: number): TreeProto {
+  const p = P.spruce;
+  const r = rng(9173 + index * 7919 + variant * 131);
+  const R = (a: [number, number]) => a[0] + r() * (a[1] - a[0]);
+  const H = R(p.H);
+  const boleY = H * R(p.bole);
+  const crownR = R(p.crownR);
+  const trunkR = R(p.trunkR);
+  const lean = new THREE.Vector3((r() - 0.5) * 0.05, 0, (r() - 0.5) * 0.05);
+  const trunkAt = (y: number) => new THREE.Vector3(lean.x * y, y, lean.z * y);
+  const windAt = (x: number, y: number, z: number) => {
+    const h = Math.max(0, (y - boleY * 0.4) / H);
+    return Math.min(1.2, h * h * 1.2 + Math.hypot(x, z) / (crownR * 3));
+  };
+  const tubes: Tube[] = [];
+  {
+    const pts: [number, number, number, number][] = [];
+    const topY = H * 0.97;
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const y = -0.3 + t * (topY + 0.3);
+      const flare = i === 0 ? 1.4 : i === 1 ? 1.1 : 1;
+      const a = trunkAt(y);
+      pts.push([a.x, y, a.z, trunkR * flare * (1 - t * 0.93)]);
+    }
+    tubes.push({ pts, sides: 8, level: 0, phase: 0 });
+  }
+  interface Frond {
+    base: THREE.Vector3;
+    dir: THREE.Vector3;
+    side: THREE.Vector3;
+    L: number;
+    W: number;
+    ao0: number;
+    ao1: number;
+    tint: THREE.Color;
+    phase: number;
+    lod1: boolean;
+  }
+  const fronds: Frond[] = [];
+  const cell = LEAF_CELLS.spruce[0];
+  const up = new THREE.Vector3(0, 1, 0);
+  let y = boleY;
+  let az = r() * 6.28;
+  let whorl = 0;
+  while (y < H * 0.985) {
+    const t = (y - boleY) / (H - boleY);
+    // the outline: a slightly concave cone, broad skirt, sharp spire
+    const Lmax = crownR * Math.pow(1 - t, 1.05) + 0.3;
+    const nb = t < 0.82 ? 5 + Math.floor(r() * 3) : 3 + Math.floor(r() * 2);
+    for (let k = 0; k < nb; k++) {
+      const a = az + (k / nb) * Math.PI * 2 + (r() - 0.5) * 0.5;
+      // skirt branches droop, the top ones sweep up
+      const el = lerp(-0.42, 0.28, Math.pow(t, 0.8)) + (r() - 0.5) * 0.14;
+      const dir = new THREE.Vector3(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el)).normalize();
+      const side = new THREE.Vector3().crossVectors(up, dir).normalize();
+      const L = Lmax * (0.82 + r() * 0.3);
+      // shaded inside and low down, bright at the tips and the top
+      const ao0 = 0.28 + 0.25 * t;
+      const ao1 = Math.min(1, 0.62 + 0.38 * Math.sqrt(t) + (r() - 0.5) * 0.1);
+      const tint = p.leafTint.clone().multiplyScalar(0.86 + r() * 0.22);
+      fronds.push({ base: trunkAt(y), dir, side, L, W: Math.max(0.45, L * (0.62 + r() * 0.18)), ao0, ao1, tint, phase: r() * 6.28, lod1: (k + whorl) % 2 === 0 });
+    }
+    az += 2.39996;
+    whorl++;
+    y += lerp(0.62, 0.4, t) * (0.85 + r() * 0.3);
+  }
+  // the leader: a small upright spray
+  fronds.push({ base: trunkAt(H * 0.9), dir: up.clone(), side: new THREE.Vector3(1, 0, 0), L: H * 0.1 + 0.6, W: 0.7, ao0: 0.8, ao1: 1, tint: p.leafTint.clone(), phase: 0, lod1: true });
+
+  const lods: THREE.BufferGeometry[] = [];
+  for (let lod = 0; lod < 2; lod++) {
+    const b = new TB();
+    for (const t of tubes) emitTube(b, t, lod === 0 ? t.sides : 5, p.bark, p.barkKind, windAt, (yy) => (yy < boleY ? 0.8 : 0.4));
+    for (const f of fronds) {
+      if (lod === 1 && !f.lod1) continue;
+      const wk = lod === 1 ? 1.35 : 1;
+      // flat spray: normal ~up (tilted with the branch), then the crossed vertical one
+      const nFlat = new THREE.Vector3().crossVectors(f.dir, f.side).normalize();
+      if (nFlat.y < 0) nFlat.negate();
+      emitFrond(b, f.base, f.dir, f.side, f.L, f.W * wk, cell, nFlat, f.tint, f.ao0, f.ao1, f.phase, windAt);
+      const vert = nFlat.clone();
+      emitFrond(b, f.base, f.dir, vert, f.L * 0.95, f.W * 0.75 * wk, cell, f.side.clone().addScaledVector(f.dir, 0.4).normalize(), f.tint, f.ao0, f.ao1 * 0.95, f.phase, windAt);
+    }
+    lods.push(b.geometry());
+  }
+  let radius = 0;
+  const pa = lods[0].attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pa.count; i++) radius = Math.max(radius, Math.hypot(pa.getX(i), pa.getZ(i)));
+  const bb = lods[0].boundingBox!;
+  return { index, species: 'spruce', variant, lods, height: bb.max.y, radius, crownR: crownR * 0.7, crownY: boleY + (H - boleY) * 0.35 };
+}
+
+/** a branch frond: a card from the trunk out along `dir`, `W` wide across `side`, lit as `light` */
+function emitFrond(
+  b: TB, base: THREE.Vector3, dir: THREE.Vector3, side: THREE.Vector3, L: number, W: number, cellIdx: number, light: THREE.Vector3,
+  tint: THREE.Color, ao0: number, ao1: number, phase: number, windAt: (x: number, y: number, z: number) => number,
+) {
+  const col = cellIdx % ATLAS_COLS, row = Math.floor(cellIdx / ATLAS_COLS);
+  const u0 = col / ATLAS_COLS, du = 1 / ATLAS_COLS;
+  const v0 = row / ATLAS_ROWS, dv = 1 / ATLAS_ROWS;
+  // lighting normal: the card's facing blended with outward + up so the crown shades as a volume
+  const out = new THREE.Vector3(dir.x, 0, dir.z);
+  if (out.lengthSq() < 1e-4) out.set(0, 1, 0);
+  out.normalize();
+  const n = light.clone().multiplyScalar(0.35).addScaledVector(out, 0.5).addScaledVector(new THREE.Vector3(0, 1, 0), 0.3).normalize();
+  const ids: number[] = [];
+  for (const [a, t] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+    // the frond sags toward its tip
+    const sag = -0.12 * L * t * t;
+    const p = base.clone().addScaledVector(dir, t * L * 1.02 - 0.08).addScaledVector(side, (a - 0.5) * W * (0.55 + 0.45 * t));
+    p.y += sag;
+    ids.push(b.v(p.x, p.y, p.z, n.x, n.y, n.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - t * 0.996 - 0.002) * dv, tint, windAt(p.x, p.y, p.z), 1, t > 0 ? ao1 : ao0, phase));
+  }
+  b.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
+}
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
 function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
+  if (sp === 'spruce') return makeConifer(variant, index);
   const p = P[sp];
   const r = rng(9173 + index * 7919 + variant * 131);
   const R = (a: [number, number]) => a[0] + r() * (a[1] - a[0]);

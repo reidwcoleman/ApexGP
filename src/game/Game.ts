@@ -19,6 +19,7 @@ import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { CarEffects } from '../fx/CarEffects.ts';
+import { Debris } from '../fx/Debris.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
 import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
 import { Weather, planWeather, isLowSun, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
@@ -66,7 +67,11 @@ export class Game {
   private race!: Race;
   private cams!: Cameras;
   private particles = new Particles();
-  private carFx = new CarEffects(this.particles);
+  private carFx!: CarEffects;
+  private tvDofOn = false;
+  private debris!: Debris;
+  /** seconds since the player's car was destroyed (−1 = still racing) */
+  private retireTimer = -1;
   private hud: HUD;
   private menu: Menu;
   private state: GameState = 'boot';
@@ -194,6 +199,12 @@ export class Game {
     applyWeatherUniforms(w0);
     this.env = createEnvironment(this.track, this.gfx, this.scene, w0);
     this.scene.add(this.env.group);
+    this.debris = new Debris(this.track, (x, z) => this.env.heightAt(x, z));
+    this.scene.add(this.debris.group);
+    this.carFx = new CarEffects(this.particles, this.debris);
+    this.scene.add(this.carFx.fireLight);
+    this.carFx.onImpact = (id, imp, isPlayer) => this.onImpact(id, imp.speed, isPlayer);
+    this.carFx.onExplosion = (id, pos) => this.onExplosion(id, pos);
 
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
@@ -250,6 +261,7 @@ export class Game {
       playerCompound: setup.compound,
       gridOrder: this.gridOrder ?? undefined,
       weather: this.plan,
+      damage: setup.damage,
     });
     this.particles.setLight(smokeLight(this.race.weatherState));
     this.rigCompound.clear();
@@ -260,7 +272,12 @@ export class Game {
     for (const [e, rig] of this.rigs) {
       rig.root.visible = inRace.has(e);
       rig.setDriverVisible(true);
+      // a new car: undo any crash damage
+      rig.setDamage({ fwL: 0, fwR: 0, rw: 0 }, [0, 0, 0, 0], 0);
+      for (const w of ['wFL', 'wFR', 'wRL', 'wRR'] as const) rig.setWheelLost(w, false);
     }
+    this.carFx?.resetDamage();
+    this.retireTimer = -1;
     this.driverHidden = false;
     this.particles.clear();
     this.carFx.reset();
@@ -408,8 +425,27 @@ export class Game {
     if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
     this.celebration = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
     this.scene.add(this.celebration.group);
-    // the cars have gone to parc fermé
-    this.carsGroup.visible = false;
+    // the top three are parked in parc fermé below the podium (drivers out); the rest are in the garages
+    for (const rig of this.rigs.values()) rig.root.visible = false;
+    const up = new THREE.Vector3(0, 1, 0);
+    top.forEach((e, i) => {
+      const rig = this.rigs.get(e);
+      const slot = this.celebration!.parkSlots[i];
+      if (!rig || !slot) return;
+      rig.root.visible = true;
+      rig.root.position.copy(slot.pos);
+      rig.root.quaternion.setFromAxisAngle(up, slot.yaw);
+      rig.body.rotation.set(0, 0, 0);
+      rig.body.position.y = 0;
+      rig.setSteer(0);
+      rig.setWheelSpeed(0);
+      rig.setBrakeGlow(0);
+      rig.setDrs(0);
+      rig.setRainLight(false);
+      rig.setDetail(0);
+      rig.setDriverVisible(false);
+    });
+    this.lastCrowd = -1;
     this.state = 'celebration';
     this.stateTime = 0;
     this.hud.show(false);
@@ -419,16 +455,22 @@ export class Game {
     this.celebration?.dispose();
     this.celebration = null;
     this.carsGroup.visible = true;
+    const inRace = new Set(this.race.cars.map((c) => c.entry));
+    for (const [e, rig] of this.rigs) {
+      rig.root.visible = inRace.has(e);
+      rig.setDriverVisible(true);
+    }
     this.gfx.setDepthOfField(false);
     this.showResults();
   }
   private celebration: Celebration | null = null;
+  private lastCrowd = -1;
 
   private showResults() {
     this.state = 'results';
     const rows = this.race.classification();
     const p = this.race.player;
-    const title = p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
+    const title = p.retired ? 'Retired · DNF' : p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
     const laps = this.race.opts.laps;
     const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${this.track.def.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
@@ -501,6 +543,24 @@ export class Game {
           else this.hud.flash('Pit request cancelled', '', '', 1.4);
           if (this.audioReady) this.audio.ui('select');
         }
+        // the player's car is destroyed: watch it burn, then leave the race (or flash back)
+        if (race.player.retired && !race.isTimeTrial) {
+          if (this.retireTimer < 0) {
+            this.retireTimer = 0;
+            this.hud.setHint('Your race is over · <kbd>R</kbd> flashback · <kbd>Enter</kbd> leave the race');
+          }
+          this.retireTimer += dt;
+          if (this.retireTimer > 2.2 && this.cams.mode !== 'tv') this.cams.set('tv');
+          if (this.retireTimer > 11 || (this.retireTimer > 1.2 && this.input.nav.accept)) {
+            this.hud.setHint(null);
+            this.showResults();
+          }
+        } else if (this.retireTimer >= 0) {
+          // flashed back to before it happened
+          this.retireTimer = -1;
+          this.hud.setHint(null);
+          this.cams.set(this.menu.settings.camera);
+        }
         // chequered flag → results
         if (race.player.finished && !race.isTimeTrial) {
           if (this.finishTimer < 0) {
@@ -521,17 +581,24 @@ export class Game {
       this.effects(dt);
       this.speedFx();
     } else if (this.state === 'celebration') {
+      // the race clock runs on (weather), but the cars stay where they're parked
       this.driveInput(dt);
       race.update(dt);
-      this.syncAllViews(dt);
-      const done = this.celebration!.update(dt, this.camera);
-      this.gfx.setDepthOfField(true, this.celebration!.focus(this.dofTarget), 6, 1.6);
+      const cel = this.celebration!;
+      const done = cel.update(dt, this.camera);
+      const dof = cel.dof;
+      this.gfx.setDepthOfField(true, cel.focus(this.dofTarget), dof.range, dof.bokeh);
+      if (this.audioReady && Math.abs(cel.crowdLevel - this.lastCrowd) > 0.01) {
+        this.lastCrowd = cel.crowdLevel;
+        this.audio.crowd(cel.crowdLevel);
+      }
       if (done || this.input.nav.accept || this.input.nav.back) this.endCelebration();
     } else if (this.state === 'results') {
       this.driveInput(dt);
       race.update(dt);
       this.syncAllViews(dt);
       this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
+      this.effects(dt);
     } else if (this.state === 'flashback') {
       // scrub with left/right (hold), confirm or cancel
       const auto = this.stateTime < 0.7 ? -3.5 : 0;
@@ -558,8 +625,17 @@ export class Game {
       this.replayBar.style.width = `${Math.min(100, ((this.replayT - this.replayStart) / span) * 100)}%`;
       if (this.replayT >= this.replayEnd || st.pause || this.input.nav.accept || this.input.nav.back) this.endReplay();
     }
+    // the TV camera has a real lens: focus pulled onto the car, shallow on the long end
+    const tvView = this.cams.mode === 'tv' && (this.state === 'race' || this.state === 'results' || this.state === 'replay');
+    if (tvView) {
+      this.gfx.setDepthOfField(true, this.cams.tvFocus, this.cams.tvRange, this.cams.tvDof);
+      this.tvDofOn = true;
+    } else if (this.tvDofOn) {
+      this.tvDofOn = false;
+      if (this.state !== 'menu' && this.state !== 'celebration') this.gfx.setDepthOfField(false);
+    }
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results') this.replay.record(dt, race);
-    if (this.state === 'race' && race.phase === 'racing' && !race.player.finished) this.flash.record(dt, race);
+    if (this.state === 'race' && race.phase === 'racing' && !race.player.finished && !race.player.retired) this.flash.record(dt, race);
 
     this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
     const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && this.cams.mode !== 'heli' && !race.player.finished;
@@ -680,10 +756,7 @@ export class Game {
       }
       if (!this.audioReady) continue;
       if (e.kind === 'lights-out') this.audio.startBeep(true);
-      if (e.kind === 'contact') {
-        this.audio.impact(Math.min(1, (e.value ?? 0) / 12));
-        this.cams.impulse = Math.min(1, (e.value ?? 0) / 10);
-      }
+      if (e.kind === 'retired' && e.car === this.race.player.id) this.audio.ui('back');
     }
     // a beep for each light
     const lit = this.race.lightsLit;
@@ -790,6 +863,28 @@ export class Game {
         (this.rigs.get(c.entry) as CompoundRig).setCompound?.(c.compound);
       }
     }
+  }
+
+  /** a damaging hit on some car: crunch and camera shake for the player's, a distant crunch for others */
+  private onImpact(id: number, speed: number, isPlayer: boolean) {
+    const s = Math.min(1, (speed - 3) / 22);
+    if (s <= 0) return;
+    if (isPlayer) {
+      this.cams.impulse = Math.max(this.cams.impulse, Math.min(1, 0.25 + s));
+      if (this.audioReady) this.audio.impact(s);
+      return;
+    }
+    const rig = this.rigs.get(this.race.cars[id].entry);
+    if (!rig || !this.audioReady) return;
+    const d = rig.root.position.distanceTo(this.camera.position);
+    if (d < 120) this.audio.impact(s * Math.min(1, 12 / (d + 4)));
+  }
+
+  private onExplosion(id: number, pos: THREE.Vector3) {
+    const d = pos.distanceTo(this.camera.position);
+    const near = this.race.cars[id].isPlayer ? 1 : Math.min(1, 25 / (d + 10));
+    if (this.audioReady) this.audio.explosion(near);
+    this.cams.impulse = Math.max(this.cams.impulse, Math.min(1, 40 / (d + 20)));
   }
 
   private playerRigPos(): THREE.Vector3 {
@@ -954,7 +1049,8 @@ export class Game {
       this.headroom = 0;
       // still slow at the lowest resolution for a few seconds: step the graphics level down
       // (only while the player hasn't chosen one themselves)
-      if (gfx.dynamicScale <= 0.56 && this.fpsAvg < 45 && st.autoQuality && st.quality !== 'low' && this.state === 'race') {
+      // (never below High: the resolution scale takes up the rest)
+      if (gfx.dynamicScale <= 0.56 && this.fpsAvg < 45 && st.autoQuality && QUALITY_ORDER.indexOf(st.quality) > QUALITY_ORDER.indexOf('high') && this.state === 'race') {
         if (++this.slowAtFloor >= 4) {
           this.slowAtFloor = 0;
           this.qualityCap = st.quality;
@@ -979,13 +1075,9 @@ export class Game {
     }
   }
   private setAutoQuality(q: QualityLevel) {
+    // this session only: the saved setting stays what the player (or the default) chose
     const st = this.menu.settings;
     st.quality = q;
-    try {
-      localStorage.setItem('apexgp.settings', JSON.stringify(st));
-    } catch {
-      /* storage unavailable */
-    }
     this.applySettings(st);
     this.scaleCeiling = 1;
   }

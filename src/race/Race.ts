@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, wetGrip, type DriveInput } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, wetGrip, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
@@ -29,6 +29,8 @@ export interface RaceOptions {
   weather: WeatherPlan;
   /** starting order from qualifying (overrides playerGrid) */
   gridOrder?: Entry[];
+  /** crash damage (default full) */
+  damage?: DamageMode;
 }
 
 /**
@@ -99,6 +101,14 @@ export interface Competitor {
   contactTimer: number;
   /** being lapped by a car close behind: blue flags */
   blueFlag: boolean;
+  /** out of the race (car destroyed or broken): DNF */
+  retired: boolean;
+  /** race time of the retirement */
+  retiredAt: number;
+  /** the marshals have craned the wreck away: no longer on the track */
+  removed: boolean;
+  /** seconds a retired car has sat still */
+  stopTimer: number;
 }
 
 export interface RaceEvent {
@@ -118,7 +128,9 @@ export interface RaceEvent {
     | 'pit-stop'
     | 'pit-out'
     | 'box-now'
-    | 'blue-flag';
+    | 'blue-flag'
+    | 'retired'
+    | 'damage';
   car: number;
   value?: number;
   sector?: number;
@@ -205,6 +217,7 @@ export class Race {
       const isPlayer = entry === opts.playerEntry;
       const car = new CarPhysics(F1_SPEC);
       car.weather = this.weather;
+      car.damageMode = opts.damage ?? 'full';
       if (opts.mode === 'timetrial') {
         car.fuel = 5;
         car.burnFuel = false;
@@ -262,6 +275,10 @@ export class Race {
         cpIndex: -1,
         contactTimer: 0,
         blueFlag: false,
+        retired: false,
+        retiredAt: 0,
+        removed: false,
+        stopTimer: 0,
       };
       c.raceDist = c.laps * track.length + c.lapDist;
       this.cars.push(c);
@@ -350,12 +367,13 @@ export class Race {
     const h = dt / SUBSTEPS;
     for (let k = 0; k < SUBSTEPS; k++) {
       this.neighbours.length = 0;
-      for (const c of this.cars) this.neighbours.push({ id: c.id, s: c.car.s, lateral: c.car.lateral, speed: c.car.vx });
+      for (const c of this.cars) if (!c.removed) this.neighbours.push({ id: c.id, s: c.car.s, lateral: c.car.lateral, speed: c.car.vx });
       for (const c of this.cars) {
+        if (c.removed) continue;
         const zone = this.drsLapDist[c.drsZone];
         const inZone = !!zone && c.drsEligible && this.inRange(c.lapDist, zone.start, zone.end);
         // pit assist: requested stop + crossing the takeover point → scripted pit lane
-        if (c.pit.phase === 'none' && (this.phase === 'racing' || this.phase === 'finished') && !c.finished) {
+        if (c.pit.phase === 'none' && (this.phase === 'racing' || this.phase === 'finished') && !c.finished && !c.retired) {
           const want = c.isPlayer ? this.playerPitRequest : c.pitLap >= 0 && c.laps + 1 >= c.pitLap;
           const d = this.track.delta(this.track.wrap(this.pitLane.takeoverS), c.car.s);
           if (want && d >= 0 && d < 25) {
@@ -370,7 +388,7 @@ export class Race {
             fitTyres(c.car, c.pit.next);
             c.compound = c.pit.next;
             if (!c.compoundsUsed.includes(c.pit.next)) c.compoundsUsed.push(c.pit.next);
-            c.car.wingDamage = 0;
+            c.car.repairFrontWing();
             c.stops++;
             if (c.isPlayer) this.playerPitRequest = false;
             else {
@@ -396,7 +414,7 @@ export class Race {
         } else if (c.ai) {
           const aiRacing = this.phase === 'racing' || this.phase === 'finished';
           const reset = c.ai.update(h, c.car, this.track, this.profile, aiRacing, this.neighbours, c.id);
-          if (reset) this.resetCar(c);
+          if (reset && !c.retired) this.resetCar(c);
           c.car.drsOpen = inZone && this.inRange(c.lapDist, zone!.start + 10, zone!.end - 60);
           c.car.step(h, c.ai.input, this.track, inZone);
         }
@@ -404,10 +422,50 @@ export class Race {
       this.collideCars();
     }
     this.playerDrsRequest = false;
+    this.retirements(dt);
 
     for (const c of this.cars) this.scoreCar(c);
     this.rankCars();
   }
+
+  /**
+   * Damage outcomes: a destroyed car is out on the spot; an AI car with a broken
+   * wheel parks it; a broken front wing sends an AI car into the pits for a new
+   * nose. Stopped wrecks are craned away after a while.
+   */
+  private retirements(dt: number) {
+    if (this.phase !== 'racing' && this.phase !== 'finished') return;
+    for (const c of this.cars) {
+      const car = c.car;
+      if (!c.retired && !c.finished) {
+        const broken = !c.isPlayer && car.susp.some((d) => d >= 0.999) && car.damageMode === 'full';
+        if (car.destroyed || broken) {
+          c.retired = true;
+          c.retiredAt = this.raceTime;
+          c.drsEligible = false;
+          car.drsOpen = false;
+          if (c.ai) {
+            // coast off the racing line onto the verge on the nearer side
+            c.ai.parkSide = car.lateral >= 0 ? 1 : -1;
+          }
+          this.events.push({ kind: 'retired', car: c.id, value: car.destroyed ? 1 : 0 });
+        } else if (c.ai && c.pitLap < 0 && car.wingDamage > 0.45 && car.damageMode === 'full') {
+          // a new nose at the end of this lap
+          c.pitLap = c.laps + 1;
+        }
+        if (c.isPlayer && car.wingDamage > 0.45 && !this.warnedWing) {
+          this.warnedWing = true;
+          this.events.push({ kind: 'damage', car: c.id, value: car.wingDamage });
+        }
+        if (c.isPlayer && car.wingDamage < 0.1) this.warnedWing = false;
+      }
+      if (c.retired && !c.removed && !c.isPlayer) {
+        if (car.speed < 1) c.stopTimer += dt;
+        if (c.stopTimer > 14) c.removed = true;
+      }
+    }
+  }
+  private warnedWing = false;
 
   /**
    * Slipstream and dirty air from the car directly ahead on the road:
@@ -420,7 +478,7 @@ export class Race {
       let tow = 0;
       let dirty = 0;
       for (const o of cars) {
-        if (o === c || o.pit.phase !== 'none' || c.pit.phase !== 'none') continue;
+        if (o === c || o.pit.phase !== 'none' || c.pit.phase !== 'none' || o.removed) continue;
         const ds = this.track.delta(c.car.s, o.car.s);
         if (ds <= 2 || ds > 55) continue;
         const dl = Math.abs(o.car.lateral - c.car.lateral);
@@ -470,9 +528,9 @@ export class Race {
     const L = this.track.length;
     for (const c of this.cars) {
       let blue = false;
-      if (!c.finished && c.pit.phase === 'none') {
+      if (!c.finished && !c.retired && c.pit.phase === 'none') {
         for (const o of this.cars) {
-          if (o === c || o.finished || o.pit.phase !== 'none') continue;
+          if (o === c || o.finished || o.retired || o.pit.phase !== 'none') continue;
           if (o.raceDist - c.raceDist < L * 0.6) continue;
           const behind = this.track.delta(o.car.s, c.car.s);
           if (behind > 0 && behind < 70) {
@@ -520,7 +578,7 @@ export class Race {
     if (this.isTimeTrial || this.phase !== 'racing') return;
     const want = this.conditionsType();
     for (const c of this.cars) {
-      if (c.isPlayer || c.finished || c.pit.phase !== 'none') continue;
+      if (c.isPlayer || c.finished || c.retired || c.pit.phase !== 'none') continue;
       const have = COMPOUNDS[c.compound].type;
       const lapsLeft = this.opts.laps - Math.max(0, c.laps);
       if (have === want || lapsLeft < 1) {
@@ -604,7 +662,7 @@ export class Race {
       if (!this.isTimeTrial) {
         if (c.laps > this.leaderLaps) this.leaderLaps = c.laps;
         if (c.isPlayer && c.laps === this.opts.laps - 1) this.events.push({ kind: 'final-lap', car: c.id });
-        if (!c.finished && (c.laps >= this.opts.laps || (this.phase === 'finished' && c.laps >= 1))) {
+        if (!c.finished && !c.retired && (c.laps >= this.opts.laps || (this.phase === 'finished' && c.laps >= 1))) {
           c.finished = true;
           // two-compound rule: finishing a long race on one compound costs 30 s
           if (this.owesSecondCompound(c)) {
@@ -724,6 +782,9 @@ export class Race {
   private rankCars() {
     const sorted = this.cars.slice().sort((a, b) => {
       // finished cars: more laps first, then total time including penalties
+      // retired cars drop behind everyone still running, in the order they got furthest
+      if (a.retired !== b.retired) return a.retired ? 1 : -1;
+      if (a.retired && b.retired) return b.raceDist - a.raceDist;
       if (a.finished && b.finished) return b.laps - a.laps || a.finishTime - b.finishTime;
       if (a.finished !== b.finished) {
         // a finished car is ahead of anyone on the same or fewer laps
@@ -758,9 +819,9 @@ export class Race {
     const OFFS = [1.75, 0, -1.8];
     for (let i = 0; i < cars.length; i++) {
       const A = cars[i].car;
-      if (cars[i].pit.phase !== 'none') continue;
+      if (cars[i].pit.phase !== 'none' || cars[i].removed) continue;
       for (let j = i + 1; j < cars.length; j++) {
-        if (cars[j].pit.phase !== 'none') continue;
+        if (cars[j].pit.phase !== 'none' || cars[j].removed) continue;
         const B = cars[j].car;
         const dxc = A.x - B.x;
         const dzc = A.z - B.z;
@@ -822,13 +883,11 @@ export class Race {
         B.applyImpulse(px, pz, -jx, -jz);
         const strength = -vn;
         if (strength > 2 && (cars[i].isPlayer || cars[j].isPlayer)) this.events.push({ kind: 'contact', car: cars[i].isPlayer ? i : j, value: strength });
-        // nose into something hard enough breaks the front wing
-        if (strength > 6) {
-          const frontA = (px - A.x) * sa + (pz - A.z) * ca > 1.2;
-          const frontB = (px - B.x) * sb + (pz - B.z) * cb > 1.2;
-          if (frontA) A.wingDamage = Math.min(1, A.wingDamage + strength * 0.03);
-          if (frontB) B.wingDamage = Math.min(1, B.wingDamage + strength * 0.03);
-        }
+        // bodywork damage on both cars where they touched (carbon on carbon, glancing: much softer than a wall)
+        const localA = [(px - A.x) * sa + (pz - A.z) * ca, (px - A.x) * ca - (pz - A.z) * sa];
+        const localB = [(px - B.x) * sb + (pz - B.z) * cb, (px - B.x) * cb - (pz - B.z) * sb];
+        A.addImpact(localA[0], localA[1], strength * 0.75, px, pz, -nx, -nz);
+        B.addImpact(localB[0], localB[1], strength * 0.75, px, pz, nx, nz);
       }
     }
   }
@@ -850,6 +909,7 @@ export class Race {
         penalty: c.penalty,
         fastest: c.id === this.bestLapCar,
         raceDist: c.raceDist / L,
+        dnf: c.retired,
       }));
   }
 }

@@ -139,6 +139,23 @@ export interface Contact {
   wallSide: number;
 }
 
+/** damage zones (index into CarPhysics.dmg) */
+export const DMG = { FWL: 0, FWR: 1, NOSE: 2, RW: 3, PODL: 4, PODR: 5, FLOOR: 6, ENGINE: 7 } as const;
+/** full: damage costs performance and a big enough accumulation destroys the car; cosmetic: looks only */
+export type DamageMode = 'full' | 'cosmetic' | 'off';
+/** one damaging hit (world contact point, outward normal toward whatever was hit), for effects and audio */
+export interface Impact {
+  along: number;
+  side: number;
+  /** normal impact speed (m/s) */
+  speed: number;
+  x: number;
+  z: number;
+  nx: number;
+  nz: number;
+}
+const NO_DMG = new Float32Array(8);
+
 const G = 9.81;
 const RHO = 1.225;
 const V_MIN = 2.5;
@@ -235,8 +252,23 @@ export class CarPhysics {
   /** set by the race each step: slipstream (0..1) and dirty air (0..1) from the car ahead */
   tow = 0;
   dirty = 0;
-  /** 0..1 aero damage (front wing), reduces front downforce */
-  wingDamage = 0;
+  /**
+   * Structural damage per zone 0..1 (see DMG): front wing halves, nose, rear wing,
+   * sidepods, floor, engine/gearbox. Suspension damage per wheel (FL FR RL RR),
+   * 1 = broken. `integrity` counts down with every big hit; at 0 the car is
+   * destroyed (it catches fire, the engine dies and it's out of the race).
+   */
+  readonly dmg = new Float32Array(8);
+  readonly susp = [0, 0, 0, 0];
+  integrity = 1;
+  destroyed = false;
+  damageMode: DamageMode = 'full';
+  /** recent damaging hits; effects consume them (bounded) */
+  readonly impacts: Impact[] = [];
+  /** front-wing damage for the HUD and the pit crew (0..1) */
+  get wingDamage(): number {
+    return Math.max(this.dmg[DMG.FWL], this.dmg[DMG.FWR], this.dmg[DMG.NOSE] * 0.8);
+  }
   /** tyre wear per wheel 0..1 and the compound's grip / wear multipliers */
   readonly wear = [0, 0, 0, 0];
   compoundGrip = 1;
@@ -303,7 +335,6 @@ export class CarPhysics {
   private heaveV = 0;
   kerbPhaseVis = 0;
   contact: Contact = { wallHit: 0, wallSide: 0 };
-  damage = 0;
 
   // tyre curve constants
   private readonly tyreB: number;
@@ -452,8 +483,10 @@ export class CarPhysics {
     this.tcActive = false;
     this.absActive = false;
 
-    const throttle = Math.max(0, Math.min(1, input.throttle));
-    const brake = Math.max(0, Math.min(1, input.brake));
+    // a destroyed car has no engine: it rolls to a stop
+    const throttle = this.destroyed ? 0 : Math.max(0, Math.min(1, input.throttle));
+    const brake = Math.max(this.destroyed ? 0.12 : 0, Math.min(1, input.brake));
+    const dm = this.damageMode === 'full' ? this.dmg : NO_DMG;
 
     if (input.hold) {
       this.vx = this.vy = this.r = 0;
@@ -491,6 +524,8 @@ export class CarPhysics {
       delta = Math.max(-sp.maxSteer, Math.min(sp.maxSteer, delta));
     }
     this.steer = delta;
+    // bent track rods pull the car toward the damaged side
+    if (this.damageMode === 'full') delta += 0.03 * (this.susp[0] - this.susp[1]);
 
     // ---- surfaces
     const fwdAlong = Math.cos(this.relYaw);
@@ -521,13 +556,15 @@ export class CarPhysics {
     this.drsOpen = drsAllowed && this.drsOpen && brake < 0.05;
     this.drsAnim += ((this.drsOpen ? 1 : 0) - this.drsAnim) * Math.min(1, dt * 12);
     const floorFactor = this.offTrack ? 0.72 : 1;
-    const clA = (sp.clA - sp.drsLift * this.drsAnim) * (1 - 0.16 * this.dirty) * floorFactor;
-    const cdA = (sp.cdA - sp.drsDrag * this.drsAnim) * (1 - 0.28 * this.tow);
+    const bodyDmg = 1 - 0.1 * dm[DMG.FLOOR] - 0.04 * (dm[DMG.PODL] + dm[DMG.PODR]);
+    const clA = (sp.clA - sp.drsLift * this.drsAnim) * (1 - 0.16 * this.dirty) * floorFactor * bodyDmg;
+    const cdA = (sp.cdA - sp.drsDrag * this.drsAnim) * (1 - 0.28 * this.tow) * (1 + 0.06 * (dm[DMG.RW] + dm[DMG.PODL] + dm[DMG.PODR]) + 0.05 * dm[DMG.FLOOR]);
     const down = q * clA;
     const drag = q * cdA;
     const balance = Math.max(0.36, Math.min(0.5, sp.aeroFront + Math.max(-0.015, Math.min(0.022, -this.ax * sp.pitchAero))));
-    const downF = down * balance * (1 - 0.35 * this.wingDamage);
-    const downR = down * (1 - balance);
+    // a broken front wing costs front downforce (understeer), a broken rear wing the rear (oversteer)
+    const downF = down * balance * (1 - 0.2 * (dm[DMG.FWL] + dm[DMG.FWR]) - 0.12 * dm[DMG.NOSE]);
+    const downR = down * (1 - balance) * (1 - 0.45 * dm[DMG.RW]);
 
     // ---- loads
     const Fz0 = (sp.mass * G) / 4;
@@ -578,7 +615,7 @@ export class CarPhysics {
     if (engRpm > sp.rpmLimit) engRpm = sp.rpmLimit;
 
     this.ersDeploying = input.ers && this.ers > 0.001 && throttle > 0.5 && !this.reverse;
-    let power = this.powerAt(engRpm);
+    let power = this.powerAt(engRpm) * (1 - 0.45 * dm[DMG.ENGINE]);
     if (this.ersDeploying) {
       power += sp.ersBoost;
       this.ers = Math.max(0, this.ers - dt / 22);
@@ -654,7 +691,10 @@ export class CarPhysics {
       // wet paint and wet grass are far worse than wet asphalt
       const surfGrip = SURF_GRIP[sc] * (sc === SURF.KERB ? 1 - 0.3 * wet : sc === SURF.GRASS ? 1 - 0.4 * wet : 1);
       const tGrip = tempGrip(this.tyreTemp[i], this.tyreOpt);
-      const cond = weatherGrip * tGrip * wearGrip * this.compoundGrip;
+      // damaged suspension: the wheel is out of alignment, a broken one barely touches the road
+      const sd8 = this.damageMode === 'full' ? this.susp[i] : 0;
+      const suspGrip = sd8 >= 0.999 ? 0.3 : 1 - 0.4 * sd8;
+      const cond = weatherGrip * tGrip * wearGrip * this.compoundGrip * suspGrip;
       gripSum += cond;
       const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond;
       const Fmax = muI * Fz;
@@ -724,7 +764,7 @@ export class CarPhysics {
       let Fl = tmp[0];
       let Ft = tmp[1];
       // rolling resistance and bogging in gravel/grass
-      Fl -= Math.sign(vl) * Fz * (SURF_RR[sc] + SURF_RR_V[sc] * Math.abs(vl));
+      Fl -= Math.sign(vl) * Fz * (SURF_RR[sc] + SURF_RR_V[sc] * Math.abs(vl) + (sd8 >= 0.999 ? 0.22 : 0));
       Ft -= vt * SURF_BOG[sc] * Fz * 0.01;
 
       const fbx = Fl * c - Ft * s;
@@ -939,7 +979,63 @@ export class CarPhysics {
     this.applyImpulse(px, pz, -nx * jn - tx * jt, -nz * jn - tz * jt);
     this.contact.wallHit = vn;
     this.contact.wallSide = wSign;
-    this.damage += vn;
-    if (wAlong > 0 && vn > 4) this.wingDamage = Math.min(1, this.wingDamage + vn * 0.025);
+    this.addImpact(wAlong, wSide, vn, px, pz, nx, nz);
+  }
+
+  /**
+   * A hit at a point on the car (local: along + forward, side + left) with normal
+   * speed vn (m/s): damages the zones around it; enough of them destroys the car.
+   * (nx, nz) is the world direction from the car toward what it hit.
+   */
+  addImpact(along: number, side: number, vn: number, px: number, pz: number, nx: number, nz: number) {
+    const e = vn - 3;
+    if (e <= 0) return;
+    this.impacts.push({ along, side, speed: vn, x: px, z: pz, nx, nz });
+    if (this.impacts.length > 8) this.impacts.shift();
+    if (this.damageMode === 'off' || this.destroyed) return;
+    // 3 m/s rubs are free; a 30 m/s square hit into a wall wrecks the front end
+    const hit = Math.pow(e / 28, 1.5);
+    const d = this.dmg;
+    const add = (i: number, k: number) => (d[i] = Math.min(1, d[i] + hit * k));
+    const left = side >= 0;
+    if (along > 1.45) {
+      add(left ? DMG.FWL : DMG.FWR, 3.2);
+      if (Math.abs(side) < 0.45 || e > 12) add(left ? DMG.FWR : DMG.FWL, 1.6);
+      add(DMG.NOSE, 1.1);
+    } else if (along < -1.45) {
+      add(DMG.RW, 2.4);
+      add(DMG.ENGINE, 0.9);
+      add(DMG.FLOOR, 0.4);
+    } else {
+      add(left ? DMG.PODL : DMG.PODR, 1.8);
+      add(DMG.FLOOR, 0.7);
+      if (along < -0.3) add(DMG.ENGINE, 0.6);
+    }
+    // out at the wheels: the suspension there takes it
+    if (Math.abs(side) > 0.5) {
+      const w = (along > 0.2 ? 0 : 2) + (left ? 0 : 1);
+      this.susp[w] = Math.min(1, this.susp[w] + hit * 2.2);
+    }
+    if (this.damageMode === 'full') {
+      this.integrity -= hit * 0.62;
+      if (this.integrity <= 0) {
+        this.integrity = 0;
+        this.destroyed = true;
+      }
+    }
+  }
+
+  /** a new nose and front wing (pit stop) */
+  repairFrontWing() {
+    this.dmg[DMG.FWL] = this.dmg[DMG.FWR] = this.dmg[DMG.NOSE] = 0;
+  }
+
+  /** back to a new car (new session) */
+  resetDamage() {
+    this.dmg.fill(0);
+    this.susp.fill(0);
+    this.integrity = 1;
+    this.destroyed = false;
+    this.impacts.length = 0;
   }
 }

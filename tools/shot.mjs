@@ -17,6 +17,7 @@ const W = Number(opt('w', 1600));
 const H = Number(opt('h', 900));
 const wait = Number(opt('wait', 25000));
 const evalJs = opt('eval', null);
+const after = Number(opt('after', 1500));
 const port = opt('port', '5190');
 const url = path.startsWith('http') ? path : `http://localhost:${port}${path}`;
 
@@ -42,7 +43,7 @@ try {
 if (evalJs) {
   const r = await page.evaluate(evalJs);
   if (r !== undefined) console.log('eval', JSON.stringify(r));
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(after);
 }
 await page.screenshot({ path: out });
 const info = await page.evaluate(() => window.__info ?? null).catch(() => null);

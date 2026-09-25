@@ -31,6 +31,8 @@ export class AIDriver {
   launched = false;
   /** blue flags: side of the road to move to (−1 left, 1 right, 0 = racing) */
   yieldSide = 0;
+  /** retired: pull off to this side of the road (−1 / 1) and stop; 0 = racing */
+  parkSide = 0;
   /** the grip the driver believes the car has (lags the real thing) */
   gripEst = 1;
   private prevLat = 0;
@@ -139,6 +141,8 @@ export class AIDriver {
     // AI keeps ~0.6 m of margin off the extreme racing line (kerb to kerb)
     const pathLat = (ss: number) => {
       const hwS = track.halfWidthAt(ss);
+      // retired: onto the verge, clear of the road (inside the barrier)
+      if (this.parkSide !== 0) return this.parkSide * Math.min(hwS + 2.2, track.barrierAt(ss, this.parkSide) - 1.4);
       return Math.max(-hwS + 1.1, Math.min(hwS - 1.1, track.racingLineAt(ss) * 0.9 + this.offset));
     };
     const latP = pathLat(sF);
@@ -169,6 +173,14 @@ export class AIDriver {
     const hiLim = lim + (aR > 0 ? room : 0);
     const loLim = lim + (aR < 0 ? room : 0);
     inp.steer = Math.max(-loLim, Math.min(hiLim, steer));
+
+    if (this.parkSide !== 0) {
+      // no engine: roll off the road, brake gently, stop
+      inp.throttle = 0;
+      inp.brake = v > 30 ? 0.2 : v > 2 ? 0.45 : 1;
+      inp.ers = false;
+      return false;
+    }
 
     // ---- speed
     const offLine = Math.abs(this.offset);
