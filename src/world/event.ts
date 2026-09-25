@@ -13,6 +13,7 @@ export interface EventNames {
 const EVENTS: Record<string, EventNames> = {
   monza: { place: 'MONZA', gp: 'GRAN PREMIO D’ITALIA', colours: ['#008c45', '#f4f5f0', '#cd212a'] },
   spa: { place: 'SPA', gp: 'BELGIAN GRAND PRIX', colours: ['#1a1a1a', '#fdda24', '#ef3340'] },
+  silverstone: { place: 'SILVERSTONE', gp: 'BRITISH GRAND PRIX', colours: ['#012169', '#ffffff', '#c8102e'] },
 };
 
 /** set once per world build (before the trackside and pit textures are painted) */

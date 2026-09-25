@@ -740,6 +740,11 @@ export class CrewSystem {
     return 0;
   }
 
+  /** a sight line kept free of people (the garage camera → the car): segment a→b in xz, radius r */
+  clear: { ax: number; az: number; bx: number; bz: number; r: number } | null = null;
+  /** a team whose crew is not drawn (the menu garage has its own people) */
+  hideTeam = -1;
+
   update(dt: number, camPos: THREE.Vector3) {
     this.time += dt;
     this.cam.copy(camPos);
@@ -861,7 +866,7 @@ export class CrewSystem {
     far.count = 0;
     const cx = this.cam.x, cz = this.cam.z;
     for (let k = 0; k < this.team.length; k++) {
-      if (!this.visible[k]) continue;
+      if (!this.visible[k] || k === this.hideTeam) continue;
       for (let j = 0; j < PER_TEAM; j++) {
         const i = k * PER_TEAM + j;
         if (this.ecol[i * 4 + 3] === 0) continue;
@@ -869,6 +874,13 @@ export class CrewSystem {
         const d2 = dx * dx + dz * dz;
         // never let the camera end up inside someone
         if (d2 < 0.8 * 0.8 && Math.abs(this.py[i] + 1 - this.cam.y) < 1.2) continue;
+        const cl = this.clear;
+        if (cl) {
+          const ux = cl.bx - cl.ax, uz = cl.bz - cl.az;
+          const t = Math.max(0, Math.min(1, ((this.px[i] - cl.ax) * ux + (this.pz[i] - cl.az) * uz) / (ux * ux + uz * uz || 1)));
+          const ex = cl.ax + ux * t - this.px[i], ez = cl.az + uz * t - this.pz[i];
+          if (ex * ex + ez * ez < cl.r * cl.r) continue;
+        }
         const b = d2 < 32 * 32 ? near : far;
         const slot = b.count++;
         const o = i * 8, q4 = slot * 4, q3 = slot * 3;

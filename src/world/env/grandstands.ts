@@ -1,3 +1,4 @@
+import type { Venue } from './worldmap.ts';
 import * as THREE from 'three';
 import { MeshBuilder, srgb } from './geom.ts';
 import type { GrandstandSpec, Layout, ScreenSpec, SpectatorBank } from './layout.ts';
@@ -7,6 +8,8 @@ import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
 import { rng } from './noise.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
+import { renderFanAtlas, ATLAS_COLS } from '../../people/Crowd.ts';
+import { peopleKit } from '../../people/Humans.ts';
 import type { Track } from '../Track.ts';
 import type { WorldMap } from './worldmap.ts';
 
@@ -45,7 +48,20 @@ const SEAT_SCHEMES: number[][] = [
 
 // ---------------------------------------------------------------- crowd atlas + material
 
-function crowdAtlas(): THREE.CanvasTexture {
+/** the grandstand crowd: the ten 3D fan types rendered to sprites (falls back to the drawn set) */
+function crowdAtlas(): { tex: THREE.CanvasTexture; variants: number } {
+  const kit = peopleKit();
+  const cv = kit ? renderFanAtlas(kit) : null;
+  if (cv && cv.width > 0 && hasInk(cv)) return { tex: canvasTexture(cv, true, 4), variants: ATLAS_COLS };
+  return { tex: drawnCrowdAtlas(), variants: 8 };
+}
+function hasInk(cv: HTMLCanvasElement): boolean {
+  const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
+  for (let i = 3; i < d.length; i += 400) if (d[i] > 0) return true;
+  return false;
+}
+
+function drawnCrowdAtlas(): THREE.CanvasTexture {
   // 8 fans × 2 poses (sitting / on their feet); the shirt is drawn near-white and tinted per instance
   const CW = 96, CH = 192, COLS = 8, ROWS = 2;
   const { canvas, ctx } = canvas2d(CW * COLS, CH * ROWS);
@@ -183,7 +199,7 @@ function crowdAtlas(): THREE.CanvasTexture {
   return canvasTexture(canvas, true, 4);
 }
 
-function crowdMaterial(atlas: THREE.Texture, uniforms: { uTime: THREE.IUniform }): THREE.MeshStandardMaterial {
+function crowdMaterial(atlas: THREE.Texture, uniforms: { uTime: THREE.IUniform }, variants = 8): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide, alphaTest: 0.5 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uCrowd = { value: atlas };
@@ -204,14 +220,14 @@ float h11( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }`,
         `#include <begin_vertex>
 {
   float id = float( gl_InstanceID );
-  float variant = floor( h11( id ) * 8.0 );
+  float variant = floor( h11( id ) * ${variants.toFixed(1)} );
   float excite = h11( id + 17.0 );
   // waves roll along the stands; some fans are always on their feet
   float wave = step( 0.9, sin( uTime * ( 0.35 + excite * 0.4 ) + id * 1.37 ) ) * step( 0.35, excite );
   float bob = sin( uTime * ( 3.0 + excite * 4.0 ) + id ) * 0.025 * step( 0.55, excite ) + wave * 0.08;
   transformed.y += bob * ( position.y + 0.1 );
   transformed.x += sin( uTime * 0.8 + id * 3.1 ) * 0.02 * position.y;
-  vCrowdUv = vec2( ( variant + uv.x ) / 8.0, ( ( 1.0 - wave ) + uv.y ) / 2.0 );
+  vCrowdUv = vec2( ( variant + uv.x ) / ${variants.toFixed(1)}, ( ( 1.0 - wave ) + uv.y ) / 2.0 );
   vShade = aShade;
 }`,
       );
@@ -240,7 +256,7 @@ varying float vShade;`,
       )
       .replace('#include <color_fragment>', '');
   };
-  mat.customProgramCacheKey = () => 'apex-crowd-v3';
+  mat.customProgramCacheKey = () => 'apex-crowd-v4-' + variants;
   return mat;
 }
 
@@ -250,7 +266,7 @@ const FLAG_DESIGNS = 16;
 /** flags 0–3 are the venue's own, 4 … 14 one per team, 15 the chequered flag */
 const TEAM_FLAG0 = 4;
 
-function flagAtlas(venue: 'park' | 'ardennes'): THREE.CanvasTexture {
+function flagAtlas(venue: Venue): THREE.CanvasTexture {
   const S = 256;
   const { canvas, ctx } = canvas2d(S * 4, S * 4);
   const at = (k: number) => [(k % 4) * S, Math.floor(k / 4) * S] as const;
@@ -261,7 +277,60 @@ function flagAtlas(venue: 'park' | 'ardennes'): THREE.CanvasTexture {
     ctx.textBaseline = 'middle';
     ctx.fillText(s, x, y);
   };
-  if (venue === 'ardennes') {
+  if (venue === 'airfield') {
+    // 0: Union flag, 1: St George's cross, 2: SILVERSTONE banner, 3: papaya banner
+    {
+      const [x, y] = at(0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, S, S);
+      ctx.clip();
+      ctx.fillStyle = '#012169';
+      ctx.fillRect(x, y, S, S);
+      const diag = (w: number, col: string) => {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = w;
+        ctx.beginPath();
+        ctx.moveTo(x, y + S * 0.2);
+        ctx.lineTo(x + S, y + S * 0.8);
+        ctx.moveTo(x + S, y + S * 0.2);
+        ctx.lineTo(x, y + S * 0.8);
+        ctx.stroke();
+      };
+      diag(S * 0.12, '#ffffff');
+      diag(S * 0.04, '#c8102e');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + S * 0.42, y + S * 0.2, S * 0.16, S * 0.6);
+      ctx.fillRect(x, y + S * 0.43, S, S * 0.14);
+      ctx.fillStyle = '#c8102e';
+      ctx.fillRect(x + S * 0.455, y + S * 0.2, S * 0.09, S * 0.6);
+      ctx.fillRect(x, y + S * 0.46, S, S * 0.08);
+      ctx.restore();
+    }
+    {
+      const [x, y] = at(1);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#ce1124';
+      ctx.fillRect(x + S * 0.42, y, S * 0.16, S);
+      ctx.fillRect(x, y + S * 0.42, S, S * 0.16);
+    }
+    {
+      const [x, y] = at(2);
+      ctx.fillStyle = '#0b1f3a';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#c8102e';
+      ctx.fillRect(x, y + S * 0.7, S, S * 0.08);
+      txt(x + S / 2, y + S * 0.42, 'SILVER', 66, '#ffffff');
+      txt(x + S / 2, y + S * 0.6, 'STONE', 66, '#ffffff');
+    }
+    {
+      const [x, y] = at(3);
+      ctx.fillStyle = '#ff8000';
+      ctx.fillRect(x, y, S, S);
+      txt(x + S / 2, y + S * 0.48, 'PAPAYA', 56, '#101216');
+    }
+  } else if (venue === 'ardennes') {
     // 0: Dutch tricolour, 1: Belgian, 2: ORANJE, 3: black-yellow-red banner
     const bars = (k: number, cols: string[], vertical: boolean) => {
       const [x, y] = at(k);
@@ -475,10 +544,13 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   // Monza: a sea of red. Spa: the orange army from over the border, Belgian colours, every team's shirts
   const oranges = ['#ff7b00', '#ff8c1a', '#f26b00', '#ff9933', '#e86a10'].map((h) => new THREE.Color(h));
   const belgian = ['#1a1a1a', '#fdda24', '#ef3340'].map((h) => new THREE.Color(h));
+  const brits = ['#012169', '#c8102e', '#f2f2f2', '#ff8000', '#1a3e8c'].map((h) => new THREE.Color(h));
   const fanColor = () => {
     const q = r();
     const c =
-      map.venue === 'ardennes'
+      map.venue === 'airfield'
+        ? q < 0.3 ? brits[Math.floor(r() * brits.length)] : q < 0.42 ? oranges[Math.floor(r() * oranges.length)] : q < 0.5 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'ardennes'
         ? q < 0.34 ? oranges[Math.floor(r() * oranges.length)] : q < 0.44 ? belgian[Math.floor(r() * belgian.length)] : q < 0.52 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
         : q < 0.45 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)];
     // a good share of every crowd wears team kit
@@ -739,7 +811,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const shade = new Float32Array(people.length);
   people.forEach((p, i) => (shade[i] = p.shade));
   personGeo.setAttribute('aShade', new THREE.InstancedBufferAttribute(shade, 1));
-  const crowd = new THREE.InstancedMesh(personGeo, crowdMaterial(crowdAtlas(), uniforms), Math.max(1, people.length));
+  const atlas = crowdAtlas();
+  const crowd = new THREE.InstancedMesh(personGeo, crowdMaterial(atlas.tex, uniforms, atlas.variants), Math.max(1, people.length));
   people.forEach((p, i) => {
     crowd.setMatrixAt(i, p.m);
     crowd.setColorAt(i, p.c);

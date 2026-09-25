@@ -1,0 +1,5 @@
+Universal Base Characters (Standard) and Universal Animation Library (Standard)
+by Quaternius — https://quaternius.com
+License: CC0 1.0 Universal (public domain dedication)
+
+Converted for APEX GP by tools/build_people.py (rotation tracks only, JPEG textures).

@@ -80,7 +80,7 @@ const ROW_DEPTH = 0.86;
 const ROW_RISE = 0.46;
 
 export function planLayout(track: Track, map: WorldMap): Layout {
-  const monza = track.def.id !== 'spa';
+  const monza = track.def.id === 'monza';
   const oval = monza ? planOval(track, (x, z) => map.naturalExact(x, z)) : null;
   if (oval) map.setOval(oval);
   const p = new THREE.Vector3();
@@ -139,6 +139,7 @@ export function planLayout(track: Track, map: WorldMap): Layout {
     }
   };
   const L = -1, R = 1;
+  if (track.def.id === 'silverstone') return planSilverstone(track, map, addStand, gs);
   if (!oval) return planSpa(track, map, addStand, gs);
   // main straight: west side, opposite the pits
   addStand('Tribuna Centrale', 452, 660, L, 28, 'centrale', 8, 105);
@@ -487,3 +488,147 @@ function planSpa(
 
 export const STAND_ROW_DEPTH = ROW_DEPTH;
 export const STAND_ROW_RISE = ROW_RISE;
+
+/**
+ * Silverstone: open airfield country. The Wing pit building on the right of the Hamilton
+ * Straight, the big International grandstand opposite, stands round Abbey, Village and the
+ * Loop, the Luffield / Woodcote complex, Copse, the Becketts bowl, Stowe and Club; grass
+ * banks everywhere else, car parks and campsites on the open fields round the circuit.
+ */
+function planSilverstone(
+  track: Track,
+  map: WorldMap,
+  addStand: (name: string, sA: number, sB: number, side: number, rows: number, style: StandStyle, gap?: number, segLen?: number) => void,
+  gs: GrandstandSpec[],
+): Layout {
+  const L = -1, R = 1;
+  const corner = (name: string) => track.corners.find((c) => c.name === name)!;
+  const p = new THREE.Vector3();
+  const at = (s: number, lat: number) => track.point(s, lat, 0, new THREE.Vector3());
+  const clear = (x: number, z: number, r: number, soft: number, keep: number) => map.clearings.push({ x, z, r, soft, keep });
+
+  // Hamilton Straight: the International grandstand opposite the Wing (pits on the right)
+  addStand('International', 200, 600, L, 26, 'centrale', 8, 100);
+  const ab = corner('Abbey');
+  addStand('Abbey', ab.sStart - 140, ab.sApex + 10, L, 20, 'covered', 8, 70);
+  const vi = corner('Village');
+  addStand('Village', vi.sStart - 110, vi.sApex, L, 20, 'covered', 8, 70);
+  const lp = corner('The Loop');
+  addStand('The Loop', lp.sStart - 40, lp.sEnd + 20, R, 16, 'open', 7, 60);
+  const ai = corner('Aintree');
+  addStand('Aintree', ai.sEnd + 20, ai.sEnd + 150, R, 14, 'open', 7, 65);
+  const br = corner('Brooklands');
+  addStand('Brooklands', br.sStart - 150, br.sStart - 10, R, 18, 'covered', 8, 70);
+  const lu = corner('Luffield');
+  addStand('Luffield', lu.sStart - 30, lu.sEnd - 20, L, 20, 'covered', 8, 60);
+  const wc = corner('Woodcote');
+  addStand('Woodcote', wc.sStart - 60, wc.sEnd + 40, L, 18, 'covered', 8, 70);
+  addStand('National Pits Straight', wc.sEnd + 80, wc.sEnd + 300, R, 16, 'open', 7, 75);
+  const co = corner('Copse');
+  addStand('Copse', co.sStart - 170, co.sApex, L, 20, 'covered', 8, 70);
+  const bk = corner('Becketts');
+  addStand('Becketts', bk.sStart - 40, bk.sEnd + 40, L, 18, 'covered', 8, 65);
+  const ch = corner('Chapel');
+  addStand('Chapel', ch.sStart - 30, ch.sEnd + 50, R, 14, 'open', 7, 60);
+  const sw = corner('Stowe');
+  addStand('Stowe', sw.sStart - 190, sw.sApex, L, 20, 'covered', 8, 70);
+  const vl = corner('Vale');
+  addStand('Vale', vl.sStart - 120, vl.sApex, R, 16, 'open', 7, 60);
+  const cl = corner('Club');
+  addStand('Club', cl.sStart - 60, cl.sApex + 30, L, 18, 'covered', 8, 60);
+
+  // grass banks
+  const banks: SpectatorBank[] = [];
+  const addBank = (sA: number, sB: number, side: number, rise: number, density: number, gap = 5, width = 16) => {
+    let bar = 0;
+    for (let s = sA; s <= sB; s += 3) bar = Math.max(bar, track.barrierAt(s, side));
+    const latA = side * (bar + gap), latB = side * (bar + gap + width);
+    banks.push({ sA, sB, side, latA, latB, rise, density });
+    map.trackPads.push({ sA, sB, latA, latB, offset: rise, blend: 9 });
+    for (let s = sA; s <= sB; s += 18) {
+      track.point(s, (latA + latB) / 2, 0, p);
+      map.clearings.push({ x: p.x, z: p.z, r: width * 0.75, soft: 10, keep: 0.05 });
+    }
+  };
+  const mg = corner('Maggotts');
+  addBank(co.sEnd + 40, mg.sStart - 30, L, 2.2, 0.8, 6, 20);
+  addBank(mg.sStart - 60, bk.sStart - 20, R, 2.0, 0.75, 6, 18);
+  addBank(ch.sEnd + 80, ch.sEnd + 420, L, 1.6, 0.55, 5, 16);
+  addBank(sw.sStart - 360, sw.sStart - 200, L, 1.8, 0.6, 5, 16);
+  addBank(sw.sEnd + 20, vl.sStart - 140, R, 1.6, 0.6, 5, 16);
+  addBank(ai.sEnd + 180, br.sStart - 170, L, 1.4, 0.5, 5, 14);
+  addBank(lu.sApex, wc.sStart - 70, R, 1.6, 0.65, 6, 16);
+  addBank(vi.sEnd + 10, lp.sStart - 50, L, 1.5, 0.6, 5, 14);
+
+  // open ground: paddock and hospitality behind the Wing, car parks and campsites on the airfield
+  for (let s = 200; s <= 620; s += 40) { const q = at(s, 150); clear(q.x, q.z, 50, 30, 0.1); }
+  for (const [s, lat, r] of [[co.sApex, -140, 90], [bk.sApex, -120, 80], [sw.sApex, -150, 90], [lu.sApex, -120, 70], [ab.sApex, -130, 70], [2000, 160, 110], [4800, 180, 130]] as const) {
+    const q = at(s, lat);
+    clear(q.x, q.z, r, 45, 0.15);
+  }
+
+  const trackLine = (sA: number, sB: number, latFn: (s: number) => number, step = 10): V2[] => {
+    const pts: V2[] = [];
+    for (let s = sA; s <= sB; s += step) {
+      track.point(s, latFn(s), 0, p);
+      pts.push({ x: p.x, z: p.z });
+    }
+    return pts;
+  };
+  map.paths.push({ pts: trackLine(180, 640, (s) => -(track.barrierAt(s, -1) + 62), 12), width: 7, kind: 2 });
+  const walk = (sA: number, sB: number, side: number, off: number) => {
+    map.paths.push({ pts: trackLine(sA, sB, (s) => side * (track.barrierAt(s, side) + off + 2.5 * Math.sin(s * 0.013)), 9), width: 3.2, kind: 1 });
+  };
+  walk(co.sStart - 300, bk.sEnd + 100, L, 30);
+  walk(sw.sStart - 400, cl.sStart - 50, L, 26);
+  walk(lu.sStart - 200, wc.sEnd + 60, L, 30);
+
+  const screens: ScreenSpec[] = [];
+  const screenAt = (s: number, side: number, lookS: number, lookSide: number, lookLat: number, w = 12, h = 7, back = 6) => {
+    const lat = side * (track.barrierAt(s, side) + back);
+    const q = at(s, lat);
+    const look = at(lookS, lookSide * lookLat);
+    const rot = Math.atan2(look.x - q.x, look.z - q.z);
+    screens.push({ x: q.x, z: q.z, y: track.heightAt(s), rot, w, h });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: w / 2 + 3, halfL: 4, angle: rot });
+    map.clearings.push({ x: q.x, z: q.z, r: 12, soft: 10, keep: 0.2 });
+  };
+  screenAt(640, R, 420, L, 40, 14, 8, 30);
+  screenAt(co.sStart - 60, R, co.sStart - 80, L, 40);
+  screenAt(lu.sStart - 40, R, lu.sStart - 20, L, 40);
+  screenAt(sw.sStart - 80, R, sw.sStart - 90, L, 40);
+  screenAt(bk.sStart - 20, R, bk.sStart, L, 40, 10, 6);
+
+  const flagpoles: V2[] = [];
+  for (const g of gs) {
+    if (g.style === 'open') continue;
+    const n = Math.max(2, Math.round(g.length / 24));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n - 0.5;
+      const along = new THREE.Vector3(g.facing.z, 0, -g.facing.x);
+      flagpoles.push({ x: g.center.x + along.x * t * g.length - g.facing.x * (g.depth / 2 + 1.5), z: g.center.z + along.z * t * g.length - g.facing.z * (g.depth / 2 + 1.5) });
+    }
+  }
+
+  // villages out on the farmland: Silverstone, Whittlebury, Syresham, Dadford…
+  const villages: Layout['villages'] = [];
+  {
+    const P = map.park;
+    const spots: [number, number, number][] = [[-0.2, 1.55, 420], [1.45, 0.5, 360], [-1.5, -0.4, 380], [0.6, -1.5, 340], [-1.1, 1.2, 300], [1.3, -1.2, 300]];
+    spots.forEach(([u, v, rr], i) => villages.push({ x: P.cx + u * P.rx, z: P.cz + v * P.rz, r: rr, seed: 41 + i * 29 }));
+    for (const v of villages) map.clearings.push({ x: v.x, z: v.z, r: v.r, soft: 80, keep: 0 });
+  }
+
+  const pit = track.pit;
+  const pitSpec = {
+    sA: pit.sStart,
+    sB: pit.sEnd,
+    side: pit.side,
+    front: pit.garageOffset + 0.5,
+    depth: 26,
+    paddockTo: 125,
+    y0: track.heightAt(pit.sStart),
+    y1: track.heightAt(pit.sEnd),
+  };
+  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages };
+}

@@ -271,7 +271,7 @@ function acquirePaint(team: Team) {
   const c = new THREE.Color(team.primary);
   const hsl = { h: 0, s: 0, l: 0 };
   c.getHSL(hsl);
-  const metallic = hsl.s < 0.15 && hsl.l > 0.25 && hsl.l < 0.85 ? 0.55 : 0.08;
+  const metallic = team.metallic ?? (hsl.s < 0.15 && hsl.l > 0.25 && hsl.l < 0.85 ? 0.55 : 0.08);
   const m = team.matte;
   const mat = new THREE.MeshPhysicalMaterial({
     name: `car-paint-${team.id}`,

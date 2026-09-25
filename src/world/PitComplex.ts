@@ -3,7 +3,7 @@ import type { Track } from './Track.ts';
 import type { Renderer } from '../core/Renderer.ts';
 import { TEAMS } from '../race/Teams.ts';
 import { Geo, TrackSpace } from './pitlane/geo.ts';
-import { L, makePlan } from './pitlane/layout.ts';
+import { GARAGE_W, L, makePlan } from './pitlane/layout.ts';
 import { DecalAtlas, PrintAtlas, fenceTexture, noiseTexture, whenFontsReady } from './pitlane/textures.ts';
 import { decalMaterial, fenceMaterial, glassMaterial, groundMaterial, pitU, signalMaterial, signalU, solidMaterial } from './pitlane/materials.ts';
 import { buildGround, buildPaint } from './pitlane/ground.ts';
@@ -53,6 +53,16 @@ export interface PitComplex {
   setCompound?(team: number, compound: string): void;
   /** optional: free GPU resources (geometries, materials, textures) */
   dispose?(): void;
+  /**
+   * A car bay inside a team's garage (bay 0 or 1): the floor point under the car's
+   * centre, the yaw that points it out at the pit lane, and the unit direction along
+   * the building toward the garage's middle (where there is room for a camera).
+   */
+  bay(team: number, k: 0 | 1): { pos: THREE.Vector3; yaw: number; inward: THREE.Vector3; wallL: number };
+  /** keep people out of a sight line (garage camera → car), or null */
+  clearView(a: THREE.Vector3 | null, b?: THREE.Vector3, r?: number): void;
+  /** stop drawing one team's crew (-1: draw all) */
+  hideCrew(team: number): void;
 }
 
 export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
@@ -148,10 +158,27 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     updateMs: 0,
   };
 
+  const bay = (team: number, k: 0 | 1) => {
+    const g0 = plan.teamS0 + team * GARAGE_W;
+    const bs = k === 0 ? g0 + 4.5 : g0 + GARAGE_W - 4.5;
+    const l = L.front + 5.4;
+    const pos = ts.P(bs, l, 0.062);
+    const out = ts.P(bs, l - 1, 0.062).sub(pos).setY(0).normalize();
+    const inward = ts.P(bs + (k === 0 ? 1 : -1), l, 0.062).sub(pos).setY(0).normalize();
+    return { pos, yaw: Math.atan2(out.x, out.z), inward, wallL: L.garageBack - l };
+  };
+
   return {
     group,
     garages,
     stats,
+    bay,
+    hideCrew(team) {
+      crew.hideTeam = team;
+    },
+    clearView(a, b, r = 1.2) {
+      crew.clear = a && b ? { ax: a.x, az: a.z, bx: b.x, bz: b.z, r } : null;
+    },
     setBox(team: number, state: BoxState, progress: number) {
       crew.setBox(team, state, progress);
     },

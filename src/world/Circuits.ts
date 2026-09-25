@@ -1,6 +1,7 @@
 import type { CircuitDef } from './CircuitGen.ts';
 import { MONZA_LINE } from './circuits/monzaLine.ts';
 import { SPA_LINE } from './circuits/spaLine.ts';
+import { SILVERSTONE_LINE } from './circuits/silverstoneLine.ts';
 
 /**
  * Autodromo Nazionale Monza — the Temple of Speed. 5.79 km, clockwise, 11
@@ -143,4 +144,69 @@ export const SPA: CircuitDef = {
   ],
 };
 
-export const CIRCUITS: CircuitDef[] = [MONZA, SPA];
+/**
+ * Silverstone — the home of British motor racing, on a wartime airfield. 5.89 km,
+ * clockwise, 18 turns, flat and fast. s = 0 sits between the two rights of Club.
+ *
+ * Lap, in s:
+ *    370  start/finish line on the Hamilton Straight, pits on the right (the Wing) 185–600
+ *    645  Abbey (T1, flat-out right) · 890 Farm · 1144 Village · 1290 The Loop · 1494 Aintree
+ *   1540–2150  Wellington Straight
+ *   2169  Brooklands · 2424 Luffield · 2698 Woodcote, the National Pits Straight
+ *   3278  Copse
+ *   3858  Maggotts → Becketts → Chapel (4443), then the Hangar Straight
+ *   5253  Stowe · 5767 Vale · 5847 / 135 Club
+ */
+export const SILVERSTONE: CircuitDef = {
+  id: 'silverstone',
+  name: 'Silverstone Circuit',
+  short: 'Silverstone',
+  country: 'GBR',
+  centerline: { points: SILVERSTONE_LINE, smooth: 3 },
+  corners: [
+    { name: 'Turn 18', at: 135, dir: -1, runoff: 'asphalt', runoffDepth: 40 },
+    { name: 'Abbey', at: 645, dir: -1, runoff: 'asphalt', runoffDepth: 52 },
+    { name: 'Farm', at: 890, dir: 1, runoff: 'asphalt', runoffDepth: 34 },
+    { name: 'Village', at: 1144, dir: -1, runoff: 'asphalt', runoffDepth: 46 },
+    { name: 'The Loop', at: 1290, dir: 1, runoff: 'asphalt', runoffDepth: 44 },
+    { name: 'Aintree', at: 1494, dir: 1, runoff: 'asphalt', runoffDepth: 34 },
+    { name: 'Brooklands', at: 2169, dir: 1, runoff: 'asphalt', runoffDepth: 50, span: [2110, 2300] },
+    { name: 'Luffield', at: 2424, dir: -1, runoff: 'asphalt', runoffDepth: 44, span: [2360, 2560] },
+    { name: 'Woodcote', at: 2698, dir: -1, runoff: 'asphalt', runoffDepth: 40, span: [2640, 2860] },
+    { name: 'Copse', at: 3278, dir: -1, runoff: 'gravel', runoffDepth: 56, span: [3200, 3440] },
+    { name: 'Maggotts', at: 3858, dir: 1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Becketts', at: 3963, dir: -1, runoff: 'gravel', runoffDepth: 46 },
+    { name: 'Turn 12', at: 4138, dir: 1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Turn 13', at: 4268, dir: -1, runoff: 'gravel', runoffDepth: 38 },
+    { name: 'Chapel', at: 4443, dir: 1, runoff: 'asphalt', runoffDepth: 40 },
+    { name: 'Stowe', at: 5253, dir: -1, runoff: 'gravel', runoffDepth: 58, span: [5180, 5400] },
+    { name: 'Vale', at: 5767, dir: 1, runoff: 'asphalt', runoffDepth: 40 },
+    { name: 'Club', at: 5847, dir: -1, runoff: 'asphalt', runoffDepth: 44 },
+  ],
+  halfWidth: 6.5,
+  startOffset: 370,
+  // an airfield: almost flat, a gentle fall from Copse down to Becketts and the Hangar Straight
+  elevation: [
+    [0.0, 0],
+    [0.1, 0.8],
+    [0.2, 1.8],
+    [0.32, 2.4],
+    [0.42, 1.6],
+    [0.52, 3.2],
+    [0.6, 1.2],
+    [0.68, -0.6],
+    [0.76, -1.8],
+    [0.86, -1.0],
+    [0.94, -0.4],
+  ],
+  pitSide: 1,
+  pit: { start: 185, end: 600 },
+  sectors: [0.33, 0.67],
+  drs: [
+    { detect: 1420, start: 1570, end: 2080 },
+    { detect: 4330, start: 4560, end: 5150 },
+    { detect: 5700, start: 190, end: 560 },
+  ],
+};
+
+export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE];

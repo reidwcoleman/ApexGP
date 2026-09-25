@@ -19,7 +19,14 @@ export interface VillagesBuild {
 const WALLS = [0xd8c7a0, 0xddd0b4, 0xcdb48a, 0xe3dccb, 0xd2ab86, 0xc4b69c, 0xe6ddca, 0xc9a07e].map((h) => new THREE.Color(h));
 const ROOFS = [0x9a4a30, 0x8a3f28, 0xa95a3a, 0x7d3a26, 0x6e6a66];
 
+// English villages: red brick and honey-coloured Northamptonshire stone under slate and tile
+const WALLS_UK = [0x9a4f38, 0xa55a3f, 0x8c4632, 0xc9a66b, 0xbf9a62, 0xd8c9a8, 0xb06448].map((h) => new THREE.Color(h));
+const ROOFS_UK = [0x4a4d52, 0x3d4045, 0x5a4a42, 0x7a3e2c, 0x44474c];
+
 export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
+  const uk = map.venue === 'airfield';
+  const wallPal = uk ? WALLS_UK : WALLS;
+  const roofPal = uk ? ROOFS_UK : ROOFS;
   const S = map.SQUARE;
   const r = rng(515);
   type B = { x: number; z: number; y: number; w: number; d: number; h: number; rot: number; wall: THREE.Color; roof: THREE.Color; flat: boolean };
@@ -38,14 +45,14 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       const jx = (hash2i(ix, iz, 5) - 0.5) * 6, jz = (hash2i(ix, iz, 6) - 0.5) * 6;
       const px = x + jx, pz = z + jz;
       const big = hash2i(ix, iz, 7);
-      const block = big > 0.8; // condominio
+      const block = big > (uk ? 0.95 : 0.8); // condominio
       const w = block ? 22 + big * 12 : 11 + hash2i(ix, iz, 8) * 10;
       const d = block ? 13 + hash2i(ix, iz, 10) * 6 : 9 + hash2i(ix, iz, 11) * 7;
       const h = block ? 14 + hash2i(ix, iz, 12) * 13 : 6 + hash2i(ix, iz, 13) * 5;
       list.push({
         x: px, z: pz, y: map.height(px, pz) - 0.3, w, d, h, rot: -ang,
-        wall: WALLS[Math.floor(hash2i(ix, iz, 14) * WALLS.length)].clone().multiplyScalar(0.85 + r() * 0.2),
-        roof: new THREE.Color(ROOFS[Math.floor(hash2i(ix, iz, 15) * ROOFS.length)]).multiplyScalar(0.85 + r() * 0.25),
+        wall: wallPal[Math.floor(hash2i(ix, iz, 14) * wallPal.length)].clone().multiplyScalar(0.85 + r() * 0.2),
+        roof: new THREE.Color(roofPal[Math.floor(hash2i(ix, iz, 15) * roofPal.length)]).multiplyScalar(0.85 + r() * 0.25),
         flat: block ? hash2i(ix, iz, 16) < 0.6 : hash2i(ix, iz, 16) < 0.12,
       });
     }
@@ -53,7 +60,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
   for (const v of layout.villages) {
     const u = map.urban(v.x, v.z);
     if (u < 0.3 || v.x < S.x0 || v.x > S.x1 || v.z < S.z0 || v.z > S.z1) continue;
-    list.push({ x: v.x, z: v.z, y: map.height(v.x, v.z) - 0.3, w: 5.5, d: 5.5, h: 38 + r() * 12, rot: r(), wall: new THREE.Color(0xc79a78), roof: new THREE.Color(0x8a3f28), flat: false });
+    list.push({ x: v.x, z: v.z, y: map.height(v.x, v.z) - 0.3, w: uk ? 6.5 : 5.5, d: uk ? 6.5 : 5.5, h: uk ? 20 + r() * 6 : 38 + r() * 12, rot: r(), wall: new THREE.Color(uk ? 0xb89a70 : 0xc79a78), roof: new THREE.Color(uk ? 0x4a4d52 : 0x8a3f28), flat: uk });
   }
 
   // geometry: unit box (walls) and unit gable prism (roof) — scaled per instance

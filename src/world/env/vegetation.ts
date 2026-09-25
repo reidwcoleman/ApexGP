@@ -88,6 +88,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const n2 = fbm2(x / 90 - 1.3, z / 90 + 8.8, 2);
     // the Ardennes: spruce plantations with stands of beech/oak (the chestnut crowns stand in for beech)
     if (map.venue === 'ardennes') return n < 0.22 || h > 0.3 ? 'spruce' : n2 > 0 ? 'chestnut' : 'oak';
+    // English lowland: oak and ash (the plane crowns stand in for ash), a few horse chestnuts and poplars
+    if (map.venue === 'airfield') return n < 0.05 ? 'oak' : n < 0.3 ? 'plane' : n2 > 0.3 ? 'poplar' : 'chestnut';
     let sp: SpeciesId;
     if (n < -0.18) sp = 'plane';
     else if (n < 0.12) sp = 'oak';

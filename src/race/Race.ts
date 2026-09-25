@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, wetGrip, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
 import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
@@ -31,6 +31,8 @@ export interface RaceOptions {
   gridOrder?: Entry[];
   /** crash damage (default full) */
   damage?: DamageMode;
+  /** the player's car (career upgrades); AI cars run the base spec */
+  playerSpec?: CarSpec;
 }
 
 /**
@@ -215,7 +217,7 @@ export class Race {
 
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
-      const car = new CarPhysics(F1_SPEC);
+      const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : F1_SPEC);
       car.weather = this.weather;
       car.damageMode = opts.damage ?? 'full';
       if (opts.mode === 'timetrial') {

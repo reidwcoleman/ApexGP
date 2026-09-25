@@ -1,3 +1,4 @@
+import { Career } from '../career/Career.ts';
 import '@fontsource/titillium-web/600.css';
 import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
@@ -27,7 +28,7 @@ auto.startFrom(race.player.car, track);
 const hud = new HUD(ui);
 hud.setup(race, track);
 hud.show(true);
-const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onResetCar() {}, onUi() {}, forecast: () => ({ weather: 'Light rain', time: 'Afternoon' }) });
+const menu = new Menu(ui, { onSetupChange() {}, onStart() {}, onSettings() {}, onResume() {}, onRestart() {}, onQuit() {}, onResetCar() {}, onUi() {}, onHubTab() {}, onCarChange() {}, onTravel() {}, onFocusPart() {}, onPlayHighlight() {}, forecast: () => ({ weather: 'Light rain', time: 'Afternoon' }) }, new Career());
 
 const simT = Number(params.get('t') ?? 95);
 race.startLights();

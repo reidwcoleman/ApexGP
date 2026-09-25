@@ -6,8 +6,10 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
-**Everything is generated in code at startup** — the circuit, the cars and their liveries, the
-park, the crowds, the weather, the engine note. No model files, no image files, no audio files.
+**Almost everything is generated in code at startup** — the circuits, the cars and their liveries,
+the parks, the weather, the engine note. The one exception is the people: drivers, mechanics and
+fans are built on rigged CC0 character bodies and animations (`public/models/people/`, 5.5 MB),
+dressed and posed in code.
 
 ```bash
 npm install
@@ -21,6 +23,14 @@ npm run check    # tsc --noEmit
 - **Autodromo Nazionale Monza** — the real Temple of Speed, 5.793 km, built from a surveyed
   centreline (within ~4 m of the real track): the Rettifilo chicane, Curva Grande, Roggia, both
   Lesmos, the Serraglio under the old banking, Ascari and the Parabolica, in the Parco di Monza.
+- **Circuit de Spa-Francorchamps** and **Silverstone** (the British GP: Copse, Maggotts–Becketts–
+  Chapel, Stowe, Vale/Club, the Wing pits straight, airfield flat with tree belts and grandstands at
+  every corner) — unlocked through the career.
+- **Career, garage and highlights** — your garage is the menu: a working pit garage with tyre
+  blankets, jacks, wheel guns, tool trolley, telemetry and your mechanics. Tune the set-up (wings,
+  brake bias, suspension, ride height, pressures) with hotspots on the car, drag to look around it,
+  and your best moments (overtakes, taking the lead, fastest laps, podiums) are recorded as you race
+  and play on the video wall behind the car.
 - **Weather, different every race** — Random by default: clear, light cloud, overcast, light rain,
   rain, heavy rain with lightning, or changeable (rain arriving or stopping mid-race), at morning,
   afternoon or golden-hour light. The track gets wet and dries again, a dry line appears once the
@@ -92,7 +102,10 @@ src/
   fx/      Particles (tyre smoke, dust, sparks)
   ui/      HUD, Menu, design tokens
   core/    Renderer (post chain: N8AO, bloom, speed blur, grade, ACES, SMAA), Input, Audio
-  dev/     dev pages for each module (car, track, world, audio, hud)
+  people/  Humans (bodies, clothing shader, faces, props), Crowd (GPU-skinned instanced fans),
+           drivers, poses
+  career/  Career (progress, upgrades, set-up), Highlights (recorded race moments, IndexedDB)
+  dev/     dev pages for each module (car, track, world, audio, hud, people, crowd, drivers)
 tools/     shot.mjs (headless screenshots), simtest.mjs (headless 20-car race), trackplot
 ```
 
@@ -108,6 +121,9 @@ Regression checks (all headless, no browser):
 
 ## Credits
 
-The Monza centreline is derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
-(Technical University of Munich, LGPL-3.0), traced from satellite imagery. Teams, drivers and
-sponsors in the game are fictional.
+The Monza, Spa and Silverstone centrelines are derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
+(Technical University of Munich, LGPL-3.0), traced from satellite imagery.
+
+People: *Universal Base Characters* and *Universal Animation Library* by
+[Quaternius](https://quaternius.com) (CC0 1.0), converted by `tools/build_people.py`; clothing,
+faces, crowds and poses are done in code. Teams, drivers and sponsors in the game are fictional.

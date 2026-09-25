@@ -4,7 +4,8 @@ import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
 import { CIRCUITS, MONZA } from '../world/Circuits.ts';
-import { setEvent } from '../world/event.ts';
+import { setEvent, EVENT } from '../world/event.ts';
+const EVENT_GP = () => EVENT.gp;
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment } from '../world/Environment.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
@@ -32,6 +33,13 @@ import { RacingLineAssist } from './RacingLineAssist.ts';
 import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
+import { Career } from '../career/Career.ts';
+import { loadPeople } from '../people/Humans.ts';
+import { Highlights } from '../career/Highlights.ts';
+import { GarageScene } from './GarageScene.ts';
+import { peopleKit } from '../people/Humans.ts';
+import type { SetupPart } from '../career/Career.ts';
+import type { HubTab } from '../ui/Menu.ts';
 
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
@@ -112,6 +120,17 @@ export class Game {
   private line!: RacingLineAssist;
   private driverHidden = false;
   private qualityCheck = 0;
+  private career = new Career();
+  readonly highlights = new Highlights();
+  private lastPos = 0;
+  private celMoment = false;
+  /** livery id each rig was built with (the player's may wear their own paint) */
+  private rigTeam = new Map<Entry, string>();
+  /** the garage (menu) camera: framing per hub tab, eased */
+  private hubTab: HubTab = 'race';
+  private garageCam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), init: false };
+  private garageLights = new THREE.Group();
+  private lastReward: import('../career/Career.ts').RaceReward | null = null;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.canvas = canvas;
@@ -140,7 +159,16 @@ export class Game {
         this.resetPlayer();
       },
       onUi: (k) => this.audioReady && this.audio.ui(k),
-    });
+      onHubTab: (t) => {
+        this.hubTab = t;
+        this.garageOrbit.active = false;
+        if (t === 'career' || t === 'race') this.garage?.refreshStats();
+      },
+      onFocusPart: (p) => (this.focusPart = p),
+      onPlayHighlight: (id) => this.garage?.playHighlight(id),
+      onCarChange: () => this.refreshPlayerRig(),
+      onTravel: () => this.travel(),
+    }, this.career);
     addEventListener('resize', () => this.gfx.resize());
     const unlock = () => {
       if (this.audioReady) return;
@@ -193,6 +221,9 @@ export class Game {
     this.pits = buildPitComplex(this.track, this.gfx);
     this.scene.add(this.pits.group);
 
+    progress(0.38, 'Getting the people in');
+    await loadPeople().catch((e) => console.warn('people failed to load', e));
+
     progress(0.42, 'Growing the park');
     await tick();
     const w0 = new Weather(this.plan).state;
@@ -213,6 +244,7 @@ export class Game {
       const e = this.entries[i];
       const rig = createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
       this.rigs.set(e, rig);
+      this.rigTeam.set(e, e.team.id);
       this.views.set(e, new CarView(rig));
       this.carsGroup.add(rig.root);
       if (i % 4 === 3) {
@@ -222,6 +254,12 @@ export class Game {
     }
     this.scene.add(this.particles.group);
     this.particles.setLight(smokeLight(w0));
+    this.buildGarageLights();
+    this.menu.highlights = this.highlights;
+    this.highlights.onChange(() => {
+      if (this.state === 'menu' && this.hubTab === 'highlights') this.menu.refreshTab();
+    });
+    this.bindGarageInput();
 
     this.cams = new Cameras(this.camera, this.track);
     this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
@@ -262,7 +300,9 @@ export class Game {
       gridOrder: this.gridOrder ?? undefined,
       weather: this.plan,
       damage: setup.damage,
+      playerSpec: this.career.spec(),
     });
+    this.refreshPlayerRig();
     this.particles.setLight(smokeLight(this.race.weatherState));
     this.rigCompound.clear();
     this.control.reset();
@@ -303,6 +343,7 @@ export class Game {
   }
 
   private toMenu() {
+    this.highlights.cancel();
     // a fresh forecast every time we come back from a session
     if (this.state !== 'boot') this.rollWeather(this.menu.setup);
     this.state = 'menu';
@@ -312,7 +353,8 @@ export class Game {
     this.makeRace('race', this.menu.setup);
     this.hud.show(false);
     this.menu.show('title');
-    this.gfx.setDepthOfField(true, this.dofTarget, 6, 2.2);
+    this.garageCam.init = false;
+    this.gfx.setDepthOfField(true, this.dofTarget, 5, 2.2);
     this.gfx.setSpeedBlur(0);
     this.gfx.setAberration(0);
     if (this.audioReady) this.audio.crowd(0.35);
@@ -378,12 +420,20 @@ export class Game {
     );
   }
 
+  /** set when this session's result has gone into the career */
+  private recorded = false;
+
   private startRace(mode: 'race' | 'timetrial', setup: RaceSetup, qualifying = false) {
     if (mode === 'race' && GRID[setup.grid].slot === -1 && !this.gridOrder && !qualifying) {
       this.startQualifying(setup);
       return;
     }
     this.mode = qualifying ? 'race' : mode;
+    this.recorded = false;
+    this.highlights.cancel();
+    this.lastPos = 0;
+    this.celMoment = false;
+    this.lastReward = null;
     this.autopilot = null;
     if (`${setup.weather}/${setup.time}` !== this.planKey) this.rollWeather(setup);
     this.makeRace(mode, setup);
@@ -476,7 +526,15 @@ export class Game {
     this.hud.show(false);
     // the next race gets new weather
     this.rollWeather(this.menu.setup);
-    this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu(), () => this.startReplay());
+    // a race (not a time trial) counts for the career, once
+    let reward: typeof this.lastReward = null;
+    if (!this.race.isTimeTrial && !this.recorded) {
+      this.recorded = true;
+      const me = rows.find((r) => r.isPlayer)!;
+      reward = this.career.recordRace(this.track.def.id, me.pos, !!me.dnf, me.fastest && me.pos <= 10, TEAMS.indexOf(me.entry.team), rows.length);
+      this.lastReward = reward;
+    } else if (!this.race.isTimeTrial) reward = this.lastReward;
+    this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu(), () => this.startReplay(), reward);
   }
 
   // ------------------------------------------------------------------ frame
@@ -499,11 +557,17 @@ export class Game {
     // read the session after the menu acted — it may have started a new one
     const race = this.race;
 
+    this.garageLights.visible = this.state === 'menu';
+    if (this.garage) this.garage.group.visible = this.state === 'menu';
+    if (this.state !== 'menu') this.updateHotspots();
+    if (this.state !== 'menu') {
+      this.pits.clearView(null);
+      this.pits.hideCrew(-1);
+    }
     if (this.state === 'menu') {
       race.update(dt);
       this.syncAllViews(dt);
-      this.cams.orbit(dt, this.playerRigPos(), 7.2, 1.35, 0.1);
-      this.dofTarget.copy(this.playerRigPos()).y += 0.5;
+      this.garageFrame(dt);
     } else if (this.state === 'intro') {
       // a short orbit of the player's car on the grid, then chase cam + lights
       race.playerInput.throttle = st.throttle;
@@ -581,6 +645,14 @@ export class Game {
       this.effects(dt);
       this.speedFx();
     } else if (this.state === 'celebration') {
+      if (!this.celMoment && this.celebration) {
+        const place = this.race.player.position;
+        const tTrophy = place === 3 ? 14 : place === 2 ? 16.5 : 19;
+        if (place <= 3 && !this.race.player.retired && this.celebration.time > tTrophy + 0.2) {
+          this.celMoment = true;
+          this.highlights.moment(place === 1 ? 'win' : 'podium', place === 1 ? `Victory at ${this.track.def.short}` : `P${place} on the podium`, `${EVENT_GP()} · ${new Date().toLocaleDateString()}`, place === 1 ? 100 : 85 - place * 3, this.track.def.short);
+        }
+      }
       // the race clock runs on (weather), but the cars stay where they're parked
       this.driveInput(dt);
       race.update(dt);
@@ -651,6 +723,7 @@ export class Game {
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.gfx.render(dt);
+    if (this.state === 'race' || this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
     this.adaptQuality(dt);
   }
 
@@ -728,6 +801,28 @@ export class Game {
     this.hud.flash('Reset', '', '', 1.2);
   }
 
+  /** the moments worth keeping: places gained, the lead, a fastest lap, the flag */
+  private watchMoments(ev: { kind: string; car: number; value?: number }[]) {
+    const r = this.race;
+    if (r.isTimeTrial || this.quali) return;
+    const p = r.player;
+    const where = `Lap ${Math.max(1, Math.min(r.opts.laps, p.laps + 1))} · ${this.track.def.short}`;
+    const name = this.track.def.short;
+    if (r.phase === 'racing' && !p.retired) {
+      const pos = p.position;
+      if (this.lastPos && pos < this.lastPos && this.stateTime > 3) {
+        if (pos === 1) this.highlights.moment('lead', 'Into the lead', where, 75, name, 0.1);
+        else this.highlights.moment('overtake', `P${this.lastPos} → P${pos}`, where, 30 + Math.max(0, 11 - pos) * 3, name, 0.1);
+      }
+      this.lastPos = pos;
+    }
+    for (const e of ev) {
+      if (e.car !== p.id) continue;
+      if (e.kind === 'fastest-lap') this.highlights.moment('fastest', `Fastest lap · ${fmtTime(e.value ?? NaN)}`, where, 55, name);
+      if (e.kind === 'finish') this.highlights.moment('finish', `Chequered flag · P${p.position}`, `${r.opts.laps} laps · ${name}`, p.position <= 3 ? 60 : 35, name);
+    }
+  }
+
   private handleRaceEvents() {
     const ev = this.race.events;
     if (ev.length === 0) {
@@ -739,6 +834,7 @@ export class Game {
       this.hud.radio(line, uiColor(this.race.player.entry.team));
       if (this.audioReady) this.audio.ui('select');
     }
+    this.watchMoments(ev);
     for (const e of ev) {
       if (this.quali && e.kind === 'lap') {
         this.endQualifying(e.value ?? Infinity, e.valid !== false);
@@ -885,6 +981,259 @@ export class Game {
     const near = this.race.cars[id].isPlayer ? 1 : Math.min(1, 25 / (d + 10));
     if (this.audioReady) this.audio.explosion(near);
     this.cams.impulse = Math.max(this.cams.impulse, Math.min(1, 40 / (d + 20)));
+  }
+
+  // ------------------------------------------------------------------ the garage
+
+  /** the player's rig wears their paint (rebuilt when it changes); everyone else their team's */
+  private refreshPlayerRig() {
+    if (!this.race || this.rigs.size === 0) return;
+    const player = this.race.player.entry;
+    for (const [e, rig] of this.rigs) {
+      const team = e === player ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
+      if (this.rigTeam.get(e) === team.id) continue;
+      const visible = rig.root.visible;
+      rig.root.removeFromParent();
+      rig.dispose();
+      const next = createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+      next.root.visible = visible;
+      this.rigs.set(e, next);
+      this.rigTeam.set(e, team.id);
+      this.views.set(e, new CarView(next));
+      this.rigCompound.delete(e);
+      this.carsGroup.add(next.root);
+    }
+  }
+
+  /** a different circuit: the world is rebuilt from the saved setup */
+  private travel() {
+    const veil = document.createElement('div');
+    veil.className = 'travel-veil';
+    const cd = CIRCUITS.find((c) => c.id === this.menu.setup.track);
+    veil.innerHTML = `<div><span>Travelling to</span><b>${cd?.name ?? ''}</b></div>`;
+    document.body.appendChild(veil);
+    requestAnimationFrame(() => veil.classList.add('on'));
+    setTimeout(() => location.reload(), 650);
+  }
+
+  /** soft work lights over the bays: the garage ceiling blocks the sun */
+  private buildGarageLights() {
+    const g = this.garageLights;
+    g.name = 'garage-lights';
+    const key = new THREE.SpotLight(0xfff4e8, 170, 16, 0.75, 0.6, 1.6);
+    key.position.set(0, 4.3, 0.6);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.bias = -0.0004;
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far = 8;
+    g.add(key, key.target);
+    for (const [x, z, i] of [[-1.6, 2.6, 26], [1.6, 2.6, 26], [-1.6, -2.4, 22], [1.6, -2.4, 22]] as const) {
+      const p = new THREE.PointLight(0xf4f1ea, i * 0.6, 9, 1.8);
+      p.position.set(x, 3.6, z);
+      g.add(p);
+    }
+    const rim = new THREE.PointLight(0xbfd6ff, 18, 10, 1.6);
+    rim.position.set(0, 1.6, -4.6);
+    g.add(rim);
+    g.visible = false;
+    this.scene.add(g);
+  }
+
+  /** menu: the player's car in their garage (teammate's in the other bay), a slow cinematic camera per tab */
+  private garageFrame(dt: number) {
+    const team = TEAMS.indexOf(this.race.player.entry.team);
+    const player = this.race.player.entry;
+    const mate = this.entries.find((e) => e.team === player.team && e !== player)!;
+    const up = this.tmp.set(0, 1, 0);
+    for (const [e, rig] of this.rigs) {
+      const k = e === player ? player.seat : e === mate ? mate.seat : -1;
+      rig.root.visible = k >= 0;
+      if (k < 0) continue;
+      const b = this.pits.bay(team, k as 0 | 1);
+      rig.root.position.copy(b.pos);
+      rig.root.quaternion.setFromAxisAngle(up, b.yaw);
+      rig.body.rotation.set(0, 0, 0);
+      rig.body.position.y = 0.02;
+      rig.setSteer(0);
+      rig.setWheelSpeed(0);
+      rig.setBrakeGlow(0);
+      rig.setDrs(0);
+      rig.setRainLight(false);
+      rig.setDetail(0);
+      rig.setDriverVisible(false);
+    }
+    const b = this.pits.bay(team, player.seat);
+    const c = b.pos;
+    const rig = this.rigs.get(player)!;
+    // the garage dressing: rebuilt when the car (paint) or the team changes
+    if (!this.garage || this.garageRig !== rig) {
+      this.garage?.dispose();
+      rig.root.updateMatrixWorld(true);
+      this.garage = new GarageScene(peopleKit(), rig, b, player.team, player.driver, this.highlights, this.career, this.track);
+      this.garageRig = rig;
+      this.scene.add(this.garage.group);
+    }
+    this.garage.group.visible = true;
+    this.garageLights.position.copy(c);
+    this.garageLights.rotation.set(0, b.yaw, 0);
+    this.garageLights.updateMatrixWorld(true);
+    const key = this.garageLights.children[0] as THREE.SpotLight;
+    key.target.position.set(0, 0, 0);
+    // car frame: +z out to the lane, +x to the car's left; the camera works on the side with room
+    const fwd = new THREE.Vector3(Math.sin(b.yaw), 0, Math.cos(b.yaw));
+    const left = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const side = left.dot(b.inward) > 0 ? 1 : -1;
+    const t = this.stateTime;
+    type Shot = { cam: [number, number, number]; look: [number, number, number]; shift: number; fov: number };
+    const shots: Record<HubTab, Shot> = {
+      race: { cam: [3.5, 1.3, 6.2], look: [0, 0.75, -0.6], shift: 1.45, fov: 38 },
+      career: { cam: [4.3, 2.0, 3.0], look: [0, 0.35, -0.3], shift: 1.35, fov: 36 },
+      highlights: { cam: [1.6, 2.5, -0.2], look: [0, 2.05, -6.0], shift: 1.0, fov: 42 },
+      car: { cam: [3.4, 1.7, -4.6], look: [0, 0.45, -0.5], shift: 1.45, fov: 36 },
+      setup: { cam: [3.6, 1.6, 3.6], look: [0, 0.35, 0], shift: 1.3, fov: 36 },
+      paint: { cam: [3.1, 3.4, 4.1], look: [0, 0.15, 0.2], shift: 1.45, fov: 38 },
+      settings: { cam: [2.3, 0.7, 3.2], look: [0.75, 0.3, 1.55], shift: 0.7, fov: 34 },
+    };
+    let sh: Shot = shots[this.hubTab];
+    const toW = (v: readonly [number, number, number], out: THREE.Vector3) =>
+      out.copy(c).addScaledVector(left, v[0] * side).addScaledVector(fwd, v[2]).setY(c.y + v[1]);
+    const wantPos = new THREE.Vector3(), wantLook = new THREE.Vector3();
+    const part = this.hubTab === 'setup' ? this.focusPart : null;
+    if (part && this.garage.parts[part === 'tyres' ? 'tyres' : part]) {
+      // a close look at the part being set up, from the open side
+      const P = this.garage.parts[part];
+      const rel = P.clone().sub(c);
+      const onSide = Math.sign(rel.dot(left)) || side;
+      const along = rel.dot(fwd);
+      const off: Record<string, [number, number, number]> = {
+        frontWing: [1.2, 0.75, 1.5], rearWing: [1.4, 1.1, -1.6], brakes: [1.1, 0.45, 0.7], suspension: [1.2, 0.95, 0.9], floor: [1.6, 0.35, 0.4], tyres: [1.2, 0.5, -0.8],
+      };
+      const o = off[part] ?? [1.4, 0.8, 1];
+      wantPos.copy(P).addScaledVector(left, o[0] * onSide).addScaledVector(fwd, o[2]).add(new THREE.Vector3(0, o[1], 0));
+      wantLook.copy(P);
+      sh = { ...sh, shift: 0.35 + 0.02 * Math.abs(along), fov: 38 };
+    } else if (this.garageOrbit.active) {
+      // looking around the car by hand
+      const O = this.garageOrbit;
+      const center = c.clone().add(new THREE.Vector3(0, 0.45, 0));
+      const dir = new THREE.Vector3(Math.sin(O.yaw) * Math.cos(O.pitch), Math.sin(O.pitch), Math.cos(O.yaw) * Math.cos(O.pitch));
+      // yaw is measured in the car's frame
+      const q = new THREE.Quaternion().setFromAxisAngle(up, b.yaw);
+      dir.applyQuaternion(q);
+      wantPos.copy(center).addScaledVector(dir, O.dist);
+      wantLook.copy(center);
+      sh = { ...sh, shift: 0.9, fov: 38 };
+    } else {
+      const drift = Math.sin(t * 0.21) * 0.25;
+      toW([sh.cam[0], sh.cam[1] + Math.sin(t * 0.17) * 0.05, sh.cam[2] + drift], wantPos);
+      toW(sh.look, wantLook);
+      if (this.hubTab === 'highlights') wantLook.copy(this.garage.wallCenter);
+    }
+    // push the subject left of centre: the hub panel is on the right
+    const dirV = wantLook.clone().sub(wantPos).normalize();
+    const camRight = new THREE.Vector3().crossVectors(dirV, up).normalize();
+    wantLook.addScaledVector(camRight, sh.shift);
+    const g = this.garageCam;
+    if (!g.init) {
+      g.pos.copy(wantPos);
+      g.look.copy(wantLook);
+      g.init = true;
+    }
+    const k = 1 - Math.exp(-(this.garageOrbit.dragging ? 12 : 2.4) * dt);
+    g.pos.lerp(wantPos, k);
+    g.look.lerp(wantLook, k);
+    this.camera.position.copy(g.pos);
+    this.camera.lookAt(g.look);
+    this.camera.fov += (sh.fov - this.camera.fov) * k;
+    this.camera.updateProjectionMatrix();
+    this.dofTarget.copy(part ? this.garage.parts[part] : this.hubTab === 'highlights' ? this.garage.wallCenter : c.clone().setY(c.y + 0.5));
+    // nobody stands between the camera and the car
+    this.pits.clearView(g.pos, c, 1.6);
+    this.pits.hideCrew(team);
+    this.garage.update(dt, g.pos, this.dofTarget);
+    this.updateHotspots();
+  }
+
+  // ---------------------------------------------------------------- garage: look around, hotspots
+  private garage: GarageScene | null = null;
+  private garageRig: CarRig | null = null;
+  private focusPart: SetupPart | null = null;
+  private garageOrbit = { active: false, dragging: false, yaw: 0.8, pitch: 0.25, dist: 6.2, lx: 0, ly: 0 };
+  private hotspotLayer: HTMLDivElement | null = null;
+
+  private bindGarageInput() {
+    const O = this.garageOrbit;
+    const onUi = (e: Event) => (e.target as HTMLElement).closest('.hub-panel, .hub-rail, .htab, .hotspot, .cta, .screen:not(.hub)') !== null;
+    addEventListener('pointerdown', (e) => {
+      if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e)) return;
+      O.dragging = true;
+      if (!O.active) {
+        // start from where the camera is now
+        const rel = this.camera.position.clone().sub(this.playerRigPos());
+        const b = this.pits.bay(TEAMS.indexOf(this.race.player.entry.team), this.race.player.entry.seat);
+        rel.applyAxisAngle(new THREE.Vector3(0, 1, 0), -b.yaw);
+        O.dist = THREE.MathUtils.clamp(rel.length(), 3, 9);
+        O.yaw = Math.atan2(rel.x, rel.z);
+        O.pitch = THREE.MathUtils.clamp(Math.asin((rel.y - 0.45) / Math.max(0.1, rel.length())), 0.02, 1.2);
+      }
+      O.active = true;
+      O.lx = e.clientX;
+      O.ly = e.clientY;
+    });
+    addEventListener('pointermove', (e) => {
+      if (!O.dragging) return;
+      O.yaw -= (e.clientX - O.lx) * 0.006;
+      O.pitch = THREE.MathUtils.clamp(O.pitch + (e.clientY - O.ly) * 0.004, 0.02, 1.2);
+      O.lx = e.clientX;
+      O.ly = e.clientY;
+    });
+    addEventListener('pointerup', () => (O.dragging = false));
+    addEventListener(
+      'wheel',
+      (e) => {
+        if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e)) return;
+        O.active = true;
+        O.dist = THREE.MathUtils.clamp(O.dist * (1 + e.deltaY * 0.001), 2.6, 10);
+      },
+      { passive: true },
+    );
+    this.hotspotLayer = document.createElement('div');
+    this.hotspotLayer.className = 'hotspots';
+    (this.hud.root.parentElement ?? document.body).appendChild(this.hotspotLayer);
+    const labels: [SetupPart, string][] = [['frontWing', 'Front wing'], ['rearWing', 'Rear wing'], ['brakes', 'Brakes'], ['suspension', 'Suspension'], ['floor', 'Ride height'], ['tyres', 'Tyres']];
+    for (const [id, label] of labels) {
+      const h = document.createElement('button');
+      h.className = 'hotspot';
+      h.dataset.part = id;
+      h.innerHTML = `<i></i><span>${label}</span>`;
+      h.addEventListener('click', () => {
+        this.menu.focusPart(id);
+        if (this.audioReady) this.audio.ui('select');
+      });
+      this.hotspotLayer.appendChild(h);
+    }
+  }
+
+  private updateHotspots() {
+    const L = this.hotspotLayer;
+    if (!L) return;
+    const show = this.state === 'menu' && this.menu.screen === 'title' && this.hubTab === 'setup' && !!this.garage;
+    L.classList.toggle('on', show);
+    if (!show) return;
+    const v = new THREE.Vector3();
+    for (const h of Array.from(L.children) as HTMLElement[]) {
+      const id = h.dataset.part as SetupPart;
+      const P = this.garage!.parts[id];
+      if (!P) continue;
+      v.copy(P).project(this.camera);
+      const sx = ((v.x + 1) / 2) * innerWidth;
+      // not under the tab rail or the panel
+      const vis = v.z < 1 && Math.abs(v.y) < 0.9 && sx > 280 && sx < innerWidth - 500;
+      h.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px)`;
+      h.classList.toggle('hidden', !vis);
+      h.classList.toggle('sel', id === this.focusPart);
+    }
   }
 
   private playerRigPos(): THREE.Vector3 {

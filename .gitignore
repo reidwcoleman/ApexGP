@@ -2,3 +2,6 @@ node_modules
 dist
 shots
 .DS_Store
+
+# downloaded source packs (Quaternius CC0, TUMFTM) — see tools/build_people.py
+assets-src/

@@ -1,5 +1,6 @@
 /**
- * The grid: the eleven 2026 teams (real names and colours, no logos), two invented drivers each.
+ * The grid: the eleven 2026 teams (real names and colours, no logos), two drivers each —
+ * sound-alike names on the real 2026 seats and numbers (not the real people).
  * Colours are sRGB hex. `pace` scales AI speed (1 = the best car).
  */
 
@@ -21,9 +22,20 @@ export interface Team {
   carbon: number;
   /** paint finish: 0 gloss … 1 matte */
   matte: number;
+  /** metal-flake paint 0..1 (default: automatic for silvers) */
+  metallic?: number;
   sponsor: string;
   pace: number;
   drivers: [Driver, Driver];
+}
+
+export interface DriverLook {
+  skin: number;
+  hair: number;
+  style: 'short' | 'buzz' | 'wavy' | 'curly' | 'braids' | 'long';
+  beard?: boolean;
+  stubble?: number;
+  face?: { width?: number; jaw?: number; nose?: number; length?: number };
 }
 
 export interface Driver {
@@ -33,6 +45,8 @@ export interface Driver {
   number: number;
   /** helmet colours */
   helmet: [string, string];
+  /** what they look like out of the car (podium): skin, hair colour and style, beard, face shape */
+  look: DriverLook;
   /** AI racecraft 0.9–1.0 */
   skill: number;
   aggression: number;
@@ -44,8 +58,8 @@ export const TEAMS: Team[] = [
     primary: '#dc0000', secondary: '#141414', accent: '#ffffff', ink: '#ffffff',
     pattern: 'ferrari', carbon: 0.25, matte: 0.0, sponsor: 'VELOCE', pace: 0.992,
     drivers: [
-      { first: 'Luca', last: 'Moretti', code: 'MOR', number: 16, helmet: ['#c8102e', '#ffd400'], skill: 0.985, aggression: 0.6 },
-      { first: 'Sebastián', last: 'Ruiz', code: 'RUI', number: 55, helmet: ['#1f4fd1', '#ffffff'], skill: 0.975, aggression: 0.5 },
+      { first: 'Carlo', last: 'Leclair', code: 'LCL', number: 16, helmet: ['#c8102e', '#ffd400'], look: { skin: 0xf0cdb0, hair: 0x3a2a1e, style: 'wavy', stubble: 0.15, face: { width: 0.97, length: 1.04 } }, skill: 0.985, aggression: 0.6 },
+      { first: 'Lewis', last: 'Hamford', code: 'HMF', number: 44, helmet: ['#1f4fd1', '#ffffff'], look: { skin: 0x9c6b4a, hair: 0x16110e, style: 'braids', beard: true, face: { width: 1.0, jaw: 1.05 } }, skill: 0.975, aggression: 0.5 },
     ],
   },
   {
@@ -53,8 +67,8 @@ export const TEAMS: Team[] = [
     primary: '#c4c8cc', secondary: '#0d0f12', accent: '#00d7b6', ink: '#0d0f12',
     pattern: 'mercedes', carbon: 0.45, matte: 0.1, sponsor: 'QUANTA', pace: 0.99,
     drivers: [
-      { first: 'Erik', last: 'Hansen', code: 'HAN', number: 44, helmet: ['#8a2be2', '#ffd400'], skill: 0.99, aggression: 0.55 },
-      { first: 'Tobi', last: 'Okafor', code: 'OKA', number: 63, helmet: ['#00d2be', '#111111'], skill: 0.97, aggression: 0.45 },
+      { first: 'George', last: 'Rushworth', code: 'RSW', number: 63, helmet: ['#8a2be2', '#ffd400'], look: { skin: 0xf2d2b8, hair: 0x5a3f28, style: 'short', face: { width: 0.96, length: 1.06, nose: 1.05 } }, skill: 0.99, aggression: 0.55 },
+      { first: 'Kimi', last: 'Antonetti', code: 'ATN', number: 12, helmet: ['#00d2be', '#111111'], look: { skin: 0xe9c3a2, hair: 0x241a14, style: 'short', face: { width: 0.97, jaw: 1.05 } }, skill: 0.97, aggression: 0.45 },
     ],
   },
   {
@@ -62,8 +76,8 @@ export const TEAMS: Team[] = [
     primary: '#1e2856', secondary: '#e3001b', accent: '#ffc906', ink: '#ffffff',
     pattern: 'redbull', carbon: 0.2, matte: 0.85, sponsor: 'KRAFT ENERGY', pace: 1.0,
     drivers: [
-      { first: 'Max', last: 'Vogel', code: 'VOG', number: 1, helmet: ['#1b2552', '#ff6a00'], skill: 1.0, aggression: 0.8 },
-      { first: 'Diego', last: 'Pérez', code: 'PER', number: 11, helmet: ['#ffffff', '#1b2552'], skill: 0.955, aggression: 0.5 },
+      { first: 'Max', last: 'Verhoeven', code: 'VHN', number: 1, helmet: ['#1b2552', '#ff6a00'], look: { skin: 0xf0cbad, hair: 0x6b4c30, style: 'short', stubble: 0.35, face: { width: 1.02, jaw: 1.08 } }, skill: 1.0, aggression: 0.8 },
+      { first: 'Isaac', last: 'Hadari', code: 'HDR', number: 6, helmet: ['#ffffff', '#1b2552'], look: { skin: 0xc99772, hair: 0x14100d, style: 'curly', stubble: 0.2, face: { width: 0.98 } }, skill: 0.955, aggression: 0.5 },
     ],
   },
   {
@@ -71,8 +85,8 @@ export const TEAMS: Team[] = [
     primary: '#ff8000', secondary: '#141414', accent: '#ffffff', ink: '#141414',
     pattern: 'mclaren', carbon: 0.3, matte: 0.2, sponsor: 'ORBIT', pace: 0.998,
     drivers: [
-      { first: 'Lando', last: 'Nolan', code: 'NOL', number: 4, helmet: ['#d4ff00', '#101216'], skill: 0.99, aggression: 0.6 },
-      { first: 'Oscar', last: 'Pierce', code: 'PIE', number: 81, helmet: ['#ff7a00', '#ffffff'], skill: 0.988, aggression: 0.5 },
+      { first: 'Lando', last: 'Morris', code: 'MRS', number: 4, helmet: ['#d4ff00', '#101216'], look: { skin: 0xf2cfb4, hair: 0x5c4028, style: 'wavy', stubble: 0.1, face: { width: 1.0, nose: 0.95 } }, skill: 0.99, aggression: 0.6 },
+      { first: 'Oscar', last: 'Piastro', code: 'PST', number: 81, helmet: ['#ff7a00', '#ffffff'], look: { skin: 0xf0cdb2, hair: 0x2e2118, style: 'short', face: { width: 0.95, length: 1.05 } }, skill: 0.988, aggression: 0.5 },
     ],
   },
   {
@@ -80,8 +94,8 @@ export const TEAMS: Team[] = [
     primary: '#00594f', secondary: '#0b1411', accent: '#cedc00', ink: '#cedc00',
     pattern: 'aston', carbon: 0.35, matte: 0.6, sponsor: 'ARBOR', pace: 0.975,
     drivers: [
-      { first: 'Fernando', last: 'Alves', code: 'ALV', number: 14, helmet: ['#00574b', '#ffe600'], skill: 0.975, aggression: 0.7 },
-      { first: 'Kit', last: 'Strand', code: 'STR', number: 18, helmet: ['#ffffff', '#00574b'], skill: 0.95, aggression: 0.4 },
+      { first: 'Fernando', last: 'Alvero', code: 'AVR', number: 14, helmet: ['#00574b', '#ffe600'], look: { skin: 0xd9aa84, hair: 0x1c1512, style: 'short', stubble: 0.55, face: { width: 1.0, nose: 1.12, length: 1.05 } }, skill: 0.975, aggression: 0.7 },
+      { first: 'Lance', last: 'Stroud', code: 'STD', number: 18, helmet: ['#ffffff', '#00574b'], look: { skin: 0xf1d0b6, hair: 0x2a1e17, style: 'short', face: { width: 1.0, jaw: 1.06 } }, skill: 0.95, aggression: 0.4 },
     ],
   },
   {
@@ -89,8 +103,8 @@ export const TEAMS: Team[] = [
     primary: '#0078c1', secondary: '#fd4bc7', accent: '#ffffff', ink: '#ffffff',
     pattern: 'alpine', carbon: 0.3, matte: 0.1, sponsor: 'CIELO', pace: 0.965,
     drivers: [
-      { first: 'Pierre', last: 'Garnier', code: 'GAR', number: 10, helmet: ['#0a5cc2', '#ffffff'], skill: 0.965, aggression: 0.55 },
-      { first: 'Jack', last: 'Doherty', code: 'DOH', number: 7, helmet: ['#ff4fa3', '#0a5cc2'], skill: 0.955, aggression: 0.6 },
+      { first: 'Pierre', last: 'Gaslin', code: 'GSN', number: 10, helmet: ['#0a5cc2', '#ffffff'], look: { skin: 0xeccaaa, hair: 0x1e1612, style: 'short', stubble: 0.4, face: { width: 0.98, nose: 1.05 } }, skill: 0.965, aggression: 0.55 },
+      { first: 'Franco', last: 'Colapietro', code: 'CPT', number: 43, helmet: ['#ff4fa3', '#0a5cc2'], look: { skin: 0xe2b996, hair: 0x2a1c14, style: 'wavy', face: { width: 0.97 } }, skill: 0.955, aggression: 0.6 },
     ],
   },
   {
@@ -98,8 +112,8 @@ export const TEAMS: Team[] = [
     primary: '#041e42', secondary: '#1a8fe0', accent: '#ffffff', ink: '#ffffff',
     pattern: 'williams', carbon: 0.35, matte: 0.3, sponsor: 'NORTHWIND', pace: 0.97,
     drivers: [
-      { first: 'Alex', last: 'Albers', code: 'ALB', number: 23, helmet: ['#00a3e0', '#061a40'], skill: 0.97, aggression: 0.45 },
-      { first: 'Carlos', last: 'Serra', code: 'SER', number: 12, helmet: ['#e10600', '#ffd400'], skill: 0.975, aggression: 0.55 },
+      { first: 'Alex', last: 'Albury', code: 'ABY', number: 23, helmet: ['#00a3e0', '#061a40'], look: { skin: 0xd8ae88, hair: 0x100c0a, style: 'short', face: { width: 1.03, nose: 0.95 } }, skill: 0.97, aggression: 0.45 },
+      { first: 'Carlos', last: 'Sainte', code: 'SNE', number: 55, helmet: ['#e10600', '#ffd400'], look: { skin: 0xdcb08c, hair: 0x1a130f, style: 'short', stubble: 0.3, face: { width: 0.97, length: 1.06, nose: 1.08 } }, skill: 0.975, aggression: 0.55 },
     ],
   },
   {
@@ -107,8 +121,8 @@ export const TEAMS: Team[] = [
     primary: '#f4f4f4', secondary: '#141414', accent: '#e6002b', ink: '#141414',
     pattern: 'haas', carbon: 0.5, matte: 0.4, sponsor: 'IRONCLAD', pace: 0.955,
     drivers: [
-      { first: 'Nico', last: 'Hartmann', code: 'HAR', number: 27, helmet: ['#f2f2f2', '#d40f1c'], skill: 0.955, aggression: 0.65 },
-      { first: 'Oliver', last: 'Bearing', code: 'BEA', number: 87, helmet: ['#141414', '#f2f2f2'], skill: 0.955, aggression: 0.6 },
+      { first: 'Esteban', last: 'Ocampo', code: 'OCP', number: 31, helmet: ['#f2f2f2', '#d40f1c'], look: { skin: 0xefcaad, hair: 0x2a1d15, style: 'buzz', face: { width: 0.95, length: 1.08 } }, skill: 0.955, aggression: 0.65 },
+      { first: 'Ollie', last: 'Bearing', code: 'BRG', number: 87, helmet: ['#141414', '#f2f2f2'], look: { skin: 0xf3d4bb, hair: 0x7a5534, style: 'wavy', face: { width: 1.0 } }, skill: 0.955, aggression: 0.6 },
     ],
   },
   {
@@ -116,8 +130,8 @@ export const TEAMS: Team[] = [
     primary: '#f7f8fb', secondary: '#1534cc', accent: '#ff1e3c', ink: '#1534cc',
     pattern: 'racingbulls', carbon: 0.25, matte: 0.1, sponsor: 'PULSAR', pace: 0.96,
     drivers: [
-      { first: 'Kenji', last: 'Tanaka', code: 'TAN', number: 22, helmet: ['#ffffff', '#ff1e3c'], skill: 0.96, aggression: 0.7 },
-      { first: 'Liam', last: 'Lawton', code: 'LAW', number: 30, helmet: ['#1434cb', '#ffffff'], skill: 0.955, aggression: 0.75 },
+      { first: 'Liam', last: 'Lawton', code: 'LWT', number: 30, helmet: ['#ffffff', '#ff1e3c'], look: { skin: 0xefcbae, hair: 0x4a3322, style: 'short', stubble: 0.2, face: { width: 1.0 } }, skill: 0.96, aggression: 0.7 },
+      { first: 'Arvid', last: 'Lindqvist', code: 'LDQ', number: 41, helmet: ['#1434cb', '#ffffff'], look: { skin: 0xf4d6be, hair: 0xc9a468, style: 'wavy', face: { width: 0.96, length: 1.05 } }, skill: 0.955, aggression: 0.75 },
     ],
   },
   {
@@ -125,8 +139,8 @@ export const TEAMS: Team[] = [
     primary: '#a4a8ad', secondary: '#0a0a0a', accent: '#f50537', ink: '#0a0a0a',
     pattern: 'audi', carbon: 0.55, matte: 0.7, sponsor: 'AXIOM', pace: 0.95,
     drivers: [
-      { first: 'Gabriel', last: 'Borges', code: 'BOR', number: 5, helmet: ['#ffe600', '#0a8f3c'], skill: 0.955, aggression: 0.55 },
-      { first: 'Nils', last: 'Hulme', code: 'HUL', number: 9, helmet: ['#ffffff', '#0a0a0a'], skill: 0.96, aggression: 0.5 },
+      { first: 'Gabriel', last: 'Bortello', code: 'BTL', number: 5, helmet: ['#ffe600', '#0a8f3c'], look: { skin: 0xdcb08e, hair: 0x2a1c13, style: 'wavy', face: { width: 0.97 } }, skill: 0.955, aggression: 0.55 },
+      { first: 'Nico', last: 'Hulkenburg', code: 'HLB', number: 27, helmet: ['#ffffff', '#0a0a0a'], look: { skin: 0xf0cfb6, hair: 0xb9955c, style: 'short', stubble: 0.35, face: { width: 1.0, length: 1.06 } }, skill: 0.96, aggression: 0.5 },
     ],
   },
   {
@@ -134,8 +148,8 @@ export const TEAMS: Team[] = [
     primary: '#111214', secondary: '#e9eaec', accent: '#b8975a', ink: '#e9eaec',
     pattern: 'cadillac', carbon: 0.45, matte: 0.5, sponsor: 'MERIDIAN', pace: 0.945,
     drivers: [
-      { first: 'Jordan', last: 'Pike', code: 'PIK', number: 38, helmet: ['#111214', '#e9eaec'], skill: 0.955, aggression: 0.55 },
-      { first: 'Marco', last: 'Bellini', code: 'BEL', number: 19, helmet: ['#b8975a', '#111214'], skill: 0.95, aggression: 0.5 },
+      { first: 'Sergio', last: 'Peralta', code: 'PRT', number: 11, helmet: ['#111214', '#e9eaec'], look: { skin: 0xc79871, hair: 0x120e0c, style: 'short', stubble: 0.45, face: { width: 1.05, jaw: 1.05 } }, skill: 0.955, aggression: 0.55 },
+      { first: 'Valtteri', last: 'Botta', code: 'BTA', number: 77, helmet: ['#b8975a', '#111214'], look: { skin: 0xf3d5bf, hair: 0xa88452, style: 'short', beard: true, face: { width: 0.97, length: 1.05 } }, skill: 0.95, aggression: 0.5 },
     ],
   },
 ];

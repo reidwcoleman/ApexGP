@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { TEAMS, type Entry } from '../race/Teams.ts';
 import type { Track } from '../world/Track.ts';
 import { EVENT } from '../world/event.ts';
+import { FanCrowd, ACT } from '../people/Crowd.ts';
+import { peopleKit } from '../people/Humans.ts';
+import { PodiumDriver } from '../people/drivers.ts';
 
 /**
  * The podium ceremony, filmed like the broadcast.
@@ -42,169 +45,7 @@ function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => 
 
 const FONT = '"Titillium Web", Arial, sans-serif';
 
-// ------------------------------------------------------------------------------------ the drivers
-interface Limb {
-  shoulder: THREE.Group;
-  elbow: THREE.Group;
-  hand: THREE.Group;
-}
-interface Figure {
-  root: THREE.Group;
-  body: THREE.Group;
-  chest: THREE.Group;
-  head: THREE.Group;
-  armL: Limb;
-  armR: Limb;
-  legL: THREE.Group;
-  legR: THREE.Group;
-  kneeL: THREE.Group;
-  kneeR: THREE.Group;
-  trophy: THREE.Object3D;
-  bottle: THREE.Object3D;
-  baseY: number;
-  phase: number;
-  place: number;
-}
-
-/**
- * Race-suit texture for a lathe torso (u around the body, front at u = 0.5; v up):
- * team colour panels, contrast side panels, a chest sponsor, the zip and collar,
- * the belt, and the driver's number on the chest.
- */
-function suitTexture(e: Entry): THREE.CanvasTexture {
-  const T = e.team;
-  return canvasTex(1024, 512, (g) => {
-    g.fillStyle = T.primary;
-    g.fillRect(0, 0, 1024, 512);
-    // side panels (under the arms) in the secondary colour, with an accent piping
-    for (const u of [0.25, 0.75]) {
-      g.fillStyle = T.secondary;
-      g.fillRect(u * 1024 - 70, 0, 140, 512);
-      g.fillStyle = T.accent;
-      g.fillRect(u * 1024 - 76, 0, 6, 512);
-      g.fillRect(u * 1024 + 70, 0, 6, 512);
-    }
-    // lower back / seat panel
-    g.fillStyle = T.secondary;
-    g.fillRect(0, 430, 1024, 82);
-    // belt
-    g.fillStyle = '#16171a';
-    g.fillRect(0, 468, 1024, 26);
-    g.fillStyle = T.accent;
-    g.fillRect(496, 468, 32, 26);
-    // zip and collar placket
-    g.fillStyle = 'rgba(0,0,0,0.35)';
-    g.fillRect(509, 0, 6, 468);
-    g.fillStyle = T.secondary;
-    g.fillRect(430, 0, 164, 26);
-    // chest sponsor across the front
-    g.fillStyle = T.ink;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = `italic 900 58px ${FONT}`;
-    g.fillText(T.sponsor.slice(0, 12), 512, 170, 300);
-    // small patches: the number on the right chest, the team name on the left
-    g.font = `900 40px ${FONT}`;
-    g.fillText(String(e.driver.number), 590, 92);
-    g.font = `700 22px ${FONT}`;
-    g.fillText(T.short, 430, 92, 120);
-    // sponsor on the back
-    g.font = `italic 900 64px ${FONT}`;
-    g.fillText(T.sponsor.slice(0, 12), 0, 150, 300);
-    g.fillText(T.sponsor.slice(0, 12), 1024, 150, 300);
-    g.font = `700 30px ${FONT}`;
-    g.fillText(e.driver.last.toUpperCase(), 0, 330, 260);
-    g.fillText(e.driver.last.toUpperCase(), 1024, 330, 260);
-    // fabric: faint quilting so it isn't flat plastic
-    g.globalAlpha = 0.05;
-    g.fillStyle = '#000';
-    for (let y = 0; y < 512; y += 6) g.fillRect(0, y, 1024, 1);
-    g.globalAlpha = 1;
-  });
-}
-
-function capTexture(e: Entry): THREE.CanvasTexture {
-  const T = e.team;
-  return canvasTex(512, 256, (g) => {
-    g.fillStyle = T.primary;
-    g.fillRect(0, 0, 512, 256);
-    // front panel logo (the front of a sphere cap is u = 0.25 with phiStart 0 … see makeHead)
-    g.fillStyle = T.ink;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = `italic 900 40px ${FONT}`;
-    g.fillText(T.sponsor.slice(0, 10), 384, 170, 150);
-    g.fillStyle = T.accent;
-    g.fillRect(0, 236, 512, 20);
-  });
-}
-
-/** a sculpted head: jaw, chin, cheekbones, brow, nose and eye sockets pushed out of a sphere; skin tones by vertex */
-function headGeometry(): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(0.1, 56, 44);
-  const p = g.getAttribute('position') as THREE.BufferAttribute;
-  const col = new Float32Array(p.count * 3);
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    let { x, y, z } = v;
-    const ny = y / 0.1;
-    // overall proportions: narrower than deep, taller than wide
-    x *= 0.76;
-    y *= 1.1;
-    z *= 0.98;
-    // jaw tapers to the chin
-    if (ny < 0.05) {
-      const k = clamp01((0.05 - ny) / 1.05);
-      x *= 1 - 0.3 * k * k;
-      z *= 1 - 0.12 * k;
-      if (z > 0) z += 0.012 * Math.exp(-((x / 0.025) ** 2)) * k;
-    }
-    // the back of the skull is fuller
-    if (z < 0) {
-      z *= 1.06;
-      y += 0.005 * clamp01(-z / 0.1);
-    }
-    const front = clamp01(z / 0.05);
-    // brow ridge, cheekbones, nose, eye sockets, lips
-    z += 0.008 * Math.exp(-(((y - 0.032) / 0.012) ** 2)) * Math.exp(-((x / 0.05) ** 2)) * front;
-    x += Math.sign(x) * 0.006 * Math.exp(-(((y + 0.005) / 0.02) ** 2)) * clamp01((Math.abs(x) - 0.03) / 0.03) * front;
-    const nose = Math.exp(-((x / 0.011) ** 2) - ((y + 0.008) / 0.024) ** 2);
-    z += 0.024 * nose * front;
-    const eye = Math.exp(-(((Math.abs(x) - 0.033) / 0.014) ** 2) - ((y - 0.017) / 0.01) ** 2);
-    z -= 0.009 * eye * front;
-    const lips = Math.exp(-((x / 0.022) ** 2) - ((y + 0.052) / 0.008) ** 2);
-    z += 0.004 * lips * front;
-    p.setXYZ(i, x, y, z);
-    // skin: warmer cheeks, redder lips, a shadow of stubble on the jaw
-    const cheek = Math.exp(-(((Math.abs(x) - 0.04) / 0.02) ** 2) - ((y + 0.01) / 0.02) ** 2) * front;
-    const stub = clamp01((-0.03 - y) / 0.04) * front * (1 - lips);
-    col[i * 3] = 1 + 0.06 * cheek + 0.12 * lips - 0.2 * stub;
-    col[i * 3 + 1] = 1 - 0.05 * cheek - 0.25 * lips - 0.22 * stub;
-    col[i * 3 + 2] = 1 - 0.05 * cheek - 0.2 * lips - 0.2 * stub;
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.computeVertexNormals();
-  return g;
-}
-let HEAD_GEO: THREE.BufferGeometry | null = null;
-
-/** torso as a lathe (hips → shoulders), front at u = 0.5 */
-function torsoGeometry(): THREE.BufferGeometry {
-  const prof: [number, number][] = [
-    [0.0, -0.02], [0.14, -0.02], [0.162, 0.04], [0.158, 0.12], [0.146, 0.2], [0.15, 0.27], [0.168, 0.35], [0.18, 0.42], [0.182, 0.47], [0.172, 0.515], [0.145, 0.545], [0.1, 0.565], [0.066, 0.578], [0.0, 0.582],
-  ];
-  const g = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 44, Math.PI, Math.PI * 2);
-  g.scale(1.16, 1, 0.74);
-  return g;
-}
-
-function limbGeo(r0: number, r1: number, len: number) {
-  const g = new THREE.CylinderGeometry(r0, r1, len, 16, 1, false);
-  g.translate(0, -len / 2, 0);
-  return g;
-}
-
+// ------------------------------------------------------------------------------------ props
 function mesh(g: THREE.BufferGeometry, m: THREE.Material, cast = true) {
   const x = new THREE.Mesh(g, m);
   x.castShadow = cast;
@@ -248,157 +89,6 @@ function makeBottle(): THREE.Object3D {
   const g = new THREE.Group();
   g.add(b, f, l);
   return g;
-}
-
-const SKIN = [0xe2b38e, 0xc68d63, 0xeec5a3, 0x8d5a3b, 0xd9a47c];
-const HAIR = [0x2a1d14, 0x4a3322, 0x14100d, 0x6b4a2c, 0x1c1612];
-
-function makeFigure(e: Entry, place: number): Figure {
-  const skinC = SKIN[(place + e.driver.number) % SKIN.length];
-  const suit = new THREE.MeshPhysicalMaterial({ map: suitTexture(e), roughness: 0.72, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0.4, 0.4, 0.42) });
-  const sleeve = new THREE.MeshPhysicalMaterial({ color: e.team.primary, roughness: 0.72, sheen: 0.5, sheenRoughness: 0.6, sheenColor: new THREE.Color(0.4, 0.4, 0.42) });
-  const legM = new THREE.MeshPhysicalMaterial({ color: e.team.secondary === '#ffffff' || e.team.secondary === '#f4f4f4' ? e.team.primary : e.team.primary, roughness: 0.74, sheen: 0.4, sheenColor: new THREE.Color(0.35, 0.35, 0.37) });
-  const cuff = new THREE.MeshStandardMaterial({ color: e.team.secondary, roughness: 0.7 });
-  const skin = new THREE.MeshPhysicalMaterial({ color: skinC, roughness: 0.52, sheen: 0.6, sheenRoughness: 0.45, sheenColor: new THREE.Color(0.55, 0.25, 0.2), vertexColors: true });
-  const skinPlain = new THREE.MeshPhysicalMaterial({ color: skinC, roughness: 0.55, sheen: 0.5, sheenColor: new THREE.Color(0.5, 0.25, 0.2) });
-  const boot = new THREE.MeshStandardMaterial({ color: 0x121214, roughness: 0.38, metalness: 0.1 });
-  const cap = new THREE.MeshStandardMaterial({ map: capTexture(e), roughness: 0.78 });
-  const brimM = new THREE.MeshStandardMaterial({ color: e.team.secondary, roughness: 0.7 });
-  const hair = new THREE.MeshStandardMaterial({ color: HAIR[(place * 3 + e.driver.number) % HAIR.length], roughness: 0.85 });
-  const eyeW = new THREE.MeshPhysicalMaterial({ color: 0xf2efe8, roughness: 0.1, clearcoat: 1 });
-  const iris = new THREE.MeshPhysicalMaterial({ color: [0x3a2616, 0x2d4a63, 0x3d5a2e, 0x201510][place % 4], roughness: 0.1, clearcoat: 1 });
-  const brow = new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.95 });
-
-  const root = new THREE.Group();
-  const body = new THREE.Group();
-  body.position.y = 0.94; // hips
-  root.add(body);
-  // legs: thigh + knee + shin + race boot
-  const leg = (s: number) => {
-    const g = new THREE.Group();
-    g.position.set(0.095 * s, 0.02, 0);
-    g.add(mesh(limbGeo(0.085, 0.07, 0.44), legM));
-    const knee = new THREE.Group();
-    knee.position.y = -0.44;
-    knee.add(mesh(new THREE.SphereGeometry(0.068, 16, 12), legM));
-    knee.add(mesh(limbGeo(0.066, 0.05, 0.42), legM));
-    const bootM = mesh(new THREE.CapsuleGeometry(0.052, 0.14, 6, 14), boot);
-    bootM.rotation.x = Math.PI / 2;
-    bootM.position.set(0, -0.45, 0.05);
-    bootM.scale.set(0.95, 1, 0.8);
-    knee.add(bootM);
-    g.add(knee);
-    body.add(g);
-    return { g, knee };
-  };
-  const L = leg(1);
-  const R = leg(-1);
-  // torso (chest group so the upper body can lean and breathe)
-  const chest = new THREE.Group();
-  body.add(chest);
-  chest.add(mesh(torsoGeometry(), suit));
-  // pelvis: bridges the suit from the waist into the legs
-  const pelvis = mesh(new THREE.SphereGeometry(0.1, 20, 14), legM);
-  pelvis.scale.set(1.85, 1.05, 1.2);
-  pelvis.position.y = -0.01;
-  body.add(pelvis);
-  // collar ring and neck
-  const collar = mesh(new THREE.CylinderGeometry(0.068, 0.074, 0.055, 22, 1, true), cuff);
-  collar.position.y = 0.585;
-  chest.add(collar);
-  const neck = mesh(new THREE.CylinderGeometry(0.056, 0.062, 0.1, 18), skinPlain);
-  neck.position.set(0, 0.615, 0.005);
-  chest.add(neck);
-  // head
-  const head = new THREE.Group();
-  head.position.set(0, 0.645, 0.012);
-  chest.add(head);
-  HEAD_GEO ??= headGeometry();
-  const skull = mesh(HEAD_GEO, skin);
-  skull.position.y = 0.1;
-  skull.scale.setScalar(1.06);
-  head.add(skull);
-  // ears
-  for (const s of [-1, 1]) {
-    const ear = mesh(new THREE.SphereGeometry(0.022, 12, 10), skinPlain);
-    ear.scale.set(0.4, 1.2, 0.8);
-    ear.position.set(0.077 * s, 0.1, -0.005);
-    head.add(ear);
-  }
-  // eyes (whites + iris), brows
-  for (const s of [-1, 1]) {
-    const w = mesh(new THREE.SphereGeometry(0.0125, 16, 12), eyeW, false);
-    w.position.set(0.033 * s, 0.118, 0.077);
-    const ir = mesh(new THREE.SphereGeometry(0.0072, 12, 10), iris, false);
-    ir.position.set(0.033 * s, 0.118, 0.087);
-    ir.scale.set(1, 1, 0.5);
-    const b = mesh(new THREE.BoxGeometry(0.03, 0.006, 0.008), brow, false);
-    b.position.set(0.034 * s, 0.137, 0.088);
-    b.rotation.z = -0.12 * s;
-    head.add(w, ir, b);
-  }
-  // hair at the sides and back under the cap
-  // (the sphere's +z is at phi = π/2: keep the band behind the ears)
-  const hairM = mesh(new THREE.SphereGeometry(0.104, 28, 16, Math.PI * 1.05, Math.PI * 0.9, Math.PI * 0.3, Math.PI * 0.3), hair);
-  hairM.scale.set(0.8, 1.08, 1.02);
-  hairM.position.set(0, 0.105, -0.004);
-  head.add(hairM);
-  // team cap: crown + curved brim (the front of the crown is +z: phiStart puts u = 0.75 there)
-  const crown = mesh(new THREE.SphereGeometry(0.106, 36, 14, 0, Math.PI * 2, 0, Math.PI * 0.46), cap);
-  crown.scale.set(0.84, 0.96, 1.02);
-  crown.position.set(0, 0.138, -0.004);
-  crown.rotation.y = Math.PI;
-  head.add(crown);
-  const brimShape = new THREE.Shape();
-  brimShape.absellipse(0, 0, 0.084, 0.088, 0, Math.PI, false, 0);
-  const brimG = new THREE.ExtrudeGeometry(brimShape, { depth: 0.006, bevelEnabled: false, curveSegments: 20 });
-  brimG.rotateX(Math.PI / 2);
-  const brimMesh = mesh(brimG, brimM);
-  brimMesh.position.set(0, 0.158, 0.07);
-  brimMesh.rotation.x = 0.16;
-  head.add(brimMesh);
-  // arms: shoulder ball, tapered upper arm, elbow, forearm, cuff, a hand with a thumb
-  const arm = (s: number): Limb => {
-    const shoulder = new THREE.Group();
-    shoulder.position.set(0.19 * s, 0.49, -0.005);
-    shoulder.add(mesh(new THREE.SphereGeometry(0.068, 16, 12), sleeve));
-    shoulder.add(mesh(limbGeo(0.064, 0.052, 0.3), sleeve));
-    const elbow = new THREE.Group();
-    elbow.position.y = -0.3;
-    elbow.add(mesh(new THREE.SphereGeometry(0.052, 14, 10), sleeve));
-    elbow.add(mesh(limbGeo(0.05, 0.04, 0.26), sleeve));
-    const cuffR = mesh(new THREE.CylinderGeometry(0.043, 0.043, 0.03, 16), cuff);
-    cuffR.position.y = -0.25;
-    elbow.add(cuffR);
-    const hand = new THREE.Group();
-    hand.position.y = -0.3;
-    const palm = mesh(new THREE.BoxGeometry(0.075, 0.09, 0.03), skinPlain);
-    palm.position.y = -0.02;
-    const fingers = mesh(new THREE.CapsuleGeometry(0.017, 0.05, 4, 8), skinPlain);
-    fingers.scale.set(2.1, 1, 0.9);
-    fingers.position.set(0, -0.085, 0.004);
-    const thumb = mesh(new THREE.CapsuleGeometry(0.011, 0.04, 4, 8), skinPlain);
-    thumb.position.set(0.04 * s, -0.035, 0.02);
-    thumb.rotation.z = 0.6 * s;
-    hand.add(palm, fingers, thumb);
-    elbow.add(hand);
-    shoulder.add(elbow);
-    chest.add(shoulder);
-    return { shoulder, elbow, hand };
-  };
-  const armL = arm(1);
-  const armR = arm(-1);
-  const trophy = makeTrophy(place);
-  trophy.rotation.x = Math.PI; // hangs from the hand, upright when the arm is raised
-  trophy.position.y = -0.06;
-  trophy.visible = false;
-  armR.hand.add(trophy);
-  const bottle = makeBottle();
-  bottle.rotation.x = Math.PI;
-  bottle.position.y = -0.05;
-  bottle.visible = false;
-  armL.hand.add(bottle);
-  return { root, body, chest, head, armL, armR, legL: L.g, legR: R.g, kneeL: L.knee, kneeR: R.knee, trophy, bottle, baseY: 0, phase: place * 1.7, place };
 }
 
 // ------------------------------------------------------------------------------------ particles
@@ -532,156 +222,6 @@ class TickerTape {
   }
 }
 
-// ------------------------------------------------------------------------------------ the crowd on the track
-/** team crews and fans under the podium: instanced people, jumping, arms up, some with flags */
-class TrackCrowd {
-  readonly group = new THREE.Group();
-  /** two builds: arms up (cheering) and arms down (clapping / watching); each a shirt mesh (team-tinted) + the rest */
-  private shirts: THREE.InstancedMesh[] = [];
-  private rest: THREE.InstancedMesh[] = [];
-  private flags: THREE.InstancedMesh;
-  private pos: { x: number; z: number; y: number; yaw: number; ph: number; hop: number; flag: number; v: number; slot: number; k: number }[] = [];
-  private readonly m = new THREE.Matrix4();
-  private readonly q = new THREE.Quaternion();
-  private readonly v = new THREE.Vector3();
-  private readonly sc = new THREE.Vector3();
-
-  constructor(spots: { x: number; z: number; y: number; yaw: number; team: number; flag: boolean }[]) {
-    const skinC = new THREE.Color(0xd8a882), pants = new THREE.Color(0x23262d), shoe = new THREE.Color(0x121212), hairC = new THREE.Color(0x2b2018);
-    const common = () => [
-      colorGeo(xf(new THREE.SphereGeometry(0.11, 10, 8), 0, 1.64, 0.01, 0.84, 1.04, 0.95), skinC),
-      colorGeo(xf(new THREE.SphereGeometry(0.113, 10, 5, 0, Math.PI * 2, 0, Math.PI * 0.5), 0, 1.67, 0, 0.86, 1, 0.97), hairC),
-      colorGeo(xf(new THREE.CylinderGeometry(0.08, 0.06, 0.88, 6), 0.09, 0.47, 0), pants),
-      colorGeo(xf(new THREE.CylinderGeometry(0.08, 0.06, 0.88, 6), -0.09, 0.47, 0), pants),
-      colorGeo(xf(new THREE.BoxGeometry(0.1, 0.07, 0.24), 0.09, 0.035, 0.04), shoe),
-      colorGeo(xf(new THREE.BoxGeometry(0.1, 0.07, 0.24), -0.09, 0.035, 0.04), shoe),
-      colorGeo(xf(new THREE.CylinderGeometry(0.05, 0.055, 0.1, 6), 0, 1.51, 0), skinC),
-    ];
-    const torso = () => xf(new THREE.CylinderGeometry(0.19, 0.155, 0.6, 10), 0, 1.2, 0, 1, 1, 0.66);
-    const builds = [
-      {
-        shirt: mergeGeos([
-          torso(),
-          xf(new THREE.CylinderGeometry(0.045, 0.052, 0.36, 6), 0.27, 1.63, 0, 1, 1, 1, 0, 0, -0.42),
-          xf(new THREE.CylinderGeometry(0.045, 0.052, 0.36, 6), -0.27, 1.63, 0, 1, 1, 1, 0, 0, 0.42),
-        ]),
-        rest: mergeGeos([...common(), colorGeo(xf(new THREE.SphereGeometry(0.048, 8, 6), 0.35, 1.82, 0), skinC), colorGeo(xf(new THREE.SphereGeometry(0.048, 8, 6), -0.35, 1.82, 0), skinC)]),
-      },
-      {
-        // arms down, forearms forward (clapping)
-        shirt: mergeGeos([
-          torso(),
-          xf(new THREE.CylinderGeometry(0.05, 0.045, 0.3, 6), 0.215, 1.33, 0.02, 1, 1, 1, 0.1, 0, 0.1),
-          xf(new THREE.CylinderGeometry(0.05, 0.045, 0.3, 6), -0.215, 1.33, 0.02, 1, 1, 1, 0.1, 0, -0.1),
-          xf(new THREE.CylinderGeometry(0.042, 0.04, 0.26, 6), 0.14, 1.2, 0.15, 1, 1, 1, 1.25, 0, 0.5),
-          xf(new THREE.CylinderGeometry(0.042, 0.04, 0.26, 6), -0.14, 1.2, 0.15, 1, 1, 1, 1.25, 0, -0.5),
-        ]),
-        rest: mergeGeos([...common(), colorGeo(xf(new THREE.SphereGeometry(0.046, 8, 6), 0.05, 1.28, 0.27), skinC), colorGeo(xf(new THREE.SphereGeometry(0.046, 8, 6), -0.05, 1.28, 0.27), skinC)]),
-      },
-    ];
-    const counts = [0, 0];
-    const variant = spots.map((sp) => (sp.flag ? 0 : Math.random() < 0.62 ? 0 : 1));
-    for (const v of variant) counts[v]++;
-    builds.forEach((b, i) => {
-      const sh = new THREE.InstancedMesh(b.shirt, new THREE.MeshStandardMaterial({ roughness: 0.82 }), Math.max(1, counts[i]));
-      const rs = new THREE.InstancedMesh(b.rest, new THREE.MeshStandardMaterial({ roughness: 0.72, vertexColors: true }), Math.max(1, counts[i]));
-      sh.count = rs.count = counts[i];
-      this.shirts.push(sh);
-      this.rest.push(rs);
-    });
-    // flags on poles held up by some of them
-    const flagG = mergeGeos([
-      colorGeo(xf(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 5), 0.35, 2.3, 0), new THREE.Color(0.8, 0.8, 0.8)),
-      colorGeo(xf(new THREE.PlaneGeometry(0.9, 0.55, 6, 1), 0.8, 2.72, 0), new THREE.Color(1, 1, 1)),
-    ]);
-    this.flags = new THREE.InstancedMesh(flagG, new THREE.MeshStandardMaterial({ roughness: 0.75, side: THREE.DoubleSide, vertexColors: true }), Math.max(1, spots.length));
-    for (const im of [...this.shirts, ...this.rest, this.flags]) {
-      im.castShadow = true;
-      im.receiveShadow = true;
-      im.frustumCulled = false;
-      this.group.add(im);
-    }
-    const c = new THREE.Color();
-    let nf = 0;
-    const slot = [0, 0];
-    spots.forEach((sp, i) => {
-      const t = TEAMS[sp.team % TEAMS.length];
-      const v = variant[i];
-      const k = slot[v]++;
-      this.shirts[v].setColorAt(k, c.set(Math.random() < 0.15 ? t.secondary : t.primary));
-      this.rest[v].setColorAt(k, c.setScalar(0.8 + Math.random() * 0.35));
-      if (sp.flag) {
-        this.flags.setColorAt(nf, c.set(t.primary));
-        nf++;
-      }
-      this.pos.push({ x: sp.x, z: sp.z, y: sp.y, yaw: sp.yaw, ph: Math.random() * 10, hop: 0.6 + Math.random() * 0.8, flag: sp.flag ? nf - 1 : -1, v, slot: k, k: 0.9 + Math.random() * 0.16 });
-    });
-    this.flags.count = nf;
-    this.update(0, 0);
-  }
-
-  /** excitement 0..1 */
-  update(t: number, excite: number) {
-    for (const p of this.pos) {
-      // the cheering ones jump; the others bob and clap
-      const hop = p.v === 0 ? Math.max(0, Math.sin(t * (5 + p.hop * 2) + p.ph)) * 0.16 * excite * p.hop : Math.abs(Math.sin(t * 6 + p.ph)) * 0.02 * excite;
-      this.q.setFromAxisAngle(this.v.set(0, 1, 0), p.yaw + Math.sin(t * 0.8 + p.ph) * 0.25);
-      this.m.compose(this.v.set(p.x, p.y + hop, p.z), this.q, this.sc.setScalar(p.k));
-      this.shirts[p.v].setMatrixAt(p.slot, this.m);
-      this.rest[p.v].setMatrixAt(p.slot, this.m);
-      if (p.flag >= 0) {
-        // waved side to side
-        this.q.setFromAxisAngle(this.v.set(0, 1, 0), p.yaw + Math.sin(t * 3 + p.ph) * 0.5);
-        this.m.compose(this.v.set(p.x, p.y + hop, p.z), this.q, this.sc.setScalar(p.k));
-        this.flags.setMatrixAt(p.flag, this.m);
-      }
-    }
-    for (const im of [...this.shirts, ...this.rest, this.flags]) im.instanceMatrix.needsUpdate = true;
-  }
-}
-
-/** transform a geometry: translate, scale, rotate (xyz) */
-function xf(g: THREE.BufferGeometry, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0): THREE.BufferGeometry {
-  g.scale(sx, sy, sz);
-  if (rx || ry || rz) g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, rz)));
-  g.translate(x, y, z);
-  return g;
-}
-function colorGeo(g: THREE.BufferGeometry, c: THREE.Color): THREE.BufferGeometry {
-  const n = g.getAttribute('position').count;
-  const a = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3);
-  g.setAttribute('color', new THREE.BufferAttribute(a, 3));
-  return g;
-}
-/** merge non-indexed copies (position, normal, optional colour) */
-function mergeGeos(gs: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const parts = gs.map((g) => (g.index ? g.toNonIndexed() : g));
-  const hasCol = parts.some((g) => g.getAttribute('color'));
-  let n = 0;
-  for (const g of parts) n += g.getAttribute('position').count;
-  const pos = new Float32Array(n * 3);
-  const nor = new Float32Array(n * 3);
-  const col = hasCol ? new Float32Array(n * 3).fill(1) : null;
-  let o = 0;
-  for (const g of parts) {
-    const p = g.getAttribute('position');
-    const nn = g.getAttribute('normal');
-    const c = g.getAttribute('color');
-    for (let i = 0; i < p.count; i++) {
-      pos.set([p.getX(i), p.getY(i), p.getZ(i)], (o + i) * 3);
-      if (nn) nor.set([nn.getX(i), nn.getY(i), nn.getZ(i)], (o + i) * 3);
-      if (col && c) col.set([c.getX(i), c.getY(i), c.getZ(i)], (o + i) * 3);
-    }
-    o += p.count;
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  return out;
-}
-
 /** how many of the fans follow each team (Ferrari's tifosi are everywhere) */
 const FOLLOWING = [3.2, 1.8, 1.8, 2.2, 1.1, 0.8, 0.9, 0.7, 0.7, 0.8, 0.7];
 function pickTeam(): number {
@@ -701,15 +241,19 @@ export class Celebration {
   readonly center = new THREE.Vector3();
   /** where the top three cars are parked (world pose), for the game to place them */
   readonly parkSlots: { pos: THREE.Vector3; yaw: number }[] = [];
-  private figures: Figure[] = [];
+  private figures: PodiumDriver[] = [];
   private champagne = new Spray(2600, 0.035, 8, 0.5, new THREE.Color(1, 0.97, 0.86), 0.85);
   private foam = new Spray(900, 0.09, 3.5, 1.8, new THREE.Color(1, 1, 0.97), 0.6);
   private mist = new Spray(700, 0.22, 0.4, 2.2, new THREE.Color(1, 0.98, 0.92), 0.12);
   private tape: TickerTape;
-  private crowd: TrackCrowd;
+  private crowd: FanCrowd;
   private flags: { pole: THREE.Object3D; flag: THREE.Mesh; geo: THREE.PlaneGeometry; base: Float32Array }[] = [];
   /** ceremony clock (runs slow during the slow-motion shot) */
   private t = 0;
+  /** ceremony clock (s) */
+  get time() {
+    return this.t;
+  }
   /** real seconds since the start */
   private real = 0;
   private title: HTMLDivElement;
@@ -854,7 +398,12 @@ export class Celebration {
 
     // ---- the drivers: P1 centre, P2 at the winner's right hand, P3 at the left
     podium.slice(0, 3).forEach((e, i) => {
-      const f = makeFigure(e, i + 1);
+      const trophy = makeTrophy(i + 1);
+      trophy.visible = false;
+      const bottle = makeBottle();
+      bottle.visible = false;
+      this.group.add(trophy, bottle);
+      const f = new PodiumDriver(peopleKit()!, e.team, e.driver, i + 1, (i + 1) * 1.7, trophy, bottle);
       const [x, h] = steps[i];
       f.baseY = h;
       f.root.position.set(x, h, 0.1);
@@ -901,7 +450,11 @@ export class Celebration {
         spots.push({ x: jx, z: jz, y: 0, yaw, team, flag: Math.random() < (crew ? 0.05 : 0.12) });
       }
     }
-    this.crowd = new TrackCrowd(spots);
+    this.crowd = new FanCrowd(
+      peopleKit()!,
+      spots.map((sp) => ({ x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw, team: sp.team, act: sp.flag ? ACT.FLAG : undefined, excite: 0.5 + Math.random() * 0.5 })),
+      { shadows: true },
+    );
     this.group.add(this.crowd.group);
 
     // TV lighting on the stage: a soft key from the front (the sun is often behind the podium)
@@ -961,9 +514,8 @@ export class Celebration {
   }
 
   /** the body language of one driver at ceremony time t */
-  private pose(f: Figure, t: number) {
+  private pose(f: PodiumDriver, t: number, dt: number) {
     const ph = f.phase;
-    const L = f.armL, R = f.armR;
     const me = f.place;
     // trophy handed over: third at 14, second at 16.5, winner at 19
     const tTrophy = me === 3 ? 14 : me === 2 ? 16.5 : 19;
@@ -1061,23 +613,8 @@ export class Celebration {
       jump = Math.max(0, Math.sin(t * 4.6 + ph * 0.3)) * 0.2;
       headX = -0.2;
     }
-    L.shoulder.rotation.set(lx, 0, lz);
-    R.shoulder.rotation.set(rx, 0, rz);
-    L.elbow.rotation.set(lex, 0, le);
-    R.elbow.rotation.set(rex, 0, re);
-    // weight on one leg: the hips drop to that side a touch
-    f.body.rotation.z = Math.sin(t * 0.35 + ph) * 0.025;
-    f.root.position.y = f.baseY + jump;
-    // knees soak up the jumps, hips counter them
-    const bend = jump > 0.01 ? 0.3 + jump : 0.05;
-    f.legL.rotation.x = -bend * 0.55;
-    f.legR.rotation.x = -bend * 0.55;
-    f.kneeL.rotation.x = bend;
-    f.kneeR.rotation.x = bend;
-    f.body.position.y = 0.94 - (1 - Math.cos(bend)) * 0.4;
-    f.chest.rotation.x = lean;
-    f.chest.scale.set(breathe, 1, breathe);
-    f.head.rotation.set(headX, headY, Math.sin(t * 0.6 + ph) * 0.04);
+    f.apply(dt, { lx, lz, lex, le, rx, rz, rex, re, headX, headY, lean, jump });
+    void breathe;
     f.trophy.visible = t >= tTrophy - 0.1;
     // the trophy goes on the step while spraying; back up for the photo
     if (t >= 22 && t < 30) f.trophy.visible = false;
@@ -1091,7 +628,7 @@ export class Celebration {
     this.t += dt;
     const t = this.t;
     this.group.updateMatrixWorld(true);
-    for (const f of this.figures) this.pose(f, t);
+    for (const f of this.figures) this.pose(f, t, dt);
     this.group.updateMatrixWorld(true);
 
     // flags: raised during the anthem, rippling in the breeze
@@ -1137,7 +674,9 @@ export class Celebration {
     this.tape.update(dt, t, this.groundY);
     for (const o of [this.champagne.points, this.foam.points, this.mist.points, this.tape.mesh]) o.matrix.copy(this.group.matrixWorld).invert();
     // the crowd: cheering on arrival, quiet for the anthem, wild for the trophies and champagne
-    this.crowd.update(t, t < 5 ? 0.8 : t < 11 ? 0.05 : t < 22 ? 0.7 : 1);
+    // quiet and still for the anthem, then wild
+    const calm = t < 5 ? 0 : t < 11 ? Math.min(1, (t - 5) / 1.2) : Math.max(0, 1 - (t - 11) / 1.2);
+    this.crowd.update(this.real, calm);
 
     this.graphics(t);
     this.shoot(camera);
@@ -1179,7 +718,7 @@ export class Celebration {
     const P = (x: number, y: number, z: number) => this.world(x, y, z, cam.position);
     const Lk = (x: number, y: number, z: number) => this.world(x, y, z, this.look);
     const f1 = this.figures[0], f2 = this.figures[1], f3 = this.figures[2];
-    const headOf = (f: Figure | undefined, out: THREE.Vector3) => (f ? f.head.localToWorld(out.set(0, 0.1, 0)) : this.world(0, 2.6, 0, out));
+    const headOf = (f: PodiumDriver | undefined, out: THREE.Vector3) => (f ? f.headWorld(out) : this.world(0, 2.6, 0, out));
     let fov = 40;
     let hand = 0.5;
     let range = 6;
@@ -1308,9 +847,11 @@ export class Celebration {
     this.title.remove();
     this.strap.remove();
     this.bars.remove();
+    this.crowd.dispose();
+    for (const f of this.figures) f.dispose();
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.geometry && m.geometry !== HEAD_GEO) m.geometry.dispose();
+      if (m.geometry) m.geometry.dispose();
       const mats = (Array.isArray(m.material) ? m.material : m.material ? [m.material] : []) as THREE.Material[];
       for (const x of mats) {
         const mm = x as THREE.MeshStandardMaterial;

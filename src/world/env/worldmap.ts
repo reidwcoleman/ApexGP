@@ -64,6 +64,8 @@ export interface Anchors {
 const floorTo = (v: number, k: number) => Math.floor(v / k) * k;
 const ceilTo = (v: number, k: number) => Math.ceil(v / k) * k;
 
+export type Venue = 'park' | 'ardennes' | 'airfield';
+
 export class WorldMap {
   readonly track: Track;
   readonly dfFar: DistanceField;
@@ -75,7 +77,7 @@ export class WorldMap {
   /** the Parco di Monza boundary (inside = park) */
   readonly park: { cx: number; cz: number; rx: number; rz: number };
   /** the land the circuit sits in: Monza's flat royal park or the hills and spruce woods of the Ardennes */
-  readonly venue: 'park' | 'ardennes';
+  readonly venue: Venue;
   private pitBox!: Bounds;
   private readonly proj = { s: 0, lat: 0 };
   private readonly platform: Float32Array;
@@ -117,9 +119,16 @@ export class WorldMap {
       z1: ceilTo(bb.z1 + 420, 16),
     };
     // the park: the circuit sits in its northern half, the Villa Reale lawns to the south
-    this.venue = track.def.id === 'spa' ? 'ardennes' : 'park';
+    this.venue = track.def.id === 'spa' ? 'ardennes' : track.def.id === 'silverstone' ? 'airfield' : 'park';
     // (in the Ardennes the "park" is the whole forest: no plain, no towns)
-    this.park = this.venue === 'ardennes' ? { cx: center.x, cz: center.z, rx: 1e5, rz: 1e5 } : { cx: center.x - 40, cz: center.z + 420, rx: 1450, rz: 2250 };
+    // (at Silverstone the "park" is the circuit estate on the old airfield: farmland and villages beyond)
+    const { bb: B } = this.A;
+    this.park =
+      this.venue === 'ardennes'
+        ? { cx: center.x, cz: center.z, rx: 1e5, rz: 1e5 }
+        : this.venue === 'airfield'
+          ? { cx: center.x, cz: center.z, rx: (B.x1 - B.x0) / 2 + 520, rz: (B.z1 - B.z0) / 2 + 520 }
+          : { cx: center.x - 40, cz: center.z + 420, rx: 1450, rz: 2250 };
     this.dfFar = track.buildDistanceField(40, 700, 560);
     this.dfNear = track.buildDistanceField(8, 170, 124);
     {
@@ -326,7 +335,7 @@ export class WorldMap {
     const n = fbm2(x / 1100 + 7.3, z / 1100 - 3.9, 3) * 0.5 + 0.5;
     const n2 = fbm2(x / 300 - 1.7, z / 300 + 2.2, 2) * 0.5 + 0.5;
     // Monza to the south is solid town; elsewhere separate villages with fields between
-    const south = smoothstep(this.park.cz + 1200, this.park.cz + 2600, z) * 0.22;
+    const south = this.venue === 'airfield' ? -0.12 : smoothstep(this.park.cz + 1200, this.park.cz + 2600, z) * 0.22;
     return out * smoothstep(0.5, 0.64, 0.12 + 0.38 * near + 0.95 * (n - 0.5) + 0.22 * (n2 - 0.5) + south);
   }
 
@@ -344,6 +353,13 @@ export class WorldMap {
       const hills = smoothstep(1400, 6000, Rh);
       const m = ridged2(x / 3800 + 0.7, z / 3800 - 2.9, 4, 2.0, 0.5);
       h += hills * (30 + 170 * Math.pow(m, 1.4) * (0.6 + 0.4 * (fbm2(x / 7000 - 1.1, z / 7000 + 2.6, 2) * 0.5 + 0.5)));
+      return h;
+    }
+    if (this.venue === 'airfield') {
+      // Northamptonshire: an old airfield on a plateau, gentle rolling farmland round it
+      h += (0.2 + 0.8 * far) * (1.6 * fbm2(x / 420 + 5.2, z / 420 - 2.4, 3) + 0.3 * fbm2(x / 110 - 1.3, z / 110 + 7.1, 2));
+      const R = Math.hypot(x - center.x, z - center.z);
+      h += smoothstep(1800, 7000, R) * 26 * (fbm2(x / 2600 + 1.7, z / 2600 - 0.4, 3) * 0.5 + 0.35);
       return h;
     }
     // gentle park undulation (never more than a couple of metres)
@@ -805,6 +821,11 @@ export class WorldMap {
     const n2 = fbm2(x / 170 - 2.3, z / 170 + 6.1, 3);
     const nearBoost = 0.42 * (1 - smoothstep(90, 320, dT));
     let f = smoothstep(0.42, 0.6, 0.55 + 0.42 * n1 + 0.14 * n2 + nearBoost);
+    if (this.venue === 'airfield') {
+      // open grass and car parks round the circuit, belts of trees and the odd copse further out
+      const belt = smoothstep(0.66, 0.8, fbm2(x / 340 + 3.7, z / 340 - 8.2, 3) * 0.5 + 0.5 + 0.1 * n2);
+      f = belt * smoothstep(70, 240, dT) * 0.85;
+    }
     f *= this.clearingKeep(x, z);
     const out = this.outsidePark(x, z);
     if (out > 0) {
