@@ -109,5 +109,5 @@ export function skinColor(tone: number, undertone = 0, out = new THREE.Color()):
   return out;
 }
 
-/** a real white fabric reflects ~80 %, never 100 % (keeps kit whites out of the bloom) */
-export const CLOTH_WHITE_MAX = 0.78;
+/** a real white fabric reflects ~60-65 %, never 100 % (keeps kit whites well clear of the bloom threshold under a strong sun) */
+export const CLOTH_WHITE_MAX = 0.6;

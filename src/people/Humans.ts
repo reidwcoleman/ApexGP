@@ -623,10 +623,11 @@ ${RB_UNIFORM_GLSL}`)
     gShirt = shirt;
   }
   gCloth = cloth;
-  // real white fabric reflects ~70 % (a texture white of 1.0 blooms like a lamp): cap the cloth, soften its sheen on light colours
+  // real white fabric reflects ~60-65 % (a texture white of 1.0 blooms like a lamp under a bright sun): cap
+  // the cloth hard, and kill its sheen on light colours (the sheen lobe is what rims a white shirt in a halo)
   float wl = dot( col, RB_LUM );
-  col = mix( col, col * min( 1.0, ${CLOTH_WHITE_MAX.toFixed(2)} * 0.86 / max( wl, 1e-3 ) ), cloth );
-  gSheen = cloth * mix( 0.45, 0.15, smoothstep( 0.4, 0.75, wl ) );
+  col = mix( col, col * min( 1.0, ${CLOTH_WHITE_MAX.toFixed(2)} * 0.72 / max( wl, 1e-3 ) ), cloth );
+  gSheen = cloth * mix( 0.4, 0.04, smoothstep( 0.35, 0.7, wl ) );
   diffuseColor.rgb *= col;
   gSkin = ( 1.0 - cloth ) * clamp( rbSkinLike( a.rgb, uSkinRef ), 0.0, 1.0 );
 }`)
@@ -1013,9 +1014,14 @@ export function mergeSimple(parts: THREE.BufferGeometry[]): THREE.BufferGeometry
   return out;
 }
 
-/** a cap's material: the panel/stitch texture over the cap colour, brim underside darker */
+/** a cap's material: the panel/stitch texture over the cap colour, brim underside darker.
+ * Same white-fabric cap as the body's cloth (CLOTH_WHITE_MAX): an uncapped white here
+ * blooms like a lamp under a bright sun, so clamp it the same way. */
 export function capMaterial(kit: PeopleKit | null, color: THREE.ColorRepresentation): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.92), map: kit?.capMap ?? null, vertexColors: true, roughness: 0.82, name: 'person-cap' });
+  const c = new THREE.Color(color).multiplyScalar(0.92);
+  const wl = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+  if (wl > CLOTH_WHITE_MAX) c.multiplyScalar(CLOTH_WHITE_MAX / wl);
+  return new THREE.MeshStandardMaterial({ color: c, map: kit?.capMap ?? null, vertexColors: true, roughness: 0.82, name: 'person-cap' });
 }
 
 // ------------------------------------------------------------------------------------ clips
