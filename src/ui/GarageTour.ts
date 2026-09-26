@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SPOT_ORDER, type Spot, type SpotId } from '../game/GarageDressing.ts';
+import { uiScale } from './scale.ts';
 
 /**
  * The garage tour's controls: glass buttons floating in the 3D garage that fly the
@@ -123,6 +124,7 @@ export class GarageTourUI {
     // the buttons: the places reachable from here, where they are in the picture
     const list = s.at ? spots[s.at].near : s.overviewMarkers ? OVERVIEW : [];
     const W = innerWidth, H = innerHeight;
+    const k = uiScale();
     const camPos = s.camera.getWorldPosition(this.v.clone());
     const off: SpotId[] = [];
     for (const [id, b] of this.markers) {
@@ -133,9 +135,10 @@ export class GarageTourUI {
         const d = sp.marker.distanceTo(camPos);
         this.v.copy(sp.marker).project(s.camera);
         const x = ((this.v.x + 1) / 2) * W, y = ((1 - this.v.y) / 2) * H;
-        vis = this.v.z < 1 && x > 24 && x < s.panelLeft - 24 && y > 80 && y < H - 150 && d > 0.6;
+        // (the marker layer is zoomed with the UI: screen px → layout px)
+        vis = this.v.z < 1 && x > 24 * k && x < s.panelLeft - 24 * k && y > 80 * k && y < H - 150 * k && d > 0.6;
         if (vis) {
-          b.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
+          b.style.transform = `translate3d(${Math.round(x / k)}px, ${Math.round(y / k)}px, 0)`;
           b.classList.toggle('far', d > 9);
         } else if (s.at) off.push(id);
         const label = b.querySelector('.wp-label')!;

@@ -3,6 +3,7 @@ import type { Track } from './Track.ts';
 import type { Renderer } from '../core/Renderer.ts';
 import { TEAMS } from '../race/Teams.ts';
 import { Geo, TrackSpace } from './pitlane/geo.ts';
+import { PitPeople } from '../people/strollers.ts';
 import { GARAGE_W, L, makePlan } from './pitlane/layout.ts';
 import { DecalAtlas, PrintAtlas, fenceTexture, noiseTexture, whenFontsReady } from './pitlane/textures.ts';
 import { decalMaterial, fenceMaterial, glassMaterial, groundMaterial, pitU, signalMaterial, signalU, solidMaterial } from './pitlane/materials.ts';
@@ -148,6 +149,11 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
   // ---------------------------------------------------------------- crews
   const crew = new CrewSystem(plan, ts, wall.seats);
   group.add(crew.group);
+  // the engineers on the pit wall and the paddock street's people (added once the avatars load)
+  const street: THREE.Vector3[] = [];
+  for (let s = plan.bldgS0 + 6; s <= plan.bldgS1 - 6; s += 12) street.push(ts.P(s, 53.5, 0.06));
+  const pitPeople = new PitPeople({ seats: wall.seats, paddock: street.length > 1 ? [street] : [] });
+  group.add(pitPeople.group);
 
   const garages: GarageSlot[] = TEAMS.map((_, k) => ({ team: k, s: plan.boxS(k), lateral: plan.side * L.box }));
   const garageCentre = ts.P(plan.mid, L.front + 8, 2);
@@ -204,6 +210,7 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     },
     dispose() {
       crew.dispose();
+      pitPeople.dispose();
       group.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
@@ -225,6 +232,7 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
       detailMesh.visible = d < 700;
       drips.visible = weatherUniforms.uRain.value > 0.02 && d < 500;
       crew.update(dt, camera);
+      pitPeople.update(dt, camera);
       for (let k = 0; k < TEAMS.length; k++) signalU.uSig.value[k] = crew.signal(k);
       stats.crewDrawn = crew.drawn;
       stats.updateMs = Math.round((performance.now() - u0) * 1000) / 1000;

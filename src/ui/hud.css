@@ -30,11 +30,27 @@
   padding: var(--s2) 0 var(--s2);
   overflow: hidden;
 }
+/* the flag state, broadcast style: a strip along the top edge (green racing, yellow VSC, white finished) */
+.tower::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: var(--line-strong);
+  transition: background 0.4s;
+}
+.tower.green::before { background: var(--green); }
+.tower.vsc::before { background: var(--yellow); }
+.tower.fin::before {
+  background: repeating-linear-gradient(90deg, #fff 0 6px, #0a0c11 6px 12px);
+}
 .tower-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 0 var(--s3) var(--s2);
+  padding: var(--s1) var(--s3) var(--s2);
   font-size: var(--t-cap);
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -49,6 +65,16 @@
 }
 .tower-rows {
   position: relative;
+}
+/* the position column sits on its own tone (tone before lines) */
+.tower-rows::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 40px;
+  background: rgba(255, 255, 255, 0.04);
 }
 .trow {
   position: absolute;
@@ -67,6 +93,8 @@
 .trow .pos {
   text-align: right;
   color: var(--ink2);
+  padding-right: 2px;
+  border-radius: 3px;
 }
 .trow .bar {
   height: 15px;
@@ -140,8 +168,19 @@
 }
 .timing .lap b {
   color: var(--ink);
+  font-size: var(--t-time);
+  letter-spacing: 0;
+  margin-left: var(--s1);
+}
+.timing .lap b span {
+  color: var(--ink2);
+  font-size: var(--t-row);
+}
+.timing .lap b.bad {
+  color: var(--accent);
   font-size: var(--t-row);
   letter-spacing: 0.02em;
+  text-transform: none;
 }
 .currow {
   margin-top: var(--s3);
@@ -232,6 +271,29 @@
   text-transform: uppercase;
   font-weight: 600;
 }
+/* a live voice meter beside the caption while the message is up */
+.radio .rwave {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 10px;
+  margin-left: var(--s2);
+}
+.radio .rwave i {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--ink2);
+  transform-origin: 50% 100%;
+  animation: rwave 0.9s ease-in-out infinite;
+}
+.radio .rwave i:nth-child(2) { animation-delay: -0.3s; }
+.radio .rwave i:nth-child(3) { animation-delay: -0.6s; }
+@keyframes rwave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.radio:not(.show) .rwave i { animation: none; }
 .radio .rmsg {
   font-size: var(--t-row);
   font-weight: 600;
@@ -325,12 +387,20 @@
   font-weight: 700;
   line-height: 1;
 }
+/* two rows: throttle | brake (+ BOX / PIT), then ERS label | store | DRS */
 .bars {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: var(--s2) var(--s3);
   margin-top: var(--s3);
   align-items: center;
+}
+.bars .pedals {
+  grid-column: 1 / 3;
+}
+.bars .erslbl {
+  min-width: 0;
+  text-align: left;
 }
 .meter {
   height: 6px;
@@ -489,38 +559,56 @@
 }
 
 /* ---------- banner + lights ---------- */
+/* race-control banner, TV style: a tone bar on the left, the graphic wipes open from it */
 .banner {
+  --tone: var(--ink);
   position: absolute;
   left: 50%;
   top: 92px;
-  transform: translate(-50%, -12px);
-  padding: 10px 22px;
+  transform: translate(-50%, -8px);
+  padding: 10px 22px 10px 26px;
   font-size: var(--t-time);
   font-weight: 700;
   letter-spacing: 0.02em;
   opacity: 0;
-  transition: opacity 0.25s, transform 0.4s var(--spring);
+  clip-path: inset(0 100% 0 0 round var(--r-panel));
+  transition: opacity 0.2s, transform 0.45s var(--spring), clip-path 0.3s var(--ease-out);
   white-space: nowrap;
   display: flex;
   gap: var(--s3);
-  align-items: center;
+  align-items: baseline;
+}
+.banner::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: var(--tone);
 }
 .banner.show {
   opacity: 1;
   transform: translate(-50%, 0);
+  clip-path: inset(0 0 0 0 round var(--r-panel));
+  transition: opacity 0.15s, transform 0.45s var(--spring), clip-path 0.5s var(--ease-out);
 }
 .banner .sub {
   font-size: var(--t-row);
   font-weight: 600;
   color: var(--ink2);
 }
-.banner.purple { box-shadow: inset 0 0 0 1.5px var(--purple); }
-.banner.purple .k { color: var(--purple); }
-.banner.green .k { color: var(--green); }
-.banner.red .k { color: var(--accent); }
-.banner.blue .k { color: var(--cold); }
-.banner.yellow { box-shadow: inset 0 0 0 1.5px var(--yellow); }
-.banner.yellow .k { color: var(--yellow); }
+.banner .k {
+  color: var(--tone);
+}
+.banner.purple { --tone: var(--purple); }
+.banner.green { --tone: var(--green); }
+.banner.red { --tone: var(--accent); }
+.banner.blue { --tone: var(--cold); }
+.banner.yellow { --tone: var(--yellow); }
+.banner:not(.purple):not(.green):not(.red):not(.blue):not(.yellow) .k {
+  color: var(--ink);
+}
 
 /* virtual safety car board: up while the VSC is out */
 .vscboard {
@@ -622,14 +710,43 @@
   opacity: 1;
 }
 
-/* smaller windows: scale the whole overlay rather than reflowing it */
-@media (max-width: 1280px) {
-  #hud { zoom: 0.85; }
+/* entrance: the panels slide in from their own edges, staggered, as the HUD fades up */
+#hud .tower,
+#hud .minimap {
+  transform: translateX(-24px);
 }
-@media (max-width: 960px) {
-  #hud { zoom: 0.7; }
+#hud .timing,
+#hud .cluster,
+#hud .carstatus {
+  transform: translateX(24px);
 }
-@media (max-height: 760px) {
-  .tower .trow { height: 21px; font-size: 13px; }
-  .minimap { width: 160px; height: 160px; }
+#hud .tower,
+#hud .minimap,
+#hud .timing,
+#hud .cluster,
+#hud .carstatus {
+  transition: transform 0.7s var(--ease-out);
 }
+#hud.on .tower,
+#hud.on .minimap,
+#hud.on .timing,
+#hud.on .cluster,
+#hud.on .carstatus {
+  transform: none;
+}
+#hud.on .timing { transition-delay: 0.06s; }
+#hud.on .minimap { transition-delay: 0.1s; }
+#hud.on .carstatus { transition-delay: 0.14s; }
+#hud.on .cluster { transition-delay: 0.1s; }
+@media (prefers-reduced-motion: reduce) {
+  #hud .tower, #hud .minimap, #hud .timing, #hud .cluster, #hud .carstatus { transform: none; }
+  .radio .rwave i { animation: none; }
+}
+
+/* every window size: scale the whole overlay rather than reflowing it (--ui, src/ui/scale.ts);
+   short layouts (a 720p window at the 0.85 floor) tighten the tower so it clears the map */
+#hud {
+  zoom: var(--ui);
+}
+#hud.compact .tower .trow { height: 21px; font-size: 13px; }
+#hud.compact .minimap { width: 176px; height: 176px; }

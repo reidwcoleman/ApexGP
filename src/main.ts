@@ -5,6 +5,7 @@ import './ui/tokens.css';
 import './ui/hud.css';
 import './ui/menu.css';
 import { Game } from './game/Game.ts';
+import { initUiScale } from './ui/scale.ts';
 
 declare global {
   interface Window {
@@ -17,6 +18,9 @@ const loading = document.getElementById('loading')!;
 const bar = loading.querySelector('.lbar b') as HTMLElement;
 const step = loading.querySelector('.lstep') as HTMLElement;
 const err = loading.querySelector('.lerr') as HTMLElement;
+
+// the overlays scale with the window (laid out at 1600 × 900)
+initUiScale();
 
 const canvas = document.getElementById('gl') as HTMLCanvasElement;
 const ui = document.getElementById('ui')!;

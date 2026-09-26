@@ -21,6 +21,8 @@ import type { SceneryLight } from './scenery.ts';
  *             'forest' a tree line (bumpy dark silhouette)
  *             'city'   a skyline of lit blocks with window bands; set
  *                      `center`/`spread` for a downtown cluster of towers
+ *             'volcano' one lone cone (Popocatépetl): summit at bearing `center`,
+ *                      base half-width `spread` (deg), snow cap; `rough` 0 dome … 1 steep cone
  *     dist:   distance from the circuit centre, metres (any: 1 500 … 60 000)
  *     height: crest / tallest-building height above `base`, metres
  *     from, to: compass arc in degrees (0 = north = −Z, 90 = east = +X), default 0 … 360
@@ -41,7 +43,7 @@ import type { SceneryLight } from './scenery.ts';
  * Cost: one draw, a few thousand triangles, no shadows.
  */
 
-export type HorizonKind = 'ridge' | 'dunes' | 'forest' | 'city';
+export type HorizonKind = 'ridge' | 'dunes' | 'forest' | 'city' | 'volcano';
 
 export interface HorizonLayer {
   kind: HorizonKind;
@@ -167,6 +169,81 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
       { kind: 'forest', dist: 6000, height: 14, rough: 0.8, seed: 93, color: DRY },
     ],
   },
+  // starting points for the new venues (their track agents tune bearings and layers)
+  // Melbourne: the suburbs run flat to the horizon all round except over Port Phillip Bay (south-west);
+  // the Dandenong Ranges blue to the east, Mount Macedon and the Great Dividing Range's foothills to
+  // the north-west and north, the You Yangs across the bay (the CBD, Southbank and St Kilda Road are
+  // real geometry: venues/melbourneScenery.ts)
+  melbourne: {
+    layers: [
+      { kind: 'ridge', dist: 52000, height: 420, from: 315, to: 40, rough: 0.35, haze: 1.1, seed: 104, scale: 9000 },
+      { kind: 'ridge', dist: 62000, height: 900, from: 308, to: 330, rough: 0.5, haze: 1.05, seed: 105, scale: 5000 },
+      { kind: 'ridge', dist: 36000, height: 560, from: 62, to: 118, rough: 0.45, haze: 0.95, seed: 103, scale: 6000 },
+      { kind: 'ridge', dist: 50000, height: 330, from: 244, to: 262, rough: 0.75, haze: 1.05, seed: 106, scale: 2600 },
+      { kind: 'city', dist: 9000, height: 30, from: 300, to: 195, rough: 0.5, seed: 101 },
+      { kind: 'city', dist: 5200, height: 60, from: 330, to: 20, rough: 0.35, seed: 102 },
+    ],
+  },
+  // Sakhir: the flat stony desert of southern Bahrain, the low broken rim of the island's central
+  // depression all round (Jebel ad-Dukhan itself is terrain: venues/sakhirLand.ts), Riffa and Isa
+  // Town sprawling low to the north, Manama's towers far off beyond them
+  sakhir: {
+    layers: [
+      { kind: 'ridge', dist: 17000, height: 45, rough: 0.3, scale: 2600, seed: 111, color: [0.3, 0.24, 0.15] },
+      { kind: 'city', dist: 16000, height: 38, from: 320, to: 55, rough: 0.5, haze: 1.2, seed: 113 },
+      { kind: 'city', dist: 27000, height: 200, from: 340, to: 22, center: 2, spread: 7, rough: 0.9, haze: 1.3, seed: 115 },
+    ],
+  },
+  // Yas Marina: the Abu Dhabi skyline (the Corniche, Etihad Towers) ~26 km to the south-west, the
+  // mainland's low sprawl (Khalifa City, Al Raha) to the south, desert dunes inland to the south-east;
+  // open Gulf to the north (Al Raha's shore towers and the Aldar HQ are real geometry: yasmarinaScenery.ts)
+  yasmarina: {
+    layers: [
+      { kind: 'city', dist: 26000, height: 290, from: 208, to: 252, center: 229, spread: 9, rough: 0.9, haze: 1.1, seed: 121 },
+      { kind: 'city', dist: 17000, height: 55, from: 130, to: 235, rough: 0.45, haze: 1.1, seed: 125 },
+      { kind: 'dunes', dist: 24000, height: 30, from: 95, to: 190, rough: 0.3, seed: 123, color: DRY },
+    ],
+  },
+  // Mexico City, 2,240 m up in its valley ringed by mountains: Popocatépetl's snow cone (65 km
+  // SE) and the long Iztaccíhuatl (53 km, the sleeping woman: head, chest and feet) behind the
+  // Sierra de Santa Catarina's small volcanoes; the Ajusco to the south-west, the Sierra de las
+  // Cruces west, the Sierra de Guadalupe north; the towers of Reforma and the centre WNW and the
+  // city's mid-rise carpet on every side. Everything pale in the thin, hazy highland air.
+  mexico: {
+    layers: [
+      // (heights a little exaggerated, as the long lenses see them)
+      // (heights a little exaggerated, as the long lenses see them)
+      { kind: 'volcano', dist: 65000, height: 4100, center: 131, spread: 9.5, rough: 0.7, snow: 0.7, haze: 0.3, seed: 133 },
+      { kind: 'ridge', dist: 58000, height: 900, from: 100, to: 150, rough: 0.45, haze: 0.4, seed: 134 },
+      // Iztaccíhuatl: a long snowy massif, the head (north), the chest and the feet on top of it
+      { kind: 'volcano', dist: 53600, height: 3250, center: 113.4, spread: 2.3, rough: 0.2, snow: 0.7, haze: 0.33, seed: 137 },
+      { kind: 'volcano', dist: 53400, height: 3380, center: 116.6, spread: 2.7, rough: 0.2, snow: 0.7, haze: 0.33, seed: 136 },
+      { kind: 'volcano', dist: 53800, height: 3060, center: 119.8, spread: 2.5, rough: 0.25, snow: 0.74, haze: 0.33, seed: 138 },
+      { kind: 'volcano', dist: 54200, height: 3000, center: 116.4, spread: 6.8, rough: 0.12, snow: 0.8, haze: 0.33, seed: 139 },
+      { kind: 'ridge', dist: 30000, height: 1650, from: 185, to: 245, rough: 0.6, haze: 0.7, seed: 140 },
+      { kind: 'ridge', dist: 32000, height: 1250, from: 240, to: 325, rough: 0.55, haze: 0.75, seed: 141 },
+      { kind: 'ridge', dist: 17000, height: 620, from: 320, to: 40, rough: 0.5, haze: 0.8, seed: 142 },
+      { kind: 'ridge', dist: 13000, height: 430, from: 95, to: 165, rough: 0.45, haze: 0.85, seed: 143 },
+      { kind: 'ridge', dist: 6500, height: 200, from: 165, to: 200, rough: 0.35, seed: 144 },
+      { kind: 'city', dist: 8500, height: 230, from: 250, to: 330, center: 292, spread: 9, rough: 0.9, seed: 131 },
+      { kind: 'city', dist: 5200, height: 45, rough: 0.55, haze: 1.1, seed: 132 },
+    ],
+  },
+  // Hungaroring: the Gödöllő Hills roll on round the valley (the terrain carries the near ones),
+  // the Börzsöny and the Pilis far to the north and north-west, the Mátra east-north-east,
+  // Budapest's haze-softened skyline 18 km south-west, the flat Great Plain to the south-east;
+  // everything pale in the July heat haze
+  hungaroring: {
+    layers: [
+      { kind: 'ridge', dist: 58000, height: 780, from: 45, to: 80, rough: 0.55, haze: 1.25, seed: 141, color: FOREST },
+      { kind: 'ridge', dist: 42000, height: 640, from: 330, to: 20, rough: 0.6, haze: 1.3, seed: 142, color: FOREST },
+      { kind: 'ridge', dist: 30000, height: 420, from: 285, to: 330, rough: 0.5, haze: 1.3, seed: 144, color: FOREST },
+      { kind: 'ridge', dist: 26000, height: 260, from: 255, to: 290, rough: 0.35, haze: 1.3, seed: 145, color: FOREST },
+      { kind: 'city', dist: 18000, height: 60, from: 220, to: 252, center: 236, spread: 7, rough: 0.55, haze: 1.5, seed: 146 },
+      { kind: 'ridge', dist: 21000, height: 150, from: 10, to: 150, rough: 0.35, haze: 1.2, seed: 147, color: FOREST },
+      { kind: 'forest', dist: 16500, height: 18, from: 110, to: 260, rough: 0.8, haze: 1.2, seed: 143, color: FOREST },
+    ],
+  },
 };
 
 /** replace a venue's horizon (call before the scenery is built) */
@@ -248,6 +325,10 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
     buildCity(b, L, cx, cz, base, hz, r);
     return;
   }
+  if (L.kind === 'volcano') {
+    buildVolcano(b, L, cx, cz, base, hz);
+    return;
+  }
   if (L.kind === 'forest') {
     // a tree line: fine bumps (single crowns ~ 12 m) on broad masses (copses and gaps)
     const step = Math.min(1.2 * DEG, 14 / D);
@@ -320,6 +401,54 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
     for (let k = 0; k < K; k++) {
       const a = grid[i][k], bb = grid[i + 1][k], c = grid[i + 1][k + 1], d = grid[i][k + 1];
       b.idx.push(a, bb, c, a, c, d);
+    }
+}
+
+/** a lone volcanic cone: concave flanks rising to a small flat crater rim, gullied, snow on top */
+function buildVolcano(b: Builder, L: HorizonLayer, cx: number, cz: number, base: number, hz: number) {
+  const D = L.dist;
+  const c = (L.center ?? 0) * DEG;
+  const half = (L.spread ?? 10) * DEG;
+  const rough = L.rough ?? 0.5;
+  const depth = Math.min(D * 0.3, L.height * 5);
+  const K = 8;
+  const n = 120;
+  const forest = L.color ?? FOREST;
+  const rock: [number, number, number] = [0.2, 0.18, 0.17];
+  const snow: [number, number, number] = [0.8, 0.82, 0.86];
+  const grid: number[][] = [];
+  for (let i = 0; i <= n; i++) {
+    const az = c + (i / n - 0.5) * 2.6 * half;
+    const t = Math.abs(az - c) / half;
+    // the cone (concave flanks), a flat crater rim, the apron of foothills round it
+    // (rough: 0 a rounded dome … 1 a steep, concave-flanked cone)
+    const cone = Math.pow(Math.max(0, 1 - t), 0.5 + 1.5 * rough);
+    const apron = 0.1 * Math.max(0, 1 - Math.abs(t - 0.9) / 0.45);
+    const gully = perlin2(az * 60 + (L.seed ?? 0), 0.5) * 0.04 * rough * Math.min(1, t * 4);
+    const crest = Math.min(0.97, Math.max(cone, apron) + gully * cone);
+    const col: number[] = [];
+    const sx = Math.sin(az), sz = -Math.cos(az);
+    for (let k = 0; k <= K; k++) {
+      const u = k / K;
+      const d = D - depth * (1 - u);
+      const rib = perlin2(az * 140 - 3.1, u * 3 + (L.seed ?? 0));
+      const h01 = Math.max(0, crest * Math.pow(u, 1.25) + 0.03 * rib * u * (1 - u) * 4 * rough);
+      const y = base - (u === 0 ? 60 : 0) + L.height * h01;
+      const rockK = Math.max(0, Math.min(1, (h01 - 0.35 - 0.1 * rib) / 0.2));
+      let cc: [number, number, number] = [forest[0] + (rock[0] - forest[0]) * rockK, forest[1] + (rock[1] - forest[1]) * rockK, forest[2] + (rock[2] - forest[2]) * rockK];
+      if (L.snow) {
+        // snow in streaks down the gullies below the cap
+        const sk = Math.max(0, Math.min(1, (h01 - L.snow + 0.1 * rib) / 0.05));
+        cc = [cc[0] + (snow[0] - cc[0]) * sk, cc[1] + (snow[1] - cc[1]) * sk, cc[2] + (snow[2] - cc[2]) * sk];
+      }
+      col.push(b.v(cx + sx * d, y, cz + sz * d, cc, 0, u, 0, h01, hz));
+    }
+    grid.push(col);
+  }
+  for (let i = 0; i < grid.length - 1; i++)
+    for (let k = 0; k < K; k++) {
+      const a = grid[i][k], bb = grid[i + 1][k], cc = grid[i + 1][k + 1], d = grid[i][k + 1];
+      b.idx.push(a, bb, cc, a, cc, d);
     }
 }
 

@@ -3,6 +3,7 @@ import { TEAMS, type Entry } from '../race/Teams.ts';
 import type { Track } from '../world/Track.ts';
 import { EVENT } from '../world/event.ts';
 import { FanCrowd, ACT } from '../people/Crowd.ts';
+import { teamCelebration, type PeopleSet } from '../people/strollers.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { PodiumDriver } from '../people/drivers.ts';
 
@@ -247,6 +248,7 @@ export class Celebration {
   private mist = new Spray(700, 0.22, 0.4, 2.2, new THREE.Color(1, 0.98, 0.92), 0.12);
   private tape: TickerTape;
   private crowd: FanCrowd;
+  private teamCrews: PeopleSet;
   private flags: { pole: THREE.Object3D; flag: THREE.Mesh; geo: THREE.PlaneGeometry; base: Float32Array }[] = [];
   /** ceremony clock (runs slow during the slow-motion shot) */
   private t = 0;
@@ -450,9 +452,13 @@ export class Celebration {
         spots.push({ x: jx, z: jz, y: 0, yaw, team, flag: Math.random() < (crew ? 0.05 : 0.12) });
       }
     }
+    // the podium teams' crews at the front, in their kit (the rest are fans)
+    const isCrew = (sp: (typeof spots)[number]) => sp.z < 8.6 && Math.abs(sp.x) < 11 && podTeams.includes(sp.team);
+    this.teamCrews = teamCelebration(spots.filter(isCrew));
+    this.group.add(this.teamCrews.group);
     this.crowd = new FanCrowd(
       peopleKit()!,
-      spots.map((sp) => ({ x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw, team: sp.team, act: sp.flag ? ACT.FLAG : undefined, excite: 0.5 + Math.random() * 0.5 })),
+      spots.filter((sp) => !isCrew(sp)).map((sp) => ({ x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw, team: sp.team, act: sp.flag ? ACT.FLAG : undefined, excite: 0.5 + Math.random() * 0.5 })),
       // (perf: ~1,500 skinned people casting into both sun cascades cost ~6 M shadow triangles a frame;
       // packed shoulder to shoulder their own shadows barely show)
       { shadows: false },
@@ -679,6 +685,8 @@ export class Celebration {
     // quiet and still for the anthem, then wild
     const calm = t < 5 ? 0 : t < 11 ? Math.min(1, (t - 5) / 1.2) : Math.max(0, 1 - (t - 11) / 1.2);
     this.crowd.update(this.real, calm);
+    this.teamCrews.calm = calm > 0.5;
+    this.teamCrews.update(dt, camera);
 
     this.graphics(t);
     this.shoot(camera);
@@ -850,6 +858,7 @@ export class Celebration {
     this.strap.remove();
     this.bars.remove();
     this.crowd.dispose();
+    this.teamCrews.dispose();
     for (const f of this.figures) f.dispose();
     this.group.traverse((o) => {
       const m = o as THREE.Mesh;

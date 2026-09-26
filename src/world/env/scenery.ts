@@ -7,15 +7,22 @@ import { planLayout } from './layout.ts';
 import { buildVegetation } from './vegetation.ts';
 import { setLeafFill } from './treematerial.ts';
 import { buildHorizon, HORIZON_PRESETS } from './horizon.ts';
+import { buildGrass, type GrassBuild } from './grass.ts';
 import { buildParkMasks } from './parkmask.ts';
 import { buildGrandstands } from './grandstands.ts';
+import { concourseCrowd } from '../../people/strollers.ts';
 import { buildBanking } from './banking.ts';
 import { buildVillages } from './villages.ts';
 import { austinTerrainLook, buildAustinScenery } from './venues/austinScenery.ts';
 import { buildSpielbergScenery, spielbergTerrainLook } from './venues/spielbergScenery.ts';
 import { buildMontrealScenery, montrealTerrainLook } from './venues/montrealScenery.ts';
+import { buildMelbourneScenery, melbourneTerrainLook } from './venues/melbourneScenery.ts';
+import { buildMexicoScenery, mexicoTerrainLook } from './venues/mexicoScenery.ts';
+import { buildYasmarinaScenery, yasmarinaTerrainLook } from './venues/yasmarinaScenery.ts';
 import { tuneInterlagosTerrain } from './venues/interlagosCity.ts';
 import { buildZandvoortScenery } from './venues/zandvoortScenery.ts';
+import { buildSakhirScenery } from './venues/sakhirScenery.ts';
+import { buildHungaroringScenery } from './venues/hungaroringScenery.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -79,9 +86,20 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   lap('trees');
   const masks = buildParkMasks(map, layout, veg.shade);
   terrain.setMasks(masks);
+  // grass blades on the verges around the camera (High/Ultra)
+  let grass: GrassBuild | null = null;
+  try {
+    const tu = terrain.uniforms;
+    grass = buildGrass(map, { lawn: tu.uLawn.value as THREE.Color, meadow: tu.uMeadow.value as THREE.Color, straw: tu.uStraw.value as THREE.Color });
+    grass.setEnabled(gfx.qualityLevel === 'high' || gfx.qualityLevel === 'ultra');
+    group.add(grass.mesh);
+  } catch (e) {
+    console.error('[scenery] grass blades failed — skipping them', e);
+  }
+  lap('grass');
   lap('masks');
   // (a failure in the stands — e.g. the crowd's avatar kit — must not take the whole landscape with it)
-  let stands: Pick<ReturnType<typeof buildGrandstands>, 'group' | 'update' | 'people' | 'flags'>;
+  let stands: Pick<ReturnType<typeof buildGrandstands>, 'group' | 'update' | 'people' | 'flags' | 'concourse'>;
   try {
     stands = buildGrandstands(layout, track, map);
   } catch (e) {
@@ -89,6 +107,9 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
     stands = { group: new THREE.Group(), update: () => {}, people: 0, flags: 0 };
   }
   group.add(stands.group);
+  // fans walking the concourses behind the stands
+  const strollers = concourseCrowd(stands.concourse ?? []);
+  group.add(strollers.group);
   lap('stands');
   const banking = layout.oval ? buildBanking(layout.oval, track, map, terrain.material) : null;
   if (banking) group.add(banking.group);
@@ -99,9 +120,17 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   if (map.venue === 'spielberg') { group.add(buildSpielbergScenery(map)); spielbergTerrainLook(terrain.uniforms); }
   const mtl = map.venue === 'montreal' ? buildMontrealScenery(layout, track, map) : null;
   if (mtl) { group.add(mtl.group); montrealTerrainLook(terrain.uniforms); }
+  const mel = map.venue === 'melbourne' ? buildMelbourneScenery(layout, track, map) : null;
+  if (mel) { group.add(mel.group); melbourneTerrainLook(terrain.uniforms); }
+  const mex = map.venue === 'mexico' ? buildMexicoScenery(layout, track, map) : null;
+  if (mex) { group.add(mex.group); mexicoTerrainLook(terrain.uniforms); }
+  const yas = map.venue === 'yasmarina' ? buildYasmarinaScenery(layout, track, map) : null;
+  if (yas) { group.add(yas.group); yasmarinaTerrainLook(terrain.uniforms); }
   if (map.venue === 'interlagos') tuneInterlagosTerrain(terrain.uniforms);
   const zv = map.venue === 'zandvoort' ? buildZandvoortScenery(layout, track, map, terrain) : null;
   if (zv) group.add(zv.group);
+  if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
+  if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
   lap('villages');
   // distant mountains / skylines beyond the far terrain (per-venue preset, horizon.ts)
   const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z));
@@ -125,13 +154,19 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
     },
     update(_dt, camera, elapsed) {
       veg.update(camera, elapsed);
+      grass?.update(camera, elapsed);
       horizon.update(camera);
       zv?.update(elapsed, camera);
       mtl?.update(elapsed);
+      mel?.update(elapsed);
+      mex?.update(elapsed);
+      yas?.update(elapsed);
       stands.update(elapsed);
+      strollers.update(_dt, camera);
     },
     setQuality(q) {
       veg.setDetail(q);
+      grass?.setEnabled(q === 'high' || q === 'ultra');
     },
     stats: { timings, trees: veg.count, treesNear: veg.near, people: stands.people, flags: stands.flags, banking: banking?.stats ?? null, buildings: villages.count, buildMs: Math.round(performance.now() - t0), map: map.timings, veg: veg.timings, masks: masks.timings },
   };

@@ -130,13 +130,18 @@
   padding: 0 var(--s4) 0 var(--s4);
   transition: bottom 0.4s var(--ease-out), opacity 0.3s;
 }
+/* a new car's graphic wipes open from its team bar, like the TV lower-thirds */
 .bc-l3.in {
-  animation: bcin 0.5s var(--spring);
+  animation: bcin 0.6s var(--ease-out);
 }
 @keyframes bcin {
   from {
     opacity: 0;
-    transform: translateX(-16px);
+    transform: translateX(-12px);
+    clip-path: inset(0 100% 0 0 round var(--r-panel));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--r-panel));
   }
 }
 .bc-pos {
@@ -279,6 +284,10 @@
 .bc-btn:active {
   transform: scale(0.94);
 }
+.bc-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 .bc-btn.play {
   background: var(--ink);
   color: var(--ink-dark);
@@ -395,7 +404,8 @@
 #hud.bcast .carstatus,
 #hud.bcast .radio,
 #hud.bcast .hint,
-#hud.bcast .camlabel {
+#hud.bcast .camlabel,
+#hud.bcast .lights {
   display: none;
 }
 #hud.bcast .minimap {
@@ -428,11 +438,12 @@
   opacity: 0;
 }
 
-@media (max-width: 1280px) {
-  .bcast-ui { zoom: 0.85; }
+/* scales with the window like the HUD (--ui, src/ui/scale.ts) */
+.bcast-ui {
+  zoom: var(--ui);
 }
-@media (max-width: 960px) {
-  .bcast-ui { zoom: 0.7; }
+/* 960 layout px at the 0.7 zoom floor */
+@media (max-width: 672px) {
   .bc-keys { display: none; }
 }
 
@@ -443,8 +454,8 @@
 
 /* ---------- "Simulate a race" setup (inside #menu, same panel / option style as the race setup) ---------- */
 #menu .simsetup .panel {
-  width: min(500px, 88vw);
-  max-height: calc(100vh - 48px);
+  width: min(500px, calc(88 * var(--vw)));
+  max-height: calc(calc(100 * var(--vh)) - 48px);
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -476,8 +487,8 @@
 }
 .simcard {
   position: absolute;
-  right: clamp(24px, 5vw, 80px);
-  bottom: clamp(24px, 6vh, 72px);
+  right: clamp(24px, calc(5 * var(--vw)), 80px);
+  bottom: clamp(24px, calc(6 * var(--vh)), 72px);
   text-align: right;
   display: grid;
   justify-items: end;

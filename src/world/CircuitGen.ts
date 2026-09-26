@@ -127,6 +127,8 @@ export interface TracksideDef {
   armcoBoards?: boolean;
   runs?: BarrierRun[];
   lights?: LightRun[];
+  /** what the ground beyond the kerbs and run-off is: 'grass' (default) or 'desert' (compacted sand and grit: Bahrain) */
+  ground?: 'grass' | 'desert';
 }
 
 export interface CircuitDef {

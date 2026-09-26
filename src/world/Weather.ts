@@ -106,11 +106,11 @@ export interface WeatherPlan {
 /** heat: shimmer over the asphalt (scaled by the sun at draw time); conv: towering convective cloud */
 const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number; heat: number; conv: number }> = {
   clear: { cloud: 0.1, rain: 0, fog: 0, heat: 0.35, conv: 0 },
-  haze: { cloud: 0.12, rain: 0, fog: 0.62, heat: 1, conv: 0 },
+  haze: { cloud: 0.12, rain: 0, fog: 0.5, heat: 1, conv: 0 },
   windy: { cloud: 0.46, rain: 0, fog: 0.02, heat: 0, conv: 0.1 },
   mist: { cloud: 0.5, rain: 0, fog: 0.9, heat: 0, conv: 0 },
   drying: { cloud: 0.35, rain: 0, fog: 0.15, heat: 0, conv: 0.2 },
-  cloudy: { cloud: 0.45, rain: 0, fog: 0.05, heat: 0.15, conv: 0.2 },
+  cloudy: { cloud: 0.52, rain: 0, fog: 0.05, heat: 0.15, conv: 0.25 },
   overcast: { cloud: 0.86, rain: 0, fog: 0.18, heat: 0, conv: 0 },
   fog: { cloud: 0.78, rain: 0, fog: 1, heat: 0, conv: 0 },
   sunshower: { cloud: 0.44, rain: 0.36, fog: 0.08, heat: 0, conv: 0.55 },
@@ -219,7 +219,7 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
   const wob = (k: WeatherKind) => {
     const g = REGIME[k];
     return {
-      cloud: Math.min(1, Math.max(0, g.cloud + (r() - 0.5) * (k === 'cloudy' ? 0.25 : 0.08))),
+      cloud: Math.min(1, Math.max(0, g.cloud + (r() - 0.5) * (k === 'cloudy' ? 0.16 : 0.08))),
       rain: g.rain > 0 ? Math.max(0.12, g.rain * (0.8 + r() * 0.4)) : 0,
       fog: Math.min(1, Math.max(0, g.fog + (r() - 0.5) * 0.1)),
       heat: g.heat,
@@ -228,6 +228,16 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
     };
   };
   let showerI = 0;
+  // a storm on its way: for the last few minutes before it breaks, towering cumulus and
+  // cumulonimbus build and anvil out while the sun is still shining
+  const stormEnd = isFinite(changeAt) && (end === 'thunderstorm' || end === 'storm') && start !== 'rain' && start !== 'drizzle';
+  const BUILD = 330;
+  const building = (key: Key) => {
+    if (!stormEnd || key.t >= changeAt || key.t < changeAt - BUILD) return;
+    const f = 1 - (changeAt - key.t) / BUILD;
+    key.conv = Math.max(key.conv, 0.5 + 0.45 * f);
+    key.cloud = Math.min(0.6, Math.max(key.cloud, 0.4 + 0.16 * f));
+  };
   for (let t = 0; t <= span; t += 90) {
     let k = start;
     if (t >= changeAt + RAMP) k = end;
@@ -246,15 +256,23 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
         key.cloud = Math.max(0.2, key.cloud - 0.14);
       } else key.rain = Math.max(0.22, key.rain);
     }
+    building(key);
     keys.push(key);
   }
   if (isFinite(changeAt)) {
-    const a = wob(start);
+    const a = { t: changeAt, ...wob(start) };
     const b = wob(end);
-    keys.push({ t: changeAt, ...a }, { t: changeAt + RAMP, ...b });
+    if (stormEnd) {
+      a.conv = 0.95;
+      a.cloud = Math.min(0.62, Math.max(a.cloud, 0.56));
+      if (changeAt > BUILD * 0.5 + 20) keys.push({ ...a, t: changeAt - BUILD * 0.5, conv: 0.8, cloud: Math.min(0.6, Math.max(a.cloud - 0.06, 0.48)) });
+    }
+    keys.push(a, { t: changeAt + RAMP, ...b });
     keys.sort((x, y) => x.t - y.t);
     // drop grid keys that fall inside the ramp
     for (let i = keys.length - 1; i >= 0; i--) if (keys[i].t > changeAt && keys[i].t < changeAt + RAMP) keys.splice(i, 1);
+    // (a grid key sitting right next to the inserted build-up key would make a kink)
+    for (let i = keys.length - 2; i >= 0; i--) if (Math.abs(keys[i + 1].t - keys[i].t) < 20) keys.splice(keys[i].k === start && keys[i].conv < keys[i + 1].conv ? i : i + 1, 1);
   }
 
   const windDir = r() * Math.PI * 2;

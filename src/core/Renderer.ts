@@ -357,13 +357,54 @@ class SunShaftsEffect extends Effect {
     super('SunShaftsEffect', /* glsl */ `
       uniform sampler2D tShafts;
       uniform float shaftStrength;
+      uniform float flare;
+      uniform vec2 flareUv;
+      uniform vec3 flareColor;
+      // lens flare: ghosts of the sun reflected between the lens elements, strung along the
+      // line through the image centre, each a soft aperture-shaped disc with a coloured rim;
+      // the sun's visibility (how much of it the trees, stands and cars cover) scales them
+      float ghost(vec2 uv, vec2 c, float r, float soft) {
+        vec2 d = (uv - c) * vec2(aspect, 1.0);
+        // hexagonal aperture
+        vec2 a = abs(d);
+        float hex = max(a.x * 0.866 + a.y * 0.5, a.y);
+        return 1.0 - smoothstep(r * (1.0 - soft), r, hex);
+      }
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-        outputColor = vec4(inputColor.rgb + texture2D(tShafts, uv).rgb * shaftStrength, inputColor.a);
+        vec3 col = inputColor.rgb + texture2D(tShafts, uv).rgb * shaftStrength;
+        if (flare > 0.001) {
+          float vis = 0.0;
+          for (int i = 0; i < 9; i++) {
+            vec2 o = vec2(float(i % 3) - 1.0, float(i / 3) - 1.0) * vec2(0.006 / aspect, 0.006);
+            vis += step(0.99999, readDepth(flareUv + o));
+          }
+          vis /= 9.0;
+          if (vis > 0.0) {
+            vec2 axis = vec2(0.5) - flareUv;
+            vec3 g = vec3(0.0);
+            g += ghost(uv, flareUv + axis * 0.45, 0.022, 0.7) * vec3(0.9, 0.7, 0.35) * 0.5;
+            g += ghost(uv, flareUv + axis * 0.8, 0.05, 0.5) * vec3(0.35, 0.6, 0.5) * 0.22;
+            g += ghost(uv, flareUv + axis * 1.3, 0.035, 0.6) * vec3(0.55, 0.45, 0.8) * 0.32;
+            g += ghost(uv, flareUv + axis * 1.65, 0.085, 0.4) * vec3(0.3, 0.45, 0.6) * 0.12;
+            g += ghost(uv, flareUv + axis * 2.1, 0.014, 0.8) * vec3(0.8, 0.6, 0.4) * 0.6;
+            // a faint halo ring centred on the image axis
+            float rr = length((uv - vec2(0.5)) * vec2(aspect, 1.0));
+            float ring = exp(-pow((rr - 0.42) * 16.0, 2.0)) * 0.018;
+            vec2 sd = (uv - flareUv) * vec2(aspect, 1.0);
+            // veiling glare close to the sun (the lens's own scatter)
+            float veil = exp(-length(sd) * 7.0) * 0.18;
+            col += flareColor * (g + ring * vec3(0.7, 0.8, 1.0) + veil) * flare * vis;
+          }
+        }
+        outputColor = vec4(col, inputColor.a);
       }`, {
       attributes: EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
         ['tShafts', new THREE.Uniform(null)],
         ['shaftStrength', new THREE.Uniform(0)],
+        ['flare', new THREE.Uniform(0)],
+        ['flareUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
+        ['flareColor', new THREE.Uniform(new THREE.Vector3(1, 0.95, 0.85))],
       ]),
     });
     const opts = { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
@@ -403,7 +444,11 @@ class SunShaftsEffect extends Effect {
     this.rtB.setSize(w, h);
     this.maskMat.uniforms.aspect.value = width / Math.max(1, height);
   }
+  /** lens flare strength (0 = off), set per frame with the sun's screen position */
+  flare = 0;
   override update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget) {
+    this.uniforms.get('flare')!.value = this.active && this.depth !== null ? this.flare : 0;
+    (this.uniforms.get('flareUv')!.value as THREE.Vector2).copy(this.sunUv);
     const on = this.active && this.strength > 0.002 && this.depth !== null;
     this.uniforms.get('shaftStrength')!.value = on ? this.strength : 0;
     if (!on) return;
@@ -883,9 +928,15 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
   }
 
+  /** lens flare scale (weather sets it: the sun's radiance × how clear it is; 0 = off) */
+  flareStrength = 0;
+  setFlareColor(r: number, g: number, b: number) {
+    (this.shafts.uniforms.get('flareColor')!.value as THREE.Vector3).set(r, g, b);
+  }
   private updateShafts() {
     let k = 0;
-    if (this.sunShaftStrength > 0.002) {
+    let fl = 0;
+    if (this.flareStrength > 0.002 || this.sunShaftStrength > 0.002) {
       const cam = this.camera;
       const p = this.tmpV.copy(this.sunDir).multiplyScalar(1000).add(cam.position);
       p.project(cam);
@@ -897,10 +948,15 @@ export class Renderer {
         const v = p.y * 0.5 + 0.5;
         this.shafts.sunUv.set(u, v);
         const off = Math.max(Math.abs(p.x), Math.abs(p.y));
-        k = this.sunShaftStrength * THREE.MathUtils.smoothstep(1.9, 1.0, off) * THREE.MathUtils.smoothstep(0.05, 0.35, facing);
+        // (THREE.MathUtils.smoothstep takes (x, min, max) — the GLSL order here used to zero the shafts)
+        const ss = THREE.MathUtils.smoothstep;
+        k = this.sunShaftStrength * (1 - ss(off, 1.0, 1.9)) * ss(facing, 0.05, 0.35);
+        // the flare needs the sun itself in frame (its depth sample decides the occlusion)
+        fl = this.flareStrength * (1 - ss(off, 0.85, 1.0)) * ss(facing, 0.3, 0.6);
       }
     }
     this.shafts.strength = k;
+    this.shafts.flare = fl;
   }
 
   render(dt: number) {

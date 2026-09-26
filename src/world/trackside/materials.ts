@@ -741,17 +741,44 @@ float gStripe = 0.0;
 }
 `;
 
-export function grassMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
+/**
+ * Desert ground (TracksideDef.ground = 'desert', Bahrain): the grass ribbons become compacted
+ * pale sand and grit, dusted darker where cars run wide, with no mowing stripes.
+ */
+const DESERT_FRAG = /* glsl */ `
+{
+  vec4 dA = texture2D(uMacro, vTrk * (1.0 / 70.0) + vec2(0.17, 0.43));
+  vec4 dB = texture2D(uMacro, vTrk * (1.0 / 11.0) + vec2(0.52, 0.91));
+  vec4 dC = texture2D(uMacro, vTrk * (1.0 / 1.7) + vec2(0.11, 0.36));
+  vec3 sand = vec3(0.55, 0.44, 0.29);
+  vec3 stone = vec3(0.36, 0.31, 0.25);
+  vec3 col = sand * (0.84 + 0.3 * dA.r) * (0.9 + 0.2 * dB.g);
+  // grey-brown desert pavement (loose stones) in patches, pale wind-blown sand in others
+  col = mix(col, stone * (0.85 + 0.3 * dC.b), smoothstep(0.55, 0.8, dA.a * 0.6 + dB.b * 0.4) * 0.6);
+  col = mix(col, sand * 1.15, smoothstep(0.62, 0.85, dB.r) * 0.35);
+  // grit: dark and pale specks
+  col *= 0.86 + 0.28 * smoothstep(0.3, 0.7, dC.g);
+  // dust and rubber thrown off the track, darkest right at the edge
+  float edge = 1.0 - smoothstep(0.0, 1.2 + 1.5 * dB.b, vA1.y);
+  col = mix(col, col * vec3(0.62, 0.6, 0.6), edge * 0.6);
+  col *= 1.0 - 0.36 * smoothstep(0.0, 0.35, uWetness);
+  diffuseColor.rgb = col;
+  roughnessFactor = mix(0.97, 0.75, smoothstep(0.0, 0.5, uWetness));
+  gStripe = 0.0;
+}
+`;
+
+export function grassMaterial(t: GroundTextures, opts: { desert?: boolean } = {}): THREE.MeshStandardMaterial {
   t.grassAlbedo.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);
   t.grassNormal.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);
   const m = new THREE.MeshStandardMaterial({
     map: t.grassAlbedo,
     normalMap: t.grassNormal,
-    normalScale: new THREE.Vector2(0.9, 0.9),
+    normalScale: opts.desert ? new THREE.Vector2(0.45, 0.45) : new THREE.Vector2(0.9, 0.9),
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-grass-3', t, GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-3-desert' : 'apex-ts-grass-3', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
     sh.fragmentShader = sh.fragmentShader.replace(
       '#include <normal_fragment_maps>',

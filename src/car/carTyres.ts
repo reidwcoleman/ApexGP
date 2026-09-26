@@ -225,7 +225,7 @@ if ( tyTread > 0.5 ) {
   vec3 treadBase = vec3( 0.0085 );
   tyC = mix( tyC, treadBase, grooveMask * smoothstep( 0.2, 1.0, tyWear ) * 0.85 );
   // used rubber: lighter, browner, matte; patchy
-  vec3 used = vec3( 0.075, 0.07, 0.064 ) * ( 0.65 + 0.7 * tyD.a );
+  vec3 used = vec3( 0.058, 0.056, 0.054 ) * ( 0.65 + 0.7 * tyD.a );
   tyC = mix( tyC, used, tyWv * 0.92 );
   // graining: transverse ridges in patches
   float grain = uTyreA.w * smoothstep( 0.62, 0.3, tyD.a - uTyreA.w * 0.35 ) * ( 1.0 - tySpin );
@@ -237,7 +237,7 @@ if ( tyTread > 0.5 ) {
   float edge = min( tyT, 1.0 - tyT );
   float wb = 0.03 + 0.16 * tyWv;
   float band = smoothstep( wb, wb * 0.35, edge ) * smoothstep( 0.05, 0.4, tyWear );
-  tyC = mix( tyC, vec3( 0.12, 0.112, 0.1 ) * ( 0.8 + 0.4 * tyD.a ), band * 0.8 );
+  tyC = mix( tyC, vec3( 0.095, 0.092, 0.088 ) * ( 0.8 + 0.4 * tyD.a ), band * 0.8 );
   tyRough += band * 0.1;
   // marbles / pick-up stuck on the shoulders
   float sh = smoothstep( 0.3, 0.04, edge );

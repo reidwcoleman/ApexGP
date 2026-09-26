@@ -20,6 +20,11 @@ const EVENTS: Record<string, EventNames> = {
   zandvoort: { place: 'ZANDVOORT', gp: 'DUTCH GRAND PRIX', colours: ['#ae1c28', '#ffffff', '#21468b'] },
   spielberg: { place: 'SPIELBERG', gp: 'GROSSER PREIS VON ÖSTERREICH', colours: ['#c8102e', '#ffffff', '#c8102e'] },
   montreal: { place: 'MONTRÉAL', gp: 'GRAND PRIX DU CANADA', colours: ['#d52b1e', '#ffffff', '#d52b1e'] },
+  melbourne: { place: 'MELBOURNE', gp: 'AUSTRALIAN GRAND PRIX', colours: ['#00247d', '#ffffff', '#cf142b'] },
+  sakhir: { place: 'SAKHIR', gp: 'BAHRAIN GRAND PRIX', colours: ['#ffffff', '#ce1126', '#ce1126'] },
+  yasmarina: { place: 'YAS MARINA', gp: 'ABU DHABI GRAND PRIX', colours: ['#00732f', '#ffffff', '#000000'] },
+  mexico: { place: 'MÉXICO', gp: 'GRAN PREMIO DE LA CIUDAD DE MÉXICO', colours: ['#006847', '#ffffff', '#ce1126'] },
+  hungaroring: { place: 'HUNGARORING', gp: 'MAGYAR NAGYDÍJ', colours: ['#ce2939', '#ffffff', '#477050'] },
 };
 
 /** set once per world build (before the trackside and pit textures are painted) */

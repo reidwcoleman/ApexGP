@@ -6,6 +6,11 @@ import { interlagosForest, interlagosNatural, interlagosPark, interlagosUrban } 
 import { zandvoortForest, zandvoortNatural, zandvoortPark, zandvoortUrban } from './venues/zandvoortLand.ts';
 import { austinForest, austinNatural, austinUrbanBias } from './venues/austinLand.ts';
 import { montrealForest, montrealNatural, montrealPark, montrealUrban } from './venues/montrealLand.ts';
+import { melbourneForest, melbourneNatural, melbournePark, melbourneUrban } from './venues/melbourneLand.ts';
+import { sakhirForest, sakhirNatural, sakhirPark, sakhirUrban } from './venues/sakhirLand.ts';
+import { mexicoForest, mexicoNatural, mexicoPark, mexicoUrban } from './venues/mexicoLand.ts';
+import { yasmarinaForest, yasmarinaNatural, yasmarinaPark, yasmarinaUrban } from './venues/yasmarinaLand.ts';
+import { hungaroringForest, hungaroringNatural, hungaroringPark, hungaroringUrban } from './venues/hungaroringLand.ts';
 
 /**
  * The shape of the land around Monza: the Parco di Monza (flat royal park,
@@ -69,7 +74,7 @@ export interface Anchors {
 const floorTo = (v: number, k: number) => Math.floor(v / k) * k;
 const ceilTo = (v: number, k: number) => Math.ceil(v / k) * k;
 
-export type Venue = 'park' | 'ardennes' | 'airfield' | 'suzuka' | 'interlagos' | 'montreal' | 'zandvoort' | 'spielberg' | 'austin';
+export type Venue = 'park' | 'ardennes' | 'airfield' | 'suzuka' | 'interlagos' | 'montreal' | 'zandvoort' | 'spielberg' | 'austin' | 'melbourne' | 'sakhir' | 'yasmarina' | 'mexico' | 'hungaroring';
 
 export class WorldMap {
   readonly track: Track;
@@ -143,6 +148,13 @@ export class WorldMap {
     if (id === 'interlagos') { this.venue = 'interlagos'; this.park = interlagosPark(this); }
     if (id === 'zandvoort') { this.venue = 'zandvoort'; this.park = zandvoortPark(this); }
     if (id === 'montreal') { this.venue = 'montreal'; this.park = montrealPark(this); }
+    // Albert Park: the lake, its parkland and Melbourne's suburbs (see venues/melbourneLand.ts)
+    if (id === 'melbourne') { this.venue = 'melbourne'; this.park = melbournePark(this); }
+    if (id === 'sakhir') { this.venue = 'sakhir'; this.park = sakhirPark(this); }
+    if (id === 'mexico') { this.venue = 'mexico'; this.park = mexicoPark(this); }
+    if (id === 'yasmarina') { this.venue = 'yasmarina'; this.park = yasmarinaPark(this); }
+    // Hungaroring: the valley bowl in the Gödöllő Hills by Mogyoród (see venues/hungaroringLand.ts)
+    if (id === 'hungaroring') { this.venue = 'hungaroring'; this.park = hungaroringPark(this); }
     this.crossings = track.crossings.map((c) => ({ lower: c.lower, upper: c.upper, x: (track.px[c.lower] + track.px[c.upper]) / 2, z: (track.pz[c.lower] + track.pz[c.upper]) / 2 }));
     this.dfFar = track.buildDistanceField(40, 700, 560);
     this.dfNear = track.buildDistanceField(8, 170, 124);
@@ -347,6 +359,11 @@ export class WorldMap {
     if (this.venue === 'interlagos') return interlagosUrban(this, x, z);
     if (this.venue === 'zandvoort') return zandvoortUrban(this, x, z);
     if (this.venue === 'montreal') return montrealUrban(this, x, z);
+    if (this.venue === 'melbourne') return melbourneUrban(this, x, z);
+    if (this.venue === 'sakhir') return sakhirUrban(this, x, z);
+    if (this.venue === 'mexico') return mexicoUrban(this, x, z);
+    if (this.venue === 'yasmarina') return yasmarinaUrban(this, x, z);
+    if (this.venue === 'hungaroring') return hungaroringUrban(this, x, z);
     const out = this.outsidePark(x, z);
     if (out <= 0) return 0;
     const d = this.parkDistance(x, z);
@@ -377,6 +394,11 @@ export class WorldMap {
     if (this.venue === 'interlagos') return interlagosNatural(this, x, z, P, dT, far);
     if (this.venue === 'zandvoort') return zandvoortNatural(this, x, z, P, dT);
     if (this.venue === 'montreal') return montrealNatural(this, x, z, P, dT, far);
+    if (this.venue === 'melbourne') return melbourneNatural(this, x, z, P, dT, far);
+    if (this.venue === 'sakhir') return sakhirNatural(this, x, z, P, dT, far);
+    if (this.venue === 'mexico') return mexicoNatural(this, x, z, P, dT, far);
+    if (this.venue === 'yasmarina') return yasmarinaNatural(this, x, z, P, dT, far);
+    if (this.venue === 'hungaroring') return hungaroringNatural(this, x, z, P, dT);
     if (this.venue === 'austin') return h + austinNatural(this, x, z, dT, far);
     if (this.venue === 'ardennes') {
       // wooded valley sides near the circuit, rolling ridges of 100–200 m further out
@@ -910,6 +932,11 @@ export class WorldMap {
     if (this.venue === 'interlagos') return interlagosForest(this, x, z);
     if (this.venue === 'zandvoort') return zandvoortForest(this, x, z);
     if (this.venue === 'montreal') return montrealForest(this, x, z);
+    if (this.venue === 'melbourne') return melbourneForest(this, x, z);
+    if (this.venue === 'sakhir') return sakhirForest(this, x, z);
+    if (this.venue === 'mexico') return mexicoForest(this, x, z);
+    if (this.venue === 'yasmarina') return yasmarinaForest(this, x, z);
+    if (this.venue === 'hungaroring') return hungaroringForest(this, x, z);
     const dT = this.distToTrack(x, z);
     const n1 = fbm2(x / 520 + 11.3, z / 520 - 7.7, 4);
     const n2 = fbm2(x / 170 - 2.3, z / 170 + 6.1, 3);

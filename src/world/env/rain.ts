@@ -24,8 +24,11 @@ uniform float uFall;
 uniform float uShutter;
 uniform float uWidth;
 uniform float uPixel;
+uniform float uZoom;
+uniform vec3 uSunDirR;
 varying float vAlpha;
 varying vec2 vQuad;
+varying float vGlint;
 
 void main() {
   float fall = uFall * ( 0.8 + 0.4 * aSeed.w );
@@ -46,7 +49,11 @@ void main() {
   vec3 wp = p - dir * len * position.y + side * w * position.x;
   vQuad = position.xy;
   float r = 0.5 * uSize;
-  vAlpha = smoothstep( r, r * 0.55, dist ) * smoothstep( 0.35, 1.4, dist ) * thin * ( 0.55 + 0.45 * aSeed.w );
+  // a long lens magnifies the drops next to it into thick bars (and they'd be out of focus): start later
+  vAlpha = smoothstep( r, r * 0.55, dist ) * smoothstep( 0.35 * uZoom, 1.4 * uZoom, dist ) * thin * ( 0.55 + 0.45 * aSeed.w ) / ( 1.0 + 0.2 * ( uZoom - 1.0 ) );
+  // drops between the lens and a low sun light up (forward scattering): a shower glitters
+  float mu = max( dot( rel / max( dist, 1e-3 ), uSunDirR ), 0.0 );
+  vGlint = mu * mu * mu * mu * mu * mu;
   // longer streaks spread the same water over more pixels
   vAlpha *= clamp( 0.9 / ( len * 2.0 + 0.2 ), 0.12, 1.0 );
   gl_Position = projectionMatrix * viewMatrix * vec4( wp, 1.0 );
@@ -55,15 +62,17 @@ void main() {
 
 const FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform vec3 uGlint;
 uniform float uOpacity;
 varying float vAlpha;
 varying vec2 vQuad;
+varying float vGlint;
 void main() {
   float across = 1.0 - vQuad.x * vQuad.x;
   float along = smoothstep( 0.0, 0.25, vQuad.y ) * smoothstep( 1.0, 0.6, vQuad.y );
   float a = vAlpha * across * along * uOpacity;
   if ( a < 0.002 ) discard;
-  gl_FragColor = vec4( uColor * a, a );
+  gl_FragColor = vec4( ( uColor + uGlint * vGlint ) * a, a );
 }
 `;
 
@@ -88,6 +97,8 @@ void main() {
   vQ = position.xy;
   // cylindrical billboard: stands upright, turns to face the camera
   vec3 toCam = uCam - aSplash.xyz;
+  // (right under the lens a splash would be a big white blot: fade those)
+  vT = mix( 2.0, vT, smoothstep( 2.5, 6.0, length( toCam ) ) );
   vec2 f = normalize( toCam.xz + vec2( 1e-4 ) );
   vec3 right = vec3( -f.y, 0.0, f.x );
   vec3 wp = aSplash.xyz + right * position.x * aSize + vec3( 0.0, position.y * aSize * 1.3, 0.0 );
@@ -157,6 +168,9 @@ function makeLayer(max: number, size: number, width: number, fall: number, opaci
     uShutter: { value: 1 / 60 },
     uWidth: { value: width },
     uPixel: { value: 0.001 },
+    uZoom: { value: 1 },
+    uSunDirR: { value: new THREE.Vector3(0, 1, 0) },
+    uGlint: { value: new THREE.Color(0, 0, 0) },
     uColor: { value: new THREE.Color(0.5, 0.5, 0.55) },
     uOpacity: { value: opacity },
   };
@@ -186,6 +200,8 @@ export interface RainSystem {
   set(rain: number, windX: number, windZ: number, color: THREE.Color): void;
   update(dt: number, camera: THREE.Camera): void;
   setDensity(scale: number): void;
+  /** the sun seen through the rain: direction toward it and its glint colour (0 = none) */
+  setSun(dir: THREE.Vector3, glint: THREE.Color): void;
   /** splashes land on this surface (the track); without one there are none */
   setSurface(fn: SplashSurface | null): void;
   /** the point the splashes crowd round (the car being watched) */
@@ -268,7 +284,13 @@ export function createRain(): RainSystem {
         (l.uniforms.uWind.value as THREE.Vector3).set(wx * 0.9, 0, wz * 0.9);
         (l.uniforms.uColor.value as THREE.Color).copy(color);
       }
-      sU.uColor.value.copy(color).multiplyScalar(1.1);
+      sU.uColor.value.copy(color).multiplyScalar(0.8);
+    },
+    setSun(dir, glint) {
+      for (const l of layers) {
+        (l.uniforms.uSunDirR.value as THREE.Vector3).copy(dir);
+        (l.uniforms.uGlint.value as THREE.Color).copy(glint);
+      }
     },
     setSurface(fn) {
       surface = fn;
@@ -303,6 +325,7 @@ export function createRain(): RainSystem {
         (l.uniforms.uCam.value as THREE.Vector3).copy(pos);
         (l.uniforms.uCamVel.value as THREE.Vector3).copy(vel);
         l.uniforms.uPixel.value = pixel;
+        l.uniforms.uZoom.value = cam.isPerspectiveCamera ? Math.max(1, Math.min(6, 50 / cam.fov)) : 1;
         l.uniforms.uShutter.value = 1 / 55;
       }
       // splashes round the car being watched (or ahead of the camera), up to ~2600 drops a second
@@ -327,7 +350,7 @@ export function createRain(): RainSystem {
           sData[k * 4 + 1] = sp.y + 0.01;
           sData[k * 4 + 2] = sp.z;
           sData[k * 4 + 3] = time - Math.random() * dt;
-          sSize[k] = 0.1 + 0.11 * Math.random();
+          sSize[k] = 0.08 + 0.09 * Math.random();
           touched = true;
         }
         if (touched) {

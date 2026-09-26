@@ -5,6 +5,7 @@ import { buildTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
 import { bakeImpostors, createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
 import type { Layout } from './layout.ts';
 import { spielbergSpecies } from './venues/spielberg.ts';
+import { hungaroringSpecies } from './venues/hungaroringLand.ts';
 
 /**
  * The woods of the Parco di Monza.
@@ -88,6 +89,16 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     // a few trees already turning (September): planes go yellow-brown, chestnuts brown
     // (not in Montréal: the Canadian GP is in June)
     if (map.venue === 'montreal') return c;
+    // Sakhir: dusty grey-olive desert scrub
+    if (map.venue === 'sakhir') return c.multiply(new THREE.Color(1.05, 0.9, 0.72));
+    // Melbourne in March: the gums (oak / poplar / spruce crowns) blue-grey and olive, a few planes and elms turning
+    if (map.venue === 'melbourne' && (sp === 'oak' || sp === 'poplar' || sp === 'spruce')) return c.multiply(new THREE.Color(0.8, 0.93, 0.86));
+    // Abu Dhabi: dusty grey-olive desert trees (ghaf, acacia, sidr)
+    if (map.venue === 'yasmarina') return c.multiply(new THREE.Color(1.02, 0.96, 0.74));
+    // Mexico City at the end of the rainy season (late October): full, slightly dusty greens
+    if (map.venue === 'mexico') return c.multiply(new THREE.Color(0.98, 1.02, 0.86));
+    // Hungary in late July: dusty, olive, heat-tired foliage (nothing turning yet)
+    if (map.venue === 'hungaroring') return c.multiply(new THREE.Color(1.04, 1.0, 0.8));
     if (h2 < 0.05 && (sp === 'plane' || sp === 'chestnut' || sp === 'poplar')) c.setRGB(1.28, 1.02, 0.5);
     else if (h2 < 0.09 && sp !== 'shrub' && sp !== 'spruce') c.setRGB(1.12, 1.03, 0.78);
     return c;
@@ -110,11 +121,23 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.venue === 'interlagos') return n < -0.05 || h < 0.25 ? 'plane' : n2 > 0.15 ? 'chestnut' : 'oak';
     // Styria: spruce (and larch) forest on the slopes, beech stands (the chestnut crowns), ash and lime in the valley
     if (map.venue === 'spielberg') return spielbergSpecies(map, x, z, n, n2, h);
+    // the Gödöllő Hills: oak woods, black locust (the chestnut crowns), a few black pines, poplar lines
+    if (map.venue === 'hungaroring') return hungaroringSpecies(map, x, z, n, n2, h);
     // Texas: live oak (the oak crowns), pecan (chestnut crowns) and mesquite / cedar scrub
     if (map.venue === 'austin') return n2 > 0.3 ? 'chestnut' : h < 0.16 ? 'shrub' : 'oak';
+    // Sakhir: desert scrub only (the palms are venues/sakhirScenery.ts)
+    if (map.venue === 'sakhir') return 'shrub';
     // Montréal: silver and Norway maples (the plane crowns: palmate leaves), ash and oak, a few
     // poplars along the water and spruce in the Expo 67 gardens
+    // Mexico City: eucalyptus (the poplar crowns stand in: tall, narrow), ash (fresno: the plane
+    // crowns), cypress and pine (spruce), jacaranda and ahuehuete (oak, chestnut)
+    if (map.venue === 'mexico') return n < -0.2 || h < 0.1 ? 'poplar' : n < 0.18 ? (n2 > 0 ? 'plane' : 'oak') : h < 0.3 ? 'spruce' : 'chestnut';
+    // Yas Island: ghaf and acacia (low, wide oak crowns) and scrub out on the sand (the palms are the scenery's)
+    if (map.venue === 'yasmarina') return h < 0.45 ? 'shrub' : 'oak';
     if (map.venue === 'montreal') return h < 0.07 ? 'spruce' : n < -0.12 ? 'plane' : n < 0.22 ? (n2 > 0.3 ? 'poplar' : n2 > -0.1 ? 'plane' : 'oak') : n2 > 0 ? 'chestnut' : 'plane';
+    // Albert Park: river red gums and other eucalypts (the oak crowns: wide, open, tinted grey-green),
+    // English elms (chestnut) and London planes lining the roads, the odd Monterey cypress
+    if (map.venue === 'melbourne') return h < 0.04 ? 'spruce' : n < -0.08 ? 'oak' : n < 0.2 ? 'plane' : n2 > -0.05 ? 'chestnut' : 'oak';
     let sp: SpeciesId;
     if (n < -0.18) sp = 'plane';
     else if (n < 0.12) sp = 'oak';
@@ -142,6 +165,11 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const y = map.height(x, z) - 0.12;
     // Texas trees are low and wide-spreading: live oak, mesquite, stunted cedar
     if (map.venue === 'austin') scale *= sp === 'spruce' ? 0.55 : sp === 'shrub' ? 1 : 0.8;
+    // low, sparse desert bushes
+    if (map.venue === 'sakhir') scale *= 0.45;
+    // the gums stand tall over the park
+    if (map.venue === 'melbourne') scale *= sp === 'oak' ? 1.15 : 1;
+    if (map.venue === 'yasmarina') scale *= sp === 'shrub' ? 0.9 : 0.6;
     trees.push({ x, y, z, proto: pick(sp, h), s: scale, rot: h2 * Math.PI * 2 * 7.3, tint: tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2), flip: h > 0.5 });
   };
 

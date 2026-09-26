@@ -686,7 +686,7 @@ function buildPalms(map: WorldMap): THREE.Group {
 }
 
 /** 11 arching fronds (+ 3 young upright ones) around the crown point, each a strip of 5 segments */
-function frondCrown(): THREE.BufferGeometry {
+export function frondCrown(): THREE.BufferGeometry {
   const pos: number[] = [], nor: number[] = [], uv: number[] = [], idx: number[] = [];
   const add = (yaw: number, pitch: number, len: number, width: number, droop: number) => {
     const seg = 4;
@@ -738,7 +738,7 @@ function frondCrown(): THREE.BufferGeometry {
 }
 
 /** a frond seen flat: central rachis, long narrow leaflets angled toward the tip, gaps between them */
-function frondTexture(): THREE.CanvasTexture {
+export function frondTexture(): THREE.CanvasTexture {
   const W = 128, H = 512;
   const cv = document.createElement('canvas');
   cv.width = W;

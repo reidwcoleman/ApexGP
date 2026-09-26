@@ -98,6 +98,7 @@ uniform vec3 uAmbBase;
 uniform vec3 uCirrusCol;
 uniform float uRain;
 uniform vec3 uRainCol;
+uniform float uConv;
 
 #define PI 3.141592653589793
 #define R_EARTH 6360000.0
@@ -129,9 +130,17 @@ float shapeDensity( vec3 p, float h01, float wc, float lod ) {
   float base = remap( n.r, fbm - 1.0, 1.0, 0.0, 1.0 );
   // cumulus: soft flat base, rounded top that rises with coverage; decks are flatter
   float bottom = smoothstep( 0.0, mix( 0.07, 0.2, uDark ), h01 );
-  float top = 1.0 - smoothstep( mix( 0.25, 0.7, wc ), 1.0, h01 );
+  // (convective cells tower: the rounded top climbs toward the tropopause)
+  float top = 1.0 - smoothstep( mix( 0.25, 0.7, wc ) + uConv * 0.2 * wc, 1.0, h01 );
   float hp = bottom * top;
   float d = clamp( remap( base * hp, 1.0 - wc, 1.0, 0.0, 1.0 ), 0.0, 1.0 );
+  // cumulonimbus anvils: where a storm cell's coverage is high its top spreads into a flat,
+  // fibrous shelf just under the lid of the slab
+  if ( uConv > 0.05 ) {
+    float band = smoothstep( 0.76, 0.84, h01 ) * ( 1.0 - smoothstep( 0.9, 0.99, h01 ) );
+    float cell = smoothstep( 0.8, 0.97, wc );
+    d = max( d, uConv * band * cell * clamp( 0.25 + 0.75 * fbm - 0.2 * n.r, 0.0, 1.0 ) * 0.4 );
+  }
   // a solid deck when the sky is overcast: its underside hangs in lumps (lower where the
   // billow noise is high), so the base reads as a dark, textured ceiling rather than a sheet
   if ( uFloor > 0.0 ) {
@@ -200,8 +209,14 @@ void main() {
     float lodB = clamp( log2( t0 / 3000.0 ) + 1.0, 0.0, 5.0 );
     vec4 sn = textureLod( uNoise, vec3( bxz.x / 11000.0, 0.31 + uTime * 0.00015, bxz.y / 11000.0 ), lodB );
     vec4 sn2 = textureLod( uNoise, vec3( bxz.x / 3800.0, 0.67, bxz.y / 3800.0 ), lodB );
-    float s = sn.r * 0.6 + sn2.r * 0.25 + sn2.g * 0.15;
-    deckK = mix( 1.0, mix( 1.55, 0.5, smoothstep( 0.2, 0.8, s ) ), clamp( uFloor * 1.8, 0.0, 1.0 ) );
+    // stratocumulus cells (~1.5 km) and their rolls: the lumpy, patchy grey of a real deck
+    vec4 sn3 = textureLod( uNoise, vec3( bxz.x / 1500.0, 0.12 + uTime * 0.0004, bxz.y / 1700.0 ), lodB + 0.5 );
+    float cells = 1.0 - sn3.g;
+    float s = sn.r * 0.45 + sn2.r * 0.2 + cells * 0.35;
+    float thin = 1.0 - smoothstep( 0.4, 0.6, s );
+    // where the deck is thin the sun glows through it (a bright patch round the hidden sun)
+    float glowSun = 1.0 + thin * 1.4 * hg( dot( d, uSunDir ), 0.72 ) * ( 1.0 - uDark * 0.8 );
+    deckK = mix( 1.0, mix( 0.5, 1.75, thin ) * glowSun, clamp( uFloor * 1.8, 0.0, 1.0 ) );
   }
 
   if ( t0 < t1 && uCoverage > 0.005 ) {
@@ -267,6 +282,9 @@ void main() {
             amb = mix( amb, uAmbBase * deckK * lumpShade, clamp( uFloor * 1.8, 0.0, 1.0 ) );
           } else {
             amb *= mix( 1.0, mix( 0.35, 1.0, occ ) * ( 1.15 - 0.5 * wc ), uDark );
+            // cumulus bases sit in their own shadow: flat and grey under sunlit tops
+            // (a low sun gets in underneath them, so evening bases glow instead)
+            amb *= mix( mix( 0.62, 0.95, 1.0 - smoothstep( 0.08, 0.3, uSunDir.y ) ), 1.0, smoothstep( 0.0, 0.35, hc01 ) );
           }
           vec3 S = sigma * ( sun * inscatter + amb );
           float Ts = exp( -sigma * ds );
@@ -379,6 +397,7 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
     uCirrusCol: { value: new THREE.Vector3(1, 1, 1) },
     uRain: { value: 0 },
     uRainCol: { value: new THREE.Vector3(0.3, 0.3, 0.3) },
+    uConv: { value: 0 },
   };
   const mat = new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,

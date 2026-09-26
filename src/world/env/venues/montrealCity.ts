@@ -29,8 +29,8 @@ const BRICK = [0x8a4a36, 0x7c4231, 0x9a5842, 0x6f3a2c, 0xa46048].map(C);
 const MODERN = [0xc9ccce, 0xb4b9bd, 0x8f979e, 0xd8d6d0, 0x6d757c, 0xa7aeb3, 0xe2e0da].map(C);
 const SUBURB = [0xd9d2c4, 0xc8bca8, 0xb9a58c, 0x9a6a50, 0xe3ddd0, 0xa9a39a].map(C);
 
-/** window-band shader for buildings: aWin.x = curtain wall 0…1, aWin.y = glass reflectivity */
-function cityMaterial(instanced: boolean): THREE.MeshStandardMaterial {
+/** window-band shader for buildings: aWin.x = curtain wall 0…1, aWin.y = glass reflectivity (also used by Melbourne's CBD) */
+export function cityMaterial(instanced: boolean): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: !instanced, roughness: 0.85, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uFlood = { value: floodUniforms.params };
@@ -93,7 +93,7 @@ interface Box {
 }
 
 /** merged-mesh builder: boxes with colour + aWin */
-class Merge {
+export class Merge {
   pos: number[] = [];
   nor: number[] = [];
   col: number[] = [];

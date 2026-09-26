@@ -109,7 +109,18 @@ interface Member {
   /** 0 fps skip accumulator for far people */
   acc: number;
   shadow: boolean;
+  /** idle in the garage: what they're at, and for how long more */
+  idleClip?: string;
+  idleT?: number;
 }
+
+/** what the idle crew in a garage get up to, by idle slot: two chatting, one at the bench, one at the car */
+const IDLE_CLIPS = [
+  ['Idle_Talking_Loop', 'Idle_Talking_Loop', 'Idle_Loop', 'look_around'],
+  ['Idle_Listening_Loop', 'Idle_Listening_Loop', 'Idle_Talking_Loop', 'phone'],
+  ['work_table', 'work_table', 'Idle_Loop', 'phone'],
+  ['crouch_work', 'crouch_work', 'Crouch_Idle_Loop', 'Idle_Loop'],
+];
 
 interface Crew {
   k: number;
@@ -700,7 +711,14 @@ export class CrewSystem {
         tx = wp.x;
         tz = wp.z;
         ty = wp.y;
-        clip = IDLE_SET.indexOf(m.i) % 2 ? 'Idle_Talking_Loop' : 'Idle_Loop';
+        // (every so often something else to do)
+        m.idleT = (m.idleT ?? 0) - dt;
+        if (!m.idleClip || m.idleT <= 0) {
+          const set = IDLE_CLIPS[Math.max(0, IDLE_SET.indexOf(m.i)) % IDLE_CLIPS.length];
+          m.idleClip = set[Math.floor(Math.random() * set.length)];
+          m.idleT = 9 + Math.random() * 16;
+        }
+        clip = m.idleClip;
         speed = active ? 3.2 : 1.6;
       }
       const dx = tx - m.x, dz = tz - m.z;

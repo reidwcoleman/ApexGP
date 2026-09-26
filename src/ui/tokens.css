@@ -44,6 +44,12 @@
   --r-pill: 6px;
   --r-panel: 12px;
 
+  /* overlay zoom: the UI is laid out at 1600 × 900 and scaled with the window (src/ui/scale.ts) */
+  --ui: 1;
+  /* viewport units that stay true inside a zoomed box (CSS zoom scales vw / vh too) */
+  --vw: calc(1vw / var(--ui));
+  --vh: calc(1vh / var(--ui));
+
   --spring: cubic-bezier(0.22, 1.2, 0.36, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }

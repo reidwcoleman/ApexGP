@@ -16,9 +16,14 @@ import type { WorldMap } from './worldmap.ts';
 import { buildLandmarks } from './landmarks.ts';
 import { AUSTIN_FANS, drawAustinFlags } from './venues/austinScenery.ts';
 import { SPIELBERG_FAN_COLOURS, drawSpielbergFlags } from './venues/spielberg.ts';
+import { HUNGARORING_FAN_COLOURS, drawHungaroringFlags } from './venues/hungaroring.ts';
 import { MONTREAL_FAN_COLOURS, drawMontrealFlags } from './venues/montreal.ts';
+import { MELBOURNE_FAN_COLOURS, drawMelbourneFlags } from './venues/melbourne.ts';
+import { YAS_FAN_COLOURS, drawYasmarinaFlags } from './venues/yasmarina.ts';
 import { BRAZIL_FANS, drawInterlagosFlags } from './venues/interlagosFlags.ts';
 import { ZANDVOORT_FANS, drawZandvoortFlags } from './venues/zandvoort.ts';
+import { MEXICO_FANS, drawMexicoFlags } from './venues/mexico.ts';
+import { SAKHIR_FANS, drawSakhirFlags } from './venues/sakhirScenery.ts';
 
 /**
  * Grandstands and the tifosi.
@@ -38,6 +43,8 @@ export interface GrandstandBuild {
   group: THREE.Group;
   update(t: number): void;
   people: number;
+  /** walkways behind the stands (polylines on the ground) */
+  concourse?: THREE.Vector3[][];
   flags: number;
 }
 
@@ -442,8 +449,18 @@ function flagAtlas(venue: Venue): THREE.CanvasTexture {
     }
   } else if (venue === 'spielberg') {
     drawSpielbergFlags(ctx, at, S, txt);
+  } else if (venue === 'hungaroring') {
+    drawHungaroringFlags(ctx, at, S, txt);
   } else if (venue === 'montreal') {
     drawMontrealFlags(ctx, at, S);
+  } else if (venue === 'sakhir') {
+    drawSakhirFlags(ctx, at, S, txt);
+  } else if (venue === 'melbourne') {
+    drawMelbourneFlags(ctx, at, S);
+  } else if (venue === 'yasmarina') {
+    drawYasmarinaFlags(ctx, at, S);
+  } else if (venue === 'mexico') {
+    drawMexicoFlags(ctx, at, S, txt);
   }
   // 0: tifosi red, yellow disc with a black "R"
   else {
@@ -627,6 +644,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const people: Person[] = [];
   const flags: Flag[] = [];
   const standRanges: [number, number][] = [];
+  // the concourses behind the stands (people walking them: src/people/strollers.ts)
+  const concourse: THREE.Vector3[][] = [];
 
   const reds = ['#c8102e', '#d4202c', '#a50d22', '#e53935', '#8e0c1c', '#c8102e', '#b3101f'].map((h) => new THREE.Color(h));
   const others = [
@@ -642,11 +661,23 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   // Spielberg: red-white-red, the Dutch orange army, Red Bull navy
   const aut = SPIELBERG_FAN_COLOURS.austria.map((h) => new THREE.Color(h));
   const rbull = SPIELBERG_FAN_COLOURS.redbull.map((h) => new THREE.Color(h));
+  // Hungaroring: red-white-green, the Dutch orange army, the Finns' blue and white
+  const magyar = HUNGARORING_FAN_COLOURS.hungary.map((h) => new THREE.Color(h));
+  const finns = HUNGARORING_FAN_COLOURS.finland.map((h) => new THREE.Color(h));
   // Montréal: the Maple Leaf's red and white, Québec blue, Ferrari red for Gilles
   const canada = MONTREAL_FAN_COLOURS.map((h) => new THREE.Color(h));
+  // Sakhir: Bahrain red and white, white thobes, a big international crowd in team kit
+  const bahrain = SAKHIR_FANS.map((h) => new THREE.Color(h));
+  // Melbourne: green and gold, papaya orange for the local hero
+  const aussie = MELBOURNE_FAN_COLOURS.map((h) => new THREE.Color(h));
+  // Yas Marina: white kanduras, black abayas, the UAE's green and red, and an international crowd in team kit
+  const emirati = YAS_FAN_COLOURS.map((h) => new THREE.Color(h));
   // Zandvoort: a sea of orange, a little red-white-blue
   const oranje = ZANDVOORT_FANS.oranje.map((h) => new THREE.Color(h));
   const holland = ZANDVOORT_FANS.holland.map((h) => new THREE.Color(h));
+  // Mexico City: el Tricolor everywhere, Checo's Red Bull navy
+  const tricolor = MEXICO_FANS.tricolor.map((h) => new THREE.Color(h));
+  const checo = MEXICO_FANS.checo.map((h) => new THREE.Color(h));
   const fanColor = () => {
     const q = r();
     const c =
@@ -654,8 +685,18 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
         ? q < 0.84 ? oranje[Math.floor(r() * oranje.length)] : q < 0.9 ? holland[Math.floor(r() * holland.length)] : others[Math.floor(r() * others.length)]
         : map.venue === 'interlagos'
         ? q < 0.46 ? BRAZIL_FANS[Math.floor(r() * BRAZIL_FANS.length)] : q < 0.52 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'mexico'
+        ? q < 0.46 ? tricolor[Math.floor(r() * tricolor.length)] : q < 0.6 ? checo[Math.floor(r() * checo.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'yasmarina'
+        ? q < 0.3 ? emirati[Math.floor(r() * emirati.length)] : q < 0.38 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'melbourne'
+        ? q < 0.34 ? aussie[Math.floor(r() * aussie.length)] : q < 0.44 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'sakhir'
+        ? q < 0.32 ? bahrain[Math.floor(r() * bahrain.length)] : q < 0.42 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
         : map.venue === 'montreal'
         ? q < 0.34 ? canada[Math.floor(r() * canada.length)] : q < 0.46 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'hungaroring'
+        ? q < 0.28 ? magyar[Math.floor(r() * magyar.length)] : q < 0.44 ? oranges[Math.floor(r() * oranges.length)] : q < 0.5 ? finns[Math.floor(r() * finns.length)] : q < 0.56 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
         : map.venue === 'spielberg'
         ? q < 0.3 ? aut[Math.floor(r() * aut.length)] : q < 0.44 ? oranges[Math.floor(r() * oranges.length)] : q < 0.5 ? rbull[Math.floor(r() * rbull.length)] : others[Math.floor(r() * others.length)]
         : map.venue === 'austin'
@@ -688,6 +729,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const teamShirts = TEAMS.map((t) => [t.primary, t.primary, t.secondary].map((h) => new THREE.Color(h)));
   const flagDesign = () => {
     const q = r();
+    if (map.venue === 'mexico' && q < 0.66) return q < 0.36 ? 0 : q < 0.46 ? 1 : q < 0.56 ? 2 : 3;
     if (q < (map.venue === 'zandvoort' ? 0.72 : 0.4)) return q < 0.18 ? 0 : q < 0.28 ? 1 : q < 0.35 ? 2 : 3;
     if (q < 0.43) return 15;
     return TEAM_FLAG0 + pickTeam();
@@ -863,6 +905,16 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     steel.append(lsteel);
     boards.append(lboards);
     glass.append(lglass);
+    if (L > 24) {
+      const path: THREE.Vector3[] = [];
+      const n = Math.max(2, Math.round((L - 8) / 10) + 1);
+      for (let k = 0; k < n; k++) {
+        const v = new THREE.Vector3(-L / 2 + 4 + ((L - 8) * k) / (n - 1), 0, depth + 5.5).applyMatrix4(M);
+        v.y = Math.max(map.height(v.x, v.z), g.y0 - 3);
+        path.push(v);
+      }
+      concourse.push(path);
+    }
     let sLo = Infinity, sHi = -Infinity, hint = -1;
     for (const p of standPeople) {
       p.m.premultiply(M);
@@ -1040,6 +1092,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     group,
     people: people.length,
     flags: flags.length,
+    concourse,
     update(t: number) {
       uniforms.uTime.value = t;
     },

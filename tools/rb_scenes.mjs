@@ -130,13 +130,34 @@ if (pin !== null) {
   }, v);
   await page.waitForTimeout(1500);
 }
+// --pinjs 'js': a snippet (g = the game, V = Vector3) returning { eye, target, fov } in world space
+const pinjs = opt('pinjs', null);
+if (pinjs !== null) {
+  const r = await page.evaluate((js) => {
+    const g = window.__game;
+    const cam = g.camera;
+    const V = cam.position.constructor;
+    const out = new Function('g', 'V', js)(g, V);
+    if (!out || !out.eye) return out;
+    const orig = cam.updateMatrixWorld.bind(cam);
+    cam.updateMatrixWorld = (f) => {
+      cam.position.set(...out.eye);
+      cam.lookAt(new V(...out.target));
+      if (cam.fov !== (out.fov ?? 40)) { cam.fov = out.fov ?? 40; cam.updateProjectionMatrix(); }
+      orig(f);
+    };
+    return out;
+  }, pinjs);
+  console.log('pinjs', JSON.stringify(r));
+  await page.waitForTimeout(1500);
+}
 await page.screenshot({ path: `${prefix}_${scene}.png` });
 console.log('saved', `${prefix}_${scene}.png`);
 const stats = await page.evaluate(async () => {
   const g = window.__game;
   const r = g.gfx.renderer;
   const frames = (n) => new Promise((res) => { let k = 0; const f = () => (++k < n ? requestAnimationFrame(f) : res()); requestAnimationFrame(f); });
-  const PEOPLE = /^(person|fan-crowd|pit_crews)$/;
+  const PEOPLE = /^(person|fan-crowd|pit_crews|track_people|pit_people|concourse_people|podium_crews)$/;
   const acc = { all: { calls: 0, tris: 0 }, people: { calls: 0, tris: 0 }, peopleShadow: { calls: 0, tris: 0 } };
   let on = false;
   const orig = r.renderBufferDirect.bind(r);

@@ -3,6 +3,7 @@ import type { Track } from '../world/Track.ts';
 import { uiColor } from '../race/Teams.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
 import { WEATHER_LABEL, isWetKind, type WeatherKind } from '../world/Weather.ts';
+import { uiHeight } from './scale.ts';
 
 /** 16px line icons for the weather row (stroke = currentColor) */
 const WX_ICON: Record<WeatherKind, string> = {
@@ -46,6 +47,22 @@ interface Row {
   code: HTMLSpanElement;
   gap: HTMLSpanElement;
   key: string;
+  /** the position last drawn (0 = none yet), for the gained / lost flash */
+  last: number;
+}
+
+/** a place gained or lost lights the position cell for a moment, like the TV tower */
+function flashPos(row: Row, gained: boolean) {
+  if (typeof row.pos.animate !== 'function') return;
+  const c = gained ? '#22d17a' : '#ff2b3f';
+  row.pos.animate(
+    [
+      { backgroundColor: c, color: '#0a0c11' },
+      { backgroundColor: c, color: '#0a0c11', offset: 0.55 },
+      { backgroundColor: 'rgba(0,0,0,0)' },
+    ],
+    { duration: 1600, easing: 'ease-out' },
+  );
 }
 
 /**
@@ -149,6 +166,7 @@ export class HUD {
     const brk = el('div', 'meter brk', ped);
     this.brkEl = el('b', '', brk);
     this.pitEl = el('span', 'lbl pitlbl', bars, '');
+    el('span', 'lbl erslbl', bars, 'ERS');
     this.ersWrap = el('div', 'meter ers', bars);
     this.ersEl = el('b', '', this.ersWrap);
     this.drsEl = el('div', 'drs', bars, 'DRS');
@@ -189,6 +207,13 @@ export class HUD {
 
   show(on: boolean) {
     this.root.classList.toggle('on', on);
+    if (!on) this.clearLights();
+  }
+
+  /** the start-light overlay off (it only belongs to a live countdown) */
+  private clearLights() {
+    this.lights.classList.remove('show');
+    for (const c of this.lightCols) c.classList.remove('on');
   }
 
   /** build tower rows + minimap for a new race */
@@ -197,10 +222,10 @@ export class HUD {
     rowsWrap.innerHTML = '';
     this.rows = [];
     this.rowByCar.clear();
-    const n = race.cars.length;
-    const compact = window.innerHeight < 760;
-    const rh = compact ? 21 : 25;
-    rowsWrap.style.height = `${n * rh}px`;
+    this.rowsWrap = rowsWrap;
+    this.rowCount = race.cars.length;
+    this.compactH = -1;
+    this.rowH();
     for (const c of race.cars) {
       const r = el('div', 'trow', rowsWrap) as HTMLDivElement;
       const row: Row = {
@@ -210,6 +235,7 @@ export class HUD {
         code: el('span', 'code', r),
         gap: el('span', 'gap', r),
         key: '',
+        last: 0,
       };
       row.bar.style.background = uiColor(c.entry.team);
       row.code.textContent = c.entry.driver.code;
@@ -267,6 +293,23 @@ export class HUD {
     this.banner.classList.remove('show');
   }
 
+  /** the tower's row height: tighter when the (zoomed) layout is short, so 22 rows clear the map */
+  private rowsWrap: HTMLDivElement | null = null;
+  private rowCount = 0;
+  private compactH = -1;
+  private rowH(): number {
+    const h = innerHeight;
+    if (h !== this.compactH) {
+      this.compactH = h;
+      const compact = uiHeight() < 880;
+      this.root.classList.toggle('compact', compact);
+      this.rh = compact ? 21 : 25;
+      if (this.rowsWrap) this.rowsWrap.style.height = `${this.rowCount * this.rh}px`;
+    }
+    return this.rh;
+  }
+  private rh = 25;
+
   private mapXY(x: number, z: number): [number, number] {
     const m = this.mapScale;
     return [(x - m.minx) * m.k + m.ox, (z - m.minz) * m.k + m.oz];
@@ -305,7 +348,7 @@ export class HUD {
 
   /** a line of team radio from the race engineer */
   radio(text: string, teamColor: string, secs = 4.5) {
-    this.radioEl.innerHTML = `<span class="rbar" style="background:${teamColor}"></span><div><div class="rwho">Race engineer</div><div class="rmsg">${text}</div></div>`;
+    this.radioEl.innerHTML = `<span class="rbar" style="background:${teamColor}"></span><div><div class="rwho">Race engineer<span class="rwave"><i></i><i></i><i></i></span></div><div class="rmsg">${text}</div></div>`;
     this.radioEl.classList.add('show');
     this.radioTimer = secs;
   }
@@ -322,6 +365,8 @@ export class HUD {
   /** broadcast mode: only the tower (the followed car lit), banners and the map; `clean` hides it all */
   setBroadcast(on: boolean, replay = false, clean = false) {
     this.root.classList.toggle('bcast', on);
+    // a replay / spectate starts clean: no start lights left over from the session (update() doesn't run there)
+    this.clearLights();
     this.root.classList.toggle('replay', on && replay);
     this.root.classList.toggle('clean', on && clean);
     if (!on) this.setFocus(-1);
@@ -347,7 +392,7 @@ export class HUD {
     this.towerTimer -= dt;
     if (this.towerTimer > 0) return;
     this.towerTimer = 0.08;
-    const rh = window.innerHeight < 760 ? 21 : 25;
+    const rh = this.rowH();
     if (this.lastText.get(this.towerHead) !== head) {
       this.towerHead.innerHTML = head;
       this.lastText.set(this.towerHead, head);
@@ -357,6 +402,9 @@ export class HUD {
       row.el.style.transform = `translateY(${(p - 1) * rh}px)`;
       this.setText(row.pos, String(p));
       const o = out(id);
+      // (a seek reshuffles everything at once: only a real pass of a place or two flashes)
+      if (row.last && row.last !== p && Math.abs(row.last - p) <= 2 && !o) flashPos(row, p < row.last);
+      row.last = p;
       const g = gap[id];
       this.setText(row.gap, o ? 'OUT' : p === 1 ? 'Leader' : g < 0 ? `+${-Math.round(g)} Lap${g < -1 ? 's' : ''}` : g > 0 ? `+${g.toFixed(3)}` : '');
       if (o !== row.el.classList.contains('out')) row.el.classList.toggle('out', o);
@@ -520,7 +568,7 @@ export class HUD {
     const t = race.phase === 'racing' || race.phase === 'finished' ? race.raceTime : 0;
     const lapNo = Math.max(1, Math.min(race.opts.laps, p.laps + 1));
     this.setText(this.pbig, race.isTimeTrial ? 'TT' : `P${p.position}`);
-    const lapHtml = race.isTimeTrial ? `Lap <b>${Math.max(1, p.laps + 1)}</b>` : p.lapValid ? '' : 'Lap deleted';
+    const lapHtml = !p.lapValid ? '<b class="bad">Lap deleted</b>' : race.isTimeTrial ? `Lap <b>${Math.max(1, p.laps + 1)}</b>` : `Lap <b>${lapNo}<span>/${race.opts.laps}</span></b>`;
     if (this.lastText.get(this.lapEl) !== lapHtml) {
       this.lapEl.innerHTML = lapHtml;
       this.lastText.set(this.lapEl, lapHtml);
@@ -575,17 +623,21 @@ export class HUD {
   }
 
   private updateTower(race: Race) {
-    const compact = window.innerHeight < 760;
-    const rh = compact ? 21 : 25;
+    const rh = this.rowH();
     const head = race.isTimeTrial ? 'Time trial' : `Lap <b>${Math.max(1, Math.min(race.opts.laps, race.leaderLaps + 1))}/${race.opts.laps}</b>`;
     if (this.lastText.get(this.towerHead) !== head) {
       this.towerHead.innerHTML = head;
       this.lastText.set(this.towerHead, head);
     }
+    // the flag state along the top of the tower
+    const flag = race.phase === 'finished' ? ' fin' : race.vsc !== 'none' ? ' vsc' : race.phase === 'racing' ? ' green' : '';
+    this.setClass(this.tower, 'tower glass' + flag);
     for (const c of race.cars) {
       const row = this.rowByCar.get(c.id)!;
       row.el.style.transform = `translateY(${(c.position - 1) * rh}px)`;
       this.setText(row.pos, String(c.position));
+      if (row.last && row.last !== c.position && race.phase === 'racing' && !c.retired) flashPos(row, c.position < row.last);
+      row.last = c.position;
       let gap: string;
       if (c.position === 1) gap = race.phase === 'racing' || race.phase === 'finished' ? 'Leader' : '';
       else if (c.gapLeader < 0) gap = `+${-c.gapLeader} Lap${c.gapLeader < -1 ? 's' : ''}`;

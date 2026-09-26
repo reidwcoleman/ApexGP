@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
 import type { Renderer, QualityLevel, GradeLook } from '../core/Renderer.ts';
-import { aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
+import { aerialBanks, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
 import { computeSky, LUT_SCALE, type SkyLUT } from './env/atmosphere.ts';
 import { createSkyDome } from './env/sky.ts';
 import { createCloudNoise } from './env/skyNoise.ts';
@@ -399,6 +399,9 @@ export function createEnvironment(
     gfx.bloom.intensity = L.bloom;
     gfx.bloom.luminanceMaterial.threshold = L.bloomThreshold;
     gfx.setSunShafts(sunDir, L.shafts * 0.9, 0.55 * C.E0 * 0.25);
+    // lens flare: only with the sun clear of cloud; colour follows the sun (orange at golden hour)
+    gfx.flareStrength = L.sunVis * L.sunVis * (isLowSun(L.time) ? 1.2 : 0.8);
+    gfx.setFlareColor(C.sunCol.r * 2.2, C.sunCol.g * 2.2, C.sunCol.b * 2.2);
 
     sceneryLight.sunColor.copy(C.sunCol).multiplyScalar(sunI);
     sceneryLight.skyAmbient.copy(C.zenith).multiplyScalar(0.55).add(tmpB.copy(C.horizonAway).multiplyScalar(0.45)).lerp(deck, ov);
@@ -432,6 +435,9 @@ export function createEnvironment(
     // the deck turns dark, cold and lumpy and the light goes a sickly blue-green
     const conv = wx.conv;
     cu0.uThick.value = L.cloudThick * (1 + 2.4 * conv * (1 - L.overcast * 0.6));
+    cu0.uConv.value = conv * (1 - L.overcast * 0.5);
+    // showers falling from distant towers, grey curtains on the horizon even while it's dry here
+    cu0.uRain.value = Math.max(L.rain, conv * 0.4 * (1 - L.overcast));
     cloudShadowB.z = L.cloudBase + (cu0.uThick.value as number) * 0.35;
     const storm = conv * wetK;
     if (storm > 0.001) {
@@ -450,6 +456,8 @@ export function createEnvironment(
     // steam hanging over a wet track once the rain stops
     const evap = THREE.MathUtils.smoothstep(wx.wet, 0.25, 0.75) * (1 - THREE.MathUtils.smoothstep(L.rain, 0.04, 0.25)) * 0.8;
     const lying = Math.max(evap, wx.kind === 'mist' ? THREE.MathUtils.smoothstep(L.mist, 0.05, 0.45) : 0);
+    // …in banks: thicker in some hollows, thinner in others, drifting with the breeze
+    aerialBanks.x = Math.max(lying * 0.75, wx.kind === 'fog' ? 0.55 : 0);
     if (lying > 0.001) {
       aerialParams.x += lying * 9e-4;
       aerialParams.y = THREE.MathUtils.lerp(aerialParams.y, 1 / 55, lying);
@@ -473,7 +481,10 @@ export function createEnvironment(
       gradeLook.contrast *= 1 - 0.04 * milk;
     }
     // shafts: morning mist and haze scatter the sun into beams through the trees
-    gfx.setSunShafts(sunDir, P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) : 0), 0.55 * C.E0 * 0.25);
+    // and broken cumulus in front of the sun throws crepuscular rays through the gaps
+    const gaps = THREE.MathUtils.smoothstep(L.coverage, 0.2, 0.45) * (1 - L.overcast) * (1 - night);
+    const shaftK = P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) + 0.45 * gaps : 0);
+    gfx.setSunShafts(sunDir, shaftK, 0.55 * C.E0 * 0.25);
     gfx.grade.setLook(gradeLook);
     const F = FLOOD_E * fl;
     setFloodLevel(F);
@@ -492,6 +503,8 @@ export function createEnvironment(
     // or it would sit below the horizon all afternoon)
     const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - L.mist);
     u.uBow.value = bow;
+    // rain lit from behind by the sun glitters
+    rain.setSun(sunDir, nightTmp.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.08 * (1 - night)));
     const bowI = P.sunIntensity * 0.03;
     (u.uBowCol.value as THREE.Vector3).set(C.sunCol.r * bowI, C.sunCol.g * bowI, C.sunCol.b * bowI);
     u.uBowEl.value = -Math.min(P.elevation, 20) * DEG;
@@ -688,6 +701,8 @@ export function createEnvironment(
 
     rain.update(dt, camera);
     floods.update(camera);
+    aerialBanks.z += wind.x * 0.6 * dt;
+    aerialBanks.w += wind.z * 0.6 * dt;
     scenery.update(dt, camera, elapsed);
 
     // env map: re-filter in place when the look drifted (or clouds moved on), spread over 2 frames

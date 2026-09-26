@@ -8,6 +8,11 @@ import { SPIELBERG } from './circuits/spielberg.ts';
 import { AUSTIN } from './circuits/austin.ts';
 import { ZANDVOORT } from './circuits/zandvoort.ts';
 import { MONTREAL } from './circuits/montreal.ts';
+import { MELBOURNE } from './circuits/melbourne.ts';
+import { MEXICO } from './circuits/mexico.ts';
+import { HUNGARORING } from './circuits/hungaroring.ts';
+import { SAKHIR } from './circuits/sakhir.ts';
+import { YASMARINA } from './circuits/yasmarina.ts';
 
 /**
  * Autodromo Nazionale Monza — the Temple of Speed. 5.79 km, clockwise, 11
@@ -326,4 +331,4 @@ export const SUZUKA: CircuitDef = {
   },
 };
 
-export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE, SUZUKA, MONTREAL, SPIELBERG, ZANDVOORT, AUSTIN, INTERLAGOS];
+export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE, SUZUKA, MONTREAL, MELBOURNE, SPIELBERG, ZANDVOORT, AUSTIN, INTERLAGOS, HUNGARORING, SAKHIR, MEXICO, YASMARINA];

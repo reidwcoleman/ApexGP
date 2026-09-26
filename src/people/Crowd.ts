@@ -30,9 +30,9 @@ export interface FanSpot {
 /** the crowd's bones: the Biped without fingers, eyes and lids */
 const CROWD_SKIP = /Finger|Eye/;
 /** extra columns: the right hand's and the head's world frames (props ride on them) */
-const PROP_HAND = 0, PROP_HEAD = 1;
+export const PROP_HAND = 0, PROP_HEAD = 1;
 
-interface AvatarBake {
+export interface AvatarBake {
   name: string;
   asset: BodyAsset;
   /** per act: first row, frames, loop seconds */
@@ -45,7 +45,9 @@ interface AvatarBake {
   capFit: THREE.Vector4;
 }
 
-interface Baked {
+export interface Baked {
+  /** the avatar the shared props were made for */
+  ref: BodyAsset;
   tex: THREE.DataTexture;
   /** crowd bone columns (skin bones + 2 prop frames) */
   cols: number;
@@ -57,7 +59,15 @@ interface Baked {
   phone: THREE.BufferGeometry;
 }
 
-const bakes = new WeakMap<PeopleKit, Baked>();
+/** what to bake: the avatars, and the clips (act k = clips[k]) with a pose over each */
+export interface BakeSpec {
+  key: string;
+  names: string[];
+  clips: string[];
+  pose?: (p: Person, act: number, u: number) => void;
+}
+const bakes = new WeakMap<PeopleKit, Map<string, Baked>>();
+const earlyBakes = new WeakMap<PeopleKit, Map<string, { n: number; b: Baked }>>();
 
 /** the crowd bone each of the 57 Biped bones folds into */
 function crowdBones(names: string[]): { map: Int16Array; src: number[] } {
@@ -105,14 +115,21 @@ function foldSkin(g: THREE.BufferGeometry, map: Int16Array): THREE.BufferGeometr
   return out;
 }
 
-const earlyBakes = new WeakMap<PeopleKit, { n: number; b: Baked }>();
 function bake(kit: PeopleKit): Baked {
-  const hit = bakes.get(kit);
-  if (hit) return hit;
-  const early = earlyBakes.get(kit);
-  if (early && early.n === kit.avatars.size) return early.b;
   // (eight bodies at most: every one is four draws)
   const names = [...new Set([...fanPool(kit, false).slice(0, 5), ...fanPool(kit, true).slice(0, 3)])];
+  return bakeSet(kit, { key: 'fans', names, clips: ACT_CLIP, pose: actPose });
+}
+
+/** the clips of a set of avatars baked into one bone-matrix texture (cached per kit and key) */
+export function bakeSet(kit: PeopleKit, spec: BakeSpec): Baked {
+  const hit = bakes.get(kit)?.get(spec.key);
+  if (hit) return hit;
+  const early = earlyBakes.get(kit)?.get(spec.key);
+  if (early && early.n === kit.avatars.size) return early.b;
+  const names = spec.names.filter((n) => kit.avatars.has(n));
+  if (!names.length) names.push(fanPool(kit, false)[0]);
+  const NA = spec.clips.length;
   const ref = kit.asset(names[0]);
   const { map, src } = crowdBones(ref.body.names);
   const cols = src.length + 2;
@@ -126,8 +143,8 @@ function bake(kit: PeopleKit): Baked {
     const asset = p.asset;
     const acts: [number, number, number][] = [];
     const hand = asset.lm.joint.hand_r, head = asset.lm.joint.Head;
-    for (let a = 0; a < ACT_COUNT; a++) {
-      const clip = p.clip(ACT_CLIP[a]) ?? p.clip('idle')!;
+    for (let a = 0; a < NA; a++) {
+      const clip = p.clip(spec.clips[a]) ?? p.clip('idle')!;
       // long clips: a five-second window, its end cross-faded into its start
       const L = clip.duration > 5.6 ? 5 : clip.duration;
       const F = clip.duration > 5.6 ? 0.6 : 0;
@@ -150,9 +167,9 @@ function bake(kit: PeopleKit): Baked {
           B.weight = 1 - s;
         }
         p.mixer.update(0);
-        p.settle(t, 1, ACT_CLIP[a]);
+        p.settle(t, 1, spec.clips[a]);
         p.root.updateMatrixWorld(true);
-        actPose(p, a, f / frames);
+        spec.pose?.(p, a, f / frames);
         p.root.updateMatrixWorld(true);
         const row = new Float32Array(cols * 16);
         src.forEach((bi, j) => {
@@ -203,10 +220,12 @@ function bake(kit: PeopleKit): Baked {
   const ph = new THREE.BoxGeometry(0.075, 0.15, 0.009);
   ph.translate(hp.x - 0.06, hp.y - 0.04, hp.z + 0.05);
   const phone = mergeSimple([ph]).applyMatrix4(handInv);
-  const out: Baked = { tex, cols, avatars, cap, capBack, flag, phone };
-  // (only once every fan has loaded: before that the bake is of the stand-ins)
-  if (kit.complete) bakes.set(kit, out);
-  else earlyBakes.set(kit, { n: kit.avatars.size, b: out });
+  const out: Baked = { ref, tex, cols, avatars, cap, capBack, flag, phone };
+  // (only once every avatar has loaded: before that the bake is of the stand-ins)
+  const into = kit.complete ? bakes : earlyBakes;
+  if (!into.has(kit)) into.set(kit, new Map());
+  if (kit.complete) bakes.get(kit)!.set(spec.key, out);
+  else earlyBakes.get(kit)!.set(spec.key, { n: kit.avatars.size, b: out });
   return out;
 }
 
@@ -304,7 +323,7 @@ type CrowdKind = 'body' | 'hair' | 'prop';
  * 'hair': alpha-tested cards; 'prop': a rigid mesh in the frame of prop column `col`
  * (per-instance aFit: offset in that frame + scale).
  */
-function crowdMaterial(baked: Baked, idle: [number, number, number], shared: { uTime: THREE.IUniform; uCalm: THREE.IUniform }, kind: CrowdKind, base: THREE.MeshStandardMaterialParameters, extra: { asset?: BodyAsset; col?: number } = {}): THREE.MeshStandardMaterial {
+export function crowdMaterial(baked: Baked, idle: [number, number, number], shared: { uTime: THREE.IUniform; uCalm: THREE.IUniform }, kind: CrowdKind, base: THREE.MeshStandardMaterialParameters, extra: { asset?: BodyAsset; col?: number } = {}): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial(base);
   const a = extra.asset;
   const u: Record<string, THREE.IUniform> = {
@@ -364,10 +383,13 @@ ${RB_SURFACE_GLSL}`)
   gRough = mix( 0.88, 0.5, ns.b );
   float cloth = vMapUv.x < 0.5 ? texture2D( uMask, vMapUv ).r : 0.0;
   float part = floor( vPart + 0.5 );
-  float shirt = cloth * step( 0.5, part ) * step( part, 4.5 ) * step( uWaist - 0.08, vRest.y );
+  // aTint.a: the dye's strength over the shirt; 2 + strength: over all the clothes (overalls, uniforms)
+  float dyeAll = step( 1.5, vTint.a );
+  float amount = vTint.a - 2.0 * dyeAll;
+  float shirt = cloth * mix( step( 0.5, part ) * step( part, 4.5 ) * step( uWaist - 0.08, vRest.y ), step( 0.5, part ), dyeAll );
   float rel = clamp( ( dot( a.rgb, RB_LUM ) + 0.01 ) / ( dot( uShirtMean, RB_LUM ) + 0.01 ), 0.35, 1.6 );
   vec3 dyed = min( vTint.rgb * mix( 1.0, rel, 0.55 ), vec3( ${CLOTH_WHITE_MAX.toFixed(2)} ) );
-  diffuseColor.rgb *= mix( a.rgb, dyed, shirt * vTint.a );
+  diffuseColor.rgb *= mix( a.rgb, dyed, shirt * amount );
   gSkin = ( 1.0 - cloth ) * clamp( rbSkinLike( a.rgb, uSkinRef ), 0.0, 1.0 );
 }`)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
@@ -377,7 +399,7 @@ mapN.z = sqrt( max( 0.0, 1.0 - dot( mapN.xy, mapN.xy ) ) );`));
     sh.fragmentShader = fs;
   };
   mat.onBeforeCompile = (sh) => patch(sh, false);
-  mat.customProgramCacheKey = () => `apex-rb-crowd-${kind}-${propCol}-v1`;
+  mat.customProgramCacheKey = () => `apex-rb-crowd-${kind}-${propCol}-v2`;
   const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: kind === 'hair' ? base.map ?? null : null, alphaTest: kind === 'hair' ? 0.5 : 0 });
   depthMat.onBeforeCompile = (sh) => patch(sh, true);
   depthMat.customProgramCacheKey = () => `apex-rb-crowd-depth-${kind}-${propCol}-v1`;
@@ -506,7 +528,7 @@ export class FanCrowd {
 }
 
 /** a hand-held flag on a pole, in bind space at the right hand (the pole along the fist, up when the arm is raised) */
-function flagGeometry(hand: THREE.Vector3): THREE.BufferGeometry {
+export function flagGeometry(hand: THREE.Vector3): THREE.BufferGeometry {
   const pole = new THREE.CylinderGeometry(0.008, 0.008, 1.1, 6);
   pole.translate(hand.x - 0.02, hand.y - 0.05 + 0.45, hand.z + 0.02);
   const cloth = new THREE.PlaneGeometry(0.62, 0.42, 8, 4);

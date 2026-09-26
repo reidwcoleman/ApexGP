@@ -23,6 +23,57 @@ export interface TerrainBuild {
 
 const lin = (hex: number) => new THREE.Color(hex);
 
+/**
+ * Per-venue ground palette (track agents: tune your venue here). Colour keys override the
+ * terrain shader's colours (hex sRGB): lawn, meadow, straw, grassDark, earth, gravel, sand,
+ * rock, litter, canopy. `arid` 0 … 1 lays sand/gravel/rock ground over the unmown land:
+ * 1 = desert (only lawns, verges and paving stay), ~0.4 = patches (coastal dunes).
+ */
+export interface TerrainPalette {
+  arid?: number;
+  lawn?: number;
+  meadow?: number;
+  straw?: number;
+  grassDark?: number;
+  earth?: number;
+  gravel?: number;
+  sand?: number;
+  rock?: number;
+  litter?: number;
+  canopy?: number;
+}
+export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
+  // Bahrain: the Sakhir desert — pale sand, grey-brown limestone pavement, irrigated verges
+  sakhir: { arid: 1, sand: 0xcbb58e, rock: 0x93826a, lawn: 0x5e7433, earth: 0xa38c6c, gravel: 0xc9b795 },
+  // Abu Dhabi: Yas Island — bright coastal sand, landscaped lawns
+  yasmarina: { arid: 1, sand: 0xd8be8c, rock: 0xa08a6a, lawn: 0x587534, earth: 0xae9270, gravel: 0xd0bf9c },
+  // Zandvoort: dunes with marram grass between the verges
+  zandvoort: { arid: 0.42, sand: 0xd2c29c, rock: 0x9a8f7a, meadow: 0x6e7547, straw: 0xa9a071 },
+  // Mexico City: dry highland grass, brown volcanic soil
+  mexico: { meadow: 0x7a7646, straw: 0xa28e5c, earth: 0x6e5238, grassDark: 0x4a4e2a },
+  // Texas: straw-coloured prairie, limestone and red clay
+  austin: { arid: 0.18, meadow: 0x7c7647, straw: 0xab975f, earth: 0x8e6244, grassDark: 0x4c5129, sand: 0xb89c72, rock: 0xa2968a },
+  // Hungary in August: sun-dried grass
+  hungaroring: { meadow: 0x76763f, straw: 0xa69455 },
+  // Melbourne: Albert Park's dry-summer lawns
+  melbourne: { meadow: 0x6f7544, straw: 0xa09262 },
+  // São Paulo: red tropical earth
+  interlagos: { earth: 0x8c4e30, meadow: 0x5f7236 },
+};
+const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid'>, string> = {
+  lawn: 'uLawn', meadow: 'uMeadow', straw: 'uStraw', grassDark: 'uGrassDark', earth: 'uEarth', gravel: 'uGravel',
+  sand: 'uSand', rock: 'uRock', litter: 'uLitter', canopy: 'uCanopy',
+};
+/** apply a venue palette to a terrain material's uniforms */
+export function applyTerrainPalette(uniforms: Record<string, THREE.IUniform>, pal: TerrainPalette | undefined) {
+  if (!pal) return;
+  for (const [k, u] of Object.entries(PALETTE_KEYS)) {
+    const v = pal[k as keyof typeof PALETTE_KEYS];
+    if (v !== undefined) (uniforms[u].value as THREE.Color).setHex(v);
+  }
+  uniforms.uArid.value = pal.arid ?? 0;
+}
+
 export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshStandardMaterial; uniforms: Record<string, THREE.IUniform> } {
   const noise = noiseTexture();
   const detail = detailNormalTexture();
@@ -54,6 +105,9 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uEarth: { value: lin(0x7d664c) },
     uCanopy: { value: lin(0x33462a) },
     uRoof: { value: lin(0x9a5a3e) },
+    uSand: { value: lin(0xc2a472) },
+    uRock: { value: lin(0x86705a) },
+    uArid: { value: 0 },
     /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
     uCity: { value: 0 },
     uWetness: weatherUniforms.uWetness,
@@ -86,13 +140,15 @@ uniform sampler2D uMaskFine;
 uniform sampler2D uMaskCoarse;
 uniform sampler2D uMaskTrack;
 uniform vec2 uFineO, uFineS, uSqO, uSqS, uCenter;
-uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uGravel, uGravelDark, uAsphalt, uEarth, uCanopy, uRoof;
+uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uGravel, uGravelDark, uAsphalt, uEarth, uCanopy, uRoof, uSand, uRock;
+uniform float uArid;
 uniform float uWetness, uRain, uWTime;
 uniform float uCity;
 varying vec3 vWPos;
 varying vec3 vWNormal;
 float tRough;
 float tAO;
+float tAridK = 0.0;
 vec3 tDetailN;
 float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 `,
@@ -261,6 +317,32 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     col = mix( col, mcol, mtn );
   }
 
+  // ---- arid ground (TERRAIN_PALETTES.arid): sand drifts with wind ripples, gravel pans,
+  // rock outcrops and sparse scrub. 1 = desert everywhere except irrigated lawns and verges;
+  // less = patches (coastal dunes, semi-arid scrubland)
+  if ( uArid > 0.01 ) {
+    float sandMask = smoothstep( 1.0 - uArid - 0.07, 1.0 - uArid + 0.07, m2 * 0.6 + m1 * 0.4 );
+    vec3 sandC = uSand * mix( vec3( 0.94, 0.96, 1.02 ), vec3( 1.06, 1.02, 0.92 ), m2 );
+    // compacted, darker sand in hollows; pale wind-blown crests
+    sandC = mix( sandC, uSand * 0.8, smoothstep( 0.45, 0.75, m3 ) * 0.45 );
+    sandC = mix( sandC, uSand * 1.12, smoothstep( 0.7, 0.9, d1 ) * 0.35 );
+    // wind ripples (only resolvable up close)
+    float rip = sin( dot( p, vec2( 0.83, 0.55 ) ) * 3.3 + d2 * 7.0 );
+    sandC *= 1.0 + 0.05 * rip * nearF;
+    // desert pavement: gravel pans of dark stones
+    vec3 pan = mix( uRock * 0.9, uSand * 0.72, d3 );
+    sandC = mix( sandC, pan, smoothstep( 0.56, 0.7, m1 * 0.6 + d1 * 0.4 ) * 0.55 );
+    // rock outcrops
+    float rockK = smoothstep( 0.7, 0.8, m1 * 0.5 + m3 * 0.5 );
+    sandC = mix( sandC, uRock * ( 0.75 + 0.45 * d2 ), rockK );
+    // sparse scrub tufts
+    float scrub = step( 0.84, d3 ) * smoothstep( 0.4, 0.62, m2 ) * ( 1.0 - rockK );
+    sandC = mix( sandC, vec3( 0.12, 0.11, 0.06 ), scrub * 0.55 * ( 0.35 + 0.65 * nearF ) );
+    float aridK = sandMask * ( 1.0 - lawn ) * ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * ( 1.0 - urban * 0.7 );
+    col = mix( col, sandC, aridK );
+    tAridK = aridK;
+  }
+
   // ---- paths and paving
   vec3 grav = mix( uGravel, uGravelDark, d1 * 0.6 + m3 * 0.4 ) * ( 0.88 + 0.24 * d3 );
   col = mix( col, grav, smoothstep( 0.35, 0.75, gravel ) );
@@ -317,7 +399,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v4';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v5';
   return { material, uniforms };
 }
 
@@ -415,6 +497,7 @@ export function buildTerrain(map: WorldMap, maxAniso: number): TerrainBuild {
   const group = new THREE.Group();
   group.name = 'Terrain';
   const { material, uniforms } = createTerrainMaterial(maxAniso);
+  applyTerrainPalette(uniforms, TERRAIN_PALETTES[map.venue]);
 
   const addMesh = (geo: THREE.BufferGeometry | null, name: string) => {
     if (!geo) return;

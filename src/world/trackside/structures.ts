@@ -70,8 +70,24 @@ export interface PanelSpot {
   right: THREE.Vector3;
 }
 
+/** a marshal's place at a post (the people are src/people's TrackPeople: animated, with flags) */
+export interface MarshalSpot {
+  pos: THREE.Vector3;
+  /** facing: rotation about y taking +z to the direction they look */
+  yaw: number;
+  /** index of the post (and of its LED panel) */
+  post: number;
+  s: number;
+  side: -1 | 1;
+  /** the one at the fence, with the flag */
+  lead: boolean;
+}
+
 export interface StructuresOut {
   panels: PanelSpot[];
+  marshals: MarshalSpot[];
+  /** photographers at the fence on the outside of the tight corners */
+  photographers: { pos: THREE.Vector3; yaw: number }[];
 }
 
 /**
@@ -84,6 +100,12 @@ interface VenueProps {
   billboards: [string, number][];
 }
 const VENUE_PROPS: Record<string, VenueProps> = {
+  // Sakhir: sponsor bridges over the run from Turn 3 to Turn 4 and over the back straight
+  sakhir: {
+    bridges: [1660, 3520],
+    cameras: ['Turn 1', 'Turn 4', 'Turn 8', 'Turn 10', 'Turn 11', 'Turn 13', 'Turn 14'],
+    billboards: [['Turn 1', 3], ['Turn 4', 7], ['Turn 10', 11], ['Turn 11', 1], ['Turn 14', 9]],
+  },
   // the main straight past the pit exit, and the back straight toward the Parabolica
   monza: {
     bridges: [1048, 4700],
@@ -132,21 +154,46 @@ const VENUE_PROPS: Record<string, VenueProps> = {
     cameras: ['S do Senna', 'Curva do Sol', 'Descida do Lago', 'Ferradura', 'Laranjinha', 'Bico de Pato', 'Mergulho', 'Junção'],
     billboards: [['S do Senna', 2], ['Descida do Lago', 6], ['Bico de Pato', 10], ['Junção', 14], ['Ferradura', 4]],
   },
+  // Hungaroring: footbridges over the back straight (up to Turn 4) and the run down to Turn 12
+  hungaroring: {
+    bridges: [1990, 3790],
+    cameras: ['Turn 1', 'Turn 2', 'Turn 4', 'Turn 5', 'Turn 6', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 14'],
+    billboards: [['Turn 1', 2], ['Turn 2', 6], ['Turn 5', 10], ['Turn 12', 14], ['Turn 14', 4]],
+  },
   // Montréal: the footbridges over the Casino straight and the back leg of the island
+  // Albert Park: footbridges over the run to Turn 3 and the back straight along the lake
+  melbourne: {
+    bridges: [1520, 3560],
+    cameras: ['Jones', 'Brabham', 'Sports Centre', 'Marina', 'Lauda', 'Turn 9', 'Ascari', 'Stewart', 'Prost'],
+    billboards: [['Jones', 3], ['Sports Centre', 7], ['Ascari', 11], ['Turn 9', 1], ['Marina', 9]],
+  },
   montreal: {
     bridges: [3760, 2380],
     cameras: ['Turn 1', 'Virage Senna', 'Turn 3', 'Turn 6', 'Turn 8', "L'Épingle", 'Turn 13'],
     billboards: [['Turn 1', 3], ["L'Épingle", 7], ['Turn 13', 11], ['Turn 8', 1], ['Turn 3', 9]],
   },
+  // Yas Marina: footbridges over the back straight and the run down to the marina
+  yasmarina: {
+    bridges: [2450, 3700],
+    cameras: ['Turn 1', 'Turn 5', 'Turn 7', 'Turn 8', 'Turn 11', 'Turn 14', 'Turn 17', 'Turn 20'],
+    billboards: [['Turn 1', 2], ['Turn 7', 6], ['Turn 8', 10], ['Turn 11', 14], ['Turn 20', 4]],
+  },
+  // Mexico City: footbridges over the straight to Turn 4 and the back straight to Turn 12
+  mexico: {
+    bridges: [2080, 3840],
+    cameras: ['Turn 1', 'Turn 4', 'Turn 6', 'Turn 7', 'Turn 10', 'Turn 12', 'Turn 13', 'Peraltada'],
+    billboards: [['Turn 1', 2], ['Turn 4', 6], ['Turn 6', 10], ['Turn 12', 14], ['Turn 7', 4]],
+  },
 };
 
 export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
-  const out: StructuresOut = { panels: [] };
+  const out: StructuresOut = { panels: [], marshals: [], photographers: [] };
   const vp = VENUE_PROPS[ctx.track.def.id] ?? { bridges: [], cameras: [], billboards: [] };
   buildGantry(ctx, atlas);
   // sponsor footbridges
   vp.bridges.forEach((s, k) => buildBridge(ctx, atlas, s, k));
   buildMarshalPosts(ctx, atlas, out);
+  placePhotographers(ctx, out);
   buildCameras(ctx, vp.cameras);
   buildBoards(ctx, atlas);
   buildBillboards(ctx, atlas, vp.billboards);
@@ -289,47 +336,32 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
 
 // ------------------------------------------------------------------ marshals
 
-const ORANGE = 0xe8561a;
-const SKIN = [0xc58d6b, 0xa8744f, 0xe0b090, 0x7a5236];
-
-/** a standing marshal in orange overalls; `f` origin at the feet, facing local −z → rotated by yaw */
-function marshal(b: GeoBuilder, base: Frame3, x: number, z: number, yaw: number, rng: Rng) {
-  G.copy(base);
-  G.o.copy(base.p(x, 0, z, A));
-  G.yaw(yaw);
-  const s = rng.range(0.92, 1.06);
-  const armUp = rng.next() < 0.25;
-  // boots, legs
-  b.color(0x151515).mat(0.7, 0, 0);
-  for (const lx of [-0.1, 0.1]) box(b, G, lx * s, 0.05 * s, 0.03, 0.13 * s, 0.1 * s, 0.26 * s);
-  b.color(ORANGE).mat(0.78, 0, 0);
-  for (const lx of [-0.1, 0.1]) box(b, G, lx * s, 0.5 * s, 0, 0.15 * s, 0.82 * s, 0.17 * s, 0b110111);
-  // torso with reflective bands
-  box(b, G, 0, 1.2 * s, 0, 0.44 * s, 0.62 * s, 0.26 * s, 0b111111);
-  b.color(0xd8d8d0).mat(0.3, 0.2, 0.05);
-  box(b, G, 0, 1.08 * s, 0, 0.45 * s, 0.05 * s, 0.27 * s, 0b110011);
-  box(b, G, 0, 0.62 * s, 0, 0.36 * s, 0.05 * s, 0.19 * s, 0b110011);
-  // arms
-  b.color(ORANGE).mat(0.78, 0, 0);
-  box(b, G, -0.28 * s, 1.18 * s, 0, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
-  if (armUp) {
-    box(b, G, 0.28 * s, 1.55 * s, -0.05, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
-  } else {
-    box(b, G, 0.28 * s, 1.18 * s, 0, 0.11 * s, 0.58 * s, 0.13 * s, 0b111111);
-  }
-  // head + cap
-  b.color(SKIN[rng.int(SKIN.length)]).mat(0.7, 0, 0);
-  box(b, G, 0, 1.62 * s, 0, 0.19 * s, 0.22 * s, 0.21 * s, 0b111111);
-  b.color(rng.next() < 0.5 ? ORANGE : 0xf2f2f2).mat(0.6, 0, 0);
-  box(b, G, 0, 1.76 * s, -0.03, 0.21 * s, 0.07 * s, 0.26 * s, 0b111111);
-  // a furled flag in some hands
-  if (!armUp && rng.next() < 0.5) {
-    b.color(0x3a3a3a).mat(0.5, 0.3, 0);
-    G.p(0.3 * s, 0.9 * s, -0.08, A);
-    G.p(0.3 * s, 1.75 * s, -0.12, B);
-    beam(b, A, B, 0.025, 0.025);
-    b.color(rng.next() < 0.5 ? 0xf2d000 : 0x1f5fd0).mat(0.8, 0, 0);
-    box(b, G, 0.3 * s, 1.5 * s, -0.12, 0.07, 0.42 * s, 0.07, 0b111111);
+/** photographers: two or three behind the fence on the outside of the tightest corners, shooting the cars coming at them */
+function placePhotographers(ctx: Ctx, out: StructuresOut) {
+  const t = ctx.track;
+  const rng = new Rng(2718);
+  const corners = [...t.corners].filter((c) => c.radius < 160).sort((a, b) => a.radius - b.radius).slice(0, 8);
+  for (const c of corners) {
+    const side = (c.dir > 0 ? 1 : -1) as 1 | -1;
+    const P = ctx.side(side);
+    const n = 2 + (rng.next() < 0.5 ? 1 : 0);
+    for (let k = 0; k < n; k++) {
+      const s = Math.round(c.sApex + 12 + k * rng.range(5, 9));
+      if (t.inPit(s) || out.marshals.some((m) => Math.abs(t.delta(m.s, s)) < 12)) continue;
+      const i = ctx.wrap(s);
+      const lat = side * (P.bar[i] + P.backOff[i] + 1.3 + rng.range(0, 0.6));
+      // a little steel stand, to shoot over the boards and the fence
+      const H = 1.3;
+      const props = ctx.cs.get(s, 'props');
+      frameAt(ctx, s, lat);
+      props.color(0x6c7076).mat(0.5, 0.5, 0);
+      box(props, F, 0, H / 2 - 0.9, 0, 1.2, H + 1.8, 1.2, 0b111111);
+      props.color(0x3a3d42).mat(0.5, 0.6, 0);
+      box(props, F, -side * 0.55, H + 0.5, 0, 0.05, 1.0, 1.2, 0b111111);
+      const pos = t.point(s, lat, H, new THREE.Vector3());
+      const to = t.point(s - rng.range(35, 70), 0, 0, new THREE.Vector3()).sub(pos);
+      out.photographers.push({ pos, yaw: Math.atan2(to.x, to.z) });
+    }
   }
 }
 
@@ -377,8 +409,10 @@ function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
     for (let m = 0; m < count; m++) {
       const mx = m === 0 ? X(0.95) : X(0.1 + rng.next() * 0.5);
       const mz = m === 0 ? rng.range(-0.8, 0.8) : rng.range(-1.2, 1.2);
-      // face the track (local −x·side … rotate so −z points toward the track)
-      marshal(props, F, mx, mz, (side > 0 ? -Math.PI / 2 : Math.PI / 2) + rng.range(-0.6, 0.6), rng);
+      // facing the track, give or take
+      const pos = F.p(mx, 0.15, mz, new THREE.Vector3());
+      const to = t.point(s + (m === 0 ? -25 : rng.range(-30, 30)), 0, 0, new THREE.Vector3()).sub(pos);
+      out.marshals.push({ pos, yaw: Math.atan2(to.x, to.z) + (m === 0 ? 0 : rng.range(-0.4, 0.4)), post: out.panels.length, s, side, lead: m === 0 });
     }
 
     // LED flag panel on a pole at the barrier, facing oncoming cars

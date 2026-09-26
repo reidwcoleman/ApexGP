@@ -116,6 +116,8 @@ export interface MenuCallbacks {
   tourNav?(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }): boolean;
   /** watch a simulated race (every car on AI, broadcast cameras) */
   onSpectate?(setup: RaceSetup): void;
+  /** the session at a glance for the pause screen (circuit, session kind, a few numbers) */
+  pauseInfo?(): { title: string; kind: string; stats: [string, string][] } | null;
 }
 
 export type HubTab = 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
@@ -140,6 +142,11 @@ export const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: 
   zandvoort: { country: 'Netherlands', km: '4.259', turns: 14, line: 'Tarzan, the dunes and the banked Hugenholtz' },
   austin: { country: 'United States', km: '5.513', turns: 20, line: 'The climb to Turn 1, the esses and the Tower' },
   montreal: { country: 'Canada', km: '4.361', turns: 14, line: 'The Senna S, the hairpin and the Wall of Champions' },
+  melbourne: { country: 'Australia', km: '5.278', turns: 14, line: 'Around the lake in Albert Park, the city skyline beyond' },
+  sakhir: { country: 'Bahrain', km: '5.412', turns: 15, line: 'Floodlights over the desert, three heavy stops' },
+  yasmarina: { country: 'Abu Dhabi', km: '5.554', turns: 21, line: 'Twilight at the marina, under the Yas hotel' },
+  mexico: { country: 'Mexico', km: '4.304', turns: 17, line: 'Thin air, the long run to Turn 1 and the Foro Sol' },
+  hungaroring: { country: 'Hungary', km: '4.381', turns: 14, line: 'Twisting through the hills outside Budapest' },
 };
 
 const fmtCr = (n: number) => '₵\u2009' + Math.round(n).toLocaleString('en-US');
@@ -304,7 +311,7 @@ export class Menu {
       'div',
       'hub-id',
       s,
-      `<div class="num">${d.number}</div><div class="who"><div class="name">${d.first} <b>${d.last}</b></div><div class="sub">${team.name} · ${c.races ? `${c.races} race${c.races === 1 ? '' : 's'} · ${c.points} pts` : 'Rookie season'}</div></div>`,
+      `<div class="num">${d.number}</div><div class="who"><div class="name">${d.first} <b>${d.last}</b></div><div class="sub"><span>${team.name}</span><span>${c.races ? `${c.races} race${c.races === 1 ? '' : 's'}</span><span>${c.points} pts` : 'Rookie season'}</span></div></div>`,
     );
     this.hubCredits = el('div', 'hub-credits', s);
     this.renderCredits();
@@ -324,7 +331,7 @@ export class Menu {
       return e;
     });
     this.hubPanel = el('div', 'hub-panel', s);
-    el('div', 'keys hub-keys', s, '<kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> select · <kbd>←</kbd> <kbd>→</kbd> change · <kbd>Esc</kbd> back · gamepad supported');
+    el('div', 'keys hub-keys', s, '<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span><span>Gamepad ready</span>');
     this.setTab(this.hubTab);
   }
 
@@ -386,14 +393,17 @@ export class Menu {
       const here = cd.id === this.setup.track;
       const best = this.career.data.best[cd.id];
       const card = el('div', 'ccard' + (open ? '' : ' locked') + (here ? ' here' : ''), p);
-      const path = cd.centerline ? circuitPath(cd.centerline.points, 96, 64) : '';
+      const path = cd.centerline ? circuitPath(cd.centerline.points, 64, 44, 3) : '';
       const prev = CIRCUITS[i - 1];
+      // right-hand status: where you are, your best here, or what unlocks it
       const status = !open
-        ? `<span class="lock"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="7" width="10" height="7" rx="1.6" fill="currentColor"/></svg>Top ${UNLOCK_POS} at ${prev?.short ?? ''} unlocks</span>`
-        : best !== undefined
-          ? `<span class="best">Best <b>P${best}</b></span>`
-          : `<span class="best dim">Not raced</span>`;
-      card.innerHTML = `<svg class="map" viewBox="0 0 96 64"><path d="${path}"/></svg><div class="cinfo"><div class="round">Round ${i + 1} · ${info.country}${here ? ' · <b>Selected</b>' : ''}</div><div class="cname">${cd.name}</div><div class="cmeta">${info.km} km · ${info.turns} turns</div>${status}</div>`;
+        ? `<span class="lock"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="7" width="10" height="7" rx="1.6" fill="currentColor"/></svg>Top ${UNLOCK_POS} at ${prev?.short ?? ''}</span>`
+        : here
+          ? `<span class="here-tag">In the garage</span>`
+          : best !== undefined
+            ? `<span class="best"><em>Best</em><b>P${best}</b></span>`
+            : '';
+      card.innerHTML = `<span class="rnd">${String(i + 1).padStart(2, '0')}</span><svg class="map" viewBox="0 0 64 44"><path d="${path}"/></svg><div class="cinfo"><div class="cname">${cd.name}</div><div class="cmeta"><span>${info.country}</span><span>${info.km} km</span><span>${info.turns} turns</span></div></div><div class="cstat">${status}${here && best !== undefined ? `<span class="best"><em>Best</em><b>P${best}</b></span>` : ''}</div>`;
       this.action(card, () => {
         if (here) {
           this.mode = 'race';
@@ -422,8 +432,10 @@ export class Menu {
       this.action(watch, () => this.cb.onSpectate?.({ ...this.setup }));
     }
     el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Finish in the top ${UNLOCK_POS} to unlock the next round. Points pay credits for car development.`);
-    // start on the Race button
+    // start on the Race button, with the circuit you're at scrolled into view (14+ rounds overflow)
     this.sel = CIRCUITS.length;
+    const here = p.querySelector<HTMLElement>('.ccard.here');
+    if (here) requestAnimationFrame(() => this.reveal(here, 'center', 'auto'));
   }
 
   private tabCareer(p: HTMLElement) {
@@ -738,6 +750,7 @@ export class Menu {
     el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
     el('p', 'lede', p, this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.');
     const st = this.setup;
+    el('div', 'pcap', p, 'Driver');
     this.opt(p, 'Team', () => {
       const t = TEAMS[st.team];
       return `<span class="swatch" style="background:${t.primary}"></span>${t.name}`;
@@ -750,6 +763,7 @@ export class Menu {
     }, () => {
       st.seat = st.seat === 0 ? 1 : 0;
     });
+    el('div', 'pcap', p, this.mode === 'race' ? 'Race' : 'Session');
     if (this.mode === 'race') {
       this.opt(p, 'Laps', () => String(st.laps), (d) => {
         const i = LAPS.indexOf(st.laps);
@@ -792,6 +806,7 @@ export class Menu {
         const i = Math.max(0, open.findIndex((c) => c.id === st.track));
         st.track = open[(i + d + open.length) % open.length].id;
       });
+    el('div', 'pcap', p, 'Conditions');
     this.opt(p, 'Weather', () => (st.weather === 'random' || st.weather === 'changeable' ? `${weatherLabel(st.weather)} <span class="dim">· ${this.cb.forecast().weather}</span>` : weatherLabel(st.weather)), (d) => {
       const i = WEATHERS.indexOf(st.weather);
       st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
@@ -800,6 +815,7 @@ export class Menu {
       const i = TIMES.indexOf(st.time);
       st.time = TIMES[(i + d + TIMES.length) % TIMES.length];
     });
+    el('div', 'pcap', p, 'Driving');
     this.opt(
       p,
       'Assists',
@@ -915,8 +931,11 @@ export class Menu {
     const s = this.screens.get('pause')!;
     s.innerHTML = '';
     el('div', 'pause-bg', s);
-    const w = el('div', 'title-wrap', s);
+    const w = el('div', 'title-wrap pause-wrap', s);
+    const info = this.cb.pauseInfo?.() ?? null;
+    if (info) el('div', 'pause-cap', w, `<span>${info.kind}</span><span>${info.title}</span>`);
     el('div', 'logo', w, 'Paused');
+    if (info?.stats.length) el('div', 'pause-stats', w, info.stats.map(([k, v]) => `<div><b>${v}</b><span>${k}</span></div>`).join(''));
     const list = el('div', 'mlist', w);
     const add = (label: string, fn: () => void) => {
       const e = el('div', 'mitem', list, label);
@@ -930,6 +949,7 @@ export class Menu {
       this.show('settings');
     });
     add('Quit to garage', () => this.cb.onQuit());
+    el('div', 'keys', w, '<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>Esc</kbd> resume</span>');
   }
 
   /** qualifying classification → grid; primary action starts the race */
@@ -1052,6 +1072,32 @@ export class Menu {
     this.items.push({ el: row, kind: 'option', change: doChange, select: onSelect ?? (() => doChange(1)) });
   }
 
+  /**
+   * Keep a keyboard / gamepad selection in view inside its scrolling panel (the calendar, a long
+   * set-up): clear of the sticky actions at the bottom of the hub panel. Mouse hover never scrolls.
+   */
+  private reveal(e: HTMLElement | undefined, block: 'nearest' | 'center' = 'nearest', behavior: ScrollBehavior = 'smooth') {
+    if (!e) return;
+    const box = e.closest<HTMLElement>('.hub-panel, .panel');
+    if (!box || box.scrollHeight <= box.clientHeight + 1) return;
+    // (the sticky actions scroll with the panel: an item inside them is always in view)
+    const foot = box.querySelector<HTMLElement>(':scope > .hp-actions');
+    if (foot?.contains(e)) return;
+    const b = box.getBoundingClientRect();
+    const r = e.getBoundingClientRect();
+    // (rects are screen px; scrollTop is in the zoomed layout's px)
+    const k = b.height / Math.max(1, box.offsetHeight) || 1;
+    const pad = 16 * k;
+    const top = b.top + pad;
+    const bottom = b.bottom - (foot ? foot.getBoundingClientRect().height : 0) - pad;
+    let dy = 0;
+    if (block === 'center') dy = r.top + r.height / 2 - (top + bottom) / 2;
+    else if (r.top < top) dy = r.top - top;
+    else if (r.bottom > bottom) dy = r.bottom - bottom;
+    if (Math.abs(dy) < 1) return;
+    box.scrollTo({ top: box.scrollTop + dy / k, behavior });
+  }
+
   private highlight() {
     const hub = this.screen === 'title';
     if (hub) {
@@ -1095,6 +1141,7 @@ export class Menu {
       const n = this.items.length;
       this.sel = (this.sel + (nav.down ? 1 : -1) + n) % n;
       this.highlight();
+      this.reveal(this.items[this.sel]?.el);
       this.cb.onUi('move');
     }
     const it = this.items[this.sel];
@@ -1124,6 +1171,7 @@ export class Menu {
       const n = this.items.length;
       this.sel = (this.sel + (nav.down ? 1 : -1) + n) % n;
       this.highlight();
+      this.reveal(this.items[this.sel]?.el);
       this.cb.onUi('move');
     }
     const it = this.items[this.sel];

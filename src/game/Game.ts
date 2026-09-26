@@ -51,6 +51,7 @@ import { Highlights } from '../career/Highlights.ts';
 import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
+import { uiScale } from '../ui/scale.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import type { SetupPart } from '../career/Career.ts';
@@ -222,6 +223,21 @@ export class Game {
       onCarChange: () => this.refreshPlayerRig(),
       onTravel: (id) => void this.travel(id),
       onSpectate: () => this.openSimSetup(),
+      // (UI only) the session at a glance on the pause screen
+      pauseInfo: () => {
+        const r = this.race;
+        const p = r.player;
+        const laps = r.opts.laps;
+        const stats: [string, string][] = this.spectating
+          ? [['Lap', `${Math.max(1, Math.min(laps, r.leaderLaps + 1))}/${laps}`], ['Weather', WEATHER_LABEL[r.weatherState.kind]]]
+          : [
+              ['Position', r.isTimeTrial ? 'TT' : `P${p.position}`],
+              ['Lap', r.isTimeTrial ? String(Math.max(1, p.laps + 1)) : `${Math.max(1, Math.min(laps, p.laps + 1))}/${laps}`],
+              ['Best lap', fmtTime(p.bestLap)],
+              ['Weather', WEATHER_LABEL[r.weatherState.kind]],
+            ];
+        return { title: this.track.def.name, kind: this.spectating ? 'Simulated race' : r.isTimeTrial ? 'Time trial' : this.quali ? 'Qualifying' : 'Race', stats };
+      },
     }, this.career);
     this.simSetup = new SimSetup(this.menu.root, {
       onStart: (cfg) => void this.startSimulation(cfg),
@@ -1073,7 +1089,9 @@ export class Game {
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results') this.replay.record(dt, race);
     if (this.state === 'race' && race.phase === 'racing' && !race.player.finished && !race.player.retired) this.flash.record(dt, race);
 
-    this.trackside.startLights.set(race.phase === 'lights' ? race.lightsLit : 0);
+    // the gantry is lit only while a live countdown runs (never over a replay, the results or the menu)
+    const liveCountdown = (this.state === 'race' || this.state === 'intro' || this.state === 'spectate') && race.phase === 'lights';
+    this.trackside.startLights.set(liveCountdown ? race.lightsLit : 0);
     const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && this.cams.mode !== 'heli' && !race.player.finished;
     this.line.mesh.visible = showLine;
     // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
@@ -2426,7 +2444,7 @@ export class Game {
       spots: this.garage?.spots ?? null,
       camera: this.camera,
       overviewMarkers: this.hubTab !== 'setup',
-      panelLeft: this.tour.at ? innerWidth : innerWidth - 500,
+      panelLeft: this.tour.at ? innerWidth : innerWidth - 500 * uiScale(),
       flying: !!this.tour.flight,
     });
     const show = onHub && this.hubTab === 'setup' && !this.tour.at;
@@ -2439,9 +2457,10 @@ export class Game {
       if (!P) continue;
       v.copy(P).project(this.camera);
       const sx = ((v.x + 1) / 2) * innerWidth;
-      // not under the tab rail or the panel
-      const vis = v.z < 1 && Math.abs(v.y) < 0.9 && sx > 280 && sx < innerWidth - 500;
-      h.style.transform = `translate3d(${Math.round(sx * 2) / 2}px, ${Math.round(((1 - v.y) / 2) * innerHeight * 2) / 2}px, 0)`;
+      // not under the tab rail or the panel (both scale with the UI zoom; the layer is zoomed too)
+      const k = uiScale();
+      const vis = v.z < 1 && Math.abs(v.y) < 0.9 && sx > 280 * k && sx < innerWidth - 500 * k;
+      h.style.transform = `translate3d(${Math.round((sx / k) * 2) / 2}px, ${Math.round((((1 - v.y) / 2) * innerHeight * 2) / k) / 2}px, 0)`;
       h.classList.toggle('hidden', !vis);
       h.classList.toggle('sel', id === this.focusPart);
       // the part's current setting on its tag

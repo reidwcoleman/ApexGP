@@ -6,6 +6,17 @@
   -webkit-font-smoothing: antialiased;
   user-select: none;
   pointer-events: none;
+  /* laid out at 1600 × 900 and scaled with the window, like the HUD (src/ui/scale.ts) */
+  zoom: var(--ui);
+}
+/* the other overlays around the menus scale the same way (their JS positions divide by the zoom) */
+.tour-markers,
+.hotspots,
+.tour-bar,
+.tour-pill,
+#loading .lwrap,
+.travel-veil > div {
+  zoom: var(--ui);
 }
 #menu .screen {
   position: absolute;
@@ -31,12 +42,12 @@
 /* ---------- title ---------- */
 .title-wrap {
   position: absolute;
-  left: clamp(24px, 6vw, 96px);
-  bottom: clamp(32px, 9vh, 110px);
-  width: min(520px, 80vw);
+  left: clamp(24px, calc(6 * var(--vw)), 96px);
+  bottom: clamp(32px, calc(9 * var(--vh)), 110px);
+  width: min(520px, calc(80 * var(--vw)));
 }
 .logo {
-  font-size: clamp(56px, 8vw, 104px);
+  font-size: clamp(56px, calc(8 * var(--vw)), 104px);
   font-weight: 900;
   font-style: italic;
   line-height: 0.86;
@@ -112,15 +123,39 @@
   border-radius: 4px;
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
+/* key hints as groups spaced apart (no "·" chains) */
+.keys > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  margin-right: var(--s4);
+}
+.keys > span kbd + kbd {
+  margin-left: 2px;
+}
 
 /* ---------- setup / settings panels ---------- */
 .panel {
   position: absolute;
-  left: clamp(24px, 5vw, 80px);
+  left: clamp(24px, calc(5 * var(--vw)), 80px);
   top: 50%;
   transform: translateY(-50%);
-  width: min(460px, 88vw);
+  width: min(460px, calc(88 * var(--vw)));
+  max-height: calc(calc(100 * var(--vh)) - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  scrollbar-width: none;
   padding: var(--s5);
+  animation: panel-rise 0.5s var(--ease-out);
+}
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translate(-12px, -50%);
+  }
+}
+.panel .cta {
+  margin-top: var(--s4);
 }
 .panel h2 {
   margin: 0 0 var(--s1);
@@ -129,28 +164,52 @@
   letter-spacing: -0.02em;
 }
 .panel .lede {
-  margin: 0 0 var(--s5);
+  margin: 0 0 var(--s3);
   font-size: var(--t-row);
   color: var(--ink2);
   font-weight: 600;
 }
 .opt {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  height: 52px;
-  padding: 0 var(--s3);
+  height: 44px;
+  padding: 0 var(--s2) 0 var(--s3);
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.2s;
 }
+.opt:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
 .opt.sel {
   background: var(--well);
+}
+/* the focused row: a bar grows at its left edge (the rail's motif) */
+.opt::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+  transition: height 0.3s var(--spring);
+}
+.opt.sel::before {
+  height: 20px;
 }
 .opt .k {
   font-size: var(--t-row);
   color: var(--ink2);
   font-weight: 600;
+  transition: color 0.2s;
+}
+.opt.sel .k {
+  color: var(--ink);
 }
 .opt .v {
   display: flex;
@@ -159,14 +218,40 @@
   font-size: var(--t-row);
   font-weight: 700;
 }
+/* ‹ › are real steppers: quiet at rest, round buttons on the focused row */
 .opt .v .chev {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   color: var(--ink3);
   font-weight: 600;
-  padding: 0 4px;
+  line-height: 1;
   cursor: pointer;
+  transition: background 0.2s, color 0.2s, transform 0.25s var(--spring);
 }
 .opt.sel .v .chev {
   color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+}
+.opt .v .chev:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.opt .v .chev:active {
+  transform: scale(0.88);
+}
+/* section captions inside a settings panel */
+.panel .lede + .pcap {
+  margin-top: 0;
+}
+.panel .pcap {
+  margin: var(--s3) 0 0 var(--s3);
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
 }
 .tyredot {
   width: 12px;
@@ -212,8 +297,8 @@
 /* driver card, bottom-right in setup */
 .drivercard {
   position: absolute;
-  right: clamp(24px, 5vw, 80px);
-  bottom: clamp(24px, 6vh, 72px);
+  right: clamp(24px, calc(5 * var(--vw)), 80px);
+  bottom: clamp(24px, calc(6 * var(--vh)), 72px);
   text-align: right;
 }
 .drivercard .num {
@@ -243,9 +328,61 @@
 .pause-bg {
   position: absolute;
   inset: 0;
-  background: rgba(6, 7, 10, 0.55);
+  background: linear-gradient(90deg, rgba(6, 7, 10, 0.82) 0%, rgba(6, 7, 10, 0.55) 45%, rgba(6, 7, 10, 0.4) 100%);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
+}
+/* the session at a glance: what and where, then four numbers, then the list */
+.pause-wrap {
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+}
+.screen.on .pause-wrap > * {
+  animation: row-in 0.5s var(--ease-out) both;
+}
+.screen.on .pause-wrap > :nth-child(2) { animation-delay: 0.04s; }
+.screen.on .pause-wrap > :nth-child(3) { animation-delay: 0.08s; }
+.screen.on .pause-wrap > :nth-child(n + 4) { animation-delay: 0.12s; }
+.pause-cap {
+  display: flex;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+.pause-cap span:first-child {
+  color: var(--accent);
+}
+.pause-stats {
+  display: flex;
+  gap: var(--s6);
+  margin-top: var(--s5);
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.pause-stats b {
+  display: block;
+  font-size: var(--t-time);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pause-stats span {
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+}
+.pause-wrap .mlist {
+  margin-top: var(--s5);
+}
+.pause-wrap .keys {
+  margin-top: var(--s5);
 }
 
 /* ---------- results ---------- */
@@ -254,8 +391,8 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(880px, 94vw);
-  max-height: 96vh;
+  width: min(880px, calc(94 * var(--vw)));
+  max-height: calc(96 * var(--vh));
   padding: var(--s4) var(--s5);
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -281,11 +418,11 @@
   grid-template-columns: 40px 4px 1.4fr 1fr 110px 96px 44px;
   gap: 0 var(--s3);
   align-items: center;
-  height: 28px;
+  height: 26px;
   padding: 0 var(--s3);
   font-size: var(--t-row);
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: 6px;
   opacity: 0;
   transform: translateY(6px);
   animation: rin 0.4s var(--ease-out) forwards;
@@ -294,6 +431,25 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+/* zebra by tone, not lines; the podium places carry a thin marker on the position */
+.rtable .rrow:nth-child(odd):not(.me):not(.head) {
+  background: rgba(255, 255, 255, 0.025);
+}
+.rtable .rrow:nth-child(2):not(.me) .p,
+.rtable .rrow:nth-child(3):not(.me) .p,
+.rtable .rrow:nth-child(4):not(.me) .p {
+  color: var(--ink);
+  font-weight: 700;
+}
+.results {
+  animation: results-in 0.55s var(--ease-out);
+}
+@keyframes results-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 16px));
   }
 }
 .rrow.head {
@@ -368,6 +524,7 @@
   transform: translateY(-8px);
   transition: opacity 0.35s, transform 0.45s var(--spring);
   pointer-events: none;
+  zoom: var(--ui);
 }
 .replay-badge.on {
   opacity: 1;
@@ -430,7 +587,7 @@
   pointer-events: none;
 }
 #loading .lwrap {
-  width: min(420px, 80vw);
+  width: min(420px, calc(80 * var(--vw)));
 }
 #loading .logo {
   font-size: 64px;
@@ -441,6 +598,25 @@
   background: var(--well);
   border-radius: 2px;
   overflow: hidden;
+}
+#loading .lwrap {
+  animation: row-in 0.8s var(--ease-out) both;
+}
+/* the bar keeps a shimmer running on the compositor while a build step blocks the main thread */
+#loading .lbar {
+  position: relative;
+}
+#loading .lbar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: translateX(-100%);
+  animation: tv-shimmer 1.3s var(--ease-out) infinite;
+}
+#loading.done .lbar::after {
+  animation: none;
 }
 #loading .lbar b {
   display: block;
@@ -500,7 +676,7 @@
   inset: 0;
   background:
     linear-gradient(270deg, rgba(6, 7, 10, 0.72) 0%, rgba(6, 7, 10, 0.3) 30%, rgba(6, 7, 10, 0) 48%),
-    linear-gradient(90deg, rgba(6, 7, 10, 0.78) 0%, rgba(6, 7, 10, 0.45) 16%, rgba(6, 7, 10, 0) 32%),
+    linear-gradient(90deg, rgba(6, 7, 10, 0.84) 0%, rgba(6, 7, 10, 0.55) 17%, rgba(6, 7, 10, 0) 34%),
     linear-gradient(180deg, rgba(6, 7, 10, 0.6) 0%, rgba(6, 7, 10, 0) 18%, rgba(6, 7, 10, 0) 80%, rgba(6, 7, 10, 0.55) 100%);
   pointer-events: none;
 }
@@ -534,10 +710,15 @@
   letter-spacing: 0.01em;
 }
 .hub-id .sub {
+  display: flex;
+  gap: var(--s3);
   margin-top: var(--s1);
   font-size: var(--t-row);
   font-weight: 600;
   color: var(--ink2);
+}
+.hub-id .sub span + span {
+  color: var(--ink3);
 }
 
 /* credits, top-right */
@@ -634,8 +815,8 @@
   position: absolute;
   right: var(--s6);
   top: 96px;
-  max-height: calc(100vh - 168px);
-  width: min(440px, 44vw);
+  max-height: calc(calc(100 * var(--vh)) - 168px);
+  width: min(440px, calc(44 * var(--vw)));
   padding: var(--s5);
   overflow-y: auto;
   scrollbar-width: none;
@@ -651,6 +832,26 @@
     opacity: 0;
     transform: translateX(12px);
   }
+}
+/* the panel's rows follow it in, one beat apart */
+.hub-panel.in > * {
+  animation: row-in 0.5s var(--ease-out) both;
+}
+.hub-panel.in > :nth-child(2) { animation-delay: 0.03s; }
+.hub-panel.in > :nth-child(3) { animation-delay: 0.06s; }
+.hub-panel.in > :nth-child(4) { animation-delay: 0.09s; }
+.hub-panel.in > :nth-child(5) { animation-delay: 0.12s; }
+.hub-panel.in > :nth-child(6) { animation-delay: 0.15s; }
+.hub-panel.in > :nth-child(7) { animation-delay: 0.18s; }
+.hub-panel.in > :nth-child(n + 8) { animation-delay: 0.21s; }
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hub-panel.in > * { animation: none; }
 }
 .hub-panel .hp-cap {
   margin-top: var(--s2);
@@ -697,74 +898,110 @@
   opacity: 0.4;
 }
 
-/* circuit cards */
+/* the calendar: one dense row per round (no cards in the card): round number, map, name,
+   the facts, and a right-aligned status. Tone marks the row you're on, a ring the focus. */
 .ccard {
   display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: var(--s4);
+  grid-template-columns: 22px 64px 1fr auto;
+  gap: var(--s3);
   align-items: center;
-  padding: var(--s3);
+  min-height: 44px;
+  padding: var(--s2) var(--s3) var(--s2) var(--s2);
   border-radius: 10px;
-  background: var(--well);
   box-shadow: inset 0 0 0 1px transparent;
   cursor: pointer;
   transition: box-shadow 0.2s, background 0.2s, transform 0.3s var(--spring);
+}
+.ccard + .ccard {
+  margin-top: calc(-1 * var(--s2));
+}
+.ccard:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 .ccard.sel {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
 }
 .ccard.here {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--well);
+}
+.ccard .rnd {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  color: var(--ink3);
+  text-align: right;
+}
+.ccard.here .rnd {
+  color: var(--accent);
 }
 .ccard .map {
-  width: 96px;
-  height: 64px;
+  width: 64px;
+  height: 44px;
 }
 .ccard .map path {
   fill: none;
   stroke: var(--ink2);
-  stroke-width: 2.4;
+  stroke-width: 2;
   stroke-linejoin: round;
 }
 .ccard.here .map path {
   stroke: var(--accent);
 }
-.ccard .round {
-  font-size: var(--t-cap);
-  font-weight: 600;
-  color: var(--ink3);
-  letter-spacing: 0.04em;
-}
-.ccard .round b {
-  color: var(--ink2);
-  font-weight: 700;
-}
 .ccard .cname {
-  margin-top: 2px;
   font-size: var(--t-row);
   font-weight: 700;
   line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ccard .cinfo {
+  min-width: 0;
 }
 .ccard .cmeta {
+  display: flex;
+  gap: var(--s3);
+  margin-top: 2px;
   font-size: var(--t-cap);
   font-weight: 600;
   color: var(--ink2);
+  white-space: nowrap;
+}
+.ccard .cmeta span + span {
+  color: var(--ink3);
+}
+.ccard .cstat {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
 }
 .ccard .best,
-.ccard .lock {
+.ccard .lock,
+.ccard .here-tag {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--s1);
-  margin-top: var(--s2);
   font-size: var(--t-cap);
   font-weight: 600;
   color: var(--ink2);
+  white-space: nowrap;
+}
+.ccard .lock {
+  align-items: center;
+}
+.ccard .best em {
+  font-style: normal;
+  color: var(--ink3);
 }
 .ccard .best b {
+  font-size: var(--t-row);
   color: var(--ink);
 }
-.ccard .best.dim {
-  color: var(--ink3);
+.ccard .here-tag {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
 }
 .ccard.locked {
   cursor: not-allowed;
@@ -1130,7 +1367,7 @@
    below it; the shimmer runs on the compositor so it keeps moving while a build step blocks JS */
 .travel-veil .tv-bar {
   position: relative;
-  width: min(360px, 70vw);
+  width: min(360px, calc(70 * var(--vw)));
   height: 3px;
   margin: var(--s5) auto 0;
   background: var(--well);
@@ -1173,7 +1410,8 @@
   }
 }
 
-@media (max-width: 820px) {
+/* narrow layout: 820 layout px, i.e. 574 screen px at the 0.7 UI zoom floor (src/ui/scale.ts) */
+@media (max-width: 574px) {
   .hub-rail {
     top: auto;
     bottom: 56px;
@@ -1194,7 +1432,7 @@
     left: var(--s4);
     right: var(--s4);
     width: auto;
-    top: 45vh;
+    top: calc(45 * var(--vh));
     bottom: 120px;
   }
   .hub-id,
@@ -1889,7 +2127,7 @@
 /* the way in, from the overview */
 .tour-pill {
   position: absolute;
-  left: calc((100vw - 500px) / 2);
+  left: calc((calc(100 * var(--vw)) - 500px) / 2);
   bottom: 64px;
   display: flex;
   align-items: center;
@@ -1922,7 +2160,8 @@
   opacity: 0;
   pointer-events: none;
 }
-@media (max-width: 820px) {
+/* narrow layout: 820 layout px, i.e. 574 screen px at the 0.7 UI zoom floor (src/ui/scale.ts) */
+@media (max-width: 574px) {
   .tour-pill {
     left: 50%;
     bottom: auto;
@@ -1937,4 +2176,15 @@
   .tour-bar {
     transition: opacity 0.2s;
   }
+}
+
+/* keyboard focus on the real buttons (tour, markers): a clear white ring, never on mouse clicks */
+.wp:focus-visible,
+.tour-pill:focus-visible,
+.tour-back:focus-visible,
+.tour-step:focus-visible,
+.tour-chips button:focus-visible,
+.hotspot:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }

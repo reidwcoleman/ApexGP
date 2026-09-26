@@ -8,6 +8,7 @@ import { buildTrackside } from '../world/TrackMesh.ts';
 import { Weather, planWeather, type TimeOfDay, type WeatherKind } from '../world/Weather.ts';
 import { applyWeatherUniforms } from '../world/weatherUniforms.ts';
 import { buildWater, seaPolygon } from '../world/env/water.ts';
+import { TERRAIN_PALETTES } from '../world/env/terrain.ts';
 
 /**
  * Landscape / lighting dev page: a circuit with its trackside and full scenery,
@@ -26,10 +27,12 @@ const track = new Track(def);
 const weather = new Weather(planWeather((params.get('weather') as WeatherKind) ?? 'clear', (params.get('time') as TimeOfDay) ?? 'afternoon', 600, Number(params.get('seed') ?? 7)));
 const W = weather.state;
 applyWeatherUniforms(W);
+// ?palette=<venue> — preview another venue's ground palette on this circuit
+if (params.get('palette')) for (const v of ['park', 'ardennes', 'airfield', 'suzuka', 'interlagos', 'montreal', 'zandvoort', 'spielberg', 'austin']) TERRAIN_PALETTES[v] = TERRAIN_PALETTES[params.get('palette')!];
 const ts = buildTrackside(track, gfx);
 scene.add(ts.group);
 const env = createEnvironment(track, gfx, scene, W);
-Object.assign(window as unknown as Record<string, unknown>, { __env: env, __track: track, __gfx: gfx, __camera: camera });
+Object.assign(window as unknown as Record<string, unknown>, { __env: env, __track: track, __gfx: gfx, __camera: camera, __controls: controls });
 
 const n = (k: string, d: number) => (params.get(k) !== null ? Number(params.get(k)) : d);
 const s = (n('s', track.startS - 120) + track.length) % track.length;

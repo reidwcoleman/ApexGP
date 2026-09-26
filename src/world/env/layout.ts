@@ -8,6 +8,11 @@ import { planSpielberg } from './venues/spielberg.ts';
 import { planInterlagos } from './venues/interlagos.ts';
 import { planZandvoort } from './venues/zandvoort.ts';
 import { planMontreal } from './venues/montreal.ts';
+import { planMelbourne } from './venues/melbourne.ts';
+import { planMexico } from './venues/mexico.ts';
+import { planSakhir } from './venues/sakhir.ts';
+import { planHungaroring } from './venues/hungaroring.ts';
+import { planYasmarina } from './venues/yasmarina.ts';
 
 /**
  * Where everything goes in the Parco di Monza. Computed from the track (corner
@@ -165,6 +170,11 @@ export function planLayout(track: Track, map: WorldMap): Layout {
   if (track.def.id === 'interlagos') return planInterlagos(track, map, addStand, gs);
   if (track.def.id === 'zandvoort') return planZandvoort(track, map, addStand, gs);
   if (track.def.id === 'montreal') return planMontreal(track, map, addStand, gs);
+  if (track.def.id === 'melbourne') return planMelbourne(track, map, addStand, gs);
+  if (track.def.id === 'mexico') return planMexico(track, map, addStand, gs);
+  if (track.def.id === 'sakhir') return planSakhir(track, map, addStand, gs);
+  if (track.def.id === 'hungaroring') return planHungaroring(track, map, addStand, gs);
+  if (track.def.id === 'yasmarina') return planYasmarina(track, map, addStand, gs);
   if (!oval) return planSpa(track, map, addStand, gs);
   // main straight: west side, opposite the pits
   addStand('Tribuna Centrale', 452, 660, L, 28, 'centrale', 8, 105);

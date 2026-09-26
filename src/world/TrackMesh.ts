@@ -22,6 +22,7 @@ import { buildBarriers, buildLightPoles } from './trackside/barriers.ts';
 import { buildMarkings } from './trackside/markings.ts';
 import { buildStructures, type PanelSpot } from './trackside/structures.ts';
 import { RoadSSR } from './trackside/ssr.ts';
+import { TrackPeople } from '../people/trackPeople.ts';
 import { GRAVEL_EDGE, SURF, VERGE } from './Track.ts';
 
 // ground cross-sections, mirroring trackside/surfaces.ts (kerb profile per style, gravel dish, sunken grass)
@@ -196,7 +197,7 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
     // the road draws after the other opaques so its wet reflections can see them (ssr.ts)
     asphalt: { material: asphaltMaterial(tex, { kerb: track.def.trackside?.kerb, runoffPaint: track.def.trackside?.runoffPaint }), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true, renderOrder: 1 },
     gravel: { material: gravelMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
-    grass: { material: grassMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
+    grass: { material: grassMaterial(tex, { desert: track.def.trackside?.ground === 'desert' }), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     decal: { material: decalMaterial(decals.texture), spec: { uv: true, color: true, pbr: true }, cast: false, receive: true, renderOrder: 2 },
     props: { material: propsMaterial(), spec: { color: true, pbr: true }, cast: true, receive: true },
     print: { material: printMaterial(print.texture), spec: { uv: true, color: true, pbr: true }, cast: true, receive: true },
@@ -219,6 +220,9 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
   const { meshes, triangles, byKey } = cs.finish(group);
   const panels = makePanels(st.panels);
   group.add(panels);
+  // the marshals at the posts and the photographers at the corners (animated people, added once the avatars load)
+  const people = new TrackPeople(track, st.marshals, st.photographers, (state, post) => setPanels(state, post));
+  group.add(people.group);
   group.matrixAutoUpdate = false;
 
   // wet-road reflections: hook every road chunk (the first one drawn each frame does the copy)
@@ -276,6 +280,7 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
     ssr,
     update(_dt: number, camera: THREE.Camera) {
       ssr.mainCamera = camera;
+      people.update(_dt, camera);
       // wet-road reflections scale with the quality preset: off on low/medium, 1/3-res copy on high, 1/2 on ultra
       const q = gfx.qualityLevel;
       ssr.enabled = reflections && (q === 'high' || q === 'ultra');
