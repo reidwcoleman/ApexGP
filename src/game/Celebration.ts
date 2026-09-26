@@ -455,6 +455,9 @@ export class Celebration {
     // the podium teams' crews at the front, in their kit (the rest are fans)
     const isCrew = (sp: (typeof spots)[number]) => sp.z < 8.6 && Math.abs(sp.x) < 11 && podTeams.includes(sp.team);
     this.teamCrews = teamCelebration(spots.filter(isCrew));
+    // build the instancing now (in the constructor, before the podium is shown), not on the
+    // first rendered frame of the celebration, which would otherwise land as a visible hitch
+    this.teamCrews.preload();
     this.group.add(this.teamCrews.group);
     this.crowd = new FanCrowd(
       peopleKit()!,

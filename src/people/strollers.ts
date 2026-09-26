@@ -94,18 +94,26 @@ export class PeopleSet {
   /** a hook for subclasses: after the walkers moved, before the draw */
   protected tick(_dt: number) {}
 
+  /** force the (expensive, instancing) build now instead of on the first update, so a
+   * caller that wants this set on screen immediately (the podium, cut to on a beat) doesn't
+   * eat the whole build cost as a rendered-frame hitch. A no-op once built or if it fails. */
+  preload() {
+    if (this.extras || this.failed) return;
+    const kit = peopleKit();
+    if (!kit || !kit.complete) return;
+    try {
+      this.build(kit);
+    } catch (e) {
+      this.failed = true;
+      console.warn('[people] ' + this.group.name + ' failed', e);
+    }
+  }
+
   update(dt: number, camera: THREE.Camera) {
     this.t += dt;
     if (!this.extras) {
-      const kit = peopleKit();
-      if (!kit || !kit.complete || this.failed) return;
-      try {
-        this.build(kit);
-      } catch (e) {
-        this.failed = true;
-        console.warn('[people] ' + this.group.name + ' failed', e);
-        return;
-      }
+      this.preload();
+      if (!this.extras) return;
     }
     const ex = this.extras!;
     if (this.calm !== this.calmed) {
