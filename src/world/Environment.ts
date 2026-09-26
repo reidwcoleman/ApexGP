@@ -130,6 +130,37 @@ export function createEnvironment(
   envScene.add(cubeCam);
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT: THREE.WebGLRenderTarget | null = null;
+  // the world in the env map: the circuit's own surroundings (terrain, trees, stands, pits,
+  // the horizon) captured once from beside the track, composited over the live sky in every
+  // bake — so cars and glass reflect the real place, and the diffuse fill carries the green
+  // bounce off sunlit grass. Re-lit (scaled) as the light changes; re-captured on a big change.
+  const worldRT = new THREE.WebGLCubeRenderTarget(ENV_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false });
+  const worldCam = new THREE.CubeCamera(0.4, 6000, worldRT);
+  const worldUniforms = { uWorld: { value: worldRT.texture }, uWorldScale: { value: 1 } };
+  const worldSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(4, 32, 16),
+    new THREE.ShaderMaterial({
+      uniforms: worldUniforms,
+      side: THREE.BackSide,
+      depthTest: false,
+      depthWrite: false,
+      vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }`,
+      fragmentShader: /* glsl */ `
+        uniform samplerCube uWorld;
+        uniform float uWorldScale;
+        varying vec3 vDir;
+        void main() {
+          vec4 w = textureCube( uWorld, normalize( vDir ) );
+          if ( w.a < 0.5 ) discard;
+          gl_FragColor = vec4( w.rgb * uWorldScale, 1.0 );
+        }`,
+    }),
+  );
+  worldSphere.renderOrder = 1;
+  worldSphere.frustumCulled = false;
+  worldSphere.visible = false;
+  envScene.add(worldSphere);
+  let worldE = 0;
 
   // ------------------------------------------------------------ light
   const rig = createSun();
@@ -328,7 +359,11 @@ export function createEnvironment(
     // ---- fill light
     const mid = tmpA.copy(C.mid).lerp(tmpB.copy(deck), ov);
     hemi.color.copy(mid).multiplyScalar(1 / Math.max(1e-3, Math.max(mid.r, mid.g, mid.b)));
-    hemi.groundColor.setRGB(0.35, 0.3, 0.22).multiplyScalar(0.4 + 0.6 * L.sunVis);
+    // ground bounce: sunlight off grass and asphalt, tinted by the sun (warm at golden hour),
+    // lighting undersides (wings, floors, crowns). The world capture in the env map carries
+    // the rest of it (the actual surroundings) through the image-based diffuse.
+    const bounce = 0.4 + 0.9 * L.sunVis * Math.max(0.15, sunDir.y);
+    hemi.groundColor.setRGB(0.3 * C.sunCol.r, 0.29 * C.sunCol.g, 0.19 * C.sunCol.b).multiplyScalar(bounce);
     hemi.intensity = L.hemi;
 
     // ---- ground cloud shadows (broken cumulus only; a closed deck already killed the sun)
@@ -354,6 +389,7 @@ export function createEnvironment(
     gradeLook.tint = L.tint;
     gradeLook.shadowTint = L.shadowTint;
     lightInfo.eGround = +eGround.toFixed(3);
+    if (worldE > 0) worldUniforms.uWorldScale.value = eGround / worldE;
     lightInfo.adapt = +adapt.toFixed(3);
     lightInfo.deckRad = +deckRad.toFixed(3);
     lightInfo.skyIrr = +C.skyIrr.toFixed(3);
@@ -502,6 +538,39 @@ export function createEnvironment(
       pmrem.fromCubemap(cubeRT.texture, envRT);
     }
   }
+  /** capture the world (no sky, no rain) into worldRT from beside the start straight */
+  const capCam = new THREE.PerspectiveCamera(90, 1, 0.4, 6000);
+  function captureWorld() {
+    const s = (track.startS - 70 + track.length) % track.length;
+    const p = track.point(s, 0, 2.6);
+    const ahead = track.point((s + 40) % track.length, 0, 2.2);
+    capCam.position.copy(p);
+    capCam.lookAt(ahead);
+    capCam.updateMatrixWorld();
+    // lay out the camera-dependent world (tree LOD, horizon) around the capture point
+    scenery.update(0, capCam, elapsed);
+    focus.copy(p);
+    rig.shadow.focus.copy(p);
+    worldCam.position.copy(p);
+    const hidden = [sky.mesh, rain.group].filter((o) => o.visible);
+    for (const o of hidden) o.visible = false;
+    const prevClear = renderer.getClearColor(new THREE.Color());
+    const prevAlpha = renderer.getClearAlpha();
+    const prevAuto = renderer.autoClear;
+    const prevEnv = scene.environment;
+    renderer.setClearColor(0x000000, 0);
+    renderer.autoClear = true;
+    scene.updateMatrixWorld(true);
+    worldCam.update(renderer, scene);
+    renderer.setClearColor(prevClear, prevAlpha);
+    renderer.autoClear = prevAuto;
+    scene.environment = prevEnv;
+    for (const o of hidden) o.visible = true;
+    worldSphere.visible = true;
+    worldE = Math.max(0.05, lightInfo.eGround ?? 1);
+    worldUniforms.uWorldScale.value = 1;
+  }
+
   function bakeNow() {
     bakeCube();
     bakeFilter();
@@ -650,6 +719,11 @@ export function createEnvironment(
   // prime the clouds and the env map so the first frame is complete
   clouds.update(0, camPos.set(track.px[0] ?? 0, 2, track.pz[0] ?? 0));
   sky.uniforms.uPano.value = clouds.texture;
+  try {
+    captureWorld();
+  } catch (e) {
+    console.warn('[env] world capture failed — sky-only reflections', e);
+  }
   bakeNow();
   lap('sky+env');
 
@@ -669,6 +743,10 @@ export function createEnvironment(
     },
     get quality() {
       return quality;
+    },
+    /** dev: the captured world cube (reflections) and its current exposure scale */
+    get envWorld() {
+      return { rt: worldRT, scale: worldUniforms.uWorldScale.value, capturedAt: worldE };
     },
   };
   console.info(`[shot] [env] built in ${Math.round(buildMs)} ms ${JSON.stringify({ timings, scenery: scenery.stats })}`);
@@ -690,6 +768,7 @@ export function createEnvironment(
       clouds.dispose();
       // (the cloud noise is shared between circuits: see createCloudNoise)
       cubeRT.dispose();
+      worldRT.dispose();
       envRT?.dispose();
       pmrem.dispose();
       for (const l of lutCache.values()) l.texture.dispose();

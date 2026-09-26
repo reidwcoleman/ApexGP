@@ -652,7 +652,8 @@ export class CrewSystem {
     group.name = `pit-props-${C.team.id}`;
     const oldW: WheelProp[] = [], newW: WheelProp[] = [];
     for (let w = 0; w < 4; w++) {
-      const a = createWheelProp(w < 2, C.old);
+      // (the old set comes off used: dull, grained, marbles and brake dust)
+      const a = createWheelProp(w < 2, C.old, 0.6);
       const b = createWheelProp(w < 2, C.compound);
       a.root.visible = b.root.visible = false;
       group.add(a.root, b.root);

@@ -333,7 +333,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
 
   // grey gradient visibility: 25 km clear → ~2.5 km drizzle → ~0.9 km downpour
   // fog 1: ~200 m to half-visibility, ~650 m to nothing
-  const fogDensity = P.fogDensity * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
+  // (×1.25: a September broadcast has 15–25 km visibility — the depth cue that sells the scale)
+  const fogDensity = P.fogDensity * 1.25 * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 
@@ -369,13 +370,14 @@ export function weatherLook(w: WeatherState): WeatherLook {
     cloudHaze,
     envIntensity: 1,
     hemi: mix(0.08, 0.18, dim),
-    shadowRadius: mix(2.2, 6, smooth(0.3, 0.9, dim)),
+    shadowRadius: mix(2.6, 6, smooth(0.3, 0.9, dim)),
     exposure,
     saturation,
     contrast,
     tint,
     shadowTint,
-    bloom: mix(P.bloom, 1.15, wetK),
+    // bloom is veiling glare, not a glow effect: kept low (highlights, wet reflections, the sun)
+    bloom: mix(P.bloom * 0.7, 0.85, wetK),
     bloomThreshold: mix(P.bloomThreshold, 0.9, wetK),
     shafts: P.shafts * sunVis,
     mist: clamp01(wetK * 0.8 + fog * 0.5),

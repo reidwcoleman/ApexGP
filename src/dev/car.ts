@@ -127,6 +127,18 @@ cars.forEach((c, i) => {
   if (cp === 'all') c.setCompound(ALL[i % ALL.length]);
   else if (cp) c.setCompound(cp as Compound);
 });
+// tyre condition / grime: ?wear=0.8 (derives the rest) or explicit ?grain= ?pickup= ?blister= ?dust= ?grass= ?tdirt= ?flat= ?heat=; ?grime=0.8
+if (['wear', 'grain', 'pickup', 'blister', 'dust', 'grass', 'tdirt', 'flat', 'heat'].some((k) => P.has(k))) {
+  const w = Number(P.get('wear') ?? 0);
+  const n = (k: string, d: number) => Number(P.get(k) ?? d);
+  const look = {
+    wear: w, heat: n('heat', 0), blister: n('blister', w > 0.6 ? 0.3 : 0), graining: n('grain', Math.min(1, w * 1.2)),
+    pickup: n('pickup', Math.min(1, w * 1.4)), dust: n('dust', Math.min(1, w * 1.2)), grass: n('grass', 0), dirt: n('tdirt', 0),
+    flatU: 0.25, flat: n('flat', 0),
+  };
+  for (const c of cars) c.setTyres?.([look, look, look, look]);
+}
+if (P.has('grime')) for (const c of cars) c.setGrime?.(Number(P.get('grime')), Number(P.get('grime')), Number(P.get('offdirt') ?? 0));
 for (const c of cars) {
   c.setDetail(detail);
   c.setDrs(P.get('drs') === '1' ? 1 : 0);

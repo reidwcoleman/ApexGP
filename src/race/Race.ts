@@ -1,6 +1,6 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
-import { AIDriver, type Neighbour } from '../sim/AIDriver.ts';
+import { CarPhysics, F1_SPEC, DMG, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
+import { AIDriver, MISTAKE, VSC_SPEED, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { TEAMS, type Entry } from './Teams.ts';
 import { PitLane, fitTyres, newPitState, DRY_COMPOUNDS, COMPOUNDS, isDry, tyreTypeFor, type Compound, type PitState, type PitNeighbour } from './Pit.ts';
@@ -44,6 +44,39 @@ export interface RaceOptions {
   dynamicAI?: boolean;
   /** track-limit rules (default lenient) */
   trackLimits?: TrackLimitsMode;
+  /**
+   * The race's randomness (launches, mistakes, strategy calls, failures, pit
+   * stops): the same seed replays the same race; omit it for a fresh one.
+   */
+  seed?: number;
+  /**
+   * The weekend: every driver's form and the qualifying spread. Pass the same
+   * value to the qualifying session and the race so they agree (default: from seed).
+   */
+  formSeed?: number;
+}
+
+/** a small fast seeded generator (0 … 1) */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function strHash(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** a roughly normal number (mean 0, sd ≈ 1, within ±3) */
+function gauss(r: () => number): number {
+  return (r() + r() + r() - 1.5) * 2;
 }
 
 /**
@@ -137,6 +170,18 @@ export interface Competitor {
   removed: boolean;
   /** seconds a retired car has sat still */
   stopTimer: number;
+  /** today's form: pace multiplier for this race weekend (AI; ≈1 ± 1%) */
+  form: number;
+  /** AI: race distance (laps) at which a mechanical failure strikes (−1: a reliable day), and seconds it limps before stopping */
+  failLap: number;
+  failT: number;
+  failDur: number;
+  /** the lap the strategist last looked at an undercut / overcut */
+  stratLap: number;
+  /** a mistake already reported (so each is announced once) */
+  errSeen: number;
+  /** seconds of no car-to-car contact after being put back on the track */
+  resetGhost: number;
 }
 
 export interface RaceEvent {
@@ -158,12 +203,18 @@ export interface RaceEvent {
     | 'box-now'
     | 'blue-flag'
     | 'retired'
-    | 'damage';
+    | 'damage'
+    | 'vsc'
+    | 'vsc-ending'
+    | 'vsc-end'
+    | 'mistake';
   car: number;
   value?: number;
   sector?: number;
   valid?: boolean;
   color?: 'purple' | 'green' | 'yellow';
+  /** a penalty's reason ('track limits' when absent) */
+  reason?: string;
 }
 
 /** fuel for a lap of Monza at racing speed (kg) */
@@ -180,6 +231,9 @@ function median(xs: number[]): number {
   const m = a.length >> 1;
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
+
+/** driver mistakes per second of racing for a par driver, before pressure / wet / wear */
+const MISTAKE_RATE = 0.0004;
 
 const CP = 20;
 /** lenient track limits: metres the car's centre must go past the outer kerb edge, and the shortest excursion (s) that counts */
@@ -234,10 +288,27 @@ export class Race {
   readonly weather: Weather;
   weatherState: WeatherState;
   private strategyTimer = 0;
+  /** the seed this race's randomness came from (see RaceOptions.seed) */
+  readonly seed: number;
+  /** generator state (a number, so a flashback rewinds it with everything else) */
+  private rs = 0;
+  /** every entry's form this weekend, the car's suitability for this circuit and a qualifying spread (s) */
+  private forms = new Map<Entry, { form: number; suit: number; quali: number }>();
+  /** what made this race different, for the tools and the broadcast */
+  incidents = { mistakes: 0, spins: 0, failures: 0, vsc: 0, undercuts: 0, overcuts: 0, badStarts: 0, goodStarts: 0 };
 
   constructor(track: Track, opts: RaceOptions) {
     this.track = track;
     this.opts = opts;
+    this.seed = opts.seed ?? ((Math.random() * 2 ** 31) | 0);
+    this.rs = this.seed >>> 0;
+    const fs = opts.formSeed ?? this.seed;
+    opts.entries.forEach((e, i) => {
+      const r = mulberry32((fs ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0);
+      // some cars suit some circuits: fixed per team and track, like a real season
+      const t = mulberry32(strHash(`${track.def.id}/${e.team.id}`));
+      this.forms.set(e, { form: 1 + Math.max(-0.013, Math.min(0.013, gauss(r) * 0.0055)), suit: 1 + gauss(t) * 0.0018, quali: gauss(r) * 0.12 });
+    });
     this.profile = RacingProfile.for(track, F1_SPEC);
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
@@ -252,7 +323,8 @@ export class Race {
     if (opts.gridOrder && opts.mode === 'race') order = opts.gridOrder.slice();
     else {
       const ai = entries.filter((e) => e !== opts.playerEntry);
-      ai.sort((a, b) => b.team.pace * b.driver.skill - a.team.pace * a.driver.skill);
+      // a simulated qualifying: the quick cars are at the front, but form and a scrappy lap shuffle it
+      ai.sort((a, b) => this.qualifyingTime(a, opts.difficulty) - this.qualifyingTime(b, opts.difficulty));
       order = ai.slice();
       const pSlot = opts.mode === 'timetrial' ? 0 : Math.max(0, Math.min(order.length, opts.playerGrid));
       order.splice(pSlot, 0, opts.playerEntry);
@@ -275,12 +347,17 @@ export class Race {
         car.placeOnTrack(track, g.s, g.lateral);
       }
       let aiDriver: AIDriver | null = null;
+      const f = this.forms.get(entry);
       if (!isPlayer) {
-        const pace = aiPace(entry, opts.difficulty);
-        aiDriver = new AIDriver(pace, entry.driver.aggression);
+        const pace = aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1);
+        aiDriver = new AIDriver(pace, entry.driver.aggression, () => this.rand());
         aiDriver.startFrom(car, track);
+        this.launch(aiDriver, entry);
         car.allowReverse = false;
       }
+      // a rare mechanical failure somewhere in the race (AI only, and only with full damage)
+      const pFail = !isPlayer && opts.mode === 'race' && (opts.damage ?? 'full') === 'full' ? Math.min(0.04, 0.0016 * opts.laps) : 0;
+      const failLap = this.rand() < pFail ? opts.laps * (0.1 + 0.85 * this.rand()) : -1;
       const c: Competitor = {
         id: i,
         entry,
@@ -333,6 +410,13 @@ export class Race {
         retiredAt: 0,
         removed: false,
         stopTimer: 0,
+        form: isPlayer ? 1 : (f?.form ?? 1),
+        failLap,
+        failT: 0,
+        failDur: 5 + this.rand() * 12,
+        stratLap: -1,
+        errSeen: 0,
+        resetGhost: 0,
       };
       c.raceDist = c.laps * track.length + c.lapDist;
       this.cars.push(c);
@@ -352,9 +436,16 @@ export class Race {
       if (pick !== 'auto') start = pick;
       else if (startType === 1) start = 'inter';
       else if (startType === 2) start = 'wet';
-      else if (opts.mode === 'timetrial' || opts.laps < 8) start = 'soft';
+      else if (opts.mode === 'timetrial' || opts.laps < 5) start = 'soft';
+      else if (opts.laps < 8) start = c.isPlayer || this.rand() > 0.18 ? 'soft' : 'medium';
       else if (c.isPlayer) start = opts.laps >= 10 ? 'medium' : 'soft';
-      else start = Math.random() < 0.6 ? 'medium' : Math.random() < 0.5 ? 'soft' : 'hard';
+      else {
+        // strategies differ: the brave start on softs, the back of the grid gambles on hards
+        const r = this.rand();
+        const soft = 0.16 + 0.16 * c.entry.driver.aggression;
+        const hard = c.id >= 10 ? 0.32 : 0.16;
+        start = r < soft ? 'soft' : r < soft + hard ? 'hard' : 'medium';
+      }
       c.compound = start;
       c.compoundsUsed = [start];
       fitTyres(c.car, start);
@@ -375,13 +466,196 @@ export class Race {
     return this.opts.mode === 'timetrial';
   }
 
+  /** the race's random numbers: seeded, and rewound by a flashback with everything else */
+  rand(): number {
+    this.rs = (this.rs + 0x6d2b79f5) >>> 0;
+    let t = this.rs;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /**
+   * An AI qualifying lap this weekend (s): the driver's pace with today's form and
+   * the car's suitability for the circuit, plus a scrappy-lap spread — the same
+   * numbers the race is run with. Fitted at Monza (see aiQualifyingTime).
+   */
+  qualifyingTime(entry: Entry, difficulty: number, wetFactor = 1, trackScale = 1): number {
+    const f = this.forms.get(entry);
+    const pace = aiPace(entry, difficulty) * (f?.form ?? 1) * (f?.suit ?? 1);
+    return (26.9 + 50.8 / pace - 0.15) * trackScale * wetFactor + (f?.quali ?? 0);
+  }
+
+  /** this weekend's form for an entry (1 = par; the player's car is always 1) */
+  formOf(entry: Entry): number {
+    return entry === this.opts.playerEntry ? 1 : (this.forms.get(entry)?.form ?? 1);
+  }
+
+  /**
+   * Launches: most drivers react in 0.15–0.27 s; a few get a great one, and a
+   * few (more of them in the wet, fewer of the best drivers) are slow away or bog down.
+   */
+  private launch(ai: AIDriver, entry: Entry) {
+    const sk = Math.max(0, Math.min(1, (entry.driver.skill - 0.95) / 0.05));
+    const wet = this.weather.wetnessAt(0, 0);
+    const r = this.rand();
+    ai.reaction = 0.15 + this.rand() * 0.12;
+    ai.bog = 0;
+    if (r < 0.05 + 0.04 * (1 - sk) + 0.06 * wet) {
+      ai.reaction += 0.2 + this.rand() * 0.35;
+      if (this.rand() < 0.5) ai.bog = 0.6 + this.rand() * 0.8;
+      this.incidents.badStarts++;
+    } else if (r > 0.9 - 0.05 * sk) {
+      ai.reaction = 0.1 + this.rand() * 0.05;
+      this.incidents.goodStarts++;
+    }
+  }
+
+  /**
+   * An autopilot that drives the player's car (a simulated race) races like the
+   * rest of the field: seeded randomness, a launch, mistakes, the VSC.
+   */
+  adoptPlayerAI(ai: AIDriver | null) {
+    this.playerAI = ai;
+    if (!ai) return;
+    ai.rand = () => this.rand();
+    this.launch(ai, this.player.entry);
+  }
+  private playerAI: AIDriver | null = null;
+
+  /** the AI driving a competitor (the player's car too, in a simulated race) */
+  private driverOf(c: Competitor): AIDriver | null {
+    return c.ai ?? (c.isPlayer ? this.playerAI : null);
+  }
+
+  // ------------------------------------------------------------------ the life of a race
+
+  private lifeTimer = 0;
+
+  /**
+   * Twice a second: every driver's rhythm drifts (a slow random walk, ±~0.5%,
+   * so battles ebb and flow), and now and then someone makes a mistake — a
+   * lock-up, an exit too fast, rarely a spin. More of them under pressure (a car
+   * within a second either side), on the first lap, on worn tyres, in the wet,
+   * and from the less polished drivers.
+   */
+  private driverLife(dt: number) {
+    if (this.phase !== 'racing' || this.isTimeTrial) return;
+    this.lifeTimer -= dt;
+    if (this.lifeTimer > 0) return;
+    const step = 0.5;
+    this.lifeTimer = step;
+    const wet = this.lineWetness;
+    for (const c of this.cars) {
+      const ai = this.driverOf(c);
+      if (!ai || c.retired || c.finished || c.pit.phase !== 'none') continue;
+      ai.rhythm += -ai.rhythm * (step / 40) + gauss(() => this.rand()) * 0.004 * Math.sqrt((2 * step) / 40);
+      ai.rhythm = Math.max(-0.01, Math.min(0.01, ai.rhythm));
+      if (this.vsc !== 'none' || this.raceTime < 5 || ai.err !== 0) continue;
+      const d = c.entry.driver;
+      const behind = this.cars.find((o) => o.position === c.position + 1);
+      const pressed = (c.gapAhead > 0 && c.gapAhead < 0.8) || (!!behind && !behind.retired && behind.gapAhead > 0 && behind.gapAhead < 0.6);
+      const rate =
+        MISTAKE_RATE * (1 + (1 - d.skill) * 12) * (0.8 + 0.5 * d.aggression) * (pressed ? 2.2 : 1) * (c.laps < 1 ? 1.6 : 1) * (1 + 2.5 * wet) * (1 + this.wearOf(c));
+      if (this.rand() >= rate * step) continue;
+      const r = this.rand();
+      const spin = 0.045 + 0.1 * wet;
+      const kind = r < spin ? MISTAKE.SPIN : r < spin + 0.45 ? MISTAKE.LOCKUP : MISTAKE.WIDE;
+      ai.mistake(kind, this.rand());
+    }
+  }
+
+  /** mistakes as they happen (not when they're armed), once each */
+  private watchMistakes() {
+    for (const c of this.cars) {
+      const ai = this.driverOf(c);
+      if (!ai) continue;
+      if (ai.err !== 0 && ai.errOn === 1 && c.errSeen === 0) {
+        c.errSeen = 1;
+        this.incidents.mistakes++;
+        if (ai.err === MISTAKE.SPIN) this.incidents.spins++;
+        this.events.push({ kind: 'mistake', car: c.id, value: ai.err });
+      } else if (ai.err === 0) c.errSeen = 0;
+    }
+  }
+
+  // ------------------------------------------------------------------ virtual safety car
+
+  /** 'deployed': everyone to the VSC speed, no overtaking; 'ending': the last seconds before green */
+  vsc: 'none' | 'deployed' | 'ending' = 'none';
+  vscSince = 0;
+  vscEndAt = 0;
+  /** the car it's out for */
+  vscCause = -1;
+  /** the player against the VSC delta (s; + = running too fast, over 1.5 s is a penalty) */
+  vscDelta = 0;
+
+  /** a stranded car may bring out the VSC (never on the leader's last lap) */
+  private maybeVsc(c: Competitor, p: number) {
+    if (this.vsc !== 'none' || this.isTimeTrial || this.phase !== 'racing' || this.raceTime < 3) return;
+    if (this.leaderLaps >= this.opts.laps - 1) return;
+    // (at most two a race, and not straight after the last one)
+    if (this.incidents.vsc >= 2 || (this.incidents.vsc > 0 && this.raceTime - this.vscEndAt < 60)) return;
+    if (this.rand() >= p) return;
+    this.vsc = 'deployed';
+    this.vscSince = this.raceTime;
+    this.vscCause = c.id;
+    this.vscDelta = 0;
+    this.incidents.vsc++;
+    for (const o of this.cars) o.drsEligible = false;
+    this.events.push({ kind: 'vsc', car: c.id });
+  }
+
+  private updateVsc(dt: number) {
+    const on = this.vsc !== 'none';
+    for (const c of this.cars) {
+      const ai = this.driverOf(c);
+      if (ai) ai.vsc = on;
+    }
+    if (!on) return;
+    if (this.phase !== 'racing') {
+      this.vsc = 'none';
+      return;
+    }
+    const t = this.raceTime - this.vscSince;
+    if (this.vsc === 'deployed') {
+      const cause = this.cars[this.vscCause];
+      // over once the marshals have cleared the car (or it has sat safely off the road a while)
+      const clear = !cause || cause.removed || (cause.isPlayer && t > 25);
+      if ((clear && t > 18) || t > 70) {
+        this.vsc = 'ending';
+        this.vscEndAt = this.raceTime + 6;
+        this.events.push({ kind: 'vsc-ending', car: this.vscCause });
+      }
+    } else if (this.raceTime >= this.vscEndAt) {
+      this.vsc = 'none';
+      for (const c of this.cars) {
+        const ai = this.driverOf(c);
+        if (ai) ai.vsc = false;
+      }
+      this.events.push({ kind: 'vsc-end', car: this.vscCause });
+      return;
+    }
+    // the player's delta: time gained on a lap at the VSC reference speed
+    const p = this.player;
+    if (!this.playerAI && !p.finished && !p.retired && p.pit.phase === 'none' && p.car.vx > 5) {
+      const vRef = Math.max(15, this.profile.atGrip(p.car.s, p.car.gripFactor) * VSC_SPEED);
+      this.vscDelta = Math.max(-1.5, this.vscDelta + dt * (p.car.vx / vRef - 1));
+      if (this.vscDelta > 1.5) {
+        p.penalty += 5;
+        this.vscDelta = 0;
+        this.events.push({ kind: 'penalty', car: p.id, value: 5, reason: 'VSC delta' });
+      }
+    }
+  }
+
   /** begin the start-light sequence */
   startLights() {
     if (this.phase !== 'grid') return;
     this.phase = 'lights';
     this.lightsLit = 0;
     this.lightsTimer = 0;
-    this.lightsHold = 0.6 + Math.random() * 2.2;
+    this.lightsHold = 0.6 + this.rand() * 2.2;
   }
 
   update(dt: number) {
@@ -434,7 +708,7 @@ export class Race {
       for (const c of this.cars) {
         if (c.removed) continue;
         const zone = this.drsLapDist[c.drsZone];
-        const inZone = !!zone && c.drsEligible && this.inRange(c.lapDist, zone.start, zone.end);
+        const inZone = !!zone && c.drsEligible && this.vsc === 'none' && this.inRange(c.lapDist, zone.start, zone.end);
         // pit assist: requested stop + crossing the takeover point → scripted pit lane
         if (this.pitStep(c, h)) continue;
         if (c.isPlayer) {
@@ -458,6 +732,9 @@ export class Race {
     this.playerDrsRequest = false;
     this.retirements(dt);
     this.pitGhosts(dt);
+    this.driverLife(dt);
+    this.watchMistakes();
+    this.updateVsc(dt);
 
     for (const c of this.cars) this.scoreCar(c, dt);
     this.rankCars();
@@ -475,7 +752,17 @@ export class Race {
       const car = c.car;
       if (!c.retired && !c.finished) {
         const broken = !c.isPlayer && car.susp.some((d) => d >= 0.999) && car.damageMode === 'full';
-        if (car.destroyed || broken) {
+        // a mechanical failure: smoke and a loss of power first, then it's over
+        if (c.ai && c.failLap >= 0 && c.pit.phase === 'none' && c.raceDist / this.track.length >= c.failLap) {
+          if (c.failT === 0) {
+            c.ai.trouble = 0.82;
+            car.dmg[DMG.ENGINE] = Math.max(car.dmg[DMG.ENGINE], 0.75);
+            this.incidents.failures++;
+          }
+          c.failT += dt;
+        }
+        const mech = c.failT > c.failDur;
+        if (car.destroyed || broken || mech) {
           c.retired = true;
           c.retiredAt = this.raceTime;
           c.drsEligible = false;
@@ -484,7 +771,8 @@ export class Race {
             // coast off the racing line onto the verge on the nearer side
             c.ai.parkSide = car.lateral >= 0 ? 1 : -1;
           }
-          this.events.push({ kind: 'retired', car: c.id, value: car.destroyed ? 1 : 0 });
+          this.events.push({ kind: 'retired', car: c.id, value: car.destroyed ? 1 : mech && !broken ? 2 : 0 });
+          this.maybeVsc(c, car.destroyed ? 0.85 : broken ? 0.6 : 0.3);
         } else if (c.ai && c.pitLap < 0 && car.wingDamage > 0.45 && car.damageMode === 'full') {
           // a new nose at the end of this lap
           c.pitLap = c.laps + 1;
@@ -634,7 +922,7 @@ export class Race {
         const gap = Math.abs(want - have);
         const brave = c.entry.driver.aggression;
         if (!fresh && (c.pitLap < 0 || c.pitLap > c.laps + 1)) {
-          if (gap >= 2 || Math.random() < 0.08 + (1 - brave) * 0.12) {
+          if (gap >= 2 || this.rand() < 0.08 + (1 - brave) * 0.12) {
             c.pitLap = c.laps + 1;
             c.weatherCall = true;
           }
@@ -645,6 +933,32 @@ export class Race {
       if (lapsLeft >= 3 && this.wearOf(c) > 0.6 && (c.pitLap < 0 || c.pitLap > c.laps + 1)) c.pitLap = c.laps + 1;
       // races of ten laps or more: everyone stops at least once (the two-compound rule, fresh wets in the rain)
       if (N >= 10 && c.stops === 0 && c.pitLap < 0 && lapsLeft <= 3) c.pitLap = c.laps + 1;
+      this.undercut(c, lapsLeft);
+    }
+  }
+
+  /**
+   * Once a lap, the strategist looks at the car ahead. Stuck within 1.5 s of it
+   * with our own stop due in the next few laps: come in now for the undercut.
+   * It has just pitted and our tyres are still good: stay out a lap or two
+   * longer for the overcut.
+   */
+  private undercut(c: Competitor, lapsLeft: number) {
+    if (this.opts.laps < 8 || c.laps < 2 || c.stratLap === c.laps || this.vsc !== 'none') return;
+    const ahead = this.cars.find((o) => o.position === c.position - 1);
+    if (!ahead || ahead.retired) return;
+    c.stratLap = c.laps;
+    const planned = c.pitLap;
+    const moveTo = (lap: number) => {
+      c.pitPlan = c.pitPlan.map((l) => (l === planned ? lap : l));
+      c.pitLap = lap;
+    };
+    if (planned > c.laps + 1 && planned <= c.laps + 3 && ahead.stops === c.stops && c.gapAhead > 0 && c.gapAhead < 1.2 && this.rand() < 0.12 + 0.25 * c.entry.driver.aggression) {
+      moveTo(c.laps + 1);
+      this.incidents.undercuts++;
+    } else if (planned === c.laps + 1 && ahead.stops > c.stops && ahead.pitLastLap >= c.laps - 1 && this.wearOf(c) < 0.45 && lapsLeft > 4 && this.rand() < 0.4) {
+      moveTo(c.laps + 2 + (this.rand() < 0.4 ? 1 : 0));
+      this.incidents.overcuts++;
     }
   }
 
@@ -659,7 +973,7 @@ export class Race {
   private planStops(start: Compound, id: number): number[] {
     const N = this.opts.laps;
     if (N < 8) return [];
-    const r = Math.random;
+    const r = () => this.rand();
     const cl = (x: number) => Math.max(2, Math.min(N - 2, Math.round(x)));
     if (N < 10) {
       if (!isDry(start)) return [];
@@ -669,7 +983,7 @@ export class Race {
     const life: Record<Compound, number> = { soft: 0.62, medium: 1, hard: 1.55, inter: 0.95, wet: 1.1 };
     // a per-driver spread so the stops don't all fall on the same lap
     const spread = (((id * 7) % 5) - 2) * 0.35 + (r() - 0.5) * 1.6;
-    const two = N >= 18 && r() < (N >= 30 ? 0.55 : N >= 24 ? 0.4 : 0.25);
+    const two = N >= 12 && r() < (N >= 30 ? 0.55 : N >= 24 ? 0.4 : N >= 18 ? 0.25 : 0.14);
     if (!two) {
       const next: Compound = !isDry(start) ? start : start === 'hard' ? 'medium' : start === 'soft' ? 'hard' : r() < 0.6 ? 'hard' : 'soft';
       return [cl((N * life[start]) / (life[start] + life[next]) + spread)];
@@ -723,10 +1037,11 @@ export class Race {
 
   /** no car-to-car contact: in the pit lane (its own queueing keeps cars apart), entering, or merging back */
   private isPitGhost(c: Competitor): boolean {
-    return c.pit.phase !== 'none' || c.pitGhost > 0 || (c.pitApproach && this.pitLane.toTakeover(c.car.s) < 160);
+    return c.pit.phase !== 'none' || c.pitGhost > 0 || c.resetGhost > 0 || (c.pitApproach && this.pitLane.toTakeover(c.car.s) < 160);
   }
 
   private pitGhosts(dt: number) {
+    for (const c of this.cars) if (c.resetGhost > 0) c.resetGhost -= dt;
     for (const c of this.cars) {
       if (c.pitGhost <= 0) continue;
       c.pitGhost -= dt;
@@ -776,9 +1091,9 @@ export class Race {
       const teamIdx = TEAMS.indexOf(c.entry.team);
       this.pitLane.begin(c.pit, c.car, this.pitLane.boxFor(teamIdx), c.isPlayer ? this.playerNextCompound() : this.aiNextCompound(c));
       // a clean stop is 2.1–2.6 s; now and then a sticky wheel nut costs a second or so
-      const slow = Math.random() < (c.isPlayer ? 0.05 : 0.12);
-      c.pit.stopTime = 2.1 + Math.random() * 0.45 + (slow ? 0.6 + Math.random() * 0.9 : 0);
-      c.pit.slow = slow ? Math.floor(Math.random() * 4) : -1;
+      const slow = this.rand() < (c.isPlayer ? 0.05 : 0.12);
+      c.pit.stopTime = 2.1 + this.rand() * 0.45 + (slow ? 0.6 + this.rand() * 0.9 : 0);
+      c.pit.slow = slow ? Math.floor(this.rand() * 4) : -1;
       c.pit.prev = c.compound;
       if (c.isPlayer) this.events.push({ kind: 'pit-in', car: c.id });
     }
@@ -824,6 +1139,8 @@ export class Race {
     c.car.setSpeed(8);
     c.car.gear = 2;
     c.ai?.startFrom(c.car, this.track);
+    // back on the road at low speed: no contact until it's moving again
+    c.resetGhost = 2.5;
   }
 
   private inRange(d: number, a: number, b: number) {
@@ -842,8 +1159,9 @@ export class Race {
       return;
     }
     const t = this.raceTime;
-    const crossedLine = prev > L - 60 && d < 60;
-    const crossedBack = prev < 60 && d > L - 60;
+    // (after the flag the cool-down lap doesn't count)
+    const crossedLine = prev > L - 60 && d < 60 && !c.finished;
+    const crossedBack = prev < 60 && d > L - 60 && !c.finished;
     if (crossedBack) c.laps--;
     if (crossedLine) {
       c.laps++;
@@ -901,7 +1219,7 @@ export class Race {
     for (let zi = 0; zi < this.drsLapDist.length; zi++) {
       const z = this.drsLapDist[zi];
       if (this.crossed(prev, d, z.detect)) {
-        const allowed = this.isTimeTrial || (c.laps >= 1 && !this.cars.some((o) => o.finished));
+        const allowed = this.isTimeTrial || (c.laps >= 1 && this.vsc === 'none' && !this.cars.some((o) => o.finished));
         const gap = this.gapToAhead(c);
         const was = c.drsEligible;
         c.drsEligible = allowed && (this.isTimeTrial || (gap > 0 && gap < 1.0));

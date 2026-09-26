@@ -22,6 +22,7 @@ const flat = {
 flat.ux = new Proxy({}, { get: () => 0 });
 flat.uy = new Proxy({}, { get: () => 1 });
 flat.uz = new Proxy({}, { get: () => 0 });
+flat.banked = new Proxy({}, { get: () => 0 });
 
 const DT = 1 / 300;
 const kmh = (v) => v * 3.6;

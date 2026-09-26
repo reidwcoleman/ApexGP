@@ -44,6 +44,7 @@ const EVENT_TONE: Record<ReplayEvent['kind'], string> = {
   pit: 'b',
   fastest: 'p',
   finish: 'w',
+  vsc: 'y',
 };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent?: HTMLElement, html?: string): HTMLElementTagNameMap[K] {
@@ -186,7 +187,7 @@ export class Broadcast {
     this.text(this.camEl, camera);
     this.text(this.whereEl, where);
     this.whereEl.style.display = where ? '' : 'none';
-    this.text(this.dirEl, director ? 'Director' : 'Manual');
+    this.text(this.dirEl, director ? 'Auto cameras' : 'Manual · D for auto');
     this.dirEl.classList.toggle('off', !director);
     const sp = speed === 1 ? '' : `${speed < 1 ? speed.toString().replace(/^0/, '') : speed}×`;
     this.text(this.spdEl, sp);
@@ -359,5 +360,7 @@ export function describeEvent(e: ReplayEvent, nameOf: (id: number) => string): s
       return `Fastest lap · ${a} ${fmtTime(e.value)}`;
     case 'finish':
       return `${a} finishes P${e.value}`;
+    case 'vsc':
+      return `Virtual safety car · ${a}`;
   }
 }

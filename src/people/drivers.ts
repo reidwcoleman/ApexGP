@@ -22,6 +22,7 @@ export function driverLook(team: Team, d: Driver, opts: { cap?: boolean; gloves?
   const ink = team.ink;
   return {
     female: false,
+    driver: true,
     tone,
     hair,
     hairColor: L.hair,
@@ -36,7 +37,8 @@ export function driverLook(team: Team, d: Driver, opts: { cap?: boolean; gloves?
     bottom: 'suit',
     bottomColor: team.primary,
     shoeColor: 0x121214,
-    gloves: opts.gloves ? team.secondary : null,
+    // (the suit's body is a work jacket over gloved hands: racing gloves in the team's second colour)
+    gloves: opts.gloves === false ? null : team.secondary,
     cap: opts.cap === false ? null : team.primary,
     logo: printTexture({ text: team.sponsor, color: ink, sub: team.short, num: String(d.number) }, { text: d.last.toUpperCase(), color: ink, num: String(d.number) }),
     height: 0.97 + ((d.number * 37) % 7) * 0.01,

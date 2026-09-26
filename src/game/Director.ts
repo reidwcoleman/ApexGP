@@ -14,7 +14,7 @@ export interface FieldCar {
   finished: boolean;
 }
 
-type Context = 'crash' | 'battle' | 'overtake' | 'pit' | 'start' | 'finish' | 'normal';
+type Context = 'crash' | 'battle' | 'overtake' | 'pit' | 'start' | 'finish' | 'vsc' | 'normal';
 
 const CONTEXT_LABEL: Record<Context, string> = {
   crash: 'Incident',
@@ -23,6 +23,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
   pit: 'Pit stop',
   start: 'Race start',
   finish: 'Chequered flag',
+  vsc: 'Virtual safety car',
   normal: '',
 };
 
@@ -40,6 +41,8 @@ export class Director {
   caption = '';
   /** true on the frame a new shot starts */
   cutNow = false;
+  /** follow only this car (−1: the director picks) — it still chooses the cameras */
+  lock = -1;
   private age = 0;
   private len = 5;
   private history: CameraMode[] = [];
@@ -78,6 +81,8 @@ export class Director {
       // mid-shot: only a trackside camera that has lost the car ends early
       const f = field[this.focus];
       if (f && this.age > 2.5 && CAMERA_GROUP[this.mode] === 'trackside' && this.mode !== 'tv' && !cams.covers(this.mode, f.s)) this.cut(field, cams, track, raceTime);
+      // the trackside camera lost the car behind something: off it at once, to a camera that can't be blocked
+      else if (f && this.age > 0.25 && CAMERA_GROUP[this.mode] === 'trackside' && cams.lost) this.cut(field, cams, track, raceTime, true);
       return;
     }
     this.evalT = 0.5;
@@ -85,6 +90,7 @@ export class Director {
     // the best car now
     let best = this.focus;
     for (let i = 0; i < n; i++) if (this.score[i] > this.score[best]) best = i;
+    if (this.lock >= 0 && this.lock < n) best = this.lock;
     const urgent = best !== this.focus && this.score[best] - this.score[this.focus] > 55 && this.age > 1.2;
     if (shotOver || urgent) {
       this.focus = best;
@@ -170,6 +176,13 @@ export class Director {
         case 'fastest':
           if (age < 4) sc[i] += 22;
           break;
+        case 'vsc':
+          // the car that caused it: straight to the incident
+          if (age < 12) {
+            sc[i] += 130;
+            ctx[i] = 'vsc';
+          }
+          break;
         case 'finish':
           if (age < 7 && field[i].position <= 3) {
             sc[i] += 100;
@@ -186,7 +199,7 @@ export class Director {
   private contexts: Context[] = [];
 
   /** choose the next shot for the focused car */
-  private cut(field: FieldCar[], cams: Cameras, track: Track, raceTime: number) {
+  private cut(field: FieldCar[], cams: Cameras, track: Track, raceTime: number, noTrackside = false) {
     const f = field[this.focus];
     if (!f) return;
     const ctx = this.contexts[this.focus] ?? 'normal';
@@ -196,10 +209,10 @@ export class Director {
     const covers = (m: CameraMode) => cams.covers(m, s) && cams.covers(m, ahead);
     const w: [CameraMode, number][] = [];
     const add = (m: CameraMode, weight: number) => {
-      if (weight > 0) w.push([m, weight]);
+      if (weight > 0 && !(noTrackside && CAMERA_GROUP[m] === 'trackside')) w.push([m, weight]);
     };
     const start = ctx === 'start' || raceTime < 14;
-    const crash = ctx === 'crash';
+    const crash = ctx === 'crash' || ctx === 'vsc';
     const battle = ctx === 'battle' || ctx === 'overtake';
     const pit = ctx === 'pit' || f.pit;
     // trackside, by where the car is on the lap
@@ -251,7 +264,7 @@ export class Director {
     }
     this.caption = this.captionFor(ctx, field);
     // in a battle, sometimes show it from the car ahead looking back
-    if (battle && pick === 'tcamrev' && this.partner[this.focus] >= 0 && ctx === 'battle') this.focus = this.partner[this.focus];
+    if (this.lock < 0 && battle && pick === 'tcamrev' && this.partner[this.focus] >= 0 && ctx === 'battle') this.focus = this.partner[this.focus];
     this.mode = pick;
     this.history.push(pick);
     if (this.history.length > 4) this.history.shift();
@@ -270,4 +283,24 @@ export class Director {
     if (ctx === 'normal') return f.position === 1 ? 'Race leader' : '';
     return CONTEXT_LABEL[ctx];
   }
+
+  /**
+   * Highlights (career/clip): the shot this director would cut to for car `id` in a given
+   * context, drawn from `groups` when given (a few draws, then whatever came up last). The
+   * no-repeat history carries over between calls, so successive shots vary. `focus` may move
+   * to the car ahead (a rear-facing battle shot).
+   */
+  pickShot(id: number, context: Context, field: FieldCar[], cams: Cameras, track: Track, raceTime: number, groups?: readonly string[]): CameraMode {
+    this.focus = id;
+    while (this.contexts.length < field.length) this.contexts.push('normal');
+    this.contexts[id] = context;
+    for (let i = 0; i < 16; i++) {
+      this.focus = id;
+      this.cut(field, cams, track, raceTime);
+      if (!groups || groups.includes(CAMERA_GROUP[this.mode])) break;
+    }
+    return this.mode;
+  }
 }
+
+export type DirectorContext = Context;

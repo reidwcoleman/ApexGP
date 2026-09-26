@@ -80,7 +80,14 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   const masks = buildParkMasks(map, layout, veg.shade);
   terrain.setMasks(masks);
   lap('masks');
-  const stands = buildGrandstands(layout, track, map);
+  // (a failure in the stands — e.g. the crowd's avatar kit — must not take the whole landscape with it)
+  let stands: Pick<ReturnType<typeof buildGrandstands>, 'group' | 'update' | 'people' | 'flags'>;
+  try {
+    stands = buildGrandstands(layout, track, map);
+  } catch (e) {
+    console.error('[scenery] grandstands failed — building without them', e);
+    stands = { group: new THREE.Group(), update: () => {}, people: 0, flags: 0 };
+  }
   group.add(stands.group);
   lap('stands');
   const banking = layout.oval ? buildBanking(layout.oval, track, map, terrain.material) : null;

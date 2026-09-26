@@ -1,0 +1,707 @@
+{
+ "avatars": {
+  "Male_Adult_01": {
+   "name": "Male_Adult_01",
+   "female": false,
+   "bones": 57,
+   "verts": 4687,
+   "tris": 7440,
+   "height": 1.814,
+   "skin": [
+    0.5841,
+    0.314,
+    0.2159
+   ],
+   "shirt": [
+    0.4475,
+    0.3958,
+    0.3489
+   ],
+   "hair": [
+    0.1542,
+    0.0981,
+    0.0648
+   ],
+   "hasHair": true,
+   "bytes": 681463,
+   "files": [
+    "Male_Adult_01_c.webp",
+    "Male_Adult_01_n.webp",
+    "Male_Adult_01_m.png",
+    "Male_Adult_01_h.webp",
+    "Male_Adult_01.glb"
+   ]
+  },
+  "Female_Adult_01": {
+   "name": "Female_Adult_01",
+   "female": true,
+   "bones": 57,
+   "verts": 5436,
+   "tris": 8732,
+   "height": 1.739,
+   "skin": [
+    0.6376,
+    0.3278,
+    0.2051
+   ],
+   "shirt": [
+    0.4654,
+    0.1323,
+    0.1675
+   ],
+   "hair": [
+    0.6017,
+    0.452,
+    0.3049
+   ],
+   "hasHair": true,
+   "bytes": 727452,
+   "files": [
+    "Female_Adult_01_c.webp",
+    "Female_Adult_01_n.webp",
+    "Female_Adult_01_m.png",
+    "Female_Adult_01_h.webp",
+    "Female_Adult_01.glb"
+   ]
+  },
+  "Sports_Male_01": {
+   "name": "Sports_Male_01",
+   "female": false,
+   "bones": 57,
+   "verts": 4234,
+   "tris": 7358,
+   "height": 1.804,
+   "skin": [
+    0.7991,
+    0.3968,
+    0.2542
+   ],
+   "shirt": [
+    0.0289,
+    0.0367,
+    0.0577
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 441969,
+   "files": [
+    "Sports_Male_01_c.webp",
+    "Sports_Male_01_n.webp",
+    "Sports_Male_01_m.png",
+    "Sports_Male_01.glb"
+   ]
+  },
+  "Male_Adult_05": {
+   "name": "Male_Adult_05",
+   "female": false,
+   "bones": 57,
+   "verts": 4883,
+   "tris": 7836,
+   "height": 1.795,
+   "skin": [
+    0.6445,
+    0.305,
+    0.2086
+   ],
+   "shirt": [
+    0.0342,
+    0.0326,
+    0.0158
+   ],
+   "hair": [
+    0.1645,
+    0.1238,
+    0.0959
+   ],
+   "hasHair": true,
+   "bytes": 770537,
+   "files": [
+    "Male_Adult_05_c.webp",
+    "Male_Adult_05_n.webp",
+    "Male_Adult_05_m.png",
+    "Male_Adult_05_h.webp",
+    "Male_Adult_05.glb"
+   ]
+  },
+  "Male_Adult_07": {
+   "name": "Male_Adult_07",
+   "female": false,
+   "bones": 57,
+   "verts": 4633,
+   "tris": 7588,
+   "height": 1.81,
+   "skin": [
+    0.6308,
+    0.2789,
+    0.147
+   ],
+   "shirt": [
+    0.0443,
+    0.0408,
+    0.0353
+   ],
+   "hair": [
+    0.0902,
+    0.0506,
+    0.0293
+   ],
+   "hasHair": true,
+   "bytes": 629627,
+   "files": [
+    "Male_Adult_07_c.webp",
+    "Male_Adult_07_n.webp",
+    "Male_Adult_07_m.png",
+    "Male_Adult_07_h.webp",
+    "Male_Adult_07.glb"
+   ]
+  },
+  "Male_Adult_08": {
+   "name": "Male_Adult_08",
+   "female": false,
+   "bones": 57,
+   "verts": 4482,
+   "tris": 7364,
+   "height": 1.81,
+   "skin": [
+    0.6584,
+    0.2918,
+    0.1714
+   ],
+   "shirt": [
+    0.2243,
+    0.313,
+    0.4133
+   ],
+   "hair": [
+    0.1782,
+    0.1186,
+    0.0823
+   ],
+   "hasHair": true,
+   "bytes": 649765,
+   "files": [
+    "Male_Adult_08_c.webp",
+    "Male_Adult_08_n.webp",
+    "Male_Adult_08_m.png",
+    "Male_Adult_08_h.webp",
+    "Male_Adult_08.glb"
+   ]
+  },
+  "Female_Adult_02": {
+   "name": "Female_Adult_02",
+   "female": true,
+   "bones": 57,
+   "verts": 5600,
+   "tris": 8940,
+   "height": 1.731,
+   "skin": [
+    0.7011,
+    0.3419,
+    0.2051
+   ],
+   "shirt": [
+    0.4327,
+    0.4427,
+    0.3958
+   ],
+   "hair": [
+    0.1212,
+    0.0779,
+    0.0521
+   ],
+   "hasHair": true,
+   "bytes": 838913,
+   "files": [
+    "Female_Adult_02_c.webp",
+    "Female_Adult_02_n.webp",
+    "Female_Adult_02_m.png",
+    "Female_Adult_02_h.webp",
+    "Female_Adult_02.glb"
+   ]
+  },
+  "Female_Adult_04": {
+   "name": "Female_Adult_04",
+   "female": true,
+   "bones": 57,
+   "verts": 5760,
+   "tris": 9284,
+   "height": 1.741,
+   "skin": [
+    0.6724,
+    0.3095,
+    0.1878
+   ],
+   "shirt": [
+    0.0476,
+    0.0207,
+    0.0138
+   ],
+   "hair": [
+    0.7102,
+    0.5647,
+    0.3896
+   ],
+   "hasHair": true,
+   "bytes": 737156,
+   "files": [
+    "Female_Adult_04_c.webp",
+    "Female_Adult_04_n.webp",
+    "Female_Adult_04_m.png",
+    "Female_Adult_04_h.webp",
+    "Female_Adult_04.glb"
+   ]
+  },
+  "Sports_Male_02": {
+   "name": "Sports_Male_02",
+   "female": false,
+   "bones": 57,
+   "verts": 5012,
+   "tris": 8146,
+   "height": 1.805,
+   "skin": [
+    0.7835,
+    0.3564,
+    0.2346
+   ],
+   "shirt": [
+    0.1635,
+    0.1347,
+    0.133
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 521413,
+   "files": [
+    "Sports_Male_02_c.webp",
+    "Sports_Male_02_n.webp",
+    "Sports_Male_02_m.png",
+    "Sports_Male_02.glb"
+   ]
+  },
+  "Sports_Female_02": {
+   "name": "Sports_Female_02",
+   "female": true,
+   "bones": 57,
+   "verts": 5367,
+   "tris": 8580,
+   "height": 1.733,
+   "skin": [
+    0.6105,
+    0.3185,
+    0.1878
+   ],
+   "shirt": [
+    0.1972,
+    0.1971,
+    0.1975
+   ],
+   "hair": [
+    0.0498,
+    0.039,
+    0.0312
+   ],
+   "hasHair": true,
+   "bytes": 685186,
+   "files": [
+    "Sports_Female_02_c.webp",
+    "Sports_Female_02_n.webp",
+    "Sports_Female_02_m.png",
+    "Sports_Female_02_h.webp",
+    "Sports_Female_02.glb"
+   ]
+  },
+  "Pilot_Female_01": {
+   "name": "Pilot_Female_01",
+   "female": true,
+   "bones": 57,
+   "verts": 4580,
+   "tris": 7650,
+   "height": 1.733,
+   "skin": [
+    0.5776,
+    0.2423,
+    0.1329
+   ],
+   "shirt": [
+    0.6086,
+    0.6088,
+    0.6096
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 402316,
+   "files": [
+    "Pilot_Female_01_c.webp",
+    "Pilot_Female_01_n.webp",
+    "Pilot_Female_01_m.png",
+    "Pilot_Female_01.glb"
+   ]
+  },
+  "Pilot_Male_03": {
+   "name": "Pilot_Male_03",
+   "female": false,
+   "bones": 57,
+   "verts": 4883,
+   "tris": 7816,
+   "height": 1.854,
+   "skin": [
+    0.6445,
+    0.2582,
+    0.1413
+   ],
+   "shirt": [
+    0.6205,
+    0.6235,
+    0.6425
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 498833,
+   "files": [
+    "Pilot_Male_03_c.webp",
+    "Pilot_Male_03_n.webp",
+    "Pilot_Male_03_m.png",
+    "Pilot_Male_03.glb"
+   ]
+  },
+  "Pilot_Female_02": {
+   "name": "Pilot_Female_02",
+   "female": true,
+   "bones": 57,
+   "verts": 4729,
+   "tris": 7820,
+   "height": 1.732,
+   "skin": [
+    0.5457,
+    0.2502,
+    0.0999
+   ],
+   "shirt": [
+    0.5761,
+    0.5811,
+    0.5982
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 440248,
+   "files": [
+    "Pilot_Female_02_c.webp",
+    "Pilot_Female_02_n.webp",
+    "Pilot_Female_02_m.png",
+    "Pilot_Female_02.glb"
+   ]
+  },
+  "Gardener_Male_01": {
+   "name": "Gardener_Male_01",
+   "female": false,
+   "bones": 57,
+   "verts": 4637,
+   "tris": 7470,
+   "height": 1.795,
+   "skin": [
+    0.6308,
+    0.3231,
+    0.2195
+   ],
+   "shirt": [
+    0.0418,
+    0.0257,
+    0.0141
+   ],
+   "hair": [
+    0.1645,
+    0.1238,
+    0.0959
+   ],
+   "hasHair": true,
+   "bytes": 664191,
+   "files": [
+    "Gardener_Male_01_c.webp",
+    "Gardener_Male_01_n.webp",
+    "Gardener_Male_01_m.png",
+    "Gardener_Male_01_h.webp",
+    "Gardener_Male_01.glb"
+   ]
+  },
+  "Delivery_Male_01": {
+   "name": "Delivery_Male_01",
+   "female": false,
+   "bones": 57,
+   "verts": 4158,
+   "tris": 6800,
+   "height": 1.815,
+   "skin": [
+    0.3095,
+    0.1301,
+    0.0802
+   ],
+   "shirt": [
+    0.2076,
+    0.0326,
+    0.0337
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 621629,
+   "files": [
+    "Delivery_Male_01_c.webp",
+    "Delivery_Male_01_n.webp",
+    "Delivery_Male_01_m.png",
+    "Delivery_Male_01.glb"
+   ]
+  },
+  "Male_Adult_09": {
+   "name": "Male_Adult_09",
+   "female": false,
+   "bones": 57,
+   "verts": 4479,
+   "tris": 7428,
+   "height": 1.806,
+   "skin": [
+    0.6724,
+    0.3663,
+    0.2086
+   ],
+   "shirt": [
+    0.0229,
+    0.0236,
+    0.0287
+   ],
+   "hair": [
+    0.0792,
+    0.0639,
+    0.0559
+   ],
+   "hasHair": true,
+   "bytes": 717435,
+   "files": [
+    "Male_Adult_09_c.webp",
+    "Male_Adult_09_n.webp",
+    "Male_Adult_09_m.png",
+    "Male_Adult_09_h.webp",
+    "Male_Adult_09.glb"
+   ]
+  },
+  "Male_Adult_10": {
+   "name": "Male_Adult_10",
+   "female": false,
+   "bones": 57,
+   "verts": 4109,
+   "tris": 6732,
+   "height": 1.822,
+   "skin": [
+    0.7682,
+    0.3663,
+    0.159
+   ],
+   "shirt": [
+    0.1523,
+    0.0308,
+    0.0285
+   ],
+   "hair": [
+    0.0725,
+    0.0455,
+    0.0195
+   ],
+   "hasHair": true,
+   "bytes": 604058,
+   "files": [
+    "Male_Adult_10_c.webp",
+    "Male_Adult_10_n.webp",
+    "Male_Adult_10_m.png",
+    "Male_Adult_10_h.webp",
+    "Male_Adult_10.glb"
+   ]
+  },
+  "Male_Adult_11": {
+   "name": "Male_Adult_11",
+   "female": false,
+   "bones": 57,
+   "verts": 3997,
+   "tris": 6740,
+   "height": 1.802,
+   "skin": [
+    0.9047,
+    0.402,
+    0.2542
+   ],
+   "shirt": [
+    0.0325,
+    0.0334,
+    0.0283
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 468368,
+   "files": [
+    "Male_Adult_11_c.webp",
+    "Male_Adult_11_n.webp",
+    "Male_Adult_11_m.png",
+    "Male_Adult_11.glb"
+   ]
+  },
+  "Male_Adult_12": {
+   "name": "Male_Adult_12",
+   "female": false,
+   "bones": 57,
+   "verts": 4043,
+   "tris": 6722,
+   "height": 1.806,
+   "skin": [
+    0.1946,
+    0.0782,
+    0.0395
+   ],
+   "shirt": [
+    0.0719,
+    0.0856,
+    0.1008
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 582948,
+   "files": [
+    "Male_Adult_12_c.webp",
+    "Male_Adult_12_n.webp",
+    "Male_Adult_12_m.png",
+    "Male_Adult_12.glb"
+   ]
+  },
+  "Male_Adult_14": {
+   "name": "Male_Adult_14",
+   "female": false,
+   "bones": 57,
+   "verts": 4090,
+   "tris": 6842,
+   "height": 1.795,
+   "skin": [
+    0.7305,
+    0.3005,
+    0.1845
+   ],
+   "shirt": [
+    0.1527,
+    0.1534,
+    0.1298
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 518882,
+   "files": [
+    "Male_Adult_14_c.webp",
+    "Male_Adult_14_n.webp",
+    "Male_Adult_14_m.png",
+    "Male_Adult_14.glb"
+   ]
+  },
+  "Male_Adult_15": {
+   "name": "Male_Adult_15",
+   "female": false,
+   "bones": 57,
+   "verts": 4517,
+   "tris": 7292,
+   "height": 1.818,
+   "skin": [
+    0.4735,
+    0.2016,
+    0.0844
+   ],
+   "shirt": [
+    0.6061,
+    0.5589,
+    0.4768
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 484226,
+   "files": [
+    "Male_Adult_15_c.webp",
+    "Male_Adult_15_n.webp",
+    "Male_Adult_15_m.png",
+    "Male_Adult_15.glb"
+   ]
+  },
+  "Male_Adult_16": {
+   "name": "Male_Adult_16",
+   "female": false,
+   "bones": 57,
+   "verts": 4237,
+   "tris": 7064,
+   "height": 1.809,
+   "skin": [
+    0.7231,
+    0.3712,
+    0.2346
+   ],
+   "shirt": [
+    0.059,
+    0.1017,
+    0.1697
+   ],
+   "hair": [
+    0.1,
+    0.07,
+    0.05
+   ],
+   "hasHair": false,
+   "bytes": 477484,
+   "files": [
+    "Male_Adult_16_c.webp",
+    "Male_Adult_16_n.webp",
+    "Male_Adult_16_m.png",
+    "Male_Adult_16.glb"
+   ]
+  }
+ },
+ "anims": {
+  "m": {
+   "bytes": 319768,
+   "file": "anims_m.bin"
+  },
+  "f": {
+   "bytes": 304336,
+   "file": "anims_f.bin"
+  }
+ }
+}

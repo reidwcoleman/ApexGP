@@ -24,7 +24,9 @@ import { CarView } from './CarView.ts';
 import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, isRemoteCam, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
 import { Director, type FieldCar } from './Director.ts';
+import { Sightlines } from './Sightlines.ts';
 import { Broadcast, describeEvent } from '../ui/Broadcast.ts';
+import { SimSetup, type SimConfig } from '../ui/SimSetup.ts';
 import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
@@ -47,7 +49,10 @@ import { Career, SETUP } from '../career/Career.ts';
 import { loadPeople } from '../people/Humans.ts';
 import { Highlights } from '../career/Highlights.ts';
 import { GarageScene } from './GarageScene.ts';
+import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
+import { GarageTourUI } from '../ui/GarageTour.ts';
 import { peopleKit } from '../people/Humans.ts';
+import { crowdReactions } from '../people/reactions.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
 
@@ -125,6 +130,7 @@ export class Game {
   private director = new Director();
   private directorOn = true;
   private broadcast!: Broadcast;
+  private simSetup!: SimSetup;
   /** the car the cameras follow */
   private focusId = 0;
   private simSpeed = 1;
@@ -196,7 +202,7 @@ export class Game {
       onStart: (mode, s) => this.startRace(mode, s),
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.resume(),
-      onRestart: () => (this.spectating ? this.startSpectate(this.menu.setup) : this.startRace(this.mode, this.menu.setup)),
+      onRestart: () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.menu.setup)),
       onQuit: () => this.toMenu(),
       onResetCar: () => {
         this.resume();
@@ -206,15 +212,26 @@ export class Game {
       onHubTab: (t) => {
         this.hubTab = t;
         this.garageOrbit.active = false;
+        if (this.tour.at) this.tourExit();
         if (t === 'career' || t === 'race') this.garage?.refreshStats();
       },
       onFocusPart: (p) => (this.focusPart = p),
       onPlayHighlight: (id) => this.garage?.playHighlight(id),
       nowPlaying: () => this.garage?.current?.id ?? null,
+      tourNav: (nav) => this.tourNav(nav),
       onCarChange: () => this.refreshPlayerRig(),
       onTravel: (id) => void this.travel(id),
-      onSpectate: (s) => this.startSpectate(s),
+      onSpectate: () => this.openSimSetup(),
     }, this.career);
+    this.simSetup = new SimSetup(this.menu.root, {
+      onStart: (cfg) => void this.startSimulation(cfg),
+      onBack: () => {
+        this.simSetup.hide();
+        this.menu.show('title');
+      },
+      onUi: (k) => this.audioReady && this.audio.ui(k),
+      currentTrack: () => this.track?.def.id ?? '',
+    });
     this.broadcast = new Broadcast(uiRoot, {
       onCamera: (d) => this.bcCamera(d),
       onCar: (d) => this.bcCar(d),
@@ -314,6 +331,20 @@ export class Game {
     this.highlights.onChange(() => {
       if (this.state === 'menu' && this.hubTab === 'highlights') this.menu.refreshTab();
     });
+    // the highlights re-film finished races offscreen (career/clip/studio.ts): what they may use of the world
+    this.highlights.attach({
+      gfx: this.gfx,
+      scene: this.scene,
+      trackId: () => (this.worldBusy || !this.track ? null : this.track.def.id),
+      world: () => (this.worldBusy || !this.env ? null : { track: this.track, env: this.env, trackside: this.trackside, pits: this.pits }),
+      liveObjects: () => [this.carsGroup, this.garage?.group, this.garageLights, this.particles.group, this.celebration?.group, this.line?.mesh, this.debris?.group],
+      rigKey: (e) => this.rigTeam.get(e) ?? e.team.id,
+      makeRig: (e) => {
+        const painted = (this.rigTeam.get(e) ?? e.team.id) !== e.team.id;
+        const team = painted ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
+        return createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+      },
+    });
     this.bindGarageInput();
     this.finishWorld();
 
@@ -332,6 +363,8 @@ export class Game {
         this.gfx.gpuFrameBegin();
         this.frame(dt);
         this.gfx.gpuFrameEnd();
+        // (highlight production: after the frame, outside its GPU timing; paused while racing)
+        this.highlights.tick(dt, this.state);
       }
       requestAnimationFrame(loop);
     };
@@ -415,7 +448,15 @@ export class Game {
   /** the circuit's cameras, racing line and HUD map (needs the cars) */
   private finishWorld() {
     const mode = this.cams?.mode;
-    this.cams = new Cameras(this.camera, this.track);
+    // what the broadcast cameras can see: an occupancy grid of this world (trees, stands, walls, terrain)
+    let sight: Sightlines | null = null;
+    try {
+      sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), [this.trackside.group, this.pits.group, this.env.group]);
+    } catch (e) {
+      console.warn('[sightlines] failed', e);
+    }
+    this.cams = new Cameras(this.camera, this.track, sight);
+    if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
     if (mode) this.cams.mode = mode;
     this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
     this.scene.add(this.line.mesh);
@@ -538,6 +579,8 @@ export class Game {
       difficulty: aiLevel(setup, this.career).value,
       dynamicAI: aiLevel(setup, this.career).dynamic,
       trackLimits: setup.trackLimits,
+      // the weekend's driver form (qualifying and the race agree); everything else is fresh each session
+      formSeed: this.weekendSeed,
       playerEntry,
       playerGrid: GRID[setup.grid].slot,
       entries: this.entries,
@@ -567,6 +610,8 @@ export class Game {
     this.driverHidden = false;
     this.particles.clear();
     this.carFx.reset();
+    // (the last race's recording is still being made into highlights: record into a new one)
+    if (this.highlights.owns(this.replay)) this.replay = new ReplayBuffer();
     this.replay.reset(this.race);
     this.flash.reset();
     this.flashbacksUsed = 0;
@@ -574,9 +619,12 @@ export class Game {
   }
 
   /** roll a new forecast for the setup's weather/time choices */
+  private weekendSeed = (Math.random() * 2 ** 31) | 0;
   private rollWeather(setup: RaceSetup) {
     const laps = setup.laps;
     this.plan = planWeather(setup.weather, setup.time, laps * 85 + 60);
+    // a new weekend: new form for every driver
+    this.weekendSeed = (Math.random() * 2 ** 31) | 0;
     this.planKey = `${setup.weather}/${setup.time}`;
   }
 
@@ -650,7 +698,7 @@ export class Game {
     const player = this.race.player.entry;
     const diff = aiLevel(setup, this.career).value;
     const wf = this.race.conditionsLapFactor();
-    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff, wf, this.trackLapScale()) }));
+    const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : this.race.qualifyingTime(e, diff, wf, this.trackLapScale()) }));
     times.sort((a, b) => a.time - b.time);
     const order = times.map((t) => t.entry);
     const pos = order.indexOf(player) + 1;
@@ -735,6 +783,7 @@ export class Game {
   /** the podium: top three celebrating, then the results */
   private startCelebration() {
     if (this.celebrationPending) return;
+    this.queueHighlights();
     const top = this.race.classification().slice(0, 3).map((r) => r.entry);
     if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
     const cel = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
@@ -799,7 +848,32 @@ export class Game {
   private celebration: Celebration | null = null;
   private lastCrowd = -1;
 
+  /** hand this session's recording over to the highlights, once: they are produced from it in the background */
+  private queueHighlights() {
+    const race = this.race;
+    if (race.isTimeTrial || this.quali || this.highlights.owns(this.replay) || this.replay.duration < 20) return;
+    const cls = race.classification();
+    const me = cls.find((r) => r.isPlayer);
+    this.highlights.queueRace({
+      id: `${Date.now().toString(36)}-${this.track.def.id}`,
+      replay: this.replay,
+      track: this.track,
+      trackId: this.track.def.id,
+      trackName: this.track.def.name,
+      trackShort: this.track.def.short,
+      laps: race.opts.laps,
+      playerId: race.player.id,
+      spectating: this.spectating,
+      cars: race.cars.map((c) => ({ id: c.id, entry: c.entry, code: c.entry.driver.code, first: c.entry.driver.first, last: c.entry.driver.last, color: uiColor(c.entry.team), compound: c.compound })),
+      date: Date.now(),
+      weather: { ...race.weatherState },
+      result: me ? (me.dnf ? 'DNF' : `P${me.pos}`) : '',
+      podium: cls.slice(0, 3).map((r) => r.entry.driver.last).join(' · '),
+    });
+  }
+
   private showResults() {
+    this.queueHighlights();
     this.state = 'results';
     this.audio.setScene('results');
     const rows = this.race.classification();
@@ -823,7 +897,7 @@ export class Game {
       if (this.race.opts.dynamicAI) this.career.setAiSkill(this.race.rateAiSkill());
       this.lastReward = reward;
     } else if (!this.race.isTimeTrial) reward = this.lastReward;
-    const again = () => (this.spectating ? this.startSpectate(this.menu.setup) : this.startRace(this.mode, this.menu.setup));
+    const again = () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.menu.setup));
     this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), reward);
   }
 
@@ -838,7 +912,8 @@ export class Game {
     // the key that closes a menu must not also act in the game this frame
     const menuFrame = this.state === 'menu' || this.state === 'results' || this.state === 'paused';
     if (menuFrame) {
-      this.menu.update(this.input.nav);
+      if (this.simSetup.open) this.simSetup.update(this.input.nav);
+      else this.menu.update(this.input.nav);
       st.pause = false;
       st.camera = false;
       st.drs = false;
@@ -940,9 +1015,10 @@ export class Game {
       if (!this.celMoment && this.celebration) {
         const place = this.race.player.position;
         const tTrophy = place === 3 ? 14 : place === 2 ? 16.5 : 19;
-        if (place <= 3 && !this.race.player.retired && this.celebration.time > tTrophy + 0.2) {
+        // (the podium is filmed from the screen: from ~7 s before the trophy, which is the moment)
+        if (place <= 3 && !this.race.player.retired && this.celebration.time > tTrophy - 6.8) {
           this.celMoment = true;
-          this.highlights.moment(place === 1 ? 'win' : 'podium', place === 1 ? `Victory at ${this.track.def.short}` : `P${place} on the podium`, `${EVENT_GP()} · ${new Date().toLocaleDateString()}`, place === 1 ? 100 : 85 - place * 3, this.track.def.short);
+          this.highlights.moment(place === 1 ? 'win' : 'podium', place === 1 ? `Victory at ${this.track.def.short}` : `P${place} on the podium`, `${EVENT_GP()} · ${new Date().toLocaleDateString()}`, place === 1 ? 100 : 85 - place * 3, this.track.def.short, tTrophy + 0.2 - this.celebration.time);
         }
       }
       // the race clock runs on (weather), but the cars stay where they're parked
@@ -1002,16 +1078,22 @@ export class Game {
     this.line.mesh.visible = showLine;
     // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
     if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
-    applyWeatherUniforms(race.weatherState);
-    this.env.setWeather(race.weatherState);
+    // (back in the garage, the last race's weather stays until its highlights are filmed)
+    const wx = (this.state === 'menu' && this.highlights.worldWeather(this.track.def.id)) || race.weatherState;
+    applyWeatherUniforms(wx);
+    this.env.setWeather(wx);
     this.env.update(dt, this.camera);
     this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos());
+    // the crowds and the trackside people follow the race
+    if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
+    else if (this.state !== 'paused') crowdReactions.quiet(dt);
     this.updatePits(dt, race);
     this.trackside.update(dt, this.camera);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.gfx.render(dt);
-    if (this.state === 'race' || this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
+    // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)
+    if (this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
     this.adaptQuality(dt);
   }
 
@@ -1214,17 +1296,55 @@ export class Game {
   // ------------------------------------------------------------------ watching: simulated race, broadcast, full replay
 
   /** a simulated race: every car (the player's too) on the AI, the TV director on the cameras */
-  private startSpectate(setup: RaceSetup) {
-    // a simulated qualifying sets the grid (nobody has to drive a lap)
+  /** the "Simulate a race" setup over the garage */
+  private openSimSetup() {
+    this.menu.show('none');
+    this.simSetup.show();
+  }
+
+  /** a simulated race from its setup: travel to the circuit if needed, then lights out */
+  private async startSimulation(cfg: SimConfig) {
+    this.simSetup.hide();
+    const c = { ...cfg };
+    if (c.track === 'random') {
+      const others = CIRCUITS.filter((x) => x.id !== this.track.def.id);
+      c.track = (others.length ? others : CIRCUITS)[Math.floor(Math.random() * (others.length || CIRCUITS.length))].id;
+    }
+    this.simCfg = c;
+    if (c.track !== this.track.def.id) {
+      this.menu.setup.track = c.track;
+      await this.travel(c.track);
+      if (this.track.def.id !== c.track) return;
+    }
+    const setup: RaceSetup = { ...this.menu.setup, track: c.track, laps: c.laps, weather: c.weather, time: c.time, damage: c.damage };
+    // every simulated race gets its own sky (a Random choice rolls again)
+    this.planKey = '';
+    this.startSpectate(setup, c);
+  }
+  /** the last simulated race's setup (circuit resolved), for "Race again" / Restart */
+  private simCfg: SimConfig | null = null;
+
+  /** a simulated race: every car (the player's too) on the AI, the TV director on the cameras */
+  private startSpectate(setup: RaceSetup, cfg: SimConfig | null = this.simCfg) {
     const diff = aiLevel(setup, this.career).value;
+    // the grid: a simulated qualifying (nobody drives a lap), a draw, reversed, or on pace
     const times = this.entries.map((e) => ({ e, t: aiQualifyingTime(e, diff, 1, 1) })).sort((a, b) => a.t - b.t);
-    this.gridOrder = times.map((x) => x.e);
+    let order = times.map((x) => x.e);
+    const grid = cfg?.grid ?? 'quali';
+    if (grid === 'reversed') order.reverse();
+    else if (grid === 'random') {
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+    } else if (grid === 'pace') order = this.entries.slice().sort((a, b) => b.team.pace * b.driver.skill - a.team.pace * a.driver.skill);
+    this.gridOrder = order;
     this.startRace('race', setup);
     this.gridOrder = null;
     // (startRace cleared these)
     this.spectating = true;
     this.recorded = true; // never counts for the career
-    this.celMoment = true; // and makes no highlights
+    this.celMoment = true; // and films no podium (its race highlights are still produced from the recording)
     const race = this.race;
     const p = race.player;
     this.autopilot = new AIDriver(aiPace(p.entry, race.opts.difficulty), p.entry.driver.aggression);
@@ -1232,13 +1352,27 @@ export class Game {
     p.car.allowReverse = false;
     p.car.assists = { traction: 'full', abs: true, stability: true, autoGear: true };
     race.playerDrsAuto = true;
+    // the field: a tight pack, the real spread, or a wild one (bigger gaps, harder racing)
+    const field = cfg?.field ?? 'mixed';
+    const spread = field === 'close' ? 0.003 : field === 'mixed' ? 0.006 : 0.014;
+    for (const c of race.cars) {
+      const ai = c.ai ?? (c.isPlayer ? this.autopilot : null);
+      if (!ai) continue;
+      if (field === 'close') ai.pace = 1 - (1 - ai.pace) * 0.5;
+      ai.pace *= 1 + (Math.random() * 2 - 1) * spread;
+      if (field === 'wild') ai.aggression = Math.min(1, ai.aggression + 0.25 + Math.random() * 0.2);
+    }
     this.specPitLap = setup.laps >= 8 ? Math.max(2, Math.round(setup.laps * (0.4 + Math.random() * 0.2))) : -1;
     this.specFinish = -1;
     this.state = 'spectate';
     this.stateTime = 0;
-    this.simSpeed = 1;
+    this.simSpeed = cfg?.speed ?? 1;
+    // the director is on unless a car was chosen to follow (then it still picks the cameras, on that car)
     this.directorOn = true;
-    this.focusId = race.cars.find((c) => c.position === 1)?.id ?? p.id;
+    const lockEntry = cfg && cfg.follow >= 0 ? this.entries[cfg.follow] : null;
+    const locked = lockEntry ? race.cars.find((c) => c.entry === lockEntry) : undefined;
+    this.director.lock = locked ? locked.id : -1;
+    this.focusId = locked?.id ?? race.cars.find((c) => c.position === 1)?.id ?? p.id;
     this.director.reset(this.focusId);
     this.replay.fresh.length = 0;
     this.cams.set('gantry');
@@ -1320,7 +1454,7 @@ export class Game {
     f.status = fc.retired ? 'OUT' : fc.pit.phase !== 'none' ? 'PIT' : fc.finished ? 'FINISHED' : '';
     f.caption = this.directorOn && this.director.focus === this.focusId ? this.director.caption : '';
     this.broadcast.setFollow(f);
-    this.broadcast.setShot(CAMERA_LABEL[this.cams.mode], this.cams.where, this.directorOn, this.simSpeed);
+    this.broadcast.setShot(this.cams.lost ? CAMERA_LABEL.heli : CAMERA_LABEL[this.cams.mode], this.cams.lost ? '' : this.cams.where, this.directorOn, this.simSpeed);
     // the flag: once everyone still running is home (or half a minute after the winner), the podium
     if (race.phase === 'finished') {
       if (this.specFinish < 0) this.specFinish = 0;
@@ -1567,7 +1701,7 @@ export class Game {
     f.status = fl & RF.retired ? 'OUT' : fl & RF.pit ? 'PIT' : fl & RF.finished ? 'FINISHED' : '';
     f.caption = this.directorOn && this.director.focus === k ? this.director.caption : '';
     this.broadcast.setFollow(f);
-    this.broadcast.setShot(CAMERA_LABEL[this.cams.mode], this.cams.where, this.directorOn, this.replaySpeed);
+    this.broadcast.setShot(this.cams.lost ? CAMERA_LABEL.heli : CAMERA_LABEL[this.cams.mode], this.cams.lost ? '' : this.cams.where, this.directorOn, this.replaySpeed);
     this.broadcast.setTime(this.replayT, R.raceTime, lap, laps, this.replayPlaying);
   }
 
@@ -1589,7 +1723,7 @@ export class Game {
     const setup = { ...this.menu.setup };
     if (opts.laps) setup.laps = opts.laps;
     if (opts.weather) setup.weather = opts.weather;
-    this.startSpectate(setup);
+    this.startSpectate(setup, null);
     const skip = opts.skip ?? 0;
     if (skip > 0) {
       this.race.startLights();
@@ -1632,7 +1766,7 @@ export class Game {
     const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.85 || w.time === 'night';
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
-      view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight);
+      view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight, !ghosts);
       if (this.rigCompound.get(c.entry) !== c.compound) {
         this.rigCompound.set(c.entry, c.compound);
         (this.rigs.get(c.entry) as CompoundRig).setCompound?.(c.compound);
@@ -1829,6 +1963,13 @@ export class Game {
       rig.setRainLight(false);
       rig.setDetail(0);
       rig.setDriverVisible(false);
+      // the teammate's car is up on stands with its wheels off (put back when the menu closes)
+      if (e === mate) {
+        rig.root.position.y += 0.3;
+        for (const w of ['wFL', 'wFR', 'wRL', 'wRR'] as const) rig.setWheelOff(w, 1);
+        this.mateOnStands = rig;
+        this.mateOnStandsEntry = e;
+      }
     }
     const b = this.pits.bay(team, player.seat);
     const c = b.pos;
@@ -1837,7 +1978,8 @@ export class Game {
     if (!this.garage || this.garageRig !== rig) {
       this.garage?.dispose();
       rig.root.updateMatrixWorld(true);
-      this.garage = new GarageScene(peopleKit(), rig, b, player.team, player.driver, this.highlights, this.career, this.track, { renderer: this.gfx.renderer, shadowLayer: GARAGE_SHADOW_LAYER, reflectLayer: GARAGE_MIRROR_LAYER });
+      const mb = this.pits.bay(team, mate.seat).pos.clone();
+      this.garage = new GarageScene(peopleKit(), rig, b, player.team, player.driver, this.highlights, this.career, this.track, { renderer: this.gfx.renderer, shadowLayer: GARAGE_SHADOW_LAYER, reflectLayer: GARAGE_MIRROR_LAYER, mateBay: mb });
       this.garageRig = rig;
       this.scene.add(this.garage.group);
     }
@@ -1863,7 +2005,7 @@ export class Game {
     type Shot = { cam: [number, number, number]; look: [number, number, number]; shift: number; fov: number };
     const shots: Record<HubTab, Shot> = {
       race: { cam: [3.5, 1.3, 6.2], look: [0, 0.75, -0.6], shift: 1.45, fov: 38 },
-      career: { cam: [4.3, 2.0, 3.0], look: [0, 0.35, -0.3], shift: 1.35, fov: 36 },
+      career: { cam: [3.45, 1.78, -4.85], look: [3.45, 1.35, -7.35], shift: 0.62, fov: 44 },
       highlights: { cam: [1.6, 2.5, -0.2], look: [0, 2.05, -6.0], shift: 1.0, fov: 42 },
       car: { cam: [3.4, 1.7, -4.6], look: [0, 0.45, -0.5], shift: 1.45, fov: 36 },
       setup: { cam: [3.6, 1.6, 3.6], look: [0, 0.35, 0], shift: 1.3, fov: 36 },
@@ -1874,8 +2016,15 @@ export class Game {
     const toW = (v: readonly [number, number, number], out: THREE.Vector3) =>
       out.copy(c).addScaledVector(left, v[0] * side).addScaledVector(fwd, v[2]).setY(c.y + v[1]);
     const wantPos = new THREE.Vector3(), wantLook = new THREE.Vector3();
-    const part = this.hubTab === 'setup' ? this.focusPart : null;
-    if (part && this.garage.parts[part === 'tyres' ? 'tyres' : part]) {
+    const T = this.tour;
+    const spot = T.at ? this.garage.spots[T.at] : null;
+    const part = this.hubTab === 'setup' && !spot ? this.focusPart : null;
+    if (spot && (!spot.orbit || T.flight)) {
+      // a place on the garage tour (the car's own place orbits once the camera is there)
+      wantPos.copy(spot.pos);
+      wantLook.copy(spot.look);
+      sh = { ...sh, shift: 0, fov: spot.fov * (spot.orbit ? 1 : T.zoom) };
+    } else if (part && this.garage.parts[part === 'tyres' ? 'tyres' : part]) {
       // a close look at the part being set up, from the open side
       const P = this.garage.parts[part];
       const rel = P.clone().sub(c);
@@ -1905,7 +2054,8 @@ export class Game {
       toW(sh.look, wantLook);
       if (this.hubTab === 'highlights') wantLook.copy(this.garage.wallCenter);
     }
-    // push the subject left of centre: the hub panel is on the right
+    // push the subject left of centre: the hub panel is on the right (not while touring: it steps aside)
+    if (spot) sh = { ...sh, shift: 0 };
     const dirV = wantLook.clone().sub(wantPos).normalize();
     const camRight = new THREE.Vector3().crossVectors(dirV, up).normalize();
     wantLook.addScaledVector(camRight, sh.shift);
@@ -1921,7 +2071,24 @@ export class Game {
     }
     const w = this.garageOrbit.dragging ? 14 : part ? 3.6 : 3.0;
     const thT = g.th + Math.atan2(Math.sin(thW - g.th), Math.cos(thW - g.th));
-    for (let left2 = Math.min(dt, 0.1); left2 > 1e-5; left2 -= 1 / 120) {
+    const flying = this.tourFly(dt, wantPos, wantLook, sh.fov);
+    const atStop = !flying && !!spot && !spot.orbit;
+    if (atStop) {
+      // at a tour stop: its framing, plus where you've dragged the view to (eased)
+      const k = 1 - Math.exp(-10 * dt);
+      T.yawS += (T.yaw - T.yawS) * k;
+      T.pitchS += (T.pitch - T.pitchS) * k;
+      const m = new THREE.Matrix4().lookAt(wantPos, wantLook, up);
+      const q = new THREE.Quaternion().setFromRotationMatrix(m);
+      q.premultiply(new THREE.Quaternion().setFromAxisAngle(up, T.yawS));
+      q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), T.pitchS));
+      this.camera.position.copy(wantPos);
+      this.camera.quaternion.copy(q);
+      this.camera.fov += (sh.fov - this.camera.fov) * k;
+      this.camera.updateProjectionMatrix();
+      g.init = false;
+    }
+    for (let left2 = flying || atStop ? 0 : Math.min(dt, 0.1); left2 > 1e-5; left2 -= 1 / 120) {
       const h = Math.min(left2, 1 / 120);
       g.vth += (w * w * (thT - g.th) - 2 * w * g.vth) * h;
       g.vr += (w * w * (rW - g.r) - 2 * w * g.vr) * h;
@@ -1935,19 +2102,21 @@ export class Game {
       g.vl.addScaledVector(a, h);
       g.look.addScaledVector(g.vl, h);
     }
-    g.pos.set(c.x + Math.sin(g.th) * g.r, c.y + g.y, c.z + Math.cos(g.th) * g.r);
-    this.camera.position.copy(g.pos);
-    this.camera.lookAt(g.look);
-    this.camera.fov = g.fov;
-    this.camera.updateProjectionMatrix();
-    this.dofTarget.copy(part ? this.garage.parts[part] : this.hubTab === 'highlights' ? this.garage.wallCenter : c.clone().setY(c.y + 0.5));
+    if (!flying && !atStop) {
+      g.pos.set(c.x + Math.sin(g.th) * g.r, c.y + g.y, c.z + Math.cos(g.th) * g.r);
+      this.camera.position.copy(g.pos);
+      this.camera.lookAt(g.look);
+      this.camera.fov = g.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.dofTarget.copy(spot ? wantLook : part ? this.garage.parts[part] : this.hubTab === 'highlights' ? this.garage.wallCenter : c.clone().setY(c.y + 0.5));
     // crisp: no depth of field in the garage, except a whisper of it on a part close-up
     if (part) this.gfx.setDepthOfField(true, this.dofTarget, 3.2, 1.1);
     else this.gfx.setDepthOfField(false);
     // nobody stands between the camera and the car
-    this.pits.clearView(g.pos, c, 1.6);
+    this.pits.clearView(this.camera.position, c, 1.6);
     this.pits.hideCrew(team);
-    this.garage.update(dt, g.pos, this.dofTarget, this.camera);
+    this.garage.update(dt, this.camera.position, this.dofTarget, this.camera, { onlyTooClose: atStop });
     this.updateHotspots();
   }
 
@@ -2010,6 +2179,13 @@ export class Game {
     const L = this.garageLook;
     if (!L) return;
     this.garageLook = null;
+    // the teammate's car back on its wheels
+    const m = this.mateOnStands;
+    if (m) {
+      for (const w of ['wFL', 'wFR', 'wRL', 'wRR'] as const) m.setWheelOff(w, 0);
+      this.mateOnStands = null;
+      this.mateOnStandsEntry = null;
+    }
     this.gfx.grain.blendMode.opacity.value = L.grain;
     this.gfx.maxDynamic = L.maxDyn;
     if (this.gfx.dynamicScale > L.maxDyn) this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
@@ -2017,6 +2193,131 @@ export class Game {
       l.shadow.autoUpdate = true;
       l.shadow.needsUpdate = true;
     }
+  }
+
+  // ---------------------------------------------------------------- garage: the tour
+  /**
+   * Walk around the garage: buttons in the picture fly the camera to another place (the
+   * car, the cockpit, the front wing, the gantry, the tool chests, the tyre sets, the
+   * telemetry desk, the video wall, the pit lane, the pit wall). The flight is a lifted
+   * Bézier arc (over the car, under the gantry, straight up out of the cockpit), eased,
+   * the view turning with it; at a stop you drag to look around (the car's place orbits)
+   * and the wheel zooms.
+   */
+  private tour = {
+    at: null as SpotId | null,
+    flight: null as null | { pending: boolean; t: number; dur: number; p0: THREE.Vector3; p1: THREE.Vector3; p2: THREE.Vector3; q0: THREE.Quaternion; fov0: number; up: boolean; down: boolean },
+    yaw: 0,
+    pitch: 0,
+    yawS: 0,
+    pitchS: 0,
+    zoom: 1,
+    dragging: false,
+    lx: 0,
+    ly: 0,
+  };
+  private tourUi: GarageTourUI | null = null;
+  private mateOnStands: CarRig | null = null;
+  private mateOnStandsEntry: unknown = null;
+
+  private tourGo(id: SpotId) {
+    const T = this.tour;
+    if (T.at === id && !T.flight) return;
+    const from = T.at;
+    T.at = id;
+    T.yaw = T.pitch = 0;
+    T.zoom = 1;
+    this.garageOrbit.active = false;
+    this.garageOrbit.dragging = false;
+    this.tourFlight(from === 'cockpit', id === 'cockpit');
+    this.menu.setExploring(true);
+    if (this.audioReady) this.audio.ui('select');
+  }
+  private tourExit() {
+    const T = this.tour;
+    if (!T.at) return;
+    const from = T.at;
+    T.at = null;
+    this.garageOrbit.active = false;
+    this.tourFlight(from === 'cockpit', false);
+    this.menu.setExploring(false);
+    if (this.audioReady) this.audio.ui('back');
+  }
+  private tourStep(dir: 1 | -1) {
+    const n = SPOT_ORDER.length;
+    const i = this.tour.at ? SPOT_ORDER.indexOf(this.tour.at) : dir > 0 ? -1 : 0;
+    this.tourGo(SPOT_ORDER[(i + dir + n) % n]);
+  }
+  private tourNav(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }): boolean {
+    if (!this.tour.at) return false;
+    if (nav.back) this.tourExit();
+    else if (nav.left || nav.up) this.tourStep(-1);
+    else if (nav.right || nav.down) this.tourStep(1);
+    return true;
+  }
+  /** start a flight from wherever the camera is now (its path is laid out on the next garage frame) */
+  private tourFlight(upOut: boolean, downIn: boolean) {
+    this.tour.flight = { pending: true, t: 0, dur: 1, p0: new THREE.Vector3(), p1: new THREE.Vector3(), p2: new THREE.Vector3(), q0: new THREE.Quaternion(), fov0: 40, up: upOut, down: downIn };
+  }
+  /** advance the flight toward (pos, look, fov); false when there is none */
+  private tourFly(dt: number, pos: THREE.Vector3, look: THREE.Vector3, fov: number): boolean {
+    const T = this.tour;
+    const F = T.flight;
+    if (!F || !this.garage) return false;
+    const up = new THREE.Vector3(0, 1, 0);
+    if (F.pending) {
+      F.pending = false;
+      const cam = this.camera;
+      F.p0.copy(cam.position);
+      F.q0.copy(cam.quaternion);
+      F.fov0 = cam.fov;
+      const p0 = F.p0, p3 = pos;
+      const d = p0.distanceTo(p3);
+      // inside the garage the arc stays under the light box and the gantry; out in the lane it may rise
+      const inside = (v: THREE.Vector3) => this.garage!.group.worldToLocal(v.clone()).z < 5.3;
+      const top = inside(p0) || inside(p3) ? 3.1 : 5;
+      const hi = Math.max(p0.y, p3.y);
+      const yMid = hi > top ? hi : THREE.MathUtils.clamp(hi + 0.3 + d * 0.04, 1.85, top);
+      const h = Math.max(0, (yMid - (p0.y + p3.y) / 2) / 0.75);
+      F.p1.copy(p0).lerp(p3, 0.3).setY(p0.y + (p3.y - p0.y) * 0.3 + h);
+      F.p2.copy(p0).lerp(p3, 0.7).setY(p0.y + (p3.y - p0.y) * 0.7 + h);
+      if (F.up) F.p1.copy(p0).setY(p0.y + Math.max(h, 1.1));
+      if (F.down) F.p2.copy(p3).setY(p3.y + Math.max(h, 1.1));
+      F.dur = THREE.MathUtils.clamp(1.0 + d * 0.1, 1.2, 2.8);
+      if (d < 0.05) F.dur = 0.6;
+    }
+    F.t = Math.min(1, F.t + dt / F.dur);
+    const t = F.t;
+    const e = t * t * t * (t * (t * 6 - 15) + 10);
+    // cubic Bézier p0 → p3 (the destination follows the shot, which drifts a little)
+    const u = 1 - e;
+    const p = new THREE.Vector3()
+      .addScaledVector(F.p0, u * u * u)
+      .addScaledVector(F.p1, 3 * u * u * e)
+      .addScaledVector(F.p2, 3 * u * e * e)
+      .addScaledVector(pos, e * e * e);
+    const qd = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, look, up));
+    this.camera.position.copy(p);
+    this.camera.quaternion.copy(F.q0).slerp(qd, e);
+    this.camera.fov = F.fov0 + (fov - F.fov0) * e;
+    this.camera.updateProjectionMatrix();
+    if (t >= 1) {
+      T.flight = null;
+      T.yawS = T.pitchS = 0;
+      // hand over to the springs (tabs, the car's orbit) from exactly here
+      this.garageCam.init = false;
+      const sp = T.at ? this.garage.spots[T.at] : null;
+      if (sp?.orbit) {
+        const O = this.garageOrbit;
+        const b = this.pits.bay(TEAMS.indexOf(this.race.player.entry.team), this.race.player.entry.seat);
+        const rel = pos.clone().sub(b.pos).setY(pos.y - b.pos.y - 0.45).applyAxisAngle(up, -b.yaw);
+        O.dist = rel.length();
+        O.yaw = Math.atan2(rel.x, rel.z);
+        O.pitch = Math.asin(rel.y / Math.max(0.1, O.dist));
+        O.active = true;
+      }
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------- garage: look around, hotspots
@@ -2028,9 +2329,18 @@ export class Game {
 
   private bindGarageInput() {
     const O = this.garageOrbit;
-    const onUi = (e: Event) => (e.target as HTMLElement).closest('.hub-panel, .hub-rail, .htab, .hotspot, .cta, .screen:not(.hub)') !== null;
+    const onUi = (e: Event) => (e.target as HTMLElement).closest('.hub-panel, .hub-rail, .htab, .hotspot, .cta, .screen:not(.hub), .wp, .tour-bar, .tour-pill') !== null;
+    const T = this.tour;
+    const freeLook = () => !!T.at && !T.flight && !this.garage?.spots[T.at].orbit;
     addEventListener('pointerdown', (e) => {
       if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e)) return;
+      if (T.flight) return;
+      if (freeLook()) {
+        T.dragging = true;
+        T.lx = e.clientX;
+        T.ly = e.clientY;
+        return;
+      }
       O.dragging = true;
       if (!O.active) {
         // start from where the camera is now
@@ -2046,17 +2356,31 @@ export class Game {
       O.ly = e.clientY;
     });
     addEventListener('pointermove', (e) => {
+      if (T.dragging) {
+        T.yaw = THREE.MathUtils.clamp(T.yaw + (e.clientX - T.lx) * 0.0035, -1.4, 1.4);
+        T.pitch = THREE.MathUtils.clamp(T.pitch + (e.clientY - T.ly) * 0.003, -0.75, 0.75);
+        T.lx = e.clientX;
+        T.ly = e.clientY;
+        return;
+      }
       if (!O.dragging) return;
       O.yaw -= (e.clientX - O.lx) * 0.006;
       O.pitch = THREE.MathUtils.clamp(O.pitch + (e.clientY - O.ly) * 0.004, 0.02, 1.2);
       O.lx = e.clientX;
       O.ly = e.clientY;
     });
-    addEventListener('pointerup', () => (O.dragging = false));
+    addEventListener('pointerup', () => {
+      O.dragging = false;
+      T.dragging = false;
+    });
     addEventListener(
       'wheel',
       (e) => {
-        if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e)) return;
+        if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e) || T.flight) return;
+        if (freeLook()) {
+          T.zoom = THREE.MathUtils.clamp(T.zoom * (1 + e.deltaY * 0.001), 0.5, 1.3);
+          return;
+        }
         O.active = true;
         O.dist = THREE.MathUtils.clamp(O.dist * (1 + e.deltaY * 0.001), 2.6, 10);
       },
@@ -2065,6 +2389,12 @@ export class Game {
     this.hotspotLayer = document.createElement('div');
     this.hotspotLayer.className = 'hotspots';
     (this.hud.root.parentElement ?? document.body).appendChild(this.hotspotLayer);
+    this.tourUi = new GarageTourUI(this.hud.root.parentElement ?? document.body, {
+      go: (id) => this.tourGo(id),
+      exit: () => this.tourExit(),
+      step: (d) => this.tourStep(d),
+      enter: () => this.tourGo('car'),
+    });
     const labels: [SetupPart, string][] = [['frontWing', 'Front wing'], ['rearWing', 'Rear wing'], ['brakes', 'Brakes'], ['suspension', 'Suspension'], ['floor', 'Ride height'], ['tyres', 'Tyres']];
     labels.forEach(([id, label], i) => {
       const h = document.createElement('button');
@@ -2083,7 +2413,23 @@ export class Game {
   private updateHotspots() {
     const L = this.hotspotLayer;
     if (!L) return;
-    const show = this.state === 'menu' && this.menu.screen === 'title' && this.hubTab === 'setup' && !!this.garage;
+    const onHub = this.state === 'menu' && this.menu.screen === 'title' && !!this.garage;
+    if (!onHub && this.tour.at) {
+      // left the garage mid-tour: back to the overview next time
+      this.tour.at = null;
+      this.tour.flight = null;
+      this.menu.setExploring(false);
+    }
+    this.tourUi?.sync({
+      visible: onHub,
+      at: this.tour.at,
+      spots: this.garage?.spots ?? null,
+      camera: this.camera,
+      overviewMarkers: this.hubTab !== 'setup',
+      panelLeft: this.tour.at ? innerWidth : innerWidth - 500,
+      flying: !!this.tour.flight,
+    });
+    const show = onHub && this.hubTab === 'setup' && !this.tour.at;
     L.classList.toggle('on', show);
     if (!show) return;
     const v = new THREE.Vector3();
@@ -2140,7 +2486,7 @@ export class Game {
         if (live && ps.phase === 'stop') {
           const P = stopPose(ps.timer, ps.stopTime, ps.slow, this.pitPose);
           view.setPit(P.liftF, P.liftR, P.wheel);
-        } else view.setPit(0, 0, null);
+        } else if (!(this.state === 'menu' && c.entry === this.mateOnStandsEntry)) view.setPit(0, 0, null); // (the garage keeps the teammate's wheels off)
       }
       if (!live || ps.phase === 'none' || (ps.phase === 'out' && ps.s > ps.boxS + 60)) continue;
       const k = TEAMS.indexOf(c.entry.team);

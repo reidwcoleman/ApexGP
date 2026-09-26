@@ -8,8 +8,8 @@ Every push to `main` is built and deployed to GitHub Pages by `.github/workflows
 
 **Almost everything is generated in code at startup** — the circuits, the cars and their liveries,
 the parks, the weather, the engine note. The one exception is the people: drivers, mechanics and
-fans are built on rigged CC0 character bodies and animations (`public/models/people/`, 5.5 MB),
-dressed and posed in code.
+fans are the Microsoft Rocketbox avatars and animations (MIT; `public/models/rocketbox/`, 13 MB,
+about half of it loaded up front, the fans behind), dressed in team kit and posed in code.
 
 ```bash
 npm install
@@ -61,7 +61,14 @@ npm run check    # tsc --noEmit
   stability, steering assist, braking assist, racing line Off/Corners/Full (the dynamic
   green/yellow/red line), auto/manual gears, DRS assist — as presets (Casual / Standard / Expert)
   or one by one.
-- **Watch and rewatch** — simulate a whole race with an automatic TV director and 23 cameras
+- **Races that are never the same** — driver form day to day, simulated qualifying, varied tyre
+  strategies with undercuts and overcuts, good and bad launches, driver mistakes, rare mechanical
+  failures and a virtual safety car after big crashes.
+- **Broadcast highlights** — after each race the best moments (overtakes, lead changes, battles,
+  crashes, the flag, the podium) are re-filmed offscreen from TV cameras and encoded as smooth 30 fps
+  video with broadcast graphics, played on the garage video wall and in the Highlights tab.
+- **Watch and rewatch** — simulate a race (pick the circuit, laps, weather, time, grid and more,
+  or randomise everything) with an automatic TV director and 23 cameras
   (onboards, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
   camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
@@ -135,6 +142,7 @@ Regression checks (all headless, no browser):
 All nine circuit centrelines are derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
 (Technical University of Munich, LGPL-3.0), traced from satellite imagery.
 
-People: *Universal Base Characters* and *Universal Animation Library* by
-[Quaternius](https://quaternius.com) (CC0 1.0), converted by `tools/build_people.py`; clothing,
-faces, crowds and poses are done in code. Teams, drivers and sponsors in the game are fictional.
+People: avatars and animations from the [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox)
+(MIT, see `public/models/rocketbox/LICENSE.txt`), fetched by `tools/rocketbox_fetch.py` and converted by
+`tools/build_rocketbox.mjs` (headless Chrome, `src/dev/rbconvert.ts`); team kits, head swaps, crowds and
+poses are done in code. Teams, drivers and sponsors in the game are fictional.

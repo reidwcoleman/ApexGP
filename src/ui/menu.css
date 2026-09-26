@@ -1652,3 +1652,289 @@
     animation: none;
   }
 }
+
+/* ======================================================================
+   The garage tour: buttons in the picture fly the camera to a place;
+   a bar at the bottom says where you are. While touring, the hub steps
+   aside (the panel, the tabs and the keys fade out).
+   ====================================================================== */
+#menu .hub .hub-panel,
+#menu .hub .hub-rail,
+#menu .hub .hub-credits,
+#menu .hub .hub-keys,
+#menu .hub .hub-scrim {
+  transition: opacity 0.35s var(--ease-out), transform 0.45s var(--ease-out);
+}
+#menu .hub.exploring .hub-panel {
+  opacity: 0;
+  transform: translateX(24px);
+  pointer-events: none;
+}
+#menu .hub.exploring .hub-rail {
+  opacity: 0;
+  transform: translate(-16px, -50%);
+  pointer-events: none;
+}
+#menu .hub.exploring .hub-credits,
+#menu .hub.exploring .hub-keys {
+  opacity: 0;
+  pointer-events: none;
+}
+#menu .hub.exploring .hub-scrim {
+  opacity: 0.45;
+}
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  font-family: var(--font);
+  color: var(--ink);
+  visibility: hidden;
+}
+.tour.on {
+  visibility: visible;
+}
+.tour kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--s1);
+  border-radius: 4px;
+  font: 700 var(--t-cap) var(--font);
+  color: var(--ink2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* a place's button, floating where the place is */
+.wp {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: -14px 0 0 -14px;
+  padding: 0 var(--s3) 0 0;
+  height: 28px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(10, 12, 17, 0.62);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--ink);
+  font: 700 var(--t-row) var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: none;
+  opacity: 0;
+  scale: 0.9;
+  transition: opacity 0.25s var(--ease-out), scale 0.3s var(--spring), background 0.2s;
+  will-change: transform;
+}
+.wp.show {
+  opacity: 1;
+  scale: 1;
+  pointer-events: auto;
+}
+.wp.show.far {
+  opacity: 0.8;
+}
+.wp:hover {
+  background: rgba(10, 12, 17, 0.86);
+}
+.wp:active {
+  scale: 0.96;
+}
+.wp-dot {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+}
+.wp-dot::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: #fff;
+  transition: inset 0.25s var(--spring), background 0.2s;
+}
+.wp:hover .wp-dot::after {
+  inset: 7px;
+  background: var(--accent);
+}
+
+/* the bar while touring */
+.tour-bar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s5);
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas: 'chips chips' 'back nav';
+  align-items: center;
+  justify-items: center;
+  gap: var(--s3);
+  transform: translate(-50%, 12px);
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out), transform 0.4s var(--spring);
+}
+.tour.touring .tour-bar {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+.tour-back,
+.tour-nav,
+.tour-chips button {
+  background: rgba(10, 12, 17, 0.72);
+  box-shadow: inset 0 0 0 1px var(--line);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+.tour-back {
+  grid-area: back;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 56px;
+  padding: 0 var(--s4) 0 var(--s3);
+  border: 0;
+  border-radius: var(--r-panel);
+  color: var(--ink);
+  font: 700 var(--t-row) var(--font);
+  cursor: pointer;
+  transition: background 0.2s, scale 0.2s var(--spring);
+}
+.tour-back:hover {
+  background: rgba(24, 27, 35, 0.9);
+}
+.tour-back:active,
+.tour-step:active {
+  scale: 0.96;
+}
+.tour-nav {
+  grid-area: nav;
+  display: grid;
+  grid-template-columns: 44px 220px 44px;
+  align-items: center;
+  height: 56px;
+  padding: 0 var(--s1);
+  border-radius: var(--r-panel);
+}
+.tour-step {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, scale 0.2s var(--spring);
+}
+.tour-step:hover {
+  background: var(--well);
+  color: var(--ink);
+}
+.tour-title {
+  display: grid;
+  justify-items: center;
+  line-height: 1.2;
+}
+.tour-title b {
+  font-size: var(--t-row);
+  font-weight: 700;
+}
+.tour-title span {
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink3);
+}
+.tour-chips {
+  grid-area: chips;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s2);
+}
+.tour-chips:empty {
+  display: none;
+}
+.tour-chips button {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  height: 32px;
+  padding: 0 var(--s2) 0 var(--s3);
+  border: 0;
+  border-radius: 16px;
+  color: var(--ink2);
+  font: 600 var(--t-cap) var(--font);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.tour-chips button:hover {
+  color: var(--ink);
+  background: rgba(24, 27, 35, 0.9);
+}
+
+/* the way in, from the overview */
+.tour-pill {
+  position: absolute;
+  left: calc((100vw - 500px) / 2);
+  bottom: 64px;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 44px;
+  padding: 0 var(--s3) 0 var(--s2);
+  border: 0;
+  border-radius: 22px;
+  background: rgba(10, 12, 17, 0.72);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  color: var(--ink);
+  font: 700 var(--t-row) var(--font);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  transition: opacity 0.3s var(--ease-out), background 0.2s, scale 0.2s var(--spring);
+}
+.tour-pill .wp-dot::after {
+  background: var(--accent);
+}
+.tour-pill:hover {
+  background: rgba(24, 27, 35, 0.9);
+}
+.tour-pill:active {
+  scale: 0.97;
+}
+.tour.touring .tour-pill {
+  opacity: 0;
+  pointer-events: none;
+}
+@media (max-width: 820px) {
+  .tour-pill {
+    left: 50%;
+    bottom: auto;
+    top: 96px;
+  }
+  .tour-nav {
+    grid-template-columns: 44px 160px 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wp,
+  .tour-bar {
+    transition: opacity 0.2s;
+  }
+}

@@ -10,6 +10,7 @@ import { rng } from './noise.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
 import { renderFanAtlas, ATLAS_COLS } from '../../people/Crowd.ts';
 import { peopleKit } from '../../people/Humans.ts';
+import { crowdUniforms, crowdReactions, REACT_GLSL } from '../../people/reactions.ts';
 import type { Track } from '../Track.ts';
 import type { WorldMap } from './worldmap.ts';
 import { buildLandmarks } from './landmarks.ts';
@@ -64,7 +65,19 @@ const ZANDVOORT_SEATS: number[][] = [
 function crowdAtlas(): { tex: THREE.CanvasTexture; variants: number } {
   const kit = peopleKit();
   const cv = kit ? renderFanAtlas(kit) : null;
-  if (cv && cv.width > 0 && hasInk(cv)) return { tex: canvasTexture(cv, true, 4), variants: ATLAS_COLS };
+  if (kit && cv && cv.width > 0 && hasInk(cv)) {
+    const tex = canvasTexture(cv, true, 4);
+    // (drawn with stand-ins while the fans' own avatars are still loading: redrawn when they're in)
+    if (!kit.complete)
+      kit.whenAll.then(() => {
+        const full = renderFanAtlas(kit);
+        if (full.width > 0 && hasInk(full)) {
+          tex.image = full;
+          tex.needsUpdate = true;
+        }
+      });
+    return { tex, variants: ATLAS_COLS };
+  }
   return { tex: drawnCrowdAtlas(), variants: 8 };
 }
 function hasInk(cv: HTMLCanvasElement): boolean {
@@ -217,15 +230,18 @@ function crowdMaterial(atlas: THREE.Texture, uniforms: { uTime: THREE.IUniform }
     sh.uniforms.uCrowd = { value: atlas };
     sh.uniforms.uTime = uniforms.uTime;
     sh.uniforms.uRain = weatherUniforms.uRain;
+    Object.assign(sh.uniforms, crowdUniforms);
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
 attribute float aShade;
+attribute float aS;
 uniform float uTime;
 varying vec2 vCrowdUv;
 varying float vShade;
-float h11( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }`,
+float h11( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }
+${REACT_GLSL}`,
       )
       .replace(
         '#include <begin_vertex>',
@@ -233,12 +249,20 @@ float h11( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }`,
 {
   float id = float( gl_InstanceID );
   float variant = floor( h11( id ) * ${variants.toFixed(1)} );
-  float excite = h11( id + 17.0 );
-  // waves roll along the stands; some fans are always on their feet
-  float wave = step( 0.9, sin( uTime * ( 0.35 + excite * 0.4 ) + id * 1.37 ) ) * step( 0.35, excite );
-  float bob = sin( uTime * ( 3.0 + excite * 4.0 ) + id ) * 0.025 * step( 0.55, excite ) + wave * 0.08;
+  float temper = h11( id + 17.0 );
+  // the race: fans get up and cheer as the cars come by (the leader, a battle, an overtake,
+  // a crash, the odd Mexican wave), each at their own threshold, so the stand ripples
+  float e = crowdExcite( aS ) * ( 0.6 + temper * 0.9 );
+  float thr = 0.35 + h11( id + 5.0 ) * 0.9;
+  // and on their own, the odd fan waving now and then
+  float lone = step( 0.93, sin( uTime * ( 0.35 + temper * 0.4 ) + id * 1.37 ) ) * step( 0.35, temper );
+  float up = max( lone, smoothstep( thr, thr + 0.25, e ) );
+  float wave = step( 0.5, up );
+  float hop = abs( sin( uTime * ( 5.0 + temper * 3.0 ) + id ) );
+  transformed.y += up * ( 0.12 + 0.09 * hop * min( e, 1.5 ) );
+  float bob = sin( uTime * ( 3.0 + temper * 4.0 ) + id ) * 0.025 * step( 0.55, temper );
   transformed.y += bob * ( position.y + 0.1 );
-  transformed.x += sin( uTime * 0.8 + id * 3.1 ) * 0.02 * position.y;
+  transformed.x += ( sin( uTime * 0.8 + id * 3.1 ) * 0.02 + sin( uTime * 3.6 + id * 3.1 ) * 0.03 * up ) * position.y;
   vCrowdUv = vec2( ( variant + uv.x ) / ${variants.toFixed(1)}, ( ( 1.0 - wave ) + uv.y ) / 2.0 );
   vShade = aShade;
 }`,
@@ -268,7 +292,7 @@ varying float vShade;`,
       )
       .replace('#include <color_fragment>', '');
   };
-  mat.customProgramCacheKey = () => 'apex-crowd-v4-' + variants;
+  mat.customProgramCacheKey = () => 'apex-crowd-v5-' + variants;
   return mat;
 }
 
@@ -496,8 +520,9 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uniforms.uTime;
     sh.uniforms.uWind = weatherUniforms.uWind;
+    Object.assign(sh.uniforms, crowdUniforms);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nuniform float uTime;\nuniform vec2 uWind;\nattribute float aDesign;\nattribute float aBig;`)
+      .replace('#include <common>', `#include <common>\nuniform float uTime;\nuniform vec2 uWind;\nattribute float aDesign;\nattribute float aBig;\nattribute float aS;\n${REACT_GLSL}`)
       .replace(
         '#include <uv_vertex>',
         `#include <uv_vertex>
@@ -517,12 +542,15 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
   float amp = mix( 0.16, 0.45, aBig );
   transformed.z += sin( ph ) * amp * k;
   transformed.y += sin( ph * 0.7 ) * amp * 0.3 * k - k * k * 0.12 * aBig;
-  // hand-held flags are waved from side to side
-  transformed.x += ( 1.0 - aBig ) * sin( uTime * 1.7 + id ) * 0.35 * ( position.y + 1.4 ) * 0.3;
+  // hand-held flags are waved from side to side, hard when the cars come by
+  float fe = ( 1.0 - aBig ) * min( crowdExcite( aS ), 2.0 );
+  float sway = sin( uTime * 1.7 + id ) * 0.35 * ( 1.0 - min( fe, 1.0 ) * 0.6 ) + sin( uTime * 4.3 + id ) * 0.45 * min( fe, 1.4 );
+  transformed.x += ( 1.0 - aBig ) * sway * ( position.y + 1.4 ) * 0.3;
+  transformed.y += fe * 0.15;
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-flag-v3';
+  mat.customProgramCacheKey = () => 'apex-flag-v4';
   return mat;
 }
 
@@ -585,8 +613,8 @@ function screenTexture(): THREE.CanvasTexture {
 
 // ---------------------------------------------------------------- build
 
-interface Person { m: THREE.Matrix4; c: THREE.Color; shade: number }
-interface Flag { m: THREE.Matrix4; design: number; big: number }
+interface Person { m: THREE.Matrix4; c: THREE.Color; shade: number; s?: number }
+interface Flag { m: THREE.Matrix4; design: number; big: number; s?: number }
 
 export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): GrandstandBuild {
   const group = new THREE.Group();
@@ -598,6 +626,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const r = rng(2024);
   const people: Person[] = [];
   const flags: Flag[] = [];
+  const standRanges: [number, number][] = [];
 
   const reds = ['#c8102e', '#d4202c', '#a50d22', '#e53935', '#8e0c1c', '#c8102e', '#b3101f'].map((h) => new THREE.Color(h));
   const others = [
@@ -834,10 +863,18 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     steel.append(lsteel);
     boards.append(lboards);
     glass.append(lglass);
+    let sLo = Infinity, sHi = -Infinity, hint = -1;
     for (const p of standPeople) {
       p.m.premultiply(M);
+      const pr = track.project(p.m.elements[12], p.m.elements[14], hint);
+      hint = pr.index;
+      p.s = pr.s;
+      sLo = Math.min(sLo, pr.s);
+      sHi = Math.max(sHi, pr.s);
       people.push(p);
     }
+    // (a stand across the start line would span the whole lap: no Mexican waves there)
+    if (standPeople.length && sHi - sLo < Math.min(600, track.length / 3)) standRanges.push([sLo, sHi]);
     for (const f of standFlags) {
       f.m.premultiply(M);
       flags.push(f);
@@ -886,6 +923,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
 
   // ---------------------------------------------------------------- fans on the grass banks
   for (const b of layout.banks as SpectatorBank[]) {
+    if (b.sB - b.sA > 80) standRanges.push([b.sA, b.sB]);
     const f = track.frame(b.sA);
     const p = new THREE.Vector3();
     for (let s = b.sA; s <= b.sB; s += 0.7) {
@@ -902,10 +940,10 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
         const sc = 1.25 + r() * 0.12;
         const m = new THREE.Matrix4().makeRotationY(face + Math.PI).setPosition(p.x, y, p.z);
         m.multiply(new THREE.Matrix4().makeScale(sc, sc, sc));
-        people.push({ m, c: fanColor(), shade: 1 });
+        people.push({ m, c: fanColor(), shade: 1, s });
         if (r() < 0.03) {
           const fm = new THREE.Matrix4().makeRotationY(face + Math.PI).setPosition(p.x, y + 2.3, p.z);
-          flags.push({ m: fm, design: flagDesign(), big: 0 });
+          flags.push({ m: fm, design: flagDesign(), big: 0, s });
         }
       }
     }
@@ -945,6 +983,22 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const shade = new Float32Array(people.length);
   people.forEach((p, i) => (shade[i] = p.shade));
   personGeo.setAttribute('aShade', new THREE.InstancedBufferAttribute(shade, 1));
+  // where along the track each fan watches from (what the crowd reacts to is in track distance)
+  const trackS = (list: { m: THREE.Matrix4; s?: number }[]) => {
+    const out = new Float32Array(Math.max(1, list.length));
+    let hint = -1;
+    list.forEach((p, i) => {
+      if (p.s === undefined) {
+        const pr = track.project(p.m.elements[12], p.m.elements[14], hint);
+        hint = pr.index;
+        p.s = pr.s;
+      }
+      out[i] = p.s;
+    });
+    return out;
+  };
+  personGeo.setAttribute('aS', new THREE.InstancedBufferAttribute(trackS(people), 1));
+  crowdReactions.setTrack(track.length, standRanges);
   const atlas = crowdAtlas();
   const crowd = new THREE.InstancedMesh(personGeo, crowdMaterial(atlas.tex, uniforms, atlas.variants), Math.max(1, people.length));
   people.forEach((p, i) => {
@@ -970,6 +1024,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   });
   flagGeo.setAttribute('aDesign', new THREE.InstancedBufferAttribute(design, 1));
   flagGeo.setAttribute('aBig', new THREE.InstancedBufferAttribute(big, 1));
+  flagGeo.setAttribute('aS', new THREE.InstancedBufferAttribute(trackS(flags), 1));
   const flagMesh = new THREE.InstancedMesh(flagGeo, flagMaterial(flagAtlas(map.venue), uniforms), Math.max(1, flags.length));
   flags.forEach((f, i) => flagMesh.setMatrixAt(i, f.m));
   flagMesh.count = flags.length;

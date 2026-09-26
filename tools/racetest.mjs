@@ -1,7 +1,7 @@
 // Headless full race through Race.ts: lights, laps, finish, classification.
 import { Track } from '../src/world/Track.ts';
 import { CIRCUITS } from '../src/world/Circuits.ts';
-import { Race } from '../src/race/Race.ts';
+import { Race, mulberry32 } from '../src/race/Race.ts';
 import { allEntries } from '../src/race/Teams.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';
 import { planWeather } from '../src/world/Weather.ts';
@@ -9,9 +9,11 @@ const track = new Track(CIRCUITS.find((c) => c.id === process.env.TRACK) ?? CIRC
 const entries = allEntries();
 const LAPS = Number(process.argv[2] ?? 3);
 const WX = process.argv[3] ?? 'clear';
-const race = new Race(track, { mode: 'race', laps: LAPS, difficulty: 0.97, playerEntry: entries[4], playerGrid: 9, entries, weather: planWeather(WX, 'afternoon', LAPS * 85, Number(process.env.SEED ?? 3)) });
+// SEED=n: the whole race repeats exactly (weather, form, launches, mistakes, strategy); unset: a fresh race each run
+const SEED = process.env.SEED !== undefined ? Number(process.env.SEED) : undefined;
+const race = new Race(track, { mode: 'race', laps: LAPS, difficulty: 0.97, playerEntry: entries[4], playerGrid: 9, entries, weather: planWeather(WX, 'afternoon', LAPS * 85, SEED ?? 3), seed: SEED });
 console.log('weather', WX, JSON.stringify(race.weather.plan.keys.slice(0, 3)), 'changeAt', race.weather.plan.changeAt);
-const auto = new AIDriver(0.985, 0.6);
+const auto = new AIDriver(0.985, 0.6, mulberry32((race.seed ^ 0x5eed) >>> 0));
 auto.startFrom(race.player.car, track);
 race.startLights();
 const dt = 1 / 60;
@@ -28,8 +30,9 @@ while (t < LAPS * 110 + 60) {
   if (w.kind !== lastKind) { lastKind = w.kind; console.log(`  t=${t.toFixed(0)} weather ${w.kind} rain ${w.rain.toFixed(2)} wet ${w.wetness.toFixed(2)}`); }
   if (Math.round(t * 60) % (60 * 30) === 0) console.log(`  t=${t.toFixed(0)} wet ${w.wetness.toFixed(2)} dry ${w.dryLine.toFixed(2)} tyres ${race.cars.map((c) => c.compound[0]).join('')}`);
   t += dt;
-  if (race.cars.every((c) => c.finished)) break;
+  if (race.cars.every((c) => c.finished || c.retired)) break;
 }
 console.log('sim', t.toFixed(1), 's; events', JSON.stringify(kinds));
 for (const r of race.classification()) console.log(String(r.pos).padStart(2), r.entry.driver.code, r.isPlayer ? '*' : ' ', 'laps', r.laps, 'time', isFinite(r.time) ? r.time.toFixed(2) : '-', 'gap', typeof r.gap === 'number' ? r.gap.toFixed(3) : r.gap, 'best', r.best.toFixed(3), 'stops', race.cars.find((c) => c.entry === r.entry).stops, race.cars.find((c) => c.entry === r.entry).compoundsUsed.join('>'));
+console.log('seed', race.seed, 'incidents', JSON.stringify(race.incidents), 'winner', race.classification()[0].entry.driver.code, 'retired', race.cars.filter((c) => c.retired).map((c) => c.entry.driver.code).join(',') || '-');
 let dmg = 0; for (const c of race.cars) dmg += 1 - c.car.integrity; console.log('total damage (integrity lost, sum)', dmg.toFixed(2));

@@ -701,6 +701,26 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
             for (const ls of lineS) if (Math.abs(s - ls) < PXM * 0.7) pl = 1;
             if (zLine && q.kt >= zLine[1] && q.kt <= zLine[2]) pl = 1;
             if (pl) col = shade(col, 0.55);
+            else if (carbon < 0.5) {
+              // quarter-turn fasteners beside the panel lines (~9 mm heads every 11 cm)
+              const FP = 0.11;
+              const R2 = (PXM * 1.7) ** 2;
+              let fd = Infinity;
+              for (const ls of lineS) {
+                const ds = Math.abs(s - ls) - PXM * 4;
+                const zz = ((z % FP) + FP) % FP;
+                const dz = Math.min(zz, FP - zz);
+                fd = Math.min(fd, ds * ds + dz * dz);
+              }
+              const zf = panelZ.find((p) => Math.abs(Math.abs(z - p[0]) - PXM * 4) < PXM * 2);
+              if (zf && q.kt >= zf[1] && q.kt <= zf[2]) {
+                const ss = ((s % FP) + FP) % FP;
+                const dsv = Math.min(ss, FP - ss);
+                const dz = Math.abs(z - zf[0]) - PXM * 4;
+                fd = Math.min(fd, dsv * dsv + dz * dz);
+              }
+              if (fd < R2) col = shade(col, fd < R2 * 0.3 ? 0.5 : 0.72);
+            }
             // cooling louvres on the sidepod downwash ramp
             if (zc < -0.28 && zc > -0.7 && q.kt > 5.15 && q.kt < 5.85) {
               const f = (zc + 10) / 0.024;

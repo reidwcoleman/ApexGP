@@ -61,9 +61,9 @@ export function aiLevel(setup: RaceSetup, career: Career): { value: number; dyna
 }
 const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
 const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
-/** the setup save format (2: dynamic AI, lenient track limits, no braking assist by default) */
-const SETUP_V = 2;
-const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'clear', time: 'afternoon', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
+/** the setup save format (2: dynamic AI, lenient track limits, no braking assist by default; 3: random weather and time of day) */
+const SETUP_V = 3;
+const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
   { label: 'Midfield', slot: 10 },
@@ -112,6 +112,8 @@ export interface MenuCallbacks {
   onPlayHighlight(id: string): void;
   /** the highlight on the garage wall right now */
   nowPlaying?(): string | null;
+  /** the garage tour takes the keys while it runs (returns true when it used them) */
+  tourNav?(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }): boolean;
   /** watch a simulated race (every car on AI, broadcast cameras) */
   onSpectate?(setup: RaceSetup): void;
 }
@@ -128,7 +130,7 @@ const HUB_TABS: { id: HubTab; label: string }[] = [
 ];
 
 /** facts for the circuit cards */
-const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: number; line: string }> = {
+export const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: number; line: string }> = {
   monza: { country: 'Italy', km: '5.793', turns: 11, line: 'The Temple of Speed' },
   spa: { country: 'Belgium', km: '7.004', turns: 19, line: 'Eau Rouge, Raidillon and the Ardennes' },
   silverstone: { country: 'Great Britain', km: '5.891', turns: 18, line: 'Maggotts, Becketts and Chapel' },
@@ -143,7 +145,7 @@ const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: number;
 const fmtCr = (n: number) => '₵\u2009' + Math.round(n).toLocaleString('en-US');
 
 /** a circuit's outline as an SVG path, fitted to a w × h box */
-function circuitPath(points: number[], w: number, h: number, pad = 4): string {
+export function circuitPath(points: number[], w: number, h: number, pad = 4): string {
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (let i = 0; i < points.length; i += 2) {
     x0 = Math.min(x0, points[i]); x1 = Math.max(x1, points[i]);
@@ -233,8 +235,12 @@ export class Menu {
     this.setup = load<RaceSetup>('apexgp.setup', { ...DEFAULT_SETUP, v: 0, assists: { ...DEFAULT_ASSISTS } });
     // saves from before the current defaults: pick up the new assists (no braking assist),
     // Dynamic AI and lenient track limits once; everything else the player chose stays
-    if ((this.setup.v ?? 0) < SETUP_V) {
-      this.setup = { ...this.setup, v: SETUP_V, assists: { ...DEFAULT_ASSISTS }, difficulty: 0, trackLimits: 'lenient' };
+    const sv = this.setup.v ?? 0;
+    if (sv < 2) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS }, difficulty: 0, trackLimits: 'lenient' };
+    // every race different: the weather and the light are rolled fresh each time (once; a player's own choice after this stays)
+    if (sv < 3) this.setup = { ...this.setup, weather: 'random', time: 'random' };
+    if (sv < SETUP_V) {
+      this.setup.v = SETUP_V;
       save('apexgp.setup', this.setup);
     }
     if (!(this.setup.difficulty >= 0 && this.setup.difficulty < DIFFICULTY.length)) this.setup.difficulty = 0;
@@ -667,6 +673,11 @@ export class Menu {
       this.renderTab();
     });
     el('div', 'hp-note', p, 'Drag the car to look around it. The set-up applies to your car from the next session.');
+  }
+
+  /** the garage tour is on: the panel and the tabs step aside for the picture */
+  setExploring(on: boolean) {
+    this.screens.get('title')?.classList.toggle('exploring', on);
   }
 
   /** the highlights list shows which clip the wall is playing */
@@ -1106,6 +1117,7 @@ export class Menu {
     }
     if (this.screen === 'title') {
       if (this.hubTab === 'highlights') this.markPlaying(this.cb.nowPlaying?.() ?? null);
+      if (this.cb.tourNav?.(nav)) return;
       return this.hubNav(nav);
     }
     if (nav.up || nav.down) {

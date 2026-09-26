@@ -17,7 +17,8 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
  *   fence    — chain-link debris fence with tension cables (RGBA, 0.5 m × 4 m)
  */
 
-export const ASPHALT_TILE = 1.7;
+/** metres per aggregate tile: 1.0 m → 1 mm/px, chips 5–11 mm (a fine stone-mastic surface course) */
+export const ASPHALT_TILE = 1.0;
 export const ASPHALT_ALB_MAX = 0.16;
 export const GRAVEL_TILE = 1.6;
 export const GRASS_TILE = 1.5;

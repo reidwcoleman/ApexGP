@@ -45,7 +45,7 @@ if (evalJs) {
   if (r !== undefined) console.log('eval', JSON.stringify(r));
   await page.waitForTimeout(after);
 }
-await page.screenshot({ path: out });
+await page.screenshot({ path: out, timeout: 180000 });
 const info = await page.evaluate(() => window.__info ?? null).catch(() => null);
 console.log(`saved ${out} in ${Date.now() - t0}ms`);
 if (info) console.log('info', JSON.stringify(info));

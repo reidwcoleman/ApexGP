@@ -279,7 +279,7 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
       // wet-road reflections scale with the quality preset: off on low/medium, 1/3-res copy on high, 1/2 on ultra
       const q = gfx.qualityLevel;
       ssr.enabled = reflections && (q === 'high' || q === 'ultra');
-      ssr.downscale = ssr.fixedDownscale ?? (q === 'ultra' ? 2 : 3);
+      ssr.downscale = ssr.fixedDownscale ?? (q === 'low' ? 3 : 2);
     },
   };
 }

@@ -2,12 +2,15 @@ import type { Race, RaceEvent } from './Race.ts';
 import { fmtTime } from '../ui/HUD.ts';
 import { COMPOUNDS } from './Pit.ts';
 import { isWetKind } from '../world/Weather.ts';
+import { MISTAKE } from '../sim/AIDriver.ts';
 
 /**
  * The race engineer: turns race state into short team-radio lines.
  * One line at a time, with a cooldown so it never chatters — and only when
  * it matters (no radio for a rub, a lap summary every other lap).
  */
+/** events about other cars the engineer talks about */
+const OTHERS = new Set(['fastest-lap', 'retired', 'vsc', 'vsc-ending', 'vsc-end', 'mistake']);
 /** seconds between two radio lines */
 const RADIO_GAP = 8;
 export class Engineer {
@@ -48,11 +51,11 @@ export class Engineer {
   update(dt: number, race: Race, events: RaceEvent[]): string | null {
     const p = race.player;
     const code = (id: number) => race.cars[id].entry.driver.code;
-    const cornerName = () => {
+    const cornerName = (s = p.car.s) => {
       let best = race.track.corners[0];
       let bd = Infinity;
       for (const c of race.track.corners) {
-        const d = Math.abs(race.track.delta(c.sApex, p.car.s));
+        const d = Math.abs(race.track.delta(c.sApex, s));
         if (d < bd) {
           bd = d;
           best = c;
@@ -62,7 +65,7 @@ export class Engineer {
     };
 
     for (const e of events) {
-      if (e.car !== p.id && e.kind !== 'fastest-lap') continue;
+      if (e.car !== p.id && !OTHERS.has(e.kind)) continue;
       switch (e.kind) {
         case 'lights-out':
           this.say(
@@ -84,7 +87,7 @@ export class Engineer {
           this.say(e.value && e.value >= race.limitWarnings ? `That's your last warning for track limits. Keep it inside the white lines.` : `Track limits at ${cornerName()}.${e.value ? ` Warning ${e.value}.` : ' That lap is gone.'}`);
           break;
         case 'penalty':
-          this.say(`We have a ${e.value} second penalty for track limits. Push, we need to pull a gap.`, true);
+          this.say(`We have a ${e.value} second penalty for ${e.reason === 'VSC delta' ? 'going too fast under the VSC' : 'track limits'}. Push, we need to pull a gap.`, true);
           break;
         case 'final-lap':
           this.say('Final lap. Bring it home.', true);
@@ -119,8 +122,30 @@ export class Engineer {
         }
         case 'retired':
           if (e.car === p.id) this.say(e.value ? "Stop the car, stop the car! There's a fire — get out, get out now." : "That's it, the car's too badly damaged. Bring it to a stop.", true);
+          else if (e.value === 2) this.say(`${code(e.car)} has stopped on track — looks like a mechanical failure.`);
           else this.say(`${code(e.car)} is out of the race${e.value ? ', car on fire' : ''}. Watch for debris.`);
           break;
+        case 'vsc':
+          this.say('Virtual safety car, VSC, VSC. Stay above the delta — no overtaking.', true);
+          break;
+        case 'vsc-ending':
+          this.say('VSC ending. Get ready, get the tyres warm.', true);
+          break;
+        case 'vsc-end':
+          this.say('Green, green, green. Push now!', true);
+          break;
+        case 'mistake': {
+          // only the cars we're racing: one place either side, and close
+          const o = race.cars[e.car];
+          if (!o || e.car === p.id || race.isTimeTrial) break;
+          const ahead = o.position === p.position - 1 && p.gapAhead < 3;
+          const behind = o.position === p.position + 1 && o.gapAhead < 3;
+          if (!ahead && !behind) break;
+          const where = cornerName(o.car.s);
+          const what = e.value === MISTAKE.SPIN ? `has spun at ${where}` : e.value === MISTAKE.LOCKUP ? `locked up into ${where}` : `ran wide at ${where}`;
+          this.say(ahead ? `${code(e.car)} ${what}! Go, go, he's right there.` : `${code(e.car)} behind ${what}. Gap's opening, keep it clean.`);
+          break;
+        }
         case 'damage':
           this.say('Front wing damage, front wing damage. Box this lap, we have a new nose ready.', true);
           break;

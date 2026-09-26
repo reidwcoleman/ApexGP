@@ -9,15 +9,19 @@ import { naturalStance, turnHead, aimArm, lean } from '../people/poses.ts';
 import { MOMENT_LABEL, type Highlight, type Highlights } from '../career/Highlights.ts';
 import type { Career } from '../career/Career.ts';
 import type { Track } from '../world/Track.ts';
+import { buildDressing, garageSpots, type Dressing, type Spot, type SpotId } from './GarageDressing.ts';
 
 /**
  * Your garage, dressed for the menu like a team feature on TV: the car on branded tyre
  * blankets with proper front and rear jacks, a cooling blower in its sidepod, an LED
  * light box overhead; a video wall behind it playing your best racing moments (real
- * video, with a broadcast lower third), the telemetry and career screens on rolling
- * towers, the engineers' laptop cart, tool chests, a wheel-gun rack; and people: you in
- * your race suit, mechanics kneeling at the wheels and fetching tools, the race engineer
- * at the laptop, two engineers at the data desk, fans at the rope on the pit-lane walk.
+ * video, with a broadcast lower third), the engineers' laptop cart, tool chests, a
+ * wheel-gun rack, and the rest of the garage from GarageDressing.ts (the telemetry desk
+ * whose monitors show your career and the circuit, tyre sets on a rack, the teammate's
+ * car on stands, flight cases, extinguishers, a fan, gantry trays); and people: you in
+ * your race suit, mechanics at the wheels, the front wing and the second car, one
+ * fetching tools, the race engineer at the laptop, two engineers at the telemetry desk,
+ * fans at the rope on the pit-lane walk. `spots` are the places of the garage tour.
  *
  * Built in the car's frame (x = the car's left, z = forward toward the lane); `side`
  * says which way the garage's open middle is (cameras stand there). Static props are
@@ -53,6 +57,10 @@ export class GarageScene {
   readonly parts: Record<PartId, THREE.Vector3> = {} as Record<PartId, THREE.Vector3>;
   /** the video wall's centre (world) — the Highlights tab frames it */
   readonly wallCenter = new THREE.Vector3();
+  /** the viewpoints of the garage tour (world) */
+  readonly spots: Record<SpotId, Spot>;
+  private readonly dressing: Dressing;
+  private blanketMat: THREE.Material | null = null;
 
   private readonly people: { p: Person; pose?: Pose }[] = [];
   private readonly owned: { dispose(): void }[] = [];
@@ -101,7 +109,7 @@ export class GarageScene {
     private readonly highlights: Highlights,
     private readonly career: Career,
     private readonly track: Track,
-    opts: { renderer?: THREE.WebGLRenderer; shadowLayer?: number; reflectLayer?: number } = {},
+    opts: { renderer?: THREE.WebGLRenderer; shadowLayer?: number; reflectLayer?: number; mateBay?: THREE.Vector3 } = {},
   ) {
     this.group.name = 'garage-scene';
     const g = this.group;
@@ -200,6 +208,7 @@ export class GarageScene {
       const blanketM = new THREE.MeshStandardMaterial({ map: band, roughness: 0.92, metalness: 0 });
       blanketM.userData.reflect = true;
       this.owned.push(blanketM);
+      this.blanketMat = blanketM;
       for (const w of [wFL, wFR, wRL, wRR]) {
         const out = Math.sign(w.x);
         const hw = w === wFL || w === wFR ? 0.19 : 0.21;
@@ -492,7 +501,8 @@ export class GarageScene {
         c.textBaseline = 'middle';
         c.fillText('HIGHLIGHTS', 74, h / 2 + 2);
       });
-      ovPlane(ovMat(bug), 64, 56, 352, 66);
+      // (the produced clips carry their own broadcast bug and lower third: the wall's are kept for the attract card only)
+      ovPlane(ovMat(bug), 64, 56, 352, 66).visible = false;
       this.pips = this.screen(512, 32);
       ovPlane(ovMat(this.pips.tex), 1920 - 64 - 400, 70, 400, 25);
       const ls = this.screen(1600, 240);
@@ -500,38 +510,43 @@ export class GarageScene {
       const lm = ovMat(ls.tex);
       ls.tex.wrapS = THREE.ClampToEdgeWrapping;
       this.lower = { mesh: ovPlane(lm, 64, 1080 - 72 - 180, lw, 180, 0.004, true), s: ls, w: lw };
+      this.lower.mesh.visible = false;
       ovPlane(ovMat(null, 0xffffff, 0.18), 64, 1080 - 44, 1792, 6, 0.003, true);
       this.progress = ovPlane(ovMat(null, new THREE.Color(this.accent)), 64, 1080 - 44, 1792, 6, 0.005, true);
     }
 
-    // ------------------------------------------------------------ telemetry + career screens on rolling towers
+    // ------------------------------------------------------------ the rest of the garage (GarageDressing.ts): the telemetry
+    // desk (its monitors show the career, the circuit and live traces), a rack of tyre sets,
+    // the teammate's car on stands, flight cases, extinguishers, a fan, gantry trays, floor marks
     this.tele = this.screen(1536, 864);
     this.stats = this.screen(1536, 864);
-    const tower = (x: number, z: number, ry: number, s: Screen) => {
-      const T = node(x, 0, z, ry);
-      T.userData.keep = true;
-      rbox(0.74, 0.05, 0.56, 0.015, satin, 0, 0.09, 0, T);
-      for (const cx of [-0.31, 0.31]) for (const cz of [-0.22, 0.22]) caster(cx, cz, T, 0.035);
-      rbox(0.1, 1.5, 0.1, 0.02, alu, 0, 0.85, -0.04, T);
-      rbox(1.4, 0.84, 0.07, 0.025, black, 0, 1.62, -0.02, T);
-      box(1.4, 0.03, 0.072, teamPaint, 0, 1.62 - 0.435, -0.02, T);
-      const sm = new THREE.MeshBasicMaterial({ map: s.tex, color: new THREE.Color(1.05, 1.05, 1.05) });
-      this.owned.push(sm);
-      add(new THREE.PlaneGeometry(1.32, 0.7425), sm, 0, 1.63, 0.017, 0, 0, 0, T, false).castShadow = false;
-      return T;
-    };
-    tower(S * 2.9, tailZ - 3.4, S * 0.35, this.tele);
-    // the career tower beside it, at the back of the open side (clear of every tab's camera and of the camera's moves)
-    tower(S * 4.45, tailZ - 2.85, S * 0.62, this.stats);
+    const mateLocal = opts.mateBay ? opts.mateBay.clone().applyMatrix4(inv) : null;
+    this.dressing = buildDressing({
+      g,
+      S,
+      owned: this.owned,
+      aniso: this.aniso,
+      accent: this.accent,
+      team,
+      teamCol,
+      noseZ,
+      tailZ,
+      midZ,
+      wheelR: R,
+      mate: mateLocal,
+      screens: [this.stats.tex, this.tele.tex, this.laptopTex],
+      blanket: this.blanketMat!,
+      mats: { steel, chrome, black, satin, rubber, teamPaint, teamMatte, hose, alu },
+    });
 
     // ------------------------------------------------------------ fans' rope on the pit-lane walk
     {
-      for (const x of [-S * 2.6, -S * 0.3, S * 2.0]) {
+      for (const x of [-S * 2.6, -S * 0.3, S * 2.9]) {
         cyl(0.03, 0.03, 0.95, 10, chrome, x, 0.48, 7.2, g);
         cyl(0.16, 0.18, 0.04, 16, chrome, x, 0.02, 7.2, g);
       }
       const rope = mat('rope', teamCol.clone().multiplyScalar(0.6), 0.8, 0);
-      for (const [a, b] of [[-S * 2.6, -S * 0.3], [-S * 0.3, S * 2.0]]) tube([new THREE.Vector3(a, 0.9, 7.2), new THREE.Vector3((a + b) / 2, 0.72, 7.2), new THREE.Vector3(b, 0.9, 7.2)], 0.018, rope, g, 16);
+      for (const [a, b] of [[-S * 2.6, -S * 0.3], [-S * 0.3, S * 2.9]]) tube([new THREE.Vector3(a, 0.9, 7.2), new THREE.Vector3((a + b) / 2, 0.72, 7.2), new THREE.Vector3(b, 0.9, 7.2)], 0.018, rope, g, 16);
     }
 
     // ------------------------------------------------------------ hotspot anchors (world)
@@ -543,6 +558,9 @@ export class GarageScene {
     this.parts.powerUnit = W2(new THREE.Vector3(0, 0.75, midZ - 0.6));
     this.parts.tyres = W2(wRL.clone().add(new THREE.Vector3(Math.sign(wRL.x) * 0.25, 0.2, 0)));
     this.parts.floor = W2(new THREE.Vector3(S * 0.7, 0.08, midZ));
+
+    // ------------------------------------------------------------ the viewpoints you can fly between
+    this.spots = garageSpots((x, y, z) => new THREE.Vector3(x, y, z).applyMatrix4(g.matrixWorld), S, { cockpit: local(A.cockpit), noseZ, tailZ, wallCenter: this.wallCenter, mate: mateLocal });
 
     // ------------------------------------------------------------ people
     if (kit) this.buildPeople(kit, { S, wFL, wFR, wRL, wRR, tailZ, noseZ, midZ, lp, teamCol });
@@ -654,6 +672,18 @@ export class GarageScene {
     place(m2, wRL.x + Math.sign(wRL.x) * 0.95, wRL.z - 0.2, wRL.x, wRL.z);
     m2.play('Fixing_Kneeling', { offset: 0.6 });
     this.people.push({ p: m2 });
+    // an aero mechanic crouched at the front wing, setting the flap angle
+    const m3 = new Person(kit, crewLook(false, 0.35, 'simpleparted'));
+    place(m3, -S * 0.95, c.noseZ + 0.35, -S * 0.2, c.noseZ - 0.25);
+    m3.play('Crouch_Idle_Loop', { offset: 0.1 });
+    this.people.push({
+      p: m3,
+      pose: (p, t) => {
+        aimArm(p, 'r', [0.1, -0.35, 0.95], [-0.25, -0.5, 0.85], 0.8);
+        aimArm(p, 'l', [0.2, -0.4, 0.9], [-0.1, -0.55, 0.85], 0.7);
+        turnHead(p, Math.sin(t * 0.33) * 0.2, 0.45);
+      },
+    });
     // the race engineer at the laptop
     const eng = new Person(kit, { ...crewLook(false, 0.45, 'simpleparted'), top: 'polo', gloves: null });
     place(eng, lp.x + S * 0.55, lp.z + 0.2, lp.x, lp.z);
@@ -677,10 +707,10 @@ export class GarageScene {
       this.walker = { p: w, path, leg: 0, u: 0, wait: 2.5, walking: false };
       this.people.push({ p: w });
     }
-    // two engineers at the data desk at the back, headsets on, reading traces
-    for (const [k, x] of [[0, S * 2.7], [1, S * 3.9]] as const) {
+    // two engineers at the telemetry desk, headsets on, reading traces
+    this.dressing.deskCrew.forEach((d, k) => {
       const e = new Person(kit, { ...crewLook(k === 1, k ? 0.3 : 0.55, k ? 'long' : 'simpleparted'), top: 'polo', gloves: null });
-      place(e, x, -8.25, x, -9.5);
+      place(e, d.x, d.z, d.x, d.faceZ);
       e.play(k ? 'Idle_Talking_Loop' : 'Idle_Loop', { offset: k * 0.5 });
       this.people.push({
         p: e,
@@ -692,16 +722,23 @@ export class GarageScene {
           turnHead(p, Math.sin(t * 0.27 + k * 2) > 0.8 ? (k ? -0.7 : 0.7) : 0, 0.25);
         },
       });
-    }
+    });
+    // two mechanics on the teammate's car: one at a hub, one in the cockpit opening
+    this.dressing.mateCrew.forEach((d, k) => {
+      const m = new Person(kit, crewLook(k === 1, k ? 0.5 : 0.1, k ? 'buns' : 'buzzed', !k));
+      place(m, d.x, d.z, d.faceX, d.faceZ);
+      m.play(d.clip, { offset: 0.3 + k * 0.4 });
+      this.people.push({ p: m });
+    });
     // fans at the rope, phones up
     {
       let seed = team.name.length * 97 + 13;
       const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-      for (const [k, x] of [[0, -S * 2.0], [1, -S * 1.2], [2, S * 1.1]] as const) {
+      for (const [k, x] of [[0, S * 1.5], [1, S * 2.3]] as const) {
         const f = new Person(kit, fanLook(rand, team));
         place(f, x, 7.65, x * 0.3, 0);
         f.play('Idle_Loop', { offset: k * 0.37 });
-        const phone = k !== 1;
+        const phone = k === 0;
         this.people.push({
           p: f,
           pose: (p, t) => {
@@ -1209,7 +1246,7 @@ export class GarageScene {
   private readonly frustum = new THREE.Frustum();
   private readonly pv = new THREE.Matrix4();
   private readonly sphere = new THREE.Sphere();
-  update(dt: number, cam?: THREE.Vector3, target?: THREE.Vector3, camera?: THREE.Camera) {
+  update(dt: number, cam?: THREE.Vector3, target?: THREE.Vector3, camera?: THREE.Camera, opts: { onlyTooClose?: boolean } = {}) {
     this.t += dt;
     this.frameNo++;
     if (cam && target) this.seg.set(cam, target);
@@ -1226,8 +1263,12 @@ export class GarageScene {
           p.root.visible = false;
           continue;
         }
+        p.root.visible = true;
       }
-      if (cam && target) {
+      if (cam && opts.onlyTooClose) {
+        // at a tour stop the people stay in the picture; only one the lens is inside goes
+        p.root.visible = p.root.getWorldPosition(this.v1).setY(this.v1.y + 1.0).distanceTo(cam) > 0.8;
+      } else if (cam && target) {
         const v = p.root.getWorldPosition(this.v1);
         v.y += 1.1;
         const q = this.seg.closestPointToPoint(v, true, this.v2);
@@ -1241,6 +1282,7 @@ export class GarageScene {
       pose?.(p, this.t, dt);
     }
     this.laptopTex.offset.x = (this.laptopTex.offset.x + dt * 0.035) % 1;
+    this.dressing.update(dt);
     this.updateWall(dt);
   }
 

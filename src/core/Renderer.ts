@@ -29,7 +29,7 @@ import { N8AOPostPass } from 'n8ao';
  *   → sanitize (NaN/Inf scrub) → sun shafts → bloom → grade (game layer × weather look × lightning flash)
  *     → AgX → vignette → grain
  *   → chromatic aberration (only while fast)     [own pass: convolution]
- *   → SMAA
+ *   → SMAA → sharpen (contrast-adaptive, High/Ultra; stronger while the dynamic resolution is down)
  *
  * renderer.toneMapping stays NoToneMapping: tone mapping happens in the
  * composer, after bloom, so highlights bloom in linear HDR.
@@ -85,6 +85,41 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   outputColor = vec4(min(max(c, 0.0), vec3(200.0)), inputColor.a);
 }
 `;
+
+/**
+ * Contrast-adaptive sharpening (after AMD's CAS): a negative-lobe cross filter whose
+ * strength backs off wherever the local contrast is already high, so edges crisp up
+ * without halos and flat areas don't gain noise. Undoes the softness of SMAA and of a
+ * lowered render resolution — the difference between a game capture and a broadcast feed.
+ */
+const SHARPEN_FRAG = /* glsl */ `
+uniform float sharpness;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 c = inputColor.rgb;
+  vec3 a = texture2D(inputBuffer, uv + vec2(0.0, -texelSize.y)).rgb;
+  vec3 b = texture2D(inputBuffer, uv + vec2(-texelSize.x, 0.0)).rgb;
+  vec3 d = texture2D(inputBuffer, uv + vec2(texelSize.x, 0.0)).rgb;
+  vec3 e = texture2D(inputBuffer, uv + vec2(0.0, texelSize.y)).rgb;
+  vec3 mn = min(c, min(min(a, b), min(d, e)));
+  vec3 mx = max(c, max(max(a, b), max(d, e)));
+  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+  vec3 w = -amp * mix(0.08, 0.2, sharpness);
+  vec3 o = (c + (a + b + d + e) * w) / (1.0 + 4.0 * w);
+  outputColor = vec4(clamp(o, 0.0, 1.0), inputColor.a);
+}
+`;
+
+class SharpenEffect extends Effect {
+  constructor() {
+    super('SharpenEffect', SHARPEN_FRAG, {
+      attributes: EffectAttribute.CONVOLUTION,
+      uniforms: new Map<string, THREE.Uniform>([['sharpness', new THREE.Uniform(0.5)]]),
+    });
+  }
+  set sharpness(v: number) {
+    this.uniforms.get('sharpness')!.value = v;
+  }
+}
 
 class SanitizeEffect extends Effect {
   constructor() {
@@ -552,9 +587,10 @@ export class Renderer {
     this.composer.addPass(this.renderPass);
 
     this.ao = new N8AOPostPass(scene, camera, 1, 1);
-    this.ao.configuration.aoRadius = 1.6;
-    this.ao.configuration.distanceFalloff = 1.2;
-    this.ao.configuration.intensity = 2.6;
+    // contact-scale AO: cars on the asphalt, wheels in their arches, barrier feet, stands, trunks
+    this.ao.configuration.aoRadius = 1.4;
+    this.ao.configuration.distanceFalloff = 1.0;
+    this.ao.configuration.intensity = 2.4;
     this.ao.configuration.gammaCorrection = false;
     this.ao.configuration.halfRes = true;
     this.ao.configuration.depthAwareUpsampling = true;
@@ -583,15 +619,16 @@ export class Renderer {
       luminanceThreshold: 1.1,
       luminanceSmoothing: 0.35,
       intensity: 0.9,
-      radius: 0.72,
+      radius: 0.62,
     });
     this.grade = new GradeEffect();
     // AgX: filmic highlight roll-off without ACES's hue skew (neon greens, cyan skies);
     // the weather look (presets.ts) adds back the saturation/contrast AgX takes out
     this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
-    this.vignette = new VignetteEffect({ darkness: 0.38, offset: 0.3 });
+    // a broadcast lens: barely-there fall-off (a heavy vignette reads as a game filter)
+    this.vignette = new VignetteEffect({ darkness: 0.26, offset: 0.34 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
-    this.grain.blendMode.opacity.value = 0.05;
+    this.grain.blendMode.opacity.value = 0.035;
     // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
     // copy less; bloom's luminance pre-pass and the shaft mask scrub what they read themselves)
     const lum = this.bloom.luminanceMaterial as unknown as THREE.ShaderMaterial;
@@ -611,7 +648,11 @@ export class Renderer {
     this.composer.addPass(this.caPass);
 
     this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
-    this.composer.addPass(new EffectPass(camera, this.smaa));
+    this.smaaPass = new EffectPass(camera, this.smaa);
+    this.composer.addPass(this.smaaPass);
+    this.sharpen = new SharpenEffect();
+    this.sharpenPass = new EffectPass(camera, this.sharpen);
+    this.composer.addPass(this.sharpenPass);
 
     this.setQuality(quality);
   }
@@ -619,6 +660,9 @@ export class Renderer {
   // ------------------------------------------------------------------ perf plumbing
 
   private readonly smaa: SMAAEffect;
+  private readonly sharpen: SharpenEffect;
+  private readonly sharpenPass: EffectPass;
+  private readonly smaaPass: EffectPass;
   private readonly shadowHooks: ((on: boolean) => void)[] = [];
   /** run `fn(true)` right before the shadow maps render and `fn(false)` right after (every renderer.render) */
   onShadowPass(fn: (on: boolean) => void): () => void {
@@ -730,10 +774,17 @@ export class Renderer {
       this.smaaPreset = preset;
       this.smaa.applyPreset(preset);
     }
-    // AO costs a fixed ~3 ms at 1080p whatever its tier, so it is an Ultra feature
+    // AO costs ~3 ms at 1080p whatever its tier (measured again: ~15–20 % of a High frame, even
+    // half-res with 8 samples), so it stays an Ultra feature; High gets its contact darkening
+    // from the materials (terrain canopy AO, crown AO) and the focus shadow cascade
     this.ao.enabled = q === 'ultra';
     this.ao.configuration.halfRes = true;
     this.ao.setQualityMode('Medium');
+    // (the last enabled pass must be the one that renders to the screen)
+    const sharpenOn = q === 'ultra' || q === 'high';
+    this.sharpenPass.enabled = sharpenOn;
+    this.sharpenPass.renderToScreen = sharpenOn;
+    this.smaaPass.renderToScreen = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
     this.dynamicScale = 1;
@@ -753,6 +804,8 @@ export class Renderer {
     const v = THREE.MathUtils.clamp(s, this.minDynamic, this.maxDynamic);
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
+    // sharpen harder when the image is being upscaled
+    this.sharpen.sharpness = THREE.MathUtils.clamp(0.45 + (1 - v) * 0.4, 0.45, 0.62);
     this.resize();
   }
 

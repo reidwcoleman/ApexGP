@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SURF, type Track, type TrackFrame } from '../world/Track.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
+import { roadUniforms } from '../world/trackside/materials.ts';
 
 /**
  * Tyre marks laid during a race and kept until the next one:
@@ -55,12 +56,14 @@ interface WheelTrail {
   /** dirt carried on the tyre after an off (0..1) */
   dirt: number;
   hint: number;
+  /** car position last frame (wheel 0's trail only: the field's distance for rubber build-up) */
+  cx0: number; cz0: number;
 }
 
 const newTrail = (): WheelTrail => ({
   active: false, light: false, kind: 0, seed: 0,
   cx: 0, cy: 0, cz: 0, ux: 0, uy: 1, uz: 0, tw: 0.3, lastQ: -1, lx: 0, ly: 0, lz: 0, rx: 0, ry: 0, rz: 0, dx: 0, dz: 1,
-  inten: 0, along: 0, px: 0, pz: 0, dirt: 0, hint: -1,
+  inten: 0, along: 0, px: 0, pz: 0, dirt: 0, hint: -1, cx0: 1e9, cz0: 1e9,
 });
 
 const VERT = /* glsl */ `
@@ -157,6 +160,8 @@ export class SkidMarks {
   /** total segments laid (stats) */
   laid = 0;
   enabled = true;
+  /** metres driven by the whole field this session (drives the road's rubber build-up) */
+  private driven = 0;
 
   constructor(private readonly track: Track, private readonly lift: GroundLift = () => 0) {
     const nv = SEGS * 4;
@@ -219,6 +224,8 @@ export class SkidMarks {
     this.posAttr.needsUpdate = true;
     this.skidAttr.needsUpdate = true;
     this.laid = 0;
+    this.driven = 0;
+    roadUniforms.uRaceRubber.value = 0;
     this.mesh.visible = false;
     this.mesh.geometry.setDrawRange(0, 0);
   }
@@ -240,12 +247,23 @@ export class SkidMarks {
     if (!this.enabled) return;
     // water: rubber barely transfers onto a wet road (and it's washed away), dirt still does
     const rubberK = 1 - 0.85 * smooth(0.08, 0.5, wetness);
+    let n = 0;
     for (const c of cars) {
       if (c.removed) continue;
+      n++;
       let ws = this.trails.get(c.id);
       if (!ws) this.trails.set(c.id, (ws = [newTrail(), newTrail(), newTrail(), newTrail()]));
+      const w = ws[0];
+      const dx = c.car.x - w.cx0, dz = c.car.z - w.cz0;
+      const step = Math.hypot(dx, dz);
+      if (step < 8) this.driven += step * rubberK;
+      w.cx0 = c.car.x;
+      w.cz0 = c.car.z;
       this.car(c.car, ws, rubberK);
     }
+    // the racing line rubbers in over the first few laps (average laps covered by the field)
+    const laps = this.driven / (Math.max(1, n) * this.track.length);
+    roadUniforms.uRaceRubber.value = 1 - Math.exp(-laps / 1.6);
     this.flush();
   }
 

@@ -20,6 +20,10 @@ export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, type Compound } from './carTextures.ts';
 import { WET_PARS, wetUniforms, wetClearcoatBeads } from './carWet.ts';
+import { createTyreMaterial, setTyreCompound, applyTyreLook, wornTyreLook, newTyreLook, type TyreLook, type TyreUniforms } from './carTyres.ts';
+import { GRIME_PARS, GRIME_VERT, GRIME_VERT_PARS, grimeShaderUniforms, grimeUniforms, flakeTexture, type GrimeUniforms } from './carGrime.ts';
+export type { TyreLook } from './carTyres.ts';
+export { newTyreLook } from './carTyres.ts';
 
 export type { Compound } from './carTextures.ts';
 import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH } from './carLayout.ts';
@@ -39,6 +43,10 @@ export interface CarRig {
   rainLightLevel(): number;
   /** tyre compound: sidewall band colour + wordmark, grooved tread on inters/wets */
   setCompound(c: Compound): void;
+  /** tyre condition per corner (FL FR RL RR): wear, graining, pick-up, blisters, dust, flat spots … */
+  setTyres?(looks: readonly TyreLook[]): void;
+  /** race grime on the bodywork: road film, rubber flecks, off-track dirt (0 … 1 each) */
+  setGrime?(film: number, flecks: number, dirt: number): void;
   setDrs(open: number): void;
   setDetail(level: 0 | 1 | 2): void;
   setDriverVisible(v: boolean): void;
@@ -152,17 +160,24 @@ function shadowGeometry(level: 1 | 2, parts: THREE.Object3D[], root: THREE.Objec
 }
 
 // ------------------------------------------------------------------------------------ shaders
-const PAINT_KEY = 'apex-paint-v2';
-function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon: THREE.Texture) {
+const PAINT_KEY = 'apex-paint-v3';
+/**
+ * Livery paint: base coat (metallic flake where the livery is metallic) under a clearcoat, exposed
+ * carbon where the mask says so (lacquered weave), race grime, rain beads on the clearcoat.
+ */
+function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon: THREE.Texture, grime: GrimeUniforms, flake: number) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.liveryMask = { value: mask };
     sh.uniforms.carbonMap = { value: carbon };
+    sh.uniforms.flakeMap = { value: flakeTexture() };
+    sh.uniforms.uFlake = { value: flake };
     wetUniforms(sh);
+    grimeShaderUniforms(sh, grime);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 cuv;\nvarying vec2 vCuv;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvCuv = cuv;');
+      .replace('#include <common>', '#include <common>\nattribute vec2 cuv;\nvarying vec2 vCuv;\n' + GRIME_VERT_PARS)
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvCuv = cuv;\n' + GRIME_VERT);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D liveryMask;\nuniform sampler2D carbonMap;\nvarying vec2 vCuv;\n' + WET_PARS)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D liveryMask;\nuniform sampler2D carbonMap;\nuniform sampler2D flakeMap;\nuniform float uFlake;\nvarying vec2 vCuv;\n' + WET_PARS + GRIME_PARS)
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
@@ -170,20 +185,37 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
         vec3 cw = texture2D( carbonMap, vCuv ).rgb;
         diffuseColor.rgb = mix( diffuseColor.rgb, cw, cMask );
         float cWet = carWetAmount();
-        diffuseColor.rgb *= mix( 1.0, mix( 0.9, 0.7, cMask ), cWet );`,
+        diffuseColor.rgb *= mix( 1.0, mix( 0.9, 0.7, cMask ), cWet );
+        vec3 cGr = carGrime( vCuv );
+        cGr *= 1.0 - 0.6 * cWet;
+        diffuseColor.rgb = carGrimeColour( diffuseColor.rgb, cGr );
+        float cGrAll = clamp( cGr.x * 0.8 + cGr.y + cGr.z, 0.0, 1.0 );`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
-        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, cMask );\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.5, cWet );',
+        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, cMask );\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.5, cWet );\nroughnessFactor = mix( roughnessFactor, 0.8, cGrAll );',
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        if ( uFlake > 0.0 ) {
+          // metallic flake: tiny tilted mirrors in the base coat (the clearcoat above stays smooth)
+          vec2 fuv = vCuv * 0.5;
+          vec2 fo = texture2D( flakeMap, fuv ).xy * 2.0 - 1.0;
+          mat3 ft = wetTBN( normal, - vViewPosition, fuv );
+          normal = normalize( ft * vec3( fo * 0.3 * uFlake * ( 1.0 - cMask ) * ( 1.0 - cGrAll ), 1.0 ) );
+        }`,
       )
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vCuv', 'cWet'))
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.0, cMask );')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.0, max( cMask, cGrAll ) );')
       .replace(
         '#include <lights_physical_fragment>',
         `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
-          material.clearcoat = mix( material.clearcoat, 1.0, cMask );
-          material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.07, cMask );
+          material.clearcoat = mix( material.clearcoat, 0.85, cMask );
+          material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.09, cMask );
+          material.clearcoat *= 1.0 - 0.95 * cGr.y;
+          material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.4, clamp( cGr.x * 0.7 + cGr.z, 0.0, 1.0 ) );
           material.clearcoat = mix( material.clearcoat, 1.0, cWet );
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.018, cWet );
         #endif
@@ -193,6 +225,36 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
       );
   };
   mat.customProgramCacheKey = () => PAINT_KEY;
+}
+
+/** helmet: an iridium visor (thin-film tint shifting with the view angle); cloth suit, gloves and belts without the gloss */
+function patchDriver(mat: THREE.MeshPhysicalMaterial) {
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+        vec2 dC = ( vMapUv - vec2( 0.5, 0.0625 ) ) / vec2( 0.03125, 0.0625 );   // flat cell row (16 px cells at y 224)
+        float dRow = step( 0.0, dC.x ) * step( dC.x, 6.0 ) * step( 0.0, dC.y ) * step( dC.y, 1.0 );
+        float dVisor = dRow * step( dC.x, 1.0 );
+        float dCloth = dRow * step( 1.0, dC.x ) * ( 1.0 - step( 3.0, dC.x ) * step( dC.x, 4.0 ) );`,
+      )
+      .replace(
+        '#include <lights_physical_fragment>',
+        `if ( dVisor > 0.5 ) {
+          float fv = 1.0 - abs( dot( normalize( vViewPosition ), normal ) );
+          diffuseColor.rgb = mix( vec3( 0.55, 0.36, 0.12 ), vec3( 0.18, 0.3, 0.75 ), smoothstep( 0.15, 0.75, fv ) ) * 0.55;
+          metalnessFactor = 1.0;
+          roughnessFactor = 0.035;
+        }
+        roughnessFactor = mix( roughnessFactor, 0.82, dCloth );
+        #include <lights_physical_fragment>
+        #ifdef USE_CLEARCOAT
+          material.clearcoat *= 1.0 - dCloth;
+        #endif`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'apex-driver-v1';
 }
 
 interface TrimUniforms {
@@ -227,98 +289,90 @@ function patchTrim(mat: THREE.MeshStandardMaterial, u: TrimUniforms) {
 }
 
 // ------------------------------------------------------------------------------------ shared materials
-let carbonMat: THREE.MeshPhysicalMaterial | null = null;
-function sharedCarbon() {
-  if (carbonMat) return carbonMat;
+/** per-car carbon: a weave under a lacquer (wings, halo fairings, bodywork) that goes satin on the floor and plank area */
+function makeCarbon(grime: GrimeUniforms) {
   const c = carbonTextures();
-  carbonMat = new THREE.MeshPhysicalMaterial({
+  const mat = new THREE.MeshPhysicalMaterial({
     name: 'car-carbon',
     map: c.map,
     normalMap: c.normal,
-    normalScale: new THREE.Vector2(0.35, 0.35),
+    normalScale: new THREE.Vector2(0.4, 0.4),
     roughnessMap: c.rough,
     roughness: 1.3,
     metalness: 0,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.22,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.1,
     specularIntensity: 0.55,
-    envMapIntensity: 0.55,
+    envMapIntensity: 0.6,
   });
-  patchCarbon(carbonMat);
-  return carbonMat;
+  patchCarbon(mat, grime);
+  return mat;
 }
-function patchCarbon(mat: THREE.MeshPhysicalMaterial) {
+function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
   mat.onBeforeCompile = (sh) => {
     wetUniforms(sh);
+    grimeShaderUniforms(sh, grime);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\n' + GRIME_VERT_PARS)
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n' + GRIME_VERT);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + WET_PARS)
-      .replace('#include <map_fragment>', '#include <map_fragment>\nfloat cWet = carWetAmount();\ndiffuseColor.rgb *= mix( 1.0, 0.66, cWet );')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.42, cWet );')
+      .replace('#include <common>', '#include <common>\n' + WET_PARS + GRIME_PARS)
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        float cWet = carWetAmount();
+        diffuseColor.rgb *= mix( 1.0, 0.66, cWet );
+        vec3 cGr = carGrime( vMapUv ) * ( 1.0 - 0.6 * cWet );
+        diffuseColor.rgb = carGrimeColour( diffuseColor.rgb, cGr );
+        float cGrAll = clamp( cGr.x * 0.8 + cGr.y + cGr.z, 0.0, 1.0 );
+        // floor / plank level: satin, not lacquered
+        float cFloor = 1.0 - smoothstep( 0.05, 0.12, vGrimePos.y );`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.42, cWet );\nroughnessFactor = mix( roughnessFactor, 0.85, cGrAll );',
+      )
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vMapUv', 'cWet'))
       .replace(
         '#include <lights_physical_fragment>',
         `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
+          material.clearcoat *= ( 1.0 - 0.6 * cFloor ) * ( 1.0 - 0.95 * cGr.y );
+          material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.32, max( cFloor, clamp( cGr.x * 0.7 + cGr.z, 0.0, 1.0 ) ) );
           material.clearcoat = mix( material.clearcoat, 1.0, cWet );
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.03, cWet );
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-carbon-v1';
-}
-const wheelMats = new Map<Compound, THREE.MeshPhysicalMaterial>();
-function sharedWheel(c: Compound) {
-  const hit = wheelMats.get(c);
-  if (hit) return hit;
-  const w = wheelTextures(c);
-  const m = new THREE.MeshPhysicalMaterial({
-    name: `car-wheel-${c}`,
-    map: w.map,
-    roughnessMap: w.orm,
-    metalnessMap: w.orm,
-    normalMap: w.normal,
-    normalScale: new THREE.Vector2(1, 1),
-    roughness: 1,
-    metalness: 1,
-    sheen: 0.35,
-    sheenRoughness: 0.55,
-    sheenColor: new THREE.Color(0.35, 0.35, 0.35),
-  });
-  patchWheel(m);
-  wheelMats.set(c, m);
-  return m;
-}
-function patchWheel(mat: THREE.MeshPhysicalMaterial) {
-  mat.onBeforeCompile = (sh) => {
-    wetUniforms(sh);
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + WET_PARS)
-      .replace(
-        '#include <metalnessmap_fragment>',
-        `#include <metalnessmap_fragment>
-        float tWet = clamp( uWetness * 1.25 + uRain * 0.35, 0.0, 1.0 );
-        float rub = 1.0 - metalnessFactor;
-        diffuseColor.rgb *= mix( 1.0, 0.7, tWet * rub );
-        roughnessFactor = mix( roughnessFactor, min( roughnessFactor, 0.3 ), tWet * rub );
-        roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.6, tWet * ( 1.0 - rub ) );`,
-      )
-      .replace(
-        '#include <lights_physical_fragment>',
-        `#include <lights_physical_fragment>
-        #ifdef USE_SHEEN
-          material.sheenColor *= 1.0 - tWet;
-        #endif`,
-      );
-  };
-  mat.customProgramCacheKey = () => 'apex-wheel-v1';
+  mat.customProgramCacheKey = () => 'apex-carbon-v2';
 }
 
-const paintCache = new Map<string, { mat: THREE.MeshPhysicalMaterial; refs: number }>();
-function acquirePaint(team: Team) {
+/** loose pit-stop wheels share a material per compound and condition (new / used) */
+const propMats = new Map<string, { mat: THREE.MeshPhysicalMaterial; u: TyreUniforms }>();
+function propWheel(c: Compound, worn: number) {
+  const key = `${c}:${worn.toFixed(2)}`;
+  let hit = propMats.get(key);
+  if (!hit) {
+    hit = createTyreMaterial(c, `car-wheel-prop-${key}`);
+    applyTyreLook(hit.u, worn > 0 ? wornTyreLook(worn) : newTyreLook());
+    propMats.set(key, hit);
+  }
+  return hit.mat;
+}
+
+interface PaintBase {
+  mat: THREE.MeshPhysicalMaterial;
+  mask: THREE.Texture;
+  flake: number;
+  refs: number;
+}
+const paintCache = new Map<string, PaintBase>();
+/** the team's paint (livery textures + finish), shared; each car wears its own copy (its own grime) */
+function acquirePaint(team: Team): PaintBase {
   const hit = paintCache.get(team.id);
   if (hit) {
     hit.refs++;
-    return hit.mat;
+    return hit;
   }
   const liv = acquireLivery(team);
   const c = new THREE.Color(team.primary);
@@ -337,9 +391,9 @@ function acquirePaint(team: Team) {
     sheenRoughness: 0.7,
     sheenColor: new THREE.Color(0.3, 0.3, 0.32),
   });
-  patchPaint(mat, liv.mask, carbonTextures().map);
-  paintCache.set(team.id, { mat, refs: 1 });
-  return mat;
+  const base: PaintBase = { mat, mask: liv.mask, flake: THREE.MathUtils.clamp((metallic - 0.05) * 1.6, 0, 1) * (1 - 0.7 * m), refs: 1 };
+  paintCache.set(team.id, base);
+  return base;
 }
 function releasePaint(team: Team) {
   const hit = paintCache.get(team.id);
@@ -355,35 +409,45 @@ function releasePaint(team: Team) {
 /**
  * A wheel off the car (pit crews carry the old set away and bring the new one):
  * the car's own wheel geometry and compound material, axle along local x,
- * centred on the hub.
+ * centred on the hub. `worn` > 0: a used set (dull, grained, marbles and brake dust); 0: brand new.
  */
 export interface WheelProp {
   root: THREE.Group;
   setCompound(c: Compound): void;
+  /** 0 brand new … 1 worn out */
+  setWorn(w: number): void;
   dispose(): void;
 }
-export function createWheelProp(front: boolean, compound: Compound): WheelProp {
+export function createWheelProp(front: boolean, compound: Compound, worn = 0): WheelProp {
   const geo = acquireGeo();
   const L = geo[1];
   const root = new THREE.Group();
   root.name = 'wheel-prop';
   const meshes: THREE.Mesh[] = [];
+  const q = (w: number) => Math.round(Math.min(1, Math.max(0, w)) * 10) / 10;
+  let cur = compound;
+  let wornQ = q(worn);
   for (const g of [front ? L.wheelF : L.wheelR, front ? L.spokesF : L.spokesR]) {
     if (!g) continue;
-    const m = new THREE.Mesh(g, sharedWheel(compound));
+    const m = new THREE.Mesh(g, propWheel(compound, wornQ));
     m.castShadow = true;
     m.receiveShadow = true;
     root.add(m);
     meshes.push(m);
   }
-  let cur = compound;
   let alive = true;
   return {
     root,
     setCompound(c) {
       if (c === cur) return;
       cur = c;
-      for (const m of meshes) m.material = sharedWheel(c);
+      for (const m of meshes) m.material = propWheel(c, wornQ);
+    },
+    setWorn(w) {
+      const k = q(w);
+      if (k === wornQ) return;
+      wornQ = k;
+      for (const m of meshes) m.material = propWheel(cur, wornQ);
     },
     dispose() {
       if (!alive) return;
@@ -397,10 +461,16 @@ export function createWheelProp(front: boolean, compound: Compound): WheelProp {
 // ------------------------------------------------------------------------------------ createCar
 export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMap?: THREE.Texture } = {}): CarRig {
   const geo = acquireGeo();
-  const paint = acquirePaint(team);
-  let carbon = sharedCarbon();
+  const paintBase = acquirePaint(team);
+  // per-car paint and carbon (the livery textures are the team's): each car carries its own grime
+  const grime = grimeUniforms();
+  const paint = paintBase.mat.clone();
+  paint.name = `car-paint-${team.id}`;
+  patchPaint(paint, paintBase.mask, carbonTextures().map, grime, paintBase.flake);
+  const carbon = makeCarbon(grime);
   let compound: Compound = 'soft';
-  let wheel = sharedWheel(compound);
+  // one wheel material per corner (FL FR RL RR): each tyre shows its own wear; one shared program
+  const tyres = [0, 1, 2, 3].map((i) => createTyreMaterial(compound, `car-wheel-${['FL', 'FR', 'RL', 'RR'][i]}`));
   const ts = trimShared();
   const trimTex = trimTexture(team, driver, seat);
   const uniforms: TrimUniforms = { uHeat: { value: 0 }, uRainLight: { value: 0 }, uSelf: { value: 3.0 } };
@@ -425,6 +495,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     clearcoat: 1,
     clearcoatRoughness: 0.05,
   });
+  patchDriver(driverMat);
   const blurMat = new THREE.MeshStandardMaterial({
     name: 'car-wheel-blur',
     map: wheelTextures('soft').blur,
@@ -434,25 +505,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     roughness: 0.7,
     metalness: 0.2,
   });
-  const own: THREE.Material[] = [trim, driverMat, blurMat];
-  let paintMat: THREE.Material = paint;
-  if (opts.envMap) {
-    // per-car copies so a custom env map doesn't leak into other cars
-    const cb = carbon;
-    carbon = carbon.clone();
-    carbon.onBeforeCompile = cb.onBeforeCompile;
-    carbon.customProgramCacheKey = cb.customProgramCacheKey;
-    const wh = wheel;
-    wheel = wheel.clone();
-    wheel.onBeforeCompile = wh.onBeforeCompile;
-    wheel.customProgramCacheKey = wh.customProgramCacheKey;
-    const p = paint.clone();
-    p.onBeforeCompile = paint.onBeforeCompile;
-    p.customProgramCacheKey = paint.customProgramCacheKey;
-    paintMat = p;
-    own.push(carbon, wheel, p);
-    for (const m of [carbon, wheel, p, trim, driverMat, blurMat] as THREE.MeshStandardMaterial[]) m.envMap = opts.envMap;
-  }
+  const own: THREE.Material[] = [trim, driverMat, blurMat, paint, carbon, ...tyres.map((t) => t.mat)];
+  const paintMat: THREE.Material = paint;
+  if (opts.envMap) for (const m of own as THREE.MeshStandardMaterial[]) m.envMap = opts.envMap;
 
   const root = new THREE.Group();
   root.name = `car-${team.id}-${driver.code}`;
@@ -561,7 +616,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       unsprungL.push(u);
     }
   }
-  const wheelsFar = mesh(geo[2].wheelsMerged!, wheel);
+  // (far LOD: all four wheels in one mesh, shown in the rear-left tyre's condition)
+  const wheelsFar = mesh(geo[2].wheelsMerged!, tyres[2].mat);
   root.add(wheelsFar);
   // one merged far-LOD silhouette for the shadow pass (see shadowPass); never drawn by the camera
   const shadowProxy = new THREE.Mesh(shadowGeometry(2, [bodyL[2], unsprungL[2], wheelsFar], root), SHADOW_MAT);
@@ -584,7 +640,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     lv: { tyre: THREE.Mesh; spokes: THREE.Mesh | null; assy: THREE.Mesh | null; blur: THREE.Mesh | null }[];
   }
   const corners: Corner[] = [];
-  const mkCorner = (front: boolean, side: number) => {
+  const mkCorner = (front: boolean, side: number, wheel: THREE.Material) => {
     const group = new THREE.Group();
     group.position.set(((front ? TRACK_F : TRACK_R) / 2) * side, WHEEL_R, front ? Z_FRONT_AXLE : Z_REAR_AXLE);
     const steer = new THREE.Group();
@@ -621,10 +677,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     corners.push(c);
     return c;
   };
-  const FL = mkCorner(true, 1);
-  const FR = mkCorner(true, -1);
-  const RL = mkCorner(false, 1);
-  const RR = mkCorner(false, -1);
+  const FL = mkCorner(true, 1, tyres[0].mat);
+  const FR = mkCorner(true, -1, tyres[1].mat);
+  const RL = mkCorner(false, 1, tyres[2].mat);
+  const RR = mkCorner(false, -1, tyres[3].mat);
   // the near cars' shadow silhouette, from the middle level of detail (built at rest, shared)
   const shadowL1 = shadowGeometry(1, [bodyL[1], unsprungL[1], ...corners.flatMap((c) => [c.lv[1].tyre, c.lv[1].spokes, c.lv[1].assy].filter((m): m is THREE.Mesh => !!m))], root);
 
@@ -648,25 +704,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     wheelRR: anchor('wheelRR', [0, 0, 0], RR.group),
     rainLight: anchor('rainLight', [0, 0.316, -2.39], body),
   };
-  // per-compound wheel materials (shared across cars unless a custom env map is used)
-  const wheelByCompound = new Map<Compound, THREE.MeshPhysicalMaterial>([[compound, wheel]]);
-  const wheelFor = (c: Compound) => {
-    let m = wheelByCompound.get(c);
-    if (!m) {
-      const base = sharedWheel(c);
-      m = base;
-      if (opts.envMap) {
-        m = base.clone();
-        m.onBeforeCompile = base.onBeforeCompile;
-        m.customProgramCacheKey = base.customProgramCacheKey;
-        m.envMap = opts.envMap;
-        own.push(m);
-      }
-      wheelByCompound.set(c, m);
-    }
-    return m;
-  };
-
   // ---- state
   let detail: 0 | 1 | 2 = 0;
   let blur = 0;
@@ -766,6 +803,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       const wasSpokes = blur < 0.6;
       blur = b;
       blurMat.opacity = b;
+      for (const t of tyres) t.u.uTyreC.value.z = b;
       if (wasShown !== blur > 0.02 || wasSpokes !== blur < 0.6) applyVisibility();
     },
     setBrakeGlow(v) {
@@ -784,14 +822,25 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     setCompound(c) {
       if (c === compound) return;
       compound = c;
-      const m = wheelFor(c);
-      for (const k of corners)
-        for (const l of k.lv) {
-          l.tyre.material = m;
-          if (l.spokes) l.spokes.material = m;
-        }
-      wheelsFar.material = m;
+      // same materials (same program), the compound's atlas swapped in
+      for (const t of tyres) setTyreCompound(t.mat, t.u, c);
       blurMat.map = wheelTextures(c).blur;
+    },
+    setTyres(looks) {
+      let dust = 0;
+      let dirt = 0;
+      for (let i = 0; i < 4; i++) {
+        const s = looks[i];
+        if (!s) continue;
+        applyTyreLook(tyres[i].u, s);
+        dust += s.dust / 4;
+        dirt += Math.max(s.grass, s.wear * 0.5) / 4;
+      }
+      // the spinning-wheel smear picks up the brake dust and grime too
+      blurMat.color.setRGB(1 - 0.05 * dirt, 1 - 0.1 * dust - 0.06 * dirt, 1 - 0.2 * dust - 0.1 * dirt);
+    },
+    setGrime(film, flecks, dirt) {
+      grime.uGrime.value.set(film, flecks, dirt, 0);
     },
     setDrs(open) {
       const o = Math.min(1, Math.max(0, open));
@@ -908,7 +957,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     setEnvMap(tex) {
       opts.envMap = tex ?? undefined;
       for (const m of own) if ('envMap' in m) (m as THREE.MeshStandardMaterial).envMap = tex;
-      for (const m of wheelByCompound.values()) m.envMap = tex;
     },
     shadowPass(on, full = false) {
       if (on) {

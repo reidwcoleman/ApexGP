@@ -99,6 +99,8 @@ export class HUD {
   private mapScale = { minx: 0, minz: 0, k: 1, ox: 0, oz: 0 };
   private towerTimer = 0;
   private lastText = new WeakMap<HTMLElement, string>();
+  /** the virtual safety car board (stays up while it's out) */
+  private vscEl!: HTMLDivElement;
 
   constructor(parent: HTMLElement) {
     this.root = el('div', '', parent);
@@ -158,6 +160,7 @@ export class HUD {
 
     // banner, lights, hints
     this.banner = el('div', 'banner glass', this.root);
+    this.vscEl = el('div', 'vscboard glass', this.root);
     this.lights = el('div', 'lights', this.root);
     for (let i = 0; i < 5; i++) {
       const c = el('div', 'col', this.lights);
@@ -287,7 +290,7 @@ export class HUD {
     }
   }
 
-  flash(title: string, sub = '', tone: '' | 'purple' | 'green' | 'red' | 'blue' = '', secs = 2.6) {
+  flash(title: string, sub = '', tone: '' | 'purple' | 'green' | 'red' | 'blue' | 'yellow' = '', secs = 2.6) {
     this.banner.className = `banner glass show ${tone}`;
     this.banner.innerHTML = `<span class="k">${title}</span>${sub ? `<span class="sub">${sub}</span>` : ''}`;
     this.bannerTimer = secs;
@@ -394,7 +397,7 @@ export class HUD {
           this.flash('Pit stop', `${(e.value ?? 0).toFixed(1)} s · ${COMPOUNDS[c.compound].label} tyres`, 'green', 3);
           break;
         case 'penalty':
-          this.flash(`${e.value} second penalty`, 'track limits', 'red', 3.2);
+          this.flash(`${e.value} second penalty`, e.reason ?? 'track limits', 'red', 3.2);
           break;
         case 'final-lap':
           this.flash('Final lap', '', '', 2.4);
@@ -404,7 +407,16 @@ export class HUD {
           break;
         case 'retired':
           if (c.isPlayer) this.flash('Retired', e.value ? 'the car is destroyed' : 'the car is too badly damaged', 'red', 6);
-          else this.flash(`${c.entry.driver.code} out`, `${c.entry.driver.last} · ${e.value ? 'car on fire' : 'crash damage'}`, 'red', 3);
+          else this.flash(`${c.entry.driver.code} out`, `${c.entry.driver.last} · ${e.value === 2 ? 'mechanical failure' : e.value ? 'car on fire' : 'crash damage'}`, 'red', 3);
+          break;
+        case 'vsc':
+          this.flash('Virtual safety car', 'slow down · no overtaking', 'yellow', 3.5);
+          break;
+        case 'vsc-ending':
+          this.flash('VSC ending', 'get ready', 'yellow', 3);
+          break;
+        case 'vsc-end':
+          this.flash('Green flag', 'racing resumes', 'green', 2.4);
           break;
         case 'damage':
           this.flash('Front wing damage', 'box for a new nose — press P', 'red', 3.2);
@@ -430,6 +442,18 @@ export class HUD {
     if (this.camLabelTimer > 0) {
       this.camLabelTimer -= dt;
       if (this.camLabelTimer <= 0) this.camLabel.classList.remove('show');
+    }
+
+    // virtual safety car board: out while it's deployed, with the player's delta (+ = too fast)
+    const vscOn = race.vsc !== 'none';
+    this.vscEl.classList.toggle('show', vscOn);
+    if (vscOn) {
+      const d = race.vscDelta;
+      const html = `<b>VSC</b>${race.vsc === 'ending' ? '<span>ending</span>' : `<span class="${d > 0.5 ? 'over' : 'ok'}">delta ${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}</span>`}`;
+      if (this.lastText.get(this.vscEl) !== html) {
+        this.vscEl.innerHTML = html;
+        this.lastText.set(this.vscEl, html);
+      }
     }
 
     // start lights

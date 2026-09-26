@@ -52,79 +52,26 @@ export function crouch(p: Person, a: number) {
 export const ACT = { CHEER: 0, CLAP: 1, WAVE: 2, FLAG: 3, PHONE: 4, FIST: 5, JUMP: 6, IDLE: 7, DANCE: 8, TALK: 9 } as const;
 export const ACT_COUNT = 10;
 
-/** the clip under each act */
-export const ACT_CLIP = ['Idle_Loop', 'Idle_Loop', 'Idle_Loop', 'Idle_Loop', 'Idle_Loop', 'Idle_Loop', 'Jump_Loop', 'Idle_Loop', 'Dance_Loop', 'Idle_Talking_Loop'];
+/** the Rocketbox clip under each act */
+export const ACT_CLIP = ['cheer', 'clap', 'wave', 'cheer4', 'photo', 'cheer5', 'cheer3', 'idle', 'dance', 'talk'];
 
 /**
- * A fan's arms for an act at phase `u` (0..1 around the loop; every rhythm is a
- * whole number of beats per loop so the bake loops cleanly).
+ * (The old bodies stood like superheroes and needed their legs straightened under the
+ * hips; the Rocketbox clips stand like people. Kept for the callers.)
  */
-/** stand like a person, not a superhero: feet under the hips, knees soft */
 export function naturalStance(p: Person, w = 0.75) {
-  for (const s of ['l', 'r'] as const) {
-    const o = s === 'l' ? 1 : -1;
-    p.aim(`thigh_${s}`, `calf_${s}`, p.dir(0.05 * o, -1, 0.03, tmpA), w);
-    p.aim(`calf_${s}`, `foot_${s}`, p.dir(0.02 * o, -1, -0.04, tmpA), w);
-  }
+  void p;
+  void w;
 }
 
+/**
+ * A fan's act at phase `u` (0..1 around the loop) over its clip: the acts are the
+ * Rocketbox clips themselves; only the flag is held up by hand.
+ */
 export function actPose(p: Person, act: number, u: number) {
   const TAU = Math.PI * 2;
-  if (act !== ACT.JUMP && act !== ACT.DANCE) naturalStance(p);
-  const beat = (n: number) => Math.sin(u * TAU * n);
-  switch (act) {
-    case ACT.CHEER: {
-      const b = beat(3) * 0.5 + 0.5;
-      aimArm(p, 'l', [0.45, 0.86, 0.18], [0.25 + 0.1 * b, 0.95, 0.12]);
-      aimArm(p, 'r', [0.45, 0.86, 0.18], [0.25 + 0.1 * b, 0.95, 0.12]);
-      turnHead(p, 0, -0.18);
-      break;
-    }
-    case ACT.CLAP: {
-      const c = Math.pow(Math.abs(Math.sin(u * TAU * 5)), 0.6);
-      aimArm(p, 'l', [0.28, -0.45, 0.85], [-0.55 + 0.35 * c, 0.42, 0.72]);
-      aimArm(p, 'r', [0.28, -0.45, 0.85], [-0.55 + 0.35 * c, 0.42, 0.72]);
-      break;
-    }
-    case ACT.WAVE: {
-      const w = beat(4);
-      aimArm(p, 'r', [0.62, 0.72, 0.28], [0.1 + 0.45 * w, 0.9, 0.15]);
-      aimArm(p, 'l', [0.12, -0.98, 0.1], [0.05, -0.9, 0.35], 0.6);
-      turnHead(p, -0.1, -0.1);
-      break;
-    }
-    case ACT.FLAG: {
-      const w = beat(1);
-      aimArm(p, 'r', [0.3 + 0.3 * w, 0.9, 0.2], [0.1 + 0.35 * w, 0.95, 0.1]);
-      aimArm(p, 'l', [0.35, 0.2, 0.9], [0.1, 0.7, 0.7], 0.7);
-      break;
-    }
-    case ACT.PHONE: {
-      const s = beat(1) * 0.04;
-      aimArm(p, 'r', [0.05, 0.3 + s, 0.95], [-0.1, 0.72, 0.68]);
-      aimArm(p, 'l', [0.12, -0.98, 0.1], [0.05, -0.9, 0.35], 0.5);
-      turnHead(p, -0.08, 0.08);
-      break;
-    }
-    case ACT.FIST: {
-      const f = Math.max(0, beat(3));
-      aimArm(p, 'r', [0.35, 0.78 + 0.18 * f, 0.35], [0.1, 0.96, 0.2]);
-      aimArm(p, 'l', [0.18, -0.9, 0.35], [0.0, -0.3, 0.95], 0.6);
-      turnHead(p, 0, -0.12);
-      break;
-    }
-    case ACT.JUMP: {
-      aimArm(p, 'l', [0.5, 0.82, 0.2], [0.3, 0.94, 0.1]);
-      aimArm(p, 'r', [0.5, 0.82, 0.2], [0.3, 0.94, 0.1]);
-      break;
-    }
-    case ACT.IDLE: {
-      // hands down, relaxed (the idle clip's fists come unclenched a little by pose)
-      aimArm(p, 'l', [0.15, -0.98, 0.05], [0.08, -0.95, 0.3], 0.8);
-      aimArm(p, 'r', [0.15, -0.98, 0.05], [0.08, -0.95, 0.3], 0.8);
-      break;
-    }
-    default:
-      break;
+  if (act === ACT.FLAG) {
+    const w = Math.sin(u * TAU);
+    aimArm(p, 'r', [0.3 + 0.3 * w, 0.9, 0.2], [0.1 + 0.35 * w, 0.95, 0.1]);
   }
 }

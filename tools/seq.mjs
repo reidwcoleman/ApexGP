@@ -20,6 +20,6 @@ for (const [i, t] of times.split(',').map(Number).entries()) {
   const wait = t * 1000 - (Date.now() - t0);
   if (wait > 0) await page.waitForTimeout(wait);
   if (perShot) console.log('shot', t, await page.evaluate(perShot).catch((e) => 'ERR ' + e.message));
-  await page.screenshot({ path: `${out}_${i}.png` });
+  await page.screenshot({ path: `${out}_${i}.png`, timeout: 180000 });
 }
 await browser.close();

@@ -33,7 +33,7 @@ const I_YAW = 0, I_LAT = 1, I_VX = 2, I_VY = 3, I_R = 4, I_STEER = 5, I_PITCH = 
 /** per-car flags (high byte of the position channel) */
 export const RF = { retired: 1, finished: 2, pit: 4, removed: 8, fastest: 16, destroyed: 32 } as const;
 
-export type ReplayEventKind = 'start' | 'overtake' | 'lead' | 'crash' | 'spin' | 'retired' | 'pit' | 'fastest' | 'finish';
+export type ReplayEventKind = 'start' | 'overtake' | 'lead' | 'crash' | 'spin' | 'retired' | 'pit' | 'fastest' | 'finish' | 'vsc';
 
 export interface ReplayEvent {
   t: number;
@@ -99,6 +99,9 @@ export class ReplayBuffer {
   /** race clock / leader's laps at the applied time */
   raceTime = 0;
   leaderLap = 0;
+  /** race phase at the applied time (0 grid, 1 lights, 2 racing, 3 finished) and the start lights lit */
+  phase = 0;
+  lightsLit = 0;
   /** the moments worth watching, in time order (bounded) */
   readonly events: ReplayEvent[] = [];
   /** moments recorded since the game last took them (for live banners) */
@@ -170,6 +173,8 @@ export class ReplayBuffer {
 
   record(dt: number, race: Race) {
     if (!this.cars) return;
+    // the virtual safety car (on the step it's called: events only last one step)
+    for (const e of race.events) if ((e.kind as string) === 'vsc') this.addEvent('vsc', race.time, e.car);
     this.acc += dt;
     if (this.acc < this.interval) return;
     this.acc = Math.min(this.acc - this.interval, this.interval);
@@ -367,6 +372,9 @@ export class ReplayBuffer {
     const near = f < 0.5 ? ca : cb, sn = f < 0.5 ? sa : sb;
     this.raceTime = lerp(ca.m[sa * NM + 1], cb.m[sb * NM + 1]);
     this.leaderLap = near.m[sn * NM + 2];
+    const pl = near.m[sn * NM + 3];
+    this.phase = Math.floor(pl / 8);
+    this.lightsLit = pl - this.phase * 8;
     const wheelDt = isFinite(this.lastApplyT) && Math.abs(t - this.lastApplyT) < 0.5 ? t - this.lastApplyT : 0;
     this.lastApplyT = t;
     for (let k = 0; k < n; k++) {

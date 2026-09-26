@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import type { CarPhysics, DriveInput } from './CarPhysics.ts';
+import type { Assists, CarPhysics, DriveInput } from './CarPhysics.ts';
 import type { RacingProfile } from './RacingProfile.ts';
 
 /**
@@ -19,6 +19,11 @@ export interface Neighbour {
   pitLat?: number;
 }
 
+/** a driver mistake, armed by the race and played out by the driver */
+export const MISTAKE = { NONE: 0, LOCKUP: 1, WIDE: 2, SPIN: 3 } as const;
+/** a virtual safety car: every car to this share of its racing speed */
+export const VSC_SPEED = 0.62;
+
 export class AIDriver {
   /** 0.9..1.0: fraction of the profile speed this driver can carry */
   pace: number;
@@ -27,10 +32,27 @@ export class AIDriver {
   aggression: number;
   offset = 0;
   targetOffset = 0;
-  private reaction: number;
+  /** seconds from lights out to moving off (the race sets it: good and bad launches) */
+  reaction: number;
+  /** a bogged launch: seconds of half throttle after moving off */
+  bog = 0;
+  /** today's rhythm: a slow drift of the pace (±~0.5%) so battles ebb and flow (set by the race) */
+  rhythm = 0;
+  /** a failing car (mechanical trouble): pace multiplier, 1 = healthy */
+  trouble = 1;
+  /** virtual safety car: slow to the VSC speed, no overtaking */
+  vsc = false;
+  /** the mistake in progress (see MISTAKE), whether it has started (0 armed, 1 happening), its clock and severity 0..1 */
+  err = 0;
+  errOn = 0;
+  errT = 0;
+  errSev = 0;
+  private savedAssists: Assists | null = null;
+  /** random numbers (the race hands in its seeded generator) */
+  rand: () => number;
   private startTimer = 0;
   private stuckTimer = 0;
-  private wobblePhase = Math.random() * 100;
+  private wobblePhase: number;
   private passSide = 0;
   private passTimer = 0;
   /** true once the race has started for this driver */
@@ -44,10 +66,21 @@ export class AIDriver {
   private prevLat = 0;
   readonly input: DriveInput = { throttle: 0, brake: 0, steer: 0, ers: false, shiftUp: false, shiftDown: false };
 
-  constructor(pace: number, aggression: number) {
+  constructor(pace: number, aggression: number, rand: () => number = Math.random) {
     this.pace = pace;
     this.aggression = aggression;
-    this.reaction = 0.18 + Math.random() * 0.08;
+    this.rand = rand;
+    this.reaction = 0.18 + rand() * 0.08;
+    this.wobblePhase = rand() * 100;
+  }
+
+  /** make a mistake: armed now, it happens at the next place it can (a braking zone, a corner exit) */
+  mistake(kind: number, severity: number) {
+    if (this.err !== 0 || this.parkSide !== 0 || this.vsc) return;
+    this.err = kind;
+    this.errOn = 0;
+    this.errT = 0;
+    this.errSev = Math.max(0, Math.min(1, severity));
   }
 
   /** start from wherever the car is (e.g. a grid slot) and merge onto the line gradually */
@@ -109,13 +142,13 @@ export class AIDriver {
       }
       if (ds > 0 && ds < 45 && Math.abs(dl) < 2.1) {
         const closing = v - o.speed;
-        if (ds < 28 && closing > -1 && calm === 0) {
+        if (ds < 28 && closing > -1 && calm === 0 && !this.vsc) {
           // decide a side once and commit for a while
           if (this.passTimer <= 0) {
             const roomL = o.lateral + hw;
             const roomR = hw - o.lateral;
             this.passSide = roomR > roomL ? 1 : -1;
-            this.passTimer = 2.5 + Math.random();
+            this.passTimer = 2.5 + this.rand();
           }
           const desired = o.lateral + this.passSide * 2.9 - track.racingLineAt(car.s + 10);
           this.targetOffset = desired;
@@ -216,7 +249,51 @@ export class AIDriver {
     const vAt = (ss: number) => profile.atGrip(ss, g);
     // off the line = a tighter radius: slow corners punish it far more than fast ones
     const offLoss = corner * Math.min(0.2, offLine * (0.012 + 0.05 * tight));
-    let vt = vAt(car.s + v * 0.12) * this.pace * this.trim * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
+
+    // ---- mistakes (armed by the race): a late brake that locks the fronts and runs
+    // wide, a corner exit taken too fast, a snap of oversteer on the power
+    let late = 0;
+    let over = 1;
+    let noLift = false;
+    let spinNow = false;
+    if (this.err !== 0) {
+      this.errT += dt;
+      const needBrake = vAt(car.s + v * 0.12) < v - 4;
+      if (this.errOn === 0) {
+        const ready =
+          this.err === MISTAKE.LOCKUP ? needBrake && v > 25
+          : this.err === MISTAKE.WIDE ? corner === 1 && v > 25
+          : corner === 1 && Math.abs(kPath) > 1 / 260 && !needBrake && v > 18;
+        if (ready) {
+          this.errOn = 1;
+          this.errT = 0;
+          if (this.err === MISTAKE.SPIN) car.r += Math.sign(kPath) * (0.25 + 0.35 * this.errSev);
+        } else if (this.errT > 12) this.err = 0;
+      }
+      if (this.errOn === 1) {
+        const dur = this.err === MISTAKE.LOCKUP ? 1.3 + this.errSev : this.err === MISTAKE.WIDE ? 2 + this.errSev : 1.2;
+        if (this.errT > dur) this.err = this.errOn = 0;
+        else if (this.err === MISTAKE.LOCKUP) late = 12 + 26 * this.errSev;
+        else if (this.err === MISTAKE.WIDE) {
+          over = 1.03 + 0.035 * this.errSev;
+          noLift = true;
+        } else spinNow = true;
+      }
+    }
+    // the assists come back as soon as the moment is over
+    const lockNow = this.err === MISTAKE.LOCKUP && this.errOn === 1;
+    if (this.savedAssists && !spinNow && !lockNow) {
+      car.assists = this.savedAssists;
+      this.savedAssists = null;
+    }
+    if ((spinNow || lockNow) && !this.savedAssists) {
+      this.savedAssists = car.assists;
+      car.assists = spinNow ? { ...car.assists, traction: 'off', stability: false } : { ...car.assists, abs: false };
+    }
+
+    let vt = vAt(car.s + v * 0.12 - late) * this.pace * this.trim * (1 + this.rhythm) * this.trouble * (corner ? over : 1) * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
+    // virtual safety car: everyone at the same reduced speed (the gaps hold)
+    if (this.vsc) vt = Math.min(vt, Math.max(15, vAt(car.s + v * 0.12) * VSC_SPEED));
     vt = Math.min(vt, followSpeed);
     const err = vt - v;
     if (err > 0) {
@@ -225,7 +302,7 @@ export class AIDriver {
       // running wide on the exit: ease off like a driver would to hold the line
       if (Math.abs(kPath) > 1 / 400) {
         const wide = crossErr * Math.sign(kPath);
-        if (wide > 0.35) inp.throttle *= Math.max(0.15, 1 - (wide - 0.35) * 0.7);
+        if (wide > 0.35 && !noLift) inp.throttle *= Math.max(0.15, 1 - (wide - 0.35) * 0.7);
       }
       // about to run out of road (outer wheels at the kerb's edge and drifting out): lift
       const side = car.lateral >= 0 ? 1 : -1;
@@ -234,11 +311,21 @@ export class AIDriver {
       const near = Math.abs(car.lateral) - (edge - 1.2);
       // (not at the inside edge of a steeply banked corner: the long apex there is the line)
       const bankedApex = track.banked[Math.floor(track.wrap(car.s))] !== 0 && Math.abs(kPath) > 1 / 400 && side !== Math.sign(kPath);
-      if (near > 0 && outward > 0.4 && !bankedApex) inp.throttle *=Math.max(0.1, 1 - near * 0.55 - outward * 0.06);
+      if (near > 0 && outward > 0.4 && !bankedApex && !noLift) inp.throttle *= Math.max(0.1, 1 - near * 0.55 - outward * 0.06);
     } else {
       inp.throttle = err > -0.6 ? 0.25 : 0;
       inp.brake = err < -0.8 ? Math.min(1, -err * 0.22) : 0;
     }
+    // a locked-up brake: stamps on it (the fronts lock, the car goes straight on)
+    if (lockNow && inp.brake > 0.2) inp.brake = 1;
+    // the snap: full power with the rear already stepping out, no countersteer yet
+    if (spinNow) {
+      inp.throttle = 1;
+      inp.brake = 0;
+      inp.steer = Math.max(-lim, Math.min(lim, inp.steer - 0.25 * Math.atan2(car.vy, Math.max(5, v))));
+    }
+    // a bogged launch: half throttle for a moment after moving off
+    if (this.bog > 0 && this.startTimer < this.reaction + this.bog) inp.throttle = Math.min(inp.throttle, 0.5);
     this.prevLat = car.lateral;
     // ERS in the second half of straights when behind someone
     inp.ers = followSpeed < Infinity && corner === 0 && car.ers > 0.3;

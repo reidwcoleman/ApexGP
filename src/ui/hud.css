@@ -519,6 +519,31 @@
 .banner.green .k { color: var(--green); }
 .banner.red .k { color: var(--accent); }
 .banner.blue .k { color: var(--cold); }
+.banner.yellow { box-shadow: inset 0 0 0 1.5px var(--yellow); }
+.banner.yellow .k { color: var(--yellow); }
+
+/* virtual safety car board: up while the VSC is out */
+.vscboard {
+  position: absolute;
+  left: 50%;
+  top: 40px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  display: flex;
+  gap: var(--s3);
+  align-items: baseline;
+  font-size: var(--t-row);
+  font-weight: 600;
+  color: var(--ink2);
+  box-shadow: inset 0 0 0 1.5px var(--yellow);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+.vscboard.show { opacity: 1; }
+.vscboard b { color: var(--yellow); letter-spacing: 0.08em; }
+.vscboard .ok { color: var(--green); }
+.vscboard .over { color: var(--accent); }
 
 .lights {
   position: absolute;

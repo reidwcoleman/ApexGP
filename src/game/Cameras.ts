@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CarRig } from '../car/CarModel.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import type { Track } from '../world/Track.ts';
+import type { Sightlines } from './Sightlines.ts';
 
 export type CameraMode =
   // the cameras the player can race with
@@ -124,6 +125,21 @@ interface TvCam {
   where: string;
 }
 
+interface CamSpec {
+  s: number;
+  side: number;
+  lat: number;
+  h: number;
+  kind: ShotKind;
+  from: number;
+  to: number;
+  frame: number;
+  where: string;
+  free: boolean;
+}
+/** catch fences count as blocking this close to the lens (further off you look through them) */
+const FENCE_NEAR = 14;
+
 /** which trackside cameras each trackside mode may use */
 const TV_KINDS: Partial<Record<CameraMode, ShotKind[]>> = {
   tv: ['tower', 'apex', 'exit', 'pan', 'long', 'pitwall', 'stand', 'gantry'],
@@ -182,10 +198,21 @@ export class Cameras {
   private blimpInit = false;
   private readonly track: Track;
 
-  constructor(camera: THREE.PerspectiveCamera, track: Track) {
+  /** what the cameras can see (null: only the barrier heuristic) */
+  readonly sight: Sightlines | null;
+
+  constructor(camera: THREE.PerspectiveCamera, track: Track, sight: Sightlines | null = null) {
     this.camera = camera;
     this.track = track;
+    this.sight = sight;
+    const t0 = performance.now();
     this.buildTv(track);
+    this.placeMs = Math.round(performance.now() - t0);
+  }
+  /** how long placing the trackside cameras took (ms) */
+  readonly placeMs: number;
+  get tvCount(): number {
+    return this.tv.length;
   }
 
   /** place the broadcast cameras around the lap from the corners, then fill the straights */
@@ -197,14 +224,8 @@ export class Cameras {
       // and fences would stand between the lens and the track (except the pit-wall camera itself)
       const nearPit = track.delta(track.pit.sStart - 700, s) >= 0 && track.delta(s, track.pit.sEnd + 300) >= 0;
       if ((track.inPit(s) || nearPit) && kind !== 'pitwall' && kind !== 'gantry') side = -track.pit.side;
-      let l = lat;
-      if (!free) {
-        const hw = track.halfWidthAt(s);
-        const bar = track.barrierAt(s, side);
-        l = Math.max(hw + 1.6, Math.min(bar - 2, lat));
-      }
-      const pos = track.point(s, side * l, h);
-      this.tv.push({ s, pos, kind, from: track.wrap(from), to: track.wrap(to), frame, where });
+      const c = this.place({ s, side, lat, h, kind, from: track.wrap(from), to: track.wrap(to), frame, where, free });
+      if (c) this.tv.push(c);
     };
     const covered: [number, number][] = [];
     const corners = track.corners;
@@ -243,54 +264,96 @@ export class Cameras {
     // grandstands at the three slowest corners (the big braking zones)
     const slowest = corners.slice().sort((a, b) => a.radius - b.radius).slice(0, 3);
     for (const c of slowest) add(c.sApex, -c.dir, track.halfWidthAt(c.sApex) + 16, 16, 'stand', c.sStart - 170, c.sEnd + 90, 30, `${c.name} grandstand`);
-    this.trimToSight(track);
     this.tv.sort((a, b) => a.s - b.s);
   }
 
-  /**
-   * Cameras can't see through barriers, fences and the trees behind them: each
-   * camera's coverage is cut to the longest stretch of track it has a clear line
-   * to (the sight line stays inside the barriers), and a camera with too little is dropped.
-   */
-  private trimToSight(track: Track) {
-    const p = new THREE.Vector3();
-    const sees = (c: TvCam, s: number) => {
-      track.point(s, 0, 0, p);
-      for (const f of SIGHT_SAMPLES) {
-        const x = c.pos.x + (p.x - c.pos.x) * f;
-        const z = c.pos.z + (p.z - c.pos.z) * f;
-        const pr = track.project(x, z, Math.floor(track.wrap(c.s + track.delta(c.s, s) * f)), 60);
-        const side = pr.lateral < 0 ? -1 : 1;
-        if (Math.abs(pr.lateral) > track.barrierAt(pr.s, side) + 0.3) return false;
+  private readonly pv = new THREE.Vector3();
+  private readonly pt = new THREE.Vector3();
+
+  /** a camera position for this spec: the variant (height, set-back, along the track) that sees the most of its stretch */
+  private place(sp: CamSpec): TvCam | null {
+    const track = this.track;
+    const exempt = sp.kind === 'apex' || sp.kind === 'pitwall' || sp.kind === 'gantry';
+    const variants: [number, number, number][] = exempt
+      ? sp.kind === 'apex'
+        ? [[0, 0, 0], [0, 0.7, 0], [1.8, 0.4, 0], [0, 0, -10], [0, 0, 10]]
+        : [[0, 0, 0], [0, 2, 0], [0, 4, 0], [0, 0, -15]]
+      : [[0, 0, 0], [0, 3, 0], [-4, 0, 0], [-4, 3, 0], [4, 1, 0], [0, 7, 0], [0, 0, -20], [0, 0, 20], [-6, 6, 0], [0, 12, 0]];
+    const span0 = track.delta(sp.from, sp.to);
+    const len = span0 > 0 ? span0 : span0 + track.length;
+    let best: TvCam | null = null;
+    let bestRun = 0;
+    for (const [dl, dh, ds] of variants) {
+      const s = track.wrap(sp.s + ds);
+      let l = sp.lat + dl;
+      if (!sp.free) {
+        const hw = track.halfWidthAt(s);
+        const bar = track.barrierAt(s, sp.side);
+        l = Math.max(hw + 1.6, Math.min(bar - 2, l));
       }
-      return true;
-    };
-    const keep: TvCam[] = [];
-    for (const c of this.tv) {
-      if (c.kind === 'apex' || c.kind === 'pitwall' || c.kind === 'gantry') {
-        keep.push(c);
-        continue;
-      }
-      const span = track.delta(c.from, c.to);
-      const len = span > 0 ? span : span + track.length;
-      let best = 0, bestFrom = 0, run = 0, runFrom = 0;
-      for (let d = 0; d <= len; d += 10) {
-        if (sees(c, c.from + d)) {
+      const pos = track.point(s, sp.side * l, sp.h + dh);
+      // never inside anything (a tree, a stand, a fence right at the lens)
+      if (this.sight && this.embedded(pos)) continue;
+      const cam: TvCam = { s, pos, kind: sp.kind, from: sp.from, to: sp.to, frame: sp.frame, where: sp.where };
+      let run = 0, runFrom = 0, bRun = 0, bFrom = 0;
+      const STEP = 8;
+      for (let d = 0; d <= len; d += STEP) {
+        if (this.seesTrack(cam, track.wrap(sp.from + d), exempt)) {
           if (run === 0) runFrom = d;
-          run += 10;
-          if (run > best) {
-            best = run;
-            bestFrom = runFrom;
+          run += STEP;
+          if (run > bRun) {
+            bRun = run;
+            bFrom = runFrom;
           }
         } else run = 0;
       }
-      if (best < 80) continue;
-      const from = c.from + bestFrom;
-      c.to = track.wrap(from + best - 10);
-      c.from = track.wrap(from);
-      keep.push(c);
+      if (bRun > bestRun) {
+        bestRun = bRun;
+        cam.from = track.wrap(sp.from + bFrom);
+        cam.to = track.wrap(sp.from + bFrom + bRun - STEP);
+        best = cam;
+      }
+      if (bRun >= len * 0.9) break;
     }
-    this.tv = keep;
+    const need = sp.kind === 'apex' ? 30 : exempt ? 60 : 80;
+    return best && bestRun >= need ? best : null;
+  }
+
+  /** is the point inside (or within a metre of) something solid or a fence */
+  private embedded(p: THREE.Vector3): boolean {
+    const sg = this.sight!;
+    if (sg.solidAt(p.x, p.y, p.z, true)) return true;
+    for (const [dx, dz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]]) if (sg.solidAt(p.x + dx, p.y, p.z + dz, true)) return true;
+    return p.y < sg.groundAt(p.x, p.z) + 0.4;
+  }
+
+  /** can this camera see a car at s (on the racing line, and on at least one other line across the road)? */
+  private seesTrack(c: TvCam, s: number, exempt: boolean): boolean {
+    const track = this.track;
+    if (!exempt && !this.insideBarriers(c, s)) return false;
+    const sg = this.sight;
+    if (!sg) return true;
+    const rl = track.racingLineAt(s);
+    track.point(s, rl, 0.8, this.pt);
+    if (!sg.clear(c.pos, this.pt, 6, FENCE_NEAR)) return false;
+    track.point(s, 0, 0.8, this.pt);
+    if (sg.clear(c.pos, this.pt, 6, FENCE_NEAR)) return true;
+    track.point(s, rl > 0 ? rl - 4 : rl + 4, 0.8, this.pt);
+    return sg.clear(c.pos, this.pt, 6, FENCE_NEAR);
+  }
+
+  /** the sight line stays inside the barriers (they carry the catch fences and the boards) */
+  private insideBarriers(c: TvCam, s: number): boolean {
+    const track = this.track;
+    const p = track.point(s, 0, 0, this.pv);
+    for (const f of SIGHT_SAMPLES) {
+      const x = c.pos.x + (p.x - c.pos.x) * f;
+      const z = c.pos.z + (p.z - c.pos.z) * f;
+      const pr = track.project(x, z, Math.floor(track.wrap(c.s + track.delta(c.s, s) * f)), 60);
+      const side = pr.lateral < 0 ? -1 : 1;
+      if (Math.abs(pr.lateral) > track.barrierAt(pr.s, side) + 0.3) return false;
+    }
+    return true;
   }
 
   next() {
@@ -387,12 +450,21 @@ export class Cameras {
     this.onboardShot(dt, car, rig, sx, sy, kmh);
   }
 
-  private heliShot(dt: number, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number) {
+  private heliShot(dt: number, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number, car?: CarPhysics) {
     const cam = this.camera;
-    // helicopter: high and off to one side, trailing the car on a long lens
+    // helicopter: high and off to one side, trailing the car on a long lens;
+    // the pilot climbs (and closes in over the top) when a hill or the trees get between
+    if (this.sight && this.initialized) {
+      this.aim.copy(carPos);
+      this.aim.y += 0.7;
+      const blocked = !this.sight.clear(this.camPos, this.aim, 5, 0);
+      this.heliLift = Math.max(0, Math.min(1, this.heliLift + (blocked ? dt * 1.5 : -dt * 0.25)));
+    } else if (!this.initialized) this.heliLift = 0;
     const side = this.v3.set(fwdCar.z, 0, -fwdCar.x);
-    const want = this.v4.copy(carPos).addScaledVector(fwdCar, -30).addScaledVector(side, 9);
-    want.y = carPos.y + 46;
+    const back = 30 * (1 - this.heliLift * 0.6);
+    const want = this.v4.copy(carPos).addScaledVector(fwdCar, -back).addScaledVector(side, 9 * (1 - this.heliLift * 0.6));
+    want.y = carPos.y + 46 + this.heliLift * 40;
+    if (car) this.feedForward(want, car, 0.6);
     if (!this.initialized) {
       this.camPos.copy(want);
       this.camVel.set(0, 0, 0);
@@ -482,6 +554,7 @@ export class Cameras {
     spring(this.camPos, this.camVel, want, 3.2, 2.5, dt);
     const p = this.v5.copy(carPos).add(this.camPos);
     p.y = Math.max(p.y, track.point(car.s, car.lateral).y + 2.5);
+    this.pullIn(carPos, p, dt);
     cam.position.copy(p);
     const look = this.v3.copy(carPos).addScaledVector(fwdCar, 5 + speed * 0.05);
     look.y += 0.4;
@@ -503,6 +576,7 @@ export class Cameras {
     const h = 0.75 + (Math.sin(this.orbitT * 0.6) + 1) * 0.55;
     cam.position.set(carPos.x + Math.sin(a) * r, carPos.y + h, carPos.z + Math.cos(a) * r);
     cam.position.y = Math.max(cam.position.y, track.point(car.s, car.lateral).y + 0.35);
+    this.pullIn(carPos, cam.position, dt);
     cam.lookAt(carPos.x, carPos.y + 0.55, carPos.z);
     this.setFov(36, dt, !this.initialized);
     this.initialized = true;
@@ -630,17 +704,29 @@ export class Cameras {
     const cam = this.camera;
     this.tvAge += dt;
     const covers = (c: TvCam) => track.delta(c.from, car.s) >= 0 && track.delta(car.s, c.to) >= 0;
+    // where the car is (and will be in half a second): a camera must see both
+    this.aim.copy(carPos);
+    this.aim.y += 0.7;
+    this.aimNext.copy(this.aim);
+    this.feedForward(this.aimNext, car, 0.5);
+    const sees = (c: TvCam) => !this.sight || (this.sight.clear(c.pos, this.aim, 6, FENCE_NEAR) && this.sight.clear(c.pos, this.aimNext, 6, FENCE_NEAR));
     let cur = this.tvIndex >= 0 ? this.tv[this.tvIndex] : null;
     if (cur && !kinds.includes(cur.kind)) cur = null;
+    // the camera on air loses the car (something's about to come between them): cut now
+    if (cur && !sees(cur)) this.tvBlockT += dt;
+    else this.tvBlockT = 0;
+    const blocked = this.tvBlockT > 0.05 || (cur !== null && this.tvBlockT > 0 && !this.initialized);
     // hold a shot at least ~2.5 s; cut when the car leaves it, or to a fresher angle after a while
-    let pick = cur ? this.tvIndex : -1;
-    const stale = !cur || !covers(cur) || (this.tvAge > 7.5 && cur.kind !== 'apex' && cur.kind !== 'long');
+    let pick = cur && !blocked ? this.tvIndex : -1;
+    const stale = !cur || blocked || !covers(cur) || (this.tvAge > 7.5 && cur.kind !== 'apex' && cur.kind !== 'long');
     if (stale || this.tvAge > 2.5) {
       let best = -1;
       let bestScore = -Infinity;
       for (let i = 0; i < this.tv.length; i++) {
         const c = this.tv[i];
         if (!kinds.includes(c.kind) || !covers(c)) continue;
+        if (i === this.tvIndex && blocked) continue;
+        if (!sees(c)) continue;
         // the camera the car is heading toward (least of its coverage used), with a bonus for the dramatic ones
         const used = track.delta(c.from, car.s) / Math.max(1, track.delta(c.from, c.to));
         const dAhead = track.delta(car.s, c.s);
@@ -662,7 +748,7 @@ export class Cameras {
           const c = this.tv[i];
           if (!kinds.includes(c.kind)) continue;
           const dd = kinds.length > 3 ? track.delta(car.s, c.s) : c.pos.distanceTo(carPos);
-          if ((kinds.length <= 3 || dd > -30) && dd < bd) {
+          if ((kinds.length <= 3 || dd > -30) && dd < bd && c.pos.distanceTo(carPos) < 600 && sees(c)) {
             bd = dd;
             best = i;
           }
@@ -675,7 +761,21 @@ export class Cameras {
       this.tvAge = 0;
       this.initialized = false;
     }
-    if (this.tvIndex < 0) return;
+    // no trackside camera can see the car here: the helicopter covers it until one can
+    this.lost = this.tvIndex < 0;
+    if (this.lost) {
+      if (!this.lostPrev) this.initialized = false;
+      this.lostPrev = true;
+      this.heliShot(dt, carPos, fwdCar, speed, car);
+      this.tvFocus.copy(carPos);
+      this.tvDof = 0.5;
+      this.tvRange = 40;
+      return;
+    }
+    if (this.lostPrev) {
+      this.lostPrev = false;
+      this.initialized = false;
+    }
     const tc = this.tv[this.tvIndex];
     const dist = tc.pos.distanceTo(carPos);
     const wide = WIDE[tc.kind];
@@ -714,11 +814,34 @@ export class Cameras {
     this.tvRange = Math.max(4, dist * (tc.kind === 'long' ? 0.05 : 0.1));
   }
   private tvAge = 0;
+  private tvBlockT = 0;
+  private lostPrev = false;
+  /** the trackside camera on air can't see the car (and no other covering one can): the helicopter is standing in */
+  lost = false;
+  private readonly aim = new THREE.Vector3();
+  private readonly aimNext = new THREE.Vector3();
   private readonly tvLookV = new THREE.Vector3();
   /** TV camera focus (for the game's depth of field) */
   readonly tvFocus = new THREE.Vector3();
   tvDof = 1;
   tvRange = 5;
+
+  private heliLift = 0;
+  private pullD = 1;
+
+  /** bring a camera near the car in front of anything between it and the car (a tree, a fence, a wall) */
+  private pullIn(carPos: THREE.Vector3, p: THREE.Vector3, dt: number) {
+    const sg = this.sight;
+    if (!sg) return;
+    this.aim.copy(carPos);
+    this.aim.y += 0.7;
+    const full = this.aim.distanceTo(p);
+    const free = sg.clearDistance(this.aim, p, 2.5);
+    const want = Math.min(1, free / Math.max(0.1, full));
+    // in fast, out slowly
+    this.pullD = !this.initialized || want < this.pullD ? want : this.pullD + (want - this.pullD) * Math.min(1, dt * 1.5);
+    if (this.pullD < 0.999) p.lerpVectors(this.aim, p, this.pullD);
+  }
 
   /** push a spring's target ahead along the car's velocity by k seconds (cancels the spring's lag) */
   private feedForward(target: THREE.Vector3, car: CarPhysics, k: number) {

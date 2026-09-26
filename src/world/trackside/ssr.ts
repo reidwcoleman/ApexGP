@@ -19,7 +19,7 @@ export class RoadSSR {
   /** below this wetness the march is skipped entirely */
   minWetness = 0.04;
   /** the copy is this many times smaller than the scene target (2 = half res) */
-  downscale = 3;
+  downscale = 2;
   /** overrides the quality-driven downscale when set */
   fixedDownscale: number | null = null;
   /** debug: copy the buffers but don't march (to time the copy alone) */
