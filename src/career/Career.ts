@@ -161,6 +161,9 @@ function fresh(): CareerData {
   };
 }
 
+/** temporary: every circuit unlocked without winning your way through the calendar */
+export const UNLOCK_ALL = true;
+
 export class Career {
   data: CareerData;
   private listeners: (() => void)[] = [];
@@ -194,6 +197,8 @@ export class Career {
   // ------------------------------------------------------------------ circuits
   /** circuits are unlocked in calendar order: the first always, then one per top-five finish at the one before */
   isUnlocked(id: string): boolean {
+    // for now every circuit is open (the career unlock chain comes back later)
+    if (UNLOCK_ALL) return true;
     const i = CIRCUITS.findIndex((c) => c.id === id);
     if (i <= 0) return true;
     const prev = this.data.best[CIRCUITS[i - 1].id];

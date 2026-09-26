@@ -10,7 +10,7 @@ import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
-import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
+import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 
 export interface RaceSetup {
@@ -415,7 +415,7 @@ export class Menu {
       const watch = el('div', 'cta ghost watch', row, 'Watch a simulated race');
       this.action(watch, () => this.cb.onSpectate?.({ ...this.setup }));
     }
-    el('div', 'hp-note', p, `Finish in the top ${UNLOCK_POS} to unlock the next round. Points pay credits for car development.`);
+    el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Finish in the top ${UNLOCK_POS} to unlock the next round. Points pay credits for car development.`);
     // start on the Race button
     this.sel = CIRCUITS.length;
   }
