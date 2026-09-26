@@ -129,8 +129,12 @@ vec4 tsSSR(vec3 P, vec3 N, float rough, vec2 wobble) {
   vec2 s0 = tsProj(P), s1 = tsProj(E);
   float iz0 = 1.0 / P.z, iz1 = 1.0 / E.z;
   float fPrev = 0.0, fHit = -1.0;
-  // per-pixel jitter of the step positions (interleaved gradient noise): no stair-step blocks in the hits
-  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  // per-pixel jitter of the step positions (interleaved gradient noise): no stair-step blocks in the hits.
+  // Full-strength jitter flips the hit/miss step at grazing, marginal reflections (a distant building
+  // seen low over wet tarmac) independently per pixel, with nothing to resolve it over time (no TAA
+  // here) — that reads as a fine dithered/checkerboard speckle. Half-strength still breaks up banding
+  // but halves how often a neighbouring pixel's phase lands on the other side of a hit/miss edge.
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 0.15;
   for (int i = 1; i <= 16; i++) {
     float f = (float(i) - jit) / 16.0;
     f *= f;
@@ -154,7 +158,11 @@ vec4 tsSSR(vec3 P, vec3 N, float rough, vec2 wobble) {
   float thick = 0.8 + tHit * 0.08;
   if (dzB > thick) return vec4(0.0);
   vec2 e = smoothstep(vec2(0.0), vec2(0.07), uv) * (1.0 - smoothstep(vec2(0.93), vec2(1.0), uv));
-  float conf = e.x * e.y * (1.0 - smoothstep(12.0, 38.0, tHit)) * (1.0 - smoothstep(0.2, 0.42, rough)) * (1.0 - smoothstep(0.5 * thick, thick, dzB));
+  // dzB (how far the refined hit still sits behind the surface) is the noisiest of these terms: a marginal,
+  // grazing hit (a distant building low in a puddle) lands on a different march step per pixel under the
+  // jitter, so dzB swings a lot between neighbours. A short, sharp falloff turns that swing into full-strength
+  // on/off speckle; a longer, softer one turns it into a smooth fade instead — same hits, no dither.
+  float conf = e.x * e.y * (1.0 - smoothstep(12.0, 38.0, tHit)) * (1.0 - smoothstep(0.2, 0.42, rough)) * (1.0 - smoothstep(0.85 * thick, 2.0 * thick, dzB));
   conf *= smoothstep(-0.05, 0.12, -R.z);
   // rough water smears reflections vertically (the classic wet-road streak): 4 taps along screen y
   float sp = (0.004 + rough * 0.05) * (1.0 + uSsrLod);
