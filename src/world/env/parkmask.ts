@@ -16,6 +16,13 @@ import type { Layout } from './layout.ts';
 export interface ParkMasks {
   fine: THREE.DataTexture;
   fineBounds: Bounds;
+  /**
+   * track-aligned ground detail over the fine bounds (half the fine resolution):
+   *   R  mowing stripe (1 = the light band): bands across the track, following every curve
+   *   G  verge (mown ground between the circuit and just beyond its barriers)
+   *   B  run-off wear: the strip beside the kerbs where cars run wide
+   */
+  track: THREE.DataTexture;
   coarse: THREE.DataTexture;
   coarseBounds: Bounds;
   /** CPU lookups (0..1) for placement: lawn, gravel, paved */
@@ -203,6 +210,8 @@ export function buildParkMasks(map: WorldMap, layout: Layout, trees: TreeShade[]
   fine.needsUpdate = true;
 
   lap('read');
+  const track2 = trackMask(map);
+  lap('track');
   // coarse forest density over the square (12 m texels)
   const S = map.SQUARE;
   const CW = 512, CH = 512;
@@ -232,6 +241,7 @@ export function buildParkMasks(map: WorldMap, layout: Layout, trees: TreeShade[]
   return {
     fine,
     fineBounds: { ...F },
+    track: track2,
     coarse,
     coarseBounds: { ...S },
     timings: (lap('coarse'), timings),
@@ -261,4 +271,72 @@ function boxBlur(a: Float32Array, W: number, H: number, r: number) {
       acc += tmp[Math.min(H - 1, j + r + 1) * W + i] - tmp[Math.max(0, j - r) * W + i];
     }
   }
+}
+
+/** mowing stripes across the track, the verge and the run-off wear (see ParkMasks.track) */
+function trackMask(map: WorldMap): THREE.DataTexture {
+  const F = map.FINE;
+  const T = TEXEL * 2;
+  const W = Math.ceil((F.x1 - F.x0) / T);
+  const H = Math.ceil((F.z1 - F.z0) / T);
+  const sx = W / (F.x1 - F.x0), sz = H / (F.z1 - F.z0);
+  const X = (x: number) => (x - F.x0) * sx;
+  const Z = (z: number) => (z - F.z0) * sz;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  const track = map.track;
+  const n = track.n;
+  const p = new THREE.Vector3();
+  const reach = (s: number, side: number) => Math.min(track.barrierAt(s, side) + 7, 48);
+  const band = (s0: number, s1: number, lat0: (s: number, side: number) => number, lat1: (s: number, side: number) => number, side: number) => {
+    ctx.beginPath();
+    let first = true;
+    for (let s = s0; s <= s1 + 1e-3; s += Math.max(0.5, (s1 - s0) / 6)) {
+      track.point(((s % n) + n) % n, side * lat0(s, side), 0, p);
+      if (first) ctx.moveTo(X(p.x), Z(p.z));
+      else ctx.lineTo(X(p.x), Z(p.z));
+      first = false;
+    }
+    for (let s = s1; s >= s0 - 1e-3; s -= Math.max(0.5, (s1 - s0) / 6)) {
+      track.point(((s % n) + n) % n, side * lat1(s, side), 0, p);
+      ctx.lineTo(X(p.x), Z(p.z));
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+  const edge = (s: number) => track.halfWidth[Math.floor(((s % n) + n) % n)] ?? 6;
+  // G: the verge on both sides
+  ctx.fillStyle = 'rgb(0,255,0)';
+  for (let s = 0; s < n; s += 24) for (const side of [-1, 1]) band(s - 0.5, s + 24.5, (q) => edge(q) - 0.5, reach, side);
+  // R: light bands, 9 m long every 18 m, whole width of the verge
+  const P = 18;
+  ctx.fillStyle = 'rgb(255,0,0)';
+  for (let s = 0; s < n; s += P) for (const side of [-1, 1]) band(s, s + P / 2, (q) => edge(q) - 0.5, reach, side);
+  // B: run-off wear beside the kerbs (strongest right at the edge)
+  for (const [w, a] of [[3, 0.45], [6, 0.3], [9, 0.25]] as [number, number][]) {
+    ctx.fillStyle = `rgba(0,0,255,${a})`;
+    for (let s = 0; s < n; s += 24) for (const side of [-1, 1]) band(s - 0.5, s + 24.5, (q) => edge(q) - 0.5, (q) => edge(q) + w, side);
+  }
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const data = new Uint8Array(W * H * 4);
+  for (let i = 0, N = W * H; i < N; i++) {
+    data[i * 4] = d[i * 4];
+    data[i * 4 + 1] = d[i * 4 + 1];
+    data[i * 4 + 2] = d[i * 4 + 2];
+    data[i * 4 + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.colorSpace = THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
 }

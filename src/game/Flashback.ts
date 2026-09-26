@@ -2,8 +2,8 @@ import type { Race } from '../race/Race.ts';
 
 /**
  * Flashback, as in the F1 games: the whole race state is snapshotted four times
- * a second for the last ~12 seconds; the player can rewind and resume from any
- * snapshot. Snapshots copy plain numbers, booleans, strings and number arrays of
+ * a second for the last ~30 seconds; the player can rewind (each extra press of
+ * the flashback key goes further back) and resume from any snapshot. Snapshots copy plain numbers, booleans, strings and number arrays of
  * the race, every competitor, every car's physics and every AI driver.
  */
 
@@ -54,7 +54,7 @@ export class Flashback {
   private snaps: RaceSnap[] = [];
   private acc = 0;
   /** seconds of history kept */
-  readonly span = 12;
+  readonly span = 30;
 
   reset() {
     this.snaps = [];

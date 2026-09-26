@@ -45,6 +45,8 @@ export interface PitPlan {
   sStart: number;
   sEnd: number;
   mid: number;
+  /** paddock reach behind the building (|lateral|) */
+  paddockEnd: number;
   /** road edge |lateral| */
   road: number;
   /** where the entry spur leaves the road edge (inside the trackside's range; overlaid) */
@@ -83,7 +85,9 @@ const sm = (a: number, b: number, x: number) => {
 
 export function makePlan(track: Track): PitPlan {
   const p = track.pit;
-  const mid = (p.sStart + p.sEnd) / 2;
+  // a circuit may pin the building (tight sites): the garages then sit where they would in a default one
+  const bld = p.building;
+  const mid = bld ? bld[0] + (bld[1] - bld[0]) * (240 / 498) : (p.sStart + p.sEnd) / 2;
   const road = track.halfWidthAt(mid);
   const s0 = p.sStart - HANDOFF.before;
   const s1 = p.sEnd + HANDOFF.after;
@@ -97,20 +101,22 @@ export function makePlan(track: Track): PitPlan {
     sStart: p.sStart,
     sEnd: p.sEnd,
     mid,
+    paddockEnd: p.paddock,
     road,
     s0,
     s1,
-    bldgS0: mid - 240,
-    bldgS1: mid + 258,
+    bldgS0: bld ? bld[0] : mid - 240,
+    bldgS1: bld ? bld[1] : mid + 258,
     teamS0: mid - (TEAM_COUNT / 2) * GARAGE_W,
     teamS1: mid + (TEAM_COUNT / 2) * GARAGE_W,
-    limitStart: p.sStart + 150,
-    limitEnd: p.sEnd - 150,
+    // (a short lane: the limiter still covers every garage)
+    limitStart: Math.min(p.sStart + 150, mid - (TEAM_COUNT / 2) * GARAGE_W - 25),
+    limitEnd: Math.max(p.sEnd - 150, mid + (TEAM_COUNT / 2) * GARAGE_W + 25),
     podiumS0: track.startS + 26,
     podiumS1: track.startS + 54,
     podiumTip: 1.5,
-    towerS0: mid + 196,
-    towerS1: mid + 216,
+    towerS0: bld ? bld[1] - 62 : mid + 196,
+    towerS1: bld ? bld[1] - 42 : mid + 216,
     boxS: (k: number) => mid + (k - (TEAM_COUNT - 1) / 2) * GARAGE_W,
     outer(s: number) {
       if (s < s0) return road + (bEntry - road) * sm(entryS, s0, s);

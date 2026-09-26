@@ -23,12 +23,11 @@ import { N8AOPostPass } from 'n8ao';
  *
  *   RenderPass (HDR, half float)
  *   → N8AO (screen-space AO, world-radius; ultra)
- *   → sanitize (NaN/Inf scrub)
  *   → speed blur (radial, only while fast)      [own pass: convolution]
  *   → depth of field (menus/replays only)        [own pass: convolution]
  *   → lens rain (onboard cameras in the wet)     [own pass: convolution]
- *   → sun shafts → bloom → grade (game layer × weather look × lightning flash)
- *     → ACES → vignette → grain
+ *   → sanitize (NaN/Inf scrub) → sun shafts → bloom → grade (game layer × weather look × lightning flash)
+ *     → AgX → vignette → grain
  *   → chromatic aberration (only while fast)     [own pass: convolution]
  *   → SMAA
  *
@@ -100,6 +99,7 @@ class SanitizeEffect extends Effect {
  */
 const LENS_RAIN_FRAG = /* glsl */ `
 uniform float amount;
+uniform float shimmer;
 uniform float speed;
 uniform float time;
 
@@ -167,7 +167,29 @@ vec4 lr_stream(vec2 uv, float seed) {
   return vec4(off / vec2(aspect, 1.0), m, head > trail ? clamp(hd / 0.22, 0.0, 1.0) : 0.6);
 }
 
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+float lr_n2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(lr_h21(i), lr_h21(i + vec2(1.0, 0.0)), f.x), mix(lr_h21(i + vec2(0.0, 1.0)), lr_h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  // heat shimmer (weather): hot air rising off the asphalt wobbles everything 30 m … 3 km away
+  vec3 col0 = inputColor.rgb;
+  if (shimmer > 0.001) {
+    float vz = -getViewZ(depth);
+    float k = shimmer * smoothstep(25.0, 110.0, vz) * (1.0 - smoothstep(900.0, 3500.0, vz));
+    if (k > 0.001) {
+      vec2 q = vec2(uv.x * aspect * 240.0, uv.y * 160.0 - time * 6.5);
+      float n = lr_n2(q) + 0.5 * lr_n2(q * 2.3 + vec2(3.7, -time * 4.0)) - 0.75;
+      col0 = texture2D(inputBuffer, uv + vec2(n * 0.3, n) * k * 0.0021).rgb;
+    }
+  }
+  if (amount < 0.001) {
+    outputColor = vec4(col0, inputColor.a);
+    return;
+  }
   vec4 a = lr_static(uv, 6.0, 1.0, 0.2 + 0.55 * amount);
   vec4 b = lr_static(uv + 0.37, 11.0, 7.0, 0.2 + 0.6 * amount);
   vec4 c = lr_static(uv + 0.71, 21.0, 13.0, 0.35 * amount);
@@ -179,7 +201,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (c.z * keep > best.z) best = vec4(c.xy, c.z * keep, c.w);
   if (s.z > best.z) best = s;
   float m = best.z * min(1.0, amount * 1.4);
-  vec3 col = inputColor.rgb;
+  vec3 col = col0;
   // a thin film of water softens the image in heavy rain
   if (amount > 0.3) {
     vec2 px = vec2(1.5 / 1920.0 * aspect, 1.5 / 1080.0) * amount;
@@ -204,11 +226,12 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 class LensRainEffect extends Effect {
   constructor() {
     super('LensRainEffect', LENS_RAIN_FRAG, {
-      attributes: EffectAttribute.CONVOLUTION,
+      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
         ['amount', new THREE.Uniform(0)],
         ['speed', new THREE.Uniform(0)],
         ['time', new THREE.Uniform(0)],
+        ['shimmer', new THREE.Uniform(0)],
       ]),
     });
   }
@@ -240,7 +263,9 @@ void main() {
     float d = texture2D( tDepth, vUv + o ).r;
     float s = step( 0.99999, d );
     sky += s;
-    c += texture2D( tColor, vUv + o ).rgb * s;
+    vec3 t = texture2D( tColor, vUv + o ).rgb;
+    if ( t.r != t.r || t.g != t.g || t.b != t.b ) t = vec3( 0.0 );
+    c += min( max( t, 0.0 ), vec3( 200.0 ) ) * s;
   }
   c *= 0.25;
   float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
@@ -506,6 +531,21 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.info.autoReset = false;
+    // shadow-pass hooks (perf: far cars swap in a one-mesh silhouette just for the shadow maps)
+    const sm = this.renderer.shadowMap as unknown as { render: (lights: THREE.Light[], scene: THREE.Scene, camera: THREE.Camera) => void };
+    const shadowRender = sm.render.bind(sm);
+    sm.render = (lights, scene, camera) => {
+      const hooks = this.shadowHooks;
+      if (lights.length === 0 || hooks.length === 0) return shadowRender(lights, scene, camera);
+      for (let i = 0; i < hooks.length; i++) hooks[i](true);
+      try {
+        shadowRender(lights, scene, camera);
+      } finally {
+        for (let i = 0; i < hooks.length; i++) hooks[i](false);
+      }
+    };
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
     this.renderPass = new RenderPass(scene, camera);
@@ -521,7 +561,6 @@ export class Renderer {
     this.ao.configuration.color = new THREE.Color(0x0a0a0c);
     this.ao.setQualityMode('Medium');
     this.composer.addPass(this.ao);
-    this.composer.addPass(new EffectPass(camera, new SanitizeEffect()));
 
     this.radial = new RadialBlurEffect();
     this.radialPass = new EffectPass(camera, this.radial);
@@ -547,11 +586,20 @@ export class Renderer {
       radius: 0.72,
     });
     this.grade = new GradeEffect();
-    this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+    // AgX: filmic highlight roll-off without ACES's hue skew (neon greens, cyan skies);
+    // the weather look (presets.ts) adds back the saturation/contrast AgX takes out
+    this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
     this.vignette = new VignetteEffect({ darkness: 0.38, offset: 0.3 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.grain.blendMode.opacity.value = 0.05;
-    this.composer.addPass(new EffectPass(camera, this.shafts, this.bloom, this.grade, this.toneMapping, this.vignette, this.grain));
+    // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
+    // copy less; bloom's luminance pre-pass and the shaft mask scrub what they read themselves)
+    const lum = this.bloom.luminanceMaterial as unknown as THREE.ShaderMaterial;
+    lum.fragmentShader = lum.fragmentShader.replace(
+      'vec4 texel=texture2D(inputBuffer,vUv);',
+      'vec4 texel=texture2D(inputBuffer,vUv);if(texel.r!=texel.r||texel.g!=texel.g||texel.b!=texel.b||max(max(abs(texel.r),abs(texel.g)),abs(texel.b))>1e6)texel.rgb=vec3(0.0);texel.rgb=min(max(texel.rgb,0.0),vec3(200.0));',
+    );
+    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.shafts, this.bloom, this.grade, this.toneMapping, this.vignette, this.grain));
 
     this.aberration = new ChromaticAberrationEffect({
       offset: new THREE.Vector2(0, 0),
@@ -562,9 +610,89 @@ export class Renderer {
     this.caPass.enabled = false;
     this.composer.addPass(this.caPass);
 
-    this.composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
+    this.smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
+    this.composer.addPass(new EffectPass(camera, this.smaa));
 
     this.setQuality(quality);
+  }
+
+  // ------------------------------------------------------------------ perf plumbing
+
+  private readonly smaa: SMAAEffect;
+  private readonly shadowHooks: ((on: boolean) => void)[] = [];
+  /** run `fn(true)` right before the shadow maps render and `fn(false)` right after (every renderer.render) */
+  onShadowPass(fn: (on: boolean) => void): () => void {
+    this.shadowHooks.push(fn);
+    return () => {
+      const i = this.shadowHooks.indexOf(fn);
+      if (i >= 0) this.shadowHooks.splice(i, 1);
+    };
+  }
+
+  private readonly timerExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
+  private readonly gpuQueries: WebGLQuery[] = [];
+  private gpuActive: WebGLQuery | null = null;
+  /** GPU time (ms) of the most recent frame whose timer result came back; NaN without the timer extension */
+  gpuMs = NaN;
+  /** called with every GPU frame time that comes back (dev tools, the adaptive quality) */
+  onGpuTime: ((ms: number) => void) | null = null;
+  private gpuRecent: number[] = [];
+  /** the GPU frame times that came back since the last call */
+  takeGpuSamples(): number[] {
+    const a = this.gpuRecent;
+    this.gpuRecent = [];
+    return a;
+  }
+  get hasGpuTimer() {
+    return this.timerExt !== null;
+  }
+  /** start timing one frame's GPU work (pair with gpuFrameEnd; results arrive a few frames later) */
+  gpuFrameBegin() {
+    const ext = this.timerExt;
+    if (!ext || this.gpuActive || this.gpuQueries.length > 6) return;
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const q = gl.createQuery();
+    if (!q) return;
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, q);
+    this.gpuActive = q;
+  }
+  gpuFrameEnd() {
+    const ext = this.timerExt;
+    if (!ext) return;
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    if (this.gpuActive) {
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+      this.gpuQueries.push(this.gpuActive);
+      this.gpuActive = null;
+    }
+    while (this.gpuQueries.length && gl.getQueryParameter(this.gpuQueries[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const q = this.gpuQueries.shift()!;
+      if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+        this.gpuMs = (gl.getQueryParameter(q, gl.QUERY_RESULT) as number) / 1e6;
+        if (this.gpuRecent.length < 240) this.gpuRecent.push(this.gpuMs);
+        this.onGpuTime?.(this.gpuMs);
+      }
+      gl.deleteQuery(q);
+    }
+  }
+
+  /**
+   * Compile the post chain's occasional passes (speed blur, depth of field, lens rain,
+   * chromatic aberration) now, so their first use mid-race doesn't stall a frame.
+   */
+  warmPasses() {
+    const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled];
+    const dofTarget = this.dof.target;
+    const strength = this.radial.strength;
+    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = true;
+    this.radial.strength = 0.01;
+    this.composer.render(0.016);
+    this.radial.strength = strength;
+    this.radialPass.enabled = was[0];
+    this.dofPass.enabled = was[1];
+    this.lensPass.enabled = was[2];
+    this.caPass.enabled = was[3];
+    this.dof.target = dofTarget;
   }
 
   get maxAnisotropy() {
@@ -592,7 +720,16 @@ export class Renderer {
   setQuality(q: QualityLevel) {
     this.quality = q;
     const dpr = window.devicePixelRatio || 1;
-    this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1.25), ultra: Math.min(dpr, 1.75) }[q];
+    // each preset's starting pixel ratio, and the ceiling the dynamic resolution may climb to when the
+    // GPU has room (High renders one pixel per CSS pixel and rises toward 1.25 on Retina screens)
+    this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1), ultra: Math.min(dpr, 1.5) }[q];
+    const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.25), ultra: Math.min(dpr, 1.75) }[q];
+    this.maxDynamic = ceiling / this.renderScale;
+    const preset = q === 'ultra' ? SMAAPreset.HIGH : q === 'high' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
+    if (preset !== this.smaaPreset) {
+      this.smaaPreset = preset;
+      this.smaa.applyPreset(preset);
+    }
     // AO costs a fixed ~3 ms at 1080p whatever its tier, so it is an Ultra feature
     this.ao.enabled = q === 'ultra';
     this.ao.configuration.halfRes = true;
@@ -608,8 +745,12 @@ export class Renderer {
    * back up when there's headroom. Multiplies the preset's pixel ratio.
    */
   dynamicScale = 1;
+  /** the dynamic scale's range for the current preset */
+  readonly minDynamic = 0.5;
+  maxDynamic = 1;
+  private smaaPreset: SMAAPreset = SMAAPreset.HIGH;
   setDynamicScale(s: number) {
-    const v = THREE.MathUtils.clamp(s, 0.55, 1);
+    const v = THREE.MathUtils.clamp(s, this.minDynamic, this.maxDynamic);
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
     this.resize();
@@ -637,9 +778,21 @@ export class Renderer {
    */
   setLensRain(amount: number, speed?: number) {
     const a = THREE.MathUtils.clamp(amount, 0, 1);
-    this.lensPass.enabled = a > 0.01;
+    this.lensAmount = a;
+    this.lensPass.enabled = a > 0.01 || this.shimmer > 0.01;
     this.lensRain.uniforms.get('amount')!.value = a;
     this.lensRain.uniforms.get('speed')!.value = THREE.MathUtils.clamp(speed ?? a, 0, 1);
+  }
+
+  private lensAmount = 0;
+  private shimmer = 0;
+  /** heat haze over hot asphalt, 0 … 1 (weather; shares the lens pass) */
+  setHeatShimmer(amount: number) {
+    const k = THREE.MathUtils.clamp(amount, 0, 1);
+    if (Math.abs(k - this.shimmer) < 0.002) return;
+    this.shimmer = k;
+    this.lensRain.uniforms.get('shimmer')!.value = k;
+    this.lensPass.enabled = this.lensAmount > 0.01 || k > 0.01;
   }
 
   /** lightning: 0 … 1 exposure punch for this frame */
@@ -700,6 +853,47 @@ export class Renderer {
   render(dt: number) {
     this.renderer.info.reset();
     this.updateShafts();
+    this.updateScene();
     this.composer.render(dt);
+  }
+
+  /**
+   * three.js recomputes every object's world matrix each frame, visible or not: hidden subtrees
+   * (the garage during a race, the pit crews' people until they are needed, parked cars, every
+   * car's unused levels of detail) were ~11 k of the scene's ~13.5 k nodes, ~3 ms a frame. The
+   * scene is updated here instead, skipping hidden subtrees; one that is shown again gets a full
+   * refresh. (Code that reads a hidden object's position uses getWorldPosition/updateWorldMatrix,
+   * which still work; objects with their own updateMatrixWorld — skinned meshes, cameras — get it.)
+   */
+  private readonly baseUpdate = THREE.Object3D.prototype.updateMatrixWorld;
+  private readonly stale = new WeakSet<THREE.Object3D>();
+  private updateScene() {
+    const scene = this.scene;
+    scene.matrixWorldAutoUpdate = false;
+    this.updateVisible(scene, false);
+  }
+  private updateVisible(o: THREE.Object3D, force: boolean) {
+    if (o.updateMatrixWorld !== this.baseUpdate) {
+      o.updateMatrixWorld(force);
+      return;
+    }
+    if (o.matrixAutoUpdate) o.updateMatrix();
+    if (o.matrixWorldNeedsUpdate || force) {
+      if (o.matrixWorldAutoUpdate || o === this.scene) {
+        if (o.parent === null) o.matrixWorld.copy(o.matrix);
+        else o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix);
+      }
+      o.matrixWorldNeedsUpdate = false;
+      force = true;
+    }
+    const kids = o.children;
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      if (!c.visible) {
+        this.stale.add(c);
+        continue;
+      }
+      this.updateVisible(c, this.stale.delete(c) || force);
+    }
   }
 }

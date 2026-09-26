@@ -2,7 +2,10 @@
 // (OfflineAudioContext in headless Chrome), pulls the samples back and analyses them.
 //
 //   node tools/audiocheck.mjs [--view chase|cockpit|tv] [--out shots/audio_lap.wav] [--spec] [--port 5190]
-//                             [--solo exhaust,rasp,…] [--native] [--quiet] [--script lap|events]
+//                             [--solo exhaust,rasp,…] [--native] [--quiet] [--bands [--bandstep s]]
+//                             [--script lap|events|ui|music|menu|scenes] [--music 0.35] [--seconds 8]
+//   node tools/audiocheck.mjs --game [--port 5191]   (drives the real game through its scenes and checks
+//                                                     the AudioContext state and gains after every step)
 //
 // Prints per-250 ms: expected firing frequency (rpm/60·3), estimated firing pitch (harmonic sum
 // search ±15 %), dominant spectral peak, RMS/peak — plus NaN / clipping / silence / level-jump stats.
@@ -19,7 +22,7 @@ const opt = (k, d) => {
 };
 const flag = (k) => args.includes('--' + k);
 const view = opt('view', 'chase');
-const port = opt('port', '5190');
+const port = opt('port', '5191');
 const out = opt('out', view === 'chase' ? 'shots/audio_lap.wav' : `shots/audio_lap_${view}.wav`);
 const seconds = Number(opt('seconds', '8'));
 const solo = opt('solo', null); // e.g. --solo exhaust,rasp  (layer levels, see GameAudio._solo)
@@ -30,9 +33,132 @@ const LAT = 0.025;
 const browser = await chromium.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   headless: true,
-  args: ['--autoplay-policy=no-user-gesture-required'],
+  args: ['--autoplay-policy=no-user-gesture-required', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage();
+
+// ---------------------------------------------------------------------------------- --game
+// Drives the real game through its session transitions and reads the live audio state after
+// each: AudioContext state, scene, master / fade / scene / music gains and the measured level
+// at the output (an AnalyserNode tapped after the fade stage). Guards against "the second race
+// is silent" (a pause-menu restart leaving the context suspended) and friends.
+if (flag('game')) {
+  const gErrors = [];
+  page.on('pageerror', (e) => gErrors.push('[pageerror] ' + e.message));
+  await page.goto(`http://localhost:${port}/?settle=300`, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
+  const probe = async (label) => {
+    await page.waitForTimeout(1600);
+    const st = await page.evaluate(async () => {
+      const g = window.__game;
+      const a = g.audio;
+      if (!a._probe) {
+        const ctx = a.context;
+        const an = new AnalyserNode(ctx, { fftSize: 2048 });
+        a.fade.connect(an);
+        a._probe = an;
+      }
+      const an = a._probe;
+      const buf = new Float32Array(an.fftSize);
+      let ss = 0, n = 0;
+      for (let k = 0; k < 6; k++) {
+        await new Promise((r) => setTimeout(r, 60));
+        an.getFloatTimeDomainData(buf);
+        for (const x of buf) { ss += x * x; n++; }
+      }
+      const s = a._state();
+      return { gameState: g.state, ...s, rmsDb: 10 * Math.log10(ss / Math.max(1, n) + 1e-12) };
+    });
+    const f = (x) => (typeof x === 'number' ? x.toFixed(2) : x);
+    console.log(`${label.padEnd(34)} state=${String(st.gameState).padEnd(8)} ctx=${String(st.ctx).padEnd(9)} scene=${String(st.scene).padEnd(8)} master=${f(st.master)} fade=${f(st.fade)} sceneG=${f(st.scene_gain)} music=${f(st.music)}×${f(st.musicVol)} out=${st.rmsDb.toFixed(1)} dB`);
+    return st;
+  };
+  const call = (js) => page.evaluate(js);
+  let fails = 0;
+  const expect = (st, want, label) => {
+    const bad = [];
+    if (st.ctx !== 'running') bad.push(`ctx ${st.ctx}`);
+    if (Math.abs(st.fade - 1) > 0.02) bad.push(`fade ${st.fade.toFixed(2)}`);
+    if (Math.abs(st.master - 0.8) > 0.02) bad.push(`master ${st.master.toFixed(2)}`);
+    if (want.scene && st.scene !== want.scene) bad.push(`scene ${st.scene} (want ${want.scene})`);
+    if (want.music !== undefined && st.musicPlaying !== want.music) bad.push(`music ${st.musicPlaying}`);
+    if (want.audible && st.rmsDb < -60) bad.push(`silent (${st.rmsDb.toFixed(1)} dB)`);
+    if (bad.length) {
+      fails++;
+      console.log(`   FAIL ${label}: ${bad.join(', ')}`);
+    }
+  };
+  await call(() => {
+    localStorage.setItem('apexgp.settings', JSON.stringify({ ...JSON.parse(localStorage.getItem('apexgp.settings') || '{}'), volume: 0.8, music: 0.35 }));
+    window.__game.applySettings({ ...window.__game.menu.settings, volume: 0.8, music: 0.35 });
+  });
+  // the first gesture unlocks audio
+  await call(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+  let st = await probe('menu (after first gesture)');
+  expect(st, { scene: 'menu', music: true, audible: true }, 'menu');
+  const race = () => call(() => window.__game.startRace('race', window.__game.menu.setup));
+  await race();
+  st = await probe('race 1 (intro)');
+  expect(st, { scene: 'race', music: false, audible: true }, 'race 1');
+  await call(() => window.__game.pause());
+  st = await probe('paused');
+  expect(st, { scene: 'paused', music: false }, 'paused');
+  await call(() => window.__game.menu.cb.onRestart());
+  st = await probe('pause → Restart (race 2)');
+  expect(st, { scene: 'race', music: false, audible: true }, 'restart');
+  await call(() => window.__game.pause());
+  await call(() => window.__game.menu.cb.onQuit());
+  st = await probe('pause → Quit (menu)');
+  expect(st, { scene: 'menu', music: true, audible: true }, 'quit');
+  await race();
+  st = await probe('race 3');
+  expect(st, { scene: 'race', music: false, audible: true }, 'race 3');
+  await call(() => window.__game.showResults());
+  st = await probe('results');
+  expect(st, { scene: 'results', music: true, audible: true }, 'results');
+  await race();
+  st = await probe('results → race 4');
+  expect(st, { scene: 'race', music: false, audible: true }, 'race 4');
+  // tab hidden mid-race (suspend), then a new race without the visibility event coming back
+  await call(() => window.__game.audio.suspend());
+  await page.waitForTimeout(400);
+  await call(() => window.__game.showResults());
+  await call(() => window.__game.menu.cb.onQuit?.() ?? window.__game.toMenu());
+  st = await probe('stale suspend → menu');
+  expect(st, { scene: 'menu', music: true, audible: true }, 'stale suspend');
+  await race();
+  await call(() => {
+    const g = window.__game;
+    g.state = 'race';
+    g.startFlashback();
+  });
+  st = await probe('flashback');
+  expect(st, { scene: g_or(st, 'flashback'), music: false }, 'flashback');
+  await call(() => window.__game.endFlashback(false));
+  st = await probe('flashback → race');
+  expect(st, { scene: 'race', music: false, audible: true }, 'after flashback');
+  await call(() => window.__game.toMenu());
+  st = await probe('menu again');
+  expect(st, { scene: 'menu', music: true, audible: true }, 'menu again');
+  // a live race on autopilot, mid-pack: the whole mix running (opponent voices, distant field)
+  await call(() => window.__game.debugStart({ mode: 'race', autopilot: true, skip: 25 }));
+  await page.waitForTimeout(2500);
+  st = await probe('live race (autopilot, 25 s in)');
+  expect(st, { scene: 'race', music: false, audible: true }, 'live race');
+  const mix = await call(() => {
+    const a = window.__game.audio;
+    return { voices: a.voices.filter((v) => v.id !== null).length, far: a.farCars.length, field: a.field.sides.map((s) => s.on), walls: [a.wallL.toFixed(1), a.wallR.toFixed(1)] };
+  });
+  console.log(`   opponent voices ${mix.voices}, far cars ${mix.far}, distant field ${mix.field.join('/')}, walls L/R ${mix.walls.join('/')} m`);
+  for (const e of gErrors.slice(0, 10)) console.log(e);
+  console.log(fails ? `\nRESULT CHECK (${fails} failing steps)` : '\nRESULT PASS');
+  await browser.close();
+  process.exit(fails ? 1 : 0);
+}
+function g_or(st, want) {
+  // flashback is refused when there's nothing to rewind yet (then the game stays in the race)
+  return st.gameState === 'flashback' ? want : 'race';
+}
 const errors = [];
 page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warning') errors.push(`[${m.type()}] ${m.text()}`);
@@ -44,7 +170,7 @@ for (let attempt = 1; attempt <= 4 && !res; attempt++) {
   try {
     await page.goto(`http://localhost:${port}/src/dev/audio.html?auto=0`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
-    res = await page.evaluate((o) => window.__renderLap(o), { view, seconds, solo: solo ? solo.split(',') : undefined, native: flag('native'), script: opt('script', 'lap') });
+    res = await page.evaluate((o) => window.__renderLap(o), { view, seconds, solo: solo ? solo.split(',') : undefined, native: flag('native'), script: opt('script', 'lap'), music: Number(opt('music', '0.35')) });
   } catch (e) {
     console.log(`render attempt ${attempt} failed: ${e.message.split('\n')[0]}`);
   }
@@ -278,6 +404,40 @@ console.log(`  pitch tracking         ${steady.length} steady windows: median |e
 console.log(`  harmonic energy share  median ${(harmMed * 100).toFixed(0)} % on firing orders/half-orders`);
 const pass = nan === 0 && clip === 0 && silent === 0 && bad === 0 && jumps6 === 0 && clicks === 0;
 console.log(`  RESULT                 ${pass ? 'PASS' : 'CHECK'}`);
+
+// ---------------------------------------------------------------------------------- bands
+// --bands: per-second loudness, spectral centroid and energy split — to judge harshness numerically
+// ("harsh" = share of energy in 2–6 kHz, where the ear is most sensitive and fatigue sets in).
+if (flag('bands')) {
+  const edges = [0, 150, 600, 2000, 6000, 10000, sr / 2];
+  const names = ['<150', '150-600', '600-2k', '2k-6k', '6k-10k', '>10k'];
+  const bandRow = (i0, i1) => {
+    const acc = new Float64Array(names.length);
+    let cen = 0, tot = 0, ss = 0;
+    for (let i = i0; i < i1; i++) ss += mono[i] * mono[i];
+    for (let c = i0 + NF / 2; c + NF / 2 <= i1; c += NF / 2) {
+      const mag = spectrum(c);
+      for (let k = 1; k < NF / 2; k++) {
+        const f = k * binHz;
+        const e = mag[k] * mag[k];
+        tot += e;
+        cen += e * f;
+        for (let b = 0; b < names.length; b++) if (f >= edges[b] && f < edges[b + 1]) acc[b] += e;
+      }
+    }
+    return { rms: db(Math.sqrt(ss / Math.max(1, i1 - i0))), cen: cen / (tot || 1), sh: [...acc].map((e) => e / (tot || 1)) };
+  };
+  const step = Number(opt('bandstep', '1'));
+  console.log(`\nbands (${step} s)   RMS dBFS  centroid   ${names.map((n) => n.padStart(7)).join(' ')}   harsh(2-6k) dB`);
+  const all = [];
+  for (let t = 0; t + step <= N / sr + 1e-6; t += step) {
+    const r = bandRow(Math.floor(t * sr), Math.floor((t + step) * sr));
+    all.push(r);
+    console.log(`  ${t.toFixed(1).padStart(5)}      ${r.rms.toFixed(1).padStart(6)}   ${r.cen.toFixed(0).padStart(6)} Hz ${r.sh.map((x) => (x * 100).toFixed(1).padStart(7)).join(' ')}   ${(10 * Math.log10(r.sh[3] + 1e-9)).toFixed(1).padStart(6)}`);
+  }
+  const o = bandRow(0, N);
+  console.log(`  all        ${o.rms.toFixed(1).padStart(6)}   ${o.cen.toFixed(0).padStart(6)} Hz ${o.sh.map((x) => (x * 100).toFixed(1).padStart(7)).join(' ')}   ${(10 * Math.log10(o.sh[3] + 1e-9)).toFixed(1).padStart(6)}`);
+}
 
 // ---------------------------------------------------------------------------------- WAV
 mkdirSync(dirname(out), { recursive: true });

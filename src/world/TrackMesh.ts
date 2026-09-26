@@ -18,10 +18,67 @@ import {
   propsMaterial,
 } from './trackside/materials.ts';
 import { buildSurfaces } from './trackside/surfaces.ts';
-import { buildBarriers } from './trackside/barriers.ts';
+import { buildBarriers, buildLightPoles } from './trackside/barriers.ts';
 import { buildMarkings } from './trackside/markings.ts';
 import { buildStructures, type PanelSpot } from './trackside/structures.ts';
 import { RoadSSR } from './trackside/ssr.ts';
+import { GRAVEL_EDGE, SURF, VERGE } from './Track.ts';
+
+// ground cross-sections, mirroring trackside/surfaces.ts (kerb profile per style, gravel dish, sunken grass)
+const KERB_X = [0, 0.03, 0.1, 0.2, 0.3, 0.86, 0.92, 0.97, 1.0];
+const KERB_H = [0, 0.008, 0.022, 0.036, 0.045, 0.045, 0.036, 0.015, 0.0];
+const KERBW_H = [0, 0.006, 0.016, 0.026, 0.032, 0.032, 0.026, 0.012, 0.0];
+const GRAVEL_CUTS = [0, 0.08, 0.35, 0.8, 1];
+const GRAVEL_DIP = [0, -0.02, -0.05, -0.04, 0];
+const GRASS_Y = -0.035;
+const GRAVEL_Y = -0.02;
+
+function interp(xs: number[], ys: number[], x: number): number {
+  if (x <= xs[0]) return ys[0];
+  for (let k = 1; k < xs.length; k++) {
+    if (x <= xs[k]) {
+      const f = (x - xs[k - 1]) / (xs[k] - xs[k - 1]);
+      return ys[k - 1] + (ys[k] - ys[k - 1]) * f;
+    }
+  }
+  return ys[ys.length - 1];
+}
+
+/** see Trackside.groundLift */
+function makeGroundLift(track: Track, ctx: Ctx) {
+  const n = track.n;
+  return (s: number, lat: number): number => {
+    const w = track.wrap(s);
+    const i = Math.floor(w) % n;
+    const a = Math.abs(lat);
+    const hw = track.halfWidth[i];
+    if (a <= hw) return 0;
+    const sd = lat < 0 ? -1 : 1;
+    if (ctx.pitOwned(i, sd)) return NaN;
+    const P = ctx.side(sd);
+    const kw = P.kerb[i];
+    if (a <= hw + kw) {
+      // kerb runs ramp up over their first/last 1.6 m
+      let d = 3;
+      for (let k = 1; k <= 2; k++) {
+        if (P.kerb[(i + k) % n] <= 0) d = Math.min(d, k - (w - Math.floor(w)));
+        if (P.kerb[(i - k + n) % n] <= 0) d = Math.min(d, k - 1 + (w - Math.floor(w)));
+      }
+      return interp(KERB_X, P.kerbStyle[i] === 3 ? KERBW_H : KERB_H, (a - hw) / kw) * Math.min(1, d / 1.6);
+    }
+    const vOut = hw + kw + VERGE;
+    if (a <= vOut) return 0;
+    const bar = P.bar[i];
+    if (a > bar) return NaN;
+    const ro = P.runoff[i];
+    if (ro === SURF.ASPHALT) return 0;
+    if (ro === SURF.GRAVEL) {
+      const g = bar - GRAVEL_EDGE;
+      if (g > vOut + 0.3 && a < g) return GRAVEL_Y + interp(GRAVEL_CUTS, GRAVEL_DIP, (a - vOut) / (g - vOut));
+    }
+    return GRASS_Y;
+  };
+}
 
 /**
  * Everything from the centreline out to (and a few metres behind) the barriers
@@ -54,6 +111,14 @@ export interface Trackside {
   setReflections?(on: boolean): void;
   /** the wet-road reflection pass (tuning/debug) */
   ssr?: RoadSSR;
+  /**
+   * Height of the rendered ground above the (banked) road plane at (s, lateral):
+   * kerb profiles, dished gravel, sunken grass. NaN where this module has no ground
+   * (pit-lane side, behind the barriers). Used to lay tyre marks on the surface.
+   */
+  groundLift?(s: number, lateral: number): number;
+  /** the per-sample trackside plan (debug / tools) */
+  ctx?: Ctx;
 }
 
 export interface TracksideStats {
@@ -129,7 +194,7 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
 
   const defs: Record<string, MatDef> = {
     // the road draws after the other opaques so its wet reflections can see them (ssr.ts)
-    asphalt: { material: asphaltMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true, renderOrder: 1 },
+    asphalt: { material: asphaltMaterial(tex, { kerb: track.def.trackside?.kerb, runoffPaint: track.def.trackside?.runoffPaint }), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true, renderOrder: 1 },
     gravel: { material: gravelMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     grass: { material: grassMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     decal: { material: decalMaterial(decals.texture), spec: { uv: true, color: true, pbr: true }, cast: false, receive: true, renderOrder: 2 },
@@ -144,6 +209,7 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
   const tCtx = performance.now();
   buildSurfaces(ctx);
   buildBarriers(ctx, print);
+  buildLightPoles(ctx);
   buildMarkings(ctx, decals);
   const st = buildStructures(ctx, print);
 
@@ -191,9 +257,13 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
     if (panels.instanceColor) panels.instanceColor.needsUpdate = true;
   };
 
+  const groundLift = makeGroundLift(track, ctx);
+
   return {
     group,
     stats,
+    groundLift,
+    ctx,
     startLights: {
       set(lit: number) {
         lamp.lit.value = Math.max(0, Math.min(5, Math.round(lit)));

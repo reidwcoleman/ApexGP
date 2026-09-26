@@ -53,7 +53,21 @@ export interface CarRig {
   cloneBroken(part: PartId | WheelId): THREE.Object3D;
   /** hide a wheel that came off */
   setWheelLost(w: WheelId, lost: boolean): void;
+  /**
+   * Pit stop: slide a wheel off its hub along the axle (0 fitted … 1 off; at 1 the
+   * wheel is gone from the car, the upright and brake stay). Going back from 1 to 0
+   * is a new wheel being pushed on (in the car's current compound).
+   */
+  setWheelOff(w: WheelId, amount: number): void;
   update(dt: number): void;
+  /**
+   * Shadow-pass LOD (perf): called with `true` right before the shadow maps render and `false`
+   * right after. A car beyond detail 0 (and not broken) then casts one merged far-LOD silhouette
+   * instead of ~18 meshes per cascade; the camera pass is untouched.
+   */
+  shadowPass?(on: boolean, full?: boolean): void;
+  /** point the car's reflections at a new environment map (a new circuit's sky) */
+  setEnvMap?(tex: THREE.Texture | null): void;
   readonly anchors: {
     cockpit: THREE.Object3D;
     tcam: THREE.Object3D;
@@ -86,6 +100,8 @@ function acquireGeo(): CarGeoLevel[] {
 }
 function releaseGeo() {
   if (--geoRefs > 0 || !GEO) return;
+  for (const g of SHADOW_GEO) g?.dispose();
+  SHADOW_GEO.length = 0;
   for (const l of GEO) {
     const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, l.steer, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
@@ -96,6 +112,43 @@ function releaseGeo() {
 }
 export function carTriangles(level: 0 | 1 | 2) {
   return (GEO ?? acquireGeo())[level].triangles;
+}
+
+// ------------------------------------------------------------------------------------ shadow proxy
+/** every far-LOD shadow-casting mesh of a car merged into one position-only geometry (car space, at rest); shared */
+const SHADOW_GEO: (THREE.BufferGeometry | undefined)[] = [];
+const SHADOW_MAT = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false });
+function shadowGeometry(level: 1 | 2, parts: THREE.Object3D[], root: THREE.Object3D): THREE.BufferGeometry {
+  const known = SHADOW_GEO[level];
+  if (known) return known;
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const m = new THREE.Matrix4();
+  const v = new THREE.Vector3();
+  for (const p of parts)
+    p.traverse((o) => {
+      const me = o as THREE.Mesh;
+      if (!me.isMesh || !me.castShadow) return;
+      const g = me.geometry;
+      const pa = g.getAttribute('position');
+      if (!pa) return;
+      m.multiplyMatrices(inv, me.matrixWorld);
+      const base = pos.length / 3;
+      for (let i = 0; i < pa.count; i++) {
+        v.fromBufferAttribute(pa, i).applyMatrix4(m);
+        pos.push(v.x, v.y, v.z);
+      }
+      if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(base + g.index.getX(i));
+      else for (let i = 0; i < pa.count; i++) idx.push(base + i);
+    });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  SHADOW_GEO[level] = g;
+  return g;
 }
 
 // ------------------------------------------------------------------------------------ shaders
@@ -298,6 +351,49 @@ function releasePaint(team: Team) {
   }
 }
 
+// ------------------------------------------------------------------------------------ a loose wheel
+/**
+ * A wheel off the car (pit crews carry the old set away and bring the new one):
+ * the car's own wheel geometry and compound material, axle along local x,
+ * centred on the hub.
+ */
+export interface WheelProp {
+  root: THREE.Group;
+  setCompound(c: Compound): void;
+  dispose(): void;
+}
+export function createWheelProp(front: boolean, compound: Compound): WheelProp {
+  const geo = acquireGeo();
+  const L = geo[1];
+  const root = new THREE.Group();
+  root.name = 'wheel-prop';
+  const meshes: THREE.Mesh[] = [];
+  for (const g of [front ? L.wheelF : L.wheelR, front ? L.spokesF : L.spokesR]) {
+    if (!g) continue;
+    const m = new THREE.Mesh(g, sharedWheel(compound));
+    m.castShadow = true;
+    m.receiveShadow = true;
+    root.add(m);
+    meshes.push(m);
+  }
+  let cur = compound;
+  let alive = true;
+  return {
+    root,
+    setCompound(c) {
+      if (c === cur) return;
+      cur = c;
+      for (const m of meshes) m.material = sharedWheel(c);
+    },
+    dispose() {
+      if (!alive) return;
+      alive = false;
+      root.removeFromParent();
+      releaseGeo();
+    },
+  };
+}
+
 // ------------------------------------------------------------------------------------ createCar
 export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMap?: THREE.Texture } = {}): CarRig {
   const geo = acquireGeo();
@@ -467,6 +563,16 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   }
   const wheelsFar = mesh(geo[2].wheelsMerged!, wheel);
   root.add(wheelsFar);
+  // one merged far-LOD silhouette for the shadow pass (see shadowPass); never drawn by the camera
+  const shadowProxy = new THREE.Mesh(shadowGeometry(2, [bodyL[2], unsprungL[2], wheelsFar], root), SHADOW_MAT);
+
+  shadowProxy.name = 'shadow-proxy';
+  shadowProxy.castShadow = true;
+  shadowProxy.receiveShadow = false;
+  shadowProxy.visible = false;
+  root.add(shadowProxy);
+  const shadowSaved: boolean[] = [];
+  let shadowProxyOn = false;
 
   // ---- corners
   interface Corner {
@@ -519,6 +625,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const FR = mkCorner(true, -1);
   const RL = mkCorner(false, 1);
   const RR = mkCorner(false, -1);
+  // the near cars' shadow silhouette, from the middle level of detail (built at rest, shared)
+  const shadowL1 = shadowGeometry(1, [bodyL[1], unsprungL[1], ...corners.flatMap((c) => [c.lv[1].tyre, c.lv[1].spokes, c.lv[1].assy].filter((m): m is THREE.Mesh => !!m))], root);
 
   // ---- anchors
   const anchor = (name: string, p: [number, number, number], parent: THREE.Object3D) => {
@@ -570,6 +678,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const headT = { roll: 0, pitch: 0, yaw: 0 };
   const partState: Record<PartId, number> = { fwL: 0, fwR: 0, rw: 0 };
   const wheelLost: Record<WheelId, boolean> = { wFL: false, wFR: false, wRL: false, wRR: false };
+  /** pit stop: how far each wheel is off its hub (0 … 1) */
+  const wheelOff: Record<WheelId, number> = { wFL: 0, wFR: 0, wRL: 0, wRR: 0 };
   const cornerOf: Record<WheelId, Corner> = { wFL: FL, wFR: FR, wRL: RL, wRR: RR };
   const cornerHome = corners.map((c) => c.group.position.clone());
   let charLevel = 0;
@@ -612,8 +722,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       c.group.visible = detail < 2 && !(wheelLost as Record<string, boolean>)[`w${c.front ? 'F' : 'R'}${c.side > 0 ? 'L' : 'R'}`];
       c.lv.forEach((m, i) => {
         const on = i === detail;
-        m.tyre.visible = on;
-        if (m.spokes) m.spokes.visible = on && blur < 0.6;
+        const off = wheelOff[`w${c.front ? 'F' : 'R'}${c.side > 0 ? 'L' : 'R'}` as WheelId] >= 0.999;
+        m.tyre.visible = on && !off;
+        if (m.spokes) m.spokes.visible = on && !off && blur < 0.6;
         if (m.assy) m.assy.visible = on;
         if (m.blur) m.blur.visible = on && showBlur;
       });
@@ -780,10 +891,47 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       src.matrixWorld.decompose(out.position, out.quaternion, out.scale);
       return out;
     },
+    setWheelOff(w, amount) {
+      const a = Math.min(1, Math.max(0, amount));
+      if (a === wheelOff[w]) return;
+      const was = wheelOff[w] >= 0.999;
+      wheelOff[w] = a;
+      // the wheel slides outboard along its axle (+x inside the side flip is outboard on both sides)
+      cornerOf[w].spin.position.x = a * 0.42;
+      if (was !== a >= 0.999) applyVisibility();
+    },
     setWheelLost(w, lost) {
       if (wheelLost[w] === lost) return;
       wheelLost[w] = lost;
       applyVisibility();
+    },
+    setEnvMap(tex) {
+      opts.envMap = tex ?? undefined;
+      for (const m of own) if ('envMap' in m) (m as THREE.MeshStandardMaterial).envMap = tex;
+      for (const m of wheelByCompound.values()) m.envMap = tex;
+    },
+    shadowPass(on, full = false) {
+      if (on) {
+        // the player's car (full) keeps its detailed shadow up close
+        if (shadowProxyOn || (detail === 0 && full) || !root.visible) return;
+        if (partState.fwL > 0 || partState.fwR > 0 || partState.rw > 0 || wheelLost.wFL || wheelLost.wFR || wheelLost.wRL || wheelLost.wRR) return;
+        // mid pit stop (wheels off, on the jacks): the real shape casts the shadow
+        if (wheelOff.wFL > 0 || wheelOff.wFR > 0 || wheelOff.wRL > 0 || wheelOff.wRR > 0) return;
+        shadowProxyOn = true;
+        for (const c of root.children) {
+          shadowSaved.push(c.visible);
+          c.visible = false;
+        }
+        shadowProxy.geometry = detail === 0 ? shadowL1 : (SHADOW_GEO[2] ?? shadowProxy.geometry);
+        shadowProxy.visible = true;
+        // (hidden, its world matrix isn't kept up to date: it sits at the car's origin)
+        shadowProxy.matrixWorld.copy(root.matrixWorld);
+      } else if (shadowProxyOn) {
+        shadowProxyOn = false;
+        root.children.forEach((c, i) => (c.visible = shadowSaved[i] ?? c.visible));
+        shadowSaved.length = 0;
+        shadowProxy.visible = false;
+      }
     },
     dispose() {
       root.removeFromParent();

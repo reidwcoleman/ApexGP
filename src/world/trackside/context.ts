@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SURF, VERGE, type Track } from '../Track.ts';
+import type { CornerInfo, ImpactLayer, TracksideDef, WallArt } from '../CircuitGen.ts';
 import type { ChunkSet, GeoBuilder } from './builder.ts';
 
 /**
@@ -12,7 +13,7 @@ import type { ChunkSet, GeoBuilder } from './builder.ts';
  */
 
 export type BarrierKind = 'armco' | 'concrete' | 'pitwall' | 'none';
-export type FrontKind = 'none' | 'tyres' | 'tecpro';
+export type FrontKind = ImpactLayer;
 
 /**
  * The pit complex module owns the pit side of the main straight: pit wall,
@@ -22,8 +23,8 @@ export type FrontKind = 'none' | 'tyres' | 'tecpro';
  */
 export const PIT_HANDOFF = { before: 110, after: 140 };
 
-/** Monza specifics by corner name. `brake` = braking-zone strength (skid marks, boards). */
-interface CornerStyle {
+/** Resolved dressing of one corner (CornerDef fields over derived defaults). `brake` = braking-zone strength. */
+export interface CornerStyle {
   front: FrontKind;
   /** chicane: raised sausage kerbs behind the apex kerb */
   chicane?: boolean;
@@ -35,20 +36,52 @@ interface CornerStyle {
   /** wide exit kerb with an outer green band */
   wideExit?: boolean;
 }
-export const MONZA_STYLE: Record<string, CornerStyle> = {
-  'Turn 1': { front: 'tecpro', chicane: true, brake: 1, brakeLen: 150, boards: true },
-  'Turn 2': { front: 'tecpro', chicane: true, wideExit: true },
-  'Curva Grande': { front: 'tyres' },
-  Roggia: { front: 'tecpro', chicane: true, brake: 0.9, brakeLen: 120, boards: true },
-  'Turn 5': { front: 'tyres', chicane: true, wideExit: true },
-  'Lesmo 1': { front: 'tyres', brake: 0.55, brakeLen: 80, boards: true },
-  'Lesmo 2': { front: 'tyres', brake: 0.3, brakeLen: 50 },
-  Ascari: { front: 'tecpro', chicane: true, brake: 0.85, brakeLen: 110, boards: true },
-  'Turn 9': { front: 'tyres' },
-  'Turn 10': { front: 'tecpro', chicane: true, wideExit: true },
-  Parabolica: { front: 'tyres', brake: 0.8, brakeLen: 110, boards: true, wideExit: true },
-};
-export const styleOf = (name: string): CornerStyle => MONZA_STYLE[name] ?? { front: 'tyres' };
+
+export const WALL_ART: Record<WallArt, number> = { ads: 0, plain: 1, stripes: 2, champions: 3 };
+
+let styles = new Map<string, CornerStyle>();
+/** style of a corner of the circuit being built (by name) */
+export const styleOf = (name: string): CornerStyle => styles.get(name) ?? { front: 'tyres' };
+
+/**
+ * Derive every corner's dressing: explicit CornerDef fields win; otherwise slow corners at the
+ * end of a straight get braking boards and a braking zone, tight ones with tarmac run-off get
+ * TecPro, the rest tyre walls; a tight left–right (or right–left) pair within 60 m is a chicane.
+ */
+function resolveStyles(t: Track): Map<string, CornerStyle> {
+  const out = new Map<string, CornerStyle>();
+  const defs = new Map((t.def.corners ?? []).map((c) => [c.name, c]));
+  const straightBefore = (c: CornerInfo) => {
+    let s = c.sStart - 1, run = 0;
+    while (run < 800 && Math.abs(t.kappaAt(s)) < 1 / 400) { s--; run++; }
+    return run;
+  };
+  const cs = t.corners;
+  cs.forEach((c, k) => {
+    const d = defs.get(c.name);
+    const run = straightBefore(c);
+    const slow = c.radius < 120;
+    const brake = slow && run > 180 ? Math.min(1, 0.35 + run / 900) * (c.radius < 60 ? 1 : 0.7) : run > 120 && c.radius < 200 ? 0.3 : 0;
+    const prev = cs[(k - 1 + cs.length) % cs.length], next = cs[(k + 1) % cs.length];
+    const pairs = (o: CornerInfo) => o !== c && o.dir !== c.dir && o.radius < 70 && Math.abs(t.delta(c.sApex, o.sApex)) < 60;
+    const chicane = c.radius < 70 && (pairs(prev) || pairs(next));
+    out.set(c.name, {
+      front: d?.front ?? (c.radius < 70 && c.runoff === 'asphalt' ? 'tecpro' : 'tyres'),
+      chicane: d?.chicane ?? chicane,
+      brake: d?.brake ?? (brake > 0.05 ? brake : undefined),
+      brakeLen: d?.brakeLen ?? Math.round(Math.min(160, 40 + run * 0.15)),
+      boards: d?.boards ?? (c.radius < 110 && run > 220),
+      wideExit: d?.wideExit ?? (c.radius < 90 && c.runoff === 'asphalt' && chicane && !pairs(next)),
+    });
+  });
+  return out;
+}
+
+/** does lap position i fall inside [from, to] (wrapping)? */
+function inRun(i: number, from: number, to: number, n: number) {
+  const a = ((from % n) + n) % n, b = ((to % n) + n) % n;
+  return a <= b ? i >= a && i <= b : i >= a || i <= b;
+}
 
 export interface SidePlan {
   side: -1 | 1;
@@ -77,6 +110,10 @@ export interface SidePlan {
   backOff: Float32Array;
   /** 1 in braking zones / corner outsides where fence banners go */
   banners: Uint8Array;
+  /** concrete wall art per row (WALL_ART: 0 ads, 1 plain, 2 stripes, 3 champions) */
+  art: Uint8Array;
+  /** 1 where sponsor boards are bolted to the armco */
+  boards: Uint8Array;
 }
 
 export interface MarshalPost {
@@ -98,9 +135,14 @@ export class Ctx {
   readonly R: SidePlan;
   readonly posts: MarshalPost[] = [];
 
+  /** the circuit's dressing (CircuitDef.trackside, may be empty) */
+  readonly dress: TracksideDef;
+
   constructor(track: Track, cs: ChunkSet) {
     this.track = track;
     this.cs = cs;
+    this.dress = track.def.trackside ?? {};
+    styles = resolveStyles(track);
     const n = (this.n = track.n);
     this.vScale = (Math.max(1, Math.round(n / 96)) * 96) / n;
     this.rubber = new Float32Array(n);
@@ -251,13 +293,15 @@ export class Ctx {
       vergePaint: new Uint8Array(n),
       kerbStyle: new Uint8Array(n),
       pitZone: new Uint8Array(n),
-      kind: new Array<BarrierKind>(n).fill('armco'),
+      kind: new Array<BarrierKind>(n).fill(this.dress.barrier ?? 'armco'),
       front: new Array<FrontKind>(n).fill('none'),
       palette: new Int16Array(n).fill(-1),
-      fence: new Uint8Array(n).fill(1),
+      fence: new Uint8Array(n).fill(this.dress.fence ?? 1),
       gate: new Uint8Array(n),
       backOff: new Float32Array(n),
       banners: new Uint8Array(n),
+      art: new Uint8Array(n).fill(WALL_ART[this.dress.art ?? 'ads']),
+      boards: new Uint8Array(n),
     };
     const pit = t.pit;
     const pitSide = pit.side === side;
@@ -285,14 +329,7 @@ export class Ctx {
       this.forRange(st - 30, en + 60, (i) => (plan.vergePaint[i] = 1));
     });
 
-    // --- barrier kinds: armco + debris fence everywhere by default
-    // main straight, grandstand side: concrete wall with a tall fence (the Tribuna Centrale is behind it)
-    if (!pitSide) {
-      this.forRange(n - 120, n + 1150, (i) => {
-        plan.kind[i] = 'concrete';
-        plan.fence[i] = 2;
-      });
-    }
+    // --- barrier kinds: the circuit's default (armco + debris fence unless trackside says otherwise)
     // walls that end up close to the road are concrete
     for (let i = 0; i < n; i++) if (bar[i] < hwAll + 5.5 && plan.kind[i] === 'armco') plan.kind[i] = 'concrete';
 
@@ -323,6 +360,22 @@ export class Ctx {
     });
     // main straight grandstand wall: printed sponsor panels, no front layer
     // (T1's escape road ends in a TecPro wall; that's handled by the corner loop above)
+
+    // --- per-segment overrides from the circuit def (later runs win)
+    for (const r of this.dress.runs ?? []) {
+      if (r.side && r.side !== side) continue;
+      for (let i = 0; i < n; i++) {
+        if (!inRun(i, r.from, r.to, n)) continue;
+        if (r.kind) plan.kind[i] = r.kind;
+        if (r.front) plan.front[i] = r.front;
+        if (r.fence !== undefined) plan.fence[i] = r.fence;
+        if (r.art) plan.art[i] = WALL_ART[r.art];
+        if (r.boards !== undefined) plan.boards[i] = r.boards ? 1 : 0;
+      }
+    }
+    // sponsor boards on the armco along straights (away from corners, where the fence banners are)
+    if (this.dress.armcoBoards) for (let i = 0; i < n; i++) if (plan.kind[i] === 'armco' && plan.front[i] === 'none' && !plan.banners[i]) plan.boards[i] = 1;
+    for (let i = 0; i < n; i++) if (plan.kind[i] !== 'armco') plan.boards[i] = 0;
 
     // --- the pit module's side of the main straight
     if (pitSide) {

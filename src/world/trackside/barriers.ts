@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Frame3, box, beam, prism, type GeoBuilder } from './builder.ts';
+import { Frame3, box, beam, cylinder, prism, type GeoBuilder } from './builder.ts';
 import type { Ctx, SidePlan } from './context.ts';
 import { hash2 } from './noise.ts';
 import { BELTS, SPONSORS, type PrintAtlas, type UVRect } from './atlas.ts';
@@ -188,7 +188,8 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
 
   // ------------------------------------------------------------------ segments: merge rows while nothing changes
   const same = (a: number, b: number) =>
-    P.kind[a] === P.kind[b] && P.front[a] === P.front[b] && P.fence[a] === P.fence[b] && P.gate[a] === P.gate[b] && P.palette[a] === P.palette[b] && Math.abs(P.backOff[a] - P.backOff[b]) < 0.02;
+    P.kind[a] === P.kind[b] && P.front[a] === P.front[b] && P.fence[a] === P.fence[b] && P.gate[a] === P.gate[b] && P.palette[a] === P.palette[b] &&
+    P.art[a] === P.art[b] && P.boards[a] === P.boards[b] && Math.abs(P.backOff[a] - P.backOff[b]) < 0.02;
   const segs: [number, number][] = [];
   for (let r = 0; r < n; ) {
     if (jump(r)) {
@@ -240,12 +241,15 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       const T = kind === 'pitwall' ? 0.6 : 0.45;
       print.rgb(1, 1, 1).mat(0.7, 0, 0);
       const plainWall = kind === 'concrete' && front !== 'none';
-      strip(print, rA, rB, 0, 0, 0, H, -1, 0, xb0, xb1, {
-        len: 4,
-        cell: (k) => (plainWall ? atlas.cell('concrete_paint') : kind === 'pitwall' && k % 4 === 0 ? atlas.cell('pitwall') : adCell(k, sd * 13 + (kind === 'pitwall' ? 5 : 0))),
-        vy0: 0,
-        vy1: 1,
-      });
+      const art = P.art[i];
+      const wallCell = (k: number) => {
+        if (kind === 'pitwall') return k % 4 === 0 ? atlas.cell('pitwall') : adCell(k, sd * 13 + 5);
+        if (plainWall || art === 1) return atlas.cell('concrete_paint');
+        if (art === 2) return atlas.cell('wall_stripes');
+        if (art === 3) return ((k % 3) + 3) % 3 === 1 ? atlas.cell('wall_champions') : atlas.cell('concrete_paint');
+        return adCell(k, sd * 13);
+      };
+      strip(print, rA, rB, 0, 0, 0, H, -1, 0, xb0, xb1, { len: 4, cell: wallCell, vy0: 0, vy1: 1 });
       props.color(0xa9a7a0).mat(0.88, 0, 0);
       strip(props, rA, rB, 0, H, T, H, 0, 1, xb0, xb1);
       print.rgb(0.95, 0.95, 0.95).mat(0.9, 0, 0);
@@ -255,9 +259,14 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       if (!isWallK(P.kind[W(rA - 1)]) || !prevOk) cap(capB, rA, xb0, xb0 + T, 0, H, -1, kind === 'pitwall' ? chev : undefined);
       if (!isWallK(P.kind[iB]) || !nextOk) cap(capB, rB, xb1, xb1 + T, 0, H, 1, kind === 'pitwall' ? chev : undefined);
     } else if (!gate) {
-      // armco: two W-beam rails
+      // armco: two W-beam rails (galvanised steel)
       props.color(0xaeb2b6).mat(0.36, 0.85, 0);
       for (const y0 of [0.46, 0.83]) armcoRail(props, rA, rB, y0, xb0, xb1);
+      // sponsor boards bolted over the rails
+      if (P.boards[i]) {
+        print.rgb(1, 1, 1).mat(0.5, 0, 0.04);
+        strip(print, rA, rB, -0.02, 0.44, -0.02, 1.15, -1, 0, xb0, xb1, { len: 4, cell: (k) => adCell(k, sd * 41 + 3), vy0: 0.02, vy1: 0.98 });
+      }
     }
 
     // ---------------- fence (behind the backing wall)
@@ -293,7 +302,8 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     const i = W(Math.floor(rf));
     if (P.kind[i] !== 'armco' || P.gate[i]) continue;
     const props = cs.get(i, 'props');
-    props.color(0x8f9398).mat(0.45, 0.8, 0);
+    // galvanised I-post (dull, weathered: brighter only where the rails are)
+    props.color(0x6c7176).mat(0.62, 0.55, 0);
     frameAt(rf, P.backOff[i] + 0.2, 0);
     box(props, FR, 0, 0.58, 0, 0.1, 1.16, 0.14, 0b110111);
     // spacer block behind the rails
@@ -444,6 +454,47 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     }
     // back plate
     strip(b, rA, rB, 0.075, y0 + 0.31, 0.075, y0, 1, 0, xo0, xo1);
+  }
+}
+
+/**
+ * Light poles (CircuitDef.trackside.lights): a 12 m galvanised mast behind the barrier with an
+ * arm reaching over the fence and a floodlight head angled down at the track.
+ */
+export function buildLightPoles(ctx: Ctx) {
+  const t = ctx.track;
+  const n = ctx.n;
+  for (const run of ctx.dress.lights ?? []) {
+    const P = ctx.side(run.side);
+    const len = ((run.to - run.from) % n + n) % n;
+    const step = Math.max(20, run.spacing ?? 50);
+    for (let d = step / 2; d < len; d += step) {
+      const s = run.from + d;
+      const i = ctx.wrap(Math.floor(s));
+      if (P.kind[i] === 'none' || P.gate[i]) continue;
+      const x = P.bar[i] + P.backOff[i] + (P.fence[i] ? 1.6 : 1.0);
+      if (ctx.clear[i] < x + 3) continue;
+      const props = ctx.cs.get(s, 'props');
+      const fr = t.frame(s);
+      t.point(s, run.side * x, 0, FR.o);
+      FR.setHorizontal(FR.o, fr.tangent.x, fr.tangent.z);
+      const X = (v: number) => -run.side * v; // v > 0 → toward the track
+      const H = 12;
+      props.color(0x9da2a7).mat(0.42, 0.8, 0);
+      cylinder(props, FR, 0, -0.6, 0, 0.16, H * 0.55, 8, false);
+      cylinder(props, FR, 0, H * 0.55, 0, 0.11, H, 8, true);
+      props.color(0x7d8186).mat(0.6, 0.3, 0);
+      cylinder(props, FR, 0, -0.6, 0, 0.3, 0.25, 8, true);
+      // arm and head
+      props.color(0x9da2a7).mat(0.42, 0.8, 0);
+      FR.p(0, H - 0.2, 0, V[0]);
+      FR.p(X(2.2), H + 0.25, 0, V[1]);
+      beam(props, V[0], V[1], 0.09, 0.09);
+      props.color(0x2a2d31).mat(0.45, 0.5, 0);
+      box(props, FR, X(2.45), H + 0.12, 0, 0.9, 0.22, 0.5, 0b111111);
+      props.color(0xe8ecef).mat(0.2, 0, 0.35);
+      box(props, FR, X(2.45), H - 0.005, 0, 0.78, 0.02, 0.4, 0b001000);
+    }
   }
 }
 

@@ -2,7 +2,7 @@
  * Audio lab: click-to-start, automatic lap simulation, manual controls, event buttons,
  * and an offline renderer (window.__renderLap) used by tools/audiocheck.mjs.
  */
-import { type AudioView, GameAudio, type OpponentAudioState, type PlayerAudioState } from '../core/Audio.ts';
+import { type AudioScene, type AudioView, GameAudio, type OpponentAudioState, type PlayerAudioState } from '../core/Audio.ts';
 
 declare global {
   interface Window {
@@ -233,8 +233,14 @@ interface RenderOpts {
   solo?: string[];
   /** force the native (no-AudioWorklet) fallback engine */
   native?: boolean;
-  /** 'lap' (default) or 'events': UI sounds, start beeps, crowd, impacts, surfaces */
-  script?: 'lap' | 'events';
+  /**
+   * 'lap' (default) · 'events': UI sounds, start beeps, crowd, impacts, surfaces ·
+   * 'music': the menu music alone · 'menu': the whole menu mix (music, crowd, ambience) ·
+   * 'scenes': menu → race → pause → race → results (fades and levels between scenes)
+   */
+  script?: 'lap' | 'events' | 'music' | 'menu' | 'scenes' | 'ui';
+  /** music level for the music/menu/scenes scripts (default 0.35) */
+  music?: number;
 }
 
 interface RenderResult {
@@ -286,6 +292,57 @@ class RenderScript {
       shift,
       opps,
     };
+  }
+}
+
+const OFF: PlayerAudioState = { rpm: 0, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false };
+
+/** Menu: engine off, garage crowd murmur, music (plus a few UI ticks). */
+class MenuScript {
+  step(t: number): Frame {
+    const act = (a: GameAudio) => {
+      a.crowd(0.35);
+      a.weather(0, 0, 0, 0, 3);
+    };
+    const ui = Math.abs(t % 3 - 1.5) < 0.008 ? (a: GameAudio) => a.ui(t % 6 < 3 ? 'move' : 'select') : undefined;
+    return { player: OFF, shift: 0, opps: [], act: t < 0.02 ? act : ui };
+  }
+}
+
+/** Just the UI sounds, one after another (loudness / harshness of the menu ticks). */
+class UiScript {
+  private done = new Set<number>();
+  step(t: number): Frame {
+    const k = Math.floor(t / 0.25);
+    let act: ((a: GameAudio) => void) | undefined;
+    if (!this.done.has(k)) {
+      this.done.add(k);
+      const kinds = ['move', 'move', 'move', 'select', 'move', 'back', 'radio'] as const;
+      const kind = kinds[k % kinds.length];
+      act = (a) => (kind === 'radio' ? a.radio() : a.ui(kind));
+    }
+    return { player: OFF, shift: 0, opps: [], act };
+  }
+}
+
+/** menu → race (lap) → pause → race → results */
+class ScenesScript {
+  lap = new RenderScript();
+  private last: AudioScene | null = null;
+  scene(t: number): AudioScene {
+    return t < 4 ? 'menu' : t < 9 ? 'race' : t < 11 ? 'paused' : t < 14 ? 'race' : 'results';
+  }
+  step(t: number, dt: number): Frame {
+    const sc = this.scene(t);
+    const f: Frame = sc === 'menu' ? { player: OFF, shift: 0, opps: [] } : sc === 'race' ? this.lap.step((t - 4) % 5, dt) : { player: { ...OFF, rpm: 4200 }, shift: 0, opps: [] };
+    if (sc !== this.last) {
+      this.last = sc;
+      f.act = (a) => {
+        if (sc === 'race') a.resetSession();
+        a.setScene(sc);
+      };
+    }
+    return f;
   }
 }
 
@@ -341,12 +398,18 @@ async function renderLap(opts: RenderOpts = {}): Promise<RenderResult> {
   const dur = opts.seconds ?? 8;
   const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: Math.round(sr * dur), sampleRate: sr });
   const audio = new GameAudio({ context: ctx, engine: opts.native ? 'native' : 'auto' });
+  const sname = opts.script ?? 'lap';
+  const musical = sname === 'music' || sname === 'menu' || sname === 'scenes';
+  audio.setScene(musical ? 'menu' : 'race');
+  audio.setVolume(0.8);
+  audio.setMusicVolume(opts.music ?? 0.35);
   await audio.init();
   audio.setView(opts.view ?? 'chase');
-  audio.setVolume(0.8);
+  if (sname === 'music') audio._solo(['music']);
   if (opts.solo) audio._solo(opts.solo);
+  if (musical) audio._musicSchedule(dur);
   const step = 768 / sr;
-  const script = opts.script === 'events' ? new EventsScript() : new RenderScript();
+  const script = sname === 'events' ? new EventsScript() : sname === 'menu' || sname === 'music' ? new MenuScript() : sname === 'scenes' ? new ScenesScript() : sname === 'ui' ? new UiScript() : new RenderScript();
   const timeline: RenderResult['timeline'] = [];
   const tick = (t: number) => {
     const f = script.step(t, step);
@@ -411,6 +474,8 @@ window.__renderLap = renderLap;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const audio = new GameAudio();
+audio.setScene('race');
+audio.setMusicVolume(0.35);
 (window as unknown as { __audio: GameAudio }).__audio = audio;
 let started = false;
 let auto = new URLSearchParams(location.search).get('auto') !== '0';
@@ -448,6 +513,15 @@ $('park').addEventListener('click', () => {
   if (parked) setAuto(false);
   $('park').classList.toggle('on', parked);
 });
+$<HTMLInputElement>('mvol').addEventListener('input', (e) => {
+  const v = Number((e.target as HTMLInputElement).value);
+  $('mvolv').textContent = v.toFixed(2);
+  audio.setMusicVolume(v);
+});
+$<HTMLSelectElement>('scene').addEventListener('change', (e) => audio.setScene((e.target as HTMLSelectElement).value as AudioScene));
+$('radio').addEventListener('click', () => audio.radio());
+$('cheer').addEventListener('click', () => audio.crowdReact('cheer', 1));
+$('gasp').addEventListener('click', () => audio.crowdReact('gasp', 1));
 $('up').addEventListener('click', () => audio.shift(true));
 $('down').addEventListener('click', () => audio.shift(false));
 setAuto(auto);

@@ -12,6 +12,12 @@ import { renderFanAtlas, ATLAS_COLS } from '../../people/Crowd.ts';
 import { peopleKit } from '../../people/Humans.ts';
 import type { Track } from '../Track.ts';
 import type { WorldMap } from './worldmap.ts';
+import { buildLandmarks } from './landmarks.ts';
+import { AUSTIN_FANS, drawAustinFlags } from './venues/austinScenery.ts';
+import { SPIELBERG_FAN_COLOURS, drawSpielbergFlags } from './venues/spielberg.ts';
+import { MONTREAL_FAN_COLOURS, drawMontrealFlags } from './venues/montreal.ts';
+import { BRAZIL_FANS, drawInterlagosFlags } from './venues/interlagosFlags.ts';
+import { ZANDVOORT_FANS, drawZandvoortFlags } from './venues/zandvoort.ts';
 
 /**
  * Grandstands and the tifosi.
@@ -44,6 +50,12 @@ const SEAT_SCHEMES: number[][] = [
   [0x2e7d32, 0xd9d9d9, 0xc8102e, 0x2e7d32],
   [0xc8102e, 0xd9d9d9, 0x1b2552, 0xc8102e],
   [0xf2b705, 0xc8102e, 0xf2b705, 0x333333],
+];
+// Zandvoort: orange seats (and the odd block of Dutch blue) under the orange crowd
+const ZANDVOORT_SEATS: number[][] = [
+  [0xff7b00, 0xe8690c, 0xff7b00, 0x21468b],
+  [0xf26b00, 0xff8c1a, 0x21468b, 0xff7b00],
+  [0xff8c1a, 0xff9933, 0xff7b00, 0x21468b],
 ];
 
 // ---------------------------------------------------------------- crowd atlas + material
@@ -330,6 +342,52 @@ function flagAtlas(venue: Venue): THREE.CanvasTexture {
       ctx.fillRect(x, y, S, S);
       txt(x + S / 2, y + S * 0.48, 'PAPAYA', 56, '#101216');
     }
+  } else if (venue === 'austin') {
+    drawAustinFlags(ctx, at, S, txt);
+  } else if (venue === 'zandvoort') {
+    drawZandvoortFlags(ctx, at, S, txt);
+  } else if (venue === 'suzuka') {
+    // 0: the Hinomaru, 1: SUZUKA banner, 2: 鈴鹿 banner, 3: red-and-white JAPAN banner
+    {
+      const [x, y] = at(0);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#bc002d';
+      ctx.beginPath();
+      ctx.arc(x + S / 2, y + S / 2, S * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    {
+      const [x, y] = at(1);
+      ctx.fillStyle = '#12151c';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#e60012';
+      ctx.fillRect(x, y + S * 0.68, S, S * 0.1);
+      txt(x + S / 2, y + S * 0.46, 'SUZUKA', 62, '#ffffff');
+    }
+    {
+      const [x, y] = at(2);
+      ctx.fillStyle = '#f4f1ea';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#bc002d';
+      ctx.fillRect(x, y, S, S * 0.12);
+      ctx.fillRect(x, y + S * 0.88, S, S * 0.12);
+      ctx.fillStyle = '#16181d';
+      ctx.font = `900 104px "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Meiryo", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('鈴鹿', x + S / 2, y + S * 0.52);
+    }
+    {
+      const [x, y] = at(3);
+      ctx.fillStyle = '#bc002d';
+      ctx.fillRect(x, y, S, S);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y + S * 0.3, S, S * 0.4);
+      txt(x + S / 2, y + S * 0.5, 'JAPAN', 70, '#bc002d');
+    }
+  } else if (venue === 'interlagos') {
+    drawInterlagosFlags(ctx, at, S, txt);
   } else if (venue === 'ardennes') {
     // 0: Dutch tricolour, 1: Belgian, 2: ORANJE, 3: black-yellow-red banner
     const bars = (k: number, cols: string[], vertical: boolean) => {
@@ -358,6 +416,10 @@ function flagAtlas(venue: Venue): THREE.CanvasTexture {
       ctx.fillRect(x, y + S * 0.8, S, S * 0.2);
       txt(x + S / 2, y + S * 0.5, 'SPA', 90, '#1a1a1a');
     }
+  } else if (venue === 'spielberg') {
+    drawSpielbergFlags(ctx, at, S, txt);
+  } else if (venue === 'montreal') {
+    drawMontrealFlags(ctx, at, S);
   }
   // 0: tifosi red, yellow disc with a black "R"
   else {
@@ -545,16 +607,39 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const oranges = ['#ff7b00', '#ff8c1a', '#f26b00', '#ff9933', '#e86a10'].map((h) => new THREE.Color(h));
   const belgian = ['#1a1a1a', '#fdda24', '#ef3340'].map((h) => new THREE.Color(h));
   const brits = ['#012169', '#c8102e', '#f2f2f2', '#ff8000', '#1a3e8c'].map((h) => new THREE.Color(h));
+  // Suzuka: white and Hinomaru red, the home team's blue, and team kit everywhere (Japanese fans love merch)
+  const japan = ['#f4f4f4', '#ffffff', '#bc002d', '#e60012', '#1f3c88', '#0a0a0a', '#f2f2f2'].map((h) => new THREE.Color(h));
+  const usa = AUSTIN_FANS.map((h) => new THREE.Color(h));
+  // Spielberg: red-white-red, the Dutch orange army, Red Bull navy
+  const aut = SPIELBERG_FAN_COLOURS.austria.map((h) => new THREE.Color(h));
+  const rbull = SPIELBERG_FAN_COLOURS.redbull.map((h) => new THREE.Color(h));
+  // Montréal: the Maple Leaf's red and white, Québec blue, Ferrari red for Gilles
+  const canada = MONTREAL_FAN_COLOURS.map((h) => new THREE.Color(h));
+  // Zandvoort: a sea of orange, a little red-white-blue
+  const oranje = ZANDVOORT_FANS.oranje.map((h) => new THREE.Color(h));
+  const holland = ZANDVOORT_FANS.holland.map((h) => new THREE.Color(h));
   const fanColor = () => {
     const q = r();
     const c =
-      map.venue === 'airfield'
+      map.venue === 'zandvoort'
+        ? q < 0.84 ? oranje[Math.floor(r() * oranje.length)] : q < 0.9 ? holland[Math.floor(r() * holland.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'interlagos'
+        ? q < 0.46 ? BRAZIL_FANS[Math.floor(r() * BRAZIL_FANS.length)] : q < 0.52 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'montreal'
+        ? q < 0.34 ? canada[Math.floor(r() * canada.length)] : q < 0.46 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'spielberg'
+        ? q < 0.3 ? aut[Math.floor(r() * aut.length)] : q < 0.44 ? oranges[Math.floor(r() * oranges.length)] : q < 0.5 ? rbull[Math.floor(r() * rbull.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'austin'
+        ? q < 0.4 ? usa[Math.floor(r() * usa.length)] : q < 0.46 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'suzuka'
+        ? q < 0.34 ? japan[Math.floor(r() * japan.length)] : q < 0.4 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
+        : map.venue === 'airfield'
         ? q < 0.3 ? brits[Math.floor(r() * brits.length)] : q < 0.42 ? oranges[Math.floor(r() * oranges.length)] : q < 0.5 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
         : map.venue === 'ardennes'
         ? q < 0.34 ? oranges[Math.floor(r() * oranges.length)] : q < 0.44 ? belgian[Math.floor(r() * belgian.length)] : q < 0.52 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)]
         : q < 0.45 ? reds[Math.floor(r() * reds.length)] : others[Math.floor(r() * others.length)];
     // a good share of every crowd wears team kit
-    if (q > 0.7) {
+    if (q > (map.venue === 'zandvoort' ? 0.93 : 0.7)) {
       const sh = teamShirts[pickTeam()];
       return sh[Math.floor(r() * sh.length)].clone().multiplyScalar(0.85 + r() * 0.2);
     }
@@ -574,7 +659,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const teamShirts = TEAMS.map((t) => [t.primary, t.primary, t.secondary].map((h) => new THREE.Color(h)));
   const flagDesign = () => {
     const q = r();
-    if (q < 0.4) return q < 0.18 ? 0 : q < 0.28 ? 1 : q < 0.35 ? 2 : 3;
+    if (q < (map.venue === 'zandvoort' ? 0.72 : 0.4)) return q < 0.18 ? 0 : q < 0.28 ? 1 : q < 0.35 ? 2 : 3;
     if (q < 0.43) return 15;
     return TEAM_FLAG0 + pickTeam();
   };
@@ -588,7 +673,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     const z0 = 0.4;
     const yBase = 1.9;
     const centrale = g.style === 'centrale';
-    const scheme = SEAT_SCHEMES[g.group % SEAT_SCHEMES.length].map((h) => srgb(h));
+    const seatSet = map.venue === 'zandvoort' ? ZANDVOORT_SEATS : SEAT_SCHEMES;
+    const scheme = seatSet[g.group % seatSet.length].map((h) => srgb(h));
     // row geometry: centrale has a 3.4 m hospitality band after the lower tier
     const lowerRows = centrale ? Math.round(rows * 0.45) : rows;
     const bandH = centrale ? 3.6 : 0;
@@ -629,6 +715,42 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     }
     // back wall & sloped side walls
     local.aabb(-L / 2, -3, depth - 0.45, L / 2, top + 1.3, depth, CONCRETE_DARK);
+    // the outside of the back wall (seen from the infield, the paddock and the TV towers):
+    // a steel frame, floor ledges, stair towers and entrances, sponsor boards facing out
+    {
+      const zo = depth;
+      const nCol = Math.max(2, Math.round(L / 7) + 1);
+      for (let k = 0; k < nCol; k++) {
+        const x = -L / 2 + (k * L) / (nCol - 1);
+        lsteel.aabb(x - 0.22, -3, zo, x + 0.22, top + 1.3, zo + 0.35, STEEL_DARK);
+      }
+      for (const yl of [yBase + 0.2, top * 0.55]) local.aabb(-L / 2, yl, zo, L / 2, yl + 0.35, zo + 0.45, CONCRETE);
+      local.aabb(-L / 2, top + 1.0, zo, L / 2, top + 1.45, zo + 0.5, CONCRETE);
+      // entrances at the foot, between the columns
+      const nDoor = Math.max(1, Math.round(L / 26));
+      for (let k = 0; k < nDoor; k++) {
+        const x = -L / 2 + ((k + 0.5) * L) / nDoor;
+        local.aabb(x - 1.6, 0, zo + 0.01, x + 1.6, 2.6, zo + 0.06, srgb(0x1c1e22));
+        lsteel.aabb(x - 1.8, 2.6, zo, x + 1.8, 2.85, zo + 0.9, STEEL);
+      }
+      // stair towers at the ends
+      for (const sx of [-1, 1]) {
+        const xs = sx * (L / 2 - 2.2);
+        lsteel.aabb(xs - 1.6, -3, zo + 0.35, xs + 1.6, top + 1.2, zo + 3.2, STEEL_DARK.clone().lerp(STEEL, 0.4));
+        for (let y = 2; y < top; y += 2.6) lsteel.aabb(xs - 1.7, y, zo + 3.15, xs + 1.7, y + 0.12, zo + 3.3, STEEL);
+      }
+      // sponsor boards on the upper back wall, facing outward
+      if (top > 6) {
+        const nB = Math.max(1, Math.round(L / 24));
+        const w = L / nB;
+        const y0 = top * 0.55 + 1.0, y1 = Math.min(top + 0.6, y0 + 3.2);
+        for (let k = 0; k < nB; k++) {
+          const xa = -L / 2 + k * w + 1.2, xb = xa + w - 2.4;
+          if (xb - xa < 4) continue;
+          lboards.quad4(new THREE.Vector3(xa, y0, zo + 0.4), new THREE.Vector3(xb, y0, zo + 0.4), new THREE.Vector3(xb, y1, zo + 0.4), new THREE.Vector3(xa, y1, zo + 0.4), new THREE.Color(1, 1, 1), sponsorUV(sponsorK++));
+        }
+      }
+    }
     for (const sx of [-1, 1]) {
       const x0 = sx < 0 ? -L / 2 - 0.4 : L / 2;
       local.prismX([[-0.05, -3], [depth + 0.05, -3], [depth + 0.05, top + 1.4], [-0.05, yBase + 0.9]], x0, x0 + 0.4, CONCRETE_DARK);
@@ -742,6 +864,18 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     const bottom = 5.5;
     lsteel.aabb(-sc.w / 2 - 0.4, bottom - 0.4, -0.5, sc.w / 2 + 0.4, bottom + sc.h + 0.4, 0.1, STEEL_DARK);
     for (const sx of [-1, 1]) lsteel.aabb(sx * sc.w * 0.3 - 0.3, -1, -0.8, sx * sc.w * 0.3 + 0.3, bottom, -0.2, STEEL_DARK);
+    // the back: a truss frame, a walkway and the electronics cabinets (not a blank slab)
+    for (let k = 0; k <= 4; k++) {
+      const y = bottom - 0.2 + (k / 4) * (sc.h + 0.2);
+      lsteel.aabb(-sc.w / 2 - 0.3, y - 0.09, -0.95, sc.w / 2 + 0.3, y + 0.09, -0.75, STEEL);
+    }
+    const nV = Math.max(3, Math.round(sc.w / 2.2));
+    for (let k = 0; k <= nV; k++) {
+      const x = -sc.w / 2 + (k / nV) * sc.w;
+      lsteel.aabb(x - 0.08, bottom - 0.3, -0.95, x + 0.08, bottom + sc.h + 0.2, -0.75, STEEL);
+    }
+    lsteel.aabb(-sc.w / 2, bottom - 0.5, -1.9, sc.w / 2, bottom - 0.38, -0.5, STEEL_DARK);
+    for (const sx of [-0.25, 0.25]) lsteel.aabb(sx * sc.w - 0.6, bottom - 0.38, -1.7, sx * sc.w + 0.6, bottom + 1.6, -1.0, srgb(0x9aa0a8));
     lscr.quad4(new THREE.Vector3(-sc.w / 2, bottom, 0.12), new THREE.Vector3(sc.w / 2, bottom, 0.12), new THREE.Vector3(sc.w / 2, bottom + sc.h, 0.12), new THREE.Vector3(-sc.w / 2, bottom + sc.h, 0.12), new THREE.Color(1, 1, 1));
     const M = new THREE.Matrix4().makeRotationY(sc.rot).setPosition(sc.x, map.height(sc.x, sc.z), sc.z);
     lsteel.transform(M);
@@ -843,6 +977,9 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   flagMesh.computeBoundingSphere();
   flagMesh.name = 'flags';
   group.add(flagMesh);
+
+  // venue landmarks (Ferris wheel, crossover bridge, hospitality, camera towers…)
+  group.add(buildLandmarks(layout, track, map).group);
 
   return {
     group,

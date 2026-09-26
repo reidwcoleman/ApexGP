@@ -23,19 +23,25 @@ npm run check    # tsc --noEmit
 - **Autodromo Nazionale Monza** — the real Temple of Speed, 5.793 km, built from a surveyed
   centreline (within ~4 m of the real track): the Rettifilo chicane, Curva Grande, Roggia, both
   Lesmos, the Serraglio under the old banking, Ascari and the Parabolica, in the Parco di Monza.
-- **Circuit de Spa-Francorchamps** and **Silverstone** (the British GP: Copse, Maggotts–Becketts–
-  Chapel, Stowe, Vale/Club, the Wing pits straight, airfield flat with tree belts and grandstands at
-  every corner) — unlocked through the career.
+- **Nine real circuits**, each from a surveyed centreline, with real elevation, named corners,
+  DRS zones and landmarks: Monza, Spa-Francorchamps (Eau Rouge), Silverstone (the Wing, Maggotts–
+  Becketts), Suzuka (the figure-8 bridge, the Ferris wheel), Montréal (Wall of Champions, the
+  Biosphère, the rowing basin, the skyline across the river), the Red Bull Ring (the Styrian Alps
+  and the steel bull), Zandvoort (banked Hugenholtz and Arie Luyendijk, dunes, the North Sea and
+  the orange army), Circuit of the Americas (the Turn 1 hill, the tower) and Interlagos (the bowl,
+  the Senna S, São Paulo all around). Switching circuit rebuilds the world in-page — no reload.
 - **Career, garage and highlights** — your garage is the menu: a working pit garage with tyre
   blankets, jacks, wheel guns, tool trolley, telemetry and your mechanics. Tune the set-up (wings,
   brake bias, suspension, ride height, pressures) with hotspots on the car, drag to look around it,
   and your best moments (overtakes, taking the lead, fastest laps, podiums) are recorded as you race
   and play on the video wall behind the car.
-- **Weather, different every race** — Random by default: clear, light cloud, overcast, light rain,
-  rain, heavy rain with lightning, or changeable (rain arriving or stopping mid-race), at morning,
-  afternoon or golden-hour light. The track gets wet and dries again, a dry line appears once the
+- **Weather, different every race** — Random by default: clear, light cloud, overcast, drizzle,
+  rain, heavy rain, thunderstorm (forked lightning), sunny showers (with a rainbow), mist and fog,
+  hazy heat (shimmer over the asphalt), windy, or changeable, at dawn, morning, midday, afternoon,
+  golden hour, twilight or a floodlit night race. The track gets wet and dries again, a dry line appears once the
   rain stops, spray and aquaplaning in standing water, the radar and your engineer warn you.
-- **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, four AI levels, start
+- **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
+  with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.
 - **Timing like the broadcast** — position tower with intervals, sectors in purple/green/yellow,
   fastest lap, DRS detection (within 1.0 s at the detection line), track limits delete the lap,
@@ -55,7 +61,12 @@ npm run check    # tsc --noEmit
   stability, steering assist, braking assist, racing line Off/Corners/Full (the dynamic
   green/yellow/red line), auto/manual gears, DRS assist — as presets (Casual / Standard / Expert)
   or one by one.
-- **F1-game mechanics** — flashback (rewind up to 12 s and resume), track-limit warnings and
+- **Watch and rewatch** — simulate a whole race with an automatic TV director and 23 cameras
+  (onboards, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
+  camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
+- **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
+  resume), tyre marks that build up through the race, pit stops where the crew really change the
+  wheels, track-limit warnings and
   5-second penalties, DRS within a second, tow and dirty air, front-wing damage.
 - **Tyres & pit stops** — Soft / Medium / Hard slicks plus Intermediates and full Wets, each with
   its own wet-track grip curve (slick/inter crossover ≈ damp, inter/wet ≈ standing water) and
@@ -121,7 +132,7 @@ Regression checks (all headless, no browser):
 
 ## Credits
 
-The Monza, Spa and Silverstone centrelines are derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
+All nine circuit centrelines are derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
 (Technical University of Munich, LGPL-3.0), traced from satellite imagery.
 
 People: *Universal Base Characters* and *Universal Animation Library* by

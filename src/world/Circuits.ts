@@ -2,6 +2,12 @@ import type { CircuitDef } from './CircuitGen.ts';
 import { MONZA_LINE } from './circuits/monzaLine.ts';
 import { SPA_LINE } from './circuits/spaLine.ts';
 import { SILVERSTONE_LINE } from './circuits/silverstoneLine.ts';
+import { SUZUKA_LINE } from './circuits/suzukaLine.ts';
+import { INTERLAGOS } from './circuits/interlagos.ts';
+import { SPIELBERG } from './circuits/spielberg.ts';
+import { AUSTIN } from './circuits/austin.ts';
+import { ZANDVOORT } from './circuits/zandvoort.ts';
+import { MONTREAL } from './circuits/montreal.ts';
 
 /**
  * Autodromo Nazionale Monza — the Temple of Speed. 5.79 km, clockwise, 11
@@ -25,18 +31,26 @@ export const MONZA: CircuitDef = {
   country: 'ITA',
   centerline: { points: MONZA_LINE, smooth: 3 },
   corners: [
-    { name: 'Turn 1', at: 1177, dir: -1, runoff: 'asphalt', runoffDepth: 62 },
-    { name: 'Turn 2', at: 1216, dir: 1, runoff: 'asphalt', runoffDepth: 30 },
-    { name: 'Curva Grande', at: 1673, dir: -1, runoff: 'gravel', runoffDepth: 46, span: [1300, 2010] },
-    { name: 'Roggia', at: 2391, dir: 1, runoff: 'asphalt', runoffDepth: 42 },
-    { name: 'Turn 5', at: 2433, dir: -1, runoff: 'gravel', runoffDepth: 30 },
-    { name: 'Lesmo 1', at: 2842, dir: -1, runoff: 'gravel', runoffDepth: 38 },
-    { name: 'Lesmo 2', at: 3127, dir: -1, runoff: 'gravel', runoffDepth: 34 },
-    { name: 'Ascari', at: 4196, dir: 1, runoff: 'gravel', runoffDepth: 36 },
-    { name: 'Turn 9', at: 4310, dir: -1, runoff: 'gravel', runoffDepth: 40 },
-    { name: 'Turn 10', at: 4387, dir: 1, runoff: 'asphalt', runoffDepth: 32 },
-    { name: 'Parabolica', at: 5386, dir: -1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Turn 1', at: 1177, dir: -1, runoff: 'asphalt', runoffDepth: 62, front: 'tecpro', chicane: true, brake: 1, brakeLen: 150, boards: true, wideExit: false },
+    { name: 'Turn 2', at: 1216, dir: 1, runoff: 'asphalt', runoffDepth: 30, front: 'tecpro', chicane: true, wideExit: true, boards: false, brake: 0 },
+    { name: 'Curva Grande', at: 1673, dir: -1, runoff: 'gravel', runoffDepth: 46, span: [1300, 2010], front: 'tyres', chicane: false, boards: false, wideExit: false, brake: 0 },
+    { name: 'Roggia', at: 2391, dir: 1, runoff: 'asphalt', runoffDepth: 42, front: 'tecpro', chicane: true, brake: 0.9, brakeLen: 120, boards: true, wideExit: false },
+    { name: 'Turn 5', at: 2433, dir: -1, runoff: 'gravel', runoffDepth: 30, front: 'tyres', chicane: true, wideExit: true, boards: false, brake: 0 },
+    { name: 'Lesmo 1', at: 2842, dir: -1, runoff: 'gravel', runoffDepth: 38, front: 'tyres', chicane: false, brake: 0.55, brakeLen: 80, boards: true, wideExit: false },
+    { name: 'Lesmo 2', at: 3127, dir: -1, runoff: 'gravel', runoffDepth: 34, front: 'tyres', chicane: false, brake: 0.3, brakeLen: 50, boards: false, wideExit: false },
+    { name: 'Ascari', at: 4196, dir: 1, runoff: 'gravel', runoffDepth: 36, front: 'tecpro', chicane: true, brake: 0.85, brakeLen: 110, boards: true, wideExit: false },
+    { name: 'Turn 9', at: 4310, dir: -1, runoff: 'gravel', runoffDepth: 40, front: 'tyres', chicane: false, boards: false, wideExit: false, brake: 0 },
+    { name: 'Turn 10', at: 4387, dir: 1, runoff: 'asphalt', runoffDepth: 32, front: 'tecpro', chicane: true, wideExit: true, boards: false, brake: 0 },
+    { name: 'Parabolica', at: 5386, dir: -1, runoff: 'gravel', runoffDepth: 40, front: 'tyres', chicane: false, brake: 0.8, brakeLen: 110, boards: true, wideExit: true },
   ],
+  trackside: {
+    barrier: 'armco',
+    armcoBoards: true,
+    runs: [
+      // the main straight, grandstand side: concrete wall with a tall fence (the Tribuna Centrale is behind it)
+      { from: 5670, to: 1150, side: -1, kind: 'concrete', fence: 2 },
+    ],
+  },
   halfWidth: 6.3,
   startOffset: 550,
   // the park is nearly flat: a gentle rise to the Lesmos, down again toward Ascari
@@ -142,6 +156,13 @@ export const SPA: CircuitDef = {
     { detect: 60, start: 320, end: 760 },
     { detect: 1350, start: 1850, end: 2790 },
   ],
+  // armco through the forest with sponsor boards on the straights; a concrete wall with a tall
+  // fence in front of the grandstands opposite the pits
+  trackside: {
+    barrier: 'armco',
+    armcoBoards: true,
+    runs: [{ from: 330, to: 800, side: 1, kind: 'concrete', fence: 2 }],
+  },
 };
 
 /**
@@ -207,6 +228,102 @@ export const SILVERSTONE: CircuitDef = {
     { detect: 4330, start: 4560, end: 5150 },
     { detect: 5700, start: 190, end: 560 },
   ],
+  // the airfield: astroturf beyond the painted run-off, concrete + tall fence along the
+  // grandstands opposite the Wing, floodlight masts along the Wellington straight
+  trackside: {
+    barrier: 'armco',
+    runoffPaint: 'astroturf',
+    armcoBoards: true,
+    runs: [{ from: 120, to: 640, side: -1, kind: 'concrete', fence: 2 }],
+    lights: [{ from: 1560, to: 2080, side: 1, spacing: 75 }],
+  },
 };
 
-export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE];
+/**
+ * Suzuka — Honda's figure of eight in the hills above Ise Bay. 5.80 km, 18 turns:
+ * clockwise through the first half, anticlockwise through the second, the back
+ * straight crossing the Degner–Hairpin run on a bridge. s = 0 is just past the
+ * Casio Triangle, so the pit lane never wraps.
+ *
+ * Lap, in s:
+ *    160  T18 the last curve onto the main straight (downhill), pits on the right 300–880
+ *    400  start/finish line
+ *   1045  T1/T2 First Curve · 1440–1945 the S Curves (uphill) · 2200 Dunlop
+ *   2629  Degner 1 · 2789 Degner 2 · 2880 under the bridge · 3109 T10 · 3249 Hairpin
+ *   3335–3950  the long right (200R) · 4160 Spoon · 4330–5260 back straight over the bridge
+ *   5303  130R · 5723 Casio Triangle
+ */
+export const SUZUKA: CircuitDef = {
+  id: 'suzuka',
+  name: 'Suzuka International Racing Course',
+  short: 'Suzuka',
+  country: 'JPN',
+  centerline: { points: SUZUKA_LINE, smooth: 3 },
+  corners: [
+    { name: 'Turn 18', at: 160, dir: -1, runoff: 'asphalt', runoffDepth: 34, span: [70, 240] },
+    { name: 'Turn 1', at: 1045, dir: -1, runoff: 'gravel', runoffDepth: 58 },
+    { name: 'Turn 2', at: 1215, dir: -1, runoff: 'gravel', runoffDepth: 44 },
+    { name: 'S Curves', at: 1440, dir: 1, runoff: 'grass', runoffDepth: 30 },
+    { name: 'Turn 4', at: 1560, dir: -1, runoff: 'grass', runoffDepth: 30 },
+    { name: 'Turn 5', at: 1707, dir: 1, runoff: 'gravel', runoffDepth: 32 },
+    { name: 'Turn 6', at: 1890, dir: -1, runoff: 'gravel', runoffDepth: 34, span: [1800, 1995] },
+    { name: 'Dunlop', at: 2150, dir: 1, runoff: 'gravel', runoffDepth: 40, span: [2040, 2420] },
+    { name: 'Degner 1', at: 2629, dir: -1, runoff: 'gravel', runoffDepth: 40 },
+    { name: 'Degner 2', at: 2789, dir: -1, runoff: 'gravel', runoffDepth: 34 },
+    { name: 'Turn 10', at: 3109, dir: -1, runoff: 'asphalt', runoffDepth: 30 },
+    { name: 'Hairpin', at: 3249, dir: 1, runoff: 'asphalt', runoffDepth: 38 },
+    { name: 'Turn 12', at: 3544, dir: -1, runoff: 'gravel', runoffDepth: 40, span: [3335, 3950] },
+    { name: 'Spoon', at: 4160, dir: 1, runoff: 'gravel', runoffDepth: 50 },
+    { name: 'Spoon Exit', at: 4300, dir: 1, runoff: 'gravel', runoffDepth: 40 },
+    { name: '130R', at: 5303, dir: 1, runoff: 'asphalt', runoffDepth: 44 },
+    { name: 'Casio Triangle', at: 5723, dir: -1, runoff: 'asphalt', runoffDepth: 40 },
+    { name: 'Turn 17', at: 5778, dir: 1, runoff: 'asphalt', runoffDepth: 30 },
+  ],
+  halfWidth: 6.0,
+  startOffset: 400,
+  // Downhill from the line into Turn 1 (the low point), up through the S Curves and Dunlop to
+  // Degner, down under the bridge to the Hairpin, climbing again through the long right to
+  // Spoon; the back straight runs level and crosses the Degner–Hairpin run ~10 m up, then
+  // falls through 130R and the Casio Triangle back to the line.
+  elevation: [
+    [0.0, 6],
+    [0.038, 5],
+    [0.069, 3.5],
+    [0.12, 0.2],
+    [0.18, -3],
+    [0.206, -4],
+    [0.248, -2],
+    [0.293, 3],
+    [0.335, 7],
+    [0.384, 12],
+    [0.422, 15],
+    [0.453, 16],
+    [0.48, 14],
+    [0.496, 12],
+    [0.513, 12],
+    [0.536, 10.5],
+    [0.56, 9.5],
+    [0.603, 12],
+    [0.655, 17],
+    [0.717, 21],
+    [0.742, 22],
+    [0.793, 22.5],
+    [0.853, 22.5],
+    [0.906, 22],
+    [0.914, 21.6],
+    [0.948, 16],
+    [0.986, 9],
+  ],
+  pitSide: 1,
+  pit: { start: 300, end: 880 },
+  sectors: [0.345, 0.74],
+  drs: [{ detect: 5660, start: 270, end: 950 }],
+  // armco and tyre walls in the hills; the main grandstand wall is painted red/white
+  trackside: {
+    barrier: 'armco',
+    armcoBoards: true,
+    runs: [{ from: 260, to: 980, side: -1, kind: 'concrete', fence: 2, art: 'ads' }],
+  },
+};
+
+export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE, SUZUKA, MONTREAL, SPIELBERG, ZANDVOORT, AUSTIN, INTERLAGOS];

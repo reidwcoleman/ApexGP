@@ -149,16 +149,26 @@ export function drawEmblem(g: CanvasRenderingContext2D, t: Team, k: number, cx: 
 
 export class PrintAtlas extends Atlas {
   constructor(aniso: number) {
-    super(2048, 2560, aniso);
+    // every team (TEAMS order = garage order) has its own cells: the layout grows with the grid
+    // (it used to assume ten teams, and the eleventh's fascia / truck overwrote other cells)
+    super(2048, 3072, aniso);
+    const T = TEAMS.length;
     TEAMS.forEach((_, k) => this.cell('fascia' + k, (k % 2) * 1024, Math.floor(k / 2) * 128, 1024, 128));
-    for (let k = 0; k < 12; k++) this.cell('back' + k, (k % 4) * 512, 640 + Math.floor(k / 4) * 256, 512, 256);
-    SPONSORS.forEach((_, k) => this.cell('sp' + k, (k % 4) * 512, 1408 + Math.floor(k / 4) * 128, 512, 128));
+    const y1 = Math.ceil(T / 2) * 128;
+    // garage back walls, then the podium backdrop and the big timing screen
+    const backs = [...TEAMS.map((_, k) => 'back' + k), 'podiumBack', 'timingBoard'];
+    backs.forEach((n, i) => this.cell(n, (i % 4) * 512, y1 + Math.floor(i / 4) * 256, 512, 256));
+    const y2 = y1 + Math.ceil(backs.length / 4) * 256;
+    SPONSORS.forEach((_, k) => this.cell('sp' + k, (k % 4) * 512, y2 + Math.floor(k / 4) * 128, 512, 128));
+    const y3 = y2 + Math.ceil(SPONSORS.length / 4) * 128;
     const scr = ['mon0', 'mon1', 'mon2', 'mon3', 'tv', 'sign80', 'signEnd', 'light'];
-    scr.forEach((n, k) => this.cell(n, k * 256, 1792, 256, 256));
-    TEAMS.forEach((_, k) => this.cell('truck' + k, (k % 4) * 512, 2048 + Math.floor(k / 4) * 128, 512, 128));
-    ['pitexit', 'podium', 'paddock', 'timing'].forEach((n, k) => this.cell(n, 1024 + (k % 2) * 512, 2048 + 256 + Math.floor(k / 2) * 128, 512, 128));
-    this.cell('pitin', 0, 2432, 512, 128);
-    // back10 = podium backdrop, back11 = big timing screen
+    scr.forEach((n, k) => this.cell(n, k * 256, y3, 256, 256));
+    const y4 = y3 + 256;
+    TEAMS.forEach((_, k) => this.cell('truck' + k, (k % 4) * 512, y4 + Math.floor(k / 4) * 128, 512, 128));
+    const y5 = y4 + Math.ceil(T / 4) * 128;
+    ['pitexit', 'podium', 'paddock', 'timing'].forEach((n, k) => this.cell(n, 1024 + (k % 2) * 512, y5 + Math.floor(k / 2) * 128, 512, 128));
+    this.cell('pitin', 0, y5, 512, 128);
+    if (y5 + 256 > 3072) console.warn('pit print atlas overflow');
     this.draw();
   }
 
@@ -543,7 +553,7 @@ export class PrintAtlas extends Atlas {
   }
 
   private podiumBackdrop() {
-    const c = this.at('back10');
+    const c = this.at('podiumBack');
     const g = this.ctx;
     g.save();
     g.beginPath();
@@ -580,7 +590,7 @@ export class PrintAtlas extends Atlas {
   }
 
   private timingBoard() {
-    const c = this.at('back11');
+    const c = this.at('timingBoard');
     const g = this.ctx;
     g.save();
     g.beginPath();
@@ -617,14 +627,18 @@ export class DecalAtlas extends Atlas {
   constructor(aniso: number) {
     super(2048, 1024, aniso);
     TEAMS.forEach((_, k) => this.cell('name' + k, (k % 4) * 512, Math.floor(k / 4) * 128, 512, 128));
-    this.cell('white', 1024 + 8, 256 + 8, 48, 48);
-    this.cell('lim80', 1024 + 64, 256, 256, 128);
-    this.cell('pit', 1024 + 320, 256, 512, 128);
-    TEAMS.forEach((_, k) => this.cell('logo' + k, k * 128, 384, 128, 128));
-    this.cell('arrow', 1280, 384, 128, 128);
-    this.cell('hatch', 1408, 384, 128, 128);
-    this.cell('pitexit', 0, 512, 512, 128);
-    this.cell('pitentry', 512, 512, 512, 128);
+    // (names take ceil(T/4) rows of 128, logos one row: keep the other cells clear of both, for any grid size)
+    const T = TEAMS.length;
+    const yL = Math.ceil(T / 4) * 128;
+    TEAMS.forEach((_, k) => this.cell('logo' + k, (k % 16) * 128, yL + Math.floor(k / 16) * 128, 128, 128));
+    const yO = yL + Math.ceil(T / 16) * 128;
+    this.cell('pitexit', 0, yO, 512, 128);
+    this.cell('pitentry', 512, yO, 512, 128);
+    this.cell('white', 1024 + 8, yO + 8, 48, 48);
+    this.cell('lim80', 1024 + 64, yO, 256, 128);
+    this.cell('arrow', 1024 + 320, yO, 128, 128);
+    this.cell('hatch', 1024 + 448, yO, 128, 128);
+    this.cell('pit', 0, yO + 128, 512, 128);
     this.draw();
   }
 

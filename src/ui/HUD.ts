@@ -20,6 +20,7 @@ const WX_ICON: Record<WeatherKind, string> = {
   drying: '<circle cx="8" cy="6" r="2.8"/><path d="M8 1v1.2M3 6h1.2M11.8 6H13M4.5 2.5l.8.8M11.5 2.5l-.8.8"/><path d="M2.5 12.5c1.5-1 3-1 4.5 0s3 1 4.5 0"/>',
   sunshower: '<circle cx="5.5" cy="5" r="2.2"/><path d="M5.5 1v.9M1.5 5h.9M2.7 2.2l.6.6"/><path d="M7.5 10.5h5a2 2 0 0 0 .2-4 2.8 2.8 0 0 0-5.3-.3A2.2 2.2 0 0 0 7.5 10.5z"/><path d="M9 12.3l-.5 1.7M12 12.3l-.5 1.7"/>',
 };
+const MOON_ICON = '<path d="M11.5 10.8A5 5 0 0 1 6.2 3a5 5 0 1 0 5.3 7.8z"/><path d="M12 2.5v1.4M11.3 3.2h1.4"/>';
 const isWet = (k: WeatherKind) => isWetKind(k);
 
 export function fmtTime(t: number, plusSign = false): string {
@@ -85,7 +86,7 @@ export class HUD {
   private wxIcon!: HTMLElement;
   private wxLabel!: HTMLElement;
   private wxInfo!: HTMLElement;
-  private wxKind: WeatherKind | '' = '';
+  private wxKind = '';
   private pitEl!: HTMLSpanElement;
   private tyreEls: SVGRectElement[] = [];
   private wingEl!: SVGRectElement;
@@ -268,6 +269,17 @@ export class HUD {
     return [(x - m.minx) * m.k + m.ox, (z - m.minz) * m.k + m.oz];
   }
 
+  /** DOM writes only when the value changes (perf: the HUD updates every frame) */
+  private readonly dotAt = new WeakMap<Element, number>();
+  private readonly widthOf = new WeakMap<HTMLElement, number>();
+  private setWidth(e: HTMLElement, pct: number) {
+    if (this.widthOf.get(e) === pct) return;
+    this.widthOf.set(e, pct);
+    e.style.width = `${pct}%`;
+  }
+  private setClass(e: HTMLElement, c: string) {
+    if (e.className !== c) e.className = c;
+  }
   private setText(e: HTMLElement, t: string) {
     if (this.lastText.get(e) !== t) {
       e.textContent = t;
@@ -301,6 +313,58 @@ export class HUD {
     this.camLabelTimer = 1.4;
   }
 
+  // ---------------------------------------------------------------- broadcast (spectate / replay)
+  private focusId = -1;
+
+  /** broadcast mode: only the tower (the followed car lit), banners and the map; `clean` hides it all */
+  setBroadcast(on: boolean, replay = false, clean = false) {
+    this.root.classList.toggle('bcast', on);
+    this.root.classList.toggle('replay', on && replay);
+    this.root.classList.toggle('clean', on && clean);
+    if (!on) this.setFocus(-1);
+  }
+
+  /** light the followed car's row in the tower */
+  setFocus(id: number) {
+    if (id === this.focusId) return;
+    this.rowByCar.get(this.focusId)?.el.classList.remove('focus');
+    this.focusId = id;
+    this.rowByCar.get(id)?.el.classList.add('focus');
+  }
+
+  /**
+   * The tower driven from a recording (replay): per car id its position, gap to
+   * the leader (s, −n = laps down), out / fastest-lap flags. Also runs the banner timer.
+   */
+  replayFrame(dt: number, head: string, pos: ArrayLike<number>, gap: ArrayLike<number>, out: (id: number) => boolean, fastest: number) {
+    if (this.bannerTimer > 0) {
+      this.bannerTimer -= dt;
+      if (this.bannerTimer <= 0) this.banner.classList.remove('show');
+    }
+    this.towerTimer -= dt;
+    if (this.towerTimer > 0) return;
+    this.towerTimer = 0.08;
+    const rh = window.innerHeight < 760 ? 21 : 25;
+    if (this.lastText.get(this.towerHead) !== head) {
+      this.towerHead.innerHTML = head;
+      this.lastText.set(this.towerHead, head);
+    }
+    for (const [id, row] of this.rowByCar) {
+      const p = pos[id] || 1;
+      row.el.style.transform = `translateY(${(p - 1) * rh}px)`;
+      this.setText(row.pos, String(p));
+      const o = out(id);
+      const g = gap[id];
+      this.setText(row.gap, o ? 'OUT' : p === 1 ? 'Leader' : g < 0 ? `+${-Math.round(g)} Lap${g < -1 ? 's' : ''}` : g > 0 ? `+${g.toFixed(3)}` : '');
+      if (o !== row.el.classList.contains('out')) row.el.classList.toggle('out', o);
+      const fl = id === fastest;
+      if (fl !== row.code.classList.contains('hasfl')) {
+        row.code.classList.toggle('hasfl', fl);
+        row.code.innerHTML = row.code.textContent + (fl ? '<span class="fl"></span>' : '');
+      }
+    }
+  }
+
   handleEvents(race: Race, events: RaceEvent[]) {
     for (const e of events) {
       const c = race.cars[e.car];
@@ -321,7 +385,7 @@ export class HUD {
           if (e.car === race.player.id) this.flash('Blue flag', 'let the leaders through', 'blue', 2.4);
           break;
         case 'track-limits':
-          this.flash('Track limits', e.value ? `warning ${e.value} of 3 · lap time deleted` : 'lap time deleted', 'red', 2.6);
+          this.flash('Track limits', e.value ? `warning ${e.value} of ${race.limitWarnings} · lap time deleted` : 'lap time deleted', 'red', 2.6);
           break;
         case 'pit-in':
           this.flash('Pit limiter', '80 km/h', '', 2);
@@ -382,12 +446,12 @@ export class HUD {
     const lit = Math.min(15, Math.floor(frac * 15.99));
     for (let i = 0; i < 15; i++) this.leds[i].classList.toggle('on', i < lit);
     this.ledWrap.classList.toggle('flash', car.limiter || lit >= 15);
-    this.thrEl.style.width = `${Math.round(car.throttle * 100)}%`;
-    this.brkEl.style.width = `${Math.round(car.brake * 100)}%`;
-    this.ersEl.style.width = `${Math.round(car.ers * 100)}%`;
+    this.setWidth(this.thrEl, Math.round(car.throttle * 100));
+    this.setWidth(this.brkEl, Math.round(car.brake * 100));
+    this.setWidth(this.ersEl, Math.round(car.ers * 100));
     this.ersWrap.classList.toggle('deploy', car.ersDeploying);
     const zoneOn = p.drsEligible;
-    this.drsEl.className = 'drs' + (car.drsAnim > 0.5 ? ' open' : zoneOn ? ' avail' : '');
+    this.setClass(this.drsEl, 'drs' + (car.drsAnim > 0.5 ? ' open' : zoneOn ? ' avail' : ''));
 
     // tyres, as in the F1 game: colour = temperature (cold / in the window / hot / overheating),
     // the number underneath = life left; wing colour = damage
@@ -409,9 +473,12 @@ export class HUD {
     }
     // weather row
     const w = race.weatherState;
-    if (w.kind !== this.wxKind) {
-      this.wxKind = w.kind;
-      this.wxIcon.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${WX_ICON[w.kind]}</svg>`;
+    const nightKey = `${w.kind}/${w.time === 'night' || w.time === 'dusk' ? 'n' : 'd'}`;
+    if (nightKey !== this.wxKind) {
+      this.wxKind = nightKey;
+      // a clear or hazy sky after sunset shows the moon, not the sun
+      const moon = nightKey.endsWith('/n') && (w.kind === 'clear' || w.kind === 'haze' || w.kind === 'drying' || w.kind === 'windy');
+      this.wxIcon.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${moon ? MOON_ICON : WX_ICON[w.kind]}</svg>`;
       this.setText(this.wxLabel, WEATHER_LABEL[w.kind]);
     }
     const soon = race.weather.forecast(150);
@@ -452,7 +519,7 @@ export class HUD {
     }
     this.setText(this.lastEl, fmtTime(p.lastLap));
     this.setText(this.bestEl, fmtTime(p.bestLap));
-    this.bestEl.className = p.bestLap < Infinity && p.bestLap <= race.bestLap ? 'purple' : p.bestLap < Infinity ? 'green' : '';
+    this.setClass(this.bestEl, p.bestLap < Infinity && p.bestLap <= race.bestLap ? 'purple' : p.bestLap < Infinity ? 'green' : '');
     // live sector marker
     this.sectorEls.forEach((e, i) => {
       if (i === p.sector && race.phase === 'racing') e.classList.add('live');
@@ -474,6 +541,10 @@ export class HUD {
       const dot = this.dots.get(c.id);
       if (!dot) continue;
       const [x, y] = this.mapXY(c.car.x, c.car.z);
+      // (only touch the SVG when a dot actually moved a tenth of a unit)
+      const key = Math.round(x * 10) * 100000 + Math.round(y * 10);
+      if (this.dotAt.get(dot) === key) continue;
+      this.dotAt.set(dot, key);
       dot.setAttribute('cx', x.toFixed(1));
       dot.setAttribute('cy', y.toFixed(1));
     }

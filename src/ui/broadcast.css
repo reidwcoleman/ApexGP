@@ -1,0 +1,425 @@
+/* ---------- broadcast overlay (spectate + replay) ----------
+   Same system as the HUD: tinted glass, Titillium, 4 sizes (cap/row/time), 2 weights,
+   the one red accent for LIVE/REPLAY and the playhead; timing colours mean what they mean. */
+
+.bcast-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out);
+  z-index: 5;
+}
+.bcast-ui.on {
+  opacity: 1;
+}
+.bcast-ui.clean .bc-l3,
+.bcast-ui.clean .bc-keys,
+.bcast-ui.clean .bc-top {
+  opacity: 0;
+}
+.bcast-ui .glassy,
+.bc-top,
+.bc-l3,
+.bc-tl {
+  background: var(--ground);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border-radius: var(--r-panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* camera caption, top right */
+.bc-top {
+  position: absolute;
+  right: var(--s5);
+  top: var(--s5);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s4) 0 var(--s3);
+  height: 40px;
+  font-size: var(--t-cap);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  transition: opacity 0.3s;
+}
+.bc-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+.bc-tag i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  animation: bcpulse 1.4s ease-in-out infinite;
+}
+@keyframes bcpulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.bc-cam {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: var(--t-row);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.bc-where {
+  color: var(--ink2);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: var(--t-row);
+}
+.bc-dir {
+  padding-left: var(--s3);
+  box-shadow: inset 1px 0 0 var(--line-strong);
+}
+.bc-dir.off {
+  color: var(--yellow);
+}
+.bc-spd {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* lower-third, bottom left */
+.bc-l3 {
+  position: absolute;
+  left: var(--s5);
+  bottom: var(--s5);
+  display: grid;
+  grid-template-columns: auto 4px auto auto;
+  align-items: center;
+  gap: 0 var(--s3);
+  min-width: 320px;
+  height: 64px;
+  padding: 0 var(--s4) 0 var(--s4);
+  transition: bottom 0.4s var(--ease-out), opacity 0.3s;
+}
+.bc-l3.in {
+  animation: bcin 0.5s var(--spring);
+}
+@keyframes bcin {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+.bc-pos {
+  min-width: 44px;
+  font-size: var(--t-time);
+  font-weight: 700;
+  text-align: center;
+}
+.bc-bar {
+  height: 36px;
+  border-radius: 2px;
+}
+.bc-who {
+  display: grid;
+  gap: 2px;
+  padding-right: var(--s3);
+}
+.bc-name {
+  font-size: var(--t-time);
+  font-weight: 600;
+  line-height: 1.05;
+  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.bc-name b {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.bc-num {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  color: var(--ink3);
+  margin-left: 2px;
+}
+.bc-sub {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink2);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.bc-cap {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  color: var(--ink);
+}
+.bc-kmh {
+  justify-self: end;
+  font-size: var(--t-row);
+  font-weight: 700;
+  color: var(--ink2);
+  min-width: 36px;
+  text-align: right;
+}
+.bc-kmh:not(:empty)::after {
+  content: ' km/h';
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink3);
+}
+
+/* key strip */
+.bc-keys {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s5);
+  transform: translateX(-50%);
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink2);
+  white-space: nowrap;
+  padding: 6px 12px 6px 4px;
+  border-radius: var(--r-pill);
+  background: rgba(10, 12, 17, 0.55);
+  transition: opacity 0.3s;
+}
+.bc-keys kbd {
+  font-family: var(--font);
+  font-weight: 700;
+  color: var(--ink);
+  padding: 0 6px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  margin: 0 2px 0 8px;
+}
+.bc-keys kbd + kbd {
+  margin-left: 0;
+}
+
+/* replay timeline, bottom */
+.bc-tl {
+  position: absolute;
+  left: var(--s5);
+  right: var(--s5);
+  bottom: var(--s5);
+  height: 56px;
+  display: none;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s3);
+  pointer-events: auto;
+}
+.bcast-ui.replay .bc-tl {
+  display: flex;
+}
+.bcast-ui.replay .bc-l3 {
+  bottom: calc(var(--s5) + 56px + var(--s3));
+}
+.bcast-ui.replay .bc-keys {
+  bottom: calc(var(--s5) + 56px + var(--s4));
+  left: auto;
+  right: var(--s5);
+  transform: none;
+}
+.bc-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--well);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--t-row);
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.25s var(--spring);
+}
+.bc-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.bc-btn:active {
+  transform: scale(0.94);
+}
+.bc-btn.play {
+  background: var(--ink);
+  color: var(--ink-dark);
+}
+.bc-btn.sm {
+  width: 28px;
+}
+.bc-btn.wide {
+  width: auto;
+  padding: 0 var(--s4);
+}
+.bc-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.bc-time {
+  flex: none;
+  min-width: 124px;
+  padding: 0 var(--s2);
+  font-size: var(--t-row);
+  font-weight: 700;
+}
+.bc-rate {
+  flex: none;
+  min-width: 36px;
+  text-align: center;
+  font-size: var(--t-row);
+  font-weight: 700;
+}
+.bc-track {
+  position: relative;
+  flex: 1;
+  height: 36px;
+  cursor: pointer;
+  touch-action: none;
+}
+.bc-rail,
+.bc-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+}
+.bc-rail {
+  right: 0;
+  background: var(--well);
+}
+.bc-fill {
+  width: 0;
+  background: var(--ink2);
+}
+.bc-head {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(10, 12, 17, 0.8);
+}
+.bc-marks {
+  position: absolute;
+  inset: 0;
+}
+.bc-marks .lap {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.bc-marks .lap[data-lap]::after {
+  content: attr(data-lap);
+  position: absolute;
+  top: -12px;
+  left: 3px;
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink3);
+  font-style: normal;
+}
+.bc-marks .ev {
+  position: absolute;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.2s var(--spring);
+}
+.bc-marks .ev:hover {
+  transform: scale(1.8);
+}
+.bc-marks .ev.r { background: var(--accent); }
+.bc-marks .ev.y { background: var(--yellow); }
+.bc-marks .ev.g { background: var(--green); }
+.bc-marks .ev.p { background: var(--purple); }
+.bc-marks .ev.b { background: var(--cold); }
+.bc-marks .ev.w { background: var(--ink); }
+
+/* the HUD in broadcast mode: only the tower (with the followed car lit), banners and the map */
+#hud.bcast .timing,
+#hud.bcast .cluster,
+#hud.bcast .gaps,
+#hud.bcast .carstatus,
+#hud.bcast .radio,
+#hud.bcast .hint,
+#hud.bcast .camlabel {
+  display: none;
+}
+#hud.bcast .minimap {
+  left: auto;
+  right: var(--s5);
+  bottom: var(--s5);
+}
+#hud.bcast.replay .minimap {
+  display: none;
+}
+#hud.bcast .trow.me {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--ink2);
+}
+#hud.bcast .trow.me .pos,
+#hud.bcast .trow.me .gap {
+  color: var(--ink2);
+}
+#hud.bcast .trow.focus {
+  background: var(--ink);
+  color: var(--ink-dark);
+  box-shadow: none;
+}
+#hud.bcast .trow.focus .pos,
+#hud.bcast .trow.focus .gap {
+  color: rgba(10, 12, 17, 0.7);
+}
+#hud.bcast.clean {
+  opacity: 0;
+}
+
+@media (max-width: 1280px) {
+  .bcast-ui { zoom: 0.85; }
+}
+@media (max-width: 960px) {
+  .bcast-ui { zoom: 0.7; }
+  .bc-keys { display: none; }
+}
+
+/* the Race tab's "Watch a simulated race" button: its own row under Race weekend / Time trial */
+.hp-actions .cta.watch {
+  grid-column: 1 / -1;
+}

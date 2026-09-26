@@ -18,6 +18,11 @@ export class CarView {
   private smoothedUp = new THREE.Vector3(0, 1, 0);
   private detail: 0 | 1 | 2 = 0;
   private first = true;
+  /** pit stop: the jacks' lift at the front and rear (0 … 1), applied on the next sync */
+  private liftF = 0;
+  private liftR = 0;
+  private readonly qLift = new THREE.Quaternion();
+  private static readonly X = new THREE.Vector3(1, 0, 0);
 
   constructor(rig: CarRig) {
     this.rig = rig;
@@ -43,6 +48,13 @@ export class CarView {
     this.q.setFromRotationMatrix(this.m);
     rig.root.position.copy(this.pos);
     rig.root.quaternion.copy(this.q);
+    if (this.liftF > 0 || this.liftR > 0) {
+      // on the jacks: the whole car (wheels hanging) rises ~9 cm at each end
+      const H = 0.09;
+      rig.root.position.addScaledVector(this.smoothedUp, ((this.liftF + this.liftR) / 2) * H);
+      this.qLift.setFromAxisAngle(CarView.X, -Math.atan2((this.liftF - this.liftR) * H, rig.dims.wheelbase));
+      rig.root.quaternion.multiply(this.qLift);
+    }
 
     rig.body.rotation.x = car.pitch;
     rig.body.rotation.z = -car.roll;
@@ -63,5 +75,16 @@ export class CarView {
       rig.setDetail(want);
     }
     rig.update(dt);
+  }
+
+  /** pit stop pose: jack lift front / rear (0 … 1) and each wheel's travel off its hub (FL FR RL RR, 0 … 1) */
+  setPit(liftF: number, liftR: number, wheels: readonly number[] | null) {
+    this.liftF = liftF;
+    this.liftR = liftR;
+    const r = this.rig;
+    r.setWheelOff('wFL', wheels ? wheels[0] : 0);
+    r.setWheelOff('wFR', wheels ? wheels[1] : 0);
+    r.setWheelOff('wRL', wheels ? wheels[2] : 0);
+    r.setWheelOff('wRR', wheels ? wheels[3] : 0);
   }
 }

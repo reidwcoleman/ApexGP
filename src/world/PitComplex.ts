@@ -10,7 +10,7 @@ import { buildGround, buildPaint } from './pitlane/ground.ts';
 import { SignalGeo, buildWall } from './pitlane/wall.ts';
 import { GlassGeo, H, buildBuilding } from './pitlane/building.ts';
 import { buildGarages } from './pitlane/garage.ts';
-import { CrewSystem } from './pitlane/crew.ts';
+import { CrewSystem, type CrewStop } from './pitlane/crew.ts';
 import { buildDrips } from './pitlane/drips.ts';
 import { weatherUniforms } from './weatherUniforms.ts';
 
@@ -23,11 +23,12 @@ import { weatherUniforms } from './weatherUniforms.ts';
  *
  * Draw calls: 11 (+4 in the shadow pass; +1 drips while it rains). Everything static is merged by
  * material (ground, paint, structure, detail, print, glass, fence, signals);
- * the crews are GPU-posed instanced meshes (near + far level of detail).
+ * the crews are real people (people/Humans.ts), drawn only near the camera.
  */
 
 /** what a team's pit box is doing (drives the crew animation) */
 export type BoxState = 'idle' | 'ready' | 'service' | 'release';
+export type { CrewStop } from './pitlane/crew.ts';
 
 export interface GarageSlot {
   /** team index (TEAMS order) */
@@ -47,6 +48,8 @@ export interface PitComplex {
    * stop), 'release' for ~1.5 s after it leaves, else 'idle'.
    */
   setBox(team: number, state: BoxState, progress: number): void;
+  /** the car a team's crew is working on: coming in, stopped (the stop's own clock), leaving — null: none */
+  setStop(team: number, stop: CrewStop | null): void;
   update(dt: number, camera: THREE.Camera): void;
   readonly stats: Record<string, unknown>;
   /** optional: compound the crew carries out next ('soft'|'medium'|'hard'|'inter'|'wet') */
@@ -63,6 +66,10 @@ export interface PitComplex {
   clearView(a: THREE.Vector3 | null, b?: THREE.Vector3, r?: number): void;
   /** stop drawing one team's crew (-1: draw all) */
   hideCrew(team: number): void;
+  /** build every pit-crew member and prop now (loading), so nothing is built mid-race; false: the people kit isn't loaded yet */
+  prebuild?(): boolean;
+  /** show all the crews for a warm-up render (shader compile, bone-texture upload), then back (false) */
+  warm?(on: boolean): void;
 }
 
 export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
@@ -126,7 +133,9 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
   add(buildGround(plan, ts), groundMaterial(), 'pit_ground', false);
   add(paint.geometry(), decalMaterial(decals.texture), 'pit_paint', false, 1);
   add(solid.geometry(), solidMat, 'pit_structure', true);
-  const detailMesh = add(detail.geometry(), solidMat, 'pit_detail', true);
+  // (perf: the detail layer is ~185 k triangles; drawn into both sun cascades it was the biggest
+  // single shadow caster at the start line, for shadows too small to read)
+  const detailMesh = add(detail.geometry(), solidMat, 'pit_detail', false);
   add(thin.geometry(), solidMat, 'pit_thin', false);
   add(printG.geometry(), solidMaterial(print.texture), 'pit_print', false);
   add(glass.geometry(), glassMaterial(), 'pit_glass', false);
@@ -153,8 +162,7 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     geometryMs: Math.round(tGeo1 - tGeo0),
     meshes: meshes.length + 2,
     staticTriangles: Math.round(tris),
-    crewTrianglesPerPerson: crew.rigTriangles,
-    crewDrawn: [0, 0],
+    crewDrawn: 0,
     updateMs: 0,
   };
 
@@ -176,6 +184,12 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     hideCrew(team) {
       crew.hideTeam = team;
     },
+    prebuild() {
+      return crew.prebuild();
+    },
+    warm(on: boolean) {
+      crew.warm(on);
+    },
     clearView(a, b, r = 1.2) {
       crew.clear = a && b ? { ax: a.x, az: a.z, bx: b.x, bz: b.z, r } : null;
     },
@@ -185,7 +199,11 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     setCompound(team: number, compound: string) {
       crew.setCompound(team, compound);
     },
+    setStop(team: number, stop: CrewStop | null) {
+      crew.setStop(team, stop);
+    },
     dispose() {
+      crew.dispose();
       group.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
@@ -206,10 +224,9 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
       const d = cam.distanceTo(garageCentre);
       detailMesh.visible = d < 700;
       drips.visible = weatherUniforms.uRain.value > 0.02 && d < 500;
-      crew.group.visible = d < 420;
-      if (crew.group.visible) crew.update(dt, cam);
+      crew.update(dt, camera);
       for (let k = 0; k < TEAMS.length; k++) signalU.uSig.value[k] = crew.signal(k);
-      stats.crewDrawn = crew.group.visible ? crew.drawn : [0, 0];
+      stats.crewDrawn = crew.drawn;
       stats.updateMs = Math.round((performance.now() - u0) * 1000) / 1000;
     },
   };

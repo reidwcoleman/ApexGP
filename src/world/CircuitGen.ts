@@ -54,6 +54,79 @@ export interface CornerDef {
   runoffDepth?: number;
   /** explicit [start, end] in s, for long multi-radius bends the detector would clip */
   span?: [number, number];
+  // ---- trackside dressing (all optional: trackside/context.ts derives sensible defaults
+  //      from the corner's radius, run-off and the straight before it)
+  /** impact layer in front of the barrier on the corner's outside */
+  front?: ImpactLayer;
+  /** chicane: yellow sausage kerbs behind the inside kerb */
+  chicane?: boolean;
+  /** braking zone strength 0..1 (baked lock-up streaks) and its length (m) */
+  brake?: number;
+  brakeLen?: number;
+  /** 150/100/50 m braking boards before the corner */
+  boards?: boolean;
+  /** wide exit kerb with an outer green band */
+  wideExit?: boolean;
+}
+
+/**
+ * Trackside dressing: what the barriers, fences and painted run-off look like.
+ * Everything is optional; a circuit with no `trackside` gets armco + debris fence,
+ * tyre walls / TecPro on corner outsides and white/blue painted run-off. How to set it:
+ *
+ *   trackside: {
+ *     barrier: 'armco',            // default barrier: 'armco' (parkland) | 'concrete' (street / modern)
+ *     fence: 1,                    // default debris fence: 0 none, 1 standard 4 m, 2 tall 6 m
+ *     art: 'ads',                  // what concrete walls wear: 'ads' | 'plain' | 'stripes' | 'champions'
+ *     runoffPaint: 'bands',        // painted tarmac run-off: 'bands' (white+blue) | 'astroturf' | 'stripes' | 'plain'
+ *     kerb: ['#c8261e', '#ecece8'],// kerb block colours
+ *     armcoBoards: true,           // sponsor boards bolted to the armco along the straights
+ *     runs: [                      // per-segment overrides, applied in order (later wins)
+ *       { from: 5670, to: 1140, side: -1, kind: 'concrete', fence: 2 },          // grandstand wall
+ *       { from: 3100, to: 3400, kind: 'concrete', art: 'champions', fence: 1 },  // both sides
+ *       { from: 1180, to: 1300, side: 1, front: 'tecpro' },
+ *     ],
+ *     lights: [{ from: 200, to: 900, side: -1, spacing: 45 }],                    // light poles
+ *   }
+ *
+ * `from`/`to` are s in metres (a run may wrap past s = 0: from > to). `side` is
+ * −1 left / 1 right of the direction of travel; omit it for both sides. Per-corner
+ * extras (front, chicane, boards, wideExit, brake) go on the CornerDef.
+ */
+export type BarrierKind = 'armco' | 'concrete' | 'none';
+export type ImpactLayer = 'none' | 'tyres' | 'tecpro';
+export type WallArt = 'ads' | 'plain' | 'stripes' | 'champions';
+export type RunoffPaint = 'bands' | 'astroturf' | 'stripes' | 'plain';
+
+export interface BarrierRun {
+  from: number;
+  to: number;
+  side?: 1 | -1;
+  kind?: BarrierKind;
+  front?: ImpactLayer;
+  fence?: 0 | 1 | 2;
+  art?: WallArt;
+  /** sponsor boards on this stretch of armco */
+  boards?: boolean;
+}
+
+export interface LightRun {
+  from: number;
+  to: number;
+  side: 1 | -1;
+  /** metres between poles (default 50) */
+  spacing?: number;
+}
+
+export interface TracksideDef {
+  barrier?: BarrierKind;
+  fence?: 0 | 1 | 2;
+  art?: WallArt;
+  runoffPaint?: RunoffPaint;
+  kerb?: [string, string];
+  armcoBoards?: boolean;
+  runs?: BarrierRun[];
+  lights?: LightRun[];
 }
 
 export interface CircuitDef {
@@ -68,18 +141,39 @@ export interface CircuitDef {
   centerline?: CenterlineDef;
   corners?: CornerDef[];
   halfWidth: number;
+  /** optional wider stretches (s range, extra half-width in m, eased in/out over ~40 m) */
+  widen?: { from: number; to: number; extra: number }[];
   /** s of the start/finish line (m) */
   startOffset: number;
   /** [fraction of lap from s = 0, height m], periodic */
   elevation: [number, number][];
   /** pit lane side of the main straight: 1 = right, −1 = left */
   pitSide: 1 | -1;
-  /** pit lane (wall) extent in s; must not wrap past s = 0 */
-  pit: { start: number; end: number };
+  /**
+   * pit lane (wall) extent in s; must not wrap past s = 0. Optional, for tight sites: `building`,
+   * the pit building's s range (default: ~500 m centred on the lane; the garages sit in it), and
+   * `paddock`, how far (|lateral| from the centreline) the paddock behind it reaches (default 125).
+   */
+  pit: { start: number; end: number; building?: [number, number]; paddock?: number };
   /** sector boundaries as fractions of the lap measured from the start line */
   sectors: [number, number];
   /** DRS zones: detection, activation and end points, in s */
   drs: { detect: number; start: number; end: number }[];
+  /**
+   * Semi-street circuits (Montréal): walls close to the road. `straight` = barrier distance
+   * from the road edge on the straights (default 13, with a ±4 m wobble scaled by `wobble`,
+   * default 1), `inside` = on the inside of corners (default 9). Corner run-off still
+   * follows each corner's `runoffDepth`.
+   */
+  walls?: { straight: number; inside?: number; wobble?: number };
+  /**
+   * Banked corners (Zandvoort): over [start, end] (s, m) the road tilts down toward the
+   * inside of the bend by `deg`, easing in and out over `ramp` m (default 40) either side.
+   * Used by the road frames (so the mesh, kerbs and barriers), the physics and the AI.
+   */
+  banking?: { start: number; end: number; deg: number; ramp?: number }[];
+  /** barriers, fences, wall art, run-off paint, kerb colours, light poles (see TracksideDef) */
+  trackside?: TracksideDef;
 }
 
 export interface CornerInfo {
@@ -386,8 +480,16 @@ function fromCenterline(def: CircuitDef): CircuitData {
   const k = boxSmoothCircular(raw, def.centerline!.smooth ?? 3, 3);
   let sum = 0;
   for (let i = 0; i < n; i++) sum += k[i];
-  const sc = (Math.sign(sum) * Math.PI * 2) / sum;
-  for (let i = 0; i < n; i++) k[i] *= sc;
+  const turns = Math.round(sum / (Math.PI * 2));
+  if (turns !== 0) {
+    const sc = (turns * Math.PI * 2) / sum;
+    for (let i = 0; i < n; i++) k[i] *= sc;
+  } else {
+    // a figure of eight (Suzuka) turns 0 in total: take the residual out in proportion to |κ|
+    let abs = 0;
+    for (let i = 0; i < n; i++) abs += Math.abs(k[i]);
+    for (let i = 0; i < n; i++) k[i] -= (sum * Math.abs(k[i])) / abs;
+  }
 
   const integ = integrate(k);
   const th0 = th[m - 1] + wrapA(th[0] - th[m - 1]) / 2;

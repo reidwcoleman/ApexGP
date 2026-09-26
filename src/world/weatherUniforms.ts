@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import type { WeatherState } from './Weather.ts';
+// installs the floodlight chunk into three's lit materials before anything compiles
+import './env/night.ts';
+/** the menu garage is indoors: no floodlight term there (see env/night.ts) */
+export { suppressFloods } from './env/night.ts';
 
 /**
  * Weather values shared by every material that reacts to rain (road, kerbs,

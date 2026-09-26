@@ -7,8 +7,10 @@ import type { RacingProfile } from './RacingProfile.ts';
  *
  *  - Full steering input maps to a little past the angle where the front
  *    tyres make peak grip at the current speed, never less than 0.3 rad.
- *  - Keyboard steering ramps like a thumb on a stick and is progressive at
- *    speed: a tap is a small correction, a hold is the full cornering rate.
+ *  - Keyboard steering: a press kicks straight to a small input and then ramps
+ *    like a thumb on a stick, progressive at speed — a quick tap is a crisp,
+ *    proportional correction (never nothing), a hold builds smoothly to the
+ *    full cornering rate, and letting go straightens the car.
  *  - Pad: small low-pass and a response curve for precision near centre.
  *  - Braking assist (optional): brakes for corners from the racing profile.
  */
@@ -38,12 +40,26 @@ export interface RawControls {
 }
 
 const KB_MAX_LAT = 70;
+/** keyboard steering feel: ramp rates (1/s) at parking and at racing speed, release rate */
+const KB_ON_LO = 10;
+const KB_ON_HI = 3.0;
+const KB_OFF = 12;
+/** the input a key press jumps to straight away, at low and at racing speed */
+const KB_KICK_LO = 0.3;
+const KB_KICK_HI = 0.25;
+/** a tap shorter than this still steers for this long (s) */
+const TAP_MIN = 0.07;
+/** response curve exponent at racing speed (1 = linear): progressive, but not so much that taps vanish */
+const KB_EXPO_HI = 1.45;
 const BRAKE_MARGIN: Record<BrakingAssist, number> = { off: 0, low: 1.08, medium: 1.02, high: 0.96 };
 
 export class PlayerControl {
   aids: ControlAids = { brakingAssist: 'off', steeringMode: 'rate' };
   private u = 0; // filtered steering −1..1
   private delta = 0; // road-wheel angle actually commanded
+  private lastKey = 0;
+  private tapTimer = 0;
+  private tapDir = 0;
   /** exposed for the HUD / steering-wheel visuals */
   steerInput = 0;
   brakeAssisting = false;
@@ -52,6 +68,8 @@ export class PlayerControl {
   reset() {
     this.u = 0;
     this.delta = 0;
+    this.lastKey = 0;
+    this.tapTimer = 0;
   }
 
   update(dt: number, raw: RawControls, car: CarPhysics, track: Track, profile: RacingProfile): DriveInput {
@@ -62,14 +80,28 @@ export class PlayerControl {
       // pad: gentle low-pass (≈12 Hz) — the curve is applied in Input
       this.u += (raw.steer - this.u) * Math.min(1, dt * 22);
     } else {
-      // keyboard: ramp toward the key direction; gentler taps at high speed
-      const target = raw.steer;
-      const onRate = 9.5 - 5.5 * Math.min(1, v / 80);
-      const offRate = 8.5;
+      // keyboard: a press kicks straight to a small input (so a tap is a crisp,
+      // proportional correction), then ramps toward full lock — gentler at speed,
+      // so a hold still builds smoothly. A very short tap is stretched to a
+      // minimum pulse so it always does something.
+      const key = Math.sign(raw.steer);
+      if (key !== 0 && key !== this.lastKey) {
+        this.tapTimer = TAP_MIN;
+        this.tapDir = key;
+      }
+      this.lastKey = key;
+      this.tapTimer = Math.max(0, this.tapTimer - dt);
+      const target = key !== 0 ? key : this.tapTimer > 0 ? this.tapDir : 0;
+      const hi = Math.min(1, v / 70);
+      const onRate = KB_ON_LO - (KB_ON_LO - KB_ON_HI) * hi;
+      const offRate = KB_OFF;
       const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.u) && this.u !== 0;
       const rate = target === 0 ? offRate : reversing ? offRate + onRate : onRate;
       const d = target - this.u;
       this.u += Math.max(-rate * dt, Math.min(rate * dt, d));
+      // the kick: once the input is on the key's side, it starts at least here
+      const kick = KB_KICK_LO - (KB_KICK_LO - KB_KICK_HI) * hi;
+      if (target !== 0 && Math.sign(this.u) !== -target && Math.abs(this.u) < kick) this.u = target * kick;
     }
     this.steerInput = this.u;
 
@@ -88,7 +120,7 @@ export class PlayerControl {
       // capped at ~7 g: no corner needs more at speed, and it keeps small inputs calm on the straights
       const rMax = Math.min(car.lateralGrip(v) * 1.45 / v, (v * Math.tan(car.spec.maxSteer)) / L, KB_MAX_LAT / v);
       // progressive at speed: a tap is a small correction, a hold is still the full rate
-      const expo = 1 + 1.2 * Math.min(1, Math.max(0, (v - 20) / 50));
+      const expo = 1 + (KB_EXPO_HI - 1) * Math.min(1, Math.max(0, (v - 20) / 50));
       const rDes = Math.sign(this.u) * Math.pow(Math.abs(this.u), expo) * rMax;
       const load = Math.min(1, Math.abs(rDes) / rMax);
       const ff = Math.atan((L * rDes) / v) + Math.sign(rDes) * 0.05 * load * load;

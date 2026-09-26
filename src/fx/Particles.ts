@@ -28,7 +28,7 @@ attribute vec3 iPos;
 attribute vec3 iVel;
 attribute vec4 iData;  // radius, alpha, rotation, stretch (s)
 attribute vec4 iTint;  // rgb, ground y
-attribute vec4 iMisc;  // age 0..1, atlas cell, erosion, -
+attribute vec4 iMisc;  // age 0..1, atlas cell, erosion, heat (fire glowing inside the puff)
 uniform vec3 uCamVel;
 uniform vec2 uNear;
 uniform float uMaxProj;
@@ -54,7 +54,9 @@ varying float vErode;
 varying float vSoft;    // depth softness (m)
 varying float vViewZ;
 varying float vHFade;
+varying float vHeat;
 void main() {
+  vHeat = iMisc.w;
   vec4 mvPosition = viewMatrix * vec4( iPos, 1.0 );
   float dist = -mvPosition.z;
   float size = iData.x;
@@ -137,6 +139,13 @@ varying float vErode;
 varying float vSoft;
 varying float vViewZ;
 varying float vHFade;
+varying float vHeat;
+// black-body-ish ramp: dull red → orange → yellow → white-hot
+vec3 fireColor( float h ) {
+  vec3 c = mix( vec3( 0.32, 0.025, 0.0 ), vec3( 1.0, 0.26, 0.02 ), smoothstep( 0.0, 0.4, h ) );
+  c = mix( c, vec3( 1.0, 0.6, 0.18 ), smoothstep( 0.35, 0.8, h ) );
+  return mix( c, vec3( 1.0, 0.88, 0.66 ), smoothstep( 0.8, 1.4, h ) );
+}
 void main() {
   vec4 t = texture2D( uAtlas, vUv );
   float d = clamp( ( t.a - vErode ) / max( 1.0 - vErode, 0.05 ), 0.0, 1.0 );
@@ -147,7 +156,15 @@ void main() {
   vec3 n = vec3( vAxes.xy * nt.x + vAxes.zw * nt.y, sqrt( max( 0.0, 1.0 - dot( nt, nt ) ) ) );
   float wrap = clamp( ( dot( n, vSunV ) + 0.6 ) * 0.625, 0.0, 1.0 );
   vec3 col = vAmbC * ( 0.9 + 0.2 * t.b ) + vSunC * wrap + vFwdC * ( 1.0 - 0.6 * d );
-  gl_FragColor = vec4( mix( col, vFog.rgb, vFog.a ), a );
+  float fogA = vFog.a;
+  if ( vHeat > 0.002 ) {
+    // fire inside the smoke: hottest in the dense heart of each billow, the rims stay sooty
+    float h = vHeat * ( 0.3 + 0.9 * d * d ) * ( 0.75 + 0.5 * t.b );
+    float glow = smoothstep( 0.08, 0.85, d );
+    col += fireColor( h ) * h * h * 7.0 * glow;
+    fogA *= 1.0 - 0.6 * min( 1.0, vHeat );
+  }
+  gl_FragColor = vec4( mix( col, vFog.rgb, fogA ), a );
 }
 `;
 
@@ -299,6 +316,8 @@ class Pool {
   rot: Float32Array; rotV: Float32Array; drag: Float32Array; dragV: Float32Array; grav: Float32Array; stretch: Float32Array;
   r: Float32Array; g: Float32Array; b: Float32Array;
   ground: Float32Array; cell: Float32Array; erode: Float32Array; windK: Float32Array; fadeIn: Float32Array; bounce: Float32Array;
+  /** fire glow: starting heat and the fraction of the life over which it cools to smoke */
+  heat: Float32Array; cool: Float32Array;
   private buf: Float32Array;
   private attr: THREE.InstancedInterleavedBuffer;
   private geo: THREE.InstancedBufferGeometry;
@@ -316,6 +335,7 @@ class Pool {
     this.rot = f(); this.rotV = f(); this.drag = f(); this.dragV = f(); this.grav = f(); this.stretch = f();
     this.r = f(); this.g = f(); this.b = f();
     this.ground = f(); this.cell = f(); this.erode = f(); this.windK = f(); this.fadeIn = f(); this.bounce = f();
+    this.heat = f(); this.cool = f();
 
     const geo = (this.geo = new THREE.InstancedBufferGeometry());
     geo.setAttribute('corner', new THREE.BufferAttribute(new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), 2));
@@ -359,6 +379,8 @@ class Pool {
     this.r[i] = r; this.g[i] = g; this.b[i] = b;
     this.ground[i] = ground; this.cell[i] = (Math.random() * 4) | 0; this.erode[i] = erode; this.windK[i] = windK;
     this.fadeIn[i] = Math.max(0.005, fadeIn); this.bounce[i] = bounce;
+    this.heat[i] = 0;
+    return i;
   }
 
   addTransient(x: number, y: number, z: number, size: number, alpha: number, r: number, g: number, b: number, pull: number) {
@@ -413,7 +435,12 @@ class Pool {
       B[o + 3] = this.vx[i]; B[o + 4] = this.vy[i]; B[o + 5] = this.vz[i];
       B[o + 6] = size; B[o + 7] = alpha; B[o + 8] = this.rot[i]; B[o + 9] = this.stretch[i];
       B[o + 10] = this.r[i]; B[o + 11] = this.g[i]; B[o + 12] = this.b[i]; B[o + 13] = this.ground[i];
-      B[o + 14] = t; B[o + 15] = this.cell[i]; B[o + 16] = this.erode[i]; B[o + 17] = 0;
+      let h = this.heat[i];
+      if (h > 0) {
+        const k = Math.max(0, 1 - t / this.cool[i]);
+        h *= k * k;
+      }
+      B[o + 14] = t; B[o + 15] = this.cell[i]; B[o + 16] = this.erode[i]; B[o + 17] = h;
     }
     const tr = this.transient;
     for (let k = 0; k < this.nTransient; k++) {
@@ -436,7 +463,7 @@ class Pool {
 
   private copy(from: number, to: number) {
     const arrs = [this.px, this.py, this.pz, this.vx, this.vy, this.vz, this.life, this.maxLife, this.s0, this.s1, this.a0, this.rot, this.rotV,
-      this.drag, this.dragV, this.grav, this.stretch, this.r, this.g, this.b, this.ground, this.cell, this.erode, this.windK, this.fadeIn, this.bounce];
+      this.drag, this.dragV, this.grav, this.stretch, this.r, this.g, this.b, this.ground, this.cell, this.erode, this.windK, this.fadeIn, this.bounce, this.heat, this.cool];
     for (const a of arrs) a[to] = a[from];
   }
 
@@ -867,6 +894,14 @@ export class Particles {
         1.4, -2.5, -1, -1e3, 0, 0.6, 0.06,
       );
     }
+    // the flames have body: small burning billows that rise and cool into soot
+    if (Math.random() < 0.55 * amount) {
+      this.fireball(
+        p.x + (Math.random() - 0.5) * spread, p.y + 0.1 + Math.random() * 0.2, p.z + (Math.random() - 0.5) * spread,
+        v.x * 0.5 + (Math.random() - 0.5) * 0.6, 2 + Math.random() * 1.6, v.z * 0.5 + (Math.random() - 0.5) * 0.6,
+        1.1 + Math.random() * 0.8, 0.25, 0.8 + Math.random() * 0.6 * amount, 0.8 + 0.35 * amount, 0.42, p.y - 0.4,
+      );
+    }
     // a lick of dull red higher up, where the flame dies into smoke
     if (Math.random() < 0.5 * amount) {
       this.hot.spawn(
@@ -897,49 +932,103 @@ export class Particles {
     );
   }
 
+  /** a billow of burning fuel: a soft puff with fire glowing inside it that cools into sooty smoke */
+  private fireball(x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, s0: number, s1: number, heat: number, cool: number, ground: number) {
+    const k = 0.025 + Math.random() * 0.03;
+    const i = this.soft.spawn(x, y, z, vx, vy, vz, life, s0, s1, 0.98, k, k * 0.92, k * 0.88, 2.4, -2.2, 0, ground, 0.32, 0.6, 0.015, 1.6);
+    this.soft.heat[i] = heat;
+    this.soft.cool[i] = cool;
+  }
+
   /**
-   * A car going up: a fuel fireball that swells and rolls upward, a shock of
-   * sparks and glowing fragments, then a column of black smoke.
+   * A car going up. Modelled on real fuel-cell fires: a white-hot flash, a fireball
+   * of burning fuel that billows out, rolls upward and cools from yellow through
+   * orange and red into thick black smoke; a shock of dust racing out along the
+   * ground; sparks and burning carbon flung out; a couple of secondary pops as the
+   * rest of the fuel and the hybrid battery go. The black column that follows is
+   * emitted by the burning car (CarEffects).
    */
   explosion(p: THREE.Vector3, v: THREE.Vector3, ground = p.y - 0.3) {
-    // fireball: layered, hottest at the core
-    for (let i = 0; i < 60; i++) {
+    const vx = v.x * 0.45, vz = v.z * 0.45;
+    // the fireball: dense, hottest in the middle, pushed out then slowed by the air
+    for (let i = 0; i < 34; i++) {
       const a = Math.random() * Math.PI * 2;
-      const u = Math.random() * 2 - 1;
-      const r = Math.sqrt(1 - u * u);
-      const sp = 2 + Math.random() * 7;
+      const u = Math.random() * 1.6 - 0.6;
+      const r = Math.sqrt(Math.max(0, 1 - u * u));
+      const sp = 3 + Math.random() * 7;
+      const core = i < 12;
+      this.fireball(
+        p.x + Math.cos(a) * r * 0.5, p.y + 0.4 + Math.random() * 0.4, p.z + Math.sin(a) * r * 0.5,
+        vx + Math.cos(a) * r * sp, 2 + Math.abs(u) * sp * 0.9, vz + Math.sin(a) * r * sp,
+        2.6 + Math.random() * 2.2, core ? 0.9 : 0.6, (core ? 3.4 : 2.6) + Math.random() * 2.2,
+        core ? 1.45 : 1.05 + Math.random() * 0.3, 0.3 + Math.random() * 0.18, ground,
+      );
+    }
+    // the rising cap: rolls upward out of the fireball
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.fireball(
+        p.x + Math.cos(a) * 0.6, p.y + 1.2, p.z + Math.sin(a) * 0.6,
+        vx * 0.6 + Math.cos(a) * 1.2, 6 + Math.random() * 4, vz * 0.6 + Math.sin(a) * 1.2,
+        3.6 + Math.random() * 2, 1.2, 4.2 + Math.random() * 2, 0.95, 0.24, ground,
+      );
+    }
+    // shockwave: a ring of dust and grit racing out along the ground
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2 + Math.random() * 0.2;
+      const sp = 11 + Math.random() * 7;
+      const k = 0.42 + Math.random() * 0.12;
+      this.soft.spawn(
+        p.x + Math.cos(a) * 0.8, ground + 0.25, p.z + Math.sin(a) * 0.8,
+        vx * 0.3 + Math.cos(a) * sp, 0.6 + Math.random() * 0.8, vz * 0.3 + Math.sin(a) * sp,
+        1.6 + Math.random() * 1.2, 0.4, 2.4 + Math.random() * 1.6, 0.5, k, k * 0.95, k * 0.86, 3.2, 0.3, 0, ground, 0.55, 0.4, 0.02,
+      );
+    }
+    // the flash and the hottest core: brief additive light that blooms
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 1.5 + Math.random() * 3;
+      this.hot.spawn(
+        p.x, p.y + 0.6, p.z,
+        vx + Math.cos(a) * sp, 1 + Math.random() * 3, vz + Math.sin(a) * sp,
+        0.1 + Math.random() * 0.12, 1.0, 1.9 + Math.random() * 0.6, 0.7, 5, 2.6, 0.8, 3, -2, -1, -1e3, 0, 0.3, 0.01,
+      );
+    }
+    // sparks and burning carbon flung out, arcing down and bouncing
+    for (let i = 0; i < 70; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 5 + Math.random() * 18;
       const heat = 0.55 + Math.random() * 0.45;
-      const core = i < 18;
+      const big = i < 14;
       this.hot.spawn(
         p.x, p.y + 0.4, p.z,
-        v.x * 0.5 + Math.cos(a) * r * sp, Math.abs(u) * sp * 0.8 + 2.5, v.z * 0.5 + Math.sin(a) * r * sp,
-        (core ? 0.45 : 0.7) + Math.random() * 0.6, core ? 0.8 : 0.5, (core ? 2.4 : 3.2) + Math.random() * 1.6, core ? 0.55 : 0.35,
-        (core ? 6 : 3.6) * heat, (core ? 3 : 1.3) * heat * heat, (core ? 0.9 : 0.25) * heat * heat * heat,
-        2.6, -3.5, -1, -1e3, 0, 0.3, 0.02,
+        vx + Math.cos(a) * sp, 3 + Math.random() * 11, vz + Math.sin(a) * sp,
+        (big ? 1.6 : 0.6) + Math.random() * 1.2, big ? 0.06 : 0.025, big ? 0.04 : 0.015, 1, 20 * heat, 7 * heat * heat, 1.5 * heat * heat, big ? 0.3 : 0.6, 9.8, big ? 0 : 0.03, ground, 0, 0, 0.01, 0.1, 0.35,
       );
     }
-    // glowing bits flung out (burning carbon, hot metal)
-    for (let i = 0; i < 46; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 4 + Math.random() * 14;
-      const heat = 0.6 + Math.random() * 0.4;
-      this.hot.spawn(
-        p.x, p.y + 0.3, p.z,
-        v.x * 0.6 + Math.cos(a) * sp, 3 + Math.random() * 9, v.z * 0.6 + Math.sin(a) * sp,
-        0.8 + Math.random() * 1.4, 0.03, 0.02, 1, 22 * heat, 8 * heat * heat, 1.8 * heat * heat, 0.5, 9.8, 0.03, ground, 0, 0, 0.01, 0.1, 0.35,
-      );
-    }
-    // the smoke it leaves: a dark, fast-growing cloud
-    for (let i = 0; i < 26; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 1 + Math.random() * 4;
-      const k = 0.03 + Math.random() * 0.04;
-      this.soft.spawn(
-        p.x + Math.cos(a) * 0.5, p.y + 0.6 + Math.random() * 0.8, p.z + Math.sin(a) * 0.5,
-        v.x * 0.3 + Math.cos(a) * sp, 2 + Math.random() * 4, v.z * 0.3 + Math.sin(a) * sp,
-        4 + Math.random() * 4, 1.2, 4.5 + Math.random() * 3.5, 0.85, k, k * 0.96, k * 0.93, 1.1, -0.4, 0, ground, 0.35, 1, 0.1 + Math.random() * 0.25,
-      );
-    }
+    // secondary pops: the rest of the fuel, then the battery
+    const at = p.clone();
+    const pop = (delay: number, n: number, size: number) =>
+      this.later(delay, () => {
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = 2 + Math.random() * 4;
+          this.fireball(
+            at.x + (Math.random() - 0.5) * 1.2, at.y + 0.5, at.z + (Math.random() - 0.5) * 1.2,
+            Math.cos(a) * sp, 2.5 + Math.random() * 4, Math.sin(a) * sp,
+            2 + Math.random() * 1.6, 0.5 * size, (2.2 + Math.random() * 1.6) * size, 1.1, 0.32, ground,
+          );
+        }
+        this.sparks(at, this.tmpA.set(0, 0, 0), 14, ground);
+      });
+    pop(0.45 + Math.random() * 0.2, 8, 0.8);
+    if (Math.random() < 0.7) pop(1.1 + Math.random() * 0.5, 5, 0.6);
+  }
+
+  private pending: { t: number; f: () => void }[] = [];
+  /** run an emitter a moment from now (secondary explosions) */
+  later(delay: number, f: () => void) {
+    this.pending.push({ t: delay, f });
   }
 
   /** a flash of light from a fireball / an impact, this frame only */
@@ -968,6 +1057,14 @@ export class Particles {
 
   update(dt: number) {
     if (dt > 0) this.lastDt = dt;
+    if (this.pending.length && dt > 0) {
+      for (let i = this.pending.length - 1; i >= 0; i--) {
+        const q = this.pending[i];
+        if ((q.t -= dt) > 0) continue;
+        this.pending.splice(i, 1);
+        q.f();
+      }
+    }
     this.soft.update(dt, this.windX, this.windZ);
     this.hot.update(dt, this.windX * 0.2, this.windZ * 0.2);
     this.halo.update(dt, 0, 0);
@@ -976,6 +1073,7 @@ export class Particles {
   }
 
   clear() {
+    this.pending.length = 0;
     this.soft.clear();
     this.hot.clear();
     this.halo.clear();

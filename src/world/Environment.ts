@@ -9,9 +9,11 @@ import { createCloudNoise } from './env/skyNoise.ts';
 import { createCloudPanorama } from './env/skyClouds.ts';
 import { createSun, cloudShadowA, cloudShadowB } from './env/lightShadows.ts';
 import { createRain } from './env/rain.ts';
+import { buildFloodField, createFloodRig, setFloodLevel } from './env/night.ts';
 import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } from './env/presets.ts';
 import { buildScenery, type Scenery, type SceneryLight } from './env/scenery.ts';
 import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
+import { disposeTree } from '../core/dispose.ts';
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -39,6 +41,8 @@ export interface Environment {
   update(dt: number, camera: THREE.Camera): void;
   /** terrain height at world (x, z) */
   heightAt(x: number, z: number): number;
+  /** free every GPU resource this environment owns (world switch); `keep`: shared resources to leave alone */
+  dispose(keep?: Set<object>): void;
   readonly buildMs: number;
   /** build breakdown + instance counts */
   readonly stats: Record<string, unknown>;
@@ -47,6 +51,8 @@ export interface Environment {
 const DEG = Math.PI / 180;
 /** ground irradiance the grade is calibrated for (clear 15:00 sun) */
 const E_REF = 4.0;
+/** floodlight irradiance scale at full night (one row of lamps at the track centre) */
+const FLOOD_E = 1.9;
 
 const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
   low: { shadowMap: 1024, farSize: 280, rain: 0.45 },
@@ -141,6 +147,20 @@ export function createEnvironment(
   group.add(rain.group);
   rain.setDensity(QUALITY[quality].rain);
 
+  // rain splashes land on the asphalt
+  let splashHint = -1;
+  rain.setSurface((x, z, out) => {
+    const pr = track.project(x, z, splashHint, 30);
+    splashHint = pr.index;
+    if (Math.abs(pr.lateral) > track.halfWidthAt(pr.s) + 1.2) return false;
+    track.point(pr.s, pr.lateral, 0, out);
+    return true;
+  });
+
+  // floodlights for twilight and night races (analytic light, see env/night.ts)
+  const floods = createFloodRig(track, (x, z) => scenery.heightAt(x, z));
+  group.add(floods.group);
+
   // ------------------------------------------------------------ state
   /** dev toggles (perf A/B from the console: __env.stats.debug.clouds = false) */
   const debug: { clouds: boolean; boltAz: number | null } = { clouds: true, boltAz: null };
@@ -188,6 +208,10 @@ export function createEnvironment(
     C.E0 = P.sunIntensity / tMax;
     C.skyScale = C.E0 * P.skyBoost;
     C.sunCol.setRGB(T.r / tMax, T.g / tMax, T.b / tMax);
+    // moonlight: the same sun, but read by the eye as cool silver-blue
+    if ((P.night ?? 0) > 0.5) C.sunCol.multiply(tmpA.setRGB(0.72, 0.84, 1.0));
+    sky.uniforms.uSunRadius.value = (P.night ?? 0) > 0.5 ? 0.017 : 0.0095;
+    if ((P.flood ?? 0) > 0) buildFloodField(track, renderer);
     const S = (e: number, phi: number) => l!.sample(e * DEG, phi * DEG).multiplyScalar(C.skyScale);
     C.zenith.copy(S(89, 90));
     C.horizonAway.copy(S(1.5, 180)).add(S(1.5, 120)).add(S(1.5, 90)).multiplyScalar(1 / 3);
@@ -225,7 +249,7 @@ export function createEnvironment(
     const el = P.elevation * DEG;
 
     // ---- sun
-    const sunI = P.sunIntensity * L.sunVis;
+    const sunI = P.sunIntensity * L.sunVis * (P.direct ?? 1);
     sun.color.copy(C.sunCol);
     sun.intensity = sunI;
     rig.shadow.radius = L.shadowRadius;
@@ -315,11 +339,12 @@ export function createEnvironment(
     // ---- rain streaks: lit by the sky
     const rc = tmpA.set(skyGrey, skyGrey, skyGrey).lerp(deck, ov).multiplyScalar(0.55);
     rain.set(L.rain, wind.x, wind.z, rc);
+    rainBase.copy(rc);
 
     // ---- eye adaptation: expose (partially) for the light falling on the ground, so a grey
     // day or a golden evening stays readable while keeping its mood
     const skyE = THREE.MathUtils.lerp(C.skyIrr, Math.PI * deckRad * 1.15, ov);
-    const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE;
+    const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE + FLOOD_E * (P.flood ?? 0) * 1.4;
     const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, 4.5);
     gradeLook.exposure = L.exposure * adapt;
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
@@ -343,6 +368,107 @@ export function createEnvironment(
     sceneryLight.skyAmbient.copy(C.zenith).multiplyScalar(0.55).add(tmpB.copy(C.horizonAway).multiplyScalar(0.45)).lerp(deck, ov);
     sceneryLight.rain = L.rain;
     pushSceneryLight();
+    applyNightAndBow(L);
+  }
+
+  /**
+   * After dark and in sun showers: the floodlights (level, glare, the light they throw into
+   * mist, rain and low cloud), the night sky (moon, stars, the city's glow) and the rainbow.
+   */
+  const rainBase = new THREE.Color();
+  /** the live weather's extra shape parameters (convective towering, heat haze) */
+  const wx = { conv: 0, heat: 0, wet: -1, kind: '' as string };
+  let groundY = 0;
+  for (let i = 0; i < track.n; i += 10) groundY += track.py[i] / Math.ceil(track.n / 10);
+  const floodCol = new THREE.Color(0.96, 0.98, 1.0);
+  const cityCol = new THREE.Color(1.0, 0.56, 0.26);
+  const nightTmp = new THREE.Color();
+  const nightV = new THREE.Vector3();
+  function applyNightAndBow(L: WeatherLook) {
+    const P = TIME_PRESETS[L.time];
+    const night = P.night ?? 0;
+    const fl = P.flood ?? 0;
+    const cu0 = clouds.uniforms;
+    const wetK = THREE.MathUtils.smoothstep(L.rain, 0.02, 0.7);
+    // after sunset only the tops still catch the last light
+    if ((P.direct ?? 1) < 1) (cu0.uSunCol.value as THREE.Vector3).multiplyScalar(Math.pow(P.direct ?? 1, 0.3));
+    // convective cloud: broken cumulus grows into towers (congestus, cumulonimbus); under a storm
+    // the deck turns dark, cold and lumpy and the light goes a sickly blue-green
+    const conv = wx.conv;
+    cu0.uThick.value = L.cloudThick * (1 + 2.4 * conv * (1 - L.overcast * 0.6));
+    cloudShadowB.z = L.cloudBase + (cu0.uThick.value as number) * 0.35;
+    const storm = conv * wetK;
+    if (storm > 0.001) {
+      cu0.uDark.value = Math.min(1, (cu0.uDark.value as number) + 0.3 * storm);
+      const dk = 1 - 0.42 * storm;
+      (cu0.uAmbBase.value as THREE.Vector3).multiply(nightV.set(dk * 0.94, dk * 1.0, dk * 1.04));
+      (cu0.uAmbTop.value as THREE.Vector3).multiplyScalar(1 - 0.3 * storm);
+      (sky.uniforms.uOvZenith.value as THREE.Vector3).multiply(nightV.set(dk * 0.9, dk * 0.97, dk * 1.02));
+      (sky.uniforms.uOvHorizon.value as THREE.Vector3).multiply(nightV.set(dk * 0.95, dk * 1.0, dk * 1.02));
+      gradeLook.exposure *= 1 - 0.22 * storm;
+      gradeLook.contrast *= 1 + 0.06 * storm;
+      gradeLook.saturation *= 1 - 0.1 * storm;
+      gradeLook.tint = [gradeLook.tint[0] * (1 - 0.05 * storm), gradeLook.tint[1] * (1 + 0.01 * storm), gradeLook.tint[2] * (1 + 0.04 * storm)];
+    }
+    // mist lying on the ground: morning mist (trees and stands poking out of it) and the
+    // steam hanging over a wet track once the rain stops
+    const evap = THREE.MathUtils.smoothstep(wx.wet, 0.25, 0.75) * (1 - THREE.MathUtils.smoothstep(L.rain, 0.04, 0.25)) * 0.8;
+    const lying = Math.max(evap, wx.kind === 'mist' ? THREE.MathUtils.smoothstep(L.mist, 0.05, 0.45) : 0);
+    if (lying > 0.001) {
+      aerialParams.x += lying * 9e-4;
+      aerialParams.y = THREE.MathUtils.lerp(aerialParams.y, 1 / 55, lying);
+      aerialParams.z = groundY * lying;
+    }
+
+    // heat haze: a bleached, milky sky and a big glare round the sun
+    const milk = THREE.MathUtils.clamp(wx.heat * 1.3 - 0.25, 0, 1) * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.35) * (1 - L.overcast) * (1 - night);
+    sky.uniforms.uMilk.value = milk * 0.8;
+    // sunlit haze: bright and warm, not grey
+    const milkCol = (sky.uniforms.uMilkCol.value as THREE.Vector3).set(
+      (C.horizonAway.r * 0.4 + C.horizonToward.r * 0.6) * 1.12,
+      (C.horizonAway.g * 0.4 + C.horizonToward.g * 0.6) * 1.02,
+      (C.horizonAway.b * 0.4 + C.horizonToward.b * 0.6) * 0.8,
+    ).multiplyScalar(1.45);
+    if (milk > 0.001) {
+      sky.uniforms.uHalo.value = (sky.uniforms.uHalo.value as number) * (1 + 2.2 * milk);
+      fog.color.lerp(nightTmp.setRGB(milkCol.x, milkCol.y, milkCol.z), milk * 0.6);
+      gradeLook.tint = [gradeLook.tint[0] * (1 + 0.05 * milk), gradeLook.tint[1] * (1 + 0.01 * milk), gradeLook.tint[2] * (1 - 0.08 * milk)];
+      gradeLook.exposure *= 1 + 0.06 * milk;
+      gradeLook.contrast *= 1 - 0.04 * milk;
+    }
+    // shafts: morning mist and haze scatter the sun into beams through the trees
+    gfx.setSunShafts(sunDir, P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) : 0), 0.55 * C.E0 * 0.25);
+    gfx.grade.setLook(gradeLook);
+    const F = FLOOD_E * fl;
+    setFloodLevel(F);
+    const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
+    floods.set(fl, haze, aerialParams.x);
+    const u = sky.uniforms;
+    u.uNight.value = night;
+    u.uStars.value = night * (1 - L.overcast) * (1 - 0.85 * L.mist) * (1 - L.coverage * 0.5);
+    // the city under a cloud deck lights it up from below
+    const city = 0.03 * night * (0.6 + 0.6 * L.overcast + 0.5 * L.mist) * (1 - 0.5 * L.rain);
+    (u.uCity.value as THREE.Vector3).set(cityCol.r * city, cityCol.g * city, cityCol.b * city);
+    const glow = F * 0.01 * (0.4 + 1.8 * haze);
+    (u.uFloodGlow.value as THREE.Vector3).set(floodCol.r * glow, floodCol.g * glow, floodCol.b * glow);
+    if (night > 0.5) u.uHalo.value = 0.35 * L.sunVis;
+    // a rainbow: rain falling while the sun shines, opposite it (lifted a little when the sun is high,
+    // or it would sit below the horizon all afternoon)
+    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - L.mist);
+    u.uBow.value = bow;
+    const bowI = P.sunIntensity * 0.03;
+    (u.uBowCol.value as THREE.Vector3).set(C.sunCol.r * bowI, C.sunCol.g * bowI, C.sunCol.b * bowI);
+    u.uBowEl.value = -Math.min(P.elevation, 20) * DEG;
+    if (fl <= 0 && night <= 0) return;
+    // the haze near the circuit glows with its lights; far off it is the night
+    nightTmp.copy(floodCol).multiplyScalar(F * 0.006 * (0.3 + 2.2 * haze)).add(tmpB.copy(cityCol).multiplyScalar(city * 0.6));
+    fog.color.add(nightTmp);
+    // cloud bases lit orange from the city below, and the lit circuit
+    const cu = clouds.uniforms;
+    const ab = cu.uAmbBase.value as THREE.Vector3;
+    ab.multiplyScalar(1 - 0.5 * night).add(nightV.set(cityCol.r * city * 0.9 + floodCol.r * glow * 0.5, cityCol.g * city * 0.9 + floodCol.g * glow * 0.5, cityCol.b * city * 0.9 + floodCol.b * glow * 0.5));
+    // rain streaks catch the floodlights
+    rain.set(L.rain, wind.x, wind.z, nightTmp.copy(rainBase).add(tmpB.copy(floodCol).multiplyScalar(F * 0.12)));
   }
   const sceneryLight: SceneryLight = {
     sunDir,
@@ -401,15 +527,31 @@ export function createEnvironment(
     focus.copy(target);
     if (haveCam) focus.addScaledVector(camFwd, 14);
     rig.shadow.focus.copy(focus);
+    rain.setFocus(target);
   }
 
   function setWeather(w: WeatherState) {
     wind.x = w.windX;
     wind.z = w.windZ;
+    const conv = w.conv ?? 0;
+    const heat = w.heat ?? 0;
+    const convChanged = Math.abs(conv - wx.conv) > 0.004 || Math.abs(heat - wx.heat) > 0.004 || Math.abs(w.wetness - wx.wet) > 0.03 || w.kind !== wx.kind;
+    wx.conv = conv;
+    wx.heat = heat;
+    if (Math.abs(w.wetness - wx.wet) > 0.03) wx.wet = w.wetness;
+    wx.kind = w.kind;
+    // heat shimmer off hot, dry asphalt under a high sun
+    {
+      const P = TIME_PRESETS[w.time] ?? TIME_PRESETS.afternoon;
+      const sunHigh = THREE.MathUtils.smoothstep(P.elevation, 6, 45) * (P.direct ?? 1) * (1 - (P.night ?? 0));
+      const k = heat * sunHigh * look.sunVis * Math.max(0, 1 - w.wetness * 3) * (1 - w.rain);
+      (gfx as unknown as { setHeatShimmer?: (a: number) => void }).setHeatShimmer?.(k * 0.9);
+    }
     sceneryLight.wetness = w.wetness;
     sceneryLight.windX = w.windX;
     sceneryLight.windZ = w.windZ;
     const changed =
+      convChanged ||
       w.time !== last.time || Math.abs(w.cloud - last.cloud) > 0.002 || Math.abs(w.rain - last.rain) > 0.002 || Math.abs(w.fog - last.fog) > 0.004;
     if (changed) {
       last.cloud = w.cloud;
@@ -449,8 +591,10 @@ export function createEnvironment(
     (sky.uniforms.uFlashCol.value as THREE.Vector3).set(0.9, 0.95, 1.15).multiplyScalar(Math.max(0.12, lightInfo.deckRad ?? 0.2) * 4.5);
     // the channel stays lit through the restrikes, fading with them
     sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
-    scene.environmentIntensity = look.envIntensity * (1 + L * 0.6);
-    gfx.setFlash(L * 0.1);
+    // the whole scene lights up cold white for an instant (the flash fills the sky the env map is made of)
+    scene.environmentIntensity = look.envIntensity * (1 + L * 1.7);
+    hemi.intensity = look.hemi + L * 0.7 * (1 - look.sunVis * 0.6);
+    gfx.setFlash(L * 0.2);
   }
 
   function update(dt: number, camera: THREE.Camera) {
@@ -463,7 +607,8 @@ export function createEnvironment(
     if (gfx.qualityLevel !== quality) setQuality(gfx.qualityLevel);
 
     // clouds drift with the wind aloft (stronger than at the ground, veering a little)
-    const ws = 2.6;
+    // (a windy day: the jet is up there too, and the clouds race)
+    const ws = 2.6 + 2.2 * THREE.MathUtils.smoothstep(Math.hypot(wind.x, wind.z), 7, 14);
     windOff.x += (wind.x * ws + 3.5) * dt;
     windOff.y += (wind.z * ws + 1.2) * dt;
     (clouds.uniforms.uWind.value as THREE.Vector2).copy(windOff);
@@ -473,6 +618,7 @@ export function createEnvironment(
     sky.uniforms.uPano.value = clouds.texture;
 
     rain.update(dt, camera);
+    floods.update(camera);
     scenery.update(dt, camera, elapsed);
 
     // env map: re-filter in place when the look drifted (or clouds moved on), spread over 2 frames
@@ -517,6 +663,10 @@ export function createEnvironment(
     get rainDrops() {
       return rain.drops;
     },
+    /** dev: the rain system (splash debugging) */
+    get rain() {
+      return rain;
+    },
     get quality() {
       return quality;
     },
@@ -532,5 +682,18 @@ export function createEnvironment(
     buildMs,
     stats,
     heightAt: (x: number, z: number) => scenery.heightAt(x, z),
+    dispose(keep = new Set<object>()) {
+      if (scene.environment === envRT?.texture) scene.environment = null;
+      if (scene.fog === fog) scene.fog = null;
+      disposeTree(group, keep);
+      disposeTree(envScene, keep);
+      clouds.dispose();
+      // (the cloud noise is shared between circuits: see createCloudNoise)
+      cubeRT.dispose();
+      envRT?.dispose();
+      pmrem.dispose();
+      for (const l of lutCache.values()) l.texture.dispose();
+      lutCache.clear();
+    },
   };
 }

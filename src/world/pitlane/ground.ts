@@ -98,13 +98,13 @@ export function buildGround(plan: PitPlan, ts: TrackSpace): THREE.BufferGeometry
   strip(p.sEnd, p.s1, (s) => p.exitLine(s), (s) => p.outer(s), Z.LANE, lift);
   // grass beside the spur lanes (behind their outer walls)
   const gEnd = 46;
-  strip(p.s0, 150, (s) => p.outer(s) + 0.45, k(gEnd), Z.GRASS, 0.05, 3);
+  strip(p.s0, p.sStart + 30, (s) => p.outer(s) + 0.45, k(gEnd), Z.GRASS, 0.05, 3);
   strip(p.sEnd - 30, p.s1, (s) => p.outer(s) + 0.45, k(gEnd), Z.GRASS, 0.05, 3);
   // paddock slab
-  const padA = 150, padB = p.sEnd - 30;
-  strip(padA, p.bldgS0, (s) => p.outer(s) + 0.45, k(L.paddockEnd), Z.PADDOCK, 0.05, 6);
-  strip(p.bldgS0, p.bldgS1, k(L.bldgBack - 0.2), k(L.paddockEnd), Z.PADDOCK, 0.05, 6);
-  strip(p.bldgS1, padB, (s) => p.outer(s) + 0.45, k(L.paddockEnd), Z.PADDOCK, 0.05, 6);
+  const padA = p.sStart + 30, padB = p.sEnd - 30;
+  strip(padA, p.bldgS0, (s) => p.outer(s) + 0.45, k(p.paddockEnd), Z.PADDOCK, 0.05, 6);
+  strip(p.bldgS0, p.bldgS1, k(L.bldgBack - 0.2), k(p.paddockEnd), Z.PADDOCK, 0.05, 6);
+  strip(p.bldgS1, padB, (s) => p.outer(s) + 0.45, k(p.paddockEnd), Z.PADDOCK, 0.05, 6);
   // building floor (service garages, corridors) and the team garages' epoxy
   strip(p.bldgS0, p.bldgS1, k(L.front - 0.2), k(L.bldgBack), Z.CONCRETE, 0.04, 6);
   for (let t = 0; t < TEAMS.length; t++) {

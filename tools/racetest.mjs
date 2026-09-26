@@ -5,7 +5,7 @@ import { Race } from '../src/race/Race.ts';
 import { allEntries } from '../src/race/Teams.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';
 import { planWeather } from '../src/world/Weather.ts';
-const track = new Track(CIRCUITS[0]);
+const track = new Track(CIRCUITS.find((c) => c.id === process.env.TRACK) ?? CIRCUITS[Number(process.env.TRK ?? 0)]); // TRACK=suzuka or TRK=3
 const entries = allEntries();
 const LAPS = Number(process.argv[2] ?? 3);
 const WX = process.argv[3] ?? 'clear';
@@ -32,4 +32,4 @@ while (t < LAPS * 110 + 60) {
 }
 console.log('sim', t.toFixed(1), 's; events', JSON.stringify(kinds));
 for (const r of race.classification()) console.log(String(r.pos).padStart(2), r.entry.driver.code, r.isPlayer ? '*' : ' ', 'laps', r.laps, 'time', isFinite(r.time) ? r.time.toFixed(2) : '-', 'gap', typeof r.gap === 'number' ? r.gap.toFixed(3) : r.gap, 'best', r.best.toFixed(3), 'stops', race.cars.find((c) => c.entry === r.entry).stops, race.cars.find((c) => c.entry === r.entry).compoundsUsed.join('>'));
-let dmg = 0; for (const c of race.cars) dmg += c.car.damage; console.log('total wall damage', dmg.toFixed(0));
+let dmg = 0; for (const c of race.cars) dmg += 1 - c.car.integrity; console.log('total damage (integrity lost, sum)', dmg.toFixed(2));

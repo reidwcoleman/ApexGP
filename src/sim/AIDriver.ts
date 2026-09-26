@@ -13,11 +13,17 @@ export interface Neighbour {
   s: number;
   lateral: number;
   speed: number;
+  /** entering the pits / merging from the pit exit on this side of the road (−1 / 1; 0 or absent = racing): give it room */
+  pit?: number;
+  /** with `pit`: the lateral to keep clear of (a car still in the exit lane: where it will join the road) */
+  pitLat?: number;
 }
 
 export class AIDriver {
   /** 0.9..1.0: fraction of the profile speed this driver can carry */
   pace: number;
+  /** Dynamic difficulty: a small race-long multiplier on the pace (≈1 ± 0.015), set by the race */
+  trim = 1;
   aggression: number;
   offset = 0;
   targetOffset = 0;
@@ -83,10 +89,19 @@ export class AIDriver {
     let blockL = false;
     let blockR = false;
     const myLat = car.lateral;
+    // a car diving into the pit entry or merging from the pit exit nearby: leave it that side of the road
+    let giveSide = 0;
+    let giveLat = 0;
     for (const o of others) {
       if (o.id === selfId) continue;
       const ds = track.delta(car.s, o.s);
       const dl = o.lateral - myLat;
+      if (o.pit && ds > -18 && ds < Math.max(120, (v - o.speed) * 5) && (giveSide === 0 || Math.abs(dl) < Math.abs(giveLat - myLat))) {
+        giveSide = -o.pit;
+        giveLat = o.pitLat ?? o.lateral;
+      }
+      // not (yet) clear of it: don't drive through it, sit behind until there's room
+      if (o.pit && ds > 0 && ds < 80 && Math.abs(dl) < 2.5) followSpeed = Math.min(followSpeed, o.speed + Math.max(0, ds - 12) * 0.3);
       // alongside: keep a car's width between us
       if (Math.abs(ds) < 6) {
         if (dl > 0 && dl < 2.6) blockR = true;
@@ -123,11 +138,18 @@ export class AIDriver {
     this.targetOffset = Math.max(-maxOff, Math.min(maxOff, this.targetOffset));
     if (blockL) this.targetOffset = Math.max(this.targetOffset, myLat - track.racingLineAt(car.s) + 0.6);
     if (blockR) this.targetOffset = Math.min(this.targetOffset, myLat - track.racingLineAt(car.s) - 0.6);
+    if (giveSide !== 0 && this.yieldSide !== -giveSide) {
+      // stay a lane clear of it (not past the far edge of the road)
+      const lim = Math.max(-hw + 1.3, Math.min(hw - 1.3, giveLat + giveSide * 3.4));
+      const off = lim - track.racingLineAt(car.s) * 0.9;
+      this.targetOffset = giveSide > 0 ? Math.max(this.targetOffset, off) : Math.min(this.targetOffset, off);
+    }
 
     // lateral offset eases toward its target — moving across mid-corner tightens the
     // path beyond the grip the speed target assumes, so do it on the straights
     const kHere = Math.max(Math.abs(track.kappaAt(car.s)), Math.abs(track.kappaAt(car.s + v * 0.6)));
-    const maxRate = 2.2 * Math.max(0.15, 1 - kHere * 180);
+    // (a car merging from the pit exit or diving into the entry: move over briskly)
+    const maxRate = (giveSide !== 0 ? 3.6 : 2.2) * Math.max(0.15, 1 - kHere * 180);
     this.offset += Math.max(-maxRate * dt, Math.min(maxRate * dt, this.targetOffset - this.offset));
 
     // ---- steering: curvature feedforward + Stanley feedback at the front axle
@@ -194,7 +216,7 @@ export class AIDriver {
     const vAt = (ss: number) => profile.atGrip(ss, g);
     // off the line = a tighter radius: slow corners punish it far more than fast ones
     const offLoss = corner * Math.min(0.2, offLine * (0.012 + 0.05 * tight));
-    let vt = vAt(car.s + v * 0.12) * this.pace * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
+    let vt = vAt(car.s + v * 0.12) * this.pace * this.trim * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
     vt = Math.min(vt, followSpeed);
     const err = vt - v;
     if (err > 0) {
@@ -210,7 +232,9 @@ export class AIDriver {
       const edge = hw + track.kerbAt(car.s + v * 0.2, side) - 0.95;
       const outward = ((car.lateral - this.prevLat) / Math.max(dt, 1e-3)) * side;
       const near = Math.abs(car.lateral) - (edge - 1.2);
-      if (near > 0 && outward > 0.4) inp.throttle *= Math.max(0.1, 1 - near * 0.55 - outward * 0.06);
+      // (not at the inside edge of a steeply banked corner: the long apex there is the line)
+      const bankedApex = track.banked[Math.floor(track.wrap(car.s))] !== 0 && Math.abs(kPath) > 1 / 400 && side !== Math.sign(kPath);
+      if (near > 0 && outward > 0.4 && !bankedApex) inp.throttle *=Math.max(0.1, 1 - near * 0.55 - outward * 0.06);
     } else {
       inp.throttle = err > -0.6 ? 0.25 : 0;
       inp.brake = err < -0.8 ? Math.min(1, -err * 0.22) : 0;

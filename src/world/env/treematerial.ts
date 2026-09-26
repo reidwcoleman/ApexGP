@@ -24,14 +24,42 @@ export interface TreeUniforms {
   uFade: THREE.IUniform<THREE.Vector2>;
   /** world direction toward the sun (for the leaf shadow offset) */
   uSunW: THREE.IUniform<THREE.Vector3>;
+  /**
+   * sky fill multiplier on foliage: light scattered leaf to leaf through a sunlit crown
+   * (strong in sunshine, near 1 under a grey deck where the sky already lights everything)
+   */
+  uLeafFill: THREE.IUniform<THREE.Vector3>;
+}
+
+const FILL_SUN = new THREE.Vector3(3.4, 3.55, 2.8);
+const FILL_GREY = new THREE.Vector3(1.35, 1.4, 1.2);
+/** set the foliage fill from how much of the light is direct sun (0 … 1) */
+export function setLeafFill(u: TreeUniforms, sunShare: number) {
+  u.uLeafFill.value.copy(FILL_GREY).lerp(FILL_SUN, Math.min(1, Math.max(0, sunShare)));
 }
 
 export function createTreeUniforms(): TreeUniforms {
-  return { uTime: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) } };
+  return { uTime: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
 }
 
 const COMMON_VERT = /* glsl */ `
 attribute vec4 aTree;
+attribute vec4 aCard;
+// camera-facing leaf card: spread the corner in the view plane (of whatever camera is
+// drawing — the sun's in the shadow pass), the texture's "up" turned toward the clump's
+// outward direction on screen. Returns a world-space offset for a tree of scale sc.
+vec3 treeCard( vec3 nW, float sc ) {
+  vec3 camR = vec3( viewMatrix[ 0 ][ 0 ], viewMatrix[ 1 ][ 0 ], viewMatrix[ 2 ][ 0 ] );
+  vec3 camU = vec3( viewMatrix[ 0 ][ 1 ], viewMatrix[ 1 ][ 1 ], viewMatrix[ 2 ][ 1 ] );
+  vec2 od = vec2( dot( nW, camR ), dot( nW, camU ) );
+  float ol = length( od );
+  vec2 up2 = vec2( 0.0, 1.0 );
+  if ( ol > 1e-3 ) up2 = normalize( mix( up2, od / ol, smoothstep( 0.1, 0.6, ol ) * 0.7 ) );
+  float cr = cos( aCard.z ), sr = sin( aCard.z );
+  up2 = vec2( up2.x * cr - up2.y * sr, up2.x * sr + up2.y * cr );
+  vec2 off = vec2( up2.y, -up2.x ) * aCard.x + up2 * aCard.y;
+  return ( camR * off.x + camU * off.y ) * sc;
+}
 uniform float uTime;
 uniform vec2 uWind;
 varying vec4 vTree;
@@ -82,11 +110,18 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
   RE_Direct_Physical( dl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   if ( vLeafL > 0.5 ) {
     float VL = saturate( dot( -geometryViewDir, directLight.direction ) );
-    float through = pow( VL, 8.0 ) * 0.7 + 0.2 * saturate( dot( -geometryNormal, directLight.direction ) );
+    // thin leaves: diffuse transmission through the lit-from-behind side of the crown
+    // (wrapped, so the terminator is soft) plus the bright forward-scatter glow around
+    // the sun when the crown is back-lit
+    float back = saturate( dot( -geometryNormal, directLight.direction ) * 0.6 + 0.4 );
+    float through = pow( VL, 6.0 ) * 0.85 + 0.3 * back * back;
     // light through a leaf comes out a saturated yellow-green (albedo squared, renormalised)
     vec3 dc = material.diffuseColor;
     vec3 tc = dc * dc / max( max( dc.r, dc.g ), 1e-3 );
-    reflectedLight.directDiffuse += dl.color * tc * vec3( 1.0, 1.0, 0.45 ) * through * 0.55;
+    reflectedLight.directDiffuse += dl.color * tc * vec3( 1.0, 1.0, 0.5 ) * through * 0.62;
+    // soft wrap on the lit side: a leafy mass never shows a hard N·L terminator
+    float wrapL = saturate( ( dot( geometryNormal, directLight.direction ) + 0.35 ) / 1.35 ) - saturate( dot( geometryNormal, directLight.direction ) );
+    reflectedLight.directDiffuse += dl.color * dc * wrapL * 0.45 * RECIPROCAL_PI;
   }
 }
 #undef RE_Direct
@@ -105,6 +140,7 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       uLeafN: { value: kit.leafNormal },
       uBark: { value: kit.bark },
       uSunW: u.uSunW,
+      uLeafFill: u.uLeafFill,
     });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\n${COMMON_VERT}\nvarying float vLeafL;\nvarying float vAOL;\nuniform vec3 uSunW;`)
@@ -124,6 +160,7 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
   vec3 disp = treeWind( ip, position, aTree );
   mat3 m3 = mat3( tm );
   float s2 = max( dot( m3[ 0 ], m3[ 0 ] ), 1e-4 );
+  if ( aCard.x != 0.0 || aCard.y != 0.0 ) disp += treeCard( normalize( mat3( modelMatrix ) * m3 * normal ), sqrt( s2 ) );
   transformed += ( transpose( m3 ) * disp ) / s2;
   vTree = aTree;
   vTUv = uv;
@@ -141,6 +178,7 @@ uniform sampler2D uLeafN;
 uniform sampler2D uBark;
 uniform vec2 uFade;
 uniform float uWet;
+uniform vec3 uLeafFill;
 varying vec4 vTree;
 varying vec2 vTUv;
 varying float vFadeD;
@@ -169,7 +207,7 @@ if ( leafK > 0.5 ) {
   // cards turning edge-on thin out instead of showing smeared leaves
   vec3 fN = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
   float edgeOn = abs( dot( fN, normalize( vViewPosition ) ) );
-  float thr = 0.5 + 0.52 * ( 1.0 - smoothstep( 0.1, 0.4, edgeOn ) );
+  float thr = 0.5 + 0.55 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
   if ( lt.a * ( 1.0 + lod * 0.32 ) < thr ) discard;
   diffuseColor.rgb *= lt.rgb;
 } else {
@@ -215,13 +253,14 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
       .replace(
         '#include <aomap_fragment>',
         `{
-  float ambientOcclusion = mix( 0.45, 1.0, vTree.z );
-  reflectedLight.indirectDiffuse *= ambientOcclusion * mix( vec3( 1.0 ), vec3( 1.12, 1.22, 0.86 ), leafK );
+  float ambientOcclusion = mix( mix( 0.45, 0.36, leafK ), 1.0, vTree.z );
+  // leaves: sky light scattered through the outer foliage (the crown is not an opaque blob)
+  reflectedLight.indirectDiffuse *= ambientOcclusion * mix( vec3( 1.0 ), uLeafFill, leafK );
   reflectedLight.indirectSpecular *= ambientOcclusion * ambientOcclusion * mix( 1.0, 0.3, leafK );
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v1';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v3';
   return mat;
 }
 
@@ -244,6 +283,7 @@ export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDept
   vec3 disp = treeWind( ip, position, aTree );
   mat3 m3 = mat3( tm );
   float s2 = max( dot( m3[ 0 ], m3[ 0 ] ), 1e-4 );
+  if ( aCard.x != 0.0 || aCard.y != 0.0 ) disp += treeCard( normalize( mat3( modelMatrix ) * m3 * normal ), sqrt( s2 ) );
   transformed += ( transpose( m3 ) * disp ) / s2;
   vTree = aTree;
   vTUv = uv;
@@ -253,7 +293,7 @@ export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDept
       .replace('#include <common>', `#include <common>\nuniform sampler2D uLeafMap;\nvarying vec4 vTree;\nvarying vec2 vTUv;`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif ( vTree.y > 0.5 && texture2D( uLeafMap, vTUv ).a < 0.5 ) discard;`);
   };
-  mat.customProgramCacheKey = () => 'apex-tree-depth-v1';
+  mat.customProgramCacheKey = () => 'apex-tree-depth-v2';
   return mat;
 }
 
@@ -270,6 +310,7 @@ export interface ImpostorAtlas {
 
 const BAKE_VERT = /* glsl */ `
 attribute vec4 aTree;
+attribute vec4 aCard;
 varying vec4 vTree;
 varying vec2 vTUv;
 varying vec3 vCol;
@@ -280,7 +321,20 @@ void main() {
   vTUv = uv;
   vCol = color;
   vN = normalize( normalMatrix * normal );
-  vec4 mv = modelViewMatrix * vec4( position, 1.0 );
+  vec3 p = position;
+  if ( aCard.x != 0.0 || aCard.y != 0.0 ) {
+    vec3 camR = vec3( viewMatrix[ 0 ][ 0 ], viewMatrix[ 1 ][ 0 ], viewMatrix[ 2 ][ 0 ] );
+    vec3 camU = vec3( viewMatrix[ 0 ][ 1 ], viewMatrix[ 1 ][ 1 ], viewMatrix[ 2 ][ 1 ] );
+    vec2 od = vec2( dot( normal, camR ), dot( normal, camU ) );
+    float ol = length( od );
+    vec2 up2 = vec2( 0.0, 1.0 );
+    if ( ol > 1e-3 ) up2 = normalize( mix( up2, od / ol, smoothstep( 0.1, 0.6, ol ) * 0.7 ) );
+    float cr = cos( aCard.z ), sr = sin( aCard.z );
+    up2 = vec2( up2.x * cr - up2.y * sr, up2.x * sr + up2.y * cr );
+    vec2 off = vec2( up2.y, -up2.x ) * aCard.x + up2 * aCard.y;
+    p += camR * off.x + camU * off.y;
+  }
+  vec4 mv = modelViewMatrix * vec4( p, 1.0 );
   vVP = - mv.xyz;
   gl_Position = projectionMatrix * mv;
 }
@@ -404,6 +458,7 @@ export function impostorMaterial(atlas: ImpostorAtlas, u: TreeUniforms): THREE.M
       uImpA: { value: atlas.albedo },
       uImpN: { value: atlas.normal },
       uCells: { value: cells },
+      uLeafFill: u.uLeafFill,
       uGrid: { value: atlas.grid },
     });
     sh.vertexShader = sh.vertexShader
@@ -477,6 +532,7 @@ varying float vAOL;`,
 uniform sampler2D uImpA;
 uniform sampler2D uImpN;
 uniform float uWet;
+uniform vec3 uLeafFill;
 varying vec2 vIUv;
 varying vec3 vIR;
 varying vec3 vIU;
@@ -486,7 +542,7 @@ varying float vIFade;
 varying float vIFlip;
 ${GET_TANGENT_FRAME}`,
       )
-      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.42, 1.0, vAOL )', 'mix( 0.62, 1.0, gImpAO )')}`)
+      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.62, 1.0, vAOL )', 'mix( 0.62, 1.0, gImpAO )')}`)
       .replace(
         '#include <map_fragment>',
         `
@@ -515,11 +571,11 @@ diffuseColor.rgb = ia.rgb * ia.rgb * vITint;
       .replace(
         '#include <aomap_fragment>',
         `{
-  reflectedLight.indirectDiffuse *= mix( 0.45, 1.0, gImpAO ) * vec3( 1.12, 1.22, 0.86 );
+  reflectedLight.indirectDiffuse *= mix( 0.36, 1.0, gImpAO ) * uLeafFill;
   reflectedLight.indirectSpecular *= gImpAO * gImpAO * 0.3;
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-impostor-v1';
+  mat.customProgramCacheKey = () => 'apex-tree-impostor-v2';
   return mat;
 }

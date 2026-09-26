@@ -4,6 +4,13 @@ import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
 import { CIRCUITS, MONZA } from '../world/Circuits.ts';
+import type { CircuitDef } from '../world/CircuitGen.ts';
+import { collectDeep, collectResources, disposeTree, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
+import { createCloudNoise } from '../world/env/skyNoise.ts';
+import { buildTreeKit } from '../world/env/treeproto.ts';
+import { makeGroundTextures } from '../world/trackside/textures.ts';
+import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
+import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
 import { setEvent, EVENT } from '../world/event.ts';
 const EVENT_GP = () => EVENT.gp;
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
@@ -12,28 +19,31 @@ import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
-import { Race, aiQualifyingTime } from '../race/Race.ts';
+import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL, ONBOARD, type CameraMode } from './Cameras.ts';
-import { ReplayBuffer } from './Replay.ts';
+import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, isRemoteCam, type CameraMode } from './Cameras.ts';
+import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
+import { Director, type FieldCar } from './Director.ts';
+import { Broadcast, describeEvent } from '../ui/Broadcast.ts';
 import { Flashback } from './Flashback.ts';
 import type { CarPhysics } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { CarEffects } from '../fx/CarEffects.ts';
 import { Debris } from '../fx/Debris.ts';
+import { SkidMarks } from '../fx/SkidMarks.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
-import { Menu, DIFFICULTY, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
-import { Weather, planWeather, isLowSun, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
-import { applyWeatherUniforms } from '../world/weatherUniforms.ts';
-import { buildPitComplex, type PitComplex, type BoxState } from '../world/PitComplex.ts';
+import { Menu, aiLevel, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
+import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
+import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
+import { buildPitComplex, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
 import { RacingLineAssist } from './RacingLineAssist.ts';
 import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
-import { COMPOUNDS } from '../race/Pit.ts';
-import { Career } from '../career/Career.ts';
+import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
+import { Career, SETUP } from '../career/Career.ts';
 import { loadPeople } from '../people/Humans.ts';
 import { Highlights } from '../career/Highlights.ts';
 import { GarageScene } from './GarageScene.ts';
@@ -41,15 +51,23 @@ import { peopleKit } from '../people/Humans.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
 
+/** objects that cast shadows into the garage key light (see buildGarageLights) */
+const GARAGE_SHADOW_LAYER = 3;
+/** what the garage floor mirrors: the player's car, its blankets and the garage lights */
+const GARAGE_MIRROR_LAYER = 4;
+
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
-type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback';
+type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
-const REPLAY_SHOTS: CameraMode[] = ['tv', 'chase', 'heli', 'tcam', 'tv', 'wheel', 'tv', 'far'];
+/** simulation speeds when watching a race, replay speeds */
+const SIM_SPEEDS = [1, 2, 4, 8];
+const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
 /** colour of the light on smoke/dust for the weather */
 function smokeLight(w: WeatherState): THREE.Color {
-  const sun = isLowSun(w.time) ? new THREE.Color(1.0, 0.86, 0.72) : new THREE.Color(1, 1, 1);
+  // (after dark it is the cool white of the floodlights)
+  const sun = floodlit(w.time) > 0 ? new THREE.Color(0.9, 0.93, 1.0) : isLowSun(w.time) ? new THREE.Color(1.0, 0.86, 0.72) : new THREE.Color(1, 1, 1);
   const grey = new THREE.Color(0.74, 0.77, 0.82);
   return sun.lerp(grey, Math.min(1, w.cloud * 0.9 + w.rain * 0.3));
 }
@@ -76,6 +94,8 @@ export class Game {
   private cams!: Cameras;
   private particles = new Particles();
   private carFx!: CarEffects;
+  /** tyre marks laid this race (cleared by makeRace) */
+  private skids!: SkidMarks;
   private tvDofOn = false;
   private debris!: Debris;
   /** seconds since the player's car was destroyed (−1 = still racing) */
@@ -99,6 +119,24 @@ export class Game {
   private replayStart = 0;
   private replayEnd = 0;
   private replayShot = -1;
+  // ---- watching: a simulated race ('spectate') and the full-race replay
+  /** this session is a simulated race (all cars on AI; never counts for the career) */
+  private spectating = false;
+  private director = new Director();
+  private directorOn = true;
+  private broadcast!: Broadcast;
+  /** the car the cameras follow */
+  private focusId = 0;
+  private simSpeed = 1;
+  private replayPlaying = true;
+  private replaySpeed = 1;
+  /** the rig whose driver is hidden for the halo POV */
+  private povRig: CarRig | null = null;
+  private field: FieldCar[] = [];
+  /** replay time the banners have announced up to */
+  private announcedT = 0;
+  private specPitLap = -1;
+  private specFinish = -1;
   private replayBadge: HTMLDivElement;
   private replayBar: HTMLElement;
   private flash = new Flashback();
@@ -107,6 +145,9 @@ export class Game {
   private fbSat = 1;
   private fbBadge: HTMLDivElement;
   private fbBar: HTMLElement;
+  private fbLabel: HTMLElement | null = null;
+  /** R was pressed again during this flashback (stops the automatic rewind) */
+  private fbJumped = false;
   flashbacksUsed = 0;
   private prevCamPos = new THREE.Vector3();
   private fpsAvg = 60;
@@ -128,11 +169,13 @@ export class Game {
   private rigTeam = new Map<Entry, string>();
   /** the garage (menu) camera: framing per hub tab, eased */
   private hubTab: HubTab = 'race';
-  private garageCam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), init: false };
+  private garageCam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), vl: new THREE.Vector3(), init: false, th: 0, r: 0, y: 0, fov: 38, vth: 0, vr: 0, vy: 0, vfov: 0 };
   private garageLights = new THREE.Group();
   private lastReward: import('../career/Career.ts').RaceReward | null = null;
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
+    // (know every texture / render target on the GPU, so a circuit switch can free all of the old one's)
+    trackGpuUploads();
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
     this.hud = new HUD(uiRoot);
@@ -143,16 +186,17 @@ export class Game {
     this.replayBar = this.replayBadge.querySelector('i')!;
     this.fbBadge = document.createElement('div');
     this.fbBadge.className = 'replay-badge flashback';
-    this.fbBadge.innerHTML = '<span class="rdot"></span><b>Flashback</b><span class="rtrack"><i></i></span><span class="rskip">← → scrub · Enter resume · Esc cancel</span>';
+    this.fbBadge.innerHTML = '<span class="rdot"></span><b>Flashback</b><span class="rtrack"><i></i></span><span class="rskip">R back 3 s · ← → scrub · Enter resume · Esc cancel</span>';
     uiRoot.appendChild(this.fbBadge);
     this.fbBar = this.fbBadge.querySelector('i')!;
+    this.fbLabel = this.fbBadge.querySelector('b');
     this.menu = new Menu(uiRoot, {
       onSetupChange: (s) => this.applySetupPreview(s),
       forecast: () => this.forecastLabel(),
       onStart: (mode, s) => this.startRace(mode, s),
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.resume(),
-      onRestart: () => this.startRace(this.mode, this.menu.setup),
+      onRestart: () => (this.spectating ? this.startSpectate(this.menu.setup) : this.startRace(this.mode, this.menu.setup)),
       onQuit: () => this.toMenu(),
       onResetCar: () => {
         this.resume();
@@ -166,17 +210,46 @@ export class Game {
       },
       onFocusPart: (p) => (this.focusPart = p),
       onPlayHighlight: (id) => this.garage?.playHighlight(id),
+      nowPlaying: () => this.garage?.current?.id ?? null,
       onCarChange: () => this.refreshPlayerRig(),
-      onTravel: () => this.travel(),
+      onTravel: (id) => void this.travel(id),
+      onSpectate: (s) => this.startSpectate(s),
     }, this.career);
+    this.broadcast = new Broadcast(uiRoot, {
+      onCamera: (d) => this.bcCamera(d),
+      onCar: (d) => this.bcCar(d),
+      onCarAt: (p) => this.bcCarAt(p),
+      onDirector: () => this.bcDirector(),
+      onSpeed: (d) => this.bcSpeed(d),
+      onExit: () => (this.state === 'replay' ? this.endReplay() : this.state === 'spectate' ? this.pause() : undefined),
+      onTogglePlay: () => {
+        if (this.replayT >= this.replayEnd - 0.05) this.replayT = this.replayStart;
+        this.replayPlaying = !this.replayPlaying;
+      },
+      onSeek: (t) => this.replaySeek(t),
+      onSkip: (d) => this.replaySeek(this.replayT + d),
+      onEvent: (d) => {
+        const e = this.replay.nextEvent(this.replayT + (d > 0 ? 3 : -3), d);
+        if (e) {
+          this.replaySeek(e.t - 3);
+          this.focusId = e.car;
+          if (this.directorOn) this.director.reset(e.car);
+        }
+      },
+    });
     addEventListener('resize', () => this.gfx.resize());
+    // browsers only allow audio after a gesture: the first key / click (even during loading)
+    // starts it — the menu music included. Later gestures just make sure it is still running.
+    this.audio.setVolume(this.menu.settings.volume);
+    this.audio.setMusicVolume(this.menu.settings.music);
     const unlock = () => {
-      if (this.audioReady) return;
+      if (this.audioReady) return this.audio.wake();
       this.audio
         .init()
         .then(() => {
           this.audioReady = true;
           this.audio.setVolume(this.menu.settings.volume);
+          this.audio.setMusicVolume(this.menu.settings.music);
         })
         .catch(() => {});
     };
@@ -194,6 +267,7 @@ export class Game {
 
   async boot(progress: (f: number, step: string) => void) {
     const tick = () => new Promise((r) => setTimeout(r, 0));
+    const t0 = performance.now();
     progress(0.02, 'Loading fonts');
     try {
       await Promise.all([document.fonts.load('700 20px "Titillium Web"'), document.fonts.load('900 20px "Titillium Web"'), document.fonts.load('600 20px "Titillium Web"')]);
@@ -203,39 +277,14 @@ export class Game {
     this.applySettings(this.menu.settings);
     this.rollWeather(this.menu.setup);
 
-    progress(0.08, 'Surveying the circuit');
-    await tick();
+    // the people (a network load) come in while the circuit is being surveyed
+    const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     // ?track=<id> (dev/demo links) overrides the saved choice
     const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
-    this.track = new Track(CIRCUITS.find((c) => c.id === want) ?? MONZA);
-    setEvent(this.track.def);
-    this.menu.setup.track = this.track.def.id;
-
-    progress(0.22, 'Laying asphalt, kerbs and barriers');
-    await tick();
-    this.trackside = buildTrackside(this.track, this.gfx);
-    this.scene.add(this.trackside.group);
-
-    progress(0.36, 'Opening the pit lane');
-    await tick();
-    this.pits = buildPitComplex(this.track, this.gfx);
-    this.scene.add(this.pits.group);
-
-    progress(0.38, 'Getting the people in');
-    await loadPeople().catch((e) => console.warn('people failed to load', e));
-
-    progress(0.42, 'Growing the park');
-    await tick();
-    const w0 = new Weather(this.plan).state;
-    applyWeatherUniforms(w0);
-    this.env = createEnvironment(this.track, this.gfx, this.scene, w0);
-    this.scene.add(this.env.group);
-    this.debris = new Debris(this.track, (x, z) => this.env.heightAt(x, z));
-    this.scene.add(this.debris.group);
-    this.carFx = new CarEffects(this.particles, this.debris);
-    this.scene.add(this.carFx.fireLight);
-    this.carFx.onImpact = (id, imp, isPlayer) => this.onImpact(id, imp.speed, isPlayer);
-    this.carFx.onExplosion = (id, pos) => this.onExplosion(id, pos);
+    await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
+      progress(0.06 + f * 0.56, step);
+      await tick();
+    }, people);
 
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
@@ -252,37 +301,231 @@ export class Game {
         await tick();
       }
     }
+    // far cars cast a one-mesh silhouette into the shadow maps (see CarRig.shadowPass)
+    // (the player's car keeps its detailed shadow up close; the others use a middle-detail one)
+    this.gfx.onShadowPass((on) => {
+      const me = this.race?.player.entry;
+      for (const [e, rig] of this.rigs) rig.shadowPass?.(on, e === me);
+    });
     this.scene.add(this.particles.group);
-    this.particles.setLight(smokeLight(w0));
+    this.particles.setLight(smokeLight(new Weather(this.plan).state));
     this.buildGarageLights();
     this.menu.highlights = this.highlights;
     this.highlights.onChange(() => {
       if (this.state === 'menu' && this.hubTab === 'highlights') this.menu.refreshTab();
     });
     this.bindGarageInput();
-
-    this.cams = new Cameras(this.camera, this.track);
-    this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
-    this.scene.add(this.line.mesh);
-    this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
+    this.finishWorld();
 
     progress(0.9, 'Warming up shaders');
     await tick();
-    this.syncAllViews(0.016);
-    this.cams.orbit(0.016, this.playerRigPos());
-    this.gfx.renderer.compile(this.scene, this.camera);
-    this.gfx.render(0.016);
+    this.toMenu();
+    await this.warmUp();
+    this.bootMs = Math.round(performance.now() - t0);
 
     progress(1, 'Ready');
-    this.toMenu();
     const loop = (now: number) => {
       this.timer.update(now);
       const dt = Math.min(this.timer.getDelta(), 1 / 20);
-      this.frame(dt);
+      // (nothing to draw while a new circuit is being built behind the travel veil)
+      if (!this.worldBusy) {
+        this.gfx.gpuFrameBegin();
+        this.frame(dt);
+        this.gfx.gpuFrameEnd();
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
   }
+
+  // ------------------------------------------------------------------ the world (one circuit)
+
+  /** how long the boot / the last world build took (ms, per step) — dev readouts */
+  bootMs = 0;
+  worldTimes: Record<string, number> = {};
+  /** a new circuit is being built: the frame loop pauses (the travel veil covers the screen) */
+  private worldBusy = false;
+  /** Track objects are pure data and take ~0.4–0.7 s to build: one per circuit, kept */
+  private readonly trackCache = new Map<string, Track>();
+  private trackFor(def: CircuitDef): Track {
+    let t = this.trackCache.get(def.id);
+    if (!t) this.trackCache.set(def.id, (t = new Track(def)));
+    return t;
+  }
+
+  /**
+   * Everything that belongs to one circuit: the track, trackside, pit complex, sky and
+   * scenery, debris, skid marks. Built in steps; `step(f, label)` runs between them
+   * (0 … 1 progress) so a loading bar can update. The cameras, racing line and HUD map
+   * follow in finishWorld() once the cars exist.
+   */
+  private async buildWorld(def: CircuitDef, step: (f: number, label: string) => Promise<void>, people?: Promise<unknown>) {
+    const times: Record<string, number> = {};
+    let tLap = performance.now();
+    const lap = (k: string) => {
+      const n = performance.now();
+      times[k] = Math.round(n - tLap);
+      tLap = n;
+    };
+    await step(0.02, 'Surveying the circuit');
+    this.track = this.trackFor(def);
+    setEvent(this.track.def);
+    this.menu.setup.track = this.track.def.id;
+    lap('track');
+
+    await step(0.14, 'Laying asphalt, kerbs and barriers');
+    this.trackside = buildTrackside(this.track, this.gfx);
+    this.scene.add(this.trackside.group);
+    lap('trackside');
+
+    await step(0.3, 'Opening the pit lane');
+    this.pits = buildPitComplex(this.track, this.gfx);
+    this.scene.add(this.pits.group);
+    lap('pits');
+
+    if (people) {
+      await step(0.36, 'Getting the people in');
+      await people;
+      lap('people');
+    }
+    // every pit crew (people, wheels, guns, jacks) now, so nothing is built mid-race
+    this.pits.prebuild?.();
+    lap('crew');
+
+    await step(0.4, 'Growing the park');
+    const w0 = new Weather(this.plan).state;
+    applyWeatherUniforms(w0);
+    this.env = createEnvironment(this.track, this.gfx, this.scene, w0);
+    this.scene.add(this.env.group);
+    lap('environment');
+
+    await step(0.94, 'Sweeping the track');
+    this.debris = new Debris(this.track, (x, z) => this.env.heightAt(x, z));
+    this.scene.add(this.debris.group);
+    this.carFx = new CarEffects(this.particles, this.debris);
+    this.skids = new SkidMarks(this.track, this.trackside.groundLift);
+    this.scene.add(this.skids.mesh);
+    this.scene.add(this.carFx.fireLight);
+    this.carFx.onImpact = (id, imp, isPlayer) => this.onImpact(id, imp.speed, isPlayer);
+    this.carFx.onExplosion = (id, pos) => this.onExplosion(id, pos);
+    lap('fx');
+    this.worldTimes = times;
+  }
+
+  /** the circuit's cameras, racing line and HUD map (needs the cars) */
+  private finishWorld() {
+    const mode = this.cams?.mode;
+    this.cams = new Cameras(this.camera, this.track);
+    if (mode) this.cams.mode = mode;
+    this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
+    this.scene.add(this.line.mesh);
+    this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
+  }
+
+  /**
+   * Free everything the current circuit owns (GPU memory back to where it was before it was
+   * built). The cars, particles, people kit and the per-page caches are left alone.
+   */
+  private disposeWorld() {
+    const keep = collectResources([
+      this.carsGroup,
+      this.particles.group,
+      this.garageLights,
+      peopleKit(),
+      buildTreeKit(),
+      makeGroundTextures(this.gfx.maxAnisotropy),
+      noiseTexture(),
+      detailNormalTexture(),
+      sponsorTexture(),
+      teamBoardTexture(),
+      createCloudNoise(this.gfx.renderer),
+    ]);
+    this.highlights.cancel();
+    // (the garage look froze the old sun's shadows; it re-arms on the new one)
+    this.leaveGarageLook();
+    this.garage?.dispose();
+    this.garage = null;
+    this.garageRig = null;
+    this.celebration?.dispose();
+    this.celebration = null;
+    this.carFx.reset();
+    this.carFx.fireLight.removeFromParent();
+    this.particles.clear();
+    disposeTree(this.debris.group, keep);
+    this.skids.dispose();
+    this.skids.mesh.removeFromParent();
+    disposeTree(this.line.mesh, keep);
+    this.trackside.ssr?.dispose();
+    disposeTree(this.trackside.group, keep);
+    this.pits.dispose?.();
+    disposeTree(this.pits.group, keep);
+    this.env.dispose(keep);
+    // then whatever the old world still has on the GPU that no walk could see (textures only a
+    // shader closure or a module-level uniform holds): everything live that nothing persistent uses
+    const persistent = collectDeep([this.scene, this.particles, this.highlights], keep);
+    collectDeep([this.gfx], persistent, 10);
+    this.lastSweep = sweepGpu(persistent);
+  }
+  /** what the last world switch's GPU sweep freed (dev readout) */
+  lastSweep: { targets: number; textures: number; names?: string[] } = { targets: 0, textures: 0 };
+
+  /**
+   * Compile the shader variants of every lighting set-up up front (menu garage, race, podium).
+   * All three are queued at once and nothing waits on them: with KHR_parallel_shader_compile the
+   * driver builds them on its own threads while the menu is up, so the first race frame, the
+   * first podium frame and the first fast lap (speed blur) find their programs ready.
+   */
+  private async warmUp() {
+    const r = this.gfx.renderer;
+    const warm: number[] = [];
+    let t = performance.now();
+    const lap = () => {
+      warm.push(Math.round(performance.now() - t));
+      t = performance.now();
+    };
+    const menu = this.state === 'menu';
+    // the pit crews are hidden until the camera nears them: show them all for the compile + first render
+    this.pits.warm?.(true);
+    // the scene is only ever drawn into the post chain's linear targets (Renderer.render → composer),
+    // never straight to the canvas: compile for a bound target, or the programs built here (sRGB
+    // output) aren't the ones the race uses and everything recompiles mid-race
+    const linear = new THREE.WebGLRenderTarget(1, 1);
+    const prevTarget = r.getRenderTarget();
+    r.setRenderTarget(linear);
+    const compileLinear = () => r.compile(this.scene, this.camera);
+    // the menu: the garage and its work lights
+    this.garageFrame(0.016);
+    this.garageLights.visible = true;
+    if (this.garage) this.garage.group.visible = true;
+    compileLinear();
+    // racing: sun and sky only
+    this.garageLights.visible = false;
+    if (this.garage) this.garage.group.visible = false;
+    compileLinear();
+    // the podium adds a spot light
+    const spot = new THREE.SpotLight(0xffffff, 0);
+    this.scene.add(spot);
+    compileLinear();
+    spot.removeFromParent();
+    spot.dispose();
+    r.setRenderTarget(prevTarget);
+    linear.dispose();
+    // one real frame in race lighting: the shadow-map depth programs (light counts are part of their
+    // key, so the menu's garage-lit frame doesn't build them) and the first uploads
+    this.gfx.render(0.016);
+    lap();
+    this.garageLights.visible = menu;
+    if (this.garage) this.garage.group.visible = menu;
+    await new Promise((res) => setTimeout(res, 0));
+    // the post passes that only switch on at speed / in the rain / on the TV cameras; this first
+    // full render also uploads the new world's textures
+    this.gfx.warmPasses();
+    this.gfx.render(0.016);
+    this.pits.warm?.(false);
+    lap();
+    this.warmTimes = warm;
+  }
+  warmTimes: number[] = [];
 
   // ------------------------------------------------------------------ states
 
@@ -292,7 +535,9 @@ export class Game {
     this.race = new Race(this.track, {
       mode,
       laps: setup.laps,
-      difficulty: DIFFICULTY[setup.difficulty].value,
+      difficulty: aiLevel(setup, this.career).value,
+      dynamicAI: aiLevel(setup, this.career).dynamic,
+      trackLimits: setup.trackLimits,
       playerEntry,
       playerGrid: GRID[setup.grid].slot,
       entries: this.entries,
@@ -317,6 +562,7 @@ export class Game {
       for (const w of ['wFL', 'wFR', 'wRL', 'wRR'] as const) rig.setWheelLost(w, false);
     }
     this.carFx?.resetDamage();
+    this.skids?.clear();
     this.retireTimer = -1;
     this.driverHidden = false;
     this.particles.clear();
@@ -350,6 +596,8 @@ export class Game {
     this.stateTime = 0;
     this.quali = null;
     this.gridOrder = null;
+    this.spectating = false;
+    this.leaveBroadcast();
     this.makeRace('race', this.menu.setup);
     this.hud.show(false);
     this.menu.show('title');
@@ -357,13 +605,15 @@ export class Game {
     this.gfx.setDepthOfField(true, this.dofTarget, 5, 2.2);
     this.gfx.setSpeedBlur(0);
     this.gfx.setAberration(0);
-    if (this.audioReady) this.audio.crowd(0.35);
+    // (safe before the audio is unlocked: it remembers and applies on start)
+    this.audio.crowd(0.35);
+    this.audio.setScene('menu');
   }
 
   private applySetupPreview(s: RaceSetup) {
-    // a different circuit means a different world: rebuild it from scratch (the setup is saved)
+    // a different circuit means a different world: build it in place behind the travel veil
     if (s.track !== this.track.def.id) {
-      location.reload();
+      this.travel(s.track);
       return;
     }
     if (`${s.weather}/${s.time}` !== this.planKey) this.rollWeather(s);
@@ -374,7 +624,8 @@ export class Game {
     if (s.quality !== this.gfx.qualityLevel) this.gfx.setQuality(s.quality);
     this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6 }[s.quality];
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
-    if (this.audioReady) this.audio.setVolume(s.volume);
+    this.audio.setVolume(s.volume);
+    this.audio.setMusicVolume(s.music);
   }
 
   /** one-shot qualifying: a flying lap sets the grid against the AI's times */
@@ -388,7 +639,7 @@ export class Game {
   /** this circuit's lap relative to Monza's, from the speed profiles (AI qualifying is fitted at Monza) */
   private trackLapScale(): number {
     if (this.track.def.id === 'monza') return 1;
-    this.monzaLap ||= RacingProfile.for(new Track(MONZA), F1_SPEC).lapTime;
+    this.monzaLap ||= RacingProfile.for(this.trackFor(MONZA), F1_SPEC).lapTime;
     return this.race.profile.lapTime / this.monzaLap;
   }
   private monzaLap = 0;
@@ -397,7 +648,7 @@ export class Game {
     const setup = this.quali!.setup;
     this.quali = null;
     const player = this.race.player.entry;
-    const diff = DIFFICULTY[setup.difficulty].value;
+    const diff = aiLevel(setup, this.career).value;
     const wf = this.race.conditionsLapFactor();
     const times = this.entries.map((e) => ({ entry: e, time: e === player ? (valid ? time : Infinity) : aiQualifyingTime(e, diff, wf, this.trackLapScale()) }));
     times.sort((a, b) => a.time - b.time);
@@ -407,6 +658,7 @@ export class Game {
     this.autopilot = new AIDriver(0.7, 0.2);
     this.autopilot.startFrom(this.race.player.car, this.track);
     this.hud.show(false);
+    this.audio.setScene('results');
     const pole = times[0].time;
     this.menu.showQualifying(
       times.map((t, i) => ({ pos: i + 1, entry: t.entry, isPlayer: t.entry === player, time: t.time, gap: t.time - pole })),
@@ -430,6 +682,8 @@ export class Game {
     }
     this.mode = qualifying ? 'race' : mode;
     this.recorded = false;
+    this.spectating = false;
+    this.leaveBroadcast();
     this.highlights.cancel();
     this.lastPos = 0;
     this.celMoment = false;
@@ -452,28 +706,55 @@ export class Game {
       const rec = this.loadRecord();
       this.hud.setHint(`Flying lap${isFinite(rec) ? ` · record ${fmtTime(rec)}` : ''} · <kbd>Space</kbd> DRS · <kbd>Shift</kbd> ERS`);
     }
-    if (this.audioReady) this.audio.crowd(mode === 'race' ? 0.8 : 0.3);
+    // a new session always leaves the audio running, un-muffled, at the set volume
+    // (a restart from the pause menu used to leave the context suspended: silent second race)
+    this.audio.resetSession();
+    this.audioPos = 0;
+    this.audio.crowd(mode === 'race' ? 0.8 : 0.3);
+    this.audio.setScene('race');
   }
 
   private pause() {
-    if (this.state !== 'race' && this.state !== 'intro') return;
+    if (this.state !== 'race' && this.state !== 'intro' && this.state !== 'spectate') return;
+    if (this.state === 'spectate') this.broadcast.show(null);
     this.state = 'paused';
     this.menu.show('pause');
     this.input.releaseAll();
-    if (this.audioReady) this.audio.suspend();
+    // muffle the world behind the menu (never suspend: menu ticks must still play, and a
+    // restart / quit from here must not inherit a stopped context)
+    this.audio.setScene('paused');
   }
 
   private resume() {
     this.menu.show('none');
-    this.state = this.race.phase === 'grid' ? 'intro' : 'race';
-    if (this.audioReady) this.audio.resume();
+    this.state = this.spectating ? 'spectate' : this.race.phase === 'grid' ? 'intro' : 'race';
+    if (this.spectating) this.broadcast.show('live');
+    this.audio.setScene('race');
   }
 
   /** the podium: top three celebrating, then the results */
   private startCelebration() {
+    if (this.celebrationPending) return;
     const top = this.race.classification().slice(0, 3).map((r) => r.entry);
     if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
-    this.celebration = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
+    const cel = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
+    // (perf) its shaders — the crowd, the stage, the podium lighting — compile on the driver's threads
+    // while the race keeps running for a few more frames; then the ceremony starts without a stall
+    this.celebrationPending = true;
+    const race = this.race;
+    const go = () => {
+      this.celebrationPending = false;
+      if (this.race !== race || this.celebration) {
+        cel.dispose();
+        return;
+      }
+      this.beginCelebration(cel, top);
+    };
+    this.gfx.renderer.compileAsync(cel.group, this.camera, this.scene).then(go, go);
+  }
+  private celebrationPending = false;
+  private beginCelebration(cel: Celebration, top: Entry[]) {
+    this.celebration = cel;
     this.scene.add(this.celebration.group);
     // the top three are parked in parc fermé below the podium (drivers out); the rest are in the garages
     for (const rig of this.rigs.values()) rig.root.visible = false;
@@ -499,7 +780,9 @@ export class Game {
     this.state = 'celebration';
     this.stateTime = 0;
     this.hud.show(false);
-    if (this.audioReady) this.audio.crowd(1);
+    this.audio.crowd(1);
+    this.audio.setScene('celebration');
+    this.audio.crowdReact('cheer', 1);
   }
   private endCelebration() {
     this.celebration?.dispose();
@@ -518,9 +801,13 @@ export class Game {
 
   private showResults() {
     this.state = 'results';
+    this.audio.setScene('results');
     const rows = this.race.classification();
     const p = this.race.player;
-    const title = p.retired ? 'Retired · DNF' : p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
+    const winner = rows[0]?.entry.driver;
+    const title = this.spectating
+      ? `${winner ? `${winner.first} ${winner.last} wins` : 'Race result'}`
+      : p.retired ? 'Retired · DNF' : p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
     const laps = this.race.opts.laps;
     const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${this.track.def.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
@@ -532,9 +819,12 @@ export class Game {
       this.recorded = true;
       const me = rows.find((r) => r.isPlayer)!;
       reward = this.career.recordRace(this.track.def.id, me.pos, !!me.dnf, me.fastest && me.pos <= 10, TEAMS.indexOf(me.entry.team), rows.length);
+      // Dynamic AI: the rating learns from this race (lap pace and result)
+      if (this.race.opts.dynamicAI) this.career.setAiSkill(this.race.rateAiSkill());
       this.lastReward = reward;
     } else if (!this.race.isTimeTrial) reward = this.lastReward;
-    this.menu.showResults(rows, title, lede, () => this.startRace(this.mode, this.menu.setup), () => this.toMenu(), () => this.startReplay(), reward);
+    const again = () => (this.spectating ? this.startSpectate(this.menu.setup) : this.startRace(this.mode, this.menu.setup));
+    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), reward);
   }
 
   // ------------------------------------------------------------------ frame
@@ -558,7 +848,9 @@ export class Game {
     const race = this.race;
 
     this.garageLights.visible = this.state === 'menu';
-    if (this.garage) this.garage.group.visible = this.state === 'menu';
+    suppressFloods(this.state === 'menu');
+    if (this.garage) this.garage.setActive(this.state === 'menu');
+    if (this.state !== 'menu') this.leaveGarageLook();
     if (this.state !== 'menu') this.updateHotspots();
     if (this.state !== 'menu') {
       this.pits.clearView(null);
@@ -672,33 +964,29 @@ export class Game {
       this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
       this.effects(dt);
     } else if (this.state === 'flashback') {
-      // scrub with left/right (hold), confirm or cancel
-      const auto = this.stateTime < 0.7 ? -3.5 : 0;
+      // each R press jumps back further, left/right scrub (hold), Enter resumes, Esc cancels
+      const auto = this.stateTime < 0.7 && !this.fbJumped ? -3.5 : 0;
       this.fbT += (auto + -st.steer * 4) * dt;
+      if (st.reset) {
+        this.fbT -= 3;
+        this.fbJumped = true;
+      }
       const oldest = Math.max(this.flash.oldest, this.replay.startTime);
       this.fbT = Math.max(oldest, Math.min(this.fbEntry, this.fbT));
+      if (this.fbLabel) this.fbLabel.textContent = `Flashback −${Math.max(0, this.fbEntry - this.fbT).toFixed(1)} s`;
       this.replay.apply(this.fbT, this.track.length);
       this.syncAllViews(dt, this.replay.ghosts);
       this.cams.update(dt, this.replay.ghosts[race.player.id], this.rigs.get(race.player.entry)!, this.track);
       this.fbBar.style.width = `${((this.fbT - oldest) / Math.max(0.1, this.fbEntry - oldest)) * 100}%`;
-      if (this.input.nav.accept || (st.reset && this.stateTime > 0.2)) this.endFlashback(true);
+      if (this.input.nav.accept) this.endFlashback(true);
       else if (this.input.nav.back) this.endFlashback(false);
     } else if (this.state === 'replay') {
-      this.replayT += dt;
-      const shot = Math.floor(this.stateTime / 4.5);
-      if (shot !== this.replayShot) {
-        this.replayShot = shot;
-        this.cams.set(REPLAY_SHOTS[shot % REPLAY_SHOTS.length]);
-      }
-      this.replay.apply(this.replayT, this.track.length);
-      this.syncAllViews(dt, this.replay.ghosts);
-      this.cams.update(dt, this.replay.ghosts[race.player.id], this.rigs.get(race.player.entry)!, this.track);
-      const span = Math.max(1, this.replayEnd - this.replayStart);
-      this.replayBar.style.width = `${Math.min(100, ((this.replayT - this.replayStart) / span) * 100)}%`;
-      if (this.replayT >= this.replayEnd || st.pause || this.input.nav.accept || this.input.nav.back) this.endReplay();
+      this.replayFrame(dt);
+    } else if (this.state === 'spectate') {
+      this.spectateFrame(dt);
     }
-    // the TV camera has a real lens: focus pulled onto the car, shallow on the long end
-    const tvView = this.cams.mode === 'tv' && (this.state === 'race' || this.state === 'results' || this.state === 'replay');
+    // the trackside cameras have a real lens: focus pulled onto the car, shallow on the long end
+    const tvView = this.cams.lensDof && (this.state === 'race' || this.state === 'results' || this.state === 'replay' || this.state === 'spectate');
     if (tvView) {
       this.gfx.setDepthOfField(true, this.cams.tvFocus, this.cams.tvRange, this.cams.tvDof);
       this.tvDofOn = true;
@@ -832,7 +1120,7 @@ export class Game {
     const line = this.engineer.update(this.lastDt, this.race, ev);
     if (line) {
       this.hud.radio(line, uiColor(this.race.player.entry.team));
-      if (this.audioReady) this.audio.ui('select');
+      if (this.audioReady) this.audio.radio();
     }
     this.watchMoments(ev);
     for (const e of ev) {
@@ -851,7 +1139,10 @@ export class Game {
         }
       }
       if (!this.audioReady) continue;
-      if (e.kind === 'lights-out') this.audio.startBeep(true);
+      if (e.kind === 'lights-out') {
+        this.audio.startBeep(true);
+        this.audio.crowdReact('cheer', 0.9);
+      }
       if (e.kind === 'retired' && e.car === this.race.player.id) this.audio.ui('back');
     }
     // a beep for each light
@@ -889,6 +1180,7 @@ export class Game {
     this.stateTime = 0;
     this.fbEntry = this.race.time;
     this.fbT = this.race.time;
+    this.fbJumped = false;
     this.fbSat = this.gfx.grade.uniforms.get('saturation')!.value as number;
     this.gfx.grade.set({ saturation: 0.25 });
     this.gfx.setSpeedBlur(0);
@@ -896,7 +1188,7 @@ export class Game {
     this.particles.clear();
     this.fbBadge.classList.add('on');
     this.input.releaseAll();
-    if (this.audioReady) this.audio.suspend();
+    this.audio.setScene('flashback');
   }
 
   private endFlashback(apply: boolean) {
@@ -906,6 +1198,7 @@ export class Game {
       this.replay.truncate(t);
       this.control.reset();
       this.carFx.reset();
+      this.skids.breakAll();
       this.flashbacksUsed++;
       this.hud.flash('Flashback', `${this.flashbacksUsed} used`, '', 1.4);
     }
@@ -915,31 +1208,416 @@ export class Game {
     this.stateTime = 5;
     this.input.releaseAll();
     this.syncAllViews(0.016);
-    if (this.audioReady) this.audio.resume();
+    this.audio.setScene('race');
   }
+
+  // ------------------------------------------------------------------ watching: simulated race, broadcast, full replay
+
+  /** a simulated race: every car (the player's too) on the AI, the TV director on the cameras */
+  private startSpectate(setup: RaceSetup) {
+    // a simulated qualifying sets the grid (nobody has to drive a lap)
+    const diff = aiLevel(setup, this.career).value;
+    const times = this.entries.map((e) => ({ e, t: aiQualifyingTime(e, diff, 1, 1) })).sort((a, b) => a.t - b.t);
+    this.gridOrder = times.map((x) => x.e);
+    this.startRace('race', setup);
+    this.gridOrder = null;
+    // (startRace cleared these)
+    this.spectating = true;
+    this.recorded = true; // never counts for the career
+    this.celMoment = true; // and makes no highlights
+    const race = this.race;
+    const p = race.player;
+    this.autopilot = new AIDriver(aiPace(p.entry, race.opts.difficulty), p.entry.driver.aggression);
+    this.autopilot.startFrom(p.car, this.track);
+    p.car.allowReverse = false;
+    p.car.assists = { traction: 'full', abs: true, stability: true, autoGear: true };
+    race.playerDrsAuto = true;
+    this.specPitLap = setup.laps >= 8 ? Math.max(2, Math.round(setup.laps * (0.4 + Math.random() * 0.2))) : -1;
+    this.specFinish = -1;
+    this.state = 'spectate';
+    this.stateTime = 0;
+    this.simSpeed = 1;
+    this.directorOn = true;
+    this.focusId = race.cars.find((c) => c.position === 1)?.id ?? p.id;
+    this.director.reset(this.focusId);
+    this.replay.fresh.length = 0;
+    this.cams.set('gantry');
+    this.gfx.setDepthOfField(false);
+    this.enterBroadcast('live');
+  }
+
+  private enterBroadcast(mode: 'live' | 'replay') {
+    this.broadcast.show(mode);
+    this.hud.show(true);
+    this.hud.setBroadcast(true, mode === 'replay');
+    this.hud.setHint(null);
+    this.gfx.setSpeedBlur(0);
+    this.gfx.setAberration(0);
+    (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(0);
+  }
+
+  private leaveBroadcast() {
+    this.broadcast?.show(null);
+    this.hud.setBroadcast(false);
+    if (this.povRig) {
+      this.povRig.setDriverVisible(true);
+      this.povRig = null;
+    }
+  }
+
+  /** the AI-driven player car's strategy: one planned stop, weather calls, a new nose */
+  private spectatePits() {
+    const race = this.race;
+    const p = race.player;
+    if (p.pit.phase !== 'none' || race.playerPitRequest || p.finished || p.retired || race.phase !== 'racing' || p.laps < 0) return;
+    const wrongTyre = COMPOUNDS[p.compound].type !== race.conditionsType();
+    const planned = this.specPitLap >= 0 && p.stops === 0 && p.laps + 1 >= this.specPitLap;
+    const lapsLeft = race.opts.laps - p.laps;
+    if ((planned || wrongTyre || p.car.wingDamage > 0.45) && lapsLeft > 1) race.playerPitRequest = true;
+  }
+
+  private spectateFrame(dt: number) {
+    const race = this.race;
+    // (the keyboard goes through the broadcast overlay; a pad's start button pauses)
+    if (this.input.state.pause) return this.pause();
+    if (race.phase === 'grid' && this.stateTime > 3.5) race.startLights();
+    // faster than real time: more fixed steps, never a bigger one
+    const steps = race.phase === 'grid' || race.phase === 'lights' ? 1 : this.simSpeed;
+    for (let k = 0; k < steps; k++) {
+      this.spectatePits();
+      this.driveInput(dt);
+      race.update(dt);
+      this.replay.record(dt, race);
+      if (this.audioReady) for (const e of race.events) if (e.kind === 'lights-out') this.audio.startBeep(true);
+    }
+    const lit = race.lightsLit;
+    if (lit !== this.lastLit) {
+      if (lit > 0 && this.audioReady) this.audio.startBeep(false);
+      this.lastLit = lit;
+    }
+    const ev = this.replay.events;
+    const fresh = this.replay.fresh;
+    for (let i = 0; i < fresh.length; i++) this.announce(fresh[i]);
+    fresh.length = 0;
+    this.syncAllViews(dt);
+    const simDt = dt * steps;
+    if (this.directorOn) {
+      this.director.update(simDt, race.time, race.raceTime, this.fieldLive(), ev, 0, this.cams, this.track, race.player.id);
+      if (this.director.cutNow) this.applyDirector();
+    }
+    const fc = race.cars[this.focusId];
+    this.cams.update(simDt, fc.car, this.rigs.get(fc.entry)!, this.track);
+    this.povUpdate();
+    this.hud.update(dt, race);
+    this.hud.setFocus(this.focusId);
+    this.hud.setBroadcast(true, false, this.broadcast.clean);
+    this.effects(dt);
+    const f = this.follow;
+    f.entry = fc.entry;
+    f.position = fc.position;
+    f.speed = fc.car.vx;
+    f.gapAhead = fc.gapAhead;
+    f.status = fc.retired ? 'OUT' : fc.pit.phase !== 'none' ? 'PIT' : fc.finished ? 'FINISHED' : '';
+    f.caption = this.directorOn && this.director.focus === this.focusId ? this.director.caption : '';
+    this.broadcast.setFollow(f);
+    this.broadcast.setShot(CAMERA_LABEL[this.cams.mode], this.cams.where, this.directorOn, this.simSpeed);
+    // the flag: once everyone still running is home (or half a minute after the winner), the podium
+    if (race.phase === 'finished') {
+      if (this.specFinish < 0) this.specFinish = 0;
+      this.specFinish += simDt;
+      const running = race.cars.some((c) => !c.finished && !c.retired);
+      if ((!running && this.specFinish > 6) || this.specFinish > 30) {
+        this.leaveBroadcast();
+        this.startCelebration();
+      }
+    }
+  }
+  private readonly follow = { entry: null as unknown as Entry, position: 1, speed: 0, caption: '', gapAhead: 0, status: '' as '' | 'PIT' | 'OUT' | 'FINISHED' };
+
+  private fieldArr(): FieldCar[] {
+    const n = this.race.cars.length;
+    while (this.field.length < n) this.field.push({ id: this.field.length, s: 0, speed: 0, position: 1, pit: false, out: false, finished: false });
+    this.field.length = n;
+    return this.field;
+  }
+
+  private fieldLive(): FieldCar[] {
+    const f = this.fieldArr();
+    for (const c of this.race.cars) {
+      const o = f[c.id];
+      o.id = c.id;
+      o.s = c.car.s;
+      o.speed = Math.max(0, c.car.vx);
+      o.position = c.position;
+      o.pit = c.pit.phase !== 'none';
+      o.out = c.retired || c.removed;
+      o.finished = c.finished;
+    }
+    return f;
+  }
+
+  private fieldReplay(): FieldCar[] {
+    const f = this.fieldArr();
+    const R = this.replay;
+    for (let k = 0; k < f.length; k++) {
+      const o = f[k];
+      const fl = R.flags[k];
+      o.id = k;
+      o.s = R.ghosts[k].s;
+      o.speed = Math.max(0, R.ghosts[k].vx);
+      o.position = R.pos[k] || k + 1;
+      o.pit = (fl & RF.pit) !== 0;
+      o.out = (fl & (RF.retired | RF.removed)) !== 0;
+      o.finished = (fl & RF.finished) !== 0;
+    }
+    return f;
+  }
+
+  private applyDirector() {
+    this.focusId = this.director.focus;
+    this.cams.set(this.director.mode);
+  }
+
+  /** the halo POV hides the followed car's driver (his helmet is where the lens is) */
+  private povUpdate() {
+    const want = (this.state === 'spectate' || this.state === 'replay') && this.cams.mode === 'cockpit' ? (this.rigs.get(this.race.cars[this.focusId].entry) ?? null) : null;
+    if (want === this.povRig) return;
+    this.povRig?.setDriverVisible(true);
+    want?.setDriverVisible(false);
+    this.povRig = want;
+  }
+
+  /** a line on the banner for the moments (live, and as a replay plays through them) */
+  private announce(e: ReplayEvent) {
+    const cars = this.race.cars;
+    const code = (id: number) => cars[id]?.entry.driver.code ?? '';
+    const A = code(e.car);
+    const B = e.other >= 0 ? code(e.other) : '';
+    const hud = this.hud;
+    switch (e.kind) {
+      case 'start':
+        hud.flash('Lights out', 'and away we go', 'red', 1.8);
+        break;
+      case 'overtake':
+        if (e.value <= 10 || e.car === this.focusId || e.other === this.focusId) hud.flash(`${A} passes ${B}`, `for P${e.value}`, 'green', 2.4);
+        break;
+      case 'lead':
+        hud.flash('New leader', `${A} passes ${B}`, 'green', 3);
+        break;
+      case 'crash':
+        hud.flash('Incident', `${A} · ${cars[e.car]?.entry.driver.last ?? ''}`, 'red', 2.6);
+        break;
+      case 'spin':
+        hud.flash(`${A} spins`, cars[e.car]?.entry.driver.last ?? '', '', 2);
+        break;
+      case 'retired':
+        hud.flash(`${A} out`, `${cars[e.car]?.entry.driver.last ?? ''} · ${e.value ? 'car on fire' : 'crash damage'}`, 'red', 3);
+        break;
+      case 'fastest':
+        hud.flash('Fastest lap', `${A}  ${fmtTime(e.value)}`, 'purple', 3);
+        break;
+      case 'pit':
+        if (e.car === this.focusId) hud.flash('Pit stop', describeEvent(e, code), '', 2);
+        break;
+      case 'finish':
+        if (e.value === 1) hud.flash('Chequered flag', `${A} wins`, '', 4);
+        break;
+    }
+  }
+
+  // ---- broadcast controls (spectate and replay)
+
+  private bcCamera(d: 1 | -1) {
+    const i = ALL_CAMERAS.indexOf(this.cams.mode);
+    this.cams.set(ALL_CAMERAS[(i + d + ALL_CAMERAS.length) % ALL_CAMERAS.length]);
+    this.directorOn = false;
+    if (this.audioReady) this.audio.ui('move');
+  }
+
+  /** position of car id now (live or in the replay) */
+  private posOf(id: number): number {
+    return this.state === 'replay' ? this.replay.pos[id] || id + 1 : this.race.cars[id].position;
+  }
+
+  private bcCar(d: 1 | -1) {
+    const n = this.race.cars.length;
+    let p = this.posOf(this.focusId);
+    for (let k = 0; k < n; k++) {
+      p = ((p - 1 + d + n) % n) + 1;
+      const c = this.race.cars.find((x) => this.posOf(x.id) === p);
+      if (c && !(this.state === 'replay' ? this.replay.flags[c.id] & RF.removed : c.removed)) {
+        this.focusId = c.id;
+        break;
+      }
+    }
+    this.directorOn = false;
+    if (this.audioReady) this.audio.ui('move');
+  }
+
+  private bcCarAt(pos: number) {
+    const c = this.race.cars.find((x) => this.posOf(x.id) === pos);
+    if (!c) return;
+    this.focusId = c.id;
+    this.directorOn = false;
+    if (this.audioReady) this.audio.ui('move');
+  }
+
+  private bcDirector() {
+    this.directorOn = !this.directorOn;
+    if (this.directorOn) this.director.reset(this.focusId);
+    if (this.audioReady) this.audio.ui('select');
+  }
+
+  private bcSpeed(d: 1 | -1) {
+    if (this.state === 'replay') {
+      const i = REPLAY_SPEEDS.indexOf(this.replaySpeed);
+      this.replaySpeed = REPLAY_SPEEDS[Math.max(0, Math.min(REPLAY_SPEEDS.length - 1, (i < 0 ? 2 : i) + d))];
+      this.replayPlaying = true;
+    } else {
+      const i = SIM_SPEEDS.indexOf(this.simSpeed);
+      this.simSpeed = SIM_SPEEDS[Math.max(0, Math.min(SIM_SPEEDS.length - 1, (i < 0 ? 0 : i) + d))];
+    }
+    if (this.audioReady) this.audio.ui('move');
+  }
+
+  // ---- the full-race replay
 
   private startReplay() {
     if (this.replay.duration < 3) return;
     this.state = 'replay';
+    this.audio.resetSession();
+    this.audio.setScene('race');
     this.stateTime = 0;
-    this.replayShot = -1;
-    this.replayEnd = this.race.time - 0.1;
-    this.replayStart = Math.max(this.replay.startTime, this.replayEnd - 45);
-    this.replayT = this.replayStart;
+    this.replayStart = this.replay.startTime;
+    this.replayEnd = this.replay.endTime;
+    // from just before the lights go out
+    const start = this.replay.events.find((e) => e.kind === 'start');
+    this.replayT = start ? Math.max(this.replayStart, start.t - 5) : this.replayStart;
+    this.announcedT = this.replayT;
+    this.replayPlaying = true;
+    this.replaySpeed = 1;
     this.menu.show('none');
-    this.hud.show(false);
     this.gfx.setDepthOfField(false);
-    this.gfx.setSpeedBlur(0);
-    this.gfx.setAberration(0);
     this.particles.clear();
-    this.replayBadge.classList.add('on');
+    this.enterBroadcast('replay');
+    // the replay has the race's sound (the results screen muffles it)
+    this.audio.setScene('race');
+    const cars = this.race.cars;
+    this.broadcast.buildTimeline(this.replayStart, this.replayEnd, this.replay.lapMarks, this.replay.events, (id) => cars[id]?.entry.driver.code ?? '');
+    this.directorOn = true;
+    this.focusId = this.race.player.id;
+    this.director.reset(this.focusId);
+    this.input.releaseAll();
+  }
+
+  private replaySeek(t: number) {
+    this.replayT = Math.max(this.replayStart, Math.min(this.replayEnd, t));
+    this.announcedT = this.replayT;
+    this.cams.cut();
+    this.particles.clear();
+  }
+
+  private readonly replayOut = (id: number) => (this.replay.flags[id] & RF.retired) !== 0;
+
+  private replayFrame(dt: number) {
+    const race = this.race;
+    const R = this.replay;
+    if (this.input.state.pause || this.input.nav.back) return this.endReplay();
+    const step = this.replayPlaying ? dt * this.replaySpeed : 0;
+    this.replayT = Math.min(this.replayEnd, this.replayT + step);
+    if (this.replayT >= this.replayEnd) this.replayPlaying = false;
+    R.apply(this.replayT, this.track.length);
+    // wrecks the marshals have craned away
+    for (const c of race.cars) {
+      const rig = this.rigs.get(c.entry)!;
+      const vis = (R.flags[c.id] & RF.removed) === 0;
+      if (rig.root.visible !== vis) rig.root.visible = vis;
+    }
+    this.syncAllViews(dt, R.ghosts);
+    if (this.directorOn) {
+      // a replay knows what's coming: the director gets there a few seconds early
+      this.director.update(step, this.replayT, R.raceTime, this.fieldReplay(), R.events, 3, this.cams, this.track, race.player.id);
+      if (this.director.cutNow) this.applyDirector();
+    }
+    const k = this.focusId;
+    const fc = race.cars[k];
+    this.cams.update(step, R.ghosts[k], this.rigs.get(fc.entry)!, this.track);
+    this.povUpdate();
+    const laps = race.opts.laps;
+    const lap = Math.max(1, Math.min(laps, R.leaderLap + 1));
+    let fastest = -1;
+    for (let i = 0; i < R.flags.length; i++) if (R.flags[i] & RF.fastest) fastest = i;
+    this.hud.replayFrame(dt, `Lap <b>${lap}/${laps}</b>`, R.pos, R.gap, this.replayOut, fastest);
+    this.hud.setFocus(k);
+    this.hud.setBroadcast(true, true, this.broadcast.clean);
+    // the banners for the moments as the replay plays through them
+    if (step > 0 && this.replaySpeed <= 2) {
+      for (const e of R.events) if (e.t > this.announcedT && e.t <= this.replayT) this.announce(e);
+    }
+    this.announcedT = this.replayT;
+    const f = this.follow;
+    const fl = R.flags[k];
+    const p = R.pos[k] || 1;
+    let ahead = -1;
+    for (let i = 0; i < R.pos.length; i++) if (R.pos[i] === p - 1) ahead = i;
+    f.entry = fc.entry;
+    f.position = p;
+    f.speed = R.ghosts[k].vx;
+    f.gapAhead = ahead >= 0 && R.gap[k] > 0 && R.gap[ahead] >= 0 ? R.gap[k] - R.gap[ahead] : 0;
+    f.status = fl & RF.retired ? 'OUT' : fl & RF.pit ? 'PIT' : fl & RF.finished ? 'FINISHED' : '';
+    f.caption = this.directorOn && this.director.focus === k ? this.director.caption : '';
+    this.broadcast.setFollow(f);
+    this.broadcast.setShot(CAMERA_LABEL[this.cams.mode], this.cams.where, this.directorOn, this.replaySpeed);
+    this.broadcast.setTime(this.replayT, R.raceTime, lap, laps, this.replayPlaying);
   }
 
   private endReplay() {
-    this.replayBadge.classList.remove('on');
+    this.leaveBroadcast();
+    // back to the live cars
+    const inRace = new Set(this.race.cars.map((c) => c.entry));
+    for (const c of this.race.cars) {
+      const rig = this.rigs.get(c.entry);
+      if (rig) rig.root.visible = inRace.has(c.entry) && !c.removed;
+    }
     this.cams.set('tv');
     this.input.releaseAll();
     this.showResults();
+  }
+
+  /** dev/demo hook: watch a simulated race, optionally fast-forwarded (e.g. from the console or tools/shot.mjs) */
+  debugSpectate(opts: { skip?: number; camera?: CameraMode; speed?: number; director?: boolean; focus?: number; laps?: number; weather?: WeatherChoice }) {
+    const setup = { ...this.menu.setup };
+    if (opts.laps) setup.laps = opts.laps;
+    if (opts.weather) setup.weather = opts.weather;
+    this.startSpectate(setup);
+    const skip = opts.skip ?? 0;
+    if (skip > 0) {
+      this.race.startLights();
+      const dt = 1 / 60;
+      for (let t = 0; t < skip; t += dt) {
+        this.spectatePits();
+        this.driveInput(dt);
+        this.race.update(dt);
+        this.replay.record(dt, this.race);
+      }
+      this.replay.fresh.length = 0;
+      this.stateTime = 10;
+      this.syncAllViews(dt);
+    }
+    if (opts.speed) this.simSpeed = opts.speed;
+    if (opts.focus !== undefined) this.focusId = opts.focus;
+    if (opts.director === false || opts.camera) this.directorOn = false;
+    if (opts.camera) this.cams.set(opts.camera);
+  }
+
+  /** dev/demo hook: open the full replay of the session so far at `at` seconds in */
+  debugReplay(opts: { at?: number; camera?: CameraMode; focus?: number; playing?: boolean; director?: boolean }) {
+    this.startReplay();
+    if (opts.at !== undefined) this.replaySeek(this.replayStart + opts.at);
+    if (opts.focus !== undefined) this.focusId = opts.focus;
+    if (opts.director === false || opts.camera) this.directorOn = false;
+    if (opts.camera) this.cams.set(opts.camera);
+    if (opts.playing !== undefined) this.replayPlaying = opts.playing;
   }
 
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
@@ -950,7 +1628,8 @@ export class Game {
       this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit);
     }
     const w = this.race.weatherState;
-    const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.85;
+    // (and after dark: the red tail light is what you follow down a floodlit straight)
+    const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.85 || w.time === 'night';
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
       view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight);
@@ -979,7 +1658,10 @@ export class Game {
   private onExplosion(id: number, pos: THREE.Vector3) {
     const d = pos.distanceTo(this.camera.position);
     const near = this.race.cars[id].isPlayer ? 1 : Math.min(1, 25 / (d + 10));
-    if (this.audioReady) this.audio.explosion(near);
+    if (this.audioReady) {
+      this.audio.explosion(near);
+      this.audio.crowdReact('gasp', 0.5 + 0.5 * near);
+    }
     this.cams.impulse = Math.max(this.cams.impulse, Math.min(1, 40 / (d + 20)));
   }
 
@@ -1005,37 +1687,122 @@ export class Game {
     }
   }
 
-  /** a different circuit: the world is rebuilt from the saved setup */
-  private travel() {
-    const veil = document.createElement('div');
-    veil.className = 'travel-veil';
-    const cd = CIRCUITS.find((c) => c.id === this.menu.setup.track);
-    veil.innerHTML = `<div><span>Travelling to</span><b>${cd?.name ?? ''}</b></div>`;
-    document.body.appendChild(veil);
-    requestAnimationFrame(() => veil.classList.add('on'));
-    setTimeout(() => location.reload(), 650);
+  /**
+   * A different circuit, without reloading the page: behind the travel veil the current world is
+   * disposed and the new one built in steps (the cars, audio, menu, particles and career stay).
+   * Asking again while travelling just changes the destination; the newest request wins.
+   */
+  private travel(id: string = this.menu.setup.track) {
+    this.travelTo = id;
+    if (!this.travelling) this.travelling = this.runTravel().finally(() => (this.travelling = null));
+    return this.travelling;
   }
+  private travelTo: string | null = null;
+  private travelling: Promise<void> | null = null;
+  /** dev/test hook: `await __game.travelAsync('spa')` */
+  travelAsync(id: string) {
+    return this.travel(id);
+  }
+
+  private async runTravel() {
+    const paint = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    while (this.travelTo && this.travelTo !== this.track.def.id) {
+      const def = CIRCUITS.find((c) => c.id === this.travelTo);
+      if (!def) break;
+      const t0 = performance.now();
+      const screen = this.menu.screen;
+      const veil = document.createElement('div');
+      veil.className = 'travel-veil';
+      veil.innerHTML = `<div><span>Travelling to</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step">Packing up</div></div>`;
+      const bar = veil.querySelector('.tv-bar i') as HTMLElement;
+      const step = veil.querySelector('.tv-step') as HTMLElement;
+      const set = (f: number, label: string) => {
+        bar.style.transform = `scaleX(${Math.max(0, Math.min(1, f)).toFixed(3)})`;
+        step.textContent = label;
+      };
+      document.body.appendChild(veil);
+      await paint();
+      veil.classList.add('on');
+      if (this.audioReady) this.audio.crowd(0);
+      await wait(380);
+      // the newest destination, now that the screen is covered
+      const dest = CIRCUITS.find((c) => c.id === this.travelTo) ?? def;
+      (veil.querySelector('b') as HTMLElement).textContent = dest.name;
+      this.worldBusy = true;
+      try {
+        const oldEnv = this.scene.environment;
+        set(0.04, 'Packing up');
+        await paint();
+        let tp = performance.now();
+        this.disposeWorld();
+        const tDispose = Math.round(performance.now() - tp);
+        await this.buildWorld(dest, async (f, label) => {
+          set(0.06 + f * 0.8, label);
+          await paint();
+        });
+        // the cars keep their materials: point their reflections at the new sky
+        const env = this.scene.environment;
+        if (env !== oldEnv) for (const rig of this.rigs.values()) rig.setEnvMap?.(env);
+        tp = performance.now();
+        this.finishWorld();
+        this.worldTimes.dispose = tDispose;
+        this.worldTimes.finish = Math.round(performance.now() - tp);
+        set(0.9, 'Warming up');
+        await paint();
+        tp = performance.now();
+        this.state = 'menu';
+        this.toMenu();
+        await this.warmUp();
+        this.worldTimes.warm = Math.round(performance.now() - tp);
+      } catch (e) {
+        // a half-built world can't be raced: fall back to a clean start there (the setup is saved)
+        console.error('[travel] failed, reloading', e);
+        location.reload();
+        return;
+      }
+      this.worldBusy = false;
+      if (screen !== 'title' && screen !== 'none') this.menu.show(screen);
+      set(1, 'Ready');
+      // a couple of real frames behind the veil (garage build, texture uploads), then reveal
+      await paint();
+      await paint();
+      this.travelMs = Math.round(performance.now() - t0);
+      console.info(`[shot] [travel] ${dest.id} in ${this.travelMs} ms ${JSON.stringify(this.worldTimes)}`);
+      veil.classList.remove('on');
+      setTimeout(() => veil.remove(), 600);
+    }
+    this.travelTo = null;
+  }
+  /** how long the last circuit switch took (ms) */
+  travelMs = 0;
 
   /** soft work lights over the bays: the garage ceiling blocks the sun */
   private buildGarageLights() {
     const g = this.garageLights;
     g.name = 'garage-lights';
-    const key = new THREE.SpotLight(0xfff4e8, 170, 16, 0.75, 0.6, 1.6);
+    const key = new THREE.SpotLight(0xfff4e8, 130, 16, 0.75, 0.6, 1.6);
     key.position.set(0, 4.3, 0.6);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.bias = -0.0004;
     key.shadow.camera.near = 0.5;
     key.shadow.camera.far = 8;
+    // only the garage (its props, people and the two cars) casts into the key light's
+    // shadow map: the world's big merged meshes would all intersect its frustum
+    key.shadow.camera.layers.set(GARAGE_SHADOW_LAYER);
     g.add(key, key.target);
-    for (const [x, z, i] of [[-1.6, 2.6, 26], [1.6, 2.6, 26], [-1.6, -2.4, 22], [1.6, -2.4, 22]] as const) {
-      const p = new THREE.PointLight(0xf4f1ea, i * 0.6, 9, 1.8);
-      p.position.set(x, 3.6, z);
+    // two soft fills from the ceiling strips (each light costs every lit pixel on screen)
+    for (const [z, i] of [[2.6, 22], [-2.4, 19]] as const) {
+      const p = new THREE.PointLight(0xf4f1ea, i, 10, 1.7);
+      p.position.set(0, 3.7, z);
       g.add(p);
     }
     const rim = new THREE.PointLight(0xbfd6ff, 18, 10, 1.6);
     rim.position.set(0, 1.6, -4.6);
     g.add(rim);
+    // the lights also light the car in the floor mirror
+    g.traverse((o) => o.layers.enable(GARAGE_MIRROR_LAYER));
     g.visible = false;
     this.scene.add(g);
   }
@@ -1070,11 +1837,19 @@ export class Game {
     if (!this.garage || this.garageRig !== rig) {
       this.garage?.dispose();
       rig.root.updateMatrixWorld(true);
-      this.garage = new GarageScene(peopleKit(), rig, b, player.team, player.driver, this.highlights, this.career, this.track);
+      this.garage = new GarageScene(peopleKit(), rig, b, player.team, player.driver, this.highlights, this.career, this.track, { renderer: this.gfx.renderer, shadowLayer: GARAGE_SHADOW_LAYER, reflectLayer: GARAGE_MIRROR_LAYER });
       this.garageRig = rig;
       this.scene.add(this.garage.group);
     }
-    this.garage.group.visible = true;
+    if (!rig.root.userData.garageShadow) {
+      rig.root.userData.garageShadow = true;
+      rig.root.traverse((o) => {
+        o.layers.enable(GARAGE_SHADOW_LAYER);
+        o.layers.enable(GARAGE_MIRROR_LAYER);
+      });
+    }
+    this.garage.setActive(true);
+    this.enterGarageLook();
     this.garageLights.position.copy(c);
     this.garageLights.rotation.set(0, b.yaw, 0);
     this.garageLights.updateMatrixWorld(true);
@@ -1134,25 +1909,114 @@ export class Game {
     const dirV = wantLook.clone().sub(wantPos).normalize();
     const camRight = new THREE.Vector3().crossVectors(dirV, up).normalize();
     wantLook.addScaledVector(camRight, sh.shift);
+    // the camera flies between shots on springs (eased in and out), arcing around the car
+    // rather than cutting through it: position in cylindrical coordinates about the car
     const g = this.garageCam;
+    const rel = wantPos.clone().sub(c);
+    const thW = Math.atan2(rel.x, rel.z), rW = Math.hypot(rel.x, rel.z);
     if (!g.init) {
-      g.pos.copy(wantPos);
+      Object.assign(g, { th: thW, r: rW, y: rel.y, fov: sh.fov, vth: 0, vr: 0, vy: 0, vfov: 0, init: true });
       g.look.copy(wantLook);
-      g.init = true;
+      g.vl.set(0, 0, 0);
     }
-    const k = 1 - Math.exp(-(this.garageOrbit.dragging ? 12 : 2.4) * dt);
-    g.pos.lerp(wantPos, k);
-    g.look.lerp(wantLook, k);
+    const w = this.garageOrbit.dragging ? 14 : part ? 3.6 : 3.0;
+    const thT = g.th + Math.atan2(Math.sin(thW - g.th), Math.cos(thW - g.th));
+    for (let left2 = Math.min(dt, 0.1); left2 > 1e-5; left2 -= 1 / 120) {
+      const h = Math.min(left2, 1 / 120);
+      g.vth += (w * w * (thT - g.th) - 2 * w * g.vth) * h;
+      g.vr += (w * w * (rW - g.r) - 2 * w * g.vr) * h;
+      g.vy += (w * w * (rel.y - g.y) - 2 * w * g.vy) * h;
+      g.vfov += (w * w * (sh.fov - g.fov) - 2 * w * g.vfov) * h;
+      g.th += g.vth * h;
+      g.r += g.vr * h;
+      g.y += g.vy * h;
+      g.fov += g.vfov * h;
+      const a = this.tmp2.copy(wantLook).sub(g.look).multiplyScalar(w * w).addScaledVector(g.vl, -2 * w);
+      g.vl.addScaledVector(a, h);
+      g.look.addScaledVector(g.vl, h);
+    }
+    g.pos.set(c.x + Math.sin(g.th) * g.r, c.y + g.y, c.z + Math.cos(g.th) * g.r);
     this.camera.position.copy(g.pos);
     this.camera.lookAt(g.look);
-    this.camera.fov += (sh.fov - this.camera.fov) * k;
+    this.camera.fov = g.fov;
     this.camera.updateProjectionMatrix();
     this.dofTarget.copy(part ? this.garage.parts[part] : this.hubTab === 'highlights' ? this.garage.wallCenter : c.clone().setY(c.y + 0.5));
+    // crisp: no depth of field in the garage, except a whisper of it on a part close-up
+    if (part) this.gfx.setDepthOfField(true, this.dofTarget, 3.2, 1.1);
+    else this.gfx.setDepthOfField(false);
     // nobody stands between the camera and the car
     this.pits.clearView(g.pos, c, 1.6);
     this.pits.hideCrew(team);
-    this.garage.update(dt, g.pos, this.dofTarget);
+    this.garage.update(dt, g.pos, this.dofTarget, this.camera);
     this.updateHotspots();
+  }
+
+  // ---------------------------------------------------------------- garage: a sharp picture
+  /**
+   * The garage is a still life, so it gets a sharper picture than the race: rendered up
+   * to 1.5× the CSS resolution on high-density screens, and never below 0.7 (the race's
+   * dynamic-resolution governor is held off in the menu; if the menu itself runs under
+   * 55 fps for 1.5 s the scale steps down, 0.15 at a time), less film grain, and the sun's
+   * shadow map frozen (the garage roof hides the sun, and its cascades were ~2/3 of the
+   * menu's triangles) with a refresh every 2 s. All undone when the menu closes.
+   */
+  private garageLook: { grain: number; suns: THREE.DirectionalLight[]; refresh: number; maxDyn: number; fps: number; slow: number } | null = null;
+  private enterGarageLook() {
+    const gfx = this.gfx;
+    const menuMax = () => Math.max(gfx.maxDynamic, Math.min(window.devicePixelRatio || 1, 1.5) / Math.max(0.01, gfx.renderer.getPixelRatio() / gfx.dynamicScale));
+    if (!this.garageLook) {
+      // every shadow-casting light out in the world (the sun's cascades), not the garage's own
+      const suns: THREE.DirectionalLight[] = [];
+      const mine = new Set<THREE.Object3D>();
+      this.garageLights.traverse((o) => mine.add(o));
+      this.scene.traverse((o) => {
+        const l = o as THREE.DirectionalLight;
+        if (l.isLight && l.castShadow && l.shadow?.autoUpdate && !mine.has(l)) suns.push(l);
+      });
+      for (const l of suns) {
+        l.shadow.autoUpdate = false;
+        l.shadow.needsUpdate = true;
+      }
+      this.garageLook = { grain: gfx.grain.blendMode.opacity.value, suns, refresh: 0, maxDyn: gfx.maxDynamic, fps: 50, slow: 0 };
+      gfx.grain.blendMode.opacity.value = 0.02;
+      gfx.maxDynamic = menuMax();
+      gfx.setDynamicScale(gfx.maxDynamic);
+    }
+    const L = this.garageLook;
+    L.refresh += this.lastDt;
+    if (L.refresh > 2) {
+      L.refresh = 0;
+      for (const l of L.suns) l.shadow.needsUpdate = true;
+    }
+    // (a graphics-level change in the settings resets the ceiling)
+    if (gfx.maxDynamic < L.maxDyn + 1e-3) {
+      L.maxDyn = gfx.maxDynamic;
+      gfx.maxDynamic = menuMax();
+    }
+    // the race's resolution governor is held off; the menu steps itself down if it must
+    this.aq.settleUntil = Math.max(this.aq.settleUntil, performance.now() / 1000 + 0.6);
+    L.fps = L.fps * 0.95 + (1 / Math.max(this.lastDt, 1e-3)) * 0.05;
+    // (perf pass: it steps down below 55 fps, not 40 — orbiting the car by hand should feel smooth —
+    // and may go down to 0.7; on a Retina MacBook the 1.5 start costs ~2.3× the pixels of 1.0)
+    L.slow = L.fps < 55 ? L.slow + this.lastDt : 0;
+    if (gfx.dynamicScale < 0.7) gfx.setDynamicScale(0.7);
+    else if (L.slow > 1.5 && gfx.dynamicScale > 0.701) {
+      gfx.setDynamicScale(Math.max(0.7, gfx.dynamicScale - 0.15));
+      L.slow = 0;
+      L.fps = 50;
+    }
+  }
+  private leaveGarageLook() {
+    const L = this.garageLook;
+    if (!L) return;
+    this.garageLook = null;
+    this.gfx.grain.blendMode.opacity.value = L.grain;
+    this.gfx.maxDynamic = L.maxDyn;
+    if (this.gfx.dynamicScale > L.maxDyn) this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
+    for (const l of L.suns) {
+      l.shadow.autoUpdate = true;
+      l.shadow.needsUpdate = true;
+    }
   }
 
   // ---------------------------------------------------------------- garage: look around, hotspots
@@ -1202,17 +2066,18 @@ export class Game {
     this.hotspotLayer.className = 'hotspots';
     (this.hud.root.parentElement ?? document.body).appendChild(this.hotspotLayer);
     const labels: [SetupPart, string][] = [['frontWing', 'Front wing'], ['rearWing', 'Rear wing'], ['brakes', 'Brakes'], ['suspension', 'Suspension'], ['floor', 'Ride height'], ['tyres', 'Tyres']];
-    for (const [id, label] of labels) {
+    labels.forEach(([id, label], i) => {
       const h = document.createElement('button');
       h.className = 'hotspot';
       h.dataset.part = id;
-      h.innerHTML = `<i></i><span>${label}</span>`;
+      h.style.setProperty('--i', String(i));
+      h.innerHTML = `<i class="hs-dot"></i><span class="hs-tag"><b>${label}</b><em></em></span>`;
       h.addEventListener('click', () => {
         this.menu.focusPart(id);
         if (this.audioReady) this.audio.ui('select');
       });
-      this.hotspotLayer.appendChild(h);
-    }
+      this.hotspotLayer!.appendChild(h);
+    });
   }
 
   private updateHotspots() {
@@ -1230,9 +2095,17 @@ export class Game {
       const sx = ((v.x + 1) / 2) * innerWidth;
       // not under the tab rail or the panel
       const vis = v.z < 1 && Math.abs(v.y) < 0.9 && sx > 280 && sx < innerWidth - 500;
-      h.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px)`;
+      h.style.transform = `translate3d(${Math.round(sx * 2) / 2}px, ${Math.round(((1 - v.y) / 2) * innerHeight * 2) / 2}px, 0)`;
       h.classList.toggle('hidden', !vis);
       h.classList.toggle('sel', id === this.focusPart);
+      // the part's current setting on its tag
+      const d = SETUP.find((x) => x.part === id);
+      const val = d ? d.fmt(this.career.data.setup[d.id]) : '';
+      if (h.dataset.val !== val) {
+        h.dataset.val = val;
+        const em = h.querySelector('em');
+        if (em) em.textContent = val;
+      }
     }
   }
 
@@ -1245,41 +2118,48 @@ export class Game {
 
   private effects(dt: number) {
     this.carFx.update(dt, this.race, this.rigs, this.camera.position, this.race.weather.state);
+    if (dt > 0) this.skids.update(this.race.cars, this.race.weather.state.wetness);
   }
 
-  /** pit crews: which boxes are expecting, servicing or releasing a car */
-  private readonly boxState: BoxState[] = [];
-  private readonly boxProgress: number[] = [];
-  private readonly releaseTimer = new Map<number, number>();
+  /**
+   * Pit stops on screen: each team's crew follows the car it's working on (coming
+   * down the lane, stopped — on the stop's own clock — or leaving), and a stopped
+   * car goes up on the jacks while its wheels come off and the new set goes on.
+   */
+  private readonly pitPose = newStopPose();
+  private readonly pitBest: (Competitor | null)[] = [];
+  private lastPlayerPit = 'none';
   private updatePits(dt: number, race: Race) {
-    const rank: Record<BoxState, number> = { idle: 0, release: 1, ready: 2, service: 3 };
-    for (let k = 0; k < TEAMS.length; k++) {
-      this.boxState[k] = 'idle';
-      this.boxProgress[k] = 0;
-    }
+    const live = this.state !== 'replay' && this.state !== 'flashback';
+    const prio = { none: 0, out: 1, in: 2, stop: 3 } as const;
+    for (let k = 0; k < TEAMS.length; k++) this.pitBest[k] = null;
     for (const c of race.cars) {
-      const k = TEAMS.indexOf(c.entry.team);
-      let st: BoxState = 'idle';
-      let prog = 0;
       const ps = c.pit;
-      if (ps.phase === 'in') st = 'ready';
-      else if (ps.phase === 'stop') {
-        st = 'service';
-        prog = Math.min(1, ps.timer / Math.max(0.1, ps.stopTime));
-      } else if (ps.phase === 'out') {
-        st = 'release';
-        this.releaseTimer.set(c.id, 1.5);
-      } else {
-        const t = (this.releaseTimer.get(c.id) ?? 0) - dt;
-        this.releaseTimer.set(c.id, t);
-        if (t > 0) st = 'release';
+      const view = this.views.get(c.entry);
+      if (view) {
+        if (live && ps.phase === 'stop') {
+          const P = stopPose(ps.timer, ps.stopTime, ps.slow, this.pitPose);
+          view.setPit(P.liftF, P.liftR, P.wheel);
+        } else view.setPit(0, 0, null);
       }
-      if (rank[st] > rank[this.boxState[k]]) {
-        this.boxState[k] = st;
-        this.boxProgress[k] = prog;
-      }
+      if (!live || ps.phase === 'none' || (ps.phase === 'out' && ps.s > ps.boxS + 60)) continue;
+      const k = TEAMS.indexOf(c.entry.team);
+      const cur = this.pitBest[k];
+      if (!cur || prio[ps.phase] > prio[cur.pit.phase] || (ps.phase === cur.pit.phase && ps.s > cur.pit.s)) this.pitBest[k] = c;
     }
-    for (let k = 0; k < TEAMS.length; k++) this.pits.setBox(k, this.boxState[k], this.boxProgress[k]);
+    for (let k = 0; k < TEAMS.length; k++) {
+      const c = this.pitBest[k];
+      if (!c) {
+        this.pits.setStop(k, null);
+        continue;
+      }
+      const ps = c.pit;
+      this.pits.setStop(k, { phase: ps.phase as 'in' | 'stop' | 'out', dist: ps.boxS - ps.s, t: ps.timer, T: ps.stopTime, slow: ps.slow, held: ps.held, green: ps.green, old: ps.prev, fresh: ps.next });
+    }
+    // the autopilot (demo / tests) picks the car up again at the pit exit
+    const pp = race.player.pit.phase;
+    if (pp === 'none' && this.lastPlayerPit !== 'none') this.autopilot?.startFrom(race.player.car, this.track);
+    this.lastPlayerPit = pp;
     this.pits.update(dt, this.camera);
   }
 
@@ -1301,23 +2181,31 @@ export class Game {
 
   // ------------------------------------------------------------------ audio
 
+  /** the player's position last frame (crowd reactions) */
+  private audioPos = 0;
+
   private updateAudio(dt: number) {
     if (!this.audioReady) return;
     const a = this.audio;
     const race = this.race;
     const w = race.weatherState;
-    if (this.state === 'menu' || this.state === 'results' || this.state === 'paused') {
-      const paused = this.state === 'paused';
+    if (this.state === 'menu' || this.state === 'results' || this.state === 'paused' || this.state === 'flashback' || this.state === 'celebration') {
+      const paused = this.state === 'paused' || this.state === 'flashback';
       a.weather(paused ? 0 : w.rain, w.wetness, 0, paused ? 0 : w.lightning, paused ? 0 : Math.hypot(w.windX, w.windZ));
-      a.updatePlayer({ rpm: 4200, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false });
+      // engine off in the garage / under the results / at the podium; idling behind the pause menu
+      a.updatePlayer({ rpm: paused ? 4200 : 0, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false });
       a.updateOpponents([]);
+      a.space(60, 60, false);
       a.update(dt);
       return;
     }
     const replaying = this.state === 'replay';
     const carOf = (c: (typeof race.cars)[number]) => (replaying ? this.replay.ghosts[c.id] : c.car);
-    const car = carOf(race.player);
-    a.setView(ONBOARD[this.cams.mode] ? 'cockpit' : this.cams.mode === 'tv' || this.cams.mode === 'heli' ? 'tv' : 'chase');
+    // the car the cameras are on is "ours" (the followed car when watching)
+    const watching = this.state === 'spectate' || replaying;
+    const ours = watching ? (race.cars[this.focusId] ?? race.player) : race.player;
+    const car = carOf(ours);
+    a.setView(ONBOARD[this.cams.mode] ? 'cockpit' : isRemoteCam(this.cams.mode) ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
     a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ));
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
@@ -1334,16 +2222,28 @@ export class Game {
       drs: car.drsAnim > 0.5,
       ers: car.ersDeploying ? 1 : 0,
       limiter: car.limiter,
+      // the pit-lane speed limiter: on while running down the lane at the limit
+      pitLimiter: ours.pit.phase !== 'none' && ours.pit.phase !== 'stop' && car.vx > 17 && car.vx < 25,
     });
+    // the space around our car: barriers either side, the pit lane's walls and garages
+    a.space(this.track.barrierAt(car.s, -1) + car.lateral, this.track.barrierAt(car.s, 1) - car.lateral, ours.pit.phase !== 'none');
+    // the grandstands cheer the player's overtakes
+    if (!watching && race.phase === 'racing' && !race.isTimeTrial) {
+      if (this.audioPos && race.player.position < this.audioPos) a.crowdReact('cheer', 0.6);
+      this.audioPos = race.player.position;
+    }
     // opponents relative to the camera
     const cam = this.camera;
     const camRight = this.tmp.set(1, 0, 0).applyQuaternion(cam.quaternion);
+    const q = cam.quaternion;
+    const fwdX = -2 * (q.x * q.z + q.w * q.y), fwdZ = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const fwdL = Math.hypot(fwdX, fwdZ) || 1;
     const camVel = this.tmp2.copy(cam.position).sub(this.prevCamPos).divideScalar(Math.max(dt, 1e-3));
     this.prevCamPos.copy(cam.position);
-    const list: { id: number; rpm: number; throttle: number; distance: number; relVel: number; pan: number }[] = [];
+    const list: { id: number; rpm: number; throttle: number; distance: number; relVel: number; pan: number; behind: number }[] = [];
     for (const c of race.cars) {
-      if (c.isPlayer) {
-        if (this.cams.mode === 'tv' || this.cams.mode === 'heli') {
+      if (c === ours) {
+        if (isRemoteCam(this.cams.mode)) {
           const p = this.rigs.get(c.entry)!.root.position;
           const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
           const d = Math.hypot(dx, dy, dz);
@@ -1356,85 +2256,97 @@ export class Game {
       const p = rig.root.position;
       const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
       const d = Math.hypot(dx, dy, dz);
-      if (d > 320) continue;
+      // (far cars still count: they make the distant drone of the rest of the field)
+      if (d > 1500 || c.removed) continue;
       const [wx, wz] = carOf(c).worldVelocity();
       // closing speed along the line of sight (+ = approaching)
       const relVel = -((wx - camVel.x) * dx + (wz - camVel.z) * dz) / Math.max(d, 1);
       const pan = Math.max(-1, Math.min(1, (dx * camRight.x + dz * camRight.z) / Math.max(d, 1)));
-      list.push({ id: c.id, rpm: carOf(c).rpm, throttle: carOf(c).throttle, distance: d, relVel, pan });
+      const behind = Math.max(0, Math.min(1, -(dx * fwdX + dz * fwdZ) / (fwdL * Math.max(d, 1))));
+      list.push({ id: c.id, rpm: carOf(c).rpm, throttle: carOf(c).throttle, distance: d, relVel, pan, behind });
     }
-    list.sort((x, y) => x.distance - y.distance);
-    a.updateOpponents(list.slice(0, 4));
+    a.updateOpponents(list);
     a.update(dt);
   }
 
   // ------------------------------------------------------------------ perf
 
   /**
-   * Dynamic resolution. Once a second: drop the render scale if frames run
-   * long; creep back up after a few seconds of headroom, and remember a
-   * ceiling if raising it made things slow again.
+   * Dynamic resolution that holds 60 fps, checked twice a second with hysteresis.
+   * With the GPU timer the render scale follows the GPU's own frame time (aiming at ~13 ms,
+   * so a CPU-bound frame never costs resolution); without it, the frame rate.
+   * Down: at once, in proportion to the overrun. Up: one 5 % step after 2 s of headroom; a
+   * raise that turns slow again within 4 s caps the scale below it for 30 s. The only
+   * automatic quality step is Ultra → High (never up: a level change recompiles shaders).
    */
   private adaptQuality(dt: number) {
     this.fpsAvg = this.fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
-    this.qualityCheck += dt;
-    if (this.qualityCheck < 1) return;
-    this.qualityCheck = 0;
-    (window as unknown as { __fps: number }).__fps = Math.round(this.fpsAvg);
-    if (this.state !== 'race' && this.state !== 'intro' && this.state !== 'menu') return;
+    const aq = this.aq;
+    aq.t += dt;
+    aq.frames++;
+    if (aq.t < 0.5) return;
+    const fps = aq.frames / aq.t;
+    aq.t = 0;
+    aq.frames = 0;
+    const g = this.gfx.takeGpuSamples();
+    let gpu = NaN;
+    if (g.length >= 4) {
+      g.sort((a, b) => a - b);
+      gpu = g[g.length >> 1];
+    }
+    const w = window as unknown as { __fps: number; __gpuMs: number };
+    w.__fps = Math.round(fps);
+    w.__gpuMs = Math.round(gpu * 10) / 10;
+    const s = this.state;
+    if (this.worldBusy || s === 'paused' || s === 'boot' || s === 'flashback') return;
+    const now = performance.now() / 1000;
+    if (now < aq.settleUntil) return;
     const gfx = this.gfx;
     const st = this.menu.settings;
-    this.sinceStepUp++;
-    // a step up that didn't hold 60 fps goes straight back, and that level is off the table
-    if (this.stepUpFrom && this.fpsAvg < 52 && this.sinceStepUp <= 20) {
-      this.qualityCap = st.quality;
-      this.setAutoQuality(this.stepUpFrom);
-      this.stepUpFrom = null;
-      return;
-    }
-    if (this.fpsAvg < 52) {
-      if (this.headroom < 3 && gfx.dynamicScale < this.scaleCeiling) this.scaleCeiling = gfx.dynamicScale - 0.01;
-      gfx.setDynamicScale(gfx.dynamicScale - (this.fpsAvg < 40 ? 0.12 : 0.07));
-      this.headroom = 0;
-      // still slow at the lowest resolution for a few seconds: step the graphics level down
-      // (only while the player hasn't chosen one themselves)
-      // (never below High: the resolution scale takes up the rest)
-      if (gfx.dynamicScale <= 0.56 && this.fpsAvg < 45 && st.autoQuality && QUALITY_ORDER.indexOf(st.quality) > QUALITY_ORDER.indexOf('high') && this.state === 'race') {
-        if (++this.slowAtFloor >= 4) {
-          this.slowAtFloor = 0;
-          this.qualityCap = st.quality;
-          this.setAutoQuality(QUALITY_ORDER[QUALITY_ORDER.indexOf(st.quality) - 1]);
-        }
-      } else this.slowAtFloor = 0;
-    } else if (this.fpsAvg > 58.5) {
-      this.headroom++;
-      if (this.headroom >= 4 && gfx.dynamicScale < this.scaleCeiling) {
-        gfx.setDynamicScale(Math.min(this.scaleCeiling, gfx.dynamicScale + 0.05));
-        this.headroom = 0;
-      } else if (this.headroom >= 10 && gfx.dynamicScale >= 1 && st.autoQuality && this.state === 'race') {
-        // smooth at full resolution for a while: try the next graphics level up
-        const next = QUALITY_ORDER[QUALITY_ORDER.indexOf(st.quality) + 1];
-        if (next && next !== this.qualityCap) {
-          this.stepUpFrom = st.quality;
-          this.sinceStepUp = 0;
-          this.setAutoQuality(next);
-        }
-        this.headroom = 0;
+    const timed = isFinite(gpu);
+    const slow = timed ? gpu > 14.5 && fps < 58 : fps < 55;
+    const roomy = timed ? gpu < 10.5 : fps > 59;
+    if (slow) {
+      aq.headroom = 0;
+      // the last raise didn't hold: stay below it for a while
+      if (aq.raisedFrom > 0 && now - aq.raisedAt < 4) {
+        aq.ceiling = aq.raisedFrom;
+        aq.ceilingUntil = now + 30;
       }
-    }
+      aq.raisedFrom = 0;
+      const k = timed ? THREE.MathUtils.clamp(Math.sqrt(13 / gpu), 0.72, 0.95) : fps < 40 ? 0.82 : 0.92;
+      const next = Math.max(gfx.minDynamic, Math.floor(gfx.dynamicScale * k * 20) / 20);
+      if (next < gfx.dynamicScale - 0.001) {
+        gfx.setDynamicScale(next);
+        aq.settleUntil = now + 0.8;
+      }
+      // still slow at the lowest resolution for 2 s on Ultra: step down to High (auto quality only)
+      if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && st.quality === 'ultra') {
+        if (++aq.slowAtFloor >= 4) {
+          aq.slowAtFloor = 0;
+          this.setAutoQuality('high');
+        }
+      } else aq.slowAtFloor = 0;
+    } else if (roomy && fps >= 57) {
+      aq.slowAtFloor = 0;
+      const ceil = now < aq.ceilingUntil ? Math.min(aq.ceiling, gfx.maxDynamic) : gfx.maxDynamic;
+      if (++aq.headroom >= 4 && gfx.dynamicScale < ceil - 0.001) {
+        aq.raisedFrom = gfx.dynamicScale;
+        aq.raisedAt = now;
+        gfx.setDynamicScale(Math.min(ceil, Math.round((gfx.dynamicScale + 0.05) * 20) / 20));
+        aq.headroom = 0;
+        aq.settleUntil = now + 0.8;
+      }
+    } else aq.headroom = Math.max(0, aq.headroom - 1);
   }
   private setAutoQuality(q: QualityLevel) {
     // this session only: the saved setting stays what the player (or the default) chose
     const st = this.menu.settings;
     st.quality = q;
     this.applySettings(st);
-    this.scaleCeiling = 1;
+    this.aq.ceilingUntil = 0;
+    this.aq.settleUntil = performance.now() / 1000 + 1.5;
   }
-  /** a level that proved too slow this session (auto quality won't step back up into it) */
-  private qualityCap: QualityLevel | null = null;
-  private stepUpFrom: QualityLevel | null = null;
-  private sinceStepUp = 0;
-  private headroom = 0;
-  private slowAtFloor = 0;
-  private scaleCeiling = 1;
+  /** adaptive resolution state (see adaptQuality) */
+  private readonly aq = { t: 0, frames: 0, headroom: 0, slowAtFloor: 0, settleUntil: 0, raisedFrom: 0, raisedAt: 0, ceiling: 1, ceilingUntil: 0 };
 }

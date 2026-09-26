@@ -21,9 +21,14 @@ export type AssistPreset = 'casual' | 'standard' | 'expert';
 
 export const ASSIST_PRESETS: Record<AssistPreset, AssistConfig> = {
   casual: { traction: 'full', abs: true, stability: true, arcade: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
-  standard: { traction: 'medium', abs: true, stability: false, arcade: true, braking: 'off', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  // the default: approachable, but the car never brakes or slows itself down for you
+  standard: { traction: 'medium', abs: true, stability: true, arcade: true, braking: 'off', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
   expert: { traction: 'off', abs: false, stability: false, arcade: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
 };
+
+/** what a new player (or a save from before these defaults) starts with */
+export const DEFAULT_PRESET: AssistPreset = 'standard';
+export const DEFAULT_ASSISTS: AssistConfig = ASSIST_PRESETS[DEFAULT_PRESET];
 
 export const PRESET_ORDER: AssistPreset[] = ['casual', 'standard', 'expert'];
 export const PRESET_LABEL: Record<AssistPreset, string> = { casual: 'Casual', standard: 'Standard', expert: 'Expert' };

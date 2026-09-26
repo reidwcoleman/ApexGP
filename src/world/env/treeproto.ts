@@ -20,7 +20,14 @@ import { finish, heightToNormal } from './textures.ts';
  *
  * Vertex layout (shared by every prototype so they batch together):
  *   position, normal, uv, color (linear tint),
- *   aTree = (wind weight, kind, ao, phase) with kind 1 = leaf, 0 = bark, −1 = mottled plane bark.
+ *   aTree = (wind weight, kind, ao, phase) with kind 1 = leaf, 0 = bark, −1 = mottled plane bark,
+ *   aCard = (corner x, corner y, in-plane rotation, 0) in metres: a non-zero corner makes the
+ *           vertex part of a camera-facing leaf card (SpeedTree-style). All four corners sit
+ *           at the clump centre; the vertex shader spreads them in the view plane, turning the
+ *           texture's "up" toward the clump's outward direction on screen. Cards never go
+ *           edge-on, never show as flat intersecting planes, and in the shadow pass they face
+ *           the sun. Spruce whorls keep flat, bent sprays along each branch plus a camera-facing
+ *           puff of needles for body.
  */
 
 export type SpeciesId = 'plane' | 'oak' | 'chestnut' | 'poplar' | 'shrub' | 'spruce';
@@ -127,15 +134,19 @@ interface LeafStyle {
   twig: string;
   brown?: number;
   yellow?: number;
+  /** clump outline half-size (cell units): x, y */
+  rx?: number;
+  ry?: number;
 }
 
 const STYLES: Record<SpeciesId, LeafStyle> = {
-  plane: { cols: ['#7c9a3e', '#8eab4a', '#6d8a34', '#9aae52', '#78963c'], len: [36, 50], count: 300, twig: '#6b5a44', yellow: 0.08 },
-  oak: { cols: ['#5f7c30', '#6c8a38', '#557230', '#768c3a', '#62803a'], len: [24, 34], count: 420, twig: '#5a4a3a', yellow: 0.03 },
-  chestnut: { cols: ['#4f7630', '#5a8236', '#466c2a', '#65893a', '#557c32'], len: [46, 62], count: 150, twig: '#5d4a38', brown: 0.14 },
-  poplar: { cols: ['#86a540', '#95b24c', '#779838', '#a2b855', '#8aa846'], len: [20, 28], count: 420, twig: '#6f6555', yellow: 0.08 },
-  shrub: { cols: ['#62803a', '#6e8e42', '#577434', '#7a944a'], len: [26, 36], count: 300, twig: '#5a4a38', yellow: 0.05 },
-  spruce: { cols: ['#2a4a2c', '#325534', '#26432a', '#3a5e3a', '#2f5032'], len: [18, 26], count: 2400, twig: '#4a3a2c' },
+  // leaf lengths in texels of a 512 cell (a cell spans ~2.5 m of card, so 1 texel ≈ 5 mm)
+  plane: { cols: ['#6f8f3a', '#7f9d44', '#627f32', '#8aa24c', '#6c8a38', '#9aae58'], len: [24, 34], count: 1100, twig: '#6b5a44', yellow: 0.07, rx: 0.42, ry: 0.4 },
+  oak: { cols: ['#56722c', '#617e33', '#4c6829', '#6b8538', '#5a7832', '#728a3e'], len: [17, 25], count: 1900, twig: '#5a4a3a', yellow: 0.03, rx: 0.42, ry: 0.39 },
+  chestnut: { cols: ['#4a6f2c', '#557b32', '#426427', '#5f8238', '#4f7430', '#688a3c'], len: [22, 32], count: 1300, twig: '#5d4a38', brown: 0.1, rx: 0.43, ry: 0.41 },
+  poplar: { cols: ['#7b9b3c', '#89a846', '#6d8e36', '#95ad50', '#809f42', '#a3b85a'], len: [14, 20], count: 1500, twig: '#6f6555', yellow: 0.08, rx: 0.24, ry: 0.42 },
+  shrub: { cols: ['#5a7834', '#66853c', '#4f6c30', '#728e44', '#5f7c38'], len: [17, 24], count: 1500, twig: '#5a4a38', yellow: 0.05, rx: 0.42, ry: 0.38 },
+  spruce: { cols: ['#26462a', '#2d5031', '#223f27', '#355a37', '#2a4b2f'], len: [16, 24], count: 5200, twig: '#4a3a2c' },
 };
 
 function jitterColor(hex: string, r: () => number, amt: number): [number, number, number] {
@@ -145,142 +156,133 @@ function jitterColor(hex: string, r: () => number, amt: number): [number, number
   return [Math.min(1, c.r * k * (1 + h)), Math.min(1, c.g * k), Math.min(1, c.b * k * (1 - h))];
 }
 
+const encN = (nx: number, ny: number) => {
+  const l = Math.hypot(nx, ny, 1);
+  return `rgb(${Math.round((nx / l * 0.5 + 0.5) * 255)},${Math.round((ny / l * 0.5 + 0.5) * 255)},${Math.round((1 / l * 0.5 + 0.5) * 255)})`;
+};
+
 function drawCluster(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D, ox: number, oy: number, sp: SpeciesId, seed: number) {
+  if (sp === 'spruce') drawSpray(ca, cn, ox, oy, seed);
+  else drawClump(ca, cn, ox, oy, sp, seed);
+}
+
+/**
+ * A broadleaf foliage clump as seen on a real tree: a few leafy shoots from one
+ * branch end, their leaves bunched toward the shoot tips, filling a ragged,
+ * roughly round mass with sky showing through at the edges. Leaves are drawn
+ * back to front, the ones at the back darker and cooler (self-shadowing inside
+ * the clump), the top ones catching more light. The card's base (toward the
+ * trunk) is the bottom of the cell.
+ */
+function drawClump(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D, ox: number, oy: number, sp: SpeciesId, seed: number) {
   const r = rng(seed);
   const st = STYLES[sp];
   const S = CELL;
-  // twig skeleton: main stem from the bottom centre up, side twigs
-  const twigs: { x0: number; y0: number; x1: number; y1: number; w: number }[] = [];
-  const upright = sp === 'poplar';
-  const topY = upright ? 0.05 : 0.1;
-  const mainBend = (r() - 0.5) * 0.2;
-  const mx0 = 0.5, my0 = 0.99, mx1 = 0.5 + mainBend, my1 = topY;
-  twigs.push({ x0: mx0, y0: my0, x1: mx1, y1: my1, w: 5 });
-  // side twigs fan out to fill the card, each with a couple of sub-twigs
-  const nSide = upright ? 9 : 8;
-  for (let k = 0; k < nSide; k++) {
-    const t = 0.14 + (0.78 * (k + r() * 0.6)) / nSide;
-    const bx = mx0 + (mx1 - mx0) * t, by = my0 + (my1 - my0) * t;
-    const side = k % 2 ? 1 : -1;
-    const ang = (upright ? 0.3 + r() * 0.2 : 0.7 + r() * 0.5) * side;
-    const L = (upright ? 0.2 : 0.42) * (1 - t * 0.5) * (0.85 + r() * 0.3);
-    const ex = bx + Math.sin(ang) * L, ey = by - Math.cos(ang) * L;
-    twigs.push({ x0: bx, y0: by, x1: ex, y1: ey, w: 3 });
-    if (!upright)
-      for (let q = 0; q < 2; q++) {
-        const tt = 0.35 + q * 0.3 + r() * 0.1;
-        const sx = bx + (ex - bx) * tt, sy = by + (ey - by) * tt;
-        const a2 = ang + (q === 0 ? -0.6 : 0.5) * side + (r() - 0.5) * 0.3;
-        const L2 = L * (0.45 + r() * 0.2);
-        twigs.push({ x0: sx, y0: sy, x1: Math.min(0.97, Math.max(0.03, sx + Math.sin(a2) * L2)), y1: Math.max(0.03, sy - Math.cos(a2) * L2), w: 2 });
-      }
-  }
+  const cx = 0.5, cy = sp === 'poplar' ? 0.5 : 0.47;
+  const rx = st.rx ?? 0.45, ry = st.ry ?? 0.43;
+  const ph = [r() * 6.28, r() * 6.28, r() * 6.28, r() * 6.28];
+  // ragged outline: a few lobes (sub-clumps) plus finer notches
+  const R = (th: number) => 1 + 0.12 * Math.sin(3 * th + ph[0]) + 0.07 * Math.sin(5 * th + ph[1]) + 0.05 * Math.sin(8 * th + ph[2]) + 0.03 * Math.sin(13 * th + ph[3]);
   const px = (u: number) => ox + u * S;
   const py = (v: number) => oy + v * S;
-  // leaves: along twigs, both sides, alternating angles
-  type Leaf = { x: number; y: number; a: number; len: number; col: [number, number, number]; nx: number; ny: number; fold: number; brown: boolean; fs: number };
-  const leaves: Leaf[] = [];
-  const perTwig = Math.round(st.count / twigs.length);
-  for (const tw of twigs) {
-    const dx = tw.x1 - tw.x0, dy = tw.y1 - tw.y0;
-    const base = Math.atan2(dx, -dy);
-    for (let k = 0; k < perTwig; k++) {
-      const t = 0.12 + 0.88 * ((k + r() * 0.8) / perTwig);
-      const x = tw.x0 + dx * t, y = tw.y0 + dy * t;
-      const side = k % 2 ? 1 : -1;
-      const spread = sp === 'poplar' ? 0.5 : 0.9;
-      const a = base + side * (0.35 + r() * spread) + (r() - 0.5) * 0.3;
-      const len = st.len[0] + r() * (st.len[1] - st.len[0]);
-      let hex = st.cols[Math.floor(r() * st.cols.length)];
-      const yel = r() < (st.yellow ?? 0);
-      if (yel) hex = r() < 0.5 ? '#a39a44' : '#b08d3a';
-      const col = jitterColor(hex, r, 0.24);
-      // top of the cluster catches more light
-      const lift = 1 + (1 - y) * 0.12;
-      col[0] *= lift; col[1] *= lift; col[2] *= lift;
-      leaves.push({ x, y, a, len, col, nx: (r() - 0.5) * 1.1, ny: (r() - 0.5) * 1.1, fold: 0.25 + r() * 0.35, brown: r() < (st.brown ?? 0), fs: 0.45 + r() * 0.55 });
-    }
+  // ---- shoots: from the stem base up to tips spread over the clump
+  type Shoot = { x0: number; y0: number; mx: number; my: number; x1: number; y1: number; w: number };
+  const shoots: Shoot[] = [];
+  const baseX = 0.5 + (r() - 0.5) * 0.06, baseY = 0.995;
+  const hubY = cy + ry * 0.35;
+  shoots.push({ x0: baseX, y0: baseY, mx: 0.5, my: (baseY + hubY) / 2, x1: 0.5 + (r() - 0.5) * 0.08, y1: hubY, w: 6 });
+  const nShoot = sp === 'poplar' ? 7 : 9;
+  const tips: { x: number; y: number }[] = [];
+  for (let k = 0; k < nShoot; k++) {
+    // tips fan over the upper 300° of the clump
+    const th = -Math.PI / 2 + ((k + 0.5) / nShoot - 0.5) * Math.PI * 1.7 + (r() - 0.5) * 0.35;
+    const rr = (0.62 + r() * 0.3) * R(th);
+    const tx = cx + Math.cos(th) * rx * rr, ty = cy + Math.sin(th) * ry * rr;
+    tips.push({ x: tx, y: ty });
+    const sx = 0.5 + (r() - 0.5) * 0.05, sy = hubY + (r() - 0.3) * 0.12;
+    const mx = (sx + tx) / 2 + (r() - 0.5) * 0.08, my = (sy + ty) / 2 + 0.04 + r() * 0.05;
+    shoots.push({ x0: sx, y0: sy, mx, my, x1: tx, y1: ty, w: 3 });
   }
-  // terminal leaves at the twig tips
-  for (const tw of twigs) {
-    const a = Math.atan2(tw.x1 - tw.x0, -(tw.y1 - tw.y0));
-    const len = st.len[1] * (0.9 + r() * 0.2);
-    leaves.push({ x: tw.x1, y: tw.y1, a, len, col: jitterColor(st.cols[1], r, 0.2), nx: (r() - 0.5) * 0.6, ny: (r() - 0.5) * 0.6, fold: 0.3, brown: false, fs: 0.8 });
-  }
-  // shuffle so overlaps look random
-  for (let i = leaves.length - 1; i > 0; i--) {
-    const j = Math.floor(r() * (i + 1));
-    [leaves[i], leaves[j]] = [leaves[j], leaves[i]];
-  }
-  // clip to the cell
+  const bez = (s: Shoot, t: number) => {
+    const a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+    return { x: a * s.x0 + b * s.mx + c * s.x1, y: a * s.y0 + b * s.my + c * s.y1 };
+  };
   for (const c of [ca, cn]) {
     c.save();
     c.beginPath();
     c.rect(ox + 1, oy + 1, S - 2, S - 2);
     c.clip();
+    c.lineCap = 'round';
   }
-  ca.lineCap = 'round';
-  cn.lineCap = 'round';
-  // conifer sprays: a solid mass of shoot under the needles, so the foliage survives
-  // the mip chain (thin needles alone vanish at distance and leave bare trunks)
-  if (sp === 'spruce') {
-    for (const tw of twigs) {
-      ca.strokeStyle = '#1f3a24';
-      ca.lineWidth = tw.w === 5 ? 70 : tw.w === 3 ? 52 : 34;
-      ca.beginPath();
-      ca.moveTo(px(tw.x0), py(tw.y0));
-      ca.lineTo(px(tw.x1), py(tw.y1));
-      ca.stroke();
-      cn.strokeStyle = 'rgb(128,150,230)';
-      cn.lineWidth = ca.lineWidth;
-      cn.beginPath();
-      cn.moveTo(px(tw.x0), py(tw.y0));
-      cn.lineTo(px(tw.x1), py(tw.y1));
-      cn.stroke();
+  for (const s of shoots) {
+    ca.strokeStyle = st.twig;
+    cn.strokeStyle = 'rgb(128,128,255)';
+    for (const c of [ca, cn]) {
+      c.lineWidth = s.w;
+      c.beginPath();
+      c.moveTo(px(s.x0), py(s.y0));
+      c.quadraticCurveTo(px(s.mx), py(s.my), px(s.x1), py(s.y1));
+      c.stroke();
     }
   }
-  // twigs
-  for (const tw of twigs) {
-    ca.strokeStyle = st.twig;
-    ca.lineWidth = tw.w;
-    ca.beginPath();
-    ca.moveTo(px(tw.x0), py(tw.y0));
-    ca.lineTo(px(tw.x1), py(tw.y1));
-    ca.stroke();
-    cn.strokeStyle = 'rgb(128,128,255)';
-    cn.lineWidth = tw.w;
-    cn.beginPath();
-    cn.moveTo(px(tw.x0), py(tw.y0));
-    cn.lineTo(px(tw.x1), py(tw.y1));
-    cn.stroke();
-  }
-  const shape = SHAPES[sp];
-  const enc = (nx: number, ny: number) => {
-    const l = Math.hypot(nx, ny, 1);
-    return `rgb(${Math.round((nx / l * 0.5 + 0.5) * 255)},${Math.round((ny / l * 0.5 + 0.5) * 255)},${Math.round((1 / l * 0.5 + 0.5) * 255)})`;
+  // ---- leaves: each hangs from a point on a shoot (bunched toward the tips),
+  // pointing outward from the clump centre, some scattered to fill the mass
+  type Leaf = { x: number; y: number; a: number; len: number; col: [number, number, number]; nx: number; ny: number; fold: number; brown: boolean; fs: number; z: number };
+  const leaves: Leaf[] = [];
+  const inside = (x: number, y: number) => {
+    const dx = (x - cx) / rx, dy = (y - cy) / ry;
+    const d = Math.hypot(dx, dy);
+    return d / R(Math.atan2(dy, dx));
   };
+  let guard = 0;
+  while (leaves.length < st.count && guard++ < st.count * 8) {
+    let x: number, y: number;
+    const mode = r();
+    if (mode < 0.55) {
+      // along a shoot, biased to the tip
+      const s = shoots[1 + Math.floor(r() * (shoots.length - 1))];
+      const t = 1 - Math.pow(r(), 1.8) * 0.75;
+      const q = bez(s, t);
+      x = q.x + (r() - 0.5) * 0.07;
+      y = q.y + (r() - 0.5) * 0.07;
+    } else {
+      // filler: anywhere in the mass, thinning toward the ragged edge
+      x = cx + (r() * 2 - 1) * rx * 1.25;
+      y = cy + (r() * 2 - 1) * ry * 1.25;
+    }
+    const e = inside(x, y);
+    if (e > 1.02) continue;
+    // sparse near the rim: gaps let the sky through
+    if (e > 0.8 && r() < (e - 0.8) * 2.5) continue;
+    const out = Math.atan2(x - cx, -(y - cy)) ;
+    const a = out + (r() - 0.5) * 1.9;
+    const len = st.len[0] + r() * (st.len[1] - st.len[0]);
+    let hex = st.cols[Math.floor(r() * st.cols.length)];
+    if (r() < (st.yellow ?? 0)) hex = r() < 0.5 ? '#a39a44' : '#b08d3a';
+    const col = jitterColor(hex, r, 0.22);
+    const z = r();
+    // back leaves in the clump's own shade, front ones lit; the top catches more sky
+    const lit = (0.8 + 0.3 * z) * (1 + (cy - y) * 0.3);
+    const cool = (1 - z) * 0.7;
+    col[0] *= lit * (1 - 0.08 * cool);
+    col[1] *= lit;
+    col[2] *= lit * (1 + 0.1 * cool);
+    leaves.push({ x, y, a, len, col, nx: (r() - 0.5) * 1.2 + (x - cx) * 0.8, ny: (r() - 0.5) * 1.2 - (y - cy) * 0.8, fold: 0.2 + r() * 0.35, brown: r() < (st.brown ?? 0), fs: 0.55 + r() * 0.45, z });
+  }
+  leaves.sort((a, b) => a.z - b.z);
+  const shape = SHAPES[sp === 'chestnut' ? 'shrub' : sp];
   for (const lf of leaves) {
     const X = px(lf.x), Y = py(lf.y);
-    // petiole
-    ca.strokeStyle = st.twig;
-    ca.lineWidth = 1.5;
-    const pl = lf.len * 0.18;
-    const ex = X + Math.sin(lf.a) * pl, ey = Y - Math.cos(lf.a) * pl;
-    ca.beginPath();
-    ca.moveTo(X, Y);
-    ca.lineTo(ex, ey);
-    ca.stroke();
-    // blade — albedo
     ca.save();
-    ca.translate(ex, ey);
+    ca.translate(X, Y);
     ca.rotate(lf.a);
     ca.scale(lf.fs, 1);
     const [cr, cg, cb] = lf.col;
-    const grad = ca.createLinearGradient(0, 0, 0, -lf.len);
     const rgb = (k: number) => `rgb(${Math.round(Math.min(1, cr * k) * 255)},${Math.round(Math.min(1, cg * k) * 255)},${Math.round(Math.min(1, cb * k) * 255)})`;
-    grad.addColorStop(0, rgb(0.82));
-    grad.addColorStop(0.6, rgb(1.0));
-    grad.addColorStop(1, rgb(1.08));
+    const grad = ca.createLinearGradient(0, 0, 0, -lf.len);
+    grad.addColorStop(0, rgb(0.8));
+    grad.addColorStop(0.55, rgb(1.0));
+    grad.addColorStop(1, rgb(1.07));
     ca.fillStyle = grad;
     shape(ca, lf.len, r);
     ca.fill();
@@ -288,32 +290,28 @@ function drawCluster(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D,
       ca.save();
       ca.clip();
       ca.fillStyle = 'rgba(122,86,44,0.7)';
-      for (let q = 0; q < 2; q++) {
-        ca.beginPath();
-        ca.ellipse((r() - 0.5) * lf.len * 0.6, -lf.len * (0.3 + r() * 0.6), lf.len * (0.12 + r() * 0.18), lf.len * (0.1 + r() * 0.12), r() * 3, 0, Math.PI * 2);
-        ca.fill();
-      }
+      ca.beginPath();
+      ca.ellipse((r() - 0.5) * lf.len * 0.5, -lf.len * (0.4 + r() * 0.5), lf.len * 0.22, lf.len * 0.16, r() * 3, 0, Math.PI * 2);
+      ca.fill();
       ca.restore();
     }
-    // midrib
-    ca.strokeStyle = `rgba(210,220,150,0.35)`;
-    ca.lineWidth = 1;
-    ca.beginPath();
-    ca.moveTo(0, 0);
-    ca.lineTo(0, -lf.len * 0.85);
-    ca.stroke();
+    if (lf.len > 16) {
+      ca.strokeStyle = 'rgba(210,220,150,0.28)';
+      ca.lineWidth = 1;
+      ca.beginPath();
+      ca.moveTo(0, 0);
+      ca.lineTo(0, -lf.len * 0.8);
+      ca.stroke();
+    }
     ca.restore();
-    // blade — normal (two folded halves)
     cn.save();
-    cn.translate(ex, ey);
+    cn.translate(X, Y);
     cn.rotate(lf.a);
     cn.scale(lf.fs, 1);
-    const ca2 = Math.cos(lf.a), sa2 = Math.sin(lf.a);
+    const c2 = Math.cos(lf.a), s2 = Math.sin(lf.a);
     const half = (sgn: number) => {
-      // fold tilts each half about the midrib; rotate the tilt into canvas space
       const lx = lf.nx + sgn * lf.fold, ly = lf.ny;
-      const wx = lx * ca2 - ly * sa2, wy = lx * sa2 + ly * ca2;
-      return enc(wx, -wy);
+      return encN(lx * c2 - ly * s2, -(lx * s2 + ly * c2));
     };
     shape(cn, lf.len, r);
     cn.save();
@@ -325,6 +323,98 @@ function drawCluster(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D,
     cn.restore();
     cn.restore();
   }
+  ca.restore();
+  cn.restore();
+}
+
+/**
+ * A spruce frond seen from above: a rachis from the trunk (bottom) out to the
+ * tip, side shoots angled forward, each a dense bottle-brush of needles —
+ * darker and bluer at the old inner growth, fresh lighter green at the tips.
+ */
+function drawSpray(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D, ox: number, oy: number, seed: number) {
+  const r = rng(seed);
+  const st = STYLES.spruce;
+  const S = CELL;
+  const px = (u: number) => ox + u * S;
+  const py = (v: number) => oy + v * S;
+  type Tw = { x0: number; y0: number; x1: number; y1: number; w: number; t0: number };
+  const twigs: Tw[] = [];
+  const bend = (r() - 0.5) * 0.12;
+  twigs.push({ x0: 0.5, y0: 0.995, x1: 0.5 + bend, y1: 0.05, w: 5, t0: 0 });
+  const nSide = 11;
+  for (let k = 0; k < nSide; k++) {
+    const t = 0.1 + (0.84 * (k + r() * 0.5)) / nSide;
+    const bx = 0.5 + bend * t, by = 0.995 - 0.945 * t;
+    for (const side of [-1, 1]) {
+      if (r() < 0.12) continue;
+      const ang = (0.62 + r() * 0.35) * side;
+      const L = 0.4 * Math.pow(1 - t, 0.7) * (0.75 + r() * 0.4) + 0.05;
+      const ex = bx + Math.sin(ang) * L, ey = by - Math.cos(ang) * L;
+      twigs.push({ x0: bx, y0: by, x1: ex, y1: ey, w: 2.5, t0: t });
+      // tertiary shoots
+      if (L > 0.16)
+        for (let q = 0; q < 2; q++) {
+          const tt = 0.4 + q * 0.3;
+          const sx = bx + (ex - bx) * tt, sy = by + (ey - by) * tt;
+          const a2 = ang + (q ? 0.55 : -0.55) * side * (r() < 0.5 ? 1 : -1);
+          const L2 = L * 0.38 * (0.8 + r() * 0.4);
+          twigs.push({ x0: sx, y0: sy, x1: sx + Math.sin(a2) * L2, y1: sy - Math.cos(a2) * L2, w: 1.5, t0: t });
+        }
+    }
+  }
+  for (const c of [ca, cn]) {
+    c.save();
+    c.beginPath();
+    c.rect(ox + 1, oy + 1, S - 2, S - 2);
+    c.clip();
+    c.lineCap = 'round';
+  }
+  // body under the needles so the spray survives the mip chain; kept inside the needle mass
+  for (const tw of twigs) {
+    ca.strokeStyle = '#223e28';
+    ca.lineWidth = tw.w === 5 ? 22 : tw.w > 2 ? 16 : 10;
+    cn.strokeStyle = 'rgb(128,150,230)';
+    cn.lineWidth = ca.lineWidth;
+    for (const c of [ca, cn]) {
+      c.beginPath();
+      c.moveTo(px(tw.x0), py(tw.y0));
+      c.lineTo(px(tw.x1), py(tw.y1));
+      c.stroke();
+    }
+  }
+  const per = Math.round(st.count / twigs.length);
+  // needles: short strokes, both sides of every shoot, pointing forward
+  for (let pass = 0; pass < 2; pass++)
+    for (const tw of twigs) {
+      const dx = tw.x1 - tw.x0, dy = tw.y1 - tw.y0;
+      const base = Math.atan2(dx, -dy);
+      for (let k = 0; k < per / 2; k++) {
+        const t = r();
+        const x = tw.x0 + dx * t, y = tw.y0 + dy * t;
+        const side = r() < 0.5 ? -1 : 1;
+        const a = base + side * (0.5 + r() * 0.6);
+        const len = (st.len[0] + r() * (st.len[1] - st.len[0])) * (0.7 + 0.3 * (1 - tw.t0));
+        // fresh growth at the shoot tips: lighter, yellower
+        const fresh = t > 0.78 && pass === 1 ? 1 : 0;
+        let [cr, cg, cb] = jitterColor(st.cols[Math.floor(r() * st.cols.length)], r, 0.3);
+        const lit = pass === 0 ? 0.72 : 1.0;
+        cr *= lit; cg *= lit; cb *= lit;
+        if (fresh) { cr = cr * 1.35 + 0.04; cg = cg * 1.3 + 0.05; cb *= 1.05; }
+        ca.strokeStyle = `rgb(${Math.round(Math.min(1, cr) * 255)},${Math.round(Math.min(1, cg) * 255)},${Math.round(Math.min(1, cb) * 255)})`;
+        ca.lineWidth = 2.2;
+        ca.beginPath();
+        ca.moveTo(px(x), py(y));
+        ca.lineTo(px(x) + Math.sin(a) * len, py(y) - Math.cos(a) * len);
+        ca.stroke();
+        cn.strokeStyle = encN(Math.sin(a) * side * 0.6 + (r() - 0.5) * 0.5, (r() - 0.5) * 0.5);
+        cn.lineWidth = 2.2;
+        cn.beginPath();
+        cn.moveTo(px(x), py(y));
+        cn.lineTo(px(x) + Math.sin(a) * len, py(y) - Math.cos(a) * len);
+        cn.stroke();
+      }
+    }
   ca.restore();
   cn.restore();
 }
@@ -415,13 +505,17 @@ class TB {
   uv: number[] = [];
   col: number[] = [];
   dat: number[] = [];
+  card: number[] = [];
   idx: number[] = [];
+  /** billboard corner for the next v() call (0,0,0 = a fixed vertex) */
+  bb: [number, number, number] = [0, 0, 0];
   v(x: number, y: number, z: number, nx: number, ny: number, nz: number, u: number, vv: number, c: THREE.Color, wind: number, kind: number, ao: number, ph: number) {
     this.pos.push(x, y, z);
     this.nor.push(nx, ny, nz);
     this.uv.push(u, vv);
     this.col.push(c.r, c.g, c.b);
     this.dat.push(wind, kind, ao, ph);
+    this.card.push(this.bb[0], this.bb[1], this.bb[2], 0);
     return this.pos.length / 3 - 1;
   }
   geometry(): THREE.BufferGeometry {
@@ -431,6 +525,7 @@ class TB {
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     g.setAttribute('aTree', new THREE.Float32BufferAttribute(this.dat, 4));
+    g.setAttribute('aCard', new THREE.Float32BufferAttribute(this.card, 4));
     g.setIndex(this.idx);
     g.computeBoundingBox();
     g.computeBoundingSphere();
@@ -467,23 +562,23 @@ const P: Record<SpeciesId, Params> = {
   },
   oak: {
     H: [18, 24], bole: [0.2, 0.27], crownR: [8.5, 10.5], crownRy: 0.98, lump: 0.34, trunkR: [0.48, 0.62], limbs: [5, 7], limbElev: [0.35, 0.7],
-    clusters: 22, cards: 10, cardSize: [2.1, 2.7], spread: 0.34, bark: new THREE.Color(0x4f473f), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
+    clusters: 22, cards: 10, cardSize: [2.1, 2.7], spread: 0.34, bark: new THREE.Color(0x5e554b), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
   },
   chestnut: {
     H: [17, 22], bole: [0.16, 0.22], crownR: [6.8, 8.2], crownRy: 1.06, lump: 0.16, trunkR: [0.42, 0.52], limbs: [5, 6], limbElev: [0.6, 0.9],
-    clusters: 22, cards: 11, cardSize: [2.2, 2.7], spread: 0.42, bark: new THREE.Color(0x5b534a), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
+    clusters: 22, cards: 11, cardSize: [2.2, 2.7], spread: 0.42, bark: new THREE.Color(0x685f55), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
   },
   poplar: {
     H: [24, 30], bole: [0.06, 0.1], crownR: [2.6, 3.3], crownRy: 1.0, lump: 0.14, trunkR: [0.36, 0.46], limbs: [12, 16], limbElev: [1.15, 1.35],
-    clusters: 20, cards: 8, cardSize: [1.6, 2.0], spread: 0.3, bark: new THREE.Color(0x5d5852), barkKind: 0, leafTint: new THREE.Color(1, 1, 1), column: true,
+    clusters: 20, cards: 8, cardSize: [1.6, 2.0], spread: 0.3, bark: new THREE.Color(0x6c665f), barkKind: 0, leafTint: new THREE.Color(1, 1, 1), column: true,
   },
   shrub: {
     H: [2.6, 3.8], bole: [0.05, 0.1], crownR: [1.9, 2.6], crownRy: 0.95, lump: 0.25, trunkR: [0.05, 0.07], limbs: [4, 5], limbElev: [0.9, 1.2],
     clusters: 6, cards: 7, cardSize: [1.2, 1.6], spread: 0.45, bark: new THREE.Color(0x4d4236), barkKind: 0, leafTint: new THREE.Color(1, 1, 1),
   },
   spruce: {
-    H: [22, 32], bole: [0.08, 0.14], crownR: [3.4, 4.4], crownRy: 1.0, lump: 0.08, trunkR: [0.3, 0.4], limbs: [18, 24], limbElev: [-0.3, 0.08],
-    clusters: 46, cards: 13, cardSize: [2.3, 3.1], spread: 0.3, bark: new THREE.Color(0x4e3d33), barkKind: 0, leafTint: new THREE.Color(1, 1, 1), cone: true,
+    H: [22, 32], bole: [0.08, 0.14], crownR: [4.0, 5.2], crownRy: 1.0, lump: 0.08, trunkR: [0.3, 0.4], limbs: [18, 24], limbElev: [-0.3, 0.08],
+    clusters: 46, cards: 13, cardSize: [2.3, 3.1], spread: 0.3, bark: new THREE.Color(0x5c483b), barkKind: 0, leafTint: new THREE.Color(1, 1, 1), cone: true,
   },
 };
 
@@ -562,7 +657,7 @@ function makeConifer(variant: number, index: number): TreeProto {
   while (y < H * 0.985) {
     const t = (y - boleY) / (H - boleY);
     // the outline: a slightly concave cone, broad skirt, sharp spire
-    const Lmax = crownR * Math.pow(1 - t, 1.05) + 0.3;
+    const Lmax = crownR * Math.pow(1 - t, 0.92) + 0.55;
     const nb = t < 0.82 ? 5 + Math.floor(r() * 3) : 3 + Math.floor(r() * 2);
     for (let k = 0; k < nb; k++) {
       const a = az + (k / nb) * Math.PI * 2 + (r() - 0.5) * 0.5;
@@ -575,7 +670,7 @@ function makeConifer(variant: number, index: number): TreeProto {
       const ao0 = 0.28 + 0.25 * t;
       const ao1 = Math.min(1, 0.62 + 0.38 * Math.sqrt(t) + (r() - 0.5) * 0.1);
       const tint = p.leafTint.clone().multiplyScalar(0.86 + r() * 0.22);
-      fronds.push({ base: trunkAt(y), dir, side, L, W: Math.max(0.45, L * (0.62 + r() * 0.18)), ao0, ao1, tint, phase: r() * 6.28, lod1: (k + whorl) % 2 === 0 });
+      fronds.push({ base: trunkAt(y), dir, side, L, W: Math.max(0.7, L * (0.66 + r() * 0.18)), ao0, ao1, tint, phase: r() * 6.28, lod1: (k + whorl) % 2 === 0 });
     }
     az += 2.39996;
     whorl++;
@@ -589,28 +684,29 @@ function makeConifer(variant: number, index: number): TreeProto {
     const b = new TB();
     for (const t of tubes) emitTube(b, t, lod === 0 ? t.sides : 5, p.bark, p.barkKind, windAt, (yy) => (yy < boleY ? 0.8 : 0.4));
     for (const f of fronds) {
+      // LOD1: every other frond, a little wider
       if (lod === 1 && !f.lod1) continue;
-      const wk = lod === 1 ? 1.35 : 1;
+      const wk = lod === 1 ? 1.3 : 1;
       // flat spray: normal ~up (tilted with the branch), then the crossed vertical one
       const nFlat = new THREE.Vector3().crossVectors(f.dir, f.side).normalize();
       if (nFlat.y < 0) nFlat.negate();
-      emitFrond(b, f.base, f.dir, f.side, f.L, f.W * wk, cell, nFlat, f.tint, f.ao0, f.ao1, f.phase, windAt);
-      const vert = nFlat.clone();
-      emitFrond(b, f.base, f.dir, vert, f.L * 0.95, f.W * 0.75 * wk, cell, f.side.clone().addScaledVector(f.dir, 0.4).normalize(), f.tint, f.ao0, f.ao1 * 0.95, f.phase, windAt);
+      // the spray bends down toward its tip (LOD0: two segments), narrower than it is long
+      emitFrond(b, f.base, f.dir, f.side, f.L, f.W * 0.86 * wk, cell, nFlat, f.tint, f.ao0, f.ao1, f.phase, windAt, lod === 0 ? 2 : 1);
+      // body: a camera-facing puff of needles over the outer half of the branch
+      const pc = f.base.clone().addScaledVector(f.dir, f.L * 0.66);
+      pc.y -= 0.12 * f.L;
+      emitPuff(b, pc, Math.max(0.8, f.W * 0.72) * wk, cell, nFlat.clone().multiplyScalar(0.3).addScaledVector(new THREE.Vector3(f.dir.x, 0, f.dir.z).normalize(), 0.7).normalize(), f.tint, (f.ao0 + f.ao1 * 2) / 3, f.phase, windAt);
     }
     lods.push(b.geometry());
   }
-  let radius = 0;
-  const pa = lods[0].attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pa.count; i++) radius = Math.max(radius, Math.hypot(pa.getX(i), pa.getZ(i)));
-  const bb = lods[0].boundingBox!;
-  return { index, species: 'spruce', variant, lods, height: bb.max.y, radius, crownR: crownR * 0.7, crownY: boleY + (H - boleY) * 0.35 };
+  const { radius, height } = extents(lods[0]);
+  return { index, species: 'spruce', variant, lods, height, radius, crownR: crownR * 0.7, crownY: boleY + (H - boleY) * 0.35 };
 }
 
 /** a branch frond: a card from the trunk out along `dir`, `W` wide across `side`, lit as `light` */
 function emitFrond(
   b: TB, base: THREE.Vector3, dir: THREE.Vector3, side: THREE.Vector3, L: number, W: number, cellIdx: number, light: THREE.Vector3,
-  tint: THREE.Color, ao0: number, ao1: number, phase: number, windAt: (x: number, y: number, z: number) => number,
+  tint: THREE.Color, ao0: number, ao1: number, phase: number, windAt: (x: number, y: number, z: number) => number, segs = 1,
 ) {
   const col = cellIdx % ATLAS_COLS, row = Math.floor(cellIdx / ATLAS_COLS);
   const u0 = col / ATLAS_COLS, du = 1 / ATLAS_COLS;
@@ -620,18 +716,58 @@ function emitFrond(
   if (out.lengthSq() < 1e-4) out.set(0, 1, 0);
   out.normalize();
   const n = light.clone().multiplyScalar(0.35).addScaledVector(out, 0.5).addScaledVector(new THREE.Vector3(0, 1, 0), 0.3).normalize();
-  const ids: number[] = [];
-  for (const [a, t] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
-    // the frond sags toward its tip
-    const sag = -0.12 * L * t * t;
-    const p = base.clone().addScaledVector(dir, t * L * 1.02 - 0.08).addScaledVector(side, (a - 0.5) * W * (0.55 + 0.45 * t));
-    p.y += sag;
-    ids.push(b.v(p.x, p.y, p.z, n.x, n.y, n.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - t * 0.996 - 0.002) * dv, tint, windAt(p.x, p.y, p.z), 1, t > 0 ? ao1 : ao0, phase));
+  const rows: number[][] = [];
+  for (let k = 0; k <= segs; k++) {
+    const t = k / segs;
+    const row: number[] = [];
+    for (const a of [0, 1]) {
+      // the frond sags toward its tip, and its edges curl down a little
+      const sag = -0.16 * L * t * t - (segs > 1 ? 0.08 * W * t : 0);
+      const p = base.clone().addScaledVector(dir, t * L * 1.02 - 0.08).addScaledVector(side, (a - 0.5) * W * (0.5 + 0.5 * t));
+      p.y += sag;
+      row.push(b.v(p.x, p.y, p.z, n.x, n.y, n.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - t * 0.996 - 0.002) * dv, tint, windAt(p.x, p.y, p.z), 1, lerp(ao0, ao1, Math.sqrt(t)), phase));
+    }
+    rows.push(row);
   }
+  for (let k = 0; k < segs; k++) {
+    const [a0, a1] = rows[k], [b0, b1] = rows[k + 1];
+    b.idx.push(a0, a1, b1, a0, b1, b0);
+  }
+}
+
+/** a camera-facing spray of needles (conifer body) */
+function emitPuff(
+  b: TB, c: THREE.Vector3, size: number, cellIdx: number, light: THREE.Vector3, tint: THREE.Color, ao: number, phase: number,
+  windAt: (x: number, y: number, z: number) => number,
+) {
+  const col = cellIdx % ATLAS_COLS, row = Math.floor(cellIdx / ATLAS_COLS);
+  const u0 = col / ATLAS_COLS, du = 1 / ATLAS_COLS;
+  const v0 = row / ATLAS_ROWS, dv = 1 / ATLAS_ROWS;
+  const ids: number[] = [];
+  const w = windAt(c.x, c.y, c.z);
+  const rot = ((phase * 7.3) % 1 - 0.5) * 0.9;
+  for (const [a, bb] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+    b.bb = [(a - 0.5) * size, (bb - 0.45) * size, rot];
+    ids.push(b.v(c.x, c.y, c.z, light.x, light.y, light.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - bb * 0.996 - 0.002) * dv, tint, w, 1, ao, phase));
+  }
+  b.bb = [0, 0, 0];
   b.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** horizontal radius and height, counting billboard cards at their full size */
+function extents(g: THREE.BufferGeometry): { radius: number; height: number } {
+  const pa = g.attributes.position as THREE.BufferAttribute;
+  const ca = g.attributes.aCard as THREE.BufferAttribute;
+  let radius = 0, height = 0;
+  for (let i = 0; i < pa.count; i++) {
+    const e = Math.hypot(ca.getX(i), ca.getY(i));
+    radius = Math.max(radius, Math.hypot(pa.getX(i), pa.getZ(i)) + e * 0.8);
+    height = Math.max(height, pa.getY(i) + e * 0.8);
+  }
+  return { radius, height };
+}
 
 function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   if (sp === 'spruce') return makeConifer(variant, index);
@@ -765,7 +901,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
       const n = o.clone().multiplyScalar(0.55).add(new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).multiplyScalar(1.5)).normalize();
       const relD = c.distanceTo(center) / env(o);
       const ao = Math.min(1, (0.3 + 0.7 * Math.max(0, (relD - 0.3) / 0.7)) * (0.72 + 0.28 * (o.y * 0.5 + 0.5)) * (0.8 + 0.2 * Math.max(0, clumpN.y)));
-      cards.push({ c, o, n, light, size: R(p.cardSize), rot: (r() - 0.5) * 0.8, ao, tint, cell, phase, keep1: k % 2 === 0 });
+      cards.push({ c, o, n, light, size: R(p.cardSize), rot: (r() - 0.5) * 1.1, ao, tint, cell, phase, keep1: k % 2 === 0 });
     }
   });
 
@@ -785,16 +921,14 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
     }
     for (const c of cards) {
       if (lod === 1 && !c.keep1) continue;
-      const s = c.size * (lod === 1 ? 1.38 : 1);
+      // (a billboard shows its whole area from every side: ~0.8× the size of a fixed card)
+      const s = c.size * 0.8 * (lod === 1 ? 1.38 : 1);
       emitCard(b, c, s, windAt);
     }
     lods.push(b.geometry());
   }
-  let radius = 0;
-  const pa = lods[0].attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pa.count; i++) radius = Math.max(radius, Math.hypot(pa.getX(i), pa.getZ(i)));
-  const bb = lods[0].boundingBox!;
-  return { index, species: sp, variant, lods, height: bb.max.y, radius, crownR: avgR, crownY: cy };
+  const { radius, height } = extents(lods[0]);
+  return { index, species: sp, variant, lods, height, radius, crownR: avgR, crownY: cy };
 }
 
 function emitTube(b: TB, t: Tube, sides: number, bark: THREE.Color, kind: number, windAt: (x: number, y: number, z: number) => number, aoAt: (y: number) => number) {
@@ -830,25 +964,18 @@ function emitTube(b: TB, t: Tube, sides: number, bark: THREE.Color, kind: number
 }
 
 function emitCard(b: TB, c: Card, s: number, windAt: (x: number, y: number, z: number) => number) {
-  // card plane: normal c.n; "up" (towards the twig tips) = outward direction projected
-  const n = c.n;
-  const upv = c.o.clone().addScaledVector(n, -c.o.dot(n));
-  if (upv.lengthSq() < 1e-4) upv.set(0, 1, 0).addScaledVector(n, -n.y);
-  upv.normalize();
-  const right = new THREE.Vector3().crossVectors(upv, n).normalize();
-  // in-plane rotation
-  const cr = Math.cos(c.rot), sr = Math.sin(c.rot);
-  const U = upv.clone().multiplyScalar(cr).addScaledVector(right, sr);
-  const Rv = right.clone().multiplyScalar(cr).addScaledVector(upv, -sr);
+  // camera-facing card: every corner at the clump centre, spread in the vertex shader
   const col = c.cell % ATLAS_COLS, row = Math.floor(c.cell / ATLAS_COLS);
   const u0 = col / ATLAS_COLS, du = 1 / ATLAS_COLS;
   const v0 = row / ATLAS_ROWS, dv = 1 / ATLAS_ROWS;
   const ids: number[] = [];
+  const w = windAt(c.c.x, c.c.y, c.c.z);
   for (const [a, bb] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
-    const p = c.c.clone().addScaledVector(Rv, (a - 0.5) * s).addScaledVector(U, (bb - 0.35) * s);
-    // canvas y grows downward and the twig base is at the bottom of the cell
-    ids.push(b.v(p.x, p.y, p.z, c.light.x, c.light.y, c.light.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - bb * 0.996 - 0.002) * dv, c.tint, windAt(p.x, p.y, p.z), 1, c.ao * (bb > 0 ? 1 : 0.88), c.phase));
+    // the texture's twig base is at the bottom of the cell: anchor the card a little below its centre
+    b.bb = [(a - 0.5) * s, (bb - 0.38) * s, c.rot];
+    ids.push(b.v(c.c.x, c.c.y, c.c.z, c.light.x, c.light.y, c.light.z, u0 + (a * 0.996 + 0.002) * du, v0 + (1 - bb * 0.996 - 0.002) * dv, c.tint, w + bb * 0.05, 1, c.ao * (bb > 0 ? 1 : 0.9), c.phase));
   }
+  b.bb = [0, 0, 0];
   b.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
 }
 

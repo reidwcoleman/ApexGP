@@ -1,5 +1,5 @@
 import { F1_SPEC, type CarSpec } from '../sim/CarPhysics.ts';
-import { POINTS } from '../race/Race.ts';
+import { POINTS, AI_SKILL } from '../race/Race.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import type { LiveryPattern, Team } from '../race/Teams.ts';
 
@@ -128,6 +128,8 @@ export interface CareerData {
   paint: Record<number, Paint>;
   history: RaceRecord[];
   setup: Record<SetupId, number>;
+  /** Dynamic difficulty: the AI pace (fraction of the limit) that matches the player, updated after every race */
+  aiSkill?: number;
 }
 
 export interface RaceReward {
@@ -230,6 +232,18 @@ export class Career {
     const unlocked = this.unlockedCircuits().find((c) => !wasUnlocked.has(c.id))?.id ?? null;
     this.save();
     return { points, credits, breakdown, unlocked, bestBefore };
+  }
+
+  // ------------------------------------------------------------------ dynamic difficulty
+  /** the AI level Dynamic difficulty races at (≈0.72 … 1.03) */
+  get aiSkill(): number {
+    const v = this.data.aiSkill;
+    return typeof v === 'number' && isFinite(v) ? Math.max(AI_SKILL.min, Math.min(AI_SKILL.max, v)) : AI_SKILL.start;
+  }
+  setAiSkill(v: number) {
+    if (!isFinite(v)) return;
+    this.data.aiSkill = Math.max(AI_SKILL.min, Math.min(AI_SKILL.max, v));
+    this.save();
   }
 
   // ------------------------------------------------------------------ car development

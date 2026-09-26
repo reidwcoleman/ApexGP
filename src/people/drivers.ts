@@ -25,7 +25,10 @@ export function driverLook(team: Team, d: Driver, opts: { cap?: boolean; gloves?
     tone,
     hair,
     hairColor: L.hair,
-    beard: !!L.beard || (L.stubble ?? 0) > 0.4,
+    skin: L.skin,
+    beard: !!L.beard,
+    // a racing driver's shave: a shadow at least, real stubble where they have it
+    stubble: Math.max(0.12, L.stubble ?? 0),
     top: 'suit',
     topColor: team.primary,
     top2: team.secondary,
@@ -39,6 +42,9 @@ export function driverLook(team: Team, d: Driver, opts: { cap?: boolean; gloves?
     height: 0.97 + ((d.number * 37) % 7) * 0.01,
     face: { width: 0.94 + ((L.face?.width ?? 1) - 0.94) * 1.4, jaw: L.face?.jaw ?? 1, length: L.face?.length ?? 1 },
     build: 0.98,
+    // drivers are lean and fit
+    weight: -0.35 + ((d.number * 13) % 5) * 0.06,
+    muscle: 0.45,
   };
 }
 

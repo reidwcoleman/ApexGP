@@ -98,6 +98,8 @@ export class Track {
   readonly kappa: Float32Array;
   /** bank angle (rad), + = right side lower */
   readonly bank: Float32Array;
+  /** the authored part of `bank` (CircuitDef.banking: steep banked corners), 0 elsewhere */
+  readonly banked: Float32Array;
   readonly halfWidth: Float32Array;
   readonly kerbL: Float32Array;
   readonly kerbR: Float32Array;
@@ -114,8 +116,10 @@ export class Track {
   /** absolute s of the sector 1→2 and 2→3 boundaries */
   readonly sectorS: [number, number];
   readonly drs: DrsZone[];
+  /** where the lap crosses over itself (Suzuka's figure of eight): s on the lower and the upper pass */
+  readonly crossings: { lower: number; upper: number }[] = [];
   /** pit lane along the main straight: s range, side (+1 right) and lateral band */
-  readonly pit: { side: 1 | -1; sStart: number; sEnd: number; wallOffset: number; laneInner: number; laneOuter: number; garageOffset: number };
+  readonly pit: { side: 1 | -1; sStart: number; sEnd: number; wallOffset: number; laneInner: number; laneOuter: number; garageOffset: number; building: [number, number] | null; paddock: number };
 
   private readonly hash = new Map<number, number[]>();
   private static readonly HASH_CELL = 24;
@@ -135,6 +139,7 @@ export class Track {
     this.heading = f32();
     this.kappa = f32();
     this.bank = f32();
+    this.banked = f32();
     this.halfWidth = f32();
     this.kerbL = f32();
     this.kerbR = f32();
@@ -152,6 +157,15 @@ export class Track {
       this.kappa[i] = d.kappa[i];
       this.halfWidth[i] = def.halfWidth;
     }
+    // wider stretches (Austin's Turn 1): eased over ~40 m at each end
+    for (const w of def.widen ?? []) {
+      const len = ((w.to - w.from) % n + n) % n;
+      for (let d = -40; d <= len + 40; d++) {
+        const e = Math.min(1, (d + 40) / 40, (len + 40 - d) / 40);
+        const i = (((Math.round(w.from) + d) % n) + n) % n;
+        this.halfWidth[i] = Math.max(this.halfWidth[i], def.halfWidth + w.extra * e * e * (3 - 2 * e));
+      }
+    }
 
     // Banking: a touch of positive camber in the faster corners.
     {
@@ -166,6 +180,22 @@ export class Track {
       const sm = smoothCircular(raw, 20, 3);
       // bank > 0 means the right side is lower. Left turn (κ>0) → inside is left → left lower → bank < 0.
       for (let i = 0; i < n; i++) this.bank[i] = sm[i];
+    }
+    // Authored banking (Zandvoort's Hugenholtz and Luyendijk): tilt toward the inside of
+    // the bend, eased in and out; `banked` keeps just this part for the physics and AI.
+    for (const b of def.banking ?? []) {
+      const len = this.delta(b.start, b.end);
+      const ramp = b.ramp ?? 40;
+      let turn = 0;
+      for (let d = 0; d <= len; d++) turn += this.kappa[this.wrap(Math.round(b.start) + d)];
+      const ang = -Math.sign(turn) * b.deg * (Math.PI / 180);
+      for (let d = -ramp; d <= len + ramp; d++) {
+        const i = this.wrap(Math.round(b.start) + d);
+        const e = Math.min(1, (d + ramp) / ramp, (len + ramp - d) / ramp);
+        const w = e * e * (3 - 2 * e);
+        this.bank[i] += (ang - this.bank[i]) * w;
+        this.banked[i] = ang * w;
+      }
     }
 
     // Frames.
@@ -197,6 +227,7 @@ export class Track {
       if (!arr) this.hash.set(key, (arr = []));
       arr.push(i);
     }
+    this.findCrossings();
 
     // Race geometry.
     this.startS = def.startOffset % n;
@@ -213,6 +244,8 @@ export class Track {
       laneInner: def.halfWidth + 4.2,
       laneOuter: def.halfWidth + 16,
       garageOffset: def.halfWidth + 19,
+      building: def.pit.building ?? null,
+      paddock: def.pit.paddock ?? 125,
     };
 
     this.buildKerbs();
@@ -530,6 +563,32 @@ export class Track {
     return (cx + 4096) * 8192 + (cz + 4096);
   }
 
+  /** a figure-of-eight lap passes over itself: find each crossing (elevation must separate the passes) */
+  private findCrossings() {
+    const n = this.n;
+    const C = Track.HASH_CELL;
+    const dist = (a: number, b: number) => Math.hypot(this.px[a] - this.px[b], this.pz[a] - this.pz[b]);
+    for (let i = 0; i < n; i += 2) {
+      const cx = Math.floor(this.px[i] / C), cz = Math.floor(this.pz[i] / C);
+      for (let ox = -1; ox <= 1; ox++)
+        for (let oz = -1; oz <= 1; oz++) {
+          for (const j of this.hash.get(this.hashKeyCell(cx + ox, cz + oz)) ?? []) {
+            if (Math.abs(this.delta(i, j)) < 200 || dist(i, j) > 3) continue;
+            let a = i, b = j;
+            for (let da = -8; da <= 8; da++)
+              for (let db = -8; db <= 8; db++) {
+                const A2 = this.wrap(i + da), B2 = this.wrap(j + db);
+                if (dist(A2, B2) < dist(a, b)) { a = A2; b = B2; }
+              }
+            const lower = this.py[a] < this.py[b] ? a : b;
+            const upper = lower === a ? b : a;
+            if (this.crossings.some((c) => Math.abs(this.delta(c.lower, lower)) < 100 || Math.abs(this.delta(c.upper, lower)) < 100)) continue;
+            this.crossings.push({ lower, upper });
+          }
+        }
+    }
+  }
+
   private buildKerbs() {
     const n = this.n;
     const mark = (side: number, from: number, to: number, width: number) => {
@@ -602,10 +661,15 @@ export class Track {
     const tL = new Float32Array(n);
     const tR = new Float32Array(n);
     // Straights: 11–16 m from the edge with a slow wobble so walls don't look ruled.
+    // (semi-street circuits bring them in close: def.walls)
+    const wallStraight = this.def.walls?.straight ?? 13;
+    const wallWob = this.def.walls?.wobble ?? 1;
+    const wallInside = this.def.walls?.inside ?? 9;
+    const wallCorner = Math.min(10, wallStraight);
     for (let i = 0; i < n; i++) {
-      const wob = 2.5 * Math.sin(i * 0.011) + 1.5 * Math.sin(i * 0.029 + 1.3);
-      tL[i] = hw + 13 + wob;
-      tR[i] = hw + 13 - wob;
+      const wob = (2.5 * Math.sin(i * 0.011) + 1.5 * Math.sin(i * 0.029 + 1.3)) * wallWob;
+      tL[i] = hw + wallStraight + wob;
+      tR[i] = hw + wallStraight - wob;
     }
     for (const c of this.corners) {
       const outside = c.dir;
@@ -617,11 +681,11 @@ export class Track {
         const i = ((s % n) + n) % n;
         // ramp in/out of the full runoff depth
         const ramp = Math.min(1, (s - (st - 40)) / 50, (en + 80 - s) / 60);
-        out[i] = Math.max(out[i], hw + 10 + (c.runoffDepth - 10) * Math.max(0, ramp));
+        out[i] = Math.max(out[i], hw + wallCorner + (c.runoffDepth - wallCorner) * Math.max(0, ramp));
       }
       for (let s = Math.floor(st); s <= Math.ceil(en); s++) {
         const i = ((s % n) + n) % n;
-        ins[i] = Math.max(ins[i], hw + 9);
+        ins[i] = Math.max(ins[i], hw + wallInside);
       }
     }
     // pit wall
@@ -655,16 +719,17 @@ export class Track {
         // march outwards and stop where another section is closer than we are
         const rx = this.rx[i] * side;
         const rz = this.rz[i] * side;
-        if (clear[i] < d * 2 + 12) for (let q = hw + 2; q <= d; q += 2) {
+        const hwi = Math.max(hw, this.halfWidth[i]); // (wider stretches: def.widen)
+        if (clear[i] < d * 2 + 12) for (let q = hwi + 2; q <= d; q += 2) {
           const x = this.px[i] + rx * q;
           const z = this.pz[i] + rz * q;
           const other = this.distanceToOther(x, z, i);
           if (other < q + 2) {
-            d = Math.max(hw + 2.5, q - 2);
+            d = Math.max(hwi + 2.5, q - 2);
             break;
           }
         }
-        out[i] = Math.max(hw + 2.5, d);
+        out[i] = Math.max(hwi + 2.5, d);
       }
       return out;
     };
@@ -676,6 +741,12 @@ export class Track {
     for (let i = 0; i < n; i++) {
       this.barrierL[i] = Math.min(L[i], Ls[i] + 0.5);
       this.barrierR[i] = Math.min(R[i], Rs[i] + 0.5);
+      // steep banking: the low side's wall comes in close (the tilted plane would otherwise dig a pit)
+      const bk = this.banked[i];
+      if (Math.abs(bk) > 0.01) {
+        const low = bk > 0 ? this.barrierR : this.barrierL;
+        low[i] = Math.min(low[i], low[i] + (hw + 6 - low[i]) * Math.min(1, Math.abs(bk) / 0.2));
+      }
     }
     // Walls may not swing in or out faster than ~0.45 m per metre of track: a
     // deep run-off meeting the inside cap of the next corner otherwise makes the
@@ -690,6 +761,16 @@ export class Track {
         for (let k = n - 1; k >= 0; k--) {
           const i = k, q = (k + 1) % n;
           if (arr[i] > arr[q] + SLOPE) arr[i] = arr[q] + SLOPE;
+        }
+      }
+    }
+    // where the lap crosses itself: parallel walls through the underpass and along the bridge
+    for (const c of this.crossings) {
+      for (const [s0, half] of [[c.lower, 34], [c.upper, 24]] as const) {
+        for (let d = -half - 26; d <= half + 26; d++) {
+          const i = this.wrap(s0 + d);
+          const cap = hw + 3 + Math.max(0, Math.abs(d) - half) * SLOPE;
+          for (const arr of [this.barrierL, this.barrierR]) arr[i] = Math.abs(d) <= half ? cap : Math.min(arr[i], cap);
         }
       }
     }

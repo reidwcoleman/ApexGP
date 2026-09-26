@@ -52,6 +52,6 @@ while (t < maxT) {
   if (cars.every((c) => c.laps >= LAPS)) break;
 }
 for (const [i, c] of cars.entries()) {
-  console.log(`car ${i}: laps ${c.laps} times ${c.times.map((x) => x.toFixed(2)).join(' ')} resets ${c.resets} wallHits ${c.wallHits} offTrack ${c.offs} dmg ${c.car.damage.toFixed(0)}`);
+  console.log(`car ${i}: laps ${c.laps} times ${c.times.map((x) => x.toFixed(2)).join(' ')} resets ${c.resets} wallHits ${c.wallHits} offTrack ${c.offs} integ ${c.car.integrity.toFixed(2)}`);
 }
 console.log('max deviation from line', maxLat.toFixed(2), 'm; sim time', t.toFixed(1));

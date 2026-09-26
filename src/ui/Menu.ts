@@ -4,10 +4,10 @@ import type { CameraMode } from '../game/Cameras.ts';
 import { CAMERA_LABEL, CAMERA_ORDER } from '../game/Cameras.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
-import { POINTS } from '../race/Race.ts';
+import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
 import type { DamageMode } from '../sim/CarPhysics.ts';
-import { ASSIST_PRESETS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
+import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
@@ -27,6 +27,10 @@ export interface RaceSetup {
   track: string;
   /** crash damage */
   damage: DamageMode;
+  /** track-limit rules */
+  trackLimits: TrackLimitsMode;
+  /** save format: bumped when the defaults change in a way old saves should pick up */
+  v?: number;
 }
 
 export interface Settings {
@@ -37,15 +41,29 @@ export interface Settings {
   autoQuality?: boolean;
   camera: CameraMode;
   volume: number;
+  /** background music level in the menus (0..1) */
+  music: number;
 }
 
 export const LAPS = [3, 5, 10, 20];
+/** AI level. Dynamic (the default) races at the player's own rating (career.aiSkill), learnt race by race */
 export const DIFFICULTY = [
-  { label: 'Rookie', value: 0.9 },
-  { label: 'Pro', value: 0.95 },
-  { label: 'Elite', value: 0.98 },
-  { label: 'Legend', value: 1.0 },
+  { label: 'Dynamic', value: 0.92, dynamic: true },
+  { label: 'Rookie', value: 0.9, dynamic: false },
+  { label: 'Pro', value: 0.95, dynamic: false },
+  { label: 'Elite', value: 0.98, dynamic: false },
+  { label: 'Legend', value: 1.0, dynamic: false },
 ];
+/** the AI level a race with this setup runs at, and whether it adapts */
+export function aiLevel(setup: RaceSetup, career: Career): { value: number; dynamic: boolean } {
+  const d = DIFFICULTY[setup.difficulty] ?? DIFFICULTY[0];
+  return d.dynamic ? { value: career.aiSkill, dynamic: true } : { value: d.value, dynamic: false };
+}
+const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
+const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
+/** the setup save format (2: dynamic AI, lenient track limits, no braking assist by default) */
+const SETUP_V = 2;
+const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'clear', time: 'afternoon', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
   { label: 'Midfield', slot: 10 },
@@ -54,7 +72,7 @@ export const GRID = [
 ];
 const WEATHERS: WeatherChoice[] = ['random', 'clear', 'haze', 'windy', 'cloudy', 'overcast', 'mist', 'fog', 'drying', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm', 'changeable'];
 const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
-const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset'];
+const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset', 'dusk', 'night'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
@@ -92,6 +110,10 @@ export interface MenuCallbacks {
   onFocusPart(part: SetupPart | null): void;
   /** play this highlight on the garage wall */
   onPlayHighlight(id: string): void;
+  /** the highlight on the garage wall right now */
+  nowPlaying?(): string | null;
+  /** watch a simulated race (every car on AI, broadcast cameras) */
+  onSpectate?(setup: RaceSetup): void;
 }
 
 export type HubTab = 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
@@ -110,6 +132,12 @@ const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: number;
   monza: { country: 'Italy', km: '5.793', turns: 11, line: 'The Temple of Speed' },
   spa: { country: 'Belgium', km: '7.004', turns: 19, line: 'Eau Rouge, Raidillon and the Ardennes' },
   silverstone: { country: 'Great Britain', km: '5.891', turns: 18, line: 'Maggotts, Becketts and Chapel' },
+  suzuka: { country: 'Japan', km: '5.807', turns: 18, line: 'The S Curves, Spoon and 130R' },
+  interlagos: { country: 'Brazil', km: '4.309', turns: 15, line: 'The S do Senna, the lake and the climb to the line' },
+  spielberg: { country: 'Austria', km: '4.318', turns: 10, line: 'Up the hill to Remus, down through Rauch and Würth' },
+  zandvoort: { country: 'Netherlands', km: '4.259', turns: 14, line: 'Tarzan, the dunes and the banked Hugenholtz' },
+  austin: { country: 'United States', km: '5.513', turns: 20, line: 'The climb to Turn 1, the esses and the Tower' },
+  montreal: { country: 'Canada', km: '4.361', turns: 14, line: 'The Senna S, the hairpin and the Wall of Champions' },
 };
 
 const fmtCr = (n: number) => '₵\u2009' + Math.round(n).toLocaleString('en-US');
@@ -201,7 +229,16 @@ export class Menu {
     this.career = career;
     this.root = el('div', '', parent);
     this.root.id = 'menu';
-    this.setup = load<RaceSetup>('apexgp.setup', { team: 0, seat: 0, laps: 5, difficulty: 1, grid: 1, weather: 'clear', time: 'afternoon', assists: { ...ASSIST_PRESETS.casual }, compound: 'auto', track: 'monza', damage: 'full' });
+    // (v: 0 here so a save without a version reads as an old one)
+    this.setup = load<RaceSetup>('apexgp.setup', { ...DEFAULT_SETUP, v: 0, assists: { ...DEFAULT_ASSISTS } });
+    // saves from before the current defaults: pick up the new assists (no braking assist),
+    // Dynamic AI and lenient track limits once; everything else the player chose stays
+    if ((this.setup.v ?? 0) < SETUP_V) {
+      this.setup = { ...this.setup, v: SETUP_V, assists: { ...DEFAULT_ASSISTS }, difficulty: 0, trackLimits: 'lenient' };
+      save('apexgp.setup', this.setup);
+    }
+    if (!(this.setup.difficulty >= 0 && this.setup.difficulty < DIFFICULTY.length)) this.setup.difficulty = 0;
+    if (!TRACK_LIMITS.includes(this.setup.trackLimits)) this.setup.trackLimits = 'lenient';
     if (!DAMAGE.includes(this.setup.damage)) this.setup.damage = 'full';
     // saves from before per-assist settings stored a preset index
     if (!this.setup.compound) this.setup.compound = 'auto';
@@ -209,9 +246,10 @@ export class Menu {
     // saves from before the weather system
     if (!WEATHERS.includes(this.setup.weather)) this.setup.weather = 'random';
     if (!TIMES.includes(this.setup.time)) this.setup.time = 'random';
-    if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...ASSIST_PRESETS.casual };
-    else this.setup.assists = { ...ASSIST_PRESETS.casual, ...this.setup.assists };
-    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'high', camera: 'chase', volume: 0.8, autoQuality: true });
+    if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...DEFAULT_ASSISTS };
+    else this.setup.assists = { ...DEFAULT_ASSISTS, ...this.setup.assists };
+    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'high', camera: 'chase', volume: 0.8, music: 0.35, autoQuality: true });
+    if (typeof this.settings.music !== 'number') this.settings.music = 0.35;
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
     // older saves may have been stepped down by the automatic quality: start again from High
     if ((this.settings.v ?? 0) < SETTINGS_V) {
@@ -372,6 +410,11 @@ export class Menu {
       this.mode = 'timetrial';
       this.show('setup');
     });
+    if (this.cb.onSpectate) {
+      // simulate the race: all cars driven by the AI, the TV director on the cameras
+      const watch = el('div', 'cta ghost watch', row, 'Watch a simulated race');
+      this.action(watch, () => this.cb.onSpectate?.({ ...this.setup }));
+    }
     el('div', 'hp-note', p, `Finish in the top ${UNLOCK_POS} to unlock the next round. Points pay credits for car development.`);
     // start on the Race button
     this.sel = CIRCUITS.length;
@@ -542,18 +585,28 @@ export class Menu {
   }
 
   private tabHighlights(p: HTMLElement) {
-    el('div', 'hp-cap', p, 'Highlights');
     const list = this.highlights?.list ?? [];
+    el('div', 'hp-cap', p, list.length ? `Highlights <span class="hp-count">${list.length} clip${list.length === 1 ? '' : 's'}</span>` : 'Highlights');
     if (!list.length) {
-      el('div', 'hp-empty', p, '<b>No highlights yet</b>Overtakes, taking the lead, fastest laps, the chequered flag and the podium are recorded as you race, and play on the wall behind your car.');
+      el('div', 'hp-empty', p, '<b>No highlights yet</b>Overtakes, taking the lead, fastest laps, the chequered flag and the podium are filmed as you race, and play on the video wall behind your car.');
+      const go = el('div', 'cta ghost', p, 'Go racing');
+      this.action(go, () => this.setTab('race'));
       return;
     }
-    el('div', 'hp-note', p, 'Your best moments, best first. Select one to play it on the video wall.');
+    const playing = this.cb.nowPlaying?.() ?? null;
     for (const h of list.slice(0, 12)) {
-      const row = el('div', 'hlrow', p);
+      const row = el('div', 'hlrow' + (h.id === playing ? ' playing' : ''), p);
+      row.dataset.id = h.id;
       const when = new Date(h.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      row.innerHTML = `<img src="${h.frames[Math.min(3, h.frames.length - 1)]}" alt=""><div><div class="hk">${MOMENT_LABEL[h.kind]} · ${when}</div><div class="ht">${h.title}</div><div class="hs">${h.sub}</div></div>`;
-      this.action(row, () => this.cb.onPlayHighlight(h.id));
+      const secs = Math.max(1, Math.round(h.duration || 0));
+      const poster = this.highlights?.posterUrl(h) ?? '';
+      row.innerHTML =
+        `<div class="hl-thumb">${poster ? `<img src="${poster}" alt="">` : ''}<span class="hl-dur">0:${String(secs).padStart(2, '0')}</span><span class="hl-play"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M5 3.2v9.6L12.6 8z" fill="currentColor"/></svg></span><span class="hl-eq"><i></i><i></i><i></i></span></div>` +
+        `<div class="hl-text"><div class="hk"><span>${MOMENT_LABEL[h.kind]}</span><time>${when}</time></div><div class="ht">${h.title}</div><div class="hs">${h.sub}</div></div>`;
+      this.action(row, () => {
+        this.cb.onPlayHighlight(h.id);
+        this.markPlaying(h.id);
+      });
     }
     const clr = el('div', 'hrowlink danger', p, 'Clear highlights<span class="chev">›</span>');
     let armed = false;
@@ -614,6 +667,14 @@ export class Menu {
       this.renderTab();
     });
     el('div', 'hp-note', p, 'Drag the car to look around it. The set-up applies to your car from the next session.');
+  }
+
+  /** the highlights list shows which clip the wall is playing */
+  private playingMark: string | null = null;
+  private markPlaying(id: string | null) {
+    if (id === this.playingMark || !this.hubPanel) return;
+    this.playingMark = id;
+    for (const r of Array.from(this.hubPanel.querySelectorAll<HTMLElement>('.hlrow'))) r.classList.toggle('playing', r.dataset.id === id);
   }
 
   /** re-render the open hub tab (new data arrived) */
@@ -683,7 +744,10 @@ export class Menu {
         const i = LAPS.indexOf(st.laps);
         st.laps = LAPS[(Math.max(0, i) + d + LAPS.length) % LAPS.length];
       });
-      this.opt(p, 'Opponents', () => DIFFICULTY[st.difficulty].label, (d) => {
+      this.opt(p, 'Opponents', () => {
+        const dd = DIFFICULTY[st.difficulty] ?? DIFFICULTY[0];
+        return dd.dynamic ? `Dynamic <span class="dim">· ${Math.round(this.career.aiSkill * 100)}%</span>` : dd.label;
+      }, (d) => {
         st.difficulty = (st.difficulty + d + DIFFICULTY.length) % DIFFICULTY.length;
       });
       this.opt(p, 'Start from', () => GRID[st.grid].label, (d) => {
@@ -707,6 +771,10 @@ export class Menu {
         st.damage = DAMAGE[(i + d + DAMAGE.length) % DAMAGE.length];
       });
     }
+    this.opt(p, 'Track limits', () => TRACK_LIMITS_LABEL[st.trackLimits] ?? 'Lenient', (d) => {
+      const i = Math.max(0, TRACK_LIMITS.indexOf(st.trackLimits));
+      st.trackLimits = TRACK_LIMITS[(i + d + TRACK_LIMITS.length) % TRACK_LIMITS.length];
+    });
     const open = this.career.unlockedCircuits();
     if (open.length > 1)
       this.opt(p, 'Circuit', () => (CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
@@ -787,6 +855,9 @@ export class Menu {
     this.items.push({ el: as, kind: 'action', select: openAssists });
     this.opt(p, 'Volume', () => `${Math.round(st.volume * 100)}%`, (d) => {
       st.volume = Math.max(0, Math.min(1, Math.round((st.volume + d * 0.1) * 10) / 10));
+    }, true);
+    this.opt(p, 'Music', () => `${Math.round(st.music * 100)}%`, (d) => {
+      st.music = Math.max(0, Math.min(1, Math.round((st.music + d * 0.05) * 20) / 20));
     }, true);
     const cta = el('div', 'cta', p, 'Done');
     const done = () => this.show(this.settingsReturn);
@@ -1033,7 +1104,10 @@ export class Menu {
     if (this.screen === 'none' || this.items.length === 0) {
       if (this.screen === 'none') return;
     }
-    if (this.screen === 'title') return this.hubNav(nav);
+    if (this.screen === 'title') {
+      if (this.hubTab === 'highlights') this.markPlaying(this.cb.nowPlaying?.() ?? null);
+      return this.hubNav(nav);
+    }
     if (nav.up || nav.down) {
       const n = this.items.length;
       this.sel = (this.sel + (nav.down ? 1 : -1) + n) % n;

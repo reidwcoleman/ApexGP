@@ -212,6 +212,14 @@ const TYRE_COOL_WET = 0.05;
 /** fuel burn at full throttle (kg/s): ~100 kg/h, the regulation flow limit */
 export const FUEL_FLOW = 0.0275;
 
+/** damage: impact speed (m/s) below which a hit is free, and how much tougher the car is than the original tuning */
+const DMG_FREE_SPEED = 4;
+const DURABILITY = 1.35;
+
+/** transient yaw damping (tyre carcass lag): time constant (s) and gain (N·m per rad/s) */
+const YAW_LAG_T = 0.12;
+const YAW_LAG_DAMP = 16000;
+
 // wheel order: 0 FL, 1 FR, 2 RL, 3 RR
 const FRONT = [true, true, false, false];
 
@@ -332,6 +340,8 @@ export class CarPhysics {
   heave = 0;
   private pitchV = 0;
   private rollV = 0;
+  /** yaw rate averaged over the tyre lag (see YAW_LAG_T) */
+  private rLag = 0;
   private heaveV = 0;
   kerbPhaseVis = 0;
   contact: Contact = { wallHit: 0, wallSide: 0 };
@@ -568,8 +578,12 @@ export class CarPhysics {
 
     // ---- loads
     const Fz0 = (sp.mass * G) / 4;
-    const axleF = (m * G * sp.b) / L + downF - (m * this.ax * sp.cgH) / L;
-    const axleR = (m * G * sp.a) / L + downR + (m * this.ax * sp.cgH) / L;
+    // steep banking (CircuitDef.banking) presses the car into the road: N = m(g cosβ + a_lat sinβ),
+    // a_lat measured toward the low side (bank > 0 = right side lower, ay > 0 = turning left)
+    const bk = track.banked[Math.floor(track.wrap(this.s))];
+    const gN = bk ? Math.max(0.3, Math.cos(bk) - (this.ay * Math.sin(bk)) / G) : 1;
+    const axleF = (m * G * gN * sp.b) / L + downF - (m * this.ax * sp.cgH) / L;
+    const axleR = (m * G * gN * sp.a) / L + downR + (m * this.ax * sp.cgH) / L;
     const latT = (m * this.ay * sp.cgH) / ((sp.trackF + sp.trackR) / 2);
     const dF = latT * sp.rollFront;
     const dR = latT * (1 - sp.rollFront);
@@ -811,6 +825,12 @@ export class CarPhysics {
       }
     }
 
+    // tyre carcass lag: the tyres can't build side force instantly, which damps
+    // yaw transients (a step of lock settles instead of ringing at high speed)
+    // without changing anything in a steady corner — acts on r minus its recent average
+    this.rLag += (this.r - this.rLag) * Math.min(1, dt / YAW_LAG_T);
+    Mz -= YAW_LAG_DAMP * Math.min(1, Math.max(0, (v - 25) / 50)) * (this.r - this.rLag);
+
     // ---- gravity on slopes and banking (in-plane component of g)
     const ti = Math.floor(track.wrap(this.s));
     const ux = track.ux[ti];
@@ -988,13 +1008,14 @@ export class CarPhysics {
    * (nx, nz) is the world direction from the car toward what it hit.
    */
   addImpact(along: number, side: number, vn: number, px: number, pz: number, nx: number, nz: number) {
-    const e = vn - 3;
-    if (e <= 0) return;
+    if (vn <= 3) return;
     this.impacts.push({ along, side, speed: vn, x: px, z: pz, nx, nz });
     if (this.impacts.length > 8) this.impacts.shift();
-    if (this.damageMode === 'off' || this.destroyed) return;
-    // 3 m/s rubs are free; a 30 m/s square hit into a wall wrecks the front end
-    const hit = Math.pow(e / 28, 1.5);
+    const e = vn - DMG_FREE_SPEED;
+    if (e <= 0 || this.damageMode === 'off' || this.destroyed) return;
+    // rubs up to 4 m/s are free; a ~35 m/s square hit into a wall wrecks the front end.
+    // Every zone (and the car's integrity) takes DURABILITY× less per hit than it used to
+    const hit = Math.pow(e / 28, 1.5) / DURABILITY;
     const d = this.dmg;
     const add = (i: number, k: number) => (d[i] = Math.min(1, d[i] + hit * k));
     const left = side >= 0;

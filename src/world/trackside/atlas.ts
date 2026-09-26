@@ -73,7 +73,7 @@ export class PrintAtlas {
     const list: string[] = [];
     SPONSORS.forEach((_, i) => list.push('ad' + i));
     list.push(...BELTS, 'belt_logo0', 'belt_logo1', 'belt_logo2');
-    list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall', 'signs2', 'posts0', 'posts1', 'posts2');
+    list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall', 'signs2', 'posts0', 'posts1', 'posts2', 'wall_stripes', 'wall_champions');
     TEAMS.forEach((t) => list.push('team_' + t.id));
     list.forEach((n, i) => this.names.set(n, i));
     if (list.length > (this.size / this.cw) * (this.size / this.ch)) throw new Error('atlas overflow');
@@ -146,6 +146,23 @@ export class PrintAtlas {
       drawConcrete(ctx, x, y, W, H, '#8d8b86', 1);
       const [x2, y2] = this.origin('concrete_paint');
       drawConcrete(ctx, x2, y2, W, H, '#d9d7d0', 2);
+      // painted red/white blocks (1 m), then weathered like the rest
+      const [x3, y3] = this.origin('wall_stripes');
+      drawConcrete(ctx, x3, y3, W, H, '#dcdad3', 3);
+      ctx.fillStyle = 'rgba(190,24,30,0.93)';
+      for (let k = 0; k < 4; k += 2) ctx.fillRect(x3 + k * 128, y3, 128, H);
+      drawConcrete(ctx, x3, y3, W, H, 'rgba(0,0,0,0)', 4);
+      // the Wall of Champions: white paint, black hand-painted lettering
+      const [x4, y4] = this.origin('wall_champions');
+      drawConcrete(ctx, x4, y4, W, H, '#e6e4de', 5);
+      ctx.save();
+      ctx.fillStyle = '#111';
+      ctx.font = `italic 700 50px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('BIENVENUE AU QUÉBEC', x4 + W / 2, y4 + H * 0.46, W - 24);
+      ctx.restore();
+      drawConcrete(ctx, x4, y4, W, H, 'rgba(0,0,0,0)', 6);
     }
     {
       const [x, y] = this.origin('chevron');

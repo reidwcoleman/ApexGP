@@ -1,6 +1,9 @@
 import { ENGINE_WORKLET_SRC } from './engineWorklet.ts';
 import { type AudioBuffers, biquad, chain, clamp, forget, gainNode, loopSource, rectCurve, setT, smoothstep, tanhCurve } from './dsp.ts';
 
+/** level of the exhaust rasp (gated turbulence noise) — the main source of "buzz" */
+const RASP = 1.25;
+
 /** AudioParams every engine voice exposes (worklet or native fallback). */
 export interface EngineParams {
   rpm: AudioParam;
@@ -176,6 +179,8 @@ export interface EngineDrive {
   speed: number;
   ers: number;
   limiter: boolean;
+  /** pit-lane speed limiter engaged */
+  pitLimiter?: boolean;
   /** turbo shaft speed 0..1 (lagged) */
   boost: number;
   /** doppler factor applied to everything (tv view) */
@@ -228,25 +233,30 @@ export class PlayerEngine {
     src.out.connect(sp);
 
     // --- exhaust tone: body + bark formants, load-dependent brightness
-    const exBody = biquad(ctx, 'peaking', 115, 0.9, 3.5);
-    const exBark = biquad(ctx, 'peaking', 1450, 1.1, 2.5);
+    // (the 600–2k band is where a synthetic engine turns nasal/buzzy: give the lows and
+    // low-mids the weight, keep a little bark up top)
+    const exBody = biquad(ctx, 'peaking', 115, 0.9, 4);
+    const exWarm = biquad(ctx, 'lowshelf', 300, 0.7, 3.5);
+    const exNasal = biquad(ctx, 'peaking', 1150, 0.9, -3);
+    const exBark = biquad(ctx, 'peaking', 1800, 1.2, 1.5);
     this.exLP = biquad(ctx, 'lowpass', 6000, 0.55);
     this.exG = gainNode(ctx, 1);
     sp.connect(exBody, 0);
-    chain(exBody, exBark, this.exLP, this.exG);
+    chain(exBody, exWarm, exNasal, exBark, this.exLP, this.exG);
 
     // --- rasp: gated noise, band-passed
     const raspHP = biquad(ctx, 'highpass', 650, 0.6);
-    this.raspBP = biquad(ctx, 'bandpass', 2200, 0.75);
+    this.raspBP = biquad(ctx, 'bandpass', 2000, 0.75);
+    const raspLP = biquad(ctx, 'lowpass', 4800, 0.6);
     this.raspG = gainNode(ctx, 0);
     sp.connect(raspHP, 1);
-    chain(raspHP, this.raspBP, this.raspG);
+    chain(raspHP, this.raspBP, raspLP, this.raspG);
 
     // --- pops / crackles
     const popHP = biquad(ctx, 'highpass', 220, 0.7);
     const popSh = new WaveShaperNode(ctx, { curve: tanhCurve(2.2), oversample: '2x' });
-    const popPk = biquad(ctx, 'peaking', 2400, 1.0, 3);
-    const popLP = biquad(ctx, 'lowpass', 6500, 0.6);
+    const popPk = biquad(ctx, 'peaking', 1900, 1.0, 2);
+    const popLP = biquad(ctx, 'lowpass', 4800, 0.6);
     this.popG = gainNode(ctx, 0);
     sp.connect(popHP, 4);
     chain(popHP, popSh, popPk, popLP, this.popG);
@@ -274,15 +284,22 @@ export class PlayerEngine {
     chain(this.roarBP, this.roarG, near);
 
     // --- mechanical (valvetrain)
-    const mechHP = biquad(ctx, 'highpass', 1500, 0.7);
+    const mechHP = biquad(ctx, 'highpass', 1300, 0.7);
+    const mechLP = biquad(ctx, 'lowpass', 4500, 0.6);
     this.mechG = gainNode(ctx, 0);
     sp.connect(mechHP, 5);
-    chain(mechHP, this.mechG, near);
+    chain(mechHP, mechLP, this.mechG, near);
 
     // --- turbo / MGU-H whistle + compressor whoosh
     this.w1 = new OscillatorNode(ctx, { type: 'sine', frequency: 3000 });
     this.w2 = new OscillatorNode(ctx, { type: 'sine', frequency: 4500 });
-    const w2g = gainNode(ctx, 0.35);
+    const w2g = gainNode(ctx, 0.2);
+    // shaft wobble: a real turbo whistle is never a perfectly steady sine
+    const wob = loopSource(ctx, bufs.wander, 0.9);
+    const wobG = gainNode(ctx, 6);
+    wob.connect(wobG);
+    wobG.connect(this.w1.detune);
+    wobG.connect(this.w2.detune);
     this.wG = gainNode(ctx, 0);
     this.w1.connect(this.wG);
     this.w2.connect(w2g).connect(this.wG);
@@ -355,7 +372,7 @@ export class PlayerEngine {
     setT(p.dop, d.dop, now, 0.04, 5e-4);
     const cutting = now < this.cutUntil;
     if (!cutting) setT(p.load, thr, now, 0.028);
-    setT(p.limiter, d.limiter ? 1 : 0, now, 0.001);
+    setT(p.limiter, d.limiter ? 1 : d.pitLimiter ? 2 : 0, now, 0.001);
     const overrun = thr < 0.1 && d.rpm > 6000 ? 0.18 : 0;
     setT(p.pops, overrun + d.popBoost, now, 0.01);
 
@@ -364,27 +381,27 @@ export class PlayerEngine {
     setT(this.exLP.frequency, lpHz, now, 0.03);
     setT(this.exG.gain, 0.8 + 0.25 * R, now, 0.05);
     if (!cutting) {
-      setT(this.raspG.gain, (0.12 + 0.88 * thr) * (0.3 + 0.7 * Math.pow(R, 1.4)) * 1.9 * m.rasp, now, 0.03);
+      setT(this.raspG.gain, (0.12 + 0.88 * thr) * (0.3 + 0.7 * Math.pow(R, 1.4)) * RASP * m.rasp, now, 0.03);
       setT(this.roarG.gain, (0.08 + 0.92 * thr) * Math.pow(R, 1.6) * 1.4 * m.roar, now, 0.03);
     }
-    setT(this.raspBP.frequency, (1500 + 1500 * R) * d.dop, now, 0.05);
+    setT(this.raspBP.frequency, (1250 + 1250 * R) * d.dop, now, 0.05);
     setT(this.roarBP.frequency, (850 + 700 * R) * d.dop, now, 0.05);
     setT(this.inLP.frequency, (1500 + 3000 * thr * R + 600) * d.dop, now, 0.04);
     setT(this.popG.gain, 0.9 * m.pops, now, 0.05);
-    setT(this.mechG.gain, 3.8 * (0.3 + 0.7 * R) * m.mech, now, 0.05);
+    setT(this.mechG.gain, 2.4 * (0.3 + 0.7 * R) * m.mech, now, 0.05);
 
     // turbo: whistle frequency follows shaft speed
     const b = clamp(d.boost, 0, 1.2);
-    setT(this.w1.frequency, (2600 + 5400 * b) * d.dop, now, 0.03);
-    setT(this.w2.frequency, (2600 + 5400 * b) * 1.503 * d.dop, now, 0.03);
-    setT(this.wG.gain, 0.022 * b * b * m.whistle, now, 0.04);
+    setT(this.w1.frequency, (2100 + 3700 * b) * d.dop, now, 0.03);
+    setT(this.w2.frequency, (2100 + 3700 * b) * 1.503 * d.dop, now, 0.03);
+    setT(this.wG.gain, 0.013 * b * b * m.whistle, now, 0.05);
     setT(this.whooshBP.frequency, (1800 + 3000 * b) * d.dop, now, 0.05);
     setT(this.whooshG.gain, 0.05 * b * b * (0.3 + 0.7 * thr) * m.whistle, now, 0.05);
 
     // gearbox whine ∝ road speed
     const sp = Math.max(0, d.speed);
     setT(this.gearOsc.frequency, Math.max(20, sp * 41) * d.dop, now, 0.03);
-    setT(this.gearG.gain, 0.03 * (0.35 + 0.65 * thr) * smoothstep(3, 30, sp) * m.gear, now, 0.05);
+    setT(this.gearG.gain, 0.022 * (0.35 + 0.65 * thr) * smoothstep(3, 30, sp) * m.gear, now, 0.05);
 
     // ERS: deploy whine + fainter harvest whine under braking
     setT(this.ersOsc.frequency, Math.max(40, d.rpm * 0.29) * d.dop, now, 0.03);
@@ -407,7 +424,7 @@ export class PlayerEngine {
       p.load.setTargetAtTime(thr, cutEnd, 0.01);
       p.bang.setValueAtTime(++this.bangCount, cutEnd - 0.004);
       this.raspG.gain.setTargetAtTime(0.25 * m.rasp, now, 0.006);
-      this.raspG.gain.setTargetAtTime(1.9 * m.rasp * (0.12 + 0.88 * thr), cutEnd, 0.012);
+      this.raspG.gain.setTargetAtTime(RASP * m.rasp * (0.12 + 0.88 * thr), cutEnd, 0.012);
       this.roarG.gain.setTargetAtTime(0.15 * m.roar, now, 0.008);
       this.roarG.gain.setTargetAtTime(1.4 * m.roar * (0.08 + 0.92 * thr), cutEnd, 0.02);
       this.cutUntil = cutEnd + 0.03;
@@ -418,8 +435,8 @@ export class PlayerEngine {
       p.rpmOfs.cancelScheduledValues(now);
       p.rpmOfs.setTargetAtTime(480, now, 0.018);
       p.rpmOfs.setTargetAtTime(0, blipEnd, 0.05);
-      this.raspG.gain.setTargetAtTime(1.2 * m.rasp, now, 0.01);
-      this.raspG.gain.setTargetAtTime(1.9 * m.rasp * (0.12 + 0.88 * thr) * 0.5, blipEnd, 0.04);
+      this.raspG.gain.setTargetAtTime(0.8 * m.rasp, now, 0.01);
+      this.raspG.gain.setTargetAtTime(RASP * m.rasp * (0.12 + 0.88 * thr) * 0.5, blipEnd, 0.04);
       this.roarG.gain.setTargetAtTime(1.0 * m.roar, now, 0.01);
       this.roarG.gain.setTargetAtTime(0.1 * m.roar, blipEnd, 0.05);
       this.cutUntil = blipEnd + 0.06;
@@ -433,11 +450,12 @@ export class PlayerEngine {
     const lvl = this.mix.mech;
     if (lvl < 0.05) return;
     const n = new AudioBufferSourceNode(ctx, { buffer: this.bufs.white, playbackRate: 1 });
-    const bp = biquad(ctx, 'bandpass', up ? 2400 : 1900, 1.8);
+    const r = Math.random();
+    const bp = biquad(ctx, 'bandpass', (up ? 2100 : 1700) * (0.9 + 0.2 * r), 1.8);
     const g = gainNode(ctx, 0);
     chain(n, bp, g, this.clackOut);
     g.gain.setValueAtTime(0, now);
-    g.gain.linearRampToValueAtTime(0.16 * lvl, now + 0.002);
+    g.gain.linearRampToValueAtTime(0.11 * lvl * (0.8 + 0.4 * Math.random()), now + 0.002);
     g.gain.setTargetAtTime(0, now + 0.004, 0.006);
     n.start(now, Math.random() * 2, 0.06);
     const th = new OscillatorNode(ctx, { type: 'sine', frequency: 95 });
@@ -498,7 +516,11 @@ export class OpponentVoice {
     this.src.p.active.setValueAtTime(0, this.freeAt);
   }
 
-  set(o: { rpm: number; throttle: number; distance: number; relVel: number; pan: number }, now: number, level: number): void {
+  /**
+   * o.behind 0..1: how far behind the listener the car is (0 = ahead / beside, 1 = straight
+   * behind). From behind you hear its nose and intake past your own car's body: duller, quieter.
+   */
+  set(o: { rpm: number; throttle: number; distance: number; relVel: number; pan: number; behind?: number }, now: number, level: number): void {
     const t = Math.max(now, this.startAt);
     const p = this.src.p;
     const d = Math.max(0.5, o.distance);
@@ -510,10 +532,13 @@ export class OpponentVoice {
     setT(p.load, clamp(o.throttle, 0, 1), t, 0.04);
     setT(p.dop, dop, t, 0.035, 5e-4);
     // inverse-distance loudness, air absorption, rear-facing exhaust is brighter when receding
-    const att = clamp(7 / (2 + d), 0, 1.4) * level;
-    const bright = (2200 + 15000 * Math.exp(-d / 55)) * (v < 0 ? 1.15 : 0.8);
+    const behind = clamp(o.behind ?? 0, 0, 1);
+    const att = clamp(7 / (2 + d), 0, 1.4) * level * (1 - 0.3 * behind);
+    // air absorption with distance; the exhaust faces away when it's coming at us (duller),
+    // straight at us once it has passed (brighter); occluded from behind
+    const bright = (2000 + 14000 * Math.exp(-d / 55)) * (v < 0 ? 1.15 : 0.8) * (1 - 0.55 * behind);
     setT(this.g.gain, att, t, 0.04);
-    setT(this.lp.frequency, clamp(bright, 800, 20000), t, 0.05);
+    setT(this.lp.frequency, clamp(bright, 600, 20000), t, 0.05);
     setT(this.pan.pan, clamp(o.pan, -1, 1) * 0.9, t, 0.04);
   }
 }

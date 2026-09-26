@@ -56,67 +56,86 @@ function makeAsphalt(size: number, aniso: number) {
   const g1 = tileNoise(size, size / 4, 7);
   const g2 = tileNoise(size, size / 2, 8);
   const mid = tileFbm(size, 24, 4, 9);
+  // binder + sand: dark, with fine grit
   for (let i = 0; i < N; i++) {
     const g = g1[i] * 0.55 + g2[i] * 0.45;
-    h[i] = 0.1 * g + 0.12 * mid[i];
-    lum[i] = 0.034 + 0.008 * g + 0.01 * mid[i];
+    h[i] = 0.08 * g + 0.1 * mid[i];
+    lum[i] = 0.026 + 0.012 * g + 0.008 * mid[i];
   }
-  // aggregate: jittered grid of irregular stones, some half-buried
+  // crushed-stone aggregate (1.66 mm/px): coarse 8–18 mm chips on a jittered grid, then fines between them.
+  // Angular outlines, tops worn flat by traffic (the polished faces that glint in the sun).
   const rng = new Rng(1234);
-  const cell = 4;
-  const cells = size / cell;
-  for (let gy = 0; gy < cells; gy++) {
-    for (let gx = 0; gx < cells; gx++) {
-      const count = rng.next() < 0.5 ? 2 : 1;
-      for (let k = 0; k < count; k++) {
-        const cx = (gx + rng.next()) * cell;
-        const cy = (gy + rng.next()) * cell;
-        const r = 0.9 + 3.1 * Math.pow(rng.next(), 1.9);
-        const ecc = 0.55 + 0.45 * rng.next();
-        const ang = rng.next() * Math.PI;
-        const ca = Math.cos(ang), sa = Math.sin(ang);
-        const p = rng.next();
-        // mostly grey basalt/porphyry chips, a few pale quartz ones, a few near-black
-        const tone = p < 0.62 ? rng.range(0.052, 0.072) : p < 0.9 ? rng.range(0.072, 0.094) : rng.range(0.038, 0.048);
-        const top = 0.45 + 0.55 * rng.next();
-        const wob = rng.range(-0.35, 0.35);
-        const R = Math.ceil(r + 0.5);
-        const fcx = Math.floor(cx), fcy = Math.floor(cy);
-        const ir = 1 / r, ire = 1 / (r * ecc);
-        for (let oy = -R; oy <= R; oy++) {
-          const py = (fcy + oy + size) % size;
-          const dy = fcy + oy + 0.5 - cy;
-          for (let ox = -R; ox <= R; ox++) {
-            const dx = fcx + ox + 0.5 - cx;
-            const u = (dx * ca + dy * sa) * ir;
-            const v = (-dx * sa + dy * ca) * ire;
-            const q = u * u + v * v;
-            if (q >= 1.4) continue;
-            const d2 = q * (1 + wob * u * v);
-            if (d2 >= 1) continue;
-            const px = (fcx + ox + size) % size;
-            const dome = Math.sqrt(1 - d2);
-            const z = 0.08 + top * dome;
-            const o = py * size + px;
-            if (z > h[o]) {
-              h[o] = z;
-              lum[o] = tone * (0.86 + 0.2 * dome);
-            }
-          }
+  const stone = (cx: number, cy: number, r: number, tone: number, top: number) => {
+    const ecc = 0.6 + 0.4 * rng.next();
+    const ang = rng.next() * Math.PI;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const p3 = rng.next() * 6.283, p5 = rng.next() * 6.283;
+    const cp3 = Math.cos(p3), sp3 = Math.sin(p3), cp5 = Math.cos(p5), sp5 = Math.sin(p5);
+    const a3 = rng.range(0.08, 0.2), a5 = rng.range(0.03, 0.1);
+    const flat = rng.range(1.3, 2.2);
+    const R = Math.ceil(r * 1.35 + 1);
+    const fcx = Math.floor(cx), fcy = Math.floor(cy);
+    const ir = 1 / r, ire = 1 / (r * ecc);
+    for (let oy = -R; oy <= R; oy++) {
+      const py = (((fcy + oy) % size) + size) % size;
+      const dy = fcy + oy + 0.5 - cy;
+      for (let ox = -R; ox <= R; ox++) {
+        const dx = fcx + ox + 0.5 - cx;
+        const u = (dx * ca + dy * sa) * ir;
+        const v = (-dx * sa + dy * ca) * ire;
+        const q = u * u + v * v;
+        if (q >= 1.9) continue;
+        // angular outline: cos(3θ+φ), cos(5θ+ψ) from the unit direction (no trig per texel)
+        const iq = 1 / Math.sqrt(q + 1e-9);
+        const c = u * iq, sn = v * iq;
+        const c2 = c * c, s2 = sn * sn;
+        const c3 = c * (4 * c2 - 3), s3 = sn * (3 - 4 * s2);
+        const c5 = c * (16 * c2 * c2 - 20 * c2 + 5), s5 = sn * (16 * s2 * s2 - 20 * s2 + 5);
+        const d2 = q * (1 + a3 * (c3 * cp3 - s3 * sp3) + a5 * (c5 * cp5 - s5 * sp5));
+        if (d2 >= 1) continue;
+        const px = (((fcx + ox) % size) + size) % size;
+        const dome = Math.min(1, Math.sqrt(1 - d2) * flat);
+        const z = 0.1 + top * dome;
+        const o = py * size + px;
+        if (z > h[o]) {
+          h[o] = z;
+          // lighter, dusty rim where the stone meets the binder; the worn top a little darker/cleaner
+          lum[o] = tone * (0.9 + 0.22 * (1 - dome) + 0.06 * (g2[o] - 0.5));
         }
       }
     }
-  }
+  };
+  const pickTone = () => {
+    const p = rng.next();
+    // mostly grey porphyry/basalt, some warm brownish, a few pale quartz, a few near-black
+    return p < 0.55 ? rng.range(0.058, 0.085) : p < 0.8 ? rng.range(0.07, 0.1) : p < 0.92 ? rng.range(0.1, 0.135) : rng.range(0.036, 0.048);
+  };
+  const cellC = 8;
+  const cellsC = size / cellC;
+  for (let gy = 0; gy < cellsC; gy++)
+    for (let gx = 0; gx < cellsC; gx++) {
+      if (rng.next() < 0.1) continue;
+      const r = 2.4 + 3.2 * Math.pow(rng.next(), 1.4);
+      stone((gx + 0.2 + 0.6 * rng.next()) * cellC, (gy + 0.2 + 0.6 * rng.next()) * cellC, r, pickTone(), 0.55 + 0.45 * rng.next());
+    }
+  const cellF = 4;
+  const cellsF = size / cellF;
+  for (let gy = 0; gy < cellsF; gy++)
+    for (let gx = 0; gx < cellsF; gx++) {
+      if (rng.next() < 0.35) continue;
+      const r = 0.8 + 1.3 * rng.next();
+      stone((gx + rng.next()) * cellF, (gy + rng.next()) * cellF, r, pickTone(), 0.2 + 0.3 * rng.next());
+    }
   // binder darkening in the crevices (dirt/rubber collects low)
   const hb = blurWrap(Float32Array.from(h), size, 3);
   let hmax = 0;
   for (let i = 0; i < N; i++) hmax = Math.max(hmax, h[i]);
-  const nrm = normalFromHeight(h, size, 1.5);
+  const nrm = normalFromHeight(h, size, 1.8);
   const out = new Uint8Array(N * 4);
   let sumA = 0, sumH = 0;
   for (let i = 0; i < N; i++) {
     const cav = Math.max(0, hb[i] - h[i]);
-    const l = lum[i] * (1 - Math.min(0.32, cav * 1.6));
+    const l = lum[i] * (1 - Math.min(0.45, cav * 2.2));
     const a = Math.round(Math.sqrt(Math.min(1, l / ASPHALT_ALB_MAX)) * 255);
     const hh = Math.round((h[i] / hmax) * 255);
     out[i * 4] = a;

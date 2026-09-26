@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TEAMS } from '../../race/Teams.ts';
-import { Frame, Geo, TrackSpace } from './geo.ts';
+import { Frame, Geo, TrackSpace, beamWorld } from './geo.ts';
 import { GARAGE_W, L, type PitPlan } from './layout.ts';
 import type { PrintAtlas } from './textures.ts';
 
@@ -216,7 +216,7 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   for (const [sEnd, dir] of [[S0 - 0.81, -1], [S1 + 0.81, 1]] as [number, -1 | 1][]) {
     fr.at(ts, sEnd, (cw + BB) / 2, 0);
     print.rgb(1, 1, 1).mat(0.5, 0, 0.3, 1);
-    fr.panel(print, 0, (H.floor1 + H.roof) / 2, 0, dir, 0, 0, 14, 7, atlas.uv('back10'));
+    fr.panel(print, 0, (H.floor1 + H.roof) / 2, 0, dir, 0, 0, 14, 7, atlas.uv('podiumBack'));
     fr.at(ts, sEnd, (F + GB) / 2, 0);
     for (let i = 0; i < 3; i++) fr.panel(print, 0, 3.0, -5.6 + i * 5.6, dir, 0, 0, 5.2, 1.3, atlas.uv('sp' + [10, 11, 0][i]));
   }
@@ -269,6 +269,61 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   buildPodium(p, ts, atlas, o);
   buildTower(p, ts, atlas, o);
   buildPaddock(p, ts, atlas, o);
+  if (ts.track.def.id === 'silverstone') buildWing(p, ts, o);
+}
+
+// ------------------------------------------------------------------ Silverstone: the Wing
+
+/**
+ * The Wing's signature roof: a long white aerofoil blade floating above the building on
+ * slim struts, reaching out over the pit lane and swooping up toward the middle.
+ */
+function buildWing(p: PitPlan, ts: TrackSpace, o: BuildingOut) {
+  const { solid, thin } = o;
+  const F = L.front, BB = L.bldgBack;
+  const S0 = p.bldgS0 - 6, S1 = p.bldgS1 + 6;
+  const T = H.roofTop;
+  const prof: [number, number][] = [[F - 11, T + 2.2], [F - 6, T + 4.2], [F, T + 5.4], [F + 8, T + 5.9], [BB - 3, T + 5.2], [BB + 3, T + 3.6]];
+  const swoop = (s: number) => {
+    const t = (s - S0) / (S1 - S0);
+    return 3.2 * Math.sin(Math.PI * t) + 1.1 * Math.sin(3 * Math.PI * t);
+  };
+  const up = new THREE.Vector3(0, 1, 0), down = new THREE.Vector3(0, -1, 0);
+  const THK = 0.5;
+  solid.color(0xf3f4f2).mat(0.35, 0.25, 0, 1);
+  const n = Math.ceil((S1 - S0) / 6);
+  for (let i = 0; i < n; i++) {
+    const a = S0 + ((S1 - S0) * i) / n, b = S0 + ((S1 - S0) * (i + 1)) / n;
+    const ha = swoop(a), hb = swoop(b);
+    for (let k = 0; k < prof.length - 1; k++) {
+      const [l0, y0] = prof[k], [l1, y1] = prof[k + 1];
+      solid.quad(ts.P(a, l0, y0 + ha), ts.P(b, l0, y0 + hb), ts.P(b, l1, y1 + hb), ts.P(a, l1, y1 + ha), up);
+      solid.quad(ts.P(a, l0, y0 + ha - THK), ts.P(b, l0, y0 + hb - THK), ts.P(b, l1, y1 + hb - THK), ts.P(a, l1, y1 + ha - THK), down);
+    }
+    // leading and trailing edges
+    for (const [l, y] of [prof[0], prof[prof.length - 1]]) {
+      const out = ts.P(a, l === prof[0][0] ? l - 1 : l + 1, 0).sub(ts.P(a, l, 0));
+      solid.quad(ts.P(a, l, y + ha - THK), ts.P(b, l, y + hb - THK), ts.P(b, l, y + hb), ts.P(a, l, y + ha), out);
+    }
+  }
+  // end caps
+  for (const [sE, d] of [[S0, -1], [S1, 1]] as [number, number][]) {
+    const h = swoop(sE);
+    for (let k = 0; k < prof.length - 1; k++) {
+      const [l0, y0] = prof[k], [l1, y1] = prof[k + 1];
+      const out = ts.P(sE + d, l0, 0).sub(ts.P(sE, l0, 0));
+      solid.quad(ts.P(sE, l0, y0 + h - THK), ts.P(sE, l1, y1 + h - THK), ts.P(sE, l1, y1 + h), ts.P(sE, l0, y0 + h), out);
+    }
+  }
+  // slim struts in V pairs down to the roof
+  thin.color(0xd9dcdf).mat(0.3, 0.8, 0, 1);
+  for (let s = S0 + 10; s < S1 - 8; s += 24) {
+    for (const [l, y] of [[F + 3, T + 5.55], [BB - 4, T + 5.3]]) {
+      const top = ts.P(s, l, y + swoop(s) - THK);
+      beamWorld(thin, ts.P(s - 3, l, T), top, 0.22);
+      beamWorld(thin, ts.P(s + 3, l, T), top, 0.22);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ podium
@@ -334,7 +389,7 @@ function buildPodium(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingO
   solid.color(0x8e0016).mat(0.5, 0.1, 0.05, 0.3);
   ts.box(solid, a + 0.5, b - 0.5, F + 0.6, F + 0.8, deck1, H.slab2, 16 | 1 | 2, 6);
   print.rgb(1, 1, 1).mat(0.5, 0, 0.55, 0.3);
-  ts.wallQuad(print, mid - 3.7, mid + 3.7, F + 0.59, deck1 + 0.1, deck1 + 3.7, -1, atlas.uv('back10'));
+  ts.wallQuad(print, mid - 3.7, mid + 3.7, F + 0.59, deck1 + 0.1, deck1 + 3.7, -1, atlas.uv('podiumBack'));
   for (const d of [-9.5, 9.5]) ts.wallQuad(print, mid + d - 3.2, mid + d + 3.2, F + 0.59, deck1 + 1.8, deck1 + 3.4, -1, atlas.uv('podium'));
   // a slim lit sponsor beam on posts across the tip
   solid.color(0x2f3338).mat(0.45, 0.6, 0, 1);
@@ -390,7 +445,7 @@ function buildTower(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingOu
   solid.color(0x0b0c0e).mat(0.5, 0.4, 0, 1);
   ts.box(solid, a + 2, b - 2, F + 2.5, F + 3, 15.4, 21.8, 63);
   print.rgb(1, 1, 1).mat(0.35, 0, 1.4, 0.4);
-  ts.wallQuad(print, a + 2.3, b - 2.3, F + 2.49, 16.4, 20.9, -1, atlas.uv('back11'));
+  ts.wallQuad(print, a + 2.3, b - 2.3, F + 2.49, 16.4, 20.9, -1, atlas.uv('timingBoard'));
   print.rgb(1, 1, 1).mat(0.5, 0, 0.9, 0.4);
   ts.wallQuad(print, a + 2.3, b - 2.3, F + 2.49, 20.95, 21.7, -1, atlas.sub('timing', 0.1, 0.1, 0.9, 0.9));
 }

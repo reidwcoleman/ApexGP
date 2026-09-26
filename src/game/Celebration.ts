@@ -453,7 +453,9 @@ export class Celebration {
     this.crowd = new FanCrowd(
       peopleKit()!,
       spots.map((sp) => ({ x: sp.x, y: sp.y, z: sp.z, yaw: sp.yaw, team: sp.team, act: sp.flag ? ACT.FLAG : undefined, excite: 0.5 + Math.random() * 0.5 })),
-      { shadows: true },
+      // (perf: ~1,500 skinned people casting into both sun cascades cost ~6 M shadow triangles a frame;
+      // packed shoulder to shoulder their own shadows barely show)
+      { shadows: false },
     );
     this.group.add(this.crowd.group);
 

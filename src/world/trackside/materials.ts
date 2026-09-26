@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ASPHALT_ALB_MAX, ASPHALT_TILE, GRASS_TILE, GRAVEL_TILE, type GroundTextures } from './textures.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
+import type { RunoffPaint } from '../CircuitGen.ts';
 
 /**
  * Trackside materials. All are MeshStandardMaterial with onBeforeCompile
@@ -172,7 +173,7 @@ vec2 tsRip = vec2(0.0);  // rain ripples
 vec3 tsSsrN = vec3(0.0); // smooth normal for the reflection march (no ripples / aggregate)
 float tsWater = 0.0;     // 1 = the aggregate is under a water film
 float tsWet = 0.0;
-float tsDetail = 0.42;
+float tsDetail = 0.6;
 {
   float lat = vTrk.x;
   float sv = vTrk.y;
@@ -184,6 +185,8 @@ float tsDetail = 0.42;
   vec4 m24 = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.37, 0.61));
   vec4 mN = texture2D(uMacroN, vTrk * (1.0 / 14.0) + vec2(0.13, 0.29));
   vec4 mN2 = texture2D(uMacroN, vTrk * (1.0 / 61.0) + vec2(0.71, 0.05));
+  // decimetre mottling: binder-rich and stone-rich patches, oil drips, fines washed together
+  vec4 m3 = texture2D(uMacro, vTrk * (1.0 / 3.1) + vec2(0.21, 0.47));
 
   // ---- aggregate: two decorrelated samples, histogram-preserving blend → no visible tiling
   const float ca = 0.81915, sa = 0.57358;
@@ -212,9 +215,16 @@ float tsDetail = 0.42;
   nB = vec2(ca * nB.x + sa * nB.y, -sa * nB.x + ca * nB.y);
   tsN = mix(nA, nB, wB) * hk;   // (single-sample pixels: wB is 0 or 1, so only the matching frame is used)
   float alb = albE * albE * ${ASPHALT_ALB_MAX.toFixed(3)};
-  float stone = smoothstep(0.32, 0.62, hgt);
-  float rough = mix(0.95, 0.66, stone);
+  // far and grazing, the footprint outruns even 16x anisotropic filtering and the aggregate would alias
+  // (salt-and-pepper glints, worst on a glossy damp road): fall back to its statistics
+  float farK = smoothstep(0.006, 0.03, px);
+  albE = mix(albE, uAsphMean.x, farK * 0.7);
+  float stone = mix(smoothstep(0.34, 0.6, hgt), 0.3, farK);
+  // binder is matte; the stone tops are polished by traffic and glint
+  float rough = mix(0.86, 0.5, stone) + (m3.r - 0.5) * 0.12;
   vec3 col = vec3(alb);
+  // resolved grain: sparkle normals; minified: their variance is gone (averaged), keep a little relief
+  tsDetail *= mix(1.0, 0.55, smoothstep(0.002, 0.012, px)) * (1.0 - 0.6 * farK);
   float porous = 0.56;    // how much darker it gets when wet
   float lumTex = clamp(alb / 0.055, 0.5, 2.0);
   tsMac = (mN.rg * 2.0 - 1.0) * 0.045 + (mN2.rg * 2.0 - 1.0) * 0.03;
@@ -223,7 +233,7 @@ float tsDetail = 0.42;
 
   if (zone < 0.5 || (zone > 3.5 && zone < 4.5)) {
     // ================================================= racing asphalt
-    col *= (0.74 + 0.32 * m96.r + 0.16 * (m24.b - 0.5)) * tint;
+    col *= (0.74 + 0.32 * m96.r + 0.22 * (m24.b - 0.5)) * (0.78 + 0.44 * m3.b) * tint;
     float edgeD = zone < 0.5 ? hw - alat : 99.0;
     // dust and lighter, unused asphalt toward the edges
     float dust = (1.0 - smoothstep(0.2, 2.6, edgeD)) * (0.5 + 0.5 * m24.b);
@@ -235,8 +245,9 @@ float tsDetail = 0.42;
     float dd = d + (m24.b - 0.5) * 0.7;
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
     rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0);
-    col = mix(col, vec3(0.016, 0.016, 0.018), rub * 0.68);
-    rough = mix(rough, 0.62, rub * 0.55);
+    col = mix(col, vec3(0.013, 0.013, 0.015), rub * 0.8);
+    // rubber fills the texture and polishes it: smoother, a faint sheen along the line
+    rough = mix(rough, 0.5, rub * 0.6);
     tsDetail *= 1.0 - rub * 0.35;
 
     // the dry line: tyre tracks clear first, then the whole ±2 m band
@@ -326,9 +337,12 @@ float tsDetail = 0.42;
       // white edge line (track limit) on the last 0.2 m of the road
       float line = tsAA(hw - 0.2, alat);
       vec3 paint = vec3(0.68, 0.68, 0.66) * (0.8 + 0.25 * m24.b) * (0.86 + 0.14 * lumTex);
+      // worn through on the stone tops in patches, grey with tyre dust
+      float lw = smoothstep(0.5, 0.85, m3.b * 0.7 + m24.b * 0.5) * smoothstep(0.4, 0.8, hgt);
+      paint = mix(paint * (0.85 + 0.15 * m3.r), col * 1.3, lw * 0.8);
       col = mix(col, paint, line);
-      rough = mix(rough, 0.46, line);
-      tsDetail *= 1.0 - line * 0.6;
+      rough = mix(rough, mix(0.4, 0.75, lw), line);
+      tsDetail *= 1.0 - line * 0.6 * (1.0 - lw);
       porous = mix(porous, 0.18, line);
     }
   } else if (zone < 1.5) {
@@ -336,22 +350,28 @@ float tsDetail = 0.42;
     float kw = max(0.3, vA1.y - hw);
     float kd = (alat - hw) / kw;             // 0 at the road edge … 1 at the outer edge
     float red = tsSquare(sv / 2.0, 0.5);     // 1 m blocks
-    vec3 cr = vec3(0.52, 0.02, 0.016);
-    vec3 cw = vec3(0.74, 0.74, 0.72);
+    vec3 cr = uKerbA;
+    vec3 cw = uKerbB;
     vec3 paint = mix(cw, cr, red);
     if (vA1.z > 2.5) {
       // wide exit kerb: an outer band of green/white
       float outer = tsAA(0.62, kd);
       paint = mix(paint, vec3(0.032, 0.11, 0.042), outer);
     }
-    // paint wears through on the aggregate peaks; grime and rubber where cars ride it
+    // paint wears through on the aggregate peaks (most where the tyres ride: the inner half),
+    // grime and rubber where cars ride it, fresher paint in patches (repainted blocks)
     float grime = (0.4 + 0.6 * m24.b) * (0.15 + 0.55 * (1.0 - smoothstep(0.0, 0.7, kd)));
     float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.8, kd));
-    paint *= 0.86 + 0.28 * (albE - uAsphMean.x) / 0.3;
-    paint = mix(paint, vec3(0.022), clamp(grime * 0.32 + rubberMarks * 0.55, 0.0, 0.85));
+    float fresh = step(0.72, tsHash(vec2(floor(sv / 2.0), 7.0 + vA1.z)));
+    float wearK = clamp(smoothstep(0.45, 0.85, m3.b * 0.6 + m24.b * 0.5) * 0.7 + (1.0 - smoothstep(0.05, 0.4, kd)) * 0.45, 0.0, 1.0) * (1.0 - 0.7 * fresh);
+    float through = wearK * smoothstep(0.4, 0.8, hgt);
+    paint *= (0.9 + 0.2 * (albE - uAsphMean.x) / 0.3) * (0.93 + 0.14 * m3.b) * (1.0 + 0.08 * fresh);
+    paint = mix(paint, vec3(alb) * 1.5 + 0.01, through);
+    paint = mix(paint, vec3(0.022), clamp(grime * 0.3 + rubberMarks * 0.55, 0.0, 0.85) * (1.0 - 0.5 * fresh));
     col = paint;
-    rough = 0.52 + 0.2 * grime;
-    tsDetail = 0.22;
+    // satin paint: a real sheen on the intact paint, matte where it's worn or grimy
+    rough = mix(0.34, 0.78, clamp(through + grime * 0.35 + rubberMarks * 0.3, 0.0, 1.0));
+    tsDetail = mix(0.18, 0.5, through);
     porous = 0.22;
     // transverse ridges on the flat top (period 0.16 m), fading out with distance
     float ridgeMask = smoothstep(0.22, 0.3, kd) * (1.0 - smoothstep(0.86, 0.93, kd)) * (1.0 - smoothstep(0.006, 0.02, px));
@@ -364,15 +384,23 @@ float tsDetail = 0.42;
     float d = alat - vA1.y;
     col *= (1.2 + 0.3 * m96.r) * tint;
     if (vA1.z > 0.5) {
-      vec3 green = vec3(0.032, 0.1, 0.04) * (0.84 + 0.3 * m24.b);
-      float worn = smoothstep(0.64, 0.92, m24.b) * 0.35;
+      vec3 green = vec3(0.032, 0.1, 0.04) * (0.84 + 0.3 * m24.b) * (0.9 + 0.2 * m3.b);
+      // abrasive paint over the aggregate: the stone tops show through where it's worn
+      float worn = smoothstep(0.64, 0.92, m24.b) * 0.35 + smoothstep(0.5, 0.9, m3.b) * smoothstep(0.45, 0.8, hgt) * 0.5;
       col = mix(green * (0.85 + 0.25 * (albE - uAsphMean.x) / 0.3), col, worn);
       // thin white line on the outer edge of the verge
       float wl = tsBand(d, 1.32, 1.46);
-      col = mix(col, vec3(0.62, 0.62, 0.6), wl);
-      rough = 0.74;
-      tsDetail = 0.35;
+      col = mix(col, vec3(0.62, 0.62, 0.6) * (0.85 + 0.15 * m3.r), wl);
+      rough = mix(0.62, 0.85, worn);
+      tsDetail = 0.4;
       porous = 0.3;
+    }
+    // soil and grass cuttings blown over the outer edge (breaks the hard line against the grass)
+    if (vA1.z < 1.5) {
+      float n = texture2D(uMacro, vTrk * vec2(1.0 / 0.9, 1.0 / 2.3) + vec2(0.4, 0.2)).b;
+      float spill = 1.0 - smoothstep(0.0, 0.05 + 0.3 * n * n, 1.5 - d);
+      col = mix(col, vec3(0.05, 0.047, 0.034) * (0.7 + 0.6 * m3.b), spill * 0.75);
+      rough = mix(rough, 0.95, spill);
     }
   } else if (zone < 3.5) {
     // ================================================= tarmac run-off: older, lighter, painted bands
@@ -396,18 +424,49 @@ float tsDetail = 0.42;
       col = mix(col, col * 0.52, tt * 0.55);
     }
     if (vA1.z > 0.5) {
-      // painted run-off next to the verge: white gap, blue band, then a green band
+      // painted run-off next to the verge (per circuit, uRunoffStyle):
+      //   0 white gap + blue band · 1 astroturf strip · 2 red/white diagonal stripes · 3 none
       float d = alat - vA1.y;
       float gap = tsBand(d, 0.0, 0.12);
-      float bB = tsBand(d, 0.12, 2.3);
-      vec3 blue = vec3(0.028, 0.06, 0.15);
-      vec3 white = vec3(0.5, 0.5, 0.48);
-      vec3 paint = white * gap + blue * bB;
-      float amt = (gap + bB) * (0.78 + 0.2 * m24.b) * (1.0 - 0.35 * smoothstep(0.6, 0.9, m96.b));
-      col = mix(col, paint * (0.82 + 0.3 * (albE - uAsphMean.x) / 0.3), amt);
-      rough = mix(rough, 0.7, amt);
-      tsDetail = mix(tsDetail, 0.3, amt);
-      porous = mix(porous, 0.3, amt);
+      if (uRunoffStyle < 0.5) {
+        float bB = tsBand(d, 0.12, 2.3);
+        vec3 blue = vec3(0.028, 0.06, 0.15);
+        vec3 white = vec3(0.5, 0.5, 0.48);
+        vec3 paint = white * gap + blue * bB;
+        float amt = (gap + bB) * (0.78 + 0.2 * m24.b) * (1.0 - 0.35 * smoothstep(0.6, 0.9, m96.b));
+        // aggregate tops wear through the paint in patches
+        amt *= 1.0 - 0.55 * smoothstep(0.5, 0.9, m3.b) * smoothstep(0.45, 0.8, hgt);
+        col = mix(col, paint * (0.82 + 0.3 * (albE - uAsphMean.x) / 0.3), amt);
+        rough = mix(rough, 0.7, amt);
+        tsDetail = mix(tsDetail, 0.3, amt);
+        porous = mix(porous, 0.3, amt);
+      } else if (uRunoffStyle < 1.5) {
+        // astroturf: a 3 m strip of synthetic grass (tufted rows, sun-bleached patches, rubbered where cars run over it)
+        float band = tsBand(d, 0.15, 3.2);
+        float rows = 0.75 + 0.25 * sin(lat * 6.2832 / 0.019 * 0.5);
+        float fib = tsHash(floor(vTrk * vec2(160.0, 160.0)));
+        float fibK = 1.0 - smoothstep(0.004, 0.012, px);
+        vec3 turf = vec3(0.045, 0.16, 0.035) * (0.85 + 0.3 * m3.b) * mix(1.0, (0.8 + 0.4 * fib) * rows, fibK);
+        turf = mix(turf, vec3(0.08, 0.17, 0.06), smoothstep(0.6, 0.9, m24.b) * 0.5);
+        float wornT = smoothstep(0.55, 0.9, m96.b * 0.6 + m3.r * 0.5) * (1.0 - smoothstep(0.0, 1.5, d - 0.15));
+        turf = mix(turf, vec3(0.03, 0.05, 0.028), wornT * 0.6);
+        col = mix(col, vec3(0.5, 0.5, 0.48), gap);
+        col = mix(col, turf, band);
+        rough = mix(rough, 0.92, band);
+        tsDetail = mix(tsDetail, 0.9, band);
+        porous = mix(porous, 0.5, band);
+        tsMac += vec2(fib - 0.5, 0.0) * 0.12 * band * fibK;
+      } else if (uRunoffStyle < 2.5) {
+        // red/white diagonal stripes, 1.2 m, over a 2.2 m band
+        float band = tsBand(d, 0.12, 2.3);
+        float st = tsSquare((sv + d * 0.8) / 2.4, 0.5);
+        vec3 paint = mix(vec3(0.62, 0.62, 0.6), uKerbA, st);
+        float amt = max(gap, band) * (0.8 + 0.18 * m24.b) * (1.0 - 0.5 * smoothstep(0.5, 0.9, m3.b) * smoothstep(0.45, 0.8, hgt));
+        col = mix(col, paint * (0.85 + 0.3 * (albE - uAsphMean.x) / 0.3), amt);
+        rough = mix(rough, 0.55, amt);
+        tsDetail = mix(tsDetail, 0.3, amt);
+        porous = mix(porous, 0.25, amt);
+      }
     }
   } else {
     // ================================================= concrete apron
@@ -419,6 +478,12 @@ float tsDetail = 0.42;
     rough = 0.8;
     tsDetail = 0.15;
     porous = 0.35;
+  }
+
+  // grazing angles: the binder hides behind the stones, so what you see is their polished tops
+  {
+    float NoV = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+    rough = mix(rough, rough * 0.72, 1.0 - smoothstep(0.04, 0.35, NoV));
   }
 
   // ================================================= weather
@@ -442,10 +507,14 @@ float tsDetail = 0.42;
     col *= 1.0 - porous * damp;
     col = mix(col, col * vec3(0.9, 0.95, 1.04), damp * 0.5);
     col *= 1.0 - 0.35 * puddle;
-    rough = mix(rough, rough * 0.62, damp);
+    // a damp film evens out stone vs binder (and keeps the grain from flickering in glossy reflections)
+    rough = mix(rough, mix(rough, 0.45, 0.6) * 0.62, damp);
     // specular anti-aliasing: glossy water over sub-pixel aggregate normals sparkles, so flatten them with distance
     tsDetail *= (1.0 - 0.45 * damp) * mix(1.0, 0.12, smoothstep(0.0015, 0.008, px) * damp);
-    rough = mix(rough, mix(0.07, 0.035, puddle), sub);
+    // water only in the crevices is broken up by the stones around it (and half-hidden): not a mirror
+    // until the film joins up — keeps a damp road from sparkling like salt and pepper
+    float joined = max(statC, puddle);
+    rough = mix(rough, mix(mix(0.24, 0.07, joined), 0.035, puddle), sub);
     tsWater = sub;
     tsWet = wet;
     if (uRain > 0.01) {
@@ -467,6 +536,9 @@ const ASPHALT_NORMAL = /* glsl */ `
   vec3 mapN = normalize(vec3(nd + nm + tsRip, 1.0));
   normal = normalize(tbn * mapN);
   tsSsrN = normalize(tbn * vec3(nm, 1.0));
+  // specular anti-aliasing: normal variance inside the pixel widens the lobe (no sparkle crawl on glossy stone tops)
+  vec3 dnx = dFdx(normal), dny = dFdy(normal);
+  roughnessFactor = sqrt(roughnessFactor * roughnessFactor + min(0.5 * max(dot(dnx, dnx), dot(dny, dny)), 0.16));
 }
 `;
 
@@ -492,7 +564,23 @@ function patchGround(m: THREE.MeshStandardMaterial, key: string, t: GroundTextur
   m.customProgramCacheKey = () => key;
 }
 
-export function asphaltMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
+const RUNOFF_STYLE: Record<RunoffPaint, number> = { bands: 0, astroturf: 1, stripes: 2, plain: 3 };
+
+/** kerb paint (linear albedo) from sRGB hex; the defaults keep the classic red/white */
+function kerbColor(hex: string | undefined, fallback: THREE.Color): THREE.Color {
+  if (!hex) return fallback;
+  return new THREE.Color(hex).multiplyScalar(0.88);
+}
+
+export interface AsphaltOptions {
+  /** kerb block colours (sRGB hex), e.g. ['#c8261e', '#ecece8'] */
+  kerb?: [string, string];
+  runoffPaint?: RunoffPaint;
+}
+
+export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): THREE.MeshStandardMaterial {
+  const kerbA = kerbColor(opts.kerb?.[0], new THREE.Color(0.52, 0.02, 0.016));
+  const kerbB = kerbColor(opts.kerb?.[1], new THREE.Color(0.74, 0.74, 0.72));
   // the packed aggregate texture doubles as the "normal map" so three builds the tangent frame;
   // the normal stage itself is replaced below
   t.asphalt.repeat.set(1, 1);
@@ -502,12 +590,15 @@ export function asphaltMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-5', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-7', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     sh.uniforms.uAsphMean = { value: t.asphaltMean };
+    sh.uniforms.uKerbA = { value: kerbA };
+    sh.uniforms.uKerbB = { value: kerbB };
+    sh.uniforms.uRunoffStyle = { value: RUNOFF_STYLE[opts.runoffPaint ?? 'bands'] };
     Object.assign(sh.uniforms, ssrUniforms);
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform vec2 uAsphMean;')
+      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
       .replace(
@@ -676,14 +767,27 @@ export function grassMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
 
 // --------------------------------------------------------------------------------------------- vertex-PBR props
 
-/** wet props: darker and glossier, most on upward-facing surfaces */
+/**
+ * Wet props: darker and glossier, most on upward-facing surfaces; vertical faces get
+ * running-water streaks (darker, glossy columns, fading downward from ledges) so walls,
+ * boards and barriers read as rain-soaked rather than uniformly varnished.
+ */
 const PROP_WET = /* glsl */ `
-{
+if (uWetness > 0.002) {
   vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
   float wUp = clamp(dot(normalize(vNormal), upV), 0.0, 1.0);
   float wet = uWetness * (0.45 + 0.55 * wUp);
-  diffuseColor.rgb *= 1.0 - 0.28 * wet;
-  roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.35, wet);
+  // streaks on steep faces: 9 cm columns keyed on the world position along the face
+  float vert = 1.0 - smoothstep(0.35, 0.7, wUp);
+  float col = floor(dot(vWP.xz, vec2(0.7071)) * 11.0);
+  float h1 = fract(sin(col * 12.9898) * 43758.5453);
+  float h2 = fract(sin(col * 78.233) * 12543.123);
+  float run = fract(vWP.y * (0.18 + 0.3 * h2) + h1);
+  float streak = step(0.45, h1) * smoothstep(0.0, 0.25, run) * (1.0 - 0.6 * run) * vert;
+  float w2 = clamp(wet + streak * uWetness * 0.8, 0.0, 1.0);
+  diffuseColor.rgb *= 1.0 - 0.28 * w2 - 0.1 * streak * uWetness;
+  roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.35, w2);
+  roughnessFactor = mix(roughnessFactor, 0.08, streak * uWetness * 0.7);
 }
 `;
 
@@ -691,10 +795,11 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = W.uWetness;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aPBR;\nvarying vec3 vPBR;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPBR = aPBR;');
+      .replace('#include <common>', '#include <common>\nattribute vec3 aPBR;\nvarying vec3 vPBR;\nvarying vec3 vWP;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPBR = aPBR;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nuniform float uWetness;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_WET)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z;');
   };
@@ -704,14 +809,14 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
 /** Untextured props: vertex colour + per-vertex roughness/metalness/emissive. */
 export function propsMaterial(): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-props-2');
+  patchPBR(m, 'apex-ts-props-3');
   return m;
 }
 
 /** Printed surfaces: atlas map × vertex colour, per-vertex PBR. */
 export function printMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-print-2');
+  patchPBR(m, 'apex-ts-print-3');
   return m;
 }
 
@@ -733,7 +838,7 @@ export function decalMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial 
   m.blendDst = THREE.OneMinusSrcAlphaFactor;
   m.blendSrcAlpha = THREE.ZeroFactor;
   m.blendDstAlpha = THREE.OneFactor;
-  patchPBR(m, 'apex-ts-decal-3');
+  patchPBR(m, 'apex-ts-decal-4');
   return m;
 }
 

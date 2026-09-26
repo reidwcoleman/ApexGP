@@ -16,6 +16,7 @@ const LEVELS = [1, 0.86, 0.74, 0.63, 0.54, 0.46];
 export class RacingProfile {
   readonly n: number;
   readonly lineK: Float32Array;
+  readonly bankIn: Float32Array;
   readonly vmax: Float32Array;
   readonly lapTime: number;
   private readonly tables: Float32Array[];
@@ -52,6 +53,9 @@ export class RacingProfile {
       k[i] = dh / ds;
     }
     this.lineK = smoothCircular(k, 4, 2);
+    // authored banking (CircuitDef.banking) toward the inside of the line's bend (rad, + = helps)
+    this.bankIn = new Float32Array(n);
+    for (let i = 0; i < n; i++) this.bankIn[i] = track.banked[i] * -Math.sign(this.lineK[i]);
     this.tables = LEVELS.map((l) => this.build(spec, grip * l, brakeGrip * l));
     this.vmax = this.tables[0];
     let t = 0;
@@ -79,21 +83,25 @@ export class RacingProfile {
       if (kk > 1e-5) {
         // fixed-point iterate for load-sensitive μ
         vv = 40;
+        // on a bank β, as CarPhysics models it (a 2D car: in-plane gravity g·sinβ·cosβ, normal load
+        // m(g cosβ + v²κ sinβ)): m v²κ (1 − μ sinβ) = μ (m g cosβ + A v²) + m g sinβ cosβ
+        const cb = Math.cos(this.bankIn[i]), sb = Math.sin(this.bankIn[i]);
         for (let it = 0; it < 6; it++) {
-          const Fz = m * g + kAL * vv * vv;
+          const Fz = m * g * cb + m * vv * vv * kk * sb + kAL * vv * vv;
           // slow corners lose more to lateral load transfer
           const mu = muAt(Fz) * grip * (0.93 + 0.07 * Math.min(1, vv / 50));
-          const den = m * kk - mu * kAL;
-          vv = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((mu * m * g) / den));
+          const den = m * kk * (1 - mu * sb) - mu * kAL;
+          vv = den <= 0 ? vTop : Math.min(vTop, Math.sqrt((m * g * cb * (mu + sb)) / den));
         }
       }
       v[i] = vv;
     }
     // friction ellipse: the share of grip left for braking/accelerating once
     // the corner has taken its lateral share at this speed
-    const latLeft = (vv: number, kk: number) => {
-      const Fz = m * g + kAL * vv * vv;
-      const aLatMax = (muAt(Fz) * grip * Fz) / m;
+    const latLeft = (vv: number, kk: number, i: number) => {
+      const b = this.bankIn[i];
+      const Fz = m * g * Math.cos(b) + m * vv * vv * kk * Math.sin(b) + kAL * vv * vv;
+      const aLatMax = (muAt(Fz) * grip * Fz) / m + g * Math.sin(b) * Math.cos(b);
       const use = (vv * vv * kk) / aLatMax;
       return Math.sqrt(Math.max(0.12, 1 - use * use));
     };
@@ -104,7 +112,7 @@ export class RacingProfile {
         const nx = (i + 1) % n;
         const vn = v[nx];
         const Fz = m * g + kA * vn * vn;
-        const aBrake = (muAt(Fz) * brakeGrip * Fz * latLeft(vn, Math.abs(this.lineK[nx])) + kD * vn * vn) / m;
+        const aBrake = (muAt(Fz) * brakeGrip * Fz * latLeft(vn, Math.abs(this.lineK[nx]), nx) + kD * vn * vn) / m;
         const lim = Math.sqrt(vn * vn + 2 * aBrake);
         if (v[i] > lim) v[i] = lim;
       }
@@ -115,7 +123,7 @@ export class RacingProfile {
         const pv = (i - 1 + n) % n;
         const vp = Math.max(1, v[pv]);
         const Fz = m * g * (spec.a / (spec.a + spec.b)) + kA * vp * vp * (1 - spec.aeroFront);
-        const aTrac = ((muAt(Fz * 2) * Fz * 0.9) / m) * latLeft(vp, Math.abs(this.lineK[pv]));
+        const aTrac = ((muAt(Fz * 2) * Fz * 0.9) / m) * latLeft(vp, Math.abs(this.lineK[pv]), pv);
         const aPow = spec.power / (m * vp);
         const a = Math.min(aTrac, aPow) - (kD * vp * vp) / m;
         const lim = Math.sqrt(vp * vp + 2 * Math.max(0, a));

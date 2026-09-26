@@ -44,6 +44,7 @@ export class CarFx {
   private buffetG: GainNode;
   private drsG: GainNode;
   private sqBase = 900;
+  private sqLast = 0;
   private t = 0;
 
   constructor(ctx: BaseAudioContext, b: AudioBuffers) {
@@ -70,12 +71,12 @@ export class CarFx {
     const sawJitG = gainNode(ctx, 18);
     sawJit.connect(sawJitG).connect(this.sqSaw.frequency);
     const sawShape = biquad(ctx, 'bandpass', 1300, 1.4);
-    const sawG = gainNode(ctx, 0.35);
+    const sawG = gainNode(ctx, 0.2);
     chain(this.sqSaw, sawShape, sawG);
     this.sqSaw.start();
 
-    this.sqBP1 = biquad(ctx, 'bandpass', 900, 6);
-    this.sqBP2 = biquad(ctx, 'bandpass', 1900, 5);
+    this.sqBP1 = biquad(ctx, 'bandpass', 900, 4);
+    this.sqBP2 = biquad(ctx, 'bandpass', 1900, 3.5);
     const nz = white();
     nz.connect(this.sqBP1);
     nz.connect(this.sqBP2);
@@ -84,7 +85,7 @@ export class CarFx {
     const wobG2 = gainNode(ctx, 140);
     wob.connect(wobG1).connect(this.sqBP1.frequency);
     wob.connect(wobG2).connect(this.sqBP2.frequency);
-    const bp2g = gainNode(ctx, 0.55);
+    const bp2g = gainNode(ctx, 0.4);
     this.sqBP2.connect(bp2g);
 
     const sqAM = gainNode(ctx, 0.55);
@@ -98,9 +99,11 @@ export class CarFx {
     this.sqBP1.connect(sqPre);
     bp2g.connect(sqPre);
     sawG.connect(sqPre);
-    const sqSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.8) });
+    const sqSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.4), oversample: '2x' });
+    // the squeal's top end is what makes it grate: keep the body, roll the fizz off
+    const sqLP = biquad(ctx, 'lowpass', 2800, 0.6);
     this.sqG = gainNode(ctx, 0);
-    chain(sqPre, sqAM, sqSat, this.sqG, this.out);
+    chain(sqPre, sqAM, sqSat, sqLP, this.sqG, this.out);
 
     // --- kerb rumble: narrow pulse train at ridge rate → body thump + rattle
     const K = 24;
@@ -113,13 +116,13 @@ export class CarFx {
     const kerbBody = biquad(ctx, 'peaking', 75, 2, 4);
     const kerbRect = new WaveShaperNode(ctx, { curve: rectCurve(2) });
     const kerbRattle = gainNode(ctx, 0);
-    const kerbRattleBP = biquad(ctx, 'bandpass', 900, 0.9);
+    const kerbRattleBP = biquad(ctx, 'bandpass', 750, 0.9);
     this.kerbG = gainNode(ctx, 0);
     chain(this.kerbOsc, kerbThumpLP, kerbBody, this.kerbG);
     this.kerbOsc.connect(kerbRect);
     kerbRect.connect(kerbRattle.gain);
     chain(white(), kerbRattleBP, kerbRattle);
-    const kerbRattleG = gainNode(ctx, 0.5);
+    const kerbRattleG = gainNode(ctx, 0.32);
     kerbRattle.connect(kerbRattleG).connect(this.kerbG);
     this.kerbG.connect(this.out);
     this.kerbOsc.start();
@@ -178,8 +181,10 @@ export class CarFx {
     // tyres
     const scrub = smoothstep(0.22, 0.85, slip) * (0.35 + 0.65 * sp) * (loose ? 0.35 : 1);
     setT(this.scrubG.gain, 0.5 * scrub * mix.tyres, now, 0.04);
-    const sq = smoothstep(0.55, 1.15, slip) * sp * (loose ? 0.12 : 1);
-    setT(this.sqG.gain, 0.26 * sq * (1 + 0.35 * lock) * mix.tyres, now, 0.035);
+    const sq = smoothstep(0.6, 1.2, slip) * sp * (loose ? 0.12 : 1);
+    // softer onset (no stab on every little slide), and quieter overall: it's feedback, not a siren
+    setT(this.sqG.gain, 0.15 * sq * (1 + 0.3 * lock) * mix.tyres, now, sq > this.sqLast ? 0.07 : 0.05);
+    this.sqLast = sq;
     const f0 = (this.sqBase + 160 * clamp(slip - 0.6, 0, 1) + 240 * lock) * dop;
     setT(this.sqBP1.frequency, f0, now, 0.05);
     setT(this.sqBP2.frequency, f0 * 2.08, now, 0.05);
@@ -189,7 +194,7 @@ export class CarFx {
     // kerb: ridge thumps at a rate ∝ speed
     const kerb = s.onKerb || surf === 1;
     setT(this.kerbOsc.frequency, clamp(v / 1.9, 3, 70), now, 0.03);
-    setT(this.kerbG.gain, kerb ? 0.2 * smoothstep(1, 20, v) * mix.tyres : 0, now, 0.025);
+    setT(this.kerbG.gain, kerb ? 0.17 * smoothstep(1, 20, v) * mix.tyres : 0, now, 0.03);
 
     // surfaces
     setT(this.gravelG.gain, surf === 4 ? 0.32 * smoothstep(1, 25, v) * mix.tyres : 0, now, 0.04);
@@ -226,8 +231,8 @@ export class Crowd {
   private swellG: GainNode;
   private cheerG: GainNode;
   private level = 0;
-  private cheerT = 2.5;
-  private hornT = 1.2;
+  private cheerT = 6;
+  private hornT = 8;
   private r = Math.random;
 
   constructor(ctx: BaseAudioContext, b: AudioBuffers) {
@@ -261,7 +266,38 @@ export class Crowd {
     const cAM = gainNode(ctx, 0.75);
     loopSource(ctx, b.wander, 4).connect(gainNode(ctx, 0.25)).connect(cAM.gain);
     this.cheerG = gainNode(ctx, 0);
-    chain(cs, cAM, this.cheerG, this.out);
+    chain(cs, cAM, this.cheerG, biquad(ctx, 'lowpass', 4200, 0.6), this.out);
+
+    // "oooh": a darker, rounder vowel for crashes and near misses
+    const gsrc = loopSource(ctx, b.pink);
+    const o1 = biquad(ctx, 'bandpass', 360, 1.6);
+    const o2 = biquad(ctx, 'bandpass', 720, 2.2);
+    const os = gainNode(ctx, 1);
+    gsrc.connect(o1).connect(os);
+    gsrc.connect(o2).connect(gainNode(ctx, 0.6)).connect(os);
+    this.gaspG = gainNode(ctx, 0);
+    chain(os, this.gaspG, this.out);
+  }
+
+  private gaspG: GainNode;
+  private reactAt = -1e9;
+
+  /**
+   * The grandstands react: 'cheer' (lights out, an overtake, the flag) or 'gasp' (a crash).
+   * amt 0..1. Rate-limited so a busy lap doesn't turn into a wall of noise.
+   */
+  react(kind: 'cheer' | 'gasp', amt: number, now: number): void {
+    if (this.level < 0.02 || now - this.reactAt < (kind === 'gasp' ? 1.5 : 4)) return;
+    this.reactAt = now;
+    if (kind === 'cheer') {
+      this.cheer(now, clamp(amt, 0, 1));
+      return;
+    }
+    const g = this.gaspG.gain;
+    const pk = 0.5 * this.level * clamp(amt, 0, 1);
+    g.cancelScheduledValues(now);
+    g.setTargetAtTime(pk, now + 0.05, 0.12);
+    g.setTargetAtTime(0, now + 0.7 + this.r() * 0.4, 0.5);
   }
 
   setLevel(l: number, now: number): void {
@@ -276,11 +312,12 @@ export class Crowd {
     this.cheerT -= dt * this.level;
     this.hornT -= dt * this.level;
     if (this.cheerT <= 0) {
-      this.cheerT = 7 + this.r() * 14;
-      this.cheer(now, 0.5 + 0.5 * this.r());
+      this.cheerT = 10 + this.r() * 18;
+      this.cheer(now, 0.35 + 0.4 * this.r());
     }
     if (this.hornT <= 0) {
-      this.hornT = 4 + this.r() * 9;
+      // the odd air horn somewhere in the stands (not a metronome)
+      this.hornT = 14 + this.r() * 26;
       this.horn(now);
     }
   }
@@ -298,8 +335,8 @@ export class Crowd {
     const f = 400 + this.r() * 110;
     const dur = 0.35 + this.r() * 0.9;
     const pan = new StereoPannerNode(ctx, { pan: this.r() * 1.6 - 0.8 });
-    const lp = biquad(ctx, 'lowpass', 2600, 0.7);
-    const pk = biquad(ctx, 'peaking', 1200, 1.2, 5);
+    const lp = biquad(ctx, 'lowpass', 1700, 0.7);
+    const pk = biquad(ctx, 'peaking', 1000, 1.2, 3);
     const sh = new WaveShaperNode(ctx, { curve: tanhCurve(1.6) });
     const g = gainNode(ctx, 0);
     const oscs: OscillatorNode[] = [];
@@ -313,10 +350,10 @@ export class Crowd {
       oscs.push(o);
     }
     chain(lp, pk, sh, g, pan, this.out);
-    const lvl = 0.05 * this.level * (0.5 + 0.5 * this.r());
+    const lvl = 0.028 * this.level * (0.5 + 0.5 * this.r());
     g.gain.setValueAtTime(0, now);
-    g.gain.setTargetAtTime(lvl, now, 0.02);
-    g.gain.setTargetAtTime(0, now + dur, 0.06);
+    g.gain.setTargetAtTime(lvl, now, 0.03);
+    g.gain.setTargetAtTime(0, now + dur, 0.08);
   }
 }
 
@@ -329,43 +366,44 @@ export function impactSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNo
   const r = Math.random;
   // body thump
   const th = new OscillatorNode(ctx, { type: 'sine', frequency: 120 });
-  th.frequency.setValueAtTime(130, now);
-  th.frequency.exponentialRampToValueAtTime(38, now + 0.25);
+  const thF = 110 + 40 * r();
+  th.frequency.setValueAtTime(thF, now);
+  th.frequency.exponentialRampToValueAtTime(thF * 0.3, now + 0.25);
   const thG = gainNode(ctx, 0);
   chain(th, thG, out);
   thG.gain.setValueAtTime(0, now);
-  thG.gain.linearRampToValueAtTime(0.9 * s, now + 0.004);
+  thG.gain.linearRampToValueAtTime(0.8 * s, now + 0.004);
   thG.gain.setTargetAtTime(0, now + 0.01, 0.07 + 0.08 * s);
   th.start(now);
   th.stop(now + 0.8);
   // low noise burst
   const nb = new AudioBufferSourceNode(ctx, { buffer: b.white });
-  const nbLP = biquad(ctx, 'lowpass', 900 + 1800 * s, 0.7);
+  const nbLP = biquad(ctx, 'lowpass', 700 + 1300 * s, 0.7);
   const nbG = gainNode(ctx, 0);
   chain(nb, nbLP, nbG, out);
   nbG.gain.setValueAtTime(0, now);
-  nbG.gain.linearRampToValueAtTime(0.6 * s, now + 0.003);
+  nbG.gain.linearRampToValueAtTime(0.5 * s, now + 0.003);
   nbG.gain.setTargetAtTime(0, now + 0.006, 0.05);
   nb.start(now, r() * 2, 0.5);
   // carbon crunch (cracking shards)
   const cr = new AudioBufferSourceNode(ctx, { buffer: b.crackle, playbackRate: 0.75 + 0.5 * r() });
-  const crBP = biquad(ctx, 'bandpass', 2600, 0.6);
-  const crSh = new WaveShaperNode(ctx, { curve: tanhCurve(2.5) });
-  const crG = gainNode(ctx, 0.55 * Math.sqrt(s));
-  chain(cr, crBP, crSh, crG, out);
+  const crBP = biquad(ctx, 'bandpass', 1500 + 700 * r(), 0.6);
+  const crSh = new WaveShaperNode(ctx, { curve: tanhCurve(1.6), oversample: '2x' });
+  const crG = gainNode(ctx, 0.32 * Math.sqrt(s));
+  chain(cr, crBP, crSh, biquad(ctx, 'lowpass', 4500, 0.6), crG, out);
   cr.start(now + 0.002);
   // scrape: grinding carbon on concrete, pitch falling as the car slows
   const sc = new AudioBufferSourceNode(ctx, { buffer: b.white, loop: true });
-  const scBP = biquad(ctx, 'bandpass', 3400, 3.5);
-  const scBP2 = biquad(ctx, 'bandpass', 1500, 2);
+  const scBP = biquad(ctx, 'bandpass', 2200, 2);
+  const scBP2 = biquad(ctx, 'bandpass', 1100, 1.6);
   const scG = gainNode(ctx, 0);
   sc.connect(scBP).connect(scG);
-  sc.connect(scBP2).connect(gainNode(ctx, 0.6)).connect(scG);
-  scG.connect(out);
+  sc.connect(scBP2).connect(gainNode(ctx, 0.8)).connect(scG);
+  chain(scG, biquad(ctx, 'lowpass', 3800, 0.6), out);
   const dur = 0.25 + 0.7 * s;
-  scBP.frequency.setValueAtTime(3600, now);
-  scBP.frequency.exponentialRampToValueAtTime(1500, now + dur);
-  const lvl = 0.35 * s;
+  scBP.frequency.setValueAtTime(2300 + 500 * r(), now);
+  scBP.frequency.exponentialRampToValueAtTime(1000, now + dur);
+  const lvl = 0.2 * s;
   scG.gain.setValueAtTime(0, now);
   let t = now + 0.01;
   while (t < now + dur) {
@@ -380,11 +418,11 @@ export function impactSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNo
   const bits = Math.floor(2 + 6 * s);
   for (let i = 0; i < bits; i++) {
     const tt = now + 0.08 + r() * (0.3 + 0.5 * s);
-    const o = new OscillatorNode(ctx, { type: 'sine', frequency: 2500 + r() * 4500 });
+    const o = new OscillatorNode(ctx, { type: 'sine', frequency: 1800 + r() * 2800 });
     const og = gainNode(ctx, 0);
     chain(o, og, out);
     og.gain.setValueAtTime(0, tt);
-    og.gain.linearRampToValueAtTime(0.04 * s * (0.4 + r()), tt + 0.001);
+    og.gain.linearRampToValueAtTime(0.018 * s * (0.4 + r()), tt + 0.002);
     og.gain.setTargetAtTime(0, tt + 0.002, 0.012);
     o.start(tt);
     o.stop(tt + 0.1);
@@ -400,17 +438,17 @@ export function explosionSound(ctx: BaseAudioContext, b: AudioBuffers, out: Audi
   const n = clamp(near, 0, 1);
   if (n < 0.02) return;
   const r = Math.random;
-  const bus = gainNode(ctx, 0.9 * n);
+  const bus = gainNode(ctx, 0.75 * n);
   // distance takes the top end off
   const air = biquad(ctx, 'lowpass', 900 + 9000 * n * n, 0.6);
   chain(bus, air, out);
   // the crack (fuel cell rupturing)
   const ck = new AudioBufferSourceNode(ctx, { buffer: b.white });
-  const ckHP = biquad(ctx, 'highpass', 900, 0.7);
+  const ckHP = biquad(ctx, 'highpass', 700, 0.7);
   const ckG = gainNode(ctx, 0);
-  chain(ck, ckHP, ckG, bus);
+  chain(ck, ckHP, biquad(ctx, 'lowpass', 5000, 0.6), ckG, bus);
   ckG.gain.setValueAtTime(0, now);
-  ckG.gain.linearRampToValueAtTime(0.8, now + 0.002);
+  ckG.gain.linearRampToValueAtTime(0.5, now + 0.002);
   ckG.gain.setTargetAtTime(0, now + 0.004, 0.035);
   ck.start(now, r() * 2, 0.4);
   // the boom: a falling sine plus a big low noise swell
@@ -458,91 +496,113 @@ export function explosionSound(ctx: BaseAudioContext, b: AudioBuffers, out: Audi
   // debris raining down
   for (let i = 0; i < 14; i++) {
     const tt = now + 0.4 + r() * 1.6;
-    const o = new OscillatorNode(ctx, { type: 'triangle', frequency: 900 + r() * 3200 });
+    const o = new OscillatorNode(ctx, { type: 'sine', frequency: 900 + r() * 2600 });
     const og = gainNode(ctx, 0);
     chain(o, og, bus);
     og.gain.setValueAtTime(0, tt);
-    og.gain.linearRampToValueAtTime(0.05 * (0.4 + r()), tt + 0.002);
+    og.gain.linearRampToValueAtTime(0.03 * (0.4 + r()), tt + 0.002);
     og.gain.setTargetAtTime(0, tt + 0.003, 0.02);
     o.start(tt);
     o.stop(tt + 0.15);
   }
 }
 
-/** Start-light beep. final = lights out: brighter two-tone and longer. */
+/**
+ * Start-light beep. final = lights out: a brighter two-note chime, a touch longer.
+ * Soft sines (no square-wave edge), smooth attack and release.
+ */
 export function beepSound(ctx: BaseAudioContext, out: AudioNode, final: boolean, now: number): void {
-  const freqs = final ? [1318.5, 1975.5] : [987.8];
-  const dur = final ? 0.55 : 0.17;
+  const freqs = final ? [1174.7, 1760] : [880];
+  const dur = final ? 0.42 : 0.15;
   const g = gainNode(ctx, 0);
-  const lp = biquad(ctx, 'lowpass', 5000, 0.7);
+  const lp = biquad(ctx, 'lowpass', 3800, 0.6);
   chain(lp, g, out);
   for (const f of freqs) {
     const o = new OscillatorNode(ctx, { type: 'sine', frequency: f });
     o.connect(lp);
-    const sq = new OscillatorNode(ctx, { type: 'square', frequency: f });
-    const sqG = gainNode(ctx, 0.06);
-    sq.connect(sqG).connect(lp);
-    o.start(now);
-    sq.start(now);
-    o.stop(now + dur + 0.2);
-    sq.stop(now + dur + 0.2);
+    // a little 2nd harmonic for presence instead of a buzzy square
+    const h = new OscillatorNode(ctx, { type: 'sine', frequency: f * 2 });
+    h.connect(gainNode(ctx, 0.12)).connect(lp);
+    for (const x of [o, h]) {
+      x.start(now);
+      x.stop(now + dur + 0.6);
+    }
   }
-  const lvl = final ? 0.13 : 0.12;
+  const lvl = final ? 0.06 : 0.055;
   g.gain.setValueAtTime(0, now);
-  g.gain.linearRampToValueAtTime(lvl, now + 0.006);
-  g.gain.setValueAtTime(lvl, now + dur - 0.02);
-  g.gain.setTargetAtTime(0, now + dur - 0.02, final ? 0.08 : 0.012);
+  g.gain.linearRampToValueAtTime(lvl, now + 0.008);
+  g.gain.setValueAtTime(lvl, now + dur - 0.03);
+  g.gain.setTargetAtTime(0, now + dur - 0.03, final ? 0.1 : 0.022);
 }
 
-/** Tasteful UI ticks/whooshes. */
-export function uiSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNode, kind: 'move' | 'select' | 'back', now: number): void {
-  const tone = (f0: number, f1: number, t0: number, len: number, lvl: number) => {
+let lastUi = -1;
+
+/**
+ * Menu sounds: quiet, rounded, a little different every time (they're heard hundreds of times).
+ * No noise clicks, no hard attacks.
+ */
+export function uiSound(ctx: BaseAudioContext, _b: AudioBuffers, out: AudioNode, kind: 'move' | 'select' | 'back', now: number): void {
+  // key-repeat scrolling: thin the ticks out instead of machine-gunning
+  if (kind === 'move' && now - lastUi < 0.045) return;
+  lastUi = now;
+  const r = Math.random;
+  const tone = (f0: number, f1: number, t0: number, len: number, lvl: number, harm = 0.15) => {
     const o = new OscillatorNode(ctx, { type: 'sine', frequency: f0 });
     o.frequency.setValueAtTime(f0, t0);
     o.frequency.exponentialRampToValueAtTime(f1, t0 + len);
+    const h = new OscillatorNode(ctx, { type: 'sine', frequency: f0 * 2 });
+    h.frequency.setValueAtTime(f0 * 2, t0);
+    h.frequency.exponentialRampToValueAtTime(f1 * 2, t0 + len);
     const g = gainNode(ctx, 0);
-    chain(o, g, out);
+    o.connect(g);
+    h.connect(gainNode(ctx, harm)).connect(g);
+    g.connect(out);
     g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(lvl, t0 + 0.003);
-    g.gain.setTargetAtTime(0, t0 + 0.004, len / 3);
-    o.start(t0);
-    o.stop(t0 + len * 2.5 + 0.05);
+    g.gain.linearRampToValueAtTime(lvl, t0 + 0.004);
+    g.gain.setTargetAtTime(0, t0 + 0.006, len / 3);
+    for (const x of [o, h]) {
+      x.start(t0);
+      x.stop(t0 + len * 2.5 + 0.08);
+    }
   };
-  const whoosh = (f0: number, f1: number, len: number, lvl: number) => {
-    const n = new AudioBufferSourceNode(ctx, { buffer: b.white });
-    const bp = biquad(ctx, 'bandpass', f0, 1.4);
-    bp.frequency.setValueAtTime(f0, now);
-    bp.frequency.exponentialRampToValueAtTime(f1, now + len);
-    const g = gainNode(ctx, 0);
-    chain(n, bp, g, out);
-    g.gain.setValueAtTime(0, now);
-    g.gain.linearRampToValueAtTime(lvl, now + len * 0.45);
-    g.gain.linearRampToValueAtTime(0, now + len);
-    n.start(now, Math.random() * 2, len + 0.02);
-  };
-  const click = (lvl: number) => {
-    const n = new AudioBufferSourceNode(ctx, { buffer: b.white });
-    const hp = biquad(ctx, 'highpass', 3500, 0.7);
-    const g = gainNode(ctx, 0);
-    chain(n, hp, g, out);
-    g.gain.setValueAtTime(lvl, now);
-    g.gain.setTargetAtTime(0, now + 0.001, 0.0025);
-    n.start(now, Math.random() * 2, 0.03);
-  };
+  const k = 1 + (r() - 0.5) * 0.05; // ±2.5 % pitch
   if (kind === 'move') {
-    click(0.06);
-    tone(2100, 1900, now, 0.03, 0.05);
+    tone(1250 * k, 1150 * k, now, 0.028, 0.018, 0.08);
   } else if (kind === 'select') {
-    click(0.07);
-    tone(880, 900, now, 0.05, 0.07);
-    tone(1320, 1340, now + 0.055, 0.09, 0.07);
-    whoosh(700, 3200, 0.16, 0.05);
+    tone(784 * k, 790 * k, now, 0.06, 0.026);
+    tone(1175 * k, 1180 * k, now + 0.06 + r() * 0.008, 0.1, 0.022);
   } else {
-    click(0.05);
-    tone(1150, 1050, now, 0.05, 0.06);
-    tone(760, 700, now + 0.05, 0.08, 0.06);
-    whoosh(2600, 600, 0.14, 0.04);
+    tone(988 * k, 960 * k, now, 0.05, 0.022);
+    tone(740 * k, 720 * k, now + 0.055, 0.09, 0.02);
   }
+}
+
+/**
+ * Team radio opening: a short band-limited squelch and a soft "bip" — the cue that a message
+ * came in, heard over the car without cutting through it.
+ */
+export function radioSound(ctx: BaseAudioContext, b: AudioBuffers, out: AudioNode, now: number): void {
+  const r = Math.random;
+  const n = new AudioBufferSourceNode(ctx, { buffer: b.white });
+  const bp = biquad(ctx, 'bandpass', 1500 + 300 * r(), 0.9);
+  const hp = biquad(ctx, 'highpass', 450, 0.7);
+  const g = gainNode(ctx, 0);
+  chain(n, hp, bp, g, out);
+  g.gain.setValueAtTime(0, now);
+  g.gain.linearRampToValueAtTime(0.022, now + 0.004);
+  g.gain.setValueAtTime(0.022, now + 0.05);
+  g.gain.setTargetAtTime(0, now + 0.05, 0.01);
+  n.start(now, r() * 2, 0.2);
+  const t1 = now + 0.07;
+  const o = new OscillatorNode(ctx, { type: 'sine', frequency: 1320 });
+  const og = gainNode(ctx, 0);
+  chain(o, biquad(ctx, 'lowpass', 3000, 0.6), og, out);
+  og.gain.setValueAtTime(0, t1);
+  og.gain.linearRampToValueAtTime(0.02, t1 + 0.005);
+  og.gain.setValueAtTime(0.02, t1 + 0.06);
+  og.gain.setTargetAtTime(0, t1 + 0.06, 0.012);
+  o.start(t1);
+  o.stop(t1 + 0.2);
 }
 
 /**

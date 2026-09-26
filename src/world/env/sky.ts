@@ -3,8 +3,10 @@ import * as THREE from 'three';
 /**
  * Sky dome: physically based atmosphere LUT (clear sky), blended toward a grey
  * overcast gradient as the cloud deck closes, with the ray-marched cloud
- * panorama (see skyClouds.ts) composited over it, plus the sun disc/aureole and
- * lightning (a flash lighting the deck from inside, and a bolt).
+ * panorama (see skyClouds.ts) composited over it, plus the sun disc/aureole,
+ * lightning (a flash lighting the deck from inside, and a bolt), a rainbow
+ * opposite the sun in a sun shower, and at night the moon, stars, the city's
+ * glow on the horizon and the circuit's floodlights lighting the haze.
  *
  * The dome is a unit sphere that follows the camera and is written at the far
  * plane (gl_Position.z = w), so it works with any camera near/far. A second
@@ -44,6 +46,15 @@ uniform float uBoltSeed;
 uniform float uBoltTop;
 uniform float uHalo;
 uniform float uSkyComp;
+uniform float uNight;
+uniform float uStars;
+uniform vec3 uCity;
+uniform vec3 uFloodGlow;
+uniform float uBow;
+uniform vec3 uBowCol;
+uniform float uBowEl;
+uniform float uMilk;
+uniform vec3 uMilkCol;
 
 #define PI 3.141592653589793
 
@@ -65,6 +76,8 @@ vec3 skyBg( vec3 d ) {
     float k = pow( 1.0 - max( d.y, 0.0 ), 3.0 );
     c = mix( c, mix( uOvZenith, uOvHorizon, k ), uOvercast );
   }
+  // haze: a milky, bleached sky, whitest toward the horizon
+  if ( uMilk > 0.001 ) c = mix( c, uMilkCol, uMilk * ( 0.25 + 0.7 * pow( 1.0 - max( d.y, 0.0 ), 4.0 ) ) );
   return c;
 }
 
@@ -119,6 +132,59 @@ float vnoise( float x ) {
   return mix( hash11( i + uBoltSeed ), hash11( i + 1.0 + uBoltSeed ), f * f * ( 3.0 - 2.0 * f ) ) * 2.0 - 1.0;
 }
 
+float hash13( vec3 p3 ) {
+  p3 = fract( p3 * 0.1031 );
+  p3 += dot( p3, p3.zyx + 31.32 );
+  return fract( ( p3.x + p3.y ) * p3.z );
+}
+float vnoise2( vec2 p ) {
+  vec2 i = floor( p );
+  vec2 f = p - i;
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( hash12( i ), hash12( i + vec2( 1.0, 0.0 ) ), f.x ), mix( hash12( i + vec2( 0.0, 1.0 ) ), hash12( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
+
+// stars: one candidate per cell of a fine grid over the sphere; denser along the Milky Way
+vec3 stars( vec3 d ) {
+  vec3 sp = d * 300.0;
+  vec3 si = floor( sp );
+  vec3 sf = fract( sp ) - 0.5;
+  float h = hash13( si );
+  float band = exp( -pow( dot( d, normalize( vec3( 0.35, 0.55, -0.76 ) ) ), 2.0 ) * 18.0 );
+  float thr = 0.985 - 0.02 * band;
+  if ( h < thr ) return vec3( 0.0 );
+  vec3 o = vec3( hash13( si + 7.1 ), hash13( si + 3.3 ), hash13( si + 9.7 ) ) - 0.5;
+  vec3 q = sf - o * 0.6;
+  float r2 = dot( q, q );
+  float mag = pow( ( h - thr ) / ( 1.0 - thr ), 3.0 );
+  float tw = 0.75 + 0.25 * sin( uTime * ( 2.0 + 6.0 * hash13( si + 1.9 ) ) + h * 60.0 );
+  // temperature: most stars white, some blue, some orange
+  float tc = hash13( si + 5.5 );
+  vec3 tint = tc < 0.2 ? vec3( 1.0, 0.8, 0.6 ) : tc > 0.8 ? vec3( 0.75, 0.85, 1.0 ) : vec3( 1.0 );
+  return tint * ( exp( -r2 * 60.0 ) * ( 0.25 + 4.0 * mag ) * tw );
+}
+
+// a rainbow opposite the sun: the primary bow at 42°, the fainter reversed secondary at 51°,
+// Alexander's dark band between them and the brighter sky inside the primary
+vec3 spectral( float t ) {
+  // t 0 = violet … 1 = red
+  vec3 c = vec3(
+    smoothstep( 0.45, 0.85, t ) + 0.35 * smoothstep( 0.25, 0.0, t ),
+    smoothstep( 0.2, 0.5, t ) * smoothstep( 0.95, 0.6, t ),
+    smoothstep( 0.55, 0.15, t ) );
+  return c * smoothstep( 0.0, 0.08, t ) * smoothstep( 1.0, 0.9, t );
+}
+vec3 rainbow( vec3 d, out float dark ) {
+  vec3 a = normalize( vec3( -uSunDir.x, 0.0, -uSunDir.z ) );
+  a = normalize( a * cos( uBowEl ) + vec3( 0.0, sin( uBowEl ), 0.0 ) );
+  float th = acos( clamp( dot( d, a ), -1.0, 1.0 ) ) * 57.2958;
+  vec3 c = spectral( ( th - 40.4 ) / 2.2 ) * 1.0 + spectral( 1.0 - ( th - 50.0 ) / 3.4 ) * 0.38;
+  dark = smoothstep( 41.5, 43.0, th ) * smoothstep( 51.0, 49.5, th );
+  // the sky inside the bow is lit up a touch
+  c += vec3( 0.05 ) * smoothstep( 41.0, 36.0, th ) * smoothstep( 20.0, 34.0, th );
+  return c;
+}
+
 // lightning bolt: a jagged vertical filament at the flash azimuth, from the deck to the ground
 float bolt( vec3 d ) {
   vec2 fd = normalize( uFlashDir.xz );
@@ -155,13 +221,40 @@ void main() {
     float disc = 1.0 - smoothstep( uSunRadius * 0.9, uSunRadius * 1.05, ang );
     float r = clamp( ang / uSunRadius, 0.0, 1.0 );
     float limb = 0.4 + 0.6 * sqrt( max( 0.0, 1.0 - r * r ) );
+    if ( uNight > 0.5 && disc > 0.0 ) {
+      // the moon: flat-lit, with its grey seas
+      vec3 t1 = normalize( cross( uSunDir, vec3( 0.0, 1.0, 0.0 ) ) );
+      vec3 t2 = cross( t1, uSunDir );
+      vec2 mp = vec2( dot( d, t1 ), dot( d, t2 ) ) / uSunRadius;
+      float maria = vnoise2( mp * 2.2 + 3.0 ) * 0.6 + vnoise2( mp * 5.0 + 11.0 ) * 0.4;
+      limb = 0.95 - 0.4 * smoothstep( 0.45, 0.7, maria ) - 0.1 * r * r;
+    }
     col += uSunDisc * disc * limb;
     // aureole: the forward-scattering glow of haze around the sun (the LUT is too coarse for it)
     col += uSunDisc * uHalo * ( 0.012 * exp( -ang * 38.0 ) + 0.0035 * exp( -ang * 9.0 ) );
   }
 
+  // the night sky behind the clouds: stars (main view only)
+  if ( uStars > 0.001 && uEnv < 0.5 && sy > 0.0 ) {
+    col += stars( d ) * uStars * smoothstep( 0.0, 0.12, sy );
+  }
+
   vec4 cl = pano( dUp );
   col = col * cl.a + cl.rgb;
+
+  // light in the low air: the city's sodium glow, and the circuit's own floodlights lighting the haze
+  if ( uNight > 0.001 ) {
+    float el = max( sy, 0.0 );
+    float cityAz = 0.5 + 0.5 * dot( normalize( d.xz + vec2( 1e-4 ) ), normalize( vec2( -0.6, -0.8 ) ) );
+    col += uCity * ( exp( -el * 9.0 ) * ( 0.35 + 0.65 * cityAz * cityAz ) + 0.08 * exp( -el * 2.0 ) );
+    col += uFloodGlow * ( exp( -el * 5.0 ) + 0.25 * exp( -el * 1.5 ) );
+  }
+  if ( uBow > 0.001 && uEnv < 0.5 && sy > -0.01 ) {
+    float dark;
+    vec3 bow = rainbow( d, dark );
+    col *= 1.0 - 0.12 * dark * uBow;
+    col += uBowCol * bow * uBow * smoothstep( -0.01, 0.03, sy );
+  }
   // the visible sky is held back a little on dim days (a graduated filter), the env map is not
   if ( uEnv < 0.5 ) col *= uSkyComp;
 
@@ -211,6 +304,15 @@ export function createSkyDome(): SkyDome {
     uBoltTop: { value: 0.12 },
     uHalo: { value: 1 },
     uSkyComp: { value: 1 },
+    uNight: { value: 0 },
+    uStars: { value: 0 },
+    uCity: { value: new THREE.Vector3() },
+    uFloodGlow: { value: new THREE.Vector3() },
+    uBow: { value: 0 },
+    uBowCol: { value: new THREE.Vector3(1, 1, 1) },
+    uBowEl: { value: -0.4 },
+    uMilk: { value: 0 },
+    uMilkCol: { value: new THREE.Vector3(1, 1, 1) },
   };
   const geo = new THREE.SphereGeometry(1, 96, 48);
   const mat = new THREE.ShaderMaterial({

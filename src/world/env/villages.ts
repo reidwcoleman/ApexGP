@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { WorldMap } from './worldmap.ts';
 import type { Layout } from './layout.ts';
 import { hash2i, rng } from './noise.ts';
+import { US_ROOFS, US_WALLS } from './venues/austinLand.ts';
+import { buildInterlagosCity } from './venues/interlagosCity.ts';
+import { buildMontrealCity } from './venues/montrealCity.ts';
 
 /**
  * The towns around the park wall (Monza, Villasanta, Biassono, Vedano…) as
@@ -23,10 +26,28 @@ const ROOFS = [0x9a4a30, 0x8a3f28, 0xa95a3a, 0x7d3a26, 0x6e6a66];
 const WALLS_UK = [0x9a4f38, 0xa55a3f, 0x8c4632, 0xc9a66b, 0xbf9a62, 0xd8c9a8, 0xb06448].map((h) => new THREE.Color(h));
 const ROOFS_UK = [0x4a4d52, 0x3d4045, 0x5a4a42, 0x7a3e2c, 0x44474c];
 
+// Japanese towns: pale render, white and grey siding, dark brown timber under blue-grey kawara tile
+const WALLS_JP = [0xe9e6de, 0xd9d6cf, 0xc8c4bb, 0xb9a891, 0xe2dccd, 0x8d8378, 0xf0eee8, 0xa7a39b].map((h) => new THREE.Color(h));
+const ROOFS_JP = [0x3a4150, 0x2f3542, 0x4a5262, 0x55504a, 0x3b3f46, 0x6a4a3a];
+
+// Styrian towns: white and pale-yellow render (Maria-Theresa yellow), dark-brown, red-brown and slate-grey roofs
+const WALLS_AT = [0xf1eee6, 0xe9e4d6, 0xeadba8, 0xf0e2b8, 0xe4e0d8, 0xd9d3c6, 0xf3f0ea, 0xe8d5a0].map((h) => new THREE.Color(h));
+const ROOFS_AT = [0x5a4436, 0x7b3a28, 0x4a4c50, 0x6a3024, 0x3f4145, 0x8a4a30];
+
+// Dutch seaside town: dark red-brown brick, white-rendered villas, black glazed and red pantile roofs
+const WALLS_NL = [0x8b4a36, 0x7a4231, 0x9c5a42, 0x6e3a2c, 0xa8664a, 0xefece4, 0xe4dfd2, 0x8b4a36].map((h) => new THREE.Color(h));
+const ROOFS_NL = [0x2e2f33, 0x3a3b40, 0x9c4a30, 0x7a3b2a, 0x44464b, 0x8a4430];
+
 export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
+  if (map.venue === 'interlagos') return buildInterlagosCity(map, layout);
+  if (map.venue === 'montreal') return buildMontrealCity(map);
   const uk = map.venue === 'airfield';
-  const wallPal = uk ? WALLS_UK : WALLS;
-  const roofPal = uk ? ROOFS_UK : ROOFS;
+  const jp = map.venue === 'suzuka';
+  const us = map.venue === 'austin';
+  const at = map.venue === 'spielberg';
+  const nl = map.venue === 'zandvoort';
+  const wallPal = nl ? WALLS_NL : at ? WALLS_AT : us ? US_WALLS.map((h) => new THREE.Color(h)) : uk ? WALLS_UK : jp ? WALLS_JP : WALLS;
+  const roofPal = nl ? ROOFS_NL : at ? ROOFS_AT : us ? US_ROOFS : uk ? ROOFS_UK : jp ? ROOFS_JP : ROOFS;
   const S = map.SQUARE;
   const r = rng(515);
   type B = { x: number; z: number; y: number; w: number; d: number; h: number; rot: number; wall: THREE.Color; roof: THREE.Color; flat: boolean };
@@ -45,7 +66,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       const jx = (hash2i(ix, iz, 5) - 0.5) * 6, jz = (hash2i(ix, iz, 6) - 0.5) * 6;
       const px = x + jx, pz = z + jz;
       const big = hash2i(ix, iz, 7);
-      const block = big > (uk ? 0.95 : 0.8); // condominio
+      const block = big > (at ? 0.94 : us ? 0.97 : uk ? 0.95 : jp ? 0.88 : 0.8); // condominio / mansion block
       const w = block ? 22 + big * 12 : 11 + hash2i(ix, iz, 8) * 10;
       const d = block ? 13 + hash2i(ix, iz, 10) * 6 : 9 + hash2i(ix, iz, 11) * 7;
       const h = block ? 14 + hash2i(ix, iz, 12) * 13 : 6 + hash2i(ix, iz, 13) * 5;
@@ -56,8 +77,8 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
         flat: block ? hash2i(ix, iz, 16) < 0.6 : hash2i(ix, iz, 16) < 0.12,
       });
     }
-  // campanili at the village centres
-  for (const v of layout.villages) {
+  // campanili at the village centres (no bell towers in Japan)
+  for (const v of jp || us || at ? [] : layout.villages) {
     const u = map.urban(v.x, v.z);
     if (u < 0.3 || v.x < S.x0 || v.x > S.x1 || v.z < S.z0 || v.z > S.z1) continue;
     list.push({ x: v.x, z: v.z, y: map.height(v.x, v.z) - 0.3, w: uk ? 6.5 : 5.5, d: uk ? 6.5 : 5.5, h: uk ? 20 + r() * 6 : 38 + r() * 12, rot: r(), wall: new THREE.Color(uk ? 0xb89a70 : 0xc79a78), roof: new THREE.Color(uk ? 0x4a4d52 : 0x8a3f28), flat: uk });

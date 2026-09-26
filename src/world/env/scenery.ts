@@ -5,10 +5,17 @@ import { WorldMap } from './worldmap.ts';
 import { buildTerrain } from './terrain.ts';
 import { planLayout } from './layout.ts';
 import { buildVegetation } from './vegetation.ts';
+import { setLeafFill } from './treematerial.ts';
+import { buildHorizon, HORIZON_PRESETS } from './horizon.ts';
 import { buildParkMasks } from './parkmask.ts';
 import { buildGrandstands } from './grandstands.ts';
 import { buildBanking } from './banking.ts';
 import { buildVillages } from './villages.ts';
+import { austinTerrainLook, buildAustinScenery } from './venues/austinScenery.ts';
+import { buildSpielbergScenery, spielbergTerrainLook } from './venues/spielbergScenery.ts';
+import { buildMontrealScenery, montrealTerrainLook } from './venues/montrealScenery.ts';
+import { tuneInterlagosTerrain } from './venues/interlagosCity.ts';
+import { buildZandvoortScenery } from './venues/zandvoortScenery.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -81,7 +88,18 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   lap('banking');
   const villages = buildVillages(map, layout);
   group.add(villages.group);
+  if (map.venue === 'austin') { group.add(buildAustinScenery(layout, track, map).group); austinTerrainLook(terrain.uniforms); }
+  if (map.venue === 'spielberg') { group.add(buildSpielbergScenery(map)); spielbergTerrainLook(terrain.uniforms); }
+  const mtl = map.venue === 'montreal' ? buildMontrealScenery(layout, track, map) : null;
+  if (mtl) { group.add(mtl.group); montrealTerrainLook(terrain.uniforms); }
+  if (map.venue === 'interlagos') tuneInterlagosTerrain(terrain.uniforms);
+  const zv = map.venue === 'zandvoort' ? buildZandvoortScenery(layout, track, map, terrain) : null;
+  if (zv) group.add(zv.group);
   lap('villages');
+  // distant mountains / skylines beyond the far terrain (per-venue preset, horizon.ts)
+  const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z));
+  group.add(horizon.mesh);
+  lap('horizon');
 
   if (typeof window !== 'undefined') (window as unknown as Record<string, unknown>).__park = { map, layout, veg, masks };
 
@@ -92,9 +110,17 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
       // materials read the shared weather uniforms and the scene lights directly;
       // trees need the sun direction for their leaf shadow offset
       veg.uniforms.uSunW.value.copy(l.sunDir);
+      horizon.setLight(l);
+      zv?.setLight(l);
+      // share of direct sun in the light (clear afternoon ≈ 1, grey deck ≈ 0)
+      const sunL = l.sunColor.r * 0.2126 + l.sunColor.g * 0.7152 + l.sunColor.b * 0.0722;
+      setLeafFill(veg.uniforms, (sunL - 0.4) / 2.6);
     },
     update(_dt, camera, elapsed) {
       veg.update(camera, elapsed);
+      horizon.update(camera);
+      zv?.update(elapsed, camera);
+      mtl?.update(elapsed);
       stands.update(elapsed);
     },
     setQuality(q) {

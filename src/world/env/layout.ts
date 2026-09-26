@@ -3,6 +3,11 @@ import type { Track } from '../Track.ts';
 import { WorldMap, type V2 } from './worldmap.ts';
 import { planOval, type OvalPath } from './ovalpath.ts';
 import { fbm2, rng } from './noise.ts';
+import { planAustin } from './venues/austin.ts';
+import { planSpielberg } from './venues/spielberg.ts';
+import { planInterlagos } from './venues/interlagos.ts';
+import { planZandvoort } from './venues/zandvoort.ts';
+import { planMontreal } from './venues/montreal.ts';
 
 /**
  * Where everything goes in the Parco di Monza. Computed from the track (corner
@@ -74,6 +79,20 @@ export interface Layout {
   avenueTrees: V2[];
   /** village clusters beyond the park (centre + radius) */
   villages: { x: number; z: number; r: number; seed: number }[];
+  /** venue landmarks built by landmarks.ts (the Ferris wheel, hospitality, camera towers, …) */
+  landmarks?: Landmark[];
+}
+
+export interface Landmark {
+  kind: 'ferris' | 'coaster' | 'hospitality' | 'cameraTower' | 'hotel';
+  x: number;
+  z: number;
+  /** ground height (absolute) */
+  y: number;
+  /** yaw: local +z faces this way (atan2 convention of the stands: rotation.y) */
+  rot: number;
+  /** size hint (length / radius, m) */
+  size: number;
 }
 
 const ROW_DEPTH = 0.86;
@@ -140,6 +159,12 @@ export function planLayout(track: Track, map: WorldMap): Layout {
   };
   const L = -1, R = 1;
   if (track.def.id === 'silverstone') return planSilverstone(track, map, addStand, gs);
+  if (track.def.id === 'suzuka') return planSuzuka(track, map, addStand, gs);
+  if (track.def.id === 'austin') return planAustin(track, map, addStand, gs);
+  if (track.def.id === 'spielberg') return planSpielberg(track, map, addStand, gs);
+  if (track.def.id === 'interlagos') return planInterlagos(track, map, addStand, gs);
+  if (track.def.id === 'zandvoort') return planZandvoort(track, map, addStand, gs);
+  if (track.def.id === 'montreal') return planMontreal(track, map, addStand, gs);
   if (!oval) return planSpa(track, map, addStand, gs);
   // main straight: west side, opposite the pits
   addStand('Tribuna Centrale', 452, 660, L, 28, 'centrale', 8, 105);
@@ -358,7 +383,12 @@ export function planLayout(track: Track, map: WorldMap): Layout {
     y1: track.heightAt(pit.sEnd),
   };
 
-  return { grandstands: gs, banks, screens, oval, pit: pitSpec, flagpoles, poplarRows, avenueTrees, villages };
+  // landmarks: hospitality behind the main stands, TV towers
+  const landmarks: Landmark[] = [];
+  addHospitality(track, map, landmarks, [[300, -1], [560, -1], [820, -1]], 98);
+  addCameraTowers(track, map, landmarks, ['Turn 1', 'Roggia', 'Lesmo 1', 'Ascari', 'Parabolica']);
+
+  return { grandstands: gs, banks, screens, oval, pit: pitSpec, flagpoles, poplarRows, avenueTrees, villages, landmarks };
 }
 
 /**
@@ -483,7 +513,11 @@ function planSpa(
     y0: track.heightAt(pit.sStart),
     y1: track.heightAt(pit.sEnd),
   };
-  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages: [] };
+  // hospitality on the paddock hillside, TV towers at the big corners
+  const landmarks: Landmark[] = [];
+  addHospitality(track, map, landmarks, [[470, 1], [650, 1]], 104);
+  addCameraTowers(track, map, landmarks, ['La Source', 'Raidillon', 'Les Combes', 'Pouhon', 'Blanchimont', 'Bus Stop']);
+  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages: [], landmarks };
 }
 
 export const STAND_ROW_DEPTH = ROW_DEPTH;
@@ -630,5 +664,233 @@ function planSilverstone(
     y0: track.heightAt(pit.sStart),
     y1: track.heightAt(pit.sEnd),
   };
-  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages };
+  // the wartime airfield: remains of the old runways (the classic triangle) across the infield
+  {
+    const C = map.A.center;
+    const runway = (ang: number, len: number, ox: number, oz: number) => {
+      const ux = Math.cos(ang), uz = Math.sin(ang);
+      const pts: V2[] = [];
+      for (let d = -len / 2; d <= len / 2; d += 40) pts.push({ x: C.x + ox + ux * d, z: C.z + oz + uz * d });
+      map.paths.push({ pts, width: 46, kind: 2 });
+    };
+    runway(0.35, 1500, -60, 40);
+    runway(0.35 + Math.PI / 3, 1300, 80, -30);
+    runway(0.35 - Math.PI / 3, 1250, -20, 90);
+  }
+  // hospitality: the paddock behind the Wing, the big village at Club and Abbey; TV towers
+  const landmarks: Landmark[] = [];
+  addHospitality(track, map, landmarks, [[260, -1], [520, -1], [cl.sApex - 40, 1], [ab.sStart - 60, 1]], 96);
+  addCameraTowers(track, map, landmarks, ['Abbey', 'Village', 'Luffield', 'Copse', 'Becketts', 'Stowe']);
+  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages, landmarks };
+}
+
+/**
+ * Suzuka: a figure of eight folded into wooded hills. The big Main Grandstand opposite the
+ * pits (right of the straight), the amusement park and its Ferris wheel on the hillside
+ * behind it, stands round Turn 1 and on the slope above the S Curves, Degner, the Hairpin,
+ * Spoon and the Casio Triangle; fans on the grass banks everywhere else (Dunlop, the long
+ * right, 130R). The back straight crosses the Degner–Hairpin run on a bridge.
+ */
+function planSuzuka(
+  track: Track,
+  map: WorldMap,
+  addStand: (name: string, sA: number, sB: number, side: number, rows: number, style: StandStyle, gap?: number, segLen?: number) => void,
+  gs: GrandstandSpec[],
+): Layout {
+  const L = -1, R = 1;
+  const corner = (name: string) => track.corners.find((c) => c.name === name)!;
+  const p = new THREE.Vector3();
+  const at = (s: number, lat: number) => track.point(s, lat, 0, new THREE.Vector3());
+  const clear = (x: number, z: number, r: number, soft: number, keep: number) => map.clearings.push({ x, z, r, soft, keep });
+
+  // main straight: the Main Grandstand opposite the pits, downhill toward Turn 1
+  addStand('Main Grandstand', 330, 900, L, 30, 'centrale', 8, 95);
+  const t1 = corner('Turn 1');
+  addStand('Turn 1', t1.sStart - 150, t1.sApex - 10, L, 20, 'covered', 8, 70);
+  const t2 = corner('Turn 2');
+  addStand('Turn 2', t2.sStart - 10, t2.sEnd + 30, L, 16, 'covered', 8, 60);
+  const sc = corner('S Curves');
+  const t5 = corner('Turn 5');
+  addStand('S Curves', sc.sStart + 20, t5.sStart - 10, L, 18, 'covered', 8, 65);
+  addStand('S Curves Upper', t5.sStart + 20, t5.sEnd + 30, L, 14, 'open', 8, 60);
+  const dn = corner('Dunlop');
+  addStand('Dunlop', dn.sStart + 10, dn.sStart + 140, R, 12, 'open', 7, 65);
+  const d1 = corner('Degner 1');
+  addStand('Degner', d1.sStart - 110, d1.sApex, L, 14, 'open', 7, 60);
+  const hp = corner('Hairpin');
+  addStand('Hairpin', hp.sStart - 130, hp.sStart - 8, R, 16, 'covered', 8, 65);
+  const sp = corner('Spoon');
+  addStand('Spoon', sp.sStart - 40, sp.sApex + 80, R, 18, 'covered', 8, 65);
+  const ct = corner('Casio Triangle');
+  addStand('Casio Triangle', ct.sStart - 190, ct.sStart - 12, L, 22, 'covered', 8, 70);
+  const t18 = corner('Turn 18');
+  addStand('Final Curve', t18.sStart - 30, t18.sEnd - 10, L, 16, 'open', 8, 60);
+
+  // grass banks: fans on the hillsides
+  const banks: SpectatorBank[] = [];
+  const addBank = (sA: number, sB: number, side: number, rise: number, density: number, gap = 5, width = 16) => {
+    let bar = 0;
+    for (let s = sA; s <= sB; s += 3) bar = Math.max(bar, track.barrierAt(s, side));
+    const latA = side * (bar + gap), latB = side * (bar + gap + width);
+    banks.push({ sA, sB, side, latA, latB, rise, density });
+    map.trackPads.push({ sA, sB, latA, latB, offset: rise, blend: 9 });
+    for (let s = sA; s <= sB; s += 18) {
+      track.point(s, (latA + latB) / 2, 0, p);
+      map.clearings.push({ x: p.x, z: p.z, r: width * 0.75, soft: 10, keep: 0.05 });
+    }
+  };
+  const t12 = corner('Turn 12');
+  const r130 = corner('130R');
+  addBank(dn.sStart + 160, dn.sEnd - 20, R, 2.2, 0.75, 6, 18);
+  addBank(corner('Turn 6').sStart, dn.sStart - 20, R, 1.8, 0.6, 5, 16);
+  addBank(d1.sApex + 20, corner('Degner 2').sStart - 10, R, 1.6, 0.55, 5, 14);
+  addBank(hp.sEnd + 10, hp.sEnd + 110, L, 1.8, 0.7, 5, 16);
+  addBank(t12.sStart + 60, t12.sApex, R, 1.8, 0.55, 6, 18);
+  addBank(t12.sApex + 60, t12.sEnd - 30, R, 1.6, 0.5, 6, 16);
+  addBank(sp.sApex + 100, sp.sEnd + 60, L, 1.6, 0.6, 5, 16);
+  addBank(r130.sStart - 200, r130.sStart - 90, R, 2.0, 0.7, 6, 18);
+  addBank(r130.sEnd + 20, r130.sEnd + 180, R, 1.8, 0.7, 6, 18);
+  addBank(ct.sStart - 360, ct.sStart - 220, L, 1.6, 0.55, 5, 16);
+
+  // open ground: paddock behind the pits, the car parks behind the Main Grandstand
+  for (let s = 300; s <= 900; s += 40) { const q = at(s, 125); clear(q.x, q.z, 48, 28, 0.1); }
+  for (let s = 360; s <= 980; s += 60) { const q = at(s, -118); clear(q.x, q.z, 46, 26, 0.12); }
+  { const q = at(t1.sApex, -140); clear(q.x, q.z, 70, 40, 0.2); }
+  { const q = at(hp.sApex, 90); clear(q.x, q.z, 60, 40, 0.25); }
+  { const q = at(sp.sApex + 60, 130); clear(q.x, q.z, 70, 45, 0.2); }
+
+  const trackLine = (sA: number, sB: number, latFn: (s: number) => number, step = 10): V2[] => {
+    const pts: V2[] = [];
+    for (let s = sA; s <= sB; s += step) {
+      track.point(s, latFn(s), 0, p);
+      pts.push({ x: p.x, z: p.z });
+    }
+    return pts;
+  };
+  map.paths.push({ pts: trackLine(300, 1000, (s) => -(track.barrierAt(s, -1) + 64), 12), width: 7, kind: 2 });
+  const walk = (sA: number, sB: number, side: number, off: number) => {
+    map.paths.push({ pts: trackLine(sA, sB, (s) => side * (track.barrierAt(s, side) + off + 2.5 * Math.sin(s * 0.013)), 9), width: 3.2, kind: 1 });
+  };
+  walk(sc.sStart - 40, dn.sStart - 40, L, 34);
+  walk(t12.sStart + 40, sp.sStart - 80, R, 30);
+  walk(r130.sStart - 380, r130.sStart - 60, R, 32);
+
+  // big screens facing the stands
+  const screens: ScreenSpec[] = [];
+  const screenAt = (s: number, side: number, lookS: number, lookSide: number, lookLat: number, w = 12, h = 7, back = 6) => {
+    const lat = side * (track.barrierAt(s, side) + back);
+    const q = at(s, lat);
+    const look = at(lookS, lookSide * lookLat);
+    const rot = Math.atan2(look.x - q.x, look.z - q.z);
+    screens.push({ x: q.x, z: q.z, y: track.heightAt(s), rot, w, h });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: w / 2 + 3, halfL: 4, angle: rot });
+    map.clearings.push({ x: q.x, z: q.z, r: 12, soft: 10, keep: 0.2 });
+  };
+  screenAt(940, R, 600, L, 40, 14, 8, 30);
+  screenAt(t1.sStart - 60, R, t1.sStart - 80, L, 40);
+  screenAt(sc.sApex + 40, R, sc.sApex + 90, L, 40);
+  screenAt(hp.sStart - 60, L, hp.sStart - 70, R, 40);
+  screenAt(sp.sStart - 70, L, sp.sStart - 10, R, 40);
+  screenAt(ct.sStart - 90, R, ct.sStart - 100, L, 40, 10, 6);
+
+  const flagpoles: V2[] = [];
+  for (const g of gs) {
+    if (g.style === 'open') continue;
+    const n = Math.max(2, Math.round(g.length / 24));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n - 0.5;
+      const along = new THREE.Vector3(g.facing.z, 0, -g.facing.x);
+      flagpoles.push({ x: g.center.x + along.x * t * g.length - g.facing.x * (g.depth / 2 + 1.5), z: g.center.z + along.z * t * g.length - g.facing.z * (g.depth / 2 + 1.5) });
+    }
+  }
+
+  // Suzuka city on the plain to the south-east, farming hamlets in the valleys
+  const villages: Layout['villages'] = [];
+  {
+    const P = map.park;
+    const spots: [number, number, number][] = [[1.35, 0.55, 520], [1.2, 1.3, 600], [0.35, 1.45, 480], [1.6, -0.35, 420], [-0.45, 1.3, 300], [-1.3, 0.9, 260]];
+    spots.forEach(([u, v, rr], i) => villages.push({ x: P.cx + u * P.rx, z: P.cz + v * P.rz, r: rr, seed: 61 + i * 37 }));
+    for (const v of villages) map.clearings.push({ x: v.x, z: v.z, r: v.r, soft: 80, keep: 0 });
+  }
+
+  // landmarks: Suzuka Circuit's amusement park on the hillside behind the Main Grandstand, its
+  // Ferris wheel over the straight; hospitality suites behind the stands; TV camera towers
+  const landmarks: Landmark[] = [];
+  {
+    const f = track.frame(700);
+    const q = at(700, -(track.barrierAt(700, -1) + 150));
+    const yaw = Math.atan2(f.tangent.x, f.tangent.z);
+    const y = map.naturalExact(q.x, q.z);
+    landmarks.push({ kind: 'ferris', x: q.x, z: q.z, y, rot: yaw, size: 27 });
+    map.worldPads.push({ cx: q.x, cz: q.z, halfW: 34, halfL: 22, angle: yaw, h: y, blend: 24, paved: true });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: 36, halfL: 16, angle: yaw });
+    clear(q.x, q.z, 60, 40, 0.05);
+    // the coaster and the rides beside it, toward Turn 1
+    const c = at(930, -(track.barrierAt(930, -1) + 200));
+    const cy = map.naturalExact(c.x, c.z);
+    landmarks.push({ kind: 'coaster', x: c.x, z: c.z, y: cy, rot: yaw, size: 70 });
+    map.worldPads.push({ cx: c.x, cz: c.z, halfW: 72, halfL: 30, angle: yaw, h: cy, blend: 26, paved: true });
+    map.exclusions.push({ cx: c.x, cz: c.z, halfW: 74, halfL: 32, angle: yaw });
+    clear(c.x, c.z, 90, 40, 0.05);
+    // the circuit hotel on the rise beyond the final curve
+    const h = at(150, -(track.barrierAt(150, -1) + 190));
+    const hy = map.naturalExact(h.x, h.z);
+    const fh = track.frame(150);
+    landmarks.push({ kind: 'hotel', x: h.x, z: h.z, y: hy, rot: Math.atan2(fh.tangent.x, fh.tangent.z), size: 80 });
+    map.worldPads.push({ cx: h.x, cz: h.z, halfW: 44, halfL: 16, angle: Math.atan2(fh.tangent.x, fh.tangent.z), h: hy, blend: 20, paved: true });
+    map.exclusions.push({ cx: h.x, cz: h.z, halfW: 46, halfL: 18, angle: Math.atan2(fh.tangent.x, fh.tangent.z) });
+    clear(h.x, h.z, 70, 30, 0.1);
+  }
+  addHospitality(track, map, landmarks, [[360, -1], [560, -1], [760, -1]], 98);
+  addCameraTowers(track, map, landmarks, ['Turn 1', 'S Curves', 'Degner 2', 'Hairpin', 'Spoon', '130R', 'Casio Triangle']);
+
+  const pit = track.pit;
+  const pitSpec = {
+    sA: pit.sStart,
+    sB: pit.sEnd,
+    side: pit.side,
+    front: pit.garageOffset + 0.5,
+    depth: 26,
+    paddockTo: 125,
+    y0: track.heightAt(pit.sStart),
+    y1: track.heightAt(pit.sEnd),
+  };
+  return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages, landmarks };
+}
+
+/** hospitality suites: two-storey glass pavilions behind the stands, at (s, side) `back` m beyond the barrier */
+export function addHospitality(track: Track, map: WorldMap, out: Landmark[], spots: [number, number][], back: number) {
+  for (const [s, side] of spots) {
+    const q = track.point(s, side * (track.barrierAt(s, side) + back), 0, new THREE.Vector3());
+    const f = track.frame(s);
+    const yaw = Math.atan2(f.tangent.x, f.tangent.z) + Math.PI / 2;
+    if (map.excluded(q.x, q.z, 6) || map.trackClearance(q.x, q.z) < 20 || map.inPitZone(q.x, q.z, 30)) continue;
+    const y = map.naturalExact(q.x, q.z);
+    out.push({ kind: 'hospitality', x: q.x, z: q.z, y, rot: yaw, size: 44 });
+    map.worldPads.push({ cx: q.x, cz: q.z, halfW: 25, halfL: 11, angle: yaw, h: y, blend: 14, paved: true });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: 26, halfL: 12, angle: yaw });
+    map.clearings.push({ x: q.x, z: q.z, r: 30, soft: 16, keep: 0.1 });
+  }
+}
+
+/** scaffold TV towers on the outside of the named corners, well back from the fence */
+export function addCameraTowers(track: Track, map: WorldMap, out: Landmark[], names: string[]) {
+  for (const name of names) {
+    const c = track.corners.find((k) => k.name === name);
+    if (!c) continue;
+    // outside of the corner at the end of the braking zone, else the inside, else further back
+    let q: THREE.Vector3 | null = null;
+    for (const [side, ds, back] of [[c.dir, -25, 14], [-c.dir, -10, 12], [c.dir, -60, 20], [-c.dir, -50, 18]] as const) {
+      const s = c.sStart + ds;
+      const p = track.point(s, side * (track.barrierAt(s, side) + back), 0, new THREE.Vector3());
+      if (map.excluded(p.x, p.z, 3) || map.trackClearance(p.x, p.z) < 8 || map.inPitZone(p.x, p.z, 10)) continue;
+      q = p;
+      break;
+    }
+    if (!q) continue;
+    const look = track.point(c.sApex, 0, 0, new THREE.Vector3());
+    out.push({ kind: 'cameraTower', x: q.x, z: q.z, y: 0, rot: Math.atan2(look.x - q.x, look.z - q.z), size: 9 });
+    map.exclusions.push({ cx: q.x, cz: q.z, halfW: 3, halfL: 3, angle: 0 });
+    map.clearings.push({ x: q.x, z: q.z, r: 8, soft: 6, keep: 0.2 });
+  }
 }

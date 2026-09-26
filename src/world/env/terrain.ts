@@ -35,15 +35,16 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uDetailN: { value: detail },
     uMaskFine: { value: blank },
     uMaskCoarse: { value: blank },
+    uMaskTrack: { value: blank },
     uFineO: { value: new THREE.Vector2() },
     uFineS: { value: new THREE.Vector2(1, 1) },
     uSqO: { value: new THREE.Vector2() },
     uSqS: { value: new THREE.Vector2(1, 1) },
     uCenter: { value: new THREE.Vector2() },
-    uLawn: { value: lin(0x587a2c) },
-    uMeadow: { value: lin(0x6f7d38) },
-    uStraw: { value: lin(0x9a8f52) },
-    uGrassDark: { value: lin(0x3f5423) },
+    uLawn: { value: lin(0x5a6f3a) },
+    uMeadow: { value: lin(0x6b7043) },
+    uStraw: { value: lin(0x958a5a) },
+    uGrassDark: { value: lin(0x3e4f28) },
     uLitter: { value: lin(0x4e3d2a) },
     uLitterDark: { value: lin(0x2e261c) },
     uMoss: { value: lin(0x46562a) },
@@ -53,6 +54,8 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uEarth: { value: lin(0x7d664c) },
     uCanopy: { value: lin(0x33462a) },
     uRoof: { value: lin(0x9a5a3e) },
+    /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
+    uCity: { value: 0 },
     uWetness: weatherUniforms.uWetness,
     uRain: weatherUniforms.uRain,
     uWTime: weatherUniforms.uWeatherTime,
@@ -81,12 +84,15 @@ uniform sampler2D uNoise;
 uniform sampler2D uDetailN;
 uniform sampler2D uMaskFine;
 uniform sampler2D uMaskCoarse;
+uniform sampler2D uMaskTrack;
 uniform vec2 uFineO, uFineS, uSqO, uSqS, uCenter;
 uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uGravel, uGravelDark, uAsphalt, uEarth, uCanopy, uRoof;
 uniform float uWetness, uRain, uWTime;
+uniform float uCity;
 varying vec3 vWPos;
 varying vec3 vWNormal;
 float tRough;
+float tAO;
 vec3 tDetailN;
 float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 `,
@@ -120,26 +126,74 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   float coarseForest = mix( procF * 0.7, mc.r, inSq );
   float park = mix( 0.0, mc.g, inSq );
   float forest = mix( coarseForest * 0.9, clamp( mf.r * 1.25, 0.0, 1.0 ), inFine );
-  float lawn = mf.g * inFine;
+  // track-aligned: R mowing band, G verge, B run-off wear (parkmask.ts)
+  vec4 mt = texture2D( uMaskTrack, clamp( fuv, 0.001, 0.999 ) ) * inFine;
+  float verge = mt.g;
+  float lawn = max( mf.g * inFine, verge );
   float gravel = mf.b * inFine;
   float paved = mf.a * inFine;
 
   // ---- grass: rough September meadow ↔ mown lawn with stripes
+  // very large scale: whole fields drift between fresh green, blue-green and sun-bleached
+  float m0 = texture2D( uNoise, p * 0.00031 + vec2( 0.61, 0.27 ) ).g;
+  float hueF = ( m0 - 0.5 ) * 2.0;
+  vec3 macroTint = vec3( 1.0 + 0.1 * hueF, 1.0 + 0.02 * hueF, 1.0 - 0.14 * hueF ) * ( 0.94 + 0.12 * m1 );
   float dry = smoothstep( 0.38, 0.78, m2 * 0.55 + m3 * 0.45 );
   vec3 meadow = mix( uMeadow, uStraw, dry * 0.75 );
   meadow = mix( meadow, uGrassDark, smoothstep( 0.55, 0.85, d1 ) * 0.4 );
+  // clumps of darker, lusher tussock and pale seed heads
+  meadow = mix( meadow, uGrassDark * 0.85, smoothstep( 0.62, 0.8, d2 ) * 0.35 * ( 0.4 + 0.6 * nearF ) );
+  meadow = mix( meadow, uStraw * 1.1, smoothstep( 0.78, 0.92, d3 ) * 0.25 * nearF );
   meadow *= 0.86 + 0.26 * d2 * ( 0.5 + 0.5 * nearF ) + 0.08 * m1;
-  vec3 lawnC = uLawn * ( 0.9 + 0.14 * m3 + 0.06 * d1 );
+  vec3 lawnC = uLawn * ( 0.88 + 0.16 * m3 + 0.06 * d1 );
+  // lawns: slightly patchy (clover, drier crowns where the soil is thin)
+  lawnC = mix( lawnC, mix( uLawn, uStraw, 0.4 ), smoothstep( 0.6, 0.85, m2 * 0.6 + d1 * 0.4 ) * 0.35 );
+  lawnC = mix( lawnC, uGrassDark, smoothstep( 0.6, 0.9, d2 ) * 0.18 );
   {
-    // mowing stripes, direction rotates from lawn to lawn
-    float ang = floor( m1 * 5.0 ) * 0.9 + 0.35;
+    // mowing stripes: the mower follows long gentle curves (the direction varies smoothly,
+    // no seams), the contrast is the light/dark of grass laid toward and away from the eye
+    // one direction per venue (a direction varying with position swirls: the stripe phase is dot(p, dir))
+    float ang = 0.35 + fract( uCenter.x * 0.00137 + uCenter.y * 0.00071 ) * 3.0;
     vec2 dir = vec2( cos( ang ), sin( ang ) );
-    float u = dot( p, dir ) / 5.6 + m2 * 0.6;
+    float u = dot( p, dir ) / 6.2 + m2 * 0.8;
     float aa = fwidth( u );
-    float st = smoothstep( 0.5 - aa, 0.5 + aa, abs( fract( u ) - 0.5 ) * 2.0 );
-    lawnC *= mix( 1.0, mix( 0.93, 1.08, st ), 1.0 - smoothstep( 0.25, 0.6, aa ) );
+    float st = smoothstep( 0.5 - aa * 1.5, 0.5 + aa * 1.5, abs( fract( u ) - 0.5 ) * 2.0 );
+    // how the laid blades read depends on which way we look along the stripe
+    vec3 vdir = normalize( vWPos - cameraPosition );
+    float along = abs( dot( normalize( vdir.xz + 1e-4 ), dir ) );
+    float amp = 0.045 + 0.035 * along;
+    // along the circuit the verges are mown in bands across the track, following every curve
+    float stT = smoothstep( 0.3, 0.7, mt.r / max( verge, 0.05 ) );
+    st = mix( st, stT, verge );
+    amp = mix( amp, 0.075, verge );
+    lawnC *= mix( 1.0, mix( 1.0 - amp, 1.0 + amp, st ), ( 1.0 - smoothstep( 0.2, 0.55, aa ) * ( 1.0 - verge ) ) * ( 1.0 - farF ) );
+    // white clover patches in the sward, a bluer, darker green
+    float clover = smoothstep( 0.64, 0.72, d1 * 0.55 + m3 * 0.45 ) * ( 0.5 + 0.5 * nearF );
+    lawnC = mix( lawnC, lawnC * vec3( 0.86, 0.98, 0.95 ), clover * 0.6 );
   }
+  meadow *= macroTint;
+  lawnC *= mix( vec3( 1.0 ), macroTint, 0.6 );
   vec3 grass = mix( meadow, lawnC, lawn );
+  // run-off wear: where cars run wide the grass is scuffed, dusty and dry
+  float wear = mt.b * smoothstep( 0.35, 0.7, d1 * 0.5 + d2 * 0.5 + mt.b * 0.3 );
+  grass = mix( grass, mix( uStraw, uEarth, 0.5 ) * ( 0.85 + 0.2 * d3 ), wear * 0.7 );
+  // hollows in the verge where rain stands: flattened, muddy grass (puddles when wet)
+  float mudK = verge * smoothstep( 0.74, 0.8, d1 * 0.6 + m2 * 0.4 );
+  grass = mix( grass, uEarth * 0.55, mudK * 0.55 );
+  // wild flowers: daisies and clover heads in the lawns, buttercups and knapweed in meadow
+  float fFade = 1.0 - smoothstep( 7.0, 28.0, camDist );
+  if ( fFade > 0.0 ) {
+    vec2 fc = p * 2.6;
+    vec2 fi = floor( fc );
+    vec2 ff = fract( fc ) - 0.5;
+    float fh = h21( fi );
+    float fk = h21( fi + 5.3 );
+    vec2 fo = vec2( h21( fi + 1.7 ), h21( fi + 4.1 ) ) - 0.5;
+    float dens = mix( 0.1, 0.035, lawn ) * smoothstep( 0.3, 0.7, m3 * 0.6 + d1 * 0.4 ) * ( 1.0 - forest ) * ( 1.0 - wear );
+    float disc = 1.0 - smoothstep( 0.05, 0.1, length( ff - fo * 0.7 ) );
+    vec3 fcol = fk < 0.55 ? vec3( 0.78, 0.78, 0.72 ) : fk < 0.82 ? vec3( 0.8, 0.62, 0.06 ) : vec3( 0.42, 0.22, 0.5 );
+    grass = mix( grass, fcol, step( fh, dens ) * disc * fFade );
+  }
   // trampled / worn grass near paths and stands
   float worn = smoothstep( 0.02, 0.3, gravel ) * ( 1.0 - smoothstep( 0.5, 0.9, gravel ) );
   grass = mix( grass, uEarth * ( 0.8 + 0.3 * d2 ), worn * 0.6 );
@@ -157,6 +211,7 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   // ---- outside the park: towns ringing the park wall, farmland and copses beyond
   float rc = length( p - uCenter );
   float procUrban = ( 1.0 - smoothstep( 3500.0, 7000.0, rc ) ) * smoothstep( 0.55, 0.7, m1 * 0.7 + m2 * 0.3 ) + smoothstep( 0.66, 0.78, m1 ) * 0.7;
+  procUrban = mix( procUrban, smoothstep( 0.3, 0.42, m1 * 0.55 + m2 * 0.45 ), uCity );
   float urban = mix( procUrban * ( 1.0 - park ), mc.b, inSq ) * ( 1.0 - inFine * 0.0 );
   float mtn = smoothstep( 90.0, 320.0, vWPos.y );
   float farm = ( 1.0 - park ) * ( 1.0 - forest ) * ( 1.0 - urban ) * ( 1.0 - mtn );
@@ -218,10 +273,12 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   float soil = max( max( gravel, pv ), forest * 0.6 );
   col *= mix( 1.0, mix( 0.8, 0.58, soil ), wet );
   float pud = smoothstep( 0.6, 0.66, d1 * 0.55 + m3 * 0.45 + wet * 0.22 ) * smoothstep( 0.3, 0.9, wet );
-  pud *= max( smoothstep( 0.4, 0.8, gravel ), pv * 0.9 ) + 0.25 * lawn * step( 0.72, m2 );
+  pud *= max( smoothstep( 0.4, 0.8, gravel ), pv * 0.9 ) + 0.25 * lawn * step( 0.72, m2 ) + mudK * 1.4;
   col = mix( col, col * 0.32 + vec3( 0.004 ), pud );
 
   diffuseColor.rgb *= col;
+  // sky occlusion: under the canopy the ground sees little sky (and the trees' own green bounce)
+  tAO = 1.0 - 0.6 * clamp( forest * 1.2, 0.0, 1.0 ) * ( 1.0 - farF * 0.5 );
   tRough = mix( 0.93, 0.97, forest );
   tRough = mix( tRough, 0.86, lawn * ( 1.0 - forest ) );
   tRough = mix( tRough, 0.82, pv );
@@ -246,6 +303,12 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
       )
       .replace('#include <roughnessmap_fragment>', `float roughnessFactor = tRough;`)
       .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+reflectedLight.indirectDiffuse *= tAO * mix( vec3( 1.0 ), vec3( 0.9, 1.05, 0.8 ), 1.0 - tAO );
+reflectedLight.indirectSpecular *= tAO * tAO;`,
+      )
+      .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
 {
@@ -254,7 +317,7 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v2';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v4';
   return { material, uniforms };
 }
 
@@ -398,6 +461,7 @@ export function buildTerrain(map: WorldMap, maxAniso: number): TerrainBuild {
     uniforms,
     setMasks(m: ParkMasks) {
       uniforms.uMaskFine.value = m.fine;
+      uniforms.uMaskTrack.value = m.track;
       uniforms.uMaskCoarse.value = m.coarse;
       (uniforms.uFineO.value as THREE.Vector2).set(m.fineBounds.x0, m.fineBounds.z0);
       (uniforms.uFineS.value as THREE.Vector2).set(m.fineBounds.x1 - m.fineBounds.x0, m.fineBounds.z1 - m.fineBounds.z0);

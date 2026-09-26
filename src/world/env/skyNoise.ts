@@ -107,7 +107,17 @@ void main() {
 }
 `;
 
+/** the noise doesn't depend on the circuit: built once per renderer and size, then shared */
+const noiseCache = new WeakMap<THREE.WebGLRenderer, Map<number, THREE.Data3DTexture>>();
 export function createCloudNoise(renderer: THREE.WebGLRenderer, size = 128): THREE.Data3DTexture {
+  const known = noiseCache.get(renderer)?.get(size);
+  if (known) return known;
+  const made = buildCloudNoise(renderer, size);
+  if (!noiseCache.has(renderer)) noiseCache.set(renderer, new Map());
+  noiseCache.get(renderer)!.set(size, made);
+  return made;
+}
+function buildCloudNoise(renderer: THREE.WebGLRenderer, size: number): THREE.Data3DTexture {
   const rt = new THREE.WebGL3DRenderTarget(size, size, size, {
     format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,

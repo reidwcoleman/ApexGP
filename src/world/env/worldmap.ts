@@ -1,6 +1,11 @@
 import { Track, type DistanceField } from '../Track.ts';
 import { clamp, fbm2, lerp, perlin2, ridged2, smoothstep } from './noise.ts';
 import type { OvalPath } from './ovalpath.ts';
+import { spielbergForest, spielbergNatural, spielbergPark, spielbergUrban } from './venues/spielberg.ts';
+import { interlagosForest, interlagosNatural, interlagosPark, interlagosUrban } from './venues/interlagos.ts';
+import { zandvoortForest, zandvoortNatural, zandvoortPark, zandvoortUrban } from './venues/zandvoortLand.ts';
+import { austinForest, austinNatural, austinUrbanBias } from './venues/austinLand.ts';
+import { montrealForest, montrealNatural, montrealPark, montrealUrban } from './venues/montrealLand.ts';
 
 /**
  * The shape of the land around Monza: the Parco di Monza (flat royal park,
@@ -64,7 +69,7 @@ export interface Anchors {
 const floorTo = (v: number, k: number) => Math.floor(v / k) * k;
 const ceilTo = (v: number, k: number) => Math.ceil(v / k) * k;
 
-export type Venue = 'park' | 'ardennes' | 'airfield';
+export type Venue = 'park' | 'ardennes' | 'airfield' | 'suzuka' | 'interlagos' | 'montreal' | 'zandvoort' | 'spielberg' | 'austin';
 
 export class WorldMap {
   readonly track: Track;
@@ -88,6 +93,8 @@ export class WorldMap {
   readonly clearings: Clearing[] = [];
   readonly paths: ParkPath[] = [];
   oval: OvalPath | null = null;
+  /** where the lap passes over itself (Suzuka): the lower road runs through a walled cut under the bridge */
+  readonly crossings: { lower: number; upper: number; x: number; z: number }[];
   private ovalHash = new Map<number, number[]>();
 
   // natural-height grid (32 m, bicubic) covering the square + margin
@@ -119,16 +126,24 @@ export class WorldMap {
       z1: ceilTo(bb.z1 + 420, 16),
     };
     // the park: the circuit sits in its northern half, the Villa Reale lawns to the south
-    this.venue = track.def.id === 'spa' ? 'ardennes' : track.def.id === 'silverstone' ? 'airfield' : 'park';
+    const id = track.def.id;
+    this.venue = id === 'austin' ? 'austin' : id === 'spa' ? 'ardennes' : id === 'silverstone' ? 'airfield' : id === 'suzuka' ? 'suzuka' : 'park';
     // (in the Ardennes the "park" is the whole forest: no plain, no towns)
     // (at Silverstone the "park" is the circuit estate on the old airfield: farmland and villages beyond)
+    // (at Suzuka it is the circuit's wooded hillside estate; rice paddies and Suzuka city beyond)
     const { bb: B } = this.A;
     this.park =
       this.venue === 'ardennes'
         ? { cx: center.x, cz: center.z, rx: 1e5, rz: 1e5 }
-        : this.venue === 'airfield'
-          ? { cx: center.x, cz: center.z, rx: (B.x1 - B.x0) / 2 + 520, rz: (B.z1 - B.z0) / 2 + 520 }
+        : this.venue === 'airfield' || this.venue === 'suzuka' || this.venue === 'austin'
+          ? { cx: center.x, cz: center.z, rx: (B.x1 - B.x0) / 2 + (this.venue === 'suzuka' ? 620 : 520), rz: (B.z1 - B.z0) / 2 + (this.venue === 'suzuka' ? 700 : 520) }
           : { cx: center.x - 40, cz: center.z + 420, rx: 1450, rz: 2250 };
+    // Spielberg: the Red Bull Ring's estate on the hillside above the Mur valley (see venues/spielberg.ts)
+    if (id === 'spielberg') { this.venue = 'spielberg'; this.park = spielbergPark(this); }
+    if (id === 'interlagos') { this.venue = 'interlagos'; this.park = interlagosPark(this); }
+    if (id === 'zandvoort') { this.venue = 'zandvoort'; this.park = zandvoortPark(this); }
+    if (id === 'montreal') { this.venue = 'montreal'; this.park = montrealPark(this); }
+    this.crossings = track.crossings.map((c) => ({ lower: c.lower, upper: c.upper, x: (track.px[c.lower] + track.px[c.upper]) / 2, z: (track.pz[c.lower] + track.pz[c.upper]) / 2 }));
     this.dfFar = track.buildDistanceField(40, 700, 560);
     this.dfNear = track.buildDistanceField(8, 170, 124);
     {
@@ -328,6 +343,10 @@ export class WorldMap {
 
   /** built-up density 0..1 outside the park: Monza, Villasanta, Biassono, Vedano… */
   urban(x: number, z: number): number {
+    if (this.venue === 'spielberg') return spielbergUrban(this, x, z);
+    if (this.venue === 'interlagos') return interlagosUrban(this, x, z);
+    if (this.venue === 'zandvoort') return zandvoortUrban(this, x, z);
+    if (this.venue === 'montreal') return montrealUrban(this, x, z);
     const out = this.outsidePark(x, z);
     if (out <= 0) return 0;
     const d = this.parkDistance(x, z);
@@ -335,7 +354,15 @@ export class WorldMap {
     const n = fbm2(x / 1100 + 7.3, z / 1100 - 3.9, 3) * 0.5 + 0.5;
     const n2 = fbm2(x / 300 - 1.7, z / 300 + 2.2, 2) * 0.5 + 0.5;
     // Monza to the south is solid town; elsewhere separate villages with fields between
-    const south = this.venue === 'airfield' ? -0.12 : smoothstep(this.park.cz + 1200, this.park.cz + 2600, z) * 0.22;
+    const south =
+      this.venue === 'austin'
+        ? austinUrbanBias(this, x, z)
+        : this.venue === 'airfield'
+        ? -0.12
+        : this.venue === 'suzuka'
+          ? // Suzuka city spreads over the plain to the south and east; the hills stay wooded
+            smoothstep(this.park.cx + 200, this.park.cx + 2600, x + 0.6 * (z - this.park.cz)) * 0.3 - smoothstep(this.park.cx - 400, this.park.cx - 2600, x) * 0.4
+          : smoothstep(this.park.cz + 1200, this.park.cz + 2600, z) * 0.22;
     return out * smoothstep(0.5, 0.64, 0.12 + 0.38 * near + 0.95 * (n - 0.5) + 0.22 * (n2 - 0.5) + south);
   }
 
@@ -346,6 +373,11 @@ export class WorldMap {
     const dT = this.distToTrack(x, z);
     const far = smoothstep(40, 380, dT);
     let h = P;
+    if (this.venue === 'spielberg') return spielbergNatural(this, x, z, P, dT);
+    if (this.venue === 'interlagos') return interlagosNatural(this, x, z, P, dT, far);
+    if (this.venue === 'zandvoort') return zandvoortNatural(this, x, z, P, dT);
+    if (this.venue === 'montreal') return montrealNatural(this, x, z, P, dT, far);
+    if (this.venue === 'austin') return h + austinNatural(this, x, z, dT, far);
     if (this.venue === 'ardennes') {
       // wooded valley sides near the circuit, rolling ridges of 100–200 m further out
       h += (0.3 + 0.7 * far) * (14 * fbm2(x / 700 + 2.3, z / 700 - 4.1, 4) + 4 * fbm2(x / 180 - 3.3, z / 180 + 1.9, 2));
@@ -353,6 +385,27 @@ export class WorldMap {
       const hills = smoothstep(1400, 6000, Rh);
       const m = ridged2(x / 3800 + 0.7, z / 3800 - 2.9, 4, 2.0, 0.5);
       h += hills * (30 + 170 * Math.pow(m, 1.4) * (0.6 + 0.4 * (fbm2(x / 7000 - 1.1, z / 7000 + 2.6, 2) * 0.5 + 0.5)));
+      return h;
+    }
+    if (this.venue === 'suzuka') {
+      // Ise: the circuit folded into wooded hills, higher ridges north and west, the Suzuka
+      // range (1000 m+) on the western horizon, the coastal plain and Ise Bay to the east
+      const R = Math.hypot(x - center.x, z - center.z);
+      const plain = smoothstep(center.x + 1400, center.x + 4200, x + 0.3 * (z - center.z));
+      h += (0.35 + 0.65 * far) * (1 - 0.8 * plain) * (9 * fbm2(x / 520 + 2.3, z / 520 - 4.1, 4) + 2.5 * fbm2(x / 150 - 3.3, z / 150 + 1.9, 2));
+      // wooded ridges right behind the circuit's own slopes, bigger hills further out
+      const near = smoothstep(120, 800, dT) * (1 - plain);
+      const m0 = ridged2(x / 1300 - 1.9, z / 1300 + 3.3, 4, 2.0, 0.5);
+      h += near * (8 + 55 * Math.pow(m0, 1.6));
+      const hills = smoothstep(1300, 4200, R) * (1 - plain);
+      const m = ridged2(x / 2600 + 0.7, z / 2600 - 2.9, 4, 2.0, 0.5);
+      h += hills * (18 + 95 * Math.pow(m, 1.5) * (0.55 + 0.45 * (fbm2(x / 5000 - 1.1, z / 5000 + 2.6, 2) * 0.5 + 0.5)));
+      h -= plain * 6;
+      const west = smoothstep(center.x - 6500, center.x - 12500, x - 0.25 * (z - center.z));
+      if (west > 0) {
+        const mm = ridged2(x / 4200 + 3.1, z / 4200 - 1.7, 5, 2.1, 0.5);
+        h += west * (140 + 900 * mm * mm * (0.5 + 0.6 * (fbm2(x / 8000 + 0.3, z / 8000 - 1.9, 2) * 0.5 + 0.5)));
+      }
       return h;
     }
     if (this.venue === 'airfield') {
@@ -469,6 +522,25 @@ export class WorldMap {
     } else if (inPit) {
       hint = this.track.project(x, z, Math.round((this.track.pit.sStart + this.track.pit.sEnd) / 2), 480).index;
     }
+    const xg = this.crossings.length && hint >= 0 ? this.crossingAt(x, z) : null;
+    if (xg && (Math.abs(this.track.delta(hint, xg.lower)) < 100 || Math.abs(this.track.delta(hint, xg.upper)) < 100)) {
+      // the figure-of-eight crossing: the upper pass sits on an embankment, the lower pass runs
+      // through a walled cut under the bridge (sharp edges near the bridge, the usual blend further on)
+      const tr = this.track;
+      const up = this.sectionAt(x, z, xg.upper);
+      const twU = 1 - smoothstep(up.bar + 2, up.bar + 32, Math.abs(up.lat));
+      N = lerp(N, up.plane - 0.3, twU);
+      const lo = this.sectionAt(x, z, xg.lower);
+      const along = Math.abs(tr.delta(xg.lower, lo.s));
+      const cut = lerp(2.5, 30, smoothstep(45, 110, along));
+      // flat to the back of the retaining-wall block (bar + 6.2) so no terrain triangle can lean over its face
+      const twL = 1 - smoothstep(lo.bar + 6.1, lo.bar + 6.1 + cut, Math.abs(lo.lat));
+      N = lerp(N, lo.plane - 0.3, twL);
+      tw = Math.max(twU, twL);
+      sOut = twL >= twU ? lo.s : up.s;
+      latOut = twL >= twU ? lo.lat : up.lat;
+      hint = -1;
+    }
     if (hint >= 0) {
       const pr = this.projectFast(x, z, hint, 12);
       const tr = this.track;
@@ -490,7 +562,7 @@ export class WorldMap {
       const pit = tr.pit;
       if (side === pit.side && s > pit.sStart - 40 && s < pit.sEnd + 40) {
         const ramp = Math.min(smoothstep(pit.sStart - 40, pit.sStart + 10, s), 1 - smoothstep(pit.sEnd - 10, pit.sEnd + 40, s));
-        flatUntil = lerp(flatUntil, 132, ramp);
+        flatUntil = lerp(flatUntil, pit.paddock + 7, ramp);
         if (al > pit.wallOffset + 1 && ramp > 0.02) offset = lerp(offset, -0.16, ramp);
         blend = 40;
       }
@@ -515,6 +587,24 @@ export class WorldMap {
       trackOut[2] = latOut;
     }
     return N;
+  }
+
+  crossingAt(x: number, z: number): { lower: number; upper: number; x: number; z: number } | null {
+    for (const c of this.crossings) if ((x - c.x) ** 2 + (z - c.z) ** 2 < 125 * 125) return c;
+    return null;
+  }
+
+  /** (s, lateral), extended road-plane height and barrier distance of the section near `hint` */
+  sectionAt(x: number, z: number, hint: number): { s: number; lat: number; plane: number; bar: number } {
+    const tr = this.track;
+    const pr = this.projectFast(x, z, hint, 90);
+    const s = pr.s, lat = pr.lat;
+    const i = Math.floor(s) % tr.n;
+    const j = (i + 1) % tr.n;
+    const a = s - Math.floor(s);
+    const py = tr.py[i] * (1 - a) + tr.py[j] * a;
+    const ry = tr.ry[i] * (1 - a) + tr.ry[j] * a;
+    return { s, lat, plane: py + ry * Math.min(Math.abs(lat), 40) * Math.sign(lat), bar: tr.barrierAt(s, lat < 0 ? -1 : 1) };
   }
 
   // ------------------------------------------------------------ baking
@@ -696,7 +786,7 @@ export class WorldMap {
       Math.sign(pr.lat) === pit.side &&
       pr.s > pit.sStart - 20 - margin &&
       pr.s < pit.sEnd + 20 + margin &&
-      Math.abs(pr.lat) < 132 + margin
+      Math.abs(pr.lat) < pit.paddock + 7 + margin
     );
   }
 
@@ -816,6 +906,10 @@ export class WorldMap {
    * farmland with hedgerows and copses.
    */
   private forestExact(x: number, z: number): number {
+    if (this.venue === 'spielberg') return spielbergForest(this, x, z);
+    if (this.venue === 'interlagos') return interlagosForest(this, x, z);
+    if (this.venue === 'zandvoort') return zandvoortForest(this, x, z);
+    if (this.venue === 'montreal') return montrealForest(this, x, z);
     const dT = this.distToTrack(x, z);
     const n1 = fbm2(x / 520 + 11.3, z / 520 - 7.7, 4);
     const n2 = fbm2(x / 170 - 2.3, z / 170 + 6.1, 3);
@@ -826,12 +920,21 @@ export class WorldMap {
       const belt = smoothstep(0.66, 0.8, fbm2(x / 340 + 3.7, z / 340 - 8.2, 3) * 0.5 + 0.5 + 0.1 * n2);
       f = belt * smoothstep(70, 240, dT) * 0.85;
     }
+    if (this.venue === 'suzuka') {
+      // cedar and pine woods on every slope round the circuit; open hillsides by the stands (layout clearings)
+      f = smoothstep(0.34, 0.56, 0.58 + 0.4 * n1 + 0.14 * n2 + nearBoost * 0.6) * smoothstep(26, 70, dT);
+    }
+    if (this.venue === 'austin') return clamp(austinForest(this, x, z, dT) * this.clearingKeep(x, z), 0, 1);
     f *= this.clearingKeep(x, z);
     const out = this.outsidePark(x, z);
     if (out > 0) {
       // farmland: scattered copses only
       const copse = smoothstep(0.62, 0.78, fbm2(x / 260 + 1.9, z / 260 - 4.4, 3) * 0.5 + 0.5) * (1 - smoothstep(0.2, 0.5, this.urban(x, z)));
-      f = lerp(f, copse * 0.8, out);
+      if (this.venue === 'suzuka') {
+        // wooded hills, rice paddies on the flat valley floors and the plain
+        const hill = smoothstep(0.3, 0.55, ridged2(x / 2600 + 0.7, z / 2600 - 2.9, 4, 2.0, 0.5)) * (1 - smoothstep(this.A.center.x + 1400, this.A.center.x + 4200, x + 0.3 * (z - this.A.center.z)));
+        f = lerp(f, Math.max(copse * 0.6, hill * 0.95) * (1 - smoothstep(0.2, 0.5, this.urban(x, z))), out);
+      } else f = lerp(f, copse * 0.8, out);
     }
     return clamp(f, 0, 1);
   }

@@ -36,6 +36,8 @@
     <div class="row">
       <button id="start">Start audio</button>
       <label>Volume <input id="vol" type="range" min="0" max="1.2" step="0.01" value="0.8"><span class="v" id="volv">0.80</span></label>
+      <label>Music <input id="mvol" type="range" min="0" max="1" step="0.05" value="0.35"><span class="v" id="mvolv">0.35</span></label>
+      <label>Scene <select id="scene"><option value="race">race</option><option value="menu">menu (music)</option><option value="results">results</option><option value="paused">paused</option><option value="flashback">flashback</option></select></label>
       <span id="status" style="color:var(--dim)">not started</span>
     </div>
   </section>
@@ -77,6 +79,9 @@
       <button data-ui="move">UI move</button>
       <button data-ui="select">UI select</button>
       <button data-ui="back">UI back</button>
+      <button id="radio">Radio</button>
+      <button id="cheer">Crowd cheer</button>
+      <button id="gasp">Crowd gasp</button>
     </div>
   </section>
   <section>

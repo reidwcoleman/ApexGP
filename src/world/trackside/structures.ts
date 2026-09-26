@@ -74,16 +74,82 @@ export interface StructuresOut {
   panels: PanelSpot[];
 }
 
+/**
+ * Per-circuit placement: sponsor footbridges (s), corners with a TV camera platform, corners
+ * with a big billboard at the end of the run-off (name, sponsor salt).
+ */
+interface VenueProps {
+  bridges: number[];
+  cameras: string[];
+  billboards: [string, number][];
+}
+const VENUE_PROPS: Record<string, VenueProps> = {
+  // the main straight past the pit exit, and the back straight toward the Parabolica
+  monza: {
+    bridges: [1048, 4700],
+    cameras: ['Turn 1', 'Curva Grande', 'Roggia', 'Lesmo 2', 'Ascari', 'Parabolica'],
+    billboards: [['Turn 1', 0], ['Roggia', 4], ['Ascari', 8], ['Parabolica', 12], ['Lesmo 1', 2]],
+  },
+  // the Kemmel straight after Raidillon, the run down to Blanchimont
+  spa: {
+    bridges: [2150, 6050],
+    cameras: ['La Source', 'Raidillon', 'Les Combes', 'Rivage', 'Pouhon', 'Stavelot', 'Blanchimont', 'Bus Stop'],
+    billboards: [['La Source', 1], ['Les Combes', 5], ['Rivage', 9], ['Bus Stop', 13], ['Stavelot', 3]],
+  },
+  // the Wellington and Hangar straights
+  silverstone: {
+    bridges: [1800, 4850],
+    cameras: ['Abbey', 'Village', 'Brooklands', 'Luffield', 'Copse', 'Becketts', 'Stowe', 'Club'],
+    billboards: [['Village', 2], ['Brooklands', 6], ['Stowe', 10], ['Copse', 14], ['Club', 4]],
+  },
+  // the end of the main straight before Turn 1, the run from Spoon to the crossover
+  suzuka: {
+    bridges: [905, 4560],
+    cameras: ['Turn 1', 'S Curves', 'Dunlop', 'Degner 1', 'Hairpin', 'Spoon', '130R', 'Casio Triangle'],
+    billboards: [['Turn 1', 3], ['Hairpin', 7], ['Spoon', 11], ['Casio Triangle', 1], ['Degner 1', 9]],
+  },
+  // COTA: the back straight (a sponsor bridge halfway down it)
+  austin: {
+    bridges: [3380],
+    cameras: ['Turn 1', 'Turn 3', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 15', 'Turn 18', 'Turn 20'],
+    billboards: [['Turn 1', 2], ['Turn 11', 6], ['Turn 12', 10], ['Turn 15', 14], ['Turn 19', 4]],
+  },
+  // the climb from the Niki Lauda Kurve to Remus, the run along the top to Schlossgold
+  spielberg: {
+    bridges: [1330, 2330],
+    cameras: ['Niki Lauda', 'Remus', 'Schlossgold', 'Rauch', 'Würth', 'Jochen Rindt', 'Red Bull Mobile'],
+    billboards: [['Niki Lauda', 2], ['Remus', 6], ['Schlossgold', 10], ['Red Bull Mobile', 14], ['Rauch', 4]],
+  },
+  // Zandvoort: the footbridge over the climb out of the Hugenholtz, another over the back straight
+  zandvoort: {
+    bridges: [1690, 3480],
+    cameras: ['Tarzanbocht', 'Hugenholtzbocht', 'Rob Slotemakerbocht', 'Scheivlak', 'Mastersbocht', 'Hans Ernstbocht', 'Kumhobocht', 'Arie Luyendijkbocht'],
+    billboards: [['Tarzanbocht', 2], ['Hugenholtzbocht', 6], ['Mastersbocht', 10], ['Hans Ernstbocht', 14], ['Kumhobocht', 4]],
+  },
+  // Interlagos: the footbridge over the Reta Oposta, another over the climb of the Subida dos Boxes
+  interlagos: {
+    bridges: [2240, 440],
+    cameras: ['S do Senna', 'Curva do Sol', 'Descida do Lago', 'Ferradura', 'Laranjinha', 'Bico de Pato', 'Mergulho', 'Junção'],
+    billboards: [['S do Senna', 2], ['Descida do Lago', 6], ['Bico de Pato', 10], ['Junção', 14], ['Ferradura', 4]],
+  },
+  // Montréal: the footbridges over the Casino straight and the back leg of the island
+  montreal: {
+    bridges: [3760, 2380],
+    cameras: ['Turn 1', 'Virage Senna', 'Turn 3', 'Turn 6', 'Turn 8', "L'Épingle", 'Turn 13'],
+    billboards: [['Turn 1', 3], ["L'Épingle", 7], ['Turn 13', 11], ['Turn 8', 1], ['Turn 3', 9]],
+  },
+};
+
 export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
   const out: StructuresOut = { panels: [] };
+  const vp = VENUE_PROPS[ctx.track.def.id] ?? { bridges: [], cameras: [], billboards: [] };
   buildGantry(ctx, atlas);
-  // sponsor footbridges: the main straight past the pit exit, and the back straight toward the Parabolica
-  buildBridge(ctx, atlas, 1048, 0);
-  buildBridge(ctx, atlas, 4700, 1);
+  // sponsor footbridges
+  vp.bridges.forEach((s, k) => buildBridge(ctx, atlas, s, k));
   buildMarshalPosts(ctx, atlas, out);
-  buildCameras(ctx);
+  buildCameras(ctx, vp.cameras);
   buildBoards(ctx, atlas);
-  buildBillboards(ctx, atlas);
+  buildBillboards(ctx, atlas, vp.billboards);
   buildSausages(ctx);
   return out;
 }
@@ -335,8 +401,7 @@ function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
 
 // ------------------------------------------------------------------ TV camera platforms
 
-function buildCameras(ctx: Ctx) {
-  const names = ['Turn 1', 'Curva Grande', 'Roggia', 'Lesmo 2', 'Ascari', 'Parabolica'];
+function buildCameras(ctx: Ctx, names: string[]) {
   for (const c of ctx.track.corners) {
     if (!names.includes(c.name)) continue;
     const side = c.dir as -1 | 1;
@@ -406,6 +471,7 @@ function buildBoards(ctx: Ctx, atlas: PrintAtlas) {
     print.rgb(1, 1, 1).mat(0.5, 0, 0.15);
     printQuadZ(print, F, 0, -size / 2, size / 2, yBase, yBase + size, -1, uv);
   };
+  // braking boards: CornerDef.boards, else every slow corner at the end of a straight (see context.ts resolveStyles)
   for (const c of t.corners) {
     const sty = styleOf(c.name);
     if (!sty.boards) continue;
@@ -424,9 +490,8 @@ function buildBoards(ctx: Ctx, atlas: PrintAtlas) {
 
 // ------------------------------------------------------------------ big corner billboards
 
-function buildBillboards(ctx: Ctx, atlas: PrintAtlas) {
+function buildBillboards(ctx: Ctx, atlas: PrintAtlas, spots: [string, number][]) {
   const t = ctx.track;
-  const spots: [string, number][] = [['Turn 1', 0], ['Roggia', 4], ['Ascari', 8], ['Parabolica', 12], ['Lesmo 1', 2]];
   for (const [name, salt] of spots) {
     const c = ctx.corner(name);
     if (!c) continue;

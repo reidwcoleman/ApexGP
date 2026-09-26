@@ -8,9 +8,16 @@
  * tv = distant trackside camera with doppler.
  *
  * Mix:  near(player cockpit-side) ─┬─────────────────────────────┐
- *       far (exhaust) ─────────────┼→ outside ─ LP(view) ─┬───────┼→ glue comp → volume → fade → limiter → soft clip → out
- *       opponents / crowd ─────────┘                      └ reverb┘
- *       ui ────────────────────────────────────────────────────────────────→ volume
+ *       far (exhaust) ─────────────┼→ outside ─ LP(view) ─┬───────┼→ glue comp → radio duck → scene LP → scene gain ─┐
+ *       opponents / distant field /┘                      └ reverb┘                                                 │
+ *       crowd / trees / wall slaps                                                                                  │
+ *       ui ──────────────────────────────────────────────────────────────────────────────────────────────────────┼→ volume → fade → limiter → soft clip → out
+ *       music (lo-fi) ─ music volume ────────────────────────────────────────────────────────────────────────────┘
+ *
+ * Scenes (setScene): the game mix sits behind a scene gain + low-pass (muffled and quiet under
+ * the pause menu, dimmed under the results, full in the race), the lo-fi music fades in for the
+ * menus / loading / results and out for racing. The context is only ever suspended while the tab
+ * is hidden; every scene change makes sure it is running again at the right volume.
  *
  * Usage: `const audio = new GameAudio(); await audio.init()` from a user gesture, then call
  * updatePlayer()/updateOpponents()/update(dt) every frame. All methods are no-ops before init.
@@ -18,7 +25,9 @@
  */
 import { type AudioBuffers, biquad, chain, clamp, gainNode, loopSource, makeBuffers, setT, softClipCurve } from './audio/dsp.ts';
 import { createEngineSource, type EngineMix, loadEngineWorklet, OpponentVoice, PlayerEngine } from './audio/engine.ts';
-import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, explosionSound, uiSound, WeatherSound } from './audio/fx.ts';
+import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, explosionSound, radioSound, uiSound, WeatherSound } from './audio/fx.ts';
+import { DistantField, type FarCar, TreeWind, WallReflections } from './audio/ambience.ts';
+import { LofiMusic } from './audio/music.ts';
 
 export type AudioView = 'chase' | 'cockpit' | 'tv';
 
@@ -41,6 +50,8 @@ export interface PlayerAudioState {
   /** ERS deploy 0..1 */
   ers: number;
   limiter: boolean;
+  /** pit-lane speed limiter engaged (the engine burbles against it) */
+  pitLimiter?: boolean;
 }
 
 export interface OpponentAudioState {
@@ -52,7 +63,36 @@ export interface OpponentAudioState {
   relVel: number;
   /** −1 (left) … +1 (right) */
   pan: number;
+  /** 0 = ahead of / beside the listener … 1 = straight behind (occluded by our own car) */
+  behind?: number;
 }
+
+/**
+ * What the player is looking at, audio-wise.
+ * loading/menu: music, engine off, quiet ambience · race / celebration: full game mix ·
+ * results: music over a dimmed race · paused: a muffled, distant world · flashback: tape-muffled
+ */
+export type AudioScene = 'loading' | 'menu' | 'race' | 'celebration' | 'results' | 'paused' | 'flashback';
+
+interface SceneMix {
+  /** game-mix level */
+  game: number;
+  /** low-pass on the game mix (Hz) */
+  lp: number;
+  music: boolean;
+  /** outdoor ambience (wind in the trees) */
+  amb: number;
+}
+
+const SCENES: Record<AudioScene, SceneMix> = {
+  loading: { game: 0.5, lp: 20000, music: true, amb: 0.35 },
+  menu: { game: 0.5, lp: 20000, music: true, amb: 0.35 },
+  race: { game: 1, lp: 20000, music: false, amb: 0.5 },
+  celebration: { game: 1, lp: 20000, music: false, amb: 0.5 },
+  results: { game: 0.42, lp: 7000, music: true, amb: 0.5 },
+  paused: { game: 0.14, lp: 520, music: false, amb: 0 },
+  flashback: { game: 0.4, lp: 700, music: false, amb: 0.2 },
+};
 
 interface ViewMix extends EngineMix, CarFxMix {
   /** player's near layers straight to the mix (1) or through the outside filter (0) */
@@ -92,6 +132,8 @@ export class GameAudio {
   private ready = false;
   private initP: Promise<void> | null = null;
   private vol = 0.8;
+  private musicVol = 0.35;
+  private scene: AudioScene = 'loading';
   private view: AudioView = 'chase';
   private b!: AudioBuffers;
 
@@ -115,6 +157,22 @@ export class GameAudio {
   private whooshG!: GainNode;
   /** one-shots (impacts, beeps): direct + a little room */
   private fxBus!: GainNode;
+  /** scene level / muffle on the whole game mix, and a short dip under team radio */
+  private sceneG!: GainNode;
+  private uiLP!: BiquadFilterNode;
+  private sceneLP!: BiquadFilterNode;
+  private duckG!: GainNode;
+  private musicVolG!: GainNode;
+  private music!: LofiMusic;
+  private field!: DistantField;
+  private trees!: TreeWind;
+  private walls!: WallReflections;
+  private farCars: FarCar[] = [];
+  private wind = 0;
+  private crowdLevel = 0;
+  private wallL = 60;
+  private wallR = 60;
+  private inPit = false;
 
   private engine!: PlayerEngine;
   private fx!: CarFx;
@@ -187,9 +245,19 @@ export class GameAudio {
     const limiter = new DynamicsCompressorNode(ctx, { threshold: -4, knee: 2, ratio: 20, attack: 0.001, release: 0.08 });
     const clip = new WaveShaperNode(ctx, { curve: softClipCurve(0.8), oversample: '2x' });
     const mixIn = gainNode(ctx, 1);
-    chain(mixIn, glue, this.master, this.fade, limiter, clip, ctx.destination);
-    this.uiBus = gainNode(ctx, 1);
-    this.uiBus.connect(this.master);
+    const sc = SCENES[this.scene];
+    this.duckG = gainNode(ctx, 1);
+    this.sceneLP = biquad(ctx, 'lowpass', sc.lp, 0.6);
+    this.sceneG = gainNode(ctx, sc.game);
+    chain(mixIn, glue, this.duckG, this.sceneLP, this.sceneG, this.master, this.fade, limiter, clip, ctx.destination);
+    // UI: subtle, rounded, outside the scene mix (audible over the pause menu)
+    this.uiBus = gainNode(ctx, 1.5);
+    this.uiLP = biquad(ctx, 'lowpass', 6000, 0.6);
+    chain(this.uiBus, this.uiLP, this.master);
+    // music: its own level, after the game's compressor (never pumped by the engine)
+    this.musicVolG = gainNode(ctx, this.musicVol);
+    this.music = new LofiMusic(ctx, this.b);
+    chain(this.music.out, this.musicVolG, this.master);
 
     this.direct = gainNode(ctx, 1);
     this.direct.connect(mixIn);
@@ -240,14 +308,117 @@ export class GameAudio {
     // --- crowd
     this.crowdFx = new Crowd(ctx, this.b);
     this.crowdFx.out.connect(this.outside);
+    this.crowdFx.setLevel(this.crowdLevel, ctx.currentTime);
 
     // --- weather
     this.weatherFx = new WeatherSound(ctx, this.b);
     this.weatherFx.out.connect(this.outside);
     this.weatherFx.near.connect(this.fxBus);
 
+    // --- ambience: the rest of the field far away, wind in the trees, wall reflections
+    this.field = new DistantField(ctx, worklet, this.b);
+    this.field.out.connect(this.outside);
+    this.field.wet.connect(gainNode(ctx, 0.6)).connect(conv);
+    this.trees = new TreeWind(ctx, this.b);
+    this.trees.out.connect(this.outside);
+    this.walls = new WallReflections(ctx);
+    this.nearPan.connect(this.walls.input);
+    this.farPan.connect(this.walls.input);
+    this.walls.out.connect(this.outside);
+
     this.ready = true;
     this.applyView(ctx.currentTime);
+    this.applyScene(ctx.currentTime, true);
+  }
+
+  // ------------------------------------------------------------------ scenes
+
+  /** Switch the mix for what the player is doing (see AudioScene). Safe before init. */
+  setScene(scene: AudioScene): void {
+    const prev = this.scene;
+    this.scene = scene;
+    if (!this.ready) return;
+    this.wake();
+    this.applyScene(this.now(), false, prev);
+  }
+
+  get currentScene(): AudioScene {
+    return this.scene;
+  }
+
+  private applyScene(now: number, first: boolean, prev?: AudioScene): void {
+    const sc = SCENES[this.scene];
+    // into the race: bring the world up briskly; out of it: settle a little slower
+    const tau = first ? 0.01 : sc.game > (SCENES[prev ?? this.scene]?.game ?? 0) ? 0.12 : 0.2;
+    this.sceneG.gain.cancelScheduledValues(now);
+    this.sceneG.gain.setTargetAtTime(sc.game, now, tau);
+    this.sceneLP.frequency.cancelScheduledValues(now);
+    this.sceneLP.frequency.setTargetAtTime(sc.lp, now, tau * 0.8);
+    this.duckG.gain.cancelScheduledValues(now);
+    this.duckG.gain.setTargetAtTime(1, now, 0.05);
+    // (loading: the main thread stalls for seconds while the world is built — schedule far ahead)
+    this.music.setLookahead(this.scene === 'loading' ? 6 : 0.8);
+    this.music.setPlaying(sc.music);
+    if (this.scene === 'flashback' && prev !== 'flashback') this.rewindSound(now);
+    // always re-assert the volume (cheap, and the one thing that must never be left wrong)
+    this.master.gain.cancelScheduledValues(now);
+    this.master.gain.setTargetAtTime(this.vol, now, 0.03);
+    this.musicVolG.gain.cancelScheduledValues(now);
+    this.musicVolG.gain.setTargetAtTime(this.musicVol, now, 0.05);
+  }
+
+  /** Make sure a realtime context is running and un-faded (unless the tab is hidden). */
+  wake(): void {
+    const ctx = this.ctx;
+    if (!ctx || !isRealtime(ctx) || !this.ready) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if (ctx.state !== 'running') {
+      this.resume();
+      return;
+    }
+    // running but a stale suspend may have left the fade down
+    if (this.fade.gain.value < 0.99) {
+      ++this.suspendToken;
+      this.fade.gain.cancelScheduledValues(ctx.currentTime);
+      this.fade.gain.setTargetAtTime(1, ctx.currentTime, 0.03);
+    }
+  }
+
+  /** A new session: forget the last one's cars, turbo state and camera. */
+  resetSession(): void {
+    this.boost = 0;
+    this.popBoost = 0;
+    this.dop = 1;
+    this.farCars = [];
+    this.wallL = this.wallR = 60;
+    this.inPit = false;
+    this.tv = { x: -120, lat: 14, side: 1, extT: -1e9, dist: 30, relVel: 0, pan: 0 };
+    if (!this.ready) return;
+    const now = this.now();
+    for (const vc of this.voices) if (vc.id !== null) vc.release(now);
+    setT(this.whooshG.gain, 0, now, 0.05);
+    this.engine.cutUntil = 0;
+  }
+
+  setMusicVolume(v: number): void {
+    this.musicVol = clamp(v, 0, 1);
+    if (!this.ready) return;
+    setT(this.musicVolG.gain, this.musicVol, this.now(), 0.05);
+  }
+
+  /** the flashback: a short tape-rewind swirl */
+  private rewindSound(now: number): void {
+    const ctx = this.ctx!;
+    const n = new AudioBufferSourceNode(ctx, { buffer: this.b.pink, playbackRate: 1.6 });
+    const bp = biquad(ctx, 'bandpass', 500, 1.4);
+    bp.frequency.setValueAtTime(500, now);
+    bp.frequency.exponentialRampToValueAtTime(2600, now + 0.45);
+    const g = gainNode(ctx, 0);
+    chain(n, bp, g, this.uiBus);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.05, now + 0.25);
+    g.gain.setTargetAtTime(0, now + 0.3, 0.1);
+    n.start(now, Math.random() * 2, 1.2);
   }
 
   setVolume(master: number): void {
@@ -297,6 +468,7 @@ export class GameAudio {
         speed: s.speed,
         ers: s.ers,
         limiter: s.limiter,
+        pitLimiter: s.pitLimiter,
         boost: this.boost,
         dop: this.dop,
         popBoost: this.popBoost,
@@ -312,13 +484,16 @@ export class GameAudio {
     if (!up) this.popBoost = 1;
   }
 
-  updateOpponents(list: { id: number; rpm: number; throttle: number; distance: number; relVel: number; pan: number }[]): void {
+  /**
+   * Every other car relative to the listener. The nearest few get their own voices (doppler,
+   * occlusion); the rest feed the distant-field drone.
+   */
+  updateOpponents(list: OpponentAudioState[]): void {
     if (!this.live()) return;
     const now = this.now();
-    const cand = list
-      .filter((o) => Number.isFinite(o.distance) && Number.isFinite(o.rpm) && o.distance < 320)
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, this.voices.length);
+    const valid = list.filter((o) => Number.isFinite(o.distance) && Number.isFinite(o.rpm)).sort((a, b) => a.distance - b.distance);
+    const cand = valid.filter((o) => o.distance < 320).slice(0, this.voices.length);
+    this.farCars = valid.slice(cand.length).filter((o) => o.distance < 1500);
     const want = new Set(cand.map((o) => o.id));
     for (const vc of this.voices) if (vc.id !== null && !want.has(vc.id)) vc.release(now);
     let whoosh = 0;
@@ -354,11 +529,13 @@ export class GameAudio {
 
   /** rain rate and track water 0..1, player speed (m/s), lightning flash 0..1, wind (m/s) — every frame */
   weather(rain: number, wet: number, speed: number, flash: number, wind = 0): void {
+    this.wind = wind;
     if (!this.ready) return;
     this.weatherFx.set(rain, wet, speed, flash, wind, this.now());
   }
 
   crowd(level: number): void {
+    this.crowdLevel = level;
     if (!this.ready) return;
     this.crowdFx.setLevel(level, this.now());
   }
@@ -366,6 +543,33 @@ export class GameAudio {
   ui(kind: 'move' | 'select' | 'back'): void {
     if (!this.live()) return;
     uiSound(this.ctx!, this.b, this.uiBus, kind, this.now());
+  }
+
+  /** a team-radio message came in: soft squelch + bip, and the car dips a little under it */
+  radio(): void {
+    if (!this.live()) return;
+    const now = this.now();
+    radioSound(this.ctx!, this.b, this.uiBus, now);
+    const g = this.duckG.gain;
+    g.cancelScheduledValues(now);
+    g.setTargetAtTime(0.72, now, 0.06);
+    g.setTargetAtTime(1, now + 1.8, 0.35);
+  }
+
+  /** the grandstands react: 'cheer' (start, overtakes, the flag) or 'gasp' (a crash) */
+  crowdReact(kind: 'cheer' | 'gasp', amount = 1): void {
+    if (!this.live()) return;
+    this.crowdFx.react(kind, amount, this.now());
+  }
+
+  /**
+   * The space around the player's car: distances (m) to the barrier on each side and whether
+   * it is in the pit lane (walls, garages and the pit building close by → more reflection).
+   */
+  space(wallLeft: number, wallRight: number, pitLane: boolean): void {
+    this.wallL = wallLeft;
+    this.wallR = wallRight;
+    this.inPit = pitLane;
   }
 
   /**
@@ -397,6 +601,15 @@ export class GameAudio {
     this.fx.update(dt);
     this.crowdFx.update(dt, now);
     this.pushPlayer(now);
+
+    // ambience
+    this.field.set(this.farCars, dt, now);
+    this.trees.set(SCENES[this.scene].amb, this.wind, now);
+    // reflections belong to the car's surroundings: not from a trackside tv camera
+    if (this.view === 'tv') this.walls.set(60, 60, false, now);
+    else this.walls.set(this.wallL, this.wallR, this.inPit, now);
+    const v = VIEWS[this.view];
+    setT(this.revSend.gain, v.reverb + (this.inPit && this.view !== 'tv' ? 0.22 : 0), now, 0.3);
   }
 
   private updateTv(dt: number, now: number): void {
@@ -423,6 +636,7 @@ export class GameAudio {
     setT(this.outsideLP.frequency, 1800 + 16000 * Math.exp(-tv.dist / 120), now, 0.05);
   }
 
+  /** The tab went into the background: fade and suspend (resume() or wake() undo it). */
   suspend(): void {
     const ctx = this.ctx;
     if (!ctx || !isRealtime(ctx) || !this.ready) return;
@@ -438,15 +652,36 @@ export class GameAudio {
     const ctx = this.ctx;
     if (!ctx || !isRealtime(ctx)) return;
     const tok = ++this.suspendToken;
-    void ctx
-      .resume()
-      .then(() => {
-        if (tok !== this.suspendToken || !this.ready) return;
-        this.fade.gain.cancelScheduledValues(ctx.currentTime);
-        this.fade.gain.setTargetAtTime(1, ctx.currentTime, 0.03);
-        this.pushPlayer(ctx.currentTime);
-      })
-      .catch(() => {});
+    const done = () => {
+      if (tok !== this.suspendToken || !this.ready) return;
+      this.fade.gain.cancelScheduledValues(ctx.currentTime);
+      this.fade.gain.setTargetAtTime(1, ctx.currentTime, 0.03);
+      this.master.gain.cancelScheduledValues(ctx.currentTime);
+      this.master.gain.setTargetAtTime(this.vol, ctx.currentTime, 0.03);
+      this.pushPlayer(ctx.currentTime);
+    };
+    if (ctx.state === 'running') done();
+    else void ctx.resume().then(done).catch(() => {});
+  }
+
+  /** Dev/debug: the numbers that decide whether anything is audible. */
+  _state(): { ctx: string; scene: AudioScene; master: number; fade: number; scene_gain: number; music: number; musicVol: number; musicPlaying: boolean } | null {
+    if (!this.ready) return null;
+    return {
+      ctx: isRealtime(this.ctx!) ? (this.ctx as AudioContext).state : 'offline',
+      scene: this.scene,
+      master: this.master.gain.value,
+      fade: this.fade.gain.value,
+      scene_gain: this.sceneG.gain.value,
+      music: this.music.out.gain.value,
+      musicVol: this.musicVolG.gain.value,
+      musicPlaying: this.music.isPlaying,
+    };
+  }
+
+  /** Dev: schedule the music ahead (offline rendering). */
+  _musicSchedule(until: number): void {
+    if (this.ready) this.music.schedule(until);
   }
 
   /** Dev/debug: current internal state (tv doppler factor, turbo shaft speed). */
@@ -474,6 +709,9 @@ export class GameAudio {
     toggle(this.oppBus, this.outside, !keep || keep.includes('opp'));
     toggle(this.crowdFx.out, this.outside, !keep || keep.includes('crowd'));
     toggle(this.fxBus, this.direct, !keep || keep.includes('events'));
-    toggle(this.uiBus, this.master, !keep || keep.includes('events'));
+    toggle(this.uiBus, this.uiLP, !keep || keep.includes('events'));
+    toggle(this.music.out, this.musicVolG, !keep || keep.includes('music'));
+    toggle(this.trees.out, this.outside, !keep || keep.includes('amb'));
+    toggle(this.field.out, this.outside, !keep || keep.includes('opp'));
   }
 }

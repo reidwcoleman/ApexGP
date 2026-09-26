@@ -34,7 +34,7 @@ class ApexEngine extends AudioWorkletProcessor {
       { name: 'rpmOfs', defaultValue: 0, minValue: -10000, maxValue: 10000, automationRate: 'k-rate' },
       { name: 'load', defaultValue: 0, minValue: 0, maxValue: 2, automationRate: 'k-rate' },
       { name: 'dop', defaultValue: 1, minValue: 0.25, maxValue: 4, automationRate: 'k-rate' },
-      { name: 'limiter', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'limiter', defaultValue: 0, minValue: 0, maxValue: 2, automationRate: 'k-rate' },
       { name: 'pops', defaultValue: 0, minValue: 0, maxValue: 8, automationRate: 'k-rate' },
       { name: 'bang', defaultValue: 0, minValue: 0, maxValue: 1e9, automationRate: 'k-rate' },
       { name: 'active', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'k-rate' }
@@ -78,7 +78,7 @@ class ApexEngine extends AudioWorkletProcessor {
     var a = Math.pow(this.cylAmp[c], lump) * (0.14 + 0.86 * L) * (1 + (0.05 + 0.2 * (1 - Lc)) * (Math.random() * 2 - 1));
     if (cut) a *= 0.1;
     var big = 0;
-    if (this.bangPend) { this.bangPend = 0; a *= 1.7; big = 0.3; }
+    if (this.bangPend) { this.bangPend = 0; a *= 1.35 + 0.45 * Math.random(); big = 0.12 + 0.22 * Math.random(); }
     if (L < 0.3 && rpm > 4500) {
       var pr = (0.0015 + 0.028 * pops) * (1 - L / 0.3) * Math.min(1, (rpm - 4500) / 3000);
       if (Math.random() < pr) { var q = Math.random(); if (0.2 + 0.8 * q * q > big) big = 0.2 + 0.8 * q * q; }
@@ -125,7 +125,10 @@ class ApexEngine extends AudioWorkletProcessor {
     var L = this.lastRpm < 0 ? loadT : this.lastLoad;
     var dR = (rpmT - rpm0) / n, dLd = (loadT - L) / n;
     this.lastRpm = rpmT; this.lastLoad = loadT;
+    // 1 = rev limiter (fast, hard stutter), 2 = pit-lane speed limiter (slower, softer burble)
     var lim = P.limiter[0] > 0.5;
+    var pitLim = P.limiter[0] > 1.5;
+    var limRate = pitLim ? 8.5 : 14.5, limDepth = pitLim ? 150 : 230, limDuty = pitLim ? 0.28 : 0.4;
     var pops = P.pops[0];
     var bang = P.bang[0];
     if (this.lastBang < 0) this.lastBang = bang;
@@ -170,9 +173,9 @@ class ApexEngine extends AudioWorkletProcessor {
       L += dLd;
       var cut = false;
       if (lim) {
-        var lp = this.limPh + 14.5 / SR; if (lp >= 1) lp -= 1; this.limPh = lp;
-        cut = lp < 0.4;
-        rpmS -= 320 * (cut ? lp / 0.4 : 1 - (lp - 0.4) / 0.6);
+        var lp = this.limPh + limRate / SR; if (lp >= 1) lp -= 1; this.limPh = lp;
+        cut = lp < limDuty;
+        rpmS -= limDepth * (cut ? lp / limDuty : 1 - (lp - limDuty) / (1 - limDuty));
       }
       var inc = rpmS / 120 * dop / SR;
       var ph = this.phase + inc;

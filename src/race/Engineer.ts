@@ -5,8 +5,11 @@ import { isWetKind } from '../world/Weather.ts';
 
 /**
  * The race engineer: turns race state into short team-radio lines.
- * One line at a time, with a cooldown so it never chatters.
+ * One line at a time, with a cooldown so it never chatters — and only when
+ * it matters (no radio for a rub, a lap summary every other lap).
  */
+/** seconds between two radio lines */
+const RADIO_GAP = 8;
 export class Engineer {
   private cooldown = 3;
   private lastPos = 0;
@@ -22,6 +25,7 @@ export class Engineer {
   private wasWet = false;
   private tyreCall = -1;
   private tyreCallTimer = 0;
+  private posSaidAt = -100;
 
   reset(race: Race) {
     this.cooldown = 3;
@@ -37,6 +41,7 @@ export class Engineer {
     this.wasWet = isWetKind(race.weatherState.kind);
     this.tyreCall = -1;
     this.tyreCallTimer = 0;
+    this.posSaidAt = -100;
   }
 
   /** returns a message to show, or null */
@@ -76,7 +81,7 @@ export class Engineer {
           this.say(`Personal best, ${fmtTime(e.value!)}. Keep that rhythm.`);
           break;
         case 'track-limits':
-          this.say(e.value === 3 ? `That's your last warning for track limits. Keep it inside the white lines.` : `Track limits at ${cornerName()}.${e.value ? ` Warning ${e.value}.` : ' That lap is gone.'}`);
+          this.say(e.value && e.value >= race.limitWarnings ? `That's your last warning for track limits. Keep it inside the white lines.` : `Track limits at ${cornerName()}.${e.value ? ` Warning ${e.value}.` : ' That lap is gone.'}`);
           break;
         case 'penalty':
           this.say(`We have a ${e.value} second penalty for track limits. Push, we need to pull a gap.`, true);
@@ -103,7 +108,7 @@ export class Engineer {
           this.say(`Out of the pits in P${race.player.position}. Push now.`);
           break;
         case 'contact': {
-          if ((e.value ?? 0) <= 6) break;
+          if ((e.value ?? 0) <= 8) break;
           const car = race.player.car;
           const worst = Math.max(...car.dmg);
           if (car.destroyed) break;
@@ -130,7 +135,10 @@ export class Engineer {
 
     if (race.phase === 'racing' && !race.isTimeTrial) {
       // position changes
-      if (p.position !== this.lastPos && race.raceTime > 4) {
+      // (at most one call per 15 s: swapping places back and forth in a fight is
+      // reported once, as the net change, when things settle)
+      if (p.position !== this.lastPos && race.raceTime > 4 && race.raceTime - this.posSaidAt >= 15) {
+        this.posSaidAt = race.raceTime;
         if (p.position < this.lastPos) {
           this.say(p.position === 1 ? "You're leading the race!" : `Nice move, P${p.position}.`);
         } else {
@@ -140,7 +148,7 @@ export class Engineer {
         this.lastPos = p.position;
       }
       // lap summaries
-      if (p.laps >= 1 && p.laps !== this.lastLapSaid && p.laps < race.opts.laps - 1) {
+      if (p.laps >= 1 && p.laps !== this.lastLapSaid && p.laps < race.opts.laps - 1 && (p.laps === 1 || p.laps % 2 === 0)) {
         this.lastLapSaid = p.laps;
         const ahead = race.cars.find((c) => c.position === p.position - 1);
         const behind = race.cars.find((c) => c.position === p.position + 1);
@@ -149,7 +157,7 @@ export class Engineer {
       }
       // pressure from behind
       const behind = race.cars.find((c) => c.position === p.position + 1);
-      if (behind && behind.gapAhead > 0 && behind.gapAhead < 0.5 && race.raceTime - this.behindWarned > 40) {
+      if (behind && behind.gapAhead > 0 && behind.gapAhead < 0.5 && race.raceTime - this.behindWarned > 90) {
         this.behindWarned = race.raceTime;
         this.say(`${behind.entry.driver.code} is right on your gearbox. Defend.`);
       }
@@ -220,7 +228,7 @@ export class Engineer {
 
     this.cooldown -= dt;
     if (this.cooldown <= 0 && this.queue.length) {
-      this.cooldown = 6;
+      this.cooldown = RADIO_GAP;
       return this.queue.shift()!;
     }
     return null;

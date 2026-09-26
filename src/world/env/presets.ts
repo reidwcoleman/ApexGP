@@ -42,6 +42,12 @@ export interface TimePreset {
   bloomThreshold: number;
   /** god-ray strength when the sun is in view (0 = none) */
   shafts: number;
+  /** multiplier on the direct light only (twilight: the sky still glows, the sun has set); default 1 */
+  direct?: number;
+  /** circuit floodlights 0 … 1 (see env/night.ts); default 0 */
+  flood?: number;
+  /** 0 … 1 night sky: stars, the city's glow on the horizon, the moon in place of the sun; default 0 */
+  night?: number;
 }
 
 export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
@@ -177,6 +183,58 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     bloomThreshold: 1.0,
     shafts: 1.2,
   },
+  // blue hour, the sun just gone: an orange band in the west under a deep blue sky, the first
+  // stars, and the floodlights taking over (Abu Dhabi)
+  dusk: {
+    azimuth: 282,
+    elevation: 0.6,
+    mie: 1.6,
+    g: 0.8,
+    ms: 0.5,
+    sunIntensity: 2.6,
+    skyBoost: 1.35,
+    sunDisc: 0,
+    cirrus: 0.5,
+    fogDensity: 1.3e-4,
+    fogFalloff: 1 / 900,
+    fogLobe: 0.9,
+    exposure: 0.9,
+    saturation: 1.12,
+    contrast: 1.08,
+    tint: [0.98, 0.95, 1.0],
+    shadowTint: [0.86, 0.92, 1.18],
+    bloom: 1.2,
+    bloomThreshold: 0.95,
+    shafts: 0,
+    direct: 0.05,
+    flood: 0.75,
+    night: 0.35,
+  },
+  // a floodlit night race (Singapore, Bahrain, Las Vegas): the moon stands in for the sun
+  night: {
+    azimuth: 140,
+    elevation: 38,
+    mie: 1.2,
+    g: 0.78,
+    ms: 0.35,
+    sunIntensity: 0.16,
+    skyBoost: 0.22,
+    sunDisc: 26,
+    cirrus: 0.2,
+    fogDensity: 1.0e-4,
+    fogFalloff: 1 / 800,
+    fogLobe: 0,
+    exposure: 0.92,
+    saturation: 1.06,
+    contrast: 1.1,
+    tint: [1.0, 0.98, 0.96],
+    shadowTint: [0.86, 0.92, 1.16],
+    bloom: 1.3,
+    bloomThreshold: 0.9,
+    shafts: 0,
+    flood: 1,
+    night: 1,
+  },
 };
 
 /** unit vector toward the sun for a preset (world: x = east, z = south) */
@@ -188,6 +246,14 @@ export function sunDirection(p: TimePreset, out: { x: number; y: number; z: numb
   out.z = -Math.cos(az) * Math.cos(el);
   return out;
 }
+
+/**
+ * The post chain tone-maps with AgX, which (unlike ACES) keeps hues true but
+ * lifts and desaturates the mid-tones; these put back the punch of a broadcast
+ * camera. The per-time values above stay relative to each other.
+ */
+const AGX_SAT = 1.12;
+const AGX_CONTRAST = 1.1;
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (a: number, b: number, x: number) => {
@@ -274,8 +340,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
   const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK));
-  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick);
-  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick);
+  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick) * AGX_SAT;
+  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * AGX_CONTRAST;
   const tintK = dim;
   const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK), mix(P.tint[1], 0.99, tintK), mix(P.tint[2], 1.02, tintK)];
   const shadowTint: [number, number, number] = [
