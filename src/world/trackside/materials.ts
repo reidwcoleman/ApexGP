@@ -270,7 +270,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // so they barely read in colour (±8 %); only a faint, large-scale evenness variation.
     float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
     // (a warm-neutral bitumen black; the fine chips give a tight ±25 % grain up close)
-    col = vec3(0.052, 0.0505, 0.0485) * (1.0 + albDev * 0.9) * even;
+    col = vec3(0.068, 0.0665, 0.064) * (1.0 + albDev * 0.9) * even;
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
     rough = mix(0.8, 0.56, stone) + (m3.r - 0.5) * 0.05;
     tsDetail *= 0.55;
@@ -286,7 +286,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
     rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.18, 1.0, uRaceRubber);
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
-    col = mix(col, vec3(0.022, 0.022, 0.023), rub * 0.75);
+    col = mix(col, vec3(0.03, 0.03, 0.031), rub * 0.75);
     rough = mix(rough, 0.56, rub * 0.5);
     tsDetail *= 1.0 - rub * 0.4;
 
@@ -391,7 +391,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
   } else if (zone < 2.5) {
     // ================================================= verge: green abrasive paint
     float d = alat - vA1.y;
-    col = vec3(0.056, 0.055, 0.053) * (1.0 + albDev * 0.9) * (0.95 + 0.1 * m96.r);
+    col = vec3(0.07, 0.069, 0.066) * (1.0 + albDev * 0.9) * (0.95 + 0.1 * m96.r);
     tsSpecOcc = 0.6;
     if (vA1.z > 0.5) {
       // fresh anti-skid green paint: even and saturated, the grit gives it a fine matte texture
@@ -413,7 +413,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     }
   } else if (zone < 3.5) {
     // ================================================= tarmac run-off: new, a shade greyer than the track, painted bands
-    col = vec3(0.062, 0.061, 0.059) * (1.0 + albDev * 0.9) * (0.94 + 0.08 * m96.r + 0.05 * (m24.b - 0.5));
+    col = vec3(0.076, 0.075, 0.072) * (1.0 + albDev * 0.9) * (0.94 + 0.08 * m96.r + 0.05 * (m24.b - 0.5));
     tsSpecOcc = 0.6;
     rough = mix(0.66, 0.5, stone);
     // tyre tracks from cars running wide: shallow arcs out from the edge and back

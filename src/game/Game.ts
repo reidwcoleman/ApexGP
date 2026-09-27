@@ -52,6 +52,7 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
+import { preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import type { SetupPart } from '../career/Career.ts';
@@ -298,20 +299,28 @@ export class Game {
 
   // ------------------------------------------------------------------ boot
 
+  /** boot timeline (ms since boot start, per step) — dev readout */
+  bootSteps: Record<string, number> = {};
   async boot(progress: (f: number, step: string) => void) {
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const t0 = performance.now();
+    const mark = (k: string) => (this.bootSteps[k] = Math.round(performance.now() - t0));
     progress(0.02, 'Loading fonts');
+    // liveries + the fan atlas painted on an earlier visit (read + decoded while the rest loads)
+    const pixels = preloadPixels();
     try {
       await Promise.all([document.fonts.load('700 20px "Titillium Web"'), document.fonts.load('900 20px "Titillium Web"'), document.fonts.load('600 20px "Titillium Web"')]);
     } catch {
       /* fallback fonts are fine */
     }
+    mark('fonts');
     this.applySettings(this.menu.settings);
     this.rollWeather(this.menu.setup);
 
     // the people (a network load) come in while the circuit is being surveyed
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
+    await pixels;
+    mark('pixels');
     // ?track=<id> (dev/demo links) overrides the saved choice
     const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
     await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
@@ -319,6 +328,7 @@ export class Game {
       await tick();
     }, people);
 
+    mark('world');
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
     this.scene.add(this.carsGroup);
@@ -340,6 +350,7 @@ export class Game {
       const me = this.race?.player.entry;
       for (const [e, rig] of this.rigs) rig.shadowPass?.(on, e === me);
     });
+    mark('cars');
     this.scene.add(this.particles.group);
     this.particles.setLight(smokeLight(new Weather(this.plan).state));
     this.buildGarageLights();
@@ -363,11 +374,14 @@ export class Game {
     });
     this.bindGarageInput();
     this.finishWorld();
+    mark('finish');
 
     progress(0.9, 'Warming up shaders');
     await tick();
     this.toMenu();
+    mark('menu');
     await this.warmUp();
+    mark('warm');
     this.bootMs = Math.round(performance.now() - t0);
 
     progress(1, 'Ready');
@@ -2261,7 +2275,7 @@ export class Game {
       // a showroom grade: deeper blacks, a little more punch, the edges falling away to dark
       gfx.grade.set({ contrast: 1.07, exposure: 0.97, saturation: 1.03 });
       this.garageVignette = gfx.vignette.darkness;
-      gfx.vignette.darkness = 0.46;
+      gfx.vignette.darkness = 0.52;
       gfx.maxDynamic = menuMax();
       gfx.setDynamicScale(gfx.maxDynamic);
     }
@@ -2289,7 +2303,7 @@ export class Game {
       L.fps = 50;
     }
   }
-  private garageVignette = 0.26;
+  private garageVignette = 0.38;
   private leaveGarageLook() {
     const L = this.garageLook;
     if (!L) return;

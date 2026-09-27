@@ -46,17 +46,17 @@ if ( uDuneOn > 0.5 ) {
   float slopeD = 1.0 - clamp( normalize( vWNormal ).y, 0.0, 1.0 );
   // pale dry sand with wind ripples; wet and dark along the water's edge; a drift line of shells
   float rip = sin( dot( p, vec2( 0.83, 0.55 ) ) * 2.4 + d1 * 5.0 ) * 0.5 + 0.5;
-  vec3 sandC = uSand * ( 0.9 + 0.12 * d2 + 0.1 * m3 ) * ( 1.0 - 0.07 * rip * nearF );
-  sandC = mix( sandC, uSandWet * ( 0.9 + 0.12 * d1 ), smoothstep( 18.0, -8.0, cIn ) );
+  vec3 sandC = uDuneSand * ( 0.9 + 0.12 * d2 + 0.1 * m3 ) * ( 1.0 - 0.07 * rip * nearF );
+  sandC = mix( sandC, uDuneSandWet * ( 0.9 + 0.12 * d1 ), smoothstep( 18.0, -8.0, cIn ) );
   sandC *= 1.0 - 0.14 * ( 1.0 - smoothstep( 0.0, 2.5, abs( cIn - 26.0 - 7.0 * m2 ) ) ) * step( 0.35, d2 );
   // marram grass: grey-green tussocks with straw tips, the sand showing between them
   float tuft = smoothstep( 0.38, 0.72, d3 * 0.65 + d2 * 0.35 );
   vec3 marram = mix( uMarram, uMarramDry, smoothstep( 0.35, 0.8, m2 * 0.6 + d1 * 0.4 ) ) * ( 0.8 + 0.32 * d2 );
   // grey dunes: older, mossy and lichen-covered hollows, darker than the young marram
   marram = mix( marram, vec3( 0.045, 0.055, 0.035 ), smoothstep( 0.5, 0.75, m1 * 0.7 + m3 * 0.3 ) * 0.55 );
-  float cover = smoothstep( 0.12, 0.42, m1 * 0.45 + m3 * 0.35 + d1 * 0.2 + 0.05 );
+  float cover = smoothstep( 0.04, 0.3, m1 * 0.45 + m3 * 0.35 + d1 * 0.2 + 0.05 );
   // bare blowouts: the steep faces, wind-scoured patches, the beach and the foredune's sea face
-  cover *= 1.0 - smoothstep( 0.16, 0.36, slopeD );
+  cover *= 1.0 - 0.7 * smoothstep( 0.22, 0.45, slopeD );
   float blow = smoothstep( 0.58, 0.64, m2 * 0.55 + m3 * 0.3 + d1 * 0.15 );
   cover *= 1.0 - blow * 0.92;
   cover *= smoothstep( 92.0, 175.0, cIn );
@@ -92,8 +92,8 @@ export function zandvoortTerrainLook(t: TerrainBuild, map: WorldMap) {
     uCoastP: { value: new THREE.Vector2(g.px, g.pz) },
     uCoastN: { value: new THREE.Vector2(g.nx, g.nz) },
     uCoastOff: { value: COAST_OFF },
-    uSand: { value: srgb(0xd6c49c) },
-    uSandWet: { value: srgb(0x9a876a) },
+    uDuneSand: { value: srgb(0xb49e76) },
+    uDuneSandWet: { value: srgb(0x857359) },
     uMarram: { value: srgb(0x43552f) },
     uMarramDry: { value: srgb(0x7b7a52) },
   };
@@ -107,7 +107,7 @@ export function zandvoortTerrainLook(t: TerrainBuild, map: WorldMap) {
     }
     Object.assign(sh.uniforms, du);
     sh.fragmentShader = sh.fragmentShader
-      .replace('void main() {', 'uniform float uDuneOn, uCoastOff;\nuniform vec2 uCoastP, uCoastN;\nuniform vec3 uSand, uSandWet, uMarram, uMarramDry;\nvoid main() {')
+      .replace('void main() {', 'uniform float uDuneOn, uCoastOff;\nuniform vec2 uCoastP, uCoastN;\nuniform vec3 uDuneSand, uDuneSandWet, uMarram, uMarramDry;\nvoid main() {')
       .replace(DUNE_ANCHOR, DUNE_ANCHOR + DUNE_GLSL);
   };
   const prevKey = mat.customProgramCacheKey.bind(mat);

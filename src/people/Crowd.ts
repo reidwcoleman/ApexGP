@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { restorePixels, keepPixels, pixelKey } from '../core/pixelCache.ts';
 import { Person, fanLook, fanPool, capGeometry, capMaterial, mergeSimple, ROSTER, RB_SURFACE_GLSL, type BodyAsset, type Look, type PeopleKit } from './Humans.ts';
 import { LIGHT_GLOBALS, peopleLightsChunk, CLOTH_WHITE_MAX } from './shading.ts';
 import { ACT, ACT_CLIP, ACT_COUNT, actPose, aimArm, turnHead } from './poses.ts';
@@ -563,8 +564,20 @@ export function renderFanAtlas(kit: PeopleKit, cw = 128, ch = 256): HTMLCanvasEl
   const memo = `${cw}x${ch}`;
   const known = fanAtlasMemo.get(kit)?.get(memo);
   if (known) return known;
+  const key = pixelKey('fans', cw, ch, [...kit.avatars.keys()].sort());
+  if (kit.complete) {
+    const c = document.createElement('canvas');
+    c.width = cw * ATLAS_COLS;
+    c.height = ch * 2;
+    if (restorePixels(key, c)) {
+      if (!fanAtlasMemo.has(kit)) fanAtlasMemo.set(kit, new Map());
+      fanAtlasMemo.get(kit)!.set(memo, c);
+      return c;
+    }
+  }
   const made = renderFanAtlasNow(kit, cw, ch);
   if (made.width > 0 && kit.complete) {
+    keepPixels(key, made);
     if (!fanAtlasMemo.has(kit)) fanAtlasMemo.set(kit, new Map());
     fanAtlasMemo.get(kit)!.set(memo, made);
   }

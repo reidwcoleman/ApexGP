@@ -279,16 +279,25 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     float h1 = h21( cell );
     float h2 = h21( cell + 17.3 );
     vec2 fc = fract( wp / fs );
-    float edge = smoothstep( 0.0, 0.025, min( min( fc.x, 1.0 - fc.x ), min( fc.y, 1.0 - fc.y ) ) );
-    // late-summer Lombardy: maize, stubble, pasture, ploughed — muted
-    vec3 fieldCol = h1 < 0.3 ? mix( uMeadow, uLawn, 0.5 )
-                  : h1 < 0.5 ? mix( uStraw, uMeadow, 0.45 )
-                  : h1 < 0.72 ? mix( uLawn, uGrassDark, 0.35 )
-                  : h1 < 0.86 ? mix( uEarth, uStraw, 0.35 ) * 0.9
-                  : mix( uMeadow, uStraw, 0.25 );
-    float stripe = 0.96 + 0.04 * sin( dot( p, vec2( 0.8, 0.6 ) * ( 1.3 + h2 ) ) );
-    fieldCol *= stripe * ( 0.9 + 0.2 * d1 ) * ( 0.92 + 0.16 * m3 );
-    fieldCol = mix( uGrassDark * 0.75, fieldCol, edge );
+    float edge = smoothstep( 0.0, 0.02, min( min( fc.x, 1.0 - fc.x ), min( fc.y, 1.0 - fc.y ) ) );
+    // late summer: pasture, golden stubble with straw swaths, deep-green maize, ploughed earth,
+    // pale hay — distinct enough that the patchwork reads from the ground, not one green plain
+    float fa = floor( h2 * 4.0 ) * 0.785 + 0.2;
+    float fu = dot( p, vec2( cos( fa ), sin( fa ) ) );
+    float furA = 1.0 - smoothstep( 0.2, 0.7, fwidth( fu / 1.6 ) );
+    float furrow = ( 0.5 + 0.5 * sin( fu / 1.6 * 6.2832 ) ) * furA;
+    float swA = 1.0 - smoothstep( 0.2, 0.7, fwidth( fu / 9.0 ) );
+    float swath = smoothstep( 0.8, 0.95, abs( fract( fu / 9.0 ) - 0.5 ) * 2.0 ) * swA;
+    vec3 fieldCol;
+    if ( h1 < 0.24 ) fieldCol = mix( uMeadow, uLawn, 0.45 ) * ( 0.95 + 0.1 * m3 );
+    else if ( h1 < 0.42 ) fieldCol = mix( uStraw * 1.08, uStraw * 1.3, swath * 0.8 );
+    else if ( h1 < 0.58 ) fieldCol = mix( uLawn, uGrassDark, 0.55 ) * ( 0.88 + 0.12 * furrow );
+    else if ( h1 < 0.7 ) fieldCol = mix( uEarth * 0.62, uEarth * 0.42, furrow * 0.8 );
+    else if ( h1 < 0.85 ) fieldCol = mix( uStraw, uMeadow, 0.3 ) * ( 0.95 + 0.08 * swath );
+    else fieldCol = mix( uMeadow, uLawn, 0.2 ) * 1.04;
+    fieldCol *= ( 0.92 + 0.14 * d1 ) * ( 0.94 + 0.12 * m3 );
+    // field margins: a darker strip of rough grass and hedge bottom
+    fieldCol = mix( uGrassDark * 0.6, fieldCol, edge );
     col = mix( col, fieldCol, farm );
   }
   // towns: blocks of terracotta and grey roofs, streets, courtyards
@@ -406,7 +415,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v6';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v7';
   return { material, uniforms };
 }
 

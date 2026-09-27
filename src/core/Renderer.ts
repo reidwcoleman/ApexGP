@@ -137,6 +137,79 @@ class SharpenEffect extends Effect {
   }
 }
 
+/**
+ * Ambient occlusion in the main post pass: depth-only, one pass, no extra render targets (the
+ * N8AO pass costs ~5 ms on an M1 whatever its quality — this costs about one). View positions are
+ * rebuilt from the depth buffer, the normal from their screen derivatives, and 10 taps on a
+ * noise-rotated spiral within a world-space radius test how much of the hemisphere is blocked:
+ * the car sitting on the asphalt, wheels in their wells, the barrier feet, the gaps in the stands,
+ * trunks and the ground under the trees. It darkens the ambient-lit share of the picture more than
+ * the sunlit one (bright pixels are mostly direct light, which AO must not touch).
+ */
+const AO_FRAG = /* glsl */ `
+uniform float aoRadius;
+uniform float aoIntensity;
+uniform vec2 aoTanHalf;
+vec3 aoViewPos(vec2 uv, float d) {
+  float vz = getViewZ(d);
+  return vec3((uv * 2.0 - 1.0) * aoTanHalf * -vz, vz);
+}
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  outputColor = inputColor;
+  if (aoIntensity <= 0.0 || depth >= 0.99999) return;
+  vec3 P = aoViewPos(uv, depth);
+  float dist = -P.z;
+  if (dist > 180.0) return;
+  vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+  // screen radius (uv) of the world radius at this depth, kept to a sensible footprint
+  float rS = min(aoRadius / (dist * aoTanHalf.y * 2.0), 0.08);
+  if (rS < texelSize.y * 1.5) return;
+  float phi = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;
+  float occ = 0.0;
+  for (int i = 0; i < 10; i++) {
+    float t = (float(i) + 0.5) / 10.0;
+    float a = phi + float(i) * 2.39996;
+    vec2 o = vec2(cos(a), sin(a) * aspect) * rS * sqrt(t);
+    vec2 q = uv + o;
+    float dq = readDepth(q);
+    vec3 S = aoViewPos(q, dq);
+    vec3 v = S - P;
+    float l = length(v);
+    float h = max(0.0, dot(N, v) / max(l, 1e-4) - 0.12);
+    occ += h * (1.0 - smoothstep(aoRadius * 0.6, aoRadius * 1.4, l));
+  }
+  occ = clamp(occ / 10.0 * 1.6, 0.0, 1.0);
+  // fade out with distance (the far field is fog and aerial haze)
+  occ *= 1.0 - smoothstep(90.0, 180.0, dist);
+  float lum = dot(inputColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  float ambient = 1.0 - smoothstep(0.35, 2.5, lum) * 0.65;
+  outputColor = vec4(inputColor.rgb * (1.0 - occ * aoIntensity * ambient), inputColor.a);
+}
+`;
+
+export class AOEffect extends Effect {
+  constructor() {
+    super('AOEffect', AO_FRAG, {
+      attributes: EffectAttribute.DEPTH,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['aoRadius', new THREE.Uniform(0.9)],
+        ['aoIntensity', new THREE.Uniform(0.85)],
+        ['aoTanHalf', new THREE.Uniform(new THREE.Vector2(1, 1))],
+      ]),
+    });
+  }
+  set intensity(v: number) {
+    this.uniforms.get('aoIntensity')!.value = v;
+  }
+  get intensity() {
+    return this.uniforms.get('aoIntensity')!.value as number;
+  }
+  setCamera(cam: THREE.PerspectiveCamera) {
+    const ty = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    (this.uniforms.get('aoTanHalf')!.value as THREE.Vector2).set(ty * cam.aspect, ty);
+  }
+}
+
 class SanitizeEffect extends Effect {
   constructor() {
     super('SanitizeEffect', SANITIZE_FRAG, { blendFunction: BlendFunction.SET });
@@ -593,6 +666,8 @@ export class Renderer {
   readonly grain: NoiseEffect;
   readonly aberration: ChromaticAberrationEffect;
   readonly dof: DepthOfFieldEffect;
+  /** the one-pass depth AO (High and below; Ultra runs N8AO instead) */
+  readonly ssao: AOEffect;
 
   private readonly radial: RadialBlurEffect;
   private readonly radialPass: EffectPass;
@@ -692,8 +767,8 @@ export class Renderer {
     // Khronos PBR Neutral: base colours come out as painted (a Ferrari red stays red, not
     // AgX's salmon), with a filmic roll-off only in the highlights; the weather look adds a touch
     this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
-    // a broadcast lens: barely-there fall-off (a heavy vignette reads as a game filter)
-    this.vignette = new VignetteEffect({ darkness: 0.26, offset: 0.34 });
+    // a soft lens fall-off that pulls the eye to the centre (strong enough to feel, never a filter)
+    this.vignette = new VignetteEffect({ darkness: 0.38, offset: 0.3 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
     this.grain.blendMode.opacity.value = 0.035;
     // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
@@ -703,7 +778,8 @@ export class Renderer {
       'vec4 texel=texture2D(inputBuffer,vUv);',
       'vec4 texel=texture2D(inputBuffer,vUv);if(texel.r!=texel.r||texel.g!=texel.g||texel.b!=texel.b||max(max(abs(texel.r),abs(texel.g)),abs(texel.b))>1e6)texel.rgb=vec3(0.0);texel.rgb=min(max(texel.rgb,0.0),vec3(200.0));',
     );
-    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.shafts, this.bloom, this.grade, this.toneMapping, this.vignette, this.grain));
+    this.ssao = new AOEffect();
+    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.vignette, this.grain));
 
     this.aberration = new ChromaticAberrationEffect({
       offset: new THREE.Vector2(0, 0),
@@ -850,6 +926,7 @@ export class Renderer {
     // half-res with 8 samples), so it stays an Ultra feature; High gets its contact darkening
     // from the materials (terrain canopy AO, crown AO) and the focus shadow cascade
     this.ao.enabled = q === 'ultra';
+    this.ssao.intensity = q === 'ultra' || q === 'low' ? 0 : q === 'medium' ? 0.7 : 1.0;
     this.ao.configuration.halfRes = true;
     this.ao.setQualityMode('Medium');
     // (the last enabled pass must be the one that renders to the screen)
@@ -994,6 +1071,7 @@ export class Renderer {
 
   render(dt: number) {
     this.renderer.info.reset();
+    this.ssao.setCamera(this.camera);
     this.updateShafts();
     this.updateScene();
     this.composer.render(dt);

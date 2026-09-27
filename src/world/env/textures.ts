@@ -47,6 +47,29 @@ export function noiseTexture(): THREE.DataTexture {
   return _noise;
 }
 
+/**
+ * texture2D( uNoise, uv ) on the CPU (repeat wrap, bilinear): lets placement code follow what the
+ * terrain shader draws from the same noise (the farmland's warped field grid)
+ */
+export function sampleNoise(u: number, v: number, ch: 0 | 1 | 2 | 3): number {
+  const d = noiseTexture().image.data as Uint8Array;
+  const N = 256;
+  const x = u * N - 0.5, y = v * N - 0.5;
+  const i0 = Math.floor(x), j0 = Math.floor(y);
+  const fx = x - i0, fy = y - j0;
+  const i = ((i0 % N) + N) % N, j = ((j0 % N) + N) % N;
+  const i1 = (i + 1) % N, j1 = (j + 1) % N;
+  const at = (a: number, b: number) => d[(b * N + a) * 4 + ch];
+  return ((at(i, j) * (1 - fx) + at(i1, j) * fx) * (1 - fy) + (at(i, j1) * (1 - fx) + at(i1, j1) * fx) * fy) / 255;
+}
+
+/** the farmland's warped coordinates (terrain.ts: wp = p + ( vec2( m1, m2 ) - 0.5 ) * 260.0) */
+export function fieldWarp(x: number, z: number): [number, number] {
+  const m1 = sampleNoise(x * 0.00093 + 0.13, z * 0.00093 + 0.71, 0);
+  const m2 = sampleNoise(x * 0.0041 + 0.37, z * 0.0041 + 0.19, 1);
+  return [x + (m1 - 0.5) * 260, z + (m2 - 0.5) * 260];
+}
+
 export function heightToNormal(h: Float32Array, N: number, strength: number, M = N): Uint8Array {
   const data = new Uint8Array(N * M * 4);
   for (let j = 0; j < M; j++) {

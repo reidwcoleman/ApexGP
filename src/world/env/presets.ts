@@ -252,8 +252,17 @@ export function sunDirection(p: TimePreset, out: { x: number; y: number; z: numb
  * rolls off the highlights; a light touch of broadcast-camera punch on top. The per-time
  * values above stay relative to each other.
  */
-const TONE_SAT = 1.04;
-const TONE_CONTRAST = 1.04;
+const TONE_SAT = 0.88;
+const TONE_CONTRAST = 1.0;
+/**
+ * The game's look on top of the physical light: a touch darker than a straight exposure, deeper
+ * shade (less sky fill, so sunlit and shadowed surfaces separate), cool clean shadows and warm-
+ * neutral highlights — a graded broadcast/cinematic image rather than a flat capture.
+ */
+const LOOK_EXPOSURE = 0.84;
+const LOOK_FILL = 0.74;
+const LOOK_SHADOW: [number, number, number] = [0.92, 0.99, 1.1];
+const LOOK_HIGH: [number, number, number] = [1.04, 1.0, 0.95];
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (a: number, b: number, x: number) => {
@@ -333,22 +342,22 @@ export function weatherLook(w: WeatherState): WeatherLook {
 
   // grey gradient visibility: 25 km clear → ~2.5 km drizzle → ~0.9 km downpour
   // fog 1: ~200 m to half-visibility, ~650 m to nothing
-  // (×1.25: a September broadcast has 15–25 km visibility — the depth cue that sells the scale)
-  const fogDensity = P.fogDensity * 1.25 * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
+  // (×1.75: a summer broadcast has 12–20 km visibility — the soft depth that sells the scale)
+  const fogDensity = P.fogDensity * 1.75 * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
-  const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK));
+  const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK)) * LOOK_EXPOSURE;
   const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick) * TONE_SAT;
   const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * TONE_CONTRAST;
   const tintK = dim;
-  const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK), mix(P.tint[1], 0.99, tintK), mix(P.tint[2], 1.02, tintK)];
+  const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK) * LOOK_HIGH[0], mix(P.tint[1], 0.99, tintK) * LOOK_HIGH[1], mix(P.tint[2], 1.02, tintK) * LOOK_HIGH[2]];
   const shadowTint: [number, number, number] = [
-    mix(P.shadowTint[0], 0.93, tintK),
-    mix(P.shadowTint[1], 0.975, tintK),
-    mix(P.shadowTint[2], 1.06, tintK),
+    mix(P.shadowTint[0], 0.93, tintK) * LOOK_SHADOW[0],
+    mix(P.shadowTint[1], 0.975, tintK) * LOOK_SHADOW[1],
+    mix(P.shadowTint[2], 1.06, tintK) * LOOK_SHADOW[2],
   ];
 
   return {
@@ -368,8 +377,9 @@ export function weatherLook(w: WeatherState): WeatherLook {
     fogMax: 1,
     fogLobe: P.fogLobe * sunVis,
     cloudHaze,
-    envIntensity: 1,
-    hemi: mix(0.08, 0.18, dim),
+    // (in the sun the shade is darker than the sky alone would make it; under cloud the fill is the light)
+    envIntensity: mix(LOOK_FILL, 0.92, dim),
+    hemi: mix(0.06, 0.16, dim),
     shadowRadius: mix(2.6, 6, smooth(0.3, 0.9, dim)),
     exposure,
     saturation,

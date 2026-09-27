@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WorldMap } from './worldmap.ts';
 import { fbm2, hash2i, rng, smoothstep } from './noise.ts';
+import { fieldWarp } from './textures.ts';
 import { buildTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
 import { bakeImpostors, createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
 import type { Layout } from './layout.ts';
@@ -282,41 +283,58 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.trackClearance(q.x, q.z) < 8 || map.excluded(q.x, q.z, 1) || map.ovalClearance(q.x, q.z) < 2) continue;
     add('poplar', q.x, q.z, 0.9 + r() * 0.2, r(), r() * 0.5 + 0.3);
   }
-  // ---------------------------------------------------------------- English field hedgerows
-  // Northamptonshire farmland: fields bounded by hawthorn hedges with an oak or ash
-  // standing every so often, gappy in places — the tree lines that close every
-  // horizon around the old airfield. Kept well away from the circuit, so they are
-  // impostors only (one instanced card each).
-  if (map.venue === 'airfield') {
-    const bb = map.A.bb;
-    const cx = (bb.x0 + bb.x1) / 2, cz = (bb.z0 + bb.z1) / 2;
-    const ang = 0.33;
-    const ca = Math.cos(ang), sa = Math.sin(ang);
-    const R = 2900;
-    const lines: { u: number; vertical: boolean }[] = [];
-    for (const vertical of [false, true]) {
-      let u = -R;
-      while (u < R) {
-        lines.push({ u, vertical });
-        u += 230 + r() * 190;
-      }
-    }
-    for (const L of lines) {
-      const seed = Math.floor(L.u) + (L.vertical ? 7919 : 0);
-      for (let v = -R; v < R; v += 7 + r() * 5) {
-        // gaps: long missing stretches where the hedge was grubbed out, gateways
-        const gap = fbm2(v / 180 + seed * 0.013, seed * 0.07, 2);
-        if (gap < -0.12) continue;
-        const lu = L.u + (r() - 0.5) * 2.5, lv = v;
-        const ox = L.vertical ? lu : lv, oz = L.vertical ? lv : lu;
-        const x = cx + ox * ca - oz * sa, z = cz + ox * sa + oz * ca;
-        if (map.distToTrack(x, z) < 150) continue;
-        if (!okTree(x, z, 20)) continue;
-        const h = r();
-        const hx = hash2i(Math.floor(x), Math.floor(z), 61);
-        if (h < 0.24) add(hx < 0.55 ? 'oak' : hx < 0.85 ? 'plane' : 'chestnut', x, z, 0.72 + r() * 0.4, r(), r() * 0.5 + 0.3);
-        else add('shrub', x, z, 1.5 + r() * 0.6, r(), 0.5);
-      }
+  // ---------------------------------------------------------------- field hedgerows and tree lines
+  // Out on the farmland every field is bounded by something that stands up out of it: hawthorn
+  // hedges with an oak every so often (Northamptonshire, Brianza), poplar and acacia windbreaks
+  // (the Great Plain), live oak and mesquite along the Texas fence lines, spruce and ash between
+  // the Styrian meadows. They follow the terrain shader's own field grid (the same warped cells:
+  // textures.fieldWarp), gappy in places, well away from the circuit — impostors only.
+  {
+    type Hedge = { fs: [number, number]; keep: number; tree: number; trees: SpeciesId[]; shrub: [number, number]; step: number; treeS: [number, number] };
+    const HEDGES: Partial<Record<typeof map.venue, Hedge>> = {
+      airfield: { fs: [320, 210], keep: 0.9, tree: 0.24, trees: ['oak', 'oak', 'plane', 'chestnut'], shrub: [1.5, 0.6], step: 7, treeS: [0.72, 0.4] },
+      park: { fs: [320, 210], keep: 0.55, tree: 0.4, trees: ['poplar', 'poplar', 'plane', 'oak'], shrub: [1.3, 0.5], step: 8, treeS: [0.8, 0.3] },
+      ardennes: { fs: [320, 210], keep: 0.6, tree: 0.3, trees: ['oak', 'chestnut', 'spruce'], shrub: [1.4, 0.5], step: 7, treeS: [0.75, 0.35] },
+      spielberg: { fs: [320, 210], keep: 0.45, tree: 0.45, trees: ['spruce', 'oak', 'chestnut'], shrub: [1.3, 0.5], step: 9, treeS: [0.7, 0.35] },
+      austin: { fs: [320, 210], keep: 0.5, tree: 0.55, trees: ['oak', 'oak', 'oak', 'spruce'], shrub: [1.2, 0.5], step: 12, treeS: [0.8, 0.45] },
+      hungaroring: { fs: [560, 380], keep: 0.5, tree: 0.5, trees: ['poplar', 'oak', 'plane', 'poplar'], shrub: [1.4, 0.5], step: 8, treeS: [0.75, 0.35] },
+    };
+    const H = HEDGES[map.venue];
+    if (H) {
+      const n0 = trees.length;
+      const G = 6;
+      const band = G / 2;
+      const [fw, fh] = H.fs;
+      for (let z = S.z0 + 40; z < S.z1 - 40; z += G)
+        for (let x = S.x0 + 40; x < S.x1 - 40; x += G) {
+          const [wx, wz] = fieldWarp(x, z);
+          const u = wx / fw, v = wz / fh;
+          const cu = Math.floor(u), cv = Math.floor(v);
+          const du = Math.min(u - cu, cu + 1 - u) * fw;
+          const dv = Math.min(v - cv, cv + 1 - v) * fh;
+          const vertical = du < dv;
+          if (Math.min(du, dv) > band) continue;
+          // one boundary: its id (for gaps + spacing) and the running coordinate along it
+          const lineId = vertical ? Math.round(u) * 7919 + 13 : Math.round(v) * 104729 + 7;
+          const along = vertical ? wz : wx;
+          // spacing: the scan meets a boundary about every G metres; keep G/step of those
+          const slot = Math.floor(along / G);
+          if (hash2i(slot, lineId, 3) > G / H.step) continue;
+          // gaps: grubbed-out stretches and gateways; some boundaries are bare wire fences
+          if (hash2i(lineId, 0, 5) > H.keep) continue;
+          const gap = fbm2(along / 170 + lineId * 0.013, lineId * 0.07, 2);
+          if (gap < -0.1) continue;
+          const out = map.outsidePark(x, z);
+          if (out < 0.5 || map.distToTrack(x, z) < 160) continue;
+          if (map.forest(x, z) > 0.45 || map.urban(x, z) > 0.2 || map.height(x, z) > 260) continue;
+          const px = x + (hash2i(slot, lineId, 9) - 0.5) * 2.2, pz = z + (hash2i(slot, lineId, 11) - 0.5) * 2.2;
+          if (!okTree(px, pz, 20)) continue;
+          const h = hash2i(slot, lineId, 17);
+          const h2 = hash2i(slot, lineId, 19);
+          if (h < H.tree) add(H.trees[Math.floor(h2 * H.trees.length) % H.trees.length], px, pz, H.treeS[0] + hash2i(slot, lineId, 23) * H.treeS[1], h / H.tree, h2);
+          else add('shrub', px, pz, H.shrub[0] + hash2i(slot, lineId, 29) * H.shrub[1], h, 0.5);
+        }
+      timings.hedges = trees.length - n0;
     }
   }
   // saplings growing out of the abandoned banking's edges

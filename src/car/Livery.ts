@@ -19,6 +19,7 @@ import {
 } from './hull.ts';
 import { FONT, canvas, ctx2d, paintWithFonts, contrastOn, fontsAreReady } from './carTextures.ts';
 import { clamp, smooth } from './carMath.ts';
+import { restorePixels, keepPixels, pixelKey } from '../core/pixelCache.ts';
 
 type RGB = [number, number, number];
 /** paint albedo cap: nothing on the car is brighter than ~0.85 linear (sRGB ≈ 238) */
@@ -439,15 +440,21 @@ function buildLivery(team: Team): LiverySet {
   const mask = new THREE.CanvasTexture(mc);
   mask.colorSpace = THREE.NoColorSpace;
   mask.anisotropy = 4;
+  // painted on an earlier visit (same build, same team): draw it back
+  const key = pixelKey('livery', team, PAINT_W, PAINT_H);
+  if (restorePixels(key + 'm', c) && restorePixels(key + 'k', mc)) return { map, mask };
   // the per-texel hull pass is font independent: keep it only until the webfont repaint has happened
   let hull: HullImg | null = null;
-  let passes = 0;
   const paint = () => {
     if (!hull) hull = paintHull(team, palOf(team), PATTERNS[team.pattern]);
     paintLivery(team, ctx2d(c), ctx2d(mc), hull);
     map.needsUpdate = true;
     mask.needsUpdate = true;
-    if (++passes >= 1 && fontsAreReady()) hull = null;
+    if (fontsAreReady()) {
+      hull = null;
+      keepPixels(key + 'm', c);
+      keepPixels(key + 'k', mc);
+    }
   };
   paintWithFonts(paint);
   return { map, mask };
@@ -607,19 +614,46 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
   }
 }
 
-function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
+/**
+ * The loft behind every hull texel — where on the body it lies (z, x, y, arc length, feature
+ * parameter, normal), what it is (bare carbon beyond the loft, seat, sidepod mouth, bodywork) and
+ * the panel lines / fasteners / louvres cut into it. The same for every team, so it is worked out
+ * once (the profile queries were ~60 % of painting a livery) and shared by all eleven; freed a
+ * little after the last livery is painted.
+ */
+interface HullGeo {
+  /** 0 carbon (off the loft), 1 seat, 2 inlet mouth, 3 bodywork */
+  kind: Uint8Array;
+  /** shade: 0 none, 1 panel line (×0.55), 2 fastener rim (×0.72), 3 fastener head (×0.5), 4 louvre slot */
+  mark: Uint8Array;
+  z: Float32Array;
+  /** per column */
+  zc: Float32Array;
+  x: Float32Array;
+  y: Float32Array;
+  s: Float32Array;
+  kt: Float32Array;
+  nx: Float32Array;
+  ny: Float32Array;
+  /** per column */
+  pod: Float32Array;
+}
+let HULL_GEO: HullGeo | null = null;
+let hullGeoTimer: ReturnType<typeof setTimeout> | null = null;
+function hullGeo(): HullGeo {
+  if (hullGeoTimer) clearTimeout(hullGeoTimer);
+  hullGeoTimer = setTimeout(() => {
+    HULL_GEO = null;
+    hullGeoTimer = null;
+  }, 20000);
+  if (HULL_GEO) return HULL_GEO;
   const W = PAINT_W;
-  const H = HULL_ROWS;
-  const img = new ImageData(W, H);
-  const MW = W * MASK_SCALE;
-  const MH = H * MASK_SCALE;
-  const mimg = new ImageData(MW, MH);
-  const d = img.data;
-  const md = mimg.data;
-  const carbonAmt = team.carbon;
-  const inletCol: RGB = [6, 6, 7];
-  const seatCol: RGB = [12, 12, 13];
-  const carbonCol: RGB = [27, 28, 31];
+  const R = HULL_ROWS / 2;
+  const N = W * R;
+  const G: HullGeo = {
+    kind: new Uint8Array(N), mark: new Uint8Array(N), z: new Float32Array(N), zc: new Float32Array(W), x: new Float32Array(N), y: new Float32Array(N),
+    s: new Float32Array(N), kt: new Float32Array(N), nx: new Float32Array(N), ny: new Float32Array(N), pod: new Float32Array(W),
+  };
   // panel lines as (kt, zFront, zRear)
   const panelKt: [number, number, number][] = [
     [4.02, 0.35, -1.45],
@@ -631,7 +665,6 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
     [-1.47, 0, 10],
     [0.86, 2.8, 10],
   ];
-  const tx: Tx = { z: 0, x: 0, y: 0, s: 0, kt: 0, nx: 0, ny: 0, pod: 0 };
   // sidepod-inlet transition: the lip/mouth faces forward, so it gets very few atlas columns (u = z).
   // Colour it by feature parameter only, sampled from the section just behind the lip.
   const ZT0 = 0.285;
@@ -645,88 +678,137 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
     const pw = podWeight(zc);
     const lineS = panelKt.filter((q) => z <= q[1] && z >= q[2]).map((q) => profileAtParam(pr, q[0]).s);
     const zLine = panelZ.find((q) => Math.abs(z - q[0]) < PXM * 0.9);
+    const zf = panelZ.find((p) => Math.abs(Math.abs(z - p[0]) - PXM * 4) < PXM * 2);
     // forward-facing test for the sidepod mouth: compare with a slice 12 mm ahead
     const prF = zc > 0.26 && zc < 0.42 ? profileAt(zc + 0.012) : null;
+    G.zc[px] = zc;
+    G.pod[px] = pw;
     const facesForward = (pf: Profile, q: { x: number; y: number; kt: number }) => {
       const a = profileAtParam(pf, q.kt);
       return Math.hypot(a.x - q.x, a.y - q.y) / 0.012 > 1.1;
     };
-    for (const side of [1, -1]) {
-      for (let k = 0; k < H / 2; k++) {
+    for (let k = 0; k < R; k++) {
+      const i = k * W + px;
+      const s = (k + 0.5) / HULL_RHO;
+      if (s >= pr.total) continue; // kind 0
+      const q = profileAtS(pr, s);
+      G.kt[i] = q.kt;
+      G.z[i] = zc;
+      G.x[i] = q.x;
+      G.y[i] = q.y;
+      G.s[i] = s;
+      G.nx[i] = Math.abs(q.nx);
+      G.ny[i] = q.ny;
+      if (cw > 0.5 && q.kt < 2.02) {
+        G.kind[i] = 1;
+        continue;
+      }
+      if (prF && q.kt > 6.75 && q.kt < 8.2 && facesForward(prF, q)) {
+        G.kind[i] = 2;
+        continue;
+      }
+      G.kind[i] = 3;
+      if (zc > ZT0 && zc < ZT1 && q.kt > 4.2 && q.kt < 9.95) {
+        const a = profileAtParam(prT, q.kt);
+        const qa = profileAtS(prT, a.s);
+        G.z[i] = ZT0;
+        G.x[i] = a.x;
+        G.y[i] = a.y;
+        G.s[i] = a.s;
+        G.nx[i] = Math.abs(qa.nx);
+        G.ny[i] = qa.ny;
+      }
+      // panel lines
+      let pl = 0;
+      for (const ls of lineS) if (Math.abs(s - ls) < PXM * 0.7) pl = 1;
+      if (zLine && q.kt >= zLine[1] && q.kt <= zLine[2]) pl = 1;
+      if (pl) G.mark[i] = 1;
+      else {
+        // quarter-turn fasteners beside the panel lines (~9 mm heads every 11 cm)
+        const FP = 0.11;
+        const R2 = (PXM * 1.7) ** 2;
+        let fd = Infinity;
+        for (const ls of lineS) {
+          const ds = Math.abs(s - ls) - PXM * 4;
+          const zz = ((z % FP) + FP) % FP;
+          const dz = Math.min(zz, FP - zz);
+          fd = Math.min(fd, ds * ds + dz * dz);
+        }
+        if (zf && q.kt >= zf[1] && q.kt <= zf[2]) {
+          const ss = ((s % FP) + FP) % FP;
+          const dsv = Math.min(ss, FP - ss);
+          const dz = Math.abs(z - zf[0]) - PXM * 4;
+          fd = Math.min(fd, dsv * dsv + dz * dz);
+        }
+        if (fd < R2) G.mark[i] = fd < R2 * 0.3 ? 3 : 2;
+      }
+      // cooling louvres on the sidepod downwash ramp
+      if (zc < -0.28 && zc > -0.7 && q.kt > 5.15 && q.kt < 5.85) {
+        const f = (zc + 10) / 0.024;
+        if (f - Math.floor(f) < 0.34) G.mark[i] = 4;
+      }
+    }
+  }
+  HULL_GEO = G;
+  return G;
+}
+
+function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
+  const W = PAINT_W;
+  const H = HULL_ROWS;
+  const img = new ImageData(W, H);
+  const MW = W * MASK_SCALE;
+  const MH = H * MASK_SCALE;
+  const mimg = new ImageData(MW, MH);
+  const d = img.data;
+  const md = mimg.data;
+  const carbonAmt = team.carbon;
+  const inletCol: RGB = [6, 6, 7];
+  const seatCol: RGB = [12, 12, 13];
+  const carbonCol: RGB = [27, 28, 31];
+  const louvreCol: RGB = [8, 8, 9];
+  const tx: Tx = { z: 0, x: 0, y: 0, s: 0, kt: 0, nx: 0, ny: 0, pod: 0 };
+  const G = hullGeo();
+  const R = H / 2;
+  for (let k = 0; k < R; k++) {
+    for (let px = 0; px < W; px++) {
+      const i = k * W + px;
+      const kind = G.kind[i];
+      for (const side of [1, -1]) {
         const row = side > 0 ? HULL_ROW0 - 1 - k : HULL_ROW0 + k;
-        const s = (k + 0.5) / HULL_RHO;
         const o = (row * W + px) * 4;
         let col: RGB;
         let carbon = 0;
-        if (s >= pr.total) {
+        if (kind === 0) {
           col = carbonCol;
           carbon = 1;
-        } else {
-          const q = profileAtS(pr, s);
-          tx.z = zc;
-          tx.x = q.x * side;
-          tx.y = q.y;
-          tx.s = s * side;
-          tx.kt = q.kt;
-          tx.nx = Math.abs(q.nx);
-          tx.ny = q.ny;
-          tx.pod = pw;
-          if (cw > 0.5 && q.kt < 2.02) {
-            col = seatCol;
-          } else if (prF && q.kt > 6.75 && q.kt < 8.2 && facesForward(prF, q)) {
-            col = inletCol;
-          } else {
-            if (zc > ZT0 && zc < ZT1 && q.kt > 4.2 && q.kt < 9.95) {
-              const a = profileAtParam(prT, q.kt);
-              const qa = profileAtS(prT, a.s);
-              tx.z = ZT0;
-              tx.x = a.x * side;
-              tx.y = a.y;
-              tx.s = a.s * side;
-              tx.nx = Math.abs(qa.nx);
-              tx.ny = qa.ny;
-            }
-            col = pattern(tx, pal);
-            // exposed carbon: underside + lower flanks, more with team.carbon
-            const lowKt = 9.35 - carbonAmt * 2.4 + 0.5 * smooth(0.4, 1.4, zc) * (1 - pw);
-            const cv = cov((lowKt - q.kt) * 0.05, 0.002);
-            // noses of carbon-heavy cars: bare underside
-            const noseUnder = carbonAmt > 0.3 ? cov((10.2 - carbonAmt * 1.5 - q.kt) * 0.05, 0.002) * smooth(1.4, 1.8, zc) : 0;
-            // rear engine cover in carbon for carbon-heavy liveries
-            const rearTop = carbonAmt > 0.42 ? smooth(-1.55, -1.75, zc) : 0;
-            carbon = Math.max(cv, noseUnder, rearTop, q.kt > 10 ? 1 : 0);
-            if (carbon > 0.5) col = carbonCol;
-            // panel lines
-            let pl = 0;
-            for (const ls of lineS) if (Math.abs(s - ls) < PXM * 0.7) pl = 1;
-            if (zLine && q.kt >= zLine[1] && q.kt <= zLine[2]) pl = 1;
-            if (pl) col = shade(col, 0.55);
-            else if (carbon < 0.5) {
-              // quarter-turn fasteners beside the panel lines (~9 mm heads every 11 cm)
-              const FP = 0.11;
-              const R2 = (PXM * 1.7) ** 2;
-              let fd = Infinity;
-              for (const ls of lineS) {
-                const ds = Math.abs(s - ls) - PXM * 4;
-                const zz = ((z % FP) + FP) % FP;
-                const dz = Math.min(zz, FP - zz);
-                fd = Math.min(fd, ds * ds + dz * dz);
-              }
-              const zf = panelZ.find((p) => Math.abs(Math.abs(z - p[0]) - PXM * 4) < PXM * 2);
-              if (zf && q.kt >= zf[1] && q.kt <= zf[2]) {
-                const ss = ((s % FP) + FP) % FP;
-                const dsv = Math.min(ss, FP - ss);
-                const dz = Math.abs(z - zf[0]) - PXM * 4;
-                fd = Math.min(fd, dsv * dsv + dz * dz);
-              }
-              if (fd < R2) col = shade(col, fd < R2 * 0.3 ? 0.5 : 0.72);
-            }
-            // cooling louvres on the sidepod downwash ramp
-            if (zc < -0.28 && zc > -0.7 && q.kt > 5.15 && q.kt < 5.85) {
-              const f = (zc + 10) / 0.024;
-              if (f - Math.floor(f) < 0.34) col = [8, 8, 9];
-            }
-          }
+        } else if (kind === 1) col = seatCol;
+        else if (kind === 2) col = inletCol;
+        else {
+          const zc = G.zc[px];
+          const kt = G.kt[i];
+          tx.z = G.z[i];
+          tx.x = G.x[i] * side;
+          tx.y = G.y[i];
+          tx.s = G.s[i] * side;
+          tx.kt = kt;
+          tx.nx = G.nx[i];
+          tx.ny = G.ny[i];
+          tx.pod = G.pod[px];
+          col = pattern(tx, pal);
+          // exposed carbon: underside + lower flanks, more with team.carbon
+          const lowKt = 9.35 - carbonAmt * 2.4 + 0.5 * smooth(0.4, 1.4, zc) * (1 - tx.pod);
+          const cv = cov((lowKt - kt) * 0.05, 0.002);
+          // noses of carbon-heavy cars: bare underside
+          const noseUnder = carbonAmt > 0.3 ? cov((10.2 - carbonAmt * 1.5 - kt) * 0.05, 0.002) * smooth(1.4, 1.8, zc) : 0;
+          // rear engine cover in carbon for carbon-heavy liveries
+          const rearTop = carbonAmt > 0.42 ? smooth(-1.55, -1.75, zc) : 0;
+          carbon = Math.max(cv, noseUnder, rearTop, kt > 10 ? 1 : 0);
+          if (carbon > 0.5) col = carbonCol;
+          const mk = G.mark[i];
+          if (mk === 1) col = shade(col, 0.55);
+          else if ((mk === 2 || mk === 3) && carbon < 0.5) col = shade(col, mk === 3 ? 0.5 : 0.72);
+          if (mk === 4) col = louvreCol;
         }
         d[o] = col[0];
         d[o + 1] = col[1];

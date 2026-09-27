@@ -1,3 +1,4 @@
+import { buildSkyline } from './skyline.ts';
 import * as THREE from 'three';
 import type { Track } from '../Track.ts';
 import type { Renderer } from '../../core/Renderer.ts';
@@ -132,6 +133,10 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
   if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
   lap('villages');
+  // wind farms, pylon lines, oil field: what stands up out of each venue's countryside
+  const skyline = buildSkyline(map);
+  if (skyline) group.add(skyline.group);
+  lap('skyline');
   // distant mountains / skylines beyond the far terrain (per-venue preset, horizon.ts)
   const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z));
   group.add(horizon.mesh);
@@ -162,6 +167,7 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
       mex?.update(elapsed);
       yas?.update(elapsed);
       stands.update(elapsed);
+      skyline?.update(elapsed);
       strollers.update(_dt, camera);
     },
     setQuality(q) {
