@@ -275,6 +275,32 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     rough = mix(0.8, 0.56, stone) + (m3.r - 0.5) * 0.05;
     tsDetail *= 0.55;
     tsSpecOcc = 0.5;
+    // laid in batches: every ~64 m a transverse joint, and each batch a slightly different mix and age —
+    // the one variation that still reads 200 m down a straight, where the aggregate is long gone
+    {
+      const float bLen = 64.0;
+      float bi = floor(sv / bLen);
+      float bf = sv - bi * bLen;
+      float hPrev = tsHash(vec2(bi - 1.0, 11.3));
+      float hCur = tsHash(vec2(bi, 11.3));
+      float hB = mix(hPrev, hCur, smoothstep(0.0, max(px * 1.5, 0.02), bf));
+      float hR = tsHash(vec2(bi, 27.9));
+      col *= 1.0 + (hB - 0.5) * 0.2;
+      rough += (hR - 0.5) * 0.07;
+      // the joint itself: a thin sealed seam, darker and glossier
+      float jd = min(bf, bLen - bf);
+      float joint = (1.0 - smoothstep(0.012, 0.012 + px, jd)) * (1.0 - smoothstep(0.02, 0.06, px));
+      col = mix(col, col * 0.62, joint * 0.7);
+      rough = mix(rough, 0.42, joint * 0.6);
+    }
+    // metre-scale relief between the grain and the long undulations: breaks the sun's glare into streaks
+    vec4 mN3 = texture2D(uMacroN, vTrk * (1.0 / 3.3) + vec2(0.47, 0.83));
+    tsMac += (mN3.rg * 2.0 - 1.0) * 0.022;
+    // tar snakes: sealed cracks, glossy black bitumen, only in some stretches
+    float snake = smoothstep(0.35, 0.75, m24.g) * smoothstep(0.55, 0.75, m96.a) * (1.0 - smoothstep(0.01, 0.04, px));
+    col = mix(col, vec3(0.022, 0.022, 0.024), snake * 0.8);
+    rough = mix(rough, 0.34, snake * 0.8);
+    tsDetail *= 1.0 - snake * 0.7;
     float edgeD = zone < 0.5 ? hw - alat : 99.0;
     // the last half-metre by the edge line sees no traffic: a touch greyer (sand/dust settles)
     float dust = (1.0 - smoothstep(0.1, 0.9, edgeD)) * (0.4 + 0.6 * m24.b);
@@ -284,11 +310,17 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float d = lat - vA0.x;
     float dd = d + (m24.b - 0.5) * 0.7;
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
-    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.18, 1.0, uRaceRubber);
+    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.4, 1.0, uRaceRubber);
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
     col = mix(col, vec3(0.03, 0.03, 0.031), rub * 0.75);
-    rough = mix(rough, 0.56, rub * 0.5);
+    rough = mix(rough, 0.52, rub * 0.5);
     tsDetail *= 1.0 - rub * 0.4;
+    // off the line the surface sees no rubber: dust and fines settle, a lighter, greyer road
+    if (zone < 0.5) {
+      float offLine = smoothstep(2.6, 5.0, abs(d)) * (0.55 + 0.45 * m24.b);
+      col = mix(col, col * 1.13 + vec3(0.0035, 0.0034, 0.003), offLine * 0.45);
+      rough = mix(rough, rough + 0.05, offLine);
+    }
 
     // the dry line: tyre tracks clear first, then the whole ±2 m band
     if (zone < 0.5) {
@@ -374,12 +406,24 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     }
     // freshly painted: saturated, clean and glossy. Only rubber the session lays down on the inner
     // edge, where the tyres ride (uRaceRubber), dulls it.
-    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.7, kd)) * uRaceRubber;
+    // (a kerb carries rubber from every session before this one too, so some is always there)
+    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.7, kd)) * mix(0.35, 1.0, uRaceRubber);
     float through = 0.0;
     paint *= 1.12 * (0.98 + 0.04 * m3.b) * (1.0 + 0.04 * albDev);
+    // chipped paint: grey concrete shows through where the tyres hammer it
+    float chip = smoothstep(0.66, 0.74, texture2D(uMacro, vTrk * vec2(1.0 / 0.9, 1.0 / 1.7) + vec2(0.3, 0.1)).r) * (0.4 + 0.6 * (1.0 - kd)) * (1.0 - smoothstep(0.004, 0.015, px));
+    paint = mix(paint, vec3(0.15, 0.145, 0.138) * (0.9 + 0.2 * m3.r), chip * 0.75);
     paint = mix(paint, vec3(0.02), clamp(rubberMarks * 0.6, 0.0, 0.8));
+    // the joint between each 1 m block, and dirt thrown up along the outer edge
+    float bjd = min(fract(sv), 1.0 - fract(sv));
+    float bj = (1.0 - smoothstep(0.008, 0.008 + px, bjd)) * (1.0 - smoothstep(0.01, 0.04, px));
+    paint *= 1.0 - 0.6 * bj;
+    float kDirt = smoothstep(0.72, 1.0, kd) * (0.45 + 0.55 * m24.b);
+    paint = mix(paint, paint * 0.55 + vec3(0.014, 0.012, 0.008), kDirt * 0.55);
     col = paint;
-    rough = mix(0.3, 0.6, rubberMarks);
+    // painted concrete is satin, not plastic: the paint's gloss varies block to block
+    rough = mix(0.42 + (m3.r - 0.5) * 0.12 + (tsHash(vec2(floor(sv), 5.0)) - 0.5) * 0.08, 0.64, max(rubberMarks, kDirt * 0.6));
+    rough = mix(rough, 0.7, chip * 0.6);
     tsDetail = 0.14;
     porous = 0.22;
     // transverse ridges on the flat top (period 0.16 m), fading out with distance
@@ -598,7 +642,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-8', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-9', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     sh.uniforms.uAsphMean = { value: t.asphaltMean };
     sh.uniforms.uKerbA = { value: kerbA };
@@ -830,6 +874,23 @@ if (uWetness > 0.002) {
 }
 `;
 
+/**
+ * Galvanised steel (armco, posts, masts, fence frames): a dull, mottled zinc skin instead of a
+ * chrome finish — spangle crystals up close, weathered patches further off, never a mirror.
+ */
+const PROP_ZINC = /* glsl */ `
+if (metalnessFactor > 0.5) {
+  float zfw = length(fwidth(vWP));
+  vec3 zq = floor(vWP * 9.0);
+  float zsp = fract(sin(dot(zq, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float zK = 1.0 - smoothstep(0.02, 0.08, zfw);
+  float zblot = 0.5 + 0.5 * sin(vWP.x * 0.9 + sin(vWP.z * 1.3)) * sin(vWP.z * 0.7 + vWP.y * 2.1);
+  diffuseColor.rgb *= mix(1.0, 0.86 + 0.24 * zsp, zK) * (0.9 + 0.14 * zblot);
+  roughnessFactor = clamp(roughnessFactor + 0.12 + (zblot - 0.5) * 0.12 + (zsp - 0.5) * 0.1 * zK, 0.05, 1.0);
+  metalnessFactor = min(metalnessFactor, 0.72);
+}
+`;
+
 function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = W.uWetness;
@@ -839,7 +900,7 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;')
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_WET)
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_ZINC + PROP_WET)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z;');
   };
   m.customProgramCacheKey = () => key;
@@ -848,14 +909,14 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
 /** Untextured props: vertex colour + per-vertex roughness/metalness/emissive. */
 export function propsMaterial(): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-props-3');
+  patchPBR(m, 'apex-ts-props-4');
   return m;
 }
 
 /** Printed surfaces: atlas map × vertex colour, per-vertex PBR. */
 export function printMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-print-3');
+  patchPBR(m, 'apex-ts-print-4');
   return m;
 }
 
@@ -877,7 +938,7 @@ export function decalMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial 
   m.blendDst = THREE.OneMinusSrcAlphaFactor;
   m.blendSrcAlpha = THREE.ZeroFactor;
   m.blendDstAlpha = THREE.OneFactor;
-  patchPBR(m, 'apex-ts-decal-4');
+  patchPBR(m, 'apex-ts-decal-5');
   return m;
 }
 

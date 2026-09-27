@@ -91,6 +91,21 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
   wheelr: { pos: [0.74, 0.62, -0.5], dir: [0.1, -0.26, -1], fov: 74, root: true, shake: 0.8 },
 };
 
+/** frame-rate independent smoothing factor: the share of the gap closed in dt at rate k (1/s) */
+const ease = (dt: number, k: number) => 1 - Math.exp(-k * dt);
+
+/**
+ * Vertical FOV for a lens specified as its vertical FOV on a 16:9 screen: wider screens see more at
+ * the sides (Hor+, like the F1 games on ultrawides); narrower ones keep the 16:9 horizontal view
+ * rather than losing the sides of the track.
+ */
+function fovFor(v169: number, aspect: number): number {
+  const A = 16 / 9;
+  if (!(aspect > 0) || aspect >= A) return v169;
+  const h = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(v169) / 2) * A);
+  return Math.min(80, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(h / 2) / aspect)));
+}
+
 /** critically damped spring toward a target, per axis, sub-stepped so it stays stable at any dt */
 function spring(x: THREE.Vector3, v: THREE.Vector3, t: THREE.Vector3, w: number, wy: number, dt: number) {
   const n = Math.min(12, Math.ceil(dt * 60 - 1e-6));
@@ -189,11 +204,17 @@ export class Cameras {
   private headX = 0;
   private headY = 0;
   private headRoll = 0;
+  /** cockpit: eased look into the corner (rad) */
+  private headLook = 0;
   private lead = 0;
   private camVel = new THREE.Vector3();
   private lookQ = new THREE.Quaternion();
   private orbitT = 0;
   private readonly chaseLook = new THREE.Vector3();
+  /** chase cam: the corner look-in, the eased acceleration surge, and which way it looked last frame */
+  private chaseLead = 0;
+  private surge = 0;
+  private chaseBack = false;
   private lastRig: CarRig | null = null;
   private topYaw = 0;
   private blimpPos = new THREE.Vector3();
@@ -445,7 +466,7 @@ export class Cameras {
         return this.cineShot(dt, car, carPos, track);
       case 'chase':
       case 'far':
-        return this.chaseShot(dt, car, carPos, track, sx, sy, kmh, speed);
+        return this.chaseShot(dt, car, carPos, track, kmh, speed);
     }
     if (TV_KINDS[this.mode]) {
       this.tvShot(dt, car, carPos, fwdCar, speed, track, TV_KINDS[this.mode]!);
@@ -586,30 +607,39 @@ export class Cameras {
     this.initialized = true;
   }
 
-  private chaseShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, track: Track, sx: number, sy: number, kmh: number, speed: number) {
+  private chaseShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, track: Track, kmh: number, speed: number) {
     const cam = this.camera;
     const far = this.mode === 'far';
+    // looking back is a cut, not a 180° swing round the side of the car
+    if (this.lookBack !== this.chaseBack) {
+      this.chaseBack = this.lookBack;
+      this.initialized = false;
+    }
     const [wx, wz] = car.worldVelocity();
-    // F1-game chase cam: locked to the car's heading with a short lag, so a
-    // slide shows as the car rotating in frame (only a hint of the travel direction)
+    // F1-game chase cam: follows the car's heading with a soft lag and a share of the direction
+    // of travel, so a slide reads as the car rotating in frame (oversteer shows, understeer too)
     let target = car.yaw;
     if (speed > 6) {
       const velYaw = Math.atan2(wx, wz);
       let d = velYaw - car.yaw;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      target = car.yaw + d * 0.15;
+      target = car.yaw + THREE.MathUtils.clamp(d, -0.6, 0.6) * 0.32;
     }
     if (this.lookBack) target += Math.PI;
     if (!this.initialized) this.camYaw = target;
     let dy = target - this.camYaw;
     while (dy > Math.PI) dy -= Math.PI * 2;
     while (dy < -Math.PI) dy += Math.PI * 2;
-    this.camYaw += dy * Math.min(1, dt * (far ? 7 : 10));
+    this.camYaw += dy * ease(dt, far ? 5.5 : 7);
 
-    // pulls back under acceleration, closes in under braking, stretches a little with speed
-    const dist = (far ? 7.1 : 5.05) + Math.max(-0.45, Math.min(0.6, -car.ax * 0.024)) + speed * 0.0028;
-    const height = (far ? 2.05 : 1.32) + car.heave * 0.6;
+    // the car surges away on the throttle and comes back toward the lens on the brakes (eased, so
+    // a gear change or a kerb doesn't jolt the framing)
+    const surgeT = speed > 3 ? THREE.MathUtils.clamp(car.ax * 0.022, -0.42, 0.4) : 0;
+    this.surge = this.initialized ? this.surge + (surgeT - this.surge) * ease(dt, 3.2) : surgeT;
+    // low and close behind the rear wing, the car in the lower third of the frame
+    const dist = (far ? 7.7 : 5.55) + this.surge + speed * 0.0024;
+    const height = (far ? 2.15 : 1.42) + car.heave * 0.5;
     // spring the camera's offset from the car (not its world position): a world-space spring
     // trails a car at 300 km/h by ~2v/ω ≈ 12 m; the offset only lags the car's turns and surges
     const want = this.v3.set(-Math.sin(this.camYaw) * dist, height, -Math.cos(this.camYaw) * dist);
@@ -617,21 +647,24 @@ export class Cameras {
       this.camPos.copy(want);
       this.camVel.set(0, 0, 0);
     }
-    spring(this.camPos, this.camVel, want, far ? 11 : 14, far ? 7 : 8.5, dt);
+    spring(this.camPos, this.camVel, want, far ? 10 : 12.5, far ? 6.5 : 8, dt);
     this.v4.copy(carPos).add(this.camPos);
-    // keep above the road surface
+    // keep above the road: under the car, and under the lens itself (the road behind the car is
+    // higher than the car over a crest — without this the camera sinks into it going downhill)
     const ground = track.point(car.s, car.lateral, 0, this.v5).y;
-    this.v4.y = Math.max(this.v4.y, ground + 0.9);
-    // look a touch into the corner (from the yaw rate), easing in and out
-    const leadT = speed > 8 && !this.lookBack ? THREE.MathUtils.clamp(car.r * 0.16, -0.14, 0.14) : 0;
-    this.lead += (leadT - this.lead) * Math.min(1, dt * 3);
-    const ly = this.camYaw + this.lead;
-    const look = this.v3.set(carPos.x + Math.sin(ly) * 3.4, carPos.y + (far ? 0.72 : 0.84), carPos.z + Math.cos(ly) * 3.4);
-    if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 3.0, carPos.y + 0.9, carPos.z + Math.cos(this.camYaw) * 3.0);
+    const behind = track.point(track.wrap(car.s - (this.lookBack ? -dist : dist)), car.lateral, 0, this.v5).y;
+    this.v4.y = Math.max(this.v4.y, ground + 0.9, behind + height * 0.82);
+    // look ahead down the road and into the corner (from the yaw rate), easing in and out
+    const leadT = speed > 8 && !this.lookBack ? THREE.MathUtils.clamp(car.r * 0.22, -0.2, 0.2) : 0;
+    this.chaseLead += (leadT - this.chaseLead) * ease(dt, 2.6);
+    const ly = this.camYaw + this.chaseLead;
+    const ahead = far ? 16 : 13;
+    const look = this.v3.set(carPos.x + Math.sin(ly) * ahead, carPos.y + (far ? 0.2 : 0.42), carPos.z + Math.cos(ly) * ahead);
+    if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 8, carPos.y + 0.5, carPos.z + Math.cos(this.camYaw) * 8);
     // (also relative to the car, or it trails v/20 m behind at speed)
     look.sub(carPos);
     if (!this.initialized) this.chaseLook.copy(look);
-    this.chaseLook.lerp(look, Math.min(1, dt * 20));
+    this.chaseLook.lerp(look, ease(dt, 14));
     this.camLook.copy(carPos).add(this.chaseLook);
     // weight: the view dips under braking and lifts on the throttle, and leans a couple of degrees
     // with the lateral G (a camera on a car-mounted arm, not a drone)
@@ -641,30 +674,47 @@ export class Cameras {
       this.chasePitch = pitchT;
       this.chaseRoll = rollT;
     }
-    this.chasePitch += (pitchT - this.chasePitch) * Math.min(1, dt * 5);
-    this.chaseRoll += (rollT - this.chaseRoll) * Math.min(1, dt * 3.5);
-    this.camLook.y += this.chasePitch * 3.4;
-    // road feel instead of a buzz: a low rumble growing with speed (smooth, below the frame rate's
-    // aliasing), sharp kerb chatter and off-track bounce on top
+    this.chasePitch += (pitchT - this.chasePitch) * ease(dt, 5);
+    this.chaseRoll += (rollT - this.chaseRoll) * ease(dt, 3.5);
+    this.camLook.y += this.chasePitch * ahead;
+    // road feel: a low rumble growing with speed (smooth, below the frame rate's aliasing); kerbs,
+    // grass and impacts come through as rotation of the lens (applyRotShake)
     const t = this.shakeT;
     const sp = Math.min(1, kmh / 320);
     const rumble = sp * sp * 0.0035;
-    const kerb = (car.onKerb ? 0.012 * Math.min(1, speed / 25) : 0) + (car.offTrack ? 0.02 * Math.min(1, speed / 20) : 0) + this.impulse * 0.08;
-    const jx = (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble + Math.sin(t * 23.7) * kerb * 0.6;
-    const jy = (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble + Math.sin(t * 29.3 + 2.1) * kerb;
     cam.position.copy(this.v4);
-    cam.position.x += jx;
-    cam.position.y += jy;
-    void sx;
-    void sy;
+    cam.position.x += (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble;
+    cam.position.y += (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble;
     cam.lookAt(this.camLook);
     cam.rotateZ(this.chaseRoll);
+    // shake as rotation of the lens (a few millimetres of travel is invisible 5 m back; a fraction of
+    // a degree of pitch and roll is what kerbs and bumps look like)
+    this.applyRotShake(car, speed, kmh, far ? 0.7 : 1);
     // (a little wider at speed for the rush, never a fisheye)
-    this.setFov((far ? 52 : 55) + Math.min(1, kmh / 330) * 8, dt, !this.initialized);
+    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + Math.min(1, kmh / 330) * 6, dt, !this.initialized);
     this.initialized = true;
   }
   private chasePitch = 0;
   private chaseRoll = 0;
+
+  /** band-limited pitch / yaw / roll shake in the camera's own frame: speed buzz, kerbs, grass, impacts */
+  private applyRotShake(car: CarPhysics, speed: number, kmh: number, k: number) {
+    const t = this.shakeT;
+    const buzz = Math.min(1, kmh / 330) * 0.0009;
+    const kerb = car.onKerb ? 0.0062 * Math.min(1, speed / 25) : 0;
+    const grass = car.offTrack ? 0.011 * Math.min(1, speed / 20) : 0;
+    const hit = this.impulse * 0.045;
+    const a = (buzz + kerb + grass + hit) * k;
+    if (a < 1e-5) return;
+    // sums of incommensurate sines: noise-like, but smooth frame to frame
+    const n1 = Math.sin(t * 37.1) * 0.6 + Math.sin(t * 61.7 + 1.3) * 0.3 + Math.sin(t * 13.3 + 0.4) * 0.4;
+    const n2 = Math.sin(t * 43.9 + 2.1) * 0.6 + Math.sin(t * 71.3) * 0.25 + Math.sin(t * 17.9 + 3.3) * 0.35;
+    const n3 = Math.sin(t * 29.3 + 4.2) * 0.5 + Math.sin(t * 53.1 + 0.7) * 0.3;
+    // kerbs hammer the car up and down: mostly pitch, some roll
+    this.camera.rotateX(n1 * a);
+    this.camera.rotateZ(n2 * a * 0.7);
+    this.camera.rotateY(n3 * a * 0.35);
+  }
 
   private onboardShot(dt: number, car: CarPhysics, rig: CarRig, sx: number, sy: number, kmh: number) {
     const cam = this.camera;
@@ -695,12 +745,15 @@ export class Cameras {
       const hx = THREE.MathUtils.clamp(-car.ay * 0.0035, -0.06, 0.06);
       const hy = THREE.MathUtils.clamp(car.ax * 0.0018, -0.03, 0.03);
       const hr = THREE.MathUtils.clamp(-car.ay * 0.0028, -0.07, 0.07);
-      this.headX += (hx - this.headX) * Math.min(1, dt * 8);
-      this.headY += (hy - this.headY) * Math.min(1, dt * 8);
-      this.headRoll += (hr - this.headRoll) * Math.min(1, dt * 6);
+      this.headX += (hx - this.headX) * ease(dt, 8);
+      this.headY += (hy - this.headY) * ease(dt, 8);
+      this.headRoll += (hr - this.headRoll) * ease(dt, 6);
       const buzz = Math.sin(this.shakeT * car.rpm * 0.05) * 0.0006 * Math.min(1, car.rpm / 11000);
       this.v3.addScaledVector(leftV, this.headX).addScaledVector(up, this.headY + buzz);
-      up.addScaledVector(leftV, this.headRoll).normalize();
+      // the driver's neck holds the horizon: most of the chassis roll (and the banking) is taken
+      // out, and only a hint of the head's own lean against the G is left in
+      const worldUp = this.v5.set(0, 1, 0);
+      up.lerp(worldUp, 0.7).addScaledVector(leftV, this.headRoll * 0.25).normalize();
     }
     if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
     // the nose camera rides a little proud of the nose, so its tip and the wing's flaps frame the road
@@ -721,14 +774,22 @@ export class Cameras {
       lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -0.45 : -0.6;
     }
     if (this.lookBack) f.negate();
-    // look slightly into the corner in the cockpit
-    if (this.mode === 'cockpit') f.addScaledVector(leftV, car.steer * 0.9).normalize();
+    // look into the corner in the cockpit: eased, so a keyboard's full-lock taps don't jerk the view
+    if (this.mode === 'cockpit') {
+      const lookT = this.lookBack ? 0 : THREE.MathUtils.clamp(car.steer * 0.55, -0.16, 0.16);
+      this.headLook = this.initialized ? this.headLook + (lookT - this.headLook) * ease(dt, 4.5) : lookT;
+      f.addScaledVector(leftV, this.headLook).normalize();
+    }
     const look = this.v4.copy(this.v3).addScaledVector(f, 20).addScaledVector(up, lift);
     cam.up.copy(up);
     cam.lookAt(look);
     cam.up.set(0, 1, 0);
-    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 70 : this.mode === 'tcam' ? 68 : 70;
-    this.setFov(baseFov + Math.min(1, kmh / 330) * 4, dt, !this.initialized);
+    // bolted to the car: kerbs and bumps come through as a fine vibration of the view
+    this.applyRotShake(car, Math.max(0, car.vx), kmh, (mount ? mount.shake : 0.6) * 0.6);
+    // (a touch narrower than before: the halo, the wheel and the T-cam's airbox read at their real
+    // size instead of shrinking into a fisheye)
+    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 66 : this.mode === 'tcam' ? 60 : 64;
+    this.setFov(fovFor(baseFov, cam.aspect) + Math.min(1, kmh / 330) * 4, dt, !this.initialized);
     this.initialized = true;
   }
 
@@ -897,7 +958,7 @@ export class Cameras {
   }
 
   private setFov(target: number, dt: number, snap: boolean) {
-    this.fov = snap ? target : this.fov + (target - this.fov) * Math.min(1, dt * 4);
+    this.fov = snap ? target : this.fov + (target - this.fov) * ease(dt, 4);
     if (Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();

@@ -37,6 +37,8 @@ import { HUD, fmtTime } from '../ui/HUD.ts';
 import { Menu, aiLevel, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
 import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
+import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
+import { aerialParams } from '../world/env/fog.ts';
 import { buildPitComplex, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
@@ -101,6 +103,9 @@ export class Game {
   private race!: Race;
   private cams!: Cameras;
   private particles = new Particles();
+  /** the field's headlights after dark (lamps, beams, and the light they throw) */
+  private headlights = new Headlights();
+  private readonly lampCars: HeadlightCar[] = [];
   private carFx!: CarEffects;
   /** tyre marks laid this race (cleared by makeRace) */
   private skids!: SkidMarks;
@@ -354,6 +359,7 @@ export class Game {
     });
     mark('cars');
     this.scene.add(this.particles.group);
+    this.scene.add(this.headlights.group);
     this.particles.setLight(smokeLight(new Weather(this.plan).state));
     this.buildGarageLights();
     this.menu.highlights = this.highlights;
@@ -366,7 +372,7 @@ export class Game {
       scene: this.scene,
       trackId: () => (this.worldBusy || !this.track ? null : this.track.def.id),
       world: () => (this.worldBusy || !this.env ? null : { track: this.track, env: this.env, trackside: this.trackside, pits: this.pits }),
-      liveObjects: () => [this.carsGroup, this.garage?.group, this.garageLights, this.particles.group, this.celebration?.group, this.line?.mesh, this.debris?.group],
+      liveObjects: () => [this.carsGroup, this.garage?.group, this.garageLights, this.particles.group, this.headlights.group, this.celebration?.group, this.line?.mesh, this.debris?.group],
       rigKey: (e) => this.rigTeam.get(e) ?? e.team.id,
       makeRig: (e) => {
         const painted = (this.rigTeam.get(e) ?? e.team.id) !== e.team.id;
@@ -1200,6 +1206,7 @@ export class Game {
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
     else if (this.state !== 'paused') crowdReactions.quiet(dt);
     this.updatePits(dt, race);
+    this.updateHeadlights(wx);
     this.trackside.update(dt, this.camera);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
@@ -2659,6 +2666,28 @@ export class Game {
     const spray = car.dirty * Math.min(1, car.speed / 40) * w.wetness;
     const lens = lensCam * Math.min(1, w.rain * (0.55 + 0.45 * Math.min(1, car.speed / 45)) + spray * 0.8);
     (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0);
+  }
+
+  /**
+   * After dark every car runs its headlights: on at night, and from twilight (with the floodlights).
+   * Not in the garage or on the podium (their own scenes and lights).
+   */
+  private updateHeadlights(w: WeatherState) {
+    const st = this.state;
+    const level = floodlit(w.time);
+    if (level <= 0 || st === 'menu' || st === 'boot' || st === 'celebration') {
+      this.headlights.suspend();
+      return;
+    }
+    const cars = this.lampCars;
+    cars.length = 0;
+    for (const c of this.race.cars) {
+      const rig = this.rigs.get(c.entry);
+      if (rig) cars.push(rig);
+    }
+    // (mist and rain catch the beams and swell the glare)
+    this.headlights.set(level, THREE.MathUtils.clamp(w.fog * 0.8 + w.rain * 0.6, 0, 1), aerialParams.x);
+    this.headlights.update(cars, this.camera);
   }
 
   // ------------------------------------------------------------------ audio
