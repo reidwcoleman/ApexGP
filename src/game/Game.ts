@@ -869,6 +869,7 @@ export class Game {
     this.gfx.renderer.compileAsync(cel.group, this.camera, this.scene).then(go, go);
   }
   private celebrationPending = false;
+  private introDof = false;
   private beginCelebration(cel: Celebration, top: Entry[]) {
     this.celebration = cel;
     this.scene.add(this.celebration.group);
@@ -1008,10 +1009,21 @@ export class Game {
       race.update(dt);
       this.syncAllViews(dt);
       if (st.pause) this.pause();
-      if (this.stateTime < 2.6) this.cams.orbit(dt, this.playerRigPos(), 6.5 - this.stateTime * 0.6, 1.2 + this.stateTime * 0.2, 0.5);
-      else {
+      // a broadcast-style build-up: a low, slow sweep round the car on the grid, rising and closing in,
+      // then into the driving camera for the lights
+      if (this.stateTime < 4.2) {
+        const t = this.stateTime;
+        this.cams.orbit(dt, this.playerRigPos(), 8.2 - t * 0.55, 0.55 + t * 0.2, 0.34);
+        // a real lens: the car sharp, the grid behind it soft
+        this.gfx.setDepthOfField(true, this.dofTarget.copy(this.playerRigPos()).setY(this.dofTarget.y + 0.5), 7, 1.15);
+        this.introDof = true;
+      } else {
+        if (this.introDof) {
+          this.introDof = false;
+          this.gfx.setDepthOfField(false);
+        }
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
-        if (this.stateTime > 3.4 && race.phase === 'grid') race.startLights();
+        if (this.stateTime > 5.0 && race.phase === 'grid') race.startLights();
       }
       if (race.phase === 'racing') {
         this.state = 'race';
@@ -2293,7 +2305,8 @@ export class Game {
     this.gfx.grade.set({ contrast: 1, exposure: 1, saturation: 1 });
     this.gfx.vignette.darkness = this.garageVignette;
     this.gfx.maxDynamic = L.maxDyn;
-    if (this.gfx.dynamicScale > L.maxDyn) this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
+    // (a session starts at full resolution whatever the menu stepped down to; the governor takes it from there)
+    this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
     for (const l of L.suns) {
       l.shadow.autoUpdate = true;
       l.shadow.needsUpdate = true;

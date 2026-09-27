@@ -679,6 +679,8 @@ export class Cameras {
       up.addScaledVector(leftV, this.headRoll).normalize();
     }
     if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
+    // the nose camera rides a little proud of the nose, so its tip and the wing's flaps frame the road
+    if (this.mode === 'nose') this.v3.addScaledVector(up, 0.09);
     // the driver's eyes sit high in the cockpit, looking over the wheel and the dash
     if (this.mode === 'cockpit') this.v3.addScaledVector(up, 0.03).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), 0.05);
     const shakeK = mount ? mount.shake : 0.4;
@@ -692,7 +694,7 @@ export class Cameras {
       lift = 0;
     } else {
       f.set(0, 0, 1).applyQuaternion(this.q);
-      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? 0.2 : -0.6;
+      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -0.45 : -0.6;
     }
     if (this.lookBack) f.negate();
     // look slightly into the corner in the cockpit

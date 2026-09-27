@@ -1,0 +1,20 @@
+// End-to-end flow smoke test: garage → race start → pause → menu → simulated race → travel. Reports page errors.
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const errs = [];
+page.on('pageerror', (e) => errs.push('[pageerror] ' + e.message));
+page.on('console', (m) => { if (m.type() === 'error') errs.push('[console] ' + m.text()); });
+await page.goto('http://localhost:5191/?track=monza');
+await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
+const step = async (name, fn, wait = 3000) => { await page.evaluate(fn); await page.waitForTimeout(wait); const st = await page.evaluate(() => ({ state: window.__game.state, fps: window.__fps, w: window.__game.race.weatherState.kind, t: window.__game.race.weatherState.time, dyn: window.__game.gfx.dynamicScale })); console.log(name.padEnd(22), JSON.stringify(st)); };
+await step('menu', () => {});
+await step('race', () => window.__game.startRace('race', { ...window.__game.menu.setup, grid: 1 }), 6000);
+await step('pause', () => window.__game.pause());
+await step('restart', () => window.__game.startRace('race', { ...window.__game.menu.setup, grid: 1 }), 4000);
+await step('menu again', () => window.__game.toMenu());
+await step('simulate (travel)', () => window.__game.startSimulation({ track: 'melbourne', laps: 3, weather: 'random', time: 'random', grid: 'quali', field: 'mixed', damage: 'full', speed: 1, follow: -1 }), 25000);
+await step('spectate +10s', () => {}, 10000);
+await step('menu 3', () => window.__game.toMenu());
+console.log(errs.length ? errs.slice(0, 20).join('\n') : 'no errors');
+await browser.close();

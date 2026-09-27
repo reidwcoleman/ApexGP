@@ -35,7 +35,8 @@ npm run check    # tsc --noEmit
   brake bias, suspension, ride height, pressures) with hotspots on the car, drag to look around it,
   and your best moments (overtakes, taking the lead, fastest laps, podiums) are recorded as you race
   and play on the video wall behind the car.
-- **Weather, different every race** — Random by default: clear, light cloud, overcast, drizzle,
+- **Weather, different every race** — Random by default, and every session (a restart too) rolls a
+  new sky and time of day, never the last race's: clear, light cloud, overcast, drizzle,
   rain, heavy rain, thunderstorm (forked lightning), sunny showers (with a rainbow), mist and fog,
   hazy heat (shimmer over the asphalt), windy, or changeable, at dawn, morning, midday, afternoon,
   golden hour, twilight or a floodlit night race. The track gets wet and dries again, a dry line appears once the
@@ -52,15 +53,15 @@ npm run check    # tsc --noEmit
   air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter,
   grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
   Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.1 s, 300→80 km/h in 80 m at
-  5.9 g, 1.8 g cornering at 100 km/h up to ~5 g at 300 km/h, stable at full lock at any speed.
+  5.9 g (54 m and 8 g with the default arcade brakes), 1.8 g cornering at 100 km/h up to ~5 g at 300 km/h, stable at full lock at any speed.
   An AI flying lap of Monza is ~78.5 s dry (real pole ≈ 79 s), ~84 s on inters in a drizzle,
   ~88 s on wets in the rain.
 - **Driving like the F1 games** — full steering input maps to the front tyres' peak-grip angle at
   the current speed; keyboard steering is yaw-rate assisted (release a key and the car straightens);
   countersteer opens up when the rear slides. Assists: traction control Off/Medium/Full, ABS,
-  stability, steering assist, braking assist, racing line Off/Corners/Full (the dynamic
-  green/yellow/red line), auto/manual gears, DRS assist — as presets (Casual / Standard / Expert)
-  or one by one.
+  stability, steering assist, braking assist (Medium by default: the car slows itself for the corners),
+  racing line Off/Corners/Full (the dynamic green/yellow/red line), auto/manual gears, DRS assist —
+  as presets (Casual / Standard / Expert) or one by one.
 - **Races that are never the same** — driver form day to day, simulated qualifying, varied tyre
   strategies with undercuts and overcuts, good and bad launches, driver mistakes, rare mechanical
   failures and a virtual safety car after big crashes.
@@ -68,7 +69,7 @@ npm run check    # tsc --noEmit
   crashes, the flag, the podium) are re-filmed offscreen from TV cameras and encoded as smooth 30 fps
   video with broadcast graphics, played on the garage video wall and in the Highlights tab.
 - **Watch and rewatch** — simulate a race (pick the circuit, laps, weather, time, grid and more,
-  or randomise everything) with an automatic TV director and 23 cameras
+  or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 23 cameras
   (onboards, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
   camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
@@ -119,7 +120,8 @@ src/
   game/    Game (states + loop), CarView, Cameras
   fx/      Particles (tyre smoke, dust, sparks)
   ui/      HUD, Menu, design tokens
-  core/    Renderer (post chain: N8AO, bloom, speed blur, grade, ACES, SMAA), Input, Audio
+  core/    Renderer (post chain: N8AO, bloom, speed blur + CA, grade, PBR Neutral, SMAA, sharpen;
+           adaptive resolution that never trusts Apple's GPU timer), Input, Audio
   people/  Humans (bodies, clothing shader, faces, props), Crowd (GPU-skinned instanced fans),
            drivers, poses
   career/  Career (progress, upgrades, set-up), Highlights (recorded race moments, IndexedDB)
@@ -136,6 +138,14 @@ Regression checks (all headless, no browser):
   (`SEED=6 node tools/racetest.mjs 8 changeable` brings rain mid-race).
 - `node tools/diag.mjs 2 rain wet` — one AI car: lap times, tyre temperatures, grip, wear, fuel.
 - `node tools/limits.mjs 3` — where AI cars run wide in a race.
+
+In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`):
+- `node tools/bench.mjs [track]` — GPU cost per post pass / scenery group / cars (steady throughput timing).
+- `node tools/perfnow.mjs [track] [cam]` — fps, render scale and draw calls in a live race at Retina 2×.
+- `node tools/cuts.mjs [secs] [track] [speed]` — how often the TV director cuts in a simulated race.
+- `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
+- `node tools/flow.mjs` — garage → race → pause → restart → simulated race (with travel): page errors.
+- `node tools/tour.mjs <track> [n]`, `tools/camsheet.mjs`, `tools/shot2x.mjs` — screenshots.
 
 ## Credits
 
