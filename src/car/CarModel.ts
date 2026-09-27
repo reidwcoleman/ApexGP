@@ -13,6 +13,7 @@
  *
  * Geometry is built once per detail level and shared by every car; materials are per team/driver.
  */
+import { bakeCarAO, withCarAO } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
 import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
@@ -102,7 +103,12 @@ export function preloadCarAssets(): Promise<void> {
 let GEO: CarGeoLevel[] | null = null;
 let geoRefs = 0;
 function acquireGeo(): CarGeoLevel[] {
-  if (!GEO) GEO = [buildCarGeometry(0), buildCarGeometry(1), buildCarGeometry(2)];
+  if (!GEO) {
+    GEO = [buildCarGeometry(0), buildCarGeometry(1), buildCarGeometry(2)];
+    // ambient occlusion baked into the shared geometry (needs the game's renderer: setCarAORenderer)
+    const ms = GEO.map((l) => bakeCarAO(l));
+    if (ms[0]) console.info(`[car] AO baked in ${ms.join(' / ')} ms`);
+  }
   geoRefs++;
   return GEO;
 }
@@ -467,7 +473,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const paint = paintBase.mat.clone();
   paint.name = `car-paint-${team.id}`;
   patchPaint(paint, paintBase.mask, carbonTextures().map, grime, paintBase.flake);
-  const carbon = makeCarbon(grime);
+  withCarAO(paint);
+  const carbon = withCarAO(makeCarbon(grime));
   let compound: Compound = 'soft';
   // one wheel material per corner (FL FR RL RR): each tyre shows its own wear; one shared program
   const tyres = [0, 1, 2, 3].map((i) => createTyreMaterial(compound, `car-wheel-${['FL', 'FR', 'RL', 'RR'][i]}`));
@@ -485,6 +492,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     emissiveMap: ts.emis,
   });
   patchTrim(trim, uniforms);
+  withCarAO(trim);
   const drvTex = driverTexture(team, driver);
   const driverMat = new THREE.MeshPhysicalMaterial({
     name: 'car-driver',
@@ -496,6 +504,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     clearcoatRoughness: 0.05,
   });
   patchDriver(driverMat);
+  withCarAO(driverMat);
   const blurMat = new THREE.MeshStandardMaterial({
     name: 'car-wheel-blur',
     map: wheelTextures('soft').blur,

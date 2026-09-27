@@ -52,6 +52,7 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
+import { setCarAORenderer } from '../car/carAO.ts';
 import { preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
@@ -321,6 +322,7 @@ export class Game {
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     await pixels;
     mark('pixels');
+    setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice
     const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
     await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {

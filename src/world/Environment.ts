@@ -236,7 +236,7 @@ export function createEnvironment(
     if (!l) {
       // (×1.6 haze on the presets: a softer, paler sky toward the horizon and a warmer sun — the
       // summer-afternoon air of a race broadcast rather than a crisp mountain blue)
-      l = computeSky({ sunElevation: P.elevation * DEG, mie: P.mie * 1.6, g: P.g, ms: P.ms * 1.15 });
+      l = computeSky({ sunElevation: P.elevation * DEG, mie: P.mie * (P.elevation < 12 ? 1.15 : 1.6), g: P.g, ms: P.ms * 1.15 });
       lutCache.set(t, l);
     }
     const T = l.sunT;

@@ -342,8 +342,9 @@ export function weatherLook(w: WeatherState): WeatherLook {
 
   // grey gradient visibility: 25 km clear → ~2.5 km drizzle → ~0.9 km downpour
   // fog 1: ~200 m to half-visibility, ~650 m to nothing
-  // (×1.75: a summer broadcast has 12–20 km visibility — the soft depth that sells the scale)
-  const fogDensity = P.fogDensity * 1.75 * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
+  // (×1.25, and never crisper than ~15 km: a summer broadcast's soft depth sells the scale;
+  // dawn and dusk already carry their own thick haze)
+  const fogDensity = Math.max(P.fogDensity * 1.25, 1.3e-4) * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 

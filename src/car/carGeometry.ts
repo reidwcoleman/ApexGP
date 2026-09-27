@@ -641,9 +641,18 @@ function halo(b: Buckets, level: Level) {
   const n = [44, 24, 12][level];
   const path = haloPath(n);
   const fr = framesAlong(path, () => [0, 1, 0]);
-  // section: flattened teardrop, wider than tall
+  // section: flattened teardrop, wider than tall — the titanium hoop is bare carbon-wrapped
+  // (what the driver sees from the cockpit), with a painted aero fairing over its top
   const st: SweepSt[] = path.map((p, i) => ({ o: p, d: fr[i].d, u: fr[i].u, sx: 0.022, sy: 0.03 }));
-  sweep(b.paint, st, ellipse([14, 10, 6][level]), () => paintCellUV(PC.halo), { cuv: CUV });
+  sweep(b.carbon, st, ellipse([14, 10, 6][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
+  const top: V2[] = [];
+  const nTop = [12, 8, 5][level];
+  for (let k = 0; k <= nTop; k++) {
+    // (the section's first axis, d, is up here)
+    const a = -Math.PI / 2 + 0.5 + (k / nTop) * (Math.PI - 1.0);
+    top.push([Math.cos(a) * 1.09 + 0.04, Math.sin(a) * 1.07]);
+  }
+  sweep(b.paint, st, top, () => paintCellUV(PC.halo), { cuv: CUV });
   // central pillar
   const pil = crPath([
     [0, 0.846, 0.505],
@@ -656,7 +665,7 @@ function halo(b: Buckets, level: Level) {
     const d = norm3(cross3([1, 0, 0], t));
     return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.016 };
   });
-  sweep(b.paint, pst, aeroSection([10, 8, 5][level]), () => paintCellUV(PC.halo), { cuv: CUV });
+  sweep(b.carbon, pst, aeroSection([10, 8, 5][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
 }
 
 function airboxAndFin(b: Buckets, level: Level) {

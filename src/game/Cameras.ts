@@ -633,14 +633,38 @@ export class Cameras {
     if (!this.initialized) this.chaseLook.copy(look);
     this.chaseLook.lerp(look, Math.min(1, dt * 20));
     this.camLook.copy(carPos).add(this.chaseLook);
+    // weight: the view dips under braking and lifts on the throttle, and leans a couple of degrees
+    // with the lateral G (a camera on a car-mounted arm, not a drone)
+    const pitchT = THREE.MathUtils.clamp(car.ax * 0.0032, -0.07, 0.05);
+    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0022, -0.04, 0.04);
+    if (!this.initialized) {
+      this.chasePitch = pitchT;
+      this.chaseRoll = rollT;
+    }
+    this.chasePitch += (pitchT - this.chasePitch) * Math.min(1, dt * 5);
+    this.chaseRoll += (rollT - this.chaseRoll) * Math.min(1, dt * 3.5);
+    this.camLook.y += this.chasePitch * 3.4;
+    // road feel instead of a buzz: a low rumble growing with speed (smooth, below the frame rate's
+    // aliasing), sharp kerb chatter and off-track bounce on top
+    const t = this.shakeT;
+    const sp = Math.min(1, kmh / 320);
+    const rumble = sp * sp * 0.0035;
+    const kerb = (car.onKerb ? 0.012 * Math.min(1, speed / 25) : 0) + (car.offTrack ? 0.02 * Math.min(1, speed / 20) : 0) + this.impulse * 0.08;
+    const jx = (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble + Math.sin(t * 23.7) * kerb * 0.6;
+    const jy = (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble + Math.sin(t * 29.3 + 2.1) * kerb;
     cam.position.copy(this.v4);
-    cam.position.x += sx;
-    cam.position.y += sy;
+    cam.position.x += jx;
+    cam.position.y += jy;
+    void sx;
+    void sy;
     cam.lookAt(this.camLook);
+    cam.rotateZ(this.chaseRoll);
     // (a little wider at speed for the rush, never a fisheye)
     this.setFov((far ? 52 : 55) + Math.min(1, kmh / 330) * 8, dt, !this.initialized);
     this.initialized = true;
   }
+  private chasePitch = 0;
+  private chaseRoll = 0;
 
   private onboardShot(dt: number, car: CarPhysics, rig: CarRig, sx: number, sy: number, kmh: number) {
     const cam = this.camera;
