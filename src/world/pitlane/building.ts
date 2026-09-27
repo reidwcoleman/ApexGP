@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TEAMS } from '../../race/Teams.ts';
-import { Frame, Geo, TrackSpace, beamWorld } from './geo.ts';
+import { Frame, Geo, TrackSpace, beamWorld, rng } from './geo.ts';
 import { GARAGE_W, L, type PitPlan } from './layout.ts';
 import type { PrintAtlas } from './textures.ts';
 
@@ -95,7 +95,8 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
 
   // ---------------------------------------------------------------- ground floor modules
   const nMod = Math.round((S1 - S0) / 6);
-  let sponsorIdx = 0;
+  // sponsors hold contracts: runs of consecutive boards, with the odd plain module between them
+  const fasciaPlan = contracts(nMod, 17);
   for (let m = 0; m < nMod; m++) {
     const a = S0 + m * 6, b = a + 6;
     const t = teamOf(a + 3);
@@ -178,7 +179,8 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
       ts.wallQuad(print, c + 5.2, c + 8.6, F - 0.21, H.fascia0 + 0.1, H.slab1 - 0.1, -1, atlas.sub('sp' + ((t + 5) % 10), 0, 0, 1, 1));
     } else {
       print.rgb(1, 1, 1).mat(0.5, 0, 0.5, 0.7);
-      ts.wallQuad(print, a + 0.6, a + 5.4, F - 0.21, H.fascia0 + 0.03, H.slab1 - 0.03, -1, atlas.uv('sp' + (sponsorIdx++ % 12)));
+      const sp = fasciaPlan[m];
+      if (sp >= 0) ts.wallQuad(print, a + 0.6, a + 5.4, F - 0.21, H.fascia0 + 0.03, H.slab1 - 0.03, -1, atlas.uv('sp' + sp));
     }
   }
 
@@ -247,10 +249,12 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   ts.box(solid, S0 - 3, S1 + 3, F - 6.45, F - 6.2, H.roof - 0.25, H.roofTop + 0.45, 63, 6);
   {
     const n = Math.floor((S1 - S0 + 6) / 6);
+    const canopyPlan = contracts(n, 91);
     for (let i = 0; i < n; i++) {
       const a = S0 - 3 + i * 6;
+      if (canopyPlan[i] < 0) continue;
       print.rgb(1, 1, 1).mat(0.45, 0, 0.7, 0.8);
-      ts.wallQuad(print, a + 0.35, a + 5.65, F - 6.46, H.roof - 0.2, H.roofTop + 0.4, -1, atlas.uv('sp' + ((i * 5) % 12)));
+      ts.wallQuad(print, a + 0.35, a + 5.65, F - 6.46, H.roof - 0.2, H.roofTop + 0.4, -1, atlas.uv('sp' + canopyPlan[i]));
     }
   }
   // back of the upper floors: glass bands facing the paddock
@@ -595,4 +599,24 @@ export function tyre(g: Geo, fr: Frame, cx: number, cy: number, cz: number, axis
       }
     }
   }
+}
+
+/**
+ * Sponsor slots along a band of `n` boards, as a real paddock sells them: each sponsor holds a run
+ * of 3–7 consecutive boards, and now and then a module or two is left plain (-1). Seeded, so a
+ * circuit always looks the same.
+ */
+function contracts(n: number, seed: number): number[] {
+  const r = rng(seed);
+  const out: number[] = [];
+  let last = -1;
+  while (out.length < n) {
+    let sp = Math.floor(r() * 12);
+    if (sp === last) sp = (sp + 5) % 12;
+    last = sp;
+    const run = 3 + Math.floor(r() * 5);
+    for (let k = 0; k < run && out.length < n; k++) out.push(sp);
+    if (r() < 0.3) for (let k = 1 + Math.floor(r() * 2); k > 0 && out.length < n; k--) out.push(-1);
+  }
+  return out;
 }

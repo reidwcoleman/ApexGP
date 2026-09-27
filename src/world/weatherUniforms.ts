@@ -27,6 +27,11 @@ export const weatherUniforms = {
   uWind: { value: new THREE.Vector2() },
   /** weather clock (s), for ripples / streaks */
   uWeatherTime: { value: 0 },
+  /**
+   * how much the backlit signs glow: printed boards and lightboxes are only visibly lit after dark
+   * (in daylight a lightbox is barely brighter than a painted sign). Set by the Environment.
+   */
+  uSignGlow: { value: 0.12 },
 };
 
 export function applyWeatherUniforms(w: WeatherState) {

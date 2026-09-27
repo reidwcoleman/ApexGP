@@ -7,6 +7,7 @@ import '@fontsource/jetbrains-mono/700.css';
 import { TEAMS, type Team } from '../../race/Teams.ts';
 import type { UVRect } from './geo.ts';
 import { rng } from './geo.ts';
+import { brandAt, drawBrand, printWear } from '../brands.ts';
 
 /**
  * Canvas-drawn textures for the pit complex (all fictional branding):
@@ -288,7 +289,7 @@ export class PrintAtlas extends Atlas {
     g.fillRect(c.x, c.y + c.h * 0.72, c.w, c.h * 0.28);
     g.fillStyle = '#e9ebee';
     g.textAlign = 'center';
-    const partners = [t.sponsor, SPONSORS[(k + 3) % 10], SPONSORS[(k + 6) % 10]];
+    const partners = [t.sponsor, brandAt(k + 3).name, brandAt(k + 9).name];
     partners.forEach((p, i) => {
       fitText(g, p, (px) => `700 ${px}px ${FONT}`, c.w / 3 - 20, 30);
       g.fillText(p, c.x + (c.w / 3) * (i + 0.5), c.y + c.h * 0.86);
@@ -335,6 +336,12 @@ export class PrintAtlas extends Atlas {
       ['#101216', '#ffffff'], ['#008c45', '#ffffff'],
     ];
     const [bg, fg] = palettes[k % palettes.length];
+    if (name !== 'MONZA' && name !== 'APEX GP') {
+      // a paddock brand, as printed on the building's fascia boards
+      drawBrand(g, c.x, c.y, c.w, c.h, brandAt(k * 3 + 1), k % 4 === 2);
+      printWear(g, c.x, c.y, c.w, c.h, 307 + k, 0.7);
+      return;
+    }
     g.save();
     g.fillStyle = bg;
     g.fillRect(c.x, c.y, c.w, c.h);

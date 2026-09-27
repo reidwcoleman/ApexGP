@@ -3,6 +3,7 @@ import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
 import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
+import { brandAt, drawBrand, printWear } from '../brands.ts';
 
 /**
  * Canvas-drawn boards: grandstand fascia sponsors, team name boards for the pit
@@ -68,7 +69,10 @@ function drawSponsors(canvas: HTMLCanvasElement) {
   SPONSORS.forEach((s, i) => {
     const col = i % BOARDS_PER_ROW;
     const row = Math.floor(i / BOARDS_PER_ROW);
-    drawBoard(ctx, col * w, row * BOARD_H, w, BOARD_H, s);
+    // (the series' own board keeps its livery; the rest are the paddock's brands, as long bands)
+    if (s.name === 'APEX GP') drawBoard(ctx, col * w, row * BOARD_H, w, BOARD_H, s);
+    else drawBrand(ctx, col * w, row * BOARD_H, w, BOARD_H, brandAt(i + 7), i % 4 === 1);
+    printWear(ctx, col * w, row * BOARD_H, w, BOARD_H, 211 + i, 0.8);
   });
 }
 

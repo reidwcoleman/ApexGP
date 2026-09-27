@@ -14,6 +14,7 @@ import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } 
 import { buildScenery, type Scenery, type SceneryLight } from './env/scenery.ts';
 import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
 import { disposeTree } from '../core/dispose.ts';
+import { weatherUniforms } from './weatherUniforms.ts';
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -506,6 +507,8 @@ export function createEnvironment(
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
     // (the masts themselves are gone after dark, not just switched off)
     floods.set(fl * floodScale(night), haze, aerialParams.x);
+    // backlit signs come on as the light goes
+    weatherUniforms.uSignGlow.value = 0.12 + 0.88 * THREE.MathUtils.smoothstep(night, 0.1, 0.9);
     const u = sky.uniforms;
     u.uNight.value = night;
     u.uStars.value = night * (1 - L.overcast) * (1 - 0.85 * L.mist) * (1 - L.coverage * 0.5);
