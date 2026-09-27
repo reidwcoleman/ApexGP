@@ -817,7 +817,7 @@ export class Menu {
       st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
     });
     // night mode in one press: floodlights, headlights on every car, the city glowing under the clouds
-    this.opt(p, 'Night race', () => (st.time === 'night' ? 'On <span class="dim">· floodlights &amp; headlights</span>' : 'Off'), () => {
+    this.opt(p, 'Night race', () => (st.time === 'night' ? 'On <span class="dim">· no floodlights, headlights only</span>' : 'Off'), () => {
       st.time = st.time === 'night' ? 'random' : 'night';
     });
     this.opt(p, 'Time of day', () => (st.time === 'random' ? `Random <span class="dim">· ${this.cb.forecast().time}</span>` : timeLabel(st.time)), (d) => {

@@ -56,12 +56,12 @@ const E_REF = 4.0;
 /** floodlight irradiance scale at full night (one row of lamps at the track centre) */
 const FLOOD_E = 1.9;
 /**
- * A night race is dark: a quarter of the masts (see env/night.ts) and dim pools between them, so
- * the circuit is mostly lit by the cars' own headlights. (Twilight keeps its full floodlights.)
+ * A night race has no floodlights at all: the moon, the city on the horizon and the cars' own
+ * headlights are the only light. (Twilight keeps its floodlights.)
  */
-const NIGHT_FLOOD = 0.08;
-/** at night the eye adapts only this far: it stays dark instead of being exposed back up to day */
-const NIGHT_MAX_ADAPT = 1.5;
+const NIGHT_FLOOD = 0;
+/** at night the eye adapts only this far: it stays dark (a faint moonlit world) instead of being exposed back up to day */
+const NIGHT_MAX_ADAPT = 1.8;
 const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
 
 const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
@@ -255,7 +255,7 @@ export function createEnvironment(
     // moonlight: the same sun, but read by the eye as cool silver-blue
     if ((P.night ?? 0) > 0.5) C.sunCol.multiply(tmpA.setRGB(0.72, 0.84, 1.0));
     sky.uniforms.uSunRadius.value = (P.night ?? 0) > 0.5 ? 0.017 : 0.0095;
-    if ((P.flood ?? 0) > 0) buildFloodField(track, renderer);
+    if ((P.flood ?? 0) * floodScale(P.night ?? 0) > 0) buildFloodField(track, renderer);
     const S = (e: number, phi: number) => l!.sample(e * DEG, phi * DEG).multiplyScalar(C.skyScale);
     C.zenith.copy(S(89, 90));
     C.horizonAway.copy(S(1.5, 180)).add(S(1.5, 120)).add(S(1.5, 90)).multiplyScalar(1 / 3);
@@ -504,7 +504,8 @@ export function createEnvironment(
     const F = FLOOD_E * fl * floodScale(night);
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
-    floods.set(fl, haze, aerialParams.x);
+    // (the masts themselves are gone after dark, not just switched off)
+    floods.set(fl * floodScale(night), haze, aerialParams.x);
     const u = sky.uniforms;
     u.uNight.value = night;
     u.uStars.value = night * (1 - L.overcast) * (1 - 0.85 * L.mist) * (1 - L.coverage * 0.5);
