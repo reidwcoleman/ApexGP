@@ -790,7 +790,8 @@ export class Particles {
     (u.uSunCol.value as THREE.Vector3).set(L.sunColor.r, L.sunColor.g, L.sunColor.b).multiplyScalar(1 / Math.PI);
     (u.uAmb.value as THREE.Vector3).set(L.ambient.r, L.ambient.g, L.ambient.b);
     const size = renderer.getDrawingBufferSize(this.tmpV2);
-    this.hotMat.uniforms.uPx.value = 2 / Math.max(1, size.y);
+    const fh = (renderer as unknown as { apexFrame?: { h: number } }).apexFrame?.h ?? size.y;
+    this.hotMat.uniforms.uPx.value = 2 / Math.max(1, fh);
     this.veil.setLighting(L);
   }
 

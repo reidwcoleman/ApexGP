@@ -121,6 +121,10 @@ export const TC = {
   halo: 36,
   /** 2026 lateral safety lights (self-lit) */
   sideLight: 37,
+  /** steering wheel: face panel, anodised rotaries, white buttons */
+  wheelFace: 38,
+  dial: 39,
+  btnWhite: 40,
 } as const;
 /** roughness, metalness, emissive masks (r: brake heat, g: rain light, b: self-lit/display) */
 export const TRIM_PROPS: Record<number, [number, number, number, number, number]> = {
@@ -162,6 +166,9 @@ export const TRIM_PROPS: Record<number, [number, number, number, number, number]
   [TC.ink]: [0.25, 0.0, 0, 0, 0],
   [TC.halo]: [0.3, 0.0, 0, 0, 0],
   [TC.sideLight]: [0.2, 0.0, 0, 0, 1],
+  [TC.wheelFace]: [0.3, 0.25, 0, 0, 0],
+  [TC.dial]: [0.3, 1.0, 0, 0, 0],
+  [TC.btnWhite]: [0.3, 0.0, 0, 0, 0.3],
 };
 export function trimUV(i: number): V2 {
   const cols = TRIM_W / TRIM_CELL;

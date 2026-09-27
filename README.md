@@ -82,7 +82,12 @@ npm run check    # tsc --noEmit
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
   nose and more; a live steering-wheel screen and shift lights in the onboards, a rear-view mirror,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
-  lock, mirror).
+  lock, mirror). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
+  in the middle, front tyres at the sides, a full 2026 wheel with dome buttons, rotaries and paddles
+  at the bottom); eye-level cams get a tight fine-texel shadow cascade, and on High/Ultra the frame is
+  upscaled to native resolution (bicubic + contrast-adaptive sharpening). The front and rear
+  suspension links are live: they run from the chassis pickups to the upright clevises and follow
+  the steering and the body's motion.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
   resume), tyre marks that build up through the race, pit stops where the crew really change the
   wheels, track-limit warnings and

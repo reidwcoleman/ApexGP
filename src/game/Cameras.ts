@@ -120,6 +120,10 @@ const ease = (dt: number, k: number) => 1 - Math.exp(-k * dt);
  * the sides (Hor+, like the F1 games on ultrawides); narrower ones keep the 16:9 horizontal view
  * rather than losing the sides of the track.
  */
+/** cockpit eye offset from the cockpit anchor (m, in the car's frame) */
+const COCKPIT_EYE_UP = 0.006;
+const COCKPIT_EYE_FWD = 0.068;
+
 function fovFor(v169: number, aspect: number): number {
   const A = 16 / 9;
   if (!(aspect > 0) || aspect >= A) return v169;
@@ -799,7 +803,7 @@ export class Cameras {
     const leftV = this.leftV.set(1, 0, 0).applyQuaternion(this.q);
     if (this.mode === 'cockpit') {
       // the head moves and tilts against the G-forces, and buzzes with the engine
-      const hx = THREE.MathUtils.clamp(-car.ay * 0.0035, -0.06, 0.06);
+      const hx = THREE.MathUtils.clamp(-car.ay * 0.0028, -0.035, 0.035);
       const hy = THREE.MathUtils.clamp(car.ax * 0.0018, -0.03, 0.03);
       const hr = THREE.MathUtils.clamp(-car.ay * 0.0028, -0.07, 0.07);
       this.headX += (hx - this.headX) * ease(dt, 8);
@@ -821,10 +825,14 @@ export class Cameras {
       up.lerp(this.v5.set(0, 1, 0), this.prefs.horizon * 0.45).normalize();
     }
     if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
-    // the nose camera rides a little proud of the nose, so its tip and the wing's flaps frame the road
-    if (this.mode === 'nose') this.v3.addScaledVector(up, 0.09);
+    // the nose camera sits on the nose's crest half a metre back from the tip, so the tip, the
+    // pitot and the front wing's flaps sit in the bottom of the picture with the road beyond
+    if (this.mode === 'nose') this.v3.addScaledVector(up, 0.215).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), -0.5);
     // the driver's eyes sit high in the cockpit, looking over the wheel and the dash
-    if (this.mode === 'cockpit') this.v3.addScaledVector(up, 0.03).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), 0.05);
+    // the driver's eyes: low in the tub and forward against the headrest's front, so the halo's
+    // hoop frames the top of the picture, the centre pillar splits it, the front tyres sit at the
+    // sides and the wheel's screen and shift lights fill the bottom — the real onboard proportions
+    if (this.mode === 'cockpit') this.v3.addScaledVector(up, COCKPIT_EYE_UP).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
     const shakeK = (mount ? mount.shake : 0.4) * this.prefs.shake;
     cam.position.copy(this.v3);
     cam.position.addScaledVector(up, sy * shakeK).addScaledVector(leftV, sx * shakeK);
@@ -836,7 +844,7 @@ export class Cameras {
       lift = 0;
     } else {
       f.set(0, 0, 1).applyQuaternion(this.q);
-      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -0.45 : this.mode === 'helmet' ? -0.75 : -0.6;
+      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -1.5 : this.mode === 'helmet' ? -0.75 : -1.0;
     }
     if (this.lookBack) f.negate();
     // look into the corner in the cockpit: eased, so a keyboard's full-lock taps don't jerk the view
@@ -853,7 +861,7 @@ export class Cameras {
     this.applyRotShake(car, Math.max(0, car.vx), kmh, (mount ? mount.shake : this.mode === 'helmet' ? 1.25 : 0.6) * 0.6 * this.prefs.shake);
     // (a touch narrower than before: the halo, the wheel and the T-cam's airbox read at their real
     // size instead of shrinking into a fisheye)
-    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 66 : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
+    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 59 : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
     this.setFov(fovFor(baseFov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? Math.min(1, kmh / 330) * 4 : 0), dt, !this.initialized);
     this.initialized = true;
   }

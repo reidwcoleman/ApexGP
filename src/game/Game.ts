@@ -87,6 +87,8 @@ type CompoundRig = CarRig & { setCompound?: (c: string) => void };
 
 /** the onboard cameras that show the rear-view mirror */
 const MIRROR_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true };
+/** cameras that sit right on the bodywork: they get the tight, fine-texel shadow cascade */
+const EYE_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true, wheel: true };
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -1218,7 +1220,8 @@ export class Game {
     this.gfx.indoor = indoor;
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
-    this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos());
+    const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.mode];
+    this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos(), eyeCam ? 16 : undefined);
     // the crowds and the trackside people follow the race
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
     else if (this.state !== 'paused') crowdReactions.quiet(dt);
@@ -2723,11 +2726,12 @@ export class Game {
   private speedFx() {
     const car = this.race.player.car;
     const kmh = Math.max(0, car.vx * 3.6);
-    const onboard = !!ONBOARD[this.cams.mode] || this.cams.mode === 'chase' || this.cams.mode === 'far';
-    const k = onboard ? Math.max(0, Math.min(1, (kmh - 170) / 170)) : 0;
-    // (a hint of it at the edges: a heavy radial smear just reads as a blurry picture)
-    this.gfx.setSpeedBlur(k * k * 0.0085 + (car.ersDeploying ? 0.0015 : 0));
-    this.gfx.setAberration(k * 0.0007);
+    // the chase cameras get a hint of radial speed blur at the edges; the onboards stay crisp (the
+    // cockpit, the halo and the wheel are right in front of the lens — any smear reads as soft focus)
+    const chaseCam = this.cams.mode === 'chase' || this.cams.mode === 'far';
+    const k = chaseCam ? Math.max(0, Math.min(1, (kmh - 190) / 150)) : 0;
+    this.gfx.setSpeedBlur(k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0));
+    this.gfx.setAberration(k * 0.0004);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
     const cam = this.cams.mode;
@@ -2904,8 +2908,15 @@ export class Game {
         gfx.setDynamicScale(next);
         aq.settleUntil = now + 0.8;
       }
-      // still slow at the lowest resolution for 2 s on Ultra: step down to High (auto quality only)
-      if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && st.quality === 'ultra') {
+      // still slow at the lowest resolution for 2 s: first give up the native-resolution output
+      // (the browser stretches the frame again), then on Ultra step down to High (auto quality only)
+      if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && gfx.nativeUpscale) {
+        if (++aq.slowAtFloor >= 4) {
+          aq.slowAtFloor = 0;
+          gfx.nativeUpscale = false;
+          aq.settleUntil = now + 1.5;
+        }
+      } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && st.quality === 'ultra') {
         if (++aq.slowAtFloor >= 4) {
           aq.slowAtFloor = 0;
           this.setAutoQuality('high');

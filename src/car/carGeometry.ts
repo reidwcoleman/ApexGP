@@ -723,7 +723,14 @@ function halo(b: Buckets, level: Level) {
   // section: flattened teardrop, wider than tall — the titanium hoop is bare carbon-wrapped
   // (what the driver sees from the cockpit), with a painted aero fairing over its top
   const st: SweepSt[] = path.map((p, i) => ({ o: p, d: fr[i].d, u: fr[i].u, sx: 0.022, sy: 0.03 }));
-  sweep(b.carbon, st, ellipse([14, 10, 6][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
+  // weave laid along the hoop (a planar projection smears it into long blocks across the front bar,
+  // right where the cockpit camera looks)
+  const arc: number[] = [0];
+  for (let i = 1; i < path.length; i++) arc.push(arc[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1], path[i][2] - path[i - 1][2]));
+  const ring = ellipse([14, 10, 6][level]);
+  // (a finer weave than the bodywork's: the hoop is the car's closest surface to any camera)
+  const HT = CARBON_TILE * 0.4;
+  sweep(b.carbon, st, ring, (i, j) => [arc[i] / HT, (ring[j][0] * 0.022 + ring[j][1] * 0.03) / HT]);
   const top: V2[] = [];
   const nTop = [12, 8, 5][level];
   for (let k = 0; k <= nTop; k++) {
@@ -937,32 +944,52 @@ function driver(b: Buckets, level: Level) {
 export const STEER_PIVOT: V3 = [0, 0.605, 0.5];
 export const STEER_TILT = -0.42; // rotation about X (top toward the driver)
 function steeringWheel(mb: MB) {
-  // local: wheel plane XY, driver looks along +Z toward it (face at −Z)
-  const outline = roundPoly(
-    [
-      [-0.13, -0.055],
-      [-0.14, 0.03],
-      [-0.1, 0.075],
-      [0.1, 0.075],
-      [0.14, 0.03],
-      [0.13, -0.055],
-      [0.06, -0.075],
-      [-0.06, -0.075],
-    ],
-    0.025,
-    3,
-  );
-  plate(mb, outline, [0, 0, 0], [1, 0, 0], [0, 1, 0], 0.035, () => trimUV(TC.wheelBody));
+  // local: wheel plane XY, driver looks along +Z toward it (face at −Z). A 2026 wheel: a carbon
+  // body wide at the grips with a flat top, a bevelled face panel carrying the screen, the shift
+  // lights, dome buttons in bezels and anodised rotaries; paddles behind, a quick-release hub.
+  const OUT: V2[] = [
+    [-0.118, -0.062],
+    [-0.142, -0.01],
+    [-0.138, 0.05],
+    [-0.1, 0.078],
+    [0.1, 0.078],
+    [0.138, 0.05],
+    [0.142, -0.01],
+    [0.118, -0.062],
+    [0.055, -0.08],
+    [-0.055, -0.08],
+  ];
+  const outline = roundPoly(OUT, [0.02, 0.02, 0.03, 0.02, 0.02, 0.03, 0.02, 0.02, 0.015, 0.015], 4);
+  plate(mb, outline, [0, 0, 0.002], [1, 0, 0], [0, 1, 0], 0.03, () => trimUV(TC.wheelBody));
+  // the face panel, proud of the body by a few mm: its step catches the light round the edge
+  const FACE: V2[] = [
+    [-0.094, -0.058],
+    [-0.106, 0.0],
+    [-0.1, 0.064],
+    [0.1, 0.064],
+    [0.106, 0.0],
+    [0.094, -0.058],
+    [0.045, -0.07],
+    [-0.045, -0.07],
+  ];
+  plate(mb, roundPoly(FACE, 0.014, 3), [0, 0, -0.0145], [1, 0, 0], [0, 1, 0], 0.006, () => trimUV(TC.wheelFace));
+  const FZ = -0.0175; // face surface
+  // grips: bent, fatter at the bottom, a team-colour band where the thumbs rest
   for (const side of [1, -1]) {
-    const g = new THREE.CapsuleGeometry(0.024, 0.08, 4, 10);
-    g.rotateZ(side * 0.12);
-    g.translate(0.13 * side, -0.005, 0.005);
-    mb.addGeometry(g, undefined, trimUV(TC.grip));
-    g.dispose();
+    const path = crPath([
+      [0.126 * side, 0.064, 0.006],
+      [0.141 * side, 0.032, 0.008],
+      [0.145 * side, -0.01, 0.01],
+      [0.134 * side, -0.052, 0.01],
+    ], 10);
+    const n = path.length - 1;
+    tube(mb, path, (i) => 0.019 + 0.005 * Math.sin((Math.PI * i) / n), 16, trimUV(TC.grip), [0, 0, 1]);
+    // paddles behind the grips (their tips show past the body's top corners)
+    const pad = roundPoly([[0, -0.03], [0.05, -0.02], [0.06, 0.03], [0.02, 0.05], [0, 0.04]], 0.008, 2).map(([x, y]) => [x * side + 0.075 * side, y] as V2);
+    plate(mb, pad, [0, 0.02, 0.028], [1, 0, 0], [0, 1, 0], 0.004, () => trimUV(TC.blackGloss));
   }
-  // display (faces −Z) + LED strip + buttons
-  const quad = (cx: number, cy: number, w: number, h: number, uvf: (a: number, b: number) => V2) => {
-    const z = -0.0185;
+  // display (faces −Z) + LED strip
+  const quad = (cx: number, cy: number, w: number, h: number, z: number, uvf: (a: number, b: number) => V2) => {
     const p: V3[] = [
       [cx - w / 2, cy - h / 2, z],
       [cx + w / 2, cy - h / 2, z],
@@ -977,26 +1004,48 @@ function steeringWheel(mb: MB) {
     mb.tri(i0, i2, i1);
     mb.tri(i0, i3, i2);
   };
-  quad(0, 0.012, 0.09, 0.05, (a, bb) => trimRectUV(R_DISPLAY, a, bb));
-  quad(0, 0.058, 0.13, 0.012, (a, bb) => trimRectUV(R_LEDS, a, bb));
-  const btn = [TC.btnRed, TC.btnYellow, TC.btnBlue, TC.btnGreen];
-  let k = 0;
-  for (const [x, y] of [
-    [-0.075, 0.035],
-    [0.075, 0.035],
-    [-0.08, -0.02],
-    [0.08, -0.02],
-    [-0.05, -0.05],
-    [0.05, -0.05],
-  ]) {
-    const g = new THREE.CylinderGeometry(0.009, 0.009, 0.008, 8);
+  // screen in a gloss bezel
+  plate(mb, roundPoly([[-0.052, -0.017], [0.052, -0.017], [0.052, 0.043], [-0.052, 0.043]], 0.006, 2), [0, 0, FZ - 0.0015], [1, 0, 0], [0, 1, 0], 0.003, () => trimUV(TC.blackGloss));
+  quad(0, 0.013, 0.094, 0.052, FZ - 0.0032, (a, bb) => trimRectUV(R_DISPLAY, a, bb));
+  plate(mb, roundPoly([[-0.07, 0.049], [0.07, 0.049], [0.07, 0.061], [-0.07, 0.061]], 0.004, 2), [0, 0, FZ - 0.001], [1, 0, 0], [0, 1, 0], 0.002, () => trimUV(TC.blackGloss));
+  quad(0, 0.055, 0.132, 0.009, FZ - 0.0022, (a, bb) => trimRectUV(R_LEDS, a, bb));
+  // dome buttons in black bezels
+  const btn = [TC.btnRed, TC.btnYellow, TC.btnBlue, TC.btnGreen, TC.btnWhite, TC.btnWhite];
+  const BTN: [number, number][] = [
+    [-0.078, 0.036],
+    [0.078, 0.036],
+    [-0.085, 0.008],
+    [0.085, 0.008],
+    [-0.066, -0.03],
+    [0.066, -0.03],
+  ];
+  BTN.forEach(([x, y], k) => {
+    const g = new THREE.CylinderGeometry(0.0095, 0.0105, 0.004, 16);
     g.rotateX(Math.PI / 2);
-    g.translate(x, y, -0.02);
-    mb.addGeometry(g, undefined, trimUV(btn[k++ % 4]));
+    g.translate(x, y, FZ - 0.002);
+    mb.addGeometry(g, undefined, trimUV(TC.blackGloss));
     g.dispose();
+    ellipsoid(mb, [x, y, FZ - 0.004], [0.0072, 0.0072, 0.0032], 14, 7, trimUV(btn[k]));
+  });
+  // anodised rotaries: knurled drums with a pointer
+  const ROT: [number, number, number][] = [
+    [-0.036, -0.036, 0.4],
+    [0.036, -0.036, -0.6],
+    [-0.05, -0.058, 1.2],
+    [0.05, -0.058, -0.2],
+  ];
+  for (const [x, y, ang] of ROT) {
+    const g = new THREE.CylinderGeometry(0.0105, 0.0105, 0.009, 18);
+    g.rotateX(Math.PI / 2);
+    g.translate(x, y, FZ - 0.0045);
+    mb.addGeometry(g, undefined, trimUV(TC.dial));
+    g.dispose();
+    box(mb, [x + Math.sin(ang) * 0.005, y + Math.cos(ang) * 0.005, FZ - 0.0092], [0.0018, 0.0075, 0.0008], trimUV(TC.btnWhite), new THREE.Euler(0, 0, -ang));
   }
+  // centre toggles under the screen
+  for (const x of [-0.016, 0, 0.016]) box(mb, [x, -0.03, FZ - 0.004], [0.008, 0.013, 0.006], trimUV(TC.darkMetal));
   // quick-release hub
-  const g = new THREE.CylinderGeometry(0.022, 0.026, 0.04, 10);
+  const g = new THREE.CylinderGeometry(0.022, 0.026, 0.04, 16);
   g.rotateX(Math.PI / 2);
   g.translate(0, 0, 0.035);
   mb.addGeometry(g, undefined, trimUV(TC.blackSatin));
@@ -1118,32 +1167,66 @@ function decals(mb: MB) {
   }
 }
 
-// ------------------------------------------------------------------------------------ suspension (unsprung, root space)
+// ------------------------------------------------------------------------------------ suspension
+/**
+ * The suspension links (left side; the right mirrors x). Each runs from a chassis pickup (body
+ * space: it moves with the sprung body) to an upright pickup (wheel-centre local, +x outboard: it
+ * moves with the corner, and at the front turns with the steering). Near cars draw them as live
+ * instanced links (CarModel keeps both ends attached every frame); the far level merges them at rest.
+ */
+export interface SuspLeg {
+  front: boolean;
+  inner: V3;
+  outer: V3;
+  chord: number;
+  thick: number;
+}
+export const SUSP_LEGS: SuspLeg[] = [
+  // front: upper wishbone (wide A), lower wishbone, pushrod up to the rocker in the chassis top,
+  // track rod in line with the upper wishbone's front leg
+  { front: true, inner: [0.165, 0.515, 1.93], outer: [-0.085, 0.185, 0.016], chord: 0.05, thick: 0.014 },
+  { front: true, inner: [0.215, 0.545, 1.4], outer: [-0.085, 0.185, -0.016], chord: 0.05, thick: 0.014 },
+  { front: true, inner: [0.13, 0.215, 1.97], outer: [-0.07, -0.17, 0.016], chord: 0.055, thick: 0.016 },
+  { front: true, inner: [0.2, 0.19, 1.33], outer: [-0.07, -0.17, -0.016], chord: 0.055, thick: 0.016 },
+  { front: true, inner: [0.13, 0.555, 1.62], outer: [-0.09, -0.14, -0.03], chord: 0.04, thick: 0.022 },
+  { front: true, inner: [0.16, 0.5, 1.83], outer: [-0.1, 0.16, 0.1], chord: 0.04, thick: 0.013 },
+  // rear: upper and lower wishbones, pullrod down to the gearbox, toe link
+  { front: false, inner: [0.16, 0.505, -1.42], outer: [-0.1, 0.178, 0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.14, 0.49, -1.98], outer: [-0.1, 0.178, -0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.2, 0.17, -1.38], outer: [-0.07, -0.18, 0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.13, 0.19, -1.98], outer: [-0.07, -0.18, -0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.15, 0.17, -1.56], outer: [-0.12, 0.155, 0.04], chord: 0.04, thick: 0.02 },
+  { front: false, inner: [0.14, 0.3, -1.9], outer: [-0.09, 0.0, -0.13], chord: 0.04, thick: 0.014 },
+];
+/** a leg's upright pickup at rest, body/root space */
+export function legOuterAtRest(l: SuspLeg, side: number): V3 {
+  const wx = (l.front ? TRACK_F : TRACK_R) / 2;
+  const wz = l.front ? Z_FRONT_AXLE : Z_REAR_AXLE;
+  return [(wx + l.outer[0]) * side, WHEEL_R + l.outer[1], wz + l.outer[2]];
+}
+/**
+ * One link of unit length along +Z (0 … 1), aero section: chord 1 along X, thickness 1 along Y
+ * (the rig scales each instance to its leg's chord, thickness and length).
+ */
+function armUnit(mb: MB, level: Level) {
+  const n = [10, 6][level] ?? 6;
+  const sec = aeroSection(n);
+  const st: SweepSt[] = [0, 0.5, 1].map((z) => ({ o: [0, 0, z] as V3, d: [1, 0, 0] as V3, u: [0, 1, 0] as V3, sx: 0.5, sy: 0.5 }));
+  sweep(mb, st, sec, (_i, _j, p) => [p[2] * 12, p[0] * 0.8]);
+}
 function suspension(carbon: MB, trim: MB, level: Level) {
-  const n = [8, 6, 4][level];
-  const legs: [V3, V3, number, number][] = [
-    // front
-    [[0.19, 0.555, 1.93], [0.7, 0.535, 1.73], 0.055, 0.016],
-    [[0.215, 0.548, 1.3], [0.7, 0.535, 1.69], 0.055, 0.016],
-    [[0.16, 0.24, 1.98], [0.73, 0.19, 1.72], 0.055, 0.016],
-    [[0.22, 0.225, 1.26], [0.73, 0.19, 1.68], 0.055, 0.016],
-    [[0.7, 0.215, 1.655], [0.14, 0.56, 1.6], 0.04, 0.02],
-    [[0.18, 0.49, 1.86], [0.71, 0.47, 1.84], 0.04, 0.014],
-    // rear
-    [[0.16, 0.505, -1.42], [0.65, 0.53, -1.7], 0.055, 0.016],
-    [[0.14, 0.49, -1.98], [0.65, 0.53, -1.74], 0.055, 0.016],
-    [[0.2, 0.17, -1.38], [0.68, 0.17, -1.69], 0.055, 0.016],
-    [[0.13, 0.19, -1.98], [0.68, 0.17, -1.73], 0.055, 0.016],
-    [[0.63, 0.51, -1.66], [0.15, 0.17, -1.56], 0.04, 0.02],
-    [[0.14, 0.3, -1.99], [0.66, 0.31, -1.92], 0.04, 0.014],
-  ];
+  const n = 4;
   for (const side of [1, -1]) {
-    for (const [a, b, c, t] of legs) {
-      if (level === 2 && (c < 0.05)) continue;
-      arm(carbon, [a[0] * side, a[1], a[2]], [b[0] * side, b[1], b[2]], c, t, n, metricUV);
+    // (near levels draw the links live: CarModel)
+    if (level === 2) {
+      for (const l of SUSP_LEGS) {
+        if (l.chord < 0.05) continue;
+        const a: V3 = [l.inner[0] * side, l.inner[1], l.inner[2]];
+        arm(carbon, a, legOuterAtRest(l, side), l.chord, l.thick, n, metricUV);
+      }
     }
     // rear driveshaft
-    if (level < 2) tube(trim, [[0.12 * side, 0.34, Z_REAR_AXLE], [0.62 * side, 0.36, Z_REAR_AXLE]], 0.024, 8, trimUV(TC.darkMetal), [0, 1, 0]);
+    if (level < 2) tube(trim, [[0.12 * side, 0.34, Z_REAR_AXLE], [0.62 * side, 0.34, Z_REAR_AXLE]], 0.024, 8, trimUV(TC.darkMetal), [0, 1, 0]);
   }
 }
 
@@ -1323,9 +1406,28 @@ function cornerAssembly(mb: MB, w: number, front: boolean, level: Level) {
     mb.cap(cal[0], [0, Math.sin(t0), -Math.cos(t0)] as V3, trimUV(TC.caliper));
     mb.cap(cal[cal.length - 1], [0, -Math.sin(t1), Math.cos(t1)] as V3, trimUV(TC.caliper));
   }
-  // upright
-  box(mb, [-0.075, 0.0, 0], [0.06, 0.34, 0.1], trimUV(TC.darkMetal));
+  // upright: reaching up and down to the wishbone pickups
+  box(mb, [-0.075, 0.0, 0], [0.05, 0.4, 0.085], trimUV(TC.darkMetal));
   box(mb, [-0.045, 0.0, 0], [0.05, 0.1, 0.1], trimUV(TC.darkMetal));
+  // the links' clevis mounts, standing proud of the brake duct's inboard face so every link
+  // visibly ends on the upright (the rig keeps the links' ends on these points)
+  if (level < 2) {
+    const ex = -h - 0.004;
+    const legs = SUSP_LEGS.filter((l) => l.front === front);
+    const seen = new Set<string>();
+    for (const l of legs) {
+      const key = `${l.outer[1].toFixed(2)}:${Math.round(l.outer[2] / 0.05)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const pair = legs.filter((q) => Math.abs(q.outer[1] - l.outer[1]) < 0.005 && Math.abs(q.outer[2] - l.outer[2]) < 0.05);
+      const zc = pair.reduce((a, q) => a + q.outer[2], 0) / pair.length;
+      box(mb, [(ex + l.outer[0]) / 2, l.outer[1], zc], [Math.abs(ex - l.outer[0]) + 0.03, 0.032, pair.length > 1 ? 0.07 : 0.036], trimUV(TC.darkMetal));
+    }
+    if (front) {
+      // steering arm: from the upright out to the track rod's pickup
+      box(mb, [-0.09, 0.14, 0.05], [0.028, 0.03, 0.11], trimUV(TC.darkMetal));
+    }
+  }
   // brake duct drum (inboard) + inlet scoop
   if (level < 2) {
     const drum: V3[][] = [];
@@ -1375,6 +1477,8 @@ export interface CarGeoLevel {
   /** breakable parts, body space */
   parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
+  /** one unit suspension link (near levels: the rig instances it per leg) */
+  armUnit: THREE.BufferGeometry | null;
   /** the front wing's active flaps, left and right, pivot-local (FW_FLAP_PIVOT) */
   fwFlaps: [THREE.BufferGeometry, THREE.BufferGeometry];
   steer: THREE.BufferGeometry | null;
@@ -1506,6 +1610,11 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     ) as CarGeoLevel['parts'],
     flap: flap.build(),
     fwFlaps: [fwFlapL.build(), fwFlapR.build()],
+    armUnit: level < 2 ? (() => {
+      const am = new MB();
+      armUnit(am, level);
+      return am.build();
+    })() : null,
     steer: steer ? steer.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
     frontAssy: frontAssy ? frontAssy.build() : null,

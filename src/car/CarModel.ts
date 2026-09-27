@@ -16,7 +16,7 @@
 import { bakeCarAO, withCarAO } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, SUSP_LEGS, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
 export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, paintDash, type Compound, type DashState } from './carTextures.ts';
@@ -122,7 +122,7 @@ function releaseGeo() {
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
     const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.unsprung.carbon, l.unsprung.trim,
-      l.unsprung.blurRear, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
+      l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
   }
@@ -148,7 +148,7 @@ function shadowGeometry(level: 1 | 2, parts: THREE.Object3D[], root: THREE.Objec
   for (const p of parts)
     p.traverse((o) => {
       const me = o as THREE.Mesh;
-      if (!me.isMesh || !me.castShadow) return;
+      if (!me.isMesh || !me.castShadow || (o as THREE.InstancedMesh).isInstancedMesh) return;
       const g = me.geometry;
       const pa = g.getAttribute('position');
       if (!pa) return;
@@ -703,6 +703,55 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const FR = mkCorner(true, -1, tyres[1].mat);
   const RL = mkCorner(false, 1, tyres[2].mat);
   const RR = mkCorner(false, -1, tyres[3].mat);
+  // ---- live suspension links (near levels): each leg joins its chassis pickup (moves with the
+  // sprung body) to its upright pickup (moves with the corner and, at the front, the steering)
+  const linkMeshes: (THREE.InstancedMesh | null)[] = [0, 1].map((lv) => {
+    const g = geo[lv].armUnit;
+    if (!g) return null;
+    const im = new THREE.InstancedMesh(g, carbon, SUSP_LEGS.length * 2);
+    im.name = 'links';
+    im.castShadow = true;
+    im.receiveShadow = true;
+    im.frustumCulled = false;
+    unsprungL[lv].add(im);
+    return im;
+  });
+  const lkA = new THREE.Vector3(), lkB = new THREE.Vector3(), lkX = new THREE.Vector3(), lkY = new THREE.Vector3(), lkZ = new THREE.Vector3();
+  const lkM = new THREE.Matrix4(), lkC = new THREE.Matrix4();
+  const FWD = new THREE.Vector3(0, 0, 1);
+  const updateLinks = (lv: number) => {
+    const im = linkMeshes[lv];
+    if (!im) return;
+    body.updateMatrix();
+    for (const c of corners) {
+      c.group.updateMatrix();
+      c.steer.updateMatrix();
+    }
+    let i = 0;
+    for (const side of [1, -1]) {
+      for (const l of SUSP_LEGS) {
+        lkA.set(l.inner[0] * side, l.inner[1], l.inner[2]).applyMatrix4(body.matrix);
+        const c = l.front ? (side > 0 ? FL : FR) : side > 0 ? RL : RR;
+        lkC.copy(c.group.matrix);
+        if (l.front) lkC.multiply(c.steer.matrix);
+        lkB.set(l.outer[0] * side, l.outer[1], l.outer[2]).applyMatrix4(lkC);
+        lkZ.subVectors(lkB, lkA);
+        const len = lkZ.length();
+        lkZ.multiplyScalar(1 / Math.max(len, 1e-5));
+        // chord with the airflow: the car's forward axis, square to the link
+        lkX.copy(FWD).addScaledVector(lkZ, -FWD.dot(lkZ));
+        if (lkX.lengthSq() < 1e-4) lkX.set(0, 1, 0).addScaledVector(lkZ, -lkZ.y);
+        lkX.normalize();
+        lkY.crossVectors(lkZ, lkX);
+        lkM.makeBasis(lkX.multiplyScalar(l.chord), lkY.multiplyScalar(l.thick), lkZ.multiplyScalar(len));
+        lkM.setPosition(lkA);
+        im.setMatrixAt(i++, lkM);
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
+  };
+  updateLinks(0);
+  updateLinks(1);
   // the near cars' shadow silhouette, from the middle level of detail (built at rest, shared)
   const shadowL1 = shadowGeometry(1, [bodyL[1], unsprungL[1], ...corners.flatMap((c) => [c.lv[1].tyre, c.lv[1].spokes, c.lv[1].assy].filter((m): m is THREE.Mesh => !!m))], root);
 
@@ -811,7 +860,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     setSteer(rad) {
       FL.steer.rotation.y = rad;
       FR.steer.rotation.y = rad;
-      if (steerSpin) steerSpin.rotation.z = -rad * 6;
+      // (a quick rack, saturating short of the grips crossing the middle of the onboard picture)
+      if (steerSpin) steerSpin.rotation.z = -1.35 * Math.tanh((rad * 5.5) / 1.35);
     },
     setWheelSpin(f, r) {
       FL.spin.rotation.x = f;
@@ -894,6 +944,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       headT.yaw = THREE.MathUtils.clamp(steer * 1.3, -0.35, 0.35);
     },
     update(dt) {
+      if (detail < 2) updateLinks(detail);
       const k = Math.min(1, dt * 7);
       head.roll += (headT.roll - head.roll) * k;
       head.pitch += (headT.pitch - head.pitch) * k;

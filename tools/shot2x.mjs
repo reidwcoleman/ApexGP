@@ -3,11 +3,11 @@
 import { chromium } from 'playwright-core';
 const [q, out, wait = '6000'] = process.argv.slice(2);
 const evalI = process.argv.indexOf('--eval');
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: !process.env.NEWHL, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', ...(process.env.NEWHL ? ['--headless=new'] : [])] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('[console]', m.text()); });
-await page.goto(`http://localhost:5191/${q}`);
+await page.goto(`http://localhost:${process.env.PORT ?? 5191}/${q}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
 if (evalI > 0) await page.evaluate(process.argv[evalI + 1]);
 await page.waitForTimeout(Number(wait));

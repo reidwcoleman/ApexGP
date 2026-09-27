@@ -579,6 +579,9 @@ export function trimTexture(teamIn: Team, driverIn: Driver, seat: 0 | 1): THREE.
       [TC.ink]: team.ink,
       [TC.halo]: team.primary,
       [TC.sideLight]: '#39d8ff',
+      [TC.wheelFace]: '#26282c',
+      [TC.dial]: '#7c828c',
+      [TC.btnWhite]: '#e9ecef',
     };
     for (const k of Object.keys(col)) {
       const i = Number(k);

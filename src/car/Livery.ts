@@ -770,10 +770,29 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
   const tx: Tx = { z: 0, x: 0, y: 0, s: 0, kt: 0, nx: 0, ny: 0, pod: 0 };
   const G = hullGeo();
   const R = H / 2;
+  // the cockpit opening's edge, anti-aliased: coverage from the distance to its two thresholds
+  // (cockpit weight along z, feature parameter across) in texels — a hard per-texel choice reads
+  // as a staircase of teeth when the onboard cameras look at the rim from half a metre
+  const cwCol = new Float32Array(W);
+  for (let px = 0; px < W; px++) cwCol[px] = G.zc[px] ? cockpitWeight(G.zc[px]) : 0;
+  const seatCov = (k: number, px: number, i: number) => {
+    const cw = cwCol[px];
+    const dcw = Math.abs(cwCol[Math.min(W - 1, px + 1)] - cwCol[Math.max(0, px - 1)]) * 0.5;
+    const cz = dcw > 1e-6 ? clamp((cw - 0.5) / dcw + 0.5) : cw > 0.5 ? 1 : 0;
+    if (cz <= 0) return 0;
+    const kt = G.kt[i];
+    const up = k + 1 < R && G.kind[i + W] !== 0 ? G.kt[i + W] : kt;
+    const dn = k > 0 && G.kind[i - W] !== 0 ? G.kt[i - W] : kt;
+    const dkt = Math.abs(up - dn) * (k + 1 < R && k > 0 ? 0.5 : 1);
+    const ck = dkt > 1e-6 ? clamp((2.02 - kt) / dkt + 0.5) : kt < 2.02 ? 1 : 0;
+    return cz * ck;
+  };
   for (let k = 0; k < R; k++) {
     for (let px = 0; px < W; px++) {
       const i = k * W + px;
-      const kind = G.kind[i];
+      let kind = G.kind[i];
+      const seat = kind === 1 || kind === 3 ? seatCov(k, px, i) : 0;
+      if (kind === 1 && seat < 1) kind = 3;
       for (const side of [1, -1]) {
         const row = side > 0 ? HULL_ROW0 - 1 - k : HULL_ROW0 + k;
         const o = (row * W + px) * 4;
@@ -809,6 +828,10 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
           if (mk === 1) col = shade(col, 0.55);
           else if ((mk === 2 || mk === 3) && carbon < 0.5) col = shade(col, mk === 3 ? 0.5 : 0.72);
           if (mk === 4) col = louvreCol;
+          if (seat > 0) {
+            col = [col[0] + (seatCol[0] - col[0]) * seat, col[1] + (seatCol[1] - col[1]) * seat, col[2] + (seatCol[2] - col[2]) * seat];
+            carbon *= 1 - seat;
+          }
         }
         d[o] = col[0];
         d[o + 1] = col[1];

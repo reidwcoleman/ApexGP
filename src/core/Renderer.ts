@@ -110,16 +110,53 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
  */
 const SHARPEN_FRAG = /* glsl */ `
 uniform float sharpness;
+// the last pass draws at the display's native resolution from the lower-resolution frame: a
+// Catmull-Rom bicubic upscale (9 bilinear taps), clamped to the local 2×2 neighbourhood so it
+// can't ring, then contrast-adaptive sharpening measured on the source texels
+vec3 cubic(vec2 uv, out vec3 mn, out vec3 mx) {
+  vec2 size = 1.0 / texelSize;
+  vec2 sp = uv * size;
+  vec2 t1 = floor(sp - 0.5) + 0.5;
+  vec2 f = sp - t1;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 o12 = w2 / w12;
+  vec2 t0 = (t1 - 1.0) * texelSize;
+  vec2 t3 = (t1 + 2.0) * texelSize;
+  vec2 t12 = (t1 + o12) * texelSize;
+  vec3 r = vec3(0.0);
+  r += texture2D(inputBuffer, vec2(t0.x, t0.y)).rgb * w0.x * w0.y;
+  r += texture2D(inputBuffer, vec2(t12.x, t0.y)).rgb * w12.x * w0.y;
+  r += texture2D(inputBuffer, vec2(t3.x, t0.y)).rgb * w3.x * w0.y;
+  r += texture2D(inputBuffer, vec2(t0.x, t12.y)).rgb * w0.x * w12.y;
+  r += texture2D(inputBuffer, vec2(t12.x, t12.y)).rgb * w12.x * w12.y;
+  r += texture2D(inputBuffer, vec2(t3.x, t12.y)).rgb * w3.x * w12.y;
+  r += texture2D(inputBuffer, vec2(t0.x, t3.y)).rgb * w0.x * w3.y;
+  r += texture2D(inputBuffer, vec2(t12.x, t3.y)).rgb * w12.x * w3.y;
+  r += texture2D(inputBuffer, vec2(t3.x, t3.y)).rgb * w3.x * w3.y;
+  vec2 b = t1 * texelSize;
+  vec3 a00 = texture2D(inputBuffer, b).rgb;
+  vec3 a10 = texture2D(inputBuffer, b + vec2(texelSize.x, 0.0)).rgb;
+  vec3 a01 = texture2D(inputBuffer, b + vec2(0.0, texelSize.y)).rgb;
+  vec3 a11 = texture2D(inputBuffer, b + texelSize).rgb;
+  mn = min(min(a00, a10), min(a01, a11));
+  mx = max(max(a00, a10), max(a01, a11));
+  return clamp(r, mn, mx);
+}
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec3 c = inputColor.rgb;
+  vec3 mn, mx;
+  vec3 c = cubic(uv, mn, mx);
   vec3 a = texture2D(inputBuffer, uv + vec2(0.0, -texelSize.y)).rgb;
   vec3 b = texture2D(inputBuffer, uv + vec2(-texelSize.x, 0.0)).rgb;
   vec3 d = texture2D(inputBuffer, uv + vec2(texelSize.x, 0.0)).rgb;
   vec3 e = texture2D(inputBuffer, uv + vec2(0.0, texelSize.y)).rgb;
-  vec3 mn = min(c, min(min(a, b), min(d, e)));
-  vec3 mx = max(c, max(max(a, b), max(d, e)));
-  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
-  vec3 w = -amp * mix(0.08, 0.2, sharpness);
+  vec3 lo = min(c, min(min(a, b), min(d, e)));
+  vec3 hi = max(c, max(max(a, b), max(d, e)));
+  vec3 amp = sqrt(clamp(min(lo, 1.0 - hi) / max(hi, 1e-4), 0.0, 1.0));
+  vec3 w = -amp * mix(0.08, 0.22, sharpness);
   vec3 o = (c + (a + b + d + e) * w) / (1.0 + 4.0 * w);
   outputColor = vec4(clamp(o, 0.0, 1.0), inputColor.a);
 }
@@ -775,7 +812,7 @@ export class Renderer {
     // a soft lens fall-off that pulls the eye to the centre (strong enough to feel, never a filter)
     this.vignette = new VignetteEffect({ darkness: 0.38, offset: 0.3 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
-    this.grain.blendMode.opacity.value = 0.035;
+    this.grain.blendMode.opacity.value = 0.02;
     // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
     // copy less; bloom's luminance pre-pass and the shaft mask scrub what they read themselves)
     const lum = this.bloom.luminanceMaterial as unknown as THREE.ShaderMaterial;
@@ -939,6 +976,7 @@ export class Renderer {
     const sharpenOn = q === 'ultra' || q === 'high';
     this.sharpenPass.enabled = sharpenOn;
     this.sharpenPass.renderToScreen = sharpenOn;
+    this.upscaleOn = sharpenOn;
     this.smaaPass.renderToScreen = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
@@ -964,7 +1002,7 @@ export class Renderer {
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
     // sharpen harder when the image is being upscaled
-    this.sharpen.sharpness = THREE.MathUtils.clamp(0.45 + (1 - v) * 0.4, 0.45, 0.62);
+    this.sharpen.sharpness = THREE.MathUtils.clamp(0.5 + (1 - v) * 0.4, 0.5, 0.7);
     this.resize();
   }
 
@@ -1033,13 +1071,45 @@ export class Renderer {
     }
   }
 
+  /**
+   * The frame renders at renderScale × dynamicScale pixels per CSS pixel; on High and Ultra the
+   * canvas itself is the display's native resolution and the final pass (bicubic + CAS) does the
+   * upscale — far crisper on a Retina screen than the browser stretching a small canvas.
+   */
+  private upscaleOn = false;
+  /** the final pass upscales to the display's native resolution (High/Ultra); the frame-rate governor may turn it off */
+  get nativeUpscale() {
+    return this.upscaleOn;
+  }
+  set nativeUpscale(on: boolean) {
+    if (on === this.upscaleOn) return;
+    this.upscaleOn = on;
+    this.resize();
+  }
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    this.renderer.setPixelRatio(this.renderScale * this.dynamicScale);
+    const internal = this.renderScale * this.dynamicScale;
+    const native = Math.min(window.devicePixelRatio || 1, 2);
+    const out = this.upscaleOn ? Math.max(internal, native) : internal;
+    this.renderer.setPixelRatio(out);
     this.composer.setSize(w, h);
+    const iw = Math.max(1, Math.round(w * internal));
+    const ih = Math.max(1, Math.round(h * internal));
+    // (for code that sizes its own buffers off "the frame": the internal size, not the canvas)
+    (this.renderer as unknown as { apexFrame: { w: number; h: number } }).apexFrame = { w: iw, h: ih };
+    if (out > internal + 1e-3) {
+      this.composer.inputBuffer.setSize(iw, ih);
+      this.composer.outputBuffer.setSize(iw, ih);
+      for (const p of this.composer.passes) p.setSize(iw, ih);
+    }
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+  /** the internal frame size in pixels (what the scene renders at, before the upscale) */
+  get frameSize(): { w: number; h: number } {
+    const k = this.renderScale * this.dynamicScale;
+    return { w: Math.round(window.innerWidth * k), h: Math.round(window.innerHeight * k) };
   }
 
   /** lens flare scale (weather sets it: the sun's radiance × how clear it is; 0 = off) */

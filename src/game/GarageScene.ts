@@ -1373,6 +1373,8 @@ export class GarageScene {
       const c = camera as THREE.PerspectiveCamera;
       // half the drawing buffer
       renderer.getDrawingBufferSize(size);
+      const fr = (renderer as unknown as { apexFrame?: { w: number; h: number } }).apexFrame;
+      if (fr) size.set(fr.w, fr.h);
       const w = Math.max(64, Math.round(size.x / 2)), h = Math.max(64, Math.round(size.y / 2));
       if (M.rt.width !== w || M.rt.height !== h) M.rt.setSize(w, h);
       mirrorPos.setFromMatrixPosition(m.matrixWorld);

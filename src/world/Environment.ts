@@ -34,8 +34,12 @@ export interface Environment {
   group: THREE.Group;
   /** the sun (three's cascaded SunLight; position = direction toward the sun) */
   sun: SunLight;
-  /** centre of the sharp shadow cascade (the player car) — call every frame */
-  focusShadow(target: THREE.Vector3): void;
+  /**
+   * centre of the sharp shadow cascade (the player car) — call every frame. `tight`: the eye-level
+   * onboard cameras look at the car's own bodywork from half a metre, where the usual 80 m cascade's
+   * 4 cm texels are a staircase of teeth; they pass a small square (m) of fine texels instead.
+   */
+  focusShadow(target: THREE.Vector3, tight?: number): void;
   /** called every frame with the live weather; cheap when little changed */
   setWeather(w: WeatherState): void;
   update(dt: number, camera: THREE.Camera): void;
@@ -620,9 +624,10 @@ export function createEnvironment(
   }
 
   // ------------------------------------------------------------ public
-  function focusShadow(target: THREE.Vector3) {
+  function focusShadow(target: THREE.Vector3, tight?: number) {
     focus.copy(target);
-    if (haveCam) focus.addScaledVector(camFwd, 14);
+    rig.shadow.nearSize = tight ?? 80;
+    if (haveCam) focus.addScaledVector(camFwd, tight ? tight * 0.2 : 14);
     rig.shadow.focus.copy(focus);
     rain.setFocus(target);
   }
