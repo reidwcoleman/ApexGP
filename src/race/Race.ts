@@ -1111,8 +1111,10 @@ export class Race {
         }
       },
       onTyres: () => {
-        // the old set is off: a brand-new set goes on (100 % life, out of the blankets)
+        // the old set is off: a brand-new set goes on (100 % life, out of the blankets), and with
+        // the wheels off the crew straightens any suspension bent in contact
         fitTyres(c.car, c.pit.next);
+        c.car.repairSuspension();
         c.compound = c.pit.next;
         if (!c.compoundsUsed.includes(c.pit.next)) c.compoundsUsed.push(c.pit.next);
       },

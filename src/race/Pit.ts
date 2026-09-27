@@ -56,6 +56,8 @@ export function fitTyres(car: CarPhysics, c: Compound) {
   car.compoundWear = k.wear;
   car.tyreType = k.type;
   car.tyreOpt = k.tOpt;
+  car.tyreSet++;
+  car.lockup = 0;
   for (let i = 0; i < 4; i++) {
     car.wear[i] = 0;
     car.tyreTemp[i] = k.type === 0 ? 80 : 60;

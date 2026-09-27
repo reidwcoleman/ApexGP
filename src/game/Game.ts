@@ -38,6 +38,7 @@ import { Menu, aiLevel, GRID, type RaceSetup, type Settings } from '../ui/Menu.t
 import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
+import { BRAND_FONTS } from '../world/brands.ts';
 import { aerialParams } from '../world/env/fog.ts';
 import { buildPitComplex, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
@@ -329,10 +330,12 @@ export class Game {
     const t0 = performance.now();
     const mark = (k: string) => (this.bootSteps[k] = Math.round(performance.now() - t0));
     progress(0.02, 'Loading fonts');
+    // the people (~13 MB over the network) start downloading first: everything below overlaps them
+    const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     // liveries + the fan atlas painted on an earlier visit (read + decoded while the rest loads)
     const pixels = preloadPixels();
     try {
-      await Promise.all([document.fonts.load('700 20px "Titillium Web"'), document.fonts.load('900 20px "Titillium Web"'), document.fonts.load('600 20px "Titillium Web"')]);
+      await Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f)));
     } catch {
       /* fallback fonts are fine */
     }
@@ -340,8 +343,6 @@ export class Game {
     this.applySettings(this.menu.settings);
     this.rollWeather(this.menu.setup);
 
-    // the people (a network load) come in while the circuit is being surveyed
-    const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     await pixels;
     mark('pixels');
     setCarAORenderer(this.gfx.renderer);

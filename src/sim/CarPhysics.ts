@@ -282,6 +282,8 @@ export class CarPhysics {
   }
   /** tyre wear per wheel 0..1 and the compound's grip / wear multipliers */
   readonly wear = [0, 0, 0, 0];
+  /** counts the sets fitted (a pit stop bumps it): the visuals start the new set clean */
+  tyreSet = 0;
   compoundGrip = 1;
   compoundWear = 1;
   /** 0 slick, 1 intermediate, 2 full wet */
@@ -1059,6 +1061,14 @@ export class CarPhysics {
   /** a new nose and front wing (pit stop) */
   repairFrontWing() {
     this.dmg[DMG.FWL] = this.dmg[DMG.FWR] = this.dmg[DMG.NOSE] = 0;
+  }
+
+  /**
+   * The wheels are off (pit stop): bent suspension from contact is straightened with them — no
+   * more pull to one side, no grip loss, and the wheels sit square on the car again.
+   */
+  repairSuspension() {
+    this.susp.fill(0);
   }
 
   /** back to a new car (new session) */

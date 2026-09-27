@@ -37,6 +37,8 @@ export class CarView {
   /** bodywork grime: road film, rubber flecks, off-track dirt */
   private readonly grime = [0, 0, 0];
   private tyreT = 0;
+  /** the car's tyre-set counter last seen: a new set (pit stop) starts every tyre look clean */
+  private tyreSet = -1;
 
   constructor(rig: CarRig) {
     this.rig = rig;
@@ -108,6 +110,12 @@ export class CarView {
         this.grime.fill(0);
       }
       this.live = car;
+      this.tyreSet = car.tyreSet;
+    }
+    // a new set was fitted (a pit stop): flat spots, blisters, graining, dust and dirt go with the old one
+    if (car.tyreSet !== this.tyreSet) {
+      for (let i = 0; i < 4; i++) this.freshTyre(i);
+      this.tyreSet = car.tyreSet;
     }
     if (!(dt > 0)) {
       this.push();

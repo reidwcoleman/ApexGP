@@ -14,6 +14,7 @@ import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } 
 import { buildScenery, type Scenery, type SceneryLight } from './env/scenery.ts';
 import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
 import { disposeTree } from '../core/dispose.ts';
+import { weatherUniforms } from './weatherUniforms.ts';
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -60,12 +61,12 @@ const E_REF = 4.0;
 /** floodlight irradiance scale at full night (one row of lamps at the track centre) */
 const FLOOD_E = 1.9;
 /**
- * A night race is dark: a quarter of the masts (see env/night.ts) and dim pools between them, so
- * the circuit is mostly lit by the cars' own headlights. (Twilight keeps its full floodlights.)
+ * A night race has no floodlights at all: the moon, the city on the horizon and the cars' own
+ * headlights are the only light. (Twilight keeps its floodlights.)
  */
-const NIGHT_FLOOD = 0.12;
-/** at night the eye adapts only this far: it stays dark instead of being exposed back up to day */
-const NIGHT_MAX_ADAPT = 1.5;
+const NIGHT_FLOOD = 0;
+/** at night the eye adapts only this far: it stays dark (a faint moonlit world) instead of being exposed back up to day */
+const NIGHT_MAX_ADAPT = 1.8;
 const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
 
 const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
@@ -259,7 +260,7 @@ export function createEnvironment(
     // moonlight: the same sun, but read by the eye as cool silver-blue
     if ((P.night ?? 0) > 0.5) C.sunCol.multiply(tmpA.setRGB(0.72, 0.84, 1.0));
     sky.uniforms.uSunRadius.value = (P.night ?? 0) > 0.5 ? 0.017 : 0.0095;
-    if ((P.flood ?? 0) > 0) buildFloodField(track, renderer);
+    if ((P.flood ?? 0) * floodScale(P.night ?? 0) > 0) buildFloodField(track, renderer);
     const S = (e: number, phi: number) => l!.sample(e * DEG, phi * DEG).multiplyScalar(C.skyScale);
     C.zenith.copy(S(89, 90));
     C.horizonAway.copy(S(1.5, 180)).add(S(1.5, 120)).add(S(1.5, 90)).multiplyScalar(1 / 3);
@@ -508,7 +509,10 @@ export function createEnvironment(
     const F = FLOOD_E * fl * floodScale(night);
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
-    floods.set(fl, haze, aerialParams.x);
+    // (the masts themselves are gone after dark, not just switched off)
+    floods.set(fl * floodScale(night), haze, aerialParams.x);
+    // backlit signs come on as the light goes
+    weatherUniforms.uSignGlow.value = 0.12 + 0.88 * THREE.MathUtils.smoothstep(night, 0.1, 0.9);
     const u = sky.uniforms;
     u.uNight.value = night;
     u.uStars.value = night * (1 - L.overcast) * (1 - 0.85 * L.mist) * (1 - L.coverage * 0.5);
@@ -694,9 +698,9 @@ export function createEnvironment(
     // the channel stays lit through the restrikes, fading with them
     sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
     // the whole scene lights up cold white for an instant (the flash fills the sky the env map is made of)
-    scene.environmentIntensity = look.envIntensity * (1 + L * 1.7) * (1 - 0.72 * indoor);
-    hemi.intensity = (look.hemi + L * 0.7 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
-    gfx.setFlash(L * 0.2);
+    scene.environmentIntensity = look.envIntensity * (1 + L * 2.6) * (1 - 0.72 * indoor);
+    hemi.intensity = (look.hemi + L * 1.1 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
+    gfx.setFlash(L * 0.3);
   }
 
   function update(dt: number, camera: THREE.Camera) {
@@ -754,6 +758,9 @@ export function createEnvironment(
   // prime the clouds and the env map so the first frame is complete
   clouds.update(0, camPos.set(track.px[0] ?? 0, 2, track.pz[0] ?? 0));
   sky.uniforms.uPano.value = clouds.texture;
+  // a sky-only env map first, so the world capture already renders (and compiles) every material
+  // with the env map it will race with — capturing with no env map compiled each program twice
+  bakeNow();
   try {
     captureWorld();
   } catch (e) {

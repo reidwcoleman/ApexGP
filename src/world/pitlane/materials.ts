@@ -73,6 +73,7 @@ uniform float uWetness;
 uniform float uRain;
 uniform float uWeatherTime;
 uniform float uLightning;
+uniform float uSignGlow;
 `;
 
 function bindUniforms(sh: THREE.WebGLProgramParametersWithUniforms) {
@@ -81,6 +82,7 @@ function bindUniforms(sh: THREE.WebGLProgramParametersWithUniforms) {
     uRain: W.uRain,
     uWeatherTime: W.uWeatherTime,
     uLightning: W.uLightning,
+    uSignGlow: W.uSignGlow,
   });
 }
 
@@ -120,7 +122,8 @@ export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-  totalEmissiveRadiance += pcBase * vPbr.z;
+  // (outdoor signs and lightboxes glow only after dark; light fittings and screens always)
+  totalEmissiveRadiance += pcBase * vPbr.z * ( vPbr.w > 0.02 && vPbr.z < 0.9 ? uSignGlow : 1.0 );
   // indoor fill from the ceiling lights (brighter on surfaces facing up)
   totalEmissiveRadiance += pcBase * (1.0 - step(0.02, vPbr.w)) * (0.16 + 0.2 * max(vWN.y, 0.0));`,
       )
