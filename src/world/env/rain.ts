@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HL_MAX, headlightUniforms } from './headlights.ts';
 
 /**
  * GPU rain around the camera.
@@ -26,9 +27,13 @@ uniform float uWidth;
 uniform float uPixel;
 uniform float uZoom;
 uniform vec3 uSunDirR;
+uniform vec4 hlPos[ ${HL_MAX} ];
+uniform vec4 hlDir[ ${HL_MAX} ];
+uniform vec4 hlInfo;
 varying float vAlpha;
 varying vec2 vQuad;
 varying float vGlint;
+varying float vLamp;
 
 void main() {
   float fall = uFall * ( 0.8 + 0.4 * aSeed.w );
@@ -54,6 +59,21 @@ void main() {
   // drops between the lens and a low sun light up (forward scattering): a shower glitters
   float mu = max( dot( rel / max( dist, 1e-3 ), uSunDirR ), 0.0 );
   vGlint = mu * mu * mu * mu * mu * mu;
+  // drops falling through a car's headlight beam light up (night races in the rain)
+  vLamp = 0.0;
+  for ( int k = 0; k < ${HL_MAX}; k ++ ) {
+    if ( float( k ) >= hlInfo.x ) break;
+    vec3 fw = hlDir[ k ].xyz;
+    vec3 ld = p - hlPos[ k ].xyz;
+    float al = dot( ld, fw );
+    if ( al < 0.5 || al > 60.0 ) continue;
+    vec3 lf = normalize( vec3( fw.z, 0.0, -fw.x ) + vec3( 1e-5 ) );
+    vec3 lu = cross( fw, lf );
+    float ex = dot( ld, lf ) / al * hlInfo.y;
+    float ey = dot( ld, lu ) / al * hlInfo.z * 0.6;
+    float e = ex * ex + ey * ey;
+    if ( e < 1.0 ) vLamp += hlPos[ k ].w * ( 1.0 - e ) / ( dot( ld, ld ) + 4.0 );
+  }
   // longer streaks spread the same water over more pixels
   vAlpha *= clamp( 0.9 / ( len * 2.0 + 0.2 ), 0.12, 1.0 );
   gl_Position = projectionMatrix * viewMatrix * vec4( wp, 1.0 );
@@ -64,15 +84,19 @@ const FRAG = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uGlint;
 uniform float uOpacity;
+uniform vec3 hlColor;
 varying float vAlpha;
 varying vec2 vQuad;
 varying float vGlint;
+varying float vLamp;
 void main() {
   float across = 1.0 - vQuad.x * vQuad.x;
   float along = smoothstep( 0.0, 0.25, vQuad.y ) * smoothstep( 1.0, 0.6, vQuad.y );
   float a = vAlpha * across * along * uOpacity;
   if ( a < 0.002 ) discard;
-  gl_FragColor = vec4( ( uColor + uGlint * vGlint ) * a, a );
+  // premultiplied: the streak's light is added, and a drop also blocks a little of what is behind
+  // it — so rain still reads against a bright sky, as grey streaks, instead of vanishing
+  gl_FragColor = vec4( ( uColor + uGlint * vGlint + hlColor * vLamp * 0.18 ) * a, a * 0.45 );
 }
 `;
 
@@ -173,6 +197,11 @@ function makeLayer(max: number, size: number, width: number, fall: number, opaci
     uGlint: { value: new THREE.Color(0, 0, 0) },
     uColor: { value: new THREE.Color(0.5, 0.5, 0.55) },
     uOpacity: { value: opacity },
+    // the cars' headlights (shared by reference, see env/headlights.ts)
+    hlPos: { value: headlightUniforms.pos },
+    hlDir: { value: headlightUniforms.dir },
+    hlInfo: { value: headlightUniforms.info },
+    hlColor: { value: headlightUniforms.color },
   };
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -183,7 +212,7 @@ function makeLayer(max: number, size: number, width: number, fall: number, opaci
     depthTest: true,
     blending: THREE.CustomBlending,
     blendSrc: THREE.OneFactor,
-    blendDst: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
     blendEquation: THREE.AddEquation,
     fog: false,
   });
