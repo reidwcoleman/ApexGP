@@ -59,7 +59,7 @@ const FLOOD_E = 1.9;
  * A night race is dark: a quarter of the masts (see env/night.ts) and dim pools between them, so
  * the circuit is mostly lit by the cars' own headlights. (Twilight keeps its full floodlights.)
  */
-const NIGHT_FLOOD = 0.12;
+const NIGHT_FLOOD = 0.08;
 /** at night the eye adapts only this far: it stays dark instead of being exposed back up to day */
 const NIGHT_MAX_ADAPT = 1.5;
 const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
@@ -689,9 +689,9 @@ export function createEnvironment(
     // the channel stays lit through the restrikes, fading with them
     sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
     // the whole scene lights up cold white for an instant (the flash fills the sky the env map is made of)
-    scene.environmentIntensity = look.envIntensity * (1 + L * 1.7) * (1 - 0.72 * indoor);
-    hemi.intensity = (look.hemi + L * 0.7 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
-    gfx.setFlash(L * 0.2);
+    scene.environmentIntensity = look.envIntensity * (1 + L * 2.6) * (1 - 0.72 * indoor);
+    hemi.intensity = (look.hemi + L * 1.1 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
+    gfx.setFlash(L * 0.3);
   }
 
   function update(dt: number, camera: THREE.Camera) {

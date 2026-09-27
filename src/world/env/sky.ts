@@ -126,11 +126,6 @@ float hash12( vec2 p ) {
   p3 += dot( p3, p3.yzx + 33.33 );
   return fract( ( p3.x + p3.y ) * p3.z );
 }
-float vnoise( float x ) {
-  float i = floor( x );
-  float f = x - i;
-  return mix( hash11( i + uBoltSeed ), hash11( i + 1.0 + uBoltSeed ), f * f * ( 3.0 - 2.0 * f ) ) * 2.0 - 1.0;
-}
 
 float hash13( vec3 p3 ) {
   p3 = fract( p3 * 0.1031 );
@@ -185,27 +180,58 @@ vec3 rainbow( vec3 d, out float dark ) {
   return c;
 }
 
-// lightning bolt: a jagged vertical filament at the flash azimuth, from the deck to the ground
-float bolt( vec3 d ) {
+// jagged noise for the bolt: straight segments between random kinks (a real channel is a chain of
+// short straight steps, not a smooth wave), a few octaves of them
+float jag( float x, float s ) {
+  float i = floor( x );
+  return mix( hash11( i + s ), hash11( i + 1.0 + s ), x - i ) * 2.0 - 1.0;
+}
+float jag3( float y, float s ) {
+  return jag( y * 6.0, s ) * 0.55 + jag( y * 17.0, s + 13.0 ) * 0.28 + jag( y * 47.0, s + 29.0 ) * 0.14;
+}
+// one filament: a crisp white core a pixel or two wide whatever the resolution, a tight violet glow,
+// and a wide soft one around the channel's general line (wb: distance to a smoothed path, so the
+// haze doesn't pick up the kinks as streaks)
+vec3 filament( float w, float wb, float px, float k ) {
+  float core = 1.0 - smoothstep( px * 0.6, px * 1.8 + 0.0004 * k, w );
+  float glow = exp( -w / ( 0.004 + px ) ) * 0.28 + exp( -wb * wb / 6e-4 ) * 0.07;
+  return vec3( 1.0, 0.98, 1.0 ) * core * 1.6 + vec3( 0.62, 0.7, 1.25 ) * glow;
+}
+// lightning bolt: a jagged channel at the flash azimuth from the cloud base to the ground, with a
+// branching tree of forks off it, and the bright spot where it leaves the cloud
+vec3 bolt( vec3 d ) {
   vec2 fd = normalize( uFlashDir.xz );
   vec2 dh = normalize( d.xz );
   float az = atan( dh.x * fd.y - dh.y * fd.x, dot( dh, fd ) );
+  if ( abs( az ) > 0.35 ) return vec3( 0.0 );
   float el = asin( clamp( d.y, -1.0, 1.0 ) );
-  if ( el < -0.002 || el > uBoltTop ) return 0.0;
-  float y = el / uBoltTop;
-  float x = ( vnoise( y * 7.0 ) * 0.5 + vnoise( y * 19.0 ) * 0.25 + vnoise( y * 53.0 ) * 0.12 ) * 0.035;
-  float w = abs( az - x );
-  float core = exp( -w * w / 5e-6 );
-  float glow = exp( -w / 0.006 ) * 0.1;
-  // two side branches forking off the upper channel
-  float s1 = sign( hash11( uBoltSeed * 3.1 ) - 0.5 );
-  float bx = x + ( y - 0.55 ) * 0.06 * s1 + vnoise( y * 31.0 + 7.0 ) * 0.008;
-  float bw = abs( az - bx );
-  float branch = y > 0.2 && y < 0.55 ? exp( -bw * bw / 5e-6 ) * smoothstep( 0.2, 0.5, y ) : 0.0;
-  float cx = x - ( y - 0.8 ) * 0.05 * s1 + vnoise( y * 23.0 + 3.0 ) * 0.006;
-  float cw = abs( az - cx );
-  float branch2 = y > 0.45 && y < 0.8 ? exp( -cw * cw / 3e-6 ) * smoothstep( 0.45, 0.75, y ) : 0.0;
-  return ( core + glow + branch * 0.7 + branch2 * 0.5 ) * smoothstep( 0.0, 0.02, y + 0.01 );
+  if ( el < -0.002 || el > uBoltTop * 1.08 ) return vec3( 0.0 );
+  float px = max( fwidth( az ), 1e-5 );
+  float y = el / uBoltTop;   // 0 ground … 1 cloud base
+  float sc = uBoltTop * 1.2; // sideways wander scales with how tall the bolt looks
+  float x = jag3( y, uBoltSeed ) * 0.09 * sc;
+  float xs = jag( y * 6.0, uBoltSeed ) * 0.55 * 0.09 * sc;
+  vec3 c = filament( abs( az - x ), abs( az - xs ), px, 1.0 ) * ( 1.0 - smoothstep( 0.97, 1.0, y ) );
+  // forks: each leaves the channel at its own height and heads down and out, thinning and fading
+  for ( int i = 0; i < 5; i ++ ) {
+    float fi = float( i );
+    float h0 = mix( 0.35, 0.95, hash11( uBoltSeed * 1.7 + fi * 3.1 ) );
+    if ( y > h0 + 0.01 || y < h0 - 0.5 ) continue;
+    float t = max( h0 - y, 0.0 ) / 0.5;   // 0 at the fork … 1 at its tip
+    float side = hash11( uBoltSeed + fi * 7.3 ) < 0.5 ? -1.0 : 1.0;
+    float spread = ( 0.25 + 0.35 * hash11( uBoltSeed * 2.3 + fi ) ) * sc;
+    float x0 = jag3( h0, uBoltSeed ) * 0.09 * sc;
+    float bx = x0 + side * spread * t * ( 1.0 - 0.3 * t ) + jag3( y * 1.3, uBoltSeed + 40.0 + fi * 11.0 ) * 0.03 * sc;
+    // (eased in at the fork and out at the tip, so no glow band starts or stops on a hard line)
+    float fade = smoothstep( 0.0, 0.08, t ) * ( 1.0 - smoothstep( 0.35, 1.0, t ) ) * ( 0.75 - 0.1 * fi );
+    float bxs = x0 + side * spread * t * ( 1.0 - 0.3 * t );
+    c += filament( abs( az - bx ), abs( az - bxs ), px, 0.4 ) * fade;
+  }
+  // where the channel leaves the cloud: a bright, soft splash along the base
+  vec2 q = vec2( ( az - jag3( 1.0, uBoltSeed ) * 0.09 * sc ) * 6.0, ( y - 1.0 ) * 9.0 );
+  c += vec3( 0.75, 0.8, 1.2 ) * exp( -dot( q, q ) * 4.0 ) * 0.9;
+  // (a soft window: nothing may end on the edge of the region this is evaluated in)
+  return c * smoothstep( -0.02, 0.02, y ) * ( 1.0 - smoothstep( 1.02, 1.08, y ) ) * ( 1.0 - smoothstep( 0.2, 0.34, abs( az ) ) );
 }
 
 void main() {
@@ -259,10 +285,14 @@ void main() {
   if ( uEnv < 0.5 ) col *= uSkyComp;
 
   if ( uFlash > 0.001 ) {
+    // the whole deck lights up from inside, brightest round the strike: the cloud's own density
+    // shows its shape (thick cells glow, thin gaps stay darker), and the clear sky above catches it too
     float fd = max( dot( dUp, uFlashDir ), 0.0 );
-    float lobe = pow( fd, 16.0 ) + 0.25 * pow( fd, 4.0 );
-    col += uFlashCol * uFlash * ( 1.0 - cl.a * 0.85 ) * ( 0.1 + 1.3 * lobe );
-    if ( uBolt > 0.001 && uEnv < 0.5 ) col += uFlashCol * uBolt * bolt( d ) * 12.0;
+    float lobe = pow( fd, 16.0 ) * 1.1 + 0.45 * pow( fd, 4.0 ) + 0.35 * fd * fd;
+    float dens = 1.0 - cl.a;
+    float lit = ( 0.2 + 0.8 * dens ) * ( 0.55 + lobe ) * smoothstep( -0.05, 0.08, sy );
+    col += uFlashCol * uFlash * lit;
+    if ( uBolt > 0.001 && uEnv < 0.5 ) col += uFlashCol * uBolt * bolt( d ) * 10.0;
   }
 
   if ( sy < 0.0 && uEnv > 0.5 ) {
