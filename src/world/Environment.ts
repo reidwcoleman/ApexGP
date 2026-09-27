@@ -753,6 +753,9 @@ export function createEnvironment(
   // prime the clouds and the env map so the first frame is complete
   clouds.update(0, camPos.set(track.px[0] ?? 0, 2, track.pz[0] ?? 0));
   sky.uniforms.uPano.value = clouds.texture;
+  // a sky-only env map first, so the world capture already renders (and compiles) every material
+  // with the env map it will race with — capturing with no env map compiled each program twice
+  bakeNow();
   try {
     captureWorld();
   } catch (e) {

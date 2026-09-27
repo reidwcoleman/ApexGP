@@ -328,6 +328,8 @@ export class Game {
     const t0 = performance.now();
     const mark = (k: string) => (this.bootSteps[k] = Math.round(performance.now() - t0));
     progress(0.02, 'Loading fonts');
+    // the people (~13 MB over the network) start downloading first: everything below overlaps them
+    const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     // liveries + the fan atlas painted on an earlier visit (read + decoded while the rest loads)
     const pixels = preloadPixels();
     try {
@@ -339,8 +341,6 @@ export class Game {
     this.applySettings(this.menu.settings);
     this.rollWeather(this.menu.setup);
 
-    // the people (a network load) come in while the circuit is being surveyed
-    const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     await pixels;
     mark('pixels');
     setCarAORenderer(this.gfx.renderer);
