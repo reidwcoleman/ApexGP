@@ -838,7 +838,10 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
     d.x += (r() - 0.5) * 0.25;
     d.z += (r() - 0.5) * 0.25;
     d.normalize();
-    clusters.push(center.clone().addScaledVector(d, env(d) * (0.64 + r() * 0.14)));
+    // an irregular crown: clumps at different depths (sprays reaching out, others sitting deep),
+    // and the odd gap where the sky shows through — not a smooth cotton-ball shell
+    if (!p.column && !p.cone && k > 2 && r() < 0.1) continue;
+    clusters.push(center.clone().addScaledVector(d, env(d) * (0.5 + r() * 0.4)));
   }
 
   // limbs from the trunk; each cluster is fed by a branch off the nearest limb
@@ -882,7 +885,7 @@ function makeTree(sp: SpeciesId, variant: number, index: number): TreeProto {
   const avgR = (rx + rz) / 2;
   clusters.forEach((cc, ci) => {
     const clumpR = avgR * p.spread * (0.85 + r() * 0.3);
-    const tint = p.leafTint.clone().multiplyScalar(0.9 + r() * 0.2);
+    const tint = p.leafTint.clone().multiplyScalar(0.84 + r() * 0.3);
     if (r() < 0.12) tint.multiply(new THREE.Color(1.08, 1.04, 0.86));
     const phase = r() * 6.28;
     const cell = cells[Math.floor(r() * cells.length)];

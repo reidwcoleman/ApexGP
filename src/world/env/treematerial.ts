@@ -45,6 +45,8 @@ export function createTreeUniforms(): TreeUniforms {
 const COMMON_VERT = /* glsl */ `
 attribute vec4 aTree;
 attribute vec4 aCard;
+uniform float uTime;
+uniform vec2 uWind;
 // camera-facing leaf card: spread the corner in the view plane (of whatever camera is
 // drawing — the sun's in the shadow pass), the texture's "up" turned toward the clump's
 // outward direction on screen. Returns a world-space offset for a tree of scale sc.
@@ -55,13 +57,14 @@ vec3 treeCard( vec3 nW, float sc ) {
   float ol = length( od );
   vec2 up2 = vec2( 0.0, 1.0 );
   if ( ol > 1e-3 ) up2 = normalize( mix( up2, od / ol, smoothstep( 0.1, 0.6, ol ) * 0.7 ) );
-  float cr = cos( aCard.z ), sr = sin( aCard.z );
+  // leaves flutter: each card twists a little about its centre (in the wind, faster and further)
+  float wl = length( uWind );
+  float spin = sin( uTime * ( 4.1 + wl * 0.35 ) + aTree.w * 7.0 + aCard.z * 11.0 ) * ( 0.07 + min( wl, 14.0 ) * 0.012 ) * step( 0.5, aTree.y );
+  float cr = cos( aCard.z + spin ), sr = sin( aCard.z + spin );
   up2 = vec2( up2.x * cr - up2.y * sr, up2.x * sr + up2.y * cr );
   vec2 off = vec2( up2.y, -up2.x ) * aCard.x + up2 * aCard.y;
   return ( camR * off.x + camU * off.y ) * sc;
 }
-uniform float uTime;
-uniform vec2 uWind;
 varying vec4 vTree;
 varying vec2 vTUv;
 varying float vFadeD;
@@ -70,15 +73,19 @@ vec3 treeWind( vec3 ip, vec3 p, vec4 t ) {
   vec2 wd = wlen > 0.2 ? uWind / wlen : vec2( 0.8, 0.6 );
   float ws = 0.55 + wlen * 0.11;
   float ph = dot( ip.xz, vec2( 0.071, 0.053 ) );
-  float gust = 0.55 + 0.45 * sin( uTime * 0.31 + ip.x * 0.006 + ip.z * 0.004 );
+  // gusts roll through the woods downwind: a wave along the wind direction, so neighbouring trees
+  // bend one after another instead of all at once
+  float gx = dot( ip.xz, wd ) * 0.028 - uTime * ( 0.55 + wlen * 0.09 );
+  float gust = 0.5 + 0.32 * sin( gx ) + 0.18 * sin( gx * 2.3 + 1.7 + dot( ip.xz, vec2( -wd.y, wd.x ) ) * 0.01 );
   float sway = ( sin( uTime * 0.83 + ph ) * 0.6 + sin( uTime * 1.73 + ph * 1.7 ) * 0.25 ) * gust * ws;
-  float br = sin( uTime * 2.1 + t.w + ph ) * ws;
+  float br = sin( uTime * 2.1 + t.w + ph ) * ws * ( 0.6 + 0.6 * gust );
   float leafK = step( 0.5, t.y );
   float fl = sin( uTime * 8.3 + p.x * 2.1 + p.z * 1.7 + t.w * 3.0 ) * leafK * ws;
   float w = t.x;
-  return vec3( wd.x, 0.0, wd.y ) * ( sway * 0.3 + 0.1 * ws ) * w
-       + vec3( 0.2, 0.08, 0.16 ) * br * w * 0.45
-       + vec3( 0.05, 0.035, -0.045 ) * fl;
+  // branches bob with the wind (and lift a little); leaf flutter is mostly the cards' twist
+  return vec3( wd.x, 0.0, wd.y ) * ( sway * 0.3 + 0.1 * ws * ( 0.5 + gust ) ) * w
+       + vec3( wd.x, 0.35, wd.y ) * br * w * 0.22
+       + vec3( 0.05, 0.035, -0.045 ) * fl * 0.5;
 }
 `;
 
@@ -260,7 +267,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v3';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v4';
   return mat;
 }
 
@@ -293,7 +300,7 @@ export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDept
       .replace('#include <common>', `#include <common>\nuniform sampler2D uLeafMap;\nvarying vec4 vTree;\nvarying vec2 vTUv;`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif ( vTree.y > 0.5 && texture2D( uLeafMap, vTUv ).a < 0.5 ) discard;`);
   };
-  mat.customProgramCacheKey = () => 'apex-tree-depth-v2';
+  mat.customProgramCacheKey = () => 'apex-tree-depth-v3';
   return mat;
 }
 

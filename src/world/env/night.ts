@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Track } from '../Track.ts';
+import { HEADLIGHT_LIGHT, HEADLIGHT_PARS, installHeadlightUniforms } from './headlights.ts';
 
 /**
  * Night racing without hundreds of real lights.
@@ -126,8 +127,9 @@ let installed = false;
 export function installFloodChunk() {
   if (installed) return;
   installed = true;
-  THREE.ShaderChunk.lights_pars_begin = THREE.ShaderChunk.lights_pars_begin + PARS;
-  THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin + LIGHT;
+  // (the cars' headlights ride along: the same kind of analytic light, see env/headlights.ts)
+  THREE.ShaderChunk.lights_pars_begin = THREE.ShaderChunk.lights_pars_begin + PARS + HEADLIGHT_PARS;
+  THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin + LIGHT + HEADLIGHT_LIGHT;
   for (const key of Object.keys(THREE.ShaderLib)) {
     const sh = (THREE.ShaderLib as Record<string, { uniforms: Record<string, THREE.IUniform> }>)[key];
     if (sh && sh.uniforms && 'sunLights' in sh.uniforms) {
@@ -136,6 +138,7 @@ export function installFloodChunk() {
       sh.uniforms.floodParams = { value: floodUniforms.params };
       sh.uniforms.floodHeight = { value: floodUniforms.height };
       sh.uniforms.floodColor = { value: floodUniforms.color };
+      installHeadlightUniforms(sh.uniforms);
     }
   }
 }

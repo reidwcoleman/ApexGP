@@ -585,6 +585,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   c *= mix(shadowTint * lookShadowTint, tint * lookTint, hl);
   l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(vec3(l), c, saturation * lookSaturation);
+  // vibrance: lift the muted colours (grass, sky, liveries in the shade) more than the already vivid
+  // ones, so the picture has the broadcast punch without clipping a red car into a flat blob
+  float cMax = max(c.r, max(c.g, c.b));
+  float cSat = (cMax - min(c.r, min(c.g, c.b))) / max(cMax, 1e-4);
+  c = mix(vec3(l), c, 1.0 + 0.16 * (1.0 - cSat) * saturation);
   c = pow(max(c, 0.0) / 0.18, vec3(contrast * lookContrast)) * 0.18;
   outputColor = vec4(c, inputColor.a);
 }
@@ -912,9 +917,10 @@ export class Renderer {
     this.quality = q;
     const dpr = window.devicePixelRatio || 1;
     // each preset's starting pixel ratio, and the ceiling the dynamic resolution may climb to when the
-    // GPU has room (High renders one pixel per CSS pixel and rises toward 1.25 on Retina screens)
+    // GPU has room (High renders one pixel per CSS pixel and rises toward 1.5 on Retina screens —
+    // most of the gap to a console-sharp image; the adaptive scale backs off again if frames run long)
     this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1), ultra: Math.min(dpr, 1.5) }[q];
-    const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.25), ultra: Math.min(dpr, 1.75) }[q];
+    const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.5), ultra: Math.min(dpr, 2) }[q];
     this.maxDynamic = ceiling / this.renderScale;
     this.minDynamic = { low: 0.5, medium: 0.65, high: 0.8, ultra: 0.8 }[q];
     const preset = q === 'ultra' || q === 'high' ? SMAAPreset.HIGH : q === 'medium' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
