@@ -39,8 +39,9 @@ npm run check    # tsc --noEmit
   new sky and time of day, never the last race's: clear, light cloud, overcast, drizzle,
   rain, heavy rain, thunderstorm (forked lightning), sunny showers (with a rainbow), mist and fog,
   hazy heat (shimmer over the asphalt), windy, or changeable, at dawn, morning, midday, afternoon,
-  golden hour, twilight or a floodlit night race (**Night race: On** in the race setup's Conditions — every car
-  runs headlights: beams that light the road and the cars ahead, glare head-on, rain glittering in them). The track gets wet and dries again, a dry line appears once the
+  golden hour, twilight or a floodlit night race (**Night race: On** in the race setup's Conditions — a dark
+  circuit, only a mast every ~90 m: you drive by your headlights, which light the road and the cars
+  ahead out to ~100 m, flare head-on and catch the rain) The track gets wet and dries again, a dry line appears once the
   rain stops, spray and aquaplaning in standing water, the radar and your engineer warn you.
 - **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
