@@ -16,7 +16,7 @@
 import { bakeCarAO, withCarAO } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
 export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, type Compound } from './carTextures.ts';
@@ -117,7 +117,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, l.steer, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -535,6 +535,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const bodyL: THREE.Group[] = [];
   const unsprungL: THREE.Group[] = [];
   const flapPivots: THREE.Object3D[] = [];
+  const fwFlapPivots: THREE.Object3D[] = [];
   const driverMeshes: { all: THREE.Mesh; decals: THREE.Mesh | null; head: THREE.Mesh | null }[] = [];
   const headPivots: THREE.Object3D[] = [];
   const partPivots: Record<PartId, THREE.Group[]> = { fwL: [], fwR: [], rw: [] };
@@ -588,9 +589,17 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     const fp = new THREE.Group();
     fp.position.set(FLAP_PIVOT[0] - PART_HINGE.rw[0], FLAP_PIVOT[1] - PART_HINGE.rw[1], FLAP_PIVOT[2] - PART_HINGE.rw[2]);
     fp.add(mesh(L.flap, paintMat));
-    // the DRS flap goes wherever the rear wing goes
+    // the active rear flaps go wherever the rear wing goes
     pivOf.rw.add(fp);
     flapPivots.push(fp);
+    // the front wing's active flaps, one pair on each (breakable) wing half
+    (['fwL', 'fwR'] as const).forEach((k, i) => {
+      const f = new THREE.Group();
+      f.position.set(FW_FLAP_PIVOT[0] - PART_HINGE[k][0], FW_FLAP_PIVOT[1] - PART_HINGE[k][1], FW_FLAP_PIVOT[2] - PART_HINGE[k][2]);
+      f.add(mesh(L.fwFlaps[i], paintMat));
+      pivOf[k].add(f);
+      fwFlapPivots.push(f);
+    });
     if (L.steer) {
       const pv = new THREE.Group();
       pv.position.set(STEER_PIVOT[0], STEER_PIVOT[1], STEER_PIVOT[2]);
@@ -704,7 +713,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const anchors = {
     cockpit: anchor('cockpit', [0, HELMET_C[1] + 0.005, HELMET_C[2] + 0.07], body),
     tcam: anchor('tcam', [0, 0.995, -0.255], body),
-    nose: anchor('nose', [0, 0.2, 3.0], body),
+    nose: anchor('nose', [0, 0.215, 2.86], body),
     rearWing: anchor('rearWing', [0, 0.88, -2.12], body),
     exhaust: anchor('exhaust', [0, 0.458, -2.25], body),
     wheelFL: anchor('wheelFL', [0, 0, 0], FL.group),
@@ -852,8 +861,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       grime.uGrime.value.set(film, flecks, dirt, 0);
     },
     setDrs(open) {
+      // 2026 active aero: straight mode lays the rear AND front flaps flatter
       const o = Math.min(1, Math.max(0, open));
-      for (const fp of flapPivots) fp.rotation.x = -0.55 * o;
+      for (const fp of flapPivots) fp.rotation.x = -0.5 * o;
+      for (const fp of fwFlapPivots) fp.rotation.x = -0.26 * o;
     },
     setDetail(level) {
       if (level === detail) return;

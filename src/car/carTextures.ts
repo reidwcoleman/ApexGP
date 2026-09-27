@@ -345,7 +345,7 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     };
     // (inside the rim the wheel cover shows through: rotationally symmetric, needs no smear)
     // sidewall smear: rubber + text ring + band
-    bring(RIM_R + 0.004, 0.346, 'rgba(22,22,22,1)');
+    bring(RIM_R + 0.004, WHEEL_R - 0.014, 'rgba(22,22,22,1)');
     bring(0.254, 0.262, band);
     const tg = b.createRadialGradient(256, 256, br(0.272), 256, 256, br(0.323));
     tg.addColorStop(0, 'rgba(120,120,120,0.0)');
@@ -578,6 +578,7 @@ export function trimTexture(teamIn: Team, driverIn: Driver, seat: 0 | 1): THREE.
       [TC.padding]: '#0d0d0e',
       [TC.ink]: team.ink,
       [TC.halo]: team.primary,
+      [TC.sideLight]: '#39d8ff',
     };
     for (const k of Object.keys(col)) {
       const i = Number(k);

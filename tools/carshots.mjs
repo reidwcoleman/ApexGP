@@ -13,7 +13,7 @@ const browser = await chromium.launch({ executablePath: '/Applications/Google Ch
 for (const [name, [cam, look]] of Object.entries(views)) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-  await page.goto(`http://localhost:5191/src/dev/car.html?team=${team}&cam=${cam}&look=${look}&fov=35`);
+  await page.goto(`http://localhost:5191/src/dev/car.html?team=${team}&cam=${cam}&look=${look}&fov=35${process.env.Q ?? ""}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 }).catch(() => {});
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${out}/${team}_${name}.png` });

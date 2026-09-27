@@ -8,10 +8,11 @@ import type { V2 } from './carMath.ts';
 export const WHEELBASE = 3.4;
 export const Z_FRONT_AXLE = WHEELBASE / 2;
 export const Z_REAR_AXLE = -WHEELBASE / 2;
-export const WHEEL_R = 0.36;
+// 2026 tyres: 18" rims, ~705 mm overall, fronts 280 mm and rears 375 mm wide (25 / 30 mm narrower than 2025)
+export const WHEEL_R = 0.3525;
 export const RIM_R = 0.2286; // 18" bead seat
-export const TYRE_W_F = 0.3;
-export const TYRE_W_R = 0.4;
+export const TYRE_W_F = 0.28;
+export const TYRE_W_R = 0.375;
 export const TRACK_F = 1.6; // wheel centre to centre
 export const TRACK_R = 1.5;
 export const CAR_WIDTH = 1.9;
@@ -118,6 +119,8 @@ export const TC = {
   padding: 34,
   ink: 35,
   halo: 36,
+  /** 2026 lateral safety lights (self-lit) */
+  sideLight: 37,
 } as const;
 /** roughness, metalness, emissive masks (r: brake heat, g: rain light, b: self-lit/display) */
 export const TRIM_PROPS: Record<number, [number, number, number, number, number]> = {
@@ -158,6 +161,7 @@ export const TRIM_PROPS: Record<number, [number, number, number, number, number]
   [TC.padding]: [0.95, 0.0, 0, 0, 0],
   [TC.ink]: [0.25, 0.0, 0, 0, 0],
   [TC.halo]: [0.3, 0.0, 0, 0, 0],
+  [TC.sideLight]: [0.2, 0.0, 0, 0, 1],
 };
 export function trimUV(i: number): V2 {
   const cols = TRIM_W / TRIM_CELL;

@@ -69,9 +69,11 @@ function sec(d: SecDef): { z: number; p: V2[]; cock: number; pod: number } {
 
 // Stations, front → rear. Front axle z = +1.7, rear axle z = −1.7.
 const STATIONS = [
-  sec({ z: 3.0, top: 0.196, sh: [0.03, 0.19], side: [0.042, 0.168], floor: [0.038, 0.142], bot: [0.026, 0.134], bottom: 0.132 }),
-  sec({ z: 2.975, top: 0.212, sh: [0.064, 0.203], side: [0.08, 0.178], floor: [0.076, 0.138], bot: [0.056, 0.126], bottom: 0.123 }),
-  sec({ z: 2.8, top: 0.255, sh: [0.086, 0.243], side: [0.1, 0.205], floor: [0.096, 0.136], bot: [0.072, 0.12], bottom: 0.117 }),
+  // 2026 nose: shorter, stopping over the front wing's mainplane (carried on two pylons),
+  // a flat, wide-ish tip rather than the long 2022–25 snout reaching the wing's leading edge
+  sec({ z: 2.86, top: 0.21, sh: [0.04, 0.205], side: [0.058, 0.188], floor: [0.054, 0.166], bot: [0.036, 0.16], bottom: 0.158 }),
+  sec({ z: 2.838, top: 0.224, sh: [0.078, 0.217], side: [0.095, 0.196], floor: [0.092, 0.162], bot: [0.066, 0.152], bottom: 0.15 }),
+  sec({ z: 2.7, top: 0.262, sh: [0.094, 0.251], side: [0.108, 0.219], floor: [0.103, 0.158], bot: [0.078, 0.145], bottom: 0.142 }),
   sec({ z: 2.5, top: 0.335, sh: [0.11, 0.318], side: [0.125, 0.265], floor: [0.12, 0.155], bot: [0.088, 0.134], bottom: 0.13 }),
   sec({ z: 2.15, top: 0.43, sh: [0.136, 0.408], side: [0.155, 0.34], floor: [0.148, 0.19], bot: [0.108, 0.165], bottom: 0.16 }),
   sec({ z: 1.8, top: 0.52, sh: [0.165, 0.495], side: [0.19, 0.415], floor: [0.178, 0.22], bot: [0.13, 0.195], bottom: 0.19 }),

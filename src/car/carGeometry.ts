@@ -375,70 +375,127 @@ function mirrorStations(st: WingSt[]): WingSt[] {
   return [...neg, ...st];
 }
 
+/**
+ * 2026 front wing: 100 mm narrower, a big carbon mainplane (raised neutral centre section the nose
+ * sits on) and a two-element painted flap that is ACTIVE — it rotates flatter on the straights
+ * (straight mode) and back to full angle for the corners. No tip "eyebrow" winglets any more; the
+ * endplates carry the detail (footplate, outwash canard, a turned-out top edge).
+ * The flaps are built separately in pivot-local space (frontFlap) so the rig can rotate them.
+ */
+export const FW_SPAN = 0.83;
+export const FW_FLAP_PIVOT: V3 = [0, 0.165, 2.73];
+/** the flap elements, left half (x ≥ 0), body space */
+function fwFlapStations(level: Level): { e1: WingSt[]; e2: WingSt[] } {
+  const xs2 = level === 2 ? [0.11, 0.48, FW_SPAN - 0.012] : [0.11, 0.2, 0.3, 0.4, 0.5, 0.6, 0.68, 0.75, 0.8, FW_SPAN - 0.012];
+  const T = (x: number) => (x - 0.11) / (FW_SPAN - 0.12);
+  const e1 = xs2.map((x) => {
+    const t = T(x);
+    // sweeps up toward the endplate, the chord growing outboard
+    return { x, z: 2.745 - 0.05 * t * t, y: 0.148 + 0.075 * t ** 2.2, c: lerp(0.19, 0.205, t * t), a: lerp(15, 25, t), t: 0.1, cam: 0.075 };
+  });
+  const e2 = xs2.map((x) => {
+    const t = T(x);
+    return { x, z: 2.605 - 0.045 * t * t, y: 0.212 + 0.112 * t ** 2.2, c: lerp(0.15, 0.172, t * t), a: lerp(30, 44, t), t: 0.1, cam: 0.08 };
+  });
+  return { e1, e2 };
+}
+
 function frontWing(b: Buckets, level: Level) {
-  const nAf = [14, 9, 6][level];
-  const xs = level === 2 ? [0, 0.3, 0.6, 0.87] : [0, 0.1, 0.2, 0.3, 0.42, 0.54, 0.66, 0.76, 0.84, 0.87];
-  const E = (fn: (x: number, t: number) => WingSt) => xs.map((x) => fn(x, x / 0.87));
+  const nAf = [16, 10, 6][level];
+  const xs = level === 2 ? [0, 0.3, 0.6, FW_SPAN - 0.005] : [0, 0.08, 0.16, 0.24, 0.3, 0.38, 0.48, 0.58, 0.68, 0.76, FW_SPAN - 0.005];
+  const E = (fn: (x: number, t: number) => WingSt) => xs.map((x) => fn(x, x / FW_SPAN));
   const carbonUV = (_s: number, _c: number, p: V3): V2 => [p[0] / CARBON_TILE, (p[2] + p[1]) / CARBON_TILE];
-  // main plane (full span, neutral centre section raised)
-  const e0 = E((x, t) => ({ x, z: 3.04 - 0.1 * t * t, y: lerp(0.098, 0.07, smooth(0.12, 0.4, x)), c: lerp(0.3, 0.27, t), a: lerp(3, 7, t), t: 0.09, cam: 0.05 }));
-  const e1 = E((x, t) => ({ x, z: 2.815 - 0.08 * t * t, y: lerp(0.13, 0.115, smooth(0.12, 0.4, x)) + 0.012 * t, c: lerp(0.18, 0.2, t), a: lerp(12, 20, t), t: 0.09, cam: 0.06 }));
-  // each half is its own part (it can break off): the lower elements split at the centreline
+  // mainplane: full span, long chord; the neutral centre section (|x| < 0.25) raised under the nose
+  const e0 = E((x, t) => ({
+    x,
+    z: 3.03 - 0.07 * t * t,
+    y: lerp(0.112, 0.068, smooth(0.2, 0.34, x)) + 0.012 * smooth(0.6, 1, t),
+    c: lerp(0.37, 0.31, t),
+    a: lerp(2.5, 6.5, t),
+    t: 0.085,
+    cam: 0.055,
+  }));
+  // each half is its own part (it can break off): split at the centreline
   const half = (st: WingSt[], side: number) => (side > 0 ? st : st.map((q) => ({ ...q, x: -q.x })).reverse());
   for (const side of [1, -1]) {
     const P = b.parts[side > 0 ? 'fwL' : 'fwR'];
     wingElement(P.carbon, half(e0, side), nAf, carbonUV);
-    wingElement(P.carbon, half(e1, side), nAf, carbonUV);
-  }
-  // upper flaps (painted), span from the nose outwards
-  const xs2 = level === 2 ? [0.1, 0.5, 0.87] : [0.1, 0.2, 0.3, 0.42, 0.54, 0.66, 0.76, 0.84, 0.87];
-  const e2 = xs2.map((x) => {
-    const t = x / 0.87;
-    // flaps sweep up hard toward the endplates (current regs), deeper chord at the tips
-    return { x, z: 2.665 - 0.07 * t * t, y: 0.165 + 0.085 * t ** 2.4, c: lerp(0.14, 0.175, t * t), a: lerp(22, 36, t), t: 0.1, cam: 0.08 };
-  });
-  const e3 = xs2.map((x) => {
-    const t = x / 0.87;
-    return { x, z: 2.555 - 0.06 * t * t, y: 0.21 + 0.12 * t ** 2.4, c: lerp(0.11, 0.15, t * t), a: lerp(34, 52, t), t: 0.1, cam: 0.08 };
-  });
-  for (const side of [1, -1]) {
-    const P = b.parts[side > 0 ? 'fwL' : 'fwR'];
-    const e2s = e2.map((s) => ({ ...s, x: s.x * side }));
-    const e3s = e3.map((s) => ({ ...s, x: s.x * side }));
-    if (side < 0) {
-      e2s.reverse();
-      e3s.reverse();
-    }
-    const fwuv = (st: number, c: number) => rectUV(R_FWING, side > 0 ? 0.5 + st * 0.5 : st * 0.5, c);
-    wingElement(P.paint, e2s, nAf, (s, c) => fwuv(s, c * 0.5), CUV);
-    wingElement(P.paint, e3s, nAf, (s, c) => fwuv(s, 0.5 + c * 0.5), CUV);
-    // endplate (carbon) — rounded outline in (z, y)
+    // endplate (carbon): rounded outline in (z, y); the top edge turns outboard
     const ep = roundPoly(
       [
-        [3.03, 0.03],
-        [2.44, 0.03],
-        [2.4, 0.26],
-        [2.5, 0.345],
-        [2.72, 0.29],
-        [2.97, 0.12],
-        [3.05, 0.07],
+        [3.05, 0.028],
+        [2.46, 0.028],
+        [2.41, 0.16],
+        [2.44, 0.285],
+        [2.52, 0.325],
+        [2.62, 0.3],
+        [2.8, 0.2],
+        [2.96, 0.12],
+        [3.06, 0.075],
       ],
-      [0.02, 0.03, 0.06, 0.06, 0.1, 0.05, 0.03],
+      [0.02, 0.03, 0.05, 0.05, 0.05, 0.06, 0.08, 0.05, 0.03],
       level === 2 ? 1 : 3,
     );
-    plate(P.carbon, ep, [0.875 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+    plate(P.carbon, ep, [(FW_SPAN + 0.006) * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     if (level < 2) {
-      // footplate + canard on the endplate
-      plate(P.carbon, roundPoly([[3.0, 0], [2.5, 0], [2.5, 0.09], [3.0, 0.09]], 0.02, 2), [0.84 * side, 0.034, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
-      // tyre-wake winglet on the outer face
+      // footplate: a horizontal strip along the endplate foot, curling outboard
+      plate(P.carbon, roundPoly([[3.02, 0], [2.48, 0], [2.48, 0.07], [3.02, 0.085]], 0.02, 2), [(FW_SPAN - 0.03) * side, 0.03, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      // turned-out top edge: a narrow plate leaning outboard along the endplate's upper rear edge
+      plate(
+        P.carbon,
+        roundPoly([[2.47, 0], [2.72, 0], [2.64, 0.05], [2.47, 0.055]], 0.015, 2),
+        [(FW_SPAN + 0.006) * side, 0.29, 0],
+        [0, 0, 1],
+        norm3([0.75 * side, 0.66, 0]),
+        0.006,
+        (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE],
+      );
+      // outwash canard on the endplate's outer face, low and forward
       wingElement(P.carbon, [
-        { x: 0.88 * side, z: 2.62, y: 0.2, c: 0.12, a: 30, t: 0.08 },
-        { x: 0.925 * side, z: 2.605, y: 0.212, c: 0.1, a: 34, t: 0.08 },
+        { x: (FW_SPAN + 0.012) * side, z: 2.97, y: 0.1, c: 0.12, a: -8, t: 0.07 },
+        { x: (FW_SPAN + 0.06) * side, z: 2.955, y: 0.108, c: 0.1, a: -10, t: 0.07 },
       ].sort((p, q) => p.x - q.x), 6, (_s, _c, p) => [p[0] / CARBON_TILE, p[2] / CARBON_TILE]);
+      // flap adjuster fairing where the flaps meet the endplate (the actuator of the active aero)
+      ellipsoid(P.carbon, [(FW_SPAN - 0.02) * side, 0.24, 2.66], [0.016, 0.04, 0.09], 8, 6, (p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
+    }
+  }
+  // the nose rides on the mainplane on two cranked pylons
+  if (level < 2) {
+    for (const side of [1, -1]) {
+      const py = roundPoly([[2.85, 0.108], [2.72, 0.108], [2.7, 0.17], [2.84, 0.17]], 0.012, 2);
+      plate(b.carbon, py, [0.052 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.01, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     }
   }
 }
 
+/** one side's active flap pair in pivot-local coordinates (rotates about FW_FLAP_PIVOT) */
+function frontFlap(mb: MB, level: Level, side: 1 | -1) {
+  const nAf = [14, 9, 6][level];
+  const { e1, e2 } = fwFlapStations(level);
+  const e1s = e1.map((q) => ({ ...q, x: q.x * side }));
+  const e2s = e2.map((q) => ({ ...q, x: q.x * side }));
+  if (side < 0) {
+    e1s.reverse();
+    e2s.reverse();
+  }
+  const fwuv = (st: number, c: number) => rectUV(R_FWING, side > 0 ? 0.5 + st * 0.5 : st * 0.5, c);
+  const from = mb.count;
+  wingElement(mb, e1s, nAf, (s, c) => fwuv(s, c * 0.5), CUV);
+  wingElement(mb, e2s, nAf, (s, c) => fwuv(s, 0.5 + c * 0.5), CUV);
+  // the flaps' own small end fences where they meet the endplate
+  if (level < 2) {
+    const x = (FW_SPAN - 0.004) * side;
+    const q = roundPoly([[2.77, 0.2], [2.5, 0.29], [2.44, 0.35], [2.56, 0.36], [2.78, 0.25]], 0.015, 2);
+    plate(mb, q, [x, 0, 0], [0, 0, 1], [0, 1, 0], 0.006, () => paintCellUV(PC.carbon), CUV);
+  }
+  mb.transform(from, new THREE.Matrix4().makeTranslation(-FW_FLAP_PIVOT[0], -FW_FLAP_PIVOT[1], -FW_FLAP_PIVOT[2]));
+}
+
+/**
+ * 2026 rear wing: three elements — a fixed main plane and a two-element flap that opens on the
+ * straights (straight mode, drsFlap) — with no beam wing underneath, simpler rounded endplates
+ * carrying the new endplate lights, on twin pylons from the crash structure.
+ */
 function rearWing(b: Buckets, level: Level) {
   const nAf = [16, 10, 6][level];
   const xs = level === 2 ? [0, 0.25, 0.49] : [0, 0.08, 0.16, 0.24, 0.32, 0.39, 0.45, 0.49];
@@ -449,11 +506,7 @@ function rearWing(b: Buckets, level: Level) {
   });
   const P = b.parts.rw;
   wingElement(P.paint, mirrorStations(main), nAf, (s, c) => rectUV(R_MAIN, s, c), CUV);
-  // beam wing (two elements, carbon)
-  const bx = level === 2 ? [0, 0.36] : [0, 0.12, 0.24, 0.36];
-  const beamUV = (_s: number, _c: number, p: V3): V2 => [p[0] / CARBON_TILE, (p[2] + p[1]) / CARBON_TILE];
-  wingElement(b.carbon, mirrorStations(bx.map((x) => ({ x, z: -2.02, y: 0.36 + 0.02 * (x / 0.36) ** 2, c: 0.14, a: 6, t: 0.11 }))), nAf, beamUV);
-  wingElement(b.carbon, mirrorStations(bx.map((x) => ({ x, z: -2.165, y: 0.395 + 0.025 * (x / 0.36) ** 2, c: 0.12, a: 22, t: 0.11 }))), nAf, beamUV);
+  // (2026: no beam wing — the space under the main plane is open down to the crash structure)
   // endplates (paint), rounded outline in (z,y)
   const ep = roundPoly(
     [
@@ -506,21 +559,26 @@ function rearWing(b: Buckets, level: Level) {
     const st: SweepSt[] = pts.map((p) => ({ o: p, d: [0, 0, -1] as V3, u: [side, 0, 0] as V3, sx: 0.1, sy: 0.012 }));
     sweep(b.carbon, st, aeroSection(level === 2 ? 4 : 8), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
   }
-  // LED rain-light strips on endplate trailing edges
-  for (const side of [1, -1]) box(P.trim, [0.5 * side, 0.74, -2.418], [0.016, 0.16, 0.008], trimUV(TC.rainLight));
+  // endplate lights (2026): tall LED strips down the endplates' trailing edges
+  for (const side of [1, -1]) box(P.trim, [0.5 * side, 0.72, -2.419], [0.017, 0.24, 0.008], trimUV(TC.rainLight));
 }
 
-/** DRS flap in pivot-local coordinates (pivot at the flap trailing edge) */
-export const FLAP_PIVOT: V3 = [0, 0.94, -2.258];
+/** the active rear flap pair in pivot-local coordinates (pivot at the upper flap's trailing edge) */
+export const FLAP_PIVOT: V3 = [0, 0.948, -2.276];
 function drsFlap(mb: MB, level: Level) {
   const nAf = [16, 10, 6][level];
   const xs = level === 2 ? [0, 0.25, 0.492] : [0, 0.08, 0.16, 0.24, 0.32, 0.39, 0.45, 0.492];
-  const st = xs.map((x) => {
+  const f1 = xs.map((x) => {
     const t = x / 0.492;
-    return { x, z: -2.113 + 0.015 * t * t, y: 0.8 + 0.035 * t ** 4, c: 0.2, a: 44, t: 0.1, cam: 0.08 };
+    return { x, z: -2.085 + 0.015 * t * t, y: 0.79 + 0.03 * t ** 4, c: 0.165, a: 31, t: 0.1, cam: 0.08 };
+  });
+  const f2 = xs.map((x) => {
+    const t = x / 0.492;
+    return { x, z: -2.196 + 0.012 * t * t, y: 0.862 + 0.025 * t ** 4, c: 0.12, a: 45, t: 0.1, cam: 0.08 };
   });
   const from = mb.count;
-  wingElement(mb, mirrorStations(st), nAf, (s, c) => rectUV(R_FLAP, s, c), CUV);
+  wingElement(mb, mirrorStations(f1), nAf, (s, c) => rectUV(R_FLAP, s, c * 0.55), CUV);
+  wingElement(mb, mirrorStations(f2), nAf, (s, c) => rectUV(R_FLAP, s, 0.55 + c * 0.45), CUV);
   // move into pivot space
   const m = new THREE.Matrix4().makeTranslation(-FLAP_PIVOT[0], -FLAP_PIVOT[1], -FLAP_PIVOT[2]);
   mb.transform(from, m);
@@ -528,17 +586,19 @@ function drsFlap(mb: MB, level: Level) {
 
 // ------------------------------------------------------------------------------------ floor + diffuser
 function floorAndDiffuser(b: Buckets, level: Level) {
+  // (2026: the floor is 100 mm narrower and flatter — shallow tunnels, the edge simpler)
   const half: V2[] = [
     [1.2, 0.3],
-    [1.12, 0.44],
-    [0.98, 0.58],
-    [0.78, 0.7],
-    [0.5, 0.775],
-    [-0.62, 0.78],
-    [-0.9, 0.75],
-    [-1.1, 0.69],
-    [-1.25, 0.6],
-    [-1.36, 0.53],
+    [1.17, 0.5],
+    [1.13, 0.68],
+    [1.02, 0.712],
+    [0.78, 0.715],
+    [0.5, 0.715],
+    [-0.62, 0.72],
+    [-0.9, 0.695],
+    [-1.1, 0.645],
+    [-1.25, 0.575],
+    [-1.36, 0.52],
     [-1.38, 0.5],
   ];
   const outline: V2[] = [...half.map(([z, x]) => [x, z] as V2), ...half.slice().reverse().map(([z, x]) => [-x, z] as V2)];
@@ -553,21 +613,39 @@ function floorAndDiffuser(b: Buckets, level: Level) {
       // build as a sweep with stations along z
       const af = airfoil(8, 0.12, 0.06);
       const stations: SweepSt[] = zs.map((z) => {
-        const xEdge = z > -0.6 ? 0.778 : lerp(0.778, 0.75, (-0.6 - z) / 0.35);
+        const xEdge = z > -0.6 ? 0.718 : lerp(0.718, 0.695, (-0.6 - z) / 0.35);
         return { o: [xEdge * side - 0.035 * side, 0.06, z] as V3, d: norm3([side * 0.8, 0.6, 0]), u: norm3([-side * 0.6, 0.8, 0]), sx: 0.07, sy: 0.07 };
       });
       void st;
       sweep(b.carbon, stations, af, (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
     }
-    // floor fences / turning vanes ahead of the sidepods
+  }
+  // wheel-wake control boards (2026): at the front of the sidepods, three stacked horizontal
+  // elements between an inner and an outer fence, turning the front tyres' wake inboard
+  if (level < 2) {
     for (const side of [1, -1]) {
-      for (const [x0, h] of [
-        [0.48, 0.11],
-        [0.58, 0.09],
-      ]) {
-        const vane = roundPoly([[0.0, 0], [0.34, 0], [0.34, h * 0.7], [0.1, h], [0.0, h * 0.9]], 0.02, 2);
-        plate(b.carbon, vane, [x0 * side, 0.05, 0.98], [0.12 * side, 0, -0.99], [0, 1, 0], 0.008, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      const X0 = 0.44, X1 = 0.705;
+      // inner fence: a tall sail; outer fence: a slim curved strip (so the elements read between them)
+      const inner = roundPoly([[1.14, 0.055], [0.74, 0.055], [0.7, 0.28], [0.8, 0.42], [1.0, 0.39], [1.16, 0.26]], [0.02, 0.03, 0.06, 0.06, 0.05, 0.04], 3);
+      plate(b.carbon, inner, [X0 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.008, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      const outer = roundPoly([[1.12, 0.055], [1.03, 0.055], [0.86, 0.4], [0.78, 0.4], [0.8, 0.34], [0.98, 0.1]], [0.02, 0.02, 0.03, 0.02, 0.03, 0.03], 3);
+      plate(b.carbon, outer, [X1 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.008, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      const els: [number, number, number, number][] = [
+        // y, leading-edge z, chord, angle (trailing edge down = in-wash)
+        [0.15, 1.1, 0.34, -6],
+        [0.25, 1.06, 0.28, -9],
+        [0.35, 1.0, 0.22, -12],
+      ];
+      for (const [y, z, c, a] of els) {
+        const st: WingSt[] = [X0 + 0.004, (X0 + X1) / 2, X1 - 0.004].map((x) => ({ x: x * side, z: z - (x - X0) * 0.18, y: y + (x - X0) * 0.1, c, a, t: 0.08, cam: 0.05 }));
+        if (side < 0) st.reverse();
+        wingElement(b.carbon, st, 8, (_s, _c, p) => [p[0] / CARBON_TILE, p[2] / CARBON_TILE]);
       }
+    }
+  } else {
+    for (const side of [1, -1]) {
+      const fence = roundPoly([[1.14, 0.055], [0.74, 0.055], [0.72, 0.3], [0.9, 0.44], [1.16, 0.3]], 0.03, 1);
+      plate(b.carbon, fence, [0.6 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.2, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     }
   }
   // plank + skid blocks
@@ -608,14 +686,15 @@ function floorAndDiffuser(b: Buckets, level: Level) {
     plate(b.carbon, wall, [W * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
   }
   if (level < 2) {
-    for (const xs of [0.13, 0.27, 0.39]) {
+    // strakes: two per side, hanging from the roof and ending well above the road at the exit
+    for (const xs of [0.17, 0.34]) {
       for (const side of [1, -1]) {
         const st: V2[] = [];
         for (let i = 2; i <= n; i++) {
           const z = lerp(-1.36, -2.3, i / n);
           st.push([z, roofY(z) + 0.004]);
         }
-        st.push([-2.3, 0.05], [lerp(-1.36, -2.3, 2 / n), 0.05]);
+        st.push([-2.3, 0.05 + (roofY(-2.3) - 0.05) * 0.55], [lerp(-1.36, -2.3, 0.55), 0.052], [lerp(-1.36, -2.3, 2 / n), 0.05]);
         plate(b.trim, st, [xs * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.008, () => trimUV(TC.blackSatin));
       }
     }
@@ -748,14 +827,17 @@ function mirrors(b: Buckets, level: Level) {
       const t = i / nz;
       const z = c[2] + 0.055 - t * 0.075;
       const k = Math.sin(Math.min(1, t * 1.6 + 0.12) * Math.PI * 0.5);
-      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.085 * k, sy: 0.03 * k });
+      // (2026: bigger mirrors)
+      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.1 * k, sy: 0.036 * k });
     }
     sweep(b.paint, hs, roundedRect(ws, 0.35), () => paintCellUV(PC.mirror), { cuv: CUV });
     if (level < 2) {
       // glass (faces −Z)
-      const g = new THREE.PlaneGeometry(0.15, 0.048);
+      const g = new THREE.PlaneGeometry(0.178, 0.058);
       g.rotateY(Math.PI);
       g.translate(c[0], c[1], c[2] - 0.0205);
+      // lateral safety light (2026) on the housing's outer tip
+      box(b.trim, [c[0] + 0.1 * side, c[1], c[2] + 0.02], [0.006, 0.022, 0.05], trimUV(TC.sideLight));
       b.trim.addGeometry(g, undefined, trimUV(TC.mirrorGlass));
       g.dispose();
       // stalks
@@ -768,7 +850,7 @@ function mirrors(b: Buckets, level: Level) {
 function noseDetails(b: Buckets, level: Level) {
   if (level === 2) return;
   // pitot
-  tube(b.trim, [[0, 0.205, 2.99], [0, 0.207, 3.1]], 0.0045, 6, trimUV(TC.titanium), [0, 1, 0]);
+  tube(b.trim, [[0, 0.19, 2.85], [0, 0.192, 2.97]], 0.0045, 6, trimUV(TC.titanium), [0, 1, 0]);
   // nose cameras
   for (const side of [1, -1]) ellipsoid(b.trim, [0.125 * side, 0.36, 2.28], [0.018, 0.018, 0.05], 10, 6, trimUV(TC.blackGloss));
 }
@@ -1073,11 +1155,11 @@ function tyreProfile(w: number): V2[] {
   const side = (sgn: number, rev: boolean) => {
     const s: V2[] = [
       [RIM_R + 0.004, sgn * (h - 0.012)],
-      [0.262, sgn * (h + 0.002)],
-      [0.3, sgn * (h + 0.006)],
-      [0.33, sgn * (h + 0.002)],
-      [0.347, sgn * (h - 0.012)],
-      [0.356, sgn * (h - 0.03)],
+      [WHEEL_R - 0.098, sgn * (h + 0.002)],
+      [WHEEL_R - 0.06, sgn * (h + 0.006)],
+      [WHEEL_R - 0.03, sgn * (h + 0.002)],
+      [WHEEL_R - 0.013, sgn * (h - 0.012)],
+      [WHEEL_R - 0.004, sgn * (h - 0.03)],
     ];
     return rev ? s.reverse() : s;
   };
@@ -1293,6 +1375,8 @@ export interface CarGeoLevel {
   /** breakable parts, body space */
   parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
+  /** the front wing's active flaps, left and right, pivot-local (FW_FLAP_PIVOT) */
+  fwFlaps: [THREE.BufferGeometry, THREE.BufferGeometry];
   steer: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
   frontAssy: THREE.BufferGeometry | null;
@@ -1323,6 +1407,10 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
 
   const flap = new MB(true);
   drsFlap(flap, level);
+  const fwFlapL = new MB(true);
+  frontFlap(fwFlapL, level, 1);
+  const fwFlapR = new MB(true);
+  frontFlap(fwFlapR, level, -1);
 
   let steer: MB | null = null;
   if (level === 0) {
@@ -1417,6 +1505,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
       }),
     ) as CarGeoLevel['parts'],
     flap: flap.build(),
+    fwFlaps: [fwFlapL.build(), fwFlapR.build()],
     steer: steer ? steer.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
     frontAssy: frontAssy ? frontAssy.build() : null,
@@ -1431,7 +1520,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
     PART_IDS.reduce((n, k) => n + tri(out.parts[k].paint) + tri(out.parts[k].carbon) + tri(out.parts[k].trim), 0) +
-    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.steer) +
+    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;
 }

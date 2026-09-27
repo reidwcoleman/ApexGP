@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CarGeoLevel } from './carGeometry.ts';
-import { FLAP_PIVOT } from './carGeometry.ts';
+import { FLAP_PIVOT, FW_FLAP_PIVOT } from './carGeometry.ts';
 import { TRACK_F, TRACK_R, TYRE_W_F, TYRE_W_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE } from './carLayout.ts';
 
 /**
@@ -58,7 +58,7 @@ export function bakeCarAO(L: CarGeoLevel): number {
   const scene = new THREE.Scene();
   const mat = new THREE.ShaderMaterial({ vertexShader: DEPTH_VERT, fragmentShader: DEPTH_FRAG, side: THREE.DoubleSide, uniforms: { uGround: { value: 0 } } });
   const groundMat = new THREE.ShaderMaterial({ vertexShader: DEPTH_VERT, fragmentShader: DEPTH_FRAG, side: THREE.DoubleSide, uniforms: { uGround: { value: 1 } } });
-  const receivers: THREE.BufferGeometry[] = [];
+  const receivers: { g: THREE.BufferGeometry; off: THREE.Vector3 }[] = [];
   const add = (g: THREE.BufferGeometry | null | undefined, receive = true, m?: THREE.Matrix4) => {
     if (!g) return;
     const mesh = new THREE.Mesh(g, mat);
@@ -67,7 +67,8 @@ export function bakeCarAO(L: CarGeoLevel): number {
       mesh.matrix.copy(m);
     }
     scene.add(mesh);
-    if (receive) receivers.push(g);
+    // (pivot-local parts are only translated: the offset takes them to body space)
+    if (receive) receivers.push({ g, off: m ? new THREE.Vector3().setFromMatrixPosition(m) : new THREE.Vector3() });
   };
   const B = L.body;
   add(B.paint);
@@ -81,6 +82,7 @@ export function bakeCarAO(L: CarGeoLevel): number {
     add(L.parts[k].trim);
   }
   add(L.flap, true, new THREE.Matrix4().makeTranslation(FLAP_PIVOT[0], FLAP_PIVOT[1], FLAP_PIVOT[2]));
+  for (const f of L.fwFlaps) add(f, true, new THREE.Matrix4().makeTranslation(FW_FLAP_PIVOT[0], FW_FLAP_PIVOT[1], FW_FLAP_PIVOT[2]));
   // occluders only: the wheels (as solid drums) and the road
   const drumF = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, TYRE_W_F, 20).rotateZ(Math.PI / 2);
   const drumR = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, TYRE_W_R, 20).rotateZ(Math.PI / 2);
@@ -107,7 +109,7 @@ export function bakeCarAO(L: CarGeoLevel): number {
   r.setClearColor(0x000000, 1);
 
   // per receiver: visibility sum and weight sum per vertex
-  const acc = receivers.map((g) => ({ g, vis: new Float32Array(g.attributes.position.count), w: new Float32Array(g.attributes.position.count) }));
+  const acc = receivers.map(({ g, off }) => ({ g, off, vis: new Float32Array(g.attributes.position.count), w: new Float32Array(g.attributes.position.count) }));
   const p = new THREE.Vector3();
   const n = new THREE.Vector3();
   const view = new THREE.Matrix4();
@@ -123,13 +125,12 @@ export function bakeCarAO(L: CarGeoLevel): number {
     for (const a of acc) {
       const pos = a.g.attributes.position as THREE.BufferAttribute;
       const nor = a.g.attributes.normal as THREE.BufferAttribute;
-      const flapM = a.g === L.flap;
       for (let i = 0; i < pos.count; i++) {
         n.fromBufferAttribute(nor, i);
         const c = n.dot(d);
         if (c <= 0.02) continue;
         p.fromBufferAttribute(pos, i);
-        if (flapM) p.set(p.x + FLAP_PIVOT[0], p.y + FLAP_PIVOT[1], p.z + FLAP_PIVOT[2]);
+        p.add(a.off);
         // a small push off the surface so a vertex doesn't shadow itself
         p.addScaledVector(n, 0.012).applyMatrix4(view);
         const u = Math.floor(((p.x / RADIUS) * 0.5 + 0.5) * RES);
