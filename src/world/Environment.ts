@@ -55,6 +55,14 @@ const DEG = Math.PI / 180;
 const E_REF = 4.0;
 /** floodlight irradiance scale at full night (one row of lamps at the track centre) */
 const FLOOD_E = 1.9;
+/**
+ * A night race is dark: a quarter of the masts (see env/night.ts) and dim pools between them, so
+ * the circuit is mostly lit by the cars' own headlights. (Twilight keeps its full floodlights.)
+ */
+const NIGHT_FLOOD = 0.12;
+/** at night the eye adapts only this far: it stays dark instead of being exposed back up to day */
+const NIGHT_MAX_ADAPT = 1.5;
+const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
 
 const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
   low: { shadowMap: 1024, farSize: 280, rain: 0.45 },
@@ -384,8 +392,10 @@ export function createEnvironment(
     // ---- eye adaptation: expose (partially) for the light falling on the ground, so a grey
     // day or a golden evening stays readable while keeping its mood
     const skyE = THREE.MathUtils.lerp(C.skyIrr, Math.PI * deckRad * 1.15, ov);
-    const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE + FLOOD_E * (P.flood ?? 0) * 1.4;
-    const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, 4.5);
+    const nightK = P.night ?? 0;
+    const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE + FLOOD_E * (P.flood ?? 0) * floodScale(nightK) * 1.4;
+    const maxAdapt = THREE.MathUtils.lerp(4.5, NIGHT_MAX_ADAPT, THREE.MathUtils.smoothstep(nightK, 0.5, 1));
+    const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, maxAdapt);
     gradeLook.exposure = L.exposure * adapt;
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
@@ -491,7 +501,7 @@ export function createEnvironment(
     const shaftK = P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) + 0.45 * gaps : 0);
     gfx.setSunShafts(sunDir, shaftK, 0.55 * C.E0 * 0.25);
     gfx.grade.setLook(gradeLook);
-    const F = FLOOD_E * fl;
+    const F = FLOOD_E * fl * floodScale(night);
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
     floods.set(fl, haze, aerialParams.x);
