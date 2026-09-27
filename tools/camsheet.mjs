@@ -4,7 +4,7 @@ const [track = 'monza', modes = 'chase,far,tcam,cockpit,nose,wheel', out = 'shot
 const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=chase&skip=40&weather=clear&time=afternoon`);
+await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=chase&skip=40&weather=clear&time=${process.env.TIME ?? "afternoon"}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
 await page.evaluate(() => { document.getElementById('ui').style.visibility = 'hidden'; window.__game.adaptQuality = () => {}; window.__game.gfx.setDynamicScale(1); });
 for (const m of modes.split(',')) {

@@ -54,6 +54,7 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
+import { setCarAORenderer } from '../car/carAO.ts';
 import { preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
@@ -326,6 +327,7 @@ export class Game {
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     await pixels;
     mark('pixels');
+    setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice
     const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
     await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
@@ -2815,8 +2817,9 @@ export class Game {
     const st = this.menu.settings;
     // (a timer that claims more than the frame interval while the frame rate holds is lying)
     const timed = isFinite(gpu) && gfx.timerTrusted && !(gpu > 1000 / Math.max(fps, 1) * 1.15 && fps > 55);
-    // (resolution is worth more than the last few frames a second: it only steps down under ~50 fps)
-    const slow = timed ? gpu > 19 && fps < 52 : fps < 48;
+    // (below ~54 fps a 60 Hz screen judders visibly: step the resolution down; a raise that
+    // doesn't hold sets a ceiling for 30 s, so this doesn't pump)
+    const slow = timed ? gpu > 19 && fps < 52 : fps < 54;
     const roomy = timed ? gpu < 12.5 : fps > 58;
     if (slow) {
       aq.headroom = 0;

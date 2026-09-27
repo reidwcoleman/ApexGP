@@ -666,8 +666,27 @@ export class Cameras {
     if (!this.initialized) this.chaseLook.copy(look);
     this.chaseLook.lerp(look, ease(dt, 14));
     this.camLook.copy(carPos).add(this.chaseLook);
+    // weight: the view dips under braking and lifts on the throttle, and leans a couple of degrees
+    // with the lateral G (a camera on a car-mounted arm, not a drone)
+    const pitchT = THREE.MathUtils.clamp(car.ax * 0.0032, -0.07, 0.05);
+    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0022, -0.04, 0.04);
+    if (!this.initialized) {
+      this.chasePitch = pitchT;
+      this.chaseRoll = rollT;
+    }
+    this.chasePitch += (pitchT - this.chasePitch) * ease(dt, 5);
+    this.chaseRoll += (rollT - this.chaseRoll) * ease(dt, 3.5);
+    this.camLook.y += this.chasePitch * ahead;
+    // road feel: a low rumble growing with speed (smooth, below the frame rate's aliasing); kerbs,
+    // grass and impacts come through as rotation of the lens (applyRotShake)
+    const t = this.shakeT;
+    const sp = Math.min(1, kmh / 320);
+    const rumble = sp * sp * 0.0035;
     cam.position.copy(this.v4);
+    cam.position.x += (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble;
+    cam.position.y += (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble;
     cam.lookAt(this.camLook);
+    cam.rotateZ(this.chaseRoll);
     // shake as rotation of the lens (a few millimetres of travel is invisible 5 m back; a fraction of
     // a degree of pitch and roll is what kerbs and bumps look like)
     this.applyRotShake(car, speed, kmh, far ? 0.7 : 1);
@@ -675,6 +694,8 @@ export class Cameras {
     this.setFov(fovFor(far ? 44 : 47, cam.aspect) + Math.min(1, kmh / 330) * 6, dt, !this.initialized);
     this.initialized = true;
   }
+  private chasePitch = 0;
+  private chaseRoll = 0;
 
   /** band-limited pitch / yaw / roll shake in the camera's own frame: speed buzz, kerbs, grass, impacts */
   private applyRotShake(car: CarPhysics, speed: number, kmh: number, k: number) {

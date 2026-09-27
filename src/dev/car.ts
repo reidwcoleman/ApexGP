@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { createDevStage, studioLighting } from './devkit.ts';
 import { TEAMS } from '../race/Teams.ts';
+import { setCarAORenderer } from '../car/carAO.ts';
 import { createCar, preloadCarAssets, carTriangles, type CarRig, type Compound } from '../car/CarModel.ts';
 import { weatherUniforms } from '../world/weatherUniforms.ts';
 
@@ -21,6 +22,7 @@ const stage = createDevStage({
   fov: 40,
 });
 const P = stage.params;
+setCarAORenderer(stage.gfx.renderer);
 stage.gfx.grade.set({ exposure: Number(P.get('exp') ?? 0.85) });
 const { key, floor } = studioLighting(stage, 1);
 key.intensity = 2.3;

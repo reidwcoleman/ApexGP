@@ -295,9 +295,9 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
       airfield: { fs: [320, 210], keep: 0.9, tree: 0.24, trees: ['oak', 'oak', 'plane', 'chestnut'], shrub: [1.5, 0.6], step: 7, treeS: [0.72, 0.4] },
       park: { fs: [320, 210], keep: 0.55, tree: 0.4, trees: ['poplar', 'poplar', 'plane', 'oak'], shrub: [1.3, 0.5], step: 8, treeS: [0.8, 0.3] },
       ardennes: { fs: [320, 210], keep: 0.6, tree: 0.3, trees: ['oak', 'chestnut', 'spruce'], shrub: [1.4, 0.5], step: 7, treeS: [0.75, 0.35] },
-      spielberg: { fs: [320, 210], keep: 0.45, tree: 0.45, trees: ['spruce', 'oak', 'chestnut'], shrub: [1.3, 0.5], step: 9, treeS: [0.7, 0.35] },
-      austin: { fs: [320, 210], keep: 0.5, tree: 0.55, trees: ['oak', 'oak', 'oak', 'spruce'], shrub: [1.2, 0.5], step: 12, treeS: [0.8, 0.45] },
-      hungaroring: { fs: [560, 380], keep: 0.5, tree: 0.5, trees: ['poplar', 'oak', 'plane', 'poplar'], shrub: [1.4, 0.5], step: 8, treeS: [0.75, 0.35] },
+      spielberg: { fs: [320, 210], keep: 0.6, tree: 0.45, trees: ['spruce', 'oak', 'chestnut'], shrub: [1.3, 0.5], step: 9, treeS: [0.7, 0.35] },
+      austin: { fs: [320, 210], keep: 0.7, tree: 0.55, trees: ['oak', 'oak', 'oak', 'spruce'], shrub: [1.2, 0.5], step: 9, treeS: [0.8, 0.45] },
+      hungaroring: { fs: [560, 380], keep: 0.68, tree: 0.5, trees: ['poplar', 'oak', 'plane', 'poplar'], shrub: [1.4, 0.5], step: 8, treeS: [0.75, 0.35] },
     };
     const H = HEDGES[map.venue];
     if (H) {

@@ -147,6 +147,11 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
 - `node tools/flow.mjs` — garage → race → pause → restart → simulated race (with travel): page errors.
 - `node tools/tour.mjs <track> [n]`, `tools/camsheet.mjs`, `tools/shot2x.mjs` — screenshots.
+- `node tools/tvsheet.mjs <track>` (TV director frames), `tools/horizon.mjs <track> <bearings>`, `tools/lookat.mjs`,
+  `tools/carshots.mjs [team]` (studio angles) — more screenshots.
+- `node tools/console.mjs <track>` — shader / page errors while a circuit boots and races (run it for all 14 after shader edits).
+- `node tools/bootprof.mjs`, `tools/bootcache.mjs` — boot profile; cold vs cached (IndexedDB liveries + fan atlas) boot.
+- `node tools/liveryhash.mjs [port]` — hash of every painted livery (proves a Livery.ts refactor is pixel-identical).
 
 ## Credits
 
