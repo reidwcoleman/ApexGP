@@ -18,6 +18,9 @@ import { TRACK_F, TRACK_R, TYRE_W_F, TYRE_W_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXL
 const DIRS = 48;
 const RES = 256;
 const RADIUS = 3.1;
+/** directions rendered side by side into one target (TILE × TILE) and read back together: a GPU
+ * readback stalls the pipeline whatever its size, so 16 views per read is 9 stalls at boot, not 144 */
+const TILE = 4;
 
 let renderer: THREE.WebGLRenderer | null = null;
 /** the game's renderer (set once at boot; without it the car renders unbaked) */
@@ -94,10 +97,11 @@ export function bakeCarAO(L: CarGeoLevel): number {
   scene.add(new THREE.Mesh(ground, groundMat));
   scene.updateMatrixWorld(true);
 
-  const rt = new THREE.WebGLRenderTarget(RES, RES, { type: THREE.FloatType, format: THREE.RGBAFormat, depthBuffer: true, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  const RT = RES * TILE;
+  const rt = new THREE.WebGLRenderTarget(RT, RT, { type: THREE.FloatType, format: THREE.RGBAFormat, depthBuffer: true, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
   const cam = new THREE.OrthographicCamera(-RADIUS, RADIUS, RADIUS, -RADIUS, 0.1, RADIUS * 4);
   const centre = new THREE.Vector3(0, 0.5, 0);
-  const buf = new Float32Array(RES * RES * 4);
+  const buf = new Float32Array(RT * RT * 4);
   const dirs = fibonacci(DIRS);
   const prevRT = r.getRenderTarget();
   const prevClear = r.getClearColor(new THREE.Color());
@@ -113,40 +117,58 @@ export function bakeCarAO(L: CarGeoLevel): number {
   const p = new THREE.Vector3();
   const n = new THREE.Vector3();
   const view = new THREE.Matrix4();
-  for (const d of dirs) {
-    cam.position.copy(centre).addScaledVector(d, RADIUS * 2);
-    cam.up.set(Math.abs(d.y) > 0.95 ? 1 : 0, Math.abs(d.y) > 0.95 ? 0 : 1, 0);
-    cam.lookAt(centre);
-    cam.updateMatrixWorld(true);
-    view.copy(cam.matrixWorldInverse);
+  const views = dirs.map(() => new THREE.Matrix4());
+  const per = TILE * TILE;
+  for (let b0 = 0; b0 < dirs.length; b0 += per) {
+    const batch = dirs.slice(b0, b0 + per);
+    // one clear of the whole target, then each direction into its own tile
+    rt.scissorTest = false;
+    rt.viewport.set(0, 0, RT, RT);
     r.setRenderTarget(rt);
-    r.render(scene, cam);
-    r.readRenderTargetPixels(rt, 0, 0, RES, RES, buf);
-    for (const a of acc) {
-      const pos = a.g.attributes.position as THREE.BufferAttribute;
-      const nor = a.g.attributes.normal as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        n.fromBufferAttribute(nor, i);
-        const c = n.dot(d);
-        if (c <= 0.02) continue;
-        p.fromBufferAttribute(pos, i);
-        p.add(a.off);
-        // a small push off the surface so a vertex doesn't shadow itself
-        p.addScaledVector(n, 0.012).applyMatrix4(view);
-        const u = Math.floor(((p.x / RADIUS) * 0.5 + 0.5) * RES);
-        const v = Math.floor(((p.y / RADIUS) * 0.5 + 0.5) * RES);
-        a.w[i] += c;
-        if (u < 0 || v < 0 || u >= RES || v >= RES) {
-          a.vis[i] += c;
-          continue;
+    r.clear();
+    rt.scissorTest = true;
+    batch.forEach((d, j) => {
+      const tx = (j % TILE) * RES, ty = Math.floor(j / TILE) * RES;
+      cam.position.copy(centre).addScaledVector(d, RADIUS * 2);
+      cam.up.set(Math.abs(d.y) > 0.95 ? 1 : 0, Math.abs(d.y) > 0.95 ? 0 : 1, 0);
+      cam.lookAt(centre);
+      cam.updateMatrixWorld(true);
+      views[b0 + j].copy(cam.matrixWorldInverse);
+      rt.viewport.set(tx, ty, RES, RES);
+      rt.scissor.set(tx, ty, RES, RES);
+      r.setRenderTarget(rt);
+      r.render(scene, cam);
+    });
+    r.readRenderTargetPixels(rt, 0, 0, RT, RT, buf);
+    batch.forEach((d, j) => {
+      const tx = (j % TILE) * RES, ty = Math.floor(j / TILE) * RES;
+      view.copy(views[b0 + j]);
+      for (const a of acc) {
+        const pos = a.g.attributes.position as THREE.BufferAttribute;
+        const nor = a.g.attributes.normal as THREE.BufferAttribute;
+        for (let i = 0; i < pos.count; i++) {
+          n.fromBufferAttribute(nor, i);
+          const c = n.dot(d);
+          if (c <= 0.02) continue;
+          p.fromBufferAttribute(pos, i);
+          p.add(a.off);
+          // a small push off the surface so a vertex doesn't shadow itself
+          p.addScaledVector(n, 0.012).applyMatrix4(view);
+          const u = Math.floor(((p.x / RADIUS) * 0.5 + 0.5) * RES);
+          const v = Math.floor(((p.y / RADIUS) * 0.5 + 0.5) * RES);
+          a.w[i] += c;
+          if (u < 0 || v < 0 || u >= RES || v >= RES) {
+            a.vis[i] += c;
+            continue;
+          }
+          const k = ((ty + v) * RT + tx + u) * 4;
+          const depth = buf[k];
+          const mine = -p.z;
+          if (depth === 0 || mine <= depth + 0.02) a.vis[i] += c;
+          else if (buf[k + 1] > 0.5) a.vis[i] += c * GROUND_BOUNCE;
         }
-        const k = (v * RES + u) * 4;
-        const depth = buf[k];
-        const mine = -p.z;
-        if (depth === 0 || mine <= depth + 0.02) a.vis[i] += c;
-        else if (buf[k + 1] > 0.5) a.vis[i] += c * GROUND_BOUNCE;
       }
-    }
+    });
   }
   r.setRenderTarget(prevRT);
   r.setClearColor(prevClear, prevAlpha);
