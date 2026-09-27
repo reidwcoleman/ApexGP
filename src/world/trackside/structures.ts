@@ -192,6 +192,8 @@ export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
   buildGantry(ctx, atlas);
   // sponsor footbridges
   vp.bridges.forEach((s, k) => buildBridge(ctx, atlas, s, k));
+  // sponsor arches over the straights: something to drive through between the bridges
+  buildArches(ctx, atlas, [...vp.bridges, ctx.track.startS]);
   buildMarshalPosts(ctx, atlas, out);
   placePhotographers(ctx, out);
   buildCameras(ctx, vp.cameras);
@@ -332,6 +334,74 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
     printQuadZ(print, F, -D / 2 - 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, -1, cellA);
     printQuadZ(print, F, D / 2 + 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, 1, cellB);
   }
+}
+
+// ------------------------------------------------------------------ sponsor arches
+
+/**
+ * Up to three sponsor arches per circuit, found automatically: a lattice truss on two lattice legs
+ * behind the barriers, a printed banner across both faces, and an LED strip along the underside
+ * that glows after dark. Only on straights (nothing overhead mid-corner), well clear of the
+ * footbridges, the start gantry, the pit lane and any part of the circuit crossing close by.
+ */
+function buildArches(ctx: Ctx, atlas: PrintAtlas, taken: number[]) {
+  const t = ctx.track;
+  const L = t.length;
+  const clear = (s: number) => taken.every((u) => Math.abs(t.delta(u, s)) > 260);
+  const straight = (s: number) => {
+    for (let d = -70; d <= 70; d += 10) if (Math.abs(t.kappaAt(t.wrap(s + d))) > 1 / 900) return false;
+    return true;
+  };
+  const picks: number[] = [];
+  for (let s = 40; s < L && picks.length < 3; s += 20) {
+    if (t.inPit(s) || t.inPit(s + 80) || t.inPit(s - 80) || !straight(s) || !clear(s)) continue;
+    const i = ctx.wrap(Math.floor(s));
+    const p = t.point(s, 0, 0, A);
+    if (t.distanceToOther(p.x, p.z, i, 160) < 60) continue;
+    picks.push(s);
+    taken.push(s);
+  }
+  picks.forEach((s, k) => buildArch(ctx, atlas, s, k));
+}
+
+function buildArch(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
+  const t = ctx.track;
+  const i = ctx.wrap(Math.floor(s));
+  const props = ctx.cs.get(s, 'props');
+  const print = ctx.cs.get(s, 'print');
+  const reach = (P: typeof ctx.L) => Math.min(t.halfWidthAt(s) + 22, (P.kind[i] === 'none' ? P.bar[i] : P.bar[i] + P.backOff[i]) + 1.4);
+  const xl = -reach(ctx.L);
+  const xr = reach(ctx.R);
+  frameAt(ctx, s, 0);
+  const ground = (x: number) => t.point(s, x, 0, A).y - F.o.y;
+  const BOT = 6.9, TOP = 8.5;
+
+  // legs and truss: dark painted steel
+  props.color(0x24272c).mat(0.45, 0.7, 0);
+  for (const x of [xl, xr]) {
+    latticeColumn(props, F, x, 0, 0.8, ground(x), TOP + 0.1, 0.11);
+    props.color(0x777a7d).mat(0.85, 0.1, 0);
+    box(props, F, x, ground(x) + 0.12, 0, 1.2, 0.24, 1.2);
+    props.color(0x24272c).mat(0.45, 0.7, 0);
+  }
+  truss(props, F, xl - 0.3, xr + 0.3, BOT, TOP - BOT, 0.9, 0.12);
+
+  // banners across both faces: the same sponsor repeated along a face, as a real arch is printed
+  const w = 5.2;
+  const nb = Math.max(1, Math.floor((xr - xl - 0.6) / w));
+  const bx0 = (xl + xr) / 2 - (nb * w) / 2;
+  const main = atlas.cell('ad' + ((salt * 5 + 2) % SPONSORS.length));
+  const alt = atlas.cell('ad' + ((salt * 5 + 9) % SPONSORS.length));
+  print.rgb(1, 1, 1).mat(0.5, 0, 0.3);
+  for (let k = 0; k < nb; k++) {
+    const x = bx0 + k * w;
+    const c = k === Math.floor(nb / 2) ? alt : main;
+    printQuadZ(print, F, -0.5, x + 0.04, x + w - 0.04, BOT + 0.05, TOP - 0.05, -1, c);
+    printQuadZ(print, F, 0.5, x + 0.04, x + w - 0.04, BOT + 0.05, TOP - 0.05, 1, c);
+  }
+  // LED strip along the underside (self-lit: it reads at night and in the rain)
+  props.color(0xdfeaff).mat(0.3, 0, 1.4);
+  box(props, F, (xl + xr) / 2, BOT - 0.06, 0, xr - xl - 0.8, 0.06, 0.16, 0b111111);
 }
 
 // ------------------------------------------------------------------ marshals
