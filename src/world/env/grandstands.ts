@@ -1001,6 +1001,28 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     }
   }
 
+  // ---------------------------------------------------------------- nobody on the track
+  // A stand or a bank laid out along one stretch can reach toward another (a stadium section, a
+  // hairpin, a parallel straight): any fan that ends up on a road or inside its barriers goes,
+  // and so does any concourse walk that would cross one.
+  const onCircuit = (x: number, z: number, hint = -1) => {
+    const pr = track.project(x, z, hint);
+    const lat = Math.abs(pr.lateral);
+    if (lat < track.halfWidthAt(pr.s) + 3) return true;
+    return lat < track.barrierAt(pr.s, pr.lateral < 0 ? -1 : 1) + 0.8 && !track.inPit(pr.s);
+  };
+  {
+    let k = 0;
+    for (const p of people) if (!onCircuit(p.m.elements[12], p.m.elements[14])) people[k++] = p;
+    people.length = k;
+    k = 0;
+    for (const f of flags) if (!onCircuit(f.m.elements[12], f.m.elements[14])) flags[k++] = f;
+    flags.length = k;
+    k = 0;
+    for (const path of concourse) if (!path.some((q) => onCircuit(q.x, q.z))) concourse[k++] = path;
+    concourse.length = k;
+  }
+
   // ---------------------------------------------------------------- meshes
   const structMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
   const steelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.35 });

@@ -43,6 +43,8 @@ export interface Environment {
   heightAt(x: number, z: number): number;
   /** free every GPU resource this environment owns (world switch); `keep`: shared resources to leave alone */
   dispose(keep?: Set<object>): void;
+  /** 0 outdoors … 1 inside the garage: the sky's ambient light is mostly shut out (the roof and walls) */
+  setIndoor(k: number): void;
   readonly buildMs: number;
   /** build breakdown + instance counts */
   readonly stats: Record<string, unknown>;
@@ -212,6 +214,7 @@ export function createEnvironment(
   let lastLightning = 0;
   let flashLevel = 0;
   const last = { cloud: -1, rain: -1, fog: -1, time: '' as string };
+  let indoor = 0;
 
   // colours derived from the atmosphere for the current time (linear radiance)
   const C = {
@@ -674,8 +677,8 @@ export function createEnvironment(
     // the channel stays lit through the restrikes, fading with them
     sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
     // the whole scene lights up cold white for an instant (the flash fills the sky the env map is made of)
-    scene.environmentIntensity = look.envIntensity * (1 + L * 1.7);
-    hemi.intensity = look.hemi + L * 0.7 * (1 - look.sunVis * 0.6);
+    scene.environmentIntensity = look.envIntensity * (1 + L * 1.7) * (1 - 0.72 * indoor);
+    hemi.intensity = (look.hemi + L * 0.7 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
     gfx.setFlash(L * 0.2);
   }
 
@@ -775,6 +778,9 @@ export function createEnvironment(
     buildMs,
     stats,
     heightAt: (x: number, z: number) => scenery.heightAt(x, z),
+    setIndoor(k: number) {
+      indoor = Math.max(0, Math.min(1, k));
+    },
     dispose(keep = new Set<object>()) {
       if (scene.environment === envRT?.texture) scene.environment = null;
       if (scene.fog === fog) scene.fog = null;

@@ -248,12 +248,12 @@ export function sunDirection(p: TimePreset, out: { x: number; y: number; z: numb
 }
 
 /**
- * The post chain tone-maps with AgX, which (unlike ACES) keeps hues true but
- * lifts and desaturates the mid-tones; these put back the punch of a broadcast
- * camera. The per-time values above stay relative to each other.
+ * The post chain tone-maps with Khronos PBR Neutral, which keeps base colours true and only
+ * rolls off the highlights; a light touch of broadcast-camera punch on top. The per-time
+ * values above stay relative to each other.
  */
-const AGX_SAT = 1.12;
-const AGX_CONTRAST = 1.1;
+const TONE_SAT = 1.04;
+const TONE_CONTRAST = 1.04;
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (a: number, b: number, x: number) => {
@@ -341,8 +341,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
   const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK));
-  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick) * AGX_SAT;
-  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * AGX_CONTRAST;
+  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick) * TONE_SAT;
+  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * TONE_CONTRAST;
   const tintK = dim;
   const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK), mix(P.tint[1], 0.99, tintK), mix(P.tint[2], 1.02, tintK)];
   const shadowTint: [number, number, number] = [

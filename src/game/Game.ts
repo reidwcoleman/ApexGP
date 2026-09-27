@@ -434,7 +434,10 @@ export class Game {
 
     if (people) {
       await step(0.36, 'Getting the people in');
-      await people;
+      const kit = (await people) as { whenAll?: Promise<void> } | undefined;
+      // everyone, not just the first few: marshals, photographers, the paddock and the fans on the
+      // concourses are built from the full set, and would otherwise pop in mid-race
+      if (kit?.whenAll) await Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]);
       lap('people');
     }
     // every pit crew (people, wheels, guns, jacks) now, so nothing is built mid-race
@@ -541,8 +544,37 @@ export class Game {
       t = performance.now();
     };
     const menu = this.state === 'menu';
+    // the lazily built sets (trackside people, strollers, the paddock) build on their first update
+    this.env.update(0, this.camera);
+    this.trackside.update(0, this.camera);
+    this.pits.update(0, this.camera);
     // the pit crews are hidden until the camera nears them: show them all for the compile + first render
     this.pits.warm?.(true);
+    // and so is much else until the camera comes near (levels of detail, far people, distant crowds):
+    // unhide the world for the compile, so nothing first appears — or compiles — mid-race
+    const hidden: THREE.Object3D[] = [];
+    const keepHidden = new Set<THREE.Object3D>([this.garageLights]);
+    this.scene.traverse((o) => {
+      if (!o.visible && !keepHidden.has(o) && !(o as THREE.Light).isLight) hidden.push(o);
+    });
+    // every texture onto the GPU now (not on the frame something first shows it)
+    const textures = new Set<THREE.Texture>();
+    this.scene.traverse((o) => {
+      const mats = (o as THREE.Mesh).material;
+      if (!mats) return;
+      for (const m of Array.isArray(mats) ? mats : [mats]) {
+        for (const v of Object.values(m)) if ((v as THREE.Texture)?.isTexture) textures.add(v as THREE.Texture);
+        const u = (m as THREE.ShaderMaterial).uniforms;
+        if (u) for (const k in u) if ((u[k]?.value as THREE.Texture)?.isTexture) textures.add(u[k].value as THREE.Texture);
+      }
+    });
+    for (const t of textures) {
+      try {
+        if (!(t as THREE.VideoTexture).isVideoTexture && !(t as THREE.Texture & { isRenderTargetTexture?: boolean }).isRenderTargetTexture) r.initTexture(t);
+      } catch {
+        /* a texture whose image isn't ready yet uploads when it is */
+      }
+    }
     // the scene is only ever drawn into the post chain's linear targets (Renderer.render → composer),
     // never straight to the canvas: compile for a bound target, or the programs built here (sRGB
     // output) aren't the ones the race uses and everything recompiles mid-race
@@ -555,10 +587,12 @@ export class Game {
     this.garageLights.visible = true;
     if (this.garage) this.garage.group.visible = true;
     compileLinear();
-    // racing: sun and sky only
+    // racing: sun and sky only — with everything the camera may meet out on the lap shown
     this.garageLights.visible = false;
     if (this.garage) this.garage.group.visible = false;
+    for (const o of hidden) o.visible = true;
     compileLinear();
+    for (const o of hidden) o.visible = false;
     // the podium adds a spot light
     const spot = new THREE.SpotLight(0xffffff, 0);
     this.scene.add(spot);
@@ -568,8 +602,11 @@ export class Game {
     r.setRenderTarget(prevTarget);
     linear.dispose();
     // one real frame in race lighting: the shadow-map depth programs (light counts are part of their
-    // key, so the menu's garage-lit frame doesn't build them) and the first uploads
+    // key, so the menu's garage-lit frame doesn't build them) and the first uploads — of everything,
+    // hidden levels of detail included (a buffer uploaded mid-race is a dropped frame)
+    for (const o of hidden) o.visible = true;
     this.gfx.render(0.016);
+    for (const o of hidden) o.visible = false;
     lap();
     this.garageLights.visible = menu;
     if (this.garage) this.garage.group.visible = menu;
@@ -636,9 +673,19 @@ export class Game {
 
   /** roll a new forecast for the setup's weather/time choices */
   private weekendSeed = (Math.random() * 2 ** 31) | 0;
+  /** the forecast hasn't been raced yet (the garage shows it; the next session uses it, later ones roll again) */
+  private planFresh = false;
   private rollWeather(setup: RaceSetup) {
     const laps = setup.laps;
-    this.plan = planWeather(setup.weather, setup.time, laps * 85 + 60);
+    // a different sky from the last race's (Random only: a fixed choice is a fixed choice)
+    const last = this.plan;
+    for (let i = 0; i < 8; i++) {
+      this.plan = planWeather(setup.weather, setup.time, laps * 85 + 60);
+      const skyNew = setup.weather !== 'random' || this.plan.start !== last?.start || this.plan.end !== last?.end;
+      const lightNew = setup.time !== 'random' || this.plan.time !== last?.time;
+      if (!last || (skyNew && lightNew)) break;
+    }
+    this.planFresh = true;
     // a new weekend: new form for every driver
     this.weekendSeed = (Math.random() * 2 ** 31) | 0;
     this.planKey = `${setup.weather}/${setup.time}`;
@@ -753,7 +800,11 @@ export class Game {
     this.celMoment = false;
     this.lastReward = null;
     this.autopilot = null;
-    if (`${setup.weather}/${setup.time}` !== this.planKey) this.rollWeather(setup);
+    // every session gets its own weather and time of day: the forecast shown in the garage is used
+    // once, and a restart / race again rolls a new one (qualifying and its race share the weekend's)
+    const weekendRace = mode === 'race' && !!this.gridOrder;
+    if (`${setup.weather}/${setup.time}` !== this.planKey || (!this.planFresh && !weekendRace)) this.rollWeather(setup);
+    this.planFresh = false;
     this.makeRace(mode, setup);
     this.hud.setup(this.race, this.track);
     this.engineer.reset(this.race);
@@ -1096,9 +1147,24 @@ export class Game {
     this.line.mesh.visible = showLine;
     // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
     if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
+    // dev/tools: a free camera (tools/tour.mjs) overrides whatever the state's camera did
+    if (this.freeCam) {
+      const F = this.freeCam;
+      this.camera.position.set(F.pos[0], F.pos[1], F.pos[2]);
+      this.camera.lookAt(F.look[0], F.look[1], F.look[2]);
+      if (this.camera.fov !== F.fov) {
+        this.camera.fov = F.fov;
+        this.camera.updateProjectionMatrix();
+      }
+    }
     // (back in the garage, the last race's weather stays until its highlights are filmed)
     const wx = (this.state === 'menu' && this.highlights.worldWeather(this.track.def.id)) || race.weatherState;
     applyWeatherUniforms(wx);
+    // in the garage the roof and walls shut most of the sky's light out (the tour's lane stops are outdoors)
+    const outside = this.tour.at === 'door' || this.tour.at === 'pitwall';
+    const indoor = this.state === 'menu' && !outside;
+    this.env.setIndoor(indoor ? 1 : 0);
+    this.gfx.indoor = indoor;
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
     this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos());
@@ -1409,6 +1475,7 @@ export class Game {
   }
 
   private leaveBroadcast() {
+    if (this.cams) this.cams.timeScale = 1;
     this.broadcast?.show(null);
     this.hud.setBroadcast(false);
     if (this.povRig) {
@@ -1454,10 +1521,12 @@ export class Game {
     this.syncAllViews(dt);
     const simDt = dt * steps;
     if (this.directorOn) {
-      this.director.update(simDt, race.time, race.raceTime, this.fieldLive(), ev, 0, this.cams, this.track, race.player.id);
+      // (shots are timed in real seconds: at 8× a 10 s shot would otherwise flash by in a second)
+      this.director.update(dt, race.time, race.raceTime, this.fieldLive(), ev, 0, this.cams, this.track, race.player.id);
       if (this.director.cutNow) this.applyDirector();
     }
     const fc = race.cars[this.focusId];
+    this.cams.timeScale = steps;
     this.cams.update(simDt, fc.car, this.rigs.get(fc.entry)!, this.track);
     this.povUpdate();
     this.hud.update(dt, race);
@@ -1688,11 +1757,12 @@ export class Game {
     this.syncAllViews(dt, R.ghosts);
     if (this.directorOn) {
       // a replay knows what's coming: the director gets there a few seconds early
-      this.director.update(step, this.replayT, R.raceTime, this.fieldReplay(), R.events, 3, this.cams, this.track, race.player.id);
+      this.director.update(this.replayPlaying ? dt : 0, this.replayT, R.raceTime, this.fieldReplay(), R.events, 3, this.cams, this.track, race.player.id);
       if (this.director.cutNow) this.applyDirector();
     }
     const k = this.focusId;
     const fc = race.cars[k];
+    this.cams.timeScale = Math.max(1, this.replaySpeed);
     this.cams.update(step, R.ghosts[k], this.rigs.get(fc.entry)!, this.track);
     this.povUpdate();
     const laps = race.opts.laps;
@@ -1770,6 +1840,14 @@ export class Game {
     if (opts.director === false || opts.camera) this.directorOn = false;
     if (opts.camera) this.cams.set(opts.camera);
     if (opts.playing !== undefined) this.replayPlaying = opts.playing;
+  }
+
+  /** dev/tools: hold the camera here (null: back to the game's cameras) */
+  freeCam: { pos: [number, number, number]; look: [number, number, number]; fov: number } | null = null;
+  /** dev/tools: a point on the track: world position of (s, lateral, height) */
+  trackPoint(s: number, lat = 0, h = 0): [number, number, number] {
+    const p = this.track.point(s, lat, h);
+    return [p.x, p.y, p.z];
   }
 
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
@@ -1933,7 +2011,8 @@ export class Game {
   private buildGarageLights() {
     const g = this.garageLights;
     g.name = 'garage-lights';
-    const key = new THREE.SpotLight(0xfff4e8, 130, 16, 0.75, 0.6, 1.6);
+    // a studio key from the light box: bright on the car, falling off fast so the garage stays moody
+    const key = new THREE.SpotLight(0xfff6ee, 78, 14, 0.62, 0.75, 1.6);
     key.position.set(0, 4.3, 0.6);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -1945,12 +2024,13 @@ export class Game {
     key.shadow.camera.layers.set(GARAGE_SHADOW_LAYER);
     g.add(key, key.target);
     // two soft fills from the ceiling strips (each light costs every lit pixel on screen)
-    for (const [z, i] of [[2.6, 22], [-2.4, 19]] as const) {
+    for (const [z, i] of [[2.6, 13], [-2.4, 11]] as const) {
       const p = new THREE.PointLight(0xf4f1ea, i, 10, 1.7);
       p.position.set(0, 3.7, z);
       g.add(p);
     }
-    const rim = new THREE.PointLight(0xbfd6ff, 18, 10, 1.6);
+    // a cool rim from behind: picks out the car's silhouette against the dark garage
+    const rim = new THREE.PointLight(0xa9c8ff, 22, 10, 1.6);
     rim.position.set(0, 1.6, -4.6);
     g.add(rim);
     // the lights also light the car in the floor mirror
@@ -2166,6 +2246,10 @@ export class Game {
       }
       this.garageLook = { grain: gfx.grain.blendMode.opacity.value, suns, refresh: 0, maxDyn: gfx.maxDynamic, fps: 50, slow: 0 };
       gfx.grain.blendMode.opacity.value = 0.02;
+      // a showroom grade: deeper blacks, a little more punch, the edges falling away to dark
+      gfx.grade.set({ contrast: 1.07, exposure: 0.97, saturation: 1.03 });
+      this.garageVignette = gfx.vignette.darkness;
+      gfx.vignette.darkness = 0.46;
       gfx.maxDynamic = menuMax();
       gfx.setDynamicScale(gfx.maxDynamic);
     }
@@ -2193,6 +2277,7 @@ export class Game {
       L.fps = 50;
     }
   }
+  private garageVignette = 0.26;
   private leaveGarageLook() {
     const L = this.garageLook;
     if (!L) return;
@@ -2205,6 +2290,8 @@ export class Game {
       this.mateOnStandsEntry = null;
     }
     this.gfx.grain.blendMode.opacity.value = L.grain;
+    this.gfx.grade.set({ contrast: 1, exposure: 1, saturation: 1 });
+    this.gfx.vignette.darkness = this.garageVignette;
     this.gfx.maxDynamic = L.maxDyn;
     if (this.gfx.dynamicScale > L.maxDyn) this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
     for (const l of L.suns) {
@@ -2533,8 +2620,9 @@ export class Game {
     const kmh = Math.max(0, car.vx * 3.6);
     const onboard = !!ONBOARD[this.cams.mode] || this.cams.mode === 'chase' || this.cams.mode === 'far';
     const k = onboard ? Math.max(0, Math.min(1, (kmh - 170) / 170)) : 0;
-    this.gfx.setSpeedBlur(k * k * 0.014 + (car.ersDeploying ? 0.002 : 0));
-    this.gfx.setAberration(k * 0.0011);
+    // (a hint of it at the edges: a heavy radial smear just reads as a blurry picture)
+    this.gfx.setSpeedBlur(k * k * 0.0085 + (car.ersDeploying ? 0.0015 : 0));
+    this.gfx.setAberration(k * 0.0007);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
     const cam = this.cams.mode;
@@ -2637,8 +2725,9 @@ export class Game {
   // ------------------------------------------------------------------ perf
 
   /**
-   * Dynamic resolution that holds 60 fps, checked twice a second with hysteresis.
-   * With the GPU timer the render scale follows the GPU's own frame time (aiming at ~13 ms,
+   * Dynamic resolution, checked twice a second with hysteresis. It gives up pixels only below
+   * ~50 fps and never below the preset's floor (0.8 on High): a sharp picture first.
+   * With the GPU timer the render scale follows the GPU's own frame time (aiming at ~17 ms,
    * so a CPU-bound frame never costs resolution); without it, the frame rate.
    * Down: at once, in proportion to the overrun. Up: one 5 % step after 2 s of headroom; a
    * raise that turns slow again within 4 s caps the scale below it for 30 s. The only
@@ -2668,9 +2757,11 @@ export class Game {
     if (now < aq.settleUntil) return;
     const gfx = this.gfx;
     const st = this.menu.settings;
-    const timed = isFinite(gpu);
-    const slow = timed ? gpu > 14.5 && fps < 58 : fps < 55;
-    const roomy = timed ? gpu < 10.5 : fps > 59;
+    // (a timer that claims more than the frame interval while the frame rate holds is lying)
+    const timed = isFinite(gpu) && gfx.timerTrusted && !(gpu > 1000 / Math.max(fps, 1) * 1.15 && fps > 55);
+    // (resolution is worth more than the last few frames a second: it only steps down under ~50 fps)
+    const slow = timed ? gpu > 19 && fps < 52 : fps < 48;
+    const roomy = timed ? gpu < 12.5 : fps > 58;
     if (slow) {
       aq.headroom = 0;
       // the last raise didn't hold: stay below it for a while
@@ -2679,7 +2770,7 @@ export class Game {
         aq.ceilingUntil = now + 30;
       }
       aq.raisedFrom = 0;
-      const k = timed ? THREE.MathUtils.clamp(Math.sqrt(13 / gpu), 0.72, 0.95) : fps < 40 ? 0.82 : 0.92;
+      const k = timed ? THREE.MathUtils.clamp(Math.sqrt(17 / gpu), 0.8, 0.95) : fps < 40 ? 0.86 : 0.93;
       const next = Math.max(gfx.minDynamic, Math.floor(gfx.dynamicScale * k * 20) / 20);
       if (next < gfx.dynamicScale - 0.001) {
         gfx.setDynamicScale(next);

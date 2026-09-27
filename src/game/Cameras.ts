@@ -166,6 +166,8 @@ export class Cameras {
   lookBack = false;
   /** extra shake requested by the game (contacts) */
   impulse = 0;
+  /** simulation seconds per real second (a sped-up simulated race / replay): shot timings stay in real time */
+  timeScale = 1;
 
   private camYaw = 0;
   private camPos = new THREE.Vector3();
@@ -363,6 +365,8 @@ export class Cameras {
 
   set(mode: CameraMode) {
     this.mode = mode;
+    this.lost = false;
+    this.lostPrev = false;
     this.initialized = false;
     this.tvIndex = -1;
     this.blimpInit = false;
@@ -604,8 +608,8 @@ export class Cameras {
     this.camYaw += dy * Math.min(1, dt * (far ? 7 : 10));
 
     // pulls back under acceleration, closes in under braking, stretches a little with speed
-    const dist = (far ? 8.4 : 5.35) + Math.max(-0.5, Math.min(0.7, -car.ax * 0.028)) + speed * 0.003;
-    const height = (far ? 2.5 : 1.42) + car.heave * 0.6;
+    const dist = (far ? 7.1 : 5.05) + Math.max(-0.45, Math.min(0.6, -car.ax * 0.024)) + speed * 0.0028;
+    const height = (far ? 2.05 : 1.32) + car.heave * 0.6;
     // spring the camera's offset from the car (not its world position): a world-space spring
     // trails a car at 300 km/h by ~2v/ω ≈ 12 m; the offset only lags the car's turns and surges
     const want = this.v3.set(-Math.sin(this.camYaw) * dist, height, -Math.cos(this.camYaw) * dist);
@@ -622,7 +626,7 @@ export class Cameras {
     const leadT = speed > 8 && !this.lookBack ? THREE.MathUtils.clamp(car.r * 0.16, -0.14, 0.14) : 0;
     this.lead += (leadT - this.lead) * Math.min(1, dt * 3);
     const ly = this.camYaw + this.lead;
-    const look = this.v3.set(carPos.x + Math.sin(ly) * 3.4, carPos.y + (far ? 0.75 : 0.88), carPos.z + Math.cos(ly) * 3.4);
+    const look = this.v3.set(carPos.x + Math.sin(ly) * 3.4, carPos.y + (far ? 0.72 : 0.84), carPos.z + Math.cos(ly) * 3.4);
     if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 3.0, carPos.y + 0.9, carPos.z + Math.cos(this.camYaw) * 3.0);
     // (also relative to the car, or it trails v/20 m behind at speed)
     look.sub(carPos);
@@ -633,7 +637,8 @@ export class Cameras {
     cam.position.x += sx;
     cam.position.y += sy;
     cam.lookAt(this.camLook);
-    this.setFov((far ? 54 : 56) + Math.min(1, kmh / 330) * 12, dt, !this.initialized);
+    // (a little wider at speed for the rush, never a fisheye)
+    this.setFov((far ? 52 : 55) + Math.min(1, kmh / 330) * 8, dt, !this.initialized);
     this.initialized = true;
   }
 
@@ -674,6 +679,8 @@ export class Cameras {
       up.addScaledVector(leftV, this.headRoll).normalize();
     }
     if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
+    // the driver's eyes sit high in the cockpit, looking over the wheel and the dash
+    if (this.mode === 'cockpit') this.v3.addScaledVector(up, 0.03).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), 0.05);
     const shakeK = mount ? mount.shake : 0.4;
     cam.position.copy(this.v3);
     cam.position.addScaledVector(up, sy * shakeK).addScaledVector(leftV, sx * shakeK);
@@ -685,7 +692,7 @@ export class Cameras {
       lift = 0;
     } else {
       f.set(0, 0, 1).applyQuaternion(this.q);
-      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? 0.2 : -0.35;
+      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? 0.2 : -0.6;
     }
     if (this.lookBack) f.negate();
     // look slightly into the corner in the cockpit
@@ -694,15 +701,17 @@ export class Cameras {
     cam.up.copy(up);
     cam.lookAt(look);
     cam.up.set(0, 1, 0);
-    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 74 : this.mode === 'tcam' ? 70 : 72;
-    this.setFov(baseFov + Math.min(1, kmh / 330) * 6, dt, !this.initialized);
+    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 70 : this.mode === 'tcam' ? 68 : 70;
+    this.setFov(baseFov + Math.min(1, kmh / 330) * 4, dt, !this.initialized);
     this.initialized = true;
   }
 
   /** TV director + operator: cut between the cameras that cover the car, frame and follow like a person on a long lens */
   private tvShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number, track: Track, kinds: ShotKind[]) {
     const cam = this.camera;
-    this.tvAge += dt;
+    // (timed in real seconds, however fast the simulation runs)
+    const realDt = dt / Math.max(1, this.timeScale);
+    this.tvAge += realDt;
     const covers = (c: TvCam) => track.delta(c.from, car.s) >= 0 && track.delta(car.s, c.to) >= 0;
     // where the car is (and will be in half a second): a camera must see both
     this.aim.copy(carPos);
@@ -713,13 +722,18 @@ export class Cameras {
     let cur = this.tvIndex >= 0 ? this.tv[this.tvIndex] : null;
     if (cur && !kinds.includes(cur.kind)) cur = null;
     // the camera on air loses the car (something's about to come between them): cut now
-    if (cur && !sees(cur)) this.tvBlockT += dt;
-    else this.tvBlockT = 0;
-    const blocked = this.tvBlockT > 0.05 || (cur !== null && this.tvBlockT > 0 && !this.initialized);
-    // hold a shot at least ~2.5 s; cut when the car leaves it, or to a fresher angle after a while
+    // (a lamp post or a tree flicking past the lens isn't worth a cut: only a car hidden for a beat is)
+    if (cur && !sees(cur)) this.tvBlockT += realDt;
+    else this.tvBlockT = Math.max(0, this.tvBlockT - realDt * 2);
+    const blocked = this.tvBlockT > 0.45 || (cur !== null && this.tvBlockT > 0 && !this.initialized);
+    // hold a shot at least ~6 s; cut when the car leaves it, or to a fresher angle after a long while
     let pick = cur && !blocked ? this.tvIndex : -1;
-    const stale = !cur || blocked || !covers(cur) || (this.tvAge > 7.5 && cur.kind !== 'apex' && cur.kind !== 'long');
-    if (stale || this.tvAge > 2.5) {
+    // an operator keeps panning with a car that has run past the end of their stretch while they
+    // can still see it and it isn't too far off (a shot that short would be a jump cut)
+    const past = cur !== null && !covers(cur);
+    const grace = past && this.tvAge < 4.5 && cur!.pos.distanceTo(carPos) < (cur!.kind === 'long' ? 520 : 300) * Math.min(3, Math.max(1, this.timeScale));
+    const stale = !cur || blocked || (past && !grace) || (this.tvAge > 14 && cur.kind !== 'apex' && cur.kind !== 'long');
+    if (stale || this.tvAge > 6) {
       let best = -1;
       let bestScore = -Infinity;
       for (let i = 0; i < this.tv.length; i++) {
@@ -730,10 +744,12 @@ export class Cameras {
         // the camera the car is heading toward (least of its coverage used), with a bonus for the dramatic ones
         const used = track.delta(c.from, car.s) / Math.max(1, track.delta(c.from, c.to));
         const dAhead = track.delta(car.s, c.s);
-        let score = -used + (c.kind === 'apex' && dAhead > 8 && dAhead < 40 ? 0.6 : 0) + (c.kind === 'tower' ? 0.15 : 0) + (c.kind === 'long' && used < 0.5 ? 0.35 : 0);
+        // and a stretch long enough to make a proper shot of it
+        const left = track.delta(car.s, c.to) / Math.max(20, speed);
+        let score = -used + Math.min(left, 8) * 0.12 + (c.kind === 'apex' && dAhead > 8 && dAhead < 40 ? 0.6 : 0) + (c.kind === 'tower' ? 0.15 : 0) + (c.kind === 'long' && used < 0.5 ? 0.35 : 0);
         // the wide, set-piece cameras are rarer in the automatic mix
         if (kinds.length > 3 && (c.kind === 'stand' || c.kind === 'gantry' || c.kind === 'pitwall')) score -= 0.25;
-        if (i === this.tvIndex) score += stale ? -5 : 0.35;
+        if (i === this.tvIndex) score += stale ? -5 : 0.8;
         const d = c.pos.distanceTo(carPos);
         if (d > 420 && c.kind !== 'long' && c.kind !== 'stand') score -= 2;
         if (score > bestScore) {
@@ -814,6 +830,10 @@ export class Cameras {
     this.tvRange = Math.max(4, dist * (tc.kind === 'long' ? 0.05 : 0.1));
   }
   private tvAge = 0;
+  /** real seconds the trackside angle on air has been up (the director doesn't cut a fresh angle away) */
+  get angleAge(): number {
+    return TV_KINDS[this.mode] ? this.tvAge : Infinity;
+  }
   private tvBlockT = 0;
   private lostPrev = false;
   /** the trackside camera on air can't see the car (and no other covering one can): the helicopter is standing in */

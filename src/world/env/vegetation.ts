@@ -90,11 +90,11 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     // (not in Montréal: the Canadian GP is in June)
     if (map.venue === 'montreal') return c;
     // Sakhir: dusty grey-olive desert scrub
-    if (map.venue === 'sakhir') return c.multiply(new THREE.Color(1.05, 0.9, 0.72));
+    if (map.venue === 'sakhir') return c.multiply(new THREE.Color(1.34, 1.0, 0.6));
     // Melbourne in March: the gums (oak / poplar / spruce crowns) blue-grey and olive, a few planes and elms turning
     if (map.venue === 'melbourne' && (sp === 'oak' || sp === 'poplar' || sp === 'spruce')) return c.multiply(new THREE.Color(0.8, 0.93, 0.86));
     // Abu Dhabi: dusty grey-olive desert trees (ghaf, acacia, sidr)
-    if (map.venue === 'yasmarina') return c.multiply(new THREE.Color(1.02, 0.96, 0.74));
+    if (map.venue === 'yasmarina') return c.multiply(sp === 'shrub' ? new THREE.Color(1.3, 1.0, 0.62) : new THREE.Color(1.02, 0.96, 0.74));
     // Mexico City at the end of the rainy season (late October): full, slightly dusty greens
     if (map.venue === 'mexico') return c.multiply(new THREE.Color(0.98, 1.02, 0.86));
     // Hungary in late July: dusty, olive, heat-tired foliage (nothing turning yet)
@@ -248,6 +248,29 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.forest(q.x, q.z) < 0.5) continue;
     if (!okTree(q.x, q.z, 3)) continue;
     add('shrub', q.x, q.z, 0.6 + r() * 0.7, r(), 0.5);
+  }
+  // ---------------------------------------------------------------- desert scrub by the circuit
+  // (Sakhir, Yas: the sand beyond the fences isn't bare — low saltbush and grass tussocks dot it,
+  // in loose clumps, thinning out with distance; nothing on the lawns or the paving)
+  if (map.venue === 'sakhir' || map.venue === 'yasmarina') {
+    for (let k = 0; k < 9000; k++) {
+      const i = Math.floor(r() * track.n);
+      const side = r() < 0.5 ? -1 : 1;
+      const far = r();
+      const lat = side * (track.barrierAt(i, side) + 6 + far * far * 220);
+      const q = track.point(i, lat, 0);
+      // clumps: a low-frequency field decides where the scrub grows
+      const clump = fbm2(q.x / 55 + 3.3, q.z / 55 - 7.1, 2);
+      if (clump < 0.05 + far * 0.2) continue;
+      if (map.forest(q.x, q.z) > 0.6 || map.pathDistance(q.x, q.z).d < 3) continue;
+      if (!okTree(q.x, q.z, 5)) continue;
+      const n = 1 + Math.floor(r() * 3);
+      for (let j = 0; j < n; j++) {
+        const x = q.x + (r() - 0.5) * 5, z = q.z + (r() - 0.5) * 5;
+        if (!okTree(x, z, 5)) continue;
+        add('shrub', x, z, 0.35 + r() * 0.45, r(), 0.5);
+      }
+    }
   }
   // ---------------------------------------------------------------- avenues & poplar rows
   for (const q of layout.avenueTrees) {

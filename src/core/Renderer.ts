@@ -37,18 +37,27 @@ import { N8AOPostPass } from 'n8ao';
 
 export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
 
+// radial speed blur toward the edges, with the lens's lateral chromatic aberration folded
+// into the same pass (red and blue fringes pulled apart radially: one full-screen pass, not two)
 const RADIAL_BLUR_FRAG = /* glsl */ `
 uniform float strength;
+uniform float aberration;
 uniform vec2 center;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec2 dir = uv - center;
   float d = length(dir * vec2(aspect, 1.0));
   float amt = strength * smoothstep(0.12, 0.85, d);
-  if (amt < 0.0005) { outputColor = inputColor; return; }
-  vec3 acc = inputColor.rgb;
+  vec3 col = inputColor.rgb;
+  if (aberration > 0.00001) {
+    vec2 ca = dir * aberration * smoothstep(0.1, 0.9, d) * 2.0;
+    col.r = texture2D(inputBuffer, uv - ca).r;
+    col.b = texture2D(inputBuffer, uv + ca).b;
+  }
+  if (amt < 0.0005) { outputColor = vec4(col, inputColor.a); return; }
+  vec3 acc = col;
   float w = 1.0;
-  for (int i = 1; i < 12; i++) {
-    float t = float(i) / 11.0;
+  for (int i = 1; i < 10; i++) {
+    float t = float(i) / 9.0;
     float wi = 1.0 - t * 0.5;
     acc += texture2D(inputBuffer, uv - dir * amt * t).rgb * wi;
     w += wi;
@@ -63,6 +72,7 @@ class RadialBlurEffect extends Effect {
       attributes: EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
         ['strength', new THREE.Uniform(0)],
+        ['aberration', new THREE.Uniform(0)],
         ['center', new THREE.Uniform(new THREE.Vector2(0.5, 0.52))],
       ]),
     });
@@ -72,6 +82,12 @@ class RadialBlurEffect extends Effect {
   }
   set strength(v: number) {
     this.uniforms.get('strength')!.value = v;
+  }
+  get aberration() {
+    return this.uniforms.get('aberration')!.value as number;
+  }
+  set aberration(v: number) {
+    this.uniforms.get('aberration')!.value = v;
   }
 }
 
@@ -626,6 +642,12 @@ export class Renderer {
     };
     const gl = this.renderer.getContext() as WebGL2RenderingContext;
     this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    // Apple's tile-based GPUs report timer-query times that run well past the real frame time
+    // (≈20 ms on an M1 holding a steady 60 fps): the adaptive resolution must not believe them
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpuName = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    this.gpuName = gpuName;
+    this.timerTrusted = !/apple|m1|m2|m3|m4/i.test(gpuName);
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
     this.renderPass = new RenderPass(scene, camera);
@@ -667,9 +689,9 @@ export class Renderer {
       radius: 0.62,
     });
     this.grade = new GradeEffect();
-    // AgX: filmic highlight roll-off without ACES's hue skew (neon greens, cyan skies);
-    // the weather look (presets.ts) adds back the saturation/contrast AgX takes out
-    this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
+    // Khronos PBR Neutral: base colours come out as painted (a Ferrari red stays red, not
+    // AgX's salmon), with a filmic roll-off only in the highlights; the weather look adds a touch
+    this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
     // a broadcast lens: barely-there fall-off (a heavy vignette reads as a game filter)
     this.vignette = new VignetteEffect({ darkness: 0.26, offset: 0.34 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
@@ -719,6 +741,10 @@ export class Renderer {
   }
 
   private readonly timerExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
+  /** the GPU's name (WebGL renderer string) */
+  readonly gpuName: string;
+  /** timer-query results match reality on this GPU (not on Apple silicon) */
+  readonly timerTrusted: boolean;
   private readonly gpuQueries: WebGLQuery[] = [];
   private gpuActive: WebGLQuery | null = null;
   /** GPU time (ms) of the most recent frame whose timer result came back; NaN without the timer extension */
@@ -814,7 +840,8 @@ export class Renderer {
     this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1), ultra: Math.min(dpr, 1.5) }[q];
     const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.25), ultra: Math.min(dpr, 1.75) }[q];
     this.maxDynamic = ceiling / this.renderScale;
-    const preset = q === 'ultra' ? SMAAPreset.HIGH : q === 'high' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
+    this.minDynamic = { low: 0.5, medium: 0.65, high: 0.8, ultra: 0.8 }[q];
+    const preset = q === 'ultra' || q === 'high' ? SMAAPreset.HIGH : q === 'medium' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
     if (preset !== this.smaaPreset) {
       this.smaaPreset = preset;
       this.smaa.applyPreset(preset);
@@ -841,8 +868,12 @@ export class Renderer {
    * back up when there's headroom. Multiplies the preset's pixel ratio.
    */
   dynamicScale = 1;
-  /** the dynamic scale's range for the current preset */
-  readonly minDynamic = 0.5;
+  /**
+   * The dynamic scale's range for the current preset. High and Ultra never drop below 0.8:
+   * a soft, smeary picture looks far worse than a few frames a second fewer (on a Retina
+   * screen the old 0.5 floor rendered a quarter of the CSS pixels — a sixteenth of the panel's).
+   */
+  minDynamic = 0.8;
   maxDynamic = 1;
   private smaaPreset: SMAAPreset = SMAAPreset.HIGH;
   setDynamicScale(s: number) {
@@ -860,14 +891,14 @@ export class Renderer {
 
   /** 0 → off. ~0.02 is a strong blur. */
   setSpeedBlur(strength: number) {
-    this.radialPass.enabled = strength > 0.0008;
-    this.radial.strength = strength;
+    this.radial.strength = strength > 0.0008 ? strength : 0;
+    this.radialPass.enabled = this.radial.strength > 0 || this.radial.aberration > 0;
   }
 
+  /** lateral chromatic aberration (shares the speed-blur pass) */
   setAberration(offset: number) {
-    const on = offset > 0.00003;
-    this.caPass.enabled = on;
-    if (on) this.aberration.offset.set(offset, offset * 0.7);
+    this.radial.aberration = offset > 0.00003 ? offset : 0;
+    this.radialPass.enabled = this.radial.strength > 0 || this.radial.aberration > 0;
   }
 
   /**
@@ -933,10 +964,12 @@ export class Renderer {
   setFlareColor(r: number, g: number, b: number) {
     (this.shafts.uniforms.get('flareColor')!.value as THREE.Vector3).set(r, g, b);
   }
+  /** indoors (the garage): no sun shafts or lens flare, whatever the sky outside is doing */
+  indoor = false;
   private updateShafts() {
     let k = 0;
     let fl = 0;
-    if (this.flareStrength > 0.002 || this.sunShaftStrength > 0.002) {
+    if (!this.indoor && (this.flareStrength > 0.002 || this.sunShaftStrength > 0.002)) {
       const cam = this.camera;
       const p = this.tmpV.copy(this.sunDir).multiplyScalar(1000).add(cam.position);
       p.project(cam);

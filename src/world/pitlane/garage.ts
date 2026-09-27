@@ -32,22 +32,34 @@ export function buildGarages(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o
     const stripe = dark ? acc : prim;
 
     // ---------------------------------------------------------------- walls
-    // side partitions (facing into the garage), lit look
+    // side partitions (facing into the garage): a modern team garage — dark graphite panels
+    // in a grid, a glowing LED strip in the team colour, a lit skirting line and a darker plinth
+    const LEN = GB - F - 1;
     for (const [s, dir] of [[g0 + 0.16, 1], [g1 - 0.16, -1]] as [number, 1 | -1][]) {
       fr.at(ts, s, (F + GB) / 2 + 0.5, 0);
-      solid.color(0xd9dbdd).mat(0.6, 0, 0.28, 0);
-      fr.panel(solid, 0, H.door / 2, 0, dir, 0, 0, GB - F - 1, H.door);
-      solid.color(stripe).mat(0.45, 0.1, 0.35, 0);
-      fr.panel(solid, dir * 0.005, 2.35, 0, dir, 0, 0, GB - F - 1, 0.35);
-      solid.color(0x2a2c30).mat(0.7, 0, 0.05, 0);
-      fr.panel(solid, dir * 0.005, 0.1, 0, dir, 0, 0, GB - F - 1, 0.2);
+      solid.color(0x2c2f34).mat(0.42, 0.15, 0, 0);
+      fr.panel(solid, 0, H.door / 2, 0, dir, 0, 0, LEN, H.door);
+      // panel joints (vertical every 1.8 m, one horizontal at 1.25 m)
+      solid.color(0x121315).mat(0.6, 0, 0, 0);
+      for (let x = -LEN / 2 + 1.8; x < LEN / 2 - 0.3; x += 1.8) fr.panel(solid, dir * 0.004, H.door / 2, x, dir, 0, 0, 0.025, H.door);
+      fr.panel(solid, dir * 0.004, 1.25, 0, dir, 0, 0, LEN, 0.025);
+      // the team LED strip: bright, it blooms and lights the reflections in the epoxy
+      solid.color(stripe).mat(0.3, 0, 2.2, 0);
+      fr.panel(solid, dir * 0.006, 2.62, 0, dir, 0, 0, LEN, 0.07);
+      solid.color(stripe, 0.55).mat(0.45, 0.1, 0.25, 0);
+      fr.panel(solid, dir * 0.005, 2.38, 0, dir, 0, 0, LEN, 0.34);
+      // cool white skirting light, then the plinth
+      solid.rgb(0.85, 0.9, 1).mat(0.3, 0, 1.4, 0);
+      fr.panel(solid, dir * 0.006, 0.24, 0, dir, 0, 0, LEN, 0.025);
+      solid.color(0x141517).mat(0.7, 0, 0, 0);
+      fr.panel(solid, dir * 0.005, 0.11, 0, dir, 0, 0, LEN, 0.22);
     }
     // back wall: branded centre panel, team-colour flanks, screens
     {
       fr.at(ts, c, GB - 0.08, 0);
       print.rgb(1, 1, 1).mat(0.5, 0, 0.55, 0);
       fr.panel(print, 0, 2.25, 0, 0, 0, -1, 8.4, 4.2, atlas.uv('back' + t));
-      solid.color(stripe, dark ? 0.6 : 0.85).mat(0.5, 0.1, 0.3, 0);
+      solid.color(stripe, dark ? 0.4 : 0.5).mat(0.45, 0.15, 0.12, 0);
       for (const x of [-6.6, 6.6]) fr.panel(solid, x, H.door / 2, 0.01, 0, 0, -1, 4.6, H.door);
       // screens on the flanks
       for (const x of [-7.3, -5.9, 5.9, 7.3]) {
@@ -58,13 +70,13 @@ export function buildGarages(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o
       }
     }
     // ceiling + light strips (rows match the epoxy reflection shader)
-    solid.color(0x121315).mat(0.9, 0, 0.02, 0);
+    solid.color(0x0b0c0d).mat(0.9, 0, 0, 0);
     ts.flat(solid, g0 + 0.16, g1 - 0.16, F + 0.9, GB, H.door, -1, 6);
     for (let i = 0; i < 4; i++) {
       const l = F + 3.2 + i * 4.1;
       detail.color(0x2a2c30).mat(0.5, 0.5, 0, 0);
       ts.box(detail, g0 + 1.0, g1 - 1.0, l - 0.45, l + 0.45, H.door - 0.12, H.door - 0.01, 4 | 16 | 32 | 1 | 2);
-      detail.rgb(1, 0.98, 0.94).mat(0.4, 0, 6, 0);
+      detail.rgb(1, 0.98, 0.95).mat(0.4, 0, 9, 0);
       ts.flat(detail, g0 + 1.2, g1 - 1.2, l - 0.34, l + 0.34, H.door - 0.125, -1, 6);
     }
     // light spill onto the lintel from outside
@@ -159,7 +171,7 @@ export function buildGarages(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o
 
     // ---------------------------------------------------------------- floor paint: two car bays
     const white = o.paintUV;
-    paint.rgb(0.8, 0.8, 0.78).mat(0.4, 0.2, 0, 0);
+    paint.rgb(0.5, 0.5, 0.49).mat(0.4, 0.2, 0, 0);
     const up = V(0, 1, 0);
     const rect = (s0: number, s1: number, l0: number, l1: number) => {
       paint.quad(ts.P(s0, l0, 0.062), ts.P(s1, l0, 0.062), ts.P(s1, l1, 0.062), ts.P(s0, l1, 0.062), up, white);

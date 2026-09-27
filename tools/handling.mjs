@@ -57,8 +57,8 @@ function newCar(assists = {}) {
 
 // 2. braking
 for (const [from, to] of [[300, 80], [200, 80], [120, 60]]) {
-  for (const abs of [true, false]) {
-    const c = newCar({ abs });
+  for (const [abs, arcade] of [[true, false], [false, false], [true, true]]) {
+    const c = newCar({ abs, arcade });
     c.setSpeed(from / 3.6);
     c.gear = 8;
     let dist = 0, t = 0, peak = 0;
@@ -69,7 +69,7 @@ for (const [from, to] of [[300, 80], [200, 80], [120, 60]]) {
       peak = Math.max(peak, (v0 - c.vx) / DT / 9.81);
       t += DT;
     }
-    console.log(`brake   ${from}→${to} km/h  abs=${abs ? 'on ' : 'off'}  ${dist.toFixed(0)} m  ${t.toFixed(2)} s  peak ${peak.toFixed(1)} g  lockup ${c.lockup.toFixed(2)}`);
+    console.log(`brake   ${from}→${to} km/h  abs=${abs ? 'on ' : 'off'}${arcade ? ' arcade' : '       '}  ${dist.toFixed(0)} m  ${t.toFixed(2)} s  peak ${peak.toFixed(1)} g  lockup ${c.lockup.toFixed(2)}`);
   }
 }
 

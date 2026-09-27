@@ -83,6 +83,9 @@ export interface CarSpec {
   halfWidth: number;
 }
 
+/** extra deceleration (m/s²) the arcade model's brakes give at full pedal on a dry track */
+const ARCADE_BRAKE = 18.5;
+
 export const F1_SPEC: CarSpec = {
   mass: 800,
   iz: 1150,
@@ -113,7 +116,7 @@ export const F1_SPEC: CarSpec = {
   rpmPeak: 11200,
   rpmLimit: 12400,
   gears: [17.2, 14.0, 11.6, 9.75, 8.25, 7.0, 5.9, 4.86],
-  brakeTorque: 17500,
+  brakeTorque: 21000,
   brakeBias: 0.57,
   maxSteer: 0.38,
   halfLength: 2.7,
@@ -844,7 +847,14 @@ export class CarPhysics {
     // ---- equations of motion
     const sgn = this.vx >= 0 ? 1 : -1;
     const Fx = Fxb - drag * sgn;
-    const axBody = Fx / m + gAlong;
+    let axBody = Fx / m + gAlong;
+    // arcade braking (the F1 games' feel): carbon brakes that bite harder than the tyre model
+    // alone allows — up to ~1.9 g more on a dry track, scaled by the grip there is (wet, worn,
+    // cold, off the road), fading in from walking pace so the car never stops dead
+    if (this.assists.arcade && brake > 0.02 && this.vx > 1.5 && !this.reverse) {
+      const k = Math.min(1, (this.vx - 1.5) / 10) * Math.min(1, this.gripFactor) * (this.offTrack ? 0.45 : 1);
+      axBody -= brake * ARCADE_BRAKE * k;
+    }
     const ayBody = Fyb / m + gSide;
     this.vx += (axBody + this.vy * this.r) * dt;
     this.vy += (ayBody - this.vx * this.r) * dt;

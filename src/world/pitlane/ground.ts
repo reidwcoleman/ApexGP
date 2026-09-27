@@ -109,7 +109,7 @@ export function buildGround(plan: PitPlan, ts: TrackSpace): THREE.BufferGeometry
   strip(p.bldgS0, p.bldgS1, k(L.front - 0.2), k(L.bldgBack), Z.CONCRETE, 0.04, 6);
   for (let t = 0; t < TEAMS.length; t++) {
     const g0 = p.teamS0 + t * GARAGE_W;
-    strip(g0 + 0.35, g0 + GARAGE_W - 0.35, k(L.front + 0.1), k(L.garageBack), Z.EPOXY, 0.06, 3, new THREE.Color(0.2, 0.205, 0.215));
+    strip(g0 + 0.35, g0 + GARAGE_W - 0.35, k(L.front + 0.1), k(L.garageBack), Z.EPOXY, 0.06, 3, new THREE.Color(0.075, 0.078, 0.084));
   }
   return gg.geometry();
 }

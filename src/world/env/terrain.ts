@@ -149,6 +149,7 @@ varying vec3 vWNormal;
 float tRough;
 float tAO;
 float tAridK = 0.0;
+vec3 tRipple = vec3( 0.0 );
 vec3 tDetailN;
 float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 `,
@@ -324,11 +325,16 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     float sandMask = smoothstep( 1.0 - uArid - 0.07, 1.0 - uArid + 0.07, m2 * 0.6 + m1 * 0.4 );
     vec3 sandC = uSand * mix( vec3( 0.94, 0.96, 1.02 ), vec3( 1.06, 1.02, 0.92 ), m2 );
     // compacted, darker sand in hollows; pale wind-blown crests
-    sandC = mix( sandC, uSand * 0.8, smoothstep( 0.45, 0.75, m3 ) * 0.45 );
-    sandC = mix( sandC, uSand * 1.12, smoothstep( 0.7, 0.9, d1 ) * 0.35 );
-    // wind ripples (only resolvable up close)
-    float rip = sin( dot( p, vec2( 0.83, 0.55 ) ) * 3.3 + d2 * 7.0 );
-    sandC *= 1.0 + 0.05 * rip * nearF;
+    sandC = mix( sandC, uSand * 0.74, smoothstep( 0.42, 0.75, m3 ) * 0.6 );
+    sandC = mix( sandC, uSand * 1.14, smoothstep( 0.68, 0.9, d1 ) * 0.4 );
+    // drift streaks: long bands of wind-sorted sand lying across the prevailing wind
+    float streak = sin( dot( p, vec2( 0.55, -0.83 ) ) * 0.045 + m2 * 5.0 ) * 0.5 + 0.5;
+    sandC *= mix( 0.9, 1.07, smoothstep( 0.25, 0.85, streak ) );
+    // wind ripples: shaded by the low sun (a normal wobble) as well as tinted
+    float ripPh = dot( p, vec2( 0.83, 0.55 ) ) * 3.3 + d2 * 7.0;
+    float rip = sin( ripPh );
+    sandC *= 1.0 + 0.08 * rip * nearF;
+    tRipple = vec3( 0.83, 0.0, 0.55 ) * cos( ripPh ) * 0.22 * nearF;
     // desert pavement: gravel pans of dark stones
     vec3 pan = mix( uRock * 0.9, uSand * 0.72, d3 );
     sandC = mix( sandC, pan, smoothstep( 0.56, 0.7, m1 * 0.6 + d1 * 0.4 ) * 0.55 );
@@ -341,6 +347,7 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     float aridK = sandMask * ( 1.0 - lawn ) * ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * ( 1.0 - urban * 0.7 );
     col = mix( col, sandC, aridK );
     tAridK = aridK;
+    tRipple *= aridK;
   }
 
   // ---- paths and paving
@@ -369,7 +376,7 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   float dStr = nearF * ( 0.6 + 0.4 * ( 1.0 - pv ) ) * ( 1.0 - pud );
   vec3 dn1 = texture2D( uDetailN, p * 0.31 ).rgb * 2.0 - 1.0;
   vec3 dn2 = texture2D( uDetailN, mat2( 0.6, 0.8, -0.8, 0.6 ) * p * 0.083 ).rgb * 2.0 - 1.0;
-  tDetailN = vec3( dn1.x + dn2.x * 0.8, 0.0, dn1.y + dn2.y * 0.8 ) * ( 0.45 + 0.35 * forest ) * dStr;
+  tDetailN = vec3( dn1.x + dn2.x * 0.8, 0.0, dn1.y + dn2.y * 0.8 ) * ( 0.45 + 0.35 * forest ) * dStr + tRipple * ( 1.0 - pud );
   // rain rings in the puddles
   if ( pud > 0.01 && uRain > 0.01 ) {
     vec2 rp = p * 1.6;
@@ -399,7 +406,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v5';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v6';
   return { material, uniforms };
 }
 

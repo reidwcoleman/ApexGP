@@ -21,8 +21,8 @@ export type AssistPreset = 'casual' | 'standard' | 'expert';
 
 export const ASSIST_PRESETS: Record<AssistPreset, AssistConfig> = {
   casual: { traction: 'full', abs: true, stability: true, arcade: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
-  // the default: approachable, but the car never brakes or slows itself down for you
-  standard: { traction: 'medium', abs: true, stability: true, arcade: true, braking: 'off', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  // the default: approachable, with a medium braking assist that slows the car for the corners
+  standard: { traction: 'medium', abs: true, stability: true, arcade: true, braking: 'medium', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
   expert: { traction: 'off', abs: false, stability: false, arcade: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
 };
 

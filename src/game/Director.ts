@@ -32,7 +32,7 @@ const CONTEXT_LABEL: Record<Context, string> = {
  * battle within a second, an overtake, a pit stop, the leader, the player) and
  * cuts between cameras that suit the moment — trackside cameras chosen by
  * where the car is on the lap, onboards, the helicopter — holding each shot
- * 4–8 s and never cutting to the same angle twice running.
+ * 7–13 s (real time, whatever the simulation speed) and never cutting to the same angle twice running.
  */
 export class Director {
   focus = 0;
@@ -76,13 +76,14 @@ export class Director {
       this.partner = new Int16Array(n);
     }
     this.evalT -= dt;
-    const shotOver = this.age >= this.len || !this.started;
+    // (a trackside shot whose camera has just moved on to the next corner gets to show that angle)
+    const shotOver = (this.age >= this.len && cams.angleAge > 3) || this.age >= this.len + 4 || !this.started;
     if (this.evalT > 0 && !shotOver) {
       // mid-shot: only a trackside camera that has lost the car ends early
       const f = field[this.focus];
-      if (f && this.age > 2.5 && CAMERA_GROUP[this.mode] === 'trackside' && this.mode !== 'tv' && !cams.covers(this.mode, f.s)) this.cut(field, cams, track, raceTime);
-      // the trackside camera lost the car behind something: off it at once, to a camera that can't be blocked
-      else if (f && this.age > 0.25 && CAMERA_GROUP[this.mode] === 'trackside' && cams.lost) this.cut(field, cams, track, raceTime, true);
+      if (f && this.age > 4 && CAMERA_GROUP[this.mode] === 'trackside' && this.mode !== 'tv' && !cams.covers(this.mode, f.s)) this.cut(field, cams, track, raceTime);
+      // the trackside camera lost the car behind something for a while: to a camera that can't be blocked
+      else if (f && this.age > 2 && CAMERA_GROUP[this.mode] === 'trackside' && cams.lost) this.cut(field, cams, track, raceTime, true);
       return;
     }
     this.evalT = 0.5;
@@ -91,7 +92,8 @@ export class Director {
     let best = this.focus;
     for (let i = 0; i < n; i++) if (this.score[i] > this.score[best]) best = i;
     if (this.lock >= 0 && this.lock < n) best = this.lock;
-    const urgent = best !== this.focus && this.score[best] - this.score[this.focus] > 55 && this.age > 1.2;
+    // (a real director lets a shot breathe: only a crash, a spin or the lead changing hands cuts a shot short)
+    const urgent = best !== this.focus && this.score[best] - this.score[this.focus] > 70 && this.age > 5;
     if (shotOver || urgent) {
       this.focus = best;
       this.cut(field, cams, track, raceTime);
@@ -208,17 +210,21 @@ export class Director {
     const ahead = s + Math.min(160, f.speed * 2.5);
     const covers = (m: CameraMode) => cams.covers(m, s) && cams.covers(m, ahead);
     const w: [CameraMode, number][] = [];
+    // sped up, the cars flash through a trackside camera's stretch: ride with them instead
+    const fast = cams.timeScale > 1.5;
     const add = (m: CameraMode, weight: number) => {
-      if (weight > 0 && !(noTrackside && CAMERA_GROUP[m] === 'trackside')) w.push([m, weight]);
+      const g = CAMERA_GROUP[m];
+      if (fast && g === 'trackside') weight *= 0.2;
+      if (weight > 0 && !(noTrackside && g === 'trackside')) w.push([m, weight]);
     };
     const start = ctx === 'start' || raceTime < 14;
     const crash = ctx === 'crash' || ctx === 'vsc';
     const battle = ctx === 'battle' || ctx === 'overtake';
     const pit = ctx === 'pit' || f.pit;
     // trackside, by where the car is on the lap
-    add('tv', 3 * (crash ? 2 : 1) * (battle ? 1.4 : 1));
+    add('tv', 4 * (crash ? 2 : 1) * (battle ? 1.4 : 1));
     if (covers('tower')) add('tower', 1.6 * (crash ? 2 : 1));
-    if (covers('longlens')) add('longlens', 2.2 * (battle ? 1.4 : 1));
+    if (covers('longlens')) add('longlens', 2.8 * (battle ? 1.4 : 1));
     if (covers('kerb')) add('kerb', 1.2);
     if (covers('grandstand')) add('grandstand', 1 * (start ? 2 : 1));
     if (cams.covers('pitwall', s)) add('pitwall', pit ? 5 : 1.2);
@@ -227,21 +233,21 @@ export class Director {
     const ob = crash ? 0.15 : pit ? 0.5 : start ? 0.6 : 1;
     add('tcam', 2.2 * ob * (battle ? 1.3 : 1));
     add('cockpit', 1.1 * ob);
-    add('nose', 0.7 * ob);
-    add('fwing', 0.5 * ob);
-    add('sidepod', 0.6 * ob);
-    add('wheel', 0.7 * ob);
-    add('wheelr', 0.45 * ob);
+    add('nose', 0.4 * ob);
+    add('fwing', 0.25 * ob);
+    add('sidepod', 0.3 * ob);
+    add('wheel', 0.35 * ob);
+    add('wheelr', 0.2 * ob);
     add('tcamrev', (battle ? 1.2 : 0.3) * ob);
-    add('rwing', 0.5 * ob);
+    add('rwing', 0.4 * ob);
     // chase, drone and cinematic
-    add('drone', 1.3 * (crash ? 1.2 : 1));
-    add('cine', pit || ctx === 'finish' ? 2 : 0.4);
-    add('chase', 0.3);
+    add('drone', 1.8 * (crash ? 1.2 : 1));
+    add('cine', pit || ctx === 'finish' ? 2 : 0.9);
+    add('chase', 0.6);
     // aerial
     add('heli', 1.6 * (crash || start ? 2 : 1) * (battle ? 1.3 : 1));
     add('blimp', start ? 1.8 : 0.5);
-    add('topdown', battle ? 1.1 : 0.35);
+    add('topdown', battle ? 0.5 : 0.15);
 
     // no jump cuts: never the same angle twice running, rarely a recent one, and a change of group on the same car
     const last = this.history[this.history.length - 1];
@@ -269,8 +275,11 @@ export class Director {
     this.history.push(pick);
     if (this.history.length > 4) this.history.shift();
     const g = CAMERA_GROUP[pick];
-    this.len = g === 'trackside' ? 4.5 + Math.random() * 3.5 : g === 'onboard' ? 4 + Math.random() * 3 : 5 + Math.random() * 3;
-    if (crash) this.len += 1.5;
+    // long, calm shots: a trackside camera follows the car through its whole corner, an onboard lets
+    // a straight and a braking zone play out, the aerials hold a wide stretch of the lap
+    this.len = g === 'trackside' ? 8 + Math.random() * 5 : g === 'onboard' ? 7 + Math.random() * 5 : g === 'aerial' ? 8 + Math.random() * 6 : 8 + Math.random() * 5;
+    if (crash) this.len += 2.5;
+    if (start) this.len += 3;
     this.age = 0;
     this.started = true;
     this.cutNow = true;

@@ -254,7 +254,7 @@ export class Studio {
     composer.addPass(this.dofPass);
     this.grade = new GradeEffect();
     const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 1.1, luminanceSmoothing: 0.35, intensity: 0.9, radius: 0.72 });
-    composer.addPass(new EffectPass(this.cam, bloom, this.grade, new ToneMappingEffect({ mode: ToneMappingMode.AGX }), new VignetteEffect({ darkness: 0.38, offset: 0.3 })));
+    composer.addPass(new EffectPass(this.cam, bloom, this.grade, new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL }), new VignetteEffect({ darkness: 0.38, offset: 0.3 })));
     const mat = new THREE.ShaderMaterial({
       vertexShader: OUT_VERT,
       fragmentShader: OUT_FRAG,

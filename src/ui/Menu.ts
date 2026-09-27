@@ -61,8 +61,8 @@ export function aiLevel(setup: RaceSetup, career: Career): { value: number; dyna
 }
 const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
 const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
-/** the setup save format (2: dynamic AI, lenient track limits, no braking assist by default; 3: random weather and time of day) */
-const SETUP_V = 3;
+/** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again) */
+const SETUP_V = 4;
 const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
@@ -240,12 +240,14 @@ export class Menu {
     this.root.id = 'menu';
     // (v: 0 here so a save without a version reads as an old one)
     this.setup = load<RaceSetup>('apexgp.setup', { ...DEFAULT_SETUP, v: 0, assists: { ...DEFAULT_ASSISTS } });
-    // saves from before the current defaults: pick up the new assists (no braking assist),
+    // saves from before the current defaults: pick up the new assists,
     // Dynamic AI and lenient track limits once; everything else the player chose stays
     const sv = this.setup.v ?? 0;
     if (sv < 2) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS }, difficulty: 0, trackLimits: 'lenient' };
     // every race different: the weather and the light are rolled fresh each time (once; a player's own choice after this stays)
     if (sv < 3) this.setup = { ...this.setup, weather: 'random', time: 'random' };
+    // the medium braking assist is the default now (and the sky changes every race again)
+    if (sv < 4) this.setup = { ...this.setup, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'medium' } };
     if (sv < SETUP_V) {
       this.setup.v = SETUP_V;
       save('apexgp.setup', this.setup);
