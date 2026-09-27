@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { brandAt, drawBrand, printWear } from '../brands.ts';
 import { EVENT } from '../event.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { Rng } from './noise.ts';
@@ -114,7 +115,10 @@ export class PrintAtlas {
     const W = this.cw, H = this.ch;
     SPONSORS.forEach((sp, i) => {
       const [x, y] = this.origin('ad' + i);
-      drawAd(ctx, x, y, W, H, sp);
+      // the series' own boards keep their livery; every other slot is one of the paddock's brands
+      if (sp[0] === 'APEX GP') drawAd(ctx, x, y, W, H, sp);
+      else drawBrand(ctx, x, y, W, H, brandAt(i), i % 5 === 3);
+      printWear(ctx, x, y, W, H, 101 + i);
     });
     const beltCols: Record<string, string[]> = {
       belt_red: ['#b3121f'],

@@ -8,6 +8,14 @@
     <style>
       html, body { margin: 0; height: 100%; background: #06070a; overflow: hidden; }
       #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      /* the loader, styled before the bundle has even parsed (menu.css refines it) */
+      #loading { position: fixed; inset: 0; background: #06070a; display: grid; place-items: center; z-index: 20; color: rgba(255, 255, 255, 0.92); font-family: "Titillium Web", "Arial Narrow", Arial, sans-serif; }
+      #loading .lwrap { width: min(420px, 80vw); }
+      #loading .logo { font-size: 64px; font-weight: 900; font-style: italic; line-height: 0.86; letter-spacing: -0.04em; text-transform: uppercase; }
+      #loading .logo .gp { color: #ff2b3f; }
+      #loading .lbar { margin-top: 24px; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
+      #loading .lbar b { display: block; height: 100%; width: 0; background: #ff2b3f; }
+      #loading .lstep { margin-top: 12px; font-size: 13px; color: rgba(255, 255, 255, 0.4); letter-spacing: 0.04em; font-weight: 600; }
     </style>
   </head>
   <body>

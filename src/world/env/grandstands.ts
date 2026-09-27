@@ -778,10 +778,17 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
       for (let x = -L / 2; x <= L / 2; x += 3) lsteel.aabb(x - 0.06, yb + 0.2, zb + 0.82, x + 0.06, yb + bandH - 0.3, zb + 0.95, STEEL_DARK);
       lsteel.aabb(-L / 2, yb + 1.0, zb - 0.05, L / 2, yb + 1.08, zb + 0.05, STEEL);
       // sponsor band on the slab edge
+      // (each sponsor's stretch repeats its logo at the board's own 8:1 proportions, as a printed
+      // band does, instead of one logo stretched seven times too wide)
       const nB = Math.max(1, Math.round(L / 20));
       for (let k = 0; k < nB; k++) {
         const xa = -L / 2 + (k * L) / nB + 0.2, xb = xa + L / nB - 0.4;
-        lboards.quad4(new THREE.Vector3(xb, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(xa, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(xa, yb + bandH + 0.03, zb - 0.22), new THREE.Vector3(xb, yb + bandH + 0.03, zb - 0.22), new THREE.Color(1, 1, 1), sponsorUV(sponsorK++));
+        const uvB = sponsorUV(sponsorK++);
+        const reps = Math.max(1, Math.round((xb - xa) / (0.36 * 8)));
+        for (let r = 0; r < reps; r++) {
+          const x0 = xa + ((xb - xa) * r) / reps, x1 = xa + ((xb - xa) * (r + 1)) / reps;
+          lboards.quad4(new THREE.Vector3(x1, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(x0, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(x0, yb + bandH + 0.03, zb - 0.22), new THREE.Vector3(x1, yb + bandH + 0.03, zb - 0.22), new THREE.Color(1, 1, 1), uvB);
+        }
       }
     }
     // back wall & sloped side walls

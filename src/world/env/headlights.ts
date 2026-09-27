@@ -112,8 +112,8 @@ const LAMPS: [number, number, number][] = [
 /** where the light is computed from (see HEADLIGHT_LIGHT), and its aim: ~25 m ahead on the road */
 const SOURCE: [number, number, number] = [0, 0.95, 2.45];
 const AIM = new THREE.Vector3(0, -0.038, 1).normalize();
-/** light intensity of one car's beam at full night (falls off ~1/d: ~2.5 on the road 10 m ahead, ~0.5 at 50 m) */
-const BEAM_I = 55;
+/** light intensity of one car's beam at full night (falls off ~1/d: ~1.2 on the road 10 m ahead, ~0.3 at 50 m — modest, not a searchlight) */
+const BEAM_I = 30;
 /** beam volume: length and end radius (m) */
 const BEAM_LEN = 34;
 const BEAM_R = 5.5;
@@ -356,8 +356,8 @@ export class Headlights {
     this.glareU.uPix.value = cam.isPerspectiveCamera ? (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) / h : 0.001;
     this.glareU.uHaze.value = this.haze;
     this.glareU.uFogD.value = this.fogD;
-    (this.glareU.uColor.value as THREE.Color).setRGB(1.0, 0.97, 0.9).multiplyScalar(3.2 * k);
-    this.beamU.uStrength.value = k * (0.035 + 0.22 * this.haze);
+    (this.glareU.uColor.value as THREE.Color).setRGB(1.0, 0.97, 0.9).multiplyScalar(2.0 * k);
+    this.beamU.uStrength.value = k * (0.02 + 0.14 * this.haze);
     this.beamU.uFogD.value = this.fogD;
 
     const n = Math.min(cars.length, this.max);

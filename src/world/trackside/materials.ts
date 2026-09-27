@@ -894,14 +894,15 @@ if (metalnessFactor > 0.5) {
 function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = W.uWetness;
+    sh.uniforms.uSignGlow = W.uSignGlow;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aPBR;\nvarying vec3 vPBR;\nvarying vec3 vWP;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPBR = aPBR;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;\nuniform float uSignGlow;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_ZINC + PROP_WET)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z * (vPBR.z < 0.9 ? uSignGlow : 1.0);');
   };
   m.customProgramCacheKey = () => key;
 }
