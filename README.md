@@ -70,9 +70,18 @@ npm run check    # tsc --noEmit
   crashes, the flag, the podium) are re-filmed offscreen from TV cameras and encoded as smooth 30 fps
   video with broadcast graphics, played on the garage video wall and in the Highlights tab.
 - **Watch and rewatch** — simulate a race (pick the circuit, laps, weather, time, grid and more,
-  or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 23 cameras
+  or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 24 cameras
   (onboards, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
   camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
+- **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
+  mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
+  straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
+  lateral and endplate lights; baked ambient occlusion on every car.
+- **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
+  them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
+  nose and more; a live steering-wheel screen and shift lights in the onboards, a rear-view mirror,
+  and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
+  lock, mirror).
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
   resume), tyre marks that build up through the race, pit stops where the crew really change the
   wheels, track-limit warnings and

@@ -21,7 +21,7 @@ import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, isRemoteCam, type CameraMode } from './Cameras.ts';
+import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
 import { Director, type FieldCar } from './Director.ts';
 import { Sightlines } from './Sightlines.ts';
@@ -54,6 +54,7 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
+import { RearMirror } from './RearMirror.ts';
 import { setCarAORenderer } from '../car/carAO.ts';
 import { preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
@@ -83,6 +84,9 @@ function smokeLight(w: WeatherState): THREE.Color {
 }
 
 type CompoundRig = CarRig & { setCompound?: (c: string) => void };
+
+/** the onboard cameras that show the rear-view mirror */
+const MIRROR_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true };
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -193,6 +197,17 @@ export class Game {
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
     this.hud = new HUD(uiRoot);
+    // the helmet cam's view through the visor opening: the padded edges of the helmet frame it
+    this.visor = document.createElement('div');
+    this.visor.className = 'visor-frame';
+    Object.assign(this.visor.style, {
+      position: 'fixed', inset: '0', pointerEvents: 'none', opacity: '0', transition: 'opacity 0.25s',
+      background: [
+        'linear-gradient(to bottom, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.55) 7%, rgba(0,0,0,0) 17%)',
+        'radial-gradient(ellipse 78% 92% at 50% 58%, rgba(0,0,0,0) 70%, rgba(4,4,6,0.55) 88%, rgba(4,4,6,0.95) 100%)',
+      ].join(','),
+    });
+    canvas.insertAdjacentElement('afterend', this.visor);
     this.replayBadge = document.createElement('div');
     this.replayBadge.className = 'replay-badge';
     this.replayBadge.innerHTML = '<span class="rdot"></span><b>Replay</b><span class="rtrack"><i></i></span><span class="rskip">Enter to skip</span>';
@@ -497,6 +512,7 @@ export class Game {
       console.warn('[sightlines] failed', e);
     }
     this.cams = new Cameras(this.camera, this.track, sight);
+    this.cams.prefs = { ...DEFAULT_CAM, ...(this.menu.settings.cam ?? {}) };
     if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
     if (mode) this.cams.mode = mode;
     this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
@@ -756,6 +772,7 @@ export class Game {
   private applySettings(s: Settings) {
     if (s.quality !== this.gfx.qualityLevel) this.gfx.setQuality(s.quality);
     this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6 }[s.quality];
+    if (this.cams) this.cams.prefs = { ...DEFAULT_CAM, ...(s.cam ?? {}) };
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
     this.audio.setVolume(s.volume);
     this.audio.setMusicVolume(s.music);
@@ -1211,6 +1228,28 @@ export class Game {
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.gfx.render(dt);
+    // the rear-view mirror over the onboard cameras
+    const mirrorOn = (this.state === 'race' || this.state === 'intro') && MIRROR_CAMS[this.cams.mode] && this.cams.prefs.mirror;
+    if (mirrorOn) {
+      const rig = this.rigs.get(race.player.entry);
+      if (rig) {
+        if (!this.mirror) {
+          this.mirror = new RearMirror();
+          this.mirrorSkipFor = null;
+        }
+        if (this.mirrorSkipFor !== this.env) {
+          // (what the little mirror doesn't need: blades of grass, walkers, the far towns and pylons)
+          this.mirrorSkipFor = this.env;
+          const skip: THREE.Object3D[] = [];
+          this.env.group.traverse((o) => {
+            if (o.name === 'grass_blades' || o.name === 'Villages' || o.name === 'Skyline' || o.name === 'horizon' || o.name === 'concourse_people') skip.push(o);
+          });
+          this.mirror.skip = skip;
+        }
+        const gu = this.gfx.grade.uniforms;
+        this.mirror.draw(this.gfx.renderer, this.scene, rig.root, (gu.get('exposure')!.value as number) * (gu.get('lookExposure')!.value as number));
+      }
+    } else this.mirror?.reset();
     // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)
     if (this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
     this.adaptQuality(dt);
@@ -1885,9 +1924,20 @@ export class Game {
     return [p.x, p.y, p.z];
   }
 
+  private dashT = 0;
+  private mirror: RearMirror | null = null;
+  private mirrorSkipFor: unknown = null;
+  private readonly visor: HTMLDivElement;
+  private visorOn = false;
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
     this.camPos.copy(this.camera.position);
-    const cockpit = (this.state === 'race' || this.state === 'intro') && this.cams.mode === 'cockpit';
+    const onboardEye = this.cams.mode === 'cockpit' || this.cams.mode === 'helmet';
+    const visor = this.cams.mode === 'helmet' && (this.state === 'race' || this.state === 'intro' || this.state === 'paused');
+    if (visor !== this.visorOn) {
+      this.visorOn = visor;
+      this.visor.style.opacity = visor ? '1' : '0';
+    }
+    const cockpit = (this.state === 'race' || this.state === 'intro') && onboardEye;
     if (cockpit !== this.driverHidden) {
       this.driverHidden = cockpit;
       this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit);
@@ -1898,6 +1948,25 @@ export class Game {
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
       view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight, !ghosts);
+      // the steering wheel's screen and shift lights, live, when the driver's eyes are the camera (15 Hz)
+      if (c.isPlayer && onboardEye && !ghosts) {
+        this.dashT -= dt;
+        if (this.dashT <= 0) {
+          this.dashT = 1 / 15;
+          const car = c.car;
+          const sp = car.spec;
+          this.rigs.get(c.entry)?.setDash?.({
+            gear: car.gear,
+            kmh: Math.abs(car.vx) * 3.6,
+            rpm: (car.rpm - sp.rpmIdle) / (sp.rpmLimit - sp.rpmIdle),
+            delta: this.race.playerDelta,
+            straight: car.drsAnim > 0.5,
+            ers: car.ers,
+            code: c.entry.driver.code,
+            lights: true,
+          });
+        }
+      }
       if (this.rigCompound.get(c.entry) !== c.compound) {
         this.rigCompound.set(c.entry, c.compound);
         (this.rigs.get(c.entry) as CompoundRig).setCompound?.(c.compound);

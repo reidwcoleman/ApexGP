@@ -586,40 +586,73 @@ export function trimTexture(teamIn: Team, driverIn: Driver, seat: 0 | 1): THREE.
       g.fillStyle = col[i];
       g.fillRect(x, y, TRIM_CELL, TRIM_CELL);
     }
-    // steering-wheel display
-    const d: Rect = R_DISPLAY;
-    g.fillStyle = '#05070a';
-    g.fillRect(d.x, d.y, d.w, d.h);
-    g.fillStyle = '#0a2a3a';
-    g.fillRect(d.x + 4, d.y + 4, d.w - 8, d.h - 8);
-    g.font = `900 40px ${FONT}`;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillStyle = '#ffffff';
-    g.fillText('7', d.x + d.w / 2, d.y + d.h / 2 + 2);
-    g.fillStyle = '#2cff6a';
-    g.fillRect(d.x + 8, d.y + 10, 34, 8);
-    g.fillStyle = '#ffcc00';
-    g.fillRect(d.x + 8, d.y + 24, 26, 8);
-    g.fillStyle = '#ff3b3b';
-    g.fillRect(d.x + 8, d.y + 38, 18, 8);
-    g.fillStyle = '#9ad7ff';
-    g.font = `700 12px ${FONT}`;
-    g.fillText('-0.214', d.x + d.w - 26, d.y + 16);
-    g.fillText(driver.code, d.x + d.w - 26, d.y + 46);
-    const l: Rect = R_LEDS;
-    g.fillStyle = '#050505';
-    g.fillRect(l.x, l.y, l.w, l.h);
-    for (let i = 0; i < 15; i++) {
-      g.fillStyle = i < 5 ? '#27ff4d' : i < 10 ? '#ff2a2a' : '#3a6bff';
-      g.beginPath();
-      g.arc(l.x + 5 + i * 8.4, l.y + l.h / 2, 3, 0, Math.PI * 2);
-      g.fill();
-    }
+    paintDash(g, { gear: 7, kmh: 0, rpm: 0.55, delta: -0.214, straight: false, ers: 0.8, code: driver.code, lights: false });
     t.needsUpdate = true;
   };
   paintWithFonts(paint);
   return t;
+}
+
+/** what the steering wheel's screen and shift lights show */
+export interface DashState {
+  gear: number;
+  kmh: number;
+  /** 0 … 1 through the rev range (idle → limiter): drives the shift lights */
+  rpm: number;
+  /** live lap delta (s), NaN when there isn't one */
+  delta: number;
+  /** 2026 straight mode (active aero open) */
+  straight: boolean;
+  /** battery state 0 … 1 */
+  ers: number;
+  code: string;
+  /** shift lights live (false on a parked car: a static preview) */
+  lights: boolean;
+}
+/** repaint the steering wheel's display and LEDs (regions of the trim texture) */
+export function paintDash(g: CanvasRenderingContext2D, s: DashState) {
+  const d: Rect = R_DISPLAY;
+  g.fillStyle = '#05070a';
+  g.fillRect(d.x, d.y, d.w, d.h);
+  g.fillStyle = s.straight ? '#0c3a1e' : '#0a2230';
+  g.fillRect(d.x + 3, d.y + 3, d.w - 6, d.h - 6);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  // gear, big in the middle
+  g.font = `900 38px ${FONT}`;
+  g.fillStyle = s.rpm > 0.94 && s.lights ? '#4fa3ff' : '#ffffff';
+  g.fillText(s.gear <= 0 ? 'N' : String(s.gear), d.x + d.w / 2, d.y + d.h / 2 + 3);
+  // speed top-left, battery bar bottom-left
+  g.font = `700 13px ${FONT}`;
+  g.fillStyle = '#e8eef5';
+  g.textAlign = 'left';
+  g.fillText(String(Math.round(s.kmh)), d.x + 8, d.y + 14);
+  g.fillStyle = '#20262e';
+  g.fillRect(d.x + 8, d.y + 44, 34, 8);
+  g.fillStyle = s.ers > 0.25 ? '#ffd23c' : '#ff5a3c';
+  g.fillRect(d.x + 8, d.y + 44, 34 * Math.max(0, Math.min(1, s.ers)), 8);
+  // delta top-right (green faster / red slower), driver code / straight-mode flag bottom-right
+  g.textAlign = 'right';
+  if (isFinite(s.delta)) {
+    g.fillStyle = s.delta <= 0 ? '#39ff8a' : '#ff5a5a';
+    g.fillText(`${s.delta <= 0 ? '−' : '+'}${Math.abs(s.delta).toFixed(3)}`, d.x + d.w - 7, d.y + 14);
+  }
+  g.fillStyle = s.straight ? '#39ff8a' : '#9ad7ff';
+  g.fillText(s.straight ? 'X-MODE' : s.code, d.x + d.w - 7, d.y + 47);
+  // shift lights: green → red → blue across the rim; the whole strip flashes blue at the limiter
+  const l: Rect = R_LEDS;
+  g.fillStyle = '#050505';
+  g.fillRect(l.x, l.y, l.w, l.h);
+  const lit = s.lights ? Math.round(Math.max(0, Math.min(1, (s.rpm - 0.55) / 0.4)) * 15) : 15;
+  const flash = s.lights && s.rpm > 0.965;
+  for (let i = 0; i < 15; i++) {
+    const on = flash || i < lit;
+    const col = flash ? '#3a78ff' : i < 5 ? '#27ff4d' : i < 10 ? '#ff2a2a' : '#3a6bff';
+    g.fillStyle = on ? col : '#16181b';
+    g.beginPath();
+    g.arc(l.x + 5 + i * 8.4, l.y + l.h / 2, 3, 0, Math.PI * 2);
+    g.fill();
+  }
 }
 
 // ------------------------------------------------------------------------------------ driver sheet

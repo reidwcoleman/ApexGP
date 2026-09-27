@@ -19,7 +19,7 @@ import type { Team, Driver } from '../race/Teams.ts';
 import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
 export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
-import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, type Compound } from './carTextures.ts';
+import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, paintDash, type Compound, type DashState } from './carTextures.ts';
 import { WET_PARS, wetUniforms, wetClearcoatBeads } from './carWet.ts';
 import { createTyreMaterial, setTyreCompound, applyTyreLook, wornTyreLook, newTyreLook, type TyreLook, type TyreUniforms } from './carTyres.ts';
 import { GRIME_PARS, GRIME_VERT, GRIME_VERT_PARS, grimeShaderUniforms, grimeUniforms, flakeTexture, type GrimeUniforms } from './carGrime.ts';
@@ -49,6 +49,8 @@ export interface CarRig {
   /** race grime on the bodywork: road film, rubber flecks, off-track dirt (0 … 1 each) */
   setGrime?(film: number, flecks: number, dirt: number): void;
   setDrs(open: number): void;
+  /** the steering wheel's live screen and shift lights (the player's car in the onboard views) */
+  setDash?(d: DashState): void;
   setDetail(level: 0 | 1 | 2): void;
   setDriverVisible(v: boolean): void;
   /** the driver's head reacts: lateral and longitudinal G (m/s², + = left / accelerating), wheel angle (rad) */
@@ -89,6 +91,8 @@ export interface CarRig {
     wheelRR: THREE.Object3D;
     /** centre of the rear rain light (crash-structure tail) */
     rainLight: THREE.Object3D;
+    /** the driver's eyes, riding the animated head (the helmet cam) */
+    eyes?: THREE.Object3D;
   };
   readonly dims: { wheelbase: number; trackFront: number; trackRear: number; length: number; width: number; wheelRadius: number };
   dispose(): void;
@@ -721,6 +725,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     wheelRL: anchor('wheelRL', [0, 0, 0], RL.group),
     wheelRR: anchor('wheelRR', [0, 0, 0], RR.group),
     rainLight: anchor('rainLight', [0, 0.316, -2.39], body),
+    eyes: headPivots[0]
+      ? anchor('eyes', [HELMET_C[0] - NECK_PIVOT[0], HELMET_C[1] - NECK_PIVOT[1] - 0.014, HELMET_C[2] - NECK_PIVOT[2] + 0.1], headPivots[0])
+      : anchor('eyes', [0, HELMET_C[1] - 0.014, HELMET_C[2] + 0.1], body),
   };
   // ---- state
   let detail: 0 | 1 | 2 = 0;
@@ -865,6 +872,11 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       const o = Math.min(1, Math.max(0, open));
       for (const fp of flapPivots) fp.rotation.x = -0.5 * o;
       for (const fp of fwFlapPivots) fp.rotation.x = -0.26 * o;
+    },
+    setDash(d) {
+      const c = trimTex.image as HTMLCanvasElement;
+      paintDash(c.getContext('2d')!, d);
+      trimTex.needsUpdate = true;
     },
     setDetail(level) {
       if (level === detail) return;

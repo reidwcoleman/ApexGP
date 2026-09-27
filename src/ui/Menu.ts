@@ -1,7 +1,7 @@
 import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
-import { CAMERA_LABEL, CAMERA_ORDER } from '../game/Cameras.ts';
+import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, type CamPrefs } from '../game/Cameras.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
@@ -40,6 +40,8 @@ export interface Settings {
   /** true until the player picks a graphics level themselves: the game may step it down */
   autoQuality?: boolean;
   camera: CameraMode;
+  /** camera tuning (Settings → Camera tuning) */
+  cam?: CamPrefs;
   volume: number;
   /** background music level in the menus (0..1) */
   music: number;
@@ -80,7 +82,7 @@ const SETTINGS_V = 3;
 const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
 const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
 
-type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'pause' | 'results' | 'none';
+type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'camera' | 'pause' | 'results' | 'none';
 
 interface Item {
   el: HTMLElement;
@@ -271,7 +273,7 @@ export class Menu {
       this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' ? 'ultra' : 'high', autoQuality: true };
       save('apexgp.settings', this.settings);
     }
-    for (const id of ['title', 'setup', 'settings', 'assists', 'pause', 'results'] as ScreenId[]) {
+    for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'pause', 'results'] as ScreenId[]) {
       const s = el('div', 'screen', this.root);
       this.screens.set(id, s);
     }
@@ -291,6 +293,7 @@ export class Menu {
     if (id === 'setup') this.buildSetup();
     if (id === 'settings') this.buildSettings();
     if (id === 'assists') this.buildAssists();
+    if (id === 'camera') this.buildCameraPrefs();
     if (id === 'pause') this.buildPause();
     this.highlight();
   }
@@ -874,6 +877,16 @@ export class Menu {
       const i = CAMERA_ORDER.indexOf(st.camera);
       st.camera = CAMERA_ORDER[(i + d + CAMERA_ORDER.length) % CAMERA_ORDER.length];
     }, true);
+    const cp = el('div', 'opt', p);
+    el('span', 'k', cp, 'Camera tuning');
+    el('span', 'v', cp, `${(() => {
+      const c = { ...DEFAULT_CAM, ...(st.cam ?? {}) };
+      const same = (Object.keys(DEFAULT_CAM) as (keyof CamPrefs)[]).every((k) => c[k] === DEFAULT_CAM[k]);
+      return same ? 'Default' : 'Custom';
+    })()}<span class="chev">›</span>`);
+    const openCam = () => this.show('camera');
+    cp.addEventListener('click', openCam);
+    this.items.push({ el: cp, kind: 'action', select: openCam });
     const as = el('div', 'opt', p);
     el('span', 'k', as, 'Driving assists');
     el('span', 'v', as, `${(() => {
@@ -894,6 +907,48 @@ export class Menu {
     }, true);
     const cta = el('div', 'cta', p, 'Done');
     const done = () => this.show(this.settingsReturn);
+    this.items.push({ el: cta, kind: 'action', select: done });
+    cta.addEventListener('click', done);
+  }
+
+  private buildCameraPrefs() {
+    const s = this.screens.get('camera')!;
+    s.innerHTML = '';
+    el('div', 'scrim', s);
+    const p = el('div', 'panel glass', s);
+    el('h2', '', p, 'Camera tuning');
+    el('p', 'lede', p, 'Applies to every camera you race with. C cycles the cameras in the race.');
+    const st = this.settings;
+    const c: CamPrefs = { ...DEFAULT_CAM, ...(st.cam ?? {}) };
+    st.cam = c;
+    const step = (v: number, d: number, k: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round((v + d * k) / k) * k));
+    const sgn = (v: number, unit: string, dp = 0) => (v === 0 ? 'Default' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(dp)}${unit}`);
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
+      const i = CAMERA_ORDER.indexOf(st.camera);
+      st.camera = CAMERA_ORDER[(i + d + CAMERA_ORDER.length) % CAMERA_ORDER.length];
+    }, true);
+    this.opt(p, 'Field of view', () => sgn(c.fov, '°'), (d) => (c.fov = step(c.fov, d, 1, -10, 15)), true);
+    this.opt(p, 'Dynamic field of view', () => (c.dynFov ? 'On' : 'Off'), () => (c.dynFov = !c.dynFov), true);
+    this.opt(p, 'Chase distance', () => sgn(c.dist, ' m', 1), (d) => (c.dist = step(c.dist, d, 0.25, -1.5, 3)), true);
+    this.opt(p, 'Chase height', () => sgn(c.height, ' m', 2), (d) => (c.height = step(c.height, d, 0.05, -0.4, 1)), true);
+    this.opt(p, 'Camera shake', () => (c.shake === 0 ? 'Off' : pct(c.shake)), (d) => (c.shake = step(c.shake, d, 0.25, 0, 1.5)), true);
+    this.opt(p, 'Look into corners', () => (c.apex === 0 ? 'Off' : pct(c.apex)), (d) => (c.apex = step(c.apex, d, 0.25, 0, 1.5)), true);
+    this.opt(p, 'Horizon lock (onboard)', () => pct(c.horizon), (d) => (c.horizon = step(c.horizon, d, 0.1, 0, 1)), true);
+    this.opt(p, 'Rear-view mirror', () => (c.mirror ? 'On (onboard cameras)' : 'Off'), () => (c.mirror = !c.mirror), true);
+    const reset = el('div', 'opt', p);
+    el('span', 'k', reset, 'Reset to defaults');
+    el('span', 'v', reset, '<span class="chev">›</span>');
+    const doReset = () => {
+      st.cam = { ...DEFAULT_CAM };
+      save('apexgp.settings', st);
+      this.cb.onSettings({ ...st });
+      this.show('camera');
+    };
+    reset.addEventListener('click', doReset);
+    this.items.push({ el: reset, kind: 'action', select: doReset });
+    const cta = el('div', 'cta', p, 'Done');
+    const done = () => this.show('settings');
     this.items.push({ el: cta, kind: 'action', select: done });
     cta.addEventListener('click', done);
   }
@@ -1191,6 +1246,7 @@ export class Menu {
       if (this.screen === 'setup') this.show('title');
       else if (this.screen === 'settings') this.show(this.settingsReturn);
       else if (this.screen === 'assists') this.show(this.assistsReturn);
+      else if (this.screen === 'camera') this.show('settings');
       else if (this.screen === 'pause') this.cb.onResume();
     }
   }
