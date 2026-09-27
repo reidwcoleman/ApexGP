@@ -217,8 +217,9 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     mie: 1.2,
     g: 0.78,
     ms: 0.35,
-    sunIntensity: 0.16,
-    skyBoost: 0.22,
+    // (a dim moon: the track is dark between the masts, the headlights do the work)
+    sunIntensity: 0.07,
+    skyBoost: 0.1,
     sunDisc: 26,
     cirrus: 0.2,
     fogDensity: 1.0e-4,

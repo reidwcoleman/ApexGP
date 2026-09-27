@@ -345,7 +345,8 @@ export function createFloodRig(track: Track, groundAt: (x: number, z: number) =>
   group.visible = false;
 
   // pole bases along both sides, staggered, behind the barriers, off other parts of the circuit
-  const spacing = 46;
+  // (sparse: one mast every ~92 m of lap, alternating sides — a night race is mostly dark)
+  const spacing = 184;
   const bases: { x: number; y: number; z: number; fx: number; fz: number }[] = [];
   const p = new THREE.Vector3();
   const c = new THREE.Vector3();

@@ -72,7 +72,7 @@ void main() {
     float ex = dot( ld, lf ) / al * hlInfo.y;
     float ey = dot( ld, lu ) / al * hlInfo.z * 0.6;
     float e = ex * ex + ey * ey;
-    if ( e < 1.0 ) vLamp += hlPos[ k ].w * ( 1.0 - e ) / ( dot( ld, ld ) + 4.0 );
+    if ( e < 1.0 ) vLamp += hlPos[ k ].w * ( 1.0 - e ) / ( length( ld ) + 2.5 );
   }
   // longer streaks spread the same water over more pixels
   vAlpha *= clamp( 0.9 / ( len * 2.0 + 0.2 ), 0.12, 1.0 );
