@@ -1,0 +1,72 @@
+[
+ {
+  "file": "yas_chase.webp",
+  "track": "yasmarina",
+  "boot": true
+ },
+ {
+  "file": "suzuka_onboard.webp",
+  "track": "suzuka",
+  "boot": true
+ },
+ {
+  "file": "zandvoort_sunset.webp",
+  "track": "zandvoort",
+  "boot": true
+ },
+ {
+  "file": "spa_rain.webp",
+  "track": "spa",
+  "boot": true
+ },
+ {
+  "file": "interlagos_rain.webp",
+  "track": "interlagos",
+  "boot": true
+ },
+ {
+  "file": "suzuka_dusk.webp",
+  "track": null,
+  "boot": true
+ },
+ {
+  "file": "hungaroring_golden.webp",
+  "track": "hungaroring",
+  "boot": true
+ },
+ {
+  "file": "melbourne_golden.webp",
+  "track": "melbourne",
+  "boot": true
+ },
+ {
+  "file": "silverstone_drizzle.webp",
+  "track": "silverstone",
+  "boot": true
+ },
+ {
+  "file": "mexico_golden.webp",
+  "track": "mexico",
+  "boot": true
+ },
+ {
+  "file": "monza_sunset.webp",
+  "track": "monza",
+  "boot": true
+ },
+ {
+  "file": "monza_rain.webp",
+  "track": null,
+  "boot": true
+ },
+ {
+  "file": "sakhir_night.webp",
+  "track": "sakhir",
+  "boot": false
+ },
+ {
+  "file": "montreal_sunset.webp",
+  "track": "montreal",
+  "boot": false
+ }
+]

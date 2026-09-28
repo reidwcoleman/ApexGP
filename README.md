@@ -36,6 +36,9 @@ npm run check    # tsc --noEmit
   (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
   **Next round** on the results screen flies you straight on. The rivals develop their cars through
   the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
+- **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
+  sunset…, `public/loading/`): the boot rotates through them, a circuit switch shows the destination's
+  own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
 - **Race intros** — a helicopter sweep down the main straight with the title card (round, circuit,
   laps, conditions, the layout drawing itself), a tracking shot down the grid to your car, then the
   orbit into the lights. Enter / click skips.

@@ -51,6 +51,7 @@ import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
 import { Career, SETUP } from '../career/Career.ts';
 import { rollForecast, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { ACHIEVEMENTS as ACH, unlockAchievement } from '../core/steam.ts';
+import { artFor } from '../ui/loadingArt.ts';
 import { loadPeople } from '../people/Humans.ts';
 import { Highlights } from '../career/Highlights.ts';
 import { GarageScene } from './GarageScene.ts';
@@ -2214,7 +2215,14 @@ export class Game {
       const screen = this.menu.screen;
       const veil = document.createElement('div');
       veil.className = 'travel-veil';
-      veil.innerHTML = `<div><span>Travelling to</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step">Packing up</div></div>`;
+      veil.innerHTML = `<img class="tv-art" alt=""><div><span>Travelling to</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step">Packing up</div></div>`;
+      // the destination's key art (decoded before the build blocks the main thread)
+      const art = veil.querySelector('img') as HTMLImageElement;
+      art.src = artFor(def.id);
+      const artReady = art.decode().then(
+        () => veil.classList.add('art'),
+        () => art.remove(),
+      );
       const bar = veil.querySelector('.tv-bar i') as HTMLElement;
       const step = veil.querySelector('.tv-step') as HTMLElement;
       const set = (f: number, label: string) => {
@@ -2225,6 +2233,7 @@ export class Game {
       await paint();
       veil.classList.add('on');
       if (this.audioReady) this.audio.crowd(0);
+      await Promise.race([artReady, wait(600)]);
       await wait(260);
       // the newest destination, now that the screen is covered
       const dest = CIRCUITS.find((c) => c.id === this.travelTo) ?? def;

@@ -92,4 +92,50 @@ def main():
         print(k, v.size)
 
 
-main()
+# loading screens: 1920×1080 key art in the header capsule's style (wordmark left, shaded);
+# (raw frame, circuit it belongs to, in the boot rotation, crop focus x)
+LOADING = [
+    ('yas_chase', 'yasmarina', True, 0.5),
+    ('suzuka_onboard', 'suzuka', True, 0.5),
+    ('zandvoort_sunset', 'zandvoort', True, 0.62),
+    ('spa_rain', 'spa', True, 0.5),
+    ('interlagos_rain', 'interlagos', True, 0.5),
+    ('suzuka_dusk', None, True, 0.55),
+    ('hungaroring_golden', 'hungaroring', True, 0.55),
+    ('melbourne_golden', 'melbourne', True, 0.55),
+    ('silverstone_drizzle', 'silverstone', True, 0.55),
+    ('mexico_golden', 'mexico', True, 0.5),
+    ('monza_sunset', 'monza', True, 0.55),
+    ('monza_rain', None, True, 0.55),
+    ('sakhir_night', 'sakhir', False, 0.5),
+    ('montreal_sunset', 'montreal', False, 0.55),
+]
+# where the wordmark sits in the 1920×1080 frame (the loader's HTML lines up with it)
+LOGO_X, LOGO_Y, LOGO_W = 96, 420, 640
+
+
+def loading():
+    out = os.path.join(HERE, '..', 'public', 'loading')
+    os.makedirs(out, exist_ok=True)
+    mark = logo(400)
+    index = []
+    for name, track, boot, fx in LOADING:
+        src = Image.open(os.path.join(RAW, name + '.png'))
+        im = shade(cover(src, 1920, 1080, fx, 0.5), 'left', 0.82)
+        # a little weight at the bottom for the loading bar's text
+        im = Image.alpha_composite(im, shade(Image.new('RGBA', (1920, 1080), (0, 0, 0, 0)), 'bottom', 0.35))
+        put(im, mark, LOGO_W, LOGO_X, LOGO_Y)
+        im.convert('RGB').save(os.path.join(out, name + '.webp'), 'WEBP', quality=80, method=6)
+        index.append({'file': name + '.webp', 'track': track, 'boot': boot})
+        print('loading', name, os.path.getsize(os.path.join(out, name + '.webp')) // 1024, 'KB')
+    import json
+    with open(os.path.join(out, 'index.json'), 'w') as f:
+        json.dump(index, f, indent=1)
+
+
+if __name__ == '__main__':
+    import sys
+    if 'loading' in sys.argv:
+        loading()
+    else:
+        main()

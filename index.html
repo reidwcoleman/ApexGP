@@ -16,6 +16,15 @@
       #loading .lbar { margin-top: 24px; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
       #loading .lbar b { display: block; height: 100%; width: 0; background: #ff2b3f; }
       #loading .lstep { margin-top: 12px; font-size: 13px; color: rgba(255, 255, 255, 0.4); letter-spacing: 0.04em; font-weight: 600; }
+      /* key art: a 1920×1080 picture with the wordmark baked in at (96, 420); the bar sits under it
+         wherever the cover crop puts it (--k = the cover scale) */
+      #loading .lart { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left center; opacity: 0; transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+      #loading.art-in .lart { opacity: 1; }
+      #loading.art-in { --k: max(calc(100vw / 1920), calc(100vh / 1080)); }
+      #loading.art-in .logo { display: none; }
+      #loading.art-in .lwrap { position: absolute; zoom: 1 !important; left: calc(104 * var(--k)); top: calc(50vh + (498 - 540) * var(--k)); width: calc(540 * var(--k)); }
+      #loading.art-in .lbar { margin-top: 0; height: max(3px, calc(4 * var(--k))); background: rgba(255, 255, 255, 0.14); }
+      #loading.art-in .lstep { font-size: max(12px, calc(17 * var(--k))); color: rgba(255, 255, 255, 0.78); margin-top: calc(14 * var(--k)); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8); }
     </style>
   </head>
   <body>
@@ -29,6 +38,29 @@
         <div class="lerr"></div>
       </div>
     </div>
+    <script>
+      // the loading picture, before the bundle has even parsed: the header-capsule shot first, then
+      // a different one every visit (keep in step with src/ui/loadingArt.ts BOOT_ART)
+      (function () {
+        var L = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa_rain', 'interlagos_rain', 'suzuka_dusk', 'hungaroring_golden', 'melbourne_golden', 'silverstone_drizzle', 'mexico_golden', 'monza_sunset', 'monza_rain'];
+        var i = 0;
+        try {
+          i = (Number(localStorage.getItem('apexgp.loadart') || -1) + 1) % L.length;
+          localStorage.setItem('apexgp.loadart', String(i));
+        } catch (e) {
+          i = Math.floor(Math.random() * L.length);
+        }
+        var box = document.getElementById('loading');
+        var img = new Image();
+        img.className = 'lart';
+        img.alt = '';
+        img.onload = function () {
+          box.classList.add('art-in');
+        };
+        img.src = 'loading/' + L[i] + '.webp';
+        box.insertBefore(img, box.firstChild);
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
