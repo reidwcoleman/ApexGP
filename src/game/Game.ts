@@ -5,7 +5,7 @@ import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
 import { CIRCUITS, MONZA } from '../world/Circuits.ts';
 import type { CircuitDef } from '../world/CircuitGen.ts';
-import { collectDeep, collectResources, disposeTree, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
+import { collectDeep, collectResources, disposeTree, holdMaterials, releaseHeldMaterials, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
 import { createCloudNoise } from '../world/env/skyNoise.ts';
 import { buildTreeKit } from '../world/env/treeproto.ts';
 import { makeGroundTextures } from '../world/trackside/textures.ts';
@@ -17,7 +17,7 @@ import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment } from '../world/Environment.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
-import { Engineer } from '../race/Engineer.ts';
+import { Engineer, RADIO_CLIPS } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
@@ -34,7 +34,7 @@ import { CarEffects } from '../fx/CarEffects.ts';
 import { Debris } from '../fx/Debris.ts';
 import { SkidMarks } from '../fx/SkidMarks.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
-import { Menu, aiLevel, GRID, type RaceSetup, type Settings } from '../ui/Menu.ts';
+import { Menu, aiLevel, GRID, CIRCUIT_INFO, circuitPath, type RaceSetup, type Settings } from '../ui/Menu.ts';
 import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
@@ -49,6 +49,8 @@ import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
 import { Career, SETUP } from '../career/Career.ts';
+import { rollForecast, CAREER_LAPS, type Forecast } from '../career/Season.ts';
+import { ACHIEVEMENTS as ACH, unlockAchievement } from '../core/steam.ts';
 import { loadPeople } from '../people/Humans.ts';
 import { Highlights } from '../career/Highlights.ts';
 import { GarageScene } from './GarageScene.ts';
@@ -126,6 +128,11 @@ export class Game {
   private stateTime = 0;
   private timer = new THREE.Timer();
   private mode: 'race' | 'timetrial' = 'race';
+  /** this session is a career round (10 laps, the round's own weather; counts for medals and unlocks) */
+  private careerRace = false;
+  /** each round's weekend forecast, rolled from its climate when first asked for and again after every race there */
+  private readonly careerFc = new Map<string, Forecast>();
+  private readonly lastFc = new Map<string, Forecast>();
   /** the forecast for the next/current session (re-rolled for every new race) */
   private plan!: WeatherPlan;
   private planKey = '';
@@ -225,10 +232,15 @@ export class Game {
     this.menu = new Menu(uiRoot, {
       onSetupChange: (s) => this.applySetupPreview(s),
       forecast: () => this.forecastLabel(),
-      onStart: (mode, s) => this.startRace(mode, s),
+      onStart: (mode, s) => {
+        this.careerRace = mode === 'career';
+        this.startRace(mode === 'career' ? 'race' : mode, this.sessionSetup(s));
+      },
+      careerForecast: (id) => this.careerForecast(id),
+      onCareerRace: (id) => void this.goCareerRound(id),
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.resume(),
-      onRestart: () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.menu.setup)),
+      onRestart: () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.sessionSetup(this.menu.setup))),
       onQuit: () => this.toMenu(),
       onResetCar: () => {
         this.resume();
@@ -683,6 +695,8 @@ export class Game {
       weather: this.plan,
       damage: setup.damage,
       playerSpec: this.career.spec(),
+      // the rivals develop their cars through the season too
+      aiSpec: this.career.rivalSpec(),
     });
     this.refreshPlayerRig();
     this.particles.setLight(smokeLight(this.race.weatherState));
@@ -710,6 +724,30 @@ export class Game {
     this.flash.reset();
     this.flashbacksUsed = 0;
     return this.race;
+  }
+
+  /** a career round's forecast (kept until it has been raced) */
+  private careerForecast(id: string): Forecast {
+    let f = this.careerFc.get(id);
+    if (!f) {
+      f = rollForecast(id, this.lastFc.get(id));
+      this.careerFc.set(id, f);
+    }
+    return f;
+  }
+  /** the setup this session actually runs: a career round fixes the distance and takes the circuit's weather */
+  private sessionSetup(s: RaceSetup): RaceSetup {
+    if (!this.careerRace) return s;
+    const f = this.careerForecast(this.track.def.id);
+    return { ...s, laps: CAREER_LAPS, weather: f.weather, time: f.time };
+  }
+  /** on to a career round: travel there if it's another circuit, then its race screen */
+  private async goCareerRound(id: string) {
+    if (!this.career.isUnlocked(id)) return;
+    if (id !== this.track.def.id) await this.travel(id);
+    else if (this.state !== 'menu') this.toMenu();
+    if (this.track.def.id !== id) return;
+    this.menu.showCareerSetup();
   }
 
   /** roll a new forecast for the setup's weather/time choices */
@@ -742,6 +780,8 @@ export class Game {
 
   private toMenu() {
     this.highlights.cancel();
+    this.hideIntroCard(true);
+    this.hud.root.classList.remove('intro-hide');
     // a fresh forecast every time we come back from a session
     if (this.state !== 'boot') this.rollWeather(this.menu.setup);
     this.state = 'menu';
@@ -828,6 +868,76 @@ export class Game {
   /** set when this session's result has gone into the career */
   private recorded = false;
 
+  // ------------------------------------------------------------------ race intro
+  /** this session opens with the full intro (a race from the garage, not a restart mid-weekend) */
+  private introLong = false;
+  private introSkip = false;
+  private introCard: HTMLDivElement | null = null;
+  private readonly introA = new THREE.Vector3();
+  private readonly introB = new THREE.Vector3();
+
+  /** the title card: round, circuit, distance and conditions, the layout drawing itself */
+  private showIntroCard() {
+    this.hideIntroCard(true);
+    const d = this.track.def;
+    const info = CIRCUIT_INFO[d.id];
+    const i = CIRCUITS.findIndex((c) => c.id === d.id);
+    const w = this.race.weatherState;
+    const card = document.createElement('div');
+    card.className = 'race-intro';
+    const path = d.centerline ? circuitPath(d.centerline.points, 200, 140, 8) : '';
+    const kicker = this.careerRace ? `Career · Round ${String(i + 1).padStart(2, '0')}` : 'Grand Prix';
+    card.innerHTML =
+      `<svg class="ri-map" viewBox="0 0 200 140"><path d="${path}"/></svg>` +
+      `<div class="ri-text"><div class="ri-kick">${kicker}</div><div class="ri-name">${d.name}</div>` +
+      `<div class="ri-facts"><span>${info?.country ?? d.country}</span><span>${this.race.opts.laps} laps</span><span>${WEATHER_LABEL[w.kind]}</span><span>${TIME_LABEL[this.plan.time]}</span></div></div>` +
+      `<div class="ri-skip"><kbd>Enter</kbd> skip</div>`;
+    card.addEventListener('click', () => (this.introSkip = true));
+    (this.hud.root.parentElement ?? document.body).appendChild(card);
+    requestAnimationFrame(() => card.classList.add('on'));
+    this.introCard = card;
+  }
+  private hideIntroCard(now = false) {
+    const c = this.introCard;
+    if (!c) return;
+    this.introCard = null;
+    if (now) return c.remove();
+    c.classList.remove('on');
+    c.classList.add('off');
+    setTimeout(() => c.remove(), 700);
+  }
+
+  /** the intro's first two shots, at time t: the helicopter onto the grid, then down the grid to your car */
+  private introShot(t: number, A: number, B: number) {
+    const tr = this.track;
+    const cam = this.camera;
+    const s0 = tr.startS;
+    const away = -tr.def.pitSide;
+    const ease = (u: number) => u * u * (3 - 2 * u);
+    if (t < A) {
+      const u = ease(Math.min(1, t / A));
+      const s = s0 + 680 - 540 * u;
+      tr.point(s, away * (tr.halfWidthAt(s) + 34 - 16 * u), 72 - 42 * u, this.introA);
+      tr.point(s0 - 50, 0, 1, this.introB);
+      cam.position.copy(this.introA);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.introB);
+      cam.fov = 44 - 6 * u;
+    } else {
+      const u = ease(Math.min(1, (t - A) / (B - A)));
+      const ps = this.race.player.car.s;
+      const back = Math.max(8, tr.delta(ps, s0) + 6);
+      const s = s0 - 2 - back * u;
+      tr.point(s, away * (tr.halfWidthAt(s) + 1.3), 1.25, this.introA);
+      tr.point(s - 16, -away * 1.2, 0.55, this.introB);
+      cam.position.copy(this.introA);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.introB);
+      cam.fov = 40;
+    }
+    cam.updateProjectionMatrix();
+  }
+
   private startRace(mode: 'race' | 'timetrial', setup: RaceSetup, qualifying = false) {
     if (mode === 'race' && GRID[setup.grid].slot === -1 && !this.gridOrder && !qualifying) {
       this.startQualifying(setup);
@@ -858,6 +968,10 @@ export class Game {
     this.state = mode === 'timetrial' ? 'race' : 'intro';
     this.stateTime = 0;
     this.hud.show(true);
+    // the full intro for a race start (a quick restart gets it too: it can be skipped)
+    this.introLong = mode === 'race';
+    if (this.introLong) this.showIntroCard();
+    else this.hideIntroCard(true);
     if (mode === 'race') this.hud.setHint('Lights out soon · hold <kbd>↑</kbd> to rev, launch when they go out');
     else {
       const rec = this.loadRecord();
@@ -866,6 +980,8 @@ export class Game {
     // a new session always leaves the audio running, un-muffled, at the set volume
     // (a restart from the pause menu used to leave the context suspended: silent second race)
     this.audio.resetSession();
+    // (the engineer's lines decode in the background: ~1 MB, first race only)
+    if (this.audioReady) this.audio.preloadVoices(RADIO_CLIPS);
     this.audioPos = 0;
     this.audio.crowd(mode === 'race' ? 0.8 : 0.3);
     this.audio.setScene('race');
@@ -874,6 +990,7 @@ export class Game {
   private pause() {
     if (this.state !== 'race' && this.state !== 'intro' && this.state !== 'spectate') return;
     if (this.state === 'spectate') this.broadcast.show(null);
+    this.hideIntroCard(true);
     this.state = 'paused';
     this.menu.show('pause');
     this.input.releaseAll();
@@ -983,6 +1100,8 @@ export class Game {
   }
 
   private showResults() {
+    this.hideIntroCard(true);
+    this.hud.root.classList.remove('intro-hide');
     this.queueHighlights();
     this.state = 'results';
     this.audio.setScene('results');
@@ -1002,13 +1121,38 @@ export class Game {
     if (!this.race.isTimeTrial && !this.recorded) {
       this.recorded = true;
       const me = rows.find((r) => r.isPlayer)!;
-      reward = this.career.recordRace(this.track.def.id, me.pos, !!me.dnf, me.fastest && me.pos <= 10, TEAMS.indexOf(me.entry.team), rows.length);
+      reward = this.career.recordRace(this.track.def.id, me.pos, !!me.dnf, me.fastest && me.pos <= 10, TEAMS.indexOf(me.entry.team), rows.length, this.careerRace);
+      // a new weekend here next time: the round's weather is rolled again
+      if (this.careerRace) {
+        const f = this.careerFc.get(this.track.def.id);
+        if (f) this.lastFc.set(this.track.def.id, f);
+        this.careerFc.delete(this.track.def.id);
+      }
+      // Steam achievements (no-ops on the website)
+      unlockAchievement(ACH.FIRST_RACE);
+      if (!me.dnf && me.pos <= 10) unlockAchievement(ACH.FIRST_POINTS);
+      if (!me.dnf && me.pos <= 3) unlockAchievement(ACH.FIRST_PODIUM);
+      if (!me.dnf && me.pos === 1) unlockAchievement(ACH.FIRST_WIN);
+      if (me.fastest) unlockAchievement(ACH.FASTEST_LAP);
+      if (!me.dnf && me.pos === 1 && me.fastest && this.gridOrder?.[0] === me.entry) unlockAchievement(ACH.GRAND_SLAM);
+      const open = this.career.unlockedCircuits().length;
+      if (open >= 5) unlockAchievement(ACH.UNLOCK_5);
+      if (open >= CIRCUITS.length) unlockAchievement(ACH.SEASON_OPEN);
+      if (this.career.medals().gold >= CIRCUITS.length) unlockAchievement(ACH.ALL_MEDALS);
+      if (this.career.development() >= 1) unlockAchievement(ACH.FULL_DEV);
       // Dynamic AI: the rating learns from this race (lap pace and result)
       if (this.race.opts.dynamicAI) this.career.setAiSkill(this.race.rateAiSkill());
       this.lastReward = reward;
     } else if (!this.race.isTimeTrial) reward = this.lastReward;
-    const again = () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.menu.setup));
-    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), reward);
+    const again = () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.sessionSetup(this.menu.setup)));
+    // a career round: straight on to the next one (new circuit, its own weather and light)
+    let next: { label: string; go: () => void } | undefined;
+    if (this.careerRace && !this.spectating && !this.race.isTimeTrial) {
+      const i = CIRCUITS.findIndex((c) => c.id === this.track.def.id);
+      const nc = CIRCUITS[i + 1];
+      if (nc && this.career.isUnlocked(nc.id)) next = { label: `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
+    }
+    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `Career round · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), reward, next);
   }
 
   // ------------------------------------------------------------------ frame
@@ -1051,21 +1195,37 @@ export class Game {
       race.update(dt);
       this.syncAllViews(dt);
       if (st.pause) this.pause();
-      // a broadcast-style build-up: a low, slow sweep round the car on the grid, rising and closing in,
-      // then into the driving camera for the lights
-      if (this.stateTime < 4.2) {
-        const t = this.stateTime;
+      // the race intro: a helicopter sweep down the main straight to the grid (title card up), a
+      // tracking shot down the grid to your car, then the low sweep round it — skippable
+      const IA = 3.8;
+      const IB = 6.8;
+      const IC = 9.6;
+      if (this.introLong && this.stateTime < IC && ((this.input.nav.accept && this.stateTime > 0.35) || this.introSkip)) {
+        this.stateTime = IC;
+        this.introSkip = false;
+      }
+      this.introSkip = false;
+      const t0 = this.introLong ? this.stateTime : this.stateTime + IB;
+      if (this.introLong && t0 < IB) {
+        this.introShot(t0, IA, IB);
+        this.hud.root.classList.add('intro-hide');
+      } else {
+        this.hud.root.classList.remove('intro-hide');
+        this.hideIntroCard();
+      }
+      if (t0 >= IB && t0 < IC) {
+        const t = t0 - IB + 1.4;
         this.cams.orbit(dt, this.playerRigPos(), 8.2 - t * 0.55, 0.55 + t * 0.2, 0.34);
         // a real lens: the car sharp, the grid behind it soft
         this.gfx.setDepthOfField(true, this.dofTarget.copy(this.playerRigPos()).setY(this.dofTarget.y + 0.5), 7, 1.15);
         this.introDof = true;
-      } else {
+      } else if (t0 >= IC) {
         if (this.introDof) {
           this.introDof = false;
           this.gfx.setDepthOfField(false);
         }
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
-        if (this.stateTime > 5.0 && race.phase === 'grid') race.startLights();
+        if (t0 > IC + 0.8 && race.phase === 'grid') race.startLights();
       }
       if (race.phase === 'racing') {
         this.state = 'race';
@@ -1214,9 +1374,8 @@ export class Game {
     // (back in the garage, the last race's weather stays until its highlights are filmed)
     const wx = (this.state === 'menu' && this.highlights.worldWeather(this.track.def.id)) || race.weatherState;
     applyWeatherUniforms(wx);
-    // in the garage the roof and walls shut most of the sky's light out (the tour's lane stops are outdoors)
-    const outside = this.tour.at === 'door' || this.tour.at === 'pitwall';
-    const indoor = this.state === 'menu' && !outside;
+    // in the garage the roof and walls shut most of the sky's light out
+    const indoor = this.state === 'menu';
     this.env.setIndoor(indoor ? 1 : 0);
     this.gfx.indoor = indoor;
     this.env.setWeather(wx);
@@ -1364,7 +1523,9 @@ export class Game {
     const line = this.engineer.update(this.lastDt, this.race, ev);
     if (line) {
       this.hud.radio(line, uiColor(this.race.player.entry.team));
-      if (this.audioReady) this.audio.radio();
+      // the engineer's own voice where the line was recorded, else the radio blip
+      const voice = this.engineer.lastVoice;
+      if (this.audioReady) voice && !this.spectating ? this.audio.radioVoice(voice) : this.audio.radio();
     }
     this.watchMoments(ev);
     for (const e of ev) {
@@ -1488,6 +1649,7 @@ export class Game {
 
   /** a simulated race: every car (the player's too) on the AI, the TV director on the cameras */
   private startSpectate(setup: RaceSetup, cfg: SimConfig | null = this.simCfg) {
+    this.careerRace = false;
     const diff = aiLevel(setup, this.career).value;
     // the grid: a simulated qualifying (nobody drives a lap), a draw, reversed, or on pace
     const times = this.entries.map((e) => ({ e, t: aiQualifyingTime(e, diff, 1, 1) })).sort((a, b) => a.t - b.t);
@@ -2063,7 +2225,7 @@ export class Game {
       await paint();
       veil.classList.add('on');
       if (this.audioReady) this.audio.crowd(0);
-      await wait(380);
+      await wait(260);
       // the newest destination, now that the screen is covered
       const dest = CIRCUITS.find((c) => c.id === this.travelTo) ?? def;
       (veil.querySelector('b') as HTMLElement).textContent = dest.name;
@@ -2073,6 +2235,8 @@ export class Game {
         set(0.04, 'Packing up');
         await paint();
         let tp = performance.now();
+        // (the old materials outlive the build: the new world reuses their shader programs)
+        holdMaterials();
         this.disposeWorld();
         const tDispose = Math.round(performance.now() - tp);
         await this.buildWorld(dest, async (f, label) => {
@@ -2092,9 +2256,11 @@ export class Game {
         this.state = 'menu';
         this.toMenu();
         await this.warmUp();
+        releaseHeldMaterials();
         this.worldTimes.warm = Math.round(performance.now() - tp);
       } catch (e) {
         // a half-built world can't be raced: fall back to a clean start there (the setup is saved)
+        releaseHeldMaterials();
         console.error('[travel] failed, reloading', e);
         location.reload();
         return;
@@ -2639,7 +2805,7 @@ export class Game {
       at: this.tour.at,
       spots: this.garage?.spots ?? null,
       camera: this.camera,
-      overviewMarkers: this.hubTab !== 'setup',
+      overviewMarkers: this.hubTab !== 'setup' && this.hubTab !== 'career',
       panelLeft: this.tour.at ? innerWidth : innerWidth - 500 * uiScale(),
       flying: !!this.tour.flight,
     });

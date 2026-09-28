@@ -139,6 +139,8 @@ export interface RaceReward {
   /** circuit id unlocked by this result */
   unlocked: string | null;
   bestBefore: number | null;
+  /** a career round */
+  career?: boolean;
 }
 
 const KEY = 'apexgp.career';
@@ -161,8 +163,14 @@ function fresh(): CareerData {
   };
 }
 
-/** temporary: every circuit unlocked without winning your way through the calendar */
-export const UNLOCK_ALL = true;
+/** every circuit unlocked without winning your way through the calendar (off: the unlock chain is back) */
+export const UNLOCK_ALL = false;
+
+/** a round's medal from the best career finish there */
+export type Medal = 'gold' | 'silver' | 'bronze' | null;
+export function medalFor(best: number | undefined): Medal {
+  return best === undefined ? null : best === 1 ? 'gold' : best <= 3 ? 'silver' : best <= UNLOCK_POS ? 'bronze' : null;
+}
 
 export class Career {
   data: CareerData;
@@ -197,7 +205,6 @@ export class Career {
   // ------------------------------------------------------------------ circuits
   /** circuits are unlocked in calendar order: the first always, then one per top-five finish at the one before */
   isUnlocked(id: string): boolean {
-    // for now every circuit is open (the career unlock chain comes back later)
     if (UNLOCK_ALL) return true;
     const i = CIRCUITS.findIndex((c) => c.id === id);
     if (i <= 0) return true;
@@ -209,8 +216,46 @@ export class Career {
   }
 
   // ------------------------------------------------------------------ results
-  /** record a finished race; returns what it earned */
-  recordRace(track: string, pos: number, dnf: boolean, fastest: boolean, team: number, field: number): RaceReward {
+  /** the next round the career is working on: the last unlocked one without a medal (null = season complete) */
+  nextRound(): string | null {
+    for (const c of CIRCUITS) {
+      if (!this.isUnlocked(c.id)) return null;
+      if (medalFor(this.data.best[c.id]) === null) return c.id;
+    }
+    return null;
+  }
+  /** medals won so far */
+  medals() {
+    const m = { gold: 0, silver: 0, bronze: 0 };
+    for (const c of CIRCUITS) {
+      const k = medalFor(this.data.best[c.id]);
+      if (k) m[k]++;
+    }
+    return m;
+  }
+  /** the season score: championship points of the best finish at every round */
+  seasonPoints(): number {
+    let n = 0;
+    for (const c of CIRCUITS) {
+      const b = this.data.best[c.id];
+      if (b !== undefined && b <= 10) n += POINTS[b - 1];
+    }
+    return n;
+  }
+
+  /**
+   * The rivals' car: they develop through the season too — three quarters of what the player has
+   * bought, plus a steady step for every round unlocked — so upgrades are an edge, never a walkover.
+   */
+  rivalSpec(): CarSpec {
+    const s: CarSpec = { ...F1_SPEC, gears: F1_SPEC.gears.slice() };
+    const season = Math.max(0, this.unlockedCircuits().length - 1) / Math.max(1, CIRCUITS.length - 1);
+    for (const u of UPGRADES) u.apply(s, Math.min(MAX_LEVEL, this.level(u.id) * 0.75 + season * 1.5));
+    return s;
+  }
+
+  /** record a finished race; returns what it earned. `career`: a career round (counts for the medals and the unlocks) */
+  recordRace(track: string, pos: number, dnf: boolean, fastest: boolean, team: number, field: number, career = true): RaceReward {
     const d = this.data;
     const scored = !dnf && pos <= 10;
     const points = scored ? POINTS[pos - 1] + (fastest ? 1 : 0) : 0;
@@ -230,13 +275,13 @@ export class Career {
     else {
       if (pos === 1) d.wins++;
       if (pos <= 3) d.podiums++;
-      d.best[track] = Math.min(d.best[track] ?? 99, pos);
+      if (career) d.best[track] = Math.min(d.best[track] ?? 99, pos);
     }
     d.history.unshift({ track, pos, dnf, points, credits, team, date: Date.now() });
     d.history.length = Math.min(d.history.length, 40);
     const unlocked = this.unlockedCircuits().find((c) => !wasUnlocked.has(c.id))?.id ?? null;
     this.save();
-    return { points, credits, breakdown, unlocked, bestBefore };
+    return { points, credits, breakdown, unlocked, bestBefore, career };
   }
 
   // ------------------------------------------------------------------ dynamic difficulty

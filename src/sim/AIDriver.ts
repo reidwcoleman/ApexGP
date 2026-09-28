@@ -40,6 +40,17 @@ export class AIDriver {
   rhythm = 0;
   /** a failing car (mechanical trouble): pace multiplier, 1 = healthy */
   trouble = 1;
+  /**
+   * Wheel-to-wheel with the player (set by the race every step): `defend` — the player is right
+   * behind, so cover the inside into the braking zones; `attack` — the player is just ahead, so
+   * brake later and use the battery to get a run. `push`: the extra pace a driver finds in a fight.
+   */
+  defend = 0;
+  attack = 0;
+  push = 1;
+  /** the braking zone this driver last moved to defend (one move per corner) */
+  private defendS = -1e9;
+  private defendSide = 0;
   /** virtual safety car: slow to the VSC speed, no overtaking */
   vsc = false;
   /** the mistake in progress (see MISTAKE), whether it has started (0 armed, 1 happening), its clock and severity 0..1 */
@@ -178,6 +189,30 @@ export class AIDriver {
       this.targetOffset = giveSide > 0 ? Math.max(this.targetOffset, off) : Math.min(this.targetOffset, off);
     }
 
+    // defending: with the player right behind and nobody ahead to race, one move to the inside
+    // before the braking zone (and hold it through the corner) — they have to go round the outside
+    if (this.defend > 0.5 && followSpeed === Infinity && calm === 0 && !this.vsc && this.yieldSide === 0 && giveSide === 0) {
+      const look = Math.max(90, v * 2.4);
+      const vCorner = profile.at(car.s + look);
+      const bigStop = vCorner < v - 14;
+      if (bigStop && track.delta(this.defendS, car.s) > 250) {
+        // the corner the braking zone leads into: its apex side
+        let k = 0;
+        for (let d = look * 0.6; d <= look + 80; d += 10) {
+          const kk = track.kappaAt(car.s + d);
+          if (Math.abs(kk) > Math.abs(k)) k = kk;
+        }
+        if (Math.abs(k) > 1 / 400) {
+          this.defendS = car.s;
+          this.defendSide = Math.sign(k);
+        }
+      }
+      if (this.defendSide !== 0 && track.delta(this.defendS, car.s) < look + 120) {
+        this.targetOffset = this.defendSide * (hw - 2.1) - track.racingLineAt(car.s + 10);
+        this.passTimer = Math.max(this.passTimer, 0.6);
+      } else this.defendSide = 0;
+    } else if (this.defend <= 0.5) this.defendSide = 0;
+
     // lateral offset eases toward its target — moving across mid-corner tightens the
     // path beyond the grip the speed target assumes, so do it on the straights
     const kHere = Math.max(Math.abs(track.kappaAt(car.s)), Math.abs(track.kappaAt(car.s + v * 0.6)));
@@ -280,6 +315,8 @@ export class AIDriver {
         } else spinNow = true;
       }
     }
+    // attacking: out-brake the car ahead when right on its gearbox
+    if (this.attack > 0.5 && followSpeed < Infinity && !this.vsc) late = Math.max(late, 4 + 3 * this.aggression);
     // the assists come back as soon as the moment is over
     const lockNow = this.err === MISTAKE.LOCKUP && this.errOn === 1;
     if (this.savedAssists && !spinNow && !lockNow) {
@@ -291,7 +328,7 @@ export class AIDriver {
       car.assists = spinNow ? { ...car.assists, traction: 'off', stability: false } : { ...car.assists, abs: false };
     }
 
-    let vt = vAt(car.s + v * 0.12 - late) * this.pace * this.trim * (1 + this.rhythm) * this.trouble * (corner ? over : 1) * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
+    let vt = vAt(car.s + v * 0.12 - late) * this.pace * this.trim * this.push * (1 + this.rhythm) * this.trouble * (corner ? over : 1) * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.04 * calm);
     // virtual safety car: everyone at the same reduced speed (the gaps hold)
     if (this.vsc) vt = Math.min(vt, Math.max(15, vAt(car.s + v * 0.12) * VSC_SPEED));
     vt = Math.min(vt, followSpeed);
@@ -328,7 +365,7 @@ export class AIDriver {
     if (this.bog > 0 && this.startTimer < this.reaction + this.bog) inp.throttle = Math.min(inp.throttle, 0.5);
     this.prevLat = car.lateral;
     // ERS in the second half of straights when behind someone
-    inp.ers = followSpeed < Infinity && corner === 0 && car.ers > 0.3;
+    inp.ers = (followSpeed < Infinity || this.attack > 0.5 || this.defend > 0.5) && corner === 0 && car.ers > (this.attack > 0.5 ? 0.12 : 0.3);
 
     // ---- stuck / wrong way detection
     if (v < 2 || Math.abs(car.relYaw) > 1.8) this.stuckTimer += dt;

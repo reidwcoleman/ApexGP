@@ -32,7 +32,7 @@ export interface TourState {
   flying: boolean;
 }
 
-const OVERVIEW: SpotId[] = ['cockpit', 'frontWing', 'gantry', 'chests', 'wall', 'desk', 'tyres', 'mate', 'door'];
+const OVERVIEW: SpotId[] = ['cockpit', 'frontWing', 'wheel', 'sidepod', 'rearWing', 'floor'];
 
 const chevron = (dir: 'l' | 'r') => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="${dir === 'l' ? 'M10 3 5 8l5 5' : 'M6 3l5 5-5 5'}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -74,7 +74,7 @@ export class GarageTourUI {
     const bar = (this.bar = document.createElement('div'));
     bar.className = 'tour-bar';
     bar.innerHTML =
-      `<button class="tour-back">${chevron('l')}<span>Overview</span><kbd>Esc</kbd></button>` +
+      `<button class="tour-back">${chevron('l')}<span>Back</span><kbd>Esc</kbd></button>` +
       `<div class="tour-nav"><button class="tour-step" data-d="-1" aria-label="Previous place">${chevron('l')}</button>` +
       `<div class="tour-title"><b></b><span></span></div>` +
       `<button class="tour-step" data-d="1" aria-label="Next place">${chevron('r')}</button></div>` +
@@ -89,17 +89,15 @@ export class GarageTourUI {
       const id = (e.target as HTMLElement).closest<HTMLElement>('[data-id]')?.dataset.id as SpotId | undefined;
       if (id) this.cb.go(id);
     });
-    // the way in, from the overview
+    // (no free roam of the garage: the car's parts are the places, reached from their buttons)
     const pill = (this.pill = document.createElement('button'));
     pill.className = 'tour-pill';
-    pill.innerHTML = `<i class="wp-dot"></i><span>Explore the garage</span><kbd>E</kbd>`;
-    pill.addEventListener('click', () => this.cb.enter());
-    root.appendChild(pill);
+    pill.hidden = true;
     addEventListener('keydown', (e) => {
-      if (!this.visible || e.repeat || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (!this.visible || e.repeat || !this.at || (e.target as HTMLElement)?.tagName === 'INPUT') return;
       const k = e.key.toLowerCase();
-      if (k === 'e') this.at ? this.cb.step(1) : this.cb.enter();
-      else if (k === 'q' && this.at) this.cb.step(-1);
+      if (k === 'e') this.cb.step(1);
+      else if (k === 'q') this.cb.step(-1);
     });
   }
 
@@ -117,7 +115,7 @@ export class GarageTourUI {
       if (s.at) {
         const i = SPOT_ORDER.indexOf(s.at);
         this.title.textContent = spots[s.at].label;
-        this.sub.textContent = spots[s.at].orbit ? 'Drag to walk around the car' : 'Drag to look around';
+        this.sub.textContent = spots[s.at].info ?? (spots[s.at].orbit ? 'Drag to walk around the car' : 'Drag to look around');
         this.bar.style.setProperty('--n', String(i));
       }
     }
@@ -136,7 +134,7 @@ export class GarageTourUI {
         this.v.copy(sp.marker).project(s.camera);
         const x = ((this.v.x + 1) / 2) * W, y = ((1 - this.v.y) / 2) * H;
         // (the marker layer is zoomed with the UI: screen px → layout px)
-        vis = this.v.z < 1 && x > 24 * k && x < s.panelLeft - 24 * k && y > 80 * k && y < H - 150 * k && d > 0.6;
+        vis = this.v.z < 1 && x > (s.at ? 24 : 300) * k && x < s.panelLeft - 24 * k && y > 80 * k && y < H - 150 * k && d > 0.6;
         if (vis) {
           b.style.transform = `translate3d(${Math.round(x / k)}px, ${Math.round(y / k)}px, 0)`;
           b.classList.toggle('far', d > 9);
@@ -161,7 +159,7 @@ export class GarageTourUI {
     const now = gp.buttons.map((b) => b.pressed);
     const edge = (i: number) => now[i] && !this.pad[i];
     if (s.visible) {
-      if (edge(3)) s.at ? this.cb.exit() : this.cb.enter();
+      if (edge(3) && s.at) this.cb.exit();
       if (s.at && edge(4)) this.cb.step(-1);
       if (s.at && edge(5)) this.cb.step(1);
     }

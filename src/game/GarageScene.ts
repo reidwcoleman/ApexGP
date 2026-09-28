@@ -6,6 +6,7 @@ import { uiColor, type Team, type Driver } from '../race/Teams.ts';
 import { Person, fanLook, type Look, type PeopleKit } from '../people/Humans.ts';
 import { driverLook } from '../people/drivers.ts';
 import { naturalStance, turnHead, aimArm, lean } from '../people/poses.ts';
+import { makeHelmet, attachWrench } from '../people/props.ts';
 import { MOMENT_LABEL, type Highlight, type Highlights } from '../career/Highlights.ts';
 import type { Career } from '../career/Career.ts';
 import type { Track } from '../world/Track.ts';
@@ -635,15 +636,33 @@ export class GarageScene {
       p.root.rotation.y = Math.atan2(faceX - x, faceZ - z);
       g.add(p.root);
     };
-    // you: behind the car on the working side, talking to your engineer
-    const me = new Person(kit, driverLook(team, this.driver, { cap: true }));
-    place(me, S * 1.55, tailZ - 1.05, S * 3.8, c.wFL.z + 4);
-    me.play('Idle_Talking_Loop');
+    // you: standing beside the cockpit in your race suit, helmet in hand, watching the crew work
+    const me = new Person(kit, driverLook(team, this.driver, { cap: false }));
+    // (across the car beside the cockpit: the overview sees him over the bodywork, turned half toward
+    // the camera, helmet in the hand away from the car)
+    const meZ = midZ - 0.35;
+    place(me, -S * 1.45, meZ, S * 3.2, meZ + 3.0);
+    me.play('Idle_Loop', { offset: 0.15 });
+    // the hand away from the car carries the helmet
+    const helmetHand: 'l' | 'r' = S > 0 ? 'r' : 'l';
+    const freeHand: 'l' | 'r' = helmetHand === 'l' ? 'r' : 'l';
+    const helmet = makeHelmet(this.driver.helmet);
+    g.add(helmet.group);
+    this.owned.push(helmet);
+    const meYaw = me.root.rotation.y;
     this.people.push({
       p: me,
       pose: (p, t) => {
         naturalStance(p, 0.8);
-        turnHead(p, Math.sin(t * 0.3) * 0.25 + 0.2, -0.05);
+        // helmet arm: upper arm down by the side, forearm forward, the helmet hanging from the chin bar
+        aimArm(p, helmetHand, [0.16, -0.97, 0.1], [0.12, -0.5, 0.86], 1);
+        // the other hand relaxed on the hip
+        aimArm(p, freeHand, [0.45, -0.8, -0.25], [-0.55, -0.35, 0.2], 0.85);
+        // looking over the car at the mechanics, now and then back at the camera side
+        turnHead(p, (Math.sin(t * 0.23) > 0.55 ? 0.1 : -0.75) * S + Math.sin(t * 0.7) * 0.05, 0.12);
+        // (after the arm is posed: the hand is where the helmet hangs)
+        p.bones[`hand_${helmetHand}`].updateWorldMatrix(true, false);
+        helmet.update(p.bones[`hand_${helmetHand}`], meYaw, (helmetHand === 'l' ? 1 : -1) * 0.9 + Math.PI, t);
       },
     });
     const crewLook = (female: boolean, tone: number, hair: Look['hair'], beard = false): Look => ({
@@ -663,25 +682,68 @@ export class GarageScene {
       headset: true,
       cap: null,
     });
-    // mechanics kneeling at the far front wheel and the near rear wheel
+    // the tools: chrome wrenches in the mechanics' hands
+    const chrome = new THREE.MeshStandardMaterial({ color: 0xc9ccd1, metalness: 1, roughness: 0.22 });
+    this.owned.push(chrome);
+    // a wrench turned in short strokes: the forearm swings about the elbow, a pause to re-set the tool
+    const stroke = (t: number, rate: number, phase: number) => {
+      const u = (t * rate + phase) % 1;
+      return u < 0.55 ? Math.sin((u / 0.55) * Math.PI) : 0;
+    };
+    // mechanics kneeling at the far front wheel and the near rear wheel, wrenching on the hubs
     const m1 = new Person(kit, crewLook(false, 0.2, 'buzzed', true));
     place(m1, wFR.x + Math.sign(wFR.x) * 0.95, wFR.z + 0.15, wFR.x, wFR.z);
     m1.play('Fixing_Kneeling', { offset: 0.2 });
-    this.people.push({ p: m1 });
+    this.owned.push(attachWrench(m1, 'r', chrome));
+    this.people.push({
+      p: m1,
+      pose: (p, t) => {
+        const k = stroke(t, 0.55, 0);
+        aimArm(p, 'r', [0.2, -0.45, 0.85], [-0.1 + 0.35 * k, -0.25 - 0.3 * k, 0.9], 0.9);
+        aimArm(p, 'l', [0.25, -0.4, 0.85], [-0.3, -0.15, 0.9], 0.7);
+        turnHead(p, 0, 0.35);
+      },
+    });
     const m2 = new Person(kit, crewLook(true, 0.65, 'buns'));
     place(m2, wRL.x + Math.sign(wRL.x) * 0.95, wRL.z - 0.2, wRL.x, wRL.z);
     m2.play('Fixing_Kneeling', { offset: 0.6 });
-    this.people.push({ p: m2 });
-    // an aero mechanic crouched at the front wing, setting the flap angle
+    this.owned.push(attachWrench(m2, 'r', chrome));
+    this.people.push({
+      p: m2,
+      pose: (p, t) => {
+        const k = stroke(t, 0.48, 0.4);
+        aimArm(p, 'r', [0.2, -0.4, 0.88], [-0.15 + 0.4 * k, -0.2 - 0.25 * k, 0.9], 0.9);
+        aimArm(p, 'l', [0.3, -0.35, 0.85], [-0.25, -0.3, 0.9], 0.7);
+        turnHead(p, 0.1, 0.3);
+      },
+    });
+    // an aero mechanic crouched at the front wing, setting the flap angle with a small wrench
     const m3 = new Person(kit, crewLook(false, 0.35, 'simpleparted'));
     place(m3, -S * 0.95, c.noseZ + 0.35, -S * 0.2, c.noseZ - 0.25);
     m3.play('Crouch_Idle_Loop', { offset: 0.1 });
+    this.owned.push(attachWrench(m3, 'r', chrome, 0.17));
     this.people.push({
       p: m3,
       pose: (p, t) => {
-        aimArm(p, 'r', [0.1, -0.35, 0.95], [-0.25, -0.5, 0.85], 0.8);
+        const k = stroke(t, 0.7, 0.2);
+        aimArm(p, 'r', [0.1, -0.35, 0.95], [-0.25 + 0.25 * k, -0.5 + 0.2 * k, 0.85], 0.85);
         aimArm(p, 'l', [0.2, -0.4, 0.9], [-0.1, -0.55, 0.85], 0.7);
         turnHead(p, Math.sin(t * 0.33) * 0.2, 0.45);
+      },
+    });
+    // a mechanic at the rear wing, standing, adjusting the flap mounting
+    const m4 = new Person(kit, crewLook(false, 0.5, 'simpleparted', true));
+    place(m4, S * 0.35, tailZ - 0.75, 0, tailZ + 0.2);
+    m4.play('Idle_Loop', { offset: 0.7 });
+    this.owned.push(attachWrench(m4, 'r', chrome));
+    this.people.push({
+      p: m4,
+      pose: (p, t) => {
+        const k = stroke(t, 0.6, 0.65);
+        lean(p, 0.22);
+        aimArm(p, 'r', [0.12, -0.15, 0.98], [-0.05 + 0.3 * k, 0.05 - 0.25 * k, 0.98], 0.95);
+        aimArm(p, 'l', [0.15, -0.1, 0.98], [-0.25, 0.1, 0.95], 0.9);
+        turnHead(p, 0, 0.3);
       },
     });
     // the race engineer at the laptop

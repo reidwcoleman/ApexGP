@@ -556,6 +556,79 @@ export class GameAudio {
     g.setTargetAtTime(1, now + 1.8, 0.35);
   }
 
+  // ------------------------------------------------------------ the race engineer's voice
+  private voiceCache = new Map<string, Promise<AudioBuffer | null>>();
+  private voiceNow: AudioBufferSourceNode | null = null;
+  private voiceBus: AudioNode | null = null;
+
+  /** a recorded radio line (public/audio/radio/<id>.mp3), fetched and decoded once */
+  private voiceBuffer(id: string): Promise<AudioBuffer | null> {
+    let p = this.voiceCache.get(id);
+    if (!p && this.ctx) {
+      const ctx = this.ctx;
+      p = fetch(`${import.meta.env.BASE_URL}audio/radio/${id}.mp3`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+        .then((b) => ctx.decodeAudioData(b))
+        .catch(() => null);
+      this.voiceCache.set(id, p);
+    }
+    return p ?? Promise.resolve(null);
+  }
+  /** decode these lines ahead of time (idle, after boot) */
+  preloadVoices(ids: string[]): void {
+    for (const id of ids) void this.voiceBuffer(id);
+  }
+  /** the radio's sound: a telephone band, a little grit, compressed hard like team radio */
+  private radioBus(): AudioNode {
+    if (this.voiceBus) return this.voiceBus;
+    const ctx = this.ctx!;
+    const hp = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 320, Q: 0.8 });
+    const lp = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: 3600, Q: 0.9 });
+    const pk = new BiquadFilterNode(ctx, { type: 'peaking', frequency: 1900, Q: 1.1, gain: 5 });
+    const shaper = new WaveShaperNode(ctx, { oversample: '2x' });
+    const n = 1024;
+    const curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * 2.2) / Math.tanh(2.2);
+    }
+    shaper.curve = curve;
+    const comp = new DynamicsCompressorNode(ctx, { threshold: -26, knee: 6, ratio: 8, attack: 0.003, release: 0.12 });
+    const g = new GainNode(ctx, { gain: 1.25 });
+    hp.connect(lp).connect(pk).connect(shaper).connect(comp).connect(g).connect(this.uiBus);
+    this.voiceBus = hp;
+    return hp;
+  }
+  /** a team-radio call with the engineer's voice: squelch, the line through the radio, squelch out */
+  radioVoice(id: string): void {
+    if (!this.live()) return;
+    void this.voiceBuffer(id).then((buf) => {
+      if (!buf || !this.live()) return;
+      const ctx = this.ctx!;
+      const now = this.now();
+      try {
+        this.voiceNow?.stop();
+      } catch {
+        /* already ended */
+      }
+      radioSound(ctx, this.b, this.uiBus, now);
+      const src = new AudioBufferSourceNode(ctx, { buffer: buf });
+      src.connect(this.radioBus());
+      const t0 = now + 0.1;
+      src.start(t0);
+      this.voiceNow = src;
+      const end = t0 + buf.duration;
+      // the car dips under the voice for as long as it talks
+      const g = this.duckG.gain;
+      g.cancelScheduledValues(now);
+      g.setTargetAtTime(0.6, now, 0.06);
+      g.setTargetAtTime(1, end, 0.3);
+      src.onended = () => {
+        if (this.voiceNow === src && this.live()) radioSound(ctx, this.b, this.uiBus, this.now());
+      };
+    });
+  }
+
   /** the grandstands react: 'cheer' (start, overtakes, the flag) or 'gasp' (a crash) */
   crowdReact(kind: 'cheer' | 'gasp', amount = 1): void {
     if (!this.live()) return;

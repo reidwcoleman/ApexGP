@@ -1,0 +1,13 @@
+"AppBuild"
+{
+	"AppID"		"YOUR_APP_ID"
+	"Desc"		"Apex GP build"
+	"ContentRoot"	"../release/"
+	"BuildOutput"	"../steam/output/"
+	"SetLive"	""
+	"Depots"
+	{
+		"YOUR_WIN_DEPOT_ID"	"depot_windows.vdf"
+		"YOUR_MAC_DEPOT_ID"	"depot_mac.vdf"
+	}
+}

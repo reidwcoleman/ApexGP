@@ -89,6 +89,23 @@ export function disposeTexture(t: THREE.Texture) {
 }
 
 /**
+ * Materials held back from disposal while a new world is built: a material's dispose releases its
+ * shader program, and most of the next circuit's materials compile to the very same programs
+ * (terrain, trees, people, barriers…). Holding the old ones until the new world has compiled lets
+ * three reuse those programs instead of deleting and relinking them (seconds on a cold driver).
+ */
+let heldMaterials: THREE.Material[] | null = null;
+export function holdMaterials() {
+  heldMaterials ??= [];
+}
+export function releaseHeldMaterials() {
+  const h = heldMaterials;
+  heldMaterials = null;
+  if (h) for (const m of h) m.dispose();
+  return h?.length ?? 0;
+}
+
+/**
  * Detach `root` and dispose every geometry, material and texture under it that is not in
  * `keep`. Returns how many of each were freed.
  */
@@ -114,7 +131,8 @@ export function disposeTree(root: THREE.Object3D, keep: ResourceSet = new Set())
     if (light.isLight && light.shadow) light.shadow.dispose();
   });
   for (const g of geos) g.dispose();
-  for (const m of mats) m.dispose();
+  if (heldMaterials) heldMaterials.push(...mats);
+  else for (const m of mats) m.dispose();
   for (const t of texs) disposeTexture(t);
   return { geometries: geos.size, materials: mats.size, textures: texs.size };
 }

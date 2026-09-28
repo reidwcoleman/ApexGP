@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Team } from '../race/Teams.ts';
+import { Z_FRONT_AXLE, TRACK_F } from '../car/carLayout.ts';
 
 /**
  * The rest of the garage around the car, for the menu: the engineers' telemetry desk
@@ -422,7 +423,8 @@ export function buildDressing(c: DressingCtx): Dressing {
 
 // ==================================================================== viewpoints
 
-export type SpotId = 'car' | 'cockpit' | 'frontWing' | 'tyres' | 'mate' | 'chests' | 'gantry' | 'wall' | 'desk' | 'door' | 'pitwall';
+/** the car's own places: the overview and the parts you can click to look at up close */
+export type SpotId = 'car' | 'cockpit' | 'frontWing' | 'wheel' | 'sidepod' | 'rearWing' | 'floor';
 
 export interface Spot {
   id: SpotId;
@@ -438,10 +440,12 @@ export interface Spot {
   orbit?: boolean;
   /** arrive and leave straight up/down (the cockpit) */
   vertical?: boolean;
+  /** one line about the part, under its name */
+  info?: string;
 }
 
 /** the tour's order (next / previous) */
-export const SPOT_ORDER: SpotId[] = ['car', 'cockpit', 'frontWing', 'gantry', 'chests', 'tyres', 'mate', 'desk', 'wall', 'door', 'pitwall'];
+export const SPOT_ORDER: SpotId[] = ['cockpit', 'frontWing', 'wheel', 'sidepod', 'rearWing', 'floor'];
 
 export function garageSpots(toWorld: (x: number, y: number, z: number) => THREE.Vector3, S: number, a: { cockpit: THREE.Vector3; noseZ: number; tailZ: number; wallCenter: THREE.Vector3; mate: THREE.Vector3 | null }): Record<SpotId, Spot> {
   const W = (x: number, y: number, z: number) => toWorld(x * S, y, z);
@@ -450,18 +454,19 @@ export function garageSpots(toWorld: (x: number, y: number, z: number) => THREE.
   const mx = a.mate ? Math.abs(a.mate.x) : 9;
   const ck = a.cockpit;
   const spot = (id: SpotId, label: string, pos: THREE.Vector3, look: THREE.Vector3, marker: THREE.Vector3, fov: number, near: SpotId[], extra: Partial<Spot> = {}): Spot => ({ id, label, pos, look, marker, fov, near, ...extra });
+  const parts: SpotId[] = ['cockpit', 'frontWing', 'wheel', 'sidepod', 'rearWing', 'floor'];
+  const others = (id: SpotId) => parts.filter((p) => p !== id);
+  const zf = Z_FRONT_AXLE;
+  const xf = TRACK_F / 2;
+  const tz = a.tailZ;
+  void mx;
   return {
-    car: spot('car', 'The car', W(4.2, 1.8, 3.9), W(0, 0.45, 0), W(0.95, 0.95, 0.9), 38, ['cockpit', 'frontWing', 'gantry', 'chests', 'tyres', 'mate', 'wall', 'desk', 'door'], { orbit: true }),
-    cockpit: spot('cockpit', 'Cockpit', toWorld(ck.x, ck.y + 0.17, ck.z - 0.06), toWorld(ck.x, ck.y - 0.18, ck.z + 0.7), toWorld(ck.x, ck.y + 0.5, ck.z), 64, ['car', 'frontWing', 'gantry'], { vertical: true }),
-    frontWing: spot('frontWing', 'Front wing', W(1.3, 0.62, nz + 1.35), W(-0.1, 0.18, nz - 0.35), W(0, 0.45, nz + 0.1), 40, ['car', 'cockpit', 'tyres', 'door']),
-    gantry: spot('gantry', 'Gantry', W(1.25, 3.4, 2.9), W(0, 0.25, -0.6), W(0.95, 3.7, 0.4), 50, ['car', 'cockpit', 'wall', 'desk']),
-    chests: spot('chests', 'Tool chests', W(1.35, 2.15, -1.3), W(-2.6, 0.8, -0.3), W(-2.62, 1.35, 0.1), 46, ['car', 'wall', 'tyres', 'gantry']),
-    tyres: spot('tyres', 'Tyre sets', W(3.55, 1.5, 2.4), W(6.3, 0.75, 0.2), W(6.3, 1.85, 0.45), 48, ['car', 'mate', 'desk', 'door', 'chests']),
-    // the teammate's car on its stands (x of the mate's bay, measured on the open side)
-    mate: spot('mate', 'Second car', W(mx + 2.4, 1.85, 4.0), W(mx - 0.1, 0.4, -0.3), W(mx, 1.45, 0), 46, ['tyres', 'car', 'desk', 'door']),
-    desk: spot('desk', 'Telemetry desk', W(3.45, 1.78, -4.85), W(3.45, 1.35, -7.35), W(3.45, 2.1, -7.25), 44, ['car', 'wall', 'tyres', 'gantry']),
-    wall: spot('wall', 'Video wall', W(0.2, 2.1, -1.4), a.wallCenter.clone(), a.wallCenter.clone().add(new THREE.Vector3(0, 1.45, 0)), 44, ['car', 'desk', 'chests', 'gantry']),
-    door: spot('door', 'Pit lane', W(-0.6, 1.65, 5.6), W(-6, 1.25, 16), W(0.4, 2.3, 5.6), 55, ['pitwall', 'car', 'frontWing', 'tyres']),
-    pitwall: spot('pitwall', 'Pit wall', W(6.2, 2.3, 17.2), W(8.2, 1.4, 22.5), W(7.4, 3.0, 20.2), 50, ['door', 'car']),
+    car: spot('car', 'The car', W(4.2, 1.8, 3.9), W(0, 0.45, 0), W(0.95, 0.95, 0.9), 38, parts, { orbit: true }),
+    cockpit: spot('cockpit', 'Cockpit', toWorld(ck.x, ck.y + 0.17, ck.z - 0.06), toWorld(ck.x, ck.y - 0.18, ck.z + 0.7), toWorld(ck.x, ck.y + 0.5, ck.z), 64, others('cockpit'), { vertical: true, info: 'The halo, the wheel and its live screen — what you see from the driver’s seat' }),
+    frontWing: spot('frontWing', 'Front wing', W(1.3, 0.62, nz + 1.35), W(-0.1, 0.18, nz - 0.35), W(0, 0.45, nz + 0.1), 40, others('frontWing'), { info: 'Active aero: the flaps open on the straights for less drag' }),
+    wheel: spot('wheel', 'Front corner', W(xf + 2.5, 1.35, zf + 1.7), W(xf + 0.2, 0.35, zf - 0.1), W(xf + 0.12, 0.8, zf), 36, others('wheel'), { info: '18-inch wheels, carbon brakes, the push-rod suspension links' }),
+    sidepod: spot('sidepod', 'Sidepod', W(2.45, 1.05, 0.35), W(0.35, 0.5, -0.25), W(0.6, 0.82, -0.05), 40, others('sidepod'), { info: 'Cooling inlets and the wheel-wake boards that steer air past the tyres' }),
+    rearWing: spot('rearWing', 'Rear wing', W(-1.9, 1.9, tz - 1.35), W(0, 0.8, tz + 0.35), W(-0.35, 1.15, tz + 0.25), 42, others('rearWing'), { info: 'Two-element active flap — flattens on the straights' }),
+    floor: spot('floor', 'Floor & diffuser', W(1.25, 0.38, tz - 1.7), W(0, 0.12, tz + 0.7), W(0.5, 0.3, tz + 0.15), 42, others('floor'), { info: 'Where most of the downforce is made: the tunnels and the diffuser' }),
   };
 }

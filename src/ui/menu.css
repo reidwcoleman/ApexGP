@@ -2188,3 +2188,275 @@
   outline: 2px solid #fff;
   outline-offset: 3px;
 }
+
+/* ---------- career: the season map ---------- */
+.hub-panel.wide {
+  left: 300px;
+  right: var(--s6);
+  width: auto;
+  top: 96px;
+  bottom: 60px;
+  max-height: none;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: var(--s4);
+  overflow: hidden;
+}
+.cm-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s5);
+}
+.cm-title .cap,
+.cm-info .cap {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.cm-title .big {
+  font-size: var(--t-time);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.cm-title .big span {
+  color: var(--ink3);
+  font-weight: 400;
+}
+.cm-stats {
+  display: flex;
+  gap: var(--s5);
+}
+.cm-stats .cs {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.cm-stats b {
+  font-size: var(--t-time);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.cm-stats b small {
+  font-size: var(--t-row);
+  color: var(--ink3);
+  font-weight: 400;
+}
+.cm-stats span {
+  font-size: var(--t-cap);
+  color: var(--ink3);
+}
+.cm-stats .medals i {
+  margin-left: var(--s2);
+}
+.md {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+.md.gold { background: #d9b45a; }
+.md.silver { background: #c3c8cf; }
+.md.bronze { background: #b77b4f; }
+.cm-map {
+  position: relative;
+  min-height: 0;
+  border-radius: var(--r-panel);
+  background: radial-gradient(120% 90% at 50% 40%, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0) 70%), rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.cm-map.sel {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.cm-map svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.cm-map .grat {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.035);
+  stroke-width: 0.8;
+}
+.cm-map .land {
+  fill: rgba(255, 255, 255, 0.075);
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+}
+.cm-map .route {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.cm-map .route.done {
+  stroke: var(--accent);
+  opacity: 0.8;
+}
+.cm-map .route.todo {
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-dasharray: 1 5;
+}
+.cm-map .leader {
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1;
+}
+.cm-map .spot {
+  fill: rgba(255, 255, 255, 0.7);
+}
+.cm-map .pin {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.45);
+}
+.cm-map .pin .halo {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 2;
+}
+.cm-map .pin .disc {
+  fill: #151820;
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 1.5;
+  transition: transform 0.25s var(--spring);
+}
+.cm-map .pin text {
+  fill: var(--ink);
+  font: 700 13px var(--font);
+  text-anchor: middle;
+  pointer-events: none;
+}
+.cm-map .pin.locked .disc {
+  fill: rgba(21, 24, 32, 0.8);
+  stroke: rgba(255, 255, 255, 0.1);
+}
+.cm-map .pin.gold .disc { stroke: #d9b45a; stroke-width: 3; }
+.cm-map .pin.silver .disc { stroke: #c3c8cf; stroke-width: 3; }
+.cm-map .pin.bronze .disc { stroke: #b77b4f; stroke-width: 3; }
+.cm-map .pin.next .disc {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+.cm-map .pin.next text {
+  fill: var(--on-accent, #fff);
+}
+.cm-map .pin.next .halo {
+  stroke: var(--accent);
+  animation: pin-pulse 2.2s var(--ease-out) infinite;
+  transform-origin: center;
+}
+@keyframes pin-pulse {
+  from { opacity: 0.8; transform: scale(0.65); }
+  to { opacity: 0; transform: scale(1.35); }
+}
+.cm-map .pin.sel .disc,
+.cm-map .pin:hover .disc {
+  transform: scale(1.18);
+}
+.cm-map .pin.sel .disc {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+.cm-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--s5);
+  min-height: 96px;
+}
+.cm-track {
+  width: 120px;
+  height: 84px;
+  flex: none;
+}
+.cm-track path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-dasharray: 600;
+  animation: track-draw 0.9s var(--ease-out) both;
+}
+@keyframes track-draw {
+  from { stroke-dashoffset: 600; }
+  to { stroke-dashoffset: 0; }
+}
+.cm-info {
+  display: grid;
+  gap: var(--s1);
+  min-width: 0;
+}
+.cm-info .name {
+  font-size: var(--t-time);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cm-info .facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  font-size: var(--t-row);
+  color: var(--ink2);
+}
+.cm-info .facts span + span::before {
+  content: '·';
+  margin-right: var(--s3);
+  color: var(--ink3);
+}
+.cm-info .got,
+.cm-info .need {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-row);
+  color: var(--ink);
+}
+.cm-info .need {
+  color: var(--ink3);
+}
+.cm-info .need svg,
+.cm-info .need g {
+  display: none;
+}
+.cm-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s5);
+}
+.cm-actions .cta {
+  margin: 0;
+  min-width: 240px;
+  padding: 0 var(--s5);
+}
+.cm-actions .cta.dis {
+  background: var(--well);
+  color: var(--ink3);
+}
+.cm-actions .hp-note {
+  margin: 0;
+}
+.opt.fixed .v {
+  color: var(--ink2);
+}
+.panel .pcap.round {
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-map .pin.next .halo,
+  .cm-track path {
+    animation: none;
+  }
+}
+
+.tour-pill[hidden] {
+  display: none !important;
+}

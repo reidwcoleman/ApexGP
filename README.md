@@ -30,11 +30,24 @@ npm run check    # tsc --noEmit
   and the steel bull), Zandvoort (banked Hugenholtz and Arie Luyendijk, dunes, the North Sea and
   the orange army), Circuit of the Americas (the Turn 1 hill, the tower) and Interlagos (the bowl,
   the Senna S, São Paulo all around). Switching circuit rebuilds the world in-page — no reload.
-- **Career, garage and highlights** — your garage is the menu: a working pit garage with tyre
-  blankets, jacks, wheel guns, tool trolley, telemetry and your mechanics. Tune the set-up (wings,
-  brake bias, suspension, ride height, pressures) with hotspots on the car, drag to look around it,
-  and your best moments (overtakes, taking the lead, fastest laps, podiums) are recorded as you race
-  and play on the video wall behind the car.
+- **Career on a world map** — the 14 rounds as pins on a map of the season: a top-5 finish unlocks
+  the next round, and your best result earns a medal (gold = win, silver = podium, bronze = top 5).
+  Career races are always 10 laps and take their weather and time of day from the circuit's climate
+  (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
+  **Next round** on the results screen flies you straight on. The rivals develop their cars through
+  the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
+- **Race intros** — a helicopter sweep down the main straight with the title card (round, circuit,
+  laps, conditions, the layout drawing itself), a tracking shot down the grid to your car, then the
+  orbit into the lights. Enter / click skips.
+- **The garage** — your garage is the menu: your driver stands by the car in race suit with his
+  helmet in his hand while the crew work on it with wrenches (hubs, front wing flaps, rear wing).
+  Click a part (cockpit, front wing, front corner, sidepod, rear wing, floor) to fly the camera to it
+  with a line about it; tune the set-up with hotspots on the car; your best moments play on the
+  video wall behind it.
+- **Race engineer voice** — the team radio is voiced (ElevenLabs, 42 recorded lines: "front wing
+  damage, box this lap", "box for inters", "green, green, green"…) through a radio filter, the car
+  dipping under it. Lines live in `tools/engineer_lines.json`; `node tools/engineer_voice.mjs` renders
+  new ones into `public/audio/radio/`.
 - **Weather, different every race** — Random by default, and every session (a restart too) rolls a
   new sky and time of day, never the last race's: clear, light cloud, overcast, drizzle,
   rain, heavy rain, thunderstorm (forked lightning), sunny showers (with a rainbow), mist and fog,
@@ -103,8 +116,12 @@ npm run check    # tsc --noEmit
   its own weather calls — some gamble, some box early.
 - **AI** — K1999 racing line, friction-ellipse speed profile built at several grip levels (so it
   drives to the conditions: rain, cold or worn tyres), curvature-feedforward + Stanley steering
-  capped at the grip limit, overtaking and defending, single file through chicanes, backs off in
-  dirty air.
+  capped at the grip limit, overtaking, single file through chicanes, backs off in dirty air. It
+  races you: the car ahead covers the inside into the braking zones when you're within a second
+  (one move per corner), the car behind out-brakes you and saves battery for a run when it's within
+  1.2 s, and both find a little extra pace while the fight lasts. Dynamic difficulty now ranges to
+  106% of the limit and moves ±2.5% during a race (`node tools/aipace.mjs [track]` shows where the
+  AI's pace tops out).
 
 ## Controls
 
@@ -167,6 +184,18 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/console.mjs <track>` — shader / page errors while a circuit boots and races (run it for all 14 after shader edits).
 - `node tools/bootprof.mjs`, `tools/bootcache.mjs` — boot profile; cold vs cached (IndexedDB liveries + fan atlas) boot.
 - `node tools/liveryhash.mjs [port]` — hash of every painted livery (proves a Livery.ts refactor is pixel-identical).
+- `node tools/careerflow.mjs` — career map → round → results → Next round (travel) → next round's race screen.
+- `node tools/introshot.mjs [track]`, `tools/menushot.mjs`, `tools/garageshot.mjs`, `tools/personshot.mjs` — intro / hub / garage part / garage person screenshots.
+- `node tools/loadtime.mjs [track] [to,…]`, `tools/cpuprof.mjs <from> <to>` — boot and circuit-switch timings, CPU profile of a switch.
+- `node tools/voicetest.mjs` — the engineer's recorded lines load, decode and play.
+
+## Steam (desktop build)
+
+`desktop/` wraps the build in Electron with the Steam overlay and achievements (`steamworks.js`,
+`src/core/steam.ts`); `cd desktop && npm install && npm start` runs it, `npm run dist:mac|win` packages
+it into `release/`. `steam/STEAM.md` is the full checklist (Steamworks account, App ID, depots,
+achievements, SteamPipe upload via `steam/upload.sh`, store page); store capsules are generated into
+`steam/art/` by `tools/steamart.mjs` + `tools/steam_capsules.py`.
 
 ## Credits
 

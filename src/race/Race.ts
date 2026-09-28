@@ -40,7 +40,9 @@ export interface RaceOptions {
   damage?: DamageMode;
   /** the player's car (career upgrades); AI cars run the base spec */
   playerSpec?: CarSpec;
-  /** Dynamic difficulty: the AI's pace drifts a little (±1.5%) toward the player's during the race */
+  /** the rivals' car (the career develops it through the season); the base car when absent */
+  aiSpec?: CarSpec;
+  /** Dynamic difficulty: the AI's pace drifts (±2.5%) toward the player's during the race */
   dynamicAI?: boolean;
   /** track-limit rules (default lenient) */
   trackLimits?: TrackLimitsMode;
@@ -221,9 +223,9 @@ export interface RaceEvent {
 export const FUEL_PER_LAP = 1.8;
 
 /** Dynamic difficulty: where a new player starts and the range the rating can move in (fraction of the limit) */
-export const AI_SKILL = { start: 0.92, min: 0.72, max: 1.03 };
+export const AI_SKILL = { start: 0.92, min: 0.72, max: 1.06 };
 /** Dynamic difficulty: the most the AI's pace moves during a race */
-const DYN_TRIM = 0.015;
+const DYN_TRIM = 0.025;
 
 function median(xs: number[]): number {
   if (!xs.length) return NaN;
@@ -309,7 +311,7 @@ export class Race {
       const t = mulberry32(strHash(`${track.def.id}/${e.team.id}`));
       this.forms.set(e, { form: 1 + Math.max(-0.013, Math.min(0.013, gauss(r) * 0.0055)), suit: 1 + gauss(t) * 0.0018, quali: gauss(r) * 0.12 });
     });
-    this.profile = RacingProfile.for(track, F1_SPEC);
+    this.profile = RacingProfile.for(track, opts.aiSpec ?? F1_SPEC);
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
     this.deltaCur = new Float32Array(Math.ceil(track.length / 10) + 2).fill(-1);
@@ -332,7 +334,7 @@ export class Race {
 
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
-      const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : F1_SPEC);
+      const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : !isPlayer && opts.aiSpec ? opts.aiSpec : F1_SPEC);
       car.weather = this.weather;
       car.damageMode = opts.damage ?? 'full';
       if (opts.mode === 'timetrial') {
@@ -739,6 +741,7 @@ export class Race {
     for (const c of this.cars) this.scoreCar(c, dt);
     this.rankCars();
     this.dynamicPace(dt);
+    this.battles();
   }
 
   /**
@@ -1515,9 +1518,32 @@ export class Race {
       this.dynTimer = 1;
       this.aiTrimTarget = 1 + DYN_TRIM * this.paceSignal();
     }
-    const step = (DYN_TRIM / 15) * dt;
+    const step = (DYN_TRIM / 10) * dt;
     this.aiTrim += Math.max(-step, Math.min(step, this.aiTrimTarget - this.aiTrim));
     for (const c of this.cars) if (c.ai) c.ai.trim = this.aiTrim;
+  }
+
+  /**
+   * The fights around the player: the car just ahead defends when they're within a second, the
+   * car just behind attacks when it's within 1.2 s — both find a little extra pace while it lasts.
+   * Everyone else races normally.
+   */
+  private battles() {
+    const p = this.player;
+    const live = this.phase === 'racing' && !this.isTimeTrial && !p.finished && !p.retired && p.pit.phase === 'none' && this.vsc === 'none';
+    for (const c of this.cars) {
+      if (!c.ai) continue;
+      let defend = 0;
+      let attack = 0;
+      if (live && !c.finished && !c.retired && c.pit.phase === 'none') {
+        if (c.position === p.position - 1 && p.gapAhead < 1.0) defend = 1;
+        if (c.position === p.position + 1 && c.gapAhead < 1.2) attack = 1;
+      }
+      c.ai.defend = defend;
+      c.ai.attack = attack;
+      const want = 1 + 0.007 * defend + 0.009 * attack;
+      c.ai.push += (want - c.ai.push) * 0.02;
+    }
   }
 
   /** −1 … 1: + = the player is getting away from the AI around them (they should be a touch quicker) */

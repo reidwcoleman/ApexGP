@@ -5,3 +5,9 @@ shots
 
 # downloaded source packs (Quaternius CC0, TUMFTM) — see tools/build_people.py
 assets-src/
+
+# desktop (Steam) build
+desktop/node_modules
+release
+steam/art/raw
+steam/output
