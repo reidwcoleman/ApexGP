@@ -34,6 +34,8 @@ game
   })
   .then(() => {
     loading.classList.add('done');
+    // once faded out, drop the slideshow (its looping layers would keep compositing under the game)
+    setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1000);
     const q = new URLSearchParams(location.search);
     const demo = q.get('demo');
     if (demo) {

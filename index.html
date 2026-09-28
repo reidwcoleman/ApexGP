@@ -18,8 +18,11 @@
       #loading .lstep { margin-top: 12px; font-size: 13px; color: rgba(255, 255, 255, 0.4); letter-spacing: 0.04em; font-weight: 600; }
       /* key art: a 1920×1080 picture with the wordmark baked in at (96, 420); the bar sits under it
          wherever the cover crop puts it (--k = the cover scale) */
-      #loading .lart { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left center; opacity: 0; transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
-      #loading.art-in .lart { opacity: 1; }
+      /* the pictures cycle on pure CSS animations (opacity + a slight drift, anchored on the logo so
+         the wordmark stays put): the compositor runs them even while a build step blocks the main
+         thread, which a timer can't. Keyframes and delays are written by the script below. */
+      #loading .lart { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left center; opacity: 0; transform-origin: 6% 39%; will-change: opacity, transform; }
+      @media (prefers-reduced-motion: reduce) { #loading .lart { animation-name: lart-still !important; } }
       #loading.art-in { --k: max(calc(100vw / 1920), calc(100vh / 1080)); }
       #loading.art-in .logo { display: none; }
       #loading.art-in .lwrap { position: absolute; zoom: 1 !important; left: calc(104 * var(--k)); top: calc(50vh + (498 - 540) * var(--k)); width: calc(540 * var(--k)); }
@@ -39,8 +42,8 @@
       </div>
     </div>
     <script>
-      // the loading picture, before the bundle has even parsed: the header-capsule shot first, then
-      // a different one every visit (keep in step with src/ui/loadingArt.ts BOOT_ART)
+      // the loading pictures, before the bundle has even parsed: a slideshow that starts on a
+      // different picture every visit, a new one every 2.2 s (keep in step with src/ui/loadingArt.ts BOOT_ART)
       (function () {
         var L = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa_rain', 'interlagos_rain', 'suzuka_dusk', 'hungaroring_golden', 'melbourne_golden', 'silverstone_drizzle', 'mexico_golden', 'monza_sunset', 'monza_rain'];
         var i = 0;
@@ -50,15 +53,30 @@
         } catch (e) {
           i = Math.floor(Math.random() * L.length);
         }
+        var N = 6, SLOT = 2.2, FADE = 0.6, T = N * SLOT;
+        var pct = function (sec) { return ((sec / T) * 100).toFixed(3) + '%'; };
+        // each picture fades in over FADE, holds (drifting in) through its slot and the next one's fade
+        // in on top, then fades out: every change a clean crossfade, the wrap from the last (on top)
+        // back to the first (underneath) included
+        var css = '@keyframes lart-cycle { 0% { opacity: 0; transform: scale(1.035); } ' +
+          pct(FADE) + ' { opacity: 1; } ' + pct(SLOT + FADE) + ' { opacity: 1; transform: scale(1); } ' +
+          pct(SLOT + 2 * FADE) + ', 100% { opacity: 0; transform: scale(1); } }' +
+          '@keyframes lart-still { 0%, ' + pct(SLOT + FADE) + ' { opacity: 1; } ' + pct(SLOT + 2 * FADE) + ', 100% { opacity: 0; } }';
+        var st = document.createElement('style');
+        st.textContent = css;
+        document.head.appendChild(st);
         var box = document.getElementById('loading');
-        var img = new Image();
-        img.className = 'lart';
-        img.alt = '';
-        img.onload = function () {
-          box.classList.add('art-in');
-        };
-        img.src = 'loading/' + L[i] + '.webp';
-        box.insertBefore(img, box.firstChild);
+        for (var k = N - 1; k >= 0; k--) {
+          var im = new Image();
+          im.className = 'lart';
+          im.alt = '';
+          im.decoding = 'async';
+          // (the first starts fully in)
+          im.style.animation = 'lart-cycle ' + T + 's linear ' + (k * SLOT - FADE) + 's infinite';
+          if (k === 0) im.onload = function () { box.classList.add('art-in'); };
+          im.src = 'loading/' + L[(i + k) % L.length] + '.webp';
+          box.insertBefore(im, box.firstChild);
+        }
       })();
     </script>
     <script type="module" src="/src/main.ts"></script>

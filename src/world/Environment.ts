@@ -50,6 +50,11 @@ export interface Environment {
   dispose(keep?: Set<object>): void;
   /** 0 outdoors … 1 inside the garage: the sky's ambient light is mostly shut out (the roof and walls) */
   setIndoor(k: number): void;
+  /**
+   * The lean tier (the game's frame-rate governor, High only): fewer 3D trees, no grass blades,
+   * a smaller shadow atlas over a shorter reach. Off restores the quality level's own settings.
+   */
+  setLean(on: boolean, parts?: { trees?: boolean; shadows?: boolean }): void;
   readonly buildMs: number;
   /** build breakdown + instance counts */
   readonly stats: Record<string, unknown>;
@@ -597,6 +602,12 @@ export function createEnvironment(
     renderer.setClearColor(0x000000, 0);
     renderer.autoClear = true;
     scene.updateMatrixWorld(true);
+    // queue every program the capture needs before the first draw, with the (linear) cube target
+    // bound so the program keys match: the driver builds them in parallel instead of one by one
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(worldCam.renderTarget);
+    renderer.compile(scene, capCam);
+    renderer.setRenderTarget(prevRT);
     worldCam.update(renderer, scene);
     renderer.setClearColor(prevClear, prevAlpha);
     renderer.autoClear = prevAuto;
@@ -615,8 +626,18 @@ export function createEnvironment(
     bakeAge = 0;
   }
 
+  let lean = false;
+  function setLean(on: boolean, parts: { trees?: boolean; shadows?: boolean } = { trees: true, shadows: true }) {
+    if (on === lean) return;
+    lean = on;
+    if (on) {
+      if (parts.trees) scenery.setQuality('medium');
+      if (parts.shadows) rig.setQuality(1536, 300);
+    } else setQuality(quality);
+  }
   function setQuality(q: QualityLevel) {
     quality = q;
+    lean = false;
     const Q = QUALITY[q];
     clouds.setQuality(q);
     rig.setQuality(Q.shadowMap, Q.farSize);
@@ -797,6 +818,7 @@ export function createEnvironment(
     group,
     sun,
     focusShadow,
+    setLean,
     setWeather,
     update,
     buildMs,

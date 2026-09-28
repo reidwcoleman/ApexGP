@@ -469,7 +469,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // [122, 142, 56] — impostors take over a little sooner now)
   // (leaf cards face the camera in the 3D trees and the impostors alike, so the hand-over can
   // come closer: fewer 3D trees on screen, the main tree cost)
-  const DETAIL = { low: [56, 72, 28], medium: [80, 96, 38], high: [98, 116, 46], ultra: [128, 150, 60] } as const;
+  const DETAIL = { low: [56, 72, 28], medium: [76, 92, 36], high: [88, 104, 40], ultra: [128, 150, 60] } as const;
   const setDetail = (q: keyof typeof DETAIL) => {
     const [f0, f1, l0] = DETAIL[q];
     uniforms.uFade.value.set(f0, f1);

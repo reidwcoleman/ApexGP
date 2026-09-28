@@ -814,7 +814,10 @@ export class Game {
   }
 
   private applySettings(s: Settings) {
-    if (s.quality !== this.gfx.qualityLevel) this.gfx.setQuality(s.quality);
+    if (s.quality !== this.gfx.qualityLevel) {
+      this.gfx.setQuality(s.quality);
+      this.leanOn = false;
+    }
     this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6 }[s.quality];
     if (this.cams) this.cams.prefs = { ...DEFAULT_CAM, ...(s.cam ?? {}) };
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
@@ -2097,6 +2100,7 @@ export class Game {
   private readonly visor: HTMLDivElement;
   private visorOn = false;
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
+    CarView.lodScale = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) / Math.tan(THREE.MathUtils.degToRad(25));
     this.camPos.copy(this.camera.position);
     const onboardEye = this.cams.mode === 'cockpit' || this.cams.mode === 'helmet';
     const visor = this.cams.mode === 'helmet' && (this.state === 'race' || this.state === 'intro' || this.state === 'paused');
@@ -2255,6 +2259,7 @@ export class Game {
         // the cars keep their materials: point their reflections at the new sky
         const env = this.scene.environment;
         if (env !== oldEnv) for (const rig of this.rigs.values()) rig.setEnvMap?.(env);
+        if (this.leanOn) this.env.setLean(true);
         tp = performance.now();
         this.finishWorld();
         this.worldTimes.dispose = tDispose;
@@ -3040,6 +3045,8 @@ export class Game {
    * raise that turns slow again within 4 s caps the scale below it for 30 s. The only
    * automatic quality step is Ultra → High (never up: a level change recompiles shaders).
    */
+  /** the governor's lean tier is on (see adaptQuality) */
+  private leanOn = false;
   private adaptQuality(dt: number) {
     this.fpsAvg = this.fpsAvg * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
     const aq = this.aq;
@@ -3096,6 +3103,15 @@ export class Game {
         if (++aq.slowAtFloor >= 4) {
           aq.slowAtFloor = 0;
           this.setAutoQuality('high');
+        }
+      } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && gfx.qualityLevel === 'high' && !this.leanOn) {
+        // High, lowest resolution, native output off, still short of 60: the lean tier (fewer 3D
+        // trees, no grass blades, a smaller shadow atlas) — kept for the session, every circuit
+        if (++aq.slowAtFloor >= 4) {
+          aq.slowAtFloor = 0;
+          this.leanOn = true;
+          this.env.setLean(true);
+          aq.settleUntil = now + 1.5;
         }
       } else aq.slowAtFloor = 0;
     } else if (roomy && fps >= 57) {

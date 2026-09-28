@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { TEAMS, type Team } from '../../race/Teams.ts';
 import { Frame, TrackSpace, rng } from './geo.ts';
 import { GARAGE_W, L, type PitPlan } from './layout.ts';
-import { Person, peopleKit, printTexture, rigid, type Look, type PeopleKit, type BodyAsset } from '../../people/Humans.ts';
+import { bindPoseBounds, Person, peopleKit, printTexture, rigid, type Look, type PeopleKit, type BodyAsset } from '../../people/Humans.ts';
 import { createWheelProp, type WheelProp, type Compound } from '../../car/CarModel.ts';
 import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R } from '../../car/carLayout.ts';
 import { STOP, newStopPose, stopPose, type StopPose } from '../../race/Pit.ts';
@@ -647,6 +647,7 @@ export class CrewSystem {
     h.castShadow = true;
     h.receiveShadow = true;
     h.frustumCulled = false;
+    bindPoseBounds(h);
     h.name = 'crew-helmet';
     p.body.parent!.add(h);
     p.root.visible = false;

@@ -14,6 +14,13 @@ const smooth = (a: number, b: number, x: number) => {
  * chassis pitch/roll/heave, wheels, steering, brakes, DRS, LOD by distance.
  */
 export class CarView {
+  /**
+   * Detail levels go by apparent size: distance × this (tan of the camera's half field of view over
+   * tan 25°, set by the game each frame). The middle level (a third of the triangles) is indistinguishable
+   * beyond a dozen metres at a normal field of view; the full one is for the player's car and the car
+   * right beside it.
+   */
+  static lodScale = 1;
   readonly rig: CarRig;
   private readonly up = new THREE.Vector3();
   private readonly fwd = new THREE.Vector3();
@@ -89,8 +96,9 @@ export class CarView {
     rig.setRainLight(rainLight);
     if (live) this.wearAndTear(car, dt);
 
-    const d = camPos.distanceTo(this.pos);
-    const want: 0 | 1 | 2 = isPlayer || d < 28 ? 0 : d < 90 ? 1 : 2;
+    // (distance as it looks on screen: a long lens brings a far car close, a wide one pushes it away)
+    const d = camPos.distanceTo(this.pos) * CarView.lodScale;
+    const want: 0 | 1 | 2 = isPlayer || d < 13 ? 0 : d < 75 ? 1 : 2;
     if (want !== this.detail) {
       this.detail = want;
       rig.setDetail(want);

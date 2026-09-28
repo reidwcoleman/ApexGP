@@ -4,7 +4,7 @@
 import { chromium } from 'playwright-core';
 const [track = 'monza', scale = '1', cam = 'chase', W = '1440', H = '900'] = process.argv.slice(2);
 const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
-const page = await browser.newPage({ viewport: { width: Number(W), height: Number(H) }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: Number(W), height: Number(H) }, deviceScaleFactor: Number(process.env.DPR ?? 1) });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=${cam}&skip=30&weather=clear&time=afternoon`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });

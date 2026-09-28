@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { perlin2, rng, tileFbm } from './noise.ts';
 import { finish, heightToNormal } from './textures.ts';
+import { keepPixels, pixelKey, restorePixels } from '../../core/pixelCache.ts';
 
 /**
  * Parco di Monza tree species, built from code:
@@ -419,8 +420,88 @@ function drawSpray(ca: CanvasRenderingContext2D, cn: CanvasRenderingContext2D, o
   cn.restore();
 }
 
+/**
+ * The leaf atlas kept between visits (~1.5 s of canvas painting and dilation): three PNGs through the
+ * image cache — the colour opaque, its alpha as grey, the normals — because a canvas premultiplies
+ * alpha and would lose the colour dilated into the transparent texels.
+ */
+const LEAF_KEY = pixelKey('leaf-atlas', 3, CELL, ATLAS_COLS, ATLAS_ROWS);
+function restoreLeafAtlas(W: number, H: number): { out: Uint8Array; nout: Uint8Array } | null {
+  const mk = () => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    return c;
+  };
+  const cRgb = mk(), cA = mk(), cN = mk();
+  if (!restorePixels(LEAF_KEY + 'c', cRgb) || !restorePixels(LEAF_KEY + 'a', cA) || !restorePixels(LEAF_KEY + 'n', cN)) return null;
+  const rgb = cRgb.getContext('2d')!.getImageData(0, 0, W, H).data;
+  const al = cA.getContext('2d')!.getImageData(0, 0, W, H).data;
+  const n = cN.getContext('2d')!.getImageData(0, 0, W, H).data;
+  const out = new Uint8Array(W * H * 4);
+  for (let q = 0; q < out.length; q += 4) {
+    out[q] = rgb[q];
+    out[q + 1] = rgb[q + 1];
+    out[q + 2] = rgb[q + 2];
+    out[q + 3] = al[q];
+  }
+  return { out, nout: new Uint8Array(n.buffer.slice(0)) };
+}
+function keepLeafAtlas(out: Uint8Array, nout: Uint8Array, W: number, H: number) {
+  if (typeof document === 'undefined') return;
+  const put = (key: string, fill: (d: Uint8ClampedArray) => void) => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const g = c.getContext('2d')!;
+    const img = g.createImageData(W, H);
+    fill(img.data);
+    g.putImageData(img, 0, 0);
+    keepPixels(key, c);
+  };
+  put(LEAF_KEY + 'c', (d) => {
+    for (let q = 0; q < d.length; q += 4) {
+      d[q] = out[q];
+      d[q + 1] = out[q + 1];
+      d[q + 2] = out[q + 2];
+      d[q + 3] = 255;
+    }
+  });
+  put(LEAF_KEY + 'a', (d) => {
+    for (let q = 0; q < d.length; q += 4) {
+      d[q] = d[q + 1] = d[q + 2] = out[q + 3];
+      d[q + 3] = 255;
+    }
+  });
+  put(LEAF_KEY + 'n', (d) => d.set(nout));
+}
+function leafTextures(out: Uint8Array, nout: Uint8Array, W: number, H: number) {
+  const map = new THREE.DataTexture(out, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+  finish(map, 8);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
+  const normal = new THREE.DataTexture(nout, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+  finish(normal, 8);
+  normal.wrapS = normal.wrapT = THREE.ClampToEdgeWrapping;
+  // the average leaf colour, from the opaque texels
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let q = 0; q < out.length; q += 64) {
+    if (out[q + 3] > 200) {
+      r += out[q];
+      g += out[q + 1];
+      b += out[q + 2];
+      n++;
+    }
+  }
+  n = Math.max(1, n);
+  const avg = new THREE.Color().setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace);
+  return { map, normal, avg };
+}
+
 function buildLeafAtlas(): { map: THREE.DataTexture; normal: THREE.DataTexture; avg: THREE.Color } {
   const W = CELL * ATLAS_COLS, H = CELL * ATLAS_ROWS;
+  const cached = typeof document !== 'undefined' ? restoreLeafAtlas(W, H) : null;
+  if (cached) return leafTextures(cached.out, cached.nout, W, H);
   const mk = () => {
     const c = document.createElement('canvas');
     c.width = W;
@@ -466,15 +547,12 @@ function buildLeafAtlas(): { map: THREE.DataTexture; normal: THREE.DataTexture; 
         nout[q + 3] = 255;
       }
   }
-  const map = new THREE.DataTexture(out, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
-  finish(map, 8);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
-  const normal = new THREE.DataTexture(nout, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
-  finish(normal, 8);
-  normal.wrapS = normal.wrapT = THREE.ClampToEdgeWrapping;
-  const avg = new THREE.Color().setRGB(tr / tn / 255, tg / tn / 255, tb / tn / 255, THREE.SRGBColorSpace);
-  return { map, normal, avg };
+  keepLeafAtlas(out, nout, W, H);
+  void tr;
+  void tg;
+  void tb;
+  void tn;
+  return leafTextures(out, nout, W, H);
 }
 
 /** bark: RGB = normal (x, y, z), A = albedo brightness. Tiles 1.6 m around × 2.4 m along. */

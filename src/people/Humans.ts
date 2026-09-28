@@ -165,6 +165,21 @@ const CASUAL_M = ['Male_Adult_07', 'Male_Adult_12', 'Male_Adult_10', 'Male_Adult
 const CASUAL_F = ['Pilot_Female_02'];
 
 /** the bodies a fan can have right now: the fans loaded, else the casual CORE ones */
+/**
+ * Give an unculled SkinnedMesh its bind-pose bounds up front. The renderer's depth sort still asks
+ * every SkinnedMesh for a bounding sphere, and SkinnedMesh computes that by skinning each vertex on
+ * the CPU (about 1.3 s over the boot's crowd, crew and garage people). The bind pose is close
+ * enough for sorting, and these meshes never frustum-cull.
+ */
+export function bindPoseBounds(m: THREE.SkinnedMesh): THREE.SkinnedMesh {
+  const g = m.geometry;
+  if (!g.boundingSphere) g.computeBoundingSphere();
+  if (!g.boundingBox) g.computeBoundingBox();
+  m.boundingSphere = g.boundingSphere!.clone();
+  m.boundingBox = g.boundingBox!.clone();
+  return m;
+}
+
 export function fanPool(kit: PeopleKit, female: boolean): string[] {
   const own = (female ? ROSTER.fansF : ROSTER.fansM).filter((n) => kit.avatars.has(n));
   if (own.length) return own;
@@ -1106,12 +1121,14 @@ export class Person {
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.body.frustumCulled = false;
+    bindPoseBounds(this.body);
     const attach = (geo: THREE.BufferGeometry, mat: THREE.Material, shadow = true) => {
       const m = new THREE.SkinnedMesh(geo, mat);
       m.bind(this.skeleton, asset.bindMatrix);
       m.castShadow = shadow;
       m.receiveShadow = true;
       m.frustumCulled = false;
+      bindPoseBounds(m);
       inner.add(m);
       return m;
     };
@@ -1179,6 +1196,7 @@ export class Person {
     m.bind(this.skeleton, this.body.bindMatrix);
     m.castShadow = shadow;
     m.frustumCulled = false;
+    bindPoseBounds(m);
     this.body.parent!.add(m);
     return m;
   }

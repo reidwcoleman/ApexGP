@@ -37,8 +37,8 @@ npm run check    # tsc --noEmit
   **Next round** on the results screen flies you straight on. The rivals develop their cars through
   the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
-  sunset…, `public/loading/`): the boot rotates through them, a circuit switch shows the destination's
-  own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
+  sunset…, `public/loading/`): the boot crossfades through them every 2.2 s on pure CSS animations (they
+  keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
 - **Race intros** — a helicopter sweep down the main straight with the title card (round, circuit,
   laps, conditions, the layout drawing itself), a tracking shot down the grid to your car, then the
   orbit into the lights. Enter / click skips.
@@ -176,7 +176,10 @@ Regression checks (all headless, no browser):
 - `node tools/limits.mjs 3` — where AI cars run wide in a race.
 
 In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`):
-- `node tools/bench.mjs [track]` — GPU cost per post pass / scenery group / cars (steady throughput timing).
+- `node tools/bench.mjs [track]` — GPU cost per post pass / scenery group / cars (steady throughput timing; `DPR=2` for Retina).
+- `node tools/ab.mjs <track> "<on js>" "<off js>"` — alternating A/B frame timing of one change (use it when another app loads the GPU).
+- `node tools/bootwarm.mjs [track]` / `node tools/pixcheck.mjs` — cold vs warm boot steps + a CPU profile / the image cache filling, against `npx vite preview --port 5194` after `npm run build`.
+- `node tools/tris.mjs`, `tools/cartris.mjs`, `tools/casters.mjs`, `tools/raceprof.mjs` — triangles/draw calls by group, per car LOD, shadow casters, a race-frame CPU profile.
 - `node tools/perfnow.mjs [track] [cam]` — fps, render scale and draw calls in a live race at Retina 2×.
 - `node tools/cuts.mjs [secs] [track] [speed]` — how often the TV director cuts in a simulated race.
 - `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
