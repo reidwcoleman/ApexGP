@@ -99,7 +99,7 @@ ones), a trailer (30–90 s, gameplay first), a short description (≤300 charac
 
 Suggested short description:
 > Race a 2026-spec Formula car through a 14-round career on a world map — dynamic weather and time of
-> day at every circuit, rivals that fight back and develop their cars, a race engineer in your ear,
+> day at every circuit, rivals that fight back and develop their cars, team radio from your engineer,
 > and cockpit, helmet and TV cameras.
 
 Minimum requirements (from testing on an M1 MacBook): macOS 12 / Windows 10, a GPU with WebGL 2

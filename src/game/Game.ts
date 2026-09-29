@@ -17,7 +17,7 @@ import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment } from '../world/Environment.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
-import { Engineer, RADIO_CLIPS } from '../race/Engineer.ts';
+import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
@@ -984,8 +984,6 @@ export class Game {
     // a new session always leaves the audio running, un-muffled, at the set volume
     // (a restart from the pause menu used to leave the context suspended: silent second race)
     this.audio.resetSession();
-    // (the engineer's lines decode in the background: ~1 MB, first race only)
-    if (this.audioReady) this.audio.preloadVoices(RADIO_CLIPS);
     this.audioPos = 0;
     this.audio.crowd(mode === 'race' ? 0.8 : 0.3);
     this.audio.setScene('race');
@@ -1527,9 +1525,7 @@ export class Game {
     const line = this.engineer.update(this.lastDt, this.race, ev);
     if (line) {
       this.hud.radio(line, uiColor(this.race.player.entry.team));
-      // the engineer's own voice where the line was recorded, else the radio blip
-      const voice = this.engineer.lastVoice;
-      if (this.audioReady) voice && !this.spectating ? this.audio.radioVoice(voice) : this.audio.radio();
+      if (this.audioReady) this.audio.radio();
     }
     this.watchMoments(ev);
     for (const e of ev) {

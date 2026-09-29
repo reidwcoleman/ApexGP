@@ -47,10 +47,7 @@ npm run check    # tsc --noEmit
   Click a part (cockpit, front wing, front corner, sidepod, rear wing, floor) to fly the camera to it
   with a line about it; tune the set-up with hotspots on the car; your best moments play on the
   video wall behind it.
-- **Race engineer voice** — the team radio is voiced (ElevenLabs, 42 recorded lines: "front wing
-  damage, box this lap", "box for inters", "green, green, green"…) through a radio filter, the car
-  dipping under it. Lines live in `tools/engineer_lines.json`; `node tools/engineer_voice.mjs` renders
-  new ones into `public/audio/radio/`.
+- **Team radio** — text calls from the engineer (damage, box this lap, rain, gaps) with a radio blip; no spoken voice.
 - **Weather, different every race** — Random by default, and every session (a restart too) rolls a
   new sky and time of day, never the last race's: clear, light cloud, overcast, drizzle,
   rain, heavy rain, thunderstorm (forked lightning), sunny showers (with a rainbow), mist and fog,
