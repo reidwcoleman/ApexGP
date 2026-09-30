@@ -13,6 +13,7 @@ import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '
 import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SETUP, medalFor, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
+import { artFor } from './loadingArt.ts';
 
 export interface RaceSetup {
   team: number;
@@ -481,47 +482,70 @@ export class Menu {
         `<div class="cs"><b>${c.wins}</b><span>Wins · ${c.races} races</span></div>` +
         `</div>`,
     );
-    // the map
+    // the map: the land as a field of dots, the season's route between the circuits, a pin per
+    // round; it glides in on the round you pick (closest over Europe, where eight rounds crowd)
     const map = el('div', 'cm-map', p);
-    const pts = CIRCUITS.map((cd) => {
+    const pts = CIRCUITS.map((cd, i) => {
       const g = GEO[cd.id] ?? [0, 0];
       const [x, y] = project(g[0], g[1]);
       const o = PIN_OFFSET[cd.id] ?? [0, 0];
-      return { cd, x, y, px: x + o[0], py: y + o[1] };
+      return { cd, i, x, y, ox: o[0], oy: o[1] };
     });
-    let grat = '';
-    for (let lon = -120; lon <= 160; lon += 20) {
-      const [x] = project(0, lon);
-      grat += `M${x.toFixed(1)} 0V${MAP_H}`;
-    }
-    for (let lat = -40; lat <= 60; lat += 20) {
-      const [, y] = project(lat, 0);
-      grat += `M0 ${y.toFixed(1)}H${MAP.w}`;
-    }
-    // the season's route: flown so far in the accent, the rest dotted
+    // the route: flown so far glowing in the accent, the next leg drawing itself, the rest dotted
     let done = '';
+    let nextLeg = '';
     let todo = '';
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1];
       const b = pts[i];
-      const mx = (a.px + b.px) / 2;
-      const my = (a.py + b.py) / 2 - Math.min(60, Math.hypot(b.px - a.px, b.py - a.py) * 0.18);
-      const seg = `M${a.px.toFixed(1)} ${a.py.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${b.px.toFixed(1)} ${b.py.toFixed(1)}`;
-      if (this.career.isUnlocked(b.cd.id)) done += seg;
-      else if (this.career.isUnlocked(a.cd.id)) todo += seg;
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2 - Math.min(70, d * 0.22);
+      const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+      if (this.career.isUnlocked(b.cd.id) && b.cd.id !== next) done += seg;
+      else if (b.cd.id === next && this.career.isUnlocked(a.cd.id)) nextLeg += seg;
+      else todo += seg;
     }
-    const lock = `<path d="M-3.5 -1v-2.2a3.5 3.5 0 0 1 7 0V-1" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="-5" y="-1" width="10" height="7" rx="1.6" fill="currentColor"/>`;
+    const lock = `<path d="M-2.6 -0.6v-1.7a2.6 2.6 0 0 1 5.2 0V-0.6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="-3.8" y="-0.7" width="7.6" height="5.4" rx="1.2" fill="currentColor"/>`;
     const pins = pts
-      .map(({ cd, x, y, px, py }, i) => {
+      .map(({ cd, i, x, y, ox, oy }) => {
         const unlocked = this.career.isUnlocked(cd.id);
         const medal = medalFor(c.best[cd.id]);
         const cls = ['pin', unlocked ? 'open' : 'locked', medal ?? '', cd.id === next ? 'next' : '', cd.id === this.setup.track ? 'here' : ''].filter(Boolean).join(' ');
-        const leader = px !== x || py !== y ? `<line class="leader" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${px.toFixed(1)}" y2="${py.toFixed(1)}"/>` : '';
-        return `${leader}<circle class="spot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2"/><g class="${cls}" data-id="${cd.id}" transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle class="halo" r="20"/><circle class="disc" r="13"/>${unlocked ? `<text y="4.5">${i + 1}</text>` : `<g class="lk">${lock}</g>`}</g>`;
+        const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
+        const face = unlocked ? `<circle class="halo" r="20"/><circle class="disc" r="13"/><text y="4.5">${i + 1}</text>` : `<circle class="disc" r="9"/><g class="lk">${lock}</g>`;
+        const tw = 22 + cd.short.length * 9.4;
+        // (on the side away from the map's edge: the far-east rounds label to their left)
+        const left = ox < 0 || x > MAP.w * 0.72;
+        const tag = `<g class="tag" transform="translate(${ox + (left ? -20 : 20)} ${oy})"><rect class="tbg" x="${left ? -tw : 0}" y="-13" width="${tw.toFixed(0)}" height="26" rx="6"/><text class="tn" x="${left ? -11 : 11}" y="4.5" text-anchor="${left ? 'end' : 'start'}">${cd.short.toUpperCase()}</text></g>`;
+        return `<g class="pinw" data-id="${cd.id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="2.4"/>${tag}<g class="${cls}" data-id="${cd.id}" transform="translate(${ox} ${oy})">${face}</g></g>`;
       })
       .join('');
-    map.innerHTML = `<svg viewBox="0 0 ${MAP.w} ${MAP_H}" preserveAspectRatio="xMidYMid meet"><path class="grat" d="${grat}"/><path class="land" d="${landPath()}"/><path class="route todo" d="${todo}"/><path class="route done" d="${done}"/>${pins}</svg>`;
+    map.innerHTML =
+      `<svg viewBox="0 0 ${MAP.w} ${MAP_H}" preserveAspectRatio="xMidYMid slice">` +
+      `<defs><pattern id="cm-dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.05"/></pattern>` +
+      `<radialGradient id="cm-vig" cx="50%" cy="45%" r="75%"><stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/></radialGradient></defs>` +
+      `<g class="cm-world"><path class="land-base" d="${landPath()}"/><path class="land" d="${landPath()}"/>` +
+      `<path class="route todo" d="${todo}"/><path class="route done" d="${done}"/><path class="route next" d="${nextLeg}"/>${pins}</g>` +
+      `<rect class="vig" width="${MAP.w}" height="${MAP_H}" fill="url(#cm-vig)"/></svg>`;
+    const world = map.querySelector<SVGGElement>('.cm-world')!;
+    const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
+    /** glide the map onto a round: tighter over Europe (its rounds sit a few hundred km apart) */
+    const focus = (id: string, instant = false) => {
+      const g = GEO[id] ?? [45, 10];
+      const europe = g[0] > 40 && g[0] < 56 && g[1] > -12 && g[1] < 28;
+      const k = europe ? 1.75 : 1.35;
+      const [fx, fy] = project(g[0], g[1]);
+      const tx = Math.min(0, Math.max(MAP.w - MAP.w * k, MAP.w / 2 - fx * k));
+      const ty = Math.min(0, Math.max(MAP_H - MAP_H * k, MAP_H / 2 - fy * k));
+      map.classList.toggle('instant', instant);
+      world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
+      // pins, tags and leaders keep their size on screen
+      for (const w of pinws) w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
+      if (instant) requestAnimationFrame(() => map.classList.remove('instant'));
+    };
     const detail = el('div', 'cm-detail', p);
+    let first = true;
     const drawDetail = () => {
       const id = this.mapSel!;
       const i = CIRCUITS.findIndex((cd) => cd.id === id);
@@ -541,10 +565,16 @@ export class Menu {
             ? `<span class="got">Best P${best} · top ${UNLOCK_POS} for a medal</span>`
             : `<span class="got">Not raced yet</span>`;
       detail.innerHTML =
-        `<svg class="cm-track" viewBox="0 0 120 84"><path d="${path}"/></svg>` +
+        `<div class="cm-art"><svg class="cm-track" viewBox="0 0 120 84"><path d="${path}"/></svg></div>` +
         `<div class="cm-info"><div class="cap">Round ${String(i + 1).padStart(2, '0')} · ${info.country}</div><div class="name">${cd.name}</div>` +
         `<div class="facts"><span>${CAREER_LAPS} laps</span><span>${info.km} km</span><span>${info.turns} turns</span>${fc ? `<span>${fcLabel(fc)}</span>` : ''}</div>${status}</div>`;
+      const art = detail.querySelector<HTMLElement>('.cm-art')!;
       for (const g of Array.from(map.querySelectorAll<SVGGElement>('.pin'))) g.classList.toggle('sel', g.dataset.id === id);
+      for (const w of pinws) w.classList.toggle('sel', w.dataset.id === id);
+      focus(id, first);
+      first = false;
+      art.style.backgroundImage = `url("${artFor(cd.id)}")`;
+      art.classList.toggle('locked', !unlocked);
       cta.textContent = unlocked ? `Race round ${i + 1}` : 'Locked';
       cta.classList.toggle('dis', !unlocked);
     };
@@ -561,7 +591,7 @@ export class Menu {
       this.cb.onUi('move');
     };
     map.addEventListener('click', (e) => {
-      const g = (e.target as Element).closest<SVGGElement>('.pin');
+      const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
       if (!g?.dataset.id) return;
       this.mapSel = g.dataset.id;
       drawDetail();

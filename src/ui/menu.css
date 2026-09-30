@@ -2281,16 +2281,35 @@
   width: 100%;
   height: 100%;
 }
-.cm-map .grat {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.035);
-  stroke-width: 0.8;
+.cm-map .cm-world {
+  transition: transform 0.9s var(--ease-out);
 }
-.cm-map .land {
-  fill: rgba(255, 255, 255, 0.075);
-  stroke: rgba(255, 255, 255, 0.1);
+.cm-map .pinw {
+  transition: transform 0.9s var(--ease-out);
+}
+.cm-map.instant .cm-world,
+.cm-map.instant .pinw {
+  transition: none;
+}
+.cm-map svg * {
+  vector-effect: non-scaling-stroke;
+}
+/* the land: a faint wash under a field of dots (the broadcast-graphics world map) */
+.cm-map .land-base {
+  fill: rgba(255, 255, 255, 0.03);
+  stroke: rgba(255, 255, 255, 0.12);
   stroke-width: 0.8;
   stroke-linejoin: round;
+}
+.cm-map .land {
+  fill: url(#cm-dots);
+  stroke: none;
+}
+.cm-map #cm-dots circle {
+  fill: rgba(255, 255, 255, 0.2);
+}
+.cm-map .vig {
+  pointer-events: none;
 }
 .cm-map .route {
   fill: none;
@@ -2299,22 +2318,34 @@
 }
 .cm-map .route.done {
   stroke: var(--accent);
-  opacity: 0.8;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 4px var(--accent));
+}
+.cm-map .route.next {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 7;
+  animation: cm-flow 1.1s linear infinite;
+}
+@keyframes cm-flow {
+  to { stroke-dashoffset: -13; }
 }
 .cm-map .route.todo {
-  stroke: rgba(255, 255, 255, 0.28);
-  stroke-dasharray: 1 5;
+  stroke: rgba(255, 255, 255, 0.13);
+  stroke-dasharray: 1 6;
 }
 .cm-map .leader {
-  stroke: rgba(255, 255, 255, 0.28);
+  stroke: rgba(255, 255, 255, 0.3);
   stroke-width: 1;
 }
 .cm-map .spot {
-  fill: rgba(255, 255, 255, 0.7);
+  fill: rgba(255, 255, 255, 0.75);
+}
+.cm-map .pinw {
+  cursor: pointer;
 }
 .cm-map .pin {
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.38);
 }
 .cm-map .pin .halo {
   fill: none;
@@ -2322,20 +2353,22 @@
   stroke-width: 2;
 }
 .cm-map .pin .disc {
-  fill: #151820;
-  stroke: rgba(255, 255, 255, 0.22);
+  fill: #141720;
+  stroke: rgba(255, 255, 255, 0.28);
   stroke-width: 1.5;
-  transition: transform 0.25s var(--spring);
+  transition: transform 0.25s var(--spring), stroke 0.2s;
 }
 .cm-map .pin text {
   fill: var(--ink);
   font: 700 13px var(--font);
   text-anchor: middle;
   pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
+/* locked rounds stay quiet: a small dark disc with a lock */
 .cm-map .pin.locked .disc {
-  fill: rgba(21, 24, 32, 0.8);
-  stroke: rgba(255, 255, 255, 0.1);
+  fill: rgba(16, 18, 24, 0.92);
+  stroke: rgba(255, 255, 255, 0.12);
 }
 .cm-map .pin.gold .disc { stroke: #d9b45a; stroke-width: 3; }
 .cm-map .pin.silver .disc { stroke: #c3c8cf; stroke-width: 3; }
@@ -2351,18 +2384,45 @@
   stroke: var(--accent);
   animation: pin-pulse 2.2s var(--ease-out) infinite;
   transform-origin: center;
+  transform-box: fill-box;
 }
 @keyframes pin-pulse {
   from { opacity: 0.8; transform: scale(0.65); }
   to { opacity: 0; transform: scale(1.35); }
 }
-.cm-map .pin.sel .disc,
-.cm-map .pin:hover .disc {
-  transform: scale(1.18);
+.cm-map .pinw:hover .pin .disc {
+  transform: scale(1.14);
 }
 .cm-map .pin.sel .disc {
+  transform: scale(1.2);
   stroke: #fff;
   stroke-width: 2.5;
+}
+.cm-map .pin.locked.sel .disc {
+  stroke: rgba(255, 255, 255, 0.7);
+}
+/* the picked round's name beside its pin (the one label on the map) */
+.cm-map .tag {
+  opacity: 0;
+  transition: opacity 0.25s var(--ease-out);
+  pointer-events: none;
+}
+.cm-map .pinw.sel .tag {
+  opacity: 1;
+}
+.cm-map .tag .tbg {
+  fill: rgba(10, 12, 17, 0.86);
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
+}
+.cm-map .tag .tn {
+  fill: var(--ink);
+  font: 700 12px var(--font);
+  letter-spacing: 0.12em;
+}
+.cm-map .pinw.sel {
+  /* on top of its neighbours */
+  isolation: isolate;
 }
 .cm-detail {
   display: flex;
@@ -2370,10 +2430,34 @@
   gap: var(--s5);
   min-height: 96px;
 }
-.cm-track {
-  width: 120px;
-  height: 84px;
+.cm-art {
+  position: relative;
+  width: 176px;
+  height: 99px;
   flex: none;
+  border-radius: var(--r-panel);
+  /* (the key art's wordmark sits on its left third: show the picture, not the logo) */
+  background: #0b0d12 82% 50% / auto 150% no-repeat;
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.cm-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 10, 14, 0.2), rgba(8, 10, 14, 0.72));
+}
+.cm-art.locked {
+  filter: grayscale(1) brightness(0.55);
+}
+.cm-track {
+  position: absolute;
+  right: 6px;
+  top: 8px;
+  width: 104px;
+  height: 73px;
+  z-index: 1;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.8));
 }
 .cm-track path {
   fill: none;
@@ -2452,8 +2536,13 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .cm-map .pin.next .halo,
+  .cm-map .route.next,
   .cm-track path {
     animation: none;
+  }
+  .cm-map .cm-world,
+  .cm-map .pinw {
+    transition: none;
   }
 }
 
