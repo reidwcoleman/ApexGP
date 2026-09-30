@@ -32,11 +32,13 @@ game
     bar.style.width = `${Math.round(f * 100)}%`;
     step.textContent = s;
   })
-  .then(() => {
+  .then(async () => {
     loading.classList.add('done');
     // once faded out, drop the slideshow (its looping layers would keep compositing under the game)
     setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1000);
     const q = new URLSearchParams(location.search);
+    // the garage is up; demo sessions and the ready signal wait for the whole circuit behind it
+    await game.whenWorld();
     const demo = q.get('demo');
     if (demo) {
       game.debugStart({

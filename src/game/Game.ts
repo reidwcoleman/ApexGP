@@ -14,7 +14,8 @@ import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
 import { setEvent, EVENT } from '../world/event.ts';
 const EVENT_GP = () => EVENT.gp;
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
-import { createEnvironment, type Environment } from '../world/Environment.ts';
+import { createEnvironment, type Environment, type Scenery } from '../world/Environment.ts';
+import { sceneryBuilder } from '../world/env/scenery.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
@@ -234,8 +235,11 @@ export class Game {
       onSetupChange: (s) => this.applySetupPreview(s),
       forecast: () => this.forecastLabel(),
       onStart: (mode, s) => {
-        this.careerRace = mode === 'career';
-        this.startRace(mode === 'career' ? 'race' : mode, this.sessionSetup(s));
+        void this.worldReady().then((ok) => {
+          if (!ok) return;
+          this.careerRace = mode === 'career';
+          this.startRace(mode === 'career' ? 'race' : mode, this.sessionSetup(s));
+        });
       },
       careerForecast: (id) => this.careerForecast(id),
       onCareerRace: (id) => void this.goCareerRound(id),
@@ -360,7 +364,10 @@ export class Game {
     mark('pixels');
     setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice
-    const want = new URLSearchParams(location.search).get('track') ?? this.menu.setup.track;
+    // (the garage opens at the circuit you race next: the career's next round, the newest unlocked)
+    const unlocked = this.career.unlockedCircuits();
+    const next = this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? this.menu.setup.track;
+    const want = new URLSearchParams(location.search).get('track') ?? next;
     await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
       progress(0.06 + f * 0.56, step);
       await tick();
@@ -415,12 +422,11 @@ export class Game {
     this.finishWorld();
     mark('finish');
 
-    progress(0.9, 'Warming up shaders');
+    progress(0.9, 'Opening the garage');
     await tick();
     this.toMenu();
+    this.warmGarage();
     mark('menu');
-    await this.warmUp();
-    mark('warm');
     this.bootMs = Math.round(performance.now() - t0);
 
     progress(1, 'Ready');
@@ -438,6 +444,175 @@ export class Game {
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+    // the garage is up: the landscape, the stands and the race's shaders follow behind it
+    void this.completeWorldInBackground().then(() => mark('warm'));
+  }
+
+  // ------------------------------------------------------------------ the rest of the world, behind the garage
+
+  /** bumped on every world switch: a background build of an older world stops at its next slice */
+  private worldGen = 0;
+  private worldDone: Promise<void> = Promise.resolve();
+  /** 0 … 1 of the background build (1 = the circuit is complete and its race shaders are ready) */
+  worldProgress = 1;
+  /** resolves when the current circuit is complete (landscape, broadcast cameras, race shaders) */
+  whenWorld(): Promise<void> {
+    return this.worldDone;
+  }
+  private completeWorldInBackground(): Promise<void> {
+    const gen = ++this.worldGen;
+    this.worldProgress = 0;
+    this.worldDone = this.completeWorld(gen).catch((e) => {
+      console.error('[world] background build failed', e);
+      this.worldProgress = 1;
+    });
+    return this.worldDone;
+  }
+  /**
+   * The costly half of a circuit — terrain, woods, grass, grandstands and crowds, villages, the
+   * skyline — built one slice per frame while the garage is up, then swapped in for the stand-in
+   * ground; the broadcast cameras re-sited on the real landscape; every race shader compiled.
+   */
+  private async completeWorld(gen: number) {
+    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const t0 = performance.now();
+    let busy = 0;
+    const it = sceneryBuilder(this.track, this.gfx);
+    let partial: THREE.Group | null = null;
+    let scenery: Scenery | null = null;
+    const SLICES = 10;
+    for (let n = 0; ; n++) {
+      await frame();
+      if (gen !== this.worldGen) {
+        if (partial) disposeTree(partial);
+        return;
+      }
+      const ts = performance.now();
+      const r = it.next();
+      busy += performance.now() - ts;
+      if (r.done) {
+        scenery = r.value;
+        break;
+      }
+      partial = r.value.group;
+      this.worldProgress = 0.75 * Math.min(1, (n + 1) / SLICES);
+    }
+    await frame();
+    if (gen !== this.worldGen) {
+      disposeTree(scenery.group);
+      return;
+    }
+    let ts = performance.now();
+    // (the garage's work lights stay out of the reflection capture)
+    const lit = this.garageLights.visible;
+    this.garageLights.visible = false;
+    this.env.adoptScenery(scenery);
+    this.garageLights.visible = lit;
+    if (this.leanOn) this.env.setLean(true);
+    this.mirrorSkipFor = null;
+    busy += performance.now() - ts;
+    this.worldProgress = 0.82;
+    await frame();
+    if (gen !== this.worldGen) return;
+    ts = performance.now();
+    this.placeBroadcastCameras();
+    busy += performance.now() - ts;
+    this.worldProgress = 0.88;
+    await frame();
+    if (gen !== this.worldGen) return;
+    ts = performance.now();
+    await this.warmUp();
+    busy += performance.now() - ts;
+    if (gen !== this.worldGen) return;
+    this.worldProgress = 1;
+    this.worldTimes.background = Math.round(busy);
+    this.worldTimes.backgroundWall = Math.round(performance.now() - t0);
+    console.info(`[shot] [world] ${this.track.def.id} complete behind the garage: ${Math.round(busy)} ms of work over ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  /** the broadcast cameras, placed with what they can see (the occupancy grid of the whole world) */
+  private placeBroadcastCameras() {
+    const mode = this.cams?.mode;
+    const prefs = this.cams?.prefs;
+    let sight: Sightlines | null = null;
+    try {
+      sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), [this.trackside.group, this.pits.group, this.env.group]);
+    } catch (e) {
+      console.warn('[sightlines] failed', e);
+    }
+    this.cams = new Cameras(this.camera, this.track, sight);
+    this.cams.prefs = prefs ?? { ...DEFAULT_CAM, ...(this.menu.settings.cam ?? {}) };
+    if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
+    if (mode) this.cams.mode = mode;
+  }
+
+  /** the garage's own shaders, queued in parallel before its first frame (the race's follow behind it) */
+  private warmGarage() {
+    const r = this.gfx.renderer;
+    const linear = new THREE.WebGLRenderTarget(1, 1);
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(linear);
+    this.garageFrame(0.016);
+    this.garageLights.visible = true;
+    r.compile(this.scene, this.camera);
+    r.setRenderTarget(prev);
+    linear.dispose();
+    this.gfx.render(0.016);
+  }
+
+  /**
+   * Run `go` once the circuit is complete. Usually it already is; if the player is quicker than the
+   * build, a small card shows how far along it is (and Esc/back gives up waiting).
+   */
+  private async worldReady(): Promise<boolean> {
+    // (a circuit picked in the calendar a moment ago: go there first)
+    if (this.travelTimer) {
+      clearTimeout(this.travelTimer);
+      this.travelTimer = 0;
+    }
+    if (this.menu.setup.track !== this.track.def.id) await this.travel(this.menu.setup.track);
+    if (this.travelling) await this.travelling;
+    if (this.worldProgress >= 1) return true;
+    const gen = this.worldGen;
+    const card = document.createElement('div');
+    card.className = 'world-wait';
+    card.innerHTML = `<span>Finishing</span><b>${this.track.def.name}</b><div class="ww-bar"><i></i></div>`;
+    document.body.appendChild(card);
+    const bar = card.querySelector('i') as HTMLElement;
+    requestAnimationFrame(() => card.classList.add('on'));
+    const tick = () => {
+      if (!card.isConnected) return;
+      bar.style.transform = `scaleX(${this.worldProgress.toFixed(3)})`;
+      requestAnimationFrame(tick);
+    };
+    tick();
+    await this.worldDone;
+    card.classList.remove('on');
+    setTimeout(() => card.remove(), 400);
+    return gen === this.worldGen && this.worldProgress >= 1 && this.state === 'menu';
+  }
+  /** a quick-race circuit picked in the calendar: the garage moves there once the pick settles */
+  private travelTimer = 0;
+  /** the garage's status chip while the circuit grows behind it */
+  private worldChip: HTMLElement | null = null;
+  private updateWorldChip() {
+    const show = this.state === 'menu' && !this.worldBusy && this.worldProgress < 1 && this.menu.screen !== 'none';
+    if (!this.worldChip) {
+      if (!show) return;
+      const c = document.createElement('div');
+      c.className = 'world-chip';
+      c.innerHTML = '<span class="wc-ring"></span><span class="wc-text"></span>';
+      document.body.appendChild(c);
+      this.worldChip = c;
+    }
+    const c = this.worldChip;
+    c.classList.toggle('on', show);
+    if (show) {
+      c.style.setProperty('--p', this.worldProgress.toFixed(3));
+      const t = c.querySelector('.wc-text') as HTMLElement;
+      const label = `Building ${this.track.def.name}`;
+      if (t.textContent !== label) t.textContent = label;
+    }
   }
 
   // ------------------------------------------------------------------ the world (one circuit)
@@ -497,10 +672,11 @@ export class Game {
     this.pits.prebuild?.();
     lap('crew');
 
-    await step(0.4, 'Growing the park');
+    await step(0.4, 'Setting up the sky');
     const w0 = new Weather(this.plan).state;
     applyWeatherUniforms(w0);
-    this.env = createEnvironment(this.track, this.gfx, this.scene, w0);
+    // (the landscape itself grows behind the garage afterwards: completeWorld)
+    this.env = createEnvironment(this.track, this.gfx, this.scene, w0, { scenery: false });
     this.scene.add(this.env.group);
     lap('environment');
 
@@ -519,18 +695,8 @@ export class Game {
 
   /** the circuit's cameras, racing line and HUD map (needs the cars) */
   private finishWorld() {
-    const mode = this.cams?.mode;
-    // what the broadcast cameras can see: an occupancy grid of this world (trees, stands, walls, terrain)
-    let sight: Sightlines | null = null;
-    try {
-      sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), [this.trackside.group, this.pits.group, this.env.group]);
-    } catch (e) {
-      console.warn('[sightlines] failed', e);
-    }
-    this.cams = new Cameras(this.camera, this.track, sight);
-    this.cams.prefs = { ...DEFAULT_CAM, ...(this.menu.settings.cam ?? {}) };
-    if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
-    if (mode) this.cams.mode = mode;
+    // (placed again on the real landscape once it exists: completeWorld)
+    this.placeBroadcastCameras();
     this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
     this.scene.add(this.line.mesh);
     this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
@@ -804,9 +970,17 @@ export class Game {
   }
 
   private applySetupPreview(s: RaceSetup) {
-    // a different circuit means a different world: build it in place behind the travel veil
+    // a different circuit means a different world: the garage moves there once the pick settles
+    // (scrolling down the calendar doesn't rebuild every circuit on the way)
+    if (this.travelTimer) {
+      clearTimeout(this.travelTimer);
+      this.travelTimer = 0;
+    }
     if (s.track !== this.track.def.id) {
-      this.travel(s.track);
+      this.travelTimer = window.setTimeout(() => {
+        this.travelTimer = 0;
+        if (this.state === 'menu' && this.menu.setup.track !== this.track.def.id) void this.travel(this.menu.setup.track);
+      }, 700);
       return;
     }
     if (`${s.weather}/${s.time}` !== this.planKey) this.rollWeather(s);
@@ -1187,6 +1361,7 @@ export class Game {
       this.pits.clearView(null);
       this.pits.hideCrew(-1);
     }
+    this.updateWorldChip();
     if (this.state === 'menu') {
       race.update(dt);
       this.syncAllViews(dt);
@@ -1634,11 +1809,8 @@ export class Game {
       c.track = (others.length ? others : CIRCUITS)[Math.floor(Math.random() * (others.length || CIRCUITS.length))].id;
     }
     this.simCfg = c;
-    if (c.track !== this.track.def.id) {
-      this.menu.setup.track = c.track;
-      await this.travel(c.track);
-      if (this.track.def.id !== c.track) return;
-    }
+    this.menu.setup.track = c.track;
+    if (!(await this.worldReady()) || this.track.def.id !== c.track) return;
     const setup: RaceSetup = { ...this.menu.setup, track: c.track, laps: c.laps, weather: c.weather, time: c.time, damage: c.damage };
     // every simulated race gets its own sky (a Random choice rolls again)
     this.planKey = '';
@@ -2215,7 +2387,10 @@ export class Game {
       const screen = this.menu.screen;
       const veil = document.createElement('div');
       veil.className = 'travel-veil';
-      veil.innerHTML = `<img class="tv-art" alt=""><div><span>Travelling to</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step">Packing up</div></div>`;
+      // a title card over the circuit's own key art while its garage is built (the rest follows
+      // behind the garage): no "travelling" screen to sit through
+      const round = CIRCUITS.indexOf(def) + 1;
+      veil.innerHTML = `<img class="tv-art" alt=""><div><span>Round ${round} · ${def.country}</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step"></div></div>`;
       // the destination's key art (decoded before the build blocks the main thread)
       const art = veil.querySelector('img') as HTMLImageElement;
       art.src = artFor(def.id);
@@ -2233,11 +2408,14 @@ export class Game {
       await paint();
       veil.classList.add('on');
       if (this.audioReady) this.audio.crowd(0);
-      await Promise.race([artReady, wait(600)]);
-      await wait(260);
+      await Promise.race([artReady, wait(350)]);
+      await wait(120);
       // the newest destination, now that the screen is covered
       const dest = CIRCUITS.find((c) => c.id === this.travelTo) ?? def;
       (veil.querySelector('b') as HTMLElement).textContent = dest.name;
+      // the old circuit's background build (if still going) stops at its next slice
+      this.worldGen++;
+      await this.worldDone;
       this.worldBusy = true;
       try {
         const oldEnv = this.scene.environment;
@@ -2260,13 +2438,12 @@ export class Game {
         this.finishWorld();
         this.worldTimes.dispose = tDispose;
         this.worldTimes.finish = Math.round(performance.now() - tp);
-        set(0.9, 'Warming up');
+        set(0.95, 'Opening the garage');
         await paint();
         tp = performance.now();
         this.state = 'menu';
         this.toMenu();
-        await this.warmUp();
-        releaseHeldMaterials();
+        this.warmGarage();
         this.worldTimes.warm = Math.round(performance.now() - tp);
       } catch (e) {
         // a half-built world can't be raced: fall back to a clean start there (the setup is saved)
@@ -2285,6 +2462,9 @@ export class Game {
       console.info(`[shot] [travel] ${dest.id} in ${this.travelMs} ms ${JSON.stringify(this.worldTimes)}`);
       veil.classList.remove('on');
       setTimeout(() => veil.remove(), 600);
+      // the landscape, stands and race shaders grow behind the garage (the old materials are
+      // held until then: the new world reuses their shader programs)
+      void this.completeWorldInBackground().then(() => releaseHeldMaterials());
     }
     this.travelTo = null;
   }

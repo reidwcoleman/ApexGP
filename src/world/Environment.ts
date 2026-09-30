@@ -12,6 +12,7 @@ import { createRain } from './env/rain.ts';
 import { buildFloodField, createFloodRig, setFloodLevel } from './env/night.ts';
 import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } from './env/presets.ts';
 import { buildScenery, type Scenery, type SceneryLight } from './env/scenery.ts';
+export type { Scenery } from './env/scenery.ts';
 import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
 import { disposeTree } from '../core/dispose.ts';
 import { weatherUniforms } from './weatherUniforms.ts';
@@ -48,6 +49,12 @@ export interface Environment {
   heightAt(x: number, z: number): number;
   /** free every GPU resource this environment owns (world switch); `keep`: shared resources to leave alone */
   dispose(keep?: Set<object>): void;
+  /**
+   * Swap the stand-in ground (createEnvironment with `scenery: false`) for the real landscape once
+   * it has been built behind the garage: the floodlight masts are re-sited on the real ground and
+   * the reflections re-captured.
+   */
+  adoptScenery(s: Scenery): void;
   /** 0 outdoors … 1 inside the garage: the sky's ambient light is mostly shut out (the roof and walls) */
   setIndoor(k: number): void;
   /**
@@ -209,8 +216,9 @@ export function createEnvironment(
   });
 
   // floodlights for twilight and night races (analytic light, see env/night.ts)
-  const floods = createFloodRig(track, (x, z) => scenery.heightAt(x, z));
+  let floods = createFloodRig(track, (x, z) => scenery.heightAt(x, z));
   group.add(floods.group);
+  let floodArgs: [number, number, number] = [0, 0, 0];
 
   // ------------------------------------------------------------ state
   /** dev toggles (perf A/B from the console: __env.stats.debug.clouds = false) */
@@ -515,7 +523,8 @@ export function createEnvironment(
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
     // (the masts themselves are gone after dark, not just switched off)
-    floods.set(fl * floodScale(night), haze, aerialParams.x);
+    floodArgs = [fl * floodScale(night), haze, aerialParams.x];
+    floods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
     // backlit signs come on as the light goes
     weatherUniforms.uSignGlow.value = 0.12 + 0.88 * THREE.MathUtils.smoothstep(night, 0.1, 0.9);
     const u = sky.uniforms;
@@ -824,6 +833,38 @@ export function createEnvironment(
     buildMs,
     stats,
     heightAt: (x: number, z: number) => scenery.heightAt(x, z),
+    adoptScenery(next: Scenery) {
+      const t = performance.now();
+      const old = scenery;
+      group.remove(old.group);
+      disposeTree(old.group);
+      scenery = next;
+      group.add(next.group);
+      group.remove(floods.group);
+      disposeTree(floods.group);
+      floods = createFloodRig(track, (x, z) => scenery.heightAt(x, z));
+      group.add(floods.group);
+      floods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
+      next.setQuality(lean ? 'medium' : quality);
+      pushSceneryLight();
+      // (adopted while the garage is up: capture the outdoor light, not the garage's shut-in sky)
+      const hemiWas = hemi.intensity;
+      const envWas = scene.environmentIntensity;
+      if (indoor > 0) {
+        hemi.intensity = hemiWas / Math.max(0.05, 1 - 0.8 * indoor);
+        scene.environmentIntensity = envWas / Math.max(0.05, 1 - 0.72 * indoor);
+      }
+      try {
+        captureWorld();
+      } catch (e) {
+        console.warn('[env] world capture failed — sky-only reflections', e);
+      }
+      hemi.intensity = hemiWas;
+      scene.environmentIntensity = envWas;
+      bakeNow();
+      stats.scenery = next.stats;
+      timings.adopt = Math.round(performance.now() - t);
+    },
     setIndoor(k: number) {
       indoor = Math.max(0, Math.min(1, k));
     },

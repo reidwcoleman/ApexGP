@@ -2507,3 +2507,95 @@
   font-size: max(12px, calc(16 * var(--k)));
   color: rgba(255, 255, 255, 0.7);
 }
+
+/* ---------- the circuit still growing behind the garage ---------- */
+/* a quiet status chip in the garage while the landscape builds, and a card if a session is started
+   before it is done (usually never seen) */
+.world-chip {
+  position: fixed;
+  right: var(--s6);
+  bottom: var(--s2);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  border-radius: 999px;
+  background: var(--ground);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  font-family: var(--font);
+  font-size: var(--t-cap);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink2);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+  pointer-events: none;
+}
+.world-chip.on {
+  opacity: 1;
+  transform: none;
+}
+.world-chip .wc-ring {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), rgba(255, 255, 255, 0.14) 0);
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+  mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+}
+.world-wait {
+  position: fixed;
+  left: 50%;
+  bottom: 12vh;
+  z-index: 60;
+  min-width: min(380px, calc(80 * var(--vw)));
+  padding: var(--s4) var(--s5);
+  border-radius: var(--r-panel);
+  background: var(--ground);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  font-family: var(--font);
+  color: var(--ink);
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out), transform 0.3s var(--ease-out);
+}
+.world-wait.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.world-wait span {
+  display: block;
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.world-wait b {
+  display: block;
+  margin-top: var(--s1);
+  font-size: var(--t-row);
+  font-weight: 700;
+}
+.world-wait .ww-bar {
+  position: relative;
+  height: 3px;
+  margin-top: var(--s3);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.world-wait .ww-bar i {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  background: var(--accent);
+  transition: transform 0.3s var(--ease-out);
+}

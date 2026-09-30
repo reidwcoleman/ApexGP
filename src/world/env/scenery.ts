@@ -60,7 +60,21 @@ export interface Scenery {
   readonly stats: Record<string, unknown>;
 }
 
+/** the scenery in one go (see sceneryBuilder for the sliced build behind the garage) */
 export function buildScenery(track: Track, gfx: Renderer): Scenery {
+  const it = sceneryBuilder(track, gfx);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * The scenery built in slices: each `yield` is a point where the caller may draw a frame (the
+ * garage keeps moving while the landscape of the next circuit grows behind it). Abandoned
+ * half-way, `group` of the yielded value holds what exists so far, for disposal.
+ */
+export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group: THREE.Group; step: string }, Scenery, void> {
   const t0 = performance.now();
   const timings: Record<string, number> = {};
   let tLap = t0;
@@ -74,17 +88,27 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   const map = new WorldMap(track);
   const layout = planLayout(track, map);
   lap('layout');
+  yield { group, step: 'layout' };
+  tLap = performance.now();
   map.bakeMasks();
   lap('forest');
+  yield { group, step: 'forest' };
+  tLap = performance.now();
   map.bake();
   lap('heights');
+  yield { group, step: 'heights' };
+  tLap = performance.now();
   const terrain = buildTerrain(map, gfx.maxAnisotropy);
   group.add(terrain.group);
   lap('terrain');
+  yield { group, step: 'terrain' };
+  tLap = performance.now();
   const veg = buildVegetation(map, layout, gfx.renderer);
   veg.setDetail(gfx.qualityLevel);
   group.add(veg.group);
   lap('trees');
+  yield { group, step: 'trees' };
+  tLap = performance.now();
   const masks = buildParkMasks(map, layout, veg.shade);
   terrain.setMasks(masks);
   // grass blades on the verges around the camera (High/Ultra)
@@ -98,6 +122,8 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
     console.error('[scenery] grass blades failed — skipping them', e);
   }
   lap('grass');
+  yield { group, step: 'grass' };
+  tLap = performance.now();
   lap('masks');
   // (a failure in the stands — e.g. the crowd's avatar kit — must not take the whole landscape with it)
   let stands: Pick<ReturnType<typeof buildGrandstands>, 'group' | 'update' | 'people' | 'flags' | 'concourse'>;
@@ -112,9 +138,13 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   const strollers = concourseCrowd(stands.concourse ?? []);
   group.add(strollers.group);
   lap('stands');
+  yield { group, step: 'stands' };
+  tLap = performance.now();
   const banking = layout.oval ? buildBanking(layout.oval, track, map, terrain.material) : null;
   if (banking) group.add(banking.group);
   lap('banking');
+  yield { group, step: 'banking' };
+  tLap = performance.now();
   const villages = buildVillages(map, layout);
   group.add(villages.group);
   if (map.venue === 'austin') { group.add(buildAustinScenery(layout, track, map).group); austinTerrainLook(terrain.uniforms); }
@@ -133,10 +163,14 @@ export function buildScenery(track: Track, gfx: Renderer): Scenery {
   if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
   if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
   lap('villages');
+  yield { group, step: 'villages' };
+  tLap = performance.now();
   // wind farms, pylon lines, oil field: what stands up out of each venue's countryside
   const skyline = buildSkyline(map);
   if (skyline) group.add(skyline.group);
   lap('skyline');
+  yield { group, step: 'skyline' };
+  tLap = performance.now();
   // distant mountains / skylines beyond the far terrain (per-venue preset, horizon.ts)
   const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z));
   group.add(horizon.mesh);
