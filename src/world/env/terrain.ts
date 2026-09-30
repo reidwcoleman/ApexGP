@@ -92,7 +92,7 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uSqO: { value: new THREE.Vector2() },
     uSqS: { value: new THREE.Vector2(1, 1) },
     uCenter: { value: new THREE.Vector2() },
-    uLawn: { value: lin(0x5a6f3a) },
+    uLawn: { value: lin(0x4f7f35) },
     uMeadow: { value: lin(0x6b7043) },
     uStraw: { value: lin(0x958a5a) },
     uGrassDark: { value: lin(0x3e4f28) },

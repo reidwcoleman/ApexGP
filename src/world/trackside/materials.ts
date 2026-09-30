@@ -269,8 +269,9 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // A deep, even charcoal binder-rich stone-mastic surface: the chips are small and coated,
     // so they barely read in colour (±8 %); only a faint, large-scale evenness variation.
     float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
-    // (a warm-neutral bitumen black; the fine chips give a tight ±25 % grain up close)
-    col = vec3(0.068, 0.0665, 0.064) * (1.0 + albDev * 0.9) * even;
+    // (a race-worn mid grey, as the TV pictures show it in sun: the binder long oxidised off the
+    // chip tops; the fine chips give a tight ±25 % grain up close)
+    col = vec3(0.118, 0.116, 0.112) * (1.0 + albDev * 0.9) * even;
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
     rough = mix(0.8, 0.56, stone) + (m3.r - 0.5) * 0.05;
     tsDetail *= 0.55;
@@ -298,7 +299,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     tsMac += (mN3.rg * 2.0 - 1.0) * 0.022;
     // tar snakes: sealed cracks, glossy black bitumen, only in some stretches
     float snake = smoothstep(0.35, 0.75, m24.g) * smoothstep(0.55, 0.75, m96.a) * (1.0 - smoothstep(0.01, 0.04, px));
-    col = mix(col, vec3(0.022, 0.022, 0.024), snake * 0.8);
+    col = mix(col, vec3(0.03, 0.03, 0.032), snake * 0.8);
     rough = mix(rough, 0.34, snake * 0.8);
     tsDetail *= 1.0 - snake * 0.7;
     float edgeD = zone < 0.5 ? hw - alat : 99.0;
@@ -312,7 +313,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
     rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.4, 1.0, uRaceRubber);
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
-    col = mix(col, vec3(0.03, 0.03, 0.031), rub * 0.75);
+    col = mix(col, vec3(0.05, 0.05, 0.051), rub * 0.8);
     rough = mix(rough, 0.52, rub * 0.5);
     tsDetail *= 1.0 - rub * 0.4;
     // off the line the surface sees no rubber: dust and fines settle, a lighter, greyer road
@@ -435,11 +436,12 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
   } else if (zone < 2.5) {
     // ================================================= verge: green abrasive paint
     float d = alat - vA1.y;
-    col = vec3(0.07, 0.069, 0.066) * (1.0 + albDev * 0.9) * (0.95 + 0.1 * m96.r);
+    col = vec3(0.12, 0.118, 0.114) * (1.0 + albDev * 0.9) * (0.95 + 0.1 * m96.r);
     tsSpecOcc = 0.6;
     if (vA1.z > 0.5) {
       // fresh anti-skid green paint: even and saturated, the grit gives it a fine matte texture
-      vec3 green = vec3(0.03, 0.115, 0.045) * (0.96 + 0.06 * m3.b) * (1.0 + 0.1 * albDev);
+      // (the vivid green of the TV pictures: it reads as a colour, not a dark strip)
+      vec3 green = vec3(0.035, 0.2, 0.075) * (0.96 + 0.06 * m3.b) * (1.0 + 0.1 * albDev);
       col = green;
       // thin white line on the outer edge of the verge
       float wl = tsBand(d, 1.32, 1.46);
@@ -457,7 +459,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     }
   } else if (zone < 3.5) {
     // ================================================= tarmac run-off: new, a shade greyer than the track, painted bands
-    col = vec3(0.076, 0.075, 0.072) * (1.0 + albDev * 0.9) * (0.94 + 0.08 * m96.r + 0.05 * (m24.b - 0.5));
+    col = vec3(0.132, 0.13, 0.126) * (1.0 + albDev * 0.9) * (0.94 + 0.08 * m96.r + 0.05 * (m24.b - 0.5));
     tsSpecOcc = 0.6;
     rough = mix(0.66, 0.5, stone);
     // tyre tracks from cars running wide: shallow arcs out from the edge and back
@@ -772,7 +774,8 @@ float gStripe = 0.0;
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.61, 0.17));
   float clump = texture2D(uMacro, vTrk / 6.0 + vec2(0.7, 0.2)).b;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
-  col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.82) * vec3(1.04, 1.0, 0.86);
+  // (the saturated, well-watered green of a circuit's verges on TV, not a field's olive)
+  col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 1.12) * vec3(0.96, 1.2, 0.78);
   // drier, yellower patches (fewer when it rains)
   float dry = (smoothstep(0.55, 0.85, mB.b) * 0.6 + smoothstep(0.6, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * 0.5);
@@ -781,6 +784,8 @@ float gStripe = 0.0;
   col = mix(col, vec3(0.06, 0.05, 0.035), wear * 0.55);
   // mown stripes (diagonal bands), sign flips per band
   gStripe = tsSquare((vTrk.y + vTrk.x * 0.55) / 12.0, 0.5) * 2.0 - 1.0;
+  // (the stripes read from every angle on TV: part of it is the cut itself, not only the sheen)
+  col *= 1.0 + 0.09 * gStripe;
   float wet = smoothstep(0.0, 0.35, uWetness);
   col *= 1.0 - 0.32 * wet;
   float rough = mix(0.95, 0.68, wet);

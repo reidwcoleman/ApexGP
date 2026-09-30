@@ -18,10 +18,10 @@ import * as THREE from 'three';
 /** cars whose beams light the world (the nearest to the camera) */
 export const HL_MAX = 8;
 /** how far the beam carries (m): far enough to see the next braking board on a dark circuit */
-const HL_RANGE = 140;
-/** beam half-angles: wide across the road, flat vertically */
-const TAN_H = Math.tan(THREE.MathUtils.degToRad(30));
-const TAN_V = Math.tan(THREE.MathUtils.degToRad(5.5));
+const HL_RANGE = 95;
+/** beam half-angles: wide across the road, flat vertically (below the axis; above it the cut-off is sharper) */
+const TAN_H = Math.tan(THREE.MathUtils.degToRad(28));
+const TAN_V = Math.tan(THREE.MathUtils.degToRad(6));
 
 const pos = new Float32Array(HL_MAX * 4);
 const dir = new Float32Array(HL_MAX * 4);
@@ -34,7 +34,7 @@ export const headlightUniforms = {
   dir,
   /** x lights in use, y 1 / tan(horizontal half-angle), z 1 / tan(vertical half-angle), w range (m) */
   info: { x: 0, y: 1 / TAN_H, z: 1 / TAN_V, w: HL_RANGE },
-  color: { r: 1.0, g: 0.97, b: 0.9 },
+  color: { r: 1.0, g: 0.975, b: 0.94 },
 };
 
 export const HEADLIGHT_PARS = /* glsl */ `
@@ -75,19 +75,24 @@ if ( hlInfo.x > 0.5 ) {
     vec3 lu = cross( fw, lf );
     float ex = dot( ld, lf ) / along * hlInfo.y;
     float ey = dot( ld, lu ) / along * hlInfo.z;
+    // a real lamp's cut-off: the light stops a degree or so above the axis (no dazzle for the car
+    // ahead, whose lower rear catches it), and spreads softly below it onto the road
+    ey *= ey > 0.0 ? 3.2 : 1.0;
     float e = ex * ex + ey * ey;
     if ( e >= 1.0 ) continue;
-    // a hot centre, soft edges; the vertical edge a little harder (the cut-off line of a real lamp)
-    float cone = ( 1.0 - smoothstep( 0.25, 1.0, e ) ) * ( 1.0 - 0.35 * smoothstep( 0.0, 0.5, ex * ex ) );
+    // a hot centre, soft edges fading out across the road
+    float cone = ( 1.0 - smoothstep( 0.1, 1.0, e ) ) * ( 1.0 - 0.45 * smoothstep( 0.0, 0.6, ex * ex ) );
     float d = sqrt( d2 );
-    float fall = 1.0 - smoothstep( hlInfo.w * 0.5, hlInfo.w, d );
+    float fall = 1.0 - smoothstep( hlInfo.w * 0.45, hlInfo.w, d );
     vec3 hL = toL / max( d, 1e-3 );
-    // the road: lit as if at a steady ~30° incidence, not the grazing angle it really meets it at
-    float hBoost = min( 30.0, max( 1.0, 0.5 * hUpK / max( dot( hNw, hL ), 0.02 ) ) );
+    // the road: lit a little flatter than the grazing angle it really meets it at (the beam is
+    // aimed down at it), but a pool that dies away with distance, not an even glow to the horizon
+    float hBoost = min( 10.0, max( 1.0, 0.35 * hUpK / max( dot( hNw, hL ), 0.02 ) ) );
+    float atten = 1.0 / ( ( d + 2.5 ) * ( 1.0 + d / 35.0 ) );
     IncidentLight hl;
     hl.visible = true;
     hl.direction = normalize( mat3( viewMatrix ) * hL );
-    hl.color = hlColor * ( hP.w * cone * fall * hBoost / ( d + 2.5 ) );
+    hl.color = hlColor * ( hP.w * cone * fall * hBoost * atten );
     RE_Direct( hl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   }
 }
@@ -112,8 +117,8 @@ const LAMPS: [number, number, number][] = [
 /** where the light is computed from (see HEADLIGHT_LIGHT), and its aim: ~25 m ahead on the road */
 const SOURCE: [number, number, number] = [0, 0.95, 2.45];
 const AIM = new THREE.Vector3(0, -0.038, 1).normalize();
-/** light intensity of one car's beam at full night (falls off ~1/d: ~1.2 on the road 10 m ahead, ~0.3 at 50 m — modest, not a searchlight) */
-const BEAM_I = 30;
+/** light intensity of one car's beam at full night: a pool on the road ~10–40 m ahead that is gone by ~90 m */
+const BEAM_I = 46;
 /** beam volume: length and end radius (m) */
 const BEAM_LEN = 34;
 const BEAM_R = 5.5;

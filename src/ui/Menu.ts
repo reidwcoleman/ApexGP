@@ -64,8 +64,8 @@ export function aiLevel(setup: RaceSetup, career: Career): { value: number; dyna
 }
 const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
 const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
-/** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again) */
-const SETUP_V = 4;
+/** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again; 5: low braking assist) */
+const SETUP_V = 5;
 const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
@@ -262,6 +262,8 @@ export class Menu {
     if (sv < 3) this.setup = { ...this.setup, weather: 'random', time: 'random' };
     // the medium braking assist is the default now (and the sky changes every race again)
     if (sv < 4) this.setup = { ...this.setup, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'medium' } };
+    // and then low: the assist leaves most of the braking to the player
+    if (sv < 5) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'low' } };
     if (sv < SETUP_V) {
       this.setup.v = SETUP_V;
       save('apexgp.setup', this.setup);

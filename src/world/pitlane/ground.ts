@@ -31,14 +31,14 @@ class GroundGeo {
 }
 
 const COL: Record<number, THREE.Color> = {
-  [Z.LANE]: new THREE.Color(0.043, 0.044, 0.047),
-  [Z.VERGE]: new THREE.Color(0.066, 0.066, 0.066),
+  [Z.LANE]: new THREE.Color(0.074, 0.075, 0.078),
+  [Z.VERGE]: new THREE.Color(0.112, 0.112, 0.11),
   [Z.APRON]: new THREE.Color(0.25, 0.255, 0.26),
   [Z.EPOXY]: new THREE.Color(0.42, 0.43, 0.44),
-  [Z.PADDOCK]: new THREE.Color(0.075, 0.074, 0.072),
+  [Z.PADDOCK]: new THREE.Color(0.125, 0.123, 0.12),
   [Z.GRASS]: new THREE.Color(0.075, 0.12, 0.04),
   [Z.CONCRETE]: new THREE.Color(0.2, 0.2, 0.2),
-  [Z.WORK]: new THREE.Color(0.07, 0.071, 0.074),
+  [Z.WORK]: new THREE.Color(0.115, 0.116, 0.12),
 };
 
 export function buildGround(plan: PitPlan, ts: TrackSpace): THREE.BufferGeometry {

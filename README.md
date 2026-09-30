@@ -190,7 +190,6 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/careerflow.mjs` — career map → round → results → Next round (travel) → next round's race screen.
 - `node tools/introshot.mjs [track]`, `tools/menushot.mjs`, `tools/garageshot.mjs`, `tools/personshot.mjs` — intro / hub / garage part / garage person screenshots.
 - `node tools/loadtime.mjs [track] [to,…]`, `tools/cpuprof.mjs <from> <to>` — boot and circuit-switch timings, CPU profile of a switch.
-- `node tools/voicetest.mjs` — the engineer's recorded lines load, decode and play.
 
 ## Steam (desktop build)
 
