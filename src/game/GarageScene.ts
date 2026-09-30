@@ -1404,7 +1404,10 @@ export class GarageScene {
           vec3 V = normalize(cameraPosition - vWorld);
           float fres = 0.3 + 0.7 * pow(1.0 - clamp(V.y, 0.0, 1.0), 3.0);
           float alpha = clamp(r.a, 0.0, 1.0) * edge * fres * strength;
-          gl_FragColor = vec4(r.rgb / max(r.a, 1e-3), alpha);
+          // (a work light in the mirror is HDR: blurred through the mips it spread into a glowing
+          // blob that bloom and the depth of field then ringed; epoxy gives back a soft sheen)
+          vec3 col = min(r.rgb / max(r.a, 1e-3), vec3(0.9));
+          gl_FragColor = vec4(col, alpha);
         }`,
     });
     this.owned.push(mat);

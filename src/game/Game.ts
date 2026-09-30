@@ -2493,10 +2493,13 @@ export class Game {
       p.position.set(0, 3.7, z);
       g.add(p);
     }
-    // a cool rim from behind: picks out the car's silhouette against the dark garage
-    const rim = new THREE.PointLight(0xa9c8ff, 22, 10, 1.6);
-    rim.position.set(0, 1.6, -4.6);
-    g.add(rim);
+    // a cool rim from behind: picks out the car's silhouette against the dark garage. A narrow spot
+    // from up high, aimed at the bodywork: as a point light 1.6 m off the floor its own reflection in
+    // the glossy epoxy sat in front of the car as a glowing blue-white oval
+    const rim = new THREE.SpotLight(0xa9c8ff, 40, 12, 0.36, 0.6, 1.6);
+    rim.position.set(0, 2.9, -5.4);
+    rim.target.position.set(0, 0.55, 0.2);
+    g.add(rim, rim.target);
     // the lights also light the car in the floor mirror
     g.traverse((o) => o.layers.enable(GARAGE_MIRROR_LAYER));
     g.visible = false;
@@ -2572,7 +2575,7 @@ export class Game {
       car: { cam: [3.4, 1.7, -4.6], look: [0, 0.45, -0.5], shift: 1.45, fov: 36 },
       setup: { cam: [3.6, 1.6, 3.6], look: [0, 0.35, 0], shift: 1.3, fov: 36 },
       paint: { cam: [3.1, 3.4, 4.1], look: [0, 0.15, 0.2], shift: 1.45, fov: 38 },
-      settings: { cam: [2.3, 0.7, 3.2], look: [0.75, 0.3, 1.55], shift: 0.7, fov: 34 },
+      settings: { cam: [3.9, 0.95, 4.6], look: [0.1, 0.5, 0.4], shift: 1.3, fov: 32 },
     };
     let sh: Shot = shots[this.hubTab];
     const toW = (v: readonly [number, number, number], out: THREE.Vector3) =>
@@ -2665,7 +2668,12 @@ export class Game {
       g.look.addScaledVector(g.vl, h);
     }
     if (!flying && !atStop) {
-      g.pos.set(c.x + Math.sin(g.th) * g.r, c.y + g.y, c.z + Math.cos(g.th) * g.r);
+      // a long move round the car rises like a crane and keeps inside the bay: flying low at full
+      // radius it skimmed the teammate's car on its stands next door (a wheel filling the frame
+      // whenever the move was caught half-way)
+      const swing = THREE.MathUtils.smoothstep(Math.max(Math.abs(thT - g.th), Math.abs(g.vth) * 0.45), 0.2, 1.0);
+      const r = Math.min(g.r, THREE.MathUtils.lerp(g.r, 5.2, swing));
+      g.pos.set(c.x + Math.sin(g.th) * r, c.y + g.y + 1.2 * swing, c.z + Math.cos(g.th) * r);
       this.camera.position.copy(g.pos);
       this.camera.lookAt(g.look);
       this.camera.fov = g.fov;
@@ -2995,7 +3003,8 @@ export class Game {
       at: this.tour.at,
       spots: this.garage?.spots ?? null,
       camera: this.camera,
-      overviewMarkers: this.hubTab !== 'setup' && this.hubTab !== 'career',
+      // (the parts you can click to look at up close: on the car development tab, not over every screen)
+      overviewMarkers: this.hubTab === 'car',
       panelLeft: this.tour.at ? innerWidth : innerWidth - 500 * uiScale(),
       flying: !!this.tour.flight,
     });

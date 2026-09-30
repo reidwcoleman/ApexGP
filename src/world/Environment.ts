@@ -444,6 +444,26 @@ export function createEnvironment(
   }
 
   /**
+   * Inside the garage it is lit by its own lamps: the look is the garage's, not the weather's —
+   * no exposure chasing the sky outside, no grey mist hanging between the car and the camera.
+   */
+  function applyIndoor() {
+    if (indoor <= 0.001) return;
+    const k = indoor;
+    const l = (a: number, b: number) => a + (b - a) * k;
+    const g = gradeLook;
+    gfx.grade.setLook({
+      exposure: l(g.exposure, 0.92),
+      saturation: l(g.saturation, 1.05),
+      contrast: l(g.contrast, 1.07),
+      tint: [l(g.tint[0], 1), l(g.tint[1], 0.995), l(g.tint[2], 0.99)],
+      shadowTint: [l(g.shadowTint[0], 0.96), l(g.shadowTint[1], 0.99), l(g.shadowTint[2], 1.05)],
+    });
+    aerialParams.x *= 1 - 0.95 * k;
+    aerialBanks.x *= 1 - k;
+  }
+
+  /**
    * After dark and in sun showers: the floodlights (level, glare, the light they throw into
    * mist, rain and low cloud), the night sky (moon, stars, the city's glow) and the rainbow.
    */
@@ -519,6 +539,7 @@ export function createEnvironment(
     const shaftK = P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) + 0.45 * gaps : 0);
     gfx.setSunShafts(sunDir, shaftK, 0.55 * C.E0 * 0.25);
     gfx.grade.setLook(gradeLook);
+    applyIndoor();
     const F = FLOOD_E * fl * floodScale(night);
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
@@ -866,7 +887,11 @@ export function createEnvironment(
       timings.adopt = Math.round(performance.now() - t);
     },
     setIndoor(k: number) {
-      indoor = Math.max(0, Math.min(1, k));
+      const n = Math.max(0, Math.min(1, k));
+      if (Math.abs(n - indoor) < 1e-3) return;
+      indoor = n;
+      // (re-derive the look from the weather, then the garage's on top of it)
+      applyLook(look);
     },
     dispose(keep = new Set<object>()) {
       if (scene.environment === envRT?.texture) scene.environment = null;

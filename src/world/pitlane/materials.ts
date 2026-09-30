@@ -282,7 +282,9 @@ export function groundMaterial(): THREE.MeshStandardMaterial {
     } else if (zone == 3.0) {
       // polished epoxy garage floor
       col *= 0.96 + 0.08 * nB.g;
-      rough = 0.16 + 0.1 * nA.r;
+      // (satin, not glass: at 0.16 the work lights came back as one hot oval that bloom blew into a
+      // glowing puddle; the ceiling strips below are mirrored by hand and stay crisp)
+      rough = 0.34 + 0.1 * nA.r;
       indoor = 1.0;
       // mirror-like reflections of the ceiling light strips
       vec3 V = normalize(vWP - cameraPosition);
@@ -292,14 +294,15 @@ export function groundMaterial(): THREE.MeshStandardMaterial {
       float gi = floor((hsl.x - uGar.x) / 18.0);
       float gs = hsl.x - uGar.x - gi * 18.0;
       float inG = step(0.0, gi) * step(gi, 9.0) * step(1.2, gs) * step(gs, 16.8);
-      float blur = 0.06 + tc * 0.03;
+      float blur = 0.14 + tc * 0.05;
       float rows = 0.0;
       for (int i = 0; i < 4; i++) {
         float lr = uGar.z + 3.2 + float(i) * 4.1;
         rows += smoothstep(0.34 + blur, max(0.34 - blur, 0.0), abs(hsl.y - lr));
       }
       float fres = 0.06 + 0.5 * pow(1.0 - clamp(-V.y, 0.0, 1.0), 5.0);
-      pcGlow += vec3(1.0, 0.97, 0.92) * rows * inG * 1.8 * fres * step(hsl.y, uGar.z + 17.0);
+      // (a satin sheen of the strips, not a glowing puddle under each one)
+      pcGlow += vec3(1.0, 0.97, 0.92) * rows * inG * 0.55 * fres * step(hsl.y, uGar.z + 17.0);
     } else if (zone == 5.0) {
       col *= 0.62 + 0.55 * nA.g + 0.35 * (nB.b - 0.5);
       col = mix(col, col * vec3(1.25, 1.08, 0.7), smoothstep(0.55, 0.8, nC.b) * 0.6);
