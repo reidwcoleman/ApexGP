@@ -141,7 +141,7 @@ interface Crew {
   lastSlow: number;
   pose: StopPose;
   props: Props | null;
-  helmetMat: THREE.MeshStandardMaterial;
+  helmetMat: THREE.MeshPhysicalMaterial;
   logo: THREE.Texture | null;
   /** 0 off, 1 red, 2 green */
   light: number;
@@ -259,45 +259,83 @@ function jackProp(color: THREE.ColorRepresentation, front: boolean): JackProp {
   return { root, handle, head };
 }
 
-/** helmet in bind space (skull landmarks): shell + dark visor as vertex colours, one draw */
+/**
+ * A pit-crew helmet in bind space (skull landmarks), one draw: a full-face shell (a touch longer
+ * front to back, the chin bar standing forward, the nape flared, a lip at the back of the crown),
+ * a recessed visor and a stripe over the crown. The zones ride in the colour attribute
+ * (r shell, g stripe, b visor) and helmetMaterial paints them in the team's colours.
+ */
 const helmetGeos = new WeakMap<BodyAsset, THREE.BufferGeometry>();
 function helmetGeometry(asset: BodyAsset): THREE.BufferGeometry {
   const hit = helmetGeos.get(asset);
   if (hit) return hit;
   const lm = asset.lm;
   const c = lm.skull, r = lm.skullR;
-  // a full-face helmet a couple of centimetres off the head: crown (headTop) to below the chin
-  const top = lm.headTop + 0.02, bottom = lm.neckY - 0.035;
+  // a couple of centimetres off the head: crown (headTop) to below the chin
+  const top = lm.headTop + 0.022, bottom = lm.neckY - 0.03;
   const cy = (top + bottom) / 2, hy = (top - bottom) / 2;
-  const hx = r.x + 0.028, hz = r.z + 0.028;
-  const g = new THREE.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.9);
-  // the chin bar and the neck opening: narrower at the bottom than an egg
-  {
-    const pa = g.getAttribute('position');
-    for (let i = 0; i < pa.count; i++) {
-      const y = pa.getY(i);
-      if (y < 0) {
-        const k = 1 + y * 0.18;
-        pa.setX(i, pa.getX(i) * k);
-        pa.setZ(i, pa.getZ(i) * (1 + y * 0.08));
-      }
-    }
-  }
-  g.scale(hx, hy, hz);
-  g.translate(c.x, cy, c.z + 0.012);
+  const hx = r.x + 0.03, hz = r.z + 0.034;
+  const g = new THREE.SphereGeometry(1, 48, 32, 0, Math.PI * 2, 0, Math.PI * 0.86);
   const pa = g.getAttribute('position');
-  const col = new Float32Array(pa.count * 3);
+  const zone = new Float32Array(pa.count * 3);
+  const ss = THREE.MathUtils.smoothstep;
   for (let i = 0; i < pa.count; i++) {
-    const y = (pa.getY(i) - cy) / hy, z = (pa.getZ(i) - c.z) / hz, x = (pa.getX(i) - c.x) / hx;
-    // the visor: a dark band across the face
-    const visor = z > 0.45 && y > -0.12 && y < 0.36 && Math.abs(x) < 0.82 ? 1 : 0;
-    const v = visor ? 0.04 : 1;
-    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = v;
+    let x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i);
+    // the visor window: the upper front, its frame a step proud of the glass
+    const ang = Math.atan2(x, z);
+    const inX = 1 - ss(Math.abs(ang), 1.08, 1.22);
+    const inY = ss(y, -0.24, -0.16) * (1 - ss(y, 0.4, 0.48));
+    const visor = z > 0 ? inX * inY : 0;
+    // under the visor the chin bar stands forward and the jaw narrows; behind, the nape flares
+    if (y < 0) {
+      const chin = ss(-y, 0.15, 0.6) * Math.max(0, z);
+      z += chin * 0.14;
+      y -= chin * 0.05;
+      x *= 1 + y * 0.12;
+      if (z < 0) z *= 1 + ss(-y, 0.3, 0.8) * 0.06;
+    }
+    // the lip at the back of the crown
+    if (z < -0.3) {
+      const lip = ss(y, 0.18, 0.4) * (1 - ss(y, 0.55, 0.75)) * ss(-z, 0.3, 0.8);
+      z -= lip * 0.06;
+    }
+    // the glass sits 6 mm in from the shell
+    const k = 1 - visor * 0.03;
+    pa.setXYZ(i, x * k, y * k, z * k);
+    const stripe = (1 - ss(Math.abs(x), 0.1, 0.14)) * ss(y, 0.05, 0.25) * (1 - visor);
+    zone[i * 3] = 1 - Math.max(visor, stripe);
+    zone[i * 3 + 1] = stripe;
+    zone[i * 3 + 2] = visor;
   }
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(zone, 3));
+  g.scale(hx, hy, hz * 1.04);
+  g.translate(c.x, cy, c.z + 0.014);
+  g.computeVertexNormals();
   const out = rigid(g, lm.joint.Head);
   helmetGeos.set(asset, out);
   return out;
+}
+
+/** the helmet paint: clear-coated team colour, a stripe, a dark tinted visor (zones from helmetGeometry) */
+function helmetMaterial(shell: THREE.Color, stripe: THREE.Color): THREE.MeshPhysicalMaterial {
+  const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08, name: 'crew-helmet' });
+  const u = { uShell: { value: shell }, uStripe: { value: stripe } };
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 color;\nvarying vec3 vZone;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvZone = color;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uShell; uniform vec3 uStripe; varying vec3 vZone;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+diffuseColor.rgb = uShell * vZone.r + uStripe * vZone.g + vec3( 0.012, 0.014, 0.018 ) * vZone.b;`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix( roughnessFactor, 0.05, vZone.b );`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+metalnessFactor = mix( metalnessFactor, 0.75, vZone.b );`);
+  };
+  m.customProgramCacheKey = () => 'apex-crew-helmet-v2';
+  return m;
 }
 
 // ------------------------------------------------------------------------------------ the system
@@ -347,6 +385,10 @@ export class CrewSystem {
       const prim = new THREE.Color(team.primary), sec = new THREE.Color(team.secondary);
       const dark = prim.r + prim.g + prim.b < 0.12;
       const helmetCol = prim.r + prim.g + prim.b > 0.35 ? prim.clone() : new THREE.Color(0xe8e9ea);
+      // the stripe in whichever team colour stands out from the shell (white when neither does)
+      const acc = new THREE.Color(team.accent);
+      const diff = (a: THREE.Color, b: THREE.Color) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b);
+      const stripeCol = [sec, acc, new THREE.Color(0xe8e9ea), new THREE.Color(0x141516)].find((x) => diff(x, helmetCol) > 0.5) ?? sec;
       const members: Member[] = ROLES.map((role, i) => {
         const female = r() < 0.14;
         const look: Look = {
@@ -375,7 +417,7 @@ export class CrewSystem {
       const center = box.o.clone();
       this.crews.push({
         k, team, box, gar, center, members, stop: null, out: false, gone: 99, lastT: 0, lastTT: 2.4, lastSlow: -1, pose: newStopPose(), props: null,
-        helmetMat: new THREE.MeshStandardMaterial({ color: helmetCol, vertexColors: true, roughness: 0.22, metalness: 0.15, name: 'crew-helmet' }),
+        helmetMat: helmetMaterial(helmetCol, stripeCol),
         logo: null, light: 0, lightT: 0, compound: 'medium', old: 'medium', dist: 1e9, vis: false,
       });
       for (const m of members) this.home(this.crews[k], m);
