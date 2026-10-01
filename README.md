@@ -36,6 +36,10 @@ npm run check    # tsc --noEmit
   (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
   **Next round** on the results screen flies you straight on. The rivals develop their cars through
   the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
+- **Garage first** — the boot opens the garage at the circuit you race next (the career's next round) as soon
+  as its pit building, track, sky and cars exist; terrain, woods, grandstands and crowds grow behind it one slice
+  per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
+  another circuit moves the garage there behind a short title card; no travel screen.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 2.2 s on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.

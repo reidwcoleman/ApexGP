@@ -7,7 +7,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:5191/?track=${track}&weather=clear&time=afternoon`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
-await page.evaluate(() => window.__game.debugSpectate({ skip: 25, speed: 1 }));
+await page.evaluate(() => window.__game.debugSpectate({ skip: 25, speed: 1, weather: 'clear' }));
 await page.waitForTimeout(3000);
 await page.evaluate(() => { const s = document.createElement('style'); s.textContent = '#ui, #ui * { visibility: hidden !important; }'; document.head.appendChild(s); });
 for (let i = 0; i < Number(n); i++) {

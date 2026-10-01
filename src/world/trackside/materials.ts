@@ -311,7 +311,10 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float d = lat - vA0.x;
     float dd = d + (m24.b - 0.5) * 0.7;
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
-    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.4, 1.0, uRaceRubber);
+    // (every lap of every session before this one has laid some down: the dark line the TV pictures
+    // show the whole way round, two tyre tracks inside a darker band, not only in the corners)
+    rub = max(rub, 0.34 * exp(-dd * dd / 2.6) + 0.22 * exp(-pow((abs(dd) - 0.82) / 0.3, 2.0)));
+    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.65, 1.0, uRaceRubber);
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
     col = mix(col, vec3(0.05, 0.05, 0.051), rub * 0.8);
     rough = mix(rough, 0.52, rub * 0.5);
@@ -486,7 +489,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
       float gap = tsBand(d, 0.0, 0.12);
       if (uRunoffStyle < 0.5) {
         float bB = tsBand(d, 0.12, 2.3);
-        vec3 blue = vec3(0.022, 0.06, 0.2);
+        vec3 blue = vec3(0.035, 0.07, 0.165);
         vec3 white = vec3(0.78, 0.78, 0.76);
         vec3 paint = white * gap + blue * bB;
         float amt = (gap + bB) * (0.97 + 0.03 * m24.b);

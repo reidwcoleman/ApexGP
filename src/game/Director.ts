@@ -222,9 +222,10 @@ export class Director {
     const battle = ctx === 'battle' || ctx === 'overtake';
     const pit = ctx === 'pit' || f.pit;
     // trackside, by where the car is on the lap
-    add('tv', 4 * (crash ? 2 : 1) * (battle ? 1.4 : 1));
+    // (the broadcast mix: about two shots in three from the trackside cameras, mostly long lenses)
+    add('tv', 4.6 * (crash ? 2 : 1) * (battle ? 1.4 : 1));
     if (covers('tower')) add('tower', 1.6 * (crash ? 2 : 1));
-    if (covers('longlens')) add('longlens', 2.8 * (battle ? 1.4 : 1));
+    if (covers('longlens')) add('longlens', 3.6 * (battle ? 1.4 : 1));
     if (covers('kerb')) add('kerb', 1.2);
     if (covers('grandstand')) add('grandstand', 1 * (start ? 2 : 1));
     if (cams.covers('pitwall', s)) add('pitwall', pit ? 5 : 1.2);
@@ -233,21 +234,21 @@ export class Director {
     const ob = crash ? 0.15 : pit ? 0.5 : start ? 0.6 : 1;
     add('tcam', 2.2 * ob * (battle ? 1.3 : 1));
     add('cockpit', 1.1 * ob);
-    add('nose', 0.4 * ob);
+    add('nose', 0.3 * ob);
     add('fwing', 0.25 * ob);
     add('sidepod', 0.3 * ob);
-    add('wheel', 0.35 * ob);
-    add('wheelr', 0.2 * ob);
+    add('wheel', 0.2 * ob);
+    add('wheelr', 0.12 * ob);
     add('tcamrev', (battle ? 1.2 : 0.3) * ob);
     add('rwing', 0.4 * ob);
     // chase, drone and cinematic
-    add('drone', 1.8 * (crash ? 1.2 : 1));
-    add('cine', pit || ctx === 'finish' ? 2 : 0.9);
-    add('chase', 0.6);
+    add('drone', 0.8 * (crash ? 1.4 : 1));
+    add('cine', pit || ctx === 'finish' ? 1.6 : 0.4);
+    add('chase', 0.3);
     // aerial
     add('heli', 1.6 * (crash || start ? 2 : 1) * (battle ? 1.3 : 1));
-    add('blimp', start ? 1.8 : 0.5);
-    add('topdown', battle ? 0.5 : 0.15);
+    add('blimp', start ? 1.4 : 0.2);
+    add('topdown', battle ? 0.25 : 0.05);
 
     // no jump cuts: never the same angle twice running, rarely a recent one, and a change of group on the same car
     const last = this.history[this.history.length - 1];
