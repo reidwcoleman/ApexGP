@@ -16,6 +16,8 @@ const EVENT_GP = () => EVENT.gp;
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment, type Scenery } from '../world/Environment.ts';
 import { sceneryBuilder } from '../world/env/scenery.ts';
+import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract } from '../career/DriverCareer.ts';
+import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
@@ -29,7 +31,7 @@ import { Sightlines } from './Sightlines.ts';
 import { Broadcast, describeEvent } from '../ui/Broadcast.ts';
 import { SimSetup, type SimConfig } from '../ui/SimSetup.ts';
 import { Flashback } from './Flashback.ts';
-import type { CarPhysics } from '../sim/CarPhysics.ts';
+import type { CarPhysics, CarSpec } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { CarEffects } from '../fx/CarEffects.ts';
 import { Debris } from '../fx/Debris.ts';
@@ -192,6 +194,9 @@ export class Game {
   private driverHidden = false;
   private qualityCheck = 0;
   private career = new Career();
+  /** the driver career (the game's main mode): one driver's seasons, teams, contracts and inbox */
+  readonly dc = new DriverCareer();
+  private rigDriverKey = new Map<Entry, string>();
   readonly highlights = new Highlights();
   private lastPos = 0;
   private celMoment = false;
@@ -264,6 +269,12 @@ export class Game {
       tourNav: (nav) => this.tourNav(nav),
       onCarChange: () => this.refreshPlayerRig(),
       onTravel: (id) => void this.travel(id),
+      driverCareer: () => this.dc,
+      onCareerStart: (driver, contract) => this.startDriverCareer(driver, contract),
+      onCareerChanged: () => {
+        // (a signature that starts the next season: other series or team, maybe another first round)
+        if (this.syncCareerGrid()) void this.travel(this.dc.nextTrack ?? this.track.def.id, true);
+      },
       onSpectate: () => this.openSimSetup(),
       // (UI only) the session at a glance on the pause screen
       pauseInfo: () => {
@@ -358,6 +369,9 @@ export class Game {
     }
     mark('fonts');
     this.applySettings(this.menu.settings);
+    // the career's grid (Formula 2 or 1, the player's driver in their seat) before any car or pit garage is built
+    this.syncCareerGrid();
+    Career.extraUnlocked = (id) => this.dc.visited(id);
     this.rollWeather(this.menu.setup);
 
     await pixels;
@@ -366,7 +380,7 @@ export class Game {
     // ?track=<id> (dev/demo links) overrides the saved choice
     // (the garage opens at the circuit you race next: the career's next round, the newest unlocked)
     const unlocked = this.career.unlockedCircuits();
-    const next = this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? this.menu.setup.track;
+    const next = this.dc.nextTrack ?? this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? this.menu.setup.track;
     const want = new URLSearchParams(location.search).get('track') ?? next;
     await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
       progress(0.06 + f * 0.56, step);
@@ -382,6 +396,7 @@ export class Game {
       const rig = createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
       this.rigs.set(e, rig);
       this.rigTeam.set(e, e.team.id);
+      this.rigDriverKey.set(e, driverKey(e));
       this.views.set(e, new CarView(rig));
       this.carsGroup.add(rig.root);
       if (i % 4 === 3) {
@@ -446,6 +461,35 @@ export class Game {
     requestAnimationFrame(loop);
     // the garage is up: the landscape, the stands and the race's shaders follow behind it
     void this.completeWorldInBackground().then(() => mark('warm'));
+  }
+
+  // ------------------------------------------------------------------ the driver career's grid
+
+  /**
+   * Put the career's grid on track: its series (Formula 2 or 1) and the player's driver in their seat
+   * (the menu's team/seat follow). Returns true when names, colours or helmets changed — the cars are
+   * then repainted, and the pit garages need the circuit rebuilt.
+   */
+  private syncCareerGrid(): boolean {
+    const d = this.dc.data;
+    let changed: boolean;
+    if (d) {
+      const ti = careerTeamIndex(d.series, d.contract.team);
+      changed = applyGrid(d.series, d.driver, ti, d.contract.seat);
+      this.menu.setup.team = ti;
+      this.menu.setup.seat = d.contract.seat;
+    } else changed = applyGrid('f1', null, 0, 0);
+    if (changed && this.rigs.size) this.refreshPlayerRig();
+    return changed;
+  }
+  /** a new driver career from the menu's wizard: its grid, then to its first round */
+  private startDriverCareer(driver: PlayerDriver, contract: Contract) {
+    this.dc.start(driver, contract);
+    const regrid = this.syncCareerGrid();
+    const first = this.dc.nextTrack ?? this.track.def.id;
+    this.menu.setup.track = first;
+    if (first !== this.track.def.id || regrid) void this.travel(first, true);
+    else this.toMenu();
   }
 
   // ------------------------------------------------------------------ the rest of the world, behind the garage
@@ -861,9 +905,9 @@ export class Game {
       gridOrder: this.gridOrder ?? undefined,
       weather: this.plan,
       damage: setup.damage,
-      playerSpec: this.career.spec(),
+      playerSpec: seriesSpec(this.career.spec()),
       // the rivals develop their cars through the season too
-      aiSpec: this.career.rivalSpec(),
+      aiSpec: seriesSpec(this.career.rivalSpec()),
     });
     this.refreshPlayerRig();
     this.particles.setLight(smokeLight(this.race.weatherState));
@@ -906,12 +950,14 @@ export class Game {
   private sessionSetup(s: RaceSetup): RaceSetup {
     if (!this.careerRace) return s;
     const f = this.careerForecast(this.track.def.id);
-    return { ...s, laps: CAREER_LAPS, weather: f.weather, time: f.time };
+    return { ...s, laps: this.dc.active ? this.dc.laps : CAREER_LAPS, weather: f.weather, time: f.time };
   }
   /** on to a career round: travel there if it's another circuit, then its race screen */
   private async goCareerRound(id: string) {
-    if (!this.career.isUnlocked(id)) return;
-    if (id !== this.track.def.id) await this.travel(id);
+    if (this.dc.active ? id !== this.dc.nextTrack : !this.career.isUnlocked(id)) return;
+    // (a new season may have changed the grid: other series, other team)
+    const regrid = this.syncCareerGrid();
+    if (id !== this.track.def.id || regrid) await this.travel(id, regrid);
     else if (this.state !== 'menu') this.toMenu();
     if (this.track.def.id !== id) return;
     this.menu.showCareerSetup();
@@ -1323,7 +1369,27 @@ export class Game {
     const again = () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.sessionSetup(this.menu.setup)));
     // a career round: straight on to the next one (new circuit, its own weather and light)
     let next: { label: string; go: () => void } | undefined;
-    if (this.careerRace && !this.spectating && !this.race.isTimeTrial) {
+    if (this.careerRace && this.dc.active && !this.spectating && !this.race.isTimeTrial) {
+      // the driver career: the round goes into the championship (once), then on to the next on its calendar
+      if (reward) {
+        const player = this.race.player.entry;
+        this.dc.recordRound(this.track.def.id, rows.map((r) => ({
+          code: r.entry.driver.code,
+          name: `${r.entry.driver.first} ${r.entry.driver.last}`,
+          team: r.entry.team.name,
+          teamId: r.entry.team.id,
+          color: uiColor(r.entry.team),
+          pos: r.pos,
+          dnf: !!r.dnf,
+          fastest: !!r.fastest,
+          isPlayer: r.isPlayer,
+          seatMate: r.entry.team === player.team && r.entry !== player,
+        })));
+      }
+      const nt = this.dc.nextTrack;
+      const nc = nt ? CIRCUITS.find((c) => c.id === nt) : null;
+      if (nc) next = { label: this.dc.data!.round === 0 ? `New season · ${nc.short}` : `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
+    } else if (this.careerRace && !this.spectating && !this.race.isTimeTrial) {
       const i = CIRCUITS.findIndex((c) => c.id === this.track.def.id);
       const nc = CIRCUITS[i + 1];
       if (nc && this.career.isUnlocked(nc.id)) next = { label: `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
@@ -2346,7 +2412,7 @@ export class Game {
     const player = this.race.player.entry;
     for (const [e, rig] of this.rigs) {
       const team = e === player ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
-      if (this.rigTeam.get(e) === team.id) continue;
+      if (this.rigTeam.get(e) === team.id && this.rigDriverKey.get(e) === driverKey(e)) continue;
       const visible = rig.root.visible;
       rig.root.removeFromParent();
       rig.dispose();
@@ -2354,6 +2420,7 @@ export class Game {
       next.root.visible = visible;
       this.rigs.set(e, next);
       this.rigTeam.set(e, team.id);
+      this.rigDriverKey.set(e, driverKey(e));
       this.views.set(e, new CarView(next));
       this.rigCompound.delete(e);
       this.carsGroup.add(next.root);
@@ -2365,12 +2432,15 @@ export class Game {
    * disposed and the new one built in steps (the cars, audio, menu, particles and career stay).
    * Asking again while travelling just changes the destination; the newest request wins.
    */
-  private travel(id: string = this.menu.setup.track) {
+  private travel(id: string = this.menu.setup.track, force = false) {
     this.travelTo = id;
+    if (force) this.travelForce = true;
     if (!this.travelling) this.travelling = this.runTravel().finally(() => (this.travelling = null));
     return this.travelling;
   }
   private travelTo: string | null = null;
+  /** rebuild the circuit even if it's the one we're at (the grid changed: other teams in the pit garages) */
+  private travelForce = false;
   private travelling: Promise<void> | null = null;
   /** dev/test hook: `await __game.travelAsync('spa')` */
   travelAsync(id: string) {
@@ -2380,7 +2450,8 @@ export class Game {
   private async runTravel() {
     const paint = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-    while (this.travelTo && this.travelTo !== this.track.def.id) {
+    while (this.travelTo && (this.travelTo !== this.track.def.id || this.travelForce)) {
+      this.travelForce = false;
       const def = CIRCUITS.find((c) => c.id === this.travelTo);
       if (!def) break;
       const t0 = performance.now();
@@ -3321,4 +3392,14 @@ export class Game {
   }
   /** adaptive resolution state (see adaptQuality) */
   private readonly aq = { t: 0, frames: 0, headroom: 0, slowAtFloor: 0, settleUntil: 0, raisedFrom: 0, raisedAt: 0, ceiling: 1, ceilingUntil: 0 };
+}
+
+/** a car's driver identity (a new name or helmet repaints it) */
+function driverKey(e: Entry): string {
+  return `${e.driver.code}|${e.driver.number}|${e.driver.helmet[0]}|${e.driver.helmet[1]}`;
+}
+/** Formula 2: a smaller, slower spec car than the F1 one (power and downforce down) */
+function seriesSpec(spec: CarSpec): CarSpec {
+  if (currentSeries() !== 'f2') return spec;
+  return { ...spec, power: spec.power * 0.76, clA: spec.clA * 0.74 };
 }

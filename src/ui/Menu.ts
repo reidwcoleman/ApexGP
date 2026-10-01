@@ -14,6 +14,9 @@ import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, 
 import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
+import { openWizard, renderHub } from './CareerHub.ts';
+import type { DriverCareer, Contract } from '../career/DriverCareer.ts';
+import type { PlayerDriver } from '../career/Series.ts';
 
 export interface RaceSetup {
   team: number;
@@ -126,6 +129,12 @@ export interface MenuCallbacks {
   onCareerRace(track: string): void;
   /** the session at a glance for the pause screen (circuit, session kind, a few numbers) */
   pauseInfo?(): { title: string; kind: string; stats: [string, string][] } | null;
+  /** the driver career (the game's main mode) */
+  driverCareer?(): DriverCareer;
+  /** a new driver career from the wizard */
+  onCareerStart?(driver: PlayerDriver, contract: Contract): void;
+  /** the career changed (an answer, a signature, a new season): the game re-syncs its grid */
+  onCareerChanged?(): void;
 }
 
 export type HubTab = 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
@@ -317,6 +326,36 @@ export class Menu {
 
   // ------------------------------------------------------------ the garage (title screen)
 
+  /** the line under the driver's name: the career's season, else the quick-race tally */
+  private careerSub(c: { races: number; points: number }): string {
+    const dc = this.cb.driverCareer?.();
+    if (dc?.data) {
+      const { pos, points } = dc.position();
+      return `${dc.data.series === 'f2' ? 'Formula 2' : 'Formula 1'} ${dc.data.year}${pos ? ` · P${pos} · ${points} pts` : ''}`;
+    }
+    return c.races ? `${c.races} race${c.races === 1 ? '' : 's'} · ${c.points} pts` : 'Rookie season';
+  }
+  /** the career tab shows the season calendar (the map) instead of the hub */
+  private calendarView = false;
+  /** the new-career wizard is open (it takes the keys) */
+  private wizardOpen = false;
+  /** open the new-career wizard */
+  openCareerWizard() {
+    if (this.wizardOpen) return;
+    this.wizardOpen = true;
+    openWizard(document.body, {
+      onDone: (driver, contract) => {
+        this.wizardOpen = false;
+        this.calendarView = false;
+        this.cb.onCareerStart?.(driver, contract);
+      },
+      onCancel: () => {
+        this.wizardOpen = false;
+      },
+      onUi: (k) => this.cb.onUi(k),
+    });
+  }
+
   private buildTitle() {
     // (back in the garage: the career map opens on the round you're working on)
     this.mapSel = null;
@@ -335,7 +374,7 @@ export class Menu {
       'div',
       'hub-id',
       s,
-      `<div class="num">${d.number}</div><div class="who"><div class="name">${d.first} <b>${d.last}</b></div><div class="sub"><span>${team.name}</span><span>${c.races ? `${c.races} race${c.races === 1 ? '' : 's'}</span><span>${c.points} pts` : 'Rookie season'}</span></div></div>`,
+      `<div class="num">${d.number}</div><div class="who"><div class="name">${d.first} <b>${d.last}</b></div><div class="sub"><span>${team.name}</span><span>${this.careerSub(c)}</span></div></div>`,
     );
     this.hubCredits = el('div', 'hub-credits', s);
     this.renderCredits();
@@ -376,6 +415,8 @@ export class Menu {
     if (!p) return;
     p.innerHTML = '';
     p.className = 'hub-panel glass' + (this.hubTab === 'career' ? ' wide' : '');
+    p.style.backgroundImage = '';
+    p.style.removeProperty('--team');
     void p.offsetWidth;
     p.classList.add('in');
     this.items = [];
@@ -464,6 +505,44 @@ export class Menu {
 
   /** the career: the season's fourteen rounds on a map, medals where you've earned them */
   private tabCareer(p: HTMLElement) {
+    const dc = this.cb.driverCareer?.();
+    if (dc && !this.calendarView) {
+      if (dc.active) {
+        renderHub(p, {
+          dc,
+          action: (e, fn, dis) => this.action(e, fn, dis),
+          onRace: (id) => this.cb.onCareerRace(id),
+          onCalendar: () => {
+            this.calendarView = true;
+            this.renderTab();
+          },
+          onNewCareer: () => this.openCareerWizard(),
+          changed: () => {
+            this.cb.onCareerChanged?.();
+            this.buildTitle();
+          },
+          forecast: (id) => fcLabel(this.cb.careerForecast(id)),
+          circuitPath: (pts) => circuitPath(pts, 120, 84, 6),
+        });
+        this.sel = 0;
+        return;
+      }
+      // no career yet: the way in
+      p.classList.add('ch', 'start');
+      p.style.backgroundImage = `url("${artFor('silverstone')}")`;
+      el('div', 'ch-start', p, `<div class="cap">Driver career</div><div class="big">Your journey to Formula 1</div><div class="sub">Create a driver and fight your way up from Formula 2, or take over a current F1 driver's seat. Every result, every interview and every contract is yours.</div>`);
+      const go = el('div', 'cta ch-start-go', p, 'Start your career');
+      this.action(go, () => this.openCareerWizard());
+      this.sel = 0;
+      return;
+    }
+    if (dc?.active) {
+      const back = el('div', 'cta ghost cm-back', p, '← Career');
+      this.action(back, () => {
+        this.calendarView = false;
+        this.renderTab();
+      });
+    }
     const c = this.career.data;
     const next = this.career.nextRound();
     const open = CIRCUITS.filter((cd) => this.career.isUnlocked(cd.id));
@@ -1394,6 +1473,7 @@ export class Menu {
 
   /** keyboard/gamepad navigation */
   update(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }) {
+    if (this.wizardOpen) return;
     if (this.screen === 'none' || this.items.length === 0) {
       if (this.screen === 'none') return;
     }

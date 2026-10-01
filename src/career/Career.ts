@@ -204,8 +204,10 @@ export class Career {
 
   // ------------------------------------------------------------------ circuits
   /** circuits are unlocked in calendar order: the first always, then one per top-five finish at the one before */
+  /** circuits opened another way (the driver career: every circuit its seasons have reached) */
+  static extraUnlocked: ((id: string) => boolean) | null = null;
   isUnlocked(id: string): boolean {
-    if (UNLOCK_ALL) return true;
+    if (UNLOCK_ALL || Career.extraUnlocked?.(id)) return true;
     const i = CIRCUITS.findIndex((c) => c.id === id);
     if (i <= 0) return true;
     const prev = this.data.best[CIRCUITS[i - 1].id];
