@@ -419,14 +419,22 @@ export class CrewSystem {
    * Without the people kit yet, they are built on demand instead.
    */
   prebuild(): boolean {
-    if (!this.kit) this.kit = peopleKit();
-    if (!this.kit) return false;
-    for (const C of this.crews) {
-      for (const m of C.members) if (!m.p) this.build(C, m);
-      this.props(C);
-    }
+    while (!this.prebuildNext()) if (!this.kit) return false;
     return true;
   }
+
+  /** one more team's crew (behind the garage, a crew a frame); true once every crew is built */
+  prebuildNext(): boolean {
+    if (!this.kit) this.kit = peopleKit();
+    if (!this.kit) return false;
+    const C = this.crews.find((c) => c.members.some((m) => !m.p) || !this.propsBuilt.has(c));
+    if (!C) return true;
+    for (const m of C.members) if (!m.p) this.build(C, m);
+    this.props(C);
+    this.propsBuilt.add(C);
+    return false;
+  }
+  private readonly propsBuilt = new Set<object>();
 
   /** show every person and prop (at home) for a shader / upload warm-up render (true), then back to normal (false) */
   warm(on: boolean) {

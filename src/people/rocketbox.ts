@@ -60,15 +60,26 @@ export function rbIndex(): Promise<RbIndex> {
   return (indexP ??= fetch(BASE + 'index.json').then((r) => r.json()));
 }
 
-const tl = new THREE.TextureLoader();
+/**
+ * Textures arrive as ImageBitmaps: decoded off the main thread while the rest boots (an <img> is only
+ * decoded when it is first uploaded, which stalled the garage's first frames on ~100 avatar images).
+ */
 function tex(file: string, srgb: boolean): Promise<THREE.Texture> {
-  return tl.loadAsync(BASE + file).then((t) => {
-    t.flipY = false;
-    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    t.anisotropy = 4;
-    t.name = file;
-    return t;
-  });
+  return fetch(BASE + file)
+    .then((r) => {
+      if (!r.ok) throw new Error(`${file}: ${r.status}`);
+      return r.blob();
+    })
+    .then((b) => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
+    .then((bmp) => {
+      const t = new THREE.Texture(bmp);
+      t.flipY = false;
+      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      t.anisotropy = 4;
+      t.name = file;
+      t.needsUpdate = true;
+      return t;
+    });
 }
 
 /** a geometry's attributes as plain float arrays (skinIndex as uint16), indexed */

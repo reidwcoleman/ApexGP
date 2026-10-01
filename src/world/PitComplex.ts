@@ -69,6 +69,8 @@ export interface PitComplex {
   hideCrew(team: number): void;
   /** build every pit-crew member and prop now (loading), so nothing is built mid-race; false: the people kit isn't loaded yet */
   prebuild?(): boolean;
+  /** one more team's crew; true once all are built (false too while the people kit isn't loaded) */
+  prebuildNext?(): boolean;
   /** show all the crews for a warm-up render (shader compile, bone-texture upload), then back (false) */
   warm?(on: boolean): void;
 }
@@ -192,6 +194,9 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     },
     prebuild() {
       return crew.prebuild();
+    },
+    prebuildNext() {
+      return crew.prebuildNext();
     },
     warm(on: boolean) {
       crew.warm(on);

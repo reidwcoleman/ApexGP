@@ -523,6 +523,9 @@ export class Game {
     const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     const t0 = performance.now();
     let busy = 0;
+    // the rest of the avatars keep downloading while the landscape is built
+    const kit = peopleKit();
+    const everyone = kit ? Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]) : Promise.resolve();
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;
     let scenery: Scenery | null = null;
@@ -564,6 +567,20 @@ export class Game {
     this.placeBroadcastCameras();
     busy += performance.now() - ts;
     this.worldProgress = 0.88;
+    await frame();
+    if (gen !== this.worldGen) return;
+    // every pit crew (people, wheels, guns, jacks), a team a frame, so nothing is built mid-race
+    for (let n = 0; n < 40; n++) {
+      ts = performance.now();
+      const done = this.pits.prebuildNext?.() ?? true;
+      busy += performance.now() - ts;
+      if (done) break;
+      await frame();
+      if (gen !== this.worldGen) return;
+    }
+    // everyone, not just the first few: marshals, photographers, the paddock and the fans on the
+    // concourses are built from the full set, and would otherwise pop in mid-race
+    await everyone;
     await frame();
     if (gen !== this.worldGen) return;
     ts = performance.now();
@@ -707,16 +724,12 @@ export class Game {
     lap('pits');
 
     if (people) {
+      // the uniforms and faces (the garage's people); the fans' avatars and the pit crews follow
+      // behind the garage (completeWorld), before any session can start
       await step(0.36, 'Getting the people in');
-      const kit = (await people) as { whenAll?: Promise<void> } | undefined;
-      // everyone, not just the first few: marshals, photographers, the paddock and the fans on the
-      // concourses are built from the full set, and would otherwise pop in mid-race
-      if (kit?.whenAll) await Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]);
+      await people;
       lap('people');
     }
-    // every pit crew (people, wheels, guns, jacks) now, so nothing is built mid-race
-    this.pits.prebuild?.();
-    lap('crew');
 
     await step(0.4, 'Setting up the sky');
     const w0 = new Weather(this.plan).state;

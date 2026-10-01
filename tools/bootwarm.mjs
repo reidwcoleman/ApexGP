@@ -28,7 +28,7 @@ for (let i = 0; i < 2; i++) {
     for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
     const counts = new Map();
     profile.samples.forEach((id, k) => counts.set(id, (counts.get(id) || 0) + (profile.timeDeltas[k] || 0)));
-    const key = (n) => `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').slice(-1)[0].split('?')[0]}:${n.callFrame.lineNumber}`;
+    const key = (n) => `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').slice(-1)[0].split('?')[0]}:${n.callFrame.lineNumber}:${n.callFrame.columnNumber}`;
     const incl = new Map(), self = new Map();
     for (const [id, t] of counts) {
       self.set(key(byId.get(id)), (self.get(key(byId.get(id))) || 0) + t);
