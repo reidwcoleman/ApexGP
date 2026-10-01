@@ -30,6 +30,14 @@ npm run check    # tsc --noEmit
   and the steel bull), Zandvoort (banked Hugenholtz and Arie Luyendijk, dunes, the North Sea and
   the orange army), Circuit of the Americas (the Turn 1 hill, the tower) and Interlagos (the bowl,
   the Senna S, São Paulo all around). Switching circuit rebuilds the world in-page — no reload.
+- **Driver career** — the game's main mode, like the F1 games' My Driver: create a driver (name, nationality,
+  number, helmet colours, skin and hair) and start in Formula 2 with one of three junior teams, or take over a
+  current F1 driver's seat. Every round feeds a season table; the inbox brings team-principal calls, press
+  questions and contract offers (lead / equal / second driver, length, salary) whose answers move reputation,
+  fan hype and team trust; offers open late in the season and at its end, and an F2 title brings F1 offers.
+  The grid is swapped in place (`src/career/Series.ts` `applyGrid` rewrites the shared Team/Driver objects, so
+  every entry and car rig follows); state in `localStorage` `apexgp.drivercareer` (`src/career/DriverCareer.ts`,
+  hub and wizard in `src/ui/CareerHub.ts`).
 - **Career on a world map** — the 14 rounds as pins on a map of the season: a top-5 finish unlocks
   the next round, and your best result earns a medal (gold = win, silver = podium, bronze = top 5).
   Career races are always 10 laps and take their weather and time of day from the circuit's climate
@@ -193,6 +201,8 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/liveryhash.mjs [port]` — hash of every painted livery (proves a Livery.ts refactor is pixel-identical).
 - `node tools/careerflow.mjs` — career map → round → results → Next round (travel) → next round's race screen.
 - `node tools/introshot.mjs [track]`, `tools/menushot.mjs`, `tools/garageshot.mjs`, `tools/personshot.mjs` — intro / hub / garage part / garage person screenshots.
+- `node tools/faceshot.mjs [outDir] [idx,…]` (garage faces, the line-of-sight hiding off), `tools/helmetshot.mjs` (pit-crew helmets in a stop), `tools/rb_scenes.mjs <garage|podium|grid|race|pit>` — people close-ups and their draw cost.
+- `python3 tools/build_asphalt.py` / `python3 tools/build_grass.py` — rebuild the scanned road / grass textures (`tools/asphstats.mjs`, `tools/grassstats.mjs` print the procedural statistics they are matched to).
 - `node tools/loadtime.mjs [track] [to,…]`, `tools/cpuprof.mjs <from> <to>` — boot and circuit-switch timings, CPU profile of a switch.
 
 ## Steam (desktop build)
@@ -212,3 +222,7 @@ People: avatars and animations from the [Microsoft Rocketbox Avatar Library](htt
 (MIT, see `public/models/rocketbox/LICENSE.txt`), fetched by `tools/rocketbox_fetch.py` and converted by
 `tools/build_rocketbox.mjs` (headless Chrome, `src/dev/rbconvert.ts`); team kits, head swaps, crowds and
 poses are done in code. Teams, drivers and sponsors in the game are fictional.
+
+Ground: the track asphalt is Poly Haven's [Asphalt Track](https://polyhaven.com/a/asphalt_track) scan and the
+grass ambientCG's [Grass 001](https://ambientcg.com/view?id=Grass001), both CC0, packed by `tools/build_asphalt.py`
+and `tools/build_grass.py` into `public/textures/`.
