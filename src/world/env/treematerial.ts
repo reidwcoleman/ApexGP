@@ -20,6 +20,8 @@ import { weatherUniforms } from '../weatherUniforms.ts';
 
 export interface TreeUniforms {
   uTime: THREE.IUniform<number>;
+  /** frame counter: the 3D/impostor hand-over dither moves every frame (a fixed one showed as hatching) */
+  uFrame: THREE.IUniform<number>;
   /** 3D fade band (start, end) in metres from the camera */
   uFade: THREE.IUniform<THREE.Vector2>;
   /** world direction toward the sun (for the leaf shadow offset) */
@@ -39,7 +41,7 @@ export function setLeafFill(u: TreeUniforms, sunShare: number) {
 }
 
 export function createTreeUniforms(): TreeUniforms {
-  return { uTime: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
+  return { uTime: { value: 0 }, uFrame: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
 }
 
 const COMMON_VERT = /* glsl */ `
@@ -105,6 +107,9 @@ mat3 treeTangentFrame( vec3 eye_pos, vec3 surf_norm, vec2 uv ) {
   return mat3( T * scale, B * scale, N );
 }
 float ign( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) ); }
+// (offset by the frame: the hand-over reads as a blend in motion instead of a fixed hatch)
+uniform float uFrame;
+float ignF( vec2 p ) { return ign( p + 5.588238 * mod( uFrame, 64.0 ) ); }
 `;
 
 /** RE_Direct wrapper: thin-leaf transmission + crown self-shadowing */
@@ -140,6 +145,7 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uTime: u.uTime,
+      uFrame: u.uFrame,
       uFade: u.uFade,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
@@ -205,7 +211,7 @@ material.specularF90 = mix( material.specularF90, 0.22, leafK );`,
 float leafK = step( 0.5, vTree.y );
 if ( uFade.y > 0.0 ) {
   float f = smoothstep( uFade.x, uFade.y, vFadeD );
-  if ( f > ign( gl_FragCoord.xy ) ) discard;
+  if ( f > ignF( gl_FragCoord.xy ) ) discard;
 }
 if ( leafK > 0.5 ) {
   vec4 lt = texture2D( uLeafMap, vTUv );
@@ -460,6 +466,7 @@ export function impostorMaterial(atlas: ImpostorAtlas, u: TreeUniforms): THREE.M
     Object.assign(sh.uniforms, {
       uFade: u.uFade,
       uTime: u.uTime,
+      uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
       uImpA: { value: atlas.albedo },
@@ -558,7 +565,7 @@ vec4 ia = texture2D( uImpA, vIUv );
   vec2 dx = dFdx( vIUv * 2048.0 ), dy = dFdy( vIUv * 2048.0 );
   float lod = max( 0.0, 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ) );
   if ( ia.a * ( 1.0 + lod * 0.3 ) < 0.5 ) discard;
-  if ( vIFade < 1.0 && vIFade <= ign( gl_FragCoord.xy ) ) discard;
+  if ( vIFade < 1.0 && vIFade <= ignF( gl_FragCoord.xy ) ) discard;
 }
 diffuseColor.rgb = ia.rgb * ia.rgb * vITint;
 `,

@@ -469,7 +469,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // [122, 142, 56] — impostors take over a little sooner now)
   // (leaf cards face the camera in the 3D trees and the impostors alike, so the hand-over can
   // come closer: fewer 3D trees on screen, the main tree cost)
-  const DETAIL = { low: [56, 72, 28], medium: [76, 92, 36], high: [88, 104, 40], ultra: [128, 150, 60] } as const;
+  // (a 10 m hand-over: fewer trees mid-dither at once)
+  const DETAIL = { low: [62, 72, 28], medium: [82, 92, 36], high: [94, 104, 40], ultra: [140, 150, 60] } as const;
   const setDetail = (q: keyof typeof DETAIL) => {
     const [f0, f1, l0] = DETAIL[q];
     uniforms.uFade.value.set(f0, f1);
@@ -479,6 +480,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   };
   const update = (camera: THREE.Camera, elapsed: number) => {
     uniforms.uTime.value = elapsed;
+    uniforms.uFrame.value = (uniforms.uFrame.value + 1) % 64;
     camera.getWorldPosition(cam);
     frames++;
     if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0) return;
