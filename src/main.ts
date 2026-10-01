@@ -35,7 +35,7 @@ game
   .then(async () => {
     loading.classList.add('done');
     // once faded out, drop the slideshow (its looping layers would keep compositing under the game)
-    setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1000);
+    setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1500);
     const q = new URLSearchParams(location.search);
     // the garage is up; demo sessions and the ready signal wait for the whole circuit behind it
     await game.whenWorld();

@@ -580,7 +580,7 @@
   z-index: 20;
   font-family: var(--font);
   color: var(--ink);
-  transition: opacity 0.8s var(--ease-out);
+  transition: opacity 1.2s var(--ease-out);
 }
 #loading.done {
   opacity: 0;

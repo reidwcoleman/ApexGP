@@ -49,7 +49,7 @@ npm run check    # tsc --noEmit
   per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
   another circuit moves the garage there behind a short title card; no travel screen.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
-  sunset…, `public/loading/`): the boot crossfades through them every 2.2 s on pure CSS animations (they
+  sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
 - **Race intros** — a helicopter sweep down the main straight with the title card (round, circuit,
   laps, conditions, the layout drawing itself), a tracking shot down the grid to your car, then the
