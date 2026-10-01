@@ -14,7 +14,7 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
  *   macro    — R large fBm, G sealed cracks, B medium fBm, A tint fBm (sampled at several scales)
  *   macroN   — metre-scale unevenness: RG = height gradient (normal xy), B = height, A = fBm
  *   gravel   — packed like asphalt: RGB albedo (sRGB) + A height; normal from gravelNormal
- *   grass    — short mown blades, 1.5 m tile
+ *   grass    — ambientCG 'Grass 001' scan (CC0, tools/build_grass.py), procedural blades as the fallback
  *   fence    — chain-link debris fence with tension cables (RGBA, 0.5 m × 4 m)
  */
 
@@ -25,7 +25,8 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
 export const ASPHALT_TILE = 2.0;
 export const ASPHALT_ALB_MAX = 0.16;
 export const GRAVEL_TILE = 1.6;
-export const GRASS_TILE = 1.5;
+/** the grass scan's tile (ambientCG Grass 001 is 1.4 m; the procedural fallback was drawn for 1.5) */
+export const GRASS_TILE = 1.4;
 
 export interface GroundTextures {
   asphalt: THREE.DataTexture;
@@ -35,8 +36,8 @@ export interface GroundTextures {
   macroN: THREE.DataTexture;
   gravelAlbedo: THREE.DataTexture;
   gravelNormal: THREE.DataTexture;
-  grassAlbedo: THREE.DataTexture;
-  grassNormal: THREE.DataTexture;
+  grassAlbedo: THREE.Texture;
+  grassNormal: THREE.Texture;
   fence: THREE.DataTexture;
 }
 
@@ -390,22 +391,54 @@ const SCAN_NORMAL_GAIN = 2.06;
 let scanPx: { data: Uint8ClampedArray; size: number } | null = null;
 let scanP: Promise<void> | null = null;
 
-/** fetches and decodes the scanned asphalt (R albedo, G height); makeGroundTextures uses it once it's in */
+let grassBmp: { c: ImageBitmap; n: ImageBitmap } | null = null;
+
+const fetchBitmap = async (file: string) => {
+  const r = await fetch(`${import.meta.env.BASE_URL}textures/${file}`);
+  if (!r.ok) throw new Error(`${file}: ${r.status}`);
+  return createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+};
+
+/**
+ * Fetches and decodes the scanned ground (off the main thread): the asphalt (R albedo, G height,
+ * Poly Haven 'Asphalt Track') and the grass (ambientCG 'Grass 001' colour + normal). makeGroundTextures
+ * uses whatever has arrived and draws the rest procedurally.
+ */
 export function loadAsphaltScan(): Promise<void> {
-  return (scanP ??= (async () => {
-    try {
-      const r = await fetch(`${import.meta.env.BASE_URL}textures/asphalt.webp`);
-      if (!r.ok) throw new Error(String(r.status));
-      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
-      const c = new OffscreenCanvas(bmp.width, bmp.height);
-      const g = c.getContext('2d', { willReadFrequently: true })!;
-      g.drawImage(bmp, 0, 0);
-      scanPx = { data: g.getImageData(0, 0, bmp.width, bmp.height).data, size: bmp.width };
-      bmp.close();
-    } catch (e) {
-      console.warn('asphalt scan failed to load, drawing the procedural surface', e);
-    }
-  })());
+  return (scanP ??= Promise.all([
+    (async () => {
+      try {
+        const bmp = await fetchBitmap('asphalt.webp');
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const g = c.getContext('2d', { willReadFrequently: true })!;
+        g.drawImage(bmp, 0, 0);
+        scanPx = { data: g.getImageData(0, 0, bmp.width, bmp.height).data, size: bmp.width };
+        bmp.close();
+      } catch (e) {
+        console.warn('asphalt scan failed to load, drawing the procedural surface', e);
+      }
+    })(),
+    (async () => {
+      try {
+        const [c, n] = await Promise.all([fetchBitmap('grass_c.webp'), fetchBitmap('grass_n.webp')]);
+        grassBmp = { c, n };
+      } catch (e) {
+        console.warn('grass scan failed to load, drawing the procedural grass', e);
+      }
+    })(),
+  ]).then(() => undefined));
+}
+
+function bitmapTex(bmp: ImageBitmap, srgb: boolean, aniso: number): THREE.Texture {
+  const t = new THREE.Texture(bmp);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.flipY = false;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = aniso;
+  t.needsUpdate = true;
+  return t;
 }
 
 function scanAsphalt(aniso: number) {
@@ -441,7 +474,7 @@ export function makeGroundTextures(aniso: number): GroundTextures {
   const a = scanPx ? scanAsphalt(aniso) : makeAsphalt(1024, aniso);
   // low-frequency data needs no anisotropic filtering (it is 4 fetches per road pixel: keep them cheap)
   const g = makeGravel(512, Math.min(aniso, 8));
-  const gr = makeGrass(512, Math.min(aniso, 8));
+  const gr = grassBmp ? { albedo: bitmapTex(grassBmp.c, true, Math.min(aniso, 8)), normal: bitmapTex(grassBmp.n, false, Math.min(aniso, 8)) } : makeGrass(512, Math.min(aniso, 8));
   const macro = makeMacro(1024, 1);
   const macroN = makeMacroN(512, 1);
   const fence = makeFence(aniso);
