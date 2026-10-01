@@ -473,7 +473,7 @@ float rbSkinLike( vec3 c, vec3 ref ) {
 /**
  * GLSL (fragment): a uniform in team colours over the avatar's clothes. part: 1 neck …
  * 8 foot; r, n: bind position and normal; K = (style 0 suit / 1 jacket / 2 shirt, gloves,
- * 0, 0); L0 = (neckY, chestY, waistY, 0); L1 = the left wrist. Writes the colour, the
+ * 0, 0); L0 = (neckY, chestY, waistY, neck z); L1 = the left wrist. Writes the colour, the
  * roughness and the print's uv (−1: none).
  */
 export const RB_UNIFORM_GLSL = /* glsl */ `
@@ -497,17 +497,25 @@ vec3 rbUniform( float part, vec3 r, vec3 n, vec4 K, vec4 L0, vec3 L1, vec3 cTop,
   }
   if ( style < 0.5 ) {
     // race suit: side panels, a stripe along the top of the sleeves, collar, belt and cuffs in the accents
-    float side = smoothstep( 0.6, 0.65, abs( n.x ) ) * ( arms ? 0.0 : 1.0 );
+    float side = smoothstep( 0.58, 0.72, abs( n.x ) ) * ( arms ? 0.0 : 1.0 );
     c = mix( c, cTop2, side );
     if ( arms ) c = mix( c, cTop2, smoothstep( 0.55, 0.6, dot( n, normalize( vec3( sign( r.x ) * 0.6, 0.8, 0.0 ) ) ) ) );
-    c = mix( c, cAcc, step( neckY - 0.012, r.y ) * ( arms ? 0.0 : 1.0 ) );
+    // the collar: a ring round the neck (the neck bone sits at shoulder height, so a level cut there
+    // painted the whole top of the chest and the shoulders)
+    float nr = length( vec2( r.x, r.z - L0.w ) );
+    c = mix( c, cAcc, smoothstep( neckY - 0.03, neckY - 0.015, r.y ) * ( 1.0 - smoothstep( 0.07, 0.085, nr ) ) * ( arms ? 0.0 : 1.0 ) );
     c = mix( c, cAcc, ( 1.0 - smoothstep( 0.012, 0.018, abs( r.y - waistY + 0.03 ) ) ) * ( arms || legs ? 0.0 : 1.0 ) );
     if ( arms ) c = mix( c, cAcc, 1.0 - smoothstep( 0.05, 0.065, distance( vec3( ax, r.y, r.z ), L1 ) ) );
   } else {
     // crew jacket / team shirt over darker trousers
     float low = legs || ( !arms && r.y < waistY - 0.05 ) ? 1.0 : 0.0;
     c = mix( c, cBot, low );
-    c = mix( c, cTop2, ( 1.0 - low ) * step( neckY - 0.03, r.y ) * ( arms ? 0.0 : 1.0 ) );
+    // the collar in the second colour: a jacket's whole shoulder yoke, a shirt's collar only (round the
+    // neck, not a band across the chest)
+    float collar = smoothstep( neckY - 0.04, neckY - 0.02, r.y ) * ( 1.0 - smoothstep( 0.075, 0.095, length( vec2( r.x, r.z - L0.w ) ) ) );
+    // a jacket's shoulder panels follow the shoulders (the up-facing cloth above the chest), not a level cut
+    float yoke = style > 1.5 ? collar : max( collar, smoothstep( 0.5, 0.68, n.y ) * smoothstep( chestY - 0.02, chestY + 0.02, r.y ) );
+    c = mix( c, cTop2, ( 1.0 - low ) * yoke * ( arms ? 0.0 : 1.0 ) );
     if ( style < 1.5 ) {
       if ( arms ) c = mix( c, cAcc, 1.0 - smoothstep( 0.06, 0.075, distance( vec3( ax, r.y, r.z ), L1 ) ) );
       c = mix( c, cTop2, ( 1.0 - low ) * smoothstep( 0.6, 0.8, abs( n.x ) ) * ( arms ? 0.0 : 1.0 ) );
@@ -557,7 +565,7 @@ export function bodyMaterial(asset: BodyAsset, look: Look): THREE.MeshPhysicalMa
     uTint: { value: tint },
     // (the crew body wears work gloves: they are always dyed, dark if the look has none)
     uK: { value: new THREE.Vector4(uniformStyle(look), look.gloves || (uni && asset.body.meta.name === ROSTER.crew) ? 1 : 0, 0, 0) },
-    uL0: { value: new THREE.Vector4(lm.neckY, lm.chestY, lm.waistY, 0) },
+    uL0: { value: new THREE.Vector4(lm.neckY, lm.chestY, lm.waistY, lm.pos.neck_01.z) },
     uL1: { value: lm.pos.hand_l.clone() },
     uTopC: { value: new THREE.Color(look.topColor) },
     uTop2C: { value: new THREE.Color(look.top2 ?? look.topColor) },
@@ -609,23 +617,39 @@ ${RB_UNIFORM_GLSL}`)
   gSheen = 0.3;
   gNScale = 1.0;
   // a uniform closes over the head's chest and the base of the neck (the head's own V is skin or its own shirt)
-  bool chest = !bodyHalf && part > 0.5 && vRest.y < uL0.x + ( uK.x < 0.5 ? 0.03 : -0.015 );
-  if ( uMode > 1.5 && chest ) { cloth = 1.0; det = 1.0; }
+  // and up to the jaw, whatever on the head isn't skin is the head's own shirt collar: the uniform takes it
+  // over too, fading out on skin (a hard cut at one height left a band of the old shirt across the chest)
+  bool chest = !bodyHalf && part > 0.5 && vRest.y < uL0.x + 0.05;
+  if ( uMode > 1.5 && chest ) {
+    float below = 1.0 - step( uL0.x + ( uK.x < 0.5 ? 0.03 : -0.015 ), vRest.y );
+    cloth = max( below, 1.0 - smoothstep( 0.3, 0.7, rbSkinLike( a.rgb, uSkinRef ) ) );
+    det = 1.0;
+  }
   // a race suit covers everything but the hands and feet (the crew body is clothed all over: its shirt collar too)
   if ( uMode > 1.5 && uK.x < 0.5 && bodyHalf && part > 0.5 && part < 7.5 && ( part < 4.5 || part > 5.5 ) ) cloth = 1.0;
+  // a uniform's shirt or jacket: every non-skin pixel of the torso and arms (the polo body's mask leaves its
+  // collar and the top of its chest out, which showed the avatar's own white shirt as a band)
+  if ( uMode > 1.5 && bodyHalf && part > 0.5 && part < 4.5 ) cloth = max( cloth, 1.0 - smoothstep( 0.3, 0.7, rbSkinLike( a.rgb, uSkinRef ) ) );
   // gloves: the work gloves (or bare hands) dyed
   if ( uMode > 1.5 && bodyHalf && part > 4.5 && part < 5.5 && uK.y > 0.5 ) cloth = 1.0;
   if ( uMode > 1.5 && uK.x < 0.5 && ( bodyHalf || chest ) ) {
-    // a race suit is smooth: only the big folds of the uniform underneath survive (no lapels, pockets, buttons)
+    // a race suit: no lapels, pockets or buttons, but the folds of the body underneath stay (and the
+    // fabric creases where it bends): a smooth suit read as plastic
     vec3 m3 = texture2D( map, uv, 3.0 ).rgb, m6 = texture2D( map, uv, 6.5 ).rgb;
-    det = bodyHalf ? clamp( ( dot( m3, RB_LUM ) + 0.004 ) / ( dot( m6, RB_LUM ) + 0.004 ), 0.82, 1.12 ) : 1.0;
-    gNScale = mix( 1.0, 0.3, cloth );
+    det = bodyHalf ? clamp( ( dot( m3, RB_LUM ) + 0.004 ) / ( dot( m6, RB_LUM ) + 0.004 ), 0.7, 1.22 ) : 1.0;
+    gNScale = mix( 1.0, 0.8, cloth );
   }
   if ( uMode > 1.5 && ( bodyHalf || chest ) && ( cloth > 0.02 || part > 7.5 ) ) {
     float rr; vec2 lu;
     vec3 u = rbUniform( part, vRest, normalize( vRestN ), uK, uL0, uL1, uTopC, uTop2C, uAccC, uBotC, uShoeC, uGloveC, a.rgb, det, rr, lu );
     if ( lu.x >= 0.0 ) { vec4 lg = texture2D( uLogo, lu ); u = mix( u, lg.rgb, lg.a ); }
     float k = part > 7.5 ? max( cloth, 0.6 ) : cloth;
+    // dyed cloth, not paint: a little darker and less saturated than the team's print colour, with
+    // the weave catching the light (a fine two-scale noise in the bind pose, so it moves with the body)
+    float uLum = dot( u, RB_LUM );
+    u = mix( vec3( uLum ), u, 0.88 ) * 0.86;
+    float weave = apNoise( vRest * 420.0 ) * 0.6 + apNoise( vRest * 95.0 ) * 0.4;
+    u *= 0.93 + 0.12 * weave;
     col = mix( col, min( u, vec3( ${CLOTH_WHITE_MAX.toFixed(2)} ) ), k );
     gRough = mix( gRough, rr, k );
     gShirt = k * step( 0.5, part ) * step( part, 4.5 );
@@ -654,7 +678,7 @@ material.sheenColor = ( diffuseColor.rgb * 0.6 + 0.05 ) * gSheen;`)
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
 if ( uMaskMode > 0.5 ) gl_FragColor = vec4( vec3( step( 0.5, gShirt ) ), 1.0 );`);
   };
-  mat.customProgramCacheKey = () => 'apex-rb-person-v1';
+  mat.customProgramCacheKey = () => 'apex-rb-person-v7';
   return mat;
 }
 

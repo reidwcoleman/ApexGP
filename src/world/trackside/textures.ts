@@ -4,7 +4,8 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
 /**
  * Procedural ground textures for the circuit (all generated in code).
  *
- *   asphalt  — PACKED aggregate texture, 1.7 m tile (1.7 mm/px), one fetch gives everything:
+ *   asphalt  — PACKED aggregate texture, one fetch gives everything (from Poly Haven's CC0 'Asphalt
+ *              Track' scan, tools/build_asphalt.py; the procedural makeAsphalt is the fallback):
  *              R = albedo (linear luminance / ASPHALT_ALB_MAX, stored as sqrt for precision)
  *              G = height (0 binder … 1 top of the biggest stones)
  *              B,A = tangent-space normal xy (0.5 = flat)
@@ -17,8 +18,11 @@ import { Rng, blurWrap, hash2, normalFromHeight, srgb8, tileFbm, tileNoise } fro
  *   fence    — chain-link debris fence with tension cables (RGBA, 0.5 m × 4 m)
  */
 
-/** metres per aggregate tile: 1.0 m → 1 mm/px, chips 5–11 mm (a fine stone-mastic surface course) */
-export const ASPHALT_TILE = 1.0;
+/**
+ * metres per aggregate tile: the scanned track surface (public/textures/asphalt.webp, 1024 px) covers
+ * 2 m → 2 mm/px; the procedural fallback was drawn for 1 m (it stretches, only if the scan fails to load)
+ */
+export const ASPHALT_TILE = 2.0;
 export const ASPHALT_ALB_MAX = 0.16;
 export const GRAVEL_TILE = 1.6;
 export const GRASS_TILE = 1.5;
@@ -379,11 +383,62 @@ function makeFence(aniso: number) {
   return dataTex(data, W, H, true, aniso);
 }
 
+// ------------------------------------------------------------------ the scanned surface
+
+/** normal gain on the scan's height channel (tools/build_asphalt.py prints it) */
+const SCAN_NORMAL_GAIN = 2.06;
+let scanPx: { data: Uint8ClampedArray; size: number } | null = null;
+let scanP: Promise<void> | null = null;
+
+/** fetches and decodes the scanned asphalt (R albedo, G height); makeGroundTextures uses it once it's in */
+export function loadAsphaltScan(): Promise<void> {
+  return (scanP ??= (async () => {
+    try {
+      const r = await fetch(`${import.meta.env.BASE_URL}textures/asphalt.webp`);
+      if (!r.ok) throw new Error(String(r.status));
+      const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+      const c = new OffscreenCanvas(bmp.width, bmp.height);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(bmp, 0, 0);
+      scanPx = { data: g.getImageData(0, 0, bmp.width, bmp.height).data, size: bmp.width };
+      bmp.close();
+    } catch (e) {
+      console.warn('asphalt scan failed to load, drawing the procedural surface', e);
+    }
+  })());
+}
+
+function scanAsphalt(aniso: number) {
+  const { data: d, size } = scanPx!;
+  const N = size * size;
+  const out = new Uint8Array(N * 4);
+  const k = SCAN_NORMAL_GAIN / 255;
+  let sumA = 0, sumH = 0;
+  for (let y = 0; y < size; y++) {
+    const ym = ((y - 1 + size) % size) * size, yp = ((y + 1) % size) * size, yc = y * size;
+    for (let x = 0; x < size; x++) {
+      const xm = (x - 1 + size) % size, xp = (x + 1) % size;
+      const o = (yc + x) * 4;
+      // the same convention as normalFromHeight
+      const nx = -(d[(yc + xp) * 4 + 1] - d[(yc + xm) * 4 + 1]) * 0.5 * k;
+      const ny = -(d[(yp + x) * 4 + 1] - d[(ym + x) * 4 + 1]) * 0.5 * k;
+      const l = 1 / Math.hypot(nx, ny, 1);
+      out[o] = d[o];
+      out[o + 1] = d[o + 1];
+      out[o + 2] = (nx * l * 0.5 + 0.5) * 255;
+      out[o + 3] = (ny * l * 0.5 + 0.5) * 255;
+      sumA += d[o];
+      sumH += d[o + 1];
+    }
+  }
+  return { tex: dataTex(out, size, size, false, aniso), mean: new THREE.Vector2(sumA / N / 255, sumH / N / 255) };
+}
+
 let cached: GroundTextures | null = null;
 
 export function makeGroundTextures(aniso: number): GroundTextures {
   if (cached) return cached;
-  const a = makeAsphalt(1024, aniso);
+  const a = scanPx ? scanAsphalt(aniso) : makeAsphalt(1024, aniso);
   // low-frequency data needs no anisotropic filtering (it is 4 fetches per road pixel: keep them cheap)
   const g = makeGravel(512, Math.min(aniso, 8));
   const gr = makeGrass(512, Math.min(aniso, 8));

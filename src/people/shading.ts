@@ -66,8 +66,8 @@ export function peopleLightsChunk(): string {
   if ( gSkin > 0.0 ) {
     // a second, tighter lobe: the oily sheen over the rougher skin
     PhysicalMaterial m2 = material;
-    m2.roughness = max( 0.3, material.roughness * 0.6 );
-    reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, m2 ) * 0.12 * gSkin;
+    m2.roughness = max( 0.36, material.roughness * 0.62 );
+    reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, m2 ) * 0.07 * gSkin;
   }
 }`,
   );

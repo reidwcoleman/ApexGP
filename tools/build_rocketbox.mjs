@@ -2,7 +2,7 @@
 // (fetched by tools/rocketbox_fetch.py). Runs the conversion page (src/dev/rbconvert.ts) in
 // headless Chrome against the stable dev server and writes public/models/rocketbox/.
 //
-//   node tools/build_rocketbox.mjs [--port 5191] [--only Name,Name] [--anims-only] [--no-anims]
+//   node tools/build_rocketbox.mjs [--port 5191] [--only Name,Name] [--anims-only] [--no-anims] [--tex 1024] [--ntex 1024] [--hair 1024]
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,7 +91,9 @@ let bones = null;
 if (!has('anims-only')) {
   for (const name of only ?? AVATARS) {
     const t0 = Date.now();
-    const r = await page.evaluate(([n]) => window.__rbAvatar(n), [name]);
+    // texture sizes per atlas half (colour, normal+specular, hair cards): the faces need the normal detail
+    const texOpts = { tex: Number(opt('tex', 1024)), ntex: Number(opt('ntex', 1024)), hair: Number(opt('hair', 1024)) };
+    const r = await page.evaluate(([n, o]) => window.__rbAvatar(n, o), [name, texOpts]);
     const bytes = write(r.files);
     const { log, boneNames, ...meta } = r.meta;
     bones = boneNames;

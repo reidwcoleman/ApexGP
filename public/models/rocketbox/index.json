@@ -23,7 +23,7 @@
     0.0648
    ],
    "hasHair": true,
-   "bytes": 681463,
+   "bytes": 902389,
    "files": [
     "Male_Adult_01_c.webp",
     "Male_Adult_01_n.webp",
@@ -50,12 +50,12 @@
     0.1675
    ],
    "hair": [
-    0.6017,
+    0.6019,
     0.452,
-    0.3049
+    0.3047
    ],
    "hasHair": true,
-   "bytes": 727452,
+   "bytes": 942630,
    "files": [
     "Female_Adult_01_c.webp",
     "Female_Adult_01_n.webp",
@@ -87,7 +87,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 441969,
+   "bytes": 529833,
    "files": [
     "Sports_Male_01_c.webp",
     "Sports_Male_01_n.webp",
@@ -113,12 +113,12 @@
     0.0158
    ],
    "hair": [
-    0.1645,
-    0.1238,
+    0.1644,
+    0.1237,
     0.0959
    ],
    "hasHair": true,
-   "bytes": 770537,
+   "bytes": 1037855,
    "files": [
     "Male_Adult_05_c.webp",
     "Male_Adult_05_n.webp",
@@ -145,12 +145,12 @@
     0.0353
    ],
    "hair": [
-    0.0902,
-    0.0506,
-    0.0293
+    0.09,
+    0.0505,
+    0.0292
    ],
    "hasHair": true,
-   "bytes": 629627,
+   "bytes": 833071,
    "files": [
     "Male_Adult_07_c.webp",
     "Male_Adult_07_n.webp",
@@ -177,12 +177,12 @@
     0.4133
    ],
    "hair": [
-    0.1782,
-    0.1186,
-    0.0823
+    0.1783,
+    0.1187,
+    0.0824
    ],
    "hasHair": true,
-   "bytes": 649765,
+   "bytes": 892215,
    "files": [
     "Male_Adult_08_c.webp",
     "Male_Adult_08_n.webp",
@@ -209,12 +209,12 @@
     0.3958
    ],
    "hair": [
-    0.1212,
-    0.0779,
-    0.0521
+    0.1214,
+    0.0781,
+    0.0522
    ],
    "hasHair": true,
-   "bytes": 838913,
+   "bytes": 1081369,
    "files": [
     "Female_Adult_02_c.webp",
     "Female_Adult_02_n.webp",
@@ -241,12 +241,12 @@
     0.0138
    ],
    "hair": [
-    0.7102,
+    0.7103,
     0.5647,
-    0.3896
+    0.3894
    ],
    "hasHair": true,
-   "bytes": 737156,
+   "bytes": 944336,
    "files": [
     "Female_Adult_04_c.webp",
     "Female_Adult_04_n.webp",
@@ -278,7 +278,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 521413,
+   "bytes": 629211,
    "files": [
     "Sports_Male_02_c.webp",
     "Sports_Male_02_n.webp",
@@ -304,12 +304,12 @@
     0.1975
    ],
    "hair": [
-    0.0498,
-    0.039,
+    0.0497,
+    0.0389,
     0.0312
    ],
    "hasHair": true,
-   "bytes": 685186,
+   "bytes": 921658,
    "files": [
     "Sports_Female_02_c.webp",
     "Sports_Female_02_n.webp",
@@ -341,7 +341,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 402316,
+   "bytes": 473848,
    "files": [
     "Pilot_Female_01_c.webp",
     "Pilot_Female_01_n.webp",
@@ -372,7 +372,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 498833,
+   "bytes": 605723,
    "files": [
     "Pilot_Male_03_c.webp",
     "Pilot_Male_03_n.webp",
@@ -403,7 +403,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 440248,
+   "bytes": 527298,
    "files": [
     "Pilot_Female_02_c.webp",
     "Pilot_Female_02_n.webp",
@@ -429,12 +429,12 @@
     0.0141
    ],
    "hair": [
-    0.1645,
-    0.1238,
+    0.1644,
+    0.1237,
     0.0959
    ],
    "hasHair": true,
-   "bytes": 664191,
+   "bytes": 891777,
    "files": [
     "Gardener_Male_01_c.webp",
     "Gardener_Male_01_n.webp",
@@ -466,7 +466,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 621629,
+   "bytes": 754059,
    "files": [
     "Delivery_Male_01_c.webp",
     "Delivery_Male_01_n.webp",
@@ -492,12 +492,12 @@
     0.0287
    ],
    "hair": [
-    0.0792,
-    0.0639,
-    0.0559
+    0.0793,
+    0.064,
+    0.056
    ],
    "hasHair": true,
-   "bytes": 717435,
+   "bytes": 939949,
    "files": [
     "Male_Adult_09_c.webp",
     "Male_Adult_09_n.webp",
@@ -524,12 +524,12 @@
     0.0285
    ],
    "hair": [
-    0.0725,
+    0.0724,
     0.0455,
-    0.0195
+    0.0194
    ],
    "hasHair": true,
-   "bytes": 604058,
+   "bytes": 849964,
    "files": [
     "Male_Adult_10_c.webp",
     "Male_Adult_10_n.webp",
@@ -561,7 +561,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 468368,
+   "bytes": 563772,
    "files": [
     "Male_Adult_11_c.webp",
     "Male_Adult_11_n.webp",
@@ -592,7 +592,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 582948,
+   "bytes": 694302,
    "files": [
     "Male_Adult_12_c.webp",
     "Male_Adult_12_n.webp",
@@ -623,7 +623,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 518882,
+   "bytes": 652464,
    "files": [
     "Male_Adult_14_c.webp",
     "Male_Adult_14_n.webp",
@@ -654,7 +654,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 484226,
+   "bytes": 633880,
    "files": [
     "Male_Adult_15_c.webp",
     "Male_Adult_15_n.webp",
@@ -685,7 +685,7 @@
     0.05
    ],
    "hasHair": false,
-   "bytes": 477484,
+   "bytes": 552414,
    "files": [
     "Male_Adult_16_c.webp",
     "Male_Adult_16_n.webp",

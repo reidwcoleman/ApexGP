@@ -8,7 +8,7 @@ import type { CircuitDef } from '../world/CircuitGen.ts';
 import { collectDeep, collectResources, disposeTree, holdMaterials, releaseHeldMaterials, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
 import { createCloudNoise } from '../world/env/skyNoise.ts';
 import { buildTreeKit } from '../world/env/treeproto.ts';
-import { makeGroundTextures } from '../world/trackside/textures.ts';
+import { loadAsphaltScan, makeGroundTextures } from '../world/trackside/textures.ts';
 import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
 import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
 import { setEvent, EVENT } from '../world/event.ts';
@@ -362,6 +362,8 @@ export class Game {
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     // liveries + the fan atlas painted on an earlier visit (read + decoded while the rest loads)
     const pixels = preloadPixels();
+    // the scanned road surface (1.2 MB, decoded off the main thread)
+    const asphalt = loadAsphaltScan();
     try {
       await Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f)));
     } catch {
@@ -374,7 +376,7 @@ export class Game {
     Career.extraUnlocked = (id) => this.dc.visited(id);
     this.rollWeather(this.menu.setup);
 
-    await pixels;
+    await Promise.all([pixels, asphalt]);
     mark('pixels');
     setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice

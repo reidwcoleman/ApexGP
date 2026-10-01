@@ -562,7 +562,7 @@ function cone(g: Geo, fr: Frame, cx: number, cy: number, cz: number, r: number, 
  * blanket = fabric colour or null (bare tyre with compound stripe).
  */
 export function tyre(g: Geo, fr: Frame, cx: number, cy: number, cz: number, axis: 'x' | 'y' | 'z', blanket: THREE.Color | number | null, compound: number, r = 0.35, w = 0.36) {
-  const seg = 14;
+  const seg = 24;
   const ax = axis === 'x' ? fr.x : axis === 'y' ? fr.y : fr.z;
   const u = axis === 'y' ? fr.x.clone() : fr.y.clone();
   const v = new THREE.Vector3().crossVectors(ax, u).normalize();
@@ -570,20 +570,26 @@ export function tyre(g: Geo, fr: Frame, cx: number, cy: number, cz: number, axis
   const P = (rad: number, ang: number, off: number) => c.clone().addScaledVector(u, Math.cos(ang) * rad).addScaledVector(v, Math.sin(ang) * rad).addScaledVector(ax, off);
   const N = (ang: number) => new THREE.Vector3().addScaledVector(u, Math.cos(ang)).addScaledVector(v, Math.sin(ang));
   const body = blanket === null ? new THREE.Color(0x121213) : new THREE.Color(blanket as THREE.ColorRepresentation);
-  // tread
+  // tread: a flat crown and rounded shoulders (the radius drops and the normal turns toward the sidewall)
   g.color(body).mat(blanket === null ? 0.85 : 0.9, 0, 0, 0);
+  const sh = r * 0.045, crown = w / 2 - sh;
+  const prof: [number, number, number][] = [[-w / 2, r - sh, -0.7], [-crown, r, 0], [crown, r, 0], [w / 2, r - sh, 0.7]];
   for (let i = 0; i < seg; i++) {
     const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
-    const q = [P(r, a0, -w / 2), P(r, a1, -w / 2), P(r, a1, w / 2), P(r, a0, w / 2)];
-    const n0 = N(a0), n1 = N(a1);
-    const i0 = g.vert(q[0], n0), i1 = g.vert(q[1], n1), i2 = g.vert(q[2], n1), i3 = g.vert(q[3], n0);
-    const fn = new THREE.Vector3().crossVectors(q[1].clone().sub(q[0]), q[2].clone().sub(q[0]));
-    if (fn.dot(n0) >= 0) g.idx.push(i0, i1, i2, i0, i2, i3);
-    else g.idx.push(i0, i2, i1, i0, i3, i2);
+    for (let j = 0; j < prof.length - 1; j++) {
+      const [o0, r0, t0] = prof[j], [o1, r1, t1] = prof[j + 1];
+      const nn = (a: number, t: number) => N(a).multiplyScalar(1 - Math.abs(t)).addScaledVector(ax, t).normalize();
+      const q = [P(r0, a0, o0), P(r0, a1, o0), P(r1, a1, o1), P(r1, a0, o1)];
+      const n0 = nn(a0, t0), n1 = nn(a1, t0), n2 = nn(a1, t1), n3 = nn(a0, t1);
+      const i0 = g.vert(q[0], n0), i1 = g.vert(q[1], n1), i2 = g.vert(q[2], n2), i3 = g.vert(q[3], n3);
+      const fn = new THREE.Vector3().crossVectors(q[1].clone().sub(q[0]), q[2].clone().sub(q[0]));
+      if (fn.dot(N(a0)) >= 0) g.idx.push(i0, i1, i2, i0, i2, i3);
+      else g.idx.push(i0, i2, i1, i0, i3, i2);
+    }
   }
   // sidewalls: outer ring (body), compound stripe, rim
   const rings: [number, number, THREE.Color, number, number][] = [
-    [r, r * 0.8, body, 0.9, 0],
+    [r - sh, r * 0.8, body, 0.9, 0],
     [r * 0.8, r * 0.72, new THREE.Color(compound), 0.6, 0.15],
     [r * 0.72, r * 0.6, body, 0.9, 0],
     [r * 0.6, 0.05, blanket === null ? new THREE.Color(0x2a2c30) : body.clone().multiplyScalar(0.7), 0.4, 0],
