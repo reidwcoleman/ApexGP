@@ -14,8 +14,8 @@ import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, 
 import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
-import { openWizard, renderHub } from './CareerHub.ts';
-import type { DriverCareer, Contract } from '../career/DriverCareer.ts';
+import { openWizard, renderHub, renderRd, renderRoundSummary } from './CareerHub.ts';
+import type { DriverCareer, Contract, RoundSummary } from '../career/DriverCareer.ts';
 import type { PlayerDriver } from '../career/Series.ts';
 
 export interface RaceSetup {
@@ -400,7 +400,10 @@ export class Menu {
 
   private renderCredits() {
     if (!this.hubCredits) return;
-    this.hubCredits.innerHTML = `<div class="cap">Credits</div><div class="val">${fmtCr(this.career.data.credits)}</div>`;
+    const dc = this.cb.driverCareer?.();
+    this.hubCredits.innerHTML = dc?.active
+      ? `<div class="cap">Research</div><div class="val">${dc.data!.rp} RP</div>`
+      : `<div class="cap">Credits</div><div class="val">${fmtCr(this.career.data.credits)}</div>`;
   }
 
   private setTab(tab: HubTab) {
@@ -521,6 +524,10 @@ export class Menu {
             this.cb.onCareerChanged?.();
             this.buildTitle();
           },
+          rerender: () => {
+            this.renderTab();
+          },
+          onDevelop: () => this.setTab('car'),
           forecast: (id) => fcLabel(this.cb.careerForecast(id)),
           circuitPath: (pts) => circuitPath(pts, 120, 84, 6),
         });
@@ -695,6 +702,25 @@ export class Menu {
   }
 
   private tabCar(p: HTMLElement) {
+    const dc = this.cb.driverCareer?.();
+    if (dc?.active) {
+      // a driver career: the team's research points into the car
+      renderRd(p, {
+        dc,
+        action: (e, fn, dis) => this.action(e, fn, dis),
+        changed: () => {
+          this.cb.onCareerChanged?.();
+          this.cb.onCarChange();
+          const keep = this.sel;
+          this.renderCredits();
+          this.renderTab();
+          this.sel = keep;
+          this.highlight();
+          this.items[keep]?.el.classList.add('bought');
+        },
+      });
+      return;
+    }
     el('div', 'hp-cap', p, 'Car development');
     const dev = Math.round(this.career.development() * 100);
     el('div', 'devbar', p, `<div class="lbl"><span>Overall</span><b>${dev}%</b></div><div class="track"><i style="width:${dev}%"></i></div>`);
@@ -976,7 +1002,17 @@ export class Menu {
     const racing = this.mode === 'race' || career;
     const ri = CIRCUITS.findIndex((c) => c.id === st.track);
     const fc = career ? this.cb.careerForecast(st.track) : null;
-    if (career) {
+    const dc = career ? this.cb.driverCareer?.() : undefined;
+    const dcd = dc?.active ? dc.data! : null;
+    if (dcd) {
+      const r = dcd.calendar.indexOf(st.track);
+      el('div', 'pcap round', p, `${dcd.series === 'f2' ? 'Formula 2' : 'Formula 1'} ${dcd.year} · Round ${r + 1} of ${dcd.calendar.length}`);
+      el('h2', '', p, CIRCUITS[ri]?.name ?? 'Race');
+      el('p', 'lede', p, `${dc!.laps} laps · ${fcLabel(fc!)} · the car should finish around P${dc!.expected()}`);
+      const ob = el('div', 'setup-obj', p);
+      el('div', 'pcap', ob, 'Team targets');
+      for (const o of dc!.objectives()) el('div', 'ch-o', ob, `<i></i><span>${o.label}</span><b>+${o.rp} RP</b>`);
+    } else if (career) {
       el('div', 'pcap round', p, `Career · Round ${ri + 1} of ${CIRCUITS.length}`);
       el('h2', '', p, CIRCUITS[ri]?.name ?? 'Race');
       el('p', 'lede', p, `${CAREER_LAPS} laps · ${fcLabel(fc!)} · top ${UNLOCK_POS} unlocks ${CIRCUITS[ri + 1]?.short ?? 'the season finale'}`);
@@ -984,6 +1020,8 @@ export class Menu {
       el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
       el('p', 'lede', p, this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.');
     }
+    // (a driver career races its own seat: the driver card shows it)
+    if (!dcd) {
     el('div', 'pcap', p, 'Driver');
     this.opt(p, 'Team', () => {
       const t = TEAMS[st.team];
@@ -997,8 +1035,9 @@ export class Menu {
     }, () => {
       st.seat = st.seat === 0 ? 1 : 0;
     });
+    }
     el('div', 'pcap', p, racing ? 'Race' : 'Session');
-    if (career) this.fixed(p, 'Laps', `${CAREER_LAPS} <span class="dim">· career distance</span>`);
+    if (career) this.fixed(p, 'Laps', `${dcd ? dc!.laps : CAREER_LAPS} <span class="dim">· career distance</span>`);
     if (racing) {
       if (!career)
         this.opt(p, 'Laps', () => String(st.laps), (d) => {
@@ -1296,7 +1335,7 @@ export class Menu {
     this.highlight();
   }
 
-  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void, reward?: RaceReward | null, onNext?: { label: string; go: () => void }) {
+  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void, reward?: RaceReward | null, onNext?: { label: string; go: () => void }, career?: RoundSummary | null) {
     this.show('results');
     const s = this.screens.get('results')!;
     s.innerHTML = '';
@@ -1328,6 +1367,7 @@ export class Menu {
         el('div', 'rw-unlock', box, `<b>New circuit unlocked</b> · ${cd?.name ?? reward.unlocked} is open in the garage`);
       }
     }
+    if (career) renderRoundSummary(box, career);
     const act = el('div', 'actions' + (onReplay || onNext ? ' three' : '') + (onReplay && onNext ? ' four' : ''), box);
     this.items = [];
     if (onNext) {

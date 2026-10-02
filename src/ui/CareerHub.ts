@@ -1,6 +1,6 @@
 import { CIRCUITS } from '../world/Circuits.ts';
 import { TEAMS, type DriverLook } from '../race/Teams.ts';
-import { DriverCareer, NATIONS, SERIES_NAME, levelLabel, levelOf, statusLabel, teamColor, teamName, type Contract, type Msg } from '../career/DriverCareer.ts';
+import { ATTRS, DriverCareer, NATIONS, RD, RD_MAX, SERIES_NAME, levelLabel, levelOf, rdCost, statusLabel, teamColor, teamName, type Ask, type AttrId, type Choice, type Contract, type Msg, type RoundSummary, type Status } from '../career/DriverCareer.ts';
 import { f1Original, f2Teams, type PlayerDriver } from '../career/Series.ts';
 import { PALETTE } from '../career/Career.ts';
 import { artFor } from './loadingArt.ts';
@@ -29,16 +29,30 @@ export interface HubCtx {
   onNewCareer(): void;
   /** something in the career changed (an answer, a signature): re-render, and the game re-syncs its grid */
   changed(): void;
+  /** re-render the hub (a section switched) */
+  rerender(): void;
+  /** open the car-development tab (the R&D) */
+  onDevelop(): void;
   forecast(track: string): string;
   circuitPath(points: number[]): string;
 }
+
+export type HubView = 'overview' | 'inbox' | 'standings' | 'driver' | 'history';
+let view: HubView = 'overview';
+/** open the hub on a section next time it renders */
+export function setHubView(v: HubView) {
+  view = v;
+}
+
+const pos = (p: number, dnf: boolean) => (dnf ? 'DNF' : `P${p}`);
+const meter = (label: string, v: number, note = '') => `<div class="ch-meter"><span>${label}</span><div class="bar"><i style="width:${Math.round(v)}%"></i></div><b>${Math.round(v)}</b>${note ? `<em>${note}</em>` : ''}</div>`;
 
 /** the career hub, in the garage's wide panel */
 export function renderHub(p: HTMLElement, ctx: HubCtx) {
   const dc = ctx.dc;
   const d = dc.data!;
   const me = d.driver;
-  const { pos, points } = dc.position();
+  const { pos: cp, points } = dc.position();
   const tn = teamName(d.series, d.contract.team);
   const tc = teamColor(d.series, d.contract.team);
   p.classList.add('ch');
@@ -48,11 +62,11 @@ export function renderHub(p: HTMLElement, ctx: HubCtx) {
   const head = el('div', 'ch-head', p);
   head.innerHTML =
     `<div class="ch-id"><div class="ch-num" style="--h1:${me.helmet[0]};--h2:${me.helmet[1]}">${me.number}</div>` +
-    `<div><div class="cap">${SERIES_NAME[d.series]} · ${d.year} · ${esc(me.nationality)}</div><div class="ch-name">${esc(me.first)} <b>${esc(me.last.toUpperCase())}</b></div><div class="ch-team"><i></i>${esc(tn)}</div></div></div>` +
+    `<div><div class="cap">${SERIES_NAME[d.series]} · ${d.year} · ${esc(me.nationality)} · Age ${d.age}</div><div class="ch-name">${esc(me.first)} <b>${esc(me.last.toUpperCase())}</b></div><div class="ch-team"><i></i>${esc(tn)} · ${statusLabel(d.contract.status)}</div></div></div>` +
     `<div class="ch-stats">` +
-    `<div class="cs"><b>${pos ? `P${pos}` : '—'}</b><span>Championship</span></div>` +
-    `<div class="cs"><b>${points}</b><span>Points</span></div>` +
-    `<div class="cs"><b>${d.wins}</b><span>Career wins · ${d.starts} starts</span></div>` +
+    `<div class="cs ovr"><b>${dc.ovr}</b><span>Overall</span></div>` +
+    `<div class="cs"><b>${cp ? `P${cp}` : '—'}</b><span>Championship · ${points} pts</span></div>` +
+    `<div class="cs"><b>${d.wins}</b><span>Wins · ${d.starts} starts</span></div>` +
     `<div class="cs"><b>${d.titles}</b><span>Titles</span></div>` +
     `</div>`;
 
@@ -60,80 +74,218 @@ export function renderHub(p: HTMLElement, ctx: HubCtx) {
     renderChoose(p, ctx);
     return;
   }
+  // ---- sections
+  const tabs = el('div', 'ch-tabs', p);
+  const unread = dc.unread();
+  const views: [HubView, string][] = [['overview', 'Overview'], ['inbox', `Inbox${unread ? ` <em>${unread}</em>` : ''}`], ['standings', 'Standings'], ['driver', 'Driver'], ['history', 'History']];
+  for (const [v, label] of views) {
+    const t = el('div', 'ch-tab' + (v === view ? ' on' : ''), tabs, label);
+    ctx.action(t, () => {
+      view = v;
+      ctx.rerender();
+    });
+  }
+  const body = el('div', 'ch-body', p);
+  if (view === 'inbox') inboxView(body, ctx);
+  else if (view === 'standings') standingsView(body, ctx);
+  else if (view === 'driver') driverView(body, ctx);
+  else if (view === 'history') historyView(body, ctx);
+  else overview(body, ctx);
+}
+
+function overview(p: HTMLElement, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
   const grid = el('div', 'ch-grid', p);
   const left = el('div', 'ch-col', grid);
   const right = el('div', 'ch-col', grid);
 
-  // ---- the next round
+  // ---- the next round, and the team's targets for it
   const nt = dc.nextTrack;
   const cd = nt ? CIRCUITS.find((c) => c.id === nt) : null;
   const next = el('div', 'ch-next', left);
   if (cd) {
     const ci = d.calendar.indexOf(cd.id);
     next.style.backgroundImage = `url("${artFor(cd.id)}")`;
+    const home = cd.country === d.driver.nationality;
     next.innerHTML =
-      `<div class="ch-next-in"><div class="cap">Round ${ci + 1} of ${d.calendar.length}</div><div class="nm">${esc(cd.name)}</div>` +
+      `<div class="ch-next-in"><div class="cap">Round ${ci + 1} of ${d.calendar.length}${home ? ' · Home race' : ''}</div><div class="nm">${esc(cd.name)}</div>` +
       `<div class="facts"><span>${dc.laps} laps</span><span>${esc(ctx.forecast(cd.id))}</span></div></div>` +
       (cd.centerline ? `<svg class="ch-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '');
+    const ob = el('div', 'ch-obj', left);
+    el('div', 'hp-cap', ob, `Team targets <span>expected P${dc.expected()}</span>`);
+    for (const o of dc.objectives()) el('div', 'ch-o', ob, `<i></i><span>${esc(o.label)}</span><b>+${o.rp} RP</b>`);
     const go = el('div', 'cta ch-go', left, `Race round ${ci + 1}`);
     ctx.action(go, () => ctx.onRace(cd.id));
   } else {
     next.innerHTML = `<div class="ch-next-in"><div class="cap">Season over</div><div class="nm">See you next year</div></div>`;
   }
-  const cal = el('div', 'cta ghost ch-cal', left, 'Season calendar');
+  const row = el('div', 'ch-btns', left);
+  const cal = el('div', 'cta ghost', row, 'Season calendar');
   ctx.action(cal, () => ctx.onCalendar());
+  const dev = el('div', 'cta ghost', row, `Car development · ${d.rp} RP`);
+  ctx.action(dev, () => ctx.onDevelop());
 
-  // ---- the championship
-  const tbl = el('div', 'ch-table', left);
-  el('div', 'hp-cap', tbl, `${SERIES_NAME[d.series]} standings`);
-  const rows = dc.table();
-  if (!rows.length) el('div', 'ch-empty', tbl, 'The table fills in after the first round.');
-  else {
-    const mine = rows.findIndex((r) => r.code === me.code);
-    const show = rows.slice(0, 6);
-    if (mine >= 6) show.push(rows[mine]);
-    for (const r of show) {
-      const i = rows.indexOf(r);
-      el('div', 'ch-row' + (r.code === me.code ? ' me' : ''), tbl, `<span class="p">${i + 1}</span><i style="background:${r.color}"></i><span class="n">${esc(r.name)}</span><span class="t">${esc(r.team)}</span><b>${r.points}</b>`);
-    }
+  // ---- the latest from the paddock
+  const inbox = el('div', 'ch-inbox', right);
+  el('div', 'hp-cap', inbox, 'Latest');
+  const list = el('div', 'ch-msgs short', inbox);
+  // (questions and offers waiting for an answer first)
+  const open = d.inbox.filter((m) => m.choices && m.picked === undefined);
+  const rest = d.inbox.filter((m) => !open.includes(m));
+  for (const m of [...open, ...rest].slice(0, 2)) list.appendChild(msgCard(m, ctx));
+  if (d.inbox.length > 2) {
+    const all = el('div', 'ch-link', inbox, `All messages (${d.inbox.length})`);
+    ctx.action(all, () => {
+      view = 'inbox';
+      ctx.rerender();
+    });
   }
 
-  // ---- the inbox
-  const inbox = el('div', 'ch-inbox', right);
-  const unread = dc.unread();
-  el('div', 'hp-cap', inbox, `Inbox${unread ? ` <em>${unread}</em>` : ''}`);
-  const list = el('div', 'ch-msgs', inbox);
-  for (const m of d.inbox.slice(0, 8)) list.appendChild(msgCard(m, ctx));
-
-  // ---- the contract and the driver's standing
+  // ---- the contract and where the driver stands
   const con = el('div', 'ch-contract', right);
   const c = d.contract;
-  const meter = (label: string, v: number) => `<div class="ch-meter"><span>${label}</span><div class="bar"><i style="width:${Math.round(v)}%"></i></div><b>${Math.round(v)}</b></div>`;
+  const tn = teamName(d.series, c.team);
+  const mate = dc.mate();
   con.innerHTML =
     `<div class="hp-cap">Contract</div>` +
     `<div class="ch-deal"><span><b>${esc(tn)}</b> · ${statusLabel(c.status)}</span><span>to ${c.until} · $${c.salary.toFixed(1)}M</span></div>` +
-    (d.next ? `<div class="ch-deal next"><span>Signed for ${d.year + 1}: <b>${esc(teamName(d.next.series, d.next.team))}</b></span></div>` : '') +
+    (d.next ? `<div class="ch-deal next"><span>Signed for ${d.year + 1}: <b>${esc(teamName(d.next.series, d.next.team))}</b></span><span>${statusLabel(d.next.status)}</span></div>` : '') +
     meter('Reputation', d.rep) +
     meter('Fan hype', d.hype) +
     meter('Team trust', d.rel) +
-    `<div class="ch-foot"><span>Earnings $${d.money.toFixed(1)}M</span><span>vs teammate ${d.h2h.race[0]}–${d.h2h.race[1]}</span></div>`;
-  const nc = el('div', 'ch-new', right, 'Start a new career');
+    `<div class="ch-foot"><span>Earnings $${d.money.toFixed(1)}M</span><span>${mate ? `vs ${esc(mate.last)} ${d.h2h.race[0]}–${d.h2h.race[1]}` : ''}</span></div>`;
+}
+
+function inboxView(p: HTMLElement, ctx: HubCtx) {
+  const d = ctx.dc.data!;
+  const list = el('div', 'ch-msgs full', p);
+  if (!d.inbox.length) el('div', 'ch-empty', list, 'Nothing yet.');
+  for (const m of d.inbox) list.appendChild(msgCard(m, ctx));
+  // (seen now: the badge counts what's new and what still needs an answer)
+  ctx.dc.markAllRead();
+}
+
+function standingsView(p: HTMLElement, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  const grid = el('div', 'ch-grid', p);
+  const drivers = el('div', 'ch-table scroll', grid);
+  el('div', 'hp-cap', drivers, `${SERIES_NAME[d.series]} drivers`);
+  const rows = dc.table();
+  const mate = dc.mate();
+  if (!rows.length) el('div', 'ch-empty', drivers, 'The table fills in after the first round.');
+  rows.forEach((r, i) => {
+    const tag = r.code === d.rival ? '<em class="tag riv">Rival</em>' : mate && r.code === mate.code ? '<em class="tag">Teammate</em>' : '';
+    el('div', 'ch-row' + (r.code === d.driver.code ? ' me' : ''), drivers, `<span class="p">${i + 1}</span><i style="background:${r.color}"></i><span class="n">${esc(r.name)}${tag}</span><span class="t">${esc(r.team)}</span><b>${r.points}</b>`);
+  });
+  const teams = el('div', 'ch-table', grid);
+  el('div', 'hp-cap', teams, 'Constructors');
+  const tt = dc.teamTable();
+  if (!tt.length) el('div', 'ch-empty', teams, 'After the first round.');
+  tt.forEach((t, i) => el('div', 'ch-row team' + (t.id === d.contract.team ? ' me' : ''), teams, `<span class="p">${i + 1}</span><i style="background:${t.color}"></i><span class="n">${esc(t.name)}</span><b>${t.points}</b>`));
+  // the form guide: this season's results
+  if (d.results.length) {
+    el('div', 'hp-cap', teams, 'Your season');
+    const f = el('div', 'ch-form', teams);
+    d.results.forEach((r) => {
+      const cd = CIRCUITS.find((c) => c.id === r.track);
+      el('div', 'fr' + (r.dnf ? ' dnf' : r.pos === 1 ? ' win' : r.pos <= 3 ? ' pod' : r.pos <= 10 ? ' pts' : ''), f, `<b>${pos(r.pos, r.dnf)}</b><span>${esc(cd?.short ?? r.track)}</span>`);
+    });
+  }
+}
+
+function driverView(p: HTMLElement, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  const grid = el('div', 'ch-grid', p);
+  const left = el('div', 'ch-col', grid);
+  const right = el('div', 'ch-col', grid);
+  // ---- the ratings
+  const rt = el('div', 'ch-ratings', left);
+  el('div', 'hp-cap', rt, 'Driver ratings');
+  el('div', 'ch-ovr', rt, `<b>${dc.ovr}</b><span>Overall rating<br><small>Teams weigh it, with your reputation, when they make offers</small></span>`);
+  const delta = d.last?.attrs ?? {};
+  for (const a of ATTRS) {
+    const v = d.attrs[a.id];
+    const dv = delta[a.id];
+    el('div', 'ch-attr', rt, `<div class="an"><span>${a.name}</span><small>${a.what}</small></div><div class="bar"><i style="width:${v}%"></i></div><b>${Math.floor(v)}</b><em class="${dv && dv > 0 ? 'up' : dv && dv < 0 ? 'down' : ''}">${dv ? (dv > 0 ? `+${dv}` : dv) : ''}</em>`);
+  }
+  // ---- the rival and the teammate
+  const riv = dc.rivalInfo();
+  const rc = el('div', 'ch-rival', right);
+  el('div', 'hp-cap', rc, 'Rival');
+  if (riv) {
+    const [a, b] = d.rivalH2H;
+    rc.insertAdjacentHTML(
+      'beforeend',
+      `<div class="ch-vs"><div class="side me"><span>${esc(d.driver.last.toUpperCase())}</span><b>${a}</b></div><div class="mid">Head to head<br><small>${d.year}</small></div><div class="side"><b>${b}</b><span>${esc(riv.driver.last.toUpperCase())}</span></div></div>` +
+        `<div class="ch-sub">${esc(riv.driver.first)} ${esc(riv.driver.last)} · ${esc(teamName(d.series, riv.team))} · Age ${riv.driver.age ?? '—'}. Lead the season series by four and a bigger rival is picked.</div>`,
+    );
+  } else el('div', 'ch-empty', rc, 'No rival this season.');
+  const mate = dc.mate();
+  const mc = el('div', 'ch-rival', right);
+  el('div', 'hp-cap', mc, 'Teammate');
+  if (mate) {
+    const [a, b] = d.h2h.race;
+    mc.insertAdjacentHTML('beforeend', `<div class="ch-vs"><div class="side me"><span>${esc(d.driver.last.toUpperCase())}</span><b>${a}</b></div><div class="mid">Races<br><small>${d.year}</small></div><div class="side"><b>${b}</b><span>${esc(mate.last.toUpperCase())}</span></div></div>`);
+  }
+  const st = el('div', 'ch-contract', right);
+  st.innerHTML = `<div class="hp-cap">Standing</div>` + meter('Reputation', d.rep) + meter('Fan hype', d.hype) + meter('Team trust', d.rel);
+}
+
+function historyView(p: HTMLElement, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  el(
+    'div',
+    'ch-totals',
+    p,
+    [
+      [d.starts, 'Starts'],
+      [d.wins, 'Wins'],
+      [d.podiums, 'Podiums'],
+      [d.points, 'Points'],
+      [d.titles, 'Titles'],
+      [`$${d.money.toFixed(1)}M`, 'Earnings'],
+    ]
+      .map(([v, l]) => `<div class="cs"><b>${v}</b><span>${l}</span></div>`)
+      .join(''),
+  );
+  const grid = el('div', 'ch-grid', p);
+  const seasons = el('div', 'ch-table', grid);
+  el('div', 'hp-cap', seasons, 'Seasons');
+  el('div', 'ch-hrow head', seasons, '<span>Year</span><span>Team</span><span>Pos</span><span>Pts</span><span>Wins</span><span>Pod</span>');
+  const cur = dc.position();
+  el('div', 'ch-hrow live', seasons, `<span>${d.year}</span><span class="n">${esc(teamName(d.series, d.contract.team))} <small>${d.series.toUpperCase()}</small></span><span>${cur.pos ? `P${cur.pos}` : '—'}</span><span>${cur.points}</span><span>${d.results.filter((r) => !r.dnf && r.pos === 1).length}</span><span>${d.results.filter((r) => !r.dnf && r.pos <= 3).length}</span>`);
+  for (const h of d.history.slice().reverse())
+    el('div', 'ch-hrow' + (h.champion ? ' champ' : ''), seasons, `<span>${h.year}</span><span class="n">${esc(h.teamName)} <small>${h.series.toUpperCase()}</small></span><span>P${h.position}</span><span>${h.points}</span><span>${h.wins}</span><span>${h.podiums}</span>`);
+  const tro = el('div', 'ch-table', grid);
+  el('div', 'hp-cap', tro, `Trophy cabinet <span>${d.trophies.length}</span>`);
+  const cab = el('div', 'ch-trophies', tro);
+  if (!d.trophies.length) el('div', 'ch-empty', cab, 'Points, podiums, wins and titles end up here.');
+  for (const t of d.trophies.slice().reverse()) el('div', 'tr' + (/champion|title/i.test(t.title) ? ' gold' : ''), cab, `<i></i><div><b>${esc(t.title)}</b><span>${esc(t.detail)}</span></div>`);
+  const nc = el('div', 'ch-new', tro, 'Start a new career');
   ctx.action(nc, () => ctx.onNewCareer());
 }
 
 function msgCard(m: Msg, ctx: HubCtx): HTMLElement {
   const card = el('div', `ch-msg k-${m.kind}` + (m.read ? '' : ' unread') + (m.choices && m.picked === undefined ? ' ask' : ''));
-  card.innerHTML = `<div class="mh"><span class="from">${esc(m.from)}</span><span class="r">R${m.round + 1}</span></div><div class="mt">${esc(m.title)}</div><div class="mb">${esc(m.body)}</div>`;
+  card.innerHTML = `<div class="mh"><span class="from">${esc(m.from)}</span><span class="r">${m.kind === 'market' || m.kind === 'season' ? 'Winter' : `R${m.round + 1}`}</span></div><div class="mt">${esc(m.title)}</div><div class="mb">${esc(m.body)}</div>`;
   if (m.choices) {
     if (m.picked === undefined) {
       const row = el('div', 'ch-choices', card);
-      m.choices.forEach((c, i) => {
-        const b = el('button', 'ch-choice' + (m.kind === 'offer' && i === 0 ? ' sign' : ''), row, esc(c.label));
-        ctx.action(b, () => {
-          ctx.dc.choose(m.id, i);
-          ctx.changed();
+      const btn = (label: string, cls: string, fn: () => void) => ctx.action(el('button', 'ch-choice' + cls, row, label.includes('<small>') ? label : esc(label)), fn);
+      if (m.kind === 'offer') {
+        btn('Sign', ' sign', () => (ctx.dc.choose(m.id, 0), ctx.changed()));
+        btn('Negotiate', '', () => openTalks(m, ctx));
+        btn('Decline', '', () => (ctx.dc.choose(m.id, 1), ctx.changed()));
+      } else
+        m.choices.forEach((c, i) => {
+          // (a paddock event shows what each choice does)
+          const fx = m.kind === 'event' ? effects(c) : '';
+          btn(c.label + (fx ? ` <small>${fx}</small>` : ''), '', () => (ctx.dc.choose(m.id, i), ctx.changed()));
         });
-      });
     } else {
       const c = m.choices[m.picked];
       el('div', 'ch-reply', card, `<b>${esc(c.label)}</b> ${esc(c.reply)}`);
@@ -143,17 +295,97 @@ function msgCard(m: Msg, ctx: HubCtx): HTMLElement {
   return card;
 }
 
+function effects(c: Choice): string {
+  const out: string[] = [];
+  const f = (n: number) => (n > 0 ? `+${n}` : `${n}`.replace('-', '−'));
+  if (c.rp) out.push(`${f(c.rp)} RP`);
+  if (c.hype) out.push(`Hype ${f(c.hype)}`);
+  if (c.rel) out.push(`Trust ${f(c.rel)}`);
+  if (c.rep) out.push(`Rep ${f(c.rep)}`);
+  if (c.attr) out.push(`${ATTRS.find((a) => a.id === c.attr![0])!.name} ${f(c.attr[1])}`);
+  return out.join(' · ');
+}
+
+/** contract talks: salary, length and status against the team's interest and patience */
+function openTalks(m: Msg, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  const o = m.offer!;
+  const ask: Ask = { salary: o.salary, years: o.until - d.year, status: o.status };
+  const back = el('div', 'ch-talks', document.body);
+  const close = () => {
+    back.classList.remove('on');
+    setTimeout(() => back.remove(), 250);
+    window.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') close();
+  };
+  window.addEventListener('keydown', onKey, true);
+  requestAnimationFrame(() => back.classList.add('on'));
+  const box = el('div', 'ch-talks-in glass', back);
+  box.style.setProperty('--team', teamColor(o.series, o.team));
+  let note = '';
+  const draw = () => {
+    const p = dc.acceptance(m.id, ask);
+    const lbl = p > 0.8 ? 'Very likely' : p > 0.55 ? 'Likely' : p > 0.3 ? 'Unlikely' : 'Very unlikely';
+    box.innerHTML =
+      `<div class="cap">Contract talks · ${SERIES_NAME[o.series]}</div><div class="big">${esc(o.teamName)}</div>` +
+      `<div class="sub">Their offer: ${statusLabel(o.status).toLowerCase()}, to ${o.until}, $${o.salary.toFixed(1)}M a season.</div>` +
+      `<div class="tk-rows"></div>` +
+      `<div class="tk-odds"><span>${lbl} to accept</span><div class="bar"><i style="width:${Math.round(p * 100)}%"></i></div></div>` +
+      `<div class="tk-pat">Patience ${'<i class="on"></i>'.repeat(o.patience)}${'<i></i>'.repeat(Math.max(0, 3 - o.patience))}</div>` +
+      (note ? `<div class="tk-note">${esc(note)}</div>` : '') +
+      `<div class="tk-act"></div>`;
+    const rows = box.querySelector('.tk-rows') as HTMLElement;
+    const stepper = (label: string, value: string, dec: () => void, inc: () => void) => {
+      const r = el('div', 'tk-row', rows, `<span>${label}</span>`);
+      const minus = el('button', 'tk-b', r, '−');
+      el('b', '', r, value);
+      const plus = el('button', 'tk-b', r, '+');
+      minus.addEventListener('click', () => (dec(), draw()));
+      plus.addEventListener('click', () => (inc(), draw()));
+    };
+    // (steps that suit the deal: a junior's wage moves in $0.1M, a star's in $0.5M)
+    const step = o.salary < 2 ? 0.1 : o.salary < 6 ? 0.2 : 0.5;
+    stepper('Salary', `$${ask.salary.toFixed(1)}M`, () => (ask.salary = Math.max(0.1, +(ask.salary - step).toFixed(1))), () => (ask.salary = +(ask.salary + step).toFixed(1)));
+    stepper('Length', `${ask.years} year${ask.years > 1 ? 's' : ''}`, () => (ask.years = Math.max(1, ask.years - 1)), () => (ask.years = Math.min(3, ask.years + 1)));
+    const sr = el('div', 'tk-row', rows, '<span>Status</span>');
+    const chips = el('div', 'tk-chips', sr);
+    for (const st of ['second', 'equal', 'lead'] as Status[]) {
+      const b = el('button', st === ask.status ? 'on' : '', chips, statusLabel(st));
+      b.addEventListener('click', () => ((ask.status = st), draw()));
+    }
+    const act = box.querySelector('.tk-act') as HTMLElement;
+    const prop = el('button', 'cta', act, 'Propose');
+    const cancel = el('button', 'cta ghost', act, 'Back');
+    cancel.addEventListener('click', close);
+    prop.addEventListener('click', () => {
+      const r = dc.propose(m.id, ask);
+      if (r === 'refused') {
+        note = 'They turned that down. Adjust the terms, or take the offer as it is.';
+        draw();
+        return;
+      }
+      close();
+      ctx.changed();
+    });
+  };
+  draw();
+}
+
 /** the season is over and the contract has run out: pick next year's team */
 function renderChoose(p: HTMLElement, ctx: HubCtx) {
   const d = ctx.dc.data!;
   const box = el('div', 'ch-choose', p);
-  el('div', 'ch-choose-h', box, `<div class="cap">${d.year + 1} season</div><div class="big">Choose your team</div><div class="sub">Your contract has ended. These teams want you.</div>`);
+  el('div', 'ch-choose-h', box, `<div class="cap">${d.year + 1} season</div><div class="big">Choose your team</div><div class="sub">Your contract has ended. These teams want you: sign, or negotiate the terms.</div>`);
   const offers = d.inbox.filter((m) => m.kind === 'offer' && m.picked === undefined && m.offer);
   const row = el('div', 'ch-offers', box);
   for (const m of offers) {
     const o = m.offer!;
     const col = teamColor(o.series, o.team);
-    const lvl = levelOf(o.series, o.team);
+    const lvl = levelOf(o.series, o.team, d.teamDev);
     const card = el('div', 'ch-offer', row);
     card.style.setProperty('--team', col);
     card.innerHTML =
@@ -165,7 +397,54 @@ function renderChoose(p: HTMLElement, ctx: HubCtx) {
       ctx.dc.choose(m.id, 0);
       ctx.changed();
     });
+    const neg = el('div', 'cta ghost', card, 'Negotiate');
+    ctx.action(neg, () => openTalks(m, ctx));
   }
+}
+
+/** what the last round did to the career: on the results screen */
+export function renderRoundSummary(box: HTMLElement, s: RoundSummary) {
+  const w = el('div', 'rc', box);
+  const objs = s.objectives.map((o) => `<div class="rc-o${o.done ? ' done' : ''}"><i></i><span>${esc(o.label)}</span><b>${o.done ? `+${o.rp}` : '—'}</b></div>`).join('');
+  el('div', 'rc-col', w, `<div class="cap">Team targets</div>${objs}`);
+  const up = s.ovr[1] - s.ovr[0];
+  const attrs = (Object.entries(s.attrs) as [AttrId, number][])
+    .filter(([, v]) => Math.abs(v) >= 0.3)
+    .map(([k, v]) => `<span class="${v > 0 ? 'up' : 'down'}">${ATTRS.find((a) => a.id === k)!.name} ${v > 0 ? '+' : ''}${v}</span>`)
+    .join('');
+  el(
+    'div',
+    'rc-col',
+    w,
+    `<div class="cap">Career</div>` +
+      `<div class="rc-stat"><span>Overall rating</span><b>${s.ovr[1]}${up ? ` <em class="${up > 0 ? 'up' : 'down'}">${up > 0 ? '▲' : '▼'}${Math.abs(up)}</em>` : ''}</b></div>` +
+      `<div class="rc-stat"><span>Research points</span><b>+${s.rp} RP</b></div>` +
+      `<div class="rc-stat"><span>Championship</span><b>P${s.champ.pos} · ${s.champ.points} pts</b></div>` +
+      (s.rival ? `<div class="rc-stat"><span>vs ${esc(s.rival.name)}</span><b>${s.rival.me}–${s.rival.them}</b></div>` : '') +
+      (attrs ? `<div class="rc-attrs">${attrs}</div>` : '') +
+      (s.trophies.length ? `<div class="rc-tro">${s.trophies.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''),
+  );
+}
+
+/** the car-development tab in a driver career: the team's research points into the car */
+export function renderRd(p: HTMLElement, ctx: { dc: DriverCareer; action(e: HTMLElement, fn: () => void, disabled?: boolean): void; changed(): void }) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  el('div', 'hp-cap', p, `Car development · ${esc(teamName(d.series, d.contract.team))}`);
+  el('div', 'devbar', p, `<div class="lbl"><span>Research points</span><b>${d.rp} RP</b></div>`);
+  for (const u of RD) {
+    const n = dc.rdLevel(u.id);
+    const max = n >= RD_MAX;
+    const cost = rdCost(n);
+    const can = dc.canUpgrade(u.id);
+    const row = el('div', 'uprow' + (max ? ' max' : !can ? ' poor' : ''), p);
+    const pips = Array.from({ length: RD_MAX }, (_, k) => `<i class="${k < n ? 'on' : ''}"></i>`).join('');
+    row.innerHTML = `<div class="ul"><div class="un">${u.name}</div><div class="us">${max ? 'Fully developed' : `Next: ${u.step}`}</div></div><div class="pips">${pips}</div><div class="ubtn">${max ? 'Max' : `${cost} RP`}</div>`;
+    ctx.action(row, () => {
+      if (dc.upgrade(u.id)) ctx.changed();
+    }, max || !can);
+  }
+  el('div', 'hp-note', p, `The team earns research points every round (more for hitting its targets and scoring). Parts make your car faster and your teammate's too; every other team is developing as well. Half the parts carry into next season with the same team; a new team starts from its own car.`);
 }
 
 // ------------------------------------------------------------------ the new-career wizard

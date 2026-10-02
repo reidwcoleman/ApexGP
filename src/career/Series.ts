@@ -11,9 +11,9 @@ import { TEAMS, type Driver, type DriverLook, type Team } from '../race/Teams.ts
 export type SeriesId = 'f1' | 'f2';
 
 type TeamData = Omit<Team, 'drivers'>;
-type DriverData = Driver;
+export type DriverData = Driver & { age?: number };
 
-const cloneDriver = (d: Driver): DriverData => ({ ...d, helmet: [d.helmet[0], d.helmet[1]], look: { ...d.look, face: d.look.face ? { ...d.look.face } : undefined } });
+const cloneDriver = (d: DriverData): DriverData => ({ ...d, helmet: [d.helmet[0], d.helmet[1]], look: { ...d.look, face: d.look.face ? { ...d.look.face } : undefined } });
 /** the F1 grid as shipped (deep copies) */
 const F1_GRID: { team: TeamData; drivers: [DriverData, DriverData] }[] = TEAMS.map((t) => {
   const { drivers, ...team } = t;
@@ -74,6 +74,66 @@ function f2Drivers(): DriverData[] {
   ];
 }
 
+/** ages at the start of a career (the grid as shipped; the junior field is 18–23) */
+const AGES: Record<string, number> = {
+  LCL: 28, HMF: 41, RSW: 28, ATN: 19, VHN: 28, HDR: 21, MRS: 26, PST: 25, AVR: 44, STD: 27, GSN: 30,
+  CPT: 22, ABY: 30, SNE: 31, OCP: 29, BRG: 21, LWT: 24, LDQ: 19, BTL: 21, HLB: 38, PRT: 36, BTA: 36,
+};
+export function ageOf(d: Driver): number {
+  const a = (d as DriverData).age;
+  if (typeof a === 'number') return a;
+  if (AGES[d.code]) return AGES[d.code];
+  let h = 0;
+  for (const ch of d.code) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return 18 + (Math.abs(h) % 6);
+}
+
+/**
+ * Who drives where, in both series: the career's living driver market. It starts as shipped and
+ * changes every winter (retirements, Formula 2 graduates, rookies, the player's own moves).
+ */
+export interface MarketTeam {
+  team: string;
+  drivers: [DriverData, DriverData];
+}
+export type Market = Record<SeriesId, MarketTeam[]>;
+export function defaultMarket(): Market {
+  const m = (src: typeof F1_GRID): MarketTeam[] =>
+    src.map((g) => ({ team: g.team.id, drivers: [{ ...cloneDriver(g.drivers[0]), age: ageOf(g.drivers[0]) }, { ...cloneDriver(g.drivers[1]), age: ageOf(g.drivers[1]) }] }));
+  return { f1: m(F1_GRID), f2: m(F2_TEAMS) };
+}
+export function f2Original(teamIndex: number) {
+  return F2_TEAMS[teamIndex];
+}
+
+// ---- rookies: new names for the seats that open up
+const FIRSTS = ['Luca', 'Mateo', 'Theo', 'Noah', 'Felix', 'Hugo', 'Elias', 'Kai', 'Rafael', 'Jonas', 'Leon', 'Oliver', 'Tomás', 'Nikolai', 'Ren', 'Yuki', 'Dante', 'Marco', 'Sebastián', 'Callum', 'Jamie', 'Emil', 'Viktor', 'Aaron', 'Isak', 'Pablo', 'Ethan', 'Lorenzo', 'Matías', 'Owen', 'Adrien', 'Kenji'];
+const LASTS = ['Ferraro', 'Okafor', 'Lindgren', 'Castell', 'Haverkamp', 'Moreau', 'Tanaka', 'Novak', 'Reyes', 'Brandt', 'Whitlock', 'Quintero', 'Sorensen', 'Vidal', 'Kowalski', 'Ashby', 'Marchetti', 'Delacroix', 'Ibarra', 'Faulkner', 'Yamada', 'Strand', 'Petrov', 'Calloway', 'Duval', 'Esposito', 'Halvorsen', 'Nakamura', 'Ortega', 'Pemberton', 'Rasmussen', 'Silvestri'];
+const HELMETS = ['#d6001c', '#ffffff', '#111214', '#ffd400', '#0a5cc2', '#00a3e0', '#ff6a00', '#00a651', '#6a1b9a', '#ff4fa3', '#c0c4c8', '#00d2be', '#b8975a', '#0b2a5b'];
+const SKIN_T = [0xf4dccb, 0xf2d2b8, 0xf0cbad, 0xe9c3a2, 0xd9a883, 0xc99772, 0x9c6b4a, 0x8a5a3c];
+const HAIR_T = [0x120e0c, 0x241a14, 0x3a2a1e, 0x5a3f28, 0x6b4c30, 0xa88452, 0xc9a86c, 0xb2552e];
+const STYLE_T: DriverLook['style'][] = ['short', 'short', 'buzz', 'wavy', 'curly', 'short'];
+
+/** a new driver for an open seat: a name, code and number nobody on either grid has */
+export function makeRookie(r: () => number, market: Market, skill: number, age: number): DriverData {
+  const all = [...market.f1, ...market.f2].flatMap((t) => t.drivers);
+  const codes = new Set(all.map((d) => d.code));
+  const nums = new Set(all.map((d) => d.number));
+  const pickOf = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
+  for (let tries = 0; ; tries++) {
+    const first = pickOf(FIRSTS), last = pickOf(LASTS);
+    const letters = last.normalize('NFD').replace(/[^A-Za-z]/g, '').toUpperCase();
+    const code = tries < 20 ? letters.slice(0, 3) : letters[0] + letters.slice(-2);
+    if (codes.has(code) && tries < 40) continue;
+    let number = 2 + Math.floor(r() * 97);
+    while (nums.has(number)) number = 2 + ((number + 7) % 97);
+    const h1 = pickOf(HELMETS);
+    let h2 = pickOf(HELMETS);
+    if (h2 === h1) h2 = h1 === '#ffffff' ? '#111214' : '#ffffff';
+    return { first, last, code, number, helmet: [h1, h2], look: look(pickOf(SKIN_T), pickOf(HAIR_T), pickOf(STYLE_T), r() < 0.25 ? { stubble: 0.2 + r() * 0.3 } : {}), skill, aggression: 0.4 + r() * 0.35, age };
+  }
+}
+
 /** the player's own driver, as the career stores it */
 export interface PlayerDriver {
   first: string;
@@ -93,18 +153,23 @@ export function currentSeries(): SeriesId {
 }
 
 /**
- * Rewrite the grid: `series`, with the player's driver (if any) in `teamIndex`/`seat`.
- * Returns true when anything visible (names, colours, helmets) changed.
+ * Rewrite the grid: `series`, with the player's driver (if any) in `teamIndex`/`seat`. `world`: the
+ * career's driver market (who sits where) and each team's development this season (pace on top of
+ * the car as shipped). Returns true when anything visible (names, colours, helmets) changed.
  */
-export function applyGrid(series: SeriesId, player: PlayerDriver | null, teamIndex: number, seat: 0 | 1): boolean {
+export function applyGrid(series: SeriesId, player: PlayerDriver | null, teamIndex: number, seat: 0 | 1, world: { market?: Market | null; dev?: Record<string, number> } = {}): boolean {
   const src = series === 'f2' ? F2_TEAMS : F1_GRID;
   const before = JSON.stringify(TEAMS.map((t) => [t.id, t.drivers[0].code, t.drivers[1].code, t.drivers[0].helmet, t.drivers[1].helmet]));
+  const mk = world.market?.[series];
   for (let i = 0; i < TEAMS.length; i++) {
     const s = src[i % src.length];
     Object.assign(TEAMS[i], s.team);
-    for (const k of [0, 1] as const) Object.assign(TEAMS[i].drivers[k], cloneDriver(s.drivers[k]));
+    // (the car as shipped, plus what the team has developed since; never past a dominant car)
+    TEAMS[i].pace = Math.min(1.012, s.team.pace + (world.dev?.[s.team.id] ?? 0));
+    const drv = mk?.find((m) => m.team === s.team.id)?.drivers ?? s.drivers;
+    for (const k of [0, 1] as const) Object.assign(TEAMS[i].drivers[k], cloneDriver(drv[k]));
   }
-  if (player?.from) {
+  if (player?.from && !mk) {
     // a current F1 driver who moved: whoever they replaced takes the seat they left
     for (let i = 0; series === 'f1' && i < TEAMS.length; i++)
       for (const k of [0, 1] as const)

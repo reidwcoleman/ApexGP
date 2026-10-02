@@ -322,6 +322,13 @@ export class Career {
     return s;
   }
 
+  /** the car with only the set-up applied (a driver career's car: the team's level and R&D come on top) */
+  setupSpec(): CarSpec {
+    const s: CarSpec = { ...F1_SPEC, gears: F1_SPEC.gears.slice() };
+    for (const d of SETUP) d.apply(s, this.data.setup[d.id] ?? d.def);
+    return s;
+  }
+
   setSetup(id: SetupId, v: number) {
     const d = SETUP.find((x) => x.id === id)!;
     this.data.setup[id] = Math.max(d.min, Math.min(d.max, Math.round(v)));

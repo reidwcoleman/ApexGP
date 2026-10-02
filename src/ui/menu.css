@@ -3424,3 +3424,648 @@
 .cw-driver b {
   font-weight: 700;
 }
+
+/* ---------- driver career v2: sections, targets, ratings, rival, history, talks ---------- */
+.hub-panel.ch:not(.start) {
+  grid-template-rows: auto auto 1fr;
+  gap: var(--s3);
+}
+.ch-stats .cs.ovr b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  height: 34px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.ch-tabs {
+  display: flex;
+  gap: var(--s1);
+  border-bottom: 1px solid var(--line);
+}
+.ch-tab {
+  position: relative;
+  padding: var(--s2) var(--s3) var(--s3);
+  font-size: var(--t-row);
+  font-weight: 600;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.ch-tab:hover,
+.ch-tab.sel {
+  color: var(--ink);
+}
+.ch-tab.on {
+  color: var(--ink);
+}
+.ch-tab.on::after {
+  content: '';
+  position: absolute;
+  left: var(--s3);
+  right: var(--s3);
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+.ch-tab em {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: var(--s1);
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font-style: normal;
+  font-size: 11px;
+}
+.ch-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--s1);
+}
+.ch-body > .ch-grid {
+  height: 100%;
+}
+.ch .hp-cap span {
+  float: right;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 600;
+  color: var(--ink3);
+}
+.ch-obj {
+  display: grid;
+  gap: var(--s1);
+}
+.ch-o,
+.rc-o {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-row);
+}
+.ch-o i,
+.rc-o i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--ink3);
+}
+.ch-o b,
+.rc-o b {
+  font-size: var(--t-cap);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink2);
+}
+.rc-o.done i {
+  background: var(--green);
+  box-shadow: none;
+}
+.rc-o.done b {
+  color: var(--green);
+}
+.rc-o:not(.done) span {
+  color: var(--ink2);
+}
+.ch-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+.ch-btns .cta {
+  min-height: 40px;
+}
+.ch-link {
+  justify-self: start;
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink2);
+  cursor: pointer;
+  padding: var(--s1) 0;
+}
+.ch-link:hover,
+.ch-link.sel {
+  color: var(--ink);
+}
+.ch-msgs.short {
+  max-height: none;
+  overflow: visible;
+}
+.ch-msgs.full {
+  max-height: none;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+.ch-msg.k-milestone {
+  box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--yellow);
+}
+.ch-msg.k-market .mt::before,
+.ch-msg.k-rival .mt::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--s2) 2px 0;
+  border-radius: 50%;
+  background: var(--ink3);
+}
+.ch-msg.k-rival .mt::before {
+  background: var(--accent);
+}
+.ch-table.scroll {
+  align-content: start;
+  overflow-y: auto;
+  min-height: 0;
+}
+.ch-row.team {
+  grid-template-columns: 22px 4px 1fr 40px;
+}
+.ch-row .tag {
+  margin-left: var(--s2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--well);
+  color: var(--ink2);
+}
+.ch-row .tag.riv {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.ch-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+}
+.ch-form .fr {
+  display: grid;
+  justify-items: center;
+  min-width: 52px;
+  padding: var(--s1) var(--s2);
+  border-radius: var(--r-pill);
+  background: var(--well);
+}
+.ch-form .fr b {
+  font-size: var(--t-row);
+  font-variant-numeric: tabular-nums;
+}
+.ch-form .fr span {
+  font-size: 11px;
+  color: var(--ink3);
+}
+.ch-form .fr.win b { color: var(--yellow); }
+.ch-form .fr.pod b { color: var(--ink); }
+.ch-form .fr.pts b { color: var(--ink2); }
+.ch-form .fr.dnf b { color: var(--accent); }
+.ch-form .fr:not(.win):not(.pod):not(.pts):not(.dnf) b { color: var(--ink3); }
+.ch-ratings {
+  display: grid;
+  gap: var(--s2);
+}
+.ch-ovr {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) 0;
+}
+.ch-ovr b {
+  font-size: var(--t-hero);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.ch-ovr span {
+  font-size: var(--t-row);
+  font-weight: 600;
+}
+.ch-ovr small {
+  font-size: var(--t-cap);
+  font-weight: 400;
+  color: var(--ink3);
+}
+.ch-attr {
+  display: grid;
+  grid-template-columns: 170px 1fr 30px 40px;
+  align-items: center;
+  gap: var(--s3);
+}
+.ch-attr .an {
+  display: grid;
+}
+.ch-attr .an span {
+  font-size: var(--t-row);
+  font-weight: 600;
+}
+.ch-attr .an small {
+  font-size: var(--t-cap);
+  color: var(--ink3);
+}
+.ch-attr .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--well);
+  overflow: hidden;
+}
+.ch-attr .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.35), var(--ink));
+}
+.ch-attr b {
+  text-align: right;
+  font-size: var(--t-row);
+  font-variant-numeric: tabular-nums;
+}
+.ch-attr em,
+.rc-stat em {
+  font-style: normal;
+  font-size: var(--t-cap);
+  font-weight: 700;
+}
+.up { color: var(--green); }
+.down { color: var(--accent); }
+.ch-rival {
+  display: grid;
+  gap: var(--s2);
+}
+.ch-vs {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-panel);
+  background: var(--well);
+}
+.ch-vs .side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s3);
+  font-size: var(--t-row);
+  font-weight: 600;
+  color: var(--ink2);
+}
+.ch-vs .side + .mid + .side {
+  justify-content: flex-start;
+}
+.ch-vs .side b {
+  font-size: var(--t-time);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.ch-vs .side.me b {
+  color: var(--accent);
+}
+.ch-vs .mid {
+  text-align: center;
+  font-size: var(--t-cap);
+  color: var(--ink3);
+  line-height: 1.3;
+}
+.ch-sub {
+  font-size: var(--t-cap);
+  color: var(--ink3);
+  line-height: 1.4;
+}
+.ch-totals {
+  display: flex;
+  gap: var(--s6);
+  padding: var(--s2) 0 var(--s4);
+}
+.ch-totals .cs {
+  display: grid;
+  gap: 2px;
+}
+.ch-totals b {
+  font-size: var(--t-time);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ch-totals span {
+  font-size: var(--t-cap);
+  color: var(--ink3);
+}
+.ch-hrow {
+  display: grid;
+  grid-template-columns: 48px 1fr 44px 44px 40px 40px;
+  align-items: center;
+  gap: var(--s2);
+  height: 30px;
+  padding: 0 var(--s2);
+  border-radius: var(--r-pill);
+  font-size: var(--t-row);
+  font-variant-numeric: tabular-nums;
+}
+.ch-hrow > span:not(.n) {
+  text-align: right;
+}
+.ch-hrow > span:first-child {
+  text-align: left;
+  color: var(--ink2);
+}
+.ch-hrow .n {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-hrow small {
+  font-size: 11px;
+  color: var(--ink3);
+}
+.ch-hrow.head {
+  height: 24px;
+  font-size: var(--t-cap);
+  color: var(--ink3);
+}
+.ch-hrow.live {
+  background: var(--well);
+}
+.ch-hrow.champ {
+  box-shadow: inset 2px 0 0 var(--yellow);
+}
+.ch-trophies {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+.ch-trophies .tr {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-pill);
+  background: var(--well);
+}
+.ch-trophies .tr i {
+  width: 14px;
+  height: 18px;
+  /* a cup: bowl, stem and base in one mask */
+  background: var(--ink3);
+  clip-path: polygon(0 0, 100% 0, 92% 40%, 62% 58%, 62% 78%, 86% 82%, 86% 100%, 14% 100%, 14% 82%, 38% 78%, 38% 58%, 8% 40%);
+}
+.ch-trophies .tr.gold i {
+  background: var(--yellow);
+}
+.ch-trophies .tr b {
+  display: block;
+  font-size: var(--t-row);
+}
+.ch-trophies .tr span {
+  font-size: var(--t-cap);
+  color: var(--ink3);
+}
+.ch-meter em {
+  grid-column: 1 / -1;
+  font-style: normal;
+}
+.ch-offer .cta + .cta {
+  margin-top: var(--s2);
+}
+/* contract talks */
+.ch-talks {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 6, 9, 0.6);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.22s var(--ease-out);
+  zoom: var(--ui);
+}
+.ch-talks.on {
+  opacity: 1;
+}
+.ch-talks-in {
+  width: 480px;
+  padding: var(--s5);
+  border-radius: var(--r-panel);
+  display: grid;
+  gap: var(--s3);
+  box-shadow: inset 0 3px 0 var(--team), 0 24px 60px rgba(0, 0, 0, 0.5);
+  font-family: var(--font);
+  color: var(--ink);
+}
+.ch-talks-in .cap {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.ch-talks-in .big {
+  font-size: var(--t-time);
+  font-weight: 700;
+}
+.ch-talks-in .sub,
+.tk-note,
+.tk-pat {
+  font-size: var(--t-cap);
+  color: var(--ink2);
+}
+.tk-note {
+  color: var(--yellow);
+}
+.tk-rows {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+}
+.tk-row {
+  display: grid;
+  grid-template-columns: 90px 36px 1fr 36px;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--t-row);
+}
+.tk-row > span {
+  color: var(--ink2);
+}
+.tk-row > b {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.tk-b {
+  height: 32px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--well);
+  color: var(--ink);
+  font: 700 var(--t-row) var(--font);
+  cursor: pointer;
+}
+.tk-b:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.tk-chips {
+  grid-column: 2 / -1;
+  display: flex;
+  gap: var(--s1);
+}
+.tk-chips button {
+  flex: 1;
+  height: 32px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--well);
+  color: var(--ink2);
+  font: 600 var(--t-cap) var(--font);
+  cursor: pointer;
+}
+.tk-chips button.on {
+  background: var(--ink);
+  color: var(--ink-dark);
+  border-color: var(--ink);
+}
+.tk-odds {
+  display: grid;
+  gap: var(--s1);
+  font-size: var(--t-cap);
+  font-weight: 600;
+}
+.tk-odds .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--well);
+  overflow: hidden;
+}
+.tk-odds .bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s var(--ease-out);
+}
+.tk-pat {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.tk-pat i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.tk-pat i.on {
+  background: var(--ink2);
+  box-shadow: none;
+}
+.tk-pat i:first-child {
+  margin-left: var(--s2);
+}
+.tk-act {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.tk-act .cta {
+  border: 0;
+  font-family: var(--font);
+  cursor: pointer;
+}
+/* results: what the round did to the career */
+.rc {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s5);
+  margin-top: var(--s4);
+  padding: var(--s4);
+  border-radius: 10px;
+  background: var(--well);
+}
+.rc-col {
+  display: grid;
+  align-content: start;
+  gap: var(--s1);
+}
+.rc .cap {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: var(--s1);
+}
+.rc-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-row);
+  font-variant-numeric: tabular-nums;
+}
+.rc-stat span {
+  color: var(--ink2);
+}
+.rc-attrs,
+.rc-tro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s3);
+  margin-top: var(--s1);
+  font-size: var(--t-cap);
+  font-weight: 700;
+}
+.rc-tro span {
+  color: var(--yellow);
+}
+
+.ch-body .ch-col {
+  overflow-y: auto;
+  padding-right: var(--s1);
+}
+.ch-table,
+.ch-trophies,
+.ch-rival,
+.ch-ratings {
+  align-content: start;
+}
+.ch-body > .ch-totals + .ch-grid {
+  height: auto;
+}
+.ch-attr {
+  grid-template-columns: 250px 1fr 30px 40px;
+}
+.tk-act .cta.ghost {
+  background: var(--well);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.ch-choose .ch-offer .cta.ghost {
+  margin-top: var(--s2);
+}
+
+.setup-obj {
+  display: grid;
+  gap: var(--s1);
+  margin-bottom: var(--s2);
+}
+.setup-obj .ch-o i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--ink3);
+}
+
+.ch-choice small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink3);
+}
+.ch-msg.k-event {
+  box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--cold);
+}

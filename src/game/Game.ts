@@ -16,10 +16,10 @@ const EVENT_GP = () => EVENT.gp;
 import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment, type Scenery } from '../world/Environment.ts';
 import { sceneryBuilder } from '../world/env/scenery.ts';
-import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract } from '../career/DriverCareer.ts';
+import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
 import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
-import { TEAMS, allEntries, uiColor, type Entry } from '../race/Teams.ts';
+import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
@@ -477,12 +477,27 @@ export class Game {
     let changed: boolean;
     if (d) {
       const ti = careerTeamIndex(d.series, d.contract.team);
-      changed = applyGrid(d.series, d.driver, ti, d.contract.seat);
+      changed = applyGrid(d.series, d.driver, ti, d.contract.seat, { market: d.market, dev: this.dc.devMap() });
       this.menu.setup.team = ti;
       this.menu.setup.seat = d.contract.seat;
     } else changed = applyGrid('f1', null, 0, 0);
     if (changed && this.rigs.size) this.refreshPlayerRig();
     return changed;
+  }
+  /**
+   * The player's car. A driver career's round: the set-up on the car the team built — a backmarker's
+   * is down on power and downforce against a front-runner's — plus the parts the R&D has bought.
+   * Otherwise the garage's own car (bought upgrades + set-up).
+   */
+  private playerSpec(team: Team): CarSpec {
+    if (!(this.careerRace && this.dc.active)) return this.career.spec();
+    const s = this.career.setupSpec();
+    const f = this.dc.carFactors(team.pace);
+    s.power *= f.power;
+    s.clA *= f.clA;
+    s.mu *= f.mu;
+    s.ersBoost *= f.ers;
+    return s;
   }
   /** a new driver career from the menu's wizard: its grid, then to its first round */
   private startDriverCareer(driver: PlayerDriver, contract: Contract) {
@@ -920,9 +935,9 @@ export class Game {
       gridOrder: this.gridOrder ?? undefined,
       weather: this.plan,
       damage: setup.damage,
-      playerSpec: seriesSpec(this.career.spec()),
-      // the rivals develop their cars through the season too
-      aiSpec: seriesSpec(this.career.rivalSpec()),
+      playerSpec: seriesSpec(this.playerSpec(team)),
+      // the rivals develop their cars through the season too (in a driver career: through their pace)
+      aiSpec: seriesSpec(this.careerRace && this.dc.active ? { ...F1_SPEC, gears: F1_SPEC.gears.slice() } : this.career.rivalSpec()),
     });
     this.refreshPlayerRig();
     this.particles.setLight(smokeLight(this.race.weatherState));
@@ -1384,11 +1399,12 @@ export class Game {
     const again = () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.sessionSetup(this.menu.setup)));
     // a career round: straight on to the next one (new circuit, its own weather and light)
     let next: { label: string; go: () => void } | undefined;
+    let careerSum: RoundSummary | null = null;
     if (this.careerRace && this.dc.active && !this.spectating && !this.race.isTimeTrial) {
       // the driver career: the round goes into the championship (once), then on to the next on its calendar
       if (reward) {
         const player = this.race.player.entry;
-        this.dc.recordRound(this.track.def.id, rows.map((r) => ({
+        careerSum = this.dc.recordRound(this.track.def.id, rows.map((r) => ({
           code: r.entry.driver.code,
           name: `${r.entry.driver.first} ${r.entry.driver.last}`,
           team: r.entry.team.name,
@@ -1409,7 +1425,7 @@ export class Game {
       const nc = CIRCUITS[i + 1];
       if (nc && this.career.isUnlocked(nc.id)) next = { label: `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
     }
-    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `Career round · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), reward, next);
+    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `Career round · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
   }
 
   // ------------------------------------------------------------------ frame

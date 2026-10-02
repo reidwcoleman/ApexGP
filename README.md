@@ -32,12 +32,26 @@ npm run check    # tsc --noEmit
   the Senna S, São Paulo all around). Switching circuit rebuilds the world in-page — no reload.
 - **Driver career** — the game's main mode, like the F1 games' My Driver: create a driver (name, nationality,
   number, helmet colours, skin and hair) and start in Formula 2 with one of three junior teams, or take over a
-  current F1 driver's seat. Every round feeds a season table; the inbox brings team-principal calls, press
-  questions and contract offers (lead / equal / second driver, length, salary) whose answers move reputation,
-  fan hype and team trust; offers open late in the season and at its end, and an F2 title brings F1 offers.
-  The grid is swapped in place (`src/career/Series.ts` `applyGrid` rewrites the shared Team/Driver objects, so
-  every entry and car rig follows); state in `localStorage` `apexgp.drivercareer` (`src/career/DriverCareer.ts`,
-  hub and wizard in `src/ui/CareerHub.ts`).
+  current F1 driver's seat. The hub (Overview · Inbox · Standings · Driver · History) runs the life around the races:
+  - **Ratings** — pace, racecraft, awareness, experience and focus (an overall from them) grow with what you do,
+    harder the higher they get; teams weigh them with your reputation when they make offers.
+  - **Team targets** every weekend (a finish for the car's level, beat the teammate, beat the rival, a home race…),
+    paid in research points, team trust and ratings; shown on the race screen and scored on the results screen.
+  - **Rival** — a driver a step ahead, head to head over the season; lead by four and a bigger one is picked.
+  - **R&D** — the Car development tab spends the team's research points on aero, power unit, chassis and ERS. Your
+    car is as fast as the team's car really is (a backmarker is down on power and downforce) plus the parts; the
+    teammate gets them too, and every other team develops through the season on its own.
+  - **Contracts** — offers in the last third of a season: sign, decline, or negotiate salary, length and status
+    against the team's interest and patience.
+  - **The driver market** — every winter drivers age, retire or get dropped, F2's best graduate into the open F1
+    seats and rookies fill the rest; a silly-season message lists the moves.
+  - **The paddock** — principal verdicts, press conferences, race headlines, events between rounds (sponsor days,
+    simulator work, upgrade direction…) with visible trade-offs, milestones, a trophy cabinet and season history.
+  The grid is swapped in place (`src/career/Series.ts` `applyGrid` writes the market and each team's development
+  into the shared Team/Driver objects, so every entry and rig follows); state in `localStorage` `apexgp.drivercareer`
+  (`src/career/DriverCareer.ts`, v1 saves migrate), hub, talks and wizard in `src/ui/CareerHub.ts`.
+  `node tools/dcsim.mjs [rounds] [pos] [out] [--existing]` simulates seasons and shoots every screen;
+  `node tools/dcflow.mjs` runs the real start → race → results → next round flow.
 - **Career on a world map** — the 14 rounds as pins on a map of the season: a top-5 finish unlocks
   the next round, and your best result earns a medal (gold = win, silver = podium, bronze = top 5).
   Career races are always 10 laps and take their weather and time of day from the circuit's climate
