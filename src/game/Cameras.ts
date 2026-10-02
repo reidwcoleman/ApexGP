@@ -30,12 +30,10 @@ export interface CamPrefs {
   apex: number;
   /** onboards: how level the horizon is held, 0 (rolls with the car) … 1 (dead level) */
   horizon: number;
-  /** rear-view mirror in the onboard cameras */
-  mirror: boolean;
   /** field of view widens with speed */
   dynFov: boolean;
 }
-export const DEFAULT_CAM: CamPrefs = { fov: 0, dist: 0, height: 0, shake: 1, apex: 1, horizon: 0.7, mirror: true, dynFov: true };
+export const DEFAULT_CAM: CamPrefs = { fov: 0, dist: 0, height: 0, shake: 1, apex: 1, horizon: 0.7, dynFov: true };
 
 export type CameraGroup = 'onboard' | 'chase' | 'trackside' | 'aerial';
 
@@ -844,7 +842,7 @@ export class Cameras {
       lift = 0;
     } else {
       f.set(0, 0, 1).applyQuaternion(this.q);
-      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -1.5 : this.mode === 'helmet' ? -0.75 : -1.0;
+      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -1.5 : this.mode === 'helmet' ? -1.6 : -1.0;
     }
     if (this.lookBack) f.negate();
     // look into the corner in the cockpit: eased, so a keyboard's full-lock taps don't jerk the view

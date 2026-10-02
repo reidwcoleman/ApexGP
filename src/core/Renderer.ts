@@ -141,10 +141,15 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   float z0 = -getViewZ(depth);
   vec3 acc = inputColor.rgb;
   float w = 1.0;
-  // 8 taps, jittered per pixel so the steps read as grain rather than as ghost copies
+  // taps by streak length (4 … 16, a tap every ~3 px), jittered per pixel so the steps read as
+  // grain rather than as ghost copies
+  float px = length(v / texelSize);
+  int n = int(clamp(px / 3.0, 4.0, 16.0));
+  float fn = float(n);
   float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
-  for (int i = 0; i < 8; i++) {
-    float t = (float(i) + 0.5 + jit) / 8.0 - 0.5;
+  for (int i = 0; i < 16; i++) {
+    if (i >= n) break;
+    float t = (float(i) + 0.5 + jit) / fn - 0.5;
     vec2 su = uv + v * t;
     float zs = -getViewZ(readDepth(su));
     // a sample much nearer the lens than this pixel is foreground: it does not smear back over it
@@ -171,7 +176,7 @@ class MotionBlurEffect extends Effect {
         ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
         ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
         ['shutter', new THREE.Uniform(0)],
-        ['maxLen', new THREE.Uniform(0.05)],
+        ['maxLen', new THREE.Uniform(0.09)],
       ]),
     });
   }
@@ -207,7 +212,7 @@ float ownDist(vec2 uv, float depth) {
   return all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)) ? length(vp) : -1.0;
 }
 // blur radius (uv, vertical) of a surface this far from a lens focused far away
-float coc(float d) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.35); }
+float coc(float d) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6); }
 
 vec3 shadeOwn(vec3 c, float d) {
   float k = shade * (1.0 - smoothstep(1.6, 3.6, d));
@@ -222,12 +227,15 @@ vec3 shadeOwn(vec3 c, float d) {
 }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  // an onboard camera's small wide lens darkens hard toward the corners
+  vec2 vc = (uv - 0.5) * vec2(aspect, 1.0);
+  float vig = 1.0 - 0.5 * smoothstep(0.3, 1.0, length(vc));
   float d0 = ownDist(uv, depth);
   // the view outside: just the exposure (its edge against the cockpit is softened from the inside)
-  if (d0 < 0.0) { outputColor = vec4(inputColor.rgb * outside, inputColor.a); return; }
+  if (d0 < 0.0) { outputColor = vec4(inputColor.rgb * outside * vig, inputColor.a); return; }
   float r0 = coc(d0);
   vec3 c0 = shadeOwn(inputColor.rgb, d0);
-  if (r0 * resolution.y < 0.75) { outputColor = vec4(c0, inputColor.a); return; }
+  if (r0 * resolution.y < 0.75) { outputColor = vec4(c0 * vig, inputColor.a); return; }
   // defocus disc: the cockpit's own soft neighbours, and the view behind where the disc crosses an
   // edge. The disc turns per pixel (interleaved gradient noise) and bright taps are weighted down
   // (1 / (1 + luma)) so a small LED spreads into a soft disc instead of a dotted pattern.
@@ -245,7 +253,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     acc += c * wi;
     w += wi;
   }
-  outputColor = vec4(acc / w, inputColor.a);
+  outputColor = vec4(acc / w * vig, inputColor.a);
 }
 `;
 
@@ -260,7 +268,7 @@ class OnboardEffect extends Effect {
         ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
         ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
         ['shade', new THREE.Uniform(1)],
-        ['defocus', new THREE.Uniform(0.006)],
+        ['defocus', new THREE.Uniform(0.0105)],
         ['outside', new THREE.Uniform(1.12)],
       ]),
     });
@@ -377,21 +385,22 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   // screen radius (uv) of the world radius at this depth, kept to a sensible footprint
   float rS = min(aoRadius / (dist * aoTanHalf.y * 2.0), 0.08);
   if (rS < texelSize.y * 1.5) return;
-  float phi = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) * 6.2831853;
+  // one fixed spiral for every pixel (a per-pixel rotation with no blur pass after it left a fine
+  // dot pattern over every curved panel): smooth, and 14 taps keep it from banding
   float occ = 0.0;
-  for (int i = 0; i < 10; i++) {
-    float t = (float(i) + 0.5) / 10.0;
-    float a = phi + float(i) * 2.39996;
+  for (int i = 0; i < 14; i++) {
+    float t = (float(i) + 0.5) / 14.0;
+    float a = float(i) * 2.39996;
     vec2 o = vec2(cos(a), sin(a) * aspect) * rS * sqrt(t);
     vec2 q = uv + o;
     float dq = readDepth(q);
     vec3 S = aoViewPos(q, dq);
     vec3 v = S - P;
     float l = length(v);
-    float h = max(0.0, dot(N, v) / max(l, 1e-4) - 0.12);
+    float h = max(0.0, dot(N, v) / max(l, 1e-4) - 0.2);
     occ += h * (1.0 - smoothstep(aoRadius * 0.6, aoRadius * 1.4, l));
   }
-  occ = clamp(occ / 10.0 * 1.6, 0.0, 1.0);
+  occ = clamp(occ / 14.0 * 1.9, 0.0, 1.0);
   // fade out with distance (the far field is fog and aerial haze)
   occ *= 1.0 - smoothstep(90.0, 180.0, dist);
   float lum = dot(inputColor.rgb, vec3(0.2126, 0.7152, 0.0722));

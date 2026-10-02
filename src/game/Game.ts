@@ -61,7 +61,6 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
-import { RearMirror } from './RearMirror.ts';
 import { setCarAORenderer } from '../car/carAO.ts';
 import { preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
@@ -77,7 +76,7 @@ const GARAGE_MIRROR_LAYER = 4;
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 /** Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°) */
-const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.3, cinematic: 0.6 };
+const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.4, cinematic: 1.0 };
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
@@ -95,8 +94,6 @@ function smokeLight(w: WeatherState): THREE.Color {
 
 type CompoundRig = CarRig & { setCompound?: (c: string) => void };
 
-/** the onboard cameras that show the rear-view mirror */
-const MIRROR_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true };
 /** cameras that sit right on the bodywork: they get the tight, fine-texel shadow cascade */
 const EYE_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true, wheel: true };
 
@@ -576,7 +573,6 @@ export class Game {
     this.env.adoptScenery(scenery);
     this.garageLights.visible = lit;
     if (this.leanOn) this.env.setLean(true);
-    this.mirrorSkipFor = null;
     busy += performance.now() - ts;
     this.worldProgress = 0.82;
     await frame();
@@ -1669,28 +1665,6 @@ export class Game {
     this.updateAudio(dt);
     this.updateMotionBlur();
     this.gfx.render(dt);
-    // the rear-view mirror over the onboard cameras
-    const mirrorOn = (this.state === 'race' || this.state === 'intro') && MIRROR_CAMS[this.cams.mode] && this.cams.prefs.mirror;
-    if (mirrorOn) {
-      const rig = this.rigs.get(race.player.entry);
-      if (rig) {
-        if (!this.mirror) {
-          this.mirror = new RearMirror();
-          this.mirrorSkipFor = null;
-        }
-        if (this.mirrorSkipFor !== this.env) {
-          // (what the little mirror doesn't need: blades of grass, walkers, the far towns and pylons)
-          this.mirrorSkipFor = this.env;
-          const skip: THREE.Object3D[] = [];
-          this.env.group.traverse((o) => {
-            if (o.name === 'grass_blades' || o.name === 'Villages' || o.name === 'Skyline' || o.name === 'horizon' || o.name === 'concourse_people') skip.push(o);
-          });
-          this.mirror.skip = skip;
-        }
-        const gu = this.gfx.grade.uniforms;
-        this.mirror.draw(this.gfx.renderer, this.scene, rig.root, (gu.get('exposure')!.value as number) * (gu.get('lookExposure')!.value as number));
-      }
-    } else this.mirror?.reset();
     // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)
     if (this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
     this.adaptQuality(dt);
@@ -2364,8 +2338,6 @@ export class Game {
   }
 
   private dashT = 0;
-  private mirror: RearMirror | null = null;
-  private mirrorSkipFor: unknown = null;
   private readonly visor: HTMLDivElement;
   private visorOn = false;
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {

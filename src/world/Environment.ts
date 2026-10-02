@@ -19,7 +19,7 @@ import { weatherUniforms } from './weatherUniforms.ts';
 
 
 /** the photographic layer over every weather/time look (see the eye adaptation in Environment.update) */
-const FILM = { exposure: 1.1, nightExposure: 0.95, saturation: 0.87, contrast: 0.99, tint: [1.02, 1.0, 0.965] as const };
+const FILM = { exposure: 0.9, nightExposure: 0.9, saturation: 0.86, contrast: 1.04, tint: [1.13, 1.02, 0.7] as const, shadowTint: [1.12, 1.0, 0.76] as const };
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -418,9 +418,9 @@ export function createEnvironment(
     const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE + FLOOD_E * (P.flood ?? 0) * floodScale(nightK) * 1.4;
     const maxAdapt = THREE.MathUtils.lerp(4.5, NIGHT_MAX_ADAPT, THREE.MathUtils.smoothstep(nightK, 0.5, 1));
     const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, maxAdapt);
-    // the photographic layer (camera footage, not a game render): a stop-fraction brighter by day so
-    // skies and sunlit surfaces roll into the tone curve's shoulder, colour pulled back a little, a
-    // faint warm cast; nights a touch darker so the headlights and the lights round the track carry them
+    // the photographic layer (camera footage, not a game render): a little under-exposed, colour pulled
+    // back and a warm yellow cast like sodium-tinted broadcast footage; nights a touch darker so the
+    // headlights and the lights round the track carry them
     const filmDay = 1 - THREE.MathUtils.smoothstep(nightK, 0.5, 1);
     gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(FILM.nightExposure, FILM.exposure, filmDay);
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
@@ -428,7 +428,7 @@ export function createEnvironment(
     gradeLook.saturation = L.saturation * FILM.saturation;
     gradeLook.contrast = L.contrast * FILM.contrast;
     gradeLook.tint = [L.tint[0] * FILM.tint[0], L.tint[1] * FILM.tint[1], L.tint[2] * FILM.tint[2]];
-    gradeLook.shadowTint = L.shadowTint;
+    gradeLook.shadowTint = [L.shadowTint[0] * FILM.shadowTint[0], L.shadowTint[1] * FILM.shadowTint[1], L.shadowTint[2] * FILM.shadowTint[2]];
     lightInfo.eGround = +eGround.toFixed(3);
     if (worldE > 0) worldUniforms.uWorldScale.value = eGround / worldE;
     lightInfo.adapt = +adapt.toFixed(3);

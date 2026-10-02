@@ -1231,7 +1231,6 @@ export class Menu {
     this.opt(p, 'Camera shake', () => (c.shake === 0 ? 'Off' : pct(c.shake)), (d) => (c.shake = step(c.shake, d, 0.25, 0, 1.5)), true);
     this.opt(p, 'Look into corners', () => (c.apex === 0 ? 'Off' : pct(c.apex)), (d) => (c.apex = step(c.apex, d, 0.25, 0, 1.5)), true);
     this.opt(p, 'Horizon lock (onboard)', () => pct(c.horizon), (d) => (c.horizon = step(c.horizon, d, 0.1, 0, 1)), true);
-    this.opt(p, 'Rear-view mirror', () => (c.mirror ? 'On (onboard cameras)' : 'Off'), () => (c.mirror = !c.mirror), true);
     const reset = el('div', 'opt', p);
     el('span', 'k', reset, 'Reset to defaults');
     el('span', 'v', reset, '<span class="chev">›</span>');

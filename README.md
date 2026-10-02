@@ -120,19 +120,19 @@ npm run check    # tsc --noEmit
 - **Camera footage look** — per-pixel camera motion blur like a film shutter (depth reprojection: the grass,
   kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a panning TV
   camera keeps its car crisp; Settings → Motion blur Off / Subtle / Cinematic), a photographic grade layer
-  over every weather and time of day (`FILM` in Environment.ts: brighter days rolling into the tone curve's
-  shoulder, colour pulled back, darker nights), and a low sun's glow that builds over kilometres of air rather
+  over every weather and time of day (`FILM` in Environment.ts: a little under-exposed, colour pulled back, a warm
+  yellow cast in highlights and shadows, darker nights), and a low sun's glow that builds over kilometres of air rather
   than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
-  depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), the rear-view mirror is
-  soft and dim like glass in a shaded cockpit, and night races are lit by a faint moon only, so the headlights,
+  depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
+  overlay (real onboard footage has none), and night races are lit by a faint moon only, so the headlights,
   rain lights and the lights round the track carry the picture. `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
 - **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
-  nose and more; a live steering-wheel screen and shift lights in the onboards, a rear-view mirror,
+  nose and more; a live steering-wheel screen and shift lights in the onboards,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
-  lock, mirror). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
+  lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
   in the middle, front tyres at the sides, a full 2026 wheel with dome buttons, rotaries and paddles
   at the bottom); eye-level cams get a tight fine-texel shadow cascade, and on High/Ultra the frame is
   upscaled to native resolution (bicubic + contrast-adaptive sharpening). The front and rear
