@@ -122,7 +122,11 @@ npm run check    # tsc --noEmit
   camera keeps its car crisp; Settings → Motion blur Off / Subtle / Cinematic), a photographic grade layer
   over every weather and time of day (`FILM` in Environment.ts: brighter days rolling into the tone curve's
   shoulder, colour pulled back, darker nights), and a low sun's glow that builds over kilometres of air rather
-  than veiling a car down a long lens. `node tools/_lookshots.mjs <out>` shoots the reference scenes;
+  than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
+  the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
+  depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), the rear-view mirror is
+  soft and dim like glass in a shaded cockpit, and night races are lit by a faint moon only, so the headlights,
+  rain lights and the lights round the track carry the picture. `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
 - **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),

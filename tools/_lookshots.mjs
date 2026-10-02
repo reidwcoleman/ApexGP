@@ -8,12 +8,15 @@ const SCENES = {
   mist_halo: { track: 'spielberg', weather: 'mist', time: 'dusk', cam: 'cockpit' },
   day_halo: { track: 'monza', weather: 'clear', time: 'afternoon', cam: 'cockpit' },
   day_chase: { track: 'spa', weather: 'clear', time: 'golden', cam: 'chase' },
+  day_helmet: { track: 'suzuka', weather: 'cloudy', time: 'morning', cam: 'helmet' },
+  day_tv: { track: 'monza', weather: 'clear', time: 'afternoon', cam: 'tv' },
+  golden_longlens: { track: 'spa', weather: 'clear', time: 'golden', cam: 'longlens', skip: 25 },
 };
 const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 for (const [name, s] of Object.entries(SCENES)) {
   if (only && !only.split(',').includes(name)) continue;
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
-  page.on('pageerror', (e) => console.log('[pageerror]', e.message)); page.on('console', (m) => { if (m.type() === 'error') console.log('[err]', m.text()); });
+  page.on('pageerror', (e) => console.log('[pageerror]', e.message)); page.on('console', (m) => { if (m.type() === 'error') console.log('[err]', m.text().slice(0, 300)); });
   await page.goto(`http://localhost:${process.env.PORT ?? 5196}/?track=${s.track}&demo=race&cam=${s.cam}&skip=${s.skip ?? 40}&weather=${s.weather}&time=${s.time}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 240000 });
   await page.evaluate((cam) => { document.getElementById('ui').style.visibility = 'hidden'; window.__game.adaptQuality = () => {}; window.__game.gfx.setDynamicScale(1); window.__game.cams.set(cam); }, s.cam);

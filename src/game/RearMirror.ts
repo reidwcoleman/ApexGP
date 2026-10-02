@@ -46,14 +46,21 @@ float roundBox( vec2 p, vec2 b, float r ) {
 void main() {
   // mirror: left and right swapped
   vec2 uv = vec2( 1.0 - vUv.x, vUv.y );
-  vec3 c = texture2D( tMirror, uv ).rgb * uExposure;
+  // a mirror a hand's width from a lens focused down the road, inside a shaded cockpit: soft,
+  // darker than the view ahead (glass reflectance × the shade), colour pulled back like the main grade
+  vec2 o = vec2( 1.6 ) / uSize;
+  vec3 c = texture2D( tMirror, uv ).rgb * 0.36
+    + ( texture2D( tMirror, uv + vec2( o.x, 0.0 ) ).rgb + texture2D( tMirror, uv - vec2( o.x, 0.0 ) ).rgb
+      + texture2D( tMirror, uv + vec2( 0.0, o.y ) ).rgb + texture2D( tMirror, uv - vec2( 0.0, o.y ) ).rgb ) * 0.16;
+  c *= uExposure * 0.6;
+  c = mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, 0.82 );
   c = toSRGB( clamp( neutral( c ), 0.0, 1.0 ) );
   // rounded frame, a dark bezel, a faint glass sheen across the top
   vec2 px = ( vUv - 0.5 ) * uSize;
   float d = roundBox( px, uSize * 0.5, uSize.y * 0.22 );
   float bezel = smoothstep( -5.0, -3.5, d );
-  c = mix( c, vec3( 0.03, 0.03, 0.035 ), bezel );
-  c += vec3( 0.05 ) * smoothstep( 0.7, 1.0, vUv.y ) * ( 1.0 - bezel );
+  c = mix( c, vec3( 0.012, 0.012, 0.014 ), bezel );
+  c += vec3( 0.025 ) * smoothstep( 0.7, 1.0, vUv.y ) * ( 1.0 - bezel );
   float a = 1.0 - smoothstep( -1.0, 0.5, d );
   gl_FragColor = vec4( c, a );
 }`;

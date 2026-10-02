@@ -24,6 +24,7 @@ import { N8AOPostPass } from 'n8ao';
  *   RenderPass (HDR, half float)
  *   → N8AO (screen-space AO, world-radius; ultra)
  *   → camera motion blur (depth reprojection; tracked cars move with themselves) [own pass]
+ *   → onboard lens (eye cams: own cockpit shaded + defocused, outside exposed up) [own pass]
  *   → speed blur (radial, only while fast)      [own pass: convolution]
  *   → depth of field (menus/replays only)        [own pass: convolution]
  *   → lens rain (onboard cameras in the wet)     [own pass: convolution]
@@ -171,6 +172,96 @@ class MotionBlurEffect extends Effect {
         ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
         ['shutter', new THREE.Uniform(0)],
         ['maxLen', new THREE.Uniform(0.05)],
+      ]),
+    });
+  }
+}
+
+// An onboard camera, as real footage shows it: the lens is exposed for the bright world outside,
+// so the inside of the car the camera sits in (halo, chassis rim, wheel) falls into shadow, and it
+// is focused down the road, so whatever is a hand's width from the glass is soft. Pixels of the
+// player's own car (its box, from depth) are shaded and defocused by how near they are (a disc
+// gather, only on those pixels: the outside costs one depth read). The outside gets a
+// little more exposure so the sky rolls off toward white.
+const ONBOARD_FRAG = /* glsl */ `
+uniform mat4 projInv;
+uniform mat4 camWorld;
+uniform mat4 ownInv;
+uniform vec3 boxMin;
+uniform vec3 boxMax;
+uniform float shade;
+uniform float defocus;
+uniform float outside;
+
+vec3 obViewPos(vec2 uv, float depth) {
+  float vz = getViewZ(depth);
+  vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  ray.xyz /= ray.w;
+  return ray.xyz * (vz / ray.z);
+}
+// distance from the lens if this pixel is the player's own car, else -1
+float ownDist(vec2 uv, float depth) {
+  if (-getViewZ(depth) > 4.5) return -1.0;
+  vec3 vp = obViewPos(uv, depth);
+  vec3 l = (ownInv * (camWorld * vec4(vp, 1.0))).xyz;
+  return all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)) ? length(vp) : -1.0;
+}
+// blur radius (uv, vertical) of a surface this far from a lens focused far away
+float coc(float d) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.35); }
+
+vec3 shadeOwn(vec3 c, float d) {
+  float k = shade * (1.0 - smoothstep(1.6, 3.6, d));
+  // the shadowed cockpit: much less light, a little less colour, and no sun glints in the lacquer
+  // (kept, they sparkle once the paint round them is dark); only the lit LEDs keep their glow —
+  // bright AND strongly coloured, where a glint is bright and white
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float hi = max(max(c.r, c.g), c.b);
+  float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
+  vec3 s = mix(vec3(lum), c, 0.72) * 0.28 + max(c - 2.5, 0.0) * 0.7 * smoothstep(0.5, 0.8, chroma);
+  return mix(c, s, k);
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  float d0 = ownDist(uv, depth);
+  // the view outside: just the exposure (its edge against the cockpit is softened from the inside)
+  if (d0 < 0.0) { outputColor = vec4(inputColor.rgb * outside, inputColor.a); return; }
+  float r0 = coc(d0);
+  vec3 c0 = shadeOwn(inputColor.rgb, d0);
+  if (r0 * resolution.y < 0.75) { outputColor = vec4(c0, inputColor.a); return; }
+  // defocus disc: the cockpit's own soft neighbours, and the view behind where the disc crosses an
+  // edge. The disc turns per pixel (interleaved gradient noise) and bright taps are weighted down
+  // (1 / (1 + luma)) so a small LED spreads into a soft disc instead of a dotted pattern.
+  float rot = 6.2832 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  float w = 1.0 / (1.0 + dot(c0, vec3(0.2126, 0.7152, 0.0722)));
+  vec3 acc = c0 * w;
+  for (int i = 0; i < 12; i++) {
+    float a = float(i) * 2.39996 + rot;
+    float rr = sqrt((float(i) + 0.5) / 12.0);
+    vec2 su = uv + vec2(cos(a), sin(a)) * rr * r0 * vec2(1.0 / aspect, 1.0);
+    float ds = ownDist(su, readDepth(su));
+    vec3 c = texture2D(inputBuffer, su).rgb;
+    c = ds < 0.0 ? c * outside : shadeOwn(c, ds);
+    float wi = 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
+    acc += c * wi;
+    w += wi;
+  }
+  outputColor = vec4(acc / w, inputColor.a);
+}
+`;
+
+class OnboardEffect extends Effect {
+  constructor() {
+    super('OnboardEffect', ONBOARD_FRAG, {
+      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['projInv', new THREE.Uniform(new THREE.Matrix4())],
+        ['camWorld', new THREE.Uniform(new THREE.Matrix4())],
+        ['ownInv', new THREE.Uniform(new THREE.Matrix4())],
+        ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
+        ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
+        ['shade', new THREE.Uniform(1)],
+        ['defocus', new THREE.Uniform(0.006)],
+        ['outside', new THREE.Uniform(1.12)],
       ]),
     });
   }
@@ -800,6 +891,8 @@ export class Renderer {
   private readonly radialPass: EffectPass;
   private readonly motion: MotionBlurEffect;
   private readonly motionPass: EffectPass;
+  private readonly onboard: OnboardEffect;
+  private readonly onboardPass: EffectPass;
   private readonly caPass: EffectPass;
   private readonly dofPass: EffectPass;
   private readonly lensRain: LensRainEffect;
@@ -874,6 +967,11 @@ export class Renderer {
     this.motionPass = new EffectPass(camera, this.motion);
     this.motionPass.enabled = false;
     this.composer.addPass(this.motionPass);
+
+    this.onboard = new OnboardEffect();
+    this.onboardPass = new EffectPass(camera, this.onboard);
+    this.onboardPass.enabled = false;
+    this.composer.addPass(this.onboardPass);
 
     this.radial = new RadialBlurEffect();
     this.radialPass = new EffectPass(camera, this.radial);
@@ -1007,10 +1105,10 @@ export class Renderer {
    * chromatic aberration) now, so their first use mid-race doesn't stall a frame.
    */
   warmPasses() {
-    const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled, this.motionPass.enabled];
+    const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled, this.motionPass.enabled, this.onboardPass.enabled];
     const dofTarget = this.dof.target;
     const strength = this.radial.strength;
-    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = this.motionPass.enabled = true;
+    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = this.motionPass.enabled = this.onboardPass.enabled = true;
     this.radial.strength = 0.01;
     this.composer.render(0.016);
     this.radial.strength = strength;
@@ -1019,6 +1117,7 @@ export class Renderer {
     this.lensPass.enabled = was[2];
     this.caPass.enabled = was[3];
     this.motionPass.enabled = was[4];
+    this.onboardPass.enabled = was[5];
     this.dof.target = dofTarget;
   }
 
@@ -1245,7 +1344,20 @@ export class Renderer {
     this.updateShafts();
     this.updateScene();
     this.updateMotion(dt);
+    this.updateOnboard();
     this.composer.render(dt);
+  }
+
+  /** the car an onboard camera rides in (null = not onboard): its own cockpit is shaded and defocused */
+  onboardCar: THREE.Object3D | null = null;
+  private updateOnboard() {
+    const own = this.onboardCar;
+    this.onboardPass.enabled = own !== null;
+    if (!own) return;
+    const u = this.onboard.uniforms;
+    (u.get('projInv')!.value as THREE.Matrix4).copy(this.camera.projectionMatrixInverse);
+    (u.get('camWorld')!.value as THREE.Matrix4).copy(this.camera.matrixWorld);
+    (u.get('ownInv')!.value as THREE.Matrix4).copy(own.matrixWorld).invert();
   }
 
   /**

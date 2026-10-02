@@ -217,10 +217,10 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     mie: 1.2,
     g: 0.78,
     ms: 0.35,
-    // (a moon you can see by: silver outlines of barriers, trees and cars, a pale sheen on the
-    // asphalt; the headlights still light the road ahead)
-    sunIntensity: 0.3,
-    skyBoost: 0.1,
+    // (a faint moon, like night footage from Le Mans: barely more than silhouettes beyond the
+    // headlights' pool; the lights round the track, the cars' rain lights and the headlights carry it)
+    sunIntensity: 0.11,
+    skyBoost: 0.05,
     sunDisc: 26,
     cirrus: 0.2,
     fogDensity: 1.0e-4,
@@ -231,8 +231,8 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     contrast: 1.1,
     tint: [1.0, 0.98, 0.96],
     shadowTint: [0.86, 0.92, 1.16],
-    bloom: 1.3,
-    bloomThreshold: 0.9,
+    bloom: 1.8,
+    bloomThreshold: 0.75,
     shafts: 0,
     flood: 1,
     night: 1,

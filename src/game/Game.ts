@@ -3202,6 +3202,8 @@ export class Game {
     const live = st === 'race' || st === 'intro' || st === 'results' || st === 'replay' || st === 'spectate' || st === 'flashback';
     const g = this.gfx;
     g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] : 0;
+    const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && EYE_CAMS[this.cams.mode];
+    g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
     const out = g.motionCars;
     out.length = 0;
     if (g.motionBlur <= 0) return;

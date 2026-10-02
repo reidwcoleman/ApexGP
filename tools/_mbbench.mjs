@@ -17,8 +17,10 @@ console.log(await page.evaluate(async () => {
   const cam = g.camera;
   const fwd = cam.getWorldDirection(cam.position.clone());
   const base = cam.position.clone();
-  const run = (mb) => {
+  const own = g.gfx.onboardCar;
+  const run = (mb, ob = true) => {
     g.gfx.motionBlur = mb;
+    g.gfx.onboardCar = ob ? own : null;
     const ts = [];
     for (let k = 0; k < 4; k++) {
       const t0 = performance.now();
@@ -30,6 +32,6 @@ console.log(await page.evaluate(async () => {
     return +ts[1].toFixed(2);
   };
   run(0);
-  return { off: run(0), on: run(0.6), off2: run(0), on2: run(0.6) };
+  return { none: run(0, false), onboard: run(0, true), both: run(0.6, true), none2: run(0, false), onboard2: run(0, true), both2: run(0.6, true), hadOwn: !!own };
 }));
 await browser.close();
