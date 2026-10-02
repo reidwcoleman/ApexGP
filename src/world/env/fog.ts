@@ -88,7 +88,9 @@ const PARS_FRAGMENT = /* glsl */ `
       }
       fogA = min( 1.0 - exp( - od ), aerialParams.w );
       float mu = max( dot( dir, aerialSunDir ), 0.0 );
-      float lobe = pow( mu, 5.0 ) * 0.55 + pow( mu, 24.0 ) * 0.9;
+      // the glow round a low sun is the whole atmosphere's forward scatter: it builds over kilometres of
+      // air, so a car a few hundred metres down a long lens isn't veiled in it (the sunset wash)
+      float lobe = ( pow( mu, 5.0 ) * 0.55 + pow( mu, 24.0 ) * 0.9 ) * ( 1.0 - exp( - dist / 1800.0 ) );
       haze += aerialSunColor * lobe;
     } else {
       #ifdef FOG_EXP2

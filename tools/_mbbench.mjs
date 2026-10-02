@@ -1,0 +1,35 @@
+// GPU cost of the camera motion blur: frames rendered back to back with the camera moving 1.5 m a frame.
+import { chromium } from 'playwright-core';
+const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+await page.goto(`http://localhost:${process.env.PORT ?? 5196}/?track=monza&demo=race&cam=cockpit&skip=30&weather=clear&time=afternoon`);
+await page.waitForFunction(() => window.__ready === true, null, { timeout: 240000 });
+await page.waitForTimeout(2500);
+console.log(await page.evaluate(async () => {
+  const g = window.__game;
+  g.adaptQuality = () => {};
+  g.gfx.setDynamicScale(1);
+  await new Promise((r) => setTimeout(r, 300));
+  g.worldBusy = true;
+  const gl = g.gfx.renderer.getContext();
+  const px = new Uint8Array(4);
+  const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const cam = g.camera;
+  const fwd = cam.getWorldDirection(cam.position.clone());
+  const base = cam.position.clone();
+  const run = (mb) => {
+    g.gfx.motionBlur = mb;
+    const ts = [];
+    for (let k = 0; k < 4; k++) {
+      const t0 = performance.now();
+      for (let i = 0; i < 30; i++) { cam.position.copy(base).addScaledVector(fwd, (i % 2) * 1.5); g.gfx.render(1 / 60); }
+      sync();
+      ts.push((performance.now() - t0) / 30);
+    }
+    ts.sort((a, b) => a - b);
+    return +ts[1].toFixed(2);
+  };
+  run(0);
+  return { off: run(0), on: run(0.6), off2: run(0), on2: run(0.6) };
+}));
+await browser.close();

@@ -117,6 +117,13 @@ npm run check    # tsc --noEmit
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
   lateral and endplate lights; baked ambient occlusion on every car.
+- **Camera footage look** — per-pixel camera motion blur like a film shutter (depth reprojection: the grass,
+  kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a panning TV
+  camera keeps its car crisp; Settings → Motion blur Off / Subtle / Cinematic), a photographic grade layer
+  over every weather and time of day (`FILM` in Environment.ts: brighter days rolling into the tone curve's
+  shoulder, colour pulled back, darker nights), and a low sun's glow that builds over kilometres of air rather
+  than veiling a car down a long lens. `node tools/_lookshots.mjs <out>` shoots the reference scenes;
+  `node tools/_mbbench.mjs` times the blur pass.
 - **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
   nose and more; a live steering-wheel screen and shift lights in the onboards, a rear-view mirror,

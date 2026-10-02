@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Renderer, type QualityLevel } from '../core/Renderer.ts';
+import { MOTION_CARS, Renderer, type QualityLevel } from '../core/Renderer.ts';
 import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
@@ -37,7 +37,7 @@ import { CarEffects } from '../fx/CarEffects.ts';
 import { Debris } from '../fx/Debris.ts';
 import { SkidMarks } from '../fx/SkidMarks.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
-import { Menu, aiLevel, GRID, CIRCUIT_INFO, circuitPath, type RaceSetup, type Settings } from '../ui/Menu.ts';
+import { Menu, aiLevel, GRID, CIRCUIT_INFO, circuitPath, type MotionBlurLevel, type RaceSetup, type Settings } from '../ui/Menu.ts';
 import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
@@ -75,6 +75,9 @@ const GARAGE_SHADOW_LAYER = 3;
 const GARAGE_MIRROR_LAYER = 4;
 
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+
+/** Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°) */
+const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.3, cinematic: 0.6 };
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
@@ -1664,6 +1667,7 @@ export class Game {
     this.trackside.update(dt, this.camera);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
+    this.updateMotionBlur();
     this.gfx.render(dt);
     // the rear-view mirror over the onboard cameras
     const mirrorOn = (this.state === 'race' || this.state === 'intro') && MIRROR_CAMS[this.cams.mode] && this.cams.prefs.mirror;
@@ -3191,14 +3195,34 @@ export class Game {
     this.pits.update(dt, this.camera);
   }
 
+  private readonly motionSort: THREE.Object3D[] = [];
+  /** camera motion blur while cars run (Settings → Motion blur); the cars nearest the lens stay sharp as moving objects */
+  private updateMotionBlur() {
+    const st = this.state;
+    const live = st === 'race' || st === 'intro' || st === 'results' || st === 'replay' || st === 'spectate' || st === 'flashback';
+    const g = this.gfx;
+    g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] : 0;
+    const out = g.motionCars;
+    out.length = 0;
+    if (g.motionBlur <= 0) return;
+    const cp = this.camera.position;
+    const all = this.motionSort;
+    all.length = 0;
+    for (const rig of this.rigs.values()) if (rig.root.visible && rig.root.parent) all.push(rig.root);
+    all.sort((a, b) => a.position.distanceToSquared(cp) - b.position.distanceToSquared(cp));
+    for (let i = 0; i < all.length && i < MOTION_CARS; i++) out.push(all[i]);
+  }
+
   private speedFx() {
     const car = this.race.player.car;
     const kmh = Math.max(0, car.vx * 3.6);
     // the chase cameras get a hint of radial speed blur at the edges; the onboards stay crisp (the
     // cockpit, the halo and the wheel are right in front of the lens — any smear reads as soft focus)
+    // (with camera motion blur on, the real per-pixel streaks replace the radial approximation)
     const chaseCam = this.cams.mode === 'chase' || this.cams.mode === 'far';
     const k = chaseCam ? Math.max(0, Math.min(1, (kmh - 190) / 150)) : 0;
-    this.gfx.setSpeedBlur(k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0));
+    const radial = (this.menu.settings.motionBlur ?? 'cinematic') === 'off';
+    this.gfx.setSpeedBlur(radial ? k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0) : 0);
     this.gfx.setAberration(k * 0.0004);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;

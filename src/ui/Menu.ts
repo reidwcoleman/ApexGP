@@ -38,6 +38,10 @@ export interface RaceSetup {
   v?: number;
 }
 
+export type MotionBlurLevel = 'off' | 'subtle' | 'cinematic';
+const MOTION_BLUR: MotionBlurLevel[] = ['off', 'subtle', 'cinematic'];
+const MOTION_BLUR_LABEL: Record<MotionBlurLevel, string> = { off: 'Off', subtle: 'Subtle', cinematic: 'Cinematic' };
+
 export interface Settings {
   /** save format: bumped when the defaults change in a way old saves should pick up */
   v?: number;
@@ -50,6 +54,8 @@ export interface Settings {
   volume: number;
   /** background music level in the menus (0..1) */
   music: number;
+  /** camera motion blur (missing = cinematic) */
+  motionBlur?: MotionBlurLevel;
 }
 
 export const LAPS = [3, 5, 10, 20];
@@ -1158,6 +1164,10 @@ export class Menu {
       const i = QUALITY.indexOf(st.quality);
       st.quality = QUALITY[(i + d + QUALITY.length) % QUALITY.length];
       st.autoQuality = false;
+    }, true);
+    this.opt(p, 'Motion blur', () => MOTION_BLUR_LABEL[st.motionBlur ?? 'cinematic'], (d) => {
+      const i = MOTION_BLUR.indexOf(st.motionBlur ?? 'cinematic');
+      st.motionBlur = MOTION_BLUR[(i + d + MOTION_BLUR.length) % MOTION_BLUR.length];
     }, true);
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
       const i = CAMERA_ORDER.indexOf(st.camera);

@@ -17,6 +17,10 @@ import { isLowSun, type TimeOfDay, type WeatherState } from './Weather.ts';
 import { disposeTree } from '../core/dispose.ts';
 import { weatherUniforms } from './weatherUniforms.ts';
 
+
+/** the photographic layer over every weather/time look (see the eye adaptation in Environment.update) */
+const FILM = { exposure: 1.1, nightExposure: 0.82, saturation: 0.87, contrast: 0.99, tint: [1.02, 1.0, 0.965] as const };
+
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
  * fog, rain, and the scenery (terrain, park, grandstands, paddock…).
@@ -414,12 +418,16 @@ export function createEnvironment(
     const eGround = sunI * Math.max(0.05, Math.sin(el)) + skyE + FLOOD_E * (P.flood ?? 0) * floodScale(nightK) * 1.4;
     const maxAdapt = THREE.MathUtils.lerp(4.5, NIGHT_MAX_ADAPT, THREE.MathUtils.smoothstep(nightK, 0.5, 1));
     const adapt = THREE.MathUtils.clamp(Math.pow(E_REF / Math.max(0.05, eGround), 0.62), 0.7, maxAdapt);
-    gradeLook.exposure = L.exposure * adapt;
+    // the photographic layer (camera footage, not a game render): a stop-fraction brighter by day so
+    // skies and sunlit surfaces roll into the tone curve's shoulder, colour pulled back a little, a
+    // faint warm cast; nights a touch darker so the headlights and the lights round the track carry them
+    const filmDay = 1 - THREE.MathUtils.smoothstep(nightK, 0.5, 1);
+    gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(FILM.nightExposure, FILM.exposure, filmDay);
     sky.uniforms.uSkyComp.value = Math.pow(adapt, -0.5);
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
-    gradeLook.saturation = L.saturation;
-    gradeLook.contrast = L.contrast;
-    gradeLook.tint = L.tint;
+    gradeLook.saturation = L.saturation * FILM.saturation;
+    gradeLook.contrast = L.contrast * FILM.contrast;
+    gradeLook.tint = [L.tint[0] * FILM.tint[0], L.tint[1] * FILM.tint[1], L.tint[2] * FILM.tint[2]];
     gradeLook.shadowTint = L.shadowTint;
     lightInfo.eGround = +eGround.toFixed(3);
     if (worldE > 0) worldUniforms.uWorldScale.value = eGround / worldE;

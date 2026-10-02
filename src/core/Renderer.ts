@@ -23,6 +23,7 @@ import { N8AOPostPass } from 'n8ao';
  *
  *   RenderPass (HDR, half float)
  *   → N8AO (screen-space AO, world-radius; ultra)
+ *   → camera motion blur (depth reprojection; tracked cars move with themselves) [own pass]
  *   → speed blur (radial, only while fast)      [own pass: convolution]
  *   → depth of field (menus/replays only)        [own pass: convolution]
  *   → lens rain (onboard cameras in the wet)     [own pass: convolution]
@@ -88,6 +89,90 @@ class RadialBlurEffect extends Effect {
   }
   set aberration(v: number) {
     this.uniforms.get('aberration')!.value = v;
+  }
+}
+
+/** how many cars the motion blur tracks as moving objects (the nearest to the camera) */
+export const MOTION_CARS = 8;
+
+// Camera motion blur like a film camera's shutter: every pixel's world position (from depth) is
+// reprojected into the previous frame and the image is smeared along the difference. Pixels inside
+// a tracked car's box move with that car instead of with the world, so the car you are in (and the
+// ones racing alongside) stay sharp while the grass, kerbs and barriers streak past; a panning TV
+// camera keeps its car sharp and streaks the background. Samples nearer the lens than the pixel are
+// rejected so foreground edges (halo, cockpit) don't bleed into the background.
+const MOTION_BLUR_FRAG = /* glsl */ `
+uniform mat4 projInv;
+uniform mat4 camWorld;
+uniform mat4 prevViewProj;
+uniform mat4 carInv[${MOTION_CARS}];
+uniform mat4 carPrev[${MOTION_CARS}];
+uniform int carCount;
+uniform vec3 boxMin;
+uniform vec3 boxMax;
+uniform float shutter;
+uniform float maxLen;
+
+vec3 viewPos(vec2 uv, float depth) {
+  float vz = getViewZ(depth);
+  vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  ray.xyz /= ray.w;
+  return ray.xyz * (vz / ray.z);
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  vec3 wpos = (camWorld * vec4(viewPos(uv, depth), 1.0)).xyz;
+  vec3 prev = wpos;
+  for (int i = 0; i < ${MOTION_CARS}; i++) {
+    if (i >= carCount) break;
+    vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
+    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
+      prev = (carPrev[i] * vec4(l, 1.0)).xyz;
+      break;
+    }
+  }
+  vec4 pc = prevViewProj * vec4(prev, 1.0);
+  if (pc.w <= 0.0) { outputColor = inputColor; return; }
+  vec2 v = (uv - (pc.xy / pc.w * 0.5 + 0.5)) * shutter;
+  float len = length(v * vec2(aspect, 1.0));
+  if (len > maxLen) v *= maxLen / len;
+  if (length(v / texelSize) < 0.75) { outputColor = inputColor; return; }
+  float z0 = -getViewZ(depth);
+  vec3 acc = inputColor.rgb;
+  float w = 1.0;
+  // 8 taps, jittered per pixel so the steps read as grain rather than as ghost copies
+  float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+  for (int i = 0; i < 8; i++) {
+    float t = (float(i) + 0.5 + jit) / 8.0 - 0.5;
+    vec2 su = uv + v * t;
+    float zs = -getViewZ(readDepth(su));
+    // a sample much nearer the lens than this pixel is foreground: it does not smear back over it
+    float k = step(z0 * 0.8 - 0.3, zs);
+    acc += texture2D(inputBuffer, su).rgb * k;
+    w += k;
+  }
+  outputColor = vec4(acc / w, inputColor.a);
+}
+`;
+
+class MotionBlurEffect extends Effect {
+  constructor() {
+    super('MotionBlurEffect', MOTION_BLUR_FRAG, {
+      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['projInv', new THREE.Uniform(new THREE.Matrix4())],
+        ['camWorld', new THREE.Uniform(new THREE.Matrix4())],
+        ['prevViewProj', new THREE.Uniform(new THREE.Matrix4())],
+        ['carInv', new THREE.Uniform(Array.from({ length: MOTION_CARS }, () => new THREE.Matrix4()))],
+        ['carPrev', new THREE.Uniform(Array.from({ length: MOTION_CARS }, () => new THREE.Matrix4()))],
+        ['carCount', new THREE.Uniform(0)],
+        // a car's box in its own frame (origin on the ground, mid-wheelbase, +Z forward), a little generous
+        ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
+        ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
+        ['shutter', new THREE.Uniform(0)],
+        ['maxLen', new THREE.Uniform(0.05)],
+      ]),
+    });
   }
 }
 
@@ -713,6 +798,8 @@ export class Renderer {
 
   private readonly radial: RadialBlurEffect;
   private readonly radialPass: EffectPass;
+  private readonly motion: MotionBlurEffect;
+  private readonly motionPass: EffectPass;
   private readonly caPass: EffectPass;
   private readonly dofPass: EffectPass;
   private readonly lensRain: LensRainEffect;
@@ -726,6 +813,7 @@ export class Renderer {
   private sunShaftStrength = 0;
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpF = new THREE.Vector3();
+  private readonly tmpF2 = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, scene: THREE.Scene, camera: THREE.PerspectiveCamera, quality: QualityLevel = 'high') {
     this.scene = scene;
@@ -781,6 +869,11 @@ export class Renderer {
     this.ao.configuration.color = new THREE.Color(0x0a0a0c);
     this.ao.setQualityMode('Medium');
     this.composer.addPass(this.ao);
+
+    this.motion = new MotionBlurEffect();
+    this.motionPass = new EffectPass(camera, this.motion);
+    this.motionPass.enabled = false;
+    this.composer.addPass(this.motionPass);
 
     this.radial = new RadialBlurEffect();
     this.radialPass = new EffectPass(camera, this.radial);
@@ -914,10 +1007,10 @@ export class Renderer {
    * chromatic aberration) now, so their first use mid-race doesn't stall a frame.
    */
   warmPasses() {
-    const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled];
+    const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled, this.motionPass.enabled];
     const dofTarget = this.dof.target;
     const strength = this.radial.strength;
-    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = true;
+    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = this.motionPass.enabled = true;
     this.radial.strength = 0.01;
     this.composer.render(0.016);
     this.radial.strength = strength;
@@ -925,6 +1018,7 @@ export class Renderer {
     this.dofPass.enabled = was[1];
     this.lensPass.enabled = was[2];
     this.caPass.enabled = was[3];
+    this.motionPass.enabled = was[4];
     this.dof.target = dofTarget;
   }
 
@@ -1150,7 +1244,67 @@ export class Renderer {
     this.ssao.setCamera(this.camera);
     this.updateShafts();
     this.updateScene();
+    this.updateMotion(dt);
     this.composer.render(dt);
+  }
+
+  /**
+   * Camera motion blur: the shutter as a fraction of a 60 fps frame (0 = off, 0.5 = a film
+   * camera's 180° shutter). Cuts and teleports skip a frame instead of smearing across the screen.
+   */
+  motionBlur = 0;
+  /** the moving objects (car roots) the motion blur tracks this frame, nearest first; at most MOTION_CARS */
+  readonly motionCars: THREE.Object3D[] = [];
+  private readonly prevCar = new WeakMap<THREE.Object3D, { m: THREE.Matrix4; frame: number }>();
+  private readonly prevViewProj = new THREE.Matrix4();
+  private readonly prevCamPos = new THREE.Vector3();
+  private readonly prevCamQ = new THREE.Quaternion();
+  private prevCam: THREE.Camera | null = null;
+  private motionFrame = 0;
+  private readonly tmpM = new THREE.Matrix4();
+  private readonly tmpQ = new THREE.Quaternion();
+  private updateMotion(dt: number) {
+    const cam = this.camera;
+    const frame = ++this.motionFrame;
+    cam.updateMatrixWorld();
+    const u = this.motion.uniforms;
+    const camPos = this.tmpV.setFromMatrixPosition(cam.matrixWorld);
+    const camQ = this.tmpQ.setFromRotationMatrix(cam.matrixWorld);
+    let ok = this.motionBlur > 0.01 && this.prevCam === cam && dt > 0;
+    // a cut (a new camera position or a whip around) has no motion to blur
+    if (ok && (camPos.distanceTo(this.prevCamPos) > 20 || camQ.angleTo(this.prevCamQ) > 0.5)) ok = false;
+    if (ok) {
+      (u.get('projInv')!.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
+      (u.get('camWorld')!.value as THREE.Matrix4).copy(cam.matrixWorld);
+      (u.get('prevViewProj')!.value as THREE.Matrix4).copy(this.prevViewProj);
+      u.get('shutter')!.value = this.motionBlur * THREE.MathUtils.clamp(1 / 60 / dt, 0.5, 2);
+      const inv = u.get('carInv')!.value as THREE.Matrix4[];
+      const prev = u.get('carPrev')!.value as THREE.Matrix4[];
+      let n = 0;
+      for (const o of this.motionCars) {
+        if (n >= MOTION_CARS) break;
+        const p = this.prevCar.get(o);
+        inv[n].copy(o.matrixWorld).invert();
+        const fresh = p && p.frame === frame - 1;
+        prev[n].copy(fresh ? p.m : o.matrixWorld);
+        // a car that jumped (replay seek, reset to track) has no motion either
+        if (fresh && this.tmpF.setFromMatrixPosition(p.m).distanceToSquared(this.tmpF2.setFromMatrixPosition(o.matrixWorld)) > 400) prev[n].copy(o.matrixWorld);
+        n++;
+      }
+      u.get('carCount')!.value = n;
+    }
+    this.motionPass.enabled = ok;
+    for (const o of this.motionCars) {
+      const p = this.prevCar.get(o);
+      if (p) {
+        p.m.copy(o.matrixWorld);
+        p.frame = frame;
+      } else this.prevCar.set(o, { m: o.matrixWorld.clone(), frame });
+    }
+    this.prevViewProj.multiplyMatrices(cam.projectionMatrix, this.tmpM.copy(cam.matrixWorld).invert());
+    this.prevCamPos.copy(camPos);
+    this.prevCamQ.copy(camQ);
+    this.prevCam = cam;
   }
 
   /**
