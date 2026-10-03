@@ -113,6 +113,12 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
 /** frame-rate independent smoothing factor: the share of the gap closed in dt at rate k (1/s) */
 const ease = (dt: number, k: number) => 1 - Math.exp(-k * dt);
 
+/** speed-dependent widening of the lens, 0 … 1: little below ~120 km/h, most of it from 150 to 320 */
+const dynFov = (kmh: number) => {
+  const x = THREE.MathUtils.clamp((kmh - 60) / 270, 0, 1);
+  return x * x * (3 - 2 * x);
+};
+
 /**
  * Vertical FOV for a lens specified as its vertical FOV on a 16:9 screen: wider screens see more at
  * the sides (Hor+, like the F1 games on ultrawides); narrower ones keep the 16:9 horizontal view
@@ -198,6 +204,116 @@ const SIGHT_SAMPLES = [0.01, 0.025, 0.05, 0.08, 0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0
 const WIDE: Partial<Record<ShotKind, number>> = { apex: 46, pitwall: 52 };
 
 /**
+ * How a lens riding with the car vibrates, per camera: two resonant bands — the mount or the
+ * driver's head on the seat (low: bumps, kerbs, the car hopping) and the structure's buzz (high:
+ * speed, the engine, the road's texture) — and how strongly each is rung (rad RMS per unit of
+ * excitation), with the weight of pitch / yaw / roll. Measured against onboard footage (the
+ * reference clips' cockpits move ~0.8 % of the frame height per 30 fps frame on a bumpy circuit,
+ * with 3–5 % jolts on kerbs): here a smooth straight at 300 km/h moves the cockpit view ≈0.4 %,
+ * braking zones and the bumpy circuits more, kerbs ≈1–2 % with sharper strike jolts
+ * (`node tools/camshake.mjs` measures it).
+ */
+interface ShakeCfg {
+  /** resonances (Hz) and damping ratios of the low and the high band */
+  fl: number;
+  fh: number;
+  zl: number;
+  zh: number;
+  /** strength of each band */
+  low: number;
+  high: number;
+  /** pitch / yaw / roll weights */
+  ax: [number, number, number];
+  /** vertical travel of the lens per rad of low-band pitch (m/rad: a head bobs, a bracket barely moves) */
+  heave: number;
+}
+const SHAKE: Record<string, ShakeCfg> = {
+  // the driver's eyes: the head on the seat sways with the bumps; the neck soaks up some of the buzz
+  cockpit: { fl: 5.2, fh: 15, zl: 0.32, zh: 0.25, low: 1, high: 0.6, ax: [1, 0.45, 0.75], heave: 0.35 },
+  helmet: { fl: 4.2, fh: 13, zl: 0.3, zh: 0.25, low: 1.3, high: 0.8, ax: [1, 0.6, 0.85], heave: 0.45 },
+  // the T-cam pod and the nose: stiff brackets in the airflow — less sway, more buzz
+  tcam: { fl: 8.5, fh: 19, zl: 0.25, zh: 0.2, low: 0.6, high: 1.1, ax: [1, 0.4, 0.7], heave: 0.05 },
+  nose: { fl: 11, fh: 22, zl: 0.22, zh: 0.18, low: 0.7, high: 1.35, ax: [1, 0.35, 0.8], heave: 0.03 },
+  mount: { fl: 10, fh: 21, zl: 0.22, zh: 0.18, low: 0.75, high: 1.2, ax: [1, 0.35, 0.8], heave: 0.03 },
+  // the chase cameras hang off a virtual arm: a soft sway with the bumps, a fine shiver at speed
+  chase: { fl: 4.2, fh: 11, zl: 0.38, zh: 0.3, low: 0.5, high: 0.35, ax: [1, 0.5, 0.7], heave: 0.6 },
+  far: { fl: 3.6, fh: 10, zl: 0.4, zh: 0.3, low: 0.38, high: 0.25, ax: [1, 0.5, 0.7], heave: 0.6 },
+};
+/** base strengths (rad RMS) of the speed buzz, the road and the kicks for a band strength of 1 */
+const SHAKE_SPEED_HI = 0.0016;
+const SHAKE_SPEED_LO = 0.0011;
+const SHAKE_ROAD_HI = 0.0009;
+const SHAKE_ROAD_LO = 0.0018;
+const SHAKE_KICK = 0.016;
+/** the integration step of the resonators (s): the high band rings at up to ~22 Hz */
+const SHAKE_H = 1 / 600;
+
+/** noise-rung resonators for one lens: [pitch, yaw, roll] × [low, high] */
+class CamShake {
+  private readonly x = new Float64Array(6);
+  private readonly v = new Float64Array(6);
+  /** this frame's output (rad, rad, rad, m) */
+  pitch = 0;
+  yaw = 0;
+  roll = 0;
+  heave = 0;
+  private seed = 0x9e3779b9;
+
+  reset() {
+    this.x.fill(0);
+    this.v.fill(0);
+    this.pitch = this.yaw = this.roll = this.heave = 0;
+  }
+
+  /** a roughly gaussian unit sample (sum of uniforms from a fast LCG) */
+  private gauss(): number {
+    let u = 0;
+    for (let i = 0; i < 4; i++) {
+      this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
+      u += this.seed / 4294967296;
+    }
+    return (u - 2) * 1.732;
+  }
+
+  /**
+   * Advance by dt with band amplitudes lo / hi (rad RMS) and a kick (rad, low band; its sign is
+   * random per axis, mostly up in pitch: a kerb throws the car up).
+   */
+  step(dt: number, c: ShakeCfg, lo: number, hi: number, kick: number) {
+    const wl = 2 * Math.PI * c.fl;
+    const wh = 2 * Math.PI * c.fh;
+    if (kick > 0) {
+      for (let a = 0; a < 3; a++) {
+        const sgn = a === 0 ? -0.6 - 0.4 * Math.abs(this.gauss()) : this.gauss() * 0.6;
+        this.v[a] += kick * c.ax[a] * sgn * wl;
+      }
+    }
+    const n = Math.min(60, Math.ceil(dt / SHAKE_H - 1e-6));
+    if (n <= 0) return;
+    const h = dt / n;
+    // white noise of RMS A through a resonator x'' + 2ζωx' + ω²x = ω²w comes out at RMS A when w has
+    // spectral strength 4ζA²/ω (so each band's amplitude is set directly in radians)
+    const gl = lo * Math.sqrt((4 * c.zl) / (wl * h));
+    const gh = hi * Math.sqrt((4 * c.zh) / (wh * h));
+    for (let k = 0; k < n; k++) {
+      for (let a = 0; a < 3; a++) {
+        const wa = c.ax[a];
+        const il = a;
+        const ih = a + 3;
+        this.v[il] += (wl * wl * (gl * wa * this.gauss() - this.x[il]) - 2 * c.zl * wl * this.v[il]) * h;
+        this.x[il] += this.v[il] * h;
+        this.v[ih] += (wh * wh * (gh * wa * this.gauss() - this.x[ih]) - 2 * c.zh * wh * this.v[ih]) * h;
+        this.x[ih] += this.v[ih] * h;
+      }
+    }
+    this.pitch = this.x[0] + this.x[3];
+    this.yaw = this.x[1] + this.x[4];
+    this.roll = this.x[2] + this.x[5];
+    this.heave = this.x[0] * c.heave;
+  }
+}
+
+/**
  * Race cameras. All of them read the car's rendered pose (rig.root) so they
  * never disagree with what's on screen. Switching the followed car (a new rig)
  * is a cut: the camera re-frames from scratch.
@@ -230,9 +346,13 @@ export class Cameras {
   private readonly leftV = new THREE.Vector3();
   private readonly fV = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
-  private headX = 0;
-  private headY = 0;
+  /** the cockpit eye: the driver's head thrown about by the G (lateral, vertical, fore-aft m; nod rad), its velocities and target */
+  private readonly head = new Float64Array(4);
+  private readonly headV = new Float64Array(4);
+  private readonly headT = new Float64Array(4);
   private headRoll = 0;
+  /** the lens' vibration (see ringShake) */
+  private readonly shake = new CamShake();
   /** cockpit: eased look into the corner (rad) */
   private headLook = 0;
   private lead = 0;
@@ -500,13 +620,10 @@ export class Cameras {
     const speed = Math.max(0, car.vx);
     const kmh = speed * 3.6;
 
-    // shake: speed buzz + kerbs + off-track + impacts
     this.shakeT += dt;
+    const impulseIn = this.impulse;
     this.impulse = Math.max(0, this.impulse - dt * 2.5);
-    const shakeAmp =
-      Math.min(1, kmh / 330) * 0.004 + (car.onKerb ? 0.018 * Math.min(1, speed / 25) : 0) + (car.offTrack ? 0.03 * Math.min(1, speed / 20) : 0) + this.impulse * 0.12;
-    const sx = (Math.sin(this.shakeT * 41.3) + Math.sin(this.shakeT * 67.1) * 0.6) * shakeAmp;
-    const sy = (Math.sin(this.shakeT * 53.7) + Math.sin(this.shakeT * 29.9) * 0.5) * shakeAmp;
+    this.ringShake(dt, car, speed, impulseIn);
 
     const fwdCar = this.v2.set(0, 0, 1).applyQuaternion(root.quaternion);
     cam.up.set(0, 1, 0);
@@ -530,7 +647,62 @@ export class Cameras {
       this.tvShot(dt, car, carPos, fwdCar, speed, track, TV_KINDS[this.mode]!);
       return;
     }
-    this.onboardShot(dt, car, rig, sx, sy, kmh);
+    this.onboardShot(dt, car, rig, kmh);
+  }
+
+  /** which vibration profile the current camera has (null: it doesn't ride with the car) */
+  private shakeCfg(): ShakeCfg | null {
+    const m = this.mode;
+    if (m === 'chase' || m === 'far' || m === 'cockpit' || m === 'helmet' || m === 'tcam' || m === 'nose') return SHAKE[m];
+    if (MOUNTS[m]) return SHAKE.mount;
+    return null;
+  }
+  private lastImpulse = 0;
+  private shakeCut = -1;
+
+  /**
+   * Ring the lens with what the car is going through: the speed's buzz, the road under the wheels
+   * (CarPhysics.roadVel: the circuit's relief, braking ripples, kerb ridges, the grass), kerb strikes
+   * (CarPhysics.strike) and contacts (impulse) as kicks. Scaled by Settings → Camera tuning → shake.
+   */
+  private ringShake(dt: number, car: CarPhysics, speed: number, impulse: number) {
+    const c = this.shakeCfg();
+    if (!c || dt <= 0) return;
+    if (this.shakeCut !== this.cuts) {
+      this.shakeCut = this.cuts;
+      this.shake.reset();
+      // (a strike the new car took before the cut is old news)
+      car.strike = 0;
+      this.lastImpulse = impulse;
+    }
+    // (a sped-up replay or simulated race shakes less: the lens can't follow it anyway)
+    // (each car-mounted bracket has its own stiffness: Mount.shake, relative to a typical 0.65)
+    const k = this.prefs.shake * (this.timeScale > 1 ? 1 / Math.sqrt(this.timeScale) : 1) * (MOUNTS[this.mode] ? MOUNTS[this.mode]!.shake / 0.65 : 1);
+    const sp = Math.min(1.15, speed / 85);
+    // the road: compressive (a kerb ridge shakes ~4× a rough braking zone, not 30×); a replay's
+    // stand-in car carries no road signal, so its kerbs and the grass come from the surfaces
+    const rv = car.roadVel || (car.onKerb ? 0.9 * Math.min(1, speed / 60) : 0) + (car.offTrack ? 2 * Math.min(1, speed / 30) : 0);
+    const road = Math.min(7, Math.pow(rv / 0.08, 0.6)) * Math.min(1, speed / 12);
+    const lo = (SHAKE_SPEED_LO * sp * sp + SHAKE_ROAD_LO * road) * c.low * k;
+    const hi = (SHAKE_SPEED_HI * sp * sp + SHAKE_ROAD_HI * road) * c.high * k;
+    // kicks: a wheel striking a kerb (taken from the car once), a contact (the rise of the impulse)
+    let kick = 0;
+    if (car.strike > 0) {
+      kick += SHAKE_KICK * car.strike;
+      car.strike = 0;
+    }
+    if (impulse > this.lastImpulse + 0.05) kick += SHAKE_KICK * 3 * (impulse - this.lastImpulse);
+    this.lastImpulse = impulse;
+    this.shake.step(dt, c, lo, hi, kick * c.low * k);
+  }
+
+  /** the lens' vibration as a rotation in its own frame (and a little travel along `up`) */
+  private applyShake(up: THREE.Vector3) {
+    const sh = this.shake;
+    this.camera.position.addScaledVector(up, sh.heave);
+    this.camera.rotateX(sh.pitch);
+    this.camera.rotateY(sh.yaw);
+    this.camera.rotateZ(sh.roll);
   }
 
   private heliShot(dt: number, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number, car?: CarPhysics) {
@@ -737,46 +909,22 @@ export class Cameras {
     this.chasePitch += (pitchT - this.chasePitch) * ease(dt, 5);
     this.chaseRoll += (rollT - this.chaseRoll) * ease(dt, 3.5);
     this.camLook.y += this.chasePitch * ahead;
-    // road feel: a low rumble growing with speed (smooth, below the frame rate's aliasing); kerbs,
-    // grass and impacts come through as rotation of the lens (applyRotShake)
-    const t = this.shakeT;
-    const sp = Math.min(1, kmh / 320);
-    const rumble = sp * sp * 0.0055 * P.shake;
+    // road feel: the lens sways and shivers with the road (ringShake: speed, the relief under the
+    // wheels, kerbs, the grass, contacts) as rotation — a few millimetres of travel is invisible 5 m
+    // back; a fraction of a degree of pitch and roll is what kerbs and bumps look like
     cam.position.copy(this.v4);
-    cam.position.x += (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble;
-    cam.position.y += (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble;
     cam.lookAt(this.camLook);
     cam.rotateZ(this.chaseRoll);
-    // shake as rotation of the lens (a few millimetres of travel is invisible 5 m back; a fraction of
-    // a degree of pitch and roll is what kerbs and bumps look like)
-    this.applyRotShake(car, speed, kmh, (far ? 0.7 : 1) * P.shake);
-    // (a little wider at speed for the rush, never a fisheye)
-    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + P.fov + (P.dynFov ? Math.min(1, kmh / 330) * 9 : 0), dt, !this.initialized);
+    this.applyShake(this.upV.set(0, 1, 0));
+    // (wider at speed for the rush — most of it above 150 km/h, where the speed has to be sold —
+    // never a fisheye)
+    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + P.fov + (P.dynFov ? dynFov(kmh) * 10 : 0), dt, !this.initialized);
     this.initialized = true;
   }
   private chasePitch = 0;
   private chaseRoll = 0;
 
-  /** band-limited pitch / yaw / roll shake in the camera's own frame: speed buzz, kerbs, grass, impacts */
-  private applyRotShake(car: CarPhysics, speed: number, kmh: number, k: number) {
-    const t = this.shakeT;
-    const buzz = Math.min(1, kmh / 330) * 0.0009;
-    const kerb = car.onKerb ? 0.0062 * Math.min(1, speed / 25) : 0;
-    const grass = car.offTrack ? 0.011 * Math.min(1, speed / 20) : 0;
-    const hit = this.impulse * 0.045;
-    const a = (buzz + kerb + grass + hit) * k;
-    if (a < 1e-5) return;
-    // sums of incommensurate sines: noise-like, but smooth frame to frame
-    const n1 = Math.sin(t * 37.1) * 0.6 + Math.sin(t * 61.7 + 1.3) * 0.3 + Math.sin(t * 13.3 + 0.4) * 0.4;
-    const n2 = Math.sin(t * 43.9 + 2.1) * 0.6 + Math.sin(t * 71.3) * 0.25 + Math.sin(t * 17.9 + 3.3) * 0.35;
-    const n3 = Math.sin(t * 29.3 + 4.2) * 0.5 + Math.sin(t * 53.1 + 0.7) * 0.3;
-    // kerbs hammer the car up and down: mostly pitch, some roll
-    this.camera.rotateX(n1 * a);
-    this.camera.rotateZ(n2 * a * 0.7);
-    this.camera.rotateY(n3 * a * 0.35);
-  }
-
-  private onboardShot(dt: number, car: CarPhysics, rig: CarRig, sx: number, sy: number, kmh: number) {
+  private onboardShot(dt: number, car: CarPhysics, rig: CarRig, kmh: number) {
     const cam = this.camera;
     const root = rig.root;
     const mount = MOUNTS[this.mode];
@@ -809,15 +957,27 @@ export class Cameras {
     const up = this.upV.set(0, 1, 0).applyQuaternion(this.q);
     const leftV = this.leftV.set(1, 0, 0).applyQuaternion(this.q);
     if (this.mode === 'cockpit') {
-      // the head moves and tilts against the G-forces, and buzzes with the engine
-      const hx = THREE.MathUtils.clamp(-car.ay * 0.0028, -0.035, 0.035);
-      const hy = THREE.MathUtils.clamp(car.ax * 0.0018, -0.03, 0.03);
+      // the head is thrown about by the G on its neck (a spring with a little overshoot, so the
+      // weight lands and settles): to the outside of the corner, forward and down on the brakes
+      // with a nod, pressed back into the seat on the power
+      const H = this.head, HV = this.headV, tgt = this.headT;
+      tgt[0] = THREE.MathUtils.clamp(-car.ay * 0.0007, -0.032, 0.032);
+      tgt[1] = THREE.MathUtils.clamp(car.ax * 0.00034, -0.018, 0.008);
+      tgt[2] = THREE.MathUtils.clamp(-car.ax * 0.00062, -0.016, 0.034);
+      tgt[3] = THREE.MathUtils.clamp(-car.ax * 0.00042, -0.012, 0.024);
+      if (!this.initialized) for (let i = 0; i < 4; i++) (H[i] = tgt[i]), (HV[i] = 0);
+      const w = 9.5;
+      const n = Math.min(12, Math.ceil(dt * 240 - 1e-6));
+      for (let k = 0; k < n; k++) {
+        const h = dt / n;
+        for (let i = 0; i < 4; i++) {
+          HV[i] += (w * w * (tgt[i] - H[i]) - w * HV[i]) * h;
+          H[i] += HV[i] * h;
+        }
+      }
       const hr = THREE.MathUtils.clamp(-car.ay * 0.0028, -0.07, 0.07);
-      this.headX += (hx - this.headX) * ease(dt, 8);
-      this.headY += (hy - this.headY) * ease(dt, 8);
       this.headRoll += (hr - this.headRoll) * ease(dt, 6);
-      const buzz = Math.sin(this.shakeT * car.rpm * 0.05) * 0.0006 * Math.min(1, car.rpm / 11000);
-      this.v3.addScaledVector(leftV, this.headX).addScaledVector(up, this.headY + buzz);
+      this.v3.addScaledVector(leftV, H[0]).addScaledVector(up, H[1]).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), H[2]);
       // the driver's neck holds the horizon: most of the chassis roll (and the banking) is taken
       // out, and only a hint of the head's own lean against the G is left in
       const worldUp = this.v5.set(0, 1, 0);
@@ -827,8 +987,6 @@ export class Cameras {
       // the driver's own eyes: the camera rides the head (it leans against the G, nods under
       // braking and turns into the corners — see CarRig.setG), with the engine's buzz through the
       // seat and only a little of the chassis roll taken out by the neck
-      const buzz = Math.sin(this.shakeT * car.rpm * 0.05) * 0.0011 * Math.min(1, car.rpm / 11000);
-      this.v3.addScaledVector(up, buzz);
       up.lerp(this.v5.set(0, 1, 0), this.prefs.horizon * 0.45).normalize();
     }
     if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
@@ -840,9 +998,7 @@ export class Cameras {
     // hoop frames the top of the picture, the centre pillar splits it, the front tyres sit at the
     // sides and the wheel's screen and shift lights fill the bottom — the real onboard proportions
     if (this.mode === 'cockpit') this.v3.addScaledVector(up, COCKPIT_EYE_UP).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
-    const shakeK = (mount ? mount.shake : 0.4) * this.prefs.shake;
     cam.position.copy(this.v3);
-    cam.position.addScaledVector(up, sy * shakeK).addScaledVector(leftV, sx * shakeK);
     const f = this.fV;
     let lift: number;
     if (mount) {
@@ -860,17 +1016,18 @@ export class Cameras {
       this.headLook = this.initialized ? this.headLook + (lookT - this.headLook) * ease(dt, 4.5) : lookT;
       f.addScaledVector(leftV, this.headLook).normalize();
     }
-    if (this.mode === 'cockpit') lift = COCKPIT_LIFT;
+    // (the head's nod on the brakes tips the look down a touch)
+    if (this.mode === 'cockpit') lift = COCKPIT_LIFT - this.head[3] * 20;
     const look = this.v4.copy(this.v3).addScaledVector(f, 20).addScaledVector(up, lift);
     cam.up.copy(up);
     cam.lookAt(look);
     cam.up.set(0, 1, 0);
-    // bolted to the car: kerbs and bumps come through as a fine vibration of the view
-    this.applyRotShake(car, Math.max(0, car.vx), kmh, (mount ? mount.shake : this.mode === 'helmet' ? 1.25 : 0.6) * 0.6 * this.prefs.shake);
+    // riding with the car: the mount (or the head) sways and buzzes with the road (ringShake)
+    this.applyShake(up);
     // (a touch narrower than before: the halo, the wheel and the T-cam's airbox read at their real
     // size instead of shrinking into a fisheye)
     const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? COCKPIT_FOV : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
-    this.setFov(fovFor(baseFov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? Math.min(1, kmh / 330) * 4 : 0), dt, !this.initialized);
+    this.setFov(fovFor(baseFov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? dynFov(kmh) * 4.5 : 0), dt, !this.initialized);
     this.initialized = true;
   }
 

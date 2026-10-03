@@ -37,7 +37,12 @@ export interface Assists {
   abs: boolean;
   stability: boolean;
   autoGear: boolean;
-  /** arcade handling: the car goes where the wheels point, up to a generous grip limit, without sliding */
+  /**
+   * Assisted handling (the menu's "Arcade"): the full simulation underneath — weight transfer,
+   * trail-brake rotation, wheelspin on the exit, kerbs, the wet — on more generous tyres, with a
+   * slide catcher and turn-in help of limited authority (see ARCADE_*), so the car moves like an F1
+   * car but a keyboard can hold it; an abused one still snaps.
+   */
   arcade?: boolean;
 }
 
@@ -83,8 +88,22 @@ export interface CarSpec {
   halfWidth: number;
 }
 
-/** extra deceleration (m/s²) the arcade model's brakes give at full pedal on a dry track */
-const ARCADE_BRAKE = 18.5;
+/** extra deceleration (m/s²) the assisted model's brakes give at full pedal on a dry track */
+const ARCADE_BRAKE = 5;
+/** assisted handling: tyre grip multiplier (the F1 games' generous-but-real limit) */
+const ARCADE_GRIP = 1.13;
+/**
+ * Assisted handling's slide catcher: the rear may slide this far (rad) untouched — the car visibly
+ * rotates on entry and steps out on the power — then the slide is pulled back toward the line the
+ * rear wheels roll along, at most ARCADE_CATCH (m/s² of sideways velocity change) plus a yaw
+ * moment of at most ARCADE_CATCH_M (N·m): enough for a lively car, not for an abused one.
+ */
+const ARCADE_SLIP = 0.11;
+const ARCADE_CATCH = 9;
+const ARCADE_CATCH_M = 9000;
+/** turn-in help once the front tyres pass their peak (N·m per rad/s short of the steering's path, and its cap) */
+const ARCADE_TURN = 9000;
+const ARCADE_TURN_M = 3500;
 
 export const F1_SPEC: CarSpec = {
   mass: 800,
@@ -193,6 +212,48 @@ export function wetGrip(type: number, wet: number): number {
   return t[i] + (t[i + 1] - t[i]) * f;
 }
 
+/**
+ * Road surface under a wheel (m): a fixed, per-circuit relief — every lap the car hits the same
+ * ripples in the same braking zones, the way an onboard shows the Lesmo bumps or Austin's. Value
+ * noise in three octaves (≈2, 7 and 25 m), rougher in the last 180 m before each corner (braking
+ * ripples) and on the circuits known for it. Read only for the chassis motion the cameras see.
+ */
+const ROUGH: Record<string, number> = { austin: 1.7, montreal: 1.35, melbourne: 1.25, interlagos: 1.35, mexico: 1.2, monza: 1.15, silverstone: 1.1, spa: 1.1, zandvoort: 1.1 };
+const roughCache = new WeakMap<Track, Float32Array>();
+function roughness(track: Track): Float32Array {
+  let r = roughCache.get(track);
+  if (r) return r;
+  const n = Math.max(1, Math.floor(track.length));
+  r = new Float32Array(n).fill(ROUGH[track.def?.id ?? ''] ?? 1);
+  for (const c of track.corners ?? []) {
+    for (let d = 0; d < 180; d++) {
+      const i = (((Math.floor(c.sStart) - d) % n) + n) % n;
+      r[i] *= 1 + 0.9 * (1 - d / 180);
+    }
+  }
+  roughCache.set(track, r);
+  return r;
+}
+/** integer hash → −1 … 1 (cheap: every car runs this for four wheels at the physics rate) */
+function hash1(i: number): number {
+  let h = Math.imul(i | 0, 0x27d4eb2d) ^ 0x165667b1;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h & 0xffff) / 32767.5 - 1;
+}
+function vnoise(x: number): number {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * (3 - 2 * f);
+  return hash1(i) + (hash1(i + 1) - hash1(i)) * u;
+}
+export function roadBump(track: Track, s: number, lat: number): number {
+  const r = roughness(track);
+  const k = r[Math.floor(track.wrap(s)) % r.length] ?? 1;
+  const l = lat * 0.37;
+  return k * (0.0011 * vnoise(s / 2.1 + l) + 0.0019 * vnoise(s / 7.3 + 31 + l * 0.5) + 0.0028 * vnoise(s / 25 + 77));
+}
+
 /** grip multiplier from tyre temperature: peaks in the working window */
 export function tempGrip(T: number, opt: number): number {
   const x = (T - opt) / (T < opt ? 40 : 30);
@@ -221,7 +282,7 @@ const DURABILITY = 1.35;
 
 /** transient yaw damping (tyre carcass lag): time constant (s) and gain (N·m per rad/s) */
 const YAW_LAG_T = 0.12;
-const YAW_LAG_DAMP = 16000;
+const YAW_LAG_DAMP = 24000;
 
 // wheel order: 0 FL, 1 FR, 2 RL, 3 RR
 const FRONT = [true, true, false, false];
@@ -316,6 +377,13 @@ export class CarPhysics {
   readonly slipAngle = [0, 0, 0, 0];
   readonly surface = [0, 0, 0, 0];
   private readonly kerbPhase = [0, 0, 0, 0];
+  /** time since each wheel struck a kerb / ran off the road (s), and how hard (0 … 1) */
+  private readonly strikeT = [9, 9, 9, 9];
+  private readonly strikeA = [0, 0, 0, 0];
+  private readonly prevSurf = [0, 0, 0, 0];
+  /** where each wheel is on the track (s, lateral) this step */
+  private readonly wS = [0, 0, 0, 0];
+  private readonly wL = [0, 0, 0, 0];
   private readonly wx: number[];
   private readonly wy: number[];
 
@@ -345,10 +413,23 @@ export class CarPhysics {
   heave = 0;
   private pitchV = 0;
   private rollV = 0;
+  /** the sprung part of the chassis pose (pitch/roll/heave add the road's direct share) */
+  private pitchS = 0;
+  private rollS = 0;
+  private heaveS = 0;
   /** yaw rate averaged over the tyre lag (see YAW_LAG_T) */
   private rLag = 0;
   private heaveV = 0;
-  kerbPhaseVis = 0;
+  /**
+   * Road input for the cameras: how hard the road is shaking the chassis (RMS vertical speed of the
+   * wheels' road input over the last ~50 ms, m/s — bumps, kerb ridges, strikes, the grass) and the
+   * hardest wheel strike since the camera last took it (0 … 1; the camera zeroes it). Camera mounts
+   * and the driver's head ring with these.
+   */
+  roadVel = 0;
+  strike = 0;
+  private roadVel2 = 0;
+  private readonly roadZ = [0, 0, 0, 0];
   contact: Contact = { wallHit: 0, wallSide: 0 };
 
   // tyre curve constants
@@ -554,6 +635,19 @@ export class CarPhysics {
       const sw = this.s + fwdAlong * along - Math.sin(this.relYaw) * side;
       const sc = track.surfaceAt(sw, lat);
       this.surface[i] = sc;
+      this.wS[i] = sw;
+      this.wL[i] = lat;
+      // a wheel climbing onto a kerb (or dropping off the road) at speed is a strike: the tyre
+      // spikes, then the wheel goes light for a few hundredths as it rebounds
+      if (sc !== this.prevSurf[i] && (sc === SURF.KERB || sc === SURF.GRASS || sc === SURF.GRAVEL) && this.vx > 8) {
+        const a = Math.min(1, this.vx / 45) * (sc === SURF.KERB ? 1 : 0.6);
+        if (this.strikeT[i] > 0.12 || a > this.strikeA[i]) {
+          this.strikeT[i] = 0;
+          this.strikeA[i] = a;
+          this.strike = Math.max(this.strike, a);
+        }
+      }
+      this.prevSurf[i] = sc;
       this.wetW[i] = this.weather ? this.weather.wetnessAt(lat, track.racingLineAt(sw)) : 0;
       if (sc === SURF.KERB) onKerb = true;
       if (!(sc === SURF.GRASS || sc === SURF.GRAVEL || sc === SURF.ASPHALT)) allOff = false;
@@ -602,6 +696,11 @@ export class CarPhysics {
         this.kerbPhase[i] += (v * dt * Math.PI * 2) / 1.05;
         this.load[i] *= 1 + 0.32 * Math.sin(this.kerbPhase[i]);
       }
+      // the strike: a spike, then the wheel hops light (≈13 Hz, gone in a tenth) — on one side of the
+      // car that is a yaw kick the driver feels, and on the power or the brakes it can break traction
+      const st = this.strikeT[i];
+      if (st < 0.25) this.load[i] *= 1 + 0.75 * this.strikeA[i] * Math.exp(-st * 16) * Math.sin(st * Math.PI * 2 * 13);
+      this.strikeT[i] = st + dt;
       if (this.load[i] < 40) this.load[i] = 40;
     }
 
@@ -684,8 +783,9 @@ export class CarPhysics {
     const ap = sp.slipAnglePeak;
     const apR = sp.slipAnglePeakRear;
     // TC keeps the rear tyre's combined slip under a target: full never lets it
-    // pass the peak (so power can't spin the car), medium allows a slide
-    const tcCombined = this.assists.traction === 'full' ? 0.92 : this.assists.traction === 'medium' ? 1.3 : Infinity;
+    // pass the peak (so power can't spin the car), medium allows a slide — a bigger one
+    // where the grip is low (a wet track, cold or worn tyres: medium can't save a stamp there)
+    const tcCombined = this.assists.traction === 'full' ? 0.92 : this.assists.traction === 'medium' ? 1.65 / Math.pow(Math.max(0.45, Math.min(1, this.gripFactor)), 1.3) : Infinity;
     const tcMinSlip = this.assists.traction === 'full' ? 0.12 : 0.75;
     const cd = Math.cos(delta);
     const sd = Math.sin(delta);
@@ -715,7 +815,7 @@ export class CarPhysics {
       const suspGrip = sd8 >= 0.999 ? 0.3 : 1 - 0.4 * sd8;
       const cond = weatherGrip * tGrip * wearGrip * this.compoundGrip * suspGrip;
       gripSum += cond;
-      const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond;
+      const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond * (this.assists.arcade ? ARCADE_GRIP : 1);
       const Fmax = muI * Fz;
 
       let td = Tdrive[i];
@@ -782,6 +882,8 @@ export class CarPhysics {
       this.tyre(k1 / kp, sy, Fmax, tmp);
       let Fl = tmp[0];
       let Ft = tmp[1];
+      // a kerb's ramp shoves the struck wheel back toward the track (lateral + = right: push left)
+      if (this.strikeT[i] < 0.12 && sc === SURF.KERB) Ft += Math.sign(this.wL[i]) * 0.32 * Fz * this.strikeA[i] * Math.exp(-this.strikeT[i] * 22);
       // rolling resistance and bogging in gravel/grass
       Fl -= Math.sign(vl) * Fz * (SURF_RR[sc] + SURF_RR_V[sc] * Math.abs(vl) + (sd8 >= 0.999 ? 0.22 : 0));
       Ft -= vt * SURF_BOG[sc] * Fz * 0.01;
@@ -862,14 +964,28 @@ export class CarPhysics {
     this.vy += (ayBody - this.vx * this.r) * dt;
     this.r += (Mz / sp.iz) * dt;
 
-    // arcade handling: rotate at the rate the steering asks for (capped by grip, far less on the grass)
-    // and keep the rear axle from sliding, so the car holds the corner instead of pushing or spinning
-    if (this.assists.arcade && this.vx > 2) {
-      const L = sp.a + sp.b;
-      const cap = ((this.offTrack ? 0.55 : 1) * Math.max(this.lateralGrip(this.vx) * 1.6, 22)) / this.vx;
+    // assisted handling: the simulation stays in charge — this only leans on it. The rear's slip
+    // angle past ARCADE_SLIP is pulled back toward rolling (sideways velocity toward r·b, and a yaw
+    // moment against the over-rotation), with a limited authority; a front that pushes gets a little
+    // turn-in moment toward the path the wheels ask for (capped by the grip there is)
+    if (this.assists.arcade && this.vx > 4 && !this.reverse) {
+      const aRear = Math.atan2(this.vy - sp.b * this.r, this.vx);
+      const over = Math.abs(aRear) - ARCADE_SLIP;
+      if (over > 0) {
+        const k = Math.min(1, over / 0.09);
+        // (it leans on the tyres: on a wet or cold track it has less to lean on)
+        const g = Math.pow(Math.min(1, this.gripFactor), 1.5);
+        const dvy = (sp.b * this.r - this.vy) * Math.min(1, dt * 7 * k);
+        this.vy += Math.max(-ARCADE_CATCH * g * dt, Math.min(ARCADE_CATCH * g * dt, dvy));
+        // aRear > 0: the rear is sliding out to the left → the car is rotating right too fast → push it left (+Mz)
+        this.r += (Math.sign(aRear) * Math.min(ARCADE_CATCH_M * g, over * 60000) * dt) / sp.iz;
+      }
+      const cap = (this.lateralGrip(this.vx) * ARCADE_GRIP * (this.offTrack ? 0.6 : 1)) / this.vx;
       const rT = Math.max(-cap, Math.min(cap, (this.vx * Math.tan(this.steer)) / L));
-      this.r += (rT - this.r) * (1 - Math.exp(-dt * 10));
-      this.vy += (this.r * sp.b - this.vy) * (1 - Math.exp(-dt * 7));
+      const push = Math.min(1, Math.max(0, (this.slipFront - 0.8) / 0.5));
+      if (push > 0 && over < 0 && Math.sign(rT) === Math.sign(this.r || rT) && Math.abs(rT) > Math.abs(this.r)) {
+        this.r += (push * Math.sign(rT) * Math.min(ARCADE_TURN_M, (Math.abs(rT) - Math.abs(this.r)) * ARCADE_TURN) * dt) / sp.iz;
+      }
     }
 
     // settle at a standstill instead of creeping
@@ -912,18 +1028,45 @@ export class CarPhysics {
     const heatIn = brake * Math.max(0, v - 15) * 0.012;
     this.brakeHeat = Math.min(1, Math.max(0, this.brakeHeat + (heatIn - this.brakeHeat * 0.9) * dt * 1.6));
 
-    // ---- suspension (visual springs)
-    const kerbBump = this.onKerb ? Math.sin((this.kerbPhaseVis += v * dt * 6)) * 0.007 * Math.min(1, v / 20) : 0;
-    const offBump = this.offTrack ? (Math.random() - 0.5) * 0.02 * Math.min(1, v / 15) : 0;
-    const pitchT = -this.ax * 0.0024;
-    const rollT = -this.ay * 0.0017;
-    const heaveT = -Math.min(0.03, down * 0.0000011) + kerbBump + offBump;
-    this.pitchV += ((pitchT - this.pitch) * 180 - this.pitchV * 18) * dt;
-    this.rollV += ((rollT - this.roll) * 200 - this.rollV * 20) * dt;
-    this.heaveV += ((heaveT - this.heave) * 260 - this.heaveV * 22) * dt;
-    this.pitch += this.pitchV * dt;
-    this.roll += this.rollV * dt;
-    this.heave += this.heaveV * dt;
+    // ---- suspension (what the chassis visibly does). An F1 car is stiff: ~2.5° of dive at 5 g on
+    // the brakes, ~1.5° of roll at 4 g, squatting ~2 cm on its aero at top speed — springs with a
+    // little overshoot, so the weight visibly settles. Each wheel's road input (the circuit's relief,
+    // kerb ridges, strikes, the grass) reaches the body as heave, pitch and roll; half of it goes
+    // straight through the stiff tyres and dampers, so kerbs chatter the car (and the onboards)
+    const vis = Math.min(1, v / 20);
+    let zF = 0, zR = 0, zLft = 0, zRgt = 0, dzSq = 0;
+    for (let i = 0; i < 4; i++) {
+      const sc = this.surface[i];
+      let z = roadBump(track, this.wS[i], this.wL[i]) * Math.min(1, v / 8);
+      if (sc === SURF.KERB) z += 0.0065 * Math.sin(this.kerbPhase[i]) * vis;
+      else if (sc === SURF.GRASS || sc === SURF.GRAVEL) z += (Math.random() - 0.5) * (sc === SURF.GRAVEL ? 0.03 : 0.018) * Math.min(1, v / 15);
+      const st = this.strikeT[i];
+      if (st < 0.25) z += 0.024 * this.strikeA[i] * Math.exp(-st * 16) * Math.sin(st * Math.PI * 2 * 13);
+      const dz = z - this.roadZ[i];
+      this.roadZ[i] = z;
+      if (i < 2) zF += z / 2;
+      else zR += z / 2;
+      if (i % 2 === 0) zLft += z / 2;
+      else zRgt += z / 2;
+      dzSq += (dz / Math.max(dt, 1e-4)) ** 2 / 4;
+    }
+    this.roadVel2 += (dzSq - this.roadVel2) * Math.min(1, dt / 0.05);
+    this.roadVel = Math.sqrt(this.roadVel2);
+    const roadPitch = -(zF - zR) / L;
+    const roadRoll = -(zLft - zRgt) / ((sp.trackF + sp.trackR) / 2);
+    const roadHeave = (zF + zR) / 2;
+    const pitchT = Math.max(-0.035, Math.min(0.05, -this.ax * 0.00095)) + roadPitch * 0.5;
+    const rollT = Math.max(-0.04, Math.min(0.04, -this.ay * 0.00068)) + roadRoll * 0.5;
+    const heaveT = -Math.min(0.022, down * 0.0000011) + roadHeave * 0.5;
+    this.pitchV += ((pitchT - this.pitchS) * 260 - this.pitchV * 19) * dt;
+    this.rollV += ((rollT - this.rollS) * 300 - this.rollV * 21) * dt;
+    this.heaveV += ((heaveT - this.heaveS) * 420 - this.heaveV * 24) * dt;
+    this.pitchS += this.pitchV * dt;
+    this.rollS += this.rollV * dt;
+    this.heaveS += this.heaveV * dt;
+    this.pitch = this.pitchS + roadPitch * 0.5;
+    this.roll = this.rollS + roadRoll * 0.5;
+    this.heave = this.heaveS + roadHeave * 0.5;
   }
 
   shift(dir: number) {
