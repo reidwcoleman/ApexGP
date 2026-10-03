@@ -112,7 +112,9 @@ float sunPCF( sampler2DShadow shadowMap, vec2 mapSize, float bias, float radiusT
   vec3 sc = c.xyz / c.w;
   sc.z += bias;
   if ( sc.z > 1.0 ) return 1.0;
-  float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;
+  // one fixed disc for every pixel: a per-pixel rotation (three's default) needs temporal AA to
+  // resolve, and without it every soft shadow edge — cars, walls, columns — showed a checkerboard dither
+  float phi = 0.6;
   vec2 r = vec2( radiusTexels ) / vec2( mapSize.x * 2.0, mapSize.y );
   float s = 0.0;
   if ( taps > 5 ) {
@@ -195,7 +197,10 @@ export function installSunShadowChunk() {
     console.warn('[env] getSunShadow not found in shadowmap_pars_fragment — using three default cascades');
     return;
   }
-  THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(re, GET_SUN_SHADOW);
+  // (the same for three's own PCF on the spot and point lights)
+  THREE.ShaderChunk.shadowmap_pars_fragment = chunk
+    .replace(re, GET_SUN_SHADOW)
+    .replace(/float phi = interleavedGradientNoise\( gl_FragCoord\.xy \) \* PI2;/g, 'float phi = 0.6;');
   for (const key of Object.keys(THREE.ShaderLib)) {
     const sh = (THREE.ShaderLib as Record<string, { uniforms: Record<string, THREE.IUniform> }>)[key];
     if (sh && sh.uniforms && 'sunLights' in sh.uniforms) {

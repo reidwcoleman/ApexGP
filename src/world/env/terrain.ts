@@ -92,8 +92,9 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uSqO: { value: new THREE.Vector2() },
     uSqS: { value: new THREE.Vector2(1, 1) },
     uCenter: { value: new THREE.Vector2() },
-    uLawn: { value: lin(0x4f7f35) },
-    uMeadow: { value: lin(0x6b7043) },
+    // (a deeper, duller lawn than a game's: verges and parkland as camera footage shows them)
+    uLawn: { value: lin(0x46692f) },
+    uMeadow: { value: lin(0x636840) },
     uStraw: { value: lin(0x958a5a) },
     uGrassDark: { value: lin(0x3e4f28) },
     uLitter: { value: lin(0x4e3d2a) },

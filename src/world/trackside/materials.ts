@@ -782,11 +782,11 @@ float gStripe = 0.0;
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.61, 0.17));
   float clump = texture2D(uMacro, vTrk / 6.0 + vec2(0.7, 0.2)).b;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
-  // (the saturated, well-watered green of a circuit's verges on TV, not a field's olive)
-  col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 1.12) * vec3(0.96, 1.2, 0.78);
+  // (the deep, slightly dull green of real verges in camera footage — not a game's lawn green)
+  col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.92) * vec3(0.92, 1.0, 0.74) * 0.86;
   // drier, yellower patches (fewer when it rains)
-  float dry = (smoothstep(0.55, 0.85, mB.b) * 0.6 + smoothstep(0.6, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
-  col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * 0.5);
+  float dry = (smoothstep(0.5, 0.85, mB.b) * 0.6 + smoothstep(0.55, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
+  col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * 0.6);
   // worn / muddy strip right next to a hard edge (vA1.y = metres from the inner edge)
   float wear = 1.0 - smoothstep(0.0, 0.5 + 0.6 * mB.b, vA1.y);
   col = mix(col, vec3(0.06, 0.05, 0.035), wear * 0.55);

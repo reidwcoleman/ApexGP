@@ -118,7 +118,9 @@ varying float vLeafL;
 varying float vAOL;
 void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
   IncidentLight dl = directLight;
-  dl.color *= mix( 1.0, mix( 0.62, 1.0, vAOL ), vLeafL );
+  // (sun on the outside of a crown is strong — the bright, warm tops the footage shows — and the
+  // inside sits in its own shade)
+  dl.color *= mix( 1.0, mix( 0.5, 1.35, vAOL ), vLeafL );
   RE_Direct_Physical( dl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   if ( vLeafL > 0.5 ) {
     float VL = saturate( dot( -geometryViewDir, directLight.direction ) );
@@ -133,7 +135,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
     reflectedLight.directDiffuse += dl.color * tc * vec3( 1.0, 1.0, 0.5 ) * through * 0.62;
     // soft wrap on the lit side: a leafy mass never shows a hard N·L terminator
     float wrapL = saturate( ( dot( geometryNormal, directLight.direction ) + 0.35 ) / 1.35 ) - saturate( dot( geometryNormal, directLight.direction ) );
-    reflectedLight.directDiffuse += dl.color * dc * wrapL * 0.45 * RECIPROCAL_PI;
+    reflectedLight.directDiffuse += dl.color * dc * wrapL * 0.25 * RECIPROCAL_PI;
   }
 }
 #undef RE_Direct
@@ -220,12 +222,13 @@ if ( leafK > 0.5 ) {
   // cards turning edge-on thin out instead of showing smeared leaves
   vec3 fN = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
   float edgeOn = abs( dot( fN, normalize( vViewPosition ) ) );
-  float thr = 0.5 + 0.55 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
+  // (a little more sky through the crowns: real foliage is full of holes, not a solid lump)
+  float thr = 0.57 + 0.5 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
   if ( lt.a * ( 1.0 + lod * 0.32 ) < thr ) discard;
   // foliage as camera footage shows it: a dark olive mass, not a bright game green (real leaf albedo
   // sits near 0.05–0.1; the atlas was painted brighter and more saturated than that)
   vec3 lc = lt.rgb;
-  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.78 ) * vec3( 0.84, 0.8, 0.72 );
+  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.8 ) * vec3( 0.9, 0.86, 0.74 );
   diffuseColor.rgb *= lc;
 } else {
   vec4 bk = texture2D( uBark, vTUv );
@@ -561,7 +564,7 @@ varying float vIFade;
 varying float vIFlip;
 ${GET_TANGENT_FRAME}`,
       )
-      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.62, 1.0, vAOL )', 'mix( 0.62, 1.0, gImpAO )')}`)
+      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.5, 1.35, vAOL )', 'mix( 0.5, 1.35, gImpAO )')}`)
       .replace(
         '#include <map_fragment>',
         `
@@ -573,6 +576,8 @@ vec4 ia = texture2D( uImpA, vIUv );
   if ( vIFade < 1.0 && vIFade <= ignF( gl_FragCoord.xy ) ) discard;
 }
 diffuseColor.rgb = ia.rgb * ia.rgb * vITint;
+// (the same footage foliage tint as the 3D trees, so near and far match)
+diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.8 ) * vec3( 0.9, 0.86, 0.74 );
 `,
       )
       .replace(
