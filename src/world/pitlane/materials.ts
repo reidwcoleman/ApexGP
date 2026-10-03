@@ -219,11 +219,14 @@ export function glassMaterial(): THREE.MeshStandardMaterial {
     float blind = step(0.8, pcHash(vec2(room, 7.0 + vGl.y)));
     inner *= mix(1.0, 0.25, blind);
     float fres = pow(1.0 - clamp(dot(-V, N), 0.0, 1.0), 4.0);
-    totalEmissiveRadiance += inner * (1.0 - fres) * 0.9;
+    // by day an office's lights are nothing next to the sun outside: the rooms read dim behind the
+    // reflections (a camera exposed for the circuit barely sees the light panels); after dark they glow
+    float dayDim = mix(0.3, 1.0, clamp((uSignGlow - 0.12) / 0.88, 0.0, 1.0));
+    totalEmissiveRadiance += inner * (1.0 - fres) * 0.9 * dayDim;
   }`,
       );
   };
-  m.customProgramCacheKey = () => 'pit-glass-v1';
+  m.customProgramCacheKey = () => 'pit-glass-v2';
   return m;
 }
 

@@ -109,8 +109,12 @@ export class GeoBuilder {
     this.cr = r; this.cg = g; this.cb = b;
     return this;
   }
-  mat(rough: number, metal = 0, emit = 0): this {
-    this.rough = rough; this.metal = metal; this.emit = emit;
+  /**
+   * `cls`: the weathering the props/print shaders add (WEATHER.*), carried in the integer part
+   * of the roughness channel (0 = none)
+   */
+  mat(rough: number, metal = 0, emit = 0, cls = 0): this {
+    this.rough = cls + Math.min(rough, 0.995); this.metal = metal; this.emit = emit;
     return this;
   }
 
@@ -270,6 +274,9 @@ export class ChunkSet {
     return { meshes, triangles, byKey };
   }
 }
+
+/** surface weathering classes for GeoBuilder.mat (see materials.ts PROP_WEATHER) */
+export const WEATHER = { NONE: 0, CONCRETE: 1, STEEL: 2, PAINTED_WALL: 3, PLASTIC: 4 } as const;
 
 /** Orthonormal local frame used to place props: x = right, y = up, z = forward. */
 export class Frame3 {

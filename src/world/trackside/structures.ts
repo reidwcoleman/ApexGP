@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VERGE } from '../Track.ts';
-import { Frame3, beam, box, cylinder, disc, printQuadX, printQuadZ, type GeoBuilder } from './builder.ts';
+import { Frame3, WEATHER, beam, box, cylinder, disc, printQuadX, printQuadZ, type GeoBuilder } from './builder.ts';
 import { styleOf, type Ctx } from './context.ts';
 import { SPONSORS, type PrintAtlas } from './atlas.ts';
 import { Rng } from './noise.ts';
@@ -223,12 +223,12 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
   const ground = (x: number) => t.point(s, x, 0, A).y - F.o.y;
   const TOP = 8.6, BOT = 7.2;
 
-  props.color(0x1d1f23).mat(0.45, 0.75, 0);
+  props.color(0x1d1f23).mat(0.45, 0.35, 0, WEATHER.STEEL);
   latticeColumn(props, F, farX, 0, 0.9, ground(farX), TOP + 0.1, 0.13);
   latticeColumn(props, F, wallX, 0, 0.45, ground(wallX), TOP + 0.1, 0.1);
-  props.color(0x6d6f72).mat(0.8, 0.2, 0);
+  props.color(0x6d6f72).mat(0.8, 0, 0, WEATHER.CONCRETE);
   box(props, F, farX, ground(farX) + 0.15, 0, 1.3, 0.3, 1.3);
-  props.color(0x1d1f23).mat(0.45, 0.75, 0);
+  props.color(0x1d1f23).mat(0.45, 0.35, 0, WEATHER.STEEL);
   truss(props, F, x0 - 0.3, x1 + 0.3, BOT, TOP - BOT, 1.0, 0.14);
 
   // sponsor banner across the truss, both faces
@@ -244,7 +244,7 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
     printQuadZ(print, F, 0.56, x, x + w, BOT + 0.02, TOP - 0.02, 1, c);
   }
   // timing screen above the centre
-  props.color(0x15171a).mat(0.5, 0.5, 0);
+  props.color(0x15171a).mat(0.5, 0.35, 0, WEATHER.STEEL);
   box(props, F, 0, TOP + 1.25, 0.12, 7.6, 2.1, 0.3, 0b111111);
   for (const x of [-3.2, 3.2]) box(props, F, x, TOP + 0.1, 0.12, 0.15, 0.4, 0.15);
   print.rgb(1, 1, 1).mat(0.3, 0, 1.6);
@@ -255,7 +255,7 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
   // five light columns hanging under the truss, facing the grid (−z)
   const cols = [-2.4, -1.2, 0, 1.2, 2.4];
   cols.forEach((cx, c) => {
-    props.color(0x0b0b0c).mat(0.4, 0.3, 0);
+    props.color(0x0b0b0c).mat(0.4, 0.3, 0, WEATHER.STEEL);
     box(props, F, cx, BOT - 1.05, -0.35, 0.62, 2.0, 0.34, 0b111111);
     box(props, F, cx, BOT - 0.02, -0.35, 0.12, 0.08, 0.12);
     for (let r = 0; r < 4; r++) {
@@ -268,7 +268,7 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
     }
   });
   // repeater column on the far leg, facing the back of the grid
-  props.color(0x0b0b0c).mat(0.4, 0.3, 0);
+  props.color(0x0b0b0c).mat(0.4, 0.3, 0, WEATHER.STEEL);
   box(props, F, farX + pit.side * 0.9, 4.2, -0.2, 0.5, 1.6, 0.3, 0b111111);
   cols.forEach((_, c) => {
     lamps.s0[0] = c;
@@ -289,51 +289,90 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const xr = reach(R);
   frameAt(ctx, s, 0);
   const ground = (x: number) => t.point(s, x, 0, A).y - F.o.y;
-  const Y0 = 6.4, H = 1.6, D = 2.6;
+  // walkway level, truss depth (the parapet the sponsors hang on), deck width
+  const Y0 = 6.4, H = 2.2, D = 2.8;
+  const STEEL = 0x8d9298, DARK = 0x2a2d31;
 
-  // stair towers: a concrete core with a steel stair cage
+  // ---- stair towers: an open steel frame round a switchback stair on a concrete pad
   for (const x of [xl, xr]) {
     const g = ground(x);
     const away = Math.sign(x);
-    const tx = x + away * 1.6;
-    props.color(0xbdbab2).mat(0.85, 0, 0);
-    box(props, F, tx, (g + Y0 + H) / 2, 0, 3.2, Y0 + H - g, 3.0, 0b110111);
-    props.color(0x2b2e33).mat(0.5, 0.6, 0);
-    box(props, F, tx, Y0 + H + 0.12, 0, 3.5, 0.24, 3.3, 0b111111);
-    // stair flights on the outer face
-    props.color(0x55595e).mat(0.5, 0.6, 0);
-    for (let k = 0; k < 3; k++) {
-      const y0 = g + k * ((Y0 - g) / 3), y1 = g + (k + 1) * ((Y0 - g) / 3);
-      const zA = k % 2 ? 1.7 : -1.7, zB = -zA;
-      F.p(tx + away * 1.75, y0 + 0.1, zA, A);
-      F.p(tx + away * 1.75, y1, zB, B);
-      beam(props, A, B, 0.9, 0.12);
+    const tx = x + away * 2.0;
+    const TW = 3.6, TD = 3.4;
+    props.color(0xb3afa6).mat(0.88, 0, 0, WEATHER.CONCRETE);
+    box(props, F, tx, g - 0.3, 0, TW + 0.8, 0.9, TD + 0.8, 0b111111);
+    props.color(STEEL).mat(0.5, 0.3, 0, WEATHER.STEEL);
+    const top = Y0 + H + 0.4;
+    for (const cx of [-TW / 2, TW / 2]) for (const cz of [-TD / 2, TD / 2]) box(props, F, tx + cx, (g + top) / 2, cz, 0.22, top - g, 0.22, 0b110111);
+    // ring beams at each landing and X-bracing on the two faces that don't carry the stair
+    const levels = 3;
+    const lh = (Y0 - g) / levels;
+    for (let k = 1; k <= levels; k++) {
+      const y = g + k * lh;
+      box(props, F, tx, y, -TD / 2, TW, 0.24, 0.16, 0b111111);
+      box(props, F, tx, y, TD / 2, TW, 0.24, 0.16, 0b111111);
+      box(props, F, tx - TW / 2, y, 0, 0.16, 0.24, TD, 0b111111);
+      box(props, F, tx + TW / 2, y, 0, 0.16, 0.24, TD, 0b111111);
     }
-    // printed panels on the tower faces
+    for (let k = 0; k < levels; k++) {
+      const y0 = g + k * lh + 0.2, y1 = g + (k + 1) * lh - 0.2;
+      for (const cz of [-TD / 2, TD / 2]) {
+        F.p(tx - TW / 2, y0, cz, A); F.p(tx + TW / 2, y1, cz, B); beam(props, A, B, 0.09, 0.09);
+        F.p(tx + TW / 2, y0, cz, A); F.p(tx - TW / 2, y1, cz, B); beam(props, A, B, 0.09, 0.09);
+      }
+    }
+    // the stair: flights inside the frame, switching back at each landing, with stringers and handrails
+    for (let k = 0; k < levels; k++) {
+      const y0 = g + k * lh, y1 = g + (k + 1) * lh;
+      const zA = k % 2 ? TD / 2 - 0.4 : -TD / 2 + 0.4, zB = -zA;
+      for (const off of [-0.55, 0.55]) {
+        props.color(DARK).mat(0.55, 0.3, 0, WEATHER.STEEL);
+        F.p(tx + off, y0 + 0.15, zA, A); F.p(tx + off, y1, zB, B); beam(props, A, B, 0.08, 0.28);
+        props.color(0xd9d9d6).mat(0.45, 0.2, 0, WEATHER.STEEL);
+        F.p(tx + off, y0 + 1.15, zA, A); F.p(tx + off, y1 + 1.0, zB, B); beam(props, A, B, 0.05, 0.05);
+      }
+      props.color(0x5a5e63).mat(0.7, 0.3, 0, WEATHER.STEEL);
+      F.p(tx, y0 + 0.1, zA, A); F.p(tx, y1 - 0.05, zB, B); beam(props, A, B, 1.1, 0.06);
+      // landing
+      box(props, F, tx, y1 - 0.05, zB + Math.sign(zB) * 0.2, TW - 0.2, 0.1, 1.4, 0b111111);
+    }
+    // printed sponsor panels on the tower's outer faces (mesh-backed), high up
+    props.color(DARK).mat(0.6, 0.2, 0, WEATHER.STEEL);
+    for (const z of [-TD / 2 - 0.1, TD / 2 + 0.1]) box(props, F, tx, Y0 - 1.0, z, TW - 0.1, 1.5, 0.05, 0b111111);
     print.rgb(1, 1, 1).mat(0.55, 0, 0.1);
     const c = atlas.cell('ad' + ((salt * 7 + (x < 0 ? 3 : 11)) % SPONSORS.length));
-    printQuadZ(print, F, -1.52, tx - 1.55, tx + 1.55, Y0 - 1.2, Y0 - 0.43, -1, c);
-    printQuadZ(print, F, 1.52, tx - 1.55, tx + 1.55, Y0 - 1.2, Y0 - 0.43, 1, c);
+    printQuadZ(print, F, -TD / 2 - 0.14, tx - TW / 2 + 0.1, tx + TW / 2 - 0.1, Y0 - 1.7, Y0 - 0.3, -1, c);
+    printQuadZ(print, F, TD / 2 + 0.14, tx - TW / 2 + 0.1, tx + TW / 2 - 0.1, Y0 - 1.7, Y0 - 0.3, 1, c);
   }
-  // deck: a box girder with glazed sides
-  props.color(0x2b2e33).mat(0.55, 0.4, 0);
-  box(props, F, (xl + xr) / 2, Y0 + 0.12, 0, xr - xl + 0.6, 0.24, D, 0b111111);
-  box(props, F, (xl + xr) / 2, Y0 + H + 0.9, 0, xr - xl + 0.6, 0.18, D + 0.4, 0b111111);
-  props.color(0x9fb6c4).mat(0.08, 0.2, 0);
-  for (const z of [-D / 2 + 0.06, D / 2 - 0.06]) box(props, F, (xl + xr) / 2, Y0 + H + 0.35, z, xr - xl, 0.7, 0.03, 0b110011);
-  props.color(0xd8d8d6).mat(0.4, 0.7, 0);
-  for (let x = xl; x <= xr; x += 3) for (const z of [-D / 2, D / 2]) box(props, F, x, Y0 + H * 0.5 + 0.45, z, 0.1, H + 0.9, 0.1, 0b110011);
-  // printed faces
+
+  // ---- the span: two Warren-truss girders carrying the walkway, glazed between them, a roof on top
+  const x0 = xl, x1 = xr;
+  props.color(STEEL).mat(0.48, 0.3, 0, WEATHER.STEEL);
+  truss(props, F, x0, x1, Y0, H, D, 0.2);
+  // walkway slab and the roof deck with its fascia
+  props.color(0x6e7277).mat(0.75, 0.2, 0, WEATHER.STEEL);
+  box(props, F, (x0 + x1) / 2, Y0 - 0.12, 0, x1 - x0 + 0.4, 0.26, D + 0.2, 0b111111);
+  props.color(0xc9cbcc).mat(0.5, 0.3, 0, WEATHER.STEEL);
+  box(props, F, (x0 + x1) / 2, Y0 + H + 0.22, 0, x1 - x0 + 1.0, 0.18, D + 0.9, 0b111111);
+  props.color(DARK).mat(0.5, 0.3, 0, WEATHER.STEEL);
+  for (const z of [-(D + 0.9) / 2, (D + 0.9) / 2]) box(props, F, (x0 + x1) / 2, Y0 + H + 0.12, z, x1 - x0 + 1.0, 0.34, 0.06, 0b110011);
+  // glazing just inside the trusses (upper half: people walking across show as shadows behind it)
+  props.color(0x7f97a6).mat(0.06, 0.6, 0);
+  for (const z of [-D / 2 + 0.14, D / 2 - 0.14]) box(props, F, (x0 + x1) / 2, Y0 + H * 0.68, z, x1 - x0, H * 0.58, 0.03, 0b110011);
+  // sponsor boards hung on the outer faces, lower half, between the truss panels
   const w = 5.6;
-  const count = Math.floor((xr - xl - 0.8) / w);
-  const start = (xl + xr) / 2 - (count * w) / 2;
+  const count = Math.floor((x1 - x0 - 0.8) / w);
+  const start = (x0 + x1) / 2 - (count * w) / 2;
   print.rgb(1, 1, 1).mat(0.55, 0, 0.25);
   for (let k = 0; k < count; k++) {
     const cellA = atlas.cell('ad' + ((k + salt * 5) % SPONSORS.length));
     const cellB = atlas.cell('ad' + ((k * 7 + 3 + salt * 3) % SPONSORS.length));
-    printQuadZ(print, F, -D / 2 - 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, -1, cellA);
-    printQuadZ(print, F, D / 2 + 0.03, start + k * w + 0.05, start + (k + 1) * w - 0.05, Y0 + 0.25, Y0 + H - 0.05, 1, cellB);
+    printQuadZ(print, F, -D / 2 - 0.16, start + k * w + 0.08, start + (k + 1) * w - 0.08, Y0 + 0.08, Y0 + H * 0.42, -1, cellA);
+    printQuadZ(print, F, D / 2 + 0.16, start + k * w + 0.08, start + (k + 1) * w - 0.08, Y0 + 0.08, Y0 + H * 0.42, 1, cellB);
   }
+  // a few lamps under the walkway
+  props.color(0xe8e6df).mat(0.3, 0, 0.6);
+  for (let x = x0 + 3; x < x1 - 2; x += 6) box(props, F, x, Y0 - 0.3, 0, 0.9, 0.06, 0.25, 0b111111);
 }
 
 // ------------------------------------------------------------------ sponsor arches
@@ -377,12 +416,12 @@ function buildArch(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const BOT = 6.9, TOP = 8.5;
 
   // legs and truss: dark painted steel
-  props.color(0x24272c).mat(0.45, 0.7, 0);
+  props.color(0x24272c).mat(0.45, 0.35, 0, WEATHER.STEEL);
   for (const x of [xl, xr]) {
     latticeColumn(props, F, x, 0, 0.8, ground(x), TOP + 0.1, 0.11);
-    props.color(0x777a7d).mat(0.85, 0.1, 0);
+    props.color(0x777a7d).mat(0.85, 0, 0, WEATHER.CONCRETE);
     box(props, F, x, ground(x) + 0.12, 0, 1.2, 0.24, 1.2);
-    props.color(0x24272c).mat(0.45, 0.7, 0);
+    props.color(0x24272c).mat(0.45, 0.35, 0, WEATHER.STEEL);
   }
   truss(props, F, xl - 0.3, xr + 0.3, BOT, TOP - BOT, 0.9, 0.12);
 
@@ -424,9 +463,9 @@ function placePhotographers(ctx: Ctx, out: StructuresOut) {
       const H = 1.3;
       const props = ctx.cs.get(s, 'props');
       frameAt(ctx, s, lat);
-      props.color(0x6c7076).mat(0.5, 0.5, 0);
+      props.color(0x6c7076).mat(0.5, 0.35, 0, WEATHER.STEEL);
       box(props, F, 0, H / 2 - 0.9, 0, 1.2, H + 1.8, 1.2, 0b111111);
-      props.color(0x3a3d42).mat(0.5, 0.6, 0);
+      props.color(0x3a3d42).mat(0.5, 0.35, 0, WEATHER.STEEL);
       box(props, F, -side * 0.55, H + 0.5, 0, 0.05, 1.0, 1.2, 0b111111);
       const pos = t.point(s, lat, H, new THREE.Vector3());
       const to = t.point(s - rng.range(35, 70), 0, 0, new THREE.Vector3()).sub(pos);
@@ -448,22 +487,51 @@ function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
     frameAt(ctx, s, side * off);
     const X = (v: number) => -side * v; // v > 0 → toward the track
     // slab (reaching down so it sits on terrain that may be lower than the run-off)
-    props.color(0x9a9892).mat(0.9, 0, 0);
-    box(props, F, 0, -0.62, 0, 2.6, 1.56, 4.2, 0b111111);
-    // shelter: open-fronted cabin with an orange roof
-    props.color(0xe9e7e1).mat(0.6, 0, 0);
-    box(props, F, X(-0.75), 1.2, 0, 0.12, 2.4, 3.2);
-    box(props, F, X(-0.1), 1.2, -1.55, 1.4, 2.4, 0.1);
-    box(props, F, X(-0.1), 1.2, 1.55, 1.4, 2.4, 0.1);
-    props.color(0xe8641c).mat(0.6, 0.1, 0);
-    box(props, F, X(-0.05), 2.45, 0, 2.0, 0.12, 3.6, 0b111111);
-    props.color(0x2d2f33).mat(0.5, 0.6, 0);
-    for (const z of [-1.7, 1.7]) box(props, F, X(0.85), 1.2, z, 0.08, 2.4, 0.08);
-    // bench + fire extinguisher + broom
-    props.color(0x55595e).mat(0.6, 0.4, 0);
-    box(props, F, X(-0.5), 0.45, 0.2, 0.4, 0.06, 1.8, 0b111111);
-    props.color(0xc41010).mat(0.4, 0.1, 0);
-    cylinder(props, F, X(-0.55), 0, -1.3, 0.09, 0.6, 8);
+    props.color(0x9a9892).mat(0.9, 0, 0, WEATHER.CONCRETE);
+    box(props, F, 0, -0.62, 0, 2.8, 1.56, 4.4, 0b111111);
+    // shelter: a painted steel frame, a solid back and part-solid ends (mesh above), open to the track
+    props.color(0x3a3d42).mat(0.5, 0.4, 0, WEATHER.STEEL);
+    for (const z of [-1.7, 1.7]) {
+      box(props, F, X(0.9), 1.25, z, 0.1, 2.5, 0.1);
+      box(props, F, X(-0.8), 1.25, z, 0.1, 2.5, 0.1);
+      box(props, F, X(0.05), 2.45, z, 1.8, 0.1, 0.08, 0b111111);
+    }
+    props.color(0xe4e2dc).mat(0.6, 0, 0, WEATHER.STEEL);
+    box(props, F, X(-0.8), 1.2, 0, 0.06, 2.3, 3.3);
+    // the end walls: solid to waist height, a grey mesh panel above
+    for (const z of [-1.7, 1.7]) {
+      props.color(0xe4e2dc).mat(0.6, 0, 0, WEATHER.STEEL);
+      box(props, F, X(0.05), 0.55, z, 1.7, 1.1, 0.05);
+      props.color(0x5b5f63).mat(0.7, 0.4, 0, WEATHER.STEEL);
+      box(props, F, X(0.05), 1.75, z, 1.7, 1.3, 0.02, 0b110011);
+    }
+    // ribbed roof, sloping back, an orange fascia facing the track
+    props.color(0xbfc2c4).mat(0.45, 0.5, 0, WEATHER.STEEL);
+    F.p(X(1.15), 2.62, 0, A); F.p(X(-1.05), 2.5, 0, B);
+    beam(props, A, B, 3.8, 0.06);
+    props.color(0x9fa3a6).mat(0.5, 0.5, 0, WEATHER.STEEL);
+    for (let z = -1.8; z <= 1.81; z += 0.3) { F.p(X(1.15), 2.66, z, A); F.p(X(-1.05), 2.54, z, B); beam(props, A, B, 0.06, 0.04); }
+    props.color(0xe8641c).mat(0.55, 0.1, 0, WEATHER.STEEL);
+    box(props, F, X(1.17), 2.55, 0, 0.06, 0.3, 3.9, 0b111111);
+    // kit: bench, two extinguishers, cement-dust bags, a broom against the wall, the flag box
+    props.color(0x55595e).mat(0.6, 0.4, 0, WEATHER.STEEL);
+    box(props, F, X(-0.5), 0.45, 0.3, 0.4, 0.06, 1.6, 0b111111);
+    for (const z of [0.3 - 0.7, 0.3 + 0.7]) box(props, F, X(-0.5), 0.22, z, 0.35, 0.44, 0.05);
+    props.color(0xc41010).mat(0.35, 0.1, 0);
+    cylinder(props, F, X(-0.6), 0, -1.35, 0.09, 0.62, 8);
+    cylinder(props, F, X(-0.38), 0, -1.35, 0.09, 0.62, 8);
+    props.color(0x111111).mat(0.5, 0, 0);
+    cylinder(props, F, X(-0.6), 0.62, -1.35, 0.04, 0.7, 6);
+    cylinder(props, F, X(-0.38), 0.62, -1.35, 0.04, 0.7, 6);
+    props.color(0xcfc6b2).mat(0.95, 0, 0, WEATHER.PLASTIC);
+    for (let k = 0; k < 3; k++) box(props, F, X(0.35 - k * 0.05), 0.12 + k * 0.17, 1.25 - (k % 2) * 0.1, 0.42, 0.16, 0.62, 0b110111);
+    props.color(0x8a6a44).mat(0.8, 0, 0);
+    F.p(X(-0.7), 0.0, 1.5, A); F.p(X(-0.74), 1.35, 1.35, B);
+    beam(props, A, B, 0.035, 0.035);
+    props.color(0x262626).mat(0.8, 0, 0);
+    box(props, F, X(-0.7), 0.06, 1.52, 0.1, 0.12, 0.4);
+    props.color(0x2f5f9a).mat(0.6, 0, 0, WEATHER.PLASTIC);
+    box(props, F, X(-0.55), 0.3, -0.55, 0.45, 0.6, 0.55);
     // post number plate on the roof edge, facing the track
     const num = post.num;
     if (num <= 24) {
@@ -471,7 +539,7 @@ function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
       const uv = atlas.sub('posts' + c, k / 8 + 0.004, (k + 1) / 8 - 0.004, 0.02, 0.98);
       print.rgb(1, 1, 1).mat(0.5, 0, 0.12);
       printQuadX(print, F, X(0.98), -0.3, 0.3, 2.62, 3.82, -side, uv);
-      props.color(0x2d2f33).mat(0.5, 0.6, 0);
+      props.color(0x2d2f33).mat(0.5, 0.35, 0, WEATHER.STEEL);
       box(props, F, X(1.0), 3.2, 0, 0.04, 1.26, 0.66, 0b111111);
     }
     // marshals: two or three, one at the fence watching
@@ -490,7 +558,7 @@ function buildMarshalPosts(ctx: Ctx, atlas: PrintAtlas, out: StructuresOut) {
     const k2 = ctx.wrap(sp);
     const pole = P.backOff[k2] + 0.4;
     frameAt(ctx, sp, side * (P.bar[k2] + pole));
-    props.color(0x2d2f33).mat(0.5, 0.6, 0);
+    props.color(0x2d2f33).mat(0.5, 0.35, 0, WEATHER.STEEL);
     box(props, F, 0, 1.55, 0, 0.1, 3.1, 0.1);
     props.color(0x111214).mat(0.5, 0.2, 0);
     box(props, F, X(0.3), 3.0, 0.0, 1.1, 0.8, 0.14, 0b111111);
@@ -517,7 +585,7 @@ function buildCameras(ctx: Ctx, names: string[]) {
     const props = ctx.cs.get(s, 'props');
     frameAt(ctx, s, side * off);
     const H = 3.6;
-    props.color(0x9ea3a8).mat(0.45, 0.8, 0);
+    props.color(0x9ea3a8).mat(0.45, 0.35, 0, WEATHER.STEEL);
     for (const x of [-0.75, 0.75]) for (const z of [-0.75, 0.75]) box(props, F, x, (H + 1.1 - 1.5) / 2, z, 0.06, H + 1.1 + 1.5, 0.06, 0b110011);
     for (let y = 0.9; y < H; y += 0.9) {
       box(props, F, 0, y, -0.75, 1.5, 0.05, 0.05, 0b111111);
@@ -527,13 +595,13 @@ function buildCameras(ctx: Ctx, names: string[]) {
     }
     props.color(0x6b5a44).mat(0.85, 0, 0);
     box(props, F, 0, H, 0, 1.7, 0.08, 1.7, 0b111111);
-    props.color(0xd6d8da).mat(0.4, 0.7, 0);
+    props.color(0xd6d8da).mat(0.4, 0.35, 0, WEATHER.STEEL);
     box(props, F, 0, H + 1.05, -0.8, 1.6, 0.05, 0.05, 0b111111);
     box(props, F, 0, H + 1.05, 0.8, 1.6, 0.05, 0.05, 0b111111);
     box(props, F, -0.8, H + 1.05, 0, 0.05, 0.05, 1.6, 0b111111);
     box(props, F, 0.8, H + 1.05, 0, 0.05, 0.05, 1.6, 0b111111);
     const X = (v: number) => -side * v;
-    props.color(0x1b1c1e).mat(0.5, 0.3, 0);
+    props.color(0x1b1c1e).mat(0.5, 0.3, 0, WEATHER.STEEL);
     box(props, F, X(0.1), H + 0.75, 0, 0.08, 1.4, 0.08);
     box(props, F, X(0.15), H + 1.55, 0, 0.55, 0.32, 0.26, 0b111111);
     const lensF = new Frame3().copy(F);
@@ -568,9 +636,9 @@ function buildBoards(ctx: Ctx, atlas: PrintAtlas) {
     const print = ctx.cs.get(s, 'print');
     frameAt(ctx, s, side * x);
     F.yaw(side * 0.22); // turn the face a little toward the track
-    props.color(0x8d9196).mat(0.4, 0.8, 0);
+    props.color(0x8d9196).mat(0.4, 0.35, 0, WEATHER.STEEL);
     for (const px of [-size * 0.35, size * 0.35]) box(props, F, px, (yBase + 0.1) / 2, 0.06, 0.07, yBase + 0.1, 0.07);
-    props.color(0x202020).mat(0.6, 0.2, 0);
+    props.color(0x202020).mat(0.6, 0.2, 0, WEATHER.STEEL);
     box(props, F, 0, yBase + size / 2, 0.035, size + 0.04, size + 0.04, 0.04, 0b111111);
     print.rgb(1, 1, 1).mat(0.5, 0, 0.15);
     printQuadZ(print, F, 0, -size / 2, size / 2, yBase, yBase + size, -1, uv);
@@ -612,7 +680,7 @@ function buildBillboards(ctx: Ctx, atlas: PrintAtlas, spots: [string, number][])
     frameAt(ctx, s, side * off);
     F.yaw(side * 0.5);
     const W = 12, H = 3, Y = 2.4;
-    props.color(0x3a3d42).mat(0.5, 0.6, 0);
+    props.color(0x3a3d42).mat(0.5, 0.35, 0, WEATHER.STEEL);
     for (const x of [-W * 0.35, 0, W * 0.35]) box(props, F, x, Y / 2 + H / 2, 0.25, 0.18, Y + H, 0.18);
     box(props, F, 0, Y + H / 2, 0.12, W + 0.2, H + 0.2, 0.12, 0b111111);
     print.rgb(1, 1, 1).mat(0.55, 0, 0.2);

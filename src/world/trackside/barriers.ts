@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Frame3, box, beam, cylinder, prism, type GeoBuilder } from './builder.ts';
+import { Frame3, WEATHER, box, beam, cylinder, prism, type GeoBuilder } from './builder.ts';
 import type { Ctx, SidePlan } from './context.ts';
 import { hash2 } from './noise.ts';
 import { BELTS, SPONSORS, type PrintAtlas, type UVRect } from './atlas.ts';
@@ -225,10 +225,10 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     // ---------------- front layer
     if (front === 'tyres') {
       const pal = BELT_PAL[Math.max(0, P.palette[i]) % BELT_PAL.length];
-      print.rgb(1, 1, 1).mat(0.82, 0, 0);
+      print.rgb(1, 1, 1).mat(0.82, 0, 0, WEATHER.PLASTIC);
       const D = 1.3, H = 1.0;
       strip(print, rA, rB, 0, 0.0, 0, H, -1, 0, 0, 0, { len: 4, cell: (k) => atlas.cell(pal[((k % pal.length) + pal.length) % pal.length]), vy0: 0, vy1: 1 });
-      print.mat(0.9, 0, 0);
+      print.mat(0.9, 0, 0, WEATHER.PLASTIC);
       strip(print, rA, rB, 0, H, D, H, 0, 1, 0, 0, { len: 4, cell: () => atlas.cell('tyre_top'), vy0: 0.05, vy1: 0.95 });
       strip(print, rA, rB, D, H, D, 0, 1, 0, 0, 0, { len: 4, cell: () => atlas.cell('tyre_side'), vy0: 1, vy1: 0 });
       if (P.front[W(rA - 1)] !== 'tyres' || !prevOk) cap(print, rA, 0, D, 0, H, -1, atlas.sub('tyre_side', 0, 0.35, 0, 1));
@@ -239,7 +239,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     if (isWallK(kind)) {
       const H = kind === 'pitwall' ? 1.1 : 1.05;
       const T = kind === 'pitwall' ? 0.6 : 0.45;
-      print.rgb(1, 1, 1).mat(0.7, 0, 0);
+      print.rgb(1, 1, 1).mat(0.7, 0, 0, WEATHER.PAINTED_WALL);
       const plainWall = kind === 'concrete' && front !== 'none';
       const art = P.art[i];
       const wallCell = (k: number) => {
@@ -250,9 +250,9 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
         return adCell(k, sd * 13);
       };
       strip(print, rA, rB, 0, 0, 0, H, -1, 0, xb0, xb1, { len: 4, cell: wallCell, vy0: 0, vy1: 1 });
-      props.color(0xa9a7a0).mat(0.88, 0, 0);
+      props.color(0xa9a7a0).mat(0.88, 0, 0, WEATHER.CONCRETE);
       strip(props, rA, rB, 0, H, T, H, 0, 1, xb0, xb1);
-      print.rgb(0.95, 0.95, 0.95).mat(0.9, 0, 0);
+      print.rgb(0.95, 0.95, 0.95).mat(0.9, 0, 0, WEATHER.CONCRETE);
       strip(print, rA, rB, T, H, T, 0, 1, 0, xb0, xb1, { len: 4, cell: () => atlas.cell('concrete'), vy0: 1, vy1: 0 });
       const chev = atlas.sub('chevron', 0, 0.3, 0, 1);
       const capB = kind === 'pitwall' ? print : props;
@@ -382,7 +382,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     }
     const pal = TECPRO_PAL[Math.max(0, P.palette[i]) % TECPRO_PAL.length];
     const props = cs.get(i, 'props');
-    props.color(pal[blockIdx++ % 2]).mat(0.55, 0, 0);
+    props.color(pal[blockIdx++ % 2]).mat(0.55, 0, 0, WEATHER.PLASTIC);
     frameAt(rf, 0.48, 0);
     FR.yaw((hash2(Math.floor(p * 10), sd, 3) - 0.5) * 0.03);
     const hl = 0.7, hd = 0.47, c = 0.12;

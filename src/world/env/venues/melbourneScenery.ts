@@ -279,12 +279,14 @@ function buildCity(map: WorldMap, M: Merge) {
       if (tall > 0.93) h = 120 + core * 140;
       const modern = h > 50 || hash2i(ia, ib, 8) < 0.3;
       const w = 22 + hash2i(ia, ib, 11) * 18, d = 20 + hash2i(ia, ib, 12) * 16;
-      const col = (modern ? (hash2i(ia, ib, 13) < 0.65 ? GLASS : CONCRETE) : BRICK)[Math.floor(hash2i(ia, ib, 14) * 4)].clone().multiplyScalar(0.9 + r() * 0.2);
+      const glassy = modern && hash2i(ia, ib, 13) < (h > 80 ? 0.8 : 0.6);
+      const pal = modern ? (glassy ? GLASS : CONCRETE) : BRICK;
+      const col = pal[Math.floor(hash2i(ia, ib, 14) * pal.length)].clone().multiplyScalar(0.9 + r() * 0.2);
       const y = ground(x, z);
-      const cw = modern && h > 50 ? 0.6 + 0.4 * hash2i(ia, ib, 17) : 0;
-      M.box(x, z, y, y + h, w, d, rot, col, cw, modern ? 0.5 + 0.5 * hash2i(ia, ib, 18) : 0);
-      // setbacks and plant rooms on the tall ones
-      if (h > 120) M.box(x, z, y + h, y + h + 10 + hash2i(ia, ib, 19) * 16, w * 0.62, d * 0.62, rot, col.clone().multiplyScalar(0.85), cw, 0.5);
+      // glass towers are curtain-walled; the concrete ones have punched windows (a few ribbon-glazed)
+      const cw = glassy ? 1 : modern && hash2i(ia, ib, 17) < 0.3 ? 0.55 : 0;
+      // podium, shaft (maybe chamfered, maybe stepped back) and a plant room / crown / mast on top
+      M.tower(x, z, y, h, w, d, rot, col, cw, modern ? 0.5 + 0.5 * hash2i(ia, ib, 18) : 0, hash2i(ia, ib, 19));
     }
   // ---- named towers (the skyline's signature shapes)
   const T = (x: number, z: number) => ({ x, z, y: ground(x, z) });
@@ -303,7 +305,7 @@ function buildCity(map: WorldMap, M: Merge) {
     // Prima Pearl, Southbank Grand, Victoria One …
     for (const [dx, dz, h, w, col] of [[-880, -2660, 254, 32, 0x9aa7b3], [-640, -2700, 185, 30, 0x8394a4], [-1120, -2840, 200, 30, 0xb7b9b6], [-950, -2900, 240, 30, 0x6f8193], [-700, -2620, 160, 34, 0xc9c5bb], [-1220, -2660, 170, 28, 0x7e8f9c], [-560, -2780, 150, 30, 0xa1adb6]] as const) {
       const q = T(dx, dz);
-      M.box(q.x, q.z, q.y, q.y + h, w, w * 0.85, 0.3 + (r() - 0.5) * 0.4, C(col), 0.9, 0.8);
+      M.tower(q.x, q.z, q.y, h, w, w * 0.85, 0.3 + (r() - 0.5) * 0.4, C(col), 0.9, 0.8, r());
     }
     // the CBD's tallest: Aurora, 120 Collins (with its spire), 101 Collins, the Rialto's twin blue towers
     const aur = T(D.x - 120, D.z - 260);
@@ -320,7 +322,7 @@ function buildCity(map: WorldMap, M: Merge) {
     // Collins Arch and Queen & Collins mid-heights
     for (const [da, db, h, col] of [[-300, 120, 210, 0xa6b3bd], [200, -180, 230, 0x7f8f9c], [-60, 180, 190, 0xc4c6c4], [640, -200, 200, 0x93a2ae], [-720, -120, 205, 0x6d7f8e]] as const) {
       const q = T(D.x + ux * da + vx * db, D.z + uz * da + vz * db);
-      M.box(q.x, q.z, q.y, q.y + h, 36, 32, rot, C(col), 0.9, 0.8);
+      M.tower(q.x, q.z, q.y, h, 36, 32, rot, C(col), 0.9, 0.8, r());
     }
   }
   // ---- the Arts Centre: the lattice spire (162 m) over its drum

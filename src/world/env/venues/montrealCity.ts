@@ -29,13 +29,22 @@ const BRICK = [0x8a4a36, 0x7c4231, 0x9a5842, 0x6f3a2c, 0xa46048].map(C);
 const MODERN = [0xc9ccce, 0xb4b9bd, 0x8f979e, 0xd8d6d0, 0x6d757c, 0xa7aeb3, 0xe2e0da].map(C);
 const SUBURB = [0xd9d2c4, 0xc8bca8, 0xb9a58c, 0x9a6a50, 0xe3ddd0, 0xa9a39a].map(C);
 
-/** window-band shader for buildings: aWin.x = curtain wall 0…1, aWin.y = glass reflectivity (also used by Melbourne's CBD) */
+/**
+ * Facade shader for city buildings. aWin = (curtain wall 0…1, glass reflectivity, building seed,
+ * base height): storeys and bays are counted from the building's own base, so each tower has its
+ * own storey height, bay width, spandrel depth and sill line; every pane its own interior (dark
+ * office, pale blinds, a lit room at night) and its own slightly bent reflection; a storefront
+ * band at street level and the darker street canyon at the foot. Beyond a few pixels a storey the
+ * pattern fades to its own average (no moiré on a tower 3 km away). A 2-component aWin (or a seed
+ * of 0) still works: the seed is hashed from the position and storeys count from y = 0.
+ * (Also used by Melbourne's CBD.)
+ */
 export function cityMaterial(instanced: boolean): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: !instanced, roughness: 0.85, metalness: 0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uFlood = { value: floodUniforms.params };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aWin;\nvarying vec2 vWin;\nvarying vec3 vCW;\nvarying vec3 vCN;')
+      .replace('#include <common>', '#include <common>\nattribute vec4 aWin;\nvarying vec4 vWin;\nvarying vec3 vCW;\nvarying vec3 vCN;')
       .replace(
         '#include <worldpos_vertex>',
         `#include <worldpos_vertex>
@@ -50,7 +59,20 @@ export function cityMaterial(instanced: boolean): THREE.MeshStandardMaterial {
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec4 uFlood;\nvarying vec2 vWin;\nvarying vec3 vCW;\nvarying vec3 vCN;\nfloat cWin;\nfloat cLit;\nfloat cH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }')
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform vec4 uFlood;
+varying vec4 vWin;
+varying vec3 vCW;
+varying vec3 vCN;
+float cWin;
+float cLit;
+float cPane;
+float cH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+// a box-filtered band a…b of a 0…1 coordinate (w = its screen footprint)
+float cBand( float a, float b, float x, float w ) { return clamp( ( x - a ) / w + 0.5, 0.0, 1.0 ) * clamp( ( b - x ) / w + 0.5, 0.0, 1.0 ); }`,
+      )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -58,30 +80,71 @@ export function cityMaterial(instanced: boolean): THREE.MeshStandardMaterial {
   float side = 1.0 - smoothstep( 0.3, 0.6, abs( vCN.y ) );
   vec2 tan2 = normalize( vec2( -vCN.z, vCN.x ) + 1e-4 );
   float u = dot( vCW.xz, tan2 );
-  float fl = vCW.y / 3.7;
-  float fu = fract( fl ), cu = fract( u / 3.2 );
-  float punched = step( 0.32, fu ) * step( fu, 0.82 ) * step( 0.18, cu ) * step( cu, 0.82 );
-  float curtain = step( 0.12, fu );
-  cWin = mix( punched, curtain, vWin.x ) * side * step( 2.5, vCW.y - 0.0 );
-  vec3 glass = mix( vec3( 0.05, 0.065, 0.08 ), vec3( 0.16, 0.2, 0.24 ), vWin.y );
-  diffuseColor.rgb = mix( diffuseColor.rgb, glass, cWin * 0.88 );
+  bool own = vWin.z > 0.0;
+  float seed = own ? vWin.z : cH( floor( vCW.xz / 23.0 ) ) + 0.01;
+  float hy = vCW.y - ( own ? vWin.w : 0.0 );
+  float cw = vWin.x;
+  // storey (offices ~4 m, older and residential ~3.2 m) and bay (curtain mullions ~1.5 m, piers ~3 m)
+  float storey = mix( 3.1, 3.9, fract( seed * 7.13 ) ) + 0.35 * cw;
+  float bay = mix( mix( 2.6, 3.6, fract( seed * 5.31 ) ), mix( 1.35, 1.8, fract( seed * 3.77 ) ), step( 0.5, cw ) );
+  float fl = hy / storey, ub = u / bay;
+  vec2 fw = fwidth( vec2( ub, fl ) ) + 1e-4;
+  float fu = fract( fl ), cu = fract( ub );
+  // punched windows: sill to head inside the storey, between piers
+  float sill = mix( 0.26, 0.38, fract( seed * 11.1 ) ), head = mix( 0.8, 0.92, fract( seed * 13.7 ) );
+  float pier = mix( 0.1, 0.24, fract( seed * 17.3 ) );
+  float punched = cBand( sill, head, fu, fw.y ) * cBand( pier, 1.0 - pier, cu, fw.x );
+  float punchedMean = ( head - sill ) * ( 1.0 - 2.0 * pier );
+  // curtain wall: a spandrel band of the tower's own depth (some all-glass), thin mullions
+  float span = mix( 0.08, 0.36, fract( seed * 19.1 ) ) * step( fract( seed * 23.3 ), 0.82 );
+  float mull = 0.05;
+  float curtain = cBand( span, 0.975, fu, fw.y ) * cBand( mull, 1.0 - mull, cu, fw.x );
+  float curtainMean = ( 0.975 - span ) * ( 1.0 - 2.0 * mull );
+  float far = smoothstep( 0.3, 0.85, max( fw.x, fw.y ) );
+  float cwS = step( 0.5, cw );
+  cWin = mix( mix( punched, curtain, cwS ), mix( punchedMean, curtainMean, cwS ), far ) * side * step( 4.6, hy );
+  // each pane: its own interior and blind, and its own bend (reflections break up pane by pane)
+  vec2 cell = floor( vec2( ub, fl ) );
+  cPane = cH( cell + seed * 37.0 );
+  float blind = step( 0.8, cPane ) * ( 1.0 - far );
+  // (as metal-ish F0: coated curtain-wall glass mirrors the sky; plain windows barely do)
+  vec3 glass = mix( vec3( 0.04, 0.05, 0.06 ), vec3( 0.3, 0.36, 0.42 ), vWin.y * vWin.y );
+  glass *= mix( 0.7 + 0.6 * cH( cell.yx + seed * 3.1 ), 1.0, far );
+  glass = mix( glass, vec3( 0.3, 0.29, 0.26 ), blind * 0.55 ) + vec3( 0.02 ) * far;
+  // up high a tower's glass sees open sky, down low its neighbours: reflective glass brightens upward
+  glass *= mix( 1.0, mix( 0.75, 1.35, smoothstep( 10.0, 160.0, hy ) ), vWin.y );
+  // the frame, spandrels and stone: the building's colour, a touch of storey-to-storey patina
+  vec3 wall = diffuseColor.rgb * ( 0.9 + 0.14 * cH( vec2( floor( fl ), seed * 13.0 ) ) * ( 1.0 - far ) );
+  // curtain walls' spandrels are mostly opaque glass of the same tint
+  wall = mix( wall, wall * 0.55 + glass * 0.6, cw * 0.5 );
+  diffuseColor.rgb = mix( wall, glass, cWin * 0.92 );
+  // street level: shopfronts (dark glass between piers) under a canopy line
+  float gf = ( 1.0 - smoothstep( 4.0, 4.6, hy ) ) * step( 0.35, hy ) * side;
+  float shop = mix( cBand( 0.12, 0.88, fract( u / 6.5 ), fwidth( u / 6.5 ) + 1e-4 ), 0.76, far );
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.028, 0.03, 0.033 ), gf * shop * 0.9 );
+  diffuseColor.rgb *= 1.0 - 0.35 * cBand( 4.25, 4.6, hy, fwidth( hy ) + 1e-3 ) * side;
+  // the street canyon: the lower storeys see less sky
+  diffuseColor.rgb *= mix( 1.0, mix( 0.55, 1.0, smoothstep( 0.0, 34.0, hy ) ), side );
   // flat roofs: tar and gravel, a paler parapet line
   float roof = smoothstep( 0.6, 0.9, vCN.y );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.075, 0.074, 0.072 ) * ( 0.85 + 0.3 * cH( floor( vCW.xz / 9.0 ) ) ), roof * ( 1.0 - vWin.y * 0.5 ) );
-  cLit = step( cH( floor( vec2( u / 3.2, fl ) ) + floor( vCW.xz / 97.0 ) ), 0.3 ) * cWin;
+  float litP = step( cH( cell + floor( vCW.xz / 97.0 ) ), 0.3 );
+  cLit = mix( litP, 0.3, far ) * cWin;
 }`,
       )
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.12, cWin * vWin.y );')
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.75, cWin * vWin.y );')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.07 + 0.16 * cPane, cWin * vWin.y );')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.88, cWin * vWin.y );')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
 totalEmissiveRadiance += vec3( 1.0, 0.78, 0.5 ) * cLit * 0.9 * smoothstep( 0.0, 0.5, uFlood.x );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-mtl-city-' + (instanced ? 'i' : 'm');
+  mat.customProgramCacheKey = () => 'apex-mtl-city2-' + (instanced ? 'i' : 'm');
   return mat;
 }
+
+const frac = (v: number) => v - Math.floor(v);
 
 interface Box {
   x: number; z: number; y: number;
@@ -99,6 +162,12 @@ export class Merge {
   col: number[] = [];
   win: number[] = [];
   idx: number[] = [];
+  /** the building being built: its seed (0 = hash per box) and base height (storeys count from it) */
+  seed = 0;
+  base = 0;
+  private wv(curtain: number, refl: number, y0: number) {
+    this.win.push(curtain, refl, this.seed > 0 ? this.seed : 0, this.seed > 0 ? this.base : y0);
+  }
   private static readonly F: [number[], number[][]][] = [
     [[1, 0, 0], [[1, -1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1]]],
     [[-1, 0, 0], [[-1, -1, 1], [-1, 1, 1], [-1, 1, -1], [-1, -1, -1]]],
@@ -117,7 +186,7 @@ export class Merge {
         this.pos.push(x + lx * ca + lz * sa, py > 0 ? y1 : y0, z - lx * sa + lz * ca);
         this.nor.push(n[0] * ca + n[2] * sa, n[1], -n[0] * sa + n[2] * ca);
         this.col.push(c.r, c.g, c.b);
-        this.win.push(curtain, refl);
+        this.wv(curtain, refl, y0);
       }
       this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
@@ -139,7 +208,7 @@ export class Merge {
         this.pos.push(p[0], p[1], p[2]);
         this.nor.push(n.x, n.y, n.z);
         this.col.push(c.r, c.g, c.b);
-        this.win.push(0, 0);
+        this.wv(0, 0, y0);
       }
       this.idx.push(i, i + 2, i + 1, i, i + 1, i + 2);
     }
@@ -164,17 +233,100 @@ export class Merge {
         this.pos.push(p.x, p.y, p.z);
         this.nor.push(n.x, n.y, n.z);
         this.col.push(c.r, c.g, c.b);
-        this.win.push(0, 0);
+        this.wv(0, 0, a.y);
       }
       this.idx.push(i, i + 1, i + 2, i, i + 2, i + 3, i, i + 2, i + 1, i, i + 3, i + 2);
     }
+  }
+  /** a box with its vertical corners cut off (chamfer `ch` m): eight walls and a flat roof */
+  prism(x: number, z: number, y0: number, y1: number, w: number, d: number, rot: number, c: THREE.Color, curtain = 0, refl = 0, ch = 4) {
+    const ca = Math.cos(rot), sa = Math.sin(rot);
+    const hw = w / 2, hd = d / 2;
+    ch = Math.min(ch, hw * 0.45, hd * 0.45);
+    const ring: [number, number][] = [[hw, -hd + ch], [hw, hd - ch], [hw - ch, hd], [-hw + ch, hd], [-hw, hd - ch], [-hw, -hd + ch], [-hw + ch, -hd], [hw - ch, -hd]];
+    const W = ring.map(([lx, lz]) => [x + lx * ca + lz * sa, z - lx * sa + lz * ca] as const);
+    for (let k = 0; k < 8; k++) {
+      const [ax, az] = W[k], [bx, bz] = W[(k + 1) % 8];
+      let nx = bz - az, nz = -(bx - ax);
+      const nl = Math.hypot(nx, nz) || 1;
+      nx /= nl; nz /= nl;
+      // outward: away from the centre
+      if (nx * ((ax + bx) / 2 - x) + nz * ((az + bz) / 2 - z) < 0) { nx = -nx; nz = -nz; }
+      const i = this.pos.length / 3;
+      for (const [px, py, pz] of [[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]]) {
+        this.pos.push(px, py, pz);
+        this.nor.push(nx, 0, nz);
+        this.col.push(c.r, c.g, c.b);
+        this.wv(curtain, refl, y0);
+      }
+      this.idx.push(i, i + 1, i + 2, i, i + 2, i + 3, i, i + 2, i + 1, i, i + 3, i + 2);
+    }
+    const i = this.pos.length / 3;
+    for (const [px, pz] of W) {
+      this.pos.push(px, y1, pz);
+      this.nor.push(0, 1, 0);
+      this.col.push(c.r, c.g, c.b);
+      this.wv(curtain, refl, y0);
+    }
+    for (let k = 1; k < 7; k++) this.idx.push(i, i + k + 1, i + k, i, i + k, i + k + 1);
+  }
+  /**
+   * A tower the way they're actually put together: a podium on the street (shopfronts, a wider
+   * footprint), the shaft (square or with its corners cut), maybe a setback two-thirds of the way
+   * up, and a top — a plant room behind a screen, a glazed crown or a mast. `seed` 0…1 picks it.
+   */
+  tower(x: number, z: number, y: number, h: number, w: number, d: number, rot: number, c: THREE.Color, curtain: number, refl: number, seed: number) {
+    const sd = (k: number) => frac(seed * k);
+    this.seed = 0.01 + seed * 0.98;
+    this.base = y;
+    const cham = sd(31.7) < 0.28 && h > 45;
+    const shaft = (y0: number, y1: number, ww: number, dd: number) => (cham ? this.prism(x, z, y0, y1, ww, dd, rot, c, curtain, refl, Math.min(ww, dd) * 0.16) : this.box(x, z, y0, y1, ww, dd, rot, c, curtain, refl));
+    let top = y + h;
+    let tw = w, td = d;
+    if (h > 40 && sd(7.7) < 0.7) {
+      // podium: stone or darker glass, a little wider than the tower
+      const ph = 9 + sd(11.3) * 14;
+      const pc = c.clone().lerp(new THREE.Color(0x8a8378), 0.45).multiplyScalar(0.92);
+      this.box(x, z, y, y + ph, w * 1.18, d * 1.18, rot, pc, 0.15, 0.25);
+      if (h > 90 && sd(13.1) < 0.45) {
+        const sb = y + h * (0.6 + 0.18 * sd(17.9));
+        shaft(y + ph, sb, w, d);
+        tw = w * 0.8;
+        td = d * 0.8;
+        // a slab edge where it steps back
+        this.box(x, z, sb, sb + 1.2, w * 1.01, d * 1.01, rot, c.clone().multiplyScalar(0.7), 0, 0);
+        shaft(sb, top, tw, td);
+      } else shaft(y + ph, top, w, d);
+    } else shaft(y, top, w, d);
+    // the top
+    const k = sd(41.3);
+    const dark = c.clone().multiplyScalar(0.62);
+    if (h > 30) {
+      // parapet line
+      this.box(x, z, top, top + 1.1, tw * 0.99, td * 0.99, rot, c.clone().multiplyScalar(0.85), 0, 0);
+      if (k < 0.4) {
+        // plant room behind louvres + a couple of units
+        this.box(x, z, top, top + 4 + sd(47.1) * 5, tw * 0.6, td * 0.55, rot, dark, 0, 0);
+        this.box(x + tw * 0.25, z, top, top + 2.5, tw * 0.2, td * 0.25, rot, dark, 0, 0);
+      } else if (k < 0.7 && h > 80) {
+        // glazed crown: the curtain wall carried up past the roof as a screen
+        this.box(x, z, top, top + 6 + sd(53.7) * 8, tw * 1.0, td * 1.0, rot, c.clone().lerp(new THREE.Color(0x9fb3c2), 0.4), 1, 1);
+      } else {
+        this.box(x, z, top, top + 3.5, tw * 0.45, td * 0.4, rot, dark, 0, 0);
+      }
+      if (h > 140 && sd(59.3) < 0.5) {
+        const mh = 18 + sd(61.7) * 30;
+        this.box(x, z, top, top + mh, 1.6, 1.6, rot, new THREE.Color(0xc8c8c8), 0, 0);
+      }
+    }
+    this.seed = 0;
   }
   geometry(): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    g.setAttribute('aWin', new THREE.Float32BufferAttribute(this.win, 2));
+    g.setAttribute('aWin', new THREE.Float32BufferAttribute(this.win, 4));
     g.setIndex(this.pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
     g.computeBoundingSphere();
     return g;
@@ -249,16 +401,28 @@ export function buildMontrealCity(map: WorldMap): CityBuild {
       });
     }
 
+  // the tops of the taller blocks: plant rooms and lift overruns (and a podium under the towers)
+  for (const b of boxes.slice()) {
+    if (b.h < 24) continue;
+    const k = frac(Math.sin(b.x * 3.1 + b.z * 7.7) * 9137.13);
+    const dark = b.col.clone().multiplyScalar(0.6);
+    boxes.push({ ...b, y: b.y + b.h, h: 3 + k * 5, w: b.w * (0.35 + 0.3 * k), d: b.d * (0.35 + 0.25 * k), col: dark, curtain: 0, refl: 0 });
+    if (b.h > 45 && k < 0.7) boxes.push({ ...b, h: 8 + k * 12, w: b.w * 1.16, d: b.d * 1.16, col: b.col.clone().lerp(STONE[0], 0.5).multiplyScalar(0.9), curtain: 0.15, refl: 0.2 });
+  }
+
   // ---------------------------------------------------------------- instanced generic buildings
   {
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
-    const win = new Float32Array(boxes.length * 2);
+    const win = new Float32Array(boxes.length * 4);
     boxes.forEach((b, i) => {
-      win[i * 2] = b.curtain;
-      win[i * 2 + 1] = b.refl;
+      win[i * 4] = b.curtain;
+      win[i * 4 + 1] = b.refl;
+      // a seed per building, storeys counted from its own base
+      win[i * 4 + 2] = 0.01 + 0.98 * frac(Math.sin(b.x * 12.9898 + b.z * 78.233) * 43758.5453);
+      win[i * 4 + 3] = b.y;
     });
-    geo.setAttribute('aWin', new THREE.InstancedBufferAttribute(win, 2));
+    geo.setAttribute('aWin', new THREE.InstancedBufferAttribute(win, 4));
     const walls = new THREE.InstancedMesh(geo, cityMaterial(true), Math.max(1, boxes.length));
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     boxes.forEach((b, i) => {

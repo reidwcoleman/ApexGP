@@ -224,6 +224,8 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
   const people = new TrackPeople(track, st.marshals, st.photographers, (state, post) => setPanels(state, post));
   group.add(people.group);
   group.matrixAutoUpdate = false;
+  // (where the marshal posts are: dev tools frame shots of them)
+  group.userData.marshals = st.marshals;
 
   // wet-road reflections: hook every road chunk (the first one drawn each frame does the copy)
   const ssr = new RoadSSR();

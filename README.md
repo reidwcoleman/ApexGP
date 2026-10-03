@@ -86,6 +86,18 @@ npm run check    # tsc --noEmit
   pasture on the lower slopes (`fields`), rock, a broken snow line, the same clouds' shadows as the ground,
   a milkier foot on every range, tree lines with single crowns cut into their tops, standing on the real
   terrain. Lakes and the sea reflect the sky (not the env map's captured grandstands) and the far bank's line.
+- **City skylines** — Melbourne's CBD and Southbank and downtown Montréal are built tower by tower
+  (`Merge.tower` in `env/venues/montrealCity.ts`): podium, shaft (square or with its corners cut), maybe a
+  setback, then a plant room, glazed crown or mast. `cityMaterial` counts storeys and bays from each building's own
+  base (aWin = curtain, reflectivity, seed, base y): punched windows or curtain walls with spandrels and mullions,
+  each pane its own interior and bend, shopfronts and the darker street canyon at the foot, coated glass mirroring
+  more sky up high, the pattern fading to its average where it would alias.
+- **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
+  `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
+  joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars
+  touched, grime, section joints) and plastic (TecPro, tyre belts). Footbridges are Warren-truss spans on open
+  steel stair towers; marshal posts are steel-framed shelters with their kit. Pit-building rooms read dim behind
+  the glass by day and glow after dark. `tools/_spots.mjs` / `_posts.mjs` / `_ring.mjs` frame free-camera shots.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.

@@ -904,6 +904,77 @@ if (metalnessFactor > 0.5) {
 }
 `;
 
+/**
+ * Weathering by surface class (the integer part of aPBR.x, see WEATHER in builder.ts), all
+ * procedural in world space and faded out by its own screen footprint:
+ *   CONCRETE      blotchy cure/patina at two scales, rain-run streaks down the faces, pour joints
+ *                 every 3 m, lichen on the tops
+ *   STEEL         painted steel: chalky mottle, chips and rust runs
+ *   PAINTED_WALL  a painted barrier: paint mottle, black rubber scuffs from cars that touched it,
+ *                 grime streaks, joints between the 4 m sections
+ *   PLASTIC       TecPro / plastic: sun-faded mottle and rubber scuffs
+ */
+const PW_COMMON = /* glsl */ `
+float pwH( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
+float pwN( vec2 p ) {
+  vec2 i = floor( p ), f = fract( p );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( pwH( i ), pwH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( pwH( i + vec2( 0.0, 1.0 ) ), pwH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
+float pwLine( float x, float p, float w, float fw ) {
+  float d = abs( fract( x / p + 0.5 ) - 0.5 ) * p;
+  return 1.0 - smoothstep( w, w + fw * 1.5, d );
+}
+`;
+const PROP_WEATHER = /* glsl */ `
+float pCls = floor( vPBR.x + 1e-3 );
+roughnessFactor = vPBR.x - pCls;
+if ( pCls > 0.5 ) {
+  vec3 Nw = normalize( ( vec4( normalize( vNormal ), 0.0 ) * viewMatrix ).xyz );
+  float vert = 1.0 - smoothstep( 0.45, 0.8, abs( Nw.y ) );
+  vec2 tW = normalize( vec2( -Nw.z, Nw.x ) + vec2( 1e-4 ) );
+  vec2 q = mix( vWP.xz, vec2( dot( vWP.xz, tW ), vWP.y ), vert );
+  float fw = length( fwidth( q ) );
+  float near = 1.0 - smoothstep( 0.03, 0.14, fw );
+  float big = pwN( q * 0.11 ) * 0.6 + pwN( q * 0.47 + 7.1 ) * 0.4;
+  float fine = pwN( q * 3.7 );
+  vec3 c = diffuseColor.rgb;
+  float r = roughnessFactor;
+  if ( pCls < 1.5 ) {
+    c *= 0.8 + 0.3 * big + 0.12 * ( fine - 0.5 ) * near;
+    float streak = vert * smoothstep( 0.5, 0.86, pwN( vec2( q.x * 2.3, q.y * 0.32 ) ) ) * ( 0.6 + 0.4 * big );
+    c *= 1.0 - 0.24 * streak;
+    c *= 1.0 - 0.38 * pwLine( q.x, 3.0, 0.012, fw ) * vert * near;
+    c = mix( c, c * vec3( 0.82, 0.9, 0.7 ), ( 1.0 - vert ) * smoothstep( 0.5, 0.8, big ) * 0.6 );
+    r = clamp( r + 0.08 * ( fine - 0.5 ), 0.05, 1.0 );
+  } else if ( pCls < 2.5 ) {
+    c *= 0.9 + 0.14 * big;
+    float rust = smoothstep( 0.76, 0.95, pwN( vec2( q.x * 3.0, q.y * 0.3 ) ) ) * vert;
+    c = mix( c, vec3( 0.23, 0.13, 0.07 ), rust * 0.3 );
+    float chip = smoothstep( 0.8, 0.9, pwN( q * 9.0 ) ) * near;
+    c = mix( c, c * 0.62 + vec3( 0.05 ), chip * 0.5 );
+    r = clamp( r + 0.16 * ( big - 0.5 ) + 0.1 * chip, 0.05, 1.0 );
+  } else if ( pCls < 3.5 ) {
+    c *= 0.9 + 0.16 * big;
+    // rubber scuffs: long thin black smears, horizontal, in patches along the wall
+    float patchK = smoothstep( 0.55, 0.8, pwN( vec2( q.x * 0.05, 3.3 ) ) );
+    float smear = smoothstep( 0.62, 0.9, pwN( vec2( q.x * 0.35, q.y * 9.0 ) ) ) * patchK * vert;
+    c = mix( c, vec3( 0.03 ), smear * 0.7 );
+    float grime = vert * smoothstep( 0.55, 0.85, pwN( vec2( q.x * 1.7, q.y * 0.6 ) ) );
+    c *= 1.0 - 0.2 * grime;
+    c *= 1.0 - 0.45 * pwLine( q.x, 4.0, 0.006, fw ) * vert * near;
+    r = mix( r, 0.55, smear );
+  } else {
+    c *= 0.86 + 0.2 * big;
+    float smear = smoothstep( 0.66, 0.92, pwN( vec2( q.x * 0.8, q.y * 6.0 ) ) ) * vert;
+    c = mix( c, vec3( 0.04 ), smear * 0.45 );
+    c = mix( c, vec3( dot( c, vec3( 0.333 ) ) ), 0.2 * smoothstep( 0.5, 0.8, big ) );
+  }
+  diffuseColor.rgb = c;
+  roughnessFactor = r;
+}
+`;
+
 function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = W.uWetness;
@@ -913,8 +984,8 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPBR = aPBR;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;\nuniform float uSignGlow;')
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_ZINC + PROP_WET)
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;\nuniform float uSignGlow;\n' + PW_COMMON)
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_WEATHER + PROP_ZINC + PROP_WET)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z * (vPBR.z < 0.9 ? uSignGlow : 1.0);');
   };
   m.customProgramCacheKey = () => key;
@@ -923,14 +994,14 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
 /** Untextured props: vertex colour + per-vertex roughness/metalness/emissive. */
 export function propsMaterial(): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-props-4');
+  patchPBR(m, 'apex-ts-props-5');
   return m;
 }
 
 /** Printed surfaces: atlas map × vertex colour, per-vertex PBR. */
 export function printMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-print-4');
+  patchPBR(m, 'apex-ts-print-5');
   return m;
 }
 
