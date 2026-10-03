@@ -28,8 +28,8 @@ import { N8AOPostPass } from 'n8ao';
  *   → speed blur (radial, only while fast)      [own pass: convolution]
  *   → depth of field (menus/replays only)        [own pass: convolution]
  *   → lens rain (onboard cameras in the wet)     [own pass: convolution]
- *   → sanitize (NaN/Inf scrub) → sun shafts → bloom → grade (game layer × weather look × lightning flash)
- *     → AgX → vignette → grain
+ *   → sanitize (NaN/Inf scrub) → AO → sun shafts → bloom (warm halation) → grade (game layer × weather
+ *     look × lightning flash) → PBR Neutral → film print (black floor, shadow chroma, warm clip) → vignette → grain
  *   → chromatic aberration (only while fast)     [own pass: convolution]
  *   → SMAA → sharpen (contrast-adaptive, High/Ultra; stronger while the dynamic resolution is down)
  *
@@ -227,7 +227,7 @@ vec3 shadeOwn(vec3 c, float d, float wheel) {
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float hi = max(max(c.r, c.g), c.b);
   float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
-  vec3 s = mix(vec3(lum), c, 0.72) * 0.28 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
+  vec3 s = mix(vec3(lum), c, 0.55) * 0.24 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
   vec3 lit = mix(s, c, wheel * 0.85);
   return mix(c, lit, k);
 }
@@ -809,6 +809,7 @@ uniform float lookContrast;
 uniform vec3 lookTint;
 uniform vec3 lookShadowTint;
 uniform float flash;
+uniform vec2 greenTame;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = max(inputColor.rgb, 0.0) * exposure * lookExposure * (1.0 + flash);
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -816,6 +817,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float hl = smoothstep(0.02, 0.6, l);
   c *= mix(shadowTint * lookShadowTint, tint * lookTint, hl);
   l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  // a camera's greens: foliage, grass and green paint come out olive and muted, never the pure
+  // RGB green of a game render (x pulls them toward yellow, y toward grey; by how green they are)
+  float gp = clamp((c.g - max(c.r, c.b)) / max(c.g, 1e-4), 0.0, 1.0);
+  c.r += (c.g - c.r) * gp * greenTame.x;
+  c = mix(c, vec3(l), gp * greenTame.y);
   c = mix(vec3(l), c, saturation * lookSaturation);
   // vibrance: lift the muted colours (grass, sky, liveries in the shade) more than the already vivid
   // ones, so the picture has the broadcast punch without clipping a red car into a flat blob
@@ -826,6 +832,39 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   outputColor = vec4(c, inputColor.a);
 }
 `;
+
+/**
+ * The print stage, after tone mapping (display-referred linear 0 … 1): what makes a frame read as
+ * footage rather than a render. The blacks are crushed but never pure black (a camera's sensor floor
+ * and the veiling flare inside the lens lift them to a dim, warm-tinted floor), the deepest shadows
+ * lose their colour (a sensor's chroma noise is filtered out down there), and the brightest
+ * highlights clip to a slightly warm white.
+ */
+const FILM_FRAG = /* glsl */ `
+uniform vec3 filmLift;
+uniform float filmShadowSat;
+uniform vec3 filmWhite;
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 c = clamp(inputColor.rgb, 0.0, 1.0);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, mix(filmShadowSat, 1.0, smoothstep(0.0, 0.06, l)));
+  c = filmLift + c * (filmWhite - filmLift);
+  outputColor = vec4(c, inputColor.a);
+}
+`;
+
+export class FilmEffect extends Effect {
+  constructor() {
+    super('FilmEffect', FILM_FRAG, {
+      blendFunction: BlendFunction.SET,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['filmLift', new THREE.Uniform(new THREE.Vector3(0.005, 0.0044, 0.0036))],
+        ['filmShadowSat', new THREE.Uniform(0.6)],
+        ['filmWhite', new THREE.Uniform(new THREE.Vector3(1.0, 0.985, 0.95))],
+      ]),
+    });
+  }
+}
 
 export interface GradeLook {
   exposure: number;
@@ -857,6 +896,7 @@ export class GradeEffect extends Effect {
         ['lookTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['lookShadowTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['flash', new THREE.Uniform(0)],
+        ['greenTame', new THREE.Uniform(new THREE.Vector2(0.3, 0.3))],
       ]),
     });
   }
@@ -898,6 +938,8 @@ export class Renderer {
   readonly ao: N8AOPostPass;
   readonly bloom: BloomEffect;
   readonly grade: GradeEffect;
+  /** the print stage after tone mapping: black floor, shadow chroma, warm clip */
+  readonly film: FilmEffect;
   readonly toneMapping: ToneMappingEffect;
   readonly vignette: VignetteEffect;
   readonly grain: NoiseEffect;
@@ -1022,7 +1064,7 @@ export class Renderer {
     // a soft lens fall-off that pulls the eye to the centre (strong enough to feel, never a filter)
     this.vignette = new VignetteEffect({ darkness: 0.38, offset: 0.3 });
     this.grain = new NoiseEffect({ blendFunction: BlendFunction.OVERLAY, premultiply: false });
-    this.grain.blendMode.opacity.value = 0.02;
+    this.grain.blendMode.opacity.value = 0.028;
     // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
     // copy less; bloom's luminance pre-pass and the shaft mask scrub what they read themselves)
     const lum = this.bloom.luminanceMaterial as unknown as THREE.ShaderMaterial;
@@ -1030,8 +1072,18 @@ export class Renderer {
       'vec4 texel=texture2D(inputBuffer,vUv);',
       'vec4 texel=texture2D(inputBuffer,vUv);if(texel.r!=texel.r||texel.g!=texel.g||texel.b!=texel.b||max(max(abs(texel.r),abs(texel.g)),abs(texel.b))>1e6)texel.rgb=vec3(0.0);texel.rgb=min(max(texel.rgb,0.0),vec3(200.0));',
     );
+    // halation: the glow round a bright light in footage is warm (red light scatters deepest into the
+    // film / sensor stack and spreads widest), not the light's own colour scaled up
+    const bl = this.bloom as unknown as { fragmentShader: string; setFragmentShader(s: string): void };
+    bl.setFragmentShader(
+      bl.fragmentShader
+        .replace('uniform float intensity;', 'uniform float intensity;uniform vec3 halation;')
+        .replace('outputColor=texture2D(map,uv)*intensity;', 'vec4 bt=texture2D(map,uv);outputColor=vec4(bt.rgb*halation,bt.a)*intensity;'),
+    );
+    this.bloom.uniforms.set('halation', new THREE.Uniform(new THREE.Vector3(1.12, 0.94, 0.76)));
     this.ssao = new AOEffect();
-    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.vignette, this.grain));
+    this.film = new FilmEffect();
+    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.film, this.vignette, this.grain));
 
     this.aberration = new ChromaticAberrationEffect({
       offset: new THREE.Vector2(0, 0),

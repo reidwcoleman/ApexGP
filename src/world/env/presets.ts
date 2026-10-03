@@ -156,7 +156,7 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     saturation: 1.16,
     contrast: 1.1,
     tint: [1.0, 0.93, 0.8],
-    shadowTint: [0.88, 0.95, 1.12],
+    shadowTint: [0.95, 0.96, 1.01],
     bloom: 1.0,
     bloomThreshold: 1.05,
     shafts: 1.0,
@@ -178,7 +178,7 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     saturation: 1.22,
     contrast: 1.1,
     tint: [1.0, 0.87, 0.72],
-    shadowTint: [0.85, 0.92, 1.16],
+    shadowTint: [0.93, 0.93, 1.03],
     bloom: 1.15,
     bloomThreshold: 1.0,
     shafts: 1.2,
@@ -259,11 +259,12 @@ const TONE_CONTRAST = 1.0;
 /**
  * The game's look on top of the physical light: a touch darker than a straight exposure, deeper
  * shade (less sky fill, so sunlit and shadowed surfaces separate), cool clean shadows and warm-
- * neutral highlights — a graded broadcast/cinematic image rather than a flat capture.
+ * neutral highlights — a graded broadcast/cinematic image rather than a flat capture. (Shadows only a
+ * touch cool: footage's low-sun shade is a warm near-black, not the navy of a game's skylight.)
  */
 const LOOK_EXPOSURE = 0.84;
 const LOOK_FILL = 0.74;
-const LOOK_SHADOW: [number, number, number] = [0.92, 0.99, 1.1];
+const LOOK_SHADOW: [number, number, number] = [0.96, 0.99, 1.04];
 const LOOK_HIGH: [number, number, number] = [1.04, 1.0, 0.95];
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -342,12 +343,13 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const cloudDark = clamp01(wetK * 0.85 + overcast * 0.2);
   const deckLight = mix(1, mix(0.62, 0.3, wetK), overcast);
 
-  // grey gradient visibility: 25 km clear → ~2.5 km drizzle → ~0.9 km downpour
+  // grey gradient visibility: 25 km clear → ~2 km drizzle → ~0.6 km downpour (trees across the
+  // track already greyed by the rain, as in wet onboard footage)
   // fog 1: ~200 m to half-visibility, ~650 m to nothing
   // (×1.25, and never crisper than ~15 km: a summer broadcast's soft depth sells the scale;
   // dawn and dusk already carry their own thick haze)
   // (the floor is the air of real footage: even a clear day softens the far side of a circuit)
-  const fogDensity = Math.max(P.fogDensity * 1.25, 2.0e-4) * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 5.5e-4 + thick * 3.2e-3;
+  const fogDensity = Math.max(P.fogDensity * 1.25, 2.0e-4) * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 1.3e-3 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 
