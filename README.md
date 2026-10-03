@@ -235,6 +235,7 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/careerflow.mjs` — career map → round → results → Next round (travel) → next round's race screen.
 - `node tools/introshot.mjs [track]`, `tools/menushot.mjs`, `tools/garageshot.mjs`, `tools/personshot.mjs` — intro / hub / garage part / garage person screenshots.
 - `node tools/faceshot.mjs [outDir] [idx,…]` (garage faces, the line-of-sight hiding off), `tools/helmetshot.mjs` (pit-crew helmets in a stop), `tools/rb_scenes.mjs <garage|podium|grid|race|pit>` — people close-ups and their draw cost.
+- `python3 tools/trees_fetch.py && node tools/bake_trees.mjs [--port 5191] [--preview id,…] [--encode]` — rebuild the trees (`public/trees/`) from the Poly Haven scans; `--preview` renders single scans, `--encode` only re-encodes the last bake's PNGs.
 - `python3 tools/build_asphalt.py` / `python3 tools/build_grass.py` — rebuild the scanned road / grass textures (`tools/asphstats.mjs`, `tools/grassstats.mjs` print the procedural statistics they are matched to).
 - `node tools/loadtime.mjs [track] [to,…]`, `tools/cpuprof.mjs <from> <to>` — boot and circuit-switch timings, CPU profile of a switch.
 
@@ -259,3 +260,12 @@ poses are done in code. Teams, drivers and sponsors in the game are fictional.
 Ground: the track asphalt is Poly Haven's [Asphalt Track](https://polyhaven.com/a/asphalt_track) scan and the
 grass ambientCG's [Grass 001](https://ambientcg.com/view?id=Grass001), both CC0, packed by `tools/build_asphalt.py`
 and `tools/build_grass.py` into `public/textures/`.
+
+Trees: Poly Haven's CC0 scanned / modelled trees — [Jacaranda Tree](https://polyhaven.com/a/jacaranda_tree),
+[Island Tree 01](https://polyhaven.com/a/island_tree_01) and [02](https://polyhaven.com/a/island_tree_02),
+[Tree Small 02](https://polyhaven.com/a/tree_small_02), [Fir Tree 01](https://polyhaven.com/a/fir_tree_01),
+[Fir Sapling Medium](https://polyhaven.com/a/fir_sapling_medium) and [Searsia lucida](https://polyhaven.com/a/searsia_lucida).
+`python3 tools/trees_fetch.py` downloads them (millions of triangles: offline only) and `node tools/bake_trees.mjs`
+(headless Chrome, `src/dev/treebake.ts`) bakes what the game draws into `public/trees/` (≈ 6 MB): 8-view impostor
+frames of each full-resolution tree, clumps of its real leaves for the near trees' leaf cards, and two near LODs
+(the scan's trunk decimated with meshoptimizer + one leaf card per k-means cluster of its leaves).
