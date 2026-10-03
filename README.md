@@ -124,8 +124,12 @@ npm run check    # tsc --noEmit
 - **Camera footage look** — per-pixel camera motion blur like a film shutter (depth reprojection: the grass,
   kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a panning TV
   camera keeps its car crisp; Settings → Motion blur Off / Subtle / Cinematic), a photographic grade layer
-  over every weather and time of day (`FILM` in Environment.ts: a little under-exposed, colour pulled back, a warm
-  yellow cast in highlights and shadows, darker nights), and a low sun's glow that builds over kilometres of air rather
+  over every weather and time of day (`FILM` in Environment.ts: a little under-exposed, colour pulled back, greens
+  tamed toward olive, a warm yellow cast that is full in sunshine, eased off under cloud and gone in the blue hour,
+  where footage is cool; a camera that meters a flat grey day almost back up so a wet sky goes near white, while a
+  sunny frame keeps its dark shade; darker nights), a print stage after tone mapping (`FilmEffect` in Renderer.ts:
+  a warm black floor that is crushed to black at night, colourless deepest shadows, a warm clip), warm halation
+  round every bright light (the bloom), and a low sun's glow that builds over kilometres of air rather
   than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
   depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
