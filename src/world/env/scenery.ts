@@ -172,7 +172,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   yield { group, step: 'skyline' };
   tLap = performance.now();
   // distant mountains / skylines beyond the far terrain (per-venue preset, horizon.ts)
-  const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z));
+  const horizon = buildHorizon(HORIZON_PRESETS[map.venue] ?? HORIZON_PRESETS.park, map.A.center, map.height(map.A.center.x, map.A.center.z), map);
   group.add(horizon.mesh);
   lap('horizon');
 

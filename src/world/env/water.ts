@@ -27,7 +27,8 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  *                                      polyline.
  *
  * Shading: a PBR surface (MeshStandardMaterial) reflecting the scene's sky env map
- * with real Fresnel, two scrolling ripple normal maps + a slow swell, sun glitter
+ * with real Fresnel (the sky only: the env map's captured trackside band is skipped,
+ * the horizon haze or the far bank's dark line stands in for it), two scrolling ripple normal maps + a slow swell, sun glitter
  * from the directional light (it blooms), roughness that grows with distance
  * (no sparkle aliasing), darker/glossier in rain with rain rings, a shallow
  * tint and foam along the shore. Receives shadows. 1–2 draw calls per body.
@@ -131,11 +132,43 @@ function makeMaterial(k: (typeof KIND)[WaterKind], deep: [number, number, number
       uDepthK: { value: depth ? (depth.range ?? 8) / 2.5 : 0 },
       uRain: weatherUniforms.uRain,
       uWind: weatherUniforms.uWind,
+      // open water (sea) mirrors a pale horizon; lakes and rivers the dark line of their far bank
+      uBank: { value: k.waves >= 1 ? 0 : 1 },
     });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nattribute float aShore;\nvarying float vShore;\nvarying vec3 vWP;`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\nvShore = aShore;\nvWP = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;`);
     sh.fragmentShader = sh.fragmentShader
+      .replace(
+        '#include <fog_pars_fragment>',
+        `#include <fog_pars_fragment>
+#if defined( USE_ENVMAP ) && defined( ENVMAP_TYPE_CUBE_UV )
+uniform float uBank;
+// The scene's env map is the sky plus the circuit's surroundings captured from beside the start
+// straight (stands, pits, trees): right for a car on the grid, wrong for a lake 2 km away or the
+// North Sea, which would mirror the main grandstand's colours in long smears. Water reflects the
+// sky only, from just above that captured band, and near the horizon what open water really
+// mirrors: the pale haze at the horizon (sea) or the dark line of the far shore (lakes, rivers).
+vec3 waterIBL( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {
+  vec3 r = reflect( - viewDir, normal );
+  r = normalize( mix( r, normal, pow4( roughness ) ) );
+  r = transformDirectionByInverseViewMatrix( r, viewMatrix );
+  float el = r.y;
+  vec3 rs = normalize( vec3( r.x, max( r.y, 0.24 ), r.z ) );
+  vec3 c = textureCubeUV( envMap, envMapRotation * rs, max( roughness, 0.08 ) ).rgb * envMapIntensity;
+  float low = 1.0 - smoothstep( 0.0, 0.24, el );
+  #ifdef USE_FOG
+    c = mix( c, fogColor * 0.9, low * 0.75 * ( 1.0 - uBank ) );
+  #endif
+  c *= 1.0 - uBank * ( 1.0 - smoothstep( 0.0, 0.06, el ) ) * 0.4;
+  return c;
+}
+#endif`,
+      )
+      .replace(
+        '#include <lights_fragment_maps>',
+        THREE.ShaderChunk.lights_fragment_maps.replace('getIBLRadiance( geometryViewDir, geometryNormal, material.roughness )', 'waterIBL( geometryViewDir, geometryNormal, material.roughness )'),
+      )
       .replace(
         '#include <common>',
         `#include <common>
@@ -199,7 +232,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.7, uRain );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-water-v1';
+  mat.customProgramCacheKey = () => 'apex-water-v2';
   return mat;
 }
 

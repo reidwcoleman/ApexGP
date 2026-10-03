@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { perlin2, rng } from './noise.ts';
 import type { Venue } from './worldmap.ts';
 import type { SceneryLight } from './scenery.ts';
+import { cloudShadowA, cloudShadowB } from './lightShadows.ts';
+import { CLOUD_FIELD_GLSL } from './skyClouds.ts';
 
 /**
  * Distant horizon: a parametric backdrop ring of mountain ranges, hills, dunes,
@@ -34,13 +36,24 @@ import type { SceneryLight } from './scenery.ts';
  *     color:  base albedo (linear RGB) — forest for ridges, sand, foliage, concrete
  *     center, spread: city: compass bearing (deg) of downtown and its half-width (deg)
  *     seed:   noise seed
+ *     fields: ridge: share of the gentle lower slopes cleared for pasture / fields, 0 … 1
  *   }
  *
  * Layers are drawn far → near in one draw call. The ring is compressed toward
  * the camera (so it never hits the far plane) and written at the back of the
- * depth range, so everything in the world draws over it and the sky never
- * does; its haze uses the scene's aerial fog at the layer's true distance.
- * Cost: one draw, a few thousand triangles, no shadows.
+ * depth range, after the world's opaque meshes (whatever hides it costs nothing)
+ * and before the sky, so everything in the world stays in front of it and the sky
+ * never draws over it; its haze uses the scene's aerial fog at the layer's true distance.
+ *
+ * The mesh only carries the shapes. Everything that makes a 30 km hillside read as
+ * land rather than a cut-out is per pixel: a noise relief that bends the normals
+ * (spurs and gullies the sun picks out), stands of darker and lighter trees, hedged
+ * parcels of pasture and crops on the gentle lower slopes (`fields`), rock on the
+ * steep faces and crests, a snow line broken by the gullies, single tree crowns cut
+ * into the tree lines' tops (discard), and a milkier foot on every range (the air
+ * between one ridge and the next). Every noise octave fades out before it is
+ * smaller than a pixel, so nothing shimmers. Cost: one draw, ~100 k triangles, no
+ * shadows.
  */
 
 export type HorizonKind = 'ridge' | 'dunes' | 'forest' | 'city' | 'volcano';
@@ -60,6 +73,8 @@ export interface HorizonLayer {
   center?: number;
   spread?: number;
   seed?: number;
+  /** ridge: 0 … 1 share of the gentle lower slopes cleared for pasture and fields (hedged parcels) */
+  fields?: number;
 }
 
 export interface HorizonSpec {
@@ -76,34 +91,49 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
     layers: [
       { kind: 'ridge', dist: 52000, height: 3600, from: 285, to: 330, rough: 0.9, snow: 0.55, haze: 0.55, seed: 3 },
       { kind: 'ridge', dist: 30000, height: 1900, from: 315, to: 60, rough: 0.8, snow: 0.9, haze: 0.8, seed: 7, base: 100 },
-      { kind: 'ridge', dist: 20000, height: 650, from: 300, to: 75, rough: 0.45, haze: 0.9, seed: 11, base: 60 },
+      { kind: 'ridge', dist: 20000, height: 650, from: 300, to: 75, rough: 0.45, haze: 0.9, seed: 11, base: 60, fields: 0.45 },
       { kind: 'city', dist: 16000, height: 230, from: 165, to: 215, center: 188, spread: 6, rough: 0.8, seed: 5 },
       { kind: 'forest', dist: 5000, height: 40, rough: 0.5, seed: 13 },
+      // (tree lines stand on the real terrain inside 15 km: layer on layer of poplar rows and copses
+      // across the plain, each a little paler, so the flat land recedes instead of stopping)
+      { kind: 'forest', dist: 8200, height: 26, rough: 0.8, seed: 14, from: 220, to: 150 },
+      { kind: 'forest', dist: 12000, height: 24, rough: 0.7, seed: 15, from: 225, to: 150 },
     ],
   },
   // the Ardennes: forested ridges fold on fold
   ardennes: {
     layers: [
-      { kind: 'ridge', dist: 26000, height: 420, rough: 0.35, haze: 1, seed: 21 },
-      { kind: 'ridge', dist: 18000, height: 330, rough: 0.4, seed: 22 },
+      { kind: 'ridge', dist: 26000, height: 420, rough: 0.35, haze: 1, seed: 21, fields: 0.4 },
+      { kind: 'ridge', dist: 18000, height: 330, rough: 0.4, seed: 22, fields: 0.5 },
       { kind: 'forest', dist: 15500, height: 30, rough: 0.6, seed: 23 },
+      // spruce fringes on the crests of the nearer folds
+      { kind: 'forest', dist: 5200, height: 30, rough: 0.7, seed: 24 },
+      { kind: 'forest', dist: 9000, height: 30, rough: 0.6, seed: 25 },
+      { kind: 'forest', dist: 12500, height: 30, rough: 0.6, seed: 26 },
     ],
   },
   // Silverstone: gently rolling Northamptonshire, woods and hedgerow trees on every horizon
   airfield: {
     layers: [
-      { kind: 'ridge', dist: 24000, height: 90, rough: 0.15, seed: 31, color: [0.07, 0.09, 0.045] },
+      { kind: 'ridge', dist: 24000, height: 90, rough: 0.15, seed: 31, color: [0.07, 0.09, 0.045], fields: 0.95 },
       { kind: 'forest', dist: 6000, height: 40, rough: 0.7, seed: 32 },
       { kind: 'forest', dist: 3200, height: 28, rough: 0.8, seed: 33, from: 200, to: 80 },
+      // hedgerow oaks and spinneys, field after field to the horizon
+      { kind: 'forest', dist: 4600, height: 22, rough: 0.9, seed: 34 },
+      { kind: 'forest', dist: 8800, height: 24, rough: 0.8, seed: 35 },
+      { kind: 'forest', dist: 12800, height: 24, rough: 0.7, seed: 36 },
     ],
   },
   // Suzuka: the Suzuka range to the west, wooded hills north, Ise Bay's coastal plain to the east
   suzuka: {
     layers: [
       { kind: 'ridge', dist: 30000, height: 1150, from: 200, to: 350, rough: 0.7, seed: 41 },
-      { kind: 'ridge', dist: 18000, height: 420, from: 300, to: 60, rough: 0.5, seed: 42 },
+      { kind: 'ridge', dist: 18000, height: 420, from: 300, to: 60, rough: 0.5, seed: 42, fields: 0.25 },
       { kind: 'city', dist: 9000, height: 60, from: 60, to: 170, rough: 0.35, seed: 43 },
       { kind: 'forest', dist: 16000, height: 26, from: 170, to: 300, seed: 44 },
+      // cedar and cypress on the hills north and west
+      { kind: 'forest', dist: 5200, height: 28, from: 200, to: 60, rough: 0.7, seed: 45 },
+      { kind: 'forest', dist: 9500, height: 28, from: 190, to: 70, rough: 0.6, seed: 46 },
     ],
   },
   // Interlagos: São Paulo all round (towers north towards the centre), the Serra do Mar to the south
@@ -127,7 +157,7 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
       // the Laurentians, low and blue far to the north
       { kind: 'ridge', dist: 56000, height: 480, from: 295, to: 45, rough: 0.35, haze: 1.1, seed: 61, scale: 9000 },
       // the Monteregian hills rising out of the plain to the east: Saint-Hilaire, Rougemont, Saint-Bruno
-      { kind: 'ridge', dist: 32000, height: 400, from: 70, to: 84, rough: 0.55, seed: 65, scale: 4200 },
+      { kind: 'ridge', dist: 32000, height: 400, from: 70, to: 84, rough: 0.55, seed: 65, scale: 4200, fields: 0.5 },
       { kind: 'ridge', dist: 40000, height: 360, from: 86, to: 96, rough: 0.5, seed: 66, scale: 4000 },
       { kind: 'ridge', dist: 16500, height: 190, from: 92, to: 104, rough: 0.3, seed: 67, scale: 3000 },
       // suburbs all round: Laval and the West Island, Longueuil and Brossard
@@ -152,21 +182,28 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
     layers: [
       // (the terrain itself carries the valley, the Seckau Alps and the Gleinalpe out to ~15 km)
       // the Niedere Tauern far to the north-west and north, snow on the crests
-      { kind: 'ridge', dist: 42000, height: 2300, from: 250, to: 30, rough: 1, snow: 0.88, haze: 0.85, seed: 81 },
+      { kind: 'ridge', dist: 42000, height: 2300, from: 250, to: 30, rough: 1, snow: 0.86, haze: 0.6, seed: 81 },
       // the Seetal Alps (Zirbitzkogel) to the south-west, a little snow on the top
-      { kind: 'ridge', dist: 24000, height: 1700, from: 200, to: 250, rough: 0.7, snow: 0.93, seed: 84 },
+      { kind: 'ridge', dist: 24000, height: 1700, from: 200, to: 250, rough: 0.7, snow: 0.93, haze: 0.7, seed: 84 },
       // the Stub-, Glein- and Koralpe south and south-east, the Fischbach Alps east: rounded, wooded
-      { kind: 'ridge', dist: 26000, height: 1300, from: 60, to: 205, rough: 0.55, haze: 0.9, seed: 82 },
+      { kind: 'ridge', dist: 26000, height: 1300, from: 60, to: 205, rough: 0.55, haze: 0.7, seed: 82, fields: 0.3 },
       // the Seckau and Wölz Tauern behind the terrain's own mountains, north-west to north-east
-      { kind: 'ridge', dist: 20000, height: 1250, from: 250, to: 60, rough: 0.85, seed: 83 },
+      { kind: 'ridge', dist: 20000, height: 1250, from: 250, to: 60, rough: 0.85, haze: 0.75, seed: 83, fields: 0.15 },
+      // spruce on the valley's own slopes and crests
+      { kind: 'forest', dist: 6000, height: 32, rough: 0.6, seed: 85, color: [0.035, 0.055, 0.03] },
+      { kind: 'forest', dist: 11000, height: 32, rough: 0.6, seed: 86, color: [0.035, 0.055, 0.03] },
     ],
   },
   // COTA: the Texas hill country to the west, prairie tree lines (the Austin skyline itself is
   // modelled at its real distance, ~12 km NW, by venues/austinScenery.ts)
   austin: {
     layers: [
-      { kind: 'ridge', dist: 30000, height: 180, from: 200, to: 340, rough: 0.25, seed: 91, color: [0.1, 0.1, 0.055] },
+      { kind: 'ridge', dist: 30000, height: 180, from: 200, to: 340, rough: 0.25, seed: 91, color: [0.1, 0.1, 0.055], fields: 0.45 },
       { kind: 'forest', dist: 6000, height: 14, rough: 0.8, seed: 93, color: DRY },
+      // live-oak mottes and creek-bottom pecans: low, broken lines across the prairie
+      { kind: 'forest', dist: 3600, height: 12, rough: 0.9, seed: 94, color: [0.06, 0.07, 0.035] },
+      { kind: 'forest', dist: 9500, height: 14, rough: 0.8, seed: 95, color: [0.08, 0.08, 0.045] },
+      { kind: 'forest', dist: 13500, height: 13, rough: 0.7, seed: 96, color: DRY },
     ],
   },
   // starting points for the new venues (their track agents tune bearings and layers)
@@ -178,7 +215,7 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
     layers: [
       { kind: 'ridge', dist: 52000, height: 420, from: 315, to: 40, rough: 0.35, haze: 1.1, seed: 104, scale: 9000 },
       { kind: 'ridge', dist: 62000, height: 900, from: 308, to: 330, rough: 0.5, haze: 1.05, seed: 105, scale: 5000 },
-      { kind: 'ridge', dist: 36000, height: 560, from: 62, to: 118, rough: 0.45, haze: 0.95, seed: 103, scale: 6000 },
+      { kind: 'ridge', dist: 36000, height: 560, from: 62, to: 118, rough: 0.45, haze: 0.95, seed: 103, scale: 6000, fields: 0.35 },
       { kind: 'ridge', dist: 50000, height: 330, from: 244, to: 262, rough: 0.75, haze: 1.05, seed: 106, scale: 2600 },
       { kind: 'city', dist: 9000, height: 30, from: 300, to: 195, rough: 0.5, seed: 101 },
       { kind: 'city', dist: 5200, height: 60, from: 330, to: 20, rough: 0.35, seed: 102 },
@@ -238,10 +275,13 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
       { kind: 'ridge', dist: 58000, height: 780, from: 45, to: 80, rough: 0.55, haze: 1.25, seed: 141, color: FOREST },
       { kind: 'ridge', dist: 42000, height: 640, from: 330, to: 20, rough: 0.6, haze: 1.3, seed: 142, color: FOREST },
       { kind: 'ridge', dist: 30000, height: 420, from: 285, to: 330, rough: 0.5, haze: 1.3, seed: 144, color: FOREST },
-      { kind: 'ridge', dist: 26000, height: 260, from: 255, to: 290, rough: 0.35, haze: 1.3, seed: 145, color: FOREST },
+      { kind: 'ridge', dist: 26000, height: 260, from: 255, to: 290, rough: 0.35, haze: 1.3, seed: 145, color: FOREST, fields: 0.6 },
       { kind: 'city', dist: 18000, height: 60, from: 220, to: 252, center: 236, spread: 7, rough: 0.55, haze: 1.5, seed: 146 },
-      { kind: 'ridge', dist: 21000, height: 150, from: 10, to: 150, rough: 0.35, haze: 1.2, seed: 147, color: FOREST },
+      { kind: 'ridge', dist: 21000, height: 150, from: 10, to: 150, rough: 0.35, haze: 1.2, seed: 147, color: FOREST, fields: 0.7 },
       { kind: 'forest', dist: 16500, height: 18, from: 110, to: 260, rough: 0.8, haze: 1.2, seed: 143, color: FOREST },
+      // acacia windbreaks and oak woods on the hills round the valley
+      { kind: 'forest', dist: 4200, height: 20, rough: 0.8, seed: 148, color: [0.05, 0.065, 0.03] },
+      { kind: 'forest', dist: 8500, height: 20, rough: 0.7, haze: 1.1, seed: 149, color: [0.05, 0.065, 0.03] },
     ],
   },
 };
@@ -262,20 +302,37 @@ export interface Horizon {
 
 const DEG = Math.PI / 180;
 
+/**
+ * Per-vertex data: position (true world metres; the ring is squeezed by the model matrix),
+ * base albedo, aInfo = (metres along the ring, row: 0 foot … 1 crest / metres above the foot,
+ * kind, h01 or building hash), aHaze, aEx = (feature scale m, fields 0 … 1, rough, snow line).
+ * kinds: 0 ridge, 1 tree line, 2 dunes, 3 building, 4 glass tower
+ */
 class Builder {
   pos: number[] = [];
   col: number[] = [];
   info: number[] = [];
   haze: number[] = [];
+  ex: number[] = [];
   idx: number[] = [];
-  v(x: number, y: number, z: number, c: [number, number, number], u: number, vv: number, kind: number, h: number, hz: number) {
+  v(x: number, y: number, z: number, c: readonly number[], u: number, vv: number, kind: number, h: number, hz: number, ex: readonly number[] = EX0) {
     this.pos.push(x, y, z);
     this.col.push(c[0], c[1], c[2]);
     this.info.push(u, vv, kind, h);
     this.haze.push(hz);
+    this.ex.push(ex[0], ex[1], ex[2], ex[3]);
     return this.pos.length / 3 - 1;
   }
 }
+const EX0 = [600, 0, 0.5, 0] as const;
+
+/**
+ * The real terrain under the ring (inside the far terrain's ±15 km), set while building: tree lines
+ * stand on the land they are drawn over (a line at 4 km on a rise is not buried by it), and ranges
+ * beyond the terrain's edge rise from the edge's own height, not from the circuit's.
+ */
+let groundAt: ((x: number, z: number) => number) | null = null;
+const footAt = (x: number, z: number, base: number) => (groundAt ? Math.max(base, groundAt(x, z) - 12) : base);
 
 /** compass arc → list of azimuths (radians, compass) */
 function arc(L: HorizonLayer, step: number): number[] {
@@ -330,70 +387,73 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
     return;
   }
   if (L.kind === 'forest') {
-    // a tree line: fine bumps (single crowns ~ 12 m) on broad masses (copses and gaps)
-    const step = Math.min(1.2 * DEG, 14 / D);
+    // a tree line: broad masses (copses, gaps, a field showing through) along the ring; the single
+    // crowns (~ 9–14 m) are cut per pixel in the shader, so the silhouette is a real fringe of
+    // tree tops, not a smooth band. Two staggered rows give it depth (the back row paler).
+    // (columns every ~70 m carry the copses and gaps; the single crowns are cut per pixel)
+    const step = Math.min(0.6 * DEG, 70 / D);
     const col = L.color ?? FOREST;
     const azs = arc(L, step);
     const ox = r() * 100, oz = r() * 100;
-    const rows: number[][] = [];
-    for (const az of azs) {
-      const [sx, sz] = dir(az);
-      const fade = arcFade(L, az);
-      const mass = perlin2((sx * D) / 900 + ox, (sz * D) / 900 + oz) * 0.5 + 0.5;
-      const crowns = Math.abs(perlin2((sx * D) / 11 + ox, (sz * D) / 11 - oz));
-      const h = L.height * fade * Math.max(0, Math.min(1, 0.25 + mass * 1.1)) * (0.72 + 0.28 * Math.sqrt(1 - crowns));
-      const x = cx + sx * D, z = cz + sz * D;
-      const x2 = cx + sx * (D - 60), z2 = cz + sz * (D - 60);
-      const c: [number, number, number] = [col[0] * (0.85 + 0.3 * mass), col[1] * (0.85 + 0.3 * mass), col[2] * (0.9 + 0.2 * mass)];
-      rows.push([b.v(x2, base - 40, z2, c, 0, 0, 1, 0, hz), b.v(x, base + h, z, c, 0, 1, 1, 1, hz)]);
+    for (let row = 1; row >= 0; row--) {
+      const Dr = D + row * 140;
+      const rows: number[][] = [];
+      for (const az of azs) {
+        const [sx, sz] = dir(az);
+        const fade = arcFade(L, az);
+        const mass = perlin2((sx * Dr) / 900 + ox + row * 7, (sz * Dr) / 900 + oz) * 0.5 + 0.5;
+        const gap = perlin2((sx * Dr) / 260 - oz, (sz * Dr) / 260 + ox + row * 3);
+        const h = L.height * fade * Math.max(0, Math.min(1, 0.2 + mass * 1.15)) * (gap < -0.42 + row * 0.1 ? 0.15 : 1) * (row ? 1.12 : 1);
+        const x = cx + sx * Dr, z = cz + sz * Dr;
+        const x2 = cx + sx * (Dr - 60), z2 = cz + sz * (Dr - 60);
+        const k = row ? 1.12 : 1;
+        const foot = groundAt ? groundAt(x, z) + (L.base ?? 0) : base;
+        const c = [col[0] * (0.85 + 0.3 * mass) * k, col[1] * (0.85 + 0.3 * mass) * k, col[2] * (0.9 + 0.2 * mass) * k];
+        const ex = [12 + row * 2, 0, L.rough ?? 0.6, 0];
+        // aInfo.y: metres above the foot; aInfo.w: this column's crown height
+        rows.push([b.v(x2, foot - 14, z2, c, az * Dr, -14, 1, h, hz, ex), b.v(x, foot + h * 1.08 + 2, z, c, az * Dr, h * 1.08 + 2, 1, h, hz, ex)]);
+      }
+      for (let i = 0; i < rows.length - 1; i++) b.idx.push(rows[i][0], rows[i + 1][0], rows[i + 1][1], rows[i][0], rows[i + 1][1], rows[i][1]);
     }
-    for (let i = 0; i < rows.length - 1; i++) b.idx.push(rows[i][0], rows[i + 1][0], rows[i + 1][1], rows[i][0], rows[i + 1][1], rows[i][1]);
     return;
   }
-  // ridge / dunes: a lit heightfield band from (D − depth) to the crest at D
+  // ridge / dunes: a lit heightfield band from (D − depth) to the crest at D. Colour (forest,
+  // pasture, rock, snow) is decided per pixel in the shader from aEx; the vertices carry the
+  // shape and the layer's base albedo.
   const dunes = L.kind === 'dunes';
   const rough = dunes ? 0.1 : (L.rough ?? 0.5);
   const scale = L.scale ?? Math.max(dunes ? 220 : 600, L.height * (dunes ? 9 : 3.5));
   const depth = Math.min(D * 0.45, Math.max(scale * 1.6, L.height * 5));
-  const K = dunes ? 4 : 8;
-  const step = Math.min(0.5 * DEG, scale / 10 / D);
+  // (rows and columns where they show: a low far ridge is a few pixels tall, a big range needs them;
+  // the fine relief is per pixel anyway)
+  const angH = L.height / D / DEG;
+  const K = dunes || angH < 0.5 ? 4 : angH < 1.5 ? 7 : 11;
+  const step = Math.max(Math.max(0.07, Math.min(angH, 0.25)) * DEG, Math.min(0.32 * DEG, scale / 14 / D));
   const azs = arc(L, step);
   const ox = r() * 100, oz = r() * 100;
   const forest = L.color ?? (dunes ? ([0.34, 0.3, 0.2] as [number, number, number]) : FOREST);
-  const rock: [number, number, number] = [0.17, 0.16, 0.15];
-  const snow: [number, number, number] = [0.78, 0.8, 0.84];
+  const fields = L.fields ?? 0;
+  const ex = [scale, fields, rough, L.snow ?? 0];
   const grid: number[][] = [];
   for (const az of azs) {
     const fade = arcFade(L, az);
     const [sx, sz] = dir(az);
     const col: number[] = [];
+    const foot = footAt(cx + sx * (D - depth), cz + sz * (D - depth), base);
+    const jit = 0.92 + 0.16 * (perlin2((sx * D) / 1700 + 3.3, (sz * D) / 1700 - 1.1) * 0.5 + 0.5);
     for (let k = 0; k <= K; k++) {
       const u = k / K;
       const d = D - depth * (1 - u);
       const px = sx * d, pz = sz * d;
-      // crest height along this azimuth, and the slope's own ribs and gullies
+      // crest height along this azimuth, and the slope's own spurs and gullies (they run down
+      // the face, so the lit/shaded ribs read like real mountainsides, not a smooth sheet)
       const crest = ridgeNoise(px / scale + ox, pz / scale + oz, rough);
       const rib = perlin2(px / (scale * 0.22) - oz, pz / (scale * 0.22) + ox);
-      const prof = Math.pow(u, dunes ? 0.8 : 1.25);
-      let h01 = crest * prof + (dunes ? 0 : 0.14 * rib * u * (1 - u) * 4 * rough);
+      const prof = dunes ? Math.pow(u, 0.8) : u * u * (3 - 2 * u) * 0.65 + Math.pow(u, 1.6) * 0.35;
+      let h01 = crest * prof + (dunes ? 0 : 0.17 * rib * u * (1 - u) * 4 * (0.35 + 0.65 * rough));
       h01 = Math.max(0, h01) * fade;
-      const y = base - (u === 0 ? 60 : 0) + L.height * h01;
-      // colour: forest low, rock high, snow on top (by absolute height fraction), ribs catch it
-      let c: [number, number, number] = [forest[0], forest[1], forest[2]];
-      if (!dunes) {
-        const rockK = Math.max(0, Math.min(1, (h01 - 0.45 - 0.12 * rib) / 0.25)) * (0.3 + 0.7 * rough);
-        c = [c[0] + (rock[0] - c[0]) * rockK, c[1] + (rock[1] - c[1]) * rockK, c[2] + (rock[2] - c[2]) * rockK];
-        if (L.snow) {
-          const sk = Math.max(0, Math.min(1, (h01 - L.snow - 0.08 * rib) / 0.06));
-          c = [c[0] + (snow[0] - c[0]) * sk, c[1] + (snow[1] - c[1]) * sk, c[2] + (snow[2] - c[2]) * sk];
-        }
-      } else {
-        // marram grass on the lee slopes
-        const g = Math.max(0, rib) * 0.6;
-        c = [c[0] * (1 - g) + 0.16 * g, c[1] * (1 - g) + 0.17 * g, c[2] * (1 - g) + 0.08 * g];
-      }
-      const jit = 0.9 + 0.2 * (perlin2(px / 700 + 3.3, pz / 700 - 1.1) * 0.5 + 0.5);
-      col.push(b.v(cx + px, y, cz + pz, [c[0] * jit, c[1] * jit, c[2] * jit], 0, u, dunes ? 2 : 0, h01, hz));
+      const y = foot - (u === 0 ? 60 : 0) + L.height * h01;
+      col.push(b.v(cx + px, y, cz + pz, [forest[0] * jit, forest[1] * jit, forest[2] * jit], az * d, u, dunes ? 2 : 0, h01, hz, ex));
     }
     grid.push(col);
   }
@@ -411,11 +471,10 @@ function buildVolcano(b: Builder, L: HorizonLayer, cx: number, cz: number, base:
   const half = (L.spread ?? 10) * DEG;
   const rough = L.rough ?? 0.5;
   const depth = Math.min(D * 0.3, L.height * 5);
-  const K = 8;
-  const n = 120;
+  const K = 10;
+  const n = 200;
   const forest = L.color ?? FOREST;
-  const rock: [number, number, number] = [0.2, 0.18, 0.17];
-  const snow: [number, number, number] = [0.8, 0.82, 0.86];
+  const ex = [Math.max(800, L.height * 0.9), 0, Math.max(0.6, rough), L.snow ?? 0];
   const grid: number[][] = [];
   for (let i = 0; i <= n; i++) {
     const az = c + (i / n - 0.5) * 2.6 * half;
@@ -428,20 +487,14 @@ function buildVolcano(b: Builder, L: HorizonLayer, cx: number, cz: number, base:
     const crest = Math.min(0.97, Math.max(cone, apron) + gully * cone);
     const col: number[] = [];
     const sx = Math.sin(az), sz = -Math.cos(az);
+    const foot = footAt(cx + sx * (D - depth), cz + sz * (D - depth), base);
     for (let k = 0; k <= K; k++) {
       const u = k / K;
       const d = D - depth * (1 - u);
       const rib = perlin2(az * 140 - 3.1, u * 3 + (L.seed ?? 0));
       const h01 = Math.max(0, crest * Math.pow(u, 1.25) + 0.03 * rib * u * (1 - u) * 4 * rough);
-      const y = base - (u === 0 ? 60 : 0) + L.height * h01;
-      const rockK = Math.max(0, Math.min(1, (h01 - 0.35 - 0.1 * rib) / 0.2));
-      let cc: [number, number, number] = [forest[0] + (rock[0] - forest[0]) * rockK, forest[1] + (rock[1] - forest[1]) * rockK, forest[2] + (rock[2] - forest[2]) * rockK];
-      if (L.snow) {
-        // snow in streaks down the gullies below the cap
-        const sk = Math.max(0, Math.min(1, (h01 - L.snow + 0.1 * rib) / 0.05));
-        cc = [cc[0] + (snow[0] - cc[0]) * sk, cc[1] + (snow[1] - cc[1]) * sk, cc[2] + (snow[2] - cc[2]) * sk];
-      }
-      col.push(b.v(cx + sx * d, y, cz + sz * d, cc, 0, u, 0, h01, hz));
+      const y = foot - (u === 0 ? 60 : 0) + L.height * h01;
+      col.push(b.v(cx + sx * d, y, cz + sz * d, forest, az * d, u, 0, h01, hz, ex));
     }
     grid.push(col);
   }
@@ -479,11 +532,17 @@ function buildCity(b: Builder, L: HorizonLayer, cx: number, cz: number, base: nu
         while (da < -Math.PI) da += Math.PI * 2;
         dt = Math.exp(-(da * da) / (2 * spread * spread));
       }
-      // mid-rise everywhere, towers in the downtown cluster
+      // mid-rise everywhere, towers in the downtown cluster; a few slabs and tall chimneys break
+      // the run of similar boxes (a skyline is never a comb)
       const rr = r();
-      let h = L.height * (centre !== null ? 0.12 + 0.2 * rr + dt * (0.35 + 0.65 * Math.pow(r(), 0.7)) : 0.35 + 0.65 * rr * rr);
+      let h = L.height * (centre !== null ? 0.12 + 0.2 * rr + dt * (0.35 + 0.65 * Math.pow(r(), 0.7)) : 0.3 + 0.7 * rr * rr * rr);
       h *= fade * (row === 0 ? 1 : 0.85 + 0.1 * row);
-      if (h > 6 && r() < 0.35 + 0.65 * density) addBlock(b, cx, cz, mid, dRow + (r() - 0.5) * 120, w * (0.75 + (dt > 0.5 ? 0.1 : 0.2) * r()), w * (0.6 + 0.8 * r()), base, h, r(), hz);
+      if (h > 6 && r() < 0.35 + 0.65 * density) {
+        const slim = dt > 0.5 && r() < 0.3;
+        addBlock(b, cx, cz, mid, dRow + (r() - 0.5) * 120, w * (slim ? 0.45 : 0.75 + (dt > 0.5 ? 0.1 : 0.2) * r()), w * (0.6 + 0.8 * r()), base, h * (slim ? 1.25 : 1), r(), hz);
+      }
+      // low roofs between the blocks: the city's carpet, so the skyline stands on something
+      if (row === 0 && fade > 0.05) addBlock(b, cx, cz, mid + dAz * 0.5, dRow - 80 - r() * 200, w * 1.8, 60, base, (6 + 10 * r()) * fade, 0.1 + 0.3 * r(), hz);
       az += dAz + gap;
     }
   }
@@ -493,9 +552,11 @@ function addBlock(b: Builder, cx: number, cz: number, az: number, d: number, w: 
   const fx = Math.sin(az), fz = -Math.cos(az); // outward
   const tx = Math.cos(az), tz = Math.sin(az); // along the ring
   const px = cx + fx * d, pz = cz + fz * d;
+  base = footAt(px, pz, base);
   const tone = 0.75 + 0.5 * hash;
   const glassy = hash > 0.55 && h > 60;
-  const c: [number, number, number] = glassy ? [0.1 * tone, 0.125 * tone, 0.15 * tone] : hash < 0.2 ? [0.42 * tone, 0.36 * tone, 0.3 * tone] : [0.34 * tone, 0.33 * tone, 0.31 * tone];
+  // muted, weathered façades: concrete, render, brick; glass towers take the sky
+  const c = glassy ? [0.1 * tone, 0.12 * tone, 0.14 * tone] : hash < 0.2 ? [0.38 * tone, 0.33 * tone, 0.28 * tone] : hash < 0.4 ? [0.3 * tone, 0.29 * tone, 0.27 * tone] : [0.34 * tone, 0.33 * tone, 0.31 * tone];
   const kind = glassy ? 4 : 3;
   const P = (s: number, q: number, y: number) => [px + tx * s * w * 0.5 + fx * q * depth * 0.5, y, pz + tz * s * w * 0.5 + fz * q * depth * 0.5] as const;
   const quad = (a: readonly number[], bb: readonly number[], cc: readonly number[], dd: readonly number[], uw: number) => {
@@ -513,16 +574,31 @@ function addBlock(b: Builder, cx: number, cz: number, az: number, d: number, w: 
   quad(P(-1, -1, y1), P(1, -1, y1), P(1, 1, y1), P(-1, 1, y1), 0);
 }
 
-export function buildHorizon(spec: HorizonSpec, center: { x: number; z: number }, groundY: number): Horizon {
+export function buildHorizon(
+  spec: HorizonSpec,
+  center: { x: number; z: number },
+  groundY: number,
+  ground?: { height(x: number, z: number): number; FAR: { x0: number; x1: number; z0: number; z1: number } },
+): Horizon {
   const b = new Builder();
+  if (ground) {
+    // (clamped just inside the far terrain: beyond it, its edge's height carries on)
+    const F = ground.FAR, m = 400;
+    groundAt = (x, z) => ground.height(Math.min(F.x1 - m, Math.max(F.x0 + m, x)), Math.min(F.z1 - m, Math.max(F.z0 + m, z)));
+  }
   // painter's order: farthest layer first
   const layers = [...spec.layers].sort((a, c) => c.dist - a.dist);
-  for (const L of layers) buildLayer(b, L, center.x, center.z, groundY);
+  try {
+    for (const L of layers) buildLayer(b, L, center.x, center.z, groundY);
+  } finally {
+    groundAt = null;
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
   g.setAttribute('aInfo', new THREE.Float32BufferAttribute(b.info, 4));
   g.setAttribute('aHaze', new THREE.Float32BufferAttribute(b.haze, 1));
+  g.setAttribute('aEx', new THREE.Float32BufferAttribute(b.ex, 4));
   g.setIndex(b.pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(b.idx, 1) : new THREE.Uint16BufferAttribute(b.idx, 1));
   g.computeVertexNormals();
 
@@ -530,6 +606,12 @@ export function buildHorizon(spec: HorizonSpec, center: { x: number; z: number }
     uSunDir: { value: new THREE.Vector3(0.4, 0.7, 0.3) },
     uSunCol: { value: new THREE.Color(4, 3.9, 3.7) },
     uSkyCol: { value: new THREE.Color(0.5, 0.6, 0.8) },
+    // (the circuit centre: noise coordinates stay small, so the hashes keep their precision)
+    uOrigin: { value: new THREE.Vector3(center.x, groundY, center.z) },
+    // the broken-cumulus ground shadows (shared with every lit material, lightShadows.ts): the
+    // same clouds dapple the far hills, the surest sign the backdrop is land under this sky
+    uCloudA: { value: cloudShadowA },
+    uCloudB: { value: cloudShadowB },
   };
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   mat.onBeforeCompile = (sh) => {
@@ -540,8 +622,12 @@ export function buildHorizon(spec: HorizonSpec, center: { x: number; z: number }
         `#include <common>
 attribute vec4 aInfo;
 attribute float aHaze;
+attribute vec4 aEx;
+uniform vec3 uOrigin;
 varying vec4 vInfo;
-varying vec3 vHN;`,
+varying vec4 vEx;
+varying vec3 vHN;
+varying vec3 vW;`,
       )
       .replace(
         '#include <fog_vertex>',
@@ -551,6 +637,8 @@ varying vec3 vHN;`,
   vFogRay *= ${SQUEEZE.toFixed(1)} * aHaze;
 #endif
 vInfo = aInfo;
+vEx = aEx;
+vW = position - uOrigin;
 vHN = normalize( mat3( modelMatrix ) * normal );
 // behind everything in the world, in front of the sky (which sits exactly on the far plane)
 gl_Position.z = gl_Position.w * 0.999995;`,
@@ -562,42 +650,187 @@ gl_Position.z = gl_Position.w * 0.999995;`,
 uniform vec3 uSunDir;
 uniform vec3 uSunCol;
 uniform vec3 uSkyCol;
+uniform vec3 uOrigin;
+uniform vec4 uCloudA;
+uniform vec4 uCloudB;
 varying vec4 vInfo;
+varying vec4 vEx;
 varying vec3 vHN;
-float hh( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }`,
+varying vec3 vW;
+${CLOUD_FIELD_GLSL}
+float hzCloud( vec3 wp ) {
+  if ( uCloudA.x <= 0.0 ) return 1.0;
+  vec2 xz = wp.xz + uCloudB.xy * ( uCloudB.z - wp.y ) + uCloudA.zw;
+  float wc = localCoverage( cloudField( xz ), uCloudA.y );
+  float n = cf_noise( xz * ( 1.0 / 1300.0 ) ) * 0.6 + cf_noise( xz * ( 1.0 / 520.0 ) + 3.1 ) * 0.4;
+  return 1.0 - uCloudA.x * smoothstep( 1.0 - wc, 1.0 - wc + 0.22, n );
+}
+float hh( vec2 p ) {
+  vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
+  p3 += dot( p3, p3.yzx + 33.33 );
+  return fract( ( p3.x + p3.y ) * p3.z );
+}
+float vn( vec2 p ) {
+  vec2 i = floor( p );
+  vec2 f = p - i;
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( hh( i ), hh( i + vec2( 1.0, 0.0 ) ), f.x ), mix( hh( i + vec2( 0.0, 1.0 ) ), hh( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
+// octaves fade out as they shrink below ~2 px (no shimmer on a 30 km ridge)
+// (and are not evaluated at all: most of a 20 km ring needs one or two)
+float hzFbm( vec2 p, float px ) {
+  float s = 0.0, a = 0.5;
+  for ( int o = 0; o < 4; o++ ) {
+    if ( px > 0.6 ) break;
+    s += ( vn( p ) - 0.5 ) * a * ( 1.0 - smoothstep( 0.25, 0.6, px ) );
+    p = mat2( 1.6, 1.2, -1.2, 1.6 ) * p + 3.7;
+    px *= 2.0;
+    a *= 0.55;
+  }
+  return s / 1.009 + 0.5;
+}`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+float hzFoot = 0.0;
 {
   vec3 n = normalize( vHN );
   float kind = vInfo.z;
+  // metres per pixel at this fragment (true scale)
+  float mpp = max( length( fwidth( vW.xz ) ), 0.5 );
   if ( kind > 2.5 ) {
     // buildings: floors and window bands, glass towers reflect the sky
     float fl = fract( vInfo.y / 3.6 );
     float col = fract( vInfo.x / 3.2 );
     float win = step( 0.3, fl ) * step( 0.18, col ) * step( col, 0.82 );
+    // window grids blur to an average once a floor is smaller than a pixel
+    win = mix( win, 0.45, smoothstep( 1.5, 4.0, mpp ) );
     vec3 glass = mix( vec3( 0.05, 0.06, 0.07 ), uSkyCol * 0.25, 0.6 );
     float lit = hh( floor( vec2( vInfo.x / 3.2, vInfo.y / 3.6 ) ) + vInfo.w * 17.0 );
     diffuseColor.rgb = kind > 3.5 ? mix( diffuseColor.rgb, glass * ( 0.8 + 0.4 * lit ), 0.35 + 0.35 * win ) : mix( diffuseColor.rgb, glass * ( 0.7 + 0.5 * lit ), win * 0.55 );
     if ( n.y > 0.9 ) diffuseColor.rgb *= 0.8;
+    // the lowest storeys sink into the city's own haze
+    hzFoot = 1.0 - smoothstep( 0.0, 40.0, vInfo.y );
+  } else if ( kind > 1.5 ) {
+    // dunes: wind-sorted sand, darker hollows, marram tufts on the lee
+    float S = vEx.x;
+    float d = hzFbm( vW.xz / ( S * 0.18 ), mpp / ( S * 0.18 ) );
+    float tuft = smoothstep( 0.55, 0.75, hzFbm( vW.xz / 40.0 + 7.1, mpp / 40.0 ) );
+    diffuseColor.rgb *= 0.82 + 0.36 * d;
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.13, 0.14, 0.07 ), tuft * 0.45 * ( 1.0 - smoothstep( 0.6, 1.0, vInfo.w ) ) );
+    hzFoot = 1.0 - smoothstep( 0.0, 0.6, vInfo.y );
+  } else if ( kind > 0.5 ) {
+    // tree line: the crowns cut per pixel against the column's height, a little ragged; the
+    // trunks' dark band at the foot, sunlit tops
+    float along = vInfo.x;
+    float hc = vInfo.w;
+    float cw = vEx.x;
+    float fa = along / cw;
+    float ci = floor( fa );
+    float cf = fract( fa ) * 2.0 - 1.0;
+    float h1 = hh( vec2( ci, 3.1 ) ), h2 = hh( vec2( ci, 8.7 ) );
+    float crown = sqrt( max( 0.0, 1.0 - cf * cf ) );
+    float fa2 = along / ( cw * 0.63 ) + 0.5;
+    float cf2 = fract( fa2 ) * 2.0 - 1.0;
+    float crown2 = sqrt( max( 0.0, 1.0 - cf2 * cf2 ) ) * ( 0.6 + 0.4 * hh( vec2( floor( fa2 ), 5.3 ) ) );
+    float top = hc * ( 0.78 + 0.2 * h1 ) + cw * 0.55 * max( crown * ( 0.5 + 0.5 * h2 ), crown2 * 0.8 ) * ( 0.6 + 0.4 * vEx.z );
+    // crowns narrower than ~1.5 px: a soft averaged fringe instead of aliasing teeth
+    float aa = smoothstep( 0.6, 1.6, mpp / cw * 3.0 );
+    top = mix( top, hc * 0.88 + cw * 0.3, aa );
+    if ( vInfo.y > top ) discard;
+    float t = clamp( vInfo.y / max( top, 1.0 ), 0.0, 1.0 );
+    float mott = hzFbm( vec2( along / ( cw * 1.3 ), vInfo.y / ( cw * 0.9 ) ), mpp / ( cw * 1.3 ) );
+    diffuseColor.rgb *= ( 0.55 + 0.45 * smoothstep( 0.0, 0.45, t ) ) * ( 0.8 + 0.45 * mott );
+    // the sun catches the upper crowns
+    n = normalize( n + vec3( 0.0, 0.6 * t, 0.0 ) );
+    hzFoot = 1.0 - smoothstep( -10.0, hc * 0.6, vInfo.y );
+  } else {
+    // mountains and hills: a fragment-level relief (spurs, gullies, stands of trees) bends the
+    // coarse mesh's normal; forest, pasture and fields, bare rock and snow by height, slope and noise
+    float S = vEx.x;
+    float fields = vEx.y;
+    float rough = vEx.z;
+    float snowL = vEx.w;
+    float h01 = vInfo.w;
+    vec2 q = vW.xz / ( S * 0.09 );
+    float pxq = mpp / ( S * 0.09 );
+    float r0 = hzFbm( q, pxq );
+    {
+      // bump from screen-space derivatives (one noise evaluation, not three): the relief as a
+      // height in metres, its gradient across the pixel quad turned into a world normal tilt
+      float H = r0 * S * 0.09 * ( 0.9 + 1.4 * rough );
+      vec3 dpx = dFdx( vW ), dpy = dFdy( vW );
+      vec3 r1 = cross( dpy, n ), r2 = cross( n, dpx );
+      float det = dot( dpx, r1 );
+      vec3 grad = sign( det ) * ( dFdx( H ) * r1 + dFdy( H ) * r2 );
+      n = normalize( abs( det ) * n - grad );
+    }
+    float slope = 1.0 - n.y;
+    vec3 forest = diffuseColor.rgb;
+    // stands of trees: darker conifer blocks, lighter broadleaf, clearings
+    float stands = hzFbm( vW.xz / 160.0 + 11.3, mpp / 160.0 );
+    forest *= 0.72 + 0.6 * stands;
+    vec3 c = forest;
+    // pasture and fields on the gentle lower slopes (farmland venues): parcels with hedges
+    if ( fields > 0.01 ) {
+      float clear = smoothstep( 0.42, 0.56, hzFbm( vW.xz / 1500.0 + 4.2, mpp / 1500.0 ) + 0.25 * ( fields - 0.5 ) );
+      clear *= ( 1.0 - smoothstep( 0.5, 0.85, h01 ) ) * ( 1.0 - smoothstep( 0.25, 0.5, slope ) ) * fields;
+      float ang = floor( vn( vW.xz / 2600.0 ) * 4.0 ) * 0.6 + 0.3;
+      vec2 fq = mat2( cos( ang ), -sin( ang ), sin( ang ), cos( ang ) ) * vW.xz;
+      vec2 cell = floor( fq / vec2( 230.0, 160.0 ) );
+      vec2 ff = fract( fq / vec2( 230.0, 160.0 ) );
+      float hc = hh( cell );
+      vec3 fc = hc < 0.35 ? vec3( 0.075, 0.1, 0.035 ) : hc < 0.6 ? vec3( 0.1, 0.12, 0.045 ) : hc < 0.8 ? vec3( 0.19, 0.17, 0.08 ) : hc < 0.92 ? vec3( 0.15, 0.13, 0.06 ) : vec3( 0.12, 0.09, 0.06 );
+      // (a dry venue's base albedo warms its fields too)
+      fc *= mix( vec3( 1.0 ), clamp( forest / vec3( 0.045, 0.07, 0.035 ), 0.6, 1.7 ), 0.4 );
+      float edgeW = min( 0.5, mpp / 230.0 * 1.2 + 0.03 );
+      float hedge = 1.0 - smoothstep( 0.0, edgeW, min( min( ff.x, 1.0 - ff.x ), min( ff.y, 1.0 - ff.y ) * 1.4 ) );
+      // parcels this small blur to their mean (no moiré from the hedges far off)
+      float far = smoothstep( 25.0, 70.0, mpp );
+      fc = mix( mix( fc, forest * 0.8, hedge * 0.7 ), vec3( 0.11, 0.115, 0.05 ), far );
+      c = mix( c, fc, clear );
+    }
+    // bare rock on the high crests and the steep faces, scree streaks down the gullies
+    float rockK = smoothstep( 0.42, 0.68, h01 + 0.35 * ( r0 - 0.5 ) + slope * 0.55 * rough ) * ( 0.2 + 0.8 * rough );
+    vec3 rock = mix( vec3( 0.16, 0.15, 0.14 ), vec3( 0.25, 0.24, 0.22 ), stands ) * ( 0.85 + 0.3 * r0 );
+    c = mix( c, rock, rockK );
+    if ( snowL > 0.0 ) {
+      // snow lies above the line, thinner on steep rock, longer down the gullies
+      float sk = smoothstep( snowL - 0.03, snowL + 0.04, h01 + 0.22 * ( r0 - 0.5 ) - slope * 0.25 );
+      c = mix( c, vec3( 0.8, 0.82, 0.86 ), sk * ( 1.0 - 0.45 * smoothstep( 0.45, 0.8, slope ) ) );
+    }
+    diffuseColor.rgb = c;
+    // valley mist: the foot of each range sits in the air between it and the next
+    hzFoot = 1.0 - smoothstep( 0.0, 0.42, vInfo.y * 0.6 + h01 * 0.6 );
   }
   float ndl = max( dot( n, uSunDir ), 0.0 );
   // soft wrap on vegetated slopes (forest canopy scatters)
   float wrap = kind < 1.5 ? max( ( dot( n, uSunDir ) + 0.3 ) / 1.3, 0.0 ) : ndl;
   float sky = 0.55 + 0.45 * n.y;
-  diffuseColor.rgb *= uSunCol * mix( ndl, wrap, 0.5 ) * RECIPROCAL_PI + uSkyCol * sky;
+  float cloud = hzCloud( vW + uOrigin );
+  diffuseColor.rgb *= uSunCol * mix( ndl, wrap, 0.5 ) * cloud * RECIPROCAL_PI + uSkyCol * sky;
 }`,
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `#include <fog_fragment>
+#ifdef USE_FOG
+  // layered depth: the low ground between ranges is milkier than the crests above it
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, hzFoot * 0.28 );
+#endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-horizon-v1';
+  mat.customProgramCacheKey = () => 'apex-horizon-v3';
   const mesh = new THREE.Mesh(g, mat);
   mesh.name = 'horizon';
   mesh.frustumCulled = false;
   mesh.matrixAutoUpdate = false;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
-  mesh.renderOrder = -5;
+  // after the world's opaque meshes (they are all nearer, so the depth test throws away every ring
+  // pixel hidden behind trees, stands and hills before it is shaded), before the sky (10000)
+  mesh.renderOrder = 5;
   const cam = new THREE.Vector3();
   const k = 1 / SQUEEZE;
   return {

@@ -41,6 +41,14 @@ export interface TerrainPalette {
   rock?: number;
   litter?: number;
   canopy?: number;
+  /**
+   * the countryside beyond the 6 km square (no trees are placed there: the canopy is painted):
+   * `forest` −0.3 … +0.3 shifts how much of it is woodland (steep ground is always the first to be
+   * wooded); `pasture` 0 … 1 the share of grass among the farm fields (the rest: stubble, maize,
+   * ploughed earth, hay)
+   */
+  forest?: number;
+  pasture?: number;
 }
 export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   // Bahrain: the Sakhir desert — pale sand, grey-brown limestone pavement, irrigated verges
@@ -51,16 +59,28 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   zandvoort: { arid: 0.42, sand: 0xd2c29c, rock: 0x9a8f7a, meadow: 0x6e7547, straw: 0xa9a071 },
   // Mexico City: dry highland grass, brown volcanic soil
   mexico: { meadow: 0x7a7646, straw: 0xa28e5c, earth: 0x6e5238, grassDark: 0x4a4e2a },
-  // Texas: straw-coloured prairie, limestone and red clay
-  austin: { arid: 0.18, meadow: 0x7c7647, straw: 0xab975f, earth: 0x8e6244, grassDark: 0x4c5129, sand: 0xb89c72, rock: 0xa2968a },
-  // Hungary in August: sun-dried grass
-  hungaroring: { meadow: 0x76763f, straw: 0xa69455 },
+  // Texas: straw-coloured prairie, limestone and red clay; ranch pasture, mesquite and oak mottes
+  austin: { arid: 0.18, meadow: 0x7c7647, straw: 0xab975f, earth: 0x8e6244, grassDark: 0x4c5129, sand: 0xb89c72, rock: 0xa2968a, forest: -0.1, pasture: 0.7 },
+  // Hungary in August: sun-dried grass; the plain's big arable fields
+  hungaroring: { meadow: 0x76763f, straw: 0xa69455, forest: 0.02, pasture: 0.3 },
   // Melbourne: Albert Park's dry-summer lawns
   melbourne: { meadow: 0x6f7544, straw: 0xa09262 },
   // São Paulo: red tropical earth
   interlagos: { earth: 0x8c4e30, meadow: 0x5f7236 },
+  // the Ardennes: spruce and beech on every slope, grazing on the plateaus (Herve cattle country)
+  ardennes: { forest: 0.17, pasture: 0.8 },
+  // Northamptonshire: big arable fields (harvested wheat, oilseed, beans) with pasture between
+  airfield: { forest: -0.04, pasture: 0.36 },
+  // Lombardy: maize and wheat on the plain, woods only on the Brianza slopes
+  park: { forest: -0.02, pasture: 0.22 },
+  // Mie: wooded hills, paddies and tea fields on the plain
+  suzuka: { forest: 0.12, pasture: 0.5 },
+  // Styria: spruce on the slopes, hay meadows and pasture in the valleys
+  spielberg: { forest: 0.14, pasture: 0.85 },
+  // the St Lawrence plain: dairy farms and maize
+  montreal: { forest: -0.05, pasture: 0.35 },
 };
-const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid'>, string> = {
+const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid' | 'forest' | 'pasture'>, string> = {
   lawn: 'uLawn', meadow: 'uMeadow', straw: 'uStraw', grassDark: 'uGrassDark', earth: 'uEarth', gravel: 'uGravel',
   sand: 'uSand', rock: 'uRock', litter: 'uLitter', canopy: 'uCanopy',
 };
@@ -72,6 +92,8 @@ export function applyTerrainPalette(uniforms: Record<string, THREE.IUniform>, pa
     if (v !== undefined) (uniforms[u].value as THREE.Color).setHex(v);
   }
   uniforms.uArid.value = pal.arid ?? 0;
+  uniforms.uForestCover.value = pal.forest ?? 0;
+  uniforms.uPasture.value = pal.pasture ?? 0.32;
 }
 
 export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshStandardMaterial; uniforms: Record<string, THREE.IUniform> } {
@@ -109,6 +131,8 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uSand: { value: lin(0xc2a472) },
     uRock: { value: lin(0x86705a) },
     uArid: { value: 0 },
+    uForestCover: { value: 0 },
+    uPasture: { value: 0.32 },
     /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
     uCity: { value: 0 },
     uWetness: weatherUniforms.uWetness,
@@ -143,6 +167,7 @@ uniform sampler2D uMaskTrack;
 uniform vec2 uFineO, uFineS, uSqO, uSqS, uCenter;
 uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uGravel, uGravelDark, uAsphalt, uEarth, uCanopy, uRoof, uSand, uRock;
 uniform float uArid;
+uniform float uForestCover, uPasture;
 uniform float uWetness, uRain, uWTime;
 uniform float uCity;
 varying vec3 vWPos;
@@ -179,9 +204,16 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   vec2 ce = min( cuv, 1.0 - cuv );
   float inSq = smoothstep( 0.0, 0.03, min( ce.x, ce.y ) );
   vec4 mc = texture2D( uMaskCoarse, clamp( cuv, 0.001, 0.999 ) );
-  // outside the square: procedural woods + farmland
-  float procF = smoothstep( 0.6, 0.72, m1 * 0.6 + m2 * 0.4 );
-  float coarseForest = mix( procF * 0.7, mc.r, inSq );
+  // outside the square: procedural woods + farmland. Steep ground is wooded first (nobody ploughs
+  // a valley side), woods have ragged edges and spurs, and the venue sets how wooded it all is
+  float slopeT = 1.0 - clamp( normalize( vWNormal ).y, 0.0, 1.0 );
+  float fShift = uForestCover + smoothstep( 0.03, 0.2, slopeT ) * 0.32;
+  // (m1 repeats every ~1 km: out here, where nothing has to line up with placed trees or houses,
+  // a rotated 2.4 km octave is mixed in so the woods and towns never fall into a visible lattice)
+  float mF = texture2D( uNoise, mat2( 0.8, -0.6, 0.6, 0.8 ) * p * 0.00041 + vec2( 0.31, 0.87 ) ).r;
+  float mFar = mF * 0.55 + m1 * 0.45;
+  float procF = smoothstep( 0.6 - fShift, 0.7 - fShift, mFar * 0.6 + m2 * 0.4 + ( m3 - 0.5 ) * 0.09 );
+  float coarseForest = mix( procF * 0.92, mc.r, inSq );
   float park = mix( 0.0, mc.g, inSq );
   float forest = mix( coarseForest * 0.9, clamp( mf.r * 1.25, 0.0, 1.0 ), inFine );
   // track-aligned: R mowing band, G verge, B run-off wear (parkmask.ts)
@@ -203,6 +235,14 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   meadow = mix( meadow, uGrassDark * 0.85, smoothstep( 0.62, 0.8, d2 ) * 0.35 * ( 0.4 + 0.6 * nearF ) );
   meadow = mix( meadow, uStraw * 1.1, smoothstep( 0.78, 0.92, d3 ) * 0.25 * nearF );
   meadow *= 0.86 + 0.26 * d2 * ( 0.5 + 0.5 * nearF ) + 0.08 * m1;
+  // from a height unmown grassland is a mosaic, not a carpet: darker tussocky stands and bramble,
+  // paler dry swards on the thin soil, with fairly crisp edges between them
+  {
+    float mos = smoothstep( 0.47, 0.6, m3 * 0.6 + m2 * 0.4 );
+    meadow = mix( meadow, meadow * vec3( 0.74, 0.8, 0.76 ), mos * ( 0.2 + 0.35 * farF ) );
+    float pale = smoothstep( 0.6, 0.72, m2 * 0.5 + m1 * 0.3 + d1 * 0.2 );
+    meadow = mix( meadow, mix( meadow, uStraw, 0.55 ), pale * ( 0.15 + 0.3 * farF ) );
+  }
   vec3 lawnC = uLawn * ( 0.88 + 0.16 * m3 + 0.06 * d1 );
   // lawns: slightly patchy (clover, drier crowns where the soil is thin)
   lawnC = mix( lawnC, mix( uLawn, uStraw, 0.4 ), smoothstep( 0.6, 0.85, m2 * 0.6 + d1 * 0.4 ) * 0.35 );
@@ -262,13 +302,21 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   floorC *= 0.8 + 0.35 * d2;
   float fleck = step( 0.82, d3 ) * nearF;
   floorC = mix( floorC, vec3( 0.42, 0.28, 0.07 ), fleck * 0.5 );
-  // from afar the woods read as canopy, not floor
-  floorC = mix( floorC, uCanopy * ( 0.75 + 0.5 * m3 ), farF * ( 1.0 - inFine * 0.4 ) );
+  // from afar the woods read as canopy, not floor: clumps of crowns (lit tops, shaded gaps),
+  // darker blue-green conifer blocks among the broadleaf, a few yellowing or bronze crowns
+  {
+    float conifer = smoothstep( 0.52, 0.6, m1 * 0.5 + m0 * 0.5 );
+    vec3 canopyC = mix( uCanopy, uCanopy * vec3( 0.66, 0.78, 0.86 ), conifer );
+    // (as dark as the real trees nearer in: a canopy is mostly shadow seen from above)
+    canopyC *= 0.48 + 0.36 * m3 + 0.2 * ( m2 - 0.5 ) + 0.16 * d1;
+    canopyC = mix( canopyC, canopyC * vec3( 1.35, 1.15, 0.7 ), smoothstep( 0.7, 0.9, d2 ) * 0.4 * ( 1.0 - conifer ) );
+    floorC = mix( floorC, canopyC, farF * ( 1.0 - inFine * 0.4 ) );
+  }
   vec3 col = mix( grass, floorC, forest );
 
   // ---- outside the park: towns ringing the park wall, farmland and copses beyond
   float rc = length( p - uCenter );
-  float procUrban = ( 1.0 - smoothstep( 3500.0, 7000.0, rc ) ) * smoothstep( 0.55, 0.7, m1 * 0.7 + m2 * 0.3 ) + smoothstep( 0.66, 0.78, m1 ) * 0.7;
+  float procUrban = ( 1.0 - smoothstep( 3500.0, 7000.0, rc ) ) * smoothstep( 0.55, 0.7, mFar * 0.7 + m2 * 0.3 ) + smoothstep( 0.68, 0.8, mFar ) * 0.7;
   procUrban = mix( procUrban, smoothstep( 0.3, 0.42, m1 * 0.55 + m2 * 0.45 ), uCity );
   float urban = mix( procUrban * ( 1.0 - park ), mc.b, inSq ) * ( 1.0 - inFine * 0.0 );
   float mtn = smoothstep( 90.0, 320.0, vWPos.y );
@@ -281,24 +329,51 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     float h2 = h21( cell + 17.3 );
     vec2 fc = fract( wp / fs );
     float edge = smoothstep( 0.0, 0.02, min( min( fc.x, 1.0 - fc.x ), min( fc.y, 1.0 - fc.y ) ) );
+    // (the hedged grid is shared with the hedgerow trees, textures.fieldWarp) — some parcels are
+    // split by a plain fence into two crops, so the patchwork never reads as one repeated tile
+    float h3 = h21( cell + 5.9 );
+    float fence = 1.0;
+    if ( h3 < 0.48 ) {
+      float sp = 0.3 + 0.4 * h21( cell + 8.1 );
+      float t = h3 < 0.24 ? fc.x : fc.y;
+      float side = step( sp, t );
+      h1 = fract( h1 + side * 0.381 );
+      h2 = fract( h2 + side * 0.537 );
+      fence = smoothstep( 0.0, 0.008, abs( t - sp ) );
+    }
     // late summer: pasture, golden stubble with straw swaths, deep-green maize, ploughed earth,
-    // pale hay — distinct enough that the patchwork reads from the ground, not one green plain
+    // pale hay — distinct enough that the patchwork reads from the ground, not one green plain;
+    // muted as a lens sees them (no bright yellow squares)
     float fa = floor( h2 * 4.0 ) * 0.785 + 0.2;
     float fu = dot( p, vec2( cos( fa ), sin( fa ) ) );
     float furA = 1.0 - smoothstep( 0.2, 0.7, fwidth( fu / 1.6 ) );
     float furrow = ( 0.5 + 0.5 * sin( fu / 1.6 * 6.2832 ) ) * furA;
     float swA = 1.0 - smoothstep( 0.2, 0.7, fwidth( fu / 9.0 ) );
     float swath = smoothstep( 0.8, 0.95, abs( fract( fu / 9.0 ) - 0.5 ) * 2.0 ) * swA;
+    // tramlines: the sprayer's wheel tracks every 24 m, visible from a helicopter
+    float trA = 1.0 - smoothstep( 0.15, 0.5, fwidth( fu / 24.0 ) );
+    float tram = smoothstep( 0.965, 0.99, abs( fract( fu / 24.0 ) - 0.5 ) * 2.0 ) * trA;
     vec3 fieldCol;
-    if ( h1 < 0.24 ) fieldCol = mix( uMeadow, uLawn, 0.45 ) * ( 0.95 + 0.1 * m3 );
-    else if ( h1 < 0.42 ) fieldCol = mix( uStraw * 1.08, uStraw * 1.3, swath * 0.8 );
-    else if ( h1 < 0.58 ) fieldCol = mix( uLawn, uGrassDark, 0.55 ) * ( 0.88 + 0.12 * furrow );
-    else if ( h1 < 0.7 ) fieldCol = mix( uEarth * 0.62, uEarth * 0.42, furrow * 0.8 );
-    else if ( h1 < 0.85 ) fieldCol = mix( uStraw, uMeadow, 0.3 ) * ( 0.95 + 0.08 * swath );
-    else fieldCol = mix( uMeadow, uLawn, 0.2 ) * 1.04;
-    fieldCol *= ( 0.92 + 0.14 * d1 ) * ( 0.94 + 0.12 * m3 );
-    // field margins: a darker strip of rough grass and hedge bottom
+    if ( h1 < uPasture ) {
+      // grazing: greens of several ages, darker tussocks and dung patches, a worn gateway corner
+      float g = h1 / max( uPasture, 0.01 );
+      fieldCol = mix( mix( uMeadow, uLawn, 0.5 ), mix( uMeadow, uGrassDark, 0.45 ), g ) * ( 0.92 + 0.16 * m3 );
+      fieldCol = mix( fieldCol, uGrassDark * 0.85, smoothstep( 0.6, 0.85, d2 ) * 0.3 );
+      fieldCol = mix( fieldCol, mix( uStraw, uMeadow, 0.5 ), smoothstep( 0.65, 0.9, m2 * 0.5 + d1 * 0.5 ) * 0.35 );
+    } else {
+      float a = ( h1 - uPasture ) / max( 1.0 - uPasture, 0.01 );
+      if ( a < 0.3 ) fieldCol = mix( mix( uStraw, uMeadow, 0.28 ) * 0.92, uStraw * 1.08, swath * 0.6 );
+      else if ( a < 0.5 ) fieldCol = mix( uLawn, uGrassDark, 0.6 ) * ( 0.84 + 0.12 * furrow );
+      else if ( a < 0.66 ) fieldCol = mix( uEarth * 0.6, uEarth * 0.42, furrow * 0.8 );
+      else if ( a < 0.86 ) fieldCol = mix( uStraw, uMeadow, 0.45 ) * ( 0.93 + 0.08 * swath );
+      else fieldCol = mix( uMeadow, uLawn, 0.25 ) * 1.02;
+      fieldCol *= 1.0 - 0.1 * tram;
+    }
+    // soil and moisture: every field is patchy at 50–200 m (wet hollows greener, thin crowns paler)
+    fieldCol *= ( 0.9 + 0.16 * d1 ) * ( 0.9 + 0.18 * m3 ) * ( 0.95 + 0.1 * m2 );
+    // field margins: a darker strip of rough grass and hedge bottom; a fence line between crops
     fieldCol = mix( uGrassDark * 0.6, fieldCol, edge );
+    fieldCol = mix( mix( uGrassDark, uMeadow, 0.5 ), fieldCol, fence );
     col = mix( col, fieldCol, farm );
   }
   // towns: blocks of terracotta and grey roofs, streets, courtyards
@@ -354,6 +429,23 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     // sparse scrub tufts
     float scrub = step( 0.84, d3 ) * smoothstep( 0.4, 0.62, m2 ) * ( 1.0 - rockK );
     sandC = mix( sandC, vec3( 0.12, 0.11, 0.06 ), scrub * 0.55 * ( 0.35 + 0.65 * nearF ) );
+    // from a height a desert is never one tone: kilometre-wide sheets of pale wind-blown sand over
+    // darker grey-brown gravel plains (reg), and wadis where the scrub gathers along a winding line
+    float sheet = smoothstep( 0.4, 0.62, m0 * 0.6 + m1 * 0.4 );
+    sandC *= mix( vec3( 0.74, 0.73, 0.75 ), vec3( 1.06, 1.03, 0.97 ), sheet );
+    float wadiU = ( m1 * 0.7 + m0 * 0.3 ) * 9.0;
+    float wadi = 1.0 - smoothstep( -0.06, 0.05 + fwidth( wadiU ) * 1.5, abs( fract( wadiU ) - 0.5 ) - 0.4 );
+    wadi *= ( 1.0 - smoothstep( 0.25, 0.6, fwidth( wadiU ) ) ) * ( 0.55 + 0.45 * d2 );
+    // (a soft bed of darker, coarser sand, dotted with scrub)
+    vec3 wadiC = mix( uSand * 0.78, uRock * 0.8, 0.4 );
+    wadiC = mix( wadiC, vec3( 0.12, 0.11, 0.06 ), step( 0.72, d3 ) * 0.5 );
+    sandC = mix( sandC, wadiC, wadi * 0.35 );
+    // vehicle tracks: pale, winding, criss-crossing the plain (the contours of two slow noises)
+    float tkU = m2 * 7.0 + m1 * 3.0;
+    float tkW = fwidth( tkU );
+    float tk = ( 1.0 - smoothstep( 0.0, 0.012 + tkW, abs( fract( tkU ) - 0.5 ) - 0.47 ) ) * ( 1.0 - smoothstep( 0.15, 0.45, tkW ) );
+    tk *= step( 0.5, h21( floor( vec2( tkU, m0 * 3.0 ) ) ) );
+    sandC = mix( sandC, uSand * 1.12, tk * 0.5 * ( 1.0 - rockK ) );
     float aridK = sandMask * ( 1.0 - lawn ) * ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * ( 1.0 - urban * 0.7 );
     col = mix( col, sandC, aridK );
     tAridK = aridK;
@@ -416,7 +508,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v7';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v8';
   return { material, uniforms };
 }
 

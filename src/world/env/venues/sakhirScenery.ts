@@ -186,7 +186,26 @@ export function sakhirTerrainLook(t: TerrainBuild, sites: SakhirSites) {
     float hi = smoothstep( 24.0, 70.0, vWPos.y + ( m2 - 0.5 ) * 30.0 );
     col = mix( col, uRock * ( 0.62 + 0.45 * m3 ) * ( 0.85 + 0.3 * d1 ), hi * 0.8 * bare );
     // a dusty, sun-bleached haze over the whole plain at distance
-    col = mix( col, uSand * 1.04, farF * 0.2 * bare );
+    col = mix( col, uSand * 1.04, farF * 0.1 * bare );
+    // the Awali field's pipelines: long, dead-straight dark lines across the desert (a few
+    // directions, each a run of a few kilometres), with a pale graded service track beside them
+    {
+      float pl = 0.0, trk = 0.0;
+      for ( int i = 0; i < 4; i++ ) {
+        float a = 0.35 + float( i ) * 1.13;
+        vec2 n = vec2( cos( a ), sin( a ) );
+        float off = ( float( i ) - 1.5 ) * 1450.0 + 380.0;
+        float d = dot( p - uCenter, n ) - off;
+        float run = dot( p - uCenter, vec2( -n.y, n.x ) );
+        float seg = step( -5200.0 + float( i ) * 900.0, run ) * step( run, 4800.0 - float( i ) * 700.0 ) * smoothstep( 1900.0, 2400.0, length( p - uCenter ) );
+        float w = fwidth( d );
+        pl = max( pl, ( 1.0 - smoothstep( 0.6, 0.6 + w * 1.5, abs( d ) ) ) * seg );
+        trk = max( trk, ( 1.0 - smoothstep( 2.5, 2.5 + w * 1.5, abs( d - 7.0 ) ) ) * seg );
+      }
+      float near = 1.0 - smoothstep( 1200.0, 6000.0, length( vWPos - cameraPosition ) );
+      col = mix( col, uSand * 1.12, trk * 0.45 * bare * ( 0.4 + 0.6 * near ) );
+      col = mix( col, vec3( 0.09, 0.085, 0.08 ), pl * 0.8 * bare * near );
+    }
   }
 ${PAVE_ANCHOR}`,
       );

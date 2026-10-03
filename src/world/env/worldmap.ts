@@ -406,7 +406,17 @@ export class WorldMap {
       const Rh = Math.hypot(x - center.x, z - center.z);
       const hills = smoothstep(1400, 6000, Rh);
       const m = ridged2(x / 3800 + 0.7, z / 3800 - 2.9, 4, 2.0, 0.5);
-      h += hills * (30 + 170 * Math.pow(m, 1.4) * (0.6 + 0.4 * (fbm2(x / 7000 - 1.1, z / 7000 + 2.6, 2) * 0.5 + 0.5)));
+      h += hills * (40 + 205 * Math.pow(m, 1.4) * (0.6 + 0.4 * (fbm2(x / 7000 - 1.1, z / 7000 + 2.6, 2) * 0.5 + 0.5)));
+      // the plateau is cut by deep, winding wooded valleys (the Amblève, the Eau Rouge, the Warche):
+      // from a height the land reads fold behind fold, not as a rolling plain
+      const vR = smoothstep(2200, 5200, Rh);
+      if (vR > 0) {
+        const v = fbm2(x / 6200 + 4.1, z / 6200 - 0.6, 3);
+        const v2 = fbm2(x / 2600 - 2.7, z / 2600 + 5.3, 2);
+        const vk = 1 - smoothstep(0.0, 0.17, Math.abs(v));
+        const vk2 = 1 - smoothstep(0.0, 0.12, Math.abs(v2));
+        h -= vR * (150 * vk * vk * (3 - 2 * vk) + 55 * vk2 * vk2 * smoothstep(0.3, 0.8, m));
+      }
       return h;
     }
     if (this.venue === 'suzuka') {

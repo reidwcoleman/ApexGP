@@ -87,6 +87,8 @@ if ( uHuFields > 0.5 ) {
     hf = mix( uMeadow, uStraw, 0.55 + 0.3 * d1 );
   }
   hf *= 0.93 + 0.12 * m3;
+  // (muted as a lens sees them from the circuit: the plain's colours under a July haze)
+  hf = mix( hf, mix( uMeadow, uStraw, 0.5 ), 0.22 );
   // unmown grass and weeds along the field margins and tracks
   hf = mix( mix( uStraw, uGrassDark, 0.45 ), hf, edge2 );
   col = mix( col, hf, farm );
