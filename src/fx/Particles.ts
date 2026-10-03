@@ -880,6 +880,23 @@ export class Particles {
   }
 
   /**
+   * The plank's titanium skid blocks striking the road: a spray of white-hot streaks that leave the
+   * floor a little slower than the car (so they stream out behind it), skate along the tarmac and
+   * bounce, cooling to orange. `v` is the car's world velocity, `strength` 0..1.
+   */
+  plankSparks(p: THREE.Vector3, v: THREE.Vector3, count: number, strength: number, ground = p.y) {
+    for (let i = 0; i < count; i++) {
+      const heat = 0.7 + Math.random() * 0.3;
+      const k = 0.62 + Math.random() * 0.3;
+      this.hot.spawn(
+        p.x + (Math.random() - 0.5) * 0.35, ground + 0.03, p.z + (Math.random() - 0.5) * 0.35,
+        v.x * k + (Math.random() - 0.5) * 3.2, 0.2 + Math.random() * (0.6 + 1.6 * strength), v.z * k + (Math.random() - 0.5) * 3.2,
+        0.28 + Math.random() * (0.25 + 0.25 * strength), 0.02, 0.009, 1, 34 * heat, 17 * heat * heat, 6 * heat * heat * heat, 1.1, 9.8, 0.03, ground, 0, 0, 0.005, 0.2, 0.38,
+      );
+    }
+  }
+
+  /**
    * Flames licking off a burning car: short-lived additive tongues that rise and
    * cool from yellow-white through orange to dull red. `amount` 0..1.
    */

@@ -83,10 +83,12 @@ function gauss(r: () => number): number {
 
 /**
  * An AI driver's pace factor: difficulty × car × driver. The car and driver
- * spreads are compressed so the field covers ~2% like a real grid, not ~6%.
+ * spreads are compressed so the field covers ~2% like a real grid, not ~6%
+ * (around the grid's mean deficit, ~2.8%, so the field as a whole is as quick
+ * as before the squeeze: the packs stay together instead of stringing out).
  */
 export function aiPace(entry: Entry, difficulty: number): number {
-  const car = 1 - (1 - entry.team.pace) * 0.45;
+  const car = 1 - (1 - entry.team.pace) * 0.36 - 0.0025;
   const driver = 0.988 + entry.driver.skill * 0.012;
   return difficulty * car * driver;
 }
@@ -297,7 +299,9 @@ export class Race {
   /** every entry's form this weekend, the car's suitability for this circuit and a qualifying spread (s) */
   private forms = new Map<Entry, { form: number; suit: number; quali: number }>();
   /** what made this race different, for the tools and the broadcast */
-  incidents = { mistakes: 0, spins: 0, failures: 0, vsc: 0, undercuts: 0, overcuts: 0, badStarts: 0, goodStarts: 0 };
+  incidents = { mistakes: 0, spins: 0, failures: 0, vsc: 0, undercuts: 0, overcuts: 0, badStarts: 0, goodStarts: 0, contacts: 0, hardContacts: 0 };
+  /** race time of each pair's last counted contact (a rub that lasts counts once) */
+  private pairContact = new Map<number, number>();
 
   constructor(track: Track, opts: RaceOptions) {
     this.track = track;
@@ -704,7 +708,7 @@ export class Race {
         const pit = this.pitFlag(c);
         // (a car still behind the pit wall: racing cars keep clear of the edge it's about to join at)
         const pitLat = pit !== 0 ? pit * Math.min(c.car.lateral * pit, this.track.halfWidthAt(c.car.s)) : undefined;
-        this.neighbours.push({ id: c.id, s: c.car.s, lateral: c.car.lateral, speed: c.car.vx, pit, pitLat });
+        this.neighbours.push({ id: c.id, s: c.car.s, lateral: c.car.lateral, speed: c.car.vx, pit, pitLat, hazard: this.hazardOf(c) });
         if (c.pit.phase !== 'none') this.pitCars.push({ id: c.id, ps: c.pit });
       }
       for (const c of this.cars) {
@@ -1140,7 +1144,11 @@ export class Race {
 
   resetCar(c: Competitor) {
     const s = c.car.s - 15;
-    c.car.placeOnTrack(this.track, s, this.track.racingLineAt(s));
+    // back on at the side of the road away from the racing line (the others steer round a slow car;
+    // dropping it on the line would have them drive through it while it's a ghost)
+    const line = this.track.racingLineAt(s);
+    const edge = -(Math.sign(line) || 1) * (this.track.halfWidthAt(s) - 1.6);
+    c.car.placeOnTrack(this.track, s, edge);
     c.car.setSpeed(8);
     c.car.gear = 2;
     c.ai?.startFrom(c.car, this.track);
@@ -1479,6 +1487,12 @@ export class Race {
         A.applyImpulse(px, pz, jx, jz);
         B.applyImpulse(px, pz, -jx, -jz);
         const strength = -vn;
+        const pk = i * 64 + j;
+        if (this.raceTime - (this.pairContact.get(pk) ?? -9) > 1.5) {
+          this.incidents.contacts++;
+          if (strength > 4.5) this.incidents.hardContacts++;
+        }
+        this.pairContact.set(pk, this.raceTime);
         // a rub or a nudge isn't news: only a proper hit is reported
         if (strength > 4.5 && (cars[i].isPlayer || cars[j].isPlayer)) this.events.push({ kind: 'contact', car: cars[i].isPlayer ? i : j, value: strength });
         // bodywork damage on both cars where they touched (carbon on carbon, glancing: much softer than a wall)
@@ -1524,24 +1538,65 @@ export class Race {
   }
 
   /**
-   * The fights around the player: the car just ahead defends when they're within a second, the
-   * car just behind attacks when it's within 1.2 s — both find a little extra pace while it lasts.
-   * Everyone else races normally.
+   * A stricken car the others must steer round (a yellow flag): retired, spun or sliding sideways,
+   * or in the middle of a spin. Crawling cars are spotted by the drivers themselves (speed against the line).
+   */
+  private hazardOf(c: Competitor): number {
+    if (c.retired) return 1;
+    if (this.phase !== 'racing' && this.phase !== 'finished') return 0;
+    if (c.pit.phase !== 'none' || c.removed) return 0;
+    // sliding sideways or going backwards (not merely pointing across the road through a chicane), or stopped
+    const car = c.car;
+    if (car.speed > 3 && Math.abs(Math.atan2(car.vy, Math.max(0.1, car.vx))) > 0.45) return 1;
+    if (car.vx < 4 && this.raceTime > 8) return 1;
+    const ai = this.driverOf(c);
+    return ai && ai.err === MISTAKE.SPIN && ai.errOn === 1 ? 1 : 0;
+  }
+
+  /** the cars racing on the road (not in the pits, retired or finished), in road order: battles() */
+  private roadOrder: Competitor[] = [];
+
+  /**
+   * Who is racing whom, for every car: in road order, the car ahead within 1.2 s (and on the same
+   * lap — lapped traffic gets blue flags instead) is the one to attack, the car behind within a
+   * second the one to defend from. The AI uses it to slipstream, pull out, out-brake, cover the
+   * inside and cut back (AIDriver). Fights with the player are fought a little harder: both cars
+   * find some extra pace while they last (a touch for AI-vs-AI fights, so a train isn't faster than
+   * the cars in it).
    */
   private battles() {
     const p = this.player;
-    const live = this.phase === 'racing' && !this.isTimeTrial && !p.finished && !p.retired && p.pit.phase === 'none' && this.vsc === 'none';
+    const L = this.track.length;
+    const live = this.phase === 'racing' && !this.isTimeTrial && this.vsc === 'none';
+    const playerLive = live && !p.finished && !p.retired && p.pit.phase === 'none';
+    const run = this.roadOrder;
+    run.length = 0;
+    for (const c of this.cars) if (!c.retired && !c.finished && !c.removed && c.pit.phase === 'none') run.push(c);
+    run.sort((a, b) => b.raceDist - a.raceDist);
     for (const c of this.cars) {
       if (!c.ai) continue;
-      let defend = 0;
-      let attack = 0;
-      if (live && !c.finished && !c.retired && c.pit.phase === 'none') {
-        if (c.position === p.position - 1 && p.gapAhead < 1.0) defend = 1;
-        if (c.position === p.position + 1 && c.gapAhead < 1.2) attack = 1;
-      }
+      c.ai.attackId = c.ai.defendId = -1;
+    }
+    for (let i = 0; i < run.length; i++) {
+      const c = run[i];
+      if (!c.ai || !live) continue;
+      const gapTo = (a: Competitor, b: Competitor) => (a.raceDist - b.raceDist) / Math.max(20, b.car.vx);
+      const ahead = run[i - 1];
+      const behind = run[i + 1];
+      if (ahead && ahead.raceDist - c.raceDist < L * 0.5 && gapTo(ahead, c) < 1.2) c.ai.attackId = ahead.id;
+      if (behind && c.raceDist - behind.raceDist < L * 0.5 && gapTo(c, behind) < 1.0) c.ai.defendId = behind.id;
+    }
+    for (const c of this.cars) {
+      if (!c.ai) continue;
+      const defend = c.ai.defendId >= 0 ? 1 : 0;
+      const attack = c.ai.attackId >= 0 ? 1 : 0;
       c.ai.defend = defend;
       c.ai.attack = attack;
-      const want = 1 + 0.007 * defend + 0.009 * attack;
+      // (the player: by position, as the timing screen shows it)
+      const vsPlayer = playerLive && !c.finished && !c.retired && c.pit.phase === 'none';
+      const defP = vsPlayer && c.position === p.position - 1 && p.gapAhead < 1.0 ? 1 : 0;
+      const attP = vsPlayer && c.position === p.position + 1 && c.gapAhead < 1.2 ? 1 : 0;
+      const want = 1 + (defP ? 0.007 : 0.0015 * defend) + (attP ? 0.009 : 0.0025 * attack);
       c.ai.push += (want - c.ai.push) * 0.02;
     }
   }

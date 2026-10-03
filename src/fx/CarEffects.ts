@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { SURF } from '../world/Track.ts';
+import { SURF, type Track } from '../world/Track.ts';
 import type { Race } from '../race/Race.ts';
 import type { Entry } from '../race/Teams.ts';
 import type { CarRig, PartId, WheelId } from '../car/CarModel.ts';
 import type { WeatherState } from '../world/Weather.ts';
 import type { Particles } from './Particles.ts';
 import { SprayEmitters } from './Spray.ts';
-import { DMG, type Impact } from '../sim/CarPhysics.ts';
+import { DMG, type CarPhysics, type Impact } from '../sim/CarPhysics.ts';
 import type { Debris } from './Debris.ts';
 
 /** a part is bent up to this much damage, then it breaks off */
@@ -309,9 +309,16 @@ export class CarEffects {
           P.dust(wheelPos(a), vel, sf === SURF.GRAVEL, Math.min(1, speed / 25), g);
         }
       }
-      // sparks: plank on the kerbs / compressions at high speed, walls, contact
-      const hi = speed > 62;
-      if ((hi && car.onKerb && emit(0.15)) || (speed > 80 && car.heave < -0.05 && emit(0.05)) || (car.contact.wallHit > 1 && emit(0.6)) || (c.contactTimer > 0 && speed > 20 && emit(0.35))) {
+      // the plank: bursts of skid-block sparks wherever the floor is pressed onto the road
+      const strike = plankStrike(car, track, speed);
+      if (strike > 0.01 && Math.random() < strike * 7 * dt) {
+        // the skid blocks: under the nose of the plank, or mid-floor (the nose dives under braking)
+        const along = car.ax < -25 && Math.random() < 0.6 ? 0.9 : -0.2 - Math.random() * 0.7;
+        this.tmp.set(root.x + Math.sin(car.yaw) * along, g, root.z + Math.cos(car.yaw) * along);
+        P.plankSparks(this.tmp, vel.set(wx, 0, wz), 3 + Math.floor(Math.random() * (3 + 7 * Math.min(1, strike))), Math.min(1, strike), g);
+      }
+      // sparks: walls, contact
+      if ((car.contact.wallHit > 1 && emit(0.6)) || (c.contactTimer > 0 && speed > 20 && emit(0.35))) {
         this.tmp.set(root.x - Math.sin(car.yaw) * 0.6, g + 0.03, root.z - Math.cos(car.yaw) * 0.6);
         P.sparks(this.tmp, vel.set(wx, 0, wz), 3 + Math.floor(Math.random() * 4), g);
       }
@@ -333,6 +340,24 @@ export class CarEffects {
     this.debris?.clear();
     this.fireLight.intensity = 0;
   }
+}
+
+/**
+ * How hard the plank is being pressed onto the road (0 … ~1.5; bursts of sparks per second ≈ 7×):
+ * the downforce squats the car at speed (a stray spark now and then flat out), much more in a
+ * compression — the bottom of a dip pushes it down by v²·κ_vertical (Eau Rouge, the Senna S) —
+ * under heavy braking as the nose dives, and over the kerbs.
+ */
+function plankStrike(car: CarPhysics, track: Track, v: number): number {
+  if (v < 40 || car.offTrack) return 0;
+  const s = car.s;
+  const vc = (track.heightAt(s + 7) + track.heightAt(s - 7) - 2 * track.heightAt(s)) / 49;
+  const gUp = (v * v * vc) / 9.81;
+  const squat = smoothstep(55, 88, v);
+  const comp = Math.min(1, Math.max(0, (gUp - 0.12) / 0.8));
+  const dive = Math.min(1, Math.max(0, (-car.ax - 25) / 25)) * smoothstep(45, 75, v);
+  const kerb = car.onKerb ? smoothstep(35, 65, v) : 0;
+  return squat * (0.04 + 1.3 * comp) + 0.5 * dive + 0.45 * kerb;
 }
 
 function smoothstep(a: number, b: number, x: number) {

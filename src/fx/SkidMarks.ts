@@ -11,9 +11,12 @@ import { roadUniforms } from '../world/trackside/materials.ts';
  *   - flattened, muddy tracks through the grass and furrows through the gravel
  *   - dirt dragged back onto the tarmac for a few dozen metres after an off
  *
+ *   - marbles: pellets of rubber the tyres scrub off in the corners, thrown just outside the
+ *     racing line, where they gather lap after lap into dark speckled bands
+ *
  * Everything is ONE mesh / ONE draw call: a pool of independent quads (4 verts each)
- * split into two ring buffers — "heavy" marks (launches, lock-ups, slides, offs) and
- * "light" braking film — so the thousands of faint braking passes never overwrite the
+ * split into three ring buffers — "heavy" marks (launches, lock-ups, slides, offs),
+ * "light" braking film and marbles — so the thousands of faint braking passes never overwrite the
  * iconic marks. The oldest segments of a full ring fade out before being reused.
  *
  * Quads are laid on the ground mesh (Track frame + the trackside's kerb/gravel/grass
@@ -27,13 +30,17 @@ export type GroundLift = (s: number, lateral: number) => number;
 
 const HEAVY = 20480;
 const LIGHT = 12288;
-const SEGS = HEAVY + LIGHT;
+const MARB = 3072;
+const SEGS = HEAVY + LIGHT + MARB;
+/** marble patches are this wide (m): the shader sizes the pellets from it */
+const MARBLE_W = 1.6;
 const LIFT = 0.012;
 
 const K_RUBBER = 0;
 const K_GRASS = 1;
 const K_GRAVEL = 2;
 const K_DUST = 3;
+const K_MARBLE = 4;
 
 interface WheelTrail {
   active: boolean;
@@ -69,6 +76,7 @@ const newTrail = (): WheelTrail => ({
 const VERT = /* glsl */ `
 attribute vec4 aSkid;
 uniform vec4 uRing;   // heavy head, heavy full (0/1), light head, light full
+uniform vec2 uRing2;  // marbles head, marbles full
 varying vec4 vS;
 varying float vFade;
 varying float vDepth;
@@ -79,9 +87,12 @@ void main() {
   if (seg < ${HEAVY}.0) {
     float age = mod(uRing.x - 1.0 - seg + ${HEAVY}.0, ${HEAVY}.0) / ${HEAVY}.0;
     fade = mix(1.0, 1.0 - smoothstep(0.8, 1.0, age), uRing.y);
-  } else {
+  } else if (seg < ${HEAVY + LIGHT}.0) {
     float age = mod(uRing.z - 1.0 - (seg - ${HEAVY}.0) + ${LIGHT}.0, ${LIGHT}.0) / ${LIGHT}.0;
     fade = mix(1.0, 1.0 - smoothstep(0.6, 1.0, age), uRing.w);
+  } else {
+    float age = mod(uRing2.x - 1.0 - (seg - ${HEAVY + LIGHT}.0) + ${MARB}.0, ${MARB}.0) / ${MARB}.0;
+    fade = mix(1.0, 1.0 - smoothstep(0.7, 1.0, age), uRing2.y);
   }
   vFade = fade;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -122,10 +133,23 @@ void main() {
     float ridge = smoothstep(0.6, 0.95, abs(x));
     a *= 0.8 + 0.2 * st;
     tint = mix(vec3(0.42, 0.39, 0.35), vec3(1.3, 1.24, 1.15), ridge);
-  } else {
+  } else if (kind < 3.5) {
     // dust dragged back onto the tarmac: lightens it
     a *= (0.6 + 0.4 * st) * (0.65 + 0.35 * wav);
     tint = vec3(3.0, 2.6, 2.0);
+  } else {
+    // marbles: a scatter of rubber pellets (~7 cm cells, half of them filled) on a faint grey-black
+    // film; past a few pixels per cell they merge into their average so nothing shimmers
+    vec2 q = vec2(x * ${(MARBLE_W / 2).toFixed(2)}, vS.y) * 14.0;
+    vec2 ci = floor(q);
+    float h = skH(ci.x * 17.13 + ci.y * 91.71 + seed);
+    vec2 cf = fract(q) - 0.5 - (vec2(skH(h * 31.7), skH(h * 57.3)) - 0.5) * 0.45;
+    float r = 0.1 + 0.15 * skH(h * 11.1);
+    float pw = max(fwidth(q.x), fwidth(q.y));
+    float pel = step(h, 0.5) * (1.0 - smoothstep(r - 0.5 * pw - 0.02, r + 0.5 * pw + 0.02, length(cf)));
+    pel = mix(pel, 0.06, smoothstep(0.35, 1.0, pw));
+    a *= (0.2 + 0.8 * pel) * (1.0 - smoothstep(0.3, 1.0, abs(x))) * (0.8 + 0.2 * wav);
+    tint = vec3(0.07, 0.07, 0.075);
   }
   a *= 1.0 - smoothstep(320.0, 700.0, vDepth);
   if (a < 0.003) discard;
@@ -150,8 +174,14 @@ export class SkidMarks {
   private readonly posAttr: THREE.BufferAttribute;
   private readonly skidAttr: THREE.BufferAttribute;
   private readonly ring = new THREE.Vector4(0, 0, 0, 0);
+  private readonly ring2 = new THREE.Vector2(0, 0);
   private headH = 0;
   private headL = 0;
+  private headM = 0;
+  /** per car: metres of hard cornering since its last marble patch */
+  private readonly marbleAcc = new Map<number, number>();
+  /** the strip a marble patch is laid with */
+  private readonly mtrail = newTrail();
   /** segments touched this frame: [dLo, dHi) */
   private dLo = SEGS;
   private dHi = 0;
@@ -185,7 +215,7 @@ export class SkidMarks {
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
-      uniforms: { uRing: { value: this.ring } },
+      uniforms: { uRing: { value: this.ring }, uRing2: { value: this.ring2 } },
       depthWrite: false,
       depthTest: true,
       transparent: false,
@@ -214,8 +244,10 @@ export class SkidMarks {
   clear() {
     this.pos.fill(0);
     this.attr.fill(0);
-    this.headH = this.headL = 0;
+    this.headH = this.headL = this.headM = 0;
     this.ring.set(0, 0, 0, 0);
+    this.ring2.set(0, 0);
+    this.marbleAcc.clear();
     this.trails.clear();
     this.dLo = SEGS;
     this.dHi = 0;
@@ -260,6 +292,7 @@ export class SkidMarks {
       w.cx0 = c.car.x;
       w.cz0 = c.car.z;
       this.car(c.car, ws, rubberK);
+      this.marbles(c.id, c.car, step, rubberK);
     }
     // the racing line rubbers in over the first few laps (average laps covered by the field)
     const laps = this.driven / (Math.max(1, n) * this.track.length);
@@ -369,6 +402,54 @@ export class SkidMarks {
     }
   }
 
+  /**
+   * Marbles: tyres working hard in a corner shed rubber; every ~80 m of it a car throws a patch of
+   * pellets a couple of metres outside the racing line (where the cars that follow sweep them), so
+   * the corners' outsides darken into speckled bands as the race goes on. Not in the wet.
+   */
+  private marbles(id: number, car: CarPhysics, step: number, rubberK: number) {
+    const v = Math.max(0, car.vx);
+    if (rubberK < 0.4 || v < 22 || car.offTrack || step > 8) return;
+    const t = this.track;
+    const k = t.kappaAt(car.s);
+    if (Math.abs(k) < 1 / 300) return;
+    const sp = car.spec;
+    const aF = Math.max(Math.abs(Math.tan(car.slipAngle[0])), Math.abs(Math.tan(car.slipAngle[1]))) / sp.slipAnglePeak;
+    const aR = Math.max(Math.abs(Math.tan(car.slipAngle[2])), Math.abs(Math.tan(car.slipAngle[3]))) / sp.slipAnglePeakRear;
+    const scrub = smooth(0.45, 1.0, Math.max(aF, aR));
+    if (scrub <= 0) return;
+    const acc = (this.marbleAcc.get(id) ?? Math.random() * 60) + step * scrub;
+    if (acc < 80) {
+      this.marbleAcc.set(id, acc);
+      return;
+    }
+    this.marbleAcc.set(id, acc - 80 - Math.random() * 40);
+    const s0 = car.s + 4 + Math.random() * 12;
+    // the outside of the corner is +sign(κ) (the line's apex sits at −sign(κ))
+    const out = Math.sign(t.kappaAt(s0) || k);
+    const len = 3 + Math.random() * 4;
+    const inten = (0.35 + 0.35 * Math.random()) * rubberK;
+    const w = this.mtrail;
+    w.active = false;
+    w.lastQ = -1;
+    const off = 2 + Math.random() * 2.6;
+    for (let i = 0; i <= 2; i++) {
+      const s = s0 + (len * i) / 2;
+      const hw = t.halfWidthAt(s);
+      const lat = Math.max(-hw + 0.7, Math.min(hw - 0.7, t.racingLineAt(s) + out * (off + 0.15 * i)));
+      const h = this.lift(s, lat);
+      if (!(h === h)) break;
+      const f = t.frame(s, _frame);
+      const dx = f.tangent.x, dz = f.tangent.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      if (i === 0) {
+        this.begin(w, s, lat, h, K_MARBLE, false, inten, dx / dl, dz / dl, 1, MARBLE_W);
+        // (begin fades the strip in from a quarter)
+      } else this.segment(w, s, lat, h, inten, MARBLE_W, dx / dl, dz / dl, len / 2);
+    }
+    if (w.active) this.end(w);
+  }
+
   private begin(w: WheelTrail, s: number, lat: number, h: number, kind: number, light: boolean, inten: number, vx: number, vz: number, v: number, tw: number) {
     w.active = true;
     w.lastQ = -1;
@@ -444,7 +525,7 @@ export class SkidMarks {
     w.dz = dz;
     w.inten = inten;
     w.along = a0 + d;
-    const q = this.alloc(w.light);
+    const q = this.alloc(w.kind === K_MARBLE ? 2 : w.light ? 1 : 0);
     w.lastQ = q;
     const kw = w.kind + w.seed;
     const p = this.pos, A = this.attr;
@@ -461,10 +542,18 @@ export class SkidMarks {
     this.laid++;
   }
 
-  /** next free segment in the heavy or light ring (overwrites the oldest when full) */
-  private alloc(light: boolean): number {
+  /** next free segment in the heavy (0), light (1) or marble (2) ring (overwrites the oldest when full) */
+  private alloc(ring: number): number {
     let q: number;
-    if (light) {
+    if (ring === 2) {
+      q = HEAVY + LIGHT + this.headM;
+      this.headM++;
+      if (this.headM >= MARB) {
+        this.headM = 0;
+        this.ring2.y = 1;
+      }
+      this.ring2.x = this.headM;
+    } else if (ring === 1) {
       q = HEAVY + this.headL;
       this.headL++;
       if (this.headL >= LIGHT) {
@@ -506,7 +595,8 @@ export class SkidMarks {
     this.dHi = 0;
     this.mesh.visible = true;
     // draw only the part of the pool in use (until the light ring starts, the heavy one's used prefix)
-    const used = this.ring.w || this.headL > 0 ? HEAVY + (this.ring.w ? LIGHT : this.headL) : this.ring.y ? HEAVY : this.headH;
+    const used = this.ring2.y || this.headM > 0 ? HEAVY + LIGHT + (this.ring2.y ? MARB : this.headM)
+      : this.ring.w || this.headL > 0 ? HEAVY + (this.ring.w ? LIGHT : this.headL) : this.ring.y ? HEAVY : this.headH;
     this.mesh.geometry.setDrawRange(0, used * 6);
   }
 

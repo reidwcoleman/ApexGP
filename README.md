@@ -190,7 +190,9 @@ npm run check    # tsc --noEmit
   suspension links are live: they run from the chassis pickups to the upright clevises and follow
   the steering and the body's motion.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
-  resume), tyre marks that build up through the race, pit stops where the crew really change the
+  resume), tyre marks that build up through the race (and marbles: rubber the tyres scrub off in the corners
+  gathers just outside the line, lap after lap), plank sparks wherever the floor is pressed onto the road
+  (compressions like Eau Rouge, heavy braking, kerbs, a stray one flat out), pit stops where the crew really change the
   wheels, track-limit warnings and
   5-second penalties, DRS within a second, tow and dirty air, front-wing damage.
 - **Tyres & pit stops** — Soft / Medium / Hard slicks plus Intermediates and full Wets, each with
@@ -204,10 +206,23 @@ npm run check    # tsc --noEmit
   its own weather calls — some gamble, some box early.
 - **AI** — K1999 racing line, friction-ellipse speed profile built at several grip levels (so it
   drives to the conditions: rain, cold or worn tyres), curvature-feedforward + Stanley steering
-  capped at the grip limit, overtaking, single file through chicanes, backs off in dirty air. It
-  races you: the car ahead covers the inside into the braking zones when you're within a second
-  (one move per corner), the car behind out-brakes you and saves battery for a run when it's within
-  1.2 s, and both find a little extra pace while the fight lasts. Dynamic difficulty now ranges to
+  capped at the grip limit, single file through chicanes, backs off (and gets buffeted) in dirty air.
+- **Racecraft** — every car races the car ahead and behind it (`Race.battles()`: within 1.2 s / 1 s on
+  the road, same lap), not just you. Followers sit in the tow down the straight and pull out when the run
+  will carry them alongside before the braking point, to the inside of the next corner if there's a car's
+  width there (`AIDriver.scan` finds the braking point and the corner's inside), round the outside if not,
+  and switch sides once if the car ahead moves to cover them. Defenders make one move to the inside
+  while the attacker is still behind (never into a car alongside) and hold it to the apex. Side by side,
+  each car's path keeps a car's width from the other's (the inside car takes the apex, the outside car the
+  long way round, nobody is pushed off the road); the car less than half alongside — or round the outside
+  of a chicane — backs out; down the inside the attacker brakes late (now and then too late: a lock-up,
+  running wide), and the car out-braked round the outside brakes early and cuts back behind it for the
+  exit. Stricken cars (spun, stopped, crawling, retired) bring a local yellow — no racing near them, a
+  lift, and every driver steers round on the side with more road or stops behind (no pile-ups); a car
+  put back on the road after a moment rejoins at the edge, away from the line. Fights with you are fought
+  a little harder (both cars find a touch of pace while they last). `node tools/racecraft.mjs [laps]`
+  (`TRACK=`, `SEED=`) measures it: overtakes per lap, gaps in the pack, side-by-side time, contacts,
+  offs and the lap-time spread. Dynamic difficulty now ranges to
   106% of the limit and moves ±2.5% during a race (`node tools/aipace.mjs [track]` shows where the
   AI's pace tops out).
 
@@ -239,7 +254,9 @@ src/
   sim/     CarPhysics, RacingProfile, AIDriver
   race/    Race (session, timing, DRS, contact), Teams, Engineer (radio)
   game/    Game (states + loop), CarView, Cameras
-  fx/      Particles (tyre smoke, dust, sparks)
+  fx/      Particles (tyre smoke, dust, sparks, plank sparks), CarEffects (per-car fx from the physics),
+           Spray (rain plumes: a translucent grey mist, darker than the sky so a bright wet exposure never
+           clips it), SkidMarks (rubber, offs, braking film, marbles)
   ui/      HUD, Menu, design tokens
   core/    Renderer (post chain: N8AO, bloom, speed blur + CA, grade, PBR Neutral, SMAA, sharpen;
            adaptive resolution that never trusts Apple's GPU timer), Input, Audio
