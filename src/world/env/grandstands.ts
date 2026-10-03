@@ -2,7 +2,6 @@ import type { Venue } from './worldmap.ts';
 import * as THREE from 'three';
 import { MeshBuilder, srgb } from './geom.ts';
 import type { GrandstandSpec, Layout, ScreenSpec, SpectatorBank } from './layout.ts';
-import { STAND_ROW_DEPTH, STAND_ROW_RISE } from './layout.ts';
 import { sponsorTexture, sponsorUV } from './signage.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
@@ -14,6 +13,10 @@ import { crowdUniforms, crowdReactions, REACT_GLSL } from '../../people/reaction
 import type { Track } from '../Track.ts';
 import type { WorldMap } from './worldmap.ts';
 import { buildLandmarks } from './landmarks.ts';
+import { ARCH, appendInto, archMaterial, tagAxis, tagClass } from './archMaterial.ts';
+import { buildStandShell, type Flag, type Person, type StandCtx } from './standShell.ts';
+import { GlassGeo } from '../pitlane/building.ts';
+import { glassMaterial } from '../pitlane/materials.ts';
 import { AUSTIN_FANS, drawAustinFlags } from './venues/austinScenery.ts';
 import { SPIELBERG_FAN_COLOURS, drawSpielbergFlags } from './venues/spielberg.ts';
 import { HUNGARORING_FAN_COLOURS, drawHungaroringFlags } from './venues/hungaroring.ts';
@@ -28,10 +31,12 @@ import { SAKHIR_FANS, drawSakhirFlags } from './venues/sakhirScenery.ts';
 /**
  * Grandstands and the tifosi.
  *
- *   Tribuna Centrale   two tiers with a glass hospitality band between them and a
- *                      deep cantilevered roof, opposite the pits
- *   covered stands     stepped concrete, coloured seat blocks, steel roof + fascia
- *   open stands        uncovered terraces
+ *   Tribuna Centrale   two tiers with a glazed hospitality level between them and a
+ *                      deep cantilevered truss roof, opposite the pits
+ *   covered stands     raked concrete, seat rows, aisles, a profiled-sheet roof on trusses
+ *   open stands        uncovered terraces on a scaffold frame behind a scrim
+ * (the structure itself: standShell.ts; its surfaces — weathered concrete, ribbed sheet,
+ * individual seats — archMaterial.ts)
  * Crowds are instanced person cards (canvas atlas, shirt tinted per instance,
  * idle bob, the odd arms-up wave) — overwhelmingly red: this is Monza. Waving
  * flags (tifosi red, tricolore, team colours) are held up in the stands and fly
@@ -48,8 +53,6 @@ export interface GrandstandBuild {
   flags: number;
 }
 
-const CONCRETE = srgb(0xbdb8ae);
-const CONCRETE_DARK = srgb(0x8d8a84);
 const STEEL = srgb(0xe8e9eb);
 const STEEL_DARK = srgb(0x5b5f66);
 const SEAT_SCHEMES: number[][] = [
@@ -630,16 +633,15 @@ function screenTexture(): THREE.CanvasTexture {
 
 // ---------------------------------------------------------------- build
 
-interface Person { m: THREE.Matrix4; c: THREE.Color; shade: number; s?: number }
-interface Flag { m: THREE.Matrix4; design: number; big: number; s?: number }
 
 export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): GrandstandBuild {
   const group = new THREE.Group();
   group.name = 'Grandstands';
-  const structure = new MeshBuilder();
-  const steel = new MeshBuilder();
+  // every stand's structure, the flagpoles and the screen frames: one mesh, classed for archMaterial
+  const arch = new MeshBuilder();
+  // (their slender parts — seats, rails, truss webs, bracing, stairs — drawn but casting no shadow)
+  const archFine = new MeshBuilder();
   const boards = new MeshBuilder();
-  const glass = new MeshBuilder();
   const r = rng(2024);
   const people: Person[] = [];
   const flags: Flag[] = [];
@@ -736,182 +738,42 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   };
 
   let sponsorK = 0;
+  const shellCtx: StandCtx = {
+    venue: map.venue,
+    r,
+    fanColor,
+    flagDesign,
+    sponsor: () => sponsorUV(sponsorK++),
+    seats: map.venue === 'zandvoort' ? ZANDVOORT_SEATS : SEAT_SCHEMES,
+  };
+  const glassGeo = new GlassGeo();
   const stands = layout.grandstands;
   stands.forEach((g: GrandstandSpec) => {
     const L = g.length;
-    const rows = g.rows;
-    const D = STAND_ROW_DEPTH, R = STAND_ROW_RISE;
-    const z0 = 0.4;
-    const yBase = 1.9;
-    const centrale = g.style === 'centrale';
-    const seatSet = map.venue === 'zandvoort' ? ZANDVOORT_SEATS : SEAT_SCHEMES;
-    const scheme = seatSet[g.group % seatSet.length].map((h) => srgb(h));
-    // row geometry: centrale has a 3.4 m hospitality band after the lower tier
-    const lowerRows = centrale ? Math.round(rows * 0.45) : rows;
-    const bandH = centrale ? 3.6 : 0;
-    const bandD = centrale ? 2.2 : 0;
-    const rowY = (i: number) => yBase + i * R + (i >= lowerRows ? bandH : 0);
-    const rowZ = (i: number) => z0 + i * D + (i >= lowerRows ? bandD : 0);
-    const depth = rowZ(rows - 1) + D + 0.8;
-    const top = rowY(rows - 1) + R;
-
-    const local = new MeshBuilder();
-    const lsteel = new MeshBuilder();
-    const lboards = new MeshBuilder();
-    const lglass = new MeshBuilder();
-    const standPeople: Person[] = [];
-    const standFlags: Flag[] = [];
-    // front wall + terraces
-    local.aabb(-L / 2, -3, 0, L / 2, yBase + 0.1, z0, CONCRETE);
-    for (let i = 0; i < rows; i++) {
-      const y = rowY(i), za = rowZ(i);
-      local.aabb(-L / 2, y - R - (i === lowerRows ? bandH : 0) - 0.25, za, L / 2, y, za + D, i % 2 ? CONCRETE : CONCRETE_DARK.clone().lerp(CONCRETE, 0.7), { skipBottom: true });
-    }
-    if (centrale) {
-      // hospitality band: glass facade set back under the upper tier, a slab above
-      const zb = rowZ(lowerRows - 1) + D;
-      const yb = rowY(lowerRows - 1);
-      lglass.quad4(new THREE.Vector3(L / 2, yb + 0.2, zb + 0.9), new THREE.Vector3(-L / 2, yb + 0.2, zb + 0.9), new THREE.Vector3(-L / 2, yb + bandH - 0.3, zb + 0.9), new THREE.Vector3(L / 2, yb + bandH - 0.3, zb + 0.9), new THREE.Color(1, 1, 1));
-      local.aabb(-L / 2, yb + bandH - 0.35, zb - 0.2, L / 2, yb + bandH + 0.05, zb + bandD, CONCRETE);
-      local.aabb(-L / 2, yb, zb, L / 2, yb + 0.2, zb + 1.2, CONCRETE_DARK);
-      // mullions + balcony rail
-      for (let x = -L / 2; x <= L / 2; x += 3) lsteel.aabb(x - 0.06, yb + 0.2, zb + 0.82, x + 0.06, yb + bandH - 0.3, zb + 0.95, STEEL_DARK);
-      lsteel.aabb(-L / 2, yb + 1.0, zb - 0.05, L / 2, yb + 1.08, zb + 0.05, STEEL);
-      // sponsor band on the slab edge
-      // (each sponsor's stretch repeats its logo at the board's own 8:1 proportions, as a printed
-      // band does, instead of one logo stretched seven times too wide)
-      const nB = Math.max(1, Math.round(L / 20));
-      for (let k = 0; k < nB; k++) {
-        const xa = -L / 2 + (k * L) / nB + 0.2, xb = xa + L / nB - 0.4;
-        const uvB = sponsorUV(sponsorK++);
-        const reps = Math.max(1, Math.round((xb - xa) / (0.36 * 8)));
-        for (let r = 0; r < reps; r++) {
-          const x0 = xa + ((xb - xa) * r) / reps, x1 = xa + ((xb - xa) * (r + 1)) / reps;
-          lboards.quad4(new THREE.Vector3(x1, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(x0, yb + bandH - 0.33, zb - 0.22), new THREE.Vector3(x0, yb + bandH + 0.03, zb - 0.22), new THREE.Vector3(x1, yb + bandH + 0.03, zb - 0.22), new THREE.Color(1, 1, 1), uvB);
-        }
-      }
-    }
-    // back wall & sloped side walls
-    local.aabb(-L / 2, -3, depth - 0.45, L / 2, top + 1.3, depth, CONCRETE_DARK);
-    // the outside of the back wall (seen from the infield, the paddock and the TV towers):
-    // a steel frame, floor ledges, stair towers and entrances, sponsor boards facing out
-    {
-      const zo = depth;
-      const nCol = Math.max(2, Math.round(L / 7) + 1);
-      for (let k = 0; k < nCol; k++) {
-        const x = -L / 2 + (k * L) / (nCol - 1);
-        lsteel.aabb(x - 0.22, -3, zo, x + 0.22, top + 1.3, zo + 0.35, STEEL_DARK);
-      }
-      for (const yl of [yBase + 0.2, top * 0.55]) local.aabb(-L / 2, yl, zo, L / 2, yl + 0.35, zo + 0.45, CONCRETE);
-      local.aabb(-L / 2, top + 1.0, zo, L / 2, top + 1.45, zo + 0.5, CONCRETE);
-      // entrances at the foot, between the columns
-      const nDoor = Math.max(1, Math.round(L / 26));
-      for (let k = 0; k < nDoor; k++) {
-        const x = -L / 2 + ((k + 0.5) * L) / nDoor;
-        local.aabb(x - 1.6, 0, zo + 0.01, x + 1.6, 2.6, zo + 0.06, srgb(0x1c1e22));
-        lsteel.aabb(x - 1.8, 2.6, zo, x + 1.8, 2.85, zo + 0.9, STEEL);
-      }
-      // stair towers at the ends
-      for (const sx of [-1, 1]) {
-        const xs = sx * (L / 2 - 2.2);
-        lsteel.aabb(xs - 1.6, -3, zo + 0.35, xs + 1.6, top + 1.2, zo + 3.2, STEEL_DARK.clone().lerp(STEEL, 0.4));
-        for (let y = 2; y < top; y += 2.6) lsteel.aabb(xs - 1.7, y, zo + 3.15, xs + 1.7, y + 0.12, zo + 3.3, STEEL);
-      }
-      // sponsor boards on the upper back wall, facing outward
-      if (top > 6) {
-        const nB = Math.max(1, Math.round(L / 24));
-        const w = L / nB;
-        const y0 = top * 0.55 + 1.0, y1 = Math.min(top + 0.6, y0 + 3.2);
-        for (let k = 0; k < nB; k++) {
-          const xa = -L / 2 + k * w + 1.2, xb = xa + w - 2.4;
-          if (xb - xa < 4) continue;
-          lboards.quad4(new THREE.Vector3(xa, y0, zo + 0.4), new THREE.Vector3(xb, y0, zo + 0.4), new THREE.Vector3(xb, y1, zo + 0.4), new THREE.Vector3(xa, y1, zo + 0.4), new THREE.Color(1, 1, 1), sponsorUV(sponsorK++));
-        }
-      }
-    }
-    for (const sx of [-1, 1]) {
-      const x0 = sx < 0 ? -L / 2 - 0.4 : L / 2;
-      local.prismX([[-0.05, -3], [depth + 0.05, -3], [depth + 0.05, top + 1.4], [-0.05, yBase + 0.9]], x0, x0 + 0.4, CONCRETE_DARK);
-    }
-    // seat blocks with aisles every ~26 m, crowd, flags
-    const blocks = Math.max(1, Math.round(L / 26));
-    const bw = L / blocks;
-    const occ = centrale ? 0.94 : g.style === 'covered' ? 0.9 : 0.86;
-    for (let b = 0; b < blocks; b++) {
-      const xa = -L / 2 + b * bw + 0.7;
-      const xb = -L / 2 + (b + 1) * bw - 0.7;
-      for (let i = 0; i < rows; i++) {
-        const y = rowY(i), za = rowZ(i);
-        const c = scheme[(b + (i > rows * 0.6 ? 1 : 0) + (i >= lowerRows ? 2 : 0)) % scheme.length];
-        local.aabb(xa, y, za + D * 0.58, xb, y + 0.42, za + D * 0.72, c, { skipBottom: true });
-        for (let x = xa + 0.3; x < xb - 0.3; x += 0.6) {
-          if (r() > occ) continue;
-          const m = new THREE.Matrix4().makeTranslation(x + (r() - 0.5) * 0.12, y + 0.02, za + D * 0.42);
-          const covered = g.roof && i > 2 ? 0.6 + 0.1 * r() : 1;
-          standPeople.push({ m, c: fanColor(), shade: covered });
-          if (r() < 0.016) standFlags.push({ m: new THREE.Matrix4().makeTranslation(x, y + 1.9, za + D * 0.3), design: flagDesign(), big: 0 });
-        }
-      }
-      if (b > 0) {
-        const xa2 = -L / 2 + b * bw - 0.7;
-        for (let i = 0; i < rows; i++) local.aabb(xa2, rowY(i), rowZ(i), xa2 + 1.4, rowY(i) + 0.02, rowZ(i) + D, srgb(0xd8d4cc), { skipBottom: true });
-      }
-    }
-    // tifosi banners hung on the front wall
-    {
-      const nB = Math.max(1, Math.round(L / 16));
-      const w = L / nB;
-      for (let k = 0; k < nB; k++) {
-        const xa = -L / 2 + k * w + 0.15, xb = xa + w - 0.3;
-        lboards.quad4(new THREE.Vector3(xb, 0.4, -0.02), new THREE.Vector3(xa, 0.4, -0.02), new THREE.Vector3(xa, 1.6, -0.02), new THREE.Vector3(xb, 1.6, -0.02), new THREE.Color(1, 1, 1), sponsorUV(sponsorK++));
-      }
-    }
-    // roof
-    if (g.roof) {
-      const over = centrale ? 5.5 : 3.2;
-      const yBack = top + (centrale ? 4.2 : 3.4);
-      const yFront = top + (centrale ? 6.6 : 5.4);
-      const zFront = centrale ? -4.5 : -2.2;
-      const zBack = depth + 0.6;
-      const thick = centrale ? 0.9 : 0.35;
-      lsteel.prismX([[zFront, yFront - thick], [zBack, yBack - thick], [zBack, yBack], [zFront, yFront]], -L / 2 - 1, L / 2 + 1, STEEL);
-      const nCol = Math.max(2, Math.round(L / 14) + 1);
-      for (let k = 0; k < nCol; k++) {
-        const x = -L / 2 + (k * L) / (nCol - 1);
-        lsteel.aabb(x - 0.3, top + 1.2, depth - 0.35, x + 0.3, yBack - 0.3, depth + 0.25, STEEL_DARK);
-        lsteel.prismX([[zFront + 0.4, yFront - thick - 0.4], [zBack - 0.2, yBack - 1.3], [zBack - 0.2, yBack - thick], [zFront + 0.4, yFront - thick]], x - 0.15, x + 0.15, STEEL_DARK);
-        lsteel.prismX([[depth * 0.55, top * 0.6], [depth * 0.55 + 0.25, top * 0.6], [zBack - 0.2, yBack - 1.3], [zBack - 0.45, yBack - 1.3]], x - 0.08, x + 0.08, STEEL_DARK);
-      }
-      // fascia with sponsors
-      const nB = Math.max(1, Math.round(L / 22));
-      const w = (L + 2) / nB;
-      const fh = centrale ? 2.6 : 1.9;
-      for (let k = 0; k < nB; k++) {
-        const xa = -L / 2 - 1 + k * w, xb = xa + w;
-        lboards.quad4(new THREE.Vector3(xb, yFront - fh, zFront - 0.05), new THREE.Vector3(xa, yFront - fh, zFront - 0.05), new THREE.Vector3(xa, yFront + 0.15, zFront - 0.05), new THREE.Vector3(xb, yFront + 0.15, zFront - 0.05), new THREE.Color(1, 1, 1), sponsorUV(sponsorK++));
-      }
-      lsteel.aabb(-L / 2 - 1, yFront - fh - 0.05, zFront - 0.02, L / 2 + 1, yFront + 0.2, zFront + 0.3, STEEL_DARK);
-      void over;
-    } else {
-      // open stand: light towers at the ends and a rail at the back
-      lsteel.aabb(-L / 2, top + 0.2, depth - 0.3, L / 2, top + 1.2, depth - 0.2, STEEL);
-      for (const sx of [-1, 1]) lsteel.aabb(sx * L / 2 - 0.25, 0, depth - 0.2, sx * L / 2 + 0.25, top + 6, depth + 0.3, STEEL_DARK);
-    }
-
+    const shell = buildStandShell(g, shellCtx);
+    const depth = shell.depth;
     // place: local −z faces the track
     const front = g.center.clone().addScaledVector(g.facing, g.depth / 2);
     const zAxis = g.facing.clone().negate();
     const yAxis = new THREE.Vector3(0, 1, 0);
     const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
     const M = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis).setPosition(front.x, g.y0, front.z);
-    local.transform(M);
-    lsteel.transform(M);
-    lboards.transform(M);
-    lglass.transform(M);
-    structure.append(local);
-    steel.append(lsteel);
-    boards.append(lboards);
-    glass.append(lglass);
+    shell.arch.transform(M);
+    shell.fine.transform(M);
+    shell.boards.transform(M);
+    // (the long axis, for the ribs, seats and panel joints in archMaterial)
+    tagAxis(shell.arch, 0, Math.atan2(xAxis.z, xAxis.x));
+    tagAxis(shell.fine, 0, Math.atan2(xAxis.z, xAxis.x));
+    appendInto(arch, shell.arch);
+    appendInto(archFine, shell.fine);
+    appendInto(boards, shell.boards);
+    const out = zAxis.clone().negate();
+    for (const q of shell.glass) {
+      const A = q.a.applyMatrix4(M), B = q.b.applyMatrix4(M), C = q.c.applyMatrix4(M), D = q.d.applyMatrix4(M);
+      glassGeo.quad(A, B, C, D, out, q.x0, q.x1, g.y0 + q.floor, g.y0 + q.ceil, q.depth);
+    }
+    const standPeople = shell.people;
+    const standFlags = shell.flags;
     if (L > 24) {
       const path: THREE.Vector3[] = [];
       const n = Math.max(2, Math.round((L - 8) / 10) + 1);
@@ -945,7 +807,9 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     const y = map.height(fp.x, fp.z);
     const H = 11 + r() * 3;
     const m = new THREE.Matrix4().makeTranslation(fp.x, y, fp.z);
-    steel.box(new THREE.Matrix4().makeScale(0.16, H, 0.16).setPosition(fp.x, y + H / 2, fp.z), STEEL);
+    const v0 = arch.vertexCount;
+    arch.box(new THREE.Matrix4().makeScale(0.16, H, 0.16).setPosition(fp.x, y + H / 2, fp.z), STEEL);
+    tagClass(arch, v0, ARCH.STEEL);
     const fm = new THREE.Matrix4().makeRotationY(r() * Math.PI * 2).setPosition(fp.x, y + H - 1.6, fp.z);
     fm.multiply(new THREE.Matrix4().makeScale(2.6, 2.6, 2.6));
     flags.push({ m: fm, design: flagDesign(), big: 1 });
@@ -976,7 +840,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     const M = new THREE.Matrix4().makeRotationY(sc.rot).setPosition(sc.x, map.height(sc.x, sc.z), sc.z);
     lsteel.transform(M);
     lscr.transform(M);
-    steel.append(lsteel);
+    tagClass(lsteel, 0, ARCH.STEEL);
+    appendInto(arch, lsteel);
     screenMB.append(lscr);
   }
 
@@ -1031,16 +896,13 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   }
 
   // ---------------------------------------------------------------- meshes
-  const structMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
-  const steelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.35 });
   const boardTex = sponsorTexture();
   const boardMat = new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.55, metalness: 0, emissiveMap: boardTex, emissive: 0xffffff, emissiveIntensity: 0.14 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.06, metalness: 0.85 });
   const scrTex = screenTexture();
   const screenMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.3, emissiveMap: scrTex, emissive: 0xffffff, emissiveIntensity: 1.6 });
-  const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean) => {
+  const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean, custom = false) => {
     if (mb.vertexCount === 0) return;
-    const g = mb.geometry(false);
+    const g = mb.geometry(custom);
     const m = new THREE.Mesh(g, mat);
     m.name = name;
     m.castShadow = cast;
@@ -1048,10 +910,18 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     m.matrixAutoUpdate = false;
     group.add(m);
   };
-  add(structure, structMat, 'stands_structure', true);
-  add(steel, steelMat, 'stands_steel', true);
+  const archMat = archMaterial();
+  add(arch, archMat, 'stands_structure', true, true);
+  add(archFine, archMaterial(true), 'stands_detail', false, true);
   add(boards, boardMat, 'stands_boards', false);
-  add(glass, glassMat, 'stands_glass', false);
+  if (glassGeo.pos.length) {
+    // the hospitality levels: the pit building's interior-mapped glass (lit rooms with depth)
+    const gm = new THREE.Mesh(glassGeo.geometry(), glassMaterial());
+    gm.name = 'stands_glass';
+    gm.receiveShadow = true;
+    gm.matrixAutoUpdate = false;
+    group.add(gm);
+  }
   add(screenMB, screenMat, 'big_screens', false);
 
   // crowd

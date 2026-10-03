@@ -94,6 +94,7 @@ function bindUniforms(sh: THREE.WebGLProgramParametersWithUniforms) {
  */
 export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1, map: map ?? null });
+  if (map) m.defines = { PC_PRINT: '' };
   m.onBeforeCompile = (sh) => {
     bindUniforms(sh);
     sh.vertexShader = sh.vertexShader
@@ -110,6 +111,29 @@ export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
   roughnessFactor = vPbr.x;
   metalnessFactor = vPbr.y;
   vec3 pcBase = diffuseColor.rgb;
+#ifndef PC_PRINT
+  if (vPbr.w > 0.3 && vPbr.z < 0.05) {
+    // the outside of the building weathers: a broad uneven patina, dirt washed down the walls
+    // under every ledge and slab edge, rendered/clad panel joints up close (faded by footprint)
+    vec3 N = normalize(vWN);
+    float vert = 1.0 - smoothstep(0.45, 0.8, abs(N.y));
+    vec2 tW = normalize(vec2(-N.z, N.x) + vec2(1e-4));
+    vec2 q = mix(vWP.xz, vec2(dot(vWP.xz, tW), vWP.y), vert);
+    float big = texture2D(uNoise, q * 0.017).b * 0.55 + texture2D(uNoise, q * 0.07).g * 0.45;
+    float run = texture2D(uNoise, vec2(q.x * 0.31, q.y * 0.011)).a;
+    float streak = vert * smoothstep(0.5, 0.85, run) * (0.6 + 0.4 * big);
+    float paint = 1.0 - metalnessFactor * 0.7;
+    diffuseColor.rgb *= (0.88 + 0.18 * big) * (1.0 - 0.16 * streak * paint);
+    float fw = length(fwidth(q));
+    float near = (1.0 - smoothstep(0.03, 0.1, fw)) * vert * step(metalnessFactor, 0.2) * step(0.55, roughnessFactor);
+    if (near > 0.0) {
+      vec2 jd = abs(fract(vec2(q.x / 1.5, q.y / 3.0) + 0.5) - 0.5) * vec2(1.5, 3.0);
+      float j = 1.0 - smoothstep(0.006, 0.006 + fw * 1.5, min(jd.x, jd.y));
+      diffuseColor.rgb *= 1.0 - 0.2 * j * near;
+    }
+    roughnessFactor = clamp(roughnessFactor + (big - 0.5) * 0.16, 0.04, 1.0);
+  }
+#endif
   {
     float wet = uWetness * vPbr.w;
     float up = smoothstep(0.35, 0.95, vWN.y);
@@ -138,7 +162,7 @@ export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
   }`,
       );
   };
-  m.customProgramCacheKey = () => (map ? 'pit-print-v3' : 'pit-solid-v3');
+  m.customProgramCacheKey = () => (map ? 'pit-print-v4' : 'pit-solid-v4');
   return m;
 }
 
