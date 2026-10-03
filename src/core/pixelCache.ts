@@ -2,6 +2,8 @@
  * Generated images kept between visits: the eleven liveries (~1.3 s of per-texel painting) and
  * the grandstand fan atlas (~1.3 s of offscreen WebGL) are the same every load of a given build,
  * so the first visit stores them in IndexedDB as PNGs and later boots draw them straight back.
+ * Other generated data (a circuit's sight-line grid, the ground textures) is kept the same way as
+ * raw bytes in a second store, read per key when it is needed (loadData / keepData).
  *
  * Keys carry the build id, so a new deploy repaints everything once and sweeps the old entries.
  * Off in the dev server (source edits would be masked by stale pixels) unless the URL has ?pixcache.
@@ -11,6 +13,7 @@ declare const __BUILD__: string;
 const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev';
 const DB = 'apex-pixels';
 const STORE = 'img';
+const DATA = 'data';
 const enabled = typeof indexedDB !== 'undefined' && typeof createImageBitmap === 'function' && (!import.meta.env.DEV || /[?&]pixcache\b/.test(location.search));
 
 const bitmaps = new Map<string, ImageBitmap>();
@@ -21,8 +24,10 @@ function db(): Promise<IDBDatabase | null> {
   if (!dbp)
     dbp = new Promise((res) => {
       try {
-        const rq = indexedDB.open(DB, 1);
-        rq.onupgradeneeded = () => rq.result.createObjectStore(STORE);
+        const rq = indexedDB.open(DB, 2);
+        rq.onupgradeneeded = () => {
+          for (const st of [STORE, DATA]) if (!rq.result.objectStoreNames.contains(st)) rq.result.createObjectStore(st);
+        };
         rq.onsuccess = () => res(rq.result);
         rq.onerror = rq.onblocked = () => res(null);
       } catch {
@@ -68,6 +73,17 @@ export function preloadPixels(): Promise<void> {
         const tx = d.transaction(STORE, 'readwrite');
         for (const k of stale) tx.objectStore(STORE).delete(k);
       }
+      // (and the data of other builds: only its keys are read)
+      try {
+        const tx = d.transaction(DATA, 'readwrite');
+        const st = tx.objectStore(DATA);
+        const k = st.getAllKeys();
+        k.onsuccess = () => {
+          for (const key of k.result) if (!String(key).startsWith(BUILD + '|')) st.delete(key);
+        };
+      } catch {
+        /* no data store yet */
+      }
     })().catch(() => undefined);
   return loaded;
 }
@@ -100,6 +116,41 @@ export function keepPixels(key: string, from: HTMLCanvasElement) {
         }
       });
     }, 'image/png'),
+  );
+}
+
+/** the bytes stored under `key` for this build by an earlier visit (null when there are none) */
+export function loadData(key: string): Promise<ArrayBuffer | null> {
+  if (!enabled) return Promise.resolve(null);
+  return db().then(
+    (d) =>
+      new Promise<ArrayBuffer | null>((res) => {
+        if (!d) return res(null);
+        try {
+          const rq = d.transaction(DATA, 'readonly').objectStore(DATA).get(`${BUILD}|${key}`);
+          rq.onsuccess = () => res(rq.result instanceof ArrayBuffer ? rq.result : null);
+          rq.onerror = () => res(null);
+        } catch {
+          res(null);
+        }
+      }),
+  );
+}
+
+/** stores bytes for the next visit (written when the page is idle; the buffer must not change after) */
+export function keepData(key: string, data: ArrayBuffer) {
+  if (!enabled) return;
+  const later = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 8000 }) : setTimeout(f, 3000));
+  later(
+    () =>
+      void db().then((d) => {
+        if (!d) return;
+        try {
+          d.transaction(DATA, 'readwrite').objectStore(DATA).put(data, `${BUILD}|${key}`);
+        } catch {
+          /* quota / private mode: the next visit builds it again */
+        }
+      }),
   );
 }
 

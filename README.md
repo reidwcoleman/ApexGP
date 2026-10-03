@@ -66,6 +66,17 @@ npm run check    # tsc --noEmit
   as its pit building, track, sky and cars exist; terrain, woods, grandstands and crowds grow behind it one slice
   per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
   another circuit moves the garage there behind a short title card; no travel screen.
+- **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
+  making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and
+  `buildWorld` awaits each only right before the step that needs it. The ground textures' pixels are made off the
+  main thread by two ground workers (`src/world/groundWorker.ts`, pure generators in `trackside/groundData.ts` and
+  `env/textureData.ts`, byte-identical to the old main-thread code). Shaders are compiled with
+  `compileAsync` (KHR_parallel_shader_compile: the driver's threads, never a blocked main thread): the world's
+  garage-lit programs are queued before the cars are made, the landscape's before it is adopted, the race's in
+  `warmUp`; the podium's (one more light = ~80 programs) only when a race ends. three's per-program error check
+  is off in production builds (`?shadercheck` turns it on). IndexedDB (`src/core/pixelCache.ts`, keyed by the
+  build) keeps, besides the liveries / fan atlas / leaf atlas, the ground pixels and each circuit's sight-line
+  grid, so a returning player's boot and circuit switches skip them. Measure with `tools/loadbench.mjs`.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
@@ -262,6 +273,13 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/faceshot.mjs [outDir] [idx,…]` (garage faces, the line-of-sight hiding off), `tools/helmetshot.mjs` (pit-crew helmets in a stop), `tools/rb_scenes.mjs <garage|podium|grid|race|pit>` — people close-ups and their draw cost.
 - `python3 tools/build_asphalt.py` / `python3 tools/build_grass.py` — rebuild the scanned road / grass textures (`tools/asphstats.mjs`, `tools/grassstats.mjs` print the procedural statistics they are matched to).
 - `node tools/loadtime.mjs [track] [to,…]`, `tools/cpuprof.mjs <from> <to>` — boot and circuit-switch timings, CPU profile of a switch.
+- `npm run build && node tools/pagesserve.mjs 5217 &` then `node tools/loadbench.mjs --ports 5217[,5218] --runs 2 --warm 3` — the
+  load benchmark on a production build served like GitHub Pages (gzip, `max-age=600`, ETag): a cold visit (empty
+  caches), warm visits, a circuit switch and a race start; first paint, garage, complete circuit (`__ready` without
+  the settle), long tasks, bytes, and renderer / GPU-process CPU time (steadier than wall time on a busy machine).
+  Several ports interleave A/B builds (e.g. an older `dist` copied elsewhere on a second port). `--net <Mbit/s>` throttles.
+- `node tools/texhash.mjs [port] [track] [--warm]` — hashes of every 8-bit DataTexture in the finished circuit (diff
+  two builds to prove texture-generation changes are pixel-identical; `--warm` hashes the cached copies).
 
 ## Steam (desktop build)
 

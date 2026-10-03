@@ -25,6 +25,9 @@ const Q = 2;
 const EMPTY = 255;
 /** anything lower than this above the ground is ground (asphalt, kerbs, grass, water) */
 const GROUND_CLEAR = 0.7;
+/** toBytes layout: a Float64 header (version, x0, z0, nx, nz, then the stats), ground, lo, hi, fence */
+const HEAD = 9;
+const BYTES_VERSION = 1;
 
 export class Sightlines {
   private readonly x0: number;
@@ -42,7 +45,12 @@ export class Sightlines {
   readonly groundMs: number;
   readonly stats = { tris: 0, instances: 0, trees: 0, cells: 0 };
 
-  constructor(track: Track, heightAt: (x: number, z: number) => number, roots: THREE.Object3D[]) {
+  /**
+   * `cached`: the bytes of this very grid from an earlier visit (toBytes; see Game.sightlines —
+   * keyed by the build, the circuit and a fingerprint of the world's geometry): read back instead
+   * of rasterising the world again (~0.3–1.5 s). Ignored if they don't fit this circuit.
+   */
+  constructor(track: Track, heightAt: (x: number, z: number) => number, roots: THREE.Object3D[], cached?: ArrayBuffer | null) {
     const t0 = performance.now();
     let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity;
     for (let i = 0; i < track.n; i++) {
@@ -56,6 +64,18 @@ export class Sightlines {
     this.nx = Math.ceil((maxx - minx + MARGIN * 2) / CELL);
     this.nz = Math.ceil((maxz - minz + MARGIN * 2) / CELL);
     const n = this.nx * this.nz;
+    const head = cached && cached.byteLength === HEAD * 8 + n * 5 ? new Float64Array(cached, 0, HEAD) : null;
+    if (head && head[0] === BYTES_VERSION && head[1] === this.x0 && head[2] === this.z0 && head[3] === this.nx && head[4] === this.nz) {
+      this.ground = new Int16Array(cached!, HEAD * 8, n);
+      this.lo = new Uint8Array(cached!, HEAD * 8 + n * 2, n);
+      this.hi = new Uint8Array(cached!, HEAD * 8 + n * 3, n);
+      this.fence = new Uint8Array(cached!, HEAD * 8 + n * 4, n);
+      Object.assign(this.stats, { tris: head[5], instances: head[6], trees: head[7], cells: head[8] });
+      this.groundMs = 0;
+      this.buildMs = Math.round(performance.now() - t0);
+      this.fromCache = true;
+      return;
+    }
     this.ground = new Int16Array(n);
     this.lo = new Uint8Array(n).fill(EMPTY);
     this.hi = new Uint8Array(n);
@@ -81,6 +101,21 @@ export class Sightlines {
     }
     this.buildMs = Math.round(performance.now() - t0);
     for (let i = 0; i < n; i++) if (this.lo[i] !== EMPTY) this.stats.cells++;
+  }
+
+  /** read back from a cache (constructor `cached`) rather than built */
+  readonly fromCache: boolean = false;
+
+  /** the grid as bytes, for the constructor's `cached` on a later visit */
+  toBytes(): ArrayBuffer {
+    const n = this.nx * this.nz;
+    const buf = new ArrayBuffer(HEAD * 8 + n * 5);
+    new Float64Array(buf, 0, HEAD).set([BYTES_VERSION, this.x0, this.z0, this.nx, this.nz, this.stats.tris, this.stats.instances, this.stats.trees, this.stats.cells]);
+    new Int16Array(buf, HEAD * 8, n).set(this.ground);
+    new Uint8Array(buf, HEAD * 8 + n * 2, n).set(this.lo);
+    new Uint8Array(buf, HEAD * 8 + n * 3, n).set(this.hi);
+    new Uint8Array(buf, HEAD * 8 + n * 4, n).set(this.fence);
+    return buf;
   }
 
   // ------------------------------------------------------------------ building
