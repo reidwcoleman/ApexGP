@@ -68,8 +68,10 @@ void main() {
   if ( a < 0.003 ) discard;
   float mu = max( dot( V, uSunDir ), 0.0 );
   float fwd = mu * mu * mu * mu * mu * mu;
-  vec3 col = uAmb * ( 1.0 + 0.1 * n2 ) + uSunCol * fwd * 0.7;
-  gl_FragColor = vec4( col, min( a, 0.88 ) );
+  // fine water mist scatters less than a white cloud: a translucent grey a little darker than the sky
+  // (it must never clip — a brighter wet-day exposure lifts it), the sun glowing through it head-on
+  vec3 col = uAmb * 0.66 * ( 1.0 + 0.1 * n2 ) + uSunCol * fwd * 0.45;
+  gl_FragColor = vec4( col, min( a, 0.78 ) );
 }
 `;
 

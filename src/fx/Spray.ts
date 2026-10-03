@@ -94,7 +94,9 @@ export class SprayEmitters {
     const g = c.y;
     const vx = c.vx, vz = c.vz;
     const rnd = Math.random;
-    const bright = 0.92 + 0.08 * I;
+    // spray albedo: grey translucent mist rather than a lit white cloud (it reads like the footage's
+    // spray at any exposure and never clips against a bright wet sky)
+    const bright = 0.68 + 0.06 * I;
     const selfK = c.self ? 0.4 : 1;
 
     const run = (slot: number, spacing: number, fn: (px: number, pz: number, pre: number) => void) => {
@@ -133,7 +135,7 @@ export class SprayEmitters {
         wx, g + ly, wz,
         vx * k + cy * out, up, vz * k - sy * out,
         (1.0 + 1.6 * r) * (0.55 + 0.45 * I), (0.8 + 0.3 * rnd()) * sizeK, (1.5 + 1.2 * r) * (0.6 + 0.4 * I) * sizeK,
-        Math.min(0.9, (0.55 + 0.3 * rnd()) * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1)) * selfK, bright,
+        Math.min(0.78, (0.5 + 0.28 * rnd()) * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1)) * selfK, bright,
         1.1, -0.1, 0, g, 0.35, 0.015, 2.6, pre,
       );
     };
@@ -169,7 +171,7 @@ export class SprayEmitters {
         wx, g + 0.3 + rnd() * 0.2, wz,
         vx * k + cy * out, (2.5 + rnd() * 3.5) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.3 + rnd() * 0.25, 0.18, 0.7 + rnd() * 0.5,
-        0.6 * I * (c.self ? 0.6 : 1), 1.04, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
+        0.6 * I * (c.self ? 0.6 : 1), 0.8, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
       );
     };
     run(E_SHEET_L, spS, sheet(1));
@@ -188,7 +190,7 @@ export class SprayEmitters {
         wx, g + 0.18 + rnd() * 0.15, wz,
         vx * k + cy * out, (0.7 + rnd() * 1.6) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.35 + rnd() * 0.35, 0.16, 0.8 + rnd() * 0.5,
-        0.32 * I * (c.self ? 0.6 : 1), 1, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
+        0.32 * I * (c.self ? 0.6 : 1), 0.76, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
       );
     };
     run(E_FRONT_L, spF, front(1));
