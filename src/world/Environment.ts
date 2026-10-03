@@ -479,7 +479,9 @@ export function createEnvironment(
     // ---- post
     gfx.grade.setLook(gradeLook);
     // (camera footage glows round every bright thing: the sky behind the trees, chrome, the lights)
-    gfx.bloom.intensity = L.bloom * FILM.bloom;
+    // (bloom runs before the grade: on a dark wet day exposed up ×6 the lamps' and LEDs' glow would be
+    // too, blowing the dash and the rain lights out to white, so it's taken back by most of that)
+    gfx.bloom.intensity = (L.bloom * FILM.bloom) / Math.pow(Math.max(1, gradeLook.exposure), 0.8);
     gfx.bloom.luminanceMaterial.threshold = L.bloomThreshold * FILM.bloomThreshold;
     gfx.setSunShafts(sunDir, L.shafts * 0.9, 0.55 * C.E0 * 0.25);
     // lens flare: only with the sun clear of cloud; colour follows the sun (orange at golden hour)

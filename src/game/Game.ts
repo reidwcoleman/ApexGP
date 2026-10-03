@@ -1795,6 +1795,7 @@ export class Game {
     this.updatePits(dt, race);
     this.updateHeadlights(wx);
     this.trackside.update(dt, this.camera);
+    this.particles.glowScale = 1 / Math.sqrt(Math.max(1, this.gfx.grade.uniforms.get('lookExposure')!.value as number));
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.updateMotionBlur();

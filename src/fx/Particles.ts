@@ -492,6 +492,8 @@ export class Particles {
   readonly softMat: THREE.ShaderMaterial;
   readonly hotMat: THREE.ShaderMaterial;
   readonly veil: SprayVeil;
+  /** lamp glow vs the grade's exposure: a dark wet day is exposed up ×6 and the lamps with it (they'd clip white): taken back by its square root */
+  glowScale = 1;
   /**
    * Resolution of the soft-particle pass relative to the frame (0.5 = half res,
    * a quarter of the fill cost). 1 renders at full res; 0 draws them straight
@@ -1070,7 +1072,8 @@ export class Particles {
 
   /** a lamp's light scattered in the surrounding spray/mist, this frame only (soft, depth-faded) */
   haloGlow(p: THREE.Vector3, size: number, r: number, g: number, b: number, alpha = 1) {
-    this.halo.addTransient(p.x, p.y, p.z, size, alpha, r, g, b, 0.6);
+    const k = this.glowScale;
+    this.halo.addTransient(p.x, p.y, p.z, size, alpha, r * k, g * k, b * k, 0.6);
   }
 
   update(dt: number) {

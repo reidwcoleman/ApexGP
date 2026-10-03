@@ -96,7 +96,7 @@ export class SprayEmitters {
     const rnd = Math.random;
     // spray albedo: grey translucent mist rather than a lit white cloud (it reads like the footage's
     // spray at any exposure and never clips against a bright wet sky)
-    const bright = 0.68 + 0.06 * I;
+    const bright = 0.54 + 0.05 * I;
     const selfK = c.self ? 0.4 : 1;
 
     const run = (slot: number, spacing: number, fn: (px: number, pz: number, pre: number) => void) => {
