@@ -119,8 +119,12 @@ const ease = (dt: number, k: number) => 1 - Math.exp(-k * dt);
  * rather than losing the sides of the track.
  */
 /** cockpit eye offset from the cockpit anchor (m, in the car's frame) */
-const COCKPIT_EYE_UP = 0.006;
-const COCKPIT_EYE_FWD = 0.068;
+// (low and back in the tub, like the onboard footage: the halo's hoop rides the top edge, the
+// chassis sides fill the bottom 40 % and the front tyres sit half hidden behind them)
+const COCKPIT_EYE_UP = -0.05;
+const COCKPIT_EYE_FWD = 0.0;
+const COCKPIT_FOV = 53;
+const COCKPIT_LIFT = 0.5;
 
 function fovFor(v169: number, aspect: number): number {
   const A = 16 / 9;
@@ -423,10 +427,14 @@ export class Cameras {
     this.initialized = false;
     this.tvIndex = -1;
     this.blimpInit = false;
+    this.cuts++;
   }
 
+  /** bumped on every cut (a new shot, a reset): frame-to-frame effects (motion blur) skip that frame */
+  cuts = 0;
   /** force a fresh framing (a cut) on the next update */
   cut() {
+    this.cuts++;
     this.initialized = false;
     this.tvIndex = -1;
     this.blimpInit = false;
@@ -851,6 +859,7 @@ export class Cameras {
       this.headLook = this.initialized ? this.headLook + (lookT - this.headLook) * ease(dt, 4.5) : lookT;
       f.addScaledVector(leftV, this.headLook).normalize();
     }
+    if (this.mode === 'cockpit') lift = COCKPIT_LIFT;
     const look = this.v4.copy(this.v3).addScaledVector(f, 20).addScaledVector(up, lift);
     cam.up.copy(up);
     cam.lookAt(look);
@@ -859,7 +868,7 @@ export class Cameras {
     this.applyRotShake(car, Math.max(0, car.vx), kmh, (mount ? mount.shake : this.mode === 'helmet' ? 1.25 : 0.6) * 0.6 * this.prefs.shake);
     // (a touch narrower than before: the halo, the wheel and the T-cam's airbox read at their real
     // size instead of shrinking into a fisheye)
-    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? 59 : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
+    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? COCKPIT_FOV : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
     this.setFov(fovFor(baseFov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? Math.min(1, kmh / 330) * 4 : 0), dt, !this.initialized);
     this.initialized = true;
   }
@@ -931,6 +940,7 @@ export class Cameras {
       if (best >= 0 && (stale || best !== this.tvIndex)) pick = best;
     }
     if (pick !== this.tvIndex) {
+      if (pick !== this.tvIndex) this.cuts++;
       this.tvIndex = pick;
       this.tvAge = 0;
       this.initialized = false;

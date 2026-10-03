@@ -22,6 +22,8 @@ export const aerialParams = { x: 1.6e-4, y: 1 / 260, z: 0, w: 1 };
 export const aerialSunDir = { x: -0.6, y: 0.15, z: 0.78 };
 /** colour added toward the sun (linear, premultiplied by strength) */
 export const aerialSunColor = { r: 0.5, g: 0.3, b: 0.1 };
+/** x = haze density scale for the lens in use (1; a long lens thins it), y unused */
+export const aerialLens = { x: 1, y: 0 };
 /** fog banks: x = patchiness 0 … 1 (0 = off), y = 1 / bank size (1/m), zw = drift offset (m) */
 export const aerialBanks = { x: 0, y: 1 / 380, z: 0, w: 0 };
 
@@ -55,6 +57,7 @@ const PARS_FRAGMENT = /* glsl */ `
   uniform vec3 aerialSunDir;
   uniform vec3 aerialSunColor;
   uniform vec4 aerialBanks;
+  uniform vec2 aerialLens;
 
   float aerialHash( vec2 p ) {
     vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
@@ -78,7 +81,7 @@ const PARS_FRAGMENT = /* glsl */ `
       float camH = cameraPosition.y - aerialParams.z;
       float x = k * vFogRay.y;
       float f = abs( x ) > 1e-3 ? ( 1.0 - exp( - x ) ) / x : 1.0 - 0.5 * x;
-      float od = aerialParams.x * exp( - k * max( camH, -50.0 ) ) * dist * f;
+      float od = aerialParams.x * aerialLens.x * exp( - k * max( camH, -50.0 ) ) * dist * f;
       // fog banks: the mist thicker in some hollows, thinner in others (fading to the mean far away,
       // where a ray has crossed many banks)
       if ( aerialBanks.x > 0.0 ) {
@@ -126,6 +129,7 @@ export function installAerialFog() {
       sh.uniforms.aerialSunDir = { value: aerialSunDir };
       sh.uniforms.aerialSunColor = { value: aerialSunColor };
       sh.uniforms.aerialBanks = { value: aerialBanks };
+      sh.uniforms.aerialLens = { value: aerialLens };
     }
   }
 }
@@ -138,6 +142,7 @@ export function aerialUniforms(): Record<string, THREE.IUniform> {
     aerialSunDir: { value: aerialSunDir },
     aerialSunColor: { value: aerialSunColor },
     aerialBanks: { value: aerialBanks },
+    aerialLens: { value: aerialLens },
   };
 }
 

@@ -235,10 +235,12 @@ export class PlayerEngine {
     // --- exhaust tone: body + bark formants, load-dependent brightness
     // (the 600–2k band is where a synthetic engine turns nasal/buzzy: give the lows and
     // low-mids the weight, keep a little bark up top)
-    const exBody = biquad(ctx, 'peaking', 115, 0.9, 4);
-    const exWarm = biquad(ctx, 'lowshelf', 300, 0.7, 3.5);
-    const exNasal = biquad(ctx, 'peaking', 1150, 0.9, -3);
-    const exBark = biquad(ctx, 'peaking', 1800, 1.2, 1.5);
+    // (measured against real V6 turbo-hybrid footage: its fundamental, ~500–600 Hz at race revs,
+    // carries most of the energy — the harmonics above it were still too strong here)
+    const exBody = biquad(ctx, 'peaking', 115, 0.9, 5);
+    const exWarm = biquad(ctx, 'lowshelf', 420, 0.7, 5.5);
+    const exNasal = biquad(ctx, 'peaking', 1250, 0.8, -7);
+    const exBark = biquad(ctx, 'peaking', 2000, 1.2, 0);
     this.exLP = biquad(ctx, 'lowpass', 6000, 0.55);
     this.exG = gainNode(ctx, 1);
     sp.connect(exBody, 0);
@@ -262,7 +264,7 @@ export class PlayerEngine {
     chain(popHP, popSh, popPk, popLP, this.popG);
 
     const exSum = gainNode(ctx, 1);
-    const exSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.4), oversample: '2x' });
+    const exSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.15), oversample: '2x' });
     this.exView = gainNode(ctx, mix.exhaust);
     this.exG.connect(exSum);
     this.raspG.connect(exSum);

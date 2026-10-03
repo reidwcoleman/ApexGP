@@ -126,7 +126,11 @@ npm run check    # tsc --noEmit
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
   depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
   overlay (real onboard footage has none), and night races are lit by a faint moon only, so the headlights,
-  rain lights and the lights round the track carry the picture. `node tools/_lookshots.mjs <out>` shoots the reference scenes;
+  rain lights and the lights round the track carry the picture. The cockpit eye sits low and back in the tub
+  (`COCKPIT_EYE_*` in Cameras.ts) so the halo's hoop rides the top edge as in onboard footage; long lenses thin
+  the haze (`aerialLens` in fog.ts) so telephoto shots stay contrasty; camera cuts reach the motion blur through
+  `Cameras.cuts`. Engine/wind mixes are balanced against real V6 turbo-hybrid footage by band energy
+  (`tools/audiocheck.mjs --bands`: cockpit ≈ 22 % < 150 Hz, 58 % 150–600 Hz, 16 % 600–2k, 3 % 2–6k). `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
 - **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),

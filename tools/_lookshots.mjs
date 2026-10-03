@@ -15,7 +15,7 @@ const SCENES = {
 const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 for (const [name, s] of Object.entries(SCENES)) {
   if (only && !only.split(',').includes(name)) continue;
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) }, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message)); page.on('console', (m) => { if (m.type() === 'error') console.log('[err]', m.text().slice(0, 300)); });
   await page.goto(`http://localhost:${process.env.PORT ?? 5196}/?track=${s.track}&demo=race&cam=${s.cam}&skip=${s.skip ?? 40}&weather=${s.weather}&time=${s.time}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 240000 });

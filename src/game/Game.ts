@@ -42,7 +42,7 @@ import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, ty
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
 import { BRAND_FONTS } from '../world/brands.ts';
-import { aerialParams } from '../world/env/fog.ts';
+import { aerialLens, aerialParams } from '../world/env/fog.ts';
 import { buildPitComplex, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
@@ -1664,6 +1664,9 @@ export class Game {
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.updateMotionBlur();
+    // a long lens looks through hundreds of metres of air at its subject, yet broadcast telephoto
+    // shots stay contrasty: thin the haze as the lens narrows (full below ~28°, a third at ~3°)
+    aerialLens.x = THREE.MathUtils.clamp(0.33 + (this.camera.fov - 3) * (0.67 / 25), 0.33, 1);
     this.gfx.render(dt);
     // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)
     if (this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
@@ -3168,6 +3171,7 @@ export class Game {
   }
 
   private readonly motionSort: THREE.Object3D[] = [];
+  private lastCuts = 0;
   /** camera motion blur while cars run (Settings → Motion blur); the cars nearest the lens stay sharp as moving objects */
   private updateMotionBlur() {
     const st = this.state;
@@ -3176,6 +3180,10 @@ export class Game {
     g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && EYE_CAMS[this.cams.mode];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
+    if (this.cams.cuts !== this.lastCuts) {
+      this.lastCuts = this.cams.cuts;
+      g.motionCut = true;
+    }
     const out = g.motionCars;
     out.length = 0;
     if (g.motionBlur <= 0) return;

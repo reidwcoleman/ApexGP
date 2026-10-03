@@ -19,7 +19,7 @@ import { weatherUniforms } from './weatherUniforms.ts';
 
 
 /** the photographic layer over every weather/time look (see the eye adaptation in Environment.update) */
-const FILM = { exposure: 0.9, nightExposure: 0.9, saturation: 0.86, contrast: 1.04, tint: [1.13, 1.02, 0.7] as const, shadowTint: [1.12, 1.0, 0.76] as const };
+const FILM = { exposure: 0.9, nightExposure: 0.9, saturation: 0.86, contrast: 1.04, tint: [1.13, 1.02, 0.7] as const, shadowTint: [1.12, 1.0, 0.76] as const, bloom: 1.35, bloomThreshold: 0.9 };
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
@@ -437,8 +437,9 @@ export function createEnvironment(
 
     // ---- post
     gfx.grade.setLook(gradeLook);
-    gfx.bloom.intensity = L.bloom;
-    gfx.bloom.luminanceMaterial.threshold = L.bloomThreshold;
+    // (camera footage glows round every bright thing: the sky behind the trees, chrome, the lights)
+    gfx.bloom.intensity = L.bloom * FILM.bloom;
+    gfx.bloom.luminanceMaterial.threshold = L.bloomThreshold * FILM.bloomThreshold;
     gfx.setSunShafts(sunDir, L.shafts * 0.9, 0.55 * C.E0 * 0.25);
     // lens flare: only with the sun clear of cloud; colour follows the sun (orange at golden hour)
     gfx.flareStrength = L.sunVis * L.sunVis * (isLowSun(L.time) ? 1.2 : 0.8);

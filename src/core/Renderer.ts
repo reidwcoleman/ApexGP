@@ -222,7 +222,7 @@ vec3 shadeOwn(vec3 c, float d) {
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float hi = max(max(c.r, c.g), c.b);
   float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
-  vec3 s = mix(vec3(lum), c, 0.72) * 0.28 + max(c - 2.5, 0.0) * 0.7 * smoothstep(0.5, 0.8, chroma);
+  vec3 s = mix(vec3(lum), c, 0.72) * 0.28 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
   return mix(c, s, k);
 }
 
@@ -1381,6 +1381,9 @@ export class Renderer {
   private readonly prevCamPos = new THREE.Vector3();
   private readonly prevCamQ = new THREE.Quaternion();
   private prevCam: THREE.Camera | null = null;
+  private prevViewProjZoom = 1;
+  /** set for one frame by the game on a camera cut */
+  motionCut = false;
   private motionFrame = 0;
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpQ = new THREE.Quaternion();
@@ -1391,9 +1394,13 @@ export class Renderer {
     const u = this.motion.uniforms;
     const camPos = this.tmpV.setFromMatrixPosition(cam.matrixWorld);
     const camQ = this.tmpQ.setFromRotationMatrix(cam.matrixWorld);
-    let ok = this.motionBlur > 0.01 && this.prevCam === cam && dt > 0;
-    // a cut (a new camera position or a whip around) has no motion to blur
-    if (ok && (camPos.distanceTo(this.prevCamPos) > 20 || camQ.angleTo(this.prevCamQ) > 0.5)) ok = false;
+    let ok = this.motionBlur > 0.01 && this.prevCam === cam && dt > 0 && !this.motionCut;
+    this.motionCut = false;
+    // a cut (a new camera position, a whip around, a zoom snap) has no motion to blur — the game says
+    // so (motionCut); these catch the rest
+    const zoom = cam.projectionMatrix.elements[5] / Math.max(1e-6, this.prevViewProjZoom);
+    if (ok && (camPos.distanceTo(this.prevCamPos) > 8 || camQ.angleTo(this.prevCamQ) > 0.25 || zoom > 1.12 || zoom < 1 / 1.12)) ok = false;
+    this.prevViewProjZoom = cam.projectionMatrix.elements[5];
     if (ok) {
       (u.get('projInv')!.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
       (u.get('camWorld')!.value as THREE.Matrix4).copy(cam.matrixWorld);
