@@ -76,7 +76,7 @@ const GARAGE_MIRROR_LAYER = 4;
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 /** Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°) */
-const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.5, cinematic: 1.25 };
+const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.6, cinematic: 1.7 };
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 

@@ -176,7 +176,7 @@ class MotionBlurEffect extends Effect {
         ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
         ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
         ['shutter', new THREE.Uniform(0)],
-        ['maxLen', new THREE.Uniform(0.11)],
+        ['maxLen', new THREE.Uniform(0.14)],
       ]),
     });
   }
@@ -197,6 +197,7 @@ uniform vec3 boxMax;
 uniform float shade;
 uniform float defocus;
 uniform float outside;
+uniform vec3 wheelPos;
 
 vec3 obViewPos(vec2 uv, float depth) {
   float vz = getViewZ(depth);
@@ -204,37 +205,43 @@ vec3 obViewPos(vec2 uv, float depth) {
   ray.xyz /= ray.w;
   return ray.xyz * (vz / ray.z);
 }
-// distance from the lens if this pixel is the player's own car, else -1
-float ownDist(vec2 uv, float depth) {
+// distance from the lens if this pixel is the player's own car, else -1; wheel 0 … 1 = on the
+// steering wheel (its screen, shift lights and buttons stay readable, as in the footage)
+float ownDist(vec2 uv, float depth, out float wheel) {
+  wheel = 0.0;
   if (-getViewZ(depth) > 4.5) return -1.0;
   vec3 vp = obViewPos(uv, depth);
   vec3 l = (ownInv * (camWorld * vec4(vp, 1.0))).xyz;
-  return all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)) ? length(vp) : -1.0;
+  if (!(all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)))) return -1.0;
+  wheel = 1.0 - smoothstep(0.17, 0.26, length(l - wheelPos));
+  return length(vp);
 }
 // blur radius (uv, vertical) of a surface this far from a lens focused far away
-float coc(float d) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6); }
+float coc(float d, float wheel) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6) * (1.0 - 0.8 * wheel); }
 
-vec3 shadeOwn(vec3 c, float d) {
-  float k = shade * (1.0 - smoothstep(1.6, 3.6, d));
+vec3 shadeOwn(vec3 c, float d, float wheel) {
+  float k = shade * (1.0 - smoothstep(1.6, 3.6, d)) * (1.0 - 0.55 * wheel);
   // the shadowed cockpit: much less light, a little less colour, and no sun glints in the lacquer
-  // (kept, they sparkle once the paint round them is dark); only the lit LEDs keep their glow —
-  // bright AND strongly coloured, where a glint is bright and white
+  // (kept, they sparkle once the paint round them is dark); lit LEDs and the wheel's screen keep
+  // their glow — bright AND strongly coloured, where a glint is bright and white
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float hi = max(max(c.r, c.g), c.b);
   float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
   vec3 s = mix(vec3(lum), c, 0.72) * 0.28 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
-  return mix(c, s, k);
+  vec3 lit = mix(s, c, wheel * 0.85);
+  return mix(c, lit, k);
 }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
   // an onboard camera's small wide lens darkens hard toward the corners
   vec2 vc = (uv - 0.5) * vec2(aspect, 1.0);
   float vig = 1.0 - 0.5 * smoothstep(0.3, 1.0, length(vc));
-  float d0 = ownDist(uv, depth);
+  float wh0;
+  float d0 = ownDist(uv, depth, wh0);
   // the view outside: just the exposure (its edge against the cockpit is softened from the inside)
   if (d0 < 0.0) { outputColor = vec4(inputColor.rgb * outside * vig, inputColor.a); return; }
-  float r0 = coc(d0);
-  vec3 c0 = shadeOwn(inputColor.rgb, d0);
+  float r0 = coc(d0, wh0);
+  vec3 c0 = shadeOwn(inputColor.rgb, d0, wh0);
   if (r0 * resolution.y < 0.75) { outputColor = vec4(c0 * vig, inputColor.a); return; }
   // defocus disc: the cockpit's own soft neighbours, and the view behind where the disc crosses an
   // edge. The disc turns per pixel (interleaved gradient noise) and bright taps are weighted down
@@ -246,9 +253,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     float a = float(i) * 2.39996 + rot;
     float rr = sqrt((float(i) + 0.5) / 12.0);
     vec2 su = uv + vec2(cos(a), sin(a)) * rr * r0 * vec2(1.0 / aspect, 1.0);
-    float ds = ownDist(su, readDepth(su));
+    float whs;
+    float ds = ownDist(su, readDepth(su), whs);
     vec3 c = texture2D(inputBuffer, su).rgb;
-    c = ds < 0.0 ? c * outside : shadeOwn(c, ds);
+    c = ds < 0.0 ? c * outside : shadeOwn(c, ds, whs);
     float wi = 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
     acc += c * wi;
     w += wi;
@@ -270,6 +278,8 @@ class OnboardEffect extends Effect {
         ['shade', new THREE.Uniform(1)],
         ['defocus', new THREE.Uniform(0.0105)],
         ['outside', new THREE.Uniform(1.12)],
+        // the steering wheel's centre in the car's frame (carGeometry STEER_PIVOT)
+        ['wheelPos', new THREE.Uniform(new THREE.Vector3(0, 0.605, 0.5))],
       ]),
     });
   }
