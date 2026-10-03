@@ -432,7 +432,7 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     // from a height a desert is never one tone: kilometre-wide sheets of pale wind-blown sand over
     // darker grey-brown gravel plains (reg), and wadis where the scrub gathers along a winding line
     float sheet = smoothstep( 0.4, 0.62, m0 * 0.6 + m1 * 0.4 );
-    sandC *= mix( vec3( 0.84, 0.83, 0.84 ), vec3( 1.05, 1.02, 0.97 ), sheet );
+    sandC *= mix( vec3( 0.74, 0.73, 0.75 ), vec3( 1.06, 1.03, 0.97 ), sheet );
     float wadiU = ( m1 * 0.7 + m0 * 0.3 ) * 9.0;
     float wadi = 1.0 - smoothstep( -0.06, 0.05 + fwidth( wadiU ) * 1.5, abs( fract( wadiU ) - 0.5 ) - 0.4 );
     wadi *= ( 1.0 - smoothstep( 0.25, 0.6, fwidth( wadiU ) ) ) * ( 0.55 + 0.45 * d2 );

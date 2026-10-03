@@ -8,7 +8,10 @@ import { rng } from './noise.ts';
  * make each venue's backdrop its own: wind farms turning on the ridges (Spa, Silverstone,
  * the Hungarian plain) or out at sea (Zandvoort), lattice pylons marching across the fields
  * with their wires sagging between them, the nodding donkeys of the Awali oil field beside
- * Sakhir.
+ * Sakhir, and the industry a venue's skyline is known for — the stacks of the Yokkaichi
+ * refineries across the bay from Suzuka, the IJmuiden steelworks up the coast from Zandvoort,
+ * the Alba smelter and the Riffa power station north of Sakhir, Umm al Nar's chimneys across
+ * the water from Yas.
  *
  * All instanced: one static mesh per kind + the moving parts (rotors, walking beams) updated
  * each frame. Beyond the circuit (≥ 700 m), no shadows; the scene fog hazes them like the
@@ -42,8 +45,25 @@ interface PylonLine {
   height: number;
   span: number;
 }
+/** an industrial site: banded chimneys, a few storage tanks and sheds round a bearing */
+interface Industry {
+  bearing: number;
+  dist: number;
+  /** half-spread across (m) and in depth (m) */
+  across: number;
+  depth: number;
+  stacks: number;
+  /** chimney height (m) and radius at the foot (m) */
+  stackH: number;
+  stackR: number;
+  tanks: number;
+  sheds: number;
+  /** a pair of blast furnaces / boiler houses: tall dark blocks */
+  furnaces?: number;
+}
 interface VenueSkyline {
   farms?: WindFarm[];
+  industry?: Industry[];
   pylons?: PylonLine[];
   /** oil field: pumpjacks scattered over an arc */
   jacks?: { from: number; to: number; d0: number; d1: number; n: number };
@@ -59,19 +79,32 @@ const SKYLINES: Partial<Record<Venue, VenueSkyline>> = {
     farms: [{ bearing: 205, dist: 2500, n: 7, across: 22, depth: 600, hub: 115, face: 235 }],
     pylons: [{ dir: 110, offset: -2300, height: 46, span: 370 }, { dir: 30, offset: 2800, height: 40, span: 350 }],
   },
-  suzuka: { pylons: [{ dir: 160, offset: -2100, height: 50, span: 380 }, { dir: 60, offset: 2600, height: 44, span: 360 }] },
   spielberg: { pylons: [{ dir: 80, offset: 1600, height: 40, span: 340 }] },
   austin: { pylons: [{ dir: 5, offset: 2300, height: 38, span: 340 }, { dir: 95, offset: -2500, height: 34, span: 320 }] },
   hungaroring: {
     farms: [{ bearing: 120, dist: 2900, n: 7, across: 18, depth: 700, hub: 120, face: 300 }],
     pylons: [{ dir: 40, offset: -2400, height: 42, span: 360 }],
   },
-  zandvoort: { farms: [{ bearing: 282, dist: 6500, n: 24, across: 22, depth: 2000, hub: 140, face: 250, seaY: -4 }] },
+  zandvoort: {
+    farms: [{ bearing: 282, dist: 6500, n: 24, across: 22, depth: 2000, hub: 140, face: 250, seaY: -4 }],
+    industry: [{ bearing: 17, dist: 10200, across: 650, depth: 450, stacks: 6, stackH: 140, stackR: 6.5, tanks: 4, sheds: 7, furnaces: 3 }],
+  },
+  suzuka: {
+    pylons: [{ dir: 160, offset: -2100, height: 50, span: 380 }, { dir: 60, offset: 2600, height: 44, span: 360 }],
+    industry: [{ bearing: 42, dist: 10800, across: 1200, depth: 600, stacks: 9, stackH: 160, stackR: 5.5, tanks: 14, sheds: 6 }],
+  },
   sakhir: {
     pylons: [{ dir: 15, offset: 2200, height: 40, span: 350 }, { dir: 115, offset: -2600, height: 40, span: 350 }],
     jacks: { from: 20, to: 110, d0: 1300, d1: 3600, n: 36 },
+    industry: [
+      { bearing: 32, dist: 9500, across: 600, depth: 400, stacks: 4, stackH: 120, stackR: 5.5, tanks: 3, sheds: 8 },
+      { bearing: 58, dist: 10500, across: 500, depth: 300, stacks: 3, stackH: 95, stackR: 5, tanks: 6, sheds: 3 },
+    ],
   },
-  yasmarina: { pylons: [{ dir: 140, offset: -2800, height: 44, span: 360 }] },
+  yasmarina: {
+    pylons: [{ dir: 140, offset: -2800, height: 44, span: 360 }],
+    industry: [{ bearing: 178, dist: 10000, across: 450, depth: 300, stacks: 5, stackH: 110, stackR: 5, tanks: 4, sheds: 3 }],
+  },
 };
 
 const WHITE = srgb(0xe7e9ea);
@@ -204,6 +237,34 @@ function jackBeam(): THREE.BufferGeometry {
   return mb.geometry(false);
 }
 
+/** a chimney of height 1 and foot radius 1 (scaled per stack): tapering, red-and-white bands at the top */
+function stackGeometry(): THREE.BufferGeometry {
+  const mb = new MeshBuilder();
+  const RED = srgb(0xa8402e), CON = srgb(0x9c9a94), WH = srgb(0xd9d8d3);
+  const path: number[][] = [];
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    path.push([0, t, 0, 1 - 0.38 * t]);
+  }
+  mb.tube(path, 10, (t) => (t < 0.7 ? CON : Math.floor((t - 0.7) / 0.075) % 2 === 0 ? RED : WH), () => 0, true);
+  return mb.geometry(false);
+}
+/** a storage tank (height 1, radius 1) and a shed (unit box), pale and weathered */
+function tankGeometry(): THREE.BufferGeometry {
+  const mb = new MeshBuilder();
+  mb.tube([[0, 0, 0, 1], [0, 1, 0, 1], [0, 1.08, 0, 0.6]], 16, srgb(0xc9c7c0), () => 0, true);
+  return mb.geometry(false);
+}
+function shedGeometry(): THREE.BufferGeometry {
+  const mb = new MeshBuilder();
+  _m.makeScale(1, 1, 1).setPosition(0, 0.5, 0);
+  mb.box(_m, srgb(0x8f948f));
+  // a lighter roof strip (cladding seen from afar)
+  _m.makeScale(1.02, 0.08, 1.02).setPosition(0, 1.0, 0);
+  mb.box(_m, srgb(0xa9aba6));
+  return mb.geometry(false);
+}
+
 // ---------------------------------------------------------------- build
 
 export function buildSkyline(map: WorldMap): SkylineBuild | null {
@@ -327,11 +388,94 @@ export function buildSkyline(map: WorldMap): SkylineBuild | null {
     group.add(im);
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(wirePts, 3));
-    const wires = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x2a2d31, transparent: true, opacity: 0.75 }));
+    // GL lines are a pixel wide at any range, so a line of wires 3 km off drew one hard wavy stroke
+    // right along the horizon. A conductor bundle (~0.12 m) covers 0.12 / (d · pixel angle) of a
+    // pixel: the wires fade with distance as a lens sees them (clear at a few hundred metres, gone
+    // into the haze by a few kilometres)
+    const wireMat = new THREE.LineBasicMaterial({ color: 0x2a2d31, transparent: true, opacity: 0.75, depthWrite: false });
+    wireMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vWireD;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvWireD = - mvPosition.z;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vWireD;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= clamp( 330.0 / max( vWireD, 1.0 ), 0.0, 1.0 );');
+    };
+    wireMat.customProgramCacheKey = () => 'apex-skyline-wires';
+    const wires = new THREE.LineSegments(wg, wireMat);
     wires.name = 'skyline_wires';
     wires.frustumCulled = false;
     group.add(wires);
     count += towers.length;
+  }
+
+  // ---- industry: stacks, tanks, sheds (static, instanced; a red light on each stack top at night)
+  if (cfg.industry?.length) {
+    const st: THREE.Matrix4[] = [], tk: THREE.Matrix4[] = [], sh: THREE.Matrix4[] = [];
+    const q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), s = new THREE.Vector3();
+    for (const I of cfg.industry) {
+      const [fx, fz] = bearingDir(I.bearing);
+      const tx = -fz, tz = fx;
+      const site = (k: number) => {
+        const a = (r() - 0.5) * 2 * I.across * (0.4 + 0.6 * k), d = (r() - 0.5) * 2 * I.depth;
+        const x = c.x + fx * (I.dist + d) + tx * a, z = c.z + fz * (I.dist + d) + tz * a;
+        return { x, z, y: map.height(x, z) - 1 };
+      };
+      // (out of the horizon ring's way: it is written at ~12 km depth, anything beyond is behind it)
+      const dry = (P: { y: number }) => P.y > -2;
+      const pick = (k: number) => {
+        for (let t = 0; t < 12; t++) {
+          const P = site(k);
+          if (dry(P)) return P;
+        }
+        return null;
+      };
+      for (let i = 0; i < I.stacks; i++) {
+        const P = pick(0.6);
+        if (!P) continue;
+        const h = I.stackH * (0.55 + 0.45 * r()) * (i === 0 ? 1.15 : 1);
+        st.push(new THREE.Matrix4().compose(p.set(P.x, P.y, P.z), q.identity(), s.set(I.stackR * (0.8 + 0.4 * r()), h, I.stackR * (0.8 + 0.4 * r()))));
+      }
+      for (let i = 0; i < I.tanks; i++) {
+        const P = pick(1);
+        if (!P) continue;
+        const rr = 9 + 14 * r();
+        tk.push(new THREE.Matrix4().compose(p.set(P.x, P.y, P.z), q.identity(), s.set(rr, 8 + 10 * r(), rr)));
+      }
+      for (let i = 0; i < I.sheds + (I.furnaces ?? 0); i++) {
+        const P = pick(1);
+        if (!P) continue;
+        const fur = i >= I.sheds;
+        const w = fur ? 30 + 10 * r() : 60 + 120 * r(), d = fur ? 30 + 10 * r() : 30 + 60 * r(), h = fur ? 70 + 25 * r() : 12 + 14 * r();
+        q.setFromEuler(e.set(0, ((I.bearing + 90) * Math.PI) / 180 + (r() - 0.5) * 0.2, 0));
+        sh.push(new THREE.Matrix4().compose(p.set(P.x, P.y, P.z), q, s.set(w, h, d)));
+      }
+    }
+    const add = (geo: THREE.BufferGeometry, list: THREE.Matrix4[], name: string) => {
+      if (!list.length) return;
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((m, i) => im.setMatrixAt(i, m));
+      im.name = name;
+      im.frustumCulled = false;
+      group.add(im);
+      count += list.length;
+    };
+    add(stackGeometry(), st, 'skyline_stacks');
+    add(tankGeometry(), tk, 'skyline_tanks');
+    add(shedGeometry(), sh, 'skyline_sheds');
+    if (st.length) {
+      const lm = new THREE.MeshBasicMaterial({ color: 0xff2a14, toneMapped: false, transparent: true, opacity: 0 });
+      const lights = new THREE.InstancedMesh(new THREE.SphereGeometry(1.6, 6, 4), lm, st.length);
+      const m = new THREE.Matrix4();
+      st.forEach((M, i) => {
+        p.setFromMatrixPosition(M);
+        s.setFromMatrixScale(M);
+        lights.setMatrixAt(i, m.makeTranslation(p.x, p.y + s.y + 1, p.z));
+      });
+      lights.frustumCulled = false;
+      group.add(lights);
+      updates.push((time) => { lm.opacity = (time % 2) < 1 ? 0.85 : 0.35; });
+    }
   }
 
   // ---- oil field

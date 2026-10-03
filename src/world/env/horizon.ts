@@ -360,7 +360,7 @@ function arcFade(L: HorizonLayer, az: number): number {
 function ridgeNoise(x: number, z: number, rough: number): number {
   // ridged fbm: sharp crests (rough → 1) or rolling domes (rough → 0)
   let a = 1, f = 1, sum = 0, norm = 0;
-  for (let o = 0; o < 6; o++) {
+  for (let o = 0; o < 5; o++) {
     const n = perlin2(x * f, z * f);
     const ridge = 1 - Math.abs(n);
     const v = rough * ridge * ridge + (1 - rough) * (n * 0.5 + 0.5);
@@ -390,7 +390,8 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
     // a tree line: broad masses (copses, gaps, a field showing through) along the ring; the single
     // crowns (~ 9–14 m) are cut per pixel in the shader, so the silhouette is a real fringe of
     // tree tops, not a smooth band. Two staggered rows give it depth (the back row paler).
-    const step = Math.min(0.6 * DEG, 40 / D);
+    // (columns every ~70 m carry the copses and gaps; the single crowns are cut per pixel)
+    const step = Math.min(0.6 * DEG, 70 / D);
     const col = L.color ?? FOREST;
     const azs = arc(L, step);
     const ox = r() * 100, oz = r() * 100;
@@ -423,9 +424,11 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
   const rough = dunes ? 0.1 : (L.rough ?? 0.5);
   const scale = L.scale ?? Math.max(dunes ? 220 : 600, L.height * (dunes ? 9 : 3.5));
   const depth = Math.min(D * 0.45, Math.max(scale * 1.6, L.height * 5));
-  // (rows and columns where they show: a low far ridge is a few pixels tall, a big range needs them)
-  const K = dunes ? 5 : L.height > 500 ? 11 : 7;
-  const step = Math.max(0.07 * DEG, Math.min(0.32 * DEG, scale / 14 / D));
+  // (rows and columns where they show: a low far ridge is a few pixels tall, a big range needs them;
+  // the fine relief is per pixel anyway)
+  const angH = L.height / D / DEG;
+  const K = dunes || angH < 0.5 ? 4 : angH < 1.5 ? 7 : 11;
+  const step = Math.max(Math.max(0.07, Math.min(angH, 0.25)) * DEG, Math.min(0.32 * DEG, scale / 14 / D));
   const azs = arc(L, step);
   const ox = r() * 100, oz = r() * 100;
   const forest = L.color ?? (dunes ? ([0.34, 0.3, 0.2] as [number, number, number]) : FOREST);
@@ -437,6 +440,7 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
     const [sx, sz] = dir(az);
     const col: number[] = [];
     const foot = footAt(cx + sx * (D - depth), cz + sz * (D - depth), base);
+    const jit = 0.92 + 0.16 * (perlin2((sx * D) / 1700 + 3.3, (sz * D) / 1700 - 1.1) * 0.5 + 0.5);
     for (let k = 0; k <= K; k++) {
       const u = k / K;
       const d = D - depth * (1 - u);
@@ -445,12 +449,10 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
       // the face, so the lit/shaded ribs read like real mountainsides, not a smooth sheet)
       const crest = ridgeNoise(px / scale + ox, pz / scale + oz, rough);
       const rib = perlin2(px / (scale * 0.22) - oz, pz / (scale * 0.22) + ox);
-      const rib2 = perlin2(px / (scale * 0.07) + oz, pz / (scale * 0.07) - ox);
       const prof = dunes ? Math.pow(u, 0.8) : u * u * (3 - 2 * u) * 0.65 + Math.pow(u, 1.6) * 0.35;
-      let h01 = crest * prof + (dunes ? 0 : (0.16 * rib + 0.05 * rib2) * u * (1 - u) * 4 * (0.35 + 0.65 * rough));
+      let h01 = crest * prof + (dunes ? 0 : 0.17 * rib * u * (1 - u) * 4 * (0.35 + 0.65 * rough));
       h01 = Math.max(0, h01) * fade;
       const y = foot - (u === 0 ? 60 : 0) + L.height * h01;
-      const jit = 0.92 + 0.16 * (perlin2(px / 1700 + 3.3, pz / 1700 - 1.1) * 0.5 + 0.5);
       col.push(b.v(cx + px, y, cz + pz, [forest[0] * jit, forest[1] * jit, forest[2] * jit], az * d, u, dunes ? 2 : 0, h01, hz, ex));
     }
     grid.push(col);
