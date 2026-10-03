@@ -12,6 +12,9 @@ import type { PrintAtlas } from './textures.ts';
  * sponsor band, the podium terrace cantilevered over the pit lane toward the
  * track at the finish line, the race-control tower with the big timing
  * screen, and the paddock behind (hospitality units, transporters, lamps).
+ * The end walls carry slab bands, cladding fins and a glazed stair core; Silverstone gets the
+ * Wing's blade roof (ribbed underneath), Interlagos a white roof rolling in waves. The outside
+ * surfaces weather in the shader (materials.ts solidMaterial).
  */
 
 export class GlassGeo {
@@ -273,7 +276,10 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   buildPodium(p, ts, atlas, o);
   buildTower(p, ts, atlas, o);
   buildPaddock(p, ts, atlas, o);
-  if (ts.track.def.id === 'silverstone') buildWing(p, ts, o);
+  if (ts.track.def.id === 'silverstone') buildWing(p, ts, o, 'wing');
+  // Interlagos: the new pit building's white roof that rolls in waves along the straight
+  if (ts.track.def.id === 'interlagos') buildWing(p, ts, o, 'wave');
+  buildEndWalls(p, ts, o);
 }
 
 // ------------------------------------------------------------------ Silverstone: the Wing
@@ -282,14 +288,19 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
  * The Wing's signature roof: a long white aerofoil blade floating above the building on
  * slim struts, reaching out over the pit lane and swooping up toward the middle.
  */
-function buildWing(p: PitPlan, ts: TrackSpace, o: BuildingOut) {
+function buildWing(p: PitPlan, ts: TrackSpace, o: BuildingOut, style: 'wing' | 'wave') {
   const { solid, thin } = o;
   const F = L.front, BB = L.bldgBack;
   const S0 = p.bldgS0 - 6, S1 = p.bldgS1 + 6;
   const T = H.roofTop;
-  const prof: [number, number][] = [[F - 11, T + 2.2], [F - 6, T + 4.2], [F, T + 5.4], [F + 8, T + 5.9], [BB - 3, T + 5.2], [BB + 3, T + 3.6]];
+  const prof: [number, number][] =
+    style === 'wing'
+      ? [[F - 11, T + 2.2], [F - 6, T + 4.2], [F, T + 5.4], [F + 8, T + 5.9], [BB - 3, T + 5.2], [BB + 3, T + 3.6]]
+      : [[F - 8, T + 1.0], [F - 4, T + 2.0], [F + 2, T + 2.6], [F + 10, T + 2.8], [BB - 2, T + 2.4], [BB + 2, T + 1.5]];
+  const waves = Math.max(3, Math.round((S1 - S0) / 110));
   const swoop = (s: number) => {
     const t = (s - S0) / (S1 - S0);
+    if (style === 'wave') return 1.5 * Math.sin(Math.PI * waves * 2 * t - Math.PI / 2) + 1.5;
     return 3.2 * Math.sin(Math.PI * t) + 1.1 * Math.sin(3 * Math.PI * t);
   };
   const up = new THREE.Vector3(0, 1, 0), down = new THREE.Vector3(0, -1, 0);
@@ -319,14 +330,75 @@ function buildWing(p: PitPlan, ts: TrackSpace, o: BuildingOut) {
       solid.quad(ts.P(sE, l0, y0 + h - THK), ts.P(sE, l1, y1 + h - THK), ts.P(sE, l1, y1 + h), ts.P(sE, l0, y0 + h), out);
     }
   }
+  // the blade's underside is not a flat slab: transverse ribs every 12 m, deepest mid-chord
+  // (seen from the pit straight and the grid, they give the soffit its rhythm and its shading)
+  solid.color(0xe2e4e3).mat(0.45, 0.2, 0, 1);
+  const l0 = prof[0][0], l1 = prof[prof.length - 1][0];
+  for (let i = 0; i <= n; i += 2) {
+    const a = S0 + ((S1 - S0) * i) / n;
+    const h = swoop(a);
+    for (let k = 0; k < prof.length - 1; k++) {
+      const [la, ya] = prof[k], [lb, yb] = prof[k + 1];
+      const da = 0.75 * Math.sin((Math.PI * (la - l0)) / (l1 - l0)), db = 0.75 * Math.sin((Math.PI * (lb - l0)) / (l1 - l0));
+      for (const d of [-1, 1]) {
+        const s = a + d * 0.12;
+        const out = ts.P(s + d, la, 0).sub(ts.P(s, la, 0));
+        solid.quad(ts.P(s, la, ya + h - THK - da), ts.P(s, lb, yb + h - THK - db), ts.P(s, lb, yb + h - THK), ts.P(s, la, ya + h - THK), out);
+      }
+      // the rib's bottom edge
+      solid.quad(ts.P(a - 0.12, la, ya + h - THK - da), ts.P(a + 0.12, la, ya + h - THK - da), ts.P(a + 0.12, lb, yb + h - THK - db), ts.P(a - 0.12, lb, yb + h - THK - db), down);
+    }
+  }
   // slim struts in V pairs down to the roof
   thin.color(0xd9dcdf).mat(0.3, 0.8, 0, 1);
   for (let s = S0 + 10; s < S1 - 8; s += 24) {
-    for (const [l, y] of [[F + 3, T + 5.55], [BB - 4, T + 5.3]]) {
+    for (const l of [F + 3, BB - 4]) {
+      // (the blade's height over this line, from the profile)
+      let y = prof[0][1];
+      for (let k = 0; k < prof.length - 1; k++)
+        if (l >= prof[k][0] && l <= prof[k + 1][0]) y = prof[k][1] + ((prof[k + 1][1] - prof[k][1]) * (l - prof[k][0])) / (prof[k + 1][0] - prof[k][0]);
       const top = ts.P(s, l, y + swoop(s) - THK);
       beamWorld(thin, ts.P(s - 3, l, T), top, 0.22);
       beamWorld(thin, ts.P(s + 3, l, T), top, 0.22);
     }
+  }
+}
+
+// ------------------------------------------------------------------ end walls
+
+/**
+ * The building's two end walls are seen head-on down the straight and the pit lane: not a blank
+ * slab but a stair/lift core with a full-height glazed slot, the floor slabs read as dark
+ * recessed bands, and vertical cladding fins between them.
+ */
+function buildEndWalls(p: PitPlan, ts: TrackSpace, o: BuildingOut) {
+  const { solid, glass } = o;
+  const F = L.front, BB = L.bldgBack;
+  const fr = new Frame();
+  const cw = F + 0.8;
+  for (const [sE, dir] of [[p.bldgS0 - 0.81, -1], [p.bldgS1 + 0.81, 1]] as [number, -1 | 1][]) {
+    // slab edges: dark shadow-gap bands at each floor
+    solid.color(0x2b2e32).mat(0.7, 0.2, 0, 1);
+    // (either side of the big print board in the middle)
+    const mid = (cw + BB) / 2;
+    for (const y of [H.slab1, H.slab2, H.roof])
+      for (const [la, lb] of [[cw, mid - 7.2], [mid + 7.2, BB]]) {
+        fr.at(ts, sE + dir * 0.06, (la + lb) / 2, 0);
+        fr.box(solid, 0, y + 0.2, 0, 0.12, 0.42, lb - la);
+      }
+    // vertical fins across the upper floors (the print board sits in the middle third)
+    solid.color(0xd9dbdc).mat(0.55, 0.15, 0, 1);
+    for (let l = cw + 1.2; l < BB - 0.8; l += 1.8) {
+      const mid = (cw + BB) / 2;
+      if (Math.abs(l - mid) < 7.6) continue;
+      fr.at(ts, sE + dir * 0.18, l, 0);
+      fr.box(solid, 0, (H.floor1 + H.roof) / 2, 0, 0.36, H.roof - H.floor1, 0.12);
+    }
+    // the stair core's glazed slot, full height, at the paddock corner
+    const l0 = BB - 3.2, l1 = BB - 1.4;
+    const A = ts.P(sE + dir * 0.02, l0, 0.4), B = ts.P(sE + dir * 0.02, l1, 0.4), C = ts.P(sE + dir * 0.02, l1, H.roof - 0.3), D = ts.P(sE + dir * 0.02, l0, H.roof - 0.3);
+    const out = ts.P(sE + dir, l0, 0).sub(ts.P(sE, l0, 0));
+    glass.quad(A, B, C, D, out, l0, l1, A.y, C.y, 3);
   }
 }
 
