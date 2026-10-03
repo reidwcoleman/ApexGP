@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { WorldMap } from './worldmap.ts';
 import { fbm2, hash2i, rng, smoothstep } from './noise.ts';
 import { fieldWarp } from './textures.ts';
-import { buildTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
-import { bakeImpostors, createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
+import { buildTreeKit, PROTO_INFO, SPECIES_PROTOS, whenTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
+import { createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
 import type { Layout } from './layout.ts';
 import { spielbergSpecies } from './venues/spielberg.ts';
 import { hungaroringSpecies } from './venues/hungaroringLand.ts';
@@ -18,12 +18,19 @@ import { hungaroringSpecies } from './venues/hungaroringLand.ts';
  * woodland edge (hazel/bramble understorey and young trees in front of the
  * mature ones), plane-tree avenues and rows of Lombardy poplars.
  *
- * Rendering (≈ 3 draw calls + shadows):
+ * The trees are Poly Haven's scanned trees, baked offline (tools/bake_trees.mjs → treeproto.ts);
+ * the far woods are placed sparser with bigger trees (same canopy cover, half the instances).
+ *
+ * Rendering (≈ 2 draw calls + shadows):
  *   near  one BatchedMesh with every prototype's LOD0/LOD1; only trees within
- *         ~120 m of the circuit are in it, and only those within ~180 m of the
- *         camera are visible (LOD0 < 70 m). Casts leafy shadows.
- *   far   one instanced impostor card per tree (all of them), cross-faded with
- *         the 3D tree by a matched dither between 158 and 182 m.
+ *         ~125 m of the circuit are in it, only those within the 3D range of the
+ *         camera (94 m on High) visible, sorted front to back (LOD0 < 34 m).
+ *         Casts leafy shadows.
+ *   far   one instanced impostor card per tree (all of them, nearest the circuit
+ *         first), showing the scan's baked frames, cross-faded with the 3D tree by
+ *         a matched dither over the last 10 m of the 3D range.
+ * Both are built once the baked files have arrived (they load at start-up, so
+ * normally before the scenery build reaches the trees).
  */
 
 export interface VegetationBuild {
@@ -54,6 +61,11 @@ interface Tree {
 }
 
 const fract = (x: number) => x - Math.floor(x);
+/** the scans' leaf colour → the footage's: broadleaf a deeper, less yellow olive, spruce near-black
+ *  blue-green, the (pale Searsia) bushes darker */
+const BROAD_K = new THREE.Color(0.74, 0.9, 0.8);
+const SPRUCE_K = new THREE.Color(0.3, 0.45, 0.4);
+const SHRUB_K = new THREE.Color(0.56, 0.7, 0.6);
 const NEAR_BAND = 125; // trees closer than this to the circuit get a 3D version
 const R3D = 170;
 const LOD0 = 72;
@@ -67,15 +79,18 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     tl = n;
   };
   const kit = buildTreeKit();
-  lap('kit');
-  Object.assign(timings, kit.timings);
   const r = rng(424242);
   const trees: Tree[] = [];
   const S = map.SQUARE;
   const track = map.track;
 
+  // the flat umbrella crowns (Burkea scan) stand in for the dry-country trees: Abu Dhabi's ghaf and
+  // acacia, Texas mesquite, Albert Park's gums, São Paulo's tipuanas, a few in Mexico City
+  const UMBRELLA: Partial<Record<string, number>> = { yasmarina: 1, austin: 0.4, melbourne: 0.45, interlagos: 0.35, mexico: 0.25 };
   const pick = (sp: SpeciesId, h: number) => {
-    const list = kit.bySpecies[sp];
+    const u = UMBRELLA[map.venue] ?? 0;
+    if (u > 0 && (sp === 'oak' || sp === 'plane' || sp === 'chestnut') && fract(h * 13.7) < u) sp = 'umbrella';
+    const list = SPECIES_PROTOS[sp];
     return list[Math.floor(h * list.length) % list.length];
   };
   const tintFor = (sp: SpeciesId, h: number, h2: number, h3 = fract(h * 7.31 + h2 * 3.17)) => {
@@ -84,7 +99,12 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const j = (h - 0.5) * 0.24;
     const hue = (h3 - 0.5) * 2;
     const c = new THREE.Color((1 + j) * (1 + hue * 0.1), (1 + j * 0.9) * (1 + hue * 0.03), (1 + j * 0.5) * (1 - hue * 0.14));
-    if (sp === 'spruce') c.multiplyScalar(0.92 + h3 * 0.18);
+    // (the scans' leaf photos are bright, fresh: a real spruce is near-black blue-green from any
+    // distance, and broadleaf woods read as a dark olive mass in the footage)
+    // (scan albedo, linear: broadleaf ≈ 0.1, 0.12, 0.04 — olive, R ≈ G; spruce the same; the bushes 0.18)
+    if (sp === 'spruce') c.multiply(SPRUCE_K).multiplyScalar(0.92 + h3 * 0.18);
+    else if (sp === 'shrub') c.multiply(SHRUB_K);
+    else c.multiply(BROAD_K);
     // São Paulo in spring (November): deep, glossy tropical greens, nothing turning
     if (map.venue === 'interlagos') return c.multiply(new THREE.Color(0.9, 1.06, 0.84));
     // a few trees already turning (September): planes go yellow-brown, chestnuts brown
@@ -177,8 +197,11 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // ---------------------------------------------------------------- the woods (jittered grid)
   {
     const bb = map.A.bb;
+    // (the far woods are drawn with fewer, bigger trees: the same canopy cover — crown area grows
+    // with the square of the scale — from half the instances; at that range nobody counts trunks)
     for (let pass = 0; pass < 3; pass++) {
-      const C = pass === 0 ? 8.6 : pass === 1 ? 12 : 17;
+      const C = pass === 0 ? 8.6 : pass === 1 ? 15 : 24;
+      const big = pass === 0 ? 1 : pass === 1 ? 1.18 : 1.45;
       // pass 0 only needs the circuit's bounding box (+ its 360 m reach)
       const X0 = pass === 0 ? Math.max(S.x0 + 40, Math.floor((bb.x0 - 380) / C) * C) : S.x0 + 40;
       const X1 = pass === 0 ? Math.min(S.x1 - 40, bb.x1 + 380) : S.x1 - 40;
@@ -205,7 +228,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
           // lone trees on lawns grow bigger; young trees mix into the woods
           const lone = f < 0.35 ? 1.12 : 1;
           const young = h2 > 0.86 ? 0.62 + h2 * 0.2 : 1;
-          add(sp, px, pz, (0.84 + hash2i(ix, iz, 19) * 0.32) * lone * young * (pass === 2 ? 1.1 : 1), h / Math.max(f * keep, 1e-3), h2);
+          add(sp, px, pz, (0.84 + hash2i(ix, iz, 19) * 0.32) * lone * young * big, h / Math.max(f * keep, 1e-3), h2);
         }
     }
   }
@@ -241,7 +264,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     }
   }
   // scattered understorey inside the woods near the circuit
-  for (let k = 0; k < 5000; k++) {
+  // (half what it was: under the canopy most of it was never seen)
+  for (let k = 0; k < 2500; k++) {
     const i = Math.floor(r() * track.n);
     const side = r() < 0.5 ? -1 : 1;
     const lat = side * (track.barrierAt(i, side) + 8 + r() * 70);
@@ -364,86 +388,14 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.distToTrack(t.x, t.z) < NEAR_BAND) nearIdx.push(i);
   }
   const isNear = new Uint8Array(trees.length);
-  for (const i of nearIdx) isNear[i] = 1;
+  // Conifers near the circuit: the impostor IS the tree (a spruce is a near-symmetric cone, and the
+  // baked frames keep its silhouette, which a cloud of camera-facing leaf cards loses); the 3D
+  // version still draws into the shadow maps only (flagged in its instance colour, treeMaterial).
+  const conifer = new Set(SPECIES_PROTOS.spruce);
+  for (const i of nearIdx) isNear[i] = conifer.has(trees[i].proto) ? 0 : 1;
+  const SHADOW_ONLY = 1000;
 
-  // BatchedMesh
-  let maxV = 0, maxI = 0;
-  for (const p of kit.protos)
-    for (const g of p.lods) {
-      maxV += g.attributes.position.count;
-      maxI += g.index!.count;
-    }
-  const mat = treeMaterial(kit, uniforms);
-  const bm = new THREE.BatchedMesh(Math.max(1, nearIdx.length), maxV, maxI, mat);
-  bm.name = 'trees_near';
-  const geoIds: number[][] = kit.protos.map((p) => p.lods.map((g) => bm.addGeometry(g)));
-  const m4 = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const upA = new THREE.Vector3(0, 1, 0);
-  const sv = new THREE.Vector3();
-  const pv = new THREE.Vector3();
-  const nearInst: number[] = [];
-  for (const i of nearIdx) {
-    const t = trees[i];
-    const id = bm.addInstance(geoIds[t.proto][1]);
-    q.setFromAxisAngle(upA, t.rot);
-    sv.set(t.s * (t.flip ? -1 : 1), t.s * (0.94 + ((t.rot * 13.7) % 1) * 0.12), t.s);
-    pv.set(t.x, t.y, t.z);
-    m4.compose(pv, q, sv);
-    bm.setMatrixAt(id, m4);
-    bm.setColorAt(id, t.tint);
-    bm.setVisibleAt(id, false);
-    nearInst.push(id);
-  }
-  bm.perObjectFrustumCulled = true;
-  bm.sortObjects = false;
-  bm.castShadow = true;
-  bm.receiveShadow = true;
-  bm.customDepthMaterial = treeDepthMaterial(kit, uniforms);
-  bm.computeBoundingBox();
-  bm.computeBoundingSphere();
-  bm.frustumCulled = false;
-  bm.renderOrder = -1;
-  group.add(bm);
-
-  lap('batch');
-  // impostors
-  const atlas = bakeImpostors(renderer, kit, 512);
-  lap('bake');
-  const base = new THREE.InstancedBufferGeometry();
-  base.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0], 3));
-  base.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
-  base.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
-  base.setIndex([0, 1, 2, 0, 2, 3]);
-  // small shrubs don't matter beyond the 3D range, but the big understorey bushes
-  // hide the bare trunks of the woodland edge when seen from afar
-  const shrubSet = new Set(kit.bySpecies.shrub);
-  const impList: number[] = [];
-  for (let i = 0; i < trees.length; i++) if (!shrubSet.has(trees[i].proto) || trees[i].s >= 1.1) impList.push(i);
-  const N = impList.length;
-  const iPos = new Float32Array(N * 4);
-  const iInfo = new Float32Array(N * 4);
-  const iTint = new Float32Array(N * 3);
-  impList.forEach((ti, i) => {
-    const t = trees[ti];
-    iPos.set([t.x, t.y, t.z, t.s], i * 4);
-    iInfo.set([t.proto, t.flip ? 1 : 0, isNear[ti], 0], i * 4);
-    iTint.set([t.tint.r, t.tint.g, t.tint.b], i * 3);
-  });
-  base.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 4));
-  base.setAttribute('iInfo', new THREE.InstancedBufferAttribute(iInfo, 4));
-  base.setAttribute('iTint', new THREE.InstancedBufferAttribute(iTint, 3));
-  base.instanceCount = N;
-  base.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
-  const imp = new THREE.Mesh(base, impostorMaterial(atlas, uniforms));
-  imp.name = 'trees_impostors';
-  imp.frustumCulled = false;
-  imp.castShadow = false;
-  imp.receiveShadow = false;
-  imp.renderOrder = 1;
-  group.add(imp);
-
-  // ---------------------------------------------------------------- LOD manager (cells of 64 m)
+  // LOD manager state (cells of 64 m over the near trees)
   const CELL = 64;
   const cells = new Map<number, number[]>();
   nearIdx.forEach((ti, k) => {
@@ -464,13 +416,109 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   let frames = 0;
   let reach = R3D + 16;
   let lod0 = LOD0;
+  // (filled once the baked trees are in: whenTreeKit below)
+  let bm: THREE.BatchedMesh | null = null;
+  let geoIds: number[][] = [];
+  const nearInst: number[] = [];
+
+  /** the GPU side, as soon as the baked prototypes are here (normally long before: they load at start-up) */
+  const buildRender = () => {
+    if (!kit.ready) return;
+    const t0 = performance.now();
+    // BatchedMesh
+    let maxV = 0, maxI = 0;
+    for (const p of kit.protos)
+      for (const g of p.lods) {
+        maxV += g.attributes.position.count;
+        maxI += g.index!.count;
+      }
+    const b = new THREE.BatchedMesh(Math.max(1, nearIdx.length), maxV, maxI, treeMaterial(kit, uniforms));
+    b.name = 'trees_near';
+    geoIds = kit.protos.map((p) => p.lods.map((g) => b.addGeometry(g)));
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const upA = new THREE.Vector3(0, 1, 0);
+    const sv = new THREE.Vector3();
+    const pv = new THREE.Vector3();
+    for (const i of nearIdx) {
+      const t = trees[i];
+      const id = b.addInstance(geoIds[t.proto][1]);
+      q.setFromAxisAngle(upA, t.rot);
+      sv.set(t.s * (t.flip ? -1 : 1), t.s * (0.94 + fract(t.rot * 13.7) * 0.12), t.s);
+      pv.set(t.x, t.y, t.z);
+      m4.compose(pv, q, sv);
+      b.setMatrixAt(id, m4);
+      b.setColorAt(id, conifer.has(t.proto) ? new THREE.Color(t.tint.r + SHADOW_ONLY, t.tint.g, t.tint.b) : t.tint);
+      b.setVisibleAt(id, false);
+      nearInst.push(id);
+    }
+    b.perObjectFrustumCulled = true;
+    // (front-to-back: the leaf cards' alpha test is the cost, and what's hidden behind a nearer
+    // crown then fails the depth test before shading)
+    b.sortObjects = true;
+    b.castShadow = true;
+    b.receiveShadow = true;
+    b.customDepthMaterial = treeDepthMaterial(kit, uniforms);
+    b.computeBoundingBox();
+    b.computeBoundingSphere();
+    b.frustumCulled = false;
+    b.renderOrder = -1;
+    group.add(b);
+    bm = b;
+    // impostors
+    const base = new THREE.InstancedBufferGeometry();
+    base.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 0, -0.5, 1, 0], 3));
+    base.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+    base.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    base.setIndex([0, 1, 2, 0, 2, 3]);
+    // small shrubs don't matter beyond the 3D range, but the big understorey bushes
+    // hide the bare trunks of the woodland edge when seen from afar
+    const shrubSet = new Set(SPECIES_PROTOS.shrub);
+    const impList: number[] = [];
+    for (let i = 0; i < trees.length; i++) if (!shrubSet.has(trees[i].proto) || trees[i].s >= 1.1) impList.push(i);
+    // nearest the circuit first: the camera is always on it, so this is roughly front-to-back
+    // order for free — the woods behind fail the depth test instead of being shaded and overdrawn
+    const dTrack = new Float32Array(trees.length);
+    for (const i of impList) dTrack[i] = map.distToTrack(trees[i].x, trees[i].z);
+    impList.sort((a, b) => dTrack[a] - dTrack[b]);
+    const N = impList.length;
+    const iPos = new Float32Array(N * 4);
+    const iInfo = new Float32Array(N * 4);
+    const iTint = new Float32Array(N * 3);
+    impList.forEach((ti, i) => {
+      const t = trees[ti];
+      iPos.set([t.x, t.y, t.z, t.s], i * 4);
+      iInfo.set([t.proto, t.flip ? 1 : 0, isNear[ti], t.rot], i * 4);
+      iTint.set([t.tint.r, t.tint.g, t.tint.b], i * 3);
+    });
+    base.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 4));
+    base.setAttribute('iInfo', new THREE.InstancedBufferAttribute(iInfo, 4));
+    base.setAttribute('iTint', new THREE.InstancedBufferAttribute(iTint, 3));
+    base.instanceCount = N;
+    base.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+    const imp = new THREE.Mesh(base, impostorMaterial(kit, uniforms));
+    imp.name = 'trees_impostors';
+    imp.frustumCulled = false;
+    imp.castShadow = false;
+    imp.receiveShadow = false;
+    imp.renderOrder = 1;
+    group.add(imp);
+    timings.render = Math.round(performance.now() - t0);
+    timings.impostors = N;
+    last.set(1e9, 0, 0);
+  };
+  whenTreeKit(buildRender);
+  lap('batch');
+
   // 3D range per quality level: [impostor fade start, fade end, LOD0 distance]
   // (perf: 3D trees are the scenery's main GPU cost, in the camera and both shadow cascades; High was
   // [122, 142, 56] — impostors take over a little sooner now)
   // (leaf cards face the camera in the 3D trees and the impostors alike, so the hand-over can
   // come closer: fewer 3D trees on screen, the main tree cost)
   // (a 10 m hand-over: fewer trees mid-dither at once)
-  const DETAIL = { low: [62, 72, 28], medium: [82, 92, 36], high: [94, 104, 40], ultra: [140, 150, 60] } as const;
+  // (the impostors are renders of the real scans now, close to the 3D trees in look: they take over
+  // ~10 m sooner, the cheapest frame time there is)
+  const DETAIL = { low: [54, 64, 24], medium: [72, 82, 30], high: [84, 94, 34], ultra: [130, 140, 54] } as const;
   const setDetail = (q: keyof typeof DETAIL) => {
     const [f0, f1, l0] = DETAIL[q];
     uniforms.uFade.value.set(f0, f1);
@@ -481,6 +529,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   const update = (camera: THREE.Camera, elapsed: number) => {
     uniforms.uTime.value = elapsed;
     uniforms.uFrame.value = (uniforms.uFrame.value + 1) % 64;
+    if (!bm) return;
     camera.getWorldPosition(cam);
     frames++;
     if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0) return;
@@ -520,7 +569,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     next = t;
   };
 
-  const shade = trees.map((t) => ({ x: t.x, z: t.z, r: kit.protos[t.proto].crownR * t.s }));
+  const shade = trees.map((t) => ({ x: t.x, z: t.z, r: PROTO_INFO[t.proto].crownR * t.s }));
   return { group, uniforms, update, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings };
 }
 

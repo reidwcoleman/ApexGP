@@ -1,0 +1,351 @@
+{
+ "version": 1,
+ "impostor": {
+  "frames": 8,
+  "rows": 12,
+  "cell": 256
+ },
+ "leaf": {
+  "cols": 8,
+  "rows": 8,
+  "cell": 256
+ },
+ "protos": [
+  {
+   "id": "jacaranda",
+   "species": "broad",
+   "height": 21,
+   "radius": 12.826,
+   "crownR": 11.75,
+   "crownY": 11.713,
+   "W": 26.677,
+   "Hc": 21.197,
+   "lods": [
+    {
+     "v": 1164,
+     "i": 3108,
+     "off": 0,
+     "bytes": 52780,
+     "wood": 736,
+     "cards": 150
+    },
+    {
+     "v": 486,
+     "i": 1314,
+     "off": 52780,
+     "bytes": 22072,
+     "wood": 334,
+     "cards": 52
+    }
+   ]
+  },
+  {
+   "id": "dome",
+   "species": "broad",
+   "height": 17,
+   "radius": 15.954,
+   "crownR": 10.689,
+   "crownY": 11.231,
+   "W": 33.184,
+   "Hc": 17.16,
+   "lods": [
+    {
+     "v": 2028,
+     "i": 3777,
+     "off": 74852,
+     "bytes": 88680,
+     "wood": 999,
+     "cards": 130
+    },
+    {
+     "v": 357,
+     "i": 984,
+     "off": 163532,
+     "bytes": 16252,
+     "wood": 236,
+     "cards": 46
+    }
+   ]
+  },
+  {
+   "id": "gnarl",
+   "species": "broad",
+   "height": 18,
+   "radius": 9.062,
+   "crownR": 9.112,
+   "crownY": 9.667,
+   "W": 18.85,
+   "Hc": 18.169,
+   "lods": [
+    {
+     "v": 1825,
+     "i": 3771,
+     "off": 179784,
+     "bytes": 80548,
+     "wood": 997,
+     "cards": 130
+    },
+    {
+     "v": 300,
+     "i": 906,
+     "off": 260332,
+     "bytes": 13816,
+     "wood": 210,
+     "cards": 46
+    }
+   ]
+  },
+  {
+   "id": "umbrella",
+   "species": "umbrella",
+   "height": 11,
+   "radius": 6.503,
+   "crownR": 4.351,
+   "crownY": 7.289,
+   "W": 13.527,
+   "Hc": 11.103,
+   "lods": [
+    {
+     "v": 1709,
+     "i": 3336,
+     "off": 274148,
+     "bytes": 75036,
+     "wood": 892,
+     "cards": 110
+    },
+    {
+     "v": 321,
+     "i": 846,
+     "off": 349184,
+     "bytes": 14536,
+     "wood": 202,
+     "cards": 40
+    }
+   ]
+  },
+  {
+   "id": "poplar",
+   "species": "poplar",
+   "height": 26,
+   "radius": 7.32,
+   "crownR": 4.904,
+   "crownY": 17.177,
+   "W": 15.226,
+   "Hc": 26.244,
+   "lods": [
+    {
+     "v": 1640,
+     "i": 2778,
+     "off": 363720,
+     "bytes": 71160,
+     "wood": 686,
+     "cards": 120
+    },
+    {
+     "v": 313,
+     "i": 753,
+     "off": 434880,
+     "bytes": 14032,
+     "wood": 163,
+     "cards": 44
+    }
+   ]
+  },
+  {
+   "id": "spruce_a",
+   "species": "spruce",
+   "height": 24,
+   "radius": 5.472,
+   "crownR": 5.582,
+   "crownY": 12.76,
+   "W": 11.382,
+   "Hc": 24.226,
+   "lods": [
+    {
+     "v": 1121,
+     "i": 2565,
+     "off": 448912,
+     "bytes": 49976,
+     "wood": 555,
+     "cards": 150
+    },
+    {
+     "v": 382,
+     "i": 681,
+     "off": 498888,
+     "bytes": 16648,
+     "wood": 123,
+     "cards": 52
+    }
+   ]
+  },
+  {
+   "id": "fir_a",
+   "species": "spruce",
+   "height": 28,
+   "radius": 4.631,
+   "crownR": 4.794,
+   "crownY": 18.33,
+   "W": 9.632,
+   "Hc": 28.263,
+   "lods": [
+    {
+     "v": 1532,
+     "i": 3549,
+     "off": 515536,
+     "bytes": 68384,
+     "wood": 883,
+     "cards": 150
+    },
+    {
+     "v": 481,
+     "i": 972,
+     "off": 583920,
+     "bytes": 21188,
+     "wood": 220,
+     "cards": 52
+    }
+   ]
+  },
+  {
+   "id": "fir_b",
+   "species": "spruce",
+   "height": 25,
+   "radius": 5.064,
+   "crownR": 5.189,
+   "crownY": 16.089,
+   "W": 10.533,
+   "Hc": 25.235,
+   "lods": [
+    {
+     "v": 1413,
+     "i": 3390,
+     "off": 605108,
+     "bytes": 63304,
+     "wood": 850,
+     "cards": 140
+    },
+    {
+     "v": 468,
+     "i": 915,
+     "off": 668412,
+     "bytes": 20556,
+     "wood": 209,
+     "cards": 48
+    }
+   ]
+  },
+  {
+   "id": "fir_c",
+   "species": "spruce",
+   "height": 22,
+   "radius": 4.962,
+   "crownR": 4.648,
+   "crownY": 16.305,
+   "W": 10.322,
+   "Hc": 22.207,
+   "lods": [
+    {
+     "v": 1199,
+     "i": 2997,
+     "off": 688968,
+     "bytes": 53960,
+     "wood": 739,
+     "cards": 130
+    },
+    {
+     "v": 415,
+     "i": 876,
+     "off": 742928,
+     "bytes": 18356,
+     "wood": 200,
+     "cards": 46
+    }
+   ]
+  },
+  {
+   "id": "shrub_a",
+   "species": "shrub",
+   "height": 3.4,
+   "radius": 1.527,
+   "crownR": 1.341,
+   "crownY": 1.807,
+   "W": 3.176,
+   "Hc": 3.432,
+   "lods": [
+    {
+     "v": 573,
+     "i": 984,
+     "off": 761284,
+     "bytes": 24892,
+     "wood": 276,
+     "cards": 26
+    },
+    {
+     "v": 187,
+     "i": 300,
+     "off": 786176,
+     "bytes": 8084,
+     "wood": 80,
+     "cards": 10
+    }
+   ]
+  },
+  {
+   "id": "shrub_b",
+   "species": "shrub",
+   "height": 2.9,
+   "radius": 1.176,
+   "crownR": 1.084,
+   "crownY": 1.563,
+   "W": 2.446,
+   "Hc": 2.927,
+   "lods": [
+    {
+     "v": 459,
+     "i": 804,
+     "off": 794260,
+     "bytes": 19972,
+     "wood": 224,
+     "cards": 22
+    },
+    {
+     "v": 147,
+     "i": 240,
+     "off": 814232,
+     "bytes": 6364,
+     "wood": 62,
+     "cards": 9
+    }
+   ]
+  },
+  {
+   "id": "shrub_c",
+   "species": "shrub",
+   "height": 2.5,
+   "radius": 1.28,
+   "crownR": 1.026,
+   "crownY": 1.379,
+   "W": 2.662,
+   "Hc": 2.524,
+   "lods": [
+    {
+     "v": 396,
+     "i": 786,
+     "off": 820596,
+     "bytes": 17416,
+     "wood": 222,
+     "cards": 20
+    },
+    {
+     "v": 134,
+     "i": 222,
+     "off": 838012,
+     "bytes": 5808,
+     "wood": 58,
+     "cards": 8
+    }
+   ]
+  }
+ ]
+}

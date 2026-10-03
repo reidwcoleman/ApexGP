@@ -12,10 +12,9 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  *                    colour), crown-depth AO, rain gloss, and a dithered fade-out
  *                    at the 3D → impostor distance.
  *  treeDepthMaterial()  the same wind + leaf alpha for the shadow map.
- *  bakeImpostors()   renders every prototype once (albedo, view-space normal + AO)
- *                    into two atlases at build time.
- *  impostorMaterial()   camera-facing cards that relight the baked normals, fade
- *                    in exactly where the 3D tree fades out.
+ *  impostorMaterial()   camera-facing cards showing the scanned tree's baked frames (8 views
+ *                    around it, blended by the camera's bearing), relit from the baked
+ *                    normals; they fade in exactly where the 3D tree fades out.
  */
 
 export interface TreeUniforms {
@@ -154,11 +153,12 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       uLeafMap: { value: kit.leafMap },
       uLeafN: { value: kit.leafNormal },
       uBark: { value: kit.bark },
+      uLeafSize: { value: kit.leafSize },
       uSunW: u.uSunW,
       uLeafFill: u.uLeafFill,
     });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\nvarying float vLeafL;\nvarying float vAOL;\nuniform vec3 uSunW;`)
+      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\nvarying float vLeafL;\nvarying float vAOL;\nvarying float vShadowOnly;\nuniform vec3 uSunW;`)
       .replace('#include <shadowmap_vertex>', `#ifdef USE_SHADOWMAP\n  worldPosition.xyz += uSunW * ( 0.45 * step( 0.5, aTree.y ) );\n#endif\n#include <shadowmap_vertex>`)
       .replace(
         '#include <begin_vertex>',
@@ -182,6 +182,14 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
   vLeafL = step( 0.5, aTree.y );
   vAOL = aTree.z;
   vFadeD = distance( cameraPosition, ip );
+  // (shadow-only instance, flagged in its instance colour: out of the camera's view entirely)
+  vShadowOnly = 0.0;
+  #ifdef USE_BATCHING_COLOR
+  if ( getBatchingColor( getIndirectIndex( gl_DrawID ) ).r > 20.0 ) {
+    vShadowOnly = 1.0;
+    transformed = vec3( 0.0, -1e5, 0.0 );
+  }
+  #endif
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
@@ -191,12 +199,14 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
 uniform sampler2D uLeafMap;
 uniform sampler2D uLeafN;
 uniform sampler2D uBark;
+uniform vec2 uLeafSize;
 uniform vec2 uFade;
 uniform float uWet;
 uniform vec3 uLeafFill;
 varying vec4 vTree;
 varying vec2 vTUv;
 varying float vFadeD;
+varying float vShadowOnly;
 ${GET_TANGENT_FRAME}`,
       )
       .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT}`)
@@ -211,39 +221,31 @@ material.specularF90 = mix( material.specularF90, 0.22, leafK );`,
         '#include <map_fragment>',
         `
 float leafK = step( 0.5, vTree.y );
+// (a tree drawn only into the shadow maps — vegetation.ts conifers)
+if ( vShadowOnly > 0.5 ) discard;
 if ( uFade.y > 0.0 ) {
   float f = smoothstep( uFade.x, uFade.y, vFadeD );
   if ( f > ignF( gl_FragCoord.xy ) ) discard;
 }
 if ( leafK > 0.5 ) {
   vec4 lt = texture2D( uLeafMap, vTUv );
-  vec2 dx = dFdx( vTUv * vec2( 2048.0, 1024.0 ) ), dy = dFdy( vTUv * vec2( 2048.0, 1024.0 ) );
+  vec2 dx = dFdx( vTUv * uLeafSize ), dy = dFdy( vTUv * uLeafSize );
   float lod = max( 0.0, 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ) );
   // cards turning edge-on thin out instead of showing smeared leaves
   vec3 fN = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
   float edgeOn = abs( dot( fN, normalize( vViewPosition ) ) );
   // (a little more sky through the crowns: real foliage is full of holes, not a solid lump)
-  float thr = 0.57 + 0.5 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
+  float thr = 0.5 + 0.5 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
   if ( lt.a * ( 1.0 + lod * 0.32 ) < thr ) discard;
-  // foliage as camera footage shows it: a dark olive mass, not a bright game green (real leaf albedo
-  // sits near 0.05–0.1; the atlas was painted brighter and more saturated than that)
+  // foliage as camera footage shows it: a dark olive mass, not a bright game green (the clumps are the
+  // scans' own leaves; a touch of desaturation and warmth matches them to the graded footage)
   vec3 lc = lt.rgb;
-  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.8 ) * vec3( 0.9, 0.86, 0.74 );
+  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.8 ) * vec3( 0.93, 0.92, 0.84 );
   diffuseColor.rgb *= lc;
 } else {
+  // the scan's own bark colour is in the vertex colour; the bark tile adds the detail around it
   vec4 bk = texture2D( uBark, vTUv );
-  float alb = 0.45 + bk.a * 0.75;
-  if ( vTree.y < -0.5 ) {
-    // plane tree: flaking bark, cream / olive / grey camouflage patches
-    float m = texture2D( uBark, vTUv * vec2( 0.23, 0.17 ) + vec2( 0.31, 0.62 ) ).a;
-    float m2 = texture2D( uBark, vTUv * vec2( 0.51, 0.33 ) + vec2( 0.7, 0.1 ) ).a;
-    vec3 cream = vec3( 0.37, 0.35, 0.27 ), olive = vec3( 0.19, 0.19, 0.13 ), grey = vec3( 0.28, 0.27, 0.23 );
-    vec3 pc = mix( olive, grey, smoothstep( 0.45, 0.6, m2 ) );
-    pc = mix( pc, cream, smoothstep( 0.58, 0.64, m ) );
-    diffuseColor.rgb = pc * ( 0.62 + 0.26 * bk.a );
-  } else {
-    diffuseColor.rgb *= alb;
-  }
+  diffuseColor.rgb *= 0.45 + bk.a * 1.1;
   diffuseColor.rgb *= mix( 1.0, 0.55, uWet );
 }
 `,
@@ -255,11 +257,10 @@ if ( leafK > 0.5 ) {
   vec3 mapN;
   if ( vTree.y > 0.5 ) {
     mapN = texture2D( uLeafN, vTUv ).xyz * 2.0 - 1.0;
-    mapN.y = -mapN.y;
     mapN.xy *= 0.85;
   } else {
     mapN = texture2D( uBark, vTUv ).xyz * 2.0 - 1.0;
-    mapN.xy *= 1.4;
+    mapN.xy *= 1.2;
   }
   mat3 tbnT = treeTangentFrame( - vViewPosition, normal, vTUv );
   normal = normalize( tbnT * normalize( mapN ) );
@@ -281,7 +282,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v4';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v5';
   return mat;
 }
 
@@ -320,156 +321,21 @@ export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDept
 
 // ---------------------------------------------------------------- impostors
 
-export interface ImpostorAtlas {
-  albedo: THREE.Texture;
-  normal: THREE.Texture;
-  /** per prototype: (cell col, cell row, world size of the cell, 0) */
-  cells: THREE.Vector4[];
-  grid: number;
-  rts: THREE.WebGLRenderTarget[];
-}
-
-const BAKE_VERT = /* glsl */ `
-attribute vec4 aTree;
-attribute vec4 aCard;
-varying vec4 vTree;
-varying vec2 vTUv;
-varying vec3 vCol;
-varying vec3 vN;
-varying vec3 vVP;
-void main() {
-  vTree = aTree;
-  vTUv = uv;
-  vCol = color;
-  vN = normalize( normalMatrix * normal );
-  vec3 p = position;
-  if ( aCard.x != 0.0 || aCard.y != 0.0 ) {
-    vec3 camR = vec3( viewMatrix[ 0 ][ 0 ], viewMatrix[ 1 ][ 0 ], viewMatrix[ 2 ][ 0 ] );
-    vec3 camU = vec3( viewMatrix[ 0 ][ 1 ], viewMatrix[ 1 ][ 1 ], viewMatrix[ 2 ][ 1 ] );
-    vec2 od = vec2( dot( normal, camR ), dot( normal, camU ) );
-    float ol = length( od );
-    vec2 up2 = vec2( 0.0, 1.0 );
-    if ( ol > 1e-3 ) up2 = normalize( mix( up2, od / ol, smoothstep( 0.1, 0.6, ol ) * 0.7 ) );
-    float cr = cos( aCard.z ), sr = sin( aCard.z );
-    up2 = vec2( up2.x * cr - up2.y * sr, up2.x * sr + up2.y * cr );
-    vec2 off = vec2( up2.y, -up2.x ) * aCard.x + up2 * aCard.y;
-    p += camR * off.x + camU * off.y;
-  }
-  vec4 mv = modelViewMatrix * vec4( p, 1.0 );
-  vVP = - mv.xyz;
-  gl_Position = projectionMatrix * mv;
-}
-`;
-
-const BAKE_FRAG = (mode: 'albedo' | 'normal') => /* glsl */ `
-uniform sampler2D uLeafMap;
-uniform sampler2D uLeafN;
-uniform sampler2D uBark;
-varying vec4 vTree;
-varying vec2 vTUv;
-varying vec3 vCol;
-varying vec3 vN;
-varying vec3 vVP;
-${GET_TANGENT_FRAME}
-void main() {
-  bool leaf = vTree.y > 0.5;
-  vec3 alb;
-  if ( leaf ) {
-    vec4 lt = texture2D( uLeafMap, vTUv );
-    if ( lt.a < 0.5 ) discard;
-    alb = lt.rgb;
-  } else {
-    vec4 bk = texture2D( uBark, vTUv );
-    alb = vec3( 0.45 + bk.a * 0.75 );
-    if ( vTree.y < -0.5 ) alb = vec3( 0.27, 0.26, 0.2 ) / max( vCol, vec3( 0.05 ) );
-  }
-  alb *= vCol;
-  ${
-    mode === 'albedo'
-      ? `gl_FragColor = vec4( sqrt( clamp( alb, 0.0, 1.0 ) ), 1.0 );`
-      : `
-  vec3 n = normalize( vN );
-  if ( ! leaf && ! gl_FrontFacing ) n = -n;
-  vec3 mapN = leaf ? texture2D( uLeafN, vTUv ).xyz * 2.0 - 1.0 : texture2D( uBark, vTUv ).xyz * 2.0 - 1.0;
-  if ( leaf ) { mapN.y = -mapN.y; mapN.xy *= 0.85; }
-  mat3 tbn = treeTangentFrame( - vVP, n, vTUv );
-  n = normalize( tbn * normalize( mapN ) );
-  gl_FragColor = vec4( n * 0.5 + 0.5, leaf ? vTree.z : 0.7 );`
-  }
-}
-`;
-
-export function bakeImpostors(renderer: THREE.WebGLRenderer, kit: TreeKit, cellPx = 512): ImpostorAtlas {
-  const n = kit.protos.length;
-  const grid = Math.ceil(Math.sqrt(n));
-  const size = grid * cellPx;
-  const mkRT = () =>
-    new THREE.WebGLRenderTarget(size, size, {
-      type: THREE.UnsignedByteType,
-      format: THREE.RGBAFormat,
-      generateMipmaps: true,
-      minFilter: THREE.LinearMipmapLinearFilter,
-      magFilter: THREE.LinearFilter,
-      depthBuffer: true,
-      colorSpace: THREE.NoColorSpace,
-    });
-  const rtA = mkRT();
-  const rtN = mkRT();
-  const uniforms = { uLeafMap: { value: kit.leafMap }, uLeafN: { value: kit.leafNormal }, uBark: { value: kit.bark } };
-  const matA = new THREE.ShaderMaterial({ vertexShader: BAKE_VERT, fragmentShader: BAKE_FRAG('albedo'), uniforms, vertexColors: true, side: THREE.DoubleSide });
-  const matN = new THREE.ShaderMaterial({ vertexShader: BAKE_VERT, fragmentShader: BAKE_FRAG('normal'), uniforms, vertexColors: true, side: THREE.DoubleSide });
-  const scene = new THREE.Scene();
-  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
-  const mesh = new THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>(new THREE.BufferGeometry(), matA);
-  mesh.frustumCulled = false;
-  scene.add(mesh);
-  const cells: THREE.Vector4[] = [];
-  const prevRT = renderer.getRenderTarget();
-  const prevClear = renderer.getClearColor(new THREE.Color());
-  const prevAlpha = renderer.getClearAlpha();
-  const prevAuto = renderer.autoClear;
-  renderer.autoClear = false;
-  const avg = kit.foliageAvg;
-  kit.protos.forEach((p: TreeProto, i: number) => {
-    const col = i % grid, row = Math.floor(i / grid);
-    const S = Math.max(p.radius * 2, p.height) * 1.04;
-    cells.push(new THREE.Vector4(col, row, S, 0));
-    cam.left = -S / 2;
-    cam.right = S / 2;
-    cam.bottom = -S * 0.02;
-    cam.top = S * 0.98;
-    cam.position.set(0, 0, 200);
-    cam.lookAt(0, 0, 0);
-    cam.updateProjectionMatrix();
-    mesh.geometry = p.lods[0];
-    for (const [rt, mat, clear] of [
-      [rtA, matA, [Math.sqrt(avg.r), Math.sqrt(avg.g), Math.sqrt(avg.b), 0]],
-      [rtN, matN, [0.5, 0.5, 1.0, 1.0]],
-    ] as [THREE.WebGLRenderTarget, THREE.ShaderMaterial, number[]][]) {
-      mesh.material = mat;
-      rt.viewport.set(col * cellPx, row * cellPx, cellPx, cellPx);
-      rt.scissor.set(col * cellPx, row * cellPx, cellPx, cellPx);
-      rt.scissorTest = true;
-      renderer.setRenderTarget(rt);
-      renderer.setClearColor(new THREE.Color(clear[0], clear[1], clear[2]), clear[3]);
-      renderer.clear(true, true, false);
-      renderer.render(scene, cam);
-    }
-  });
-  renderer.setRenderTarget(prevRT);
-  renderer.setClearColor(prevClear, prevAlpha);
-  renderer.autoClear = prevAuto;
-  matA.dispose();
-  matN.dispose();
-  rtA.texture.anisotropy = 4;
-  rtN.texture.anisotropy = 4;
-  return { albedo: rtA.texture, normal: rtN.texture, cells, grid, rts: [rtA, rtN] };
-}
-
-export function impostorMaterial(atlas: ImpostorAtlas, u: TreeUniforms): THREE.MeshStandardMaterial {
+/**
+ * Camera-facing cards showing the baked frames of the scanned tree (tools/bake_trees.mjs): eight
+ * views around it; the two frames either side of the camera's bearing (in the tree's own, rotated
+ * and maybe mirrored, frame) are blended, so a tree turns as you drive round it instead of
+ * following you. The baked normals are relit like the 3D trees; they fade in exactly where the 3D
+ * tree fades out.
+ *
+ * Instance attributes: iPos (x, y, z, scale), iInfo (prototype, mirrored, near (has a 3D tree), yaw),
+ * iTint (rgb).
+ */
+export function impostorMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.66, metalness: 0 });
-  const cells = atlas.cells.map((c) => c.clone());
-  while (cells.length < 24) cells.push(new THREE.Vector4());
+  // per prototype: (card width, card height (m), atlas row, 0)
+  const protos: THREE.Vector4[] = kit.protos.map((p: TreeProto, i: number) => new THREE.Vector4(p.W, p.Hc, kit.impRow[i], 0));
+  while (protos.length < 16) protos.push(new THREE.Vector4());
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uFade: u.uFade,
@@ -477,11 +343,12 @@ export function impostorMaterial(atlas: ImpostorAtlas, u: TreeUniforms): THREE.M
       uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
-      uImpA: { value: atlas.albedo },
-      uImpN: { value: atlas.normal },
-      uCells: { value: cells },
+      uImpA: { value: kit.impC },
+      uImpN: { value: kit.impN },
+      uProtos: { value: protos },
       uLeafFill: u.uLeafFill,
-      uGrid: { value: atlas.grid },
+      uImpGrid: { value: new THREE.Vector2(kit.frames, kit.impRows) },
+      uImpSize: { value: new THREE.Vector2(kit.frames * 256, kit.impRows * 256) },
     });
     sh.vertexShader = sh.vertexShader
       .replace(
@@ -490,18 +357,18 @@ export function impostorMaterial(atlas: ImpostorAtlas, u: TreeUniforms): THREE.M
 attribute vec4 iPos;
 attribute vec4 iInfo;
 attribute vec3 iTint;
-uniform vec4 uCells[ 24 ];
-uniform float uGrid;
+uniform vec4 uProtos[ 16 ];
+uniform vec2 uImpGrid;
 uniform vec2 uFade;
 uniform float uTime;
 uniform vec2 uWind;
-varying vec2 vIUv;
+varying vec4 vIUv;
+varying float vIW;
 varying vec3 vIR;
 varying vec3 vIU;
 varying vec3 vIF;
 varying vec3 vITint;
 varying float vIFade;
-varying float vIFlip;
 varying float vLeafL;
 varying float vAOL;`,
       )
@@ -516,8 +383,9 @@ varying float vAOL;`,
         '#include <begin_vertex>',
         `vec3 transformed;
 {
-  vec4 cell = uCells[ int( iInfo.x + 0.5 ) ];
-  float S = cell.z * iPos.w;
+  vec4 pr = uProtos[ int( iInfo.x + 0.5 ) ];
+  float S = pr.y * iPos.w;
+  float Wc = pr.x * iPos.w;
   vec3 P = iPos.xyz;
   vec3 toCam = cameraPosition - P;
   float horiz = max( length( toCam.xz ), 1e-3 );
@@ -534,14 +402,21 @@ varying float vAOL;`,
   float ph = dot( P.xz, vec2( 0.071, 0.053 ) );
   float sway = sin( uTime * 0.83 + ph ) * 0.12 * ( 0.55 + length( uWind ) * 0.1 );
   vec2 c = position.xy;
-  transformed = P + right * ( c.x * S ) + up * ( c.y * S ) + right * sway * c.y * c.y * S * 0.02;
+  transformed = P + right * ( c.x * Wc ) + up * ( c.y * S ) + right * sway * c.y * c.y * S * 0.02;
   if ( vIFade <= 0.0 ) transformed = vec3( 0.0, -1e5, 0.0 );
-  vIUv = ( cell.xy + vec2( c.x * flip + 0.5, c.y * 0.98 + 0.02 ) ) / uGrid;
+  // the camera's bearing in the tree's own frame (yaw undone, mirror undone) → the two frames around it
+  float az = ( atan( toCam.x, toCam.z ) - iInfo.w ) * flip;
+  float f = fract( az / 6.2831853 ) * uImpGrid.x;
+  float f0 = floor( f );
+  vIW = f - f0;
+  float f1 = mod( f0 + 1.0, uImpGrid.x );
+  float uu = c.x * flip + 0.5;
+  float vv = ( uImpGrid.y - 1.0 - pr.z + c.y * 0.98 + 0.02 ) / uImpGrid.y;
+  vIUv = vec4( ( f0 + uu ) / uImpGrid.x, vv, ( f1 + uu ) / uImpGrid.x, vv );
   vIR = right * flip;
   vIU = up;
   vIF = nrm;
   vITint = iTint;
-  vIFlip = flip;
   vLeafL = 1.0;
   vAOL = 1.0;
   objectNormal = nrm;
@@ -553,37 +428,42 @@ varying float vAOL;`,
         `#include <common>
 uniform sampler2D uImpA;
 uniform sampler2D uImpN;
+uniform vec2 uImpSize;
 uniform float uWet;
 uniform vec3 uLeafFill;
-varying vec2 vIUv;
+varying vec4 vIUv;
+varying float vIW;
 varying vec3 vIR;
 varying vec3 vIU;
 varying vec3 vIF;
 varying vec3 vITint;
 varying float vIFade;
-varying float vIFlip;
 ${GET_TANGENT_FRAME}`,
       )
       .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.5, 1.35, vAOL )', 'mix( 0.5, 1.35, gImpAO )')}`)
       .replace(
         '#include <map_fragment>',
         `
-vec4 ia = texture2D( uImpA, vIUv );
+vec4 ia0 = texture2D( uImpA, vIUv.xy );
+vec4 ia1 = texture2D( uImpA, vIUv.zw );
+vec4 ia = mix( ia0, ia1, vIW );
 {
-  vec2 dx = dFdx( vIUv * 2048.0 ), dy = dFdy( vIUv * 2048.0 );
+  vec2 dx = dFdx( vIUv.xy * uImpSize ), dy = dFdy( vIUv.xy * uImpSize );
   float lod = max( 0.0, 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ) );
   if ( ia.a * ( 1.0 + lod * 0.3 ) < 0.5 ) discard;
   if ( vIFade < 1.0 && vIFade <= ignF( gl_FragCoord.xy ) ) discard;
 }
-diffuseColor.rgb = ia.rgb * ia.rgb * vITint;
+// (sRGB atlas: the colour arrives linear)
+diffuseColor.rgb = ia.rgb * vITint;
 // (the same footage foliage tint as the 3D trees, so near and far match)
-diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.8 ) * vec3( 0.9, 0.86, 0.74 );
+diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.8 ) * vec3( 0.93, 0.92, 0.84 );
 `,
       )
       .replace(
         '#include <normal_fragment_maps>',
         `{
-  vec4 inr = texture2D( uImpN, vIUv );
+  // (the nearer frame's normals: lighting doesn't need the blend, and it saves a fetch per fragment)
+  vec4 inr = texture2D( uImpN, vIW < 0.5 ? vIUv.xy : vIUv.zw );
   vec3 nb = inr.xyz * 2.0 - 1.0;
   vec3 nW = normalize( vIR * nb.x + vIU * nb.y + vIF * nb.z );
   normal = normalize( ( viewMatrix * vec4( nW, 0.0 ) ).xyz );
@@ -600,6 +480,6 @@ diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.072
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-impostor-v2';
+  mat.customProgramCacheKey = () => 'apex-tree-impostor-v3';
   return mat;
 }
