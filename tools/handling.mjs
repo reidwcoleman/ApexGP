@@ -18,6 +18,7 @@ const flat = {
   project: (x, z) => ({ s: 500000 + z, lateral: -x, index: Math.floor(500000 + z) }),
   frame: () => ({ heading: 0 }),
   barrierAt: () => 1e9,
+  racingLineAt: () => 0,
 };
 flat.ux = new Proxy({}, { get: () => 0 });
 flat.uy = new Proxy({}, { get: () => 1 });
@@ -123,4 +124,111 @@ for (const tc of ['off', 'medium', 'full']) {
     t += DT;
   }
   console.log(`power   TC=${tc.padEnd(6)} max β ${(maxBeta * 57.3).toFixed(1)}°  wheelspin ${c.wheelspin.toFixed(2)}  ${maxBeta > 0.6 ? 'SPUN' : maxBeta > 0.15 ? 'slides' : 'grips'}`);
+}
+
+// 7. the game's Standard handling (assisted: TC medium, ABS, stability, arcade) vs the bare simulation
+const STD = { traction: 'medium', abs: true, stability: true, arcade: true };
+const SIM = { traction: 'off', abs: false, stability: false };
+for (const [name, a] of [['sim', SIM], ['standard', STD]]) {
+  // trail-braking: turn in at 200 km/h while still on the brakes (60 % pedal, easing off): how much the
+  // car rotates past what the wheels alone ask for (yaw rate / kinematic yaw rate) and the rear's slide
+  for (const brk of [0.6, 0]) {
+    const c = newCar(a);
+    c.setSpeed(200 / 3.6);
+    c.gear = 6;
+    let t = 0, maxGain = 0, maxBeta = 0, rotT = 0;
+    const d = c.gripSteerLimit(c.vx) * 0.75;
+    while (t < 1.4) {
+      const br = Math.max(0, brk - t * 0.4);
+      c.step(DT, inp({ steer: t > 0.15 ? d : 0, brake: br }), flat, false);
+      t += DT;
+      if (t > 0.3) {
+        const kin = (c.vx * Math.tan(d)) / (F1_SPEC.a + F1_SPEC.b);
+        maxGain = Math.max(maxGain, c.r / kin);
+        const b = Math.abs(Math.atan2(c.vy - F1_SPEC.b * c.r, c.vx));
+        if (b > maxBeta) { maxBeta = b; rotT = t; }
+      }
+    }
+    console.log(`trail   ${name.padEnd(8)} 200 km/h, ${brk ? '60%→0 brake' : 'coasting   '} into the turn  rotation ${maxGain.toFixed(2)}× the wheels' path  rear slip ${(maxBeta * 57.3).toFixed(1)}° at ${rotT.toFixed(2)} s  ${maxBeta > 0.6 ? 'SPUN' : ''}`);
+  }
+  // exit: 2nd gear at the apex, then full throttle with the wheel still turned
+  {
+    const c = newCar(a);
+    c.setSpeed(85 / 3.6);
+    c.gear = 2;
+    let t = 0, maxBeta = 0;
+    while (t < 2.5) {
+      c.step(DT, inp({ steer: c.gripSteerLimit(c.vx) * 0.85, throttle: t < 0.6 ? 0.3 : 1 }), flat, false);
+      t += DT;
+      if (t > 0.6) maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(c.vy - F1_SPEC.b * c.r, Math.max(1, c.vx))));
+    }
+    console.log(`exit    ${name.padEnd(8)} 85 km/h 2nd, full throttle at the apex  max rear slip ${(maxBeta * 57.3).toFixed(1)}°  ${maxBeta > 0.6 ? 'SPUN' : maxBeta > 0.12 ? 'steps out' : 'grips'}`);
+  }
+  // kerb: 200 km/h straight, the left wheels ride a 25 m kerb (a strike on, ridges, a strike off)
+  {
+    const kerb = { ...flat, surfaceAt: (s, lat) => (s > 500040 && s < 500065 && lat < -0.3 ? 1 : 0) };
+    const c = newCar(a);
+    c.setSpeed(200 / 3.6);
+    c.gear = 6;
+    c.lateral = 0;
+    let t = 0, maxR = 0, maxH = 0, maxP = 0;
+    while (t < 1.5) {
+      c.step(DT, inp({ throttle: 0.5 }), kerb, false);
+      t += DT;
+      maxR = Math.max(maxR, Math.abs(c.r));
+      maxH = Math.max(maxH, Math.abs(c.heave + 0.0));
+      maxP = Math.max(maxP, Math.abs(c.roll));
+    }
+    console.log(`kerb    ${name.padEnd(8)} left wheels over a kerb at 200 km/h  yaw kick ${(maxR * 57.3).toFixed(1)}°/s  heading ${(c.yaw * 57.3).toFixed(1)}°  body roll ${(maxP * 57.3).toFixed(2)}°`);
+  }
+}
+// 8. wet: steady cornering grip at 150 km/h by tyre type and water (fraction of dry slicks)
+{
+  const lat = (type, wet, a = { stability: false }) => {
+    const c = newCar(a);
+    c.weather = { wetnessAt: () => wet, state: { airTemp: 18, trackTemp: 20 } };
+    c.tyreType = type;
+    c.tyreTemp.fill(type ? 70 : 95);
+    c.setSpeed(150 / 3.6);
+    c.gear = 5;
+    let t = 0, best = 0;
+    while (t < 3) {
+      const thr = 0.3 + (150 / 3.6 - c.vx) * 0.4;
+      c.step(DT, inp({ steer: c.gripSteerLimit(c.vx), throttle: Math.max(0, Math.min(1, thr)) }), flat, false);
+      t += DT;
+      if (t > 1) best = Math.max(best, c.vx * c.r);
+    }
+    return best;
+  };
+  const dry = lat(0, 0);
+  const row = (n, ty) => [0.3, 0.6, 1].map((w) => `${(lat(ty, w) / dry * 100).toFixed(0)}%`).join(' / ');
+  console.log(`wet     150 km/h cornering vs dry slicks at water 0.3 / 0.6 / 1.0:  slick ${row('s', 0)}  inter ${row('i', 1)}  wet ${row('w', 2)}   (dry ${(dry / 9.81).toFixed(2)} g)`);
+}
+// 9. Standard handling: step steer and full lock (what a keyboard / pad at full input does)
+for (const v of [100, 200, 280]) {
+  const c = newCar(STD);
+  c.setSpeed(v / 3.6);
+  c.gear = v < 150 ? 4 : v < 250 ? 6 : 8;
+  let t = 0, maxBeta = 0;
+  while (t < 2.5) {
+    c.step(DT, inp({ steer: Math.min(F1_SPEC.maxSteer, c.gripSteerLimit(c.vx) * 1.75), throttle: 0.4 }), flat, false);
+    maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(c.vy, Math.max(1, c.vx))));
+    t += DT;
+  }
+  console.log(`stdlock ${v} km/h full pad lock  lat ${((c.vx * c.r) / 9.81).toFixed(2)} g  max β ${(maxBeta * 57.3).toFixed(1)}°  end ${kmh(c.vx).toFixed(0)} km/h  ${maxBeta > 0.5 ? 'SPUN' : 'ok'}`);
+}
+// 10. abuse on Standard: full lock and full throttle out of a slow corner — dry, dry over a kerb, slicks on a wet track
+for (const [what, wet, kerb] of [['dry', 0, false], ['dry kerb', 0, true], ['wet slicks', 0.5, false]]) {
+  const c = newCar(STD);
+  const tr = kerb ? { ...flat, surfaceAt: (s, lat) => (Math.floor(s) % 9 < 5 ? 1 : 0) } : flat;
+  if (wet) c.weather = { wetnessAt: () => wet, state: { airTemp: 18, trackTemp: 20 } };
+  c.setSpeed(75 / 3.6);
+  c.gear = 2;
+  let t = 0, maxBeta = 0;
+  while (t < 2.5) {
+    c.step(DT, inp({ steer: Math.min(F1_SPEC.maxSteer, c.gripSteerLimit(c.vx) * 1.75), throttle: t < 0.4 ? 0.3 : 1 }), tr, false);
+    t += DT;
+    maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(c.vy - F1_SPEC.b * c.r, Math.max(1, c.vx))));
+  }
+  console.log(`abuse   standard ${what.padEnd(10)} full lock + full throttle at 75 km/h  max rear slip ${(maxBeta * 57.3).toFixed(1)}°  ${maxBeta > 0.6 ? 'SPUN' : maxBeta > 0.12 ? 'slides, caught' : 'grips'}`);
 }

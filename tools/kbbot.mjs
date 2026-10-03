@@ -2,20 +2,27 @@
 // braking points. Drives laps through PlayerControl → CarPhysics on the real
 // circuit for each assist preset and reports how controllable it is.
 //   node tools/kbbot.mjs [laps]
+//   GAME=1   — the game's own presets (Assists.ts: Casual / Standard / Expert, arcade handling included)
+//   PAD=1    — an analog pad instead of keys (proportional stick, direct steering, as the game does for pads)
+//   TRACK=id — another circuit (default Monza); WET=0.6 — water on the track (0 … 1) on the tyre type the conditions call for
 import { Track } from '../src/world/Track.ts';
+import { ASSIST_PRESETS } from '../src/game/Assists.ts';
 import { CIRCUITS } from '../src/world/Circuits.ts';
 import { CarPhysics, F1_SPEC } from '../src/sim/CarPhysics.ts';
 import { RacingProfile } from '../src/sim/RacingProfile.ts';
 import { PlayerControl } from '../src/sim/PlayerControl.ts';
 
 const LAPS = Number(process.argv[2] ?? 2);
-const track = new Track(CIRCUITS[0]);
+const track = new Track(process.env.TRACK ? CIRCUITS.find((c) => c.id === process.env.TRACK) : CIRCUITS[0]);
+const PAD = !!process.env.PAD;
+const WET = Number(process.env.WET ?? 0);
 const profile = new RacingProfile(track, F1_SPEC);
 const DT = 1 / 300;
 
 const base = { assists: { traction: 'full', abs: true, stability: true, autoGear: true }, aids: { brakingAssist: 'medium', steeringMode: 'rate' } };
 const variant = (a, b) => ({ assists: { ...base.assists, ...a }, aids: { ...base.aids, ...b } });
-const PRESETS = process.env.MATRIX ? {
+const fromGame = (g) => ({ assists: { traction: g.traction, abs: g.abs, stability: g.stability, autoGear: true, arcade: g.arcade }, aids: { brakingAssist: g.braking, steeringMode: PAD ? 'direct' : g.keyboard } });
+const PRESETS = process.env.GAME ? Object.fromEntries(Object.entries(ASSIST_PRESETS).map(([k, g]) => [k, fromGame(g)])) : process.env.MATRIX ? {
   casual: base,
   noSteerAssist: variant({}, {}),
   noStability: variant({ stability: false }, {}),
@@ -38,9 +45,14 @@ function run(name, preset, seed) {
   car.setSpeed(45);
   car.gear = 5;
   car.assists = { ...preset.assists };
+  if (WET > 0) {
+    // a uniform wet track (no drier line) and the tyre the conditions call for
+    car.weather = { wetnessAt: () => WET, state: { airTemp: 18, trackTemp: 20 } };
+    car.tyreType = WET > 0.72 ? 2 : WET > 0.2 ? 1 : 0;
+  }
   const pc = new PlayerControl();
   pc.aids = { ...preset.aids };
-  const raw = { steer: 0, throttle: 0, brake: 0, usingPad: false, ers: false, shiftUp: false, shiftDown: false };
+  const raw = { steer: 0, throttle: 0, brake: 0, usingPad: PAD, ers: false, shiftUp: false, shiftDown: false };
   const queue = [];
   let t = 0, laps = 0, lastLd = track.lapDistance(car.s), lapStart = 0;
   const times = [];
@@ -68,11 +80,13 @@ function run(name, preset, seed) {
       const want = kappa * v;
       const err = want - car.r; // + → should be turning more to the left
       const dead = 0.025 + 0.02 * rand();
-      const key = err > dead ? 1 : err < -dead ? -1 : 0;
-      if (key !== lastKey) keyFlips++;
+      // a pad: the stick goes proportionally (a thumb isn't precise: a little noise on it)
+      const padLimit = Math.min(car.spec.maxSteer, Math.max(0.3, car.gripSteerLimit(v) * 1.75));
+      const key = PAD ? Math.max(-1, Math.min(1, (Math.atan(((car.spec.a + car.spec.b) * want) / Math.max(v, 5)) * 1.2 + err * 0.08) / padLimit + (rand() - 0.5) * 0.06)) : err > dead ? 1 : err < -dead ? -1 : 0;
+      if (Math.sign(key) !== Math.sign(lastKey)) keyFlips++;
       lastKey = key;
       if (rand() < 0.02) brakeMargin = (process.env.MARGIN ? Number(process.env.MARGIN) : 0.93) + rand() * 0.05;
-      const vt = Math.min(profile.at(car.s + v * 0.2), profile.at(car.s + v * 0.45)) * brakeMargin;
+      const vt = Math.min(profile.atGrip(car.s + v * 0.2, car.gripFactor), profile.atGrip(car.s + v * 0.45, car.gripFactor)) * brakeMargin;
       const brake = v > vt + 1 ? 1 : 0;
       // lift when the rear steps out (a human reacts to the slide)
       const sliding = Math.abs(Math.atan2(car.vy, Math.max(3, car.vx))) > 0.09;
@@ -94,7 +108,7 @@ function run(name, preset, seed) {
     wasOff = car.offTrack;
     const beta = Math.abs(Math.atan2(car.vy, Math.max(1, Math.abs(car.vx))));
     maxBeta = Math.max(maxBeta, beta);
-    if (beta > 0.6 && !spinning) { spins++; if (process.env.TRACE && name === process.env.TRACE) console.log('  spin at s', car.s.toFixed(0)); for (const h of hist) console.log('     ', h.join(' ')); }
+    if (beta > 0.6 && !spinning) { spins++; if (process.env.TRACE && name === process.env.TRACE) { console.log('  spin at s', car.s.toFixed(0)); for (const h of hist) console.log('     ', h.join(' ')); } }
     if (Math.round(t / DT) % 15 === 0) hist.push(['s' + car.s.toFixed(0), 'lat' + car.lateral.toFixed(1), 'rl' + track.racingLineAt(car.s).toFixed(1), (car.vx * 3.6).toFixed(0), 'T' + raw.throttle, 'B' + raw.brake, 'S' + raw.steer, 'δ' + inp.steer.toFixed(3), 'β' + (Math.atan2(car.vy, Math.max(1, car.vx)) * 57.3).toFixed(0), 'r' + car.r.toFixed(2), 'sF' + car.slipFront.toFixed(1), 'sR' + car.slipRear.toFixed(1), 'g' + car.gear, car.surface.join('')]);
     if (hist.length > 18) hist.shift();
     spinning = beta > 0.6;

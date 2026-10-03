@@ -95,15 +95,27 @@ npm run check    # tsc --noEmit
 - **Car physics** — four-wheel model: per-tyre loads (weight, aero, longitudinal and lateral load
   transfer), combined-slip tyres with load sensitivity (wider, stiffer rears), wheel-spin dynamics so
   wheelspin and lock-ups come from the physics, downforce/drag with DRS, slipstream tow and dirty
-  air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter,
-  grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
-  Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.1 s, 300→80 km/h in 80 m at
-  5.9 g (54 m and 8 g with the default arcade brakes), 1.8 g cornering at 100 km/h up to ~5 g at 300 km/h, stable at full lock at any speed.
+  air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter
+  and kerb strikes (the wheel spikes, hops light for a few hundredths and the ramp shoves it back toward
+  the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
+  The chassis moves like a stiff F1 car (~2.5° of dive at 5 g, ~1.5° of roll, springs that settle with a
+  little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
+  and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).
+  Validated with `tools/handling.mjs`: 0–100 km/h 2.0 s, 0–200 3.9 s, top 336 (343 with DRS), 300→80 km/h in 78 m at
+  6.2 g peak (63 m with the assisted handling's brakes), 1.8 g cornering at 100 km/h up to ~5 g at 300 km/h, stable at full lock at any speed;
+  trail-braking rotates the car ~1.8× more than coasting into the same turn, full throttle at a 2nd-gear apex
+  steps the rear out ~18° with no assists (≈6° on Standard), and the wet table drops cornering grip to
+  ~63 % on slicks / ~77 % on inters at half-wet.
   An AI flying lap of Monza is ~78.5 s dry (real pole ≈ 79 s), ~84 s on inters in a drizzle,
   ~88 s on wets in the rain.
 - **Driving like the F1 games** — full steering input maps to the front tyres' peak-grip angle at
   the current speed; keyboard steering is yaw-rate assisted (release a key and the car straightens);
-  countersteer opens up when the rear slides. Assists: traction control Off/Medium/Full, ABS,
+  countersteer opens up when the rear slides. Handling "Arcade" (Casual / Standard) is the full
+  simulation on 13 % grippier tyres with a slide catcher of limited authority (`ARCADE_*` in
+  CarPhysics.ts: the rear may slide ~6° freely, more is pulled back — less so on a wet or cold track)
+  and turn-in help once the front tyres pass their peak, so weight transfer, trail-brake rotation,
+  wheelspin on the exit, kerbs and the wet all come through while a keyboard can still hold it;
+  "Simulation" removes the net. Traction control Medium lets the rear slide (more where grip is low). Assists: traction control Off/Medium/Full, ABS,
   stability, steering assist, braking assist (Medium by default: the car slows itself for the corners),
   racing line Off/Corners/Full (the dynamic green/yellow/red line), auto/manual gears, DRS assist —
   as presets (Casual / Standard / Expert) or one by one.
@@ -138,6 +150,13 @@ npm run check    # tsc --noEmit
   `node tools/_mbbench.mjs` times the blur pass.
 - **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
   them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
+  every lens riding with the car vibrating like its mount (`CamShake` in Cameras.ts: noise-rung
+  resonators — the head or bracket sway at 4–11 Hz, the structure's buzz at 11–22 Hz — driven by the
+  speed, the road relief under the wheels, kerb ridges and strikes, the grass and contacts; calibrated
+  against the reference onboards with `node tools/camshake.mjs`: the Halo POV moves ≈0.4 % of the frame
+  height per 30 fps frame on a straight at 300 km/h, ≈1 % on kerbs with sharper strike jolts), the
+  cockpit eye thrown about by the G on a sprung neck (outward in corners, forward and down with a nod
+  on the brakes, back into the seat on the power), a lens that widens with speed (mostly above 150 km/h),
   nose and more; a live steering-wheel screen and shift lights in the onboards,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
   lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
@@ -210,10 +229,12 @@ tools/     shot.mjs (headless screenshots), simtest.mjs (headless 20-car race), 
 Regression checks (all headless, no browser):
 - `node tools/handling.mjs` — acceleration, top speed, braking, step steer, full lock, power oversteer.
 - `node tools/kbbot.mjs 2` — a simulated keyboard player (binary keys, reaction delay) drives laps
-  on each assist preset through the real control layer; reports off-tracks and spins.
+  on each assist preset through the real control layer; reports off-tracks and spins (`GAME=1` uses the
+  game's own presets, `PAD=1` an analog stick, `WET=0.6` a wet track, `TRACK=<id>` another circuit).
 - `node tools/simtest.mjs 20 3` / `node tools/racetest.mjs 3 [weather]` — 20 AI cars racing: lap
   times, wall hits, off-tracks, penalties, weather and tyre calls, classification
   (`SEED=6 node tools/racetest.mjs 8 changeable` brings rain mid-race).
+- `node tools/camshake.mjs [track]` — how much each car-mounted camera vibrates per frame (% of the frame height) on straights, kerbs and the grass over an AI lap.
 - `node tools/diag.mjs 2 rain wet` — one AI car: lap times, tyre temperatures, grip, wear, fuel.
 - `node tools/limits.mjs 3` — where AI cars run wide in a race.
 
