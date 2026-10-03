@@ -62,7 +62,7 @@ import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
 import { setCarAORenderer } from '../car/carAO.ts';
-import { preloadPixels } from '../core/pixelCache.ts';
+import { keepData, loadData, pixelKey, preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import type { SetupPart } from '../career/Career.ts';
@@ -213,6 +213,10 @@ export class Game {
     trackGpuUploads();
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
+    // (boot) three's per-program error check (info logs + link status read back on each program's first use)
+    // is a blocking round trip to the GPU process per program: dev builds only (tools/console.mjs
+    // runs against the dev server), or ?shadercheck
+    this.gfx.renderer.debug.checkShaderErrors = import.meta.env.DEV || /[?&]shadercheck\b/.test(location.search);
     this.hud = new HUD(uiRoot);
     // the helmet cam's view through the visor opening: the padded edges of the helmet frame it
     this.visor = document.createElement('div');
@@ -357,39 +361,52 @@ export class Game {
     const tick = () => new Promise((r) => setTimeout(r, 0));
     const t0 = performance.now();
     const mark = (k: string) => (this.bootSteps[k] = Math.round(performance.now() - t0));
-    progress(0.02, 'Loading fonts');
-    // the people (~13 MB over the network) start downloading first: everything below overlaps them
+    progress(0.02, 'Surveying the circuit');
+    // the downloads and decodes (main.ts started them before the Game was made; these pick up the
+    // same promises): the people (~13 MB over the network, the core ~6 MB waited for), the liveries
+    // and atlases painted on an earlier visit (read + decoded off the main thread), the scanned road
+    // surface, the brand fonts. Nothing waits on them up front: buildWorld awaits each just before
+    // the step that uses it, so its CPU work (the track survey first) overlaps them.
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
-    // liveries + the fan atlas painted on an earlier visit (read + decoded while the rest loads)
     const pixels = preloadPixels();
-    // the scanned road surface (1.2 MB, decoded off the main thread)
     const asphalt = loadAsphaltScan();
-    try {
-      await Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f)));
-    } catch {
-      /* fallback fonts are fine */
-    }
-    mark('fonts');
+    const fonts = Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
+      () => void mark('fonts'),
+      () => undefined /* fallback fonts are fine */,
+    );
+    void Promise.all([pixels, asphalt]).then(() => mark('pixels'));
     this.applySettings(this.menu.settings);
     // the career's grid (Formula 2 or 1, the player's driver in their seat) before any car or pit garage is built
     this.syncCareerGrid();
     Career.extraUnlocked = (id) => this.dc.visited(id);
     this.rollWeather(this.menu.setup);
 
-    await Promise.all([pixels, asphalt]);
-    mark('pixels');
     setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice
     // (the garage opens at the circuit you race next: the career's next round, the newest unlocked)
     const unlocked = this.career.unlockedCircuits();
     const next = this.dc.nextTrack ?? this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? this.menu.setup.track;
     const want = new URLSearchParams(location.search).get('track') ?? next;
-    await this.buildWorld(CIRCUITS.find((c) => c.id === want) ?? MONZA, async (f, step) => {
-      progress(0.06 + f * 0.56, step);
-      await tick();
-    }, people);
+    await this.buildWorld(
+      CIRCUITS.find((c) => c.id === want) ?? MONZA,
+      async (f, step) => {
+        progress(0.06 + f * 0.56, step);
+        await tick();
+      },
+      { people, signs: fonts, ground: asphalt, pixels },
+    );
 
     mark('world');
+    // every light the garage frame will have, before anything is compiled (light counts are part of
+    // every program's key) …
+    this.scene.add(this.particles.group);
+    this.scene.add(this.headlights.group);
+    this.buildGarageLights();
+    // … then the world's programs, garage-lit, queued now: the driver builds them on its own threads
+    // (KHR_parallel_shader_compile) while the cars are made below
+    this.garageLights.visible = true;
+    const worldPrograms = this.compileQueued(this.scene);
+    this.garageLights.visible = false;
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
     this.scene.add(this.carsGroup);
@@ -413,10 +430,7 @@ export class Game {
       for (const [e, rig] of this.rigs) rig.shadowPass?.(on, e === me);
     });
     mark('cars');
-    this.scene.add(this.particles.group);
-    this.scene.add(this.headlights.group);
     this.particles.setLight(smokeLight(new Weather(this.plan).state));
-    this.buildGarageLights();
     this.menu.highlights = this.highlights;
     this.highlights.onChange(() => {
       if (this.state === 'menu' && this.hubTab === 'highlights') this.menu.refreshTab();
@@ -442,7 +456,7 @@ export class Game {
     progress(0.9, 'Opening the garage');
     await tick();
     this.toMenu();
-    this.warmGarage();
+    await this.warmGarage(worldPrograms);
     mark('menu');
     this.bootMs = Math.round(performance.now() - t0);
 
@@ -538,6 +552,14 @@ export class Game {
     const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     const t0 = performance.now();
     let busy = 0;
+    // (wall time per phase, for the dev readout: worldTimes.bg*)
+    const phase: Record<string, number> = {};
+    let tPhase = t0;
+    const lap = (k: string) => {
+      const n = performance.now();
+      phase[k] = Math.round(n - tPhase);
+      tPhase = n;
+    };
     // the rest of the avatars keep downloading while the landscape is built
     const kit = peopleKit();
     const everyone = kit ? Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]) : Promise.resolve();
@@ -561,6 +583,16 @@ export class Game {
       partial = r.value.group;
       this.worldProgress = 0.75 * Math.min(1, (n + 1) / SLICES);
     }
+    lap('bgScenery');
+    // the landscape's programs queued before it is adopted, lit as its reflection capture and the
+    // race see it (sun and sky, the garage's work lights out): built on the driver's threads while
+    // the garage keeps drawing, where the capture would build them one by one, blocking
+    const lit0 = this.garageLights.visible;
+    this.garageLights.visible = false;
+    const landscape = this.compileQueued(scenery.group, this.scene);
+    this.garageLights.visible = lit0;
+    await landscape;
+    lap('bgShaders');
     await frame();
     if (gen !== this.worldGen) {
       disposeTree(scenery.group);
@@ -574,67 +606,135 @@ export class Game {
     this.garageLights.visible = lit;
     if (this.leanOn) this.env.setLean(true);
     busy += performance.now() - ts;
+    lap('bgAdopt');
     this.worldProgress = 0.82;
     await frame();
     if (gen !== this.worldGen) return;
     ts = performance.now();
-    this.placeBroadcastCameras();
+    const sight = await this.sightlines();
+    if (gen !== this.worldGen) return;
+    this.placeBroadcastCameras(sight);
     busy += performance.now() - ts;
+    lap('bgCameras');
     this.worldProgress = 0.88;
     await frame();
     if (gen !== this.worldGen) return;
-    // every pit crew (people, wheels, guns, jacks), a team a frame, so nothing is built mid-race
+    // every pit crew (people, wheels, guns, jacks), so nothing is built mid-race: a team at a time,
+    // as many as fit in ~10 ms before the next garage frame
     for (let n = 0; n < 40; n++) {
       ts = performance.now();
-      const done = this.pits.prebuildNext?.() ?? true;
+      let done = false;
+      do done = this.pits.prebuildNext?.() ?? true;
+      while (!done && performance.now() - ts < 10);
       busy += performance.now() - ts;
       if (done) break;
       await frame();
       if (gen !== this.worldGen) return;
     }
+    lap('bgCrews');
     // everyone, not just the first few: marshals, photographers, the paddock and the fans on the
     // concourses are built from the full set, and would otherwise pop in mid-race
     await everyone;
+    lap('bgPeople');
     await frame();
     if (gen !== this.worldGen) return;
     ts = performance.now();
-    await this.warmUp();
+    await this.warmUp(gen);
     busy += performance.now() - ts;
     if (gen !== this.worldGen) return;
+    lap('bgWarm');
     this.worldProgress = 1;
+    Object.assign(this.worldTimes, phase);
     this.worldTimes.background = Math.round(busy);
     this.worldTimes.backgroundWall = Math.round(performance.now() - t0);
     console.info(`[shot] [world] ${this.track.def.id} complete behind the garage: ${Math.round(busy)} ms of work over ${Math.round(performance.now() - t0)} ms`);
   }
 
-  /** the broadcast cameras, placed with what they can see (the occupancy grid of the whole world) */
-  private placeBroadcastCameras() {
+  /**
+   * The broadcast cameras, placed with what they can see (`sight`: the occupancy grid of the whole
+   * world, see sightlines()) — or, before the landscape exists, along the track alone (only the
+   * garage is up then: completeWorld places them again before any session can start).
+   */
+  private placeBroadcastCameras(sight: Sightlines | null) {
     const mode = this.cams?.mode;
     const prefs = this.cams?.prefs;
-    let sight: Sightlines | null = null;
-    try {
-      sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), [this.trackside.group, this.pits.group, this.env.group]);
-    } catch (e) {
-      console.warn('[sightlines] failed', e);
-    }
     this.cams = new Cameras(this.camera, this.track, sight);
     this.cams.prefs = prefs ?? { ...DEFAULT_CAM, ...(this.menu.settings.cam ?? {}) };
-    if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
+    if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms${sight.fromCache ? ' (cached)' : ''}, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
     if (mode) this.cams.mode = mode;
   }
 
-  /** the garage's own shaders, queued in parallel before its first frame (the race's follow behind it) */
-  private warmGarage() {
-    const r = this.gfx.renderer;
-    const linear = new THREE.WebGLRenderTarget(1, 1);
-    const prev = r.getRenderTarget();
-    r.setRenderTarget(linear);
+  /**
+   * The occupancy grid of the whole world (trackside, pit complex, landscape) for the broadcast
+   * cameras. The same for every visit to a circuit with a given build, so it is kept in IndexedDB
+   * (pixelCache loadData/keepData) under a fingerprint of the geometry it is made from — anything
+   * that changes the world (a new build, a different circuit, other meshes) misses and rebuilds.
+   */
+  private async sightlines(): Promise<Sightlines | null> {
+    const t0 = performance.now();
+    const roots = [this.trackside.group, this.pits.group, this.env.group];
+    // (instance counts are left out: a few instanced sets — people about the place — vary from visit
+    // to visit, and so would the grid built from any one moment of them)
+    let meshes = 0, verts = 0;
+    for (const r of roots)
+      r.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || (o as THREE.SkinnedMesh).isSkinnedMesh) return;
+        const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.Material | undefined;
+        if (!mat || mat.visible === false || mat.depthWrite === false) return;
+        meshes++;
+        verts += m.geometry?.attributes.position?.count ?? 0;
+      });
+    const key = pixelKey('sightlines', this.track.def.id, meshes, verts);
+    const t1 = performance.now();
+    const cached = await loadData(key);
+    this.worldTimes.sightKey = Math.round(t1 - t0);
+    this.worldTimes.sightRead = Math.round(performance.now() - t1);
+    try {
+      const sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), roots, cached);
+      this.worldTimes.sightGrid = sight.buildMs;
+      if (!sight.fromCache) keepData(key, sight.toBytes());
+      return sight;
+    } catch (e) {
+      console.warn('[sightlines] failed', e);
+      return null;
+    }
+  }
+
+  /**
+   * The garage's shaders, all queued at once before its first frame (with `queued`, programs queued
+   * earlier), then that frame once the driver has built them: with KHR_parallel_shader_compile it
+   * builds them on its own threads and the main thread stays free, where a plain compile + render
+   * would block on each program in turn. (The shadow maps' depth programs are built by the frame.)
+   */
+  private async warmGarage(queued?: Promise<unknown>) {
     this.garageFrame(0.016);
     this.garageLights.visible = true;
-    r.compile(this.scene, this.camera);
-    r.setRenderTarget(prev);
-    linear.dispose();
+    await Promise.all([queued, this.compileQueued(this.scene)]);
     this.gfx.render(0.016);
+  }
+
+  /** a 1 × 1 linear target: programs compiled with it bound get the post chain's keys */
+  private linearRT: THREE.WebGLRenderTarget | null = null;
+  /**
+   * Queue the programs `obj` needs (lit by `lights`' lights, as drawn by the camera into the post
+   * chain's linear targets — never straight to the canvas, so that's the key to compile for) and
+   * resolve once the driver has built them (at most `cap` ms: a driver that never says leaves the
+   * rest to the first frame). Nothing blocks: the compile runs on the driver's threads.
+   */
+  private compileQueued(obj: THREE.Object3D, lights: THREE.Object3D | null = null, cap = 20000): Promise<unknown> {
+    const r = this.gfx.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget((this.linearRT ??= new THREE.WebGLRenderTarget(1, 1)));
+    try {
+      const done = r.compileAsync(obj, this.camera, lights as THREE.Scene | null);
+      return Promise.race([done, new Promise((res) => setTimeout(res, cap))]);
+    } catch (e) {
+      console.warn('[shaders] compile failed', e);
+      return Promise.resolve();
+    } finally {
+      r.setRenderTarget(prev);
+    }
   }
 
   /**
@@ -713,7 +813,12 @@ export class Game {
    * (0 … 1 progress) so a loading bar can update. The cameras, racing line and HUD map
    * follow in finishWorld() once the cars exist.
    */
-  private async buildWorld(def: CircuitDef, step: (f: number, label: string) => Promise<void>, people?: Promise<unknown>) {
+  private async buildWorld(
+    def: CircuitDef,
+    step: (f: number, label: string) => Promise<void>,
+    /** the boot's downloads, each awaited just before the step that needs it (a circuit switch has them all) */
+    wait: { people?: Promise<unknown>; signs?: Promise<unknown>; ground?: Promise<unknown>; pixels?: Promise<unknown> } = {},
+  ) {
     const times: Record<string, number> = {};
     let tLap = performance.now();
     const lap = (k: string) => {
@@ -727,22 +832,35 @@ export class Game {
     this.menu.setup.track = this.track.def.id;
     lap('track');
 
-    await step(0.14, 'Laying asphalt, kerbs and barriers');
-    this.trackside = buildTrackside(this.track, this.gfx);
-    this.scene.add(this.trackside.group);
-    lap('trackside');
-
-    await step(0.3, 'Opening the pit lane');
+    // (the pit complex before the trackside — they don't depend on each other — so the ground
+    // textures, made off the main thread, have its build time to arrive in)
+    await step(0.14, 'Opening the pit lane');
+    // (the fonts its boards are lettered in)
+    await wait.signs;
+    lap('fonts');
     this.pits = buildPitComplex(this.track, this.gfx);
     this.scene.add(this.pits.group);
     lap('pits');
 
-    if (people) {
+    await step(0.3, 'Laying asphalt, kerbs and barriers');
+    // (the road scan and the ground textures)
+    await wait.ground;
+    lap('ground');
+    this.trackside = buildTrackside(this.track, this.gfx);
+    this.scene.add(this.trackside.group);
+    lap('trackside');
+
+    if (wait.people) {
       // the uniforms and faces (the garage's people); the fans' avatars and the pit crews follow
       // behind the garage (completeWorld), before any session can start
       await step(0.36, 'Getting the people in');
-      await people;
+      await wait.people;
       lap('people');
+    }
+    // the liveries and atlases from an earlier visit (the cars, the trees) are read back by now
+    if (wait.pixels) {
+      await wait.pixels;
+      lap('pixels');
     }
 
     await step(0.4, 'Setting up the sky');
@@ -768,8 +886,9 @@ export class Game {
 
   /** the circuit's cameras, racing line and HUD map (needs the cars) */
   private finishWorld() {
-    // (placed again on the real landscape once it exists: completeWorld)
-    this.placeBroadcastCameras();
+    // (along the track alone: placed again with their sight lines over the real landscape once it
+    // exists — completeWorld — before any session can start)
+    this.placeBroadcastCameras(null);
     this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
     this.scene.add(this.line.mesh);
     this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
@@ -823,12 +942,12 @@ export class Game {
   lastSweep: { targets: number; textures: number; names?: string[] } = { targets: 0, textures: 0 };
 
   /**
-   * Compile the shader variants of every lighting set-up up front (menu garage, race, podium).
-   * All three are queued at once and nothing waits on them: with KHR_parallel_shader_compile the
-   * driver builds them on its own threads while the menu is up, so the first race frame, the
-   * first podium frame and the first fast lap (speed blur) find their programs ready.
+   * Compile the shader variants of both lighting set-ups up front (menu garage, race). Both are
+   * queued at once and awaited without blocking: with KHR_parallel_shader_compile the driver builds
+   * them on its own threads while the menu is up, so the first race frame and the first fast lap
+   * (speed blur) find their programs ready. (The podium's are built when a race ends.)
    */
-  private async warmUp() {
+  private async warmUp(gen: number) {
     const r = this.gfx.renderer;
     const warm: number[] = [];
     let t = performance.now();
@@ -845,11 +964,15 @@ export class Game {
     this.pits.warm?.(true);
     // and so is much else until the camera comes near (levels of detail, far people, distant crowds):
     // unhide the world for the compile, so nothing first appears — or compiles — mid-race
-    const hidden: THREE.Object3D[] = [];
     const keepHidden = new Set<THREE.Object3D>([this.garageLights]);
-    this.scene.traverse((o) => {
-      if (!o.visible && !keepHidden.has(o) && !(o as THREE.Light).isLight) hidden.push(o);
-    });
+    const findHidden = () => {
+      const out: THREE.Object3D[] = [];
+      this.scene.traverse((o) => {
+        if (!o.visible && !keepHidden.has(o) && !(o as THREE.Light).isLight) out.push(o);
+      });
+      return out;
+    };
+    let hidden = findHidden();
     // every texture onto the GPU now (not on the frame something first shows it)
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
@@ -868,32 +991,39 @@ export class Game {
         /* a texture whose image isn't ready yet uploads when it is */
       }
     }
-    // the scene is only ever drawn into the post chain's linear targets (Renderer.render → composer),
-    // never straight to the canvas: compile for a bound target, or the programs built here (sRGB
-    // output) aren't the ones the race uses and everything recompiles mid-race
-    const linear = new THREE.WebGLRenderTarget(1, 1);
-    const prevTarget = r.getRenderTarget();
-    r.setRenderTarget(linear);
-    const compileLinear = () => r.compile(this.scene, this.camera);
+    // every lighting set-up's programs queued at once (compileQueued: for the post chain's linear
+    // targets, built on the driver's threads), then awaited without blocking — the garage keeps
+    // drawing meanwhile (its own programs are built already)
+    const queued: Promise<unknown>[] = [];
+    const progs = [r.info.programs?.length ?? 0];
     // the menu: the garage and its work lights
     this.garageFrame(0.016);
     this.garageLights.visible = true;
     if (this.garage) this.garage.group.visible = true;
-    compileLinear();
+    queued.push(this.compileQueued(this.scene));
+    progs.push(r.info.programs?.length ?? 0);
     // racing: sun and sky only — with everything the camera may meet out on the lap shown
     this.garageLights.visible = false;
     if (this.garage) this.garage.group.visible = false;
     for (const o of hidden) o.visible = true;
-    compileLinear();
+    queued.push(this.compileQueued(this.scene));
+    progs.push(r.info.programs?.length ?? 0);
+    this.warmPrograms = progs;
     for (const o of hidden) o.visible = false;
-    // the podium adds a spot light
-    const spot = new THREE.SpotLight(0xffffff, 0);
-    this.scene.add(spot);
-    compileLinear();
-    spot.removeFromParent();
-    spot.dispose();
-    r.setRenderTarget(prevTarget);
-    linear.dispose();
+    // (the podium's lighting — one more spot light, so every program again — is compiled when the
+    // race is over: startCelebration)
+    // (the garage as it was while the driver works: the crews only drawn for the warm frame below)
+    this.garageLights.visible = menu;
+    if (this.garage) this.garage.group.visible = menu;
+    this.pits.warm?.(false);
+    await Promise.all(queued);
+    if (gen !== this.worldGen) return;
+    this.pits.warm?.(true);
+    // (the garage frames since may have switched levels of detail: what is hidden now)
+    hidden = findHidden();
+    const garageVis = this.garage?.group.visible ?? false;
+    this.garageLights.visible = false;
+    if (this.garage) this.garage.group.visible = false;
     // one real frame in race lighting: the shadow-map depth programs (light counts are part of their
     // key, so the menu's garage-lit frame doesn't build them) and the first uploads — of everything,
     // hidden levels of detail included (a buffer uploaded mid-race is a dropped frame)
@@ -902,7 +1032,7 @@ export class Game {
     for (const o of hidden) o.visible = false;
     lap();
     this.garageLights.visible = menu;
-    if (this.garage) this.garage.group.visible = menu;
+    if (this.garage) this.garage.group.visible = garageVis;
     await new Promise((res) => setTimeout(res, 0));
     // the post passes that only switch on at speed / in the rain / on the TV cameras; this first
     // full render also uploads the new world's textures
@@ -913,6 +1043,8 @@ export class Game {
     this.warmTimes = warm;
   }
   warmTimes: number[] = [];
+  /** shader programs before / after each of warmUp's compile passes (garage, race) — dev readout */
+  warmPrograms: number[] = [];
 
   // ------------------------------------------------------------------ states
 
@@ -1264,8 +1396,10 @@ export class Game {
     const top = this.race.classification().slice(0, 3).map((r) => r.entry);
     if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
     const cel = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
-    // (perf) its shaders — the crowd, the stage, the podium lighting — compile on the driver's threads
-    // while the race keeps running for a few more frames; then the ceremony starts without a stall
+    // (perf) its shaders — the crowd, the stage, and the world under its extra spot light (the light
+    // count is part of every program's key: ~80 programs warmUp no longer builds at boot) — compile on
+    // the driver's threads while the race keeps running for a few more frames; then the ceremony
+    // starts without a stall
     this.celebrationPending = true;
     const race = this.race;
     const go = () => {
@@ -1276,7 +1410,7 @@ export class Game {
       }
       this.beginCelebration(cel, top);
     };
-    this.gfx.renderer.compileAsync(cel.group, this.camera, this.scene).then(go, go);
+    Promise.all([this.compileQueued(cel.group, this.scene), this.compileQueued(this.scene, cel.group)]).then(go, go);
   }
   private celebrationPending = false;
   private introDof = false;
@@ -2524,7 +2658,7 @@ export class Game {
         tp = performance.now();
         this.state = 'menu';
         this.toMenu();
-        this.warmGarage();
+        await this.warmGarage();
         this.worldTimes.warm = Math.round(performance.now() - tp);
       } catch (e) {
         // a half-built world can't be raced: fall back to a clean start there (the setup is saved)
