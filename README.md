@@ -66,6 +66,15 @@ npm run check    # tsc --noEmit
   as its pit building, track, sky and cars exist; terrain, woods, grandstands and crowds grow behind it one slice
   per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
   another circuit moves the garage there behind a short title card; no travel screen.
+- **Backdrops in depth** — beyond the barriers the land recedes in layers like circuit footage: verge → parkland
+  and fields → tree lines → hills → hazy horizon. The far countryside (beyond the 6 km square, painted, no trees)
+  is wooded on steep ground first, a venue's own share of woodland and pasture (`TERRAIN_PALETTES` `forest` /
+  `pasture`), hedged fields split by fences into different crops with tramlines and soil patches, deserts in
+  gravel plains, sand sheets, wadis and vehicle tracks (terrain.ts); the Ardennes cut by deep wooded valleys
+  (worldmap.ts). The horizon ring (horizon.ts) is lit per pixel: spurs and gullies, stands of trees, hedged
+  pasture on the lower slopes (`fields`), rock, a broken snow line, the same clouds' shadows as the ground,
+  a milkier foot on every range, tree lines with single crowns cut into their tops, standing on the real
+  terrain. Lakes and the sea reflect the sky (not the env map's captured grandstands) and the far bank's line.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
