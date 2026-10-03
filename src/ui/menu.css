@@ -743,6 +743,17 @@
   font-weight: 700;
 }
 
+/* the shade behind the rail (under every hub element: it's the first child) */
+.hub-scrim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 460px;
+  background: linear-gradient(90deg, rgba(6, 8, 12, 0.82) 0%, rgba(6, 8, 12, 0.6) 45%, rgba(6, 8, 12, 0) 100%);
+  pointer-events: none;
+}
+
 /* tab rail, left */
 .hub-rail {
   position: absolute;
@@ -4068,4 +4079,168 @@
 }
 .ch-msg.k-event {
   box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--cold);
+}
+
+/* ---------------------------------------------------------------- driver career: the season map overview */
+.ch-body > .ch-season {
+  height: 100%;
+}
+.ch-season {
+  display: grid;
+  grid-template-rows: minmax(230px, 1fr) auto;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+  min-height: 0;
+}
+.ch-map {
+  min-height: 230px;
+}
+/* (the hub's map uses the career map's pins; a finished round carries its result on the disc) */
+.ch-map .pin.done .disc {
+  fill: #1b1f2a;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 1.5;
+}
+.ch-map .pin.done.gold .disc { stroke: #d9b45a; stroke-width: 3; }
+.ch-map .pin.done.silver .disc { stroke: #c3c8cf; stroke-width: 3; }
+.ch-map .pin.done.bronze .disc { stroke: #b77b4f; stroke-width: 3; }
+.ch-map .pin text.sm {
+  font-size: 10px;
+}
+.ch-map .pin.next .disc {
+  fill: var(--team, var(--accent));
+  stroke: var(--team, var(--accent));
+}
+.ch-map .pin.next .halo {
+  stroke: var(--team, var(--accent));
+}
+.ch-map .route.done,
+.ch-map .route.next {
+  stroke: var(--team, var(--accent));
+}
+.ch-map .route.done {
+  filter: drop-shadow(0 0 4px var(--team, var(--accent)));
+}
+.ch-map-cap {
+  position: absolute;
+  left: var(--s4);
+  top: var(--s3);
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  pointer-events: none;
+}
+.ch-map-cap b {
+  font-size: var(--t-row);
+  font-weight: 700;
+}
+.ch-map-cap span {
+  font-size: var(--t-row);
+  color: var(--ink2);
+}
+.ch-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  column-gap: var(--s5);
+  row-gap: var(--s3);
+  min-height: 0;
+}
+.ch-rnd {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-radius: var(--r-panel);
+  background:
+    linear-gradient(90deg, rgba(8, 10, 14, 0.94) 0%, rgba(8, 10, 14, 0.78) 60%, rgba(8, 10, 14, 0.5)),
+    #0b0d12 var(--art) 100% 60% / auto 320% no-repeat;
+  box-shadow: inset 0 0 0 1px var(--line);
+  min-height: 0;
+  overflow: hidden;
+}
+.ch-rnd-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+}
+.ch-rnd-id .nm {
+  font-size: var(--t-time);
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: var(--s1);
+}
+.ch-rnd-id .facts {
+  display: flex;
+  gap: var(--s3);
+  margin-top: var(--s1);
+  font-size: var(--t-row);
+  color: var(--ink2);
+}
+.ch-rnd-id .facts span + span::before {
+  content: '·';
+  margin-right: var(--s3);
+  color: var(--ink3);
+}
+.ch-rnd-track {
+  flex: none;
+  width: 104px;
+  height: 72px;
+}
+.ch-rnd-track path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+}
+.ch-rnd-res {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s4);
+  font-size: var(--t-row);
+  color: var(--ink2);
+}
+.ch-rnd-res b {
+  font-size: var(--t-hero);
+  line-height: 1;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ch-rnd-res b.pod {
+  color: var(--yellow);
+}
+.ch-rnd-res b.dnf {
+  color: var(--ink3);
+}
+.ch-rnd-res.later span {
+  color: var(--ink3);
+}
+.ch-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-height: 0;
+  overflow-y: auto;
+  grid-row: span 2;
+}
+.ch-rnd-acts {
+  display: grid;
+  grid-template-columns: 56px 1fr 56px;
+  gap: var(--s2);
+}
+.ch-rnd-acts .ch-go {
+  height: 52px;
+  font-size: var(--t-row);
+}
+.ch-rnd-acts .ch-step {
+  height: 52px;
+  font-size: 22px;
+  padding: 0;
+}
+.ch-rnd-acts .cta.dis {
+  opacity: 0.4;
+  pointer-events: none;
 }

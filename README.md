@@ -52,6 +52,10 @@ npm run check    # tsc --noEmit
   (`src/career/DriverCareer.ts`, v1 saves migrate), hub, talks and wizard in `src/ui/CareerHub.ts`.
   `node tools/dcsim.mjs [rounds] [pos] [out] [--existing]` simulates seasons and shoots every screen;
   `node tools/dcflow.mjs` runs the real start → race → results → next round flow.
+- **Driver career season map** — the career hub's Overview is the season as a world map: the route flown so
+  far in the team colour, the next leg drawing itself, every finish on its pin (gold/silver/bronze for a podium)
+  and the next round pulsing; click a pin (or ‹ ›) to glide to it and see that round — your result, or the
+  team's targets for the next one — with one call to action, always the next round (CareerHub.ts overview).
 - **Career on a world map** — the 14 rounds as pins on a map of the season: a top-5 finish unlocks
   the next round, and your best result earns a medal (gold = win, silver = podium, bronze = top 5).
   Career races are always 10 laps and take their weather and time of day from the circuit's climate

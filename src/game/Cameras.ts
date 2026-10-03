@@ -698,7 +698,8 @@ export class Cameras {
     // low and close behind the rear wing, the car in the lower third of the frame
     const P = this.prefs;
     const dist = (far ? 7.7 : 5.55) + P.dist + this.surge + speed * 0.0024;
-    const height = (far ? 2.15 : 1.42) + P.height + car.heave * 0.5;
+    // (low, as the race footage frames it: the road rushing under the lens sells the speed)
+    const height = (far ? 1.95 : 1.2) + P.height + car.heave * 0.5;
     // spring the camera's offset from the car (not its world position): a world-space spring
     // trails a car at 300 km/h by ~2v/ω ≈ 12 m; the offset only lags the car's turns and surges
     const want = this.v3.set(-Math.sin(this.camYaw) * dist, height, -Math.cos(this.camYaw) * dist);
@@ -718,7 +719,7 @@ export class Cameras {
     this.chaseLead += (leadT - this.chaseLead) * ease(dt, 2.6);
     const ly = this.camYaw + this.chaseLead;
     const ahead = far ? 16 : 13;
-    const look = this.v3.set(carPos.x + Math.sin(ly) * ahead, carPos.y + (far ? 0.2 : 0.42), carPos.z + Math.cos(ly) * ahead);
+    const look = this.v3.set(carPos.x + Math.sin(ly) * ahead, carPos.y + (far ? 0.18 : 0.34), carPos.z + Math.cos(ly) * ahead);
     if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 8, carPos.y + 0.5, carPos.z + Math.cos(this.camYaw) * 8);
     // (also relative to the car, or it trails v/20 m behind at speed)
     look.sub(carPos);
@@ -728,7 +729,7 @@ export class Cameras {
     // weight: the view dips under braking and lifts on the throttle, and leans a couple of degrees
     // with the lateral G (a camera on a car-mounted arm, not a drone)
     const pitchT = THREE.MathUtils.clamp(car.ax * 0.0032, -0.07, 0.05);
-    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0022, -0.04, 0.04);
+    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0034, -0.06, 0.06);
     if (!this.initialized) {
       this.chasePitch = pitchT;
       this.chaseRoll = rollT;
@@ -740,7 +741,7 @@ export class Cameras {
     // grass and impacts come through as rotation of the lens (applyRotShake)
     const t = this.shakeT;
     const sp = Math.min(1, kmh / 320);
-    const rumble = sp * sp * 0.0035 * P.shake;
+    const rumble = sp * sp * 0.0055 * P.shake;
     cam.position.copy(this.v4);
     cam.position.x += (Math.sin(t * 7.3) * 0.6 + Math.sin(t * 13.1 + 1.3) * 0.4) * rumble;
     cam.position.y += (Math.sin(t * 9.1 + 0.7) * 0.6 + Math.sin(t * 17.3) * 0.4) * rumble;
@@ -750,7 +751,7 @@ export class Cameras {
     // a degree of pitch and roll is what kerbs and bumps look like)
     this.applyRotShake(car, speed, kmh, (far ? 0.7 : 1) * P.shake);
     // (a little wider at speed for the rush, never a fisheye)
-    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + P.fov + (P.dynFov ? Math.min(1, kmh / 330) * 6 : 0), dt, !this.initialized);
+    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + P.fov + (P.dynFov ? Math.min(1, kmh / 330) * 9 : 0), dt, !this.initialized);
     this.initialized = true;
   }
   private chasePitch = 0;

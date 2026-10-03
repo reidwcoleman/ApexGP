@@ -4,6 +4,7 @@ import { ATTRS, DriverCareer, NATIONS, RD, RD_MAX, SERIES_NAME, levelLabel, leve
 import { f1Original, f2Teams, type PlayerDriver } from '../career/Series.ts';
 import { PALETTE } from '../career/Career.ts';
 import { artFor } from './loadingArt.ts';
+import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath } from '../career/Season.ts';
 
 /**
  * The driver career's screens: the hub (who you are, the next round, the inbox where the
@@ -93,68 +94,170 @@ export function renderHub(p: HTMLElement, ctx: HubCtx) {
   else overview(body, ctx);
 }
 
+/** the round picked on the season map (null = the next one) */
+let mapSel: string | null = null;
+
+/**
+ * The overview is the season: a world map of the calendar (the route flown so far, the next leg
+ * drawing itself, every finish on its pin) with the picked round beneath it — and the paddock,
+ * kept short, beside that.
+ */
 function overview(p: HTMLElement, ctx: HubCtx) {
   const dc = ctx.dc;
   const d = dc.data!;
-  const grid = el('div', 'ch-grid', p);
-  const left = el('div', 'ch-col', grid);
-  const right = el('div', 'ch-col', grid);
-
-  // ---- the next round, and the team's targets for it
   const nt = dc.nextTrack;
-  const cd = nt ? CIRCUITS.find((c) => c.id === nt) : null;
-  const next = el('div', 'ch-next', left);
-  if (cd) {
-    const ci = d.calendar.indexOf(cd.id);
-    next.style.backgroundImage = `url("${artFor(cd.id)}")`;
+  const cal = d.calendar;
+  if (!mapSel || !cal.includes(mapSel)) mapSel = nt ?? cal[cal.length - 1];
+  const wrap = el('div', 'ch-season', p);
+  const map = el('div', 'cm-map ch-map', wrap);
+  const lower = el('div', 'ch-lower', wrap);
+  const card = el('div', 'ch-rnd', lower);
+  const side = el('div', 'ch-side', lower);
+
+  // ---- the map
+  const pts = cal.map((id, i) => {
+    const g = GEO[id] ?? [0, 0];
+    const [x, y] = project(g[0], g[1]);
+    const o = PIN_OFFSET[id] ?? [0, 0];
+    return { id, i, x, y, ox: o[0], oy: o[1], cd: CIRCUITS.find((c) => c.id === id)! };
+  });
+  let done = '';
+  let nextLeg = '';
+  let todo = '';
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const dd = Math.hypot(b.x - a.x, b.y - a.y);
+    const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${((a.x + b.x) / 2).toFixed(1)} ${((a.y + b.y) / 2 - Math.min(70, dd * 0.22)).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+    if (i < d.round) done += seg;
+    else if (i === d.round) nextLeg += seg;
+    else todo += seg;
+  }
+  const pins = pts
+    .map(({ id, i, x, y, ox, oy, cd }) => {
+      const r = d.results[i];
+      const medal = r && !r.dnf && r.pos <= 3 ? ['gold', 'silver', 'bronze'][r.pos - 1] : '';
+      const cls = ['pin', 'open', r ? 'done' : '', medal, i === d.round ? 'next' : ''].filter(Boolean).join(' ');
+      const label = r ? (r.dnf ? 'DNF' : `P${r.pos}`) : String(i + 1);
+      const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
+      const face = `<circle class="halo" r="20"/><circle class="disc" r="${r ? 15 : 13}"/><text y="4.5"${label.length > 2 ? ' class="sm"' : ''}>${label}</text>`;
+      const short = (cd?.short ?? id).toUpperCase();
+      const tw = 22 + short.length * 9.4;
+      const left = ox < 0 || x > MAP.w * 0.72;
+      const tag = `<g class="tag" transform="translate(${ox + (left ? -22 : 22)} ${oy})"><rect class="tbg" x="${left ? -tw : 0}" y="-13" width="${tw.toFixed(0)}" height="26" rx="6"/><text class="tn" x="${left ? -11 : 11}" y="4.5" text-anchor="${left ? 'end' : 'start'}">${short}</text></g>`;
+      return `<g class="pinw" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="2.4"/>${tag}<g class="${cls}" data-id="${id}" transform="translate(${ox} ${oy})">${face}</g></g>`;
+    })
+    .join('');
+  map.innerHTML =
+    `<svg viewBox="0 0 ${MAP.w} ${MAP_H}" preserveAspectRatio="xMidYMid slice">` +
+    `<defs><pattern id="cm-dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.05"/></pattern>` +
+    `<radialGradient id="cm-vig" cx="50%" cy="45%" r="75%"><stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/></radialGradient></defs>` +
+    `<g class="cm-world"><path class="land-base" d="${landPath()}"/><path class="land" d="${landPath()}"/>` +
+    `<path class="route todo" d="${todo}"/><path class="route done" d="${done}"/><path class="route next" d="${nextLeg}"/>${pins}</g>` +
+    `<rect class="vig" width="${MAP.w}" height="${MAP_H}" fill="url(#cm-vig)"/></svg>` +
+    `<div class="ch-map-cap"><b>${d.year} ${SERIES_NAME[d.series]}</b><span>${nt ? `Round ${d.round + 1} of ${cal.length}` : 'Season complete'}</span></div>`;
+  const world = map.querySelector<SVGGElement>('.cm-world')!;
+  const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
+  let first = true;
+  const focus = (id: string) => {
+    const g = GEO[id] ?? [45, 10];
+    const europe = g[0] > 40 && g[0] < 56 && g[1] > -12 && g[1] < 28;
+    const k = europe ? 2.1 : 1.4;
+    const [fx, fy] = project(g[0], g[1]);
+    // the part of the map the panel shows (the svg slices to fill it): centre the round in that,
+    // never showing past the map's edge
+    const cw = map.clientWidth || 1200;
+    const ch = map.clientHeight || 260;
+    const wide = cw / ch > MAP.w / MAP_H;
+    const vw = wide ? MAP.w : (MAP_H * cw) / ch;
+    const vh = wide ? (MAP.w * ch) / cw : MAP_H;
+    const cx = MAP.w / 2;
+    const cy = MAP_H / 2;
+    const tx = Math.min(cx - vw / 2, Math.max(cx + vw / 2 - MAP.w * k, cx - fx * k));
+    const ty = Math.min(cy - vh / 2, Math.max(cy + vh / 2 - MAP_H * k, cy - fy * k));
+    map.classList.toggle('instant', first);
+    world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
+    for (const w of pinws) w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
+    if (first) requestAnimationFrame(() => map.classList.remove('instant'));
+    first = false;
+  };
+
+  // ---- the picked round
+  const draw = () => {
+    const id = mapSel!;
+    const i = cal.indexOf(id);
+    const cd = CIRCUITS.find((c) => c.id === id)!;
+    const r = d.results[i];
+    const isNext = i === d.round && !!nt;
     const home = cd.country === d.driver.nationality;
-    next.innerHTML =
-      `<div class="ch-next-in"><div class="cap">Round ${ci + 1} of ${d.calendar.length}${home ? ' · Home race' : ''}</div><div class="nm">${esc(cd.name)}</div>` +
-      `<div class="facts"><span>${dc.laps} laps</span><span>${esc(ctx.forecast(cd.id))}</span></div></div>` +
-      (cd.centerline ? `<svg class="ch-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '');
-    const ob = el('div', 'ch-obj', left);
-    el('div', 'hp-cap', ob, `Team targets <span>expected P${dc.expected()}</span>`);
-    for (const o of dc.objectives()) el('div', 'ch-o', ob, `<i></i><span>${esc(o.label)}</span><b>+${o.rp} RP</b>`);
-    const go = el('div', 'cta ch-go', left, `Race round ${ci + 1}`);
-    ctx.action(go, () => ctx.onRace(cd.id));
-  } else {
-    next.innerHTML = `<div class="ch-next-in"><div class="cap">Season over</div><div class="nm">See you next year</div></div>`;
-  }
-  const row = el('div', 'ch-btns', left);
-  const cal = el('div', 'cta ghost', row, 'Season calendar');
-  ctx.action(cal, () => ctx.onCalendar());
-  const dev = el('div', 'cta ghost', row, `Car development · ${d.rp} RP`);
-  ctx.action(dev, () => ctx.onDevelop());
+    for (const g of Array.from(map.querySelectorAll<SVGGElement>('.pin'))) g.classList.toggle('sel', g.dataset.id === id);
+    for (const w of pinws) w.classList.toggle('sel', w.dataset.id === id);
+    focus(id);
+    card.style.setProperty('--art', `url("${artFor(cd.id)}")`);
+    card.innerHTML = '';
+    const top = el('div', 'ch-rnd-top', card);
+    top.innerHTML =
+      `<div class="ch-rnd-id"><div class="cap">Round ${i + 1}${home ? ' · Home race' : ''}</div><div class="nm">${esc(cd.name)}</div>` +
+      `<div class="facts"><span>${dc.laps} laps</span><span>${esc(isNext ? ctx.forecast(cd.id) : cd.country)}</span></div></div>` +
+      (cd.centerline ? `<svg class="ch-rnd-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '');
+    if (r) {
+      const mate = r.mate >= 99 ? 'DNF' : `P${r.mate}`;
+      el('div', 'ch-rnd-res', card, `<b class="${r.dnf ? 'dnf' : r.pos <= 3 ? 'pod' : ''}">${r.dnf ? 'DNF' : `P${r.pos}`}</b><span>${r.points} pts${r.fastest ? ' · fastest lap' : ''}</span><span>Teammate ${mate}</span>`);
+    } else if (isNext) {
+      const ob = el('div', 'ch-obj', card);
+      el('div', 'hp-cap', ob, `Team targets <span>expected P${dc.expected()}</span>`);
+      for (const o of dc.objectives()) el('div', 'ch-o', ob, `<i></i><span>${esc(o.label)}</span><b>+${o.rp} RP</b>`);
+    } else {
+      const n = i - d.round;
+      el('div', 'ch-rnd-res later', card, `<span>${n === 1 ? 'The round after next' : `In ${n} rounds`}</span>`);
+    }
+  };
 
-  // ---- the latest from the paddock
-  const inbox = el('div', 'ch-inbox', right);
-  el('div', 'hp-cap', inbox, 'Latest');
-  const list = el('div', 'ch-msgs short', inbox);
-  // (questions and offers waiting for an answer first)
+  // ---- the one call to action: always the next round (whatever is picked on the map)
+  const acts = el('div', 'ch-rnd-acts', lower);
+  const prev = el('div', 'cta ghost ch-step', acts, '‹');
+  const go = el('div', 'cta ch-go', acts, nt ? `Race round ${d.round + 1} · ${esc(CIRCUITS.find((c) => c.id === nt)?.short ?? '')}` : 'Season complete');
+  const nextB = el('div', 'cta ghost ch-step', acts, '›');
+  const step = (k: number) => {
+    const i = cal.indexOf(mapSel!);
+    mapSel = cal[(i + k + cal.length) % cal.length];
+    draw();
+  };
+  ctx.action(prev, () => step(-1));
+  if (nt) ctx.action(go, () => ctx.onRace(nt));
+  else go.classList.add('dis');
+  ctx.action(nextB, () => step(1));
+  map.addEventListener('click', (e) => {
+    const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
+    if (!g?.dataset.id) return;
+    mapSel = g.dataset.id;
+    draw();
+  });
+  map.addEventListener('dblclick', (e) => {
+    const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
+    if (g?.dataset.id && g.dataset.id === nt) ctx.onRace(nt);
+  });
+
+  // ---- the paddock, short: what needs an answer, the car, the contract
   const open = d.inbox.filter((m) => m.choices && m.picked === undefined);
-  const rest = d.inbox.filter((m) => !open.includes(m));
-  for (const m of [...open, ...rest].slice(0, 2)) list.appendChild(msgCard(m, ctx));
-  if (d.inbox.length > 2) {
-    const all = el('div', 'ch-link', inbox, `All messages (${d.inbox.length})`);
-    ctx.action(all, () => {
-      view = 'inbox';
-      ctx.rerender();
-    });
+  const latest = open[0] ?? d.inbox[0];
+  if (latest) {
+    el('div', 'hp-cap', side, `Paddock${dc.unread() ? ` <span>${dc.unread()} new</span>` : ''}`);
+    side.appendChild(msgCard(latest, ctx));
+    if (d.inbox.length > 1) {
+      const all = el('div', 'ch-link', side, `All messages (${d.inbox.length})`);
+      ctx.action(all, () => {
+        view = 'inbox';
+        ctx.rerender();
+      });
+    }
   }
-
-  // ---- the contract and where the driver stands
-  const con = el('div', 'ch-contract', right);
-  const c = d.contract;
-  const tn = teamName(d.series, c.team);
-  const mate = dc.mate();
-  con.innerHTML =
-    `<div class="hp-cap">Contract</div>` +
-    `<div class="ch-deal"><span><b>${esc(tn)}</b> · ${statusLabel(c.status)}</span><span>to ${c.until} · $${c.salary.toFixed(1)}M</span></div>` +
-    (d.next ? `<div class="ch-deal next"><span>Signed for ${d.year + 1}: <b>${esc(teamName(d.next.series, d.next.team))}</b></span><span>${statusLabel(d.next.status)}</span></div>` : '') +
-    meter('Reputation', d.rep) +
-    meter('Fan hype', d.hype) +
-    meter('Team trust', d.rel) +
-    `<div class="ch-foot"><span>Earnings $${d.money.toFixed(1)}M</span><span>${mate ? `vs ${esc(mate.last)} ${d.h2h.race[0]}–${d.h2h.race[1]}` : ''}</span></div>`;
+  draw();
+  // (the first focus ran before layout: frame it again once the panel has its size)
+  requestAnimationFrame(() => {
+    first = true;
+    draw();
+  });
 }
 
 function inboxView(p: HTMLElement, ctx: HubCtx) {

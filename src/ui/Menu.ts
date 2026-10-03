@@ -374,7 +374,7 @@ export class Menu {
     const accent = paint ? (paint.primary === '#111214' || paint.primary === '#2a2d33' ? paint.secondary : paint.primary) : uiColor(team);
     s.style.setProperty('--accent', accent);
     s.style.setProperty('--on-accent', onColor(accent));
-    el('div', 'hub-scrim', s);
+    if (!s.querySelector(':scope > .hub-scrim')) s.prepend(el('div', 'hub-scrim'));
     const c = this.career.data;
     el(
       'div',
@@ -384,6 +384,9 @@ export class Menu {
     );
     this.hubCredits = el('div', 'hub-credits', s);
     this.renderCredits();
+    // a soft shade down the left edge: the tab rail and the driver's name stay readable over
+    // whatever the garage has behind them (the wall's big number, the monitors)
+    el('div', 'hub-scrim', s);
     const rail = el('div', 'hub-rail', s);
     el('div', 'hub-brand', rail, 'Apex <span>GP</span>');
     this.hubTabs = HUB_TABS.map((t, i) => {
