@@ -313,8 +313,8 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
     // (every lap of every session before this one has laid some down: the dark line the TV pictures
     // show the whole way round, two tyre tracks inside a darker band, not only in the corners)
-    rub = max(rub, 0.34 * exp(-dd * dd / 2.6) + 0.22 * exp(-pow((abs(dd) - 0.82) / 0.3, 2.0)));
-    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.65, 1.0, uRaceRubber);
+    rub = max(rub, 0.5 * exp(-dd * dd / 2.6) + 0.3 * exp(-pow((abs(dd) - 0.82) / 0.3, 2.0)));
+    rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.8, 1.0, uRaceRubber);
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
     col = mix(col, vec3(0.05, 0.05, 0.051), rub * 0.8);
     rough = mix(rough, 0.52, rub * 0.5);
@@ -388,7 +388,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
       // freshly painted white edge line (track limit) on the last 0.2 m of the road:
       // bright, clean, a satin gloss from the glass beads
       float line = tsAA(hw - 0.2, alat);
-      vec3 paint = vec3(0.8, 0.8, 0.78) * (0.97 + 0.03 * m3.r);
+      vec3 paint = vec3(0.7, 0.69, 0.66) * (0.9 + 0.1 * m3.r);
       col = mix(col, paint, line);
       tsSpecOcc = mix(tsSpecOcc, 1.0, line);
       rough = mix(rough, 0.38, line);
@@ -411,9 +411,10 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // freshly painted: saturated, clean and glossy. Only rubber the session lays down on the inner
     // edge, where the tyres ride (uRaceRubber), dulls it.
     // (a kerb carries rubber from every session before this one too, so some is always there)
-    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.7, kd)) * mix(0.35, 1.0, uRaceRubber);
+    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.75, kd)) * mix(0.6, 1.0, uRaceRubber);
     float through = 0.0;
-    paint *= 1.12 * (0.98 + 0.04 * m3.b) * (1.0 + 0.04 * albDev);
+    // (a season of rubber, brake dust and grit: never the showroom red and white)
+    paint *= 0.96 * (0.92 + 0.16 * m3.b) * (1.0 + 0.06 * albDev);
     // chipped paint: grey concrete shows through where the tyres hammer it
     float chip = smoothstep(0.66, 0.74, texture2D(uMacro, vTrk * vec2(1.0 / 0.9, 1.0 / 1.7) + vec2(0.3, 0.1)).r) * (0.4 + 0.6 * (1.0 - kd)) * (1.0 - smoothstep(0.004, 0.015, px));
     paint = mix(paint, vec3(0.15, 0.145, 0.138) * (0.9 + 0.2 * m3.r), chip * 0.75);
@@ -422,7 +423,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float bjd = min(fract(sv), 1.0 - fract(sv));
     float bj = (1.0 - smoothstep(0.008, 0.008 + px, bjd)) * (1.0 - smoothstep(0.01, 0.04, px));
     paint *= 1.0 - 0.6 * bj;
-    float kDirt = smoothstep(0.72, 1.0, kd) * (0.45 + 0.55 * m24.b);
+    float kDirt = max(smoothstep(0.6, 1.0, kd) * (0.45 + 0.55 * m24.b), smoothstep(0.55, 0.85, m24.g) * 0.35);
     paint = mix(paint, paint * 0.55 + vec3(0.014, 0.012, 0.008), kDirt * 0.55);
     col = paint;
     // painted concrete is satin, not plastic: the paint's gloss varies block to block
@@ -445,6 +446,10 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
       // fresh anti-skid green paint: even and saturated, the grit gives it a fine matte texture
       // (the vivid green of the TV pictures: it reads as a colour, not a dark strip)
       vec3 green = vec3(0.035, 0.2, 0.075) * (0.96 + 0.06 * m3.b) * (1.0 + 0.1 * albDev);
+      // (weathered: the grit and the dirt cars drag across it dull and darken it in patches; a flat
+      // emerald strip was the most video-game thing on every circuit)
+      float wear = smoothstep(0.3, 0.8, m24.b) * 0.5 + smoothstep(0.55, 0.9, texture2D(uMacro, vTrk * vec2(1.0 / 1.3, 1.0 / 3.1) + vec2(0.17, 0.71)).r) * 0.5;
+      green = mix(green, vec3(0.06, 0.1, 0.06), 0.3 + 0.35 * wear) * (0.82 + 0.3 * m3.r);
       col = green;
       // thin white line on the outer edge of the verge
       float wl = tsBand(d, 1.32, 1.46);

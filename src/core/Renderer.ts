@@ -176,7 +176,7 @@ class MotionBlurEffect extends Effect {
         ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
         ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
         ['shutter', new THREE.Uniform(0)],
-        ['maxLen', new THREE.Uniform(0.09)],
+        ['maxLen', new THREE.Uniform(0.11)],
       ]),
     });
   }

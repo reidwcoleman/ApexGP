@@ -222,7 +222,11 @@ if ( leafK > 0.5 ) {
   float edgeOn = abs( dot( fN, normalize( vViewPosition ) ) );
   float thr = 0.5 + 0.55 * ( 1.0 - smoothstep( 0.16, 0.5, edgeOn ) );
   if ( lt.a * ( 1.0 + lod * 0.32 ) < thr ) discard;
-  diffuseColor.rgb *= lt.rgb;
+  // foliage as camera footage shows it: a dark olive mass, not a bright game green (real leaf albedo
+  // sits near 0.05–0.1; the atlas was painted brighter and more saturated than that)
+  vec3 lc = lt.rgb;
+  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.78 ) * vec3( 0.84, 0.8, 0.72 );
+  diffuseColor.rgb *= lc;
 } else {
   vec4 bk = texture2D( uBark, vTUv );
   float alb = 0.45 + bk.a * 0.75;
@@ -266,7 +270,8 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
       .replace(
         '#include <aomap_fragment>',
         `{
-  float ambientOcclusion = mix( mix( 0.45, 0.36, leafK ), 1.0, vTree.z );
+  // (the inside of a crown is deep in shade: little sky reaches it)
+  float ambientOcclusion = mix( mix( 0.45, 0.24, leafK ), 1.0, pow( vTree.z, 1.25 ) );
   // leaves: sky light scattered through the outer foliage (the crown is not an opaque blob)
   reflectedLight.indirectDiffuse *= ambientOcclusion * mix( vec3( 1.0 ), uLeafFill, leafK );
   reflectedLight.indirectSpecular *= ambientOcclusion * ambientOcclusion * mix( 1.0, 0.3, leafK );

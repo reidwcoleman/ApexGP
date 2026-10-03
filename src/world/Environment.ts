@@ -19,7 +19,7 @@ import { weatherUniforms } from './weatherUniforms.ts';
 
 
 /** the photographic layer over every weather/time look (see the eye adaptation in Environment.update) */
-const FILM = { exposure: 0.9, nightExposure: 0.9, saturation: 0.86, contrast: 1.04, tint: [1.13, 1.02, 0.7] as const, shadowTint: [1.12, 1.0, 0.76] as const, bloom: 1.35, bloomThreshold: 0.9 };
+const FILM = { exposure: 0.9, nightExposure: 0.9, saturation: 0.8, contrast: 1.04, tint: [1.13, 1.02, 0.7] as const, shadowTint: [1.12, 1.0, 0.76] as const, bloom: 1.35, bloomThreshold: 0.9 };
 
 /**
  * Everything beyond the barriers: sky, sun, clouds, environment map, aerial
