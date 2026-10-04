@@ -8,14 +8,27 @@ export type CameraMode =
   // the cameras the player can race with
   | 'chase' | 'far' | 'tcam' | 'cockpit' | 'helmet' | 'nose' | 'wheel' | 'heli' | 'tv'
   // more onboards
-  | 'tcamrev' | 'sidepod' | 'fwing' | 'rwing' | 'wheelr'
+  | 'tcamrev' | 'sidepod' | 'fwing' | 'rwing' | 'wheelr' | 'halo' | 'bumper' | 'sideback'
+  // more chase cameras
+  | 'lowchase' | 'gtchase'
   // trackside
   | 'tower' | 'longlens' | 'kerb' | 'pitwall' | 'grandstand' | 'gantry'
   // aerial and cinematic
-  | 'drone' | 'cine' | 'blimp' | 'topdown';
+  | 'drone' | 'cine' | 'blimp' | 'topdown'
+  // the TV director on the player's own race: cuts between the long lenses, the onboards and the chase cameras
+  | 'director';
 
-/** the in-race cycle (C key) and the settings choice: cameras you can drive with */
-export const CAMERA_ORDER: CameraMode[] = ['chase', 'far', 'tcam', 'cockpit', 'helmet', 'nose', 'wheel', 'heli', 'tv'];
+/**
+ * The in-race cycle (C key) and the settings choice: cameras you can drive with — the chase cameras,
+ * the onboards from the top of the car down to the road, the rear-facing ones, the aerial and
+ * trackside views and the TV director's edit.
+ */
+export const CAMERA_ORDER: CameraMode[] = [
+  'chase', 'far', 'lowchase', 'gtchase', 'drone',
+  'tcam', 'halo', 'cockpit', 'helmet', 'nose', 'bumper', 'wheel', 'sidepod',
+  'tcamrev', 'sideback',
+  'heli', 'tv', 'director',
+];
 
 /** player camera tuning: offsets on top of each camera's own framing */
 export interface CamPrefs {
@@ -39,8 +52,8 @@ export type CameraGroup = 'onboard' | 'chase' | 'trackside' | 'aerial';
 
 /** every camera, for spectating and replays (grouped: onboard, chase, trackside, aerial) */
 export const ALL_CAMERAS: CameraMode[] = [
-  'tcam', 'cockpit', 'helmet', 'nose', 'fwing', 'sidepod', 'wheel', 'wheelr', 'tcamrev', 'rwing',
-  'chase', 'far', 'drone', 'cine',
+  'tcam', 'halo', 'cockpit', 'helmet', 'nose', 'bumper', 'fwing', 'sidepod', 'wheel', 'wheelr', 'sideback', 'tcamrev', 'rwing',
+  'chase', 'far', 'lowchase', 'gtchase', 'drone', 'cine',
   'tv', 'tower', 'longlens', 'kerb', 'pitwall', 'grandstand', 'gantry',
   'heli', 'blimp', 'topdown',
 ];
@@ -48,15 +61,21 @@ export const ALL_CAMERAS: CameraMode[] = [
 export const CAMERA_LABEL: Record<CameraMode, string> = {
   chase: 'Chase',
   far: 'Chase far',
+  lowchase: 'Low chase',
+  gtchase: 'Long-lens chase',
   tcam: 'T-cam',
-  cockpit: 'Halo POV',
+  halo: 'Halo cam',
+  cockpit: 'Cockpit',
   helmet: 'Helmet cam',
-  nose: 'Nose',
+  nose: 'Nose cam',
+  bumper: 'Bumper cam',
   wheel: 'Front wheel',
   heli: 'Helicopter',
   tv: 'Trackside',
-  tcamrev: 'Rear-facing',
+  director: 'TV director',
+  tcamrev: 'Rear T-cam',
   sidepod: 'Sidepod',
+  sideback: 'Rear sidepod',
   fwing: 'Front wing',
   rwing: 'Rear wing',
   wheelr: 'Rear wheel',
@@ -73,14 +92,24 @@ export const CAMERA_LABEL: Record<CameraMode, string> = {
 };
 
 export const CAMERA_GROUP: Record<CameraMode, CameraGroup> = {
-  tcam: 'onboard', cockpit: 'onboard', helmet: 'onboard', nose: 'onboard', wheel: 'onboard', tcamrev: 'onboard', sidepod: 'onboard', fwing: 'onboard', rwing: 'onboard', wheelr: 'onboard',
-  chase: 'chase', far: 'chase', drone: 'chase', cine: 'chase',
+  tcam: 'onboard', cockpit: 'onboard', helmet: 'onboard', halo: 'onboard', nose: 'onboard', bumper: 'onboard', wheel: 'onboard', tcamrev: 'onboard', sidepod: 'onboard', sideback: 'onboard', fwing: 'onboard', rwing: 'onboard', wheelr: 'onboard',
+  chase: 'chase', far: 'chase', lowchase: 'chase', gtchase: 'chase', drone: 'chase', cine: 'chase',
   tv: 'trackside', tower: 'trackside', longlens: 'trackside', kerb: 'trackside', pitwall: 'trackside', grandstand: 'trackside', gantry: 'trackside',
   heli: 'aerial', blimp: 'aerial', topdown: 'aerial',
+  // (what it shows is the shot it has on air: Cameras.view)
+  director: 'chase',
 };
 
-/** cameras mounted on the car (audio hears the car from inside, the lens gets wet) */
-export const ONBOARD: Partial<Record<CameraMode, true>> = { tcam: true, cockpit: true, helmet: true, nose: true, wheel: true, tcamrev: true, sidepod: true, fwing: true, rwing: true, wheelr: true };
+/** cameras mounted on the car (audio hears the car from inside, the lens gets wet, the tight shadow cascade) */
+export const ONBOARD: Partial<Record<CameraMode, true>> = { tcam: true, cockpit: true, helmet: true, halo: true, nose: true, bumper: true, wheel: true, tcamrev: true, sidepod: true, sideback: true, fwing: true, rwing: true, wheelr: true };
+
+/**
+ * Cameras inside the cockpit, where the driver's head is: the driver is hidden (the lens is where his
+ * helmet would be) and the cockpit round the lens is shaded and defocused (Renderer's OnboardEffect),
+ * as the footage shows it. The cameras on the outside of the car (T-cam, nose, wheels, wings) see
+ * sunlit bodywork, in focus.
+ */
+export const INSIDE_CAR: Partial<Record<CameraMode, true>> = { cockpit: true, helmet: true, halo: true };
 
 /** cameras away from the car: audio hears it from where the camera is */
 export function isRemoteCam(m: CameraMode): boolean {
@@ -89,25 +118,87 @@ export function isRemoteCam(m: CameraMode): boolean {
 }
 
 /**
- * Car-mounted cameras that aren't on a model anchor: position and look direction
- * in the car's frame (+x left, +y up, +z forward), on the sprung body unless
- * `root` (wheel cams ride on the unsprung corner brackets).
+ * Car-mounted cameras (all but the driver's own eyes): position and look direction in the car's
+ * frame (+x left, +y up, +z forward; heights from the ground under the car at rest), on the sprung
+ * body unless `root` (the wheel cameras ride on brackets below the body's roll and pitch).
+ * Placed against the body's real shape (a raycast height map of the car, dm): the T-cam pod on the
+ * roll hoop above the airbox (its top 0.95 m, 0.25 m behind the helmet), the nose 0.6 m high at the
+ * front axle and 0.4 m at the wing, the wing's flaps 0.2–0.3 m, the sidepods' tops 0.5–0.6 m, the
+ * halo's hoop 0.9 m, the front tyres' tops 0.7 m between z 1.4 and 2.0, the rear wing 0.7–1.0 m.
  */
 interface Mount {
   pos: [number, number, number];
   dir: [number, number, number];
+  /** vertical field of view on a 16:9 screen */
   fov: number;
   root?: boolean;
+  /** bracket stiffness: its vibration relative to a typical mount's 0.65 */
   shake: number;
+  /** vibration profile (a SHAKE key; 'mount' when not given) */
+  prof?: string;
+  /** the housing flexes: its view follows the chassis at this rate (1/s), trailing it by a few ms */
+  flex?: number;
+  /** the share of the player's horizon setting this mount gets (0: bolted on, it rolls with the car) */
+  level?: number;
+  /** turns into the corners with the steering (rad per unit of steer, × the apex setting) */
+  apex?: number;
+  /** the lens widens with speed by this much (degrees at full speed, with the dynamic-FOV setting) */
+  dyn?: number;
+  /** `pos` is relative to the cockpit anchor (the driver's eyes) instead of the car's origin */
+  cockpit?: boolean;
 }
 const MOUNTS: Partial<Record<CameraMode, Mount>> = {
-  wheel: { pos: [0.66, 0.64, -0.1], dir: [-0.12, -0.03, 1], fov: 78, root: true, shake: 0.8 },
-  tcamrev: { pos: [0, 1.1, -0.34], dir: [0, -0.2, -1], fov: 66, shake: 0.4 },
-  sidepod: { pos: [0.72, 0.9, -0.8], dir: [0.06, -0.1, 1], fov: 70, shake: 0.5 },
+  // the classic F1 onboard: the pod on top of the roll hoop just behind the driver's head — the halo's
+  // hoop and the helmet below the middle, the front tyres either side, the whole car rolling with it
+  tcam: { pos: [0, 1.135, -0.255], dir: [0, -0.07, 1], fov: 56, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  // the pod's rear-facing lens: the engine cover and the rear wing below, whoever is behind above
+  tcamrev: { pos: [0, 1.125, -0.36], dir: [0, -0.16, -1], fov: 58, shake: 0.6, prof: 'tcam', flex: 22, level: 0.1, dyn: 2 },
+  // the broadcast halo camera: low in the tub in front of the driver, bolted to the chassis (no neck
+  // to soak up the G or the bumps): the halo's centre pillar splits a wide picture, its hoop frames
+  // the top and the wheel fills the bottom, out of focus; it rolls with the car
+  halo: { pos: [0, -0.035, 0.03], dir: [0, -0.05, 1], fov: 62, shake: 0.6, prof: 'halo', cockpit: true, level: 0.35, apex: 0.18, dyn: 5 },
+  // the nose pod on the nose's flank ahead of the suspension: the nose's top at the bottom corner,
+  // the wing's flaps across the bottom, the road rushing at the lens
+  nose: { pos: [-0.17, 0.5, 2.0], dir: [0.012, -0.07, 1], fov: 58, shake: 0.7, prof: 'nose', dyn: 5 },
+  // the bumper: low on the nose tip over the front wing, the road a hand's width under the lens
+  bumper: { pos: [0, 0.34, 2.98], dir: [0, -0.025, 1], fov: 60, shake: 0.75, prof: 'nose', dyn: 6 },
+  // beside the cockpit at the front of the sidepod, past the mirror: the front tyre and its arms
+  wheel: { pos: [0.6, 0.8, 0.66], dir: [0.06, -0.13, 1], fov: 62, root: true, shake: 0.8, dyn: 4 },
+  // the sidepod's flank, looking forward along the car (the low "pod" shot of the TikTok onboards)
+  sidepod: { pos: [0.72, 0.9, -0.8], dir: [0.06, -0.1, 1], fov: 62, shake: 0.5, dyn: 4 },
+  // the front of the sidepod looking back down the car's flank: the sidepod, the rear tyre, the
+  // wing's endplate and whoever is behind
+  sideback: { pos: [0.66, 0.76, 0.95], dir: [-0.08, -0.08, -1], fov: 60, shake: 0.6, level: 0.2, dyn: 2 },
   fwing: { pos: [0.3, 0.52, 3.05], dir: [-0.08, -0.02, -1], fov: 62, shake: 0.7 },
   // above the rear wing, looking forward over the whole car
   rwing: { pos: [0, 1.28, -2.62], dir: [0, -0.13, 1], fov: 60, shake: 0.5 },
   wheelr: { pos: [0.74, 0.62, -0.5], dir: [0.1, -0.26, -1], fov: 74, root: true, shake: 0.8 },
+};
+
+/**
+ * The chase cameras on their virtual arm: distance behind and height above the car (m), the arm's
+ * stiffness (position ω, vertical ω, yaw follow rate), how far ahead and how high it aims, the lens,
+ * and the lowest it may go over the road.
+ */
+interface ChaseCfg {
+  dist: number;
+  h: number;
+  w: number;
+  wy: number;
+  yawK: number;
+  ahead: number;
+  aimH: number;
+  fov: number;
+  clear: number;
+  /** speed widening (degrees at full speed) */
+  dyn: number;
+}
+const CHASE: Partial<Record<CameraMode, ChaseCfg>> = {
+  chase: { dist: 5.55, h: 1.2, w: 12.5, wy: 8, yawK: 7, ahead: 13, aimH: 0.34, fov: 47, clear: 0.9, dyn: 10 },
+  far: { dist: 7.7, h: 1.95, w: 10, wy: 6.5, yawK: 5.5, ahead: 16, aimH: 0.18, fov: 44, clear: 0.9, dyn: 10 },
+  // a hand's width over the tarmac behind the diffuser, the rear wing high in the frame: the
+  // road and the kerbs tear under the lens (the sims' "bumper chase")
+  lowchase: { dist: 4.6, h: 0.42, w: 14, wy: 11, yawK: 7.5, ahead: 12, aimH: 0.52, fov: 52, clear: 0.28, dyn: 12 },
 };
 
 /** frame-rate independent smoothing factor: the share of the gap closed in dt at rate k (1/s) */
@@ -233,11 +324,17 @@ const SHAKE: Record<string, ShakeCfg> = {
   helmet: { fl: 4.2, fh: 13, zl: 0.3, zh: 0.25, low: 1.3, high: 0.8, ax: [1, 0.6, 0.85], heave: 0.45 },
   // the T-cam pod and the nose: stiff brackets in the airflow — less sway, more buzz
   tcam: { fl: 8.5, fh: 19, zl: 0.25, zh: 0.2, low: 0.6, high: 1.1, ax: [1, 0.4, 0.7], heave: 0.05 },
+  // the halo camera: on the tub itself — no neck between it and the bumps, the monocoque's own buzz
+  halo: { fl: 7, fh: 17, zl: 0.26, zh: 0.22, low: 0.8, high: 1.0, ax: [1, 0.4, 0.75], heave: 0.06 },
   nose: { fl: 11, fh: 22, zl: 0.22, zh: 0.18, low: 0.7, high: 1.35, ax: [1, 0.35, 0.8], heave: 0.03 },
   mount: { fl: 10, fh: 21, zl: 0.22, zh: 0.18, low: 0.75, high: 1.2, ax: [1, 0.35, 0.8], heave: 0.03 },
   // the chase cameras hang off a virtual arm: a soft sway with the bumps, a fine shiver at speed
   chase: { fl: 4.2, fh: 11, zl: 0.38, zh: 0.3, low: 0.5, high: 0.35, ax: [1, 0.5, 0.7], heave: 0.6 },
   far: { fl: 3.6, fh: 10, zl: 0.4, zh: 0.3, low: 0.38, high: 0.25, ax: [1, 0.5, 0.7], heave: 0.6 },
+  // low over the road the arm is short and stiff: less sway, more of the road's chatter
+  lowchase: { fl: 5.5, fh: 14, zl: 0.34, zh: 0.28, low: 0.45, high: 0.6, ax: [1, 0.45, 0.8], heave: 0.25 },
+  // a camera car's stabilised long lens: a slow float, a faint shiver of the road
+  gtchase: { fl: 1.6, fh: 9, zl: 0.5, zh: 0.35, low: 0.1, high: 0.04, ax: [1, 0.8, 0.4], heave: 0 },
 };
 /** base strengths (rad RMS) of the speed buzz, the road and the kicks for a band strength of 1 */
 const SHAKE_SPEED_HI = 0.0016;
@@ -320,7 +417,14 @@ class CamShake {
  */
 export class Cameras {
   readonly camera: THREE.PerspectiveCamera;
+  /** the camera chosen (the player's pick, the spectating director's) */
   mode: CameraMode = 'chase';
+  /** the camera on air this frame: the mode, or the shot the TV director has cut to */
+  private cur: CameraMode = 'chase';
+  /** what is on screen: `mode`, or under the TV director ('director') the shot it has on air */
+  get view(): CameraMode {
+    return this.mode === 'director' ? this.dirShot : this.mode;
+  }
   lookBack = false;
   /** the player's camera tuning (Settings → Camera tuning) */
   prefs: CamPrefs = { ...DEFAULT_CAM };
@@ -534,8 +638,8 @@ export class Cameras {
   }
 
   set(mode: CameraMode) {
-    // chase ↔ chase far glides over a third of a second (every other change is a clean cut)
-    if (this.initialized && mode !== this.mode && CAMERA_GROUP[mode] === 'chase' && CAMERA_GROUP[this.mode] === 'chase' && mode !== 'drone' && mode !== 'cine' && this.mode !== 'drone' && this.mode !== 'cine') {
+    // chase ↔ chase far ↔ low chase glide over a third of a second (every other change is a clean cut)
+    if (this.initialized && mode !== this.mode && CHASE[mode] && CHASE[this.mode]) {
       this.blendPos.copy(this.camera.position);
       this.blendQ.copy(this.camera.quaternion);
       this.blendFov = this.camera.fov;
@@ -548,10 +652,19 @@ export class Cameras {
     this.tvIndex = -1;
     this.blimpInit = false;
     this.cuts++;
+    // the director opens on the chase camera and makes its first cut after a beat
+    this.dirShot = 'chase';
+    this.dirAge = 0;
+    this.dirLen = 2.5;
+    this.dirHist.length = 0;
   }
 
   /** bumped on every cut (a new shot, a reset): frame-to-frame effects (motion blur) skip that frame */
   cuts = 0;
+  /** the car the cameras follow (its root), null before the first frame */
+  get followed(): THREE.Object3D | null {
+    return this.lastRig?.root ?? null;
+  }
   /** force a fresh framing (a cut) on the next update */
   cut() {
     this.cuts++;
@@ -560,9 +673,10 @@ export class Cameras {
     this.blimpInit = false;
   }
 
-  /** the lens has depth of field worth rendering (trackside long lenses) */
+  /** the lens has depth of field worth rendering (trackside long lenses, the long-lens chase) */
   get lensDof(): boolean {
-    return CAMERA_GROUP[this.mode] === 'trackside';
+    const v = this.view;
+    return CAMERA_GROUP[v] === 'trackside' || v === 'gtchase';
   }
 
   /** does some camera of this trackside mode cover track position s (for the director) */
@@ -576,7 +690,7 @@ export class Cameras {
 
   /** where the current trackside camera is ("Turn 4", "Pit wall"…), '' for the others */
   get where(): string {
-    if (!TV_KINDS[this.mode] || this.tvIndex < 0) return '';
+    if (!TV_KINDS[this.view] || this.tvIndex < 0) return '';
     return this.tv[this.tvIndex]?.where ?? '';
   }
 
@@ -620,6 +734,10 @@ export class Cameras {
     const speed = Math.max(0, car.vx);
     const kmh = speed * 3.6;
 
+    // the TV director: cut to its next shot when this one has run (before the lens is rung for it)
+    if (this.mode === 'director') this.directorStep(dt, car, speed);
+    this.cur = this.view;
+
     this.shakeT += dt;
     const impulseIn = this.impulse;
     this.impulse = Math.max(0, this.impulse - dt * 2.5);
@@ -628,7 +746,7 @@ export class Cameras {
     const fwdCar = this.v2.set(0, 0, 1).applyQuaternion(root.quaternion);
     cam.up.set(0, 1, 0);
 
-    switch (this.mode) {
+    switch (this.cur) {
       case 'heli':
         return this.heliShot(dt, carPos, fwdCar, speed);
       case 'blimp':
@@ -639,12 +757,14 @@ export class Cameras {
         return this.droneShot(dt, car, carPos, fwdCar, speed, track);
       case 'cine':
         return this.cineShot(dt, car, carPos, track);
-      case 'chase':
-      case 'far':
-        return this.chaseShot(dt, car, carPos, track, kmh, speed);
+      case 'gtchase':
+        return this.gtShot(dt, car, carPos, speed, track);
     }
-    if (TV_KINDS[this.mode]) {
-      this.tvShot(dt, car, carPos, fwdCar, speed, track, TV_KINDS[this.mode]!);
+    const chase = CHASE[this.cur];
+    if (chase) return this.chaseShot(dt, car, carPos, track, kmh, speed, chase);
+    const kinds = TV_KINDS[this.cur];
+    if (kinds) {
+      this.tvShot(dt, car, carPos, fwdCar, speed, track, kinds);
       return;
     }
     this.onboardShot(dt, car, rig, kmh);
@@ -652,10 +772,11 @@ export class Cameras {
 
   /** which vibration profile the current camera has (null: it doesn't ride with the car) */
   private shakeCfg(): ShakeCfg | null {
-    const m = this.mode;
-    if (m === 'chase' || m === 'far' || m === 'cockpit' || m === 'helmet' || m === 'tcam' || m === 'nose') return SHAKE[m];
-    if (MOUNTS[m]) return SHAKE.mount;
-    return null;
+    // (the view, not `cur`: tools/camshake.mjs rings the lens without running frame())
+    const m = this.view;
+    if (CHASE[m] || m === 'gtchase' || m === 'cockpit' || m === 'helmet') return SHAKE[m] ?? SHAKE.chase;
+    const mt = MOUNTS[m];
+    return mt ? SHAKE[mt.prof ?? 'mount'] : null;
   }
   private lastImpulse = 0;
   private shakeCut = -1;
@@ -677,12 +798,14 @@ export class Cameras {
     }
     // (a sped-up replay or simulated race shakes less: the lens can't follow it anyway)
     // (each car-mounted bracket has its own stiffness: Mount.shake, relative to a typical 0.65)
-    const k = this.prefs.shake * (this.timeScale > 1 ? 1 / Math.sqrt(this.timeScale) : 1) * (MOUNTS[this.mode] ? MOUNTS[this.mode]!.shake / 0.65 : 1);
+    const k = this.prefs.shake * (this.timeScale > 1 ? 1 / Math.sqrt(this.timeScale) : 1) * (MOUNTS[this.view] ? MOUNTS[this.view]!.shake / 0.65 : 1);
     const sp = Math.min(1.15, speed / 85);
     // the road: compressive (a kerb ridge shakes ~4× a rough braking zone, not 30×); a replay's
     // stand-in car carries no road signal, so its kerbs and the grass come from the surfaces
     const rv = car.roadVel || (car.onKerb ? 0.9 * Math.min(1, speed / 60) : 0) + (car.offTrack ? 2 * Math.min(1, speed / 30) : 0);
-    const road = Math.min(7, Math.pow(rv / 0.08, 0.6)) * Math.min(1, speed / 12);
+    // (the long-lens chase rides in its own camera car: the car's kerbs and knocks aren't its own)
+    const own = this.view !== 'gtchase';
+    const road = own ? Math.min(7, Math.pow(rv / 0.08, 0.6)) * Math.min(1, speed / 12) : 0;
     const lo = (SHAKE_SPEED_LO * sp * sp + SHAKE_ROAD_LO * road) * c.low * k;
     const hi = (SHAKE_SPEED_HI * sp * sp + SHAKE_ROAD_HI * road) * c.high * k;
     // kicks: a wheel striking a kerb (taken from the car once), a contact (the rise of the impulse)
@@ -693,7 +816,7 @@ export class Cameras {
     }
     if (impulse > this.lastImpulse + 0.05) kick += SHAKE_KICK * 3 * (impulse - this.lastImpulse);
     this.lastImpulse = impulse;
-    this.shake.step(dt, c, lo, hi, kick * c.low * k);
+    this.shake.step(dt, c, lo, hi, own ? kick * c.low * k : 0);
   }
 
   /** the lens' vibration as a rotation in its own frame (and a little travel along `up`) */
@@ -837,9 +960,8 @@ export class Cameras {
     this.initialized = true;
   }
 
-  private chaseShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, track: Track, kmh: number, speed: number) {
+  private chaseShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, track: Track, kmh: number, speed: number, C: ChaseCfg) {
     const cam = this.camera;
-    const far = this.mode === 'far';
     // looking back is a cut, not a 180° swing round the side of the car
     if (this.lookBack !== this.chaseBack) {
       this.chaseBack = this.lookBack;
@@ -861,7 +983,7 @@ export class Cameras {
     let dy = target - this.camYaw;
     while (dy > Math.PI) dy -= Math.PI * 2;
     while (dy < -Math.PI) dy += Math.PI * 2;
-    this.camYaw += dy * ease(dt, far ? 5.5 : 7);
+    this.camYaw += dy * ease(dt, C.yawK);
 
     // the car surges away on the throttle and comes back toward the lens on the brakes (eased, so
     // a gear change or a kerb doesn't jolt the framing)
@@ -869,9 +991,9 @@ export class Cameras {
     this.surge = this.initialized ? this.surge + (surgeT - this.surge) * ease(dt, 3.2) : surgeT;
     // low and close behind the rear wing, the car in the lower third of the frame
     const P = this.prefs;
-    const dist = (far ? 7.7 : 5.55) + P.dist + this.surge + speed * 0.0024;
+    const dist = C.dist + P.dist + this.surge + speed * 0.0024;
     // (low, as the race footage frames it: the road rushing under the lens sells the speed)
-    const height = (far ? 1.95 : 1.2) + P.height + car.heave * 0.5;
+    const height = Math.max(C.clear + 0.05, C.h + P.height + car.heave * 0.5);
     // spring the camera's offset from the car (not its world position): a world-space spring
     // trails a car at 300 km/h by ~2v/ω ≈ 12 m; the offset only lags the car's turns and surges
     const want = this.v3.set(-Math.sin(this.camYaw) * dist, height, -Math.cos(this.camYaw) * dist);
@@ -879,19 +1001,24 @@ export class Cameras {
       this.camPos.copy(want);
       this.camVel.set(0, 0, 0);
     }
-    spring(this.camPos, this.camVel, want, far ? 10 : 12.5, far ? 6.5 : 8, dt);
+    spring(this.camPos, this.camVel, want, C.w, C.wy, dt);
     this.v4.copy(carPos).add(this.camPos);
     // keep above the road: under the car, and under the lens itself (the road behind the car is
-    // higher than the car over a crest — without this the camera sinks into it going downhill)
+    // higher than the car over a crest — without this the camera sinks into it going downhill);
+    // the low chase measures the road right under its lens (the car may be off line, sideways)
     const ground = track.point(car.s, car.lateral, 0, this.v5).y;
-    const behind = track.point(track.wrap(car.s - (this.lookBack ? -dist : dist)), car.lateral, 0, this.v5).y;
-    this.v4.y = Math.max(this.v4.y, ground + 0.9, behind + height * 0.82);
+    let behind: number;
+    if (C.clear < 0.5) {
+      const pr = track.project(this.v4.x, this.v4.z, Math.floor(track.wrap(car.s - dist)), 30);
+      behind = track.point(pr.s, pr.lateral, 0, this.v5).y;
+    } else behind = track.point(track.wrap(car.s - (this.lookBack ? -dist : dist)), car.lateral, 0, this.v5).y;
+    this.v4.y = Math.max(this.v4.y, ground + C.clear, behind + Math.max(C.clear, height * 0.82));
     // look ahead down the road and into the corner (from the yaw rate), easing in and out
     const leadT = speed > 8 && !this.lookBack ? THREE.MathUtils.clamp(car.r * 0.22, -0.2, 0.2) * P.apex : 0;
     this.chaseLead += (leadT - this.chaseLead) * ease(dt, 2.6);
     const ly = this.camYaw + this.chaseLead;
-    const ahead = far ? 16 : 13;
-    const look = this.v3.set(carPos.x + Math.sin(ly) * ahead, carPos.y + (far ? 0.18 : 0.34), carPos.z + Math.cos(ly) * ahead);
+    const ahead = C.ahead;
+    const look = this.v3.set(carPos.x + Math.sin(ly) * ahead, carPos.y + C.aimH, carPos.z + Math.cos(ly) * ahead);
     if (this.lookBack) look.set(carPos.x + Math.sin(this.camYaw) * 8, carPos.y + 0.5, carPos.z + Math.cos(this.camYaw) * 8);
     // (also relative to the car, or it trails v/20 m behind at speed)
     look.sub(carPos);
@@ -918,45 +1045,78 @@ export class Cameras {
     this.applyShake(this.upV.set(0, 1, 0));
     // (wider at speed for the rush — most of it above 150 km/h, where the speed has to be sold —
     // never a fisheye)
-    this.setFov(fovFor(far ? 44 : 47, cam.aspect) + P.fov + (P.dynFov ? dynFov(kmh) * 10 : 0), dt, !this.initialized);
+    this.setFov(fovFor(C.fov, cam.aspect) + P.fov + (P.dynFov ? dynFov(kmh) * C.dyn : 0), dt, !this.initialized);
     this.initialized = true;
   }
   private chasePitch = 0;
   private chaseRoll = 0;
 
   private onboardShot(dt: number, car: CarPhysics, rig: CarRig, kmh: number) {
+    const m = this.cur;
+    if (m === 'cockpit' || m === 'helmet') return this.eyeShot(dt, car, rig, kmh);
     const cam = this.camera;
-    const root = rig.root;
-    const mount = MOUNTS[this.mode];
-    // onboard cameras ride on anchors, or on a mount on the body / a wheel bracket
-    if (mount) {
-      const holder = mount.root ? root : rig.body;
-      holder.updateMatrixWorld();
-      holder.getWorldQuaternion(this.q);
-      this.v3.set(mount.pos[0], mount.pos[1], mount.pos[2]).applyMatrix4(holder.matrixWorld);
-    } else {
-      const anchor = this.mode === 'cockpit' ? rig.anchors.cockpit : this.mode === 'helmet' ? (rig.anchors.eyes ?? rig.anchors.cockpit) : this.mode === 'tcam' ? rig.anchors.tcam : rig.anchors.nose;
-      anchor.updateMatrixWorld();
-      anchor.getWorldPosition(this.v3);
-      anchor.getWorldQuaternion(this.q);
-      if (this.mode === 'helmet') {
-        // half of the head's own motion reaches the lens (all of it is seasick); the eye point
-        // rides between the chassis and the head the same way
-        rig.body.getWorldQuaternion(this.lookQ);
-        this.q.slerp(this.lookQ, 0.5);
-        rig.anchors.cockpit.getWorldPosition(this.v5);
-        this.v3.lerp(this.v5, 0.4);
-      }
-    }
-    // the T-cam housing flexes: its view trails the chassis by a few milliseconds
-    if (this.mode === 'tcam' || this.mode === 'tcamrev') {
+    const mount = MOUNTS[m] ?? MOUNTS.tcam!;
+    // a bracket on the body (or on the car's ground frame for the wheel cameras)
+    const holder = mount.root ? rig.root : rig.body;
+    holder.updateMatrixWorld();
+    holder.getWorldQuaternion(this.q);
+    const P = this.v3.set(mount.pos[0], mount.pos[1], mount.pos[2]);
+    if (mount.cockpit) P.add(rig.anchors.cockpit.position);
+    P.applyMatrix4(holder.matrixWorld);
+    // a housing on a stalk flexes: its view trails the chassis by a few milliseconds (the jolts soften)
+    if (mount.flex) {
       if (!this.initialized) this.lookQ.copy(this.q);
-      this.lookQ.slerp(this.q, Math.min(1, dt * 22));
+      this.lookQ.slerp(this.q, ease(dt, mount.flex));
       this.q.copy(this.lookQ);
     }
     const up = this.upV.set(0, 1, 0).applyQuaternion(this.q);
     const leftV = this.leftV.set(1, 0, 0).applyQuaternion(this.q);
-    if (this.mode === 'cockpit') {
+    // the lens' look direction in the car's frame
+    const f = this.fV.set(mount.dir[0], mount.dir[1], mount.dir[2]).normalize().applyQuaternion(this.q);
+    if (this.lookBack) {
+      f.x = -f.x;
+      f.z = -f.z;
+    }
+    // a bolted-on camera rolls with the car (that's the look of the real onboards); a share of the
+    // player's horizon setting levels it
+    const level = (mount.level ?? 0) * this.prefs.horizon;
+    if (level > 0) up.lerp(this.v5.set(0, 1, 0), level).normalize();
+    // the chassis cameras lean into the corner a touch with the steering (eased)
+    if (mount.apex) {
+      const lookT = this.lookBack ? 0 : THREE.MathUtils.clamp(car.steer * mount.apex, -0.12, 0.12) * this.prefs.apex;
+      this.headLook = this.initialized ? this.headLook + (lookT - this.headLook) * ease(dt, 4) : lookT;
+      f.addScaledVector(leftV, this.headLook).normalize();
+    }
+    cam.position.copy(P);
+    const look = this.v4.copy(P).addScaledVector(f, 20);
+    cam.up.copy(up);
+    cam.lookAt(look);
+    cam.up.set(0, 1, 0);
+    // riding with the car: the bracket sways and buzzes with the road (ringShake)
+    this.applyShake(up);
+    this.setFov(fovFor(mount.fov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? dynFov(kmh) * (mount.dyn ?? 3) : 0), dt, !this.initialized);
+    this.initialized = true;
+  }
+
+  /** the driver's own eyes: the cockpit (the eye on the seat, thrown about by the G) and the helmet cam */
+  private eyeShot(dt: number, car: CarPhysics, rig: CarRig, kmh: number) {
+    const cam = this.camera;
+    const helmet = this.cur === 'helmet';
+    const anchor = helmet ? (rig.anchors.eyes ?? rig.anchors.cockpit) : rig.anchors.cockpit;
+    anchor.updateMatrixWorld();
+    anchor.getWorldPosition(this.v3);
+    anchor.getWorldQuaternion(this.q);
+    if (helmet) {
+      // half of the head's own motion reaches the lens (all of it is seasick); the eye point
+      // rides between the chassis and the head the same way
+      rig.body.getWorldQuaternion(this.lookQ);
+      this.q.slerp(this.lookQ, 0.5);
+      rig.anchors.cockpit.getWorldPosition(this.v5);
+      this.v3.lerp(this.v5, 0.4);
+    }
+    const up = this.upV.set(0, 1, 0).applyQuaternion(this.q);
+    const leftV = this.leftV.set(1, 0, 0).applyQuaternion(this.q);
+    if (!helmet) {
       // the head is thrown about by the G on its neck (a spring with a little overshoot, so the
       // weight lands and settles): to the outside of the corner, forward and down on the brakes
       // with a nod, pressed back into the seat on the power
@@ -980,56 +1140,173 @@ export class Cameras {
       this.v3.addScaledVector(leftV, H[0]).addScaledVector(up, H[1]).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), H[2]);
       // the driver's neck holds the horizon: most of the chassis roll (and the banking) is taken
       // out, and only a hint of the head's own lean against the G is left in
-      const worldUp = this.v5.set(0, 1, 0);
-      up.lerp(worldUp, this.prefs.horizon).addScaledVector(leftV, this.headRoll * 0.25).normalize();
-    }
-    if (this.mode === 'helmet') {
+      up.lerp(this.v5.set(0, 1, 0), this.prefs.horizon).addScaledVector(leftV, this.headRoll * 0.25).normalize();
+      // the driver's eyes: low in the tub and forward against the headrest's front, so the halo's
+      // hoop frames the top of the picture, the centre pillar splits it, the front tyres sit at the
+      // sides and the wheel's screen and shift lights fill the bottom — the real onboard proportions
+      this.v3.addScaledVector(up, COCKPIT_EYE_UP).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
+    } else {
       // the driver's own eyes: the camera rides the head (it leans against the G, nods under
       // braking and turns into the corners — see CarRig.setG), with the engine's buzz through the
       // seat and only a little of the chassis roll taken out by the neck
       up.lerp(this.v5.set(0, 1, 0), this.prefs.horizon * 0.45).normalize();
     }
-    if (this.mode === 'tcam') this.v3.addScaledVector(up, 0.14);
-    // the nose camera sits on the nose's crest half a metre back from the tip, so the tip, the
-    // pitot and the front wing's flaps sit in the bottom of the picture with the road beyond
-    if (this.mode === 'nose') this.v3.addScaledVector(up, 0.215).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), -0.5);
-    // the driver's eyes sit high in the cockpit, looking over the wheel and the dash
-    // the driver's eyes: low in the tub and forward against the headrest's front, so the halo's
-    // hoop frames the top of the picture, the centre pillar splits it, the front tyres sit at the
-    // sides and the wheel's screen and shift lights fill the bottom — the real onboard proportions
-    if (this.mode === 'cockpit') this.v3.addScaledVector(up, COCKPIT_EYE_UP).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
     cam.position.copy(this.v3);
-    const f = this.fV;
-    let lift: number;
-    if (mount) {
-      // the mount's look direction in the car's frame
-      f.set(mount.dir[0], mount.dir[1], mount.dir[2]).normalize().applyQuaternion(this.q);
-      lift = 0;
-    } else {
-      f.set(0, 0, 1).applyQuaternion(this.q);
-      lift = this.mode === 'tcam' ? -0.9 : this.mode === 'nose' ? -1.5 : this.mode === 'helmet' ? -1.6 : -1.0;
-    }
+    const f = this.fV.set(0, 0, 1).applyQuaternion(this.q);
+    let lift = helmet ? -1.6 : COCKPIT_LIFT;
     if (this.lookBack) f.negate();
-    // look into the corner in the cockpit: eased, so a keyboard's full-lock taps don't jerk the view
-    if (this.mode === 'cockpit') {
+    if (!helmet) {
+      // look into the corner: eased, so a keyboard's full-lock taps don't jerk the view
       const lookT = this.lookBack ? 0 : THREE.MathUtils.clamp(car.steer * 0.55, -0.16, 0.16) * this.prefs.apex;
       this.headLook = this.initialized ? this.headLook + (lookT - this.headLook) * ease(dt, 4.5) : lookT;
       f.addScaledVector(leftV, this.headLook).normalize();
+      // (the head's nod on the brakes tips the look down a touch)
+      lift -= this.head[3] * 20;
     }
-    // (the head's nod on the brakes tips the look down a touch)
-    if (this.mode === 'cockpit') lift = COCKPIT_LIFT - this.head[3] * 20;
     const look = this.v4.copy(this.v3).addScaledVector(f, 20).addScaledVector(up, lift);
     cam.up.copy(up);
     cam.lookAt(look);
     cam.up.set(0, 1, 0);
-    // riding with the car: the mount (or the head) sways and buzzes with the road (ringShake)
+    // riding with the car: the head sways and buzzes with the road (ringShake)
     this.applyShake(up);
-    // (a touch narrower than before: the halo, the wheel and the T-cam's airbox read at their real
-    // size instead of shrinking into a fisheye)
-    const baseFov = mount ? mount.fov : this.mode === 'cockpit' ? COCKPIT_FOV : this.mode === 'helmet' ? 68 : this.mode === 'tcam' ? 60 : 64;
-    this.setFov(fovFor(baseFov, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? dynFov(kmh) * 4.5 : 0), dt, !this.initialized);
+    // (a touch narrower than a game's: the halo and the wheel read at their real size instead of
+    // shrinking into a fisheye)
+    this.setFov(fovFor(helmet ? 68 : COCKPIT_FOV, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? dynFov(kmh) * 4.5 : 0), dt, !this.initialized);
     this.initialized = true;
   }
+
+  /**
+   * The long-lens chase (the GT replays, the TikTok edits): a camera car far behind on the circuit
+   * with a long lens that holds the car at a set size, so the road compresses, the car sweeps across
+   * the frame through the corners and the field stacks up behind it. When the circuit bends between
+   * them (a hairpin, trees, a wall on the inside) it closes in until it sees the car again.
+   */
+  private gtShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, speed: number, track: Track) {
+    const cam = this.camera;
+    const realDt = dt / Math.max(1, this.timeScale);
+    // distance behind (along the circuit), easing so a lift or a burst of power breathes the shot
+    const backT = 30 + Math.min(85, speed) * 0.16 + this.prefs.dist * 3;
+    // the camera car runs a smooth line: a share of the car's lateral, eased
+    const latT = car.lateral * 0.55;
+    this.gtLat = this.initialized ? this.gtLat + (latT - this.gtLat) * ease(dt, 0.9) : latT;
+    const p = this.v4;
+    const at = (back: number) => {
+      const s = track.wrap(car.s - back);
+      const hw = track.halfWidthAt(s);
+      track.point(s, THREE.MathUtils.clamp(this.gtLat, -hw, hw), 2.3 + this.prefs.height + back * 0.035, p);
+      if (this.sight) p.y = Math.max(p.y, this.sight.groundAt(p.x, p.z) + 1.2);
+      return p;
+    };
+    this.aim.copy(carPos);
+    this.aim.y += 0.7;
+    const clear = (back: number) => !this.sight || this.sight.clear(at(back), this.aim, 5, 0);
+    // closer in until it sees the car (a hairpin, the trees on the inside of a bend)
+    const closest = (back: number) => {
+      while (back > 9 && !clear(back)) back *= 0.72;
+      return back;
+    };
+    if (!this.initialized) {
+      this.gtBack = closest(backT);
+      this.gtBlock = 0;
+    } else {
+      // breathe toward the distance for the speed, but only out into clear air
+      const next = this.gtBack + (backT - this.gtBack) * ease(realDt, 0.6);
+      if (next <= this.gtBack || clear(next)) this.gtBack = next;
+      // the road has turned between them for a beat: cut to a camera car nearer in (a lens
+      // whipping 30 m forward in one frame would be a smear, not a move)
+      this.gtBlock = clear(this.gtBack) ? 0 : this.gtBlock + realDt;
+      if (this.gtBlock > 0.3) {
+        this.gtBack = closest(this.gtBack);
+        this.gtBlock = 0;
+        this.initialized = false;
+        this.cuts++;
+      }
+    }
+    at(this.gtBack);
+    cam.position.copy(p);
+    // the operator holds the car a little low in the frame and a beat ahead of where it is
+    const look = this.v3.copy(carPos);
+    look.y += 0.6 + Math.min(0.3, this.gtBack * 0.008);
+    this.feedForward(look, car, 1.92 / 9);
+    if (!this.initialized) this.panFrom(look, car, 9);
+    spring(this.camLook, this.tvLookV, look, 9, 9, dt);
+    cam.lookAt(this.camLook);
+    // the stabilised head floats a fraction of a degree (ringShake: the camera car on the road)
+    this.applyShake(this.upV.set(0, 1, 0));
+    const dist = Math.max(3, p.distanceTo(carPos));
+    // the lens holds ~4.6 m of the scene's height round the car (it is ~30 % of the frame's width)
+    const fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(2.3 / dist)), 2, 40) + this.prefs.fov * 0.2;
+    this.setFov(fov, dt, !this.initialized);
+    this.initialized = true;
+    // focus on the car, shallow: the road ahead and the field behind melt away
+    this.tvFocus.copy(carPos);
+    this.tvFocus.y += 0.5;
+    this.tvDof = THREE.MathUtils.clamp(10 / Math.max(2, this.fov), 0.6, 2.6);
+    this.tvRange = Math.max(4, dist * 0.08);
+  }
+  private gtBack = 40;
+  private gtLat = 0;
+  private gtBlock = 0;
+
+  /**
+   * The TV director on the player's own race (mode 'director'): the TikTok edit — a long lens at the
+   * end of the straight, the T-cam down to the braking zone, the long-lens chase through the
+   * corners, a low pod shot, the halo, the helicopter — cutting every few seconds, never to the same
+   * camera twice running and almost always to a different kind of camera. Trackside shots are only
+   * picked where a camera covers the car (and the next few seconds of its lap), and are cut short
+   * when a camera loses the car. Timed in real seconds.
+   */
+  private directorStep(dt: number, car: CarPhysics, speed: number) {
+    const realDt = dt / Math.max(1, this.timeScale);
+    this.dirAge += realDt;
+    const g = CAMERA_GROUP[this.dirShot];
+    // a trackside camera that has run out of coverage or lost the car hands over early
+    const done = this.dirAge >= this.dirLen || (g === 'trackside' && this.dirAge > 1.5 && (this.lost || !this.covers(this.dirShot, car.s)));
+    if (!done) return;
+    const s = car.s;
+    const ahead = this.track.wrap(s + Math.min(220, speed * 3));
+    const covered = (m: CameraMode) => this.covers(m, s) && this.covers(m, ahead);
+    const w: [CameraMode, number][] = [];
+    // (the weights: about one shot in three from trackside, the rest riding with the car)
+    if (covered('longlens')) w.push(['longlens', 3.2]);
+    if (covered('tower')) w.push(['tower', 1.4]);
+    if (covered('kerb')) w.push(['kerb', 0.8]);
+    w.push(['gtchase', 2.6], ['tcam', 2.4], ['halo', 1.5], ['nose', 1.0], ['sidepod', 0.8], ['bumper', 0.6], ['wheel', 0.6]);
+    w.push(['lowchase', 1.0], ['chase', 0.8], ['drone', 1.0], ['tcamrev', 0.5], ['heli', 0.6]);
+    const last = this.dirShot;
+    const lastG = CAMERA_GROUP[last];
+    let total = 0;
+    for (const e of w) {
+      if (e[0] === last) e[1] = 0;
+      else if (this.dirHist.includes(e[0])) e[1] *= 0.25;
+      // a cut changes the kind of picture: onboard → trackside → chase …
+      if (CAMERA_GROUP[e[0]] === lastG) e[1] *= 0.2;
+      total += e[1];
+    }
+    let r = Math.random() * total;
+    let pick: CameraMode = 'chase';
+    for (const e of w) {
+      r -= e[1];
+      if (r <= 0 && e[1] > 0) {
+        pick = e[0];
+        break;
+      }
+    }
+    this.dirHist.push(pick);
+    if (this.dirHist.length > 4) this.dirHist.shift();
+    this.dirShot = pick;
+    this.dirAge = 0;
+    const pg = CAMERA_GROUP[pick];
+    // short, punchy shots (the edits cut every 3–6 s); a trackside camera holds while the car passes
+    this.dirLen = pg === 'trackside' ? 5 + Math.random() * 3 : pg === 'aerial' ? 4.5 + Math.random() * 2 : 3.2 + Math.random() * 2.8;
+    this.lost = false;
+    this.lostPrev = false;
+    this.cut();
+  }
+  private dirShot: CameraMode = 'chase';
+  private dirAge = 0;
+  private dirLen = 2.5;
+  private readonly dirHist: CameraMode[] = [];
 
   /** TV director + operator: cut between the cameras that cover the car, frame and follow like a person on a long lens */
   private tvShot(dt: number, car: CarPhysics, carPos: THREE.Vector3, fwdCar: THREE.Vector3, speed: number, track: Track, kinds: ShotKind[]) {
@@ -1129,14 +1406,13 @@ export class Cameras {
     look.x += (Math.sin(t * 0.83) + Math.sin(t * 2.1) * 0.35) * hand;
     look.y += Math.sin(t * 1.27 + 1) * hand * 0.7;
     look.z += Math.sin(t * 0.61 + 2) * hand * 0.6;
-    if (!this.initialized) {
-      this.camLook.copy(look);
-      this.tvLookV.set(0, 0, 0);
-    }
     // a critically damped pan: smooth starts and stops, a slight lag on a fast car
-    // (the operator anticipates: most of the spring's 2v/ω lag behind a moving car is fed forward)
+    // (the operator anticipates: nearly all of the spring's 2v/ω lag behind a moving car is fed
+    // forward — a long lens has no slack for more: a few metres of lag 15 m off throws the car out
+    // of a tight frame as it passes)
     const w = wide ? 14 : 8.5;
-    this.feedForward(look, car, 1.7 / w);
+    this.feedForward(look, car, 1.92 / w);
+    if (!this.initialized) this.panFrom(look, car, w);
     spring(this.camLook, this.tvLookV, look, w, 8.5, dt);
     cam.position.copy(tc.pos);
     // the platform sways in the wind; the low cameras shake as the car thunders past
@@ -1144,10 +1420,16 @@ export class Cameras {
     cam.position.x += Math.sin(t * 0.7) * 0.02 + Math.sin(t * 47) * 0.012 * pass;
     cam.position.y += Math.sin(t * 0.9 + 2) * 0.015 + Math.sin(t * 59) * 0.012 * pass;
     cam.lookAt(this.camLook);
-    // zoom: hold the car at a set size in frame (fixed wide lenses don't zoom)
+    // zoom: hold the car at a set size in frame (fixed wide lenses don't zoom), sized for where the
+    // car will be in a third of a second (an operator zooms out ahead of a car closing on the lens)
+    // and never tighter than keeps the car inside the frame; out fast, in gently
     const aspect = Math.max(0.5, cam.aspect);
-    const fov = wide ?? THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(2 * Math.atan(tc.frame / (2 * dist * aspect))), tc.kind === 'long' ? 0.9 : 2.2, tc.kind === 'stand' ? 60 : 50);
-    this.setFov(fov, dt * 0.6, !this.initialized);
+    this.aimNext.copy(carPos);
+    this.feedForward(this.aimNext, car, 0.35);
+    const dz = Math.max(4, Math.min(dist, tc.pos.distanceTo(this.aimNext)));
+    const off = THREE.MathUtils.radToDeg(this.v4.copy(carPos).sub(tc.pos).normalize().angleTo(this.v5.copy(this.camLook).sub(tc.pos).normalize()));
+    const fov = wide ?? THREE.MathUtils.clamp(Math.max(THREE.MathUtils.radToDeg(2 * Math.atan(tc.frame / (2 * dz * aspect))), off * 2.6), tc.kind === 'long' ? 0.9 : 2.2, tc.kind === 'stand' ? 60 : 50);
+    this.setFov(fov, fov > this.fov ? dt * 2 : dt * 0.5, !this.initialized);
     this.initialized = true;
     // focus pull on the car; a long lens has a shallow depth of field
     this.tvFocus.copy(carPos);
@@ -1158,7 +1440,7 @@ export class Cameras {
   private tvAge = 0;
   /** real seconds the trackside angle on air has been up (the director doesn't cut a fresh angle away) */
   get angleAge(): number {
-    return TV_KINDS[this.mode] ? this.tvAge : Infinity;
+    return TV_KINDS[this.view] ? this.tvAge : Infinity;
   }
   private tvBlockT = 0;
   private lostPrev = false;
@@ -1187,6 +1469,17 @@ export class Cameras {
     // in fast, out slowly
     this.pullD = !this.initialized || want < this.pullD ? want : this.pullD + (want - this.pullD) * Math.min(1, dt * 1.5);
     if (this.pullD < 0.999) p.lerpVectors(this.aim, p, this.pullD);
+  }
+
+  /**
+   * A new shot's pan starts already moving with the car, where the spring settles behind a target
+   * moving with it (2v/ω back): from rest it would swing after the car for its first few frames.
+   */
+  private panFrom(target: THREE.Vector3, car: CarPhysics, w: number) {
+    this.camLook.copy(target);
+    this.feedForward(this.camLook, car, -2 / w);
+    const sy = Math.sin(car.yaw), cy = Math.cos(car.yaw);
+    this.tvLookV.set(car.vx * sy + car.vy * cy, 0, car.vx * cy - car.vy * sy);
   }
 
   /** push a spring's target ahead along the car's velocity by k seconds (cancels the spring's lag) */

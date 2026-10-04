@@ -240,11 +240,16 @@ export class Director {
     add('wheel', 0.2 * ob);
     add('wheelr', 0.12 * ob);
     add('tcamrev', (battle ? 1.2 : 0.3) * ob);
+    add('sideback', (battle ? 0.5 : 0.15) * ob);
+    add('bumper', 0.2 * ob);
     add('rwing', 0.4 * ob);
-    // chase, drone and cinematic
+    // (the halo cam stays out of the mix: the highlights studio only hides the driver for the cockpit)
+    // chase, drone and cinematic; the long-lens chase stacks a battle up in one frame
+    add('gtchase', (crash || pit ? 0.3 : 1.3) * (battle ? 1.6 : 1));
     add('drone', 0.8 * (crash ? 1.4 : 1));
     add('cine', pit || ctx === 'finish' ? 1.6 : 0.4);
     add('chase', 0.3);
+    add('lowchase', pit ? 0 : 0.35);
     // aerial
     add('heli', 1.6 * (crash || start ? 2 : 1) * (battle ? 1.3 : 1));
     add('blimp', start ? 1.4 : 0.2);

@@ -158,8 +158,8 @@ npm run check    # tsc --noEmit
   crashes, the flag, the podium) are re-filmed offscreen from TV cameras and encoded as smooth 30 fps
   video with broadcast graphics, played on the garage video wall and in the Highlights tab.
 - **Watch and rewatch** — simulate a race (pick the circuit, laps, weather, time, grid and more,
-  or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 24 cameras
-  (onboards, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
+  or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 29 cameras
+  (onboards, chase and long-lens chase, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
   camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
 - **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
@@ -174,7 +174,7 @@ npm run check    # tsc --noEmit
   sunny frame keeps its dark shade; darker nights), a print stage after tone mapping (`FilmEffect` in Renderer.ts:
   a warm black floor that is crushed to black at night, colourless deepest shadows, a warm clip), warm halation
   round every bright light (the bloom), and a low sun's glow that builds over kilometres of air rather
-  than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
+  than veiling a car down a long lens. Inside the cockpit (cockpit, helmet, halo cam: `INSIDE_CAR`) the lens is exposed for
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
   depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
   overlay (real onboard footage has none), and night races are lit by a faint moon only, so the headlights,
@@ -184,20 +184,29 @@ npm run check    # tsc --noEmit
   `Cameras.cuts`. Engine/wind mixes are balanced against real V6 turbo-hybrid footage by band energy
   (`tools/audiocheck.mjs --bands`: cockpit ≈ 22 % < 150 Hz, 58 % 150–600 Hz, 16 % 600–2k, 3 % 2–6k). `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
-- **Racing cameras** — chase / far (surge, G lean, brake pitch, look to the apex, glide between
-  them), T-cam, Halo POV, a driver's-eye Helmet cam (rides the driver's head, framed by the visor),
-  every lens riding with the car vibrating like its mount (`CamShake` in Cameras.ts: noise-rung
+- **Racing cameras** — 18 to race with (C cycles them, Settings → Camera picks one): chase / far / low
+  chase a hand's width over the road (surge, G lean, brake pitch, look to the apex, glide between them),
+  a long-lens chase (a camera car 30–45 m back on the circuit holding the car on a 6–9° lens, the field
+  stacked behind it in a shallow focus; it cuts to a closer camera car when a bend comes between them),
+  the chase drone, and onboards placed against the body's measured shape (`MOUNTS` in Cameras.ts, each
+  with its own lens, bracket stiffness, housing flex, roll and corner look): the T-cam on the roll hoop,
+  the broadcast halo cam low in the tub (the centre pillar splitting a wide picture), the cockpit eye,
+  the helmet cam, the nose pod, the bumper cam over the front wing, the front-wheel cam, the sidepod,
+  the rear-facing T-cam and rear sidepod; the helicopter, trackside, and a **TV director** for your own
+  race that cuts every 3–8 s between long lenses, onboards and the chase cameras like the TikTok edits
+  (`Cameras.view` is the shot on air). The helmet cam rides the driver's head, framed by the visor;
+  every lens rides with the car vibrating like its mount (`CamShake` in Cameras.ts: noise-rung
   resonators — the head or bracket sway at 4–11 Hz, the structure's buzz at 11–22 Hz — driven by the
   speed, the road relief under the wheels, kerb ridges and strikes, the grass and contacts; calibrated
-  against the reference onboards with `node tools/camshake.mjs`: the Halo POV moves ≈0.4 % of the frame
+  against the reference onboards with `node tools/camshake.mjs`: the cockpit moves ≈0.4 % of the frame
   height per 30 fps frame on a straight at 300 km/h, ≈1 % on kerbs with sharper strike jolts), the
   cockpit eye thrown about by the G on a sprung neck (outward in corners, forward and down with a nod
   on the brakes, back into the seat on the power), a lens that widens with speed (mostly above 150 km/h),
-  nose and more; a live steering-wheel screen and shift lights in the onboards,
+  a live steering-wheel screen and shift lights in the onboards,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
   lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
   in the middle, front tyres at the sides, a full 2026 wheel with dome buttons, rotaries and paddles
-  at the bottom); eye-level cams get a tight fine-texel shadow cascade, and on High/Ultra the frame is
+  at the bottom); every onboard gets a tight fine-texel shadow cascade, and on High/Ultra the frame is
   upscaled to native resolution (bicubic + contrast-adaptive sharpening). The front and rear
   suspension links are live: they run from the chassis pickups to the upright clevises and follow
   the steering and the body's motion.
