@@ -89,7 +89,7 @@ export interface Layout {
 }
 
 export interface Landmark {
-  kind: 'ferris' | 'coaster' | 'hospitality' | 'cameraTower' | 'hotel' | 'villa';
+  kind: 'ferris' | 'coaster' | 'hospitality' | 'cameraTower' | 'hotel' | 'villa' | 'hangar' | 'controlTower' | 'carpark' | 'campsite';
   x: number;
   z: number;
   /** ground height (absolute) */
@@ -619,9 +619,50 @@ function planSilverstone(
 
   // open ground: paddock and hospitality behind the Wing, car parks and campsites on the airfield
   for (let s = 200; s <= 620; s += 40) { const q = at(s, 150); clear(q.x, q.z, 50, 30, 0.1); }
+  // (the race-weekend fields: campsites by the corners, the big car parks out on the airfield)
+  const fields: Landmark[] = [];
   for (const [s, lat, r] of [[co.sApex, -140, 90], [bk.sApex, -120, 80], [sw.sApex, -150, 90], [lu.sApex, -120, 70], [ab.sApex, -130, 70], [2000, 160, 110], [4800, 180, 130]] as const) {
     const q = at(s, lat);
-    clear(q.x, q.z, r, 45, 0.15);
+    clear(q.x, q.z, r, 45, r > 100 ? 0.02 : 0.1);
+    const tg = track.frame(s).tangent;
+    fields.push({ kind: r > 100 ? 'carpark' : 'campsite', x: q.x, z: q.z, y: 0, rot: Math.atan2(tg.x, tg.z), size: r });
+  }
+  // the wartime airfield's T2 hangars that gave the Hangar Straight its name, and the old control tower:
+  // beside the straight, on whichever side has room, square to the track
+  {
+    const f = new THREE.Vector3();
+    let placed = 0;
+    for (const s of [4640, 4800, 4960]) {
+      const fr = track.frame(s);
+      const rot = Math.atan2(fr.tangent.x, fr.tangent.z);
+      for (const side of [L, R]) {
+        const q = at(s, side * (track.barrierAt(s, side) + 120));
+        // the footprint (36 × 74 m, the long side along the track) clear of the circuit and the stands
+        let ok = !map.inPitZone(q.x, q.z, 40);
+        for (const [lx, lz] of [[-20, -40], [20, -40], [-20, 40], [20, 40], [0, 0]]) {
+          f.set(q.x + lx * Math.cos(rot) + lz * Math.sin(rot), 0, q.z - lx * Math.sin(rot) + lz * Math.cos(rot));
+          if (map.trackClearance(f.x, f.z) < 45 || map.excluded(f.x, f.z, 8)) ok = false;
+        }
+        if (!ok) continue;
+        const y = map.naturalExact(q.x, q.z);
+        fields.push({ kind: 'hangar', x: q.x, z: q.z, y, rot, size: 74 });
+        map.worldPads.push({ cx: q.x, cz: q.z, halfW: 26, halfL: 44, angle: rot, h: y, blend: 16, paved: true });
+        map.exclusions.push({ cx: q.x, cz: q.z, halfW: 22, halfL: 40, angle: rot });
+        clear(q.x, q.z, 60, 25, 0);
+        if (placed++ === 0) {
+          // the control tower, out beyond the first hangar
+          const t = at(s + 40, side * (track.barrierAt(s + 40, side) + 205));
+          if (map.trackClearance(t.x, t.z) > 40 && !map.excluded(t.x, t.z, 12)) {
+            const ty = map.naturalExact(t.x, t.z);
+            fields.push({ kind: 'controlTower', x: t.x, z: t.z, y: ty, rot, size: 14 });
+            map.worldPads.push({ cx: t.x, cz: t.z, halfW: 12, halfL: 12, angle: rot, h: ty, blend: 10, paved: true });
+            map.exclusions.push({ cx: t.x, cz: t.z, halfW: 10, halfL: 10, angle: rot });
+            clear(t.x, t.z, 30, 15, 0);
+          }
+        }
+        break;
+      }
+    }
   }
 
   const trackLine = (sA: number, sB: number, latFn: (s: number) => number, step = 10): V2[] => {
@@ -704,6 +745,7 @@ function planSilverstone(
   const landmarks: Landmark[] = [];
   addHospitality(track, map, landmarks, [[260, -1], [520, -1], [cl.sApex - 40, 1], [ab.sStart - 60, 1]], 96);
   addCameraTowers(track, map, landmarks, ['Abbey', 'Village', 'Luffield', 'Copse', 'Becketts', 'Stowe']);
+  landmarks.push(...fields);
   return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages, landmarks };
 }
 

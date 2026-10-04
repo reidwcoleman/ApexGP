@@ -14,6 +14,7 @@ import { buildGrandstands } from './grandstands.ts';
 import { concourseCrowd } from '../../people/strollers.ts';
 import { buildBanking } from './banking.ts';
 import { buildSpaScenery, spaTerrainLook } from './venues/spaScenery.ts';
+import { buildSilverstoneScenery } from './venues/silverstoneScenery.ts';
 import { buildVillages } from './villages.ts';
 import { austinTerrainLook, buildAustinScenery } from './venues/austinScenery.ts';
 import { buildSpielbergScenery, spielbergTerrainLook } from './venues/spielbergScenery.ts';
@@ -149,6 +150,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   tLap = performance.now();
   const villages = buildVillages(map, layout);
   group.add(villages.group);
+  if (map.venue === 'airfield') group.add(buildSilverstoneScenery(layout, map));
   if (map.venue === 'ardennes') { group.add(buildSpaScenery(map).group); spaTerrainLook(terrain.uniforms); }
   if (map.venue === 'austin') { group.add(buildAustinScenery(layout, track, map).group); austinTerrainLook(terrain.uniforms); }
   if (map.venue === 'spielberg') { group.add(buildSpielbergScenery(map)); spielbergTerrainLook(terrain.uniforms); }

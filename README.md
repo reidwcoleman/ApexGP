@@ -121,6 +121,10 @@ npm run check    # tsc --noEmit
   garden clearings (terrain `uTownYard` = 1: lawns, no painted roofs), each village with its stone church under a
   slate spire. Raidillon has gravel on the outside and the big covered stand at the top (2022); Les Combes gravel;
   the Ardennes forest is about three-quarters spruce.
+- **Silverstone on a race weekend** (`env/venues/silverstoneScenery.ts`, placed by `planSilverstone` as landmark
+  kinds `carpark` / `campsite` / `hangar` / `controlTower`) — instanced grass car parks out on the airfield (rows nose
+  to nose, two-thirds full), campsites by the corners (ridge tents, cars, the odd motorhome), three WWII T2 hangars
+  beside the Hangar Straight on whichever side has room, and the old watch office with its glazed control room.
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars
