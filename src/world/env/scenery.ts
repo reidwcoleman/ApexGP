@@ -24,6 +24,7 @@ import { tuneInterlagosTerrain } from './venues/interlagosCity.ts';
 import { buildZandvoortScenery } from './venues/zandvoortScenery.ts';
 import { buildSakhirScenery } from './venues/sakhirScenery.ts';
 import { buildHungaroringScenery } from './venues/hungaroringScenery.ts';
+import { buildMonzaScenery } from './venues/monzaScenery.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -166,6 +167,8 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   if (zv) group.add(zv.group);
   if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
   if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
+  // Monza: the Villa Reale, Milan's towers across the plain
+  if (track.def.id === 'monza') group.add(buildMonzaScenery(layout, map).group);
   lap('villages');
   yield { group, step: 'villages' };
   tLap = performance.now();

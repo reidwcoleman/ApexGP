@@ -83,16 +83,19 @@ float cBand( float a, float b, float x, float w ) { return clamp( ( x - a ) / w 
   bool own = vWin.z > 0.0;
   float seed = own ? vWin.z : cH( floor( vCW.xz / 23.0 ) ) + 0.01;
   float hy = vCW.y - ( own ? vWin.w : 0.0 );
-  float cw = vWin.x;
+  // aWin.x ≥ 1.5 marks a classical palazzo: tall piano-nobile storeys, tall windows between wide piers,
+  // no shopfronts (the Villa Reale, Monza's Duomo)
+  float cl = step( 1.5, vWin.x );
+  float cw = vWin.x * ( 1.0 - cl );
   // storey (offices ~4 m, older and residential ~3.2 m) and bay (curtain mullions ~1.5 m, piers ~3 m)
-  float storey = mix( 3.1, 3.9, fract( seed * 7.13 ) ) + 0.35 * cw;
-  float bay = mix( mix( 2.6, 3.6, fract( seed * 5.31 ) ), mix( 1.35, 1.8, fract( seed * 3.77 ) ), step( 0.5, cw ) );
+  float storey = mix( mix( 3.1, 3.9, fract( seed * 7.13 ) ) + 0.35 * cw, 5.6, cl );
+  float bay = mix( mix( mix( 2.6, 3.6, fract( seed * 5.31 ) ), mix( 1.35, 1.8, fract( seed * 3.77 ) ), step( 0.5, cw ) ), 4.2, cl );
   float fl = hy / storey, ub = u / bay;
   vec2 fw = fwidth( vec2( ub, fl ) ) + 1e-4;
   float fu = fract( fl ), cu = fract( ub );
   // punched windows: sill to head inside the storey, between piers
-  float sill = mix( 0.26, 0.38, fract( seed * 11.1 ) ), head = mix( 0.8, 0.92, fract( seed * 13.7 ) );
-  float pier = mix( 0.1, 0.24, fract( seed * 17.3 ) );
+  float sill = mix( mix( 0.26, 0.38, fract( seed * 11.1 ) ), 0.2, cl ), head = mix( mix( 0.8, 0.92, fract( seed * 13.7 ) ), 0.78, cl );
+  float pier = mix( mix( 0.1, 0.24, fract( seed * 17.3 ) ), 0.33, cl );
   float punched = cBand( sill, head, fu, fw.y ) * cBand( pier, 1.0 - pier, cu, fw.x );
   float punchedMean = ( head - sill ) * ( 1.0 - 2.0 * pier );
   // curtain wall: a spandrel band of the tower's own depth (some all-glass), thin mullions
@@ -102,7 +105,7 @@ float cBand( float a, float b, float x, float w ) { return clamp( ( x - a ) / w 
   float curtainMean = ( 0.975 - span ) * ( 1.0 - 2.0 * mull );
   float far = smoothstep( 0.3, 0.85, max( fw.x, fw.y ) );
   float cwS = step( 0.5, cw );
-  cWin = mix( mix( punched, curtain, cwS ), mix( punchedMean, curtainMean, cwS ), far ) * side * step( 4.6, hy );
+  cWin = mix( mix( punched, curtain, cwS ), mix( punchedMean, curtainMean, cwS ), far ) * side * step( mix( 4.6, 0.8, cl ), hy );
   // each pane: its own interior and blind, and its own bend (reflections break up pane by pane)
   vec2 cell = floor( vec2( ub, fl ) );
   cPane = cH( cell + seed * 37.0 );
@@ -119,12 +122,14 @@ float cBand( float a, float b, float x, float w ) { return clamp( ( x - a ) / w 
   wall = mix( wall, wall * 0.55 + glass * 0.6, cw * 0.5 );
   diffuseColor.rgb = mix( wall, glass, cWin * 0.92 );
   // street level: shopfronts (dark glass between piers) under a canopy line
-  float gf = ( 1.0 - smoothstep( 4.0, 4.6, hy ) ) * step( 0.35, hy ) * side;
+  float gf = ( 1.0 - smoothstep( 4.0, 4.6, hy ) ) * step( 0.35, hy ) * side * ( 1.0 - cl );
   float shop = mix( cBand( 0.12, 0.88, fract( u / 6.5 ), fwidth( u / 6.5 ) + 1e-4 ), 0.76, far );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.028, 0.03, 0.033 ), gf * shop * 0.9 );
-  diffuseColor.rgb *= 1.0 - 0.35 * cBand( 4.25, 4.6, hy, fwidth( hy ) + 1e-3 ) * side;
+  diffuseColor.rgb *= 1.0 - 0.35 * cBand( 4.25, 4.6, hy, fwidth( hy ) + 1e-3 ) * side * ( 1.0 - cl );
+  // a palazzo: a string course under every storey and a plinth
+  diffuseColor.rgb *= 1.0 - cl * side * ( 0.18 * cBand( 0.0, 0.05, fu, fw.y ) + 0.12 * ( 1.0 - smoothstep( 0.6, 1.0, hy ) ) );
   // the street canyon: the lower storeys see less sky
-  diffuseColor.rgb *= mix( 1.0, mix( 0.55, 1.0, smoothstep( 0.0, 34.0, hy ) ), side );
+  diffuseColor.rgb *= mix( 1.0, mix( 0.55, 1.0, smoothstep( 0.0, 34.0, hy ) ), side * ( 1.0 - 0.7 * cl ) );
   // flat roofs: tar and gravel, a paler parapet line
   float roof = smoothstep( 0.6, 0.9, vCN.y );
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.075, 0.074, 0.072 ) * ( 0.85 + 0.3 * cH( floor( vCW.xz / 9.0 ) ) ), roof * ( 1.0 - vWin.y * 0.5 ) );
@@ -140,7 +145,7 @@ float cBand( float a, float b, float x, float w ) { return clamp( ( x - a ) / w 
 totalEmissiveRadiance += vec3( 1.0, 0.78, 0.5 ) * cLit * 0.9 * smoothstep( 0.0, 0.5, uFlood.x );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-mtl-city2-' + (instanced ? 'i' : 'm');
+  mat.customProgramCacheKey = () => 'apex-mtl-city3-' + (instanced ? 'i' : 'm');
   return mat;
 }
 

@@ -95,7 +95,8 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
       { kind: 'ridge', dist: 52000, height: 3600, from: 285, to: 330, rough: 0.9, snow: 0.55, haze: 0.55, seed: 3 },
       { kind: 'ridge', dist: 30000, height: 1900, from: 315, to: 60, rough: 0.8, snow: 0.9, haze: 0.8, seed: 7, base: 100 },
       { kind: 'ridge', dist: 20000, height: 650, from: 300, to: 75, rough: 0.45, haze: 0.9, seed: 11, base: 60, fields: 0.45 },
-      { kind: 'city', dist: 16000, height: 230, from: 165, to: 215, center: 188, spread: 6, rough: 0.8, seed: 5 },
+      // (the named towers stand in 3D in front of it: venues/monzaScenery.ts; this is the sprawl behind)
+      { kind: 'city', dist: 17500, height: 130, from: 180, to: 230, center: 206, spread: 9, rough: 0.8, seed: 5 },
       { kind: 'forest', dist: 5000, height: 40, rough: 0.5, seed: 13 },
       // (tree lines stand on the real terrain inside 15 km: layer on layer of poplar rows and copses
       // across the plain, each a little paler, so the flat land recedes instead of stopping)

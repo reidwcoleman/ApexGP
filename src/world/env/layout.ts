@@ -89,7 +89,7 @@ export interface Layout {
 }
 
 export interface Landmark {
-  kind: 'ferris' | 'coaster' | 'hospitality' | 'cameraTower' | 'hotel';
+  kind: 'ferris' | 'coaster' | 'hospitality' | 'cameraTower' | 'hotel' | 'villa';
   x: number;
   z: number;
   /** ground height (absolute) */
@@ -395,6 +395,15 @@ export function planLayout(track: Track, map: WorldMap): Layout {
 
   // landmarks: hospitality behind the main stands, TV towers
   const landmarks: Landmark[] = [];
+  // the Villa Reale at the park's southern end, facing the town, its gardens running north into the park
+  // (south of the Viale Mirabello; built by venues/monzaScenery.ts)
+  {
+    const vx = C.x + 160, vz = C.z + 2470;
+    landmarks.push({ kind: 'villa', x: vx, z: vz, y: map.naturalExact(vx, vz), rot: 0.28, size: 120 });
+    map.clearings.push({ x: vx, z: vz - 20, r: 150, soft: 40, keep: 0 });
+    map.clearings.push({ x: vx, z: vz - 260, r: 190, soft: 90, keep: 0.02 });
+    map.exclusions.push({ cx: vx, cz: vz + 25, halfW: 75, halfL: 70, angle: 0.28 });
+  }
   addHospitality(track, map, landmarks, [[300, -1], [560, -1], [820, -1]], 98);
   addCameraTowers(track, map, landmarks, ['Turn 1', 'Roggia', 'Lesmo 1', 'Ascari', 'Parabolica']);
 

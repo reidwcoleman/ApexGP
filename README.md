@@ -109,6 +109,13 @@ npm run check    # tsc --noEmit
   base (aWin = curtain, reflectivity, seed, base y): punched windows or curtain walls with spandrels and mullions,
   each pane its own interior and bend, shopfronts and the darker street canyon at the foot, coated glass mirroring
   more sky up high, the pattern fading to its average where it would alias.
+- **Monza's own landmarks** (`env/venues/monzaScenery.ts`) — the Villa Reale at the park's southern end
+  (Piermarini's corps de logis with its giant order and pediment, the wings round the cour d'honneur, cornices,
+  attic, hipped grey roofs, the parterres and fountain behind; `cityMaterial`'s classical mode: aWin.x ≥ 1.5
+  gives tall piano-nobile storeys and windows, no shopfronts) and Milan in 3D 13–15 km to the south-west
+  (Unicredit and its spire, Solaria, the Diamond, Bosco Verticale, the Pirelli tower, CityLife's straight,
+  twisting and curving towers, Torre Velasca, the Duomo and its spire, the city round them) in front of the
+  horizon's painted sprawl. `tools/_monzalm.mjs` frames them.
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars
