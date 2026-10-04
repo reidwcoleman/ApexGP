@@ -280,12 +280,14 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
     // (a race-worn mid grey, as the TV pictures show it in sun: the binder long oxidised off the
     // chip tops; the fine chips give a tight ±25 % grain up close)
-    col = vec3(0.118, 0.116, 0.112) * (1.0 + albDev * 0.9) * even;
+    col = vec3(0.118, 0.116, 0.112) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
+    // the odd pale chip (quartz, limestone) among the dark ones, resolved only up close
+    col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, px));
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
     // (a narrow gap: chip tops and binder differ by a polish, not by a material — a wide one made every
     // cluster of chips a hard-edged glint island against the sun)
     rough = mix(0.76, 0.6, stone) + (m3.r - 0.5) * 0.05;
-    tsDetail *= 0.55;
+    tsDetail *= 0.72;
     tsSpecOcc = 0.5;
     // laid in batches: every ~64 m a transverse joint, and each batch a slightly different mix and age —
     // the one variation that still reads 200 m down a straight, where the aggregate is long gone
@@ -719,7 +721,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-10', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-11', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     sh.uniforms.uAsphMean = { value: t.asphaltMean };
     sh.uniforms.uKerbA = { value: kerbA };

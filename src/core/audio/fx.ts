@@ -24,12 +24,23 @@ export interface CarFxMix {
 export class CarFx {
   readonly out: GainNode;
   private scrubG: GainNode;
-  private sqBP1: BiquadFilterNode;
-  private sqBP2: BiquadFilterNode;
-  private sqSaw: OscillatorNode;
-  private sqAMDepth: GainNode;
-  private sqChatter: OscillatorNode;
+  private scrubHissG: GainNode;
+  private scrubGrain: AudioBufferSourceNode;
+  private sqPulse: OscillatorNode;
+  private sqR1: BiquadFilterNode;
+  private sqR2: BiquadFilterNode;
+  private sqR3: BiquadFilterNode;
   private sqG: GainNode;
+  private lkPulse: OscillatorNode;
+  private lkR1: BiquadFilterNode;
+  private lkR2: BiquadFilterNode;
+  private lkG: GainNode;
+  private chR: BiquadFilterNode;
+  private chG: GainNode;
+  private brakeG: GainNode;
+  private brakeLP: BiquadFilterNode;
+  private lockLast = 0;
+  private chirpAt = -1e9;
   private kerbOsc: OscillatorNode;
   private kerbG: GainNode;
   private gravel: AudioBufferSourceNode;
@@ -43,7 +54,7 @@ export class CarFx {
   private windG: GainNode;
   private buffetG: GainNode;
   private drsG: GainNode;
-  private sqBase = 900;
+  private sqBase = 820;
   private sqLast = 0;
   private t = 0;
 
@@ -52,58 +63,87 @@ export class CarFx {
     const white = () => loopSource(ctx, b.white);
     const pink = () => loopSource(ctx, b.pink);
 
-    // --- tyre scrub: low grumbly sliding noise with grainy amplitude
-    const scrubBP = biquad(ctx, 'bandpass', 420, 0.9);
-    const scrubLP = biquad(ctx, 'lowpass', 1100, 0.7);
-    const scrubAM = gainNode(ctx, 0.6);
-    const grain = loopSource(ctx, b.crunch, 0.35);
-    const grainG = gainNode(ctx, 0.5);
-    grain.connect(grainG).connect(scrubAM.gain);
+    // --- tyre scrub: a slick sliding sideways grinds rather than sings — low raspy noise, its grain
+    // (the tread tearing and re-gripping) speeding up with the road speed, and a thin rubber hiss over it
+    const scrubBP = biquad(ctx, 'bandpass', 420, 0.8);
+    const scrubLP = biquad(ctx, 'lowpass', 1300, 0.7);
+    const scrubAM = gainNode(ctx, 0.55);
+    this.scrubGrain = loopSource(ctx, b.crunch, 0.6);
+    const grainG = gainNode(ctx, 0.6);
+    this.scrubGrain.connect(grainG).connect(scrubAM.gain);
     this.scrubG = gainNode(ctx, 0);
     chain(pink(), scrubBP, scrubLP, scrubAM, this.scrubG, this.out);
+    const hissBP = biquad(ctx, 'bandpass', 2400, 0.7);
+    const hissAM = gainNode(ctx, 0.6);
+    grainG.connect(hissAM.gain);
+    this.scrubHissG = gainNode(ctx, 0);
+    chain(white(), hissBP, hissAM, this.scrubHissG, this.out);
 
-    // --- squeal: stick-slip relaxation tone (jittery saw) + resonant noise, chattering AM
-    this.sqSaw = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 900 });
-    const sawFM = loopSource(ctx, b.wander, 3.1);
-    const sawFMg = gainNode(ctx, 55);
-    sawFM.connect(sawFMg).connect(this.sqSaw.frequency);
-    const sawJit = loopSource(ctx, b.white, 0.02); // very slow = rough random walk
-    const sawJitG = gainNode(ctx, 18);
-    sawJit.connect(sawJitG).connect(this.sqSaw.frequency);
-    const sawShape = biquad(ctx, 'bandpass', 1300, 1.4);
-    const sawG = gainNode(ctx, 0.2);
-    chain(this.sqSaw, sawShape, sawG);
-    this.sqSaw.start();
-
-    this.sqBP1 = biquad(ctx, 'bandpass', 900, 4);
-    this.sqBP2 = biquad(ctx, 'bandpass', 1900, 3.5);
-    const nz = white();
-    nz.connect(this.sqBP1);
-    nz.connect(this.sqBP2);
-    const wob = loopSource(ctx, b.wander, 1.7);
-    const wobG1 = gainNode(ctx, 70);
-    const wobG2 = gainNode(ctx, 140);
-    wob.connect(wobG1).connect(this.sqBP1.frequency);
-    wob.connect(wobG2).connect(this.sqBP2.frequency);
-    const bp2g = gainNode(ctx, 0.4);
-    this.sqBP2.connect(bp2g);
-
-    const sqAM = gainNode(ctx, 0.55);
-    this.sqChatter = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 38 });
-    const chatRect = new WaveShaperNode(ctx, { curve: rectCurve(1.5) });
-    this.sqAMDepth = gainNode(ctx, 0.45);
-    chain(this.sqChatter, chatRect, this.sqAMDepth);
-    this.sqAMDepth.connect(sqAM.gain);
-    this.sqChatter.start();
-    const sqPre = gainNode(ctx, 1);
-    this.sqBP1.connect(sqPre);
-    bp2g.connect(sqPre);
-    sawG.connect(sqPre);
-    const sqSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.4), oversample: '2x' });
-    // the squeal's top end is what makes it grate: keep the body, roll the fizz off
-    const sqLP = biquad(ctx, 'lowpass', 2800, 0.6);
+    // --- squeal: stick-slip. The tread blocks catch and let go a hundred-odd times a second (an
+    // irregular pulse train gating noise), and each release rings the carcass's few resonances —
+    // inharmonic, wandering, so it rasps and chatters instead of whistling a pure tone
+    const spiky = new WaveShaperNode(ctx, { curve: rectCurve(5) });
+    this.sqPulse = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 110 });
+    const pJit = loopSource(ctx, b.white, 0.05);
+    const pJitG = gainNode(ctx, 28);
+    pJit.connect(pJitG).connect(this.sqPulse.frequency);
+    const pWob = loopSource(ctx, b.wander, 2.2);
+    const pWobG = gainNode(ctx, 22);
+    pWob.connect(pWobG).connect(this.sqPulse.frequency);
+    this.sqPulse.connect(spiky);
+    this.sqPulse.start();
+    const exc = gainNode(ctx, 0);
+    spiky.connect(exc.gain);
+    white().connect(exc);
+    this.sqR1 = biquad(ctx, 'bandpass', 820, 14);
+    this.sqR2 = biquad(ctx, 'bandpass', 1250, 11);
+    this.sqR3 = biquad(ctx, 'bandpass', 1890, 9);
+    const rWob = loopSource(ctx, b.wander, 1.3);
+    for (const [r, d] of [[this.sqR1, 45], [this.sqR2, 70], [this.sqR3, 110]] as [BiquadFilterNode, number][]) {
+      rWob.connect(gainNode(ctx, d)).connect(r.frequency);
+    }
+    const sqSum = gainNode(ctx, 3.2);
+    exc.connect(this.sqR1).connect(sqSum);
+    exc.connect(this.sqR2).connect(gainNode(ctx, 0.75)).connect(sqSum);
+    exc.connect(this.sqR3).connect(gainNode(ctx, 0.4)).connect(sqSum);
+    // a little of the raw excitation for bite
+    exc.connect(biquad(ctx, 'bandpass', 1500, 0.8)).connect(gainNode(ctx, 0.04)).connect(sqSum);
+    const sqSat = new WaveShaperNode(ctx, { curve: tanhCurve(1.8), oversample: '2x' });
+    const sqLP = biquad(ctx, 'lowpass', 3600, 0.6);
     this.sqG = gainNode(ctx, 0);
-    chain(sqPre, sqAM, sqSat, sqLP, this.sqG, this.out);
+    chain(sqSum, sqSat, sqLP, this.sqG, this.out);
+
+    // --- lock-up: a locked tyre dragged along the tarmac — harsher and lower, its pitch falling with the
+    // road speed under it as the car slows, driven hard into saturation
+    this.lkPulse = new OscillatorNode(ctx, { type: 'sawtooth', frequency: 190 });
+    pJit.connect(gainNode(ctx, 40)).connect(this.lkPulse.frequency);
+    const lkSpiky = new WaveShaperNode(ctx, { curve: rectCurve(3) });
+    this.lkPulse.connect(lkSpiky);
+    this.lkPulse.start();
+    const lkExc = gainNode(ctx, 0.25);
+    lkSpiky.connect(lkExc.gain);
+    pink().connect(lkExc);
+    this.lkR1 = biquad(ctx, 'bandpass', 640, 3.2);
+    this.lkR2 = biquad(ctx, 'bandpass', 1350, 4);
+    const lkSum = gainNode(ctx, 1);
+    lkExc.connect(this.lkR1).connect(lkSum);
+    lkExc.connect(this.lkR2).connect(gainNode(ctx, 0.6)).connect(lkSum);
+    const lkSat = new WaveShaperNode(ctx, { curve: tanhCurve(2.6), oversample: '2x' });
+    this.lkG = gainNode(ctx, 0);
+    chain(lkSum, lkSat, biquad(ctx, 'lowpass', 3200, 0.6), this.lkG, this.out);
+
+    // --- the chirp: the bark at the instant a tyre locks or snaps loose (a short ringing burst, falling)
+    this.chR = biquad(ctx, 'bandpass', 1500, 7);
+    this.chG = gainNode(ctx, 0);
+    chain(white(), this.chR, new WaveShaperNode(ctx, { curve: tanhCurve(1.5) }), this.chG, this.out);
+
+    // --- heavy braking: the front tyres and carbon discs under 5 g groan — a low, rough rumble that
+    // rises in pitch with the speed being scrubbed off
+    this.brakeLP = biquad(ctx, 'lowpass', 160, 1.2);
+    const brakeAM = gainNode(ctx, 0.7);
+    loopSource(ctx, b.crunch, 0.45).connect(gainNode(ctx, 0.35)).connect(brakeAM.gain);
+    this.brakeG = gainNode(ctx, 0);
+    chain(pink(), biquad(ctx, 'highpass', 45, 0.7), this.brakeLP, brakeAM, this.brakeG, this.out);
 
     // --- kerb rumble: narrow pulse train at ridge rate → body thump + rattle
     const K = 24;
@@ -176,20 +216,50 @@ export class CarFx {
     const slip = Math.max(0, s.slip);
     const surf = s.surface | 0;
     const loose = surf === 3 || surf === 4;
-    const lock = s.brake > 0.5 && slip > 0.7 ? 1 : 0;
 
-    // tyres
-    const scrub = smoothstep(0.22, 0.85, slip) * (0.35 + 0.65 * sp) * (loose ? 0.35 : 1);
-    setT(this.scrubG.gain, 0.5 * scrub * mix.tyres, now, 0.04);
-    const sq = smoothstep(0.6, 1.2, slip) * sp * (loose ? 0.12 : 1);
-    // softer onset (no stab on every little slide), and quieter overall: it's feedback, not a siren
-    setT(this.sqG.gain, 0.15 * sq * (1 + 0.3 * lock) * mix.tyres, now, sq > this.sqLast ? 0.07 : 0.05);
+    // tyres: scrub (sliding), squeal (at and past the peak), lock-up (braking past the peak)
+    const lockAmt = smoothstep(0.75, 1.15, slip) * smoothstep(0.35, 0.75, s.brake) * (loose ? 0.15 : 1);
+    const scrub = smoothstep(0.2, 0.8, slip) * (0.35 + 0.65 * sp) * (loose ? 0.35 : 1);
+    // (past the peak the squeal takes over from the grind)
+    setT(this.scrubG.gain, 0.45 * scrub * (1 - 0.45 * smoothstep(0.9, 1.3, slip)) * mix.tyres, now, 0.04);
+    setT(this.scrubGrain.playbackRate, 0.55 + clamp(v / 40, 0, 1.8), now, 0.1);
+    const sq = smoothstep(0.7, 1.3, slip) * sp * (loose ? 0.1 : 1) * (1 - 0.7 * lockAmt);
+    // (the hiss is the slide's, under the squeal it would only fizz)
+    setT(this.scrubHissG.gain, 0.05 * scrub * smoothstep(8, 60, v) * (1 - sq) * mix.tyres, now, 0.05);
+    // (feedback, not a siren: it swells in, never stabs on every little slide)
+    setT(this.sqG.gain, 0.3 * sq * mix.tyres, now, sq > this.sqLast ? 0.06 : 0.05);
+    const f0 = (this.sqBase + 140 * clamp(slip - 0.8, 0, 1)) * dop;
+    setT(this.sqR1.frequency, f0, now, 0.06);
+    setT(this.sqR2.frequency, f0 * 1.52, now, 0.06);
+    setT(this.sqR3.frequency, f0 * 2.31, now, 0.06);
+    setT(this.sqPulse.frequency, 70 + 90 * clamp(slip - 0.7, 0, 1) + 0.6 * v, now, 0.08);
+    setT(this.lkG.gain, 0.26 * lockAmt * sp * mix.tyres, now, lockAmt > this.lockLast ? 0.025 : 0.06);
+    const fl = (400 + 3.4 * v) * dop;
+    setT(this.lkR1.frequency, fl, now, 0.05);
+    setT(this.lkR2.frequency, fl * 2.1, now, 0.05);
+    setT(this.lkPulse.frequency, 120 + 1.6 * v, now, 0.08);
+    // a chirp as a tyre locks, or as the slide snaps in hard
+    const snap = sq - this.sqLast > 0.12 || (lockAmt > 0.5 && this.lockLast <= 0.5);
+    if (snap && now - this.chirpAt > 0.45 && v > 6 && !loose) {
+      this.chirpAt = now;
+      const pk = (0.16 + 0.12 * lockAmt) * mix.tyres;
+      const g = this.chG.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0, now);
+      g.linearRampToValueAtTime(pk, now + 0.012);
+      g.setTargetAtTime(0, now + 0.03, 0.05);
+      const fr = this.chR.frequency;
+      fr.cancelScheduledValues(now);
+      fr.setValueAtTime((1500 + 300 * lockAmt) * dop, now);
+      fr.setTargetAtTime(1050 * dop, now + 0.01, 0.06);
+    }
     this.sqLast = sq;
-    const f0 = (this.sqBase + 160 * clamp(slip - 0.6, 0, 1) + 240 * lock) * dop;
-    setT(this.sqBP1.frequency, f0, now, 0.05);
-    setT(this.sqBP2.frequency, f0 * 2.08, now, 0.05);
-    setT(this.sqSaw.frequency, f0 * 0.98, now, 0.05);
-    setT(this.sqChatter.frequency, 26 + 30 * clamp(slip, 0, 1.5) + 0.2 * v, now, 0.1);
+    this.lockLast = lockAmt;
+
+    // braking load (not a lock-up: that's the screech above)
+    const bl = smoothstep(0.3, 0.9, s.brake) * smoothstep(15, 70, v) * (loose ? 0.3 : 1);
+    setT(this.brakeG.gain, 0.22 * bl * mix.tyres, now, 0.06);
+    setT(this.brakeLP.frequency, 110 + 1.6 * v, now, 0.1);
 
     // kerb: ridge thumps at a rate ∝ speed
     const kerb = s.onKerb || surf === 1;
@@ -217,7 +287,7 @@ export class CarFx {
   update(dt: number): void {
     // squeal pitch drifts slowly (tyre temperature/load), keeps it from sounding like a fixed whistle
     this.t += dt;
-    this.sqBase = 880 + 90 * Math.sin(this.t * 0.37) + 50 * Math.sin(this.t * 1.13 + 1.3);
+    this.sqBase = 800 + 70 * Math.sin(this.t * 0.37) + 40 * Math.sin(this.t * 1.13 + 1.3);
   }
 }
 

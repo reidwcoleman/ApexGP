@@ -25,7 +25,9 @@ const LAT = 18;
 const BIN = 0.5;
 const BINS = Math.round((2 * LAT) / BIN) + 1;
 const TILES = 64;
-const PER_M2 = 26;
+const PER_M2 = 34;
+/** blades per tuft: each instance is a little clump (the blades a lawn is made of, not one in a square foot) */
+const TUFT = 3;
 const FADE: [number, number] = [18, 30];
 const ROW = 2048;
 
@@ -105,8 +107,9 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
 
   // ---- blades: TILES metres × ±LAT, PER_M2, one triangle each
   const count = Math.round(TILES * 2 * LAT * PER_M2);
-  const aBlade = new Float32Array(count * 3 * 4);
-  const aCorner = new Float32Array(count * 3);
+  const V = 3 * TUFT;
+  const aBlade = new Float32Array(count * V * 4);
+  const aCorner = new Float32Array(count * V);
   let seed = 12345;
   const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   for (let k = 0; k < count; k++) {
@@ -114,13 +117,13 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
     const lat = -LAT + rnd() * 2 * LAT;
     const ds = rnd();
     const r = rnd();
-    for (let c = 0; c < 3; c++) {
-      aBlade.set([tile, lat, ds, r], (k * 3 + c) * 4);
-      aCorner[k * 3 + c] = c;
+    for (let c = 0; c < V; c++) {
+      aBlade.set([tile, lat, ds, r], (k * V + c) * 4);
+      aCorner[k * V + c] = c;
     }
   }
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3 * 3), 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * V * 3), 3));
   geo.setAttribute('aBlade', new THREE.BufferAttribute(aBlade, 4));
   geo.setAttribute('aCorner', new THREE.BufferAttribute(aCorner, 1));
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e7);
@@ -160,6 +163,7 @@ uniform vec2 uFade, uWind;
 uniform vec3 uLawnC, uMeadowC, uStrawC;
 varying vec3 vGC;
 varying float vGH;
+varying float vGRoot;
 vec3 gFetch( float i, float row ) {
   i = mod( i, uN );
   return texelFetch( tFrame, ivec2( int( mod( i, ${ROW}.0 ) ), int( floor( i / ${ROW}.0 ) + row * uRows ) ), 0 ).xyz;
@@ -187,19 +191,26 @@ ${CAR_WAKE_GLSL}`,
   vec4 g = texture2D( tGround, vec2( ( lat + ${LAT.toFixed(1)} ) / ${(2 * LAT + BIN).toFixed(2)} + ${(BIN / 2 / (2 * LAT + BIN)).toFixed(5)}, ( mod( s, uN ) + 0.5 ) / uN ) );
   vec3 base = c + r * lat;
   base.y += g.g - 0.03;
-  float rnd = aBlade.w;
+  // which blade of the tuft and which corner of it
+  float bi = floor( aCorner / 3.0 + 0.01 );
+  float cc = aCorner - bi * 3.0;
+  float rnd = fract( aBlade.w + bi * 0.618 );
+  {
+    float oa = aBlade.w * 39.7 + bi * 2.09;
+    base += vec3( cos( oa ), 0.0, sin( oa ) ) * ( 0.025 + 0.045 * fract( aBlade.w * 7.1 + bi * 0.37 ) ) * step( 0.5, bi );
+  }
   float dist = length( base - cameraPosition );
   // density: surface mask, and thinning with distance (fewer, slightly larger blades far off)
   float lod = mix( 1.0, 0.35, smoothstep( 6.0, uFade.y, dist ) );
-  float keep = step( rnd, g.r * lod );
+  float keep = step( aBlade.w, g.r * lod );
   float fade = 1.0 - smoothstep( uFade.x, uFade.y, dist );
   // clumps: tufts of taller grass and bare patches
   float clump = texture2D( tNoise, base.xz * 0.37 ).a;
   float mown = g.b;
-  float h = mix( mix( 0.09, 0.17, rnd ), mix( 0.24, 0.55, rnd * rnd ), 1.0 - mown ) * ( 0.6 + 0.8 * clump );
-  h *= fade * keep * ( 1.0 + 0.25 * ( 1.0 - lod ) );
+  float h = mix( mix( 0.11, 0.21, rnd ), mix( 0.26, 0.58, rnd * rnd ), 1.0 - mown ) * ( 0.6 + 0.8 * clump );
+  h *= fade * keep * ( 1.0 - 0.35 * ( 1.0 - lod ) );
   if ( uDebug < 0.0 ) h *= -uDebug;
-  float w = mix( 0.012, 0.022, fract( rnd * 13.1 ) ) * ( 1.0 + 0.8 * ( 1.0 - lod ) + dist * 0.004 );
+  float w = mix( 0.013, 0.024, fract( rnd * 13.1 ) ) * ( 1.0 + 0.8 * ( 1.0 - lod ) + dist * 0.004 );
   float yaw = fract( rnd * 91.7 ) * 6.2832;
   vec3 side = vec3( cos( yaw ), 0.0, sin( yaw ) );
   vec3 face = vec3( -side.z, 0.0, side.x );
@@ -214,32 +225,38 @@ ${CAR_WAKE_GLSL}`,
     lean += ( wk.xyz + vec3( side.x, 0.0, side.z ) * sin( uTime * 23.0 + rnd * 40.0 ) * wk.w * 0.35 ) * 0.75;
   }
   transformed = base;
-  if ( aCorner < 0.5 ) transformed -= side * w;
-  else if ( aCorner < 1.5 ) transformed += side * w;
+  if ( cc < 0.5 ) transformed -= side * w;
+  else if ( cc < 1.5 ) transformed += side * w;
   else { vec3 tip = vec3( 0.0, 1.0, 0.0 ) + lean; transformed += tip * min( 1.0, 1.15 / length( tip ) ) * h; }
-  if ( uDebug > 0.0 ) { transformed = base + ( aCorner < 0.5 ? -side * 0.1 : aCorner < 1.5 ? side * 0.1 : vec3( 0.0, uDebug * ( 0.1 + g.r ), 0.0 ) ); h = uDebug; }
+  if ( uDebug > 0.0 ) { transformed = base + ( cc < 0.5 ? -side * 0.1 : cc < 1.5 ? side * 0.1 : vec3( 0.0, uDebug * ( 0.1 + g.r ), 0.0 ) ); h = uDebug; }
   if ( h < 0.004 ) transformed = vec3( 0.0, -1e5, 0.0 );
-  vGH = aCorner > 1.5 ? 1.0 : 0.0;
+  vGH = cc > 1.5 ? 1.0 : 0.0;
+  // (the dark thatch only reads up close: further out a dark-rooted blade is a black stick)
+  vGRoot = mix( 0.3, 0.9, smoothstep( 5.0, 18.0, dist ) );
   // colour: the ground palette, fresh green to straw, lighter tips
   float dry = texture2D( tNoise, base.xz * 0.0041 + vec2( 0.37, 0.19 ) ).g;
   vec3 col = mix( uMeadowC, uLawnC, mown );
   col = mix( col, uStrawC, smoothstep( 0.45, 0.8, dry ) * ( 1.0 - mown * 0.6 ) * 0.7 + fract( rnd * 3.7 ) * 0.12 );
-  vGC = col * ( 0.8 + 0.4 * fract( rnd * 5.3 ) );
+  // every blade its own shade, a few dead straw ones in the lawn
+  vGC = col * ( 0.72 + 0.56 * fract( rnd * 5.3 ) );
+  vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
   if ( uDebug > 0.0 ) vGC = vec3( g.r, clamp( g.g * 0.2 + 0.5, 0.0, 1.0 ), g.b );
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vGC;\nvarying float vGH;\nuniform float uWet;`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = vGC * mix( 0.38, 1.25, vGH * vGH ) * mix( 1.0, 0.7, uWet );`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vGC;\nvarying float vGH;\nvarying float vGRoot;\nuniform float uWet;`)
+      // dark in the thatch at the root, the sun-bleached tip paler and yellower: what makes a lawn read as blades
+      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = mix( vGC * vGRoot, vGC * vec3( 1.35, 1.32, 1.05 ), vGH * vGH ) * mix( 1.0, 0.7, uWet );`)
       .replace('normal *= faceDirection;', '')
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
-reflectedLight.indirectDiffuse *= mix( 0.45, 1.0, vGH );
-reflectedLight.directDiffuse *= mix( 0.7, 1.0, vGH );`,
+float gNear = 1.0 - ( vGRoot - 0.3 ) / 0.6;
+reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
+reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v2';
+  mat.customProgramCacheKey = () => 'apex-grass-v6';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;
