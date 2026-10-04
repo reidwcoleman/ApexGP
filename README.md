@@ -101,9 +101,16 @@ npm run check    # tsc --noEmit
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
-- **Race intros** — a helicopter sweep down the main straight with the title card (round, circuit,
-  laps, conditions, the layout drawing itself), a tracking shot down the grid to your car, then the
-  orbit into the lights. Enter / click skips.
+- **Race intros** — a directed broadcast opening (`src/game/IntroDirector.ts`, ~28 s, letterboxed,
+  lower-third captions): the helicopter over the start/finish complex under the title card (round,
+  circuit, laps, conditions, the layout drawing itself), the venue's signature (Eau Rouge, the Foro Sol,
+  the Yas hotel, the Observation Tower, the Ferris wheel, Monza's banking bridge, the city skylines…),
+  a crane past the main grandstand, a crane up the pit building onto the grid, a low shot skimming a
+  kerb, the long lens down the grid in the heat haze, the pole sitter, then a match cut to your car and
+  the drop into your race camera. Every move is chosen from candidates tested against the terrain and
+  the Sightlines grid (never under the ground or in a building, subject in view); after dark the cars
+  are filmed from behind (headlights) and the kerb shot is dropped. Cuts tell the motion blur. A
+  restart gets the short orbit of your car. Enter / click skips. `node tools/introshot.mjs <track>`.
 - **The garage** — your garage is the menu: your driver stands by the car in race suit with his
   helmet in his hand while the crew work on it with wrenches (hubs, front wing flaps, rear wing).
   Click a part (cockpit, front wing, front corner, sidepod, rear wing, floor) to fly the camera to it
