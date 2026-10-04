@@ -897,7 +897,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
 
   // ---------------------------------------------------------------- meshes
   const boardTex = sponsorTexture();
-  const boardMat = new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.55, metalness: 0, emissiveMap: boardTex, emissive: 0xffffff, emissiveIntensity: 0.14 });
+  // (boards sit a few cm proud of the stands: pulled forward in depth so they don't z-fight far out)
+  const boardMat = new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.55, metalness: 0, emissiveMap: boardTex, emissive: 0xffffff, emissiveIntensity: 0.14, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
   const scrTex = screenTexture();
   const screenMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.3, emissiveMap: scrTex, emissive: 0xffffff, emissiveIntensity: 1.6 });
   const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean, custom = false) => {

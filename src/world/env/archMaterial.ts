@@ -22,10 +22,11 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  *             its own sun-faded shade, a satin sheen
  *   PLAIN     no detail (doors, scrim, dark voids)
  *   FABRIC    PVC membrane / scrim: soft broad mottle, very rough
+ *   RENDER    painted render: soft mottle, faint runs under each storey's ledge, no formwork
  *
  * Rain darkens and glosses every class, more on upward faces, with streaks down walls.
  */
-export const ARCH = { CONCRETE: 0, STEEL: 1, CLAD: 2, SEAT: 3, PLAIN: 4, FABRIC: 5 } as const;
+export const ARCH = { CONCRETE: 0, STEEL: 1, CLAD: 2, SEAT: 3, PLAIN: 4, FABRIC: 5, RENDER: 6 } as const;
 
 /** set the class of every vertex of `mb` from index `from` on */
 export function tagClass(mb: MeshBuilder, from: number, cls: number) {
@@ -173,7 +174,9 @@ export function archMaterial(fine = false): THREE.MeshStandardMaterial {
     }
     // horizontal surfaces collect grime
     col *= 1.0 - 0.1 * ( 1.0 - vert ) * smoothstep( 0.4, 0.8, big );
-    rough = 0.82 + 0.12 * fine;
+    // (the fine grain only where it resolves: in the roughness too, or a flat roof in low sun
+    // shimmers into moiré rings)
+    rough = 0.82 + 0.12 * mix( 0.5, fine, near );
   } else if ( cls < 1.5 ) {
     // ---- painted steel
     col *= 0.92 + 0.12 * big;
@@ -196,6 +199,21 @@ export function archMaterial(fine = false): THREE.MeshStandardMaterial {
     col *= 1.0 - 0.14 * smoothstep( 0.55, 0.9, arN( vec2( along * 1.6, ( vert > 0.5 ? vArWP.y : dot( vArWP.xz, vec2( -ax.y, ax.x ) ) ) * 0.12 ) ) );
     rough = 0.48 + 0.2 * big;
     metal = 0.4;
+    // roof tops, as the helicopter sees them: sheet end-laps across the slope every 7 m, grime
+    // gathered in drifts, every few bays a pale translucent rooflight strip down the slope
+    float top = smoothstep( 0.6, 0.85, N.y );
+    if ( top > 0.0 ) {
+      float across = dot( vArWP.xz, vec2( -ax.y, ax.x ) );
+      float fwa = fwidth( across );
+      float lap = arLine( across, 7.0, 0.03, fwa ) * ( 1.0 - smoothstep( 0.3, 1.2, fwa ) );
+      float grime = smoothstep( 0.45, 0.85, arN( vec2( along * 0.05, across * 0.3 ) ) * 0.6 + big * 0.4 );
+      col *= ( 1.0 - 0.16 * lap * top ) * ( 1.0 - 0.24 * grime * top );
+      float bay = floor( along / 9.0 );
+      float u = fract( along / 9.0 );
+      float rl = smoothstep( 0.44, 0.45, u ) * ( 1.0 - smoothstep( 0.55, 0.56, u ) ) * step( 0.55, arH( vec2( bay, 3.1 ) ) );
+      col = mix( col, vec3( 0.42, 0.45, 0.44 ), rl * top * 0.75 );
+      rough = mix( rough, 0.25, rl * top );
+    }
   } else if ( cls < 3.5 ) {
     // ---- plastic seats at a 0.5 m pitch
     float ph = along / 0.5;
@@ -211,10 +229,18 @@ export function archMaterial(fine = false): THREE.MeshStandardMaterial {
     rough = 0.42 + 0.12 * fade;
   } else if ( cls < 4.5 ) {
     rough = 0.7;
-  } else {
+  } else if ( cls < 5.5 ) {
     // ---- membrane / scrim
     col *= 0.92 + 0.14 * big;
     rough = 0.9;
+  } else {
+    // ---- painted render (hotels, houses, offices): a soft mottle, faint runs from every ledge,
+    // a darker band of splash and grime along the foot of the wall; no formwork
+    col *= 0.9 + 0.16 * big + 0.05 * ( fine - 0.5 ) * near;
+    float run = arN( vec2( q.x * 1.6, q.y * 0.12 ) );
+    col *= 1.0 - 0.1 * vert * smoothstep( 0.55, 0.9, run );
+    col *= 1.0 - 0.12 * vert * ( 1.0 - smoothstep( 0.0, 0.9, fract( q.y / 3.3 ) ) ) * smoothstep( 0.4, 0.7, big );
+    rough = 0.78 + 0.08 * big;
   }
   // rain: darker and glossier, most on what faces up; streaks running down walls
   if ( uWetness > 0.002 ) {
@@ -238,6 +264,6 @@ export function archMaterial(fine = false): THREE.MeshStandardMaterial {
   normal = normalize( normal + ( viewMatrix * vec4( arBend, 0.0 ) ).xyz );`,
       );
   };
-  m.customProgramCacheKey = () => (fine ? 'apex-arch-fine-v1' : 'apex-arch-v1');
+  m.customProgramCacheKey = () => (fine ? 'apex-arch-fine-v2' : 'apex-arch-v2');
   return m;
 }

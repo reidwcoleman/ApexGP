@@ -9,7 +9,7 @@ import { DecalAtlas, PrintAtlas, fenceTexture, noiseTexture, whenFontsReady } fr
 import { decalMaterial, fenceMaterial, glassMaterial, groundMaterial, pitU, signalMaterial, signalU, solidMaterial } from './pitlane/materials.ts';
 import { buildGround, buildPaint } from './pitlane/ground.ts';
 import { SignalGeo, buildWall } from './pitlane/wall.ts';
-import { GlassGeo, H, buildBuilding } from './pitlane/building.ts';
+import { GlassGeo, H, buildBuilding, pitStyle } from './pitlane/building.ts';
 import { buildGarages } from './pitlane/garage.ts';
 import { CrewSystem, type CrewStop } from './pitlane/crew.ts';
 import { buildDrips } from './pitlane/drips.ts';
@@ -141,7 +141,7 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
   const detailMesh = add(detail.geometry(), solidMat, 'pit_detail', false);
   add(thin.geometry(), solidMat, 'pit_thin', false);
   add(printG.geometry(), solidMaterial(print.texture), 'pit_print', false);
-  add(glass.geometry(), glassMaterial(), 'pit_glass', false);
+  add(glass.geometry(), glassMaterial(pitStyle(track.def.id).glass), 'pit_glass', false);
   const fenceMat = fenceMaterial(fenceTexture(aniso));
   add(fenceG.geometry(), fenceMat, 'pit_fence', false, 2);
   add(signal.geometry(), signalMaterial(), 'pit_signals', false);

@@ -6,6 +6,7 @@ import { US_ROOFS, US_WALLS } from './venues/austinLand.ts';
 import { buildInterlagosCity } from './venues/interlagosCity.ts';
 import { buildMontrealCity } from './venues/montrealCity.ts';
 import { buildMexicoCity } from './venues/mexicoCity.ts';
+import { weatherUniforms } from '../weatherUniforms.ts';
 
 /**
  * The towns around the park wall (Monza, Villasanta, Biassono, Vedano…) as
@@ -116,26 +117,77 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
     roof.computeVertexNormals();
   }
   const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 });
-  // windows: darker bands on the walls from world height (cheap)
+  /**
+   * The façades, laid out per house in its own metres (not world stripes): storeys of 3 m, the
+   * width split into whole window bays centred on each face, a deeper ground floor with a door in
+   * one bay, sills; on many houses shutters either side of each window (green, brown or grey,
+   * per house); a band of grime at the foot. The panes are dark glass that catches a little sky;
+   * after dark a scatter of rooms is lit. Where a bay is smaller than a pixel or two the pattern
+   * fades to its average, so a hillside of houses doesn't shimmer.
+   */
   wallMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uSignGlow = weatherUniforms.uSignGlow;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vVW;\nvarying vec3 vVN;')
-      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvVW = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xyz;\nvVN = normalize( mat3( modelMatrix * instanceMatrix ) * objectNormal );');
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLoc;\nvarying vec3 vSz;\nvarying vec3 vNl;\nvarying float vSeed;')
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+  vSz = vec3( length( instanceMatrix[ 0 ].xyz ), length( instanceMatrix[ 1 ].xyz ), length( instanceMatrix[ 2 ].xyz ) );
+  vLoc = transformed * vSz;
+  vNl = objectNormal;
+  vSeed = fract( instanceMatrix[ 3 ].x * 0.1311 + instanceMatrix[ 3 ].z * 0.0719 );`,
+      );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vVW;\nvarying vec3 vVN;')
+      .replace('#include <common>', '#include <common>\nuniform float uSignGlow;\nvarying vec3 vLoc;\nvarying vec3 vSz;\nvarying vec3 vNl;\nvarying float vSeed;\nvec3 vgLit = vec3( 0.0 );')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
 {
-  float side = 1.0 - abs( vVN.y );
-  float fl = fract( vVW.y / 3.1 );
-  float col = fract( ( vVW.x + vVW.z ) / 3.4 );
-  float win = step( 0.35, fl ) * step( fl, 0.8 ) * step( 0.3, col ) * step( col, 0.7 ) * side * step( 1.5, vVW.y - 0.0 );
-  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.06, 0.07, 0.08 ), win * 0.85 );
+  float side = 1.0 - smoothstep( 0.5, 0.9, abs( vNl.y ) );
+  bool xFace = abs( vNl.x ) > 0.5;
+  float along = xFace ? vLoc.z : vLoc.x;
+  float wide = xFace ? vSz.z : vSz.x;
+  float H = vSz.y, y = vLoc.y;
+  float nb = max( 1.0, floor( wide / 3.3 ) );
+  float bw = wide / nb;
+  float ub = ( along + wide * 0.5 ) / bw;
+  float u = fract( ub );
+  float g0 = 3.6;
+  float above = max( y - g0, 0.0 );
+  float fl = y < g0 ? y / g0 : fract( above / 3.0 );
+  float fi = y < g0 ? 0.0 : 1.0 + floor( above / 3.0 );
+  float inside = side * step( 0.25, y ) * step( y, H - 0.9 );
+  // windows: 40 % of the bay, 1.5 m tall; the ground floor's taller, a door in one bay
+  float door = step( 0.5, fi < 0.5 ? 1.0 : 0.0 ) * step( abs( floor( ub ) - floor( nb * vSeed ) ), 0.5 );
+  float win = step( 0.3, u ) * step( u, 0.7 ) * ( y < g0 ? step( door > 0.5 ? 0.0 : 0.3, fl ) * step( fl, 0.82 ) : step( 0.3, fl ) * step( fl, 0.82 ) ) * inside;
+  float sill = step( 0.27, u ) * step( u, 0.73 ) * step( fl, 0.3 ) * step( 0.24, fl ) * ( 1.0 - door ) * inside * step( g0, y + 1.0 );
+  float shut = step( 0.45, fract( vSeed * 7.3 ) ) * ( step( 0.15, u ) * step( u, 0.29 ) + step( 0.71, u ) * step( u, 0.85 ) ) * step( 0.3, fl ) * step( fl, 0.82 ) * inside * ( 1.0 - door ) * step( g0, y + 0.01 );
+  vec3 shutC = fract( vSeed * 13.1 ) < 0.45 ? vec3( 0.12, 0.2, 0.13 ) : fract( vSeed * 13.1 ) < 0.75 ? vec3( 0.22, 0.14, 0.09 ) : vec3( 0.32, 0.33, 0.33 );
+  // fade to the average where a bay is under ~2 pixels
+  float fw = max( fwidth( ub ), fwidth( y / 3.0 ) );
+  float k = 1.0 - smoothstep( 0.25, 0.6, fw );
+  float room = floor( ub ) * 7.0 + fi * 3.0 + floor( vSeed * 97.0 );
+  float lit = step( 0.62, fract( sin( room * 12.9898 ) * 43758.5453 ) );
+  vec3 glassC = vec3( 0.05, 0.06, 0.075 ) + vec3( 0.03, 0.04, 0.05 ) * smoothstep( 0.4, 0.9, fl );
+  vec3 c = diffuseColor.rgb;
+  c = mix( c, c * 1.08, sill * k );
+  c = mix( c, shutC, shut * 0.9 * k );
+  c = mix( c, glassC, win * k );
+  // (the far average: windows darken the wall by their share of it)
+  c = mix( c, c * 0.8, ( 1.0 - k ) * inside * 0.9 );
+  // grime at the foot, the eaves' shadow along the top
+  c *= 1.0 - 0.18 * side * ( 1.0 - smoothstep( 0.0, 1.0, y ) );
+  c *= 1.0 - 0.3 * side * smoothstep( H - 0.6, H - 0.05, y );
+  // flat roofs are bitumen and gravel, not the wall's render
+  c = mix( c, vec3( 0.2, 0.2, 0.19 ) * ( 0.85 + 0.3 * vSeed ), smoothstep( 0.5, 0.9, vNl.y ) );
+  diffuseColor.rgb = c;
+  float night = clamp( ( uSignGlow - 0.12 ) / 0.88, 0.0, 1.0 );
+  vgLit = vec3( 1.0, 0.78, 0.5 ) * night * ( win * k * lit + ( 1.0 - k ) * inside * 0.12 ) * 0.7;
 }`,
-      );
+      )
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vgLit;');
   };
-  wallMat.customProgramCacheKey = () => 'apex-village-walls';
+  wallMat.customProgramCacheKey = () => 'apex-village-walls-v2';
   const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0 });
   const walls = new THREE.InstancedMesh(box, wallMat, Math.max(1, list.length));
   const roofs = new THREE.InstancedMesh(roof, roofMat, Math.max(1, list.length));

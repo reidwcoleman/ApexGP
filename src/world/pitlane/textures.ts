@@ -587,12 +587,11 @@ export class PrintAtlas extends Atlas {
     g.fillText(EVENT.place, c.x + c.w / 2, c.y + 100);
     g.font = `700 30px ${FONT}`;
     g.fillText(EVENT.gp, c.x + c.w / 2, c.y + 170);
-    g.fillStyle = '#008c45';
-    g.fillRect(c.x + c.w / 2 - 90, c.y + 200, 60, 10);
-    g.fillStyle = '#f4f5f0';
-    g.fillRect(c.x + c.w / 2 - 30, c.y + 200, 60, 10);
-    g.fillStyle = '#cd212a';
-    g.fillRect(c.x + c.w / 2 + 30, c.y + 200, 60, 10);
+    // the host nation's colours under the name (it was the tricolore at every circuit)
+    EVENT.colours.forEach((col, i) => {
+      g.fillStyle = col;
+      g.fillRect(c.x + c.w / 2 - 90 + i * 60, c.y + 200, 60, 10);
+    });
     g.restore();
   }
 

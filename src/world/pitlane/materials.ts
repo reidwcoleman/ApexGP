@@ -94,7 +94,14 @@ function bindUniforms(sh: THREE.WebGLProgramParametersWithUniforms) {
  */
 export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1, map: map ?? null });
-  if (map) m.defines = { PC_PRINT: '' };
+  if (map) {
+    m.defines = { PC_PRINT: '' };
+    // prints sit 1–2 cm proud of the walls they are fixed to: beyond ~120 m that is less than the
+    // depth buffer resolves, and the boards z-fought into stripes down every long lens
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = -1;
+    m.polygonOffsetUnits = -6;
+  }
   m.onBeforeCompile = (sh) => {
     bindUniforms(sh);
     sh.vertexShader = sh.vertexShader
@@ -173,8 +180,8 @@ export function solidMaterial(map?: THREE.Texture): THREE.MeshStandardMaterial {
  * The interior is ray-cast in the shader (ceiling light grid, back wall, floor),
  * so rooms show parallax and glow from outside; the exterior reflects the sky.
  */
-export function glassMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0x2c3a44, roughness: 0.06, metalness: 0.35, envMapIntensity: 1.25 });
+export function glassMaterial(tint = 0x2c3a44): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.06, metalness: 0.35, envMapIntensity: 1.25 });
   m.onBeforeCompile = (sh) => {
     bindUniforms(sh);
     sh.vertexShader = sh.vertexShader
@@ -182,6 +189,35 @@ export function glassMaterial(): THREE.MeshStandardMaterial {
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvGl = aGl;\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * normal);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>\n${UNI_DECL}\nvarying vec4 vGl;\nvarying vec3 vWP;\nvarying vec3 vWN;\n${COMMON}`)
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+  {
+    // no two panes of a curtain wall lie quite flat in one plane (oil-canning, a glazier's
+    // tolerances): each 1.5 m pane bends the reflection its own fraction of a degree, so the sky
+    // breaks up pane by pane across the facade instead of sliding over it as one mirror
+    float pid = floor(vGl.x / 1.5);
+    vec2 hb = vec2(pcHash(vec2(pid, vGl.y * 1.37)), pcHash(vec2(pid + 7.31, vGl.y * 0.71))) - 0.5;
+    vec3 Nw = normalize(vWN);
+    vec3 Tw = normalize(cross(vec3(0.0, 1.0, 0.0), Nw) + vec3(1e-4));
+    vec3 bend = (Tw * hb.x + vec3(0.0, 1.0, 0.0) * hb.y) * 0.03;
+    normal = normalize(normal + (viewMatrix * vec4(bend, 0.0)).xyz);
+  }`,
+      )
+      .replace(
+        '#include <lights_physical_fragment>',
+        `#include <lights_physical_fragment>
+  // coated glazing: hardly any body colour, a tinted ~8–10 % reflection at normal incidence
+  // (plain 4 % read as dull grey slabs in the sun); the grazing mirror comes from Fresnel
+  {
+    vec3 tn = diffuseColor.rgb / max(max(diffuseColor.r, diffuseColor.g), max(diffuseColor.b, 1e-4));
+    vec3 f0g = vec3(0.035) + 0.06 * tn;
+    material.metalness = 0.0;
+    material.specularColor = f0g;
+    material.specularColorBlended = f0g;
+    material.diffuseContribution = diffuseColor.rgb * 0.25;
+  }`,
+      )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
@@ -226,7 +262,7 @@ export function glassMaterial(): THREE.MeshStandardMaterial {
   }`,
       );
   };
-  m.customProgramCacheKey = () => 'pit-glass-v2';
+  m.customProgramCacheKey = () => 'pit-glass-v3';
   return m;
 }
 
