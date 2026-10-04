@@ -23,7 +23,8 @@ export function buildMarkings(ctx: Ctx, atlas: DecalAtlas) {
   const B = (s: number) => cs.get(s, 'decal');
 
   /** quad in (s, lat) space: corners at s0..s1 × l0..l1, uv mapped with u ← lateral, v ← s */
-  const PAINT = [0.74, 0.74, 0.72];
+  // white road paint is ~60 % (the asphalt shader's edge lines use the same): brighter read as a lit strip
+  const PAINT = [0.6, 0.595, 0.575];
   const rect = (s0: number, s1: number, l0: number, l1: number, uv: UVRect, rgb = PAINT, rot = false) => {
     const b = B(s0);
     b.rgb(rgb[0], rgb[1], rgb[2]);
@@ -173,7 +174,7 @@ export function buildMarkings(ctx: Ctx, atlas: DecalAtlas) {
     const uv = atlas.logo(k);
     // rot: u runs along s, v across; oriented to read upright for someone on the track looking out at it
     const u = side > 0 ? { u0: uv.u0, u1: uv.u1, v0: uv.v1, v1: uv.v0 } : { u0: uv.u1, u1: uv.u0, v0: uv.v0, v1: uv.v1 };
-    rect(s0, s0 + 16, Math.min(l0, l1), Math.max(l0, l1), u, [0.8, 0.8, 0.78], true);
+    rect(s0, s0 + 16, Math.min(l0, l1), Math.max(l0, l1), u, [0.62, 0.615, 0.595], true);
   };
   logoAt('Turn 1', 18, 0);
   logoAt('Roggia', 10, 1);

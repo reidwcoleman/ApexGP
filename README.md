@@ -98,6 +98,18 @@ npm run check    # tsc --noEmit
   touched, grime, section joints) and plastic (TecPro, tyre belts). Footbridges are Warren-truss spans on open
   steel stair towers; marshal posts are steel-framed shelters with their kit. Pit-building rooms read dim behind
   the glass by day and glow after dark. `tools/_spots.mjs` / `_posts.mjs` / `_ring.mjs` frame free-camera shots.
+- **Materials like footage** — surfaces keep to what real ones reflect: livery paint between ~2 % and ~75 %
+  (a screen-pure red or white read as neon next to footage) under a lacquer softened by orange peel and dust,
+  tyre rubber a charcoal ~2.5 % rather than a hole, white road and kerb paint ~60 % with a road film and rubber
+  streaks on the ridden half of the kerb. The asphalt's polished chip tops are the high-pass of the scan's
+  height (a raw threshold made glossy islands, a camouflage pattern against the sun); the racing line is laid
+  in streaks, some stretches have relaid repair patches with sealed seams, painted run-off follows the grain and
+  wears off the chip tops, gravel rakes wander. The wet road takes the env map's light but not its colour (the
+  env map is one spot's view: a red grandstand mirrored round the lap); the screen-space march supplies what is
+  really beside the road. Carbon weave and paint flake within ~2 m of an onboard lens read as their average
+  (the lens's defocus can't resolve them). `node tools/_matshots.mjs <out> <track> <weather> <time> [car|road|glare]`
+  (PORT env) shoots frozen close-ups of the player's car, the road at several distances and the road into and
+  away from the sun; `WXSET='{"wetness":0.7,"rain":0,"dryLine":0.8}'` sets a drying track.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
