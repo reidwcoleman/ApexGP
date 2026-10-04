@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
 import type { Renderer, QualityLevel, GradeLook } from '../core/Renderer.ts';
-import { aerialBanks, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
+import { aerialBanks, aerialLens, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
 import { computeSky, LUT_SCALE, type SkyLUT } from './env/atmosphere.ts';
 import { createSkyDome } from './env/sky.ts';
 import { createCloudNoise } from './env/skyNoise.ts';
@@ -28,19 +28,33 @@ import { weatherUniforms } from './weatherUniforms.ts';
  */
 const FILM = {
   exposure: 0.9,
-  nightExposure: 0.82,
-  saturation: 0.84,
+  nightExposure: 1.1,
+  saturation: 0.68,
   contrast: 1.08,
-  tint: [1.17, 1.01, 0.66],
-  shadowTint: [1.08, 0.97, 0.8],
+  // (measured on the onboard footage: highlights only a touch warm (b/g ≈ 0.95), the mids more; a
+  // stronger blue cut turned every grey cloud and every misty sky olive)
+  tint: [1.12, 1.0, 0.76],
+  shadowTint: [1.06, 0.98, 0.86],
   bloom: 1.35,
   bloomThreshold: 0.9,
   skyComp: 0.1,
   adaptPow: 0.62,
   adaptPowGrey: 0.84,
   maxAdapt: 9.5,
-  /** black floor (linear, after tone mapping; warm) */
-  lift: [0.0042, 0.0037, 0.003],
+  /**
+   * black floor (linear, after tone mapping): footage's blacks sit at ~1 % (sRGB ~0.01), a hair warm by
+   * day and olive at night (Le Mans onboard: the unlit dark is a greenish brown-black, never red or navy)
+   */
+  lift: [0.0011, 0.001, 0.0008],
+  nightLift: [0.0006, 0.0007, 0.0004],
+  /** wet: the veil of spray and water on the lens lifts the whole dark end (wet AC onboard: blacks ~0.09) */
+  wetLift: [0.0062, 0.0064, 0.0068],
+  /** how much brighter the rain's grey veil (fog) is than the deck that lights it */
+  rainVeil: 0.7,
+  /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
+  skyHot: 0.25,
+  /** the milky haze over a sunny day's sky (sky.ts uMilk) */
+  dayMilk: 0.15,
 };
 
 /**
@@ -189,7 +203,10 @@ export function createEnvironment(
   // bounce off sunlit grass. Re-lit (scaled) as the light changes; re-captured on a big change.
   const worldRT = new THREE.WebGLCubeRenderTarget(ENV_SIZE, { type: THREE.HalfFloatType, generateMipmaps: false });
   const worldCam = new THREE.CubeCamera(0.4, 6000, worldRT);
-  const worldUniforms = { uWorld: { value: worldRT.texture }, uWorldScale: { value: 1 } };
+  // uWorldVeil: in rain, mist and under a grey deck the captured trees and stands round the horizon are
+  // veiled by the air in front of them, so a wet road mirrors a light grey band (the sky through the
+  // spray), not the near-black wall of the tree line it was captured from
+  const worldUniforms = { uWorld: { value: worldRT.texture }, uWorldScale: { value: 1 }, uWorldVeil: { value: 0 } };
   const worldSphere = new THREE.Mesh(
     new THREE.SphereGeometry(4, 32, 16),
     new THREE.ShaderMaterial({
@@ -201,12 +218,16 @@ export function createEnvironment(
       fragmentShader: /* glsl */ `
         uniform samplerCube uWorld;
         uniform float uWorldScale;
+        uniform float uWorldVeil;
         varying vec3 vDir;
         void main() {
-          vec4 w = textureCube( uWorld, normalize( vDir ) );
+          vec3 d = normalize( vDir );
+          vec4 w = textureCube( uWorld, d );
           if ( w.a < 0.5 ) discard;
-          gl_FragColor = vec4( w.rgb * uWorldScale, 1.0 );
+          float veil = uWorldVeil * ( 1.0 - smoothstep( 0.03, 0.45, abs( d.y ) ) );
+          gl_FragColor = vec4( w.rgb * uWorldScale, 1.0 - veil );
         }`,
+      transparent: true,
     }),
   );
   worldSphere.renderOrder = 1;
@@ -302,7 +323,10 @@ export function createEnvironment(
     if ((P.night ?? 0) > 0.5) C.sunCol.multiply(tmpA.setRGB(0.72, 0.84, 1.0));
     sky.uniforms.uSunRadius.value = (P.night ?? 0) > 0.5 ? 0.017 : 0.0095;
     if ((P.flood ?? 0) * floodScale(P.night ?? 0) > 0) buildFloodField(track, renderer);
-    const S = (e: number, phi: number) => l!.sample(e * DEG, phi * DEG).multiplyScalar(C.skyScale);
+    // (the sky's colours as the dome draws them, with its softened glow round the sun — see below)
+    const mieG = l.g * 0.9;
+    const mieK = THREE.MathUtils.lerp(0.5, 0.85, THREE.MathUtils.smoothstep(P.elevation, 6, 30));
+    const S = (e: number, phi: number) => l!.sampleSky(e * DEG, phi * DEG, mieG, mieK).multiplyScalar(C.skyScale);
     C.zenith.copy(S(89, 90));
     C.horizonAway.copy(S(1.5, 180)).add(S(1.5, 120)).add(S(1.5, 90)).multiplyScalar(1 / 3);
     C.horizonToward.copy(S(1.5, 0));
@@ -315,6 +339,12 @@ export function createEnvironment(
 
     const u = sky.uniforms;
     u.uLut.value = l.texture;
+    u.uMieLut.value = l.mieTexture;
+    // (the haze glow round a low sun, single-scattered, piles up toward the horizon into a bright cone
+    // standing on it — brighter than the sky and clipping white at golden hour; footage shows a soft,
+    // round glow: a broader, weaker lobe, the aureole term in sky.ts keeps the tight core)
+    u.uMieG.value = mieG;
+    u.uMieK.value = mieK;
     u.uSkyScale.value = C.skyScale * LUT_SCALE;
     (u.uSunDir.value as THREE.Vector3).copy(sunDir);
     rig.setDirection(sunDir);
@@ -397,12 +427,26 @@ export function createEnvironment(
     (u.uSunDisc.value as THREE.Vector3).set(C.sunCol.r * disc, C.sunCol.g * disc, C.sunCol.b * disc);
 
     // ---- fog / haze: clear-sky horizon → grey mist
-    const fogCol = tmpA.copy(C.away).lerp(tmpB.set(deck.r * 1.2, deck.g * 1.22, deck.b * 1.25), Math.max(ov, L.mist * 0.9));
+    const wetK = THREE.MathUtils.smoothstep(L.rain, 0.02, 0.7);
+    // (mist and fog are water: the haze goes the deck's neutral grey-white well before the mist is thick)
+    const fogCol = tmpA.copy(C.away).lerp(tmpB.set(deck.r * 1.2, deck.g * 1.22, deck.b * 1.25), Math.max(ov, THREE.MathUtils.smoothstep(L.mist, 0.03, 0.4) * 0.92));
+    // (rain and spray hang a bright, cool veil between the car and everything beyond it: in wet onboard
+    // footage the trees across the track are pale grey and the sky behind them near white)
+    // (by day only: at night nothing lights it and a wet night stays black)
+    const dayK = 1 - THREE.MathUtils.smoothstep(P.night ?? 0, 0.3, 1);
+    fogCol.multiplyScalar(1 + FILM.rainVeil * wetK * dayK);
+    // (the blue hour: with the sun gone the air is lit by the blue sky alone — misty dusk footage is slate
+    // blue-grey, where the atmosphere model's low sky away from the afterglow still leans mauve)
+    const blueHour = (1 - (P.direct ?? 1)) * (1 - THREE.MathUtils.smoothstep(P.night ?? 0, 0.5, 1));
+    const fogLum = fogCol.r * 0.2126 + fogCol.g * 0.7152 + fogCol.b * 0.0722;
+    fogCol.lerp(tmpB.setRGB(0.74, 1.0, 1.26).multiplyScalar(fogLum), 0.9 * blueHour);
     fog.color.copy(fogCol);
     aerialParams.x = L.fogDensity;
     aerialParams.y = L.fogFalloff;
     aerialParams.z = 0;
     aerialParams.w = L.fogMax;
+    // clear air turns distance blue-grey (per-channel extinction); droplets in mist and rain are grey
+    aerialLens.y = THREE.MathUtils.clamp(1 - Math.max(L.mist * 1.4, wetK), 0, 1) * (1 - 0.6 * ov);
     // (the sun's forward-scatter glow in the haze goes with the sun: a faint afterglow once it has set)
     const lobe = tmpB.copy(C.horizonToward).sub(fogCol).multiplyScalar((L.fogLobe / 1.45) * Math.sqrt(P.direct ?? 1));
     aerialSunColor.r = Math.max(0, lobe.r);
@@ -455,23 +499,42 @@ export function createEnvironment(
     // headlights and the lights round the track carry them
     const filmDay = 1 - THREE.MathUtils.smoothstep(nightK, 0.5, 1);
     gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(FILM.nightExposure, FILM.exposure, filmDay);
-    sky.uniforms.uSkyComp.value = Math.pow(adapt, -FILM.skyComp);
+    // (a misty blue hour is darker than a clear one: the mist eats the last light — sim dusk footage sits
+    // at ~0.11 mid-grey)
+    gradeLook.exposure *= 1 - 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.5) * blueHour;
+    // (a camera exposed for the land lets a sunny sky run hot and pale: footage's daytime sky is nearly
+    // white at the horizon and only a washed blue overhead, never the deep blue of a render)
+    const skyHot = 1 + FILM.skyHot * L.sunVis * filmDay * THREE.MathUtils.smoothstep(P.elevation, 8, 30);
+    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot;
+    sky.uniforms.uSkyComp.value = skyComp;
+    // the low sky veiled by the mist / rain that veils the land (in the land's colour, so they meet):
+    // how much of the horizon a few km of the air beyond the clear-day haze hides
+    const veilOd = Math.max(0, L.fogDensity - 2.6e-4) * 7000;
+    const veil = 1 - Math.exp(-veilOd);
+    sky.uniforms.uFogK.value.set(veil, THREE.MathUtils.lerp(9, 1.2, THREE.MathUtils.smoothstep(veilOd, 1, 6)));
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
     gradeLook.saturation = L.saturation * FILM.saturation;
     gradeLook.contrast = L.contrast * FILM.contrast;
     // the warm cast is the sun's: full in sunshine, eased off under a grey deck, gone in the blue hour
     // after sunset and in a misty dusk (footage there is cool blue-grey, not brown)
     // (a night keeps some of it: the lights round the track are warm, and night footage is never blue)
-    const warm = Math.max(filmDay * (0.5 + 0.5 * L.sunVis) * (1 - 0.85 * (1 - (P.direct ?? 1))) * (1 - 0.35 * L.mist), 0.6 * THREE.MathUtils.smoothstep(nightK, 0.5, 1));
+    // (and gone in the rain: wet onboard footage is neutral to cool grey, the spray white, never beige)
+    // (under a grey deck or in mist a yellow cast only turns the sky olive: there it is mostly gone)
+    const warm = Math.max(filmDay * (0.25 + 0.75 * L.sunVis) * (1 - 0.85 * (1 - (P.direct ?? 1))) * (1 - 0.85 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.5)) * (1 - 0.85 * wetK), 0.6 * THREE.MathUtils.smoothstep(nightK, 0.5, 1));
     const wt = (k: number, i: number, f: readonly number[]) => k * (1 + (f[i] - 1) * warm);
     gradeLook.tint = [wt(L.tint[0], 0, FILM.tint), wt(L.tint[1], 1, FILM.tint), wt(L.tint[2], 2, FILM.tint)];
     gradeLook.shadowTint = [wt(L.shadowTint[0], 0, FILM.shadowTint), wt(L.shadowTint[1], 1, FILM.shadowTint), wt(L.shadowTint[2], 2, FILM.shadowTint)];
     lightInfo.warm = +warm.toFixed(3);
     // the black floor: a lens's veiling flare lifts the blacks of a bright day; a night is crushed to black
     const lift = gfx.film.uniforms.get('filmLift')!.value as THREE.Vector3;
-    lift.set(FILM.lift[0], FILM.lift[1], FILM.lift[2]).multiplyScalar(THREE.MathUtils.lerp(0.35, 1, filmDay));
+    lift.set(
+      THREE.MathUtils.lerp(FILM.nightLift[0], FILM.lift[0], filmDay) + FILM.wetLift[0] * wetK * dayK,
+      THREE.MathUtils.lerp(FILM.nightLift[1], FILM.lift[1], filmDay) + FILM.wetLift[1] * wetK * dayK,
+      THREE.MathUtils.lerp(FILM.nightLift[2], FILM.lift[2], filmDay) + FILM.wetLift[2] * wetK * dayK,
+    );
     lightInfo.eGround = +eGround.toFixed(3);
     if (worldE > 0) worldUniforms.uWorldScale.value = eGround / worldE;
+    worldUniforms.uWorldVeil.value = THREE.MathUtils.clamp(0.8 * wetK + 0.3 * ov + 0.4 * L.mist, 0, 0.85);
     lightInfo.adapt = +adapt.toFixed(3);
     lightInfo.deckRad = +deckRad.toFixed(3);
     lightInfo.skyIrr = +C.skyIrr.toFixed(3);
@@ -493,6 +556,9 @@ export function createEnvironment(
     sceneryLight.rain = L.rain;
     pushSceneryLight();
     applyNightAndBow(L);
+    // (after the night glow / heat milk have coloured the fog)
+    const sc = sky.uniforms.uSkyComp.value as number;
+    (sky.uniforms.uFogCol.value as THREE.Vector3).set(fog.color.r / sc, fog.color.g / sc, fog.color.b / sc);
   }
 
   /**
@@ -571,7 +637,13 @@ export function createEnvironment(
 
     // heat haze: a bleached, milky sky and a big glare round the sun
     const milk = THREE.MathUtils.clamp(wx.heat * 1.3 - 0.25, 0, 1) * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.35) * (1 - L.overcast) * (1 - night);
+    // (and a little of that milk on every sunny day: the pale, washed horizon of broadcast footage)
+    // (not under broken cloud: a bright strip under a dark deck reads as a seam, not haze)
+    const dayMilk = FILM.dayMilk * L.sunVis * (1 - night) * (P.direct ?? 1) * THREE.MathUtils.smoothstep(P.elevation, 8, 30) * (1 - THREE.MathUtils.smoothstep(L.coverage, 0.2, 0.6));
     sky.uniforms.uMilk.value = milk * 0.8;
+    // (the visible dome only: the light the sky throws on the land stays the atmosphere's, so the land
+    // keeps its contrast under the paler sky)
+    sky.uniforms.uViewMilk.value = dayMilk;
     // sunlit haze: bright and warm, not grey
     const milkCol = (sky.uniforms.uMilkCol.value as THREE.Vector3).set(
       (C.horizonAway.r * 0.4 + C.horizonToward.r * 0.6) * 1.12,
@@ -604,7 +676,9 @@ export function createEnvironment(
     u.uNight.value = night;
     u.uStars.value = night * (1 - L.overcast) * (1 - 0.85 * L.mist) * (1 - L.coverage * 0.5);
     // the city under a cloud deck lights it up from below
-    const city = 0.03 * night * (0.6 + 0.6 * L.overcast + 0.5 * L.mist) * (1 - 0.5 * L.rain);
+    // (a city's sodium glow only shows once it is properly dark: in the blue hour it would turn the misty
+    // air mauve)
+    const city = 0.03 * night * THREE.MathUtils.smoothstep(night, 0.3, 1) * (0.6 + 0.6 * L.overcast + 0.5 * L.mist) * (1 - 0.5 * L.rain);
     (u.uCity.value as THREE.Vector3).set(cityCol.r * city, cityCol.g * city, cityCol.b * city);
     const glow = F * 0.01 * (0.4 + 1.8 * haze);
     (u.uFloodGlow.value as THREE.Vector3).set(floodCol.r * glow, floodCol.g * glow, floodCol.b * glow);
@@ -959,7 +1033,10 @@ export function createEnvironment(
       worldRT.dispose();
       envRT?.dispose();
       pmrem.dispose();
-      for (const l of lutCache.values()) l.texture.dispose();
+      for (const l of lutCache.values()) {
+        l.texture.dispose();
+        l.mieTexture.dispose();
+      }
       lutCache.clear();
     },
   };

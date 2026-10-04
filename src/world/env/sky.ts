@@ -6,7 +6,8 @@ import * as THREE from 'three';
  * panorama (see skyClouds.ts) composited over it, plus the sun disc/aureole,
  * lightning (a flash lighting the deck from inside, and a bolt), a rainbow
  * opposite the sun in a sun shower, and at night the moon, stars, the city's
- * glow on the horizon and the circuit's floodlights lighting the haze.
+ * glow on the horizon and the circuit's floodlights lighting the haze. In mist, fog and rain the
+ * low sky is veiled by the same air (and colour) as the land (`uFogCol`, `uFogK`).
  *
  * The dome is a unit sphere that follows the camera and is written at the far
  * plane (gl_Position.z = w), so it works with any camera near/far. A second
@@ -27,6 +28,9 @@ const FRAG = /* glsl */ `
 precision highp float;
 varying vec3 vDir;
 uniform sampler2D uLut;
+uniform sampler2D uMieLut;
+uniform float uMieG;
+uniform float uMieK;
 uniform float uSkyScale;
 uniform vec3 uSunDir;
 uniform vec3 uSunDisc;
@@ -54,7 +58,10 @@ uniform float uBow;
 uniform vec3 uBowCol;
 uniform float uBowEl;
 uniform float uMilk;
+uniform float uViewMilk;
 uniform vec3 uMilkCol;
+uniform vec3 uFogCol;
+uniform vec2 uFogK;
 
 #define PI 3.141592653589793
 
@@ -67,7 +74,11 @@ vec3 skyLut( vec3 d ) {
   float u = acos( clamp( cphi, -1.0, 1.0 ) ) / PI;
   float e = sqrt( min( 1.0, abs( el ) / ( PI * 0.5 ) ) );
   float v = el >= 0.0 ? 0.5 + 0.5 * e : 0.5 - 0.5 * e;
-  return texture2D( uLut, vec2( u, v ) ).rgb * uSkyScale;
+  // the Mie forward peak with the true sun angle (see atmosphere.ts: a baked peak smeared into a cone)
+  float c = dot( d, uSunDir );
+  float g2 = uMieG * uMieG;
+  float pm = 0.1193662 * ( 1.0 - g2 ) * ( 1.0 + c * c ) / ( ( 2.0 + g2 ) * pow( max( 1.0 + g2 - 2.0 * uMieG * c, 1e-4 ), 1.5 ) );
+  return ( texture2D( uLut, vec2( u, v ) ).rgb + texture2D( uMieLut, vec2( u, v ) ).rgb * pm * uMieK ) * uSkyScale;
 }
 
 vec3 skyBg( vec3 d ) {
@@ -77,7 +88,8 @@ vec3 skyBg( vec3 d ) {
     c = mix( c, mix( uOvZenith, uOvHorizon, k ), uOvercast );
   }
   // haze: a milky, bleached sky, whitest toward the horizon
-  if ( uMilk > 0.001 ) c = mix( c, uMilkCol, uMilk * ( 0.25 + 0.7 * pow( 1.0 - max( d.y, 0.0 ), 4.0 ) ) );
+  float milk = uMilk + ( uEnv < 0.5 ? uViewMilk : 0.0 );
+  if ( milk > 0.001 ) c = mix( c, uMilkCol, milk * ( 0.25 + 0.7 * pow( 1.0 - max( d.y, 0.0 ), 4.0 ) ) );
   return c;
 }
 
@@ -268,6 +280,11 @@ void main() {
   vec4 cl = pano( dUp );
   col = col * cl.a + cl.rgb;
 
+  // the sky seen through the mist: the same air that veils the land veils the low sky (and the clouds
+  // in it), so the far hills and the horizon fade into one colour instead of a fogged band of land
+  // under a clear-sky horizon (x = how much at the horizon, y = how fast it thins upward)
+  if ( uFogK.x > 0.001 ) col = mix( col, uFogCol, uFogK.x * exp( -max( sy, 0.0 ) * uFogK.y ) );
+
   // light in the low air: the city's sodium glow, and the circuit's own floodlights lighting the haze
   if ( uNight > 0.001 ) {
     float el = max( sy, 0.0 );
@@ -314,6 +331,10 @@ export interface SkyDome {
 export function createSkyDome(): SkyDome {
   const uniforms: Record<string, THREE.IUniform> = {
     uLut: { value: null },
+    uMieLut: { value: null },
+    uMieG: { value: 0.8 },
+    /** strength of the visible Mie glow round the sun (1 = the physical single scattering) */
+    uMieK: { value: 1 },
     uSkyScale: { value: 1 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunDisc: { value: new THREE.Vector3(40, 30, 20) },
@@ -342,7 +363,11 @@ export function createSkyDome(): SkyDome {
     uBowCol: { value: new THREE.Vector3(1, 1, 1) },
     uBowEl: { value: -0.4 },
     uMilk: { value: 0 },
+    /** extra milk on the visible dome only (a sunny day's pale horizon), not in the env map */
+    uViewMilk: { value: 0 },
     uMilkCol: { value: new THREE.Vector3(1, 1, 1) },
+    uFogCol: { value: new THREE.Vector3(0.5, 0.5, 0.5) },
+    uFogK: { value: new THREE.Vector2(0, 8) },
   };
   const geo = new THREE.SphereGeometry(1, 96, 48);
   const mat = new THREE.ShaderMaterial({
