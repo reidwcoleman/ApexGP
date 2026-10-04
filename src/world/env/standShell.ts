@@ -81,6 +81,7 @@ const STEEL_MID = srgb(0x9a9ea4);
 const STEEL_DARK = srgb(0x4a4e55);
 const CLAD = srgb(0xb4b8bc);
 const ROOF_DECK = srgb(0xd8dadb);
+const ROOF_TOP = srgb(0xbdc0c1);
 const MEMBRANE = srgb(0xf1f0eb);
 const SCRIM = srgb(0x2b2f35);
 const NOSING = srgb(0xe8c21a);
@@ -436,7 +437,8 @@ function buildRoof(
         const za = zFront + ((zBack - zFront) * j) / nz, zb = zFront + ((zBack - zFront) * (j + 1)) / nz;
         const P = (x: number, z: number, dy: number) => V(x, roofY(Math.min(Math.max(x, -L / 2), L / 2), z) + dy, z);
         // top (faces up): p0 (xa, zb), p1 (xb, zb), p2 (xb, za), p3 (xa, za)
-        B.cur.quad4(P(xa, zb, thick), P(xb, zb, thick), P(xb, za, thick), P(xa, za, thick), col);
+        // (the weather side of a sheet roof is a duller grey than its painted soffit)
+        B.cur.quad4(P(xa, zb, thick), P(xb, zb, thick), P(xb, za, thick), P(xa, za, thick), kind === 'membrane' ? col : ROOF_TOP);
         // underside (faces down)
         B.cur.quad4(P(xa, za, 0), P(xb, za, 0), P(xb, zb, 0), P(xa, zb, 0), col.clone().multiplyScalar(0.92));
       }

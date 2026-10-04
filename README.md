@@ -104,6 +104,22 @@ npm run check    # tsc --noEmit
   touched, grime, section joints) and plastic (TecPro, tyre belts). Footbridges are Warren-truss spans on open
   steel stair towers; marshal posts are steel-framed shelters with their kit. Pit-building rooms read dim behind
   the glass by day and glow after dark. `tools/_spots.mjs` / `_posts.mjs` / `_ring.mjs` frame free-camera shots.
+- **Pit buildings in each circuit's own materials** — `pitStyle` (pitlane/building.ts): trim, cladding, core,
+  frame and glass tint per venue (Spa's and Mexico's dark grey, Sakhir's sandstone, Spielberg's graphite) and the
+  top floor's shading: vertical fins (Monza, Yas), horizontal louvres on outriggers (Suzuka, Hungaroring,
+  Melbourne, Zandvoort, Sakhir) or a flush curtain wall (Spa, Austin, Mexico). The end elevations — what the
+  long lens sees down the straight — wrap the curtain wall round the corner, carry the slab edges round as
+  bands, a framed event board in the host's colours, a stair core rising past the roof, a glazed lobby under a
+  canopy, a roller shutter and a louvred plant enclosure. Race control's glazing is raked outward under a deep
+  overhang with aerials on top. Curtain-wall glass is coated (a tinted ~9 % reflection, Fresnel to a mirror at
+  grazing) and every 1.5 m pane bends the reflection its own fraction of a degree. Team motorhomes are glazed
+  full width in a team-colour frame with roof-terrace shades. Prints and boards carry a polygon offset (they
+  z-fought into stripes down long lenses). Hospitality pavilions and the Suzuka hotel are real buildings
+  (colonnade, set-back terrace, balconies and party walls, interior-mapped rooms lit at night) in the stands'
+  archMaterial, which gained a RENDER class and roof-top laps, grime and rooflights. Village houses lay their
+  windows out per house (bays, storeys, a door, sills, shutters, eaves shadow, gravel flat roofs, lit rooms at
+  night). `tools/_bldg.mjs` frames the pit building (grid, TV long lens, ends, tower, paddock), `tools/_lm.mjs`
+  every cluster of a mesh (landmarks, villages), `tools/_bench_bldg.mjs` their GPU cost (min of many frames).
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.

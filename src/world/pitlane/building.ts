@@ -63,6 +63,43 @@ export const H = {
   roofTop: 14.9,
 };
 
+/**
+ * Each circuit's pit building in its own materials, as the real ones are: Spa's and Mexico's dark
+ * grey cladding, Sakhir's sandstone, Suzuka's and Hungaroring's horizontal louvres, the flush
+ * curtain walls at Austin and Spa, Spielberg's graphite, the white fins at Monza and Yas.
+ *   trim   slab edges, canopy, frames      clad   end walls, pillars, the ground-floor shell
+ *   core   stair cores and the tower shaft  frame  mullions and fins
+ *   shade  how the top floor is shaded: vertical fins, horizontal louvres or a flush curtain wall
+ *   glass  the curtain wall's tint (glassMaterial)
+ */
+export interface PitStyle {
+  trim: number;
+  clad: number;
+  core: number;
+  frame: number;
+  shade: 'fins' | 'louvres' | 'flush';
+  glass: number;
+}
+const STYLES: Record<string, Partial<PitStyle>> = {
+  monza: { clad: 0xb3b6b8, core: 0x8f9396, glass: 0x2c3a44 },
+  spa: { trim: 0xf0f0ec, clad: 0x6c7177, core: 0x55595e, frame: 0x3a3e43, shade: 'flush', glass: 0x26384a },
+  silverstone: { clad: 0xb8bcc0, core: 0x9a9fa4, glass: 0x30404c },
+  suzuka: { trim: 0xf2f2ef, clad: 0xd2d4d2, core: 0xb4b7b6, frame: 0xc9ccce, shade: 'louvres', glass: 0x1e2a30 },
+  yasmarina: { trim: 0xf4f3ef, clad: 0xe2dfd8, core: 0xcfcbc2, frame: 0xf2f1ec, glass: 0x2a4450 },
+  austin: { trim: 0xf0f0ee, clad: 0x8d9298, core: 0x6f747a, frame: 0x2f3338, shade: 'flush', glass: 0x22344a },
+  hungaroring: { trim: 0xeeeeea, clad: 0xc4c6c4, core: 0x9fa3a3, frame: 0x3a3d42, shade: 'louvres', glass: 0x2a3a36 },
+  interlagos: { clad: 0xbfc3c4, core: 0x9ea2a4, glass: 0x2c3c46 },
+  melbourne: { trim: 0xebebe8, clad: 0x8e9396, core: 0x6e7376, frame: 0x50555a, shade: 'louvres', glass: 0x2a3640 },
+  mexico: { trim: 0xe8e8e4, clad: 0x5d6268, core: 0x474b50, frame: 0x2a2d31, shade: 'flush', glass: 0x26323c },
+  montreal: { trim: 0xf3f3f0, clad: 0xdadcdb, core: 0xb9bcbc, frame: 0xe6e8e8, glass: 0x2b3e4a },
+  sakhir: { trim: 0xebe0c9, clad: 0xcdb994, core: 0xb39f7b, frame: 0xc2ad86, shade: 'louvres', glass: 0x3a3a34 },
+  spielberg: { trim: 0xd9dbdd, clad: 0x3f4348, core: 0x2e3135, frame: 0x26292d, glass: 0x222c34 },
+  zandvoort: { trim: 0xf0f0ec, clad: 0x9fa4a8, core: 0x7d8286, frame: 0x60656a, shade: 'louvres', glass: 0x2c3a44 },
+};
+export function pitStyle(id: string): PitStyle {
+  return { trim: 0xe9eae7, clad: 0xc9cbc9, core: 0xa9acac, frame: 0xf2f2ef, shade: 'fins', glass: 0x2c3a44, ...STYLES[id] };
+}
+
 export interface BuildingOut {
   solid: Geo;
   detail: Geo;
@@ -78,8 +115,9 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   const F = L.front, GB = L.garageBack, BB = L.bldgBack;
   const S0 = p.bldgS0, S1 = p.bldgS1;
   const fr = new Frame();
-  const white = 0xe9eae7;
-  const cladding = 0xc9cbc9;
+  const st = pitStyle(ts.track.def.id);
+  const white = st.trim;
+  const cladding = st.clad;
 
   /** glass pane in track space: s range, lateral l, heights; faces the track (dir −1) or the paddock (+1) */
   const pane = (s0: number, s1: number, l: number, h0: number, h1: number, dir: -1 | 1, depth: number) => {
@@ -151,8 +189,8 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   // ground-floor shell: back wall, end walls
   solid.color(cladding).mat(0.8, 0, 0, 1);
   ts.box(solid, S0 - 0.3, S1 + 0.3, GB, BB, 0, H.slab1, 1 | 2 | 32, 6);
-  ts.box(solid, S0 - 0.8, S0 - 0.3, F - 0.1, GB, 0, H.slab1, 1 | 16);
-  ts.box(solid, S1 + 0.3, S1 + 0.8, F - 0.1, GB, 0, H.slab1, 2 | 16);
+  ts.box(solid, S0 - 0.8, S0 - 0.3, F - 0.1, BB, 0, H.slab1, 1 | 16 | 32);
+  ts.box(solid, S1 + 0.3, S1 + 0.8, F - 0.1, BB, 0, H.slab1, 2 | 16 | 32);
   // back doors to the paddock + a lit sign over each team's door
   for (let m = 0; m < nMod; m++) {
     const a = S0 + m * 6;
@@ -204,35 +242,37 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   }
   // curtain wall (not across the podium, which has its own backdrop)
   const cw = F + 0.8;
-  const glassRuns: [number, number][] = [[S0, p.podiumS0 + 1], [p.podiumS1 - 1, S1]];
+  // (the glass runs to the end planes: it wraps the corners there, buildEndWalls)
+  const glassRuns: [number, number][] = [[S0 - 0.8, p.podiumS0 + 1], [p.podiumS1 - 1, S1 + 0.8]];
   for (const [a, b] of glassRuns) pane(a, b, cw, H.floor1 + 0.05, H.slab2, -1, 12);
-  solid.color(0xd5d7d8).mat(0.4, 0.6, 0, 1);
+  solid.color(st.frame).mat(0.4, 0.6, 0, 1);
   for (let s = S0; s <= S1; s += 1.5) {
     if (s > p.podiumS0 + 1 && s < p.podiumS1 - 1) continue;
     ts.box(solid, s - 0.05, s + 0.05, cw - 0.12, cw + 0.02, H.floor1, H.slab2, 1 | 2 | 16);
   }
-  ts.box(solid, S0, S1, cw - 0.1, cw + 0.02, H.floor1 + 0.9, H.floor1 + 1.0, 4 | 8 | 16, 6);
-  // end walls of the upper floors
-  solid.color(cladding).mat(0.75, 0, 0, 1);
-  ts.box(solid, S0 - 0.8, S0, cw - 0.3, BB, H.floor1, H.roof, 1 | 16, 6);
-  ts.box(solid, S1, S1 + 0.8, cw - 0.3, BB, H.floor1, H.roof, 2 | 16, 6);
-
-  // big graphics on the end walls (seen down the straight and the pit lane)
-  for (const [sEnd, dir] of [[S0 - 0.81, -1], [S1 + 0.81, 1]] as [number, -1 | 1][]) {
-    fr.at(ts, sEnd, (cw + BB) / 2, 0);
-    print.rgb(1, 1, 1).mat(0.5, 0, 0.3, 1);
-    fr.panel(print, 0, (H.floor1 + H.roof) / 2, 0, dir, 0, 0, 14, 7, atlas.uv('podiumBack'));
-    fr.at(ts, sEnd, (F + GB) / 2, 0);
-    for (let i = 0; i < 3; i++) fr.panel(print, 0, 3.0, -5.6 + i * 5.6, dir, 0, 0, 5.2, 1.3, atlas.uv('sp' + [10, 11, 0][i]));
-  }
+  ts.box(solid, S0 - 0.8, S1 + 0.8, cw - 0.1, cw + 0.02, H.floor1 + 0.9, H.floor1 + 1.0, 4 | 8 | 16, 6);
 
   // ---------------------------------------------------------------- second floor: Paddock Club with fins
   solid.color(white).mat(0.6, 0, 0, 1);
   ts.box(solid, S0 - 0.8, S1 + 0.8, F - 0.9, BB, H.slab2, H.floor2, 63, 6);
   const g2 = F - 0.6;
-  pane(S0, S1, g2, H.floor2, H.roof, -1, 14);
-  solid.color(0xf2f2ef).mat(0.5, 0.1, 0, 1);
-  for (let s = S0 + 0.9; s < S1; s += 1.8) ts.box(solid, s - 0.07, s + 0.07, F - 1.45, g2, H.floor2, H.roof, 63);
+  pane(S0 - 0.8, S1 + 0.8, g2, H.floor2, H.roof, -1, 14);
+  if (st.shade === 'fins') {
+    // vertical fins, 1.8 m apart, standing proud of the glass
+    solid.color(st.frame).mat(0.5, 0.1, 0, 1);
+    for (let s = S0 + 0.9; s < S1; s += 1.8) ts.box(solid, s - 0.07, s + 0.07, F - 1.45, g2, H.floor2, H.roof, 63);
+  } else if (st.shade === 'louvres') {
+    // horizontal aluminium louvre blades hung in front of the glass on outriggers every 6 m:
+    // from the track they read as fine dark lines over the glass, and their shade bands it
+    thin.color(st.frame).mat(0.4, 0.55, 0, 1);
+    for (let y = H.floor2 + 0.55; y < H.roof - 0.2; y += 0.48) ts.box(thin, S0 - 0.8, S1 + 0.8, F - 1.5, F - 1.12, y, y + 0.07, 4 | 8 | 16 | 32, 12);
+    for (let s = S0 - 0.8; s <= S1 + 0.8; s += 6) ts.box(thin, s - 0.05, s + 0.05, F - 1.55, g2, H.floor2, H.roof, 1 | 2 | 16);
+  } else {
+    // flush curtain wall: slim mullions and a transom at sill height, a dark spandrel at the slab
+    thin.color(st.frame).mat(0.35, 0.6, 0, 1);
+    for (let s = S0 - 0.8; s <= S1 + 0.8; s += 1.5) ts.box(thin, s - 0.04, s + 0.04, g2 - 0.14, g2, H.floor2, H.roof, 1 | 2 | 16);
+    ts.box(thin, S0 - 0.8, S1 + 0.8, g2 - 0.12, g2, H.floor2 + 1.05, H.floor2 + 1.12, 4 | 8 | 16, 12);
+  }
   // Paddock Club lettering on the podium side
   // roof slab + canopy blade over the apron
   solid.color(white).mat(0.55, 0.05, 0, 1);
@@ -274,12 +314,12 @@ export function buildBuilding(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, 
   }
 
   buildPodium(p, ts, atlas, o);
-  buildTower(p, ts, atlas, o);
+  buildTower(p, ts, atlas, o, st);
   buildPaddock(p, ts, atlas, o);
   if (ts.track.def.id === 'silverstone') buildWing(p, ts, o, 'wing');
   // Interlagos: the new pit building's white roof that rolls in waves along the straight
   if (ts.track.def.id === 'interlagos') buildWing(p, ts, o, 'wave');
-  buildEndWalls(p, ts, o);
+  buildEndWalls(p, ts, atlas, o, st);
 }
 
 // ------------------------------------------------------------------ Silverstone: the Wing
@@ -367,38 +407,129 @@ function buildWing(p: PitPlan, ts: TrackSpace, o: BuildingOut, style: 'wing' | '
 // ------------------------------------------------------------------ end walls
 
 /**
- * The building's two end walls are seen head-on down the straight and the pit lane: not a blank
- * slab but a stair/lift core with a full-height glazed slot, the floor slabs read as dark
- * recessed bands, and vertical cladding fins between them.
+ * The building's two end elevations are seen head-on down the straight, down the pit lane and in
+ * every long-lens shot of the grid: not a blank slab with a poster on it but the way a real pit
+ * building ends —
+ *   - the curtain wall wraps the track-side corner (both upper floors), mullions on the return
+ *   - the slab edges run round the corner as projecting white bands
+ *   - the rest is clad (panel joints and weathering in the shader), a framed event board
+ *     standing proud of it across both floors
+ *   - a stair core at the paddock corner, proud of the wall, rising past the roof to its lift
+ *     overrun, a full-height glazed slot up its face
+ *   - at the foot: a glazed entrance lobby under a canopy, a roller-shuttered service door with
+ *     a board over it, a plinth
+ *   - on the roof behind the parapet: a louvred plant enclosure
  */
-function buildEndWalls(p: PitPlan, ts: TrackSpace, o: BuildingOut) {
-  const { solid, glass } = o;
-  const F = L.front, BB = L.bldgBack;
+function buildEndWalls(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingOut, st: PitStyle) {
+  const { solid, detail, thin, print, glass } = o;
+  const F = L.front, GB = L.garageBack, BB = L.bldgBack;
   const fr = new Frame();
-  const cw = F + 0.8;
-  for (const [sE, dir] of [[p.bldgS0 - 0.81, -1], [p.bldgS1 + 0.81, 1]] as [number, -1 | 1][]) {
-    // slab edges: dark shadow-gap bands at each floor
-    solid.color(0x2b2e32).mat(0.7, 0.2, 0, 1);
-    // (either side of the big print board in the middle)
-    const mid = (cw + BB) / 2;
-    for (const y of [H.slab1, H.slab2, H.roof])
-      for (const [la, lb] of [[cw, mid - 7.2], [mid + 7.2, BB]]) {
-        fr.at(ts, sE + dir * 0.06, (la + lb) / 2, 0);
-        fr.box(solid, 0, y + 0.2, 0, 0.12, 0.42, lb - la);
-      }
-    // vertical fins across the upper floors (the print board sits in the middle third)
-    solid.color(0xd9dbdc).mat(0.55, 0.15, 0, 1);
-    for (let l = cw + 1.2; l < BB - 0.8; l += 1.8) {
-      const mid = (cw + BB) / 2;
-      if (Math.abs(l - mid) < 7.6) continue;
-      fr.at(ts, sE + dir * 0.18, l, 0);
-      fr.box(solid, 0, (H.floor1 + H.roof) / 2, 0, 0.36, H.roof - H.floor1, 0.12);
+  const cw = F + 0.8, g2 = F - 0.6;
+  /** the corner glazing reaches this far back; then cladding up to the stair core */
+  const lg = F + 7.4;
+  const lc0 = BB - 4.4, lc1 = BB + 0.5;
+  for (const dir of [-1, 1] as const) {
+    const sI = dir < 0 ? p.bldgS0 : p.bldgS1;
+    /** the end wall's outer face */
+    const sO = sI + dir * 0.8;
+    const outer = dir < 0 ? 1 : 2;
+    /** box between two s values given in any order */
+    const eb = (g: Geo, sa: number, sb: number, l0: number, l1: number, h0: number, h1: number, mask: number, seg = 6) =>
+      ts.box(g, Math.min(sa, sb), Math.max(sa, sb), l0, l1, h0, h1, mask, seg);
+    /** a glazed panel on an end plane at s, facing out (interior-mapped rooms `depth` deep) */
+    const endGlass = (s: number, l0: number, l1: number, h0: number, h1: number, depth: number) => {
+      const A = ts.P(s, l0, h0), B = ts.P(s, l1, h0), C = ts.P(s, l1, h1), D = ts.P(s, l0, h1);
+      glass.quad(A, B, C, D, ts.P(s + dir, l0, h0).sub(A), l0, l1, A.y, A.y + (h1 - h0), depth);
+    };
+
+    // ---- upper floors: the corner glazing, mullions on the return, a transom at sill height
+    endGlass(sO, cw, lg, H.floor1 + 0.05, H.slab2, 6);
+    endGlass(sO, g2, lg, H.floor2, H.roof, 6.5);
+    thin.color(st.frame).mat(0.4, 0.6, 0, 1);
+    for (let l = cw + 1.5; l < lg - 0.2; l += 1.5) eb(thin, sO, sO + dir * 0.1, l - 0.05, l + 0.05, H.floor1, H.slab2, outer | 16 | 32);
+    for (let l = g2 + 1.5; l < lg - 0.2; l += 1.5) eb(thin, sO, sO + dir * 0.1, l - 0.05, l + 0.05, H.floor2, H.roof, outer | 16 | 32);
+    eb(thin, sO, sO + dir * 0.1, cw, lg, H.floor1 + 0.9, H.floor1 + 1.0, outer | 4 | 8);
+    // corner posts
+    solid.color(st.frame).mat(0.4, 0.6, 0, 1);
+    eb(solid, sO - dir * 0.1, sO + dir * 0.1, cw - 0.12, cw + 0.08, H.floor1, H.slab2, outer | 16);
+    eb(solid, sO - dir * 0.1, sO + dir * 0.1, g2 - 0.12, g2 + 0.08, H.floor2, H.roof, outer | 16);
+
+    // ---- the clad part of the upper floors, back to the stair core
+    solid.color(st.clad).mat(0.72, 0.05, 0, 1);
+    eb(solid, sI, sO, lg, lc0 + 0.2, H.slab1, H.roof, outer | 16);
+    // slab edges round the corner: white bands proud of the wall
+    solid.color(st.trim).mat(0.6, 0, 0, 1);
+    for (const [y0, y1, l0] of [[H.slab1, H.floor1, F - 2.3], [H.slab2, H.floor2, F - 0.9], [H.roof, H.roofTop, F - 1.5]] as [number, number, number][])
+      eb(solid, sO - dir * 0.05, sO + dir * 0.22, l0, lc0, y0 - 0.05, y1 + 0.05, outer | 4 | 8 | 16);
+    // the event board, framed and standing off the cladding across both floors
+    {
+      const lm = (lg + lc0) / 2;
+      const w = Math.min(lc0 - lg - 1.6, 12), h = w / 2;
+      const hm = (H.floor1 + H.roof) / 2 + 0.2;
+      solid.color(0x1b1d20).mat(0.5, 0.4, 0, 1);
+      eb(solid, sO + dir * 0.22, sO + dir * 0.42, lm - w / 2 - 0.18, lm + w / 2 + 0.18, hm - h / 2 - 0.18, hm + h / 2 + 0.18, outer | 4 | 8 | 16 | 32);
+      fr.at(ts, sO + dir * 0.43, lm, 0);
+      print.rgb(1, 1, 1).mat(0.5, 0, 0.45, 1);
+      fr.panel(print, 0, hm, 0, dir, 0, 0, w, h, atlas.uv('podiumBack'));
     }
-    // the stair core's glazed slot, full height, at the paddock corner
-    const l0 = BB - 3.2, l1 = BB - 1.4;
-    const A = ts.P(sE + dir * 0.02, l0, 0.4), B = ts.P(sE + dir * 0.02, l1, 0.4), C = ts.P(sE + dir * 0.02, l1, H.roof - 0.3), D = ts.P(sE + dir * 0.02, l0, H.roof - 0.3);
-    const out = ts.P(sE + dir, l0, 0).sub(ts.P(sE, l0, 0));
-    glass.quad(A, B, C, D, out, l0, l1, A.y, C.y, 3);
+
+    // ---- stair core at the paddock corner, past the roof to the lift overrun
+    const sC = sO + dir * 0.9;
+    // (under Interlagos' wave roof the core stops short of the blade)
+    const yTop = H.roofTop + (ts.track.def.id === 'interlagos' ? 1.3 : 2.9);
+    solid.color(st.core).mat(0.78, 0, 0, 1);
+    eb(solid, sI - dir * 3, sC, lc0, lc1, 0, yTop, outer | 8 | 16 | 32);
+    solid.color(st.trim).mat(0.6, 0, 0, 1);
+    eb(solid, sI - dir * 3.1, sC + dir * 0.1, lc0 - 0.1, lc1 + 0.1, yTop, yTop + 0.35, 63);
+    endGlass(sC + dir * 0.01, lc0 + 1.1, lc0 + 2.9, 0.6, yTop - 1.0, 3);
+    thin.color(st.frame).mat(0.4, 0.6, 0, 1);
+    for (const l of [lc0 + 1.1, lc0 + 2.9]) eb(thin, sC, sC + dir * 0.12, l - 0.08, l + 0.08, 0.5, yTop - 0.9, outer | 16 | 32);
+    for (let y = 0.6 + 3.3; y < yTop - 1.1; y += 3.3) eb(thin, sC, sC + dir * 0.08, lc0 + 1.1, lc0 + 2.9, y - 0.06, y, outer | 4 | 8);
+
+    // ---- ground floor: plinth, glazed entrance under a canopy, service door, a board over it
+    solid.color(0x55585b).mat(0.85, 0, 0, 1);
+    eb(solid, sO, sO + dir * 0.04, F - 0.1, lc0, 0, 0.45, outer | 8);
+    endGlass(sO + dir * 0.02, F + 1.6, F + 7.6, 0.2, 3.7, 7);
+    thin.color(st.frame).mat(0.4, 0.6, 0, 1);
+    for (let l = F + 1.6; l <= F + 7.61; l += 2) eb(thin, sO, sO + dir * 0.12, l - 0.06, l + 0.06, 0.2, 3.7, outer | 16 | 32);
+    eb(thin, sO, sO + dir * 0.12, F + 1.6, F + 7.6, 2.5, 2.58, outer | 4 | 8);
+    solid.color(st.trim).mat(0.55, 0.1, 0, 1);
+    eb(solid, sO, sO + dir * 2.4, F + 1.1, F + 8.1, 3.85, 4.15, outer | 4 | 8 | 16 | 32);
+    detail.rgb(1, 0.95, 0.85).mat(0.4, 0, 5, 0);
+    for (const l of [F + 2.6, F + 4.6, F + 6.6]) eb(detail, sO + dir * 0.9, sO + dir * 1.3, l - 0.2, l + 0.2, 3.84, 3.85, 4);
+    // the roller shutter: ribbed, in a dark frame
+    solid.color(0x2a2c30).mat(0.6, 0.3, 0, 0.8);
+    eb(solid, sO, sO + dir * 0.06, GB - 7.4, GB - 1.1, 0, 4.7, outer | 8 | 16 | 32);
+    for (let k = 0; k < 14; k++) {
+      solid.color(0xa9adb1, k % 2 ? 0.86 : 1).mat(0.5, 0.4, 0, 0.7);
+      eb(solid, sO, sO + dir * 0.08, GB - 7.1, GB - 1.4, (k * 4.4) / 14, ((k + 1) * 4.4) / 14, outer);
+    }
+    fr.at(ts, sO + dir * 0.09, GB - 4.25, 0);
+    print.rgb(1, 1, 1).mat(0.5, 0, 0.4, 1);
+    fr.panel(print, 0, 5.3, 0, dir, 0, 0, 5.2, 1.3, atlas.uv('sp' + (dir < 0 ? 10 : 11)));
+    // a personnel door and a lit exit sign by the core
+    solid.color(0x3a3d42).mat(0.5, 0.4, 0, 0.8);
+    eb(solid, sO, sO + dir * 0.05, lc0 - 2.6, lc0 - 1.4, 0, 2.3, outer);
+    detail.rgb(0.2, 1, 0.45).mat(0.4, 0, 3, 0);
+    eb(detail, sO, sO + dir * 0.08, lc0 - 2.3, lc0 - 1.7, 2.45, 2.65, outer);
+
+    // ---- louvred plant enclosure on the roof behind the end
+    const sp0 = sI - dir * 15, sp1 = sI - dir * 4;
+    const ph = ts.track.def.id === 'interlagos' ? 1.4 : 2.6;
+    solid.color(0x9da2a6).mat(0.5, 0.5, 0, 1);
+    eb(solid, sp0, sp1, F + 9, BB - 9, H.roofTop, H.roofTop + ph, 63);
+    detail.color(0x7f8489).mat(0.45, 0.55, 0, 1);
+    for (let y = H.roofTop + 0.3; y < H.roofTop + ph - 0.1; y += 0.32) {
+      eb(detail, sp1, sp1 + dir * 0.12, F + 9, BB - 9, y, y + 0.1, outer | 8 | 4);
+      eb(detail, sp0, sp1, F + 8.88, F + 9, y, y + 0.1, 16 | 8 | 4);
+    }
+    // a pair of extract fans on top
+    if (ph > 2) {
+      fr.at(ts, (sp0 + sp1) / 2, (F + BB) / 2, H.roofTop + ph);
+      detail.color(0x55595e).mat(0.5, 0.6, 0, 1);
+      fr.cyl(detail, -2.2, 0.35, 0, 'y', 0.9, 0.7, 14, true);
+      fr.cyl(detail, 2.2, 0.35, 0, 'y', 0.9, 0.7, 14, true);
+    }
   }
 }
 
@@ -488,35 +619,95 @@ function buildPodium(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingO
 
 // ------------------------------------------------------------------ race control + timing screen
 
-function buildTower(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingOut) {
-  const { solid, print, glass } = o;
+/**
+ * Race control: a clad shaft with a glazed lift slot and vertical fins rising off the roof, the
+ * control room cantilevered over the pit lane on a deep slab. Its glazing is raked outward at
+ * the top all round, as real control rooms and airport towers are (no reflections of the room
+ * on the glass for the stewards); a deep roof overhang shades it, a dark fascia band trims it,
+ * aerials and a weather mast on top.
+ */
+function buildTower(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: BuildingOut, st: PitStyle) {
+  const { solid, detail, thin, print, glass } = o;
   const F = L.front, BB = L.bldgBack;
   const a = p.towerS0, b = p.towerS1;
   const fr = new Frame();
-  solid.color(0xeeeeec).mat(0.55, 0.05, 0, 1);
-  ts.box(solid, a + 3, b - 3, F + 3, BB - 2, H.roofTop, 22.2, 63, 6);
-  // control room cantilevered toward the track
-  ts.box(solid, a - 1, b + 1, F - 4, BB - 1, 22.2, 22.7, 63, 6);
-  ts.box(solid, a - 1.4, b + 1.4, F - 4.5, BB - 0.6, 27.6, 28.3, 63, 6);
-  const panes = (s0: number, s1: number, l: number, dir: -1 | 1) => {
-    const A = ts.P(s0, l, 22.7), B = ts.P(s1, l, 22.7), C = ts.P(s1, l, 27.6), D = ts.P(s0, l, 27.6);
-    glass.quad(A, B, C, D, ts.P(s0, l + dir, 22.7).sub(A), s0, s1, A.y, C.y - 0.1, 8);
-  };
-  panes(a - 0.8, b + 0.8, F - 3.8, -1);
-  panes(a - 0.8, b + 0.8, BB - 1.2, 1);
-  // end glass (faces ±s)
-  for (const [s, d] of [[a - 0.8, -1], [b + 0.8, 1]] as [number, number][]) {
-    const A = ts.P(s, F - 3.8, 22.7), B = ts.P(s, BB - 1.2, 22.7), C = ts.P(s, BB - 1.2, 27.6), D = ts.P(s, F - 3.8, 27.6);
-    const out = ts.P(s + d, F, 22.7).sub(ts.P(s, F, 22.7));
-    glass.quad(A, B, C, D, out, F, BB, A.y, C.y - 0.1, 10);
+  const yF = 22.2, yG = 22.75, yC = 27.5, yR = 28.5;
+  // ---- the shaft
+  solid.color(st.core).mat(0.7, 0.05, 0, 1);
+  ts.box(solid, a + 3, b - 3, F + 3, BB - 2, H.roofTop, yF, 63, 6);
+  // vertical cladding fins on the ends of the shaft and a glazed lift slot up the paddock face
+  detail.color(st.clad).mat(0.55, 0.2, 0, 1);
+  for (let l = F + 3.9; l < BB - 2.6; l += 1.4)
+    for (const [s0, s1] of [[a + 2.75, a + 3], [b - 3, b - 2.75]] as [number, number][]) ts.box(detail, s0, s1, l - 0.09, l + 0.09, H.roofTop, yF, 63);
+  {
+    const s0 = (a + b) / 2 - 1.2, s1 = (a + b) / 2 + 1.2;
+    const A = ts.P(s0, BB - 1.98, H.roofTop + 0.6), B = ts.P(s1, BB - 1.98, H.roofTop + 0.6), C = ts.P(s1, BB - 1.98, yF - 0.6), D = ts.P(s0, BB - 1.98, yF - 0.6);
+    glass.quad(A, B, C, D, ts.P(s0, BB, H.roofTop).sub(ts.P(s0, BB - 2, H.roofTop)), s0, s1, A.y, C.y, 2.5);
   }
-  solid.color(0xdfe1e2).mat(0.4, 0.5, 0, 1);
-  for (let s = a - 0.8; s <= b + 0.8; s += 2.2) ts.box(solid, s - 0.06, s + 0.06, F - 3.95, F - 3.75, 22.7, 27.6, 63);
-  // antenna mast
-  fr.at(ts, b - 2, BB - 4, 28.3);
+  // ---- control room floor slab, cantilevered toward the track (a thick edge, lit soffit)
+  solid.color(st.trim).mat(0.55, 0.05, 0, 1);
+  ts.box(solid, a - 1.3, b + 1.3, F - 4.3, BB - 0.7, yF, yG, 63, 6);
+  detail.rgb(1, 0.95, 0.85).mat(0.4, 0, 5, 0);
+  for (let s = a; s <= b; s += 3.3) ts.flat(detail, s - 0.18, s + 0.18, F - 3.4, F - 3.0, yF - 0.01, -1);
+  // ---- raked glazing: the bottom inset, the top leaning out ~0.9 m
+  const s0b = a - 0.8, s1b = b + 0.8, l0b = F - 3.7, l1b = BB - 1.3;
+  const s0t = a - 1.7, s1t = b + 1.7, l0t = F - 4.6, l1t = BB - 0.4;
+  const pb = (s: number, l: number) => ts.P(s, l, yG), pt = (s: number, l: number) => ts.P(s, l, yC);
+  const rake = (A: THREE.Vector3, B: THREE.Vector3, C: THREE.Vector3, D: THREE.Vector3, out: THREE.Vector3, al0: number, al1: number, depth: number) =>
+    glass.quad(A, B, C, D, out, al0, al1, A.y, C.y - 0.1, depth);
+  const tOut = ts.P(a, F - 10, yG).sub(ts.P(a, F, yG)), pOut = tOut.clone().negate();
+  const eOut0 = ts.P(a - 10, F, yG).sub(ts.P(a, F, yG)), eOut1 = eOut0.clone().negate();
+  rake(pb(s0b, l0b), pb(s1b, l0b), pt(s1t, l0t), pt(s0t, l0t), tOut, s0b, s1b, 8);
+  rake(pb(s0b, l1b), pb(s1b, l1b), pt(s1t, l1t), pt(s0t, l1t), pOut, s0b, s1b, 8);
+  rake(pb(s0b, l0b), pb(s0b, l1b), pt(s0t, l1t), pt(s0t, l0t), eOut0, l0b, l1b, 10);
+  rake(pb(s1b, l0b), pb(s1b, l1b), pt(s1t, l1t), pt(s1t, l0t), eOut1, l0b, l1b, 10);
+  // raked mullions (front, back, ends) and the corner posts
+  thin.color(st.frame === 0xf2f2ef ? 0x2c3035 : st.frame).mat(0.4, 0.6, 0, 1);
+  const nm = Math.round((s1b - s0b) / 2.2);
+  for (let k = 0; k <= nm; k++) {
+    const u = k / nm;
+    const sb = s0b + (s1b - s0b) * u, stp = s0t + (s1t - s0t) * u;
+    beamWorld(thin, pb(sb, l0b), pt(stp, l0t), k % nm === 0 ? 0.2 : 0.1);
+    beamWorld(thin, pb(sb, l1b), pt(stp, l1t), k % nm === 0 ? 0.2 : 0.1);
+  }
+  const ne = Math.round((l1b - l0b) / 2.4);
+  for (let k = 1; k < ne; k++) {
+    const u = k / ne;
+    const lb = l0b + (l1b - l0b) * u, lt = l0t + (l1t - l0t) * u;
+    beamWorld(thin, pb(s0b, lb), pt(s0t, lt), 0.1);
+    beamWorld(thin, pb(s1b, lb), pt(s1t, lt), 0.1);
+  }
+  // a sill rail at desk height round the front
+  beamWorld(thin, ts.P(s0b - 0.18, l0b - 0.18, yG + 1.1), ts.P(s1b + 0.18, l0b - 0.18, yG + 1.1), 0.08);
+  // ---- roof: a deep overhang with a dark fascia band, soffit downlights
+  solid.color(st.trim).mat(0.55, 0.05, 0, 1);
+  ts.box(solid, a - 3.0, b + 3.0, F - 6.2, BB + 0.9, yC, yR, 63, 6);
+  solid.color(0x1d2024).mat(0.45, 0.4, 0, 1);
+  ts.box(solid, a - 3.05, b + 3.05, F - 6.25, F - 6.0, yC - 0.05, yR + 0.25, 63, 6);
+  detail.rgb(1, 0.95, 0.85).mat(0.4, 0, 5, 0);
+  for (let s = a - 1.5; s <= b + 1.5; s += 3) ts.flat(detail, s - 0.15, s + 0.15, F - 5.4, F - 5.1, yC - 0.01, -1);
+  solid.color(0x8f9499).mat(0.6, 0.3, 0, 1);
+  ts.box(solid, a - 3, b + 3, BB + 0.3, BB + 0.9, yR, yR + 0.7, 63, 6);
+  // roof kit: a lattice aerial mast, a weather mast, two satellite domes
+  fr.at(ts, b - 2, BB - 4, yR);
   solid.color(0x9aa0a6).mat(0.4, 0.8, 0, 1);
-  fr.cyl(solid, 0, 3, 0, 'y', 0.08, 6, 6, true);
   fr.cyl(solid, 0, 0.6, 0, 'y', 0.25, 1.2, 8, true);
+  thin.color(0xb5babf).mat(0.4, 0.8, 0, 1);
+  for (const [x, z] of [[-0.35, -0.35], [0.35, -0.35], [0.35, 0.35], [-0.35, 0.35]]) fr.box(thin, x, 4.2, z, 0.06, 7.2, 0.06);
+  for (let y = 1.4; y < 7.6; y += 1.1) {
+    for (const z of [-0.35, 0.35]) fr.box(thin, 0, y, z, 0.7, 0.04, 0.04);
+    for (const x of [-0.35, 0.35]) fr.box(thin, x, y, 0, 0.04, 0.04, 0.7);
+  }
+  fr.cyl(thin, 0, 8.8, 0, 'y', 0.05, 2.4, 6, true);
+  fr.at(ts, a + 1, BB - 5, yR);
+  fr.cyl(thin, 0, 1.6, 0, 'y', 0.05, 3.2, 6, true);
+  fr.box(thin, 0, 3.2, 0, 1.2, 0.05, 0.05);
+  detail.color(0xeeeeec).mat(0.5, 0.1, 0, 1);
+  for (const ds of [3, 6.5]) {
+    fr.at(ts, a + ds, BB - 3, yR);
+    fr.cyl(detail, 0, 0.5, 0, 'y', 0.5, 1.0, 10, true);
+    fr.cyl(detail, 0, 1.25, 0, 'y', 0.75, 0.5, 14, true);
+  }
   // big timing screen on the tower face
   solid.color(0x0b0c0e).mat(0.5, 0.4, 0, 1);
   ts.box(solid, a + 2, b - 2, F + 2.5, F + 3, 15.4, 21.8, 63);
@@ -544,29 +735,45 @@ function buildPaddock(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: Building
     glass.quad(A, B, C, D, ts.P(a, l0 - 1, 0).sub(A), a, b, A.y, C.y, 7);
     solid.color(0xd9dad8).mat(0.7, 0, 0, 1);
     ts.box(solid, a, b, l0 + 6, l1, 0, 3.45, 1 | 2 | 32);
-    // upper floor clad in team colour, overhanging the street
+    // upper floor overhanging the street, glazed full width as the teams' motorhomes are: the team
+    // colour frames it (a fascia band carrying the name, a sill band, the end walls), graphite
+    // mullions, the back clad in dark grey
+    const dark = prim.clone().multiplyScalar(0.18).add(new THREE.Color(0x1c1e21));
     solid.color(prim).mat(0.35, 0.3, 0, 1);
-    ts.box(solid, a - 0.4, b + 0.4, l0 - 1.0, l1 + 0.2, 3.7, 7.6, 63, 6);
+    ts.box(solid, a - 0.4, b + 0.4, l0 - 1.0, l1 + 0.2, 3.7, 4.15, 63, 6);
+    ts.box(solid, a - 0.4, b + 0.4, l0 - 1.0, l1 + 0.2, 6.55, 7.6, 63, 6);
+    for (const [s0, s1] of [[a - 0.4, a + 0.5], [b - 0.5, b + 0.4]]) ts.box(solid, s0, s1, l0 - 1.0, l1 + 0.2, 4.15, 6.55, 63);
+    solid.color(dark).mat(0.5, 0.3, 0, 1);
+    ts.box(solid, a + 0.5, b - 0.5, l1 - 0.4, l1 + 0.2, 4.15, 6.55, 32, 6);
     {
-      const A2 = ts.P(a + 2, l0 - 1.02, 4.2), B2 = ts.P(b - 2, l0 - 1.02, 4.2), C2 = ts.P(b - 2, l0 - 1.02, 5.9), D2 = ts.P(a + 2, l0 - 1.02, 5.9);
-      glass.quad(A2, B2, C2, D2, ts.P(a, l0 - 2, 4.2).sub(ts.P(a, l0, 4.2)), a + 2, b - 2, A2.y, C2.y, 6);
+      const A2 = ts.P(a + 0.5, l0 - 0.85, 4.15), B2 = ts.P(b - 0.5, l0 - 0.85, 4.15), C2 = ts.P(b - 0.5, l0 - 0.85, 6.55), D2 = ts.P(a + 0.5, l0 - 0.85, 6.55);
+      glass.quad(A2, B2, C2, D2, ts.P(a, l0 - 2, 4.2).sub(ts.P(a, l0, 4.2)), a + 0.5, b - 0.5, A2.y, C2.y, 7);
     }
+    detail.color(0x2a2d31).mat(0.4, 0.6, 0, 1);
+    for (let s = a + 2.3; s < b - 1; s += 1.8) ts.box(detail, s - 0.05, s + 0.05, l0 - 0.98, l0 - 0.85, 4.15, 6.55, 1 | 2 | 16);
     print.rgb(1, 1, 1).mat(0.45, 0, 0.5, 1);
-    ts.wallQuad(print, c - 4.8, c + 4.8, l0 - 1.03, 6.1, 7.3, -1, atlas.uv('fascia' + k));
+    ts.wallQuad(print, c - 4.2, c + 4.2, l0 - 1.03, 6.6, 7.55, -1, atlas.uv('fascia' + k));
     // roof terrace rail + parasols
     solid.color(0xf0f0ee).mat(0.5, 0.05, 0, 1);
     ts.box(solid, a - 0.5, b + 0.5, l0 - 1.1, l1 + 0.3, 7.6, 7.85, 63 & ~8, 6);
-    solid.color(0x3a3c3f).mat(0.8, 0, 0, 1);
+    // the roof terrace: pale grey decking at the front, the plant and a white tensile shade at the back
+    solid.color(0x9a9c9c).mat(0.85, 0, 0, 1);
     ts.flat(solid, a - 0.5, b + 0.5, l0 - 1.1, l1 + 0.3, 7.85, 1, 6);
+    solid.color(0xb4b8bb).mat(0.5, 0.5, 0, 1);
+    ts.box(solid, c - 6, c + 6, l1 - 5, l1 - 0.5, 7.85, 9.4, 63 & ~4);
+    detail.color(0xf3f2ee).mat(0.85, 0, 0, 1);
+    ts.box(detail, a + 0.5, b - 0.5, l0 + 0.5, l0 + 9, 10.1, 10.2, 63);
+    detail.color(0x9aa0a6).mat(0.4, 0.7, 0, 1);
+    for (const s of [a + 0.7, c, b - 0.7]) for (const l of [l0 + 0.7, l0 + 8.8]) ts.box(detail, s - 0.06, s + 0.06, l - 0.06, l + 0.06, 7.85, 10.1, 1 | 2 | 16 | 32);
     solid.color(prim).mat(0.4, 0.2, 0, 1);
     ts.box(solid, a - 0.5, b + 0.5, l0 - 1.1, l0 - 0.9, 7.85, 8.15, 63, 8);
     detail.color(0xa9aeb3).mat(0.3, 0.9, 0, 1);
     ts.box(detail, a - 0.4, b + 0.4, l0 - 1.0, l0 - 0.94, 8.8, 8.86, 63, 8);
-    for (const ds of [-6, 0, 6]) {
-      fr.at(ts, c + ds, l0 + 4, 7.85);
+    for (const ds of [-8.5, 8.5]) {
+      fr.at(ts, c + ds, l0 + 11.5, 7.85);
       detail.color(0x9aa0a6).mat(0.4, 0.7, 0, 1);
       fr.cyl(detail, 0, 1.2, 0, 'y', 0.03, 2.4, 6, false);
-      detail.color(ds === 0 ? prim : 0xf2f2f2).mat(0.8, 0, 0, 1);
+      detail.color(prim).mat(0.8, 0, 0, 1);
       cone(detail, fr, 0, 2.4, 0, 1.6, 0.45);
     }
     // planters + awning at the door

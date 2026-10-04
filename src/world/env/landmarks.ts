@@ -5,6 +5,9 @@ import type { Track } from '../Track.ts';
 import type { WorldMap } from './worldmap.ts';
 import { sponsorTexture, sponsorUV } from './signage.ts';
 import { rng } from './noise.ts';
+import { ARCH, archMaterial, tagAxis, tagClass } from './archMaterial.ts';
+import { GlassGeo } from '../pitlane/building.ts';
+import { glassMaterial } from '../pitlane/materials.ts';
 
 /**
  * Venue landmarks that make a circuit recognisable from the TV and helicopter
@@ -13,8 +16,9 @@ import { rng } from './noise.ts';
  * walled underpass, glass hospitality pavilions behind the stands and scaffold
  * TV camera towers at the big corners (every circuit).
  *
- * Everything is merged into four meshes (concrete/paint, steel, glass, printed
- * boards): a handful of draw calls for the whole set.
+ * Everything is merged into a few meshes (render/concrete and steel in the stands' weathering
+ * archMaterial, interior-mapped curtain walls, plain glass, printed boards): a handful of draw
+ * calls for the whole set.
  */
 
 export interface LandmarksBuild {
@@ -49,8 +53,11 @@ function beam(mb: MeshBuilder, a: THREE.Vector3, b: THREE.Vector3, w: number, h:
 /** local frame: origin (x, y, z), yaw `rot` (local +z → (sin rot, 0, cos rot)) */
 class Local {
   readonly m = new THREE.Matrix4();
+  /** world yaw of the local x axis (archMaterial's axis convention, x → z) */
+  readonly yaw: number;
   constructor(x: number, y: number, z: number, rot: number) {
     this.m.makeRotationY(rot).setPosition(x, y, z);
+    this.yaw = -rot;
   }
   p(x: number, y: number, z: number, out = new THREE.Vector3()) {
     return out.set(x, y, z).applyMatrix4(this.m);
@@ -62,15 +69,28 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
   const steel = new MeshBuilder();
   const glass = new MeshBuilder();
   const boards = new MeshBuilder();
+  /** the buildings' curtain walls and windows (the pit building's interior-mapped glass) */
+  const rooms = new GlassGeo();
   const r = rng(8088);
   let count = 0;
   let sponsorK = 5;
 
-  const box = (mb: MeshBuilder, L: Local, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: THREE.Color) => {
+  /** box in a landmark's frame; `cls` = its archMaterial surface class (concrete by default) */
+  const box = (mb: MeshBuilder, L: Local, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, c: THREE.Color, cls: number = ARCH.CONCRETE) => {
     const lm = new MeshBuilder();
     lm.aabb(x0, y0, z0, x1, y1, z1, c);
     lm.transform(L.m);
+    tagClass(lm, 0, cls);
+    tagAxis(lm, 0, L.yaw);
     mb.append(lm);
+  };
+  /** interior-mapped glazing on a local plane: corners bottom-left → top-left as seen from outside */
+  const glaze = (L: Local, x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, out: THREE.Vector3, depth: number) => {
+    const A = L.p(x0, y0, z0), B = L.p(x1, y0, z1), C = L.p(x1, y1, z1), D = L.p(x0, y1, z0);
+    const o = out.clone().transformDirection(L.m);
+    // (the along-facade coordinate runs the way the shader walks its rooms: up × outward normal)
+    const T = new THREE.Vector3(0, 1, 0).cross(o).normalize();
+    rooms.quad(A, B, C, D, o, A.dot(T), B.dot(T), A.y, C.y, depth);
   };
   /** printed board on the local plane z = zc, facing −z (dir −1) or +z (dir 1) */
   const board = (L: Local, x0: number, x1: number, y0: number, y1: number, zc: number, dir: 1 | -1) => {
@@ -128,13 +148,13 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
     for (let k = 0; k < CARS; k++) {
       const a = (k / CARS) * Math.PI * 2;
       const cx = Math.cos(a) * (R + 0.2), cy = hub + Math.sin(a) * (R + 0.2);
-      box(solid, L, cx - 1.1, cy - 3.3, -1.1, cx + 1.1, cy - 1.2, 1.1, cols[k % cols.length]);
+      box(solid, L, cx - 1.1, cy - 3.3, -1.1, cx + 1.1, cy - 1.2, 1.1, cols[k % cols.length], ARCH.PLAIN);
       box(glass, L, cx - 1.12, cy - 2.7, -1.12, cx + 1.12, cy - 1.7, 1.12, WHITE);
       box(steel, L, cx - 0.08, cy - 1.2, -0.08, cx + 0.08, cy, 0.08, STEEL_DARK);
     }
     // boarding station
-    box(solid, L, -9, 0, -7, 9, 3.6, 7, WHITE);
-    box(solid, L, -10, 3.6, -8, 10, 4.1, 8, srgb(0xd23b3b));
+    box(solid, L, -9, 0, -7, 9, 3.6, 7, WHITE, ARCH.RENDER);
+    box(solid, L, -10, 3.6, -8, 10, 4.1, 8, srgb(0xd23b3b), ARCH.PLAIN);
   }
 
   // ---------------------------------------------------------------- roller coaster
@@ -164,39 +184,113 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
     for (let k = 0; k < 5; k++) {
       const x = -a * 0.8 + k * a * 0.4 + (r() - 0.5) * 8, z = (r() - 0.5) * b * 0.8;
       const w = 8 + r() * 10, d = 6 + r() * 8, h = 4 + r() * 5;
-      box(solid, L, x - w / 2, 0, z - d / 2, x + w / 2, h, z + d / 2, WHITE);
-      box(solid, L, x - w / 2 - 0.6, h, z - d / 2 - 0.6, x + w / 2 + 0.6, h + 0.5, z + d / 2 + 0.6, roofs[k % roofs.length]);
+      box(solid, L, x - w / 2, 0, z - d / 2, x + w / 2, h, z + d / 2, WHITE, ARCH.RENDER);
+      box(solid, L, x - w / 2 - 0.6, h, z - d / 2 - 0.6, x + w / 2 + 0.6, h + 0.5, z + d / 2 + 0.6, roofs[k % roofs.length], ARCH.PLAIN);
     }
   }
 
   // ---------------------------------------------------------------- hotel
+  /**
+   * The circuit hotel: a long six-storey slab in white render, as such hotels are built — a
+   * glazed double-height lobby behind a colonnade with a porte-cochère canopy in the middle, then
+   * five floors of rooms: a balcony slab per floor on both long faces, a party wall between every
+   * 3.6 m room, glass balustrades, the rooms behind (interior-mapped: dim by day, a scatter of lit
+   * windows at night), a stair core at each end, a parapet and plant room on the roof.
+   */
   function hotel(lm: Landmark) {
     const L = new Local(lm.x, lm.y, lm.z, lm.rot);
-    const W = lm.size, D = 16, floors = 5, FH = 3.4;
-    box(solid, L, -W / 2, -1, -D / 2, W / 2, floors * FH + 0.6, D / 2, WHITE);
-    for (let f = 0; f < floors; f++) {
-      const y = 1.2 + f * FH;
-      for (const z of [-D / 2 - 0.05, D / 2 + 0.05]) box(glass, L, -W / 2 + 1, y, z - 0.02, W / 2 - 1, y + 1.8, z + 0.02, WHITE);
-      box(solid, L, -W / 2 - 0.4, y + 2.2, -D / 2 - 1.2, W / 2 + 0.4, y + 2.4, D / 2 + 1.2, WHITE);
+    const W = lm.size, D = 16, G = 4.6, FH = 3.3, floors = 5;
+    const top = G + floors * FH;
+    const RENDER = srgb(0xece9e1), RENDER_DK = srgb(0xd6d2c8);
+    // body (set back behind the balconies), end cores standing proud, a plinth
+    box(solid, L, -W / 2, -1, -D / 2 + 0.4, W / 2, top + 0.4, D / 2 - 0.4, RENDER, ARCH.RENDER);
+    for (const sx of [-1, 1]) box(solid, L, sx > 0 ? W / 2 - 0.1 : -W / 2 - 3.2, -1, -D / 2 - 1.8, sx > 0 ? W / 2 + 3.2 : -W / 2 + 0.1, top + 2.2, D / 2 + 1.8, RENDER_DK, ARCH.RENDER);
+    // lobby: glazed behind a colonnade under the first balcony slab
+    for (const fz of [-1, 1]) {
+      const z = fz * (D / 2 - 0.39);
+      glaze(L, fz < 0 ? W / 2 : -W / 2, z, fz < 0 ? -W / 2 : W / 2, z, 0.1, G - 0.3, new THREE.Vector3(0, 0, fz), 9);
+      for (let x = -W / 2 + 4; x < W / 2 - 1; x += 7.2) box(solid, L, x - 0.3, 0, fz * (D / 2 + 1.1) - 0.3, x + 0.3, G, fz * (D / 2 + 1.1) + 0.3, RENDER, ARCH.RENDER);
     }
-    box(solid, L, -W / 2 - 1, floors * FH + 0.6, -D / 2 - 1, W / 2 + 1, floors * FH + 1.1, D / 2 + 1, srgb(0x5a6068));
+    // porte-cochère canopy over the entrance (track side, local −z)
+    box(solid, L, -9, G - 0.9, -D / 2 - 9, 9, G - 0.4, -D / 2, WHITE, ARCH.RENDER);
+    for (const x of [-8, 8]) box(steel, L, x - 0.15, 0, -D / 2 - 8.4, x + 0.15, G - 0.9, -D / 2 - 8.1, STEEL, ARCH.STEEL);
+    // room floors
+    for (let f = 0; f <= floors; f++) {
+      const y = G + f * FH;
+      // the balcony slab (and the roof's edge on the last one)
+      box(solid, L, -W / 2, y - 0.25, -D / 2 - 1.6, W / 2, y + 0.05, D / 2 + 1.6, f === floors ? RENDER_DK : WHITE, ARCH.RENDER);
+      if (f === floors) break;
+      for (const fz of [-1, 1]) {
+        const z = fz * (D / 2 - 0.39);
+        glaze(L, fz < 0 ? W / 2 : -W / 2, z, fz < 0 ? -W / 2 : W / 2, z, y + 0.08, y + FH - 0.3, new THREE.Vector3(0, 0, fz), 5.5);
+        // party walls between the rooms' balconies
+        for (let x = -W / 2 + 3.6; x < W / 2 - 0.5; x += 3.6) box(solid, L, x - 0.1, y + 0.05, fz > 0 ? D / 2 - 0.4 : -D / 2 - 1.6, x + 0.1, y + FH - 0.25, fz > 0 ? D / 2 + 1.6 : -D / 2 + 0.4, RENDER, ARCH.RENDER);
+        // glass balustrade with a steel handrail
+        box(glass, L, -W / 2, y + 0.1, fz * (D / 2 + 1.55) - 0.02, W / 2, y + 1.0, fz * (D / 2 + 1.55) + 0.02, WHITE);
+        box(steel, L, -W / 2, y + 1.0, fz * (D / 2 + 1.55) - 0.04, W / 2, y + 1.06, fz * (D / 2 + 1.55) + 0.04, STEEL, ARCH.STEEL);
+      }
+    }
+    // roof: parapet, plant room, louvred screen, the hotel's name board facing the circuit
+    box(solid, L, -W / 2, top, -D / 2 - 1.6, W / 2, top + 1.0, -D / 2 - 1.35, RENDER_DK, ARCH.RENDER);
+    box(solid, L, -W / 2, top, D / 2 + 1.35, W / 2, top + 1.0, D / 2 + 1.6, RENDER_DK, ARCH.RENDER);
+    box(solid, L, -12, top, -4, 12, top + 3.2, 4, srgb(0xa9adb0), ARCH.STEEL);
+    for (let y = top + 0.4; y < top + 3.1; y += 0.35) box(steel, L, -12.1, y, -4.1, 12.1, y + 0.1, -4.0, srgb(0x8d9296), ARCH.STEEL);
   }
 
   // ---------------------------------------------------------------- hospitality pavilion
+  /**
+   * Corporate hospitality behind the stands: a two-storey steel-and-glass pavilion. The ground
+   * floor is glazed, set back under the floor above on slim columns; upstairs the glass is set back
+   * from the track side behind a terrace with a glass balustrade, the other faces shaded by white
+   * vertical fins; a thin roof plate oversails all round, deepest over the terrace, its dark fascia
+   * carrying the sponsors; plant and a parapet on top.
+   */
   function hospitality(lm: Landmark) {
     const L = new Local(lm.x, lm.y, lm.z, lm.rot);
     const W = lm.size, D = 16;
-    box(solid, L, -W / 2, -0.8, -D / 2, W / 2, 0.4, D / 2, CONCRETE);
-    box(glass, L, -W / 2 + 0.6, 0.4, -D / 2 + 0.6, W / 2 - 0.6, 7.6, D / 2 - 0.6, WHITE);
-    box(solid, L, -W / 2 - 0.2, 3.9, -D / 2 - 0.2, W / 2 + 0.2, 4.3, D / 2 + 0.2, WHITE);
-    box(solid, L, -W / 2 - 1.8, 7.6, -D / 2 - 1.8, W / 2 + 1.8, 8.3, D / 2 + 1.8, WHITE);
-    for (let x = -W / 2 + 0.5; x <= W / 2 - 0.5; x += 5.5) for (const z of [-D / 2 + 0.5, D / 2 - 0.5]) box(steel, L, x - 0.12, 0.4, z - 0.12, x + 0.12, 7.6, z + 0.12, STEEL);
-    // fascia boards both long sides
+    // which local z faces the circuit
+    const pr = track.project(lm.x, lm.z);
+    const toTrack = track.point(pr.s, 0, 0, new THREE.Vector3()).sub(L.p(0, 0, 0));
+    const fz = toTrack.dot(new THREE.Vector3(0, 0, 1).transformDirection(L.m)) > 0 ? 1 : -1;
+    const y1 = 4.2, y2 = 7.9;
+    box(solid, L, -W / 2 - 2, -0.8, -D / 2 - 2, W / 2 + 2, 0.25, D / 2 + 2, CONCRETE);
+    // ground floor: glass set back 1.4 m
+    const gx = W / 2 - 1.4, gz = D / 2 - 1.4;
+    glaze(L, -gx, -fz * gz, gx, -fz * gz, 0.25, y1 - 0.45, new THREE.Vector3(0, 0, -fz), 6);
+    glaze(L, gx, fz * gz, -gx, fz * gz, 0.25, y1 - 0.45, new THREE.Vector3(0, 0, fz), 6);
+    for (const sx of [-1, 1]) glaze(L, sx * gx, -gz, sx * gx, gz, 0.25, y1 - 0.45, new THREE.Vector3(sx, 0, 0), 6);
+    box(solid, L, -gx + 0.1, 0.25, -gz + 0.1, gx - 0.1, y1, gz - 0.1, srgb(0x55595d), ARCH.PLAIN);
+    // columns on the slab edge
+    for (let x = -W / 2 + 0.6; x <= W / 2 - 0.5; x += 7) for (const z of [-D / 2 + 0.6, D / 2 - 0.6]) box(steel, L, x - 0.14, 0.25, z - 0.14, x + 0.14, y1, z + 0.14, STEEL, ARCH.STEEL);
+    // first floor slab
+    box(solid, L, -W / 2, y1 - 0.45, -D / 2, W / 2, y1, D / 2, WHITE, ARCH.RENDER);
+    // upstairs: the track face set back behind a 3 m terrace
+    const tz = D / 2 - 3, uz = D / 2 - 0.3, ux = W / 2 - 0.3;
+    glaze(L, fz < 0 ? ux : -ux, fz * tz, fz < 0 ? -ux : ux, fz * tz, y1 + 0.05, y2 - 0.3, new THREE.Vector3(0, 0, fz), 7);
+    glaze(L, fz < 0 ? -ux : ux, -fz * uz, fz < 0 ? ux : -ux, -fz * uz, y1 + 0.05, y2 - 0.3, new THREE.Vector3(0, 0, -fz), 7);
+    for (const sx of [-1, 1]) glaze(L, sx * ux, -fz * uz, sx * ux, fz * tz, y1 + 0.05, y2 - 0.3, new THREE.Vector3(sx, 0, 0), 6);
+    box(solid, L, -ux + 0.1, y1, Math.min(fz * tz, -fz * uz) + 0.1, ux - 0.1, y2, Math.max(fz * tz, -fz * uz) - 0.1, srgb(0x55595d), ARCH.PLAIN);
+    // mullions on the terrace face, fins on the back
+    for (let x = -ux; x <= ux + 0.01; x += 1.8) {
+      box(steel, L, x - 0.04, y1, fz * tz - 0.08, x + 0.04, y2, fz * tz + 0.08, STEEL_DARK, ARCH.STEEL);
+      box(steel, L, x - 0.06, y1, -fz * (uz + 0.6), x + 0.06, y2, -fz * uz, WHITE, ARCH.STEEL);
+    }
+    // terrace balustrade: glass panels between a steel handrail and posts
+    box(glass, L, -W / 2 + 0.1, y1 + 0.05, fz * (D / 2 - 0.12) - 0.02, W / 2 - 0.1, y1 + 1.05, fz * (D / 2 - 0.12) + 0.02, WHITE);
+    box(steel, L, -W / 2 + 0.1, y1 + 1.05, fz * (D / 2 - 0.12) - 0.04, W / 2 - 0.1, y1 + 1.11, fz * (D / 2 - 0.12) + 0.04, STEEL, ARCH.STEEL);
+    // roof plate: oversailing 1 m, 3.5 m over the terrace; dark fascia band
+    const zF = fz * (D / 2 + 1.4), zB = -fz * (D / 2 + 1);
+    box(solid, L, -W / 2 - 1, y2, Math.min(zF, zB), W / 2 + 1, y2 + 0.35, Math.max(zF, zB), WHITE, ARCH.RENDER);
+    box(solid, L, -W / 2 - 1.05, y2 - 0.25, Math.min(zF, zB) - 0.05, W / 2 + 1.05, y2 + 0.75, Math.min(zF, zB) + 0.12, STEEL_DARK, ARCH.PLAIN);
+    box(solid, L, -W / 2 - 1.05, y2 - 0.25, Math.max(zF, zB) - 0.12, W / 2 + 1.05, y2 + 0.75, Math.max(zF, zB) + 0.05, STEEL_DARK, ARCH.PLAIN);
+    box(solid, L, -8, y2 + 0.35, -3, 8, y2 + 2.2, 3, srgb(0xa9adb0), ARCH.STEEL);
+    // sponsor boards on both long fascias
     const n = Math.max(1, Math.round(W / 14));
     for (let k = 0; k < n; k++) {
-      const xa = -W / 2 - 1.6 + ((W + 3.2) * k) / n, xb = xa + (W + 3.2) / n;
-      board(L, xa + 0.1, xb - 0.1, 7.55, 8.35, -D / 2 - 1.85, -1);
-      board(L, xa + 0.1, xb - 0.1, 7.55, 8.35, D / 2 + 1.85, 1);
+      const xa = -W / 2 - 1 + ((W + 2) * k) / n, xb = xa + (W + 2) / n;
+      const zLo = Math.min(zF, zB) - 0.07, zHi = Math.max(zF, zB) + 0.07;
+      board(L, xa + 0.15, xb - 0.15, y2 - 0.2, y2 + 0.7, zLo, -1);
+      board(L, xa + 0.15, xb - 0.15, y2 - 0.2, y2 + 0.7, zHi, 1);
     }
   }
 
@@ -212,14 +306,14 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
       box(steel, L, -w - 0.03, hh, -w, -w + 0.03, hh + 0.06, w, STEEL);
       box(steel, L, w - 0.03, hh, -w, w + 0.03, hh + 0.06, w, STEEL);
     }
-    box(solid, L, -w - 0.3, H, -w - 0.3, w + 0.3, H + 0.12, w + 0.3, srgb(0x6b5a44));
+    box(solid, L, -w - 0.3, H, -w - 0.3, w + 0.3, H + 0.12, w + 0.3, srgb(0x6b5a44), ARCH.PLAIN);
     // camera (facing local +z, toward the corner) and operator
-    box(solid, L, -0.3, H + 1.25, 0.2, 0.3, H + 1.6, 0.9, srgb(0x1b1c1e));
-    box(solid, L, -0.08, H + 0.12, 0.4, 0.08, H + 1.25, 0.56, srgb(0x1b1c1e));
-    box(solid, L, -0.25, H + 0.12, -0.6, 0.25, H + 1.2, -0.2, srgb(0x20252c));
-    box(solid, L, -0.14, H + 1.2, -0.52, 0.14, H + 1.48, -0.26, srgb(0xc58d6b));
+    box(solid, L, -0.3, H + 1.25, 0.2, 0.3, H + 1.6, 0.9, srgb(0x1b1c1e), ARCH.PLAIN);
+    box(solid, L, -0.08, H + 0.12, 0.4, 0.08, H + 1.25, 0.56, srgb(0x1b1c1e), ARCH.PLAIN);
+    box(solid, L, -0.25, H + 0.12, -0.6, 0.25, H + 1.2, -0.2, srgb(0x20252c), ARCH.PLAIN);
+    box(solid, L, -0.14, H + 1.2, -0.52, 0.14, H + 1.48, -0.26, srgb(0xc58d6b), ARCH.PLAIN);
     // umbrella / sun cover
-    box(solid, L, -1.5, H + 2.5, -1.5, 1.5, H + 2.56, 1.5, srgb(0x1d4f9c));
+    box(solid, L, -1.5, H + 2.5, -1.5, 1.5, H + 2.56, 1.5, srgb(0x1d4f9c), ARCH.PLAIN);
     box(steel, L, -0.03, H + 1.2, -1.2, 0.03, H + 2.5, -1.14, STEEL_DARK);
   }
 
@@ -328,18 +422,29 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
   // ---------------------------------------------------------------- meshes
   const group = new THREE.Group();
   group.name = 'Landmarks';
-  const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean) => {
+  const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean, custom = false) => {
     if (mb.vertexCount === 0) return;
-    const m = new THREE.Mesh(mb.geometry(false), mat);
+    const m = new THREE.Mesh(mb.geometry(custom), mat);
     m.name = name;
     m.castShadow = cast;
     m.receiveShadow = true;
     m.matrixAutoUpdate = false;
     group.add(m);
   };
-  add(solid, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide }), 'landmarks_solid', true);
-  add(steel, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.4 }), 'landmarks_steel', true);
+  // (the stands' architectural surfaces: weathered render and concrete, painted steel)
+  tagClass(steel, 0, ARCH.STEEL);
+  const solidMat = archMaterial();
+  solidMat.side = THREE.DoubleSide;
+  add(solid, solidMat, 'landmarks_solid', true, true);
+  add(steel, archMaterial(), 'landmarks_steel', true, true);
   add(glass, new THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.08, metalness: 0.85 }), 'landmarks_glass', false);
+  if (rooms.pos.length) {
+    const gm = new THREE.Mesh(rooms.geometry(), glassMaterial(0x2a3a44));
+    gm.name = 'landmarks_rooms';
+    gm.receiveShadow = true;
+    gm.matrixAutoUpdate = false;
+    group.add(gm);
+  }
   const tex = sponsorTexture();
   add(boards, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.14, side: THREE.DoubleSide }), 'landmarks_boards', false);
   return { group, count };
