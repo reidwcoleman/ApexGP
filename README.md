@@ -206,9 +206,16 @@ npm run check    # tsc --noEmit
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
   lateral and endplate lights; baked ambient occlusion on every car.
-- **Camera footage look** — per-pixel camera motion blur like a film shutter (depth reprojection: the grass,
-  kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a panning TV
-  camera keeps its car crisp; Settings → Motion blur Off / Subtle / Cinematic), a photographic grade layer
+- **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
+  half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
+  grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car
+  flashing past a fixed camera smears beyond its own outline, the halo never smears or is smeared into, and the
+  frame's edges don't streak; long lenses get a faster shutter; Settings → Motion blur Off / Subtle / Cinematic),
+  a camera's auto exposure (`autoExposure.ts`: metered on the GPU, it opens up a beat late under a bridge or the
+  trees and is briefly over-exposed coming back out, but leaves the grade alone in steady light), sensor grain
+  that follows the metered gain (all but clean on a sunny day, visible on a wet morning or at night), a lens:
+  soft-knee bloom (no glow disc round a low sun), warm wide halation, soft lens-flare ghosts and veiling glare
+  into the sun, mild barrel distortion + lateral CA on the wide lenses and footage-soft sharpening, a photographic grade layer
   over every weather and time of day (`FILM` in Environment.ts: a little under-exposed, colour pulled back, greens
   tamed toward olive, a warm yellow cast that is full in sunshine, eased off under cloud and gone in the blue hour,
   where footage is cool; a camera that meters a flat grey day almost back up so a wet sky goes near white, while a
@@ -218,6 +225,10 @@ npm run check    # tsc --noEmit
   than veiling a car down a long lens. Inside the cockpit (cockpit, helmet, halo cam: `INSIDE_CAR`) the lens is exposed for
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect`, from
   depth + the car's box; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
+  than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
+  the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect` in
+  onboard.ts, from depth + the car's box, blurred from both sides of its edge so the halo's outline is soft and
+  the sky glows into it; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
   overlay (real onboard footage has none), and night races are lit by a faint moon only, so the headlights,
   rain lights and the lights round the track carry the picture. The cockpit eye sits low and back in the tub
   (`COCKPIT_EYE_*` in Cameras.ts) so the halo's hoop rides the top edge as in onboard footage; long lenses thin
@@ -320,7 +331,8 @@ src/
            Spray (rain plumes: a translucent grey mist, darker than the sky so a bright wet exposure never
            clips it), SkidMarks (rubber, offs, braking film, marbles)
   ui/      HUD, Menu, design tokens
-  core/    Renderer (post chain: N8AO, bloom, speed blur + CA, grade, PBR Neutral, SMAA, sharpen;
+  core/    Renderer (post chain: N8AO, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
+           PBR Neutral, film print + grain, SMAA, lens + sharpen;
            adaptive resolution that never trusts Apple's GPU timer), Input, Audio
   people/  Humans (bodies, clothing shader, faces, props), Crowd (GPU-skinned instanced fans),
            drivers, poses

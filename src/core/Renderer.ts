@@ -17,21 +17,29 @@ import {
   VignetteEffect,
 } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
+import { MOTION_CARS, MotionBlurEffect } from './motionBlur';
+import { AutoExposure } from './autoExposure';
+import { OnboardEffect } from './onboard';
+
+export { MOTION_CARS };
 
 /**
  * Renderer + post chain.
  *
  *   RenderPass (HDR, half float)
  *   → N8AO (screen-space AO, world-radius; ultra)
- *   → camera motion blur (depth reprojection; tracked cars move with themselves) [own pass]
- *   → onboard lens (eye cams: own cockpit shaded + defocused, outside exposed up) [own pass]
+ *   → motion blur (camera + per-object, reconstructed from a velocity buffer: motionBlur.ts) [own pass]
+ *   → onboard lens (eye cams: own cockpit shaded + defocused from both sides, outside exposed up: onboard.ts)
  *   → speed blur (radial, only while fast)      [own pass: convolution]
- *   → depth of field (menus/replays only)        [own pass: convolution]
+ *   → depth of field (trackside lenses, menus/replays) [own pass: convolution]
  *   → lens rain (onboard cameras in the wet)     [own pass: convolution]
- *   → sanitize (NaN/Inf scrub) → AO → sun shafts → bloom (warm halation) → grade (game layer × weather
- *     look × lightning flash) → PBR Neutral → film print (black floor, shadow chroma, warm clip) → vignette → grain
+ *   → sanitize (NaN/Inf scrub) → AO → sun shafts + lens flare / veiling glare → bloom (soft knee, warm
+ *     halation) → grade (game layer × weather look × lightning flash × auto exposure: autoExposure.ts)
+ *     → PBR Neutral → film print (black floor, shadow chroma, warm clip, sensor grain by the metered
+ *     gain) → vignette
  *   → chromatic aberration (only while fast)     [own pass: convolution]
- *   → SMAA → sharpen (contrast-adaptive, High/Ultra; stronger while the dynamic resolution is down)
+ *   → SMAA → lens + upscale + sharpen (barrel distortion and lateral CA by the field of view; light
+ *     contrast-adaptive sharpening, softer toward the edges; High/Ultra)
  *
  * renderer.toneMapping stays NoToneMapping: tone mapping happens in the
  * composer, after bloom, so highlights bloom in linear HDR.
@@ -93,198 +101,6 @@ class RadialBlurEffect extends Effect {
   }
 }
 
-/** how many cars the motion blur tracks as moving objects (the nearest to the camera) */
-export const MOTION_CARS = 8;
-
-// Camera motion blur like a film camera's shutter: every pixel's world position (from depth) is
-// reprojected into the previous frame and the image is smeared along the difference. Pixels inside
-// a tracked car's box move with that car instead of with the world, so the car you are in (and the
-// ones racing alongside) stay sharp while the grass, kerbs and barriers streak past; a panning TV
-// camera keeps its car sharp and streaks the background. Samples nearer the lens than the pixel are
-// rejected so foreground edges (halo, cockpit) don't bleed into the background.
-const MOTION_BLUR_FRAG = /* glsl */ `
-uniform mat4 projInv;
-uniform mat4 camWorld;
-uniform mat4 prevViewProj;
-uniform mat4 carInv[${MOTION_CARS}];
-uniform mat4 carPrev[${MOTION_CARS}];
-uniform int carCount;
-uniform vec3 boxMin;
-uniform vec3 boxMax;
-uniform float shutter;
-uniform float maxLen;
-
-vec3 viewPos(vec2 uv, float depth) {
-  float vz = getViewZ(depth);
-  vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
-  ray.xyz /= ray.w;
-  return ray.xyz * (vz / ray.z);
-}
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  vec3 wpos = (camWorld * vec4(viewPos(uv, depth), 1.0)).xyz;
-  vec3 prev = wpos;
-  for (int i = 0; i < ${MOTION_CARS}; i++) {
-    if (i >= carCount) break;
-    vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
-    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
-      prev = (carPrev[i] * vec4(l, 1.0)).xyz;
-      break;
-    }
-  }
-  vec4 pc = prevViewProj * vec4(prev, 1.0);
-  if (pc.w <= 0.0) { outputColor = inputColor; return; }
-  vec2 v = (uv - (pc.xy / pc.w * 0.5 + 0.5)) * shutter;
-  float len = length(v * vec2(aspect, 1.0));
-  if (len > maxLen) v *= maxLen / len;
-  if (length(v / texelSize) < 0.75) { outputColor = inputColor; return; }
-  float z0 = -getViewZ(depth);
-  vec3 acc = inputColor.rgb;
-  float w = 1.0;
-  // taps by streak length (4 … 16, a tap every ~3 px), jittered per pixel so the steps read as
-  // grain rather than as ghost copies
-  float px = length(v / texelSize);
-  int n = int(clamp(px / 3.0, 4.0, 16.0));
-  float fn = float(n);
-  float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
-  for (int i = 0; i < 16; i++) {
-    if (i >= n) break;
-    float t = (float(i) + 0.5 + jit) / fn - 0.5;
-    vec2 su = uv + v * t;
-    float zs = -getViewZ(readDepth(su));
-    // a sample much nearer the lens than this pixel is foreground: it does not smear back over it
-    float k = step(z0 * 0.8 - 0.3, zs);
-    acc += texture2D(inputBuffer, su).rgb * k;
-    w += k;
-  }
-  outputColor = vec4(acc / w, inputColor.a);
-}
-`;
-
-class MotionBlurEffect extends Effect {
-  constructor() {
-    super('MotionBlurEffect', MOTION_BLUR_FRAG, {
-      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
-      uniforms: new Map<string, THREE.Uniform>([
-        ['projInv', new THREE.Uniform(new THREE.Matrix4())],
-        ['camWorld', new THREE.Uniform(new THREE.Matrix4())],
-        ['prevViewProj', new THREE.Uniform(new THREE.Matrix4())],
-        ['carInv', new THREE.Uniform(Array.from({ length: MOTION_CARS }, () => new THREE.Matrix4()))],
-        ['carPrev', new THREE.Uniform(Array.from({ length: MOTION_CARS }, () => new THREE.Matrix4()))],
-        ['carCount', new THREE.Uniform(0)],
-        // a car's box in its own frame (origin on the ground, mid-wheelbase, +Z forward), a little generous
-        ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
-        ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
-        ['shutter', new THREE.Uniform(0)],
-        ['maxLen', new THREE.Uniform(0.14)],
-      ]),
-    });
-  }
-}
-
-// An onboard camera, as real footage shows it: the lens is exposed for the bright world outside,
-// so the inside of the car the camera sits in (halo, chassis rim, wheel) falls into shadow, and it
-// is focused down the road, so whatever is a hand's width from the glass is soft. Pixels of the
-// player's own car (its box, from depth) are shaded and defocused by how near they are (a disc
-// gather, only on those pixels: the outside costs one depth read). The outside gets a
-// little more exposure so the sky rolls off toward white.
-const ONBOARD_FRAG = /* glsl */ `
-uniform mat4 projInv;
-uniform mat4 camWorld;
-uniform mat4 ownInv;
-uniform vec3 boxMin;
-uniform vec3 boxMax;
-uniform float shade;
-uniform float defocus;
-uniform float outside;
-uniform vec3 wheelPos;
-
-vec3 obViewPos(vec2 uv, float depth) {
-  float vz = getViewZ(depth);
-  vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
-  ray.xyz /= ray.w;
-  return ray.xyz * (vz / ray.z);
-}
-// distance from the lens if this pixel is the player's own car, else -1; wheel 0 … 1 = on the
-// steering wheel (its screen, shift lights and buttons stay readable, as in the footage)
-float ownDist(vec2 uv, float depth, out float wheel) {
-  wheel = 0.0;
-  if (-getViewZ(depth) > 4.5) return -1.0;
-  vec3 vp = obViewPos(uv, depth);
-  vec3 l = (ownInv * (camWorld * vec4(vp, 1.0))).xyz;
-  if (!(all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)))) return -1.0;
-  wheel = 1.0 - smoothstep(0.17, 0.26, length(l - wheelPos));
-  return length(vp);
-}
-// blur radius (uv, vertical) of a surface this far from a lens focused far away
-float coc(float d, float wheel) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6) * (1.0 - 0.8 * wheel); }
-
-vec3 shadeOwn(vec3 c, float d, float wheel) {
-  float k = shade * (1.0 - smoothstep(1.6, 3.6, d)) * (1.0 - 0.55 * wheel);
-  // the shadowed cockpit: much less light, a little less colour, and no sun glints in the lacquer
-  // (kept, they sparkle once the paint round them is dark); lit LEDs and the wheel's screen keep
-  // their glow — bright AND strongly coloured, where a glint is bright and white
-  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float hi = max(max(c.r, c.g), c.b);
-  float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
-  vec3 s = mix(vec3(lum), c, 0.55) * 0.24 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
-  vec3 lit = mix(s, c, wheel * 0.85);
-  return mix(c, lit, k);
-}
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  // an onboard camera's small wide lens darkens hard toward the corners
-  vec2 vc = (uv - 0.5) * vec2(aspect, 1.0);
-  float vig = 1.0 - 0.5 * smoothstep(0.3, 1.0, length(vc));
-  float wh0;
-  float d0 = ownDist(uv, depth, wh0);
-  // the view outside: just the exposure (its edge against the cockpit is softened from the inside)
-  if (d0 < 0.0) { outputColor = vec4(inputColor.rgb * outside * vig, inputColor.a); return; }
-  float r0 = coc(d0, wh0);
-  vec3 c0 = shadeOwn(inputColor.rgb, d0, wh0);
-  if (r0 * resolution.y < 0.75) { outputColor = vec4(c0 * vig, inputColor.a); return; }
-  // defocus disc: the cockpit's own soft neighbours, and the view behind where the disc crosses an
-  // edge. The disc turns per pixel (interleaved gradient noise) and bright taps are weighted down
-  // (1 / (1 + luma)) so a small LED spreads into a soft disc instead of a dotted pattern.
-  float rot = 6.2832 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-  float w = 1.0 / (1.0 + dot(c0, vec3(0.2126, 0.7152, 0.0722)));
-  vec3 acc = c0 * w;
-  for (int i = 0; i < 12; i++) {
-    float a = float(i) * 2.39996 + rot;
-    float rr = sqrt((float(i) + 0.5) / 12.0);
-    vec2 su = uv + vec2(cos(a), sin(a)) * rr * r0 * vec2(1.0 / aspect, 1.0);
-    float whs;
-    float ds = ownDist(su, readDepth(su), whs);
-    vec3 c = texture2D(inputBuffer, su).rgb;
-    c = ds < 0.0 ? c * outside : shadeOwn(c, ds, whs);
-    float wi = 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
-    acc += c * wi;
-    w += wi;
-  }
-  outputColor = vec4(acc / w * vig, inputColor.a);
-}
-`;
-
-class OnboardEffect extends Effect {
-  constructor() {
-    super('OnboardEffect', ONBOARD_FRAG, {
-      attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,
-      uniforms: new Map<string, THREE.Uniform>([
-        ['projInv', new THREE.Uniform(new THREE.Matrix4())],
-        ['camWorld', new THREE.Uniform(new THREE.Matrix4())],
-        ['ownInv', new THREE.Uniform(new THREE.Matrix4())],
-        ['boxMin', new THREE.Uniform(new THREE.Vector3(-1.15, -0.2, -2.85))],
-        ['boxMax', new THREE.Uniform(new THREE.Vector3(1.15, 1.45, 2.95))],
-        ['shade', new THREE.Uniform(1)],
-        ['defocus', new THREE.Uniform(0.0105)],
-        ['outside', new THREE.Uniform(1.12)],
-        // the steering wheel's centre in the car's frame (carGeometry STEER_PIVOT)
-        ['wheelPos', new THREE.Uniform(new THREE.Vector3(0, 0.605, 0.5))],
-      ]),
-    });
-  }
-}
-
 // One NaN/Inf pixel (a degenerate normal, a divide by zero in some shader) is
 // enough for bloom's blur chain to black out the whole frame. Scrub them first.
 const SANITIZE_FRAG = /* glsl */ `
@@ -297,13 +113,21 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 `;
 
 /**
- * Contrast-adaptive sharpening (after AMD's CAS): a negative-lobe cross filter whose
- * strength backs off wherever the local contrast is already high, so edges crisp up
- * without halos and flat areas don't gain noise. Undoes the softness of SMAA and of a
- * lowered render resolution — the difference between a game capture and a broadcast feed.
+ * The last pass: the lens and the upscale. Contrast-adaptive sharpening (after AMD's CAS) — a
+ * negative-lobe cross filter whose strength backs off wherever the local contrast is already high,
+ * so edges crisp up without halos and flat areas don't gain noise — undoes the softness of SMAA and
+ * of a lowered render resolution, but only so far: real footage is a little soft (the optics, the
+ * camera's own processing, the stream's compression), never a render's pixel-crisp, so it is held to
+ * a light touch in the middle of the frame and eases off toward the edges, where a real lens is softer.
+ * The lens itself: a wide onboard lens's barrel distortion (straight lines bow outward a touch; the
+ * corners stay put and the middle is magnified slightly) and its lateral chromatic aberration (red
+ * and blue are imaged at slightly different sizes: thin colour fringes on contrasty edges toward the
+ * corners), both scaled by how wide the lens is — a long trackside lens is almost free of them.
  */
 const SHARPEN_FRAG = /* glsl */ `
 uniform float sharpness;
+uniform float lensK;
+uniform float lensCA;
 // the last pass draws at the display's native resolution from the lower-resolution frame: a
 // Catmull-Rom bicubic upscale (9 bilinear taps), clamped to the local 2×2 neighbourhood so it
 // can't ring, then contrast-adaptive sharpening measured on the source texels
@@ -340,7 +164,13 @@ vec3 cubic(vec2 uv, out vec3 mn, out vec3 mx) {
   mx = max(max(a00, a10), max(a01, a11));
   return clamp(r, mn, mx);
 }
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+void mainImage(const in vec4 inputColor, const in vec2 uv0, out vec4 outputColor) {
+  // barrel distortion, normalised so the corners map to the corners
+  vec2 q = (uv0 - 0.5) * vec2(aspect, 1.0);
+  float r2 = dot(q, q);
+  float rc2 = 0.25 * (aspect * aspect + 1.0);
+  vec2 uv = 0.5 + (uv0 - 0.5) * (1.0 + lensK * r2) / (1.0 + lensK * rc2);
+  float edge = r2 / rc2;
   vec3 mn, mx;
   vec3 c = cubic(uv, mn, mx);
   vec3 a = texture2D(inputBuffer, uv + vec2(0.0, -texelSize.y)).rgb;
@@ -350,8 +180,18 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   vec3 lo = min(c, min(min(a, b), min(d, e)));
   vec3 hi = max(c, max(max(a, b), max(d, e)));
   vec3 amp = sqrt(clamp(min(lo, 1.0 - hi) / max(hi, 1e-4), 0.0, 1.0));
-  vec3 w = -amp * mix(0.08, 0.22, sharpness);
+  vec3 w = -amp * mix(0.04, 0.2, sharpness) * (1.0 - 0.75 * edge);
   vec3 o = (c + (a + b + d + e) * w) / (1.0 + 4.0 * w);
+  // lateral chromatic aberration toward the corners (red imaged a touch larger, blue smaller): the
+  // shift is a texel or two, so red and blue are moved along their own gradients (from the cross
+  // taps above) instead of being fetched again — no extra reads at the display's full resolution
+  if (lensCA > 0.0) {
+    vec2 sh = (uv - 0.5) * lensCA * edge / texelSize;
+    vec3 gx = (d - b) * 0.5;
+    vec3 gy = (e - a) * 0.5;
+    o.r += dot(sh, vec2(gx.r, gy.r));
+    o.b -= dot(sh, vec2(gx.b, gy.b));
+  }
   outputColor = vec4(clamp(o, 0.0, 1.0), inputColor.a);
 }
 `;
@@ -360,11 +200,20 @@ class SharpenEffect extends Effect {
   constructor() {
     super('SharpenEffect', SHARPEN_FRAG, {
       attributes: EffectAttribute.CONVOLUTION,
-      uniforms: new Map<string, THREE.Uniform>([['sharpness', new THREE.Uniform(0.5)]]),
+      uniforms: new Map<string, THREE.Uniform>([
+        ['sharpness', new THREE.Uniform(0.4)],
+        ['lensK', new THREE.Uniform(0)],
+        ['lensCA', new THREE.Uniform(0)],
+      ]),
     });
   }
   set sharpness(v: number) {
     this.uniforms.get('sharpness')!.value = v;
+  }
+  /** the lens: barrel distortion coefficient and lateral chromatic aberration (uv per unit radius) */
+  setLens(k: number, ca: number) {
+    this.uniforms.get('lensK')!.value = k;
+    this.uniforms.get('lensCA')!.value = ca;
   }
 }
 
@@ -654,6 +503,22 @@ void main() {
 }
 `;
 
+// how much of the sun is in sight (a 3 × 3 cluster of depth samples round its disc reaching the sky)
+const FLARE_VIS_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D tDepth;
+uniform vec2 sunUv;
+uniform float aspect;
+void main() {
+  float vis = 0.0;
+  for (int i = 0; i < 9; i++) {
+    vec2 o = vec2(float(i - (i / 3) * 3) - 1.0, float(i / 3) - 1.0) * vec2(0.006 / aspect, 0.006);
+    vis += step(0.99999, texture2D(tDepth, sunUv + o).r);
+  }
+  gl_FragColor = vec4(vis / 9.0, 0.0, 0.0, 1.0);
+}
+`;
+
 const FS_VERT = /* glsl */ `
 varying vec2 vUv;
 void main() {
@@ -677,6 +542,7 @@ class SunShaftsEffect extends Effect {
   constructor() {
     super('SunShaftsEffect', /* glsl */ `
       uniform sampler2D tShafts;
+      uniform sampler2D tFlareVis;
       uniform float shaftStrength;
       uniform float flare;
       uniform vec2 flareUv;
@@ -694,26 +560,24 @@ class SunShaftsEffect extends Effect {
       void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
         vec3 col = inputColor.rgb + texture2D(tShafts, uv).rgb * shaftStrength;
         if (flare > 0.001) {
-          float vis = 0.0;
-          for (int i = 0; i < 9; i++) {
-            vec2 o = vec2(float(i % 3) - 1.0, float(i / 3) - 1.0) * vec2(0.006 / aspect, 0.006);
-            vis += step(0.99999, readDepth(flareUv + o));
-          }
-          vis /= 9.0;
+          // (how much of the sun the trees, stands and cars cover: one 1×1 pass a frame)
+          float vis = texture2D(tFlareVis, vec2(0.5)).r;
           if (vis > 0.0) {
             vec2 axis = vec2(0.5) - flareUv;
             vec3 g = vec3(0.0);
-            g += ghost(uv, flareUv + axis * 0.45, 0.022, 0.7) * vec3(0.9, 0.7, 0.35) * 0.5;
-            g += ghost(uv, flareUv + axis * 0.8, 0.05, 0.5) * vec3(0.35, 0.6, 0.5) * 0.22;
-            g += ghost(uv, flareUv + axis * 1.3, 0.035, 0.6) * vec3(0.55, 0.45, 0.8) * 0.32;
-            g += ghost(uv, flareUv + axis * 1.65, 0.085, 0.4) * vec3(0.3, 0.45, 0.6) * 0.12;
-            g += ghost(uv, flareUv + axis * 2.1, 0.014, 0.8) * vec3(0.8, 0.6, 0.4) * 0.6;
+            // (soft-edged and faint: a coated lens's ghosts are smudges of colour, not crisp shapes)
+            g += ghost(uv, flareUv + axis * 0.45, 0.026, 0.95) * vec3(0.9, 0.7, 0.35) * 0.3;
+            g += ghost(uv, flareUv + axis * 0.8, 0.055, 0.9) * vec3(0.35, 0.6, 0.5) * 0.14;
+            g += ghost(uv, flareUv + axis * 1.3, 0.04, 0.9) * vec3(0.55, 0.45, 0.8) * 0.2;
+            g += ghost(uv, flareUv + axis * 1.65, 0.09, 0.85) * vec3(0.3, 0.45, 0.6) * 0.08;
+            g += ghost(uv, flareUv + axis * 2.1, 0.016, 0.95) * vec3(0.8, 0.6, 0.4) * 0.35;
             // a faint halo ring centred on the image axis
             float rr = length((uv - vec2(0.5)) * vec2(aspect, 1.0));
-            float ring = exp(-pow((rr - 0.42) * 16.0, 2.0)) * 0.018;
+            float ring = exp(-pow((rr - 0.42) * 16.0, 2.0)) * 0.014;
             vec2 sd = (uv - flareUv) * vec2(aspect, 1.0);
-            // veiling glare close to the sun (the lens's own scatter)
-            float veil = exp(-length(sd) * 7.0) * 0.18;
+            // veiling glare: the lens's own scatter, strong round the sun and a thin wash over the whole
+            // frame (it lifts the shadows and flattens the contrast of everything shot into the light)
+            float veil = exp(-length(sd) * 7.0) * 0.18 + exp(-length(sd) * 1.6) * 0.012 + 0.004;
             col += flareColor * (g + ring * vec3(0.7, 0.8, 1.0) + veil) * flare * vis;
           }
         }
@@ -722,6 +586,7 @@ class SunShaftsEffect extends Effect {
       attributes: EffectAttribute.DEPTH,
       uniforms: new Map<string, THREE.Uniform>([
         ['tShafts', new THREE.Uniform(null)],
+        ['tFlareVis', new THREE.Uniform(null)],
         ['shaftStrength', new THREE.Uniform(0)],
         ['flare', new THREE.Uniform(0)],
         ['flareUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
@@ -751,10 +616,21 @@ class SunShaftsEffect extends Effect {
       depthTest: false,
       depthWrite: false,
     });
+    this.rtVis = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    this.visMat = new THREE.ShaderMaterial({
+      vertexShader: FS_VERT,
+      fragmentShader: FLARE_VIS_FRAG,
+      uniforms: { tDepth: { value: null }, sunUv: { value: this.sunUv }, aspect: { value: 1 } },
+      depthTest: false,
+      depthWrite: false,
+    });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.maskMat);
     this.quad.frustumCulled = false;
     this.uniforms.get('tShafts')!.value = this.rtB.texture;
+    this.uniforms.get('tFlareVis')!.value = this.rtVis.texture;
   }
+  private readonly rtVis: THREE.WebGLRenderTarget;
+  private readonly visMat: THREE.ShaderMaterial;
   override setDepthTexture(depthTexture: THREE.Texture) {
     this.depth = depthTexture;
   }
@@ -764,16 +640,28 @@ class SunShaftsEffect extends Effect {
     this.rtA.setSize(w, h);
     this.rtB.setSize(w, h);
     this.maskMat.uniforms.aspect.value = width / Math.max(1, height);
+    this.visMat.uniforms.aspect.value = width / Math.max(1, height);
   }
   /** lens flare strength (0 = off), set per frame with the sun's screen position */
   flare = 0;
   override update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget) {
-    this.uniforms.get('flare')!.value = this.active && this.depth !== null ? this.flare : 0;
+    const flareOn = this.active && this.depth !== null && this.flare > 0.001;
+    this.uniforms.get('flare')!.value = flareOn ? this.flare : 0;
     (this.uniforms.get('flareUv')!.value as THREE.Vector2).copy(this.sunUv);
     const on = this.active && this.strength > 0.002 && this.depth !== null;
     this.uniforms.get('shaftStrength')!.value = on ? this.strength : 0;
-    if (!on) return;
+    if (!on && !flareOn) return;
     const prev = renderer.getRenderTarget();
+    if (flareOn) {
+      this.visMat.uniforms.tDepth.value = this.depth;
+      this.quad.material = this.visMat;
+      renderer.setRenderTarget(this.rtVis);
+      renderer.render(this.quad, this.cam);
+    }
+    if (!on) {
+      renderer.setRenderTarget(prev);
+      return;
+    }
     this.maskMat.uniforms.tColor.value = inputBuffer.texture;
     this.maskMat.uniforms.tDepth.value = this.depth;
     this.quad.material = this.maskMat;
@@ -810,8 +698,16 @@ uniform vec3 lookTint;
 uniform vec3 lookShadowTint;
 uniform float flash;
 uniform vec2 greenTame;
+uniform sampler2D tAdapt;
+uniform float adaptStrength;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec3 c = max(inputColor.rgb, 0.0) * exposure * lookExposure * (1.0 + flash);
+  // the camera's auto exposure: (reference / adapted)^strength, 1 in steady light (autoExposure.ts)
+  float ae = 1.0;
+  if (adaptStrength > 0.0) {
+    vec2 ad = texture2D(tAdapt, vec2(0.5)).xy;
+    ae = clamp(exp((ad.y - ad.x) * adaptStrength), 0.6, 1.9);
+  }
+  vec3 c = max(inputColor.rgb, 0.0) * exposure * lookExposure * (1.0 + flash) * ae;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // split toning: shadows toward shadowTint, highlights toward tint
   float hl = smoothstep(0.02, 0.6, l);
@@ -839,16 +735,54 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
  * and the veiling flare inside the lens lift them to a dim, warm-tinted floor), the deepest shadows
  * lose their colour (a sensor's chroma noise is filtered out down there), and the brightest
  * highlights clip to a slightly warm white.
+ *
+ * Then the sensor's noise. A camera's grain lives in the dark-to-mid tones (shot noise; the crushed
+ * black floor and the highlights stay clean), it is a little clumpy rather than per-pixel (the
+ * camera's own noise reduction and the stream's compression smear it to 2–3 px), and it grows with
+ * the gain: the darker the light the camera meters (the auto exposure's adapted level), the higher
+ * its ISO — a sunny afternoon is all but clean, a wet morning or a night onboard is visibly noisy,
+ * with a little colour in it.
  */
 const FILM_FRAG = /* glsl */ `
 uniform vec3 filmLift;
 uniform float filmShadowSat;
 uniform vec3 filmWhite;
+uniform float filmGrain;
+uniform float filmTime;
+uniform sampler2D tAdapt;
+uniform float adaptOn;
+float fg_h(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = clamp(inputColor.rgb, 0.0, 1.0);
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(vec3(l), c, mix(filmShadowSat, 1.0, smoothstep(0.0, 0.06, l)));
   c = filmLift + c * (filmWhite - filmLift);
+  if (filmGrain > 0.0) {
+    // the gain: ~0 in daylight, ~1 by a wet morning or a night (metered log luminance, pre-grade)
+    float iso = adaptOn > 0.5 ? smoothstep(-4.1, -5.8, texture2D(tAdapt, vec2(0.5)).x) : 0.3;
+    // clumpy grain: this pixel's noise plus a coarser layer, both new every frame (in a
+    // perceptual, square-root domain so it sits evenly across the tones)
+    vec3 p = sqrt(c);
+    float pl = dot(p, vec3(0.2126, 0.7152, 0.0722));
+    float w = smoothstep(0.02, 0.14, pl) * (1.0 - 0.8 * smoothstep(0.25, 0.8, pl));
+    if (w > 0.0) {
+      vec2 fc = gl_FragCoord.xy;
+      float t = floor(filmTime * 60.0);
+      vec2 o = vec2(fract(t * 0.6180339) * 913.0, fract(t * 0.7548777) * 577.0);
+      float h1 = fg_h(fc + o);
+      float h2 = fg_h(floor(fc * 0.5) + o * 1.3);
+      float n = (h1 - 0.5) * 0.8 + (h2 - 0.5) * 0.7;
+      // (the colour noise rides on the coarse layer, decorrelated per channel)
+      vec3 chroma = fract(h2 * vec3(7.31, 13.17, 3.93)) - 0.5;
+      float a = filmGrain * (0.5 + 1.0 * iso) * w;
+      p += a * (n + chroma * 0.8 * iso);
+      c = max(p, 0.0) * max(p, 0.0);
+    }
+  }
   outputColor = vec4(c, inputColor.a);
 }
 `;
@@ -861,8 +795,15 @@ export class FilmEffect extends Effect {
         ['filmLift', new THREE.Uniform(new THREE.Vector3(0.005, 0.0044, 0.0036))],
         ['filmShadowSat', new THREE.Uniform(0.6)],
         ['filmWhite', new THREE.Uniform(new THREE.Vector3(1.0, 0.985, 0.95))],
+        ['filmGrain', new THREE.Uniform(0)],
+        ['filmTime', new THREE.Uniform(0)],
+        ['tAdapt', new THREE.Uniform(null)],
+        ['adaptOn', new THREE.Uniform(0)],
       ]),
     });
+  }
+  override update(_r: THREE.WebGLRenderer, _i: THREE.WebGLRenderTarget, dt?: number) {
+    this.uniforms.get('filmTime')!.value = ((this.uniforms.get('filmTime')!.value as number) + (dt ?? 0.016)) % 1000;
   }
 }
 
@@ -897,9 +838,36 @@ export class GradeEffect extends Effect {
         ['lookShadowTint', new THREE.Uniform(new THREE.Vector3(1, 1, 1))],
         ['flash', new THREE.Uniform(0)],
         ['greenTame', new THREE.Uniform(new THREE.Vector2(0.3, 0.3))],
+        ['tAdapt', new THREE.Uniform(null)],
+        ['adaptStrength', new THREE.Uniform(0)],
       ]),
     });
   }
+  private auto: AutoExposure | null = null;
+  /**
+   * Meter the frame like a camera's auto exposure (0 = off): how much of a change in the view's
+   * brightness (into shade, under a bridge, out into the sun) it compensates, after a beat.
+   */
+  setAutoExposure(strength: number) {
+    if (strength > 0 && !this.auto) this.auto = new AutoExposure();
+    this.uniforms.get('adaptStrength')!.value = this.auto ? strength : 0;
+  }
+  /** snap the auto exposure to the next frame (a camera cut) */
+  resetAutoExposure() {
+    this.auto?.reset();
+  }
+  override update(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget, dt?: number) {
+    const a = this.auto;
+    if (!a || (this.uniforms.get('adaptStrength')!.value as number) <= 0) return;
+    a.update(renderer, inputBuffer.texture, dt ?? 0.016);
+    this.uniforms.get('tAdapt')!.value = a.texture;
+    for (const e of this.adaptLinks) {
+      e.uniforms.get('tAdapt')!.value = a.texture;
+      e.uniforms.get('adaptOn')!.value = 1;
+    }
+  }
+  /** effects later in the chain that read the metered level too (their tAdapt / adaptOn uniforms) */
+  readonly adaptLinks: Effect[] = [];
   set(opts: { exposure?: number; saturation?: number; contrast?: number; tint?: THREE.ColorRepresentation; shadowTint?: THREE.ColorRepresentation }) {
     const u = this.uniforms;
     if (opts.exposure !== undefined) u.get('exposure')!.value = opts.exposure;
@@ -1053,11 +1021,13 @@ export class Renderer {
     this.bloom = new BloomEffect({
       mipmapBlur: true,
       luminanceThreshold: 1.1,
-      luminanceSmoothing: 0.35,
+      luminanceSmoothing: 0.5,
       intensity: 0.9,
-      radius: 0.62,
+      // (wide: a lamp glows several times its own size in footage — the lens and sensor scatter)
+      radius: 0.78,
     });
     this.grade = new GradeEffect();
+    this.grade.setAutoExposure(0.6);
     // Khronos PBR Neutral: base colours come out as painted (a Ferrari red stays red, not
     // AgX's salmon), with a filmic roll-off only in the highlights; the weather look adds a touch
     this.toneMapping = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
@@ -1068,10 +1038,19 @@ export class Renderer {
     // (the NaN scrub runs first inside this pass rather than as a pass of its own — one full-screen
     // copy less; bloom's luminance pre-pass and the shaft mask scrub what they read themselves)
     const lum = this.bloom.luminanceMaterial as unknown as THREE.ShaderMaterial;
-    lum.fragmentShader = lum.fragmentShader.replace(
-      'vec4 texel=texture2D(inputBuffer,vUv);',
-      'vec4 texel=texture2D(inputBuffer,vUv);if(texel.r!=texel.r||texel.g!=texel.g||texel.b!=texel.b||max(max(abs(texel.r),abs(texel.g)),abs(texel.b))>1e6)texel.rgb=vec3(0.0);texel.rgb=min(max(texel.rgb,0.0),vec3(200.0));',
-    );
+    lum.fragmentShader = lum.fragmentShader
+      .replace(
+        'vec4 texel=texture2D(inputBuffer,vUv);',
+        'vec4 texel=texture2D(inputBuffer,vUv);if(texel.r!=texel.r||texel.g!=texel.g||texel.b!=texel.b||max(max(abs(texel.r),abs(texel.g)),abs(texel.b))>1e6)texel.rgb=vec3(0.0);texel.rgb=min(max(texel.rgb,0.0),vec3(200.0));',
+      )
+      // a soft knee that only lets the light ABOVE the threshold glow (as a lens's scatter does): a
+      // smoothstep mask passed the whole colour of everything just over the threshold, so a bright sky
+      // round a low sun bloomed as a flat disc with a visible edge where it crossed the threshold
+      // (smoothing is the knee's width as a fraction of the threshold)
+      .replace(
+        'mask=smoothstep(threshold,threshold+smoothing,l);',
+        'float kn=max(smoothing*threshold,1e-4);float sk=clamp(l-threshold+kn,0.0,2.0*kn);sk=sk*sk/(4.0*kn);mask=max(sk,l-threshold)/max(l,1e-4);',
+      );
     // halation: the glow round a bright light in footage is warm (red light scatters deepest into the
     // film / sensor stack and spreads widest), not the light's own colour scaled up
     const bl = this.bloom as unknown as { fragmentShader: string; setFragmentShader(s: string): void };
@@ -1083,7 +1062,10 @@ export class Renderer {
     this.bloom.uniforms.set('halation', new THREE.Uniform(new THREE.Vector3(1.12, 0.94, 0.76)));
     this.ssao = new AOEffect();
     this.film = new FilmEffect();
-    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.film, this.vignette, this.grain));
+    this.grade.adaptLinks.push(this.film);
+    // (the grain lives in the print stage now — sensor noise that follows the light; `grain` stays as
+    // the knob: its opacity is the base amount)
+    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.film, this.vignette));
 
     this.aberration = new ChromaticAberrationEffect({
       offset: new THREE.Vector2(0, 0),
@@ -1208,6 +1190,7 @@ export class Renderer {
 
   setScene(scene: THREE.Scene) {
     this.scene = scene;
+    this.grade.resetAutoExposure();
     for (const p of this.composer.passes) {
       (p as unknown as { mainScene: THREE.Scene }).mainScene = scene;
     }
@@ -1244,6 +1227,8 @@ export class Renderer {
     this.smaaPass.renderToScreen = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
+    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 8 : q === 'high' ? 12 : 16;
+    this.onboard.twoSided = q === 'high' || q === 'ultra';
     this.dynamicScale = 1;
     this.resize();
   }
@@ -1266,7 +1251,7 @@ export class Renderer {
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
     // sharpen harder when the image is being upscaled
-    this.sharpen.sharpness = THREE.MathUtils.clamp(0.5 + (1 - v) * 0.4, 0.5, 0.7);
+    this.sharpen.sharpness = THREE.MathUtils.clamp(0.4 + (1 - v) * 0.5, 0.4, 0.65);
     this.resize();
   }
 
@@ -1383,6 +1368,7 @@ export class Renderer {
   }
   /** indoors (the garage): no sun shafts or lens flare, whatever the sky outside is doing */
   indoor = false;
+  private wasIndoor = false;
   private updateShafts() {
     let k = 0;
     let fl = 0;
@@ -1409,8 +1395,22 @@ export class Renderer {
     this.shafts.flare = fl;
   }
 
+  /** lens character on (barrel distortion + lateral CA by the field of view; off for menus' dev pages) */
+  lensCharacter = true;
+  private updateLens() {
+    const fov = this.camera.fov;
+    // how wide the lens is (vertical fov): a long trackside lens (a few degrees) 0, the onboards ~0.8, chase 1
+    const wide = this.lensCharacter ? THREE.MathUtils.smoothstep(fov, 20, 60) : 0;
+    this.sharpen.setLens(0.05 * wide, this.lensCharacter ? 0.0012 + 0.0024 * wide : 0);
+  }
+
   render(dt: number) {
     this.renderer.info.reset();
+    this.updateLens();
+    this.film.uniforms.get('filmGrain')!.value = this.grain.blendMode.opacity.value;
+    // (a cut, another camera, or in/out of the garage: the auto exposure starts from the new view)
+    if (this.motionCut || this.prevCam !== this.camera || this.indoor !== this.wasIndoor) this.grade.resetAutoExposure();
+    this.wasIndoor = this.indoor;
     this.ssao.setCamera(this.camera);
     this.updateShafts();
     this.updateScene();
@@ -1426,6 +1426,7 @@ export class Renderer {
     this.onboardPass.enabled = own !== null;
     if (!own) return;
     const u = this.onboard.uniforms;
+    this.onboard.setCamera(this.camera);
     (u.get('projInv')!.value as THREE.Matrix4).copy(this.camera.projectionMatrixInverse);
     (u.get('camWorld')!.value as THREE.Matrix4).copy(this.camera.matrixWorld);
     (u.get('ownInv')!.value as THREE.Matrix4).copy(own.matrixWorld).invert();
@@ -1453,7 +1454,6 @@ export class Renderer {
     const cam = this.camera;
     const frame = ++this.motionFrame;
     cam.updateMatrixWorld();
-    const u = this.motion.uniforms;
     const camPos = this.tmpV.setFromMatrixPosition(cam.matrixWorld);
     const camQ = this.tmpQ.setFromRotationMatrix(cam.matrixWorld);
     let ok = this.motionBlur > 0.01 && this.prevCam === cam && dt > 0 && !this.motionCut;
@@ -1461,15 +1461,22 @@ export class Renderer {
     // a cut (a new camera position, a whip around, a zoom snap) has no motion to blur — the game says
     // so (motionCut); these catch the rest
     const zoom = cam.projectionMatrix.elements[5] / Math.max(1e-6, this.prevViewProjZoom);
-    if (ok && (camPos.distanceTo(this.prevCamPos) > 8 || camQ.angleTo(this.prevCamQ) > 0.25 || zoom > 1.12 || zoom < 1 / 1.12)) ok = false;
+    if (ok && (camPos.distanceTo(this.prevCamPos) > 8 || camQ.angleTo(this.prevCamQ) > 0.25 || zoom > 1.05 || zoom < 1 / 1.05)) ok = false;
     this.prevViewProjZoom = cam.projectionMatrix.elements[5];
     if (ok) {
-      (u.get('projInv')!.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
-      (u.get('camWorld')!.value as THREE.Matrix4).copy(cam.matrixWorld);
-      (u.get('prevViewProj')!.value as THREE.Matrix4).copy(this.prevViewProj);
-      u.get('shutter')!.value = this.motionBlur * THREE.MathUtils.clamp(1 / 60 / dt, 0.5, 2);
-      const inv = u.get('carInv')!.value as THREE.Matrix4[];
-      const prev = u.get('carPrev')!.value as THREE.Matrix4[];
+      const u = this.motion.velMat.uniforms;
+      (u.projInv.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
+      (u.camWorld.value as THREE.Matrix4).copy(cam.matrixWorld);
+      (u.prevViewProj.value as THREE.Matrix4).copy(this.prevViewProj);
+      u.cameraNear.value = cam.near;
+      u.cameraFar.value = cam.far;
+      // (a long lens magnifies every tremor of the operator's pan and every beat of lag behind the
+      // car into a smear across the frame; broadcast long lenses run a faster shutter, and the blur
+      // eases off with the field of view: full from ~30°, under a third at a few degrees)
+      const lensShutter = 0.3 + 0.7 * THREE.MathUtils.smoothstep(cam.fov, 4, 30);
+      u.shutter.value = this.motionBlur * lensShutter * THREE.MathUtils.clamp(1 / 60 / dt, 0.5, 2);
+      const inv = u.carInv.value as THREE.Matrix4[];
+      const prev = u.carPrev.value as THREE.Matrix4[];
       let n = 0;
       for (const o of this.motionCars) {
         if (n >= MOTION_CARS) break;
@@ -1481,7 +1488,7 @@ export class Renderer {
         if (fresh && this.tmpF.setFromMatrixPosition(p.m).distanceToSquared(this.tmpF2.setFromMatrixPosition(o.matrixWorld)) > 400) prev[n].copy(o.matrixWorld);
         n++;
       }
-      u.get('carCount')!.value = n;
+      u.carCount.value = n;
     }
     this.motionPass.enabled = ok;
     for (const o of this.motionCars) {
