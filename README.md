@@ -86,6 +86,12 @@ npm run check    # tsc --noEmit
   pasture on the lower slopes (`fields`), rock, a broken snow line, the same clouds' shadows as the ground,
   a milkier foot on every range, tree lines with single crowns cut into their tops, standing on the real
   terrain. Lakes and the sea reflect the sky (not the env map's captured grandstands) and the far bank's line.
+  Beyond the square the painted woods throw a shadow over the fields away from the sun, their canopy
+  and the hillsides carry a per-pixel relief (spurs, folds, crowns) the 256 m mesh can't, mountains are a
+  mosaic of dark forest and alpine pasture, country lanes run between the hedged fields, and hedges/lanes
+  fade to their share of the pixel far off (no ruled-paper horizon). Far land and the horizon ring ease
+  their haze beyond 5 km (`HAZE_EASE`, ∝ √distance; off at Interlagos, whose city is real geometry), so
+  hills 10–50 km away read as layered silhouettes, each fold a step paler, instead of one pale band.
 - **City skylines** — Melbourne's CBD and Southbank and downtown Montréal are built tower by tower
   (`Merge.tower` in `env/venues/montrealCity.ts`): podium, shaft (square or with its corners cut), maybe a
   setback, then a plant room, glazed crown or mast. `cityMaterial` counts storeys and bays from each building's own

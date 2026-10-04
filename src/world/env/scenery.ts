@@ -157,7 +157,11 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   if (mex) { group.add(mex.group); mexicoTerrainLook(terrain.uniforms); }
   const yas = map.venue === 'yasmarina' ? buildYasmarinaScenery(layout, track, map) : null;
   if (yas) { group.add(yas.group); yasmarinaTerrainLook(terrain.uniforms); }
-  if (map.venue === 'interlagos') tuneInterlagosTerrain(terrain.uniforms);
+  if (map.venue === 'interlagos') {
+    tuneInterlagosTerrain(terrain.uniforms);
+    // (São Paulo is real buildings out to ~13 km: the ground under them takes the full haze too)
+    terrain.uniforms.uHazeEase.value = 1e9;
+  }
   const zv = map.venue === 'zandvoort' ? buildZandvoortScenery(layout, track, map, terrain) : null;
   if (zv) group.add(zv.group);
   if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
