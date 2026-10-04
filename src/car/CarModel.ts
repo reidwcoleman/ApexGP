@@ -170,7 +170,7 @@ function shadowGeometry(level: 1 | 2, parts: THREE.Object3D[], root: THREE.Objec
 }
 
 // ------------------------------------------------------------------------------------ shaders
-const PAINT_KEY = 'apex-paint-v3';
+const PAINT_KEY = 'apex-paint-v4';
 /**
  * Livery paint: base coat (metallic flake where the livery is metallic) under a clearcoat, exposed
  * carbon where the mask says so (lacquered weave), race grime, rain beads on the clearcoat.
@@ -191,8 +191,18 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
+        // the livery's colours as real paint: no pigment reflects 0 % or 100 % (black paint ≈ 2 %, white
+        // ≈ 75 %, a racing red ≈ 60 % in its own channel). A screen-pure #dc0000 at 72 % rendered as a
+        // neon sign in flat light and a white as a lamp in the sun — the most "CG" thing about a car next
+        // to real footage. (Saturation is kept: real reds are that pure; greying them read as salmon pink
+        // under the clearcoat's sky sheen.)
+        {
+          float pl = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+          diffuseColor.rgb = 0.012 + mix( vec3( pl ), diffuseColor.rgb, 0.97 ) * 0.82;
+        }
         float cMask = texture2D( liveryMask, vMapUv ).r;
-        vec3 cw = texture2D( carbonMap, vCuv ).rgb;
+        // (exposed weave near an onboard lens: its average, as for the carbon parts — see patchCarbon)
+        vec3 cw = texture2D( carbonMap, vCuv, 5.0 * ( 1.0 - smoothstep( 0.9, 2.2, length( vViewPosition ) ) ) ).rgb;
         diffuseColor.rgb = mix( diffuseColor.rgb, cw, cMask );
         float cWet = carWetAmount();
         diffuseColor.rgb *= mix( 1.0, mix( 0.9, 0.7, cMask ), cWet );
@@ -213,7 +223,9 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
           vec2 fuv = vCuv * 0.5;
           vec2 fo = texture2D( flakeMap, fuv ).xy * 2.0 - 1.0;
           mat3 ft = wetTBN( normal, - vViewPosition, fuv );
-          normal = normalize( ft * vec3( fo * 0.3 * uFlake * ( 1.0 - cMask ) * ( 1.0 - cGrAll ), 1.0 ) );
+          // (none resolvable inside an onboard lens's defocus, a metre or two away: it only sparkled as noise there)
+          float fNear = 1.0 - smoothstep( 0.9, 2.2, length( vViewPosition ) );
+          normal = normalize( ft * vec3( fo * 0.3 * uFlake * ( 1.0 - cMask ) * ( 1.0 - cGrAll ) * ( 1.0 - fNear ), 1.0 ) );
         }`,
       )
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vCuv', 'cWet'))
@@ -330,6 +342,13 @@ function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
+        // the tub and halo fairings a metre from an onboard lens: far inside its defocus, so the 5 mm weave
+        // can't resolve — sharp, it survived the blur as a regular checker on every cockpit side (a CG tell
+        // in the onboard shots). Read as the weave's average there: colour, gloss and relief.
+        float cNear = 1.0 - smoothstep( 0.9, 2.2, length( vViewPosition ) );
+        #ifdef USE_MAP
+          if ( cNear > 0.01 ) diffuseColor.rgb = mix( diffuseColor.rgb, diffuse * texture2D( map, vMapUv, 5.0 ).rgb, cNear );
+        #endif
         float cWet = carWetAmount();
         diffuseColor.rgb *= mix( 1.0, 0.66, cWet );
         vec3 cGr = carGrime( vMapUv ) * ( 1.0 - 0.6 * cWet );
@@ -340,8 +359,14 @@ function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
       )
       .replace(
         '#include <roughnessmap_fragment>',
-        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.42, cWet );\nroughnessFactor = mix( roughnessFactor, 0.85, cGrAll );',
+        `#include <roughnessmap_fragment>
+        #ifdef USE_ROUGHNESSMAP
+          if ( cNear > 0.01 ) roughnessFactor = mix( roughnessFactor, roughness * texture2D( roughnessMap, vRoughnessMapUv, 5.0 ).g, cNear );
+        #endif
+        roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.42, cWet );
+        roughnessFactor = mix( roughnessFactor, 0.85, cGrAll );`,
       )
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize( mix( normal, nonPerturbedNormal, cNear ) );')
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vMapUv', 'cWet'))
       .replace(
         '#include <lights_physical_fragment>',
@@ -354,7 +379,7 @@ function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-carbon-v2';
+  mat.customProgramCacheKey = () => 'apex-carbon-v3';
 }
 
 /** loose pit-stop wheels share a material per compound and condition (new / used) */
@@ -396,7 +421,9 @@ function acquirePaint(team: Team): PaintBase {
     roughness: 0.46 + 0.22 * m - metallic * 0.12,
     metalness: metallic,
     clearcoat: 1 - 0.72 * m,
-    clearcoatRoughness: 0.035 + 0.42 * m,
+    // (a race car's lacquer is no showroom mirror: orange peel, vinyl wrap edges and a film of road dust
+    // soften every reflection — the sky and the sun glint still read, just not like chrome)
+    clearcoatRoughness: 0.065 + 0.4 * m,
     sheen: 0.4 * m,
     sheenRoughness: 0.7,
     sheenColor: new THREE.Color(0.3, 0.3, 0.32),

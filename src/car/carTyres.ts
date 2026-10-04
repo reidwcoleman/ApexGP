@@ -301,6 +301,10 @@ if ( tyTread > 0.5 ) {
   tyRough += dust * 0.22;
   tyDirtAll = dust;
 }
+// carbon-black rubber reflects ~2.5 % (a charcoal, not a hole): the atlas paints it near 0.7 %, which read as
+// cut-outs in the frame in any light, the sidewall's shape and sheen gone. Lifted here (after the region
+// tests above, which key on the atlas's own values); the wheel cover's black gets a smaller floor.
+tyC = mix( 0.017 + tyC * 0.96, 0.008 + tyC, tyRim );
 diffuseColor.rgb = tyC;
 `;
 
@@ -357,7 +361,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_LIGHTS);
   };
-  mat.customProgramCacheKey = () => 'apex-tyre-v1';
+  mat.customProgramCacheKey = () => 'apex-tyre-v2';
 }
 
 /** a wheel material with its own condition uniforms */
