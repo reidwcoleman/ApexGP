@@ -22,6 +22,8 @@ export interface TerrainBuild {
 }
 
 const lin = (hex: number) => new THREE.Color(hex);
+/** (m) where the far land's haze starts to ease (the horizon ring uses the same distance) */
+export const HAZE_EASE = 5000;
 
 /**
  * Per-venue ground palette (track agents: tune your venue here). Colour keys override the
@@ -135,6 +137,13 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uPasture: { value: 0.32 },
     /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
     uCity: { value: 0 },
+    /**
+     * (m) beyond this the land's haze distance grows only as √distance, like the horizon ring's
+     * (horizon.ts HAZE_EASE): the hills 8–15 km off keep their woods and folds through a summer haze
+     * instead of fading into one pale band. Set it very large where real buildings stand far out
+     * (São Paulo's city): they must not be hazier than the ground under them.
+     */
+    uHazeEase: { value: HAZE_EASE },
     uWetness: weatherUniforms.uWetness,
     uRain: weatherUniforms.uRain,
     uWTime: weatherUniforms.uWeatherTime,
@@ -146,8 +155,19 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
       .replace(
         '#include <common>',
         `#include <common>
+uniform float uHazeEase;
 varying vec3 vWPos;
 varying vec3 vWNormal;`,
+      )
+      .replace(
+        '#include <fog_vertex>',
+        `#include <fog_vertex>
+#ifdef USE_FOG
+{
+  float fd = length( vFogRay );
+  if ( fd > uHazeEase ) vFogRay *= sqrt( uHazeEase / fd );
+}
+#endif`,
       )
       .replace(
         '#include <worldpos_vertex>',
@@ -174,10 +194,19 @@ varying vec3 vWPos;
 varying vec3 vWNormal;
 float tRough;
 float tAO;
+float tWood = 0.0;
 float tAridK = 0.0;
 vec3 tRipple = vec3( 0.0 );
 vec3 tDetailN;
 float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+// the painted woods beyond the square (the same mask as procF below), sampled anywhere
+float tWoodAt( vec2 q, float fShift ) {
+  float a1 = texture2D( uNoise, q * 0.00093 + vec2( 0.13, 0.71 ) ).r;
+  float a2 = texture2D( uNoise, q * 0.0041 + vec2( 0.37, 0.19 ) ).g;
+  float a3 = texture2D( uNoise, q * 0.019 ).b;
+  float aF = texture2D( uNoise, mat2( 0.8, -0.6, 0.6, 0.8 ) * q * 0.00041 + vec2( 0.31, 0.87 ) ).r;
+  return smoothstep( 0.6 - fShift, 0.7 - fShift, ( aF * 0.55 + a1 * 0.45 ) * 0.6 + a2 * 0.4 + ( a3 - 0.5 ) * 0.09 );
+}
 `,
       )
       .replace(
@@ -313,6 +342,21 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     floorC = mix( floorC, canopyC, farF * ( 1.0 - inFine * 0.4 ) );
   }
   vec3 col = mix( grass, floorC, forest );
+#if defined( USE_FOG ) && NUM_DIR_LIGHTS > 0
+  // the painted woods beyond the square stand ~20 m tall: they throw a shadow out over the fields
+  // on the side away from the sun (and the 3D trees inside the square throw their own), so from a
+  // TV tower or a hillside a wood reads as a mass with height, not a stain on the ground
+  {
+    vec2 sxz = aerialSunDir.xz;
+    float sl = length( sxz );
+    float sunK = smoothstep( 0.4, 2.0, dot( directionalLights[ 0 ].color, vec3( 0.2126, 0.7152, 0.0722 ) ) );
+    if ( inSq < 0.99 && sl > 0.05 && aerialSunDir.y > 0.03 && sunK > 0.01 ) {
+      float L = clamp( 20.0 * sl / aerialSunDir.y, 10.0, 110.0 );
+      float wSun = max( tWoodAt( p + sxz / sl * L * 0.55, fShift ), tWoodAt( p + sxz / sl * L, fShift ) ) * 0.92;
+      col *= 1.0 - 0.5 * sunK * clamp( ( wSun - coarseForest ) * 1.5, 0.0, 1.0 ) * ( 1.0 - inSq );
+    }
+  }
+#endif
 
   // ---- outside the park: towns ringing the park wall, farmland and copses beyond
   float rc = length( p - uCenter );
@@ -323,6 +367,8 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   float farm = ( 1.0 - park ) * ( 1.0 - forest ) * ( 1.0 - urban ) * ( 1.0 - mtn );
   if ( farm > 0.01 ) {
     vec2 wp = p + ( vec2( m1, m2 ) - 0.5 ) * 260.0;
+    // metres per pixel across the field grid (grazing views: the long axis of the footprint)
+    float rpx = max( length( fwidth( wp ) ), 0.05 );
     vec2 fs = vec2( 320.0, 210.0 );
     vec2 cell = floor( wp / fs );
     float h1 = h21( cell );
@@ -372,8 +418,31 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
     // soil and moisture: every field is patchy at 50–200 m (wet hollows greener, thin crowns paler)
     fieldCol *= ( 0.9 + 0.16 * d1 ) * ( 0.9 + 0.18 * m3 ) * ( 0.95 + 0.1 * m2 );
     // field margins: a darker strip of rough grass and hedge bottom; a fence line between crops
-    fieldCol = mix( uGrassDark * 0.6, fieldCol, edge );
-    fieldCol = mix( mix( uGrassDark, uMeadow, 0.5 ), fieldCol, fence );
+    // (a hedge a few metres wide is a hit-or-miss sample once a pixel spans more than that: far off
+    // it becomes its share of the field, a slightly darker tone, not dark speckle and streaks)
+    float hedgeK = mix( 1.0 - edge, 0.07, smoothstep( 3.0, 10.0, rpx ) );
+    fieldCol = mix( fieldCol, uGrassDark * 0.6, hedgeK );
+    fieldCol = mix( mix( uGrassDark, uMeadow, 0.5 ), fieldCol, 1.0 - ( 1.0 - fence ) * ( 1.0 - smoothstep( 2.0, 6.0, rpx ) ) );
+    // country lanes beyond the square (no placed hedgerow trees out there to stand on them): some
+    // runs of the hedged boundaries carry a narrow road with pale verges, so from a height and down
+    // a long lens the patchwork is threaded with lanes running off between the villages. A lane
+    // runs for a few parcels, then stops at a junction; once it is thinner than a pixel it fades to
+    // its share of the pixel instead of aliasing into dashes.
+    if ( inSq < 0.99 ) {
+      vec2 fm = fc * fs;
+      float hx0 = h21( vec2( cell.x, floor( cell.y / 5.0 ) ) + 41.7 ), hx1 = h21( vec2( cell.x + 1.0, floor( cell.y / 5.0 ) ) + 41.7 );
+      float hz0 = h21( vec2( floor( cell.x / 4.0 ), cell.y ) + 63.1 ), hz1 = h21( vec2( floor( cell.x / 4.0 ), cell.y + 1.0 ) + 63.1 );
+      float dl = min( min( hx0 < 0.2 ? fm.x : 1e4, hx1 < 0.2 ? fs.x - fm.x : 1e4 ), min( hz0 < 0.16 ? fm.y : 1e4, hz1 < 0.16 ? fs.y - fm.y : 1e4 ) );
+      float lane = ( 1.0 - smoothstep( 3.0 - rpx * 0.5, 3.0 + rpx * 0.5, dl ) ) * min( 1.0, 6.0 / rpx );
+      float lverge = ( 1.0 - smoothstep( 6.5 - rpx * 0.5, 6.5 + rpx * 0.5, dl ) ) * min( 1.0, 13.0 / rpx ) - lane;
+      fieldCol = mix( fieldCol, mix( uStraw, uMeadow, 0.5 ) * 1.05, max( lverge, 0.0 ) * 0.7 * ( 1.0 - inSq ) );
+      fieldCol = mix( fieldCol, uAsphalt * ( 0.95 + 0.15 * d1 ), lane * ( 1.0 - inSq ) );
+    }
+    // once a parcel is only a few pixels deep the patchwork, its hedges and lanes alias into streaks
+    // (a ruled-paper horizon): it fades to the parcels' mean, still drifting at the kilometre scale
+    // between greener grazing and paler stubble, so the far plain keeps a tone without the moire
+    vec3 fieldMean = mix( mix( uMeadow, uLawn, 0.3 ), mix( uStraw, uMeadow, 0.45 ), clamp( 1.0 - uPasture + ( m1 - 0.5 ) * 0.8, 0.0, 1.0 ) ) * ( 0.88 + 0.2 * mF );
+    fieldCol = mix( fieldCol, fieldMean, smoothstep( 80.0, 220.0, rpx ) );
     col = mix( col, fieldCol, farm );
   }
   // towns: blocks of terracotta and grey roofs, streets, courtyards
@@ -397,10 +466,17 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   }
   // mountains: wooded slopes, bare rock and scree higher up
   if ( mtn > 0.01 ) {
-    vec3 wood = mix( uCanopy, uGrassDark, m3 * 0.5 ) * ( 0.8 + 0.3 * m2 );
+    // dark conifer and beech forest on the slopes (crowns lit and shaded like the woods below),
+    // alpine pasture and hay meadows in the clearings on the gentler ground and the shoulders: the
+    // mosaic that gives a hillside 10 km off its shape through the haze, not one green felt
+    float woodK = smoothstep( 0.42, 0.58, mFar * 0.45 + m2 * 0.3 + m3 * 0.1 + slopeT * 1.4 + uForestCover * 0.6 );
+    float conifer = smoothstep( 0.45, 0.6, m1 * 0.5 + m0 * 0.5 );
+    vec3 wood = mix( uCanopy, uCanopy * vec3( 0.66, 0.78, 0.86 ), conifer ) * ( 0.5 + 0.38 * m3 + 0.18 * d1 + 0.12 * ( m2 - 0.5 ) );
+    vec3 alp = mix( mix( uMeadow, uLawn, 0.45 ), uStraw, smoothstep( 0.55, 0.8, m3 ) * 0.4 ) * ( 0.9 + 0.2 * d1 );
     vec3 rockC = mix( vec3( 0.32, 0.3, 0.28 ), vec3( 0.46, 0.44, 0.4 ), m3 );
-    vec3 mcol = mix( wood, rockC, smoothstep( 700.0, 1150.0, vWPos.y + ( m2 - 0.5 ) * 300.0 ) );
+    vec3 mcol = mix( mix( alp, wood, woodK ), rockC, smoothstep( 700.0, 1150.0, vWPos.y + ( m2 - 0.5 ) * 300.0 ) );
     col = mix( col, mcol, mtn );
+    tWood = woodK * mtn;
   }
 
   // ---- arid ground (TERRAIN_PALETTES.arid): sand drifts with wind ripples, gravel pans,
@@ -479,6 +555,30 @@ float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 4375
   vec3 dn1 = texture2D( uDetailN, p * 0.31 ).rgb * 2.0 - 1.0;
   vec3 dn2 = texture2D( uDetailN, mat2( 0.6, 0.8, -0.8, 0.6 ) * p * 0.083 ).rgb * 2.0 - 1.0;
   tDetailN = vec3( dn1.x + dn2.x * 0.8, 0.0, dn1.y + dn2.y * 0.8 ) * ( 0.45 + 0.35 * forest ) * dStr + tRipple * ( 1.0 - pud );
+  // a painted canopy seen from afar: crowns ~20 m across, sunlit on one side and shaded on the other,
+  // so the woods have texture and relief in the light instead of one flat green (mipmapped: it
+  // averages away smoothly where the crowns are smaller than a pixel)
+  vec3 cn = texture2D( uDetailN, mat2( 0.8, 0.6, -0.6, 0.8 ) * p * 0.047 + vec2( 0.3, 0.6 ) ).rgb * 2.0 - 1.0;
+  tDetailN += vec3( cn.x, 0.0, cn.y ) * 0.9 * max( forest, tWood ) * farF * ( 1.0 - pud );
+  // the far mesh is 256 m (16 m in the square): spurs, gullies, folds and banks smaller than that are
+  // a relief in the shading only — a height (m) from the same noise octaves, its gradient across the
+  // pixel quad tilting the normal (as on the horizon ring). Strongest on hillsides and mountains,
+  // a gentle roll on the plain; nothing near the camera, where the mesh carries the real shape
+  {
+    float relK = farF * ( 0.3 + 0.7 * max( mtn, smoothstep( 0.04, 0.2, slopeT ) ) ) * ( 1.0 - inFine * 0.7 );
+    // (each octave fades out before it is under ~3 px: on the foreshortened slopes near a far
+    // crest a sub-pixel octave's gradient would only be noise — glitter on the skyline)
+    float mpp = length( fwidth( vWPos.xz ) );
+    float H = ( ( mF - 0.5 ) * 110.0 * ( 1.0 - smoothstep( 300.0, 700.0, mpp ) ) + ( m1 - 0.5 ) * 60.0 * ( 1.0 - smoothstep( 120.0, 300.0, mpp ) ) + ( m2 - 0.5 ) * 16.0 * ( 1.0 - smoothstep( 30.0, 80.0, mpp ) ) ) * relK;
+    vec3 n0 = normalize( vWNormal );
+    vec3 dpx = dFdx( vWPos ), dpy = dFdy( vWPos );
+    vec3 r1 = cross( dpy, n0 ), r2 = cross( n0, dpx );
+    float det = dot( dpx, r1 );
+    vec3 grad = sign( det ) * ( dFdx( H ) * r1 + dFdy( H ) * r2 );
+    vec3 nr = normalize( abs( det ) * n0 - grad );
+    vec3 dn = nr - n0;
+    if ( abs( det ) > 1e-6 ) tDetailN += dn * min( 1.0, 0.55 / max( length( dn ), 1e-4 ) ) * ( 1.0 - pud );
+  }
   // rain rings in the puddles
   if ( pud > 0.01 && uRain > 0.01 ) {
     vec2 rp = p * 1.6;
@@ -508,7 +608,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v8';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v10';
   return { material, uniforms };
 }
 

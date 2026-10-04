@@ -4,6 +4,9 @@ import type { Venue } from './worldmap.ts';
 import type { SceneryLight } from './scenery.ts';
 import { cloudShadowA, cloudShadowB } from './lightShadows.ts';
 import { CLOUD_FIELD_GLSL } from './skyClouds.ts';
+// (m) beyond this the ring's haze distance grows only as √distance (see the vertex shader); the
+// far terrain eases its haze from the same distance, so a tree line stands in the same air as its land
+import { HAZE_EASE } from './terrain.ts';
 
 /**
  * Distant horizon: a parametric backdrop ring of mountain ranges, hills, dunes,
@@ -633,8 +636,16 @@ varying vec3 vW;`,
         '#include <fog_vertex>',
         `#include <fog_vertex>
 #ifdef USE_FOG
-  // the ring is squeezed toward the camera: haze at the true distance
-  vFogRay *= ${SQUEEZE.toFixed(1)} * aHaze;
+  // the ring is squeezed toward the camera: haze at the true distance (× the layer's aHaze), eased
+  // beyond ~${(HAZE_EASE / 1000).toFixed(0)} km (∝ √distance). The ground-level haze that softens the far side of a
+  // circuit, applied over the full 20–60 km to a range, left 95–99 % fog at its foot: every range was
+  // the same pale ghost on the sky line. Eased, the nearest hills keep their green and their relief, the
+  // farthest ranges are blue silhouettes, and each fold in between is a step paler: the layers read.
+  {
+    float hzA = length( vFogRay ) * ${SQUEEZE.toFixed(1)} * aHaze;
+    float hzE = hzA > ${HAZE_EASE.toFixed(1)} ? sqrt( hzA * ${HAZE_EASE.toFixed(1)} ) : hzA;
+    vFogRay *= ${SQUEEZE.toFixed(1)} * aHaze * hzE / max( hzA, 1.0 );
+  }
 #endif
 vInfo = aInfo;
 vEx = aEx;
@@ -821,7 +832,7 @@ float hzFoot = 0.0;
 #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-horizon-v3';
+  mat.customProgramCacheKey = () => 'apex-horizon-v4';
   const mesh = new THREE.Mesh(g, mat);
   mesh.name = 'horizon';
   mesh.frustumCulled = false;
