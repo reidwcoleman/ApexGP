@@ -12,13 +12,15 @@ import { MeshoptSimplifier } from 'meshoptimizer';
  *   impostor frames   the full-resolution tree rendered from 8 directions around it (albedo +
  *                     coverage, view-space normal + crown AO), 256 px a frame, super-sampled 4×
  *                     and edge-dilated so the mips don't bleed. Everything beyond ~100 m.
- *   leaf clumps       a few real clumps of the tree's own leaves (every leaf within a sphere
- *                     around a branch-end cluster, rendered from outside the crown): the
- *                     texture of the near trees' camera-facing leaf cards.
- *   near geometry     two LODs per tree in the game's tree vertex layout (treeproto.ts): the
- *                     scanned trunk + limbs decimated with meshoptimizer (vertex colour = the
- *                     scan's own bark albedo), and one leaf card per k-means cluster of the
- *                     real leaves (so the crown keeps the scan's shape, gaps and all).
+ *   leaf sprays       a few real sprays of the tree's own leaves per scan (every leaf and twig of
+ *                     one k-means cell of the crown — a branch tip, a stretch of fir bough — seen
+ *                     face-on): the textures of the near trees' leaf cards.
+ *   near geometry     three LODs per tree (treeproto.ts decodes them): the scanned trunk + limbs
+ *                     decimated with meshoptimizer (vertex colour = the scan's own bark albedo), and
+ *                     one leaf card per k-means cell of the real leaves — hundreds of small sprays,
+ *                     each lying in its cell's own plane along its own axis (PCA), so the crown
+ *                     keeps the scan's shape, gaps, layered boughs and all. Wind weights (trunk bend,
+ *                     limb sway, phase) are shared by wood and cards so leaves stay on their limbs.
  *   bark              a tile of the jacaranda's trunk scan (normal + albedo), the near trunks'
  *                     detail texture.
  *
@@ -38,14 +40,20 @@ export interface ProtoSpec {
   sink?: number;
   /** extra non-uniform scale after normalising (a poplar from a round crown) */
   stretch?: [number, number, number];
-  /** leaf clusters (cards) for LOD0 / LOD1 */
-  K0: number;
-  K1: number;
-  /** trunk + limbs triangle budgets for LOD0 / LOD1 */
-  wood0: number;
-  wood1: number;
-  /** leaf clumps baked for the card atlas */
-  clumps?: number;
+  /** leaf sprays (cards) for LOD0 / LOD1 / LOD2 (LOD2 is also every near tree's shadow caster) */
+  K: [number, number, number];
+  /** how far the leaf cards turn toward the camera about their own axis (0 = fixed planes, 1 = axial billboards) */
+  bb?: number;
+  /** spray textures baked for the atlas (per source asset) */
+  sprays?: number;
+  /** cards a little bigger than their cells: fills a sparse scan out (the firs: a spruce plantation
+   *  edge is a dark wall, the fir scan is airy) */
+  cardScale?: number;
+  /** leaf size on the cards relative to the (height-normalised) scan: < 1 when normalising blew a small
+   *  tree's leaves up — the textures then come from proportionally bigger cells */
+  leafScale?: number;
+  /** trunk + limbs triangle budgets for LOD0 / LOD1 / LOD2 */
+  wood: [number, number, number];
   /** alpha cut-off for the leaf masks (lower = fuller foliage; thin conifer twigs need it) */
   cut?: number;
   /** coverage gain on the baked frames / clumps: needles cover a texel only partly, and the game's
@@ -360,8 +368,10 @@ varying vec2 vUv;
 varying vec3 vN;
 varying vec3 vVP;
 varying float vAO;
+varying vec3 vP;
 void main() {
   vUv = uv;
+  vP = position;
   vAO = aAO;
   vN = normalize( normalMatrix * normal );
   vec4 mv = modelViewMatrix * vec4( position, 1.0 );
@@ -378,10 +388,16 @@ uniform float uCut;
 uniform float uHasNorm;
 uniform float uMode;
 uniform vec3 uTint;
+// a spray bake: the normal pass's alpha is how far toward the spray's front face (e3) a leaf lies
+// (front 1 … back 0) instead of the crown AO — the game shades the leaves behind darker
+uniform vec4 uSpray;
+uniform vec3 uSprayN;
+uniform float uSprayK;
 varying vec2 vUv;
 varying vec3 vN;
 varying vec3 vVP;
 varying float vAO;
+varying vec3 vP;
 mat3 tangentFrame( vec3 eye_pos, vec3 surf_norm, vec2 uv ) {
   vec3 q0 = dFdx( eye_pos.xyz );
   vec3 q1 = dFdy( eye_pos.xyz );
@@ -411,7 +427,8 @@ void main() {
       mapN.xy *= 0.8;
       n = normalize( tangentFrame( - vVP, n, vUv ) * mapN );
     }
-    gl_FragColor = vec4( n * 0.5 + 0.5, vAO );
+    float a = uSprayK > 0.5 ? clamp( 0.5 + 0.5 * dot( vP - uSpray.xyz, uSprayN ) / uSpray.w, 0.02, 1.0 ) : vAO;
+    gl_FragColor = vec4( n * 0.5 + 0.5, a );
   }
 }`;
 
@@ -430,6 +447,9 @@ function bakeMaterial(p: Part, mode: 0 | 1, tint = new THREE.Color(1, 1, 1)) {
       uHasNorm: { value: p.normal ? 1 : 0 },
       uMode: { value: mode },
       uTint: { value: tint },
+      uSpray: { value: new THREE.Vector4() },
+      uSprayN: { value: new THREE.Vector3(0, 0, 1) },
+      uSprayK: { value: 0 },
     },
   });
 }
@@ -630,7 +650,7 @@ function bakeImpostor(tree: Tree, col: Img, nrm: Img, row: number, cell: number,
   return { W, Hc: Hf * 0.98 };
 }
 
-// ------------------------------------------------------------------------------------ leaf clusters
+// ------------------------------------------------------------------------------------ leaf sprays
 
 function rngOf(seed: number) {
   let s = seed >>> 0 || 1;
@@ -642,45 +662,66 @@ function rngOf(seed: number) {
   };
 }
 
-interface Cluster {
+/**
+ * A spray: one k-means cell of the scan's real leaves (a branch tip with its leaves — a twig of
+ * needles along a fir bough), with its principal axes: e1 along the spray (toward its tip, away
+ * from the trunk), e3 across its flattest dimension (the plane the leaves lie in, turned outward /
+ * upward), e2 = e1 × e3; ext = half extents along e1, e2, e3 (m).
+ */
+interface Spray {
   c: THREE.Vector3;
+  e1: THREE.Vector3;
+  e2: THREE.Vector3;
+  e3: THREE.Vector3;
+  ext: [number, number, number];
+  /** share of the tree's leaf area */
   w: number;
-  rms: number;
+  /** sample points of the cell (indices into the sample array) */
+  members: number[];
 }
 
-/** leaf sample points (triangle centroids, picked by area) */
-function leafSamples(tree: Tree, N: number, r: () => number): Float32Array {
-  const tris: { p: Part; t: number; a: number }[] = [];
-  let total = 0;
-  for (const p of tree.parts) {
-    if (p.kind !== 'leaf') continue;
+/** leaf sample points (triangle centroids, picked by area) and the mean leaf triangle size */
+function leafSamples(tree: Tree, N: number, r: () => number): { pts: Float32Array; leafR: number } {
+  // (typed arrays: the big firs have four million leaf triangles)
+  const leafParts = tree.parts.filter((p) => p.kind === 'leaf');
+  const nT = leafParts.reduce((a, p) => a + p.idx.length / 3, 0);
+  const cum = new Float64Array(nT), partOf = new Uint8Array(nT), triOf = new Uint32Array(nT);
+  let total = 0, n = 0;
+  leafParts.forEach((p, pi) => {
     const P = p.pos;
     for (let t = 0; t < p.idx.length; t += 3) {
       const a = p.idx[t] * 3, b = p.idx[t + 1] * 3, c = p.idx[t + 2] * 3;
       const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
       const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
-      const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
-      total += area;
-      tris.push({ p, t, a: total });
+      total += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+      cum[n] = total;
+      partOf[n] = pi;
+      triOf[n++] = t;
     }
-  }
+  });
   const out = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     const x = r() * total;
-    let lo = 0, hi = tris.length - 1;
+    let lo = 0, hi = nT - 1;
     while (lo < hi) {
       const m = (lo + hi) >> 1;
-      if (tris[m].a < x) lo = m + 1;
+      if (cum[m] < x) lo = m + 1;
       else hi = m;
     }
-    const { p, t } = tris[lo];
+    const p = leafParts[partOf[lo]], t = triOf[lo];
     const a = p.idx[t] * 3, b = p.idx[t + 1] * 3, c = p.idx[t + 2] * 3;
-    for (let k = 0; k < 3; k++) out[i * 3 + k] = (p.pos[a + k] + p.pos[b + k] + p.pos[c + k]) / 3;
+    // (a random point on the triangle, not its centroid: a leaf card's area is spread over it)
+    let u = r(), v = r();
+    if (u + v > 1) {
+      u = 1 - u;
+      v = 1 - v;
+    }
+    for (let k = 0; k < 3; k++) out[i * 3 + k] = p.pos[a + k] + (p.pos[b + k] - p.pos[a + k]) * u + (p.pos[c + k] - p.pos[a + k]) * v;
   }
-  return out;
+  return { pts: out, leafR: Math.sqrt((2 * total) / Math.max(1, nT)) * 0.5 };
 }
 
-function kmeans(pts: Float32Array, K: number, r: () => number, iters = 12): Cluster[] {
+function kmeans(pts: Float32Array, K: number, r: () => number, iters = 14): { C: Float32Array; asg: Int32Array } {
   const N = pts.length / 3;
   const C = new Float32Array(K * 3);
   // k-means++ seeding
@@ -704,8 +745,9 @@ function kmeans(pts: Float32Array, K: number, r: () => number, iters = 12): Clus
   for (let it = 0; it < iters; it++) {
     for (let i = 0; i < N; i++) {
       let best = 0, bd = Infinity;
+      const px = pts[i * 3], py = pts[i * 3 + 1], pz = pts[i * 3 + 2];
       for (let k = 0; k < K; k++) {
-        const dx = pts[i * 3] - C[k * 3], dy = pts[i * 3 + 1] - C[k * 3 + 1], dz = pts[i * 3 + 2] - C[k * 3 + 2];
+        const dx = px - C[k * 3], dy = py - C[k * 3 + 1], dz = pz - C[k * 3 + 2];
         const d = dx * dx + dy * dy + dz * dz;
         if (d < bd) {
           bd = d;
@@ -724,50 +766,149 @@ function kmeans(pts: Float32Array, K: number, r: () => number, iters = 12): Clus
     }
     for (let k = 0; k < K; k++) if (S[k * 4 + 3] > 0) C.set([S[k * 4] / S[k * 4 + 3], S[k * 4 + 1] / S[k * 4 + 3], S[k * 4 + 2] / S[k * 4 + 3]], k * 3);
   }
-  const out: Cluster[] = [];
-  const acc = new Float64Array(K * 2);
-  for (let i = 0; i < N; i++) {
-    const k = asg[i];
-    const dx = pts[i * 3] - C[k * 3], dy = pts[i * 3 + 1] - C[k * 3 + 1], dz = pts[i * 3 + 2] - C[k * 3 + 2];
-    acc[k * 2] += dx * dx + dy * dy + dz * dz;
-    acc[k * 2 + 1]++;
+  return { C, asg };
+}
+
+/** eigenvectors of a symmetric 3×3 (Jacobi), sorted by eigenvalue, largest first */
+function eig3(m: number[][]): { val: number[]; vec: THREE.Vector3[] } {
+  const a = m.map((r) => r.slice());
+  const v = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  for (let sweep = 0; sweep < 24; sweep++) {
+    let off = 0;
+    for (let p = 0; p < 3; p++) for (let q = p + 1; q < 3; q++) off += a[p][q] * a[p][q];
+    if (off < 1e-14) break;
+    for (let p = 0; p < 3; p++)
+      for (let q = p + 1; q < 3; q++) {
+        if (Math.abs(a[p][q]) < 1e-12) continue;
+        const th = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+        const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1));
+        const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let k = 0; k < 3; k++) {
+          const akp = a[k][p], akq = a[k][q];
+          a[k][p] = c * akp - s * akq;
+          a[k][q] = s * akp + c * akq;
+        }
+        for (let k = 0; k < 3; k++) {
+          const apk = a[p][k], aqk = a[q][k];
+          a[p][k] = c * apk - s * aqk;
+          a[q][k] = s * apk + c * aqk;
+        }
+        for (let k = 0; k < 3; k++) {
+          const vkp = v[k][p], vkq = v[k][q];
+          v[k][p] = c * vkp - s * vkq;
+          v[k][q] = s * vkp + c * vkq;
+        }
+      }
   }
+  const idx = [0, 1, 2].sort((i, j) => a[j][j] - a[i][i]);
+  return { val: idx.map((i) => a[i][i]), vec: idx.map((i) => new THREE.Vector3(v[0][i], v[1][i], v[2][i]).normalize()) };
+}
+
+/** the crown's outward direction at a point (from the trunk axis, flattened a little vertically) */
+function outwardAt(tree: Tree, c: THREE.Vector3): THREE.Vector3 {
+  const o = new THREE.Vector3(c.x, (c.y - tree.crownC.y) * 0.6, c.z);
+  if (o.lengthSq() < 1e-4) o.set(0, 1, 0);
+  return o.normalize();
+}
+
+function sprays(tree: Tree, pts: Float32Array, K: number, r: () => number, leafR: number, conifer: boolean): Spray[] {
+  // (conifers: heights count AY× in the clustering, so a cell is a flat stretch of one bough layer,
+  // not a ball spanning two or three layers — its plane is then the bough's own, drooping)
+  const AY = conifer ? 2.6 : 1;
+  const sq = AY === 1 ? pts : pts.map((v, i) => (i % 3 === 1 ? v * AY : v));
+  const { C, asg } = kmeans(sq, K, r);
+  if (AY !== 1) for (let k = 0; k < K; k++) C[k * 3 + 1] /= AY;
+  const N = pts.length / 3;
+  const mem: number[][] = Array.from({ length: K }, () => []);
+  for (let i = 0; i < N; i++) mem[asg[i]].push(i);
+  const out: Spray[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
   for (let k = 0; k < K; k++) {
-    if (acc[k * 2 + 1] < 3) continue;
-    out.push({ c: new THREE.Vector3(C[k * 3], C[k * 3 + 1], C[k * 3 + 2]), w: acc[k * 2 + 1] / N, rms: Math.sqrt(acc[k * 2] / acc[k * 2 + 1]) });
+    const m = mem[k];
+    if (m.length < 4) continue;
+    const c = new THREE.Vector3(C[k * 3], C[k * 3 + 1], C[k * 3 + 2]);
+    const cov = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ];
+    for (const i of m) {
+      const d = [pts[i * 3] - c.x, pts[i * 3 + 1] - c.y, pts[i * 3 + 2] - c.z];
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) cov[a][b] += d[a] * d[b];
+    }
+    const { vec } = eig3(cov);
+    const e1 = vec[0], e3 = vec[2];
+    const o = outwardAt(tree, c);
+    // e1 toward the spray's tip (away from the trunk; up when it stands vertical)
+    if (e1.dot(o) + e1.y * 0.25 < 0) e1.negate();
+    // e3: the side the leaves face — outward, and up (a fir bough's top)
+    if (e3.dot(o.clone().addScaledVector(up, conifer ? 1.5 : 0.4)) < 0) e3.negate();
+    const e2 = new THREE.Vector3().crossVectors(e1, e3).normalize();
+    // half extents: a high percentile of the cell's points along each axis, plus half a leaf
+    const pr = [e1, e2, e3].map((e) => m.map((i) => Math.abs((pts[i * 3] - c.x) * e.x + (pts[i * 3 + 1] - c.y) * e.y + (pts[i * 3 + 2] - c.z) * e.z)).sort((a, b) => a - b));
+    // (not the very last stray leaf: a card's empty corners are fill the GPU pays for in every pass)
+    const q = (a: number[]) => a[Math.min(a.length - 1, Math.floor(a.length * 0.92))];
+    const ext: [number, number, number] = [q(pr[0]) + leafR, q(pr[1]) + leafR, q(pr[2]) + leafR];
+    out.push({ c, e1, e2, e3, ext, w: m.length / N, members: m });
   }
   return out;
 }
 
-/** a clump: every leaf (and twig) triangle with its centroid within R of c, seen from outside the crown */
-function bakeClump(tree: Tree, cl: Cluster, R: number, col: Img, nrm: Img, ox: number, oy: number, cell: number, gain = 1) {
+/**
+ * The texture of a spray: every leaf (and twig) triangle of its k-means cell (nearest centre, so the
+ * cell's own ragged shape, not a sphere cut out of the crown), seen face-on from e3 with e1 up,
+ * stretched over the whole atlas cell (the card restores the aspect).
+ */
+function bakeSpray(tree: Tree, sp: Spray, all: Spray[], col: Img, nrm: Img, ox: number, oy: number, cell: number, gain: number) {
+  const R = Math.hypot(sp.ext[0], sp.ext[1], sp.ext[2]) * 1.3;
+  // the neighbouring cells a triangle near this one could belong to instead
+  const neigh = all.filter((s) => s !== sp && s.c.distanceTo(sp.c) < R + Math.hypot(s.ext[0], s.ext[1], s.ext[2]) * 1.3);
   const scene = new THREE.Scene();
   const disp: { dispose(): void }[] = [];
   for (const p of tree.parts) {
+    // (leaves and the twigs that carry them: never the trunk)
+    if (p.kind === 'wood' && /trunk/i.test(p.name)) continue;
     const keep: number[] = [];
     const P = p.pos;
     for (let t = 0; t < p.idx.length; t += 3) {
       const a = p.idx[t] * 3, b = p.idx[t + 1] * 3, c = p.idx[t + 2] * 3;
-      const x = (P[a] + P[b] + P[c]) / 3 - cl.c.x, y = (P[a + 1] + P[b + 1] + P[c + 1]) / 3 - cl.c.y, z = (P[a + 2] + P[b + 2] + P[c + 2]) / 3 - cl.c.z;
-      if (x * x + y * y + z * z < R * R) keep.push(p.idx[t], p.idx[t + 1], p.idx[t + 2]);
+      const x = (P[a] + P[b] + P[c]) / 3, y = (P[a + 1] + P[b + 1] + P[c + 1]) / 3, z = (P[a + 2] + P[b + 2] + P[c + 2]) / 3;
+      const dx = x - sp.c.x, dy = y - sp.c.y, dz = z - sp.c.z;
+      const d0 = dx * dx + dy * dy + dz * dz;
+      if (d0 > R * R) continue;
+      // inside the card's box
+      if (Math.abs(dx * sp.e1.x + dy * sp.e1.y + dz * sp.e1.z) > sp.ext[0] || Math.abs(dx * sp.e2.x + dy * sp.e2.y + dz * sp.e2.z) > sp.ext[1]) continue;
+      let mine = true;
+      for (const s of neigh) {
+        const ex = x - s.c.x, ey = y - s.c.y, ez = z - s.c.z;
+        if (ex * ex + ey * ey + ez * ez < d0) {
+          mine = false;
+          break;
+        }
+      }
+      if (mine) keep.push(p.idx[t], p.idx[t + 1], p.idx[t + 2]);
     }
     if (!keep.length) continue;
     const g = partGeometry(p, tree.ao, Uint32Array.from(keep));
     const mA = bakeMaterial(p, 0), mN = bakeMaterial(p, 1);
+    mN.uniforms.uSpray.value.set(sp.c.x, sp.c.y, sp.c.z, Math.max(0.05, sp.ext[2]));
+    mN.uniforms.uSprayN.value.copy(sp.e3);
+    mN.uniforms.uSprayK.value = 1;
     const m = new THREE.Mesh(g, mA);
     m.userData.mats = [mA, mN];
     m.frustumCulled = false;
     scene.add(m);
     disp.push(g, mA, mN);
   }
-  const o = cl.c.clone().sub(tree.crownC);
-  o.y *= 0.6;
-  if (o.lengthSq() < 1e-4) o.set(0, 0, 1);
-  o.normalize();
-  const cam = new THREE.OrthographicCamera(-R, R, R, -R, 0.01, R * 6);
-  cam.position.copy(cl.c).addScaledVector(o, R * 3);
-  cam.up.set(0, 1, 0);
-  cam.lookAt(cl.c);
+  const D = R * 3;
+  const cam = new THREE.OrthographicCamera(-sp.ext[1], sp.ext[1], sp.ext[0], -sp.ext[0], 0.01, D * 2);
+  cam.position.copy(sp.c).addScaledVector(sp.e3, D);
+  cam.up.copy(sp.e1);
+  cam.lookAt(sp.c);
   cam.updateMatrixWorld();
   for (const pass of [0, 1] as const) {
     scene.traverse((x) => {
@@ -784,60 +925,82 @@ function bakeClump(tree: Tree, cl: Cluster, R: number, col: Img, nrm: Img, ox: n
 
 // ------------------------------------------------------------------------------------ near geometry
 
-/** the game's tree vertex layout (treeproto.ts) */
-class Geo {
-  pos: number[] = [];
-  nor: number[] = [];
-  uv: number[] = [];
-  col: number[] = [];
-  dat: number[] = [];
-  card: number[] = [];
-  idx: number[] = [];
-  get count() {
-    return this.pos.length / 3;
+/** a vertex of the trunk / limbs */
+interface WoodV {
+  p: [number, number, number];
+  n: [number, number, number];
+  uv: [number, number];
+  c: [number, number, number];
+  /** trunk bend weight, limb sway weight, ao, limb phase */
+  w: [number, number, number, number];
+}
+/** a leaf card */
+interface CardV {
+  c: THREE.Vector3;
+  e1: THREE.Vector3;
+  e3: THREE.Vector3;
+  /** lighting normal (the crown's surface there, not the card's plane) */
+  ln: THREE.Vector3;
+  /** width (along e2) × length (along e1), m */
+  size: [number, number];
+  cell: number;
+  tint: number;
+  ao: number;
+  trunkW: number;
+  limbW: number;
+  phase: number;
+  /** how far the card turns about e1 toward the camera (0 = a fixed plane, 1 = axial billboard) */
+  bb: number;
+}
+
+/**
+ * pack one LOD (treeproto.ts decodes it):
+ *   wood:  pos f32×3 | nor i8×4 | uv f32×2 | albedo u8×4 | (trunkW, limbW, ao, phase) u8×4   per vertex, then idx u16
+ *   cards: centre f32×3 | e1 i8×4 | e3 i8×4 | lighting normal i8×4 | width, length u16×2 (mm) |
+ *          (atlas cell, tint, ao, trunkW, limbW, phase, bb, 0) u8×8                         per card
+ */
+function packLod(wood: WoodV[], idx: number[], cards: CardV[]): Uint8Array {
+  const V = wood.length, I = idx.length, K = cards.length;
+  const size = V * 32 + Math.ceil((I * 2) / 4) * 4 + K * 36;
+  const buf = new ArrayBuffer(size);
+  const dv = new DataView(buf);
+  let o = 0;
+  const f = (x: number) => (dv.setFloat32(o, x, true), (o += 4));
+  const i8 = (x: number) => (dv.setInt8(o, Math.round(Math.max(-1, Math.min(1, x)) * 127)), (o += 1));
+  const u8 = (x: number) => (dv.setUint8(o, Math.round(Math.max(0, Math.min(1, x)) * 255)), (o += 1));
+  const u16 = (x: number) => (dv.setUint16(o, Math.round(Math.max(0, Math.min(65535, x))), true), (o += 2));
+  for (const v of wood) {
+    v.p.forEach(f);
+    v.n.forEach(i8);
+    o++;
+    v.uv.forEach(f);
+    v.c.forEach(u8);
+    o++;
+    u8(v.w[0] / 1.5);
+    u8(v.w[1] / 1.5);
+    u8(v.w[2]);
+    u8((((v.w[3] / (Math.PI * 2)) % 1) + 1) % 1);
   }
-  v(p: ArrayLike<number>, n: ArrayLike<number>, uv: ArrayLike<number>, c: ArrayLike<number>, dat: ArrayLike<number>, card: ArrayLike<number>) {
-    this.pos.push(p[0], p[1], p[2]);
-    this.nor.push(n[0], n[1], n[2]);
-    this.uv.push(uv[0], uv[1]);
-    this.col.push(c[0], c[1], c[2]);
-    this.dat.push(dat[0], dat[1], dat[2], dat[3]);
-    this.card.push(card[0], card[1], card[2], card[3]);
-    return this.count - 1;
-  }
-  /** pack: pos f32×3 | nor i8×4 | uv f32×2 | col u8×4 | aTree u8×4 | aCard i16×4 | idx u16 */
-  pack(): { bytes: Uint8Array; v: number; i: number } {
-    const V = this.count, I = this.idx.length;
-    const size = V * (12 + 4 + 8 + 4 + 4 + 8) + I * 2 + 4;
-    const buf = new ArrayBuffer(Math.ceil(size / 4) * 4);
-    let off = 0;
-    const f32 = new Float32Array(buf, off, V * 3);
-    f32.set(this.pos);
-    off += V * 12;
-    const i8 = new Int8Array(buf, off, V * 4);
-    for (let i = 0; i < V; i++) for (let k = 0; k < 3; k++) i8[i * 4 + k] = Math.round(Math.max(-1, Math.min(1, this.nor[i * 3 + k])) * 127);
-    off += V * 4;
-    new Float32Array(buf, off, V * 2).set(this.uv);
-    off += V * 8;
-    const u8 = new Uint8Array(buf, off, V * 4);
-    for (let i = 0; i < V; i++) for (let k = 0; k < 3; k++) u8[i * 4 + k] = Math.round(Math.max(0, Math.min(1, this.col[i * 3 + k])) * 255);
-    off += V * 4;
-    const d8 = new Uint8Array(buf, off, V * 4);
-    // aTree: wind (0…1.5), kind (0 bark / 1 leaf), ao, phase (0…2π)
-    for (let i = 0; i < V; i++) {
-      d8[i * 4] = Math.round(Math.max(0, Math.min(1, this.dat[i * 4] / 1.5)) * 255);
-      d8[i * 4 + 1] = this.dat[i * 4 + 1] > 0.5 ? 255 : 0;
-      d8[i * 4 + 2] = Math.round(Math.max(0, Math.min(1, this.dat[i * 4 + 2])) * 255);
-      d8[i * 4 + 3] = Math.round(((this.dat[i * 4 + 3] / (Math.PI * 2)) % 1) * 255);
+  for (const i of idx) u16(i);
+  o = V * 32 + Math.ceil((I * 2) / 4) * 4;
+  for (const k of cards) {
+    f(k.c.x), f(k.c.y), f(k.c.z);
+    for (const e of [k.e1, k.e3, k.ln]) {
+      i8(e.x), i8(e.y), i8(e.z);
+      o++;
     }
-    off += V * 4;
-    // aCard: corner x, y (mm), rotation (mrad)
-    const i16 = new Int16Array(buf, off, V * 4);
-    for (let i = 0; i < V * 4; i++) i16[i] = Math.round(Math.max(-32767, Math.min(32767, this.card[i] * 1000)));
-    off += V * 8;
-    new Uint16Array(buf, off, I).set(this.idx);
-    return { bytes: new Uint8Array(buf), v: V, i: I };
+    u16(k.size[0] * 1000);
+    u16(k.size[1] * 1000);
+    dv.setUint8(o++, k.cell);
+    u8((k.tint - 0.5) / 1);
+    u8(k.ao);
+    u8(k.trunkW / 1.5);
+    u8(k.limbW / 1.5);
+    u8((((k.phase / (Math.PI * 2)) % 1) + 1) % 1);
+    u8(k.bb);
+    o++;
   }
+  return new Uint8Array(buf);
 }
 
 function srgbToLin(c: number) {
@@ -864,7 +1027,27 @@ function albedoAt(p: Part, u: number, v: number): [number, number, number] {
   return [r / n, g / n, b / n];
 }
 
-function woodLOD(tree: Tree, target: number, geo: Geo, windAt: (x: number, y: number, z: number) => number) {
+/**
+ * Wind weights, shared by the wood and the leaf cards so the leaves stay on their branches:
+ *   trunk   (height / H)² scaled by the tree's size (a 20 m tree's top moves 1 unit): the whole tree bends
+ *   limb    how far out along a limb (horizontal distance from the trunk, relative to the crown) —
+ *           branches swing about where they leave the trunk
+ *   phase   continuous around the crown (azimuth × 2 + height), so a limb and its sprays move together
+ *           and the far side of the crown is out of step with the near side
+ */
+function windOf(tree: Tree) {
+  const R = Math.max(1, (tree.crownR.x + tree.crownR.z) / 2);
+  return (x: number, y: number, z: number) => {
+    const h = Math.max(0, y / tree.H);
+    const r = Math.hypot(x, z);
+    const trunkW = h * h * (tree.H / 20);
+    const limbW = Math.min(1.45, Math.pow(Math.min(1.6, r / R), 1.4) * 0.9 + Math.max(0, h - 0.55) * 0.5);
+    const phase = Math.atan2(z, x) * 2 + y * 0.31 + r * 0.45;
+    return { trunkW, limbW, phase };
+  };
+}
+
+function woodLOD(tree: Tree, target: number): { verts: WoodV[]; idx: number[]; tris: number } {
   // merge the wood parts
   const parts = tree.parts.filter((p) => p.kind === 'wood');
   let V = 0, I = 0;
@@ -873,11 +1056,13 @@ function woodLOD(tree: Tree, target: number, geo: Geo, windAt: (x: number, y: nu
     I += p.idx.length;
   }
   const pos = new Float32Array(V * 3);
+  const nrm = new Float32Array(V * 3);
   const idx = new Uint32Array(I);
   const owner: { p: Part; base: number }[] = [];
   let vo = 0, io = 0;
   for (const p of parts) {
     pos.set(p.pos, vo * 3);
+    nrm.set(p.nor, vo * 3);
     for (let i = 0; i < p.idx.length; i++) idx[io + i] = p.idx[i] + vo;
     owner.push({ p, base: vo });
     vo += p.pos.length / 3;
@@ -885,11 +1070,36 @@ function woodLOD(tree: Tree, target: number, geo: Geo, windAt: (x: number, y: nu
   }
   let [out] = MeshoptSimplifier.simplify(idx, pos, 3, target * 3, 0.02, ['Prune']);
   if (out.length > target * 3 * 1.3) [out] = MeshoptSimplifier.simplifySloppy(out, pos, 3, null, target * 3, 0.05);
+  // a thin branch simplified away collapses into a big flat wedge — a dark shard in the crown. Its
+  // corners keep their own (tube) normals, which then point every which way off the face: drop those
+  // (a coarse but real tube's corners stay within ~60° of its faces)
+  {
+    const keep: number[] = [];
+    for (let t = 0; t < out.length; t += 3) {
+      const [a, b, c] = [out[t] * 3, out[t + 1] * 3, out[t + 2] * 3];
+      const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+      const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+      let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      const fl = Math.hypot(fx, fy, fz) || 1;
+      fx /= fl;
+      fy /= fl;
+      fz /= fl;
+      const longest = Math.sqrt(Math.max(ux * ux + uy * uy + uz * uz, vx * vx + vy * vy + vz * vz, (vx - ux) ** 2 + (vy - uy) ** 2 + (vz - uz) ** 2));
+      let agree = 0;
+      for (const k of [a, b, c]) agree += Math.abs(fx * nrm[k] + fy * nrm[k + 1] + fz * nrm[k + 2]);
+      if (agree / 3 < 0.45 && longest > 0.3 && pos[a + 1] > tree.H * 0.2) continue;
+      keep.push(out[t], out[t + 1], out[t + 2]);
+    }
+    out = Uint32Array.from(keep);
+  }
   const map = new Map<number, number>();
   const ownerOf = (vi: number) => {
     for (let k = owner.length - 1; k >= 0; k--) if (vi >= owner[k].base) return owner[k];
     return owner[0];
   };
+  const wind = windOf(tree);
+  const verts: WoodV[] = [];
+  const ix: number[] = [];
   for (let t = 0; t < out.length; t++) {
     const vi = out[t];
     let ni = map.get(vi);
@@ -900,42 +1110,55 @@ function woodLOD(tree: Tree, target: number, geo: Geo, windAt: (x: number, y: nu
       const u = p.uv[li * 2], v = p.uv[li * 2 + 1];
       const ao = tree.ao.at(x, y, z);
       const alb = albedoAt(p, u, v);
+      const w = wind(x, y, z);
       // (the near trunk's albedo is the scan's own; the bark tile adds the detail around it)
-      ni = geo.v([x, y, z], [p.nor[li * 3], p.nor[li * 3 + 1], p.nor[li * 3 + 2]], [u * 2, v * 2], [alb[0] * 1.6, alb[1] * 1.6, alb[2] * 1.6], [windAt(x, y, z), 0, Math.min(1, 0.25 + ao), 0], [0, 0, 0, 0]);
+      verts.push({ p: [x, y, z], n: [p.nor[li * 3], p.nor[li * 3 + 1], p.nor[li * 3 + 2]], uv: [u * 2, v * 2], c: [alb[0] * 1.6, alb[1] * 1.6, alb[2] * 1.6], w: [w.trunkW, w.limbW, Math.min(1, 0.25 + ao), w.phase] });
+      ni = verts.length - 1;
       map.set(vi, ni);
     }
-    geo.idx.push(ni);
+    ix.push(ni);
   }
-  return out.length / 3;
+  return { verts, idx: ix, tris: out.length / 3 };
 }
 
-/**
- * A leaf card covers its cluster out to CLUMP_R × the cluster's RMS radius (the clump texture is the
- * leaves within that sphere). Neighbouring cards overlap anyway; much more than ~1.1 and the near
- * trees' cost is all overdraw of transparent card corners (fill, in the camera and the shadow maps).
- */
-const CLUMP_R = 1.1;
+/** the atlas sprays of one source asset: cell index + aspect (width / length) */
+type SpraySet = { cell: number; aspect: number }[];
 
-function cardsLOD(tree: Tree, clusters: Cluster[], cells: { u0: number; v0: number; du: number; dv: number }[], geo: Geo, windAt: (x: number, y: number, z: number) => number, r: () => number, scale: number) {
+function cardsLOD(tree: Tree, list: Spray[], set: SpraySet, r: () => number, bb: number, scale: number): CardV[] {
+  const wind = windOf(tree);
   const up = new THREE.Vector3(0, 1, 0);
-  for (const cl of clusters) {
-    const o = cl.c.clone().sub(tree.crownC);
-    o.y *= 0.7;
-    o.normalize();
-    const n = o.clone().addScaledVector(up, 0.3).normalize();
-    const ao = tree.ao.at(cl.c.x, cl.c.y, cl.c.z);
-    const s = Math.max(0.5, cl.rms * CLUMP_R * 2 * scale);
-    const cell = cells[Math.floor(r() * cells.length)];
-    const tint = 0.9 + r() * 0.2;
-    const rot = (r() - 0.5) * 0.9;
-    const phase = r() * Math.PI * 2;
-    const w = windAt(cl.c.x, cl.c.y, cl.c.z);
-    const ids: number[] = [];
-    for (const [a, b] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
-      ids.push(geo.v([cl.c.x, cl.c.y, cl.c.z], [n.x, n.y, n.z], [cell.u0 + (a * 0.996 + 0.002) * cell.du, cell.v0 + (b * 0.996 + 0.002) * cell.dv], [tint, tint, tint], [w + b * 0.05, 1, ao, phase], [(a - 0.5) * s, (b - 0.5) * s, rot, 0]));
-    }
-    geo.idx.push(ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]);
-  }
+  // outermost first (the cards are drawn in this order): seen from outside the crown the outer
+  // sprays then fill the depth buffer first and most of the inner ones fail the depth test before
+  // they are shaded — overdraw of lit, alpha-tested leaves is most of what a tree costs
+  const shell = (sp: Spray) => -tree.ao.at(sp.c.x, sp.c.y, sp.c.z) - outwardAt(tree, sp.c).dot(new THREE.Vector3(sp.c.x, sp.c.y - tree.crownC.y, sp.c.z)) / Math.max(1, tree.radius) * 0.3;
+  list = [...list].sort((a, b) => shell(a) - shell(b));
+  // (a sparse cell on the crown's rim can span metres: its card would stretch a typical spray's leaves
+  // to giant ones — no card more than ~1.35× the typical size; the gap that leaves is real sky)
+  const med = (k: 0 | 1) => [...list].map((x) => x.ext[k]).sort((a, b) => a - b)[list.length >> 1];
+  const cap0 = med(0) * 1.35, cap1 = med(1) * 1.35;
+  return list.map((sp) => {
+    const aspect = sp.ext[1] / sp.ext[0];
+    // a texture of about the same shape (one of the nearest three)
+    const near = [...set].sort((a, b) => Math.abs(Math.log(a.aspect / aspect)) - Math.abs(Math.log(b.aspect / aspect))).slice(0, 3);
+    const pick = near[Math.floor(r() * near.length)];
+    const o = outwardAt(tree, sp.c);
+    const ln = o.clone().multiplyScalar(0.7).addScaledVector(sp.e3, 0.3).addScaledVector(up, 0.3).normalize();
+    const w = wind(sp.c.x, sp.c.y, sp.c.z);
+    return {
+      c: sp.c,
+      e1: sp.e1,
+      e3: sp.e3,
+      ln,
+      size: [Math.min(sp.ext[1], cap1) * 2 * scale, Math.min(sp.ext[0], cap0) * 2 * scale],
+      cell: pick.cell,
+      tint: 0.9 + r() * 0.2,
+      ao: tree.ao.at(sp.c.x, sp.c.y, sp.c.z),
+      trunkW: w.trunkW,
+      limbW: w.limbW,
+      phase: w.phase,
+      bb,
+    };
+  });
 }
 
 // ------------------------------------------------------------------------------------ the bake
@@ -950,17 +1173,23 @@ interface ProtoOut {
   /** impostor card width and height (m) */
   W: number;
   Hc: number;
-  lods: { v: number; i: number; off: number; bytes: number; wood: number; cards: number }[];
+  lods: { v: number; i: number; cards: number; off: number; bytes: number }[];
 }
 
-async function bake(specs: ProtoSpec[], opts: { cell?: number; leafCell?: number; clumps?: number } = {}) {
+/** atlas sprays per source asset: near ones (LOD0's cell size) and far ones (LOD1's, for LOD1 + LOD2) —
+ *  so a distant card's leaves are the size of real leaves, not blown up with the card */
+const SPRAYS = 6;
+const FAR_SPRAYS = 3;
+
+async function bake(specs: ProtoSpec[], opts: { cell?: number; leafCell?: number } = {}) {
   await MeshoptSimplifier.ready;
   log.length = 0;
   const cell = opts.cell ?? 256;
   const leafCell = opts.leafCell ?? 256;
-  const nClumps = specs.reduce((a, s) => a + (s.clumps ?? opts.clumps ?? 5), 0);
+  const assets = [...new Set(specs.map((s) => s.asset))];
+  const nCells = assets.reduce((a, as) => a + (specs.find((s) => s.asset === as)!.sprays ?? SPRAYS) + FAR_SPRAYS, 0);
   const LC = 8;
-  const LR = Math.ceil(nClumps / LC);
+  const LR = Math.ceil(nCells / LC);
   const impC = new Img(FRAMES * cell, specs.length * cell);
   const impN = new Img(FRAMES * cell, specs.length * cell);
   const leafC = new Img(LC * leafCell, LR * leafCell);
@@ -968,9 +1197,11 @@ async function bake(specs: ProtoSpec[], opts: { cell?: number; leafCell?: number
   const protos: ProtoOut[] = [];
   const bins: Uint8Array[] = [];
   let binOff = 0;
-  let clumpSlot = 0;
+  let slot = 0;
+  const sets = new Map<string, SpraySet[]>();
   for (let pi = 0; pi < specs.length; pi++) {
     const spec = specs[pi];
+    const conifer = spec.species === 'spruce';
     const t0 = performance.now();
     const parts = await loadParts(spec);
     const base = normalise(parts, spec);
@@ -979,44 +1210,60 @@ async function bake(specs: ProtoSpec[], opts: { cell?: number; leafCell?: number
     const { W: cardW, Hc } = bakeImpostor(tree, impC, impN, pi, cell, spec.alphaGain ?? 1);
     const t2 = performance.now();
     const r = rngOf(9001 + pi * 7919);
-    const pts = leafSamples(tree, 40000, r);
-    const cl0 = kmeans(pts, spec.K0, r);
-    const cl1 = kmeans(pts, spec.K1, r);
-    // the clumps for the card atlas: outer-shell clusters of typical size
-    const nc = spec.clumps ?? opts.clumps ?? 5;
-    const med = [...cl0].sort((a, b) => a.rms - b.rms)[Math.floor(cl0.length / 2)].rms;
-    const cand = cl0
-      .map((c) => ({ c, score: tree.ao.at(c.c.x, c.c.y, c.c.z) - Math.abs(c.rms / med - 1) * 0.5 + r() * 0.15 }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, nc);
-    const cells: { u0: number; v0: number; du: number; dv: number }[] = [];
-    for (const { c } of cand) {
-      const col = clumpSlot % LC, row = Math.floor(clumpSlot / LC);
-      clumpSlot++;
-      bakeClump(tree, c, c.rms * CLUMP_R, leafC, leafN, col * leafCell, row * leafCell, leafCell, spec.alphaGain ?? 1);
-      // (image rows run top-down; the game decodes the atlas flipped, so v = 0 is the bottom row)
-      cells.push({ u0: col / LC, v0: 1 - (row + 1) / LR, du: 1 / LC, dv: 1 / LR });
-    }
+    const { pts, leafR } = leafSamples(tree, Math.max(20000, spec.K[0] * 90), r);
+    const spL = spec.K.map((k) => sprays(tree, pts, k, r, leafR, conifer));
+    const sp0 = spL[0];
+    // the atlas sprays: once per source asset, from the first prototype that uses it — sprays from
+    // the crown's outer shell (where they are seen), of typical size, spanning the shapes
+    let sl = sets.get(spec.asset);
+    if (!sl) sets.set(spec.asset, (sl = [0, 1].map((far) => {
+      const set: SpraySet = [];
+      const n = far ? FAR_SPRAYS : (spec.sprays ?? SPRAYS);
+      const ls = spec.leafScale ?? 1;
+      const kT = Math.max(n * 3, Math.round(spec.K[far] * ls * ls * ls));
+      const spT = kT === spec.K[far] ? spL[far] : sprays(tree, pts, kT, r, leafR, conifer);
+      const sz = spT.map((s) => s.ext[0] * s.ext[1]).sort((a, b) => a - b);
+      const lo = sz[Math.floor(sz.length * 0.35)], hi = sz[Math.floor(sz.length * 0.8)];
+      const aoS = spT.map((s) => tree.ao.at(s.c.x, s.c.y, s.c.z)).sort((a, b) => a - b);
+      const aoMin = aoS[Math.floor(aoS.length * 0.5)];
+      // (and not the densest: a solid mat of leaves reads as a pale square, not as foliage)
+      const dens = (s: Spray) => s.members.length / (s.ext[0] * s.ext[1]);
+      const dS = spT.map(dens).sort((a, b) => a - b);
+      const dHi = dS[Math.floor(dS.length * 0.65)];
+      let cand = spT.filter((s) => s.ext[0] * s.ext[1] >= lo && s.ext[0] * s.ext[1] <= hi && tree.ao.at(s.c.x, s.c.y, s.c.z) >= aoMin && dens(s) <= dHi);
+      if (cand.length < n) cand = [...spT];
+      cand.sort((a, b) => a.ext[1] / a.ext[0] - b.ext[1] / b.ext[0]);
+      for (let k = 0; k < n; k++) {
+        const s = cand[Math.min(cand.length - 1, Math.floor(((k + 0.5) / n) * cand.length))];
+        const col = slot % LC, row = Math.floor(slot / LC);
+        bakeSpray(tree, s, spT, leafC, leafN, col * leafCell, row * leafCell, leafCell, spec.alphaGain ?? 1);
+        set.push({ cell: slot, aspect: s.ext[1] / s.ext[0] });
+        slot++;
+      }
+      return set;
+    })));
     const t3 = performance.now();
-    const avgR = (tree.crownR.x + tree.crownR.z) / 2;
-    const windAt = (x: number, y: number, z: number) => {
-      const h = Math.max(0, y / tree.H - 0.08);
-      return Math.min(1.2, h * h * 1.4 + Math.hypot(x, z) / (avgR * 3));
-    };
     const lods: ProtoOut['lods'] = [];
-    for (let lod = 0; lod < 2; lod++) {
-      const g = new Geo();
-      const wood = woodLOD(tree, lod ? spec.wood1 : spec.wood0, g, windAt);
-      cardsLOD(tree, lod ? cl1 : cl0, cells, g, windAt, rngOf(77 + pi * 31 + lod), 1);
-      const pk = g.pack();
-      bins.push(pk.bytes);
-      lods.push({ v: pk.v, i: pk.i, off: binOff, bytes: pk.bytes.length, wood, cards: lod ? cl1.length : cl0.length });
-      binOff += pk.bytes.length;
+    for (let lod = 0; lod < 3; lod++) {
+      const wood = woodLOD(tree, spec.wood[lod]);
+      const cards = cardsLOD(tree, spL[lod], sl[lod ? 1 : 0], rngOf(77 + pi * 31 + lod), spec.bb ?? 0.6, spec.cardScale ?? 1);
+      const bytes = packLod(wood.verts, wood.idx, cards);
+      bins.push(bytes);
+      lods.push({ v: wood.verts.length, i: wood.idx.length, cards: cards.length, off: binOff, bytes: bytes.length });
+      binOff += bytes.length;
     }
+    // (the scans are hundreds of MB each: drop one as soon as no later prototype needs it)
+    if (!specs.slice(pi + 1).some((x) => x.asset === spec.asset)) {
+      const g = await gltfs.get(spec.asset);
+      g?.gltf.scene.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+      gltfs.delete(spec.asset);
+    }
+    const avgR = (tree.crownR.x + tree.crownR.z) / 2;
     protos.push({ id: spec.id, species: spec.species, height: +tree.H.toFixed(3), radius: +tree.radius.toFixed(3), crownR: +avgR.toFixed(3), crownY: +tree.crownC.y.toFixed(3), W: +cardW.toFixed(3), Hc: +Hc.toFixed(3), lods });
-    say(`${spec.id}: H ${tree.H.toFixed(1)} m, R ${tree.radius.toFixed(1)} m, crown ${avgR.toFixed(1)} m; ${parts.map((p) => `${p.name} ${p.idx.length / 3}`).join(', ')}; lod0 ${lods[0].wood} wood tris + ${lods[0].cards} cards, lod1 ${lods[1].wood} + ${lods[1].cards}; load ${Math.round(t1 - t0)} ms, imp ${Math.round(t2 - t1)} ms, clumps ${Math.round(t3 - t2)} ms`);
+    const med = (a: Spray[]) => [...a].sort((x, y) => x.ext[0] - y.ext[0])[a.length >> 1];
+    say(`${spec.id}: H ${tree.H.toFixed(1)} m, R ${tree.radius.toFixed(1)} m, crown ${avgR.toFixed(1)} m; ${parts.map((p) => `${p.name} ${p.idx.length / 3}`).join(', ')}; lod0 ${lods[0].i / 3} wood tris + ${lods[0].cards} cards (median ${(med(sp0).ext[1] * 2).toFixed(2)} × ${(med(sp0).ext[0] * 2).toFixed(2)} m), lod1 ${lods[1].i / 3} + ${lods[1].cards}, lod2 ${lods[2].i / 3} + ${lods[2].cards}; load ${Math.round(t1 - t0)} ms, imp ${Math.round(t2 - t1)} ms, sprays ${Math.round(t3 - t2)} ms`);
   }
-  // the near trunks' detail: a tile of the jacaranda's bark scan (normal xyz, albedo in alpha)
+  // the near trunks' detail: a tile of the jacaranda's bark scan (normal + albedo)
   const bark = await bakeBark();
   const bin = new Uint8Array(binOff);
   let o = 0;
@@ -1027,7 +1274,7 @@ async function bake(specs: ProtoSpec[], opts: { cell?: number; leafCell?: number
   let s = '';
   for (let i = 0; i < bin.length; i += 0x8000) s += String.fromCharCode(...bin.subarray(i, i + 0x8000));
   const manifest = {
-    version: 1,
+    version: 2,
     impostor: { frames: FRAMES, rows: specs.length, cell },
     leaf: { cols: LC, rows: LR, cell: leafCell },
     protos,

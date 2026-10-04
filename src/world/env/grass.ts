@@ -3,6 +3,7 @@ import type { WorldMap } from './worldmap.ts';
 import { SURF } from '../Track.ts';
 import { noiseTexture } from './textures.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
+import { CAR_WAKE_GLSL, wakeUniforms } from './treematerial.ts';
 
 /**
  * Grass blades on the verges, in the few dozen metres of circuit around the camera.
@@ -15,7 +16,8 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  * One draw: a fixed set of blade triangles laid out over TILES metres of lap; each frame the
  * window slides to the camera's position along the lap (whole metres, so blades never swim).
  * Blades shrink away with distance and fade out by FADE m; nothing is drawn when the camera is
- * far from the circuit (TV towers, helicopter). Wind sway from the shared weather wind.
+ * far from the circuit (TV towers, helicopter). Wind sway from the shared weather wind, and the
+ * wake of a passing car (treematerial.ts carWake) flattens and ruffles the verge for a second.
  * No shadow casting; receives shadows and the scene's lighting and haze.
  */
 
@@ -139,6 +141,7 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
     uStrawC: { value: palette.straw },
     uWind: weatherUniforms.uWind,
     uWet: weatherUniforms.uWetness,
+    ...wakeUniforms,
   };
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
@@ -161,7 +164,8 @@ vec3 gFetch( float i, float row ) {
   i = mod( i, uN );
   return texelFetch( tFrame, ivec2( int( mod( i, ${ROW}.0 ) ), int( floor( i / ${ROW}.0 ) + row * uRows ) ), 0 ).xyz;
 }
-float gHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }`,
+float gHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+${CAR_WAKE_GLSL}`,
       )
       .replace(
         '#include <beginnormal_vertex>',
@@ -204,10 +208,15 @@ float gHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43
   vec2 wd = wl > 0.1 ? uWind / wl : vec2( 0.8, 0.6 );
   float gust = sin( uTime * 1.7 + base.x * 0.35 + base.z * 0.21 ) * 0.5 + 0.5;
   vec3 lean = face * ( fract( rnd * 7.3 ) - 0.5 ) * 0.5 + vec3( wd.x, 0.0, wd.y ) * ( 0.08 + wl * 0.03 ) * ( 0.4 + 0.6 * gust );
+  // a passing car's wake: the blades lie over after it and whip back (each at its own phase)
+  if ( h > 0.004 ) {
+    vec4 wk = carWake( base );
+    lean += ( wk.xyz + vec3( side.x, 0.0, side.z ) * sin( uTime * 23.0 + rnd * 40.0 ) * wk.w * 0.35 ) * 0.75;
+  }
   transformed = base;
   if ( aCorner < 0.5 ) transformed -= side * w;
   else if ( aCorner < 1.5 ) transformed += side * w;
-  else transformed += ( vec3( 0.0, 1.0, 0.0 ) + lean ) * h;
+  else { vec3 tip = vec3( 0.0, 1.0, 0.0 ) + lean; transformed += tip * min( 1.0, 1.15 / length( tip ) ) * h; }
   if ( uDebug > 0.0 ) { transformed = base + ( aCorner < 0.5 ? -side * 0.1 : aCorner < 1.5 ? side * 0.1 : vec3( 0.0, uDebug * ( 0.1 + g.r ), 0.0 ) ); h = uDebug; }
   if ( h < 0.004 ) transformed = vec3( 0.0, -1e5, 0.0 );
   vGH = aCorner > 1.5 ? 1.0 : 0.0;
@@ -230,7 +239,7 @@ reflectedLight.indirectDiffuse *= mix( 0.45, 1.0, vGH );
 reflectedLight.directDiffuse *= mix( 0.7, 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v1';
+  mat.customProgramCacheKey = () => 'apex-grass-v2';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;

@@ -92,6 +92,17 @@ npm run check    # tsc --noEmit
   fade to their share of the pixel far off (no ruled-paper horizon). Far land and the horizon ring ease
   their haze beyond 5 km (`HAZE_EASE`, ∝ √distance; off at Interlagos, whose city is real geometry), so
   hills 10–50 km away read as layered silhouettes, each fold a step paler, instead of one pale band.
+- **Living trees** — every tree is one of Poly Haven's scans (`env/treeproto.ts`, baked by `tools/bake_trees.mjs`).
+  Near the circuit they are 3D: the scan's trunk and limbs, and hundreds of small leaf sprays — one per k-means cell
+  of the scan's real leaves, lying in the cell's own plane along its own axis, textured with real sprays of that
+  tree's leaves (separate near / far sprays so leaves keep their real size at every LOD) — so a crown has gaps, a
+  ragged edge, branches inside and a dark interior; a fir's sprays are flat stretches of bough, so it reads as
+  layered drooping tiers from below. Three LODs (LOD2 also casts every near tree's shadow from a second,
+  shadow-only BatchedMesh), hashed alpha once leaves get small, then 8-view impostors of the full scan (conifers
+  hand over sooner, ~55 m). Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
+  trees slower), gusts roll downwind through the woods, limbs swing at their own phase, leaves rock and flash;
+  calm in fog, thrashing in a storm; impostors share the trunk sway. A car's wake (`feedCarWake`, fed from
+  `Game`'s rigs) ruffles the verge grass, bushes and low branches it passes.
 - **City skylines** — Melbourne's CBD and Southbank and downtown Montréal are built tower by tower
   (`Merge.tower` in `env/venues/montrealCity.ts`): podium, shaft (square or with its corners cut), maybe a
   setback, then a plant room, glazed crown or mast. `cityMaterial` counts storeys and bays from each building's own
@@ -411,5 +422,6 @@ Trees: Poly Haven's CC0 scanned / modelled trees — [Jacaranda Tree](https://po
 [Fir Sapling Medium](https://polyhaven.com/a/fir_sapling_medium) and [Searsia lucida](https://polyhaven.com/a/searsia_lucida).
 `python3 tools/trees_fetch.py` downloads them (millions of triangles: offline only) and `node tools/bake_trees.mjs`
 (headless Chrome, `src/dev/treebake.ts`) bakes what the game draws into `public/trees/` (≈ 6 MB): 8-view impostor
-frames of each full-resolution tree, clumps of its real leaves for the near trees' leaf cards, and two near LODs
-(the scan's trunk decimated with meshoptimizer + one leaf card per k-means cluster of its leaves).
+frames of each full-resolution tree, sprays of its real leaves (every leaf and twig of one k-means cell, seen
+face-on) for the near trees' leaf cards, and three near LODs (the scan's trunk and limbs decimated with
+meshoptimizer + one oriented leaf card per k-means cell of its leaves, with shared wind weights).
