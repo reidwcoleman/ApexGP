@@ -28,6 +28,7 @@ import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, 
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
 import { Director, type FieldCar } from './Director.ts';
 import { Sightlines } from './Sightlines.ts';
+import { IntroDirector, type IntroCaption } from './IntroDirector.ts';
 import { Broadcast, describeEvent } from '../ui/Broadcast.ts';
 import { SimSetup, type SimConfig } from '../ui/SimSetup.ts';
 import { Flashback } from './Flashback.ts';
@@ -1258,8 +1259,6 @@ export class Game {
   private introLong = false;
   private introSkip = false;
   private introCard: HTMLDivElement | null = null;
-  private readonly introA = new THREE.Vector3();
-  private readonly introB = new THREE.Vector3();
 
   /** the title card: round, circuit, distance and conditions, the layout drawing itself */
   private showIntroCard() {
@@ -1275,14 +1274,15 @@ export class Game {
     card.innerHTML =
       `<svg class="ri-map" viewBox="0 0 200 140"><path d="${path}"/></svg>` +
       `<div class="ri-text"><div class="ri-kick">${kicker}</div><div class="ri-name">${d.name}</div>` +
-      `<div class="ri-facts"><span>${info?.country ?? d.country}</span><span>${this.race.opts.laps} laps</span><span>${WEATHER_LABEL[w.kind]}</span><span>${TIME_LABEL[this.plan.time]}</span></div></div>` +
-      `<div class="ri-skip"><kbd>Enter</kbd> skip</div>`;
+      `<div class="ri-facts"><span>${info?.country ?? d.country}</span><span>${this.race.opts.laps} laps</span><span>${WEATHER_LABEL[w.kind]}</span><span>${TIME_LABEL[this.plan.time]}</span></div></div>`;
     card.addEventListener('click', () => (this.introSkip = true));
     (this.hud.root.parentElement ?? document.body).appendChild(card);
     requestAnimationFrame(() => card.classList.add('on'));
     this.introCard = card;
   }
+  /** `now`: gone this instant, and the director's film with it (a new session, the pause menu, leaving) */
   private hideIntroCard(now = false) {
+    if (now) this.endIntroFilm();
     const c = this.introCard;
     if (!c) return;
     this.introCard = null;
@@ -1292,35 +1292,243 @@ export class Game {
     setTimeout(() => c.remove(), 700);
   }
 
-  /** the intro's first two shots, at time t: the helicopter onto the grid, then down the grid to your car */
-  private introShot(t: number, A: number, B: number) {
-    const tr = this.track;
-    const cam = this.camera;
-    const s0 = tr.startS;
-    const away = -tr.def.pitSide;
-    const ease = (u: number) => u * u * (3 - 2 * u);
-    if (t < A) {
-      const u = ease(Math.min(1, t / A));
-      const s = s0 + 680 - 540 * u;
-      tr.point(s, away * (tr.halfWidthAt(s) + 34 - 16 * u), 72 - 42 * u, this.introA);
-      tr.point(s0 - 50, 0, 1, this.introB);
-      cam.position.copy(this.introA);
-      cam.up.set(0, 1, 0);
-      cam.lookAt(this.introB);
-      cam.fov = 44 - 6 * u;
-    } else {
-      const u = ease(Math.min(1, (t - A) / (B - A)));
-      const ps = this.race.player.car.s;
-      const back = Math.max(8, tr.delta(ps, s0) + 6);
-      const s = s0 - 2 - back * u;
-      tr.point(s, away * (tr.halfWidthAt(s) + 1.3), 1.25, this.introA);
-      tr.point(s - 16, -away * 1.2, 0.55, this.introB);
-      cam.position.copy(this.introA);
-      cam.up.set(0, 1, 0);
-      cam.lookAt(this.introB);
-      cam.fov = 40;
+  /** the full intro's director (IntroDirector: the shot list), built on its first frame — the cars are on the grid by then */
+  private introDirector: IntroDirector | null = null;
+  /** dev/tools: hold the intro clock at this time (−1: let it run) — tools/introshot.mjs */
+  introHold = -1;
+  /** the director has the lens (the player's own camera waits in introCamMode) */
+  private introFilming = false;
+  private introCamMode: CameraMode | null = null;
+  private introShotIndex = -1;
+  /** the last filmed frame, which the race camera blends out of at the drop */
+  private introFrom: { pos: THREE.Vector3; q: THREE.Quaternion; fov: number } | null = null;
+  /** letterbox, fade from black and the lower-third captions */
+  private introFilm: HTMLDivElement | null = null;
+  private introCaptionKey = '';
+  private introHazeOn = false;
+  /** while the director films: where the shadows and the rain centre (null: on your car) */
+  private introFocus: THREE.Vector3 | null = null;
+  private readonly introFocusPt = new THREE.Vector3();
+  /** the drop from the last shot into the race camera (s) */
+  private static readonly INTRO_DROP = 1.1;
+
+  private makeIntroDirector(): IntroDirector {
+    const race = this.race;
+    const player = race.player;
+    // cars[] is in grid order: the pole sitter — or P2, when that's you (you get the next shot)
+    const pole = race.cars[0] === player ? (race.cars[1] ?? player) : race.cars[0];
+    const name = (c: Competitor) => `${c.entry.driver.first} ${c.entry.driver.last}`;
+    const grid = race.cars.indexOf(player) + 1;
+    const t0 = performance.now();
+    const d = new IntroDirector({
+      track: this.track,
+      sight: this.cams.sight,
+      heightAt: (x, z) => this.env.heightAt(x, z),
+      scene: this.scene,
+      headlights: floodlit(race.weatherState.time) > 0,
+      dark: race.weatherState.time === 'night',
+      cars: {
+        pole: { s: pole.car.s, lateral: pole.car.lateral, caption: { kick: pole === race.cars[0] ? 'Pole position' : 'Front row', title: name(pole), sub: pole.entry.team.name } },
+        player: { s: player.car.s, lateral: player.car.lateral, caption: { kick: `Starting P${grid}`, title: name(player), sub: player.entry.team.name } },
+      },
+    });
+    console.info(`[intro] ${this.track.def.id} ${d.length.toFixed(1)} s, planned in ${(performance.now() - t0).toFixed(1)} ms · ${d.report.join(' · ')}`);
+    return d;
+  }
+
+  /** the letterbox (and its fade from black and captions) over the full intro */
+  private showFilm(on: boolean) {
+    if (on && !this.introFilm) {
+      const el = document.createElement('div');
+      el.className = 'intro-film';
+      el.innerHTML =
+        '<div class="if-bar if-top"></div><div class="if-bar if-bot"></div>' +
+        '<div class="if-lower"><div class="if-kick"></div><div class="if-title"></div><div class="if-sub"></div></div>' +
+        '<div class="if-skip"><kbd>Enter</kbd> skip</div><div class="if-fade"></div>';
+      el.addEventListener('click', () => (this.introSkip = true));
+      (this.hud.root.parentElement ?? document.body).appendChild(el);
+      requestAnimationFrame(() => el.classList.add('on'));
+      this.introFilm = el;
+    } else if (!on && this.introFilm) {
+      const el = this.introFilm;
+      this.introFilm = null;
+      this.introCaptionKey = '';
+      el.classList.remove('on');
+      el.classList.add('off');
+      setTimeout(() => el.remove(), 900);
     }
-    cam.updateProjectionMatrix();
+  }
+
+  /** the lower third: who / what we're looking at */
+  private filmCaption(c: IntroCaption | null) {
+    const el = this.introFilm;
+    if (!el) return;
+    const key = c ? `${c.kick}|${c.title}` : '';
+    if (key === this.introCaptionKey) return;
+    this.introCaptionKey = key;
+    const low = el.querySelector<HTMLElement>('.if-lower')!;
+    low.classList.remove('show');
+    if (!c) return;
+    low.querySelector('.if-kick')!.textContent = c.kick;
+    low.querySelector('.if-title')!.textContent = c.title;
+    low.querySelector('.if-sub')!.textContent = c.sub ?? '';
+    void low.offsetWidth;
+    low.classList.add('show');
+  }
+
+  /**
+   * The long lens's heat haze: the day's own shimmer (Environment sets it from the heat, the sun
+   * and a dry track), turned up through a telephoto. Only when there is some: no haze on a cold,
+   * wet or dark day. (The Renderer's lens pass reads the uniform; its own `shimmer` stays the
+   * weather's, so the next weather update and the end of the shot put it back.)
+   */
+  private introHaze(on: boolean) {
+    const g = this.gfx as unknown as { shimmer?: number; lensRain?: { uniforms: Map<string, THREE.Uniform> } };
+    const u = g.lensRain?.uniforms.get('shimmer');
+    if (!u || g.shimmer === undefined) return;
+    if (on && g.shimmer > 0.01) {
+      u.value = Math.min(1, g.shimmer * 2.5 + 0.2);
+      this.introHazeOn = true;
+    } else if (this.introHazeOn) {
+      u.value = g.shimmer;
+      this.introHazeOn = false;
+    }
+  }
+
+  /** one frame of the director's film at intro time t */
+  private filmIntro(D: IntroDirector, t: number) {
+    if (!this.introFilming) {
+      this.introFilming = true;
+      // (an aerial mode while the director has the lens: no racing line, no onboard grade or cockpit
+      // hiding, the sound heard from where the camera is)
+      if (this.cams.mode !== 'heli') {
+        this.introCamMode = this.cams.mode;
+        this.cams.set('heli');
+      }
+      this.hud.root.classList.add('intro-hide');
+    }
+    this.showFilm(true);
+    const f = D.frame(t, this.camera);
+    if (!f) return;
+    if (f.index !== this.introShotIndex) {
+      // a cut: nothing to smear between the last frame of one shot and the first of the next
+      this.gfx.motionCut = true;
+      this.introShotIndex = f.index;
+    }
+    // the title card stays over the establishing shot
+    if (f.index >= 1) this.hideIntroCard();
+    this.filmCaption(f.caption);
+    if (f.dof) {
+      this.gfx.setDepthOfField(true, f.dof.target, f.dof.range, f.dof.bokeh);
+      this.introDof = true;
+    } else if (this.introDof) {
+      this.introDof = false;
+      this.gfx.setDepthOfField(false);
+    }
+    this.introHaze(f.haze);
+    this.introFocus = this.introFocusPt.copy(f.focus);
+  }
+
+  /** the director hands the lens back (the drop, a skip, the pause menu, leaving) */
+  private endIntroFilm() {
+    if (!this.introFilming) return;
+    this.introFilming = false;
+    this.introShotIndex = -1;
+    if (this.introCamMode) {
+      this.cams.set(this.introCamMode);
+      this.introCamMode = null;
+    }
+    if (this.introDof) {
+      this.introDof = false;
+      this.gfx.setDepthOfField(false);
+    }
+    this.introHaze(false);
+    this.introFocus = null;
+    this.showFilm(false);
+  }
+
+  /**
+   * The race intro. From the garage (or after qualifying): the director's film (IntroDirector —
+   * establishing aerial, the venue, the stands, the pits, the kerbs, the long lens down the grid,
+   * pole, your car), then the drop into your race camera and the lights. A restart: the short
+   * version, a low orbit of your car on the grid. Both skippable.
+   */
+  private introFrame(dt: number, st: Game['input']['state']) {
+    const race = this.race;
+    race.playerInput.throttle = st.throttle;
+    race.update(dt);
+    if (st.pause) {
+      this.syncAllViews(dt);
+      this.pause();
+      this.handleRaceEvents();
+      return;
+    }
+    if (this.introHold >= 0) this.stateTime = this.introHold;
+    if (this.introLong) {
+      const D = (this.introDirector ??= this.makeIntroDirector());
+      const FILM = D.length;
+      const END = FILM + Game.INTRO_DROP;
+      if (this.stateTime < END && ((this.input.nav.accept && this.stateTime > 0.35) || this.introSkip)) this.stateTime = END;
+      this.introSkip = false;
+      const t = this.stateTime;
+      if (t < FILM) {
+        this.filmIntro(D, t);
+        this.syncAllViews(dt);
+      } else {
+        const k = (t - FILM) / Game.INTRO_DROP;
+        if (this.introFilming) {
+          // the drop: blend out of the last shot into the race camera (a hard cut into an onboard
+          // camera, or after a skip)
+          const mode = this.introCamMode ?? this.cams.mode;
+          const cam = this.camera;
+          this.introFrom = k < 1 && !ONBOARD[mode] ? { pos: cam.position.clone(), q: cam.quaternion.clone(), fov: cam.fov } : null;
+          this.endIntroFilm();
+          this.hideIntroCard();
+          this.hud.root.classList.remove('intro-hide');
+          if (!this.introFrom) this.gfx.motionCut = true;
+        }
+        this.syncAllViews(dt);
+        this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
+        const F = this.introFrom;
+        if (F && k < 1) {
+          const e = k * k * (3 - 2 * k);
+          const cam = this.camera;
+          cam.position.lerpVectors(F.pos, cam.position, e);
+          cam.quaternion.slerpQuaternions(F.q, cam.quaternion, e);
+          cam.fov = F.fov + (cam.fov - F.fov) * e;
+          cam.updateProjectionMatrix();
+        } else this.introFrom = null;
+        if (t > END + 0.5 && race.phase === 'grid') race.startLights();
+      }
+    } else {
+      // the short intro: the low sweep round your car, then your camera and the lights
+      this.syncAllViews(dt);
+      const IB = 6.8;
+      const IC = 9.6;
+      this.introSkip = false;
+      const t0 = this.stateTime + IB;
+      this.hud.root.classList.remove('intro-hide');
+      this.hideIntroCard();
+      if (t0 < IC) {
+        const t = t0 - IB + 1.4;
+        this.cams.orbit(dt, this.playerRigPos(), 8.2 - t * 0.55, 0.55 + t * 0.2, 0.34);
+        // a real lens: the car sharp, the grid behind it soft
+        this.gfx.setDepthOfField(true, this.dofTarget.copy(this.playerRigPos()).setY(this.dofTarget.y + 0.5), 7, 1.15);
+        this.introDof = true;
+      } else {
+        if (this.introDof) {
+          this.introDof = false;
+          this.gfx.setDepthOfField(false);
+        }
+        this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
+        if (t0 > IC + 0.8 && race.phase === 'grid') race.startLights();
+      }
+    }
+    if (race.phase === 'racing') {
+      this.state = 'race';
+      this.hud.setHint(null);
+    }
+    this.handleRaceEvents();
   }
 
   private startRace(mode: 'race' | 'timetrial', setup: RaceSetup, qualifying = false) {
@@ -1342,6 +1550,9 @@ export class Game {
     const weekendRace = mode === 'race' && !!this.gridOrder;
     if (`${setup.weather}/${setup.time}` !== this.planKey || (!this.planFresh && !weekendRace)) this.rollWeather(setup);
     this.planFresh = false;
+    // (a restart — the pause menu, race again — gets the short intro; a race from the garage or after
+    // qualifying the director's full one)
+    const restart = this.state === 'paused' || this.state === 'results' ? !!this.race && !this.race.isTimeTrial && this.race.track === this.track : false;
     this.makeRace(mode, setup);
     this.hud.setup(this.race, this.track);
     this.engineer.reset(this.race);
@@ -1353,8 +1564,8 @@ export class Game {
     this.state = mode === 'timetrial' ? 'race' : 'intro';
     this.stateTime = 0;
     this.hud.show(true);
-    // the full intro for a race start (a quick restart gets it too: it can be skipped)
-    this.introLong = mode === 'race';
+    this.introLong = mode === 'race' && !restart;
+    this.introDirector = null;
     if (this.introLong) this.showIntroCard();
     else this.hideIntroCard(true);
     if (mode === 'race') this.hud.setHint('Lights out soon · hold <kbd>↑</kbd> to rev, launch when they go out');
@@ -1597,48 +1808,7 @@ export class Game {
       this.syncAllViews(dt);
       this.garageFrame(dt);
     } else if (this.state === 'intro') {
-      // a short orbit of the player's car on the grid, then chase cam + lights
-      race.playerInput.throttle = st.throttle;
-      race.update(dt);
-      this.syncAllViews(dt);
-      if (st.pause) this.pause();
-      // the race intro: a helicopter sweep down the main straight to the grid (title card up), a
-      // tracking shot down the grid to your car, then the low sweep round it — skippable
-      const IA = 3.8;
-      const IB = 6.8;
-      const IC = 9.6;
-      if (this.introLong && this.stateTime < IC && ((this.input.nav.accept && this.stateTime > 0.35) || this.introSkip)) {
-        this.stateTime = IC;
-        this.introSkip = false;
-      }
-      this.introSkip = false;
-      const t0 = this.introLong ? this.stateTime : this.stateTime + IB;
-      if (this.introLong && t0 < IB) {
-        this.introShot(t0, IA, IB);
-        this.hud.root.classList.add('intro-hide');
-      } else {
-        this.hud.root.classList.remove('intro-hide');
-        this.hideIntroCard();
-      }
-      if (t0 >= IB && t0 < IC) {
-        const t = t0 - IB + 1.4;
-        this.cams.orbit(dt, this.playerRigPos(), 8.2 - t * 0.55, 0.55 + t * 0.2, 0.34);
-        // a real lens: the car sharp, the grid behind it soft
-        this.gfx.setDepthOfField(true, this.dofTarget.copy(this.playerRigPos()).setY(this.dofTarget.y + 0.5), 7, 1.15);
-        this.introDof = true;
-      } else if (t0 >= IC) {
-        if (this.introDof) {
-          this.introDof = false;
-          this.gfx.setDepthOfField(false);
-        }
-        this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
-        if (t0 > IC + 0.8 && race.phase === 'grid') race.startLights();
-      }
-      if (race.phase === 'racing') {
-        this.state = 'race';
-        this.hud.setHint(null);
-      }
-      this.handleRaceEvents();
+      this.introFrame(dt, st);
     } else if (this.state === 'race') {
       if (st.pause) {
         this.pause();
@@ -1788,7 +1958,7 @@ export class Game {
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
     const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.mode];
-    this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos(), eyeCam ? 16 : undefined);
+    this.env.focusShadow(this.celebration ? this.celebration.center : (this.introFocus ?? this.playerRigPos()), eyeCam ? 16 : undefined);
     // the crowds and the trackside people follow the race
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
     else if (this.state !== 'paused') crowdReactions.quiet(dt);
