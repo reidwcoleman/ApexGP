@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Track } from '../Track.ts';
-import { WorldMap, type V2 } from './worldmap.ts';
+import { ARDENNES_TOWNS, WorldMap, type V2 } from './worldmap.ts';
 import { planOval, type OvalPath } from './ovalpath.ts';
 import { fbm2, rng } from './noise.ts';
 import { planAustin } from './venues/austin.ts';
@@ -436,6 +436,8 @@ function planSpa(
   addStand('La Source Sortie', ls.sEnd + 10, ls.sEnd + 120, R, 14, 'open', 7, 60);
   const er = corner('Eau Rouge');
   addStand('Eau Rouge', er.sStart - 130, er.sStart - 5, R, 20, 'covered', 8, 65);
+  // the big covered stand at the top of Raidillon (2022), looking back down the climb
+  addStand('Raidillon', corner('Raidillon').sEnd + 35, corner('Raidillon').sEnd + 165, R, 24, 'covered', 8, 65);
   const lc = corner('Les Combes');
   addStand('Les Combes', lc.sStart - 130, lc.sApex, L, 16, 'open', 7, 65);
   const rv = corner('Rivage');
@@ -476,6 +478,8 @@ function planSpa(
   { const q = at(er.sApex, -70); clear(q.x, q.z, 55, 35, 0.25); }
   { const q = at(po.sApex + 60, -110); clear(q.x, q.z, 70, 45, 0.2); }
   { const q = at(ls.sApex, 70); clear(q.x, q.z, 50, 30, 0.2); }
+  // the villages: gardens and meadows round the houses (worldmap's ARDENNES_TOWNS)
+  for (const t of ARDENNES_TOWNS) clear(t.x, t.z, t.r * 0.9, t.r * 0.4, 0.04);
 
   // service road behind the main stands, walkways along the banks
   const trackLine = (sA: number, sB: number, latFn: (s: number) => number, step = 10): V2[] => {

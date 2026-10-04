@@ -44,6 +44,11 @@ const ROOFS_NL = [0x2e2f33, 0x3a3b40, 0x9c4a30, 0x7a3b2a, 0x44464b, 0x8a4430];
 const WALLS_HU = [0xf2efe7, 0xeee6cf, 0xe8d49a, 0xf1e3b4, 0xe9e1d2, 0xdcd3c1, 0xf5f2ec, 0xe2c98c].map((h) => new THREE.Color(h));
 const ROOFS_HU = [0xa4482c, 0xb4532f, 0x8e3f28, 0x9c4a30, 0xb85c38, 0x6e3a2a];
 
+// the Ardennes: grey-brown rubble stone, whitewash and cream render, the odd red brick, under dark
+// slate (the Belgian vernacular: steep slate gables, no tiles)
+const WALLS_BE = [0x86796a, 0x93897b, 0x7a7064, 0xe8e4da, 0xdcd6c8, 0xd6ccb8, 0x8c5642, 0x9d9284].map((h) => new THREE.Color(h));
+const ROOFS_BE = [0x383b40, 0x32353a, 0x404348, 0x2c2f33, 0x46494e, 0x3a3836];
+
 // Melbourne's inner suburbs: Victorian terraces in red and cream brick, painted weatherboard and
 // render, under grey corrugated iron, terracotta tile and slate
 const WALLS_AU = [0x9a5a44, 0xa8674c, 0xd9ccb0, 0xe8e2d4, 0xc9b79a, 0xf1eee6, 0x8e4f3c, 0xbfae95].map((h) => new THREE.Color(h));
@@ -61,8 +66,9 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
   // Hungarian villages: whitewashed and pastel-rendered houses under red clay tiles
   const hu = map.venue === 'hungaroring';
   const au = map.venue === 'melbourne';
-  const wallPal = au ? WALLS_AU : hu ? WALLS_HU : nl ? WALLS_NL : at ? WALLS_AT : us ? US_WALLS.map((h) => new THREE.Color(h)) : uk ? WALLS_UK : jp ? WALLS_JP : WALLS;
-  const roofPal = au ? ROOFS_AU : hu ? ROOFS_HU : nl ? ROOFS_NL : at ? ROOFS_AT : us ? US_ROOFS : uk ? ROOFS_UK : jp ? ROOFS_JP : ROOFS;
+  const be = map.venue === 'ardennes';
+  const wallPal = be ? WALLS_BE : au ? WALLS_AU : hu ? WALLS_HU : nl ? WALLS_NL : at ? WALLS_AT : us ? US_WALLS.map((h) => new THREE.Color(h)) : uk ? WALLS_UK : jp ? WALLS_JP : WALLS;
+  const roofPal = be ? ROOFS_BE : au ? ROOFS_AU : hu ? ROOFS_HU : nl ? ROOFS_NL : at ? ROOFS_AT : us ? US_ROOFS : uk ? ROOFS_UK : jp ? ROOFS_JP : ROOFS;
   const S = map.SQUARE;
   const r = rng(515);
   type B = { x: number; z: number; y: number; w: number; d: number; h: number; rot: number; wall: THREE.Color; roof: THREE.Color; flat: boolean };
@@ -73,27 +79,29 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       const ix = Math.floor(x / C), iz = Math.floor(z / C);
       const u = map.urban(x, z);
       if (u < 0.35) continue;
-      const pd = map.parkDistance(x, z);
-      if (pd < 30 || pd > 2200) continue;
-      if (hash2i(ix, iz, 3) > u * 0.42 * (1 - pd / 3000)) continue;
+      // (the Ardennes are all "park": their villages are placed by urban() alone)
+      const pd = be ? 0 : map.parkDistance(x, z);
+      if (!be && (pd < 30 || pd > 2200)) continue;
+      if (hash2i(ix, iz, 3) > u * (be ? 0.6 : 0.42) * (1 - pd / 3000)) continue;
       // local street grid orientation (matches the ground pattern's blocks roughly)
       const ang = Math.floor(hash2i(Math.floor(x / 500), Math.floor(z / 500), 9) * 4) * 0.4 + 0.2;
-      const jx = (hash2i(ix, iz, 5) - 0.5) * 6, jz = (hash2i(ix, iz, 6) - 0.5) * 6;
+      const jx = (hash2i(ix, iz, 5) - 0.5) * (be ? 14 : 6), jz = (hash2i(ix, iz, 6) - 0.5) * (be ? 14 : 6);
       const px = x + jx, pz = z + jz;
       const big = hash2i(ix, iz, 7);
-      const block = big > (au ? 0.9 : hu ? 0.97 : at ? 0.94 : us ? 0.97 : uk ? 0.95 : jp ? 0.88 : 0.8); // condominio / mansion block
+      const block = big > (be ? 0.96 : au ? 0.9 : hu ? 0.97 : at ? 0.94 : us ? 0.97 : uk ? 0.95 : jp ? 0.88 : 0.8); // condominio / mansion block
       const w = block ? 22 + big * 12 : 11 + hash2i(ix, iz, 8) * 10;
       const d = block ? 13 + hash2i(ix, iz, 10) * 6 : 9 + hash2i(ix, iz, 11) * 7;
-      const h = block ? 14 + hash2i(ix, iz, 12) * 13 : hu ? 4 + hash2i(ix, iz, 13) * 3 : 6 + hash2i(ix, iz, 13) * 5; // (Hungarian village houses: one storey)
+      const h = block ? (be ? 10 + hash2i(ix, iz, 12) * 5 : 14 + hash2i(ix, iz, 12) * 13) : hu ? 4 + hash2i(ix, iz, 13) * 3 : 6 + hash2i(ix, iz, 13) * 5; // (Hungarian village houses: one storey)
       list.push({
-        x: px, z: pz, y: map.height(px, pz) - 0.3, w, d, h, rot: -ang,
+        x: px, z: pz, y: map.height(px, pz) - 0.3, w, d, h, rot: -ang + (be ? (hash2i(ix, iz, 17) - 0.5) * 0.7 : 0),
         wall: wallPal[Math.floor(hash2i(ix, iz, 14) * wallPal.length)].clone().multiplyScalar(0.85 + r() * 0.2),
         roof: new THREE.Color(roofPal[Math.floor(hash2i(ix, iz, 15) * roofPal.length)]).multiplyScalar(0.85 + r() * 0.25),
-        flat: block ? hash2i(ix, iz, 16) < 0.6 : hash2i(ix, iz, 16) < 0.12,
+        flat: be ? false : block ? hash2i(ix, iz, 16) < 0.6 : hash2i(ix, iz, 16) < 0.12,
       });
     }
   // campanili at the village centres (no bell towers in Japan)
-  for (const v of jp || us || at || hu ? [] : layout.villages) {
+  // (the Ardennes' churches, with their slate spires, are built by venues/spaScenery.ts)
+  for (const v of jp || us || at || hu || be ? [] : layout.villages) {
     const u = map.urban(v.x, v.z);
     if (u < 0.3 || v.x < S.x0 || v.x > S.x1 || v.z < S.z0 || v.z > S.z1) continue;
     list.push({ x: v.x, z: v.z, y: map.height(v.x, v.z) - 0.3, w: uk ? 6.5 : 5.5, d: uk ? 6.5 : 5.5, h: uk ? 20 + r() * 6 : 38 + r() * 12, rot: r(), wall: new THREE.Color(uk ? 0xb89a70 : 0xc79a78), roof: new THREE.Color(uk ? 0x4a4d52 : 0x8a3f28), flat: uk });
@@ -204,7 +212,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
     if (!b.flat) {
       const tower = b.w < 6;
       p.set(b.x, b.y + b.h, b.z);
-      s.set(b.w + (tower ? 0.3 : 1.0), tower ? 5 : Math.min(b.d, b.w) * 0.32, b.d + (tower ? 0.3 : 1.0));
+      s.set(b.w + (tower ? 0.3 : 1.0), tower ? 5 : Math.min(b.d, b.w) * (be ? 0.52 : 0.32), b.d + (tower ? 0.3 : 1.0));
       m.compose(p, q, s);
       roofs.setMatrixAt(nr, m);
       roofs.setColorAt(nr, b.roof);

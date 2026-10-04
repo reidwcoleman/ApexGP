@@ -116,6 +116,11 @@ npm run check    # tsc --noEmit
   (Unicredit and its spire, Solaria, the Diamond, Bosco Verticale, the Pirelli tower, CityLife's straight,
   twisting and curving towers, Torre Velasca, the Duomo and its spire, the city round them) in front of the
   horizon's painted sprawl. `tools/_monzalm.mjs` frames them.
+- **Spa's own landmarks** (`env/venues/spaScenery.ts`, worldmap `ARDENNES_TOWNS`) — Francorchamps north-east of
+  La Source and the hamlets of Burnenville and Ster: Belgian houses (grey rubble stone, whitewash, steep slate) in
+  garden clearings (terrain `uTownYard` = 1: lawns, no painted roofs), each village with its stone church under a
+  slate spire. Raidillon has gravel on the outside and the big covered stand at the top (2022); Les Combes gravel;
+  the Ardennes forest is about three-quarters spruce.
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars

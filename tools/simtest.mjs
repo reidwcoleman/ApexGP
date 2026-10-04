@@ -8,7 +8,7 @@ import { AIDriver } from '../src/sim/AIDriver.ts';
 
 const N = Number(process.argv[2] ?? 1);
 const LAPS = Number(process.argv[3] ?? 2);
-const track = new Track(CIRCUITS[0]);
+const track = new Track(CIRCUITS.find((c) => c.id === (process.env.TRACK ?? CIRCUITS[0].id)));
 const profile = new RacingProfile(track, F1_SPEC);
 console.log('profile theoretical lap', profile.lapTime.toFixed(2), 's; vmax min', Math.min(...profile.vmax).toFixed(1), 'max', Math.max(...profile.vmax).toFixed(1));
 for (const c of track.corners) console.log(`  ${c.name.padEnd(22)} R${String(c.radius).padStart(3)} apex v=${(profile.at(c.sApex) * 3.6).toFixed(0)} km/h`);

@@ -134,8 +134,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const n = fbm2(x / 260 + 4.1, z / 260 - 2.7, 3);
     const n2 = fbm2(x / 90 - 1.3, z / 90 + 8.8, 2);
     // the Ardennes: spruce plantations with stands of beech/oak (the chestnut crowns stand in for beech)
-    // (about a third broadleaf, in stands, so the hills read as a patchwork of dark conifer and lighter beech)
-    if (map.venue === 'ardennes') return n < -0.02 || (n < 0.18 && h > 0.5) || h > 0.9 ? 'spruce' : n2 > -0.1 ? 'chestnut' : 'oak';
+    // (about a quarter broadleaf, in stands, so the hills read as dark conifer with patches of lighter beech)
+    if (map.venue === 'ardennes') return n < 0.12 || (n < 0.3 && h > 0.4) || h > 0.85 ? 'spruce' : n2 > -0.1 ? 'chestnut' : 'oak';
     // English lowland: oak and ash (the plane crowns stand in for ash), a few horse chestnuts and poplars
     if (map.venue === 'airfield') return n < 0.05 ? 'oak' : n < 0.3 ? 'plane' : n2 > 0.3 ? 'poplar' : 'chestnut';
     // Suzuka: sugi cedar and pine on the slopes (the spruce crowns stand in), oak and chestnut in the hollows

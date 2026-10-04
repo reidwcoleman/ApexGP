@@ -137,6 +137,8 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uPasture: { value: 0.32 },
     /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
     uCity: { value: 0 },
+    /** share of town ground that is gardens rather than painted roofs (Spa's villages are real houses on lawns) */
+    uTownYard: { value: 0.14 },
     /**
      * (m) beyond this the land's haze distance grows only as √distance, like the horizon ring's
      * (horizon.ts HAZE_EASE): the hills 8–15 km off keep their woods and folds through a summer haze
@@ -190,6 +192,7 @@ uniform float uArid;
 uniform float uForestCover, uPasture;
 uniform float uWetness, uRain, uWTime;
 uniform float uCity;
+uniform float uTownYard;
 varying vec3 vWPos;
 varying vec3 vWNormal;
 float tRough;
@@ -460,8 +463,9 @@ float tWoodAt( vec2 q, float fShift ) {
     // pitched roofs: light/dark halves
     roof *= 0.82 + 0.3 * step( 0.5, fract( ( bf.y - 7.0 ) / 13.0 ) );
     vec3 yard = mix( uLawn, uGrassDark, 0.4 ) * ( 0.8 + 0.3 * d1 );
-    vec3 townC = h21( bc + lc * 3.3 ) < 0.14 ? yard : roof;
-    townC = mix( townC, vec3( 0.22, 0.22, 0.23 ), street );
+    vec3 townC = h21( bc + lc * 3.3 ) < uTownYard ? yard : roof;
+    // (garden villages: the lanes are faint tracks between the plots, not a street grid)
+    townC = mix( townC, vec3( 0.22, 0.22, 0.23 ), street * ( uTownYard > 0.5 ? 0.3 : 1.0 ) );
     col = mix( col, townC, urban * ( 1.0 - forest * 0.6 ) );
   }
   // mountains: wooded slopes, bare rock and scree higher up

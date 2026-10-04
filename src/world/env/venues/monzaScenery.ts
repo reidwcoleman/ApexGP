@@ -25,7 +25,7 @@ import { Merge, cityMaterial } from './montrealCity.ts';
 const C = (h: number) => new THREE.Color(h);
 
 /** plain vertex-colour geometry with true face normals (roofs, cornices, spires: no windows) */
-class Plain {
+export class Plain {
   pos: number[] = [];
   nor: number[] = [];
   col: number[] = [];

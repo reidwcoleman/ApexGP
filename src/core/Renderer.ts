@@ -1227,7 +1227,7 @@ export class Renderer {
     this.smaaPass.renderToScreen = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
-    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 8 : q === 'high' ? 12 : 16;
+    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 10 : q === 'high' ? 14 : 20;
     this.onboard.twoSided = q === 'high' || q === 'ultra';
     this.dynamicScale = 1;
     this.resize();

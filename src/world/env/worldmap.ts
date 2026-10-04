@@ -364,6 +364,7 @@ export class WorldMap {
     if (this.venue === 'mexico') return mexicoUrban(this, x, z);
     if (this.venue === 'yasmarina') return yasmarinaUrban(this, x, z);
     if (this.venue === 'hungaroring') return hungaroringUrban(this, x, z);
+    if (this.venue === 'ardennes') return ardennesUrban(this, x, z);
     const out = this.outsidePark(x, z);
     if (out <= 0) return 0;
     const d = this.parkDistance(x, z);
@@ -962,6 +963,8 @@ export class WorldMap {
       f = smoothstep(0.34, 0.56, 0.58 + 0.4 * n1 + 0.14 * n2 + nearBoost * 0.6) * smoothstep(26, 70, dT);
     }
     if (this.venue === 'austin') return clamp(austinForest(this, x, z, dT) * this.clearingKeep(x, z), 0, 1);
+    // (the Ardennes villages stand in their own clearings: meadows and gardens round the houses)
+    if (this.venue === 'ardennes') f *= 1 - smoothstep(0.08, 0.4, this.urban(x, z));
     f *= this.clearingKeep(x, z);
     const out = this.outsidePark(x, z);
     if (out > 0) {
@@ -975,6 +978,32 @@ export class WorldMap {
     }
     return clamp(f, 0, 1);
   }
+}
+
+// ---------------------------------------------------------------- the Ardennes villages
+
+/**
+ * The villages round Spa (in circuit metres, +x east, −z north): Francorchamps on the slope
+ * north-east of La Source and Eau Rouge, and the hamlets out in the forest to the east (towards
+ * Burnenville and Malmedy) and west (Ster). Each a ragged blob along its lanes, never within
+ * 220 m of the track.
+ */
+export const ARDENNES_TOWNS: { x: number; z: number; r: number; seed: number; name: string }[] = [
+  { x: 560, z: -1270, r: 360, seed: 3, name: 'Francorchamps' },
+  { x: 1240, z: 330, r: 210, seed: 7, name: 'Burnenville' },
+  { x: -1180, z: 560, r: 190, seed: 11, name: 'Ster' },
+];
+
+function ardennesUrban(map: WorldMap, x: number, z: number): number {
+  let u = 0;
+  for (const t of ARDENNES_TOWNS) {
+    const d = Math.hypot(x - t.x, z - t.z);
+    if (d > t.r * 1.3) continue;
+    const e = d + 70 * fbm2(x / 160 + t.seed, z / 160 - t.seed, 2);
+    u = Math.max(u, smoothstep(t.r, t.r * 0.35, e));
+  }
+  if (u <= 0) return 0;
+  return u * smoothstep(220, 300, map.distToTrack(x, z));
 }
 
 // ---------------------------------------------------------------- anchors
