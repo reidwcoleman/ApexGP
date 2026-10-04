@@ -260,7 +260,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       if (!isWallK(P.kind[iB]) || !nextOk) cap(capB, rB, xb1, xb1 + T, 0, H, 1, kind === 'pitwall' ? chev : undefined);
     } else if (!gate) {
       // armco: two W-beam rails (galvanised steel)
-      props.color(0xaeb2b6).mat(0.36, 0.85, 0);
+      props.color(0xa3a7ab).mat(0.52, 0.8, 0);
       for (const y0 of [0.46, 0.83]) armcoRail(props, rA, rB, y0, xb0, xb1);
       // sponsor boards bolted over the rails
       if (P.boards[i]) {
@@ -366,7 +366,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     // overlapping armco section behind the gap (the classic staggered opening)
     if (P.kind[i] === 'armco') {
       const r0 = Math.max(0, r - 3), r1 = Math.min(n, rEnd + 3);
-      props.color(0xaeb2b6).mat(0.36, 0.85, 0);
+      props.color(0xa3a7ab).mat(0.52, 0.8, 0);
       for (let q = r0; q < r1; q++) for (const y0 of [0.46, 0.83]) armcoRail(props, q, q + 1, y0, P.backOff[W(q)] + 2.2, P.backOff[W(q + 1)] + 2.2);
     }
   }

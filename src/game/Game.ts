@@ -18,7 +18,7 @@ import { createEnvironment, type Environment, type Scenery } from '../world/Envi
 import { sceneryBuilder } from '../world/env/scenery.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
-import { createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
+import { DASH_GLOW, createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
@@ -1971,7 +1971,9 @@ export class Game {
     this.updatePits(dt, race);
     this.updateHeadlights(wx);
     this.trackside.update(dt, this.camera);
-    this.particles.glowScale = 1 / Math.sqrt(Math.max(1, this.gfx.grade.uniforms.get('lookExposure')!.value as number));
+    const lookExp = Math.max(1, this.gfx.grade.uniforms.get('lookExposure')!.value as number);
+    this.particles.glowScale = 1 / Math.sqrt(lookExp);
+    DASH_GLOW.value = 1.6 / Math.pow(lookExp, 0.8);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     this.updateAudio(dt);
     this.updateMotionBlur();

@@ -126,9 +126,24 @@ float cRough;`,
     conc = mix( conc, mix( vec3( 0.2, 0.24, 0.12 ), vec3( 0.28, 0.3, 0.18 ), n3 ), moss * 0.55 );
     // black water stains on the running surface; formwork panels + streaks on walls
     conc = mix( conc, conc * 0.6, smoothstep( 0.66, 0.82, n4 ) * 0.4 * up );
-    float panel = abs( fract( ( p.x + p.z ) / 1.25 ) - 0.5 );
-    conc *= 1.0 - ( 1.0 - up ) * ( 1.0 - smoothstep( 0.46, 0.49, panel ) ) * 0.0 - ( 1.0 - up ) * smoothstep( 0.47, 0.5, panel ) * 0.18;
-    conc *= 1.0 - ( 1.0 - up ) * smoothstep( 2.5, 0.0, p.y - texture2D( uNoise, p.xz * 0.02 ).r * 3.0 ) * 0.0;
+    // walls, girder faces and piers (kind 1): a paler cast-in-place grey with the formwork's
+    // 2.4 m panel joints, 1.2 m pour lines and tie holes up close, and the road's grime splashed up the foot
+    if ( kind > 0.5 ) {
+      float wall = 1.0 - up;
+      vec2 tW = normalize( vec2( -vCN.z, vCN.x ) + 1e-4 );
+      float u = dot( p.xz, tW );
+      float fw = length( fwidth( vec2( u, p.y ) ) );
+      float near = 1.0 - smoothstep( 0.03, 0.15, fw );
+      // (neutral: under the warm grade a warm grey went brown like old timber)
+      conc = mix( conc, vec3( dot( conc, vec3( 0.333 ) ) ) * vec3( 0.97, 0.99, 1.03 ), wall * 0.8 ) * mix( 1.0, 1.3, wall );
+      float jv = 1.0 - smoothstep( 0.012, 0.012 + fw * 1.5, abs( fract( u / 2.4 + 0.5 ) - 0.5 ) * 2.4 );
+      float jh = 1.0 - smoothstep( 0.01, 0.01 + fw * 1.5, abs( fract( p.y / 1.2 + 0.5 ) - 0.5 ) * 1.2 );
+      vec2 tc = vec2( fract( u / 0.6 ) - 0.5, fract( p.y / 0.6 ) - 0.5 ) * 0.6;
+      float tie = 1.0 - smoothstep( 0.012, 0.012 + fw, length( tc ) );
+      conc *= 1.0 - wall * near * ( 0.18 * max( jv, jh ) + 0.3 * tie );
+      // soot and grime in blotches
+      conc *= 1.0 - wall * 0.2 * smoothstep( 0.4, 0.9, n3 + 0.3 * n2 );
+    }
     col = conc;
     cRough = mix( 0.88, 0.95, moss );
   } else {
@@ -143,7 +158,7 @@ float cRough;`,
       )
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = cRough;');
   };
-  mat.customProgramCacheKey = () => 'apex-banking-concrete-v1';
+  mat.customProgramCacheKey = () => 'apex-banking-concrete-v2';
   return mat;
 }
 
@@ -488,7 +503,8 @@ export function buildBanking(o: OvalPath, track: Track, map: WorldMap, terrainMa
   add(conc, cmat, 'banking_concrete', true);
   add(rust, cmat, 'banking_rails', false);
   add(earth, terrainMat, 'banking_embankment', false);
-  const bannerMat = new THREE.MeshStandardMaterial({ map: sponsorTexture(), roughness: 0.6, emissiveMap: sponsorTexture(), emissive: 0xffffff, emissiveIntensity: 0.12, side: THREE.DoubleSide });
+  // (front faces only: seen from under the bridge a double-sided banner showed its text mirrored)
+  const bannerMat = new THREE.MeshStandardMaterial({ map: sponsorTexture(), roughness: 0.6, emissiveMap: sponsorTexture(), emissive: 0xffffff, emissiveIntensity: 0.12, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   add(banner, bannerMat, 'banking_banners', false);
 
   void BANK_RISE;

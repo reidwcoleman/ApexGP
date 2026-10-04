@@ -803,7 +803,16 @@ float gRake = 0.0;
   float wet = smoothstep(0.0, 0.3, uWetness);
   col *= 1.0 - 0.5 * wet;
   rough = mix(rough, mix(0.62, 0.3, gh), wet);
-  diffuseColor.rgb = col * vec3(0.84, 0.78, 0.68);
+  // at TV range the pebbles average out to one flat beige: keep a grain of stone clumps and damp,
+  // compacted patches at 1–3 m, and the cars' tracks across it, so a trap still reads as loose gravel
+  {
+    float far = smoothstep(0.03, 0.2, px);
+    vec4 mD = texture2D(uMacro, vTrk * (1.0 / 2.3) + vec2(0.27, 0.61));
+    col *= 1.0 + far * (0.22 * (mD.g - 0.5) + 0.14 * (mC.g - 0.5));
+    col *= 1.0 - far * 0.12 * smoothstep(0.55, 0.85, mB.g);
+  }
+  // (a light grey-beige river gravel, not a sand-yellow)
+  diffuseColor.rgb = col * vec3(0.82, 0.78, 0.71);
   roughnessFactor = rough;
 }
 `;
@@ -822,7 +831,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-5', t, GRAVEL_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-gravel-6', t, GRAVEL_FRAG, (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
@@ -1124,10 +1133,14 @@ export function fenceMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial {
       .replace('#include <common>', '#include <common>\nuniform float uWetness;')
       .replace(
         '#include <map_fragment>',
-        '#include <map_fragment>\n  diffuseColor.a *= mix(1.0, 0.4, smoothstep(6.0, 45.0, length(vViewPosition)));\n  diffuseColor.rgb *= 1.0 - 0.25 * uWetness;',
-      );
+        // (seen edge-on down a straight the mesh piles up into a solid grey sheet that mirrored the sky like
+        // glass: thin it and take the sheen off at grazing angles — a real catch fence is a faint haze there)
+        '#include <map_fragment>\n  float fNdv = abs(dot(normalize(vNormal), normalize(vViewPosition)));\n  float fGraze = 1.0 - smoothstep(0.04, 0.45, fNdv);\n  diffuseColor.a *= mix(1.0, 0.4, smoothstep(6.0, 45.0, length(vViewPosition))) * (1.0 - 0.6 * fGraze * smoothstep(4.0, 25.0, length(vViewPosition)));\n  diffuseColor.rgb *= 1.0 - 0.25 * uWetness;',
+      )
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.9, fGraze);')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = mix(metalnessFactor, 0.1, fGraze);');
   };
-  m.customProgramCacheKey = () => 'apex-ts-fence-3';
+  m.customProgramCacheKey = () => 'apex-ts-fence-4';
   return m;
 }
 

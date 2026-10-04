@@ -310,6 +310,12 @@ function patchTrim(mat: THREE.MeshStandardMaterial, u: TrimUniforms) {
   mat.customProgramCacheKey = () => 'apex-trim-v2';
 }
 
+/**
+ * The wheel's screen and LEDs (self-lit trim), shared by every car. Game scales it against the grade's
+ * exposure: a dark wet day is exposed up ~6x and the dash with it, which blew the gear digit into a blob.
+ */
+export const DASH_GLOW = { value: 1.6 };
+
 // ------------------------------------------------------------------------------------ shared materials
 /** per-car carbon: a weave under a lacquer (wings, halo fairings, bodywork) that goes satin on the floor and plank area */
 function makeCarbon(grime: GrimeUniforms) {
@@ -511,7 +517,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const tyres = [0, 1, 2, 3].map((i) => createTyreMaterial(compound, `car-wheel-${['FL', 'FR', 'RL', 'RR'][i]}`));
   const ts = trimShared();
   const trimTex = trimTexture(team, driver, seat);
-  const uniforms: TrimUniforms = { uHeat: { value: 0 }, uRainLight: { value: 0 }, uSelf: { value: 3.0 } };
+  const uniforms: TrimUniforms = { uHeat: { value: 0 }, uRainLight: { value: 0 }, uSelf: DASH_GLOW };
   const trim = new THREE.MeshStandardMaterial({
     name: 'car-trim',
     map: trimTex,
