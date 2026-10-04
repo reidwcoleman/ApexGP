@@ -24,7 +24,7 @@ import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL, ONBOARD, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, type CameraMode } from './Cameras.ts';
+import { Cameras, CAMERA_LABEL, ONBOARD, INSIDE_CAR, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
 import { Director, type FieldCar } from './Director.ts';
 import { Sightlines } from './Sightlines.ts';
@@ -94,8 +94,12 @@ function smokeLight(w: WeatherState): THREE.Color {
 
 type CompoundRig = CarRig & { setCompound?: (c: string) => void };
 
-/** cameras that sit right on the bodywork: they get the tight, fine-texel shadow cascade */
-const EYE_CAMS: Partial<Record<string, true>> = { cockpit: true, helmet: true, tcam: true, nose: true, wheel: true };
+/**
+ * Cameras that sit right on the bodywork get the tight, fine-texel shadow cascade (every onboard:
+ * ONBOARD); the ones inside the cockpit also get the dark, defocused cockpit (INSIDE_CAR). Both
+ * test what is on screen (Cameras.view: under the TV director, the shot it has on air).
+ */
+const EYE_CAMS = ONBOARD;
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -1764,7 +1768,7 @@ export class Game {
     // the gantry is lit only while a live countdown runs (never over a replay, the results or the menu)
     const liveCountdown = (this.state === 'race' || this.state === 'intro' || this.state === 'spectate') && race.phase === 'lights';
     this.trackside.startLights.set(liveCountdown ? race.lightsLit : 0);
-    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && this.cams.mode !== 'tv' && this.cams.mode !== 'heli' && !race.player.finished;
+    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && !isRemoteCam(this.cams.view) && this.cams.view !== 'gtchase' && !race.player.finished;
     this.line.mesh.visible = showLine;
     // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
     if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
@@ -1787,7 +1791,7 @@ export class Game {
     this.gfx.indoor = indoor;
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
-    const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.mode];
+    const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.view];
     this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos(), eyeCam ? 16 : undefined);
     // the crowds and the trackside people follow the race
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
@@ -2226,7 +2230,7 @@ export class Game {
 
   /** the halo POV hides the followed car's driver (his helmet is where the lens is) */
   private povUpdate() {
-    const want = (this.state === 'spectate' || this.state === 'replay') && this.cams.mode === 'cockpit' ? (this.rigs.get(this.race.cars[this.focusId].entry) ?? null) : null;
+    const want = (this.state === 'spectate' || this.state === 'replay') && INSIDE_CAR[this.cams.view] ?(this.rigs.get(this.race.cars[this.focusId].entry) ?? null) : null;
     if (want === this.povRig) return;
     this.povRig?.setDriverVisible(true);
     want?.setDriverVisible(false);
@@ -2481,8 +2485,8 @@ export class Game {
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
     CarView.lodScale = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) / Math.tan(THREE.MathUtils.degToRad(25));
     this.camPos.copy(this.camera.position);
-    const onboardEye = this.cams.mode === 'cockpit' || this.cams.mode === 'helmet';
-    const visor = this.cams.mode === 'helmet' && (this.state === 'race' || this.state === 'intro' || this.state === 'paused');
+    const onboardEye = INSIDE_CAR[this.cams.view] === true;
+    const visor = this.cams.view === 'helmet' && (this.state === 'race' || this.state === 'intro' || this.state === 'paused');
     if (visor !== this.visorOn) {
       this.visorOn = visor;
       this.visor.style.opacity = visor ? '1' : '0';
@@ -3313,7 +3317,7 @@ export class Game {
     const live = st === 'race' || st === 'intro' || st === 'results' || st === 'replay' || st === 'spectate' || st === 'flashback';
     const g = this.gfx;
     g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] : 0;
-    const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && EYE_CAMS[this.cams.mode];
+    const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
     if (this.cams.cuts !== this.lastCuts) {
       this.lastCuts = this.cams.cuts;
@@ -3327,7 +3331,11 @@ export class Game {
     all.length = 0;
     for (const rig of this.rigs.values()) if (rig.root.visible && rig.root.parent) all.push(rig.root);
     all.sort((a, b) => a.position.distanceToSquared(cp) - b.position.distanceToSquared(cp));
-    for (let i = 0; i < all.length && i < MOTION_CARS; i++) out.push(all[i]);
+    // the car the camera follows always moves as a car (a long lens 150 m off has other cars nearer
+    // it: left out, the panning lens' own motion would smear the car it holds sharp)
+    const followed = this.cams.followed;
+    if (followed && followed.visible && followed.parent) out.push(followed);
+    for (let i = 0; i < all.length && out.length < MOTION_CARS; i++) if (all[i] !== followed) out.push(all[i]);
   }
 
   private speedFx() {
@@ -3336,15 +3344,15 @@ export class Game {
     // the chase cameras get a hint of radial speed blur at the edges; the onboards stay crisp (the
     // cockpit, the halo and the wheel are right in front of the lens — any smear reads as soft focus)
     // (with camera motion blur on, the real per-pixel streaks replace the radial approximation)
-    const chaseCam = this.cams.mode === 'chase' || this.cams.mode === 'far';
+    const chaseCam = this.cams.view === 'chase' || this.cams.view === 'far' || this.cams.view === 'lowchase';
     const k = chaseCam ? Math.max(0, Math.min(1, (kmh - 190) / 150)) : 0;
     const radial = (this.menu.settings.motionBlur ?? 'cinematic') === 'off';
     this.gfx.setSpeedBlur(radial ? k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0) : 0);
     this.gfx.setAberration(k * 0.0004);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
-    const cam = this.cams.mode;
-    const lensCam = ONBOARD[cam] ? 1 : cam === 'chase' ? 0.35 : 0;
+    const cam = this.cams.view;
+    const lensCam = ONBOARD[cam] ? 1 : cam === 'chase' || cam === 'lowchase' ? 0.35 : 0;
     const spray = car.dirty * Math.min(1, car.speed / 40) * w.wetness;
     const lens = lensCam * Math.min(1, w.rain * (0.55 + 0.45 * Math.min(1, car.speed / 45)) + spray * 0.8);
     (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0);
@@ -3398,7 +3406,7 @@ export class Game {
     const watching = this.state === 'spectate' || replaying;
     const ours = watching ? (race.cars[this.focusId] ?? race.player) : race.player;
     const car = carOf(ours);
-    a.setView(ONBOARD[this.cams.mode] ? 'cockpit' : isRemoteCam(this.cams.mode) ? 'tv' : 'chase');
+    a.setView(ONBOARD[this.cams.view] ? 'cockpit' : isRemoteCam(this.cams.view) || this.cams.view === 'gtchase' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
     a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ));
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
@@ -3436,7 +3444,7 @@ export class Game {
     const list: { id: number; rpm: number; throttle: number; distance: number; relVel: number; pan: number; behind: number }[] = [];
     for (const c of race.cars) {
       if (c === ours) {
-        if (isRemoteCam(this.cams.mode)) {
+        if (isRemoteCam(this.cams.view) || this.cams.view === 'gtchase') {
           const p = this.rigs.get(c.entry)!.root.position;
           const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
           const d = Math.hypot(dx, dy, dz);
