@@ -22,7 +22,12 @@ export const aerialParams = { x: 1.6e-4, y: 1 / 260, z: 0, w: 1 };
 export const aerialSunDir = { x: -0.6, y: 0.15, z: 0.78 };
 /** colour added toward the sun (linear, premultiplied by strength) */
 export const aerialSunColor = { r: 0.5, g: 0.3, b: 0.1 };
-/** x = haze density scale for the lens in use (1; a long lens thins it), y unused */
+/**
+ * x = haze density scale for the lens in use (1; a long lens thins it, set by the Game);
+ * y = colour of the air 0 … 1 (Environment): clear air scatters blue out of a view ray faster than
+ * red, so a hill a few kilometres off turns blue-grey long before it melts into the horizon — the
+ * layering of ridges in real footage. 0 = grey droplets (fog, rain), which take every colour alike.
+ */
 export const aerialLens = { x: 1, y: 0 };
 /** fog banks: x = patchiness 0 … 1 (0 = off), y = 1 / bank size (1/m), zw = drift offset (m) */
 export const aerialBanks = { x: 0, y: 1 / 380, z: 0, w: 0 };
@@ -75,6 +80,7 @@ const PARS_FRAGMENT = /* glsl */ `
     float dist = length( vFogRay );
     vec3 dir = vFogRay / max( dist, 1e-4 );
     float fogA;
+    vec3 fogA3 = vec3( 0.0 );
     vec3 haze = fogColor;
     if ( aerialParams.x > 0.0 ) {
       float k = aerialParams.y;
@@ -89,7 +95,11 @@ const PARS_FRAGMENT = /* glsl */ `
         float bn = aerialNoise( bp ) * 0.65 + aerialNoise( bp * 2.7 + 5.3 ) * 0.35;
         od *= 1.0 + aerialBanks.x * ( bn * 2.0 - 1.0 ) * 0.85 * exp( - dist * aerialBanks.y * 0.25 );
       }
-      fogA = min( 1.0 - exp( - od ), aerialParams.w );
+      // per channel: blue is lost first (aerialLens.y), so distance reads as a colour shift, not just
+      // a fade — near ridges stay dark and green, the next ones blue-grey, the last ones pale
+      vec3 odc = od * ( 1.0 + aerialLens.y * vec3( -0.2, 0.0, 0.26 ) );
+      fogA3 = min( 1.0 - exp( - odc ), vec3( aerialParams.w ) );
+      fogA = fogA3.g;
       float mu = max( dot( dir, aerialSunDir ), 0.0 );
       // the glow round a low sun is the whole atmosphere's forward scatter: it builds over kilometres of
       // air, so a car a few hundred metres down a long lens isn't veiled in it (the sunset wash)
@@ -101,8 +111,9 @@ const PARS_FRAGMENT = /* glsl */ `
       #else
         fogA = smoothstep( fogNear, fogFar, vFogDepth );
       #endif
+      fogA3 = vec3( fogA );
     }
-    return mix( col, haze, fogA );
+    return mix( col, haze, fogA3 );
   }
 #endif
 `;
@@ -151,6 +162,7 @@ export function aerialOpacity(dist: number, dirY: number, camY: number): number 
   const k = aerialParams.y;
   const x = k * dirY * dist;
   const f = Math.abs(x) > 1e-3 ? (1 - Math.exp(-x)) / x : 1 - 0.5 * x;
+  // (the green channel's opacity: the middle of the per-channel fade)
   const od = aerialParams.x * Math.exp(-k * Math.max(camY - aerialParams.z, -50)) * dist * f;
   return Math.min(1 - Math.exp(-od), aerialParams.w);
 }

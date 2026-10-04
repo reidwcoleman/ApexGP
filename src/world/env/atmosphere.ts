@@ -34,7 +34,17 @@ export interface AtmosphereParams {
 }
 
 export interface SkyLUT {
+  /** in-scattered radiance without the sharp Mie forward peak (Rayleigh + multiple scattering) */
   texture: THREE.DataTexture;
+  /**
+   * single-scattered Mie radiance *before* its phase function: the shader multiplies it by the
+   * Cornette-Shanks phase of the true sun angle per pixel. Baked into a 48 × 72 grid in (azimuth,
+   * elevation) the forward peak (g ≈ 0.8) was bilinearly smeared into a pink, mountain-shaped glow
+   * standing on the horizon under a low sun; evaluated per pixel it is the round aureole it should be.
+   */
+  mieTexture: THREE.DataTexture;
+  /** Mie phase asymmetry the LUT was built with */
+  g: number;
   width: number;
   height: number;
   data: Float32Array;
@@ -42,6 +52,11 @@ export interface SkyLUT {
   sunT: THREE.Color;
   /** CPU lookup of the LUT for a direction given in sun-relative terms */
   sample(elevation: number, dPhi: number, out?: THREE.Color): THREE.Color;
+  /**
+   * the same, but as the sky dome draws it: the Mie single scattering with the phase of asymmetry `g`
+   * at the true sun angle, scaled by `mieK` (sky.ts uMieG / uMieK)
+   */
+  sampleSky(elevation: number, dPhi: number, g: number, mieK: number, out?: THREE.Color): THREE.Color;
 }
 
 // ---------------------------------------------------------------- transmittance
@@ -115,6 +130,9 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
   const se = p.sunElevation;
   const sx = Math.cos(se), sy = Math.sin(se);
   const data = new Float32Array(W * H * 4);
+  /** the GPU textures: everything but the Mie single scattering, and that without its phase */
+  const base = new Float32Array(W * H * 4);
+  const mie = new Float32Array(W * H * 4);
   const tau = [0, 0, 0];
   const STEPS = 26;
   const inv4pi = 1 / (4 * Math.PI);
@@ -143,6 +161,7 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
       // Cornette-Shanks
       const pm = ((3 / (8 * Math.PI)) * ((1 - g * g) * (1 + cosT * cosT))) / ((2 + g * g) * Math.pow(1 + g * g - 2 * g * cosT, 1.5));
       let Lr = 0, Lg = 0, Lb = 0;
+      let Mr = 0, Mg = 0, Mb = 0; // Mie single scattering without the phase function
       let ar = 0, ag = 0, ab = 0; // accumulated optical depth
       let tPrev = 0;
       for (let s = 0; s < STEPS; s++) {
@@ -176,30 +195,47 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
         Lr += vr * sr * scR * dt;
         Lg += vg * sg * scG * dt;
         Lb += vb * sb * scB * dt;
+        const ms0 = mieSca * dM * dt;
+        Mr += vr * sr * ms0;
+        Mg += vg * sg * ms0;
+        Mb += vb * sb * ms0;
       }
       const k = (j * W + i) * 4;
       data[k] = Lr;
       data[k + 1] = Lg;
       data[k + 2] = Lb;
       data[k + 3] = 1;
+      base[k] = Lr - Mr * pm;
+      base[k + 1] = Lg - Mg * pm;
+      base[k + 2] = Lb - Mb * pm;
+      base[k + 3] = 1;
+      mie[k] = Mr;
+      mie[k + 1] = Mg;
+      mie[k + 2] = Mb;
+      mie[k + 3] = 1;
     }
   }
 
-  const half = new Uint16Array(W * H * 4);
-  for (let i = 0; i < half.length; i++) half[i] = THREE.DataUtils.toHalfFloat(data[i] * 10);
-  const texture = new THREE.DataTexture(half, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
+  const toTexture = (src: Float32Array) => {
+    const half = new Uint16Array(W * H * 4);
+    for (let i = 0; i < half.length; i++) half[i] = THREE.DataUtils.toHalfFloat(src[i] * 10);
+    const t = new THREE.DataTexture(half, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
+    t.magFilter = THREE.LinearFilter;
+    t.minFilter = THREE.LinearFilter;
+    t.wrapS = THREE.ClampToEdgeWrapping;
+    t.wrapT = THREE.ClampToEdgeWrapping;
+    t.colorSpace = THREE.NoColorSpace;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    return t;
+  };
+  const texture = toTexture(base);
+  const mieTexture = toTexture(mie);
 
   lookupTau(tab, alt, sy, tau);
   const sunT = new THREE.Color(Math.exp(-tau[0]), Math.exp(-tau[1]), Math.exp(-tau[2]));
 
-  const sample = (elevation: number, dPhi: number, out = new THREE.Color()) => {
+  const bilerp = (src: Float32Array, elevation: number, dPhi: number, out: THREE.Color) => {
     const a = Math.abs(dPhi) % (Math.PI * 2);
     const phi = a > Math.PI ? Math.PI * 2 - a : a;
     const u = (phi / Math.PI) * W - 0.5;
@@ -211,13 +247,24 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
     const fv = Math.max(0, Math.min(1, v - j0));
     const c = [0, 0, 0];
     for (let ch = 0; ch < 3; ch++) {
-      const q = (jj: number, ii: number) => data[(jj * W + ii) * 4 + ch];
+      const q = (jj: number, ii: number) => src[(jj * W + ii) * 4 + ch];
       c[ch] = (q(j0, i0) * (1 - fu) + q(j0, i0 + 1) * fu) * (1 - fv) + (q(j0 + 1, i0) * (1 - fu) + q(j0 + 1, i0 + 1) * fu) * fv;
     }
     return out.setRGB(c[0], c[1], c[2]);
   };
+  const tmpMie = new THREE.Color();
+  const sampleSky = (elevation: number, dPhi: number, gs: number, mieK: number, out = new THREE.Color()) => {
+    bilerp(base, elevation, dPhi, out);
+    bilerp(mie, elevation, dPhi, tmpMie);
+    const cosT = Math.cos(elevation) * Math.cos(dPhi) * sx + Math.sin(elevation) * sy;
+    const g2 = gs * gs;
+    const pm = ((3 / (8 * Math.PI)) * ((1 - g2) * (1 + cosT * cosT))) / ((2 + g2) * Math.pow(Math.max(1e-4, 1 + g2 - 2 * gs * cosT), 1.5));
+    return out.add(tmpMie.multiplyScalar(pm * mieK));
+  };
 
-  return { texture, width: W, height: H, data, sunT, sample };
+  const sample = (elevation: number, dPhi: number, out = new THREE.Color()) => bilerp(data, elevation, dPhi, out);
+
+  return { texture, mieTexture, g, width: W, height: H, data, sunT, sample, sampleSky };
 }
 
 /** the LUT texture stores radiance × 10 (keeps half floats out of the subnormal range) */

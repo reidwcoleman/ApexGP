@@ -65,13 +65,14 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogFalloff: 1 / 700,
     fogLobe: 1.4,
     exposure: 0.92,
-    saturation: 1.12,
-    contrast: 1.08,
-    tint: [1.0, 0.93, 0.88],
-    shadowTint: [0.9, 0.95, 1.14],
+    saturation: 1.18,
+    contrast: 1.1,
+    tint: [1.0, 0.9, 0.8],
+    shadowTint: [0.94, 0.95, 1.06],
     bloom: 1.05,
     bloomThreshold: 1.0,
-    shafts: 1.0,
+    // (the radial blur of the bright low sky smeared a white glare down over the land below the sun)
+    shafts: 0.55,
   },
   morning: {
     azimuth: 112,
@@ -86,8 +87,8 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.7e-4,
     fogFalloff: 1 / 900,
     fogLobe: 0.8,
-    exposure: 1.02,
-    saturation: 1.04,
+    exposure: 1.1,
+    saturation: 1.0,
     contrast: 1.07,
     tint: [1.0, 0.985, 0.955],
     shadowTint: [0.95, 0.99, 1.06],
@@ -108,8 +109,8 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.0e-4,
     fogFalloff: 1 / 1400,
     fogLobe: 0.3,
-    exposure: 0.95,
-    saturation: 1.09,
+    exposure: 1.03,
+    saturation: 1.0,
     contrast: 1.13,
     tint: [1.0, 0.995, 0.98],
     shadowTint: [0.95, 0.98, 1.05],
@@ -130,8 +131,9 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.2e-4,
     fogFalloff: 1 / 1200,
     fogLobe: 0.45,
-    exposure: 0.97,
-    saturation: 1.07,
+    // (daytime onboard footage is exposed for the shade more than the sky: mid-grey ~0.3, colour muted)
+    exposure: 1.05,
+    saturation: 0.98,
     contrast: 1.1,
     tint: [1.0, 0.99, 0.97],
     shadowTint: [0.95, 0.985, 1.06],
@@ -152,14 +154,16 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.4e-4,
     fogFalloff: 1 / 1000,
     fogLobe: 1.2,
-    exposure: 0.88,
-    saturation: 1.16,
-    contrast: 1.1,
-    tint: [1.0, 0.93, 0.8],
-    shadowTint: [0.95, 0.96, 1.01],
+    exposure: 0.9,
+    // (golden-hour footage — the Spa long lens — is orange through and through: the light, the shade
+    // the low sun fills, even the asphalt; sRGB r/g ≈ 1.6 in the shadows, saturation ≈ 0.55)
+    saturation: 1.42,
+    contrast: 1.22,
+    tint: [1.04, 0.83, 0.56],
+    shadowTint: [1.3, 0.87, 0.52],
     bloom: 1.0,
     bloomThreshold: 1.05,
-    shafts: 1.0,
+    shafts: 0.55,
   },
   sunset: {
     azimuth: 274,
@@ -175,13 +179,13 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogFalloff: 1 / 900,
     fogLobe: 1.5,
     exposure: 0.86,
-    saturation: 1.22,
-    contrast: 1.1,
-    tint: [1.0, 0.87, 0.72],
-    shadowTint: [0.93, 0.93, 1.03],
+    saturation: 1.42,
+    contrast: 1.14,
+    tint: [1.0, 0.8, 0.58],
+    shadowTint: [1.08, 0.9, 0.72],
     bloom: 1.15,
     bloomThreshold: 1.0,
-    shafts: 1.2,
+    shafts: 0.65,
   },
   // blue hour, the sun just gone: an orange band in the west under a deep blue sky, the first
   // stars, and the floodlights taking over (Abu Dhabi)
@@ -198,11 +202,12 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.3e-4,
     fogFalloff: 1 / 900,
     fogLobe: 0.9,
-    exposure: 0.9,
-    saturation: 1.12,
-    contrast: 1.08,
-    tint: [0.98, 0.95, 1.0],
-    shadowTint: [0.86, 0.92, 1.18],
+    exposure: 0.74,
+    saturation: 1.0,
+    contrast: 1.1,
+    // (blue hour footage is slate blue-grey, the orange only a thin band where the sun went down)
+    tint: [0.86, 0.97, 1.12],
+    shadowTint: [0.84, 0.93, 1.22],
     bloom: 1.2,
     bloomThreshold: 0.95,
     shafts: 0,
@@ -230,7 +235,8 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     saturation: 1.06,
     contrast: 1.1,
     tint: [1.0, 0.98, 0.96],
-    shadowTint: [0.86, 0.92, 1.16],
+    // (night onboard footage: the dark is a greenish brown-black under the sodium and LED lights, not navy)
+    shadowTint: [0.94, 1.0, 0.9],
     bloom: 1.8,
     bloomThreshold: 0.75,
     shafts: 0,
@@ -349,7 +355,9 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // (×1.25, and never crisper than ~15 km: a summer broadcast's soft depth sells the scale;
   // dawn and dusk already carry their own thick haze)
   // (the floor is the air of real footage: even a clear day softens the far side of a circuit)
-  const fogDensity = Math.max(P.fogDensity * 1.25, 2.0e-4) * (1 + overcast * 0.8) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 1.3e-3 + thick * 3.2e-3;
+  // (a clear day's floor kept low enough that the land layers into the distance — ridge behind ridge,
+  // each bluer and paler — instead of melting into a flat band; the colour shift does the depth)
+  const fogDensity = Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 3.2e-3 + thick * 3.2e-3;
   const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
 
@@ -380,7 +388,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
     rain,
     fogDensity,
     fogFalloff,
-    fogMax: 1,
+    // (clear air never quite swallows a hillside: its silhouette stays readable against the sky)
+    fogMax: mix(0.93, 1, Math.max(wetK, smooth(0.3, 0.8, fog), overcast * 0.5)),
     fogLobe: P.fogLobe * sunVis,
     cloudHaze,
     // (in the sun the shade is darker than the sky alone would make it; under cloud the fill is the light)
