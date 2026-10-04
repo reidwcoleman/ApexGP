@@ -65,6 +65,7 @@ import { setCarAORenderer } from '../car/carAO.ts';
 import { keepData, loadData, pixelKey, preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { crowdReactions } from '../people/reactions.ts';
+import { feedCarWake } from '../world/env/treematerial.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
 
@@ -1787,6 +1788,7 @@ export class Game {
     this.gfx.indoor = indoor;
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
+    feedCarWake(this.rigs.values(), this.camera, this.state === 'paused' ? 0 : dt);
     const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.mode];
     this.env.focusShadow(this.celebration ? this.celebration.center : this.playerRigPos(), eyeCam ? 16 : undefined);
     // the crowds and the trackside people follow the race
