@@ -943,7 +943,7 @@ export class Menu {
       this.career.resetSetup();
       this.renderTab();
     });
-    el('div', 'hp-note', p, 'Drag the car to look around it. The set-up applies to your car from the next session.');
+    el('div', 'hp-note', p, 'Pick a part on the car to look at it up close. The set-up applies to your car from the next session.');
   }
 
   /** the garage tour is on: the panel and the tabs step aside for the picture */

@@ -5,7 +5,7 @@ import type { CarRig } from '../car/CarModel.ts';
 import { uiColor, type Team, type Driver } from '../race/Teams.ts';
 import { Person, fanLook, type Look, type PeopleKit } from '../people/Humans.ts';
 import { driverLook } from '../people/drivers.ts';
-import { naturalStance, turnHead, aimArm, lean } from '../people/poses.ts';
+import { naturalStance, turnHead, aimArm, lean, reachTo, lookAt } from '../people/poses.ts';
 import { makeHelmet, attachWrench } from '../people/props.ts';
 import { MOMENT_LABEL, type Highlight, type Highlights } from '../career/Highlights.ts';
 import type { Career } from '../career/Career.ts';
@@ -690,34 +690,62 @@ export class GarageScene {
       const u = (t * rate + phase) % 1;
       return u < 0.55 ? Math.sin((u / 0.55) * Math.PI) : 0;
     };
-    // mechanics kneeling at the far front wheel and the near rear wheel, wrenching on the hubs
+    // ---- the crew at work on the car: hands on real points of it (two-bone IK, the elbows bending
+    // naturally), heads following the hands, each on its own cycle of jobs
+    const R = this.rig.dims.wheelRadius;
+    const Wp = (x: number, y: number, z: number) => g.localToWorld(new THREE.Vector3(x, y, z));
+    const blend = (t: number, period: number, cuts: number[]) => {
+      // which job of the cycle (index) and the eased mix into it from the previous one
+      const u = ((t % period) + period) % period;
+      let i = cuts.length - 1;
+      for (let k = 0; k < cuts.length; k++) if (u >= cuts[k]) i = k;
+      const into = Math.min(1, (u - cuts[i]) / 0.45);
+      return { i, prev: (i + cuts.length - 1) % cuts.length, k: into * into * (3 - 2 * into), u: u - cuts[i] };
+    };
+    const mixV = (a: THREE.Vector3, b: THREE.Vector3, k: number) => a.clone().lerp(b, k);
+    /** a mechanic at a wheel: torque wrench on the nut, rocking the tyre for play, a look in the brake duct */
+    const wheelWork = (w: THREE.Vector3, rate: number, phase: number) => {
+      const out = Math.sign(w.x) || 1;
+      const face = w.x + out * 0.24;
+      const jobs = (j: number, u: number): [THREE.Vector3, THREE.Vector3, THREE.Vector3] => {
+        if (j === 0) {
+          // ratchet strokes about the hub, the other hand braced on the tyre's shoulder
+          const st = stroke(u, 0.9, 0);
+          const th = -0.5 + 1.1 * st;
+          const rh = Wp(face + out * 0.1, w.y + Math.cos(th) * 0.16, w.z + Math.sin(th) * 0.16);
+          const lh = Wp(face - out * 0.02, w.y + R * 0.92, w.z - 0.05);
+          return [rh, lh, Wp(face, w.y, w.z)];
+        }
+        if (j === 1) {
+          // both hands on the tread at ten and two, rocking it for bearing play
+          const rock = Math.sin(u * 13) * 0.015;
+          return [Wp(face - out * 0.06, w.y + R * 0.72 + rock, w.z + R * 0.62), Wp(face - out * 0.06, w.y + R * 0.72 - rock, w.z - R * 0.62), Wp(face, w.y + R * 0.6, w.z)];
+        }
+        // a torch into the brake duct, the other hand on the rim
+        const sweep = Math.sin(u * 1.7) * 0.06;
+        return [Wp(face + out * 0.14, w.y - 0.05 + sweep, w.z - 0.18), Wp(face, w.y + R * 0.45, w.z + 0.22), Wp(face - out * 0.2, w.y, w.z - 0.1 + sweep)];
+      };
+      return (p: Person, t: number) => {
+        const b = blend(t * rate + phase, 13, [0, 5.5, 9.5]);
+        const A = jobs(b.prev, 3), B = jobs(b.i, b.u);
+        const elbow = new THREE.Vector3(0, -1, 0).add(p.dir(0, 0, -0.4));
+        reachTo(p, 'r', mixV(A[0], B[0], b.k), elbow.clone().add(p.dir(-0.6, 0, 0)), 1);
+        reachTo(p, 'l', mixV(A[1], B[1], b.k), elbow.clone().add(p.dir(0.6, 0, 0)), 1);
+        lookAt(p, mixV(A[2], B[2], b.k), 0.85);
+      };
+    };
     const m1 = new Person(kit, crewLook(false, 0.2, 'buzzed', true));
     place(m1, wFR.x + Math.sign(wFR.x) * 0.95, wFR.z + 0.15, wFR.x, wFR.z);
     m1.play('Fixing_Kneeling', { offset: 0.2 });
     this.owned.push(attachWrench(m1, 'r', chrome));
-    this.people.push({
-      p: m1,
-      pose: (p, t) => {
-        const k = stroke(t, 0.55, 0);
-        aimArm(p, 'r', [0.2, -0.45, 0.85], [-0.1 + 0.35 * k, -0.25 - 0.3 * k, 0.9], 0.9);
-        aimArm(p, 'l', [0.25, -0.4, 0.85], [-0.3, -0.15, 0.9], 0.7);
-        turnHead(p, 0, 0.35);
-      },
-    });
+    this.people.push({ p: m1, pose: wheelWork(wFR, 1, 0) });
     const m2 = new Person(kit, crewLook(true, 0.65, 'buns'));
     place(m2, wRL.x + Math.sign(wRL.x) * 0.95, wRL.z - 0.2, wRL.x, wRL.z);
     m2.play('Fixing_Kneeling', { offset: 0.6 });
     this.owned.push(attachWrench(m2, 'r', chrome));
-    this.people.push({
-      p: m2,
-      pose: (p, t) => {
-        const k = stroke(t, 0.48, 0.4);
-        aimArm(p, 'r', [0.2, -0.4, 0.88], [-0.15 + 0.4 * k, -0.2 - 0.25 * k, 0.9], 0.9);
-        aimArm(p, 'l', [0.3, -0.35, 0.85], [-0.25, -0.3, 0.9], 0.7);
-        turnHead(p, 0.1, 0.3);
-      },
-    });
-    // an aero mechanic crouched at the front wing, setting the flap angle with a small wrench
+    this.people.push({ p: m2, pose: wheelWork(wRL, 0.9, 6.3) });
+    // an aero mechanic crouched at the front wing: turning the flap adjuster, then running a hand along
+    // the flap's gap to check it
     const m3 = new Person(kit, crewLook(false, 0.35, 'simpleparted'));
     place(m3, -S * 0.95, c.noseZ + 0.35, -S * 0.2, c.noseZ - 0.25);
     m3.play('Crouch_Idle_Loop', { offset: 0.1 });
@@ -725,25 +753,53 @@ export class GarageScene {
     this.people.push({
       p: m3,
       pose: (p, t) => {
-        const k = stroke(t, 0.7, 0.2);
-        aimArm(p, 'r', [0.1, -0.35, 0.95], [-0.25 + 0.25 * k, -0.5 + 0.2 * k, 0.85], 0.85);
-        aimArm(p, 'l', [0.2, -0.4, 0.9], [-0.1, -0.55, 0.85], 0.7);
-        turnHead(p, Math.sin(t * 0.33) * 0.2, 0.45);
+        const b = blend(t, 11, [0, 6]);
+        const job = (j: number, u: number): [THREE.Vector3, THREE.Vector3] => {
+          if (j === 0) {
+            const a = u * 5.5;
+            return [Wp(-S * 0.5 + Math.cos(a) * 0.03, 0.33, c.noseZ - 0.42 + Math.sin(a) * 0.03), Wp(-S * 0.86, 0.36, c.noseZ - 0.5)];
+          }
+          const x = -S * (0.3 + 0.45 * (0.5 - 0.5 * Math.cos(u * 1.2)));
+          return [Wp(x, 0.3, c.noseZ - 0.55), Wp(x - S * 0.12, 0.3, c.noseZ - 0.38)];
+        };
+        const A = job(b.prev, 3), B = job(b.i, b.u);
+        const rh = mixV(A[0], B[0], b.k), lh = mixV(A[1], B[1], b.k);
+        const elbow = new THREE.Vector3(0, -1, 0);
+        reachTo(p, 'r', rh, elbow.clone().add(p.dir(-0.7, 0, 0)), 1);
+        reachTo(p, 'l', lh, elbow.clone().add(p.dir(0.7, 0, 0)), 1);
+        lookAt(p, rh.clone().lerp(lh, 0.3), 0.9);
       },
     });
-    // a mechanic at the rear wing, standing, adjusting the flap mounting
+    // a mechanic at the rear wing: working the DRS flap open and shut by hand (the flap really moves),
+    // then wiping down the main plane
     const m4 = new Person(kit, crewLook(false, 0.5, 'simpleparted', true));
     place(m4, S * 0.35, tailZ - 0.75, 0, tailZ + 0.2);
     m4.play('Idle_Loop', { offset: 0.7 });
-    this.owned.push(attachWrench(m4, 'r', chrome));
+    const wingY = g.worldToLocal(this.rig.anchors.rearWing.getWorldPosition(new THREE.Vector3())).y;
     this.people.push({
       p: m4,
       pose: (p, t) => {
-        const k = stroke(t, 0.6, 0.65);
-        lean(p, 0.22);
-        aimArm(p, 'r', [0.12, -0.15, 0.98], [-0.05 + 0.3 * k, 0.05 - 0.25 * k, 0.98], 0.95);
-        aimArm(p, 'l', [0.15, -0.1, 0.98], [-0.25, 0.1, 0.95], 0.9);
-        turnHead(p, 0, 0.3);
+        const b = blend(t, 12, [0, 4.5, 7]);
+        // the flap: pushed open through the first job, held, eased shut
+        const open = b.i === 0 ? smooth((b.u - 0.8) / 1.6) : b.i === 1 ? 1 - smooth((b.u - 1.2) / 1) : 0;
+        this.rig.setDrs(open);
+        const job = (j: number, u: number, o: number): [THREE.Vector3, THREE.Vector3] => {
+          if (j === 2) {
+            // a cloth along the main plane, the other hand on the endplate
+            const x = 0.38 * Math.sin(u * 1.4);
+            return [Wp(x, wingY - 0.06, tailZ - 0.2), Wp(-0.48, wingY - 0.1, tailZ - 0.12)];
+          }
+          // both hands under the flap's trailing edge, lifting it with the actuator
+          const y = wingY + 0.02 + o * 0.12;
+          return [Wp(0.28, y, tailZ - 0.24 + o * 0.05), Wp(-0.28, y, tailZ - 0.24 + o * 0.05)];
+        };
+        const A = job(b.prev, 2, b.prev === 0 ? 1 : 0), B = job(b.i, b.u, open);
+        const rh = mixV(A[0], B[0], b.k), lh = mixV(A[1], B[1], b.k);
+        lean(p, 0.12);
+        const elbow = new THREE.Vector3(0, -1, 0);
+        reachTo(p, 'r', rh, elbow.clone().add(p.dir(-0.8, 0, 0)), 1);
+        reachTo(p, 'l', lh, elbow.clone().add(p.dir(0.8, 0, 0)), 1);
+        lookAt(p, rh.clone().lerp(lh, 0.5), 0.9);
       },
     });
     // the race engineer at the laptop

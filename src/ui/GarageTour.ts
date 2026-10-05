@@ -115,7 +115,7 @@ export class GarageTourUI {
       if (s.at) {
         const i = SPOT_ORDER.indexOf(s.at);
         this.title.textContent = spots[s.at].label;
-        this.sub.textContent = spots[s.at].info ?? (spots[s.at].orbit ? 'Drag to walk around the car' : 'Drag to look around');
+        this.sub.textContent = spots[s.at].info ?? '';
         this.bar.style.setProperty('--n', String(i));
       }
     }

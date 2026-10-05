@@ -2997,8 +2997,9 @@ export class Game {
       wantLook.copy(P);
       sh = { ...sh, shift: 0.35 + 0.02 * Math.abs(along), fov: 38 };
     } else if (this.garageOrbit.active) {
-      // looking around the car by hand
+      // the car's own tour stop: a slow turntable drift round it (no hand control)
       const O = this.garageOrbit;
+      if (spot?.orbit) O.yaw += dt * 0.06;
       const center = c.clone().add(new THREE.Vector3(0, 0.45, 0));
       const dir = new THREE.Vector3(Math.sin(O.yaw) * Math.cos(O.pitch), Math.sin(O.pitch), Math.cos(O.yaw) * Math.cos(O.pitch));
       // yaw is measured in the car's frame
@@ -3015,6 +3016,17 @@ export class Game {
     }
     // push the subject left of centre: the hub panel is on the right (not while touring: it steps aside)
     if (spot) sh = { ...sh, shift: 0 };
+    {
+      // the cursor parallax: the camera slides a few centimetres across and up, the look stays put
+      const P = this.garageParallax;
+      const kp = 1 - Math.exp(-2.5 * dt);
+      P.x += (P.tx - P.x) * kp;
+      P.y += (P.ty - P.y) * kp;
+      const fwdV = wantLook.clone().sub(wantPos).setY(0).normalize();
+      const rightV = new THREE.Vector3(-fwdV.z, 0, fwdV.x);
+      const amp = spot ? 0.05 : 0.16;
+      wantPos.addScaledVector(rightV, P.x * amp).add(new THREE.Vector3(0, -P.y * amp * 0.45, 0));
+    }
     const dirV = wantLook.clone().sub(wantPos).normalize();
     const camRight = new THREE.Vector3().crossVectors(dirV, up).normalize();
     wantLook.addScaledVector(camRight, sh.shift);
@@ -3297,6 +3309,8 @@ export class Game {
   private garageRig: CarRig | null = null;
   private focusPart: SetupPart | null = null;
   private garageOrbit = { active: false, dragging: false, yaw: 0.8, pitch: 0.25, dist: 6.2, lx: 0, ly: 0 };
+  /** the cursor, -1..1 (target) and eased: the garage shots lean with it a little */
+  private garageParallax = { tx: 0, ty: 0, x: 0, y: 0 };
   private hotspotLayer: HTMLDivElement | null = null;
 
   private bindGarageInput() {
@@ -3304,60 +3318,15 @@ export class Game {
     const onUi = (e: Event) => (e.target as HTMLElement).closest('.hub-panel, .hub-rail, .htab, .hotspot, .cta, .screen:not(.hub), .wp, .tour-bar, .tour-pill') !== null;
     const T = this.tour;
     const freeLook = () => !!T.at && !T.flight && !this.garage?.spots[T.at].orbit;
-    addEventListener('pointerdown', (e) => {
-      if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e)) return;
-      if (T.flight) return;
-      if (freeLook()) {
-        T.dragging = true;
-        T.lx = e.clientX;
-        T.ly = e.clientY;
-        return;
-      }
-      O.dragging = true;
-      if (!O.active) {
-        // start from where the camera is now
-        const rel = this.camera.position.clone().sub(this.playerRigPos());
-        const b = this.pits.bay(TEAMS.indexOf(this.race.player.entry.team), this.race.player.entry.seat);
-        rel.applyAxisAngle(new THREE.Vector3(0, 1, 0), -b.yaw);
-        O.dist = THREE.MathUtils.clamp(rel.length(), 3, 9);
-        O.yaw = Math.atan2(rel.x, rel.z);
-        O.pitch = THREE.MathUtils.clamp(Math.asin((rel.y - 0.45) / Math.max(0.1, rel.length())), 0.02, 1.2);
-      }
-      O.active = true;
-      O.lx = e.clientX;
-      O.ly = e.clientY;
-    });
+    // (the garage is shown, not roamed: no dragging the camera round the car or zooming it. The
+    // composed shots only lean a touch with the cursor, a parallax that keeps the scene alive)
+    void O;
+    void onUi;
+    void freeLook;
     addEventListener('pointermove', (e) => {
-      if (T.dragging) {
-        T.yaw = THREE.MathUtils.clamp(T.yaw + (e.clientX - T.lx) * 0.0035, -1.4, 1.4);
-        T.pitch = THREE.MathUtils.clamp(T.pitch + (e.clientY - T.ly) * 0.003, -0.75, 0.75);
-        T.lx = e.clientX;
-        T.ly = e.clientY;
-        return;
-      }
-      if (!O.dragging) return;
-      O.yaw -= (e.clientX - O.lx) * 0.006;
-      O.pitch = THREE.MathUtils.clamp(O.pitch + (e.clientY - O.ly) * 0.004, 0.02, 1.2);
-      O.lx = e.clientX;
-      O.ly = e.clientY;
+      this.garageParallax.tx = THREE.MathUtils.clamp((e.clientX / Math.max(1, innerWidth)) * 2 - 1, -1, 1);
+      this.garageParallax.ty = THREE.MathUtils.clamp((e.clientY / Math.max(1, innerHeight)) * 2 - 1, -1, 1);
     });
-    addEventListener('pointerup', () => {
-      O.dragging = false;
-      T.dragging = false;
-    });
-    addEventListener(
-      'wheel',
-      (e) => {
-        if (this.state !== 'menu' || this.menu.screen !== 'title' || onUi(e) || T.flight) return;
-        if (freeLook()) {
-          T.zoom = THREE.MathUtils.clamp(T.zoom * (1 + e.deltaY * 0.001), 0.5, 1.3);
-          return;
-        }
-        O.active = true;
-        O.dist = THREE.MathUtils.clamp(O.dist * (1 + e.deltaY * 0.001), 2.6, 10);
-      },
-      { passive: true },
-    );
     this.hotspotLayer = document.createElement('div');
     this.hotspotLayer.className = 'hotspots';
     (this.hud.root.parentElement ?? document.body).appendChild(this.hotspotLayer);

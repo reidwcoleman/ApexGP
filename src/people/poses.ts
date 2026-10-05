@@ -75,3 +75,80 @@ export function actPose(p: Person, act: number, u: number) {
     aimArm(p, 'r', [0.3 + 0.3 * w, 0.9, 0.2], [0.1 + 0.35 * w, 0.95, 0.1]);
   }
 }
+
+const ikS = new THREE.Vector3();
+const ikE = new THREE.Vector3();
+const ikH = new THREE.Vector3();
+const ikD = new THREE.Vector3();
+const ikP = new THREE.Vector3();
+const ikQ = new THREE.Quaternion();
+
+/**
+ * Put a hand on a point (world): two-bone IK on the arm, the elbow bending toward `pole` (a world
+ * direction: down-and-out for work at a wheel). The arm keeps its own bone lengths — a point out of
+ * reach is pointed at with the elbow still a little bent, never stretched — so sleeves stay the size
+ * they are. `w` blends from the clip's arm (0) to the reach (1).
+ */
+export function reachTo(p: Person, side: 'l' | 'r', target: THREE.Vector3, pole: THREE.Vector3, w = 1) {
+  const up = p.bones[`upperarm_${side}`], lo = p.bones[`lowerarm_${side}`], hd = p.bones[`hand_${side}`];
+  if (!up || !lo || !hd || w <= 0) return;
+  up.updateWorldMatrix(true, true);
+  up.getWorldPosition(ikS);
+  lo.getWorldPosition(ikE);
+  hd.getWorldPosition(ikH);
+  const a = ikE.distanceTo(ikS), b = ikH.distanceTo(ikE);
+  ikD.copy(target).sub(ikS);
+  const dist = ikD.length();
+  if (dist < 1e-4) return;
+  ikD.divideScalar(dist);
+  const L = Math.min(dist, (a + b) * 0.97);
+  const cosA = THREE.MathUtils.clamp((a * a + L * L - b * b) / (2 * a * L), -1, 1);
+  const sinA = Math.sqrt(1 - cosA * cosA);
+  // the pole's part square to the shoulder→hand line
+  ikP.copy(pole).addScaledVector(ikD, -pole.dot(ikD));
+  if (ikP.lengthSq() < 1e-6) ikP.set(0, -1, 0).addScaledVector(ikD, ikD.y);
+  ikP.normalize();
+  const elbow = ikE.copy(ikS).addScaledVector(ikD, a * cosA).addScaledVector(ikP, a * sinA);
+  p.aim(`upperarm_${side}`, `lowerarm_${side}`, ikH.copy(elbow).sub(ikS), w);
+  // the forearm from where the elbow now is to the target (or as far toward it as it reaches)
+  lo.getWorldPosition(ikS);
+  p.aim(`lowerarm_${side}`, `hand_${side}`, ikH.copy(target).sub(ikS), w);
+}
+
+/** each body's head "forward" in the head bone's own frame (from the bind pose) */
+const headFwd = new WeakMap<object, THREE.Vector3>();
+const ikM = new THREE.Matrix4();
+
+/**
+ * Turn the head toward a point (world) on top of the clip: the head bone is rotated so its forward
+ * (the face's direction in the bind pose) swings toward the point, by at most `max` radians, blended
+ * by `w`. Works whatever the clip has the head doing (bowed over a wheel, turned to a laptop).
+ */
+export function lookAt(p: Person, target: THREE.Vector3, w = 1, max = 0.9) {
+  const h = p.bones.Head;
+  if (!h || w <= 0) return;
+  let f = headFwd.get(p.asset);
+  if (!f) {
+    const i = p.skeleton.bones.indexOf(h);
+    if (i < 0) return;
+    // bind rotation of the head in the body's frame, whose forward is +z
+    ikM.copy(p.skeleton.boneInverses[i]).invert();
+    ikQ.setFromRotationMatrix(ikM).invert();
+    f = new THREE.Vector3(0, 0, 1).applyQuaternion(ikQ).normalize();
+    headFwd.set(p.asset, f);
+  }
+  h.updateWorldMatrix(true, false);
+  h.getWorldPosition(ikS);
+  h.getWorldQuaternion(ikQ);
+  const cur = ikE.copy(f).applyQuaternion(ikQ).normalize();
+  const want = ikD.copy(target).sub(ikS).normalize();
+  const ang = Math.acos(THREE.MathUtils.clamp(cur.dot(want), -1, 1));
+  if (ang < 1e-3) return;
+  const k = Math.min(1, max / ang) * w;
+  const delta = new THREE.Quaternion().setFromUnitVectors(cur, want);
+  delta.slerp(new THREE.Quaternion(), 1 - k);
+  const pq = h.parent!.getWorldQuaternion(new THREE.Quaternion());
+  const pInv = pq.clone().invert();
+  h.quaternion.premultiply(pInv.multiply(delta).multiply(pq));
+  h.updateMatrixWorld(true);
+}
