@@ -364,8 +364,10 @@ export function weatherLook(w: WeatherState): WeatherLook {
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
-  const exposure = P.exposure * mix(1, 0.86, wetK) * mix(1, 1.06, overcast * (1 - wetK)) * LOOK_EXPOSURE;
-  const saturation = mix(P.saturation, mix(0.93, 0.78, wetK), dim) * (1 - 0.12 * fog - 0.14 * thick) * TONE_SAT;
+  // (a shower in sunshine — a sun shower — keeps the sun's light and colour: only a deck's rain is dark)
+  const wetDark = wetK * (1 - 0.8 * sunVis);
+  const exposure = P.exposure * mix(1, 0.86, wetDark) * mix(1, 1.06, overcast * (1 - wetK)) * LOOK_EXPOSURE;
+  const saturation = mix(P.saturation, mix(0.93, 0.78, wetDark), dim) * (1 - 0.12 * fog - 0.14 * thick) * TONE_SAT;
   const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * TONE_CONTRAST;
   const tintK = dim;
   const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK) * LOOK_HIGH[0], mix(P.tint[1], 0.99, tintK) * LOOK_HIGH[1], mix(P.tint[2], 1.02, tintK) * LOOK_HIGH[2]];
@@ -374,6 +376,27 @@ export function weatherLook(w: WeatherState): WeatherLook {
     mix(P.shadowTint[1], 0.975, tintK) * LOOK_SHADOW[1],
     mix(P.shadowTint[2], 1.06, tintK) * LOOK_SHADOW[2],
   ];
+
+  // ---- each condition its own character (the wet looks had it; the dry ones were one flat grey):
+  //   clear: deep, contrasty light and crisp shafts · haze: a hot golden glare round the sun ·
+  //   broken cloud (cloudy, windy): punchy sun with god rays out of the gaps · overcast: moody,
+  //   cool, a touch darker · mist and fog: the sun's shafts standing in the murk
+  const dryK = 1 - wetK;
+  const heat = clamp01(w.heat ?? 0);
+  const clearK = sunVis * (1 - smooth(0.3, 0.8, fog)) * dryK * (1 - smooth(0.25, 0.6, cloud));
+  const hazeK = smooth(0.5, 1, heat) * sunVis * dryK;
+  const brokenK = sunVis * smooth(0.3, 0.55, cloud) * (1 - smooth(0.7, 0.9, cloud)) * dryK;
+  const overK = overcast * dryK * (1 - thick);
+  const mistK = smooth(0.4, 0.95, fog) * dryK;
+  const dExposure = (1 - 0.1 * overK) * (1 + 0.04 * hazeK);
+  const dContrast = (1 + 0.12 * clearK + 0.12 * brokenK + 0.07 * overK) * (1 - 0.04 * hazeK);
+  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK) * (1 - 0.13 * overK) * (1 - 0.04 * hazeK);
+  const warm = hazeK * 0.06;
+  const cool = overK * 0.03;
+  const dTint: [number, number, number] = [1 + warm - cool, 1 + warm * 0.25 - cool * 0.3, 1 - warm * 1.4 + cool];
+  const dShafts = 1 + 0.6 * clearK + 1.2 * brokenK + 2.2 * mistK * sunVis + 0.8 * hazeK;
+  const dLobe = 1 + 1.6 * hazeK + 1.0 * mistK;
+  const dBloom = 1 + 0.5 * hazeK + 0.25 * brokenK;
 
   return {
     time: w.time,
@@ -391,21 +414,21 @@ export function weatherLook(w: WeatherState): WeatherLook {
     fogFalloff,
     // (clear air never quite swallows a hillside: its silhouette stays readable against the sky)
     fogMax: mix(0.93, 1, Math.max(wetK, smooth(0.3, 0.8, fog), overcast * 0.5)),
-    fogLobe: P.fogLobe * sunVis,
+    fogLobe: P.fogLobe * sunVis * dLobe,
     cloudHaze,
     // (in the sun the shade is darker than the sky alone would make it; under cloud the fill is the light)
     envIntensity: mix(LOOK_FILL, 0.92, dim),
     hemi: mix(0.06, 0.16, dim),
     shadowRadius: mix(2.6, 6, smooth(0.3, 0.9, dim)),
-    exposure,
-    saturation,
-    contrast,
-    tint,
+    exposure: exposure * dExposure,
+    saturation: saturation * dSat,
+    contrast: contrast * dContrast,
+    tint: [tint[0] * dTint[0], tint[1] * dTint[1], tint[2] * dTint[2]],
     shadowTint,
     // bloom is veiling glare, not a glow effect: kept low (highlights, wet reflections, the sun)
-    bloom: mix(P.bloom * 0.7, 0.85, wetK),
+    bloom: mix(P.bloom * 0.7, 0.85, wetK) * dBloom,
     bloomThreshold: mix(P.bloomThreshold, 0.9, wetK),
-    shafts: P.shafts * sunVis,
+    shafts: P.shafts * sunVis * dShafts,
     mist: clamp01(wetK * 0.8 + fog * 0.5),
   };
 }

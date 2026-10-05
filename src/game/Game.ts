@@ -36,6 +36,7 @@ import type { CarPhysics, CarSpec } from '../sim/CarPhysics.ts';
 import { Particles } from '../fx/Particles.ts';
 import { CarEffects } from '../fx/CarEffects.ts';
 import { Debris } from '../fx/Debris.ts';
+import { WindLeaves } from '../fx/WindLeaves.ts';
 import { SkidMarks } from '../fx/SkidMarks.ts';
 import { HUD, fmtTime } from '../ui/HUD.ts';
 import { Menu, aiLevel, GRID, CIRCUIT_INFO, circuitPath, type MotionBlurLevel, type RaceSetup, type Settings } from '../ui/Menu.ts';
@@ -880,6 +881,7 @@ export class Game {
     await step(0.94, 'Sweeping the track');
     this.debris = new Debris(this.track, (x, z) => this.env.heightAt(x, z));
     this.scene.add(this.debris.group);
+    this.scene.add(this.leaves.mesh);
     this.carFx = new CarEffects(this.particles, this.debris);
     this.skids = new SkidMarks(this.track, this.trackside.groundLift);
     this.scene.add(this.skids.mesh);
@@ -1676,6 +1678,7 @@ export class Game {
     this.showResults();
   }
   private celebration: Celebration | null = null;
+  private readonly leaves = new WindLeaves();
   private lastCrowd = -1;
 
   /** hand this session's recording over to the highlights, once: they are produced from it in the background */
@@ -1977,6 +1980,14 @@ export class Game {
     this.particles.glowScale = 1 / Math.sqrt(lookExp);
     DASH_GLOW.value = 1.6 / Math.pow(lookExp, 0.8);
     this.particles.update(this.state === 'paused' ? 0 : dt);
+    {
+      // a windy day: leaves and dry grass blowing across the circuit (not once the ground is wet)
+      const st = this.state;
+      const live = st === 'race' || st === 'intro' || st === 'replay' || st === 'spectate' || st === 'results' || st === 'flashback' || st === 'paused';
+      const ws = Math.hypot(wx.windX, wx.windZ);
+      const amt = live ? THREE.MathUtils.smoothstep(ws, 5, 11) * (1 - THREE.MathUtils.smoothstep(wx.wetness, 0.08, 0.35)) : 0;
+      this.leaves.update(st === 'paused' ? 0 : dt, amt, wx.windX, wx.windZ, this.camera.position, (x, z) => this.env.heightAt(x, z));
+    }
     this.updateAudio(dt);
     this.updateMotionBlur();
     // a long lens looks through hundreds of metres of air at its subject, yet broadcast telephoto
@@ -2674,7 +2685,8 @@ export class Game {
     }
     const w = this.race.weatherState;
     // (and after dark: the red tail light is what you follow down a floodlit straight)
-    const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.85 || w.time === 'night';
+    // (the rain light is the rule in poor visibility too: mist and fog, not only rain)
+    const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.6 || w.time === 'night';
     for (const c of this.race.cars) {
       const view = this.views.get(c.entry)!;
       view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight, !ghosts);

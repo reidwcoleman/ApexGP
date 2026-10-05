@@ -661,7 +661,9 @@ export function createEnvironment(
     // and broken cumulus in front of the sun throws crepuscular rays through the gaps
     const gaps = THREE.MathUtils.smoothstep(L.coverage, 0.2, 0.45) * (1 - L.overcast) * (1 - night);
     const shaftK = P.shafts * L.sunVis * 0.9 * (1 + 1.6 * THREE.MathUtils.smoothstep(L.mist, 0.05, 0.4)) + (L.sunVis > 0.3 ? 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.4) + 0.45 * gaps : 0);
-    gfx.setSunShafts(sunDir, shaftK, 0.55 * C.E0 * 0.25);
+    // (and the condition's own character on top: weatherLook's shafts over the preset's)
+    const shaftDrama = P.shafts > 1e-4 && L.sunVis > 0.01 ? THREE.MathUtils.clamp(L.shafts / (P.shafts * L.sunVis), 0.5, 4) : 1;
+    gfx.setSunShafts(sunDir, shaftK * shaftDrama, 0.55 * C.E0 * 0.25);
     gfx.grade.setLook(gradeLook);
     applyIndoor();
     const F = FLOOD_E * fl * floodScale(night);
@@ -685,11 +687,12 @@ export function createEnvironment(
     if (night > 0.5) u.uHalo.value = 0.35 * L.sunVis;
     // a rainbow: rain falling while the sun shines, opposite it (lifted a little when the sun is high,
     // or it would sit below the horizon all afternoon)
-    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - L.mist);
+    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
+    // (a shower's own spray mist is where the bow is seen: only real fog washes it out)
     u.uBow.value = bow;
     // rain lit from behind by the sun glitters
     rain.setSun(sunDir, nightTmp.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.08 * (1 - night)));
-    const bowI = P.sunIntensity * 0.03;
+    const bowI = P.sunIntensity * 0.045;
     (u.uBowCol.value as THREE.Vector3).set(C.sunCol.r * bowI, C.sunCol.g * bowI, C.sunCol.b * bowI);
     u.uBowEl.value = -Math.min(P.elevation, 20) * DEG;
     if (fl <= 0 && night <= 0) return;
