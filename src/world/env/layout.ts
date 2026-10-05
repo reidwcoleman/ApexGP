@@ -142,13 +142,37 @@ export function planLayout(track: Track, map: WorldMap): Layout {
         if (worst >= gap - 0.5) break;
         front += gap - worst + 0.5;
       }
-      const A = track.point(a, side * front, 0, new THREE.Vector3());
-      const B = track.point(b, side * front, 0, new THREE.Vector3());
+      let A = track.point(a, side * front, 0, new THREE.Vector3());
+      let B = track.point(b, side * front, 0, new THREE.Vector3());
+      const f = track.frame((a + b) / 2);
+      /** the stand's footprint (with its back walkway) clear of every part of the circuit, not just its own
+       *  stretch: at a hairpin or where two legs run close, a stand built off one leg can reach across the other */
+      const footClear = (A: THREE.Vector3, B: THREE.Vector3) => {
+        const ax = B.x - A.x, az = B.z - A.z;
+        const len = Math.hypot(ax, az) || 1;
+        let fx = -az / len, fz = ax / len;
+        if (fx * (f.pos.x - (A.x + B.x) / 2) + fz * (f.pos.z - (A.z + B.z) / 2) < 0) { fx = -fx; fz = -fz; }
+        for (let u = -2; u <= len + 2; u += 3)
+          for (let w = 1.5; w <= depth + 3; w += 2.5) {
+            const x = A.x + (ax / len) * u - fx * w, z = A.z + (az / len) * u - fz * w;
+            if (map.trackClearance(x, z) < 1.5) return false;
+          }
+        return true;
+      };
+      if (!footClear(A, B)) {
+        // trim from whichever end is in the way until the rest is clear; drop the segment if nothing is
+        let ok = false;
+        for (let cut = 0.1; cut <= 0.6 && !ok; cut += 0.1)
+          for (const [ta, tb] of [[a + (b - a) * cut, b], [a, b - (b - a) * cut], [a + (b - a) * cut * 0.5, b - (b - a) * cut * 0.5]]) {
+            const A2 = track.point(ta, side * front, 0, new THREE.Vector3()), B2 = track.point(tb, side * front, 0, new THREE.Vector3());
+            if (footClear(A2, B2)) { A = A2; B = B2; ok = true; break; }
+          }
+        if (!ok) continue;
+      }
       const mid = A.clone().add(B).multiplyScalar(0.5);
       const length = A.distanceTo(B);
       const along = B.clone().sub(A).normalize();
       const facing = new THREE.Vector3(-along.z, 0, along.x);
-      const f = track.frame((a + b) / 2);
       const toTrack = f.pos.clone().sub(mid);
       toTrack.y = 0;
       if (facing.dot(toTrack) < 0) facing.negate();

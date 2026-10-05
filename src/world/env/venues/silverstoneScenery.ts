@@ -24,20 +24,60 @@ const C = (h: number) => new THREE.Color(h);
 const PAINT = [0xf2f2f0, 0xe9e9e6, 0x1c1d1f, 0x2a2b2e, 0x9a9da1, 0xb7babd, 0x6c7075, 0x1f2f4f, 0x7a1d1d, 0x2e5a8c, 0x404a3c, 0xc8c2b2].map(C);
 const TENT = [0x3f6b3a, 0x2c5a8c, 0xd06a2a, 0x8a8f94, 0xa8322a, 0xd8b13a, 0x26304a, 0x5a7a3a, 0x7a8a96].map(C);
 
-/** a hatchback-ish car, 4.3 m: the body (white, tinted per instance) and the dark glasshouse */
+/**
+ * A parked road car, 4.3 m: the side profile (bumpers, bonnet, raked windscreen, roof, tailgate)
+ * extruded across its width, coloured per triangle — painted panels white (tinted per instance),
+ * the glasshouse and the lower sills dark — and four wheels. Length along +z.
+ */
 function carGeometry(): THREE.BufferGeometry {
-  const paint = (g: THREE.BufferGeometry, k: number) => {
-    const n = g.attributes.position.count;
-    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(n * 3).fill(k), 3));
-    return g;
-  };
-  const body = new THREE.BoxGeometry(1.8, 0.72, 4.3).translate(0, 0.58, 0);
-  // (the glasshouse dark, its roof painted: from the air a car park is a mosaic of paint)
-  const cabin = new THREE.BoxGeometry(1.6, 0.42, 2.3).translate(0, 1.15, -0.25);
-  const roof = new THREE.BoxGeometry(1.5, 0.08, 2.0).translate(0, 1.4, -0.3);
-  const wheels = new THREE.BoxGeometry(1.86, 0.5, 3.1).translate(0, 0.25, 0);
-  const g = mergeGeometries([paint(body.toNonIndexed(), 1), paint(cabin.toNonIndexed(), 0.12), paint(roof.toNonIndexed(), 1), paint(wheels.toNonIndexed(), 0.06)]);
-  g.computeVertexNormals();
+  const prof: [number, number][] = [
+    [-2.15, 0.3], [-2.2, 0.52], [-2.12, 0.86], [-1.62, 0.95], [-1.25, 1.4], [0.35, 1.44], [0.55, 1.42],
+    [1.18, 0.98], [2.02, 0.84], [2.2, 0.62], [2.16, 0.3],
+  ];
+  const shape = new THREE.Shape(prof.map(([x, y]) => new THREE.Vector2(x, y)));
+  const W = 1.78;
+  const body = new THREE.ExtrudeGeometry(shape, { depth: W - 0.12, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 1, curveSegments: 1 })
+    .translate(0, 0, -(W - 0.12) / 2)
+    .rotateY(Math.PI / 2)
+    .toNonIndexed();
+  body.computeVertexNormals();
+  // per-triangle colour: glass round the cabin (not the roof), dark sills and bumpers, paint elsewhere
+  const pos = body.attributes.position, nor = body.attributes.normal;
+  const col: number[] = [];
+  for (let i = 0; i < pos.count; i += 3) {
+    const cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+    const ny = Math.abs(nor.getY(i) + nor.getY(i + 1) + nor.getY(i + 2)) / 3;
+    const k = cy > 0.99 && cy < 1.39 && ny < 0.9 ? 0.07 : cy < 0.42 ? 0.22 : 1;
+    for (let j = 0; j < 3; j++) col.push(k, k, k);
+  }
+  body.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const parts: THREE.BufferGeometry[] = [body];
+  // the side windows: a dark pane on each flank, just proud of the panel
+  const win = new THREE.ShapeGeometry(new THREE.Shape([[-1.5, 1.0], [-1.18, 1.35], [0.38, 1.38], [1.05, 1.0]].map(([x, y]) => new THREE.Vector2(x, y))))
+    .rotateY(Math.PI / 2)
+    .translate(W / 2 + 0.005, 0, 0)
+    .toNonIndexed();
+  win.deleteAttribute('uv');
+  const flip = win.clone();
+  flip.applyMatrix4(new THREE.Matrix4().makeScale(-1, 1, 1));
+  {
+    // (mirroring turns the triangles inside out: swap two corners of each)
+    const a = flip.attributes.position.array as Float32Array;
+    for (let i = 0; i < a.length; i += 9) for (let k = 0; k < 3; k++) [a[i + 3 + k], a[i + 6 + k]] = [a[i + 6 + k], a[i + 3 + k]];
+  }
+  for (const w of [win, flip]) {
+    w.computeVertexNormals();
+    w.setAttribute('color', new THREE.Float32BufferAttribute(new Array(w.attributes.position.count * 3).fill(0.06), 3));
+    parts.push(w);
+  }
+  for (const [x, z] of [[-0.8, 1.38], [0.8, 1.38], [-0.8, -1.32], [0.8, -1.32]]) {
+    const w = new THREE.CylinderGeometry(0.33, 0.33, 0.24, 10).rotateZ(Math.PI / 2).translate(x, 0.33, z).toNonIndexed();
+    w.setAttribute('color', new THREE.Float32BufferAttribute(new Array(w.attributes.position.count * 3).fill(0.04), 3));
+    w.deleteAttribute('uv');
+    parts.push(w);
+  }
+  body.deleteAttribute('uv');
+  const g = mergeGeometries(parts);
   return g;
 }
 
