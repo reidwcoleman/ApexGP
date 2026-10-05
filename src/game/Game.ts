@@ -1631,6 +1631,8 @@ export class Game {
   private celebrationPending = false;
   private introDof = false;
   private beginCelebration(cel: Celebration, top: Entry[]) {
+    // (no race overlays over the ceremony: the title card of a skipped intro included)
+    this.hideIntroCard(true);
     this.celebration = cel;
     this.scene.add(this.celebration.group);
     // the top three are parked in parc fermé below the podium (drivers out); the rest are in the garages

@@ -16,10 +16,10 @@ import { PodiumDriver } from '../people/drivers.ts';
  * flags. The sequence: establishing shots, the anthem as the flags go up, the
  * trophies handed over (third, second, winner), the champagne — shaken, sprayed,
  * one shot in slow motion — the crowd going wild, and the team photo under the
- * ticker tape as the camera cranes away. ~36 s; `update` returns true at the end.
+ * ticker tape and the fireworks as the camera cranes away. ~39 s; `update` returns true at the end.
  */
 
-const DURATION = 36;
+const DURATION = 39;
 
 // ------------------------------------------------------------------------------------ helpers
 const lerp = THREE.MathUtils.lerp;
@@ -45,6 +45,8 @@ function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => 
 }
 
 const FONT = '"Titillium Web", Arial, sans-serif';
+/** the same, for inline style attributes (no double quotes inside style="…") */
+const FONTQ = "'Titillium Web', Arial, sans-serif";
 
 // ------------------------------------------------------------------------------------ props
 function mesh(g: THREE.BufferGeometry, m: THREE.Material, cast = true) {
@@ -119,7 +121,7 @@ class Spray {
     for (let i = 0; i < n; i++) this.pos[i * 3 + 1] = -1e4;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    const m = new THREE.PointsMaterial({ size, color: colour, transparent: true, opacity, depthWrite: false, map: dotTexture() });
+    const m = new THREE.PointsMaterial({ size, color: colour, transparent: true, opacity, depthWrite: false, map: dotTexture(), blending: size < 0.05 ? THREE.AdditiveBlending : THREE.NormalBlending });
     this.points = new THREE.Points(g, m);
     this.points.frustumCulled = false;
   }
@@ -152,6 +154,73 @@ class Spray {
   }
 }
 
+/**
+ * Pyro: hot sparks as additive points, each with its own colour and life (it dims and reddens as it
+ * cools). Used for the spark fountains on the stage edge and for the fireworks over the finale.
+ */
+class Sparks {
+  readonly points: THREE.Points;
+  private pos: Float32Array;
+  private vel: Float32Array;
+  private col: Float32Array;
+  private base: Float32Array;
+  private life: Float32Array;
+  private max: Float32Array;
+  private next = 0;
+  constructor(n: number, size: number, private gravity: number, private drag: number) {
+    this.pos = new Float32Array(n * 3);
+    this.vel = new Float32Array(n * 3);
+    this.col = new Float32Array(n * 3);
+    this.base = new Float32Array(n * 3);
+    this.life = new Float32Array(n);
+    this.max = new Float32Array(n);
+    for (let i = 0; i < n; i++) this.pos[i * 3 + 1] = -1e4;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    const m = new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, map: dotTexture() });
+    this.points = new THREE.Points(g, m);
+    this.points.frustumCulled = false;
+  }
+  emit(p: THREE.Vector3, vx: number, vy: number, vz: number, c: THREE.Color, life: number) {
+    const i = this.next;
+    this.next = (this.next + 1) % this.life.length;
+    this.pos.set([p.x, p.y, p.z], i * 3);
+    this.vel.set([vx, vy, vz], i * 3);
+    this.base.set([c.r, c.g, c.b], i * 3);
+    this.life[i] = this.max[i] = life;
+  }
+  update(dt: number) {
+    const P = this.pos, V = this.vel, C = this.col, B = this.base;
+    const k = Math.exp(-this.drag * dt);
+    for (let i = 0; i < this.life.length; i++) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt;
+      const o = i * 3;
+      if (this.life[i] <= 0) {
+        P[o + 1] = -1e4;
+        C[o] = C[o + 1] = C[o + 2] = 0;
+        continue;
+      }
+      V[o] *= k;
+      V[o + 2] *= k;
+      V[o + 1] = V[o + 1] * k - this.gravity * dt;
+      P[o] += V[o] * dt;
+      P[o + 1] += V[o + 1] * dt;
+      P[o + 2] += V[o + 2] * dt;
+      // white-hot, cooling to orange and out; a flicker as it burns
+      const u = this.life[i] / this.max[i];
+      const fl = 0.75 + 0.25 * Math.sin(i * 7.1 + this.life[i] * 40);
+      const heat = u * u;
+      C[o] = B[o] * (0.35 + 0.65 * u) * fl + heat * 0.6;
+      C[o + 1] = B[o + 1] * u * u * fl + heat * 0.5;
+      C[o + 2] = B[o + 2] * u * u * u * fl + heat * 0.35;
+    }
+    (this.points.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.points.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+  }
+}
+
 /** ticker tape: thin paper strips tumbling and fluttering down (instanced, lit, double-sided) */
 class TickerTape {
   readonly mesh: THREE.InstancedMesh;
@@ -165,10 +234,11 @@ class TickerTape {
   private readonly q = new THREE.Quaternion();
   private readonly e = new THREE.Euler();
   private readonly s = new THREE.Vector3(1, 1, 1);
+  private readonly s0 = new THREE.Vector3(1e-4, 1e-4, 1e-4);
   private readonly t = new THREE.Vector3();
   constructor(private n: number, colours: string[]) {
-    const g = new THREE.PlaneGeometry(0.035, 0.11);
-    const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.35, metalness: 0.55 });
+    const g = new THREE.PlaneGeometry(0.028, 0.085);
+    const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.22, metalness: 0.8 });
     this.mesh = new THREE.InstancedMesh(g, mat, n);
     this.mesh.frustumCulled = false;
     this.mesh.count = n;
@@ -184,22 +254,25 @@ class TickerTape {
       this.mesh.setMatrixAt(i, this.m.makeTranslation(0, -1e4, 0));
     }
   }
-  emit(x: number, y: number, z: number) {
+  emit(x: number, y: number, z: number, vx = (Math.random() - 0.5) * 1.2, vy = -0.6 - Math.random() * 0.6, vz = (Math.random() - 0.5) * 1.2) {
     const i = this.next;
     this.next = (this.next + 1) % this.n;
     this.p.set([x, y, z], i * 3);
-    this.v.set([(Math.random() - 0.5) * 1.2, -0.6 - Math.random() * 0.6, (Math.random() - 0.5) * 1.2], i * 3);
+    this.v.set([vx, vy, vz], i * 3);
     this.rot.set([Math.random() * 6, Math.random() * 6, Math.random() * 6], i * 3);
     this.spin.set([(Math.random() - 0.5) * 14, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 14], i * 3);
     this.live[i] = 1;
   }
-  update(dt: number, t: number, ground: number) {
+  update(dt: number, t: number, ground: number, cam?: THREE.Vector3) {
     const P = this.p, V = this.v, R = this.rot, S = this.spin;
+    const hk = Math.exp(-1.6 * dt);
     for (let i = 0; i < this.n; i++) {
       if (!this.live[i]) continue;
       const o = i * 3;
-      // paper falls at ~1 m/s, sways side to side
-      V[o + 1] += (-1.0 - V[o + 1]) * Math.min(1, dt * 2);
+      // paper falls at ~1 m/s, sways side to side (a cannon's throw dies away in the air)
+      V[o + 1] += (-1.0 - V[o + 1]) * Math.min(1, dt * (V[o + 1] > 0 ? 1.1 : 2));
+      V[o] *= hk;
+      V[o + 2] *= hk;
       P[o] += (V[o] + Math.sin(t * 2.3 + i) * 0.5) * dt;
       P[o + 1] += V[o + 1] * dt;
       P[o + 2] += (V[o + 2] + Math.cos(t * 1.9 + i * 1.3) * 0.5) * dt;
@@ -215,7 +288,10 @@ class TickerTape {
         R[o + 2] += S[o + 2] * dt;
       }
       this.q.setFromEuler(this.e.set(R[o], R[o + 1], R[o + 2]));
-      this.m.compose(this.t.set(P[o], P[o + 1], P[o + 2]), this.q, this.s);
+      this.t.set(P[o], P[o + 1], P[o + 2]);
+      // (a strip right in front of the lens is a slab across the frame: those aren't drawn)
+      const near = cam ? this.t.distanceToSquared(cam) < 0.8 : false;
+      this.m.compose(this.t, this.q, near ? this.s0 : this.s);
       this.mesh.setMatrixAt(i, this.m);
       if (this.live[i] === 2) this.live[i] = 0;
     }
@@ -243,9 +319,20 @@ export class Celebration {
   /** where the top three cars are parked (world pose), for the game to place them */
   readonly parkSlots: { pos: THREE.Vector3; yaw: number }[] = [];
   private figures: PodiumDriver[] = [];
-  private champagne = new Spray(2600, 0.035, 8, 0.5, new THREE.Color(1, 0.97, 0.86), 0.85);
+  private champagne = new Spray(3400, 0.028, 8, 0.5, new THREE.Color(1.6, 1.45, 1.05), 0.9);
   private foam = new Spray(900, 0.09, 3.5, 1.8, new THREE.Color(1, 1, 0.97), 0.6);
   private mist = new Spray(700, 0.22, 0.4, 2.2, new THREE.Color(1, 0.98, 0.92), 0.12);
+  /** the spark fountains on the stage edge */
+  private gerbs = new Sparks(5000, 0.05, 9.8, 0.35);
+  /** fireworks over the finale (big sparks, far off) */
+  private sky = new Sparks(9000, 1.1, 5.5, 0.9);
+  private shells: { p: THREE.Vector3; v: THREE.Vector3; fuse: number; col: THREE.Color }[] = [];
+  private nextShell = 0;
+  /** the stage lights that pulse with the pyro */
+  private ledMat: THREE.MeshStandardMaterial | null = null;
+  private beamMat: THREE.MeshBasicMaterial | null = null;
+  private fade: HTMLDivElement | null = null;
+  private card: HTMLDivElement | null = null;
   private tape: TickerTape;
   private crowd: FanCrowd;
   private teamCrews: PeopleSet;
@@ -352,7 +439,7 @@ export class Celebration {
       g.font = `700 60px ${FONT}`;
       g.fillText(`${EVENT.place.toUpperCase()}`, 1024, 636);
     });
-    const back = new THREE.Mesh(new THREE.BoxGeometry(9, 3.8, 0.22), [stepMat, stepMat, stepMat, stepMat, new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.55 }), stepMat]);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(9, 3.8, 0.22), [stepMat, stepMat, stepMat, stepMat, new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.55, emissiveMap: backTex, emissive: 0xffffff, emissiveIntensity: 0.55 }), stepMat]);
     back.position.set(0, 1.9, -2.55);
     back.castShadow = back.receiveShadow = true;
     this.group.add(back);
@@ -469,16 +556,66 @@ export class Celebration {
     this.group.add(this.crowd.group);
 
     // TV lighting on the stage: a soft key from the front (the sun is often behind the podium)
-    const key = new THREE.SpotLight(0xfff3e6, 60, 40, 0.55, 0.8, 1.2);
+    const key = new THREE.SpotLight(0xfff3e6, 85, 40, 0.55, 0.8, 1.2);
     key.position.set(-3, 9, 14);
     key.target.position.set(0, 1.8, 0);
     key.castShadow = false;
     this.group.add(key, key.target);
+    // a warm rim from high behind the gantry: the drivers stand off the backdrop, hair and shoulders lit
+    const rim = new THREE.SpotLight(0xffc98a, 70, 30, 0.6, 0.7, 1.3);
+    rim.position.set(3.5, 9.5, -7);
+    rim.target.position.set(0, 1.6, 0.6);
+    rim.castShadow = false;
+    this.group.add(rim, rim.target);
+    // the rig on the gantry: a row of LED pars facing the stage, each with a soft beam in the haze
+    {
+      this.ledMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff1d6, emissiveIntensity: 2.2, roughness: 0.4 });
+      const can = new THREE.MeshStandardMaterial({ color: 0x1a1b1e, roughness: 0.4, metalness: 0.7 });
+      // (a soft shaft: brightest where you look straight through the cone's middle, gone at its
+      // silhouette and fading down its length — never a hard-edged triangle)
+      this.beamMat = new THREE.ShaderMaterial({
+        uniforms: { uI: { value: 0.05 }, uC: { value: new THREE.Color(0xfff0d8) } },
+        vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
+          void main() { vY = position.y; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uI; uniform vec3 uC; varying vec3 vN; varying vec3 vV; varying float vY;
+          void main() { float f = abs(dot(normalize(vN), normalize(vV))); float a = pow(f, 3.0) * smoothstep(-5.6, -0.6, vY) * (1.0 - smoothstep(-0.6, 0.0, vY) * 0.6); gl_FragColor = vec4(uC * uI * a, 1.0); }`,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }) as unknown as THREE.MeshBasicMaterial;
+      const beamGeo = new THREE.CylinderGeometry(0.12, 1.25, 5.6, 20, 1, true);
+      beamGeo.translate(0, -2.8, 0);
+      for (let k = 0; k < 6; k++) {
+        const x = -3.75 + k * 1.5;
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.32, 14), can);
+        body.position.set(x, 5.75, -1.85);
+        body.rotation.x = -0.55;
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(0.115, 16), this.ledMat);
+        lens.position.set(0, -0.165, 0);
+        lens.rotation.x = Math.PI / 2;
+        body.add(lens);
+        const beam = new THREE.Mesh(beamGeo, this.beamMat);
+        beam.position.set(0, -0.2, 0);
+        body.add(beam);
+        this.group.add(body);
+      }
+      // gold LED strips along the steps' top edges and the deck's front
+      const strip = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffc861, emissiveIntensity: 1.6, roughness: 0.5 });
+      for (const [x, h] of steps.map(([x, h]) => [x, h])) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.035, 0.035), strip);
+        m.position.set(x, h + 0.005, 0.76);
+        this.group.add(m);
+      }
+      const deckStrip = new THREE.Mesh(new THREE.BoxGeometry(9, 0.03, 0.03), strip);
+      deckStrip.position.set(0, 0.02, 2.22);
+      this.group.add(deckStrip);
+    }
 
     // ---- champagne and ticker tape (world space)
     const cols = ['#e8c35a', '#f3f3f3', '#d9dce1', '#e8c35a', ...podium.slice(0, 3).map((e) => e.team.primary)];
     this.tape = new TickerTape(3200, cols);
-    for (const o of [this.champagne.points, this.foam.points, this.mist.points, this.tape.mesh]) {
+    for (const o of [this.champagne.points, this.foam.points, this.mist.points, this.tape.mesh, this.gerbs.points, this.sky.points]) {
       o.matrixAutoUpdate = false;
       o.matrix.copy(this.group.matrixWorld).invert();
       this.group.add(o);
@@ -500,14 +637,37 @@ export class Celebration {
     });
     this.title.innerHTML = `<div style="font-size:12px;color:#d8b04a">Podium ceremony</div><div style="font-size:20px;letter-spacing:.06em;margin-top:4px">${EVENT.gp}</div>`;
     uiRoot.appendChild(this.title);
+    // the lower third: a broadcast bar sliding in from the left, a gold position block, the team's
+    // colour, the name large and the team under it
     this.strap = document.createElement('div');
     css(this.strap, {
-      position: 'fixed', left: '50%', bottom: '72px', transform: 'translateX(-50%) translateY(14px)', opacity: '0',
-      display: 'flex', gap: '14px', alignItems: 'center', padding: '12px 22px 12px 14px', borderRadius: '10px',
-      background: 'rgba(10,12,17,0.78)', backdropFilter: 'blur(14px)', color: '#fff', font: `600 19px ${FONT}`,
-      transition: 'opacity .45s, transform .55s cubic-bezier(.2,.9,.3,1.1)', pointerEvents: 'none', zIndex: '20', letterSpacing: '0.02em',
+      position: 'fixed', left: '64px', bottom: 'calc(8.5vh + 34px)', transform: 'translateX(-28px)', opacity: '0',
+      display: 'flex', alignItems: 'stretch', overflow: 'hidden', borderRadius: '4px',
+      background: 'rgba(8,10,14,0.86)', backdropFilter: 'blur(12px)', color: '#fff', font: `600 19px ${FONT}`,
+      transition: 'opacity .4s, transform .6s cubic-bezier(.15,.9,.25,1)', pointerEvents: 'none', zIndex: '20',
+      boxShadow: '0 10px 40px rgba(0,0,0,.45)',
     });
     uiRoot.appendChild(this.strap);
+    // the winner's card over the finale, and the fade to the results
+    this.card = document.createElement('div');
+    css(this.card, {
+      position: 'fixed', left: '0', right: '0', top: '30%', transform: 'translateY(-50%) scale(1.04)', opacity: '0', textAlign: 'center',
+      transition: 'opacity 1.1s, transform 2.6s cubic-bezier(.2,.8,.2,1)', pointerEvents: 'none', zIndex: '20', color: '#fff',
+      textShadow: '0 4px 40px rgba(0,0,0,.65)',
+    });
+    {
+      const w = podium[0];
+      if (w)
+        this.card.innerHTML =
+          `<div style="font:700 14px ${FONTQ};letter-spacing:.42em;color:#e3c070;text-transform:uppercase">Race winner · ${EVENT.gp}</div>` +
+          `<div style="height:2px;width:120px;margin:16px auto 14px;background:linear-gradient(90deg,transparent,#e3c070,transparent)"></div>` +
+          `<div style="font:italic 900 86px/1 ${FONTQ};letter-spacing:.01em;text-transform:uppercase">${w.driver.last}</div>` +
+          `<div style="font:600 20px ${FONTQ};margin-top:12px;color:rgba(255,255,255,.75);letter-spacing:.12em;text-transform:uppercase">${w.driver.first} ${w.driver.last} &nbsp;·&nbsp; <span style="color:${w.team.primary}">${w.team.name}</span></div>`;
+    }
+    uiRoot.appendChild(this.card);
+    this.fade = document.createElement('div');
+    css(this.fade, { position: 'fixed', inset: '0', background: '#000', opacity: '0', transition: 'opacity .9s', pointerEvents: 'none', zIndex: '21' });
+    uiRoot.appendChild(this.fade);
     requestAnimationFrame(() => {
       for (const b of Array.from(this.bars.children) as HTMLElement[]) b.style.height = '8.5vh';
     });
@@ -679,11 +839,71 @@ export class Celebration {
         this.tape.emit(p.x, p.y, p.z);
       }
     }
+    // pyro: spark fountains along the stage edge as the winner lifts the trophy, and for the photo
+    const hot = new THREE.Color(1.0, 0.72, 0.32);
+    const gerb = (t >= 19.15 && t < 21.8) || (t >= 30.4 && t < 32.6);
+    if (gerb) {
+      const n = Math.ceil(9 * Math.min(2, dt * 60));
+      for (const x of [-4.1, -2.6, -0.9, 0.9, 2.6, 4.1]) {
+        const base = this.world(x, 0.05, 2.1, this.tmp);
+        for (let k = 0; k < n; k++) {
+          const a = Math.random() * Math.PI * 2, r = Math.random() * 0.7;
+          this.gerbs.emit(base, Math.cos(a) * r, 6.2 + Math.random() * 2.4, Math.sin(a) * r, hot, 0.7 + Math.random() * 0.6);
+        }
+      }
+    }
+    // confetti cannons on the gantry posts: a burst up and out over the stage and the crowd
+    if ((t >= 19.2 && t < 19.65) || (t >= 30.5 && t < 30.95)) {
+      for (const sx of [-1, 1]) {
+        const n = Math.ceil(70 * Math.min(2, dt * 60));
+        for (let k = 0; k < n; k++) {
+          const p = this.world(sx * 4.4, 6.3, -2.1, this.tmp);
+          const d = this.tmp2.set(-sx * (0.5 + Math.random() * 2.2), 5 + Math.random() * 5, 2.5 + Math.random() * 6).applyQuaternion(this.group.quaternion);
+          this.tape.emit(p.x, p.y, p.z, d.x, d.y, d.z);
+        }
+      }
+    }
+    // fireworks over the finale: shells up from behind the pit building, bursting in the winner's
+    // colours and gold
+    if (this.real > 27.8 && this.real < DURATION - 1.5 && this.real > this.nextShell) {
+      this.nextShell = this.real + 0.35 + Math.random() * 0.5;
+      const team = this.podium[0]?.team;
+      // (daylight swallows a dim star: bright enough to bloom against the sky)
+      const pal = [new THREE.Color(3.2, 2.2, 0.9), new THREE.Color(3, 2.9, 2.6), ...(team ? [new THREE.Color(team.primary).multiplyScalar(3.4), new THREE.Color(team.secondary).multiplyScalar(3)] : [])];
+      this.shells.push({
+        // (over the pit building behind the podium, and over the main grandstand across the track)
+        p: this.world((Math.random() - 0.5) * 80, 4, Math.random() < 0.5 ? -30 - Math.random() * 40 : 60 + Math.random() * 40, new THREE.Vector3()),
+        v: new THREE.Vector3((Math.random() - 0.5) * 6, 30 + Math.random() * 8, (Math.random() - 0.5) * 6),
+        fuse: 1.4 + Math.random() * 0.5,
+        col: pal[Math.floor(Math.random() * pal.length)],
+      });
+    }
+    for (let i = this.shells.length - 1; i >= 0; i--) {
+      const sh = this.shells[i];
+      sh.v.y -= 9.8 * dtReal;
+      sh.p.addScaledVector(sh.v, dtReal);
+      sh.fuse -= dtReal;
+      this.sky.emit(sh.p, (Math.random() - 0.5) * 0.6, -1, (Math.random() - 0.5) * 0.6, hot, 0.5);
+      if (sh.fuse <= 0) {
+        // the burst: a shell of stars, a few crackling gold ones among them
+        for (let k = 0; k < 220; k++) {
+          const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+          const sp = 13 + Math.random() * 3;
+          this.sky.emit(sh.p, r * Math.cos(a) * sp, u * sp, r * Math.sin(a) * sp, k % 9 ? sh.col : hot, 1.6 + Math.random() * 0.9);
+        }
+        this.shells.splice(i, 1);
+      }
+    }
+    // the stage lights flare with the pyro
+    if (this.ledMat) this.ledMat.emissiveIntensity = 2.2 + (gerb ? 1.6 : 0);
+    if (this.beamMat) ((this.beamMat as unknown as THREE.ShaderMaterial).uniforms.uI.value = 0.05 + (gerb ? 0.04 : 0));
+    this.gerbs.update(dt);
+    this.sky.update(dtReal);
     this.champagne.update(dt);
     this.foam.update(dt);
     this.mist.update(dt);
-    this.tape.update(dt, t, this.groundY);
-    for (const o of [this.champagne.points, this.foam.points, this.mist.points, this.tape.mesh]) o.matrix.copy(this.group.matrixWorld).invert();
+    this.tape.update(dt, t, this.groundY, camera.position);
+    for (const o of [this.champagne.points, this.foam.points, this.mist.points, this.tape.mesh, this.gerbs.points, this.sky.points]) o.matrix.copy(this.group.matrixWorld).invert();
     // the crowd: cheering on arrival, quiet for the anthem, wild for the trophies and champagne
     // quiet and still for the anthem, then wild
     const calm = t < 5 ? 0 : t < 11 ? Math.min(1, (t - 5) / 1.2) : Math.max(0, 1 - (t - 11) / 1.2);
@@ -704,22 +924,32 @@ export class Celebration {
 
   private graphics(t: number) {
     this.title.style.opacity = this.real > 0.8 && this.real < 6 ? '1' : '0';
-    // lower-third names as each driver gets their trophy, then the winner
+    // lower thirds as each driver gets their trophy
     let key = '';
     let html = '';
-    const row = (e: Entry, label: string) =>
-      `<span style="width:5px;height:30px;border-radius:3px;background:${e.team.primary}"></span><span style="color:#d8b04a;font-size:13px;letter-spacing:.14em;text-transform:uppercase">${label}</span><b style="font-weight:700">${e.driver.first} ${e.driver.last.toUpperCase()}</b><span style="color:rgba(255,255,255,.62);font-size:15px">${e.team.name}</span>`;
+    const row = (e: Entry, pos: string, label: string) =>
+      `<div style="display:flex;align-items:center;justify-content:center;min-width:64px;background:linear-gradient(180deg,#e9c977,#b98d34);color:#121212;font:italic 900 34px ${FONTQ}">${pos}</div>` +
+      `<div style="width:6px;background:${e.team.primary}"></div>` +
+      `<div style="padding:12px 26px 12px 18px"><div style="font:700 11px ${FONTQ};letter-spacing:.32em;color:#e3c070;text-transform:uppercase">${label}</div>` +
+      `<div style="font:italic 800 30px/1.1 ${FONTQ};margin-top:3px;text-transform:uppercase;letter-spacing:.01em"><span style="font-weight:500;font-style:normal;font-size:22px;text-transform:none;margin-right:8px;opacity:.85">${e.driver.first}</span>${e.driver.last}</div>` +
+      `<div style="font:600 13px ${FONTQ};margin-top:4px;color:rgba(255,255,255,.62);letter-spacing:.14em;text-transform:uppercase">${e.team.name}</div></div>`;
     const [p1, p2, p3] = this.podium;
-    if (t > 14 && t < 16.3 && p3) (key = '3'), (html = row(p3, 'Third'));
-    else if (t > 16.6 && t < 18.8 && p2) (key = '2'), (html = row(p2, 'Second'));
-    else if (t > 19.1 && t < 23.5 && p1) (key = '1'), (html = row(p1, 'Race winner'));
-    else if (this.real > 31 && this.real < DURATION - 1.2 && p1) (key = 'w'), (html = row(p1, `Winner · ${EVENT.gp}`));
+    if (t > 14 && t < 16.3 && p3) (key = '3'), (html = row(p3, '3', 'Third place'));
+    else if (t > 16.6 && t < 18.8 && p2) (key = '2'), (html = row(p2, '2', 'Second place'));
+    else if (t > 19.1 && t < 23.5 && p1) (key = '1'), (html = row(p1, '1', 'Race winner'));
     if (key !== this.strapKey) {
       this.strapKey = key;
       if (key) this.strap.innerHTML = html;
       this.strap.style.opacity = key ? '1' : '0';
-      this.strap.style.transform = key ? 'translateX(-50%) translateY(0)' : 'translateX(-50%) translateY(14px)';
+      this.strap.style.transform = key ? 'translateX(0)' : 'translateX(-28px)';
     }
+    // the winner's card over the crane and the fireworks, then black
+    if (this.card) {
+      const on = this.real > 31.2 && this.real < DURATION - 0.5;
+      this.card.style.opacity = on ? '1' : '0';
+      this.card.style.transform = on ? 'translateY(-50%) scale(1)' : 'translateY(-50%) scale(1.04)';
+    }
+    if (this.fade) this.fade.style.opacity = this.real > DURATION - 1 ? '1' : '0';
   }
 
   /**
@@ -825,8 +1055,9 @@ export class Celebration {
       // 10. the photo, then crane up and away over the crowd
       const u = ease((r - 30.5) / (DURATION - 30.5));
       P(lerp(0.5, 3, u), lerp(2.6, 14, u), lerp(8, 26, u));
-      Lk(0, lerp(2.4, 1.2, u), lerp(0, 3, u));
-      fov = lerp(34, 46, u);
+      // (rising to take in the fireworks over the pit building)
+      Lk(0, lerp(2.4, 9, u * u), lerp(0, -6, u * u));
+      fov = lerp(34, 50, u);
       hand = 0.5;
       range = lerp(5, 16, u);
       bokeh = lerp(1.6, 0.6, u);
@@ -860,6 +1091,13 @@ export class Celebration {
     this.title.remove();
     this.strap.remove();
     this.bars.remove();
+    this.card?.remove();
+    // (the fade lifts as the results come in)
+    const f = this.fade;
+    if (f) {
+      f.style.opacity = '0';
+      setTimeout(() => f.remove(), 1000);
+    }
     this.crowd.dispose();
     this.teamCrews.dispose();
     for (const f of this.figures) f.dispose();
