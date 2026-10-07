@@ -3,7 +3,7 @@
  *   ?team=<id>&seat=0|1   livery (default rossa, seat 0)
  *   ?grid=1               every team, in rows of six
  *   ?spin=1               spin wheels + sweep steering     ?speed=<m/s> fixed wheel speed (blur)
- *   ?drs=1  ?brake=1  ?rain=1 (rain light)  ?detail=0|1|2  ?driver=0  ?yaw=<deg>
+ *   ?drs=1  ?brake=1  ?rain=1 (rain light)  ?detail=0|1|2  ?driver=0 (?hands=1 keeps his hands on the wheel)  ?yaw=<deg>
  *   ?compound=soft|medium|hard|inter|wet   tyres (grid: ?compound=all cycles them)
  *   ?wet=0.8  ?rainfall=0.7                weather uniforms (wet paint/carbon/tyres)
  */
@@ -146,7 +146,7 @@ for (const c of cars) {
   c.setDrs(P.get('drs') === '1' ? 1 : 0);
   c.setBrakeGlow(P.get('brake') === '1' ? 1 : Number(P.get('brake') ?? 0));
   c.setRainLight(P.get('rain') === '1');
-  c.setDriverVisible(P.get('driver') !== '0');
+  c.setDriverVisible(P.get('driver') !== '0', P.get('hands') === '1');
   if (P.get('steer')) c.setSteer(Number(P.get('steer')));
   if (P.get('speed')) c.setWheelSpeed(Number(P.get('speed')));
 }

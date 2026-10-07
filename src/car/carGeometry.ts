@@ -848,22 +848,22 @@ function mirrors(b: Buckets, level: Level) {
       const t = i / nz;
       const z = c[2] + 0.055 - t * 0.075;
       const k = Math.sin(Math.min(1, t * 1.6 + 0.12) * Math.PI * 0.5);
-      // (2026: bigger mirrors)
-      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.1 * k, sy: 0.036 * k });
+      // (2026: bigger mirrors — a 200 × 60 mm glass at the least)
+      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.12 * k, sy: 0.042 * k });
     }
     sweep(b.paint, hs, roundedRect(ws, 0.35), () => paintCellUV(PC.mirror), { cuv: CUV });
     if (level < 2) {
       // glass (faces −Z)
-      const g = new THREE.PlaneGeometry(0.178, 0.058);
+      const g = new THREE.PlaneGeometry(0.198, 0.061);
       g.rotateY(Math.PI);
       g.translate(c[0], c[1], c[2] - 0.0205);
       // lateral safety light (2026) on the housing's outer tip
-      box(b.trim, [c[0] + 0.1 * side, c[1], c[2] + 0.02], [0.006, 0.022, 0.05], trimUV(TC.sideLight));
+      box(b.trim, [c[0] + 0.12 * side, c[1], c[2] + 0.02], [0.006, 0.024, 0.05], trimUV(TC.sideLight));
       b.trim.addGeometry(g, undefined, trimUV(TC.mirrorGlass));
       g.dispose();
       // stalks
       arm(b.carbon, [0.47 * side, 0.7, 0.47], [0.355 * side, 0.64, 0.5], 0.045, 0.012, 6, metricUV);
-      arm(b.carbon, [0.48 * side, 0.73, 0.47], [0.29 * side, 0.8, 0.15], 0.03, 0.01, 6, metricUV);
+      arm(b.carbon, [0.41 * side, 0.735, 0.49], [0.29 * side, 0.8, 0.15], 0.03, 0.01, 6, metricUV);
     }
   }
 }
