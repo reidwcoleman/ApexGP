@@ -41,9 +41,17 @@ export class FocusSunShadow extends SunLightShadow {
   /** light-space depth range (m) toward the sun / away from it */
   ceiling = 450;
   floor = 250;
-  /** per-cascade PCF radius multipliers and normal-bias multipliers */
-  radiusScale: [number, number] = [1, 1.15];
+  /**
+   * per-cascade PCF radius multipliers and normal-bias multipliers
+   * (focus 0.6: a car's shadow under a high sun has a penumbra of about a centimetre — the
+   * full 2.6-texel disc, ~10 cm, softened every edge of it to a game's blur where footage and ACC
+   * show the wheels, the wing endplates and the halo crisp on the asphalt; 1.5 texels (~6 cm) with
+   * the hardware 2×2 compare still hides the texel steps, and cloud widens it with L.shadowRadius)
+   */
+  radiusScale: [number, number] = [0.6, 1.15];
   normalScale: [number, number] = [1, 4.5];
+  /** extra multiplier on the focus cascade's disc (dev A/B) */
+  focusSharpen = 1;
 
   override updateMatrices(light: THREE.Light, viewCamera?: THREE.Camera) {
     if (!viewCamera) return;
@@ -72,6 +80,17 @@ export class FocusSunShadow extends SunLightShadow {
     if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
     _fwd.normalize();
 
+    // A low sun stretches every shadow texel, and the filter disc with it, across the ground by
+    // 1 / sin(elevation) — ×7.7 at golden hour, where the focus cascade's 2.6-texel disc smeared a
+    // car's shadow ~1.5 m along the sun: a blurred streak rather than the crisp long shadow of
+    // golden-hour footage (sharp at the tyres, softening only toward its far tip). The real
+    // penumbra there is a few centimetres across the beam, so the focus disc narrows with the sun
+    // (to 70 %, ~1.1 texels, below ~6°); the hardware 2×2 compare and the 8 taps still smooth the
+    // texel steps. (The view cascade keeps its disc: trees 40–100 m up the beam really do throw
+    // soft shadows.)
+    const sinEl = Math.max(0, -_lightDir.y);
+    const lowSun = 0.7 + 0.3 * THREE.MathUtils.smoothstep(sinEl, 0.1, 0.5);
+
     for (let i = 0; i < 2; i++) {
       const size = i === 0 ? this.nearSize : this.farSize;
       const half = size / 2;
@@ -97,7 +116,7 @@ export class FocusSunShadow extends SunLightShadow {
       cam.updateMatrixWorld();
       self._updateMatrix(cam, self._matrices[i], self._frustums[i], self._viewports[i]);
       // read by the patched getSunShadow: normal-bias scale, radius scale, tile inset, unused
-      self._cascadeData[i].set(this.normalScale[i], this.radiusScale[i], inset, 0);
+      self._cascadeData[i].set(this.normalScale[i], this.radiusScale[i] * (i === 0 ? lowSun * this.focusSharpen : 1), inset, 0);
     }
   }
 }
