@@ -80,7 +80,14 @@ npm run check    # tsc --noEmit
   `env/textureData.ts`, byte-identical to the old main-thread code). Shaders are compiled with
   `compileAsync` (KHR_parallel_shader_compile: the driver's threads, never a blocked main thread): the world's
   garage-lit programs are queued before the cars are made, the landscape's before it is adopted, the race's in
-  `warmUp`; the podium's (one more light = ~80 programs) only when a race ends. three's per-program error check
+  `warmUp`; the podium's (one more light = ~80 programs) only when a race ends. Nothing the boot draws is left
+  to be built on first use (each such program was a blocking compile + link, 0.1–0.6 s apiece on a cold D3D
+  cache): the sky's programs (cloud noise and march, the dome, PMREM's filters: `env/skyPrewarm.ts`) and the post
+  chain's (`Renderer.compilePasses`, a dry run of the chain) are queued the moment the boot starts, the particles'
+  sky probe with the world, and the garage's first frame waits only for what it draws (`Game.compileSeen`: what
+  the garage camera frames, and the floor mirror's own light set) — the rest of the garage's programs build
+  behind it. `PORT=… node tools/_boottrace.mjs` (cold profile; `ALL=1 KEYS=1 USED=1 AFTER=1` for detail) lists every
+  program and upload the boot still waits on and why, `tools/_bootshots.mjs <out>` shoots the boot's stages. three's per-program error check
   is off in production builds (`?shadercheck` turns it on). IndexedDB (`src/core/pixelCache.ts`, keyed by the
   build) keeps, besides the liveries / fan atlas / leaf atlas, the ground pixels and each circuit's sight-line
   grid, so a returning player's boot and circuit switches skip them. Measure with `tools/loadbench.mjs`.

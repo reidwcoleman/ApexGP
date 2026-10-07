@@ -7,6 +7,7 @@ import { CIRCUITS, MONZA } from '../world/Circuits.ts';
 import type { CircuitDef } from '../world/CircuitGen.ts';
 import { collectDeep, collectResources, disposeTree, holdMaterials, releaseHeldMaterials, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
 import { createCloudNoise } from '../world/env/skyNoise.ts';
+import { prewarmSkyPrograms } from '../world/env/skyPrewarm.ts';
 import { buildTreeKit } from '../world/env/treeproto.ts';
 import { loadAsphaltScan, makeGroundTextures } from '../world/trackside/textures.ts';
 import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
@@ -398,6 +399,11 @@ export class Game {
     );
     void Promise.all([pixels, asphalt]).then(() => mark('pixels'));
     this.applySettings(this.menu.settings);
+    // the sky's programs, then the post chain's (its quality set by now), on the driver's threads from
+    // the start: they build side by side while the circuit is surveyed and the garage made, rather
+    // than one by one, blocking, when the environment first draws them / in the first garage frame
+    const skyPrograms = prewarmSkyPrograms(this.gfx.renderer);
+    const postPrograms = this.gfx.compilePasses();
     // the career's grid (Formula 2 or 1, the player's driver in their seat) before any car or pit garage is built
     this.syncCareerGrid();
     Career.extraUnlocked = (id) => this.dc.visited(id);
@@ -419,6 +425,10 @@ export class Game {
       },
       { people, signs: fonts, pixels },
     );
+    // (the environment holds those programs itself now)
+    skyPrograms.release();
+    // the particles' sky probe, which the garage's first frame draws (a readback of the env map)
+    if (this.scene.environment) this.particles.compileProbe(this.gfx.renderer, this.scene.environment);
 
     mark('world');
     // every light the garage frame will have, before anything is compiled (light counts are part of
@@ -427,9 +437,12 @@ export class Game {
     this.scene.add(this.headlights.group);
     this.buildGarageLights();
     // … then the world's programs, garage-lit, queued now: the driver builds them on its own threads
-    // (KHR_parallel_shader_compile) while the cars are made below
+    // (KHR_parallel_shader_compile) while the cars are made below. Only what is shown (the hidden
+    // sets — rain, floodlight flares, the fire — are built with the race's lighting in warmUp, or
+    // by the garage's first frame should the weather show them: compileSeen). Not waited for:
+    // warmGarage waits only for what its first frame draws, the rest builds behind the garage
     this.garageLights.visible = true;
-    const worldPrograms = this.compileQueued(this.scene);
+    void this.compileSeen(this.camera, undefined, false);
     this.garageLights.visible = false;
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
@@ -472,7 +485,7 @@ export class Game {
     progress(0.9, 'Opening the garage');
     await tick();
     this.toMenu();
-    await this.warmGarage(worldPrograms);
+    await this.warmGarage(postPrograms);
     mark('menu');
     this.bootMs = Math.round(performance.now() - t0);
 
@@ -838,16 +851,90 @@ export class Game {
   }
 
   /**
-   * The garage's shaders, all queued at once before its first frame (with `queued`, programs queued
-   * earlier), then that frame once the driver has built them: with KHR_parallel_shader_compile it
-   * builds them on its own threads and the main thread stays free, where a plain compile + render
-   * would block on each program in turn. (The shadow maps' depth programs are built by the frame.)
+   * The garage's shaders, queued at once before its first frame, then that frame once the driver has
+   * built them: with KHR_parallel_shader_compile it builds them on its own threads and the main thread
+   * stays free, where a plain compile + render would block on each program in turn. (The shadow maps'
+   * depth programs are built by the frame.)
+   *
+   * The first frame waits only for what it draws (with `queued`: the post chain's programs): what the
+   * garage camera frames, and what the floor mirror under the car shows — its camera sees only the
+   * mirror layer, lit only by the garage lights, so those are programs of their own, which the frame
+   * used to build one by one, blocking (≈1 s on a cold Windows/D3D shader cache, the carbon alone
+   * ≈0.6 s: tools/_boottrace.mjs). On a first visit the garage opens on the career tab, framing the
+   * wall and the teammate's car: half the garage's programs (the player's car, the props behind the
+   * camera) aren't in that frame. They are queued right after it and build while the garage is up
+   * (the camera takes a second or two to fly anywhere); the world's programs queued in boot() keep
+   * building too, no longer waited for.
    */
   private async warmGarage(queued?: Promise<unknown>) {
     this.garageFrame(0.016);
     this.garageLights.visible = true;
-    await Promise.all([queued, this.compileQueued(this.scene)]);
+    const mirror = this.garage?.mirrorCamera;
+    const floorY = this.rigs.get(this.race.player.entry)?.root.position.y;
+    await Promise.all([queued, this.compileSeen(this.camera), mirror && floorY !== undefined ? this.compileSeen(mirror, floorY) : null]);
     this.gfx.render(0.016);
+    // (everything shown, wherever the camera goes; the mirror: everything on its layer)
+    void this.compileSeen(this.camera, undefined, false);
+    if (mirror) void this.compileSeen(mirror, undefined, false);
+  }
+  /**
+   * Queue the programs of what `camera` will draw next frame — visible, on its layers, inside its
+   * frustum — lit by the scene's lights on its layers, and resolve once they are built (compileQueued).
+   * `mirrorY`: `camera` is a floor mirror at that height, whose view is the garage camera's reflected in
+   * the floor: an object is in it if its reflection is in the garage camera's frustum. `inFrustum`
+   * false: everything visible on the camera's layers, wherever it looks. Their textures are uploaded
+   * meanwhile.
+   */
+  private compileSeen(camera: THREE.Camera, mirrorY?: number, inFrustum = true): Promise<unknown> {
+    const view = this.camera;
+    this.scene.updateMatrixWorld();
+    view.updateMatrixWorld();
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(view.projectionMatrix, view.matrixWorldInverse));
+    const sphere = new THREE.Sphere();
+    const seen: THREE.Object3D[] = [];
+    this.scene.traverseVisible((o) => {
+      const m = o as THREE.Mesh & { boundingSphere?: THREE.Sphere | null; computeBoundingSphere?: () => void };
+      const sprite = (o as THREE.Sprite).isSprite;
+      if (!(m.isMesh || (o as THREE.Points).isPoints || (o as THREE.Line).isLine || sprite) || !o.layers.test(camera.layers)) return;
+      if (inFrustum && o.frustumCulled && !sprite) {
+        // (three's own test: Frustum.intersectsObject, here with the sphere reflected for a mirror)
+        if (m.boundingSphere !== undefined) {
+          if (m.boundingSphere === null) m.computeBoundingSphere?.();
+          if (!m.boundingSphere) return void seen.push(o);
+          sphere.copy(m.boundingSphere);
+        } else {
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          sphere.copy(m.geometry.boundingSphere!);
+        }
+        sphere.applyMatrix4(o.matrixWorld);
+        if (mirrorY !== undefined) sphere.center.y = 2 * mirrorY - sphere.center.y;
+        if (!frustum.intersectsSphere(sphere)) return;
+      }
+      seen.push(o);
+    });
+    // (compile walks `scene` for the materials and `targetScene` for the lights: a stand-in whose walk
+    // yields just these objects; the scene's lights light them)
+    const some = { traverse: (cb: (o: THREE.Object3D) => void) => seen.forEach(cb), traverseVisible: () => undefined } as unknown as THREE.Object3D;
+    const built = this.compileQueued(some, this.scene, 20000, camera);
+    // their textures onto the GPU now, while the driver builds the programs (the first frame
+    // uploaded them itself: ≈0.3–0.6 s of the garage's atlases and canvases in one frame)
+    const r = this.gfx.renderer;
+    const textures = new Set<THREE.Texture>();
+    for (const o of seen)
+      for (const m of [(o as THREE.Mesh).material].flat() as THREE.Material[]) {
+        if (!m) continue;
+        for (const v of Object.values(m)) if ((v as THREE.Texture)?.isTexture) textures.add(v as THREE.Texture);
+        const u = (m as THREE.ShaderMaterial).uniforms;
+        if (u) for (const k in u) if ((u[k]?.value as THREE.Texture)?.isTexture) textures.add(u[k].value as THREE.Texture);
+      }
+    for (const t of textures) {
+      try {
+        if (!(t as THREE.VideoTexture).isVideoTexture && !(t as THREE.Texture & { isRenderTargetTexture?: boolean }).isRenderTargetTexture) r.initTexture(t);
+      } catch {
+        /* a texture whose image isn't ready yet uploads when it is */
+      }
+    }
+    return built;
   }
 
   /** a 1 × 1 linear target: programs compiled with it bound get the post chain's keys */
@@ -858,12 +945,30 @@ export class Game {
    * resolve once the driver has built them (at most `cap` ms: a driver that never says leaves the
    * rest to the first frame). Nothing blocks: the compile runs on the driver's threads.
    */
-  private compileQueued(obj: THREE.Object3D, lights: THREE.Object3D | null = null, cap = 20000): Promise<unknown> {
+  private compileQueued(obj: THREE.Object3D, lights: THREE.Object3D | null = null, cap = 20000, camera: THREE.Camera = this.camera): Promise<unknown> {
     const r = this.gfx.renderer;
     const prev = r.getRenderTarget();
     r.setRenderTarget((this.linearRT ??= new THREE.WebGLRenderTarget(1, 1)));
     try {
-      const done = r.compileAsync(obj, this.camera, lights as THREE.Scene | null);
+      // (`camera`: whose layers pick the lights — the floor mirror's sees only the garage's)
+      const mats = r.compile(obj, camera, lights as THREE.Scene | null);
+      // the very programs this compile made ready (three's compileAsync polls each material's *current*
+      // program, which a later compile of the same material for other lights — the floor mirror's —
+      // replaces: it could resolve with this light set's programs still building)
+      type Prog = { program?: WebGLProgram; isReady(): boolean };
+      let progs: Prog[] = [];
+      for (const m of mats) {
+        const p = (r.properties.get(m) as { currentProgram?: Prog }).currentProgram;
+        if (p) progs.push(p);
+      }
+      const done = new Promise<void>((res) => {
+        const check = () => {
+          progs = progs.filter((p) => p.program !== undefined && !p.isReady());
+          if (progs.length) setTimeout(check, 10);
+          else res();
+        };
+        check();
+      });
       return Promise.race([done, new Promise((res) => setTimeout(res, cap))]);
     } catch (e) {
       console.warn('[shaders] compile failed', e);
@@ -1147,6 +1252,9 @@ export class Game {
     for (const o of hidden) o.visible = true;
     queued.push(this.compileQueued(this.scene));
     progs.push(r.info.programs?.length ?? 0);
+    // and the post passes that only switch on at speed, onboard, in the rain or on a long lens
+    // (warmPasses below then finds them built: it used to build them one by one in a frame of ~1 s)
+    queued.push(this.gfx.compilePasses(true));
     this.warmPrograms = progs;
     for (const o of hidden) o.visible = false;
     // (the podium's lighting — one more spot light, so every program again — is compiled when the

@@ -797,8 +797,8 @@ export class Particles {
     this.veil.setLighting(L);
   }
 
-  /** average radiance a white diffuse blob receives from scene.environment (one GPU readback) */
-  private measureSky(renderer: THREE.WebGLRenderer, env: THREE.Texture, intensity: number) {
+  /** the sky probe: a white diffuse ball lit by scene.environment alone, drawn into a 16² float target */
+  private probeKit() {
     if (!this.probe) {
       const scene = new THREE.Scene();
       const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
@@ -809,7 +809,25 @@ export class Particles {
       const rt = new THREE.WebGLRenderTarget(16, 16, { type: THREE.FloatType, depthBuffer: true });
       this.probe = { scene, cam, mat, rt, buf: new Float32Array(16 * 16 * 4) };
     }
-    const pr = this.probe;
+    return this.probe;
+  }
+  /**
+   * (boot) Queue the sky probe's program (measureSky) on the driver's threads ahead of its first use
+   * in the garage's first frame, where it was compiled and linked while the main thread waited
+   * (≈0.15–0.25 s on a cold Windows/D3D shader cache: tools/_boottrace.mjs).
+   */
+  compileProbe(renderer: THREE.WebGLRenderer, env: THREE.Texture) {
+    const pr = this.probeKit();
+    pr.mat.envMap = env;
+    pr.mat.needsUpdate = true;
+    const cur = renderer.getRenderTarget();
+    renderer.setRenderTarget(pr.rt);
+    renderer.compile(pr.scene, pr.cam);
+    renderer.setRenderTarget(cur);
+  }
+  /** average radiance a white diffuse blob receives from scene.environment (one GPU readback) */
+  private measureSky(renderer: THREE.WebGLRenderer, env: THREE.Texture, intensity: number) {
+    const pr = this.probeKit();
     pr.mat.envMap = env;
     pr.mat.envMapIntensity = intensity;
     pr.mat.needsUpdate = true;
