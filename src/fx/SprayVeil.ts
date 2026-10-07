@@ -68,9 +68,9 @@ void main() {
   if ( a < 0.003 ) discard;
   float mu = max( dot( V, uSunDir ), 0.0 );
   float fwd = mu * mu * mu * mu * mu * mu;
-  // fine water mist scatters less than a white cloud: a translucent grey a little darker than the sky
-  // (it must never clip — a brighter wet-day exposure lifts it), the sun glowing through it head-on
-  vec3 col = uAmb * 0.66 * ( 1.0 + 0.1 * n2 ) + uSunCol * fwd * 0.45;
+  // fine water mist: about as bright as the light falling on it, a little under the sky (it must
+  // never clip — a brighter wet-day exposure lifts it), the sun glowing through it head-on
+  vec3 col = uAmb * 0.8 * ( 1.0 + 0.1 * n2 ) + uSunCol * fwd * 0.45;
   gl_FragColor = vec4( col, min( a, 0.78 ) );
 }
 `;
@@ -143,9 +143,9 @@ export class SprayVeil {
     this.ground = groundY;
   }
 
-  setLighting(L: FxLighting) {
+  setLighting(L: FxLighting, mistGain = 1) {
     const u = this.mat.uniforms;
-    (u.uAmb.value as THREE.Vector3).set(L.ambient.r, L.ambient.g, L.ambient.b);
+    (u.uAmb.value as THREE.Vector3).set(L.ambient.r, L.ambient.g, L.ambient.b).multiplyScalar(mistGain);
     (u.uSunCol.value as THREE.Vector3).set(L.sunColor.r, L.sunColor.g, L.sunColor.b).multiplyScalar(1 / Math.PI);
     (u.uSunDir.value as THREE.Vector3).copy(L.sunDir);
   }

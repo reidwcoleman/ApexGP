@@ -723,8 +723,11 @@ export class WeatherSound {
     chain(loopSource(ctx, b.crackle, 0.75), biquad(ctx, 'bandpass', 900, 0.9), this.drumG, this.near);
   }
 
-  /** rain rate, water on track 0..1, player speed m/s, lightning flash 0..1, wind m/s */
-  set(rain: number, wet: number, speed: number, flash: number, wind: number, now: number): void {
+  /**
+   * rain rate, water on track 0..1, player speed m/s, lightning flash 0..1, wind m/s; `strike` counts
+   * the strikes so far and `km` is how far off the last one was (−1: unknown)
+   */
+  set(rain: number, wet: number, speed: number, flash: number, wind: number, now: number, strike = -1, km = -1): void {
     const r = clamp(rain, 0, 1);
     setT(this.bedG.gain, 0.2 * Math.pow(r, 0.8), now, 0.6);
     setT(this.patterG.gain, 0.1 * r, now, 0.6);
@@ -741,37 +744,50 @@ export class WeatherSound {
     setT(this.whistleG.gain, 0.025 * w * w * clamp(g - 0.35, 0, 1), now, 0.3);
     setT(this.whistleBP.frequency, 800 + 900 * clamp(g, 0, 1), now, 0.3);
 
-    if (flash > 0.9 && this.lastFlash < 0.5) {
+    if (km > 0 && strike >= 0) {
+      // the thunder of each strike arrives at the speed of sound, ~3 s a kilometre after its flash
+      // (count the seconds, divide by three): a crack right on top of it close by, a long low roll
+      // half a minute later from the far side of the storm
+      if (strike !== this.lastStrike && this.lastStrike >= 0) this.thunder(now + (km * 1000) / 343, km < 1.2, km);
+      this.lastStrike = strike;
+    } else if (flash > 0.9 && this.lastFlash < 0.5) {
       const close = Math.random() < 0.45;
       this.thunder(now + (close ? 0.12 + Math.random() * 0.5 : 1.2 + Math.random() * 3), close);
     }
     this.lastFlash = flash;
   }
 
-  private thunder(at: number, close: boolean): void {
+  private lastStrike = -1;
+
+  private thunder(at: number, close: boolean, km = close ? 0.8 : 3): void {
     const ctx = this.ctx;
-    const len = (close ? 6 : 5) + Math.random() * 4;
+    // (a far strike rolls longer — the sound arrives off kilometres of channel — quieter, and the air
+    // has eaten its highs)
+    const far = Math.min(1, Math.max(0, (km - 1) / 8));
+    const len = (close ? 6 : 5) + Math.random() * 4 + far * 4;
+    const vol = Math.min(1, Math.max(0.25, 1.8 / (0.8 + km)));
     // the rumble: two layers of slowed noise, the low-pass closing as it rolls away
     for (const [rate, lvl] of [
       [0.32, close ? 0.8 : 0.55],
       [0.6, close ? 0.35 : 0.2],
     ] as const) {
       const src = new AudioBufferSourceNode(ctx, { buffer: this.b.pink, loop: true, playbackRate: rate });
-      const lp = biquad(ctx, 'lowpass', close ? 1100 : 420, 0.8);
+      const f0 = close ? 1100 : 420 * (1 - 0.45 * far);
+      const lp = biquad(ctx, 'lowpass', f0, 0.8);
       const g = gainNode(ctx, 0);
       chain(src, lp, g, this.out);
-      lp.frequency.setValueAtTime(close ? 1100 : 420, at);
-      lp.frequency.setTargetAtTime(close ? 180 : 130, at + 0.2, len / 5);
+      lp.frequency.setValueAtTime(f0, at);
+      lp.frequency.setTargetAtTime(close ? 180 : 130 - 40 * far, at + 0.2, len / 5);
       g.gain.setValueAtTime(0, at);
-      g.gain.linearRampToValueAtTime(lvl, at + (close ? 0.08 : 0.5));
+      g.gain.linearRampToValueAtTime(lvl * vol, at + (close ? 0.08 : 0.5 + far));
       // rolls: the sound arriving off different parts of the cloud
       let t = at + 0.4;
       const rolls = 3 + Math.floor(Math.random() * 4);
       for (let i = 0; i < rolls; i++) {
         t += 0.35 + Math.random() * 0.9;
         const k = 1 - i / (rolls + 1);
-        g.gain.setTargetAtTime(lvl * (0.35 + 0.3 * Math.random()) * k, t - 0.3, 0.12);
-        g.gain.setTargetAtTime(lvl * (0.7 + 0.3 * Math.random()) * k, t, 0.15);
+        g.gain.setTargetAtTime(lvl * vol * (0.35 + 0.3 * Math.random()) * k, t - 0.3, 0.12);
+        g.gain.setTargetAtTime(lvl * vol * (0.7 + 0.3 * Math.random()) * k, t, 0.15);
       }
       g.gain.setTargetAtTime(0, t + 0.3, len / 4);
       src.start(at, Math.random() * 3);

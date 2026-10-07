@@ -282,7 +282,11 @@ npm run check    # tsc --noEmit
   the fog; rain lights glow in it. A drying track starts with a line already cleared and dries unevenly: the line goes
   to dry, lighter asphalt with a ragged edge, the braking zones keep damp blotches, the stretches by the trees (the park
   mask's tree cover) stay wet, the open surface dries in patches; the wet half keeps a smooth sheen that fades as the
-  film thins; spray comes only off the wettest parts, light, and next to none off the dry line.
+  film thins; spray comes only off the wettest parts, light, and next to none off the dry line. The rain itself
+  changes with the rate (drizzle: fine, slow, faint streaks; a downpour: thick fast ones falling in wind-driven
+  sheets), lightning lights the land by how dark it is and how close it struck (a flicker at noon, the circuit
+  flooded white at night), and its thunder arrives ~3 s per kilometre later. Onboard lenses carry defocused,
+  ragged drops that sit at low speed and are blown streaming off the glass flat out (the chase cameras stay dry).
 - **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.
@@ -518,8 +522,11 @@ src/
   race/    Race (session, timing, DRS, contact), Teams, Engineer (radio)
   game/    Game (states + loop), CarView, Cameras
   fx/      Particles (tyre smoke, dust, sparks, plank sparks), CarEffects (per-car fx from the physics),
-           Spray (rain plumes: a translucent grey mist, darker than the sky so a bright wet exposure never
-           clips it), SkidMarks (rubber, offs, braking film, marbles)
+           Spray (rain plumes: compact at the tyres, fading in and spreading into a hanging trail — taller,
+           wider and longer-lived on a flooded track — lit by the whole sky dome, a little under the haze;
+           soft puffs fade by how much of their ball lies in front of a surface, and the half-res layer is
+           upsampled depth-aware so cars in spray keep clean outlines), SkidMarks (rubber, offs, braking
+           film, marbles)
   ui/      HUD, Menu, design tokens
   core/    Renderer (post chain: N8AO, TAA, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
            PBR Neutral / ACES-fit by look, film print + grain, SMAA below High, lens + sharpen;
@@ -555,6 +562,9 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
 - `node tools/flow.mjs` — garage → race → pause → restart → simulated race (with travel): page errors.
 - `node tools/tour.mjs <track> [n]`, `tools/camsheet.mjs`, `tools/shot2x.mjs` — screenshots.
+- `node tools/_wetshots.mjs <out> [track] [weather:time,…] [cams]` — each wet scene booted once and shot through the
+  cameras (`FLASH=1` also shoots a lightning strike's peak); `node tools/_quickab.mjs <out> <weather> <time> <cam> '{"name":"js"}'`
+  — runtime toggles shot back to back in one live race.
 - `node tools/raceshots.mjs <out> [track] [cams]` — one live race shot through a list of cameras (dev server :5190;
   `PORT`, `WEATHER`, `TIME`); `node tools/abshots.mjs <out> <track> <cam> '{"name":"js"}'` — the same moment with renderer toggles.
 - `node tools/gpuab.mjs 5217,5218` / `node tools/frametimes.mjs 5217,5218` — GPU ms and uncapped frame-time percentiles

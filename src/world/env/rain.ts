@@ -26,6 +26,7 @@ uniform float uShutter;
 uniform float uWidth;
 uniform float uPixel;
 uniform float uZoom;
+uniform float uSheets;
 uniform vec3 uSunDirR;
 uniform vec4 hlPos[ ${HL_MAX} ];
 uniform vec4 hlDir[ ${HL_MAX} ];
@@ -58,7 +59,11 @@ void main() {
   vAlpha = smoothstep( r, r * 0.55, dist ) * smoothstep( 0.35 * uZoom, 1.4 * uZoom, dist ) * thin * ( 0.55 + 0.45 * aSeed.w ) / ( 1.0 + 0.2 * ( uZoom - 1.0 ) );
   // drops between the lens and a low sun light up (forward scattering): a shower glitters
   float mu = max( dot( rel / max( dist, 1e-3 ), uSunDirR ), 0.0 );
-  vGlint = mu * mu * mu * mu * mu * mu;
+  // (two lobes: the broad glow of sunlit drops anywhere toward the sun, and the hard sparkle of
+  // those nearly in line with it — the silver threads against dark trees in a sun shower)
+  float mu2 = mu * mu;
+  float mu8 = mu2 * mu2 * mu2 * mu2;
+  vGlint = 0.6 * mu2 + 1.4 * mu8 * mu8;
   // drops falling through a car's headlight beam light up (night races in the rain)
   vLamp = 0.0;
   for ( int k = 0; k < ${HL_MAX}; k ++ ) {
@@ -74,8 +79,18 @@ void main() {
     float e = ex * ex + ey * ey;
     if ( e < 1.0 ) vLamp += hlPos[ k ].w * ( 1.0 - e ) / ( length( ld ) + 2.5 );
   }
-  // longer streaks spread the same water over more pixels
-  vAlpha *= clamp( 0.9 / ( len * 2.0 + 0.2 ), 0.12, 1.0 );
+  // longer streaks spread the same water over more pixels (but each streak here stands for a
+  // bundle of the hundreds of drops per m³ a real shower has: it stays readable when it smears)
+  vAlpha *= clamp( 0.9 / ( len * 1.4 + 0.2 ), 0.25, 1.0 );
+  // a downpour falls in sheets: gust-driven bands of heavier rain sweeping across with the wind
+  // (the curtains you see marching down the straight in a storm), lighter rain between them
+  if ( uSheets > 0.0 ) {
+    vec2 wd = length( uWind.xz ) > 0.3 ? normalize( uWind.xz ) : vec2( 0.8, 0.6 );
+    float a1 = dot( p.xz, wd ) * 0.075 - uTime * ( 0.35 + 0.075 * length( uWind.xz ) );
+    float a2 = dot( p.xz, vec2( -wd.y, wd.x ) ) * 0.031 + a1 * 0.4;
+    float band = 0.5 + 0.32 * sin( a1 * 6.2832 ) + 0.18 * sin( a2 * 6.2832 + 1.7 );
+    vAlpha *= mix( 1.0, 0.3 + 1.5 * smoothstep( 0.3, 0.85, band ), uSheets );
+  }
   gl_Position = projectionMatrix * viewMatrix * vec4( wp, 1.0 );
 }
 `;
@@ -110,6 +125,7 @@ uniform vec3 uCam;
 varying vec2 vQ;
 varying float vT;
 varying float vSeed;
+varying float vFade;
 void main() {
   float age = uTime - aSplash.w;
   vT = age / uLife;
@@ -123,6 +139,9 @@ void main() {
   vec3 toCam = uCam - aSplash.xyz;
   // (right under the lens a splash would be a big white blot: fade those)
   vT = mix( 2.0, vT, smoothstep( 2.5, 6.0, length( toCam ) ) );
+  // a crown is a few millimetres of water: past ~20 m (and down a long lens) the splashes only
+  // make the surface fizz — at full strength they read as white popcorn scattered on the road
+  vFade = 1.0 - 0.7 * smoothstep( 12.0, 45.0, length( toCam ) );
   vec2 f = normalize( toCam.xz + vec2( 1e-4 ) );
   vec3 right = vec3( -f.y, 0.0, f.x );
   vec3 wp = aSplash.xyz + right * position.x * aSize + vec3( 0.0, position.y * aSize * 1.3, 0.0 );
@@ -135,6 +154,7 @@ uniform vec3 uColor;
 varying vec2 vQ;
 varying float vT;
 varying float vSeed;
+varying float vFade;
 void main() {
   float t = vT;
   float a = 0.0;
@@ -150,7 +170,7 @@ void main() {
   // the crown wall, low and brief, and the ring spreading on the water
   float crown = exp( -pow( ( abs( vQ.x ) - t * 0.9 ) * 14.0, 2.0 ) ) * smoothstep( 0.35 * ( 1.0 - t ), 0.0, vQ.y ) * step( 0.0, vQ.y ) * ( 1.0 - t );
   a = a * ( 1.0 - t * 0.6 ) + crown * 0.8;
-  a *= smoothstep( 1.0, 0.7, t );
+  a *= smoothstep( 1.0, 0.7, t ) * vFade;
   if ( a < 0.004 ) discard;
   gl_FragColor = vec4( uColor * a, a );
 }
@@ -193,6 +213,7 @@ function makeLayer(max: number, size: number, width: number, fall: number, opaci
     uWidth: { value: width },
     uPixel: { value: 0.001 },
     uZoom: { value: 1 },
+    uSheets: { value: 0 },
     uSunDirR: { value: new THREE.Vector3(0, 1, 0) },
     uGlint: { value: new THREE.Color(0, 0, 0) },
     uColor: { value: new THREE.Color(0.5, 0.5, 0.55) },
@@ -241,10 +262,13 @@ export interface RainSystem {
 export function createRain(): RainSystem {
   const group = new THREE.Group();
   group.name = 'Rain';
-  const near = makeLayer(14000, 26, 0.0045, 9.5, 0.55, 11);
+  // (a real shower has ~100–300 drops a cubic metre big enough to see (Marshall–Palmer): each of
+  // these streaks stands for many of them, so it is brighter than one drop would be)
+  const near = makeLayer(14000, 26, 0.0045, 9.5, 1.1, 11);
   const far = makeLayer(12000, 110, 0.03, 8.5, 0.16, 29);
   group.add(near.mesh, far.mesh);
   const layers = [near, far];
+  const base = layers.map((l) => ({ width: l.uniforms.uWidth.value as number, fall: l.uniforms.uFall.value as number, opacity: l.uniforms.uOpacity.value as number }));
 
   // splash pool: a ring buffer of instances, re-seeded on the CPU as drops land
   const SPLASH_MAX = 900;
@@ -308,12 +332,23 @@ export function createRain(): RainSystem {
       if (Math.abs(r - rain) > 0.004) {
         rain = r;
         applyCount();
+        // the drops themselves change with the rate: drizzle is a mist of ~0.5 mm drops falling at
+        // 2–4 m/s (fine, short, faint streaks), a downpour 2–5 mm drops at 7–9 m/s (thick, long,
+        // bright) — terminal velocity after Gunn & Kinzer (1949)
+        const k = Math.min(1, r);
+        const fall = 0.3 + 0.7 * Math.pow(k, 0.7);
+        layers.forEach((l, i) => {
+          l.uniforms.uFall.value = base[i].fall * fall;
+          l.uniforms.uWidth.value = base[i].width * (0.5 + 0.6 * k);
+          l.uniforms.uOpacity.value = base[i].opacity * (0.55 + 0.55 * k);
+          l.uniforms.uSheets.value = Math.min(1, Math.max(0, (k - 0.6) / 0.35));
+        });
       }
       for (const l of layers) {
         (l.uniforms.uWind.value as THREE.Vector3).set(wx * 0.9, 0, wz * 0.9);
         (l.uniforms.uColor.value as THREE.Color).copy(color);
       }
-      sU.uColor.value.copy(color).multiplyScalar(0.8);
+      sU.uColor.value.copy(color).multiplyScalar(0.5);
     },
     setSun(dir, glint) {
       for (const l of layers) {

@@ -338,7 +338,10 @@ vec3 lr_h31(float p) {
 }
 
 // a drop: xy = where to sample the scene (uv offset), z = coverage, w = 0 centre … 1 rim
-// sitting drops: an inverted, shrunk image of what is behind them; they bead, sit and evaporate
+// sitting drops: they bead, sit and evaporate. The lens is focused tens of metres beyond them, so
+// a drop is never a crisp bubble: its outline is soft and ragged (water wets the glass unevenly)
+// and the image through it — shrunk and flipped by the bead's short focus — is smeared by the
+// same defocus (the onboard footage's drops are pale, wobbling smudges, not dark-ringed lenses).
 vec4 lr_static(vec2 uv, float scale, float seed, float density) {
   vec2 g = uv * vec2(aspect, 1.0) * scale;
   vec2 id = floor(g);
@@ -351,12 +354,14 @@ vec4 lr_static(vec2 uv, float scale, float seed, float density) {
   vec2 d = st - c;
   // drops sag a little
   d.y *= 1.0 + 0.25 * sign(d.y);
-  float dist = length(d);
-  float m = smoothstep(r, r * 0.8, dist) * alive;
+  float ang = atan(d.y, d.x);
+  float wob = 1.0 + 0.13 * sin(ang * 3.0 + n.x * 40.0) + 0.07 * sin(ang * 5.0 + n.y * 60.0);
+  float dist = length(d) / wob;
+  float m = smoothstep(r, r * 0.3, dist) * alive;
   if (m <= 0.0) return vec4(0.0);
   vec2 centreUV = (id + 0.5 + c) / scale / vec2(aspect, 1.0);
   vec2 rel = (uv - centreUV);
-  vec2 target = centreUV - rel * 2.4 + vec2(0.0, 0.03);
+  vec2 target = centreUV - rel * 1.5 + vec2(0.0, 0.02);
   return vec4(target - uv, m, clamp(dist / max(r, 1e-4), 0.0, 1.0));
 }
 
@@ -417,12 +422,14 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec4 b = lr_static(uv + 0.37, 11.0, 7.0, 0.2 + 0.6 * amount);
   vec4 c = lr_static(uv + 0.71, 21.0, 13.0, 0.35 * amount);
   vec4 s = speed > 0.02 ? lr_stream(uv, 3.0) : vec4(0.0);
-  // the airflow wipes sitting drops away at speed
-  float keep = 1.0 - 0.75 * speed;
+  // the airflow wipes sitting drops away at speed (but the rain keeps landing: some always sit)
+  float keep = 1.0 - 0.55 * speed;
   vec4 best = vec4(a.xy, a.z * keep, a.w);
-  if (b.z * keep > best.z) best = vec4(b.xy, b.z * keep, b.w);
-  if (c.z * keep > best.z) best = vec4(c.xy, c.z * keep, c.w);
-  if (s.z > best.z) best = s;
+  // (each drop smears what it shows over about its own size)
+  float blur = 0.012;
+  if (b.z * keep > best.z) { best = vec4(b.xy, b.z * keep, b.w); blur = 0.007; }
+  if (c.z * keep > best.z) { best = vec4(c.xy, c.z * keep, c.w); blur = 0.0035; }
+  if (s.z > best.z) { best = s; blur = 0.003; }
   float m = best.z * min(1.0, amount * 1.4);
   vec3 col = col0;
   // a thin film of water softens the image in heavy rain
@@ -433,14 +440,21 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     col = mix(col, soft, (amount - 0.3) * 0.6);
   }
   if (m > 0.001) {
-    vec2 tuv = clamp(uv + best.xy, 0.001, 0.999);
-    vec3 refr = (texture2D(inputBuffer, tuv).rgb * 2.0
-               + texture2D(inputBuffer, clamp(tuv + vec2(0.002, 0.0), 0.001, 0.999)).rgb
-               + texture2D(inputBuffer, clamp(tuv - vec2(0.0, 0.002), 0.001, 0.999)).rgb) * 0.25;
-    // dark refracting rim, slightly brighter lensing core
-    float rim = smoothstep(0.55, 1.0, best.w);
-    refr *= (1.0 - 0.55 * rim) * 1.08;
-    col = mix(col, refr, m);
+    // what the drop shows, smeared by the defocus (five taps across about the drop's own size)
+    vec2 tuv = uv + best.xy;
+    vec2 bl = vec2(blur / aspect, blur);
+    vec3 refr = texture2D(inputBuffer, clamp(tuv, 0.001, 0.999)).rgb * 0.2;
+    refr += texture2D(inputBuffer, clamp(tuv + vec2(bl.x, 0.3 * bl.y), 0.001, 0.999)).rgb * 0.2;
+    refr += texture2D(inputBuffer, clamp(tuv - vec2(bl.x, 0.3 * bl.y), 0.001, 0.999)).rgb * 0.2;
+    refr += texture2D(inputBuffer, clamp(tuv + vec2(-0.3 * bl.x, bl.y), 0.001, 0.999)).rgb * 0.2;
+    refr += texture2D(inputBuffer, clamp(tuv + vec2(0.3 * bl.x, -bl.y), 0.001, 0.999)).rgb * 0.2;
+    // the bead's lower edge bends the dark ground into it, its upper edge catches the sky: a soft
+    // shading across the drop rather than a dark ring
+    float rim = smoothstep(0.45, 1.0, best.w);
+    refr *= 1.0 - 0.22 * rim;
+    // (water on the glass also scatters a little: drops veil toward the frame's own average light)
+    refr = mix(refr, (col + refr) * 0.5, 0.25);
+    col = mix(col, refr, m * 0.85);
   }
   outputColor = vec4(col, inputColor.a);
 }
