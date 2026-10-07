@@ -325,6 +325,13 @@ npm run check    # tsc --noEmit
   offs and the lap-time spread. Dynamic difficulty now ranges to
   106% of the limit and moves ±2.5% during a race (`node tools/aipace.mjs [track]` shows where the
   AI's pace tops out).
+- **AI that learns** (`src/sim/AILearning.ts`) — each AI driver learns every circuit corner by corner: new
+  to a track they brake early and carry a little less speed, then each clean pass moves their braking point and
+  corner speed toward the limit (back off after running wide or arriving too fast, push on with grip to spare,
+  give it back if it didn't pay); someone — you too — quicker through a corner shows there's time there (the
+  learning never slows anyone for your sake). Long fights push drivers past what they know (that's where mistakes come from). What they
+  learn, and a slow development over the races they drive, is kept in localStorage (`apexgp.ailearn`), capped by
+  the difficulty so the AI stays beatable.
 
 ## Controls
 

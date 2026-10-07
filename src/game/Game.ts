@@ -1064,6 +1064,8 @@ export class Game {
       laps: setup.laps,
       difficulty: aiLevel(setup, this.career).value,
       dynamicAI: aiLevel(setup, this.career).dynamic,
+      // the AI drivers remember the circuit (and develop) from race to race
+      learning: true,
       trackLimits: setup.trackLimits,
       // the weekend's driver form (qualifying and the race agree); everything else is fresh each session
       formSeed: this.weekendSeed,
@@ -1720,6 +1722,8 @@ export class Game {
     const laps = this.race.opts.laps;
     const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${this.track.def.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
+    // what the AI drivers learned today, for the next race here (once per race)
+    this.race.saveLearning();
     // the next race gets new weather
     this.rollWeather(this.menu.setup);
     // a race (not a time trial) counts for the career, once
