@@ -1,7 +1,8 @@
 // Shadow casters per scene group: triangles (each cascade draws them again, less what it culls). node tools/casters.mjs [track]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=chase&skip=30&weather=clear&time=afternoon`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });

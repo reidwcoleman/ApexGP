@@ -6,6 +6,7 @@
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const SRC = path.join(ROOT, 'assets-src', 'rocketbox');
@@ -56,9 +57,9 @@ export const CLIPS = [
 ];
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
 page.on('console', (m) => {

@@ -1,5 +1,6 @@
 // Podium screenshots for the people pass: node tools/_hum_podium.mjs out_prefix [times s, comma] [--port 5191]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const prefix = args[0] ?? 'shots/hum_pod';
@@ -10,9 +11,9 @@ const opt = (k, d) => {
 };
 const port = opt('port', '5191');
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

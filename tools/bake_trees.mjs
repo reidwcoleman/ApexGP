@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const OUT = path.join(ROOT, 'public', 'trees');
@@ -70,9 +71,9 @@ if (args.includes('--encode')) {
 }
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--js-flags=--max-old-space-size=8192'],
 });
 const page = await browser.newPage({ viewport: { width: 600, height: 600 } });
 page.on('console', (m) => console.log(`[${m.type()}] ${m.text().slice(0, 400)}`));

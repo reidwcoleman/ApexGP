@@ -1,7 +1,8 @@
 // 4 views (N/E/S/W) from a raised point over the circuit centre-ish. node tools/_ring.mjs <out> <track> [h] [fov]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out, track, h = '18', fov = '45'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:5196/?track=${track}&demo=race&skip=20&weather=clear&time=afternoon&settle=500`);

@@ -1,9 +1,10 @@
 // Face/upper-body close-ups of the garage people (head bone framed): node tools/faceshot.mjs [outDir] [idx,idx…] [dist=0.9]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out = 'shots/people', list = '', dist = '0.9'] = process.argv.slice(2);
 mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:${process.env.PORT ?? 5196}/?track=monza`);

@@ -1,7 +1,8 @@
 // Garage hub screenshots per tab. node tools/menushot.mjs [track] [tabs=race,career] [outdir]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza', tabs = 'race,career', out = 'shots/menu'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('[error]', m.text().slice(0, 300)); });

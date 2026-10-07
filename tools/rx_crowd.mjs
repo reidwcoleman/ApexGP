@@ -3,6 +3,7 @@
 //   node tools/rx_crowd.mjs shots/prefix [--track monza] [--ahead 160] [--scn none,lead,pack,mex,hot] [--what crowd]
 //     [--cam dx,dy,back] (camera: back metres up-track of the fan, dx metres across, dy up) [--fov 42] [--eval js]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const prefix = args[0] ?? 'shots/rx';
@@ -18,9 +19,9 @@ const what = opt('what', 'crowd');
 const camSpec = opt('cam', '-6,3.5,25').split(',').map(Number);
 const fov = +opt('fov', '42');
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

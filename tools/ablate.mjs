@@ -1,6 +1,7 @@
 // GPU ablation: median GPU ms of one frame with individual features switched off.
 //   node tools/ablate.mjs [--scene menu|chase|tv|podium] [--dpr 1] [--q high] [--track monza]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => {
@@ -13,9 +14,9 @@ const q = opt('q', 'high');
 const track = opt('track', 'monza');
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: dpr });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

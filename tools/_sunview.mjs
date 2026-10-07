@@ -1,8 +1,9 @@
 // Per weather: a frame toward the sun (sky, shafts, glare) and away from it, with the race running.
 //   node tools/_sunview.mjs <out> <track> <time> <weather,...>
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out, track = 'spa', time = 'afternoon', list = 'clear'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 for (const wx of list.split(',')) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));

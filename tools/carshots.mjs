@@ -1,5 +1,6 @@
 // Studio shots of a car from several angles (src/dev/car.html). node tools/carshots.mjs [team=rossa] [outdir=shots/car]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [team = 'rossa', out = 'shots/car'] = process.argv.slice(2);
 const views = {
   front34: ['4.2,1.3,4.6', '0,0.45,0.3'],
@@ -9,7 +10,7 @@ const views = {
   low: ['2.6,0.35,3.6', '0,0.5,0.6'],
   nose: ['1.2,0.9,4.2', '0,0.35,1.8'],
 };
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (const [name, [cam, look]] of Object.entries(views)) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));

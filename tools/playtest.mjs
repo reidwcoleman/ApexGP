@@ -3,11 +3,12 @@
 // Menu → setup → race start (revving on the grid) → launch → a few seconds of
 // driving with simple steering from the game's own track data → pause → resume.
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const errors = [];

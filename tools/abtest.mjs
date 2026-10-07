@@ -4,6 +4,7 @@
 // medians of CPU frame time, GPU frame time, rAF interval, draw calls, triangles.
 //   node tools/abtest.mjs [--dpr 2] [--scenes menu,grid,chase,tv,replay,podium] [--cycles 4] [--block 50] [--track monza]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => {
@@ -19,9 +20,9 @@ const track = opt('track', 'monza');
 const sync = opt('sync', '1') === '1';
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: dpr });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

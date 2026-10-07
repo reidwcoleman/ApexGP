@@ -1,8 +1,9 @@
 // node tools/_carseq.mjs <path> <outPrefix> "<setup js>" "<js per shot 1>" "<js per shot 2>" ... (env W,H,WAIT seconds between shots)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [path, out, setup, ...shots] = process.argv.slice(2);
 const W = +(process.env.W ?? 1280), H = +(process.env.H ?? 720), GAP = +(process.env.WAIT ?? 3);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('[error]', m.text().slice(0, 600)); });

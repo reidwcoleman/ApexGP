@@ -1,11 +1,12 @@
 // Fans (stand/bank crowd instances, concourse walkers, trackside people) standing on the
 // track or its run-off, per circuit.   node tools/fanprobe.mjs [ids...]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const ids = process.argv.slice(2);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

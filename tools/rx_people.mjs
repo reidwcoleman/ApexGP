@@ -4,6 +4,7 @@
 //   node tools/rx_people.mjs shots/prefix [--track monza] [--weather clear] [--time midday] [--live] [--wait 1500] -- name1 'js…' name2 'js…'
 // In the snippets: g (the game), R (src/people/reactions.ts), V (THREE.Vector3), T (the track).
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const prefix = args[0] ?? 'shots/rxp';
@@ -22,9 +23,9 @@ const rest = args.slice(args.indexOf('--') + 1);
 const scns = [];
 for (let i = 0; i + 1 < rest.length; i += 2) scns.push([rest[i], rest[i + 1]]);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

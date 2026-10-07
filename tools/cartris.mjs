@@ -1,6 +1,7 @@
 // Triangles and meshes per car detail level, and per car at each level in the live scene. node tools/cartris.mjs
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal'] });
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE] });
 const page = await browser.newPage();
 await page.goto('http://localhost:5191/?track=monza');
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });

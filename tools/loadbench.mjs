@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const arg = (k, d) => {
   const i = process.argv.indexOf('--' + k);
@@ -134,8 +135,8 @@ for (let k = 0; k < runs; k++) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apexload-'));
   const dport = 9300 + Math.floor(Math.random() * 500);
   const chrome = spawn(
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    ['--headless=new', `--remote-debugging-port=${dport}`, `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--window-size=1440,900', '--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required', 'about:blank'],
+    CHROME,
+    ['--headless=new', `--remote-debugging-port=${dport}`, `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--window-size=1440,900', ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required', 'about:blank'],
     { stdio: 'ignore' },
   );
   let browser = null;

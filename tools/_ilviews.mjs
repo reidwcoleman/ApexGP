@@ -1,6 +1,7 @@
 // Interlagos landscape views via src/dev/nature.html (one page per view, sequential).
 //   node tools/_ilviews.mjs name1 name2 ...   (names from VIEWS below; none = all)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const VIEWS = {
   straight: 's=1000&lat=-2&h=1.4&ahead=200',
   setorA: 's=1150&lat=-60&h=25&ahead=-10&llat=40&lh=10',
@@ -20,9 +21,9 @@ const VIEWS = {
 };
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(VIEWS);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 for (const n of names) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });

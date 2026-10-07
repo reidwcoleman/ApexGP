@@ -3,9 +3,10 @@
 //   npm run build && npx vite preview --port 5194 & node tools/bootwarm.mjs [track]
 import { chromium } from 'playwright-core';
 import fs from 'fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza'] = process.argv.slice(2);
 const dir = fs.mkdtempSync('/tmp/apexwarm-');
-const ctx = await chromium.launchPersistentContext(dir, { executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, viewport: { width: 1440, height: 900 }, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const ctx = await chromium.launchPersistentContext(dir, { executablePath: CHROME, headless: true, viewport: { width: 1440, height: 900 }, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (let i = 0; i < 2; i++) {
   const page = await ctx.newPage();
   let cdp = null;

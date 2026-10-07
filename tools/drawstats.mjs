@@ -2,6 +2,7 @@
 // by pass (main camera, shadow cameras, other render targets).
 //   node tools/drawstats.mjs [--scene menu|grid|chase|tv|podium] [--track monza] [--q high] [--depth 2]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => {
@@ -14,9 +15,9 @@ const track = opt('track', 'monza');
 const depth = Number(opt('depth', 2));
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

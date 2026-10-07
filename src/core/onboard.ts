@@ -105,7 +105,9 @@ vec3 shadeOwn(vec3 c, float d, float wheel) {
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float hi = max(max(c.r, c.g), c.b);
   float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
-  vec3 s = mix(vec3(lum), c, 0.55) * 0.24 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
+  // (to ~40 %, most of the colour kept: in the helmet-cam footage the chassis rim and the halo are in
+  // shade but still read as the livery's red / papaya / silver, never as a black frame)
+  vec3 s = mix(vec3(lum), c, 0.75) * 0.4 + max(c - 2.5, 0.0) * 0.12 * smoothstep(0.5, 0.8, chroma);
   vec3 lit = mix(s, c, wheel * 0.85);
   return mix(c, lit, k);
 }

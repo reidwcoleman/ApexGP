@@ -140,6 +140,12 @@ float mbCone(float d, float v) { return clamp(1.0 - d / v, 0.0, 1.0); }
 float mbCyl(float d, float v) { return 1.0 - smoothstep(0.95 * v, 1.05 * v, d); }
 // 1 when a is not behind b (within a soft margin that grows with distance)
 float mbFront(float za, float zb) { return clamp(1.0 - (za - zb) / (0.04 * min(za, zb) + 0.06), 0.0, 1.0); }
+// the gather runs before the composite's NaN/Inf scrub: one bad pixel (a degenerate normal, a half-float
+// overflow on a sun glint) smeared along a streak and was then blacked out as a whole block. Scrub each tap.
+vec3 mbSafe(vec3 c) {
+  bool bad = c.r != c.r || c.g != c.g || c.b != c.b || max(max(abs(c.r), abs(c.g)), abs(c.b)) > 6e4;
+  return bad ? vec3(0.0) : clamp(c, 0.0, 200.0);
+}
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   // (the neighbourhood is looked up a little off this pixel's own tile — a per-pixel random offset
@@ -165,7 +171,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // interleaved gradient noise: the tap positions shift per pixel, so the steps read as grain
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
   float w = 1.0 / lx;
-  vec3 acc = inputColor.rgb * w;
+  vec3 acc = mbSafe(inputColor.rgb) * w;
   for (int i = 0; i < 24; i++) {
     if (float(i) >= n) break;
     float t = mix(-1.0, 1.0, (float(i) + 0.5 + jit) / n);
@@ -178,7 +184,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     float f = mbFront(cy.z, zx);
     float b = mbFront(zx, cy.z);
     float a = f * mbCone(d, ly) + b * mbCone(d, lx) + mbCyl(d, ly) * mbCyl(d, lx) * 2.0;
-    acc += texture2D(inputBuffer, su).rgb * a;
+    acc += mbSafe(texture2D(inputBuffer, su).rgb) * a;
     w += a;
   }
   outputColor = vec4(acc / w, inputColor.a);

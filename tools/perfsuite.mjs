@@ -5,6 +5,7 @@
 //
 // --adapt 1 keeps the adaptive resolution running (otherwise it is frozen at 1.0).
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => {
@@ -25,9 +26,9 @@ const W = Number(opt('w', 1600));
 const H = Number(opt('h', 900));
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: dpr });
 const errors = [];

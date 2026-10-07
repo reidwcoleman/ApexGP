@@ -1,7 +1,8 @@
 // Boot + circuit-switch timings (ms, per step). node tools/loadtime.mjs [track] [to,to2...]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza', to = 'spa'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 if (process.env.LOG) page.on('console', (m) => { const t = m.text(); if (t.includes(process.env.LOG)) console.log(t.slice(0, 3000)); });

@@ -1,13 +1,14 @@
 // How often the TV director cuts in a simulated race (real seconds between cuts).
 //   node tools/cuts.mjs [seconds=60] [track=monza] [speed=1]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const secs = Number(process.argv[2] ?? 60);
 const track = process.argv[3] ?? 'monza';
 const speed = Number(process.argv[4] ?? 1);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

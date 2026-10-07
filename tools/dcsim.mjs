@@ -3,11 +3,12 @@
 //   node tools/dcsim.mjs [rounds=5] [pos=6] [outDir=shots/dc] [--existing]
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const existing = process.argv.includes('--existing');
 const [rounds = '5', ppos = '6', out = 'shots/dc'] = args;
 mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => m.type() === 'error' && console.log('[console]', m.text().slice(0, 300)));

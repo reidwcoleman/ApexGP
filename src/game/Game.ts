@@ -66,6 +66,7 @@ import { uiScale } from '../ui/scale.ts';
 import { setCarAORenderer } from '../car/carAO.ts';
 import { keepData, loadData, pixelKey, preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
+import { prepareFanAtlas } from '../people/Crowd.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import { feedCarWake } from '../world/env/treematerial.ts';
 import type { SetupPart } from '../career/Career.ts';
@@ -78,10 +79,21 @@ const GARAGE_MIRROR_LAYER = 4;
 
 const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
-/** Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°) */
-const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.9, cinematic: 2.5 };
+/**
+ * Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°).
+ * Broadcast cameras and the sims' replays (ACC) sit near 180°: the barriers and kerbs streak at speed,
+ * the trees and the cars stay legible. (It was 2.5 → 6.5 flat out, up to 13× a 180° shutter: the
+ * whole frame smeared into radial streaks and the cars beside you into ghosts.)
+ */
+const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.35, cinematic: 0.7 };
 /** extra shutter flat out (×(1 + gain) at 320 km/h and up, eased in from 140 km/h) */
-const MOTION_SPEED_GAIN = 1.6;
+const MOTION_SPEED_GAIN = 0.8;
+
+/**
+ * The race grade on top of the weather's look: a touch more contrast and colour than the broadcast
+ * baseline — the clean, punchy picture of a modern sim (ACC's) rather than a compressed TV feed.
+ */
+const RACE_GRADE = { contrast: 1.05, exposure: 1, saturation: 1.06 };
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
@@ -222,6 +234,7 @@ export class Game {
     trackGpuUploads();
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
+    this.gfx.grade.set(RACE_GRADE);
     // (boot) three's per-program error check (info logs + link status read back on each program's first use)
     // is a blocking round trip to the GPU process per program: dev builds only (tools/console.mjs
     // runs against the dev server), or ?shadercheck
@@ -588,6 +601,11 @@ export class Game {
     // the rest of the avatars keep downloading while the landscape is built
     const kit = peopleKit();
     const everyone = kit ? Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]) : Promise.resolve();
+    // the grandstands' fan atlas, made off to the side while the circuit core is built (its shaders on
+    // the driver's threads, then a column a frame) rather than inside the stands' slice in one ~2 s go
+    const fanAtlas = kit
+      ? kit.whenAll.then(() => (gen === this.worldGen ? prepareFanAtlas(kit) : undefined)).catch((e) => console.warn('[world] fan atlas', e))
+      : Promise.resolve();
     // the circuit itself, a step per frame. Never left half-way, not even for a circuit switch
     // (worldGen is checked after it): the switch waits these few frames, and disposeWorld always
     // finds a whole circuit
@@ -602,6 +620,9 @@ export class Game {
       this.worldProgress = (0.25 * (i + 1)) / core.length;
     }
     lap('bgCore');
+    if (gen !== this.worldGen) return;
+    // (never long: the avatars are usually in by now; past the cap the stands paint it themselves)
+    await Promise.race([fanAtlas, new Promise((r) => setTimeout(r, 4000))]);
     if (gen !== this.worldGen) return;
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;
@@ -630,8 +651,17 @@ export class Game {
     const lit0 = this.garageLights.visible;
     this.garageLights.visible = false;
     const landscape = this.compileQueued(scenery.group, this.scene);
+    // (the reflection capture in adoptScenery draws everything already built too — the field, the
+    // trackside, the pits, the crews — under that same outdoor light; their garage-lit programs don't
+    // serve it, and the capture's own compile built the ~60 of them one by one: a 2.7 s frame)
+    const capture = this.compileQueued(this.scene);
     this.garageLights.visible = lit0;
-    await landscape;
+    // ...and lit as the garage frame sees it, work lights on: the landscape is drawn by the very next
+    // garage frame once adopted, and every program of that lighting set-up not built yet was compiled
+    // there, synchronously — one frame of 17 programs held the main thread for ~10 s on a cold
+    // Windows/D3D shader cache (tools/_progtrace.mjs)
+    const garageLit = lit0 ? this.compileQueued(scenery.group, this.scene) : null;
+    await Promise.all([landscape, capture, garageLit]);
     lap('bgShaders');
     await frame();
     if (gen !== this.worldGen) {
@@ -2038,7 +2068,7 @@ export class Game {
     // the trackside cameras have a real lens: focus pulled onto the car, shallow on the long end
     const tvView = this.cams.lensDof && (this.state === 'race' || this.state === 'results' || this.state === 'replay' || this.state === 'spectate');
     if (tvView) {
-      this.gfx.setDepthOfField(true, this.cams.tvFocus, this.cams.tvRange, this.cams.tvDof);
+      this.gfx.setDepthOfField(true, this.cams.tvFocus, this.cams.tvRange, this.cams.tvDof, this.cams.tvHold);
       this.tvDofOn = true;
     } else if (this.tvDofOn) {
       this.tvDofOn = false;
@@ -3300,7 +3330,7 @@ export class Game {
       this.mateOnStandsEntry = null;
     }
     this.gfx.grain.blendMode.opacity.value = L.grain;
-    this.gfx.grade.set({ contrast: 1, exposure: 1, saturation: 1 });
+    this.gfx.grade.set(RACE_GRADE);
     this.gfx.vignette.darkness = this.garageVignette;
     this.gfx.maxDynamic = L.maxDyn;
     // (a session starts at full resolution whatever the menu stepped down to; the governor takes it from there)

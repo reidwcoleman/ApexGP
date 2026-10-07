@@ -1,6 +1,7 @@
 // Screenshots from trackside viewpoints around a circuit (free camera), with a race running.
 //   node tools/tour.mjs <track> [n=8] [outdir=shots/tour] [--h 3] [--lat 0] [--weather clear] [--time midday] [--skip 20]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const track = args[0] ?? 'monza';
@@ -8,7 +9,7 @@ const n = Number(args[1] ?? 8);
 const out = args[2] && !args[2].startsWith('--') ? args[2] : 'shots/tour';
 const H = Number(opt('h', 3)), LAT = Number(opt('lat', 0));
 const q = new URLSearchParams({ track, demo: 'race', skip: opt('skip', '20'), weather: opt('weather', 'clear'), time: opt('time', 'midday'), settle: '500' });
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: Number(opt('w', 1600)), height: Number(opt('hgt', 900)) } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:5191/?${q}`);

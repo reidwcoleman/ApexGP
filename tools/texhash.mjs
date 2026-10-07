@@ -4,9 +4,10 @@
 //   node tools/texhash.mjs [port=5191] [track=monza] [--warm]
 // --warm: hash a second visit in the same browser context (textures read back from the caches)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [port = '5191', track = 'monza'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const warm = process.argv.includes('--warm');
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 let page;
 for (let v = 0; v < (warm ? 2 : 1); v++) {

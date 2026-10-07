@@ -250,7 +250,8 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   for (int i = 0; i < 14; i++) {
     float t = (float(i) + 0.5) / 14.0;
     float a = float(i) * 2.39996;
-    vec2 o = vec2(cos(a), sin(a) * aspect) * rS * sqrt(t);
+    // (rS is in uv-y units: the same world radius spans 1/aspect as much in u)
+    vec2 o = vec2(cos(a) / aspect, sin(a)) * rS * sqrt(t);
     vec2 q = uv + o;
     float dq = readDepth(q);
     vec3 S = aoViewPos(q, dq);
@@ -1008,6 +1009,18 @@ export class Renderer {
     this.composer.addPass(this.radialPass);
 
     this.dof = new DepthOfFieldEffect(camera, { focusDistance: 8, focusRange: 5, bokehScale: 2.5, resolutionScale: 0.5 });
+    // an in-focus band round the focus distance: postprocessing's circle of confusion grows from the exact
+    // focus plane (smoothstep 0 → range), so on a long lens only a slice of the car was sharp — its nose
+    // and wing went soft and the half-res CoC of the field behind bled over it. A real lens holds the
+    // depth of field: the whole car (±focusHold m) stays sharp, the blur ramps up beyond it.
+    {
+      const coc = this.dof.cocMaterial as unknown as THREE.ShaderMaterial;
+      coc.uniforms.focusHold = new THREE.Uniform(0);
+      coc.fragmentShader = coc.fragmentShader
+        .replace('uniform float focusRange;', 'uniform float focusRange;uniform float focusHold;')
+        .replace('smoothstep(0.0,focusRange,abs(signedDistance))', 'smoothstep(focusHold,focusHold+focusRange,abs(signedDistance))');
+      coc.needsUpdate = true;
+    }
     this.dofPass = new EffectPass(camera, this.dof);
     this.dofPass.enabled = false;
     this.composer.addPass(this.dofPass);
@@ -1311,11 +1324,12 @@ export class Renderer {
   }
 
   /** Bokeh DOF for menus/replays. With a target the focus follows it (autofocus). */
-  setDepthOfField(on: boolean, target: THREE.Vector3 | null = null, range = 5, bokeh = 2.5) {
+  setDepthOfField(on: boolean, target: THREE.Vector3 | null = null, range = 5, bokeh = 2.5, hold = 0) {
     this.dofPass.enabled = on;
     this.dof.target = on ? target : null;
     if (on) {
       (this.dof.cocMaterial as unknown as { focusRange: number }).focusRange = range;
+      ((this.dof.cocMaterial as unknown as THREE.ShaderMaterial).uniforms.focusHold as THREE.IUniform<number>).value = hold;
       this.dof.bokehScale = bokeh;
     }
   }

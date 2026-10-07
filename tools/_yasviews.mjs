@@ -2,6 +2,7 @@
 //   OUT=<dir> node tools/_yasviews.mjs name1 name2 ...   (names from VIEWS below, or a raw query string)
 //   TIME=dusk|night|afternoon (default dusk)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const VIEWS = {
   aerial: 's=5100&lat=420&h=260&ahead=0&llat=40&lh=0',
   hotelTrack: 's=5020&lat=0&h=2&ahead=90',
@@ -22,9 +23,9 @@ const time = process.env.TIME ?? 'dusk';
 const out = process.env.OUT ?? 'shots';
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(VIEWS);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 for (const [ni, n] of names.entries()) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });

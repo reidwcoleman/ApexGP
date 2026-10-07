@@ -614,6 +614,18 @@ function seatedArms(p: Person, act: number, u: number) {
 }
 
 function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasElement {
+  const job = fanAtlasJob(kit, cw, ch);
+  for (let col = 0; col < ATLAS_COLS; col++) job.paintColumn(col);
+  return job.finish();
+}
+
+/**
+ * The atlas render as a job: the fans posed in their own little scene, then painted a column at a
+ * time. `warm()` builds every program the painting needs on the driver's threads first (compileAsync,
+ * the mask materials too): painted cold, the first render compiled the avatars' shaders one by one
+ * and held the main thread ~1.6 s (on a cold Windows/D3D shader cache) in the middle of the garage.
+ */
+function fanAtlasJob(kit: PeopleKit, cw: number, ch: number) {
   const COLS = ATLAS_COLS, ROWS = 2;
   const canvas = document.createElement('canvas');
   canvas.width = cw * COLS;
@@ -623,13 +635,9 @@ function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasEl
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   } catch {
-    return canvas;
+    renderer = null;
   }
   const RW = cw * 2, RH = ch * 2;
-  renderer.setPixelRatio(1);
-  renderer.setSize(RW, RH, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x000000, 0);
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 2.0));
   const key = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -637,6 +645,12 @@ function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasEl
   scene.add(key);
   const cam = new THREE.OrthographicCamera(-0.31, 0.31, 1.24, 0, 0.1, 20);
   cam.position.set(0, 0.62, 6);
+  if (renderer) {
+    renderer.setPixelRatio(1);
+    renderer.setSize(RW, RH, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(0x000000, 0);
+  }
   const grab = () => {
     const c = document.createElement('canvas');
     c.width = RW;
@@ -650,10 +664,13 @@ function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasEl
   const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
   const white = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const fans = [...new Set([...fanPool(kit, false), ...fanPool(kit, true)])];
+  // every fan posed up front (cheap: the avatars are shared), so their programs can be built first
+  const posed: Person[][] = [];
   for (let col = 0; col < COLS; col++) {
     const base = fanLook(rand, TEAMS[col % TEAMS.length]);
     base.body = fans[col % fans.length];
     base.female = kit.avatars.get(base.body)!.meta.female;
+    posed.push([]);
     for (let row = 0; row < ROWS; row++) {
       // shirts dyed white for the grandstand's own dye, everything else as it is
       const look: Look = { ...base, topColor: 0xffffff, tint: 1, cap: base.cap ? 0xffffff : null };
@@ -666,7 +683,6 @@ function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasEl
       if (act >= 0) seatedArms(p, act, 0.13 + col * 0.07);
       p.root.rotation.y = -0.12 + (col % 3) * 0.12;
       p.root.updateMatrixWorld(true);
-      scene.add(p.root);
       // the posed figure's extent, from its bones (the geometry's box is the standing bind pose)
       const box = new THREE.Box3();
       for (const b of p.skeleton.bones) if (!/Arm|Forearm|Hand|Finger/.test(b.name)) box.expandByPoint(b.getWorldPosition(new THREE.Vector3()));
@@ -676,52 +692,111 @@ function renderFanAtlasNow(kit: PeopleKit, cw: number, ch: number): HTMLCanvasEl
       p.root.scale.setScalar(sc);
       p.root.position.y = -box.min.y * sc;
       p.root.updateMatrixWorld(true);
-      renderer.render(scene, cam);
-      const img = grab();
-      // mask: shirt (and cap) white, everything else black
-      const bodyMat = p.body.material as THREE.MeshPhysicalMaterial;
-      const saved = new Map<THREE.Mesh, THREE.Material>();
-      p.root.traverse((o) => {
-        const m = o as THREE.SkinnedMesh;
-        if (m.isSkinnedMesh && m !== p.body) {
-          saved.set(m, m.material as THREE.Material);
-          m.material = (m.material as THREE.Material).name === 'person-cap' ? white : black;
-        }
-      });
-      bodyMat.userData.maskMode.value = 1;
-      renderer.render(scene, cam);
-      const mask = grab().data;
-      bodyMat.userData.maskMode.value = 0;
-      for (const [m, mat] of saved) m.material = mat;
-      scene.remove(p.root);
-      p.dispose();
-      const d = img.data;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i + 3] < 8) continue;
-        if (mask[i] > 127) {
-          const L = (d[i] + d[i + 1] + d[i + 2]) / 3;
-          const v = 236 + (Math.min(255, L) / 255) * 19;
-          d[i] = d[i + 1] = d[i + 2] = v;
-        } else {
-          const mn = Math.min(d[i], d[i + 1], d[i + 2]);
-          if (mn > 212) {
-            const k = 212 / mn;
-            d[i] *= k;
-            d[i + 1] *= k;
-            d[i + 2] *= k;
-          }
-        }
-      }
-      const tmp = document.createElement('canvas');
-      tmp.width = RW;
-      tmp.height = RH;
-      tmp.getContext('2d')!.putImageData(img, 0, 0);
-      out.drawImage(tmp, col * cw, row * ch, cw, ch);
+      posed[col].push(p);
     }
   }
-  black.dispose();
-  white.dispose();
-  renderer.dispose();
-  renderer.forceContextLoss();
-  return canvas;
+  // mask: shirt (and cap) white, everything else black
+  const maskOn = (p: Person) => {
+    const saved = new Map<THREE.Mesh, THREE.Material>();
+    p.root.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (m.isSkinnedMesh && m !== p.body) {
+        saved.set(m, m.material as THREE.Material);
+        m.material = (m.material as THREE.Material).name === 'person-cap' ? white : black;
+      }
+    });
+    return saved;
+  };
+  const all = posed.flat();
+  return {
+    async warm() {
+      if (!renderer) return;
+      for (const p of all) scene.add(p.root);
+      await renderer.compileAsync(scene, cam);
+      const saved = all.map(maskOn);
+      await renderer.compileAsync(scene, cam);
+      saved.forEach((sv) => sv.forEach((mat, m) => (m.material = mat)));
+      for (const p of all) scene.remove(p.root);
+    },
+    paintColumn(col: number) {
+      if (!renderer) return;
+      for (let row = 0; row < ROWS; row++) {
+        const p = posed[col][row];
+        scene.add(p.root);
+        renderer.render(scene, cam);
+        const img = grab();
+        const bodyMat = p.body.material as THREE.MeshPhysicalMaterial;
+        const saved = maskOn(p);
+        bodyMat.userData.maskMode.value = 1;
+        renderer.render(scene, cam);
+        const mask = grab().data;
+        bodyMat.userData.maskMode.value = 0;
+        for (const [m, mat] of saved) m.material = mat;
+        scene.remove(p.root);
+        const d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] < 8) continue;
+          if (mask[i] > 127) {
+            const L = (d[i] + d[i + 1] + d[i + 2]) / 3;
+            const v = 236 + (Math.min(255, L) / 255) * 19;
+            d[i] = d[i + 1] = d[i + 2] = v;
+          } else {
+            const mn = Math.min(d[i], d[i + 1], d[i + 2]);
+            if (mn > 212) {
+              const k = 212 / mn;
+              d[i] *= k;
+              d[i + 1] *= k;
+              d[i + 2] *= k;
+            }
+          }
+        }
+        const tmp = document.createElement('canvas');
+        tmp.width = RW;
+        tmp.height = RH;
+        tmp.getContext('2d')!.putImageData(img, 0, 0);
+        out.drawImage(tmp, col * cw, row * ch, cw, ch);
+      }
+    },
+    finish(): HTMLCanvasElement {
+      for (const p of all) p.dispose();
+      black.dispose();
+      white.dispose();
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      }
+      return canvas;
+    },
+  };
+}
+
+/**
+ * Make the grandstand atlas ahead of the stands (Game.completeWorld, once the avatars are in): its
+ * programs built on the driver's threads, then painted a column per frame, so the stands' slice of
+ * the landscape finds it ready (renderFanAtlas's memo) instead of rendering it there in one go.
+ */
+export async function prepareFanAtlas(kit: PeopleKit, cw = 128, ch = 256): Promise<void> {
+  if (!kit.complete) return;
+  const memo = `${cw}x${ch}`;
+  if (fanAtlasMemo.get(kit)?.get(memo)) return;
+  const key = pixelKey('fans', cw, ch, [...kit.avatars.keys()].sort());
+  let made = document.createElement('canvas');
+  made.width = cw * ATLAS_COLS;
+  made.height = ch * 2;
+  if (!restorePixels(key, made)) {
+    const job = fanAtlasJob(kit, cw, ch);
+    try {
+      await job.warm();
+      for (let col = 0; col < ATLAS_COLS; col++) {
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        job.paintColumn(col);
+      }
+    } finally {
+      made = job.finish();
+    }
+    if (made.width <= 0) return;
+    keepPixels(key, made);
+  }
+  if (!fanAtlasMemo.has(kit)) fanAtlasMemo.set(kit, new Map());
+  fanAtlasMemo.get(kit)!.set(memo, made);
 }

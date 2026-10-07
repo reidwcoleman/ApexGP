@@ -468,6 +468,14 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
 - `node tools/flow.mjs` — garage → race → pause → restart → simulated race (with travel): page errors.
 - `node tools/tour.mjs <track> [n]`, `tools/camsheet.mjs`, `tools/shot2x.mjs` — screenshots.
+- `node tools/raceshots.mjs <out> [track] [cams]` — one live race shot through a list of cameras (dev server :5190;
+  `PORT`, `WEATHER`, `TIME`); `node tools/abshots.mjs <out> <track> <cam> '{"name":"js"}'` — the same moment with renderer toggles.
+- `node tools/gpuab.mjs 5217,5218` / `node tools/frametimes.mjs 5217,5218` — GPU ms and uncapped frame-time percentiles
+  (p50/p95/p99, frames over 33 ms) in a race, A/B across two served builds.
+- `node tools/_progtrace.mjs` / `node tools/_linktrace.mjs` — per-frame shader program count and which programs a long
+  boot frame linked (a frame that compiles synchronously); `node tools/_profsub.mjs <fn>` — CPU time under one function
+  during a boot; `node tools/_progmap.mjs` — programs per material family.
+- Every headless tool finds Chrome through `tools/chrome.mjs` (macOS Metal, Windows D3D11, Linux GL; `CHROME=` overrides).
 - `node tools/_lookmatrix.mjs <out> [track] [look|weather:time,…]` + `python3 tools/lookcompare.py --pairs <file>` — every time of day × weather (race cam + a vista down the valley) and the TikTok reference scenes, and their tone / colour statistics against the footage (black and white point, percentiles, saturation, hue of shadows / mids / highlights, sky-to-ground, haze).
 - `node tools/tvsheet.mjs <track>` (TV director frames), `tools/horizon.mjs <track> <bearings>`, `tools/lookat.mjs`,
   `tools/carshots.mjs [team]` (studio angles) — more screenshots.

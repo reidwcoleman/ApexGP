@@ -7,6 +7,7 @@
 // s relative to the start line; VISTA=none skips it), to judge the haze. A crashed browser is relaunched.
 // PORT env picks the dev server. Compare against the footage with tools/lookcompare.py.
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out = 'shots/matrix', track = 'spa', list] = process.argv.slice(2);
 const TIMES = ['dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset', 'dusk', 'night'];
 const WX = ['clear', 'cloudy', 'overcast', 'mist', 'fog', 'drizzle', 'rain', 'storm'];
@@ -23,7 +24,7 @@ let conds = list ? list.split(',') : [...TIMES.map((t) => `clear:${t}`), ...WX.f
 conds = conds.flatMap((c) => (c === 'look' ? LOOK : [c]));
 const vistaEnv = process.env.VISTA ?? '300,-20,30,1500,0,10,60';
 const vista = vistaEnv === 'none' ? null : vistaEnv.split(',').map(Number);
-const launch = () => chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const launch = () => chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 let browser = await launch();
 for (const c0 of conds) {
   const [name, spec] = c0.includes('=') ? c0.split('=') : [null, c0];

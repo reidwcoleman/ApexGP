@@ -2,8 +2,9 @@
 // skip painting liveries and the fan atlas. node tools/bootcache.mjs
 import { chromium } from 'playwright-core';
 import fs from 'fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const dir = fs.mkdtempSync('/tmp/apexprof-');
-const ctx = await chromium.launchPersistentContext(dir, { executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, viewport: { width: 1280, height: 800 }, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const ctx = await chromium.launchPersistentContext(dir, { executablePath: CHROME, headless: true, viewport: { width: 1280, height: 800 }, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (let i = 0; i < 2; i++) {
   const page = await ctx.newPage();
   await page.goto('http://localhost:5191/?track=melbourne&pixcache');

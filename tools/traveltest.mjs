@@ -2,6 +2,7 @@
 // screenshots of the menu garage and of the race on every circuit, GPU memory after each step.
 //   node tools/traveltest.mjs [--route spa,silverstone,monza] [--out shots/travel] [--race 1]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => {
@@ -13,9 +14,9 @@ const out = opt('out', 'shots/travel');
 const race = opt('race', '1') === '1';
 
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-precise-memory-info', '--js-flags=--expose-gc'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--enable-precise-memory-info', '--js-flags=--expose-gc'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 const errors = [];

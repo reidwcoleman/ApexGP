@@ -1,6 +1,7 @@
 // Linear mean / std of the procedural grass albedo (tools/build_grass.py matches the scan to them).
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 const page = await browser.newPage();
 await page.goto('http://localhost:5191/package.json');
 console.log(await page.evaluate(async () => {

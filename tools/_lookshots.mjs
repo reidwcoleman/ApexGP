@@ -1,5 +1,6 @@
 // Shoots the reference-matching scenes (TikTok look study). node tools/_lookshots.mjs <outdir> [scene,...]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out = 'shots/look', only] = process.argv.slice(2);
 const SCENES = {
   rain_cockpit: { track: 'spa', weather: 'rain', time: 'morning', cam: 'cockpit' },
@@ -12,7 +13,7 @@ const SCENES = {
   day_tv: { track: 'monza', weather: 'clear', time: 'afternoon', cam: 'tv' },
   golden_longlens: { track: 'spa', weather: 'clear', time: 'golden', cam: 'longlens', skip: 25 },
 };
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 for (const [name, s] of Object.entries(SCENES)) {
   if (only && !only.split(',').includes(name)) continue;
   const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) }, deviceScaleFactor: 1 });

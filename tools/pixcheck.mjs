@@ -1,9 +1,10 @@
 // Is the generated-image cache (IndexedDB apex-pixels) filled after a boot, and used on the next? node tools/pixcheck.mjs [port=5192]
 import { chromium } from 'playwright-core';
 import fs from 'fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [port = '5194'] = process.argv.slice(2);
 const dir = fs.mkdtempSync('/tmp/apexpix-');
-const ctx = await chromium.launchPersistentContext(dir, { executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, viewport: { width: 1280, height: 800 }, args: ['--use-angle=metal'] });
+const ctx = await chromium.launchPersistentContext(dir, { executablePath: CHROME, headless: true, viewport: { width: 1280, height: 800 }, args: [ANGLE] });
 const stored = (page) => page.evaluate(async () => {
   const dbs = await indexedDB.databases();
   if (!dbs.some((d) => d.name === 'apex-pixels')) return 'no db';

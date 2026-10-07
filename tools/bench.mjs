@@ -2,8 +2,9 @@
 // and synced (readPixels), per configuration. Much steadier than timer queries on Apple GPUs.
 //   node tools/bench.mjs [track=monza] [scale=1] [cam=chase] [w=1440] [h=900]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza', scale = '1', cam = 'chase', W = '1440', H = '900'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: Number(W), height: Number(H) }, deviceScaleFactor: Number(process.env.DPR ?? 1) });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:${process.env.PORT ?? 5191}/?track=${track}&demo=race&cam=${cam}&skip=30&weather=clear&time=afternoon`);

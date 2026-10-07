@@ -1,8 +1,9 @@
 // Robust-ish GPU cost of the buildings on a busy machine: min-of-many frame times with everything,
 // without the pit complex, without the stands/landmarks, from a few cameras.  node tools/_bench_bldg.mjs <track>
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:${process.env.PORT ?? 5191}/?track=${track}&demo=race&cam=chase&skip=30&weather=clear&time=afternoon`);

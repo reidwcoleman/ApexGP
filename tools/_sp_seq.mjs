@@ -1,11 +1,12 @@
 // Spielberg camera tour: node tools/_sp_seq.mjs <prefix> "skip:cam[:focus],skip:cam,..." [track]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [prefix = 'shots/sp_tour', list = '20:tv', track = 'spielberg'] = process.argv.slice(2);
 const url = `http://localhost:${process.env.PORT ?? 5191}/?track=${track}`;
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 page.setDefaultTimeout(180000);

@@ -2,10 +2,11 @@
 //   node tools/blackprobe.mjs '/?demo=race&cam=far&weather=overcast&time=golden' [n] [interval ms]
 import { chromium } from 'playwright-core';
 import { writeFileSync, mkdirSync } from 'node:fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const path = process.argv[2];
 const N = Number(process.argv[3] ?? 30);
 const every = Number(process.argv[4] ?? 1000);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 const errs = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.text()); });

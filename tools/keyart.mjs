@@ -1,6 +1,7 @@
 // Beauty frames for key art / loading screens (steam/art/raw, 3840×2160).
 //   node tools/keyart.mjs [name,name…]   (dev server on :5191)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 export const SHOTS = [
   { name: 'sakhir_night', track: 'sakhir', time: 'night', weather: 'clear', cam: 'chase', skip: 55 },
   { name: 'melbourne_golden', track: 'melbourne', time: 'golden', weather: 'clear', cam: 'chase', skip: 50 },
@@ -21,7 +22,7 @@ export const SHOTS = [
   { name: 'monza_rain', track: 'monza', time: 'golden', weather: 'sunshower', cam: 'chase', skip: 50 },
 ];
 const want = process.argv[2]?.split(',');
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (const s of SHOTS.filter((x) => !want || want.includes(x.name))) {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 2 });
   page.on('pageerror', (e) => console.log('[pageerror]', e.message));

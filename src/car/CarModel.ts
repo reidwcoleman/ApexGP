@@ -399,7 +399,18 @@ function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
           // uv unit) it sees warp and weft together — isotropic on average (the mip-blended directions
           // would otherwise streak it diagonally); none inside an onboard lens's defocus or under grime
           float aTow = length( fwidth( vAnisotropyMapUv ) ) * 12.0;
-          material.anisotropy *= ( 1.0 - smoothstep( 0.35, 1.0, aTow ) ) * ( 1.0 - cNear ) * ( 1.0 - cGrAll );
+          // the tow frame comes from the uv derivatives: on a plate's rounded edge, a pylon or a thin link
+          // the uvs are stretched or folded, the frame collapses onto the normal, and the stretched lobe
+          // turned into a needle-sharp highlight — single-pixel fireflies that bloomed into "lights" on
+          // the wing tips. Re-square the frame on the shading normal and drop the sheen where it degenerates.
+          vec3 aT = material.anisotropyT - normal * dot( normal, material.anisotropyT );
+          float aOk = smoothstep( 0.35, 0.8, length( aT ) );
+          aT = normalize( aT + 1e-5 );
+          material.anisotropyT = aT;
+          material.anisotropyB = cross( normal, aT );
+          material.anisotropy *= aOk * ( 1.0 - smoothstep( 0.35, 1.0, aTow ) ) * ( 1.0 - cNear ) * ( 1.0 - cGrAll );
+          // never sharper than the pixel's own curvature allows across the tows either
+          material.roughness = max( material.roughness, 0.18 + geometryRoughness );
           material.alphaT = mix( pow2( material.roughness ), 1.0, pow2( material.anisotropy ) );
         }
         #endif`,

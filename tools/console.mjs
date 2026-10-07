@@ -1,6 +1,7 @@
 // Print shader / page errors and warnings while a circuit boots and a race runs. node tools/console.mjs <track>
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal'] });
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE] });
 const page = await browser.newPage();
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(`[${m.type()}]`, m.text().slice(0, 600)); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

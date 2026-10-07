@@ -1,8 +1,9 @@
 // Render the tyre fx offline through a scripted slide + lock-up and save a WAV. node tools/_tyresound.mjs <out.wav>
 import { chromium } from 'playwright-core';
 import { writeFileSync } from 'node:fs';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:${process.env.PORT ?? 5196}/tools/blank.html`).catch(() => {});

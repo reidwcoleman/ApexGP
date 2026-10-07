@@ -1,7 +1,8 @@
 // One screenshot per camera mode in a live race (HUD hidden). node tools/camsheet.mjs <track> <modes,...> [outdir]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza', modes = 'chase,far,tcam,cockpit,nose,wheel', out = 'shots/cams'] = process.argv.slice(2);
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=chase&skip=${process.env.SKIP ?? 40}&weather=clear&time=${process.env.TIME ?? "afternoon"}`);

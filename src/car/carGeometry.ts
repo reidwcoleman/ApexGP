@@ -1281,16 +1281,17 @@ export interface SuspLeg {
 }
 export const SUSP_LEGS: SuspLeg[] = [
   // front: upper wishbone (wide A), lower wishbone, pushrod up to the rocker in the chassis top,
-  // track rod in line with the upper wishbone's front leg
-  { front: true, inner: [0.165, 0.515, 1.93], outer: [-0.085, 0.185, 0.016], chord: 0.05, thick: 0.014 },
+  // track rod in line with the upper wishbone's front leg. Inner pickups sit on (just inside) the
+  // hull's surface at their height (tools/_hullq.ts checks them against hull.ts).
+  { front: true, inner: [0.155, 0.448, 1.93], outer: [-0.085, 0.185, 0.016], chord: 0.05, thick: 0.014 },
   { front: true, inner: [0.215, 0.545, 1.4], outer: [-0.085, 0.185, -0.016], chord: 0.05, thick: 0.014 },
   { front: true, inner: [0.13, 0.215, 1.97], outer: [-0.07, -0.17, 0.016], chord: 0.055, thick: 0.016 },
   { front: true, inner: [0.2, 0.19, 1.33], outer: [-0.07, -0.17, -0.016], chord: 0.055, thick: 0.016 },
-  { front: true, inner: [0.13, 0.555, 1.62], outer: [-0.09, -0.14, -0.03], chord: 0.04, thick: 0.022 },
-  { front: true, inner: [0.16, 0.5, 1.83], outer: [-0.1, 0.16, 0.1], chord: 0.04, thick: 0.013 },
+  { front: true, inner: [0.125, 0.52, 1.62], outer: [-0.09, -0.14, -0.03], chord: 0.04, thick: 0.022 },
+  { front: true, inner: [0.155, 0.473, 1.83], outer: [-0.1, 0.16, 0.1], chord: 0.04, thick: 0.013 },
   // rear: upper and lower wishbones, pullrod down to the gearbox, toe link
-  { front: false, inner: [0.16, 0.505, -1.42], outer: [-0.1, 0.178, 0.016], chord: 0.055, thick: 0.016 },
-  { front: false, inner: [0.14, 0.49, -1.98], outer: [-0.1, 0.178, -0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.104, 0.505, -1.42], outer: [-0.1, 0.178, 0.016], chord: 0.055, thick: 0.016 },
+  { front: false, inner: [0.08, 0.418, -1.98], outer: [-0.1, 0.178, -0.016], chord: 0.055, thick: 0.016 },
   { front: false, inner: [0.2, 0.17, -1.38], outer: [-0.07, -0.18, 0.016], chord: 0.055, thick: 0.016 },
   { front: false, inner: [0.13, 0.19, -1.98], outer: [-0.07, -0.18, -0.016], chord: 0.055, thick: 0.016 },
   { front: false, inner: [0.15, 0.17, -1.56], outer: [-0.12, 0.155, 0.04], chord: 0.04, thick: 0.02 },

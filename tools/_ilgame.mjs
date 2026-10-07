@@ -2,11 +2,12 @@
 // track.point(s + ahead, llat, lh), after a debug race start.
 //   node tools/_ilgame.mjs "name:s,lat,h,ahead,llat,lh" ...
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const views = process.argv.slice(2).map((a) => { const [n, v] = a.split(':'); return { n, v: v.split(',').map(Number) }; });
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

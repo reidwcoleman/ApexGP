@@ -1,5 +1,6 @@
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const cdp = await page.context().newCDPSession(page);
 await cdp.send('Profiler.enable');

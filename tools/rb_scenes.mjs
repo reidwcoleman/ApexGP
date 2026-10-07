@@ -1,6 +1,7 @@
 // People scenes: screenshot + draw calls / triangles (total, and the people's share) + frame time.
 //   node tools/rb_scenes.mjs <garage|podium|grid|race|pit> shots/prefix [--track monza] [--port 5191] [--cam tv]
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 
 const args = process.argv.slice(2);
 const scene = args[0] ?? 'garage';
@@ -13,9 +14,9 @@ const port = opt('port', '5191');
 const track = opt('track', 'monza');
 const cam = opt('cam', 'tv');
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('[pageerror] ' + e.message));

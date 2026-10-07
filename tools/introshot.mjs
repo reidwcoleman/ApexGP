@@ -5,6 +5,7 @@
 //
 // `--seq fps,dur,start` saves a frame sequence instead (intro time start … start+dur at 1/fps steps).
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2).filter((a, i, all) => !a.startsWith('--') && !(all[i - 1] ?? '').startsWith('--'));
 const opt = (k, d) => {
   const i = process.argv.indexOf('--' + k);
@@ -14,9 +15,9 @@ const [track = 'monza', times = 'auto', out = 'shots/intro', tod = 'afternoon', 
 const port = opt('port', '5191');
 const seq = opt('seq', null)?.split(',').map(Number);
 const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  executablePath: CHROME,
   headless: true,
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
+  args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

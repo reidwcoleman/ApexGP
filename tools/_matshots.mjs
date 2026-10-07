@@ -3,6 +3,7 @@
 // Views: the player's car and the car ahead from a few angles (car-local offsets), and the road
 // (track points: racing line, kerb, verge, run-off) at near and broadcast distance. PORT env = dev server.
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const [out, track = 'monza', weather = 'clear', time = 'afternoon', set = 'all'] = process.argv.slice(2);
 const CAR = [
   // name, [x right, y up, z forward] camera offset in car space, look offset, fov
@@ -20,7 +21,7 @@ const ROAD = [
   ['roadLong', 'start+400', 0, 1.2, 'start+520', 0, 0, 40],
   ['roadBroad', 'start+600', -22, 9, 'start+640', 0, 0, 28],
 ];
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('403')) console.log('[err]', m.text().slice(0, 300)); });

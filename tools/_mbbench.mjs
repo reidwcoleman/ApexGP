@@ -1,6 +1,7 @@
 // GPU cost of the camera motion blur: frames rendered back to back with the camera moving 1.5 m a frame.
 import { chromium } from 'playwright-core';
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
 await page.goto(`http://localhost:${process.env.PORT ?? 5196}/?track=monza&demo=race&cam=cockpit&skip=30&weather=clear&time=afternoon`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 240000 });

@@ -1242,7 +1242,7 @@ export class Cameras {
     // focus on the car, shallow: the road ahead and the field behind melt away
     this.tvFocus.copy(carPos);
     this.tvFocus.y += 0.5;
-    this.tvDof = THREE.MathUtils.clamp(10 / Math.max(2, this.fov), 0.6, 2.6);
+    this.tvDof = THREE.MathUtils.clamp(10 / Math.max(2, this.fov), 0.6, 1.8);
     this.tvRange = Math.max(4, dist * 0.08);
   }
   private gtBack = 40;
@@ -1435,7 +1435,7 @@ export class Cameras {
     // focus pull on the car; a long lens has a shallow depth of field
     this.tvFocus.copy(carPos);
     this.tvFocus.y += 0.5;
-    this.tvDof = wide ? 0.5 : THREE.MathUtils.clamp((tc.kind === 'long' ? 14 : 8) / Math.max(tc.kind === 'long' ? 1.5 : 3, this.fov), 0.5, tc.kind === 'long' ? 3.4 : 2.4);
+    this.tvDof = wide ? 0.5 : THREE.MathUtils.clamp((tc.kind === 'long' ? 14 : 8) / Math.max(tc.kind === 'long' ? 1.5 : 3, this.fov), 0.5, tc.kind === 'long' ? 2.2 : 1.8);
     this.tvRange = Math.max(4, dist * (tc.kind === 'long' ? 0.05 : 0.1));
   }
   private tvAge = 0;
@@ -1454,6 +1454,8 @@ export class Cameras {
   readonly tvFocus = new THREE.Vector3();
   tvDof = 1;
   tvRange = 5;
+  /** half-depth (m) of the in-focus band round tvFocus: the whole car on air stays sharp */
+  tvHold = 3.2;
 
   private heliLift = 0;
   private pullD = 1;

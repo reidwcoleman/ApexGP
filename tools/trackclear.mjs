@@ -4,9 +4,10 @@
 // and the road itself are skipped by name).
 //   node tools/trackclear.mjs [track,...]      (PORT env = dev server, default 5196)
 import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
 const ALL = ['monza', 'spa', 'silverstone', 'suzuka', 'montreal', 'melbourne', 'spielberg', 'zandvoort', 'austin', 'interlagos', 'hungaroring', 'sakhir', 'mexico', 'yasmarina'];
 const tracks = process.argv[2] ? process.argv[2].split(',') : ALL;
-const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 let bad = 0;
 for (const track of tracks) {
   const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
