@@ -376,7 +376,10 @@ npm run check    # tsc --noEmit
   `Cameras.cuts`. Engine/wind mixes are balanced against real V6 turbo-hybrid footage by band energy
   (`tools/audiocheck.mjs --bands`: cockpit ≈ 22 % < 150 Hz, 58 % 150–600 Hz, 16 % 600–2k, 3 % 2–6k). `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
-- **Racing cameras** — 19 to race with (C cycles them, Settings → Camera picks one): chase / far / low
+- **Racing cameras** — 12 to drive with (C cycles them, Settings → Camera picks one: `CAMERA_ORDER`, the chase
+  cameras and the forward-looking onboards; the long-lens chase, the drone, the rear-facing onboards, the helicopter,
+  blimp, tactical map, trackside lenses and the TV director are for simulated races, spectating and replays, where
+  every camera cycles — `ALL_CAMERAS`; an older save holding one of those falls back to the chase): chase / far / low
   chase a hand's width over the road (surge, brake pitch, look to the apex, glide between them; the horizon
   held all but level as in ACC — the G lean is what the horizon lock leaves, ≤1° by default),
   a long-lens chase (a camera car 30–45 m back on the circuit holding the car on a 6–9° lens, the field

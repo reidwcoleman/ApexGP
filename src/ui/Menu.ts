@@ -1,7 +1,7 @@
 import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
-import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, type CamPrefs } from '../game/Cameras.ts';
+import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, driveCamera, type CamPrefs } from '../game/Cameras.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
@@ -308,6 +308,8 @@ export class Menu {
     if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...DEFAULT_ASSISTS };
     else this.setup.assists = { ...DEFAULT_ASSISTS, ...this.setup.assists };
     this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'high', camera: 'chase', volume: 0.8, music: 0.35, autoQuality: true });
+    // (driving cameras only: a save from before may hold the helicopter, the tactical map or the TV director)
+    this.settings.camera = driveCamera(this.settings.camera);
     if (typeof this.settings.music !== 'number') this.settings.music = 0.35;
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
     // older saves may have been stepped down by the automatic quality: start again from High

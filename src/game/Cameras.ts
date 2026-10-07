@@ -19,16 +19,21 @@ export type CameraMode =
   | 'director';
 
 /**
- * The in-race cycle (C key) and the settings choice: cameras you can drive with — the chase cameras,
- * the onboards from the top of the car down to the road, the rear-facing ones, the aerial and
- * trackside views and the TV director's edit.
+ * The in-race cycle (C key) and the settings choice: only the cameras you can actually drive with —
+ * the chase cameras behind the car and the forward-looking onboards, from the T-cam down to the
+ * road. The views that are for watching, not driving (the long-lens chase that cuts away round
+ * bends, the swaying chase drone, the rear-facing onboards, the helicopter, blimp, tactical map,
+ * trackside and pit-wall lenses, the TV director) stay in simulated races, spectating and replays
+ * (ALL_CAMERAS).
  */
 export const CAMERA_ORDER: CameraMode[] = [
-  'chase', 'far', 'lowchase', 'gtchase', 'drone',
+  'chase', 'far', 'lowchase',
   'tcam', 'halo', 'cockpit', 'helmet', 'bonnet', 'nose', 'bumper', 'wheel', 'sidepod',
-  'tcamrev', 'sideback',
-  'heli', 'tv', 'director',
 ];
+/** a camera you can drive with: the saved choice if it is one (older saves may hold the heli or the TV director), else the chase */
+export function driveCamera(m: CameraMode | undefined): CameraMode {
+  return m && CAMERA_ORDER.includes(m) ? m : 'chase';
+}
 
 /** player camera tuning: offsets on top of each camera's own framing */
 export interface CamPrefs {
