@@ -55,6 +55,9 @@ export const MONTREAL: CircuitDef = {
       { from: 990, to: 1110, side: -1, kind: 'concrete', fence: 2 },
       { from: 3250, to: 3420, side: -1, kind: 'concrete', fence: 2 },
       { from: 4000, to: 225, side: -1, kind: 'concrete', fence: 2, art: 'ads' },
+      // sponsor wraps down the river side of the Casino straight and the outside of the back leg
+      { from: 3470, to: 4320, side: 1, art: 'ads' },
+      { from: 2030, to: 2660, side: 1, art: 'ads' },
     ],
     lights: [{ from: 300, to: 900, side: -1, spacing: 55 }],
   },

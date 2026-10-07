@@ -91,7 +91,7 @@ const STYLES: Record<string, Partial<PitStyle>> = {
   interlagos: { clad: 0xbfc3c4, core: 0x9ea2a4, glass: 0x2c3c46 },
   melbourne: { trim: 0xebebe8, clad: 0x8e9396, core: 0x6e7376, frame: 0x50555a, shade: 'louvres', glass: 0x2a3640 },
   mexico: { trim: 0xe8e8e4, clad: 0x5d6268, core: 0x474b50, frame: 0x2a2d31, shade: 'flush', glass: 0x26323c },
-  montreal: { trim: 0xf3f3f0, clad: 0xdadcdb, core: 0xb9bcbc, frame: 0xe6e8e8, glass: 0x2b3e4a },
+  montreal: { trim: 0xf3f3f0, clad: 0xdadcdb, core: 0xb9bcbc, frame: 0xe6e8e8, shade: 'flush', glass: 0x2b3e4a },
   sakhir: { trim: 0xebe0c9, clad: 0xcdb994, core: 0xb39f7b, frame: 0xc2ad86, shade: 'louvres', glass: 0x3a3a34 },
   spielberg: { trim: 0xd9dbdd, clad: 0x3f4348, core: 0x2e3135, frame: 0x26292d, glass: 0x222c34 },
   zandvoort: { trim: 0xf0f0ec, clad: 0x9fa4a8, core: 0x7d8286, frame: 0x60656a, shade: 'louvres', glass: 0x2c3a44 },
