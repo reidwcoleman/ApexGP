@@ -349,8 +349,12 @@ npm run check    # tsc --noEmit
   floor stays, inlet scoops on all four brake ducts, the rear flaps' actuator pod, a telemetry antenna
   ahead of the cockpit, the T-cam pod's lenses (the T-cam films from them: the helmet's top under the
   halo), a slimmer halo pillar, a moulded headrest round the helmet, a helmet with a chin bar and a
-  rear spoiler, and the driver's gloved hands on the wheel — they turn it, the forearms follow as live
-  links from the elbows, and the cockpit cameras keep them when the driver is hidden
+  rear spoiler, and the driver's arms and gloved hands on the wheel (`car/carHands.ts`: one skinned mesh,
+  upper arm / forearm / hand bones a side): palms cupped round the grips, fingers wrapped round their backs
+  onto the shift paddles, thumbs on the face by the top buttons, so they sit on the grips at any lock;
+  the elbows are a two-bone IK from the shoulders and the gauntlet bends at the wrist; race gloves with
+  the team's colours, a sponsor patch, tonal stitching and a suede palm (sheen, a shared stitch/padding
+  normal map, baked finger occlusion). The cockpit cameras keep them when the driver is hidden
   (`setDriverVisible(false, true)`). Carbon is anisotropic (each tow's sheen stretched across it, warp
   and weft at right angles, under the isotropic lacquer; it fades to the weave's average once a pixel
   spans a tow), plate edges (endplates, fences, fins, the wheel) shade rounded, and the front wing's
@@ -420,7 +424,13 @@ npm run check    # tsc --noEmit
   cockpit eye thrown about by the G on a sprung neck (outward in corners, forward and down with a nod
   on the brakes, back into the seat on the power) behind a fixed 56° lens (in the 55–60° range the sims use on a monitor; the
   other cameras' lenses widen with speed, mostly above 150 km/h),
-  a live steering-wheel screen and shift lights in the onboards,
+  a live steering-wheel screen and shift lights in the onboards (a 1024-texel screen texture of its own,
+  mipmapped and anisotropic, repainted at 15 Hz like a 2026 wheel's / ACC's dash: gear, speed, delta,
+  lap and position, tyre temperatures, brake balance, battery and boost, aero mode, last lap; held at a
+  constant brightness on the display whatever the grade's exposure (`SCREEN_GLOW`); kept sharp by the
+  onboard defocus, untouched by the motion blur, and reprojected through the wheel's own turn by the TAA,
+  its pixels flagged responsive so changing digits don't ghost), printed legends and position ticks on
+  the face, LED lenses, knurled rotaries,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
   lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
   in the middle, front tyres at the sides, a full 2026 wheel with dome buttons, rotaries and paddles

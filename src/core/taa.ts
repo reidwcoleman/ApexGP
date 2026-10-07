@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Pass } from 'postprocessing';
-import { MOTION_CARS } from './motionBlur';
+import { MOTION_CARS, WHEEL_BOX_GLSL, wheelUniforms } from './motionBlur';
 
 /**
  * Temporal anti-aliasing (High/Ultra), as Unreal Engine 4 — and so ACC — does it: every frame the
@@ -57,6 +57,7 @@ uniform int carCount;
 uniform vec3 boxMin;
 uniform vec3 boxMax;
 uniform float reset;
+${WHEEL_BOX_GLSL}
 
 // tone-mapped working space (and back): bright texels count as ~1, not as 50
 vec3 tmap(vec3 c) { return c / (1.0 + max(c.r, max(c.g, c.b))); }
@@ -133,6 +134,10 @@ void main() {
   ray.xyz /= ray.w;
   vec3 wpos = (camWorld * vec4(ray.xyz * (vz / ray.z), 1.0)).xyz;
   vec3 prev = wpos;
+  vec3 wl;
+  // the steering wheel turns inside its car: back through its own last frame
+  if (onWheel(wpos, wl)) prev = (wheelPrev * vec4(wl, 1.0)).xyz;
+  else
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
@@ -162,7 +167,9 @@ void main() {
   float a = mix(0.09, 0.25, smoothstep(2.0, 24.0, px));
   // additive particles (sparks, flames, glows: Particles.ts's hot pool) leave the frame's alpha above
   // 1 (an additive blend's alpha adds up on a half-float target): they fly on their own paths with no
-  // depth to reproject them by, so they pass nearly as drawn instead of being averaged to a trace
+  // depth to reproject them by, so they pass nearly as drawn instead of being averaged to a trace.
+  // The steering wheel's screen marks itself the same way (CarModel patchDash): its digits change
+  // 15 times a second, and the history kept the last readings ghosting under the new one
   float hot = clamp(texture2D(tColor, vUv).a - 1.0, 0.0, 1.0);
   a = mix(a, 0.75, hot);
   vec3 res = mix(hist, cur, a);
@@ -228,6 +235,7 @@ export class TAAPass extends Pass {
         // (the motion blur's car box: motionBlur.ts)
         boxMin: { value: new THREE.Vector3(-1.15, 0.06, -2.85) },
         boxMax: { value: new THREE.Vector3(1.15, 1.45, 2.95) },
+        ...wheelUniforms(),
         reset: { value: 1 },
       },
       depthTest: false,

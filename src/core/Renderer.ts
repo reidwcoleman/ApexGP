@@ -1612,6 +1612,7 @@ export class Renderer {
     ou.get('outside')!.value = THREE.MathUtils.lerp(1.0, 1.12, b);
     ou.get('defocus')!.value = THREE.MathUtils.lerp(0.0105 * 0.25, 0.0105, b);
     ou.get('obVig')!.value = THREE.MathUtils.lerp(0.12, 0.5, b);
+    ou.get('wheelKeep')!.value = THREE.MathUtils.lerp(1, 0.8, b);
   }
 
   render(dt: number) {
@@ -1685,10 +1686,26 @@ export class Renderer {
       n++;
     }
     u.carCount.value = n;
+    // the steering wheel the camera looks at (it turns inside the car): reprojected through its own
+    // last frame (Game sets it with onboardCar; nothing a frame ago → this frame's: no motion)
+    const w = this.onboardWheel;
+    u.wheelOn.value = w ? 1 : 0;
+    if (w) {
+      (u.wheelInv.value as THREE.Matrix4).copy(w.matrixWorld).invert();
+      const fresh = this.prevWheelObj === w && this.prevWheelFrame === this.motionFrame;
+      (u.wheelPrev.value as THREE.Matrix4).copy(fresh ? this.prevWheel : w.matrixWorld);
+      this.prevWheel.copy(w.matrixWorld);
+    }
+    this.prevWheelObj = w;
   }
+  private readonly prevWheel = new THREE.Matrix4();
+  private prevWheelObj: THREE.Object3D | null = null;
+  private prevWheelFrame = -1;
 
   /** the car an onboard camera rides in (null = not onboard): its own cockpit is shaded and defocused */
   onboardCar: THREE.Object3D | null = null;
+  /** the steering wheel in it (CarRig.wheel; null when not onboard or not at the nearest detail) */
+  onboardWheel: THREE.Object3D | null = null;
   private updateOnboard() {
     const own = this.onboardCar;
     this.onboardPass.enabled = own !== null;
@@ -1757,8 +1774,13 @@ export class Renderer {
         n++;
       }
       u.carCount.value = n;
+      const w = this.onboardWheel;
+      u.wheelOn.value = w ? 1 : 0;
+      if (w) (u.wheelInv.value as THREE.Matrix4).copy(w.matrixWorld).invert();
     }
     this.motionPass.enabled = ok;
+    // (from here on the TAA's wheel history is the frame before the next)
+    this.prevWheelFrame = frame;
     for (const o of this.motionCars) {
       const p = this.prevCar.get(o);
       if (p) {
