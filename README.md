@@ -267,6 +267,17 @@ npm run check    # tsc --noEmit
   bottom however the wheel has rolled. A new slick is matte with its wear-indicator dimples, a used one's
   running band polished to a satin sheen between grained, scrubbed shoulders; the fictional VELTRA
   sidewall (VX-18 slicks, TORRENTA rain tyres) carries moulded technical markings that show in the relief.
+  The details a close lens finds:
+  floor stays, inlet scoops on all four brake ducts, the rear flaps' actuator pod, a telemetry antenna
+  ahead of the cockpit, the T-cam pod's lenses (the T-cam films from them: the helmet's top under the
+  halo), a slimmer halo pillar, a moulded headrest round the helmet, a helmet with a chin bar and a
+  rear spoiler, and the driver's gloved hands on the wheel — they turn it, the forearms follow as live
+  links from the elbows, and the cockpit cameras keep them when the driver is hidden
+  (`setDriverVisible(false, true)`). Carbon is anisotropic (each tow's sheen stretched across it, warp
+  and weft at right angles, under the isotropic lacquer; it fades to the weave's average once a pixel
+  spans a tow), plate edges (endplates, fences, fins, the wheel) shade rounded, and the front wing's
+  first flaps carry a partner's wordmark read from the onboards. (No over-wheel deflectors: 2026
+  dropped them for the wheel-wake boards.)
 - **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car

@@ -73,6 +73,13 @@ export interface CarbonSet {
   map: THREE.Texture;
   normal: THREE.Texture;
   rough: THREE.Texture;
+  /**
+   * anisotropy (MeshPhysicalMaterial.anisotropyMap): RG the direction the highlight stretches in,
+   * across each tow (a fibre bundle is a cylinder: its sheen runs perpendicular to it), B strength.
+   * The warp and weft tows stretch it at right angles — the checker of sheen that flips as the
+   * light moves, the look of real carbon under its lacquer.
+   */
+  aniso: THREE.Texture;
 }
 let carbonCache: CarbonSet | null = null;
 export function carbonTextures(): CarbonSet {
@@ -83,9 +90,11 @@ export function carbonTextures(): CarbonSet {
   const col = canvas(S, S);
   const nor = canvas(S, S);
   const rou = canvas(S, S);
+  const ani = canvas(S, S);
   const ic = new ImageData(S, S);
   const inn = new ImageData(S, S);
   const ir = new ImageData(S, S);
+  const ia = new ImageData(S, S);
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const i = Math.floor(x / tw);
@@ -125,12 +134,19 @@ export function carbonTextures(): CarbonSet {
       ir.data[o + 1] = Math.round(r * 255);
       ir.data[o + 2] = 0;
       ir.data[o + 3] = 255;
+      // a warp tow runs along v: its highlight stretches along u, and the weft's the other way;
+      // strongest on the crown of each tow, gone in the resin between them
+      ia.data[o] = warp ? 255 : 128;
+      ia.data[o + 1] = warp ? 128 : 255;
+      ia.data[o + 2] = Math.round((0.35 + 0.65 * bulge) * Math.min(1, edge * 12) * 255);
+      ia.data[o + 3] = 255;
     }
   }
   ctx2d(col).putImageData(ic, 0, 0);
   ctx2d(nor).putImageData(inn, 0, 0);
   ctx2d(rou).putImageData(ir, 0, 0);
-  carbonCache = { map: tex(col, true, true, 16), normal: tex(nor, false, true, 16), rough: tex(rou, false, true, 16) };
+  ctx2d(ani).putImageData(ia, 0, 0);
+  carbonCache = { map: tex(col, true, true, 16), normal: tex(nor, false, true, 16), rough: tex(rou, false, true, 16), aniso: tex(ani, false, true, 16) };
   return carbonCache;
 }
 

@@ -122,7 +122,7 @@ export function isRemoteCam(m: CameraMode): boolean {
  * frame (+x left, +y up, +z forward; heights from the ground under the car at rest), on the sprung
  * body unless `root` (the wheel cameras ride on brackets below the body's roll and pitch).
  * Placed against the body's real shape (a raycast height map of the car, dm): the T-cam pod on the
- * roll hoop above the airbox (its top 0.95 m, 0.25 m behind the helmet), the nose 0.6 m high at the
+ * roll hoop above the airbox (its top 0.99 m, 0.34 m behind the helmet's centre; the lenses in its ends), the nose 0.6 m high at the
  * front axle and 0.4 m at the wing, the wing's flaps 0.2–0.3 m, the sidepods' tops 0.5–0.6 m, the
  * halo's hoop 0.9 m, the front tyres' tops 0.7 m between z 1.4 and 2.0, the rear wing 0.7–1.0 m.
  */
@@ -148,11 +148,12 @@ interface Mount {
   cockpit?: boolean;
 }
 const MOUNTS: Partial<Record<CameraMode, Mount>> = {
-  // the classic F1 onboard: the pod on top of the roll hoop just behind the driver's head — the halo's
-  // hoop and the helmet below the middle, the front tyres either side, the whole car rolling with it
-  tcam: { pos: [0, 1.135, -0.255], dir: [0, -0.07, 1], fov: 56, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
-  // the pod's rear-facing lens: the engine cover and the rear wing below, whoever is behind above
-  tcamrev: { pos: [0, 1.125, -0.36], dir: [0, -0.16, -1], fov: 58, shake: 0.6, prof: 'tcam', flex: 22, level: 0.1, dyn: 2 },
+  // the classic F1 onboard: the lens in the front of the pod on top of the roll hoop, just behind the
+  // driver's head — the top of the helmet filling the bottom of the picture, the halo's hoop across it,
+  // the front tyres either side, the whole car rolling with it
+  tcam: { pos: [0, 0.985, -0.2], dir: [0, -0.07, 1], fov: 56, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  // the pod's rear-facing lens: the engine cover's spine and fin, the rear wing, whoever is behind above
+  tcamrev: { pos: [0, 1.01, -0.3], dir: [0, -0.16, -1], fov: 58, shake: 0.6, prof: 'tcam', flex: 22, level: 0.1, dyn: 2 },
   // the broadcast halo camera: low in the tub in front of the driver, bolted to the chassis (no neck
   // to soak up the G or the bumps): the halo's centre pillar splits a wide picture, its hoop frames
   // the top and the wheel fills the bottom, out of focus; it rolls with the car
