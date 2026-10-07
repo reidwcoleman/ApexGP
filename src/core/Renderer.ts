@@ -715,6 +715,12 @@ class SunShaftsEffect extends Effect {
 const SIM_TONE_GLSL = /* glsl */ `
 vec3 simFilmic(vec3 c) {
   vec3 a = (c * (c + 0.0245786) - 0.000090537) / (c * (0.983729 * c + 0.4329510) + 0.238081);
+  // a softer toe: the fit alone takes deep shade to a quarter of Neutral's (0.02 → 0.005), so a sunset
+  // or a shaded cockpit went to black; below ~0.07 (after acesScale) a linear segment holds the shade
+  // readable, joined to the curve by a smooth max — the mids and the shoulder are the fit's own
+  vec3 lin = c * 0.46;
+  vec3 h = clamp(0.5 + 0.5 * (lin - a) / 0.01, 0.0, 1.0);
+  a = mix(a, lin, h) + 0.01 * h * (1.0 - h);
   return clamp(a, 0.0, 1.0);
 }
 `;
