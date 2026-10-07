@@ -797,7 +797,9 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     // ---- decals (alpha-tested)
     const numCol = team.ink;
     const numOut = contrastOn(team.ink) === '#ececec' ? null : null;
-    drawInRect(g, R_NUM_NOSE, String(driver.number), numCol, numOut, 0.9, 0.85);
+    // (the nose patch stretches the cell's 128 × 64 px over 15 × 20 cm: x-scale 2.67 keeps the
+    // digits upright, ~12 cm tall — they read as a skinny "1" whatever the number without it)
+    drawInRect(g, R_NUM_NOSE, String(driver.number), numCol, numOut, 0.62, 2.67);
     drawInRect(g, R_NUM_FIN_L, String(driver.number), numCol, null, 0.95, 1);
     drawInRect(g, R_NUM_FIN_R, String(driver.number), numCol, null, 0.95, 1);
     const code = `${driver.code}  ${driver.number}`;

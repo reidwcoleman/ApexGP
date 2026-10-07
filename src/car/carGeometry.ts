@@ -213,16 +213,30 @@ function plate(
       nrm = scl3(nrm, -1);
       flip = true;
     }
-    const uv = uvf((a0 + a1) / 2, (b0 + b1) / 2, 0);
-    const c = cuv ? cuv(p0, nrm) : ([0, 0] as V2);
+    // uv / weave coordinates per vertex, running along the rim: one value per quad gave every rim
+    // segment a single texel of the weave and no tangent frame (zero derivatives) — the carbon's
+    // stretched tow sheen then lit whole segments at random, a dotted string of "LEDs" glowing
+    // along every endplate and fence edge. Across the thickness the coordinates step sideways by
+    // the thickness at the same scale, so the frame is never degenerate.
+    const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]) || 1;
+    const across = (A: V2, B: V2): V2 => {
+      const k = thick / len;
+      return [-(B[1] - A[1]) * k, (B[0] - A[0]) * k];
+    };
+    const uvA = uvf(a0, b0, 0);
+    const uvB = uvf(a1, b1, 0);
+    const uvX = across(uvA, uvB);
+    const cA = cuv ? cuv(p0, nrm) : ([0, 0] as V2);
+    const cB = cuv ? cuv(p1, nrm) : ([0, 0] as V2);
+    const cX = across(cA, cB);
     // the rim shades as a rounded edge: its normals lean toward each face, so a moulded part's
     // edge catches a thin highlight instead of a machined 90° step (no extra triangles)
     const nTop = norm3(add3(nrm, scl3(en, BEVEL)));
     const nBot = norm3(add3(nrm, scl3(en, -BEVEL)));
-    const i0 = mb.vert(p0, nTop, uv, c);
-    const i1 = mb.vert(p1, nTop, uv, c);
-    const i2 = mb.vert(p2, nBot, uv, c);
-    const i3 = mb.vert(p3, nBot, uv, c);
+    const i0 = mb.vert(p0, nTop, uvA, cA);
+    const i1 = mb.vert(p1, nTop, uvB, cB);
+    const i2 = mb.vert(p2, nBot, [uvB[0] + uvX[0], uvB[1] + uvX[1]], [cB[0] + cX[0], cB[1] + cX[1]]);
+    const i3 = mb.vert(p3, nBot, [uvA[0] + uvX[0], uvA[1] + uvX[1]], [cA[0] + cX[0], cA[1] + cX[1]]);
     if (!flip) {
       mb.tri(i0, i3, i1);
       mb.tri(i1, i3, i2);
@@ -383,27 +397,52 @@ function mirrorStations(st: WingSt[]): WingSt[] {
 
 /**
  * 2026 front wing: 100 mm narrower, a big carbon mainplane (raised neutral centre section the nose
- * sits on) and a two-element painted flap that is ACTIVE — it rotates flatter on the straights
+ * sits on), a fixed carbon second element, and a two-element painted flap that is ACTIVE — it rotates flatter on the straights
  * (straight mode) and back to full angle for the corners. No tip "eyebrow" winglets any more; the
  * endplates carry the detail (footplate, outwash canard, a turned-out top edge).
  * The flaps are built separately in pivot-local space (frontFlap) so the rig can rotate them.
  */
 export const FW_SPAN = 0.83;
-export const FW_FLAP_PIVOT: V3 = [0, 0.165, 2.73];
+/** the active flaps' hinge line (at the lower flap's leading edge, mid-span) */
+export const FW_FLAP_PIVOT: V3 = [0, 0.14, 2.62];
+/**
+ * The upper elements' span-wise shape, as on the 2026 cars (launch and testing photos): slender
+ * cambered blades of 10–13 cm chord (the old flaps were 15–20 cm bands), that step UP beside the nose (the raised,
+ * flatter neutral section the regulations keep free of load), run low across the middle of the
+ * span and then sweep up hard into the endplate, twisting to more angle and growing a little in
+ * chord on the way. Per element: [LE z, LE y, chord, angle°] mid-span, and how far it rises
+ * inboard / outboard. Left half (x ≥ 0), body space.
+ */
+const FW_UPPER: Record<'f' | 'e1' | 'e2', { z: number; y: number; c: number; a: number; up: number; tip: number }> = {
+  // the fixed second element (bare carbon), its leading edge tucked over the mainplane's trailing edge
+  f: { z: 2.72, y: 0.106, c: 0.13, a: 11, up: 0.04, tip: 0.055 },
+  // the two active flaps
+  e1: { z: 2.62, y: 0.137, c: 0.115, a: 22, up: 0.045, tip: 0.085 },
+  e2: { z: 2.535, y: 0.184, c: 0.1, a: 36, up: 0.05, tip: 0.1 },
+};
+function fwUpperStations(level: Level, k: keyof typeof FW_UPPER): WingSt[] {
+  // (finer where the blade bends: the step beside the nose and the sweep into the endplate)
+  const xs = level === 2
+    ? [0.11, 0.2, 0.3, 0.5, 0.7, FW_SPAN - 0.012]
+    : [0.11, 0.14, 0.17, 0.2, 0.23, 0.26, 0.29, 0.33, 0.39, 0.46, 0.53, 0.6, 0.66, 0.71, 0.75, 0.785, FW_SPAN - 0.012];
+  const e = FW_UPPER[k];
+  return xs.map((x) => {
+    const inb = 1 - smooth(0.17, 0.31, x); // raised neutral section
+    const out = smooth(0.42, FW_SPAN - 0.012, x) ** 1.5; // up into the endplate
+    return {
+      x,
+      z: e.z + 0.012 * inb - 0.035 * out,
+      y: e.y + e.up * inb + e.tip * out,
+      c: e.c * (1 + 0.15 * out),
+      a: e.a - 5 * inb + 8 * out,
+      t: 0.1,
+      cam: 0.08,
+    };
+  });
+}
 /** the flap elements, left half (x ≥ 0), body space */
 function fwFlapStations(level: Level): { e1: WingSt[]; e2: WingSt[] } {
-  const xs2 = level === 2 ? [0.11, 0.48, FW_SPAN - 0.012] : [0.11, 0.2, 0.3, 0.4, 0.5, 0.6, 0.68, 0.75, 0.8, FW_SPAN - 0.012];
-  const T = (x: number) => (x - 0.11) / (FW_SPAN - 0.12);
-  const e1 = xs2.map((x) => {
-    const t = T(x);
-    // sweeps up toward the endplate, the chord growing outboard
-    return { x, z: 2.745 - 0.05 * t * t, y: 0.148 + 0.075 * t ** 2.2, c: lerp(0.19, 0.205, t * t), a: lerp(15, 25, t), t: 0.1, cam: 0.075 };
-  });
-  const e2 = xs2.map((x) => {
-    const t = T(x);
-    return { x, z: 2.605 - 0.045 * t * t, y: 0.212 + 0.112 * t ** 2.2, c: lerp(0.15, 0.172, t * t), a: lerp(30, 44, t), t: 0.1, cam: 0.08 };
-  });
-  return { e1, e2 };
+  return { e1: fwUpperStations(level, 'e1'), e2: fwUpperStations(level, 'e2') };
 }
 
 function frontWing(b: Buckets, level: Level) {
@@ -426,32 +465,36 @@ function frontWing(b: Buckets, level: Level) {
   for (const side of [1, -1]) {
     const P = b.parts[side > 0 ? 'fwL' : 'fwR'];
     wingElement(P.carbon, half(e0, side), nAf, carbonUV);
-    // endplate (carbon): rounded outline in (z, y); the top edge turns outboard
+    // the fixed second element: bare carbon, the same span-wise shape as the flaps above it
+    wingElement(P.carbon, half(fwUpperStations(level, 'f'), side), nAf, carbonUV);
+    // endplate (carbon): rounded outline in (z, y), tall at the back where the flaps sweep up into
+    // it; the top edge turns outboard
     const ep = roundPoly(
       [
         [3.05, 0.028],
-        [2.46, 0.028],
-        [2.41, 0.16],
-        [2.44, 0.285],
-        [2.52, 0.325],
-        [2.62, 0.3],
-        [2.8, 0.2],
-        [2.96, 0.12],
+        [2.44, 0.028],
+        [2.395, 0.17],
+        [2.403, 0.35],
+        [2.455, 0.398],
+        [2.56, 0.362],
+        [2.72, 0.258],
+        [2.9, 0.15],
         [3.06, 0.075],
       ],
-      [0.02, 0.03, 0.05, 0.05, 0.05, 0.06, 0.08, 0.05, 0.03],
+      [0.02, 0.03, 0.05, 0.04, 0.04, 0.05, 0.08, 0.05, 0.03],
       level === 2 ? 1 : 3,
     );
     plate(P.carbon, ep, [(FW_SPAN + 0.006) * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     if (level < 2) {
       // footplate: a horizontal strip along the endplate foot, curling outboard
-      plate(P.carbon, roundPoly([[3.02, 0], [2.48, 0], [2.48, 0.07], [3.02, 0.085]], 0.02, 2), [(FW_SPAN - 0.03) * side, 0.03, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
-      // turned-out top edge: a narrow plate leaning outboard along the endplate's upper rear edge
+      plate(P.carbon, roundPoly([[3.02, 0], [2.46, 0], [2.46, 0.07], [3.02, 0.085]], 0.02, 2), [(FW_SPAN - 0.03) * side, 0.03, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+      // turned-out top edge: a narrow plate leaning outboard along the endplate's sloping upper rear
+      // edge (a runs forward and down the edge from its top corner)
       plate(
         P.carbon,
-        roundPoly([[2.47, 0], [2.72, 0], [2.64, 0.05], [2.47, 0.055]], 0.015, 2),
-        [(FW_SPAN + 0.006) * side, 0.29, 0],
-        [0, 0, 1],
+        roundPoly([[0, 0], [0.27, 0], [0.21, 0.045], [0.02, 0.05]], 0.015, 2),
+        [(FW_SPAN + 0.006) * side, 0.38, 2.47],
+        norm3([0, -0.12, 0.25]),
         norm3([0.75 * side, 0.66, 0]),
         0.006,
         (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE],
@@ -462,7 +505,7 @@ function frontWing(b: Buckets, level: Level) {
         { x: (FW_SPAN + 0.06) * side, z: 2.955, y: 0.108, c: 0.1, a: -10, t: 0.07 },
       ].sort((p, q) => p.x - q.x), 6, (_s, _c, p) => [p[0] / CARBON_TILE, p[2] / CARBON_TILE]);
       // flap adjuster fairing where the flaps meet the endplate (the actuator of the active aero)
-      ellipsoid(P.carbon, [(FW_SPAN - 0.02) * side, 0.24, 2.66], [0.016, 0.04, 0.09], 8, 6, (p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
+      ellipsoid(P.carbon, [(FW_SPAN - 0.02) * side, 0.235, 2.6], [0.014, 0.034, 0.08], 8, 6, (p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
     }
   }
   // the nose rides on the mainplane on two cranked pylons
@@ -491,7 +534,16 @@ function frontFlap(mb: MB, level: Level, side: 1 | -1) {
   // the flaps' own small end fences where they meet the endplate
   if (level < 2) {
     const x = (FW_SPAN - 0.004) * side;
-    const q = roundPoly([[2.77, 0.2], [2.5, 0.29], [2.44, 0.35], [2.56, 0.36], [2.78, 0.25]], 0.015, 2);
+    // a slim fence round the two tip sections (leading and trailing edges of each, padded)
+    const te = (s: WingSt): V2 => {
+      const a = (s.a * Math.PI) / 180;
+      return [s.z - s.c * Math.cos(a), s.y + s.c * Math.sin(a)];
+    };
+    const t1 = e1[e1.length - 1];
+    const t2 = e2[e2.length - 1];
+    const [z1, y1] = te(t1);
+    const [z2, y2] = te(t2);
+    const q = roundPoly([[t1.z + 0.02, t1.y - 0.018], [z1 - 0.004, y1 - 0.022], [z2 - 0.012, y2 - 0.012], [z2 - 0.002, y2 + 0.018], [t2.z + 0.018, t2.y + 0.028], [t1.z + 0.026, t1.y + 0.026]], 0.012, 2);
     plate(mb, q, [x, 0, 0], [0, 0, 1], [0, 1, 0], 0.006, () => paintCellUV(PC.carbon), CUV);
   }
   mb.transform(from, new THREE.Matrix4().makeTranslation(-FW_FLAP_PIVOT[0], -FW_FLAP_PIVOT[1], -FW_FLAP_PIVOT[2]));
@@ -1190,8 +1242,10 @@ function decals(mb: MB) {
         }
       }
   };
-  // nose number: from the front, reading direction +X (s increasing), up = toward the rear (z decreasing)
-  patch(2.55, 2.33, -0.085, 0.085, 6, 4, (a, b) => drvUV(R_NUM_NOSE, a, b));
+  // nose number: from the front, reading direction +X (s increasing), up = toward the rear (z decreasing).
+  // Near the tip of the short 2026 nose, 15 cm across × 20 cm along it: the 2:1 sheet cell is
+  // stretched ~2.7× along z, which driverTexture (carTextures.ts) pre-squashes so digits read upright.
+  patch(2.64, 2.44, -0.075, 0.075, 6, 4, (a, b) => drvUV(R_NUM_NOSE, a, b));
 
   // fin numbers (both faces)
   const FZc = -1.2;

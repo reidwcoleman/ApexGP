@@ -39,6 +39,26 @@ const shade = (a: RGB, k: number): RGB => [a[0] * k, a[1] * k, a[2] * k];
 const hexOf = (c: RGB) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
 
 const SPONSORS = ['HELIX', 'NORDVOLT', 'ARCLINE', 'MERIDIAN', 'OKTA', 'LUMEN', 'PRAXIS', 'SOLACE', 'TANGENT', 'VANTA', 'KORU', 'ZENITH'];
+/**
+ * Where the small partner decals sit on each flank: z range (front, rear), the feature line they
+ * follow (hull.ts curve parameter), letter height (m), which partner (offset into SPONSORS) and
+ * whether it's a tile. Kept clear of the big wordmarks, the panel lines and the louvres.
+ */
+const PARTNER_DECALS: { zf: number; zr: number; kt: number; h: number; k: number; tile?: boolean }[] = [
+  // nose flank, just behind the tip
+  { zf: 2.72, zr: 2.5, kt: 4.6, h: 0.022, k: 3, tile: true },
+  // chassis flank by the front suspension, two stacked
+  { zf: 1.5, zr: 1.2, kt: 4.25, h: 0.026, k: 4 },
+  { zf: 1.46, zr: 1.24, kt: 5.6, h: 0.022, k: 6, tile: true },
+  // cockpit flank ahead of the sidepod inlet
+  { zf: 0.78, zr: 0.5, kt: 4.35, h: 0.024, k: 7 },
+  // sidepod: top front, and low on the flank above the undercut
+  { zf: 0.12, zr: -0.22, kt: 6.1, h: 0.026, k: 8 },
+  { zf: 0.05, zr: -0.42, kt: 7.75, h: 0.024, k: 9, tile: true },
+  // engine cover flank, under the shoulder, and its tail
+  { zf: -0.95, zr: -1.3, kt: 4.7, h: 0.024, k: 10 },
+  { zf: -1.98, zr: -2.25, kt: 3.3, h: 0.02, k: 11, tile: true },
+];
 
 /** per-texel context handed to the pattern functions */
 interface Tx {
@@ -327,6 +347,8 @@ interface HullTextOpts {
   weight?: number;
   italic?: boolean;
   track?: number;
+  /** a backing tile behind the word (a partner's patch decal), its colour */
+  box?: string;
 }
 
 function sForY(pr: Profile, y: number, ktMin: number, ktMax: number): number {
@@ -345,34 +367,55 @@ function sForY(pr: Profile, y: number, ktMin: number, ktMax: number): number {
   return best;
 }
 
+/** arc length of a wordmark's guide line per atlas column (z) and guide: the same for every team */
+const guideMemo = new Map<string, number>();
+
 function hullText(g: CanvasRenderingContext2D, m: CanvasRenderingContext2D | null, o: HullTextOpts) {
   const Lpx = Math.ceil((o.zFront - o.zRear) * HULL_PX_PER_M);
   const Hpx = Math.ceil(o.height * HULL_RHO * 1.35);
   const aspect = HULL_PX_PER_M / HULL_RHO; // canvas x-scale for physically square glyphs
   const fontPx = o.height * HULL_RHO;
-  const render = (color: string) => {
+  const render = (color: string, box?: string) => {
     const off = canvas(Lpx, Hpx);
     const oc = ctx2d(off);
     oc.translate(Lpx / 2, Hpx / 2);
     if (o.side > 0) oc.rotate(Math.PI);
     oc.font = `${o.italic === false ? '' : 'italic '}${o.weight ?? 900} ${fontPx}px ${FONT}`;
     (oc as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${fontPx * (o.track ?? 0.02)}px`;
-    const w = oc.measureText(o.text).width * aspect;
+    const tw = oc.measureText(o.text).width;
+    // (a tile's word is set smaller inside it, the tile filling the decal's height)
+    const ts = box ? 0.68 : 1;
+    const pad = box ? fontPx * 0.26 : 0;
+    const w = (tw * ts + pad * 2) * aspect;
     const k = Math.min(1, (Lpx * 0.98) / w);
     oc.scale(aspect * k, 1);
+    if (box) {
+      oc.fillStyle = box;
+      oc.fillRect(-(tw * ts) / 2 - pad, -fontPx * 0.58, tw * ts + pad * 2, fontPx * 1.16);
+      oc.scale(ts, ts);
+    }
     oc.textAlign = 'center';
     oc.textBaseline = 'middle';
     oc.fillStyle = color;
     oc.fillText(o.text, 0, fontPx * 0.04);
     return off;
   };
-  const off = render(o.color);
-  const offM = m ? render('#000') : null;
+  const off = render(o.color, o.box);
+  const offM = m ? render('#000', o.box ? '#000' : undefined) : null;
   const x0 = Math.round(hullAtlasX(o.zRear));
+  const g0 = o.guide;
+  const gKey = 'kt' in g0 ? `k${g0.kt}` : `y${g0.y}|${g0.ktMin}|${g0.ktMax}`;
   for (let c = 0; c < Lpx; c++) {
     const z = o.zRear + (c + 0.5) / HULL_PX_PER_M;
-    const pr = profileAt(z);
-    const s = 'kt' in o.guide ? profileAtParam(pr, o.guide.kt).s : sForY(pr, o.guide.y, o.guide.ktMin, o.guide.ktMax);
+    // (the same columns and feature lines for every team: a profile per column is ~30 µs, and
+    // a livery runs ~3000 of them — worked out for the first livery, looked up for the rest)
+    const key = `${z}|${gKey}`;
+    let s = guideMemo.get(key);
+    if (s === undefined) {
+      const pr = profileAt(z);
+      s = 'kt' in g0 ? profileAtParam(pr, g0.kt).s : sForY(pr, g0.y, g0.ktMin, g0.ktMax);
+      guideMemo.set(key, s);
+    }
     const row = HULL_ROW0 - s * o.side * HULL_RHO;
     g.drawImage(off, c, 0, 1, Hpx, x0 + c, row - Hpx / 2, 1, Hpx);
     if (m && offM && (c & 1) === 0) {
@@ -501,6 +544,18 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     hullText(g, m, { text: team.short, zFront: 1.2, zRear: 0.84, side, guide: { kt: 5.0 }, height: 0.038, color: chCol, weight: 700, italic: false, track: 0.12 });
     const lowCol = inkFor(sample(-1.7, 3.75, side));
     hullText(g, m, { text: small2, zFront: -1.5, zRear: -1.92, side, guide: { kt: 3.75 }, height: 0.034, color: lowCol, weight: 700 });
+    // the technical partners' small decals: a real car carries a dozen or more, 2–4 cm tall,
+    // scattered over the chassis flanks, the sidepods and the engine cover (a few big wordmarks
+    // alone read as a model kit). Some are plain words in the ink, some white or black tiles.
+    for (const d of PARTNER_DECALS) {
+      const bg = sample((d.zf + d.zr) / 2, d.kt, side);
+      const word = SPONSORS[(tIndex + d.k) % SPONSORS.length];
+      const tile = d.tile ? (contrastOn(hexOf(bg)) === '#ececec' ? '#e6e6e6' : '#111214') : undefined;
+      hullText(g, m, {
+        text: word, zFront: d.zf, zRear: d.zr, side, guide: { kt: d.kt }, height: d.h,
+        color: tile ? contrastOn(tile) : inkFor(bg), box: tile, weight: d.tile ? 900 : 700, italic: !d.tile, track: 0.06,
+      });
+    }
   }
 
   // ---------------- flat paint cells
@@ -538,6 +593,8 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     m.fillStyle = on ? '#fff' : '#000';
     m.fillRect(r.x * MASK_SCALE, r.y * MASK_SCALE, r.w * MASK_SCALE, r.h * MASK_SCALE);
   };
+  /** the same rect on the half-resolution mask */
+  const scaleR = (r: Rect): Rect => ({ x: r.x * MASK_SCALE, y: r.y * MASK_SCALE, w: r.w * MASK_SCALE, h: r.h * MASK_SCALE });
   // rows of a rect for chord param b ∈ [b0,b1] (b up)
   const sub = (r: Rect, a0: number, a1: number, b0: number, b1: number): Rect => ({
     x: r.x + a0 * r.w,
@@ -559,16 +616,19 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
   rectText(g, sub(R_FLAP, 0.08, 0.92, 0.56, 0.92), team.sponsor, team.ink, 0.85, { flipX: true, aspect: aspFlap });
   maskR(sub(R_FLAP, 0, 1, 0.46, 0.54), true);
 
-  // main plane: upper = secondary with a primary TE band; lower = primary→secondary with a wordmark from behind
+  // main plane: upper = secondary with a primary TE band; the underside bare carbon (as on the
+  // real cars: the low cameras and the car behind see weave there) with a partner's wordmark
+  // read from behind, painted onto the weave
   const aspMain = ((R_MAIN.w / flapLen) / (R_MAIN.h / 0.62)) ** -1;
   fillR(R_MAIN, team.secondary);
   fillR(sub(R_MAIN, 0, 1, 0.0, 0.1), team.primary);
   fillR(sub(R_MAIN, 0, 1, 0.1, 0.13), team.accent);
-  fillR(sub(R_MAIN, 0, 1, 0.62, 1), team.primary);
-  fillR(sub(R_MAIN, 0, 1, 0.6, 0.62), team.accent);
-  rectText(g, sub(R_MAIN, 0.2, 0.8, 0.66, 0.97), small, team.ink, 0.8, { flipX: true, aspect: aspMain, weight: 700 });
+  fillR(sub(R_MAIN, 0, 1, 0.5, 1), '#1b1c1f');
+  maskR(sub(R_MAIN, 0, 1, 0.48, 1), true);
+  const lowerWord = sub(R_MAIN, 0.3, 0.7, 0.68, 0.94);
+  rectText(g, lowerWord, small, '#e6e6e6', 0.8, { flipX: true, aspect: aspMain, weight: 700 });
+  rectText(m, scaleR(lowerWord), small, '#000', 0.8, { flipX: true, aspect: aspMain, weight: 700 });
   rectText(g, sub(R_MAIN, 0.2, 0.8, 0.16, 0.44), team.short, contrastOn(team.secondary), 0.7, { flipY: true, aspect: aspMain, weight: 700, italic: false });
-  maskR(sub(R_MAIN, 0, 1, 0.46, 0.58), true);
 
   // ---------------- rear-wing endplates (outer: readable from each side; inner: plain)
   for (const [r, _side] of [
@@ -593,24 +653,30 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     rectText(g, sub(r, 0.08, 0.92, 0.6, 0.86), team.sponsor, team.ink, 0.8, { aspect: 0.9 });
     rectText(g, sub(r, 0.15, 0.85, 0.12, 0.36), team.short, contrastOn(team.secondary), 0.7, { aspect: 0.9, weight: 700, italic: false });
   }
+  // inner faces: bare carbon below a painted top band (the weave the onboard T-cam looks along)
   fillR(R_EP_IN, team.secondary);
   fillR(sub(R_EP_IN, 0, 1, 0.8, 1), team.primary);
-  maskR(sub(R_EP_IN, 0, 1, 0, 0.35), true);
+  maskR(sub(R_EP_IN, 0, 1, 0, 0.78), true);
 
   // ---------------- front-wing upper flaps (a: right tip → centre | centre → left tip; b: e2 [0,.5], e3 [.5,1])
-  fillR(R_FWING, team.primary);
-  fillR(sub(R_FWING, 0, 1, 0.5, 1), team.accent === '#ffffff' ? team.secondary : team.accent);
-  fillR(sub(R_FWING, 0, 0.12, 0, 1), team.secondary);
-  fillR(sub(R_FWING, 0.88, 1, 0, 1), team.secondary);
-  fillR(sub(R_FWING, 0, 1, 0.26, 0.5), team.secondary);
-  // lower surfaces carbon
-  maskR(sub(R_FWING, 0, 1, 0.26, 0.5), true);
-  maskR(sub(R_FWING, 0, 1, 0.76, 1), true);
-  // a partner's wordmark across each half's first flap, read from behind (the nose and T-cams):
-  // a runs toward +X (screen left from behind → flipX), b from its trailing edge to its leading
-  // edge (screen up). A half spans ~0.72 m over 512 px, the upper surface ~0.2 m over 32 px.
-  const aspFw = (R_FWING.w * 0.5) / 0.72 / ((R_FWING.h * 0.25) / 0.2);
-  for (const a0 of [0.14, 0.56]) rectText(g, sub(R_FWING, a0, a0 + 0.3, 0.03, 0.22), small, team.ink, 0.78, { flipX: true, aspect: aspFw, weight: 700 });
+  // The flaps are slender blades (~12 / 10 cm chord): their upper surfaces painted (the colour the
+  // onboards and the chase cam see), the undersides and leading edges' lower half bare carbon as on
+  // the real cars; one modest partner wordmark per side on the lower flap, out toward the endplate.
+  fillR(R_FWING, '#1b1c1f');
+  maskR(R_FWING, true);
+  const fw2 = team.accent === '#ffffff' || team.accent === team.primary ? team.secondary : team.accent;
+  fillR(sub(R_FWING, 0, 1, 0, 0.27), team.primary);
+  fillR(sub(R_FWING, 0, 1, 0.5, 0.77), fw2);
+  // a contrasting trailing-edge line on the upper flap (the edge the chase cam reads)
+  fillR(sub(R_FWING, 0, 1, 0.5, 0.53), team.primary);
+  maskR(sub(R_FWING, 0, 1, 0, 0.27), false);
+  maskR(sub(R_FWING, 0, 1, 0.5, 0.77), false);
+  // the wordmark on the upper flap (the lower one is half hidden under it from behind), read from
+  // behind (the nose and T-cams): a runs toward +X (screen left from behind → flipX), b from its
+  // trailing edge to its leading edge (screen up). A half spans ~0.71 m over 512 px, the upper
+  // flap's upper surface ~0.11 m over 32 px.
+  const aspFw = (R_FWING.w * 0.5) / 0.71 / ((R_FWING.h * 0.25) / 0.11);
+  for (const a0 of [0.12, 0.7]) rectText(g, sub(R_FWING, a0, a0 + 0.18, 0.54, 0.73), small, contrastOn(fw2), 0.66, { flipX: true, aspect: aspFw, weight: 700 });
 
   // ---------------- shark fin sides
   for (const r of [R_FIN_L, R_FIN_R]) {
@@ -820,13 +886,17 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
           tx.ny = G.ny[i];
           tx.pod = G.pod[px];
           col = pattern(tx, pal);
-          // exposed carbon: underside + lower flanks, more with team.carbon
-          const lowKt = 9.35 - carbonAmt * 2.4 + 0.5 * smooth(0.4, 1.4, zc) * (1 - tx.pod);
+          // exposed carbon: underside + lower flanks, more with team.carbon. Every current car leaves
+          // the whole sidepod undercut bare from the lower lip down (P8: paint there is weight
+          // nobody sees from the grandstand), the carbon-heavy ones from the sidepod's waist; the
+          // tub's lower flanks ahead of the sidepods likewise
+          const lowKt = 8.2 - carbonAmt * 1.3 + 0.7 * smooth(0.4, 1.4, zc) * (1 - tx.pod);
           const cv = cov((lowKt - kt) * 0.05, 0.002);
           // noses of carbon-heavy cars: bare underside
           const noseUnder = carbonAmt > 0.3 ? cov((10.2 - carbonAmt * 1.5 - kt) * 0.05, 0.002) * smooth(1.4, 1.8, zc) : 0;
-          // rear engine cover in carbon for carbon-heavy liveries
-          const rearTop = carbonAmt > 0.42 ? smooth(-1.55, -1.75, zc) : 0;
+          // rear engine cover in carbon for carbon-heavy liveries; on every car the gearbox
+          // fairing's flanks round the crash structure (heat from the exhaust, under the wing)
+          const rearTop = carbonAmt > 0.42 ? smooth(-1.55, -1.75, zc) : smooth(-1.86, -1.98, zc) * cov((3.1 - kt) * 0.05, 0.002);
           carbon = Math.max(cv, noseUnder, rearTop, kt > 10 ? 1 : 0);
           if (carbon > 0.5) col = carbonCol;
           const mk = G.mark[i];
