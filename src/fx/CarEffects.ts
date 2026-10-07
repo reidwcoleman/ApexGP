@@ -3,7 +3,7 @@ import { SURF, type Track } from '../world/Track.ts';
 import type { Race } from '../race/Race.ts';
 import type { Entry } from '../race/Teams.ts';
 import type { CarRig, PartId, WheelId } from '../car/CarModel.ts';
-import type { WeatherState } from '../world/Weather.ts';
+import { isWetKind, type WeatherState } from '../world/Weather.ts';
 import type { Particles } from './Particles.ts';
 import { SprayEmitters } from './Spray.ts';
 import { DMG, type CarPhysics, type Impact } from '../sim/CarPhysics.ts';
@@ -193,6 +193,14 @@ export class CarEffects {
     this.camDir.copy(P.cameraDirection);
     const track = race.track;
     const wetBase = weather.wetness;
+    // a drying track throws far less than a wet one: with no rain feeding it the film drains into the
+    // surface, and footage of a drying race shows a light mist off the wettest parts only (the cars off the
+    // line, through the puddles) and next to none on the dry line
+    const drying = !isWetKind(weather.kind);
+    // (fog and mist: the rain lights glow in the murk round them as they do in spray)
+    // (a small halo: the light is ~1 m off the ground in air that scatters it over metres, not a pink cloud;
+    // and none on the cars right by the lens, where there is too little air between to scatter)
+    const fogHaze = weather.kind === 'fog' || weather.kind === 'mist' ? 0.22 * smoothstep(0.35, 1, weather.fog) : 0;
     let veil = 0;
     let groundNear = cam.y - 1.2;
     let nearest = 1e9;
@@ -240,9 +248,10 @@ export class CarEffects {
 
       // ---------------------------------------------------------- spray
       let I = 0;
-      if (wet > 0.01 && dist < 420) {
+      const sprayWet = drying ? wet * smoothstep(0.22, 0.8, wet) * 0.8 : wet;
+      if (sprayWet > 0.01 && dist < 420) {
         I = this.spray.emit(P, c.id, {
-          x: root.x, y: root.y, z: root.z, yaw: car.yaw, vx: wx, vz: wz, speed, wet, camDist: dist,
+          x: root.x, y: root.y, z: root.z, yaw: car.yaw, vx: wx, vz: wz, speed, wet: sprayWet, camDist: dist,
           wheelbase: rig.dims.wheelbase, trackF: rig.dims.trackFront, trackR: rig.dims.trackRear, self: c.id === selfId,
         }, dt);
         if (I > 0.02 && dist < 160) {
@@ -264,7 +273,7 @@ export class CarEffects {
         // your own light is already right there (emissive LED + bloom): only other cars get the flare
         if (!self) P.glow(a, 0.06 + 0.04 * I, 24 * lvl, 1 * lvl, 0.5 * lvl, att, 0.35);
         // the red light scattering in the spray around it
-        const haze = Math.max(I, wetBase * 0.4);
+        const haze = Math.max(I, wetBase * 0.4, fogHaze * smoothstep(20, 45, dist));
         if (haze > 0.03 && !self) P.haloGlow(a, 0.6 + 1.4 * haze, 0.22 * lvl * haze, 0.011 * lvl * haze, 0.006 * lvl * haze, att);
       }
 

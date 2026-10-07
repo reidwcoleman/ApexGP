@@ -62,6 +62,8 @@ uniform float uViewMilk;
 uniform vec3 uMilkCol;
 uniform vec3 uFogCol;
 uniform vec2 uFogK;
+// the fog layer's glow round the sun (fog.ts aerialFogSun), so the murk and the sky meet in one glare
+uniform vec3 uFogSun;
 
 #define PI 3.141592653589793
 
@@ -283,7 +285,13 @@ void main() {
   // the sky seen through the mist: the same air that veils the land veils the low sky (and the clouds
   // in it), so the far hills and the horizon fade into one colour instead of a fogged band of land
   // under a clear-sky horizon (x = how much at the horizon, y = how fast it thins upward)
-  if ( uFogK.x > 0.001 ) col = mix( col, uFogCol, uFogK.x * exp( -max( sy, 0.0 ) * uFogK.y ) );
+  if ( uFogK.x > 0.001 ) {
+    // (the same droplet phase function as fog.ts aerialFogLobe)
+    float fmu = max( dot( d, uSunDir ), 0.0 );
+    float fm2 = fmu * fmu;
+    vec3 fogC = uFogCol + uFogSun * ( fm2 * 0.3 + fm2 * fm2 * fm2 * 0.55 + pow( fmu, 48.0 ) * 1.5 );
+    col = mix( col, fogC, uFogK.x * exp( -max( sy, 0.0 ) * uFogK.y ) );
+  }
 
   // light in the low air: the city's sodium glow, and the circuit's own floodlights lighting the haze
   if ( uNight > 0.001 ) {
@@ -368,6 +376,7 @@ export function createSkyDome(): SkyDome {
     uMilkCol: { value: new THREE.Vector3(1, 1, 1) },
     uFogCol: { value: new THREE.Vector3(0.5, 0.5, 0.5) },
     uFogK: { value: new THREE.Vector2(0, 8) },
+    uFogSun: { value: new THREE.Vector3(0, 0, 0) },
   };
   const geo = new THREE.SphereGeometry(1, 96, 48);
   const mat = new THREE.ShaderMaterial({

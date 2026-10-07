@@ -10,6 +10,7 @@ import { setLeafFill } from './treematerial.ts';
 import { buildHorizon, HORIZON_PRESETS } from './horizon.ts';
 import { buildGrass, type GrassBuild } from './grass.ts';
 import { buildParkMasks } from './parkmask.ts';
+import { roadUniforms } from '../trackside/materials.ts';
 import { buildGrandstands } from './grandstands.ts';
 import { concourseCrowd } from '../../people/strollers.ts';
 import { buildBanking } from './banking.ts';
@@ -115,6 +116,12 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   tLap = performance.now();
   const masks = buildParkMasks(map, layout, veg.shade);
   terrain.setMasks(masks);
+  // (the road reads the tree cover too: a drying track stays wet under the trees)
+  {
+    const b = masks.fineBounds;
+    roadUniforms.uCanopy.value = masks.fine;
+    roadUniforms.uCanopyB.value.set(b.x0, b.z0, 1 / (b.x1 - b.x0), 1 / (b.z1 - b.z0));
+  }
   // grass blades on the verges around the camera (High/Ultra)
   let grass: GrassBuild | null = null;
   try {

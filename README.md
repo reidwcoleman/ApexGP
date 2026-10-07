@@ -264,6 +264,16 @@ npm run check    # tsc --noEmit
   floodlights at all: the moon, the city on the horizon and every car's modest headlights, which light
   the road ahead, flare head-on and catch the rain). The track gets wet and dries again, a dry line appears once the
   rain stops, spray and aquaplaning in standing water, the radar and your engineer warn you.
+  Fog and mist are a ground layer under the haze (`aerialGround` in fog.ts: an analytic exponential anchored at the
+  circuit's level, thicker in the hollows, drifting in banks): fog ~45 m deep with ~400 m visibility, the sun a pale
+  disc through it at best and the murk glowing round it (a droplet phase function, shared with the sky dome), trees,
+  stands and cars fading to grey silhouettes; morning mist shallow (~25 m) and bright under a blue sky, ~600 m
+  visibility, burning off through the session — the helicopter looks down on it lying in the low ground. The sun gets
+  through what the layer's slant depth leaves (a high sun casts shadows in mist, a low one is gone); AO fades behind
+  the fog; rain lights glow in it. A drying track starts with a line already cleared and dries unevenly: the line goes
+  to dry, lighter asphalt with a ragged edge, the braking zones keep damp blotches, the stretches by the trees (the park
+  mask's tree cover) stay wet, the open surface dries in patches; the wet half keeps a smooth sheen that fades as the
+  film thins; spray comes only off the wettest parts, light, and next to none off the dry line.
 - **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.

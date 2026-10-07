@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { aerialUniforms } from '../world/env/fog.ts';
+import { AERIAL_GROUND, aerialUniforms } from '../world/env/fog.ts';
 import { puffAtlas } from './fxTextures.ts';
 import { SprayVeil } from './SprayVeil.ts';
 import { DEPTH_PARS } from './fxShaders.ts';
@@ -42,6 +42,11 @@ uniform float fogFar;
 uniform vec4 aerialParams;
 uniform vec3 aerialSunDir;
 uniform vec3 aerialSunColor;
+uniform vec4 aerialBanks;
+uniform vec2 aerialLens;
+uniform vec4 aerialGround;
+uniform vec3 aerialFogSun;
+${AERIAL_GROUND}
 varying vec2 vUv;
 varying vec4 vAxes;     // quad x/y axes in view space (rotates the atlas normals)
 varying vec3 vSunV;     // sun direction in view space
@@ -109,9 +114,12 @@ void main() {
     float x = k * ray.y;
     float f = abs( x ) > 1e-3 ? ( 1.0 - exp( -x ) ) / x : 1.0 - 0.5 * x;
     float od = aerialParams.x * exp( -k * max( camH, -50.0 ) ) * fd * f;
-    fogA = min( 1.0 - exp( -od ), aerialParams.w );
+    // (spray and smoke sit in the same ground fog as the cars that throw them)
+    float odG = aerialGroundOd( cameraPosition, ray, fd );
+    fogA = min( 1.0 - exp( -od - odG ), aerialParams.w );
     float m = max( dot( ray / max( fd, 1e-4 ), aerialSunDir ), 0.0 );
-    haze += aerialSunColor * ( pow( m, 5.0 ) * 0.55 + pow( m, 24.0 ) * 0.9 );
+    float wG = odG / max( od + odG, 1e-6 );
+    haze += aerialSunColor * ( pow( m, 5.0 ) * 0.55 + pow( m, 24.0 ) * 0.9 ) * ( 1.0 - wG ) + aerialFogSun * ( aerialFogLobe( m ) * wG );
   } else {
     fogA = fogFar > fogNear ? smoothstep( fogNear, fogFar, dist ) : 0.0;
   }
