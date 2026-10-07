@@ -439,6 +439,13 @@ npm run check    # tsc --noEmit
 
 Menus: arrows + Enter, or the mouse. Enter twice from the title starts a race.
 
+Steering wheels and pedals (any USB wheel the browser exposes as a gamepad, pedals on the same or a separate
+device): Settings → Controls → Wheel and pedals binds and calibrates them by moving them (inverted and
+combined-axis pedals included), with the wheel's rotation (mapped 1:1 onto the car's ±180° lock), steering
+and brake linearity, pedal deadzone and live meters. Pads get deadzone, linearity, an adaptive (1€) steering
+filter, speed sensitivity and force-feedback-style vibration (kerbs, gravel, lock-ups, wheelspin, impacts;
+impulse triggers on Xbox pads in Chrome / Edge).
+
 ## Layout
 
 ```
@@ -466,6 +473,8 @@ tools/     shot.mjs (headless screenshots), simtest.mjs (headless 20-car race), 
 
 Regression checks (all headless, no browser):
 - `node tools/handling.mjs` — acceleration, top speed, braking, step steer, full lock, power oversteer.
+- `node tools/controlstest.mjs` — the control layer: wheel / pedal mapping and binding, the pad filter, device
+  switching with a stubbed Gamepad API, rumble.
 - `node tools/kbbot.mjs 2` — a simulated keyboard player (binary keys, reaction delay) drives laps
   on each assist preset through the real control layer; reports off-tracks and spins (`GAME=1` uses the
   game's own presets, `PAD=1` an analog stick, `WET=0.6` a wet track, `TRACK=<id>` another circuit).

@@ -1,6 +1,7 @@
 import type { Track } from '../world/Track.ts';
 import type { CarPhysics, DriveInput } from './CarPhysics.ts';
 import type { RacingProfile } from './RacingProfile.ts';
+import { DEFAULT_CONTROLS, OneEuro, type ControlPrefs, type Device } from '../core/controllers.ts';
 
 /**
  * Turns raw controller input into driver commands, the way the F1 games do:
@@ -11,7 +12,11 @@ import type { RacingProfile } from './RacingProfile.ts';
  *    like a thumb on a stick, progressive at speed — a quick tap is a crisp,
  *    proportional correction (never nothing), a hold builds smoothly to the
  *    full cornering rate, and letting go straightens the car.
- *  - Pad: small low-pass and a response curve for precision near centre.
+ *  - Pad: an adaptive (1€) filter that smooths a thumb's tremor but lets a quick
+ *    flick straight through, tighter at speed; the response curve is in Input.
+ *  - Wheel: the player's wheel angle is the car's, 1:1 (Input maps the hardware
+ *    rotation onto the car's lock): no speed limit, no filter, no assist — ACC's
+ *    rule that a wheel is never second-guessed.
  *  - Braking assist (optional): brakes for corners from the racing profile.
  */
 
@@ -34,6 +39,8 @@ export interface RawControls {
   throttle: number;
   brake: number;
   usingPad: boolean;
+  /** the device (missing: keyboard, or a pad when usingPad) */
+  device?: Device;
   ers: boolean;
   shiftUp: boolean;
   shiftDown: boolean;
@@ -51,6 +58,14 @@ const KB_KICK_HI = 0.25;
 const TAP_MIN = 0.07;
 /** response curve exponent at racing speed (1 = linear): progressive, but not so much that taps vanish */
 const KB_EXPO_HI = 1.45;
+/** the pad's steering range at speed, as a multiple of the peak-grip angle: at 0 / 1 speed sensitivity */
+const PAD_RANGE_LO = 2.25;
+const PAD_RANGE_HI = 1.25;
+/** the keyboard's (fixed) range in direct mode */
+const KB_RANGE = 1.75;
+/** steering rack speed at the road wheels (rad/s): pad and keyboard (≈ 85°/s), and a wheel (the player's hands are the limit) */
+const RACK = 1.5;
+const RACK_WHEEL = 8;
 const BRAKE_MARGIN: Record<BrakingAssist, number> = { off: 0, low: 1.08, medium: 1.02, high: 0.96 };
 
 export class PlayerControl {
@@ -60,6 +75,9 @@ export class PlayerControl {
   private lastKey = 0;
   private tapTimer = 0;
   private tapDir = 0;
+  private euro = new OneEuro();
+  /** Settings → Controls: pad filter and speed sensitivity, keyboard steering speed */
+  prefs: Pick<ControlPrefs, 'padFilter' | 'padSpeedSens' | 'kbSteerSpeed'> = { ...DEFAULT_CONTROLS };
   /** exposed for the HUD / steering-wheel visuals */
   steerInput = 0;
   brakeAssisting = false;
@@ -70,15 +88,33 @@ export class PlayerControl {
     this.delta = 0;
     this.lastKey = 0;
     this.tapTimer = 0;
+    this.euro.reset();
   }
 
   update(dt: number, raw: RawControls, car: CarPhysics, track: Track, profile: RacingProfile): DriveInput {
     const v = Math.max(0, car.vx);
 
     // ---- steering input shaping
-    if (raw.usingPad) {
-      // pad: gentle low-pass (≈12 Hz) — the curve is applied in Input
-      this.u += (raw.steer - this.u) * Math.min(1, dt * 22);
+    const device: Device = raw.device ?? (raw.usingPad ? 'pad' : 'keyboard');
+    if (device === 'wheel') {
+      this.u = raw.steer;
+      this.euro.reset(raw.steer);
+    } else if (device === 'pad') {
+      // pad: 1€ filter. The resting cutoff falls with speed (≈4.8 Hz in a hairpin, ≈1.9 Hz at
+      // 290 km/h at the default strength 0.7) — on a straight a thumb's tremor would weave the car —
+      // while the speed term lets a deliberate move through: 90 % of a sudden half-stick input arrives
+      // in ~33 ms (a small correction ~67 ms) against ~100 ms for the old fixed 3.5 Hz low-pass (the
+      // "floaty" feel), with less tremor left at every speed and about the same lag on a slow, steady
+      // turn-in (tools/controlstest.mjs). Note kbbot's PAD=1 bot, a delayed P-controller stepping its
+      // stick at 20 Hz, laps the arcade presets ~1 % faster with heavier smoothing (filter 1.0 ≈ the
+      // old figures); with no assists it is quicker and spins less at the default.
+      const f = this.prefs.padFilter;
+      if (f <= 0) this.u = raw.steer;
+      else {
+        const hi = Math.min(1, v / 80);
+        const minCutoff = (1 - 0.75 * f) * (10 - 6 * hi);
+        this.u = this.euro.filter(raw.steer, dt, minCutoff, 6 * (1.2 - f));
+      }
     } else {
       // keyboard: a press kicks straight to a small input (so a tap is a crisp,
       // proportional correction), then ramps toward full lock — gentler at speed,
@@ -93,8 +129,9 @@ export class PlayerControl {
       this.tapTimer = Math.max(0, this.tapTimer - dt);
       const target = key !== 0 ? key : this.tapTimer > 0 ? this.tapDir : 0;
       const hi = Math.min(1, v / 70);
-      const onRate = KB_ON_LO - (KB_ON_LO - KB_ON_HI) * hi;
-      const offRate = KB_OFF;
+      const k = this.prefs.kbSteerSpeed;
+      const onRate = (KB_ON_LO - (KB_ON_LO - KB_ON_HI) * hi) * k;
+      const offRate = KB_OFF * k;
       const reversing = target !== 0 && Math.sign(target) !== Math.sign(this.u) && this.u !== 0;
       const rate = target === 0 ? offRate : reversing ? offRate + onRate : onRate;
       const d = target - this.u;
@@ -106,7 +143,12 @@ export class PlayerControl {
     this.steerInput = this.u;
 
     // ---- map to a road-wheel angle: full input = past the peak-grip angle at this speed
-    const limit = Math.min(car.spec.maxSteer, Math.max(0.3, car.gripSteerLimit(v) * 1.75));
+    // (the pad's range is its speed sensitivity: narrower at speed = finer, but must stay past the peak)
+    const range = device === 'pad' ? PAD_RANGE_LO + (PAD_RANGE_HI - PAD_RANGE_LO) * this.prefs.padSpeedSens : KB_RANGE;
+    // (above ~100 km/h the 0.3 rad floor is the range — 3× the peak-grip angle at 200 km/h — so speed
+    // sensitivity scales it too: 0.3 at the default, 0.15 at full sensitivity)
+    const floor = device === 'pad' ? 0.3 * (1.5 - this.prefs.padSpeedSens) : 0.3;
+    const limit = Math.min(car.spec.maxSteer, Math.max(floor, car.gripSteerLimit(v) * range));
     // when the rear is sliding, countersteer may go as far as the slide needs
     // (the wheels have to point where the car is going). Rear slip angle > 0 →
     // the rear is stepping out to the left → countersteer left.
@@ -114,7 +156,10 @@ export class PlayerControl {
     const counterRoom = Math.min(car.spec.maxSteer, Math.max(0, Math.abs(aR) - 0.09) * 1.4);
     const limitFor = (d: number) => limit + (Math.sign(d) === Math.sign(aR) ? counterRoom : 0);
     let delta = this.u * limitFor(this.u);
-    if (this.aids.steeringMode === 'rate' && v > 4) {
+    if (device === 'wheel') {
+      // a wheel is the car's wheel: full lock is full lock at any speed, countersteer included
+      delta = this.u * car.spec.maxSteer;
+    } else if (this.aids.steeringMode === 'rate' && v > 4) {
       // yaw-rate command: input → share of the maximum sustainable yaw rate
       const L = car.spec.a + car.spec.b;
       // capped at ~7 g: no corner needs more at speed, and it keeps small inputs calm on the straights
@@ -132,8 +177,8 @@ export class PlayerControl {
       delta = delta * w + this.u * limit * (1 - w);
     }
 
-    // ---- steering rack speed (≈ 85°/s at the wheels, at any speed)
-    const rack = 1.5;
+    // ---- steering rack speed (at the road wheels, at any speed)
+    const rack = device === 'wheel' ? RACK_WHEEL : RACK;
     this.delta += Math.max(-rack * dt, Math.min(rack * dt, delta - this.delta));
     const o = this.out;
     o.steer = Math.max(-car.spec.maxSteer, Math.min(car.spec.maxSteer, this.delta));
