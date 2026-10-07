@@ -465,13 +465,20 @@ export class CrewSystem {
     return true;
   }
 
-  /** one more team's crew (behind the garage, a crew a frame); true once every crew is built */
+  /**
+   * One more crew member, or one team's props (behind the garage, as many as fit between two
+   * frames: a whole crew at once was ~0.2 s); true once every crew is built
+   */
   prebuildNext(): boolean {
     if (!this.kit) this.kit = peopleKit();
     if (!this.kit) return false;
     const C = this.crews.find((c) => c.members.some((m) => !m.p) || !this.propsBuilt.has(c));
     if (!C) return true;
-    for (const m of C.members) if (!m.p) this.build(C, m);
+    const m = C.members.find((x) => !x.p);
+    if (m) {
+      this.build(C, m);
+      return false;
+    }
     this.props(C);
     this.propsBuilt.add(C);
     return false;

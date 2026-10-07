@@ -14,9 +14,10 @@ import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
 import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
 import { setEvent, EVENT } from '../world/event.ts';
 const EVENT_GP = () => EVENT.gp;
-import { buildTrackside, type Trackside } from '../world/TrackMesh.ts';
+import { tracksideBuilder, type Trackside } from '../world/TrackMesh.ts';
 import { createEnvironment, type Environment, type Scenery } from '../world/Environment.ts';
 import { sceneryBuilder } from '../world/env/scenery.ts';
+import { ScenePrep, frameClock, type LightMode } from '../world/prepare.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
 import { DASH_GLOW, createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
@@ -46,7 +47,7 @@ import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.t
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
 import { BRAND_FONTS } from '../world/brands.ts';
 import { aerialLens, aerialParams } from '../world/env/fog.ts';
-import { buildGarageBox, buildPitComplex, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
+import { buildGarageBox, pitComplexBuilder, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
@@ -600,9 +601,12 @@ export class Game {
    * compiled.
    */
   private async completeWorld(gen: number) {
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const frame = () => frameClock.next();
     const t0 = performance.now();
     let busy = 0;
+    const prep = this.worldPrep();
+    const prep0 = prep.spent;
+    const cancelled = () => gen !== this.worldGen;
     // (wall time per phase, for the dev readout: worldTimes.bg*)
     const phase: Record<string, number> = {};
     let tPhase = t0;
@@ -610,6 +614,24 @@ export class Game {
       const n = performance.now();
       phase[k] = Math.round(n - tPhase);
       tPhase = n;
+    };
+    // main-thread work between two garage frames: a piece runs, and the next follows in the same gap
+    // while the gap has used less than ~8 ms — more when the frames come slower anyway (frameClock) —
+    // (on a warm visit the liveries come from the pixel cache and several cars fit in one gap; cold,
+    // each is ~100 ms of painting and gets a gap to itself)
+    let tGap = performance.now();
+    const slice = async (ms = 8) => {
+      if (performance.now() - tGap < frameClock.budget(ms)) return;
+      await frame();
+      tGap = performance.now();
+    };
+    const work = <T,>(f: () => T): T => {
+      const ts = performance.now();
+      try {
+        return f();
+      } finally {
+        busy += performance.now() - ts;
+      }
     };
     // the rest of the avatars keep downloading while the landscape is built
     const kit = peopleKit();
@@ -619,19 +641,10 @@ export class Game {
     const fanAtlas = kit
       ? kit.whenAll.then(() => (gen === this.worldGen ? prepareFanAtlas(kit) : undefined)).catch((e) => console.warn('[world] fan atlas', e))
       : Promise.resolve();
-    // the circuit itself, a step per frame. Never left half-way, not even for a circuit switch
-    // (worldGen is checked after it): the switch waits these few frames, and disposeWorld always
-    // finds a whole circuit
-    const core = this.coreSteps();
-    for (let i = 0; i < core.length; i++) {
-      await frame();
-      const ts = performance.now();
-      const r = core[i]();
-      busy += performance.now() - ts;
-      // (a step may wait on a download or its shaders, built on the driver's threads)
-      await r;
-      this.worldProgress = (0.25 * (i + 1)) / core.length;
-    }
+    // the circuit itself. Never left half-way, not even for a circuit switch (worldGen is checked
+    // after it): the switch waits for it, and disposeWorld always finds a whole circuit
+    await this.buildCore(frame, slice, work, everyone);
+    this.worldProgress = 0.25;
     lap('bgCore');
     if (gen !== this.worldGen) return;
     // (never long: the avatars are usually in by now; past the cap the stands paint it themselves)
@@ -647,53 +660,74 @@ export class Game {
         if (partial) disposeTree(partial);
         return;
       }
-      const ts = performance.now();
-      const r = it.next();
-      busy += performance.now() - ts;
+      const r = work(() => it.next());
       if (r.done) {
         scenery = r.value;
         break;
       }
       partial = r.value.group;
-      this.worldProgress = 0.25 + 0.5 * Math.min(1, (n + 1) / SLICES);
+      this.worldProgress = 0.25 + 0.4 * Math.min(1, (n + 1) / SLICES);
     }
+    // the fans walking the concourses are built on the scenery's first update once every avatar is
+    // in: now, so the landscape's programs below include theirs (not in the first garage frame)
+    if (kit?.complete) work(() => scenery!.update(0, this.camera, 0));
     lap('bgScenery');
-    // the landscape's programs queued before it is adopted, lit as its reflection capture and the
-    // race see it (sun and sky, the garage's work lights out): built on the driver's threads while
-    // the garage keeps drawing, where the capture would build them one by one, blocking
-    const lit0 = this.garageLights.visible;
-    this.garageLights.visible = false;
-    const landscape = this.compileQueued(scenery.group, this.scene);
-    // (the reflection capture in adoptScenery draws everything already built too — the field, the
-    // trackside, the pits, the crews — under that same outdoor light; their garage-lit programs don't
-    // serve it, and the capture's own compile built the ~60 of them one by one: a 2.7 s frame)
-    const capture = this.compileQueued(this.scene);
-    this.garageLights.visible = lit0;
-    // ...and lit as the garage frame sees it, work lights on: the landscape is drawn by the very next
-    // garage frame once adopted, and every program of that lighting set-up not built yet was compiled
-    // there, synchronously — one frame of 17 programs held the main thread for ~10 s on a cold
-    // Windows/D3D shader cache (tools/_progtrace.mjs)
-    const garageLit = lit0 ? this.compileQueued(scenery.group, this.scene) : null;
-    await Promise.all([landscape, capture, garageLit]);
+    // the landscape's programs queued before it is adopted, a slice of objects per frame, with the
+    // shadow pass's depth programs and the textures: lit as its reflection capture and the race see
+    // it (sun and sky, the garage's work lights out) and as the garage frame sees it (work lights on:
+    // the landscape is drawn by the next garage frame once adopted — one frame of 17 programs built
+    // there held the main thread ~10 s on a cold Windows/D3D shader cache); then everything built so
+    // far under the outdoor light too, for the capture (its own compile built ~60 of them one by one:
+    // a 2.7 s frame). The driver links them on its own threads while the garage keeps drawing.
+    const outdoor: LightMode = () => {
+      const v = this.garageLights.visible;
+      this.garageLights.visible = false;
+      return () => void (this.garageLights.visible = v);
+    };
+    const garageLit: LightMode = () => {
+      const v = this.garageLights.visible;
+      this.garageLights.visible = true;
+      return () => void (this.garageLights.visible = v);
+    };
+    await prep.queue([scenery.group], { modes: this.garageLights.visible ? [outdoor, garageLit] : [outdoor], lastIsCurrent: true, shadows: true, textures: true, cancelled });
+    this.worldProgress = 0.7;
+    await prep.queue([this.scene], { modes: [outdoor], lastIsCurrent: !this.garageLights.visible, shadows: true, cancelled });
+    await prep.programsReady(20000, cancelled);
     lap('bgShaders');
     await frame();
     if (gen !== this.worldGen) {
       disposeTree(scenery.group);
       return;
     }
-    let ts = performance.now();
-    // (the garage's work lights stay out of the reflection capture)
-    const lit = this.garageLights.visible;
-    this.garageLights.visible = false;
-    this.env.adoptScenery(scenery);
-    this.garageLights.visible = lit;
+    // the swap, then the reflections re-captured a cube face a frame (env.adoptSteps), the garage's
+    // work lights kept out of every step
+    const adopt = this.env.adoptSteps(scenery);
+    for (let n = 0; ; n++) {
+      const r = work(() => {
+        const lit = this.garageLights.visible;
+        this.garageLights.visible = false;
+        try {
+          return adopt.next();
+        } finally {
+          this.garageLights.visible = lit;
+        }
+      });
+      if (r.done) break;
+      this.worldProgress = 0.72 + 0.1 * Math.min(1, n / 9);
+      // (a new piece it is about to show: the floodlight masts on the real ground)
+      if (r.value instanceof THREE.Object3D) await prep.prepare([r.value], { modes: this.garageLights.visible ? [outdoor, garageLit] : [outdoor], lastIsCurrent: true, shadows: true, textures: true });
+      // (and before the capture's first face, whatever was made since the landscape's programs were
+      // queued — a pit prop, a lazily built set — or the capture links it there, ~1 s)
+      if (r.value === 'swap') await prep.prepare([this.scene], { modes: [outdoor], lastIsCurrent: !this.garageLights.visible, shadows: true, textures: true, cancelled });
+      // (the faces are ~5–40 ms each now: as many a frame as fit)
+      await slice();
+    }
     if (this.leanOn) this.env.setLean(true);
-    busy += performance.now() - ts;
     lap('bgAdopt');
     this.worldProgress = 0.82;
     await frame();
     if (gen !== this.worldGen) return;
-    ts = performance.now();
+    let ts = performance.now();
     const sight = await this.sightlines();
     if (gen !== this.worldGen) return;
     this.placeBroadcastCameras(sight);
@@ -702,9 +736,9 @@ export class Game {
     this.worldProgress = 0.88;
     await frame();
     if (gen !== this.worldGen) return;
-    // every pit crew (people, wheels, guns, jacks), so nothing is built mid-race: a team at a time,
-    // as many as fit in ~10 ms before the next garage frame
-    for (let n = 0; n < 40; n++) {
+    // every pit crew (people, wheels, guns, jacks), so nothing is built mid-race: buildCore built them
+    // with the pit complex; this only finishes what it couldn't (the people kit missing then)
+    for (let n = 0; n < 400; n++) {
       ts = performance.now();
       let done = false;
       do done = this.pits.prebuildNext?.() ?? true;
@@ -727,6 +761,7 @@ export class Game {
     if (gen !== this.worldGen) return;
     lap('bgWarm');
     this.worldProgress = 1;
+    busy += prep.spent - prep0;
     Object.assign(this.worldTimes, phase);
     this.worldTimes.background = Math.round(busy);
     this.worldTimes.backgroundWall = Math.round(performance.now() - t0);
@@ -734,54 +769,118 @@ export class Game {
   }
 
   /**
-   * The circuit behind the player's garage, one step per frame (completeWorld): the rest of the field
-   * (a car a step), the trackside, the whole pit complex — the other teams' garages, the building,
-   * the pit wall, the crews — swapped in for the garage box (its atlases taken over), the skid
-   * marks and the racing line. What the garage could see of a new piece (through
-   * the door) is shown only once its shaders are built, on the driver's threads (compileQueued).
+   * The circuit behind the player's garage (completeWorld): the trackside, the whole pit complex —
+   * the other teams' garages, the building, the pit wall, every crew, the paddock's people —
+   * swapped in for the garage box (its atlases taken over), the rest of the field, the skid marks
+   * and the racing line. One piece of main-thread work at a time between garage frames (`slice`).
+   * The new pieces' programs are queued with the driver (ScenePrep) before the field is made, so
+   * the linking runs while the cars are painted, not after; they are shown only once linked (the
+   * garage could see them through the door).
    */
-  private coreSteps(): (() => Promise<unknown> | void)[] {
-    const steps: (() => Promise<unknown> | void)[] = [];
-    for (const e of this.entries)
-      if (!this.rigs.has(e))
-        steps.push(() => {
-          // (the garage may have made it meanwhile: another team picked)
-          if (!this.rigs.has(e)) this.makeRig(e).root.visible = false;
-        });
+  private async buildCore(frame: () => Promise<void>, slice: (ms?: number) => Promise<void>, work: <T>(f: () => T) => T, everyone: Promise<unknown>) {
+    const prep = this.worldPrep();
     // (the road scan: the boot's download, long since here on a circuit switch)
-    steps.push(() => loadAsphaltScan());
-    steps.push(() => {
-      const t0 = performance.now();
-      const trackside = buildTrackside(this.track, this.gfx);
-      this.trackside = trackside;
-      this.worldTimes.trackside = Math.round(performance.now() - t0);
-      return this.compileQueued(trackside.group, this.scene).then(() => this.scene.add(trackside.group));
-    });
-    steps.push(() => {
-      const t0 = performance.now();
-      const pits = buildPitComplex(this.track, this.gfx, this.garageBox?.kit);
-      this.worldTimes.pits = Math.round(performance.now() - t0);
-      return this.compileQueued(pits.group, this.scene).then(() => {
-        // (the box the garage stood in, whichever team's it is by now: the complex has its own)
-        const box = this.garageBox;
-        this.garageBox = null;
-        if (box) {
-          box.group.removeFromParent();
-          box.disposeBox();
+    await loadAsphaltScan();
+    // (the garage's own first frames go first: they are long enough on a cold start)
+    await frame();
+    await frame();
+    // (each built in a few steps, a frame between: in one go each was a ~0.3 s frame)
+    const steps = async <T,>(it: Generator<void, T, void>, key: string): Promise<T> => {
+      let ms = 0;
+      for (;;) {
+        const ts = performance.now();
+        const r = work(() => it.next());
+        ms += performance.now() - ts;
+        if (r.done) {
+          this.worldTimes[key] = Math.round(ms);
+          return r.value;
         }
-        this.pits = pits;
-        this.scene.add(pits.group);
+        await frame();
+      }
+    };
+    const trackside = await steps(tracksideBuilder(this.track, this.gfx), 'trackside');
+    this.trackside = trackside;
+    this.worldProgress = 0.03;
+    await frame();
+    const pits = await steps(pitComplexBuilder(this.track, this.gfx, this.garageBox?.kit), 'pits');
+    this.worldProgress = 0.06;
+    // every pit crew (people, wheels, guns, jacks) before the complex is shown: built on demand by a
+    // garage frame, each new one's programs were linked in that frame
+    for (let n = 0; n < 2000; n++) {
+      await slice();
+      if (work(() => pits.prebuildNext?.() ?? true)) break;
+    }
+    // the marshals and photographers, the pit wall's engineers and the paddock's people are built on
+    // their first update once every avatar is in. Built by a garage frame, that frame linked their
+    // ~8 programs (and the shadow pass's) one by one: a 2.4–4 s frame on a cold Windows/D3D cache
+    const people = () =>
+      work(() => {
+        trackside.update(0, this.camera);
+        pits.update(0, this.camera);
       });
+    const kit = peopleKit();
+    const peopleFirst = !kit || kit.complete;
+    if (peopleFirst) people();
+    await slice();
+    await prep.queue([trackside.group, pits.group], { shadows: true, textures: true });
+    this.worldProgress = 0.08;
+    // the rest of the field (hidden in the garage), while the driver links
+    const field = this.entries.filter((e) => !this.rigs.has(e));
+    for (let i = 0; i < field.length; i++) {
+      await slice();
+      const e = field[i];
+      // (the garage may have made it meanwhile: another team picked)
+      work(() => {
+        if (!this.rigs.has(e)) this.makeRig(e).root.visible = false;
+      });
+      this.worldProgress = 0.08 + (0.14 * (i + 1)) / field.length;
+    }
+    if (!peopleFirst) {
+      // (a slow download: not past ~6 s; whoever isn't in by then is built on a garage frame as before)
+      await Promise.race([everyone, new Promise((r) => setTimeout(r, 6000))]);
+      await slice();
+      people();
+      await prep.queue([trackside.group, pits.group], { shadows: true, textures: true });
+    }
+    await prep.programsReady();
+    await slice();
+    work(() => {
+      this.scene.add(trackside.group);
+      // (the box the garage stood in, whichever team's it is by now: the complex has its own)
+      const box = this.garageBox;
+      this.garageBox = null;
+      if (box) {
+        box.group.removeFromParent();
+        box.disposeBox();
+      }
+      this.pits = pits;
+      this.scene.add(pits.group);
     });
-    steps.push(() => {
-      this.skids = new SkidMarks(this.track, this.trackside.groundLift);
+    this.worldProgress = 0.24;
+    await frame();
+    // the skid marks and the racing line, shown once their programs are linked too
+    const marks = work(() => {
+      const skids = new SkidMarks(this.track, trackside.groundLift);
+      const line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
+      line.setMode(this.menu.setup.assists.line);
+      return { skids, line };
+    });
+    await prep.prepare([marks.skids.mesh, marks.line.mesh]);
+    work(() => {
+      this.skids = marks.skids;
       this.scene.add(this.skids.mesh);
-      this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
+      this.line = marks.line;
       this.scene.add(this.line.mesh);
+      // (the setup may have changed meanwhile)
       this.line.setMode(this.menu.setup.assists.line);
       this.worldCore = true;
     });
-    return steps;
+  }
+
+  /** ScenePrep: programs and textures of new world pieces readied a slice per frame (src/world/prepare.ts) */
+  private prep: ScenePrep | null = null;
+  private worldPrep(): ScenePrep {
+    return (this.prep ??= new ScenePrep(this.gfx.renderer, this.camera, this.scene, () => (this.linearRT ??= new THREE.WebGLRenderTarget(1, 1))));
   }
 
   /**
@@ -840,7 +939,14 @@ export class Game {
     this.worldTimes.sightKey = Math.round(t1 - t0);
     this.worldTimes.sightRead = Math.round(performance.now() - t1);
     try {
-      const sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), roots, cached);
+      const sight = new Sightlines(this.track, (x, z) => this.env.heightAt(x, z), roots, cached, true);
+      // (a grid to build is rasterised ~8 ms a frame: in one go it was a 0.4–1 s frame behind the garage)
+      let ts = performance.now();
+      for (const _ of sight.pending ?? []) {
+        if (performance.now() - ts < frameClock.budget(8)) continue;
+        await frameClock.next();
+        ts = performance.now();
+      }
       this.worldTimes.sightGrid = sight.buildMs;
       if (!sight.fromCache) keepData(key, sight.toBytes());
       return sight;
@@ -1204,10 +1310,8 @@ export class Game {
     this.env.update(0, this.camera);
     this.trackside.update(0, this.camera);
     this.pits.update(0, this.camera);
-    // the pit crews are hidden until the camera nears them: show them all for the compile + first render
-    this.pits.warm?.(true);
-    // and so is much else until the camera comes near (levels of detail, far people, distant crowds):
-    // unhide the world for the compile, so nothing first appears — or compiles — mid-race
+    // much is hidden until the camera comes near (levels of detail, far people, distant crowds, the
+    // pit crews): unhide the world for the compile, so nothing first appears — or compiles — mid-race
     const keepHidden = new Set<THREE.Object3D>([this.garageLights]);
     const findHidden = () => {
       const out: THREE.Object3D[] = [];
@@ -1217,53 +1321,38 @@ export class Game {
       return out;
     };
     let hidden = findHidden();
-    // every texture onto the GPU now (not on the frame something first shows it)
-    const textures = new Set<THREE.Texture>();
-    this.scene.traverse((o) => {
-      const mats = (o as THREE.Mesh).material;
-      if (!mats) return;
-      for (const m of Array.isArray(mats) ? mats : [mats]) {
-        for (const v of Object.values(m)) if ((v as THREE.Texture)?.isTexture) textures.add(v as THREE.Texture);
-        const u = (m as THREE.ShaderMaterial).uniforms;
-        if (u) for (const k in u) if ((u[k]?.value as THREE.Texture)?.isTexture) textures.add(u[k].value as THREE.Texture);
-      }
-    });
-    for (const t of textures) {
-      try {
-        if (!(t as THREE.VideoTexture).isVideoTexture && !(t as THREE.Texture & { isRenderTargetTexture?: boolean }).isRenderTargetTexture) r.initTexture(t);
-      } catch {
-        /* a texture whose image isn't ready yet uploads when it is */
-      }
-    }
-    // every lighting set-up's programs queued at once (compileQueued: for the post chain's linear
-    // targets, built on the driver's threads), then awaited without blocking — the garage keeps
-    // drawing meanwhile (its own programs are built already)
-    const queued: Promise<unknown>[] = [];
+    // every texture onto the GPU, and every lighting set-up's programs queued with the driver — the
+    // menu: the garage and its work lights; racing: sun and sky only, with everything the camera may
+    // meet out on the lap shown — with the shadow pass's depth programs (light counts are part of
+    // their key: the menu's don't serve the race). ScenePrep spreads it over frames, one object per
+    // program key (it was all in one frame: ~1.7 s of uploads, then the compile); then awaited without
+    // blocking — the garage keeps drawing meanwhile (its own programs are built already)
     const progs = [r.info.programs?.length ?? 0];
-    // the menu: the garage and its work lights
     this.garageFrame(0.016);
-    this.garageLights.visible = true;
-    if (this.garage) this.garage.group.visible = true;
-    queued.push(this.compileQueued(this.scene));
-    progs.push(r.info.programs?.length ?? 0);
-    // racing: sun and sky only — with everything the camera may meet out on the lap shown
-    this.garageLights.visible = false;
-    if (this.garage) this.garage.group.visible = false;
-    for (const o of hidden) o.visible = true;
-    queued.push(this.compileQueued(this.scene));
-    progs.push(r.info.programs?.length ?? 0);
-    // and the post passes that only switch on at speed, onboard, in the rain or on a long lens
-    // (warmPasses below then finds them built: it used to build them one by one in a frame of ~1 s)
-    queued.push(this.gfx.compilePasses(true));
-    this.warmPrograms = progs;
-    for (const o of hidden) o.visible = false;
+    const garageMode = (lit: boolean): LightMode => () => {
+      const l = this.garageLights.visible;
+      const g = this.garage?.group.visible ?? false;
+      const was = lit ? [] : hidden.map((o) => o.visible);
+      this.garageLights.visible = lit;
+      if (this.garage) this.garage.group.visible = lit;
+      if (!lit) for (const o of hidden) o.visible = true;
+      return () => {
+        if (!lit) hidden.forEach((o, i) => (o.visible = was[i]));
+        this.garageLights.visible = l;
+        if (this.garage) this.garage.group.visible = g;
+      };
+    };
+    // and the post passes that only switch on at speed, onboard, in the rain or on a long lens, queued
+    // with the driver now (warmPasses below then finds them built: it used to build them one by one in
+    // a frame of ~1 s)
+    const postPasses = this.gfx.compilePasses(true);
     // (the podium's lighting — one more spot light, so every program again — is compiled when the
     // race is over: startCelebration)
-    // (the garage as it was while the driver works: the crews only drawn for the warm frame below)
-    this.garageLights.visible = menu;
-    if (this.garage) this.garage.group.visible = menu;
-    this.pits.warm?.(false);
-    await Promise.all(queued);
+    const cancelled = () => gen !== this.worldGen;
+    await this.worldPrep().queue([this.scene], { modes: [garageMode(false), garageMode(true)], lastIsCurrent: menu, shadows: true, textures: true, cancelled });
+    progs.push(r.info.programs?.length ?? 0);
+    this.warmPrograms = progs;
+    await Promise.all([this.worldPrep().programsReady(20000, cancelled), postPasses]);
     if (gen !== this.worldGen) return;
     this.pits.warm?.(true);
     // (the garage frames since may have switched levels of detail: what is hidden now)
@@ -1280,7 +1369,12 @@ export class Game {
     lap();
     this.garageLights.visible = menu;
     if (this.garage) this.garage.group.visible = garageVis;
-    await new Promise((res) => setTimeout(res, 0));
+    // (a garage frame in between: two shorter frames rather than one long one)
+    await new Promise((res) => requestAnimationFrame(() => setTimeout(res, 0)));
+    if (gen !== this.worldGen) {
+      this.pits.warm?.(false);
+      return;
+    }
     // the post passes that only switch on at speed / in the rain / on the TV cameras; this first
     // full render also uploads the new world's textures
     this.gfx.warmPasses();

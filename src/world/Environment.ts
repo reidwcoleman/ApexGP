@@ -95,6 +95,13 @@ export interface Environment {
    * the reflections re-captured.
    */
   adoptScenery(s: Scenery): void;
+  /**
+   * adoptScenery a step at a time, for behind the garage (Game.completeWorld draws a frame between
+   * steps): the new floodlight rig (yielded as an Object3D, to be readied before it is shown), the
+   * swap ('swap'), then the reflection capture a cube face per step, then the sky cube and its
+   * filtering. Done when the iterator is.
+   */
+  adoptSteps(s: Scenery): Generator<string | THREE.Object3D, void, void>;
   /** 0 outdoors … 1 inside the garage: the sky's ambient light is mostly shut out (the roof and walls) */
   setIndoor(k: number): void;
   /**
@@ -740,7 +747,22 @@ export function createEnvironment(
   }
   /** capture the world (no sky, no rain) into worldRT from beside the start straight */
   const capCam = new THREE.PerspectiveCamera(90, 1, 0.4, 6000);
-  function captureWorld() {
+  /** one face of worldCam (CubeCamera.update draws all six in one go: the whole circuit six times, ~1 s in one frame) */
+  function captureFace(f: number) {
+    if (worldCam.coordinateSystem !== renderer.coordinateSystem) {
+      worldCam.coordinateSystem = renderer.coordinateSystem;
+      worldCam.updateCoordinateSystem();
+    }
+    if (worldCam.parent === null) worldCam.updateMatrixWorld();
+    const prevRT = renderer.getRenderTarget();
+    const prevFace = renderer.getActiveCubeFace();
+    const prevMip = renderer.getActiveMipmapLevel();
+    renderer.setRenderTarget(worldRT, f, 0);
+    renderer.render(scene, worldCam.children[f] as THREE.Camera);
+    renderer.setRenderTarget(prevRT, prevFace, prevMip);
+  }
+  /** `face`: just that cube face (0 … 5; the programs are queued with the first), else all six */
+  function captureWorld(face = -1) {
     const s = (track.startS - 70 + track.length) % track.length;
     const p = track.point(s, 0, 2.6);
     const ahead = track.point((s + 40) % track.length, 0, 2.2);
@@ -763,15 +785,19 @@ export function createEnvironment(
     scene.updateMatrixWorld(true);
     // queue every program the capture needs before the first draw, with the (linear) cube target
     // bound so the program keys match: the driver builds them in parallel instead of one by one
-    const prevRT = renderer.getRenderTarget();
-    renderer.setRenderTarget(worldCam.renderTarget);
-    renderer.compile(scene, capCam);
-    renderer.setRenderTarget(prevRT);
-    worldCam.update(renderer, scene);
+    if (face <= 0) {
+      const prevRT = renderer.getRenderTarget();
+      renderer.setRenderTarget(worldCam.renderTarget);
+      renderer.compile(scene, capCam);
+      renderer.setRenderTarget(prevRT);
+    }
+    if (face < 0) worldCam.update(renderer, scene);
+    else captureFace(face);
     renderer.setClearColor(prevClear, prevAlpha);
     renderer.autoClear = prevAuto;
     scene.environment = prevEnv;
     for (const o of hidden) o.visible = true;
+    if (face >= 0 && face < 5) return;
     worldSphere.visible = true;
     worldE = Math.max(0.05, lightInfo.eGround ?? 1);
     worldUniforms.uWorldScale.value = 1;
@@ -987,37 +1013,9 @@ export function createEnvironment(
     stats,
     heightAt: (x: number, z: number) => scenery.heightAt(x, z),
     adoptScenery(next: Scenery) {
-      const t = performance.now();
-      const old = scenery;
-      group.remove(old.group);
-      disposeTree(old.group);
-      scenery = next;
-      group.add(next.group);
-      group.remove(floods.group);
-      disposeTree(floods.group);
-      floods = createFloodRig(track, (x, z) => scenery.heightAt(x, z));
-      group.add(floods.group);
-      floods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
-      next.setQuality(lean ? 'medium' : quality);
-      pushSceneryLight();
-      // (adopted while the garage is up: capture the outdoor light, not the garage's shut-in sky)
-      const hemiWas = hemi.intensity;
-      const envWas = scene.environmentIntensity;
-      if (indoor > 0) {
-        hemi.intensity = hemiWas / Math.max(0.05, 1 - 0.8 * indoor);
-        scene.environmentIntensity = envWas / Math.max(0.05, 1 - 0.72 * indoor);
-      }
-      try {
-        captureWorld();
-      } catch (e) {
-        console.warn('[env] world capture failed — sky-only reflections', e);
-      }
-      hemi.intensity = hemiWas;
-      scene.environmentIntensity = envWas;
-      bakeNow();
-      stats.scenery = next.stats;
-      timings.adopt = Math.round(performance.now() - t);
+      for (const _ of adoptSteps(next));
     },
+    adoptSteps,
     setIndoor(k: number) {
       const n = Math.max(0, Math.min(1, k));
       if (Math.abs(n - indoor) < 1e-3) return;
@@ -1043,4 +1041,77 @@ export function createEnvironment(
       lutCache.clear();
     },
   };
+
+  /**
+   * The real landscape in place of the stand-in ground, a step per call (behind the garage a frame is
+   * drawn between steps): the swap, the reflection capture one cube face at a time (each face draws
+   * the whole circuit: all six at once was a ~1–2 s frame), then the sky cube and its filtering on
+   * separate steps too (they were another ~0.6 s on top). The garage's work lights are the caller's
+   * to keep out of each step.
+   */
+  function* adoptSteps(next: Scenery): Generator<string | THREE.Object3D, void, void> {
+    let work = 0;
+    // (main-thread ms of each step: dev readout, stats.adoptSteps)
+    const steps: number[] = [];
+    const done = () => {
+      const d = performance.now() - t;
+      work += d;
+      steps.push(Math.round(d));
+    };
+    let t = performance.now();
+    // the floodlight masts re-sited on the real ground first, handed out (yielded) for the caller to
+    // ready their programs before they are shown
+    const nextFloods = createFloodRig(track, (x, z) => next.heightAt(x, z));
+    nextFloods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
+    done();
+    yield nextFloods.group;
+    t = performance.now();
+    const old = scenery;
+    group.remove(old.group);
+    disposeTree(old.group);
+    scenery = next;
+    group.add(next.group);
+    group.remove(floods.group);
+    disposeTree(floods.group);
+    floods = nextFloods;
+    group.add(floods.group);
+    next.setQuality(lean ? 'medium' : quality);
+    pushSceneryLight();
+    stats.scenery = next.stats;
+    done();
+    yield 'swap';
+    // (adopted while the garage is up: capture the outdoor light, not the garage's shut-in sky)
+    for (let f = 0; f < 6; f++) {
+      t = performance.now();
+      const hemiWas = hemi.intensity;
+      const envWas = scene.environmentIntensity;
+      if (indoor > 0) {
+        hemi.intensity = hemiWas / Math.max(0.05, 1 - 0.8 * indoor);
+        scene.environmentIntensity = envWas / Math.max(0.05, 1 - 0.72 * indoor);
+      }
+      try {
+        captureWorld(f);
+      } catch (e) {
+        console.warn('[env] world capture failed — sky-only reflections', e);
+      }
+      hemi.intensity = hemiWas;
+      scene.environmentIntensity = envWas;
+      done();
+      yield 'capture';
+    }
+    // (bakeNow, in the two halves update() spreads its own re-bakes over)
+    t = performance.now();
+    bakeCube();
+    done();
+    yield 'sky';
+    t = performance.now();
+    bakeFilter();
+    bakedLook = look;
+    lastBake = elapsed;
+    bakeAge = 0;
+    bakeStage = 0;
+    done();
+    timings.adopt = Math.round(work);
+    stats.adoptSteps = steps;
+  }
 }
