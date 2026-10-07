@@ -3598,13 +3598,19 @@ export class Game {
     g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
+    // the look (Renderer.broadcast): the cameras you drive with see the sim's clean image (ACC); the
+    // TV director's edit, the trackside / aerial cameras and the replays keep the broadcast footage
+    // (the garage and the menus: the sim look, whatever camera the last session ended on)
+    const onTrack = live || st === 'paused';
+    g.broadcast = onTrack && ((st === 'spectate' && this.directorOn) || st === 'replay' || this.cams.mode === 'director' || isRemoteCam(this.cams.view)) ? 1 : 0;
     if (this.cams.cuts !== this.lastCuts) {
       this.lastCuts = this.cams.cuts;
       g.motionCut = true;
     }
     const out = g.motionCars;
     out.length = 0;
-    if (g.motionBlur <= 0) return;
+    // (the TAA's reprojection follows the same cars, motion blur or not)
+    if (g.motionBlur <= 0 && !g.temporalAA) return;
     const cp = this.camera.position;
     const all = this.motionSort;
     all.length = 0;

@@ -91,6 +91,7 @@ void main() {
 const ONBOARD_FRAG = /* glsl */ `
 uniform float shade;
 uniform float outside;
+uniform float obVig;
 uniform sampler2D tMap;
 uniform sampler2D tNear;
 uniform float bleed;
@@ -111,9 +112,9 @@ vec3 shadeOwn(vec3 c, float d, float wheel) {
 }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
-  // an onboard camera's small wide lens darkens hard toward the corners
+  // an onboard camera's small wide lens darkens hard toward the corners (obVig: Renderer's look)
   vec2 vc = (uv - 0.5) * vec2(aspect, 1.0);
-  float vig = 1.0 - 0.5 * smoothstep(0.3, 1.0, length(vc));
+  float vig = 1.0 - obVig * smoothstep(0.3, 1.0, length(vc));
   float rot = 6.2832 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   float wh0;
   float d0 = ownDist(uv, depth, wh0);
@@ -198,6 +199,7 @@ export class OnboardEffect extends Effect {
         ...Object.entries(shared),
         ['shade', new THREE.Uniform(1)],
         ['outside', new THREE.Uniform(1.12)],
+        ['obVig', new THREE.Uniform(0.5)],
         ['tMap', new THREE.Uniform(null)],
         ['tNear', new THREE.Uniform(null)],
         ['bleed', new THREE.Uniform(1)],
