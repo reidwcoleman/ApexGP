@@ -4,6 +4,7 @@ import type { WorldMap, V2 } from '../worldmap.ts';
 import type { GrandstandSpec, Landmark, Layout, ScreenSpec, SpectatorBank, StandStyle } from '../layout.ts';
 import { addCameraTowers, addHospitality } from '../layout.ts';
 import { MEL_SITES, lakeContour, lakeDistance, melbourneGeo } from './melbourneLand.ts';
+import { reserveVenueAds } from './venueAdPlans.ts';
 
 /**
  * Albert Park's layout: where the stands, fans, paths and the landmark sites go. The big
@@ -55,8 +56,10 @@ export function planMelbourne(track: Track, map: WorldMap, addStand: AddStand, g
     if (dry(sA, sB, side, rows)) addStand(name, sA, sB, side, rows, style, gap, segLen);
   };
   // the start/finish straight, opposite the pits: Brabham, the big Fangio stand over the grid, Jones at T1
+  // (all temporary: raked seating on scaffold under sheet roofs, no glazed hospitality tier as at a
+  // permanent circuit; the corporate boxes are in the pit building and the paddock club)
   stand('Prost Stand', t14.sEnd + 10, 470, L, 20, 'covered', 7, 70);
-  stand('Fangio Stand', 480, 760, L, 30, 'centrale', 7, 95);
+  stand('Fangio Stand', 480, 760, L, 30, 'covered', 7, 70);
   stand('Brabham Stand', 770, t1.sStart - 30, L, 24, 'covered', 7, 70);
   stand('Jones Stand', t1.sStart - 20, t1.sEnd + 30, L, 22, 'covered', 7, 60);
   stand('Whiteford Stand', t2.sStart + 10, t2.sEnd - 10, R, 16, 'open', 7, 60);
@@ -217,6 +220,9 @@ export function planMelbourne(track: Track, map: WorldMap, addStand: AddStand, g
     map.worldPads.push({ cx: s.x, cz: s.z, halfW: hw, halfL: hl, angle: ang, h: y, blend: 16, paved: true });
   }
   for (const o of ovals) map.worldPads.push({ cx: o.x, cz: o.z, halfW: o.r, halfL: o.r * 0.85, angle: 0.3, h: map.naturalExact(o.x, o.z), blend: 20 });
+
+  // the race weekend's own hoardings and LED boards (venueAdPlans.ts): keep the trees off them
+  reserveVenueAds(track, map);
 
   // ---------------------------------------------------------------- hospitality & TV towers
   const landmarks: Landmark[] = [];

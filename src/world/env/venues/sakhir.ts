@@ -3,6 +3,7 @@ import type { Track } from '../../Track.ts';
 import type { WorldMap, V2 } from '../worldmap.ts';
 import type { GrandstandSpec, Landmark, Layout, ScreenSpec, SpectatorBank, StandStyle } from '../layout.ts';
 import { addCameraTowers, addHospitality } from '../layout.ts';
+import { reserveVenueAds } from './venueAdPlans.ts';
 
 /**
  * Bahrain International Circuit: where everything goes. Heading north up the main straight:
@@ -175,6 +176,9 @@ export function planSakhir(track: Track, map: WorldMap, addStand: AddStand, gs: 
       map.exclusions.push({ cx: q.x, cz: q.z, halfW: 3, halfL: 3, angle: 0 });
     }
   }
+
+  // the race weekend's own hoardings and LED boards (venueAdPlans.ts): keep the scrub off them
+  reserveVenueAds(track, map);
 
   // ---------------------------------------------------------------- landmarks
   const landmarks: Landmark[] = [];

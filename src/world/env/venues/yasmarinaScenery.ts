@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import type { Track } from '../../Track.ts';
 import type { WorldMap } from '../worldmap.ts';
-import type { Layout } from '../layout.ts';
+import type { GrandstandSpec, Layout } from '../layout.ts';
 import { srgb } from '../geom.ts';
 import { buildWaters, type Water, type WaterSpec } from '../water.ts';
 import { fbm2, hash2i, rng } from '../noise.ts';
 import { floodUniforms } from '../night.ts';
 import { MARINA, YAS_SITES, YAS_WATER_Y, yasGeo } from './yasmarinaLand.ts';
 import { hotelPlan, pitTunnelPlan } from './yasmarina.ts';
+import { buildVenueAds } from './venueAdPlans.ts';
 
 /**
  * Yas Marina's landmarks and water, built once per world:
@@ -533,6 +534,106 @@ function ferrariRoofTexture(): THREE.CanvasTexture {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   return tex;
+}
+
+// ---------------------------------------------------------------- the grandstands' sail roofs
+
+/**
+ * The Yas stands' white fabric canopies: per stand segment a row of raked steel masts behind the
+ * top row, back-stayed to the ground, and one tensioned membrane hung from them out over the seats
+ * — its leading edge scalloped (high at each mast, dipping between), the surface sagging a little
+ * under tension and turned up at the tip, a steel edge tube along the front, cables from each
+ * mast head to the edge. Uplit after dark (litMat).
+ */
+function buildSails(stands: GrandstandSpec[], sail: MB, steel: MB) {
+  const white = srgb(0xf6f5f1);
+  const mastCol = srgb(0xe9eaec);
+  const cable = srgb(0x9ea3a8);
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const g of stands) {
+    if (g.name === 'Turn 20') continue;
+    // local frame: x along the stand, y up, z from the front edge (0) back over the rows
+    const front = g.center.clone().addScaledVector(g.facing, g.depth / 2);
+    const zAxis = g.facing.clone().negate();
+    const xAxis = new THREE.Vector3().crossVectors(up, zAxis).normalize();
+    const lp = (x: number, y: number, z: number) => new THREE.Vector3(front.x + xAxis.x * x + zAxis.x * z, g.y0 + y, front.z + xAxis.z * x + zAxis.z * z);
+    const top = 1.9 + g.rows * 0.46;
+    const L = g.length;
+    const nb = Math.max(2, Math.round(L / 15));
+    const bay = L / nb;
+    const zB = g.depth + 0.4, zF = -3.2;
+    const yB = top + 7.2, yF = top + 4.4;
+    // the membrane's height over (x, t): t = 0 at the back edge … 1 at the leading edge
+    const crest = (x: number) => Math.abs(Math.cos((Math.PI * (x + L / 2)) / bay));
+    const surf = (x: number, t: number) => {
+      const edge = yF + 1.8 * crest(x) - 0.6;
+      const y = yB + (edge - yB) * t - 0.9 * Math.sin(Math.PI * t) * (0.4 + 0.6 * (1 - crest(x))) + 0.8 * t ** 4;
+      return lp(x, y, zB + (zF - zB) * t);
+    };
+    const NX = nb * 8, NZ = 9;
+    const P: THREE.Vector3[][] = [];
+    for (let i = 0; i <= NX; i++) {
+      const row: THREE.Vector3[] = [];
+      for (let j = 0; j <= NZ; j++) row.push(surf(-L / 2 + (L * i) / NX, j / NZ));
+      P.push(row);
+    }
+    const ids: number[][] = [];
+    const n = new THREE.Vector3(), du = new THREE.Vector3(), dv = new THREE.Vector3();
+    for (let i = 0; i <= NX; i++) {
+      const row: number[] = [];
+      for (let j = 0; j <= NZ; j++) {
+        du.subVectors(P[Math.min(NX, i + 1)][j], P[Math.max(0, i - 1)][j]);
+        dv.subVectors(P[i][Math.min(NZ, j + 1)], P[i][Math.max(0, j - 1)]);
+        n.crossVectors(du, dv).normalize();
+        if (n.y < 0) n.negate();
+        row.push(sail.v(P[i][j], n, white));
+      }
+      ids.push(row);
+    }
+    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+    for (let i = 0; i < NX; i++)
+      for (let j = 0; j < NZ; j++) {
+        const a = ids[i][j], b = ids[i + 1][j], c = ids[i + 1][j + 1], d = ids[i][j + 1];
+        // (wound for the upward normal; the material is double-sided)
+        e1.subVectors(P[i + 1][j], P[i][j]);
+        e2.subVectors(P[i][j + 1], P[i][j]);
+        if (e1.cross(e2).y >= 0) sail.idx.push(a, b, c, a, c, d);
+        else sail.idx.push(a, c, b, a, d, c);
+      }
+    // the leading-edge tube
+    for (let i = 0; i < NX; i++) beamMB(steel, P[i][NZ], P[i + 1][NZ], 0.28, mastCol);
+    // masts, raked forward, back-stayed; cables from the head to the edge at the mast line
+    for (let k = 0; k <= nb; k++) {
+      const x = -L / 2 + k * bay;
+      const foot = lp(x, -0.6, g.depth + 1.4);
+      const head = lp(x, top + 15.5, g.depth - 0.6);
+      beamMB(steel, foot, head, 0.55, mastCol);
+      beamMB(steel, head, lp(x, -0.4, g.depth + 9), 0.09, cable);
+      const i = Math.round((k / nb) * NX);
+      beamMB(steel, head, P[i][NZ], 0.07, cable);
+      beamMB(steel, head, P[i][Math.round(NZ / 2)], 0.07, cable);
+      // the back edge's clamp on the mast
+      beamMB(steel, P[i][0], head, 0.12, mastCol);
+    }
+  }
+}
+
+/** a square-section member from a to b (w thick) */
+function beamMB(mb: MB, a: THREE.Vector3, b: THREE.Vector3, w: number, col: THREE.Color) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  if (d.length() < 1e-3) return;
+  d.normalize();
+  const x = new THREE.Vector3(0, 1, 0).cross(d);
+  if (x.lengthSq() < 1e-6) x.set(1, 0, 0);
+  x.normalize();
+  const y = new THREE.Vector3().crossVectors(d, x).normalize();
+  const h = w / 2;
+  const c = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([u, v]) => [a.clone().addScaledVector(x, u).addScaledVector(y, v), b.clone().addScaledVector(x, u).addScaledVector(y, v)]);
+  for (let k = 0; k < 4; k++) {
+    const [p0, p1] = c[k], [q0, q1] = c[(k + 1) % 4];
+    const out = p0.clone().add(q0).multiplyScalar(0.5).sub(a);
+    mb.quadOut(p0, q0, q1, p1, col, out);
+  }
 }
 
 // ---------------------------------------------------------------- build
@@ -1084,6 +1185,10 @@ export function buildYasmarinaScenery(layout: Layout, track: Track, map: WorldMa
   }
   group.add(buildPalms(spots));
 
+  // ---------------------------------------------------------------- the stands' sail roofs
+  const sails = new MB();
+  buildSails(layout.grandstands, sails, steel);
+
   // ---------------------------------------------------------------- meshes
   const add = (mb: MB, mat: THREE.Material, name: string, cast: boolean) => {
     if (mb.n === 0) return;
@@ -1113,7 +1218,13 @@ export function buildYasmarinaScenery(layout: Layout, track: Track, map: WorldMa
     m.matrixAutoUpdate = false;
     group.add(m);
   }
-  let tris = shellMB.idx.length / 3;
+  {
+    const sm = litMat(0.22, 0xffffff, 'sails', 0.72);
+    sm.side = THREE.DoubleSide;
+    add(sails, sm, 'yas_sails', true);
+  }
+  group.add(buildVenueAds(track, map, layout.grandstands));
+  let tris = shellMB.idx.length / 3 + sails.idx.length / 3;
   for (const mb of [solid, gloss, glass, facade, steel]) tris += mb.idx.length / 3;
   return {
     group,

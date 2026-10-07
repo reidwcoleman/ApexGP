@@ -134,6 +134,17 @@ npm run check    # tsc --noEmit
   kinds `carpark` / `campsite` / `hangar` / `controlTower`) — instanced grass car parks out on the airfield (rows nose
   to nose, two-thirds full), campsites by the corners (ridge tents, cars, the odd motorhome), three WWII T2 hangars
   beside the Hangar Straight on whichever side has room, and the old watch office with its glazed control room.
+- **Each Grand Prix's own boards** (`env/venues/venueAds.ts`, plans in `venueAdPlans.ts`) — on top of the
+  paddock-wide wall paint, fence wraps and bridges, Albert Park, Mexico City, Sakhir and Yas Marina carry their
+  race weekend's partners (fictional brands in the real boards' colour blocks: the title partner's banner, the
+  local lager, airline, telco, bank): LED perimeter boards along the foot of the main grandstands (self-lit),
+  printed hoardings on posts round the backs of the run-offs (Melbourne's gravel traps, Mexico's and Sakhir's
+  Turn 1, Yas's hairpin), the title banner across the top of every footbridge, big word marks painted on the
+  Tilke run-offs (laid along the track, reading from the outside camera, worn by tyres), Mexico's rosa mexicano
+  round the Foro Sol and Bahrain's serrated red-and-white. Yas Marina's stands sit under white sail canopies on
+  raked masts (uplit after dark); Mexico City's Reforma towers (Torre Reforma, BBVA, Mayor, Chapultepec Uno,
+  the Latinoamericana, the WTC, Mítikah) stand 5–10 km west at their real bearings; Sakhir is lined with light
+  poles every ~50 m a side.
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars

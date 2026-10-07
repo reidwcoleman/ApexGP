@@ -9,6 +9,8 @@ import { canvas2d, canvasTexture } from '../textures.ts';
 import { floodUniforms } from '../night.ts';
 import type { MexicoLayout } from './mexico.ts';
 import { CANAL, MX_LAKE, MX_SITES, MX_WATER_Y } from './mexicoLand.ts';
+import { buildVenueAds } from './venueAdPlans.ts';
+import { Merge, cityMaterial } from './montrealCity.ts';
 
 /**
  * Mexico City's landmarks and water, built once per world:
@@ -149,6 +151,82 @@ export function mexicoTerrainLook(u: Record<string, THREE.IUniform>) {
   set('uRoof', 0x9c5a44);
   set('uGravel', 0xb9a88a);
   if (u.uCity) u.uCity.value = 1;
+}
+
+// ---------------------------------------------------------------- the Reforma skyline
+
+/**
+ * Mexico City's towers 5–10 km west of the circuit, for the helicopter and the long lenses down the
+ * main straight (the horizon paints the sprawl; these stand up out of it): Paseo de la Reforma's
+ * cluster — Torre Reforma's bare concrete flanks, Torre BBVA's glass, Torre Mayor, Chapultepec
+ * Uno — the Torre Latinoamericana downtown with its mast, the round World Trade Center and Torre
+ * Mítikah to the south-west, and the corridor of offices along the avenue. Placed by their real
+ * bearing and distance from the Foro Sol (x east, z south).
+ */
+function buildReforma(map: WorldMap): THREE.Mesh {
+  const M = new Merge();
+  const F = MX_SITES.foro;
+  const at = (east: number, north: number) => {
+    const x = F.x + east * 1000, z = F.z - north * 1000;
+    return { x, z, y: map.height(x, z) - 0.5 };
+  };
+  const C = (h: number) => new THREE.Color(h);
+  const rot = 0.52; // the avenue runs south-west to north-east
+  // Torre Reforma (246 m): two blind concrete flanks, glass between them
+  {
+    const q = at(-8.92, 2.1);
+    M.box(q.x, q.z, q.y, q.y + 246, 34, 10, rot, C(0xb7b1a6), 0, 0);
+    M.box(q.x, q.z, q.y, q.y + 246, 30, 32, rot, C(0x7d8f9a), 1, 0.9);
+  }
+  // Torre BBVA (235 m), across the avenue
+  {
+    const q = at(-8.84, 2.03);
+    M.tower(q.x, q.z, q.y, 235, 44, 40, rot, C(0x8fa1ad), 1, 0.9, 0.62);
+  }
+  // Torre Mayor (225 m): the green glass, its corners cut
+  {
+    const q = at(-8.9, 2.21);
+    M.prism(q.x, q.z, q.y, q.y + 225, 42, 36, rot, C(0x5d7e86), 1, 1, 9);
+  }
+  // Chapultepec Uno (241 m)
+  {
+    const q = at(-9.08, 2.33);
+    M.prism(q.x, q.z, q.y, q.y + 241, 34, 34, rot + 0.3, C(0x9aaab4), 1, 1, 11);
+  }
+  // Torre Latinoamericana (182 m to the mast tip): the dark shaft stepping in near the top
+  {
+    const q = at(-5.25, 3.24);
+    M.box(q.x, q.z, q.y, q.y + 138, 30, 30, 0.1, C(0x3e4b53), 0.8, 0.6);
+    M.box(q.x, q.z, q.y + 138, q.y + 152, 24, 24, 0.1, C(0x3e4b53), 0.8, 0.6);
+    M.box(q.x, q.z, q.y + 152, q.y + 160, 16, 16, 0.1, C(0x58646b), 0, 0);
+    M.box(q.x, q.z, q.y + 160, q.y + 182, 1.6, 1.6, 0.1, C(0xcfcfcf), 0, 0, 0.3);
+  }
+  // the World Trade Center (round, 191 m) and Torre Mítikah (267 m)
+  {
+    const w = at(-8.8, -1.24);
+    M.prism(w.x, w.z, w.y, w.y + 191, 48, 48, 0, C(0x6e8494), 1, 0.9, 18);
+    M.prism(w.x, w.z, w.y + 191, w.y + 207, 30, 30, 0, C(0x8a99a3), 0.5, 0.5, 11);
+    const m = at(-8.4, -3.54);
+    M.prism(m.x, m.z, m.y, m.y + 267, 32, 30, 0.3, C(0x7d96a6), 1, 1, 7);
+  }
+  // the corridor of offices and hotels along Reforma, Polanco behind it
+  const r = rng(1968);
+  const a = at(-9.7, 1.75), b = at(-6.1, 3.65);
+  for (let k = 0; k < 46; k++) {
+    const t = r();
+    const off = (r() - 0.5) * 700;
+    const x = a.x + (b.x - a.x) * t + off * 0.48, z = a.z + (b.z - a.z) * t + off * 0.88;
+    const y = map.height(x, z) - 0.5;
+    const h = 45 + r() ** 1.6 * 140;
+    const glassy = r() < 0.65;
+    M.tower(x, z, y, h, 24 + r() * 16, 22 + r() * 14, rot + (r() - 0.5) * 0.4, C(glassy ? [0x7d93a6, 0x8aa0b0, 0x5f7383, 0x9fb1be][Math.floor(r() * 4)] : [0xcfc8bb, 0xbdb5a6, 0xd9d1c2][Math.floor(r() * 3)]), glassy ? 1 : 0.3, glassy ? 0.8 : 0.3, r());
+  }
+  const mesh = new THREE.Mesh(M.geometry(), cityMaterial(false));
+  mesh.name = 'mx_reforma';
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.matrixAutoUpdate = false;
+  return mesh;
 }
 
 // ---------------------------------------------------------------- build
@@ -391,6 +469,8 @@ export function buildMexicoScenery(layout: Layout, track: Track, map: WorldMap):
   add(letters, new THREE.MeshStandardMaterial({ map: foroTexture(), roughness: 0.8 }), 'mx_forosol', false);
   let tris = 0;
   for (const mb of [solid, steel, lamps, copper, arco, letters]) tris += mb.idx.length / 3;
-  void track;
+  group.add(buildReforma(map));
+  // the race weekend's boards: LED down the straight, the rosa mexicano in the stadium, painted run-offs
+  group.add(buildVenueAds(track, map, layout.grandstands));
   return { group, tris, update: (t: number) => water.update(t) };
 }
