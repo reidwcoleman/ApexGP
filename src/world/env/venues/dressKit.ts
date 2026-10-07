@@ -146,8 +146,8 @@ export class BannerAtlas {
       });
       if (mine.length) y += Math.ceil(mine.length / (W / cw)) * ch;
     }
-    let H = 128;
-    while (H < y) H *= 2;
+    // (WebGL2 mips any size: no need to round the height up to a power of two)
+    const H = Math.max(128, Math.ceil(y / 128) * 128);
     this.canvas = document.createElement('canvas');
     this.canvas.width = W;
     this.canvas.height = H;
