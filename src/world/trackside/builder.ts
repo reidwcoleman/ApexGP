@@ -16,6 +16,8 @@ export interface BuilderSpec {
   a0?: boolean;
   /** vec4 custom attribute `aA1` */
   a1?: boolean;
+  /** vec4 custom attribute `aA2` */
+  a2?: boolean;
   /** vec3 custom attribute `aPBR` (roughness, metalness, emissive) */
   pbr?: boolean;
 }
@@ -77,6 +79,7 @@ export class GeoBuilder {
   private col: FloatList | null;
   private a0: FloatList | null;
   private a1: FloatList | null;
+  private a2: FloatList | null;
   private pbr: FloatList | null;
   private idx = new IndexList();
   count = 0;
@@ -85,6 +88,7 @@ export class GeoBuilder {
   cr = 1; cg = 1; cb = 1;
   s0 = [0, 0, 0, 0];
   s1 = [0, 0, 0, 0];
+  s2 = [0, 0, 0, 0];
   rough = 0.6; metal = 0; emit = 0;
 
   constructor(spec: BuilderSpec) {
@@ -93,6 +97,7 @@ export class GeoBuilder {
     this.col = spec.color ? new FloatList() : null;
     this.a0 = spec.a0 ? new FloatList() : null;
     this.a1 = spec.a1 ? new FloatList() : null;
+    this.a2 = spec.a2 ? new FloatList() : null;
     this.pbr = spec.pbr ? new FloatList() : null;
   }
 
@@ -125,6 +130,7 @@ export class GeoBuilder {
     if (this.col) this.col.push3(this.cr, this.cg, this.cb);
     if (this.a0) this.a0.push4(this.s0[0], this.s0[1], this.s0[2], this.s0[3]);
     if (this.a1) this.a1.push4(this.s1[0], this.s1[1], this.s1[2], this.s1[3]);
+    if (this.a2) this.a2.push4(this.s2[0], this.s2[1], this.s2[2], this.s2[3]);
     if (this.pbr) this.pbr.push3(this.rough, this.metal, this.emit);
     return this.count++;
   }
@@ -193,6 +199,7 @@ export class GeoBuilder {
     if (this.col) g.setAttribute('color', new THREE.BufferAttribute(this.col.view(), 3));
     if (this.a0) g.setAttribute('aA0', new THREE.BufferAttribute(this.a0.view(), 4));
     if (this.a1) g.setAttribute('aA1', new THREE.BufferAttribute(this.a1.view(), 4));
+    if (this.a2) g.setAttribute('aA2', new THREE.BufferAttribute(this.a2.view(), 4));
     if (this.pbr) g.setAttribute('aPBR', new THREE.BufferAttribute(this.pbr.view(), 3));
     const n = this.idx.n;
     const index = this.count > 65535 ? this.idx.a.slice(0, n) : Uint16Array.from(this.idx.a.subarray(0, n));

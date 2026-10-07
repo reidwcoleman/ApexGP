@@ -7,6 +7,8 @@
  *   uTyreA  wear (0 new … 1 gone), heat (0 … 1 above the window), blistering, graining
  *   uTyreB  marbles / rubber pick-up, brake dust, sidewall grass & dirt, tread dirt (after an off)
  *   uTyreC  flat-spot position (atlas u), flat-spot depth, spin blur (0 … 1), treaded (inters / wets)
+ *   uTyreD  vertical load (0 off the ground … 1 full aero load): the contact patch flattens and the
+ *           sidewall bulges out over it, at the bottom of the wheel whichever way it has rolled
  *
  * Regions come from the wheel atlas v (see carLayout: sidewall rows 0‥256, tread 256‥352, rim cells
  * below). A tileable detail texture carries graining ridges, pick-up / blister blobs and patch noise;
@@ -29,28 +31,37 @@ export interface TyreLook {
   /** flat spot: where round the tyre (atlas u, 0 … 1) and how bad (0 … 1) */
   flatU: number;
   flat: number;
+  /** vertical load, 0 (off the ground: a loose wheel, on the jacks) … 1 (full downforce) */
+  load: number;
 }
 export function newTyreLook(): TyreLook {
-  return { wear: 0, heat: 0, blister: 0, graining: 0, pickup: 0, dust: 0, grass: 0, dirt: 0, flatU: 0, flat: 0 };
+  return { wear: 0, heat: 0, blister: 0, graining: 0, pickup: 0, dust: 0, grass: 0, dirt: 0, flatU: 0, flat: 0, load: 0 };
 }
 /** a used set as it comes off in the pits (generic: ~a stint's worth) */
 export function wornTyreLook(w = 0.62): TyreLook {
-  return { wear: w, heat: 0.15, blister: 0.1 * w, graining: 0.5 * w, pickup: Math.min(1, w * 1.3), dust: Math.min(1, w * 1.1), grass: 0.08, dirt: 0, flatU: 0.3, flat: 0 };
+  return { wear: w, heat: 0.15, blister: 0.1 * w, graining: 0.5 * w, pickup: Math.min(1, w * 1.3), dust: Math.min(1, w * 1.1), grass: 0.08, dirt: 0, flatU: 0.3, flat: 0, load: 0 };
 }
 
 export interface TyreUniforms {
   uTyreA: { value: THREE.Vector4 };
   uTyreB: { value: THREE.Vector4 };
   uTyreC: { value: THREE.Vector4 };
+  uTyreD: { value: THREE.Vector4 };
 }
 export function tyreUniforms(): TyreUniforms {
-  return { uTyreA: { value: new THREE.Vector4(0, 0, 0, 0) }, uTyreB: { value: new THREE.Vector4(0, 0, 0, 0) }, uTyreC: { value: new THREE.Vector4(0, 0, 0, 0) } };
+  return {
+    uTyreA: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTyreB: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTyreC: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTyreD: { value: new THREE.Vector4(0, 0, 0, 0) },
+  };
 }
 export function applyTyreLook(u: TyreUniforms, s: TyreLook) {
   u.uTyreA.value.set(s.wear, s.heat, s.blister, s.graining);
   u.uTyreB.value.set(s.pickup, s.dust, s.grass, s.dirt);
   u.uTyreC.value.x = s.flatU;
   u.uTyreC.value.y = s.flat;
+  u.uTyreD.value.x = s.load;
 }
 
 // ------------------------------------------------------------------------------------ detail texture
@@ -159,16 +170,54 @@ export function tyreDetailTexture(): THREE.DataTexture {
 // ------------------------------------------------------------------------------------ glsl
 const VERT_PARS = /* glsl */ `
 uniform vec4 uTyreA;
+uniform vec4 uTyreD;
+// the band of sidewall that bulges under load (radius, m): rising off the rim flange, gone by the shoulder
+float tyBump( float r ) { return smoothstep( 0.243, 0.288, r ) * ( 1.0 - smoothstep( 0.3, 0.345, r ) ); }
 `;
-/** worn shoulders: the rounded shoulder rows square off toward the tread (normals and a couple of mm) */
+/**
+ * Worn shoulders: the rounded shoulder rows square off toward the tread (normals and a couple of mm).
+ * Load: an 18-inch tyre's short sidewall still squashes visibly under 3 g of downforce — the contact
+ * patch goes flat on the road and the sidewall bulges out over it. "Down" in the spinning wheel's own
+ * frame comes from the model matrix, so the squash stays at the bottom as the wheel rolls. The patch
+ * is flattened onto the plane through the tyre's lowest point (the car's ride height stays the
+ * physics'), the tread just ahead and behind rolling into it.
+ * Only this wheel's own rubber moves: not the rim, cover and nut inside it (r < 0.243 m), nor the far
+ * LOD's four merged wheels (those positions are in car space, |x| > 0.5).
+ */
 const VERT_NORMAL = /* glsl */ `
 float tyR = length( position.yz );
+float tyOn = step( abs( position.x ), 0.3 ) * step( 0.243, tyR );
 float tyK = 0.0;
-if ( tyR > 0.343 && tyR < 0.3595 ) tyK = smoothstep( 0.05, 0.9, uTyreA.x ) * smoothstep( 0.343, 0.356, tyR );
+if ( tyR > 0.343 && tyR < 0.3595 ) tyK = smoothstep( 0.05, 0.9, uTyreA.x ) * smoothstep( 0.343, 0.356, tyR ) * tyOn;
 objectNormal = normalize( mix( objectNormal, vec3( 0.0, position.yz / max( tyR, 1e-4 ) ), tyK * 0.6 ) );
+float tyBul = 0.0;
+float tyPush = 1.0;
+float tyLd = uTyreD.x * tyOn;
+if ( tyLd > 0.001 ) {
+  vec2 tyRad = position.yz / max( tyR, 1e-4 );
+  vec3 tyDn = normalize( ( vec4( 0.0, -1.0, 0.0, 0.0 ) * modelMatrix ).xyz );
+  float tyDl = length( tyDn.yz );
+  // (a wheel lying on its side has no "bottom")
+  float tyCs = dot( tyRad, tyDn.yz / max( tyDl, 1e-3 ) ) * smoothstep( 0.3, 0.7, tyDl );
+  if ( tyCs > 0.4 ) {
+    float tyNear = smoothstep( 0.4, 0.97, tyCs );
+    float tyB = ( 0.004 + 0.011 * tyLd ) * tyNear;
+    float tyBd = ( tyBump( tyR + 0.002 ) - tyBump( tyR - 0.002 ) ) / 0.004;
+    tyBul = tyB * tyBump( tyR );
+    // the bulge's slope tilts the sidewall normal (n.yz = −dx/dr · radial on either face)
+    objectNormal.yz -= tyRad * tyB * tyBd;
+    float tyA = 0.035 + 0.035 * tyLd;
+    float tyC0 = 0.3525 / sqrt( 0.3525 * 0.3525 + tyA * tyA );
+    float tyTr = smoothstep( 0.3, 0.345, tyR );
+    tyPush = mix( 1.0, 1.0 / max( tyCs, 0.5 ), smoothstep( tyC0 - 0.025, tyC0, tyCs ) * tyTr );
+    objectNormal = mix( objectNormal, tyDn, smoothstep( tyC0 - 0.004, tyC0 + 0.004, tyCs ) * tyTr );
+    objectNormal = normalize( objectNormal );
+  }
+}
 `;
 const VERT_POS = /* glsl */ `
-transformed.yz *= 1.0 + tyK * 0.007;
+transformed.yz *= ( 1.0 + tyK * 0.007 ) * tyPush;
+transformed.x += sign( position.x ) * tyBul;
 `;
 
 const FRAG_PARS = /* glsl */ `
@@ -272,10 +321,23 @@ if ( tyTread > 0.5 ) {
   float dd = uTyreB.w * smoothstep( 0.3, 0.7, tyD.a + tyD2.a * 0.3 );
   tyC = mix( tyC, vec3( 0.085, 0.075, 0.045 ), dd * 0.75 );
   tyRough += dd * 0.2;
+  // wear indicators (slicks): three small round dimples near each shoulder, gone once worn through
+  if ( uTyreC.w < 0.5 ) {
+    float wiU = ( fract( tyU * 3.0 ) - 0.5 ) * 0.738;   // metres round (2.215 m / 3)
+    float wiT = ( min( abs( tyT - 0.16 ), abs( tyT - 0.84 ) ) ) * 0.2;   // metres across (~0.2 m)
+    float wiR = length( vec2( wiU, wiT ) );
+    float wi = ( 1.0 - smoothstep( 0.0032, 0.0037 + fwidth( wiR ) * 1.5, wiR ) ) * ( 1.0 - smoothstep( 0.3, 0.75, tyWear ) ) * ( 1.0 - tySpin );
+    tyC = mix( tyC, vec3( 0.004 ), wi * 0.85 );
+    tyH -= wi * 0.8;
+  }
   // hot rubber is darker and tackier
   tyC *= 1.0 - 0.22 * uTyreA.y;
   tyGloss += 0.22 * uTyreA.y;
-  tyRough += 0.26 * tyWv;
+  // a new slick is matte (the mould's fine skin); a used one's running band is buffed by the road to a
+  // soft satin sheen, broken where it has grained, and scrubbed matte out at the shoulders
+  float runB = smoothstep( 0.06, 0.2, edge ) * ( 1.0 - grain * 0.8 ) * ( 1.0 - dd ) * ( 1.0 - uTyreC.w * 0.5 );
+  tyGloss += 0.3 * tyWv * runB * ( 0.7 + 0.3 * tyD.a );
+  tyRough += 0.26 * tyWv * ( 1.0 - runB * 0.85 );
   tyDirtAll = max( tyWv * 0.7, dd );
 } else if ( tySide > 0.5 ) {
   // brake dust from the bead up, grimy rubber and pick-up at the shoulder, grass / dirt after offs
@@ -312,9 +374,10 @@ diffuseColor.rgb = tyC;
 const FRAG_ROUGH = /* glsl */ `
 float tWet = clamp( uWetness * 1.25 + uRain * 0.35, 0.0, 1.0 );
 float rub = 1.0 - metalnessFactor;
-// new rubber reads crisp and faintly glossy, used rubber goes matte
+// a new sidewall reads crisp and faintly glossy, a new tread matte; used rubber goes matte (the tread's
+// polished running band excepted: tyGloss)
 float tyNew = ( 1.0 - tyDirtAll ) * rub * ( 1.0 - tyRim );
-roughnessFactor *= mix( 1.0, 0.74, tyNew );
+roughnessFactor *= mix( 1.0, mix( 0.74, 1.06, tyTread ), tyNew );
 roughnessFactor = clamp( roughnessFactor + tyRough * rub - tyGloss * roughnessFactor, 0.04, 1.0 );
 metalnessFactor *= 1.0 - 0.6 * tyDirtAll * tyRim;
 roughnessFactor = mix( roughnessFactor, roughnessFactor + 0.2, tyDirtAll * tyRim * ( 1.0 - rub ) );
@@ -349,6 +412,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
     sh.uniforms.uTyreA = u.uTyreA;
     sh.uniforms.uTyreB = u.uTyreB;
     sh.uniforms.uTyreC = u.uTyreC;
+    sh.uniforms.uTyreD = u.uTyreD;
     sh.uniforms.tyreDetail = { value: tyreDetailTexture() };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + VERT_PARS)
@@ -361,7 +425,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_LIGHTS);
   };
-  mat.customProgramCacheKey = () => 'apex-tyre-v2';
+  mat.customProgramCacheKey = () => 'apex-tyre-v3';
 }
 
 /** a wheel material with its own condition uniforms */

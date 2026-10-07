@@ -14,6 +14,8 @@ import type { RunoffPaint } from '../CircuitGen.ts';
  *   uv   = (lateral m, s·vScale m)
  *   aA0  = (racing-line lateral, rubber 0..1, skid 0..1, marbles 0..1)
  *   aA1  = (zone, zone-edge lateral |m|, paint/style, half width)
+ *   aA2  = (acceleration "elevens" 0..1, dirt dragged on at lateral −, at lateral +, line load signed to the inside)
+ *          (asphalt only; marbles in aA0.w are signed: the lateral side they collect on — see trackside/context.ts)
  *          zone: 0 road, 1 kerb, 2 verge, 3 tarmac runoff, 4 plain tarmac, 5 concrete apron (4/5 unused at Monza)
  *          kerb style (aA1.z): 1 flat Monza kerb, 2 chicane kerb, 3 wide exit kerb
  *          verge paint (aA1.z): 0 bare, 1 green, 2 green + blue band (tarmac runoff follows)
@@ -205,6 +207,7 @@ float tsWater = 0.0;     // 1 = the aggregate is under a water film
 float tsWet = 0.0;
 float tsDetail = 0.6;
 float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
+float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen in the wet)
 {
   float lat = vTrk.x;
   float sv = vTrk.y;
@@ -347,36 +350,51 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // rubbered-in racing line: builds with the session (uRaceRubber), baked strength per corner (vA0.y)
     float d = lat - vA0.x;
     float dd = d + (m24.b - 0.5) * 0.7;
-    float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-pow((abs(dd) - 0.82) / 0.34, 2.0)));
+    // (the outside tyres carry the corner: their track lays down more — vA2.w is the line's lateral load,
+    // signed toward the inside of the bend)
+    float trkW = 1.0 - 0.45 * clamp(vA2.w, -1.0, 1.0) * sign(dd);
+    float qA = (abs(dd) - 0.82) / 0.34;
+    float qB = (abs(dd) - 0.82) / 0.3;
+    float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-qA * qA) * trkW);
     // (every lap of every session before this one has laid some down: the dark line the TV pictures
     // show the whole way round, two tyre tracks inside a darker band, not only in the corners)
-    rub = max(rub, 0.5 * exp(-dd * dd / 2.6) + 0.3 * exp(-pow((abs(dd) - 0.82) / 0.3, 2.0)));
+    rub = max(rub, 0.5 * exp(-dd * dd / 2.6) + 0.3 * exp(-qB * qB));
     // (laid by thousands of tyres on slightly different lines: long streaks along the lap, not a smooth band)
     float rStreak = texture2D(uMacro, vec2(lat * 1.9, sv * 0.007) + vec2(0.43, 0.12)).b;
     rub *= 0.7 + 0.6 * smoothstep(0.25, 0.75, rStreak);
     rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.8, 1.0, uRaceRubber);
+    tsRub = rub;
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
     col = mix(col, vec3(0.05, 0.05, 0.051), rub * 0.8);
     rough = mix(rough, 0.52, rub * 0.5);
     tsDetail *= 1.0 - rub * 0.4;
+    // ...and buffed by thousands of tyres: in long streaks down the line it is polished to a satin sheen
+    // that catches a low sun and more of the sky (the chips' cavities are filled: less occlusion)
+    float polish = rub * smoothstep(0.35, 0.8, rStreak * 0.6 + m24.b * 0.5) * (zone < 0.5 ? 1.0 : 0.0);
+    rough = mix(rough, 0.4, polish * 0.55);
+    tsSpecOcc = mix(tsSpecOcc, 0.8, rub * 0.55);
     // off the line the surface sees no rubber: dust and fines settle, a lighter, greyer road
     if (zone < 0.5) {
       float offLine = smoothstep(2.6, 5.0, abs(d)) * (0.55 + 0.45 * m24.b);
       col = mix(col, col * 1.13 + vec3(0.0035, 0.0034, 0.003), offLine * 0.45);
       rough = mix(rough, rough + 0.05, offLine);
+      // (unswept: the chips stand proud and open, a coarser grain)
+      tsDetail *= 1.0 + 0.15 * offLine;
     }
 
     // the dry line: tyre tracks clear first, then the whole ±2 m band
     if (zone < 0.5) {
       float dl = abs(d + (mN.a - 0.5) * 0.9);
       float band = 1.0 - smoothstep(1.3, 2.5, dl);
-      float tracks = exp(-pow((abs(dl) - 0.82) / 0.42, 2.0));
+      float qT = (abs(dl) - 0.82) / 0.42;
+      float tracks = exp(-qT * qT);
       float patchy = (m24.b - 0.5) * 0.5 + (mN.b - 0.5) * 0.4;
       dryBand = clamp(uDryLine * 1.5 * tracks + (uDryLine * 1.3 - 0.12 + patchy) * band, 0.0, 1.0);
     }
 
-    // braking-zone lock-up streaks: only as the session rubbers in (the live tyre marks do the rest)
-    float skAmt = vA0.z * uRaceRubber;
+    // braking-zone lock-up streaks: the support races left some, the session adds more (the live tyre
+    // marks do the rest)
+    float skAmt = vA0.z * mix(0.4, 1.0, uRaceRubber) * (zone < 0.5 ? 1.0 : 0.0);
     if (skAmt > 0.01) {
       float sk = 0.0;
       for (int k = 0; k < 5; k++) {
@@ -406,17 +424,88 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
       tsDetail *= 1.0 - sk * 0.5;
     }
 
-    // marbles off-line near corner exits, as the session goes on
-    float mbAmt = vA0.w * uRaceRubber;
+    // acceleration "elevens" out of the slow corners: the rears spinning up leave two parallel black
+    // stripes a rear track apart (±0.78 m), darkest where the throttle goes down, tapering away as the
+    // grip comes in, kinked by a snap of oversteer. Every car lays its own pair a little off the line.
+    float elAmt = vA2.x * mix(0.45, 1.0, uRaceRubber) * (zone < 0.5 ? 1.0 : 0.0);
+    if (elAmt > 0.01) {
+      float el = 0.0;
+      for (int k = 0; k < 4; k++) {
+        float fk = float(k);
+        float L = 17.0 + fk * 9.0;
+        float cid = floor(sv / L);
+        float h1 = tsHash(vec2(cid, fk * 13.0 + 41.0));
+        float h2 = tsHash(vec2(cid + 2.3, fk * 7.0 + 43.0));
+        float h3 = tsHash(vec2(cid + 5.9, fk * 3.0 + 47.0));
+        float f = fract(sv / L);
+        float len = 0.45 + 0.5 * h2;
+        float st = h3 * (1.0 - len);
+        float along = clamp((f - st) / len, 0.0, 1.0);
+        float inSeg = step(st, f) * step(f, st + len);
+        float off = (h1 - 0.5) * 1.6 + sin(along * 6.0 + h2 * 6.2831) * 0.05 * h3;
+        float x = d - off;
+        float tr = min(abs(x - 0.78), abs(x + 0.78));
+        float w = 0.15 + 0.06 * h2 + px * 0.5;
+        float m = 1.0 - smoothstep(w * 0.55, w, tr);
+        float fade = smoothstep(0.0, 0.04, along) * pow(1.0 - along, 1.6);
+        el = max(el, m * fade * inSeg * (0.5 + 0.5 * h1));
+      }
+      // (laid down in streaks along each stripe as the tread hops, not as a flat fill)
+      el *= elAmt * (0.65 + 0.35 * texture2D(uMacro, vec2(lat * 2.7, sv * 0.03) + vec2(0.61, 0.33)).b);
+      col = mix(col, vec3(0.012, 0.012, 0.013), el * 0.75);
+      rough = mix(rough, 0.6, el * 0.4);
+      tsDetail *= 1.0 - el * 0.5;
+    }
+
+    // marbles: rubber pellets scrubbed off through the corner and flung to the OUTSIDE of the line
+    // (vA0.w is signed: the lateral side they collect on), gathering a metre or two off-line into a
+    // dark, gritty band that thickens toward the edge; a little on the inside of the tight ones too
+    float mbAmt = abs(vA0.w) * mix(0.35, 1.0, uRaceRubber) * (zone < 0.5 ? 1.0 : 0.0);
     if (mbAmt > 0.01) {
-      float offl = smoothstep(2.4, 4.5, abs(d));
-      float n1 = m24.b;
+      float mSide = vA0.w < 0.0 ? -1.0 : 1.0;
+      float dOut = d * mSide;
+      float lo = 1.7 + 0.8 * (m24.b - 0.5);
+      float offl = smoothstep(lo, lo + 1.4, dOut) + 0.25 * smoothstep(2.4, 4.0, -dOut);
       float n2 = texture2D(uMacro, vTrk / 6.0 + vec2(0.63, 0.05)).b;
-      float m = mbAmt * offl * (0.35 + 0.65 * smoothstep(0.3, 0.8, n1)) * (0.75 + 0.25 * n2);
+      float m = mbAmt * offl * (0.35 + 0.65 * smoothstep(0.3, 0.8, m24.b)) * (0.7 + 0.3 * n2);
       m *= 0.6 + 0.4 * (1.0 - smoothstep(0.0, 4.0, edgeD));
-      rough = mix(rough, 0.9, m * 0.7);
-      float pel = step(0.9, tsHash(floor(vTrk * 26.0))) * (1.0 - smoothstep(0.015, 0.04, px));
-      col = mix(col, vec3(0.012), pel * m * 0.8);
+      // pellets: 8–26 mm crumbs on a jittered 4 cm grid, more of them where m is high; up close each one,
+      // further away only their coverage (a dark speckled film)
+      vec2 pc = vTrk * 25.0;
+      vec2 pcI = floor(pc);
+      vec2 pcF = fract(pc) - 0.5;
+      vec2 pcO = (vec2(tsHash(pcI + 3.1), tsHash(pcI + 8.7)) - 0.5) * 0.3;
+      float pcR = 0.1 + 0.23 * tsHash(pcI + 5.3);
+      float pel = step(tsHash(pcI + 17.0), m * 0.85) * (1.0 - smoothstep(0.7, 1.0, length(pcF - pcO) / pcR));
+      float res = 1.0 - smoothstep(0.006, 0.025, px);
+      float mk = mix(m * 0.85 * 0.13, pel, res);
+      col = mix(col, vec3(0.012, 0.011, 0.011), clamp(mk, 0.0, 1.0) * 0.9);
+      // (and the rubber dust between them: matte, a shade darker)
+      col = mix(col, col * 0.82, clamp(m, 0.0, 1.0) * 0.5);
+      rough = mix(rough, 0.92, clamp(m, 0.0, 1.0) * 0.6);
+    }
+
+    // dirt and gravel dragged back on where cars ran wide (or cut a kerb) over grass or gravel: a
+    // brown-grey film fanning in from the edge with stones and clods on it; the line itself stays swept
+    if (zone < 0.5) {
+      float dS = lat < 0.0 ? vA2.y : vA2.z;
+      if (dS > 0.02) {
+        float nD = texture2D(uMacro, vTrk * vec2(1.0 / 1.7, 1.0 / 9.0) + vec2(0.29, 0.83)).g * 0.5 + m24.b * 0.6;
+        float reach = 0.4 + 2.6 * dS * (0.5 + nD);
+        float film = dS * (1.0 - smoothstep(0.0, reach, edgeD)) * smoothstep(0.25, 0.65, nD + 0.2 * m3.b);
+        film *= 1.0 - 0.8 * rub;
+        col = mix(col, vec3(0.085, 0.074, 0.056) * (0.8 + 0.4 * m3.r), film * 0.55);
+        rough = mix(rough, 0.9, film * 0.6);
+        vec2 sc = vTrk * vec2(9.0, 7.0);
+        vec2 scI = floor(sc);
+        vec2 scF = fract(sc) - 0.5;
+        vec2 scO = (vec2(tsHash(scI + 11.3), tsHash(scI + 4.9)) - 0.5) * 0.4;
+        float scR = 0.07 + 0.15 * tsHash(scI + 2.2);
+        float stn = step(tsHash(scI + 6.6), film * 0.7) * (1.0 - smoothstep(0.6, 1.0, length(scF - scO) / scR)) * (1.0 - smoothstep(0.01, 0.04, px));
+        vec3 sCol = mix(vec3(0.22, 0.2, 0.17), vec3(0.06, 0.05, 0.035), step(0.6, tsHash(scI + 9.4)));
+        col = mix(col, sCol * (0.75 + 0.5 * tsHash(scI + 1.7)), stn);
+        rough = mix(rough, 0.85, stn);
+      }
     }
 
     // the paver's longitudinal joint: a faint, slightly glossier seam (hot-joint, barely there)
@@ -452,7 +541,10 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // freshly painted: saturated, clean and glossy. Only rubber the session lays down on the inner
     // edge, where the tyres ride (uRaceRubber), dulls it.
     // (a kerb carries rubber from every session before this one too, so some is always there)
-    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.75, kd)) * mix(0.6, 1.0, uRaceRubber);
+    // (the inside kerb at the apex is ridden hardest — vA2.w, the line's load signed to the inside — and the
+    // exit kerbs where the cars spin up out of slow corners)
+    float kUse = clamp(0.7 + 0.6 * clamp(vA2.w * sign(lat), 0.0, 1.0) + 0.35 * vA2.x, 0.0, 1.35);
+    float rubberMarks = smoothstep(0.45, 0.8, texture2D(uMacro, vec2(lat * 0.35, sv * 0.02)).b) * (1.0 - smoothstep(0.1, 0.75, kd)) * mix(0.6, 1.0, uRaceRubber) * kUse;
     float through = 0.0;
     // (a season of rubber, brake dust and grit: never the showroom red and white)
     paint *= 0.96 * (0.92 + 0.16 * m3.b) * (1.0 + 0.06 * albDev);
@@ -463,7 +555,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // the tyres that ride the kerb leave rubber in long streaks along it (stretched 80:1 along the lap),
     // heaviest on the inner half; and the white blocks are never white: a grey-brown road film over all
     float kStreak = smoothstep(0.38, 0.8, texture2D(uMacro, vec2(lat * 1.3, sv * 0.016) + vec2(0.21, 0.6)).g * 0.7 + texture2D(uMacro, vec2(lat * 0.5, sv * 0.006)).b * 0.5)
-      * (1.0 - smoothstep(0.3, 0.9, kd)) * (1.0 - smoothstep(0.004, 0.03, px) * 0.5) * mix(0.7, 1.0, uRaceRubber);
+      * (1.0 - smoothstep(0.3, 0.9, kd)) * (1.0 - smoothstep(0.004, 0.03, px) * 0.5) * mix(0.7, 1.0, uRaceRubber) * kUse;
     // (and a grey film of it over the whole ridden half, under the streaks)
     paint = mix(paint, paint * 0.62 + vec3(0.012), (1.0 - smoothstep(0.15, 0.7, kd)) * 0.45);
     paint = mix(paint, vec3(0.025, 0.024, 0.023), kStreak * 0.6);
@@ -475,7 +567,19 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float bj = (1.0 - smoothstep(0.008, 0.008 + px, bjd)) * (1.0 - smoothstep(0.01, 0.04, px));
     paint *= 1.0 - 0.6 * bj;
     float kDirt = max(smoothstep(0.6, 1.0, kd) * (0.45 + 0.55 * m24.b), smoothstep(0.55, 0.85, m24.g) * 0.35);
+    // dirt dragged across it where cars run wide / cut it over grass or gravel (vA2.y / vA2.z per side)
+    float kDS = lat < 0.0 ? vA2.y : vA2.z;
+    kDirt = max(kDirt, kDS * smoothstep(0.3, 0.7, m24.b + 0.4 * kd) * 0.9);
     paint = mix(paint, paint * 0.55 + vec3(0.014, 0.012, 0.008), kDirt * 0.55);
+    // tyre scuffs across the white blocks: short grey-black arcs where a wheel slid over the kerb
+    {
+      float sid = floor(sv / 3.0);
+      float sh = tsHash(vec2(sid, 61.0));
+      float sf = fract(sv / 3.0);
+      float arc = abs(kd - (0.15 + 0.6 * sh) - (sf - 0.5) * (sh - 0.5) * 1.4);
+      float scuff = (1.0 - smoothstep(0.03, 0.08 + px, arc)) * step(0.55, sh) * smoothstep(0.0, 0.3, sf) * (1.0 - smoothstep(0.6, 1.0, sf)) * kUse;
+      paint = mix(paint, paint * 0.45 + vec3(0.01), scuff * kWhite * 0.6);
+    }
     col = paint;
     // painted concrete is satin, not plastic: the paint's gloss varies block to block
     rough = mix(0.42 + (m3.r - 0.5) * 0.12 + (tsHash(vec2(floor(sv), 5.0)) - 0.5) * 0.08, 0.64, max(rubberMarks, kDirt * 0.6));
@@ -628,7 +732,7 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     float sub = max(mix(sharpC, statC, smoothstep(0.0015, 0.006, px)), puddle);
     if (zone > 0.5 && zone < 1.5) sub *= 0.55;   // kerbs drain: a glossy film, never a mirror
     float damp = smoothstep(0.0, 0.22, wet);
-    col *= 1.0 - porous * damp;
+    col *= 1.0 - porous * (1.0 - 0.4 * tsRub) * damp;
     col = mix(col, col * vec3(0.9, 0.95, 1.04), damp * 0.5);
     col *= 1.0 - 0.35 * puddle;
     // a damp film evens out stone vs binder (and keeps the grain from flickering in glossy reflections)
@@ -641,7 +745,9 @@ float tsSpecOcc = 1.0;   // dry indirect-specular occlusion (1 = none)
     // (a joined film is still broken by the rain and the chips poking through it: a soft, streaky sheen;
     // only standing water is a mirror)
     rough = mix(rough, mix(mix(0.26, 0.11, joined), 0.035, puddle), sub);
-    tsWater = sub;
+    // the rubbered line takes no water into its pores: before the film joins up it already shows a slick,
+    // smoother sheen (why it is the slipperiest place on a damp track)
+    rough = mix(rough, rough * 0.78, tsRub * damp * (1.0 - sub));
     tsWet = wet;
     if (uRain > 0.01) {
       float fadeR = 1.0 - smoothstep(0.003, 0.011, px);
@@ -721,7 +827,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-11', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-12', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     sh.uniforms.uAsphMean = { value: t.asphaltMean };
     sh.uniforms.uKerbA = { value: kerbA };
@@ -729,7 +835,12 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     sh.uniforms.uRunoffStyle = { value: RUNOFF_STYLE[opts.runoffPaint ?? 'bands'] };
     sh.uniforms.uRaceRubber = roadUniforms.uRaceRubber;
     Object.assign(sh.uniforms, ssrUniforms);
+    // the road's third attribute (wear: elevens, dirt per side, line load), asphalt only
+    sh.vertexShader = sh.vertexShader
+      .replace('attribute vec4 aA1;', 'attribute vec4 aA1;\nattribute vec4 aA2;\nvarying vec4 vA2;')
+      .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;');
     sh.fragmentShader = sh.fragmentShader
+      .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;')
       .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
