@@ -567,6 +567,8 @@ function rearWing(b: Buckets, level: Level) {
   }
   // endplate lights (2026): tall LED strips down the endplates' trailing edges
   for (const side of [1, -1]) box(P.trim, [0.5 * side, 0.72, -2.419], [0.017, 0.24, 0.008], trimUV(TC.rainLight));
+  // the active flaps' actuator: a slim carbon pod on the main plane's centre, its nose on the pylons
+  if (level < 2) ellipsoid(P.carbon, [0, 0.772, -2.0], [0.019, 0.026, 0.12], 10, 8, (p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE], new THREE.Euler(0.2, 0, 0));
 }
 
 /** the active rear flap pair in pivot-local coordinates (pivot at the upper flap's trailing edge) */

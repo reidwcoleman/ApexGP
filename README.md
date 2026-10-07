@@ -232,7 +232,17 @@ npm run check    # tsc --noEmit
 - **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
-  lateral and endplate lights; baked ambient occlusion on every car.
+  lateral and endplate lights; baked ambient occlusion on every car. The details a close lens finds:
+  floor stays, inlet scoops on all four brake ducts, the rear flaps' actuator pod, a telemetry antenna
+  ahead of the cockpit, the T-cam pod's lenses (the T-cam films from them: the helmet's top under the
+  halo), a slimmer halo pillar, a moulded headrest round the helmet, a helmet with a chin bar and a
+  rear spoiler, and the driver's gloved hands on the wheel — they turn it, the forearms follow as live
+  links from the elbows, and the cockpit cameras keep them when the driver is hidden
+  (`setDriverVisible(false, true)`). Carbon is anisotropic (each tow's sheen stretched across it, warp
+  and weft at right angles, under the isotropic lacquer; it fades to the weave's average once a pixel
+  spans a tow), plate edges (endplates, fences, fins, the wheel) shade rounded, and the front wing's
+  first flaps carry a partner's wordmark read from the onboards. (No over-wheel deflectors: 2026
+  dropped them for the wheel-wake boards.)
 - **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car
