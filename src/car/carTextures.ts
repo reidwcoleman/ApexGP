@@ -7,7 +7,9 @@ import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
 import type { Team, Driver } from '../race/Teams.ts';
 import {
-  TRIM_W, TRIM_H, TRIM_CELL, TC, TRIM_PROPS, R_DISPLAY, R_LEDS,
+  TRIM_W, TRIM_H, TRIM_CELL, TC, TRIM_PROPS,
+  DASH_W, DASH_H, R_SCREEN, R_SHIFT, SHIFT_N, SHIFT_CELL, FACE_W, FACE_H, FACE_SPAN_X, FACE_SPAN_Y, FACE_CY, WHEEL_BUTTONS, WHEEL_ROTARIES,
+  GLOVE_W, GLOVE_H, R_GL_BACK, R_GL_PALM, R_GL_FINGER, R_GL_THUMB, R_GL_CUFF,
   WHEEL_TEX_W, WHEEL_TEX_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WC, WHEEL_PROPS, WHEEL_CELL,
   SIDEWALL_R0, SIDEWALL_R1, RIM_R, WHEEL_R,
   DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, type Rect,
@@ -558,13 +560,6 @@ export function trimShared(): { orm: THREE.Texture; emis: THREE.Texture } {
     ge.fillStyle = `rgb(${Math.round(eh * 255)}, ${Math.round(eg * 255)}, ${Math.round(eb * 255)})`;
     ge.fillRect(x, y, TRIM_CELL, TRIM_CELL);
   }
-  // display + leds: glossy glass, self-lit
-  for (const r of [R_DISPLAY, R_LEDS]) {
-    go.fillStyle = 'rgb(0, 20, 0)';
-    go.fillRect(r.x, r.y, r.w, r.h);
-    ge.fillStyle = 'rgb(0, 0, 255)';
-    ge.fillRect(r.x, r.y, r.w, r.h);
-  }
   trimOrm = tex(o, false, false, 1);
   trimEmis = tex(e, false, false, 1);
   trimOrm.generateMipmaps = trimEmis.generateMipmaps = false;
@@ -632,13 +627,13 @@ export function trimTexture(teamIn: Team, driverIn: Driver, seat: 0 | 1): THREE.
       g.fillStyle = col[i];
       g.fillRect(x, y, TRIM_CELL, TRIM_CELL);
     }
-    paintDash(g, { gear: 7, kmh: 0, rpm: 0.55, delta: -0.214, straight: false, ers: 0.8, code: driver.code, lights: false });
     t.needsUpdate = true;
   };
   paintWithFonts(paint);
   return t;
 }
 
+// ------------------------------------------------------------------------------------ steering-wheel screen
 /** what the steering wheel's screen and shift lights show */
 export interface DashState {
   gear: number;
@@ -647,58 +642,474 @@ export interface DashState {
   rpm: number;
   /** live lap delta (s), NaN when there isn't one */
   delta: number;
-  /** 2026 straight mode (active aero open) */
+  /** 2026 straight mode (active aero open: "X-mode"; closed for the corners: "Z-mode") */
   straight: boolean;
   /** battery state 0 … 1 */
   ers: number;
   code: string;
-  /** shift lights live (false on a parked car: a static preview) */
+  /** shift lights live (false on a parked car: a static preview, LEDs dark) */
   lights: boolean;
+  /** laps: the one being run (1-based) and the race's; race position */
+  lap?: number;
+  laps?: number;
+  pos?: number;
+  /** brake balance: the front's share 0 … 1 */
+  bias?: number;
+  /** deploying the overtake boost */
+  deploy?: boolean;
+  /** tyre temperatures (°C, FL FR RL RR) and the compound's working temperature */
+  tyres?: readonly number[];
+  tyreOpt?: number;
+  /** last lap time (s), NaN / 0 when none yet */
+  last?: number;
 }
-/** repaint the steering wheel's display and LEDs (regions of the trim texture) */
+
+const DASH_LABEL = '#8d99a6';
+const DASH_LINE = '#262b31';
+function lapTime(t: number) {
+  if (!(t > 0) || !isFinite(t)) return 'NO TIME';
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${m}:${s < 10 ? '0' : ''}${s.toFixed(3)}`;
+}
+function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+/**
+ * Paint the wheel's screen and shift lights (the dash texture). Laid out like the 2026 cars'
+ * screens and Assetto Corsa Competizione's dashes: black glass, the gear huge in the middle, speed
+ * and tyre temperatures on the left, brake balance and the battery on the right, the lap delta
+ * across the top in a green / red box, the aero mode and the last lap along the bottom. Every value
+ * is sized to stay legible from the driver's eye (~300 px wide at 1080p: the smallest values are
+ * ~20 px there, the labels ~10 px).
+ */
 export function paintDash(g: CanvasRenderingContext2D, s: DashState) {
-  const d: Rect = R_DISPLAY;
-  g.fillStyle = '#05070a';
-  g.fillRect(d.x, d.y, d.w, d.h);
-  g.fillStyle = s.straight ? '#0c3a1e' : '#0a2230';
-  g.fillRect(d.x + 3, d.y + 3, d.w - 6, d.h - 6);
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  // gear, big in the middle
-  g.font = `900 38px ${FONT}`;
-  g.fillStyle = s.rpm > 0.94 && s.lights ? '#4fa3ff' : '#ffffff';
-  g.fillText(s.gear <= 0 ? 'N' : String(s.gear), d.x + d.w / 2, d.y + d.h / 2 + 3);
-  // speed top-left, battery bar bottom-left
-  g.font = `700 13px ${FONT}`;
-  g.fillStyle = '#e8eef5';
-  g.textAlign = 'left';
-  g.fillText(String(Math.round(s.kmh)), d.x + 8, d.y + 14);
-  g.fillStyle = '#20262e';
-  g.fillRect(d.x + 8, d.y + 44, 34, 8);
-  g.fillStyle = s.ers > 0.25 ? '#ffd23c' : '#ff5a3c';
-  g.fillRect(d.x + 8, d.y + 44, 34 * Math.max(0, Math.min(1, s.ers)), 8);
-  // delta top-right (green faster / red slower), driver code / straight-mode flag bottom-right
-  g.textAlign = 'right';
-  if (isFinite(s.delta)) {
-    g.fillStyle = s.delta <= 0 ? '#39ff8a' : '#ff5a5a';
-    g.fillText(`${s.delta <= 0 ? '−' : '+'}${Math.abs(s.delta).toFixed(3)}`, d.x + d.w - 7, d.y + 14);
-  }
-  g.fillStyle = s.straight ? '#39ff8a' : '#9ad7ff';
-  g.fillText(s.straight ? 'X-MODE' : s.code, d.x + d.w - 7, d.y + 47);
-  // shift lights: green → red → blue across the rim; the whole strip flashes blue at the limiter
-  const l: Rect = R_LEDS;
-  g.fillStyle = '#050505';
-  g.fillRect(l.x, l.y, l.w, l.h);
-  const lit = s.lights ? Math.round(Math.max(0, Math.min(1, (s.rpm - 0.55) / 0.4)) * 15) : 15;
-  const flash = s.lights && s.rpm > 0.965;
-  for (let i = 0; i < 15; i++) {
-    const on = flash || i < lit;
-    const col = flash ? '#3a78ff' : i < 5 ? '#27ff4d' : i < 10 ? '#ff2a2a' : '#3a6bff';
-    g.fillStyle = on ? col : '#16181b';
-    g.beginPath();
-    g.arc(l.x + 5 + i * 8.4, l.y + l.h / 2, 3, 0, Math.PI * 2);
+  const S = R_SCREEN;
+  const X = (u: number) => S.x + u;
+  const Y = (v: number) => S.y + v;
+  g.save();
+  g.fillStyle = '#000';
+  g.fillRect(S.x, S.y, S.w, S.h);
+  g.textBaseline = 'alphabetic';
+  const text = (t: string, x: number, y: number, px: number, color: string, align: CanvasTextAlign = 'left', weight = 900) => {
+    g.font = `${weight} ${px}px ${FONT}`;
+    g.textAlign = align;
+    g.fillStyle = color;
+    g.fillText(t, X(x), Y(y));
+  };
+  const label = (t: string, x: number, y: number, align: CanvasTextAlign = 'left') => text(t, x, y, 34, DASH_LABEL, align, 700);
+  // panel rules
+  g.fillStyle = DASH_LINE;
+  g.fillRect(X(0), Y(112), S.w, 4);
+  g.fillRect(X(0), Y(474), S.w, 4);
+  g.fillRect(X(300), Y(116), 4, 358);
+  g.fillRect(X(720), Y(116), 4, 358);
+
+  // ---- top: lap, delta, position
+  label('LAP', 22, 46);
+  text(s.lap ? `${s.lap}/${s.laps ?? '–'}` : '–', 22, 98, 54, '#ffffff');
+  label('POS', 1002, 46, 'right');
+  text(s.pos ? `P${s.pos}` : '–', 1002, 98, 54, '#ffffff', 'right');
+  {
+    const has = isFinite(s.delta);
+    const up = has && s.delta > 0;
+    g.fillStyle = !has ? '#15181c' : up ? '#5a0f12' : '#0b4423';
+    roundRect(g, X(262), Y(12), 500, 92, 14);
     g.fill();
+    if (has) {
+      // the bar grows from the middle with the delta (±1 s full)
+      const k = Math.min(1, Math.abs(s.delta)) * 236;
+      g.fillStyle = up ? '#c21f26' : '#18a24a';
+      g.fillRect(X(512) - (up ? 0 : k), Y(94), k, 7);
+    }
+    text(has ? `${s.delta <= 0 ? '−' : '+'}${Math.abs(s.delta).toFixed(3)}` : 'DELTA', 512, 82, 74, has ? (up ? '#ff7d7d' : '#7dffaa') : '#56606b', 'center');
   }
+
+  // ---- left: speed and the tyres (coloured by temperature against the compound's window, as the HUD)
+  label('KM/H', 22, 160);
+  text(String(Math.round(s.kmh)), 280, 246, 96, '#ffffff', 'right');
+  label('TYRES', 22, 300);
+  const opt = s.tyreOpt ?? 100;
+  for (let i = 0; i < 4; i++) {
+    const T = s.tyres?.[i];
+    const col = T === undefined ? '#22272d' : T < opt - 22 ? '#2f6fe0' : T <= opt + 14 ? '#1fae4f' : T <= opt + 26 ? '#e0a81a' : '#e0322a';
+    // (FL top-left as the driver looks at the car: its left is the screen's left)
+    const bx = 22 + (i % 2) * 136;
+    const by = 318 + Math.floor(i / 2) * 76;
+    g.fillStyle = col;
+    roundRect(g, X(bx), Y(by), 124, 66, 10);
+    g.fill();
+    if (T !== undefined) text(`${Math.round(T)}°`, bx + 62, by + 50, 44, '#050607', 'center');
+  }
+
+  // ---- centre: the gear
+  {
+    const gear = s.gear <= 0 ? 'N' : String(s.gear);
+    const shift = s.lights && s.rpm > 0.94;
+    text(gear, 512, 442, 360, shift ? '#5aa9ff' : '#ffffff', 'center');
+  }
+
+  // ---- right: brake balance, battery, deployment
+  label('BBAL', 744, 160);
+  text(s.bias !== undefined ? (s.bias * 100).toFixed(1) : '–', 1002, 222, 66, '#ffffff', 'right');
+  label('ERS', 744, 286);
+  {
+    const e = Math.max(0, Math.min(1, s.ers));
+    text(`${Math.round(e * 100)}%`, 1002, 286, 44, '#ffffff', 'right', 900);
+    // ten cells, like the battery gauges on the wheels
+    const col = e > 0.25 ? '#ffd23c' : '#ff5a3c';
+    for (let i = 0; i < 10; i++) {
+      g.fillStyle = i < Math.round(e * 10) ? col : '#1d2126';
+      g.fillRect(X(744 + i * 26), Y(304), 21, 52);
+    }
+    const mode = s.deploy ? 'OVERTAKE' : 'BALANCED';
+    g.fillStyle = s.deploy ? '#b0168f' : '#15181c';
+    roundRect(g, X(744), Y(380), 258, 72, 10);
+    g.fill();
+    text(mode, 873, 432, 44, s.deploy ? '#ffffff' : '#7f8b97', 'center');
+  }
+
+  // ---- bottom: last lap, the aero mode
+  label('LAST', 22, 540);
+  text(lapTime(s.last ?? NaN), 116, 542, 54, (s.last ?? 0) > 0 ? '#ffffff' : '#56606b', 'left');
+  {
+    const x = s.straight;
+    g.fillStyle = x ? '#0f8f45' : '#15181c';
+    roundRect(g, X(744), Y(490), 258, 72, 10);
+    g.fill();
+    text(x ? 'X-MODE' : 'Z-MODE', 873, 543, 48, x ? '#ffffff' : '#7f8b97', 'center');
+  }
+  g.restore();
+
+  // ---- shift lights: green → red → blue across the top, the whole row flashing blue at the
+  // limiter; a dark LED still shows its lens's tint (black with a hint of colour, not grey)
+  const l = R_SHIFT;
+  g.fillStyle = '#000';
+  g.fillRect(l.x, l.y, l.w, l.h);
+  const lit = s.lights ? Math.round(Math.max(0, Math.min(1, (s.rpm - 0.55) / 0.4)) * SHIFT_N) : 0;
+  const flash = s.lights && s.rpm > 0.965;
+  const third = SHIFT_N / 3;
+  for (let i = 0; i < SHIFT_N; i++) {
+    const on = flash || i < lit;
+    const rgb = flash ? [60, 120, 255] : i < third ? [40, 255, 80] : i < 2 * third ? [255, 36, 36] : [60, 110, 255];
+    const cx = l.x + (i + 0.5) * SHIFT_CELL;
+    const cy = l.y + SHIFT_CELL / 2;
+    const gr = g.createRadialGradient(cx, cy, 0, cx, cy, SHIFT_CELL * 0.5);
+    if (on) {
+      gr.addColorStop(0, `rgb(${rgb[0] * 0.6 + 100},${rgb[1] * 0.6 + 100},${rgb[2] * 0.6 + 100})`);
+      gr.addColorStop(0.35, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+      gr.addColorStop(1, `rgb(${rgb[0] * 0.55},${rgb[1] * 0.55},${rgb[2] * 0.55})`);
+    } else {
+      gr.addColorStop(0, `rgb(${rgb[0] * 0.07 + 6},${rgb[1] * 0.07 + 6},${rgb[2] * 0.07 + 6})`);
+      gr.addColorStop(1, `rgb(${rgb[0] * 0.03 + 3},${rgb[1] * 0.03 + 3},${rgb[2] * 0.03 + 3})`);
+    }
+    g.fillStyle = gr;
+    g.fillRect(l.x + i * SHIFT_CELL, l.y, SHIFT_CELL, SHIFT_CELL);
+  }
+}
+
+function dashTex(c: HTMLCanvasElement) {
+  // mipmapped and anisotropic: the screen leans back ~25° from the eye and shrinks to a quarter
+  // of its texels on screen, so a plain bilinear lookup aliased the strokes into a shimmer
+  const t = tex(c, true, false, 16);
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  return t;
+}
+/** a car's own live screen (only the cars a camera rides in need one: CarModel makes it on demand) */
+export function createDashTexture(): { tex: THREE.Texture; paint: (s: DashState) => void } {
+  const c = canvas(DASH_W, DASH_H);
+  const g = ctx2d(c);
+  const t = dashTex(c);
+  let last: DashState | null = null;
+  const paint = (s: DashState) => {
+    last = s;
+    paintDash(g, s);
+    t.needsUpdate = true;
+  };
+  paint({ gear: 0, kmh: 0, rpm: 0, delta: NaN, straight: false, ers: 1, code: '', lights: false });
+  // (the webfont may land after the first paint)
+  if (!fontsAreReady()) fontsLoaded.then(() => last && paint(last));
+  return { tex: t, paint };
+}
+let staticDash: THREE.Texture | null = null;
+/** the screen every other car shows: neutral, on the pit-lane defaults (shared) */
+export function sharedDashTexture(): THREE.Texture {
+  if (staticDash) return staticDash;
+  const c = canvas(DASH_W, DASH_H);
+  staticDash = dashTex(c);
+  const t = staticDash;
+  paintWithFonts(() => {
+    paintDash(ctx2d(c), { gear: 0, kmh: 0, rpm: 0, delta: NaN, straight: false, ers: 1, code: '', lights: false, bias: 0.57 });
+    t.needsUpdate = true;
+  });
+  return t;
+}
+
+// ------------------------------------------------------------------------------------ the wheel's face
+let faceTex: THREE.Texture | null = null;
+/**
+ * The face panel's print (shared): a fine carbon twill under the lacquer, the legend under each
+ * button, position ticks round each rotary with its function beside it, as the real wheels print
+ * them — white on carbon, condensed capitals a few millimetres tall.
+ */
+export function wheelFaceTexture(): THREE.Texture {
+  if (faceTex) return faceTex;
+  const c = canvas(FACE_W, FACE_H);
+  faceTex = tex(c, true, false, 16);
+  const t = faceTex;
+  const kx = FACE_W / FACE_SPAN_X;
+  const ky = FACE_H / FACE_SPAN_Y;
+  // wheel-local metres → canvas px (u runs to the driver's right: −x)
+  const PX = (x: number) => (0.5 - x / FACE_SPAN_X) * FACE_W;
+  const PY = (y: number) => (0.5 - (y - FACE_CY) / FACE_SPAN_Y) * FACE_H;
+  paintWithFonts(() => {
+    const g = ctx2d(c);
+    g.fillStyle = '#1d1f23';
+    g.fillRect(0, 0, FACE_W, FACE_H);
+    // 2×2 twill, ~3 mm tows, very low contrast (it is under the face's satin lacquer)
+    const tw = 0.003 * kx;
+    g.fillStyle = '#212328';
+    for (let j = 0; j * tw < FACE_H; j++) for (let i = 0; i * tw < FACE_W; i++) if (((i + j) & 3) < 2) g.fillRect(i * tw, j * tw, tw - 0.6, tw - 0.6);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const legend = (s: string, x: number, y: number, mm = 3.4, col = '#e9ecef') => {
+      g.font = `700 ${(mm / 1000) * ky * 1.36}px ${FONT}`;
+      g.fillStyle = col;
+      g.fillText(s, PX(x), PY(y));
+    };
+    WHEEL_BUTTONS.forEach((b, i) => {
+      // under the top four; beside the lower pair (the rotaries sit under them)
+      if (i < 4) legend(b.label, b.x, b.y - 0.0148);
+      else legend(b.label, b.x + Math.sign(b.x) * 0.0205, b.y);
+    });
+    for (const r of WHEEL_ROTARIES) {
+      // nine detents over 270°, the first and last longer
+      g.strokeStyle = '#d9dde2';
+      g.lineCap = 'round';
+      for (let k = 0; k < 9; k++) {
+        const a = (-135 + k * 33.75) * (Math.PI / 180);
+        const long = k === 0 || k === 8 || k === 4;
+        const r0 = 0.0121;
+        const r1 = long ? 0.0142 : 0.0135;
+        // (+x is the canvas's left: mirror the ticks' x as the legends are)
+        g.lineWidth = 0.00055 * kx;
+        g.beginPath();
+        g.moveTo(PX(r.x - Math.sin(a) * r0), PY(r.y + Math.cos(a) * r0));
+        g.lineTo(PX(r.x - Math.sin(a) * r1), PY(r.y + Math.cos(a) * r1));
+        g.stroke();
+      }
+      const upper = r.y > -0.045;
+      if (upper) legend(r.label, r.x - Math.sign(r.x) * 0.0185, r.y - 0.005, 3.0);
+      else legend(r.label, r.x + Math.sign(r.x) * 0.0195, r.y, 3.0);
+    }
+    // the toggles' legend and the maker's mark at the foot of the face
+    legend('–     OK     +', 0, -0.0395, 2.6, '#c9ced4');
+    legend('APEX', 0, -0.0625, 3.2, '#6b7078');
+    t.needsUpdate = true;
+  });
+  return t;
+}
+
+// ------------------------------------------------------------------------------------ gloves
+/**
+ * Race gloves (FIA 8856-2018 type: Nomex knit backs, suede palms): the colour sheet per team, and
+ * one shared normal map — stitching, the padded knuckle panel, the sponsor patch's raised border,
+ * the silicone grip print on the palm and fingertips, the knit's grain.
+ */
+const gloveCache = new Map<string, { t: THREE.Texture; refs: number }>();
+let gloveNormalTex: THREE.Texture | null = null;
+
+/** the glove sheet's layout in canvas px (shared by the colour and height passes) */
+function gloveLayout(g: CanvasRenderingContext2D, ink: { base: string; panel: string; palm: string; stitch: string; patch: string; patchInk: string; strap: string; strapInk: string; binding: string }, sponsor: string, height: boolean) {
+  const B = R_GL_BACK;
+  const P = R_GL_PALM;
+  const F = R_GL_FINGER;
+  const T = R_GL_THUMB;
+  const C = R_GL_CUFF;
+  const rect = (x: number, y: number, w: number, h: number, col: string) => {
+    g.fillStyle = col;
+    g.fillRect(x, y, w, h);
+  };
+  const stitch = (pts: [number, number][], col: string, dash = 5) => {
+    g.save();
+    g.strokeStyle = col;
+    g.lineWidth = height ? 2 : 1.1;
+    g.setLineDash([dash, dash * 0.75]);
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.stroke();
+    g.restore();
+  };
+  // ---- back of the hand (x: little finger 0 → index 1, y: knuckles at the top → wrist)
+  rect(B.x, B.y, B.w, B.h, ink.base);
+  // the padded knuckle panel across the top
+  rect(B.x, B.y, B.w, 30, ink.panel);
+  stitch([[B.x + 2, B.y + 32], [B.x + B.w - 2, B.y + 32]], ink.stitch);
+  // the outline seam from the wrist up the thumb side
+  stitch([[B.x + B.w - 6, B.y + B.h], [B.x + B.w - 26, B.y + 70], [B.x + B.w - 10, B.y + 36]], ink.stitch);
+  stitch([[B.x + 6, B.y + B.h], [B.x + 8, B.y + 36]], ink.stitch);
+  // the sponsor's patch
+  roundRect(g, B.x + 70, B.y + 54, 116, 30, 6);
+  g.fillStyle = ink.patch;
+  g.fill();
+  if (!height) {
+    g.save();
+    g.font = `900 21px ${FONT}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const w = g.measureText(sponsor).width;
+    g.translate(B.x + 128, B.y + 70);
+    g.scale(Math.min(1, 100 / Math.max(1, w)), 1);
+    g.fillStyle = ink.patchInk;
+    g.fillText(sponsor, 0, 0);
+    g.restore();
+  }
+  stitch([[B.x + 67, B.y + 51], [B.x + 189, B.y + 51], [B.x + 189, B.y + 87], [B.x + 67, B.y + 87], [B.x + 67, B.y + 51]], ink.stitch, 3);
+  // ---- palm: suede, a reinforced heel, silicone grip print
+  rect(P.x, P.y, P.w, P.h, ink.palm);
+  rect(P.x, P.y + P.h - 34, P.w, 34, height ? '#707070' : shade(ink.palm, 0.85));
+  for (let y = P.y + 8; y < P.y + P.h - 38; y += 12)
+    for (let x = P.x + 8 + ((y / 12) % 2) * 6; x < P.x + P.w - 4; x += 12) {
+      g.fillStyle = height ? '#d0d0d0' : shade(ink.palm, 1.35);
+      g.beginPath();
+      g.arc(x, y, 2.6, 0, Math.PI * 2);
+      g.fill();
+    }
+  // ---- fingers (x: root → tip, y: round it — its back in the middle row)
+  const finger = (R: typeof F, panel: boolean) => {
+    rect(R.x, R.y, R.w, R.h, ink.base);
+    // the underside (the grip side) and the fingertip are suede, like the palm
+    rect(R.x, R.y, R.w, R.h * 0.2, ink.palm);
+    rect(R.x, R.y + R.h * 0.8, R.w, R.h * 0.2, ink.palm);
+    rect(R.x + R.w * 0.86, R.y, R.w * 0.14, R.h, ink.palm);
+    // a padded panel over the first knuckle
+    if (panel) {
+      roundRect(g, R.x + R.w * 0.06, R.y + R.h * 0.3, R.w * 0.36, R.h * 0.4, 6);
+      g.fillStyle = ink.panel;
+      g.fill();
+    }
+    // the side seams (outseams: the stitching shows) and round the tip
+    stitch([[R.x, R.y + R.h * 0.22], [R.x + R.w * 0.86, R.y + R.h * 0.22]], ink.stitch);
+    stitch([[R.x, R.y + R.h * 0.78], [R.x + R.w * 0.86, R.y + R.h * 0.78]], ink.stitch);
+    stitch([[R.x + R.w * 0.86, R.y + 2], [R.x + R.w * 0.86, R.y + R.h - 2]], ink.stitch);
+  };
+  finger(F, true);
+  finger(T, false);
+  // ---- gauntlet (x: round it, the top at the middle; y: the open end at the top → the wrist)
+  rect(C.x, C.y, C.w, C.h, ink.base);
+  // the bound edge at the open end, the wrist strap with the maker's name
+  rect(C.x, C.y, C.w, 4, ink.binding);
+  rect(C.x, C.y + 36, C.w, 18, ink.strap);
+  stitch([[C.x, C.y + 35], [C.x + C.w, C.y + 35]], ink.stitch, 3);
+  if (!height) {
+    g.save();
+    g.font = `900 12px ${FONT}`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = ink.strapInk;
+    // (upside down in the sheet: the driver reads it from the elbow's side, looking down the forearm)
+    g.translate(C.x + C.w * 0.5, C.y + 45.5);
+    g.rotate(Math.PI);
+    g.fillText('APEX', 0, 0);
+    g.restore();
+  }
+}
+function shade(hex: string, k: number) {
+  const c = new THREE.Color(hex);
+  const h = (v: number) => Math.round(Math.min(255, v * 255 * k)).toString(16).padStart(2, '0');
+  c.convertLinearToSRGB();
+  return '#' + h(c.r) + h(c.g) + h(c.b);
+}
+
+/** the team's glove colours (refcounted with the cars using them) */
+export function acquireGloveTexture(teamIn: Team): THREE.Texture {
+  const key = `${teamIn.id}:${teamIn.primary}:${teamIn.secondary}:${teamIn.sponsor}`;
+  const hit = gloveCache.get(key);
+  if (hit) {
+    hit.refs++;
+    return hit.t;
+  }
+  const base = capHex(teamIn.secondary, 225);
+  const panel = capHex(teamIn.primary, 225);
+  const accent = capHex(teamIn.accent, 225);
+  const c = canvas(GLOVE_W, GLOVE_H);
+  const t = tex(c, true, false, 8);
+  paintWithFonts(() => {
+    const g = ctx2d(c);
+    // (the palm: dark suede; on a light glove a mid grey, as the real ones)
+    const light = luminance(base) > 0.35;
+    // the patch contrasts with the glove; its lettering in the team's colour where that reads on it
+    const patch = light ? '#16171a' : '#e6e7e9';
+    const patchInk = Math.abs(luminance(panel) - luminance(patch)) > 0.25 ? panel : Math.abs(luminance(accent) - luminance(patch)) > 0.25 ? accent : contrastOn(patch);
+    gloveLayout(g, {
+      base,
+      panel,
+      palm: light ? '#55575c' : '#2a2b2e',
+      // (tonal thread, a shade off the knit: the seams read in the light without drawing lines on it)
+      stitch: light ? '#6a6d73' : '#7d838b',
+      patch,
+      patchInk,
+      strap: '#121315',
+      strapInk: '#a9aeb5',
+      binding: panel,
+    }, teamIn.sponsor, false);
+    t.needsUpdate = true;
+  });
+  gloveCache.set(key, { t, refs: 1 });
+  return t;
+}
+export function releaseGloveTexture(t: THREE.Texture) {
+  for (const [k, v] of gloveCache)
+    if (v.t === t && --v.refs <= 0) {
+      t.dispose();
+      gloveCache.delete(k);
+    }
+}
+/** the gloves' relief (shared): stitching sunk into the knit, padded panels, the grip print */
+export function gloveNormalTexture(): THREE.Texture {
+  if (gloveNormalTex) return gloveNormalTex;
+  const h = canvas(GLOVE_W, GLOVE_H);
+  const g = ctx2d(h);
+  gloveLayout(g, { base: '#808080', panel: '#a8a8a8', palm: '#7a7a7a', stitch: '#383838', patch: '#9a9a9a', patchInk: '#9a9a9a', strap: '#8c8c8c', strapInk: '#8c8c8c', binding: '#a0a0a0' }, '', true);
+  const src = g.getImageData(0, 0, GLOVE_W, GLOVE_H).data;
+  const H = new Float32Array(GLOVE_W * GLOVE_H);
+  for (let i = 0; i < H.length; i++) H[i] = src[i * 4] / 255 + (hash(i % GLOVE_W, (i / GLOVE_W) | 0) - 0.5) * 0.05;
+  // (soften the steps: a stitch is a groove, a panel's edge a rounded seam, not a cliff)
+  const blur = new Float32Array(H.length);
+  for (let y = 0; y < GLOVE_H; y++)
+    for (let x = 0; x < GLOVE_W; x++) {
+      let s = 0;
+      for (let k = -1; k <= 1; k++) s += H[y * GLOVE_W + Math.min(GLOVE_W - 1, Math.max(0, x + k))];
+      blur[y * GLOVE_W + x] = s / 3;
+    }
+  const out = canvas(GLOVE_W, GLOVE_H);
+  const go = ctx2d(out);
+  const img = go.createImageData(GLOVE_W, GLOVE_H);
+  const at = (x: number, y: number) => blur[Math.min(GLOVE_H - 1, Math.max(0, y)) * GLOVE_W + Math.min(GLOVE_W - 1, Math.max(0, x))];
+  const k = 2.2;
+  for (let y = 0; y < GLOVE_H; y++)
+    for (let x = 0; x < GLOVE_W; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * k;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * k;
+      const l = Math.hypot(dx, dy, 1);
+      const i = (y * GLOVE_W + x) * 4;
+      // (tangent space, +y up the texture: canvas y runs down)
+      img.data[i] = Math.round((-dx / l) * 127.5 + 127.5);
+      img.data[i + 1] = Math.round((dy / l) * 127.5 + 127.5);
+      img.data[i + 2] = Math.round((1 / l) * 127.5 + 127.5);
+      img.data[i + 3] = 255;
+    }
+  go.putImageData(img, 0, 0);
+  gloveNormalTex = tex(out, false, false, 8);
+  return gloveNormalTex;
 }
 
 // ------------------------------------------------------------------------------------ driver sheet

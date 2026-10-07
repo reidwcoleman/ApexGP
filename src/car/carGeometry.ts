@@ -11,10 +11,12 @@ import {
   PC, TC, WC, paintCellUV, trimUV, wheelCellUV, rectUV,
   R_FLAP, R_MAIN, R_FWING, R_EP_OL, R_EP_OR, R_EP_IN, R_FIN_L, R_FIN_R,
   R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, DRV_W, DRV_H,
-  DC, drvCellUV, R_DISPLAY, R_LEDS, TRIM_W, TRIM_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WHEEL_TEX_W, WHEEL_TEX_H,
+  DC, drvCellUV, TRIM_W, TRIM_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WHEEL_TEX_W, WHEEL_TEX_H,
   WHEEL_R, RIM_R, TYRE_W_F, TYRE_W_R, TRACK_F, TRACK_R, Z_FRONT_AXLE, Z_REAR_AXLE, SIDEWALL_R0, SIDEWALL_R1,
+  DASH_W, DASH_H, R_SCREEN, R_SHIFT, SHIFT_N, SHIFT_CELL, SCREEN_W, SCREEN_H, SCREEN_CY, faceUV, WHEEL_BUTTONS, WHEEL_ROTARIES,
   type Rect,
 } from './carLayout.ts';
+import { STEER_PIVOT, STEER_TILT, GRIP_PTS, gripRadius, WHEEL_FACE_Z, buildArms } from './carHands.ts';
 import { hullSlices, halfRing, hullUV, hullPoint, profileAt, sAtParam, HULL_FRONT, HULL_REAR } from './hull.ts';
 
 export const CARBON_TILE = 0.06;
@@ -33,9 +35,6 @@ const cuvPlanar = (p: V3, n: V3): V2 => {
 
 function drvUV(r: Rect, a: number, b: number): V2 {
   return rectUV(r, a, b, DRV_W, DRV_H);
-}
-function trimRectUV(r: Rect, a: number, b: number): V2 {
-  return rectUV(r, a, b, TRIM_W, TRIM_H);
 }
 function wheelRectUV(r: Rect, a: number, b: number): V2 {
   return rectUV(r, a, b, WHEEL_TEX_W, WHEEL_TEX_H);
@@ -1041,29 +1040,41 @@ function driver(b: Buckets, level: Level) {
         const q = hp(1.02 * side, 0.12, 1.016);
         box(b.head, q, [0.008, 0.026, 0.012], drvCellUV(DC.hans), new THREE.Euler(0, 1.02 * side, 0));
       }
-    // HANS collar + shoulders + arms (+ gloves: at the nearest level they ride the steering wheel, see hands)
+    // HANS collar + shoulders + arms (at the nearest level the arms and gloves are their own skinned
+    // mesh, carHands: the hands ride the steering wheel, the elbows follow them)
     ellipsoid(b.driver, [0, 0.64, 0.01], [0.15, 0.04, 0.12], 12, 6, drvCellUV(DC.hans));
     for (const side of [1, -1]) {
       ellipsoid(b.driver, [0.165 * side, 0.595, 0.0], [0.1, 0.065, 0.13], 12, 8, drvCellUV(DC.suit));
       if (level > 0) {
         tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.57, 0.28], [0.14 * side, 0.595, 0.47]], 0.042, 8, drvCellUV(DC.suit2), [0, 1, 0]);
         ellipsoid(b.driver, [0.13 * side, 0.6, 0.49], [0.03, 0.04, 0.035], 8, 6, drvCellUV(DC.glove));
-      } else {
-        // upper arm to a rounded elbow (the forearm is a live link to the hand on the wheel)
-        tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.577, 0.17], [0.2 * side, 0.57, 0.28]], 0.042, 12, drvCellUV(DC.suit2), [0, 1, 0]);
-        ellipsoid(b.driver, [0.2 * side, 0.57, 0.28], [0.043, 0.043, 0.043], 12, 8, drvCellUV(DC.suit2));
       }
     }
   }
 }
 
 // ------------------------------------------------------------------------------------ steering wheel (pivot-local)
-export const STEER_PIVOT: V3 = [0, 0.605, 0.5];
-export const STEER_TILT = -0.42; // rotation about X (top toward the driver)
-function steeringWheel(mb: MB) {
-  // local: wheel plane XY, driver looks along +Z toward it (face at −Z). A 2026 wheel: a carbon
-  // body wide at the grips with a flat top, a bevelled face panel carrying the screen, the shift
-  // lights, dome buttons in bezels and anodised rotaries; paddles behind, a quick-release hub.
+export { STEER_PIVOT, STEER_TILT };
+/** a solid of revolution about an axis along −Z (toward the driver) at (cx, cy): profile (radius, z) back → front */
+function latheZ(mb: MB, cx: number, cy: number, prof: V2[], seg: number, uv: V2 | ((p: V3, ring: number) => V2), knurl?: (a: number, k: number) => number) {
+  const P: V3[][] = [];
+  for (let j = 0; j <= seg; j++) {
+    const a = (j / seg) * Math.PI * 2;
+    P.push(prof.map(([r, z], k) => {
+      const rr = r * (knurl ? knurl(a, k) : 1);
+      return [cx + rr * Math.cos(a), cy + rr * Math.sin(a), z] as V3;
+    }));
+  }
+  return mb.grid(P, (j, k) => (typeof uv === 'function' ? uv(P[j][k], k) : uv), { orient: true });
+}
+/**
+ * The 2026 wheel (wheel plane XY, the driver looks along +Z toward it, face at −Z): a carbon body
+ * wide at the grips with a flat top, a bevelled face panel carrying the screen, a row of shift
+ * lights over it, dome buttons in bezels and knurled anodised rotaries; paddles behind, a
+ * quick-release hub. Three meshes: the trim parts, the face panel (its printed legends: the shared
+ * face texture) and the self-lit glass (screen + LED lenses: the car's dash texture).
+ */
+function steeringWheel(mb: MB, face: MB, dash: MB) {
   const OUT: V2[] = [
     [-0.118, -0.062],
     [-0.142, -0.01],
@@ -1089,75 +1100,58 @@ function steeringWheel(mb: MB) {
     [0.045, -0.07],
     [-0.045, -0.07],
   ];
-  plate(mb, roundPoly(FACE, 0.014, 3), [0, 0, -0.0145], [1, 0, 0], [0, 1, 0], 0.006, () => trimUV(TC.wheelFace));
-  const FZ = -0.0175; // face surface
-  // grips: bent, fatter at the bottom, a team-colour band where the thumbs rest
+  plate(face, roundPoly(FACE, 0.014, 3), [0, 0, -0.0145], [1, 0, 0], [0, 1, 0], 0.006, (a, b) => faceUV(a, b));
+  const FZ = WHEEL_FACE_Z;
+  // grips: bent, fatter in the middle (where the palms sit: carHands builds the gloves round these)
   for (const side of [1, -1]) {
-    const path = crPath([
-      [0.126 * side, 0.064, 0.006],
-      [0.141 * side, 0.032, 0.008],
-      [0.145 * side, -0.01, 0.01],
-      [0.134 * side, -0.052, 0.01],
-    ], 10);
+    const path = crPath(GRIP_PTS.map(([x, y, z]) => [x * side, y, z] as V3), 16);
     const n = path.length - 1;
-    tube(mb, path, (i) => 0.019 + 0.005 * Math.sin((Math.PI * i) / n), 16, trimUV(TC.grip), [0, 0, 1]);
+    tube(mb, path, (i) => gripRadius(i / n), 18, trimUV(TC.grip), [0, 0, 1]);
     // paddles behind the grips (their tips show past the body's top corners)
     const pad = roundPoly([[0, -0.03], [0.05, -0.02], [0.06, 0.03], [0.02, 0.05], [0, 0.04]], 0.008, 2).map(([x, y]) => [x * side + 0.075 * side, y] as V2);
     plate(mb, pad, [0, 0.02, 0.028], [1, 0, 0], [0, 1, 0], 0.004, () => trimUV(TC.blackGloss));
   }
-  // display (faces −Z) + LED strip
-  const quad = (cx: number, cy: number, w: number, h: number, z: number, uvf: (a: number, b: number) => V2) => {
-    const p: V3[] = [
-      [cx - w / 2, cy - h / 2, z],
-      [cx + w / 2, cy - h / 2, z],
-      [cx + w / 2, cy + h / 2, z],
-      [cx - w / 2, cy + h / 2, z],
-    ];
-    // viewed from −Z (driver side): screen-right = −X → a = 1 at −X
-    const i0 = mb.vert(p[0], [0, 0, -1], uvf(1, 0));
-    const i1 = mb.vert(p[1], [0, 0, -1], uvf(0, 0));
-    const i2 = mb.vert(p[2], [0, 0, -1], uvf(0, 1));
-    const i3 = mb.vert(p[3], [0, 0, -1], uvf(1, 1));
-    mb.tri(i0, i2, i1);
-    mb.tri(i0, i3, i2);
-  };
-  // screen in a gloss bezel
-  plate(mb, roundPoly([[-0.052, -0.017], [0.052, -0.017], [0.052, 0.043], [-0.052, 0.043]], 0.006, 2), [0, 0, FZ - 0.0015], [1, 0, 0], [0, 1, 0], 0.003, () => trimUV(TC.blackGloss));
-  quad(0, 0.013, 0.094, 0.052, FZ - 0.0032, (a, bb) => trimRectUV(R_DISPLAY, a, bb));
-  plate(mb, roundPoly([[-0.07, 0.049], [0.07, 0.049], [0.07, 0.061], [-0.07, 0.061]], 0.004, 2), [0, 0, FZ - 0.001], [1, 0, 0], [0, 1, 0], 0.002, () => trimUV(TC.blackGloss));
-  quad(0, 0.055, 0.132, 0.009, FZ - 0.0022, (a, bb) => trimRectUV(R_LEDS, a, bb));
-  // dome buttons in black bezels
+  // the screen: glass flush in a gloss bezel. Viewed from −Z the driver's right is −X: u = 1 there.
+  const sw = SCREEN_W / 2;
+  const sh = SCREEN_H / 2;
+  plate(mb, roundPoly([[-sw - 0.005, -sh - 0.0045], [sw + 0.005, -sh - 0.0045], [sw + 0.005, sh + 0.0045], [-sw - 0.005, sh + 0.0045]], 0.006, 2), [0, SCREEN_CY, FZ - 0.0015], [1, 0, 0], [0, 1, 0], 0.003, () => trimUV(TC.blackGloss));
+  {
+    const z = FZ - 0.0031;
+    const uvS = (x: number, y: number) => rectUV(R_SCREEN, 0.5 - x / SCREEN_W, 0.5 + (y - SCREEN_CY) / SCREEN_H, DASH_W, DASH_H);
+    const i0 = dash.vert([-sw, SCREEN_CY - sh, z], [0, 0, -1], uvS(-sw, SCREEN_CY - sh));
+    const i1 = dash.vert([sw, SCREEN_CY - sh, z], [0, 0, -1], uvS(sw, SCREEN_CY - sh));
+    const i2 = dash.vert([sw, SCREEN_CY + sh, z], [0, 0, -1], uvS(sw, SCREEN_CY + sh));
+    const i3 = dash.vert([-sw, SCREEN_CY + sh, z], [0, 0, -1], uvS(-sw, SCREEN_CY + sh));
+    dash.tri(i0, i2, i1);
+    dash.tri(i0, i3, i2);
+  }
+  // shift lights: a gloss housing over the screen, SHIFT_N lens domes (left → right as the driver
+  // sees them: +x → −x), each sampling its own cell of the dash texture (centre bright, as an LED)
+  plate(mb, roundPoly([[-0.07, 0.0495], [0.07, 0.0495], [0.07, 0.0605], [-0.07, 0.0605]], 0.004, 2), [0, 0, FZ - 0.001], [1, 0, 0], [0, 1, 0], 0.002, () => trimUV(TC.blackGloss));
+  for (let i = 0; i < SHIFT_N; i++) {
+    const x = 0.063 - (i * 0.126) / (SHIFT_N - 1);
+    const y = 0.055;
+    const R = 0.0034;
+    const cu = R_SHIFT.x + (i + 0.5) * SHIFT_CELL;
+    const cv = R_SHIFT.y + SHIFT_CELL / 2;
+    const lensUV = (p: V3): V2 => {
+      const px = cu - ((p[0] - x) / R) * SHIFT_CELL * 0.42;
+      const py = cv - ((p[1] - y) / R) * SHIFT_CELL * 0.42;
+      return [px / DASH_W, 1 - py / DASH_H];
+    };
+    latheZ(dash, x, y, [[R, FZ - 0.0018], [R, FZ - 0.0026], [R * 0.82, FZ - 0.0036], [R * 0.45, FZ - 0.0043], [0.0001, FZ - 0.0045]], 16, lensUV);
+  }
+  // dome buttons: a chamfered black bezel, a coloured cap with a skirt under its dome
   const btn = [TC.btnRed, TC.btnYellow, TC.btnBlue, TC.btnGreen, TC.btnWhite, TC.btnWhite];
-  const BTN: [number, number][] = [
-    [-0.078, 0.036],
-    [0.078, 0.036],
-    [-0.085, 0.008],
-    [0.085, 0.008],
-    [-0.066, -0.03],
-    [0.066, -0.03],
-  ];
-  BTN.forEach(([x, y], k) => {
-    const g = new THREE.CylinderGeometry(0.0095, 0.0105, 0.004, 16);
-    g.rotateX(Math.PI / 2);
-    g.translate(x, y, FZ - 0.002);
-    mb.addGeometry(g, undefined, trimUV(TC.blackGloss));
-    g.dispose();
-    ellipsoid(mb, [x, y, FZ - 0.004], [0.0072, 0.0072, 0.0032], 14, 7, trimUV(btn[k]));
+  WHEEL_BUTTONS.forEach(({ x, y }, k) => {
+    latheZ(mb, x, y, [[0.0108, FZ + 0.001], [0.0108, FZ - 0.0016], [0.0099, FZ - 0.0028], [0.0086, FZ - 0.0028], [0.0084, FZ - 0.0016]], 24, trimUV(TC.blackGloss));
+    latheZ(mb, x, y, [[0.0079, FZ - 0.001], [0.0079, FZ - 0.0044], [0.0073, FZ - 0.0058], [0.0052, FZ - 0.0068], [0.0001, FZ - 0.0072]], 24, trimUV(btn[k]));
   });
-  // anodised rotaries: knurled drums with a pointer
-  const ROT: [number, number, number][] = [
-    [-0.036, -0.036, 0.4],
-    [0.036, -0.036, -0.6],
-    [-0.05, -0.058, 1.2],
-    [0.05, -0.058, -0.2],
-  ];
-  for (const [x, y, ang] of ROT) {
-    const g = new THREE.CylinderGeometry(0.0105, 0.0105, 0.009, 18);
-    g.rotateX(Math.PI / 2);
-    g.translate(x, y, FZ - 0.0045);
-    mb.addGeometry(g, undefined, trimUV(TC.dial));
-    g.dispose();
-    box(mb, [x + Math.sin(ang) * 0.005, y + Math.cos(ang) * 0.005, FZ - 0.0092], [0.0018, 0.0075, 0.0008], trimUV(TC.btnWhite), new THREE.Euler(0, 0, -ang));
+  // anodised rotaries: a knurled drum (the grip ridges a gloved thumb turns), a chamfered top, a
+  // white index line; their position ticks are printed on the face
+  for (const { x, y, ang } of WHEEL_ROTARIES) {
+    latheZ(mb, x, y, [[0.0106, FZ + 0.001], [0.0106, FZ - 0.0072], [0.0094, FZ - 0.0088], [0.0001, FZ - 0.009]], 36, trimUV(TC.dial), (a, k) => (k < 2 ? 1 - 0.055 * (Math.cos(a * 18) > 0 ? 1 : 0) : 1));
+    box(mb, [x - Math.sin(ang) * 0.0047, y + Math.cos(ang) * 0.0047, FZ - 0.0091], [0.0016, 0.0074, 0.0006], trimUV(TC.btnWhite), new THREE.Euler(0, 0, ang));
   }
   // centre toggles under the screen
   for (const x of [-0.016, 0, 0.016]) box(mb, [x, -0.03, FZ - 0.004], [0.008, 0.013, 0.006], trimUV(TC.darkMetal));
@@ -1167,39 +1161,6 @@ function steeringWheel(mb: MB) {
   g.translate(0, 0, 0.035);
   mb.addGeometry(g, undefined, trimUV(TC.blackSatin));
   g.dispose();
-}
-
-/**
- * The driver's forearms (left side; the right mirrors x): from the elbow (body space, it stays put)
- * to the cuff of the glove on the wheel (steering-pivot local, it turns with the wheel). The rig
- * draws them as two live links, like the suspension's, so the arms follow the hands round.
- */
-export const FOREARM = { elbow: [0.2, 0.57, 0.28] as V3, wrist: [0.148, -0.004, -0.03] as V3, elbowLocal: [0.2, 0.058, -0.215] as V3, r: 0.041 };
-/** one forearm of unit length along +Z (0 … 1), radius 1 tapering to 0.85 at the wrist (driver material) */
-function forearmUnit(mb: MB) {
-  tube(mb, [[0, 0, 0], [0, 0, 0.5], [0, 0, 1]], (i) => 1 - 0.075 * i, 12, drvCellUV(DC.suit2), [0, 1, 0]);
-}
-
-/**
- * The driver's hands on the wheel (pivot-local like the wheel, so they turn with it): a gloved fist
- * round each grip, fingers over the front, the thumb on the face beside the rotaries, the cuff.
- * Driver material; drawn with the driver, and on its own for the onboard cameras inside the cockpit
- * (the driver's hands are in every onboard picture). The forearms join them live (FOREARM).
- */
-function hands(mb: MB) {
-  const glove = drvCellUV(DC.glove);
-  for (const side of [1, -1]) {
-    const X = (x: number) => x * side;
-    // fist round the grip (its axis near vertical in the wheel's plane), knuckles over the front
-    ellipsoid(mb, [X(0.142), 0.004, 0.012], [0.031, 0.05, 0.035], 14, 10, glove, new THREE.Euler(0, 0, -0.08 * side));
-    ellipsoid(mb, [X(0.133), 0.0, 0.036], [0.03, 0.044, 0.016], 12, 8, glove, new THREE.Euler(0, 0, -0.08 * side));
-    // thumb along the face toward the buttons
-    ellipsoid(mb, [X(0.111), 0.024, -0.022], [0.024, 0.0105, 0.011], 10, 6, glove, new THREE.Euler(0, 0, 0.4 * side));
-    // the glove's cuff, heading back toward the elbow (the live forearm slides into it)
-    const wrist: V3 = [X(FOREARM.wrist[0]), FOREARM.wrist[1], FOREARM.wrist[2]];
-    const elbow: V3 = [X(FOREARM.elbowLocal[0]), FOREARM.elbowLocal[1], FOREARM.elbowLocal[2]];
-    tube(mb, [wrist, lerp3(wrist, elbow, 0.16)], (i) => (i === 0 ? 0.03 : 0.037), 12, glove, [0, 1, 0]);
-  }
 }
 
 // ------------------------------------------------------------------------------------ decals (driver material)
@@ -1648,10 +1609,12 @@ export interface CarGeoLevel {
   /** the front wing's active flaps, left and right, pivot-local (FW_FLAP_PIVOT) */
   fwFlaps: [THREE.BufferGeometry, THREE.BufferGeometry];
   steer: THREE.BufferGeometry | null;
-  /** the driver's gloved hands on the wheel, steering-pivot local (driver material; nearest level only) */
-  hands: THREE.BufferGeometry | null;
-  /** one unit forearm (nearest level: the rig instances it elbow → hand, see FOREARM) */
-  forearm: THREE.BufferGeometry | null;
+  /** the wheel's face panel (printed legends: the shared face texture), steering-pivot local */
+  steerFace: THREE.BufferGeometry | null;
+  /** the wheel's self-lit glass: screen + shift-light lenses (the car's dash texture), steering-pivot local */
+  steerDash: THREE.BufferGeometry | null;
+  /** the driver's arms and gloves, skinned (car space at rest; nearest level only: carHands) */
+  arms: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
   frontAssy: THREE.BufferGeometry | null;
   blurFront: THREE.BufferGeometry | null;
@@ -1687,15 +1650,15 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   frontFlap(fwFlapR, level, -1);
 
   let steer: MB | null = null;
-  let handsMB: MB | null = null;
-  let forearmMB: MB | null = null;
+  let steerFace: MB | null = null;
+  let steerDash: MB | null = null;
+  let arms: THREE.BufferGeometry | null = null;
   if (level === 0) {
     steer = new MB();
-    steeringWheel(steer);
-    handsMB = new MB();
-    hands(handsMB);
-    forearmMB = new MB();
-    forearmUnit(forearmMB);
+    steerFace = new MB();
+    steerDash = new MB();
+    steeringWheel(steer, steerFace, steerDash);
+    arms = buildArms().geometry;
   }
 
   const uc = new MB();
@@ -1792,8 +1755,9 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
       return am.build();
     })() : null,
     steer: steer ? steer.build() : null,
-    hands: handsMB ? handsMB.build() : null,
-    forearm: forearmMB ? forearmMB.build() : null,
+    steerFace: steerFace ? steerFace.build() : null,
+    steerDash: steerDash ? steerDash.build() : null,
+    arms,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
     frontAssy: frontAssy ? frontAssy.build() : null,
     blurFront: blurFront ? blurFront.build() : null,
@@ -1807,7 +1771,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
     PART_IDS.reduce((n, k) => n + tri(out.parts[k].paint) + tri(out.parts[k].carbon) + tri(out.parts[k].trim), 0) +
-    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) + tri(out.hands) + tri(out.forearm, 2) +
+    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) + tri(out.steerFace) + tri(out.steerDash) + tri(out.arms) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;
 }

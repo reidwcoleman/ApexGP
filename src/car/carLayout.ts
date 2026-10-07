@@ -176,9 +176,72 @@ export function trimUV(i: number): V2 {
   const cy = Math.floor(i / cols) + 0.5;
   return [(cx * TRIM_CELL) / TRIM_W, 1 - (cy * TRIM_CELL) / TRIM_H];
 }
-/** steering-wheel display image region inside the trim texture */
-export const R_DISPLAY: Rect = { x: 256, y: 128, w: 128, h: 64 };
-export const R_LEDS: Rect = { x: 256, y: 208, w: 128, h: 16 };
+// ---------------------------------------------------------------- steering wheel: screen, shift lights, face print
+/**
+ * The wheel's screen has a texture of its own (it used to be 128 × 64 texels of the trim palette:
+ * at 1080p the cockpit view shows the 10 cm screen ~300 px wide, so every digit was a smear of a
+ * dozen texels). 1024 texels across the screen is ~3.5 per pixel there — enough for mipmapped,
+ * anisotropic sampling to keep thin strokes crisp at 1440p and at the wheel's lean. The shift
+ * lights are cells below it (each LED lens samples its own cell), with a gutter so the mip chain
+ * doesn't bleed the screen into them.
+ */
+export const DASH_W = 1024;
+export const DASH_H = 672;
+export const R_SCREEN: Rect = { x: 0, y: 0, w: 1024, h: 576 };
+/** shift lights: SHIFT_N cells of SHIFT_CELL px (the LED lenses map into them, see carGeometry) */
+export const SHIFT_N = 15;
+export const SHIFT_CELL = 64;
+export const R_SHIFT: Rect = { x: 32, y: 600, w: SHIFT_N * SHIFT_CELL, h: SHIFT_CELL };
+/** the screen's glass (wheel-local metres, centred on (0, SCREEN_CY)): 4.7", 16:9 like the 2026 wheels' */
+export const SCREEN_W = 0.104;
+export const SCREEN_H = 0.0585;
+export const SCREEN_CY = 0.0125;
+/**
+ * The face panel's printed legends (shared by every car): a planar map of the face, u running to
+ * the driver's right (−x: he looks along +z) and v up. 1024 px over 22 cm ≈ 4.7 px/mm, so the 3.5 mm
+ * legends beside the buttons are ~16 px tall in the texture.
+ */
+export const FACE_W = 1024;
+export const FACE_H = 656;
+export const FACE_SPAN_X = 0.22;
+export const FACE_SPAN_Y = 0.141;
+export const FACE_CY = -0.0035;
+export function faceUV(x: number, y: number): V2 {
+  return [0.5 - x / FACE_SPAN_X, 0.5 + (y - FACE_CY) / FACE_SPAN_Y];
+}
+/**
+ * The face's controls (wheel-local x, y; +x is the driver's left) and their printed legends —
+ * the functions a 2026 wheel puts under the thumbs: neutral, pit limiter, radio, the overtake
+ * (manual override) boost, the straight-mode aero toggle, a lap marker; rotaries for brake
+ * balance, the differential, the power-unit strategy and the battery's recharge.
+ */
+export const WHEEL_BUTTONS: { x: number; y: number; label: string }[] = [
+  { x: -0.078, y: 0.036, label: 'N' },
+  { x: 0.078, y: 0.036, label: 'PIT' },
+  { x: -0.085, y: 0.008, label: 'RADIO' },
+  { x: 0.085, y: 0.008, label: 'OVT' },
+  { x: -0.066, y: -0.03, label: 'MARK' },
+  { x: 0.066, y: -0.03, label: 'AERO' },
+];
+export const WHEEL_ROTARIES: { x: number; y: number; ang: number; label: string }[] = [
+  { x: -0.036, y: -0.036, ang: 0.4, label: 'BBAL' },
+  { x: 0.036, y: -0.036, ang: -0.6, label: 'DIFF' },
+  { x: -0.05, y: -0.058, ang: 1.2, label: 'STRAT' },
+  { x: 0.05, y: -0.058, ang: -0.2, label: 'RECH' },
+];
+
+// ---------------------------------------------------------------- gloves (per team, 512×256)
+/**
+ * The glove's own sheet: the back of the hand (u across the knuckles, v from cuff to knuckles), the
+ * fingers (one strip, u along the finger, v round it), the palm, the thumb and the gauntlet strap.
+ */
+export const GLOVE_W = 512;
+export const GLOVE_H = 256;
+export const R_GL_BACK: Rect = { x: 0, y: 0, w: 256, h: 128 };
+export const R_GL_PALM: Rect = { x: 256, y: 0, w: 256, h: 128 };
+export const R_GL_FINGER: Rect = { x: 0, y: 128, w: 256, h: 64 };
+export const R_GL_THUMB: Rect = { x: 256, y: 128, w: 256, h: 64 };
+export const R_GL_CUFF: Rect = { x: 0, y: 192, w: 512, h: 64 };
 
 // ---------------------------------------------------------------- wheel atlas (shared, 2048×512)
 export const WHEEL_TEX_W = 2048;

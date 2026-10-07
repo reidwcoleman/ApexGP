@@ -3,6 +3,24 @@ import { Effect, EffectAttribute } from 'postprocessing';
 
 /** how many cars the motion blur tracks as moving objects (the nearest to the camera) */
 export const MOTION_CARS = 8;
+/**
+ * The steering wheel of the car an onboard camera rides in (and the gloves on it): its box in the
+ * wheel's own frame (carGeometry steeringWheel, carHands). It turns inside the car, so the TAA
+ * reprojects it through its own turn (a rotating wheel reprojected with the car smeared its screen
+ * over itself), and the motion blur leaves it sharp — the screen is read, not filmed.
+ */
+export const WHEEL_BOX_GLSL = /* glsl */ `
+uniform mat4 wheelInv;
+uniform mat4 wheelPrev;
+uniform float wheelOn;
+bool onWheel(vec3 wpos, out vec3 wl) {
+  wl = (wheelInv * vec4(wpos, 1.0)).xyz;
+  return wheelOn > 0.5 && all(lessThan(abs(wl - vec3(0.0, -0.005, -0.008)), vec3(0.2, 0.105, 0.068)));
+}
+`;
+export function wheelUniforms() {
+  return { wheelInv: { value: new THREE.Matrix4() }, wheelPrev: { value: new THREE.Matrix4() }, wheelOn: { value: 0 } };
+}
 
 /**
  * Camera + per-object motion blur, the way a film camera's shutter smears a frame — reconstructed
@@ -49,6 +67,7 @@ uniform vec3 boxMax;
 uniform float shutter;
 uniform float maxLen;
 uniform float aspect;
+${WHEEL_BOX_GLSL}
 void main() {
   float d = texture2D(tDepth, vUv).r;
   float vz = perspectiveDepthToViewZ(d, cameraNear, cameraFar);
@@ -67,6 +86,9 @@ void main() {
   }
   vec4 pc = prevViewProj * vec4(prev, 1.0);
   vec2 v = pc.w > 0.0 ? (vUv - (pc.xy / pc.w * 0.5 + 0.5)) * (0.5 * shutter) : vec2(0.0);
+  // (the wheel and the hands on it: no streak at all, whatever the camera's shake inside the car)
+  vec3 wl;
+  if (onWheel(wpos, wl)) v = vec2(0.0);
   // (half extents from here on; the longest streak is held to maxLen of the frame height)
   float len = length(v * vec2(aspect, 1.0));
   if (len > maxLen * 0.5) v *= maxLen * 0.5 / len;
@@ -240,6 +262,7 @@ export class MotionBlurEffect extends Effect {
         // car is the world (moving it with the car drew the box as a sharp rectangle in the streaks)
         boxMin: { value: new THREE.Vector3(-1.15, 0.06, -2.85) },
         boxMax: { value: new THREE.Vector3(1.15, 1.45, 2.95) },
+        ...wheelUniforms(),
         shutter: { value: 0 },
         maxLen: { value: 0.3 },
         aspect: { value: 1 },

@@ -34,13 +34,15 @@ uniform vec3 boxMin;
 uniform vec3 boxMax;
 uniform float defocus;
 uniform vec3 wheelPos;
+uniform float wheelKeep;
 vec3 obViewPos(vec2 uv, float vz) {
   vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
   ray.xyz /= ray.w;
   return ray.xyz * (vz / ray.z);
 }
 // distance from the lens if this pixel is the player's own car, else -1; wheel 0 … 1 = on the
-// steering wheel (its screen, shift lights and buttons stay readable, as in the footage)
+// steering wheel (its screen, shift lights and buttons stay readable, as in the footage; in the sim
+// look entirely sharp — wheelKeep 1 — as a driver's eye focuses on it, as ACC's and the F1 games' do)
 float ownDistZ(vec2 uv, float vz, out float wheel) {
   wheel = 0.0;
   if (-vz > 4.5) return -1.0;
@@ -51,7 +53,7 @@ float ownDistZ(vec2 uv, float vz, out float wheel) {
   return length(vp);
 }
 // blur radius (uv, vertical) of a surface this far from a lens focused far away
-float coc(float d, float wheel) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6) * (1.0 - 0.8 * wheel); }
+float coc(float d, float wheel) { return defocus * clamp(1.0 / max(d, 0.25) - 0.12, 0.0, 1.6) * (1.0 - wheelKeep * wheel); }
 `;
 
 // half res: (blur radius, distance, wheel) of the own car's pixels; zeros elsewhere
@@ -194,6 +196,8 @@ export class OnboardEffect extends Effect {
       defocus: new THREE.Uniform(0.0105),
       // the steering wheel's centre in the car's frame (carGeometry STEER_PIVOT)
       wheelPos: new THREE.Uniform(new THREE.Vector3(0, 0.605, 0.5)),
+      // how much of the defocus the wheel is spared (Renderer's look: 1 sim, 0.8 footage)
+      wheelKeep: new THREE.Uniform(1),
     };
     super('OnboardEffect', ONBOARD_FRAG, {
       attributes: EffectAttribute.CONVOLUTION | EffectAttribute.DEPTH,

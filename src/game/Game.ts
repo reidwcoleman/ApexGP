@@ -20,7 +20,7 @@ import { sceneryBuilder } from '../world/env/scenery.ts';
 import { ScenePrep, frameClock, type LightMode } from '../world/prepare.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
-import { DASH_GLOW, createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
+import { DASH_GLOW, SCREEN_GLOW, createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
@@ -98,6 +98,8 @@ const MOTION_SPEED_GAIN = 0.8;
  * baseline — the clean, punchy picture of a modern sim (ACC's) rather than a compressed TV feed.
  */
 const RACE_GRADE = { contrast: 1.05, exposure: 1, saturation: 1.06 };
+/** the wheel screen's white, in the grade's input (scene-linear × the grade's exposure = this) */
+const SCREEN_WHITE = 1.15;
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
@@ -2361,6 +2363,10 @@ export class Game {
     const lookExp = Math.max(1, this.gfx.grade.uniforms.get('lookExposure')!.value as number);
     this.particles.glowScale = 1 / Math.sqrt(lookExp);
     DASH_GLOW.value = 1.6 / Math.pow(lookExp, 0.8);
+    // the wheel's screen: white held at ~0.8 of the display's range under any grade (the grade's whole
+    // exposure divided out; the camera's brief auto-exposure swings still carry it, as they carry the eye)
+    const gradeExp = this.gfx.grade.exposure * (this.gfx.grade.uniforms.get('lookExposure')!.value as number);
+    SCREEN_GLOW.value = SCREEN_WHITE / Math.max(0.05, gradeExp);
     this.particles.update(this.state === 'paused' ? 0 : dt);
     {
       // a windy day: leaves and dry grass blowing across the circuit (not once the ground is wet)
@@ -3091,6 +3097,14 @@ export class Game {
             ers: car.ers,
             code: c.entry.driver.code,
             lights: true,
+            lap: Math.max(1, Math.min(this.race.opts.laps, c.laps + 1)),
+            laps: this.race.opts.laps,
+            pos: c.position,
+            bias: sp.brakeBias,
+            deploy: car.ersDeploying,
+            tyres: car.tyreTemp,
+            tyreOpt: car.tyreOpt,
+            last: c.lastLap,
           });
         }
       }
@@ -3871,6 +3885,8 @@ export class Game {
     g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
+    // (its steering wheel turns inside it: the TAA and the motion blur follow the wheel's own turn)
+    g.onboardWheel = eye ? (this.rigs.get(this.race.player.entry)?.wheel ?? null) : null;
     // the look (Renderer.broadcast): the cameras you drive with see the sim's clean image (ACC); the
     // TV director's edit, the trackside / aerial cameras and the replays keep the broadcast footage
     // (the garage and the menus: the sim look, whatever camera the last session ended on)

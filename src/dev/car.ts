@@ -117,8 +117,9 @@ if (P.get('hide')) {
   const h = P.get('hide')!;
   for (const c of cars)
     c.root.traverse((o) => {
-      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-      if (m && m.name.includes(h)) m.visible = false;
+      const mm = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      // (?hide=a,b: several; the driver's arms carry two materials)
+      for (const m of mm ? ([] as THREE.Material[]).concat(mm) : []) if (h.split(',').some((k) => m.name.includes(k))) m.visible = false;
     });
 }
 weatherUniforms.uWetness.value = Number(P.get('wet') ?? 0);
@@ -149,6 +150,12 @@ for (const c of cars) {
   c.setDriverVisible(P.get('driver') !== '0', P.get('hands') === '1');
   if (P.get('steer')) c.setSteer(Number(P.get('steer')));
   if (P.get('speed')) c.setWheelSpeed(Number(P.get('speed')));
+  // ?dash=1: the wheel's live screen with a mid-race reading (?dash=x: straight mode, deploying)
+  if (P.get('dash'))
+    c.setDash?.({
+      gear: 6, kmh: 287, rpm: 0.86, delta: -0.214, straight: P.get('dash') === 'x', ers: 0.64, code: 'RAV', lights: true,
+      lap: 12, laps: 53, pos: 4, bias: 0.565, deploy: P.get('dash') === 'x', tyres: [96, 99, 104, 131], tyreOpt: 100, last: 81.456,
+    });
 }
 
 function countDraws(o: THREE.Object3D): number {
