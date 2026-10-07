@@ -332,7 +332,9 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
       g.fill();
     };
     // 2022+ wheel cover (near LODs map their cover disc here, the far LOD its flat face):
-    // satin anthracite with a faint moulded five-spoke relief, a bright rim lip, the nut
+    // lacquered carbon, near black, the five spokes behind it only a faint shadow in the moulding, a
+    // machined rim lip, the nut. (It was a satin metal with the spokes painted on at a third: in the sun
+    // the satin lobe lit the whole flat face as one grey plate and the spokes read as pie slices.)
     g.save();
     g.beginPath();
     g.rect(rf.x, rf.y, rf.w, rf.h);
@@ -345,7 +347,7 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     g.beginPath();
     g.arc(cx, cy, rr(RIM_R + 0.006), 0, Math.PI * 2);
     g.fill();
-    g.fillStyle = 'rgba(70,74,80,0.35)';
+    g.fillStyle = 'rgba(70,74,80,0.14)';
     for (let k = 0; k < 5; k++) {
       const a = (k / 5) * Math.PI * 2;
       g.beginPath();
@@ -361,12 +363,15 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     ring(RIM_R - 0.006, RIM_R + 0.006, '#8c9097');
     ring(0, 0.05, '#101113');
     ring(0, 0.035, '#b52024');
-    go.fillStyle = 'rgb(0, 95, 70)';
+    // cover: dielectric under its lacquer (roughness ~0.25: the dished cover gathers the sun into a
+    // curved glint instead of glowing all over); lip: machined metal, satin rather than chrome (a 0.22
+    // mirror ring sparkled round every wheel in motion)
+    go.fillStyle = 'rgb(0, 64, 0)';
     go.fillRect(rf.x, rf.y, rf.w, rf.h);
     go.beginPath();
     go.arc(cx, cy, rr(RIM_R + 0.006), 0, Math.PI * 2);
     go.arc(cx, cy, rr(RIM_R - 0.006), 0, Math.PI * 2, true);
-    go.fillStyle = 'rgb(0, 56, 255)';
+    go.fillStyle = 'rgb(0, 80, 255)';
     go.fill();
 
     // ------------------------------------------ blur disc (transparent), radius ↔ WHEEL_R − 0.006

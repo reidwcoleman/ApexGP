@@ -27,7 +27,7 @@ export type { TyreLook } from './carTyres.ts';
 export { newTyreLook } from './carTyres.ts';
 
 export type { Compound } from './carTextures.ts';
-import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH } from './carLayout.ts';
+import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH, TC, trimUV } from './carLayout.ts';
 
 export type WheelId = 'wFL' | 'wFR' | 'wRL' | 'wRR';
 
@@ -229,7 +229,9 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
           mat3 ft = wetTBN( normal, - vViewPosition, fuv );
           // (none resolvable inside an onboard lens's defocus, a metre or two away: it only sparkled as noise there)
           float fNear = 1.0 - smoothstep( 0.9, 2.2, length( vViewPosition ) );
-          normal = normalize( ft * vec3( fo * 0.3 * uFlake * ( 1.0 - cMask ) * ( 1.0 - cGrAll ) * ( 1.0 - fNear ), 1.0 ) );
+          // (flakes lie nearly flat in the base coat — a spread of a few degrees: at ±17° the planar flake
+          // map's stretch over the curved hull showed as brushed-metal streaks on every silver car)
+          normal = normalize( ft * vec3( fo * 0.12 * uFlake * ( 1.0 - cMask ) * ( 1.0 - cGrAll ) * ( 1.0 - fNear ), 1.0 ) );
         }`,
       )
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vCuv', 'cWet'))
@@ -283,6 +285,30 @@ function patchDriver(mat: THREE.MeshPhysicalMaterial) {
   mat.customProgramCacheKey = () => 'apex-driver-v1';
 }
 
+/**
+ * The tailpipe: not a brass tube but heat-tinted metal, like every exhaust in ACC's and the real cars'
+ * close-ups. The oxide film's thickness follows the temperature, and thin films colour by interference
+ * (titanium / Inconel temper colours): grey-blue and blue upstream where the gas is hottest, purple, then
+ * bronze and straw toward the cooler end, and a ring of soot round the lip. (Car-space z along the pipe:
+ * carGeometry exhaustAndLight, −1.98 under the bodywork → −2.25 at the lip. The chase camera stares
+ * straight at it.) Only the exhaust's cell of the trim palette is touched.
+ */
+const EXHAUST_TINT = /* glsl */ `
+if ( abs( vMapUv.x - ${trimUV(TC.exhaust)[0].toFixed(6)} ) + abs( vMapUv.y - ${trimUV(TC.exhaust)[1].toFixed(6)} ) < 1e-3 ) {
+  float ez = clamp( ( -1.98 - vTrimPos.z ) / 0.27, 0.0, 1.0 );
+  vec3 ex = mix( vec3( 0.29, 0.3, 0.33 ), vec3( 0.18, 0.25, 0.46 ), smoothstep( 0.05, 0.3, ez ) );
+  ex = mix( ex, vec3( 0.32, 0.19, 0.34 ), smoothstep( 0.3, 0.5, ez ) );
+  ex = mix( ex, vec3( 0.46, 0.29, 0.18 ), smoothstep( 0.5, 0.7, ez ) );
+  ex = mix( ex, vec3( 0.58, 0.45, 0.25 ), smoothstep( 0.68, 0.88, ez ) );
+  // (a used pipe's film is dull and uneven, not a clean rainbow)
+  ex = mix( vec3( dot( ex, vec3( 0.3333 ) ) ), ex, 0.7 );
+  float soot = smoothstep( 0.9, 0.99, ez );
+  diffuseColor.rgb = mix( ex, vec3( 0.03, 0.028, 0.026 ), soot * 0.9 );
+  metalnessFactor = 1.0 - 0.9 * soot;
+  roughnessFactor = mix( 0.34, 0.8, soot );
+}
+`;
+
 interface TrimUniforms {
   uHeat: { value: number };
   uRainLight: { value: number };
@@ -294,12 +320,16 @@ function patchTrim(mat: THREE.MeshStandardMaterial, u: TrimUniforms) {
     sh.uniforms.uRainLight = u.uRainLight;
     sh.uniforms.uSelf = u.uSelf;
     wetUniforms(sh);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTrimPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTrimPos = position;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uHeat;\nuniform float uRainLight;\nuniform float uSelf;\n' + WET_PARS)
+      .replace('#include <common>', '#include <common>\nuniform float uHeat;\nuniform float uRainLight;\nuniform float uSelf;\nvarying vec3 vTrimPos;\n' + WET_PARS)
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
         float tWet = carWetAmount();
+        ${EXHAUST_TINT}
         roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, tWet );
         diffuseColor.rgb *= mix( 1.0, 0.85, tWet * ( 1.0 - metalnessFactor ) );`,
       )
@@ -311,7 +341,7 @@ function patchTrim(mat: THREE.MeshStandardMaterial, u: TrimUniforms) {
         totalEmissiveRadiance = heat * emM.r + vec3( 1.0, 0.03, 0.015 ) * emM.g * uRainLight + diffuseColor.rgb * emM.b * uSelf;`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-trim-v2';
+  mat.customProgramCacheKey = () => 'apex-trim-v3';
 }
 
 /**
@@ -461,6 +491,12 @@ function acquirePaint(team: Team): PaintBase {
     // (a race car's lacquer is no showroom mirror: orange peel, vinyl wrap edges and a film of road dust
     // soften every reflection — the sky and the sun glint still read, just not like chrome)
     clearcoatRoughness: 0.065 + 0.4 * m,
+    // the base coat's own reflection: under the lacquer it meets resin of nearly its own index, not air,
+    // so a lacquered solid colour has almost none — the air-facing reflection is the clearcoat's alone.
+    // At full strength it laid a broad milky lobe (roughness ~0.46) under the crisp clearcoat glint: the
+    // look of moulded plastic, not of a deep painted panel (ACC's paint is a sharp lacquer over a clean
+    // colour). A matte livery has little lacquer, so its base keeps its sheen. (A uniform: no new program.)
+    specularIntensity: 1 - 0.75 * (1 - m),
     sheen: 0.4 * m,
     sheenRoughness: 0.7,
     sheenColor: new THREE.Color(0.3, 0.3, 0.32),

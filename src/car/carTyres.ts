@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { WET_PARS, wetUniforms } from './carWet.ts';
 import { wheelTextures, type Compound } from './carTextures.ts';
+import { CAR_FILL, CAR_FILL_GLSL } from './carAO.ts';
 
 export interface TyreLook {
   wear: number;
@@ -414,18 +415,21 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
     sh.uniforms.uTyreC = u.uTyreC;
     sh.uniforms.uTyreD = u.uTyreD;
     sh.uniforms.tyreDetail = { value: tyreDetailTexture() };
+    // (the world's sky fill, as for the bodywork: carAO CAR_FILL)
+    sh.uniforms.uCarFill = CAR_FILL;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + VERT_PARS)
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + VERT_NORMAL)
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VERT_POS);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + WET_PARS + FRAG_PARS)
+      .replace('#include <common>', '#include <common>\nuniform float uCarFill;\n' + WET_PARS + FRAG_PARS)
+      .replace('#include <lights_fragment_maps>', CAR_FILL_GLSL)
       .replace('#include <map_fragment>', '#include <map_fragment>\n' + FRAG_MAP)
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + FRAG_ROUGH)
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_LIGHTS);
   };
-  mat.customProgramCacheKey = () => 'apex-tyre-v3';
+  mat.customProgramCacheKey = () => 'apex-tyre-v4';
 }
 
 /** a wheel material with its own condition uniforms */
@@ -441,9 +445,10 @@ export function createTyreMaterial(c: Compound, name: string): { mat: THREE.Mesh
     normalScale: new THREE.Vector2(1, 1),
     roughness: 1,
     metalness: 1,
-    sheen: 0.35,
-    sheenRoughness: 0.55,
-    sheenColor: new THREE.Color(0.35, 0.35, 0.35),
+    // (no sheen: a velvet lobe is cloth's — fibres scattering back at grazing angles. On rubber it laid a
+    // milky grey rim over every tread and shoulder, a foam-tyre look against the sun. Rubber's grazing
+    // light is its plain Fresnel reflection at the atlas's roughness, which the new sidewall's lower
+    // roughness (FRAG_ROUGH) already turns into a crisp satin edge.)
   });
   patchTyre(mat, u);
   setTyreCompound(mat, u, c);
