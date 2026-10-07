@@ -337,7 +337,11 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const thick = smooth(0.7, 1, fog);
   // direct sun: survives broken cumulus, dies under a deck, gone in rain from a full deck
   // (a shower from broken cloud keeps the sun: a sun shower)
-  const sunVis = (1 - smooth(0.6, 0.94, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain) * smooth(0.45, 0.85, cloud)) * (1 - 0.75 * thick);
+  // (an overcast sky — 7/8 and more — has no sun at all: the light is the deck's, shadowless; at the
+  // old 0.6 … 0.94 ramp 'overcast' kept a sixth of the sun and hard car shadows under a grey ceiling)
+  // heat haze: the sun is a softened, bigger glare (aerosol takes ~20 % of the beam into the diffuse sky)
+  const heatK = smooth(0.5, 1, clamp01(w.heat ?? 0)) * (1 - wetK);
+  const sunVis = (1 - smooth(0.55, 0.84, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain) * smooth(0.45, 0.85, cloud)) * (1 - 0.75 * thick) * (1 - 0.2 * heatK);
   const overcast = smooth(0.62, 0.95, cloud);
   const dim = 1 - sunVis;
 
@@ -358,9 +362,17 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // everything past ~4 km was over half haze and the countryside, its tree lines and hills, read
   // as one pale band; the land now layers ridge behind ridge, each bluer and paler. Rain keeps its
   // own thick wet veil, as in the wet onboard footage)
-  const fogDensity = Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 3.2e-3 + thick * 3.2e-3;
-  const fogFalloff = mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6));
-  const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7));
+  // a windy day's air is the clearest there is: the wind mixes the haze up through a deep layer and
+  // usually follows a front that swept it out — Alps sharp from Monza, visibility 50 km and more
+  const windK = smooth(5, 11, Math.hypot(w.windX, w.windZ)) * (1 - wetK) * (1 - smooth(0.3, 0.7, fog));
+  // heat haze: a deep, milky boundary layer (dust, pollen, photochemical smog on a still hot day —
+  // visibility 5–8 km, the far hills gone to a pale silhouette or gone altogether), lying a kilometre
+  // or two deep rather than in the low layer of a morning mist
+  const fogDensity =
+    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 3.2e-3 + thick * 3.2e-3) * (1 - 0.3 * windK) +
+    heatK * 1.7e-4;
+  const fogFalloff = mix(mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6)), 1 / 1500, 0.85 * heatK);
+  const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7)) * (1 - 0.4 * heatK) * (1 + 0.35 * windK);
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
@@ -379,8 +391,10 @@ export function weatherLook(w: WeatherState): WeatherLook {
 
   // ---- each condition its own character (the wet looks had it; the dry ones were one flat grey):
   //   clear: deep, contrasty light and crisp shafts · haze: a hot golden glare round the sun ·
-  //   broken cloud (cloudy, windy): punchy sun with god rays out of the gaps · overcast: moody,
-  //   cool, a touch darker · mist and fog: the sun's shafts standing in the murk
+  //   broken cloud (cloudy, windy): punchy sun with god rays out of the gaps · windy: the clean,
+  //   saturated air behind a front · overcast: flat, soft and shadowless, the camera metering the
+  //   grey day back up so the sky goes a bright grey-white (as in overcast race footage: never the
+  //   dim, moody grey of a render) · mist and fog: the sun's shafts standing in the murk
   const dryK = 1 - wetK;
   const heat = clamp01(w.heat ?? 0);
   const clearK = sunVis * (1 - smooth(0.3, 0.8, fog)) * dryK * (1 - smooth(0.25, 0.6, cloud));
@@ -388,10 +402,11 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const brokenK = sunVis * smooth(0.3, 0.55, cloud) * (1 - smooth(0.7, 0.9, cloud)) * dryK;
   const overK = overcast * dryK * (1 - thick);
   const mistK = smooth(0.4, 0.95, fog) * dryK;
-  const dExposure = (1 - 0.1 * overK) * (1 + 0.04 * hazeK);
-  const dContrast = (1 + 0.12 * clearK + 0.12 * brokenK + 0.07 * overK) * (1 - 0.04 * hazeK);
-  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK) * (1 - 0.13 * overK) * (1 - 0.04 * hazeK);
-  const warm = hazeK * 0.06;
+  const dExposure = (1 + 0.08 * overK) * (1 + 0.04 * hazeK);
+  const dContrast = (1 + 0.12 * clearK + 0.12 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK);
+  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 - 0.13 * overK) * (1 - 0.08 * hazeK);
+  // (a low sun is orange enough on its own: haze on top of it turned every grey olive)
+  const warm = hazeK * 0.06 * smooth(8, 25, P.elevation);
   const cool = overK * 0.03;
   const dTint: [number, number, number] = [1 + warm - cool, 1 + warm * 0.25 - cool * 0.3, 1 - warm * 1.4 + cool];
   const dShafts = 1 + 0.6 * clearK + 1.2 * brokenK + 2.2 * mistK * sunVis + 0.8 * hazeK;
@@ -413,13 +428,15 @@ export function weatherLook(w: WeatherState): WeatherLook {
     fogDensity,
     fogFalloff,
     // (clear air never quite swallows a hillside: its silhouette stays readable against the sky)
-    fogMax: mix(0.93, 1, Math.max(wetK, smooth(0.3, 0.8, fog), overcast * 0.5)),
+    // (haze does: the far hills go to a silhouette and then to nothing)
+    fogMax: mix(0.93, 1, Math.max(wetK, smooth(0.3, 0.8, fog), overcast * 0.5, heatK)),
     fogLobe: P.fogLobe * sunVis * dLobe,
     cloudHaze,
     // (in the sun the shade is darker than the sky alone would make it; under cloud the fill is the light)
-    envIntensity: mix(LOOK_FILL, 0.92, dim),
+    // (haze moves a fifth of the beam into the sky's light: brighter shade, softer shadow edges)
+    envIntensity: mix(LOOK_FILL, 0.92, Math.max(dim, 0.45 * heatK)),
     hemi: mix(0.06, 0.16, dim),
-    shadowRadius: mix(2.6, 6, smooth(0.3, 0.9, dim)),
+    shadowRadius: mix(2.6, 6, Math.max(smooth(0.3, 0.9, dim), 0.4 * heatK)),
     exposure: exposure * dExposure,
     saturation: saturation * dSat,
     contrast: contrast * dContrast,

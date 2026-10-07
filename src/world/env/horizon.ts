@@ -673,9 +673,8 @@ ${CLOUD_FIELD_GLSL}
 float hzCloud( vec3 wp ) {
   if ( uCloudA.x <= 0.0 ) return 1.0;
   vec2 xz = wp.xz + uCloudB.xy * ( uCloudB.z - wp.y ) + uCloudA.zw;
-  float wc = localCoverage( cloudField( xz ), uCloudA.y );
-  float n = cf_noise( xz * ( 1.0 / 1300.0 ) ) * 0.6 + cf_noise( xz * ( 1.0 / 520.0 ) + 3.1 ) * 0.4;
-  return 1.0 - uCloudA.x * smoothstep( 1.0 - wc, 1.0 - wc + 0.22, n );
+  // (the same patches as the ground round the circuit: skyClouds.ts cloudShadowMask)
+  return 1.0 - uCloudA.x * cloudShadowMask( xz, uCloudA.y );
 }
 float hh( vec2 p ) {
   vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );

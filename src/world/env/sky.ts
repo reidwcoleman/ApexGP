@@ -60,6 +60,7 @@ uniform float uBowEl;
 uniform float uMilk;
 uniform float uViewMilk;
 uniform vec3 uMilkCol;
+uniform vec3 uViewMilkCol;
 uniform vec3 uFogCol;
 uniform vec2 uFogK;
 
@@ -88,8 +89,12 @@ vec3 skyBg( vec3 d ) {
     c = mix( c, mix( uOvZenith, uOvHorizon, k ), uOvercast );
   }
   // haze: a milky, bleached sky, whitest toward the horizon
-  float milk = uMilk + ( uEnv < 0.5 ? uViewMilk : 0.0 );
-  if ( milk > 0.001 ) c = mix( c, uMilkCol, milk * ( 0.25 + 0.7 * pow( 1.0 - max( d.y, 0.0 ), 4.0 ) ) );
+  float h = 1.0 - max( d.y, 0.0 );
+  if ( uMilk > 0.001 ) c = mix( c, uMilkCol, uMilk * ( 0.3 + 0.7 * pow( h, 3.0 ) ) );
+  // a sunny day's sky as a camera sees it (the visible dome only): the deep blue of the clear-air model
+  // is only straight up — from ~40° down it pales through a soft, slightly milky blue to near white at
+  // the horizon (aerosol in the boundary layer, which the single-layer model under-does)
+  if ( uEnv < 0.5 && uViewMilk > 0.001 ) c = mix( c, uViewMilkCol, uViewMilk * ( 0.12 + 0.88 * pow( h, 2.5 ) ) );
   return c;
 }
 
@@ -366,6 +371,7 @@ export function createSkyDome(): SkyDome {
     /** extra milk on the visible dome only (a sunny day's pale horizon), not in the env map */
     uViewMilk: { value: 0 },
     uMilkCol: { value: new THREE.Vector3(1, 1, 1) },
+    uViewMilkCol: { value: new THREE.Vector3(1, 1, 1) },
     uFogCol: { value: new THREE.Vector3(0.5, 0.5, 0.5) },
     uFogK: { value: new THREE.Vector2(0, 8) },
   };

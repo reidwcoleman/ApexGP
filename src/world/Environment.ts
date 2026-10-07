@@ -52,9 +52,9 @@ const FILM = {
   /** how much brighter the rain's grey veil (fog) is than the deck that lights it */
   rainVeil: 0.7,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
-  skyHot: 0.25,
+  skyHot: 0.45,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
-  dayMilk: 0.15,
+  dayMilk: 0.3,
 };
 
 /**
@@ -282,6 +282,8 @@ export function createEnvironment(
   const camPos = new THREE.Vector3();
   const focus = new THREE.Vector3();
   const windOff = new THREE.Vector2(3000, -1200);
+  /** downwind (x, y) and how hard it blows aloft (z), eased: see update */
+  const shear = new THREE.Vector3(weather.windX + 1e-3, weather.windZ, THREE.MathUtils.smoothstep(Math.hypot(weather.windX, weather.windZ), 5, 12));
   let haveCam = false;
   const lutCache = new Map<TimeOfDay, SkyLUT>();
   let curTime: TimeOfDay | null = null;
@@ -395,7 +397,12 @@ export function createEnvironment(
 
     // ---- clouds
     const cu = clouds.uniforms;
-    cu.uCoverage.value = L.coverage;
+    // (broken cumulus looks far more closed from the ground than its cover is: toward the horizon the
+    // far clouds' flanks stack up into a wall. The shape field gets less than the weather's cover until
+    // the deck closes, so light cloud is a blue sky full of separate heaps, not a grey ceiling with
+    // holes — the rain decks, ≥ 0.9, are as they were)
+    const shapeCov = L.coverage * THREE.MathUtils.lerp(0.74, 1, THREE.MathUtils.smoothstep(L.coverage, 0.62, 0.9));
+    cu.uCoverage.value = shapeCov;
     cu.uBase.value = L.cloudBase;
     cu.uThick.value = L.cloudThick;
     cu.uExt.value = L.cloudExt;
@@ -410,7 +417,10 @@ export function createEnvironment(
     const cw = L.time === 'sunset' ? [1.1, 0.78, 0.7] : isLowSun(L.time) ? [1.06, 0.86, 0.78] : [1, 1, 1];
     (cu.uSunCol.value as THREE.Vector3).set(C.sunCol.r * sunRad * cw[0], C.sunCol.g * sunRad * cw[1], C.sunCol.b * sunRad * cw[2]);
     const clearTop = tmpA.copy(C.zenith).multiplyScalar(1.25).add(tmpB.copy(C.sunCol).multiplyScalar((P.sunIntensity * (P.direct ?? 1) * Math.max(0.1, Math.sin(el)) / Math.PI) * 0.22));
-    const clearBase = tmpB.copy(C.away).multiplyScalar(0.36).multiply(deckTint.setRGB(0.92, 0.97, 1.08));
+    // (a cumulus base and its shaded flanks are lit by the blue sky around and above them, not by the low
+    // sky's haze: blue-grey at noon, lavender-grey under a low sun — never the olive a warm horizon gave)
+    const lowK = 1 - THREE.MathUtils.smoothstep(P.elevation, 10, 30);
+    const clearBase = tmpB.copy(C.away).lerp(deckTint.copy(C.zenith).multiplyScalar(1.6), 0.45 + 0.3 * lowK).multiplyScalar(0.36).multiply(deckTint.setRGB(0.92, 0.97, 1.08 + 0.08 * lowK));
     const ov = L.overcast;
     (cu.uAmbTop.value as THREE.Vector3).set(
       THREE.MathUtils.lerp(clearTop.r, deck.r * 3, ov),
@@ -481,8 +491,12 @@ export function createEnvironment(
     hemi.intensity = L.hemi;
 
     // ---- ground cloud shadows (broken cumulus only; a closed deck already killed the sun)
-    cloudShadowA.x = 0.82 * THREE.MathUtils.smoothstep(L.coverage, 0.12, 0.3) * (1 - ov);
-    cloudShadowA.y = L.coverage;
+    // (a cumulus takes nearly all of the direct sun, but under broken cloud the shade is also lit by the
+    // sunlit flanks of the clouds around it — light the sky fill doesn't carry — and a broadcast camera's
+    // iris opens up: in race footage a passing cloud shadow drops the track a stop or so, flat and soft,
+    // never to the near-night a full cut of the sun made of the game's deep shade)
+    cloudShadowA.x = 0.62 * THREE.MathUtils.smoothstep(L.coverage, 0.12, 0.3) * (1 - ov);
+    cloudShadowA.y = shapeCov;
     cloudShadowB.z = L.cloudBase + L.cloudThick * 0.35;
 
     // ---- rain streaks: lit by the sky
@@ -512,7 +526,10 @@ export function createEnvironment(
     // (a camera exposed for the land lets a sunny sky run hot and pale: footage's daytime sky is nearly
     // white at the horizon and only a washed blue overhead, never the deep blue of a render)
     const skyHot = 1 + FILM.skyHot * L.sunVis * filmDay * THREE.MathUtils.smoothstep(P.elevation, 8, 30);
-    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot;
+    // (and a dry grey day's sky: a camera metering the land under a deck leaves the sky a bright grey-
+    // white, as in overcast race footage — the deck the dome draws is the light's, dim beside that)
+    const greyHot = 1 + 0.6 * L.overcast * (1 - wetK) * filmDay;
+    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot;
     sky.uniforms.uSkyComp.value = skyComp;
     // the low sky veiled by the mist / rain that veils the land (in the land's colour, so they meet):
     // how much of the horizon a few km of the air beyond the clear-day haze hides
@@ -645,22 +662,30 @@ export function createEnvironment(
     // heat haze: a bleached, milky sky and a big glare round the sun
     const milk = THREE.MathUtils.clamp(wx.heat * 1.3 - 0.25, 0, 1) * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.35) * (1 - L.overcast) * (1 - night);
     // (and a little of that milk on every sunny day: the pale, washed horizon of broadcast footage)
-    // (not under broken cloud: a bright strip under a dark deck reads as a seam, not haze)
-    const dayMilk = FILM.dayMilk * L.sunVis * (1 - night) * (P.direct ?? 1) * THREE.MathUtils.smoothstep(P.elevation, 8, 30) * (1 - THREE.MathUtils.smoothstep(L.coverage, 0.2, 0.6));
-    sky.uniforms.uMilk.value = milk * 0.8;
+    // (a bright strip under a dark deck reads as a seam, not haze: gone as the cumulus close up)
+    const dayMilk = FILM.dayMilk * L.sunVis * (1 - night) * (P.direct ?? 1) * THREE.MathUtils.smoothstep(P.elevation, 8, 30) * (1 - THREE.MathUtils.smoothstep(L.coverage, 0.35, 0.75));
+    sky.uniforms.uMilk.value = milk * 0.95;
     // (the visible dome only: the light the sky throws on the land stays the atmosphere's, so the land
     // keeps its contrast under the paler sky)
     sky.uniforms.uViewMilk.value = dayMilk;
-    // sunlit haze: bright and warm, not grey
+    // (the pale, slightly greyed blue of the low sky away from the sun, a touch brighter)
+    const hzA = C.horizonAway;
+    const hzL = hzA.r * 0.2126 + hzA.g * 0.7152 + hzA.b * 0.0722;
+    (sky.uniforms.uViewMilkCol.value as THREE.Vector3).set(THREE.MathUtils.lerp(hzA.r, hzL, 0.35) * 1.18, THREE.MathUtils.lerp(hzA.g, hzL, 0.35) * 1.18, THREE.MathUtils.lerp(hzA.b, hzL, 0.35) * 1.18);
+    // (a low sun's own horizon is many times brighter than the rest: the milk takes the sky away from it,
+    // or a hazy golden hour clips to a white wall)
+    const milkToward = 0.15 + 0.35 * THREE.MathUtils.smoothstep(P.elevation, 6, 25);
+    // sunlit haze: a bright, near-white glare, only faintly warm — a hazy summer sky is luminous and
+    // pale, never the dull grey (or, under a low sun, the olive-mustard) that a warm grey made of it
     const milkCol = (sky.uniforms.uMilkCol.value as THREE.Vector3).set(
-      (C.horizonAway.r * 0.4 + C.horizonToward.r * 0.6) * 1.12,
-      (C.horizonAway.g * 0.4 + C.horizonToward.g * 0.6) * 1.02,
-      (C.horizonAway.b * 0.4 + C.horizonToward.b * 0.6) * 0.8,
-    ).multiplyScalar(1.45);
+      THREE.MathUtils.lerp(C.horizonAway.r, C.horizonToward.r, milkToward) * 1.06,
+      THREE.MathUtils.lerp(C.horizonAway.g, C.horizonToward.g, milkToward) * 1.02,
+      THREE.MathUtils.lerp(C.horizonAway.b, C.horizonToward.b, milkToward) * 0.95,
+    ).multiplyScalar(1.7);
     if (milk > 0.001) {
       sky.uniforms.uHalo.value = (sky.uniforms.uHalo.value as number) * (1 + 2.2 * milk);
-      fog.color.lerp(nightTmp.setRGB(milkCol.x, milkCol.y, milkCol.z), milk * 0.6);
-      gradeLook.tint = [gradeLook.tint[0] * (1 + 0.05 * milk), gradeLook.tint[1] * (1 + 0.01 * milk), gradeLook.tint[2] * (1 - 0.08 * milk)];
+      fog.color.lerp(nightTmp.setRGB(milkCol.x, milkCol.y, milkCol.z), milk * 0.7);
+      gradeLook.tint = [gradeLook.tint[0] * (1 + 0.03 * milk), gradeLook.tint[1] * (1 + 0.01 * milk), gradeLook.tint[2] * (1 - 0.03 * milk)];
       gradeLook.exposure *= 1 + 0.06 * milk;
       gradeLook.contrast *= 1 - 0.04 * milk;
     }
@@ -924,6 +949,16 @@ export function createEnvironment(
     windOff.x += (wind.x * ws + 3.5) * dt;
     windOff.y += (wind.z * ws + 1.2) * dt;
     (clouds.uniforms.uWind.value as THREE.Vector2).copy(windOff);
+    // the wind aloft shears the cumulus (followed slowly: the gusts must not make the clouds breathe)
+    {
+      const ws = Math.hypot(wind.x, wind.z);
+      const k = Math.min(1, dt / 12);
+      shear.x += ((ws > 0.2 ? wind.x / ws : shear.x) - shear.x) * k;
+      shear.y += ((ws > 0.2 ? wind.z / ws : shear.y) - shear.y) * k;
+      shear.z += (THREE.MathUtils.smoothstep(ws, 5, 12) - shear.z) * k;
+      const l = Math.hypot(shear.x, shear.y) || 1;
+      (clouds.uniforms.uShear.value as THREE.Vector3).set(shear.x / l, shear.y / l, shear.z);
+    }
     cloudShadowA.z = windOff.x;
     cloudShadowA.w = windOff.y;
     if (debug.clouds) clouds.update(dt, camPos);

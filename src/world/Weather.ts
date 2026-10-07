@@ -107,7 +107,8 @@ export interface WeatherPlan {
 const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number; heat: number; conv: number }> = {
   clear: { cloud: 0.1, rain: 0, fog: 0, heat: 0.35, conv: 0 },
   haze: { cloud: 0.12, rain: 0, fog: 0.5, heat: 1, conv: 0 },
-  windy: { cloud: 0.46, rain: 0, fog: 0.02, heat: 0, conv: 0.1 },
+  // (a blustery day: fast, ragged broken cumulus — more of the sky than fair-weather cloud covers)
+  windy: { cloud: 0.54, rain: 0, fog: 0.02, heat: 0, conv: 0.1 },
   mist: { cloud: 0.5, rain: 0, fog: 0.9, heat: 0, conv: 0 },
   drying: { cloud: 0.35, rain: 0, fog: 0.15, heat: 0, conv: 0.2 },
   cloudy: { cloud: 0.52, rain: 0, fog: 0.05, heat: 0.15, conv: 0.25 },
