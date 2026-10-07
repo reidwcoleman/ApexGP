@@ -253,14 +253,23 @@ npm run check    # tsc --noEmit
   the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage (a tough car:
   rubs, taps and wheel-banging under ~45 km/h are free, 7× tougher than the original tuning, and only a
   big hit (~80 km/h square on) bends the suspension), tyre wear.
+  Past the peak the tyre curve falls away gently sideways but harder for a lock-up or wheelspin
+  (`SLIDE_DROP_*`: a locked tyre keeps ~80 % of its peak, a sideways slide ~90 %, as ACC's tyres do).
+  Tyre pressures as in ACC: the carcass soaks up the tread's heat over ~25 s and the gas follows it
+  (ideal gas, hot targets ~27 / 25 psi front / rear), so pressures build over the first lap out of the
+  blankets — under target the tyre is lazy and slippery, over target it is stiffer and pointier
+  (`tyreCore`, `tyrePress`; a time-trial / qualifying lap starts with them up, as after an out-lap).
+  Kerbs unseal the floor: a wheel on a kerb costs its axle downforce, a strike more for a moment
+  (`KERB_AERO*`), and a strike leaves the wheel running light for most of a tenth — an exit kerb on
+  the power takes grip off the rear.
   The chassis moves like a stiff F1 car (~2.5° of dive at 5 g, ~1.5° of roll, springs that settle with a
   little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
   and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).
-  Validated with `tools/handling.mjs`: 0–100 km/h 2.0 s, 0–200 3.9 s, top 336 (343 with DRS), 300→80 km/h in 78 m at
-  6.2 g peak (63 m with the assisted handling's brakes), 1.8 g cornering at 100 km/h up to ~5 g at 300 km/h, stable at full lock at any speed;
-  trail-braking rotates the car ~1.8× more than coasting into the same turn, full throttle at a 2nd-gear apex
-  steps the rear out ~18° with no assists (≈6° on Standard), and the wet table drops cornering grip to
-  ~63 % on slicks / ~77 % on inters at half-wet.
+  Validated with `tools/handling.mjs`: 0–100 km/h 1.9 s, 0–200 3.7 s, top 336 (343 with DRS), 300→80 km/h in 68 m at
+  6.8 g peak with ABS (86 m locked up without it, 56 m with the assisted handling's brakes), 2.1 g cornering at 100 km/h up to ~5 g at 280 km/h, stable at full lock at any speed;
+  trail-braking rotates the car ~1.6× more than coasting into the same turn, full throttle at a 2nd-gear apex
+  steps the rear out ~27° with no assists (≈5° on Standard), an exit kerb on the power at 200 km/h kicks
+  the yaw rate ~15°/s, and the wet table drops cornering grip to ~63 % on slicks / ~78 % on inters at half-wet.
   An AI flying lap of Monza is ~78.5 s dry (real pole ≈ 79 s), ~84 s on inters in a drizzle,
   ~88 s on wets in the rain.
 - **Driving like the F1 games** — full steering input maps to the front tyres' peak-grip angle at

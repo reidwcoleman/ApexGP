@@ -188,6 +188,8 @@ for (const [name, a] of [['sim', SIM], ['standard', STD]]) {
     const c = newCar(a);
     c.weather = { wetnessAt: () => wet, state: { airTemp: 18, trackTemp: 20 } };
     c.tyreType = type;
+    // the compound's working window as Pit.ts fits it (slick ~100 °C, inter 80, wet 65)
+    c.tyreOpt = [100, 80, 65][type];
     c.tyreTemp.fill(type ? 70 : 95);
     c.setSpeed(150 / 3.6);
     c.gear = 5;
@@ -231,4 +233,56 @@ for (const [what, wet, kerb] of [['dry', 0, false], ['dry kerb', 0, true], ['wet
     maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(c.vy - F1_SPEC.b * c.r, Math.max(1, c.vx))));
   }
   console.log(`abuse   standard ${what.padEnd(10)} full lock + full throttle at 75 km/h  max rear slip ${(maxBeta * 57.3).toFixed(1)}°  ${maxBeta > 0.6 ? 'SPUN' : maxBeta > 0.12 ? 'slides, caught' : 'grips'}`);
+}
+// 11. kerbs mid-corner: a steady corner near the limit, then the wheels ride a 15 m kerb — the inside
+// wheels at the apex (off throttle) and the outside wheels on the exit (on the power). How much the
+// car is upset: the biggest change in rear slip angle and yaw rate against the steady corner.
+for (const [name, a] of [['sim', SIM], ['standard', STD]]) {
+  for (const [where, kmhV, inside, thrK] of [['apex', 150, true, 0], ['exit', 200, false, 1]]) {
+    const c = newCar(a);
+    let kerbOn = false;
+    // the frame follows the car so the wheels' "lateral" stays left/right of it through the turn
+    const tr = { ...flat, frame: () => ({ heading: c.yaw }), surfaceAt: (s, lat) => (kerbOn && (inside ? lat < c.lateral - 0.3 : lat > c.lateral + 0.3) ? 1 : 0) };
+    c.setSpeed(kmhV / 3.6);
+    c.gear = kmhV < 170 ? 5 : 6;
+    let t = 0, r0 = 0, b0 = 0, dR = 0, dB = 0, spun = false;
+    const d = c.gripSteerLimit(c.vx) * 0.8;
+    const tOn = 2.0, tOff = 2.0 + 15 / (kmhV / 3.6);
+    while (t < 3.5) {
+      kerbOn = t > tOn && t < tOff;
+      let thr = 0.35 + (kmhV / 3.6 - c.vx) * 0.4;
+      if (kerbOn && thrK) thr = 1;
+      c.step(DT, inp({ steer: d, throttle: Math.max(0, Math.min(1, thr)) }), tr, false);
+      t += DT;
+      const b = Math.atan2(c.vy - F1_SPEC.b * c.r, Math.max(1, c.vx));
+      if (t < tOn) { r0 = c.r; b0 = b; }
+      else { dR = Math.max(dR, Math.abs(c.r - r0)); dB = Math.max(dB, Math.abs(b - b0)); if (Math.abs(b) > 0.6) spun = true; }
+    }
+    console.log(`kerbcnr ${name.padEnd(8)} ${where} kerb at ${kmhV} km/h (80% lock${thrK ? ', full throttle' : ''})  yaw-rate upset ${(dR * 57.3).toFixed(1)}°/s  rear slip upset ${(dB * 57.3).toFixed(1)}°  ${spun ? 'SPUN' : 'held'}`);
+  }
+}
+// 12. tyres out of the blankets (80 °C, softs): a lap-like cycle (3 s of a 200 km/h corner at 50 %
+// lock, ~3.3 g; 6 s of straight at 250) — tread and carcass temperature, hot pressure and grip as they
+// come up to the window (outside front / outside rear)
+{
+  const c = newCar({ stability: false });
+  c.tyreOpt = 98;
+  c.setSpeed(200 / 3.6);
+  c.gear = 6;
+  let t = 0;
+  const marks = [0.01, 20, 60, 120];
+  const row = [];
+  while (t < 121) {
+    const corner = t % 9 < 3;
+    const vT = (corner ? 200 : 250) / 3.6;
+    const thr = 0.35 + (vT - c.vx) * 0.4;
+    c.step(DT, inp({ steer: corner ? c.gripSteerLimit(c.vx) * 0.5 : 0, throttle: Math.max(0, Math.min(1, thr)), brake: c.vx > vT + 3 ? 0.6 : 0 }), flat, false);
+    t += DT;
+    for (const m of marks) if (t >= m && t - DT < m) {
+      const p = c.tyrePress ? `${c.tyrePress[1].toFixed(1)}/${c.tyrePress[3].toFixed(1)} psi` : '-';
+      const core = c.tyreCore ? `${c.tyreCore[1].toFixed(0)}/${c.tyreCore[3].toFixed(0)}` : '-';
+      row.push(`${m.toFixed(0).padStart(3)} s: tread ${c.tyreTemp[1].toFixed(0)}/${c.tyreTemp[3].toFixed(0)} °C  carcass ${core} °C  ${p}  grip ${(c.gripFactor * 100).toFixed(1)}%`);
+    }
+  }
+  console.log(`warmup  softs from the blankets: 3 s of a 200 km/h corner, 6 s of straight, repeated (outside front / rear)\n        ${row.join('\n        ')}`);
 }

@@ -273,6 +273,47 @@ const TYRE_COOL_0 = 0.012;
 const TYRE_COOL_V = 0.00042;
 const TYRE_COOL_WET = 0.05;
 
+/**
+ * Tyre pressure, the way ACC models it: the gas inside follows the carcass, and the carcass soaks
+ * up the tread's heat over ~half a minute (TYRE_CORE_T) — so pressures come up over the first lap
+ * or two out of the blankets, keep climbing after a slide, and don't drop on one straight. The
+ * engineers set the cold pressure so the tyre reaches its target hot pressure with the carcass in
+ * the compound's window (Pirelli quotes hot F1 pressures of ~27 psi front / ~25 rear); the gas
+ * obeys the ideal-gas law on absolute pressure (~0.11 psi per °C). Under target the carcass squirms
+ * and the patch rolls under: grip falls away with the square of the error (ACC's narrow window,
+ * ~1.8 % at 2 psi short — the slippery out-lap) and the tyre is lazy (its peak slip angle grows).
+ * Over target the carcass is stiffer: pointier, with an earlier peak; the grip that costs is already
+ * the overheated tread's (tempGrip), so it isn't charged twice — a hot track can't spiral.
+ */
+const ATM_PSI = 14.7;
+const P_HOT_F = 27.0;
+const P_HOT_R = 25.0;
+const TYRE_CORE_T = 25;
+const PRESS_GRIP = 0.0045;
+const PRESS_GRIP_MIN = 0.92;
+const PRESS_STIFF = 0.025;
+
+/**
+ * Past the peak the tyre slides, and rubber gives less the faster it slides: a locked or spinning
+ * tyre (all longitudinal slip) loses up to SLIDE_DROP_L more than the combined curve on its own, a
+ * sideways slide only SLIDE_DROP_T — ACC's long, gentle lateral falloff you can lean on, but a
+ * lock-up or a stamp of wheelspin that really costs. Half the drop is reached SLIDE_W peak-slips
+ * past the peak, so near the limit nothing changes.
+ */
+const SLIDE_DROP_L = 0.14;
+const SLIDE_DROP_T = 0.04;
+const SLIDE_W2 = 2 * 2;
+
+/**
+ * Kerbs upset the aero platform: a wheel on the kerb lifts its corner of the floor and unseals it,
+ * so the axle loses part of its downforce (both wheels: KERB_AERO), and a strike onto a kerb kicks
+ * the car up for a moment on top (KERB_AERO_STRIKE, gone in ~0.1 s). Exit kerbs take grip off the
+ * rear on the power, apex kerbs off the front — why F1 drivers ride the flat kerbs and avoid the
+ * sausages, and why ACC punishes too much kerb at speed.
+ */
+const KERB_AERO = 0.1;
+const KERB_AERO_STRIKE = 0.12;
+
 /** fuel burn at full throttle (kg/s): ~100 kg/h, the regulation flow limit */
 export const FUEL_FLOW = 0.0275;
 
@@ -357,6 +398,12 @@ export class CarPhysics {
   tyreOpt = 100;
   /** tyre surface/carcass temperature per wheel (°C) */
   readonly tyreTemp = [80, 80, 80, 80];
+  /** carcass (core) temperature per wheel (°C): the tread's temperature soaked in (see TYRE_CORE_T) */
+  readonly tyreCore = [80, 80, 80, 80];
+  /** hot tyre pressure per wheel (psi, gauge), from the carcass temperature */
+  readonly tyrePress = [P_HOT_F, P_HOT_F, P_HOT_R, P_HOT_R];
+  /** the tyre set the carcass temperatures belong to (a new set starts at its blanket temperature) */
+  private coreSet = -1;
   /** water under each tyre, 0 … 1 */
   readonly wetW = [0, 0, 0, 0];
   /** sliding power per tyre right now (W): longitudinal and lateral */
@@ -481,6 +528,16 @@ export class CarPhysics {
     for (let i = 0; i < 4; i++) this.omega[i] = 0;
   }
 
+  /**
+   * The out-lap done: the carcasses (and so the pressures) of the set fitted now at the compound's
+   * working temperature — for a flying lap that starts without one (time trial, one-shot qualifying).
+   * The tread keeps its own temperature.
+   */
+  warmCarcass() {
+    this.coreSet = this.tyreSet;
+    for (let i = 0; i < 4; i++) this.tyreCore[i] = this.tyreOpt;
+  }
+
   /** give the car a speed along its heading with wheels spinning to match */
   setSpeed(v: number) {
     this.vx = v;
@@ -569,7 +626,15 @@ export class CarPhysics {
     const s = Math.hypot(sx, sy);
     let k: number;
     if (s < 1e-4) k = Fmax * this.tyreBC;
-    else k = (Fmax * Math.sin(this.tyreC * Math.atan(this.tyreB * s))) / s;
+    else {
+      k = (Fmax * Math.sin(this.tyreC * Math.atan(this.tyreB * s))) / s;
+      // sliding past the peak: more falloff the more of the slide is lock-up / wheelspin (SLIDE_DROP_*)
+      if (s > 1) {
+        const e2 = (s - 1) * (s - 1);
+        const shareL = (sx * sx) / (s * s);
+        k *= 1 - (SLIDE_DROP_L * shareL + SLIDE_DROP_T * (1 - shareL)) * (e2 / (e2 + SLIDE_W2));
+      }
+    }
     out[0] = k * sx;
     out[1] = -k * sy;
   }
@@ -675,9 +740,20 @@ export class CarPhysics {
     const down = q * clA;
     const drag = q * cdA;
     const balance = Math.max(0.36, Math.min(0.5, sp.aeroFront + Math.max(-0.015, Math.min(0.022, -this.ax * sp.pitchAero))));
+    // kerbs unseal the floor at that axle (KERB_AERO): riding them, plus a moment's lift from a strike
+    let kerbF = 0;
+    let kerbR = 0;
+    for (let i = 0; i < 4; i++) {
+      let k = this.surface[i] === SURF.KERB ? 0.5 : 0;
+      if (this.strikeT[i] < 0.15) k += ((0.5 * KERB_AERO_STRIKE) / KERB_AERO) * this.strikeA[i] * Math.exp(-this.strikeT[i] * 20);
+      if (FRONT[i]) kerbF += k;
+      else kerbR += k;
+    }
+    const kerbAeroF = 1 - KERB_AERO * Math.min(2, kerbF);
+    const kerbAeroR = 1 - KERB_AERO * Math.min(2, kerbR);
     // a broken front wing costs front downforce (understeer), a broken rear wing the rear (oversteer)
-    const downF = down * balance * (1 - 0.2 * (dm[DMG.FWL] + dm[DMG.FWR]) - 0.12 * dm[DMG.NOSE]);
-    const downR = down * (1 - balance) * (1 - 0.45 * dm[DMG.RW]);
+    const downF = down * balance * kerbAeroF * (1 - 0.2 * (dm[DMG.FWL] + dm[DMG.FWR]) - 0.12 * dm[DMG.NOSE]);
+    const downR = down * (1 - balance) * kerbAeroR * (1 - 0.45 * dm[DMG.RW]);
 
     // ---- loads
     const Fz0 = (sp.mass * G) / 4;
@@ -700,10 +776,12 @@ export class CarPhysics {
         this.kerbPhase[i] += (v * dt * Math.PI * 2) / 1.05;
         this.load[i] *= 1 + 0.32 * Math.sin(this.kerbPhase[i]);
       }
-      // the strike: a spike, then the wheel hops light (≈13 Hz, gone in a tenth) — on one side of the
-      // car that is a yaw kick the driver feels, and on the power or the brakes it can break traction
+      // the strike: a sharp spike (~10 ms) as the tyre hits the ramp, then the wheel rebounds and runs
+      // light for most of a tenth (lightest, about half its load, at 30 ms) — net, the wheel has less
+      // grip, not more: on one side of the car that is a yaw kick the driver has to catch, and on the
+      // power or the brakes it can break traction
       const st = this.strikeT[i];
-      if (st < 0.25) this.load[i] *= 1 + 0.75 * this.strikeA[i] * Math.exp(-st * 16) * Math.sin(st * Math.PI * 2 * 13);
+      if (st < 0.25) this.load[i] *= 1 + this.strikeA[i] * (0.9 * Math.exp(-st / 0.012) - 0.55 * (st / 0.03) * Math.exp(1 - st / 0.03));
       this.strikeT[i] = st + dt;
       if (this.load[i] < 40) this.load[i] = 40;
     }
@@ -794,6 +872,12 @@ export class CarPhysics {
     const cd = Math.cos(delta);
     const sd = Math.sin(delta);
     const tAmb = this.weather ? 0.35 * this.weather.state.airTemp + 0.65 * this.weather.state.trackTemp : 36;
+    // a new set of tyres (a pit stop, a new session) comes with its carcass at the blanket temperature
+    if (this.coreSet !== this.tyreSet) {
+      this.coreSet = this.tyreSet;
+      for (let i = 0; i < 4; i++) this.tyreCore[i] = this.tyreTemp[i];
+    }
+    const kCore = Math.min(1, dt / TYRE_CORE_T);
     for (let i = 0; i < 4; i++) {
       const front = FRONT[i];
       const c = front ? cd : 1;
@@ -803,7 +887,15 @@ export class CarPhysics {
       const vl = vxw * c + vyw * s;
       const vt = -vxw * s + vyw * c;
       const vref = Math.max(Math.abs(vl), V_MIN);
-      const sy = vt / vref / (front ? ap : apR);
+      // pressure from the carcass temperature: its error from the target sets the patch's grip and the
+      // carcass stiffness (the slip angle at the peak)
+      const core = (this.tyreCore[i] += (this.tyreTemp[i] - this.tyreCore[i]) * kCore);
+      const pHot = front ? P_HOT_F : P_HOT_R;
+      const dp = ((pHot + ATM_PSI) * (core - this.tyreOpt)) / (this.tyreOpt + 273.15);
+      this.tyrePress[i] = pHot + dp;
+      const pressGrip = dp < 0 ? Math.max(PRESS_GRIP_MIN, 1 - PRESS_GRIP * dp * dp) : 1;
+      const pressStiff = Math.max(0.9, Math.min(1.1, 1 - PRESS_STIFF * dp));
+      const sy = vt / vref / ((front ? ap : apR) * pressStiff);
       const sc = this.surface[i];
       const Fz = this.load[i];
       const wearGrip = 1 - 0.14 * Math.pow(this.wear[i], 1.6);
@@ -817,7 +909,7 @@ export class CarPhysics {
       // damaged suspension: the wheel is out of alignment, a broken one barely touches the road
       const sd8 = this.damageMode === 'full' ? this.susp[i] : 0;
       const suspGrip = sd8 >= 0.999 ? 0.3 : 1 - 0.4 * sd8;
-      const cond = weatherGrip * tGrip * wearGrip * this.compoundGrip * suspGrip;
+      const cond = weatherGrip * tGrip * pressGrip * wearGrip * this.compoundGrip * suspGrip;
       gripSum += cond;
       const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond * (this.assists.arcade ? ARCADE_GRIP : 1);
       const Fmax = muI * Fz;
