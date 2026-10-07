@@ -158,6 +158,18 @@ npm run check    # tsc --noEmit
   pavilion under an orange fascia and the orange gantry into Tarzan; COTA's white Paddock Club blade with its fin
   screen and the court-sized logos in the Turn 1 run-off; Interlagos's big boards up the Subida dos Boxes and the
   painted S do Senna. Seat colours per venue (`VENUE_SEATS`).
+- **Venue dressing for Monza, Spa, Silverstone, Suzuka and the Hungaroring** (`env/venues/*Dress.ts` on
+  `venueDressKit.ts`, planned with the layout so trees and stands keep off, built with the scenery) — each venue's own
+  footbridges where the real ones cross (`dressBridges.ts`; the trackside's automatic arches keep clear): Monza's
+  Rettifilo bridge and the one before the Parabolica, Spa's bridge by the old pits on the run to Eau Rouge, the Kemmel
+  bridge and the run toward Blanchimont, Silverstone's Wellington and Hangar Straight bridges, Suzuka's main-straight
+  bridge, the yellow Dunlop arch and the back straight, the Hungaroring's back straight and Turn 12 run — enclosed box
+  girders, open trusses or (Dunlop) an arch, one title sponsor across each face as the real ones are sold, stair
+  towers wherever the stands and fans' banks leave room. Self-lit LED boards along the main grandstand walls. Spa's
+  old pits stepping down the hill to Eau Rouge (fans on the roof rail, the old timekeepers' box at the top), the old
+  National pits and the drivers' clubhouse at Woodcote at Silverstone, Suzuka's big boards round 130R, painted
+  run-off logos at more corners (`trackside/markings.ts` `RUNOFF_LOGOS`). Its own banner atlas of fictional brands
+  in the real boards' colour blocks (a green-and-gold watchmaker, a yellow freight company, a green lager…).
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars

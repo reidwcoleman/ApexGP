@@ -13,6 +13,10 @@ import { planMexico } from './venues/mexico.ts';
 import { planSakhir } from './venues/sakhir.ts';
 import { planHungaroring } from './venues/hungaroring.ts';
 import { planYasmarina } from './venues/yasmarina.ts';
+import { planMonzaDress } from './venues/monzaDress.ts';
+import { planSpaDress } from './venues/spaDress.ts';
+import { planSilverstoneDress } from './venues/silverstoneDress.ts';
+import { planSuzukaDress } from './venues/suzukaDress.ts';
 
 /**
  * Where everything goes in the Parco di Monza. Computed from the track (corner
@@ -428,6 +432,8 @@ export function planLayout(track: Track, map: WorldMap): Layout {
     map.clearings.push({ x: vx, z: vz - 260, r: 190, soft: 90, keep: 0.02 });
     map.exclusions.push({ cx: vx, cz: vz + 25, halfW: 75, halfL: 70, angle: 0.28 });
   }
+  // the venue's own footbridges (venues/monzaDress.ts): their ground reserved before the hospitality and the trees
+  planMonzaDress(track, map, gs, banks);
   addHospitality(track, map, landmarks, [[300, -1], [560, -1], [820, -1]], 98);
   addCameraTowers(track, map, landmarks, ['Turn 1', 'Roggia', 'Lesmo 1', 'Ascari', 'Parabolica']);
 
@@ -562,6 +568,8 @@ function planSpa(
   };
   // hospitality on the paddock hillside, TV towers at the big corners
   const landmarks: Landmark[] = [];
+  // the venue's own footbridges and the old pits on the run down to Eau Rouge (venues/spaDress.ts)
+  planSpaDress(track, map, gs, banks);
   addHospitality(track, map, landmarks, [[470, 1], [650, 1]], 104);
   addCameraTowers(track, map, landmarks, ['La Source', 'Raidillon', 'Les Combes', 'Pouhon', 'Blanchimont', 'Bus Stop']);
   return { grandstands: gs, banks, screens, oval: null, pit: pitSpec, flagpoles, poplarRows: [], avenueTrees: [], villages: [], landmarks };
@@ -604,7 +612,8 @@ function planSilverstone(
   addStand('Luffield', lu.sStart - 30, lu.sEnd - 20, L, 20, 'covered', 8, 60);
   const wc = corner('Woodcote');
   addStand('Woodcote', wc.sStart - 60, wc.sEnd + 40, L, 18, 'covered', 8, 70);
-  addStand('National Pits Straight', wc.sEnd + 80, wc.sEnd + 300, R, 16, 'open', 7, 75);
+  // (on the outside, opposite the old National pits on the inside: silverstoneDress.ts)
+  addStand('National Pits Straight', wc.sEnd + 60, wc.sEnd + 160, L, 16, 'open', 7, 75);
   const co = corner('Copse');
   addStand('Copse', co.sStart - 170, co.sApex, L, 20, 'covered', 8, 70);
   const bk = corner('Becketts');
@@ -767,6 +776,8 @@ function planSilverstone(
   }
   // hospitality: the paddock behind the Wing, the big village at Club and Abbey; TV towers
   const landmarks: Landmark[] = [];
+  // the venue's own footbridges and the old National pits (venues/silverstoneDress.ts)
+  planSilverstoneDress(track, map, gs, banks);
   addHospitality(track, map, landmarks, [[260, -1], [520, -1], [cl.sApex - 40, 1], [ab.sStart - 60, 1]], 96);
   addCameraTowers(track, map, landmarks, ['Abbey', 'Village', 'Luffield', 'Copse', 'Becketts', 'Stowe']);
   landmarks.push(...fields);
@@ -930,6 +941,8 @@ function planSuzuka(
     map.exclusions.push({ cx: h.x, cz: h.z, halfW: 46, halfL: 18, angle: Math.atan2(fh.tangent.x, fh.tangent.z) });
     clear(h.x, h.z, 70, 30, 0.1);
   }
+  // the venue's own footbridges (venues/suzukaDress.ts): their ground reserved before the hospitality and the trees
+  planSuzukaDress(track, map, gs, banks);
   addHospitality(track, map, landmarks, [[360, -1], [560, -1], [760, -1]], 98);
   addCameraTowers(track, map, landmarks, ['Turn 1', 'S Curves', 'Degner 2', 'Hairpin', 'Spoon', '130R', 'Casio Triangle']);
 

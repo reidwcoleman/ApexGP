@@ -4,6 +4,7 @@ import type { WorldMap, V2 } from '../worldmap.ts';
 import type { GrandstandSpec, Landmark, Layout, ScreenSpec, SpectatorBank, StandStyle } from '../layout.ts';
 import { fbm2 } from '../noise.ts';
 import { HUNGARORING_TOWNS, hungaroringM3, hungaroringUrban } from './hungaroringLand.ts';
+import { planHungaroringDress } from './hungaroringDress.ts';
 
 /**
  * The Hungaroring's stands, banks and landmarks (the land itself is in hungaroringLand.ts).
@@ -172,6 +173,8 @@ export function planHungaroring(track: Track, map: WorldMap, addStand: AddStand,
 
   // landmarks
   const landmarks: Landmark[] = [];
+  // the venue's own footbridges (hungaroringDress.ts): their ground reserved before the hospitality and the trees
+  planHungaroringDress(track, map, gs, banks);
   addHospitality(track, map, landmarks, [[470, -1], [700, -1], [t1.sStart - 30, -1]], 92);
   addCameraTowers(track, map, landmarks, ['Turn 1', 'Turn 2', 'Turn 4', 'Turn 5', 'Turn 6', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 13', 'Turn 14']);
   planHungaroringSpots(track, map, HUNGARORING_SPOTS);

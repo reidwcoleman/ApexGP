@@ -7,19 +7,31 @@ import { buildSpielbergDress } from './spielbergDress.ts';
 import { buildZandvoortDress } from './zandvoortDress.ts';
 import { buildAustinDress } from './austinDress.ts';
 import { buildInterlagosDress } from './interlagosDress.ts';
+import { buildMonzaDress } from './monzaDress.ts';
+import { buildSpaDress } from './spaDress.ts';
+import { buildSilverstoneDress } from './silverstoneDress.ts';
+import { buildSuzukaDress } from './suzukaDress.ts';
+import { buildHungaroringDress } from './hungaroringDress.ts';
 
 /**
- * The venue's own race-weekend dressing (dressKit.ts): its gantries, hoardings, big boards,
- * painted run-off and the features on top of its pit building. Null for a circuit without one.
+ * The venue's own race-weekend dressing. Two kits: dressKit.ts (Montréal, Spielberg, Zandvoort,
+ * Austin, Interlagos: gantries, hoardings, big boards, painted run-off, the features on top of the
+ * pit building) and venueDressKit.ts (Monza, Spa, Silverstone, Suzuka, the Hungaroring: footbridges,
+ * LED boards, the old pit rows, planned with the layout). Null for a circuit without one.
  * (A failure here must not take the landscape with it.)
  */
 export function buildVenueDress(track: Track, map: WorldMap, layout: Layout): THREE.Group | null {
-  const build: Record<string, (t: Track, m: WorldMap, l: Layout) => THREE.Group> = {
+  const build: Record<string, (t: Track, m: WorldMap, l: Layout) => THREE.Group | null> = {
     montreal: buildMontrealDress,
     spielberg: buildSpielbergDress,
     zandvoort: buildZandvoortDress,
     austin: buildAustinDress,
     interlagos: buildInterlagosDress,
+    monza: buildMonzaDress,
+    spa: buildSpaDress,
+    silverstone: buildSilverstoneDress,
+    suzuka: buildSuzukaDress,
+    hungaroring: buildHungaroringDress,
   };
   const fn = build[track.def.id];
   if (!fn) return null;
