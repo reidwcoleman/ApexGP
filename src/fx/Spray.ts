@@ -62,9 +62,10 @@ export class SprayEmitters {
   /** spray intensity for a car: water × speed (0 … 1) */
   static intensity(wet: number, speed: number) {
     if (wet <= 0.01) return 0;
-    // heavy already at 100 km/h, full from ~200 km/h
+    // heavy already at 100 km/h, full from ~200 km/h; a damp drizzle track throws a fine mist, a
+    // wet one the full plume
     const s = smooth(5, 56, speed);
-    return Math.min(1, Math.pow(Math.min(1, wet * 1.35), 0.8) * Math.pow(s, 0.9));
+    return Math.min(1, Math.pow(Math.min(1, wet * 1.3), 1.1) * Math.pow(s, 0.9));
   }
 
   /** emit this frame's spray for car `id`; returns its intensity */
@@ -94,10 +95,15 @@ export class SprayEmitters {
     const g = c.y;
     const vx = c.vx, vz = c.vz;
     const rnd = Math.random;
-    // spray albedo: grey translucent mist rather than a lit white cloud (it reads like the footage's
-    // spray at any exposure and never clips against a bright wet sky)
-    const bright = 0.54 + 0.05 * I;
+    // spray albedo: fine water droplets scatter nearly all the light they get — a plume under a grey
+    // sky is about as bright as the light falling on it, a little under the horizon sky behind it
+    // (it never clips where the sky doesn't). At 0.54 a plume 150 m down the road read as dark
+    // smoke against the wet haze, darker than the air it hung in.
+    const bright = (0.7 + 0.06 * I) * p.mistGain;
     const selfK = c.self ? 0.4 : 1;
+    // standing water, not just a wet surface: a storm's flooded track throws a taller, wider plume
+    // that hangs longer (Spa 2021, Silverstone 2023: a wall of spray 4–6 m high behind every car)
+    const deep = smooth(0.45, 1, c.wet);
 
     const run = (slot: number, spacing: number, fn: (px: number, pz: number, pre: number) => void) => {
       let a = st!.acc[slot] + D;
@@ -117,8 +123,12 @@ export class SprayEmitters {
     };
 
     // ---- plume (rooster tail)
-    // fill rate is the budget: fewer, denser puffs (fill ∝ count × area, opacity ∝ alpha × count)
-    const spP = (lod === 0 ? 4.2 : lod === 1 ? 6.5 : 11) / q / (0.55 + 0.45 * I);
+    // fill rate is the budget (fill ∝ count × area, opacity ∝ alpha × count) — but too few, too
+    // dense puffs read from above and from the long lenses as a string of cotton balls: a plume is a
+    // continuous trail, so more of them, fainter, overlapping (and its opacity is the path through
+    // it: tens of metres of trail from behind — a wall — but only its few metres of depth from the
+    // helicopter, where the cars in it stay visible)
+    const spP = (lod === 0 ? 2.6 : lod === 1 ? 4.4 : 8.0) / q / (0.55 + 0.45 * I);
     const sizeK = lod === 0 ? 1 : lod === 1 ? 1.25 : 1.6;
     const plume = (side: number) => (px: number, pz: number, pre: number) => {
       const r = rnd();
@@ -130,13 +140,16 @@ export class SprayEmitters {
       const out = side === 0 ? (rnd() - 0.5) * 0.8 : side * (0.15 + rnd() * 0.8);
       const k = 0.55 + rnd() * 0.3;
       // thrown steeply up behind the tyres, then hanging: rises ~2–3.5 m within ~0.4 s
-      const up = (3.8 + rnd() * 3.4) * (0.45 + 0.55 * I) * (side === 0 ? 1.15 : 1);
+      const up = (3.8 + rnd() * 3.4) * (0.45 + 0.55 * I) * (side === 0 ? 1.15 : 1) * (1 + 0.55 * deep);
       p.puff(
         wx, g + ly, wz,
         vx * k + cy * out, up, vz * k - sy * out,
-        (1.0 + 1.6 * r) * (0.55 + 0.45 * I), (0.8 + 0.3 * rnd()) * sizeK, (1.5 + 1.2 * r) * (0.6 + 0.4 * I) * sizeK,
-        Math.min(0.78, (0.5 + 0.28 * rnd()) * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1)) * selfK, bright,
-        1.1, -0.1, 0, g, 0.35, 0.015, 2.6, pre,
+        (1.0 + 1.6 * r) * (0.55 + 0.45 * I) * (1 + 0.45 * deep), (0.45 + 0.25 * rnd()) * sizeK, (1.2 + 1.0 * r) * (0.6 + 0.4 * I) * sizeK * (1 + 0.4 * deep),
+        Math.min(0.45, (0.25 + 0.16 * rnd()) * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1) * (1 + 0.2 * deep)) * selfK, bright,
+        // (born compact at the tyre and faded in over its first ~0.2 s: the footage's plume is
+        // thin right at the diffuser and thickest a few metres back, so the car stays readable
+        // inside it instead of drawing as a white ghost; eroded into wisps as it spreads)
+        1.1, -0.1, 0, g, 0.5, 0.08, 2.6, pre,
       );
     };
     run(E_PLUME_L, spP, plume(1));
@@ -150,8 +163,8 @@ export class SprayEmitters {
         p.puff(
           px + sy * back + (rnd() - 0.5) * 1.5, g + 0.6 + rnd() * 0.8, pz + cy * back + (rnd() - 0.5) * 1.5,
           vx * 0.22, 0.25 + rnd() * 0.4, vz * 0.22,
-          (2.2 + rnd() * 1.4) * (0.6 + 0.4 * I), 1.4 * sizeK, (3.6 + rnd() * 1.8) * sizeK,
-          0.16 * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, 0, g, 0.4, 0.12, 0.8, pre,
+          (2.2 + rnd() * 1.4) * (0.6 + 0.4 * I) * (1 + 0.6 * deep), 1.4 * sizeK, (3.6 + rnd() * 1.8) * sizeK * (1 + 0.3 * deep),
+          (0.16 + 0.08 * deep) * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, 0, g, 0.4, 0.12, 0.8, pre,
         );
       });
     }
@@ -171,7 +184,7 @@ export class SprayEmitters {
         wx, g + 0.3 + rnd() * 0.2, wz,
         vx * k + cy * out, (2.5 + rnd() * 3.5) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.3 + rnd() * 0.25, 0.18, 0.7 + rnd() * 0.5,
-        0.6 * I * (c.self ? 0.6 : 1), 0.8, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
+        0.6 * I * (c.self ? 0.6 : 1), 0.8 * p.mistGain, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
       );
     };
     run(E_SHEET_L, spS, sheet(1));
@@ -190,7 +203,7 @@ export class SprayEmitters {
         wx, g + 0.18 + rnd() * 0.15, wz,
         vx * k + cy * out, (0.7 + rnd() * 1.6) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.35 + rnd() * 0.35, 0.16, 0.8 + rnd() * 0.5,
-        0.32 * I * (c.self ? 0.6 : 1), 0.76, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
+        0.32 * I * (c.self ? 0.6 : 1), 0.76 * p.mistGain, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
       );
     };
     run(E_FRONT_L, spF, front(1));

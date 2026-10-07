@@ -292,6 +292,7 @@ export function createEnvironment(
   let elapsed = 0;
   const wind = { x: weather.windX, z: weather.windZ };
   let lastLightning = 0;
+  let lastStrike = 0;
   let flashLevel = 0;
   const last = { cloud: -1, rain: -1, fog: -1, time: '' as string };
   let indoor = 0;
@@ -487,6 +488,8 @@ export function createEnvironment(
 
     // ---- rain streaks: lit by the sky
     const rc = tmpA.set(skyGrey, skyGrey, skyGrey).lerp(deck, ov).multiplyScalar(0.55);
+    // …and by the sun when it shines through a shower: each drop throws a glint of it
+    rc.add(tmpB.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.012));
     rain.set(L.rain, wind.x, wind.z, rc);
     rainBase.copy(rc);
 
@@ -697,8 +700,9 @@ export function createEnvironment(
     const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
     // (a shower's own spray mist is where the bow is seen: only real fog washes it out)
     u.uBow.value = bow;
-    // rain lit from behind by the sun glitters
-    rain.setSun(sunDir, nightTmp.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.08 * (1 - night)));
+    // rain lit from behind by the sun glitters (each drop a tiny lens throwing the sun at the camera:
+    // a streak far brighter than the sky behind it — the silver rain of a sun shower)
+    rain.setSun(sunDir, nightTmp.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.4 * (1 - night)));
     const bowI = P.sunIntensity * 0.045;
     (u.uBowCol.value as THREE.Vector3).set(C.sunCol.r * bowI, C.sunCol.g * bowI, C.sunCol.b * bowI);
     u.uBowEl.value = -Math.min(P.elevation, 20) * DEG;
@@ -883,7 +887,9 @@ export function createEnvironment(
     }
     // lightning: a flicker that lights the deck, the scene and the exposure
     const L = Math.max(0, Math.min(1, w.lightning));
-    if (L > 0.5 && lastLightning <= 0.5 && flashLevel < 0.3) {
+    const km = w.strikeKm ?? 2;
+    const strike = w.strike ?? 0;
+    if (strike !== lastStrike || (w.strike === undefined && L > 0.5 && lastLightning <= 0.5 && flashLevel < 0.3)) {
       // new strike: mostly somewhere ahead of the camera so it is actually seen
       const ahead = Math.atan2(camFwd.z, camFwd.x);
       const a =
@@ -894,19 +900,29 @@ export function createEnvironment(
             : Math.random() * Math.PI * 2;
       (sky.uniforms.uFlashDir.value as THREE.Vector3).set(Math.cos(a), 0.12 + Math.random() * 0.1, Math.sin(a)).normalize();
       sky.uniforms.uBoltSeed.value = Math.random() * 100;
-      sky.uniforms.uBoltTop.value = Math.atan2(look.cloudBase, 700 + Math.random() * 1900);
+      // the channel stands as tall as the cloud base looks from this far away
+      sky.uniforms.uBoltTop.value = Math.atan2(look.cloudBase, Math.max(450, km * 1000));
     }
+    lastStrike = strike;
     lastLightning = L;
     flashLevel = L;
-    sky.uniforms.uFlash.value = L;
+    // A flash lights the land by what it adds to the light already there: a strike in the next field
+    // floods a night circuit white, the same strike at noon under a storm deck is a flicker, and one
+    // 10 km off only lights its own cloud (the old full flash at midday blew the whole frame out).
+    const dark = w.time === 'night' ? 1 : w.time === 'dusk' ? 0.85 : isLowSun(w.time) ? 0.6 : 0.32;
+    const near = THREE.MathUtils.clamp(2.2 / (1 + km), 0.18, 1);
+    const Ls = L * dark * near;
+    // (the spray and mist light up with the land, not with the raw flash)
+    weatherUniforms.uLightning.value = Ls;
+    sky.uniforms.uFlash.value = L * (0.45 + 0.55 * near) * (0.55 + 0.45 * dark);
     // the deck lit from inside: several times its own brightness, cold white
     (sky.uniforms.uFlashCol.value as THREE.Vector3).set(0.9, 0.95, 1.15).multiplyScalar(Math.max(0.12, lightInfo.deckRad ?? 0.2) * 4.5);
-    // the channel stays lit through the restrikes, fading with them
-    sky.uniforms.uBolt.value = L > 0.12 ? Math.max(L, 0.45) : 0;
+    // the channel stays lit through the restrikes, fading with them (sheet lightning shows none)
+    sky.uniforms.uBolt.value = L > 0.12 && (w.strikeBolt ?? 1) > 0.5 ? Math.max(L, 0.45) : 0;
     // the whole scene lights up cold white for an instant (the flash fills the sky the env map is made of)
-    scene.environmentIntensity = look.envIntensity * (1 + L * 2.6) * (1 - 0.72 * indoor);
-    hemi.intensity = (look.hemi + L * 1.1 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
-    gfx.setFlash(L * 0.3);
+    scene.environmentIntensity = look.envIntensity * (1 + Ls * 2.6) * (1 - 0.72 * indoor);
+    hemi.intensity = (look.hemi + Ls * 1.1 * (1 - look.sunVis * 0.6)) * (1 - 0.8 * indoor);
+    gfx.setFlash(Ls * 0.3);
   }
 
   function update(dt: number, camera: THREE.Camera) {

@@ -67,6 +67,11 @@ export interface WeatherState {
   windZ: number;
   /** lightning flash brightness this frame, 0 … 1 */
   lightning: number;
+  /** strikes so far this session (a change = a new strike), how far away the last one was (km), and
+   *  whether it came to ground (1: a visible channel) or stayed in the cloud (0: sheet lightning) */
+  strike?: number;
+  strikeKm?: number;
+  strikeBolt?: number;
   /** °C */
   airTemp: number;
   trackTemp: number;
@@ -324,6 +329,9 @@ export class Weather {
       windX: plan.windX,
       windZ: plan.windZ,
       lightning: 0,
+      strike: 0,
+      strikeKm: 3,
+      strikeBolt: 0,
       airTemp: 0,
       trackTemp: 0,
       t: 0,
@@ -417,6 +425,12 @@ export class Weather {
         this.flashT = 0;
         this.nextFlash = thunder ? 3 + Math.random() * 7 : 10 + Math.random() * 20;
         const sheet = Math.random() < 0.35;
+        // how far off: ground strikes anywhere from the next field to the far side of the storm cell
+        // (0.5 … 6 km, more of them close); sheet lightning flickers deeper in the cell (3 … 14 km).
+        // The thunder arrives at the speed of sound — ~3 s a kilometre (Audio)
+        s.strike = (s.strike ?? 0) + 1;
+        s.strikeKm = sheet ? 3 + Math.random() * 11 : 0.5 * Math.pow(12, Math.random());
+        s.strikeBolt = sheet ? 0 : 1;
         this.strokes.length = 0;
         let t0 = 0;
         const n = sheet ? 1 + ((Math.random() * 2) | 0) : 2 + ((Math.random() * 3) | 0);

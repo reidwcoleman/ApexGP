@@ -251,7 +251,8 @@ export class CarEffects {
           const cosA = (dxc * this.camDir.x + dyc * this.camDir.y + dzc * this.camDir.z) * inv;
           const view = dist < 9 ? 1 : smoothstep(0.15, 0.75, cosA);
           const away = Math.max(0, Math.sin(car.yaw) * this.camDir.x + Math.cos(car.yaw) * this.camDir.z);
-          veil += I * view * Math.exp(-dist / 55) * (0.1 + 0.9 * away * away) * (dist < 9 ? 0.4 : 1);
+          // (∝ I²: a drizzle's fine mist thins out within metres, a downpour's hangs as a wall)
+          veil += I * I * view * Math.exp(-dist / 55) * (0.1 + 0.9 * away * away) * (dist < 9 ? 0.4 : 1);
         }
       }
 

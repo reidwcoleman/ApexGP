@@ -55,6 +55,7 @@ varying float vSoft;    // depth softness (m)
 varying float vViewZ;
 varying float vHFade;
 varying float vHeat;
+varying vec3 vBall;     // quad corner xy (−1 … 1), puff radius (m)
 void main() {
   vHeat = iMisc.w;
   vec4 mvPosition = viewMatrix * vec4( iPos, 1.0 );
@@ -119,6 +120,7 @@ void main() {
   vAlpha = alpha;
   vErode = iMisc.z * iMisc.x;
   vSoft = 0.35 + size * 0.45;
+  vBall = vec3( corner, size );
   vViewZ = -mvPosition.z;
   gl_Position = projectionMatrix * mvPosition;
 }
@@ -140,6 +142,7 @@ varying float vSoft;
 varying float vViewZ;
 varying float vHFade;
 varying float vHeat;
+varying vec3 vBall;
 // black-body-ish ramp: dull red → orange → yellow → white-hot
 vec3 fireColor( float h ) {
   vec3 c = mix( vec3( 0.32, 0.025, 0.0 ), vec3( 1.0, 0.26, 0.02 ), smoothstep( 0.0, 0.4, h ) );
@@ -149,8 +152,12 @@ vec3 fireColor( float h ) {
 void main() {
   vec4 t = texture2D( uAtlas, vUv );
   float d = clamp( ( t.a - vErode ) / max( 1.0 - vErode, 0.05 ), 0.0, 1.0 );
-  // soft against the real scene depth (and, as a backup, the road plane)
-  float a = d * vAlpha * vHFade * clamp( ( sceneViewZ() - vViewZ ) / vSoft, 0.0, 1.0 );
+  // soft against the real scene depth (and, as a backup, the road plane). A puff is a ball, not
+  // a card: what hides a surface is the part of its chord through this pixel in front of it. (A
+  // card faded over a fixed depth cut a car in its spray into slices along that depth — the
+  // wing clear, the tyres veiled — and drew it as an outlined x-ray ghost.)
+  float th = max( vSoft * 0.5, vBall.z * sqrt( max( 1.0 - dot( vBall.xy, vBall.xy ), 0.0 ) ) );
+  float a = d * vAlpha * vHFade * clamp( ( sceneViewZ() - vViewZ + th ) / ( 2.0 * th ), 0.0, 1.0 );
   if ( a < 0.002 ) discard;
   vec2 nt = t.rg * 2.0 - 1.0;
   vec3 n = vec3( vAxes.xy * nt.x + vAxes.zw * nt.y, sqrt( max( 0.0, 1.0 - dot( nt, nt ) ) ) );
@@ -264,11 +271,50 @@ void main() {
   gl_Position = uOn > 0.5 ? vec4( position.xy, 0.0, 1.0 ) : vec4( 2.0, 2.0, 2.0, 1.0 );
 }
 `;
+// Depth-aware upsample of the low-res soft layer. A plain bilinear stretch smears each low-res
+// texel's depth test across a car's silhouette: the spray hanging round a car ahead is cut out a
+// texel wide outside its outline and pasted a texel over it, so every car in the spray drew as
+// a pale x-ray ghost ringed in dark lines. Each of the four texels is weighted by how close the
+// depth it was tested against (the full-res depth at its centre) is to this pixel's own depth.
+// (The composite draws into the target whose depth it would read — a feedback loop — so it reads
+// a linear copy made just before the soft pass: LINZ_FRAG.)
 const COMPOSITE_FRAG = /* glsl */ `
 uniform sampler2D uTex;
+uniform sampler2D uLinZ;
+uniform vec2 uLowRes;
+uniform float uUseDepth;
+varying vec2 vUv;
+float cz( vec2 p ) {
+  return texture2D( uLinZ, p ).r;
+}
+void main() {
+  if ( uUseDepth < 0.5 ) {
+    gl_FragColor = texture2D( uTex, vUv );
+    return;
+  }
+  vec2 lp = vUv * uLowRes - 0.5;
+  vec2 f = fract( lp );
+  vec2 b = ( floor( lp ) + 0.5 ) / uLowRes;
+  vec2 tx = vec2( 1.0 / uLowRes.x, 0.0 );
+  vec2 ty = vec2( 0.0, 1.0 / uLowRes.y );
+  float z = cz( vUv );
+  vec4 w = vec4( ( 1.0 - f.x ) * ( 1.0 - f.y ), f.x * ( 1.0 - f.y ), ( 1.0 - f.x ) * f.y, f.x * f.y );
+  vec4 zs = vec4( cz( b ), cz( b + tx ), cz( b + ty ), cz( b + tx + ty ) );
+  // (a few % of depth is one object — a car's wing and its tyres — and blends smoothly; the road
+  // 30 % further back is another)
+  vec4 rel = abs( zs - z ) / max( z, 0.1 );
+  w *= 1.0 / ( 0.05 + rel * rel * 20.0 );
+  vec4 c = texture2D( uTex, b ) * w.x + texture2D( uTex, b + tx ) * w.y + texture2D( uTex, b + ty ) * w.z + texture2D( uTex, b + tx + ty ) * w.w;
+  gl_FragColor = c / max( w.x + w.y + w.z + w.w, 1e-5 );
+}
+`;
+
+/** the main pass's depth as linear view distance (half float: 3 significant digits is plenty to tell a car from the road behind it) */
+const LINZ_FRAG = /* glsl */ `
+${DEPTH_PARS}
 varying vec2 vUv;
 void main() {
-  gl_FragColor = texture2D( uTex, vUv );
+  gl_FragColor = vec4( min( sceneViewZ(), 6e4 ), 0.0, 0.0, 1.0 );
 }
 `;
 
@@ -492,6 +538,8 @@ export class Particles {
   readonly softMat: THREE.ShaderMaterial;
   readonly hotMat: THREE.ShaderMaterial;
   readonly veil: SprayVeil;
+  /** extra light on water mist (spray, the veil) over the measured sky ambient: see beforeRender */
+  mistGain = 1;
   /** lamp glow vs the grade's exposure: a dark wet day is exposed up ×6 and the lamps with it (they'd clip white): taken back by its square root */
   glowScale = 1;
   /**
@@ -510,6 +558,11 @@ export class Particles {
   private composite: THREE.Mesh;
   private compositeMat: THREE.ShaderMaterial;
   private lowRT: THREE.WebGLRenderTarget | null = null;
+  /** full-res linear depth for the composite's depth-aware upsample (see COMPOSITE_FRAG) */
+  private linRT: THREE.WebGLRenderTarget | null = null;
+  private readonly linMat: THREE.ShaderMaterial;
+  private readonly linScene = new THREE.Scene();
+  private readonly linCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private depthUniforms = {
     uDepth: { value: null as THREE.Texture | null },
     uInvRes: { value: new THREE.Vector2(1, 1) },
@@ -608,7 +661,7 @@ export class Particles {
       name: 'fx-composite',
       vertexShader: COMPOSITE_VERT,
       fragmentShader: COMPOSITE_FRAG,
-      uniforms: { uTex: { value: null }, uOn: { value: 0 } },
+      uniforms: { uTex: { value: null }, uOn: { value: 0 }, uLowRes: { value: new THREE.Vector2(1, 1) }, uLinZ: { value: null }, uUseDepth: { value: 0 } },
       transparent: true,
       depthTest: false,
       depthWrite: false,
@@ -622,6 +675,17 @@ export class Particles {
     this.composite.name = 'fx-soft-composite';
     this.composite.frustumCulled = false;
     this.composite.renderOrder = 10;
+    this.linMat = new THREE.ShaderMaterial({
+      name: 'fx-linz',
+      vertexShader: COMPOSITE_VERT,
+      fragmentShader: LINZ_FRAG,
+      uniforms: { uOn: { value: 1 }, uDepth: this.depthUniforms.uDepth, uClip: this.depthUniforms.uClip, uUseDepth: { value: 1 }, uInvRes: { value: new THREE.Vector2(1, 1) } },
+      depthTest: false,
+      depthWrite: false,
+    });
+    const linQuad = new THREE.Mesh(tri, this.linMat);
+    linQuad.frustumCulled = false;
+    this.linScene.add(linQuad);
     this.composite.onBeforeRender = (renderer, scene, camera) => this.renderSoft(renderer, scene, camera as THREE.PerspectiveCamera);
 
     this.group.name = 'fx';
@@ -655,6 +719,7 @@ export class Particles {
     renderer.setRenderTarget(target);
     try {
       renderer.compile(this.softScene, camera);
+      renderer.compile(this.linScene, this.linCam);
     } finally {
       renderer.setRenderTarget(prev);
     }
@@ -707,6 +772,7 @@ export class Particles {
       du.uDepth.value = depth;
       du.uUseDepth.value = 1;
       du.uInvRes.value.set(1 / w, 1 / h);
+      (this.compositeMat.uniforms.uLowRes.value as THREE.Vector2).set(w, h);
       this.softMat.depthTest = false;
       this.haloMat.depthTest = false;
       this.veil.material.depthTest = false;
@@ -722,6 +788,17 @@ export class Particles {
             gl.beginQuery(this.tq.TIME_ELAPSED_EXT, q);
           }
         }
+        // the linear depth copy the composite upsamples with (it can't read the depth it draws over)
+        const W = cur!.width, H = cur!.height;
+        if (!this.linRT) {
+          this.linRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, format: THREE.RedFormat, depthBuffer: false, stencilBuffer: false, magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, generateMipmaps: false });
+          this.linRT.texture.name = 'fx-linz';
+        } else if (this.linRT.width !== W || this.linRT.height !== H) this.linRT.setSize(W, H);
+        (this.linMat.uniforms.uInvRes.value as THREE.Vector2).set(1 / W, 1 / H);
+        renderer.setRenderTarget(this.linRT);
+        renderer.render(this.linScene, this.linCam);
+        this.compositeMat.uniforms.uLinZ.value = this.linRT.texture;
+        this.compositeMat.uniforms.uUseDepth.value = 1;
         renderer.setRenderTarget(this.lowRT);
         renderer.setClearColor(0x000000, 0);
         renderer.clear(true, false, false);
@@ -799,6 +876,12 @@ export class Particles {
         if (fog) L.ambient.lerp(this.tmpC.copy(fog.color).multiplyScalar(Math.max(1e-3, lum(this.skyAmbient)) / Math.max(1e-3, lum(fog.color))), 0.35);
       } else if (fog) L.ambient.copy(fog.color);
       else L.ambient.copy(this.fallback).multiplyScalar(0.8);
+      // water mist sees the whole sky dome — under an overcast the zenith is ~3× the horizon (CIE
+      // overcast sky) — while the white-ball probe, seen side-on, is lit half by the dark wet ground:
+      // spray lit by the probe alone came out a seventh of the haze behind it under a storm deck at
+      // noon and hung over the track like smoke. Mist averaging the bright upper and dark lower
+      // hemisphere comes to ~0.8 of the horizon haze
+      this.mistGain = fog && env ? THREE.MathUtils.clamp((0.8 * lum(fog.color)) / Math.max(1e-4, lum(L.ambient)), 1, 4) : 1;
       // lightning lights up the spray
       const flash = weatherUniforms.uLightning.value;
       if (flash > 0) L.ambient.multiplyScalar(1 + flash * 2.5);
@@ -810,7 +893,7 @@ export class Particles {
     const size = renderer.getDrawingBufferSize(this.tmpV2);
     const fh = (renderer as unknown as { apexFrame?: { h: number } }).apexFrame?.h ?? size.y;
     this.hotMat.uniforms.uPx.value = 2 / Math.max(1, fh);
-    this.veil.setLighting(L);
+    this.veil.setLighting(L, this.mistGain);
   }
 
   /** the sky probe: a white diffuse ball lit by scene.environment alone, drawn into a 16² float target */
@@ -1137,6 +1220,8 @@ export class Particles {
 
   dispose() {
     this.lowRT?.dispose();
+    this.linRT?.dispose();
+    this.linMat.dispose();
     this.probe?.rt.dispose();
     this.probe?.mat.dispose();
     this.softMat.dispose();

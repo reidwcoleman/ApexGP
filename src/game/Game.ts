@@ -3910,10 +3910,15 @@ export class Game {
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
     const cam = this.cams.view;
-    const lensCam = ONBOARD[cam] ? 1 : cam === 'chase' || cam === 'lowchase' ? 0.35 : 0;
+    // (only the onboards: a chase view is a virtual camera with no glass in front of it — drops
+    // floating over it read as a screen effect, and the sims keep it dry)
+    const lensCam = ONBOARD[cam] ? 1 : 0;
     const spray = car.dirty * Math.min(1, car.speed / 40) * w.wetness;
     const lens = lensCam * Math.min(1, w.rain * (0.55 + 0.45 * Math.min(1, car.speed / 45)) + spray * 0.8);
-    (this.gfx as unknown as { setLensRain?: (a: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0);
+    // the airflow, not the rain rate, blows the drops across the glass: they sit in the pit lane and
+    // streak away flat out
+    const blow = Math.min(1, Math.max(0, (car.speed - 8) / 70));
+    (this.gfx as unknown as { setLensRain?: (a: number, s?: number) => void }).setLensRain?.(this.state === 'race' || this.state === 'intro' ? lens : 0, blow);
   }
 
   /**
@@ -3950,7 +3955,7 @@ export class Game {
     const w = race.weatherState;
     if (this.state === 'menu' || this.state === 'results' || this.state === 'paused' || this.state === 'flashback' || this.state === 'celebration') {
       const paused = this.state === 'paused' || this.state === 'flashback';
-      a.weather(paused ? 0 : w.rain, w.wetness, 0, paused ? 0 : w.lightning, paused ? 0 : Math.hypot(w.windX, w.windZ));
+      a.weather(paused ? 0 : w.rain, w.wetness, 0, paused ? 0 : w.lightning, paused ? 0 : Math.hypot(w.windX, w.windZ), w.strike, w.strikeKm);
       // engine off in the garage / under the results / at the podium; idling behind the pause menu
       a.updatePlayer({ rpm: paused ? 4200 : 0, throttle: 0, brake: 0, speed: 0, gear: 0, slip: 0, surface: 0, onKerb: false, drs: false, ers: 0, limiter: false });
       a.updateOpponents([]);
@@ -3966,7 +3971,7 @@ export class Game {
     const car = carOf(ours);
     a.setView(ONBOARD[this.cams.view] ? 'cockpit' : isRemoteCam(this.cams.view) || this.cams.view === 'gtchase' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
-    a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ));
+    a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ), w.strike, w.strikeKm);
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
     const surf = Math.max(car.surfaceFL, car.surfaceFR, car.surfaceRL, car.surfaceRR);
     a.updatePlayer({

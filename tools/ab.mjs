@@ -1,13 +1,13 @@
 // Steady A/B GPU timing of one runtime toggle: the loop paused, frames rendered back to back and synced,
 // A and B alternated several times (drift cancels), medians reported.
-//   node tools/ab.mjs <track> "<js that turns B on>" "<js that turns B off>" [cam=chase] [dpr=2] [scale=1]
+//   node tools/ab.mjs <track> "<js that turns B on>" "<js that turns B off>" [cam=chase] [dpr=2] [scale=1]   (env PORT, WEATHER, TIME, W, H)
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
 const [track = 'monza', onJs = '', offJs = '', cam = 'chase', dpr = '2', scale = '1'] = process.argv.slice(2);
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: Number(dpr) });
+const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1440), height: Number(process.env.H ?? 900) }, deviceScaleFactor: Number(dpr) });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-await page.goto(`http://localhost:5191/?track=${track}&demo=race&cam=${cam}&skip=30&weather=clear&time=afternoon`);
+await page.goto(`http://localhost:${process.env.PORT ?? 5191}/?track=${track}&demo=race&cam=${cam}&skip=30&weather=${process.env.WEATHER ?? 'clear'}&time=${process.env.TIME ?? 'afternoon'}`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 180000 });
 await page.waitForTimeout(2500);
 const r = await page.evaluate(async ([onJs, offJs, scale]) => {
