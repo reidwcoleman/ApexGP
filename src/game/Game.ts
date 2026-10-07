@@ -46,7 +46,7 @@ import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, ty
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
 import { BRAND_FONTS } from '../world/brands.ts';
-import { aerialLens, aerialParams } from '../world/env/fog.ts';
+import { aerialGround, aerialLens, aerialParams } from '../world/env/fog.ts';
 import { buildGarageBox, pitComplexBuilder, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
@@ -3934,7 +3934,7 @@ export class Game {
       if (rig) cars.push(rig);
     }
     // (mist and rain catch the beams and swell the glare)
-    this.headlights.set(level, THREE.MathUtils.clamp(w.fog * 0.8 + w.rain * 0.6, 0, 1), aerialParams.x);
+    this.headlights.set(level, THREE.MathUtils.clamp(w.fog * 0.8 + w.rain * 0.6, 0, 1), aerialParams.x + aerialGround.x);
     this.headlights.update(cars, this.camera);
   }
 

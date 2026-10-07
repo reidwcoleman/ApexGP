@@ -109,11 +109,13 @@ const REGIME: Record<WeatherKind, { cloud: number; rain: number; fog: number; he
   haze: { cloud: 0.12, rain: 0, fog: 0.5, heat: 1, conv: 0 },
   // (a blustery day: fast, ragged broken cumulus — more of the sky than fair-weather cloud covers)
   windy: { cloud: 0.54, rain: 0, fog: 0.02, heat: 0, conv: 0.1 },
-  mist: { cloud: 0.5, rain: 0, fog: 0.9, heat: 0, conv: 0 },
+  // (morning mist is radiation fog: it forms under a clear night sky and lies under a blue morning one)
+  mist: { cloud: 0.3, rain: 0, fog: 0.9, heat: 0, conv: 0 },
   drying: { cloud: 0.35, rain: 0, fog: 0.15, heat: 0, conv: 0.2 },
   cloudy: { cloud: 0.52, rain: 0, fog: 0.05, heat: 0.15, conv: 0.25 },
   overcast: { cloud: 0.86, rain: 0, fog: 0.18, heat: 0, conv: 0 },
-  fog: { cloud: 0.78, rain: 0, fog: 1, heat: 0, conv: 0 },
+  // (fog under a broken deck: the sun still lights the top of the layer, the murk glows round it)
+  fog: { cloud: 0.6, rain: 0, fog: 1, heat: 0, conv: 0 },
   sunshower: { cloud: 0.44, rain: 0.36, fog: 0.08, heat: 0, conv: 0.55 },
   drizzle: { cloud: 0.93, rain: 0.22, fog: 0.35, heat: 0, conv: 0 },
   rain: { cloud: 0.97, rain: 0.62, fog: 0.5, heat: 0, conv: 0.15 },
@@ -320,7 +322,8 @@ export class Weather {
       cloud: k0.cloud,
       rain: k0.rain,
       wetness: wet0,
-      dryLine: 0,
+      // (and the support race and the laps to the grid have already begun to clear a line)
+      dryLine: plan.start === 'drying' ? 0.3 : 0,
       fog: k0.fog,
       windX: plan.windX,
       windZ: plan.windZ,

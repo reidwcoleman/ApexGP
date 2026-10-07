@@ -50,6 +50,13 @@ const W = weatherUniforms;
  */
 export const roadUniforms = {
   uRaceRubber: { value: 0 },
+  /**
+   * tree cover over the ground (the park mask's R: crowns from the real trees) and its world bounds
+   * (x0, z0, 1/width, 1/depth; z = 0 until the scenery has built it): a drying track stays wet under
+   * the trees. Set by env/scenery.ts.
+   */
+  uCanopy: { value: null as THREE.Texture | null },
+  uCanopyB: { value: new THREE.Vector4(0, 0, 0, 0) },
 };
 
 const COMMON = /* glsl */ `
@@ -407,7 +414,18 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
       float qT = (abs(dl) - 0.82) / 0.42;
       float tracks = exp(-qT * qT);
       float patchy = (m24.b - 0.5) * 0.5 + (mN.b - 0.5) * 0.4;
-      dryBand = clamp(uDryLine * 1.5 * tracks + (uDryLine * 1.3 - 0.12 + patchy) * band, 0.0, 1.0);
+      float rainLine = clamp(uDryLine * 1.5 * tracks + (uDryLine * 1.3 - 0.12 + patchy) * band, 0.0, 1.0);
+      // once the rain has stopped (a drying track): its edge is ragged at every scale, as on footage of a
+      // drying race — the line wanders lap to lap and the drier asphalt bleeds into the wet in tongues, not
+      // along a soft airbrushed border — and it widens into a proper dry band
+      float patchyD = (m24.b - 0.5) * 0.45 + (mN.b - 0.5) * 0.35 + (m3.b - 0.5) * 0.2;
+      float dryLineD = clamp(uDryLine * 1.5 * tracks + (uDryLine * 1.5 - 0.15 + patchyD) * band, 0.0, 1.0);
+      // braking zones dry last: every car brakes on its own line there, so the water is pushed about
+      // rather than cleared, and the lock-up film sheds it slowly — damp blotches stay on the line
+      float brkZ = smoothstep(0.08, 0.45, vA0.z);
+      float blot = smoothstep(0.35, 0.65, mN.b * 0.7 + m3.b * 0.4);
+      dryLineD *= 1.0 - 0.35 * brkZ * blot * (1.0 - smoothstep(0.6, 1.0, uDryLine));
+      dryBand = mix(rainLine, dryLineD, 1.0 - smoothstep(0.02, 0.12, uRain));
     }
 
     // braking-zone lock-up streaks: the support races left some, the session adds more (the live tyre
@@ -756,9 +774,30 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
   // ================================================= weather
   if (uWetness > 0.002) {
     float Wt = uWetness;
-    float wet = Wt * (1.0 - 0.94 * dryBand);
-    // standing water: low spots, the road edges (the camber drains outward), never on the dry line
     float low = mN.b * 0.55 + mN2.b * 0.3 + m96.r * 0.2;
+    // ---- a drying track (the rain has stopped) doesn't dry evenly. Beside the trees it stays wet: their
+    // shade keeps the sun off, they break the wind, and the crowns drip for an hour (the park at Monza,
+    // Spa's forest sections stay dark in patches long after the line is dry). The tree cover is the park
+    // mask's, read ~4 mips down (a ~20 m footprint) so a tree line 10–20 m off the edge reaches the road,
+    // strongest on its side, broken into patches where the drips and the shade fall.
+    float drying = 1.0 - smoothstep(0.02, 0.12, uRain);
+    float shade = 0.0;
+    if (drying > 0.0 && uCanopyB.z > 0.0) {
+      vec2 cuv = (vWXZ - uCanopyB.xy) * uCanopyB.zw;
+      shade = smoothstep(0.1, 0.4, texture2D(uCanopy, cuv, 4.0).r) * drying;
+      shade *= step(0.0, cuv.x) * step(cuv.x, 1.0) * step(0.0, cuv.y) * step(cuv.y, 1.0);
+      shade *= smoothstep(0.25, 0.6, mN2.b * 0.6 + mN.g * 0.5);
+    }
+    Wt = min(1.0, Wt + shade * (1.0 - Wt) * 0.6);
+    dryBand *= 1.0 - 0.6 * shade;
+    // ...and the open surface in blotches: the crowns of the camber and the open, porous patches first,
+    // the ruts, dips and fine sealed patches last
+    Wt = clamp(Wt * (1.0 + drying * (low - 0.52) * 1.7), 0.0, 1.0);
+    // (where the line has dried it is dry asphalt — a lighter grey band, as on the aerials of a drying race —
+    // not a slightly less damp one: the film goes once the tyres have cleared it)
+    float dryK = 1.0 - dryBand;
+    float wet = Wt * mix(1.0 - 0.94 * dryBand, dryK * sqrt(dryK), drying);
+    // standing water: low spots, the road edges (the camber drains outward), never on the dry line
     float edgeBias = zone < 0.5 ? (1.0 - smoothstep(0.1, 2.0, hw - alat)) * 0.3 : zone < 1.5 ? 0.0 : 0.16;
     float thr = 1.08 - 0.5 * Wt;
     float puddle = smoothstep(thr, thr + 0.1, low + edgeBias) * smoothstep(0.25, 0.55, Wt) * (1.0 - dryBand);
@@ -787,6 +826,9 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // the rubbered line takes no water into its pores: before the film joins up it already shows a slick,
     // smoother sheen (why it is the slipperiest place on a damp track)
     rough = mix(rough, rough * 0.78, tsRub * damp * (1.0 - sub));
+    // with no rain to roughen it the film a shower leaves is smooth: the wet half of a drying track has a
+    // glassy sheen toward the light that fades as the film thins (and is gone where it's only damp)
+    rough = mix(rough, rough * 0.7, drying * smoothstep(0.15, 0.5, wet) * (1.0 - puddle));
     tsWet = wet;
     if (uRain > 0.01) {
       float fadeR = 1.0 - smoothstep(0.003, 0.011, px);
@@ -875,13 +917,16 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     sh.uniforms.uKerbB = { value: kerbB };
     sh.uniforms.uRunoffStyle = { value: RUNOFF_STYLE[opts.runoffPaint ?? 'bands'] };
     sh.uniforms.uRaceRubber = roadUniforms.uRaceRubber;
+    sh.uniforms.uCanopy = roadUniforms.uCanopy;
+    sh.uniforms.uCanopyB = roadUniforms.uCanopyB;
     Object.assign(sh.uniforms, ssrUniforms);
-    // the road's third attribute (wear: elevens, dirt per side, line load), asphalt only
+    // the road's third attribute (wear: elevens, dirt per side, line load), asphalt only; and its world x/z
+    // (the tree cover over it)
     sh.vertexShader = sh.vertexShader
-      .replace('attribute vec4 aA1;', 'attribute vec4 aA1;\nattribute vec4 aA2;\nvarying vec4 vA2;')
-      .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;');
+      .replace('attribute vec4 aA1;', 'attribute vec4 aA1;\nattribute vec4 aA2;\nvarying vec4 vA2;\nvarying vec2 vWXZ;')
+      .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;\nvWXZ = (modelMatrix * vec4(position, 1.0)).xz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;')
+      .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;\nvarying vec2 vWXZ;\nuniform sampler2D uCanopy;\nuniform vec4 uCanopyB;')
       .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)

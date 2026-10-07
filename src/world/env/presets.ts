@@ -325,6 +325,21 @@ export interface WeatherLook {
   shafts: number;
   /** extra grey haze close to the ground in rain (spray mist, low visibility) */
   mist: number;
+  /**
+   * the ground layer of fog and mist (fog.ts `aerialGround`): density at the circuit's level (1/m)
+   * and its height falloff (1/m); 0 density = none
+   */
+  groundFog: number;
+  groundFall: number;
+  /** 0 … 1 how much of the ground layer is fog (deep, grey) rather than mist (shallow, bright) */
+  fogDeep: number;
+  /**
+   * the sunlight falling on the top of the fog / mist layer (0 … 1, before the layer itself dims it):
+   * what makes the murk glow round the sun and a mist bright
+   */
+  sunAbove: number;
+  /** optical depth of the haze + ground layer straight up (veils the sky overhead) */
+  fogTau: number;
 }
 
 export function weatherLook(w: WeatherState): WeatherLook {
@@ -335,15 +350,27 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const wetK = smooth(0.02, 0.7, rain);
   // dense fog: the ground layer eats the view and most of the sun
   const thick = smooth(0.7, 1, fog);
+  // fog and mist are a ground layer under the haze (fog.ts aerialGround), each with its own character:
+  //   fog: ~45 m deep, ~400 m visibility at the track — the far side of the circuit gone, trees and stands
+  //     emerging as grey silhouettes, the sun a pale disc in a white glare at best
+  //   mist: a shallow (~25 m), bright layer under a clear sky, ~600 m visibility, burning off through the
+  //     session — the helicopter and the TV towers look down on treetops poking out of it
+  // (a changeable fog that burns off has fog → 0 by the time the kind flips: no pop)
+  const fogKind = w.kind === 'fog' ? smooth(0.5, 0.95, fog) : 0;
+  const mistKind = w.kind === 'mist' ? smooth(0.1, 0.85, fog) : 0;
+  const layerK = Math.max(fogKind, mistKind);
+  const fogDeep = fogKind / Math.max(1e-4, fogKind + mistKind);
+  const groundFog = fogKind * 6.5e-3 + mistKind * 4.6e-3;
+  const groundFall = 1 / mix(26, 45, fogDeep);
   // direct sun: survives broken cumulus, dies under a deck, gone in rain from a full deck
   // (a shower from broken cloud keeps the sun: a sun shower)
   // (an overcast sky — 7/8 and more — has no sun at all: the light is the deck's, shadowless; at the
   // old 0.6 … 0.94 ramp 'overcast' kept a sixth of the sun and hard car shadows under a grey ceiling)
   // heat haze: the sun is a softened, bigger glare (aerosol takes ~20 % of the beam into the diffuse sky)
   const heatK = smooth(0.5, 1, clamp01(w.heat ?? 0)) * (1 - wetK);
-  const sunVis = (1 - smooth(0.55, 0.84, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain) * smooth(0.45, 0.85, cloud)) * (1 - 0.75 * thick) * (1 - 0.2 * heatK);
+  // (the sun above any ground fog layer; sunVis below takes the layer's own extinction)
+  const sunAbove = (1 - smooth(0.55, 0.84, cloud)) * (1 - 0.9 * smooth(0.03, 0.35, rain) * smooth(0.45, 0.85, cloud)) * (1 - 0.2 * heatK);
   const overcast = smooth(0.62, 0.95, cloud);
-  const dim = 1 - sunVis;
 
   // cloud layer: fair-weather cumulus at ~1.4 km, lowering and thickening into a rain deck
   const cloudBase = mix(mix(1500, 1050, overcast), 520, wetK);
@@ -368,19 +395,30 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // heat haze: a deep, milky boundary layer (dust, pollen, photochemical smog on a still hot day —
   // visibility 5–8 km, the far hills gone to a pale silhouette or gone altogether), lying a kilometre
   // or two deep rather than in the low layer of a morning mist
+  // (fog and mist put most of their water in the ground layer: the haze above it only greys the far side)
   const fogDensity =
-    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + smooth(0.5, 0.9, fog) * 1.3e-3 + rain * rain * 3.2e-3 + thick * 3.2e-3) * (1 - 0.3 * windK) +
+    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + (smooth(0.5, 0.9, fog) * 1.3e-3 + thick * 3.2e-3) * (1 - layerK) + layerK * mix(1.2e-4, 8e-4, fogDeep) + rain * rain * 3.2e-3) *
+      (1 - 0.3 * windK) +
     heatK * 1.7e-4;
   const fogFalloff = mix(mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6)), 1 / 1500, 0.85 * heatK);
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7)) * (1 - 0.4 * heatK) * (1 + 0.35 * windK);
+  // the sun through the fog / mist is what the layer's optical depth on the slant up to it leaves: a
+  // high sun burns through a shallow mist (sharp shadows on a misty morning), a low one is gone in it
+  const fogTau = fogDensity / fogFalloff + groundFog / groundFall;
+  const fogT = Math.exp(-fogTau / Math.max(0.07, Math.sin((P.elevation * Math.PI) / 180)));
+  const sunVis = sunAbove * mix(1 - 0.75 * thick, fogT, layerK);
+  const dim = 1 - sunVis;
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
   // eye adaptation to the light level is applied by the Environment; this is the mood on top
   // (a shower in sunshine — a sun shower — keeps the sun's light and colour: only a deck's rain is dark)
   const wetDark = wetK * (1 - 0.8 * sunVis);
-  const exposure = P.exposure * mix(1, 0.86, wetDark) * mix(1, 1.06, overcast * (1 - wetK)) * LOOK_EXPOSURE;
-  const saturation = mix(P.saturation, mix(0.93, 0.78, wetDark), dim) * (1 - 0.12 * fog - 0.14 * thick) * TONE_SAT;
-  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * thick) * TONE_CONTRAST;
+  // (fog footage reads grey, not white: a camera doesn't meter the murk back up to a bright day; a sunlit
+  // mist keeps the colour of what is close — the murk itself does the greying)
+  const exposure = P.exposure * mix(1, 0.86, wetDark) * mix(1, 1.06, overcast * (1 - wetK)) * (1 - 0.1 * fogKind) * LOOK_EXPOSURE;
+  const greyK = thick * (1 - 0.7 * mistKind);
+  const saturation = mix(P.saturation, mix(0.93, 0.78, wetDark), dim) * (1 - 0.12 * fog * (1 - 0.5 * mistKind) - 0.14 * greyK) * TONE_SAT;
+  const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * greyK) * TONE_CONTRAST;
   const tintK = dim;
   const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK) * LOOK_HIGH[0], mix(P.tint[1], 0.99, tintK) * LOOK_HIGH[1], mix(P.tint[2], 1.02, tintK) * LOOK_HIGH[2]];
   const shadowTint: [number, number, number] = [
@@ -447,6 +485,11 @@ export function weatherLook(w: WeatherState): WeatherLook {
     bloomThreshold: mix(P.bloomThreshold, 0.9, wetK),
     shafts: P.shafts * sunVis * dShafts,
     mist: clamp01(wetK * 0.8 + fog * 0.5),
+    groundFog,
+    groundFall,
+    fogDeep,
+    sunAbove: sunAbove * layerK,
+    fogTau,
   };
 }
 

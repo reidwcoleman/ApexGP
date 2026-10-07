@@ -238,6 +238,7 @@ const AO_FRAG = /* glsl */ `
 uniform float aoRadius;
 uniform float aoIntensity;
 uniform vec2 aoTanHalf;
+uniform float aoFog;
 vec3 aoViewPos(vec2 uv, float d) {
   float vz = getViewZ(d);
   return vec3((uv * 2.0 - 1.0) * aoTanHalf * -vz, vz);
@@ -271,6 +272,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   occ = clamp(occ / 14.0 * 1.9, 0.0, 1.0);
   // fade out with distance (the far field is fog and aerial haze)
   occ *= 1.0 - smoothstep(90.0, 180.0, dist);
+  // (and by the fog in front of it: occlusion darkens the surface, not the murk between it and the lens —
+  // applied to the fogged colour it spattered dark dots through every foggy tree crown)
+  occ *= exp(-dist * aoFog);
   float lum = dot(inputColor.rgb, vec3(0.2126, 0.7152, 0.0722));
   float ambient = 1.0 - smoothstep(0.35, 2.5, lum) * 0.65;
   outputColor = vec4(inputColor.rgb * (1.0 - occ * aoIntensity * ambient), inputColor.a);
@@ -285,6 +289,7 @@ export class AOEffect extends Effect {
         ['aoRadius', new THREE.Uniform(0.9)],
         ['aoIntensity', new THREE.Uniform(0.85)],
         ['aoTanHalf', new THREE.Uniform(new THREE.Vector2(1, 1))],
+        ['aoFog', new THREE.Uniform(0)],
       ]),
     });
   }
@@ -293,6 +298,10 @@ export class AOEffect extends Effect {
   }
   get intensity() {
     return this.uniforms.get('aoIntensity')!.value as number;
+  }
+  /** extinction of the fog at the ground (1/m): the AO fades behind it */
+  set fog(d: number) {
+    this.uniforms.get('aoFog')!.value = d;
   }
   setCamera(cam: THREE.PerspectiveCamera) {
     const ty = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);

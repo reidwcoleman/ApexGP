@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
 import type { Renderer, QualityLevel, GradeLook } from '../core/Renderer.ts';
-import { aerialBanks, aerialLens, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
+import { aerialBanks, aerialFogSun, aerialGround, aerialLens, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
 import { computeSky, LUT_SCALE, type SkyLUT } from './env/atmosphere.ts';
 import { createSkyDome } from './env/sky.ts';
 import { createCloudNoise } from './env/skyNoise.ts';
@@ -469,6 +469,20 @@ export function createEnvironment(
     aerialSunColor.r = Math.max(0, lobe.r);
     aerialSunColor.g = Math.max(0, lobe.g);
     aerialSunColor.b = Math.max(0, lobe.b);
+    // ---- the fog / mist layer (fog.ts aerialGround, set in applyNightAndBow): lit from above, a mist is
+    // bright, near white — the morning murk of the footage, not a grey veil — and toward the sun the
+    // droplets glow in its colour (white at midday, gold when it is low), even where the disc is gone
+    const fogLit = L.sunAbove * (P.direct ?? 1) * dayK;
+    fog.color.multiplyScalar(1 + 0.3 * fogLit * (1 - L.fogDeep));
+    // (deep fog is lit by the whole sky at once, so it keeps little of any one colour: a low sun's light
+    // in it reads as a pale warm grey, not sepia)
+    const fogGrey = fog.color.r * 0.2126 + fog.color.g * 0.7152 + fog.color.b * 0.0722;
+    fog.color.lerp(tmpB.setRGB(fogGrey, fogGrey, fogGrey), 0.45 * L.fogDeep * THREE.MathUtils.smoothstep(L.groundFog, 0, 2e-3));
+    const sunLum = Math.max(1e-3, C.sunCol.r * 0.2126 + C.sunCol.g * 0.7152 + C.sunCol.b * 0.0722);
+    const fogGlow = (fogLum * fogLit * THREE.MathUtils.lerp(1.5, 1.0, L.fogDeep)) / sunLum;
+    aerialFogSun.r = C.sunCol.r * fogGlow;
+    aerialFogSun.g = C.sunCol.g * fogGlow;
+    aerialFogSun.b = C.sunCol.b * fogGlow;
 
     // ---- ground in reflections: dry grass/earth, darker and glossier when wet
     const irr = (P.sunIntensity * L.sunVis * Math.max(0.05, sunDir.y)) / Math.PI;
@@ -535,7 +549,11 @@ export function createEnvironment(
     // how much of the horizon a few km of the air beyond the clear-day haze hides
     const veilOd = Math.max(0, L.fogDensity - 2.6e-4) * 7000;
     const veil = 1 - Math.exp(-veilOd);
-    sky.uniforms.uFogK.value.set(veil, THREE.MathUtils.lerp(9, 1.2, THREE.MathUtils.smoothstep(veilOd, 1, 6)));
+    // (under a fog or mist layer the horizon is gone and the sky overhead is veiled by the layer's own
+    // depth: 1 − e^−τ straight up — white overhead in fog, a pale blue sky over a shallow mist)
+    const layerK = THREE.MathUtils.smoothstep(L.groundFog, 0, 2e-3);
+    const fogUp = -Math.log(Math.max(1e-3, 1 - Math.exp(-L.fogTau)));
+    sky.uniforms.uFogK.value.set(THREE.MathUtils.lerp(veil, 1, layerK), THREE.MathUtils.lerp(THREE.MathUtils.lerp(9, 1.2, THREE.MathUtils.smoothstep(veilOd, 1, 6)), fogUp, layerK));
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
     gradeLook.saturation = L.saturation * FILM.saturation;
     gradeLook.contrast = L.contrast * FILM.contrast;
@@ -583,6 +601,7 @@ export function createEnvironment(
     // (after the night glow / heat milk have coloured the fog)
     const sc = sky.uniforms.uSkyComp.value as number;
     (sky.uniforms.uFogCol.value as THREE.Vector3).set(fog.color.r / sc, fog.color.g / sc, fog.color.b / sc);
+    (sky.uniforms.uFogSun.value as THREE.Vector3).set(aerialFogSun.r / sc, aerialFogSun.g / sc, aerialFogSun.b / sc);
   }
 
   /**
@@ -602,6 +621,7 @@ export function createEnvironment(
       shadowTint: [l(g.shadowTint[0], 0.96), l(g.shadowTint[1], 0.99), l(g.shadowTint[2], 1.05)],
     });
     aerialParams.x *= 1 - 0.95 * k;
+    aerialGround.x *= 1 - k;
     aerialBanks.x *= 1 - k;
   }
 
@@ -647,17 +667,22 @@ export function createEnvironment(
       gradeLook.saturation *= 1 - 0.1 * storm;
       gradeLook.tint = [gradeLook.tint[0] * (1 - 0.05 * storm), gradeLook.tint[1] * (1 + 0.01 * storm), gradeLook.tint[2] * (1 + 0.04 * storm)];
     }
-    // mist lying on the ground: morning mist (trees and stands poking out of it) and the
-    // steam hanging over a wet track once the rain stops
+    // the ground layer (fog.ts aerialGround), anchored at the circuit's mean level: fog and morning mist
+    // (weatherLook), and the thin steam hanging over a wet track once the rain stops — a few metres deep,
+    // wisps over the asphalt more than a layer
     const evap = THREE.MathUtils.smoothstep(wx.wet, 0.25, 0.75) * (1 - THREE.MathUtils.smoothstep(L.rain, 0.04, 0.25)) * 0.8;
-    const lying = Math.max(evap, wx.kind === 'mist' ? THREE.MathUtils.smoothstep(L.mist, 0.05, 0.45) : 0);
-    // …in banks: thicker in some hollows, thinner in others, drifting with the breeze
-    aerialBanks.x = Math.max(lying * 0.75, wx.kind === 'fog' ? 0.55 : 0);
-    if (lying > 0.001) {
-      aerialParams.x += lying * 9e-4;
-      aerialParams.y = THREE.MathUtils.lerp(aerialParams.y, 1 / 55, lying);
-      aerialParams.z = groundY * lying;
-    }
+    const steam = evap * 1.1e-3;
+    aerialGround.x = L.groundFog + steam;
+    aerialGround.y = aerialGround.x > 0 ? (L.groundFog * L.groundFall + steam / 9) / aerialGround.x : 1 / 40;
+    aerialGround.z = groundY;
+    // (it thickens into the hollows below the circuit's level, but only down to one scale height: ×e)
+    aerialGround.w = 1 / aerialGround.y;
+    // …in banks: thicker in some hollows, thinner in others, drifting with the breeze (fog in big slow
+    // banks, mist in smaller patches, steam in wisps)
+    const steamK = steam / Math.max(1e-6, aerialGround.x);
+    aerialBanks.x = aerialGround.x > 0 ? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.75, 0.55, L.fogDeep), 0.9, steamK) : 0;
+    aerialBanks.y = 1 / THREE.MathUtils.lerp(THREE.MathUtils.lerp(170, 300, L.fogDeep), 45, steamK);
+    gfx.ssao.fog = aerialParams.x + aerialGround.x;
 
     // heat haze: a bleached, milky sky and a big glare round the sun
     const milk = THREE.MathUtils.clamp(wx.heat * 1.3 - 0.25, 0, 1) * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.35) * (1 - L.overcast) * (1 - night);
@@ -702,7 +727,7 @@ export function createEnvironment(
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
     // (the masts themselves are gone after dark, not just switched off)
-    floodArgs = [fl * floodScale(night), haze, aerialParams.x];
+    floodArgs = [fl * floodScale(night), haze, aerialParams.x + aerialGround.x];
     floods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
     // backlit signs come on as the light goes
     weatherUniforms.uSignGlow.value = 0.12 + 0.88 * THREE.MathUtils.smoothstep(night, 0.1, 0.9);
