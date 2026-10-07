@@ -1187,6 +1187,41 @@ export class Renderer {
     this.dof.target = dofTarget;
   }
 
+  /**
+   * (boot) Queue the post chain's own programs on the driver's threads (KHR_parallel_shader_compile)
+   * and resolve once they are built: each pass's full-screen material, bloom's mip chain, SMAA's two
+   * stages, the exposure meter… Left to the first frame they were built one by one, each blocking
+   * the main thread (≈0.3 s for the garage's chain on a cold Windows/D3D shader cache, and the
+   * occasional passes another ≈1 s in warmPasses: tools/_boottrace.mjs). A dry run of the chain:
+   * every draw it would make becomes a compileAsync with the same target bound (the target is part
+   * of a program's key), and nothing is drawn. `all`: the passes that only switch on at speed, in
+   * the rain, onboard or on a long lens too.
+   */
+  compilePasses(all = false): Promise<unknown> {
+    const r = this.renderer;
+    const queued: Promise<unknown>[] = [];
+    const occasional = [this.radialPass, this.dofPass, this.lensPass, this.caPass, this.motionPass, this.onboardPass];
+    const was = occasional.map((p) => p.enabled);
+    const main = this.renderPass.enabled;
+    const draw = r.render;
+    if (all) for (const p of occasional) p.enabled = true;
+    // (the scene itself is the game's to compile: compileQueued)
+    this.renderPass.enabled = false;
+    r.render = (scene, camera) => void queued.push(r.compileAsync(scene, camera));
+    try {
+      this.composer.render(0);
+    } catch (e) {
+      console.warn('[shaders] post chain compile failed', e);
+    } finally {
+      r.render = draw;
+      this.renderPass.enabled = main;
+      occasional.forEach((p, i) => (p.enabled = was[i]));
+      // (the meter's dry run read nothing: it starts afresh on the first real frame)
+      this.grade.resetAutoExposure();
+    }
+    return Promise.all(queued);
+  }
+
   get maxAnisotropy() {
     return this.renderer.capabilities.getMaxAnisotropy();
   }

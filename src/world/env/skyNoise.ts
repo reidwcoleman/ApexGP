@@ -117,6 +117,20 @@ export function createCloudNoise(renderer: THREE.WebGLRenderer, size = 128): THR
   noiseCache.get(renderer)!.set(size, made);
   return made;
 }
+/** the noise's slice painter (also queued ahead by the boot: env/skyPrewarm.ts) */
+export function cloudNoiseMaterial(): THREE.RawShaderMaterial {
+  return new THREE.RawShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: /* glsl */ `
+      in vec3 position;
+      in vec2 uv;
+      ${VERT}`,
+    fragmentShader: FRAG,
+    uniforms: { uZ: { value: 0 } },
+    depthTest: false,
+    depthWrite: false,
+  });
+}
 function buildCloudNoise(renderer: THREE.WebGLRenderer, size: number): THREE.Data3DTexture {
   const rt = new THREE.WebGL3DRenderTarget(size, size, size, {
     format: THREE.RGBAFormat,
@@ -131,17 +145,7 @@ function buildCloudNoise(renderer: THREE.WebGLRenderer, size: number): THREE.Dat
   tex.generateMipmaps = true;
   tex.colorSpace = THREE.NoColorSpace;
 
-  const mat = new THREE.RawShaderMaterial({
-    glslVersion: THREE.GLSL3,
-    vertexShader: /* glsl */ `
-      in vec3 position;
-      in vec2 uv;
-      ${VERT}`,
-    fragmentShader: FRAG,
-    uniforms: { uZ: { value: 0 } },
-    depthTest: false,
-    depthWrite: false,
-  });
+  const mat = cloudNoiseMaterial();
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
   quad.frustumCulled = false;
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);

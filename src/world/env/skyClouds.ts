@@ -368,6 +368,21 @@ export interface CloudPanorama {
   dispose(): void;
 }
 
+/** the panorama's ray march (also queued ahead by the boot: env/skyPrewarm.ts) */
+export function cloudPanoramaMaterial(uniforms: Record<string, THREE.IUniform> = {}): THREE.RawShaderMaterial {
+  return new THREE.RawShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: /* glsl */ `
+      in vec3 position;
+      in vec2 uv;
+      ${VERT}`,
+    fragmentShader: FRAG,
+    uniforms,
+    depthTest: false,
+    depthWrite: false,
+  });
+}
+
 export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.Texture, quality: QualityLevel): CloudPanorama {
   const uniforms: Record<string, THREE.IUniform> = {
     uNoise: { value: noise },
@@ -399,17 +414,7 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
     uRainCol: { value: new THREE.Vector3(0.3, 0.3, 0.3) },
     uConv: { value: 0 },
   };
-  const mat = new THREE.RawShaderMaterial({
-    glslVersion: THREE.GLSL3,
-    vertexShader: /* glsl */ `
-      in vec3 position;
-      in vec2 uv;
-      ${VERT}`,
-    fragmentShader: FRAG,
-    uniforms,
-    depthTest: false,
-    depthWrite: false,
-  });
+  const mat = cloudPanoramaMaterial(uniforms);
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
   quad.frustumCulled = false;
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);

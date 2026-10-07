@@ -1556,6 +1556,15 @@ export class GarageScene {
     for (const o of objs) o.traverse((x) => x.layers.enable(M.layer));
   }
 
+  /**
+   * The floor mirror's camera (null without a mirror). It sees only its layer — the car and the
+   * garage lights — so what it draws is lit differently from the garage view, and needs programs
+   * of its own: Game.warmGarage queues them with the rest before the first garage frame.
+   */
+  get mirrorCamera(): THREE.PerspectiveCamera | null {
+    return this.mirror?.cam ?? null;
+  }
+
   // ================================================================== reflections
 
   /** a small room with the garage's light strips, its open door and the team wall, as a reflection map */
