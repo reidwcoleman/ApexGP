@@ -2,6 +2,7 @@ import type { Track } from '../world/Track.ts';
 import { CarPhysics, F1_SPEC, DMG, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
 import { AIDriver, MISTAKE, VSC_SPEED, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
+import { AILearning, CornerClock } from '../sim/AILearning.ts';
 import { TEAMS, type Entry } from './Teams.ts';
 import { PitLane, fitTyres, newPitState, DRY_COMPOUNDS, COMPOUNDS, isDry, tyreTypeFor, type Compound, type PitState, type PitNeighbour } from './Pit.ts';
 import { Weather, type WeatherPlan, type WeatherState } from '../world/Weather.ts';
@@ -44,6 +45,12 @@ export interface RaceOptions {
   aiSpec?: CarSpec;
   /** Dynamic difficulty: the AI's pace drifts (±2.5%) toward the player's during the race */
   dynamicAI?: boolean;
+  /**
+   * The AI drivers bring what they learned of this circuit (and their development) from earlier
+   * races (localStorage, see AILearning) and keep what they learn today (`saveLearning`). Without it
+   * they still learn the circuit during the race, from scratch.
+   */
+  learning?: boolean;
   /** track-limit rules (default lenient) */
   trackLimits?: TrackLimitsMode;
   /**
@@ -316,6 +323,7 @@ export class Race {
       this.forms.set(e, { form: 1 + Math.max(-0.013, Math.min(0.013, gauss(r) * 0.0055)), suit: 1 + gauss(t) * 0.0018, quali: gauss(r) * 0.12 });
     });
     this.profile = RacingProfile.for(track, opts.aiSpec ?? F1_SPEC);
+    this.learning = new AILearning(track.def.id, this.profile, opts.difficulty, !!opts.learning && opts.mode === 'race');
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
     this.deltaCur = new Float32Array(Math.ceil(track.length / 10) + 2).fill(-1);
@@ -355,8 +363,11 @@ export class Race {
       let aiDriver: AIDriver | null = null;
       const f = this.forms.get(entry);
       if (!isPlayer) {
-        const pace = aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1);
+        const pace = aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(entry.driver.code);
         aiDriver = new AIDriver(pace, entry.driver.aggression, () => this.rand());
+        // what this driver knows of the circuit (learned here before, or new to it) — and learns today
+        aiDriver.know = this.learning.knowledgeOf(entry.driver);
+        aiDriver.bench = this.learning;
         aiDriver.startFrom(car, track);
         this.launch(aiDriver, entry);
         car.allowReverse = false;
@@ -488,7 +499,9 @@ export class Race {
    */
   qualifyingTime(entry: Entry, difficulty: number, wetFactor = 1, trackScale = 1): number {
     const f = this.forms.get(entry);
-    const pace = aiPace(entry, difficulty) * (f?.form ?? 1) * (f?.suit ?? 1);
+    // (and what the driver has learned: their development, and the circuit if they know it better than a practice session teaches)
+    const code = entry.driver.code;
+    const pace = aiPace(entry, difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(code) * Math.max(1, this.learning.knowledgePace(code));
     return (26.9 + 50.8 / pace - 0.15) * trackScale * wetFactor + (f?.quali ?? 0);
   }
 
@@ -561,8 +574,11 @@ export class Race {
       const d = c.entry.driver;
       const behind = this.cars.find((o) => o.position === c.position + 1);
       const pressed = (c.gapAhead > 0 && c.gapAhead < 0.8) || (!!behind && !behind.retired && behind.gapAhead > 0 && behind.gapAhead < 0.6);
+      // (pressure builds over a long fight; experience and knowing the circuit calm a driver down)
+      const stress = 1 + 1.5 * Math.max(pressed ? 0.5 : 0, ai.pressure);
+      const calm = (1 - 0.25 * Math.min(1, this.learning.experience(d.code) / 60)) * (1.05 - 0.1 * (ai.know ? ai.know.familiarity() : 1));
       const rate =
-        MISTAKE_RATE * (1 + (1 - d.skill) * 12) * (0.8 + 0.5 * d.aggression) * (pressed ? 2.2 : 1) * (c.laps < 1 ? 1.6 : 1) * (1 + 2.5 * wet) * (1 + this.wearOf(c));
+        MISTAKE_RATE * (1 + (1 - d.skill) * 12) * (0.8 + 0.5 * d.aggression) * stress * calm * (c.laps < 1 ? 1.6 : 1) * (1 + 2.5 * wet) * (1 + this.wearOf(c));
       if (this.rand() >= rate * step) continue;
       const r = this.rand();
       const spin = 0.045 + 0.1 * wet;
@@ -736,6 +752,9 @@ export class Race {
       this.collideCars();
     }
     this.playerDrsRequest = false;
+    // the player's passes through the corners: the AI sees where there's time to find
+    const p = this.player;
+    if (racing && !this.isTimeTrial) this.playerClock.step(this.learning, p.car.s, this.raceTime, !p.car.offTrack && p.pit.phase === 'none' && !p.retired && !p.finished, p.id);
     this.retirements(dt);
     this.pitGhosts(dt);
     this.driverLife(dt);
@@ -1214,8 +1233,11 @@ export class Race {
             if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 30 });
           }
           c.finishTime = t + c.penalty;
-          // cool-down lap
-          if (c.ai) c.ai.pace *= 0.72;
+          // cool-down lap (nothing to learn from it)
+          if (c.ai) {
+            c.ai.pace *= 0.72;
+            c.ai.learnOn = false;
+          }
           this.finishOrder.push(c.id);
           if (this.phase !== 'finished') this.phase = 'finished';
           this.events.push({ kind: 'finish', car: c.id });
@@ -1502,6 +1524,21 @@ export class Race {
         B.addImpact(localB[0], localB[1], strength * 0.75, px, pz, nx, nz);
       }
     }
+  }
+
+  // ------------------------------------------------------------------ learning
+
+  /** what the AI drivers know of this circuit and learn during the race (AILearning) */
+  readonly learning: AILearning;
+  private readonly playerClock = new CornerClock();
+
+  /**
+   * After the race: what the AI drivers learned of the circuit, and a race's more experience for
+   * each who took part, is kept for next time (with `opts.learning`; once per race).
+   */
+  saveLearning() {
+    if (this.isTimeTrial) return;
+    this.learning.save(this.cars.filter((c) => c.ai && c.laps >= 1).map((c) => c.entry.driver.code));
   }
 
   // ------------------------------------------------------------------ dynamic difficulty
