@@ -20,14 +20,16 @@ import { N8AOPostPass } from 'n8ao';
 import { MOTION_CARS, MotionBlurEffect } from './motionBlur';
 import { AutoExposure } from './autoExposure';
 import { OnboardEffect } from './onboard';
+import { TAAPass, TAA_JITTER } from './taa';
 
 export { MOTION_CARS };
 
 /**
  * Renderer + post chain.
  *
- *   RenderPass (HDR, half float)
+ *   RenderPass (HDR, half float; sub-pixel jittered projection on High/Ultra)
  *   → N8AO (screen-space AO, world-radius; ultra)
+ *   → TAA (temporal anti-aliasing, High/Ultra: taa.ts; replaces SMAA there) [own pass]
  *   → motion blur (camera + per-object, reconstructed from a velocity buffer: motionBlur.ts) [own pass]
  *   → onboard lens (eye cams: own cockpit shaded + defocused from both sides, outside exposed up: onboard.ts)
  *   → speed blur (radial, only while fast)      [own pass: convolution]
@@ -126,6 +128,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
  */
 const SHARPEN_FRAG = /* glsl */ `
 uniform float sharpness;
+uniform float edgeSoft;
 uniform float lensK;
 uniform float lensCA;
 // the last pass draws at the display's native resolution from the lower-resolution frame: a
@@ -180,7 +183,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv0, out vec4 outputColor
   vec3 lo = min(c, min(min(a, b), min(d, e)));
   vec3 hi = max(c, max(max(a, b), max(d, e)));
   vec3 amp = sqrt(clamp(min(lo, 1.0 - hi) / max(hi, 1e-4), 0.0, 1.0));
-  vec3 w = -amp * mix(0.04, 0.2, sharpness) * (1.0 - 0.75 * edge);
+  vec3 w = -amp * mix(0.04, 0.2, sharpness) * (1.0 - edgeSoft * edge);
   vec3 o = (c + (a + b + d + e) * w) / (1.0 + 4.0 * w);
   // lateral chromatic aberration toward the corners (red imaged a touch larger, blue smaller): the
   // shift is a texel or two, so red and blue are moved along their own gradients (from the cross
@@ -202,6 +205,7 @@ class SharpenEffect extends Effect {
       attributes: EffectAttribute.CONVOLUTION,
       uniforms: new Map<string, THREE.Uniform>([
         ['sharpness', new THREE.Uniform(0.4)],
+        ['edgeSoft', new THREE.Uniform(0.75)],
         ['lensK', new THREE.Uniform(0)],
         ['lensCA', new THREE.Uniform(0)],
       ]),
@@ -209,6 +213,10 @@ class SharpenEffect extends Effect {
   }
   set sharpness(v: number) {
     this.uniforms.get('sharpness')!.value = v;
+  }
+  /** how much softer the sharpening is toward the corners (0 = even across the frame) */
+  set edgeSoft(v: number) {
+    this.uniforms.get('edgeSoft')!.value = v;
   }
   /** the lens: barrel distortion coefficient and lateral chromatic aberration (uv per unit radius) */
   setLens(k: number, ca: number) {
@@ -703,6 +711,14 @@ class SunShaftsEffect extends Effect {
   }
 }
 
+// the sim look's tone curve (Renderer.broadcast): ACES's RRT + ODT fit (Stephen Hill's), per channel
+const SIM_TONE_GLSL = /* glsl */ `
+vec3 simFilmic(vec3 c) {
+  vec3 a = (c * (c + 0.0245786) - 0.000090537) / (c * (0.983729 * c + 0.4329510) + 0.238081);
+  return clamp(a, 0.0, 1.0);
+}
+`;
+
 const GRADE_FRAG = /* glsl */ `
 uniform float exposure;
 uniform float saturation;
@@ -718,6 +734,7 @@ uniform float flash;
 uniform vec2 greenTame;
 uniform sampler2D tAdapt;
 uniform float adaptStrength;
+uniform float sim;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   // the camera's auto exposure: (reference / adapted)^strength, 1 in steady light (autoExposure.ts)
   float ae = 1.0;
@@ -729,14 +746,24 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // split toning: shadows toward shadowTint, highlights toward tint
   float hl = smoothstep(0.02, 0.6, l);
-  c *= mix(shadowTint * lookShadowTint, tint * lookTint, hl);
+  vec3 tS = shadowTint * lookShadowTint;
+  vec3 tH = tint * lookTint;
+  // (the sim look, see Renderer.broadcast: a game camera is white-balanced to the light, not a
+  // broadcast camera's warm sodium cast — most of the tints' colour goes, their brightness stays;
+  // the warmth of a low sun is in the light itself, and the remaining 30 % keeps the hour's mood)
+  tS = mix(tS, vec3(dot(tS, vec3(0.2126, 0.7152, 0.0722))), 0.7 * sim);
+  tH = mix(tH, vec3(dot(tH, vec3(0.2126, 0.7152, 0.0722))), 0.7 * sim);
+  c *= mix(tS, tH, hl);
   l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // a camera's greens: foliage, grass and green paint come out olive and muted, never the pure
   // RGB green of a game render (x pulls them toward yellow, y toward grey; by how green they are)
-  float gp = clamp((c.g - max(c.r, c.b)) / max(c.g, 1e-4), 0.0, 1.0);
+  // (not in the sim look: ACC's Monza park is a rich, clean green)
+  float gp = clamp((c.g - max(c.r, c.b)) / max(c.g, 1e-4), 0.0, 1.0) * (1.0 - sim);
   c.r += (c.g - c.r) * gp * greenTame.x;
   c = mix(c, vec3(l), gp * greenTame.y);
-  c = mix(vec3(l), c, saturation * lookSaturation);
+  // (the footage layer pulls the colour back to ~0.7 of the render's (Environment FILM.saturation);
+  // the sim look gives most of it back: saturated but natural, the tone curve adds the rest)
+  c = mix(vec3(l), c, saturation * lookSaturation * (1.0 + 0.32 * sim));
   // vibrance: lift the muted colours (grass, sky, liveries in the shade) more than the already vivid
   // ones, so the picture has the broadcast punch without clipping a red car into a flat blob
   float cMax = max(c.r, max(c.g, c.b));
@@ -769,6 +796,7 @@ uniform float filmGrain;
 uniform float filmTime;
 uniform sampler2D tAdapt;
 uniform float adaptOn;
+uniform float sim;
 float fg_h(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -777,11 +805,16 @@ float fg_h(vec2 p) {
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = clamp(inputColor.rgb, 0.0, 1.0);
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(l), c, mix(filmShadowSat, 1.0, smoothstep(0.0, 0.06, l)));
-  c = filmLift + c * (filmWhite - filmLift);
+  // (the sim look prints clean: colour all the way into the shadows, a neutral white, and only a
+  // quarter of the black floor — what is left is the wet day's veil of spray, which is real)
+  c = mix(vec3(l), c, mix(mix(filmShadowSat, 1.0, sim), 1.0, smoothstep(0.0, 0.06, l)));
+  vec3 lift = filmLift * (1.0 - 0.75 * sim);
+  c = lift + c * (mix(filmWhite, vec3(1.0), sim) - lift);
   if (filmGrain > 0.0) {
     // the gain: ~0 in daylight, ~1 by a wet morning or a night (metered log luminance, pre-grade)
-    float iso = adaptOn > 0.5 ? smoothstep(-4.1, -5.8, texture2D(tAdapt, vec2(0.5)).x) : 0.3;
+    // (sim look: no sensor gain — what is left of the grain is a faint dither that keeps the
+    // sky's gradients from banding in 8 bits)
+    float iso = (adaptOn > 0.5 ? smoothstep(-4.1, -5.8, texture2D(tAdapt, vec2(0.5)).x) : 0.3) * (1.0 - sim);
     // clumpy grain: this pixel's noise plus a coarser layer, both new every frame (in a
     // perceptual, square-root domain so it sits evenly across the tones)
     vec3 p = sqrt(c);
@@ -796,7 +829,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
       float n = (h1 - 0.5) * 0.8 + (h2 - 0.5) * 0.7;
       // (the colour noise rides on the coarse layer, decorrelated per channel)
       vec3 chroma = fract(h2 * vec3(7.31, 13.17, 3.93)) - 0.5;
-      float a = filmGrain * (0.5 + 1.0 * iso) * w;
+      float a = filmGrain * (0.5 + 1.0 * iso) * w * (1.0 - 0.8 * sim);
       p += a * (n + chroma * 0.8 * iso);
       c = max(p, 0.0) * max(p, 0.0);
     }
@@ -817,6 +850,8 @@ export class FilmEffect extends Effect {
         ['filmTime', new THREE.Uniform(0)],
         ['tAdapt', new THREE.Uniform(null)],
         ['adaptOn', new THREE.Uniform(0)],
+        // (1 = the sim look; the live chain sets it from Renderer.broadcast, other users keep the footage)
+        ['sim', new THREE.Uniform(0)],
       ]),
     });
   }
@@ -858,6 +893,8 @@ export class GradeEffect extends Effect {
         ['greenTame', new THREE.Uniform(new THREE.Vector2(0.3, 0.3))],
         ['tAdapt', new THREE.Uniform(null)],
         ['adaptStrength', new THREE.Uniform(0)],
+        // (1 = the sim look; the live chain sets it from Renderer.broadcast, other users keep the footage)
+        ['sim', new THREE.Uniform(0)],
       ]),
     });
   }
@@ -1010,6 +1047,10 @@ export class Renderer {
     this.ao.setQualityMode('Medium');
     this.composer.addPass(this.ao);
 
+    // (before the motion blur, as UE4 orders it: the blur then smears an image without stair-steps)
+    this.taa = new TAAPass();
+    this.composer.addPass(this.taa);
+
     this.motion = new MotionBlurEffect();
     this.motionPass = new EffectPass(camera, this.motion);
     this.motionPass.enabled = false;
@@ -1090,6 +1131,29 @@ export class Renderer {
         .replace('outputColor=texture2D(map,uv)*intensity;', 'vec4 bt=texture2D(map,uv);outputColor=vec4(bt.rgb*halation,bt.a)*intensity;'),
     );
     this.bloom.uniforms.set('halation', new THREE.Uniform(new THREE.Vector3(1.12, 0.94, 0.76)));
+    // The sim look's tone curve (see `broadcast`): ACC is an Unreal Engine 4 game, whose filmic tone
+    // mapper is fitted to ACES — per channel, so colour stays rich through the mids, with detail kept
+    // in the shade (PBR Neutral's quadratic toe crushes it, as a broadcast camera does) and a long
+    // soft shoulder that holds the sky and sunlit lacquer. It runs in the display primaries, not
+    // ACES's AP1 (whose round trip turns a sunlit red livery orange), and is blended in the same pass
+    // by a uniform (no second program). acesScale sets mid grey: 0.18 in → 0.15 out, a touch brighter
+    // than Neutral's 0.14 (a game exposes for the subject, a broadcast camera a little under).
+    const tm = this.toneMapping as unknown as { fragmentShader: string; setFragmentShader(s: string): void };
+    const tmSrc = tm.fragmentShader
+      .replace('uniform float whitePoint;', `uniform float whitePoint;uniform float simTone;uniform float acesScale;${SIM_TONE_GLSL}`)
+      .replace(
+        'outputColor=vec4(toneMapping(inputColor.rgb),inputColor.a);',
+        'vec3 tmc=toneMapping(inputColor.rgb);if(simTone>0.0)tmc=mix(tmc,simFilmic(inputColor.rgb*acesScale),simTone);outputColor=vec4(tmc,inputColor.a);',
+      );
+    if (!tmSrc.includes('simTone>0.0')) console.warn('Renderer: tone mapping patch did not apply (postprocessing changed?)');
+    tm.setFragmentShader(tmSrc);
+    this.toneMapping.uniforms.set('simTone', new THREE.Uniform(0));
+    this.toneMapping.uniforms.set('acesScale', new THREE.Uniform(1.3));
+    // (the sim look keeps only a hint of the vignette: the game's camera is not a lens that darkens
+    // its corners; `darkness` stays what the game sets, the sim look scales it)
+    const vg = this.vignette as unknown as { fragmentShader: string; setFragmentShader(s: string): void };
+    vg.setFragmentShader(vg.fragmentShader.replace('uniform float darkness;', 'uniform float darkness;uniform float vigScale;').replace('d*(darkness+offset)', 'd*(darkness*vigScale+offset)'));
+    this.vignette.uniforms.set('vigScale', new THREE.Uniform(1));
     this.ssao = new AOEffect();
     this.film = new FilmEffect();
     this.grade.adaptLinks.push(this.film);
@@ -1119,6 +1183,12 @@ export class Renderer {
   // ------------------------------------------------------------------ perf plumbing
 
   private readonly smaa: SMAAEffect;
+  /** temporal anti-aliasing (High/Ultra; SMAA below): taa.ts */
+  private readonly taa: TAAPass;
+  /** TAA is running (the game keeps the tracked cars listed for its reprojection even with motion blur off) */
+  get temporalAA() {
+    return this.taa.enabled;
+  }
   private readonly sharpen: SharpenEffect;
   private readonly sharpenPass: EffectPass;
   private readonly smaaPass: EffectPass;
@@ -1258,6 +1328,7 @@ export class Renderer {
   setScene(scene: THREE.Scene) {
     this.scene = scene;
     this.grade.resetAutoExposure();
+    this.taa.reset();
     for (const p of this.composer.passes) {
       (p as unknown as { mainScene: THREE.Scene }).mainScene = scene;
     }
@@ -1292,6 +1363,12 @@ export class Renderer {
     this.sharpenPass.renderToScreen = sharpenOn;
     this.upscaleOn = sharpenOn;
     this.smaaPass.renderToScreen = !sharpenOn;
+    // TAA where the CAS sharpen follows it (High/Ultra) — it resolves what SMAA can't (sub-pixel
+    // wires, kerb stripes, thin flaps), and the sharpen gives back what its blend softens; below,
+    // SMAA (no history, no jitter: cheaper, and nothing to smear at a low frame rate)
+    this.taa.enabled = sharpenOn;
+    this.taa.reset();
+    this.smaaPass.enabled = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
     this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 10 : q === 'high' ? 14 : 20;
@@ -1318,7 +1395,7 @@ export class Renderer {
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
     // sharpen harder when the image is being upscaled
-    this.sharpen.sharpness = THREE.MathUtils.clamp(0.4 + (1 - v) * 0.5, 0.4, 0.65);
+    this.sharpBase = THREE.MathUtils.clamp(0.4 + (1 - v) * 0.5, 0.4, 0.65);
     this.resize();
   }
 
@@ -1332,11 +1409,13 @@ export class Renderer {
     this.radialPass.enabled = this.radial.strength > 0 || this.radial.aberration > 0;
   }
 
-  /** lateral chromatic aberration (shares the speed-blur pass) */
+  /** lateral chromatic aberration (shares the speed-blur pass; the broadcast look only, see `broadcast`) */
   setAberration(offset: number) {
-    this.radial.aberration = offset > 0.00003 ? offset : 0;
+    this.caWanted = offset;
+    this.radial.aberration = offset * this.broadcast > 0.00003 ? offset * this.broadcast : 0;
     this.radialPass.enabled = this.radial.strength > 0 || this.radial.aberration > 0;
   }
+  private caWanted = 0;
 
   /**
    * Water on the lens for onboard cameras: 0 = dry … 1 = soaked. `speed` 0 … 1
@@ -1468,12 +1547,61 @@ export class Renderer {
   private updateLens() {
     const fov = this.camera.fov;
     // how wide the lens is (vertical fov): a long trackside lens (a few degrees) 0, the onboards ~0.8, chase 1
-    const wide = this.lensCharacter ? THREE.MathUtils.smoothstep(fov, 20, 60) : 0;
-    this.sharpen.setLens(0.05 * wide, this.lensCharacter ? 0.0012 + 0.0024 * wide : 0);
+    // (a real lens's character is the broadcast look's: the sim's camera is an ideal rectilinear one)
+    const lens = this.lensCharacter ? this.broadcast : 0;
+    const wide = THREE.MathUtils.smoothstep(fov, 20, 60);
+    this.sharpen.setLens(0.05 * wide * lens, (0.0012 + 0.0024 * wide) * lens);
+  }
+
+  /**
+   * The look, 0 … 1: 0 is the sim look, 1 the broadcast look. The game sets it per camera
+   * (Game.updateMotionBlur): the cameras you drive with (chase, onboards) get the sim look, the TV
+   * director, the trackside and aerial cameras and the replays keep the broadcast look.
+   *
+   * The broadcast look is what the chain was built for: compressed TV footage — a warm sodium cast,
+   * olive greens, colour pulled back, a lifted black floor, sensor grain that follows the gain, a
+   * strong vignette, the lens's barrel distortion and lateral CA, speed CA, footage-soft sharpening.
+   *
+   * The sim look is Assetto Corsa Competizione's (Unreal Engine 4): a clean, crisp, high-dynamic-
+   * range image — ACES-fitted filmic tone curve (deep shade, rich mids, a soft shoulder), white
+   * balance to the light, saturated but natural colour, clean blacks, no grain beyond a dither,
+   * a hint of vignette, no lens distortion or chromatic aberration, even sharpening corner to corner,
+   * a restrained neutral bloom, and a cockpit that is in shade but readable (no footage-style
+   * defocus). Shared state (exposure, auto exposure, weather looks, flare) is untouched: the two
+   * looks are the same light shot by two cameras.
+   */
+  broadcast = 0;
+  private sharpBase = 0.4;
+  private appliedLook = -1;
+  private applyLook() {
+    const b = THREE.MathUtils.clamp(this.broadcast, 0, 1);
+    const s = 1 - b;
+    // (per frame: cheap, and the sharpening base moves with the dynamic resolution)
+    // (the sim look sharpens a little harder and evenly: ACC's TAA + sharpen is crisp to the corners)
+    this.sharpen.sharpness = Math.min(1, this.sharpBase + 0.22 * s);
+    this.sharpen.edgeSoft = 0.75 * b;
+    this.radial.aberration = this.caWanted * b > 0.00003 ? this.caWanted * b : 0;
+    this.radialPass.enabled = this.radial.strength > 0 || this.radial.aberration > 0;
+    if (b === this.appliedLook) return;
+    this.appliedLook = b;
+    this.grade.uniforms.get('sim')!.value = s;
+    this.film.uniforms.get('sim')!.value = s;
+    this.toneMapping.uniforms.get('simTone')!.value = s;
+    this.vignette.uniforms.get('vigScale')!.value = THREE.MathUtils.lerp(0.4, 1, b);
+    // bloom: the footage's wide warm halation, or a restrained neutral glow (UE4's bloom is subtle in ACC)
+    (this.bloom.uniforms.get('halation')!.value as THREE.Vector3).set(THREE.MathUtils.lerp(0.62, 1.12, b), THREE.MathUtils.lerp(0.6, 0.94, b), THREE.MathUtils.lerp(0.58, 0.76, b));
+    // the cockpit: footage shades it hard and defocuses it (a lens exposed for the outside, focused far);
+    // the sim's eye sees it in shade but readable and sharp, as ACC's cockpit view does
+    const ou = this.onboard.uniforms;
+    ou.get('shade')!.value = THREE.MathUtils.lerp(0.5, 1, b);
+    ou.get('outside')!.value = THREE.MathUtils.lerp(1.0, 1.12, b);
+    ou.get('defocus')!.value = THREE.MathUtils.lerp(0.0105 * 0.25, 0.0105, b);
+    ou.get('obVig')!.value = THREE.MathUtils.lerp(0.12, 0.5, b);
   }
 
   render(dt: number) {
     this.renderer.info.reset();
+    this.applyLook();
     this.updateLens();
     this.film.uniforms.get('filmGrain')!.value = this.grain.blendMode.opacity.value;
     // (a cut, another camera, or in/out of the garage: the auto exposure starts from the new view)
@@ -1482,9 +1610,66 @@ export class Renderer {
     this.ssao.setCamera(this.camera);
     this.updateShafts();
     this.updateScene();
+    // (before updateMotion, which moves last frame's camera and car matrices on to this frame's)
+    this.updateTaa();
     this.updateMotion(dt);
     this.updateOnboard();
-    this.composer.render(dt);
+    // TAA: this frame's sub-pixel offset, on the projection for the composer's render only (game code
+    // between frames, and the matrices kept for next frame's reprojection, see the unjittered one)
+    const cam = this.camera;
+    const jitter = this.taa.enabled;
+    if (jitter) {
+      const j = TAA_JITTER[this.taaPhase++ & 7];
+      this.taaSaved.copy(cam.projectionMatrix);
+      const e = cam.projectionMatrix.elements;
+      e[8] += (2 * j[0]) / Math.max(1, this.composer.inputBuffer.width);
+      e[9] += (2 * j[1]) / Math.max(1, this.composer.inputBuffer.height);
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+      (this.taa.uniforms.projInv.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
+    }
+    try {
+      this.composer.render(dt);
+    } finally {
+      if (jitter) {
+        cam.projectionMatrix.copy(this.taaSaved);
+        cam.projectionMatrixInverse.copy(this.taaSaved).invert();
+      }
+    }
+  }
+
+  private taaPhase = 0;
+  private readonly taaSaved = new THREE.Matrix4();
+  /** the TAA's reprojection: last frame's (unjittered) view-projection and the tracked cars' motion */
+  private updateTaa() {
+    if (!this.taa.enabled) return;
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    const camPos = this.tmpV.setFromMatrixPosition(cam.matrixWorld);
+    const camQ = this.tmpQ.setFromRotationMatrix(cam.matrixWorld);
+    const zoom = cam.projectionMatrix.elements[5] / Math.max(1e-6, this.prevViewProjZoom);
+    // a cut, another camera, a jump, a whip pan or a zoom snap: nothing a frame ago to blend with
+    // (the same tests as the motion blur's; updateMotion clears motionCut after this)
+    if (this.motionCut || this.prevCam !== cam || camPos.distanceTo(this.prevCamPos) > 8 || camQ.angleTo(this.prevCamQ) > 0.25 || zoom > 1.05 || zoom < 1 / 1.05) this.taa.reset();
+    const u = this.taa.uniforms;
+    (u.prevViewProj.value as THREE.Matrix4).copy(this.prevViewProj);
+    (u.camWorld.value as THREE.Matrix4).copy(cam.matrixWorld);
+    (u.projInv.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
+    u.cameraNear.value = cam.near;
+    u.cameraFar.value = cam.far;
+    const inv = u.carInv.value as THREE.Matrix4[];
+    const prev = u.carPrev.value as THREE.Matrix4[];
+    let n = 0;
+    for (const o of this.motionCars) {
+      if (n >= MOTION_CARS) break;
+      const p = this.prevCar.get(o);
+      inv[n].copy(o.matrixWorld).invert();
+      // (updateMotion hasn't counted this frame yet: a car seen last frame has frame === motionFrame)
+      const fresh = p && p.frame === this.motionFrame;
+      prev[n].copy(fresh ? p.m : o.matrixWorld);
+      if (fresh && this.tmpF.setFromMatrixPosition(p.m).distanceToSquared(this.tmpF2.setFromMatrixPosition(o.matrixWorld)) > 400) prev[n].copy(o.matrixWorld);
+      n++;
+    }
+    u.carCount.value = n;
   }
 
   /** the car an onboard camera rides in (null = not onboard): its own cockpit is shaded and defocused */

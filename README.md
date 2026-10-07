@@ -337,6 +337,14 @@ npm run check    # tsc --noEmit
   spans a tow), plate edges (endplates, fences, fins, the wheel) shade rounded, and the front wing's
   first flaps carry a partner's wordmark read from the onboards. (No over-wheel deflectors: 2026
   dropped them for the wheel-wake boards.)
+- **Two looks, one light** (`Renderer.broadcast`, set per camera in Game.updateMotionBlur): the cameras you drive
+  with (chase, onboards) get the sim look — Assetto Corsa Competizione's clean, crisp HDR image: an ACES-fitted
+  filmic curve, white balance to the light, saturated but natural colour, clean blacks, no grain, lens distortion
+  or chromatic aberration, a hint of vignette, even sharpening, a restrained neutral bloom, a cockpit in shade but
+  readable and sharp. The TV director, the trackside and aerial cameras and the replays keep the camera footage
+  look below. On High/Ultra both get temporal anti-aliasing (`src/core/taa.ts`: Halton-jittered projection,
+  depth + tracked-car reprojection, Catmull-Rom history, variance clipping; sparks pass through) in place of SMAA,
+  so fences, kerb stripes, thin flaps and hashed-alpha foliage stop crawling.
 - **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car
@@ -481,8 +489,8 @@ src/
            Spray (rain plumes: a translucent grey mist, darker than the sky so a bright wet exposure never
            clips it), SkidMarks (rubber, offs, braking film, marbles)
   ui/      HUD, Menu, design tokens
-  core/    Renderer (post chain: N8AO, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
-           PBR Neutral, film print + grain, SMAA, lens + sharpen;
+  core/    Renderer (post chain: N8AO, TAA, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
+           PBR Neutral / ACES-fit by look, film print + grain, SMAA below High, lens + sharpen;
            adaptive resolution that never trusts Apple's GPU timer), Input, Audio
   people/  Humans (bodies, clothing shader, faces, props), Crowd (GPU-skinned instanced fans),
            drivers, poses
