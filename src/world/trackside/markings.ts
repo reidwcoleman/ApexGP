@@ -12,6 +12,18 @@ import { Rng } from './noise.ts';
  */
 
 const LIFT = 0.006;
+
+/**
+ * Further corners whose tarmac run-off carries a painted sponsor logo, per circuit ([corner, logo]),
+ * where the broadcast shows them: La Source, the Bus Stop and Rivage; Abbey, Village, Brooklands and
+ * Vale; the Hairpin, 130R and the chicane at Suzuka; Turns 12 and 14 at the Hungaroring.
+ */
+const RUNOFF_LOGOS: Record<string, [string, number][]> = {
+  spa: [['La Source', 1], ['Bus Stop', 0], ['Rivage', 1]],
+  silverstone: [['Abbey', 0], ['Village', 1], ['Brooklands', 0], ['Vale', 1]],
+  suzuka: [['Hairpin', 0], ['130R', 1], ['Casio Triangle', 0]],
+  hungaroring: [['Turn 12', 1], ['Turn 14', 0]],
+};
 const P0 = new THREE.Vector3(), P1 = new THREE.Vector3(), P2 = new THREE.Vector3(), P3 = new THREE.Vector3();
 const UP = new THREE.Vector3();
 
@@ -179,6 +191,7 @@ export function buildMarkings(ctx: Ctx, atlas: DecalAtlas) {
   logoAt('Turn 1', 18, 0);
   logoAt('Roggia', 10, 1);
   logoAt('Turn 10', 8, 0);
+  for (const [name, k] of RUNOFF_LOGOS[t.def.id] ?? []) logoAt(name, 0, k);
 
   // ---------------------------------------------------------------- timing loops (sealed saw cuts across the road)
   const loops: number[] = [t.startS - 0.9, t.sectorS[0], t.sectorS[1], pit.sStart - 40, pit.sEnd + 40];

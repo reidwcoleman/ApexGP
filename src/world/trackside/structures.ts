@@ -4,6 +4,7 @@ import { Frame3, WEATHER, beam, box, cylinder, disc, printQuadX, printQuadZ, typ
 import { styleOf, type Ctx } from './context.ts';
 import { SPONSORS, type PrintAtlas } from './atlas.ts';
 import { Rng } from './noise.ts';
+import { DRESS_BRIDGES } from '../env/venues/dressBridges.ts';
 
 /**
  * Bigger trackside structures for Monza: the start gantry with its five light
@@ -108,25 +109,25 @@ const VENUE_PROPS: Record<string, VenueProps> = {
   },
   // the main straight past the pit exit, and the back straight toward the Parabolica
   monza: {
-    bridges: [1048, 4700],
+    bridges: [], // (env/venues/monzaDress.ts)
     cameras: ['Turn 1', 'Curva Grande', 'Roggia', 'Lesmo 2', 'Ascari', 'Parabolica'],
     billboards: [['Turn 1', 0], ['Roggia', 4], ['Ascari', 8], ['Parabolica', 12], ['Lesmo 1', 2]],
   },
   // the Kemmel straight after Raidillon, the run down to Blanchimont
   spa: {
-    bridges: [2150, 6050],
+    bridges: [], // (env/venues/spaDress.ts)
     cameras: ['La Source', 'Raidillon', 'Les Combes', 'Rivage', 'Pouhon', 'Stavelot', 'Blanchimont', 'Bus Stop'],
     billboards: [['La Source', 1], ['Les Combes', 5], ['Rivage', 9], ['Bus Stop', 13], ['Stavelot', 3]],
   },
   // the Wellington and Hangar straights
   silverstone: {
-    bridges: [1800, 4850],
+    bridges: [], // (env/venues/silverstoneDress.ts)
     cameras: ['Abbey', 'Village', 'Brooklands', 'Luffield', 'Copse', 'Becketts', 'Stowe', 'Club'],
     billboards: [['Village', 2], ['Brooklands', 6], ['Stowe', 10], ['Copse', 14], ['Club', 4]],
   },
   // the end of the main straight before Turn 1, the run from Spoon to the crossover
   suzuka: {
-    bridges: [905, 4560],
+    bridges: [], // (env/venues/suzukaDress.ts)
     cameras: ['Turn 1', 'S Curves', 'Dunlop', 'Degner 1', 'Hairpin', 'Spoon', '130R', 'Casio Triangle'],
     billboards: [['Turn 1', 3], ['Hairpin', 7], ['Spoon', 11], ['Casio Triangle', 1], ['Degner 1', 9]],
   },
@@ -156,7 +157,7 @@ const VENUE_PROPS: Record<string, VenueProps> = {
   },
   // Hungaroring: footbridges over the back straight (up to Turn 4) and the run down to Turn 12
   hungaroring: {
-    bridges: [1990, 3790],
+    bridges: [], // (env/venues/hungaroringDress.ts)
     cameras: ['Turn 1', 'Turn 2', 'Turn 4', 'Turn 5', 'Turn 6', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 14'],
     billboards: [['Turn 1', 2], ['Turn 2', 6], ['Turn 5', 10], ['Turn 12', 14], ['Turn 14', 4]],
   },
@@ -193,7 +194,8 @@ export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
   // sponsor footbridges
   vp.bridges.forEach((s, k) => buildBridge(ctx, atlas, s, k));
   // sponsor arches over the straights: something to drive through between the bridges
-  buildArches(ctx, atlas, [...vp.bridges, ctx.track.startS]);
+  // (and away from the bridges a venue's own dressing builds: env/venues/dressBridges.ts)
+  buildArches(ctx, atlas, [...vp.bridges, ctx.track.startS, ...(DRESS_BRIDGES[ctx.track.def.id] ?? [])]);
   buildMarshalPosts(ctx, atlas, out);
   placePhotographers(ctx, out);
   buildCameras(ctx, vp.cameras);
