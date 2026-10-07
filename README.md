@@ -348,24 +348,28 @@ npm run check    # tsc --noEmit
   `Cameras.cuts`. Engine/wind mixes are balanced against real V6 turbo-hybrid footage by band energy
   (`tools/audiocheck.mjs --bands`: cockpit ≈ 22 % < 150 Hz, 58 % 150–600 Hz, 16 % 600–2k, 3 % 2–6k). `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
-- **Racing cameras** — 18 to race with (C cycles them, Settings → Camera picks one): chase / far / low
-  chase a hand's width over the road (surge, G lean, brake pitch, look to the apex, glide between them),
+- **Racing cameras** — 19 to race with (C cycles them, Settings → Camera picks one): chase / far / low
+  chase a hand's width over the road (surge, brake pitch, look to the apex, glide between them; the horizon
+  held all but level as in ACC — the G lean is what the horizon lock leaves, ≤1° by default),
   a long-lens chase (a camera car 30–45 m back on the circuit holding the car on a 6–9° lens, the field
   stacked behind it in a shallow focus; it cuts to a closer camera car when a bend comes between them),
   the chase drone, and onboards placed against the body's measured shape (`MOUNTS` in Cameras.ts, each
   with its own lens, bracket stiffness, housing flex, roll and corner look): the T-cam on the roll hoop,
   the broadcast halo cam low in the tub (the centre pillar splitting a wide picture), the cockpit eye,
-  the helmet cam, the nose pod, the bumper cam over the front wing, the front-wheel cam, the sidepod,
+  the helmet cam, the bonnet cam (ACC's: on the tub's centre line ahead of the halo pillar, the nose
+  running away down the middle), the nose pod, the bumper cam over the front wing, the front-wheel cam, the sidepod,
   the rear-facing T-cam and rear sidepod; the helicopter, trackside, and a **TV director** for your own
   race that cuts every 3–8 s between long lenses, onboards and the chase cameras like the TikTok edits
   (`Cameras.view` is the shot on air). The helmet cam rides the driver's head, framed by the visor;
   every lens rides with the car vibrating like its mount (`CamShake` in Cameras.ts: noise-rung
   resonators — the head or bracket sway at 4–11 Hz, the structure's buzz at 11–22 Hz — driven by the
   speed, the road relief under the wheels, kerb ridges and strikes, the grass and contacts; calibrated
-  against the reference onboards with `node tools/camshake.mjs`: the cockpit moves ≈0.4 % of the frame
-  height per 30 fps frame on a straight at 300 km/h, ≈1 % on kerbs with sharper strike jolts), the
+  against the reference onboards with `node tools/camshake.mjs`: the T-cam moves ≈0.5 % of the frame
+  height per 30 fps frame on a straight at 300 km/h, ≈1 % on kerbs with sharper strike jolts; the
+  cockpit eye, steadied by the driver's own gaze as in the sims, ≈0.3 % and ≈0.9 %), the
   cockpit eye thrown about by the G on a sprung neck (outward in corners, forward and down with a nod
-  on the brakes, back into the seat on the power), a lens that widens with speed (mostly above 150 km/h),
+  on the brakes, back into the seat on the power) behind a fixed 56° lens (in the 55–60° range the sims use on a monitor; the
+  other cameras' lenses widen with speed, mostly above 150 km/h),
   a live steering-wheel screen and shift lights in the onboards,
   and Camera tuning (FOV, dynamic FOV, chase distance / height, shake, look into corners, horizon
   lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar

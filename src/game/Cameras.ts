@@ -6,7 +6,7 @@ import type { Sightlines } from './Sightlines.ts';
 
 export type CameraMode =
   // the cameras the player can race with
-  | 'chase' | 'far' | 'tcam' | 'cockpit' | 'helmet' | 'nose' | 'wheel' | 'heli' | 'tv'
+  | 'chase' | 'far' | 'tcam' | 'cockpit' | 'helmet' | 'bonnet' | 'nose' | 'wheel' | 'heli' | 'tv'
   // more onboards
   | 'tcamrev' | 'sidepod' | 'fwing' | 'rwing' | 'wheelr' | 'halo' | 'bumper' | 'sideback'
   // more chase cameras
@@ -25,7 +25,7 @@ export type CameraMode =
  */
 export const CAMERA_ORDER: CameraMode[] = [
   'chase', 'far', 'lowchase', 'gtchase', 'drone',
-  'tcam', 'halo', 'cockpit', 'helmet', 'nose', 'bumper', 'wheel', 'sidepod',
+  'tcam', 'halo', 'cockpit', 'helmet', 'bonnet', 'nose', 'bumper', 'wheel', 'sidepod',
   'tcamrev', 'sideback',
   'heli', 'tv', 'director',
 ];
@@ -41,9 +41,9 @@ export interface CamPrefs {
   shake: number;
   /** how far the view turns into the corners, 0 … 1.5 */
   apex: number;
-  /** onboards: how level the horizon is held, 0 (rolls with the car) … 1 (dead level) */
+  /** how level the horizon is held, 0 (the onboards roll with the car, the chase cameras lean with the G) … 1 (dead level) */
   horizon: number;
-  /** field of view widens with speed */
+  /** field of view widens with speed (not the cockpit eye: a fixed lens, as in the sims) */
   dynFov: boolean;
 }
 export const DEFAULT_CAM: CamPrefs = { fov: 0, dist: 0, height: 0, shake: 1, apex: 1, horizon: 0.7, dynFov: true };
@@ -52,7 +52,7 @@ export type CameraGroup = 'onboard' | 'chase' | 'trackside' | 'aerial';
 
 /** every camera, for spectating and replays (grouped: onboard, chase, trackside, aerial) */
 export const ALL_CAMERAS: CameraMode[] = [
-  'tcam', 'halo', 'cockpit', 'helmet', 'nose', 'bumper', 'fwing', 'sidepod', 'wheel', 'wheelr', 'sideback', 'tcamrev', 'rwing',
+  'tcam', 'halo', 'cockpit', 'helmet', 'bonnet', 'nose', 'bumper', 'fwing', 'sidepod', 'wheel', 'wheelr', 'sideback', 'tcamrev', 'rwing',
   'chase', 'far', 'lowchase', 'gtchase', 'drone', 'cine',
   'tv', 'tower', 'longlens', 'kerb', 'pitwall', 'grandstand', 'gantry',
   'heli', 'blimp', 'topdown',
@@ -67,6 +67,7 @@ export const CAMERA_LABEL: Record<CameraMode, string> = {
   halo: 'Halo cam',
   cockpit: 'Cockpit',
   helmet: 'Helmet cam',
+  bonnet: 'Bonnet cam',
   nose: 'Nose cam',
   bumper: 'Bumper cam',
   wheel: 'Front wheel',
@@ -92,7 +93,7 @@ export const CAMERA_LABEL: Record<CameraMode, string> = {
 };
 
 export const CAMERA_GROUP: Record<CameraMode, CameraGroup> = {
-  tcam: 'onboard', cockpit: 'onboard', helmet: 'onboard', halo: 'onboard', nose: 'onboard', bumper: 'onboard', wheel: 'onboard', tcamrev: 'onboard', sidepod: 'onboard', sideback: 'onboard', fwing: 'onboard', rwing: 'onboard', wheelr: 'onboard',
+  tcam: 'onboard', cockpit: 'onboard', helmet: 'onboard', bonnet: 'onboard', halo: 'onboard', nose: 'onboard', bumper: 'onboard', wheel: 'onboard', tcamrev: 'onboard', sidepod: 'onboard', sideback: 'onboard', fwing: 'onboard', rwing: 'onboard', wheelr: 'onboard',
   chase: 'chase', far: 'chase', lowchase: 'chase', gtchase: 'chase', drone: 'chase', cine: 'chase',
   tv: 'trackside', tower: 'trackside', longlens: 'trackside', kerb: 'trackside', pitwall: 'trackside', grandstand: 'trackside', gantry: 'trackside',
   heli: 'aerial', blimp: 'aerial', topdown: 'aerial',
@@ -101,7 +102,7 @@ export const CAMERA_GROUP: Record<CameraMode, CameraGroup> = {
 };
 
 /** cameras mounted on the car (audio hears the car from inside, the lens gets wet, the tight shadow cascade) */
-export const ONBOARD: Partial<Record<CameraMode, true>> = { tcam: true, cockpit: true, helmet: true, halo: true, nose: true, bumper: true, wheel: true, tcamrev: true, sidepod: true, sideback: true, fwing: true, rwing: true, wheelr: true };
+export const ONBOARD: Partial<Record<CameraMode, true>> = { tcam: true, cockpit: true, helmet: true, bonnet: true, halo: true, nose: true, bumper: true, wheel: true, tcamrev: true, sidepod: true, sideback: true, fwing: true, rwing: true, wheelr: true };
 
 /**
  * Cameras inside the cockpit, where the driver's head is: the driver is hidden (the lens is where his
@@ -158,6 +159,12 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
   // to soak up the G or the bumps): the halo's centre pillar splits a wide picture, its hoop frames
   // the top and the wheel fills the bottom, out of focus; it rolls with the car
   halo: { pos: [0, -0.035, 0.03], dir: [0, -0.05, 1], fov: 62, shake: 0.6, prof: 'halo', cockpit: true, level: 0.35, apex: 0.18, dyn: 5 },
+  // the sims' bonnet camera (ACC's "bonnet", the F1 games' nose cam): on the chassis' centre line just
+  // ahead of the halo's front pillar (its foot is at z 0.79, the tub's top ~0.66 m there), a hand
+  // over the bodywork — the nose runs away down the middle of the bottom of the picture to the
+  // wing, the front tyres stand at its sides, no halo, no wheel. Stiff on the tub and held a little
+  // toward level so the horizon doesn't see-saw with every kerb
+  bonnet: { pos: [0, 0.8, 0.9], dir: [0, -0.07, 1], fov: 54, shake: 0.5, prof: 'halo', level: 0.4, dyn: 3 },
   // the nose pod on the nose's flank ahead of the suspension: the nose's top at the bottom corner,
   // the wing's flaps across the bottom, the road rushing at the lens
   nose: { pos: [-0.17, 0.5, 2.0], dir: [0.012, -0.07, 1], fov: 58, shake: 0.7, prof: 'nose', dyn: 5 },
@@ -195,7 +202,7 @@ interface ChaseCfg {
   dyn: number;
 }
 const CHASE: Partial<Record<CameraMode, ChaseCfg>> = {
-  chase: { dist: 5.55, h: 1.2, w: 12.5, wy: 8, yawK: 7, ahead: 13, aimH: 0.34, fov: 47, clear: 0.9, dyn: 10 },
+  chase: { dist: 5.55, h: 1.35, w: 12.5, wy: 8, yawK: 7, ahead: 13, aimH: 0.34, fov: 47, clear: 0.9, dyn: 10 },
   far: { dist: 7.7, h: 1.95, w: 10, wy: 6.5, yawK: 5.5, ahead: 16, aimH: 0.18, fov: 44, clear: 0.9, dyn: 10 },
   // a hand's width over the tarmac behind the diffuser, the rear wing high in the frame: the
   // road and the kerbs tear under the lens (the sims' "bumper chase")
@@ -221,7 +228,8 @@ const dynFov = (kmh: number) => {
 // chassis sides fill the bottom 40 % and the front tyres sit half hidden behind them)
 const COCKPIT_EYE_UP = -0.05;
 const COCKPIT_EYE_FWD = 0.0;
-const COCKPIT_FOV = 53;
+// (vertical, 16:9: in the 55–60° range the sims (ACC) use for a cockpit on a single monitor; a fixed lens — see eyeShot)
+const COCKPIT_FOV = 56;
 const COCKPIT_LIFT = 0.5;
 
 function fovFor(v169: number, aspect: number): number {
@@ -320,8 +328,11 @@ interface ShakeCfg {
   heave: number;
 }
 const SHAKE: Record<string, ShakeCfg> = {
-  // the driver's eyes: the head on the seat sways with the bumps; the neck soaks up some of the buzz
-  cockpit: { fl: 5.2, fh: 15, zl: 0.32, zh: 0.25, low: 1, high: 0.6, ax: [1, 0.45, 0.75], heave: 0.35 },
+  // the driver's eyes: the head on the seat sways with the bumps; the neck soaks up some of the buzz,
+  // and the eyes themselves hold the gaze on the road (the vestibulo-ocular reflex steadies what a
+  // driver sees well below what a helmet camera records), so the sims' cockpit view (ACC, iRacing)
+  // is calmer than the onboard footage: the kerbs still land, the high buzz at speed is a shiver
+  cockpit: { fl: 5.2, fh: 15, zl: 0.32, zh: 0.25, low: 0.85, high: 0.38, ax: [1, 0.45, 0.75], heave: 0.3 },
   helmet: { fl: 4.2, fh: 13, zl: 0.3, zh: 0.25, low: 1.3, high: 0.8, ax: [1, 0.6, 0.85], heave: 0.45 },
   // the T-cam pod and the nose: stiff brackets in the airflow — less sway, more buzz
   tcam: { fl: 8.5, fh: 19, zl: 0.25, zh: 0.2, low: 0.6, high: 1.1, ax: [1, 0.4, 0.7], heave: 0.05 },
@@ -1026,10 +1037,13 @@ export class Cameras {
     if (!this.initialized) this.chaseLook.copy(look);
     this.chaseLook.lerp(look, ease(dt, 14));
     this.camLook.copy(carPos).add(this.chaseLook);
-    // weight: the view dips under braking and lifts on the throttle, and leans a couple of degrees
-    // with the lateral G (a camera on a car-mounted arm, not a drone)
-    const pitchT = THREE.MathUtils.clamp(car.ax * 0.0032, -0.07, 0.05);
-    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0034, -0.06, 0.06);
+    // weight: the view dips a touch under braking and lifts on the throttle, and leans with the
+    // lateral G only as far as the horizon setting lets it. The sims' chase cameras (ACC, the F1
+    // games) hold the horizon all but level and the car pitches and rolls inside the frame: a lens
+    // tilting 3–4° through every long corner and nodding 4° into every braking zone reads as the
+    // world tipping, not the car. (Horizon lock 70 %: ≤1° of lean at 5 g; 100 %: dead level.)
+    const pitchT = THREE.MathUtils.clamp(car.ax * 0.0016, -0.032, 0.022);
+    const rollT = this.lookBack ? 0 : THREE.MathUtils.clamp(-car.ay * 0.0034, -0.06, 0.06) * (1 - P.horizon);
     if (!this.initialized) {
       this.chasePitch = pitchT;
       this.chaseRoll = rollT;
@@ -1170,9 +1184,12 @@ export class Cameras {
     cam.up.set(0, 1, 0);
     // riding with the car: the head sways and buzzes with the road (ringShake)
     this.applyShake(up);
-    // (a touch narrower than a game's: the halo and the wheel read at their real size instead of
-    // shrinking into a fisheye)
-    this.setFov(fovFor(helmet ? 68 : COCKPIT_FOV, cam.aspect) + this.prefs.fov + (this.prefs.dynFov ? dynFov(kmh) * 4.5 : 0), dt, !this.initialized);
+    // (a touch narrower than an arcade game's: the halo and the wheel read at their real size instead
+    // of shrinking into a fisheye.) The driver's own eye is a fixed lens, as in ACC: a view that
+    // widened with the speed would breathe the cockpit in and out on every straight and braking zone
+    // (the dynamic FOV setting is for the chase and the car-mounted cameras); the helmet cam keeps it
+    const dyn = helmet && this.prefs.dynFov ? dynFov(kmh) * 4.5 : 0;
+    this.setFov(fovFor(helmet ? 68 : COCKPIT_FOV, cam.aspect) + this.prefs.fov + dyn, dt, !this.initialized);
     this.initialized = true;
   }
 
