@@ -645,6 +645,22 @@ export class Particles {
   }
 
   /**
+   * (perf) Queue the soft puffs' programs: they are drawn in their own scene (renderSoft), which no
+   * compile of the main scene reaches, so the first smoke of a session — the race start — built them
+   * in the middle of a frame. `target`: any linear render target (the puffs are drawn into one).
+   */
+  warm(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, target: THREE.WebGLRenderTarget) {
+    this.softScene.fog = scene.fog;
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    try {
+      renderer.compile(this.softScene, camera);
+    } finally {
+      renderer.setRenderTarget(prev);
+    }
+  }
+
+  /**
    * Called from the composite quad's onBeforeRender, i.e. inside the main render
    * after all opaque geometry: render the soft puffs + veil into a low-res target
    * (depth-tested in the shader against the main pass's depth texture), then let

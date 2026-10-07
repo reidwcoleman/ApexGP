@@ -74,7 +74,12 @@
           // (the first starts fully in)
           im.style.animation = 'lart-cycle ' + T + 's linear ' + (k * SLOT - FADE) + 's infinite';
           if (k === 0) im.onload = function () { box.classList.add('art-in'); };
-          im.src = 'loading/' + L[(i + k) % L.length] + '.webp';
+          // the first picture now; each of the others ~3 s before its turn, and only if the loader is
+          // still up then (they no longer share the first second's bandwidth with the bundle, and a
+          // quick boot never fetches the ones it would not show)
+          var src = 'loading/' + L[(i + k) % L.length] + '.webp';
+          if (k === 0) im.src = src;
+          else setTimeout(function (im, src) { return function () { if (im.isConnected) im.src = src; }; }(im, src), Math.max(0, (k * SLOT - FADE - 3) * 1000));
           box.insertBefore(im, box.firstChild);
         }
       })();

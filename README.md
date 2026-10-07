@@ -81,12 +81,19 @@ npm run check    # tsc --noEmit
   short title card; no travel screen.
 - **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
   making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and
-  `buildWorld` awaits each only right before the step that needs it. The ground textures' pixels are made off the
+  `buildWorld` awaits each only right before the step that needs it; the baked trees (~6 MB) and the fans' avatars
+  only once the people are in (nothing the garage shows needs them; the landscape waits for the trees), the loading
+  pictures one at a time ~3 s before their turn, and the highlights' production code (`career/clip/production.ts`)
+  is a chunk of its own, imported once the garage is up. The ground textures' pixels are made off the
   main thread by two ground workers (`src/world/groundWorker.ts`, pure generators in `trackside/groundData.ts` and
   `env/textureData.ts`, byte-identical to the old main-thread code). Shaders are compiled with
   `compileAsync` (KHR_parallel_shader_compile: the driver's threads, never a blocked main thread): the world's
-  garage-lit programs are queued before the cars are made, the landscape's before it is adopted, the race's in
-  `warmUp`; the podium's (one more light = ~80 programs) only when a race ends. Nothing the boot draws is left
+  garage-lit programs are queued before the cars are made, the landscape's (and the rest of the scene's in race
+  light) before it is adopted, the race's in `warmUp` (with the soft smoke's scene and the sun shafts' passes, which
+  only draw now and then). The podium's stage lights are the same set as the garage's work lights (two spots, one
+  shadowed, two points: light counts are part of every program's key), so the ceremony draws the world with its
+  garage-lit programs and only the stage's own few compile when a race ends; its fans are baked behind the garage
+  (`prebakeFans`). Nothing the boot draws is left
   to be built on first use (each such program was a blocking compile + link, 0.1–0.6 s apiece on a cold D3D
   cache): the sky's programs (cloud noise and march, the dome, PMREM's filters: `env/skyPrewarm.ts`) and the post
   chain's (`Renderer.compilePasses`, a dry run of the chain) are queued the moment the boot starts, the particles'

@@ -10,6 +10,7 @@ import { loadPeople } from './people/Humans.ts';
 import { preloadPixels } from './core/pixelCache.ts';
 import { loadAsphaltScan } from './world/trackside/textures.ts';
 import { BRAND_FONTS } from './world/brands.ts';
+import { loadTreeKit } from './world/env/treeproto.ts';
 
 // boot milestones on the performance timeline (tools/loadbench.mjs reads them: ms since navigation)
 performance.mark('apex:main');
@@ -42,7 +43,11 @@ let loadsStarted = false;
 const startLoads = () => {
   if (loadsStarted) return;
   loadsStarted = true;
-  loadPeople().catch(() => undefined);
+  // (the baked trees, ~6 MB, only once the people are in: the landscape behind the garage is the
+  // first thing to draw them, and on a real connection they took bandwidth from what the garage waits for)
+  loadPeople()
+    .catch(() => undefined)
+    .then(() => void loadTreeKit());
   void preloadPixels();
   void loadAsphaltScan();
   Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(

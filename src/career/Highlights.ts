@@ -1,12 +1,18 @@
-import { planMoments, type MomentKind, type MomentPlan, type RaceInfo } from './clip/moments.ts';
-import { Studio, type Readback, type StudioHost } from './clip/studio.ts';
-import { createSink, pickFormat, type ClipFormat, type ClipSink } from './clip/encoder.ts';
+import type { MomentKind, MomentPlan, RaceInfo } from './clip/moments.ts';
+import type { Readback, Studio, StudioHost } from './clip/studio.ts';
+import type { ClipFormat, ClipSink } from './clip/encoder.ts';
 import type { OverlayState, TowerRow } from './clip/graphics.ts';
 import { RF, type ReplayBuffer } from '../game/Replay.ts';
 import type { WeatherState } from '../world/Weather.ts';
 
 export type { MomentKind, RaceInfo, RaceCar } from './clip/moments.ts';
 export type { StudioHost } from './clip/studio.ts';
+
+/**
+ * The production code (clip/production.ts: studio, moment finder, encoders, muxers), loaded by
+ * attach. Every use is behind `studio` / `fmt`, which are only set once it has arrived.
+ */
+let clip: typeof import('./clip/production.ts') | null = null;
 
 /**
  * Real broadcast highlights of your races.
@@ -358,12 +364,25 @@ export class Highlights {
   /** the game's world, renderer and car factory: production can start */
   attach(host: StudioHost & { trackId(): string | null }) {
     this.host = host;
-    this.studio = new Studio(host, W, H, FPS);
-    pickFormat(W, H, FPS, BITRATE).then((f) => {
-      this.fmt = f;
-      this.stats.format = f ? `${f.kind} ${f.codec}` : 'none';
-      if (!f) console.warn('[highlights] no video encoder: highlights are off');
-    });
+    // (the production code is a chunk of its own, fetched after the garage's first frames: nothing
+    // of it is needed before a race has finished)
+    setTimeout(() => {
+      import('./clip/production.ts')
+        .then((m) => {
+          clip = m;
+          this.studio = new m.Studio(host, W, H, FPS);
+          return m.pickFormat(W, H, FPS, BITRATE).then((f) => {
+            this.fmt = f;
+            this.stats.format = f ? `${f.kind} ${f.codec}` : 'none';
+            if (!f) console.warn('[highlights] no video encoder: highlights are off');
+          });
+        })
+        .catch((e) => {
+          this.fmt = null;
+          this.stats.format = 'none';
+          console.warn('[highlights] the production code failed to load: highlights are off', e);
+        });
+    }, 2000);
   }
 
   /** a finished session: find its moments and produce them in the background */
@@ -399,7 +418,7 @@ export class Highlights {
    */
   moment(kind: MomentKind, title: string, sub: string, score: number, track: string, delay = 0) {
     if ((kind !== 'win' && kind !== 'podium') || this.capture || !this.studio || !this.fmt) return;
-    const sink = createSink(this.fmt, W, H, FPS, BITRATE);
+    const sink = clip!.createSink(this.fmt, W, H, FPS, BITRATE);
     if (sink.failed) return;
     const at = Math.max(0, delay);
     const job = [...this.jobs].reverse().find((j) => j.info.trackShort === track) ?? null;
@@ -575,7 +594,7 @@ export class Highlights {
       return true;
     }
     if (!job.plans) {
-      job.gen ??= planMoments(job.info, PER_RACE);
+      job.gen ??= clip!.planMoments(job.info, PER_RACE);
       const t0 = performance.now();
       while (performance.now() - t0 < 3) {
         const r = job.gen.next();
@@ -616,7 +635,7 @@ export class Highlights {
       frames,
       i: 0,
       got: 0,
-      sink: createSink(this.fmt!, W, H, FPS, BITRATE),
+      sink: clip!.createSink(this.fmt!, W, H, FPS, BITRATE),
       shot: -1,
       focus: plan.shots[0].focus,
       mode: 'tv',

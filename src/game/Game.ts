@@ -8,7 +8,7 @@ import type { CircuitDef } from '../world/CircuitGen.ts';
 import { collectDeep, collectResources, disposeTree, holdMaterials, releaseHeldMaterials, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
 import { createCloudNoise } from '../world/env/skyNoise.ts';
 import { prewarmSkyPrograms } from '../world/env/skyPrewarm.ts';
-import { buildTreeKit } from '../world/env/treeproto.ts';
+import { buildTreeKit, loadTreeKit } from '../world/env/treeproto.ts';
 import { loadAsphaltScan, makeGroundTextures } from '../world/trackside/textures.ts';
 import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
 import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
@@ -68,7 +68,7 @@ import { uiScale } from '../ui/scale.ts';
 import { setCarAORenderer } from '../car/carAO.ts';
 import { keepData, loadData, pixelKey, preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
-import { prepareFanAtlas } from '../people/Crowd.ts';
+import { prebakeFans, prepareFanAtlas } from '../people/Crowd.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import { feedCarWake } from '../world/env/treematerial.ts';
 import type { SetupPart } from '../career/Career.ts';
@@ -649,6 +649,10 @@ export class Game {
     if (gen !== this.worldGen) return;
     // (never long: the avatars are usually in by now; past the cap the stands paint it themselves)
     await Promise.race([fanAtlas, new Promise((r) => setTimeout(r, 4000))]);
+    // (the baked trees download behind the garage — main.ts — and the woods must be built with the
+    // landscape: a kit landing later was added on whatever frame its download finished, after the
+    // landscape's shader compile below, and its programs were then built synchronously in a frame)
+    await loadTreeKit();
     if (gen !== this.worldGen) return;
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;
@@ -753,6 +757,20 @@ export class Game {
     // concourses are built from the full set, and would otherwise pop in mid-race
     await everyone;
     lap('bgPeople');
+    // (perf) the podium's fans baked now, an avatar a frame, not in the frame the race ends
+    // (Crowd.ts prebakeFans; cached for the page, so only the first circuit pays)
+    if (kit?.complete) {
+      const it = prebakeFans(kit);
+      for (;;) {
+        await frame();
+        if (gen !== this.worldGen) return;
+        ts = performance.now();
+        const done = it.next().done;
+        busy += performance.now() - ts;
+        if (done) break;
+      }
+      lap('bgFans');
+    }
     await frame();
     if (gen !== this.worldGen) return;
     ts = performance.now();
@@ -1346,8 +1364,10 @@ export class Game {
     // with the driver now (warmPasses below then finds them built: it used to build them one by one in
     // a frame of ~1 s)
     const postPasses = this.gfx.compilePasses(true);
-    // (the podium's lighting — one more spot light, so every program again — is compiled when the
-    // race is over: startCelebration)
+    // (perf) and the soft smoke's, drawn in a scene of its own (Particles.warm)
+    this.particles.warm(r, this.scene, this.camera, (this.linearRT ??= new THREE.WebGLRenderTarget(1, 1)));
+    // (the podium's stage lights are the same set as the garage's work lights — light counts are part
+    // of every program's key — so the ceremony reuses the garage-lit programs: startCelebration)
     const cancelled = () => gen !== this.worldGen;
     await this.worldPrep().queue([this.scene], { modes: [garageMode(false), garageMode(true)], lastIsCurrent: menu, shadows: true, textures: true, cancelled });
     progs.push(r.info.programs?.length ?? 0);
@@ -1953,10 +1973,10 @@ export class Game {
     const top = this.race.classification().slice(0, 3).map((r) => r.entry);
     if (top.length < 3 || this.race.isTimeTrial) return this.showResults();
     const cel = new Celebration(this.track, (x, z) => this.env.heightAt(x, z), top, this.hud.root.parentElement ?? document.body);
-    // (perf) its shaders — the crowd, the stage, and the world under its extra spot light (the light
-    // count is part of every program's key: ~80 programs warmUp no longer builds at boot) — compile on
-    // the driver's threads while the race keeps running for a few more frames; then the ceremony
-    // starts without a stall
+    // (perf) its shaders — the crowd, the stage, and the world under its stage lights (the light
+    // count is part of every program's key; the stage's set matches the garage's, so the world's
+    // are mostly built already: Celebration) — compile on the driver's threads while the race keeps
+    // running for a few more frames; then the ceremony starts without a stall
     this.celebrationPending = true;
     const race = this.race;
     const go = () => {
@@ -1967,7 +1987,15 @@ export class Game {
       }
       this.beginCelebration(cel, top);
     };
-    Promise.all([this.compileQueued(cel.group, this.scene), this.compileQueued(this.scene, cel.group)]).then(go, go);
+    // (one pass over the scene with the stage in it, in this same task — nothing is drawn before it
+    // comes out again: the stage's materials and the world's, under the stage lights and with the
+    // scene's fog and environment. Compiling the world with the stage group as the "target scene"
+    // keyed it for a scene with neither: ~90 programs nothing ever drew, and the real ones were left
+    // to the first podium frame, which blocked until the driver had built them all.)
+    this.scene.add(cel.group);
+    const queued = this.compileQueued(this.scene);
+    this.scene.remove(cel.group);
+    queued.then(go, go);
   }
   private celebrationPending = false;
   private introDof = false;
