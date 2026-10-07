@@ -215,6 +215,16 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
   float zone = vA1.x;
   float hw = vA1.w;
   float px = max(length(fwidth(vTrk)), 1e-4);   // metres per pixel
+  // ...and what the aggregate's anisotropic filter really averages over. px is the footprint's long
+  // axis — down the road from a car's height that is 10–30× the short one — and fading the scanned
+  // aggregate by it threw away detail the 16× filter still resolves: the grain went flat ~4 m from a
+  // chase cam, where in laser-scanned games (ACC) and on footage it carries on into the distance as a
+  // fine, even texture. The filter averages over the short axis, or over long / ratio once the pixel is
+  // stretched more than the filter can follow, so the texture-derived terms fade by that. (Procedural
+  // features — seams, hashed pellets, ridges — are not filtered by the hardware: they keep px.)
+  vec2 tdX = dFdx(vTrk), tdY = dFdy(vTrk);
+  float fLx = length(tdX), fLy = length(tdY);
+  float pxA = max(max(min(fLx, fLy), max(fLx, fLy) / uAniso), 1e-4);
   vec4 m96 = texture2D(uMacro, vTrk * (1.0 / 96.0));
   vec4 m24 = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.37, 0.61));
   vec4 mN = texture2D(uMacroN, vTrk * (1.0 / 14.0) + vec2(0.13, 0.29));
@@ -227,8 +237,13 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
   vec2 uA = vTrk * (1.0 / ${ASPHALT_TILE.toFixed(3)});
   vec2 uB = vec2(ca * lat - sa * sv, sa * lat + ca * sv) * (1.0 / ${(ASPHALT_TILE * 0.77).toFixed(3)}) + vec2(0.31, 0.17);
   float wB = smoothstep(0.3, 0.7, m24.a * 0.7 + mN.a * 0.6 - 0.15);
-  // the blend mask is low-frequency, so most pixels need only one of the two (16× anisotropic) fetches
-  vec2 gAx = dFdx(uA), gAy = dFdy(uA), gBx = dFdx(uB), gBy = dFdy(uB);
+  // the blend mask is low-frequency, so most pixels need only one of the two (16× anisotropic) fetches.
+  // (A quarter-mip LOD bias: with no temporal AA to resolve it, the scan's last octave at a texel per pixel
+  // crawls under a moving camera — the hardware filter's bilinear tail lets through more than a pixel can
+  // hold. Measured with tools/_roadalias.mjs, +0.25 took the road's shimmer below where it was while the
+  // aniso-aware fades below kept more of the grain than before; +0.5 went soft.)
+  const float LODB = 1.19;   // 2^0.25
+  vec2 gAx = dFdx(uA) * LODB, gAy = dFdy(uA) * LODB, gBx = dFdx(uB) * LODB, gBy = dFdy(uB) * LODB;
   vec4 tA, tB;
   if (wB < 0.01) {
     tA = textureGrad(uAsph, uA, gAx, gAy);
@@ -252,23 +267,26 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
   float alb = albE * albE * ${ASPHALT_ALB_MAX.toFixed(3)};
   // far and grazing, the footprint outruns even 16x anisotropic filtering and the aggregate would alias
   // (salt-and-pepper glints, worst on a glossy damp road): fall back to its statistics
-  float farK = smoothstep(0.006, 0.03, px);
+  float farK = smoothstep(0.006, 0.03, pxA);
   albE = mix(albE, uAsphMean.x, farK * 0.7);
+  // (the albedo is linear in the filtered texture, so it may follow the filter out to pxA; the glints are
+  // not — thresholds on height and the lit normals — and keep fading by the long axis)
+  float farS = smoothstep(0.006, 0.03, px);
   // stone tops = the HIGH-PASS of the height: the scan's height also carries centimetre-to-decimetre
   // swells (how the surface was rolled), and a threshold on the raw height turned those into big binary
   // glossy/matte islands — a camouflage pattern in any backlit glare. Against the local mean (a coarse
   // mip, ~9 cm) only the individual chips stand out, as on a real road: a fine, even sparkle.
   float hLoc = hgt;
-  if (farK < 0.99) {
+  if (farS < 0.99) {
     vec4 tL = textureLod(uAsph, wB < 0.5 ? uA : uB, 5.5);
     hLoc = uAsphMean.y + (tL.g - uAsphMean.y) * hk;
   }
-  float stone = mix(smoothstep(-0.02, 0.3, hgt - hLoc), 0.3, farK);
+  float stone = mix(smoothstep(-0.02, 0.3, hgt - hLoc), 0.3, farS);
   // binder is matte; the stone tops are polished by traffic and glint
   float rough = mix(0.86, 0.5, stone) + (m3.r - 0.5) * 0.12;
   vec3 col = vec3(alb);
   // resolved grain: sparkle normals; minified: their variance is gone (averaged), keep a little relief
-  tsDetail *= mix(1.0, 0.55, smoothstep(0.002, 0.012, px)) * (1.0 - 0.6 * farK);
+  tsDetail *= mix(1.0, 0.55, smoothstep(0.002, 0.012, px)) * (1.0 - 0.6 * farS);
   albDev *= 1.0 - farK;
   float porous = 0.56;    // how much darker it gets when wet
   float lumTex = clamp(alb / 0.055, 0.5, 2.0);
@@ -285,7 +303,7 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // chip tops; the fine chips give a tight ±25 % grain up close)
     col = vec3(0.118, 0.116, 0.112) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
     // the odd pale chip (quartz, limestone) among the dark ones, resolved only up close
-    col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, px));
+    col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, pxA));
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
     // (a narrow gap: chip tops and binder differ by a polish, not by a material — a wide one made every
     // cluster of chips a hard-edged glint island against the sun)
@@ -516,9 +534,17 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     if (zone < 0.5) {
       // freshly painted white edge line (track limit) on the last 0.2 m of the road:
       // bright, clean, a satin gloss from the glass beads
-      float line = tsAA(hw - 0.2, alat);
+      // (rolled onto open asphalt, its edge follows the chips: ragged at the millimetre scale, never a
+      // ruler line — offset by the filtered scan, so it settles to a clean edge with distance by itself)
+      float line = tsAA(hw - 0.2 + albDev * 0.012, alat);
       // (line paint is ~60 %, not paper white; tyres that cross it and the dust that settles on it grey it in patches)
       vec3 paint = vec3(0.6, 0.59, 0.565) * (0.88 + 0.12 * m3.r) * (1.0 - 0.28 * smoothstep(0.5, 0.85, m24.g * 0.6 + m3.b * 0.5));
+      // the paint is a coat over the aggregate, not a decal: the chips' grain shows through it, and it never
+      // fills the deepest voids between them — dark pin-holes of tarmac in the white up close, as on a
+      // laser-scanned track (ACC) or any onboard on the kerbs
+      paint *= 1.0 + 0.3 * albDev;
+      float voids = smoothstep(0.32, 0.48, hLoc - hgt) * (1.0 - farK);
+      paint = mix(paint, col, voids * 0.7);
       col = mix(col, paint, line);
       tsSpecOcc = mix(tsSpecOcc, 1.0, line);
       rough = mix(rough, 0.38, line);
@@ -548,6 +574,12 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float through = 0.0;
     // (a season of rubber, brake dust and grit: never the showroom red and white)
     paint *= 0.96 * (0.92 + 0.16 * m3.b) * (1.0 + 0.06 * albDev);
+    // painted concrete, not moulded plastic: up close the coat shows the cast surface under it — a fine
+    // sandy grain and the odd air hole the paint bridges darker (the filtered scan again, at a third of the
+    // road's relief: it averages away by itself with distance)
+    float kGrain = 1.0 - farK;
+    paint *= 1.0 + 0.16 * albDev * kGrain;
+    paint *= 1.0 - 0.45 * smoothstep(0.36, 0.5, hLoc - hgt) * kGrain;
     // chipped paint: grey concrete shows through where the tyres hammer it
     float chip = smoothstep(0.66, 0.74, texture2D(uMacro, vTrk * vec2(1.0 / 0.9, 1.0 / 1.7) + vec2(0.3, 0.1)).r) * (0.4 + 0.6 * (1.0 - kd)) * (1.0 - smoothstep(0.004, 0.015, px));
     paint = mix(paint, vec3(0.15, 0.145, 0.138) * (0.9 + 0.2 * m3.r), chip * 0.75);
@@ -566,6 +598,12 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float bjd = min(fract(sv), 1.0 - fract(sv));
     float bj = (1.0 - smoothstep(0.008, 0.008 + px, bjd)) * (1.0 - smoothstep(0.01, 0.04, px));
     paint *= 1.0 - 0.6 * bj;
+    // the joint against the asphalt: a centimetre groove where the precast kerb meets the road, packed
+    // with rubber dust and grit — the dark line that makes a kerb read as a separate, raised block from
+    // the car rather than paint on the road (it fades out before it is thinner than a pixel)
+    float lip = alat - hw;
+    float seam = (1.0 - smoothstep(0.012, 0.012 + px, lip)) * (1.0 - smoothstep(0.015, 0.05, px));
+    paint = mix(paint, vec3(0.022, 0.021, 0.02), seam * 0.75);
     float kDirt = max(smoothstep(0.6, 1.0, kd) * (0.45 + 0.55 * m24.b), smoothstep(0.55, 0.85, m24.g) * 0.35);
     // dirt dragged across it where cars run wide / cut it over grass or gravel (vA2.y / vA2.z per side)
     float kDS = lat < 0.0 ? vA2.y : vA2.z;
@@ -584,7 +622,8 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // painted concrete is satin, not plastic: the paint's gloss varies block to block
     rough = mix(0.42 + (m3.r - 0.5) * 0.12 + (tsHash(vec2(floor(sv), 5.0)) - 0.5) * 0.08, 0.64, max(rubberMarks, kDirt * 0.6));
     rough = mix(rough, 0.7, chip * 0.6);
-    tsDetail = 0.14;
+    // (the cast grain's relief, a little of it, faded like the road's)
+    tsDetail = mix(0.22, 0.12, smoothstep(0.002, 0.012, pxA));
     porous = 0.22;
     // transverse ridges on the flat top (period 0.16 m), fading out with distance
     float ridgeMask = smoothstep(0.22, 0.3, kd) * (1.0 - smoothstep(0.86, 0.93, kd)) * (1.0 - smoothstep(0.006, 0.02, px));
@@ -827,8 +866,10 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-12', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-13', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
+    // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
+    sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
     sh.uniforms.uAsphMean = { value: t.asphaltMean };
     sh.uniforms.uKerbA = { value: kerbA };
     sh.uniforms.uKerbB = { value: kerbB };
@@ -841,7 +882,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
       .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;');
     sh.fragmentShader = sh.fragmentShader
       .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;')
-      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
+      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
       .replace(

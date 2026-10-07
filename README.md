@@ -212,6 +212,11 @@ npm run check    # tsc --noEmit
   (the lens's defocus can't resolve them). `node tools/_matshots.mjs <out> <track> <weather> <time> [car|road|glare]`
   (PORT env) shoots frozen close-ups of the player's car, the road at several distances and the road into and
   away from the sun; `WXSET='{"wetness":0.7,"rain":0,"dryLine":0.8}'` sets a drying track.
+  The aggregate fades by what its 16× anisotropic filter really averages (the footprint's short axis, not its
+  long one), so the grain carries on down the road from a chase cam, under a quarter-mip LOD bias that keeps it
+  from crawling; edge-line paint and kerbs show the surface under the coat (grain, pin-holes, a ragged edge, the
+  dark joint where the kerb meets the road). `node tools/_roadalias.mjs <out> [track] [views]` (PORT env) measures
+  road shimmer: frozen views rendered at 1× (turned a quarter pixel at a time) against a 2× reference.
 - **Loading screens** — key art from the game itself (Yas at dusk, Spa in the rain, Suzuka at
   sunset…, `public/loading/`): the boot crossfades through them every 5 s (1.2 s fades) on pure CSS animations (they
   keep moving while a build step blocks the main thread), a circuit switch shows the destination's own. New ones: `node tools/keyart.mjs` then `python3 tools/steam_capsules.py loading`.
