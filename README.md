@@ -197,7 +197,8 @@ npm run check    # tsc --noEmit
   wheelspin and lock-ups come from the physics, downforce/drag with DRS, slipstream tow and dirty
   air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter
   and kerb strikes (the wheel spikes, hops light for a few hundredths and the ramp shoves it back toward
-  the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
+  the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage (a tough car:
+  rubs and taps under ~30 km/h are free and only a real hit bends the suspension), tyre wear.
   The chassis moves like a stiff F1 car (~2.5° of dive at 5 g, ~1.5° of roll, springs that settle with a
   little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
   and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).
@@ -237,7 +238,8 @@ npm run check    # tsc --noEmit
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car
   flashing past a fixed camera smears beyond its own outline, the halo never smears or is smeared into, and the
-  frame's edges don't streak; long lenses get a faster shutter; Settings → Motion blur Off / Subtle / Cinematic),
+  frame's edges don't streak; long lenses get a faster shutter; the shutter opens up with speed, to 2.6× flat out;
+  Settings → Motion blur Off / Subtle / Cinematic),
   a camera's auto exposure (`autoExposure.ts`: metered on the GPU, it opens up a beat late under a bridge or the
   trees and is briefly over-exposed coming back out, but leaves the grade alone in steady light), sensor grain
   that follows the metered gain (all but clean on a sunny day, visible on a wet morning or at night), a lens:

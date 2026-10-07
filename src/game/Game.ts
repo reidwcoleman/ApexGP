@@ -80,6 +80,8 @@ const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
 
 /** Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°) */
 const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.9, cinematic: 2.5 };
+/** extra shutter flat out (×(1 + gain) at 320 km/h and up, eased in from 140 km/h) */
+const MOTION_SPEED_GAIN = 1.6;
 
 type GameState = 'boot' | 'menu' | 'intro' | 'race' | 'paused' | 'celebration' | 'results' | 'replay' | 'flashback' | 'spectate';
 
@@ -3473,7 +3475,11 @@ export class Game {
     const st = this.state;
     const live = st === 'race' || st === 'intro' || st === 'results' || st === 'replay' || st === 'spectate' || st === 'flashback';
     const g = this.gfx;
-    g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] : 0;
+    // the shutter opens up with speed: a touch at corner speeds, well over twice as long flat out,
+    // so the kerbs, the barriers and the trees streak hard down the straights
+    const kmh = st === 'race' || st === 'intro' || st === 'flashback' ? Math.max(0, this.race.player.car.vx * 3.6) : 0;
+    const fast = THREE.MathUtils.smoothstep(kmh, 140, 320);
+    g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
     if (this.cams.cuts !== this.lastCuts) {

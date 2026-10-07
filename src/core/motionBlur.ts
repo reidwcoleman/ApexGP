@@ -235,7 +235,7 @@ export class MotionBlurEffect extends Effect {
         boxMin: { value: new THREE.Vector3(-1.15, 0.06, -2.85) },
         boxMax: { value: new THREE.Vector3(1.15, 1.45, 2.95) },
         shutter: { value: 0 },
-        maxLen: { value: 0.19 },
+        maxLen: { value: 0.3 },
         aspect: { value: 1 },
       },
       depthTest: false,
@@ -277,9 +277,9 @@ export class MotionBlurEffect extends Effect {
     // smooth, and the gather's depth compare only needs to know who is in front)
     const vw = Math.max(2, Math.ceil(this.w / 2));
     const vh = Math.max(2, Math.ceil(this.h / 2));
-    // tiles ~1/27 of the frame height: the neighbour max (±2 tiles, plus the half-tile jitter) then
-    // reaches ~9 % of the height, about the longest half streak (maxLen / 2 = 9.5 %)
-    this.tile = Math.max(4, Math.min(40, Math.round(vh / 27)));
+    // tiles ~1/17 of the frame height: the neighbour max (±2 tiles, plus the half-tile jitter) then
+    // reaches ~15 % of the height, the longest half streak (maxLen / 2 = 15 %)
+    this.tile = Math.max(4, Math.min(64, Math.round(vh / 17)));
     const tw = Math.ceil(vw / this.tile);
     const th = Math.ceil(vh / this.tile);
     this.rtVel.setSize(vw, vh);
