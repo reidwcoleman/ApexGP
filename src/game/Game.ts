@@ -71,6 +71,8 @@ import { peopleKit } from '../people/Humans.ts';
 import { prebakeFans, prepareFanAtlas } from '../people/Crowd.ts';
 import { crowdReactions } from '../people/reactions.ts';
 import { feedCarWake } from '../world/env/treematerial.ts';
+// (the dark under every car: the sky its floor hides from the road)
+import { withContactShadow } from '../world/env/contactShadow.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
 
@@ -476,7 +478,7 @@ export class Game {
       makeRig: (e) => {
         const painted = (this.rigTeam.get(e) ?? e.team.id) !== e.team.id;
         const team = painted ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
-        return createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+        return withContactShadow(createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined }));
       },
     });
     this.bindGarageInput();
@@ -511,7 +513,7 @@ export class Game {
 
   /** a car of the field in its team's livery (the player's paint follows: refreshPlayerRig) */
   private makeRig(e: Entry): CarRig {
-    const rig = createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+    const rig = withContactShadow(createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined }));
     this.rigs.set(e, rig);
     this.rigTeam.set(e, e.team.id);
     this.rigDriverKey.set(e, driverKey(e));
@@ -2346,7 +2348,10 @@ export class Game {
     CAR_FILL.value = indoor ? 1 : this.scene.environmentIntensity;
     feedCarWake(this.rigs.values(), this.camera, this.state === 'paused' ? 0 : dt);
     const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.view];
-    this.env.focusShadow(this.celebration ? this.celebration.center : (this.introFocus ?? this.playerRigPos()), eyeCam ? 16 : undefined);
+    // (watching a simulated race or a replay, the fine shadow cascade goes with the car the cameras
+    // follow: left on the player's car, the car on screen got the 18 cm view cascade's soft blob)
+    const watched = this.state === 'spectate' || this.state === 'replay' ? this.cams.followed : null;
+    this.env.focusShadow(this.celebration ? this.celebration.center : (this.introFocus ?? (watched ? watched.getWorldPosition(this.tmp2) : this.playerRigPos())), eyeCam ? 16 : undefined);
     // the crowds and the trackside people follow the race
     if (this.state === 'race' || this.state === 'intro' || this.state === 'results' || this.state === 'spectate' || this.state === 'celebration') crowdReactions.update(dt, race);
     else if (this.state !== 'paused') crowdReactions.quiet(dt);
@@ -3133,7 +3138,7 @@ export class Game {
       const visible = rig.root.visible;
       rig.root.removeFromParent();
       rig.dispose();
-      const next = createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+      const next = withContactShadow(createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined }));
       next.root.visible = visible;
       this.rigs.set(e, next);
       this.rigTeam.set(e, team.id);
