@@ -66,10 +66,10 @@ function flashPos(row: Row, gained: boolean) {
 }
 
 /**
- * Pirelli sets a minimum starting pressure per axle, fronts a couple of psi above the rears, in the
- * blankets (the tyres leave them at 80 °C, CarPhysics). The physics carries no pressure, so the tyre
- * widget derives each tyre's hot pressure from its simulated temperature by the gas law at constant
- * volume (absolute pressure ∝ absolute temperature): +10 °C ≈ +1.1 psi, as the engineers' rule of thumb.
+ * The tyre widget shows CarPhysics' simulated pressure (tyrePress: the carcass temperature by the gas
+ * law). Fallback for a car without it: Pirelli's minimum starting pressure per axle, fronts a couple of
+ * psi above the rears, in the blankets (80 °C), by the gas law at constant volume (absolute pressure ∝
+ * absolute temperature): +10 °C ≈ +1.1 psi, as the engineers' rule of thumb.
  */
 const PSI_SET = [24.0, 24.0, 21.5, 21.5];
 const PSI_BLANKET_C = 80;
@@ -668,7 +668,7 @@ export class HUD {
     }
 
     // tyres: colour = temperature against the compound's window (cold / in it / hot / overheating),
-    // °C and the gas-law pressure beside it, the block's fill and the % = life left
+    // °C and the simulated pressure beside it, the block's fill and the % = life left
     const opt = car.tyreOpt;
     const tone = (T: number) => (T < opt - 22 ? 'cold' : T <= opt + 14 ? 'ok' : T <= opt + 26 ? 'warn' : 'bad');
     for (let i = 0; i < 4; i++) {
@@ -676,7 +676,7 @@ export class HUD {
       const T = car.tyreTemp[i];
       this.setClass(c.block, 'tyb ' + tone(T));
       this.setText(c.temp, `${Math.round(T)}°`);
-      this.setText(c.psi, tyrePsi(i, T).toFixed(1));
+      this.setText(c.psi, (car.tyrePress?.[i] ?? tyrePsi(i, T)).toFixed(1));
       const life = 1 - car.wear[i];
       this.setScale(c.fill, life, 'Y');
       this.setText(c.wear, `${Math.floor(life * 100)}%`);
