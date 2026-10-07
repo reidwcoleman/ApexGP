@@ -198,7 +198,8 @@ npm run check    # tsc --noEmit
   air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter
   and kerb strikes (the wheel spikes, hops light for a few hundredths and the ramp shoves it back toward
   the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage (a tough car:
-  rubs and taps under ~30 km/h are free and only a real hit bends the suspension), tyre wear.
+  rubs, taps and wheel-banging under ~45 km/h are free, 7× tougher than the original tuning, and only a
+  big hit (~80 km/h square on) bends the suspension), tyre wear.
   The chassis moves like a stiff F1 car (~2.5° of dive at 5 g, ~1.5° of roll, springs that settle with a
   little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
   and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).

@@ -280,9 +280,9 @@ export const FUEL_FLOW = 0.0275;
  * damage: impact speed (m/s) below which a hit is free, how much tougher the car is than the
  * original tuning, and the (higher) impact speed the wheels and suspension shrug off on their own
  */
-const DMG_FREE_SPEED = 9;
-const DURABILITY = 3.5;
-const SUSP_FREE_SPEED = 15;
+const DMG_FREE_SPEED = 13;
+const DURABILITY = 7;
+const SUSP_FREE_SPEED = 22;
 
 /** transient yaw damping (tyre carcass lag): time constant (s) and gain (N·m per rad/s) */
 const YAW_LAG_T = 0.12;
@@ -1172,8 +1172,8 @@ export class CarPhysics {
     if (this.impacts.length > 8) this.impacts.shift();
     const e = vn - DMG_FREE_SPEED;
     if (e <= 0 || this.damageMode === 'off' || this.destroyed) return;
-    // rubs and taps up to ~9 m/s (30 km/h square on) are free; a ~35 m/s square hit into a wall
-    // still costs the front wing. Every zone (and the car's integrity) takes DURABILITY× less per
+    // rubs, taps and wheel-banging up to ~13 m/s (45 km/h square on) are free; a ~35 m/s square hit
+    // into a wall chips the front wing, it takes several of them to break it. Every zone (and the car's integrity) takes DURABILITY× less per
     // hit than the original tuning
     const hit = Math.pow(e / 28, 1.5) / DURABILITY;
     const d = this.dmg;
@@ -1200,7 +1200,7 @@ export class CarPhysics {
       this.susp[w] = Math.min(1, this.susp[w] + (Math.pow(es / 28, 1.5) / DURABILITY) * 1.2);
     }
     if (this.damageMode === 'full') {
-      this.integrity -= hit * 0.4;
+      this.integrity -= hit * 0.25;
       if (this.integrity <= 0) {
         this.integrity = 0;
         this.destroyed = true;
