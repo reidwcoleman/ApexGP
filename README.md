@@ -75,12 +75,19 @@ npm run check    # tsc --noEmit
   short title card; no travel screen.
 - **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
   making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and
-  `buildWorld` awaits each only right before the step that needs it. The ground textures' pixels are made off the
+  `buildWorld` awaits each only right before the step that needs it; the baked trees (~6 MB) and the fans' avatars
+  only once the people are in (nothing the garage shows needs them; the landscape waits for the trees), the loading
+  pictures one at a time ~3 s before their turn, and the highlights' production code (`career/clip/production.ts`)
+  is a chunk of its own, imported once the garage is up. The ground textures' pixels are made off the
   main thread by two ground workers (`src/world/groundWorker.ts`, pure generators in `trackside/groundData.ts` and
   `env/textureData.ts`, byte-identical to the old main-thread code). Shaders are compiled with
   `compileAsync` (KHR_parallel_shader_compile: the driver's threads, never a blocked main thread): the world's
-  garage-lit programs are queued before the cars are made, the landscape's before it is adopted, the race's in
-  `warmUp`; the podium's (one more light = ~80 programs) only when a race ends. three's per-program error check
+  garage-lit programs are queued before the cars are made, the landscape's (and the rest of the scene's in race
+  light) before it is adopted, the race's in `warmUp` (with the soft smoke's scene and the sun shafts' passes, which
+  only draw now and then). The podium's stage lights are the same set as the garage's work lights (two spots, one
+  shadowed, two points: light counts are part of every program's key), so the ceremony draws the world with its
+  garage-lit programs and only the stage's own few compile when a race ends; its fans are baked behind the garage
+  (`prebakeFans`). three's per-program error check
   is off in production builds (`?shadercheck` turns it on). IndexedDB (`src/core/pixelCache.ts`, keyed by the
   build) keeps, besides the liveries / fan atlas / leaf atlas, the ground pixels and each circuit's sight-line
   grid, so a returning player's boot and circuit switches skip them. Measure with `tools/loadbench.mjs`.

@@ -116,14 +116,35 @@ function foldSkin(g: THREE.BufferGeometry, map: Int16Array): THREE.BufferGeometr
   return out;
 }
 
-function bake(kit: PeopleKit): Baked {
+function fanSpec(kit: PeopleKit): BakeSpec {
   // (eight bodies at most: every one is four draws)
   const names = [...new Set([...fanPool(kit, false).slice(0, 5), ...fanPool(kit, true).slice(0, 3)])];
-  return bakeSet(kit, { key: 'fans', names, clips: ACT_CLIP, pose: actPose });
+  return { key: 'fans', names, clips: ACT_CLIP, pose: actPose };
+}
+function bake(kit: PeopleKit): Baked {
+  return bakeSet(kit, fanSpec(kit));
+}
+
+/**
+ * The fans' bake ahead of time, one avatar per step (perf: the podium's FanCrowd is made in the frame
+ * the race ends, and baking its clips and bodies there was a ~0.3 s stall; Game steps this a frame at
+ * a time behind the garage once every avatar is in, and the cached bake is all the podium finds)
+ */
+export function prebakeFans(kit: PeopleKit): Generator<void, Baked> {
+  return bakeSetSteps(kit, fanSpec(kit));
 }
 
 /** the clips of a set of avatars baked into one bone-matrix texture (cached per kit and key) */
 export function bakeSet(kit: PeopleKit, spec: BakeSpec): Baked {
+  const it = bakeSetSteps(kit, spec);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** bakeSet a step at a time: it yields after each avatar */
+function* bakeSetSteps(kit: PeopleKit, spec: BakeSpec): Generator<void, Baked> {
   const hit = bakes.get(kit)?.get(spec.key);
   if (hit) return hit;
   const early = earlyBakes.get(kit)?.get(spec.key);
@@ -202,6 +223,7 @@ export function bakeSet(kit: PeopleKit, spec: BakeSpec): Baked {
     const skull = lm.skull.clone().applyMatrix4(asset.boneInverses[head]);
     const sc = lm.skullR.x / ref.lm.skullR.x;
     avatars.set(name, { name, asset, acts, body, bodyFar, hair, hairFar, capFit: new THREE.Vector4(skull.x - refSkull.x * sc, skull.y - refSkull.y * sc, skull.z - refSkull.z * sc, sc) });
+    yield;
   }
   // one texture, half floats: row = frame, 4 texels per column
   const W = cols * 4, H = rows.length;

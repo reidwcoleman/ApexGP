@@ -683,6 +683,23 @@ class SunShaftsEffect extends Effect {
   set threshold(v: number) {
     this.maskMat.uniforms.threshold.value = v;
   }
+  /**
+   * (perf) Queue the three inner passes' programs. They only run once the sun is in view, so they
+   * were built synchronously in the middle of a lap (three links in one frame) the first time the
+   * camera turned into the sun. Queued here they build on the driver's threads (compile, not render).
+   */
+  warm(renderer: THREE.WebGLRenderer) {
+    const prev = renderer.getRenderTarget();
+    const mat = this.quad.material;
+    // (bound to one of its own targets: the programs are keyed for a linear target, as drawn)
+    renderer.setRenderTarget(this.rtA);
+    for (const m of [this.visMat, this.maskMat, this.blurMat]) {
+      this.quad.material = m;
+      renderer.compile(this.quad, this.cam);
+    }
+    this.quad.material = mat;
+    renderer.setRenderTarget(prev);
+  }
 }
 
 const GRADE_FRAG = /* glsl */ `
@@ -1172,6 +1189,8 @@ export class Renderer {
     this.motionPass.enabled = was[4];
     this.onboardPass.enabled = was[5];
     this.dof.target = dofTarget;
+    // (and the sun shafts' / lens flare's inner passes, which run only with the sun in view)
+    this.shafts.warm(this.renderer);
   }
 
   get maxAnisotropy() {

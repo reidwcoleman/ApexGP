@@ -295,5 +295,7 @@ export function buildTreeKit(): TreeKit {
   return kit;
 }
 
-// the download overlaps everything else the boot does
-if (typeof window !== 'undefined' && typeof fetch !== 'undefined') void loadTreeKit();
+// (the download is started by main.ts once the garage's own downloads — the people — are in: the
+// trees, ~6 MB, are only drawn by the landscape built behind the garage, and over a real connection
+// they shared the bandwidth with what the garage waits for. Anything that needs them earlier starts
+// it: buildTreeKit / whenTreeKit.)

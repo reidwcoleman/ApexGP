@@ -20,6 +20,8 @@ import { PodiumDriver } from '../people/drivers.ts';
  */
 
 const DURATION = 39;
+/** a layer nothing is drawn on: the stage key light's (empty) shadow map, kept for the light counts */
+const PARITY_SHADOW_LAYER = 30;
 
 // ------------------------------------------------------------------------------------ helpers
 const lerp = THREE.MathUtils.lerp;
@@ -556,10 +558,22 @@ export class Celebration {
     this.group.add(this.crowd.group);
 
     // TV lighting on the stage: a soft key from the front (the sun is often behind the podium)
+    // (perf: the stage is lit by the same SET of lights as the garage's work lights — two spots, one
+    // casting a shadow, and two point lights (Game.buildGarageLights). The light counts are part of
+    // every shader program's key, so a set of its own (two plain spots) made everything on screen
+    // compile again the moment the race ended: ~160 programs, seconds of D3D shader compiling on
+    // Windows, with the first podium frame blocked on the last of them. With the garage's counts the
+    // world's garage-lit programs (built at boot and in warmUp) are reused. The key's shadow map is
+    // drawn once, empty — its camera only sees a layer nothing is on — and the two points are dark:
+    // the look is the two spots' as before.)
     const key = new THREE.SpotLight(0xfff3e6, 85, 40, 0.55, 0.8, 1.2);
     key.position.set(-3, 9, 14);
     key.target.position.set(0, 1.8, 0);
-    key.castShadow = false;
+    key.castShadow = true;
+    key.shadow.camera.layers.set(PARITY_SHADOW_LAYER);
+    key.shadow.mapSize.set(16, 16);
+    key.shadow.autoUpdate = false;
+    key.shadow.needsUpdate = true;
     this.group.add(key, key.target);
     // a warm rim from high behind the gantry: the drivers stand off the backdrop, hair and shoulders lit
     const rim = new THREE.SpotLight(0xffc98a, 70, 30, 0.6, 0.7, 1.3);
@@ -567,6 +581,11 @@ export class Celebration {
     rim.target.position.set(0, 1.6, 0.6);
     rim.castShadow = false;
     this.group.add(rim, rim.target);
+    for (let k = 0; k < 2; k++) {
+      const parity = new THREE.PointLight(0xffffff, 0, 1);
+      parity.position.set(0, -50, 0);
+      this.group.add(parity);
+    }
     // the rig on the gantry: a row of LED pars facing the stage, each with a soft beam in the haze
     {
       this.ledMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff1d6, emissiveIntensity: 2.2, roughness: 0.4 });
