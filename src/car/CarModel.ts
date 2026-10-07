@@ -16,7 +16,7 @@
 import { bakeCarAO, withCarAO } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, SUSP_LEGS, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, SUSP_LEGS, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, FOREARM, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
 export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import { carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, paintDash, type Compound, type DashState } from './carTextures.ts';
@@ -125,7 +125,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.hands, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.hands, l.forearm, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -598,6 +598,8 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const partPivots: Record<PartId, THREE.Group[]> = { fwL: [], fwR: [], rw: [] };
   let steerSpin: THREE.Object3D | null = null;
   let handsMesh: THREE.Mesh | null = null;
+  let steerPivot: THREE.Object3D | null = null;
+  let forearms: THREE.InstancedMesh | null = null;
   for (let lv = 0; lv < 3; lv++) {
     const L = geo[lv];
     const g = new THREE.Group();
@@ -671,6 +673,16 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       pv.add(spin);
       g.add(pv);
       steerSpin = spin;
+      steerPivot = pv;
+      if (L.forearm) {
+        // the forearms: live links from the elbows (body) to the gloves' cuffs (turning with the wheel)
+        forearms = new THREE.InstancedMesh(L.forearm, driverMat, 2);
+        forearms.name = 'forearms';
+        forearms.castShadow = false;
+        forearms.receiveShadow = true;
+        forearms.frustumCulled = false;
+        g.add(forearms);
+      }
     }
     body.add(g);
     bodyL.push(g);
@@ -810,6 +822,36 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   };
   updateLinks(0);
   updateLinks(1);
+  // ---- the forearms (nearest level): elbow → the glove's cuff, wherever the wheel has turned it
+  const faE = new THREE.Vector3(), faW = new THREE.Vector3(), faZ = new THREE.Vector3(), faX = new THREE.Vector3(), faY = new THREE.Vector3();
+  const faM = new THREE.Matrix4(), faS = new THREE.Matrix4();
+  let faSteer = NaN;
+  const updateForearms = () => {
+    if (!forearms || !steerSpin || !steerPivot || !forearms.visible) return;
+    const ang = steerSpin.rotation.z;
+    if (ang === faSteer) return;
+    faSteer = ang;
+    steerPivot.updateMatrix();
+    steerSpin.updateMatrix();
+    faS.multiplyMatrices(steerPivot.matrix, steerSpin.matrix);
+    const { elbow, wrist, elbowLocal, r } = FOREARM;
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      faE.set(elbow[0] * side, elbow[1], elbow[2]);
+      // (a little up the cuff, so the sleeve slides into it)
+      faW.set(wrist[0] * side, wrist[1], wrist[2]).lerp(faY.set(elbowLocal[0] * side, elbowLocal[1], elbowLocal[2]), 0.1).applyMatrix4(faS);
+      faZ.subVectors(faW, faE);
+      const len = faZ.length();
+      faZ.multiplyScalar(1 / Math.max(len, 1e-5));
+      faX.set(0, 1, 0).cross(faZ).normalize();
+      faY.crossVectors(faZ, faX);
+      faM.makeBasis(faX.multiplyScalar(r), faY.multiplyScalar(r), faZ.multiplyScalar(len));
+      faM.setPosition(faE);
+      forearms.setMatrixAt(i, faM);
+    }
+    forearms.instanceMatrix.needsUpdate = true;
+  };
+  updateForearms();
   // the near cars' shadow silhouette, from the middle level of detail (built at rest, shared)
   const shadowL1 = shadowGeometry(1, [bodyL[1], unsprungL[1], ...corners.flatMap((c) => [c.lv[1].tyre, c.lv[1].spokes, c.lv[1].assy].filter((m): m is THREE.Mesh => !!m))], root);
 
@@ -909,6 +951,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       if (d.decals) d.decals.visible = !driverVisible;
     }
     if (handsMesh) handsMesh.visible = driverVisible || handsVisible;
+    if (forearms) forearms.visible = driverVisible || handsVisible;
   };
   applyVisibility();
 
@@ -1006,6 +1049,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     },
     update(dt) {
       if (detail < 2) updateLinks(detail);
+      if (detail === 0) updateForearms();
       const k = Math.min(1, dt * 7);
       head.roll += (headT.roll - head.roll) * k;
       head.pitch += (headT.pitch - head.pitch) * k;
