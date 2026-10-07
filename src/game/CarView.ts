@@ -137,6 +137,11 @@ export class CarView {
       if (w < this.lastWear[i] - 0.02) this.freshTyre(i);
       this.lastWear[i] = w;
       L.wear = w;
+      // vertical load (the contact patch flattens, the sidewall bulges): ≈ 0.2 at rest, 1 under full
+      // downforce; a wheel hanging off the jacks carries none (smoothed: the look is pushed at 10 Hz)
+      const lift = i < 2 ? this.liftF : this.liftR;
+      const ld = lift > 0.05 ? 0 : clamp01((car.load[i] - 600) / 6500);
+      L.load += (ld - L.load) * Math.min(1, dt * 4);
       const T = car.tyreTemp[i];
       L.heat = smooth(opt - 4, opt + 26, T);
       // blisters: sustained running well above the working window

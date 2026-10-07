@@ -153,7 +153,15 @@ npm run check    # tsc --noEmit
   streaks on the ridden half of the kerb. The asphalt's polished chip tops are the high-pass of the scan's
   height (a raw threshold made glossy islands, a camouflage pattern against the sun); the racing line is laid
   in streaks, some stretches have relaid repair patches with sealed seams, painted run-off follows the grain and
-  wears off the chip tops, gravel rakes wander. The wet road takes the env map's light but not its colour (the
+  wears off the chip tops, gravel rakes wander.
+  Road wear is baked per metre from the racing line and the AI's speed profile (`trackside/context.ts`
+  `analyseWear`, so every circuit gets its own): rubber heaviest where the tyres work (braking, lateral
+  load, traction), the loaded outside tyre's track darker, polished to a satin sheen in streaks (it catches
+  a low sun; in the wet it sheds water and goes slick first); lock-up film into the braking zones;
+  acceleration "elevens" out of the slow corners; marbles flung to the outside of the line from the apex
+  on; dirt and stones dragged back onto the edge (and across the kerb) where the outside is grass or
+  gravel; inside kerbs rubbered and scuffed hardest; a season of launch marks off every grid box. The
+  session's own rubber (`uRaceRubber`) deepens all of it. The wet road takes the env map's light but not its colour (the
   env map is one spot's view: a red grandstand mirrored round the lap); the screen-space march supplies what is
   really beside the road. Carbon weave and paint flake within ~2 m of an onboard lens read as their average
   (the lens's defocus can't resolve them). `node tools/_matshots.mjs <out> <track> <weather> <time> [car|road|glare]`
@@ -232,7 +240,11 @@ npm run check    # tsc --noEmit
 - **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
-  lateral and endplate lights; baked ambient occlusion on every car.
+  lateral and endplate lights; baked ambient occlusion on every car. Tyres (`car/carTyres.ts`) squash
+  under load from the physics: the contact patch goes flat and the sidewall bulges over it, at the
+  bottom however the wheel has rolled. A new slick is matte with its wear-indicator dimples, a used one's
+  running band polished to a satin sheen between grained, scrubbed shoulders; the fictional VELTRA
+  sidewall (VX-18 slicks, TORRENTA rain tyres) carries moulded technical markings that show in the relief.
 - **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car

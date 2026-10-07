@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { SURF, VERGE, type Track } from '../Track.ts';
+import { SURF, VERGE, smoothCircular, type Track } from '../Track.ts';
+import { RacingProfile } from '../../sim/RacingProfile.ts';
+import { F1_SPEC } from '../../sim/CarPhysics.ts';
 import type { CornerInfo, ImpactLayer, TracksideDef, WallArt } from '../CircuitGen.ts';
 import type { ChunkSet, GeoBuilder } from './builder.ts';
 
@@ -129,7 +131,17 @@ export class Ctx {
   readonly cs: ChunkSet;
   readonly rubber: Float32Array;
   readonly skid: Float32Array;
+  /** marbles 0..1, signed: the lateral side (−/+) they collect on, the outside of the bend */
   readonly marbles: Float32Array;
+  /** traction marks ("elevens") out of slow corners 0..1 */
+  readonly elevens: Float32Array;
+  /** dirt / gravel dragged onto the road edge, per side (lateral − / +) 0..1 */
+  readonly dirtL: Float32Array;
+  readonly dirtR: Float32Array;
+  /** lateral load on the line 0..1, signed toward the inside of the bend */
+  readonly lineLoad: Float32Array;
+  /** which lateral side is the inside of the racing line's bend (−1, 0 straight, +1) */
+  readonly inSide: Int8Array;
   readonly clear: Float32Array;
   readonly L: SidePlan;
   readonly R: SidePlan;
@@ -148,6 +160,11 @@ export class Ctx {
     this.rubber = new Float32Array(n);
     this.skid = new Float32Array(n);
     this.marbles = new Float32Array(n);
+    this.elevens = new Float32Array(n);
+    this.dirtL = new Float32Array(n);
+    this.dirtR = new Float32Array(n);
+    this.lineLoad = new Float32Array(n);
+    this.inSide = new Int8Array(n);
     this.clear = new Float32Array(n);
     this.analyseWear();
     this.computeClearance();
@@ -227,9 +244,80 @@ export class Ctx {
 
   // ---------------------------------------------------------------- analysis
 
+  /**
+   * Where the road wears, from the racing line and the speed profile the AI drives to (F1 spec,
+   * dry): rubber where the tyres work hardest (braking, high lateral load, traction out of slow
+   * corners), lock-up film into the braking zones, acceleration "elevens" out of the slow corners,
+   * marbles thrown to the OUTSIDE of the line through and after each corner, and dirt dragged
+   * back onto the edge where cars run wide over grass or gravel (or cut an inside kerb). The
+   * corner-keyed estimate (CornerStyle.brake …) stays as a floor, so a circuit whose profile is
+   * odd still reads right. All of it is baked into the road's vertex attributes: no per-frame cost.
+   */
   private analyseWear() {
     const t = this.track;
+    const n = this.n;
     this.rubber.fill(0.55);
+
+    // ---- the line and its speed profile
+    let v: Float32Array | null = null;
+    let lineK: Float32Array | null = null;
+    try {
+      const p = RacingProfile.for(t, F1_SPEC);
+      if (p.n === n) {
+        v = p.vmax;
+        lineK = p.lineK;
+      }
+    } catch {
+      v = null;
+    }
+    const lx = new Float32Array(n), lz = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = t.racingLine[i];
+      lx[i] = t.px[i] + t.rx[i] * o;
+      lz[i] = t.pz[i] + t.rz[i] * o;
+    }
+    // which lateral side is the inside of the line's bend (+1 / −1), ±6 m chords (no sign convention assumed)
+    const inRaw = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = (i - 6 + n) % n, b = (i + 6) % n;
+      const ex = lx[b] - 2 * lx[i] + lx[a], ez = lz[b] - 2 * lz[i] + lz[a];
+      inRaw[i] = ex * t.rx[i] + ez * t.rz[i];
+    }
+    const inSm = smoothCircular(inRaw, 6, 2);
+    for (let i = 0; i < n; i++) this.inSide[i] = Math.abs(inSm[i]) < 1e-4 ? 0 : Math.sign(inSm[i]);
+
+    // ---- per-metre loads from the profile (m/s²), smoothed over a few metres
+    const brakeK = new Float32Array(n), latK = new Float32Array(n), tracK = new Float32Array(n);
+    if (v && lineK) {
+      const ax = new Float32Array(n), ay = new Float32Array(n), vv = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const a = v[(i - 1 + n) % n], b = v[(i + 1) % n];
+        ax[i] = (b * b - a * a) / 4;
+        ay[i] = v[i] * v[i] * Math.abs(lineK[i]);
+        vv[i] = v[i];
+      }
+      const axS = smoothCircular(ax, 4, 2), ayS = smoothCircular(ay, 4, 2);
+      const sat = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+      for (let i = 0; i < n; i++) {
+        // ~5 g on the brakes, ~5 g of lateral at the most; traction-limited only out of slow corners
+        brakeK[i] = sat(-axS[i] / 38);
+        latK[i] = sat((ayS[i] - 6) / 40);
+        const slow = 1 - sat((vv[i] - 38) / 22);
+        tracK[i] = sat(axS[i] / 9) * slow;
+      }
+    }
+
+    // ---- rubber: everywhere the tyres work (a laid-in floor of 0.55: decades of traffic)
+    for (let i = 0; i < n; i++) {
+      const work = Math.max(brakeK[i], latK[i] * 0.85, tracK[i] * 0.95);
+      this.rubber[i] = Math.max(this.rubber[i], 0.55 + 0.45 * work);
+      this.lineLoad[i] = this.inSide[i] * latK[i];
+    }
+    // lock-up film: hardest where the stop is hardest, i.e. at the top of the braking zone
+    for (let i = 0; i < n; i++) this.skid[i] = Math.pow(brakeK[i], 1.3) * 0.85;
+    // elevens: the rears spinning up out of slow corners
+    for (let i = 0; i < n; i++) this.elevens[i] = tracK[i];
+
     for (const c of t.corners) {
       const st = c.sStart;
       const ap = st + t.delta(st, c.sApex);
@@ -244,23 +332,73 @@ export class Ctx {
       });
       if (sk > 0.05) {
         this.forRange(st - Lb - 25, ap, (i, s) => {
-          let v: number;
-          if (s < st - Lb) v = (s - (st - Lb - 25)) / 25; // first big stop
-          else if (s < st - 12) v = 0.55 + 0.45 * ((s - (st - Lb)) / Math.max(1, Lb - 12)); // building to turn-in
-          else v = 1 - (s - (st - 12)) / Math.max(1, ap - (st - 12)); // fade to the apex
-          this.skid[i] = Math.max(this.skid[i], Math.max(0, Math.min(1, v)) * (0.35 + 0.65 * sk));
+          let w: number;
+          if (s < st - Lb) w = (s - (st - Lb - 25)) / 25; // first big stop
+          else if (s < st - 12) w = 0.55 + 0.45 * ((s - (st - Lb)) / Math.max(1, Lb - 12)); // building to turn-in
+          else w = 1 - (s - (st - 12)) / Math.max(1, ap - (st - 12)); // fade to the apex
+          this.skid[i] = Math.max(this.skid[i], Math.max(0, Math.min(1, w)) * (0.35 + 0.65 * sk));
         });
       }
-      const mb = 0.45 + 0.55 * Math.max(0, Math.min(1, (160 - c.radius) / 140));
+      // the corner's outside (the line's bend at the apex) and how hard it is
+      const ia = this.wrap(Math.round(ap));
+      let inS = 0;
+      for (let d = -8; d <= 8 && inS === 0; d++) inS = this.inSide[this.wrap(ia + d)];
+      if (inS === 0) inS = -c.dir;
+      const out = -inS;
+      let vMin = 1e9;
+      if (v) this.forRange(st, en, (i) => (vMin = Math.min(vMin, v![i])));
+      const tight = Math.max(0, Math.min(1, (160 - c.radius) / 140));
+      // marbles: scrubbed off through the corner, flung outward and collecting off-line from the apex on
+      const mb = 0.45 + 0.55 * tight;
       this.forRange(st, en + 70, (i, s) => {
         const a = Math.min(1, (s - st) / 25, (en + 70 - s) / 40);
-        this.marbles[i] = Math.max(this.marbles[i], Math.max(0, a) * mb);
+        const m = Math.max(0, a) * mb;
+        if (m > Math.abs(this.marbles[i])) this.marbles[i] = m * out;
       });
+      // elevens out of the slow ones (if the profile had none there: a short estimate from the radius)
+      if (c.radius < 90) {
+        const e0 = 0.4 + 0.6 * Math.max(0, Math.min(1, (90 - c.radius) / 70));
+        this.forRange(ap, en + 45, (i, s) => {
+          const a = Math.min(1, (s - ap) / 8, (en + 45 - s) / 25);
+          this.elevens[i] = Math.max(this.elevens[i], Math.max(0, a) * e0 * 0.7);
+        });
+      }
+      // dirt dragged back on: running wide over grass/gravel at the exit (outside), cutting the inside kerb
+      const fast = vMin < 1e8 ? Math.max(0, Math.min(1, (vMin - 20) / 50)) : 0.5;
+      const exitDirt = 0.45 + 0.4 * tight + 0.15 * fast;
+      const outRun = out < 0 ? t.runoffL : t.runoffR;
+      const inRun = out < 0 ? t.runoffR : t.runoffL;
+      const outDirt = out < 0 ? this.dirtL : this.dirtR;
+      const inDirt = out < 0 ? this.dirtR : this.dirtL;
+      const loose = (r: number) => r === SURF.GRASS || r === SURF.GRAVEL;
+      this.forRange(ap - 10, en + 90, (i, s) => {
+        if (!loose(outRun[i])) return;
+        const a = Math.min(1, (s - (ap - 10)) / 20, (en + 90 - s) / 50);
+        outDirt[i] = Math.max(outDirt[i], Math.max(0, a) * exitDirt);
+      });
+      this.forRange(ap - 18, ap + 22, (i, s) => {
+        if (!loose(inRun[i])) return;
+        const a = Math.min(1, (s - (ap - 18)) / 10, (ap + 22 - s) / 12);
+        inDirt[i] = Math.max(inDirt[i], Math.max(0, a) * 0.45 * tight);
+      });
+    }
+    // a trace of dust off any grass or gravel verge
+    for (let i = 0; i < n; i++) {
+      if (t.runoffL[i] === SURF.GRASS || t.runoffL[i] === SURF.GRAVEL) this.dirtL[i] = Math.max(this.dirtL[i], 0.08);
+      if (t.runoffR[i] === SURF.GRASS || t.runoffR[i] === SURF.GRAVEL) this.dirtR[i] = Math.max(this.dirtR[i], 0.08);
     }
     // grid: launches rubber the whole start area
     this.forRange(t.startS - 170, t.startS + 60, (i) => {
       this.rubber[i] = Math.max(this.rubber[i], 0.65);
     });
+    // soften the row-to-row steps (the shader interpolates within a row, not across a corner's edges)
+    const soft = (a: Float32Array, r: number) => a.set(smoothCircular(a, r, 1));
+    soft(this.rubber, 3);
+    soft(this.skid, 2);
+    soft(this.elevens, 2);
+    soft(this.dirtL, 3);
+    soft(this.dirtR, 3);
+    soft(this.lineLoad, 3);
   }
 
   private computeClearance() {

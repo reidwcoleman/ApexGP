@@ -151,7 +151,8 @@ export interface WheelSet {
   normal: THREE.Texture;
   blur: THREE.Texture;
 }
-const COMPOUND_LINE: Record<Compound, string> = { soft: 'CORSA', medium: 'CORSA', hard: 'CORSA', inter: 'ACQUA', wet: 'ACQUA' };
+// (a fictional tyre maker and its fictional ranges — never a real maker's names or marks)
+const COMPOUND_LINE: Record<Compound, string> = { soft: 'VX-18', medium: 'VX-18', hard: 'VX-18', inter: 'TORRENTA', wet: 'TORRENTA' };
 const COMPOUND_NAME: Record<Compound, string> = { soft: 'SOFT', medium: 'MEDIUM', hard: 'HARD', inter: 'INTERMEDIATE', wet: 'FULL WET' };
 const wheelCache = new Map<string, WheelSet>();
 export function wheelTextures(compound: Compound = 'soft'): WheelSet {
@@ -247,6 +248,27 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
       text(COMPOUND_LINE[compound], u, 0.297, 0.052, band, 900, 0.06);
     }
     for (const u of [0.125, 0.375, 0.625, 0.875]) text(COMPOUND_NAME[compound], u, 0.279, 0.016, '#bdbdbd', 700, 0.3);
+    // moulded technical markings (black on black: they read only in the relief, as the light rakes across)
+    {
+      const rain = compound === 'inter' || compound === 'wet';
+      const marks = ['280 · 375 R18 RADIAL', 'TUBELESS · RACING USE ONLY', rain ? 'ROTATION →' : 'MADE FOR COMPETITION', 'NOT FOR HIGHWAY USE'];
+      const fontPx = 0.0065 * pxPerMv;
+      marks.forEach((m, k) => {
+        const u = 0.0625 + k * 0.25;
+        for (const [ctx, col] of [[gh, 'rgb(222,222,222)'], [g, 'rgba(255,255,255,0.035)']] as [CanvasRenderingContext2D, string][]) {
+          ctx.save();
+          ctx.translate(sw.x + u * sw.w, rowOf(0.3285));
+          ctx.scale(sq, 1);
+          ctx.font = `700 ${fontPx}px ${FONT}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${fontPx * 0.12}px`;
+          ctx.fillStyle = col;
+          ctx.fillText(m, 0, 0);
+          ctx.restore();
+        }
+      });
+    }
     // tread: slight scuffing/graining
     const tr = R_TREAD;
     g.fillStyle = '#161616';
@@ -356,7 +378,7 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     b.arc(256, 256, br(0.272), 0, Math.PI * 2, true);
     b.fillStyle = tg;
     b.fill();
-    // band-colour haze of the CORSA text
+    // band-colour haze of the range name
     b.globalAlpha = 0.25;
     bring(0.28, 0.315, band);
     b.globalAlpha = 1;
