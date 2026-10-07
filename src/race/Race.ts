@@ -474,6 +474,8 @@ export class Race {
     if (opts.mode === 'timetrial') {
       this.player.car.setSpeed(60);
       this.player.car.gear = 7;
+      // a flying lap with no out-lap: the tyre pressures are up already (CarPhysics.warmCarcass)
+      this.player.car.warmCarcass();
       this.player.laps = -1;
       this.phase = 'racing';
     }

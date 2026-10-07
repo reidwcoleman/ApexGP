@@ -12,7 +12,7 @@ const LAPS = Number(process.argv[2] ?? 2);
 const wk = process.argv[3] ?? 'clear';
 const comp = process.argv[4] ?? 'soft';
 const pace = Number(process.env.PACE ?? 0.985);
-const track = new Track(CIRCUITS[0]);
+const track = new Track(CIRCUITS.find((c) => c.id === process.env.TRACK) ?? CIRCUITS[0]); // TRACK=suzuka
 const profile = new RacingProfile(track, F1_SPEC);
 const weather = new Weather(planWeather(wk, 'afternoon', 600, 7));
 const car = new CarPhysics(F1_SPEC);
@@ -40,7 +40,7 @@ while (laps < LAPS && t < LAPS * 160 + 30) {
   const ld = track.lapDistance(car.s);
   if (ld < 100 && prevLd > track.length - 100) {
     laps++;
-    if (laps >= 1) console.log(`lap ${laps}: ${(t - lapStart).toFixed(2)} s  tyres avg ${tSum.map((x) => (x / tN).toFixed(0)).join('/')} min ${tMin.toFixed(0)} max ${tMax.toFixed(0)}  grip ${car.gripFactor.toFixed(3)} wear ${car.wear.map((w) => (w * 100).toFixed(1)).join('/')}% fuel ${car.fuel.toFixed(1)}`);
+    if (laps >= 1) console.log(`lap ${laps}: ${(t - lapStart).toFixed(2)} s  tyres avg ${tSum.map((x) => (x / tN).toFixed(0)).join('/')} min ${tMin.toFixed(0)} max ${tMax.toFixed(0)}  grip ${car.gripFactor.toFixed(3)}${car.tyrePress ? ` carcass ${car.tyreCore.map((x) => x.toFixed(0)).join('/')} psi ${car.tyrePress.map((x) => x.toFixed(1)).join('/')}` : ''} wear ${car.wear.map((w) => (w * 100).toFixed(1)).join('/')}% fuel ${car.fuel.toFixed(1)}`);
     if (process.env.HEAT) console.log('   mean slip kW long', pl.map((x) => (x / tN / 1000).toFixed(1)).join('/'), 'lat', pt.map((x) => (x / tN / 1000).toFixed(1)).join('/'), 'Fz·v MW', fzv.map((x) => (x / tN / 1e6).toFixed(2)).join('/'));
     pl = [0, 0, 0, 0]; pt = [0, 0, 0, 0]; fzv = [0, 0, 0, 0];
     lapStart = t; tSum = [0, 0, 0, 0]; tN = 0; tMax = 0; tMin = 999;

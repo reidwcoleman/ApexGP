@@ -136,7 +136,7 @@ if (['wear', 'grain', 'pickup', 'blister', 'dust', 'grass', 'tdirt', 'flat', 'he
   const look = {
     wear: w, heat: n('heat', 0), blister: n('blister', w > 0.6 ? 0.3 : 0), graining: n('grain', Math.min(1, w * 1.2)),
     pickup: n('pickup', Math.min(1, w * 1.4)), dust: n('dust', Math.min(1, w * 1.2)), grass: n('grass', 0), dirt: n('tdirt', 0),
-    flatU: 0.25, flat: n('flat', 0),
+    flatU: 0.25, flat: n('flat', 0), load: n('load', 0),
   };
   for (const c of cars) c.setTyres?.([look, look, look, look]);
 }
