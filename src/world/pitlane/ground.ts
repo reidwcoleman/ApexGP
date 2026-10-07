@@ -41,10 +41,15 @@ const COL: Record<number, THREE.Color> = {
   [Z.WORK]: new THREE.Color(0.115, 0.116, 0.12),
 };
 
-export function buildGround(plan: PitPlan, ts: TrackSpace): THREE.BufferGeometry {
+/** `win`: only the ground in this s range (the boot's garage box: the lane in front of its door) */
+export function buildGround(plan: PitPlan, ts: TrackSpace, win?: [number, number]): THREE.BufferGeometry {
   const gg = new GroundGeo();
   const P = new THREE.Vector3();
   const strip = (sA: number, sB: number, l0: (s: number) => number, l1: (s: number) => number, zone: number, lift: number, ds = 2, color?: THREE.Color) => {
+    if (win) {
+      sA = Math.max(sA, win[0]);
+      sB = Math.min(sB, win[1]);
+    }
     if (sB <= sA) return;
     const n = Math.max(1, Math.ceil((sB - sA) / ds));
     const c = color ?? COL[zone];
@@ -116,9 +121,11 @@ export function buildGround(plan: PitPlan, ts: TrackSpace): THREE.BufferGeometry
 
 // ------------------------------------------------------------------ paint
 
-export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas): Geo {
+/** `win`: only the paint in this s range (as buildGround) */
+export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas, win?: [number, number]): Geo {
   const g = new Geo();
   const p = plan;
+  const outside = (sA: number, sB: number) => !!win && (Math.max(sA, sB) < win[0] || Math.min(sA, sB) > win[1]);
   const white = atlas.uv('white', 4);
   let lift = 0.021;
   const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), D = new THREE.Vector3();
@@ -128,6 +135,11 @@ export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas): Ge
 
   /** band along s between laterals l(s) ± w/2 */
   const line = (sA: number, sB: number, l: (s: number) => number, w: number, ds = 3, uv: UVRect = white) => {
+    if (win) {
+      sA = Math.max(sA, win[0]);
+      sB = Math.min(sB, win[1]);
+      if (sB <= sA) return;
+    }
     const n = Math.max(1, Math.ceil((sB - sA) / ds));
     for (let i = 0; i < n; i++) {
       const s0 = sA + ((sB - sA) * i) / n, s1 = sA + ((sB - sA) * (i + 1)) / n;
@@ -140,6 +152,7 @@ export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas): Ge
   };
   /** rectangle [s0,s1]×[l0,l1] */
   const rect = (s0: number, s1: number, l0: number, l1: number, uv: UVRect = white) => {
+    if (outside(s0, s1)) return;
     ts.P(s0, l0, lift, A);
     ts.P(s1, l0, lift, B);
     ts.P(s1, l1, lift, C);
@@ -151,6 +164,7 @@ export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas): Ge
    * i.e. upright for a driver heading down the lane) × `across` metres
    */
   const image = (s: number, l: number, along: number, across: number, uv: UVRect) => {
+    if (outside(s - along / 2, s + along / 2)) return;
     // the driver's right = +l when side = +1
     const r = ts.side > 0 ? 1 : -1;
     ts.P(s - along / 2, l - (r * across) / 2, lift, A);
@@ -181,6 +195,7 @@ export function buildPaint(plan: PitPlan, ts: TrackSpace, atlas: DecalAtlas): Ge
   // gore hatching (chevrons pointing the way)
   const hatch = (sA: number, sB: number, edge: (s: number) => number, dir: 1 | -1) => {
     for (let s = sA; s < sB; s += 2.6) {
+      if (outside(s, s + 0.45)) continue;
       const w = edge(s) - p.road;
       if (w < 0.9) continue;
       const lA = p.road + 0.25, lB = edge(s) - 0.2;

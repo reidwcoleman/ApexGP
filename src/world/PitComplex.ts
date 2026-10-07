@@ -4,7 +4,7 @@ import type { Renderer } from '../core/Renderer.ts';
 import { TEAMS } from '../race/Teams.ts';
 import { Geo, TrackSpace } from './pitlane/geo.ts';
 import { PitPeople } from '../people/strollers.ts';
-import { GARAGE_W, L, makePlan } from './pitlane/layout.ts';
+import { GARAGE_W, L, makePlan, type PitPlan } from './pitlane/layout.ts';
 import { DecalAtlas, PrintAtlas, fenceTexture, noiseTexture, whenFontsReady } from './pitlane/textures.ts';
 import { decalMaterial, fenceMaterial, glassMaterial, groundMaterial, pitU, signalMaterial, signalU, solidMaterial } from './pitlane/materials.ts';
 import { buildGround, buildPaint } from './pitlane/ground.ts';
@@ -75,7 +75,59 @@ export interface PitComplex {
   warm?(on: boolean): void;
 }
 
-export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
+/**
+ * The complex's painted atlases (boards, fascias, back walls, floor decals) and its noise: made once
+ * per circuit, by the garage box (buildGarageBox) at boot, and taken over by the whole complex when
+ * it follows behind the garage (`adopted`: the complex owns and frees them from then on).
+ */
+export interface PitKit {
+  print: PrintAtlas;
+  decals: DecalAtlas;
+  noise: THREE.DataTexture;
+  adopted: boolean;
+}
+
+function makeKit(gfx: Renderer): PitKit {
+  const aniso = gfx.maxAnisotropy;
+  const print = new PrintAtlas(aniso);
+  const decals = new DecalAtlas(aniso);
+  whenFontsReady(() => {
+    print.draw();
+    decals.draw();
+  });
+  return { print, decals, noise: noiseTexture(), adopted: false };
+}
+
+/** the pit shaders' shared uniforms (the same for the box and the whole complex of a circuit) */
+function setPitUniforms(track: Track, plan: PitPlan, noise: THREE.Texture) {
+  pitU.uNoise.value = noise;
+  const f = track.frame(plan.mid);
+  pitU.uOrig.value.copy(track.point(plan.mid, 0));
+  pitU.uT.value.set(f.tangent.x, f.tangent.z).normalize();
+  pitU.uR.value.set(f.right.x, f.right.z).normalize().multiplyScalar(plan.side);
+  pitU.uMid.value = plan.mid;
+  pitU.uBox.value.set(plan.boxS(0), 18, L.box, L.fast);
+  pitU.uGar.value.set(plan.teamS0, plan.teamS1, L.front, H.door);
+  pitU.uLane.value.set(plan.sStart, plan.sEnd, plan.limitStart, plan.limitEnd);
+  pitU.uCover.value.set(plan.podiumS0, plan.podiumS1, plan.podiumTip, L.front);
+  pitU.uCover2.value.set(plan.bldgS0, plan.bldgS1);
+}
+
+/** a car bay inside a team's garage (PitComplex.bay) */
+function bayOf(plan: PitPlan, ts: TrackSpace) {
+  return (team: number, k: 0 | 1) => {
+    const g0 = plan.teamS0 + team * GARAGE_W;
+    const bs = k === 0 ? g0 + 4.5 : g0 + GARAGE_W - 4.5;
+    const l = L.front + 5.4;
+    const pos = ts.P(bs, l, 0.062);
+    const out = ts.P(bs, l - 1, 0.062).sub(pos).setY(0).normalize();
+    const inward = ts.P(bs + (k === 0 ? 1 : -1), l, 0.062).sub(pos).setY(0).normalize();
+    return { pos, yaw: Math.atan2(out.x, out.z), inward, wallL: L.garageBack - l };
+  };
+}
+
+/** `kit`: the garage box's atlases, taken over (else made here) */
+export function buildPitComplex(track: Track, gfx: Renderer, kit: PitKit = makeKit(gfx)): PitComplex {
   const t0 = performance.now();
   const group = new THREE.Group();
   group.name = 'PitComplex';
@@ -84,26 +136,9 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
   const aniso = gfx.maxAnisotropy;
 
   // ---------------------------------------------------------------- textures + shared uniforms
-  const print = new PrintAtlas(aniso);
-  const decals = new DecalAtlas(aniso);
-  whenFontsReady(() => {
-    print.draw();
-    decals.draw();
-  });
-  const noise = noiseTexture();
-  pitU.uNoise.value = noise;
-  {
-    const f = track.frame(plan.mid);
-    pitU.uOrig.value.copy(track.point(plan.mid, 0));
-    pitU.uT.value.set(f.tangent.x, f.tangent.z).normalize();
-    pitU.uR.value.set(f.right.x, f.right.z).normalize().multiplyScalar(plan.side);
-    pitU.uMid.value = plan.mid;
-    pitU.uBox.value.set(plan.boxS(0), 18, L.box, L.fast);
-    pitU.uGar.value.set(plan.teamS0, plan.teamS1, L.front, H.door);
-    pitU.uLane.value.set(plan.sStart, plan.sEnd, plan.limitStart, plan.limitEnd);
-    pitU.uCover.value.set(plan.podiumS0, plan.podiumS1, plan.podiumTip, L.front);
-    pitU.uCover2.value.set(plan.bldgS0, plan.bldgS1);
-  }
+  kit.adopted = true;
+  const { print, decals, noise } = kit;
+  setPitUniforms(track, plan, noise);
 
   // ---------------------------------------------------------------- geometry
   const solid = new Geo();
@@ -174,15 +209,7 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
     updateMs: 0,
   };
 
-  const bay = (team: number, k: 0 | 1) => {
-    const g0 = plan.teamS0 + team * GARAGE_W;
-    const bs = k === 0 ? g0 + 4.5 : g0 + GARAGE_W - 4.5;
-    const l = L.front + 5.4;
-    const pos = ts.P(bs, l, 0.062);
-    const out = ts.P(bs, l - 1, 0.062).sub(pos).setY(0).normalize();
-    const inward = ts.P(bs + (k === 0 ? 1 : -1), l, 0.062).sub(pos).setY(0).normalize();
-    return { pos, yaw: Math.atan2(out.x, out.z), inward, wallL: L.garageBack - l };
-  };
+  const bay = bayOf(plan, ts);
 
   return {
     group,
@@ -241,6 +268,139 @@ export function buildPitComplex(track: Track, gfx: Renderer): PitComplex {
       for (let k = 0; k < TEAMS.length; k++) signalU.uSig.value[k] = crew.signal(k);
       stats.crewDrawn = crew.drawn;
       stats.updateMs = Math.round((performance.now() - u0) * 1000) / 1000;
+    },
+  };
+}
+
+/** the boot's garage box (buildGarageBox) */
+export type GarageBox = PitComplex & {
+  team: number;
+  kit: PitKit;
+  /** free the box but not `kit` (it goes on into the whole complex, or the next box) */
+  disposeBox(): void;
+};
+
+/**
+ * Only the player's garage: the first thing a circuit builds, so the garage view is up before
+ * anything else of it exists. The team's interior (garage.ts), its floor and door frame, the lane and
+ * its paint in front of the door — and, standing in for the world beyond (the pit wall, the track,
+ * the far side, all built behind the garage: Game.completeWorld), a haze across the lane at the
+ * pit wall, coloured each frame like the air (the fog's colour): from inside the dark garage a
+ * bright, washed-out outdoors. Replaced by the whole complex (buildPitComplex, which takes over
+ * `kit`) once that is built. Same interface; no crews, signals or people (the garage dressing has
+ * its own).
+ */
+export function buildGarageBox(track: Track, gfx: Renderer, team: number, kit: PitKit = makeKit(gfx)): GarageBox {
+  const t0 = performance.now();
+  const group = new THREE.Group();
+  group.name = 'GarageBox';
+  const plan = makePlan(track);
+  const ts = new TrackSpace(track, plan.side);
+  setPitUniforms(track, plan, kit.noise);
+  const g0 = plan.teamS0 + team * GARAGE_W, g1 = g0 + GARAGE_W;
+  // (what can be seen of the lane through the door, from anywhere in the garage)
+  const win: [number, number] = [g0 - 40, g1 + 40];
+
+  const solid = new Geo();
+  const detail = new Geo();
+  const printG = new Geo();
+  const paint = buildPaint(plan, ts, kit.decals, win);
+  buildGarages(plan, ts, kit.print, { solid, detail, print: printG, paint, paintUV: kit.decals.uv('white', 4), only: team });
+  // the door frame (as building.ts): pillars at the team boundaries, the lintel, the fascia band
+  const cladding = pitStyle(track.def.id).clad;
+  solid.color(cladding).mat(0.75, 0, 0, 1);
+  for (const a of [g0, g1]) ts.box(solid, a - 0.3, a + 0.3, L.front - 0.1, L.front + 1.0, 0, H.fascia0, 1 | 2 | 16);
+  solid.color(0x2a2d31).mat(0.6, 0.2, 0, 0.8);
+  ts.box(solid, g0, g1, L.front - 0.05, L.front + 0.9, H.door, H.fascia0, 4 | 16, 6);
+  solid.color(0x16181b).mat(0.55, 0.3, 0, 1);
+  ts.box(solid, g0 - 0.3, g1 + 0.3, L.front - 0.2, L.front + 0.9, H.fascia0, H.slab1, 1 | 2 | 16 | 4, 6);
+  // and the shell behind the back wall (its print panel casts no shadow: a low sun behind the
+  // building would shine through it)
+  solid.color(cladding).mat(0.8, 0, 0, 1);
+  ts.box(solid, g0 - 0.3, g1 + 0.3, L.garageBack, L.garageBack + 0.5, 0, H.slab1, 63, 6);
+
+  const meshes: THREE.Mesh[] = [];
+  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, name: string, cast: boolean, order = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.name = name;
+    m.castShadow = cast;
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    m.renderOrder = order;
+    group.add(m);
+    meshes.push(m);
+    return m;
+  };
+  const solidMat = solidMaterial();
+  add(buildGround(plan, ts, win), groundMaterial(), 'box_ground', false);
+  add(paint.geometry(), decalMaterial(kit.decals.texture), 'box_paint', false, 1);
+  add(solid.geometry(), solidMat, 'box_structure', true);
+  add(detail.geometry(), solidMat, 'box_detail', false);
+  add(printG.geometry(), solidMaterial(kit.print.texture), 'box_print', false);
+
+  // the haze at the pit wall (a vertical band along the lane, 40 m high)
+  const pos: number[] = [];
+  const idx: number[] = [];
+  const P = new THREE.Vector3();
+  const n = Math.ceil((win[1] - win[0]) / 4);
+  for (let i = 0; i <= n; i++) {
+    const s = win[0] + ((win[1] - win[0]) * i) / n;
+    ts.P(s, L.wall + L.wallT, -2, P);
+    pos.push(P.x, P.y, P.z);
+    ts.P(s, L.wall + L.wallT, 40, P);
+    pos.push(P.x, P.y, P.z);
+    if (i < n) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  }
+  const hazeGeo = new THREE.BufferGeometry();
+  hazeGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  hazeGeo.setIndex(idx);
+  hazeGeo.computeBoundingSphere();
+  const hazeMat = new THREE.MeshBasicMaterial({ color: 0xb0b8c0, side: THREE.DoubleSide, fog: false });
+  const haze = new THREE.Mesh(hazeGeo, hazeMat);
+  haze.name = 'box_haze';
+  haze.matrixAutoUpdate = false;
+  haze.onBeforeRender = (_r: THREE.WebGLRenderer, scene: THREE.Scene) => {
+    const fog = scene.fog as THREE.Fog | null;
+    if (fog) hazeMat.color.copy(fog.color);
+  };
+  group.add(haze);
+
+  const disposeBox = () =>
+    group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.geometry.dispose();
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mt of mats) mt.dispose();
+    });
+
+  let tris = 0;
+  for (const m of meshes) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
+  const stats: Record<string, unknown> = { buildMs: Math.round(performance.now() - t0), meshes: meshes.length + 1, staticTriangles: Math.round(tris) };
+
+  return {
+    group,
+    team,
+    kit,
+    garages: TEAMS.map((_, k) => ({ team: k, s: plan.boxS(k), lateral: plan.side * L.box })),
+    stats,
+    bay: bayOf(plan, ts),
+    hideCrew() {},
+    clearView() {},
+    setBox() {},
+    setStop() {},
+    disposeBox,
+    dispose() {
+      disposeBox();
+      // (the atlases go on into the whole complex, unless it never came)
+      if (!kit.adopted) {
+        kit.print.texture.dispose();
+        kit.decals.texture.dispose();
+        kit.noise.dispose();
+      }
+    },
+    update(dt: number) {
+      pitU.uTime.value += dt;
     },
   };
 }

@@ -16,13 +16,15 @@ import type { PrintAtlas } from './textures.ts';
 
 const COMPOUNDS = [0xe3202e, 0xf3c300, 0xeeeeee, 0x2fb34a, 0x1f6fd6];
 
-export function buildGarages(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: { solid: Geo; detail: Geo; print: Geo; paint: Geo; paintUV: [number, number, number, number] }) {
+/** `only`: just that team's garage (the boot's garage box, PitComplex.buildGarageBox) */
+export function buildGarages(plan: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: { solid: Geo; detail: Geo; print: Geo; paint: Geo; paintUV: [number, number, number, number]; only?: number }) {
   const { solid, detail, print, paint } = o;
   const F = L.front, GB = L.garageBack;
   const fr = new Frame();
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
   TEAMS.forEach((team, t) => {
+    if (o.only !== undefined && t !== o.only) return;
     const g0 = plan.teamS0 + t * GARAGE_W, g1 = g0 + GARAGE_W;
     const c = (g0 + g1) / 2;
     const prim = new THREE.Color(team.primary);
