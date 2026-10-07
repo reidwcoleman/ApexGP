@@ -65,7 +65,7 @@ import { GarageScene } from './GarageScene.ts';
 import { SPOT_ORDER, type SpotId } from './GarageDressing.ts';
 import { GarageTourUI } from '../ui/GarageTour.ts';
 import { uiScale } from '../ui/scale.ts';
-import { setCarAORenderer } from '../car/carAO.ts';
+import { setCarAORenderer, CAR_FILL } from '../car/carAO.ts';
 import { keepData, loadData, pixelKey, preloadPixels } from '../core/pixelCache.ts';
 import { peopleKit } from '../people/Humans.ts';
 import { prebakeFans, prepareFanAtlas } from '../people/Crowd.ts';
@@ -2341,6 +2341,9 @@ export class Game {
     this.gfx.indoor = indoor;
     this.env.setWeather(wx);
     this.env.update(dt, this.camera);
+    // the cars take the world's sky fill (their own env map skips three's environmentIntensity; carAO
+    // CAR_FILL). In the garage they reflect the garage's own env map at their own strength.
+    CAR_FILL.value = indoor ? 1 : this.scene.environmentIntensity;
     feedCarWake(this.rigs.values(), this.camera, this.state === 'paused' ? 0 : dt);
     const eyeCam = !this.celebration && (this.state === 'race' || this.state === 'intro' || this.state === 'paused') && EYE_CAMS[this.cams.view];
     this.env.focusShadow(this.celebration ? this.celebration.center : (this.introFocus ?? this.playerRigPos()), eyeCam ? 16 : undefined);

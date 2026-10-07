@@ -194,6 +194,19 @@ export function bakeCarAO(L: CarGeoLevel): number {
 }
 
 /**
+ * The sky fill the world round the car gets (Game copies scene.environmentIntensity in here every frame
+ * outdoors: ~0.74 of the sky in sunshine — the trees, stands and buildings hide part of it — ~0.92 under
+ * cloud, the lightning flash on top). The cars carry their own env map, so three never applied that scale
+ * to them: a car's shaded side was lit by a third more sky than the road in the same shade beside it, the
+ * pasted-in, evenly lit look of a CG car on a photo, and they didn't flash with the lightning. Applied to
+ * the env map's diffuse light only — the clearcoat's reflection of the open sky above stays the sky's.
+ * 1 = the material's own envMapIntensity (the garage, the dev pages).
+ */
+export const CAR_FILL = { value: 1 };
+/** GLSL: after `#include <lights_fragment_maps>` (needs `uniform float uCarFill`) */
+export const CAR_FILL_GLSL = '#include <lights_fragment_maps>\niblIrradiance *= uCarFill;';
+
+/**
  * Hook a car material up to the baked occlusion: ambient light and reflections are attenuated
  * by it (and a little of the direct light, for the crevices the shadow map is too coarse for).
  */
@@ -202,10 +215,11 @@ export function withCarAO<T extends THREE.Material>(mat: T): T {
   const prevKey = mat.customProgramCacheKey.bind(mat);
   mat.onBeforeCompile = (sh, r) => {
     prev(sh, r);
+    sh.uniforms.uCarFill = CAR_FILL;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aOcc;\nvarying float vOcc;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOcc = aOcc;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vOcc;').replace(
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vOcc;\nuniform float uCarFill;').replace('#include <lights_fragment_maps>', CAR_FILL_GLSL).replace(
       '#include <aomap_fragment>',
       `#include <aomap_fragment>
       {
@@ -222,6 +236,6 @@ export function withCarAO<T extends THREE.Material>(mat: T): T {
       }`,
     );
   };
-  mat.customProgramCacheKey = () => prevKey() + '-ao1';
+  mat.customProgramCacheKey = () => prevKey() + '-ao2';
   return mat;
 }
