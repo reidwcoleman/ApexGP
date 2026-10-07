@@ -41,16 +41,19 @@ export class Sightlines {
   private readonly hi: Uint8Array;
   /** top of see-through stuff (fences) above the ground (0.5 m units; 0 = none) */
   private readonly fence: Uint8Array;
-  readonly buildMs: number;
-  readonly groundMs: number;
+  /** ms of main-thread work the grid took (a sliced build: summed over its slices) */
+  buildMs = 0;
+  groundMs = 0;
   readonly stats = { tris: 0, instances: 0, trees: 0, cells: 0 };
 
   /**
    * `cached`: the bytes of this very grid from an earlier visit (toBytes; see Game.sightlines —
    * keyed by the build, the circuit and a fingerprint of the world's geometry): read back instead
    * of rasterising the world again (~0.3–1.5 s). Ignored if they don't fit this circuit.
+   * `sliced`: a grid to build is left to `pending` (a step at a time, the caller drawing frames
+   * between), not built here in one go.
    */
-  constructor(track: Track, heightAt: (x: number, z: number) => number, roots: THREE.Object3D[], cached?: ArrayBuffer | null) {
+  constructor(track: Track, heightAt: (x: number, z: number) => number, roots: THREE.Object3D[], cached?: ArrayBuffer | null, sliced = false) {
     const t0 = performance.now();
     let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity;
     for (let i = 0; i < track.n; i++) {
@@ -80,9 +83,33 @@ export class Sightlines {
     this.lo = new Uint8Array(n).fill(EMPTY);
     this.hi = new Uint8Array(n);
     this.fence = new Uint8Array(n);
+    const steps = this.build(track, heightAt, roots);
+    this.buildMs = performance.now() - t0;
+    if (sliced) this.pending = steps;
+    else for (const _ of steps);
+  }
+
+  /**
+   * A grid still to build (constructor `sliced`): each step is a few rows of the ground or a few ms
+   * of the world's meshes — run with frames between (Game.sightlines: a cold build in one go was a
+   * ~0.4–1 s frame behind the garage). Null once built.
+   */
+  pending: Generator<void, void, void> | null = null;
+
+  private *build(track: Track, heightAt: (x: number, z: number) => number, roots: THREE.Object3D[]): Generator<void, void, void> {
+    let t = performance.now();
+    // (each step's own time goes into buildMs, not the caller's frames between them)
+    const lap = () => {
+      this.buildMs += performance.now() - t;
+    };
     for (let j = 0; j < this.nz; j++) {
       const z = this.z0 + (j + 0.5) * CELL;
       for (let i = 0; i < this.nx; i++) this.ground[j * this.nx + i] = Math.round(heightAt(this.x0 + (i + 0.5) * CELL, z) * 10);
+      if ((j & 31) === 31) {
+        lap();
+        yield;
+        t = performance.now();
+      }
     }
     // the road itself is ground too (a crest hides what's over it; an embankment isn't a wall)
     const pt = new THREE.Vector3();
@@ -94,13 +121,27 @@ export class Sightlines {
         if (k >= 0) this.ground[k] = Math.max(this.ground[k], Math.round(pt.y * 10));
       }
     }
-    this.groundMs = Math.round(performance.now() - t0);
+    lap();
+    this.groundMs = Math.round(this.buildMs);
+    yield;
+    t = performance.now();
     for (const r of roots) {
       r.updateMatrixWorld(true);
-      r.traverse((o) => this.add(o));
+      const objs: THREE.Object3D[] = [];
+      r.traverse((o) => void objs.push(o));
+      for (const o of objs) {
+        this.add(o);
+        if (performance.now() - t > 3) {
+          lap();
+          yield;
+          t = performance.now();
+        }
+      }
     }
-    this.buildMs = Math.round(performance.now() - t0);
-    for (let i = 0; i < n; i++) if (this.lo[i] !== EMPTY) this.stats.cells++;
+    for (let i = 0; i < this.lo.length; i++) if (this.lo[i] !== EMPTY) this.stats.cells++;
+    lap();
+    this.buildMs = Math.round(this.buildMs);
+    this.pending = null;
   }
 
   /** read back from a cache (constructor `cached`) rather than built */

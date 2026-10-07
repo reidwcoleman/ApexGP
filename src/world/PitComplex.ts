@@ -128,7 +128,20 @@ function bayOf(plan: PitPlan, ts: TrackSpace) {
 
 /** `kit`: the garage box's atlases, taken over (else made here) */
 export function buildPitComplex(track: Track, gfx: Renderer, kit: PitKit = makeKit(gfx)): PitComplex {
-  const t0 = performance.now();
+  const it = pitComplexBuilder(track, gfx, kit);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * buildPitComplex in steps: each `yield` is a point where the caller may draw a frame (behind the
+ * garage, Game.completeWorld: in one go it was a ~0.3 s frame). The stats' times leave out the
+ * time between steps.
+ */
+export function* pitComplexBuilder(track: Track, gfx: Renderer, kit: PitKit = makeKit(gfx)): Generator<void, PitComplex, void> {
+  let t0 = performance.now();
   const group = new THREE.Group();
   group.name = 'PitComplex';
   const plan = makePlan(track);
@@ -149,11 +162,24 @@ export function buildPitComplex(track: Track, gfx: Renderer, kit: PitKit = makeK
   const paint = buildPaint(plan, ts, decals);
   const glass = new GlassGeo();
   const signal = new SignalGeo();
-  const tGeo0 = performance.now();
+  let geoMs = 0;
+  let tGeo = performance.now();
+  // (a frame may be drawn at each yield: its time is left out of buildMs)
+  const pause = () => {
+    const now = performance.now();
+    geoMs += now - tGeo;
+    return now;
+  };
   const wall = buildWall(plan, ts, print, { solid, detail, thin, print: printG, fence: fenceG, signal });
   buildBuilding(plan, ts, print, { solid, detail, thin, print: printG, glass });
+  let ty = pause();
+  yield;
+  t0 += performance.now() - ty;
+  tGeo = performance.now();
   buildGarages(plan, ts, print, { solid, detail, print: printG, paint, paintUV: decals.uv('white', 4) });
-  const tGeo1 = performance.now();
+  ty = pause();
+  yield;
+  t0 += performance.now() - ty;
 
   const meshes: THREE.Mesh[] = [];
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, name: string, cast: boolean, order = 0) => {
@@ -202,7 +228,7 @@ export function buildPitComplex(track: Track, gfx: Renderer, kit: PitKit = makeK
   for (const m of meshes) tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
   const stats: Record<string, unknown> = {
     buildMs: Math.round(performance.now() - t0),
-    geometryMs: Math.round(tGeo1 - tGeo0),
+    geometryMs: Math.round(geoMs),
     meshes: meshes.length + 2,
     staticTriangles: Math.round(tris),
     crewDrawn: 0,

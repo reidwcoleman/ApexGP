@@ -66,12 +66,18 @@ npm run check    # tsc --noEmit
   next round, else the quick-race circuit you picked last): the track's data, the sky, your own garage alone
   (`buildGarageBox`: its interior, the lane in front of the door, and a haze across the lane at the pit wall,
   coloured like the air, in place of the world not yet built) and the two cars in it. The rest of the circuit then
-  grows behind it one step per frame (`Game.coreSteps`, then `sceneryBuilder`, `env.adoptScenery`,
-  `Game.completeWorld`): the rest of the field a car at a time, the trackside, the whole pit complex (the other
-  garages, building, pit wall and crews, swapped in for the box and taking over its atlases; each piece shown
-  once its shaders are built), the skid marks and racing line, then terrain, woods, grandstands and crowds — with a
-  status chip in the garage. Starting a session sooner waits behind a short "Finishing" card. Picking another
-  team before then moves the box to that team's garage; picking another circuit moves the garage there behind a
+  grows behind it a slice of main-thread work between garage frames (`Game.buildCore`, then `sceneryBuilder`,
+  `env.adoptSteps`, `Game.completeWorld`): the trackside and the whole pit complex in a few steps each (the other
+  garages, building, pit wall and every crew member, swapped in for the box and taking over its atlases), the rest
+  of the field (several cars a frame when their liveries are cached), the skid marks and racing line, then
+  terrain, woods, grandstands and crowds, the reflections re-captured a cube face a frame, the camera sight-line
+  grid rasterised a few ms a frame — with a status chip in the garage. Every new piece is readied before it is
+  shown (`src/world/prepare.ts` `ScenePrep`: its programs — the lit ones under each lighting set-up and the shadow
+  pass's depth ones — queued a slice of objects per frame, its textures uploaded a few a frame, the driver's
+  linking awaited behind a fence, each program's first-use queries asked in idle time; the slices grow when the
+  garage's frames come slowly anyway, `frameClock`): `node tools/_bgtrace.mjs` (PORT env) lists the long frames and long tasks behind the garage
+  with the WebGL calls in them, `tools/_bgprogs.mjs` the programs any of them linked in a draw. Starting a
+  session sooner waits behind a short "Finishing" card. Picking another team before then moves the box to that team's garage; picking another circuit moves the garage there behind a
   short title card; no travel screen.
 - **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
   making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and

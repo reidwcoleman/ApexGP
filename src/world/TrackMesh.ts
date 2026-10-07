@@ -184,13 +184,33 @@ function makePanels(spots: PanelSpot[]): THREE.InstancedMesh {
 }
 
 export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats: TracksideStats } {
-  const t0 = performance.now();
+  const it = tracksideBuilder(track, gfx);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * buildTrackside in steps: each `yield` is a point where the caller may draw a frame (behind the
+ * garage, Game.completeWorld: in one go it was a ~0.3 s frame). The stats' times leave out the
+ * time between steps.
+ */
+export function* tracksideBuilder(track: Track, gfx: Renderer): Generator<void, Trackside & { stats: TracksideStats }, void> {
+  let t0 = performance.now();
+  // (the time spent between steps, taken off the stats' phases)
+  let away = 0;
   const aniso = gfx.maxAnisotropy;
 
   const tex = makeGroundTextures(aniso);
   const print = new PrintAtlas(aniso);
   const decals = new DecalAtlas(aniso);
-  const tTex = performance.now();
+  let tTex = performance.now();
+  let ty = performance.now();
+  yield;
+  away = performance.now() - ty;
+  t0 += away;
+  tTex += away;
   const lamp = lampMaterial();
 
   const defs: Record<string, MatDef> = {
@@ -207,12 +227,30 @@ export function buildTrackside(track: Track, gfx: Renderer): Trackside & { stats
 
   const cs = new ChunkSet(track.length, 360, defs);
   const ctx = new Ctx(track, cs);
-  const tCtx = performance.now();
+  let tCtx = performance.now();
   buildSurfaces(ctx);
+  ty = performance.now();
+  yield;
+  away = performance.now() - ty;
+  t0 += away;
+  tTex += away;
+  tCtx += away;
   buildBarriers(ctx, print);
+  ty = performance.now();
+  yield;
+  away = performance.now() - ty;
+  t0 += away;
+  tTex += away;
+  tCtx += away;
   buildLightPoles(ctx);
   buildMarkings(ctx, decals);
   const st = buildStructures(ctx, print);
+  ty = performance.now();
+  yield;
+  away = performance.now() - ty;
+  t0 += away;
+  tTex += away;
+  tCtx += away;
 
   const tGeo = performance.now();
   const group = new THREE.Group();
