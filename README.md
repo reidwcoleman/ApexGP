@@ -99,7 +99,9 @@ npm run check    # tsc --noEmit
   ragged edge, branches inside and a dark interior; a fir's sprays are flat stretches of bough, so it reads as
   layered drooping tiers from below. Three LODs (LOD2 also casts every near tree's shadow from a second,
   shadow-only BatchedMesh), hashed alpha once leaves get small, then 8-view impostors of the full scan (conifers
-  hand over sooner, ~55 m). Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
+  hand over sooner, ~55 m). Every LOD change and the impostor hand-over is a matched dither over a few metres, and
+  every distance is measured from the camera's look-ahead (the stretch its next half second of travel covers), so
+  the trees the car is heading for are at full detail well before it reaches them, not as it passes. Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
   trees slower), gusts roll downwind through the woods, limbs swing at their own phase, leaves rock and flash;
   calm in fog, thrashing in a storm; impostors share the trunk sway. A car's wake (`feedCarWake`, fed from
   `Game`'s rigs) ruffles the verge grass, bushes and low branches it passes.
