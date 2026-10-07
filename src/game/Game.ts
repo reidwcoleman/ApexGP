@@ -1316,6 +1316,9 @@ export class Game {
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
     this.audio.setVolume(s.volume);
     this.audio.setMusicVolume(s.music);
+    // Settings → Controls: wheel binding and calibration, pad shaping, rumble, keyboard steering speed
+    this.input.setPrefs(s.controls);
+    this.control.prefs = this.input.prefs;
   }
 
   /** one-shot qualifying: a flying lap sets the grid against the AI's times */
@@ -1931,6 +1934,8 @@ export class Game {
       } else {
         this.driveInput(dt);
         race.update(dt);
+        // pad rumble from the player's car (before the effects consume its impacts)
+        this.input.feedback(dt, race.player.car);
         this.handleRaceEvents();
         this.syncAllViews(dt);
         if (st.camera) {
@@ -2155,7 +2160,7 @@ export class Game {
     this.control.aids.steeringMode = st.usingPad ? 'direct' : a.keyboard;
     const out = this.control.update(
       dt,
-      { steer: st.steer, throttle: st.throttle, brake: st.brake, usingPad: st.usingPad, ers: st.ers, shiftUp: st.shiftUp, shiftDown: st.shiftDown },
+      { steer: st.steer, throttle: st.throttle, brake: st.brake, usingPad: st.usingPad, device: st.device, ers: st.ers, shiftUp: st.shiftUp, shiftDown: st.shiftDown },
       car,
       this.track,
       race.profile,

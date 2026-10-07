@@ -661,6 +661,62 @@
 }
 .opt .v .dim { opacity: 0.55; }
 
+/* ---------- Settings → Controls: live input meters and the wheel binding prompt ---------- */
+.ctl-meters {
+  margin: var(--s1) 0 0;
+}
+.ctl-meter {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  height: 26px;
+  padding: 0 var(--s2) 0 var(--s3);
+  font-size: var(--t-cap);
+  font-weight: 600;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+}
+.ctl-meter .bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--well);
+  overflow: hidden;
+}
+.ctl-meter .bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-radius: 3px;
+  background: var(--accent);
+}
+/* steering grows out of the centre line */
+.ctl-meter.centred .bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-strong);
+}
+.ctl-meter.centred .bar i {
+  left: auto;
+  background: var(--ink2);
+}
+.ctl-prompt {
+  margin: var(--s3) var(--s3) var(--s4);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink2);
+}
+.ctl-prompt b {
+  color: var(--ink);
+}
+
 /* ======================================================================
    The garage (title screen). The car is the hero: it sits left of centre,
    the panel lives on the right. One accent: the player's team colour

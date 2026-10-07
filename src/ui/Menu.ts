@@ -17,6 +17,7 @@ import { artFor } from './loadingArt.ts';
 import { openWizard, renderHub, renderRd, renderRoundSummary } from './CareerHub.ts';
 import type { DriverCareer, Contract, RoundSummary } from '../career/DriverCareer.ts';
 import type { PlayerDriver } from '../career/Series.ts';
+import { BIND_PROMPT, BIND_STEPS, Binder, DEFAULT_CONTROLS, controlPrefs, deviceName, findDev, isWheelId, padSteer, pedal, wheelSteer, type ControlPrefs } from '../core/controllers.ts';
 
 export interface RaceSetup {
   team: number;
@@ -56,6 +57,8 @@ export interface Settings {
   music: number;
   /** camera motion blur (missing = cinematic) */
   motionBlur?: MotionBlurLevel;
+  /** Settings → Controls: wheel binding and calibration, pad shaping, rumble (missing = defaults) */
+  controls?: Partial<ControlPrefs>;
 }
 
 export const LAPS = [3, 5, 10, 20];
@@ -93,7 +96,9 @@ const SETTINGS_V = 3;
 const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
 const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
 
-type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'camera' | 'pause' | 'results' | 'none';
+type ScreenId = 'title' | 'setup' | 'settings' | 'assists' | 'camera' | 'controls' | 'pause' | 'results' | 'none';
+/** Settings → Controls → wheel rotation choices (degrees lock to lock: the common wheel-base settings) */
+const WHEEL_ROTATIONS = [180, 270, 360, 450, 540, 720, 900, 1080];
 
 interface Item {
   el: HTMLElement;
@@ -250,6 +255,11 @@ export class Menu {
   private sel = 0;
   private settingsReturn: ScreenId = 'title';
   private assistsReturn: ScreenId = 'setup';
+  private controlsReturn: ScreenId = 'settings';
+  /** the Controls screen's live-input loop, and the wheel binding in progress */
+  private ctlRaf = 0;
+  private binder: Binder | null = null;
+  private bindKeys: ((e: KeyboardEvent) => void) | null = null;
   private driverCard!: HTMLDivElement;
 
   readonly career: Career;
@@ -305,7 +315,7 @@ export class Menu {
       this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' ? 'ultra' : 'high', autoQuality: true };
       save('apexgp.settings', this.settings);
     }
-    for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'pause', 'results'] as ScreenId[]) {
+    for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'controls', 'pause', 'results'] as ScreenId[]) {
       const s = el('div', 'screen', this.root);
       this.screens.set(id, s);
     }
@@ -314,6 +324,7 @@ export class Menu {
   // ------------------------------------------------------------ screens
 
   show(id: ScreenId) {
+    this.endControls();
     this.screen = id;
     for (const [k, s] of this.screens) s.classList.toggle('on', k === id);
     this.items = [];
@@ -326,6 +337,7 @@ export class Menu {
     if (id === 'settings') this.buildSettings();
     if (id === 'assists') this.buildAssists();
     if (id === 'camera') this.buildCameraPrefs();
+    if (id === 'controls') this.buildControls();
     if (id === 'pause') this.buildPause();
     this.highlight();
   }
@@ -982,6 +994,11 @@ export class Menu {
       this.settingsReturn = 'title';
       this.show('settings');
     });
+    const ct = el('div', 'hrowlink', p, 'Controls and steering wheel<span class="chev">›</span>');
+    this.action(ct, () => {
+      this.controlsReturn = 'title';
+      this.show('controls');
+    });
     const as = el('div', 'hrowlink', p, 'Driving assists<span class="chev">›</span>');
     this.action(as, () => {
       this.assistsReturn = 'title';
@@ -1186,6 +1203,15 @@ export class Menu {
     const openCam = () => this.show('camera');
     cp.addEventListener('click', openCam);
     this.items.push({ el: cp, kind: 'action', select: openCam });
+    const ctl = el('div', 'opt', p);
+    el('span', 'k', ctl, 'Controls');
+    el('span', 'v', ctl, `${st.controls?.wheel ? 'Wheel set up' : 'Keyboard · pad · wheel'}<span class="chev">›</span>`);
+    const openControls = () => {
+      this.controlsReturn = 'settings';
+      this.show('controls');
+    };
+    ctl.addEventListener('click', openControls);
+    this.items.push({ el: ctl, kind: 'action', select: openControls });
     const as = el('div', 'opt', p);
     el('span', 'k', as, 'Driving assists');
     el('span', 'v', as, `${(() => {
@@ -1249,6 +1275,215 @@ export class Menu {
     const done = () => this.show('settings');
     this.items.push({ el: cta, kind: 'action', select: done });
     cta.addEventListener('click', done);
+  }
+
+  /**
+   * Settings → Controls, laid out like ACC's: the wheel and pedals (bound by moving them, with live
+   * meters to check the calibration), then the gamepad's four knobs and the rumble, then the keyboard.
+   */
+  private buildControls() {
+    const s = this.screens.get('controls')!;
+    s.innerHTML = '';
+    el('div', 'scrim', s);
+    const p = el('div', 'panel glass', s);
+    el('h2', '', p, 'Controls');
+    const lede = el('p', 'lede', p, '');
+    const st = this.settings;
+    const c: ControlPrefs = controlPrefs(st.controls);
+    st.controls = c;
+    const step = (v: number, d: number, k: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round((v + d * k) / k) * k));
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    const commit = () => {
+      save('apexgp.settings', st);
+      this.cb.onSettings({ ...st });
+    };
+
+    el('div', 'pcap', p, 'Steering wheel');
+    const wr = el('div', 'opt', p);
+    el('span', 'k', wr, 'Wheel and pedals');
+    const wv = el('span', 'v', wr, `${c.wheel ? deviceName(c.wheel.name, 24) : 'Set up'}<span class="chev">›</span>`);
+    const bind = () => this.startBind();
+    wr.addEventListener('click', bind);
+    this.items.push({ el: wr, kind: 'action', select: bind });
+    this.opt(p, 'Wheel rotation', () => `${c.wheelRotation}° <span class="dim">· as set on the wheel</span>`, (d) => {
+      const i = WHEEL_ROTATIONS.indexOf(c.wheelRotation);
+      c.wheelRotation = WHEEL_ROTATIONS[Math.max(0, Math.min(WHEEL_ROTATIONS.length - 1, (i < 0 ? WHEEL_ROTATIONS.indexOf(900) : i) + d))];
+    }, true);
+    this.opt(p, 'Steering linearity', () => (c.wheelLinearity === 1 ? '1.0 <span class="dim">· 1:1</span>' : c.wheelLinearity.toFixed(1)), (d) => (c.wheelLinearity = step(c.wheelLinearity, d, 0.1, 1, 2.5)), true);
+    this.opt(p, 'Brake linearity', () => c.brakeLinearity.toFixed(1), (d) => (c.brakeLinearity = step(c.brakeLinearity, d, 0.1, 1, 3)), true);
+    this.opt(p, 'Pedal deadzone', () => pct(c.pedalDeadzone), (d) => (c.pedalDeadzone = step(c.pedalDeadzone, d, 0.01, 0, 0.1)), true);
+    // live input: what the game reads from the device that would drive
+    const meters = el('div', 'ctl-meters', p);
+    const meter = (k: string, centred: boolean) => {
+      const row = el('div', 'ctl-meter' + (centred ? ' centred' : ''), meters);
+      el('span', 'k', row, k);
+      const bar = el('span', 'bar', row);
+      return el('i', '', bar);
+    };
+    const mSteer = meter('Steering', true);
+    const mThr = meter('Throttle', false);
+    const mBrk = meter('Brake', false);
+
+    el('div', 'pcap', p, 'Gamepad');
+    this.opt(p, 'Steering deadzone', () => pct(c.padDeadzone), (d) => (c.padDeadzone = step(c.padDeadzone, d, 0.02, 0, 0.3)), true);
+    this.opt(p, 'Steering linearity', () => c.padLinearity.toFixed(1), (d) => (c.padLinearity = step(c.padLinearity, d, 0.1, 1, 3)), true);
+    this.opt(p, 'Steering filter', () => (c.padFilter === 0 ? 'Off' : pct(c.padFilter)), (d) => (c.padFilter = step(c.padFilter, d, 0.1, 0, 1)), true);
+    this.opt(p, 'Speed sensitivity', () => pct(c.padSpeedSens), (d) => (c.padSpeedSens = step(c.padSpeedSens, d, 0.1, 0, 1)), true);
+    this.opt(p, 'Vibration', () => (c.vibration === 0 ? 'Off' : pct(c.vibration)), (d) => (c.vibration = step(c.vibration, d, 0.25, 0, 1.5)), true);
+
+    el('div', 'pcap', p, 'Keyboard');
+    this.opt(p, 'Steering speed', () => pct(c.kbSteerSpeed), (d) => (c.kbSteerSpeed = step(c.kbSteerSpeed, d, 0.1, 0.5, 1.5)), true);
+
+    const reset = el('div', 'opt', p);
+    el('span', 'k', reset, 'Reset to defaults');
+    el('span', 'v', reset, `${c.wheel ? '<span class="dim">keeps the wheel set-up</span>' : ''}<span class="chev">›</span>`);
+    const doReset = () => {
+      st.controls = { ...DEFAULT_CONTROLS, wheel: c.wheel };
+      commit();
+      this.show('controls');
+    };
+    reset.addEventListener('click', doReset);
+    this.items.push({ el: reset, kind: 'action', select: doReset });
+    if (c.wheel) {
+      const forget = el('div', 'opt', p);
+      el('span', 'k', forget, 'Forget the wheel set-up');
+      el('span', 'v', forget, '<span class="chev">›</span>');
+      const doForget = () => {
+        delete c.wheel;
+        commit();
+        this.show('controls');
+      };
+      forget.addEventListener('click', doForget);
+      this.items.push({ el: forget, kind: 'action', select: doForget });
+    }
+    const cta = el('div', 'cta', p, 'Done');
+    const done = () => this.show(this.controlsReturn);
+    this.items.push({ el: cta, kind: 'action', select: done });
+    cta.addEventListener('click', done);
+
+    // ---- the live loop: device line + meters (only while this screen is up)
+    let lastLede = '';
+    const tick = () => {
+      if (this.screen !== 'controls' || this.binder) return;
+      this.ctlRaf = requestAnimationFrame(tick);
+      const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+      const wb = c.wheel;
+      const wheel = (wb ? findDev(pads, wb.steer.dev) : null) ?? pads.find((q) => q && q.connected && q.mapping !== 'standard' && isWheelId(q.id)) ?? null;
+      const pad = pads.find((q) => q && q.connected && q !== wheel && !isWheelId(q.id)) ?? null;
+      let sv = 0;
+      let tv = 0;
+      let bv = 0;
+      if (wheel) {
+        const sc = wb && wheel.id === wb.steer.dev ? wb.steer : { dev: wheel.id, axis: 0, center: 0, sign: -1 as const };
+        sv = wheelSteer(wheel.axes[sc.axis] ?? 0, sc, c);
+        const td = wb?.throttle ? findDev(pads, wb.throttle.dev) : null;
+        const bd = wb?.brake ? findDev(pads, wb.brake.dev) : null;
+        if (td && wb?.throttle) tv = pedal(td.axes[wb.throttle.axis] ?? wb.throttle.rest, wb.throttle, c.pedalDeadzone);
+        if (bd && wb?.brake) bv = pedal(bd.axes[wb.brake.axis] ?? wb.brake.rest, wb.brake, c.pedalDeadzone, c.brakeLinearity);
+      } else if (pad) {
+        sv = padSteer(pad.axes[0] ?? 0, c);
+        tv = pad.buttons[7]?.value ?? 0;
+        bv = Math.pow(pad.buttons[6]?.value ?? 0, c.brakeLinearity);
+      }
+      // (+ is left: the bar grows to the left of centre)
+      mSteer.style.cssText = sv >= 0 ? `right:50%;width:${(sv * 50).toFixed(1)}%` : `left:50%;width:${(-sv * 50).toFixed(1)}%`;
+      mThr.style.width = `${(tv * 100).toFixed(1)}%`;
+      mBrk.style.width = `${(bv * 100).toFixed(1)}%`;
+      const rumble = pad && (pad as unknown as { vibrationActuator?: unknown }).vibrationActuator ? ' · vibration' : '';
+      const parts: string[] = [];
+      if (wheel) parts.push(`Wheel: ${deviceName(wheel.id)}${wb ? '' : ' · not set up'}`);
+      if (pad) parts.push(`Pad: ${deviceName(pad.id)}${rumble}`);
+      // (browsers only reveal a controller once one of its buttons has been pressed)
+      const text = parts.length ? parts.join('  ·  ') : 'No pad or wheel found. Press a button on it to wake it up.';
+      if (text !== lastLede) {
+        lastLede = text;
+        lede.textContent = text;
+        if (!wb) wv.innerHTML = `${wheel ? 'Detected · set up' : 'Set up'}<span class="chev">›</span>`;
+      }
+    };
+    tick();
+  }
+
+  /** bind and calibrate a wheel and pedals: one prompt per step, the device's own movement completes it */
+  private startBind() {
+    this.endControls();
+    const binder = new Binder();
+    this.binder = binder;
+    const s = this.screens.get('controls')!;
+    s.innerHTML = '';
+    el('div', 'scrim', s);
+    const p = el('div', 'panel glass', s);
+    el('h2', '', p, 'Wheel and pedals');
+    const lede = el('p', 'lede', p, '');
+    const prompt = el('div', 'ctl-prompt', p);
+    const bar = el('div', 'ctl-meter', p);
+    el('span', 'k', bar, 'Input');
+    const fill = el('i', '', el('span', 'bar', bar));
+    const skip = el('div', 'opt', p);
+    el('span', 'k', skip, 'Skip this step');
+    el('span', 'v', skip, '<span class="dim">Enter</span>');
+    const cancel = el('div', 'opt', p);
+    el('span', 'k', cancel, 'Cancel');
+    el('span', 'v', cancel, '<span class="dim">Esc</span>');
+    this.items = [];
+    const render = () => {
+      const n = BIND_STEPS.indexOf(binder.step);
+      lede.textContent = `Step ${n + 1} of ${BIND_STEPS.length - 1}`;
+      prompt.innerHTML = BIND_PROMPT[binder.step];
+      skip.style.visibility = binder.step === 'steer' ? 'hidden' : '';
+    };
+    const finish = (keep: boolean) => {
+      const b = binder.binding();
+      this.endControls();
+      if (keep && b) {
+        const c = controlPrefs(this.settings.controls);
+        c.wheel = b;
+        this.settings.controls = c;
+        save('apexgp.settings', this.settings);
+        this.cb.onSettings({ ...this.settings });
+      }
+      this.cb.onUi(keep ? 'select' : 'back');
+      this.show('controls');
+    };
+    const doSkip = () => {
+      if (binder.skip()) {
+        this.cb.onUi('move');
+        if (binder.step === 'done') finish(true);
+        else render();
+      }
+    };
+    skip.addEventListener('click', doSkip);
+    cancel.addEventListener('click', () => finish(false));
+    this.bindKeys = (e: KeyboardEvent) => {
+      if (e.code === 'Enter') doSkip();
+      else if (e.code === 'Escape' || e.code === 'Backspace') finish(false);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    addEventListener('keydown', this.bindKeys, true);
+    render();
+    const tick = () => {
+      if (this.binder !== binder) return;
+      this.ctlRaf = requestAnimationFrame(tick);
+      const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+      if (binder.update(pads)) {
+        this.cb.onUi('select');
+        if (binder.step === 'done') return finish(true);
+        render();
+      }
+      fill.style.width = `${(binder.level * 100).toFixed(1)}%`;
+    };
+    tick();
+  }
+
+  /** stop the Controls screen's loop and any binding in progress */
+  private endControls() {
+    if (this.ctlRaf) cancelAnimationFrame(this.ctlRaf);
+    this.ctlRaf = 0;
+    this.binder = null;
+    if (this.bindKeys) removeEventListener('keydown', this.bindKeys, true);
+    this.bindKeys = null;
   }
 
   private buildAssists() {
@@ -1526,6 +1761,8 @@ export class Menu {
   /** keyboard/gamepad navigation */
   update(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }) {
     if (this.wizardOpen) return;
+    // binding a wheel: its own buttons and axes must not navigate (Enter / Esc are read directly)
+    if (this.binder) return;
     if (this.screen === 'none' || this.items.length === 0) {
       if (this.screen === 'none') return;
     }
@@ -1553,6 +1790,7 @@ export class Menu {
       else if (this.screen === 'settings') this.show(this.settingsReturn);
       else if (this.screen === 'assists') this.show(this.assistsReturn);
       else if (this.screen === 'camera') this.show('settings');
+      else if (this.screen === 'controls') this.show(this.controlsReturn);
       else if (this.screen === 'pause') this.cb.onResume();
     }
   }
