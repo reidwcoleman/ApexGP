@@ -4,6 +4,42 @@ import { type AudioBuffers, biquad, chain, clamp, forget, gainNode, loopSource, 
 /** level of the exhaust rasp (gated turbulence noise) — the main source of "buzz" */
 const RASP = 1.25;
 
+/**
+ * Gearbox whine geometry. Teeth on the input-shaft gear of each pair, 1st … 8th: a constant
+ * centre distance (54 teeth a pair) cut to the sim's ratios (17.2 … 5.02 overall over a ~4:1
+ * bevel), behind a primary drop from the crank. These are assumptions, sized so the whine sits
+ * where it does in onboard footage (≈1–4 kHz); what matters is that the mesh rate follows the
+ * revs and steps a few per cent at each shift, and the bevel's follows the road speed.
+ */
+const GEAR_TEETH = [10, 12, 14, 16, 18, 20, 22, 24];
+const PRIMARY_DROP = 1.4;
+const CROWN_TEETH = 37;
+const WHEEL_R = 0.36;
+
+/**
+ * The MGU-K whine's pitch per crank rpm (Hz/rpm): the machine's electrical order through its drive
+ * gear — ≈1–3 kHz over the rev range. (Higher, it would sit in the 2–6 kHz band the ear tires of.)
+ */
+const K_ORDER = 0.24;
+
+/**
+ * How hard the MGU-K is working, 0..1 (its whine follows the torque it carries either way).
+ * 2026 rules: 350 kW deploy, tapered off at speed — full to 290 km/h, then (1800 − 5·v) kW to
+ * 340 km/h and down to nothing at 345; the overtake (manual override) mode keeps the full power
+ * to ~337 km/h. It harvests up to the same 350 kW on the brakes (power = force × speed, so it
+ * fades at low speed) and gently on a lift-and-coast. The braking zone is where it is heard most:
+ * the engine is on the overrun and the K is turning the car's speed into charge.
+ */
+export function mguK(thr: number, brake: number, v: number, override: number): number {
+  const kmh = v * 3.6;
+  const taper = kmh <= 290 ? 1 : kmh < 340 ? (1800 - 5 * kmh) / 350 : kmh < 345 ? (6900 - 20 * kmh) / 350 : 0;
+  const taperO = kmh <= 337 ? 1 : clamp((7100 - 20 * kmh) / 350, 0, 1);
+  const deploy = smoothstep(0.25, 0.85, thr) * smoothstep(2, 20, v) * (taper + (taperO - taper) * override) * (0.55 + 0.25 * override);
+  const harvest = smoothstep(0.05, 0.6, brake) * smoothstep(6, 40, v);
+  const coast = 0.35 * (1 - smoothstep(0.02, 0.12, thr)) * (1 - smoothstep(0.02, 0.1, brake)) * smoothstep(15, 50, v);
+  return Math.max(deploy, harvest, coast);
+}
+
 /** AudioParams every engine voice exposes (worklet or native fallback). */
 export interface EngineParams {
   rpm: AudioParam;
@@ -170,6 +206,8 @@ export interface EngineMix {
   mech: number;
   whistle: number;
   gear: number;
+  /** MGU-K motor-generator whine */
+  ers: number;
 }
 
 export interface EngineDrive {
@@ -177,6 +215,9 @@ export interface EngineDrive {
   throttle: number;
   brake: number;
   speed: number;
+  /** engaged gear (≤ 0 = neutral: no gear pair meshing) */
+  gear?: number;
+  /** overtake (manual override) deployment 0..1 — the MGU-K's ordinary deploy/harvest follows throttle, brake and speed */
   ers: number;
   limiter: boolean;
   /** pit-lane speed limiter engaged */
@@ -214,8 +255,11 @@ export class PlayerEngine {
   private whooshBP: BiquadFilterNode;
   private whooshG: GainNode;
   private gearOsc: OscillatorNode;
+  private meshG: GainNode;
+  private fdOsc: OscillatorNode;
   private gearG: GainNode;
   private ersOsc: OscillatorNode;
+  private ersOsc2: OscillatorNode;
   private ersG: GainNode;
   private clackOut: GainNode;
   private bufs: AudioBuffers;
@@ -292,7 +336,8 @@ export class PlayerEngine {
     sp.connect(mechHP, 5);
     chain(mechHP, mechLP, this.mechG, near);
 
-    // --- turbo / MGU-H whistle + compressor whoosh
+    // --- turbo whistle + compressor whoosh (2026: no MGU-H on the shaft any more, so nothing holds
+    // it up off the throttle — it spools with exhaust energy alone; see GameAudio.update)
     this.w1 = new OscillatorNode(ctx, { type: 'sine', frequency: 3000 });
     this.w2 = new OscillatorNode(ctx, { type: 'sine', frequency: 4500 });
     const w2g = gainNode(ctx, 0.2);
@@ -312,19 +357,43 @@ export class PlayerEngine {
     this.w1.start();
     this.w2.start();
 
-    // --- gearbox whine (straight-cut gears, rises with road speed)
+    // --- gearbox whine: straight-cut gears. Two meshes sing: the engaged pair, at the input shaft's
+    // speed × its teeth (so it follows the revs and steps at every shift, as a racing sequential
+    // does onboard), and the bevel final drive under it, at the road speed × the crown wheel's teeth
     const gw = ctx.createPeriodicWave(new Float32Array([0, 0, 0, 0, 0]), new Float32Array([0, 1, 0.32, 0.12, 0.05]));
     this.gearOsc = new OscillatorNode(ctx, { frequency: 200 });
     this.gearOsc.setPeriodicWave(gw);
+    this.meshG = gainNode(ctx, 0);
+    this.fdOsc = new OscillatorNode(ctx, { frequency: 200 });
+    this.fdOsc.setPeriodicWave(gw);
+    const fdG = gainNode(ctx, 0.45);
     this.gearG = gainNode(ctx, 0);
-    chain(this.gearOsc, this.gearG, near);
+    chain(this.gearOsc, this.meshG, this.gearG);
+    chain(this.fdOsc, fdG, this.gearG);
+    this.gearG.connect(near);
     this.gearOsc.start();
+    this.fdOsc.start();
 
-    // --- MGU-K / ERS electric whine
-    this.ersOsc = new OscillatorNode(ctx, { type: 'triangle', frequency: 2000 });
+    // --- MGU-K: the 2026 motor-generator is a 350 kW machine (the 2014–25 one was 120 kW) carrying
+    // about half the car's power, geared to the crank — so its whine follows the revs. It sings
+    // whenever it carries torque either way: deploying on the throttle, harvesting on the brakes and
+    // the lift. A permanent-magnet machine's whine is its electrical order with a little of the next
+    // ones, and a fainter slot order a fifth above it; torque ripple wobbles it slightly.
+    const kw = ctx.createPeriodicWave(new Float32Array([0, 0, 0, 0]), new Float32Array([0, 1, 0.28, 0.1]));
+    this.ersOsc = new OscillatorNode(ctx, { frequency: 2000 });
+    this.ersOsc.setPeriodicWave(kw);
+    this.ersOsc2 = new OscillatorNode(ctx, { type: 'sine', frequency: 3000 });
+    const kWob = loopSource(ctx, bufs.wander, 1.7);
+    const kWobG = gainNode(ctx, 3);
+    kWob.connect(kWobG);
+    kWobG.connect(this.ersOsc.detune);
+    kWobG.connect(this.ersOsc2.detune);
     this.ersG = gainNode(ctx, 0);
-    chain(this.ersOsc, this.ersG, near);
+    this.ersOsc.connect(this.ersG);
+    this.ersOsc2.connect(gainNode(ctx, 0.22)).connect(this.ersG);
+    this.ersG.connect(near);
     this.ersOsc.start();
+    this.ersOsc2.start();
 
     this.clackOut = gainNode(ctx, 1);
     this.clackOut.connect(near);
@@ -400,15 +469,24 @@ export class PlayerEngine {
     setT(this.whooshBP.frequency, (1800 + 3000 * b) * d.dop, now, 0.05);
     setT(this.whooshG.gain, 0.05 * b * b * (0.3 + 0.7 * thr) * m.whistle, now, 0.05);
 
-    // gearbox whine ∝ road speed
+    // gearbox whine: the engaged pair's mesh follows the revs (a quick glide: the new pair is in
+    // within the shift), the final drive follows the road speed. Its level follows the torque
+    // through the teeth — the drive on the throttle, the engine braking on the overrun, where the
+    // load comes onto the coast flanks and the whine stands out of a quieter engine (as in ACC's
+    // onboard mix, where the gearbox is most audible off the throttle)
     const sp = Math.max(0, d.speed);
-    setT(this.gearOsc.frequency, Math.max(20, sp * 41) * d.dop, now, 0.03);
-    setT(this.gearG.gain, 0.022 * (0.35 + 0.65 * thr) * smoothstep(3, 30, sp) * m.gear, now, 0.05);
+    const g = Math.round(d.gear ?? 1);
+    const teeth = GEAR_TEETH[clamp(g, 1, GEAR_TEETH.length) - 1];
+    setT(this.gearOsc.frequency, Math.max(20, (d.rpm / 60 / PRIMARY_DROP) * teeth) * d.dop, now, 0.012);
+    setT(this.meshG.gain, g >= 1 ? 1 : 0, now, 0.02);
+    setT(this.fdOsc.frequency, Math.max(20, (sp / (2 * Math.PI * WHEEL_R)) * CROWN_TEETH) * d.dop, now, 0.03);
+    const coast = 0.2 + 0.4 * (1 - smoothstep(0.02, 0.12, thr)) * smoothstep(5500, 6500, d.rpm);
+    setT(this.gearG.gain, 0.022 * (0.3 + 0.7 * Math.max(thr, coast)) * smoothstep(3, 30, sp) * m.gear, now, 0.05);
 
-    // ERS: deploy whine + fainter harvest whine under braking
-    setT(this.ersOsc.frequency, Math.max(40, d.rpm * 0.29) * d.dop, now, 0.03);
-    const ersLvl = clamp(d.ers, 0, 1) * 0.006 + clamp(d.brake, 0, 1) * smoothstep(10, 40, sp) * 0.0035;
-    setT(this.ersG.gain, ersLvl * m.gear, now, 0.06);
+    // MGU-K: the whine's level is the torque it carries, deploying or harvesting
+    setT(this.ersOsc.frequency, Math.max(40, d.rpm * K_ORDER) * d.dop, now, 0.03);
+    setT(this.ersOsc2.frequency, Math.max(60, d.rpm * K_ORDER * 1.5) * d.dop, now, 0.03);
+    setT(this.ersG.gain, 0.022 * mguK(thr, clamp(d.brake, 0, 1), sp, clamp(d.ers, 0, 1)) * m.ers, now, 0.05);
   }
 
   /** Upshift: ~50 ms torque cut then re-bite with a small bang. Downshift: throttle blip + crackle. */
