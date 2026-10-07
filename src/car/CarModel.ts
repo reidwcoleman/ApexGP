@@ -52,7 +52,11 @@ export interface CarRig {
   /** the steering wheel's live screen and shift lights (the player's car in the onboard views) */
   setDash?(d: DashState): void;
   setDetail(level: 0 | 1 | 2): void;
-  setDriverVisible(v: boolean): void;
+  /**
+   * show / hide the driver (hidden for the cameras where his head is, and when he's out of the car).
+   * `hands`: keep his gloved hands on the wheel while he's hidden (the onboard cameras inside the cockpit)
+   */
+  setDriverVisible(v: boolean, hands?: boolean): void;
   /** the driver's head reacts: lateral and longitudinal G (m/s², + = left / accelerating), wheel angle (rad) */
   setG(lateral: number, longitudinal: number, steer: number): void;
   /**
@@ -121,7 +125,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.hands, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -317,7 +321,11 @@ function patchTrim(mat: THREE.MeshStandardMaterial, u: TrimUniforms) {
 export const DASH_GLOW = { value: 1.6 };
 
 // ------------------------------------------------------------------------------------ shared materials
-/** per-car carbon: a weave under a lacquer (wings, halo fairings, bodywork) that goes satin on the floor and plank area */
+/**
+ * per-car carbon: a weave under a lacquer (wings, halo fairings, bodywork) that goes satin on the floor
+ * and plank area. The tows' sheen is anisotropic (stretched across each tow, the warp and weft at right
+ * angles) under an isotropic clearcoat: the lacquer mirrors the sky, the weave below shimmers.
+ */
 function makeCarbon(grime: GrimeUniforms) {
   const c = carbonTextures();
   const mat = new THREE.MeshPhysicalMaterial({
@@ -332,6 +340,8 @@ function makeCarbon(grime: GrimeUniforms) {
     clearcoatRoughness: 0.1,
     specularIntensity: 0.55,
     envMapIntensity: 0.6,
+    anisotropy: 0.7,
+    anisotropyMap: c.aniso,
   });
   patchCarbon(mat, grime);
   return mat;
@@ -382,10 +392,20 @@ function patchCarbon(mat: THREE.MeshPhysicalMaterial, grime: GrimeUniforms) {
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.32, max( cFloor, clamp( cGr.x * 0.7 + cGr.z, 0.0, 1.0 ) ) );
           material.clearcoat = mix( material.clearcoat, 1.0, cWet );
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.03, cWet );
+        #endif
+        #if defined( USE_ANISOTROPY ) && defined( USE_ANISOTROPYMAP )
+        {
+          // the weave's stretched sheen only where the tows resolve: once a pixel spans a tow (12 to a
+          // uv unit) it sees warp and weft together — isotropic on average (the mip-blended directions
+          // would otherwise streak it diagonally); none inside an onboard lens's defocus or under grime
+          float aTow = length( fwidth( vAnisotropyMapUv ) ) * 12.0;
+          material.anisotropy *= ( 1.0 - smoothstep( 0.35, 1.0, aTow ) ) * ( 1.0 - cNear ) * ( 1.0 - cGrAll );
+          material.alphaT = mix( pow2( material.roughness ), 1.0, pow2( material.anisotropy ) );
+        }
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-carbon-v3';
+  mat.customProgramCacheKey = () => 'apex-carbon-v4';
 }
 
 /** loose pit-stop wheels share a material per compound and condition (new / used) */
@@ -577,6 +597,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const headPivots: THREE.Object3D[] = [];
   const partPivots: Record<PartId, THREE.Group[]> = { fwL: [], fwR: [], rw: [] };
   let steerSpin: THREE.Object3D | null = null;
+  let handsMesh: THREE.Mesh | null = null;
   for (let lv = 0; lv < 3; lv++) {
     const L = geo[lv];
     const g = new THREE.Group();
@@ -643,6 +664,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       pv.rotation.x = STEER_TILT;
       const spin = new THREE.Group();
       spin.add(mesh(L.steer, trim, false));
+      if (L.hands) {
+        handsMesh = mesh(L.hands, driverMat, false);
+        spin.add(handsMesh);
+      }
       pv.add(spin);
       g.add(pv);
       steerSpin = spin;
@@ -818,6 +843,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   let rainT = 0;
   let rainLevel = 0;
   let driverVisible = true;
+  let handsVisible = false;
   const head = { roll: 0, pitch: 0, yaw: 0 };
   const headT = { roll: 0, pitch: 0, yaw: 0 };
   const partState: Record<PartId, number> = { fwL: 0, fwR: 0, rw: 0 };
@@ -882,6 +908,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       if (d.head) d.head.visible = driverVisible;
       if (d.decals) d.decals.visible = !driverVisible;
     }
+    if (handsMesh) handsMesh.visible = driverVisible || handsVisible;
   };
   applyVisibility();
 
@@ -966,8 +993,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       detail = level;
       applyVisibility();
     },
-    setDriverVisible(v) {
+    setDriverVisible(v, hands = false) {
       driverVisible = v;
+      handsVisible = hands;
       applyVisibility();
     },
     setG(lateral, longitudinal, steer) {

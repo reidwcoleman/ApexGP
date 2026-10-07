@@ -2420,7 +2420,7 @@ export class Game {
     const want = (this.state === 'spectate' || this.state === 'replay') && INSIDE_CAR[this.cams.view] ?(this.rigs.get(this.race.cars[this.focusId].entry) ?? null) : null;
     if (want === this.povRig) return;
     this.povRig?.setDriverVisible(true);
-    want?.setDriverVisible(false);
+    want?.setDriverVisible(false, true);
     this.povRig = want;
   }
 
@@ -2681,7 +2681,7 @@ export class Game {
     const cockpit = (this.state === 'race' || this.state === 'intro') && onboardEye;
     if (cockpit !== this.driverHidden) {
       this.driverHidden = cockpit;
-      this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit);
+      this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit, cockpit);
     }
     const w = this.race.weatherState;
     // (and after dark: the red tail light is what you follow down a floodlit straight)

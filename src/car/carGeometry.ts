@@ -169,6 +169,8 @@ function cylinderX(mb: MB, c: V3, r: number, len: number, seg: number, uv: V2, o
   g.dispose();
 }
 
+/** how far a plate's rim normals lean toward its faces (tan of the lean; 0.8 ≈ 39°) */
+const BEVEL = 0.8;
 /** extruded flat plate: outline in (a,b) coordinates of plane (o, ea, eb), thickness along en */
 function plate(
   mb: MB,
@@ -213,10 +215,14 @@ function plate(
     }
     const uv = uvf((a0 + a1) / 2, (b0 + b1) / 2, 0);
     const c = cuv ? cuv(p0, nrm) : ([0, 0] as V2);
-    const i0 = mb.vert(p0, nrm, uv, c);
-    const i1 = mb.vert(p1, nrm, uv, c);
-    const i2 = mb.vert(p2, nrm, uv, c);
-    const i3 = mb.vert(p3, nrm, uv, c);
+    // the rim shades as a rounded edge: its normals lean toward each face, so a moulded part's
+    // edge catches a thin highlight instead of a machined 90° step (no extra triangles)
+    const nTop = norm3(add3(nrm, scl3(en, BEVEL)));
+    const nBot = norm3(add3(nrm, scl3(en, -BEVEL)));
+    const i0 = mb.vert(p0, nTop, uv, c);
+    const i1 = mb.vert(p1, nTop, uv, c);
+    const i2 = mb.vert(p2, nBot, uv, c);
+    const i3 = mb.vert(p3, nBot, uv, c);
     if (!flip) {
       mb.tri(i0, i3, i1);
       mb.tri(i1, i3, i2);
@@ -648,6 +654,9 @@ function floorAndDiffuser(b: Buckets, level: Level) {
       plate(b.carbon, fence, [0.6 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.2, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     }
   }
+  // floor stays: a slim rod each side from the floor's edge up into the sidepod's undercut, holding
+  // the edge down against the suction (the thin diagonal line under every car's flank)
+  if (level < 2) for (const side of [1, -1]) tube(b.trim, [[0.665 * side, 0.052, -0.12], [0.56 * side, 0.12, -0.1], [0.452 * side, 0.205, -0.08]], 0.0055, 6, trimUV(TC.blackSatin), [0, 0, 1]);
   // plank + skid blocks
   box(b.trim, [0, 0.0265, -0.15], [0.3, 0.013, 2.1], trimUV(TC.plank));
   if (level < 2) for (const z of [0.55, -0.15, -0.85]) box(b.trim, [0, 0.0195, z], [0.09, 0.002, 0.14], trimUV(TC.skid));
@@ -749,7 +758,8 @@ function halo(b: Buckets, level: Level) {
   const pst: SweepSt[] = pil.map((p, i) => {
     const t = norm3(sub3(pil[Math.min(pil.length - 1, i + 1)], pil[Math.max(0, i - 1)]));
     const d = norm3(cross3([1, 0, 0], t));
-    return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.016 };
+    // (a slim blade edge-on to the driver: ~26 mm across, as it splits the onboard picture)
+    return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.013 };
   });
   sweep(b.carbon, pst, aeroSection([10, 8, 5][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
 }
@@ -818,6 +828,8 @@ function airboxAndFin(b: Buckets, level: Level) {
     const tc: V3 = [0, 0.972, -0.255];
     ellipsoid(b.trim, tc, [0.105, 0.02, 0.04], 14, 8, trimUV(TC.tcam));
     box(b.trim, [0, 0.955, -0.26], [0.02, 0.03, 0.05], trimUV(TC.tcam));
+    // its lens windows, forward and back
+    if (level === 0) for (const x of [0.05, -0.05]) for (const z of [-0.2205, -0.2895]) ellipsoid(b.trim, [x, 0.974, z], [0.0095, 0.0085, 0.004], 10, 6, trimUV(TC.blackGloss));
   } else {
     box(b.trim, [0, 0.968, -0.255], [0.2, 0.03, 0.07], trimUV(TC.tcam));
   }
@@ -860,6 +872,10 @@ function noseDetails(b: Buckets, level: Level) {
   tube(b.trim, [[0, 0.19, 2.85], [0, 0.192, 2.97]], 0.0045, 6, trimUV(TC.titanium), [0, 1, 0]);
   // nose cameras
   for (const side of [1, -1]) ellipsoid(b.trim, [0.125 * side, 0.36, 2.28], [0.018, 0.018, 0.05], 10, 6, trimUV(TC.blackGloss));
+  // telemetry antenna on the chassis top ahead of the cockpit, off the centreline (it pokes up
+  // beside the halo's pillar in the onboard), on a small carbon base
+  box(b.carbon, [0.06, 0.631, 1.18], [0.022, 0.01, 0.034], [0.06 / CARBON_TILE, 1.18 / CARBON_TILE]);
+  tube(b.trim, [[0.06, 0.632, 1.182], [0.06, 0.668, 1.177], [0.06, 0.7, 1.17]], (i) => 0.0034 - i * 0.0008, 6, trimUV(TC.blackSatin), [0, 0, 1]);
 }
 
 function exhaustAndLight(b: Buckets, level: Level) {
@@ -930,12 +946,43 @@ function driver(b: Buckets, level: Level) {
       rows.push(row);
     }
     b.head.grid(rows, () => drvCellUV(DC.visor), { orient: true });
-    // HANS collar + shoulders + arms + gloves
+    // the helmet's own aero: a rear spoiler across the crown and a strip of tear-offs' tab at the
+    // visor's edge (the helmet's paint, read off its unwrap at the same spot)
+    const hp = (lon: number, lat: number, k = 1): V3 => [
+      HELMET_C[0] - NECK_PIVOT[0] + Math.sin(lon) * Math.cos(lat) * HELMET_R[0] * k,
+      HELMET_C[1] - NECK_PIVOT[1] + Math.sin(lat) * HELMET_R[1] * k,
+      HELMET_C[2] - NECK_PIVOT[2] + Math.cos(lon) * Math.cos(lat) * HELMET_R[2] * k,
+    ];
+    const sp = [-0.55, -0.3, 0, 0.3, 0.55].map((d) => {
+      // (along the crown at ~50° up behind the head; it kicks up off the shell toward its trailing edge)
+      const lat = 0.86 - 0.12 * d * d;
+      const p = hp(Math.PI + d * 1.5, lat, 0.985);
+      return { x: p[0], z: p[2] + 0.012, y: p[1] + 0.006, c: 0.052, a: -18 - 6 * d * d, t: 0.16, cam: 0.02 };
+    });
+    wingElement(b.head, sp, level === 0 ? 8 : 5, () => drvUV(R_HELMET, 0.01, 0.86));
+    // the chin bar under the visor, standing forward of the shell (a ball reads as a toy's head),
+    // painted from the helmet's unwrap where it sits (the shell's sphere uv, seam at the back)
+    const H: V3 = sub3(HELMET_C, NECK_PIVOT);
+    const shellUV = (p: V3): V2 => {
+      const d = norm3([(p[0] - H[0]) / HELMET_R[0], (p[1] - H[1]) / HELMET_R[1], (p[2] - H[2]) / HELMET_R[2]]);
+      const theta = Math.acos(Math.max(-1, Math.min(1, d[1])));
+      let phi = Math.atan2(d[0], d[2]) + Math.PI;
+      if (phi >= Math.PI * 2) phi -= Math.PI * 2;
+      // (the sphere was turned −90° about y: its native u runs from the back, front = 0.5, +x = 0.75)
+      return drvUV(R_HELMET, phi / (Math.PI * 2), Math.max(0.01, 1 - theta / (Math.PI * 0.8)));
+    };
+    ellipsoid(b.head, add3(H, [0, -0.058, 0.04]), [0.1, 0.07, 0.115], ws, Math.max(6, hs >> 1), (p) => shellUV(p));
+    if (level === 0)
+      for (const side of [1, -1]) {
+        const q = hp(1.02 * side, 0.12, 1.016);
+        box(b.head, q, [0.008, 0.026, 0.012], drvCellUV(DC.hans), new THREE.Euler(0, 1.02 * side, 0));
+      }
+    // HANS collar + shoulders + arms (+ gloves: at the nearest level they ride the steering wheel, see hands)
     ellipsoid(b.driver, [0, 0.64, 0.01], [0.15, 0.04, 0.12], 12, 6, drvCellUV(DC.hans));
     for (const side of [1, -1]) {
       ellipsoid(b.driver, [0.165 * side, 0.595, 0.0], [0.1, 0.065, 0.13], 12, 8, drvCellUV(DC.suit));
       tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.57, 0.28], [0.14 * side, 0.595, 0.47]], 0.042, 8, drvCellUV(DC.suit2), [0, 1, 0]);
-      ellipsoid(b.driver, [0.13 * side, 0.6, 0.49], [0.03, 0.04, 0.035], 8, 6, drvCellUV(DC.glove));
+      if (level > 0) ellipsoid(b.driver, [0.13 * side, 0.6, 0.49], [0.03, 0.04, 0.035], 8, 6, drvCellUV(DC.glove));
     }
   }
 }
@@ -1050,6 +1097,30 @@ function steeringWheel(mb: MB) {
   g.translate(0, 0, 0.035);
   mb.addGeometry(g, undefined, trimUV(TC.blackSatin));
   g.dispose();
+}
+
+/**
+ * The driver's hands on the wheel (pivot-local like the wheel, so they turn with it): a gloved fist
+ * round each grip, fingers over the front, the thumb on the face beside the rotaries, the cuff and
+ * the first of the forearm toward the elbow. Driver material; drawn with the driver, and on its own
+ * for the onboard cameras inside the cockpit (the driver's hands are in every onboard picture).
+ */
+function hands(mb: MB) {
+  const glove = drvCellUV(DC.glove);
+  const sleeve = drvCellUV(DC.suit2);
+  for (const side of [1, -1]) {
+    const X = (x: number) => x * side;
+    // fist round the grip (its axis near vertical in the wheel's plane), knuckles over the front
+    ellipsoid(mb, [X(0.142), 0.004, 0.012], [0.031, 0.05, 0.035], 14, 10, glove, new THREE.Euler(0, 0, -0.08 * side));
+    ellipsoid(mb, [X(0.133), 0.0, 0.036], [0.03, 0.044, 0.016], 12, 8, glove, new THREE.Euler(0, 0, -0.08 * side));
+    // thumb along the face toward the buttons
+    ellipsoid(mb, [X(0.111), 0.024, -0.022], [0.024, 0.0105, 0.011], 10, 6, glove, new THREE.Euler(0, 0, 0.4 * side));
+    // wrist, cuff and forearm heading back to the elbow (the arm's own tube meets it there)
+    const wrist: V3 = [X(0.148), -0.004, -0.03];
+    const elbow: V3 = [X(0.2), 0.058, -0.215];
+    tube(mb, [wrist, lerp3(wrist, elbow, 0.12)], 0.03, 12, glove, [0, 1, 0]);
+    tube(mb, [lerp3(wrist, elbow, 0.1), lerp3(wrist, elbow, 0.62)], (i) => (i === 0 ? 0.034 : 0.041), 12, sleeve, [0, 1, 0]);
+  }
 }
 
 // ------------------------------------------------------------------------------------ decals (driver material)
@@ -1457,6 +1528,19 @@ function cornerAssembly(mb: MB, w: number, front: boolean, level: Level) {
         sc.push(ellipse(10).map(([a, bb]) => [-h + 0.02 + a * 0.035 * s, -0.08 + bb * 0.06 * s, z] as V3));
       mb.grid(sc, () => trimUV(TC.ductBlack), { wrapCols: true, orient: true });
       mb.cap(sc[0], [0, 0, 1], trimUV(TC.inletDark));
+    } else {
+      // the rear duct's inlet: a tall scoop inboard of the wheel, ahead of the axle, mouth to the
+      // airflow, its throat turning into the drum
+      const sc: V3[][] = [];
+      for (const [z, s, dx] of [
+        [0.32, 1.0, 0],
+        [0.23, 0.92, 0.004],
+        [0.12, 0.7, 0.02],
+      ] as V3[])
+        sc.push(roundedRect(12, 0.5).map(([a, bb]) => [-h - 0.034 + dx + a * 0.026 * s, 0.07 + bb * 0.075 * s, z] as V3));
+      mb.grid(sc, () => trimUV(TC.ductBlack), { wrapCols: true, orient: true });
+      mb.cap(sc[0], [0, 0, 1], trimUV(TC.inletDark));
+      mb.cap(sc[2], [0, 0, -1], trimUV(TC.ductBlack));
     }
   }
 }
@@ -1482,6 +1566,8 @@ export interface CarGeoLevel {
   /** the front wing's active flaps, left and right, pivot-local (FW_FLAP_PIVOT) */
   fwFlaps: [THREE.BufferGeometry, THREE.BufferGeometry];
   steer: THREE.BufferGeometry | null;
+  /** the driver's gloved hands on the wheel, steering-pivot local (driver material; nearest level only) */
+  hands: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
   frontAssy: THREE.BufferGeometry | null;
   blurFront: THREE.BufferGeometry | null;
@@ -1517,9 +1603,12 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   frontFlap(fwFlapR, level, -1);
 
   let steer: MB | null = null;
+  let handsMB: MB | null = null;
   if (level === 0) {
     steer = new MB();
     steeringWheel(steer);
+    handsMB = new MB();
+    hands(handsMB);
   }
 
   const uc = new MB();
@@ -1616,6 +1705,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
       return am.build();
     })() : null,
     steer: steer ? steer.build() : null,
+    hands: handsMB ? handsMB.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
     frontAssy: frontAssy ? frontAssy.build() : null,
     blurFront: blurFront ? blurFront.build() : null,
@@ -1629,7 +1719,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
     PART_IDS.reduce((n, k) => n + tri(out.parts[k].paint) + tri(out.parts[k].carbon) + tri(out.parts[k].trim), 0) +
-    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) +
+    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) + tri(out.hands) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;
 }
