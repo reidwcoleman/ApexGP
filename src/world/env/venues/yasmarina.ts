@@ -4,6 +4,7 @@ import type { WorldMap, V2 } from '../worldmap.ts';
 import type { GrandstandSpec, Landmark, Layout, ScreenSpec, SpectatorBank, StandStyle } from '../layout.ts';
 import { addCameraTowers, addHospitality } from '../layout.ts';
 import { MARINA, YAS_SITES, YAS_WATER_Y, yasGeo } from './yasmarinaLand.ts';
+import { reserveVenueAds } from './venueAdPlans.ts';
 
 /**
  * Yas Marina's layout: where the stands, the paths and the pads for the landmarks go.
@@ -14,6 +15,7 @@ import { MARINA, YAS_SITES, YAS_WATER_Y, yasGeo } from './yasmarinaLand.ts';
  *   South Grandstand  the braking zone of the T11 chicane
  *   Marina Grandstand the T14–T15 run, its back to the harbour
  *   Turn 20           a smaller stand on the run from under the hotel to the last corners
+ * All but the Turn 20 stand sit under white sail canopies (yasmarinaScenery.ts `buildSails`).
  * The marina basin is cut out of the land with a sharp-edged pad (vertical quays); the hotel's
  * two wings, Ferrari World and the marina promenades get flat pads and keep the palms out.
  */
@@ -78,14 +80,16 @@ export function planYasmarina(track: Track, map: WorldMap, addStand: AddStand, g
   const t20 = corner('Turn 20');
 
   // ---------------------------------------------------------------- grandstands
-  addStand('Main Grandstand West', 225, 330, L, 26, 'covered', 7, 60);
-  addStand('Main Grandstand', 338, 580, L, 30, 'centrale', 7, 81);
-  addStand('Main Grandstand East', 588, t1.sStart - 8, L, 24, 'covered', 7, 50);
-  addStand('North Grandstand', t5.sStart - 170, t5.sStart - 10, R, 22, 'covered', 7, 55);
-  addStand('North Grandstand Hairpin', t7.sStart - 110, t7.sStart - 8, R, 18, 'covered', 7, 50);
-  addStand('West Grandstand', t8.sStart - 210, t8.sStart - 12, R, 24, 'covered', 7, 66);
-  addStand('South Grandstand', t11.sStart - 190, t11.sStart - 14, R, 22, 'covered', 7, 60);
-  addStand('Marina Grandstand', t14.sEnd + 40, t14.sEnd + 225, R, 16, 'covered', 7, 62);
+  // (the permanent stands are open terraces here: their white sail roofs on raked masts are built
+  // by yasmarinaScenery.ts, as the real ones are fabric canopies, not sheet roofs on trusses)
+  addStand('Main Grandstand West', 225, 330, L, 26, 'open', 7, 60);
+  addStand('Main Grandstand', 338, 580, L, 30, 'open', 7, 81);
+  addStand('Main Grandstand East', 588, t1.sStart - 8, L, 24, 'open', 7, 50);
+  addStand('North Grandstand', t5.sStart - 170, t5.sStart - 10, R, 22, 'open', 7, 55);
+  addStand('North Grandstand Hairpin', t7.sStart - 110, t7.sStart - 8, R, 18, 'open', 7, 50);
+  addStand('West Grandstand', t8.sStart - 210, t8.sStart - 12, R, 24, 'open', 7, 66);
+  addStand('South Grandstand', t11.sStart - 190, t11.sStart - 14, R, 22, 'open', 7, 60);
+  addStand('Marina Grandstand', t14.sEnd + 40, t14.sEnd + 225, R, 16, 'open', 7, 62);
   addStand('Turn 20', t20.sStart - 170, t20.sStart - 20, L, 14, 'open', 7, 50);
 
   // ---------------------------------------------------------------- general admission (landscaped mounds)
@@ -217,6 +221,9 @@ export function planYasmarina(track: Track, map: WorldMap, addStand: AddStand, g
       flagpoles.push({ x: g.center.x + along.x * tt * g.length - g.facing.x * (g.depth / 2 + 1.5), z: g.center.z + along.z * tt * g.length - g.facing.z * (g.depth / 2 + 1.5) });
     }
   }
+
+  // the race weekend's own hoardings and LED boards (venueAdPlans.ts): keep the palms off them
+  reserveVenueAds(track, map);
 
   // ---------------------------------------------------------------- hospitality & TV towers
   const landmarks: Landmark[] = [];

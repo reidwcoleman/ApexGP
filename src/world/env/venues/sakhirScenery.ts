@@ -10,6 +10,7 @@ import type { TerrainBuild } from '../terrain.ts';
 import type { SakhirLayout, SakhirSites } from './sakhir.ts';
 import { sakhirKnoll } from './sakhirLand.ts';
 import { frondCrown, frondTexture } from './interlagosCity.ts';
+import { buildVenueAds } from './venueAdPlans.ts';
 
 /**
  * The Bahrain International Circuit's buildings and desert, merged into a handful of meshes:
@@ -443,6 +444,7 @@ export function buildSakhirScenery(layout: Layout, track: Track, map: WorldMap, 
   if (flagMB.vertexCount) group.add(flagMesh(flagMB));
   group.add(buildPalms(map, sites, track));
   group.add(buildRocks(map));
+  group.add(buildVenueAds(track, map, layout.grandstands));
   return { group };
 }
 

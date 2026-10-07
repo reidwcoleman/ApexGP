@@ -5,6 +5,7 @@ import type { Layout } from '../layout.ts';
 import { buildWaters, seaPolygon, type Water } from '../water.ts';
 import { hash2i, rng } from '../noise.ts';
 import { Merge, cityMaterial } from './montrealCity.ts';
+import { buildVenueAds } from './venueAdPlans.ts';
 import { ISLAND, LAKE_CHAIN, MEL_LAKE_Y, MEL_SEA_Y, MEL_SITES, QUEENS, lakeContour, lakeDistance, melbourneGeo, seaDistance } from './melbourneLand.ts';
 
 /**
@@ -393,7 +394,6 @@ function buildCity(map: WorldMap, M: Merge) {
 // ---------------------------------------------------------------- build
 
 export function buildMelbourneScenery(layout: Layout, track: Track, map: WorldMap): { group: THREE.Group; tris: number; update(elapsed: number): void } {
-  void layout;
   const group = new THREE.Group();
   group.name = 'MelbourneScenery';
   const r = rng(6161);
@@ -527,6 +527,7 @@ export function buildMelbourneScenery(layout: Layout, track: Track, map: WorldMa
   solidMesh.receiveShadow = true;
   group.add(solidMesh);
   group.add(buildPalms(map, track));
+  group.add(buildVenueAds(track, map, layout.grandstands));
   for (const o of group.children) {
     o.matrixAutoUpdate = false;
     o.updateMatrix();

@@ -73,10 +73,11 @@ export const SAKHIR: CircuitDef = {
       { from: 1130, to: 1260, fence: 2 },
       { from: 3200, to: 3850, side: 1, fence: 2 },
     ],
+    // (the real lap is lined with ~500 light poles on both sides: a pole every ~50 m a side)
     lights: [
-      { from: 60, to: 1120, side: -1, spacing: 60 },
-      { from: 1240, to: 5330, side: -1, spacing: 85 },
-      { from: 1240, to: 5330, side: 1, spacing: 85 },
+      { from: 60, to: 1120, side: -1, spacing: 50 },
+      { from: 1240, to: 5330, side: -1, spacing: 55 },
+      { from: 1240, to: 5330, side: 1, spacing: 55 },
     ],
   },
   startOffset: 830,
