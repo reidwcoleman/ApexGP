@@ -16,6 +16,14 @@
   --ink3: rgba(255, 255, 255, 0.4);
   --ink-dark: #0a0c11;
 
+  /* the driving HUD (ACC's panels): a flat charcoal tint, not frosted glass; a lighter header
+     strip; square corners; amber for an aid at work (TC / ABS) and the rev bar's shift zone */
+  --hud-bg: rgba(14, 15, 19, 0.8);
+  --hud-head: rgba(255, 255, 255, 0.06);
+  --hud-edge: rgba(255, 255, 255, 0.06);
+  --hud-r: 2px;
+  --hud-amber: #ffb020;
+
   /* the one accent */
   --accent: #ff2b3f;
   --accent-wash: rgba(255, 43, 63, 0.16);

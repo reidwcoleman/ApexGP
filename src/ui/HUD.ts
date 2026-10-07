@@ -1,4 +1,4 @@
-import type { Race, RaceEvent, Competitor } from '../race/Race.ts';
+import { FUEL_PER_LAP, type Race, type RaceEvent, type Competitor } from '../race/Race.ts';
 import type { Track } from '../world/Track.ts';
 import { uiColor } from '../race/Teams.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
@@ -66,9 +66,35 @@ function flashPos(row: Row, gained: boolean) {
 }
 
 /**
- * Broadcast-style race HUD. DOM is built once; updates only touch text and
- * transforms that changed. The tower re-orders by translating rows, so
- * position changes animate like the TV graphics.
+ * Pirelli sets a minimum starting pressure per axle, fronts a couple of psi above the rears, in the
+ * blankets (the tyres leave them at 80 °C, CarPhysics). The physics carries no pressure, so the tyre
+ * widget derives each tyre's hot pressure from its simulated temperature by the gas law at constant
+ * volume (absolute pressure ∝ absolute temperature): +10 °C ≈ +1.1 psi, as the engineers' rule of thumb.
+ */
+const PSI_SET = [24.0, 24.0, 21.5, 21.5];
+const PSI_BLANKET_C = 80;
+const ATM_PSI = 14.7;
+const tyrePsi = (i: number, T: number) => (PSI_SET[i] + ATM_PSI) * ((T + 273.15) / (PSI_BLANKET_C + 273.15)) - ATM_PSI;
+/** the delta bar's full scale either side of zero (s): ACC's bar fills at ±2 s on a GT lap; an F1 lap is won by tenths */
+const DELTA_SCALE = 1.0;
+const TC_LABEL = { off: 'OFF', medium: 'MED', full: 'FULL' } as const;
+
+interface TyreCell {
+  block: HTMLElement;
+  fill: HTMLElement;
+  temp: HTMLElement;
+  psi: HTMLElement;
+  wear: HTMLElement;
+}
+
+/**
+ * The driving HUD, laid out like ACC's: small, flat, square-cornered panels at the edges — the
+ * standings top left, the delta bar to your best lap top centre, the timing panel (position, lap,
+ * sectors, the cars either side, weather) top right, the track map bottom left and the car's dash
+ * bottom right (rev bar, gear, speed, pedals, brake bias / TC / ABS, ERS battery and mode, fuel),
+ * with the tyre widget beside it (temperature, pressure, wear per corner). DOM is built once;
+ * updates only touch text and transforms that changed. The tower re-orders by translating rows,
+ * so position changes animate like the TV graphics.
  */
 export class HUD {
   readonly root: HTMLDivElement;
@@ -79,18 +105,40 @@ export class HUD {
   private pbig: HTMLDivElement;
   private lapEl: HTMLDivElement;
   private curEl: HTMLDivElement;
+  /** sector cells and their times: this lap's as they close, the last lap's (dimmed) ahead of the car */
   private sectorEls: HTMLElement[] = [];
+  private sectorTimeEls: HTMLElement[] = [];
+  private secTime = [NaN, NaN, NaN];
+  private secColor = ['', '', ''];
   private lastEl: HTMLSpanElement;
   private bestEl: HTMLSpanElement;
-  private leds: HTMLElement[] = [];
-  private ledWrap: HTMLDivElement;
+  private rpmEl: HTMLElement;
+  private rpmWrap: HTMLDivElement;
+  private rpmTxt: HTMLElement;
   private speedEl: HTMLSpanElement;
   private gearEl: HTMLDivElement;
   private thrEl: HTMLElement;
   private brkEl: HTMLElement;
+  private bbEl: HTMLElement;
+  private tcEl: HTMLElement;
+  private absEl: HTMLElement;
   private ersEl: HTMLElement;
   private ersWrap: HTMLDivElement;
+  private ersPct: HTMLElement;
+  private ersMode: HTMLElement;
   private drsEl: HTMLDivElement;
+  private fuelEl: HTMLElement;
+  private fuelLapEl: HTMLElement;
+  private fuelRangeEl: HTMLElement;
+  /** fuel used per lap, measured line to line (kg; NaN until a lap has been timed) */
+  private fuelPerLap = NaN;
+  private fuelAtLine = NaN;
+  private fuelLaps = -2;
+  private deltaWrap: HTMLDivElement;
+  private deltaL: HTMLElement;
+  private deltaR: HTMLElement;
+  private estEl: HTMLElement;
+  private relEl: HTMLDivElement;
   private aheadEl: HTMLDivElement;
   private behindEl: HTMLDivElement;
   private banner: HTMLDivElement;
@@ -105,9 +153,9 @@ export class HUD {
   private wxInfo!: HTMLElement;
   private wxKind = '';
   private pitEl!: HTMLSpanElement;
-  private tyreEls: SVGRectElement[] = [];
-  private wingEl!: SVGRectElement;
-  private wearEl!: HTMLDivElement;
+  private tyres: TyreCell[] = [];
+  private cmpEl!: HTMLElement;
+  private wingEl!: HTMLElement;
   private camLabelTimer = 0;
   private deltaEl: HTMLDivElement;
   private radioEl: HTMLDivElement;
@@ -128,53 +176,89 @@ export class HUD {
     this.towerHead = el('div', 'tower-head', this.tower, 'Lap <b>1/5</b>');
     el('div', 'tower-rows', this.tower);
 
-    // timing
+    // delta bar (top centre), as ACC's: the live gap to your best lap on a bar that fills from
+    // the middle — left and green when you're up on it, right and red when you're down (a number
+    // line) — with the lap it projects to underneath
+    this.deltaWrap = el('div', 'deltabar glass', this.root);
+    this.deltaEl = el('div', 'dnum', this.deltaWrap, '−.---');
+    const dtrack = el('div', 'dtrack', this.deltaWrap);
+    this.deltaL = el('i', 'dl', dtrack);
+    this.deltaR = el('i', 'dr', dtrack);
+    const dfoot = el('div', 'dfoot', this.deltaWrap);
+    el('span', 'k', dfoot, 'Est. lap');
+    this.estEl = el('span', '', dfoot, '—');
+
+    // timing (top right): position, lap, the lap clock, sector splits, last / best, the cars either side, weather
     const timing = el('div', 'timing glass', this.root);
     const posline = el('div', 'posline', timing);
     this.pbig = el('div', 'pbig', posline, 'P1');
     this.lapEl = el('div', 'lap', posline, 'Lap <b>1</b>');
-    const curRow = el('div', 'currow', timing);
-    this.curEl = el('div', 'cur', curRow, '0:00.000');
-    this.deltaEl = el('div', 'delta', curRow, '');
+    const curRow = el('div', 'tline cur', timing);
+    el('span', 'k', curRow, 'Current');
+    this.curEl = el('div', 'curt', curRow, '0:00.000');
     const sec = el('div', 'sectors', timing);
-    for (let i = 0; i < 3; i++) this.sectorEls.push(el('i', '', sec));
+    for (let i = 0; i < 3; i++) {
+      const c = el('div', 'sc', sec);
+      el('span', 'k', c, `S${i + 1}`);
+      this.sectorTimeEls.push(el('span', 'st', c, '—'));
+      this.sectorEls.push(c);
+    }
     const l1 = el('div', 'tline', timing);
-    el('span', '', l1, 'Last');
+    el('span', 'k', l1, 'Last');
     this.lastEl = el('span', '', l1, '—');
     const l2 = el('div', 'tline', timing);
-    el('span', '', l2, 'Best');
+    el('span', 'k', l2, 'Best');
     this.bestEl = el('span', '', l2, '—');
+    // the cars either side of you on the road (ACC's relative, trimmed to the two that matter)
+    this.relEl = el('div', 'rel', timing);
+    this.aheadEl = el('div', 'relrow', this.relEl);
+    this.behindEl = el('div', 'relrow', this.relEl);
     // weather: now, track temperature, and a heads-up when it's about to change
     const wx = el('div', 'wx', timing);
     this.wxIcon = el('span', 'wxi', wx);
     this.wxLabel = el('span', 'wxl', wx, '');
     this.wxInfo = el('span', 'wxr', wx, '');
 
-    // cluster
+    // the dash (bottom right): rev bar, pedals, gear, speed, electronics, ERS, fuel
     const cl = el('div', 'cluster glass', this.root);
-    this.ledWrap = el('div', 'leds', cl);
-    for (let i = 0; i < 15; i++) this.leds.push(el('i', i < 5 ? 'g' : i < 10 ? 'r' : 'b', this.ledWrap));
-    const sr = el('div', 'speedrow', cl);
-    const sp = el('div', 'speed', sr);
-    this.speedEl = el('span', '', sp, '0');
-    el('small', '', sp, 'KM/H');
-    this.gearEl = el('div', 'gear', sr, 'N');
-    const bars = el('div', 'bars', cl);
-    const ped = el('div', 'pedals', bars);
+    this.rpmWrap = el('div', 'rpm', cl);
+    this.rpmEl = el('b', '', this.rpmWrap);
+    const dm = el('div', 'dmain', cl);
+    const ped = el('div', 'pedals', dm);
     const thr = el('div', 'meter thr', ped);
     this.thrEl = el('b', '', thr);
     const brk = el('div', 'meter brk', ped);
     this.brkEl = el('b', '', brk);
-    this.pitEl = el('span', 'lbl pitlbl', bars, '');
-    el('span', 'lbl erslbl', bars, 'ERS');
-    this.ersWrap = el('div', 'meter ers', bars);
+    this.gearEl = el('div', 'gear', dm, 'N');
+    const sp = el('div', 'speed', dm);
+    const spv = el('div', 'spv', sp);
+    this.speedEl = el('span', '', spv, '0');
+    el('small', '', spv, 'km/h');
+    this.rpmTxt = el('div', 'rpmtxt', sp, '');
+    const elec = el('div', 'elec', dm);
+    const eRow = (k: string) => {
+      const r = el('div', 'er', elec);
+      el('span', 'k', r, k);
+      return el('b', '', r, '');
+    };
+    this.bbEl = eRow('BB');
+    this.tcEl = eRow('TC');
+    this.absEl = eRow('ABS');
+    // ERS: the battery's state of charge (2026: 350 kW MGU-K, no MGU-H), harvest / overtake light, DRS
+    const ers = el('div', 'drow', cl);
+    el('span', 'k', ers, 'ERS');
+    this.ersWrap = el('div', 'meter ers', ers);
     this.ersEl = el('b', '', this.ersWrap);
-    this.drsEl = el('div', 'drs', bars, 'DRS');
-
-    // ahead / behind
-    const gaps = el('div', 'gaps', this.root);
-    this.aheadEl = el('div', 'glass', gaps);
-    this.behindEl = el('div', 'glass', gaps);
+    this.ersPct = el('span', 'v', ers, '');
+    this.ersMode = el('span', 'chip', ers, '');
+    this.drsEl = el('div', 'drs', ers, 'DRS');
+    // fuel: on board, used per lap (measured line to line), and the laps it covers beyond the laps to go
+    const fu = el('div', 'drow fuel', cl);
+    el('span', 'k', fu, 'Fuel');
+    this.fuelEl = el('span', 'v', fu, '');
+    this.fuelLapEl = el('span', 'v2', fu, '');
+    this.fuelRangeEl = el('span', 'v3', fu, '');
+    this.pitEl = el('span', 'chip pitlbl', fu, '');
 
     // banner, lights, hints
     this.banner = el('div', 'banner glass', this.root);
@@ -189,20 +273,23 @@ export class HUD {
     this.hint = el('div', 'hint glass', this.root);
     this.camLabel = el('div', 'camlabel glass', this.root);
     this.radioEl = el('div', 'radio glass', this.root);
-    // car status: tyre wear and front-wing damage, like the F1 game's car diagram
+    // tyres, as ACC's widget: per corner the temperature (colour and °C), the pressure (psi) and the
+    // life left (the block empties as it wears); the compound and the front wing along the top
     this.statusEl = el('div', 'carstatus glass', this.root);
-    this.statusEl.innerHTML = `<svg viewBox="0 0 56 96" aria-hidden="true">
-      <rect class="fw" x="6" y="3" width="44" height="6" rx="2"/>
-      <path class="body" d="M24 10h8l3 22 5 8v30l-4 12h-16l-4-12V40l5-8z"/>
-      <rect class="ty" data-i="0" x="3" y="14" width="11" height="18" rx="3"/>
-      <rect class="ty" data-i="1" x="42" y="14" width="11" height="18" rx="3"/>
-      <rect class="ty" data-i="2" x="1" y="60" width="13" height="22" rx="3"/>
-      <rect class="ty" data-i="3" x="42" y="60" width="13" height="22" rx="3"/>
-      <rect class="rw" x="12" y="88" width="32" height="5" rx="2"/>
-    </svg><div class="wear">100%</div>`;
-    this.tyreEls = Array.from(this.statusEl.querySelectorAll('.ty')) as SVGRectElement[];
-    this.wingEl = this.statusEl.querySelector('.fw') as SVGRectElement;
-    this.wearEl = this.statusEl.querySelector('.wear') as HTMLDivElement;
+    const th = el('div', 'tyhead', this.statusEl);
+    this.cmpEl = el('span', 'cmp', th, '');
+    this.wingEl = el('span', 'wing', th, '');
+    const grid = el('div', 'tygrid', this.statusEl);
+    for (let i = 0; i < 4; i++) {
+      const c = el('div', 'tyc' + (i % 2 ? ' r' : ' l'), grid);
+      const block = el('div', 'tyb', c);
+      const fill = el('i', '', block);
+      const txt = el('div', 'tyt', c);
+      const temp = el('b', '', txt, '');
+      const psi = el('span', '', txt, '');
+      const wear = el('span', 'tw', txt, '');
+      this.tyres.push({ block, fill, temp, psi, wear });
+    }
   }
 
   show(on: boolean) {
@@ -244,7 +331,11 @@ export class HUD {
       this.rowByCar.set(c.id, row);
     }
     this.tower.style.display = race.isTimeTrial ? 'none' : '';
-    (this.root.querySelector('.gaps') as HTMLElement).style.display = race.isTimeTrial ? 'none' : '';
+    this.relEl.style.display = race.isTimeTrial ? 'none' : '';
+    this.root.classList.toggle('tt', race.isTimeTrial);
+    this.fuelPerLap = NaN;
+    this.fuelAtLine = NaN;
+    this.fuelLaps = -2;
 
     // minimap
     const mm = this.root.querySelector('.minimap');
@@ -288,7 +379,8 @@ export class HUD {
       svg.appendChild(dot);
       this.dots.set(c.id, dot);
     }
-    this.sectorEls.forEach((e) => (e.className = ''));
+    this.secTime.fill(NaN);
+    this.secColor.fill('');
     this.lights.classList.remove('show');
     this.banner.classList.remove('show');
   }
@@ -317,11 +409,13 @@ export class HUD {
 
   /** DOM writes only when the value changes (perf: the HUD updates every frame) */
   private readonly dotAt = new WeakMap<Element, number>();
-  private readonly widthOf = new WeakMap<HTMLElement, number>();
-  private setWidth(e: HTMLElement, pct: number) {
-    if (this.widthOf.get(e) === pct) return;
-    this.widthOf.set(e, pct);
-    e.style.width = `${pct}%`;
+  /** a bar's fill as a transform (compositor only, no layout), in 1/200 steps */
+  private readonly scaleOf = new WeakMap<HTMLElement, number>();
+  private setScale(e: HTMLElement, v: number, axis: 'X' | 'Y' = 'X') {
+    const q = Math.round(Math.max(0, Math.min(1, v)) * 200);
+    if (this.scaleOf.get(e) === q) return;
+    this.scaleOf.set(e, q);
+    e.style.transform = `scale${axis}(${q / 200})`;
   }
   private setClass(e: HTMLElement, c: string) {
     if (e.className !== c) e.className = c;
@@ -470,7 +564,15 @@ export class HUD {
           this.flash('Front wing damage', 'box for a new nose — press P', 'red', 3.2);
           break;
         case 'sector':
-          if (e.sector !== undefined) this.sectorEls[e.sector].className = e.color ?? '';
+          if (e.sector !== undefined && e.car === race.player.id) {
+            this.secTime[e.sector] = e.value ?? NaN;
+            this.secColor[e.sector] = e.color ?? '';
+            // the first split of a new lap clears the last lap's other two
+            if (e.sector === 0) {
+              this.secTime[1] = this.secTime[2] = NaN;
+              this.secColor[1] = this.secColor[2] = '';
+            }
+          }
           break;
         case 'lap':
           break;
@@ -509,39 +611,84 @@ export class HUD {
     this.lights.classList.toggle('show', showLights);
     this.lightCols.forEach((c, i) => c.classList.toggle('on', race.phase === 'lights' && i < race.lightsLit));
 
-    // cluster
+    // the dash
     const kmh = Math.max(0, Math.round(car.vx * 3.6));
     this.setText(this.speedEl, String(kmh));
     this.setText(this.gearEl, car.reverse ? 'R' : race.phase === 'grid' || race.phase === 'lights' ? 'N' : String(car.gear));
     const sp = car.spec;
-    const frac = Math.max(0, (car.rpm - 8800) / (sp.rpmLimit - 250 - 8800));
-    const lit = Math.min(15, Math.floor(frac * 15.99));
-    for (let i = 0; i < 15; i++) this.leds[i].classList.toggle('on', i < lit);
-    this.ledWrap.classList.toggle('flash', car.limiter || lit >= 15);
-    this.setWidth(this.thrEl, Math.round(car.throttle * 100));
-    this.setWidth(this.brkEl, Math.round(car.brake * 100));
-    this.setWidth(this.ersEl, Math.round(car.ers * 100));
+    // the rev bar, as ACC's: one bar across the dash from idle to the limiter, white through the
+    // range, amber then red as the shift point nears, flashing blue on the limiter
+    const rpmF = (car.rpm - sp.rpmIdle) / (sp.rpmLimit - sp.rpmIdle);
+    this.setScale(this.rpmEl, rpmF);
+    const shift = car.limiter || car.rpm >= sp.rpmLimit - 250;
+    this.setClass(this.rpmWrap, 'rpm' + (shift ? ' lim' : rpmF > 0.86 ? ' r' : rpmF > 0.72 ? ' y' : ''));
+    this.setText(this.rpmTxt, `${Math.round(car.rpm / 50) * 50} rpm`);
+    this.setScale(this.thrEl, car.throttle, 'Y');
+    this.setScale(this.brkEl, car.brake, 'Y');
+    // electronics: brake bias (the set-up's, % front), traction control and ABS — lit amber while they work, as ACC
+    this.setText(this.bbEl, (sp.brakeBias * 100).toFixed(1));
+    const tc = car.assists.traction;
+    this.setText(this.tcEl, TC_LABEL[tc]);
+    this.setClass(this.tcEl, tc === 'off' ? 'off' : car.tcActive ? 'act' : '');
+    this.setText(this.absEl, car.assists.abs ? 'ON' : 'OFF');
+    this.setClass(this.absEl, !car.assists.abs ? 'off' : car.absActive ? 'act' : '');
+    // ERS: state of charge, and what the MGU-K is doing — OVT deploying the overtake boost, HARV
+    // recovering under braking and lifts (CarPhysics' rules), else the balanced base map
+    this.setScale(this.ersEl, car.ers);
+    this.setText(this.ersPct, `${Math.round(car.ers * 100)}%`);
+    const v = car.vx;
+    const harv = !car.ersDeploying && car.ers < 0.999 && ((car.brake > 0.2 && v > 10) || (car.throttle < 0.05 && v > 20));
+    const mode = car.ersDeploying ? 'ovt' : harv ? 'harv' : '';
+    this.setText(this.ersMode, car.ersDeploying ? 'OVT' : harv ? 'HARV' : 'BAL');
+    this.setClass(this.ersMode, 'chip ' + mode);
     this.ersWrap.classList.toggle('deploy', car.ersDeploying);
     const zoneOn = p.drsEligible;
     this.setClass(this.drsEl, 'drs' + (car.drsAnim > 0.5 ? ' open' : zoneOn ? ' avail' : ''));
+    // fuel: per lap measured line to line (the regulation estimate until a lap is done), and the
+    // margin: laps the fuel covers beyond the laps still to run (red when it's short)
+    if (p.laps !== this.fuelLaps) {
+      if (p.laps === this.fuelLaps + 1 && p.laps >= 1 && isFinite(this.fuelAtLine)) {
+        const used = this.fuelAtLine - car.fuel;
+        if (used > 0.2) this.fuelPerLap = used;
+      }
+      this.fuelLaps = p.laps;
+      this.fuelAtLine = car.fuel;
+    }
+    this.setText(this.fuelEl, `${car.fuel.toFixed(1)} kg`);
+    if (car.burnFuel) {
+      const perLap = isFinite(this.fuelPerLap) ? this.fuelPerLap : FUEL_PER_LAP;
+      this.setText(this.fuelLapEl, `${perLap.toFixed(2)}/lap`);
+      const toGo = Math.max(0, race.opts.laps - Math.max(0, p.laps) - (p.laps >= 0 ? p.lapDist / race.track.length : 0));
+      const margin = car.fuel / perLap - toGo;
+      this.setText(this.fuelRangeEl, p.finished ? '' : `${margin < 0 ? '−' : '+'}${Math.abs(margin).toFixed(1)} laps`);
+      this.setClass(this.fuelRangeEl, 'v3' + (margin < 0 ? ' bad' : margin < 0.3 ? ' warn' : ''));
+    } else {
+      this.setText(this.fuelLapEl, '—/lap');
+      this.setText(this.fuelRangeEl, '');
+    }
 
-    // tyres, as in the F1 game: colour = temperature (cold / in the window / hot / overheating),
-    // the number underneath = life left; wing colour = damage
+    // tyres: colour = temperature against the compound's window (cold / in it / hot / overheating),
+    // °C and the gas-law pressure beside it, the block's fill and the % = life left
     const opt = car.tyreOpt;
     const tone = (T: number) => (T < opt - 22 ? 'cold' : T <= opt + 14 ? 'ok' : T <= opt + 26 ? 'warn' : 'bad');
-    let avg = 0;
     for (let i = 0; i < 4; i++) {
-      const cls = 'ty ' + tone(car.tyreTemp[i]);
-      if (this.tyreEls[i].getAttribute('class') !== cls) this.tyreEls[i].setAttribute('class', cls);
-      avg += car.wear[i] / 4;
+      const c = this.tyres[i];
+      const T = car.tyreTemp[i];
+      this.setClass(c.block, 'tyb ' + tone(T));
+      this.setText(c.temp, `${Math.round(T)}°`);
+      this.setText(c.psi, tyrePsi(i, T).toFixed(1));
+      const life = 1 - car.wear[i];
+      this.setScale(c.fill, life, 'Y');
+      this.setText(c.wear, `${Math.floor(life * 100)}%`);
     }
-    const wcls = 'fw ' + (car.wingDamage < 0.15 ? 'ok' : car.wingDamage < 0.5 ? 'warn' : 'bad');
-    if (this.wingEl.getAttribute('class') !== wcls) this.wingEl.setAttribute('class', wcls);
+    const wd = car.wingDamage;
+    this.setText(this.wingEl, wd < 0.15 ? 'Wing OK' : `Wing ${Math.round(wd * 100)}%`);
+    this.setClass(this.wingEl, 'wing ' + (wd < 0.15 ? 'ok' : wd < 0.5 ? 'warn' : 'bad'));
     const cmp = COMPOUNDS[p.compound];
-    const wearHtml = `<span class="cmp" style="color:${cmp.color}">${cmp.short}</span> ${Math.round((1 - avg) * 100)}%`;
-    if (this.lastText.get(this.wearEl) !== wearHtml) {
-      this.wearEl.innerHTML = wearHtml;
-      this.lastText.set(this.wearEl, wearHtml);
+    const cmpHtml = `<i style="color:${cmp.color}">${cmp.short}</i>${p.compound === 'inter' ? 'Inter' : cmp.label}`;
+    if (this.lastText.get(this.cmpEl) !== cmpHtml) {
+      this.cmpEl.innerHTML = cmpHtml;
+      this.lastText.set(this.cmpEl, cmpHtml);
     }
     // weather row
     const w = race.weatherState;
@@ -567,7 +714,11 @@ export class HUD {
     // timing
     const t = race.phase === 'racing' || race.phase === 'finished' ? race.raceTime : 0;
     const lapNo = Math.max(1, Math.min(race.opts.laps, p.laps + 1));
-    this.setText(this.pbig, race.isTimeTrial ? 'TT' : `P${p.position}`);
+    const posHtml = race.isTimeTrial ? 'TT' : `P${p.position}<small>/${race.cars.length}</small>`;
+    if (this.lastText.get(this.pbig) !== posHtml) {
+      this.pbig.innerHTML = posHtml;
+      this.lastText.set(this.pbig, posHtml);
+    }
     const lapHtml = !p.lapValid ? '<b class="bad">Lap deleted</b>' : race.isTimeTrial ? `Lap <b>${Math.max(1, p.laps + 1)}</b>` : `Lap <b>${lapNo}<span>/${race.opts.laps}</span></b>`;
     if (this.lastText.get(this.lapEl) !== lapHtml) {
       this.lapEl.innerHTML = lapHtml;
@@ -576,13 +727,20 @@ export class HUD {
     const cur = p.laps >= 0 ? t - p.lapStart : 0;
     this.setText(this.curEl, fmtTime(Math.max(0.0001, cur)).replace('—', '0.000'));
     this.curEl.classList.toggle('invalid', !p.lapValid);
+    // the delta bar: to your best lap (Race samples it every 10 m); idle until there is one to beat
     const dl = race.playerDelta;
-    if (isFinite(dl) && p.laps >= 1 && p.lapValid) {
+    if (isFinite(dl) && p.laps >= 1 && p.lapValid && isFinite(p.bestLap)) {
       this.setText(this.deltaEl, `${dl < 0 ? '−' : '+'}${Math.abs(dl).toFixed(3)}`);
-      this.deltaEl.className = 'delta ' + (dl < 0 ? 'faster' : 'slower');
-    } else if (this.deltaEl.className !== 'delta') {
-      this.deltaEl.className = 'delta';
-      this.setText(this.deltaEl, '');
+      this.setClass(this.deltaWrap, 'deltabar glass ' + (dl < 0 ? 'faster' : 'slower'));
+      this.setScale(this.deltaL, dl < 0 ? -dl / DELTA_SCALE : 0);
+      this.setScale(this.deltaR, dl > 0 ? dl / DELTA_SCALE : 0);
+      this.setText(this.estEl, fmtTime(p.bestLap + dl));
+    } else {
+      this.setText(this.deltaEl, !p.lapValid ? 'Invalid' : '−.---');
+      this.setClass(this.deltaWrap, 'deltabar glass' + (!p.lapValid ? ' invalid' : ''));
+      this.setScale(this.deltaL, 0);
+      this.setScale(this.deltaR, 0);
+      this.setText(this.estEl, '—');
     }
     // radio fade
     if (this.radioTimer > 0) {
@@ -592,13 +750,22 @@ export class HUD {
     this.setText(this.lastEl, fmtTime(p.lastLap));
     this.setText(this.bestEl, fmtTime(p.bestLap));
     this.setClass(this.bestEl, p.bestLap < Infinity && p.bestLap <= race.bestLap ? 'purple' : p.bestLap < Infinity ? 'green' : '');
-    // live sector marker
-    this.sectorEls.forEach((e, i) => {
-      if (i === p.sector && race.phase === 'racing') e.classList.add('live');
-      else e.classList.remove('live');
-      if (i > p.sector && e.className === '') return;
-    });
-    if (p.sector === 0 && cur < 0.2) this.sectorEls.forEach((e) => (e.className = ''));
+    // sector splits: this lap's as they close (purple / green / yellow), the running split in the
+    // sector you're in, and ahead of the car the last lap's, dimmed, until this lap overwrites them
+    const live = race.phase === 'racing' && p.laps >= 0;
+    for (let i = 0; i < 3; i++) {
+      const st = this.secTime[i];
+      if (live && i === p.sector) {
+        this.setClass(this.sectorEls[i], 'sc live');
+        this.setText(this.sectorTimeEls[i], fmtTime(Math.max(0.0001, t - p.sectorStart)).replace('—', '0.000').slice(0, -2));
+      } else if (isFinite(st)) {
+        this.setClass(this.sectorEls[i], `sc ${this.secColor[i]}${i > p.sector ? ' old' : ''}`);
+        this.setText(this.sectorTimeEls[i], fmtTime(st));
+      } else {
+        this.setClass(this.sectorEls[i], 'sc');
+        this.setText(this.sectorTimeEls[i], '—');
+      }
+    }
 
     // tower + gaps at ~12 Hz
     this.towerTimer -= dt;
@@ -664,7 +831,7 @@ export class HUD {
         return;
       }
       box.style.visibility = '';
-      const html = `<span class="bar" style="background:${uiColor(c.entry.team)}"></span><span class="code">${c.entry.driver.code}</span><span class="t">${sign}${gap.toFixed(3)}</span>`;
+      const html = `<span class="rp">P${c.position}</span><span class="bar" style="background:${uiColor(c.entry.team)}"></span><span class="code">${c.entry.driver.code}</span><span class="t ${sign === '−' ? 'ah' : 'bh'}">${sign}${gap.toFixed(3)}</span>`;
       if (this.lastText.get(box) !== html) {
         box.innerHTML = html;
         this.lastText.set(box, html);
