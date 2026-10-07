@@ -264,6 +264,15 @@ npm run check    # tsc --noEmit
   floodlights at all: the moon, the city on the horizon and every car's modest headlights, which light
   the road ahead, flare head-on and catch the rain). The track gets wet and dries again, a dry line appears once the
   rain stops, spray and aquaplaning in standing water, the radar and your engineer warn you.
+  The dry skies each read differently (`weatherLook` in env/presets.ts, the cloud march in env/skyClouds.ts):
+  clear is a deep blue paling to a near-white horizon; light cloud is separate sunlit cumulus — white flanks
+  (multiple-scattering octaves), blue-grey bases lit by the sky, lit orange on the sun's side and lavender-grey
+  in their own shade at golden hour — whose shadows slide over the land as distinct soft-edged patches
+  (`cloudShadowMask`, shared by the ground and the horizon ring); windy is the clean, saturated air behind a
+  front, the cumulus dragged out and torn by the wind aloft (`uShear`), racing, and every pole flag flying
+  straight out downwind (limp in a calm); hazy sun is a deep milky layer that swallows the far hills, with a
+  pale luminous sky and a softened sun; overcast has no sun at all — flat, shadowless light under a soft grey
+  deck that the camera meters up to a bright grey-white.
 - **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.
@@ -532,6 +541,7 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
   during a boot; `node tools/_progmap.mjs` — programs per material family.
 - Every headless tool finds Chrome through `tools/chrome.mjs` (macOS Metal, Windows D3D11, Linux GL; `CHROME=` overrides).
 - `node tools/_lookmatrix.mjs <out> [track] [look|weather:time,…]` + `python3 tools/lookcompare.py --pairs <file>` — every time of day × weather (race cam + a vista down the valley) and the TikTok reference scenes, and their tone / colour statistics against the footage (black and white point, percentiles, saturation, hue of shadows / mids / highlights, sky-to-ground, haze).
+- `PORT=… node tools/_wxsweep.mjs <out> [track] weather:time,… [chase,vista,up]` — many weather × time conditions from one boot (the live forecast swapped per condition, same seed so the clouds stay put): the chase camera, a frozen vista and a look up at the sky. For tuning the sky; confirm with real boots.
 - `node tools/tvsheet.mjs <track>` (TV director frames), `tools/horizon.mjs <track> <bearings>`, `tools/lookat.mjs`,
   `tools/carshots.mjs [team]` (studio angles) — more screenshots.
 - `node tools/console.mjs <track>` — shader / page errors while a circuit boots and races (run it for all 14 after shader edits).

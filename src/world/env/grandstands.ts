@@ -551,18 +551,51 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
   vMapUv = vec2( ( mod( aDesign, 4.0 ) + uv.x ) / 4.0, ( 3.0 - floor( aDesign / 4.0 ) + uv.y ) / 4.0 );
 #endif`,
       )
+      // a flag on a pole flies downwind (every pole on the circuit the same way), and how it flies is
+      // the wind's strength at a glance: limp down the pole in a calm, drooping and rolling in a breeze,
+      // straight out and snapping in a gale (Beaufort: a flag 'extended' from ~6 m/s). Turned about
+      // the pole (local y) and drooped about its top hoist corner — the lighting normal with it.
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+float flagWl = length( uWind );
+float flagYaw = 0.0;
+float flagDroop = 0.0;
+if ( aBig > 0.5 ) {
+  vec3 fx = ( modelMatrix * instanceMatrix * vec4( 1.0, 0.0, 0.0, 0.0 ) ).xyz;
+  float yaw0 = atan( -fx.z, fx.x );
+  vec2 wdir = flagWl > 0.05 ? uWind / flagWl : vec2( 1.0, 0.0 );
+  float dy = atan( -wdir.y, wdir.x ) - yaw0;
+  flagYaw = atan( sin( dy ), cos( dy ) ) * smoothstep( 0.4, 2.5, flagWl );
+  flagDroop = mix( 1.2, 0.06, smoothstep( 0.5, 7.0, flagWl ) );
+  float cyw = cos( flagYaw ), syw = sin( flagYaw );
+  float cdr = cos( flagDroop ), sdr = sin( flagDroop );
+  objectNormal.xy = vec2( objectNormal.x * cdr + objectNormal.y * sdr, -objectNormal.x * sdr + objectNormal.y * cdr );
+  objectNormal.xz = vec2( objectNormal.x * cyw + objectNormal.z * syw, -objectNormal.x * syw + objectNormal.z * cyw );
+}`,
+      )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 {
   float id = float( gl_InstanceID );
   float k = uv.x;
-  float ws = 1.0 + length( uWind ) * 0.15;
+  float ws = 1.0 + flagWl * 0.15;
   float sp = mix( 6.0, 3.2, aBig ) * ws;
   float ph = uTime * sp + id * 2.1 - k * mix( 5.0, 3.0, aBig );
-  float amp = mix( 0.16, 0.45, aBig );
+  // (a pole flag: small rolls in a calm, big waves in a breeze, short quick ripples once it is flying
+  // straight out)
+  float amp = mix( 0.16, 0.45 * mix( 0.35, 1.0, smoothstep( 0.5, 4.0, flagWl ) ) * mix( 1.0, 0.55, smoothstep( 7.0, 14.0, flagWl ) ), aBig );
   transformed.z += sin( ph ) * amp * k;
-  transformed.y += sin( ph * 0.7 ) * amp * 0.3 * k - k * k * 0.12 * aBig;
+  transformed.y += sin( ph * 0.7 ) * amp * 0.3 * k;
+  if ( aBig > 0.5 ) {
+    // droop about the top of the hoist, then turn about the pole
+    float cdr = cos( flagDroop ), sdr = sin( flagDroop );
+    vec2 q = vec2( transformed.x, transformed.y - 0.46 );
+    transformed.xy = vec2( q.x * cdr + q.y * sdr, -q.x * sdr + q.y * cdr ) + vec2( 0.0, 0.46 );
+    float cyw = cos( flagYaw ), syw = sin( flagYaw );
+    transformed.xz = vec2( transformed.x * cyw + transformed.z * syw, -transformed.x * syw + transformed.z * cyw );
+  }
   // hand-held flags are waved from side to side, hard when the cars come by
   float fe = ( 1.0 - aBig ) * min( crowdExcite( aS ), 2.0 );
   float sway = sin( uTime * 1.7 + id ) * 0.35 * ( 1.0 - min( fe, 1.0 ) * 0.6 ) + sin( uTime * 4.3 + id ) * 0.45 * min( fe, 1.4 );
@@ -571,7 +604,7 @@ function flagMaterial(tex: THREE.Texture, uniforms: { uTime: THREE.IUniform }): 
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-flag-v4';
+  mat.customProgramCacheKey = () => 'apex-flag-v5';
   return mat;
 }
 

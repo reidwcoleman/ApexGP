@@ -55,6 +55,18 @@ float cloudField( vec2 xz ) {
 float localCoverage( float field, float coverage ) {
   return clamp( coverage * 1.12 + ( field - 0.5 ) * mix( 1.0, 0.25, coverage * coverage ), 0.0, 1.0 );
 }
+// 0 … 1 how much of the sun the cumulus over ground point xz (already projected up the sun ray and
+// drifted with the wind) takes away. Cumulus shadows are distinct patches a few hundred metres to a
+// kilometre across with soft but definite edges, sliding over the land with the wind — the threshold
+// is set so about as much ground is shaded as sky is covered (a soft one turned the whole circuit a
+// uniform 30 % darker instead: no patches at all)
+float cloudShadowMask( vec2 xz, float coverage ) {
+  float wc = localCoverage( cloudField( xz ), coverage );
+  float n = cf_noise( xz * ( 1.0 / 1300.0 ) ) * 0.55 + cf_noise( xz * ( 1.0 / 520.0 ) + 3.1 ) * 0.3 + cf_noise( xz * ( 1.0 / 210.0 ) + 7.7 ) * 0.15;
+  // (n is ~normal round 0.5, σ ≈ 0.12: thr puts a fraction ≈ 0.85·wc of the ground under cloud)
+  float thr = 0.5 + 0.31 * ( 0.5 - 0.85 * wc );
+  return smoothstep( thr - 0.022, thr + 0.022, n );
+}
 `;
 
 const VERT = /* glsl */ `
@@ -99,6 +111,8 @@ uniform vec3 uCirrusCol;
 uniform float uRain;
 uniform vec3 uRainCol;
 uniform float uConv;
+// wind shear: xy = downwind (unit), z = 0 … 1 how hard it blows aloft
+uniform vec3 uShear;
 
 #define PI 3.141592653589793
 #define R_EARTH 6360000.0
@@ -125,6 +139,13 @@ float hg( float c, float g ) {
 // base shape density (no erosion)
 float shapeDensity( vec3 p, float h01, float wc, float lod ) {
   if ( h01 <= 0.0 || h01 >= 1.0 ) return 0.0;
+  // a windy day: the wind aloft drags each cumulus out downwind (cloud streets, torn fractus) and
+  // leans its top over, since the wind strengthens with height (sheared cumulus, as on a blustery
+  // spring day at Silverstone) — the field squeezed across the wind, the top slid downwind
+  if ( uShear.z > 0.0 ) {
+    float k = uShear.z * 0.8;
+    p.xz -= uShear.xy * ( dot( p.xz, uShear.xy ) * ( k / ( 1.0 + k ) ) + h01 * uThick * 0.45 * uShear.z );
+  }
   vec4 n = textureLod( uNoise, p * vec3( 1.0 / 4600.0, 1.0 / 3200.0, 1.0 / 4600.0 ), lod );
   float fbm = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
   float base = remap( n.r, fbm - 1.0, 1.0, 0.0, 1.0 );
@@ -156,8 +177,9 @@ float detailErode( float d, vec3 p, float h01, float lod ) {
   vec4 n = textureLod( uNoise, p * ( 1.0 / 1100.0 ) + vec3( 0.37, 0.61 + uTime * 0.0004, 0.13 ), lod );
   float f = n.g * 0.625 + n.b * 0.25 + n.a * 0.125;
   // wispy at the base, billowy (cauliflower) toward the top
-  float m = mix( f, 1.0 - f, clamp( h01 * 3.0, 0.0, 1.0 ) );
-  return clamp( remap( d, m * 0.55, 1.0, 0.0, 1.0 ), 0.0, 1.0 );
+  float m = mix( f, 1.0 - f, clamp( h01 * 3.0 * ( 1.0 - 0.6 * uShear.z ), 0.0, 1.0 ) );
+  // (in a strong wind the edges are torn ragged, not billowed: the erosion bites deeper)
+  return clamp( remap( d, m * ( 0.55 + 0.2 * uShear.z ), 1.0, 0.0, 1.0 ), 0.0, 1.0 );
 }
 
 void main() {
@@ -216,7 +238,10 @@ void main() {
     float thin = 1.0 - smoothstep( 0.4, 0.6, s );
     // where the deck is thin the sun glows through it (a bright patch round the hidden sun)
     float glowSun = 1.0 + thin * 1.4 * hg( dot( d, uSunDir ), 0.72 ) * ( 1.0 - uDark * 0.8 );
-    deckK = mix( 1.0, mix( 0.5, 1.75, thin ) * glowSun, clamp( uFloor * 1.8, 0.0, 1.0 ) );
+    // (a dry grey deck — stratus, stratocumulus — is soft from below: big, faint lighter and darker
+    // patches, not the dark lumps and bright tears of a rain deck)
+    vec2 span = mix( vec2( 0.78, 1.3 ), vec2( 0.5, 1.75 ), smoothstep( 0.25, 0.6, uDark ) );
+    deckK = mix( 1.0, mix( span.x, span.y, thin ) * glowSun, clamp( uFloor * 1.8, 0.0, 1.0 ) );
   }
 
   if ( t0 < t1 && uCoverage > 0.005 ) {
@@ -233,7 +258,9 @@ void main() {
       float h01 = h / uThick;
       vec2 xz = uCam.xz + d.xz * t + uWind;
       float wc = localCoverage( cloudField( xz ), uCoverage );
-      float lod = clamp( log2( ds / 70.0 ), 0.0, 5.0 );
+      // (a finer mip than the step strictly asks for: the running average of jittered marches removes
+      // the aliasing, and far cumulus keep crisp heads instead of melting into flat grey sheets)
+      float lod = clamp( log2( ds / 120.0 ), 0.0, 5.0 );
       vec3 p = vec3( xz.x, h + uTime * 0.6, xz.y );
       float dens = shapeDensity( p, h01, wc, lod );
       if ( dens > 0.001 ) {
@@ -259,7 +286,16 @@ void main() {
           if ( k2 > 0.0 ) {
             float hq2 = ( h + uSunDir.y * 378.0 ) / uThick;
             float d2 = hq2 < 1.0 ? shapeDensity( p + uSunDir * 378.0, hq2, wc, lod + 1.0 ) : 0.0;
-            tau = mix( tauFar, d1 * 90.0 * 1.4 + d2 * 288.0 * 1.8, k2 );
+            // a low sun crosses a cumulus sideways, through its whole body: a third tap a kilometre up
+            // the beam, or a golden-hour cloud was lit orange right through instead of glowing on the
+            // sun's side and going blue-grey in its own shade
+            float far3 = 0.0;
+            if ( uSunDir.y < 0.4 ) {
+              float hq3 = ( h + uSunDir.y * 950.0 ) / uThick;
+              float d3 = hq3 < 1.0 ? shapeDensity( p + uSunDir * 950.0, hq3, wc, lod + 1.5 ) : 0.0;
+              far3 = d3 * 570.0 * 1.6 * ( 1.0 - smoothstep( 0.25, 0.4, uSunDir.y ) );
+            }
+            tau = mix( tauFar, d1 * 90.0 * 1.4 + d2 * 288.0 * 1.8 + far3, k2 );
           }
           tau *= uExt * 0.6;
           // a closed deck: the rest of the layer above also stands between this point and the sun
@@ -269,7 +305,11 @@ void main() {
           // multiple scattering needs some depth to build up (powder): thin edges are lit by
           // single scattering (bright silver toward the sun), cores glow softly, flat-lit
           float powder = 1.0 - exp( -dens * 12.0 );
-          vec3 sun = uSunCol * ( phase * exp( -tau ) + ( phase2 * 0.55 * exp( -tau * 0.25 ) + phase3 * 0.3 * exp( -tau * 0.08 ) ) * powder );
+          // (the octaves carry most of a real cloud's light: in a thick cumulus nearly all the sunlight
+          // comes back out after many scatterings, so its sunlit flank is a near-Lambertian white ~2–3×
+          // brighter than the blue sky beside it — with too little of it every cumulus read as a grey
+          // lump; Wrenninge-style octaves, each less extinguished and nearly as strong as the last)
+          vec3 sun = uSunCol * ( phase * exp( -tau ) + ( phase2 * 0.95 * exp( -tau * 0.4 ) + phase3 * 0.7 * exp( -tau * 0.16 ) ) * powder );
           // dark crevices near the tops, bright rims (in-scatter probability)
           float inscatter = 0.3 + 0.7 * pow( dens, clamp( remap( hc01, 0.3, 0.85, 0.5, 1.4 ), 0.5, 1.4 ) );
           // ambient: sky from above, occluded by the cloud over this point; dim bounce from below
@@ -413,6 +453,7 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
     uRain: { value: 0 },
     uRainCol: { value: new THREE.Vector3(0.3, 0.3, 0.3) },
     uConv: { value: 0 },
+    uShear: { value: new THREE.Vector3(1, 0, 0) },
   };
   const mat = cloudPanoramaMaterial(uniforms);
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);

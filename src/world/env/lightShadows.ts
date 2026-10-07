@@ -158,10 +158,7 @@ ${CLOUD_FIELD_GLSL}
 float cloudShadowAt( vec3 wp ) {
   if ( cloudShadowA.x <= 0.0 ) return 1.0;
   vec2 xz = wp.xz + cloudShadowB.xy * ( cloudShadowB.z - wp.y ) + cloudShadowA.zw;
-  float wc = localCoverage( cloudField( xz ), cloudShadowA.y );
-  float n = cf_noise( xz * ( 1.0 / 1300.0 ) ) * 0.55 + cf_noise( xz * ( 1.0 / 520.0 ) + 3.1 ) * 0.3 + cf_noise( xz * ( 1.0 / 210.0 ) + 7.7 ) * 0.15;
-  float d = smoothstep( 1.0 - wc, 1.0 - wc + 0.22, n );
-  return 1.0 - cloudShadowA.x * d;
+  return 1.0 - cloudShadowA.x * cloudShadowMask( xz, cloudShadowA.y );
 }
 
 float getSunShadow(
