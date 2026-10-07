@@ -430,7 +430,7 @@ export class VenueAds {
     add(this.frames, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.35 }), 'frames', true);
     add(this.prints, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.12, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), 'prints', false);
     add(this.leds, ledMaterial(tex), 'leds', false);
-    add(this.paint, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }), 'paint', false, 1);
+    add(this.paint, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), 'paint', false, 1);
     return out;
   }
 }
