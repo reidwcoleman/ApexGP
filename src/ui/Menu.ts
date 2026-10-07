@@ -1233,7 +1233,8 @@ export class Menu {
     this.opt(p, 'Chase height', () => sgn(c.height, ' m', 2), (d) => (c.height = step(c.height, d, 0.05, -0.4, 1)), true);
     this.opt(p, 'Camera shake', () => (c.shake === 0 ? 'Off' : pct(c.shake)), (d) => (c.shake = step(c.shake, d, 0.25, 0, 1.5)), true);
     this.opt(p, 'Look into corners', () => (c.apex === 0 ? 'Off' : pct(c.apex)), (d) => (c.apex = step(c.apex, d, 0.25, 0, 1.5)), true);
-    this.opt(p, 'Horizon lock (onboard)', () => pct(c.horizon), (d) => (c.horizon = step(c.horizon, d, 0.1, 0, 1)), true);
+    // (the onboards' roll with the car, and the chase cameras' lean with the G: 100 % is dead level)
+    this.opt(p, 'Horizon lock', () => pct(c.horizon), (d) => (c.horizon = step(c.horizon, d, 0.1, 0, 1)), true);
     const reset = el('div', 'opt', p);
     el('span', 'k', reset, 'Reset to defaults');
     el('span', 'v', reset, '<span class="chev">›</span>');
