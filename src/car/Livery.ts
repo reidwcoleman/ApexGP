@@ -606,6 +606,11 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
   // lower surfaces carbon
   maskR(sub(R_FWING, 0, 1, 0.26, 0.5), true);
   maskR(sub(R_FWING, 0, 1, 0.76, 1), true);
+  // a partner's wordmark across each half's first flap, read from behind (the nose and T-cams):
+  // a runs toward +X (screen left from behind → flipX), b from its trailing edge to its leading
+  // edge (screen up). A half spans ~0.72 m over 512 px, the upper surface ~0.2 m over 32 px.
+  const aspFw = (R_FWING.w * 0.5) / 0.72 / ((R_FWING.h * 0.25) / 0.2);
+  for (const a0 of [0.14, 0.56]) rectText(g, sub(R_FWING, a0, a0 + 0.3, 0.03, 0.22), small, team.ink, 0.78, { flipX: true, aspect: aspFw, weight: 700 });
 
   // ---------------- shark fin sides
   for (const r of [R_FIN_L, R_FIN_R]) {

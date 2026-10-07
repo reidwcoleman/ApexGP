@@ -62,10 +62,17 @@ npm run check    # tsc --noEmit
   (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
   **Next round** on the results screen flies you straight on. The rivals develop their cars through
   the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
-- **Garage first** — the boot opens the garage at the circuit you race next (the career's next round) as soon
-  as its pit building, track, sky and cars exist; terrain, woods, grandstands and crowds grow behind it one slice
-  per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
-  another circuit moves the garage there behind a short title card; no travel screen.
+- **Garage first** — the boot builds only what the garage camera shows, at the circuit you race next (the career's
+  next round, else the quick-race circuit you picked last): the track's data, the sky, your own garage alone
+  (`buildGarageBox`: its interior, the lane in front of the door, and a haze across the lane at the pit wall,
+  coloured like the air, in place of the world not yet built) and the two cars in it. The rest of the circuit then
+  grows behind it one step per frame (`Game.coreSteps`, then `sceneryBuilder`, `env.adoptScenery`,
+  `Game.completeWorld`): the rest of the field a car at a time, the trackside, the whole pit complex (the other
+  garages, building, pit wall and crews, swapped in for the box and taking over its atlases; each piece shown
+  once its shaders are built), the skid marks and racing line, then terrain, woods, grandstands and crowds — with a
+  status chip in the garage. Starting a session sooner waits behind a short "Finishing" card. Picking another
+  team before then moves the box to that team's garage; picking another circuit moves the garage there behind a
+  short title card; no travel screen.
 - **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
   making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and
   `buildWorld` awaits each only right before the step that needs it. The ground textures' pixels are made off the
@@ -99,7 +106,9 @@ npm run check    # tsc --noEmit
   ragged edge, branches inside and a dark interior; a fir's sprays are flat stretches of bough, so it reads as
   layered drooping tiers from below. Three LODs (LOD2 also casts every near tree's shadow from a second,
   shadow-only BatchedMesh), hashed alpha once leaves get small, then 8-view impostors of the full scan (conifers
-  hand over sooner, ~55 m). Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
+  hand over sooner, ~55 m). Every LOD change and the impostor hand-over is a matched dither over a few metres, and
+  every distance is measured from the camera's look-ahead (the stretch its next half second of travel covers), so
+  the trees the car is heading for are at full detail well before it reaches them, not as it passes. Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
   trees slower), gusts roll downwind through the woods, limbs swing at their own phase, leaves rock and flash;
   calm in fog, thrashing in a storm; impostors share the trunk sway. A car's wake (`feedCarWake`, fed from
   `Game`'s rigs) ruffles the verge grass, bushes and low branches it passes.
@@ -125,6 +134,42 @@ npm run check    # tsc --noEmit
   kinds `carpark` / `campsite` / `hangar` / `controlTower`) — instanced grass car parks out on the airfield (rows nose
   to nose, two-thirds full), campsites by the corners (ridge tents, cars, the odd motorhome), three WWII T2 hangars
   beside the Hangar Straight on whichever side has room, and the old watch office with its glazed control room.
+- **Each Grand Prix's own boards** (`env/venues/venueAds.ts`, plans in `venueAdPlans.ts`) — on top of the
+  paddock-wide wall paint, fence wraps and bridges, Albert Park, Mexico City, Sakhir and Yas Marina carry their
+  race weekend's partners (fictional brands in the real boards' colour blocks: the title partner's banner, the
+  local lager, airline, telco, bank): LED perimeter boards along the foot of the main grandstands (self-lit),
+  printed hoardings on posts round the backs of the run-offs (Melbourne's gravel traps, Mexico's and Sakhir's
+  Turn 1, Yas's hairpin), the title banner across the top of every footbridge, big word marks painted on the
+  Tilke run-offs (laid along the track, reading from the outside camera, worn by tyres), Mexico's rosa mexicano
+  round the Foro Sol and Bahrain's serrated red-and-white. Yas Marina's stands sit under white sail canopies on
+  raked masts (uplit after dark); Mexico City's Reforma towers (Torre Reforma, BBVA, Mayor, Chapultepec Uno,
+  the Latinoamericana, the WTC, Mítikah) stand 5–10 km west at their real bearings; Sakhir is lined with light
+  poles every ~50 m a side.
+- **Race-weekend dressing** (`env/venues/dressKit.ts`, one `<venue>Dress.ts` each, dispatched by `venues/dress.ts`) —
+  each venue's own boards laid out where the broadcast shows them rather than from the paddock-wide pool: a canvas
+  atlas per venue (fictional brands in the real boards' colour blocks — `venues/dressBrands.ts` — and the event's own
+  banners), rows of printed or LED hoardings on posts behind the barrier (clear of marshal posts, stands, fan banks,
+  screens and footbridges; brands in contract runs), big braced boards at the ends of run-offs, a banner gantry
+  over a straight (the generic arches keep clear: `VENUE_PROPS.keepClear` / `arches` in `trackside/structures.ts`),
+  painted logos in the tarmac run-offs (only where it really is tarmac run-off) and the pit building's roof:
+  Montréal's white canopy over the roof terrace with GRAND PRIX DU CANADA on its fascia and boards down the Casino
+  straight; Spielberg's graphite roof blade sweeping up over the pit lane with its red leading edge and the energy
+  drink's logos painted across the Niki Lauda, Remus and Schlossgold run-offs; Zandvoort's glazed Paddock Club
+  pavilion under an orange fascia and the orange gantry into Tarzan; COTA's white Paddock Club blade with its fin
+  screen and the court-sized logos in the Turn 1 run-off; Interlagos's big boards up the Subida dos Boxes and the
+  painted S do Senna. Seat colours per venue (`VENUE_SEATS`).
+- **Venue dressing for Monza, Spa, Silverstone, Suzuka and the Hungaroring** (`env/venues/*Dress.ts` on
+  `venueDressKit.ts`, planned with the layout so trees and stands keep off, built with the scenery) — each venue's own
+  footbridges where the real ones cross (`dressBridges.ts`; the trackside's automatic arches keep clear): Monza's
+  Rettifilo bridge and the one before the Parabolica, Spa's bridge by the old pits on the run to Eau Rouge, the Kemmel
+  bridge and the run toward Blanchimont, Silverstone's Wellington and Hangar Straight bridges, Suzuka's main-straight
+  bridge, the yellow Dunlop arch and the back straight, the Hungaroring's back straight and Turn 12 run — enclosed box
+  girders, open trusses or (Dunlop) an arch, one title sponsor across each face as the real ones are sold, stair
+  towers wherever the stands and fans' banks leave room. Self-lit LED boards along the main grandstand walls. Spa's
+  old pits stepping down the hill to Eau Rouge (fans on the roof rail, the old timekeepers' box at the top), the old
+  National pits and the drivers' clubhouse at Woodcote at Silverstone, Suzuka's big boards round 130R, painted
+  run-off logos at more corners (`trackside/markings.ts` `RUNOFF_LOGOS`). Its own banner atlas of fictional brands
+  in the real boards' colour blocks (a green-and-gold watchmaker, a yellow freight company, a green lager…).
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars
@@ -134,7 +179,7 @@ npm run check    # tsc --noEmit
 - **Pit buildings in each circuit's own materials** — `pitStyle` (pitlane/building.ts): trim, cladding, core,
   frame and glass tint per venue (Spa's and Mexico's dark grey, Sakhir's sandstone, Spielberg's graphite) and the
   top floor's shading: vertical fins (Monza, Yas), horizontal louvres on outriggers (Suzuka, Hungaroring,
-  Melbourne, Zandvoort, Sakhir) or a flush curtain wall (Spa, Austin, Mexico). The end elevations — what the
+  Melbourne, Zandvoort, Sakhir) or a flush curtain wall (Spa, Austin, Mexico, Montréal). The end elevations — what the
   long lens sees down the straight — wrap the curtain wall round the corner, carry the slab edges round as
   bands, a framed event board in the host's colours, a stair core rising past the roof, a glazed lobby under a
   canopy, a roller shutter and a louvred plant enclosure. Race control's glazing is raked outward under a deep
@@ -153,7 +198,15 @@ npm run check    # tsc --noEmit
   streaks on the ridden half of the kerb. The asphalt's polished chip tops are the high-pass of the scan's
   height (a raw threshold made glossy islands, a camouflage pattern against the sun); the racing line is laid
   in streaks, some stretches have relaid repair patches with sealed seams, painted run-off follows the grain and
-  wears off the chip tops, gravel rakes wander. The wet road takes the env map's light but not its colour (the
+  wears off the chip tops, gravel rakes wander.
+  Road wear is baked per metre from the racing line and the AI's speed profile (`trackside/context.ts`
+  `analyseWear`, so every circuit gets its own): rubber heaviest where the tyres work (braking, lateral
+  load, traction), the loaded outside tyre's track darker, polished to a satin sheen in streaks (it catches
+  a low sun; in the wet it sheds water and goes slick first); lock-up film into the braking zones;
+  acceleration "elevens" out of the slow corners; marbles flung to the outside of the line from the apex
+  on; dirt and stones dragged back onto the edge (and across the kerb) where the outside is grass or
+  gravel; inside kerbs rubbered and scuffed hardest; a season of launch marks off every grid box. The
+  session's own rubber (`uRaceRubber`) deepens all of it. The wet road takes the env map's light but not its colour (the
   env map is one spot's view: a red grandstand mirrored round the lap); the screen-space march supplies what is
   really beside the road. Carbon weave and paint flake within ~2 m of an onboard lens read as their average
   (the lens's defocus can't resolve them). `node tools/_matshots.mjs <out> <track> <weather> <time> [car|road|glare]`
@@ -197,7 +250,9 @@ npm run check    # tsc --noEmit
   wheelspin and lock-ups come from the physics, downforce/drag with DRS, slipstream tow and dirty
   air, 8-speed seamless box, launch clutch, ERS overtake, gravity on slopes and banking, kerb chatter
   and kerb strikes (the wheel spikes, hops light for a few hundredths and the ramp shoves it back toward
-  the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage, tyre wear.
+  the track), grass and gravel, impulse-based contact with walls and cars, front-wing damage (a tough car:
+  rubs, taps and wheel-banging under ~45 km/h are free, 7× tougher than the original tuning, and only a
+  big hit (~80 km/h square on) bends the suspension), tyre wear.
   The chassis moves like a stiff F1 car (~2.5° of dive at 5 g, ~1.5° of roll, springs that settle with a
   little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
   and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).
@@ -232,12 +287,28 @@ npm run check    # tsc --noEmit
 - **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,
-  lateral and endplate lights; baked ambient occlusion on every car.
+  lateral and endplate lights; baked ambient occlusion on every car. Tyres (`car/carTyres.ts`) squash
+  under load from the physics: the contact patch goes flat and the sidewall bulges over it, at the
+  bottom however the wheel has rolled. A new slick is matte with its wear-indicator dimples, a used one's
+  running band polished to a satin sheen between grained, scrubbed shoulders; the fictional VELTRA
+  sidewall (VX-18 slicks, TORRENTA rain tyres) carries moulded technical markings that show in the relief.
+  The details a close lens finds:
+  floor stays, inlet scoops on all four brake ducts, the rear flaps' actuator pod, a telemetry antenna
+  ahead of the cockpit, the T-cam pod's lenses (the T-cam films from them: the helmet's top under the
+  halo), a slimmer halo pillar, a moulded headrest round the helmet, a helmet with a chin bar and a
+  rear spoiler, and the driver's gloved hands on the wheel — they turn it, the forearms follow as live
+  links from the elbows, and the cockpit cameras keep them when the driver is hidden
+  (`setDriverVisible(false, true)`). Carbon is anisotropic (each tow's sheen stretched across it, warp
+  and weft at right angles, under the isotropic lacquer; it fades to the weave's average once a pixel
+  spans a tow), plate edges (endplates, fences, fins, the wheel) shade rounded, and the front wing's
+  first flaps carry a partner's wordmark read from the onboards. (No over-wheel deflectors: 2026
+  dropped them for the wheel-wake boards.)
 - **Camera footage look** — camera + per-object motion blur like a film shutter (`src/core/motionBlur.ts`: a
   half-res velocity buffer from depth reprojection, tile/neighbour max and a McGuire-style reconstruction, so the
   grass, kerbs and barriers streak past while your own car and the cars racing alongside stay sharp, a car
   flashing past a fixed camera smears beyond its own outline, the halo never smears or is smeared into, and the
-  frame's edges don't streak; long lenses get a faster shutter; Settings → Motion blur Off / Subtle / Cinematic),
+  frame's edges don't streak; long lenses get a faster shutter; the shutter opens up with speed, to 2.6× flat out;
+  Settings → Motion blur Off / Subtle / Cinematic),
   a camera's auto exposure (`autoExposure.ts`: metered on the GPU, it opens up a beat late under a bridge or the
   trees and is briefly over-exposed coming back out, but leaves the grade alone in steady light), sensor grain
   that follows the metered gain (all but clean on a sunny day, visible on a wet morning or at night), a lens:
@@ -325,6 +396,13 @@ npm run check    # tsc --noEmit
   offs and the lap-time spread. Dynamic difficulty now ranges to
   106% of the limit and moves ±2.5% during a race (`node tools/aipace.mjs [track]` shows where the
   AI's pace tops out).
+- **AI that learns** (`src/sim/AILearning.ts`) — each AI driver learns every circuit corner by corner: new
+  to a track they brake early and carry a little less speed, then each clean pass moves their braking point and
+  corner speed toward the limit (back off after running wide or arriving too fast, push on with grip to spare,
+  give it back if it didn't pay); someone — you too — quicker through a corner shows there's time there (the
+  learning never slows anyone for your sake). Long fights push drivers past what they know (that's where mistakes come from). What they
+  learn, and a slow development over the races they drive, is kept in localStorage (`apexgp.ailearn`), capped by
+  the difficulty so the AI stays beatable.
 
 ## Controls
 

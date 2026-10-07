@@ -393,7 +393,7 @@ export class Studio {
     if (mode === 'cockpit') {
       const c = this.carOf(info, focus);
       if (c) {
-        c.rig.setDriverVisible(false);
+        c.rig.setDriverVisible(false, true);
         this.pov = c.rig;
       }
     }

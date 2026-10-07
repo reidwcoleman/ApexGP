@@ -4,6 +4,7 @@ import type { WorldMap, V2 } from '../worldmap.ts';
 import type { GrandstandSpec, Landmark, Layout, ScreenSpec, SpectatorBank, StandStyle } from '../layout.ts';
 import { addCameraTowers, addHospitality } from '../layout.ts';
 import { CANAL, MX_LAKE, MX_SITES, MX_WATER_Y } from './mexicoLand.ts';
+import { reserveVenueAds } from './venueAdPlans.ts';
 
 /**
  * The Autódromo Hermanos Rodríguez's layout: where the stands, fans, paths, the water and the
@@ -228,6 +229,9 @@ export function planMexico(track: Track, map: WorldMap, addStand: AddStand, gs: 
   const podQ = at(podS, track.barrierAt(podS, R) + 8);
   const podLook = at(podS, 0);
   const podium = { x: podQ.x, z: podQ.z, rot: Math.atan2(podLook.x - podQ.x, podLook.z - podQ.z) };
+
+  // the race weekend's own hoardings and LED boards (venueAdPlans.ts): keep the trees off them
+  reserveVenueAds(track, map);
 
   // ---------------------------------------------------------------- hospitality & TV towers
   const landmarks: Landmark[] = [];

@@ -27,6 +27,7 @@ import { buildZandvoortScenery } from './venues/zandvoortScenery.ts';
 import { buildSakhirScenery } from './venues/sakhirScenery.ts';
 import { buildHungaroringScenery } from './venues/hungaroringScenery.ts';
 import { buildMonzaScenery } from './venues/monzaScenery.ts';
+import { buildVenueDress } from './venues/dress.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -173,6 +174,10 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
   // Monza: the Villa Reale, Milan's towers across the plain
   if (track.def.id === 'monza') group.add(buildMonzaScenery(layout, map).group);
+  // the venue's own race-weekend dressing: gantries, hoardings, footbridges, LED boards, painted run-off,
+  // old pit rows, its pit roof (venues/dress.ts)
+  const dress = buildVenueDress(track, map, layout);
+  if (dress) group.add(dress);
   lap('villages');
   yield { group, step: 'villages' };
   tLap = performance.now();

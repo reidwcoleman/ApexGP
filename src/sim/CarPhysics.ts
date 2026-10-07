@@ -276,9 +276,13 @@ const TYRE_COOL_WET = 0.05;
 /** fuel burn at full throttle (kg/s): ~100 kg/h, the regulation flow limit */
 export const FUEL_FLOW = 0.0275;
 
-/** damage: impact speed (m/s) below which a hit is free, and how much tougher the car is than the original tuning */
-const DMG_FREE_SPEED = 4;
-const DURABILITY = 1.35;
+/**
+ * damage: impact speed (m/s) below which a hit is free, how much tougher the car is than the
+ * original tuning, and the (higher) impact speed the wheels and suspension shrug off on their own
+ */
+const DMG_FREE_SPEED = 13;
+const DURABILITY = 7;
+const SUSP_FREE_SPEED = 22;
 
 /** transient yaw damping (tyre carcass lag): time constant (s) and gain (N·m per rad/s) */
 const YAW_LAG_T = 0.12;
@@ -1168,8 +1172,9 @@ export class CarPhysics {
     if (this.impacts.length > 8) this.impacts.shift();
     const e = vn - DMG_FREE_SPEED;
     if (e <= 0 || this.damageMode === 'off' || this.destroyed) return;
-    // rubs up to 4 m/s are free; a ~35 m/s square hit into a wall wrecks the front end.
-    // Every zone (and the car's integrity) takes DURABILITY× less per hit than it used to
+    // rubs, taps and wheel-banging up to ~13 m/s (45 km/h square on) are free; a ~35 m/s square hit
+    // into a wall chips the front wing, it takes several of them to break it. Every zone (and the car's integrity) takes DURABILITY× less per
+    // hit than the original tuning
     const hit = Math.pow(e / 28, 1.5) / DURABILITY;
     const d = this.dmg;
     const add = (i: number, k: number) => (d[i] = Math.min(1, d[i] + hit * k));
@@ -1187,13 +1192,15 @@ export class CarPhysics {
       add(DMG.FLOOR, 0.7);
       if (along < -0.3) add(DMG.ENGINE, 0.6);
     }
-    // out at the wheels: the suspension there takes it
-    if (Math.abs(side) > 0.5) {
+    // out at the wheels: the suspension there takes it, but only from a real hit (wheel-to-wheel
+    // banging and kerb strikes leave the wishbones straight)
+    const es = vn - SUSP_FREE_SPEED;
+    if (Math.abs(side) > 0.5 && es > 0) {
       const w = (along > 0.2 ? 0 : 2) + (left ? 0 : 1);
-      this.susp[w] = Math.min(1, this.susp[w] + hit * 2.2);
+      this.susp[w] = Math.min(1, this.susp[w] + (Math.pow(es / 28, 1.5) / DURABILITY) * 1.2);
     }
     if (this.damageMode === 'full') {
-      this.integrity -= hit * 0.62;
+      this.integrity -= hit * 0.25;
       if (this.integrity <= 0) {
         this.integrity = 0;
         this.destroyed = true;

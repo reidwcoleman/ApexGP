@@ -169,6 +169,8 @@ function cylinderX(mb: MB, c: V3, r: number, len: number, seg: number, uv: V2, o
   g.dispose();
 }
 
+/** how far a plate's rim normals lean toward its faces (tan of the lean; 0.8 ≈ 39°) */
+const BEVEL = 0.8;
 /** extruded flat plate: outline in (a,b) coordinates of plane (o, ea, eb), thickness along en */
 function plate(
   mb: MB,
@@ -213,10 +215,14 @@ function plate(
     }
     const uv = uvf((a0 + a1) / 2, (b0 + b1) / 2, 0);
     const c = cuv ? cuv(p0, nrm) : ([0, 0] as V2);
-    const i0 = mb.vert(p0, nrm, uv, c);
-    const i1 = mb.vert(p1, nrm, uv, c);
-    const i2 = mb.vert(p2, nrm, uv, c);
-    const i3 = mb.vert(p3, nrm, uv, c);
+    // the rim shades as a rounded edge: its normals lean toward each face, so a moulded part's
+    // edge catches a thin highlight instead of a machined 90° step (no extra triangles)
+    const nTop = norm3(add3(nrm, scl3(en, BEVEL)));
+    const nBot = norm3(add3(nrm, scl3(en, -BEVEL)));
+    const i0 = mb.vert(p0, nTop, uv, c);
+    const i1 = mb.vert(p1, nTop, uv, c);
+    const i2 = mb.vert(p2, nBot, uv, c);
+    const i3 = mb.vert(p3, nBot, uv, c);
     if (!flip) {
       mb.tri(i0, i3, i1);
       mb.tri(i1, i3, i2);
@@ -561,6 +567,8 @@ function rearWing(b: Buckets, level: Level) {
   }
   // endplate lights (2026): tall LED strips down the endplates' trailing edges
   for (const side of [1, -1]) box(P.trim, [0.5 * side, 0.72, -2.419], [0.017, 0.24, 0.008], trimUV(TC.rainLight));
+  // the active flaps' actuator: a slim carbon pod on the main plane's centre, its nose on the pylons
+  if (level < 2) ellipsoid(P.carbon, [0, 0.772, -2.0], [0.019, 0.026, 0.12], 10, 8, (p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE], new THREE.Euler(0.2, 0, 0));
 }
 
 /** the active rear flap pair in pivot-local coordinates (pivot at the upper flap's trailing edge) */
@@ -648,6 +656,9 @@ function floorAndDiffuser(b: Buckets, level: Level) {
       plate(b.carbon, fence, [0.6 * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.2, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
     }
   }
+  // floor stays: a slim rod each side from the floor's edge up into the sidepod's undercut, holding
+  // the edge down against the suction (the thin diagonal line under every car's flank)
+  if (level < 2) for (const side of [1, -1]) tube(b.trim, [[0.665 * side, 0.052, -0.12], [0.56 * side, 0.12, -0.1], [0.452 * side, 0.205, -0.08]], 0.0055, 6, trimUV(TC.blackSatin), [0, 0, 1]);
   // plank + skid blocks
   box(b.trim, [0, 0.0265, -0.15], [0.3, 0.013, 2.1], trimUV(TC.plank));
   if (level < 2) for (const z of [0.55, -0.15, -0.85]) box(b.trim, [0, 0.0195, z], [0.09, 0.002, 0.14], trimUV(TC.skid));
@@ -749,7 +760,8 @@ function halo(b: Buckets, level: Level) {
   const pst: SweepSt[] = pil.map((p, i) => {
     const t = norm3(sub3(pil[Math.min(pil.length - 1, i + 1)], pil[Math.max(0, i - 1)]));
     const d = norm3(cross3([1, 0, 0], t));
-    return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.016 };
+    // (a slim blade edge-on to the driver: ~26 mm across, as it splits the onboard picture)
+    return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.013 };
   });
   sweep(b.carbon, pst, aeroSection([10, 8, 5][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
 }
@@ -818,6 +830,8 @@ function airboxAndFin(b: Buckets, level: Level) {
     const tc: V3 = [0, 0.972, -0.255];
     ellipsoid(b.trim, tc, [0.105, 0.02, 0.04], 14, 8, trimUV(TC.tcam));
     box(b.trim, [0, 0.955, -0.26], [0.02, 0.03, 0.05], trimUV(TC.tcam));
+    // its lens windows, forward and back
+    if (level === 0) for (const x of [0.05, -0.05]) for (const z of [-0.2205, -0.2895]) ellipsoid(b.trim, [x, 0.974, z], [0.0095, 0.0085, 0.004], 10, 6, trimUV(TC.blackGloss));
   } else {
     box(b.trim, [0, 0.968, -0.255], [0.2, 0.03, 0.07], trimUV(TC.tcam));
   }
@@ -834,22 +848,22 @@ function mirrors(b: Buckets, level: Level) {
       const t = i / nz;
       const z = c[2] + 0.055 - t * 0.075;
       const k = Math.sin(Math.min(1, t * 1.6 + 0.12) * Math.PI * 0.5);
-      // (2026: bigger mirrors)
-      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.1 * k, sy: 0.036 * k });
+      // (2026: bigger mirrors — a 200 × 60 mm glass at the least)
+      hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.12 * k, sy: 0.042 * k });
     }
     sweep(b.paint, hs, roundedRect(ws, 0.35), () => paintCellUV(PC.mirror), { cuv: CUV });
     if (level < 2) {
       // glass (faces −Z)
-      const g = new THREE.PlaneGeometry(0.178, 0.058);
+      const g = new THREE.PlaneGeometry(0.198, 0.061);
       g.rotateY(Math.PI);
       g.translate(c[0], c[1], c[2] - 0.0205);
       // lateral safety light (2026) on the housing's outer tip
-      box(b.trim, [c[0] + 0.1 * side, c[1], c[2] + 0.02], [0.006, 0.022, 0.05], trimUV(TC.sideLight));
+      box(b.trim, [c[0] + 0.12 * side, c[1], c[2] + 0.02], [0.006, 0.024, 0.05], trimUV(TC.sideLight));
       b.trim.addGeometry(g, undefined, trimUV(TC.mirrorGlass));
       g.dispose();
       // stalks
       arm(b.carbon, [0.47 * side, 0.7, 0.47], [0.355 * side, 0.64, 0.5], 0.045, 0.012, 6, metricUV);
-      arm(b.carbon, [0.48 * side, 0.73, 0.47], [0.29 * side, 0.8, 0.15], 0.03, 0.01, 6, metricUV);
+      arm(b.carbon, [0.41 * side, 0.735, 0.49], [0.29 * side, 0.8, 0.15], 0.03, 0.01, 6, metricUV);
     }
   }
 }
@@ -860,6 +874,10 @@ function noseDetails(b: Buckets, level: Level) {
   tube(b.trim, [[0, 0.19, 2.85], [0, 0.192, 2.97]], 0.0045, 6, trimUV(TC.titanium), [0, 1, 0]);
   // nose cameras
   for (const side of [1, -1]) ellipsoid(b.trim, [0.125 * side, 0.36, 2.28], [0.018, 0.018, 0.05], 10, 6, trimUV(TC.blackGloss));
+  // telemetry antenna on the chassis top ahead of the cockpit, off the centreline (it pokes up
+  // beside the halo's pillar in the onboard), on a small carbon base
+  box(b.carbon, [0.06, 0.631, 1.18], [0.022, 0.01, 0.034], [0.06 / CARBON_TILE, 1.18 / CARBON_TILE]);
+  tube(b.trim, [[0.06, 0.632, 1.182], [0.06, 0.668, 1.177], [0.06, 0.7, 1.17]], (i) => 0.0034 - i * 0.0008, 6, trimUV(TC.blackSatin), [0, 0, 1]);
 }
 
 function exhaustAndLight(b: Buckets, level: Level) {
@@ -883,11 +901,21 @@ function exhaustAndLight(b: Buckets, level: Level) {
 
 function cockpitBits(b: Buckets, level: Level) {
   if (level === 2) return;
-  // headrest pads
-  for (const side of [1, -1]) {
-    ellipsoid(b.trim, [0.205 * side, 0.7, -0.01], [0.055, 0.05, 0.15], 10, 6, trimUV(TC.padding));
-  }
-  ellipsoid(b.trim, [0, 0.69, -0.085], [0.17, 0.06, 0.04], 10, 6, trimUV(TC.padding));
+  // the moulded headrest: one U of foam round the helmet's sides and back, its top flush with the
+  // cockpit rim, a couple of centimetres off the helmet (the driver's head lolls into it in the turns)
+  const half: V3[] = [
+    [0.19, 0.645, 0.2],
+    [0.193, 0.645, 0.1],
+    [0.19, 0.645, 0.0],
+    [0.15, 0.645, -0.062],
+    [0.07, 0.645, -0.088],
+  ];
+  const ctrl: V3[] = [...half, [0, 0.645, -0.094], ...half.slice().reverse().map((p) => [-p[0], p[1], p[2]] as V3)];
+  const path = crPath(ctrl, level === 0 ? 30 : 14);
+  const fr = framesAlong(path, () => [0, 1, 0]);
+  // (d is up here, u across the pad)
+  const st: SweepSt[] = path.map((p, i) => ({ o: p, d: fr[i].d, u: fr[i].u, sx: 0.042, sy: 0.044 }));
+  sweep(b.trim, st, roundedRect(level === 0 ? 16 : 10, 0.45), () => trimUV(TC.padding));
 }
 
 // ------------------------------------------------------------------------------------ driver
@@ -930,12 +958,49 @@ function driver(b: Buckets, level: Level) {
       rows.push(row);
     }
     b.head.grid(rows, () => drvCellUV(DC.visor), { orient: true });
-    // HANS collar + shoulders + arms + gloves
+    // the helmet's own aero: a rear spoiler across the crown and a strip of tear-offs' tab at the
+    // visor's edge (the helmet's paint, read off its unwrap at the same spot)
+    const hp = (lon: number, lat: number, k = 1): V3 => [
+      HELMET_C[0] - NECK_PIVOT[0] + Math.sin(lon) * Math.cos(lat) * HELMET_R[0] * k,
+      HELMET_C[1] - NECK_PIVOT[1] + Math.sin(lat) * HELMET_R[1] * k,
+      HELMET_C[2] - NECK_PIVOT[2] + Math.cos(lon) * Math.cos(lat) * HELMET_R[2] * k,
+    ];
+    const sp = [-0.55, -0.3, 0, 0.3, 0.55].map((d) => {
+      // (along the crown at ~50° up behind the head; it kicks up off the shell toward its trailing edge)
+      const lat = 0.86 - 0.12 * d * d;
+      const p = hp(Math.PI + d * 1.5, lat, 0.985);
+      return { x: p[0], z: p[2] + 0.012, y: p[1] + 0.006, c: 0.052, a: -18 - 6 * d * d, t: 0.16, cam: 0.02 };
+    });
+    wingElement(b.head, sp, level === 0 ? 8 : 5, () => drvUV(R_HELMET, 0.01, 0.86));
+    // the chin bar under the visor, standing forward of the shell (a ball reads as a toy's head),
+    // painted from the helmet's unwrap where it sits (the shell's sphere uv, seam at the back)
+    const H: V3 = sub3(HELMET_C, NECK_PIVOT);
+    const shellUV = (p: V3): V2 => {
+      const d = norm3([(p[0] - H[0]) / HELMET_R[0], (p[1] - H[1]) / HELMET_R[1], (p[2] - H[2]) / HELMET_R[2]]);
+      const theta = Math.acos(Math.max(-1, Math.min(1, d[1])));
+      let phi = Math.atan2(d[0], d[2]) + Math.PI;
+      if (phi >= Math.PI * 2) phi -= Math.PI * 2;
+      // (the sphere was turned −90° about y: its native u runs from the back, front = 0.5, +x = 0.75)
+      return drvUV(R_HELMET, phi / (Math.PI * 2), Math.max(0.01, 1 - theta / (Math.PI * 0.8)));
+    };
+    ellipsoid(b.head, add3(H, [0, -0.058, 0.04]), [0.1, 0.07, 0.115], ws, Math.max(6, hs >> 1), (p) => shellUV(p));
+    if (level === 0)
+      for (const side of [1, -1]) {
+        const q = hp(1.02 * side, 0.12, 1.016);
+        box(b.head, q, [0.008, 0.026, 0.012], drvCellUV(DC.hans), new THREE.Euler(0, 1.02 * side, 0));
+      }
+    // HANS collar + shoulders + arms (+ gloves: at the nearest level they ride the steering wheel, see hands)
     ellipsoid(b.driver, [0, 0.64, 0.01], [0.15, 0.04, 0.12], 12, 6, drvCellUV(DC.hans));
     for (const side of [1, -1]) {
       ellipsoid(b.driver, [0.165 * side, 0.595, 0.0], [0.1, 0.065, 0.13], 12, 8, drvCellUV(DC.suit));
-      tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.57, 0.28], [0.14 * side, 0.595, 0.47]], 0.042, 8, drvCellUV(DC.suit2), [0, 1, 0]);
-      ellipsoid(b.driver, [0.13 * side, 0.6, 0.49], [0.03, 0.04, 0.035], 8, 6, drvCellUV(DC.glove));
+      if (level > 0) {
+        tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.57, 0.28], [0.14 * side, 0.595, 0.47]], 0.042, 8, drvCellUV(DC.suit2), [0, 1, 0]);
+        ellipsoid(b.driver, [0.13 * side, 0.6, 0.49], [0.03, 0.04, 0.035], 8, 6, drvCellUV(DC.glove));
+      } else {
+        // upper arm to a rounded elbow (the forearm is a live link to the hand on the wheel)
+        tube(b.driver, [[0.2 * side, 0.585, 0.06], [0.2 * side, 0.577, 0.17], [0.2 * side, 0.57, 0.28]], 0.042, 12, drvCellUV(DC.suit2), [0, 1, 0]);
+        ellipsoid(b.driver, [0.2 * side, 0.57, 0.28], [0.043, 0.043, 0.043], 12, 8, drvCellUV(DC.suit2));
+      }
     }
   }
 }
@@ -1050,6 +1115,39 @@ function steeringWheel(mb: MB) {
   g.translate(0, 0, 0.035);
   mb.addGeometry(g, undefined, trimUV(TC.blackSatin));
   g.dispose();
+}
+
+/**
+ * The driver's forearms (left side; the right mirrors x): from the elbow (body space, it stays put)
+ * to the cuff of the glove on the wheel (steering-pivot local, it turns with the wheel). The rig
+ * draws them as two live links, like the suspension's, so the arms follow the hands round.
+ */
+export const FOREARM = { elbow: [0.2, 0.57, 0.28] as V3, wrist: [0.148, -0.004, -0.03] as V3, elbowLocal: [0.2, 0.058, -0.215] as V3, r: 0.041 };
+/** one forearm of unit length along +Z (0 … 1), radius 1 tapering to 0.85 at the wrist (driver material) */
+function forearmUnit(mb: MB) {
+  tube(mb, [[0, 0, 0], [0, 0, 0.5], [0, 0, 1]], (i) => 1 - 0.075 * i, 12, drvCellUV(DC.suit2), [0, 1, 0]);
+}
+
+/**
+ * The driver's hands on the wheel (pivot-local like the wheel, so they turn with it): a gloved fist
+ * round each grip, fingers over the front, the thumb on the face beside the rotaries, the cuff.
+ * Driver material; drawn with the driver, and on its own for the onboard cameras inside the cockpit
+ * (the driver's hands are in every onboard picture). The forearms join them live (FOREARM).
+ */
+function hands(mb: MB) {
+  const glove = drvCellUV(DC.glove);
+  for (const side of [1, -1]) {
+    const X = (x: number) => x * side;
+    // fist round the grip (its axis near vertical in the wheel's plane), knuckles over the front
+    ellipsoid(mb, [X(0.142), 0.004, 0.012], [0.031, 0.05, 0.035], 14, 10, glove, new THREE.Euler(0, 0, -0.08 * side));
+    ellipsoid(mb, [X(0.133), 0.0, 0.036], [0.03, 0.044, 0.016], 12, 8, glove, new THREE.Euler(0, 0, -0.08 * side));
+    // thumb along the face toward the buttons
+    ellipsoid(mb, [X(0.111), 0.024, -0.022], [0.024, 0.0105, 0.011], 10, 6, glove, new THREE.Euler(0, 0, 0.4 * side));
+    // the glove's cuff, heading back toward the elbow (the live forearm slides into it)
+    const wrist: V3 = [X(FOREARM.wrist[0]), FOREARM.wrist[1], FOREARM.wrist[2]];
+    const elbow: V3 = [X(FOREARM.elbowLocal[0]), FOREARM.elbowLocal[1], FOREARM.elbowLocal[2]];
+    tube(mb, [wrist, lerp3(wrist, elbow, 0.16)], (i) => (i === 0 ? 0.03 : 0.037), 12, glove, [0, 1, 0]);
+  }
 }
 
 // ------------------------------------------------------------------------------------ decals (driver material)
@@ -1457,6 +1555,19 @@ function cornerAssembly(mb: MB, w: number, front: boolean, level: Level) {
         sc.push(ellipse(10).map(([a, bb]) => [-h + 0.02 + a * 0.035 * s, -0.08 + bb * 0.06 * s, z] as V3));
       mb.grid(sc, () => trimUV(TC.ductBlack), { wrapCols: true, orient: true });
       mb.cap(sc[0], [0, 0, 1], trimUV(TC.inletDark));
+    } else {
+      // the rear duct's inlet: a tall scoop inboard of the wheel, ahead of the axle, mouth to the
+      // airflow, its throat turning into the drum
+      const sc: V3[][] = [];
+      for (const [z, s, dx] of [
+        [0.32, 1.0, 0],
+        [0.23, 0.92, 0.004],
+        [0.12, 0.7, 0.02],
+      ] as V3[])
+        sc.push(roundedRect(12, 0.5).map(([a, bb]) => [-h - 0.034 + dx + a * 0.026 * s, 0.07 + bb * 0.075 * s, z] as V3));
+      mb.grid(sc, () => trimUV(TC.ductBlack), { wrapCols: true, orient: true });
+      mb.cap(sc[0], [0, 0, 1], trimUV(TC.inletDark));
+      mb.cap(sc[2], [0, 0, -1], trimUV(TC.ductBlack));
     }
   }
 }
@@ -1482,6 +1593,10 @@ export interface CarGeoLevel {
   /** the front wing's active flaps, left and right, pivot-local (FW_FLAP_PIVOT) */
   fwFlaps: [THREE.BufferGeometry, THREE.BufferGeometry];
   steer: THREE.BufferGeometry | null;
+  /** the driver's gloved hands on the wheel, steering-pivot local (driver material; nearest level only) */
+  hands: THREE.BufferGeometry | null;
+  /** one unit forearm (nearest level: the rig instances it elbow → hand, see FOREARM) */
+  forearm: THREE.BufferGeometry | null;
   unsprung: { carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; blurRear: THREE.BufferGeometry | null };
   frontAssy: THREE.BufferGeometry | null;
   blurFront: THREE.BufferGeometry | null;
@@ -1517,9 +1632,15 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   frontFlap(fwFlapR, level, -1);
 
   let steer: MB | null = null;
+  let handsMB: MB | null = null;
+  let forearmMB: MB | null = null;
   if (level === 0) {
     steer = new MB();
     steeringWheel(steer);
+    handsMB = new MB();
+    hands(handsMB);
+    forearmMB = new MB();
+    forearmUnit(forearmMB);
   }
 
   const uc = new MB();
@@ -1616,6 +1737,8 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
       return am.build();
     })() : null,
     steer: steer ? steer.build() : null,
+    hands: handsMB ? handsMB.build() : null,
+    forearm: forearmMB ? forearmMB.build() : null,
     unsprung: { carbon: uc.build(), trim: ut.build(), blurRear: blurRear ? blurRear.build() : null },
     frontAssy: frontAssy ? frontAssy.build() : null,
     blurFront: blurFront ? blurFront.build() : null,
@@ -1629,7 +1752,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   const tri = (g: THREE.BufferGeometry | null, k = 1) => (g ? ((g.index ? g.index.count : g.getAttribute('position').count) / 3) * k : 0);
   out.triangles =
     PART_IDS.reduce((n, k) => n + tri(out.parts[k].paint) + tri(out.parts[k].carbon) + tri(out.parts[k].trim), 0) +
-    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) +
+    tri(out.body.paint) + tri(out.body.carbon) + tri(out.body.trim) + tri(out.body.driver) + tri(out.body.head) + tri(out.flap) + tri(out.fwFlaps[0]) + tri(out.fwFlaps[1]) + tri(out.steer) + tri(out.hands) + tri(out.forearm, 2) +
     tri(out.unsprung.carbon) + tri(out.unsprung.trim) + tri(out.frontAssy, 2) + tri(out.wheelF, 2) + tri(out.wheelR, 2) + tri(out.spokesF, 2) + tri(out.spokesR, 2) + tri(out.wheelsMerged) + tri(out.blurFront, 2) + tri(out.unsprung.blurRear);
   return out;
 }

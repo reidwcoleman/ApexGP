@@ -30,6 +30,8 @@ import * as THREE from 'three';
  *   aCard      (corner offset across, corner offset along the card (m; 0, 0 for wood), limb sway
  *              weight, billboard amount: how far the card turns about its axis toward the camera)
  *   aAxis      card: (axis e1 — along the spray toward its tip, tint); wood: 0
+ *   aLod       which LOD the geometry is (0 … 2): the shader dithers neighbouring LODs into each
+ *              other over a short band instead of swapping them in one frame
  * The vertex shader (treematerial.ts) builds each card's corners from these for whatever camera is
  * drawing (the sun's in the shadow pass) and moves wood and leaves with the same wind weights.
  */
@@ -134,7 +136,7 @@ const kit: TreeKit = {
  * decode one near LOD (tools/bake_trees.mjs → treebake.ts packLod): V wood vertices + I indices,
  * then K leaf cards, each expanded here into its four corners
  */
-function decodeLod(buf: ArrayBuffer, off: number, V: number, I: number, K: number, cols: number, rows: number): THREE.BufferGeometry {
+function decodeLod(buf: ArrayBuffer, off: number, V: number, I: number, K: number, cols: number, rows: number, lod: number): THREE.BufferGeometry {
   const dv = new DataView(buf, off);
   const NV = V + K * 4, NI = I + K * 6;
   const pos = new Float32Array(NV * 3), nor = new Float32Array(NV * 3), uv = new Float32Array(NV * 2), col = new Float32Array(NV * 3);
@@ -196,11 +198,14 @@ function decodeLod(buf: ArrayBuffer, off: number, V: number, I: number, K: numbe
   g.setAttribute('aTree', new THREE.BufferAttribute(tree, 4));
   g.setAttribute('aCard', new THREE.BufferAttribute(card, 4));
   g.setAttribute('aAxis', new THREE.BufferAttribute(axis, 4));
+  g.setAttribute('aLod', new THREE.BufferAttribute(new Float32Array(NV).fill(lod), 1));
   g.setIndex(new THREE.BufferAttribute(idx, 1));
   g.computeBoundingBox();
   g.computeBoundingSphere();
-  // (the cards are spread in the vertex shader: grow the bounds by the largest card)
-  g.boundingSphere!.radius += 2;
+  // (the cards are spread in the vertex shader: grow the bounds by the largest card, and the crown's
+  // sway in a gale — a crown sticking out past its sphere is culled while still on screen, and pops
+  // in at the frame's edge as the car turns toward it)
+  g.boundingSphere!.radius += 3.5;
   return g;
 }
 
@@ -250,7 +255,7 @@ export function loadTreeKit(): Promise<TreeKit> {
         const p = man.protos.find((q) => q.id === info.id);
         if (!p) throw new Error(`trees.json has no ${info.id}`);
         if (man.version !== 2) throw new Error(`trees.json is version ${man.version}, expected 2`);
-        protos.push({ index, id: p.id, lods: p.lods.map((l) => decodeLod(bin, l.off, l.v, l.i, l.cards, man.leaf.cols, man.leaf.rows)), height: p.height, radius: p.radius, crownR: p.crownR, crownY: p.crownY, W: p.W, Hc: p.Hc });
+        protos.push({ index, id: p.id, lods: p.lods.map((l, li) => decodeLod(bin, l.off, l.v, l.i, l.cards, man.leaf.cols, man.leaf.rows, li)), height: p.height, radius: p.radius, crownR: p.crownR, crownY: p.crownY, W: p.W, Hc: p.Hc });
       });
       const rowOf = new Map(man.protos.map((p, i) => [p.id, i] as const));
       // (the impostor rows follow the manifest; the shader indexes by prototype)

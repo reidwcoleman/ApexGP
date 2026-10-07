@@ -12,8 +12,9 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  *                    light through the leaves when back-lit (shadowed properly because it
  *                    rides on the directional light's shadowed colour), crown-depth AO and
  *                    each leaf's place in its spray, hashed alpha at a distance, rain gloss,
- *                    and a dithered fade-out at the 3D → impostor distance (a shorter one for
- *                    conifers: instance colour w = 2).
+ *                    a dithered fade-out at the 3D → impostor distance (a shorter one for
+ *                    conifers: instance colour w = 2), and the same dither cross-fading each LOD
+ *                    into the next (aLod) — all measured from the camera's look-ahead (uLook).
  *  treeDepthMaterial()  the same cards + wind (no flutter, no wake) + leaf alpha for the shadow map.
  *  impostorMaterial()   camera-facing cards showing the scanned tree's baked frames (8 views
  *                    around it, blended by the camera's bearing), relit from the baked
@@ -31,6 +32,15 @@ export interface TreeUniforms {
   uFade: THREE.IUniform<THREE.Vector2>;
   /** the conifers' (shorter) 3D fade band: instance colour w = 2 (vegetation.ts) */
   uFadeC: THREE.IUniform<THREE.Vector2>;
+  /**
+   * the look-ahead (vegetation.ts update): (direction of travel x, z (unit, or 0), reach ahead for
+   * the near detail — LODs, conifers — and for the broadleaf 3D → impostor hand-over (m)). Every
+   * fade distance is measured from the segment the camera will cover in the next half second, so a
+   * tree the car is heading for is in full detail well before it gets there, not as it goes by.
+   */
+  uLook: THREE.IUniform<THREE.Vector4>;
+  /** LOD cross-fade: (LOD0 → 1 distance, LOD1 → 2 distance, half-width of the dithered band, 0) */
+  uLodB: THREE.IUniform<THREE.Vector4>;
   /** world direction toward the sun (for the leaf shadow offset) */
   uSunW: THREE.IUniform<THREE.Vector3>;
   /**
@@ -48,7 +58,7 @@ export function setLeafFill(u: TreeUniforms, sunShare: number) {
 }
 
 export function createTreeUniforms(): TreeUniforms {
-  return { uTime: { value: 0 }, uFrame: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uFadeC: { value: new THREE.Vector2(48, 56) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
+  return { uTime: { value: 0 }, uFrame: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uFadeC: { value: new THREE.Vector2(48, 56) }, uLook: { value: new THREE.Vector4() }, uLodB: { value: new THREE.Vector4(34, 50, 4, 0) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
 }
 
 // ---------------------------------------------------------------- car wake
@@ -147,6 +157,21 @@ vec4 carWake( vec3 P ) {
 }
 `;
 
+/**
+ * GLSL: a tree's fade distance — from the camera's look-ahead segment (the camera and the stretch of
+ * the next half second's travel ahead of it, uLook) rather than the camera itself: the same as the
+ * plain distance beside and behind, shorter for what lies ahead. Shared by the 3D trees and the
+ * impostors so their hand-over dithers stay matched.
+ */
+const TREE_LOOK = /* glsl */ `
+uniform vec4 uLook;
+float treeLookDist( vec3 p, float ahead ) {
+  vec3 rel = p - cameraPosition;
+  vec3 dir = vec3( uLook.x, 0.0, uLook.y );
+  return length( rel - dir * clamp( dot( rel, dir ), 0.0, ahead ) );
+}
+`;
+
 // ---------------------------------------------------------------- the 3D trees' vertex motion
 
 /**
@@ -173,7 +198,7 @@ uniform vec2 uWind;
 ${CAR_WAKE_GLSL}
 varying vec4 vTree;
 varying vec2 vTUv;
-varying float vFadeD;
+varying vec2 vFadeD;
 float treeGust( vec2 xz, vec2 wd, float wl ) {
   float gx = dot( xz, wd ) * 0.026 - uTime * ( 0.45 + wl * 0.11 );
   float cr = dot( xz, vec2( -wd.y, wd.x ) ) * 0.012;
@@ -343,6 +368,8 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       uFrame: u.uFrame,
       uFade: u.uFade,
       uFadeC: u.uFadeC,
+      uLook: u.uLook,
+      uLodB: u.uLodB,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
       uLeafMap: { value: kit.leafMap },
@@ -355,7 +382,7 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       ...wakeUniforms,
     });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\nvarying float vLeafL;\nvarying float vAOL;\nuniform vec3 uSunW;`)
+      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\n${TREE_LOOK}\nattribute float aLod;\nuniform vec4 uLodB;\nvarying vec2 vLodK;\nvarying float vLeafL;\nvarying float vAOL;\nuniform vec3 uSunW;`)
       .replace('#include <shadowmap_vertex>', `#ifdef USE_SHADOWMAP\n  worldPosition.xyz += uSunW * ( 0.45 * step( 0.5, aTree.y ) );\n#endif\n#include <shadowmap_vertex>`)
       // (leaf cards: the colour attribute carries the lighting normal, the tint rides in aAxis.w)
       .replace(
@@ -394,7 +421,14 @@ transformed += treeDisp;
   vTUv = uv;
   vLeafL = step( 0.5, aTree.y );
   vAOL = aTree.z;
-  vFadeD = distance( cameraPosition, ip );
+  // (near detail and conifers by the full look-ahead, the broadleaf hand-over by half of it)
+  vFadeD = vec2( treeLookDist( ip, uLook.z ), treeLookDist( ip, uLook.w ) );
+  // this LOD's share of the dither: [ x, y ) of the noise. Neighbouring LODs take complementary
+  // ranges across each band (the 3D tree's overall share is untouched), so a tree turns into its
+  // next LOD over a few metres in a matched dither, the same way it hands over to its impostor
+  float s0 = smoothstep( uLodB.x - uLodB.z, uLodB.x + uLodB.z, vFadeD.x );
+  float s1 = smoothstep( uLodB.y - uLodB.z, uLodB.y + uLodB.z, vFadeD.x );
+  vLodK = aLod < 0.5 ? vec2( s0, 2.0 ) : aLod < 1.5 ? vec2( s1, s0 ) : vec2( -1.0, s1 );
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
@@ -412,7 +446,8 @@ uniform vec3 uLeafFill;
 varying vec4 vTree;
 varying vec2 vTUv;
 uniform vec2 uLeafGrid;
-varying float vFadeD;
+varying vec2 vFadeD;
+varying vec2 vLodK;
 ${GET_TANGENT_FRAME}`,
       )
       .replace(
@@ -436,9 +471,11 @@ material.specularF90 = mix( material.specularF90, 0.22, leafK );`,
 float leafK = step( 0.5, vTree.y );
 {
   // (instance colour w: 2 = a conifer, on its own shorter 3D band)
-  vec2 fb = vColor.a > 1.5 ? uFadeC : uFade;
-  float f = fb.y > 0.0 ? smoothstep( fb.x, fb.y, vFadeD ) : 0.0;
-  if ( f > ignF( gl_FragCoord.xy ) ) discard;
+  bool fir = vColor.a > 1.5;
+  vec2 fb = fir ? uFadeC : uFade;
+  float f = fb.y > 0.0 ? smoothstep( fb.x, fb.y, fir ? vFadeD.x : vFadeD.y ) : 0.0;
+  float ig = ignF( gl_FragCoord.xy );
+  if ( f > ig || ig < vLodK.x || ig >= vLodK.y ) discard;
 }
 if ( leafK > 0.5 ) {
   // (sharper than the default mip: individual leaves stay legible a little further out — the hashed
@@ -511,7 +548,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v8';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v9';
   return mat;
 }
 
@@ -572,6 +609,7 @@ export function impostorMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStand
     Object.assign(sh.uniforms, {
       uFade: u.uFade,
       uFadeC: u.uFadeC,
+      uLook: u.uLook,
       uTime: u.uTime,
       uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
@@ -596,6 +634,7 @@ uniform vec2 uFade;
 uniform vec2 uFadeC;
 uniform float uTime;
 uniform vec2 uWind;
+${TREE_LOOK}
 varying vec4 vIUv;
 varying float vIW;
 varying vec3 vIR;
@@ -630,8 +669,8 @@ varying float vAOL;`,
   vec3 up = vec3( 0.0, cos( tilt ), 0.0 ) - fwd * sin( tilt );
   vec3 nrm = fwd * cos( tilt ) + vec3( 0.0, sin( tilt ), 0.0 );
   float flip = iInfo.y > 0.5 ? -1.0 : 1.0;
-  float d = length( toCam );
-  vIFade = iInfo.z > 1.5 ? smoothstep( uFadeC.x, uFadeC.y, d ) : iInfo.z > 0.5 ? smoothstep( uFade.x, uFade.y, d ) : 1.0;
+  // (the 3D trees' own fade distances: the look-ahead, full for conifers, half for broadleaf)
+  vIFade = iInfo.z > 1.5 ? smoothstep( uFadeC.x, uFadeC.y, treeLookDist( P, uLook.z ) ) : iInfo.z > 0.5 ? smoothstep( uFade.x, uFade.y, treeLookDist( P, uLook.w ) ) : 1.0;
   // the 3D trees' wind (treeWind's trunk term): a lean with the mean wind, the tree's own slow swing
   // and the gusts rolling downwind through the woods — a card can only lean in its own plane, so it
   // takes the wind's component across the view; the crown breathes a little (limbs swinging) too
@@ -726,6 +765,6 @@ diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.072
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-impostor-v5';
+  mat.customProgramCacheKey = () => 'apex-tree-impostor-v6';
   return mat;
 }

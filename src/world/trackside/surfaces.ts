@@ -44,6 +44,10 @@ export function buildSurfaces(ctx: Ctx) {
     b.s1[1] = edge;
     b.s1[2] = paint;
     b.s1[3] = t.halfWidth[i];
+    b.s2[0] = ctx.elevens[i];
+    b.s2[1] = ctx.dirtL[i];
+    b.s2[2] = ctx.dirtR[i];
+    b.s2[3] = ctx.lineLoad[i];
   };
 
   /** flat band between signed laterals, rows i and i+1 (a0/b0 at row i, a1/b1 at row i+1) */

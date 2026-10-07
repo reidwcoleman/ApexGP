@@ -76,8 +76,8 @@ function f2Drivers(): DriverData[] {
 
 /** ages at the start of a career (the grid as shipped; the junior field is 18–23) */
 const AGES: Record<string, number> = {
-  LCL: 28, HMF: 41, RSW: 28, ATN: 19, VHN: 28, HDR: 21, MRS: 26, PST: 25, AVR: 44, STD: 27, GSN: 30,
-  CPT: 22, ABY: 30, SNE: 31, OCP: 29, BRG: 21, LWT: 24, LDQ: 19, BTL: 21, HLB: 38, PRT: 36, BTA: 36,
+  RAV: 28, ACH: 41, ASH: 28, MOR: 19, VMR: 28, DUA: 21, WHT: 26, KRN: 25, SLV: 44, BRN: 27, FON: 30,
+  AGR: 22, MEH: 30, NAV: 31, MCH: 29, CAL: 21, THN: 24, EKS: 19, TAV: 21, KRL: 38, CAS: 36, AAL: 36,
 };
 export function ageOf(d: Driver): number {
   const a = (d as DriverData).age;

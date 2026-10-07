@@ -4,6 +4,7 @@ import { Frame3, WEATHER, beam, box, cylinder, disc, printQuadX, printQuadZ, typ
 import { styleOf, type Ctx } from './context.ts';
 import { SPONSORS, type PrintAtlas } from './atlas.ts';
 import { Rng } from './noise.ts';
+import { DRESS_BRIDGES } from '../env/venues/dressBridges.ts';
 
 /**
  * Bigger trackside structures for Monza: the start gantry with its five light
@@ -98,6 +99,10 @@ interface VenueProps {
   bridges: number[];
   cameras: string[];
   billboards: [string, number][];
+  /** most automatic sponsor arches (default 3) */
+  arches?: number;
+  /** s of the venue's own overhead gantries (env/venues/*Dress.ts): the arches keep clear of them */
+  keepClear?: number[];
 }
 const VENUE_PROPS: Record<string, VenueProps> = {
   // Sakhir: sponsor bridges over the run from Turn 3 to Turn 4 and over the back straight
@@ -108,55 +113,67 @@ const VENUE_PROPS: Record<string, VenueProps> = {
   },
   // the main straight past the pit exit, and the back straight toward the Parabolica
   monza: {
-    bridges: [1048, 4700],
+    bridges: [], // (env/venues/monzaDress.ts)
     cameras: ['Turn 1', 'Curva Grande', 'Roggia', 'Lesmo 2', 'Ascari', 'Parabolica'],
     billboards: [['Turn 1', 0], ['Roggia', 4], ['Ascari', 8], ['Parabolica', 12], ['Lesmo 1', 2]],
   },
   // the Kemmel straight after Raidillon, the run down to Blanchimont
   spa: {
-    bridges: [2150, 6050],
+    bridges: [], // (env/venues/spaDress.ts)
     cameras: ['La Source', 'Raidillon', 'Les Combes', 'Rivage', 'Pouhon', 'Stavelot', 'Blanchimont', 'Bus Stop'],
     billboards: [['La Source', 1], ['Les Combes', 5], ['Rivage', 9], ['Bus Stop', 13], ['Stavelot', 3]],
   },
   // the Wellington and Hangar straights
   silverstone: {
-    bridges: [1800, 4850],
+    bridges: [], // (env/venues/silverstoneDress.ts)
     cameras: ['Abbey', 'Village', 'Brooklands', 'Luffield', 'Copse', 'Becketts', 'Stowe', 'Club'],
     billboards: [['Village', 2], ['Brooklands', 6], ['Stowe', 10], ['Copse', 14], ['Club', 4]],
   },
   // the end of the main straight before Turn 1, the run from Spoon to the crossover
   suzuka: {
-    bridges: [905, 4560],
+    bridges: [], // (env/venues/suzukaDress.ts)
     cameras: ['Turn 1', 'S Curves', 'Dunlop', 'Degner 1', 'Hairpin', 'Spoon', '130R', 'Casio Triangle'],
     billboards: [['Turn 1', 3], ['Hairpin', 7], ['Spoon', 11], ['Casio Triangle', 1], ['Degner 1', 9]],
   },
-  // COTA: the back straight (a sponsor bridge halfway down it)
+  // COTA: the back straight (a sponsor bridge halfway down it); the Turn 1, 11 and 12 boards and
+  // the gantry before the stadium are the venue's own (env/venues/austinDress.ts)
   austin: {
     bridges: [3380],
     cameras: ['Turn 1', 'Turn 3', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 15', 'Turn 18', 'Turn 20'],
-    billboards: [['Turn 1', 2], ['Turn 11', 6], ['Turn 12', 10], ['Turn 15', 14], ['Turn 19', 4]],
+    billboards: [['Turn 15', 14], ['Turn 19', 4]],
+    arches: 1,
+    keepClear: [3780],
   },
   // the climb from the Niki Lauda Kurve to Remus, the run along the top to Schlossgold
+  // (the boards at the end of the Niki Lauda and Remus run-offs and the gantry down to Schlossgold: spielbergDress.ts)
   spielberg: {
     bridges: [1330, 2330],
     cameras: ['Niki Lauda', 'Remus', 'Schlossgold', 'Rauch', 'Würth', 'Jochen Rindt', 'Red Bull Mobile'],
-    billboards: [['Niki Lauda', 2], ['Remus', 6], ['Schlossgold', 10], ['Red Bull Mobile', 14], ['Rauch', 4]],
+    billboards: [['Schlossgold', 10], ['Red Bull Mobile', 14], ['Rauch', 4]],
+    arches: 1,
+    keepClear: [2060],
   },
   // Zandvoort: the footbridge over the climb out of the Hugenholtz, another over the back straight
+  // (the orange gantry over the braking zone into Tarzan: zandvoortDress.ts)
   zandvoort: {
     bridges: [1690, 3480],
     cameras: ['Tarzanbocht', 'Hugenholtzbocht', 'Rob Slotemakerbocht', 'Scheivlak', 'Mastersbocht', 'Hans Ernstbocht', 'Kumhobocht', 'Arie Luyendijkbocht'],
     billboards: [['Tarzanbocht', 2], ['Hugenholtzbocht', 6], ['Mastersbocht', 10], ['Hans Ernstbocht', 14], ['Kumhobocht', 4]],
+    arches: 1,
+    keepClear: [930],
   },
   // Interlagos: the footbridge over the Reta Oposta, another over the climb of the Subida dos Boxes
+  // (the gantry before the Descida do Lago and the boards up the Subida dos Boxes: interlagosDress.ts)
   interlagos: {
     bridges: [2240, 440],
     cameras: ['S do Senna', 'Curva do Sol', 'Descida do Lago', 'Ferradura', 'Laranjinha', 'Bico de Pato', 'Mergulho', 'Junção'],
     billboards: [['S do Senna', 2], ['Descida do Lago', 6], ['Bico de Pato', 10], ['Junção', 14], ['Ferradura', 4]],
+    arches: 1,
+    keepClear: [2480],
   },
   // Hungaroring: footbridges over the back straight (up to Turn 4) and the run down to Turn 12
   hungaroring: {
-    bridges: [1990, 3790],
+    bridges: [], // (env/venues/hungaroringDress.ts)
     cameras: ['Turn 1', 'Turn 2', 'Turn 4', 'Turn 5', 'Turn 6', 'Turn 9', 'Turn 11', 'Turn 12', 'Turn 14'],
     billboards: [['Turn 1', 2], ['Turn 2', 6], ['Turn 5', 10], ['Turn 12', 14], ['Turn 14', 4]],
   },
@@ -167,10 +184,13 @@ const VENUE_PROPS: Record<string, VenueProps> = {
     cameras: ['Jones', 'Brabham', 'Sports Centre', 'Marina', 'Lauda', 'Turn 9', 'Ascari', 'Stewart', 'Prost'],
     billboards: [['Jones', 3], ['Sports Centre', 7], ['Ascari', 11], ['Turn 9', 1], ['Marina', 9]],
   },
+  // (Montréal's own banner gantry over the Casino straight: montrealDress.ts)
   montreal: {
     bridges: [3760, 2380],
     cameras: ['Turn 1', 'Virage Senna', 'Turn 3', 'Turn 6', 'Turn 8', "L'Épingle", 'Turn 13'],
     billboards: [['Turn 1', 3], ["L'Épingle", 7], ['Turn 13', 11], ['Turn 8', 1], ['Turn 3', 9]],
+    arches: 1,
+    keepClear: [4170],
   },
   // Yas Marina: footbridges over the back straight and the run down to the marina
   yasmarina: {
@@ -193,7 +213,8 @@ export function buildStructures(ctx: Ctx, atlas: PrintAtlas): StructuresOut {
   // sponsor footbridges
   vp.bridges.forEach((s, k) => buildBridge(ctx, atlas, s, k));
   // sponsor arches over the straights: something to drive through between the bridges
-  buildArches(ctx, atlas, [...vp.bridges, ctx.track.startS]);
+  // (and away from the gantries and bridges a venue's own dressing builds: keepClear, env/venues/dressBridges.ts)
+  buildArches(ctx, atlas, [...vp.bridges, ...(vp.keepClear ?? []), ctx.track.startS, ...(DRESS_BRIDGES[ctx.track.def.id] ?? [])], vp.arches ?? 3);
   buildMarshalPosts(ctx, atlas, out);
   placePhotographers(ctx, out);
   buildCameras(ctx, vp.cameras);
@@ -383,7 +404,7 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
  * that glows after dark. Only on straights (nothing overhead mid-corner), well clear of the
  * footbridges, the start gantry, the pit lane and any part of the circuit crossing close by.
  */
-function buildArches(ctx: Ctx, atlas: PrintAtlas, taken: number[]) {
+function buildArches(ctx: Ctx, atlas: PrintAtlas, taken: number[], max = 3) {
   const t = ctx.track;
   const L = t.length;
   const clear = (s: number) => taken.every((u) => Math.abs(t.delta(u, s)) > 260);
@@ -392,7 +413,7 @@ function buildArches(ctx: Ctx, atlas: PrintAtlas, taken: number[]) {
     return true;
   };
   const picks: number[] = [];
-  for (let s = 40; s < L && picks.length < 3; s += 20) {
+  for (let s = 40; s < L && picks.length < max; s += 20) {
     if (t.inPit(s) || t.inPit(s + 80) || t.inPit(s - 80) || !straight(s) || !clear(s)) continue;
     const i = ctx.wrap(Math.floor(s));
     const p = t.point(s, 0, 0, A);
