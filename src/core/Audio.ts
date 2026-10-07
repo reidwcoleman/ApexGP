@@ -3,7 +3,8 @@
  *
  * Engine: a physically-flavoured V6 turbo-hybrid voice running in an AudioWorklet
  * (see audio/engineWorklet.ts) split into exhaust / rasp / intake / roar / pops / mechanical
- * layers, plus native turbo whistle, gearbox whine and ERS whine. Views re-balance the layers:
+ * layers, plus native turbo whistle, gearbox whine (gear pair + final drive) and the MGU-K's
+ * whine (deploying and harvesting). Views re-balance the layers:
  * cockpit = intake + mechanical + low-passed "outside", chase = exhaust dominant,
  * tv = distant trackside camera with doppler.
  *
@@ -47,7 +48,7 @@ export interface PlayerAudioState {
   surface: number;
   onKerb: boolean;
   drs: boolean;
-  /** ERS deploy 0..1 */
+  /** overtake (manual override) deploy 0..1 — the MGU-K's ordinary deploy/harvest is implied by throttle, brake and speed */
   ers: number;
   limiter: boolean;
   /** pit-lane speed limiter engaged (the engine burbles against it) */
@@ -110,17 +111,17 @@ const VIEWS: Record<AudioView, ViewMix> = {
   // 150–600 Hz with a heavy floor of wind, buffeting and road rumble under it, and little above
   // 2 kHz — the helmet and the tub swallow the fizz; tools/audiocheck.mjs --bands)
   cockpit: {
-    exhaust: 0.32, rasp: 0.25, pops: 0.5, intake: 1.0, roar: 0.6, mech: 0.5, whistle: 0.7, gear: 0.7,
+    exhaust: 0.32, rasp: 0.25, pops: 0.5, intake: 1.0, roar: 0.6, mech: 0.5, whistle: 0.7, gear: 0.7, ers: 1.0,
     tyres: 1.25, wind: 1.9, buffet: 2.0, nearDirect: 1, outsideLP: 1900, reverb: 0.03, body: 8, opponents: 0.7,
   },
   // (outside, the footage is still dark and heavy: the exhaust's body, not its fizz — the air and the
   // distance take the top off, the wind and the road fill the bottom)
   chase: {
-    exhaust: 1.0, rasp: 0.55, pops: 1.0, intake: 0.3, roar: 0.25, mech: 0.18, whistle: 0.45, gear: 0.3,
+    exhaust: 1.0, rasp: 0.55, pops: 1.0, intake: 0.3, roar: 0.25, mech: 0.18, whistle: 0.45, gear: 0.3, ers: 0.5,
     tyres: 1.1, wind: 1.0, buffet: 0, nearDirect: 1, outsideLP: 7000, reverb: 0.08, body: 6, opponents: 1.0,
   },
   tv: {
-    exhaust: 1.0, rasp: 0.5, pops: 0.9, intake: 0.14, roar: 0.12, mech: 0.06, whistle: 0.25, gear: 0.12,
+    exhaust: 1.0, rasp: 0.5, pops: 0.9, intake: 0.14, roar: 0.12, mech: 0.06, whistle: 0.25, gear: 0.12, ers: 0.35,
     tyres: 0.8, wind: 0.4, buffet: 0, nearDirect: 0, outsideLP: 5000, reverb: 0.3, body: 0, opponents: 1.0,
   },
 };
@@ -471,6 +472,7 @@ export class GameAudio {
         throttle: s.throttle,
         brake: s.brake,
         speed: s.speed,
+        gear: s.gear,
         ers: s.ers,
         limiter: s.limiter,
         pitLimiter: s.pitLimiter,
