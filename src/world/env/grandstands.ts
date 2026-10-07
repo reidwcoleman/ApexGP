@@ -27,6 +27,7 @@ import { BRAZIL_FANS, drawInterlagosFlags } from './venues/interlagosFlags.ts';
 import { ZANDVOORT_FANS, drawZandvoortFlags } from './venues/zandvoort.ts';
 import { MEXICO_FANS, drawMexicoFlags } from './venues/mexico.ts';
 import { SAKHIR_FANS, drawSakhirFlags } from './venues/sakhirScenery.ts';
+import { VENUE_SEATS } from './venues/dress.ts';
 
 /**
  * Grandstands and the tifosi.
@@ -744,7 +745,7 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     fanColor,
     flagDesign,
     sponsor: () => sponsorUV(sponsorK++),
-    seats: map.venue === 'zandvoort' ? ZANDVOORT_SEATS : SEAT_SCHEMES,
+    seats: map.venue === 'zandvoort' ? ZANDVOORT_SEATS : VENUE_SEATS[map.venue] ?? SEAT_SCHEMES,
   };
   const glassGeo = new GlassGeo();
   const stands = layout.grandstands;

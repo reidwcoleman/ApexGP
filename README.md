@@ -145,6 +145,19 @@ npm run check    # tsc --noEmit
   raked masts (uplit after dark); Mexico City's Reforma towers (Torre Reforma, BBVA, Mayor, Chapultepec Uno,
   the Latinoamericana, the WTC, Mítikah) stand 5–10 km west at their real bearings; Sakhir is lined with light
   poles every ~50 m a side.
+- **Race-weekend dressing** (`env/venues/dressKit.ts`, one `<venue>Dress.ts` each, dispatched by `venues/dress.ts`) —
+  each venue's own boards laid out where the broadcast shows them rather than from the paddock-wide pool: a canvas
+  atlas per venue (fictional brands in the real boards' colour blocks — `venues/dressBrands.ts` — and the event's own
+  banners), rows of printed or LED hoardings on posts behind the barrier (clear of marshal posts, stands, fan banks,
+  screens and footbridges; brands in contract runs), big braced boards at the ends of run-offs, a banner gantry
+  over a straight (the generic arches keep clear: `VENUE_PROPS.keepClear` / `arches` in `trackside/structures.ts`),
+  painted logos in the tarmac run-offs (only where it really is tarmac run-off) and the pit building's roof:
+  Montréal's white canopy over the roof terrace with GRAND PRIX DU CANADA on its fascia and boards down the Casino
+  straight; Spielberg's graphite roof blade sweeping up over the pit lane with its red leading edge and the energy
+  drink's logos painted across the Niki Lauda, Remus and Schlossgold run-offs; Zandvoort's glazed Paddock Club
+  pavilion under an orange fascia and the orange gantry into Tarzan; COTA's white Paddock Club blade with its fin
+  screen and the court-sized logos in the Turn 1 run-off; Interlagos's big boards up the Subida dos Boxes and the
+  painted S do Senna. Seat colours per venue (`VENUE_SEATS`).
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars
@@ -154,7 +167,7 @@ npm run check    # tsc --noEmit
 - **Pit buildings in each circuit's own materials** — `pitStyle` (pitlane/building.ts): trim, cladding, core,
   frame and glass tint per venue (Spa's and Mexico's dark grey, Sakhir's sandstone, Spielberg's graphite) and the
   top floor's shading: vertical fins (Monza, Yas), horizontal louvres on outriggers (Suzuka, Hungaroring,
-  Melbourne, Zandvoort, Sakhir) or a flush curtain wall (Spa, Austin, Mexico). The end elevations — what the
+  Melbourne, Zandvoort, Sakhir) or a flush curtain wall (Spa, Austin, Mexico, Montréal). The end elevations — what the
   long lens sees down the straight — wrap the curtain wall round the corner, carry the slab edges round as
   bands, a framed event board in the host's colours, a stair core rising past the roof, a glazed lobby under a
   canopy, a roller shutter and a louvred plant enclosure. Race control's glazing is raked outward under a deep
