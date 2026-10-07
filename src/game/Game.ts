@@ -45,7 +45,7 @@ import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.t
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
 import { BRAND_FONTS } from '../world/brands.ts';
 import { aerialLens, aerialParams } from '../world/env/fog.ts';
-import { buildPitComplex, type PitComplex } from '../world/PitComplex.ts';
+import { buildGarageBox, buildPitComplex, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { F1_SPEC } from '../sim/CarPhysics.ts';
@@ -392,9 +392,11 @@ export class Game {
 
     setCarAORenderer(this.gfx.renderer);
     // ?track=<id> (dev/demo links) overrides the saved choice
-    // (the garage opens at the circuit you race next: the career's next round, the newest unlocked)
+    // (the garage opens at the circuit you race next: the career's next round; without one the
+    // quick-race circuit picked last time, then the newest unlocked)
     const unlocked = this.career.unlockedCircuits();
-    const next = this.dc.nextTrack ?? this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? this.menu.setup.track;
+    const picked = this.career.isUnlocked(this.menu.setup.track) ? this.menu.setup.track : null;
+    const next = this.dc.nextTrack ?? picked ?? this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? MONZA.id;
     const want = new URLSearchParams(location.search).get('track') ?? next;
     await this.buildWorld(
       CIRCUITS.find((c) => c.id === want) ?? MONZA,
@@ -402,7 +404,7 @@ export class Game {
         progress(0.06 + f * 0.56, step);
         await tick();
       },
-      { people, signs: fonts, ground: asphalt, pixels },
+      { people, signs: fonts, pixels },
     );
 
     mark('world');
@@ -419,19 +421,10 @@ export class Game {
     progress(0.62, 'Rolling out the cars');
     await preloadCarAssets();
     this.scene.add(this.carsGroup);
-    for (let i = 0; i < this.entries.length; i++) {
-      const e = this.entries[i];
-      const rig = createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
-      this.rigs.set(e, rig);
-      this.rigTeam.set(e, e.team.id);
-      this.rigDriverKey.set(e, driverKey(e));
-      this.views.set(e, new CarView(rig));
-      this.carsGroup.add(rig.root);
-      if (i % 4 === 3) {
-        progress(0.62 + (0.25 * i) / this.entries.length, 'Rolling out the cars');
-        await tick();
-      }
-    }
+    // the two cars in the garage, the player's and the teammate's (the rest of the field is made
+    // behind the garage: completeWorld)
+    const team = TEAMS[this.menu.setup.team];
+    for (const e of this.entries) if (e.team === team) this.makeRig(e);
     // far cars cast a one-mesh silhouette into the shadow maps (see CarRig.shadowPass)
     // (the player's car keeps its detailed shadow up close; the others use a middle-detail one)
     this.gfx.onShadowPass((on) => {
@@ -448,8 +441,9 @@ export class Game {
     this.highlights.attach({
       gfx: this.gfx,
       scene: this.scene,
-      trackId: () => (this.worldBusy || !this.track ? null : this.track.def.id),
-      world: () => (this.worldBusy || !this.env ? null : { track: this.track, env: this.env, trackside: this.trackside, pits: this.pits }),
+      // (not while only the garage of a circuit exists)
+      trackId: () => (this.worldBusy || !this.worldCore ? null : this.track.def.id),
+      world: () => (this.worldBusy || !this.worldCore ? null : { track: this.track, env: this.env, trackside: this.trackside, pits: this.pits }),
       liveObjects: () => [this.carsGroup, this.garage?.group, this.garageLights, this.particles.group, this.headlights.group, this.celebration?.group, this.line?.mesh, this.debris?.group],
       rigKey: (e) => this.rigTeam.get(e) ?? e.team.id,
       makeRig: (e) => {
@@ -484,8 +478,19 @@ export class Game {
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
-    // the garage is up: the landscape, the stands and the race's shaders follow behind it
+    // the garage is up: the rest of the circuit, the landscape, the stands and the race's shaders follow behind it
     void this.completeWorldInBackground().then(() => mark('warm'));
+  }
+
+  /** a car of the field in its team's livery (the player's paint follows: refreshPlayerRig) */
+  private makeRig(e: Entry): CarRig {
+    const rig = createCar(e.team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined });
+    this.rigs.set(e, rig);
+    this.rigTeam.set(e, e.team.id);
+    this.rigDriverKey.set(e, driverKey(e));
+    this.views.set(e, new CarView(rig));
+    this.carsGroup.add(rig.root);
+    return rig;
   }
 
   // ------------------------------------------------------------------ the driver career's grid
@@ -536,6 +541,13 @@ export class Game {
 
   /** bumped on every world switch: a background build of an older world stops at its next slice */
   private worldGen = 0;
+  /**
+   * The circuit itself is up (completeWorld's core steps: the whole field, the trackside, the pit
+   * complex, the skid marks, the racing line); before that only the player's garage exists
+   */
+  private worldCore = false;
+  /** the player's garage alone, standing in for the pit complex until it is built (buildWorld) */
+  private garageBox: GarageBox | null = null;
   private worldDone: Promise<void> = Promise.resolve();
   /** 0 … 1 of the background build (1 = the circuit is complete and its race shaders are ready) */
   worldProgress = 1;
@@ -548,14 +560,18 @@ export class Game {
     this.worldProgress = 0;
     this.worldDone = this.completeWorld(gen).catch((e) => {
       console.error('[world] background build failed', e);
-      this.worldProgress = 1;
+      // (a circuit without its track or pit complex can't be raced: sessions keep waiting)
+      if (this.worldCore) this.worldProgress = 1;
     });
     return this.worldDone;
   }
   /**
-   * The costly half of a circuit — terrain, woods, grass, grandstands and crowds, villages, the
-   * skyline — built one slice per frame while the garage is up, then swapped in for the stand-in
-   * ground; the broadcast cameras re-sited on the real landscape; every race shader compiled.
+   * Everything of a circuit but the player's garage (buildWorld), built one slice per frame while
+   * the garage is up. First the circuit itself (coreSteps): the rest of the field, the trackside, the
+   * whole pit complex in place of the garage box, the skid marks, the racing line. Then the costly
+   * half — terrain, woods, grass, grandstands and crowds, villages, the skyline — swapped in for
+   * the stand-in ground; the broadcast cameras re-sited on the real landscape; every race shader
+   * compiled.
    */
   private async completeWorld(gen: number) {
     const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -572,6 +588,21 @@ export class Game {
     // the rest of the avatars keep downloading while the landscape is built
     const kit = peopleKit();
     const everyone = kit ? Promise.race([kit.whenAll, new Promise((r) => setTimeout(r, 20000))]) : Promise.resolve();
+    // the circuit itself, a step per frame. Never left half-way, not even for a circuit switch
+    // (worldGen is checked after it): the switch waits these few frames, and disposeWorld always
+    // finds a whole circuit
+    const core = this.coreSteps();
+    for (let i = 0; i < core.length; i++) {
+      await frame();
+      const ts = performance.now();
+      const r = core[i]();
+      busy += performance.now() - ts;
+      // (a step may wait on a download or its shaders, built on the driver's threads)
+      await r;
+      this.worldProgress = (0.25 * (i + 1)) / core.length;
+    }
+    lap('bgCore');
+    if (gen !== this.worldGen) return;
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;
     let scenery: Scenery | null = null;
@@ -590,7 +621,7 @@ export class Game {
         break;
       }
       partial = r.value.group;
-      this.worldProgress = 0.75 * Math.min(1, (n + 1) / SLICES);
+      this.worldProgress = 0.25 + 0.5 * Math.min(1, (n + 1) / SLICES);
     }
     lap('bgScenery');
     // the landscape's programs queued before it is adopted, lit as its reflection capture and the
@@ -657,6 +688,72 @@ export class Game {
     this.worldTimes.background = Math.round(busy);
     this.worldTimes.backgroundWall = Math.round(performance.now() - t0);
     console.info(`[shot] [world] ${this.track.def.id} complete behind the garage: ${Math.round(busy)} ms of work over ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  /**
+   * The circuit behind the player's garage, one step per frame (completeWorld): the rest of the field
+   * (a car a step), the trackside, the whole pit complex — the other teams' garages, the building,
+   * the pit wall, the crews — swapped in for the garage box (its atlases taken over), the skid
+   * marks and the racing line. What the garage could see of a new piece (through
+   * the door) is shown only once its shaders are built, on the driver's threads (compileQueued).
+   */
+  private coreSteps(): (() => Promise<unknown> | void)[] {
+    const steps: (() => Promise<unknown> | void)[] = [];
+    for (const e of this.entries)
+      if (!this.rigs.has(e))
+        steps.push(() => {
+          // (the garage may have made it meanwhile: another team picked)
+          if (!this.rigs.has(e)) this.makeRig(e).root.visible = false;
+        });
+    // (the road scan: the boot's download, long since here on a circuit switch)
+    steps.push(() => loadAsphaltScan());
+    steps.push(() => {
+      const t0 = performance.now();
+      const trackside = buildTrackside(this.track, this.gfx);
+      this.trackside = trackside;
+      this.worldTimes.trackside = Math.round(performance.now() - t0);
+      return this.compileQueued(trackside.group, this.scene).then(() => this.scene.add(trackside.group));
+    });
+    steps.push(() => {
+      const t0 = performance.now();
+      const pits = buildPitComplex(this.track, this.gfx, this.garageBox?.kit);
+      this.worldTimes.pits = Math.round(performance.now() - t0);
+      return this.compileQueued(pits.group, this.scene).then(() => {
+        // (the box the garage stood in, whichever team's it is by now: the complex has its own)
+        const box = this.garageBox;
+        this.garageBox = null;
+        if (box) {
+          box.group.removeFromParent();
+          box.disposeBox();
+        }
+        this.pits = pits;
+        this.scene.add(pits.group);
+      });
+    });
+    steps.push(() => {
+      this.skids = new SkidMarks(this.track, this.trackside.groundLift);
+      this.scene.add(this.skids.mesh);
+      this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
+      this.scene.add(this.line.mesh);
+      this.line.setMode(this.menu.setup.assists.line);
+      this.worldCore = true;
+    });
+    return steps;
+  }
+
+  /**
+   * Another team picked while only the garage box stands (quick race): the box moves to that team's
+   * garage. (The old one is freed a couple of frames on, once the new one has drawn with the
+   * shader programs they share.)
+   */
+  private moveGarageBox(team: number) {
+    const old = this.garageBox!;
+    const box = buildGarageBox(this.track, this.gfx, team, old.kit);
+    old.group.removeFromParent();
+    requestAnimationFrame(() => requestAnimationFrame(() => old.disposeBox()));
+    this.garageBox = box;
+    this.pits = box;
+    this.scene.add(box.group);
   }
 
   /**
@@ -817,16 +914,18 @@ export class Game {
   }
 
   /**
-   * Everything that belongs to one circuit: the track, trackside, pit complex, sky and
-   * scenery, debris, skid marks. Built in steps; `step(f, label)` runs between them
-   * (0 … 1 progress) so a loading bar can update. The cameras, racing line and HUD map
-   * follow in finishWorld() once the cars exist.
+   * The first of a circuit, all the garage view needs: the track (data), the player's garage alone
+   * (a garage box: its interior, the lane in front of the door, a haze where the rest of the world
+   * will be), the sky. Built in steps; `step(f, label)` runs between them (0 … 1 progress) so a
+   * loading bar can update. The cameras and HUD map follow in finishWorld() once the cars exist;
+   * everything else of the circuit (the other garages and the pit building, the trackside, the
+   * rest of the field, the landscape) behind the garage: completeWorld.
    */
   private async buildWorld(
     def: CircuitDef,
     step: (f: number, label: string) => Promise<void>,
     /** the boot's downloads, each awaited just before the step that needs it (a circuit switch has them all) */
-    wait: { people?: Promise<unknown>; signs?: Promise<unknown>; ground?: Promise<unknown>; pixels?: Promise<unknown> } = {},
+    wait: { people?: Promise<unknown>; signs?: Promise<unknown>; pixels?: Promise<unknown> } = {},
   ) {
     const times: Record<string, number> = {};
     let tLap = performance.now();
@@ -835,29 +934,22 @@ export class Game {
       times[k] = Math.round(n - tLap);
       tLap = n;
     };
+    // (nothing can be raced until completeWorld has built the rest)
+    this.worldCore = false;
+    this.worldProgress = 0;
     await step(0.02, 'Surveying the circuit');
     this.track = this.trackFor(def);
     setEvent(this.track.def);
     this.menu.setup.track = this.track.def.id;
     lap('track');
 
-    // (the pit complex before the trackside — they don't depend on each other — so the ground
-    // textures, made off the main thread, have its build time to arrive in)
-    await step(0.14, 'Opening the pit lane');
+    await step(0.2, 'Opening the garage');
     // (the fonts its boards are lettered in)
     await wait.signs;
     lap('fonts');
-    this.pits = buildPitComplex(this.track, this.gfx);
-    this.scene.add(this.pits.group);
-    lap('pits');
-
-    await step(0.3, 'Laying asphalt, kerbs and barriers');
-    // (the road scan and the ground textures)
-    await wait.ground;
-    lap('ground');
-    this.trackside = buildTrackside(this.track, this.gfx);
-    this.scene.add(this.trackside.group);
-    lap('trackside');
+    this.garageBox = buildGarageBox(this.track, this.gfx, this.menu.setup.team);
+    this.pits = this.garageBox;
+    lap('garage');
 
     if (wait.people) {
       // the uniforms and faces (the garage's people); the fans' avatars and the pit crews follow
@@ -872,21 +964,23 @@ export class Game {
       lap('pixels');
     }
 
-    await step(0.4, 'Setting up the sky');
+    await step(0.7, 'Setting up the sky');
     const w0 = new Weather(this.plan).state;
     applyWeatherUniforms(w0);
     // (the landscape itself grows behind the garage afterwards: completeWorld)
     this.env = createEnvironment(this.track, this.gfx, this.scene, w0, { scenery: false });
     this.scene.add(this.env.group);
+    // (the garage after the sky's first capture of the world: its haze stays out of the reflections,
+    // which are captured again with the whole circuit once the landscape is adopted)
+    this.scene.add(this.pits.group);
     lap('environment');
 
-    await step(0.94, 'Sweeping the track');
+    // the effects now (their fire light is one of the lights every program is compiled for: added
+    // later, everything the garage shows would compile again); the skid marks follow the trackside
     this.debris = new Debris(this.track, (x, z) => this.env.heightAt(x, z));
     this.scene.add(this.debris.group);
     this.scene.add(this.leaves.mesh);
     this.carFx = new CarEffects(this.particles, this.debris);
-    this.skids = new SkidMarks(this.track, this.trackside.groundLift);
-    this.scene.add(this.skids.mesh);
     this.scene.add(this.carFx.fireLight);
     this.carFx.onImpact = (id, imp, isPlayer) => this.onImpact(id, imp.speed, isPlayer);
     this.carFx.onExplosion = (id, pos) => this.onExplosion(id, pos);
@@ -894,13 +988,11 @@ export class Game {
     this.worldTimes = times;
   }
 
-  /** the circuit's cameras, racing line and HUD map (needs the cars) */
+  /** the circuit's cameras and HUD map (needs the cars; the racing line follows behind the garage) */
   private finishWorld() {
     // (along the track alone: placed again with their sight lines over the real landscape once it
     // exists — completeWorld — before any session can start)
     this.placeBroadcastCameras(null);
-    this.line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
-    this.scene.add(this.line.mesh);
     this.hud.setup(this.makeRace('race', this.menu.setup), this.track);
   }
 
@@ -930,17 +1022,24 @@ export class Game {
     this.garageRig = null;
     this.celebration?.dispose();
     this.celebration = null;
+    this.particles.clear();
     this.carFx.reset();
     this.carFx.fireLight.removeFromParent();
-    this.particles.clear();
     disposeTree(this.debris.group, keep);
-    this.skids.dispose();
-    this.skids.mesh.removeFromParent();
-    disposeTree(this.line.mesh, keep);
-    this.trackside.ssr?.dispose();
-    disposeTree(this.trackside.group, keep);
+    // (the circuit is whole here — a switch waits for completeWorld's core steps — unless they failed)
+    if (this.skids) {
+      this.skids.dispose();
+      this.skids.mesh.removeFromParent();
+    }
+    if (this.line) disposeTree(this.line.mesh, keep);
+    if (this.trackside) {
+      this.trackside.ssr?.dispose();
+      disposeTree(this.trackside.group, keep);
+    }
     this.pits.dispose?.();
     disposeTree(this.pits.group, keep);
+    this.garageBox = null;
+    this.worldCore = false;
     this.env.dispose(keep);
     // then whatever the old world still has on the GPU that no walk could see (textures only a
     // shader closure or a module-level uniform holds): everything live that nothing persistent uses
@@ -1094,8 +1193,9 @@ export class Game {
       rig.setDamage({ fwL: 0, fwR: 0, rw: 0 }, [0, 0, 0, 0], 0);
       for (const w of ['wFL', 'wFR', 'wRL', 'wRR'] as const) rig.setWheelLost(w, false);
     }
-    this.carFx?.resetDamage();
-    this.skids?.clear();
+    this.carFx.resetDamage();
+    // (the skid marks are laid out behind the garage: coreSteps)
+    if (this.worldCore) this.skids.clear();
     this.retireTimer = -1;
     this.driverHidden = false;
     this.particles.clear();
@@ -1944,12 +2044,15 @@ export class Game {
     if (this.state === 'race' && race.phase === 'racing' && !race.player.finished && !race.player.retired) this.flash.record(dt, race);
 
     // the gantry is lit only while a live countdown runs (never over a replay, the results or the menu)
-    const liveCountdown = (this.state === 'race' || this.state === 'intro' || this.state === 'spectate') && race.phase === 'lights';
-    this.trackside.startLights.set(liveCountdown ? race.lightsLit : 0);
-    const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && !isRemoteCam(this.cams.view) && this.cams.view !== 'gtchase' && !race.player.finished;
-    this.line.mesh.visible = showLine;
-    // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
-    if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
+    // (in the garage before the rest of the circuit exists: no gantry, no line yet)
+    if (this.worldCore) {
+      const liveCountdown = (this.state === 'race' || this.state === 'intro' || this.state === 'spectate') && race.phase === 'lights';
+      this.trackside.startLights.set(liveCountdown ? race.lightsLit : 0);
+      const showLine = (this.state === 'race' || this.state === 'intro') && this.line.mode !== 'off' && !isRemoteCam(this.cams.view) && this.cams.view !== 'gtchase' && !race.player.finished;
+      this.line.mesh.visible = showLine;
+      // the line's colours compare against dry targets: scale the car's speed up by the grip it lacks
+      if (showLine) this.line.update(race.player.car.s, Math.max(0, race.player.car.vx) / Math.sqrt(Math.max(0.3, race.player.car.gripFactor)));
+    }
     // dev/tools: a free camera (tools/tour.mjs) overrides whatever the state's camera did
     if (this.freeCam) {
       const F = this.freeCam;
@@ -1977,7 +2080,7 @@ export class Game {
     else if (this.state !== 'paused') crowdReactions.quiet(dt);
     this.updatePits(dt, race);
     this.updateHeadlights(wx);
-    this.trackside.update(dt, this.camera);
+    if (this.worldCore) this.trackside.update(dt, this.camera);
     const lookExp = Math.max(1, this.gfx.grade.uniforms.get('lookExposure')!.value as number);
     this.particles.glowScale = 1 / Math.sqrt(lookExp);
     DASH_GLOW.value = 1.6 / Math.pow(lookExp, 0.8);
@@ -2063,7 +2166,8 @@ export class Game {
     this.control.aids.brakingAssist = a.braking;
     this.control.aids.steeringMode = a.keyboard;
     this.race.playerDrsAuto = a.drs === 'auto';
-    this.line.setMode(a.line);
+    // (the line is made behind the garage: coreSteps sets the setup's mode on it)
+    if (this.worldCore) this.line.setMode(a.line);
   }
 
   private resetPlayer() {
@@ -2690,7 +2794,9 @@ export class Game {
     // (the rain light is the rule in poor visibility too: mist and fog, not only rain)
     const rainLight = w.wetness > 0.22 || w.rain > 0.08 || w.fog > 0.6 || w.time === 'night';
     for (const c of this.race.cars) {
-      const view = this.views.get(c.entry)!;
+      // (in the garage the rest of the field may still be being made: coreSteps)
+      const view = this.views.get(c.entry);
+      if (!view) continue;
       view.sync(ghosts ? ghosts[c.id] : c.car, this.track, dt, this.camPos, c.isPlayer, rainLight, !ghosts);
       // the steering wheel's screen and shift lights, live, when the driver's eyes are the camera (15 Hz)
       if (c.isPlayer && onboardEye && !ghosts) {
@@ -2921,6 +3027,12 @@ export class Game {
     const team = TEAMS.indexOf(this.race.player.entry.team);
     const player = this.race.player.entry;
     const mate = this.entries.find((e) => e.team === player.team && e !== player)!;
+    // another team picked before the rest of the circuit and the field are up: its garage and cars first
+    if (this.garageBox && this.garageBox.team !== team) this.moveGarageBox(team);
+    if (!this.rigs.has(player) || !this.rigs.has(mate)) {
+      for (const e of [player, mate]) if (!this.rigs.has(e)) this.makeRig(e);
+      this.refreshPlayerRig();
+    }
     const up = this.tmp.set(0, 1, 0);
     for (const [e, rig] of this.rigs) {
       const k = e === player ? player.seat : e === mate ? mate.seat : -1;

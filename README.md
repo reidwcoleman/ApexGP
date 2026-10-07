@@ -62,10 +62,17 @@ npm run check    # tsc --noEmit
   (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
   **Next round** on the results screen flies you straight on. The rivals develop their cars through
   the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
-- **Garage first** — the boot opens the garage at the circuit you race next (the career's next round) as soon
-  as its pit building, track, sky and cars exist; terrain, woods, grandstands and crowds grow behind it one slice
-  per frame (`sceneryBuilder`, `env.adoptScenery`, `Game.completeWorld`), with a status chip in the garage. Picking
-  another circuit moves the garage there behind a short title card; no travel screen.
+- **Garage first** — the boot builds only what the garage camera shows, at the circuit you race next (the career's
+  next round, else the quick-race circuit you picked last): the track's data, the sky, your own garage alone
+  (`buildGarageBox`: its interior, the lane in front of the door, and a haze across the lane at the pit wall,
+  coloured like the air, in place of the world not yet built) and the two cars in it. The rest of the circuit then
+  grows behind it one step per frame (`Game.coreSteps`, then `sceneryBuilder`, `env.adoptScenery`,
+  `Game.completeWorld`): the rest of the field a car at a time, the trackside, the whole pit complex (the other
+  garages, building, pit wall and crews, swapped in for the box and taking over its atlases; each piece shown
+  once its shaders are built), the skid marks and racing line, then terrain, woods, grandstands and crowds — with a
+  status chip in the garage. Starting a session sooner waits behind a short "Finishing" card. Picking another
+  team before then moves the box to that team's garage; picking another circuit moves the garage there behind a
+  short title card; no travel screen.
 - **Fast boot** — the loading screen is painted before anything heavy runs (main.ts waits one frame before
   making the Game); the downloads and decodes (people, cached pixels, road scan, fonts) start on that frame and
   `buildWorld` awaits each only right before the step that needs it. The ground textures' pixels are made off the
