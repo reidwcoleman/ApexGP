@@ -29,6 +29,7 @@ const _inv = new THREE.Matrix4();
 const _c = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _up = new THREE.Vector3();
+const _eye = new THREE.Vector3();
 
 export class FocusSunShadow extends SunLightShadow {
   /** world point the focus cascade is centred on */
@@ -52,6 +53,8 @@ export class FocusSunShadow extends SunLightShadow {
   normalScale: [number, number] = [1, 4.5];
   /** extra multiplier on the focus cascade's disc (dev A/B) */
   focusSharpen = 1;
+  /** a long lens centres the view cascade on the followed car (see updateMatrices; dev A/B) */
+  followLens = true;
 
   override updateMatrices(light: THREE.Light, viewCamera?: THREE.Camera) {
     if (!viewCamera) return;
@@ -91,11 +94,24 @@ export class FocusSunShadow extends SunLightShadow {
     const sinEl = Math.max(0, -_lightDir.y);
     const lowSun = 0.7 + 0.3 * THREE.MathUtils.smoothstep(sinEl, 0.1, 0.5);
 
+    // A long lens looks at a patch of circuit far down its axis: the trackside tower's 2° lens frames
+    // the cars 150–300 m away, beyond the view cascade (it reaches ~310 m ahead of the camera), so only
+    // the followed car had a shadow — the rest of the field, the barriers and the stands behind them
+    // stood flat-lit on the asphalt, where the TV pictures them on crisp black shadows. A narrow lens
+    // centres the view cascade on what it is looking at (the followed car's distance along the view):
+    // the wedge of ground such a lens sees there is a few tens of metres wide, well inside it.
+    _eye.setFromMatrixPosition(viewCamera.matrixWorld);
+    const fov = (viewCamera as THREE.PerspectiveCamera).isPerspectiveCamera ? (viewCamera as THREE.PerspectiveCamera).fov : 60;
+    const narrow = this.followLens ? 1 - THREE.MathUtils.smoothstep(fov, 12, 30) : 0;
+    const along = (this.focus.x - _eye.x) * _fwd.x + (this.focus.z - _eye.z) * _fwd.z;
+    const ahead0 = this.farSize * this.farAhead;
+    const ahead = narrow > 0 && along > ahead0 ? THREE.MathUtils.lerp(ahead0, Math.min(along, 2500), narrow) : ahead0;
+
     for (let i = 0; i < 2; i++) {
       const size = i === 0 ? this.nearSize : this.farSize;
       const half = size / 2;
       if (i === 0) _c.copy(this.focus);
-      else _c.setFromMatrixPosition(viewCamera.matrixWorld).addScaledVector(_fwd, size * this.farAhead);
+      else _c.copy(_eye).addScaledVector(_fwd, ahead);
       _c.applyMatrix4(_inv);
       const texel = size / usable;
       _c.x = Math.round(_c.x / texel) * texel;
