@@ -147,5 +147,5 @@ export function rollForecast(circuit: string, avoid?: Forecast | null): Forecast
   return f;
 }
 
-/** career races are always this long */
-export const CAREER_LAPS = 10;
+/** a career round's distance when there's no driver career to say otherwise (the driver career's own: DriverCareer.laps) */
+export const CAREER_LAPS = 5;

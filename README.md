@@ -51,17 +51,27 @@ npm run check    # tsc --noEmit
   into the shared Team/Driver objects, so every entry and rig follows); state in `localStorage` `apexgp.drivercareer`
   (`src/career/DriverCareer.ts`, v1 saves migrate), hub, talks and wizard in `src/ui/CareerHub.ts`.
   `node tools/dcsim.mjs [rounds] [pos] [out] [--existing]` simulates seasons and shoots every screen;
-  `node tools/dcflow.mjs` runs the real start → race → results → next round flow.
-- **Driver career season map** — the career hub's Overview is the season as a world map: the route flown so
-  far in the team colour, the next leg drawing itself, every finish on its pin (gold/silver/bronze for a podium)
-  and the next round pulsing; click a pin (or ‹ ›) to glide to it and see that round — your result, or the
-  team's targets for the next one — with one call to action, always the next round (CareerHub.ts overview).
-- **Career on a world map** — the 14 rounds as pins on a map of the season: a top-5 finish unlocks
-  the next round, and your best result earns a medal (gold = win, silver = podium, bronze = top 5).
-  Career races are always 10 laps and take their weather and time of day from the circuit's climate
-  (Sakhir and Yas at night, Spa and Interlagos changeable…), re-rolled after every race there;
-  **Next round** on the results screen flies you straight on. The rivals develop their cars through
-  the season too. **Quick race** keeps free laps and weather at any circuit you've opened.
+  `node tools/dcflow.mjs` runs the real start → race → results → next round flow;
+  `node tools/unlockflow.mjs` races the unlock chain for real (a slow attempt that leaves the next round locked,
+  then a top-five one that opens it), `node tools/careermap.mjs` shoots the map in every state at 720p and 1080p.
+- **Driver career season map** — the Career tab is the season as a world map, filling the hub: a pin per round,
+  each **locked until the round before it is finished in the top 5** (the first is open). A finish outside the top
+  5 (or a DNF) doesn't count: nothing is scored, the attempt is remembered ("Attempt 3 · best so far P7") and the
+  results screen offers **Retry round**; a top-5 finish scores the round into the championship, the paddock and
+  the ratings as before, and unlocks the next pin. Cleared pins carry the result ringed by its medal (gold = win,
+  silver = podium, bronze = top 5), the next one pulses in the team colour, the rest wear a padlock; the route
+  flown so far glows, the next leg draws itself. Click a pin (or ‹ ›) to glide to it: a card over the map shows
+  the circuit, your result, what unlocks it, or — for the next round — the team's targets, the race distance and
+  the call to action. The season's progress and a legend sit on the map, the paddock's latest message at its foot;
+  Inbox, Standings, Driver and History stay as tabs. Without a career yet the tab shows the F2 season's map,
+  locked but for round 1, and the way in (`DriverCareer.recordRound`, `CareerHub.ts` overview / `renderStart`).
+- **Race distance** — 5 laps by default everywhere. Career races pick 5 / 10 / 15 / 20 / 30 laps (on the map's
+  card or the race screen, kept with the career; saves from before default to 5), quick races 3 / 5 / 10 / 15 /
+  20 / 30. Fuel is loaded for the distance (1.8 kg a lap + a reserve); under 8 laps nobody stops (softs), from 10
+  the two-compound rule and the AI's planned stops, from 12 some two-stoppers, more of them the longer it gets.
+  Career races take their weather and time of day from the circuit's climate (Sakhir and Yas at night, Spa and
+  Interlagos changeable…), re-rolled after every race there; **Next round** on the results screen flies you
+  straight on. **Quick race** keeps free laps and weather at any circuit your career has reached.
 - **Garage first** — the boot builds only what the garage camera shows, at the circuit you race next (the career's
   next round, else the quick-race circuit you picked last): the track's data, the sky, your own garage alone
   (`buildGarageBox`: its interior, the lane in front of the door, and a haze across the lane at the pit wall,
@@ -287,7 +297,7 @@ npm run check    # tsc --noEmit
   sheets), lightning lights the land by how dark it is and how close it struck (a flicker at noon, the circuit
   flooded white at night), and its thunder arrives ~3 s per kilometre later. Onboard lenses carry defocused,
   ragged drops that sit at low speed and are blown streaming off the glass flat out (the chase cameras stay dry).
-- **Race** — 20 cars, standing start with five red lights, 3/5/10/20 laps, Dynamic AI (keeps pace
+- **Race** — 20 cars, standing start with five red lights, 3/5/10/15/20/30 laps (5 by default), Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.
 - **Timing like the broadcast** — position tower with intervals, sectors in purple/green/yellow,

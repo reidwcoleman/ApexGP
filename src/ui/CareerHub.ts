@@ -1,8 +1,8 @@
 import { CIRCUITS } from '../world/Circuits.ts';
 import { TEAMS, type DriverLook } from '../race/Teams.ts';
-import { ATTRS, DriverCareer, NATIONS, RD, RD_MAX, SERIES_NAME, levelLabel, levelOf, rdCost, statusLabel, teamColor, teamName, type Ask, type AttrId, type Choice, type Contract, type Msg, type RoundSummary, type Status } from '../career/DriverCareer.ts';
+import { ATTRS, DEFAULT_LAPS, DriverCareer, F2_CALENDAR, LAP_CHOICES, NATIONS, RD, RD_MAX, SERIES_NAME, levelLabel, levelOf, rdCost, statusLabel, teamColor, teamName, type Ask, type AttrId, type Choice, type Contract, type Msg, type RoundSummary, type Status } from '../career/DriverCareer.ts';
 import { f1Original, f2Teams, type PlayerDriver } from '../career/Series.ts';
-import { PALETTE } from '../career/Career.ts';
+import { PALETTE, UNLOCK_POS, medalFor, type Medal } from '../career/Career.ts';
 import { artFor } from './loadingArt.ts';
 import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath } from '../career/Season.ts';
 
@@ -19,6 +19,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, parent?
   parent?.appendChild(e);
   return e;
 }
+/** readable ink on a team colour (Campello's yellow wants dark text, most others white) */
+function inkOn(hex: string): string {
+  const n = parseInt(hex.replace('#', '').slice(0, 6), 16);
+  const l = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return l > 0.62 ? '#0a0c11' : '#ffffff';
+}
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export interface HubCtx {
@@ -26,7 +32,6 @@ export interface HubCtx {
   /** register a clickable for the menu's keyboard/gamepad navigation */
   action(e: HTMLElement, fn: () => void, disabled?: boolean): void;
   onRace(track: string): void;
-  onCalendar(): void;
   onNewCareer(): void;
   /** something in the career changed (an answer, a signature): re-render, and the game re-syncs its grid */
   changed(): void;
@@ -36,6 +41,8 @@ export interface HubCtx {
   onDevelop(): void;
   forecast(track: string): string;
   circuitPath(points: number[]): string;
+  /** the circuit card's facts (country, length, turns) */
+  info(track: string): { country: string; km: string; turns: number };
 }
 
 export type HubView = 'overview' | 'inbox' | 'standings' | 'driver' | 'history';
@@ -58,6 +65,7 @@ export function renderHub(p: HTMLElement, ctx: HubCtx) {
   const tc = teamColor(d.series, d.contract.team);
   p.classList.add('ch');
   p.style.setProperty('--team', tc);
+  p.style.setProperty('--on-team', inkOn(tc));
 
   // ---- who you are
   const head = el('div', 'ch-head', p);
@@ -96,30 +104,35 @@ export function renderHub(p: HTMLElement, ctx: HubCtx) {
 
 /** the round picked on the season map (null = the next one) */
 let mapSel: string | null = null;
+/** back in the garage: the map opens on the round you're working on */
+export function resetSeasonMap() {
+  mapSel = null;
+}
+
+/** a pin's state on the season map */
+type PinState = 'done' | 'next' | 'locked';
+interface PinSpec {
+  id: string;
+  state: PinState;
+  /** the text on the disc: the result once cleared, else the round number (none when locked) */
+  label: string;
+  medal: Medal;
+}
+const LOCK = `<path d="M-2.6 -0.6v-1.7a2.6 2.6 0 0 1 5.2 0V-0.6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="-3.8" y="-0.7" width="7.6" height="5.4" rx="1.2" fill="currentColor"/>`;
+const LOCK_ICON = `<svg class="lk-i" viewBox="-5 -5 10 10" width="14" height="14">${LOCK}</svg>`;
 
 /**
- * The overview is the season: a world map of the calendar (the route flown so far, the next leg
- * drawing itself, every finish on its pin) with the picked round beneath it — and the paddock,
- * kept short, beside that.
+ * The season on the world map: the route flown so far in the team colour, the leg to the next
+ * round drawing itself, the rounds still locked dotted; a pin per round (the result and its medal
+ * once cleared, the next one pulsing, a padlock on the rest). Returns `focus(id)`, which glides
+ * the map onto a round, centred in the part of the map the round card doesn't cover.
  */
-function overview(p: HTMLElement, ctx: HubCtx) {
-  const dc = ctx.dc;
-  const d = dc.data!;
-  const nt = dc.nextTrack;
-  const cal = d.calendar;
-  if (!mapSel || !cal.includes(mapSel)) mapSel = nt ?? cal[cal.length - 1];
-  const wrap = el('div', 'ch-season', p);
-  const map = el('div', 'cm-map ch-map', wrap);
-  const lower = el('div', 'ch-lower', wrap);
-  const card = el('div', 'ch-rnd', lower);
-  const side = el('div', 'ch-side', lower);
-
-  // ---- the map
-  const pts = cal.map((id, i) => {
-    const g = GEO[id] ?? [0, 0];
+function seasonMap(map: HTMLElement, pins: PinSpec[], cardW: () => number) {
+  const pts = pins.map((s, i) => {
+    const g = GEO[s.id] ?? [0, 0];
     const [x, y] = project(g[0], g[1]);
-    const o = PIN_OFFSET[id] ?? [0, 0];
-    return { id, i, x, y, ox: o[0], oy: o[1], cd: CIRCUITS.find((c) => c.id === id)! };
+    const o = PIN_OFFSET[s.id] ?? [0, 0];
+    return { ...s, i, x, y, ox: o[0], oy: o[1], cd: CIRCUITS.find((c) => c.id === s.id) };
   });
   let done = '';
   let nextLeg = '';
@@ -129,104 +142,221 @@ function overview(p: HTMLElement, ctx: HubCtx) {
     const b = pts[i];
     const dd = Math.hypot(b.x - a.x, b.y - a.y);
     const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${((a.x + b.x) / 2).toFixed(1)} ${((a.y + b.y) / 2 - Math.min(70, dd * 0.22)).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-    if (i < d.round) done += seg;
-    else if (i === d.round) nextLeg += seg;
+    if (b.state === 'done') done += seg;
+    else if (b.state === 'next' && a.state === 'done') nextLeg += seg;
     else todo += seg;
   }
-  const pins = pts
-    .map(({ id, i, x, y, ox, oy, cd }) => {
-      const r = d.results[i];
-      const medal = r && !r.dnf && r.pos <= 3 ? ['gold', 'silver', 'bronze'][r.pos - 1] : '';
-      const cls = ['pin', 'open', r ? 'done' : '', medal, i === d.round ? 'next' : ''].filter(Boolean).join(' ');
-      const label = r ? (r.dnf ? 'DNF' : `P${r.pos}`) : String(i + 1);
+  const svgPins = pts
+    .map(({ id, state, label, medal, x, y, ox, oy, cd }) => {
+      const cls = ['pin', state === 'locked' ? 'locked' : 'open', state, medal ?? ''].filter(Boolean).join(' ');
       const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
-      const face = `<circle class="halo" r="20"/><circle class="disc" r="${r ? 15 : 13}"/><text y="4.5"${label.length > 2 ? ' class="sm"' : ''}>${label}</text>`;
+      const face =
+        state === 'locked'
+          ? `<circle class="disc" r="11"/><g class="lk">${LOCK}</g>`
+          : `<circle class="halo" r="20"/><circle class="disc" r="${state === 'done' ? 15 : 14}"/><text y="4.5"${label.length > 2 ? ' class="sm"' : ''}>${label}</text>`;
       const short = (cd?.short ?? id).toUpperCase();
       const tw = 22 + short.length * 9.4;
       const left = ox < 0 || x > MAP.w * 0.72;
       const tag = `<g class="tag" transform="translate(${ox + (left ? -22 : 22)} ${oy})"><rect class="tbg" x="${left ? -tw : 0}" y="-13" width="${tw.toFixed(0)}" height="26" rx="6"/><text class="tn" x="${left ? -11 : 11}" y="4.5" text-anchor="${left ? 'end' : 'start'}">${short}</text></g>`;
-      return `<g class="pinw" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="2.4"/>${tag}<g class="${cls}" data-id="${id}" transform="translate(${ox} ${oy})">${face}</g></g>`;
+      return `<g class="pinw ${state}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="2.4"/>${tag}<g class="${cls}" data-id="${id}" transform="translate(${ox} ${oy})">${face}</g></g>`;
     })
     .join('');
-  map.innerHTML =
+  map.insertAdjacentHTML(
+    'afterbegin',
     `<svg viewBox="0 0 ${MAP.w} ${MAP_H}" preserveAspectRatio="xMidYMid slice">` +
-    `<defs><pattern id="cm-dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.05"/></pattern>` +
-    `<radialGradient id="cm-vig" cx="50%" cy="45%" r="75%"><stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/></radialGradient></defs>` +
-    `<g class="cm-world"><path class="land-base" d="${landPath()}"/><path class="land" d="${landPath()}"/>` +
-    `<path class="route todo" d="${todo}"/><path class="route done" d="${done}"/><path class="route next" d="${nextLeg}"/>${pins}</g>` +
-    `<rect class="vig" width="${MAP.w}" height="${MAP_H}" fill="url(#cm-vig)"/></svg>` +
-    `<div class="ch-map-cap"><b>${d.year} ${SERIES_NAME[d.series]}</b><span>${nt ? `Round ${d.round + 1} of ${cal.length}` : 'Season complete'}</span></div>`;
+      `<defs><pattern id="cm-dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.05"/></pattern>` +
+      `<radialGradient id="cm-vig" cx="40%" cy="45%" r="80%"><stop offset="50%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.6"/></radialGradient></defs>` +
+      `<g class="cm-world"><path class="land-base" d="${landPath()}"/><path class="land" d="${landPath()}"/>` +
+      `<path class="route todo" d="${todo}"/><path class="route done" d="${done}"/><path class="route next" d="${nextLeg}"/>${svgPins}</g>` +
+      `<rect class="vig" width="${MAP.w}" height="${MAP_H}" fill="url(#cm-vig)"/></svg>`,
+  );
   const world = map.querySelector<SVGGElement>('.cm-world')!;
   const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
-  let first = true;
+  let instant = true;
   const focus = (id: string) => {
     const g = GEO[id] ?? [45, 10];
     const europe = g[0] > 40 && g[0] < 56 && g[1] > -12 && g[1] < 28;
-    const k = europe ? 2.1 : 1.4;
+    const k = europe ? 1.9 : 1.4;
     const [fx, fy] = project(g[0], g[1]);
-    // the part of the map the panel shows (the svg slices to fill it): centre the round in that,
+    // the svg slices to fill the map box: work out which part of the map that shows (in map
+    // units), then put the round in the middle of what the card beside it leaves uncovered,
     // never showing past the map's edge
     const cw = map.clientWidth || 1200;
-    const ch = map.clientHeight || 260;
-    const wide = cw / ch > MAP.w / MAP_H;
-    const vw = wide ? MAP.w : (MAP_H * cw) / ch;
-    const vh = wide ? (MAP.w * ch) / cw : MAP_H;
-    const cx = MAP.w / 2;
-    const cy = MAP_H / 2;
-    const tx = Math.min(cx - vw / 2, Math.max(cx + vw / 2 - MAP.w * k, cx - fx * k));
-    const ty = Math.min(cy - vh / 2, Math.max(cy + vh / 2 - MAP_H * k, cy - fy * k));
-    map.classList.toggle('instant', first);
+    const ch = map.clientHeight || 420;
+    const s = Math.max(cw / MAP.w, ch / MAP_H);
+    const vw = cw / s;
+    const vh = ch / s;
+    const left = MAP.w / 2 - vw / 2;
+    const top = MAP_H / 2 - vh / 2;
+    const free = Math.max(vw * 0.4, vw - cardW() / s);
+    const tx = Math.min(left, Math.max(left + vw - MAP.w * k, left + free / 2 - fx * k));
+    // (a little below the middle: the season's caption takes the top of the map. Europe sits near
+    // the frame's northern edge, so the map may slide down past it a little — the land outlines
+    // carry on to the Arctic — rather than pin Europe's rounds under the caption)
+    const ty = Math.min(top + vh * 0.3, Math.max(top + vh - MAP_H * k, top + vh * 0.6 - fy * k));
+    map.classList.toggle('instant', instant);
     world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
-    for (const w of pinws) w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
-    if (first) requestAnimationFrame(() => map.classList.remove('instant'));
-    first = false;
+    // pins, tags and leaders keep their size on screen
+    for (const w of pinws) {
+      w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
+      w.classList.toggle('sel', w.dataset.id === id);
+      w.querySelector('.pin')?.classList.toggle('sel', w.dataset.id === id);
+    }
+    if (instant) requestAnimationFrame(() => map.classList.remove('instant'));
+    instant = false;
   };
+  /** the next layout pass: frame again without gliding (the first focus ran before the panel had its size) */
+  const settle = (id: string) =>
+    requestAnimationFrame(() => {
+      instant = true;
+      focus(id);
+    });
+  return { focus, settle };
+}
 
-  // ---- the picked round
+/** the medal a cleared round earned (as the circuit career: win, podium, top five) */
+const medalOf = (pos: number, dnf: boolean): Medal => (dnf ? null : medalFor(pos));
+
+/** the season's progress as one segment per round: cleared, next, locked */
+function progress(states: PinState[], medals: Medal[]): string {
+  return `<div class="ch-prog">${states.map((s, i) => `<i class="${s}${medals[i] ? ` ${medals[i]}` : ''}"></i>`).join('')}</div>`;
+}
+
+const LEGEND =
+  `<div class="ch-legend"><span><i class="lg done"></i>Cleared</span><span><i class="lg next"></i>Next round</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span>` +
+  `<span class="md-l"><i class="md gold"></i>Win<i class="md silver"></i>Podium<i class="md bronze"></i>Top ${UNLOCK_POS}</span></div>`;
+
+/**
+ * The overview is the season as a map: every round a pin, each locked until the one before it is
+ * finished in the top five. The round picked on the map sits in a card beside it — the result
+ * there, or what it takes to unlock it, or (the next round) the team's targets, the race distance
+ * and the one call to action — with the paddock's latest message at the map's foot.
+ */
+function overview(p: HTMLElement, ctx: HubCtx) {
+  const dc = ctx.dc;
+  const d = dc.data!;
+  const nt = dc.nextTrack;
+  const cal = d.calendar;
+  if (!mapSel || !cal.includes(mapSel)) mapSel = nt ?? cal[cal.length - 1];
+  const wrap = el('div', 'ch-season', p);
+  const map = el('div', 'cm-map ch-map', wrap);
+  const card = el('div', 'ch-rnd', wrap);
+
+  const states: PinState[] = cal.map((_, i) => (i < d.round ? 'done' : i === d.round && nt ? 'next' : 'locked'));
+  const medals = cal.map((_, i) => (d.results[i] ? medalOf(d.results[i].pos, d.results[i].dnf) : null));
+  const { focus, settle } = seasonMap(
+    map,
+    cal.map((id, i) => {
+      const r = d.results[i];
+      return { id, state: states[i], label: r ? (r.dnf ? 'DNF' : `P${r.pos}`) : String(i + 1), medal: medals[i] };
+    }),
+    () => card.offsetWidth + 32,
+  );
+  const cleared = states.filter((s) => s === 'done').length;
+  map.insertAdjacentHTML(
+    'beforeend',
+    `<div class="ch-map-cap"><div class="cap">${d.year} ${SERIES_NAME[d.series]}</div>` +
+      `<div class="big">${nt ? `Round ${d.round + 1} <span>of ${cal.length}</span>` : 'Season complete'}</div>` +
+      progress(states, medals) +
+      `<div class="ch-prog-l">${cleared} of ${cal.length} cleared · top ${UNLOCK_POS} unlocks the next round</div></div>` +
+      LEGEND,
+  );
+
+  // ---- the paddock, at the map's foot: the message that wants an answer (else the newest)
+  const ask = d.inbox.find((m) => m.choices && m.picked === undefined);
+  const latest = ask ?? d.inbox[0];
+  if (latest) {
+    const n = dc.unread();
+    const pill = el('div', 'ch-pad' + (ask ? ' ask' : ''), map, `<span class="from">${esc(latest.from)}</span><b>${esc(latest.title)}</b><em>${ask ? 'Answer' : n ? `${n} new` : 'Inbox'} ›</em>`);
+    ctx.action(pill, () => {
+      view = 'inbox';
+      ctx.rerender();
+    });
+  }
+
+  // ---- the picked round: the card's body is redrawn in place as the map glides (its controls are
+  // made once, so the menu's keyboard/gamepad list stays the same)
+  const body = el('div', 'ch-rnd-body', card);
+  // the race distance, for the next round: short by default, longer brings the pit strategy in
+  const laps = el('div', 'ch-laps', card, `<span>Race distance</span>`);
+  const chips = LAP_CHOICES.map((n) => {
+    const b = el('div', 'ch-lap' + (n === dc.laps ? ' on' : ''), laps, `${n}`);
+    ctx.action(b, () => {
+      dc.setLaps(n);
+      for (const [k, c] of chips.entries()) c.classList.toggle('on', LAP_CHOICES[k] === dc.laps);
+      const f = body.querySelector('.facts .laps');
+      if (f) f.textContent = `${dc.laps} laps`;
+    });
+    return b;
+  });
+  laps.insertAdjacentHTML('beforeend', '<em>laps</em>');
+  // the one call to action: always the next round, whichever pin is picked
+  const acts = el('div', 'ch-rnd-acts', card);
+  const back = el('div', 'cta ghost ch-step', acts, '‹');
+  const go = el('div', 'cta ch-go', acts, nt ? `Race round ${d.round + 1} · ${esc(CIRCUITS.find((c) => c.id === nt)?.short ?? '')}` : 'Season complete');
+  const fwd = el('div', 'cta ghost ch-step', acts, '›');
+
   const draw = () => {
     const id = mapSel!;
     const i = cal.indexOf(id);
     const cd = CIRCUITS.find((c) => c.id === id)!;
+    const info = ctx.info(id);
     const r = d.results[i];
-    const isNext = i === d.round && !!nt;
+    const st = states[i];
     const home = cd.country === d.driver.nationality;
-    for (const g of Array.from(map.querySelectorAll<SVGGElement>('.pin'))) g.classList.toggle('sel', g.dataset.id === id);
-    for (const w of pinws) w.classList.toggle('sel', w.dataset.id === id);
     focus(id);
-    card.style.setProperty('--art', `url("${artFor(cd.id)}")`);
-    card.innerHTML = '';
-    const top = el('div', 'ch-rnd-top', card);
-    top.innerHTML =
-      `<div class="ch-rnd-id"><div class="cap">Round ${i + 1}${home ? ' · Home race' : ''}</div><div class="nm">${esc(cd.name)}</div>` +
-      `<div class="facts"><span>${dc.laps} laps</span><span>${esc(isNext ? ctx.forecast(cd.id) : cd.country)}</span></div></div>` +
-      (cd.centerline ? `<svg class="ch-rnd-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '');
-    if (r) {
+    card.className = `ch-rnd ${st}`;
+    laps.hidden = st !== 'next';
+    body.innerHTML = '';
+    const art = el('div', 'ch-rnd-art', body);
+    art.style.backgroundImage = `url("${artFor(cd.id)}")`;
+    art.innerHTML =
+      (cd.centerline ? `<svg class="ch-rnd-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '') +
+      `<span class="badge ${st}">${st === 'done' ? 'Cleared' : st === 'next' ? 'Next round' : `${LOCK_ICON}Locked`}</span>`;
+    el(
+      'div',
+      'ch-rnd-id',
+      body,
+      `<div class="cap">Round ${i + 1} of ${cal.length} · ${esc(info.country)}${home ? ' · Home race' : ''}</div><div class="nm">${esc(cd.name)}</div>` +
+        `<div class="facts">${st === 'next' ? `<span class="laps">${dc.laps} laps</span>` : ''}${info.km ? `<span>${info.km} km</span>` : ''}<span>${info.turns} turns</span></div>` +
+        (st === 'next' ? `<div class="fc">Forecast · ${esc(ctx.forecast(cd.id))}</div>` : ''),
+    );
+    if (st === 'done' && r) {
       const mate = r.mate >= 99 ? 'DNF' : `P${r.mate}`;
-      el('div', 'ch-rnd-res', card, `<b class="${r.dnf ? 'dnf' : r.pos <= 3 ? 'pod' : ''}">${r.dnf ? 'DNF' : `P${r.pos}`}</b><span>${r.points} pts${r.fastest ? ' · fastest lap' : ''}</span><span>Teammate ${mate}</span>`);
-    } else if (isNext) {
-      const ob = el('div', 'ch-obj', card);
+      const medal = medals[i];
+      el(
+        'div',
+        'ch-rnd-res',
+        body,
+        `<b class="${r.dnf ? 'dnf' : medal ?? ''}">${r.dnf ? 'DNF' : `P${r.pos}`}</b><div><span>${medal ? `<i class="md ${medal}"></i>${medal === 'gold' ? 'Win' : medal === 'silver' ? 'Podium' : `Top ${UNLOCK_POS}`}` : 'Finished'} · ${r.points} pts${r.fastest ? ' · fastest lap' : ''}</span><span>Teammate ${mate}</span></div>`,
+      );
+    } else if (st === 'next') {
+      const after = cal[i + 1] ? CIRCUITS.find((c) => c.id === cal[i + 1]) : null;
+      const t = dc.tries;
+      el(
+        'div',
+        'ch-unlock',
+        body,
+        `<span><b>Finish in the top ${UNLOCK_POS}</b> ${after ? `to unlock round ${i + 2} · ${esc(after.short)}` : 'to complete the season'}</span>` +
+          (t.n ? `<em>Attempt ${t.n + 1} · best so far ${t.best >= 99 ? 'DNF' : `P${t.best}`}</em>` : ''),
+      );
+      const ob = el('div', 'ch-obj', body);
       el('div', 'hp-cap', ob, `Team targets <span>expected P${dc.expected()}</span>`);
       for (const o of dc.objectives()) el('div', 'ch-o', ob, `<i></i><span>${esc(o.label)}</span><b>+${o.rp} RP</b>`);
     } else {
-      const n = i - d.round;
-      el('div', 'ch-rnd-res later', card, `<span>${n === 1 ? 'The round after next' : `In ${n} rounds`}</span>`);
+      const prev = CIRCUITS.find((c) => c.id === cal[i - 1]);
+      el('div', 'ch-unlock locked', body, `${LOCK_ICON}<span><b>Locked.</b> Finish in the top ${UNLOCK_POS} at ${esc(prev?.short ?? 'the round before')} to unlock it.</span>`);
     }
   };
-
-  // ---- the one call to action: always the next round (whatever is picked on the map)
-  const acts = el('div', 'ch-rnd-acts', lower);
-  const prev = el('div', 'cta ghost ch-step', acts, '‹');
-  const go = el('div', 'cta ch-go', acts, nt ? `Race round ${d.round + 1} · ${esc(CIRCUITS.find((c) => c.id === nt)?.short ?? '')}` : 'Season complete');
-  const nextB = el('div', 'cta ghost ch-step', acts, '›');
   const step = (k: number) => {
     const i = cal.indexOf(mapSel!);
     mapSel = cal[(i + k + cal.length) % cal.length];
     draw();
   };
-  ctx.action(prev, () => step(-1));
+  ctx.action(back, () => step(-1));
   if (nt) ctx.action(go, () => ctx.onRace(nt));
   else go.classList.add('dis');
-  ctx.action(nextB, () => step(1));
+  ctx.action(fwd, () => step(1));
   map.addEventListener('click', (e) => {
     const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
     if (!g?.dataset.id) return;
@@ -237,27 +367,51 @@ function overview(p: HTMLElement, ctx: HubCtx) {
     const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
     if (g?.dataset.id && g.dataset.id === nt) ctx.onRace(nt);
   });
-
-  // ---- the paddock, short: what needs an answer, the car, the contract
-  const open = d.inbox.filter((m) => m.choices && m.picked === undefined);
-  const latest = open[0] ?? d.inbox[0];
-  if (latest) {
-    el('div', 'hp-cap', side, `Paddock${dc.unread() ? ` <span>${dc.unread()} new</span>` : ''}`);
-    side.appendChild(msgCard(latest, ctx));
-    if (d.inbox.length > 1) {
-      const all = el('div', 'ch-link', side, `All messages (${d.inbox.length})`);
-      ctx.action(all, () => {
-        view = 'inbox';
-        ctx.rerender();
-      });
-    }
-  }
   draw();
-  // (the first focus ran before layout: frame it again once the panel has its size)
-  requestAnimationFrame(() => {
-    first = true;
-    draw();
-  });
+  settle(mapSel);
+}
+
+/** no career yet: the season map to come (every round but the first locked) and the way in */
+export function renderStart(p: HTMLElement, ctx: { action(e: HTMLElement, fn: () => void, disabled?: boolean): void; onNewCareer(): void }) {
+  p.classList.add('ch', 'start');
+  const wrap = el('div', 'ch-season', p);
+  const map = el('div', 'cm-map ch-map', wrap);
+  const card = el('div', 'ch-rnd ch-begin', wrap);
+  const cal = F2_CALENDAR;
+  const states: PinState[] = cal.map((_, i) => (i === 0 ? 'next' : 'locked'));
+  const { focus, settle } = seasonMap(
+    map,
+    cal.map((id, i) => ({ id, state: states[i], label: String(i + 1), medal: null })),
+    () => card.offsetWidth + 32,
+  );
+  map.insertAdjacentHTML(
+    'beforeend',
+    `<div class="ch-map-cap"><div class="cap">Driver career</div><div class="big">The road to Formula 1</div>${progress(states, cal.map(() => null))}` +
+      `<div class="ch-prog-l">${cal.length} rounds of Formula 2 · top ${UNLOCK_POS} unlocks the next one</div></div>` +
+      LEGEND,
+  );
+  const art = el('div', 'ch-rnd-art', card);
+  art.style.backgroundImage = `url("${artFor(cal[0])}")`;
+  el('div', 'ch-rnd-id', card, `<div class="cap">Your career</div><div class="nm">Your journey to Formula 1</div>`);
+  el(
+    'div',
+    'ch-begin-sub',
+    card,
+    `Create a driver and fight your way up from Formula 2, or take over a current F1 driver's seat. Contracts, rivals, ratings and the team's R&D come with it.`,
+  );
+  el(
+    'div',
+    'ch-steps',
+    card,
+    `<div><b>1</b><span><em>Every round is a pin.</em> Round 1 is open; the rest are locked.</span></div>` +
+      `<div><b>2</b><span><em>Finish in the top ${UNLOCK_POS}</em> to unlock the next round. Lower, and you race it again.</span></div>` +
+      `<div><b>3</b><span><em>Medals</em> for the result that counts: <i class="md gold"></i> a win, <i class="md silver"></i> a podium, <i class="md bronze"></i> the top ${UNLOCK_POS}.</span></div>` +
+      `<div><b>4</b><span><em>${DEFAULT_LAPS} laps</em> a race, or ${LAP_CHOICES.slice(1).join(', ').replace(/, (\d+)$/, ' or $1')} with pit stops.</span></div>`,
+  );
+  const go = el('div', 'cta ch-go', card, 'Start your career');
+  ctx.action(go, () => ctx.onNewCareer());
+  focus(cal[0]);
+  settle(cal[0]);
 }
 
 function inboxView(p: HTMLElement, ctx: HubCtx) {
@@ -507,6 +661,20 @@ function renderChoose(p: HTMLElement, ctx: HubCtx) {
 
 /** what the last round did to the career: on the results screen */
 export function renderRoundSummary(box: HTMLElement, s: RoundSummary) {
+  const short = (id: string | null | undefined) => CIRCUITS.find((c) => c.id === id)?.short ?? id ?? '';
+  if (s.cleared === false) {
+    // outside the top five: the map doesn't move on, and nothing was scored
+    const res = s.dnf ? 'a DNF' : `P${s.pos}`;
+    el(
+      'div',
+      'rw-unlock gate',
+      box,
+      `<b>Round not cleared</b> · ${res} at ${esc(short(s.track))}. Finish in the top ${UNLOCK_POS} to unlock the next round — the championship, the team's targets and the paddock wait for the result that counts.${s.tries && s.tries > 1 ? ` <em>Attempt ${s.tries}</em>` : ''}`,
+    );
+    return;
+  }
+  if (s.cleared)
+    el('div', 'rw-unlock', box, s.unlocked ? `<b>Round cleared</b> · ${esc(short(s.unlocked))} is unlocked on the season map` : `<b>Round cleared</b> · the season is complete`);
   const w = el('div', 'rc', box);
   const objs = s.objectives.map((o) => `<div class="rc-o${o.done ? ' done' : ''}"><i></i><span>${esc(o.label)}</span><b>${o.done ? `+${o.rp}` : '—'}</b></div>`).join('');
   el('div', 'rc-col', w, `<div class="cap">Team targets</div>${objs}`);

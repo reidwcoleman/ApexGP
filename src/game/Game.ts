@@ -2146,7 +2146,8 @@ export class Game {
       }
       const nt = this.dc.nextTrack;
       const nc = nt ? CIRCUITS.find((c) => c.id === nt) : null;
-      if (nc) next = { label: this.dc.data!.round === 0 ? `New season · ${nc.short}` : `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
+      // (outside the top five the round stays the next one: race it again)
+      if (nc) next = { label: careerSum?.cleared === false ? `Retry round · ${nc.short}` : this.dc.data!.round === 0 ? `New season · ${nc.short}` : `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
     } else if (this.careerRace && !this.spectating && !this.race.isTimeTrial) {
       const i = CIRCUITS.findIndex((c) => c.id === this.track.def.id);
       const nc = CIRCUITS[i + 1];
