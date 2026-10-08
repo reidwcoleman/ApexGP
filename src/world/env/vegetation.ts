@@ -3,7 +3,7 @@ import { WorldMap } from './worldmap.ts';
 import { fbm2, hash2i, rng, smoothstep } from './noise.ts';
 import { fieldWarp } from './textures.ts';
 import { buildTreeKit, PROTO_INFO, SPECIES_PROTOS, whenTreeKit, type SpeciesId, type TreeKit } from './treeproto.ts';
-import { createTreeUniforms, impostorMaterial, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
+import { createTreeUniforms, impostorMaterial, TREE_FADE, treeDepthMaterial, treeMaterial, type TreeUniforms } from './treematerial.ts';
 import type { Layout } from './layout.ts';
 import { spielbergSpecies } from './venues/spielberg.ts';
 import { hungaroringSpecies } from './venues/hungaroringLand.ts';
@@ -24,26 +24,29 @@ import { hungaroringSpecies } from './venues/hungaroringLand.ts';
  * Rendering (≈ 3 draw calls + shadows):
  *   near  one BatchedMesh with every prototype's LOD0/1/2; only trees within
  *         ~125 m of the circuit are in it, only those within the 3D range of the
- *         camera (94 m on High, conifers 56 m) visible, sorted front to back
+ *         camera (89 m on High, conifers 52 m) visible, sorted front to back
  *         (LOD0 < 34 m, LOD1 < 50 m). Each tree has two instances in it (even LOD,
- *         odd LOD): across a LOD boundary both are shown and the shader dithers
- *         one into the other over a few metres, so no tree swaps detail in one frame.
+ *         odd LOD). A tree that changes its detail dissolves from one into the other
+ *         (or into / out of its impostor) in a matched dither over 0.3 s and is then
+ *         left alone (5 m of hysteresis): never a swap in one frame, and never a tree
+ *         left half-dithered because it stands near a boundary (see change()).
  *         Doesn't cast shadows itself:
  *   shade a second BatchedMesh of the same trees at LOD2 only (out to 64 m), drawn
  *         into the shadow maps and nowhere else (its camera-pass draw list is
  *         emptied) — leafy shadows at a fraction of the full trees' cost in both
- *         cascades; beyond, the ground's crown-shade mask.
+ *         cascades, thinning out leaf by leaf over their last 11 m; beyond, the
+ *         ground's crown-shade mask.
  *   far   one instanced impostor card per tree (all of them, nearest the circuit
- *         first), showing the scan's baked frames, cross-faded with the 3D tree by
- *         a matched dither over the last 10 m of the 3D range.
+ *         first), showing the scan's baked frames; a near tree's impostor takes the
+ *         other half of its 3D tree's dissolve.
  * Look-ahead: every one of those distances is measured not from the camera but from the
  * stretch of road it will cover in the next half second (its own travel, measured frame
  * to frame — a static TV camera gets none). At 300 km/h a tree beside the track used to
  * reach full detail ~20 m before the car (a quarter of a second: "as you pass it"); now
  * the detail is there ~55 m out (High), while what lies beside and behind (and every distance at
  * a standstill) is unchanged, so the cost stays where the view is.
- * Both are built once the baked files have arrived (they load at start-up, so
- * normally before the scenery build reaches the trees).
+ * Both are built once the baked files have arrived (Game.completeWorldInBackground awaits them
+ * before the landscape is built, so no session ever starts — nor any view show — without them).
  */
 
 export interface VegetationBuild {
@@ -56,6 +59,10 @@ export interface VegetationBuild {
    * as its impostor instead (no holes where the main view's 3D trees would stand, and far cheaper).
    */
   feedView(on: boolean): void;
+  /** dev: the 3D reach scaled (0: every tree its impostor — tools/treehand.mjs), and counts of the
+   *  changes of detail: dissolves, instant ones without a cut (pops: should stay 0), at cuts, and
+   *  changes held back until the dissolve before them is done (tools/treepop.mjs) */
+  debug: { reach: number; fades: number; pops: number; snaps: number; deferred: number; cuts: number };
   /** how far the 3D trees reach before the impostors take over (quality level) */
   setDetail(q: 'low' | 'medium' | 'high' | 'ultra'): void;
   count: number;
@@ -91,8 +98,21 @@ const LOD0 = 72;
 const LOD1 = 100;
 /** look-ahead: seconds of the camera's travel the detail reaches ahead of it (capped per quality level) */
 const LOOK_T = 0.5;
-/** CPU margin (m) round each fade band: the LOD pass runs every ~2 m of travel, the shader every frame */
-const LOD_M = 3;
+/** how long a tree takes to change its detail (s): a dissolve, quick enough never to be watched */
+const FADE = TREE_FADE;
+/** hysteresis round each detail boundary (m): a tree near one doesn't flap between its LODs */
+const HYST = 5;
+/** a camera move bigger than this in one frame (m) is a cut */
+const CUT_M = 12;
+
+/**
+ * The 3D trees' instance colour w: the species flag (1 broadleaf, 2 conifer) and the instance's
+ * fade — fading in (dirIn 1) or out (0), started at t0 (s of the scenery clock, kept to 1/60 s;
+ * 0: steady). treematerial decodes it (TREE_FADE). Floats hold integers exactly to 2^24: ≈ 12 h.
+ */
+function fadeCode(flag: number, dirIn: number, t0: number) {
+  return flag + 3 * dirIn + 6 * (t0 > 0 ? Math.max(1, Math.round(t0 * 60)) : 0);
+}
 
 export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.WebGLRenderer): VegetationBuild {
   const timings: Record<string, number> = {};
@@ -402,7 +422,6 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   lap('place');
   // ---------------------------------------------------------------- render: near batch + impostors
   const uniforms = createTreeUniforms();
-  uniforms.uFade.value.set(R3D - 12, R3D + 12);
   const group = new THREE.Group();
   group.name = 'Vegetation';
 
@@ -429,25 +448,39 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (!a) cells.set(key, (a = []));
     a.push(k);
   });
-  // two instances per tree: the even LOD (0 or 2 — never both: the bands are apart) and LOD1
-  const lodE = new Int8Array(nearIdx.length).fill(-1);
-  const lodO = new Int8Array(nearIdx.length).fill(-1);
+  // two instances per tree: the even LOD (0 or 2) and LOD1 — both shown only while one fades into
+  // the other. Each tree's detail is a small state machine (see update): the LOD it shows (cur:
+  // -1 = its impostor), and while it changes, the one it is leaving (prev, -2 = none) and when the
+  // change began (t0, s of the scenery clock).
+  const cur = new Int8Array(nearIdx.length).fill(-1);
+  const prev = new Int8Array(nearIdx.length).fill(-2);
+  const tStart = new Float64Array(nearIdx.length);
+  const shownE = new Int8Array(nearIdx.length).fill(-1);
+  const shownO = new Uint8Array(nearIdx.length);
   const shadeOn = new Uint8Array(nearIdx.length);
+  /** near tree → its impostor instance (-1: a small shrub, no impostor) */
+  const impOf = new Int32Array(nearIdx.length).fill(-1);
+  let impFade: THREE.InstancedBufferAttribute | null = null;
+  /** trees mid-change (finished ones are retired every frame) */
+  let fading: number[] = [];
+  let fadingNext: number[] = [];
+  const isFading = new Uint8Array(nearIdx.length);
   // double-buffered active lists + a per-tree stamp: no allocation per LOD pass
   let active: number[] = [];
   let next: number[] = [];
   const stamp = new Uint32Array(nearIdx.length);
   let gen = 0;
   const cam = new THREE.Vector3();
+  const debug = { reach: 1, fades: 0, pops: 0, snaps: 0, deferred: 0, cuts: 0 };
   const last = new THREE.Vector3(1e9, 0, 0);
   let frames = 0;
   let reach = R3D + 16;
   let reachC = R3D + 16;
   let lod0 = LOD0;
   let lod1 = LOD1;
-  // (half-width of each LOD cross-fade band)
-  let lodH = 4;
   let lookMax = 34;
+  let clock = 0;
+  let lastClock = -1;
   // the camera's travel (m/s, world x/z), smoothed: the direction and reach of the look-ahead
   const prevCam = new THREE.Vector3();
   let prevT = 0;
@@ -458,6 +491,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   let shadeR = LOD1 + 14;
   // (filled once the baked trees are in: whenTreeKit below)
   let bm: THREE.BatchedMesh | null = null;
+  let colorsUp = false;
   let sm: THREE.BatchedMesh | null = null;
   let geoIds: number[][] = [];
   let shadeIds: number[] = [];
@@ -510,9 +544,9 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
       sv.set(t.s * (t.flip ? -1 : 1), t.s * (0.94 + fract(t.rot * 13.7) * 0.12), t.s);
       pv.set(t.x, t.y, t.z);
       m4.compose(pv, q, sv);
-      // (instance colour: the tint, and in w which 3D fade band the tree uses — treeMaterial)
-      c4.set(t.tint.r, t.tint.g, t.tint.b, isNear[i]);
-      // the even-LOD and the LOD1 instance (both shown only across a LOD boundary)
+      // (instance colour: the tint, and in w the species flag and the instance's fade — fadeCode)
+      c4.set(t.tint.r, t.tint.g, t.tint.b, fadeCode(isNear[i], 1, 0));
+      // the even-LOD and the LOD1 instance (both shown only while one fades into the other)
       for (let e = 0; e < 2; e++) {
         const id = b.addInstance(geoIds[t.proto][e === 0 ? 0 : 1]);
         b.setMatrixAt(id, m4);
@@ -537,6 +571,10 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     b.renderOrder = -1;
     group.add(b);
     bm = b;
+    b.onAfterRender = () => {
+      colorsUp = true;
+      b.onAfterRender = () => {};
+    };
     sb.perObjectFrustumCulled = true;
     sb.sortObjects = false;
     sb.castShadow = true;
@@ -567,15 +605,25 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const iPos = new Float32Array(N * 4);
     const iInfo = new Float32Array(N * 4);
     const iTint = new Float32Array(N * 3);
+    // (each impostor's fade: (start, s — 0: steady; 1 = fading in / shown, 0 = fading out / hidden);
+    // only the near trees' ever change, as their 3D tree takes over or hands back)
+    const iFade = new Float32Array(N * 2);
+    const nearK = new Int32Array(trees.length).fill(-1);
+    nearIdx.forEach((ti, k) => (nearK[ti] = k));
     impList.forEach((ti, i) => {
       const t = trees[ti];
       iPos.set([t.x, t.y, t.z, t.s], i * 4);
       iInfo.set([t.proto, t.flip ? 1 : 0, isNear[ti], t.rot], i * 4);
       iTint.set([t.tint.r, t.tint.g, t.tint.b], i * 3);
+      iFade[i * 2 + 1] = 1;
+      if (nearK[ti] >= 0) impOf[nearK[ti]] = i;
     });
     base.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 4));
     base.setAttribute('iInfo', new THREE.InstancedBufferAttribute(iInfo, 4));
     base.setAttribute('iTint', new THREE.InstancedBufferAttribute(iTint, 3));
+    impFade = new THREE.InstancedBufferAttribute(iFade, 2);
+    impFade.setUsage(THREE.DynamicDrawUsage);
+    base.setAttribute('iFade', impFade);
     base.instanceCount = N;
     base.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
     const imp = new THREE.Mesh(base, impostorMaterial(kit, uniforms));
@@ -604,37 +652,141 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // further out — [fade start, fade end, LOD0 →, LOD1 →])
   // (and the conifers' own, shorter 3D band: [fade start, fade end])
   // (and how far ahead the look-ahead may reach, m: LOOK_T of travel, at most this)
-  const DETAIL = { low: [54, 64, 24, 36, 34, 42, 20], medium: [72, 82, 30, 44, 42, 50, 26], high: [84, 94, 34, 50, 48, 56, 34], ultra: [130, 140, 54, 80, 70, 80, 44] } as const;
+  // (since the hand-overs became timed fades — update — rather than distance bands, each row is
+  // [broadleaf 3D reach, LOD0 → 1, LOD1 → 2, conifer 3D reach, look-ahead cap], m)
+  const DETAIL = { low: [59, 24, 36, 38, 20], medium: [77, 30, 44, 46, 26], high: [89, 34, 50, 52, 34], ultra: [135, 54, 80, 75, 44] } as const;
   const setDetail = (q: keyof typeof DETAIL) => {
-    const [f0, f1, l0, l1, c0, c1, la] = DETAIL[q];
-    uniforms.uFade.value.set(f0, f1);
-    uniforms.uFadeC.value.set(c0, c1);
-    reach = f1 + 4;
-    reachC = c1 + 4;
+    const [r3, l0, l1, rc, la] = DETAIL[q];
+    reach = r3;
+    reachC = rc;
     lod0 = l0;
     lod1 = l1;
-    // (the LOD0 and LOD2 bands, margins and all, must not meet: a tree has one even-LOD instance)
-    lodH = Math.min(5, Math.max(1, (l1 - l0) / 2 - LOD_M - 1));
     lookMax = la;
     shadeR = l1 + 14;
     last.set(1e9, 0, 0);
   };
-  /** show / hide / re-geometry one instance of near tree k (lod -1: hidden) */
-  const setInst = (b: THREE.BatchedMesh, inst: number[], now: Int8Array, k: number, proto: number, want: number) => {
-    const cur = now[k];
-    if (cur === want) return;
-    if (want < 0) b.setVisibleAt(inst[k], false);
-    else {
-      if (cur < 0) b.setVisibleAt(inst[k], true);
-      b.setGeometryIdAt(inst[k], geoIds[proto][want]);
+  const c4u = new THREE.Vector4();
+  /** show near tree k's LOD L (its even or odd instance) fading in (dirIn 1) or out (0) from t0 (0: steady) */
+  const showInst = (k: number, L: number, dirIn: number, t0: number) => {
+    const t = trees[nearIdx[k]];
+    let id: number;
+    if (L === 1) {
+      id = nearInstO[k];
+      if (!shownO[k]) bm!.setVisibleAt(id, true);
+      shownO[k] = 1;
+    } else {
+      id = nearInst[k];
+      if (shownE[k] !== L) {
+        if (shownE[k] < 0) bm!.setVisibleAt(id, true);
+        bm!.setGeometryIdAt(id, geoIds[t.proto][L]);
+        shownE[k] = L;
+      }
     }
-    now[k] = want;
+    bm!.setColorAt(id, c4u.set(t.tint.r, t.tint.g, t.tint.b, fadeCode(isNear[nearIdx[k]], dirIn, t0)));
+    // (just this instance's texel re-uploaded, not the whole ~0.5 MB colour texture on every LOD pass —
+    // once it has been uploaded whole: a first upload of only the ranges would leave the rest blank)
+    if (colorsUp) (bm as unknown as { _colorsTexture: THREE.DataTexture })._colorsTexture.addUpdateRange(id * 4, 4);
+  };
+  const hideInst = (k: number, L: number) => {
+    if (L === 1) {
+      if (shownO[k]) bm!.setVisibleAt(nearInstO[k], false);
+      shownO[k] = 0;
+    } else if (L >= 0 && shownE[k] === L) {
+      bm!.setVisibleAt(nearInst[k], false);
+      shownE[k] = -1;
+    }
+  };
+  /** near tree k's impostor: shown (dirIn 1) or hidden (0), fading from t0 (0: at once) */
+  const setImp = (k: number, dirIn: number, t0: number) => {
+    const i = impOf[k];
+    if (i < 0 || !impFade) return;
+    const a = impFade.array as Float32Array;
+    a[i * 2] = t0;
+    a[i * 2 + 1] = dirIn;
+    impFade.addUpdateRange(i * 2, 2);
+    impFade.needsUpdate = true;
+  };
+  /** a change of detail that has run its course: the LOD it left goes */
+  const retire = (k: number) => {
+    const p = prev[k];
+    if (p >= 0 && (cur[k] < 0 || (p === 1) !== (cur[k] === 1))) hideInst(k, p);
+    prev[k] = -2;
+  };
+  /**
+   * Tree k changes its detail to `want` (-1: its impostor). Not in a single frame and not by
+   * distance: the LOD it leaves and the one it takes cross-fade in a matched dither over FADE s of
+   * the scenery clock, and are then left alone (hysteresis, HYST m, keeps it from flapping on the
+   * boundary). The old distance bands kept every tree near a boundary half-dithered for as long
+   * as it stayed there — from a static TV camera, forever: a screen-door crown — and a car
+   * running alongside a row of trees saw a band of them stippled at all times. A cut (snap) just
+   * sets the new state: the frame is new anyway.
+   */
+  const change = (k: number, want: number, snap: boolean) => {
+    const old = cur[k];
+    if (want === old) return;
+    if (prev[k] !== -2) {
+      // mid-dissolve: the next change waits until this one is done (the pass comes round again within
+      // a few frames) — cutting it short dropped what was left of the old LOD in one frame, which at
+      // 300 km/h, trees crossing two LOD bands within 0.3 s, happened ~80 times a second
+      if (!snap) {
+        debug.deferred++;
+        return;
+      }
+      retire(k);
+    }
+    if (snap || (old >= 0 && want >= 0 && (old === 1) === (want === 1))) {
+      if (snap) debug.snaps++;
+      else debug.pops++;
+      if (old >= 0) hideInst(k, old);
+      if (want >= 0) showInst(k, want, 1, 0);
+      setImp(k, want < 0 ? 1 : 0, 0);
+      cur[k] = want;
+      return;
+    }
+    // (on the 1/60 s grid the instance colour keeps — fadeCode — so 3D and impostor fade in step)
+    debug.fades++;
+    const t0 = Math.max(2, Math.round(clock * 60)) / 60;
+    if (old >= 0) showInst(k, old, 0, t0);
+    else setImp(k, 0, t0);
+    if (want >= 0) showInst(k, want, 1, t0);
+    else setImp(k, 1, t0);
+    cur[k] = want;
+    prev[k] = old;
+    tStart[k] = t0;
+    if (!isFading[k]) {
+      isFading[k] = 1;
+      fading.push(k);
+    }
   };
   const update = (camera: THREE.Camera, elapsed: number) => {
     uniforms.uTime.value = elapsed;
     uniforms.uFrame.value = (uniforms.uFrame.value + 1) % 64;
     if (!bm || !sm) return;
     camera.getWorldPosition(cam);
+    clock = elapsed;
+    // (the shadow casters thin out over the last 11 m before they are dropped at shadeR + HYST: treeDepthMaterial)
+    uniforms.uShade.value.set(cam.x, cam.z, shadeR - 14, shadeR - 3);
+    // a cut: the camera jumped (TV cameras, the helicopter, the reflection capture, a replay seek)
+    // or the clock went back — the new view gets its trees as they should be, no fades
+    const snap = !haveCam || cam.distanceToSquared(prevCam) > CUT_M * CUT_M || clock < lastClock;
+    lastClock = clock;
+    if (snap) {
+      last.set(1e9, 0, 0);
+      debug.cuts++;
+    }
+    // retire the changes that have run their course
+    fadingNext.length = 0;
+    for (const k of fading) {
+      if (snap || clock - tStart[k] >= FADE || clock < tStart[k]) {
+        retire(k);
+        isFading[k] = 0;
+      } else fadingNext.push(k);
+    }
+    {
+      const f = fading;
+      fading = fadingNext;
+      fadingNext = f;
+    }
     // the camera's travel, every frame (a cut — TV cameras, the reflection capture, a replay seek —
     // is not a camera at warp speed: it is skipped, and the smoothing settles on the new one)
     const dtv = elapsed - prevT;
@@ -652,25 +804,19 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     frames++;
     if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0) return;
     last.copy(cam);
-    // the look-ahead for this pass (the shader gets the same, so both agree on every distance):
+    // the look-ahead for this pass (the CPU decides every change: the shader only plays the dissolve):
     // the near detail (LODs, conifers, all within ~60 m) by the full reach, the broadleaf 3D range
     // and the shadow casters by half of it (they are further out, and cost more the further they go)
     const sp = Math.hypot(velX, velZ);
     const aN = sp > 3 ? Math.min(lookMax, sp * LOOK_T) : 0;
     const aF = aN * 0.5;
     const ux = aN > 0 ? velX / sp : 0, uz = aN > 0 ? velZ / sp : 0;
-    uniforms.uLook.value.set(ux, uz, aN, aF);
-    uniforms.uLodB.value.set(lod0, lod1, lodH, 0);
     gen++;
     next.length = 0;
-    const R = Math.max(reach, reachC);
+    const R = Math.max(reach, reachC) * Math.max(1, debug.reach) + HYST;
     const ex = cam.x + ux * aN, ez = cam.z + uz * aN;
     const c0x = Math.floor((Math.min(cam.x, ex) - R) / CELL), c1x = Math.floor((Math.max(cam.x, ex) + R) / CELL);
     const c0z = Math.floor((Math.min(cam.z, ez) - R) / CELL), c1z = Math.floor((Math.max(cam.z, ez) + R) / CELL);
-    // the LODs' bands (LOD_M: the shader's distances drift by up to the ~2 m the camera may move
-    // before the next pass — an instance is kept a little beyond where it has dithered away)
-    const e0 = lod0 + lodH + LOD_M, e2 = lod1 - lodH - LOD_M;
-    const o0 = lod0 - lodH - LOD_M, o1 = lod1 + lodH + LOD_M;
     for (let cx = c0x; cx <= c1x; cx++)
       for (let cz = c0z; cz <= c1z; cz++) {
         const arr = cells.get((cx + 1024) * 2048 + cz + 1024);
@@ -685,26 +831,33 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
           const dN = Math.sqrt(nx * nx + nz * nz + dy * dy);
           const dF = Math.sqrt(fx * fx + fz * fz + dy * dy);
           const fir = isNear[nearIdx[k]] === 2;
-          if (fir ? dN > reachC : dF > reach) continue;
-          setInst(bm, nearInst, lodE, k, t.proto, dN < e0 ? 0 : dN > e2 ? 2 : -1);
-          setInst(bm, nearInstO, lodO, k, t.proto, dN > o0 && dN < o1 ? 1 : -1);
-          const sh = dF < (fir ? Math.min(shadeR, reachC) : shadeR);
+          // the detail it should have — each boundary moved HYST m away from the side it is on
+          const c = cur[k];
+          const h3 = c >= 0 ? HYST : -HYST;
+          const in3D = fir ? dN < reachC * debug.reach + h3 : dF < reach * debug.reach + h3;
+          const want = !in3D ? -1 : dN < lod0 + (c === 0 ? HYST : -HYST) ? 0 : dN < lod1 + (c === 0 || c === 1 ? HYST : -HYST) ? 1 : 2;
+          change(k, want, snap);
+          const sh = dF < (fir ? Math.min(shadeR, reachC) : shadeR) + (shadeOn[k] ? HYST : -HYST);
           if (shadeOn[k] !== +sh) {
             sm.setVisibleAt(shadeInst[k], sh);
             shadeOn[k] = +sh;
           }
+          if (want < 0 && !shadeOn[k] && prev[k] === -2) continue;
           next.push(k);
           stamp[k] = gen;
         }
       }
-    // hide the ones that dropped out
+    // the ones that dropped out of the scan: back to their impostors
     for (const k of active) {
       if (stamp[k] !== gen) {
-        const p = trees[nearIdx[k]].proto;
-        setInst(bm, nearInst, lodE, k, p, -1);
-        setInst(bm, nearInstO, lodO, k, p, -1);
+        change(k, -1, snap);
         if (shadeOn[k]) sm.setVisibleAt(shadeInst[k], false);
         shadeOn[k] = 0;
+        // (still fading out: kept on the list until its fade is retired)
+        if (prev[k] !== -2) {
+          next.push(k);
+          stamp[k] = gen;
+        }
       }
     }
     const t = active;
@@ -713,24 +866,16 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   };
 
   const shade = trees.map((t) => ({ x: t.x, z: t.z, r: PROTO_INFO[t.proto].crownR * t.s }));
-  const feedFade = new THREE.Vector4();
   let feedNear = false;
   const feedView = (on: boolean) => {
-    const f = uniforms.uFade.value, fc = uniforms.uFadeC.value;
+    // (every impostor shown whatever its hand-over to a 3D tree, the 3D trees hidden for the pass)
+    uniforms.uImpAll.value = on ? 1 : 0;
     if (on) {
-      feedFade.set(f.x, f.y, fc.x, fc.y);
-      // (a band below zero: every impostor fully in at any distance)
-      f.set(-2, -1);
-      fc.set(-2, -1);
       feedNear = bm?.visible ?? false;
       if (bm) bm.visible = false;
-    } else {
-      f.set(feedFade.x, feedFade.y);
-      fc.set(feedFade.z, feedFade.w);
-      if (bm) bm.visible = feedNear;
-    }
+    } else if (bm) bm.visible = feedNear;
   };
-  return { group, uniforms, update, feedView, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings };
+  return { group, uniforms, update, feedView, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings, debug };
 }
 
 void smoothstep;

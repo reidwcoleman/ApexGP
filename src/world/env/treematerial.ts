@@ -11,36 +11,27 @@ import { weatherUniforms } from '../weatherUniforms.ts';
  *                    woods, limb sway, leaf flutter) and a passing car's wake (carWake),
  *                    light through the leaves when back-lit (shadowed properly because it
  *                    rides on the directional light's shadowed colour), crown-depth AO and
- *                    each leaf's place in its spray, hashed alpha at a distance, rain gloss,
- *                    a dithered fade-out at the 3D → impostor distance (a shorter one for
- *                    conifers: instance colour w = 2), and the same dither cross-fading each LOD
- *                    into the next (aLod) — all measured from the camera's look-ahead (uLook).
+ *                    each leaf's place in its spray, coverage-preserving alpha at a distance,
+ *                    rain gloss, and a timed dither cross-fade whenever a tree changes its
+ *                    detail (instance colour w: TREE_FADE_GLSL; vegetation.ts decides when).
  *  treeDepthMaterial()  the same cards + wind (no flutter, no wake) + leaf alpha for the shadow map.
  *  impostorMaterial()   camera-facing cards showing the scanned tree's baked frames (8 views
  *                    around it, blended by the camera's bearing), relit from the baked
- *                    normals, swaying with the same trunk wind; they fade in exactly where
- *                    the 3D tree fades out.
+ *                    normals, swaying with the same trunk wind; a near tree's impostor fades
+ *                    in exactly as its 3D tree fades out (the same dither, complementary).
  *  feedCarWake()     (Game, once a frame) the nearest cars' positions / speeds for carWake —
  *                    shared with the verge grass (grass.ts).
  */
 
 export interface TreeUniforms {
   uTime: THREE.IUniform<number>;
-  /** frame counter: the 3D/impostor hand-over dither moves every frame (a fixed one showed as hatching) */
+  /** frame counter: the hand-over dither moves every frame (a fixed one showed as hatching) */
   uFrame: THREE.IUniform<number>;
-  /** 3D fade band (start, end) in metres from the camera */
-  uFade: THREE.IUniform<THREE.Vector2>;
-  /** the conifers' (shorter) 3D fade band: instance colour w = 2 (vegetation.ts) */
-  uFadeC: THREE.IUniform<THREE.Vector2>;
-  /**
-   * the look-ahead (vegetation.ts update): (direction of travel x, z (unit, or 0), reach ahead for
-   * the near detail — LODs, conifers — and for the broadleaf 3D → impostor hand-over (m)). Every
-   * fade distance is measured from the segment the camera will cover in the next half second, so a
-   * tree the car is heading for is in full detail well before it gets there, not as it goes by.
-   */
-  uLook: THREE.IUniform<THREE.Vector4>;
-  /** LOD cross-fade: (LOD0 → 1 distance, LOD1 → 2 distance, half-width of the dithered band, 0) */
-  uLodB: THREE.IUniform<THREE.Vector4>;
+  /** the shadow casters' fade-out: (camera x, z, fade start, fade end) m — vegetation.ts */
+  uShade: THREE.IUniform<THREE.Vector4>;
+  /** the ground's crown mask (parkmask.ts fine, R) and its bounds (x0, z0, 1 / width, 1 / depth; z = 0: none yet) */
+  uCanopy: THREE.IUniform<THREE.Texture | null>;
+  uCanopyB: THREE.IUniform<THREE.Vector4>;
   /** world direction toward the sun (for the leaf shadow offset) */
   uSunW: THREE.IUniform<THREE.Vector3>;
   /**
@@ -48,9 +39,17 @@ export interface TreeUniforms {
    * (strong in sunshine, near 1 under a grey deck where the sky already lights everything)
    */
   uLeafFill: THREE.IUniform<THREE.Vector3>;
+  /** 1 while the big screens' feed renders: every tree drawn as its impostor (vegetation feedView) */
+  uImpAll: THREE.IUniform<number>;
 }
 
-const FILL_SUN = new THREE.Vector3(3.4, 3.55, 2.8);
+/**
+ * The leaf cards' alpha cut: (the cut, extra cut on cards turning edge-on). Shared by every tree
+ * material (src/dev/treelod.ts tunes it live).
+ */
+export const leafTune = { uLeafCut: { value: new THREE.Vector4(0.4, 0.25, 0.25, 0.15) } };
+
+const FILL_SUN =new THREE.Vector3(3.4, 3.55, 2.8);
 const FILL_GREY = new THREE.Vector3(1.35, 1.4, 1.2);
 /** set the foliage fill from how much of the light is direct sun (0 … 1) */
 export function setLeafFill(u: TreeUniforms, sunShare: number) {
@@ -58,8 +57,61 @@ export function setLeafFill(u: TreeUniforms, sunShare: number) {
 }
 
 export function createTreeUniforms(): TreeUniforms {
-  return { uTime: { value: 0 }, uFrame: { value: 0 }, uFade: { value: new THREE.Vector2(158, 182) }, uFadeC: { value: new THREE.Vector2(48, 56) }, uLook: { value: new THREE.Vector4() }, uLodB: { value: new THREE.Vector4(34, 50, 4, 0) }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() } };
+  return { uTime: { value: 0 }, uFrame: { value: 0 }, uShade: { value: new THREE.Vector4(0, 0, 1e5, 1e5 + 1) }, uCanopy: { value: null }, uCanopyB: { value: new THREE.Vector4() }, uSunW: { value: new THREE.Vector3(0.4, 0.8, 0.4) }, uLeafFill: { value: FILL_SUN.clone() }, uImpAll: { value: 0 } };
 }
+
+/** how long a tree's change of detail takes (s of the scenery clock: vegetation.ts) */
+export const TREE_FADE = 0.3;
+
+/**
+ * GLSL: the share of the hand-over dither an instance takes, [x, y) of the noise. Fading in it
+ * takes [0, p), fading out [p, 1) — the two always complementary, so a tree's coverage never
+ * dips or doubles while one LOD (or its impostor) dissolves into the next. p runs 0 → 1 over
+ * TREE_FADE s from the start t0 (s, kept to 1/60; 0: steady, p = 1).
+ */
+const TREE_FADE_GLSL = /* glsl */ `
+vec2 treeFadeShare( float t0, float dirIn ) {
+  float p = t0 > 0.0 ? clamp( ( uTime - t0 ) / ${TREE_FADE.toFixed(3)}, 0.0, 1.0 ) : 1.0;
+  return dirIn > 0.5 ? vec2( 0.0, p ) : vec2( p, 1.0 );
+}
+`;
+
+/**
+ * GLSL: how much of the sun the woods upwind take from a point of a tree beyond the shadow
+ * casters' range (uShade: the 3D trees cast into the shadow maps only out to ~60 m; beyond, and for
+ * every impostor, nothing did — a low sun lit every distant crown, so at golden hour the woods past
+ * 60 m glowed orange while the near trees sat, correctly, in their neighbours' shade). The ground's crown
+ * mask (parkmask.ts, R: the trees' own crowns, ~1.5 m a texel) is read at three points toward the
+ * sun, as far as a ray from the point climbs past the crowns (≈ 19 m up): a crown there that rises
+ * above the ray's height blocks it. The tops stay lit, the lower crown and the trunks go into the
+ * shade of the trees upwind — long shadows at sunset, only the neighbours' at noon. Fades in
+ * exactly as the real shadow casters fade out, so nothing is shaded twice.
+ */
+const TREE_CANOPY_GLSL = /* glsl */ `
+uniform sampler2D uCanopy;
+uniform vec4 uCanopyB;
+uniform vec4 uShade;
+float treeCanopyOcc( vec3 P, float hy, float r0, vec3 root ) {
+  if ( uCanopyB.z <= 0.0 ) return 0.0;
+  float w = smoothstep( uShade.z, uShade.w, length( root.xz - uShade.xy ) );
+  if ( w <= 0.0 ) return 0.0;
+  vec3 L = normalize( uSunW );
+  float lh = length( L.xz );
+  if ( L.y <= 0.0 || lh < 1e-3 ) return 0.0;
+  float t = max( L.y, 0.04 ) / lh;
+  vec2 dir = L.xz / lh;
+  float reach = clamp( ( 19.0 - hy ) / t, 0.0, 140.0 );
+  float lit = 1.0;
+  for ( int k = 0; k < 3; k++ ) {
+    float d = r0 + reach * ( 0.15 + 0.35 * float( k ) );
+    vec2 uv = ( P.xz + dir * d - uCanopyB.xy ) * uCanopyB.zw;
+    if ( uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 ) continue;
+    float c = textureLod( uCanopy, uv, 1.0 ).r;
+    lit *= 1.0 - clamp( c * 1.6, 0.0, 1.0 ) * ( 1.0 - smoothstep( 12.0, 20.0, hy + d * t ) );
+  }
+  return ( 1.0 - lit ) * w;
+}
+`;
 
 // ---------------------------------------------------------------- car wake
 
@@ -157,21 +209,6 @@ vec4 carWake( vec3 P ) {
 }
 `;
 
-/**
- * GLSL: a tree's fade distance — from the camera's look-ahead segment (the camera and the stretch of
- * the next half second's travel ahead of it, uLook) rather than the camera itself: the same as the
- * plain distance beside and behind, shorter for what lies ahead. Shared by the 3D trees and the
- * impostors so their hand-over dithers stay matched.
- */
-const TREE_LOOK = /* glsl */ `
-uniform vec4 uLook;
-float treeLookDist( vec3 p, float ahead ) {
-  vec3 rel = p - cameraPosition;
-  vec3 dir = vec3( uLook.x, 0.0, uLook.y );
-  return length( rel - dir * clamp( dot( rel, dir ), 0.0, ahead ) );
-}
-`;
-
 // ---------------------------------------------------------------- the 3D trees' vertex motion
 
 /**
@@ -198,7 +235,6 @@ uniform vec2 uWind;
 ${CAR_WAKE_GLSL}
 varying vec4 vTree;
 varying vec2 vTUv;
-varying vec2 vFadeD;
 float treeGust( vec2 xz, vec2 wd, float wl ) {
   float gx = dot( xz, wd ) * 0.026 - uTime * ( 0.45 + wl * 0.11 );
   float cr = dot( xz, vec2( -wd.y, wd.x ) ) * 0.012;
@@ -334,11 +370,14 @@ float ignF( vec2 p ) { return ign( p + 5.588238 * mod( uFrame, 64.0 ) ); }
 const LEAF_LIGHT = /* glsl */ `
 varying float vLeafL;
 varying float vAOL;
+varying float vSunOcc;
 void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
   IncidentLight dl = directLight;
   // (sun on the outside of a crown is strong — the bright, warm tops the footage shows — and the
   // inside sits in its own shade)
   dl.color *= mix( 1.0, mix( 0.5, 1.35, vAOL ), vLeafL );
+  // (the sun the woods upwind take, where the shadow maps have no casters: TREE_CANOPY_GLSL)
+  dl.color *= 1.0 - 0.85 * vSunOcc;
   RE_Direct_Physical( dl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   if ( vLeafL > 0.5 ) {
     float VL = saturate( dot( -geometryViewDir, directLight.direction ) );
@@ -366,10 +405,6 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
     Object.assign(sh.uniforms, {
       uTime: u.uTime,
       uFrame: u.uFrame,
-      uFade: u.uFade,
-      uFadeC: u.uFadeC,
-      uLook: u.uLook,
-      uLodB: u.uLodB,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
       uLeafMap: { value: kit.leafMap },
@@ -377,20 +412,40 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       uBark: { value: kit.bark },
       uLeafSize: { value: kit.leafSize },
       uSunW: u.uSunW,
+      uShade: u.uShade,
+      uCanopy: u.uCanopy,
+      uCanopyB: u.uCanopyB,
       uLeafFill: u.uLeafFill,
+      uLeafCut: leafTune.uLeafCut,
+      uLeafCover: { value: kit.leafCover },
+      uLeafCoverN: { value: kit.leafCover.image.height },
       uLeafGrid: { value: kit.leafGrid },
       ...wakeUniforms,
     });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\n${TREE_LOOK}\nattribute float aLod;\nuniform vec4 uLodB;\nvarying vec2 vLodK;\nvarying float vLeafL;\nvarying float vAOL;\nuniform vec3 uSunW;`)
+      .replace('#include <common>', `#include <common>\n${COMMON_VERT}\n${TREE_FADE_GLSL}\nvarying vec2 vLodK;\nvarying float vLeafL;\nvarying float vAOL;\nvarying float vSunOcc;
+uniform vec3 uSunW;
+${TREE_CANOPY_GLSL}`)
       .replace('#include <shadowmap_vertex>', `#ifdef USE_SHADOWMAP\n  worldPosition.xyz += uSunW * ( 0.45 * step( 0.5, aTree.y ) );\n#endif\n#include <shadowmap_vertex>`)
       // (leaf cards: the colour attribute carries the lighting normal, the tint rides in aAxis.w)
       .replace(
         '#include <color_vertex>',
         `vColor = vec4( aTree.y > 0.5 ? vec3( aAxis.w ) : color, 1.0 );
-#ifdef USE_BATCHING_COLOR
-  vColor *= getBatchingColor( getIndirectIndex( gl_DrawID ) );
-#endif`,
+{
+  #ifdef USE_BATCHING_COLOR
+    vec4 bc = getBatchingColor( getIndirectIndex( gl_DrawID ) );
+  #else
+    vec4 bc = vec4( 1.0, 1.0, 1.0, 4.0 );
+  #endif
+  vColor.rgb *= bc.rgb;
+  // instance colour w = flag + 3 dirIn + 6 · t0 · 60 (vegetation.ts fadeCode): this instance's share
+  // of the hand-over dither, and the species flag (2: a conifer) in vColor.a
+  float t60 = floor( bc.a / 6.0 + 1e-3 );
+  float rem = bc.a - t60 * 6.0;
+  float dirIn = floor( rem / 3.0 + 1e-3 );
+  vColor.a = rem - dirIn * 3.0;
+  vLodK = treeFadeShare( t60 / 60.0, dirIn );
+}`,
       )
       .replace(
         '#include <beginnormal_vertex>',
@@ -411,25 +466,23 @@ vec3 treeDisp = treeMove( TREE_TM, objectNormal );
         '#include <begin_vertex>',
         `#include <begin_vertex>
 transformed += treeDisp;
+vTree = aTree;
+vTUv = uv;
+vLeafL = step( 0.5, aTree.y );
+vAOL = aTree.z;
 {
   #ifdef USE_BATCHING
-    vec3 ip = ( modelMatrix * vec4( batchingMatrix[ 3 ].xyz, 1.0 ) ).xyz;
+    mat4 tBm = batchingMatrix;
   #else
-    vec3 ip = ( modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+    mat4 tBm = mat4( 1.0 );
   #endif
-  vTree = aTree;
-  vTUv = uv;
-  vLeafL = step( 0.5, aTree.y );
-  vAOL = aTree.z;
-  // (near detail and conifers by the full look-ahead, the broadleaf hand-over by half of it)
-  vFadeD = vec2( treeLookDist( ip, uLook.z ), treeLookDist( ip, uLook.w ) );
-  // this LOD's share of the dither: [ x, y ) of the noise. Neighbouring LODs take complementary
-  // ranges across each band (the 3D tree's overall share is untouched), so a tree turns into its
-  // next LOD over a few metres in a matched dither, the same way it hands over to its impostor
-  float s0 = smoothstep( uLodB.x - uLodB.z, uLodB.x + uLodB.z, vFadeD.x );
-  float s1 = smoothstep( uLodB.y - uLodB.z, uLodB.y + uLodB.z, vFadeD.x );
-  vLodK = aLod < 0.5 ? vec2( s0, 2.0 ) : aLod < 1.5 ? vec2( s1, s0 ) : vec2( -1.0, s1 );
-}`,
+  vec3 tRoot = ( modelMatrix * vec4( tBm[ 3 ].xyz, 1.0 ) ).xyz;
+  vec3 tWP = ( modelMatrix * ( tBm * vec4( transformed, 1.0 ) ) ).xyz;
+  vSunOcc = treeCanopyOcc( tWP, tWP.y - tRoot.y, 4.0 * length( tBm[ 0 ].xyz ), tRoot );
+}
+// (an instance wholly faded out — the LOD a tree has just left, until vegetation.ts retires it —
+// is dropped before rasterising)
+if ( vLodK.y <= vLodK.x ) transformed = vec3( 0.0, -1e5, 0.0 );`,
       );
     sh.fragmentShader = sh.fragmentShader
       .replace(
@@ -439,14 +492,14 @@ uniform sampler2D uLeafMap;
 uniform sampler2D uLeafN;
 uniform sampler2D uBark;
 uniform vec2 uLeafSize;
-uniform vec2 uFade;
-uniform vec2 uFadeC;
 uniform float uWet;
+uniform vec4 uLeafCut;
+uniform sampler2D uLeafCover;
+uniform float uLeafCoverN;
 uniform vec3 uLeafFill;
 varying vec4 vTree;
 varying vec2 vTUv;
 uniform vec2 uLeafGrid;
-varying vec2 vFadeD;
 varying vec2 vLodK;
 ${GET_TANGENT_FRAME}`,
       )
@@ -469,36 +522,36 @@ material.specularF90 = mix( material.specularF90, 0.22, leafK );`,
         '#include <map_fragment>',
         `
 float leafK = step( 0.5, vTree.y );
-{
-  // (instance colour w: 2 = a conifer, on its own shorter 3D band)
-  bool fir = vColor.a > 1.5;
-  vec2 fb = fir ? uFadeC : uFade;
-  float f = fb.y > 0.0 ? smoothstep( fb.x, fb.y, fir ? vFadeD.x : vFadeD.y ) : 0.0;
+// (mid-change: this instance's share of the hand-over dither, vLodK)
+if ( vLodK.x > 0.0 || vLodK.y < 1.0 ) {
   float ig = ignF( gl_FragCoord.xy );
-  if ( f > ig || ig < vLodK.x || ig >= vLodK.y ) discard;
+  if ( ig < vLodK.x || ig >= vLodK.y ) discard;
 }
 if ( leafK > 0.5 ) {
   // (sharper than the default mip: individual leaves stay legible a little further out — the hashed
-  // alpha below keeps the extra detail from turning into a hard-edged shimmer)
+  // coverage-preserving cut below keeps the extra detail from thinning out)
   vec4 lt = texture2D( uLeafMap, vTUv, -0.7 );
   vec2 dx = dFdx( vTUv * uLeafSize ), dy = dFdy( vTUv * uLeafSize );
   float lod = max( 0.0, 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ) - 0.7 );
   // cards turning edge-on thin out instead of showing smeared leaves
   vec3 fN = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
   float edgeOn = abs( dot( fN, normalize( vViewPosition ) ) );
-  // (a little more sky through the crowns: real foliage is full of holes, not a solid lump)
-  float thr = 0.5 + 0.5 * ( 1.0 - smoothstep( 0.12, 0.42, edgeOn ) );
+  // (the cut, leafTune: conifers lower — a needle covers a texel only partly)
+  vec2 cut = vColor.a > 1.5 ? uLeafCut.zw : uLeafCut.xy;
+  float thr = cut.x + cut.y * ( 1.0 - smoothstep( 0.12, 0.42, edgeOn ) );
   // a spray's leaves run to the card's edge: fade them out over its last few per cent, so no card
   // shows a straight cut
   vec2 cl = fract( vTUv * uLeafGrid );
   float rim = treeRim( cl );
-  // hashed alpha once the leaves are smaller than a few texels: a texel's partial coverage (half a
-  // needle, the edge of a leaf) is kept as that share of its pixels instead of a hard 0.5 cut, so a
-  // distant spray reads as fine foliage texture with sky through it, not a solid cut-out shape. The
-  // hash is anchored to the atlas texel at the current mip: the pattern moves with the leaves.
-  float hs = fract( 52.9829189 * fract( dot( floor( vTUv * uLeafSize / exp2( floor( lod ) ) ), vec2( 0.06711056, 0.00583715 ) ) ) );
-  float jit = ( hs - 0.5 ) * clamp( ( lod - 0.5 ) * 0.35, 0.0, 0.7 );
-  if ( lt.a * rim * ( 1.0 + lod * 0.08 ) < thr + jit ) discard;
+  // coverage-preserving alpha (treeproto leafCoverage): the mip's alpha scaled so this spray keeps
+  // its full-resolution share of leaf at any distance — no thinning far off, and no hashed noise
+  // (which speckled and crawled as the mip level changed): one clean cut the TAA anti-aliases
+  ivec2 ccell = ivec2( floor( vTUv * uLeafGrid ) );
+  int ci = ccell.y * int( uLeafGrid.x ) + ccell.x;
+  float lc0 = min( lod, uLeafCoverN - 1.0 );
+  int l0 = int( floor( lc0 ) );
+  float cg = mix( texelFetch( uLeafCover, ivec2( ci, l0 ), 0 ).r, texelFetch( uLeafCover, ivec2( ci, min( l0 + 1, int( uLeafCoverN ) - 1 ) ), 0 ).r, fract( lc0 ) );
+  if ( lt.a * cg * rim < thr ) discard;
   // foliage as camera footage shows it: a dark olive mass, not a bright game green (the clumps are the
   // scans' own leaves; a touch of desaturation and warmth matches them to the graded footage)
   vec3 lc = lt.rgb;
@@ -536,6 +589,13 @@ if ( leafK > 0.5 ) {
   }
   mat3 tbnT = treeTangentFrame( - vViewPosition, normal, vTUv );
   normal = normalize( tbnT * normalize( mapN ) );
+  // specular anti-aliasing (Kaplanyan & Hoffman, "Filtering Distributions of Normals for Shading
+  // Antialiasing", 2016): where the per-leaf normals change faster than a pixel can hold — a distant
+  // crown, and worst on wet, glossy leaves in the rain — widen the highlight by the normals' spread
+  // instead of letting single pixels flash on and off as the leaves move
+  vec3 dnx = dFdx( normal ), dny = dFdy( normal );
+  float nvar = min( 0.5 * max( dot( dnx, dnx ), dot( dny, dny ) ), 0.22 );
+  roughnessFactor = min( 1.0, sqrt( roughnessFactor * roughnessFactor + nvar ) );
 }`,
       )
       .replace(
@@ -546,7 +606,9 @@ if ( leafK > 0.5 ) {
   vec2 rdx = dFdx( vTUv * uLeafSize ), rdy = dFdy( vTUv * uLeafSize );
   roughnessFactor = mix( roughnessFactor, 0.92, leafK * smoothstep( 1.0, 3.5, max( 0.0, 0.5 * log2( max( dot( rdx, rdx ), dot( rdy, rdy ) ) ) ) ) );
 }
-roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
+// wet: leaves take a film of water and gloss (cuticle + water ≈ 0.4); bark soaks it up — it darkens
+// (map_fragment) and only loses a little roughness: a sodden trunk is dark, not shiny
+roughnessFactor *= mix( 1.0, mix( 0.8, 0.55, leafK ), uWet );`,
       )
       .replace(
         '#include <aomap_fragment>',
@@ -559,15 +621,17 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v10';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v13';
   return mat;
 }
 
 export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDepthMaterial {
   const mat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uTime: u.uTime, uWind: weatherUniforms.uWind, uLeafMap: { value: kit.leafMap }, uLeafGrid: { value: kit.leafGrid }, ...wakeUniforms });
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n#define TREE_SHADOW\n${COMMON_VERT}`).replace(
+    Object.assign(sh.uniforms, { uTime: u.uTime, uShade: u.uShade, uWind: weatherUniforms.uWind, uLeafMap: { value: kit.leafMap }, uLeafGrid: { value: kit.leafGrid }, uLeafSize: { value: kit.leafSize }, uLeafCut: leafTune.uLeafCut, uLeafCover: { value: kit.leafCover }, uLeafCoverN: { value: kit.leafCover.image.height }, ...wakeUniforms });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n#define TREE_SHADOW\n${COMMON_VERT}
+uniform vec4 uShade;
+varying float vShadeK;`).replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
 {
@@ -581,25 +645,65 @@ export function treeDepthMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshDept
   #endif
   vTree = aTree;
   vTUv = uv;
+  // (the far casters' shade thins out before vegetation.ts drops them from the shadow pass)
+  #ifdef USE_BATCHING
+    vec3 sip = ( modelMatrix * vec4( batchingMatrix[ 3 ].xyz, 1.0 ) ).xyz;
+  #else
+    vec3 sip = ( modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+  #endif
+  vShadeK = 1.0 - smoothstep( uShade.z, uShade.w, length( sip.xz - uShade.xy ) );
 }`,
     );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform sampler2D uLeafMap;\nuniform vec2 uLeafGrid;\nvarying vec4 vTree;\nvarying vec2 vTUv;\n${TREE_RIM}`)
+      .replace('#include <common>', `#include <common>\nuniform sampler2D uLeafMap;\nuniform vec2 uLeafGrid;\nuniform vec2 uLeafSize;\nuniform vec4 uLeafCut;\nuniform sampler2D uLeafCover;\nuniform float uLeafCoverN;\nvarying vec4 vTree;\nvarying vec2 vTUv;\nvarying float vShadeK;\n${TREE_RIM}`)
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
+// a far caster's shade goes leaf by leaf (a hash fixed to the spray texture: stable as the tree
+// sways, and soft under the shadow filter) — not all at once as it leaves the shadow range
+if ( vShadeK < 1.0 && fract( sin( dot( floor( vTUv * uLeafSize / 24.0 ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) >= vShadeK ) discard;
 if ( vTree.y > 0.5 ) {
   vec2 cl = fract( vTUv * uLeafGrid );
   float rim = treeRim( cl );
-  if ( texture2D( uLeafMap, vTUv ).a * rim < 0.5 ) discard;
+  // (the same coverage-preserving gain as the lit cards: a crown far down the shadow cascade, its
+  // sprays a few texels across, still casts a full shade, not a sieve)
+  vec2 dx = dFdx( vTUv * uLeafSize ), dy = dFdy( vTUv * uLeafSize );
+  float lod = clamp( 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ), 0.0, uLeafCoverN - 1.0 );
+  ivec2 cc = ivec2( floor( vTUv * uLeafGrid ) );
+  float cg = texelFetch( uLeafCover, ivec2( cc.y * int( uLeafGrid.x ) + cc.x, int( lod + 0.5 ) ), 0 ).r;
+  if ( texture2D( uLeafMap, vTUv ).a * cg * rim < uLeafCut.x ) discard;
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-depth-v5';
+  mat.customProgramCacheKey = () => 'apex-tree-depth-v7';
   return mat;
 }
 
 // ---------------------------------------------------------------- impostors
+
+/**
+ * Per prototype, the impostor's colour relative to its baked frames (linear rgb gain), so that the
+ * hand-over from the 3D tree is a change of detail, not of colour. The frames are renders of the
+ * full scan under the bake's light; the 3D trees are its sprays under the game's leaf shading, and
+ * the two came out up to 1.6× apart in brightness (most frames brighter, the young fir's and one
+ * fir's darker). Solved with `node tools/treelod.mjs calib` (LOD2 against the impostor at the
+ * hand-over distance, mean over four bearings, three rounds: within ±5 % before the last round).
+ * Re-run it whenever the 3D trees' shading or the bake changes.
+ */
+export const IMP_GAIN: Record<string, [number, number, number]> = {
+  jacaranda: [0.879, 0.867, 0.858],
+  dome: [0.734, 0.765, 0.853],
+  gnarl: [0.862, 0.874, 1.085],
+  umbrella: [0.825, 0.894, 0.947],
+  poplar: [0.695, 0.72, 0.797],
+  spruce_a: [1.304, 1.352, 1.303],
+  fir_a: [0.718, 0.779, 0.743],
+  fir_b: [0.696, 0.74, 0.677],
+  fir_c: [1.138, 1.245, 1.315],
+  shrub_a: [0.922, 1.008, 1.006],
+  shrub_b: [0.827, 0.846, 0.9],
+  shrub_c: [0.889, 0.887, 1.029],
+};
 
 /**
  * Camera-facing cards showing the baked frames of the scanned tree (tools/bake_trees.mjs): eight
@@ -618,9 +722,6 @@ export function impostorMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStand
   while (protos.length < 16) protos.push(new THREE.Vector4());
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uFade: u.uFade,
-      uFadeC: u.uFadeC,
-      uLook: u.uLook,
       uTime: u.uTime,
       uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
@@ -628,7 +729,14 @@ export function impostorMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStand
       uImpA: { value: kit.impC },
       uImpN: { value: kit.impN },
       uProtos: { value: protos },
+      uImpGain: { value: kit.protos.map((p) => new THREE.Vector3(...(IMP_GAIN[p.id] ?? [1, 1, 1]))).concat(Array.from({ length: 16 - kit.protos.length }, () => new THREE.Vector3(1, 1, 1))) },
+      uImpCrown: { value: kit.protos.map((p) => new THREE.Vector2(p.crownY, p.crownR)).concat(Array.from({ length: 16 - kit.protos.length }, () => new THREE.Vector2(1, 1))) },
       uLeafFill: u.uLeafFill,
+      uSunW: u.uSunW,
+      uShade: u.uShade,
+      uCanopy: u.uCanopy,
+      uCanopyB: u.uCanopyB,
+      uImpAll: u.uImpAll,
       uImpGrid: { value: new THREE.Vector2(kit.frames, kit.impRows) },
       uImpSize: { value: new THREE.Vector2(kit.frames * 256, kit.impRows * 256) },
     });
@@ -640,19 +748,25 @@ attribute vec4 iPos;
 attribute vec4 iInfo;
 attribute vec3 iTint;
 uniform vec4 uProtos[ 16 ];
+uniform vec3 uImpGain[ 16 ];
 uniform vec2 uImpGrid;
-uniform vec2 uFade;
-uniform vec2 uFadeC;
 uniform float uTime;
 uniform vec2 uWind;
-${TREE_LOOK}
+attribute vec2 iFade;
+uniform float uImpAll;
+${TREE_FADE_GLSL}
+uniform vec3 uSunW;
+varying float vSunOcc;
+${TREE_CANOPY_GLSL}
 varying vec4 vIUv;
 varying float vIW;
 varying vec3 vIR;
 varying vec3 vIU;
 varying vec3 vIF;
 varying vec3 vITint;
-varying float vIFade;
+varying vec2 vISph;
+uniform vec2 uImpCrown[ 16 ];
+varying vec2 vIFade;
 varying float vLeafL;
 varying float vAOL;`,
       )
@@ -681,7 +795,9 @@ varying float vAOL;`,
   vec3 nrm = fwd * cos( tilt ) + vec3( 0.0, sin( tilt ), 0.0 );
   float flip = iInfo.y > 0.5 ? -1.0 : 1.0;
   // (the 3D trees' own fade distances: the look-ahead, full for conifers, half for broadleaf)
-  vIFade = iInfo.z > 1.5 ? smoothstep( uFadeC.x, uFadeC.y, treeLookDist( P, uLook.z ) ) : iInfo.z > 0.5 ? smoothstep( uFade.x, uFade.y, treeLookDist( P, uLook.w ) ) : 1.0;
+  // (a near tree's impostor: its share of the hand-over to and from its 3D tree, iFade — the other
+  // side of the same dither; every other tree's is always shown)
+  vIFade = iInfo.z > 0.5 && uImpAll < 0.5 ? treeFadeShare( iFade.x, iFade.y ) : vec2( 0.0, 1.0 );
   // the 3D trees' wind (treeWind's trunk term): a lean with the mean wind, the tree's own slow swing
   // and the gusts rolling downwind through the woods — a card can only lean in its own plane, so it
   // takes the wind's component across the view; the crown breathes a little (limbs swinging) too
@@ -698,7 +814,7 @@ varying float vAOL;`,
   vec2 c = position.xy;
   float breathe = 1.0 + 0.05 * str * ( 0.4 + gust ) * sin( uTime * 1.7 + ph * 5.0 );
   transformed = P + right * ( c.x * Wc * breathe ) + up * ( c.y * S ) + right * ( dot( vec3( wd.x, 0.0, wd.y ), right ) * bend * c.y * c.y );
-  if ( vIFade <= 0.0 ) transformed = vec3( 0.0, -1e5, 0.0 );
+  if ( vIFade.y <= vIFade.x ) transformed = vec3( 0.0, -1e5, 0.0 );
   // the camera's bearing in the tree's own frame (yaw undone, mirror undone) → the two frames around it
   float az = ( atan( toCam.x, toCam.z ) - iInfo.w ) * flip;
   float f = fract( az / 6.2831853 ) * uImpGrid.x;
@@ -711,9 +827,16 @@ varying float vAOL;`,
   vIR = right * flip;
   vIU = up;
   vIF = nrm;
-  vITint = iTint;
+  vITint = iTint * uImpGain[ int( iInfo.x + 0.5 ) ];
+  {
+    // (where on the crown's sphere this corner lies, in crown radii: its lighting normal)
+    vec2 cr = uImpCrown[ int( iInfo.x + 0.5 ) ] * iPos.w;
+    vISph = vec2( c.x * Wc * flip, c.y * S - cr.x ) / max( cr.y, 0.5 );
+  }
   vLeafL = 1.0;
   vAOL = 1.0;
+  // (the woods upwind: per corner, the card's foot in their shade sooner than its top)
+  vSunOcc = treeCanopyOcc( transformed, transformed.y - P.y, uImpCrown[ int( iInfo.x + 0.5 ) ].y * iPos.w, P );
   objectNormal = nrm;
 }`,
       );
@@ -732,7 +855,8 @@ varying vec3 vIR;
 varying vec3 vIU;
 varying vec3 vIF;
 varying vec3 vITint;
-varying float vIFade;
+varying vec2 vISph;
+varying vec2 vIFade;
 ${GET_TANGENT_FRAME}`,
       )
       .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.5, 1.35, vAOL )', 'mix( 0.5, 1.35, gImpAO ) * 0.86')}`)
@@ -746,7 +870,10 @@ vec4 ia = mix( ia0, ia1, vIW );
   vec2 dx = dFdx( vIUv.xy * uImpSize ), dy = dFdy( vIUv.xy * uImpSize );
   float lod = max( 0.0, 0.5 * log2( max( dot( dx, dx ), dot( dy, dy ) ) ) );
   if ( ia.a * ( 1.0 + lod * 0.3 ) < 0.5 ) discard;
-  if ( vIFade < 1.0 && vIFade <= ignF( gl_FragCoord.xy ) ) discard;
+  if ( vIFade.x > 0.0 || vIFade.y < 1.0 ) {
+    float ig = ignF( gl_FragCoord.xy );
+    if ( ig < vIFade.x || ig >= vIFade.y ) discard;
+  }
 }
 // (sRGB atlas: the colour arrives linear)
 diffuseColor.rgb = ia.rgb * vITint;
@@ -760,6 +887,12 @@ diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.072
   // (the nearer frame's normals: lighting doesn't need the blend, and it saves a fetch per fragment)
   vec4 inr = texture2D( uImpN, vIW < 0.5 ? vIUv.xy : vIUv.zw );
   vec3 nb = inr.xyz * 2.0 - 1.0;
+  // blended with a sphere round the crown (its centre and radius: uImpCrown): the frames' normals are
+  // the scan's leaves, which mostly face the camera that baked them, so a front-lit impostor came out
+  // evenly bright and a side-lit one evenly dark — the 3D trees light their leaves by the crown's
+  // surface (treeproto: the lighting normal), sunlit side bright, the far side and the inside dark
+  vec3 nS = vec3( vISph, sqrt( max( 0.0, 1.0 - dot( vISph, vISph ) ) ) + 0.25 );
+  nb = normalize( mix( normalize( nb ), normalize( nS ), 0.55 ) );
   vec3 nW = normalize( vIR * nb.x + vIU * nb.y + vIF * nb.z );
   normal = normalize( ( viewMatrix * vec4( nW, 0.0 ) ).xyz );
   gImpAO = inr.a;
@@ -776,6 +909,6 @@ diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.072
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-impostor-v6';
+  mat.customProgramCacheKey = () => 'apex-tree-impostor-v10';
   return mat;
 }
