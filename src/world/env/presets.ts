@@ -157,10 +157,13 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     exposure: 0.9,
     // (golden-hour footage — the Spa long lens — is orange through and through: the light, the shade
     // the low sun fills, even the asphalt; sRGB r/g ≈ 1.6 in the shadows, saturation ≈ 0.55)
-    saturation: 1.42,
-    contrast: 1.22,
-    tint: [1.04, 0.83, 0.56],
-    shadowTint: [1.3, 0.87, 0.52],
+    // (the light itself is orange now — a 7.5° sun through the daylight-locus sky (atmosphere.ts) — so
+    // the grade's own push is halved: on top of that light the old one counted the orange twice and
+    // took the TV and helicopter shots to sepia — grass and asphalt the same brown, saturation ~0.75)
+    saturation: 1.24,
+    contrast: 1.18,
+    tint: [1.03, 0.9, 0.72],
+    shadowTint: [1.14, 0.94, 0.74],
     bloom: 1.0,
     bloomThreshold: 1.05,
     shafts: 0.55,
