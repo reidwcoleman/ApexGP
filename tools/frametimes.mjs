@@ -1,4 +1,4 @@
-// Frame-time distribution (rAF deltas) in a live race over N seconds, per server.
+// Frame-time distribution (rAF deltas) in a live race over N seconds, per server (EVAL: js run first, e.g. a toggle).
 //   node tools/frametimes.mjs <ports> [track] [cam] [secs]
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
@@ -9,6 +9,7 @@ for (const port of portsArg.split(',')) {
   await page.goto(`http://localhost:${port}/?track=${track}&demo=race&cam=${cam}&skip=20&weather=clear&time=afternoon`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 300000 });
   await page.evaluate(() => { const g = window.__game; const o = g.adaptQuality.bind(g); g.adaptQuality = (dt) => { o(dt); g.gfx.setDynamicScale(1); }; g.gfx.setDynamicScale(1); });
+  if (process.env.EVAL) await page.evaluate(process.env.EVAL);
   await page.waitForTimeout(2000);
   const r = await page.evaluate((ms) => new Promise((res) => {
     const d = []; let last = performance.now(); const t0 = last;
