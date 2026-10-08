@@ -4202,6 +4202,11 @@
   scrollbar-width: none;
   margin: 0 calc(-1 * var(--s4));
   padding: 0 var(--s4);
+  /* (it scrolls when the targets don't fit: fade the last line out above the race distance instead of
+     cutting it through the middle, so it reads as "more below") */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  padding-bottom: 20px;
 }
 .ch-rnd-art {
   position: relative;
