@@ -112,19 +112,22 @@ const STATIONS = [
     pod: { inner: [0.39, 0.57], top: [0.62, 0.58], max: [0.67, 0.485], low: [0.63, 0.385], cut: [0.45, 0.185] },
     floor: [0.43, 0.06], bot: [0.31, 0.05], bottom: 0.05,
   }),
-  // roll hoop / airbox front face
+  // roll hoop / airbox front face: its top ~1 m up (the regulations' 940 mm over the reference
+  // plane plus the ride height), so the rollover line from it to the halo's top clears the helmet
+  // by the required ~70 mm — the hump stands well proud of the driver's head, as on the real cars,
+  // and the T-cam on it looks down over the helmet and the halo's ring onto the nose
   sec({
-    z: -0.13, top: 0.935, sh: [0.13, 0.82], side: [0.3, 0.68],
+    z: -0.13, top: 0.975, sh: [0.13, 0.845], side: [0.3, 0.68],
     pod: { inner: [0.37, 0.555], top: [0.615, 0.565], max: [0.665, 0.47], low: [0.625, 0.375], cut: [0.45, 0.18] },
     floor: [0.43, 0.06], bot: [0.31, 0.05], bottom: 0.05,
   }),
   sec({
-    z: -0.32, top: 0.95, sh: [0.118, 0.845], side: [0.25, 0.64],
+    z: -0.32, top: 0.99, sh: [0.118, 0.865], side: [0.25, 0.64],
     pod: { inner: [0.33, 0.52], top: [0.6, 0.535], max: [0.648, 0.445], low: [0.61, 0.355], cut: [0.445, 0.17] },
     floor: [0.43, 0.06], bot: [0.31, 0.05], bottom: 0.05,
   }),
   sec({
-    z: -0.6, top: 0.875, sh: [0.1, 0.8], side: [0.215, 0.58],
+    z: -0.6, top: 0.9, sh: [0.1, 0.815], side: [0.215, 0.58],
     pod: { inner: [0.29, 0.465], top: [0.56, 0.475], max: [0.6, 0.395], low: [0.565, 0.31], cut: [0.43, 0.15] },
     floor: [0.42, 0.06], bot: [0.3, 0.05], bottom: 0.05,
   }),

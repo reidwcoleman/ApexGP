@@ -283,9 +283,12 @@ export const R_HELMET: Rect = { x: 0, y: 0, w: 256, h: 256 };
 export const R_NUM_NOSE: Rect = { x: 256, y: 0, w: 128, h: 64 };
 export const R_NUM_FIN_L: Rect = { x: 384, y: 0, w: 128, h: 64 };
 export const R_NUM_FIN_R: Rect = { x: 256, y: 64, w: 128, h: 64 };
+/** the helmet's crown number (a white-on-black mask the driver shader prints in the helmet's ink) */
 export const R_TCAM_NUM: Rect = { x: 384, y: 64, w: 128, h: 48 };
 export const R_CODE_L: Rect = { x: 256, y: 128, w: 256, h: 32 };
 export const R_CODE_R: Rect = { x: 256, y: 160, w: 256, h: 32 };
+/** the sponsor across the back of the helmet (a mask, like R_TCAM_NUM) */
+export const R_HELM_SPON: Rect = { x: 256, y: 192, w: 256, h: 32 };
 /** flat colour cells in the driver sheet (16×16 at y = 224) */
 export const DC = { visor: 0, suit: 1, suit2: 2, hans: 3, glove: 4, belts: 5 } as const;
 export function drvCellUV(i: number): V2 {

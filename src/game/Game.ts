@@ -20,7 +20,7 @@ import { sceneryBuilder } from '../world/env/scenery.ts';
 import { ScenePrep, frameClock, type LightMode } from '../world/prepare.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
-import { DASH_GLOW, SCREEN_GLOW, createCar, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
+import { DASH_GLOW, SCREEN_GLOW, createCar, feedMirrors, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
 import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
@@ -3113,6 +3113,8 @@ export class Game {
         (this.rigs.get(c.entry) as CompoundRig).setCompound?.(c.compound);
       }
     }
+    // the cars behind, in the mirrors of the car an onboard camera rides in
+    feedMirrors(this.rigs.values(), ONBOARD[this.cams.view] ? this.cams.followed : null);
   }
 
   /** a damaging hit on some car: crunch and camera shake for the player's, a distant crunch for others */

@@ -17,7 +17,7 @@ import {
   type Rect,
 } from './carLayout.ts';
 import { STEER_PIVOT, STEER_TILT, GRIP_PTS, gripRadius, WHEEL_FACE_Z, buildArms } from './carHands.ts';
-import { hullSlices, halfRing, hullUV, hullPoint, profileAt, sAtParam, HULL_FRONT, HULL_REAR } from './hull.ts';
+import { hullSlices, halfRing, hullUV, hullPoint, profileAt, sAtParam, sectionAt, HULL_FRONT, HULL_REAR } from './hull.ts';
 
 export const CARBON_TILE = 0.06;
 
@@ -300,6 +300,8 @@ interface Buckets {
   /** helmet + visor, pivot-local around NECK_PIVOT (animated) */
   head: MB;
   decals: MB;
+  /** the rear-view mirrors' glass (nearest level: its own material, CarModel's mirror shader) */
+  mirror: MB;
   /** parts that bend and break off in a crash (body space, own meshes) */
   parts: Record<PartId, PartMB>;
 }
@@ -821,9 +823,9 @@ function airboxAndFin(b: Buckets, level: Level) {
   // inlet cowl (elliptical mouth) on the roll hoop front face
   const seg = [20, 12, 6][level];
   const ring = ellipse(seg);
-  const cy = 0.87;
+  const cy = 0.9;
   const rx = 0.078;
-  const ry = 0.052;
+  const ry = 0.055;
   const zf = -0.108;
   const zb = -0.17;
   const outer: V3[][] = [];
@@ -878,19 +880,37 @@ function airboxAndFin(b: Buckets, level: Level) {
 
   // T-cam: streamlined bar on top of the roll hoop
   if (level < 2) {
-    const tc: V3 = [0, 0.972, -0.255];
+    const tc: V3 = [0, 1.013, -0.255];
     ellipsoid(b.trim, tc, [0.105, 0.02, 0.04], 14, 8, trimUV(TC.tcam));
-    box(b.trim, [0, 0.955, -0.26], [0.02, 0.03, 0.05], trimUV(TC.tcam));
+    box(b.trim, [0, 0.993, -0.26], [0.02, 0.03, 0.05], trimUV(TC.tcam));
     // its lens windows, forward and back
-    if (level === 0) for (const x of [0.05, -0.05]) for (const z of [-0.2205, -0.2895]) ellipsoid(b.trim, [x, 0.974, z], [0.0095, 0.0085, 0.004], 10, 6, trimUV(TC.blackGloss));
+    if (level === 0) for (const x of [0.05, -0.05]) for (const z of [-0.2205, -0.2895]) ellipsoid(b.trim, [x, 1.015, z], [0.0095, 0.0085, 0.004], 10, 6, trimUV(TC.blackGloss));
   } else {
-    box(b.trim, [0, 0.968, -0.255], [0.2, 0.03, 0.07], trimUV(TC.tcam));
+    box(b.trim, [0, 1.009, -0.255], [0.2, 0.03, 0.07], trimUV(TC.tcam));
   }
 }
 
+/**
+ * Rear-view mirrors: where the 2022+ rules put them, on stalks off the sidepod's shoulder ~0.4 m
+ * ahead of the driver's eyes and ~0.5 m out (at the very edges of his view, as in the helmet-cam
+ * footage), a little above the rear tyres' tops, each toed in ~18° so from the cockpit the rear
+ * tyre's shoulder fills the glass' inner third and the track behind the rest (a car right on the
+ * gearbox hides behind your own tyre, the F1 blind spot) rather than the run-off beside it. The
+ * glass is its own bucket at the nearest level (CarModel's mirror shader: the env plus the road,
+ * the own car and the cars behind, ray-traced as boxes and cylinders).
+ */
+export const MIRROR_C: V3 = [0.515, 0.735, 0.56];
+export const MIRROR_TOE = 0.32;
 function mirrors(b: Buckets, level: Level) {
   for (const side of [1, -1]) {
-    const c: V3 = [0.515 * side, 0.715, 0.47];
+    const c: V3 = [MIRROR_C[0] * side, MIRROR_C[1], MIRROR_C[2]];
+    // (turned about the glass' centre: toward the car's centre line, and tipped a touch down so
+    // the road behind fills the glass' lower half as a driver sets them)
+    const toe = new THREE.Matrix4()
+      .makeTranslation(c[0], c[1], c[2])
+      .multiply(new THREE.Matrix4().makeRotationY(MIRROR_TOE * side))
+      .multiply(new THREE.Matrix4().makeRotationX(-0.012))
+      .multiply(new THREE.Matrix4().makeTranslation(-c[0], -c[1], -c[2]));
     const ws = level === 0 ? 20 : 8;
     // aero housing: flattened, tapering rearwards; glass on the back face
     const hs: SweepSt[] = [];
@@ -902,19 +922,25 @@ function mirrors(b: Buckets, level: Level) {
       // (2026: bigger mirrors — a 200 × 60 mm glass at the least)
       hs.push({ o: [c[0], c[1], z], d: [1, 0, 0], u: [0, 1, 0], sx: 0.12 * k, sy: 0.042 * k });
     }
+    const p0 = b.paint.count;
     sweep(b.paint, hs, roundedRect(ws, 0.35), () => paintCellUV(PC.mirror), { cuv: CUV });
+    b.paint.transform(p0, toe);
     if (level < 2) {
       // glass (faces −Z)
       const g = new THREE.PlaneGeometry(0.198, 0.061);
       g.rotateY(Math.PI);
       g.translate(c[0], c[1], c[2] - 0.0205);
+      g.applyMatrix4(toe);
       // lateral safety light (2026) on the housing's outer tip
+      const t0 = b.trim.count;
       box(b.trim, [c[0] + 0.12 * side, c[1], c[2] + 0.02], [0.006, 0.024, 0.05], trimUV(TC.sideLight));
-      b.trim.addGeometry(g, undefined, trimUV(TC.mirrorGlass));
+      b.trim.transform(t0, toe);
+      if (level === 0) b.mirror.addGeometry(g);
+      else b.trim.addGeometry(g, undefined, trimUV(TC.mirrorGlass));
       g.dispose();
-      // stalks
-      arm(b.carbon, [0.47 * side, 0.7, 0.47], [0.355 * side, 0.64, 0.5], 0.045, 0.012, 6, metricUV);
-      arm(b.carbon, [0.41 * side, 0.735, 0.49], [0.29 * side, 0.8, 0.15], 0.03, 0.01, 6, metricUV);
+      // stalks: down to the sidepod's shoulder and back to the halo's leg
+      arm(b.carbon, [0.47 * side, c[1] - 0.015, c[2] - 0.005], [0.355 * side, 0.645, c[2] + 0.04], 0.045, 0.012, 6, metricUV);
+      arm(b.carbon, [0.41 * side, c[1] + 0.02, c[2] + 0.015], [0.268 * side, 0.822, 0.25], 0.03, 0.01, 6, metricUV);
     }
   }
 }
@@ -967,6 +993,21 @@ function cockpitBits(b: Buckets, level: Level) {
   // (d is up here, u across the pad)
   const st: SweepSt[] = path.map((p, i) => ({ o: p, d: fr[i].d, u: fr[i].u, sx: 0.042, sy: 0.044 }));
   sweep(b.trim, st, roundedRect(level === 0 ? 16 : 10, 0.45), () => trimUV(TC.padding));
+  // the cockpit opening's padded edge: a black foam roll along the inner rim from the headrest's
+  // front to the wheel (the edge the driver's elbows rub, trimmed like the headrest) — from the
+  // driver's eyes it is the dark line framing the cockpit's sides below the tyres, as in the
+  // helmet-cam footage, and from the T-cam it outlines the opening round his shoulders
+  if (level === 0) {
+    for (const side of [1, -1]) {
+      const rim: V3[] = [];
+      for (let z = 0.2; z <= 0.661; z += 0.035) {
+        const P = sectionAt(z);
+        // (P2: the inner wall's top, where the rim turns down into the cockpit)
+        rim.push([(P[2][0] + 0.004) * side, P[2][1] + 0.012, z]);
+      }
+      tube(b.trim, rim, 0.017, 10, trimUV(TC.padding), [0, 1, 0]);
+    }
+  }
 }
 
 // ------------------------------------------------------------------------------------ driver
@@ -1009,20 +1050,22 @@ function driver(b: Buckets, level: Level) {
       rows.push(row);
     }
     b.head.grid(rows, () => drvCellUV(DC.visor), { orient: true });
-    // the helmet's own aero: a rear spoiler across the crown and a strip of tear-offs' tab at the
-    // visor's edge (the helmet's paint, read off its unwrap at the same spot)
+    // the helmet's own aero: a rear spoiler across the crown, in gloss black carbon like the
+    // Bell / Arai F1 shells' bolt-on gurneys (painted, it vanished into the crown's livery in the
+    // T-cam, which looks straight down onto it)
     const hp = (lon: number, lat: number, k = 1): V3 => [
       HELMET_C[0] - NECK_PIVOT[0] + Math.sin(lon) * Math.cos(lat) * HELMET_R[0] * k,
       HELMET_C[1] - NECK_PIVOT[1] + Math.sin(lat) * HELMET_R[1] * k,
       HELMET_C[2] - NECK_PIVOT[2] + Math.cos(lon) * Math.cos(lat) * HELMET_R[2] * k,
     ];
-    const sp = [-0.55, -0.3, 0, 0.3, 0.55].map((d) => {
-      // (along the crown at ~50° up behind the head; it kicks up off the shell toward its trailing edge)
-      const lat = 0.86 - 0.12 * d * d;
+    const sp = [-0.55, -0.4, -0.2, 0, 0.2, 0.4, 0.55].map((d) => {
+      // (along the crown at ~50° up behind the head; it kicks up off the shell toward its trailing
+      // edge, and its tips taper down into the shell — square ends stood up like horns in the T-cam)
+      const lat = 0.86 - 0.25 * d * d;
       const p = hp(Math.PI + d * 1.5, lat, 0.985);
-      return { x: p[0], z: p[2] + 0.012, y: p[1] + 0.006, c: 0.052, a: -18 - 6 * d * d, t: 0.16, cam: 0.02 };
+      return { x: p[0], z: p[2] + 0.012, y: p[1] + 0.006, c: 0.05 * (1 - 1.9 * d * d), a: -16 - 5 * d * d, t: 0.15, cam: 0.02 };
     });
-    wingElement(b.head, sp, level === 0 ? 8 : 5, () => drvUV(R_HELMET, 0.01, 0.86));
+    wingElement(b.head, sp, level === 0 ? 8 : 5, () => drvCellUV(DC.hans));
     // the chin bar under the visor, standing forward of the shell (a ball reads as a toy's head),
     // painted from the helmet's unwrap where it sits (the shell's sphere uv, seam at the back)
     const H: V3 = sub3(HELMET_C, NECK_PIVOT);
@@ -1600,7 +1643,7 @@ function blurDisc(mb: MB, w: number) {
 
 // ================================================================================================ public
 export interface CarGeoLevel {
-  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null };
+  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null; mirror: THREE.BufferGeometry | null };
   /** breakable parts, body space */
   parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
@@ -1628,7 +1671,7 @@ export interface CarGeoLevel {
 
 export function buildCarGeometry(level: Level): CarGeoLevel {
   const pm = (): PartMB => ({ paint: new MB(true), carbon: new MB(), trim: new MB() });
-  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB(), parts: { fwL: pm(), fwR: pm(), rw: pm() } };
+  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB(), mirror: new MB(), parts: { fwL: pm(), fwR: pm(), rw: pm() } };
   buildHull(b.paint, level);
   frontWing(b, level);
   rearWing(b, level);
@@ -1740,7 +1783,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     driverAll = dAll.build();
   }
   const out: CarGeoLevel = {
-    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly },
+    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly, mirror: b.mirror.count ? b.mirror.build() : null },
     parts: Object.fromEntries(
       PART_IDS.map((k) => {
         const q = b.parts[k];
