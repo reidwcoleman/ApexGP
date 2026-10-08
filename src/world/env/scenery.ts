@@ -121,6 +121,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
     const b = masks.fineBounds;
     roadUniforms.uCanopy.value = masks.fine;
     roadUniforms.uCanopyB.value.set(b.x0, b.z0, 1 / (b.x1 - b.x0), 1 / (b.z1 - b.z0));
+    // (and the trees: the woods upwind shade the crowns past the shadow casters' range)
+    veg.uniforms.uCanopy.value = masks.fine;
+    veg.uniforms.uCanopyB.value.copy(roadUniforms.uCanopyB.value);
   }
   // grass blades on the verges around the camera (High/Ultra)
   let grass: GrassBuild | null = null;
