@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { cloudNoiseMaterial } from './skyNoise.ts';
-import { cloudPanoramaMaterial } from './skyClouds.ts';
+import { cloudPanoramaMaterial, cloudShadowMaterial } from './skyClouds.ts';
 import { createSkyDome } from './sky.ts';
 
 /**
@@ -42,6 +42,7 @@ export function prewarmSkyPrograms(renderer: THREE.WebGLRenderer): { release(): 
     geos.push(quad);
     compile(cloudNoiseMaterial(), quad);
     compile(cloudPanoramaMaterial(), quad);
+    compile(cloudShadowMaterial(), quad);
     const sky = createSkyDome();
     geos.push(sky.envMesh.geometry);
     compile(sky.envMesh.material as THREE.Material, sky.envMesh.geometry);

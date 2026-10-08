@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { perlin2, rng } from './noise.ts';
 import type { Venue } from './worldmap.ts';
 import type { SceneryLight } from './scenery.ts';
-import { cloudShadowA, cloudShadowB } from './lightShadows.ts';
+import { CLOUD_SHADOW_AT_GLSL, cloudShadowA, cloudShadowB, cloudShadowC, cloudShadowTexture } from './lightShadows.ts';
 import { CLOUD_FIELD_GLSL } from './skyClouds.ts';
 // (m) beyond this the ring's haze distance grows only as √distance (see the vertex shader); the
 // far terrain eases its haze from the same distance, so a tree line stands in the same air as its land
@@ -616,6 +616,8 @@ export function buildHorizon(
     // same clouds dapple the far hills, the surest sign the backdrop is land under this sky
     uCloudA: { value: cloudShadowA },
     uCloudB: { value: cloudShadowB },
+    uCloudC: { value: cloudShadowC },
+    uCloudMap: { value: cloudShadowTexture },
   };
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   mat.onBeforeCompile = (sh) => {
@@ -665,16 +667,18 @@ uniform vec3 uSkyCol;
 uniform vec3 uOrigin;
 uniform vec4 uCloudA;
 uniform vec4 uCloudB;
+uniform vec4 uCloudC;
+uniform sampler2D uCloudMap;
 varying vec4 vInfo;
 varying vec4 vEx;
 varying vec3 vHN;
 varying vec3 vW;
 ${CLOUD_FIELD_GLSL}
+${CLOUD_SHADOW_AT_GLSL}
 float hzCloud( vec3 wp ) {
   if ( uCloudA.x <= 0.0 ) return 1.0;
-  vec2 xz = wp.xz + uCloudB.xy * ( uCloudB.z - wp.y ) + uCloudA.zw;
-  // (the same patches as the ground round the circuit: skyClouds.ts cloudShadowMask)
-  return 1.0 - uCloudA.x * cloudShadowMask( xz, uCloudA.y );
+  // (the same shadows as the ground round the circuit: the drawn clouds' where the baked map reaches)
+  return 1.0 - uCloudA.x * cloudShadowAmount( wp, uCloudA, uCloudB, uCloudC, uCloudMap );
 }
 float hh( vec2 p ) {
   vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );

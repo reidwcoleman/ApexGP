@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { HL_MAX, headlightUniforms } from './headlights.ts';
+import { floodTex, floodUniforms } from './night.ts';
 
 /**
  * Aerial perspective for every material in the scene.
@@ -50,6 +52,16 @@ export const aerialGround = { x: 0, y: 1 / 40, z: 0, w: 40 };
  * of a foggy morning, even once the disc itself is gone. Linear, premultiplied by strength.
  */
 export const aerialFogSun = { r: 0, g: 0, b: 0 };
+/**
+ * The cars' headlights lighting the murk (night and twilight): x = how strongly (0 = off: by day and in
+ * clear air it costs one branch), y = the most lamps to march (the nearest the camera, from the
+ * headlights' own list). Driving at night in fog the beams are a glowing white wedge in the air ahead
+ * and a car coming the other way is a ball of light long before it is a car — a single haze colour
+ * can't be lit by lamps, so the beams' in-scattered light is integrated along each view ray.
+ */
+export const aerialLampFog = { x: 0, y: 3 };
+/** how many beams to march at most (each one costs ~8 taps on every fogged pixel) */
+const LAMP_FOG_MAX = 3;
 
 /**
  * The ground layer's optical depth along a view ray (shared with the particles, which evaluate it per
@@ -134,7 +146,93 @@ const PARS_FRAGMENT = /* glsl */ `
   uniform vec2 aerialLens;
   uniform vec4 aerialGround;
   uniform vec3 aerialFogSun;
+  uniform vec2 aerialLampFog;
+  uniform vec4 aerialLampPos[ ${HL_MAX} ];
+  uniform vec4 aerialLampDir[ ${HL_MAX} ];
+  uniform vec4 aerialLampInfo;
+  uniform vec3 aerialLampCol;
+  uniform sampler2D aerialFloodMap;
+  uniform vec4 aerialFloodXf;
+  uniform vec4 aerialFloodP;
+  uniform vec4 aerialFloodH;
+  uniform vec3 aerialFloodCol;
 ${AERIAL_GROUND}
+
+  // the floodlit air (twilight): in fog or mist the light of the lamp rows round the circuit is scattered
+  // by the droplets it crosses, so the air over the track glows — the bright dome a floodlit stadium
+  // wears on a foggy evening — and darkens away from it, instead of one flat grey. Six taps along the
+  // first few hundred metres of the ray, each lit by both rows as the surfaces are (night.ts: the
+  // distance to the centreline from the flood field, ~1/r from each row, the reach fading off the track)
+  vec3 aerialFlood( vec3 dir, float dist, float sig ) {
+    float tMax = min( dist, 360.0 );
+    float dt = tMax / 6.0;
+    float fr0 = length( aerialFloodP.yz );
+    float s = 0.0;
+    for ( int i = 0; i < 6; i ++ ) {
+      float t = ( float( i ) + 0.5 ) * dt;
+      vec3 q = cameraPosition + dir * t;
+      vec2 uv = ( q.xz - aerialFloodXf.xy ) * aerialFloodXf.zw;
+      if ( uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0 ) continue;
+      vec4 fm = texture2D( aerialFloodMap, uv );
+      float fd = fm.r * 255.0;
+      if ( fd >= aerialFloodP.w ) continue;
+      float above = q.y - ( aerialFloodH.x + fm.a * aerialFloodH.y );
+      float r1 = length( vec2( fd - aerialFloodP.y, aerialFloodP.z - above ) );
+      float r2 = length( vec2( fd + aerialFloodP.y, aerialFloodP.z - above ) );
+      float e = fr0 / max( r1, 5.0 ) + 0.5 * fr0 / max( r2, 5.0 );
+      e *= ( 1.0 - smoothstep( aerialFloodP.w * 0.5, aerialFloodP.w, fd ) ) * exp( - max( fd - aerialFloodP.y - 8.0, 0.0 ) / 55.0 );
+      // (the lamps aim down: above their heads only spill reaches the air)
+      e *= 1.0 - 0.75 * smoothstep( aerialFloodP.z, aerialFloodP.z + 40.0, above );
+      s += e * exp( - sig * t );
+    }
+    // (isotropic phase, 1 / 4π)
+    return aerialFloodCol * ( aerialFloodP.x * s * dt * sig * 0.0796 * aerialLampFog.x );
+  }
+
+  // the headlight beams' light scattered toward the camera by the air along the view ray (σ: the mean
+  // extinction along it, 1/m). Eight taps over the stretch of the ray the beam can reach; each tap is lit
+  // by the lamp's own pattern (wide and flat, cut off just above its axis — headlights.ts) with the same
+  // gentle fall-off the road gets, and droplets' phase: a strong forward lobe (a car coming at the
+  // camera is a blazing ball in fog) over a weak back-scatter (the wall of grey glare ahead of your own)
+  vec3 aerialLamps( vec3 dir, float dist, float sig ) {
+    vec3 acc = vec3( 0.0 );
+    int n = int( min( aerialLampInfo.x, aerialLampFog.y ) );
+    for ( int k = 0; k < ${LAMP_FOG_MAX}; k ++ ) {
+      if ( k >= n ) break;
+      vec4 P = aerialLampPos[ k ];
+      if ( P.w <= 0.0 ) continue;
+      vec3 fw = aerialLampDir[ k ].xyz;
+      vec3 rel = P.xyz - cameraPosition;
+      float tP = dot( rel, dir );
+      float tE = dot( rel + fw * 70.0, dir );
+      float tA = clamp( min( tP, tE ) - 25.0, 0.0, dist );
+      float tB = clamp( max( tP, tE ) + 25.0, 0.0, dist );
+      if ( tB - tA < 0.5 ) continue;
+      vec3 lf = normalize( vec3( fw.z, 0.0, -fw.x ) + vec3( 1e-5 ) );
+      vec3 lu = cross( fw, lf );
+      float dt = ( tB - tA ) / 8.0;
+      float s = 0.0;
+      for ( int i = 0; i < 8; i ++ ) {
+        float t = tA + ( float( i ) + 0.5 ) * dt;
+        vec3 lq = cameraPosition + dir * t - P.xyz;
+        float along = dot( lq, fw );
+        if ( along < 0.4 ) continue;
+        float ex = dot( lq, lf ) / along * aerialLampInfo.y;
+        float ey = dot( lq, lu ) / along * aerialLampInfo.z;
+        ey *= ey > 0.0 ? 3.2 : 1.0;
+        float e = ex * ex + ey * ey;
+        if ( e >= 1.0 ) continue;
+        float d = length( lq );
+        float cone = 1.0 - smoothstep( 0.1, 1.0, e );
+        float fall = 1.0 - smoothstep( aerialLampInfo.w * 0.45, aerialLampInfo.w, d );
+        float mu = dot( lq / d, - dir );
+        float ph = 0.06 + 0.5 * pow( max( mu, 0.0 ), 6.0 ) + 2.5 * pow( max( mu, 0.0 ), 40.0 );
+        s += cone * fall * ph / ( ( d + 2.5 ) * ( 1.0 + d / 35.0 ) ) * exp( - sig * ( t + d ) );
+      }
+      acc += P.w * s * dt;
+    }
+    return acc * sig * aerialLampFog.x * aerialLampCol;
+  }
 
   vec3 applyAerial( vec3 col ) {
     float dist = length( vFogRay );
@@ -142,6 +240,7 @@ ${AERIAL_GROUND}
     float fogA;
     vec3 fogA3 = vec3( 0.0 );
     vec3 haze = fogColor;
+    float sigMean = 0.0;
     if ( aerialParams.x > 0.0 ) {
       float k = aerialParams.y;
       float camH = cameraPosition.y - aerialParams.z;
@@ -150,6 +249,7 @@ ${AERIAL_GROUND}
       float od = aerialParams.x * aerialLens.x * exp( - k * max( camH, -50.0 ) ) * dist * f;
       // the ground layer (fog, mist, steam): grey droplets, lying in drifting banks
       float odG = aerialGroundOd( cameraPosition, vFogRay, dist );
+      sigMean = ( od + odG ) / max( dist, 1.0 );
       // per channel: blue is lost first (aerialLens.y), so distance reads as a colour shift, not just
       // a fade — near ridges stay dark and green, the next ones blue-grey, the last ones pale
       vec3 odc = od * ( 1.0 + aerialLens.y * vec3( -0.2, 0.0, 0.26 ) ) + odG;
@@ -170,7 +270,10 @@ ${AERIAL_GROUND}
       #endif
       fogA3 = vec3( fogA );
     }
-    return mix( col, haze, fogA3 );
+    vec3 lit = mix( col, haze, fogA3 );
+    if ( aerialLampFog.x > 0.0 && aerialLampInfo.x > 0.5 ) lit += aerialLamps( dir, dist, sigMean );
+    if ( aerialLampFog.x > 0.0 && aerialFloodP.x > 0.0 ) lit += aerialFlood( dir, dist, sigMean );
+    return lit;
   }
 #endif
 `;
@@ -180,6 +283,20 @@ const FRAGMENT = /* glsl */ `
   gl_FragColor.rgb = applyAerial( gl_FragColor.rgb );
 #endif
 `;
+
+/** the headlights' own arrays, by reference (headlights.ts fills them each frame, nearest first) */
+const lampUniforms = (): Record<string, THREE.IUniform> => ({
+  aerialLampFog: { value: aerialLampFog },
+  aerialLampPos: { value: headlightUniforms.pos },
+  aerialLampDir: { value: headlightUniforms.dir },
+  aerialLampInfo: { value: headlightUniforms.info },
+  aerialLampCol: { value: headlightUniforms.color },
+  aerialFloodMap: { value: floodTex },
+  aerialFloodXf: { value: floodUniforms.xform },
+  aerialFloodP: { value: floodUniforms.params },
+  aerialFloodH: { value: floodUniforms.height },
+  aerialFloodCol: { value: floodUniforms.color },
+});
 
 let installed = false;
 
@@ -200,6 +317,7 @@ export function installAerialFog() {
       sh.uniforms.aerialLens = { value: aerialLens };
       sh.uniforms.aerialGround = { value: aerialGround };
       sh.uniforms.aerialFogSun = { value: aerialFogSun };
+      Object.assign(sh.uniforms, lampUniforms());
     }
   }
 }
@@ -215,6 +333,7 @@ export function aerialUniforms(): Record<string, THREE.IUniform> {
     aerialLens: { value: aerialLens },
     aerialGround: { value: aerialGround },
     aerialFogSun: { value: aerialFogSun },
+    ...lampUniforms(),
   };
 }
 

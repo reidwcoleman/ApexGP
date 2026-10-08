@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
 import type { Renderer, QualityLevel, GradeLook } from '../core/Renderer.ts';
-import { aerialBanks, aerialFogSun, aerialGround, aerialLens, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
+import { aerialBanks, aerialFogSun, aerialGround, aerialLampFog, aerialLens, aerialParams, aerialSunColor, aerialSunDir, installAerialFog } from './env/fog.ts';
 import { computeSky, LUT_SCALE, type SkyLUT } from './env/atmosphere.ts';
 import { createSkyDome } from './env/sky.ts';
 import { createCloudNoise } from './env/skyNoise.ts';
 import { createCloudPanorama } from './env/skyClouds.ts';
-import { createSun, cloudShadowA, cloudShadowB } from './env/lightShadows.ts';
+import { createSun, cloudShadowA, cloudShadowB, cloudShadowC, setCloudShadowTarget } from './env/lightShadows.ts';
 import { createRain } from './env/rain.ts';
 import { buildFloodField, createFloodRig, setFloodLevel } from './env/night.ts';
 import { TIME_PRESETS, lookDelta, sunDirection, weatherLook, type WeatherLook } from './env/presets.ts';
@@ -686,6 +686,9 @@ export function createEnvironment(
     aerialBanks.x = aerialGround.x > 0 ? THREE.MathUtils.lerp(THREE.MathUtils.lerp(0.75, 0.55, L.fogDeep), 0.9, steamK) : 0;
     aerialBanks.y = 1 / THREE.MathUtils.lerp(THREE.MathUtils.lerp(170, 300, L.fogDeep), 45, steamK);
     gfx.ssao.fog = aerialParams.x + aerialGround.x;
+    // the headlights light the fog and mist they shine into (fog.ts aerialLamps; only the ground layer:
+    // in clear air the beams barely show, and the rain keeps its own spray)
+    aerialLampFog.x = THREE.MathUtils.smoothstep(aerialGround.x, 5e-4, 2.5e-3);
 
     // heat haze: a bleached, milky sky and a big glare round the sun
     const milk = THREE.MathUtils.clamp(wx.heat * 1.3 - 0.25, 0, 1) * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.35) * (1 - L.overcast) * (1 - night);
@@ -758,7 +761,10 @@ export function createEnvironment(
     u.uBowEl.value = -Math.min(P.elevation, 20) * DEG;
     if (fl <= 0 && night <= 0) return;
     // the haze near the circuit glows with its lights; far off it is the night
-    nightTmp.copy(floodCol).multiplyScalar(F * 0.006 * (0.3 + 2.2 * haze)).add(tmpB.copy(cityCol).multiplyScalar(city * 0.6));
+    // (a fog bank close round the circuit is lit by the lamps nearby — LED and sodium mixed, a pale warm
+    // grey — more than by the city's orange dome on the horizon: night fog was a flat sepia)
+    const cityFog = tmpB.copy(cityCol).lerp(nightTmp.setRGB(1.0, 0.82, 0.66), THREE.MathUtils.smoothstep(L.groundFog, 0, 2e-3) * 0.7);
+    nightTmp.copy(floodCol).multiplyScalar(F * 0.006 * (0.3 + 2.2 * haze)).add(cityFog.multiplyScalar(city * 0.6));
     fog.color.add(nightTmp);
     // cloud bases lit orange from the city below, and the lit circuit
     const cu = clouds.uniforms;
@@ -1004,6 +1010,16 @@ export function createEnvironment(
     cloudShadowA.w = windOff.y;
     if (debug.clouds) clouds.update(dt, camPos);
     sky.uniforms.uPano.value = clouds.texture;
+    // the drawn cumulus' shadows on the land (only while there are broken clouds to cast them)
+    if (cloudShadowA.x > 0 && debug.clouds) {
+      const m = clouds.bakeShadow(camPos.x, camPos.z, groundY, cloudShadowB.x, cloudShadowB.y);
+      cloudShadowB.w = groundY;
+      cloudShadowC.x = m.x;
+      cloudShadowC.y = m.z;
+      cloudShadowC.z = 1 / m.size;
+      setCloudShadowTarget(renderer, clouds.shadowTarget);
+      cloudShadowC.w = 1;
+    } else cloudShadowC.w = 0;
 
     rain.update(dt, camera);
     floods.update(camera);
@@ -1058,6 +1074,14 @@ export function createEnvironment(
     /** dev: the photographic layer (edit, then relook()) */
     film: FILM,
     relook: () => applyLook(look),
+    /** dev: the sky dome's and the cloud march's uniforms (tuning from the console) */
+    skyUniforms: sky.uniforms,
+    cloudUniforms: clouds.uniforms,
+    cloudShadow: { a: cloudShadowA, b: cloudShadowB, c: cloudShadowC },
+    aerial: { params: aerialParams, ground: aerialGround, banks: aerialBanks, lamps: aerialLampFog },
+    get look() {
+      return look;
+    },
     light: lightInfo,
     timings,
     scenery: scenery.stats,
@@ -1104,6 +1128,7 @@ export function createEnvironment(
       if (scene.fog === fog) scene.fog = null;
       disposeTree(group, keep);
       disposeTree(envScene, keep);
+      setCloudShadowTarget(renderer, null);
       clouds.dispose();
       // (the cloud noise is shared between circuits: see createCloudNoise)
       cubeRT.dispose();

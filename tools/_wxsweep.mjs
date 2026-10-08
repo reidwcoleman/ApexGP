@@ -3,6 +3,7 @@
 // camera, a frozen vista down the start straight toward the horizon and a frozen look up at the sky
 // (`up`: 25° above the horizon, across the straight, away from the pits) are shot.
 //   PORT=5701 node tools/_wxsweep.mjs <outdir> [track=monza] clear:midday,overcast:morning,… [views=chase,vista,up]
+// (more views: sun — toward the sun's azimuth just above the horizon; heli, tv — the race's own cameras)
 // Not a substitute for a real boot (a night race's headlights, the start's own weather): a sheet for
 // tuning the sky. Same seed every condition, so the clouds sit in the same place.
 import { chromium } from 'playwright-core';
@@ -27,14 +28,23 @@ for (const c of list.split(',')) {
     Object.assign(w.plan, { keys: p.keys, windX: p.windX, windZ: p.windZ, start: p.start, end: p.end, changeAt: p.changeAt, time: p.time });
     w.state.time = time;
     w.state.t = 0;
-    w.state.wetness = 0;
+    // (a drying track starts wet with a line already cleared, as the Weather constructor has it)
+    w.state.wetness = wx === 'drying' ? 0.7 : 0;
+    w.state.dryLine = wx === 'drying' ? 0.3 : 0;
   }, [wx, time, Number(process.env.SEED ?? 7)]);
   for (const v of views) {
     await page.evaluate((v) => {
       const g = window.__game;
       const L = g.track.length;
       const S = (x) => (((g.track.startS + x) % L) + L) % L;
-      if (v === 'chase') g.freeCam = null;
+      if (v === 'chase' || v === 'heli' || v === 'tv') { g.freeCam = null; g.cams.set(v); }
+      else if (v === 'sun') {
+        // toward the sun's azimuth, 4° up: the glow, the disc, the far hills against the bright sky
+        const p = g.trackPoint(S(300), -20, 30);
+        const s = g.env.sun.position.clone().normalize();
+        const h = Math.hypot(s.x, s.z) || 1;
+        g.freeCam = { pos: p, look: [p[0] + (s.x / h) * 100, p[1] + 100 * Math.tan(4 * Math.PI / 180), p[2] + (s.z / h) * 100], fov: 60 };
+      }
       else if (v === 'vista') g.freeCam = { pos: g.trackPoint(S(300), -20, 30), look: g.trackPoint(S(1500), 0, 10), fov: 60 };
       else if (v === 'up') {
         const p = g.trackPoint(S(200), 0, 2);

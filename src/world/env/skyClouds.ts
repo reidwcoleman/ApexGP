@@ -77,49 +77,12 @@ void main() {
 }
 `;
 
-const FRAG = /* glsl */ `
-precision highp float;
-precision highp sampler3D;
-in vec2 vUv;
-layout(location = 0) out vec4 outColor;
-
-uniform sampler3D uNoise;
-uniform sampler2D uPrev;
-uniform float uBlend;
-uniform int uFrame;
-uniform vec2 uRes;
-uniform int uPhase;
-uniform int uPhases;
-uniform int uSteps;
-uniform int uMaxIter;
-uniform vec3 uCam;
-uniform vec2 uWind;
-uniform float uTime;
-uniform float uCoverage;
-uniform float uBase;
-uniform float uThick;
-uniform float uExt;
-uniform float uDark;
-uniform float uFloor;
-uniform float uHaze;
-uniform float uCirrus;
-uniform vec3 uSunDir;
-uniform vec3 uSunCol;
-uniform vec3 uAmbTop;
-uniform vec3 uAmbBase;
-uniform vec3 uCirrusCol;
-uniform float uRain;
-uniform vec3 uRainCol;
-uniform float uConv;
-// wind shear: xy = downwind (unit), z = 0 … 1 how hard it blows aloft
-uniform vec3 uShear;
-
-#define PI 3.141592653589793
-#define R_EARTH 6360000.0
-#define T_MAX 45000.0
-
-${CLOUD_FIELD_GLSL}
-
+/**
+ * The cumulus' shape (the march's density and its erosion): shared by the panorama and the cloud-shadow
+ * bake, so the shadows on the ground are cast by the clouds that are drawn. Needs uNoise, uThick, uDark,
+ * uFloor, uConv, uShear and uTime declared.
+ */
+const CLOUD_SHAPE_GLSL = /* glsl */ `
 float remap( float x, float a, float b, float c, float d ) {
   return c + ( x - a ) / ( b - a ) * ( d - c );
 }
@@ -181,6 +144,52 @@ float detailErode( float d, vec3 p, float h01, float lod ) {
   // (in a strong wind the edges are torn ragged, not billowed: the erosion bites deeper)
   return clamp( remap( d, m * ( 0.55 + 0.2 * uShear.z ), 1.0, 0.0, 1.0 ), 0.0, 1.0 );
 }
+`;
+
+const FRAG = /* glsl */ `
+precision highp float;
+precision highp sampler3D;
+in vec2 vUv;
+layout(location = 0) out vec4 outColor;
+
+uniform sampler3D uNoise;
+uniform sampler2D uPrev;
+uniform float uBlend;
+uniform int uFrame;
+uniform vec2 uRes;
+uniform int uPhase;
+uniform int uPhases;
+uniform int uSteps;
+uniform int uMaxIter;
+uniform vec3 uCam;
+uniform vec2 uWind;
+uniform float uTime;
+uniform float uCoverage;
+uniform float uBase;
+uniform float uThick;
+uniform float uExt;
+uniform float uDark;
+uniform float uFloor;
+uniform float uHaze;
+uniform float uCirrus;
+uniform vec3 uSunDir;
+uniform vec3 uSunCol;
+uniform vec3 uAmbTop;
+uniform vec3 uAmbBase;
+uniform vec3 uCirrusCol;
+uniform float uRain;
+uniform vec3 uRainCol;
+uniform float uConv;
+// wind shear: xy = downwind (unit), z = 0 … 1 how hard it blows aloft
+uniform vec3 uShear;
+
+#define PI 3.141592653589793
+#define R_EARTH 6360000.0
+#define T_MAX 45000.0
+
+${CLOUD_FIELD_GLSL}
+
+${CLOUD_SHAPE_GLSL}
 
 void main() {
   // interleave whole 2×2 quads (GPUs shade quads: a lone live pixel per quad would cost the full quad);
@@ -240,7 +249,7 @@ void main() {
     float glowSun = 1.0 + thin * 1.4 * hg( dot( d, uSunDir ), 0.72 ) * ( 1.0 - uDark * 0.8 );
     // (a dry grey deck — stratus, stratocumulus — is soft from below: big, faint lighter and darker
     // patches, not the dark lumps and bright tears of a rain deck)
-    vec2 span = mix( vec2( 0.78, 1.3 ), vec2( 0.5, 1.75 ), smoothstep( 0.25, 0.6, uDark ) );
+    vec2 span = mix( vec2( 0.68, 1.36 ), vec2( 0.5, 1.75 ), smoothstep( 0.25, 0.6, uDark ) );
     deckK = mix( 1.0, mix( span.x, span.y, thin ) * glowSun, clamp( uFloor * 1.8, 0.0, 1.0 ) );
   }
 
@@ -310,6 +319,12 @@ void main() {
           // brighter than the blue sky beside it — with too little of it every cumulus read as a grey
           // lump; Wrenninge-style octaves, each less extinguished and nearly as strong as the last)
           vec3 sun = uSunCol * ( phase * exp( -tau ) + ( phase2 * 0.95 * exp( -tau * 0.4 ) + phase3 * 0.7 * exp( -tau * 0.16 ) ) * powder );
+          // a dry grey deck is lit through itself: what reaches its underside is the sunlight diffused
+          // down through it, so where it is thinner it is brighter — the soft lighter and darker patches
+          // of a stratocumulus sky and the glow where the sun is hidden. (The light from above carried
+          // none of the deck's structure, and the overcast sky was one flat sheet of grey-white)
+          // (rain decks keep their own darker treatment through the ambient)
+          if ( uFloor > 0.0 ) sun *= mix( 1.0, deckK, clamp( uFloor * 1.8, 0.0, 1.0 ) * ( 1.0 - smoothstep( 0.3, 0.6, uDark ) ) );
           // dark crevices near the tops, bright rims (in-scatter probability)
           float inscatter = 0.3 + 0.7 * pow( dens, clamp( remap( hc01, 0.3, 0.85, 0.5, 1.4 ), 0.5, 1.4 ) );
           // ambient: sky from above, occluded by the cloud over this point; dim bounce from below
@@ -390,6 +405,80 @@ void main() {
 }
 `;
 
+/**
+ * The cumulus' shadows on the land, cast by the clouds that are drawn: for each ground point of a map
+ * round the camera, the cloud density integrated up the ray toward the sun through the slab (the
+ * panorama's own shape and erosion, wind and drift), stored as how much of the beam the clouds take
+ * (r = 1 − transmittance). A cloud the helicopter sees over the back straight now has its shadow
+ * under it — displaced away from the sun by the base's height, as it is — instead of a statistically
+ * similar patch somewhere else.
+ */
+const SHADOW_FRAG = /* glsl */ `
+precision highp float;
+precision highp sampler3D;
+in vec2 vUv;
+layout(location = 0) out vec4 outColor;
+uniform sampler3D uNoise;
+uniform vec2 uWind;
+uniform float uTime;
+uniform float uCoverage;
+uniform float uBase;
+uniform float uThick;
+uniform float uExt;
+uniform float uDark;
+uniform float uFloor;
+uniform float uConv;
+uniform vec3 uShear;
+// x, z of the map's corner (m), its size (m), the ground height the map is for (m)
+uniform vec4 uShXf;
+// horizontal metres toward the sun per metre up (sunDir.xz / sunDir.y)
+uniform vec2 uShShift;
+#define PI 3.141592653589793
+${CLOUD_FIELD_GLSL}
+${CLOUD_SHAPE_GLSL}
+void main() {
+  vec2 g = uShXf.xy + vUv * uShXf.z;
+  float slant = length( vec3( uShShift.x, 1.0, uShShift.y ) );
+  float dh = uThick / 12.0;
+  float tau = 0.0;
+  for ( int i = 0; i < 12; i++ ) {
+    float h = ( float( i ) + 0.5 ) * dh;
+    vec2 xz = g + uShShift * ( uBase + h - uShXf.w ) + uWind;
+    float h01 = h / uThick;
+    float wc = localCoverage( cloudField( xz ), uCoverage );
+    vec3 p = vec3( xz.x, h + uTime * 0.6, xz.y );
+    float d = shapeDensity( p, h01, wc, 1.0 );
+    if ( d > 0.001 ) d = detailErode( d, p, h01, 1.0 );
+    tau += d;
+  }
+  // (half the extinction: a cumulus' shade is not the black of a wall's — light scattered forward out
+  // of its base, and its thin edges, still reach the ground)
+  float T = exp( -tau * dh * slant * uExt * 0.5 );
+  outColor = vec4( 1.0 - T, 0.0, 0.0, 1.0 );
+}
+`;
+
+/** the cloud-shadow bake (also queued ahead by the boot: env/skyPrewarm.ts) */
+export function cloudShadowMaterial(uniforms: Record<string, THREE.IUniform> = {}): THREE.RawShaderMaterial {
+  return new THREE.RawShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: /* glsl */ `
+      in vec3 position;
+      in vec2 uv;
+      ${VERT}`,
+    fragmentShader: SHADOW_FRAG,
+    uniforms,
+    depthTest: false,
+    depthWrite: false,
+  });
+}
+
+/** the shadow map: texels per side, metres per side (~40 m texels: a 1 km cumulus is 25 of them) */
+const SHADOW_N = 640;
+const SHADOW_SIZE = 24000;
+/** the map is baked a strip at a time (rows), one strip a frame */
+const SHADOW_STRIPS = 4;
+
 const QUALITY: Record<QualityLevel, { w: number; h: number; phases: 1 | 2 | 4 | 8; steps: number; iter: number }> = {
   low: { w: 1024, h: 256, phases: 8, steps: 10, iter: 18 },
   medium: { w: 1536, h: 384, phases: 8, steps: 14, iter: 24 },
@@ -404,6 +493,14 @@ export interface CloudPanorama {
   update(dt: number, camPos: THREE.Vector3): void;
   /** force a full refresh on the next update (weather jump, camera cut) */
   invalidate(): void;
+  /**
+   * Bake the next strip of the cloud-shadow map round (x, z) for ground at `groundY`, the sun `shiftX/Z`
+   * metres sideways per metre up. Returns the map's placement (corner x, z, size) — it re-centres (and
+   * bakes whole) only when the camera has wandered far from its middle.
+   */
+  bakeShadow(x: number, z: number, groundY: number, shiftX: number, shiftZ: number): { x: number; z: number; size: number };
+  /** the shadow map (r = how much of the sun the clouds take) */
+  readonly shadowTarget: THREE.WebGLRenderTarget;
   setQuality(q: QualityLevel): void;
   dispose(): void;
 }
@@ -459,6 +556,28 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
   quad.frustumCulled = false;
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  // the cloud-shadow map: the march's uniforms by reference (it follows every change), plus its own
+  const shXf = new THREE.Vector4(0, 0, SHADOW_SIZE, 0);
+  const shShift = new THREE.Vector2();
+  const shMat = cloudShadowMaterial({ ...uniforms, uShXf: { value: shXf }, uShShift: { value: shShift } });
+  const shQuad = new THREE.Mesh(quad.geometry, shMat);
+  shQuad.frustumCulled = false;
+  const shadowTarget = new THREE.WebGLRenderTarget(SHADOW_N, SHADOW_N, {
+    type: THREE.UnsignedByteType,
+    format: THREE.RedFormat,
+    depthBuffer: false,
+    generateMipmaps: false,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    wrapS: THREE.ClampToEdgeWrapping,
+    wrapT: THREE.ClampToEdgeWrapping,
+  });
+  shadowTarget.texture.colorSpace = THREE.NoColorSpace;
+  shadowTarget.scissorTest = true;
+  let shStrip = 0;
+  let shFull = true;
+  const shPlace = { x: 0, z: 0, size: SHADOW_SIZE };
 
   // ping-pong pair: read last frame's panorama, write this frame's (running average of jittered marches)
   const rts: THREE.WebGLRenderTarget[] = [];
@@ -549,6 +668,37 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
     },
     invalidate() {
       full = 2;
+      shFull = true;
+    },
+    shadowTarget,
+    bakeShadow(x, z, groundY, shiftX, shiftZ) {
+      // re-centred (snapped to whole texels, so nothing swims) once the camera is a sixth of the map
+      // from its middle: a fresh map is baked whole, otherwise a strip a frame
+      const half = SHADOW_SIZE / 2;
+      if (shFull || Math.abs(x - (shPlace.x + half)) > SHADOW_SIZE / 6 || Math.abs(z - (shPlace.z + half)) > SHADOW_SIZE / 6) {
+        const texel = SHADOW_SIZE / SHADOW_N;
+        shPlace.x = Math.round((x - half) / texel) * texel;
+        shPlace.z = Math.round((z - half) / texel) * texel;
+        shFull = true;
+      }
+      shXf.set(shPlace.x, shPlace.z, SHADOW_SIZE, groundY);
+      shShift.set(shiftX, shiftZ);
+      const prevTarget = renderer.getRenderTarget();
+      const prevAuto = renderer.autoClear;
+      const prevXr = renderer.xr.enabled;
+      renderer.autoClear = false;
+      renderer.xr.enabled = false;
+      const rows = SHADOW_N / SHADOW_STRIPS;
+      const y0 = shFull ? 0 : shStrip * rows;
+      shadowTarget.scissor.set(0, y0, SHADOW_N, shFull ? SHADOW_N : rows);
+      renderer.setRenderTarget(shadowTarget);
+      renderer.render(shQuad, cam);
+      shStrip = (shStrip + 1) % SHADOW_STRIPS;
+      shFull = false;
+      renderer.setRenderTarget(prevTarget);
+      renderer.autoClear = prevAuto;
+      renderer.xr.enabled = prevXr;
+      return shPlace;
     },
     setQuality(q) {
       alloc(q);
@@ -557,6 +707,8 @@ export function createCloudPanorama(renderer: THREE.WebGLRenderer, noise: THREE.
       for (const rt of rts) rt.dispose();
       mat.dispose();
       quad.geometry.dispose();
+      shadowTarget.dispose();
+      shMat.dispose();
     },
   };
 }

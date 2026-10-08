@@ -265,19 +265,30 @@ npm run check    # tsc --noEmit
   the road ahead, flare head-on and catch the rain). The track gets wet and dries again, a dry line appears once the
   rain stops, spray and aquaplaning in standing water, the radar and your engineer warn you.
   The dry skies each read differently (`weatherLook` in env/presets.ts, the cloud march in env/skyClouds.ts):
-  clear is a deep blue paling to a near-white horizon; light cloud is separate sunlit cumulus — white flanks
+  clear is a deep blue paling to a near-white horizon; at dawn and golden hour the low sky runs from the sun's
+  orange through a pale cream to the blue above, never the mint or olive an RGB-only atmosphere makes of it (the
+  sky LUT is folded back onto the daylight locus and its multiple scattering is lit by the sky, not the reddened
+  beam: `toDaylightLocus` in atmosphere.ts); light cloud is separate sunlit cumulus — white flanks
   (multiple-scattering octaves), blue-grey bases lit by the sky, lit orange on the sun's side and lavender-grey
-  in their own shade at golden hour — whose shadows slide over the land as distinct soft-edged patches
-  (`cloudShadowMask`, shared by the ground and the horizon ring); windy is the clean, saturated air behind a
+  in their own shade at golden hour — whose shadows are cast by the clouds that are drawn: the panorama's own
+  density is integrated up the sun ray over a 24 km map round the camera (`bakeShadow` in skyClouds.ts, a strip a
+  frame), read by the ground, every lit material and the horizon ring (`cloudShadowAmount` in lightShadows.ts),
+  so a cumulus over the back straight has its shadow under it, displaced away from the sun; windy is the clean, saturated air behind a
   front, the cumulus dragged out and torn by the wind aloft (`uShear`), racing, and every pole flag flying
   straight out downwind (limp in a calm); hazy sun is a deep milky layer that swallows the far hills, with a
   pale luminous sky and a softened sun; overcast has no sun at all — flat, shadowless light under a soft grey
-  deck that the camera meters up to a bright grey-white.
+  deck that the camera meters up to a bright grey-white, with the soft lighter and darker patches of a
+  stratocumulus underside and a brighter patch where the sun is hidden (the light diffused through the deck
+  follows its thickness).
   Fog and mist are a ground layer under the haze (`aerialGround` in fog.ts: an analytic exponential anchored at the
   circuit's level, thicker in the hollows, drifting in banks): fog ~45 m deep with ~400 m visibility, the sun a pale
   disc through it at best and the murk glowing round it (a droplet phase function, shared with the sky dome), trees,
-  stands and cars fading to grey silhouettes; morning mist shallow (~25 m) and bright under a blue sky, ~600 m
-  visibility, burning off through the session — the helicopter looks down on it lying in the low ground. The sun gets
+  stands and cars fading to grey silhouettes; morning mist shallow (~14 m) and bright under a pale blue sky (clean
+  air above the inversion), ~600 m visibility, burning off through the session — the helicopter looks down
+  through a sunlit sheen, the treetops stand out of it and it pools in the low ground of a hilly circuit. After
+  dark the murk is lit by what shines into it: the cars' beams are a glowing wedge ahead and an oncoming car a
+  ball of light (`aerialLamps`), and at twilight the air over the track glows under the floodlights and darkens
+  away from them (`aerialFlood`, from the flood field) — both integrated along each view ray in fog.ts. The sun gets
   through what the layer's slant depth leaves (a high sun casts shadows in mist, a low one is gone); AO fades behind
   the fog; rain lights glow in it. A drying track starts with a line already cleared and dries unevenly: the line goes
   to dry, lighter asphalt with a ragged edge, the braking zones keep damp blotches, the stretches by the trees (the park
