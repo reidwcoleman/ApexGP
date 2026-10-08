@@ -318,6 +318,13 @@ npm run check    # tsc --noEmit
   sheets), lightning lights the land by how dark it is and how close it struck (a flicker at noon, the circuit
   flooded white at night), and its thunder arrives ~3 s per kilometre later. Onboard lenses carry defocused,
   ragged drops that sit at low speed and are blown streaming off the glass flat out (the chase cameras stay dry).
+  A downpour under a full deck is heavy: the camera doesn't meter the gloom back up to a bright day and its sky is
+  held back to a dark, lumpy slate (`FILM.stormSky` / `stormExposure`), the murk greys instead of glowing, and darker
+  rain curtains hang from the deck along the horizon, leaning with the wind and marching across it (`uCurtain` in
+  sky.ts). In standing water a few rivers run across the road each lap — slanted bands of flowing, rippled water
+  (visual only). Seen from above (helicopter, long lenses) a plume's puffs are drawn as trails smeared along their
+  drift, not balls; water flung off the front tyres' tread streams back over them on the close onboards; a car's
+  headlights light the rain only in their beams' low wedge; foliage keeps no ambient-occlusion pepper in the veil.
 - **Race** — 20 cars, standing start with five red lights, 3/5/10/15/20/30 laps (5 by default), Dynamic AI (keeps pace
   with you, adjusts properly after each race) or four fixed levels, start
   from pole / midfield / the back, or **qualify** with a one-shot flying lap against the AI's times. **Time trial** — flying laps against your own best with a live delta.

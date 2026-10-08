@@ -45,8 +45,10 @@ interface CarState {
 }
 
 // emitter slots
-const E_PLUME_L = 0, E_PLUME_R = 1, E_PLUME_C = 2, E_SHEET_L = 3, E_SHEET_R = 4, E_FRONT_L = 5, E_FRONT_R = 6, E_MIST = 7;
-const N_EMIT = 8;
+const E_PLUME_L = 0, E_PLUME_R = 1, E_PLUME_C = 2, E_SHEET_L = 3, E_SHEET_R = 4, E_FRONT_L = 5, E_FRONT_R = 6, E_MIST = 7, E_TREAD_L = 8, E_TREAD_R = 9;
+const N_EMIT = 10;
+/** 2026 tyre radius (m): 18-inch rims, ~720 mm tall wets */
+const TYRE_R = 0.36;
 
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -149,7 +151,8 @@ export class SprayEmitters {
         // (born compact at the tyre and faded in over its first ~0.2 s: the footage's plume is
         // thin right at the diffuser and thickest a few metres back, so the car stays readable
         // inside it instead of drawing as a white ghost; eroded into wisps as it spreads)
-        1.1, -0.1, 0, g, 0.5, 0.08, 2.6, pre,
+        // (stretch −1: drawn as a trail when seen from above — Particles SOFT_VERT)
+        1.1, -0.1, -1, g, 0.5, 0.08, 2.6, pre,
       );
     };
     run(E_PLUME_L, spP, plume(1));
@@ -164,7 +167,7 @@ export class SprayEmitters {
           px + sy * back + (rnd() - 0.5) * 1.5, g + 0.6 + rnd() * 0.8, pz + cy * back + (rnd() - 0.5) * 1.5,
           vx * 0.22, 0.25 + rnd() * 0.4, vz * 0.22,
           (2.2 + rnd() * 1.4) * (0.6 + 0.4 * I) * (1 + 0.6 * deep), 1.4 * sizeK, (3.6 + rnd() * 1.8) * sizeK * (1 + 0.3 * deep),
-          (0.16 + 0.08 * deep) * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, 0, g, 0.4, 0.12, 0.8, pre,
+          (0.16 + 0.08 * deep) * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, -1, g, 0.4, 0.12, 0.8, pre,
         );
       });
     }
@@ -208,6 +211,30 @@ export class SprayEmitters {
     };
     run(E_FRONT_L, spF, front(1));
     run(E_FRONT_R, spF, front(-1));
+
+    // ---- water flung off the front tyres' tread: what the grooves carry round comes off the top of the
+    // tyre, moving forward at the tread's speed, and the air stops it dead within a few centimetres and
+    // blows it back over the wheel — the fine, ragged fan of mist streaming off the top of the front
+    // tyres in every wet onboard (wheel cam, T-cam); only the cameras close to it can see it
+    if (c.camDist < 30) {
+      const spT = 1.1 / q;
+      const tread = (side: number) => (px: number, pz: number, pre: number) => {
+        const lx = side * (halfF + (rnd() - 0.5) * 0.3);
+        const lz = zf + TYRE_R * (rnd() * 0.5 - 0.3);
+        const wx = px + sy * lz + cy * lx;
+        const wz = pz + cy * lz - sy * lx;
+        const k = 0.8 + rnd() * 0.18;
+        const out = side * (rnd() - 0.3) * 1.5;
+        p.puff(
+          wx, g + TYRE_R * (1.75 + rnd() * 0.3), wz,
+          vx * k + cy * out, (1.5 + rnd() * 2.5) * (0.5 + 0.5 * I), vz * k - sy * out,
+          0.2 + rnd() * 0.2, 0.05, 0.25 + rnd() * 0.25,
+          0.42 * I * (c.self ? 0.75 : 1), 0.82 * p.mistGain, 9.0, 2.0, 0.03, g, 0.45, 0.05, 4.0, pre,
+        );
+      };
+      run(E_TREAD_L, spT, tread(1));
+      run(E_TREAD_R, spT, tread(-1));
+    }
     return I;
   }
 

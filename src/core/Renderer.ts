@@ -249,7 +249,17 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   vec3 P = aoViewPos(uv, depth);
   float dist = -P.z;
   if (dist > 180.0) return;
-  vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+  // the normal from the nearer neighbour on each axis, not the 2×2 quad's derivatives: across a depth
+  // step (a leaf's edge, hashed-alpha foliage against the crown or the sky behind it) the derivative
+  // takes the step for the slope and the taps find "occluders" all round — every leaf got its own dark
+  // dot. Hidden in a dark dry crown; in the rain the crowns are veiled pale grey and it read as pepper
+  // sprinkled over every tree line.
+  vec2 tx = vec2(texelSize.x, 0.0), ty = vec2(0.0, texelSize.y);
+  vec3 Pl = aoViewPos(uv - tx, readDepth(uv - tx)), Pr = aoViewPos(uv + tx, readDepth(uv + tx));
+  vec3 Pd = aoViewPos(uv - ty, readDepth(uv - ty)), Pu = aoViewPos(uv + ty, readDepth(uv + ty));
+  vec3 dxP = abs(Pl.z - P.z) < abs(Pr.z - P.z) ? P - Pl : Pr - P;
+  vec3 dyP = abs(Pd.z - P.z) < abs(Pu.z - P.z) ? P - Pd : Pu - P;
+  vec3 N = normalize(cross(dxP, dyP));
   // screen radius (uv) of the world radius at this depth, kept to a sensible footprint
   float rS = min(aoRadius / (dist * aoTanHalf.y * 2.0), 0.08);
   if (rS < texelSize.y * 1.5) return;
@@ -270,6 +280,14 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     occ += h * (1.0 - smoothstep(aoRadius * 0.6, aoRadius * 1.4, l));
   }
   occ = clamp(occ / 14.0 * 1.9, 0.0, 1.0);
+  // a leaf on its own — nearer (or farther) than the pixels on both sides of it — has no surface round
+  // it to be occluded by: no shade (a surface, even the road at a grazing angle, slopes through; a
+  // silhouette steps on one side only, so the contact shade round a car's edge is kept)
+  {
+    float zl = Pl.z - P.z, zr = Pr.z - P.z, zd = Pd.z - P.z, zu = Pu.z - P.z;
+    float island = max(max(min(zl, zr), -max(zl, zr)), max(min(zd, zu), -max(zd, zu)));
+    occ *= 1.0 - smoothstep(0.15, 0.6, island / aoRadius);
+  }
   // fade out with distance (the far field is fog and aerial haze)
   occ *= 1.0 - smoothstep(90.0, 180.0, dist);
   // (and by the fog in front of it: occlusion darkens the surface, not the murk between it and the lens —

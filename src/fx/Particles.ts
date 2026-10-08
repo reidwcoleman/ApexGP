@@ -66,7 +66,10 @@ void main() {
   vec4 mvPosition = viewMatrix * vec4( iPos, 1.0 );
   float dist = -mvPosition.z;
   float size = iData.x;
-  float alpha = iData.y * smoothstep( uNear.x + size * 0.3, uNear.y + size * 0.8, dist );
+  // (small puffs fade in nearer the lens: a big one there would fill the frame, but the fine water
+  // flung off a tyre a metre from a wheel cam is right there in the footage)
+  float nearK = clamp( size * 1.5, 0.3, 1.0 );
+  float alpha = iData.y * smoothstep( ( uNear.x + size * 0.3 ) * nearK, ( uNear.y + size * 0.8 ) * nearK, dist );
   if ( alpha < 0.0015 || dist < 0.1 ) { gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); return; }
   float proj = size * projectionMatrix[1][1] / dist;
   if ( proj > uMaxProj ) size *= uMaxProj / proj;
@@ -85,7 +88,29 @@ void main() {
     ax = vec2( c, s );
     ay = vec2( -s, c );
   }
-  vec2 off = ax * corner.x * size + ay * corner.y * sy;
+  vec2 shift = vec2( 0.0 );
+  if ( iData.w < 0.0 ) {
+    // rain spray seen from above (helicopter, long lens down onto the track): a plume is a long, low
+    // trail a couple of metres deep, so its puffs — balls from behind, where tens of metres of them
+    // stack into a wall — read from up there as a string of cotton wool. Looked down on, each puff
+    // is drawn as a streak along its drift trailing behind where it is (the trail on the aerials of
+    // Spa 2021 or Silverstone 2023: smeared, translucent veils behind each car, the road showing
+    // through), with its opacity spread over the bigger area and the thin layer's short path.
+    float top = smoothstep( 0.3, 0.85, normalize( iPos - cameraPosition ).y * -1.0 );
+    vec2 dv = ( viewMatrix * vec4( iVel.x, 0.0, iVel.z, 0.0 ) ).xy;
+    float l = length( dv );
+    if ( top > 0.0 && l > 0.5 ) {
+      vec2 ty = dv / l;
+      ay = normalize( mix( ay, ty, top ) );
+      ax = vec2( ay.y, -ay.x );
+      float stretchK = 1.0 + 2.2 * top * smoothstep( 0.5, 6.0, l );
+      sy = size * stretchK;
+      size *= 1.0 - 0.2 * top;
+      shift = -ty * ( sy - size ) * 0.7;
+      alpha *= ( 1.0 - 0.35 * top ) / sqrt( stretchK );
+    }
+  }
+  vec2 off = ax * corner.x * size + ay * corner.y * sy + shift;
   mvPosition.xy += off;
   vec3 world = iPos + ( vec4( off, 0.0, 0.0 ) * viewMatrix ).xyz;
   float cell = iMisc.y;
@@ -313,7 +338,13 @@ void main() {
   vec4 rel = abs( zs - z ) / max( z, 0.1 );
   w *= 1.0 / ( 0.05 + rel * rel * 20.0 );
   vec4 c = texture2D( uTex, b ) * w.x + texture2D( uTex, b + tx ) * w.y + texture2D( uTex, b + ty ) * w.z + texture2D( uTex, b + tx + ty ) * w.w;
-  gl_FragColor = c / max( w.x + w.y + w.z + w.w, 1e-5 );
+  c /= max( w.x + w.y + w.z + w.w, 1e-5 );
+  // a pixel nearer than every texel the layer was tested at (a wing flap, a suspension arm, a halo a
+  // pixel or two thick, which the low-res layer never sampled) took the spray hanging in front of the
+  // road behind it: the whole depth of the plume pasted over the part, every wing and arm of a car
+  // in spray outlined in white. Only the nearer share of that lies in front of it.
+  float zn = min( min( zs.x, zs.y ), min( zs.z, zs.w ) );
+  gl_FragColor = c * min( 1.0, z / max( zn, 1e-3 ) );
 }
 `;
 
