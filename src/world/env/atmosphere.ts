@@ -19,6 +19,8 @@ const BETA_R = [5.802e-6, 13.558e-6, 33.1e-6];
 const OZONE = [0.65e-6, 1.881e-6, 0.085e-6];
 const HR = 8000;
 const HM = 1200;
+/** the direction cosine the multiply scattered light's colour is taken at (see computeSky) */
+const MS_MU = 0.34;
 
 export interface AtmosphereParams {
   /** sun elevation, radians */
@@ -120,6 +122,47 @@ function lookupTau(tab: Float32Array, h: number, mu: number, out: number[]) {
 
 // ---------------------------------------------------------------- sky-view LUT
 
+/**
+ * Three wavelengths are not a spectrum: integrated over the visible band, a reddened beam scattered by
+ * the λ⁻⁴ Rayleigh air comes out along the daylight (Planckian) locus — orange → cream → white → blue —
+ * but sampled at just R, G and B the same sum overshoots in green: the low sky round a golden-hour or
+ * dawn sun went mint and yellow-green where its orange met the blue above (Bruneton and Hillaire both
+ * note an RGB-only sky needs this care). No sky, seen or photographed, shows it: past an evening's
+ * orange horizon it goes through a pale cream to a pale blue. So any green above the locus's for the
+ * same red : blue balance is folded back, keeping the luminance.
+ * The locus in linear sRGB (Planck, normalised): warm side green vs blue / red, cool side vs red / blue
+ * (2000 K, 3000 K, 4000 K, 5000 K, 6500 K | 10000 K, 15000 K)
+ */
+const LOCUS_WARM = [0.004, 0.25, 0.147, 0.456, 0.366, 0.637, 0.617, 0.776, 1, 1];
+const LOCUS_COOL = [0.462, 0.61, 0.604, 0.708, 1, 1];
+/**
+ * how far over the locus green may run: a little near white and on the warm side; a clear blue sky
+ * itself sits ~20 % greener than a 15000 K body (measured sky blues, x ≈ 0.26, y ≈ 0.28), so the blue
+ * end keeps its own colour and only the pale transition is corrected
+ */
+const LOCUS_SLACK = 1.04;
+const LOCUS_SLACK_BLUE = 1.2;
+const smooth01 = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+function locusG(x: number, t: number[]) {
+  if (x <= t[0]) return t[1];
+  for (let i = 2; i < t.length; i += 2) if (x <= t[i]) return t[i - 1] + ((x - t[i - 2]) / (t[i] - t[i - 2])) * (t[i + 1] - t[i - 1]);
+  return 1;
+}
+function toDaylightLocus(a: Float32Array, k: number) {
+  const r = a[k], g = a[k + 1], b = a[k + 2];
+  const hi = Math.max(r, b);
+  if (hi <= 0) return;
+  const x = r >= b ? b / r : r / b;
+  const slack = r >= b ? LOCUS_SLACK : LOCUS_SLACK + (LOCUS_SLACK_BLUE - LOCUS_SLACK) * smooth01((0.9 - x) / 0.4);
+  const gMax = slack * hi * locusG(x, r >= b ? LOCUS_WARM : LOCUS_COOL);
+  if (g <= gMax) return;
+  const y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+  const s = y / Math.max(1e-12, r * 0.2126 + gMax * 0.7152 + b * 0.0722);
+  a[k] = r * s;
+  a[k + 1] = gMax * s;
+  a[k + 2] = b * s;
+}
+
 export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
   const tab = buildTransmittance(p.mie);
   const mieSca = 3.996e-6 * p.mie;
@@ -188,13 +231,23 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
         const sr = Math.exp(-tau[0]);
         const sg = Math.exp(-tau[1]);
         const sb = Math.exp(-tau[2]);
+        // the multiply scattered light is lit by the sky, not by the beam alone: under a low sun the
+        // beam reaching the low air is orange, but the light scattered a second and third time comes
+        // down from the bright sky overhead, which is still white-blue. Lighting it with the reddened
+        // beam (as a crude single-colour term does) turned the whole low sky away from a golden-hour
+        // sun yellow-green where its orange met the Rayleigh blue — a colour no evening sky has. Its
+        // colour is the beam's along a steeper path (as if from ~20° up), its strength the beam's own
+        lookupTau(tab, h, Math.max(muS, MS_MU), tau);
+        let mr = Math.exp(-tau[0]), mg = Math.exp(-tau[1]), mb = Math.exp(-tau[2]);
+        const mk = (sr * 0.2126 + sg * 0.7152 + sb * 0.0722) / Math.max(1e-6, mr * 0.2126 + mg * 0.7152 + mb * 0.0722);
+        mr *= mk; mg *= mk; mb *= mk;
         const msR = p.ms * inv4pi;
-        const scR = BETA_R[0] * dR * (pr + msR) + mieSca * dM * (pm + msR);
-        const scG = BETA_R[1] * dR * (pr + msR) + mieSca * dM * (pm + msR);
-        const scB = BETA_R[2] * dR * (pr + msR) + mieSca * dM * (pm + msR);
-        Lr += vr * sr * scR * dt;
-        Lg += vg * sg * scG * dt;
-        Lb += vb * sb * scB * dt;
+        const ssR = BETA_R[0] * dR * pr + mieSca * dM * pm;
+        const ssG = BETA_R[1] * dR * pr + mieSca * dM * pm;
+        const ssB = BETA_R[2] * dR * pr + mieSca * dM * pm;
+        Lr += vr * (sr * ssR + mr * (BETA_R[0] * dR + mieSca * dM) * msR) * dt;
+        Lg += vg * (sg * ssG + mg * (BETA_R[1] * dR + mieSca * dM) * msR) * dt;
+        Lb += vb * (sb * ssB + mb * (BETA_R[2] * dR + mieSca * dM) * msR) * dt;
         const ms0 = mieSca * dM * dt;
         Mr += vr * sr * ms0;
         Mg += vg * sg * ms0;
@@ -209,6 +262,8 @@ export function computeSky(p: AtmosphereParams, W = 48, H = 72): SkyLUT {
       base[k + 1] = Lg - Mg * pm;
       base[k + 2] = Lb - Mb * pm;
       base[k + 3] = 1;
+      toDaylightLocus(data, k);
+      toDaylightLocus(base, k);
       mie[k] = Mr;
       mie[k + 1] = Mg;
       mie[k + 2] = Mb;

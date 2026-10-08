@@ -123,7 +123,51 @@ export class FocusSunShadow extends SunLightShadow {
 
 /** shared (by reference) with every lit built-in material, see installSunShadowChunk */
 export const cloudShadowA = { x: 0, y: 0, z: 0, w: 0 }; // strength, coverage, windX, windZ
-export const cloudShadowB = { x: 0, y: 0, z: 1500, w: 0 }; // sunDir.x/y, sunDir.z/y, cloud mid height
+export const cloudShadowB = { x: 0, y: 0, z: 1500, w: 0 }; // sunDir.x/y, sunDir.z/y, cloud mid height, ground height of the baked map
+/** the baked map of the drawn clouds' shadows (skyClouds.ts bakeShadow): corner x, z, 1 / size, 1 = in use */
+export const cloudShadowC = { x: 0, y: 0, z: 0, w: 0 };
+/**
+ * The map's GPU texture, handed to every lit material. ShaderLib's uniforms are cloned per material, and
+ * three won't clone a render target's texture (it hands the clone null) — so the materials get an
+ * external texture whose source is looked up live: every clone binds whatever map the current
+ * environment baked, and none (no shadow: r reads 0) before the first.
+ */
+const cloudShadowGL: { tex: WebGLTexture | null } = { tex: null };
+class CloudShadowTexture extends THREE.ExternalTexture {}
+Object.defineProperty(CloudShadowTexture.prototype, 'sourceTexture', {
+  get: () => cloudShadowGL.tex,
+  set: () => {},
+  configurable: true,
+});
+export const cloudShadowTexture = new CloudShadowTexture();
+/** point the materials' cloud-shadow map at a baked render target (null: none) */
+export function setCloudShadowTarget(renderer: THREE.WebGLRenderer, rt: THREE.WebGLRenderTarget | null) {
+  cloudShadowGL.tex = rt ? ((renderer.properties.get(rt.texture) as { __webglTexture?: WebGLTexture }).__webglTexture ?? null) : null;
+  if (!cloudShadowGL.tex) cloudShadowC.w = 0;
+}
+/**
+ * GLSL: how much of the sun the clouds take at world point wp — the baked map of the drawn clouds where
+ * it reaches, fading to the old statistical patches (cloudShadowMask) toward and beyond its edge.
+ * Needs CLOUD_FIELD_GLSL and the four uniforms.
+ */
+export const CLOUD_SHADOW_AT_GLSL = /* glsl */ `
+float cloudShadowAmount( vec3 wp, vec4 A, vec4 B, vec4 C, sampler2D map ) {
+  float k = 0.0;
+  float baked = 0.0;
+  if ( C.w > 0.5 ) {
+    // (the map was baked for the ground under it: a point higher up looks up a ray that starts further
+    // toward the sun)
+    vec2 uv = ( wp.xz - B.xy * ( wp.y - B.w ) - C.xy ) * C.z;
+    float edge = min( min( uv.x, 1.0 - uv.x ), min( uv.y, 1.0 - uv.y ) );
+    k = smoothstep( 0.0, 0.12, edge );
+    if ( k > 0.0 ) baked = texture2D( map, uv ).r;
+  }
+  // (the statistical patches only where the map doesn't reach: they cost six noise lookups)
+  if ( k >= 1.0 ) return baked;
+  float proc = cloudShadowMask( wp.xz + B.xy * ( B.z - wp.y ) + A.zw, A.y );
+  return mix( proc, baked, k );
+}
+`;
 
 const GET_SUN_SHADOW = /* glsl */ `
 #if defined( SHADOWMAP_TYPE_PCF )
@@ -154,11 +198,13 @@ float sunTileEdge( vec4 c, float tile, float inset ) {
 
 uniform vec4 cloudShadowA;
 uniform vec4 cloudShadowB;
+uniform vec4 cloudShadowC;
+uniform sampler2D cloudShadowMap;
 ${CLOUD_FIELD_GLSL}
+${CLOUD_SHADOW_AT_GLSL}
 float cloudShadowAt( vec3 wp ) {
   if ( cloudShadowA.x <= 0.0 ) return 1.0;
-  vec2 xz = wp.xz + cloudShadowB.xy * ( cloudShadowB.z - wp.y ) + cloudShadowA.zw;
-  return 1.0 - cloudShadowA.x * cloudShadowMask( xz, cloudShadowA.y );
+  return 1.0 - cloudShadowA.x * cloudShadowAmount( wp, cloudShadowA, cloudShadowB, cloudShadowC, cloudShadowMap );
 }
 
 float getSunShadow(
@@ -222,6 +268,8 @@ export function installSunShadowChunk() {
     if (sh && sh.uniforms && 'sunLights' in sh.uniforms) {
       sh.uniforms.cloudShadowA = { value: cloudShadowA };
       sh.uniforms.cloudShadowB = { value: cloudShadowB };
+      sh.uniforms.cloudShadowC = { value: cloudShadowC };
+      sh.uniforms.cloudShadowMap = { value: cloudShadowTexture };
     }
   }
 }

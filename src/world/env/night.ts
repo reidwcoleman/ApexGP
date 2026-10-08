@@ -33,7 +33,8 @@ export const FLOOD_H = 19;
 const FLOOD_REACH = 240;
 
 const floodData = new Uint8Array(N * N * 4);
-const floodTex = new THREE.DataTexture(floodData, N, N, THREE.RGBAFormat, THREE.UnsignedByteType);
+/** (exported for the fog: the floodlit air glows, fog.ts aerialFlood) */
+export const floodTex = new THREE.DataTexture(floodData, N, N, THREE.RGBAFormat, THREE.UnsignedByteType);
 floodTex.magFilter = THREE.LinearFilter;
 floodTex.minFilter = THREE.LinearFilter;
 floodTex.wrapS = floodTex.wrapT = THREE.ClampToEdgeWrapping;

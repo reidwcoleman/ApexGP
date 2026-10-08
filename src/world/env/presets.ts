@@ -353,15 +353,19 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // fog and mist are a ground layer under the haze (fog.ts aerialGround), each with its own character:
   //   fog: ~45 m deep, ~400 m visibility at the track — the far side of the circuit gone, trees and stands
   //     emerging as grey silhouettes, the sun a pale disc in a white glare at best
-  //   mist: a shallow (~25 m), bright layer under a clear sky, ~600 m visibility, burning off through the
-  //     session — the helicopter and the TV towers look down on treetops poking out of it
+  //   mist: a shallow (~14 m), bright layer under a clear sky, ~600 m visibility, burning off through the
+  //     session — the helicopter and the TV towers look down on treetops poking out of it. (Radiation mist
+  //     is a few metres to a couple of tens deep: at ~25 m the helicopter, 50 m up, looked down through a
+  //     white sheet as deep as itself; this shallow it sees the circuit through a sunlit sheen, the mist
+  //     lying white only where it looks across it — the hollows, the far fields — and pooling in the low
+  //     ground of a hilly circuit while the crests stand clear of it)
   // (a changeable fog that burns off has fog → 0 by the time the kind flips: no pop)
   const fogKind = w.kind === 'fog' ? smooth(0.5, 0.95, fog) : 0;
   const mistKind = w.kind === 'mist' ? smooth(0.1, 0.85, fog) : 0;
   const layerK = Math.max(fogKind, mistKind);
   const fogDeep = fogKind / Math.max(1e-4, fogKind + mistKind);
-  const groundFog = fogKind * 6.5e-3 + mistKind * 4.6e-3;
-  const groundFall = 1 / mix(26, 45, fogDeep);
+  const groundFog = fogKind * 6.5e-3 + mistKind * 5.2e-3;
+  const groundFall = 1 / mix(14, 45, fogDeep);
   // direct sun: survives broken cumulus, dies under a deck, gone in rain from a full deck
   // (a shower from broken cloud keeps the sun: a sun shower)
   // (an overcast sky — 7/8 and more — has no sun at all: the light is the deck's, shadowless; at the
@@ -396,8 +400,11 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // visibility 5–8 km, the far hills gone to a pale silhouette or gone altogether), lying a kilometre
   // or two deep rather than in the low layer of a morning mist
   // (fog and mist put most of their water in the ground layer: the haze above it only greys the far side)
+  // (and over a morning mist the air is clean: the mist is the night's cold air pooled under an inversion,
+  // the sky above it a pale blue and the far hills standing clear over the white — a hazy veil on top
+  // turned the whole sky the mist's white)
   const fogDensity =
-    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 + (smooth(0.5, 0.9, fog) * 1.3e-3 + thick * 3.2e-3) * (1 - layerK) + layerK * mix(1.2e-4, 8e-4, fogDeep) + rain * rain * 3.2e-3) *
+    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 * (1 - 0.65 * mistKind) + (smooth(0.5, 0.9, fog) * 1.3e-3 + thick * 3.2e-3) * (1 - layerK) + layerK * mix(1.2e-4, 8e-4, fogDeep) + rain * rain * 3.2e-3) *
       (1 - 0.3 * windK) +
     heatK * 1.7e-4;
   const fogFalloff = mix(mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6)), 1 / 1500, 0.85 * heatK);

@@ -518,12 +518,18 @@ if ( leafK > 0.5 ) {
         `{
   vec3 mapN;
   if ( vTree.y > 0.5 ) {
-    vec4 ln = texture2D( uLeafN, vTUv, -0.7 );
-    mapN = ln.xyz * 2.0 - 1.0;
     // (each leaf its own tilt: the crown speckles light and dark leaf by leaf instead of shading
-    // card by card)
-    mapN.xy *= 1.5;
-    gLeafS = ln.a;
+    // card by card) — near. Once a leaf is under a pixel or two the tilts can't be resolved: sampled
+    // sharp they alias into a crawl of lit and dark pixels over every far crown (the distant tree line
+    // sparkled as the camera moved), where a real crown, like its mip, averages to a soft, even shade.
+    // So the tilt flattens and the normal is read at the plain mip as the leaves shrink.
+    vec2 ndx = dFdx( vTUv * uLeafSize ), ndy = dFdy( vTUv * uLeafSize );
+    float nLod = max( 0.0, 0.5 * log2( max( dot( ndx, ndx ), dot( ndy, ndy ) ) ) );
+    float far = smoothstep( 1.0, 3.5, nLod );
+    vec4 ln = texture2D( uLeafN, vTUv, -0.7 * ( 1.0 - far ) );
+    mapN = ln.xyz * 2.0 - 1.0;
+    mapN.xy *= mix( 1.5, 0.45, far );
+    gLeafS = mix( ln.a, 0.75, far * 0.6 );
   } else {
     mapN = texture2D( uBark, vTUv ).xyz * 2.0 - 1.0;
     mapN.xy *= 1.2;
@@ -535,6 +541,11 @@ if ( leafK > 0.5 ) {
       .replace(
         '#include <roughnessmap_fragment>',
         `float roughnessFactor = mix( 0.86, 0.72, leafK );
+// (far crowns: the leaves' glints average out under a pixel — rougher, so they don't sparkle)
+{
+  vec2 rdx = dFdx( vTUv * uLeafSize ), rdy = dFdy( vTUv * uLeafSize );
+  roughnessFactor = mix( roughnessFactor, 0.92, leafK * smoothstep( 1.0, 3.5, max( 0.0, 0.5 * log2( max( dot( rdx, rdx ), dot( rdy, rdy ) ) ) ) ) );
+}
 roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
       )
       .replace(
@@ -548,7 +559,7 @@ roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.55, uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v9';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v10';
   return mat;
 }
 
