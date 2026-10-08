@@ -10,12 +10,12 @@ import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
-import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SETUP, medalFor, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
-import { GEO, PIN_OFFSET, MAP, MAP_H, project, landPath, CAREER_LAPS, type Forecast } from '../career/Season.ts';
+import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
+import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
-import { openWizard, renderHub, renderRd, renderRoundSummary } from './CareerHub.ts';
-import type { DriverCareer, Contract, RoundSummary } from '../career/DriverCareer.ts';
+import { openWizard, renderHub, renderRd, renderRoundSummary, renderStart, resetSeasonMap } from './CareerHub.ts';
+import { LAP_CHOICES, type DriverCareer, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import type { PlayerDriver } from '../career/Series.ts';
 import { BIND_PROMPT, BIND_STEPS, Binder, DEFAULT_CONTROLS, controlPrefs, deviceName, findDev, isWheelId, padSteer, pedal, wheelSteer, type ControlPrefs } from '../core/controllers.ts';
 
@@ -61,7 +61,8 @@ export interface Settings {
   controls?: Partial<ControlPrefs>;
 }
 
-export const LAPS = [3, 5, 10, 20];
+/** quick-race distances (5 by default); the career offers the same from 5 up (DriverCareer LAP_CHOICES) */
+export const LAPS = [3, 5, 10, 15, 20, 30];
 /** AI level. Dynamic (the default) races at the player's own rating (career.aiSkill), learnt race by race */
 export const DIFFICULTY = [
   { label: 'Dynamic', value: 0.92, dynamic: true },
@@ -265,8 +266,6 @@ export class Menu {
   readonly career: Career;
   highlights: Highlights | null = null;
   hubTab: HubTab = 'career';
-  /** the round the career map has selected */
-  private mapSel: string | null = null;
   private focusedPart: SetupPart | null | undefined = undefined;
   private hubFocus: 'tabs' | 'panel' = 'tabs';
   private hubTabs: HTMLElement[] = [];
@@ -355,8 +354,6 @@ export class Menu {
     }
     return c.races ? `${c.races} race${c.races === 1 ? '' : 's'} · ${c.points} pts` : 'Rookie season';
   }
-  /** the career tab shows the season calendar (the map) instead of the hub */
-  private calendarView = false;
   /** the new-career wizard is open (it takes the keys) */
   private wizardOpen = false;
   /** open the new-career wizard */
@@ -366,7 +363,6 @@ export class Menu {
     openWizard(document.body, {
       onDone: (driver, contract) => {
         this.wizardOpen = false;
-        this.calendarView = false;
         this.cb.onCareerStart?.(driver, contract);
       },
       onCancel: () => {
@@ -378,7 +374,7 @@ export class Menu {
 
   private buildTitle() {
     // (back in the garage: the career map opens on the round you're working on)
-    this.mapSel = null;
+    resetSeasonMap();
     const s = this.screens.get('title')!;
     s.innerHTML = '';
     s.classList.add('hub');
@@ -529,198 +525,36 @@ export class Menu {
     if (here) requestAnimationFrame(() => this.reveal(here, 'center', 'auto'));
   }
 
-  /** the career: the season's fourteen rounds on a map, medals where you've earned them */
+  /**
+   * The career: the season as a map (the driver career's hub, its Overview the map of the rounds,
+   * each unlocked by a top-five finish at the one before). Without a career yet, the map of the
+   * season to come and the way in.
+   */
   private tabCareer(p: HTMLElement) {
     const dc = this.cb.driverCareer?.();
-    if (dc && !this.calendarView) {
-      if (dc.active) {
-        renderHub(p, {
-          dc,
-          action: (e, fn, dis) => this.action(e, fn, dis),
-          onRace: (id) => this.cb.onCareerRace(id),
-          onCalendar: () => {
-            this.calendarView = true;
-            this.renderTab();
-          },
-          onNewCareer: () => this.openCareerWizard(),
-          changed: () => {
-            this.cb.onCareerChanged?.();
-            this.buildTitle();
-          },
-          rerender: () => {
-            this.renderTab();
-          },
-          onDevelop: () => this.setTab('car'),
-          forecast: (id) => fcLabel(this.cb.careerForecast(id)),
-          circuitPath: (pts) => circuitPath(pts, 120, 84, 6),
-        });
-        this.sel = 0;
-        return;
-      }
-      // no career yet: the way in
-      p.classList.add('ch', 'start');
-      p.style.backgroundImage = `url("${artFor('silverstone')}")`;
-      el('div', 'ch-start', p, `<div class="cap">Driver career</div><div class="big">Your journey to Formula 1</div><div class="sub">Create a driver and fight your way up from Formula 2, or take over a current F1 driver's seat. Every result, every interview and every contract is yours.</div>`);
-      const go = el('div', 'cta ch-start-go', p, 'Start your career');
-      this.action(go, () => this.openCareerWizard());
+    if (dc?.active) {
+      renderHub(p, {
+        dc,
+        action: (e, fn, dis) => this.action(e, fn, dis),
+        onRace: (id) => this.cb.onCareerRace(id),
+        onNewCareer: () => this.openCareerWizard(),
+        changed: () => {
+          this.cb.onCareerChanged?.();
+          this.buildTitle();
+        },
+        rerender: () => {
+          this.renderTab();
+        },
+        onDevelop: () => this.setTab('car'),
+        forecast: (id) => fcLabel(this.cb.careerForecast(id)),
+        circuitPath: (pts) => circuitPath(pts, 120, 84, 6),
+        info: (id) => CIRCUIT_INFO[id] ?? { country: CIRCUITS.find((c) => c.id === id)?.country ?? '', km: '', turns: 0 },
+      });
       this.sel = 0;
       return;
     }
-    if (dc?.active) {
-      const back = el('div', 'cta ghost cm-back', p, '← Career');
-      this.action(back, () => {
-        this.calendarView = false;
-        this.renderTab();
-      });
-    }
-    const c = this.career.data;
-    const next = this.career.nextRound();
-    const open = CIRCUITS.filter((cd) => this.career.isUnlocked(cd.id));
-    if (!this.mapSel || !CIRCUITS.some((cd) => cd.id === this.mapSel)) this.mapSel = next ?? this.setup.track;
-    const m = this.career.medals();
-    const round = next ? CIRCUITS.findIndex((cd) => cd.id === next) + 1 : CIRCUITS.length;
-    el(
-      'div',
-      'cm-head',
-      p,
-      `<div class="cm-title"><div class="cap">Season ${new Date().getFullYear()}</div><div class="big">${next ? `Round ${round} <span>of ${CIRCUITS.length}</span>` : 'Season complete'}</div></div>` +
-        `<div class="cm-stats">` +
-        `<div class="cs"><b>${this.career.seasonPoints()}</b><span>Season points</span></div>` +
-        `<div class="cs"><b>${open.length}<small>/${CIRCUITS.length}</small></b><span>Rounds open</span></div>` +
-        `<div class="cs medals"><b><i class="md gold"></i>${m.gold}<i class="md silver"></i>${m.silver}<i class="md bronze"></i>${m.bronze}</b><span>Medals</span></div>` +
-        `<div class="cs"><b>${c.wins}</b><span>Wins · ${c.races} races</span></div>` +
-        `</div>`,
-    );
-    // the map: the land as a field of dots, the season's route between the circuits, a pin per
-    // round; it glides in on the round you pick (closest over Europe, where eight rounds crowd)
-    const map = el('div', 'cm-map', p);
-    const pts = CIRCUITS.map((cd, i) => {
-      const g = GEO[cd.id] ?? [0, 0];
-      const [x, y] = project(g[0], g[1]);
-      const o = PIN_OFFSET[cd.id] ?? [0, 0];
-      return { cd, i, x, y, ox: o[0], oy: o[1] };
-    });
-    // the route: flown so far glowing in the accent, the next leg drawing itself, the rest dotted
-    let done = '';
-    let nextLeg = '';
-    let todo = '';
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1];
-      const b = pts[i];
-      const d = Math.hypot(b.x - a.x, b.y - a.y);
-      const mx = (a.x + b.x) / 2;
-      const my = (a.y + b.y) / 2 - Math.min(70, d * 0.22);
-      const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-      if (this.career.isUnlocked(b.cd.id) && b.cd.id !== next) done += seg;
-      else if (b.cd.id === next && this.career.isUnlocked(a.cd.id)) nextLeg += seg;
-      else todo += seg;
-    }
-    const lock = `<path d="M-2.6 -0.6v-1.7a2.6 2.6 0 0 1 5.2 0V-0.6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="-3.8" y="-0.7" width="7.6" height="5.4" rx="1.2" fill="currentColor"/>`;
-    const pins = pts
-      .map(({ cd, i, x, y, ox, oy }) => {
-        const unlocked = this.career.isUnlocked(cd.id);
-        const medal = medalFor(c.best[cd.id]);
-        const cls = ['pin', unlocked ? 'open' : 'locked', medal ?? '', cd.id === next ? 'next' : '', cd.id === this.setup.track ? 'here' : ''].filter(Boolean).join(' ');
-        const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
-        const face = unlocked ? `<circle class="halo" r="20"/><circle class="disc" r="13"/><text y="4.5">${i + 1}</text>` : `<circle class="disc" r="9"/><g class="lk">${lock}</g>`;
-        const tw = 22 + cd.short.length * 9.4;
-        // (on the side away from the map's edge: the far-east rounds label to their left)
-        const left = ox < 0 || x > MAP.w * 0.72;
-        const tag = `<g class="tag" transform="translate(${ox + (left ? -20 : 20)} ${oy})"><rect class="tbg" x="${left ? -tw : 0}" y="-13" width="${tw.toFixed(0)}" height="26" rx="6"/><text class="tn" x="${left ? -11 : 11}" y="4.5" text-anchor="${left ? 'end' : 'start'}">${cd.short.toUpperCase()}</text></g>`;
-        return `<g class="pinw" data-id="${cd.id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="2.4"/>${tag}<g class="${cls}" data-id="${cd.id}" transform="translate(${ox} ${oy})">${face}</g></g>`;
-      })
-      .join('');
-    map.innerHTML =
-      `<svg viewBox="0 0 ${MAP.w} ${MAP_H}" preserveAspectRatio="xMidYMid slice">` +
-      `<defs><pattern id="cm-dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.05"/></pattern>` +
-      `<radialGradient id="cm-vig" cx="50%" cy="45%" r="75%"><stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.55"/></radialGradient></defs>` +
-      `<g class="cm-world"><path class="land-base" d="${landPath()}"/><path class="land" d="${landPath()}"/>` +
-      `<path class="route todo" d="${todo}"/><path class="route done" d="${done}"/><path class="route next" d="${nextLeg}"/>${pins}</g>` +
-      `<rect class="vig" width="${MAP.w}" height="${MAP_H}" fill="url(#cm-vig)"/></svg>`;
-    const world = map.querySelector<SVGGElement>('.cm-world')!;
-    const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
-    /** glide the map onto a round: tighter over Europe (its rounds sit a few hundred km apart) */
-    const focus = (id: string, instant = false) => {
-      const g = GEO[id] ?? [45, 10];
-      const europe = g[0] > 40 && g[0] < 56 && g[1] > -12 && g[1] < 28;
-      const k = europe ? 1.75 : 1.35;
-      const [fx, fy] = project(g[0], g[1]);
-      const tx = Math.min(0, Math.max(MAP.w - MAP.w * k, MAP.w / 2 - fx * k));
-      const ty = Math.min(0, Math.max(MAP_H - MAP_H * k, MAP_H / 2 - fy * k));
-      map.classList.toggle('instant', instant);
-      world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
-      // pins, tags and leaders keep their size on screen
-      for (const w of pinws) w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
-      if (instant) requestAnimationFrame(() => map.classList.remove('instant'));
-    };
-    const detail = el('div', 'cm-detail', p);
-    let first = true;
-    const drawDetail = () => {
-      const id = this.mapSel!;
-      const i = CIRCUITS.findIndex((cd) => cd.id === id);
-      const cd = CIRCUITS[i];
-      const info = CIRCUIT_INFO[cd.id] ?? { country: cd.country, km: '', turns: cd.corners?.length ?? 0, line: '' };
-      const unlocked = this.career.isUnlocked(cd.id);
-      const best = c.best[cd.id];
-      const medal = medalFor(best);
-      const fc = unlocked ? this.cb.careerForecast(cd.id) : null;
-      const path = cd.centerline ? circuitPath(cd.centerline.points, 120, 84, 6) : '';
-      const prev = CIRCUITS[i - 1];
-      const status = !unlocked
-        ? `<span class="need">Finish top ${UNLOCK_POS} at ${prev?.short ?? ''} to unlock</span>`
-        : medal
-          ? `<span class="got"><i class="md ${medal}"></i>Best P${best}</span>`
-          : best !== undefined
-            ? `<span class="got">Best P${best} · top ${UNLOCK_POS} for a medal</span>`
-            : `<span class="got">Not raced yet</span>`;
-      detail.innerHTML =
-        `<div class="cm-art"><svg class="cm-track" viewBox="0 0 120 84"><path d="${path}"/></svg></div>` +
-        `<div class="cm-info"><div class="cap">Round ${String(i + 1).padStart(2, '0')} · ${info.country}</div><div class="name">${cd.name}</div>` +
-        `<div class="facts"><span>${CAREER_LAPS} laps</span><span>${info.km} km</span><span>${info.turns} turns</span>${fc ? `<span>${fcLabel(fc)}</span>` : ''}</div>${status}</div>`;
-      const art = detail.querySelector<HTMLElement>('.cm-art')!;
-      for (const g of Array.from(map.querySelectorAll<SVGGElement>('.pin'))) g.classList.toggle('sel', g.dataset.id === id);
-      for (const w of pinws) w.classList.toggle('sel', w.dataset.id === id);
-      focus(id, first);
-      first = false;
-      art.style.backgroundImage = `url("${artFor(cd.id)}")`;
-      art.classList.toggle('locked', !unlocked);
-      cta.textContent = unlocked ? `Race round ${i + 1}` : 'Locked';
-      cta.classList.toggle('dis', !unlocked);
-    };
-    const race = () => {
-      const id = this.mapSel!;
-      if (!this.career.isUnlocked(id)) return this.cb.onUi('back');
-      this.cb.onCareerRace(id);
-    };
-    const pickable = CIRCUITS.map((cd) => cd.id);
-    const move = (d: number) => {
-      const i = pickable.indexOf(this.mapSel!);
-      this.mapSel = pickable[(i + d + pickable.length) % pickable.length];
-      drawDetail();
-      this.cb.onUi('move');
-    };
-    map.addEventListener('click', (e) => {
-      const g = (e.target as Element).closest<SVGGElement>('.pin, .pinw');
-      if (!g?.dataset.id) return;
-      this.mapSel = g.dataset.id;
-      drawDetail();
-      this.cb.onUi('move');
-    });
-    map.addEventListener('dblclick', (e) => {
-      if ((e.target as Element).closest('.pin')) race();
-    });
-    const mapIdx = this.items.length;
-    this.items.push({ el: map, kind: 'option', change: move, select: race });
-    map.addEventListener('mouseenter', () => {
-      this.hubFocus = 'panel';
-      this.sel = mapIdx;
-      this.highlight();
-    });
-    const row = el('div', 'cm-actions', detail.parentElement!);
-    const cta = el('div', 'cta', row, '');
-    this.action(cta, race);
-    el('div', 'hp-note', row, `<kbd>←</kbd><kbd>→</kbd> pick a round · top ${UNLOCK_POS} unlocks the next one · career races are ${CAREER_LAPS} laps, the weather comes from the circuit`);
-    drawDetail();
+    // no career yet: the season map to come, and the way in
+    renderStart(p, { action: (e, fn, dis) => this.action(e, fn, dis), onNewCareer: () => this.openCareerWizard() });
     this.sel = this.items.length - 1;
   }
 
@@ -1036,7 +870,8 @@ export class Menu {
       const r = dcd.calendar.indexOf(st.track);
       el('div', 'pcap round', p, `${dcd.series === 'f2' ? 'Formula 2' : 'Formula 1'} ${dcd.year} · Round ${r + 1} of ${dcd.calendar.length}`);
       el('h2', '', p, CIRCUITS[ri]?.name ?? 'Race');
-      el('p', 'lede', p, `${dc!.laps} laps · ${fcLabel(fc!)} · the car should finish around P${dc!.expected()}`);
+      const next = dcd.calendar[r + 1] ? CIRCUITS.find((c) => c.id === dcd.calendar[r + 1]) : null;
+      el('p', 'lede', p, `${fcLabel(fc!)} · the car should finish around P${dc!.expected()} · top ${UNLOCK_POS} ${next ? `unlocks ${next.short}` : 'completes the season'}`);
       const ob = el('div', 'setup-obj', p);
       el('div', 'pcap', ob, 'Team targets');
       for (const o of dc!.objectives()) el('div', 'ch-o', ob, `<i></i><span>${o.label}</span><b>+${o.rp} RP</b>`);
@@ -1065,7 +900,13 @@ export class Menu {
     });
     }
     el('div', 'pcap', p, racing ? 'Race' : 'Session');
-    if (career) this.fixed(p, 'Laps', `${dcd ? dc!.laps : CAREER_LAPS} <span class="dim">· career distance</span>`);
+    // a driver career's distance is the player's (5 laps by default), kept with the career
+    if (dcd)
+      this.opt(p, 'Laps', () => `${dc!.laps}${dc!.laps === LAP_CHOICES[0] ? ' <span class="dim">· sprint</span>' : dc!.laps >= 10 ? ' <span class="dim">· two compounds, a pit stop</span>' : ''}`, (d) => {
+        const i = Math.max(0, LAP_CHOICES.indexOf(dc!.laps));
+        dc!.setLaps(LAP_CHOICES[(i + d + LAP_CHOICES.length) % LAP_CHOICES.length]);
+      });
+    else if (career) this.fixed(p, 'Laps', `${CAREER_LAPS} <span class="dim">· career distance</span>`);
     if (racing) {
       if (!career)
         this.opt(p, 'Laps', () => String(st.laps), (d) => {
@@ -1144,7 +985,9 @@ export class Menu {
         this.show('assists');
       },
     );
-    const cta = el('div', 'cta', p, career ? `Start round ${ri + 1}` : this.mode === 'race' ? 'Start race' : 'Start time trial');
+    // (a driver career's round number is its place in the career's own calendar, not the circuit list's)
+    const round = dcd ? dcd.calendar.indexOf(st.track) + 1 : ri + 1;
+    const cta = el('div', 'cta', p, career ? `Start round ${round}` : this.mode === 'race' ? 'Start race' : 'Start time trial');
     this.items.push({ el: cta, kind: 'action', select: () => this.cb.onStart(this.mode, { ...this.setup }) });
     cta.addEventListener('click', () => this.cb.onStart(this.mode, { ...this.setup }));
     el('div', 'back', p, 'Esc to go back');

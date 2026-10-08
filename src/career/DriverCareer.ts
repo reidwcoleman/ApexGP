@@ -1,11 +1,14 @@
 import { POINTS } from '../race/Race.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
+import { UNLOCK_POS } from './Career.ts';
 import { ageOf, defaultMarket, f1Teams, f2Teams, makeRookie, type DriverData, type Market, type MarketTeam, type PlayerDriver, type SeriesId } from './Series.ts';
 
 /**
  * The driver career: one driver's life in motor racing. A created driver starts in Formula 2 and
  * has to earn an F1 seat; a current F1 driver starts in their own car. Every round is raced in order
- * and scored into real championship tables (drivers and constructors). Around it:
+ * and scored into real championship tables (drivers and constructors). The season is a map: a round
+ * only counts once it's finished in the top five, which unlocks the next one; anything lower is an
+ * attempt (nothing scored) and the round is raced again. Around it:
  *
  *   ratings     pace, racecraft, awareness, experience, focus (0–100, an overall from them) that grow
  *               with what the driver does — the teams judge offers on them and the reputation
@@ -129,6 +132,18 @@ export interface Trophy {
 
 /** what a round did to the career, for the results screen */
 export interface RoundSummary {
+  /**
+   * false: outside the top five, so the round stays locked in front of the player (nothing else in
+   * the summary is filled in). Missing on summaries saved before the unlock chain = cleared.
+   */
+  cleared?: boolean;
+  track?: string;
+  pos?: number;
+  dnf?: boolean;
+  /** the round this result opened (null: the season is over) */
+  unlocked?: string | null;
+  /** attempts at the round so far, this one included */
+  tries?: number;
   objectives: { label: string; done: boolean; rp: number }[];
   rp: number;
   ovr: [number, number];
@@ -189,12 +204,25 @@ export interface DCData {
   last: RoundSummary | null;
   /** consecutive wins */
   streak: number;
+  /** race distance the player picked for career rounds (missing: DEFAULT_LAPS) */
+  laps?: number;
+  /** failed attempts at the current round (finished outside the top five); best = best finish, 99 = DNF */
+  tries?: { track: string; n: number; best: number } | null;
 }
 
 const KEY = 'apexgp.drivercareer';
 export const F2_CALENDAR = ['monza', 'spa', 'silverstone', 'spielberg', 'zandvoort', 'hungaroring', 'sakhir', 'yasmarina'];
 export const F1_CALENDAR = CIRCUITS.map((c) => c.id);
-export const LAPS: Record<SeriesId, number> = { f1: 10, f2: 7 };
+/**
+ * Career race distances. Short by default: a 5-lap race is a full weekend's tension in ten minutes,
+ * and a round may have to be raced more than once to finish in the top five. Longer races bring in
+ * the strategy (fuel load scales with the laps; from 10 the two-compound rule and the AI's planned
+ * stops, from 12 some two-stoppers).
+ */
+export const LAP_CHOICES = [5, 10, 15, 20, 30];
+export const DEFAULT_LAPS = 5;
+/** a finish that clears a round (and unlocks the next one) */
+export const clears = (pos: number, dnf: boolean) => !dnf && pos <= UNLOCK_POS;
 export const SERIES_NAME: Record<SeriesId, string> = { f1: 'Formula 1', f2: 'Formula 2' };
 
 export const NATIONS: [string, string][] = [
@@ -474,7 +502,18 @@ export class DriverCareer {
     return !!d && (d.seen?.includes(id) || this.nextTrack === id);
   }
   get laps(): number {
-    return LAPS[this.data?.series ?? 'f1'];
+    const n = this.data?.laps;
+    return n !== undefined && LAP_CHOICES.includes(n) ? n : DEFAULT_LAPS;
+  }
+  setLaps(n: number) {
+    if (!this.data || !LAP_CHOICES.includes(n)) return;
+    this.data.laps = n;
+    this.save();
+  }
+  /** the failed attempts at the next round so far (0: none yet) */
+  get tries(): { n: number; best: number } {
+    const t = this.data?.tries;
+    return t && t.track === this.nextTrack ? { n: t.n, best: t.best } : { n: 0, best: 99 };
   }
   get ovr(): number {
     return this.data ? overall(this.data.attrs) : 0;
@@ -648,6 +687,16 @@ export class DriverCareer {
     if (!d || d.calendar[d.round] !== track) return null;
     const me = rows.find((r) => r.isPlayer);
     if (!me) return null;
+    if (!clears(me.pos, me.dnf)) {
+      // outside the top five: the round isn't cleared, so nothing is scored (the championship, the
+      // ratings, the paddock all wait for the result that counts); only the attempt is remembered
+      const t = this.tries;
+      d.tries = { track, n: t.n + 1, best: Math.min(t.best, me.dnf ? 99 : me.pos) };
+      this.save();
+      return { cleared: false, track, pos: me.pos, dnf: me.dnf, tries: d.tries.n, objectives: [], rp: 0, ovr: [overall(d.attrs), overall(d.attrs)], attrs: {}, champ: this.position(), trophies: [] };
+    }
+    const tries = this.tries.n + 1;
+    d.tries = null;
     const objs = this.objectives();
     const ovr0 = overall(d.attrs);
     const a0 = { ...d.attrs };
@@ -800,7 +849,7 @@ export class DriverCareer {
     // offers once the market opens (the last third of a season), and at its end
     const tt = d.round / d.calendar.length;
     if (tt >= 0.6 && !d.next && (d.round === Math.ceil(d.calendar.length * 0.6) || d.round === d.calendar.length)) this.makeOffers();
-    const summary: RoundSummary = { objectives: sumObj, rp: rpGain, ovr: [ovr0, overall(d.attrs)], attrs: {}, champ: this.position(), rival: rivalSum, trophies: got };
+    const summary: RoundSummary = { cleared: true, track, pos: me.pos, dnf: me.dnf, unlocked: d.calendar[d.round] ?? null, tries, objectives: sumObj, rp: rpGain, ovr: [ovr0, overall(d.attrs)], attrs: {}, champ: this.position(), rival: rivalSum, trophies: got };
     for (const k of Object.keys(a0) as AttrId[]) {
       const dv = d.attrs[k] - a0[k];
       if (Math.abs(dv) >= 0.05) summary.attrs[k] = +dv.toFixed(1);
@@ -1026,6 +1075,7 @@ export class DriverCareer {
     for (const k of Object.keys(d.teamDev)) d.teamDev[k] *= 0.4;
     d.calendar = d.series === 'f2' ? F2_CALENDAR.slice() : F1_CALENDAR.slice();
     d.round = 0;
+    d.tries = null;
     d.results = [];
     d.standings = {};
     d.teamPoints = {};

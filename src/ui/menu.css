@@ -1396,6 +1396,23 @@
   background: rgba(34, 209, 122, 0.14);
   box-shadow: inset 0 0 0 1px rgba(34, 209, 122, 0.4);
 }
+/* a driver-career round finished outside the top five: the next round stays locked */
+.rw-unlock.gate {
+  font-weight: 400;
+  color: var(--ink2);
+  line-height: 1.45;
+  background: rgba(255, 176, 32, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 176, 32, 0.4);
+}
+.rw-unlock.gate b {
+  color: var(--hud-amber);
+}
+.rw-unlock.gate em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
 
 /* travelling between circuits */
 .travel-veil {
@@ -2269,58 +2286,6 @@
   gap: var(--s4);
   overflow: hidden;
 }
-.cm-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--s5);
-}
-.cm-title .cap,
-.cm-info .cap {
-  font-size: var(--t-cap);
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink3);
-}
-.cm-title .big {
-  font-size: var(--t-time);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-.cm-title .big span {
-  color: var(--ink3);
-  font-weight: 400;
-}
-.cm-stats {
-  display: flex;
-  gap: var(--s5);
-}
-.cm-stats .cs {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-}
-.cm-stats b {
-  font-size: var(--t-time);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  display: flex;
-  align-items: center;
-  gap: var(--s1);
-}
-.cm-stats b small {
-  font-size: var(--t-row);
-  color: var(--ink3);
-  font-weight: 400;
-}
-.cm-stats span {
-  font-size: var(--t-cap);
-  color: var(--ink3);
-}
-.cm-stats .medals i {
-  margin-left: var(--s2);
-}
 .md {
   display: inline-block;
   width: 10px;
@@ -2342,7 +2307,7 @@
 .cm-map.sel {
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
-.cm-map svg {
+.cm-map > svg {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2491,110 +2456,6 @@
   /* on top of its neighbours */
   isolation: isolate;
 }
-.cm-detail {
-  display: flex;
-  align-items: center;
-  gap: var(--s5);
-  min-height: 96px;
-}
-.cm-art {
-  position: relative;
-  width: 176px;
-  height: 99px;
-  flex: none;
-  border-radius: var(--r-panel);
-  /* (the key art's wordmark sits on its left third: show the picture, not the logo) */
-  background: #0b0d12 82% 50% / auto 150% no-repeat;
-  box-shadow: inset 0 0 0 1px var(--line);
-  overflow: hidden;
-}
-.cm-art::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(8, 10, 14, 0.2), rgba(8, 10, 14, 0.72));
-}
-.cm-art.locked {
-  filter: grayscale(1) brightness(0.55);
-}
-.cm-track {
-  position: absolute;
-  right: 6px;
-  top: 8px;
-  width: 104px;
-  height: 73px;
-  z-index: 1;
-  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.8));
-}
-.cm-track path {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 2.5;
-  stroke-linejoin: round;
-  stroke-dasharray: 600;
-  animation: track-draw 0.9s var(--ease-out) both;
-}
-@keyframes track-draw {
-  from { stroke-dashoffset: 600; }
-  to { stroke-dashoffset: 0; }
-}
-.cm-info {
-  display: grid;
-  gap: var(--s1);
-  min-width: 0;
-}
-.cm-info .name {
-  font-size: var(--t-time);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cm-info .facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s3);
-  font-size: var(--t-row);
-  color: var(--ink2);
-}
-.cm-info .facts span + span::before {
-  content: '·';
-  margin-right: var(--s3);
-  color: var(--ink3);
-}
-.cm-info .got,
-.cm-info .need {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  font-size: var(--t-row);
-  color: var(--ink);
-}
-.cm-info .need {
-  color: var(--ink3);
-}
-.cm-info .need svg,
-.cm-info .need g {
-  display: none;
-}
-.cm-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--s5);
-}
-.cm-actions .cta {
-  margin: 0;
-  min-width: 240px;
-  padding: 0 var(--s5);
-}
-.cm-actions .cta.dis {
-  background: var(--well);
-  color: var(--ink3);
-}
-.cm-actions .hp-note {
-  margin: 0;
-}
 .opt.fixed .v {
   color: var(--ink2);
 }
@@ -2603,8 +2464,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .cm-map .pin.next .halo,
-  .cm-map .route.next,
-  .cm-track path {
+  .cm-map .route.next {
     animation: none;
   }
   .cm-map .cm-world,
@@ -3098,30 +2958,6 @@
 .ch-new.sel {
   color: var(--ink);
 }
-.hub-panel.ch.start {
-  grid-template-rows: 1fr auto auto 1fr;
-  /* (past the key art's wordmark, on its left third) */
-  background-size: auto 140%;
-  background-position: 100% 60%;
-  background-repeat: no-repeat;
-  overflow: hidden;
-}
-.hub-panel.ch.start::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(8, 10, 14, 0.94) 0%, rgba(8, 10, 14, 0.7) 50%, rgba(8, 10, 14, 0.2));
-  pointer-events: none;
-}
-.hub-panel.ch.start > * {
-  position: relative;
-}
-.ch-start {
-  grid-row: 2;
-  max-width: 640px;
-  padding-left: var(--s4);
-}
-.ch-start .big,
 .ch-choose-h .big {
   font-size: var(--t-hero);
   font-weight: 700;
@@ -3129,18 +2965,11 @@
   letter-spacing: -0.02em;
   margin-top: var(--s2);
 }
-.ch-start .sub,
 .ch-choose-h .sub {
   font-size: var(--t-row);
   color: var(--ink2);
   margin-top: var(--s3);
   line-height: 1.45;
-}
-.ch-start-go {
-  grid-row: 3;
-  align-self: start;
-  max-width: 280px;
-  margin-left: var(--s4) !important;
 }
 .ch-choose {
   display: grid;
@@ -3185,11 +3014,6 @@
   padding: 2px var(--s2);
   border-radius: var(--r-pill);
   background: var(--well);
-}
-.cm-back {
-  justify-self: start;
-  min-height: 34px;
-  padding: 0 var(--s4);
 }
 
 /* ======================================================================== new-career wizard */
@@ -3607,18 +3431,6 @@
 }
 .ch-btns .cta {
   min-height: 40px;
-}
-.ch-link {
-  justify-self: start;
-  font-size: var(--t-cap);
-  font-weight: 600;
-  color: var(--ink2);
-  cursor: pointer;
-  padding: var(--s1) 0;
-}
-.ch-link:hover,
-.ch-link.sel {
-  color: var(--ink);
 }
 .ch-msgs.short {
   max-height: none;
@@ -4137,21 +3949,31 @@
   box-shadow: inset 0 0 0 1px var(--line), inset 3px 0 0 var(--cold);
 }
 
-/* ---------------------------------------------------------------- driver career: the season map overview */
+/* ---------------------------------------------------------------- driver career: the season map overview
+   The map fills the section; the picked round is a card floating over its right side (the map
+   centres its rounds in what the card leaves free); the season's caption, progress and legend sit
+   top-left, the paddock's latest message bottom-left. */
 .ch-body > .ch-season {
   height: 100%;
 }
 .ch-season {
-  display: grid;
-  grid-template-rows: minmax(230px, 1fr) auto;
-  grid-template-columns: 1fr;
-  gap: var(--s4);
-  min-height: 0;
+  position: relative;
+  height: 100%;
+  min-height: 380px;
 }
 .ch-map {
-  min-height: 230px;
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  /* (its caption shade stays under the round card) */
+  isolation: isolate;
 }
-/* (the hub's map uses the career map's pins; a finished round carries its result on the disc) */
+/* no career yet: the hub is the map alone */
+.hub-panel.ch.start {
+  grid-template-rows: 1fr;
+}
+
+/* ---- pins: cleared (the result on the disc, ringed by its medal), next (pulsing), locked (a padlock) */
 .ch-map .pin.done .disc {
   fill: #1b1f2a;
   stroke: rgba(255, 255, 255, 0.5);
@@ -4165,10 +3987,25 @@
 }
 .ch-map .pin.next .disc {
   fill: var(--team, var(--accent));
-  stroke: var(--team, var(--accent));
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 2;
+}
+.ch-map .pin.next text {
+  fill: var(--on-team, #fff);
 }
 .ch-map .pin.next .halo {
   stroke: var(--team, var(--accent));
+}
+.ch-map .pin.locked {
+  color: rgba(255, 255, 255, 0.5);
+}
+.ch-map .pin.locked .disc {
+  fill: rgba(12, 14, 19, 0.94);
+  stroke: rgba(255, 255, 255, 0.16);
+}
+.ch-map .pinw.locked .spot,
+.ch-map .pinw.locked .leader {
+  opacity: 0.45;
 }
 .ch-map .route.done,
 .ch-map .route.next {
@@ -4177,50 +4014,268 @@
 .ch-map .route.done {
   filter: drop-shadow(0 0 4px var(--team, var(--accent)));
 }
-.ch-map-cap {
+
+/* ---- the caption: season, round, one segment per round, and how the unlocks work (over a shade
+   at the top of the map, so a pin passing under it doesn't fight the text) */
+.ch-map::before {
+  content: '';
   position: absolute;
-  left: var(--s4);
-  top: var(--s3);
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 132px;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(10, 12, 17, 0.88) 35%, rgba(10, 12, 17, 0));
   pointer-events: none;
 }
-.ch-map-cap b {
-  font-size: var(--t-row);
-  font-weight: 700;
+.ch-map-cap {
+  z-index: 2;
+  position: absolute;
+  left: var(--s5);
+  top: var(--s4);
+  display: grid;
+  gap: var(--s1);
+  pointer-events: none;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
 }
-.ch-map-cap span {
-  font-size: var(--t-row);
+.ch-map-cap .big {
+  font-size: var(--t-time);
+  font-weight: 700;
+  line-height: 1.15;
+}
+.ch-map-cap .big span {
+  font-weight: 400;
+  color: var(--ink3);
+}
+.ch-prog {
+  display: flex;
+  gap: 4px;
+  margin-top: var(--s2);
+}
+.ch-prog i {
+  width: 24px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ch-prog i.done { background: rgba(255, 255, 255, 0.55); }
+.ch-prog i.done.gold { background: #d9b45a; }
+.ch-prog i.done.silver { background: #c3c8cf; }
+.ch-prog i.done.bronze { background: #b77b4f; }
+.ch-prog i.next {
+  background: var(--team, var(--accent));
+  animation: prog-pulse 1.6s ease-in-out infinite alternate;
+}
+@keyframes prog-pulse {
+  from { opacity: 0.45; }
+}
+.ch-prog-l {
+  font-size: var(--t-cap);
   color: var(--ink2);
 }
-.ch-lower {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  grid-template-rows: 1fr auto;
-  column-gap: var(--s5);
-  row-gap: var(--s3);
-  min-height: 0;
+.ch-legend {
+  position: absolute;
+  left: var(--s5);
+  bottom: var(--s4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s4);
+  max-width: calc(100% - 440px);
+  font-size: var(--t-cap);
+  color: var(--ink2);
+  pointer-events: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
 }
+.ch-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ch-legend .lg {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+}
+.ch-legend .lg.done {
+  background: #1b1f2a;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+.ch-legend .lg.next {
+  background: var(--team, var(--accent));
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+.ch-legend .lg.locked {
+  display: grid;
+  place-items: center;
+  background: rgba(12, 14, 19, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.55);
+}
+.ch-legend .lg.locked .lk-i {
+  width: 9px;
+  height: 9px;
+}
+.ch-legend .md-l .md + .md,
+.ch-legend .md-l .md {
+  margin-left: var(--s2);
+}
+.ch-legend .md-l .md:first-child {
+  margin-left: 0;
+}
+.lk-i {
+  flex: none;
+  color: currentColor;
+}
+
+/* ---- the paddock's latest message, a pill at the map's foot */
+.ch-pad {
+  position: absolute;
+  left: var(--s5);
+  bottom: calc(var(--s4) + 30px);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  max-width: min(520px, calc(100% - 460px));
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-pill);
+  background: rgba(10, 12, 17, 0.88);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: var(--t-cap);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.ch-pad.ask {
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 3px 0 0 var(--cold);
+}
+.ch-pad:hover,
+.ch-pad.sel {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+.ch-pad .from {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.ch-pad b {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--t-row);
+  font-weight: 600;
+}
+.ch-pad em {
+  flex: none;
+  font-style: normal;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ---- the picked round: a card over the map's right side */
 .ch-rnd {
-  position: relative;
+  position: absolute;
+  top: var(--s3);
+  right: var(--s3);
+  bottom: var(--s3);
+  width: 372px;
   display: flex;
   flex-direction: column;
   gap: var(--s3);
-  padding: var(--s4);
+  padding: 0 var(--s4) var(--s4);
   border-radius: var(--r-panel);
-  background:
-    linear-gradient(90deg, rgba(8, 10, 14, 0.94) 0%, rgba(8, 10, 14, 0.78) 60%, rgba(8, 10, 14, 0.5)),
-    #0b0d12 var(--art) 100% 60% / auto 320% no-repeat;
-  box-shadow: inset 0 0 0 1px var(--line);
-  min-height: 0;
+  background: rgba(10, 12, 17, 0.9);
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 16px 48px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
-.ch-rnd-top {
+.ch-rnd-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  overflow-y: auto;
+  scrollbar-width: none;
+  margin: 0 calc(-1 * var(--s4));
+  padding: 0 var(--s4);
+}
+.ch-rnd-art {
+  position: relative;
+  flex: none;
+  height: 116px;
+  margin: 0 calc(-1 * var(--s4));
+  /* (the key art's wordmark sits on its left third: show the picture, not the logo) */
+  background: #0b0d12 100% 62% / 190% auto no-repeat;
+}
+.ch-rnd-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 12, 17, 0.1) 30%, rgba(10, 12, 17, 0.95));
+}
+.ch-rnd.locked .ch-rnd-art {
+  filter: grayscale(1) brightness(0.5);
+}
+.ch-rnd-track {
+  position: absolute;
+  right: var(--s3);
+  bottom: var(--s1);
+  width: 112px;
+  height: 78px;
+  z-index: 1;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.8));
+}
+.ch-rnd-track path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  stroke-dasharray: 600;
+  animation: track-draw 0.9s var(--ease-out) both;
+}
+@keyframes track-draw {
+  from { stroke-dashoffset: 600; }
+  to { stroke-dashoffset: 0; }
+}
+.ch-rnd-art .badge {
+  position: absolute;
+  left: var(--s4);
+  top: var(--s3);
+  z-index: 1;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--s4);
+  gap: 5px;
+  padding: 3px var(--s2);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.ch-rnd-art .badge.next {
+  background: var(--team, var(--accent));
+  color: var(--on-team, #fff);
+}
+.ch-rnd-art .badge.done {
+  background: rgba(10, 12, 17, 0.8);
+  color: var(--green);
+  box-shadow: inset 0 0 0 1px rgba(34, 209, 122, 0.45);
+}
+.ch-rnd-art .badge.locked {
+  background: rgba(10, 12, 17, 0.85);
+  color: var(--ink2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.ch-rnd-art .badge .lk-i {
+  width: 11px;
+  height: 11px;
+}
+.ch-rnd-id {
+  margin-top: calc(-1 * var(--s2));
 }
 .ch-rnd-id .nm {
   font-size: var(--t-time);
@@ -4230,7 +4285,8 @@
 }
 .ch-rnd-id .facts {
   display: flex;
-  gap: var(--s3);
+  flex-wrap: wrap;
+  gap: 0 var(--s3);
   margin-top: var(--s1);
   font-size: var(--t-row);
   color: var(--ink2);
@@ -4240,23 +4296,26 @@
   margin-right: var(--s3);
   color: var(--ink3);
 }
-.ch-rnd-track {
-  flex: none;
-  width: 104px;
-  height: 72px;
-}
-.ch-rnd-track path {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 2.4;
-  stroke-linejoin: round;
+.ch-rnd-id .fc {
+  margin-top: 2px;
+  font-size: var(--t-cap);
+  color: var(--ink3);
 }
 .ch-rnd-res {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s4);
   font-size: var(--t-row);
   color: var(--ink2);
+}
+.ch-rnd-res > div {
+  display: grid;
+  gap: 2px;
+}
+.ch-rnd-res span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .ch-rnd-res b {
   font-size: var(--t-hero);
@@ -4265,26 +4324,94 @@
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-.ch-rnd-res b.pod {
-  color: var(--yellow);
+.ch-rnd-res b.gold { color: #d9b45a; }
+.ch-rnd-res b.silver { color: #c3c8cf; }
+.ch-rnd-res b.bronze { color: #b77b4f; }
+.ch-rnd-res b.dnf { color: var(--ink3); }
+/* what unlocks the next round (or this one, when it's still locked) */
+.ch-unlock {
+  display: grid;
+  gap: 2px;
+  padding: var(--s3);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--team, var(--accent)) 14%, rgba(255, 255, 255, 0.03));
+  box-shadow: inset 3px 0 0 var(--team, var(--accent));
+  font-size: var(--t-row);
+  color: var(--ink2);
+  line-height: 1.4;
 }
-.ch-rnd-res b.dnf {
+.ch-unlock b {
+  color: var(--ink);
+}
+.ch-unlock em {
+  font-style: normal;
+  font-size: var(--t-cap);
   color: var(--ink3);
 }
-.ch-rnd-res.later span {
-  color: var(--ink3);
-}
-.ch-side {
+.ch-unlock.locked {
   display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  min-height: 0;
-  overflow-y: auto;
-  grid-row: span 2;
+  align-items: flex-start;
+  gap: var(--s2);
+  background: var(--well);
+  box-shadow: none;
+}
+.ch-unlock.locked .lk-i {
+  margin-top: 3px;
+  color: var(--ink3);
+}
+.ch-rnd .ch-obj .hp-cap {
+  margin-top: 0;
+}
+/* the race distance: five steps, 5 laps by default */
+.ch-laps {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.ch-laps[hidden] {
+  display: none;
+}
+.ch-laps > span {
+  flex: 1;
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.ch-laps em {
+  font-style: normal;
+  font-size: var(--t-cap);
+  color: var(--ink3);
+  margin-left: var(--s1);
+}
+.ch-lap {
+  min-width: 38px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  font-size: var(--t-row);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.ch-lap:hover {
+  color: var(--ink);
+}
+.ch-lap.on {
+  background: var(--team, var(--accent));
+  color: var(--on-team, #fff);
+}
+.ch-lap.sel {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
 }
 .ch-rnd-acts {
   display: grid;
-  grid-template-columns: 56px 1fr 56px;
+  grid-template-columns: 48px 1fr 48px;
   gap: var(--s2);
 }
 .ch-rnd-acts .ch-go {
@@ -4299,4 +4426,104 @@
 .ch-rnd-acts .cta.dis {
   opacity: 0.4;
   pointer-events: none;
+}
+/* no career yet: the way in */
+.ch-begin .ch-go {
+  margin-top: auto;
+  height: 52px;
+}
+.ch-begin-sub {
+  font-size: var(--t-row);
+  line-height: 1.5;
+  color: var(--ink2);
+}
+.ch-steps {
+  display: grid;
+  gap: var(--s3);
+  margin-top: var(--s1);
+}
+.ch-steps > div {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: var(--s3);
+  align-items: start;
+  font-size: var(--t-row);
+  line-height: 1.4;
+  color: var(--ink2);
+}
+.ch-steps b {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-size: var(--t-cap);
+  color: var(--ink);
+}
+.ch-steps em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ch-steps .md {
+  vertical-align: 0;
+  margin-left: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ch-prog i.next,
+  .ch-rnd-track path {
+    animation: none;
+  }
+}
+/* short windows (720p, 768p laptops): a slimmer card, so the next round's targets, the race
+   distance and the call to action all fit without scrolling */
+@media (max-height: 800px) and (min-width: 575px) {
+  .ch-rnd-art {
+    height: 84px;
+  }
+  .ch-rnd-track {
+    width: 84px;
+    height: 58px;
+  }
+  .ch-rnd,
+  .ch-rnd-body {
+    gap: var(--s2);
+  }
+  .ch-unlock {
+    padding: var(--s2) var(--s3);
+  }
+  .ch-rnd-acts .ch-go,
+  .ch-rnd-acts .ch-step {
+    height: 46px;
+  }
+  .hub-panel.ch .ch-num {
+    width: 52px;
+    height: 52px;
+  }
+  .hub-panel.ch .ch-head {
+    padding-bottom: var(--s3);
+  }
+}
+@media (max-width: 574px) {
+  .ch-season {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+  }
+  .ch-map {
+    position: relative;
+    flex: none;
+    height: 220px;
+  }
+  .ch-rnd {
+    position: relative;
+    inset: auto;
+    width: auto;
+  }
+  .ch-legend,
+  .ch-pad {
+    display: none;
+  }
 }
