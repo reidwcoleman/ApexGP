@@ -12,7 +12,7 @@ import {
   GLOVE_W, GLOVE_H, R_GL_BACK, R_GL_PALM, R_GL_FINGER, R_GL_THUMB, R_GL_CUFF,
   WHEEL_TEX_W, WHEEL_TEX_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WC, WHEEL_PROPS, WHEEL_CELL,
   SIDEWALL_R0, SIDEWALL_R1, RIM_R, WHEEL_R,
-  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, type Rect,
+  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, type Rect,
 } from './carLayout.ts';
 
 export const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
@@ -1179,18 +1179,9 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
       g.quadraticCurveTo(X(side), Y(0.62), X(side + 0.2), Y(0.44));
     }
     g.fill();
-    // crown design: chevrons
-    g.fillStyle = h1;
-    for (let k = 0; k < 4; k++) {
-      const u = 0.125 + k * 0.25;
-      g.beginPath();
-      g.moveTo(X(u - 0.06), Y(0.82));
-      g.lineTo(X(u), Y(0.94));
-      g.lineTo(X(u + 0.06), Y(0.82));
-      g.lineTo(X(u), Y(0.87));
-      g.closePath();
-      g.fill();
-    }
+    // (the crown's design, its number and the sponsor across the back are drawn by the driver
+    // shader — CarModel patchDriver — sharp at any distance: the T-cam has the crown 30 cm from its
+    // lens, where this sheet's 256 texels round the shell would smear into a blur)
     // stripe separating band
     g.fillStyle = contrastOn(h1) === '#ececec' ? '#ececec' : '#111111';
     g.fillRect(h.x, Y(0.452), h.w, 2);
@@ -1202,8 +1193,14 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     for (const u of [0.25, 0.75]) {
       drawInRect(g, { x: X(u - 0.07), y: Y(0.7), w: X(u + 0.07) - X(u - 0.07), h: Y(0.5) - Y(0.7) }, String(driver.number), h1, contrastOn(h1), 0.85, 0.55);
     }
-    drawInRect(g, { x: X(0.93), y: Y(0.72), w: X(1.0) - X(0.93), h: Y(0.56) - Y(0.72) }, driver.code, h1, null, 0.6, 0.5, 900, false);
-    drawInRect(g, { x: X(0.0), y: Y(0.72), w: X(0.07) - X(0.0), h: Y(0.56) - Y(0.72) }, driver.code, h1, null, 0.6, 0.5, 900, false);
+    // the crown number and the back's sponsor: white-on-black masks the shader prints in the ink
+    // that reads on the paint under them (sized for their patches on the shell: aspectFix keeps
+    // the digits' and letters' proportions after the stretch)
+    g.fillStyle = '#000000';
+    g.fillRect(R_TCAM_NUM.x, R_TCAM_NUM.y, R_TCAM_NUM.w, R_TCAM_NUM.h);
+    g.fillRect(R_HELM_SPON.x, R_HELM_SPON.y, R_HELM_SPON.w, R_HELM_SPON.h);
+    drawInRect(g, R_TCAM_NUM, String(driver.number), '#ffffff', null, 0.86, 1.45);
+    drawInRect(g, R_HELM_SPON, team.sponsor, '#ffffff', null, 0.78, 1.5, 900, false);
 
     // ---- decals (alpha-tested)
     const numCol = team.ink;
@@ -1226,6 +1223,22 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
   };
   paintWithFonts(paint);
   return t;
+}
+
+/**
+ * The helmet's livery for the driver shader (CarModel patchDriver): its two colours, the
+ * pinstripe between them (white or near-black, whichever reads on both, as the painters'
+ * outlines do) and one of the crown designs (HELMET_STYLES), chosen per driver from his code so a
+ * helmet keeps its design from race to race. Colours are linear, capped like the sheet's.
+ */
+export const HELMET_STYLES = 6;
+export function helmetLook(driverIn: Driver): { a: THREE.Color; b: THREE.Color; line: THREE.Color; style: number } {
+  const a = capHex(driverIn.helmet[0]);
+  const b = capHex(driverIn.helmet[1]);
+  const line = (luminance(a) + luminance(b)) / 2 > 0.33 ? '#121315' : '#ededed';
+  let h = 7;
+  for (const ch of driverIn.code) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return { a: new THREE.Color(a), b: new THREE.Color(b), line: new THREE.Color(line), style: h % HELMET_STYLES };
 }
 
 export function disposeTex(t: THREE.Texture | null | undefined) {

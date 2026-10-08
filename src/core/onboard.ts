@@ -101,11 +101,17 @@ ${OWN_GLSL}
 float ownDist(vec2 uv, float depth, out float wheel) { return ownDistZ(uv, getViewZ(depth), wheel); }
 
 vec3 shadeOwn(vec3 c, float d, float wheel) {
-  float k = shade * (1.0 - smoothstep(1.6, 3.6, d)) * (1.0 - 0.55 * wheel);
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  // the sun reaching in stays sunlight: a sunlit stretch of the halo's top, the rim or a glove
+  // (already lit, and shadowed by the scene's own shadow maps where it isn't) is spared most of
+  // the shade, so the light rakes across the halo and the cockpit edge against the dark tub as
+  // it does in the onboard footage, instead of everything inside the car going one flat grey (a
+  // glint, far brighter, is still put out with the rest)
+  float sun = smoothstep(0.16, 0.75, lum) * (1.0 - smoothstep(1.5, 3.0, lum)) * (1.0 - wheel);
+  float k = shade * (1.0 - smoothstep(1.6, 3.6, d)) * (1.0 - 0.55 * wheel) * (1.0 - 0.75 * sun);
   // the shadowed cockpit: much less light, a little less colour, and no sun glints in the lacquer
   // (kept, they sparkle once the paint round them is dark); lit LEDs and the wheel's screen keep
   // their glow — bright AND strongly coloured, where a glint is bright and white
-  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float hi = max(max(c.r, c.g), c.b);
   float chroma = (hi - min(min(c.r, c.g), c.b)) / max(hi, 1e-4);
   // (to ~40 %, most of the colour kept: in the helmet-cam footage the chassis rim and the halo are in

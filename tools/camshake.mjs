@@ -15,7 +15,7 @@ const tid = process.argv[2] ?? 'monza';
 const track = new Track(CIRCUITS.find((c) => c.id === tid));
 const profile = RacingProfile.for(track, F1_SPEC);
 // typical vertical FOVs at speed (16:9), for the % of frame height
-const FOV = { cockpit: 57, helmet: 72, tcam: 64, nose: 68, chase: 55, far: 52 };
+const FOV = { cockpit: 60, helmet: 72, tcam: 66, nose: 68, chase: 55, far: 52 };
 for (const mode of Object.keys(FOV)) {
   const car = new CarPhysics(F1_SPEC);
   car.placeOnTrack(track, track.startS ?? 0, 0);

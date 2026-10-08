@@ -917,7 +917,9 @@ function paintHull(team: Team, pal: Pal, pattern: Pattern): HullImg {
           const v = Math.round(carbon * 255);
           md[mo] = v;
           md[mo + 1] = v;
-          md[mo + 2] = v;
+          // (blue: the cockpit's inside too — matte, unlacquered, as the tub's inner walls and the
+          // seat are: lacquered, they mirrored the sky in glossy stripes right under the onboards)
+          md[mo + 2] = Math.round(Math.max(carbon, seat) * 255);
           md[mo + 3] = 255;
         }
       }

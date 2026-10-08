@@ -400,9 +400,17 @@ npm run check    # tsc --noEmit
   sidewall (VX-18 slicks, TORRENTA rain tyres) carries moulded technical markings that show in the relief.
   The details a close lens finds:
   floor stays, inlet scoops on all four brake ducts, the rear flaps' actuator pod, a telemetry antenna
-  ahead of the cockpit, the T-cam pod's lenses (the T-cam films from them: the helmet's top under the
-  halo), a slimmer halo pillar, a moulded headrest round the helmet, a helmet with a chin bar and a
-  rear spoiler, and the driver's arms and gloved hands on the wheel (`car/carHands.ts`: one skinned mesh,
+  ahead of the cockpit, the T-cam pod's lenses on a roll hoop ~1 m up (proud of the helmet by the
+  rollover line's ~70 mm, so the T-cam looks down over the helmet's crown and the halo's ring), a
+  slimmer halo pillar, a moulded headrest round the helmet and a black padded roll along the
+  cockpit's rim, mirrors on stalks off the sidepods ~0.4 m ahead of the driver's eyes, toed in so
+  his own rear tyre fills their inner third (their glass ray-traces the road, the own sidepods and
+  tyres and up to four cars behind as boxes and cylinders, lit like the scene, over the env
+  reflection: `makeMirrorMaterial` / `feedMirrors` in CarModel.ts — no second render), a helmet
+  with a chin bar and a gloss-carbon rear spoiler whose livery is drawn per pixel from the shell's
+  shape (`HELMET_GLSL`: one of six painters' designs per driver — stripe, arrows, crown cap, wave,
+  twin stripes, split — with pinstripes, the number across the crown and the sponsor across the
+  back, sharp 30 cm from the T-cam), and the driver's arms and gloved hands on the wheel (`car/carHands.ts`: one skinned mesh,
   upper arm / forearm / hand bones a side): palms cupped round the grips, fingers wrapped round their backs
   onto the shift paddles, thumbs on the face by the top buttons, so they sit on the grips at any lock;
   the elbows are a two-bone IK from the shoulders and the gauntlet bends at the wrist; race gloves with
@@ -444,7 +452,8 @@ npm run check    # tsc --noEmit
   than veiling a car down a long lens. Onboard (cockpit, helmet, T-cam, nose, wheel) the lens is exposed for
   the bright world outside: the car's own cockpit is shaded and defocused by distance (`OnboardEffect` in
   onboard.ts, from depth + the car's box, blurred from both sides of its edge so the halo's outline is soft and
-  the sky glows into it; lit LEDs keep their glow, sun glints in the lacquer don't), no rear-view mirror
+  the sky glows into it; lit LEDs keep their glow, sun glints in the lacquer don't, sunlit stretches of the
+  halo, the rim and the gloves keep most of their light so the sun rakes across them), no rear-view mirror
   overlay (real onboard footage has none), and night races are lit by a faint moon only, so the headlights,
   rain lights and the lights round the track carry the picture. The cockpit eye sits low and back in the tub
   (`COCKPIT_EYE_*` in Cameras.ts) so the halo's hoop rides the top edge as in onboard footage; long lenses thin
@@ -461,7 +470,9 @@ npm run check    # tsc --noEmit
   a long-lens chase (a camera car 30–45 m back on the circuit holding the car on a 6–9° lens, the field
   stacked behind it in a shallow focus; it cuts to a closer camera car when a bend comes between them),
   the chase drone, and onboards placed against the body's measured shape (`MOUNTS` in Cameras.ts, each
-  with its own lens, bracket stiffness, housing flex, roll and corner look): the T-cam on the roll hoop,
+  with its own lens, bracket stiffness, housing flex, roll and corner look): the T-cam on the roll hoop
+  (1.03 m up, tipped ~8° down, a ~95° lens: the helmet's crown inside the halo's ring at the bottom, the
+  nose under the hoop between the front tyres, the mirrors at the sides),
   the broadcast halo cam low in the tub (the centre pillar splitting a wide picture), the cockpit eye,
   the helmet cam, the bonnet cam (ACC's: on the tub's centre line ahead of the halo pillar, the nose
   running away down the middle), the nose pod, the bumper cam over the front wing, the front-wheel cam, the sidepod,
@@ -475,7 +486,9 @@ npm run check    # tsc --noEmit
   height per 30 fps frame on a straight at 300 km/h, ≈1 % on kerbs with sharper strike jolts; the
   cockpit eye, steadied by the driver's own gaze as in the sims, ≈0.3 % and ≈0.9 %), the
   cockpit eye thrown about by the G on a sprung neck (outward in corners, forward and down with a nod
-  on the brakes, back into the seat on the power) behind a fixed 56° lens (in the 55–60° range the sims use on a monitor; the
+  on the brakes, back into the seat on the power) behind a fixed 60° lens (the top of the 55–60° range the sims use on a monitor, so the mirrors' inner
+  edges sit at the frame's edges as in the helmet-cam footage and the inside one swings in with the look
+  into a corner; the
   other cameras' lenses widen with speed, mostly above 150 km/h),
   a live steering-wheel screen and shift lights in the onboards (a 1024-texel screen texture of its own,
   mipmapped and anisotropic, repainted at 15 Hz like a 2026 wheel's / ACC's dash: gear, speed, delta,
@@ -598,6 +611,7 @@ Regression checks (all headless, no browser):
   times, wall hits, off-tracks, penalties, weather and tyre calls, classification
   (`SEED=6 node tools/racetest.mjs 8 changeable` brings rain mid-race).
 - `node tools/camshake.mjs [track]` — how much each car-mounted camera vibrates per frame (% of the frame height) on straights, kerbs and the grass over an AI lap.
+- `PORT=… node tools/_studiocam.mjs <out> 'name=px,py,pz/dx,dy,dz/fov[/&query]' …` — onboard lens framings on the studio car (car frame, e.g. the T-cam mount); `PORT=… [SKIP=s N=k] node tools/_mirrorprobe.mjs <out> [weather] [time]` — a live race with the cockpit lens swung onto each rear-view mirror (14°), and where the cars behind are.
 - `node tools/diag.mjs 2 rain wet` — one AI car: lap times, tyre temperatures, grip, wear, fuel.
 - `node tools/limits.mjs 3` — where AI cars run wide in a race.
 

@@ -13,16 +13,16 @@
  *
  * Geometry is built once per detail level and shared by every car; materials are per team/driver.
  */
-import { bakeCarAO, withCarAO } from './carAO.ts';
+import { bakeCarAO, withCarAO, CAR_FILL } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
-import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, SUSP_LEGS, STEER_PIVOT, STEER_TILT, HELMET_C, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
+import { buildCarGeometry, FLAP_PIVOT, FW_FLAP_PIVOT, SUSP_LEGS, STEER_PIVOT, STEER_TILT, HELMET_C, HELMET_R, NECK_PIVOT, PART_IDS, PART_HINGE, type CarGeoLevel, type PartId } from './carGeometry.ts';
 import { ARM, ARM_REST, WRIST_LOCAL, solveElbow } from './carHands.ts';
 export type { PartId } from './carGeometry.ts';
 import { acquireLivery, releaseLivery } from './Livery.ts';
 import {
   carbonTextures, wheelTextures, trimShared, trimTexture, driverTexture, fontsLoaded, createDashTexture, sharedDashTexture, wheelFaceTexture,
-  acquireGloveTexture, releaseGloveTexture, gloveNormalTexture, type Compound, type DashState,
+  acquireGloveTexture, releaseGloveTexture, gloveNormalTexture, helmetLook, type Compound, type DashState,
 } from './carTextures.ts';
 import { WET_PARS, wetUniforms, wetClearcoatBeads } from './carWet.ts';
 import { createTyreMaterial, setTyreCompound, applyTyreLook, wornTyreLook, newTyreLook, type TyreLook, type TyreUniforms } from './carTyres.ts';
@@ -31,7 +31,7 @@ export type { TyreLook } from './carTyres.ts';
 export { newTyreLook } from './carTyres.ts';
 
 export type { Compound } from './carTextures.ts';
-import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH, TC, trimUV } from './carLayout.ts';
+import { WHEELBASE, TRACK_F, TRACK_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE, CAR_WIDTH, TC, trimUV, DRV_W, DRV_H, R_TCAM_NUM, R_HELM_SPON } from './carLayout.ts';
 
 export type WheelId = 'wFL' | 'wFR' | 'wRL' | 'wRR';
 
@@ -89,6 +89,10 @@ export interface CarRig {
   shadowPass?(on: boolean, full?: boolean): void;
   /** point the car's reflections at a new environment map (a new circuit's sky) */
   setEnvMap?(tex: THREE.Texture | null): void;
+  /** the livery's main colour (linear): what this car looks like in another car's mirrors */
+  readonly bodyColor: THREE.Color;
+  /** the cars its mirrors show (nearest first, their world matrices current), or null: env only */
+  setMirrorCars?(cars: readonly CarRig[] | null): void;
   readonly anchors: {
     cockpit: THREE.Object3D;
     tcam: THREE.Object3D;
@@ -180,7 +184,7 @@ function shadowGeometry(level: 1 | 2, parts: THREE.Object3D[], root: THREE.Objec
 }
 
 // ------------------------------------------------------------------------------------ shaders
-const PAINT_KEY = 'apex-paint-v4';
+const PAINT_KEY = 'apex-paint-v5';
 /**
  * Livery paint: base coat (metallic flake where the livery is metallic) under a clearcoat, exposed
  * carbon where the mask says so (lacquered weave), race grime, rain beads on the clearcoat.
@@ -210,7 +214,10 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
           float pl = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
           diffuseColor.rgb = 0.012 + mix( vec3( pl ), diffuseColor.rgb, 0.97 ) * 0.82;
         }
-        float cMask = texture2D( liveryMask, vMapUv ).r;
+        vec4 cMasks = texture2D( liveryMask, vMapUv );
+        float cMask = cMasks.r;
+        // the cockpit's inside (Livery: the mask's blue over its red): matte black, no lacquer
+        float cSeat = max( cMasks.b - cMasks.r, 0.0 );
         // (exposed weave near an onboard lens: its average, as for the carbon parts — see patchCarbon)
         vec3 cw = texture2D( carbonMap, vCuv, 5.0 * ( 1.0 - smoothstep( 0.9, 2.2, length( vViewPosition ) ) ) ).rgb;
         diffuseColor.rgb = mix( diffuseColor.rgb, cw, cMask );
@@ -223,7 +230,7 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
       )
       .replace(
         '#include <roughnessmap_fragment>',
-        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, cMask );\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.5, cWet );\nroughnessFactor = mix( roughnessFactor, 0.8, cGrAll );',
+        '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, cMask );\nroughnessFactor = mix( roughnessFactor, 0.78, cSeat );\nroughnessFactor = mix( roughnessFactor, roughnessFactor * 0.5, cWet );\nroughnessFactor = mix( roughnessFactor, 0.8, cGrAll );',
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -241,7 +248,7 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
         }`,
       )
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n' + wetClearcoatBeads('vCuv', 'cWet'))
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.0, max( cMask, cGrAll ) );')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.0, max( max( cMask, cSeat ), cGrAll ) );')
       .replace(
         '#include <lights_physical_fragment>',
         `#include <lights_physical_fragment>
@@ -249,22 +256,303 @@ function patchPaint(mat: THREE.MeshPhysicalMaterial, mask: THREE.Texture, carbon
           material.clearcoat = mix( material.clearcoat, 0.85, cMask );
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.09, cMask );
           material.clearcoat *= 1.0 - 0.95 * cGr.y;
+          material.clearcoat *= 1.0 - cSeat;
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.4, clamp( cGr.x * 0.7 + cGr.z, 0.0, 1.0 ) );
           material.clearcoat = mix( material.clearcoat, 1.0, cWet );
           material.clearcoatRoughness = mix( material.clearcoatRoughness, 0.018, cWet );
         #endif
         #ifdef USE_SHEEN
-          material.sheenColor *= ( 1.0 - cMask ) * ( 1.0 - cWet );
+          material.sheenColor *= ( 1.0 - max( cMask, cSeat ) ) * ( 1.0 - cWet );
         #endif`,
       );
   };
   mat.customProgramCacheKey = () => PAINT_KEY;
 }
 
-/** helmet: an iridium visor (thin-film tint shifting with the view angle); cloth suit, gloves and belts without the gloss */
-function patchDriver(mat: THREE.MeshPhysicalMaterial) {
+const glslV3 = (v: readonly number[]) => `vec3( ${v.map((x) => x.toFixed(4)).join(', ')} )`;
+const glslRect = (r: { x: number; y: number; w: number; h: number }) => `vec4( ${r.x.toFixed(1)}, ${r.y.toFixed(1)}, ${r.w.toFixed(1)}, ${r.h.toFixed(1)} )`;
+/**
+ * The helmet's livery, drawn per pixel from the shell's own shape (helmet-local position over its
+ * ellipsoid) rather than read off the driver sheet: the T-cam has the crown ~30 cm from its lens,
+ * filling a third of the frame, where the sheet's 256 texels round the whole shell smeared every
+ * edge into a blur. The designs are the painters' staples (Arai / Bell race helmets): a stripe
+ * from brow to nape, forward arrows over the crown, a crown cap with a ring, a wave round the
+ * shell, twin stripes, a diagonal split — each in the driver's second colour with a fine pinstripe
+ * round it, the number printed across the crown (read from behind: the T-cam's view) and the
+ * sponsor across the back, in whichever ink reads on the paint under them. Edges are
+ * antialiased by their screen-space gradient, so they stay sharp at any distance.
+ */
+const HELMET_GLSL = /* glsl */ `
+varying vec3 vHelmP;
+uniform vec3 uHelmA;
+uniform vec3 uHelmB;
+uniform vec3 uHelmLine;
+uniform float uHelmStyle;
+const vec3 HELM_C = ${glslV3([HELMET_C[0] - NECK_PIVOT[0], HELMET_C[1] - NECK_PIVOT[1], HELMET_C[2] - NECK_PIVOT[2]])};
+const vec3 HELM_R = ${glslV3(HELMET_R)};
+float helmAA( float f ) {
+  float w = max( fwidth( f ), 1e-4 );
+  return smoothstep( -w, w, f );
+}
+// the design's field over the unit shell direction d (+x left, +y up, +z forward): > 0 is the second colour
+float helmField( vec3 d ) {
+  // (the crown number's patch is kept clear on the busy designs, so the digits read)
+  float plate = max( abs( d.x ) - 0.47, abs( d.z + 0.1 ) - 0.25 );
+  float f;
+  if ( uHelmStyle < 0.5 ) {
+    // a stripe from the brow over the crown to the nape, widening toward the visor
+    f = min( 0.2 + 0.06 * d.z - abs( d.x ), d.y + 0.2 );
+  } else if ( uHelmStyle < 1.5 ) {
+    // arrows pointing forward over the crown
+    float tri = abs( fract( ( d.z + 1.2 * abs( d.x ) ) * 1.5 ) - 0.5 );
+    f = min( min( 0.16 - tri, d.y - 0.3 ), plate );
+  } else if ( uHelmStyle < 2.5 ) {
+    // a cap over the crown and a ring below it
+    f = max( d.y - 0.78 + 0.05 * d.z, 0.045 - abs( d.y - 0.53 ) );
+  } else if ( uHelmStyle < 3.5 ) {
+    // a wave round the shell, the second colour above it
+    float lon = atan( d.x, d.z );
+    f = d.y - ( 0.48 + 0.3 * sin( 2.0 * lon + 0.9 ) + 0.06 * sin( 5.0 * lon ) );
+  } else if ( uHelmStyle < 4.5 ) {
+    // twin stripes front to back
+    f = min( min( 0.075 - abs( abs( d.x ) - 0.28 ), d.y + 0.1 ), plate );
+  } else {
+    // a diagonal split over the top
+    f = min( min( d.x * 0.9 - d.z * 0.4 + 0.12 * sin( 3.0 * d.z + 1.0 ), d.y - 0.05 ), plate );
+  }
+  return f;
+}
+vec3 helmPaint( vec3 base, vec3 d ) {
+  float f = helmField( d );
+  vec3 c = mix( base, uHelmB, helmAA( f ) );
+  // the pinstripe just outside the shape
+  return mix( c, uHelmLine, helmAA( 0.014 - abs( f + 0.022 ) ) );
+}
+vec2 helmRectUv( vec4 r, vec2 ab ) {
+  ab = clamp( ab, 0.0, 1.0 );
+  return vec2( ( r.x + 1.0 + ab.x * ( r.z - 2.0 ) ) / ${DRV_W.toFixed(1)}, 1.0 - ( r.y + r.w - 1.0 - ab.y * ( r.w - 2.0 ) ) / ${DRV_H.toFixed(1)} );
+}
+// a white-on-black mask from the sheet (sRGB: back to coverage) over [0, 1]² of a patch
+float helmMask( vec4 r, vec2 ab ) {
+  float inside = step( 0.0, ab.x ) * step( ab.x, 1.0 ) * step( 0.0, ab.y ) * step( ab.y, 1.0 );
+  return sqrt( texture2D( map, helmRectUv( r, ab ) ).r ) * inside;
+}
+vec3 helmInk( vec3 under ) {
+  return dot( under, vec3( 0.2126, 0.7152, 0.0722 ) ) > 0.22 ? vec3( 0.006 ) : vec3( 0.86 );
+}
+vec3 helmLivery( vec3 base, vec3 P ) {
+  vec3 d = normalize( ( P - HELM_C ) / HELM_R );
+  vec3 c = helmPaint( base, d );
+  // the number across the crown, its top toward the visor; the sponsor across the back
+  float num = helmMask( ${glslRect(R_TCAM_NUM)}, vec2( 0.5 - d.x / 0.8, 0.5 + ( d.z + 0.1 ) / 0.36 ) ) * step( 0.6, d.y );
+  float spon = helmMask( ${glslRect(R_HELM_SPON)}, vec2( 0.5 - d.x / 1.25, ( d.y - 0.1 ) / 0.22 ) ) * step( d.z, -0.4 );
+  c = mix( c, helmInk( helmPaint( uHelmA, vec3( 0.0, 0.98, -0.1 ) ) ), num );
+  return mix( c, helmInk( helmPaint( uHelmA, vec3( 0.0, 0.21, -0.98 ) ) ), spon );
+}
+`;
+
+/** how many cars behind a mirror can show (nearest first) */
+const MIRROR_CARS = 4;
+/**
+ * The rear-view mirrors' glass. Rendering the scene again from each mirror would cost a second
+ * pass over the whole circuit every frame; what a 200 × 60 mm glass at arm's length shows is a
+ * blurred handful of things — the car's own sidepod and rear tyre on its inner side, the road
+ * running back to a vanishing point, the cars behind, the sky and the trees — so the glass ray-
+ * traces those as boxes in its reflected view direction: the own sidepods, rear tyres and the
+ * road under the car (in the car's frame), and up to MIRROR_CARS cars behind (a low wide box of
+ * body and tyres, the front wing, the airbox), each lit like the scene (the env's irradiance and
+ * the sun) and hazed out with distance into the env reflection, which carries everything else.
+ * Off (just the env) unless a camera rides in this car: Game feeds it through feedMirrors.
+ */
+function makeMirrorMaterial(bodyColor: THREE.Color) {
+  const u = {
+    uMirOn: { value: 0 },
+    uMirN: { value: 0 },
+    uMirOwn: { value: new THREE.Matrix4() },
+    uMirOwnCol: { value: bodyColor },
+    uMirInv: { value: Array.from({ length: MIRROR_CARS }, () => new THREE.Matrix4()) },
+    uMirCol: { value: Array.from({ length: MIRROR_CARS }, () => new THREE.Color()) },
+  };
+  // (a real mirror's silvered glass: ~85 % reflective, a hint cool)
+  const mat = new THREE.MeshStandardMaterial({ name: 'car-mirror', color: new THREE.Color(0.8, 0.83, 0.86), roughness: 0.05, metalness: 1 });
   mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.uniforms.uCarFill = CAR_FILL;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vMirW;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvMirW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
     sh.fragmentShader = sh.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vMirW;
+        uniform float uCarFill;
+        uniform float uMirOn;
+        uniform int uMirN;
+        uniform mat4 uMirOwn;
+        uniform vec3 uMirOwnCol;
+        uniform mat4 uMirInv[ ${MIRROR_CARS} ];
+        uniform vec3 uMirCol[ ${MIRROR_CARS} ];
+        // a ray (o, d: a car's frame M) against a box: the nearest hit so far, its albedo and world normal
+        void mirBox( vec3 o, vec3 d, vec3 lo, vec3 hi, vec3 alb, mat4 M, inout float tHit, inout vec3 aHit, inout vec3 nHit ) {
+          vec3 inv = 1.0 / ( sign( d ) * max( abs( d ), vec3( 1e-6 ) ) );
+          vec3 t0 = ( lo - o ) * inv;
+          vec3 t1 = ( hi - o ) * inv;
+          vec3 tn = min( t0, t1 );
+          vec3 tf = max( t0, t1 );
+          float a = max( max( tn.x, tn.y ), tn.z );
+          float b = min( min( tf.x, tf.y ), tf.z );
+          if ( a > 0.0 && a < b && a < tHit ) {
+            tHit = a;
+            aHit = alb;
+            vec3 nL = tn.x >= a ? vec3( -sign( d.x ), 0.0, 0.0 ) : tn.y >= a ? vec3( 0.0, -sign( d.y ), 0.0 ) : vec3( 0.0, 0.0, -sign( d.z ) );
+            nHit = normalize( ( vec4( nL, 0.0 ) * M ).xyz );
+          }
+        }
+        // a tyre: a cylinder across the car (axis x, radius r round c.yz) from x0 to x1 — round, as
+        // the rear tyre's shoulder fills the inner corner of every F1 mirror
+        void mirWheel( vec3 o, vec3 d, vec3 c, float x0, float x1, float r, mat4 M, inout float tHit, inout vec3 aHit, inout vec3 nHit ) {
+          vec2 oc = o.yz - c.yz;
+          float A = dot( d.yz, d.yz );
+          float B = dot( oc, d.yz );
+          float h = B * B - A * ( dot( oc, oc ) - r * r );
+          if ( h > 0.0 && A > 1e-8 ) {
+            float t = ( -B - sqrt( h ) ) / A;
+            float x = o.x + d.x * t;
+            if ( t > 0.0 && t < tHit && x > x0 && x < x1 ) {
+              tHit = t;
+              aHit = vec3( 0.045 );
+              nHit = normalize( ( vec4( 0.0, ( o.yz + d.yz * t - c.yz ) / r, 0.0 ) * M ).xyz );
+            }
+          }
+          for ( int s = 0; s < 2; s++ ) {
+            float xs = s == 0 ? x0 : x1;
+            float t = ( xs - o.x ) / ( sign( d.x ) * max( abs( d.x ), 1e-6 ) );
+            vec2 q = o.yz + d.yz * t - c.yz;
+            if ( t > 0.0 && t < tHit && dot( q, q ) < r * r ) {
+              tHit = t;
+              // (the sidewall, the wheel cover's dark disc inside it)
+              aHit = dot( q, q ) < 0.42 * r * r ? vec3( 0.025 ) : vec3( 0.055 );
+              nHit = normalize( ( vec4( s == 0 ? -1.0 : 1.0, 0.0, 0.0, 0.0 ) * M ).xyz );
+            }
+          }
+        }`,
+      )
+      .replace(
+        '#include <lights_fragment_maps>',
+        `#include <lights_fragment_maps>
+        #if defined( RE_IndirectSpecular )
+        if ( uMirOn > 0.5 ) {
+          vec3 rW = normalize( ( vec4( reflect( -geometryViewDir, geometryNormal ), 0.0 ) * viewMatrix ).xyz );
+          float tHit = 1e6;
+          vec3 aHit = vec3( 0.0 );
+          vec3 nHit = vec3( 0.0, 1.0, 0.0 );
+          // the own car: sidepods and rear tyres either side, and the road it runs on
+          vec3 o = ( uMirOwn * vec4( vMirW, 1.0 ) ).xyz;
+          vec3 d = ( uMirOwn * vec4( rW, 0.0 ) ).xyz;
+          for ( int s = 0; s < 2; s++ ) {
+            float k = s == 0 ? 1.0 : -1.0;
+            // (the pod's shoulder, then its top falling away toward the coke bottle)
+            vec3 pl = vec3( k * 0.36, 0.12, -0.35 ), ph = vec3( k * 0.66, 0.6, 0.38 );
+            mirBox( o, d, min( pl, ph ), max( pl, ph ), uMirOwnCol, uMirOwn, tHit, aHit, nHit );
+            pl = vec3( k * 0.3, 0.12, -1.5 ), ph = vec3( k * 0.62, 0.46, -0.35 );
+            mirBox( o, d, min( pl, ph ), max( pl, ph ), uMirOwnCol, uMirOwn, tHit, aHit, nHit );
+            mirWheel( o, d, vec3( 0.0, 0.36, -1.7 ), min( k * 0.62, k * 1.0 ), max( k * 0.62, k * 1.0 ), 0.36, uMirOwn, tHit, aHit, nHit );
+          }
+          if ( d.y < -1e-4 ) {
+            float t = -o.y / d.y;
+            vec3 g = o + d * t;
+            // (the circuit's width round the car; past it the env's own ground)
+            if ( t < tHit && abs( g.x ) < 7.5 ) {
+              tHit = t;
+              aHit = vec3( 0.1, 0.1, 0.105 );
+              nHit = normalize( ( vec4( 0.0, 1.0, 0.0, 0.0 ) * uMirOwn ).xyz );
+            }
+          }
+          // the cars behind: body and sidepods, the four tyres, the front wing, the airbox
+          for ( int i = 0; i < ${MIRROR_CARS}; i++ ) {
+            if ( i >= uMirN ) break;
+            vec3 co = ( uMirInv[ i ] * vec4( vMirW, 1.0 ) ).xyz;
+            vec3 cd = ( uMirInv[ i ] * vec4( rW, 0.0 ) ).xyz;
+            vec3 col = uMirCol[ i ];
+            mirBox( co, cd, vec3( -0.62, 0.06, -2.0 ), vec3( 0.62, 0.62, 1.9 ), col, uMirInv[ i ], tHit, aHit, nHit );
+            mirBox( co, cd, vec3( -0.15, 0.6, -0.75 ), vec3( 0.15, 1.0, 0.15 ), col, uMirInv[ i ], tHit, aHit, nHit );
+            mirBox( co, cd, vec3( -0.9, 0.07, 2.45 ), vec3( 0.9, 0.3, 3.05 ), col * 0.45, uMirInv[ i ], tHit, aHit, nHit );
+            for ( int s = 0; s < 2; s++ ) {
+              float k = s == 0 ? 1.0 : -1.0;
+              mirWheel( co, cd, vec3( 0.0, 0.36, 1.7 ), min( k * 0.6, k * 0.98 ), max( k * 0.6, k * 0.98 ), 0.36, uMirInv[ i ], tHit, aHit, nHit );
+              mirWheel( co, cd, vec3( 0.0, 0.36, -1.7 ), min( k * 0.62, k * 1.0 ), max( k * 0.62, k * 1.0 ), 0.36, uMirInv[ i ], tHit, aHit, nHit );
+            }
+          }
+          if ( tHit < 1e5 ) {
+            vec3 nV = normalize( ( viewMatrix * vec4( nHit, 0.0 ) ).xyz );
+            vec3 irr = vec3( 0.0 );
+            #ifdef USE_ENVMAP
+              // (the sky's fill at the strength the cars themselves get it: carAO CAR_FILL)
+              irr += getIBLIrradiance( nV ) * uCarFill;
+            #endif
+            // (the circuit's sun is a SunLight — three's cascaded one — not a DirectionalLight)
+            #if NUM_SUN_LIGHTS > 0
+              irr += sunLights[ 0 ].color * max( dot( nV, sunLights[ 0 ].direction ), 0.0 );
+            #endif
+            #if NUM_DIR_LIGHTS > 0
+              irr += directionalLights[ 0 ].color * max( dot( nV, directionalLights[ 0 ].direction ), 0.0 );
+            #endif
+            radiance = mix( aHit * irr * RECIPROCAL_PI, radiance, smoothstep( 45.0, 170.0, tHit ) );
+          }
+        }
+        #ifdef USE_ENVMAP
+        {
+          // the sun's disc or a lamp in the env map is a broad blob at its resolution, not a point:
+          // past ~4× the average light round the glass it is rolled off (still the brightest thing
+          // in the mirror, without filling it)
+          const vec3 LW = vec3( 0.2126, 0.7152, 0.0722 );
+          float cap = 4.0 * max( dot( getIBLIrradiance( geometryNormal ) * RECIPROCAL_PI, LW ), 1e-4 );
+          float L = dot( radiance, LW );
+          if ( L > cap ) radiance *= cap * ( 1.0 + 0.5 * log2( L / cap ) ) / L;
+        }
+        #endif
+        #endif`,
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        // (the punctual lights' highlights off a near-perfect mirror — the sun, each floodlight at
+        // night — are GGX spikes thousands of times the scene's light that bloomed into white discs
+        // over the glass; what the mirror shows of them is already in the env reflection)
+        reflectedLight.directSpecular *= 0.0;`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'apex-mirror-v1';
+  mat.userData.mirror = u;
+  return { mat, u };
+}
+
+/**
+ * The driver: the helmet's livery (HELMET_GLSL, on the shell's texels — the driver sheet's left
+ * half), an iridium visor (thin-film tint shifting with the view angle); cloth suit, gloves and
+ * belts without the gloss
+ */
+function patchDriver(mat: THREE.MeshPhysicalMaterial, look: ReturnType<typeof helmetLook>) {
+  mat.onBeforeCompile = (sh) => {
+    // (per material: every car's helmet its own colours and design, one shared program)
+    sh.uniforms.uHelmA = { value: look.a };
+    sh.uniforms.uHelmB = { value: look.b };
+    sh.uniforms.uHelmLine = { value: look.line };
+    sh.uniforms.uHelmStyle = { value: look.style };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vHelmP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHelmP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', `${HELMET_GLSL}\nvoid main() {`)
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        #ifdef USE_MAP
+          // (the shell, its spoiler and chin bar map into the sheet's left half; nothing else does)
+          diffuseColor.rgb = mix( diffuseColor.rgb, helmLivery( diffuseColor.rgb, vHelmP ), step( vMapUv.x, 0.5 ) );
+        #endif`,
+      )
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
@@ -288,7 +576,7 @@ function patchDriver(mat: THREE.MeshPhysicalMaterial) {
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-driver-v1';
+  mat.customProgramCacheKey = () => 'apex-driver-v2';
 }
 
 /**
@@ -617,6 +905,52 @@ export function createWheelProp(front: boolean, compound: Compound, worn = 0): W
   };
 }
 
+// ------------------------------------------------------------------------------------ mirrors
+let mirrorFed: CarRig | null = null;
+const mirrorPick: { rig: CarRig; d: number }[] = [];
+const mirrorCars: CarRig[] = [];
+const mirrorAll: CarRig[] = [];
+const mirV = new THREE.Vector3();
+const mirM = new THREE.Matrix4();
+/**
+ * Show the cars behind in the mirrors of the car a camera rides in (`followed`: its root, null when
+ * the camera isn't on a car): the nearest few behind or alongside it, within ~180 m (further, a
+ * car is a couple of pixels in a glass the size of a phone). Once a frame, after the cars moved.
+ */
+export function feedMirrors(rigsIn: Iterable<CarRig>, followed: THREE.Object3D | null) {
+  // (an iterator — a Map's values() — runs once: keep the cars for the second pass)
+  const rigs = mirrorAll;
+  rigs.length = 0;
+  let own: CarRig | null = null;
+  if (followed)
+    for (const r of rigsIn) {
+      rigs.push(r);
+      if (r.root === followed) own = r;
+    }
+  if (own !== mirrorFed) {
+    mirrorFed?.setMirrorCars?.(null);
+    mirrorFed = own;
+  }
+  if (!own) return;
+  // (this frame's poses: the glass' ray origins are this frame's too)
+  own.root.updateWorldMatrix(true, false);
+  mirM.copy(own.root.matrixWorld).invert();
+  mirrorPick.length = 0;
+  for (const r of rigs) {
+    if (r === own || !r.root.visible || !r.root.parent) continue;
+    r.root.updateWorldMatrix(true, false);
+    mirV.setFromMatrixPosition(r.root.matrixWorld).applyMatrix4(mirM);
+    // (a mirror sees nothing ahead of itself)
+    if (mirV.z > 1.5) continue;
+    const d = mirV.lengthSq();
+    if (d < 180 * 180) mirrorPick.push({ rig: r, d });
+  }
+  mirrorPick.sort((a, b) => a.d - b.d);
+  mirrorCars.length = 0;
+  for (let i = 0; i < Math.min(MIRROR_CARS, mirrorPick.length); i++) mirrorCars.push(mirrorPick[i].rig);
+  own.setMirrorCars?.(mirrorCars);
+}
+
 // ------------------------------------------------------------------------------------ createCar
 export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMap?: THREE.Texture } = {}): CarRig {
   const geo = acquireGeo();
@@ -656,7 +990,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     clearcoat: 1,
     clearcoatRoughness: 0.05,
   });
-  patchDriver(driverMat);
+  patchDriver(driverMat, helmetLook(driver));
   withCarAO(driverMat);
   const blurMat = new THREE.MeshStandardMaterial({
     name: 'car-wheel-blur',
@@ -696,7 +1030,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     sheenColor: new THREE.Color(0.24, 0.24, 0.26),
   });
   withCarAO(gloveMat);
-  const own: THREE.Material[] = [trim, driverMat, blurMat, paint, carbon, faceMat, dashMat, gloveMat, ...tyres.map((t) => t.mat)];
+  const bodyColor = new THREE.Color(team.primary);
+  const mirror = makeMirrorMaterial(bodyColor);
+  const own: THREE.Material[] = [trim, driverMat, blurMat, paint, carbon, faceMat, dashMat, gloveMat, mirror.mat, ...tyres.map((t) => t.mat)];
   const paintMat: THREE.Material = paint;
   if (opts.envMap) for (const m of own as THREE.MeshStandardMaterial[]) m.envMap = opts.envMap;
 
@@ -733,6 +1069,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     g.add(mesh(L.body.paint, paintMat));
     g.add(mesh(L.body.carbon, carbon));
     g.add(mesh(L.body.trim, trim));
+    if (L.body.mirror) g.add(mesh(L.body.mirror, mirror.mat, false, false));
     if (L.body.driver) {
       const all = mesh(L.body.driver, driverMat);
       g.add(all);
@@ -1010,7 +1347,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   };
   const anchors = {
     cockpit: anchor('cockpit', [0, HELMET_C[1] + 0.005, HELMET_C[2] + 0.07], body),
-    tcam: anchor('tcam', [0, 0.995, -0.255], body),
+    tcam: anchor('tcam', [0, 1.036, -0.255], body),
     nose: anchor('nose', [0, 0.215, 2.86], body),
     rearWing: anchor('rearWing', [0, 0.88, -2.12], body),
     exhaust: anchor('exhaust', [0, 0.458, -2.25], body),
@@ -1102,10 +1439,24 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   };
   applyVisibility();
 
+  const mirInv = new THREE.Matrix4();
   const rig: CarRig = {
     root,
     body,
     anchors,
+    bodyColor,
+    setMirrorCars(cars) {
+      const u = mirror.u;
+      u.uMirOn.value = cars ? 1 : 0;
+      if (!cars) return;
+      u.uMirOwn.value.copy(root.matrixWorld).invert();
+      const n = Math.min(MIRROR_CARS, cars.length);
+      for (let i = 0; i < n; i++) {
+        u.uMirInv.value[i].copy(mirInv.copy(cars[i].root.matrixWorld).invert());
+        u.uMirCol.value[i].copy(cars[i].bodyColor);
+      }
+      u.uMirN.value = n;
+    },
     dims: { wheelbase: WHEELBASE, trackFront: TRACK_F, trackRear: TRACK_R, length: 5.46, width: CAR_WIDTH, wheelRadius: WHEEL_R },
     setSteer(rad) {
       FL.steer.rotation.y = rad;
