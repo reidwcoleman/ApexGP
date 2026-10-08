@@ -60,6 +60,11 @@ export interface Scenery {
   heightAt(x: number, z: number): number;
   setLight(l: SceneryLight): void;
   update(dt: number, camera: THREE.Camera, elapsed: number): void;
+  /**
+   * Lay the camera-dependent scenery out for the big screens' feed lens (`cam`) for one render,
+   * and back for the main view (null): trees as impostors, no grass blades, the horizon round the lens.
+   */
+  feedView?(cam: THREE.Camera | null): void;
   /** scale the costly detail (tree 3D range) with the graphics quality */
   setQuality(q: 'low' | 'medium' | 'high' | 'ultra'): void;
   readonly stats: Record<string, unknown>;
@@ -200,6 +205,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   lap('horizon');
 
   if (typeof window !== 'undefined') (window as unknown as Record<string, unknown>).__park = { map, layout, veg, masks };
+  // (the camera the scenery was last laid out for, and the grass's own visibility, while the feed borrows them)
+  let mainCam: THREE.Camera | null = null;
+  let grassShown = false;
 
   return {
     group,
@@ -215,6 +223,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
       setLeafFill(veg.uniforms, (sunL - 0.4) / 2.6);
     },
     update(_dt, camera, elapsed) {
+      mainCam = camera;
       veg.update(camera, elapsed);
       grass?.update(camera, elapsed);
       horizon.update(camera);
@@ -226,6 +235,20 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
       stands.update(elapsed);
       skyline?.update(elapsed);
       strollers.update(_dt, camera);
+    },
+    feedView(cam) {
+      veg.feedView(cam !== null);
+      if (grass) {
+        if (cam) {
+          grassShown = grass.mesh.visible;
+          grass.mesh.visible = false;
+        } else grass.mesh.visible = grassShown;
+      }
+      const hc = cam ?? mainCam;
+      if (hc) {
+        horizon.update(hc);
+        horizon.mesh.updateMatrixWorld();
+      }
     },
     setQuality(q) {
       veg.setDetail(q);

@@ -50,6 +50,12 @@ export interface VegetationBuild {
   group: THREE.Group;
   uniforms: TreeUniforms;
   update(camera: THREE.Camera, elapsed: number): void;
+  /**
+   * The big screens' feed lens (true) and back (false): the 3D trees are laid out round the main
+   * camera only, so the feed — a few hundred pixels wide, often a kilometre away — draws every tree
+   * as its impostor instead (no holes where the main view's 3D trees would stand, and far cheaper).
+   */
+  feedView(on: boolean): void;
   /** how far the 3D trees reach before the impostors take over (quality level) */
   setDetail(q: 'low' | 'medium' | 'high' | 'ultra'): void;
   count: number;
@@ -707,7 +713,24 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   };
 
   const shade = trees.map((t) => ({ x: t.x, z: t.z, r: PROTO_INFO[t.proto].crownR * t.s }));
-  return { group, uniforms, update, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings };
+  const feedFade = new THREE.Vector4();
+  let feedNear = false;
+  const feedView = (on: boolean) => {
+    const f = uniforms.uFade.value, fc = uniforms.uFadeC.value;
+    if (on) {
+      feedFade.set(f.x, f.y, fc.x, fc.y);
+      // (a band below zero: every impostor fully in at any distance)
+      f.set(-2, -1);
+      fc.set(-2, -1);
+      feedNear = bm?.visible ?? false;
+      if (bm) bm.visible = false;
+    } else {
+      f.set(feedFade.x, feedFade.y);
+      fc.set(feedFade.z, feedFade.w);
+      if (bm) bm.visible = feedNear;
+    }
+  };
+  return { group, uniforms, update, feedView, setDetail, count: trees.length, near: nearIdx.length, shade, kit, trees, timings };
 }
 
 void smoothstep;

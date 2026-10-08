@@ -390,6 +390,19 @@ npm run check    # tsc --noEmit
   or randomise everything) with an automatic TV director (calm 7–13 s shots, in real time at any sim speed) and 29 cameras
   (onboards, chase and long-lens chase, trackside towers, long lens, pit wall, heli, blimp, drone, tactical), change car and
   camera, up to 8× speed; replay your full race afterwards with a timeline, moments and any camera.
+- **The big screens carry the world feed** (`game/ScreenFeed.ts`, `world/env/bigScreens.ts`) — every giant screen round
+  the circuit shows the live race as the TV director cuts it (its own lens and `Director`, sharing the placed trackside
+  cameras, 4–8 s shots: onboards, chase, long lenses, the heli, the leader, battles; your car when the feed is on it),
+  under the broadcast graphics (the timing tower with the lap count, the driver's name as the feed moves to him, speed
+  and gear on the onboards). One shared picture: the live scene drawn into a 384×216 HDR target at 12 Hz (8 Medium,
+  15 Ultra; half that while the screens are small) only while some screen faces the main view in plain sight (frustum,
+  viewing angle and the cameras' sight-line grid), without the post chain or a new shadow pass, the trees as impostors,
+  no grass, rain streaks, particles or the main view's extras, cars at the LOD their size in the feed calls for; then
+  exposed with the main view's exposure and tone curve and burned in with the graphics at the wall's 768×432 LEDs. The
+  panels are LED walls: the picture per LED up close (round dies, RGB chips at arm's length, moiré in the hand-over to
+  the average), the louvres' viewing angle (dark from above), held at a steady level against the grade by day and
+  glowing after dark, a wet glossy face with beads and runs that smear the picture in the rain. Low quality keeps the
+  event's holding graphic under the live timing. `__game.screenFeed` (`force`, `enabled`, `stats`) for dev.
 - **2026 cars** — the new regulations' car: 280 / 375 mm tyres, a shorter nose on the front wing's
   mainplane, three-element front and rear wings whose flaps move (straight mode opens both on the
   straights), no beam wing, a narrower flatter floor with wheel-wake boards, bigger mirrors,

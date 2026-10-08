@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isFeedCamera } from '../bigScreens.ts';
 import type { WorldMap } from '../worldmap.ts';
 import type { Layout } from '../layout.ts';
 import { fbm2, hash2i, rng, smoothstep } from '../noise.ts';
@@ -423,6 +424,8 @@ export function buildInterlagosCity(map: WorldMap, layout: Layout): CityBuild {
   probe.name = 'city_lod_probe';
   let frame = 0;
   probe.onBeforeRender = (_r, _s, cam) => {
+    // (the big screens' feed lens draws the city as the main view laid it out)
+    if (isFeedCamera(cam)) return;
     water.update(weatherUniforms.uWeatherTime.value);
     if (frame++ % 10) return;
     const reach = 2900 + Math.max(0, cam.position.y - 60) * 4;

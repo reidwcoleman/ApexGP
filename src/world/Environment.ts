@@ -88,6 +88,12 @@ export interface Environment {
   /** called every frame with the live weather; cheap when little changed */
   setWeather(w: WeatherState): void;
   update(dt: number, camera: THREE.Camera): void;
+  /**
+   * The big screens' feed lens borrows the camera-centred world for one render (`cam`), then hands
+   * it back (null): the sky dome round the lens, no rain streaks (the feed is too small to resolve
+   * them), the scenery's own (Scenery.feedView). Cheap: no LOD pass runs for it.
+   */
+  feedView(cam: THREE.Camera | null): void;
   /** terrain height at world (x, z) */
   heightAt(x: number, z: number): number;
   /** free every GPU resource this environment owns (world switch); `keep`: shared resources to leave alone */
@@ -1124,6 +1130,22 @@ export function createEnvironment(
   };
   console.info(`[shot] [env] built in ${Math.round(buildMs)} ms ${JSON.stringify({ timings, scenery: scenery.stats })}`);
 
+  const feedSky = new THREE.Vector3();
+  let feedRain = false;
+  function feedView(cam: THREE.Camera | null) {
+    if (cam) {
+      feedSky.copy(sky.mesh.position);
+      cam.getWorldPosition(sky.mesh.position);
+      feedRain = rain.group.visible;
+      rain.group.visible = false;
+    } else {
+      sky.mesh.position.copy(feedSky);
+      rain.group.visible = feedRain;
+    }
+    sky.mesh.updateMatrixWorld();
+    scenery.feedView?.(cam);
+  }
+
   return {
     group,
     sun,
@@ -1131,6 +1153,7 @@ export function createEnvironment(
     setLean,
     setWeather,
     update,
+    feedView,
     buildMs,
     stats,
     heightAt: (x: number, z: number) => scenery.heightAt(x, z),

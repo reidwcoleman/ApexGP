@@ -43,6 +43,11 @@ export class Director {
   cutNow = false;
   /** follow only this car (−1: the director picks) — it still chooses the cameras */
   lock = -1;
+  /**
+   * shot length scale: 1 for the calm spectating edit; the circuit's big screens (ScreenFeed) cut
+   * the world feed a little quicker, as the circuit's own screen director does between replays
+   */
+  pace = 1;
   private age = 0;
   private len = 5;
   private history: CameraMode[] = [];
@@ -286,6 +291,7 @@ export class Director {
     this.len = g === 'trackside' ? 8 + Math.random() * 5 : g === 'onboard' ? 7 + Math.random() * 5 : g === 'aerial' ? 8 + Math.random() * 6 : 8 + Math.random() * 5;
     if (crash) this.len += 2.5;
     if (start) this.len += 3;
+    this.len *= this.pace;
     this.age = 0;
     this.started = true;
     this.cutNow = true;
