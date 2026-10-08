@@ -75,6 +75,7 @@ import { feedCarWake } from '../world/env/treematerial.ts';
 import { withContactShadow } from '../world/env/contactShadow.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
+import { ScreenFeed, type FeedSource } from './ScreenFeed.ts';
 
 /** objects that cast shadows into the garage key light (see buildGarageLights) */
 const GARAGE_SHADOW_LAYER = 3;
@@ -129,6 +130,8 @@ export class Game {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 30000);
   private gfx: Renderer;
+  /** the live world feed on the circuit's big screens */
+  readonly screenFeed: ScreenFeed;
   private input = new Input();
   private audio = new GameAudio();
   private audioReady = false;
@@ -240,6 +243,7 @@ export class Game {
     trackGpuUploads();
     this.canvas = canvas;
     this.gfx = new Renderer(canvas, this.scene, this.camera, 'high');
+    this.screenFeed = new ScreenFeed(this.gfx, this.scene, this.camera);
     this.gfx.grade.set(RACE_GRADE);
     // (boot) three's per-program error check (info logs + link status read back on each program's first use)
     // is a blocking round trip to the GPU process per program: dev builds only (tools/console.mjs
@@ -409,6 +413,8 @@ export class Game {
     // than one by one, blocking, when the environment first draws them / in the first garage frame
     const skyPrograms = prewarmSkyPrograms(this.gfx.renderer);
     const postPrograms = this.gfx.compilePasses();
+    // (the big screens' resolve pass: one small program, off the main thread like the rest)
+    void this.screenFeed.compile();
     // the career's grid (Formula 2 or 1, the player's driver in their seat) before any car or pit garage is built
     this.syncCareerGrid();
     Career.extraUnlocked = (id) => this.dc.visited(id);
@@ -932,6 +938,7 @@ export class Game {
     this.cams.prefs = prefs ?? { ...DEFAULT_CAM, ...(this.menu.settings.cam ?? {}) };
     if (sight) console.info(`[shot] [sightlines] ${this.track.def.id} grid ${sight.buildMs} ms${sight.fromCache ? ' (cached)' : ''}, cameras ${this.cams.placeMs} ms ${JSON.stringify(sight.stats)} tv ${this.cams.tvCount}`);
     if (mode) this.cams.mode = mode;
+    this.screenFeed.setCameras(this.cams, this.track);
   }
 
   /**
@@ -1276,6 +1283,7 @@ export class Game {
       sponsorTexture(),
       teamBoardTexture(),
       createCloudNoise(this.gfx.renderer),
+      this.screenFeed.resources(),
     ]);
     this.highlights.cancel();
     // (the garage look froze the old sun's shadows; it re-arms on the new one)
@@ -2382,9 +2390,55 @@ export class Game {
     // shots stay contrasty: thin the haze as the lens narrows (full below ~28°, a third at ~3°)
     aerialLens.x = THREE.MathUtils.clamp(0.33 + (this.camera.fov - 3) * (0.67 / 25), 0.33, 1);
     this.gfx.render(dt);
+    this.screenFeed.frame(dt, this.feedSource(dt));
     // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)
     if (this.state === 'celebration') this.highlights.afterRender(this.canvas, dt);
     this.adaptQuality(dt);
+  }
+
+  private feedSrc: FeedSource | null = null;
+  /** what the big screens' feed films this frame (null: they hold their picture — garage, pause, replays) */
+  private feedSource(dt: number): FeedSource | null {
+    const st = this.state;
+    if (!this.worldCore || this.worldBusy || (st !== 'race' && st !== 'intro' && st !== 'spectate' && st !== 'results')) return null;
+    const race = this.race;
+    const steps = st === 'spectate' && race.phase !== 'grid' && race.phase !== 'lights' ? this.simSpeed : 1;
+    const s = (this.feedSrc ??= {
+      race,
+      track: this.track,
+      env: this.env,
+      field: [],
+      car: (id) => this.race.cars[id]?.car,
+      rig: (id) => {
+        const c = this.race.cars[id];
+        return c ? this.rigs.get(c.entry) : undefined;
+      },
+      events: [],
+      t: 0,
+      raceTime: 0,
+      lookahead: 0,
+      simDt: 0,
+      timeScale: 1,
+      hidden: [null, null],
+      skip: [null, null, null],
+    });
+    s.race = race;
+    s.track = this.track;
+    s.env = this.env;
+    s.field = this.fieldLive();
+    s.events = this.replay.events;
+    s.t = race.time;
+    s.raceTime = race.raceTime;
+    s.simDt = dt * steps;
+    s.timeScale = steps;
+    const hidden = s.hidden as (CarRig | null | undefined)[];
+    hidden[0] = this.driverHidden ? this.rigs.get(race.player.entry) : null;
+    hidden[1] = this.povRig;
+    const skip = s.skip as (THREE.Object3D | null | undefined)[];
+    skip[0] = this.particles.group;
+    skip[1] = this.line?.mesh;
+    skip[2] = this.leaves.mesh;
+    return s;
   }
 
   /**

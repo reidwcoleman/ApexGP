@@ -58,6 +58,8 @@ export interface CarRig {
   /** the steering wheel (turning with setSteer; null below the nearest level): the TAA follows its turn */
   readonly wheel?: THREE.Object3D | null;
   setDetail(level: 0 | 1 | 2): void;
+  /** the level of detail shown now (the big screens' feed borrows a nearer one for its own lens) */
+  readonly detailLevel: 0 | 1 | 2;
   /**
    * show / hide the driver (hidden for the cameras where his head is, and when he's out of the car).
    * `hands`: keep his gloved hands on the wheel while he's hidden (the onboard cameras inside the cockpit)
@@ -1183,6 +1185,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     },
     get wheel() {
       return detail === 0 ? steerSpin : null;
+    },
+    get detailLevel() {
+      return detail;
     },
     setDetail(level) {
       if (level === detail) return;

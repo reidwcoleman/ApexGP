@@ -5,6 +5,7 @@ import type { GrandstandSpec, Layout, ScreenSpec, SpectatorBank } from './layout
 import { sponsorTexture, sponsorUV } from './signage.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
+import { bigScreenMaterial, screenSites, screenSizeAttribute, type ScreenSite } from './bigScreens.ts';
 import { rng } from './noise.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
 import { renderFanAtlas, ATLAS_COLS } from '../../people/Crowd.ts';
@@ -608,63 +609,6 @@ if ( aBig > 0.5 ) {
   return mat;
 }
 
-// ---------------------------------------------------------------- big screens
-
-function screenTexture(): THREE.CanvasTexture {
-  const W = 512, H = 288;
-  const { canvas, ctx } = canvas2d(W, H);
-  // broadcast image: a car at speed through the park + timing tower
-  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.45);
-  sky.addColorStop(0, '#6f9fd6');
-  sky.addColorStop(1, '#c6d8e8');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#2f4a22';
-  for (let i = 0; i < 40; i++) {
-    ctx.beginPath();
-    ctx.arc(i * 14 + 5, H * 0.42 - Math.sin(i * 1.7) * 8, 22, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = '#4c7a2e';
-  ctx.fillRect(0, H * 0.45, W, H * 0.55);
-  ctx.fillStyle = '#56585c';
-  ctx.beginPath();
-  ctx.moveTo(0, H * 0.72);
-  ctx.lineTo(W, H * 0.58);
-  ctx.lineTo(W, H * 0.8);
-  ctx.lineTo(0, H);
-  ctx.fill();
-  ctx.fillStyle = '#c8102e';
-  ctx.beginPath();
-  ctx.ellipse(W * 0.6, H * 0.72, 70, 14, -0.14, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#111';
-  ctx.fillRect(W * 0.6 - 60, H * 0.72 - 6, 16, 22);
-  ctx.fillRect(W * 0.6 + 44, H * 0.72 - 16, 16, 22);
-  // timing tower
-  ctx.fillStyle = 'rgba(10,12,16,0.85)';
-  ctx.fillRect(10, 10, 118, 188);
-  ctx.font = '700 15px "Titillium Web", Arial, sans-serif';
-  ctx.textBaseline = 'middle';
-  TEAMS.slice(0, 10).forEach((t, i) => {
-    const y = 22 + i * 18;
-    ctx.fillStyle = '#fff';
-    ctx.fillText(String(i + 1), 16, y);
-    ctx.fillStyle = t.primary;
-    ctx.fillRect(34, y - 6, 4, 12);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(t.short.slice(0, 3), 44, y);
-    ctx.fillStyle = '#ddd';
-    ctx.fillText(i === 0 ? 'LEAD' : `+${(i * 0.83 + 0.3).toFixed(1)}`, 86, y);
-  });
-  ctx.fillStyle = '#c8102e';
-  ctx.fillRect(W - 150, H - 40, 140, 28);
-  ctx.fillStyle = '#fff';
-  ctx.font = '900 18px "Titillium Web", Arial, sans-serif';
-  ctx.fillText('LAP 23 / 53', W - 138, H - 26);
-  return canvasTexture(canvas, true, 4);
-}
-
 // ---------------------------------------------------------------- build
 
 
@@ -851,7 +795,10 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   }
 
   // ---------------------------------------------------------------- big screens
+  // (the LED face: the live world feed, bigScreens.ts / game/ScreenFeed.ts)
   const screenMB = new MeshBuilder();
+  const screenSizes: { w: number; h: number }[] = [];
+  const sites: ScreenSite[] = [];
   for (const sc of layout.screens as ScreenSpec[]) {
     const lsteel = new MeshBuilder();
     const lscr = new MeshBuilder();
@@ -877,6 +824,13 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     tagClass(lsteel, 0, ARCH.STEEL);
     appendInto(arch, lsteel);
     screenMB.append(lscr);
+    screenSizes.push({ w: sc.w, h: sc.h });
+    sites.push({
+      center: new THREE.Vector3(0, bottom + sc.h / 2, 0.12).applyMatrix4(M),
+      normal: new THREE.Vector3(Math.sin(sc.rot), 0, Math.cos(sc.rot)),
+      w: sc.w,
+      h: sc.h,
+    });
   }
 
   // ---------------------------------------------------------------- fans on the grass banks
@@ -933,8 +887,6 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   const boardTex = sponsorTexture();
   // (boards sit a few cm proud of the stands: pulled forward in depth so they don't z-fight far out)
   const boardMat = new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.55, metalness: 0, emissiveMap: boardTex, emissive: 0xffffff, emissiveIntensity: 0.14, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
-  const scrTex = screenTexture();
-  const screenMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.3, emissiveMap: scrTex, emissive: 0xffffff, emissiveIntensity: 1.6 });
   const add = (mb: MeshBuilder, mat: THREE.Material, name: string, cast: boolean, custom = false) => {
     if (mb.vertexCount === 0) return;
     const g = mb.geometry(custom);
@@ -957,7 +909,17 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
     gm.matrixAutoUpdate = false;
     group.add(gm);
   }
-  add(screenMB, screenMat, 'big_screens', false);
+  if (screenMB.vertexCount > 0) {
+    const g = screenMB.geometry(false);
+    g.setAttribute('aScr', screenSizeAttribute(screenSizes));
+    const m = new THREE.Mesh(g, bigScreenMaterial());
+    m.name = 'big_screens';
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    group.add(m);
+    screenSites.list = sites;
+    screenSites.root = m;
+  }
 
   // crowd
   const uniforms = { uTime: { value: 0 } };

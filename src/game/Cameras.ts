@@ -494,12 +494,17 @@ export class Cameras {
   /** what the cameras can see (null: only the barrier heuristic) */
   readonly sight: Sightlines | null;
 
-  constructor(camera: THREE.PerspectiveCamera, track: Track, sight: Sightlines | null = null) {
+  /**
+   * `twin`: another lens on the same circuit (the big screens' feed) — it shares that set's placed
+   * trackside cameras and sight lines instead of surveying the lap again.
+   */
+  constructor(camera: THREE.PerspectiveCamera, track: Track, sight: Sightlines | null = null, twin: Cameras | null = null) {
     this.camera = camera;
     this.track = track;
-    this.sight = sight;
+    this.sight = twin ? twin.sight : sight;
     const t0 = performance.now();
-    this.buildTv(track);
+    if (twin && twin.track === track) this.tv = twin.tv;
+    else this.buildTv(track);
     this.placeMs = Math.round(performance.now() - t0);
   }
   /** how long placing the trackside cameras took (ms) */
