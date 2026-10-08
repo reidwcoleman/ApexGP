@@ -124,11 +124,21 @@ npm run check    # tsc --noEmit
   of the scan's real leaves, lying in the cell's own plane along its own axis, textured with real sprays of that
   tree's leaves (separate near / far sprays so leaves keep their real size at every LOD) — so a crown has gaps, a
   ragged edge, branches inside and a dark interior; a fir's sprays are flat stretches of bough, so it reads as
-  layered drooping tiers from below. Three LODs (LOD2 also casts every near tree's shadow from a second,
-  shadow-only BatchedMesh), hashed alpha once leaves get small, then 8-view impostors of the full scan (conifers
-  hand over sooner, ~55 m). Every LOD change and the impostor hand-over is a matched dither over a few metres, and
-  every distance is measured from the camera's look-ahead (the stretch its next half second of travel covers), so
-  the trees the car is heading for are at full detail well before it reaches them, not as it passes. Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
+  layered drooping tiers from below. Each spray also has an inner copy pulled toward the crown's core, turned and
+  mirrored (two for a fir: `TREE_BUILD`), so a crown is several leaf layers deep and as full as the scan (3D crowns
+  cover 0.8–1.0 of what the impostor frames of the full scan cover: `tools/treelod.mjs`), and every LOD keeps
+  LOD0's trunk and limbs. The leaf atlas's alpha is coverage-preserving per cell and mip (`leafCover.ts`, worked
+  out in a worker), so distant sprays keep their density without hashed-alpha speckle; leaves and bark get
+  specular anti-aliasing (no sparkle in the rain). Three LODs (LOD2 also casts every near tree's shadow from a
+  second, shadow-only BatchedMesh, thinning out leaf by leaf before it leaves the shadow range), then 8-view
+  impostors of the full scan (conifers hand over sooner, ~52 m), colour-matched per prototype to LOD2
+  (`IMP_GAIN`, `node tools/treelod.mjs calib`). Every change of detail (LOD, impostor) is decided on the CPU and
+  played as a matched dissolve over 0.3 s, with 5 m of hysteresis; a camera cut just sets the new state — no tree
+  swaps in a frame and none is left stippled near a boundary (`tools/treepop.mjs` counts them per camera;
+  `tools/treeseq.mjs` shoots consecutive fixed-clock frames). Every distance is measured from the camera's look-ahead (the stretch its next half second of travel covers), so
+  the trees the car is heading for are at full detail well before it reaches them, not as it passes. Beyond the
+  shadow casters, the woods upwind shade the crowns (the ground's crown mask read toward the sun), so golden-hour
+  forests don't glow behind shaded near trees. Wind is per vertex (`treematerial.ts`): trunks lean and swing (drag ∝ speed², bigger
   trees slower), gusts roll downwind through the woods, limbs swing at their own phase, leaves rock and flash;
   calm in fog, thrashing in a storm; impostors share the trunk sway. A car's wake (`feedCarWake`, fed from
   `Game`'s rigs) ruffles the verge grass, bushes and low branches it passes.
