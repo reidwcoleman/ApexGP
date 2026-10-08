@@ -4,8 +4,9 @@ import type { WorldMap } from '../worldmap.ts';
 import type { Layout } from '../layout.ts';
 import { ARCH } from '../archMaterial.ts';
 import { H as PIT_H } from '../../pitlane/building.ts';
-import { DB } from './dressBrands.ts';
-import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dressKit.ts';
+import { rosterFor, type Roster } from '../../partners.ts';
+import { LedReel, rotation } from './ledReel.ts';
+import { Dress, DressAtlas, brandCell, textCell, titleCell, type DressCell } from './dressKit.ts';
 
 /**
  * Zandvoort dressed for the Dutch Grand Prix: orange on everything the broadcast sees.
@@ -20,47 +21,50 @@ import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dr
  *                      at the fence everywhere else)
  *   painted run-off    logos in the tarmac run-off on the exit of the Hans Ernst chicane
  *
- * Orange and the Dutch red-white-blue for the event, the lager's green (a Dutch brewer's
- * home race), the supermarket's yellow, the flag carrier's sky blue.
+ * Orange and the Dutch red-white-blue for the event, the lager's green (the title partner, as
+ * in 2025–26: a Dutch brewer's home race, docs/F1_ADVERTISING.md §2), the supermarket's yellow,
+ * the flag carrier's sky blue.
  */
 
 export const ZVT_GANTRIES = [930];
 const ZVT_BRIDGES = [1690, 3480];
 
-function atlas(): DressAtlas {
+function atlas(R: Roster): { atlas: DressAtlas; reel: LedReel } {
   const nl = ['#ae1c28', '#ffffff', '#21468b'];
-  return new DressAtlas([
-    textCell('gp', 'DUTCH GRAND PRIX', { bg: '#ff6a00', fg: '#ffffff', bands: nl, weight: 900, italic: true }),
+  // the event's own LED slide, in the reel after the title partner's
+  const ledGp: DressCell['draw'] = (g, x, y, w, h) => {
+    g.fillStyle = '#ff6a00';
+    g.fillRect(x, y, w, h);
+    g.fillStyle = '#ffffff';
+    g.font = `italic 900 ${Math.round(h * 0.5)}px "Titillium Web", Arial, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('ZANDVOORT', x + w / 2, y + h / 2);
+  };
+  const atlas = new DressAtlas([
+    titleCell('gp', R.title, 'DUTCH GRAND PRIX', { bg: '#ff6a00', fg: '#ffffff', accent: '#ffffff', bands: nl }),
     textCell('gpW', 'DUTCH GRAND PRIX', { bg: '#ffffff', fg: '#ff6a00', top: '#ff6a00', bands: nl, weight: 900, italic: true }),
     textCell('zandvoort', 'ZANDVOORT', { bg: '#21468b', fg: '#ffffff', sub: 'CIRCUIT · AAN ZEE', subFg: '#ffb27a', weight: 900, track: 0.08 }),
     textCell('oranje', 'HUP HOLLAND HUP', { bg: '#ff7b00', fg: '#101216', weight: 900, italic: true }),
     textCell('orange', 'ORANJE', { bg: '#101216', fg: '#ff7b00', weight: 900, italic: true, track: 0.1 }),
-    brandCell('lager', DB.lager),
-    brandCell('duinbank', DB.oranje),
-    brandCell('groot', DB.grootmarkt),
-    brandCell('noordzee', DB.noordzee),
-    brandCell('watch', DB.watch),
-    brandCell('freight', DB.freight),
-    brandCell('tyres', DB.tyres),
-    brandCell('crypto', DB.crypto),
-    brandCell('cruise', DB.cruise),
-    brandCell('cloud', DB.cloud),
-    ledCell('ledGp', (g, x, y, w, h) => {
-      g.fillStyle = '#ff6a00';
-      g.fillRect(x, y, w, h);
-      g.fillStyle = '#ffffff';
-      g.font = `italic 900 ${Math.round(h * 0.5)}px "Titillium Web", Arial, sans-serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText('ZANDVOORT', x + w / 2, y + h / 2);
-    }),
-    ledCell('ledLager', brandDraw(DB.lager)),
-    ledCell('ledDuin', brandDraw(DB.oranje)),
+    brandCell('lager', R.b('lager')),
+    brandCell('duinbank', R.b('duinbank')),
+    brandCell('groot', R.b('grootmarkt')),
+    brandCell('noordzee', R.b('noordzee')),
+    brandCell('watch', R.b('timing')),
+    brandCell('freight', R.b('logistics')),
+    brandCell('tyres', R.b('tyres')),
+    brandCell('crypto', R.b('crypto')),
+    brandCell('cruise', R.b('cruise')),
+    brandCell('cloud', R.b('cloud')),
   ]);
+  return { atlas, reel: new LedReel(rotation(R, [['ledGp', ledGp]])) };
 }
 
 export function buildZandvoortDress(track: Track, map: WorldMap, layout: Layout): THREE.Group {
-  const d = new Dress(track, map, layout, atlas());
+  const partners = rosterFor(track.def.id);
+  const dressing = atlas(partners);
+  const d = new Dress(track, map, layout, dressing.atlas, dressing.reel);
   const R = 1;
   const c = (n: string) => d.corner(n);
   const t1 = c('Tarzanbocht'), he = c('Hans Ernstbocht'), t13 = c('Turn 13'), t9 = c('Turn 9'), t10 = c('Turn 10');
@@ -108,14 +112,14 @@ export function buildZandvoortDress(track: Track, map: WorldMap, layout: Layout)
 
   // ---------------------------------------------------------------- the main straight
   d.gantry({ s: ZVT_GANTRIES[0], cells: ['gp', 'lager', 'gp'], back: ['zandvoort', 'oranje', 'zandvoort'], y0: 6.6, h: 1.8, steel: 0xd9dadc });
-  d.hoardings({ sA: 300, sB: 432, side: R, off: 5.2, cells: ['ledGp', 'ledLager', 'ledDuin'], run: 2, led: true, y0: 1.3, h: 1.2 });
+  d.hoardings({ sA: 300, sB: 432, side: R, off: 5.2, cells: ['title'], run: 2, led: true, y0: 1.3, h: 1.2 });
   // round the inside of Tarzan, looking out at the stands on the dune
-  if (t1) d.hoardings({ sA: t1.sStart - 20, sB: t1.sEnd + 80, side: R, off: 5.0, cells: ['oranje', 'groot', 'gp', 'noordzee', 'freight', 'orange'], run: 2 });
+  if (t1) d.hoardings({ sA: t1.sStart - 20, sB: t1.sEnd + 80, side: R, off: 5.0, cells: ['oranje', 'lager', 'groot', 'gp', 'noordzee', 'freight', 'orange'], run: 2 });
   // the loop through Turns 9 and 10
-  if (t9 && t10) d.hoardings({ sA: t9.sStart - 80, sB: t10.sEnd + 120, side: R, off: 5.0, cells: ['duinbank', 'watch', 'tyres', 'crypto', 'cruise', 'cloud', 'gpW'], run: 3 });
+  if (t9 && t10) d.hoardings({ sA: t9.sStart - 80, sB: t10.sEnd + 120, side: R, off: 5.0, cells: ['lager', 'duinbank', 'watch', 'tyres', 'crypto', 'cruise', 'cloud', 'gpW'], run: 3 });
 
   // ---------------------------------------------------------------- painted run-off
-  if (t13) d.logos(t13.sStart - 20, t13.sEnd + 60, R, ['gp', 'duinbank', 'lager'], 28, 18);
+  if (t13) d.logos(t13.sStart - 20, t13.sEnd + 60, R, ['lager', 'duinbank', 'gp'], 28, 18);
 
   return d.build('ZandvoortDress');
 }

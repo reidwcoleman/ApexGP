@@ -5,9 +5,11 @@ import type { GrandstandSpec, SpectatorBank } from '../layout.ts';
 import { ARCH } from '../archMaterial.ts';
 import { srgb } from '../geom.ts';
 import {
-  BannerAtlas, DRESS_BRANDS as B, Dress, barrierLine, brandCell, brandNamed, dressPlan, footbridge, ledCell, ledRun, pitRow, planBridge, planRow, rowModule, setDressPlan, wordCell,
+  BannerAtlas, Dress, barrierLine, brandCell, brandWord, dressPlan, footbridge, ledRun, pitRow, planBridge, planRow, rowModule, setDressPlan, wordCell,
   type BridgeSpot, type RowSpot,
 } from './venueDressKit.ts';
+import { rosterFor } from '../../partners.ts';
+import { LedReel, rotation } from './ledReel.ts';
 import { DRESS_BRIDGES } from './dressBridges.ts';
 
 /**
@@ -18,10 +20,14 @@ import { DRESS_BRIDGES } from './dressBridges.ts';
  *                       stepping down the hill, spectators along the rail on its roof, the old
  *                       two-storey timing block at the top end
  *   the bridges         the footbridge over the run down to Eau Rouge, just past the old pits, in
- *                       the watchmaker's green; the Kemmel bridge over the straight past the
- *                       Raidillon crest, a lager's green and red; the bridge on the long run from
- *                       Paul Frère toward Blanchimont
- *   LED boards          along the wall in front of the main grandstand opposite the pits
+ *                       the title partner's bottle green (the champagne house, as in 2025–26:
+ *                       docs/F1_ADVERTISING.md §2); the Kemmel bridge over the straight past the
+ *                       Raidillon crest, the series lager's green; the bridge on the long run from
+ *                       Paul Frère toward Blanchimont, the freight yellow
+ *   the old pits'       the promoter's partners: Ardennes water, the abbey beer, the chocolatier
+ *   fascias
+ *   LED boards          along the wall in front of the main grandstand opposite the pits, rolling
+ *                       through the partners
  */
 
 interface SpaPlan {
@@ -59,33 +65,28 @@ export function planSpaDress(track: Track, map: WorldMap, gs: GrandstandSpec[], 
 export function buildSpaDress(track: Track, map: WorldMap): THREE.Group | null {
   const plan = dressPlan<SpaPlan>(map);
   if (!plan) return null;
+  const R = rosterFor(track.def.id);
   const atlas = new BannerAtlas([
-    ['coronelle', 'band', wordCell({ text: 'CORONELLE', bg: '#0b5a3a', fg: '#e8cf86', weight: 600, track: 0.24, seed: 7 })],
-    ['valdor', 'band', brandCell(B.valdor, false, 12)],
-    ['hallstein', 'band', wordCell({ text: 'HALLSTEIN', bg: '#0b6e3f', fg: '#ffffff', accent: '#e4002b', weight: 700, rules: true, track: 0.06, seed: 17 })],
+    ['title', 'band', brandWord(R.b('title'), { seed: 7 })],
+    ['valdor', 'band', brandCell(R.b('valdor'), false, 12)],
+    ['lager', 'band', brandWord(R.b('lager'), { rules: true, seed: 17 })],
     ['spa', 'band', wordCell({ text: 'CIRCUIT DE SPA-FRANCORCHAMPS', bg: '#1a1a1a', fg: '#fdda24', accent: '#ef3340', weight: 700, rules: true, track: 0.04, seed: 19 })],
-    ['karro', 'band', wordCell({ text: 'KARRO', bg: '#ffcc00', fg: '#d40511', italic: true, sx: 1.25, seed: 23 })],
-    ['nexa', 'band', brandCell(B.nexa, false, 29)],
+    ['logistics', 'band', brandWord(R.b('logistics'), { seed: 23 })],
+    ['crypto', 'band', brandCell(R.b('crypto'), false, 29)],
     ['spa_board', 'board', wordCell({ text: 'SPA-FRANCORCHAMPS', bg: '#1a1a1a', fg: '#fdda24', accent: '#ef3340', weight: 700, rules: true, seed: 37 })],
-    ['fascia0', 'band', brandCell(B.valdor, true, 41)],
-    ['fascia1', 'band', brandCell(B.hallstein, false, 42)],
-    ['fascia2', 'band', brandCell(brandNamed('MAISON DUVAL'), false, 43)],
-    ['led0', 'band', ledCell(brandCell(B.hallstein, false, 51, 0.3))],
-    ['led1', 'band', ledCell(brandCell(B.coronelle, false, 52, 0.3))],
-    ['led2', 'band', ledCell(brandCell(B.karro, false, 53, 0.3))],
-    ['led3', 'band', ledCell(brandCell(B.valdor, false, 54, 0.3))],
-    ['led4', 'band', ledCell(brandCell(B.nexa, false, 55, 0.3))],
-    ['led5', 'band', ledCell(brandCell(brandNamed('CASTELLAN'), false, 56, 0.3))],
-    ['coronelle_p', 'panel', brandCell(B.coronelle, false, 61)],
-    ['hallstein_p', 'panel', brandCell(B.hallstein, false, 62)],
+    ['fascia0', 'band', brandCell(R.b('valdor'), true, 41)],
+    ['fascia1', 'band', brandCell(R.b('abbaye'), false, 42)],
+    ['fascia2', 'band', brandCell(R.b('mercx'), false, 43)],
+    ['title_p', 'panel', brandCell(R.b('title'), false, 61)],
+    ['lager_p', 'panel', brandCell(R.b('lager'), false, 62)],
   ]);
-  const d = new Dress(track, map, atlas);
+  const d = new Dress(track, map, atlas, new LedReel(rotation(R), 1024, 128));
   const [eauRouge, kemmel, blanchimont] = plan.bridges;
-  if (eauRouge) footbridge(d, eauRouge, { front: ['coronelle'], back: ['spa'], kind: 'truss', steel: 0x0b3d28, towerCells: ['coronelle_p'] });
-  if (kemmel) footbridge(d, kemmel, { front: ['hallstein'], back: ['valdor'], kind: 'box', steel: 0x2b2f35, tower: 0xc9ccce, towerCells: ['hallstein_p'] });
-  if (blanchimont) footbridge(d, blanchimont, { front: ['karro'], back: ['nexa'], kind: 'truss', steel: 0x3a3d42 });
+  if (eauRouge) footbridge(d, eauRouge, { front: ['title'], back: ['spa'], kind: 'truss', steel: 0x0b3d28, towerCells: ['title_p'] });
+  if (kemmel) footbridge(d, kemmel, { front: ['lager'], back: ['valdor'], kind: 'box', steel: 0x2b2f35, tower: 0xc9ccce, towerCells: ['lager_p'] });
+  if (blanchimont) footbridge(d, blanchimont, { front: ['logistics'], back: ['crypto'], kind: 'truss', steel: 0x3a3d42 });
   // LED boards along the grandstand wall opposite the pits (pits on the left)
-  ledRun(d, 340, 790, 1, 1.0, ['led0', 'led1', 'led2', 'led3', 'led4', 'led5'], 3);
+  ledRun(d, 340, 790, 1, 1.0, ['title'], 3);
 
   if (plan.oldPits) {
     const row = plan.oldPits;

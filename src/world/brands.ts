@@ -7,18 +7,21 @@ import '@fontsource/titillium-web/700-italic.css';
 import '@fontsource/titillium-web/900.css';
 
 /**
- * The paddock's sponsors: one registry for every board, banner, fascia and bridge, so a brand looks
- * the same wherever it appears. All fictional. Each has a sector, a word mark (weight, case,
- * tracking, slant), a simple logo mark, brand colours and a tagline — drawn as a lockup at the
- * board's own proportions, then weathered like printed vinyl (grain, a dirty bottom edge, rain
- * streaks, seams on long banners), so the boards read as printed things rather than text on a fill.
+ * How a sponsor's board is drawn: one look for every board, banner, fascia and bridge, so a brand
+ * looks the same wherever it appears. All fictional. Each has a category, a word mark (weight,
+ * case, tracking, slant, stretch), a simple emblem, brand colours and a tagline — drawn as a lockup
+ * at the board's own proportions, then weathered like printed vinyl (grain, a dirty bottom edge,
+ * rain streaks, seams on long banners), so the boards read as printed things rather than text on a
+ * fill. Which brands a circuit carries, and where, is partners.ts (docs/F1_ADVERTISING.md).
  */
 
-export type BrandMark = 'ring' | 'wing' | 'shield' | 'bars' | 'dot' | 'diamond' | 'wave' | 'none';
+export type BrandMark = 'ring' | 'wing' | 'shield' | 'bars' | 'dot' | 'diamond' | 'wave' | 'chevron' | 'star' | 'sun' | 'monogram' | 'globe' | 'leaf' | 'none';
 
 export interface Brand {
   name: string;
   tag: string;
+  /** what it sells (timing, tyres, logistics, bank…): which contract positions it holds (partners.ts) */
+  cat?: string;
   /** board background, word mark, accent (mark / rule) */
   bg: string;
   fg: string;
@@ -33,34 +36,10 @@ export interface Brand {
   lower?: boolean;
 }
 
-export const BRANDS: Brand[] = [
-  { name: 'MARLOWE & PIERCE', tag: 'PRIVATE BANKING SINCE 1868', bg: '#0f2342', fg: '#f3efe6', accent: '#c9a45c', mark: 'shield', weight: 300, track: 0.14 },
-  { name: 'TERRANO', tag: 'ENERGY · LOW-CARBON FUELS', bg: '#ffffff', fg: '#0b6b3a', accent: '#f2b705', mark: 'dot', weight: 900, italic: true },
-  { name: 'KESSLER', tag: 'CHRONOGRAPHE · GENÈVE', bg: '#0b0b0c', fg: '#e9e4d8', accent: '#b8975a', mark: 'none', weight: 300, track: 0.32 },
-  { name: 'HOLLIS', tag: 'GLOBAL FREIGHT PARTNER', bg: '#f4f4f2', fg: '#c1121f', accent: '#1d1d1f', mark: 'bars', weight: 900, sx: 1.18 },
-  { name: 'Aurelia', tag: 'ESPRESSO ITALIANO', bg: '#3b1f14', fg: '#f5e6c8', accent: '#d9a441', mark: 'ring', weight: 600, italic: true, lower: true },
-  { name: 'NORVIK', tag: 'TELECOM · 5G', bg: '#5a1e8c', fg: '#ffffff', accent: '#ff6fb5', mark: 'wave', weight: 700 },
-  { name: 'CASTELLAN', tag: 'PERFORMANCE TYRES', bg: '#141414', fg: '#ffd21f', accent: '#ffd21f', mark: 'diamond', weight: 900, italic: true, sx: 1.1 },
-  { name: 'SABLE AIRWAYS', tag: 'FLY FURTHER', bg: '#ffffff', fg: '#10284f', accent: '#d71920', mark: 'wing', weight: 600, track: 0.04 },
-  { name: 'cirrusnet', tag: 'CLOUD · DATA · AI', bg: '#0a1624', fg: '#5ee2ff', accent: '#5ee2ff', mark: 'dot', weight: 400, lower: true, track: 0.02 },
-  { name: 'VIREO', tag: 'NATURAL SPRING WATER', bg: '#e8f4fb', fg: '#0a4c8c', accent: '#47a9e0', mark: 'wave', weight: 600, track: 0.1 },
-  { name: 'OAKRIDGE', tag: 'ENGINEERED LUBRICANTS', bg: '#1b1b1b', fg: '#ff7a00', accent: '#ff7a00', mark: 'bars', weight: 900, italic: true },
-  { name: 'MAISON DUVAL', tag: 'CHAMPAGNE · REIMS', bg: '#0e2a1f', fg: '#e8d6a8', accent: '#e8d6a8', mark: 'none', weight: 300, track: 0.22 },
-  { name: 'FERRANT', tag: 'INSURANCE GROUP', bg: '#ffffff', fg: '#0033a0', accent: '#00a3e0', mark: 'ring', weight: 700 },
-  { name: 'RIDGEWAY', tag: 'PAYMENTS', bg: '#111827', fg: '#ffffff', accent: '#22c55e', mark: 'diamond', weight: 600, track: 0.06 },
-  { name: 'HALDEN', tag: 'PRECISION TOOLS', bg: '#e30613', fg: '#ffffff', accent: '#1d1d1f', mark: 'bars', weight: 900, sx: 1.15 },
-  { name: 'LUMEN', tag: 'OPTICS & EYEWEAR', bg: '#f5f3ee', fg: '#1a1a1a', accent: '#d4a017', mark: 'ring', weight: 300, track: 0.3 },
-  { name: 'PARRISH & VALE', tag: 'LONDON', bg: '#1c1c1c', fg: '#f1ede4', accent: '#8a1c2b', mark: 'none', weight: 400, track: 0.18 },
-  { name: 'KOSEI', tag: 'ELECTRONICS', bg: '#0050b5', fg: '#ffffff', accent: '#ffffff', mark: 'wing', weight: 700, italic: true },
-];
-
 const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
 
 /** every face the brand boards use (boot waits for these before painting the atlases) */
 export const BRAND_FONTS = ['300', '400', '600', '700', '900', 'italic 600', 'italic 700'].map((f) => `${f} 20px "Titillium Web"`);
-
-/** a brand by index (wraps) */
-export const brandAt = (k: number): Brand => BRANDS[((k % BRANDS.length) + BRANDS.length) % BRANDS.length];
 
 function setTrack(g: CanvasRenderingContext2D, px: number) {
   const c = g as CanvasRenderingContext2D & { letterSpacing?: string };
@@ -150,6 +129,83 @@ function drawMark(g: CanvasRenderingContext2D, b: Brand, cx: number, cy: number,
         g.stroke();
       }
       break;
+    case 'chevron':
+      // two forward chevrons (a speed mark)
+      for (let k = 0; k < 2; k++) {
+        const x = cx - r * 0.75 + k * r * 0.7;
+        g.beginPath();
+        g.moveTo(x, cy - r * 0.8);
+        g.lineTo(x + r * 0.32, cy - r * 0.8);
+        g.lineTo(x + r * 0.85, cy);
+        g.lineTo(x + r * 0.32, cy + r * 0.8);
+        g.lineTo(x, cy + r * 0.8);
+        g.lineTo(x + r * 0.53, cy);
+        g.closePath();
+        g.fill();
+      }
+      break;
+    case 'star':
+      // an eight-point compass star
+      g.beginPath();
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2 - Math.PI / 2;
+        const rr = k % 2 ? r * 0.36 : k % 4 ? r * 0.62 : r * 0.95;
+        g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      }
+      g.closePath();
+      g.fill();
+      break;
+    case 'sun':
+      // a half sun rising over a rule
+      g.beginPath();
+      g.arc(cx, cy + r * 0.35, r * 0.48, Math.PI, 0);
+      g.fill();
+      g.lineWidth = r * 0.12;
+      g.lineCap = 'round';
+      for (let k = 0; k < 7; k++) {
+        const a = Math.PI + (k / 6) * Math.PI;
+        g.beginPath();
+        g.moveTo(cx + Math.cos(a) * r * 0.66, cy + r * 0.35 + Math.sin(a) * r * 0.66);
+        g.lineTo(cx + Math.cos(a) * r * 0.95, cy + r * 0.35 + Math.sin(a) * r * 0.95);
+        g.stroke();
+      }
+      g.fillRect(cx - r, cy + r * 0.45, r * 2, r * 0.14);
+      break;
+    case 'monogram':
+      // the initials in a thin square frame (the luxury houses' device)
+      g.lineWidth = r * 0.08;
+      g.strokeRect(cx - r * 0.82, cy - r * 0.82, r * 1.64, r * 1.64);
+      g.font = `300 ${Math.round(r * 1.05)}px ${FONT}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(b.name.split(/[\s&]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join(''), cx, cy + r * 0.04);
+      break;
+    case 'globe':
+      g.lineWidth = r * 0.12;
+      g.beginPath();
+      g.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
+      g.stroke();
+      g.beginPath();
+      g.ellipse(cx, cy, r * 0.36, r * 0.82, 0, 0, Math.PI * 2);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(cx - r * 0.82, cy);
+      g.lineTo(cx + r * 0.82, cy);
+      g.stroke();
+      break;
+    case 'leaf':
+      g.beginPath();
+      g.moveTo(cx - r * 0.8, cy + r * 0.8);
+      g.quadraticCurveTo(cx - r * 0.7, cy - r * 0.7, cx + r * 0.85, cy - r * 0.85);
+      g.quadraticCurveTo(cx + r * 0.7, cy + r * 0.7, cx - r * 0.8, cy + r * 0.8);
+      g.fill();
+      g.strokeStyle = b.bg;
+      g.lineWidth = r * 0.08;
+      g.beginPath();
+      g.moveTo(cx - r * 0.6, cy + r * 0.6);
+      g.lineTo(cx + r * 0.55, cy - r * 0.55);
+      g.stroke();
+      break;
     default:
       break;
   }
@@ -233,6 +289,117 @@ export function drawBrand(g: CanvasRenderingContext2D, x: number, y: number, w: 
     g.textAlign = 'center';
     g.fillText(b.tag, x + w / 2, y + h * 0.8);
   }
+  g.restore();
+}
+
+/**
+ * Just the lockup (emblem + word mark, no tagline, no background), centred in (x, y, w, h) in one
+ * colour or the brand's own: the painted run-off logos (one colour of road paint) and the partner
+ * block of an event title.
+ */
+export function drawWordmark(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, b: Brand, color?: string, withMark = true) {
+  g.save();
+  const hasMark = withMark && b.mark !== 'none';
+  const markR = h * 0.34;
+  const word = b.lower ? b.name : b.name.toUpperCase();
+  const style = `${b.italic ? 'italic ' : ''}${b.weight}`;
+  const sx = b.sx ?? 1;
+  let size = h * 0.72;
+  const avail = w * 0.94 - (hasMark ? markR * 2.7 : 0);
+  const measure = (s: number) => {
+    g.font = `${style} ${Math.round(s)}px ${FONT}`;
+    setTrack(g, s * (b.track ?? 0));
+    return g.measureText(word).width * sx;
+  };
+  while (size > 8 && measure(size) > avail) size *= 0.94;
+  const wordW = measure(size);
+  let cx = x + (w - wordW - (hasMark ? markR * 2.7 : 0)) / 2;
+  const midY = y + h / 2;
+  if (hasMark) {
+    // (one colour: the emblem's cut-outs are left open rather than filled with the board colour)
+    drawMark(g, color ? { ...b, accent: color, bg: 'rgba(0,0,0,0)' } : b, cx + markR, midY, markR);
+    cx += markR * 2.7;
+  }
+  g.fillStyle = color ?? b.fg;
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  g.font = `${style} ${Math.round(size)}px ${FONT}`;
+  setTrack(g, size * (b.track ?? 0));
+  g.translate(cx, midY + size * 0.04);
+  g.scale(sx, 1);
+  g.fillText(word, 0, 0);
+  g.restore();
+}
+
+export interface TitleStyle {
+  /** the banner's ground, the Grand Prix's lettering, the rule along the bottom */
+  bg: string;
+  fg: string;
+  accent: string;
+  /** the host's colours as bands along the bottom instead of the rule */
+  bands?: string[];
+  italic?: boolean;
+}
+
+/**
+ * The event's own banner, laid out like the real race titles ("FORMULA 1 <partner> <race name>",
+ * docs/F1_ADVERTISING.md §2): the title partner's lockup in its own colour block at the left, then
+ * the Grand Prix's name in the host's language filling the rest. Without a title partner (Mexico
+ * City) the name has the whole banner. A squarer cell stacks the partner over the name.
+ */
+export function drawTitle(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, partner: Brand | null, gp: string, st: TitleStyle) {
+  g.save();
+  g.beginPath();
+  g.rect(x, y, w, h);
+  g.clip();
+  g.fillStyle = st.bg;
+  g.fillRect(x, y, w, h);
+  const ruleH = h * 0.12;
+  if (st.bands) {
+    const n = st.bands.length;
+    st.bands.forEach((c, i) => {
+      g.fillStyle = c;
+      g.fillRect(x + (i * w) / n, y + h - ruleH, w / n + 1, ruleH);
+    });
+  } else {
+    g.fillStyle = st.accent;
+    g.fillRect(x, y + h - ruleH, w, ruleH);
+  }
+  const inner = h - ruleH;
+  const stacked = w / h < 3;
+  let nx = x + w * 0.04, nw = w * 0.92, ny = y, nh = inner;
+  if (partner) {
+    if (stacked) {
+      g.fillStyle = partner.bg;
+      g.fillRect(x, y, w, inner * 0.42);
+      drawWordmark(g, x + w * 0.08, y + inner * 0.06, w * 0.84, inner * 0.3, partner, undefined, false);
+      ny = y + inner * 0.42;
+      nh = inner * 0.58;
+    } else {
+      // (the partner's block: its own colours, a fixed share of the banner)
+      const pw = Math.min(w * 0.34, h * 3);
+      g.fillStyle = partner.bg;
+      g.fillRect(x, y, pw, inner);
+      // (the word mark alone: at this size the emblem would only shrink the name)
+      drawWordmark(g, x + pw * 0.06, y + inner * 0.16, pw * 0.88, inner * 0.68, partner, undefined, false);
+      nx = x + pw + w * 0.025;
+      nw = w - pw - w * 0.05;
+    }
+  }
+  let size = nh * 0.5;
+  const set = () => {
+    g.font = `${st.italic === false ? '' : 'italic '}900 ${Math.round(size)}px ${FONT}`;
+    setTrack(g, 0);
+  };
+  set();
+  while (size > 8 && g.measureText(gp).width > nw) {
+    size *= 0.94;
+    set();
+  }
+  g.fillStyle = st.fg;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(gp, nx + nw / 2, ny + nh * 0.53);
   g.restore();
 }
 

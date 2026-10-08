@@ -3,7 +3,8 @@ import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
 import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
-import { brandAt, drawBrand, printWear } from '../brands.ts';
+import { drawBrand, printWear } from '../brands.ts';
+import { roster } from '../partners.ts';
 
 /**
  * Canvas-drawn boards: grandstand fascia sponsors, team name boards for the pit
@@ -11,40 +12,33 @@ import { brandAt, drawBrand, printWear } from '../brands.ts';
  * immediately with a fallback font and redrawn once Titillium Web has loaded.
  */
 
-export const SPONSORS: { name: string; bg: string; fg: string; accent?: string }[] = [
-  { name: 'VELOCE', bg: '#c8102e', fg: '#ffffff' },
-  { name: 'QUANTA', bg: '#0d0f12', fg: '#00d2be' },
-  { name: 'KRAFT ENERGY', bg: '#1b2552', fg: '#ffcc00' },
-  { name: 'ORBIT', bg: '#ff7a00', fg: '#101216' },
-  { name: 'ARBOR', bg: '#00574b', fg: '#cedc00' },
-  { name: 'CIELO', bg: '#0a5cc2', fg: '#ffffff' },
-  { name: 'NORTHWIND', bg: '#061a40', fg: '#00a3e0' },
-  { name: 'IRONCLAD', bg: '#f2f2f2', fg: '#141414', accent: '#d40f1c' },
-  { name: 'PULSAR', bg: '#f7f8fb', fg: '#1434cb' },
-  { name: 'AXIOM', bg: '#0a0a0a', fg: '#ff2a1f' },
-  { name: 'HELIX OIL', bg: '#ffd400', fg: '#1a1a1a' },
-  { name: 'MAREA TELECOM', bg: '#5b2c83', fg: '#ffffff' },
-  { name: 'AZURA TIME', bg: '#0b0b0d', fg: '#d9b56b' },
-  { name: 'LAMBRO AIR', bg: '#e6f1fb', fg: '#0a4c8c' },
-  { name: 'SOLARA', bg: '#ff4a1c', fg: '#fff5e0' },
-  { name: 'APEX GP', bg: '#111317', fg: '#ffffff', accent: '#e10600' },
-  { name: 'BRIANZA BANCA', bg: '#f4efe4', fg: '#1f3a5a' },
-  { name: 'CAFFÈ VILLORESI', bg: '#1f3a5a', fg: '#f4efe4' },
+/**
+ * The fascia boards (grandstands, the banking, the landmarks take them in turn): the circuit's
+ * partners (partners.ts), the promoter's local partners on every other board — the stands are the
+ * promoter's to sell (docs/F1_ADVERTISING.md §1, §5) — between the title partner, the big series
+ * contracts and the series' own board. Keys into the roster; 'series' is the series' own board.
+ */
+const FASCIA: string[] = [
+  'title', '@0', 'lager', '@1', 'timing', '@2', 'logistics', '@3', 'series',
+  '@4', 'airline', '@5', 'energy', 'title', 'tyres', '@0', 'cruise', 'champagne',
 ];
+const SERIES_BOARD = { name: 'APEX GP', bg: '#111317', fg: '#ffffff', accent: '#e10600' };
 
 const ATLAS_W = 2048;
 const BOARD_H = 128;
 const BOARDS_PER_ROW = 2;
-export const SPONSOR_ROWS = Math.ceil(SPONSORS.length / BOARDS_PER_ROW);
+export const SPONSOR_ROWS = Math.ceil(FASCIA.length / BOARDS_PER_ROW);
 
 let _sponsor: THREE.CanvasTexture | null = null;
+/** the circuit whose partners the fascia atlas shows */
+let _sponsorFor = '';
 let _teams: THREE.CanvasTexture | null = null;
 
 function font(size: number, weight = 900) {
   return `${weight} ${size}px "Titillium Web", "Arial Narrow", Arial, sans-serif`;
 }
 
-function drawBoard(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, s: (typeof SPONSORS)[number]) {
+function drawBoard(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, s: typeof SERIES_BOARD) {
   ctx.fillStyle = s.bg;
   ctx.fillRect(x, y, w, h);
   if (s.accent) {
@@ -66,19 +60,28 @@ function drawBoard(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 function drawSponsors(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d')!;
   const w = ATLAS_W / BOARDS_PER_ROW;
-  SPONSORS.forEach((s, i) => {
+  const R = roster();
+  _sponsorFor = R.id;
+  FASCIA.forEach((key, i) => {
     const col = i % BOARDS_PER_ROW;
     const row = Math.floor(i / BOARDS_PER_ROW);
-    // (the series' own board keeps its livery; the rest are the paddock's brands, as long bands)
-    if (s.name === 'APEX GP') drawBoard(ctx, col * w, row * BOARD_H, w, BOARD_H, s);
-    else drawBrand(ctx, col * w, row * BOARD_H, w, BOARD_H, brandAt(i + 7), i % 4 === 1);
+    // (the series' own board keeps its livery; the rest are the circuit's partners, as long bands)
+    if (key === 'series') drawBoard(ctx, col * w, row * BOARD_H, w, BOARD_H, SERIES_BOARD);
+    else drawBrand(ctx, col * w, row * BOARD_H, w, BOARD_H, R.b(key[0] === '@' ? R.local[Number(key.slice(1)) % R.local.length] : key));
     printWear(ctx, col * w, row * BOARD_H, w, BOARD_H, 211 + i, 0.8);
   });
 }
 
 /** Sponsor atlas: 2 boards per row, 128 px tall. UV of board k via sponsorUV(). */
 export function sponsorTexture(): THREE.CanvasTexture {
-  if (_sponsor) return _sponsor;
+  if (_sponsor) {
+    // (kept across circuit switches: repainted with the new circuit's partners)
+    if (_sponsorFor !== roster().id) {
+      drawSponsors(_sponsor.image as HTMLCanvasElement);
+      _sponsor.needsUpdate = true;
+    }
+    return _sponsor;
+  }
   const { canvas } = canvas2d(ATLAS_W, SPONSOR_ROWS * BOARD_H);
   drawSponsors(canvas);
   _sponsor = canvasTexture(canvas, true, 8);
@@ -90,7 +93,7 @@ export function sponsorTexture(): THREE.CanvasTexture {
 }
 
 export function sponsorUV(k: number): [number, number, number, number] {
-  const i = ((k % SPONSORS.length) + SPONSORS.length) % SPONSORS.length;
+  const i = ((k % FASCIA.length) + FASCIA.length) % FASCIA.length;
   const col = i % BOARDS_PER_ROW;
   const row = Math.floor(i / BOARDS_PER_ROW);
   const u0 = col / BOARDS_PER_ROW, u1 = (col + 1) / BOARDS_PER_ROW;

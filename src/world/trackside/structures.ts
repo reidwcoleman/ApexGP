@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { VERGE } from '../Track.ts';
 import { Frame3, WEATHER, beam, box, cylinder, disc, printQuadX, printQuadZ, type GeoBuilder } from './builder.ts';
 import { styleOf, type Ctx } from './context.ts';
-import { SPONSORS, type PrintAtlas } from './atlas.ts';
+import { adName, type PrintAtlas } from './atlas.ts';
+import { roster } from '../partners.ts';
 import { Rng } from './noise.ts';
 import { DRESS_BRIDGES } from '../env/venues/dressBridges.ts';
 
@@ -252,15 +253,17 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
   props.color(0x1d1f23).mat(0.45, 0.35, 0, WEATHER.STEEL);
   truss(props, F, x0 - 0.3, x1 + 0.3, BOT, TOP - BOT, 1.0, 0.14);
 
-  // sponsor banner across the truss, both faces
+  // banners across the truss, both faces: the race's title banner alternating with the
+  // timekeeper's board (the timing partner holds the line: docs/F1_ADVERTISING.md §3)
   const cell = atlas.cell('gantry');
+  const timing = atlas.cell(adName('timing'));
   print.rgb(1, 1, 1).mat(0.5, 0, 0.35);
   const w = 4.8;
   const nb = Math.floor((x1 - x0 - 0.8) / w);
   const bx0 = (x0 + x1) / 2 - (nb * w) / 2;
   for (let k = 0; k < nb; k++) {
     const x = bx0 + k * w;
-    const c = k % 2 === 0 ? cell : atlas.cell('ad' + [6, 0, 14, 10, 2][((k - 1) / 2) % 5]);
+    const c = k % 2 === 0 ? cell : timing;
     printQuadZ(print, F, -0.56, x, x + w, BOT + 0.02, TOP - 0.02, -1, c);
     printQuadZ(print, F, 0.56, x, x + w, BOT + 0.02, TOP - 0.02, 1, c);
   }
@@ -298,6 +301,12 @@ function buildGantry(ctx: Ctx, atlas: PrintAtlas) {
 }
 
 // ------------------------------------------------------------------ sponsor footbridges
+
+/** who buys each generic footbridge's two faces (partners.ts keys), by bridge */
+const BRIDGE_FRONT = ['title', 'logistics', 'lager', 'timing', 'airline'];
+const BRIDGE_BACK = ['energy', 'cruise', 'tyres', 'cloud', 'crypto'];
+/** each generic arch's brand, and the brand of its middle banner */
+const ARCH_MAIN = ['tyres', 'cloud', 'airline', 'cruise', 'crypto'];
 
 function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const t = ctx.track;
@@ -361,7 +370,9 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
     props.color(DARK).mat(0.6, 0.2, 0, WEATHER.STEEL);
     for (const z of [-TD / 2 - 0.1, TD / 2 + 0.1]) box(props, F, tx, Y0 - 1.0, z, TW - 0.1, 1.5, 0.05, 0b111111);
     print.rgb(1, 1, 1).mat(0.55, 0, 0.1);
-    const c = atlas.cell('ad' + ((salt * 7 + (x < 0 ? 3 : 11)) % SPONSORS.length));
+    // (the towers' panels are the promoter's to sell: a local partner each, §1)
+    const loc = roster().local;
+    const c = atlas.cell(adName(loc[(salt * 2 + (x < 0 ? 0 : 1)) % loc.length]));
     printQuadZ(print, F, -TD / 2 - 0.14, tx - TW / 2 + 0.1, tx + TW / 2 - 0.1, Y0 - 1.7, Y0 - 0.3, -1, c);
     printQuadZ(print, F, TD / 2 + 0.14, tx - TW / 2 + 0.1, tx + TW / 2 - 0.1, Y0 - 1.7, Y0 - 0.3, 1, c);
   }
@@ -380,14 +391,16 @@ function buildBridge(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   // glazing just inside the trusses (upper half: people walking across show as shadows behind it)
   props.color(0x7f97a6).mat(0.06, 0.6, 0);
   for (const z of [-D / 2 + 0.14, D / 2 - 0.14]) box(props, F, (x0 + x1) / 2, Y0 + H * 0.68, z, x1 - x0, H * 0.58, 0.03, 0b110011);
-  // sponsor boards hung on the outer faces, lower half, between the truss panels
+  // sponsor boards hung on the outer faces, lower half, between the truss panels: each face sold
+  // whole to one brand (a footbridge is one contract), the title partner's facing the cars on the
+  // first bridge
   const w = 5.6;
+  const cellA = atlas.cell(adName(BRIDGE_FRONT[salt % BRIDGE_FRONT.length]));
+  const cellB = atlas.cell(adName(BRIDGE_BACK[salt % BRIDGE_BACK.length]));
   const count = Math.floor((x1 - x0 - 0.8) / w);
   const start = (x0 + x1) / 2 - (count * w) / 2;
   print.rgb(1, 1, 1).mat(0.55, 0, 0.25);
   for (let k = 0; k < count; k++) {
-    const cellA = atlas.cell('ad' + ((k + salt * 5) % SPONSORS.length));
-    const cellB = atlas.cell('ad' + ((k * 7 + 3 + salt * 3) % SPONSORS.length));
     printQuadZ(print, F, -D / 2 - 0.16, start + k * w + 0.08, start + (k + 1) * w - 0.08, Y0 + 0.08, Y0 + H * 0.42, -1, cellA);
     printQuadZ(print, F, D / 2 + 0.16, start + k * w + 0.08, start + (k + 1) * w - 0.08, Y0 + 0.08, Y0 + H * 0.42, 1, cellB);
   }
@@ -450,8 +463,8 @@ function buildArch(ctx: Ctx, atlas: PrintAtlas, s: number, salt: number) {
   const w = 5.2;
   const nb = Math.max(1, Math.floor((xr - xl - 0.6) / w));
   const bx0 = (xl + xr) / 2 - (nb * w) / 2;
-  const main = atlas.cell('ad' + ((salt * 5 + 2) % SPONSORS.length));
-  const alt = atlas.cell('ad' + ((salt * 5 + 9) % SPONSORS.length));
+  const main = atlas.cell(adName(ARCH_MAIN[salt % ARCH_MAIN.length]));
+  const alt = atlas.cell(adName('title'));
   print.rgb(1, 1, 1).mat(0.5, 0, 0.3);
   for (let k = 0; k < nb; k++) {
     const x = bx0 + k * w;
@@ -705,7 +718,8 @@ function buildBillboards(ctx: Ctx, atlas: PrintAtlas, spots: [string, number][])
     for (const x of [-W * 0.35, 0, W * 0.35]) box(props, F, x, Y / 2 + H / 2, 0.25, 0.18, Y + H, 0.18);
     box(props, F, 0, Y + H / 2, 0.12, W + 0.2, H + 0.2, 0.12, 0b111111);
     print.rgb(1, 1, 1).mat(0.55, 0, 0.2);
-    printQuadZ(print, F, 0.04, -W / 2, W / 2, Y, Y + H, -1, atlas.cell('ad' + ((salt + 5) % SPONSORS.length)));
+    // (the big corner boards are camera positions: the title partner and the big series contracts)
+    printQuadZ(print, F, 0.04, -W / 2, W / 2, Y, Y + H, -1, atlas.cell(adName(['title', 'timing', 'logistics', 'lager', 'energy', 'tyres'][salt % 6])));
   }
 }
 

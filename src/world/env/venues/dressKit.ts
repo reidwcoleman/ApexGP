@@ -6,19 +6,21 @@ import type { Layout } from '../layout.ts';
 import { MeshBuilder, srgb } from '../geom.ts';
 import { ARCH, archMaterial, member, tagAxis, tagClass } from '../archMaterial.ts';
 import { canvas2d, canvasTexture } from '../textures.ts';
-import { drawBrand, printWear, type Brand } from '../../brands.ts';
+import { drawBrand, drawTitle, printWear, type Brand, type TitleStyle } from '../../brands.ts';
 import { GlassGeo } from '../../pitlane/building.ts';
 import { glassMaterial } from '../../pitlane/materials.ts';
 import { makePlan, L as PIT_L, type PitPlan } from '../../pitlane/layout.ts';
 import { PIT_HANDOFF } from '../../trackside/context.ts';
+import type { LedReel } from './ledReel.ts';
 
 /**
  * A venue's own trackside dressing, laid out the way the circuit really dresses itself for the
  * race weekend rather than from the paddock-wide sponsor pool (trackside/structures.ts and
  * barriers.ts still do the generic boards, belts and fence wraps):
  *
- *   DressAtlas   one canvas per venue: the brands that venue's boards really carry (fictional
- *                names in the real boards' colour blocks), its event banners, LED boards
+ *   DressAtlas   one canvas per venue: its partners' boards (partners.ts: fictional names in the
+ *                real boards' colour blocks), its event banners; the LED boards show a `LedReel`
+ *                (ledReel.ts) rolling through the partners
  *   hoardings    a row of printed (or LED) boards on posts ~5–6 m behind the barrier, clear of
  *                the marshal posts, photographers and camera platforms in front of it; brands
  *                hold contracts, so the same board repeats in runs as on a real fence line
@@ -111,6 +113,11 @@ export class DressAtlas {
 /** a brand's lockup at the board's proportions, weathered */
 export function brandCell(name: string, b: Brand, w = 512, h = 128, invert = false, wear = 0.7): DressCell {
   return { name, w, h, wear, draw: (g, x, y, W, H) => drawBrand(g, x, y, W, H, b, invert) };
+}
+
+/** the event's banner: the race's title, the title partner's block first (brands.ts drawTitle) */
+export function titleCell(name: string, partner: Brand | null, gp: string, st: TitleStyle, w = 512, h = 128, wear = 0.6): DressCell {
+  return { name, w, h, wear, draw: (g, x, y, W, H) => drawTitle(g, x, y, W, H, partner, gp, st) };
 }
 
 export interface TextStyle {
@@ -271,15 +278,23 @@ export class Dress {
   readonly map: WorldMap;
   readonly layout: Layout;
   readonly atlas: DressAtlas;
+  /** the LED boards' rotation (every LED face shows a slide of it) */
+  readonly reel: LedReel | null;
   /** s of every big overhead structure the generic trackside also builds (footbridges): hoardings keep clear */
   keepClear: number[] = [];
   glassTint = 0x2c3a44;
 
-  constructor(track: Track, map: WorldMap, layout: Layout, atlas: DressAtlas) {
+  constructor(track: Track, map: WorldMap, layout: Layout, atlas: DressAtlas, reel: LedReel | null = null) {
     this.track = track;
     this.map = map;
     this.layout = layout;
     this.atlas = atlas;
+    this.reel = reel;
+  }
+
+  /** an LED face's UVs: a slide of the reel (or an atlas cell, without one) */
+  ledUV(cell: string): [number, number, number, number] {
+    return this.reel ? this.reel.uv(cell) : this.atlas.uv(cell);
   }
 
   // ---------------------------------------------------------------- placement
@@ -420,7 +435,7 @@ export class Dress {
         }
         lastPost = b.clone();
         const cell = o.cells[Math.floor(k / run) % o.cells.length];
-        this.face(o.led ? this.led : this.print, A, B, h, this.atlas.uv(cell), toward);
+        this.face(o.led ? this.led : this.print, A, B, h, o.led ? this.ledUV(cell) : this.atlas.uv(cell), toward);
         k++;
       }
       a = b;
@@ -517,7 +532,8 @@ export class Dress {
       const look = at(0, y0, v * 100);
       for (let k = 0; k < n; k++) {
         const a = at(x0 + k * bw + 0.03, y0, v), b = at(x0 + (k + 1) * bw - 0.03, y0, v);
-        this.face(mb, a, b, h, this.atlas.uv(cells[Math.floor(k / run) % cells.length]), look);
+        const cell = cells[Math.floor(k / run) % cells.length];
+        this.face(mb, a, b, h, o.led ? this.ledUV(cell) : this.atlas.uv(cell), look);
       }
     }
     // backing sheet between the faces
@@ -673,7 +689,7 @@ export class Dress {
       const a = s0 + ((s1 - s0) * k) / n, b = s0 + ((s1 - s0) * (k + 1)) / n;
       const A = P(a, l, h0), B = P(b, l, h0);
       const look = P((a + b) / 2, l + dir * 50, h0);
-      this.face(led ? this.led : this.print, A, B, h1 - h0, this.atlas.uv(cells[k % cells.length]), look);
+      this.face(led ? this.led : this.print, A, B, h1 - h0, led ? this.ledUV(cells[k % cells.length]) : this.atlas.uv(cells[k % cells.length]), look);
     }
   }
 
@@ -696,7 +712,11 @@ export class Dress {
     add(this.arch, archMaterial(), `${name}_structure`, true, true);
     add(this.fine, archMaterial(true), `${name}_members`, false, true);
     add(this.print, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.12, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), `${name}_boards`, false, false);
-    add(this.led, new THREE.MeshStandardMaterial({ map: tex, color: 0x303030, roughness: 0.35, metalness: 0, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 1.1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), `${name}_led`, false, false);
+    const ledTex = this.reel?.texture ?? tex;
+    add(this.led, new THREE.MeshStandardMaterial({ map: ledTex, color: 0x303030, roughness: 0.35, metalness: 0, emissiveMap: ledTex, emissive: 0xffffff, emissiveIntensity: 1.1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), `${name}_led`, false, false);
+    // (the LED boards roll through the venue's partners)
+    const ledMesh = group.getObjectByName(`${name}_led`);
+    if (ledMesh && this.reel) this.reel.attach(ledMesh);
     // painted run-off: matt paint on tarmac, a shade darker than print, drawn after the road surfaces (renderOrder 1)
     add(this.paint, new THREE.MeshStandardMaterial({ map: tex, color: 0xcfcfcf, roughness: 0.8, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 }), `${name}_runoff`, false, false, 2);
     if (this.rooms.pos.length) {

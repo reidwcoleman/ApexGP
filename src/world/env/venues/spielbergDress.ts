@@ -4,8 +4,9 @@ import type { WorldMap } from '../worldmap.ts';
 import type { Layout } from '../layout.ts';
 import { ARCH } from '../archMaterial.ts';
 import { H as PIT_H } from '../../pitlane/building.ts';
-import { DB } from './dressBrands.ts';
-import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dressKit.ts';
+import { rosterFor, type Roster } from '../../partners.ts';
+import { LedReel, rotation } from './ledReel.ts';
+import { Dress, DressAtlas, brandCell, textCell, titleCell, type DressCell } from './dressKit.ts';
 
 /**
  * The Red Bull Ring dressed for the Grosser Preis von Österreich: a circuit owned by an energy
@@ -19,39 +20,42 @@ import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dr
  *                      kink at Turn 2, through Turn 5 and the valley at Turn 8 (the banks of fans
  *                      everywhere else stand right at the fence)
  *
- * The event's red-white-red, the Styrian tourism board's green, the Austrian bank's yellow.
+ * The event's red-white-red; the race's title partner (the laptop maker, as in 2026:
+ * docs/F1_ADVERTISING.md §2, §4) on the banners, the gantry and the first run-off beside the
+ * owner's drink; the Styrian tourism board's green, the Austrian bank's yellow.
  */
 
 const RBR_BRIDGES = [1330, 2330];
 export const RBR_GANTRIES = [2060];
 
-function atlas(): DressAtlas {
+function atlas(R: Roster): { atlas: DressAtlas; reel: LedReel } {
   const rwr = ['#c8102e', '#ffffff', '#c8102e'];
-  return new DressAtlas([
-    textCell('gp', 'GROSSER PREIS VON ÖSTERREICH', { bg: '#ffffff', fg: '#1b2b5a', bands: rwr, weight: 900, italic: true }),
+  const atlas = new DressAtlas([
+    titleCell('gp', R.title, 'GROSSER PREIS VON ÖSTERREICH', { bg: '#ffffff', fg: '#1b2b5a', accent: '#1b2b5a', bands: rwr }),
     textCell('spielberg', 'SPIELBERG', { bg: '#1b2b5a', fg: '#ffffff', sub: 'STEIERMARK · AUSTRIA', subFg: '#c9d1dc', weight: 900, italic: true, track: 0.06 }),
     textCell('ring', 'THE RING', { bg: '#c8102e', fg: '#ffffff', top: '#ffffff', bands: ['#ffffff'], weight: 900, italic: true, track: 0.12 }),
-    brandCell('bull', DB.bull),
-    brandCell('bullS', DB.bullSilver),
-    brandCell('bullM', DB.bullMobile),
-    brandCell('watch', DB.watch),
-    brandCell('freight', DB.freight),
-    brandCell('tyres', DB.tyres),
-    brandCell('cruise', DB.cruise),
-    brandCell('crypto', DB.crypto),
-    brandCell('cloud', DB.cloud),
-    brandCell('styria', DB.styria),
-    brandCell('alpbank', DB.alpbank),
-    brandCell('alpcom', DB.alpcom),
-    brandCell('airline', DB.airline),
-    ledCell('ledBull', brandDraw(DB.bull)),
-    ledCell('ledBullM', brandDraw(DB.bullMobile)),
-    ledCell('ledWatch', brandDraw(DB.watch)),
+    brandCell('title', R.b('title')),
+    brandCell('bull', R.b('energyDrink')),
+    brandCell('bullS', R.b('energyDrink'), 512, 128, true),
+    brandCell('bullM', R.b('tauro')),
+    brandCell('watch', R.b('timing')),
+    brandCell('freight', R.b('logistics')),
+    brandCell('tyres', R.b('tyres')),
+    brandCell('cruise', R.b('cruise')),
+    brandCell('crypto', R.b('crypto')),
+    brandCell('cloud', R.b('cloud')),
+    brandCell('styria', R.b('steiermark')),
+    brandCell('alpbank', R.b('alpenbank')),
+    brandCell('alpcom', R.b('alpcom')),
+    brandCell('airline', R.b('airline')),
   ]);
+  return { atlas, reel: new LedReel(rotation(R)) };
 }
 
 export function buildSpielbergDress(track: Track, map: WorldMap, layout: Layout): THREE.Group {
-  const d = new Dress(track, map, layout, atlas());
+  const partners = rosterFor(track.def.id);
+  const dressing = atlas(partners);
+  const d = new Dress(track, map, layout, dressing.atlas, dressing.reel);
   const L = -1, R = 1;
   const c = (n: string) => d.corner(n);
   const t1 = c('Niki Lauda'), t2 = c('Turn 2'), t3 = c('Remus'), t4 = c('Schlossgold'), t5 = c('Turn 5'), t8 = c('Turn 8');
@@ -84,13 +88,13 @@ export function buildSpielbergDress(track: Track, map: WorldMap, layout: Layout)
   }
 
   // ---------------------------------------------------------------- the hill
-  d.gantry({ s: RBR_GANTRIES[0], cells: ['bull', 'bullS', 'bull'], back: ['gp', 'spielberg', 'gp'], y0: 6.6, h: 1.8, steel: 0x1f2a44 });
-  if (t2) d.hoardings({ sA: t2.sStart - 160, sB: t2.sEnd + 60, side: R, off: 5.0, cells: ['bull', 'styria', 'bullS', 'freight', 'alpbank'], run: 3 });
-  if (t5) d.hoardings({ sA: t5.sStart - 40, sB: t5.sEnd + 20, side: R, off: 5.0, cells: ['ledBull', 'ledWatch', 'ledBullM'], run: 3, led: true, y0: 1.3, h: 1.2 });
+  d.gantry({ s: RBR_GANTRIES[0], cells: ['bull', 'title', 'bull'], back: ['gp', 'spielberg', 'gp'], y0: 6.6, h: 1.8, steel: 0x1f2a44 });
+  if (t2) d.hoardings({ sA: t2.sStart - 160, sB: t2.sEnd + 60, side: R, off: 5.0, cells: ['title', 'bull', 'styria', 'bullS', 'freight', 'alpbank'], run: 3 });
+  if (t5) d.hoardings({ sA: t5.sStart - 40, sB: t5.sEnd + 20, side: R, off: 5.0, cells: ['title'], run: 3, led: true, y0: 1.3, h: 1.2 });
   if (t8) d.hoardings({ sA: t8.sStart - 120, sB: t8.sEnd + 80, side: R, off: 5.0, cells: ['bullM', 'tyres', 'alpcom', 'crypto', 'cloud'], run: 3 });
 
   // ---------------------------------------------------------------- painted run-off
-  if (t1) d.logos(t1.sStart - 30, t1.sEnd + 40, L, ['bull', 'gp', 'bullS', 'tyres'], 28, 22);
+  if (t1) d.logos(t1.sStart - 30, t1.sEnd + 40, L, ['title', 'bull', 'gp', 'bullS', 'tyres'], 28, 22);
   if (t3) d.logos(t3.sStart - 40, t3.sEnd + 30, L, ['bull', 'bullS', 'spielberg'], 26, 22, true);
   if (t4) d.logos(t4.sStart - 30, t4.sEnd + 30, L, ['bullM', 'freight', 'bull'], 28, 20);
 
