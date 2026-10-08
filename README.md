@@ -379,7 +379,10 @@ npm run check    # tsc --noEmit
   frame's edges don't streak; long lenses get a faster shutter; the shutter opens up with speed, to 2.6× flat out;
   Settings → Motion blur Off / Subtle / Cinematic),
   a camera's auto exposure (`autoExposure.ts`: metered on the GPU, it opens up a beat late under a bridge or the
-  trees and is briefly over-exposed coming back out, but leaves the grade alone in steady light), sensor grain
+  trees and is briefly over-exposed coming back out, but leaves the grade alone in steady light; in sunshine a
+  shading operator rides the iris shot by shot — `GradeEffect.setOperator`: each shot's settled level pulled part of
+  the way to a standard key beyond a dead band, so a helicopter looking down into a golden-hour park's shade is
+  exposed up instead of going brown-black, a normal frame is untouched and the cockpit lenses are left alone), sensor grain
   that follows the metered gain (all but clean on a sunny day, visible on a wet morning or at night), a lens:
   soft-knee bloom (no glow disc round a low sun), warm wide halation, soft lens-flare ghosts and veiling glare
   into the sun, mild barrel distortion + lateral CA on the wide lenses and footage-soft sharpening, a photographic grade layer
@@ -403,6 +406,14 @@ npm run check    # tsc --noEmit
   `Cameras.cuts`. Engine/wind mixes are balanced against real V6 turbo-hybrid footage by band energy
   (`tools/audiocheck.mjs --bands`: cockpit ≈ 22 % < 150 Hz, 58 % 150–600 Hz, 16 % 600–2k, 3 % 2–6k). `node tools/_lookshots.mjs <out>` shoots the reference scenes;
   `node tools/_mbbench.mjs` times the blur pass.
+- **Light at every focal length** — the screen-space AO (`AOEffect` in Renderer.ts, High) is a contact ring
+  (0.9 m, 14 taps) plus a wide ring (3.5 m, 8 taps) for the rows under a grandstand roof, the back of a garage, a
+  wall's foot; its distance fade scales with the lens's magnification, so a 7° TV lens keeps the cars' contact shade
+  out to a kilometre. A long lens (under ~30°) centres the sun's view cascade on the followed car when that is
+  further down the view than the cascade reaches (`FocusSunShadow.followLens`), so the trackside tower's 2° shots
+  keep the field's, the barriers' and the stands' shadows. `tools/_rlab.mjs` shoots frozen A/B toggles across
+  cameras, `tools/_meterprobe.mjs` prints each camera's metered key and operator gain, `tools/_abmin.mjs` times
+  one toggle (ab.mjs with more alternations and each side's fastest run, for a GPU shared with other work).
 - **Racing cameras** — 12 to drive with (C cycles them, Settings → Camera picks one: `CAMERA_ORDER`, the chase
   cameras and the forward-looking onboards; the long-lens chase, the drone, the rear-facing onboards, the helicopter,
   blimp, tactical map, trackside lenses and the TV director are for simulated races, spectating and replays, where

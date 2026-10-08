@@ -239,6 +239,8 @@ uniform float aoRadius;
 uniform float aoIntensity;
 uniform vec2 aoTanHalf;
 uniform float aoFog;
+uniform float aoReach;
+uniform float aoWide;
 vec3 aoViewPos(vec2 uv, float d) {
   float vz = getViewZ(d);
   return vec3((uv * 2.0 - 1.0) * aoTanHalf * -vz, vz);
@@ -248,7 +250,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   if (aoIntensity <= 0.0 || depth >= 0.99999) return;
   vec3 P = aoViewPos(uv, depth);
   float dist = -P.z;
-  if (dist > 180.0) return;
+  if (dist > 180.0 * aoReach) return;
   vec3 N = normalize(cross(dFdx(P), dFdy(P)));
   // screen radius (uv) of the world radius at this depth, kept to a sensible footprint
   float rS = min(aoRadius / (dist * aoTanHalf.y * 2.0), 0.08);
@@ -270,8 +272,28 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
     occ += h * (1.0 - smoothstep(aoRadius * 0.6, aoRadius * 1.4, l));
   }
   occ = clamp(occ / 14.0 * 1.9, 0.0, 1.0);
-  // fade out with distance (the far field is fog and aerial haze)
-  occ *= 1.0 - smoothstep(90.0, 180.0, dist);
+  // the wide ring: the same test over a few metres (8 taps on their own spiral), for the occlusion a
+  // contact radius can't see — the rows under a grandstand roof, the back of a garage, a wall's foot,
+  // the ground between tyre stacks and under a gantry. The sky light there comes from a slice of the
+  // dome, and a camera reads it as a soft dimming toward every corner (Unreal's SSAO, which ACC's image
+  // carries, works over ~2 m by default); at 0.45 of its weight, so the contact shade still leads
+  float rW = min(aoWide / (dist * aoTanHalf.y * 2.0), 0.16);
+  if (aoWide > 0.0 && rW > texelSize.y * 4.0) {
+    float ow = 0.0;
+    for (int i = 0; i < 8; i++) {
+      float t = (float(i) + 0.5) / 8.0;
+      float a = float(i) * 2.39996 + 1.3;
+      vec2 q = uv + vec2(cos(a) / aspect, sin(a)) * rW * sqrt(t);
+      vec3 v = aoViewPos(q, readDepth(q)) - P;
+      float l = length(v);
+      ow += max(0.0, dot(N, v) / max(l, 1e-4) - 0.25) * (1.0 - smoothstep(aoWide * 0.6, aoWide * 1.4, l));
+    }
+    occ = 1.0 - (1.0 - occ) * (1.0 - clamp(ow / 8.0 * 1.6, 0.0, 1.0) * 0.45);
+  }
+  // fade out with distance (the far field is fog and aerial haze) — measured in what the lens makes
+  // of it: a long lens or the helicopter frames cars 300–800 m away as big as the chase cam does at
+  // 40 m, and there the cars, the tyre walls and the stands need their contact shade as much
+  occ *= 1.0 - smoothstep(90.0 * aoReach, 180.0 * aoReach, dist);
   // (and by the fog in front of it: occlusion darkens the surface, not the murk between it and the lens —
   // applied to the fogged colour it spattered dark dots through every foggy tree crown)
   occ *= exp(-dist * aoFog);
@@ -290,6 +312,8 @@ export class AOEffect extends Effect {
         ['aoIntensity', new THREE.Uniform(0.85)],
         ['aoTanHalf', new THREE.Uniform(new THREE.Vector2(1, 1))],
         ['aoFog', new THREE.Uniform(0)],
+        ['aoReach', new THREE.Uniform(1)],
+        ['aoWide', new THREE.Uniform(3.5)],
       ]),
     });
   }
@@ -306,6 +330,9 @@ export class AOEffect extends Effect {
   setCamera(cam: THREE.PerspectiveCamera) {
     const ty = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
     (this.uniforms.get('aoTanHalf')!.value as THREE.Vector2).set(ty * cam.aspect, ty);
+    // (the distances above are a 60° lens's; a longer lens reaches as much further as it magnifies,
+    // up to ×8 — a 7° TV lens: past ~1.4 km the haze has the picture anyway)
+    this.uniforms.get('aoReach')!.value = THREE.MathUtils.clamp(0.577 / ty, 1, 8);
   }
 }
 
@@ -763,6 +790,7 @@ uniform float flash;
 uniform vec2 greenTame;
 uniform sampler2D tAdapt;
 uniform float adaptStrength;
+uniform vec3 operator;
 uniform float sim;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   // the camera's auto exposure: (reference / adapted)^strength, 1 in steady light (autoExposure.ts)
@@ -770,6 +798,14 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (adaptStrength > 0.0) {
     vec2 ad = texture2D(tAdapt, vec2(0.5)).xy;
     ae = clamp(exp((ad.y - ad.x) * adaptStrength), 0.6, 1.9);
+    // the shading operator (see GradeEffect.setOperator): each shot's settled level (the slow
+    // reference, snapped at a cut), as the look exposes it, pulled part of the way to a standard key
+    // once it is off by more than a dead band — a normal frame is left exactly as graded
+    if (operator.y > 0.0) {
+      float d = operator.x - (ad.y + log(max(lookExposure, 1e-4)));
+      d = sign(d) * max(abs(d) - operator.z, 0.0);
+      ae *= exp(clamp(d * operator.y, -0.3, 0.9));
+    }
   }
   vec3 c = max(inputColor.rgb, 0.0) * exposure * lookExposure * (1.0 + flash) * ae;
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -922,12 +958,41 @@ export class GradeEffect extends Effect {
         ['greenTame', new THREE.Uniform(new THREE.Vector2(0.3, 0.3))],
         ['tAdapt', new THREE.Uniform(null)],
         ['adaptStrength', new THREE.Uniform(0)],
+        // (target log key, strength, dead band: see setOperator)
+        ['operator', new THREE.Uniform(new THREE.Vector3(-2.25, 0, 0.2))],
         // (1 = the sim look; the live chain sets it from Renderer.broadcast, other users keep the footage)
         ['sim', new THREE.Uniform(0)],
       ]),
     });
   }
   private auto: AutoExposure | null = null;
+  /**
+   * A broadcast camera's shading operator (the CCU's iris), 0 … 1. The auto exposure above only
+   * follows changes within a shot, so every shot inherited the light's global exposure: a helicopter
+   * looking straight down onto a track in the long shade of a golden-hour park metered ~1.5 stops
+   * under the chase camera (mean ~0.1 sRGB: near-black brown), where a real operator rides the iris
+   * to keep the picture at standard video level and lets the light's colour carry the hour. The
+   * shot's settled level (in the look's exposure; e^−2.25 is where a clear afternoon's frames sit) is
+   * pulled `strength` of the way to that key beyond a ±0.2 dead band, up by at most ×2.5 (a frame
+   * that dark is meant to stay a little dark), down by at most ×0.74. The Environment sets it for
+   * sunlit daylight only: night, rain, fog and grey decks keep the look's own exposure.
+   */
+  setOperator(strength: number) {
+    this.opStrength = strength;
+    (this.uniforms.get('operator')!.value as THREE.Vector3).y = this.opInside ? 0 : strength;
+  }
+  private opStrength = 0;
+  private opInside = false;
+  /**
+   * (the Renderer, per frame) a lens inside the cockpit has no operator: its meter is half dark tub,
+   * and onboard footage is exposed for the bright world outside the halo (onboard.ts), which riding
+   * the iris on that average would blow out ×2 and more
+   */
+  set operatorInside(v: boolean) {
+    if (v === this.opInside) return;
+    this.opInside = v;
+    this.setOperator(this.opStrength);
+  }
   /**
    * Meter the frame like a camera's auto exposure (0 = off): how much of a change in the view's
    * brightness (into shade, under a bridge, out into the sun) it compensates, after a beat.
@@ -1644,6 +1709,7 @@ export class Renderer {
     this.updateTaa();
     this.updateMotion(dt);
     this.updateOnboard();
+    this.grade.operatorInside = this.onboardCar !== null;
     // TAA: this frame's sub-pixel offset, on the projection for the composer's render only (game code
     // between frames, and the matrices kept for next frame's reprojection, see the unjittered one)
     const cam = this.camera;

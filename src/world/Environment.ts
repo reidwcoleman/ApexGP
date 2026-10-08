@@ -586,6 +586,10 @@ export function createEnvironment(
 
     // ---- post
     gfx.grade.setLook(gradeLook);
+    // (a broadcast camera's operator rides the iris shot by shot in sunshine — Renderer setOperator; the
+    // night, the rain, fog, grey decks and the garage keep the look's own exposure and mood)
+    const ss = THREE.MathUtils.smoothstep;
+    gfx.grade.setOperator(0.75 * filmDay * (P.direct ?? 1) * ss(L.sunVis, 0.3, 0.8) * (1 - wetK) * (1 - ss(L.mist, 0.05, 0.3)) * (1 - indoor));
     // (camera footage glows round every bright thing: the sky behind the trees, chrome, the lights)
     // (bloom runs before the grade: on a dark wet day exposed up ×6 the lamps' and LEDs' glow would be
     // too, blowing the dash and the rain lights out to white, so it's taken back by most of that)
