@@ -4,8 +4,9 @@ import type { WorldMap } from '../worldmap.ts';
 import type { GrandstandSpec } from '../layout.ts';
 import { MeshBuilder, srgb } from '../geom.ts';
 import { canvas2d, canvasTexture } from '../textures.ts';
-import { BRAND_FONTS, drawBrand, printWear, type Brand } from '../../brands.ts';
+import { BRAND_FONTS, drawBrand, drawTitle, printWear, type Brand, type TitleStyle } from '../../brands.ts';
 import { floodUniforms } from '../night.ts';
+import type { LedReel } from './ledReel.ts';
 
 /**
  * A venue's own advertising, on top of the paddock-wide boards the trackside builds everywhere
@@ -19,31 +20,20 @@ import { floodUniforms } from '../night.ts';
  *                  laid along the track and reading from the TV camera on the outside
  *   title boards   the event's own banner (title partner · Grand Prix) in its colours
  *
- * Every brand is fictional (brands.ts): a venue lists its own partners — echoing the colour blocks
- * and type of the real boards, never their names — in an `AdSheet`, 512×128 cells (4:1), drawn
- * once and redrawn when the brand faces have loaded. One `VenueAds` per venue merges everything
+ * Every brand is fictional (partners.ts): a venue's boards are drawn in an `AdSheet`, 512×128
+ * cells (4:1), drawn once and redrawn when the brand faces have loaded; its LED boards show a
+ * `LedReel` (ledReel.ts) rolling through the partners. One `VenueAds` per venue merges everything
  * into four meshes (frames, prints, LED, paint).
  */
 
 export type AdPainter = (g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) => void;
 
-const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
 const CW = 512, CH = 128, COLS = 4;
 
 /** a brand board, weathered like printed vinyl */
 export const brandCell = (b: Brand, invert = false, seed = 1): AdPainter => (g, x, y, w, h) => {
   drawBrand(g, x, y, w, h, b, invert);
   printWear(g, x, y, w, h, seed, 0.8);
-};
-
-/** an LED board: the brand on its own black, a fine pixel grid over it (no weathering: it's a screen) */
-export const ledCell = (b: Brand, invert = false): AdPainter => (g, x, y, w, h) => {
-  drawBrand(g, x, y, w, h, b, invert);
-  g.save();
-  g.fillStyle = 'rgba(0,0,0,0.28)';
-  for (let k = 0; k < w; k += 4) g.fillRect(x + k, y, 1, h);
-  for (let k = 0; k < h; k += 4) g.fillRect(x, y + k, w, 1);
-  g.restore();
 };
 
 /**
@@ -78,36 +68,9 @@ export const paintCell = (b: Brand, invert = false, seed = 1): AdPainter => (g, 
   g.restore();
 };
 
-/**
- * The event's banner: the title partner's word mark small on the left, then the Grand Prix's name
- * big, on the event's colour, with an accent rule along the bottom.
- */
-export const titleCell = (partner: string, gp: string, bg: string, fg: string, accent: string, seed = 1, italic = true): AdPainter => (g, x, y, w, h) => {
-  g.save();
-  g.beginPath();
-  g.rect(x, y, w, h);
-  g.clip();
-  g.fillStyle = bg;
-  g.fillRect(x, y, w, h);
-  g.fillStyle = accent;
-  g.fillRect(x, y + h * 0.84, w, h * 0.16);
-  g.fillStyle = fg;
-  g.textBaseline = 'middle';
-  g.textAlign = 'left';
-  g.font = `600 ${Math.round(h * 0.2)}px ${FONT}`;
-  const pw = Math.min(w * 0.3, g.measureText(partner).width);
-  g.fillText(partner, x + w * 0.04, y + h * 0.42, w * 0.3);
-  g.fillRect(x + w * 0.06 + pw, y + h * 0.18, 2, h * 0.5);
-  let size = h * 0.42;
-  const avail = w * 0.9 - pw - w * 0.06;
-  const set = () => (g.font = `${italic ? 'italic ' : ''}900 ${Math.round(size)}px ${FONT}`);
-  set();
-  while (size > 12 && g.measureText(gp).width > avail) {
-    size *= 0.94;
-    set();
-  }
-  g.fillText(gp, x + w * 0.08 + pw, y + h * 0.43);
-  g.restore();
+/** the event's banner: the race's title, the title partner's block first (brands.ts drawTitle) */
+export const titleCell = (partner: Brand | null, gp: string, st: TitleStyle, seed = 1): AdPainter => (g, x, y, w, h) => {
+  drawTitle(g, x, y, w, h, partner, gp, st);
   printWear(g, x, y, w, h, seed, 0.6);
 };
 
@@ -159,7 +122,7 @@ export interface RunOpts {
   y?: number;
   /** gap between boards (m) */
   gap?: number;
-  /** cells to cycle; each holds `repeat` boards in a row (a contract) */
+  /** cells to cycle; each holds `repeat` boards in a row (a contract). LED runs: the reel slide each board starts on */
   cells: number[];
   repeat?: number;
   /** emissive LED boards instead of printed vinyl */
@@ -225,7 +188,7 @@ export class VenueAds {
   readonly prints = new MeshBuilder();
   readonly leds = new MeshBuilder();
   readonly paint = new MeshBuilder();
-  constructor(readonly track: Track, readonly map: WorldMap, readonly sheet: AdSheet, readonly stands: GrandstandSpec[] = []) {}
+  constructor(readonly track: Track, readonly map: WorldMap, readonly sheet: AdSheet, readonly stands: GrandstandSpec[] = [], readonly reel: LedReel | null = null) {}
 
   /** a spot clear of the pit complex, of every other part of the circuit and of the grandstands and their fronts */
   private clearAt(x: number, z: number, s: number, need: number): boolean {
@@ -295,7 +258,7 @@ export class VenueAds {
       const y0 = gy + Y, y1 = y0 + Hb;
       const a = mid.clone().addScaledVector(right, -len / 2), b = mid.clone().addScaledVector(right, len / 2);
       const cell = o.cells[Math.floor(idx / rep) % o.cells.length];
-      const uv = this.sheet.uv(cell);
+      const uv = o.led && this.reel ? this.reel.uv(cell) : this.sheet.uv(cell);
       if (o.led) {
         // a black cabinet on the ground, the screen in its face
         this.obox(this.frames, mid.clone().addScaledVector(n, -0.22).setY((gy - 0.3 + y1 + 0.05) / 2), right, len, y1 + 0.35 - gy, 0.4, frameCol);
@@ -429,7 +392,10 @@ export class VenueAds {
     };
     add(this.frames, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.35 }), 'frames', true);
     add(this.prints, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.12, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), 'prints', false);
-    add(this.leds, ledMaterial(tex), 'leds', false);
+    add(this.leds, ledMaterial(this.reel?.texture ?? tex), 'leds', false);
+    // (the LED boards roll through the venue's partners: ledReel.ts)
+    const led = out.find((m) => m.name === `${name}_leds`);
+    if (led && this.reel) this.reel.attach(led);
     add(this.paint, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), 'paint', false, 1);
     return out;
   }

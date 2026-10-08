@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Frame3, WEATHER, box, beam, cylinder, prism, type GeoBuilder } from './builder.ts';
 import type { Ctx, SidePlan } from './context.ts';
 import { hash2 } from './noise.ts';
-import { BELTS, SPONSORS, type PrintAtlas, type UVRect } from './atlas.ts';
+import { BELTS, adMixed, type PrintAtlas, type UVRect } from './atlas.ts';
 
 /**
  * Barriers along barrierL/barrierR: armco double rails on posts, concrete walls
@@ -176,11 +176,9 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     b.quadN(a, c, d, e, nx, 0, nz);
   };
 
-  const adCell = (k: number, salt: number) => {
-    const group = Math.floor(k / 3);
-    const idx = Math.floor(hash2(group, salt, 17) * SPONSORS.length);
-    return atlas.cell('ad' + idx);
-  };
+  // three boards in a row per contract, the brands drawn by contract weight (the title partner's
+  // runs most often: docs/F1_ADVERTISING.md §5)
+  const adCell = (k: number, salt: number) => atlas.cell(adMixed(hash2(Math.floor(k / 3), salt, 17)));
 
   // segments where the barrier distance jumps (pit wall ends) are left open
   const jump = (r: number) => Math.abs(P.bar[W(r + 1)] - P.bar[W(r)]) > 1.2;

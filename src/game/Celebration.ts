@@ -414,7 +414,7 @@ export class Celebration {
       g.font = `700 36px ${FONT}`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      for (let k = 0; k < 4; k++) g.fillText(`${EVENT.gp.toUpperCase()}   ·   `, 256 + k * 512, 34);
+      for (let k = 0; k < 4; k++) g.fillText(`${EVENT.titled.toUpperCase()}   ·   `, 256 + k * 512, 34, 500);
     });
     const skirt = new THREE.Mesh(new THREE.PlaneGeometry(9, 0.25), new THREE.MeshStandardMaterial({ map: skirtTex, roughness: 0.6 }));
     skirt.position.set(0, -0.12, 2.21);
@@ -425,19 +425,25 @@ export class Celebration {
       gr.addColorStop(1, '#1b2030');
       g.fillStyle = gr;
       g.fillRect(0, 0, 2048, 840);
-      // repeating event wall behind the drivers, like a press backdrop
+      // repeating event wall behind the drivers, like a press backdrop: the series' mark alternating
+      // with the title partner's (docs/F1_ADVERTISING.md §3)
       g.globalAlpha = 0.16;
       g.fillStyle = '#ffffff';
       g.font = `italic 900 54px ${FONT}`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      for (let y = 60; y < 840; y += 120) for (let x = (y / 120) % 2 ? 150 : 0; x < 2200; x += 420) g.fillText('APEX GP', x, y);
+      const wall = EVENT.title ? ['APEX GP', EVENT.title] : ['APEX GP'];
+      for (let y = 60; y < 840; y += 120) for (let x = (y / 120) % 2 ? 150 : 0, k = 0; x < 2200; x += 420, k++) g.fillText(wall[(k + Math.floor(y / 120)) % wall.length], x, y, 380);
       g.globalAlpha = 1;
       g.fillStyle = '#b0001e';
       g.fillRect(0, 600, 2048, 70);
       g.fillStyle = '#ffffff';
       g.font = `italic 900 170px ${FONT}`;
       g.fillText(EVENT.gp.toUpperCase(), 1024, 330, 1900);
+      if (EVENT.title) {
+        g.font = `700 64px ${FONT}`;
+        g.fillText(EVENT.title, 1024, 190, 1600);
+      }
       g.font = `700 60px ${FONT}`;
       g.fillText(`${EVENT.place.toUpperCase()}`, 1024, 636);
     });

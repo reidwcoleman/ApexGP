@@ -4,8 +4,9 @@ import type { WorldMap } from '../worldmap.ts';
 import type { Layout } from '../layout.ts';
 import { ARCH } from '../archMaterial.ts';
 import { H as PIT_H } from '../../pitlane/building.ts';
-import { DB } from './dressBrands.ts';
-import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dressKit.ts';
+import { rosterFor, type Roster } from '../../partners.ts';
+import { LedReel, rotation } from './ledReel.ts';
+import { Dress, DressAtlas, brandCell, textCell, titleCell, type DressCell } from './dressKit.ts';
 
 /**
  * The Circuit of the Americas dressed for the United States Grand Prix:
@@ -20,7 +21,9 @@ import { Dress, DressAtlas, brandCell, brandDraw, ledCell, textCell } from './dr
  *                      Turn 11 and Turn 12 run-offs
  *   the T9/T10 crest   boards along the outside of the climb
  *
- * Red, white and navy for the event and Texas, the truck maker's navy and burnt orange.
+ * Red, white and navy for the event and Texas; the cruise line's navy and gold as the race's title
+ * partner (as in 2025–26: docs/F1_ADVERTISING.md §2) at the top of Turn 1, on the gantry and the
+ * back straight; the truck maker's navy and burnt orange, the US rights holder's streaming blue.
  */
 
 export const COTA_GANTRIES = [3780];
@@ -38,51 +41,52 @@ function star(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, co
   g.fill();
 }
 
-function atlas(): DressAtlas {
+function atlas(R: Roster): { atlas: DressAtlas; reel: LedReel } {
   const usa = ['#b22234', '#ffffff', '#b22234'];
   const lone = (g: CanvasRenderingContext2D, x: number, y: number, _w: number, h: number) => {
     g.fillStyle = '#002868';
     g.fillRect(x, y, h * 1.0, h);
     star(g, x + h * 0.5, y + h * 0.5, h * 0.3, '#ffffff');
   };
-  return new DressAtlas([
-    textCell('gp', 'UNITED STATES GRAND PRIX', { bg: '#0b1f4b', fg: '#ffffff', bands: usa, weight: 900, italic: true }),
+  // the event's own LED slide, in the reel after the title partner's
+  const ledGp: DressCell['draw'] = (g, x, y, w, h) => {
+    g.fillStyle = '#0b1f4b';
+    g.fillRect(x, y, w, h);
+    g.fillStyle = '#b22234';
+    g.fillRect(x, y + h * 0.82, w, h * 0.18);
+    g.fillStyle = '#ffffff';
+    g.font = `italic 900 ${Math.round(h * 0.48)}px "Titillium Web", Arial, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('USGP', x + w / 2, y + h * 0.42);
+  };
+  const atlas = new DressAtlas([
+    titleCell('gp', R.title, 'UNITED STATES GRAND PRIX', { bg: '#0b1f4b', fg: '#ffffff', accent: '#ffffff', bands: usa }),
     textCell('gpR', 'UNITED STATES GRAND PRIX', { bg: '#b22234', fg: '#ffffff', top: '#ffffff', weight: 900, italic: true }),
     textCell('austin', 'AUSTIN', { bg: '#ffffff', fg: '#0b1f4b', sub: 'TEXAS · USA', subFg: '#b22234', weight: 900, track: 0.1 }),
     textCell('cota', 'CIRCUIT OF THE AMERICAS', { bg: '#c62026', fg: '#ffffff', weight: 900, track: 0.02 }),
     textCell('texas', 'TEXAS', { bg: '#ffffff', fg: '#bf0a30', deco: lone, indent: 1.0, weight: 900, italic: true, track: 0.12, bands: ['#bf0a30'] }),
-    brandCell('watch', DB.watch),
-    brandCell('freight', DB.freight),
-    brandCell('lager', DB.lager),
-    brandCell('tyres', DB.tyres),
-    brandCell('cruise', DB.cruise),
-    brandCell('crypto', DB.crypto),
-    brandCell('cloud', DB.cloud),
-    brandCell('energy', DB.energy),
-    brandCell('crm', DB.crm),
-    brandCell('trucks', DB.lonestar),
-    brandCell('stream', DB.stream),
-    brandCell('laptop', DB.laptop),
-    brandCell('airline', DB.airline),
-    ledCell('ledGp', (g, x, y, w, h) => {
-      g.fillStyle = '#0b1f4b';
-      g.fillRect(x, y, w, h);
-      g.fillStyle = '#b22234';
-      g.fillRect(x, y + h * 0.82, w, h * 0.18);
-      g.fillStyle = '#ffffff';
-      g.font = `italic 900 ${Math.round(h * 0.48)}px "Titillium Web", Arial, sans-serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText('USGP', x + w / 2, y + h * 0.42);
-    }),
-    ledCell('ledCrypto', brandDraw(DB.crypto)),
-    ledCell('ledStream', brandDraw(DB.stream)),
-    ledCell('ledTrucks', brandDraw(DB.lonestar)),
+    brandCell('watch', R.b('timing')),
+    brandCell('freight', R.b('logistics')),
+    brandCell('lager', R.b('lager')),
+    brandCell('tyres', R.b('tyres')),
+    brandCell('cruise', R.b('cruise')),
+    brandCell('crypto', R.b('crypto')),
+    brandCell('cloud', R.b('cloud')),
+    brandCell('energy', R.b('energy')),
+    brandCell('crm', R.b('mesa')),
+    brandCell('trucks', R.b('longhorn')),
+    brandCell('stream', R.b('skyreach')),
+    brandCell('laptop', R.b('tech')),
+    brandCell('airline', R.b('airline')),
   ]);
+  return { atlas, reel: new LedReel(rotation(R, [['ledGp', ledGp]])) };
 }
 
 export function buildAustinDress(track: Track, map: WorldMap, layout: Layout): THREE.Group {
-  const d = new Dress(track, map, layout, atlas());
+  const partners = rosterFor(track.def.id);
+  const dressing = atlas(partners);
+  const d = new Dress(track, map, layout, dressing.atlas, dressing.reel);
   const L = -1, R = 1;
   const c = (n: string) => d.corner(n);
   const t1 = c('Turn 1'), t2 = c('Turn 2'), t9 = c('Turn 9'), t10 = c('Turn 10'), t11 = c('Turn 11'), t12 = c('Turn 12');
@@ -119,14 +123,14 @@ export function buildAustinDress(track: Track, map: WorldMap, layout: Layout): T
   }
 
   // ---------------------------------------------------------------- Turn 1
-  if (t1 && t2) d.logos(t1.sStart - 30, t2.sStart, R, ['gp', 'freight', 'texas', 'lager', 'trucks', 'tyres'], 26, 26);
+  if (t1 && t2) d.logos(t1.sStart - 30, t2.sStart, R, ['cruise', 'freight', 'texas', 'gp', 'trucks', 'tyres'], 26, 26);
   if (t1) d.billboard(t1.sApex + 25, R, 8, 14, 3.5, 2.4, 'cota', t1.sStart - 160);
 
   // ---------------------------------------------------------------- the back straight and the stadium
-  d.gantry({ s: COTA_GANTRIES[0], cells: ['gp', 'stream', 'gp'], back: ['austin', 'trucks', 'austin'], y0: 6.6, h: 1.8, steel: 0xe8e9eb });
+  d.gantry({ s: COTA_GANTRIES[0], cells: ['gp', 'cruise', 'gp'], back: ['austin', 'stream', 'austin'], y0: 6.6, h: 1.8, steel: 0xe8e9eb });
   if (t11 && t12) {
-    d.hoardings({ sA: t11.sEnd + 60, sB: t12.sStart - 210, side: R, off: 5.2, cells: ['crypto', 'trucks', 'crm', 'cloud', 'airline', 'energy'], run: 3 });
-    d.hoardings({ sA: t11.sEnd + 190, sB: t12.sStart - 20, side: L, off: 5.2, cells: ['ledGp', 'ledCrypto', 'ledStream', 'ledTrucks'], run: 2, led: true, y0: 1.3, h: 1.2 });
+    d.hoardings({ sA: t11.sEnd + 60, sB: t12.sStart - 210, side: R, off: 5.2, cells: ['cruise', 'crypto', 'trucks', 'crm', 'cloud', 'airline', 'energy'], run: 3 });
+    d.hoardings({ sA: t11.sEnd + 190, sB: t12.sStart - 20, side: L, off: 5.2, cells: ['title'], run: 2, led: true, y0: 1.3, h: 1.2 });
   }
   if (t11) d.logos(t11.sStart - 30, t11.sEnd + 20, R, ['gpR', 'laptop'], 28, 20);
   if (t12) d.logos(t12.sStart - 40, t12.sEnd + 20, R, ['crypto', 'gp', 'tyres'], 28, 22);

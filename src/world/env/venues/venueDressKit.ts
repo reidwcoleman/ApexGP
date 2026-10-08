@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { MeshBuilder, srgb } from '../geom.ts';
 import { ARCH, appendInto, archMaterial, member, tagAxis, tagClass } from '../archMaterial.ts';
-import { BRAND_FONTS, brandAt, drawBrand, printWear, type Brand } from '../../brands.ts';
+import { BRAND_FONTS, drawBrand, printWear, type Brand } from '../../brands.ts';
+import type { LedReel } from './ledReel.ts';
 import type { Track } from '../../Track.ts';
 import type { WorldMap } from '../worldmap.ts';
 import type { GrandstandSpec, SpectatorBank } from '../layout.ts';
@@ -16,8 +17,9 @@ import { glassMaterial } from '../../pitlane/materials.ts';
  * the track. Built with the scenery (the venue files call these helpers), planned with the layout
  * (`planBridge` and friends reserve the ground so no tree or stand grows into them).
  *
- *   BannerAtlas   the venue's own printed banners: fictional brands (brands.ts lockups, or a big
- *                 bridge word mark in a sponsor's colour block), weathered like printed vinyl
+ *   BannerAtlas   the venue's own printed banners: its partners (partners.ts; brands.ts lockups,
+ *                 or a big bridge word mark in the partner's colour block), weathered like printed
+ *                 vinyl; the LED boards show a `LedReel` (ledReel.ts) rolling through the partners
  *   Dress         the builders: structure (archMaterial, casts shadows), slender steel (no shadow),
  *                 prints, LED boards (self-lit), interior-mapped glazing; `finish` merges them
  *                 into a handful of meshes for the whole venue
@@ -31,30 +33,22 @@ const C = (h: number) => srgb(h);
 // ---------------------------------------------------------------- brands
 
 /**
- * The venues' title sponsors (fictional), in the colour blocks the real bridges and boards wear:
- * a green-and-gold watchmaker, a yellow freight company with a red italic word mark, a green
- * lager, a white energy board, a navy exchange, the series' own tyre supplier in yellow.
+ * A partner's bridge word mark: one big name filling the band in the brand's colour block, as the
+ * title sponsors' bridges are printed (no tagline; rules in the accent colour when asked).
  */
-export const DRESS_BRANDS: Record<string, Brand> = {
-  coronelle: { name: 'CORONELLE', tag: 'GENÈVE · DEPUIS 1905', bg: '#0b5a3a', fg: '#e8cf86', accent: '#e8cf86', mark: 'none', weight: 600, track: 0.2 },
-  karro: { name: 'KARRO', tag: 'EXPRESS WORLDWIDE', bg: '#ffcc00', fg: '#d40511', accent: '#d40511', mark: 'bars', weight: 900, italic: true, sx: 1.2 },
-  hallstein: { name: 'HALLSTEIN', tag: 'LAGER · BREWED SINCE 1873', bg: '#0b6e3f', fg: '#ffffff', accent: '#e4002b', mark: 'dot', weight: 700, track: 0.06 },
-  meridian: { name: 'MERIDIAN', tag: 'ENERGY FOR TOMORROW', bg: '#ffffff', fg: '#0a6b8a', accent: '#28a745', mark: 'wave', weight: 700, track: 0.08 },
-  nexa: { name: 'nexa.coin', tag: 'THE FUTURE OF FINANCE', bg: '#0b1d33', fg: '#ffffff', accent: '#3fa9f5', mark: 'diamond', weight: 600, lower: true },
-  castellan: { name: 'CASTELLAN', tag: 'PERFORMANCE TYRES', bg: '#ffd21f', fg: '#111111', accent: '#c4151c', mark: 'diamond', weight: 900, italic: true, sx: 1.12 },
-  veloce: { name: 'VELOCE', tag: 'BANCA · ASSICURAZIONI', bg: '#c8102e', fg: '#ffffff', accent: '#ffd400', mark: 'wing', weight: 900, italic: true, sx: 1.08 },
-  brianza: { name: 'BRIANZA BANCA', tag: 'DAL 1896', bg: '#f4efe4', fg: '#1f3a5a', accent: '#c8102e', mark: 'shield', weight: 600, track: 0.08 },
-  kosei: { name: 'KOSEI', tag: 'ELECTRONICS', bg: '#0050b5', fg: '#ffffff', accent: '#ffffff', mark: 'wing', weight: 700, italic: true },
-  hayate: { name: 'HAYATE', tag: 'MOTOR COMPANY', bg: '#e60012', fg: '#ffffff', accent: '#ffffff', mark: 'wing', weight: 900, italic: true, sx: 1.1 },
-  valdor: { name: 'VALDOR', tag: 'EAU MINÉRALE DES ARDENNES', bg: '#e9f3fb', fg: '#c8102e', accent: '#0a4c8c', mark: 'ring', weight: 700, track: 0.1 },
-  tisza: { name: 'TISZA BANK', tag: 'MAGYAR · SINCE 1912', bg: '#00205b', fg: '#ffffff', accent: '#ce2939', mark: 'shield', weight: 700, track: 0.05 },
-};
-
-/** a registry brand (brands.ts) by name, else the first */
-export const brandNamed = (name: string): Brand => {
-  for (let k = 0; k < 18; k++) if (brandAt(k).name === name) return brandAt(k);
-  return brandAt(0);
-};
+export const brandWord = (b: Brand, o: { rules?: boolean; seed?: number; invert?: boolean } = {}): BannerDraw =>
+  wordCell({
+    text: b.lower ? b.name : b.name.toUpperCase(),
+    bg: o.invert ? b.fg : b.bg,
+    fg: o.invert ? b.bg : b.fg,
+    accent: b.accent,
+    italic: b.italic,
+    weight: b.weight,
+    sx: b.sx,
+    track: b.track,
+    rules: o.rules,
+    seed: o.seed,
+  });
 
 // ---------------------------------------------------------------- banner atlas
 
@@ -238,10 +232,18 @@ export class Dress {
   readonly track: Track;
   readonly map: WorldMap;
   readonly atlas: BannerAtlas;
-  constructor(track: Track, map: WorldMap, atlas: BannerAtlas) {
+  /** the LED boards' rotation (every LED face shows a slide of it) */
+  readonly reel: LedReel | null;
+  constructor(track: Track, map: WorldMap, atlas: BannerAtlas, reel: LedReel | null = null) {
     this.track = track;
     this.map = map;
     this.atlas = atlas;
+    this.reel = reel;
+  }
+
+  /** an LED face's UVs: a slide of the reel (or an atlas cell, without one) */
+  ledUV(cell: string): [number, number, number, number] {
+    return this.reel ? this.reel.uv(cell) : this.atlas.uv(cell);
   }
 
   /** box in a Loc (min/max corners), its archMaterial class, into the solid (or fine) mesh */
@@ -277,13 +279,13 @@ export class Dress {
    */
   bannerZ(L: Loc, x0: number, x1: number, y0: number, y1: number, zc: number, dir: 1 | -1, cell: string, led = false) {
     const a = dir < 0 ? x1 : x0, b = dir < 0 ? x0 : x1;
-    (led ? this.led : this.print).quad4(L.p(a, y0, zc), L.p(b, y0, zc), L.p(b, y1, zc), L.p(a, y1, zc), C(0xffffff), this.atlas.uv(cell));
+    (led ? this.led : this.print).quad4(L.p(a, y0, zc), L.p(b, y0, zc), L.p(b, y1, zc), L.p(a, y1, zc), C(0xffffff), led ? this.ledUV(cell) : this.atlas.uv(cell));
   }
 
   /** printed banner on the local plane x = xc spanning z0..z1 × y0..y1, facing −x (dir −1) or +x */
   bannerX(L: Loc, z0: number, z1: number, y0: number, y1: number, xc: number, dir: 1 | -1, cell: string, led = false) {
     const a = dir < 0 ? z0 : z1, b = dir < 0 ? z1 : z0;
-    (led ? this.led : this.print).quad4(L.p(xc, y0, a), L.p(xc, y0, b), L.p(xc, y1, b), L.p(xc, y1, a), C(0xffffff), this.atlas.uv(cell));
+    (led ? this.led : this.print).quad4(L.p(xc, y0, a), L.p(xc, y0, b), L.p(xc, y1, b), L.p(xc, y1, a), C(0xffffff), led ? this.ledUV(cell) : this.atlas.uv(cell));
   }
 
   /** a band of `cells` along x0..x1 (repeating; each tile kept near the cell's 8:1) on the plane z = zc */
@@ -342,7 +344,11 @@ export class Dress {
     const tex = this.atlas.texture;
     // (prints sit a few cm proud of their girders: pulled forward in depth so they never z-fight down a long lens)
     add(this.print, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.14, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 }), name + '_banners', true, false);
-    add(this.led, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3, metalness: 0, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 }), name + '_led', false, false);
+    const ledTex = this.reel?.texture ?? tex;
+    add(this.led, new THREE.MeshStandardMaterial({ map: ledTex, roughness: 0.3, metalness: 0, emissiveMap: ledTex, emissive: 0xffffff, emissiveIntensity: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 }), name + '_led', false, false);
+    // (the LED boards roll through the venue's partners)
+    const ledMesh = group.getObjectByName(name + '_led');
+    if (ledMesh && this.reel) this.reel.attach(ledMesh);
     add(this.glass, new THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.08, metalness: 0.85 }), name + '_glass', false, false);
     if (this.rooms.pos.length) {
       const gm = new THREE.Mesh(this.rooms.geometry(), glassMaterial(0x2a3a44));
@@ -585,7 +591,7 @@ export function ledRun(d: Dress, sA: number, sB: number, side: number, back: num
     const P2 = q.clone(), P3 = p.clone();
     P2.y += h;
     P3.y += h;
-    d.led.quad4(P0, P1, P2, P3, C(0xffffff), d.atlas.uv(cell));
+    d.led.quad4(P0, P1, P2, P3, C(0xffffff), d.ledUV(cell));
     // the housing behind the face and two posts
     const mid = new THREE.Vector3().addVectors(A, B).multiplyScalar(0.5);
     const out = new THREE.Vector3(B.z - A.z, 0, A.x - B.x).normalize().multiplyScalar(-side * 0.12);

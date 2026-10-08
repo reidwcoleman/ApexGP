@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { brandAt, drawBrand, printWear } from '../brands.ts';
+import { drawBrand, drawTitle, drawWordmark, printWear, type Brand } from '../brands.ts';
+import { roster } from '../partners.ts';
 import { EVENT } from '../event.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { Rng } from './noise.ts';
@@ -25,27 +26,25 @@ export interface UVRect {
 
 const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
 
-/** Fictional sponsors — deliberately made-up names. [text, bg, fg, style, accent] */
-export const SPONSORS: [string, string, string, number, string][] = [
-  ['VELOCE', '#c8102e', '#ffffff', 0, '#ffd400'],
-  ['SOLMARA AIR', '#0b2a5b', '#ffffff', 1, '#f5b700'],
-  ['QUANTA', '#101214', '#00d2be', 2, '#00d2be'],
-  ['ZEPHYRA', '#ffffff', '#12305f', 3, '#e4002b'],
-  ['TERRAVOLT', '#00843d', '#ffffff', 0, '#c6ff00'],
-  ['LUMERA', '#1a1a1a', '#d8b56a', 4, '#d8b56a'],
-  ['APEX GP', '#e10600', '#ffffff', 5, '#15151e'],
-  ['CORALUX', '#ff6b00', '#ffffff', 1, '#1b1b1b'],
-  ['VANTORO', '#ffd400', '#111111', 2, '#111111'],
-  ['ORBELLE', '#5b2a86', '#ffffff', 3, '#ff9bd2'],
-  ['QUINTARA BANK', '#00205b', '#ffffff', 0, '#00a3e0'],
-  ['HALCYA', '#e8e8e8', '#0a0a0a', 4, '#e10600'],
-  ['NORTHWIND', '#0e3b43', '#ffffff', 1, '#7fd1c7'],
-  ['MIRAFLO', '#00a3e0', '#ffffff', 5, '#ffffff'],
-  ['VALTREO TYRES', '#111111', '#ffd400', 2, '#ffd400'],
-  ['VERDANO', '#f2a900', '#0b2a5b', 3, '#0b2a5b'],
-  ['BRAVANTE', '#8a0f2e', '#ffffff', 0, '#e8c07a'],
-  ['ARBOR', '#2d5a27', '#f1f1e6', 4, '#a5d86e'],
-];
+/**
+ * The boards: 'ad0'…'ad19' are the circuit's 20 partners (partners.ts order, title partner first,
+ * then the series partners, then the local ones), each in its own colour block; 'ad20' is the
+ * series' own board.
+ */
+export const AD_COUNT = 21;
+const SERIES_BOARD: [string, string, string, number, string] = ['APEX GP', '#e10600', '#ffffff', 5, '#15151e'];
+/** the cell of a partner's board by key ('title', 'timing', 'tyres', a local key…) */
+export const adName = (key: string) => 'ad' + roster().index(key);
+/**
+ * A board for the paddock-wide runs (barriers, wall paint), drawn by contract weight from a hash
+ * u in [0, 1): the title partner holds the most runs, the big series contracts the next most
+ * (docs/F1_ADVERTISING.md §2, §5); 1 in 12 is the series' own board.
+ */
+export const adMixed = (u: number) => {
+  const mix = roster().mix;
+  if (u > 11 / 12) return 'ad20';
+  return 'ad' + mix[Math.min(mix.length - 1, Math.floor(((u * 12) / 11) * mix.length))];
+};
 
 export const BELTS = ['belt_red', 'belt_blue', 'belt_white', 'belt_yellow', 'belt_black', 'belt_redwhite'] as const;
 
@@ -72,7 +71,7 @@ export class PrintAtlas {
 
   private register() {
     const list: string[] = [];
-    SPONSORS.forEach((_, i) => list.push('ad' + i));
+    for (let i = 0; i < AD_COUNT; i++) list.push('ad' + i);
     list.push(...BELTS, 'belt_logo0', 'belt_logo1', 'belt_logo2');
     list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall', 'signs2', 'posts0', 'posts1', 'posts2', 'wall_stripes', 'wall_champions');
     TEAMS.forEach((t) => list.push('team_' + t.id));
@@ -113,13 +112,14 @@ export class PrintAtlas {
     ctx.fillStyle = '#777';
     ctx.fillRect(0, 0, this.size, this.size);
     const W = this.cw, H = this.ch;
-    SPONSORS.forEach((sp, i) => {
+    const R = roster();
+    for (let i = 0; i < AD_COUNT; i++) {
       const [x, y] = this.origin('ad' + i);
-      // the series' own boards keep their livery; every other slot is one of the paddock's brands
-      if (sp[0] === 'APEX GP') drawAd(ctx, x, y, W, H, sp);
-      else drawBrand(ctx, x, y, W, H, brandAt(i), i % 5 === 3);
+      // the series' own board keeps its livery; the rest are the circuit's partners in their colour blocks
+      if (i === AD_COUNT - 1) drawAd(ctx, x, y, W, H, SERIES_BOARD);
+      else drawBrand(ctx, x, y, W, H, R.brands[i % R.brands.length]);
       printWear(ctx, x, y, W, H, 101 + i);
-    });
+    }
     const beltCols: Record<string, string[]> = {
       belt_red: ['#b3121f'],
       belt_blue: ['#16408f'],
@@ -132,11 +132,12 @@ export class PrintAtlas {
       const [x, y] = this.origin(b);
       drawBelt(ctx, x, y, W, H, beltCols[b], null);
     }
-    for (let k = 0; k < 3; k++) {
+    // tyre-wall belts printed in a partner's colours: the title partner's, the tyre maker's, the freight company's
+    (['title', 'tyres', 'logistics'] as const).forEach((key, k) => {
       const [x, y] = this.origin('belt_logo' + k);
-      const sp = SPONSORS[[0, 6, 14][k]];
-      drawBelt(ctx, x, y, W, H, [sp[1]], sp);
-    }
+      const b = R.b(key);
+      drawBelt(ctx, x, y, W, H, [b.bg], b);
+    });
     {
       const [x, y] = this.origin('tyre_top');
       drawTyreTop(ctx, x, y, W, H);
@@ -196,13 +197,11 @@ export class PrintAtlas {
         const bx = x + k * 128;
         ctx.fillStyle = '#f4f4f2';
         ctx.fillRect(bx, y, 128, 128);
-        ctx.fillStyle = '#c8102e';
+        // (the title partner's strip along the foot, in its colours)
+        const tp = R.b('title');
+        ctx.fillStyle = tp.bg;
         ctx.fillRect(bx, y + 100, 128, 28);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `italic 700 20px ${FONT}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('VELOCE', bx + 64, y + 115);
+        drawWordmark(ctx, bx + 4, y + 101, 120, 26, tp);
         ctx.fillStyle = '#111111';
         ctx.font = `700 ${t.length > 2 ? 58 : 70}px ${FONT}`;
         ctx.save();
@@ -256,21 +255,9 @@ export class PrintAtlas {
       drawScreen(ctx, x, y, W, H);
     }
     {
+      // the start gantry's banner: the race's title, the title partner's block first (§2)
       const [x, y] = this.origin('gantry');
-      ctx.fillStyle = '#0d0f14';
-      ctx.fillRect(x, y, W, H);
-      const g = ctx.createLinearGradient(x, y, x + W, y);
-      g.addColorStop(0, '#e10600');
-      g.addColorStop(1, '#8a0400');
-      ctx.fillStyle = g;
-      ctx.fillRect(x, y + H - 22, W, 22);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `italic 700 50px ${FONT}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(EVENT.gp, x + W / 2, y + 44, W - 30);
-      ctx.font = `700 20px ${FONT}`;
-      ctx.fillText(`${EVENT.place}  ·  APEX GP`, x + W / 2, y + H - 11);
+      drawTitle(ctx, x, y, W, H, R.title, EVENT.gp, { bg: '#0d0f14', fg: '#ffffff', accent: '#e10600', bands: EVENT.colours });
     }
     {
       const [x, y] = this.origin('monitor');
@@ -452,7 +439,7 @@ function drawAd(ctx: CanvasRenderingContext2D, x: number, y: number, W: number, 
   ctx.restore();
 }
 
-function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, W: number, H: number, cols: string[], sp: [string, string, string, number, string] | null) {
+function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, W: number, H: number, cols: string[], brand: Brand | null) {
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, W, H);
@@ -483,13 +470,7 @@ function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, W: number
       ctx.fillRect(bx - 1, by - 12, 3, 3);
     }
   }
-  if (sp) {
-    ctx.fillStyle = sp[2];
-    ctx.font = `italic 700 64px ${FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(sp[0], x + W / 2, y + H / 2 + 3, W - 40);
-  }
+  if (brand) drawWordmark(ctx, x + W * 0.06, y + H * 0.2, W * 0.88, H * 0.6, brand);
   // scuffs from impacts, darker at the bottom
   const g = ctx.createLinearGradient(x, y, x, y + H);
   g.addColorStop(0, 'rgba(0,0,0,0)');
@@ -714,42 +695,18 @@ export class DecalAtlas {
     c2.fillStyle = gv;
     c2.fillRect(0, 0, 512, 64);
     ctx.drawImage(sc, 512, 448);
-    // run-off logos: big italic sponsor names, painted white
-    const logos: [string, string][] = [['VELOCE', 'swoosh'], ['APEX GP', 'chev']];
-    logos.forEach(([text, style], k) => {
+    // run-off logos, painted white (tinted by the vertex colour): the title partner's (or the
+    // presenting partner's) at the big first-corner run-offs, a series partner's at the rest — the
+    // energy company's, or the freight company's where energy holds the title (§3)
+    const R = roster();
+    const second = R.title === R.b('energy') ? 'logistics' : 'energy';
+    [R.b('title'), R.b(second)].forEach((b, k) => {
       const y = 512 + k * 256;
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, y, 1024, 256);
       ctx.clip();
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `italic 700 190px ${FONT}`;
-      ctx.fillText(text, 512 + (style === 'swoosh' ? 60 : 0), y + 136, 880);
-      if (style === 'swoosh') {
-        ctx.beginPath();
-        ctx.moveTo(40, y + 220);
-        ctx.lineTo(150, y + 220);
-        ctx.lineTo(250, y + 40);
-        ctx.lineTo(140, y + 40);
-        ctx.closePath();
-        ctx.fill();
-      } else {
-        for (const side of [0, 1]) {
-          const bx = side ? 1024 - 70 : 70;
-          const d = side ? -1 : 1;
-          ctx.beginPath();
-          ctx.moveTo(bx, y + 50);
-          ctx.lineTo(bx + 40 * d, y + 128);
-          ctx.lineTo(bx, y + 206);
-          ctx.lineTo(bx + 26 * d, y + 206);
-          ctx.lineTo(bx + 66 * d, y + 128);
-          ctx.lineTo(bx + 26 * d, y + 50);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
+      drawWordmark(ctx, 24, y + 28, 976, 200, b, '#ffffff');
       ctx.restore();
     });
     this.texture.needsUpdate = true;

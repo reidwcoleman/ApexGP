@@ -164,10 +164,31 @@ npm run check    # tsc --noEmit
   kinds `carpark` / `campsite` / `hangar` / `controlTower`) — instanced grass car parks out on the airfield (rows nose
   to nose, two-thirds full), campsites by the corners (ridge tents, cars, the odd motorhome), three WWII T2 hangars
   beside the Hangar Straight on whichever side has room, and the old watch office with its glazed control room.
+- **Who advertises where** (`world/partners.ts`, research in `docs/F1_ADVERTISING.md`) — every circuit carries 20
+  fictional brands combined the way the real ones are: 14 series partners at every race (a timekeeper, the VELTRA
+  tyres, express freight, a 0.0 lager, champagne, an energy drink, an airline, a bank, cloud, an energy company, a
+  luxury house, a crypto exchange, a cruise line, a laptop maker — each in the colour block of the kind of board that
+  holds that contract) and 6 local partners sold by the promoter (the host's bank, telecom, beer, airline, tourism
+  board, car maker…). Each race has a title partner that names it ("VELTRA GRAN PREMIO D'ITALIA", `EVENT.titled` in
+  `event.ts`) following the 2026 calendar's pattern (the tyre maker at Monza and Silverstone, the laptop maker at
+  Montréal and Spielberg, the cruise line at Austin and São Paulo, the energy company at Suzuka, cloud at the
+  Hungaroring, champagne at Spa, the lager at Zandvoort, the airline at Albert Park, the national airlines in the
+  Gulf; Mexico City has none, "presented by" the lager): its banner on the start gantry, the podium and the
+  footbridges, its paint in the big first-corner run-offs, and the most contracts in the board runs. `setEvent`
+  picks the circuit's roster; every board painter reads `roster()`: the trackside atlas (`ad0`…`ad19` + the series'
+  own board; `adMixed` draws barrier runs by contract weight, the gantry alternates the title banner with the
+  timekeeper, each generic footbridge face is one contract, stair towers carry local partners, tyre-wall belts the
+  title partner / tyre maker / freight, the braking boards the title partner's strip, run-off decals its word mark),
+  the grandstand fascias (`signage.ts`, local partners on every other board, repainted on a circuit switch), the
+  pit building and podium, and the venue dressings. Word marks are drawn on canvas (`brands.ts`: weight, case,
+  tracking, slant, stretch and one of 13 emblems). LED perimeter boards show a `LedReel` (`venues/ledReel.ts`):
+  every venue's LED boards roll together through its partners (8 s a slide, the title partner every fourth),
+  so a run belongs to one brand at a time. `tools/_brandshots.mjs <out> <track> [--atlases]` frames the gantry,
+  the main straight and Turn 1 and dumps every board atlas.
 - **Each Grand Prix's own boards** (`env/venues/venueAds.ts`, plans in `venueAdPlans.ts`) — on top of the
   paddock-wide wall paint, fence wraps and bridges, Albert Park, Mexico City, Sakhir and Yas Marina carry their
-  race weekend's partners (fictional brands in the real boards' colour blocks: the title partner's banner, the
-  local lager, airline, telco, bank): LED perimeter boards along the foot of the main grandstands (self-lit),
+  race weekend's partners (`partners.ts`: the title partner's banner, the local lager, airline, telco, bank):
+  LED perimeter boards along the foot of the main grandstands (self-lit),
   printed hoardings on posts round the backs of the run-offs (Melbourne's gravel traps, Mexico's and Sakhir's
   Turn 1, Yas's hairpin), the title banner across the top of every footbridge, big word marks painted on the
   Tilke run-offs (laid along the track, reading from the outside camera, worn by tyres), Mexico's rosa mexicano
@@ -177,8 +198,7 @@ npm run check    # tsc --noEmit
   poles every ~50 m a side.
 - **Race-weekend dressing** (`env/venues/dressKit.ts`, one `<venue>Dress.ts` each, dispatched by `venues/dress.ts`) —
   each venue's own boards laid out where the broadcast shows them rather than from the paddock-wide pool: a canvas
-  atlas per venue (fictional brands in the real boards' colour blocks — `venues/dressBrands.ts` — and the event's own
-  banners), rows of printed or LED hoardings on posts behind the barrier (clear of marshal posts, stands, fan banks,
+  atlas per venue (its partners from `partners.ts` and the event's own banners), rows of printed or LED hoardings on posts behind the barrier (clear of marshal posts, stands, fan banks,
   screens and footbridges; brands in contract runs), big braced boards at the ends of run-offs, a banner gantry
   over a straight (the generic arches keep clear: `VENUE_PROPS.keepClear` / `arches` in `trackside/structures.ts`),
   painted logos in the tarmac run-offs (only where it really is tarmac run-off) and the pit building's roof:
@@ -198,8 +218,9 @@ npm run check    # tsc --noEmit
   towers wherever the stands and fans' banks leave room. Self-lit LED boards along the main grandstand walls. Spa's
   old pits stepping down the hill to Eau Rouge (fans on the roof rail, the old timekeepers' box at the top), the old
   National pits and the drivers' clubhouse at Woodcote at Silverstone, Suzuka's big boards round 130R, painted
-  run-off logos at more corners (`trackside/markings.ts` `RUNOFF_LOGOS`). Its own banner atlas of fictional brands
-  in the real boards' colour blocks (a green-and-gold watchmaker, a yellow freight company, a green lager…).
+  run-off logos at more corners (`trackside/markings.ts` `RUNOFF_LOGOS`). Its own banner atlas of the venue's
+  partners: the title partner on the first bridge's face, the series' timekeeper, freight and lager on the others,
+  the promoter's partners on the far faces and the old pits' fascias.
 - **Trackside weathering** — props and printed surfaces carry a weathering class (`WEATHER` in
   `trackside/builder.ts`, the integer part of the roughness channel): concrete (patina, rain-run streaks, pour
   joints, lichen on top), painted steel (mottle, chips, rust runs), painted walls (rubber scuffs where cars

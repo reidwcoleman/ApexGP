@@ -7,7 +7,8 @@ import '@fontsource/jetbrains-mono/700.css';
 import { TEAMS, type Team } from '../../race/Teams.ts';
 import type { UVRect } from './geo.ts';
 import { rng } from './geo.ts';
-import { brandAt, drawBrand, printWear } from '../brands.ts';
+import { drawBrand, drawTitle, printWear } from '../brands.ts';
+import { SERIES, roster } from '../partners.ts';
 
 /**
  * Canvas-drawn textures for the pit complex (all fictional branding):
@@ -20,7 +21,15 @@ import { brandAt, drawBrand, printWear } from '../brands.ts';
 const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
 const MONO = '"JetBrains Mono", Menlo, monospace';
 
-export const SPONSORS = ['VELOCE', 'QUANTA', 'KRAFT ENERGY', 'ORBIT', 'ARBOR', 'CIELO', 'NORTHWIND', 'IRONCLAD', 'PULSAR', 'AXIOM', 'APEX GP', 'MONZA'];
+/**
+ * The pit building's boards 'sp0'…'sp11' (building.ts: the fascia between the garages takes 0–9,
+ * the canopy, the race-control front 10 and 11), as keys into the circuit's partners (partners.ts):
+ * the title partner and the big series contracts alternating with the promoter's local partners
+ * ('@n'), the series' own board, the circuit's name in the host's colours.
+ */
+export const SPONSORS = ['title', '@0', 'timing', '@1', 'logistics', '@2', 'lager', '@3', 'tyres', '@4', 'APEX GP', 'PLACE'];
+/** the teams' own commercial partners on the garage walls (series-wide brands, the same at every race) */
+const TEAM_PARTNERS = Object.values(SERIES);
 
 interface Cell {
   x: number;
@@ -191,7 +200,11 @@ export class PrintAtlas extends Atlas {
     this.lightCell();
     this.banner('pitexit', 'PIT EXIT', '#101216', '#ffffff', true);
     this.banner('pitin', 'PIT IN', '#101216', '#ffffff', true);
-    this.banner('podium', `${EVENT.gp} · ${EVENT.place}`, '#b0001e', '#ffffff', false);
+    {
+      // the podium's banner: the race's title, the title partner's block first (docs/F1_ADVERTISING.md §2)
+      const c = this.at('podium');
+      drawTitle(this.ctx, c.x, c.y, c.w, c.h, roster().title, EVENT.gp, { bg: '#b0001e', fg: '#ffffff', accent: '#15151e', bands: EVENT.colours });
+    }
     this.banner('paddock', 'PADDOCK CLUB', '#15181d', '#e8e8e8', false);
     this.banner('timing', 'LIVE TIMING', '#050608', '#ffd21f', false);
     this.podiumBackdrop();
@@ -289,7 +302,7 @@ export class PrintAtlas extends Atlas {
     g.fillRect(c.x, c.y + c.h * 0.72, c.w, c.h * 0.28);
     g.fillStyle = '#e9ebee';
     g.textAlign = 'center';
-    const partners = [t.sponsor, brandAt(k + 3).name, brandAt(k + 9).name];
+    const partners = [t.sponsor, TEAM_PARTNERS[(k * 3 + 1) % TEAM_PARTNERS.length].name, TEAM_PARTNERS[(k * 5 + 8) % TEAM_PARTNERS.length].name];
     partners.forEach((p, i) => {
       fitText(g, p, (px) => `700 ${px}px ${FONT}`, c.w / 3 - 20, 30);
       g.fillText(p, c.x + (c.w / 3) * (i + 0.5), c.y + c.h * 0.86);
@@ -336,16 +349,17 @@ export class PrintAtlas extends Atlas {
       ['#101216', '#ffffff'], ['#008c45', '#ffffff'],
     ];
     const [bg, fg] = palettes[k % palettes.length];
-    if (name !== 'MONZA' && name !== 'APEX GP') {
-      // a paddock brand, as printed on the building's fascia boards
-      drawBrand(g, c.x, c.y, c.w, c.h, brandAt(k * 3 + 1), k % 4 === 2);
+    if (name !== 'PLACE' && name !== 'APEX GP') {
+      // one of the circuit's partners, as printed on the building's fascia boards
+      const R = roster();
+      drawBrand(g, c.x, c.y, c.w, c.h, R.b(name[0] === '@' ? R.local[Number(name.slice(1)) % R.local.length] : name));
       printWear(g, c.x, c.y, c.w, c.h, 307 + k, 0.7);
       return;
     }
     g.save();
     g.fillStyle = bg;
     g.fillRect(c.x, c.y, c.w, c.h);
-    if (name === 'MONZA') {
+    if (name === 'PLACE') {
       // national colours band
       g.fillStyle = EVENT.colours[0];
       g.fillRect(c.x, c.y, c.w / 3, c.h);
@@ -359,7 +373,7 @@ export class PrintAtlas extends Atlas {
     g.fillStyle = fg;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    const label = name === 'MONZA' ? EVENT.place : name;
+    const label = name === 'PLACE' ? EVENT.place : name;
     fitText(g, label, (px) => `italic 700 ${px}px ${FONT}`, c.w - 50, 84);
     g.fillText(label, c.x + c.w / 2, c.y + c.h / 2 + 4);
     g.restore();
@@ -585,8 +599,9 @@ export class PrintAtlas extends Atlas {
     g.textBaseline = 'middle';
     g.font = `italic 700 88px ${FONT}`;
     g.fillText(EVENT.place, c.x + c.w / 2, c.y + 100);
-    g.font = `700 30px ${FONT}`;
-    g.fillText(EVENT.gp, c.x + c.w / 2, c.y + 170);
+    // (the full title, as the title partner buys it)
+    fitText(g, EVENT.titled, (px) => `700 ${px}px ${FONT}`, c.w - 40, 30);
+    g.fillText(EVENT.titled, c.x + c.w / 2, c.y + 170);
     // the host nation's colours under the name (it was the tricolore at every circuit)
     EVENT.colours.forEach((col, i) => {
       g.fillStyle = col;
