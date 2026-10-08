@@ -63,6 +63,9 @@ uniform vec3 uMilkCol;
 uniform vec3 uViewMilkCol;
 uniform vec3 uFogCol;
 uniform vec2 uFogK;
+// rain curtains below the deck: x strength, y lean with the wind (per unit of elevation), z drift,
+// w the murk's flat band over the horizon (rad: in the rain the veil is solid that far up)
+uniform vec4 uCurtain;
 // the fog layer's glow round the sun (fog.ts aerialFogSun), so the murk and the sky meet in one glare
 uniform vec3 uFogSun;
 
@@ -295,7 +298,24 @@ void main() {
     float fmu = max( dot( d, uSunDir ), 0.0 );
     float fm2 = fmu * fmu;
     vec3 fogC = uFogCol + uFogSun * ( fm2 * 0.3 + fm2 * fm2 * fm2 * 0.55 + pow( fmu, 48.0 ) * 1.5 );
-    col = mix( col, fogC, uFogK.x * exp( -max( sy, 0.0 ) * uFogK.y ) );
+    col = mix( col, fogC, uFogK.x * exp( -max( sy - uCurtain.w, 0.0 ) * uFogK.y ) );
+  }
+  // the rain itself seen kilometres off: darker curtains hanging from the deck to the ground, a few
+  // degrees wide, leaning with the wind and marching across the horizon (the grey shafts that sweep
+  // across Eau Rouge's hillside or the Silverstone flats before the next squall arrives). Whole
+  // harmonics of the azimuth, so the ring has no seam.
+  if ( uCurtain.x > 0.001 && uEnv < 0.5 && sy > -0.02 ) {
+    float az = atan( d.z, d.x );
+    float el = max( sy, 0.0 );
+    float a = az + el * uCurtain.y;
+    float n = 0.5 + 0.26 * sin( a * 7.0 + uCurtain.z ) + 0.15 * sin( a * 17.0 - uCurtain.z * 1.7 + 1.3 ) + 0.09 * sin( a * 41.0 + uCurtain.z * 2.3 + 4.1 );
+    // (the ragged, streaky texture of each curtain: noise on the azimuth circle, so it wraps too)
+    vec2 ring = vec2( cos( a ), sin( a ) );
+    float st = 0.8 + 0.4 * ( vnoise2( ring * 60.0 + vec2( 0.0, el * 12.0 + uCurtain.z * 0.3 ) ) - 0.5 );
+    float c = smoothstep( 0.5, 0.85, n ) * st;
+    // hanging from the deck, fading into the murk that hides their feet (and the land's own fog edge)
+    float hang = smoothstep( 0.2, 0.06, el ) * smoothstep( 0.0, 0.035, el );
+    col *= 1.0 - uCurtain.x * c * hang;
   }
 
   // light in the low air: the city's sodium glow, and the circuit's own floodlights lighting the haze
@@ -353,6 +373,7 @@ export function createSkyDome(): SkyDome {
     uSunDisc: { value: new THREE.Vector3(40, 30, 20) },
     uSunRadius: { value: 0.0095 },
     uTime: { value: 0 },
+    uCurtain: { value: new THREE.Vector4() },
     uPano: { value: null },
     uPanoSize: { value: new THREE.Vector2(1792, 448) },
     uOvercast: { value: 0 },

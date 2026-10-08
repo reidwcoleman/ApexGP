@@ -802,6 +802,28 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float thr = 1.08 - 0.5 * Wt;
     float puddle = smoothstep(thr, thr + 0.1, low + edgeBias) * smoothstep(0.25, 0.55, Wt) * (1.0 - dryBand);
     if (zone > 0.5 && zone < 1.5) puddle *= 0.0;
+    // rivers: in a downpour the camber and the fall of the land can't shed it fast enough and the water
+    // runs across the road in sheets — a band one to three metres wide crossing on a slant, a few times a lap
+    // (Spa's Raidillon, the Hangar Straight, the bottom of Interlagos' Senna S: where the cars twitch and
+    // the drivers radio in about "a river at turn 3"). Placed by hashing 160 m stretches of the lap.
+    float river = 0.0;
+    if (zone < 0.5 && Wt > 0.62) {
+      float cell = floor(sv / 160.0);
+      // (an arithmetic hash: a sin() of a large argument hashes differently from one GPU to the next)
+      float h = fract(cell * 0.1031 + 0.37);
+      h *= h + 33.33;
+      h = fract((h + h) * h);
+      if (h < 0.2) {
+        float c0 = (cell + 0.2 + 0.6 * fract(h * 13.1)) * 160.0;
+        // a slant across the road, wandering where the surface's own dips lead it
+        float d = sv - c0 - lat * (fract(h * 7.3) - 0.5) * 1.6 - (mN2.g - 0.5) * 6.0 - (m24.b - 0.5) * 1.2;
+        float w = 1.2 + 2.0 * fract(h * 3.7);
+        // (deepest toward the low side it drains to, a thin film over the crown it starts from)
+        float side = fract(h * 5.9) < 0.5 ? lat : -lat;
+        river = (1.0 - smoothstep(w * 0.45, w, abs(d))) * smoothstep(0.62, 0.85, Wt) * mix(0.65, 1.0, smoothstep(-hw, hw, side)) * (1.0 - 0.6 * dryBand);
+        puddle = max(puddle, river);
+      }
+    }
     // the water film rises through the aggregate: crevices fill first, stone tops last
     float level = wet * 1.15 - 0.32;
     // resolved aggregate: per-stone coverage; minified: the fraction of the height distribution below the level
@@ -833,6 +855,12 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     if (uRain > 0.01) {
       float fadeR = 1.0 - smoothstep(0.003, 0.011, px);
       if (fadeR > 0.0) tsRip = tsRipple(vTrk, uWeatherTime, 0.25 + 0.75 * uRain) * fadeR * sub * min(1.0, uRain * 2.0);
+      // running water isn't a still mirror: a river's surface is a train of ripples flowing across
+      if (river > 0.01) {
+        float fl = lat * 3.1 + mN.r * 4.0 - uWeatherTime * 5.0;
+        tsRip += vec2(sin(fl) * 0.09, sin(fl * 1.7 + sv * 2.3) * 0.05) * river * (1.0 - smoothstep(0.004, 0.02, px));
+        rough = max(rough, 0.05 * river);
+      }
       // distant rain: a fine shimmer keeps the water from looking like glass
       rough = max(rough, 0.035 + 0.07 * uRain * (1.0 - fadeR) * sub);
     }

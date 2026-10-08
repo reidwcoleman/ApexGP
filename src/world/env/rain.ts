@@ -63,7 +63,9 @@ void main() {
   // those nearly in line with it — the silver threads against dark trees in a sun shower)
   float mu2 = mu * mu;
   float mu8 = mu2 * mu2 * mu2 * mu2;
-  vGlint = 0.6 * mu2 + 1.4 * mu8 * mu8;
+  // (checked against the low sun at Monza's Lesmo trees: at 1.4 the hard lobe left a sparse few
+  // gold flecks; a sun shower filmed into the light is a curtain of bright threads)
+  vGlint = 0.7 * mu2 + 3.0 * mu8 * mu8;
   // drops falling through a car's headlight beam light up (night races in the rain)
   vLamp = 0.0;
   for ( int k = 0; k < ${HL_MAX}; k ++ ) {
@@ -75,7 +77,10 @@ void main() {
     vec3 lf = normalize( vec3( fw.z, 0.0, -fw.x ) + vec3( 1e-5 ) );
     vec3 lu = cross( fw, lf );
     float ex = dot( ld, lf ) / al * hlInfo.y;
-    float ey = dot( ld, lu ) / al * hlInfo.z * 0.6;
+    // (the beam's own ~6° vertical cut-off: a wider cone lit drops metres above the road all over the
+    // top of a night chase view — warp-speed streaks across a black sky — where onboard night-rain
+    // footage shows them only in the beams' low wedge ahead of each car)
+    float ey = dot( ld, lu ) / al * hlInfo.z;
     float e = ex * ex + ey * ey;
     if ( e < 1.0 ) vLamp += hlPos[ k ].w * ( 1.0 - e ) / ( length( ld ) + 2.5 );
   }

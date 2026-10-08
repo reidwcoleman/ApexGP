@@ -51,6 +51,9 @@ const FILM = {
   wetLift: [0.0062, 0.0064, 0.0068],
   /** how much brighter the rain's grey veil (fog) is than the deck that lights it */
   rainVeil: 0.7,
+  /** a storm's deck held back from white (share of the visible sky) and its frame left dimmer */
+  stormSky: 0.5,
+  stormExposure: 0.25,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
   skyHot: 0.45,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
@@ -452,7 +455,11 @@ export function createEnvironment(
     // footage the trees across the track are pale grey and the sky behind them near white)
     // (by day only: at night nothing lights it and a wet night stays black)
     const dayK = 1 - THREE.MathUtils.smoothstep(P.night ?? 0, 0.3, 1);
-    fogCol.multiplyScalar(1 + FILM.rainVeil * wetK * dayK);
+    // a downpour under a thick deck (a storm, not a shower in sunshine): the 'heavy' of a wet race —
+    // the murk is grey, not glowing, and the deck overhead reads as a dark ceiling (Spa 2021,
+    // Suzuka 2022, Interlagos 2016: slate skies, the far trees going to grey rather than to white)
+    const stormK = THREE.MathUtils.smoothstep(L.rain, 0.45, 0.95) * (1 - L.sunVis) * dayK;
+    fogCol.multiplyScalar(1 + FILM.rainVeil * wetK * dayK * (1 - 0.55 * stormK));
     // (the blue hour: with the sun gone the air is lit by the blue sky alone — misty dusk footage is slate
     // blue-grey, where the atmosphere model's low sky away from the afterglow still leans mauve)
     const blueHour = (1 - (P.direct ?? 1)) * (1 - THREE.MathUtils.smoothstep(P.night ?? 0, 0.5, 1));
@@ -537,6 +544,8 @@ export function createEnvironment(
     // headlights and the lights round the track carry them
     const filmDay = 1 - THREE.MathUtils.smoothstep(nightK, 0.5, 1);
     gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(FILM.nightExposure, FILM.exposure, filmDay);
+    // (and doesn't meter a storm's gloom all the way back up to a bright day: it stays dim)
+    gradeLook.exposure *= 1 - FILM.stormExposure * stormK;
     // (a misty blue hour is darker than a clear one: the mist eats the last light — sim dusk footage sits
     // at ~0.11 mid-grey)
     gradeLook.exposure *= 1 - 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.5) * blueHour;
@@ -546,7 +555,9 @@ export function createEnvironment(
     // (and a dry grey day's sky: a camera metering the land under a deck leaves the sky a bright grey-
     // white, as in overcast race footage — the deck the dome draws is the light's, dim beside that)
     const greyHot = 1 + 0.6 * L.overcast * (1 - wetK) * filmDay;
-    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot;
+    // (a broadcast camera in a storm is set for the land and its knee holds the sky back: the deck
+    // stays a dark, textured grey, where a light shower's sky goes near white)
+    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot * (1 - FILM.stormSky * stormK);
     sky.uniforms.uSkyComp.value = skyComp;
     // the low sky veiled by the mist / rain that veils the land (in the land's colour, so they meet):
     // how much of the horizon a few km of the air beyond the clear-day haze hides
@@ -556,7 +567,16 @@ export function createEnvironment(
     // depth: 1 − e^−τ straight up — white overhead in fog, a pale blue sky over a shallow mist)
     const layerK = THREE.MathUtils.smoothstep(L.groundFog, 0, 2e-3);
     const fogUp = -Math.log(Math.max(1e-3, 1 - Math.exp(-L.fogTau)));
-    sky.uniforms.uFogK.value.set(THREE.MathUtils.lerp(veil, 1, layerK), THREE.MathUtils.lerp(THREE.MathUtils.lerp(9, 1.2, THREE.MathUtils.smoothstep(veilOd, 1, 6)), fogUp, layerK));
+    // (a storm's murk thins faster upward than its veil depth says: the rain falls in curtains with gaps
+    // between them, so the deck's dark lumps show from ~15° up instead of one grey sheet)
+    sky.uniforms.uFogK.value.set(THREE.MathUtils.lerp(veil, 1, layerK), THREE.MathUtils.lerp(THREE.MathUtils.lerp(9, 1.2, THREE.MathUtils.smoothstep(veilOd, 1, 6)) * (1 + 1.6 * stormK), fogUp, layerK));
+    // rain curtains on the horizon: a downpour's own, and a shower's off under the deck
+    const curtain = sky.uniforms.uCurtain.value as THREE.Vector4;
+    curtain.x = (0.24 * stormK + 0.1 * wetK * (1 - L.sunVis)) * dayK;
+    curtain.y = THREE.MathUtils.clamp(Math.hypot(wind.x, wind.z) / 8, 0, 1.3) * 0.4;
+    // (…but the murk itself stays solid over the first few degrees, so the far hills melt into it instead
+    // of standing as a glowing white ridge under a darker sky — as they did while a shower came in)
+    curtain.w = (0.03 * wetK + 0.02 * stormK) * dayK;
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
     gradeLook.saturation = L.saturation * FILM.saturation;
     gradeLook.contrast = L.contrast * FILM.contrast;
@@ -980,6 +1000,8 @@ export function createEnvironment(
     camera.getWorldPosition(camPos);
     sky.mesh.position.copy(camPos);
     sky.uniforms.uTime.value = elapsed;
+    // (the curtains march across the horizon at the wind's pace, a few km off)
+    (sky.uniforms.uCurtain.value as THREE.Vector4).z += dt * 11 * (0.0008 + Math.hypot(wind.x, wind.z) / 5000);
 
     // quality follows the renderer
     if (gfx.qualityLevel !== quality) setQuality(gfx.qualityLevel);
