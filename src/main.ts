@@ -45,11 +45,14 @@ const startLoads = () => {
   loadsStarted = true;
   // (the baked trees, ~6 MB, only once the people are in: the landscape behind the garage is the
   // first thing to draw them, and on a real connection they took bandwidth from what the garage waits for)
+  // (the road and grass scans too: the garage doesn't draw them)
   loadPeople()
     .catch(() => undefined)
-    .then(() => void loadTreeKit());
+    .then(() => {
+      void loadAsphaltScan();
+      void loadTreeKit();
+    });
   void preloadPixels();
-  void loadAsphaltScan();
   Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
     () => performance.mark('apex:fonts'),
     () => undefined,

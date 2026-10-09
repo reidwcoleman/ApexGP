@@ -1,3 +1,4 @@
+import { everUnlocked, unlockForever } from './Unlocks.ts';
 import { F1_SPEC, type CarSpec } from '../sim/CarPhysics.ts';
 import { POINTS, AI_SKILL } from '../race/Race.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
@@ -207,11 +208,19 @@ export class Career {
   /** circuits opened another way (the driver career: every circuit its seasons have reached) */
   static extraUnlocked: ((id: string) => boolean) | null = null;
   isUnlocked(id: string): boolean {
-    if (UNLOCK_ALL || Career.extraUnlocked?.(id)) return true;
-    const i = CIRCUITS.findIndex((c) => c.id === id);
-    if (i <= 0) return true;
-    const prev = this.data.best[CIRCUITS[i - 1].id];
-    return prev !== undefined && prev <= UNLOCK_POS;
+    // (once opened, open for good: a new season or a new career never locks it again)
+    if (UNLOCK_ALL || everUnlocked(id)) return true;
+    let open = !!Career.extraUnlocked?.(id);
+    if (!open) {
+      const i = CIRCUITS.findIndex((c) => c.id === id);
+      if (i <= 0) open = true;
+      else {
+        const prev = this.data.best[CIRCUITS[i - 1].id];
+        open = prev !== undefined && prev <= UNLOCK_POS;
+      }
+    }
+    if (open) unlockForever(id);
+    return open;
   }
   unlockedCircuits() {
     return CIRCUITS.filter((c) => this.isUnlocked(c.id));

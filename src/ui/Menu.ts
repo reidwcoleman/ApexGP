@@ -149,8 +149,9 @@ export interface MenuCallbacks {
   onCareerChanged?(): void;
 }
 
-export type HubTab = 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
+export type HubTab = 'home' | 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
 const HUB_TABS: { id: HubTab; label: string }[] = [
+  { id: 'home', label: 'Home' },
   { id: 'career', label: 'Career' },
   { id: 'race', label: 'Quick race' },
   { id: 'highlights', label: 'Highlights' },
@@ -265,7 +266,8 @@ export class Menu {
 
   readonly career: Career;
   highlights: Highlights | null = null;
-  hubTab: HubTab = 'career';
+  /** the garage opens on Home: just the car, and the one thing to do next */
+  hubTab: HubTab = 'home';
   private focusedPart: SetupPart | null | undefined = undefined;
   private hubFocus: 'tabs' | 'panel' = 'tabs';
   private hubTabs: HTMLElement[] = [];
@@ -436,14 +438,15 @@ export class Menu {
     const p = this.hubPanel;
     if (!p) return;
     p.innerHTML = '';
-    p.className = 'hub-panel glass' + (this.hubTab === 'career' ? ' wide' : '');
+    p.className = this.hubTab === 'home' ? 'hub-panel home' : 'hub-panel glass' + (this.hubTab === 'career' ? ' wide' : '');
     p.style.backgroundImage = '';
     p.style.removeProperty('--team');
     void p.offsetWidth;
     p.classList.add('in');
     this.items = [];
     this.sel = Math.min(this.sel, 0);
-    if (this.hubTab === 'race') this.tabRace(p);
+    if (this.hubTab === 'home') this.tabHome(p);
+    else if (this.hubTab === 'race') this.tabRace(p);
     else if (this.hubTab === 'career') this.tabCareer(p);
     else if (this.hubTab === 'car') this.tabCar(p);
     else if (this.hubTab === 'paint') this.tabPaint(p);
@@ -530,6 +533,40 @@ export class Menu {
    * each unlocked by a top-five finish at the one before). Without a career yet, the map of the
    * season to come and the way in.
    */
+  /**
+   * Home: the garage and the car, nothing over it but the one thing to do next — the next career
+   * round (or the way into a career), a quick race at this circuit as the quiet alternative.
+   */
+  private tabHome(p: HTMLElement) {
+    const dc = this.cb.driverCareer?.();
+    const nt = dc?.active ? dc.nextTrack : null;
+    const cd = CIRCUITS.find((c) => c.id === (nt ?? this.setup.track)) ?? CIRCUITS[0];
+    const info = CIRCUIT_INFO[cd.id];
+    const box = el('div', 'home-next', p);
+    if (dc?.active && nt) {
+      const d = dc.data!;
+      el('div', 'eyebrow', box, `Next up · Round ${d.round + 1} of ${d.calendar.length}`);
+      el('div', 'title', box, cd.name);
+      el('div', 'meta', box, `${info?.country ?? cd.country} · ${dc.laps} laps · ${fcLabel(this.cb.careerForecast(cd.id))}`);
+      const go = el('div', 'cta home-go', box, 'Race weekend');
+      this.action(go, () => this.cb.onCareerRace(nt));
+    } else if (dc?.active) {
+      el('div', 'eyebrow', box, 'Season complete');
+      el('div', 'title', box, 'See where you finished');
+      const go = el('div', 'cta home-go', box, 'Career');
+      this.action(go, () => this.setTab('career'));
+    } else {
+      el('div', 'eyebrow', box, 'Your journey to Formula 1');
+      el('div', 'title', box, 'Start your career');
+      el('div', 'meta', box, 'Create a driver, sign with a team and race the season.');
+      const go = el('div', 'cta home-go', box, 'Start career');
+      this.action(go, () => this.openCareerWizard());
+    }
+    const quick = el('div', 'home-quick', box, `Quick race at ${this.setup.track === cd.id ? cd.short : (CIRCUITS.find((c) => c.id === this.setup.track)?.short ?? cd.short)} ›`);
+    this.action(quick, () => this.setTab('race'));
+    this.sel = 0;
+  }
+
   private tabCareer(p: HTMLElement) {
     const dc = this.cb.driverCareer?.();
     if (dc?.active) {
@@ -537,6 +574,15 @@ export class Menu {
         dc,
         action: (e, fn, dis) => this.action(e, fn, dis),
         onRace: (id) => this.cb.onCareerRace(id),
+        onQuickRace: (id) => {
+          // to the Quick race tab, travelling to the circuit first if the garage is elsewhere
+          this.setTab('race');
+          if (id !== this.setup.track) {
+            this.setup.track = id;
+            save('apexgp.setup', this.setup);
+            this.cb.onTravel(id);
+          }
+        },
         onNewCareer: () => this.openCareerWizard(),
         changed: () => {
           this.cb.onCareerChanged?.();

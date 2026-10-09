@@ -1,3 +1,4 @@
+import { everUnlocked } from '../career/Unlocks.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { TEAMS, type DriverLook } from '../race/Teams.ts';
 import { ATTRS, DEFAULT_LAPS, DriverCareer, F2_CALENDAR, LAP_CHOICES, NATIONS, RD, RD_MAX, SERIES_NAME, levelLabel, levelOf, rdCost, statusLabel, teamColor, teamName, type Ask, type AttrId, type Choice, type Contract, type Msg, type RoundSummary, type Status } from '../career/DriverCareer.ts';
@@ -32,6 +33,8 @@ export interface HubCtx {
   /** register a clickable for the menu's keyboard/gamepad navigation */
   action(e: HTMLElement, fn: () => void, disabled?: boolean): void;
   onRace(track: string): void;
+  /** a quick race at an unlocked circuit (outside the championship) */
+  onQuickRace(track: string): void;
   onNewCareer(): void;
   /** something in the career changed (an answer, a signature): re-render, and the game re-syncs its grid */
   changed(): void;
@@ -110,7 +113,8 @@ export function resetSeasonMap() {
 }
 
 /** a pin's state on the season map */
-type PinState = 'done' | 'next' | 'locked';
+/** avail: a later round you reached in an earlier season (raced any time in Quick race) */
+type PinState = 'done' | 'next' | 'locked' | 'avail';
 interface PinSpec {
   id: string;
   state: PinState;
@@ -223,7 +227,7 @@ function progress(states: PinState[], medals: Medal[]): string {
 }
 
 const LEGEND =
-  `<div class="ch-legend"><span><i class="lg done"></i>Cleared</span><span><i class="lg next"></i>Next round</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span>` +
+  `<div class="ch-legend"><span><i class="lg done"></i>Cleared</span><span><i class="lg next"></i>Next round</span><span><i class="lg avail"></i>Unlocked</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span>` +
   `<span class="md-l"><i class="md gold"></i>Win<i class="md silver"></i>Podium<i class="md bronze"></i>Top ${UNLOCK_POS}</span></div>`;
 
 /**
@@ -242,7 +246,7 @@ function overview(p: HTMLElement, ctx: HubCtx) {
   const map = el('div', 'cm-map ch-map', wrap);
   const card = el('div', 'ch-rnd', wrap);
 
-  const states: PinState[] = cal.map((_, i) => (i < d.round ? 'done' : i === d.round && nt ? 'next' : 'locked'));
+  const states: PinState[] = cal.map((id, i) => (i < d.round ? 'done' : i === d.round && nt ? 'next' : everUnlocked(id) ? 'avail' : 'locked'));
   const medals = cal.map((_, i) => (d.results[i] ? medalOf(d.results[i].pos, d.results[i].dnf) : null));
   const { focus, settle } = seasonMap(
     map,
@@ -312,7 +316,7 @@ function overview(p: HTMLElement, ctx: HubCtx) {
     art.style.backgroundImage = `url("${artFor(cd.id)}")`;
     art.innerHTML =
       (cd.centerline ? `<svg class="ch-rnd-track" viewBox="0 0 120 84"><path d="${ctx.circuitPath(cd.centerline.points)}"/></svg>` : '') +
-      `<span class="badge ${st}">${st === 'done' ? 'Cleared' : st === 'next' ? 'Next round' : `${LOCK_ICON}Locked`}</span>`;
+      `<span class="badge ${st}">${st === 'done' ? 'Cleared' : st === 'next' ? 'Next round' : st === 'avail' ? 'Unlocked' : `${LOCK_ICON}Locked`}</span>`;
     el(
       'div',
       'ch-rnd-id',
@@ -343,6 +347,11 @@ function overview(p: HTMLElement, ctx: HubCtx) {
       const ob = el('div', 'ch-obj', body);
       el('div', 'hp-cap', ob, `Team targets <span>expected P${dc.expected()}</span>`);
       for (const o of dc.objectives()) el('div', 'ch-o', ob, `<i></i><span>${esc(o.label)}</span><b>+${o.rp} RP</b>`);
+    } else if (st === 'avail') {
+      // reached in an earlier season: open any time outside the championship
+      el('div', 'ch-unlock', body, `<span><b>Unlocked.</b> You opened ${esc(cd.short)} in an earlier season. It counts for the championship as round ${i + 1}; until then, race it any time.</span>`);
+      const q = el('div', 'cta ghost ch-quick', body, `Race ${esc(cd.short)} now · Quick race`);
+      ctx.action(q, () => ctx.onQuickRace(cd.id));
     } else {
       const prev = CIRCUITS.find((c) => c.id === cal[i - 1]);
       el('div', 'ch-unlock locked', body, `${LOCK_ICON}<span><b>Locked.</b> Finish in the top ${UNLOCK_POS} at ${esc(prev?.short ?? 'the round before')} to unlock it.</span>`);

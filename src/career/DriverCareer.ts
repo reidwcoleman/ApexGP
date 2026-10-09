@@ -1,3 +1,4 @@
+import { unlockForever } from './Unlocks.ts';
 import { POINTS } from '../race/Race.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { UNLOCK_POS } from './Career.ts';
@@ -713,6 +714,8 @@ export class DriverCareer {
     d.starts++;
     d.points += myPts;
     d.seen = Array.from(new Set([...(d.seen ?? []), track]));
+    unlockForever(track);
+    if (d.calendar[d.round + 1]) unlockForever(d.calendar[d.round + 1]);
     const won = !me.dnf && me.pos === 1;
     if (won) d.wins++;
     if (!me.dnf && me.pos <= 3) d.podiums++;

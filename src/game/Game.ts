@@ -401,7 +401,9 @@ export class Game {
     // the step that uses it, so its CPU work (the track survey first) overlaps them.
     const people = loadPeople().catch((e) => console.warn('people failed to load', e));
     const pixels = preloadPixels();
-    const asphalt = loadAsphaltScan();
+    // (the scanned road and grass aren't needed until the circuit is built behind the garage: they
+    // download after the garage's people, not alongside them)
+    const asphalt = people.then(() => loadAsphaltScan());
     const fonts = Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
       () => void mark('fonts'),
       () => undefined /* fallback fonts are fine */,
@@ -3439,6 +3441,8 @@ export class Game {
     const t = this.stateTime;
     type Shot = { cam: [number, number, number]; look: [number, number, number]; shift: number; fov: number };
     const shots: Record<HubTab, Shot> = {
+      // home: the car alone, a low three-quarter hero from the open side, centred in the frame
+      home: { cam: [3.9, 0.95, 4.4], look: [0, 0.5, 0.15], shift: 1.0, fov: 34 },
       race: { cam: [3.5, 1.3, 6.2], look: [0, 0.75, -0.6], shift: 1.45, fov: 38 },
       career: { cam: [3.45, 1.78, -4.85], look: [3.45, 1.35, -7.35], shift: 0.62, fov: 44 },
       highlights: { cam: [1.6, 2.5, -0.2], look: [0, 2.05, -6.0], shift: 1.0, fov: 42 },

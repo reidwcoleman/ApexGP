@@ -4532,3 +4532,94 @@
     display: none;
   }
 }
+
+/* rounds reached in an earlier season: open (raced any time in Quick race), not locked */
+.ch-legend .lg.avail {
+  background: rgba(12, 14, 19, 0.9);
+  box-shadow: inset 0 0 0 2px var(--team, var(--accent));
+}
+.ch-map .pin.avail .disc {
+  fill: rgba(12, 14, 19, 0.92);
+  stroke: var(--team, var(--accent));
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+.ch-map .pin.avail text {
+  fill: rgba(255, 255, 255, 0.85);
+}
+.ch-rnd-art .badge.avail {
+  background: rgba(10, 12, 17, 0.85);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px var(--team, var(--accent));
+}
+.ch-prog i.avail {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--team, var(--accent));
+}
+.ch-quick {
+  margin-top: var(--s3, 12px);
+}
+
+/* ---- Home: the car, and the one thing to do next (no panel: a short block bottom-right) */
+.hub-panel.home {
+  top: auto;
+  bottom: calc(var(--s6) + 40px);
+  width: min(380px, calc(40 * var(--vw)));
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  background: none;
+  gap: 0;
+}
+.home-next {
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--s4);
+  border-left: 3px solid var(--accent);
+}
+.home-next .eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+.home-next .title {
+  margin-top: var(--s2);
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
+}
+.home-next .meta {
+  margin-top: var(--s2);
+  font-size: 14px;
+  color: var(--ink2);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+.home-next .home-go {
+  margin-top: var(--s5);
+  width: 240px;
+}
+.home-quick {
+  margin-top: var(--s4);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.home-quick:hover,
+.home-quick.sel {
+  color: #fff;
+}
+/* a soft shade under the Home block: the text stays readable over the bright car behind it */
+.hub-panel.home::before {
+  content: '';
+  position: absolute;
+  inset: -90px -64px -90px -120px;
+  background: radial-gradient(closest-side, rgba(6, 7, 10, 0.72), rgba(6, 7, 10, 0));
+  pointer-events: none;
+  z-index: -1;
+}

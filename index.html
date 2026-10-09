@@ -84,6 +84,29 @@
         }
       })();
     </script>
+    <script>
+      // the garage's people (src/people/Humans.ts CORE, and their animation clips) start downloading
+      // now, beside the bundle, instead of after it has parsed: rocketbox.ts fetches the same URLs and
+      // picks these responses up (keep the list in step with CORE)
+      (function () {
+        var B = 'models/rocketbox/';
+        var hair = { Gardener_Male_01: 1, Male_Adult_07: 1, Male_Adult_10: 1 };
+        var core = ['Gardener_Male_01', 'Pilot_Female_01', 'Pilot_Male_03', 'Pilot_Female_02', 'Sports_Male_01', 'Sports_Male_02', 'Male_Adult_07', 'Male_Adult_10', 'Male_Adult_12', 'Male_Adult_11', 'Male_Adult_16'];
+        var f = ['index.json', 'anims_m.bin', 'anims_f.bin'];
+        core.forEach(function (n) {
+          f.push(n + '.glb', n + '_c.webp', n + '_n.webp', n + '_m.png');
+          if (hair[n]) f.push(n + '_h.webp');
+        });
+        f.forEach(function (u) {
+          var l = document.createElement('link');
+          l.rel = 'preload';
+          l.as = 'fetch';
+          l.crossOrigin = 'anonymous';
+          l.href = B + u;
+          document.head.appendChild(l);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
