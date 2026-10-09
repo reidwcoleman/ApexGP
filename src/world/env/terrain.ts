@@ -60,13 +60,13 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   // Zandvoort: dunes with marram grass between the verges
   zandvoort: { arid: 0.42, sand: 0xd2c29c, rock: 0x9a8f7a, meadow: 0x6e7547, straw: 0xa9a071 },
   // Mexico City: dry highland grass, brown volcanic soil
-  mexico: { meadow: 0x7a7646, straw: 0xa28e5c, earth: 0x6e5238, grassDark: 0x4a4e2a },
+  mexico: { lawn: 0x5a6634, meadow: 0x7a7646, straw: 0xa28e5c, earth: 0x6e5238, grassDark: 0x4a4e2a },
   // Texas: straw-coloured prairie, limestone and red clay; ranch pasture, mesquite and oak mottes
-  austin: { arid: 0.18, meadow: 0x7c7647, straw: 0xab975f, earth: 0x8e6244, grassDark: 0x4c5129, sand: 0xb89c72, rock: 0xa2968a, forest: -0.1, pasture: 0.7 },
+  austin: { arid: 0.18, lawn: 0x5d6833, meadow: 0x7c7647, straw: 0xab975f, earth: 0x8e6244, grassDark: 0x4c5129, sand: 0xb89c72, rock: 0xa2968a, forest: -0.1, pasture: 0.7 },
   // Hungary in August: sun-dried grass; the plain's big arable fields
-  hungaroring: { meadow: 0x76763f, straw: 0xa69455, forest: 0.02, pasture: 0.3 },
+  hungaroring: { lawn: 0x586a33, meadow: 0x76763f, straw: 0xa69455, forest: 0.02, pasture: 0.3 },
   // Melbourne: Albert Park's dry-summer lawns
-  melbourne: { meadow: 0x6f7544, straw: 0xa09262 },
+  melbourne: { lawn: 0x526a38, meadow: 0x6f7544, straw: 0xa09262 },
   // São Paulo: red tropical earth
   interlagos: { earth: 0x8c4e30, meadow: 0x5f7236 },
   // the Ardennes: spruce and beech on every slope, grazing on the plateaus (Herve cattle country)
@@ -277,7 +277,15 @@ float tWoodAt( vec2 q, float fShift ) {
   }
   vec3 lawnC = uLawn * ( 0.88 + 0.16 * m3 + 0.06 * d1 );
   // lawns: slightly patchy (clover, drier crowns where the soil is thin)
-  lawnC = mix( lawnC, mix( uLawn, uStraw, 0.4 ), smoothstep( 0.6, 0.85, m2 * 0.6 + d1 * 0.4 ) * 0.35 );
+  lawnC = mix( lawnC, mix( uLawn, uStraw, 0.4 ), smoothstep( 0.52, 0.85, m2 * 0.6 + d1 * 0.4 ) * 0.45 );
+  // (a mown lawn seen across a few hundred metres is a quilt of tones — richer and paler swards,
+  // thinner turf on the crowns, damper hollows — not one flat green)
+  {
+    float q1 = texture2D( uNoise, p * 0.021 + vec2( 0.17, 0.83 ) ).b;
+    float q2 = texture2D( uNoise, p * 0.067 + vec2( 0.71, 0.29 ) ).g;
+    lawnC *= 0.88 + 0.16 * q1 + 0.08 * q2;
+    lawnC = mix( lawnC, lawnC * vec3( 1.14, 1.06, 0.78 ), smoothstep( 0.58, 0.8, q1 * 0.7 + q2 * 0.3 ) * 0.4 );
+  }
   lawnC = mix( lawnC, uGrassDark, smoothstep( 0.6, 0.9, d2 ) * 0.18 );
   {
     // mowing stripes: the mower follows long gentle curves (the direction varies smoothly,
@@ -295,7 +303,7 @@ float tWoodAt( vec2 q, float fShift ) {
     // along the circuit the verges are mown in bands across the track, following every curve
     float stT = smoothstep( 0.3, 0.7, mt.r / max( verge, 0.05 ) );
     st = mix( st, stT, verge );
-    amp = mix( amp, 0.075, verge );
+    amp = mix( amp, 0.12, verge );
     lawnC *= mix( 1.0, mix( 1.0 - amp, 1.0 + amp, st ), ( 1.0 - smoothstep( 0.2, 0.55, aa ) * ( 1.0 - verge ) ) * ( 1.0 - farF ) );
     // white clover patches in the sward, a bluer, darker green
     float clover = smoothstep( 0.64, 0.72, d1 * 0.55 + m3 * 0.45 ) * ( 0.5 + 0.5 * nearF );
@@ -496,10 +504,13 @@ float tWoodAt( vec2 q, float fShift ) {
     float streak = sin( dot( p, vec2( 0.55, -0.83 ) ) * 0.045 + m2 * 5.0 ) * 0.5 + 0.5;
     sandC *= mix( 0.9, 1.07, smoothstep( 0.25, 0.85, streak ) );
     // wind ripples: shaded by the low sun (a normal wobble) as well as tinted
-    float ripPh = dot( p, vec2( 0.83, 0.55 ) ) * 3.3 + d2 * 7.0;
+    // (only on loose sand, faint and broken: the compacted run-off and the gravel plains have none —
+    // a regular ripple field everywhere read as corduroy from the TV towers)
+    float ripPh = dot( p, vec2( 0.83, 0.55 ) ) * 3.3 + d2 * 9.0 + m3 * 26.0;
+    float ripK = nearF * smoothstep( 0.45, 0.7, m2 * 0.6 + d1 * 0.4 ) * ( 1.0 - smoothstep( 0.4, 0.8, d3 ) * 0.5 );
     float rip = sin( ripPh );
-    sandC *= 1.0 + 0.08 * rip * nearF;
-    tRipple = vec3( 0.83, 0.0, 0.55 ) * cos( ripPh ) * 0.22 * nearF;
+    sandC *= 1.0 + 0.03 * rip * ripK;
+    tRipple = vec3( 0.83, 0.0, 0.55 ) * cos( ripPh ) * 0.07 * ripK;
     // desert pavement: gravel pans of dark stones
     vec3 pan = mix( uRock * 0.9, uSand * 0.72, d3 );
     sandC = mix( sandC, pan, smoothstep( 0.56, 0.7, m1 * 0.6 + d1 * 0.4 ) * 0.55 );

@@ -1092,6 +1092,8 @@ const GRASS_FRAG = /* glsl */ `
 float gStripe = 0.0;
 {
   vec3 col = diffuseColor.rgb;
+  // (uVergeDry: how sun-dried the venue's verges are — Texas, the Mexican highland and the Hungarian
+  // plain in summer are straw-green with whole stretches gone tawny; Spa, Silverstone and Suzuka stay green)
   vec4 mA = texture2D(uMacro, vTrk * (1.0 / 96.0) + vec2(0.3, 0.8));
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.61, 0.17));
   float clump = texture2D(uMacro, vTrk / 6.0 + vec2(0.7, 0.2)).b;
@@ -1099,15 +1101,19 @@ float gStripe = 0.0;
   // (the deep, slightly dull green of real verges in camera footage — not a game's lawn green)
   col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.92) * vec3(0.92, 1.0, 0.74) * 0.86;
   // drier, yellower patches (fewer when it rains)
-  float dry = (smoothstep(0.5, 0.85, mB.b) * 0.6 + smoothstep(0.55, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
-  col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * 0.6);
+  float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
+  col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
+  col = mix(col, col * vec3(1.3, 1.12, 0.7), uVergeDry * 0.55);
+  // mottling at a few metres (clover, rye, thinner sward on the crowns): a verge is never one flat colour
+  float mot = texture2D(uMacro, vTrk * (1.0 / 3.1) + vec2(0.13, 0.57)).g;
+  col *= 0.9 + 0.2 * mot;
   // worn / muddy strip right next to a hard edge (vA1.y = metres from the inner edge)
   float wear = 1.0 - smoothstep(0.0, 0.5 + 0.6 * mB.b, vA1.y);
   col = mix(col, vec3(0.06, 0.05, 0.035), wear * 0.55);
   // mown stripes (diagonal bands), sign flips per band
   gStripe = tsSquare((vTrk.y + vTrk.x * 0.55) / 12.0, 0.5) * 2.0 - 1.0;
   // (the stripes read from every angle on TV: part of it is the cut itself, not only the sheen)
-  col *= 1.0 + 0.09 * gStripe;
+  col *= 1.0 + 0.13 * gStripe;
   float wet = smoothstep(0.0, 0.35, uWetness);
   col *= 1.0 - 0.32 * wet;
   float rough = mix(0.95, 0.68, wet);
@@ -1147,7 +1153,12 @@ const DESERT_FRAG = /* glsl */ `
 }
 `;
 
-export function grassMaterial(t: GroundTextures, opts: { desert?: boolean } = {}): THREE.MeshStandardMaterial {
+/** how sun-dried each circuit's verges are in its race month (0 lush … 1 straw) */
+export const VERGE_DRY: Record<string, number> = {
+  austin: 0.7, mexico: 0.6, hungaroring: 0.55, melbourne: 0.4, spielberg: 0.15, interlagos: 0.2, monza: 0.3, zandvoort: 0.3,
+  montreal: 0.15, silverstone: 0.2, spa: 0.05, suzuka: 0.1, sakhir: 0.15, yasmarina: 0.1,
+};
+export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?: number } = {}): THREE.MeshStandardMaterial {
   t.grassAlbedo.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);
   t.grassNormal.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);
   const m = new THREE.MeshStandardMaterial({
@@ -1157,7 +1168,9 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean } = {}
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-3-desert' : 'apex-ts-grass-3', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-4-desert' : 'apex-ts-grass-4', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+    sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
     sh.fragmentShader = sh.fragmentShader.replace(
       '#include <normal_fragment_maps>',
@@ -1167,7 +1180,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean } = {}
         vec3 B = normalize(tbn[1]);
         float facing = dot(V, B);
         float sheen = gStripe * facing;
-        diffuseColor.rgb *= 1.0 + 0.22 * sheen;
+        diffuseColor.rgb *= 1.0 + 0.3 * sheen;
         diffuseColor.rgb += vec3(0.006, 0.01, 0.004) * max(0.0, 1.0 - dot(V, nonPerturbedNormal));
       }`,
     );

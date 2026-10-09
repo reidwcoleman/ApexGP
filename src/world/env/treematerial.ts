@@ -555,7 +555,7 @@ if ( leafK > 0.5 ) {
   // foliage as camera footage shows it: a dark olive mass, not a bright game green (the clumps are the
   // scans' own leaves; a touch of desaturation and warmth matches them to the graded footage)
   vec3 lc = lt.rgb;
-  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.8 ) * vec3( 0.93, 0.92, 0.84 );
+  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.86 ) * vec3( 1.0, 1.0, 0.88 );
   diffuseColor.rgb *= lc;
 } else {
   // the scan's own bark colour is in the vertex colour; the bark tile adds the detail around it
@@ -614,7 +614,9 @@ roughnessFactor *= mix( 1.0, mix( 0.8, 0.55, leafK ), uWet );`,
         '#include <aomap_fragment>',
         `{
   // (the inside of a crown is deep in shade: little sky reaches it)
-  float ambientOcclusion = mix( mix( 0.45, 0.24, leafK ), 1.0, pow( vTree.z, 1.25 ) ) * mix( 1.0, mix( 0.6, 1.0, gLeafS ), leafK );
+  // (not black: real crowns in sunshine are lit through by the light bounced leaf to leaf — the deep
+  // interior of a spruce reads dark green, not as a hole)
+  float ambientOcclusion = mix( mix( 0.52, 0.33, leafK ), 1.0, pow( vTree.z, 1.25 ) ) * mix( 1.0, mix( 0.66, 1.0, gLeafS ), leafK );
   // leaves: sky light scattered through the outer foliage (the crown is not an opaque blob)
   reflectedLight.indirectDiffuse *= ambientOcclusion * mix( vec3( 1.0 ), uLeafFill, leafK );
   reflectedLight.indirectSpecular *= ambientOcclusion * ambientOcclusion * mix( 1.0, 0.3, leafK );
@@ -878,7 +880,7 @@ vec4 ia = mix( ia0, ia1, vIW );
 // (sRGB atlas: the colour arrives linear)
 diffuseColor.rgb = ia.rgb * vITint;
 // (the same footage foliage tint as the 3D trees, so near and far match)
-diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.8 ) * vec3( 0.93, 0.92, 0.84 );
+diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.86 ) * vec3( 1.0, 1.0, 0.88 );
 `,
       )
       .replace(
