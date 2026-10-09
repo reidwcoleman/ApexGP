@@ -16,11 +16,26 @@ const LAPS = Number(process.argv[2] ?? 5);
 const WX = process.argv[3] ?? 'clear';
 const GRID = Number(process.argv[4] ?? 9);
 const SEED = Number(process.env.SEED ?? 1);
-const race = new Race(track, { mode: 'race', laps: LAPS, difficulty: 0.97, playerEntry: entries[4], playerGrid: GRID, entries, weather: planWeather(WX, 'afternoon', LAPS * 85, SEED), seed: SEED });
+const race = new Race(track, { mode: 'race', laps: LAPS, difficulty: Number(process.env.DIFF ?? 0.97), playerEntry: entries[4], playerGrid: GRID, entries, weather: planWeather(WX, 'afternoon', LAPS * 85, SEED), seed: SEED });
 const auto = new AIDriver(0.975, 0.6, mulberry32((race.seed ^ 0x5eed) >>> 0));
 auto.startFrom(race.player.car, track);
 race.adoptPlayerAI?.(auto);
 race.startLights();
+const contactLog = [];
+if (process.env.DIAG) {
+  const pm = race.pairContact;
+  const orig = pm.set.bind(pm);
+  pm.set = (k, v) => {
+    if (race.raceTime - (pm.get(k) ?? -9) > 1.5) {
+      const i = Math.floor(k / 64), j = k % 64;
+      const A = race.cars[i], B = race.cars[j];
+      const ds = track.delta(A.car.s, B.car.s);
+      const [f, r] = ds > 0 ? [A, B] : [B, A];
+      contactLog.push({ t: +race.raceTime.toFixed(1), lap: Math.max(A.laps, B.laps), s: Math.round(A.car.s), ds: +Math.abs(ds).toFixed(1), dl: +(A.car.lateral - B.car.lateral).toFixed(2), dv: +(r.car.vx - f.car.vx).toFixed(1), front: f.entry.driver.code, rear: r.entry.driver.code, fErr: f.ai?.err ?? -1, frontSteer: +(f.ai?.offset ?? 0).toFixed(1) });
+    }
+    return orig(k, v);
+  };
+}
 const L = track.length;
 const dt = 1 / 60;
 let t = 0;
@@ -33,6 +48,8 @@ const otLap = [];
 const gaps = [];
 let sideBySide = 0, sbsSamples = 0, nose2tail = 0;
 let offs = 0;
+const hist = [];
+let traced = 0;
 const prevOff = race.cars.map(() => false);
 const lastErr = race.cars.map(() => -99);
 let sample = 0;
@@ -50,7 +67,20 @@ while (t < LAPS * 160 + 120) {
   cars.forEach((c, i) => {
     const ai = c.ai ?? (c.isPlayer ? auto : null);
     if (ai && ai.err !== 0 && ai.errOn === 1) lastErr[i] = race.raceTime;
-    if (c.car.offTrack && !prevOff[i] && c.car.speed > 15) offs++;
+    if (process.env.TRACE) {
+      const h = (hist[i] ??= []);
+      h.push([+race.raceTime.toFixed(2), Math.round(c.car.s), +c.car.lateral.toFixed(1), +(c.car.vx * 3.6).toFixed(0), +(ai?.input.brake ?? 0).toFixed(2), +(ai?.input.throttle ?? 0).toFixed(2), +(ai?.input.steer ?? 0).toFixed(2), +(ai?.offset ?? 0).toFixed(1), +c.car.dirty.toFixed(2), +(race.profile.at(c.car.s) * 3.6).toFixed(0), +(track.racingLineAt(c.car.s) * 0.9).toFixed(1)]);
+      if (h.length > 90) h.shift();
+    }
+    if (c.car.offTrack && !prevOff[i] && c.car.speed > 15) {
+      offs++;
+      if (process.env.TRACE && traced < 3 && race.raceTime > 100 && !c.isPlayer) {
+        traced++;
+        console.log('TRACE', c.entry.driver.code, 'hw', track.halfWidthAt(c.car.s).toFixed(1), '[t, s, lat, kmh, brake, thr, steer, offset, dirty, profileKmh, line]');
+        for (const r of hist[i].filter((_, k) => k % 6 === 0)) console.log('  ', JSON.stringify(r));
+      }
+      if (process.env.DIAG) console.log('O', JSON.stringify({ t: +race.raceTime.toFixed(1), lap: c.laps, s: Math.round(c.car.s), lat: +c.car.lateral.toFixed(1), v: Math.round(c.car.vx), code: c.entry.driver.code, err: ai?.err ?? -1, off: +(ai?.offset ?? 0).toFixed(1), near: race.cars.filter((o) => o !== c && Math.abs(track.delta(c.car.s, o.car.s)) < 12).length }));
+    }
     prevOff[i] = c.car.offTrack;
   });
   if (++sample % 6 !== 0) continue; // 10 Hz
@@ -135,5 +165,10 @@ const out = {
   lapBest: +meds[0].toFixed(2), lapSpread: +(meds[meds.length - 1] - meds[0]).toFixed(2), lapSpreadP80: +(meds[Math.floor(meds.length * 0.8)] - meds[0]).toFixed(2),
   finishSpread: +(fin[fin.length - 1] - fin[0]).toFixed(1), winner: race.classification()[0].entry.driver.code, player: race.player.position,
 };
+if (process.env.DIAG) for (const x of contactLog) console.log('C', JSON.stringify(x));
+if (process.env.DIAG) for (const c of race.cars) {
+  const laps = c.lapTimes.map((x) => x.toFixed(1)).join(' ');
+  console.log(c.entry.driver.code.padEnd(4), (c.ai ? c.ai.pace : 0).toFixed(4), 'int', c.car.integrity.toFixed(2), 'pos', c.position, 'laps', laps, c.isPlayer ? '(player)' : '');
+}
 if (process.env.JSON) console.log('JSON ' + JSON.stringify(out));
 else for (const [k, v] of Object.entries(out)) console.log(k.padEnd(14), Array.isArray(v) ? v.join(' ') : v);

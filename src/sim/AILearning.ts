@@ -129,6 +129,10 @@ const BK_MIN = -22;
 export function learnLevel(difficulty: number): number {
   return Math.max(0.15, Math.min(1, (difficulty - 0.86) / 0.14));
 }
+/** how far past "knows the circuit" a difficulty goes (0 … 1: below Elite … Legend): sim-prepared, no warm-up laps */
+export function eliteLevel(difficulty: number): number {
+  return Math.max(0, Math.min(1, (difficulty - 0.97) / 0.055));
+}
 
 /** one driver's knowledge of one circuit */
 export class DriverKnowledge {
@@ -322,12 +326,15 @@ export class AILearning {
   private readonly fastestBy: Int16Array;
   private saved = false;
   private readonly persist: boolean;
+  /** Elite / Legend: the drivers arrive from the simulator knowing the circuit (eliteLevel) */
+  private readonly elite: number;
 
   /** `persist`: bring what the drivers learned before (localStorage) and keep what they learn today */
   constructor(circuit: string, profile: RacingProfile, difficulty: number, persist: boolean) {
     this.circuit = circuit;
     this.zones = cornerZones(profile);
     this.level = learnLevel(difficulty);
+    this.elite = eliteLevel(difficulty);
     this.persist = persist;
     this.data = persist ? readStore() : { v: VERSION, drivers: {}, circuits: {} };
     this.fastest = new Float32Array(this.zones.count).fill(Infinity);
@@ -387,9 +394,20 @@ export class AILearning {
     const xp = Math.min(1, this.experience(d.code) / 40);
     k.rate = 0.2 + 0.2 * talent + 0.1 * xp;
     k.brave = Math.max(0, Math.min(1, d.aggression));
-    k.csMax = 1 + 0.004 + 0.008 * this.level + 0.002 * k.brave;
-    k.bkMax = 2 + 7 * this.level + 2 * k.brave;
+    // (at Elite and Legend the race pace is already the circuit's limit (Race.limitedPace): the
+    // headroom left to learn into is a fraction — past it they only overdrive, run wide and collide)
+    const room = 1 - 0.7 * this.elite;
+    k.csMax = 1 + (0.004 + 0.008 * this.level + 0.002 * k.brave) * room;
+    k.bkMax = (2 + 7 * this.level + 2 * k.brave) * room;
     for (let c = 0; c < k.cs.length; c++) {
+      // (an Elite or Legend field has done its laps in the simulator: it starts the race close to
+      // what it would learn, not a few metres early everywhere)
+      if (this.elite > 0) {
+        // (to the profile's own speeds and braking points: the race pace is already at the circuit's
+        // limit (Race.limitedPace), so what's left to learn is corner by corner, as they race)
+        k.cs[c] = Math.max(k.cs[c], CS_FRESH + (1 - CS_FRESH) * this.elite);
+        k.bk[c] = Math.max(k.bk[c], BK_FRESH + (1 - BK_FRESH) * this.elite);
+      }
       k.cs[c] = Math.min(k.csMax, k.cs[c]);
       k.bk[c] = Math.min(k.bkMax, k.bk[c]);
     }

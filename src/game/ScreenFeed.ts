@@ -34,7 +34,7 @@ const FEED_W = 384;
 const FEED_H = 216;
 /** feed frames per second by quality (real screens show 50 Hz, but a 12 Hz picture reads as live video
  *  from the stands; Low only refreshes the graphics) */
-const RATE = { low: 2, medium: 8, high: 12, ultra: 15 } as const;
+const RATE = { low: 2, medium: 8, high: 12, ultra: 15, tuned: 24 } as const;
 /** a car in the feed's 216-line picture is ~4× smaller than in a 1080p main view: its LOD distances stretch by that */
 const FEED_LOD = 4;
 /** cars nearest the feed's lens that may have more than the far silhouette */

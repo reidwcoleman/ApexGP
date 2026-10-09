@@ -323,8 +323,9 @@ export function* tracksideBuilder(track: Track, gfx: Renderer): Generator<void, 
       people.update(_dt, camera);
       // wet-road reflections scale with the quality preset: off on low/medium, 1/3-res copy on high, 1/2 on ultra
       const q = gfx.qualityLevel;
-      ssr.enabled = reflections && (q === 'high' || q === 'ultra');
-      ssr.downscale = ssr.fixedDownscale ?? (q === 'low' ? 3 : 2);
+      ssr.enabled = reflections && (q === 'high' || q === 'ultra' || q === 'tuned');
+      // (Ultra Tuned: the reflections at full resolution)
+      ssr.downscale = ssr.fixedDownscale ?? (q === 'low' ? 3 : q === 'tuned' ? 1 : 2);
     },
   };
 }

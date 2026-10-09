@@ -82,7 +82,7 @@ const GARAGE_SHADOW_LAYER = 3;
 /** what the garage floor mirrors: the player's car, its blankets and the garage lights */
 const GARAGE_MIRROR_LAYER = 4;
 
-const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'];
 
 /**
  * Settings → Motion blur: the shutter as a fraction of a 60 fps frame (0.5 = a film camera's 180°).
@@ -1581,7 +1581,7 @@ export class Game {
       this.gfx.setQuality(s.quality);
       this.leanOn = false;
     }
-    this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6 }[s.quality];
+    this.particles.resolution = { low: 0.35, medium: 0.4, high: 0.5, ultra: 0.6, tuned: 0.8 }[s.quality];
     if (this.cams) this.cams.prefs = { ...DEFAULT_CAM, ...(s.cam ?? {}) };
     if (this.cams && this.cams.mode !== s.camera && this.state !== 'menu') this.cams.set(s.camera);
     this.audio.setVolume(s.volume);
@@ -4184,10 +4184,10 @@ export class Game {
           gfx.nativeUpscale = false;
           aq.settleUntil = now + 1.5;
         }
-      } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && st.quality === 'ultra') {
+      } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && (st.quality === 'ultra' || st.quality === 'tuned')) {
         if (++aq.slowAtFloor >= 4) {
           aq.slowAtFloor = 0;
-          this.setAutoQuality('high');
+          this.setAutoQuality(st.quality === 'tuned' ? 'ultra' : 'high');
         }
       } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && gfx.qualityLevel === 'high' && !this.leanOn) {
         // High, lowest resolution, native output off, still short of 60: the lean tier (fewer 3D

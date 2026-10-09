@@ -66,7 +66,7 @@ export interface Scenery {
    */
   feedView?(cam: THREE.Camera | null): void;
   /** scale the costly detail (tree 3D range) with the graphics quality */
-  setQuality(q: 'low' | 'medium' | 'high' | 'ultra'): void;
+  setQuality(q: 'low' | 'medium' | 'high' | 'ultra' | 'tuned'): void;
   readonly stats: Record<string, unknown>;
 }
 
@@ -135,7 +135,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   try {
     const tu = terrain.uniforms;
     grass = buildGrass(map, { lawn: tu.uLawn.value as THREE.Color, meadow: tu.uMeadow.value as THREE.Color, straw: tu.uStraw.value as THREE.Color });
-    grass.setEnabled(gfx.qualityLevel === 'high' || gfx.qualityLevel === 'ultra');
+    grass.setEnabled(gfx.qualityLevel === 'high' || gfx.qualityLevel === 'ultra' || gfx.qualityLevel === 'tuned');
     group.add(grass.mesh);
   } catch (e) {
     console.error('[scenery] grass blades failed — skipping them', e);
@@ -255,7 +255,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
     },
     setQuality(q) {
       veg.setDetail(q);
-      grass?.setEnabled(q === 'high' || q === 'ultra');
+      grass?.setEnabled(q === 'high' || q === 'ultra' || q === 'tuned');
     },
     stats: { timings, trees: veg.count, treesNear: veg.near, people: stands.people, flags: stands.flags, banking: banking?.stats ?? null, buildings: villages.count, buildMs: Math.round(performance.now() - t0), map: map.timings, veg: veg.timings, masks: masks.timings },
   };

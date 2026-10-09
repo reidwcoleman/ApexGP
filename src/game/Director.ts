@@ -238,6 +238,8 @@ export class Director {
     // onboards (not for a car that's crashing or crawling in the pit lane)
     const ob = crash ? 0.15 : pit ? 0.5 : start ? 0.6 : 1;
     add('tcam', 2.2 * ob * (battle ? 1.3 : 1));
+    add('tcamoff', 0.9 * ob * (battle ? 1.2 : 1));
+    add('bonnet', 0.3 * ob);
     add('cockpit', 1.1 * ob);
     add('nose', 0.3 * ob);
     add('fwing', 0.25 * ob);
@@ -254,6 +256,7 @@ export class Director {
     add('drone', 0.8 * (crash ? 1.4 : 1));
     add('cine', pit || ctx === 'finish' ? 1.6 : 0.4);
     add('chase', 0.3);
+    add('far', 0.25);
     add('lowchase', pit ? 0 : 0.35);
     // aerial
     add('heli', 1.6 * (crash || start ? 2 : 1) * (battle ? 1.3 : 1));

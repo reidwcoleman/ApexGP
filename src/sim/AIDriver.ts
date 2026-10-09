@@ -326,8 +326,8 @@ export class AIDriver {
       // from it (side by side through the corner: the inside car takes the apex, the outside car the long
       // way round); no room left on our side and it's ahead: we're the one to back out
       if (Math.abs(ds) < 6.5 && Math.abs(dl) < 4.5 && !o.pit) {
-        if (dl > 0) capR = Math.min(capR, o.lateral - 2.6);
-        else capL = Math.max(capL, o.lateral + 2.6);
+        if (dl > 0) capR = Math.min(capR, o.lateral - 2.75);
+        else capL = Math.max(capL, o.lateral + 2.75);
         const squeezed = dl > 0 ? o.lateral - 2.6 < -hw + 1.1 : o.lateral + 2.6 > hw - 1.1;
         // who has the corner: into a slow corner (or a chicane, where two don't fit) the car that is
         // less than half alongside, or round the outside of a tight one, backs out and tucks in behind
@@ -350,6 +350,11 @@ export class AIDriver {
           if (Math.max(roomL, roomR) < 3.2) followSpeed = Math.min(followSpeed, Math.max(0, o.speed) + Math.max(0, ds - 9) * 0.35);
         }
         continue;
+      }
+      // half a car's width out of its tracks but not yet half alongside, into a braking zone: our front
+      // wheel is level with its rear one — brake with it (the chicane turns them across each other)
+      if (ds > 2.8 && ds < 14 && Math.abs(dl) >= 1.85 && Math.abs(dl) < 2.5 && !o.pit && (this.brakeIn < 30 || tight > 0.3) && v > o.speed - 0.5) {
+        followSpeed = Math.min(followSpeed, o.speed + Math.sqrt(2 * 3 * Math.max(0, ds - 3.2)));
       }
       if (ds > 0 && ds < 70 && Math.abs(dl) < 2.1 && ds < leadDs) {
         lead = o;
@@ -426,6 +431,15 @@ export class AIDriver {
       if (closing > 0 && this.leadA < -6 && lead.speed < profile.atGrip(lead.s, this.gripEst) * this.pace * 0.95 - 2) {
         const aRel = Math.max(3, 18 + 0.35 * v + this.leadA);
         followSpeed = Math.min(followSpeed, lead.speed + Math.sqrt(2 * aRel * Math.max(0, ds - minGap * 0.8)));
+      }
+      // nose to tail into a braking zone, still in its wheel tracks: a car that hasn't pulled out can't
+      // out-brake the one in front — it brakes when that one brakes (our brakes have no more than a
+      // couple of m/s² over its own), keeping a bumper's length clear. Out-braking is done from
+      // alongside, not from the gearbox (the rear-enders into the chicanes were all from here)
+      if (closing > -0.5 && Math.abs(lead.lateral - myLat) < 1.85 && ds < 45 && (this.leadA < -10 || this.brakeIn < 40)) {
+        const gap = 6.6 + v * 0.025;
+        const aRel = Math.max(2.5, 6 + Math.min(0, this.leadA + 30) * 0.2);
+        followSpeed = Math.min(followSpeed, Math.max(0, lead.speed + (this.leadA < 0 ? this.leadA * 0.08 : 0)) + Math.sqrt(2 * aRel * Math.max(0, ds - gap)));
       }
     }
 
@@ -584,7 +598,10 @@ export class AIDriver {
     // judged with a lag and a little caution, the way a driver feels it out
     this.gripEst += (car.gripFactor - this.gripEst) * Math.min(1, dt * 0.8);
     const g = Math.min(car.gripFactor, this.gripEst) * (car.gripFactor < 0.9 ? 0.985 : 1);
-    const dirtyLoss = corner * car.dirty * 0.06;
+    // (and under braking: less downforce is less braking grip — a car braking in another's wake from
+    // 330 km/h needs metres more, or it overshoots the chicane: brake a little earlier there too)
+    const brakingAhead = profile.at(car.s + Math.max(20, v * 1.1)) < v - 6;
+    const dirtyLoss = (corner ? 1 : brakingAhead ? 0.75 : 0) * car.dirty * 0.06;
     // the driver's own speed for each corner, learned (see AILearning) — and in a long fight a little more
     // than they know is safe: that's where the mistakes come from
     const know = this.know;
@@ -623,7 +640,8 @@ export class AIDriver {
       }
     }
     // attacking: out-brake the car ahead when right on its gearbox
-    if (this.attack > 0.5 && followSpeed < Infinity && !this.vsc) late = Math.max(late, 4 + 3 * this.aggression + 3 * frustration);
+    // (only once pulled out of its wheel tracks: from right behind it, a later braking point is a rear-ender)
+    if (this.attack > 0.5 && followSpeed < Infinity && !this.vsc && (!lead || Math.abs(lead.lateral - myLat) > 1.85)) late = Math.max(late, 4 + 3 * this.aggression + 3 * frustration);
     // side by side into the corner (see craftLate): later down the inside, earlier round the outside
     if (craftLate > 0) late = Math.max(late, craftLate);
     else if (craftLate < 0 && late === 0) late = craftLate;

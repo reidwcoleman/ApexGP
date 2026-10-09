@@ -47,7 +47,9 @@ export { MOTION_CARS };
  * composer, after bloom, so highlights bloom in linear HDR.
  */
 
-export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra';
+export type QualityLevel = 'low' | 'medium' | 'high' | 'ultra' | 'tuned';
+/** Ultra or above: everything Ultra has ('tuned' = Ultra Tuned: Ultra pushed — supersampled, full-res AO, 4K shadows) */
+export const ultraUp = (q: QualityLevel) => q === 'ultra' || q === 'tuned';
 
 // radial speed blur toward the edges, with the lens's lateral chromatic aberration folded
 // into the same pass (red and blue fringes pulled apart radially: one full-screen pass, not two)
@@ -1453,11 +1455,14 @@ export class Renderer {
     // each preset's starting pixel ratio, and the ceiling the dynamic resolution may climb to when the
     // GPU has room (High renders one pixel per CSS pixel and rises toward 1.5 on Retina screens —
     // most of the gap to a console-sharp image; the adaptive scale backs off again if frames run long)
-    this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1), ultra: Math.min(dpr, 1.5) }[q];
-    const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.5), ultra: Math.min(dpr, 2) }[q];
+    // (Ultra Tuned supersamples: at least 1.5 pixels per CSS pixel even on a 1x screen, up to 2.5 on a
+    // Retina panel when the GPU has the room, resolved down by the bicubic upscale + sharpen pass —
+    // the edges, the fences, the far kerbs and the tree crowns resolve as on a 4K capture)
+    this.renderScale = { low: Math.min(dpr, 1) * 0.75, medium: Math.min(dpr, 1), high: Math.min(dpr, 1), ultra: Math.min(dpr, 1.5), tuned: Math.min(Math.max(dpr, 1.5), 2) }[q];
+    const ceiling = { low: this.renderScale, medium: this.renderScale, high: Math.min(dpr, 1.5), ultra: Math.min(dpr, 2), tuned: Math.min(Math.max(dpr * 1.25, 1.75), 2.5) }[q];
     this.maxDynamic = ceiling / this.renderScale;
-    this.minDynamic = { low: 0.5, medium: 0.65, high: 0.8, ultra: 0.8 }[q];
-    const preset = q === 'ultra' || q === 'high' ? SMAAPreset.HIGH : q === 'medium' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
+    this.minDynamic = { low: 0.5, medium: 0.65, high: 0.8, ultra: 0.8, tuned: 0.85 }[q];
+    const preset = ultraUp(q) || q === 'high' ? SMAAPreset.HIGH : q === 'medium' ? SMAAPreset.MEDIUM : SMAAPreset.LOW;
     if (preset !== this.smaaPreset) {
       this.smaaPreset = preset;
       this.smaa.applyPreset(preset);
@@ -1465,12 +1470,14 @@ export class Renderer {
     // AO costs ~3 ms at 1080p whatever its tier (measured again: ~15–20 % of a High frame, even
     // half-res with 8 samples), so it stays an Ultra feature; High gets its contact darkening
     // from the materials (terrain canopy AO, crown AO) and the focus shadow cascade
-    this.ao.enabled = q === 'ultra';
-    this.ssao.intensity = q === 'ultra' || q === 'low' ? 0 : q === 'medium' ? 0.7 : 1.0;
-    this.ao.configuration.halfRes = true;
-    this.ao.setQualityMode('Medium');
+    this.ao.enabled = ultraUp(q);
+    this.ssao.intensity = ultraUp(q) || q === 'low' ? 0 : q === 'medium' ? 0.7 : 1.0;
+    // (Ultra Tuned: full-resolution AO at the High sample count — contact shadows under the cars, in
+    // the garage, under the barriers' lips and the stands' rows, crisp instead of half-res smudges)
+    this.ao.configuration.halfRes = q !== 'tuned';
+    this.ao.setQualityMode(q === 'tuned' ? 'High' : 'Medium');
     // (the last enabled pass must be the one that renders to the screen)
-    const sharpenOn = q === 'ultra' || q === 'high';
+    const sharpenOn = ultraUp(q) || q === 'high';
     this.sharpenPass.enabled = sharpenOn;
     this.sharpenPass.renderToScreen = sharpenOn;
     this.upscaleOn = sharpenOn;
@@ -1483,8 +1490,8 @@ export class Renderer {
     this.smaaPass.enabled = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
-    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 10 : q === 'high' ? 14 : 20;
-    this.onboard.twoSided = q === 'high' || q === 'ultra';
+    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 10 : q === 'high' ? 14 : q === 'ultra' ? 20 : 28;
+    this.onboard.twoSided = q === 'high' || ultraUp(q);
     this.dynamicScale = 1;
     this.resize();
   }

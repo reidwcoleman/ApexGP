@@ -68,7 +68,9 @@ export const DIFFICULTY = [
   { label: 'Dynamic', value: 0.92, dynamic: true },
   { label: 'Rookie', value: 0.9, dynamic: false },
   { label: 'Pro', value: 0.95, dynamic: false },
-  { label: 'Elite', value: 0.98, dynamic: false },
+  // (Legend: the front of the field at each circuit's own limit (Race.limitedPace), sim-prepared,
+  // metronomic, rarely a bad start; Elite a few tenths behind it)
+  { label: 'Elite', value: 0.985, dynamic: false },
   { label: 'Legend', value: 1.0, dynamic: false },
 ];
 /** the AI level a race with this setup runs at, and whether it adapts */
@@ -78,8 +80,8 @@ export function aiLevel(setup: RaceSetup, career: Career): { value: number; dyna
 }
 const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
 const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
-/** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again; 5: low braking assist) */
-const SETUP_V = 5;
+/** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again; 5: low braking assist; 6: low again for every save) */
+const SETUP_V = 6;
 const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
@@ -92,7 +94,7 @@ const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'c
 const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset', 'dusk', 'night'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
-const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra'];
+const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'];
 const SETTINGS_V = 3;
 const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
 const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
@@ -291,6 +293,8 @@ export class Menu {
     if (sv < 4) this.setup = { ...this.setup, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'medium' } };
     // and then low: the assist leaves most of the braking to the player
     if (sv < 5) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'low' } };
+    // (6: the braking assist back to its default, low, on every save)
+    if (sv < 6) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'low' } };
     if (sv < SETUP_V) {
       this.setup.v = SETUP_V;
       save('apexgp.setup', this.setup);
@@ -315,7 +319,7 @@ export class Menu {
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
     // older saves may have been stepped down by the automatic quality: start again from High
     if ((this.settings.v ?? 0) < SETTINGS_V) {
-      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' ? 'ultra' : 'high', autoQuality: true };
+      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' || this.settings.quality === 'tuned' ? this.settings.quality : 'high', autoQuality: true };
       save('apexgp.settings', this.settings);
     }
     for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'controls', 'pause', 'results'] as ScreenId[]) {
@@ -1070,7 +1074,7 @@ export class Menu {
     el('h2', '', p, 'Settings');
     el('p', 'lede', p, 'Changes apply straight away.');
     const st = this.settings;
-    const label: Record<QualityLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra' };
+    const label: Record<QualityLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra', tuned: 'Ultra Tuned' };
     this.opt(p, 'Graphics', () => label[st.quality] + (st.autoQuality ? ' <span class="dim">· auto</span>' : ''), (d) => {
       const i = QUALITY.indexOf(st.quality);
       st.quality = QUALITY[(i + d + QUALITY.length) % QUALITY.length];

@@ -2,7 +2,7 @@ import type { Track } from '../world/Track.ts';
 import { CarPhysics, F1_SPEC, DMG, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
 import { AIDriver, MISTAKE, VSC_SPEED, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
-import { AILearning, CornerClock } from '../sim/AILearning.ts';
+import { AILearning, CornerClock, eliteLevel } from '../sim/AILearning.ts';
 import { TEAMS, type Entry } from './Teams.ts';
 import { PitLane, fitTyres, newPitState, DRY_COMPOUNDS, COMPOUNDS, isDry, tyreTypeFor, type Compound, type PitState, type PitNeighbour } from './Pit.ts';
 import { Weather, type WeatherPlan, type WeatherState } from '../world/Weather.ts';
@@ -98,6 +98,27 @@ export function aiPace(entry: Entry, difficulty: number): number {
   const car = 1 - (1 - entry.team.pace) * 0.36 - 0.0025;
   const driver = 0.988 + entry.driver.skill * 0.012;
   return difficulty * car * driver;
+}
+
+/**
+ * The fastest pace (fraction of the speed profile) a solo AI can hold at each circuit without
+ * overdriving: above it the car runs wide, lifts and loses time (at Suzuka 1.0 is a second slower
+ * than 0.97). Measured with `tools/aipace.mjs <track> 0.95,…,1.03` (best of laps 2–3, nothing off
+ * the road); re-run after a change to the physics, the profile or the AI's driving.
+ */
+export const LIMIT_PACE: Record<string, number> = {
+  monza: 1.03, spa: 1.0, silverstone: 1.0, suzuka: 0.97, montreal: 0.99, melbourne: 1.03, spielberg: 1.03,
+  zandvoort: 0.97, austin: 0.98, interlagos: 0.98, hungaroring: 0.98, sakhir: 1.02, mexico: 1.02, yasmarina: 0.98,
+};
+/**
+ * A pace as the AI drives it at this circuit: unchanged in the midfield of the difficulties, and the
+ * top of the range (Elite, Legend) mapped onto the circuit's limit — a Legend at 1.0 drives the
+ * fastest the car can be driven there, never past it into a slower, scrappier lap.
+ */
+export function limitedPace(pace: number, circuit: string): number {
+  const L = LIMIT_PACE[circuit] ?? 1;
+  const knee = Math.min(L, 1) - 0.045;
+  return pace <= knee ? pace : knee + ((pace - knee) * (L - knee)) / (1 - knee);
 }
 
 /**
@@ -363,7 +384,7 @@ export class Race {
       let aiDriver: AIDriver | null = null;
       const f = this.forms.get(entry);
       if (!isPlayer) {
-        const pace = aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(entry.driver.code);
+        const pace = limitedPace(aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(entry.driver.code), track.def.id);
         aiDriver = new AIDriver(pace, entry.driver.aggression, () => this.rand());
         // what this driver knows of the circuit (learned here before, or new to it) — and learns today
         aiDriver.know = this.learning.knowledgeOf(entry.driver);
@@ -503,7 +524,7 @@ export class Race {
     const f = this.forms.get(entry);
     // (and what the driver has learned: their development, and the circuit if they know it better than a practice session teaches)
     const code = entry.driver.code;
-    const pace = aiPace(entry, difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(code) * Math.max(1, this.learning.knowledgePace(code));
+    const pace = limitedPace(aiPace(entry, difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(code), this.track.def.id) * Math.max(1, this.learning.knowledgePace(code));
     return (26.9 + 50.8 / pace - 0.15) * trackScale * wetFactor + (f?.quali ?? 0);
   }
 
@@ -522,11 +543,13 @@ export class Race {
     const r = this.rand();
     ai.reaction = 0.15 + this.rand() * 0.12;
     ai.bog = 0;
-    if (r < 0.05 + 0.04 * (1 - sk) + 0.06 * wet) {
+    // (an Elite / Legend field rarely fluffs a start)
+    const el = eliteLevel(this.opts.difficulty);
+    if (r < (0.05 + 0.04 * (1 - sk) + 0.06 * wet) * (1 - 0.65 * el)) {
       ai.reaction += 0.2 + this.rand() * 0.35;
       if (this.rand() < 0.5) ai.bog = 0.6 + this.rand() * 0.8;
       this.incidents.badStarts++;
-    } else if (r > 0.9 - 0.05 * sk) {
+    } else if (r > 0.9 - 0.05 * sk - 0.15 * el) {
       ai.reaction = 0.1 + this.rand() * 0.05;
       this.incidents.goodStarts++;
     }
@@ -579,7 +602,10 @@ export class Race {
       // (pressure builds over a long fight; experience and knowing the circuit calm a driver down)
       const stress = 1 + 1.5 * Math.max(pressed ? 0.5 : 0, ai.pressure);
       const calm = (1 - 0.25 * Math.min(1, this.learning.experience(d.code) / 60)) * (1.05 - 0.1 * (ai.know ? ai.know.familiarity() : 1));
+      // (Legend drivers are metronomes: a third of the mistakes, and none of the rookie extra)
+      const el = eliteLevel(this.opts.difficulty);
       const rate =
+        (1 - 0.65 * el) *
         MISTAKE_RATE * (1 + (1 - d.skill) * 12) * (0.8 + 0.5 * d.aggression) * stress * calm * (c.laps < 1 ? 1.6 : 1) * (1 + 2.5 * wet) * (1 + this.wearOf(c));
       if (this.rand() >= rate * step) continue;
       const r = this.rand();

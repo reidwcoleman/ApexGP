@@ -134,7 +134,7 @@ const FLOOD_E = 1.9;
  */
 const NIGHT_FLOOD = 0;
 /** at night the eye adapts only this far: it stays dark (a faint moonlit world) instead of being exposed back up to day */
-const NIGHT_MAX_ADAPT = 1.8;
+const NIGHT_MAX_ADAPT = 2.2;
 const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
 
 const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
@@ -142,6 +142,9 @@ const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: 
   medium: { shadowMap: 1536, farSize: 320, rain: 0.7 },
   high: { shadowMap: 2048, farSize: 360, rain: 1 },
   ultra: { shadowMap: 3072, farSize: 420, rain: 1 },
+  // (Ultra Tuned: 4K shadow maps over a longer reach — crisp shadows of the fences, the wires, the
+  // gantries and the trees' leaves far down the straight)
+  tuned: { shadowMap: 4096, farSize: 540, rain: 1 },
 };
 /** env cube face size (fixed: see setQuality) */
 const ENV_SIZE = 256;
@@ -773,7 +776,7 @@ export function createEnvironment(
     // the city under a cloud deck lights it up from below
     // (a city's sodium glow only shows once it is properly dark: in the blue hour it would turn the misty
     // air mauve)
-    const city = 0.03 * night * THREE.MathUtils.smoothstep(night, 0.3, 1) * (0.6 + 0.6 * L.overcast + 0.5 * L.mist) * (1 - 0.5 * L.rain);
+    const city = 0.045 * night * THREE.MathUtils.smoothstep(night, 0.3, 1) * (0.6 + 0.6 * L.overcast + 0.5 * L.mist) * (1 - 0.5 * L.rain);
     (u.uCity.value as THREE.Vector3).set(cityCol.r * city, cityCol.g * city, cityCol.b * city);
     const glow = F * 0.01 * (0.4 + 1.8 * haze);
     (u.uFloodGlow.value as THREE.Vector3).set(floodCol.r * glow, floodCol.g * glow, floodCol.b * glow);

@@ -484,6 +484,9 @@ const QUALITY: Record<QualityLevel, { w: number; h: number; phases: 1 | 2 | 4 | 
   medium: { w: 1536, h: 384, phases: 8, steps: 14, iter: 24 },
   high: { w: 1792, h: 448, phases: 8, steps: 16, iter: 30 },
   ultra: { w: 2560, h: 640, phases: 4, steps: 22, iter: 44 },
+  // (Ultra Tuned: the cloud panorama at 3K with half again the march steps, refreshed twice as often —
+  // the cumulus edges, the anvil tops and the crepuscular gaps hold their detail)
+  tuned: { w: 3200, h: 800, phases: 2, steps: 32, iter: 64 },
 };
 
 export interface CloudPanorama {

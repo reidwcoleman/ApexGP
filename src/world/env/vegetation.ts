@@ -64,7 +64,7 @@ export interface VegetationBuild {
    *  changes held back until the dissolve before them is done (tools/treepop.mjs) */
   debug: { reach: number; fades: number; pops: number; snaps: number; deferred: number; cuts: number };
   /** how far the 3D trees reach before the impostors take over (quality level) */
-  setDetail(q: 'low' | 'medium' | 'high' | 'ultra'): void;
+  setDetail(q: 'low' | 'medium' | 'high' | 'ultra' | 'tuned'): void;
   count: number;
   near: number;
   /** crown shade discs for the ground mask */
@@ -654,7 +654,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // (and how far ahead the look-ahead may reach, m: LOOK_T of travel, at most this)
   // (since the hand-overs became timed fades — update — rather than distance bands, each row is
   // [broadleaf 3D reach, LOD0 → 1, LOD1 → 2, conifer 3D reach, look-ahead cap], m)
-  const DETAIL = { low: [59, 24, 36, 38, 20], medium: [77, 30, 44, 46, 26], high: [89, 34, 50, 52, 34], ultra: [135, 54, 80, 75, 44] } as const;
+  const DETAIL = { low: [59, 24, 36, 38, 20], medium: [77, 30, 44, 46, 26], high: [89, 34, 50, 52, 34], ultra: [135, 54, 80, 75, 44], tuned: [160, 76, 112, 100, 60] } as const;
   const setDetail = (q: keyof typeof DETAIL) => {
     const [r3, l0, l1, rc, la] = DETAIL[q];
     reach = r3;

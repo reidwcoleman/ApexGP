@@ -26,12 +26,10 @@ export type CameraMode =
  * trackside and pit-wall lenses, the TV director) stay in simulated races, spectating and replays
  * (ALL_CAMERAS).
  */
-// (F1 25's seven first, in its order — chase, far chase, TV pod, TV pod offset, cockpit, nose, nose
-// offset — then the extra onboards)
-export const CAMERA_ORDER: CameraMode[] = [
-  'chase', 'far', 'tcam', 'tcamoff', 'cockpit', 'bonnet', 'nose',
-  'halo', 'helmet', 'bumper', 'wheel', 'sidepod', 'lowchase',
-];
+// (exactly F1 25's seven, in its order — chase, far chase, TV pod, TV pod offset, cockpit, nose, nose
+// offset: the cameras of career and quick race. Every other camera is the simulated races' and the
+// replays', where the TV director cuts between them on its own)
+export const CAMERA_ORDER: CameraMode[] = ['chase', 'far', 'tcam', 'tcamoff', 'cockpit', 'bonnet', 'nose'];
 /** a camera you can drive with: the saved choice if it is one (older saves may hold the heli or the TV director), else the chase */
 export function driveCamera(m: CameraMode | undefined): CameraMode {
   return m && CAMERA_ORDER.includes(m) ? m : 'chase';
