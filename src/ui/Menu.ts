@@ -1,7 +1,7 @@
 import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
-import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, driveCamera, type CamPrefs } from '../game/Cameras.ts';
+import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, NO_OFFSET, driveCamera, type CamPrefs, type CamOffset } from '../game/Cameras.ts';
 import { CIRCUITS } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
@@ -1089,7 +1089,8 @@ export class Menu {
     el('span', 'v', cp, `${(() => {
       const c = { ...DEFAULT_CAM, ...(st.cam ?? {}) };
       const same = (Object.keys(DEFAULT_CAM) as (keyof CamPrefs)[]).every((k) => c[k] === DEFAULT_CAM[k]);
-      return same ? 'Default' : 'Custom';
+      const moved = Object.values(c.per ?? {}).some((x) => x && (x.fov || x.lat || x.fwd || x.up || x.angle));
+      return same && !moved ? 'Default' : 'Custom';
     })()}<span class="chev">›</span>`);
     const openCam = () => this.show('camera');
     cp.addEventListener('click', openCam);
@@ -1133,25 +1134,39 @@ export class Menu {
     el('div', 'scrim', s);
     const p = el('div', 'panel glass', s);
     el('h2', '', p, 'Camera tuning');
-    el('p', 'lede', p, 'Applies to every camera you race with. C cycles the cameras in the race.');
+    el('p', 'lede', p, 'Each camera keeps its own placement, as in F1 25. C cycles the cameras in the race.');
     const st = this.settings;
     const c: CamPrefs = { ...DEFAULT_CAM, ...(st.cam ?? {}) };
     st.cam = c;
     const step = (v: number, d: number, k: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round((v + d * k) / k) * k));
-    const sgn = (v: number, unit: string, dp = 0) => (v === 0 ? 'Default' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(dp)}${unit}`);
+    const sgn = (v: number, unit: string, dp = 0) => (Math.abs(v) < 1e-6 ? 'Default' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(dp)}${unit}`);
     const pct = (v: number) => `${Math.round(v * 100)}%`;
+    // (the camera being tuned is the one you race with: pick it here and the sliders below are its own)
+    const o = (): CamOffset => {
+      const per = (c.per ??= {});
+      return (per[st.camera] ??= { ...NO_OFFSET });
+    };
+    const chase = st.camera === 'chase' || st.camera === 'far' || st.camera === 'lowchase';
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
       const i = CAMERA_ORDER.indexOf(st.camera);
       st.camera = CAMERA_ORDER[(i + d + CAMERA_ORDER.length) % CAMERA_ORDER.length];
+      // (the sliders below change with the camera)
+      queueMicrotask(() => this.show('camera'));
     }, true);
-    this.opt(p, 'Field of view', () => sgn(c.fov, '°'), (d) => (c.fov = step(c.fov, d, 1, -10, 15)), true);
+    el('div', 'pcap', p, CAMERA_LABEL[st.camera]);
+    this.opt(p, 'Field of view', () => sgn(o().fov, '°'), (d) => (o().fov = step(o().fov, d, 1, -20, 20)), true);
+    this.opt(p, 'Offset lateral', () => sgn(o().lat * 100, ' cm'), (d) => (o().lat = step(o().lat, d, 0.02, -0.4, 0.4)), true);
+    this.opt(p, 'Offset horizontal', () => sgn(o().fwd * 100, ' cm'), (d) => (o().fwd = step(o().fwd, d, chase ? 0.25 : 0.02, chase ? -4 : -0.4, chase ? 3 : 0.4)), true);
+    this.opt(p, 'Offset vertical', () => sgn(o().up * 100, ' cm'), (d) => (o().up = step(o().up, d, chase ? 0.1 : 0.01, chase ? -1 : -0.2, chase ? 2 : 0.25)), true);
+    this.opt(p, 'Angle', () => sgn(o().angle, '°'), (d) => (o().angle = step(o().angle, d, 1, -15, 15)), true);
+    if (st.camera === 'cockpit') this.opt(p, 'Halo column', () => (c.haloCol === false ? 'Off' : 'On'), () => (c.haloCol = c.haloCol === false), true);
+    el('div', 'pcap', p, 'Every camera');
     this.opt(p, 'Dynamic field of view', () => (c.dynFov ? 'On' : 'Off'), () => (c.dynFov = !c.dynFov), true);
-    this.opt(p, 'Chase distance', () => sgn(c.dist, ' m', 1), (d) => (c.dist = step(c.dist, d, 0.25, -1.5, 3)), true);
-    this.opt(p, 'Chase height', () => sgn(c.height, ' m', 2), (d) => (c.height = step(c.height, d, 0.05, -0.4, 1)), true);
     this.opt(p, 'Camera shake', () => (c.shake === 0 ? 'Off' : pct(c.shake)), (d) => (c.shake = step(c.shake, d, 0.25, 0, 1.5)), true);
-    this.opt(p, 'Look into corners', () => (c.apex === 0 ? 'Off' : pct(c.apex)), (d) => (c.apex = step(c.apex, d, 0.25, 0, 1.5)), true);
-    // (the onboards' roll with the car, and the chase cameras' lean with the G: 100 % is dead level)
-    this.opt(p, 'Horizon lock', () => pct(c.horizon), (d) => (c.horizon = step(c.horizon, d, 0.1, 0, 1)), true);
+    // (F1 25's "camera movement": how far the view leans and rolls with the car; stored as the
+    // horizon lock, 100 % movement = the horizon free)
+    this.opt(p, 'Camera movement', () => pct(1 - c.horizon), (d) => (c.horizon = 1 - step(1 - c.horizon, d, 0.1, 0, 1)), true);
+    this.opt(p, 'Look to apex', () => (c.apex === 0 ? 'Off' : pct(c.apex)), (d) => (c.apex = step(c.apex, d, 0.25, 0, 1.5)), true);
     const reset = el('div', 'opt', p);
     el('span', 'k', reset, 'Reset to defaults');
     el('span', 'v', reset, '<span class="chev">›</span>');

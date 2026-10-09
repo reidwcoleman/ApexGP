@@ -65,6 +65,8 @@ export interface CarRig {
    * `hands`: keep his gloved hands on the wheel while he's hidden (the onboard cameras inside the cockpit)
    */
   setDriverVisible(v: boolean, hands?: boolean): void;
+  /** show / hide the halo's centre pillar (the cockpit camera's "halo column" setting) */
+  setHaloPillar?(v: boolean): void;
   /** the driver's head reacts: lateral and longitudinal G (m/s², + = left / accelerating), wheel angle (rad) */
   setG(lateral: number, longitudinal: number, steer: number): void;
   /**
@@ -137,7 +139,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.pillar, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -1064,6 +1066,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   let arms: THREE.SkinnedMesh | null = null;
   /** per side (left, right): upper arm, forearm, hand */
   const armBones: THREE.Bone[][] = [];
+  const pillars: THREE.Mesh[] = [];
   for (let lv = 0; lv < 3; lv++) {
     const L = geo[lv];
     const g = new THREE.Group();
@@ -1072,6 +1075,12 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     g.add(mesh(L.body.carbon, carbon));
     g.add(mesh(L.body.trim, trim));
     if (L.body.mirror) g.add(mesh(L.body.mirror, mirror.mat, false, false));
+    if (L.body.pillar) {
+      const pm = mesh(L.body.pillar, carbon);
+      pm.name = 'halo_pillar';
+      pillars.push(pm);
+      g.add(pm);
+    }
     if (L.body.driver) {
       const all = mesh(L.body.driver, driverMat);
       g.add(all);
@@ -1544,6 +1553,9 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       if (level === detail) return;
       detail = level;
       applyVisibility();
+    },
+    setHaloPillar(v) {
+      for (const m of pillars) m.visible = v;
     },
     setDriverVisible(v, hands = false) {
       driverVisible = v;

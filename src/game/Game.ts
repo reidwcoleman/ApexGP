@@ -222,6 +222,8 @@ export class Game {
   private control = new PlayerControl();
   private line!: RacingLineAssist;
   private driverHidden = false;
+  /** the halo's centre pillar hidden in the cockpit view (the halo column setting) */
+  private pillarHidden = false;
   private qualityCheck = 0;
   private career = new Career();
   /** the driver career (the game's main mode): one driver's seasons, teams, contracts and inbox */
@@ -1466,6 +1468,8 @@ export class Game {
     if (this.worldCore) this.skids.clear();
     this.retireTimer = -1;
     this.driverHidden = false;
+    if (this.pillarHidden) for (const r of this.rigs.values()) r.setHaloPillar?.(true);
+    this.pillarHidden = false;
     this.particles.clear();
     this.carFx.reset();
     // (the last race's recording is still being made into highlights: record into a new one)
@@ -3128,6 +3132,11 @@ export class Game {
     if (cockpit !== this.driverHidden) {
       this.driverHidden = cockpit;
       this.rigs.get(this.race.player.entry)?.setDriverVisible(!cockpit, cockpit);
+    }
+    const noPillar = cockpit && this.cams.view === 'cockpit' && this.cams.prefs.haloCol === false;
+    if (noPillar !== this.pillarHidden) {
+      this.pillarHidden = noPillar;
+      this.rigs.get(this.race.player.entry)?.setHaloPillar?.(!noPillar);
     }
     const w = this.race.weatherState;
     // (and after dark: the red tail light is what you follow down a floodlit straight)

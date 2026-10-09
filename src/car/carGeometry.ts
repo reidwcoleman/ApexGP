@@ -302,6 +302,8 @@ interface Buckets {
   decals: MB;
   /** the rear-view mirrors' glass (nearest level: its own material, CarModel's mirror shader) */
   mirror: MB;
+  /** the halo's centre pillar (nearest level: its own mesh, so the cockpit camera can hide it as the F1 games' "halo column" setting does) */
+  pillar: MB;
   /** parts that bend and break off in a crash (body space, own meshes) */
   parts: Record<PartId, PartMB>;
 }
@@ -816,7 +818,7 @@ function halo(b: Buckets, level: Level) {
     // (a slim blade edge-on to the driver: ~26 mm across, as it splits the onboard picture)
     return { o: p, d, u: [1, 0, 0] as V3, sx: 0.03, sy: 0.013 };
   });
-  sweep(b.carbon, pst, aeroSection([10, 8, 5][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
+  sweep(level === 0 ? b.pillar : b.carbon, pst, aeroSection([10, 8, 5][level]), (_i, _j, p) => [p[2] / CARBON_TILE, p[1] / CARBON_TILE]);
 }
 
 function airboxAndFin(b: Buckets, level: Level) {
@@ -1643,7 +1645,7 @@ function blurDisc(mb: MB, w: number) {
 
 // ================================================================================================ public
 export interface CarGeoLevel {
-  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null; mirror: THREE.BufferGeometry | null };
+  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null; mirror: THREE.BufferGeometry | null; pillar: THREE.BufferGeometry | null };
   /** breakable parts, body space */
   parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
@@ -1671,7 +1673,7 @@ export interface CarGeoLevel {
 
 export function buildCarGeometry(level: Level): CarGeoLevel {
   const pm = (): PartMB => ({ paint: new MB(true), carbon: new MB(), trim: new MB() });
-  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB(), mirror: new MB(), parts: { fwL: pm(), fwR: pm(), rw: pm() } };
+  const b: Buckets = { paint: new MB(true), carbon: new MB(), trim: new MB(), driver: new MB(), head: new MB(), decals: new MB(), mirror: new MB(), pillar: new MB(), parts: { fwL: pm(), fwR: pm(), rw: pm() } };
   buildHull(b.paint, level);
   frontWing(b, level);
   rearWing(b, level);
@@ -1783,7 +1785,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     driverAll = dAll.build();
   }
   const out: CarGeoLevel = {
-    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly, mirror: b.mirror.count ? b.mirror.build() : null },
+    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly, mirror: b.mirror.count ? b.mirror.build() : null, pillar: b.pillar.count ? b.pillar.build() : null },
     parts: Object.fromEntries(
       PART_IDS.map((k) => {
         const q = b.parts[k];

@@ -76,6 +76,7 @@ export function bakeCarAO(L: CarGeoLevel): number {
   const B = L.body;
   add(B.paint);
   add(B.carbon);
+  add(B.pillar);
   add(B.trim);
   add(B.driver);
   add(B.head);
