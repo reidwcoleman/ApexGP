@@ -44,7 +44,7 @@ export const SERIES: Record<SeriesKey, Brand> = {
   // the energy drink: navy and silver, a red accent
   energyDrink: { name: 'TAURO', tag: 'ENERGY DRINK', cat: 'energy drink', bg: '#1b2b5a', fg: '#e8ecf2', accent: '#db0a40', mark: 'ring', weight: 900, italic: true, sx: 1.08 },
   // the airline: burgundy and old gold
-  airline: { name: 'CORVINA AIR', tag: 'GOING PLACES TOGETHER', cat: 'airline', bg: '#5c0632', fg: '#ffffff', accent: '#c7a26b', mark: 'wing', weight: 600, track: 0.06 },
+  airline: { name: 'CORVINA AIR', tag: 'FLY FURTHER', cat: 'airline', bg: '#5c0632', fg: '#ffffff', accent: '#c7a26b', mark: 'wing', weight: 600, track: 0.06 },
   // the retail bank: red, a white dot
   bank: { name: 'REDWOOD', tag: 'BANKING · PAYMENTS', cat: 'bank', bg: '#ec0000', fg: '#ffffff', accent: '#ffffff', mark: 'dot', weight: 700 },
   // cloud: dark slate, orange wave, lower case

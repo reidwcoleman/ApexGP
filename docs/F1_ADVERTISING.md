@@ -90,3 +90,44 @@ Official titles read **FORMULA 1 \<BRAND\> \<RACE NAME\> \<YEAR\>**. The race na
 4. Each brand appears in its own colour block, in runs of consecutive boards (contracts) rather than scattered singles.
 5. LED perimeter boards rotate their content in sync, so a run belongs to one brand at a time.
 6. Painted run-off logos lie along the track on the outside of the corner, stretched along the direction of travel so they read from the TV camera.
+
+## 6. How partners market: the creative on the boards
+
+Logo boards are only part of what fills a circuit. The global partners buy contracts and then run campaigns and named programmes on that inventory. Sources: [RTR Sports](https://rtrsports.com/en/blog/formula-1-sponsors-and-partners/), [BlackBook Motorsport](https://www.blackbookmotorsport.com/features/f1-sponsorship-portfolio-2025-season-preview/), [Formulapedia: Heineken](https://formulapedia.com/how-much-does-heineken-pay-to-sponsor-f1/), [Insider Sport: Lenovo](https://insidersport.com/2024/09/09/formula-one-lenovo-global-partner/), [Further: Lenovo activation](https://www.further.group/work/lenovo-f1).
+
+- **Campaign lines, not just logos.**
+  - The beer partner spends its rights on a responsibility campaign ("If you drive, never drink") and on pushing its 0.0 product. It never advertises the alcoholic beer on cars.
+  - The champagne, spirits and lottery boards carry "enjoy responsibly" or age lines.
+- **Named programmes.** A contract often buys a feature with the brand's name on it:
+  - the logistics partner's Fastest Lap and Fastest Pit Stop awards;
+  - the cloud partner's "F1 Insights powered by …" broadcast graphics;
+  - "presenting partner of …" features (for example the energy company and F1 Sim Racing);
+  - official designations: Official Timekeeper, Official Tyre Supplier, Official Airline, Official Chocolate Bar.
+
+  The boards repeat the programme name as their headline.
+- **Product on the board.** Real boards show the product itself:
+  - the watch face, the tyre's sidewall with its compound band, the bottle or can;
+  - the aircraft tail, the ship, the laptop, the payment card.
+
+  Typical layout: the product on a slab of the brand's accent colour, the line in heavy italic type, and the logo with a web address or hashtag at the end. **[inference]** This layout comes from broadcast footage.
+- **Pattern and brand world.**
+  - Luxury houses fill the board with their monogram.
+  - The tyre maker runs its stretched name as a wall.
+  - Freight runs speed stripes.
+  - The cloud and tech partners use data grids and telemetry traces.
+- **Fan-facing activation.** Lenovo's "Race to Create" let fans design AI liveries that were projected onto a London skyscraper. Partners push the online side (URLs, hashtags, apps) on the boards. In 2025 Lenovo also got title races and brought its Motorola sub-brand trackside.
+- **Rotation.** LED runs cycle a brand's creatives as well as different brands, so the same contract shows the logo, the campaign and the programme in turn.
+
+### What the game does (`src/world/adCreative.ts`)
+
+Each of the 20 brands per circuit has three creatives:
+- **0, logo:** the logo board.
+- **1, campaign:** the campaign line, a product drawing on an accent slab, the logo, and a web address or hashtag.
+- **2, programme:** the official title or award with a "powered by" lockup over the brand's pattern.
+
+Where each creative is used:
+- **Barrier contracts:** each contract picks one creative by hash (`adMixed`).
+- **LED reel:** slides cycle through the three creatives.
+- **Grandstand fascias:** the creatives alternate.
+
+All copy is written for the fictional brands in the style of the real campaigns. None of it quotes a real slogan. The airline's tagline was changed from a real airline's slogan for that reason.

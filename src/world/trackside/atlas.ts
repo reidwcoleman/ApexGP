@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { drawBrand, drawTitle, drawWordmark, printWear, type Brand } from '../brands.ts';
 import { roster } from '../partners.ts';
+import { CREATIVES, drawCreative } from '../adCreative.ts';
 import { EVENT } from '../event.ts';
 import { TEAMS } from '../../race/Teams.ts';
 import { Rng } from './noise.ts';
@@ -43,7 +44,16 @@ export const adName = (key: string) => 'ad' + roster().index(key);
 export const adMixed = (u: number) => {
   const mix = roster().mix;
   if (u > 11 / 12) return 'ad20';
-  return 'ad' + mix[Math.min(mix.length - 1, Math.floor(((u * 12) / 11) * mix.length))];
+  const f = ((u * 12) / 11) * mix.length;
+  const i = Math.min(mix.length - 1, Math.floor(f));
+  // (and which of the brand's creatives this contract runs: the logo board, the campaign or the
+  // programme — docs/F1_ADVERTISING.md §6)
+  return adCreative(mix[i], Math.floor((f - i) * CREATIVES * 7.31));
+};
+/** the cell of creative v of brand i (0: its logo board) */
+export const adCreative = (i: number, v: number) => {
+  const k = ((v % CREATIVES) + CREATIVES) % CREATIVES;
+  return k === 0 || i >= AD_COUNT - 1 ? 'ad' + i : `ad${i}c${k}`;
 };
 
 export const BELTS = ['belt_red', 'belt_blue', 'belt_white', 'belt_yellow', 'belt_black', 'belt_redwhite'] as const;
@@ -56,10 +66,13 @@ export class PrintAtlas {
   private readonly ch = 128;
   private readonly cols = 4;
   private readonly size = 2048;
+  /** (twice as tall as wide: every partner's three creatives) */
+  private readonly sizeH = 4096;
 
   constructor(aniso: number) {
     this.canvas = document.createElement('canvas');
-    this.canvas.width = this.canvas.height = this.size;
+    this.canvas.width = this.size;
+    this.canvas.height = this.sizeH;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = aniso;
@@ -72,11 +85,12 @@ export class PrintAtlas {
   private register() {
     const list: string[] = [];
     for (let i = 0; i < AD_COUNT; i++) list.push('ad' + i);
+    for (let i = 0; i < AD_COUNT - 1; i++) for (let k = 1; k < CREATIVES; k++) list.push(`ad${i}c${k}`);
     list.push(...BELTS, 'belt_logo0', 'belt_logo1', 'belt_logo2');
     list.push('tyre_top', 'tyre_side', 'concrete', 'concrete_paint', 'chevron', 'boards', 'signs', 'screen', 'gantry', 'monitor', 'glass', 'pitwall', 'signs2', 'posts0', 'posts1', 'posts2', 'wall_stripes', 'wall_champions');
     TEAMS.forEach((t) => list.push('team_' + t.id));
     list.forEach((n, i) => this.names.set(n, i));
-    if (list.length > (this.size / this.cw) * (this.size / this.ch)) throw new Error('atlas overflow');
+    if (list.length > (this.size / this.cw) * (this.sizeH / this.ch)) throw new Error('atlas overflow');
   }
 
   /** UV rectangle of a whole cell (inset to avoid bleeding). */
@@ -90,8 +104,8 @@ export class PrintAtlas {
       u0: (cx + pad) / this.size,
       u1: (cx + this.cw - pad) / this.size,
       // CanvasTexture has flipY: canvas row 0 is v = 1
-      v0: 1 - (cy + this.ch - pad) / this.size,
-      v1: 1 - (cy + pad) / this.size,
+      v0: 1 - (cy + this.ch - pad) / this.sizeH,
+      v1: 1 - (cy + pad) / this.sizeH,
     };
   }
 
@@ -110,7 +124,7 @@ export class PrintAtlas {
   draw() {
     const ctx = this.canvas.getContext('2d')!;
     ctx.fillStyle = '#777';
-    ctx.fillRect(0, 0, this.size, this.size);
+    ctx.fillRect(0, 0, this.size, this.sizeH);
     const W = this.cw, H = this.ch;
     const R = roster();
     for (let i = 0; i < AD_COUNT; i++) {
@@ -119,6 +133,12 @@ export class PrintAtlas {
       if (i === AD_COUNT - 1) drawAd(ctx, x, y, W, H, SERIES_BOARD);
       else drawBrand(ctx, x, y, W, H, R.brands[i % R.brands.length]);
       printWear(ctx, x, y, W, H, 101 + i);
+      if (i === AD_COUNT - 1) continue;
+      for (let k = 1; k < CREATIVES; k++) {
+        const [cx, cy] = this.origin(`ad${i}c${k}`);
+        drawCreative(ctx, cx, cy, W, H, R.brands[i % R.brands.length], k);
+        printWear(ctx, cx, cy, W, H, 301 + i * 3 + k);
+      }
     }
     const beltCols: Record<string, string[]> = {
       belt_red: ['#b3121f'],

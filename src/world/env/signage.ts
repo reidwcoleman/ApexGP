@@ -3,7 +3,8 @@ import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
 import { TEAMS } from '../../race/Teams.ts';
 import { canvas2d, canvasTexture } from './textures.ts';
-import { drawBrand, printWear } from '../brands.ts';
+import { printWear } from '../brands.ts';
+import { drawCreative } from '../adCreative.ts';
 import { roster } from '../partners.ts';
 
 /**
@@ -67,7 +68,7 @@ function drawSponsors(canvas: HTMLCanvasElement) {
     const row = Math.floor(i / BOARDS_PER_ROW);
     // (the series' own board keeps its livery; the rest are the circuit's partners, as long bands)
     if (key === 'series') drawBoard(ctx, col * w, row * BOARD_H, w, BOARD_H, SERIES_BOARD);
-    else drawBrand(ctx, col * w, row * BOARD_H, w, BOARD_H, R.b(key[0] === '@' ? R.local[Number(key.slice(1)) % R.local.length] : key));
+    else drawCreative(ctx, col * w, row * BOARD_H, w, BOARD_H, R.b(key[0] === '@' ? R.local[Number(key.slice(1)) % R.local.length] : key), i % 3);
     printWear(ctx, col * w, row * BOARD_H, w, BOARD_H, 211 + i, 0.8);
   });
 }

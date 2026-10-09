@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { canvas2d, canvasTexture } from '../textures.ts';
 import { BRAND_FONTS, drawBrand, type Brand } from '../../brands.ts';
+import { drawCreative } from '../../adCreative.ts';
 import type { Roster } from '../../partners.ts';
 
 /**
@@ -35,7 +36,10 @@ export function rotation(R: Roster, extra: [string, SlideDraw][] = []): [string,
   const order = ['title', 'timing', L(0), 'logistics', 'title', 'lager', L(1), 'energy', 'title', 'tyres', L(2), 'airline'];
   const out: [string, SlideDraw][] = [];
   order.forEach((k, i) => {
-    out.push([out.some((o) => o[0] === k) ? `${k}#${i}` : k, brandSlide(R.b(k))]);
+    // (the brands' campaigns roll through with their logo boards: each slide one creative, the
+    // title partner's three appearances its logo, its campaign and its programme)
+    const b = R.b(k);
+    out.push([out.some((o) => o[0] === k) ? `${k}#${i}` : k, i % 3 === 0 ? brandSlide(b) : (g, x, y, w, h) => drawCreative(g, x, y, w, h, b, i % 3)]);
     if (i === 0) out.push(...extra);
   });
   return out;
