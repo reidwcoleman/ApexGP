@@ -9,6 +9,7 @@
  */
 import * as THREE from 'three';
 import type { Team } from '../race/Teams.ts';
+import { partnersOf } from '../race/TeamPartners.ts';
 import {
   PAINT_W, PAINT_H, HULL_ROWS, HULL_Z0, HULL_Z1, MASK_SCALE, PAINT_CELL, PC, R_PAL, R_FLAP, R_MAIN, R_FWING,
   R_EP_OL, R_EP_OR, R_EP_IN, R_FIN_L, R_FIN_R, type Rect,
@@ -36,12 +37,12 @@ const rgb = (hex: string): RGB => {
 export const safe = (hex: string) => hexOf(rgb(hex));
 const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const shade = (a: RGB, k: number): RGB => [a[0] * k, a[1] * k, a[2] * k];
+const lumOf = (c: RGB) => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
 const hexOf = (c: RGB) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
 
-const SPONSORS = ['HELIX', 'NORDVOLT', 'ARCLINE', 'MERIDIAN', 'OKTA', 'LUMEN', 'PRAXIS', 'SOLACE', 'TANGENT', 'VANTA', 'KORU', 'ZENITH'];
 /**
  * Where the small partner decals sit on each flank: z range (front, rear), the feature line they
- * follow (hull.ts curve parameter), letter height (m), which partner (offset into SPONSORS) and
+ * follow (hull.ts curve parameter), letter height (m), which technical partner (offset into the team's list, TeamPartners.ts) and
  * whether it's a tile. Kept clear of the big wordmarks, the panel lines and the louvres.
  */
 const PARTNER_DECALS: { zf: number; zr: number; kt: number; h: number; k: number; tile?: boolean }[] = [
@@ -484,7 +485,7 @@ function buildLivery(team: Team): LiverySet {
   mask.colorSpace = THREE.NoColorSpace;
   mask.anisotropy = 4;
   // painted on an earlier visit (same build, same team): draw it back
-  const key = pixelKey('livery', team, PAINT_W, PAINT_H);
+  const key = pixelKey('livery', 2, team, partnersOf(team.id), PAINT_W, PAINT_H);
   if (restorePixels(key + 'm', c) && restorePixels(key + 'k', mc)) return { map, mask };
   // the per-texel hull pass is font independent: keep it only until the webfont repaint has happened
   let hull: HullImg | null = null;
@@ -530,16 +531,23 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
   const near = (a: RGB, b: RGB) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 60;
   const inkFor = (bg: RGB) => (near(bg, pal.P) ? team.ink : contrastOn(hexOf(bg)));
 
-  // ---------------- wordmarks on the hull
-  const small = SPONSORS[tIndex % SPONSORS.length];
-  const small2 = SPONSORS[(tIndex + 5) % SPONSORS.length];
+  // ---------------- wordmarks on the hull, where the real teams sell them (docs/F1_LIVERIES.md):
+  // the title partner the sidepods and the rear wing, the first principal partner the engine
+  // cover, the second the nose and the rear wing's underside, the fuel partner the cover's tail and
+  // the front wing, the power unit's maker its badge, the technical partners the small decals
+  const P = partnersOf(team.id);
+  const small = P.principal[1].name;
+  const small2 = P.fuel.name;
   for (const side of [1, -1] as const) {
     const sideCol = inkFor(sample(-0.3, 7.2, side));
-    hullText(g, m, { text: team.sponsor, zFront: 0.2, zRear: -0.95, side, guide: { kt: 7.15 }, height: 0.1, color: sideCol });
+    hullText(g, m, { text: team.sponsor, zFront: 0.2, zRear: -0.95, side, guide: { kt: 7.15 }, height: 0.13, color: sideCol });
     const coverCol = inkFor(sample(-0.85, 3.55, side));
-    hullText(g, m, { text: team.sponsor, zFront: -0.42, zRear: -1.3, side, guide: { kt: 3.52 }, height: 0.058, color: coverCol });
+    hullText(g, m, { text: P.principal[0].name, zFront: -0.42, zRear: -1.3, side, guide: { kt: 3.52 }, height: 0.074, color: coverCol });
+    // the power unit's badge on the cover behind the cockpit
+    const puCol = inkFor(sample(-0.2, 3.52, side));
+    hullText(g, m, { text: P.engine, zFront: -0.04, zRear: -0.36, side, guide: { kt: 3.52 }, height: 0.03, color: puCol, weight: 700, italic: false, track: 0.16 });
     const noseCol = inkFor(sample(2.0, 3.7, side));
-    hullText(g, m, { text: small, zFront: 2.3, zRear: 1.82, side, guide: { kt: 3.75 }, height: 0.04, color: noseCol, weight: 700 });
+    hullText(g, m, { text: small, zFront: 2.3, zRear: 1.82, side, guide: { kt: 3.75 }, height: 0.044, color: noseCol, weight: 900 });
     const chCol = inkFor(sample(1.0, 5.2, side));
     hullText(g, m, { text: team.short, zFront: 1.2, zRear: 0.84, side, guide: { kt: 5.0 }, height: 0.038, color: chCol, weight: 700, italic: false, track: 0.12 });
     const lowCol = inkFor(sample(-1.7, 3.75, side));
@@ -549,11 +557,13 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     // alone read as a model kit). Some are plain words in the ink, some white or black tiles.
     for (const d of PARTNER_DECALS) {
       const bg = sample((d.zf + d.zr) / 2, d.kt, side);
-      const word = SPONSORS[(tIndex + d.k) % SPONSORS.length];
+      const pm = P.tech[(tIndex + d.k) % P.tech.length];
       const tile = d.tile ? (contrastOn(hexOf(bg)) === '#ececec' ? '#e6e6e6' : '#111214') : undefined;
+      // (a partner's own colour on its tile when it reads there, as the real patch decals are)
+      const onTile = tile && Math.abs(lumOf(rgb(pm.color)) - lumOf(rgb(tile))) > 0.3 ? safe(pm.color) : tile ? contrastOn(tile) : '';
       hullText(g, m, {
-        text: word, zFront: d.zf, zRear: d.zr, side, guide: { kt: d.kt }, height: d.h,
-        color: tile ? contrastOn(tile) : inkFor(bg), box: tile, weight: d.tile ? 900 : 700, italic: !d.tile, track: 0.06,
+        text: pm.name, zFront: d.zf, zRear: d.zr, side, guide: { kt: d.kt }, height: d.h,
+        color: tile ? onTile : inkFor(bg), box: tile, weight: d.tile ? 900 : 700, italic: !d.tile, track: 0.06,
       });
     }
   }
