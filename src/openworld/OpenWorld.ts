@@ -87,6 +87,9 @@ export class OpenWorld {
   avatar: Gunman | null = null;
   private aimK = 0;
   private fireT = 0;
+  /** a click while the gun was still coming up: it fires once it's up */
+  private fireQueue = 0;
+  private fireWas = false;
   private readonly aimRay = new THREE.Ray();
   private readonly muzzle = new THREE.Vector3();
   private exploded = false;
@@ -953,7 +956,11 @@ export class OpenWorld {
     // ---- aiming and the trigger
     const capture = pad.locked || pad.usingPad;
     const aiming = onFoot && !!C.current && C.hp > 0 && (pad.aim || pad.padAim);
-    const firing = (pad.fire || (onFoot && pad.padFire)) && C.hp > 0 && this.respawnT <= 0;
+    const trig = (pad.fire || (onFoot && pad.padFire)) && C.hp > 0 && this.respawnT <= 0;
+    if (trig && !this.fireWas) this.fireQueue = 0.4;
+    this.fireWas = trig;
+    this.fireQueue = Math.max(0, this.fireQueue - dt);
+    const firing = trig || this.fireQueue > 0;
     this.aimK += ((aiming ? 1 : 0) - this.aimK) * Math.min(1, dt * 10);
     const spec = C.spec;
     this.cams.freeAim = onFoot && capture;
@@ -979,7 +986,10 @@ export class OpenWorld {
       if (C.current && A.aim > 0.6 && C.hp > 0) {
         A.muzzle(this.muzzle);
         fired = C.playerTrigger(dt, firing, aiming, ray, this.muzzle, Math.min(1, Math.hypot(P.vel.x, P.vel.z) / 5), false);
-        if (fired) A.kick = 1;
+        if (fired) {
+          A.kick = 1;
+          this.fireQueue = 0;
+        }
       } else C.playerTrigger(dt, false, false, ray, this.muzzle, 0, false);
     } else if (this.vehicle) {
       if (this.avatar) this.avatar.root.visible = false;

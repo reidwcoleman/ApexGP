@@ -146,6 +146,7 @@ export class Combat {
   private cool = 0;
   reloading = 0;
   private triggerWas = false;
+  private latch = 0;
   /** the player on foot */
   hp = 100;
   armor = 50;
@@ -261,8 +262,11 @@ export class Combat {
   playerTrigger(dt: number, held: boolean, aiming: boolean, aimRay: THREE.Ray, muzzle: THREE.Vector3, moving: number, inVehicle: boolean): boolean {
     const s = this.spec;
     this.cool -= dt;
-    const pressed = held && !this.triggerWas;
+    // a press is latched until it can fire (during a cooldown or a weapon switch it would be lost)
+    if (held && !this.triggerWas) this.latch = 0.45;
     this.triggerWas = held;
+    this.latch = Math.max(0, this.latch - dt);
+    const pressed = this.latch > 0;
     if (this.reloading > 0) {
       this.reloading -= dt;
       if (this.reloading <= 0 && s) {
@@ -273,16 +277,19 @@ export class Combat {
       }
       return false;
     }
-    if (!s || !held) return false;
+    if (!s || (!held && !pressed)) return false;
     if (inVehicle && !s.driveBy) return false;
     if (this.cool > 0 || (!s.auto && !pressed)) return false;
     const a = this.ammo[s.id];
     if (a.mag <= 0) {
-      if (pressed) this.H.audio.dry();
+      if (pressed && !s.auto) this.H.audio.dry();
+      else if (held && this.latch > 0.4) this.H.audio.dry();
+      this.latch = 0;
       if (a.spare > 0) this.reload();
       return false;
     }
     a.mag--;
+    this.latch = 0;
     this.cool = 60 / s.rpm;
     // where the crosshair points: the first thing on the camera's ray (from in front of the player)
     const far = this.tmp.copy(aimRay.direction).multiplyScalar(s.range).add(aimRay.origin);
