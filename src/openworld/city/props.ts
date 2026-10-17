@@ -37,15 +37,17 @@ const FAR: Record<string, number> = {
   sigPoles: 700,
   sigArms: 700,
   sigHeads: 600,
-  roofAC: 2500,
-  roofFans: 1200,
+  roofAC: 1400,
+  roofFans: 500,
   loungers: 900,
   umbrellas: 1100,
   umbrellaPoles: 700,
   cabanas: 1200,
   cabanaPosts: 700,
   daybeds: 800,
-  roofCars: 2200,
+  roofCars: 1100,
+  helipads: 2500,
+  beacons: 4000,
 };
 
 // ------------------------------------------------------------------------------ palm models

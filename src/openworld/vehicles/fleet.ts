@@ -349,14 +349,14 @@ export class Fleet {
         heads.setColorAt(i, new THREE.Color(1, 1, 1));
         tails.setColorAt(i, new THREE.Color(1, 1, 1));
       }
-      const wheels = mk(carWheel(spec.wheelR, spec.id === 'bus' ? 0.32 : spec.id === 'pickup' || spec.id === 'gwagon' ? 0.28 : 0.24, id === 'gwagon' || id === 'police' || id === 'policeSuv' ? 'black' : id === 'van' || id === 'bus' ? 'steel' : 'alloy'), wheel, cap * 4, true);
+      const wheels = mk(carWheel(spec.wheelR, spec.id === 'bus' ? 0.32 : spec.id === 'pickup' || spec.id === 'gwagon' ? 0.28 : 0.24, id === 'gwagon' || id === 'police' || id === 'policeSuv' ? 'black' : id === 'van' || id === 'bus' ? 'steel' : 'alloy'), wheel, cap * 4, false);
       let decal: THREE.InstancedMesh | null = null;
       if (g.decal) {
         const kind = id === 'taxi' ? 'taxi' : 'police';
         const dm = (decalMats[kind] ??= new THREE.MeshStandardMaterial({ map: liveryTexture(kind), transparent: true, roughness: 0.35, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
         decal = mk(g.decal, dm, cap, false);
       }
-      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, decal, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: 0 });
+      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, decal, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: new Set<number>() });
     }
   }
 
@@ -367,10 +367,13 @@ export class Fleet {
   alloc(id: ModelId, paint: THREE.ColorRepresentation): FleetSlot | null {
     const k = this.kinds.get(id);
     if (!k || !k.free.length) return null;
+    // (the lowest free slot: the drawn range stays short)
+    k.free.sort((a, b) => b - a);
     const index = k.free.pop()!;
+    k.used.add(index);
+    this.dirty(k);
     k.body.setColorAt(index, new THREE.Color(paint));
     k.body.instanceColor!.needsUpdate = true;
-    k.used++;
     return { model: id, index };
   }
 
@@ -390,7 +393,7 @@ export class Fleet {
     k.decal?.setMatrixAt(s.index, this.zero);
     for (let w = 0; w < 4; w++) k.wheels.setMatrixAt(s.index * 4 + w, this.zero);
     k.free.push(s.index);
-    k.used--;
+    k.used.delete(s.index);
     this.dirty(k);
   }
 
@@ -438,6 +441,11 @@ export class Fleet {
   /** upload this frame's changes */
   flush() {
     for (const k of this.dirtySet) {
+      // draw only up to the highest slot in use (hidden slots still cost vertex work)
+      let n = 0;
+      for (const i of k.used) n = Math.max(n, i + 1);
+      for (const im of [k.body, k.glass, k.heads, k.tails, k.decal]) if (im) im.count = n;
+      k.wheels.count = n * 4;
       k.body.instanceMatrix.needsUpdate = true;
       k.glass.instanceMatrix.needsUpdate = true;
       k.heads.instanceMatrix.needsUpdate = true;
@@ -461,7 +469,7 @@ interface Kind {
   decal: THREE.InstancedMesh | null;
   free: number[];
   cap: number;
-  used: number;
+  used: Set<number>;
 }
 
 const E = new THREE.Euler();

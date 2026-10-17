@@ -22,22 +22,35 @@ interface Item {
   c?: THREE.Color;
 }
 
-function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, list: Item[], name: string, cast = true): THREE.InstancedMesh | null {
+function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, list: Item[], name: string, cast = true): THREE.Object3D | null {
   if (!list.length) return null;
-  const im = new THREE.InstancedMesh(geo, mat, list.length);
+  // in 500 m cells, so the distance culling (props.cull, by name) can drop the far ones
+  const cells = new Map<string, Item[]>();
+  for (const it of list) {
+    const k = `${Math.floor(it.x / 500)}:${Math.floor(it.z / 500)}`;
+    let l = cells.get(k);
+    if (!l) cells.set(k, (l = []));
+    l.push(it);
+  }
+  const g = new THREE.Group();
+  g.name = name + 'Cells';
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
-  list.forEach((it, i) => {
-    q.setFromEuler(e.set(0, it.yaw, 0));
-    s.set(it.sx ?? 1, it.sy ?? 1, it.sz ?? 1);
-    p.set(it.x, it.y, it.z);
-    im.setMatrixAt(i, m4.compose(p, q, s));
-    if (it.c) im.setColorAt(i, it.c);
-  });
-  im.castShadow = cast;
-  im.receiveShadow = true;
-  im.name = name;
-  im.computeBoundingSphere();
-  return im;
+  for (const items of cells.values()) {
+    const im = new THREE.InstancedMesh(geo, mat, items.length);
+    items.forEach((it, i) => {
+      q.setFromEuler(e.set(0, it.yaw, 0));
+      s.set(it.sx ?? 1, it.sy ?? 1, it.sz ?? 1);
+      p.set(it.x, it.y, it.z);
+      im.setMatrixAt(i, m4.compose(p, q, s));
+      if (it.c) im.setColorAt(i, it.c);
+    });
+    im.castShadow = cast;
+    im.receiveShadow = true;
+    im.name = name;
+    im.computeBoundingSphere();
+    g.add(im);
+  }
+  return g;
 }
 
 /** a point in a deck's frame → world */
@@ -149,7 +162,7 @@ export function buildRoofDress(bld: BuildingsBuild, addPalm: (x: number, z: numb
   // (the instance colour paints it; the dark parts stay dark)
   const carMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.3, roughness: 0.4 });
   for (const [id, list] of cars) {
-    const im = instanced(lowCar(MODELS[id]), carMat, list, 'roofCars');
+    const im = instanced(lowCar(MODELS[id]), carMat, list, 'roofCars', false);
     if (im) group.add(im);
   }
   // loungers (a white frame and cushion), umbrellas (pole + canopy), cabanas (posts + canvas roof)

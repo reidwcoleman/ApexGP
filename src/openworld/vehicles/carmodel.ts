@@ -127,7 +127,7 @@ export function buildCar(m: ModelSpec): CarGeometry {
   const pillars = tall ? [] : m.id === 'pickup' ? [(cowl + roofR) / 2 - 0.1] : [(roofF + roofR) / 2 + 0.05, ...(m.id === 'suv' || m.id === 'gwagon' || m.id === 'policeSuv' ? [roofR + 0.05] : [])];
   const nearPillar = (z: number) => pillars.some((p) => Math.abs(z - p) < 0.06);
   const stations: Station[] = [];
-  const nZ = m.id === 'bus' ? 60 : 64;
+  const nZ = m.id === 'bus' ? 40 : 46;
   for (let k = 0; k <= nZ; k++) {
     const z = hl - (k / nZ) * m.L;
     const w = widthAt(z);
@@ -470,22 +470,22 @@ export function carWheel(R: number, W: number, style: 'alloy' | 'steel' | 'black
       [r + 0.02, W / 2 - 0.005],
       [r - 0.01, W / 2 - 0.03],
     ],
-    28,
+    18,
   );
   const rimC: RGB = style === 'black' ? [0.07, 0.07, 0.075] : style === 'steel' ? [0.32, 0.32, 0.33] : [0.66, 0.67, 0.69];
   const parts: THREE.BufferGeometry[] = [colorize(tyre, [0.035, 0.035, 0.038])];
   // the barrel (inside the rim) and the disc
-  const barrel = latheX([[r * 0.98, W / 2 - 0.03], [r * 0.95, -W / 2 + 0.04]], 20);
+  const barrel = latheX([[r * 0.98, W / 2 - 0.03], [r * 0.95, -W / 2 + 0.04]], 12);
   parts.push(colorize(barrel, [0.12, 0.12, 0.13]));
-  const disc = new THREE.CylinderGeometry(r * 0.78, r * 0.78, 0.025, 20);
+  const disc = new THREE.CylinderGeometry(r * 0.78, r * 0.78, 0.025, 12, 1, true);
   disc.rotateZ(Math.PI / 2);
   disc.translate(-0.01, 0, 0);
   parts.push(colorize(disc, [0.28, 0.28, 0.29]));
   // the face: a dished centre, spokes, a hub cap
   const x0 = W / 2 - 0.035;
-  const lip = latheX([[r * 0.99, x0 + 0.012], [r * 0.92, x0]], 24);
+  const lip = latheX([[r * 0.99, x0 + 0.012], [r * 0.92, x0]], 16);
   parts.push(colorize(lip, rimC));
-  const hub = new THREE.CylinderGeometry(r * 0.22, r * 0.26, 0.05, 14);
+  const hub = new THREE.CylinderGeometry(r * 0.22, r * 0.26, 0.05, 10);
   hub.rotateZ(Math.PI / 2);
   hub.translate(x0 - 0.01, 0, 0);
   parts.push(colorize(hub, rimC));
