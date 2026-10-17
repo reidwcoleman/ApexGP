@@ -38,6 +38,7 @@ import { setDynLights, type DynLight } from './city/cityLights.ts';
 import { placeAt, WORLD } from './geo.ts';
 import type { CarBody } from './sim/car.ts';
 import type { CamSubject } from './camera.ts';
+import { Particles, fx } from './fx/particles.ts';
 
 /**
  * The open world: Miami, from Brickell to South Beach, at real scale. Owns the renderer, the
@@ -76,6 +77,7 @@ export class OpenWorld {
   ambient!: Ambient;
   hud!: Hud;
   audio = new OpenWorldAudio();
+  readonly particles = new Particles();
   /** vehicles parked about the city for the player (the Roadster is one) */
   readonly owned: Drivable[] = [];
   private paused = false;
@@ -178,6 +180,9 @@ export class OpenWorld {
     this.scene.add(this.police.group);
     this.people = new People(this.net, this.world);
     this.scene.add(this.people.group);
+
+    this.scene.add(this.particles.group);
+    fx.p = this.particles;
 
     await step(0.85, 'Charging the Roadster');
     this.input = new Input(this.canvas);
@@ -682,11 +687,13 @@ export class OpenWorld {
     const cc = this.params.get('carcam');
     if (cc && this.vehicle) {
       // dev: an orbit shot of the car (azimuth from the nose, elevation, distance)
-      const [az, el, d, fov] = cc.split(',').map(Number);
+      // (optionally aimed at a point in the car's frame: tx (left), ty, tz (forward))
+      const [az, el, d, fov, tx = 0, ty = 0.55, tz = 0] = cc.split(',').map(Number);
       const v = this.vehicle;
       const a = v.yaw + (az * Math.PI) / 180, e = (el * Math.PI) / 180;
-      this.camera.position.set(v.pos.x + Math.sin(a) * Math.cos(e) * d, v.pos.y + 0.55 + Math.sin(e) * d, v.pos.z + Math.cos(a) * Math.cos(e) * d);
-      this.camera.lookAt(v.pos.x, v.pos.y + 0.55, v.pos.z);
+      const T = this.tmpV.set(tx, ty, tz).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.yaw).add(v.pos);
+      this.camera.position.set(T.x + Math.sin(a) * Math.cos(e) * d, T.y + Math.sin(e) * d, T.z + Math.cos(a) * Math.cos(e) * d);
+      this.camera.lookAt(T);
       if (fov && this.camera.fov !== fov) {
         this.camera.fov = fov;
         this.camera.updateProjectionMatrix();
@@ -740,6 +747,9 @@ export class OpenWorld {
     facadeUniforms.uDay.value = (1 - night) * (P.direct ?? 1);
     facadeUniforms.uFTime.value = this.elapsed;
     for (const wt of this.ground.water) wt.update(this.elapsed);
+    this.tyreSmoke(dt, body);
+    this.particles.setLight(night, P.direct ?? 1);
+    this.particles.update(dt);
     this.props.update(this.elapsed, night);
     if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
@@ -755,6 +765,32 @@ export class OpenWorld {
     }
     setDynLights(dyn, this.camera.position);
     this.gfx.render(dt);
+  }
+
+  /** white smoke off the rear tyres when they spin up or slide (the driven ones) */
+  private smokeAcc = 0;
+  private tyreSmoke(dt: number, body: CarBody | null) {
+    const v = this.vehicle;
+    if (!body || !v || !body.onGround) return;
+    const slip = body.slip;
+    if (slip < 0.35) return;
+    const k = Math.min(1, (slip - 0.35) / 0.5);
+    this.smokeAcc += dt * 70 * k;
+    const n = Math.floor(this.smokeAcc);
+    this.smokeAcc -= n;
+    const P = this.particles;
+    const c = Math.cos(body.yaw), s = Math.sin(body.yaw);
+    const back = -body.spec.hl * 0.62, half = body.spec.hw * 0.85;
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? 1 : -1;
+      const lx = side * half, lz = back;
+      const x = body.pos.x + lx * c + lz * s, z = body.pos.z - lx * s + lz * c;
+      P.puff({
+        x, y: body.pos.y + 0.2, z, vx: v.vel.x * 0.25 + (P.rand() - 0.5) * 2, vy: 0.5 + P.rand(), vz: v.vel.z * 0.25 + (P.rand() - 0.5) * 2,
+        life: 1.8 + P.rand() * 1.6, s0: 0.5, s1: 3.2 + P.rand() * 2, a: 0.22 * k + 0.05, r: 0.93, g: 0.93, b: 0.95,
+        drag: 1.4, lift: 0.35, floor: body.pos.y + 0.05, fadeIn: 0.12,
+      });
+    }
   }
 
   /** where the player is (in a vehicle or on foot) */

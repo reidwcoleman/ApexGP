@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeStatic } from '../city/build.ts';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { loft, table, type Station } from './loft.ts';
 import { MAT, lampMaterial, makeWheel, nozzleGeometry, plumeMesh, wellLiner } from './parts.ts';
 
@@ -50,6 +51,7 @@ export interface RoadsterRig {
   wing: THREE.Group;
   yoke: THREE.Group;
   thrusters: Thruster[];
+  nozzleMat: THREE.MeshStandardMaterial;
   paint: THREE.MeshPhysicalMaterial;
   tail: THREE.MeshStandardMaterial;
   head: THREE.MeshStandardMaterial;
@@ -194,6 +196,27 @@ function screenTexture(): THREE.CanvasTexture {
   return t;
 }
 
+let wordTex: THREE.CanvasTexture | null = null;
+/** the spaced-out wordmark across the tail */
+function wordmark(): THREE.CanvasTexture {
+  if (wordTex) return wordTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 102;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.font = '600 74px "Titillium Web", Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  const word = 'T E S L A';
+  g.letterSpacing = '38px';
+  g.fillText(word, 512 + 19, 54);
+  wordTex = new THREE.CanvasTexture(c);
+  wordTex.colorSpace = THREE.SRGBColorSpace;
+  wordTex.anisotropy = 8;
+  return wordTex;
+}
+
 export function buildRoadster(trim: Trim, color: THREE.ColorRepresentation = 0xe9e8e3): RoadsterRig {
   const root = new THREE.Group();
   root.name = 'Roadster';
@@ -210,7 +233,7 @@ export function buildRoadster(trim: Trim, color: THREE.ColorRepresentation = 0xe
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
-if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
+if ( abs( vLoc.x ) > 0.62 && vLocN.x * sign( vLoc.x ) > 0.3 && vLoc.y < 0.735 ) {
   float dz = abs( vLoc.z ) - uArchZ;
   float dy = vLoc.y - uArchY;
   if ( dz * dz + dy * dy < uArchR * uArchR ) discard;
@@ -236,8 +259,31 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     float slat = step( 0.5, fract( vLoc.y * 70.0 ) );
     diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.012 ) * ( 0.6 + 0.6 * slat ), intake );
   }
-  // the front intake below the light bar, and the splitter
-  if ( vLoc.z > 1.98 && vLoc.y < 0.2 + ( vLoc.z - 1.98 ) * 0.0 && vLoc.y > 0.12 && ax < 0.78 ) diffuseColor.rgb = vec3( 0.015 );
+  // the front intake below the light bar: a honeycomb mesh behind a dark surround
+  if ( vLoc.z > 1.9 && vLoc.y < 0.215 && vLoc.y > 0.115 && ax < 0.8 - ( 0.215 - vLoc.y ) * 0.6 ) {
+    vec2 hp = vec2( vLoc.x * 42.0, vLoc.y * 48.0 );
+    vec2 hr = vec2( 1.0, 1.732 );
+    vec2 ha = mod( hp, hr ) - hr * 0.5, hb = mod( hp - hr * 0.5, hr ) - hr * 0.5;
+    float hd = min( dot( ha, ha ), dot( hb, hb ) );
+    diffuseColor.rgb = mix( vec3( 0.006 ), vec3( 0.05 ), smoothstep( 0.12, 0.2, hd ) );
+  }
+  // the hood's twin heat extractors (slatted vents either side of the centre)
+  if ( vLoc.z > 1.36 && vLoc.z < 1.58 && ax > 0.26 && ax < 0.44 && vLocN.y > 0.5 ) {
+    float slat = smoothstep( 0.3, 0.5, abs( fract( vLoc.z * 70.0 ) - 0.5 ) );
+    float edge = smoothstep( 0.0, 0.008, min( min( vLoc.z - 1.36, 1.58 - vLoc.z ), min( ax - 0.26, 0.44 - ax ) ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, mix( vec3( 0.015 ), diffuseColor.rgb * 0.55, slat ), edge );
+  }
+  // the tail: body colour above the light blade, a gloss-black band with the wordmark, the
+  // carbon diffuser below
+  if ( vLoc.z < -2.27 && vLocN.z < -0.6 ) {
+    if ( vLoc.y < 0.765 ) diffuseColor.rgb = vec3( 0.012 );
+    if ( vLoc.y < 0.5 ) {
+      float cb = step( 0.5, fract( ( vLoc.x + vLoc.y ) * 60.0 ) ) * 0.5 + step( 0.5, fract( ( vLoc.x - vLoc.y ) * 60.0 ) ) * 0.5;
+      diffuseColor.rgb = vec3( 0.018 + cb * 0.016 );
+    }
+  }
+  // the lower door blade (a carbon sill line) and the chine's shadow just under the crease
+  if ( ax > 0.86 && vLoc.y > 0.17 && vLoc.y < 0.3 && abs( vLoc.z ) < 1.0 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.02 ), 0.92 );
   diffuseColor.rgb *= 1.0 - 0.9 * seam;
 }`,
       );
@@ -253,7 +299,7 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     },
     door: { bands: [2, 3, 4], z0: -0.62, z1: 0.82 },
     capFront: 'paint',
-    capRear: 'tailcap',
+    capRear: 'paint',
   });
   const mats: Record<string, THREE.Material> = {
     paint,
@@ -316,16 +362,65 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     const tl = new THREE.Mesh(g, tail);
     tl.position.set(0, y, z);
     body.add(tl);
-    // a dark recess band under it and the diffuser
-    const rec = new THREE.Mesh(new THREE.BoxGeometry(w * 2.02, 0.09, 0.012), MAT.gloss());
-    rec.position.set(0, y - 0.01, z + 0.006);
-    body.add(rec);
+    // the blade's smoked housing, its C-shaped ends wrapping round the corners, the reverse lamps
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(w * 2 + 0.02, 0.05, 0.012), MAT.glassDark());
+    housing.position.set(0, y, z - 0.004);
+    body.add(housing);
+    for (const sg of [1, -1]) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.022), tail);
+      c.position.set(sg * (w - 0.035), y - 0.04, z);
+      body.add(c);
+      const rev = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.022, 0.014), lampMaterial(0xffffff, 0.15));
+      rev.position.set(sg * 0.42, 0.535, z);
+      body.add(rev);
+    }
+    // the wordmark across the black band
+    const wm = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.07), new THREE.MeshStandardMaterial({ map: wordmark(), transparent: true, metalness: 0.6, roughness: 0.3, color: 0xf2f3f5, emissive: 0x30333a, emissiveMap: wordmark() }));
+    wm.position.set(0, 0.64, z - 0.006);
+    wm.rotation.y = Math.PI;
+    body.add(wm);
+    // the diffuser: strakes running back under the tail
     for (let i = -3; i <= 3; i++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.09, 0.5), MAT.carbon());
-      fin.position.set(i * 0.17, floorY(-2.0) + 0.02, -L + 0.27);
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.13, 0.62), MAT.carbon());
+      fin.position.set(i * 0.17, floorY(-2.0) + 0.05, -L + 0.3);
       fin.rotation.x = 0.36;
       body.add(fin);
     }
+    // a carbon lip under the diffuser's trailing edge
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(w * 2 - 0.1, 0.012, 0.08), MAT.carbon());
+    lip.position.set(0, floorY(-L) - 0.004, -L + 0.03);
+    body.add(lip);
+  }
+  // ---- the nose: lamp pods under the hairline bar, the carbon splitter
+  for (const sg of [1, -1]) {
+    const z = 2.12;
+    const x = chineW(z) * 0.78 * sg;
+    const pod = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.17, 4, 10), MAT.glassDark());
+    pod.rotation.z = Math.PI / 2;
+    pod.rotation.y = -0.45 * sg;
+    pod.scale.set(1, 1, 0.5);
+    pod.position.set(x, chineY(z) - 0.006, z + 0.035);
+    body.add(pod);
+    for (let k = 0; k < 3; k++) {
+      const led = new THREE.Mesh(new THREE.CircleGeometry(0.013, 12), head);
+      const lx = x - sg * (0.055 - k * 0.055) * Math.cos(0.45);
+      led.position.set(lx, chineY(z) - 0.006, z + 0.035 + (0.055 - k * 0.055) * Math.sin(0.45) * 1 + 0.016);
+      body.add(led);
+    }
+  }
+  {
+    const sh = new THREE.Shape();
+    const n = 18;
+    const zs = (i: number) => 2.29 - (i / n) * 0.55;
+    sh.moveTo(0, 2.33);
+    for (let i = 0; i <= n; i++) sh.lineTo(floorW(zs(i)) + 0.08 - (i / n) * 0.02, zs(i) + 0.04 * (1 - i / n));
+    for (let i = n; i >= 0; i--) sh.lineTo(-(floorW(zs(i)) + 0.08 - (i / n) * 0.02), zs(i) + 0.04 * (1 - i / n));
+    sh.lineTo(0, 2.33);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.014, bevelEnabled: false });
+    g.rotateX(Math.PI / 2);
+    const sp = new THREE.Mesh(g, MAT.carbon());
+    sp.position.y = floorY(2.2) + 0.002;
+    body.add(sp);
   }
   // the badge: a small chrome T on the nose
   {
@@ -365,12 +460,23 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     const g = new THREE.ExtrudeGeometry(af, { depth: 1.5, bevelEnabled: false, curveSegments: 10 });
     g.rotateY(Math.PI / 2);
     g.translate(-0.75, 0, 0.16);
-    const blade = new THREE.Mesh(g, paint);
+    const blade = new THREE.Mesh(g, MAT.carbon());
     blade.castShadow = true;
     wing.add(blade);
+    const gurney = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.014, 0.004), MAT.gloss());
+    gurney.position.set(0, 0.009, -0.16);
+    wing.add(gurney);
     for (const sg of [1, -1]) {
-      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.07, 0.36), MAT.carbon());
-      plate.position.set(0.752 * sg, 0.005, 0);
+      const ep = new THREE.Shape();
+      ep.moveTo(-0.2, -0.03);
+      ep.lineTo(0.17, -0.02);
+      ep.quadraticCurveTo(0.2, 0.03, 0.12, 0.05);
+      ep.lineTo(-0.16, 0.06);
+      ep.quadraticCurveTo(-0.22, 0.04, -0.2, -0.03);
+      const eg = new THREE.ExtrudeGeometry(ep, { depth: 0.01, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2 });
+      eg.rotateY(Math.PI / 2);
+      const plate = new THREE.Mesh(eg, paint);
+      plate.position.set(0.752 * sg + (sg > 0 ? 0 : 0.01), 0.005, 0);
       wing.add(plate);
     }
     wing.userData.struts = [] as THREE.Mesh[];
@@ -396,6 +502,23 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
       root.add(w.steer);
       wheels.push({ steer: w.steer, spin: w.spin, front, left, rest });
       body.add(wellLiner(front ? WZ : -WZ, ROADSTER.wheelR, 0.385, sg < 0 ? -1.02 : 0.8, sg < 0 ? -0.8 : 1.02));
+      // the arch's finished edge: a thin black lip round the cut-out (flat along the top where the
+      // shoulder runs over the tyre)
+      {
+        const pts: THREE.Vector3[] = [];
+        const zc = front ? WZ : -WZ;
+        for (let i = 0; i <= 40; i++) {
+          const th = 0.02 + (i / 40) * (Math.PI - 0.04);
+          const z = zc + Math.cos(th) * 0.39;
+          const y = Math.min(0.36 + Math.sin(th) * 0.39, 0.733);
+          const cy = chineY(z), cw = chineW(z), sy = shY(z), sw = shW(z);
+          const k = THREE.MathUtils.clamp((y - cy) / Math.max(0.01, sy - cy), 0, 1);
+          const x = cw + (sw - cw) * k + 0.012 * Math.sin(k * Math.PI) + 0.006;
+          pts.push(new THREE.Vector3(x * sg, y, z));
+        }
+        const lip = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.011, 6, false), MAT.gloss());
+        body.add(lip);
+      }
       // a carbon sill under the doors
       if (front) {
         const sill = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 2.0), MAT.carbon());
@@ -431,23 +554,58 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
       d.rotation.x = -0.3;
       body.add(d);
     }
-    // seats: shells moulded into the tub
+    // seats: carbon-backed buckets, black bolsters round cream inserts, a fixed headrest
     for (const sx of [0.35, -0.35]) {
       const seat = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.5), MAT.interior());
-      base.position.set(0, 0.28, 0);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.66, 0.1), MAT.interior());
-      back.position.set(0, 0.6, -0.27);
-      back.rotation.x = -0.42;
-      const bolsterL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.14), MAT.interiorLight());
-      bolsterL.position.set(0.22, 0.6, -0.24);
-      bolsterL.rotation.x = -0.42;
-      const bolsterR = bolsterL.clone();
-      bolsterR.position.x = -0.22;
-      seat.add(base, back, bolsterL, bolsterR);
+      const shell = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.7, 0.09, 3, 0.04), MAT.carbon());
+      shell.position.set(0, 0.62, -0.31);
+      shell.rotation.x = -0.4;
+      const cushion = new THREE.Mesh(new RoundedBoxGeometry(0.46, 0.1, 0.5, 3, 0.04), MAT.interior());
+      cushion.position.set(0, 0.29, -0.02);
+      cushion.rotation.x = 0.08;
+      const insert = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.03, 0.4, 2, 0.012), MAT.interiorLight());
+      insert.position.set(0, 0.345, -0.0);
+      insert.rotation.x = 0.08;
+      const back = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.6, 0.08, 3, 0.035), MAT.interior());
+      back.position.set(0, 0.61, -0.255);
+      back.rotation.x = -0.4;
+      const backIn = new THREE.Mesh(new RoundedBoxGeometry(0.22, 0.42, 0.02, 2, 0.008), MAT.interiorLight());
+      backIn.position.set(0, 0.58, -0.205);
+      backIn.rotation.x = -0.4;
+      seat.add(shell, cushion, insert, back, backIn);
+      for (const bx of [0.2, -0.2]) {
+        const bol = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.36, 4, 10), MAT.interior());
+        bol.position.set(bx, 0.6, -0.22);
+        bol.rotation.x = -0.4;
+        const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.3, 4, 10), MAT.interior());
+        thigh.rotation.x = Math.PI / 2 + 0.08;
+        thigh.position.set(bx * 1.05, 0.34, 0.0);
+        seat.add(bol, thigh);
+      }
       seat.position.set(sx, 0, -0.35);
       body.add(seat);
     }
+    // the centre tunnel and console, the door cards with their ambient light line
+    const tunnel = new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.2, 1.2, 3, 0.04), MAT.interior());
+    tunnel.position.set(0, 0.32, 0.0);
+    body.add(tunnel);
+    const consoleTop = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.02, 0.5, 2, 0.008), MAT.gloss());
+    consoleTop.position.set(0, 0.43, 0.12);
+    body.add(consoleTop);
+    const amb = lampMaterial(0x6fd6ff, 1.2);
+    for (const sg of [1, -1]) {
+      const card = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.3, 1.3, 2, 0.015), MAT.interior());
+      card.position.set(0.74 * sg, 0.5, 0.05);
+      body.add(card);
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.006, 1.1), amb);
+      strip.position.set(0.715 * sg, 0.62, 0.05);
+      body.add(strip);
+    }
+    // the hoop behind the seats (carbon), the T-top's spine above
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.035, 8, 28, Math.PI), MAT.carbon());
+    hoop.scale.set(1, 0.72, 1);
+    hoop.position.set(0, 0.42, -0.86);
+    body.add(hoop);
     // the yoke: a squared ring with grips, on a column
     const yokePath = new THREE.CurvePath<THREE.Vector3>();
     const yp = [
@@ -475,8 +633,10 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
 
   // ---- thrusters
   const thrusters: Thruster[] = [];
+  // the nozzles frost over as the expanding nitrogen chills them (their own material, so it can)
+  const nozzleMat = (MAT.nozzle() as THREE.MeshStandardMaterial).clone();
   const addThruster = (pos: THREE.Vector3, dir: THREE.Vector3, kind: 'lift' | 'boost', scale: number) => {
-    const nz = new THREE.Mesh(nozzleGeometry(scale), MAT.nozzle());
+    const nz = new THREE.Mesh(nozzleGeometry(scale), nozzleMat);
     // nozzle bell opens along -y in its own frame: aim -y at `dir`
     nz.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
     nz.position.copy(pos);
@@ -521,6 +681,7 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     wing,
     yoke,
     thrusters,
+    nozzleMat,
     paint,
     tail,
     head,
@@ -557,7 +718,7 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
         th.plume.u.uTime.value = t;
         th.plume.u.uThrust.value = th.level;
         th.plume.mesh.visible = th.level > 0.02;
-        th.plume.mesh.scale.set(1, 0.5 + th.level * 0.8, 1);
+        th.plume.mesh.scale.set(0.8, 0.3 + th.level * 0.4, 0.8);
       }
     },
   };

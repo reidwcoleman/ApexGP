@@ -153,7 +153,7 @@ export const MAT = {
   /** the Roadster's gold visor glass (Apollo-suit visor): a metallic gold mirror from outside */
   glassGold: () =>
     once('glassGold', () => {
-      const m = new THREE.MeshPhysicalMaterial({ color: 0xffd27a, metalness: 0.95, roughness: 0.03, transparent: true, opacity: 0.9, clearcoat: 1, clearcoatRoughness: 0, side: THREE.FrontSide });
+      const m = new THREE.MeshPhysicalMaterial({ color: 0xffd27a, metalness: 0.92, roughness: 0.07, transparent: true, opacity: 0.88, clearcoat: 1, clearcoatRoughness: 0, side: THREE.FrontSide });
       m.envMapIntensity = 1.4;
       return m;
     }),
@@ -406,7 +406,7 @@ void main() {
   float core = pow( vFace, 2.0 ) * ( 1.0 - v ) * ( 0.7 + 0.3 * diamonds * ( 1.0 - v ) );
   float a = core * flick * uThrust;
   vec3 c = mix( vec3( 0.75, 0.85, 1.0 ), vec3( 1.0 ), v );
-  gl_FragColor = vec4( c * a * 2.2, a * 0.85 );
+  gl_FragColor = vec4( c * a * 0.9, a * 0.35 );
 }`;
 
 /** the visible cold-gas jet: a cone with an additive, flickering shader (length scales with thrust) */

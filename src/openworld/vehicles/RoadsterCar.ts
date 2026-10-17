@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { buildRoadster, type RoadsterRig, type Trim } from './roadster.ts';
+import { buildRoadster, type RoadsterRig, type Thruster, type Trim } from './roadster.ts';
 import { CarBody, ROADSTER_SPEC } from '../sim/car.ts';
 import type { Pad } from '../input.ts';
 import type { CamSubject } from '../camera.ts';
 import type { Drivable, HudInfo, WorldCtx } from './drivable.ts';
 import { makeSurf } from '../roads.ts';
 import type { Contact } from '../sim/collide.ts';
+import { fx } from '../fx/particles.ts';
 
 /**
  * The player's Tesla Roadster: the model, the road physics and the SpaceX package.
@@ -73,6 +74,7 @@ export class RoadsterCar implements Drivable {
 
   drive(dt: number, pad: Pad | null, ctx: WorldCtx) {
     this.impact = 0;
+    this.ctxRef = ctx;
     const p = pad;
     const thrusters = this.trim !== 'performance';
     // ---- the doors (open when stopped with nobody in, or while getting in/out)
@@ -265,8 +267,86 @@ export class RoadsterCar implements Drivable {
     const airbrake = !this.flying && this.braking > 0.6 && sp > 25 ? 1 : 0;
     r.setWing(this.wingRise, 0.12 * this.wingRise + airbrake * 0.9);
     r.update(t);
+    if (dt > 0 && this.ctxRef) this.emitGas(dt, this.ctxRef);
     void p;
     void this.tq;
+  }
+
+  private ctxRef: WorldCtx | null = null;
+  private frost = 0;
+  private readonly gp = new THREE.Vector3();
+  private readonly gd = new THREE.Vector3();
+  private readonly gq = new THREE.Quaternion();
+  private gasAcc = new Map<Thruster, number>();
+  /**
+   * The cold-gas jets as they really look: nitrogen leaves each nozzle near Mach 3, invisible, and
+   * chills the humid Miami air it entrains until it fogs — a white jet that slows within a couple of
+   * metres and billows out, sinks a little (cold, dense), drifts on the wind and evaporates. Near the
+   * ground the lift jets splash and roll outward in a ring of vapour, kicking up dust or spray.
+   */
+  private emitGas(dt: number, ctx: WorldCtx) {
+    const P = fx.p;
+    const r = this.rig;
+    let total = 0;
+    for (const th of r.thrusters) total += th.level;
+    this.frost = THREE.MathUtils.clamp(this.frost + (total > 0.1 ? dt * 0.12 * Math.min(1, total / 3) : -dt * 0.03), 0, 1);
+    r.nozzleMat.color.setRGB(0.56 + 0.4 * this.frost, 0.57 + 0.4 * this.frost, 0.59 + 0.4 * this.frost);
+    r.nozzleMat.roughness = 0.28 + 0.6 * this.frost;
+    r.nozzleMat.metalness = 1 - 0.8 * this.frost;
+    if (!P || total < 0.02) return;
+    const c = this.car;
+    r.body.updateWorldMatrix(true, false);
+    r.body.getWorldQuaternion(this.gq);
+    const s = ctx.net.surface(c.pos.x, c.pos.z, c.pos.y + 0.5, this.surf);
+    let floor = s.y;
+    const roof = this.roofUnder(c.pos.x, c.pos.z, c.pos.y, ctx);
+    if (roof > floor) floor = roof;
+    const water = s.water && roof < s.y;
+    const h = c.pos.y - floor;
+    const R = () => P.rand();
+    for (const th of r.thrusters) {
+      if (th.level < 0.02) continue;
+      const boost = th.kind === 'boost';
+      const rate = th.level * (boost ? 90 : 38);
+      let acc = (this.gasAcc.get(th) ?? R()) + rate * dt;
+      const n = Math.floor(acc);
+      acc -= n;
+      this.gasAcc.set(th, acc);
+      const o = this.gp.copy(th.pos).applyMatrix4(r.body.matrixWorld);
+      const d = this.gd.copy(th.dir).applyQuaternion(this.gq);
+      for (let k = 0; k < n; k++) {
+        const sp = (boost ? 30 : 24) + R() * 10;
+        const jx = (R() - 0.5) * 0.22, jy = (R() - 0.5) * 0.22, jz = (R() - 0.5) * 0.22;
+        const f = R() * 0.06;
+        P.puff({
+          x: o.x + d.x * f, y: o.y + d.y * f, z: o.z + d.z * f,
+          vx: (d.x + jx) * sp + this.vel.x * 0.9, vy: (d.y + jy) * sp + this.vel.y * 0.9, vz: (d.z + jz) * sp + this.vel.z * 0.9,
+          life: 0.7 + R() * 0.8, s0: 0.06, s1: (boost ? 1.5 : 1.1) + R() * 0.7,
+          a: 0.26 + 0.12 * th.level, r: 0.96, g: 0.975, b: 1,
+          drag: 3.4 + R() * 1.2, lift: -0.35, floor: floor + 0.12, fadeIn: 0.06,
+        });
+      }
+      // the jet's first metre: thin fast streaks of condensate
+      if (R() < th.level * 0.9) {
+        const sp = 55 + R() * 20;
+        P.puff({
+          x: o.x, y: o.y, z: o.z, vx: d.x * sp + this.vel.x, vy: d.y * sp + this.vel.y, vz: d.z * sp + this.vel.z,
+          life: 0.09 + R() * 0.05, s0: 0.05, s1: 0.16, a: 0.5, drag: 9, stretch: 0.025, floor: floor + 0.05, fadeIn: 0,
+        });
+      }
+      // low over the ground: the splash of the downwash, dust or spray
+      if (!boost && h < 5.5 && R() < th.level * dt * 14 * (1 - h / 5.5)) {
+        const a = R() * Math.PI * 2;
+        const v = (3.5 + R() * 4) * (1 - h / 7);
+        P.puff({
+          x: o.x + d.x * h, y: floor + 0.15, z: o.z + d.z * h,
+          vx: Math.cos(a) * v, vy: 0.6 + R() * 0.8, vz: Math.sin(a) * v,
+          life: 1.1 + R() * 0.9, s0: 0.4, s1: 1.8 + R() * 1.2,
+          a: water ? 0.3 : 0.16, r: water ? 0.92 : 0.78, g: water ? 0.95 : 0.73, b: water ? 1 : 0.64,
+          drag: 1.6, lift: water ? -0.2 : 0.15, floor, fadeIn: 0.15,
+        });
+      }
+    }
   }
 
   subject(): CamSubject {
