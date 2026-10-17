@@ -523,8 +523,8 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
   const models = [...royal, ...coco];
   models.forEach((m, k) => {
     if (!lists[k].length) return;
-    group.add(chunkedInstances(m.trunk, trunkMat, lists[k], 600, { cast: true, name: 'palmTrunks' }));
-    group.add(chunkedInstances(m.crown, fm, lists[k], 600, { cast: true, name: 'palmCrowns' }));
+    group.add(chunkedInstances(m.trunk, trunkMat, lists[k], 900, { cast: true, name: 'palmTrunks' }));
+    group.add(chunkedInstances(m.crown, fm, lists[k], 900, { cast: true, name: 'palmCrowns' }));
   });
 
   // ---------------------------------------------------------------- street lights
@@ -547,7 +547,7 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
     if (l.type !== 'deco') (l.kind === 1 ? lensC : lensW).push(it);
     if (l.type !== 'mast') solids.push({ poly: [], circle: 0.22, y0: l.base - 1, y1: l.base + 8, cx: px, cz: pz, r: 0.22, kind: 'pole' });
   }
-  group.add(chunkedInstances(cobra.pole, poleMat, L.cobra, 400, { cast: true, name: 'cobras' }));
+  group.add(chunkedInstances(cobra.pole, poleMat, L.cobra, 900, { cast: true, name: 'cobras' }));
   group.add(chunkedInstances(mast.pole, poleMat, L.mast, 600, { cast: true, name: 'masts' }));
   group.add(chunkedInstances(deco.pole, decoMat, L.deco, 400, { cast: true, name: 'decoLamps' }));
   const lensSplit = (list: Inst[], mat: THREE.Material) => {
@@ -590,9 +590,9 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
     }
     solids.push({ poly: [], circle: 0.25, y0: sp.y - 1, y1: sp.y + 6, cx: sp.x, cz: sp.z, r: 0.25, kind: 'pole' });
   }
-  group.add(chunkedInstances(signalPoleGeometry(), sigPoleMat, poles, 500, { cast: true, name: 'sigPoles' }));
-  group.add(chunkedInstances(signalArmGeometry(), sigPoleMat, arms, 500, { cast: true, name: 'sigArms' }));
-  group.add(chunkedInstances(signalHeadGeometry(), headMat, heads, 500, { cast: true, name: 'sigHeads' }));
+  group.add(chunkedInstances(signalPoleGeometry(), sigPoleMat, poles, 1100, { cast: true, name: 'sigPoles' }));
+  group.add(chunkedInstances(signalArmGeometry(), sigPoleMat, arms, 1100, { cast: false, name: 'sigArms' }));
+  group.add(chunkedInstances(signalHeadGeometry(), headMat, heads, 1100, { cast: false, name: 'sigHeads' }));
   // the lamps: one instanced disc mesh, coloured per frame from the phases
   const discGeo = new THREE.CircleGeometry(0.12, 12);
   discGeo.rotateY(Math.PI);

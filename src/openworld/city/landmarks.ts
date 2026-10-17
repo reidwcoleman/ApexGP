@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { BuildingsBuild } from './buildings.ts';
-import { rng } from './build.ts';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeStatic, rng } from './build.ts';
 import { ll, type LandMask } from '../geo.ts';
 import type { Solid } from '../sim/collide.ts';
 
@@ -24,6 +23,15 @@ export interface LandmarkBuild {
 }
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+/** identical materials shared (the static merge then makes one draw per material across the city) */
+const smats = new Map<string, THREE.MeshStandardMaterial>();
+function smat(p: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
+  const k = JSON.stringify(p, (_k, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v));
+  let m = smats.get(k);
+  if (!m) smats.set(k, (m = new THREE.MeshStandardMaterial(p)));
+  return m;
+}
 
 /** a box solid (for the collision world) */
 function boxSolid(cx: number, cz: number, w: number, d: number, yaw: number, y0: number, y1: number): Solid {
@@ -176,7 +184,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   // ---------------------------------------------------------------- the Freedom Tower's cupola
   if (L.freedomTower) {
     const F = L.freedomTower;
-    const cream = new THREE.MeshStandardMaterial({ color: 0xe6d4b0, roughness: 0.7 });
+    const cream = smat({ color: 0xe6d4b0, roughness: 0.7 });
     const g = new THREE.Group();
     const drum = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.6, 4, 12), cream);
     drum.position.set(F.x, F.y + 2, F.z);
@@ -187,7 +195,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     lantern.position.set(F.x, F.y + 11, F.z);
     const cap = new THREE.Mesh(new THREE.SphereGeometry(1.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), cream);
     cap.position.set(F.x, F.y + 12.6, F.z);
-    const fin = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.15, 3, 6), new THREE.MeshStandardMaterial({ color: 0xc9a54a, metalness: 0.8, roughness: 0.3 }));
+    const fin = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.15, 3, 6), smat({ color: 0xc9a54a, metalness: 0.8, roughness: 0.3 }));
     fin.position.set(F.x, F.y + 15, F.z);
     g.add(drum, dome, lantern, cap, fin);
     group.add(cast(g));
@@ -196,7 +204,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   // ---------------------------------------------------------------- the arena's roof
   if (L.arena) {
     const A = L.arena;
-    const roof = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf2f2f0, roughness: 0.55 }));
+    const roof = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 12, 0, Math.PI * 2, 0, Math.PI / 2), smat({ color: 0xf2f2f0, roughness: 0.55 }));
     roof.scale.set(A.w / 2 + 2, 13, A.d / 2 + 2);
     roof.position.set(A.x, A.y, A.z);
     group.add(cast(roof));
@@ -218,8 +226,8 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   if (L.pamm) {
     const P = L.pamm;
     const g = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ color: 0xa47c56, roughness: 0.8 });
-    const top = new THREE.MeshStandardMaterial({ color: 0xd9d6cf, roughness: 0.9 });
+    const wood = smat({ color: 0xa47c56, roughness: 0.8 });
+    const top = smat({ color: 0xd9d6cf, roughness: 0.9 });
     const canopy = new THREE.Mesh(new THREE.BoxGeometry(P.w, 1.4, P.d), [top, top, top, wood, top, top]);
     canopy.position.set(P.x, P.y, P.z);
     g.add(canopy);
@@ -229,7 +237,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
       slat.position.set(P.x + x, P.y - 1, P.z);
       g.add(slat);
     }
-    const col = new THREE.MeshStandardMaterial({ color: 0xe9e7e2, roughness: 0.6 });
+    const col = smat({ color: 0xe9e7e2, roughness: 0.6 });
     for (let i = 0; i < 26; i++) {
       const x = P.x + (R() - 0.5) * P.w * 0.9, z = P.z + (R() - 0.5) * P.d * 0.9;
       const lean = (R() - 0.5) * 0.25;
@@ -239,7 +247,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
       g.add(c);
     }
     // the hanging gardens: tall cylinders of planting dangling from the canopy
-    const green = new THREE.MeshStandardMaterial({ color: 0x3f6a2c, roughness: 1 });
+    const green = smat({ color: 0x3f6a2c, roughness: 1 });
     for (let i = 0; i < 18; i++) {
       const x = P.x + (R() - 0.5) * P.w * 0.95, z = P.z + (R() < 0.5 ? -1 : 1) * (P.d / 2 - 4 - R() * 10);
       const len = 6 + R() * 7;
@@ -286,7 +294,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(F.r, 48, 32), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4, metalness: 0.15 }));
     sphere.position.set(F.x, F.y, F.z);
     group.add(cast(sphere));
-    const cone = new THREE.Mesh(new THREE.CylinderGeometry(13, 5, 16, 32, 1, true), new THREE.MeshStandardMaterial({ color: 0x8fb7c4, roughness: 0.25, metalness: 0.4, side: THREE.DoubleSide }));
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(13, 5, 16, 32, 1, true), smat({ color: 0x8fb7c4, roughness: 0.25, metalness: 0.4, side: THREE.DoubleSide }));
     cone.position.set(F.x - 34, 24 + 8, F.z + 8);
     group.add(cast(cone));
     solids.push({ poly: [], circle: F.r, y0: F.y - F.r, y1: F.y + F.r, cx: F.x, cz: F.z, r: F.r, kind: 'building' });
@@ -313,7 +321,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     wheel.add(spin);
     const rot = new THREE.Group();
     spin.add(rot);
-    const steel = new THREE.MeshStandardMaterial({ color: 0xe9ecef, metalness: 0.6, roughness: 0.35 });
+    const steel = smat({ color: 0xe9ecef, metalness: 0.6, roughness: 0.35 });
     for (const zz of [-1.2, 1.2]) {
       const rim = new THREE.Mesh(new THREE.TorusGeometry(Rw, 0.35, 8, 96), steel);
       rim.position.z = zz;
@@ -337,8 +345,8 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     const led = new THREE.Mesh(new THREE.TorusGeometry(Rw + 0.4, 0.18, 6, 128), ledMat);
     rot.add(led);
     // the gondolas: they hang level as the wheel turns (two instanced meshes, set each frame)
-    const gMat = new THREE.MeshStandardMaterial({ color: 0xf6f7f8, roughness: 0.3, metalness: 0.2 });
-    const gGlass = new THREE.MeshStandardMaterial({ color: 0x17303c, roughness: 0.05, metalness: 0.6 });
+    const gMat = smat({ color: 0xf6f7f8, roughness: 0.3, metalness: 0.2 });
+    const gGlass = smat({ color: 0x17303c, roughness: 0.05, metalness: 0.6 });
     const nG = 30;
     const podGeo = new THREE.CapsuleGeometry(1.1, 1.6, 4, 10);
     podGeo.rotateZ(Math.PI / 2);
@@ -436,13 +444,13 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
       const term = new THREE.Group();
       term.position.set(cx, 0, tz);
       term.rotation.y = yaw;
-      const hall = new THREE.Mesh(new THREE.BoxGeometry(44, 14, 170), new THREE.MeshStandardMaterial({ color: 0x31434e, roughness: 0.08, metalness: 0.7 }));
+      const hall = new THREE.Mesh(new THREE.BoxGeometry(44, 14, 170), smat({ color: 0x31434e, roughness: 0.08, metalness: 0.7 }));
       hall.position.y = 7;
-      const roof = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 176, 24, 1, false, -0.6, 1.2), new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.5, side: THREE.DoubleSide }));
+      const roof = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 176, 24, 1, false, -0.6, 1.2), smat({ color: 0xf4f4f2, roughness: 0.5, side: THREE.DoubleSide }));
       roof.rotation.x = Math.PI / 2;
       roof.rotation.y = Math.PI / 2;
       roof.position.y = 14 - 30 * Math.cos(0.6) + 2;
-      const bridgeW = new THREE.Mesh(new THREE.BoxGeometry(3, 3.2, 26), new THREE.MeshStandardMaterial({ color: 0xe8e8e6, roughness: 0.5 }));
+      const bridgeW = new THREE.Mesh(new THREE.BoxGeometry(3, 3.2, 26), smat({ color: 0xe8e8e6, roughness: 0.5 }));
       bridgeW.position.set(0, 16, -34);
       bridgeW.rotation.y = Math.PI / 2;
       term.add(hall, roof, bridgeW);
@@ -454,9 +462,9 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   // ---------------------------------------------------------------- PortMiami: cranes and boxes
   {
     const cranes = [-80.1560, -80.1535, -80.1510, -80.1485, -80.1460];
-    const craneMat = new THREE.MeshStandardMaterial({ color: 0xe6e8ea, metalness: 0.5, roughness: 0.45 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xc8202a, metalness: 0.4, roughness: 0.45 });
-    const house = new THREE.MeshStandardMaterial({ color: 0x3a4148, roughness: 0.6 });
+    const craneMat = smat({ color: 0xe6e8ea, metalness: 0.5, roughness: 0.45 });
+    const red = smat({ color: 0xc8202a, metalness: 0.4, roughness: 0.45 });
+    const house = smat({ color: 0x3a4148, roughness: 0.6 });
     const yard: { x: number; z: number }[] = [];
     for (const lon of cranes) {
       const p0 = ll(25.7735, lon);
@@ -523,7 +531,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     }
     if (boxes.length) {
       const geo = new THREE.BoxGeometry(12.2, 2.6, 2.44);
-      const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.3 }), boxes.length);
+      const im = new THREE.InstancedMesh(geo, smat({ roughness: 0.7, metalness: 0.3 }), boxes.length);
       const m4 = new THREE.Matrix4();
       boxes.forEach((b, i) => {
         im.setMatrixAt(i, m4.makeTranslation(b.x, b.y, b.z));
@@ -572,8 +580,8 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
         im.computeBoundingSphere();
         group.add(im);
       };
-      const paint = new THREE.MeshStandardMaterial({ roughness: 0.6 });
-      const whiteWood = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.8 });
+      const paint = smat({ roughness: 0.6 });
+      const whiteWood = smat({ color: 0xf2f0ea, roughness: 0.8 });
       mk(hut, paint, (t) => t.c);
       mk(roofG, paint, (t) => t.r);
       mk(deckG, whiteWood);
@@ -620,47 +628,13 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   };
 }
 
-/** merge the static single-material meshes under `root` (in root's space), one mesh per material */
-function mergeStatic(root: THREE.Object3D, keep: Set<THREE.Object3D>) {
-  root.updateMatrixWorld(true);
-  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
-  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  const done: THREE.Mesh[] = [];
-  let cast = false;
-  root.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material)) return;
-    for (let p: THREE.Object3D | null = o; p && p !== root; p = p.parent) if (keep.has(p)) return;
-    let g = m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
-    if (g.index) g = g.toNonIndexed();
-    if (!g.getAttribute('normal')) g.computeVertexNormals();
-    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
-    g.morphAttributes = {};
-    let l = byMat.get(m.material);
-    if (!l) byMat.set(m.material, (l = []));
-    l.push(g);
-    done.push(m);
-    cast ||= m.castShadow;
-  });
-  for (const m of done) m.removeFromParent();
-  for (const [mat, list] of byMat) {
-    const merged = mergeGeometries(list);
-    if (!merged) continue;
-    const mesh = new THREE.Mesh(merged, mat);
-    mesh.castShadow = cast;
-    mesh.receiveShadow = true;
-    root.add(mesh);
-  }
-}
-
 /** a ~290 m cruise ship: hull, the stacked decks with their balconies, the funnel, lifeboats, the pool deck */
 function buildCruiseShip(liv: { band: number; funnel: number }, seed: number) {
   const group = new THREE.Group();
   const R = rng(seed);
   const L = 290, Bm = 36;
-  const white = new THREE.MeshStandardMaterial({ color: 0xf6f7f6, roughness: 0.45 });
-  const hullDark = new THREE.MeshStandardMaterial({ color: liv.band, roughness: 0.5 });
+  const white = smat({ color: 0xf6f7f6, roughness: 0.45 });
+  const hullDark = smat({ color: liv.band, roughness: 0.5 });
   // the hull: a pointed bow, a flat transom (a box with its bow faces brought in)
   const hull = new THREE.BoxGeometry(Bm, 16, L, 1, 2, 12);
   const pos = hull.getAttribute('position');
@@ -713,22 +687,22 @@ function buildCruiseShip(liv: { band: number; funnel: number }, seed: number) {
   const bridge = new THREE.Mesh(new THREE.BoxGeometry(Bm + 6, 3, 8), white);
   bridge.position.set(0, 44, 100);
   group.add(bridge);
-  const brGlass = new THREE.Mesh(new THREE.BoxGeometry(Bm + 6.1, 1.4, 8.1), new THREE.MeshStandardMaterial({ color: 0x0e1a22, roughness: 0.05, metalness: 0.7 }));
+  const brGlass = new THREE.Mesh(new THREE.BoxGeometry(Bm + 6.1, 1.4, 8.1), smat({ color: 0x0e1a22, roughness: 0.05, metalness: 0.7 }));
   brGlass.position.set(0, 44.6, 100);
   group.add(brGlass);
   // the funnel (a raked whale-tail-ish stack in the line's colour)
-  const fun = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 6, 16, 16), new THREE.MeshStandardMaterial({ color: liv.funnel, roughness: 0.4 }));
+  const fun = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 6, 16, 16), smat({ color: liv.funnel, roughness: 0.4 }));
   fun.scale.set(1, 1, 2.2);
   fun.rotation.x = -0.22;
   fun.position.set(0, 60, -92);
   group.add(fun);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, 1.6, 16), new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 }));
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, 1.6, 16), smat({ color: 0x15171a, roughness: 0.6 }));
   cap.scale.set(1, 1, 2.2);
   cap.rotation.x = -0.22;
   cap.position.set(0, 68, -94);
   group.add(cap);
   // lifeboats along both sides (orange), under the first tier
-  const boatMat = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.5 });
+  const boatMat = smat({ color: 0xff7a1a, roughness: 0.5 });
   const lb = new THREE.CapsuleGeometry(1.6, 7, 4, 10);
   lb.rotateX(Math.PI / 2);
   for (const sx of [-1, 1])
@@ -738,7 +712,7 @@ function buildCruiseShip(liv: { band: number; funnel: number }, seed: number) {
       group.add(b);
     }
   // the pool deck: pools, the water slides' coloured tubes
-  const pool = new THREE.Mesh(new THREE.BoxGeometry(12, 0.3, 22), new THREE.MeshStandardMaterial({ color: 0x2bb5c8, roughness: 0.05, emissive: 0x0a5a66, emissiveIntensity: 0.3 }));
+  const pool = new THREE.Mesh(new THREE.BoxGeometry(12, 0.3, 22), smat({ color: 0x2bb5c8, roughness: 0.05, emissive: 0x0a5a66, emissiveIntensity: 0.3 }));
   pool.position.set(0, 48.2, 10);
   group.add(pool);
   const slideCols = [0xff3f8e, 0xffd84d, 0x3db7ff];
@@ -748,7 +722,7 @@ function buildCruiseShip(liv: { band: number; funnel: number }, seed: number) {
       const a = k * 0.45 + i * 2;
       pts.push(V(Math.cos(a) * (6 + i), 70 - k * 0.7, -40 + i * 14 + Math.sin(a) * (6 + i)));
     }
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 80, 0.8, 8), new THREE.MeshStandardMaterial({ color: slideCols[i], roughness: 0.3 }));
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 80, 0.8, 8), smat({ color: slideCols[i], roughness: 0.3 }));
     group.add(tube);
   }
   void R;

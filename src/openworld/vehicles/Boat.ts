@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStatic } from '../city/build.ts';
 import { loft, table, type Station } from './loft.ts';
 import { MAT, paintMaterial } from './parts.ts';
 import type { Pad } from '../input.ts';
@@ -236,6 +237,8 @@ export function buildBoat(color: THREE.ColorRepresentation, stripe: THREE.ColorR
     root.add(sp);
     spray.push(sp);
   }
+  for (const e of engines) mergeStatic(e, new Set());
+  mergeStatic(hull, new Set<THREE.Object3D>(engines));
   return { root, hull, engines, wake, wakeMat, spray, sprayMat };
 }
 

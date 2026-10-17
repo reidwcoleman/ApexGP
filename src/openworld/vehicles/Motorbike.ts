@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStatic } from '../city/build.ts';
 import { loft, table, type Station } from './loft.ts';
 import { MAT, makeWheel, paintMaterial } from './parts.ts';
 import { CarBody, type CarSpec } from '../sim/car.ts';
@@ -276,6 +277,10 @@ export function buildBike(color: THREE.ColorRepresentation) {
     if ((o as THREE.Mesh).isMesh) o.castShadow = true;
   });
   lean.add(rider);
+  // fixed parts merged per material (the wheels, the forks and the rider move or hide)
+  mergeStatic(rider, new Set());
+  mergeStatic(fork, new Set());
+  mergeStatic(lean, new Set<THREE.Object3D>([front.steer, rear.steer, fork, rider]));
   return { root, lean, front, rear, fork, rider, tail };
 }
 

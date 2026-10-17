@@ -664,7 +664,10 @@ export class OpenWorld {
       if (o === this.vehicle) continue;
       const d = Math.hypot(o.pos.x - this.focus.x, o.pos.z - this.focus.z);
       if (d < 400) o.drive(dt, null, ctx);
+      // (parked a long way off: not drawn — a car at 600 m is a few pixels and a hundred draws)
+      o.root.visible = Math.hypot(o.pos.x - this.camera.position.x, o.pos.z - this.camera.position.z) < 650;
     }
+    if (this.vehicle) this.vehicle.root.visible = true;
     // the Roadster's butterfly doors swing up as you get in and out
     this.doorT -= dt;
     this.player.doorTarget = this.doorT > 0 || (!this.player.occupied && Math.hypot(this.player.vel.x, this.player.vel.z) < 0.5 && Math.hypot(this.people.player.pos.x - this.player.pos.x, this.people.player.pos.z - this.player.pos.z) < 6) ? 1 : 0;

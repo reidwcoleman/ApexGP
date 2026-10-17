@@ -349,14 +349,14 @@ export function buildRoads(net: Network): RoadBuild {
   }
 
   const rm = roadMaterial();
-  group.add(chunkMeshes(road, 400, rm, { receive: true, name: 'road' }));
-  group.add(chunkMeshes(walk, 400, sidewalkMaterial(), { receive: true, name: 'sidewalks' }));
-  if (median.count) group.add(chunkMeshes(median, 600, lawnMaterial(), { receive: true, name: 'medians' }));
+  group.add(chunkMeshes(road, 900, rm, { receive: true, name: 'road' }));
+  group.add(chunkMeshes(walk, 900, sidewalkMaterial(), { receive: true, name: 'sidewalks' }));
+  if (median.count) group.add(chunkMeshes(median, 1200, lawnMaterial(), { receive: true, name: 'medians' }));
   const conc = concreteMaterial(0xc9c3b8, 0.82, true);
-  group.add(chunkMeshes(deck, 500, conc, { cast: true, receive: true, name: 'decks' }));
-  group.add(chunkMeshes(barrier, 500, concreteMaterial(0xd6d1c6, 0.8, false), { cast: true, receive: true, name: 'barriers' }));
-  if (verge.count) group.add(chunkMeshes(verge, 600, lawnMaterial(), { receive: true, name: 'verges' }));
-  if (rocks.count) group.add(chunkMeshes(rocks, 600, rockMaterial(), { receive: true, name: 'riprap' }));
+  group.add(chunkMeshes(deck, 1000, conc, { cast: true, receive: true, name: 'decks' }));
+  group.add(chunkMeshes(barrier, 1200, concreteMaterial(0xd6d1c6, 0.8, false), { cast: true, receive: true, name: 'barriers' }));
+  if (verge.count) group.add(chunkMeshes(verge, 1200, lawnMaterial(), { receive: true, name: 'verges' }));
+  if (rocks.count) group.add(chunkMeshes(rocks, 1500, rockMaterial(), { receive: true, name: 'riprap' }));
   return out;
 }
 

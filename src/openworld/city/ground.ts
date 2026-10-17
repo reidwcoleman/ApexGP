@@ -90,7 +90,7 @@ export function buildGround(mask: LandMask): GroundBuild {
       pushFace(wall, [Ao, Bo, Bw, Aw], [nx, 0, nz]);
     }
   }
-  group.add(chunkMeshes(wall, 600, concreteMaterial(0xd2ccc0, 0.8, true), { receive: true, cast: false, name: 'seawalls' }));
+  group.add(chunkMeshes(wall, 1500, concreteMaterial(0xd2ccc0, 0.8, true), { receive: true, cast: false, name: 'seawalls' }));
 
   // ---- Miami Beach: the sand strip and its slope into the Atlantic
   const sand = new MeshBuilder().attr('aShoreD', 1);

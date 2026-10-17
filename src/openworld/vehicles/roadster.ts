@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStatic } from '../city/build.ts';
 import { loft, table, type Station } from './loft.ts';
 import { MAT, lampMaterial, makeWheel, nozzleGeometry, plumeMesh, wellLiner } from './parts.ts';
 
@@ -508,6 +509,9 @@ if ( abs( vLoc.x ) > 0.62 && abs( vLocN.x ) > 0.3 ) {
     ];
     for (const [x, z] of ring8) addThruster(new THREE.Vector3(x, floorY(z) + 0.075, z), down.clone().add(new THREE.Vector3(x * 0.08, 0, 0)), 'lift', 0.85);
   }
+
+  // one draw per material for the body's fixed parts (the doors, the wing, the yoke and the plumes move)
+  mergeStatic(body, new Set<THREE.Object3D>([...doors, wing, yoke, ...thrusters.map((t) => t.plume.mesh)]));
 
   const rig: RoadsterRig = {
     root,

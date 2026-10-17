@@ -767,12 +767,12 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
   const group = new THREE.Group();
   group.name = 'Buildings';
   const fm = facadeMaterial();
-  group.add(chunkMeshes(B.walls, 450, fm, { cast: true, receive: true, name: 'walls' }));
-  group.add(chunkMeshes(B.roofs, 450, roofMaterial(), { cast: false, receive: true, name: 'roofs' }));
-  if (B.lots.count) group.add(chunkMeshes(B.lots, 600, lotMaterial(), { receive: true, name: 'lots' }));
+  group.add(chunkMeshes(B.walls, 1000, fm, { cast: true, receive: true, name: 'walls' }));
+  group.add(chunkMeshes(B.roofs, 1000, roofMaterial(), { cast: false, receive: true, name: 'roofs' }));
+  if (B.lots.count) group.add(chunkMeshes(B.lots, 1200, lotMaterial(), { receive: true, name: 'lots' }));
   if (B.pools.count) {
     const pm = new THREE.MeshStandardMaterial({ color: 0x2bb5c8, roughness: 0.05, metalness: 0.1, emissive: 0x0a5a66, emissiveIntensity: 0.25 });
-    group.add(chunkMeshes(B.pools, 900, pm, { name: 'pools' }));
+    group.add(chunkMeshes(B.pools, 2000, pm, { name: 'pools' }));
   }
   return { group, colliders: B.colliders, open, roofs: B.roofTops, decks: B.decks, crowns: B.crowns, decoSigns, landmarks };
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * A growable mesh: positions, normals, optional uv and any number of float attributes, with an
@@ -193,4 +194,38 @@ export function hull(pts: { x: number; z: number }[]): { x: number; z: number }[
   up.pop();
   lo.pop();
   return lo.concat(up);
+}
+
+/** merge the static single-material meshes under `root` (in root's space), one mesh per material */
+export function mergeStatic(root: THREE.Object3D, keep: Set<THREE.Object3D>) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const done: THREE.Mesh[] = [];
+  let cast = false;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material)) return;
+    for (let p: THREE.Object3D | null = o; p && p !== root; p = p.parent) if (keep.has(p)) return;
+    let g = m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+    if (g.index) g = g.toNonIndexed();
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+    g.morphAttributes = {};
+    let l = byMat.get(m.material);
+    if (!l) byMat.set(m.material, (l = []));
+    l.push(g);
+    done.push(m);
+    cast ||= m.castShadow;
+  });
+  for (const m of done) m.removeFromParent();
+  for (const [mat, list] of byMat) {
+    const merged = mergeGeometries(list);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+  }
 }
