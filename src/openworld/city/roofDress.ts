@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { BuildingsBuild, RoofDeck } from './buildings.ts';
 import { rng } from './build.ts';
-import { MODELS, PAINTS, buildBody, wheelGeometry, type ModelId } from '../vehicles/fleet.ts';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { MODELS, PAINTS, type ModelId, type ModelSpec } from '../vehicles/fleet.ts';
 
 /**
  * What the city looks like from a helicopter: the podium decks of Brickell and Downtown dressed —
@@ -144,27 +145,12 @@ export function buildRoofDress(bld: BuildingsBuild, addPalm: (x: number, z: numb
       }
     }
   }
-  const carPaint = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.35, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.05 });
-  const carGlass = new THREE.MeshPhysicalMaterial({ color: 0x0a0d10, metalness: 0.2, roughness: 0.04, clearcoat: 1 });
-  const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.55, roughness: 0.42 });
+  // seen from the air, so a low car: body, glasshouse, wheels in one vertex-coloured mesh
+  // (the instance colour paints it; the dark parts stay dark)
+  const carMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.3, roughness: 0.4 });
   for (const [id, list] of cars) {
-    const spec = MODELS[id];
-    const g = buildBody(spec);
-    const body = instanced(g.body, carPaint, list, 'roofCars');
-    if (body) group.add(body);
-    const glass = instanced(g.glass, carGlass, list.map((i) => ({ ...i, c: undefined })), 'roofCarGlass', false);
-    if (glass) group.add(glass);
-    // the wheels: four per car
-    const wl: Item[] = [];
-    for (const it of list) {
-      const c = Math.cos(it.yaw), s = Math.sin(it.yaw);
-      for (const [lx, lz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-        const x = lx * (spec.W / 2 - 0.12), z = lz * (spec.wb / 2);
-        wl.push({ x: it.x + x * c + z * s, y: it.y + spec.wheelR, z: it.z - x * s + z * c, yaw: it.yaw + (lx < 0 ? Math.PI : 0) });
-      }
-    }
-    const wm = instanced(wheelGeometry(spec.wheelR, 0.24, 'alloy'), wheelMat, wl, 'roofCarWheels', false);
-    if (wm) group.add(wm);
+    const im = instanced(lowCar(MODELS[id]), carMat, list, 'roofCars');
+    if (im) group.add(im);
   }
   // loungers (a white frame and cushion), umbrellas (pole + canopy), cabanas (posts + canvas roof)
   const white = new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.6 });
@@ -264,4 +250,35 @@ export function buildRoofDress(bld: BuildingsBuild, addPalm: (x: number, z: numb
       beaconMat.color.setRGB(4 * on * (0.3 + night), 0.1 * on, 0.05 * on);
     },
   };
+}
+
+/** a parked car for the roofs: ~80 triangles (body, glasshouse, four wheels), vertex coloured */
+const lowCars = new Map<string, THREE.BufferGeometry>();
+function lowCar(m: ModelSpec): THREE.BufferGeometry {
+  const hit = lowCars.get(m.id);
+  if (hit) return hit;
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (g: THREE.BufferGeometry, x: number, y: number, z: number, shade: number) => {
+    g.translate(x, y, z);
+    const g2 = g.index ? g.toNonIndexed() : g;
+    const n = g2.getAttribute('position').count;
+    const c = new Float32Array(n * 3).fill(shade);
+    g2.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    g2.deleteAttribute('uv');
+    parts.push(g2);
+  };
+  const L = m.L, W = m.W, H = m.H;
+  const bodyH = Math.max(0.5, H * 0.5);
+  add(new THREE.BoxGeometry(W, bodyH, L), 0, m.wheelR * 0.55 + bodyH / 2, 0, 1);
+  // the glasshouse: tapered in plan toward the roof
+  const cab = new THREE.CylinderGeometry(0.5, 0.62, H - bodyH - m.wheelR * 0.55, 4, 1);
+  cab.rotateY(Math.PI / 4);
+  cab.scale(W * 1.25, 1, L * 0.62);
+  add(cab, 0, m.wheelR * 0.55 + bodyH + (H - bodyH - m.wheelR * 0.55) / 2, -L * 0.05, 0.12);
+  for (const sx of [-1, 1])
+    for (const sz of [-1, 1]) add(new THREE.BoxGeometry(0.22, m.wheelR * 2, m.wheelR * 1.8), sx * (W / 2 - 0.1), m.wheelR, sz * m.wb * 0.5, 0.05);
+  const merged = mergeGeometries(parts)!;
+  merged.computeVertexNormals();
+  lowCars.set(m.id, merged);
+  return merged;
 }

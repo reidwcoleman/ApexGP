@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { BuildingsBuild } from './buildings.ts';
 import { rng } from './build.ts';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ll, type LandMask } from '../geo.ts';
 import type { Solid } from '../sim/collide.ts';
 
@@ -123,6 +124,8 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
   const R = rng(1234);
   const L = bld.landmarks;
   const updates: ((t: number, night: number) => void)[] = [];
+  /** parts that move (left out of the static merge) */
+  const keep = new Set<THREE.Object3D>();
   const cast = (o: THREE.Object3D) => {
     o.traverse((m) => {
       if ((m as THREE.Mesh).isMesh) {
@@ -333,24 +336,35 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     const ledMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const led = new THREE.Mesh(new THREE.TorusGeometry(Rw + 0.4, 0.18, 6, 128), ledMat);
     rot.add(led);
-    // the gondolas: they hang level as the wheel turns
-    const gondolas: THREE.Object3D[] = [];
+    // the gondolas: they hang level as the wheel turns (two instanced meshes, set each frame)
     const gMat = new THREE.MeshStandardMaterial({ color: 0xf6f7f8, roughness: 0.3, metalness: 0.2 });
     const gGlass = new THREE.MeshStandardMaterial({ color: 0x17303c, roughness: 0.05, metalness: 0.6 });
     const nG = 30;
-    for (let i = 0; i < nG; i++) {
-      const a = (i / nG) * Math.PI * 2;
-      const pivot = new THREE.Group();
-      pivot.position.set(Math.cos(a) * Rw, Math.sin(a) * Rw, 0);
-      const pod = new THREE.Mesh(new THREE.CapsuleGeometry(1.1, 1.6, 4, 10), gGlass);
-      pod.rotation.z = Math.PI / 2;
-      pod.position.y = -1.6;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.3, 2.4), gMat);
-      roof.position.y = -0.4;
-      pivot.add(pod, roof);
-      rot.add(pivot);
-      gondolas.push(pivot);
+    const podGeo = new THREE.CapsuleGeometry(1.1, 1.6, 4, 10);
+    podGeo.rotateZ(Math.PI / 2);
+    podGeo.translate(0, -1.6, 0);
+    const roofGeo = new THREE.BoxGeometry(3.6, 0.3, 2.4);
+    roofGeo.translate(0, -0.4, 0);
+    const pods = new THREE.InstancedMesh(podGeo, gGlass, nG);
+    const roofs = new THREE.InstancedMesh(roofGeo, gMat, nG);
+    for (const im of [pods, roofs]) {
+      im.frustumCulled = false;
+      im.castShadow = true;
+      rot.add(im);
     }
+    const gm = new THREE.Matrix4(), gq = new THREE.Quaternion(), gp = new THREE.Vector3(), g1 = new THREE.Vector3(1, 1, 1), gz = new THREE.Vector3(0, 0, 1);
+    const setGondolas = (a: number) => {
+      gq.setFromAxisAngle(gz, -a);
+      for (let i = 0; i < nG; i++) {
+        const b = (i / nG) * Math.PI * 2;
+        gm.compose(gp.set(Math.cos(b) * Rw, Math.sin(b) * Rw, 0), gq, g1);
+        pods.setMatrixAt(i, gm);
+        roofs.setMatrixAt(i, gm);
+      }
+      pods.instanceMatrix.needsUpdate = true;
+      roofs.instanceMatrix.needsUpdate = true;
+    };
+    setGondolas(0);
     // the legs: an A-frame each side
     for (const zz of [-1, 1]) {
       for (const xx of [-1, 1]) {
@@ -362,12 +376,14 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
         spin.add(leg);
       }
     }
+    mergeStatic(rot, new Set([pods, roofs, led]));
     group.add(cast(wheel));
+    keep.add(rot);
     solids.push({ poly: [], circle: 9, y0: 0, y1: hubY * 2, cx: wx, cz: wz, r: 9, kind: 'building' });
     updates.push((t, night) => {
       const a = t * 0.035;
       rot.rotation.z = a;
-      for (const g of gondolas) g.rotation.z = -a;
+      setGondolas(a);
       const hue = (t * 0.05) % 1;
       ledMat.color.setHSL(hue, 0.9, 0.55).multiplyScalar(0.2 + night * 3);
     });
@@ -593,6 +609,8 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
     });
   }
 
+  // one draw per material for everything that stands still
+  mergeStatic(group, keep);
   return {
     group,
     solids,
@@ -600,6 +618,40 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
       for (const u of updates) u(t, night);
     },
   };
+}
+
+/** merge the static single-material meshes under `root` (in root's space), one mesh per material */
+function mergeStatic(root: THREE.Object3D, keep: Set<THREE.Object3D>) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const done: THREE.Mesh[] = [];
+  let cast = false;
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || (m as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material)) return;
+    for (let p: THREE.Object3D | null = o; p && p !== root; p = p.parent) if (keep.has(p)) return;
+    let g = m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+    if (g.index) g = g.toNonIndexed();
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    if (!g.getAttribute('uv')) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 2), 2));
+    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+    g.morphAttributes = {};
+    let l = byMat.get(m.material);
+    if (!l) byMat.set(m.material, (l = []));
+    l.push(g);
+    done.push(m);
+    cast ||= m.castShadow;
+  });
+  for (const m of done) m.removeFromParent();
+  for (const [mat, list] of byMat) {
+    const merged = mergeGeometries(list);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+  }
 }
 
 /** a ~290 m cruise ship: hull, the stacked decks with their balconies, the funnel, lifeboats, the pool deck */

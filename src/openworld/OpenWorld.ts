@@ -83,6 +83,8 @@ export class OpenWorld {
   private respawnAt: { x: number; z: number } | null = null;
   private mapTick = 0;
   private readonly sirenPos: THREE.Vector3[] = [];
+  /** the frame-rate governor (the race game's, simplified): resolution first, then the lean tier */
+  private gov = { frames: 0, t: 0, headroom: 0, slowAtFloor: 0, lean: false };
   private readonly tmpV = new THREE.Vector3();
   private readonly camFwd = new THREE.Vector3();
   private readonly headlight: DynLight = { pos: new THREE.Vector3(), color: new THREE.Color(1, 0.94, 0.85), intensity: 0, radius: 24 };
@@ -583,7 +585,36 @@ export class OpenWorld {
     this.enter(this.player);
   }
 
+  private govern(dt: number) {
+    const g = this.gov;
+    g.frames++;
+    g.t += dt;
+    if (g.t < 0.5) return;
+    const fps = g.frames / g.t;
+    g.frames = 0;
+    g.t = 0;
+    (window as unknown as { __fps: number }).__fps = Math.round(fps);
+    if (this.params.get('q') || this.paused) return;
+    const gfx = this.gfx;
+    if (fps < 50) {
+      g.headroom = 0;
+      const next = Math.max(gfx.minDynamic, Math.floor(gfx.dynamicScale * (fps < 38 ? 0.86 : 0.93) * 20) / 20);
+      if (next < gfx.dynamicScale - 0.001) gfx.setDynamicScale(next);
+      else if (++g.slowAtFloor >= 6 && !g.lean) {
+        g.lean = true;
+        this.env.setLean(true);
+      }
+    } else if (fps > 58) {
+      g.slowAtFloor = 0;
+      if (++g.headroom >= 6 && gfx.dynamicScale < gfx.maxDynamic - 0.001) {
+        gfx.setDynamicScale(Math.min(gfx.maxDynamic, Math.round((gfx.dynamicScale + 0.05) * 20) / 20));
+        g.headroom = 0;
+      }
+    }
+  }
+
   private frame(dt: number) {
+    this.govern(dt);
     this.input.update(dt);
     const pad = this.input.s;
     if (pad.pause) {
@@ -701,6 +732,7 @@ export class OpenWorld {
     facadeUniforms.uFTime.value = this.elapsed;
     for (const wt of this.ground.water) wt.update(this.elapsed);
     this.props.update(this.elapsed, night);
+    if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
     const dyn = this.police.dynLights(night, this.focus);
     // the player's headlights throw a pool on the road ahead after dark

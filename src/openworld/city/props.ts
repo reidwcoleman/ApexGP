@@ -22,7 +22,31 @@ export interface PropsBuild {
   group: THREE.Group;
   solids: Solid[];
   update(t: number, night: number): void;
+  /** hide the chunks too far from the camera to matter (palms past ~1.6 km are a pixel) */
+  cull(cam: THREE.Vector3): void;
 }
+
+/** how far each kind of street furniture is drawn (m) */
+const FAR: Record<string, number> = {
+  palmTrunks: 1500,
+  palmCrowns: 1700,
+  cobras: 900,
+  masts: 1400,
+  decoLamps: 800,
+  decoGlobes: 1400,
+  sigPoles: 700,
+  sigArms: 700,
+  sigHeads: 600,
+  roofAC: 2500,
+  roofFans: 1200,
+  loungers: 900,
+  umbrellas: 1100,
+  umbrellaPoles: 700,
+  cabanas: 1200,
+  cabanaPosts: 700,
+  daybeds: 800,
+  roofCars: 2200,
+};
 
 // ------------------------------------------------------------------------------ palm models
 
@@ -499,8 +523,8 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
   const models = [...royal, ...coco];
   models.forEach((m, k) => {
     if (!lists[k].length) return;
-    group.add(chunkedInstances(m.trunk, trunkMat, lists[k], 380, { cast: true, name: 'palmTrunks' }));
-    group.add(chunkedInstances(m.crown, fm, lists[k], 380, { cast: true, name: 'palmCrowns' }));
+    group.add(chunkedInstances(m.trunk, trunkMat, lists[k], 600, { cast: true, name: 'palmTrunks' }));
+    group.add(chunkedInstances(m.crown, fm, lists[k], 600, { cast: true, name: 'palmCrowns' }));
   });
 
   // ---------------------------------------------------------------- street lights
@@ -528,7 +552,7 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
   group.add(chunkedInstances(deco.pole, decoMat, L.deco, 400, { cast: true, name: 'decoLamps' }));
   const lensSplit = (list: Inst[], mat: THREE.Material) => {
     const cl = list.filter((i) => L.cobra.includes(i)), ml = list.filter((i) => L.mast.includes(i));
-    if (cl.length) group.add(chunkedInstances(cobra.lens, mat, cl, 400, { name: 'lenses' }));
+    if (cl.length) group.add(chunkedInstances(cobra.lens, mat, cl, 1100, { name: 'lenses' }));
     if (ml.length) group.add(chunkedInstances(mast.lens, mat, ml, 600, { name: 'lenses' }));
   };
   lensSplit(lensW, lensWarm);
@@ -584,9 +608,22 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
   const col = new THREE.Color();
   let lastNight = -1;
 
+  // the cull list: every chunk of the kinds above, with its bounding sphere
+  const culled: { m: THREE.Object3D; c: THREE.Vector3; r: number; far: number }[] = [];
+  group.traverse((o) => {
+    const im = o as THREE.InstancedMesh;
+    if (!im.isInstancedMesh) return;
+    const far = FAR[im.name] ?? FAR[im.parent?.name ?? ''];
+    if (!far || !im.boundingSphere) return;
+    culled.push({ m: im, c: im.boundingSphere.center.clone(), r: im.boundingSphere.radius, far });
+  });
+
   return {
     group,
     solids,
+    cull(cam) {
+      for (const k of culled) k.m.visible = k.c.distanceTo(cam) - k.r < k.far;
+    },
     update(t, night) {
       windU.uWindT.value = t;
       roofDress.update(t, night);
