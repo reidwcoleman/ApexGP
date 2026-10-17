@@ -582,6 +582,58 @@ npm run check    # tsc --noEmit
   learn, and a slow development over the races they drive, is kept in localStorage (`apexgp.ailearn`), capped by
   the difficulty so the AI stays beatable.
 
+## Open world: Miami
+
+**▶ https://reidwcoleman.github.io/ApexGP/miami.html** (or Home → Open world · Miami in the garage)
+
+Its own page (`miami.html`, `src/openworld/`): nothing of the race world loads with it — only the
+engine (the race game's renderer, sky, weather, grade, reflections) and the city.
+
+- **Miami at real scale**, from latitude / longitude: Downtown, Brickell (its grid at 33.7°),
+  Little Havana, Edgewater, the river and its bridges, I-95, I-395 and the MacArthur Causeway,
+  Watson, Dodge, Star, Palm and Hibiscus islands, Brickell Key, South Beach and Ocean Drive.
+  37 named towers at their real addresses and heights (Panorama, Four Seasons, Southeast Financial,
+  Brickell City Centre…), interior-mapped facades, podium amenity decks and garage tops full of
+  cars, AC plant, masts and helipads; street lighting from a baked light map (the night street is
+  lit by its lamps), shops with lettered signs, Ocean Drive's neon.
+- **Landmarks**: Miami Tower's three lit tiers, the Freedom Tower, the Kaseya Center, PAMM's canopy
+  and hanging gardens, Frost Science's sphere, the SkyViews wheel at Bayside, cruise ships at the
+  PortMiami terminals, gantry cranes and container stacks, South Beach's lifeguard towers.
+- **The 2026 Tesla Roadster** in three trims: Performance, Thrust (four rear cold-gas boost
+  nozzles) and Rocket (ten: two boost, eight lift — it flies, lands on roofs, kickflips).
+  Lofted body with butterfly doors, the active wing, a gold-tinted canopy, aero wheels, a cockpit.
+- **Other vehicles**: every traffic car can be taken (carjacking ejects the driver), a superbike,
+  a helicopter (Watson Island), a seaplane, a go-fast boat with a wake; the menu delivers more.
+- **The city lives**: lane-following traffic with signals and junction paths, parked cars,
+  pedestrians (Rocketbox avatars) who cross, dodge and flee, boats in the bay, airliners on the
+  MIA approach, a news helicopter.
+- **Miami PD**: crimes raise the wanted level; cruisers route to you (A*), chase, ram and box you
+  in, the helicopter joins at three stars (searchlight at night); stop with a cruiser beside you
+  and you're BUSTED; lose them and the stars clear.
+- Physics: a bicycle-model car on Pacejka-shaped tyres (load transfer, traction control, ABS,
+  downforce), assisted flight for the Rocket and the helicopter, lift / drag / stall for the
+  seaplane, planing for the boat. Synthesised audio (EV whine, thrusters, rotors, sirens, surf).
+
+| | Keyboard | Gamepad |
+|---|---|---|
+| Drive / steer | W A S D | RT / LT, left stick |
+| Handbrake (fly up) | Space | A / ✕ |
+| Cold-gas boost | Shift | RB |
+| Rocket: lift off / land | T | X / □ |
+| Fly down / bank | X · Q / E | B / ○ |
+| Get in / out | F | Y / △ |
+| Camera · recover · map · menu | C · R · M · Esc | View · D-pad · Menu |
+
+Dev flags (`miami.html?`): `time=night`, `weather=rain`, `trim=performance|thrust|rocket`,
+`traffic=N`, `people=0`, `hud=0`, `carcam=az,el,dist,fov`, `cam=x,y,z&look=x,y,z`, `q=high`.
+
+Research: [Tesla Roadster (second generation)](https://en.wikipedia.org/wiki/Tesla_Roadster_(second_generation)),
+[TechCrunch on the reveal](https://techcrunch.com/2026/10/15/tesla-reveals-spacex-powered-roadster-that-flies-and-falls-with-style/),
+[Electrek](https://electrek.co/2026/10/15/tesla-unveils-cyberfied-new-roadster-kickflip/),
+[The EV Report on the cold-gas thrusters](https://theevreport.com/tesla-roadster-unveil-spacex-cold-gas-thrusters),
+[List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
+[CTBUH Skyscraper Center: Miami](https://www.skyscrapercenter.com/city/miami).
+
 ## Controls
 
 | | Keyboard | Gamepad |

@@ -223,6 +223,10 @@ if ( style < 0.5 ) {
   float browShadow = boxStep( fy, 0.74, 0.82 ) * boxStep( fx, 0.08, 0.92 ) * ( 1.0 - w );
   col = mix( col, wallC * 1.12, brow );
   col *= 1.0 - 0.22 * browShadow;
+  // neon tubes along the eyebrows and up the corners after dark (most of the deco district)
+  vec3 neonC = fract( seed * 5.7 ) < 0.3 ? vec3( 1.0, 0.25, 0.65 ) : fract( seed * 5.7 ) < 0.55 ? vec3( 0.3, 0.85, 1.0 ) : fract( seed * 5.7 ) < 0.75 ? vec3( 0.3, 1.0, 0.6 ) : vec3( 1.0, 0.75, 0.3 );
+  float tube = boxStep( fy, 0.875, 0.885 ) * boxStep( fx, 0.04, 0.96 );
+  facEmit += neonC * tube * uNight * 3.0 * step( 0.35, fract( seed * 7.3 ) );
   // the racing stripes and the speed lines of streamline moderne
   float stripe = boxStep( fy, 0.9, 0.96 ) * step( 0.5, fract( seed * 3.1 ) );
   col = mix( col, uWallPal[ int( mod( vFPal.x + 5.0, 16.0 ) ) ] * 0.8, stripe );
@@ -345,7 +349,7 @@ if ( glass > 0.01 ) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v3';
+  m.customProgramCacheKey = () => 'ow-facade-v4';
   return m;
 }
 

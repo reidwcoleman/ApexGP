@@ -26,6 +26,7 @@ import { Fleet, PAINTS, type ModelId } from './vehicles/fleet.ts';
 import { Traffic } from './ai/traffic.ts';
 import { People } from './ai/people.ts';
 import { Police, type Suspect } from './ai/police.ts';
+import { Ambient } from './ambient.ts';
 import { FleetCar } from './vehicles/FleetCar.ts';
 import { Helicopter } from './vehicles/Helicopter.ts';
 import { Seaplane } from './vehicles/Seaplane.ts';
@@ -72,6 +73,7 @@ export class OpenWorld {
   night = 0;
   people!: People;
   police!: Police;
+  ambient!: Ambient;
   hud!: Hud;
   audio = new OpenWorldAudio();
   /** vehicles parked about the city for the player (the Roadster is one) */
@@ -170,6 +172,8 @@ export class OpenWorld {
     this.traffic = new Traffic(this.net, this.fleet, this.world, roads.parking);
     this.traffic.target = Number(this.params.get('traffic') ?? 70);
 
+    this.ambient = new Ambient(this.net.mask);
+    this.scene.add(this.ambient.group);
     this.police = new Police(this.net, this.world, this.fleet, this.traffic);
     this.scene.add(this.police.group);
     this.people = new People(this.net, this.world);
@@ -193,6 +197,8 @@ export class OpenWorld {
     this.gfx.motionBlur = 0.9;
     this.placeLandmarkVehicles();
     this.hud = new Hud(this.ui, this.net);
+    // (clean frames for key art: ?hud=0)
+    if (this.params.get('hud') === '0') this.ui.style.display = 'none';
     this.audio.arm();
 
     await step(0.95, 'Warming up');
@@ -737,6 +743,7 @@ export class OpenWorld {
     this.props.update(this.elapsed, night);
     if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
+    this.ambient.update(dt, ctx, this.camera.position);
     const dyn = this.police.dynLights(night, this.focus);
     // the player's headlights throw a pool on the road ahead after dark
     const hv = this.vehicle;

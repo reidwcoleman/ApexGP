@@ -602,7 +602,7 @@ export function buildLandmarks(bld: BuildingsBuild, mask: LandMask, beachX: (z: 
       const tex = neonTexture(s.name, s.color);
       const m = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0x000000, roughness: 0.5 });
       const blade = new THREE.Mesh(new THREE.BoxGeometry(0.35, s.h * 0.55, 1.8), [m, m, m, m, m, m]);
-      blade.position.set(s.x, s.y + s.h * 0.3, s.z);
+      blade.position.set(s.x, s.y + (s.h * 0.55) / 2, s.z);
       blade.rotation.y = s.yaw - Math.PI / 2;
       group.add(blade);
       mats.push({ m, c: new THREE.Color(s.color) });

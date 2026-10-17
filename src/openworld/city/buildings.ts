@@ -728,9 +728,10 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
           if (oceanFront) {
             // the Ocean Drive hotels face the park: a neon sign on each
             for (const side of [0.27, 0.73]) {
-              const p = cell(0.94, side);
+              // on the face toward the park, over the ground floor's porch
+              const p = cell(1.0, side);
               const hotel = DECO_HOTELS[decoSigns.length % DECO_HOTELS.length];
-              decoSigns.push({ x: p.x + 2.5, y: 9, z: p.z, yaw: Math.PI / 2, name: hotel[0], color: hotel[2], h: 13 + R() * 4 });
+              decoSigns.push({ x: p.x - 0.4, y: 5.2, z: p.z, yaw: Math.PI / 2, name: hotel[0], color: hotel[2], h: 13 + R() * 4 });
             }
           }
         } else if (density === 'park') {
