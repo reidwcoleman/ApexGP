@@ -208,6 +208,58 @@ class Builder {
   roofTops: BuildingsBuild['roofs'] = [];
   decks: RoofDeck[] = [];
   crowns: BuildingsBuild['crowns'] = [];
+  slabs = new MeshBuilder();
+  rails = new MeshBuilder();
+
+  /**
+   * A condo tower's balconies: a concrete slab round the outline at every floor, projecting `out` m,
+   * and a frosted glass rail along its edge — the deep horizontal bands of Miami's waterfront towers.
+   */
+  balconies(poly: P2[], y0: number, y1: number, floorH: number, out: number) {
+    const n = poly.length;
+    let area = 0;
+    for (let i = 0; i < n; i++) area += poly[i].x * poly[(i + 1) % n].z - poly[(i + 1) % n].x * poly[i].z;
+    const sgn = area > 0 ? -1 : 1;
+    // outward offset of each vertex (the mitre of its two edges' normals)
+    const en = poly.map((a, i) => {
+      const b = poly[(i + 1) % n];
+      const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+      return { x: (-dz / l) * sgn, z: (dx / l) * sgn };
+    });
+    const o = poly.map((p, i) => {
+      const a = en[(i - 1 + n) % n], b = en[i];
+      let x = a.x + b.x, z = a.z + b.z;
+      const l = Math.hypot(x, z) || 1;
+      x /= l;
+      z /= l;
+      const k = out / Math.max(0.5, x * b.x + z * b.z);
+      return { x: p.x + x * k, z: p.z + z * k, nx: x, nz: z };
+    });
+    const S = this.slabs, Rl = this.rails;
+    const th = 0.22, railH = 1.05;
+    for (let y = y0 + floorH; y < y1 - 0.5; y += floorH) {
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const a = poly[i], b = poly[j], A = o[i], B = o[j];
+        const nx = en[i].x, nz = en[i].z;
+        // top, bottom (between the wall and the outer edge), the edge
+        const t0 = S.v(a.x, y, a.z, 0, 1, 0), t1 = S.v(b.x, y, b.z, 0, 1, 0), t2 = S.v(B.x, y, B.z, 0, 1, 0), t3 = S.v(A.x, y, A.z, 0, 1, 0);
+        if (sgn > 0) S.quad(t0, t1, t2, t3);
+        else S.quad(t1, t0, t3, t2);
+        const b0 = S.v(a.x, y - th, a.z, 0, -1, 0), b1 = S.v(b.x, y - th, b.z, 0, -1, 0), b2 = S.v(B.x, y - th, B.z, 0, -1, 0), b3 = S.v(A.x, y - th, A.z, 0, -1, 0);
+        if (sgn > 0) S.quad(b1, b0, b3, b2);
+        else S.quad(b0, b1, b2, b3);
+        const e0 = S.v(A.x, y - th, A.z, nx, 0, nz), e1 = S.v(B.x, y - th, B.z, nx, 0, nz), e2 = S.v(B.x, y, B.z, nx, 0, nz), e3 = S.v(A.x, y, A.z, nx, 0, nz);
+        if (sgn > 0) S.quad(e0, e1, e2, e3);
+        else S.quad(e1, e0, e3, e2);
+        // the rail, a hand's width in from the edge
+        const ix = -nx * 0.06, iz = -nz * 0.06;
+        const r0 = Rl.v(A.x + ix, y, A.z + iz, nx, 0, nz, 0, 0), r1 = Rl.v(B.x + ix, y, B.z + iz, nx, 0, nz, 1, 0), r2 = Rl.v(B.x + ix, y + railH, B.z + iz, nx, 0, nz, 1, 1), r3 = Rl.v(A.x + ix, y + railH, A.z + iz, nx, 0, nz, 0, 1);
+        if (sgn > 0) Rl.quad(r0, r1, r2, r3);
+        else Rl.quad(r1, r0, r3, r2);
+      }
+    }
+  }
 
   /** walls of a polygon prism from y0 to y1 (+ a roof cap of `roof` kind, -1 = none) */
   prism(poly: P2[], y0: number, y1: number, f: Fac, roof: number, opts: { collide?: boolean; parapet?: number; topH?: number } = {}) {
@@ -511,6 +563,8 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     const setback = R() < 0.35 && tall > 110;
     const yTop = setback ? tall * 0.86 : tall;
     B.prism(poly, podiumH, yTop, fac, setback ? 1 : 0, { topH: tall });
+    // condos: real balconies (most of them wrap the whole tower)
+    if (style === 0) B.balconies(poly, podiumH, yTop, fac.floorH, 1.5 + R() * 0.9);
     if (setback) {
       const p2 = shapePoly(shape, cx, cz, tw * 0.78, td * 0.78, tyaw, R);
       B.prism(p2, yTop, tall, fac, 0);
@@ -801,6 +855,11 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
   group.add(chunkMeshes(B.walls, 1000, fm, { cast: true, receive: true, name: 'walls' }));
   group.add(chunkMeshes(B.roofs, 1000, roofMaterial(), { cast: false, receive: true, name: 'roofs' }));
   if (B.lots.count) group.add(chunkMeshes(B.lots, 1200, lotMaterial(), { receive: true, name: 'lots' }));
+  if (B.slabs.count) {
+    group.add(chunkMeshes(B.slabs, 700, new THREE.MeshStandardMaterial({ color: 0xe9e7e2, roughness: 0.78, metalness: 0 }), { cast: true, receive: true, name: 'balconies' }));
+    const railMat = new THREE.MeshPhysicalMaterial({ color: 0xbfd6dc, roughness: 0.18, metalness: 0.1, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false });
+    group.add(chunkMeshes(B.rails, 700, railMat, { cast: false, receive: true, name: 'rails' }));
+  }
   if (B.pools.count) {
     const pm = new THREE.MeshStandardMaterial({ color: 0x2bb5c8, roughness: 0.05, metalness: 0.1, emissive: 0x0a5a66, emissiveIntensity: 0.25 });
     group.add(chunkMeshes(B.pools, 2000, pm, { name: 'pools' }));

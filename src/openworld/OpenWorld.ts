@@ -15,6 +15,9 @@ import { ll } from './geo.ts';
 import { buildBuildings, type BuildingsBuild } from './city/buildings.ts';
 import { buildProps, type PropsBuild } from './city/props.ts';
 import { buildLandmarks, type LandmarkBuild } from './city/landmarks.ts';
+import { buildTrees, type TreesBuild } from './city/trees.ts';
+import { buildLawnMask } from './city/lawnmask.ts';
+import { buildGrass, type GrassBuild } from './city/grass.ts';
 import { facadeUniforms } from './city/facade.ts';
 import { CollisionWorld, type Contact } from './sim/collide.ts';
 import { Input } from './input.ts';
@@ -60,6 +63,8 @@ export class OpenWorld {
   buildings!: BuildingsBuild;
   props!: PropsBuild;
   landmarks!: LandmarkBuild;
+  trees!: TreesBuild;
+  grass!: GrassBuild;
   time: TimeOfDay;
   kind: WeatherKind;
   private readonly params = new URLSearchParams(location.search);
@@ -179,6 +184,12 @@ export class OpenWorld {
     this.landmarks = buildLandmarks(this.buildings, this.net.mask, this.ground.beachX);
     this.scene.add(this.landmarks.group);
     for (const s of this.landmarks.solids) this.world.add(s);
+    const lawn = buildLawnMask(this.net, this.buildings, this.ground.beachX);
+    this.trees = buildTrees(this.net, this.world, this.ground.beachX, lawn);
+    this.grass = buildGrass(lawn);
+    this.scene.add(this.grass.mesh);
+    this.scene.add(this.trees.group);
+    for (const s of this.trees.solids) this.world.add(s);
     // the reflections: capture the city now that it stands (the environment's own lawn goes)
     await step(0.8, 'Catching the light');
     this.env.adoptScenery({ group: new THREE.Group(), heightAt: () => 0, setLight() {}, update() {}, setQuality() {}, stats: { miami: true } });
@@ -805,6 +816,8 @@ export class OpenWorld {
     this.props.update(this.elapsed, night);
     if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
+    this.trees.update(this.camera.position, this.elapsed, (1 - night) * (P.direct ?? 1));
+    this.grass.update(this.camera.position, this.elapsed);
     this.ambient.update(dt, ctx, this.camera.position);
     const dyn = this.police.dynLights(night, this.focus);
     this.combat.lights(dyn);
