@@ -168,7 +168,15 @@ export function createEnvironment(
   gfx: Renderer,
   scene: THREE.Scene,
   weather: WeatherState,
-  opts: { scenery?: boolean } = {},
+  opts: {
+    scenery?: boolean;
+    /** where rain splashes land (default: the circuit's asphalt) */
+    surface?: (x: number, z: number, out: THREE.Vector3) => boolean;
+    /** false: no floodlight masts at twilight (the open world lights itself) */
+    floods?: boolean;
+    /** where the world is captured for the reflections (default: beside the start straight) */
+    capture?: { pos: THREE.Vector3; look: THREE.Vector3 };
+  } = {},
 ): Environment {
   installAerialFog();
   const renderer = gfx.renderer;
@@ -273,7 +281,8 @@ export function createEnvironment(
 
   // rain splashes land on the asphalt
   let splashHint = -1;
-  rain.setSurface((x, z, out) => {
+  if (opts.surface) rain.setSurface(opts.surface);
+  else rain.setSurface((x, z, out) => {
     const pr = track.project(x, z, splashHint, 30);
     splashHint = pr.index;
     if (Math.abs(pr.lateral) > track.halfWidthAt(pr.s) + 1.2) return false;
@@ -344,7 +353,7 @@ export function createEnvironment(
     // moonlight: the same sun, but read by the eye as cool silver-blue
     if ((P.night ?? 0) > 0.5) C.sunCol.multiply(tmpA.setRGB(0.72, 0.84, 1.0));
     sky.uniforms.uSunRadius.value = (P.night ?? 0) > 0.5 ? 0.017 : 0.0095;
-    if ((P.flood ?? 0) * floodScale(P.night ?? 0) > 0) buildFloodField(track, renderer);
+    if (opts.floods !== false && (P.flood ?? 0) * floodScale(P.night ?? 0) > 0) buildFloodField(track, renderer);
     // (the sky's colours as the dome draws them, with its softened glow round the sun — see below)
     const mieG = l.g * 0.9;
     const mieK = THREE.MathUtils.lerp(0.5, 0.85, THREE.MathUtils.smoothstep(P.elevation, 6, 30));
@@ -762,11 +771,11 @@ export function createEnvironment(
     gfx.setSunShafts(sunDir, shaftK * shaftDrama, 0.55 * C.E0 * 0.25);
     gfx.grade.setLook(gradeLook);
     applyIndoor();
-    const F = FLOOD_E * fl * floodScale(night);
+    const F = opts.floods === false ? 0 : FLOOD_E * fl * floodScale(night);
     setFloodLevel(F);
     const haze = THREE.MathUtils.clamp(L.mist * 0.8 + L.rain * 0.6, 0, 1);
     // (the masts themselves are gone after dark, not just switched off)
-    floodArgs = [fl * floodScale(night), haze, aerialParams.x + aerialGround.x];
+    floodArgs = [opts.floods === false ? 0 : fl * floodScale(night), haze, aerialParams.x + aerialGround.x];
     floods.set(floodArgs[0], floodArgs[1], floodArgs[2]);
     // backlit signs come on as the light goes
     weatherUniforms.uSignGlow.value = 0.12 + 0.88 * THREE.MathUtils.smoothstep(night, 0.1, 0.9);
@@ -857,8 +866,8 @@ export function createEnvironment(
   /** `face`: just that cube face (0 … 5; the programs are queued with the first), else all six */
   function captureWorld(face = -1) {
     const s = (track.startS - 70 + track.length) % track.length;
-    const p = track.point(s, 0, 2.6);
-    const ahead = track.point((s + 40) % track.length, 0, 2.2);
+    const p = opts.capture ? opts.capture.pos.clone() : track.point(s, 0, 2.6);
+    const ahead = opts.capture ? opts.capture.look : track.point((s + 40) % track.length, 0, 2.2);
     capCam.position.copy(p);
     capCam.lookAt(ahead);
     capCam.updateMatrixWorld();

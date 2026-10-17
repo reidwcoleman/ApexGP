@@ -1,0 +1,496 @@
+/* the open world's HUD and menus (built in ui/Hud.ts) */
+:root {
+  --ow-pink: #ff3f8e;
+  --ow-cyan: #57e8ff;
+  --ow-amber: #ffb547;
+  --ow-ink: rgba(255, 255, 255, 0.94);
+  --ow-dim: rgba(255, 255, 255, 0.62);
+  --ow-glass: rgba(10, 10, 18, 0.5);
+  --ow-font: 'Titillium Web', 'Arial Narrow', Arial, sans-serif;
+}
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--ow-font);
+  color: var(--ow-ink);
+  z-index: 5;
+  user-select: none;
+}
+.ow-hud {
+  position: absolute;
+  inset: 0;
+}
+
+/* speed */
+.ow-speed {
+  position: absolute;
+  right: 34px;
+  bottom: 30px;
+  min-width: 230px;
+  text-align: right;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+}
+.ow-vname {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ow-dim);
+}
+.ow-speed-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ow-speed-num {
+  font-size: 78px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.ow-speed-side {
+  padding-bottom: 8px;
+  text-align: left;
+}
+.ow-speed-unit {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--ow-dim);
+}
+.ow-gear {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--ow-cyan);
+}
+.ow-mode {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  background: var(--ow-pink);
+  color: #fff;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.ow-mode.on {
+  opacity: 1;
+  transform: none;
+}
+.ow-alt {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ow-cyan);
+  font-variant-numeric: tabular-nums;
+}
+.ow-gauges {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.ow-gauge .g-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ow-dim);
+}
+.ow-gauge .g-bar {
+  margin-top: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  margin-left: auto;
+  width: 200px;
+}
+.ow-gauge .g-bar b {
+  display: block;
+  height: 100%;
+  transition: width 0.2s linear;
+}
+.on-foot .ow-speed {
+  opacity: 0;
+}
+
+/* wanted */
+.ow-stars {
+  position: absolute;
+  right: 34px;
+  top: 26px;
+  display: flex;
+  gap: 4px;
+  opacity: 0.3;
+  transition: opacity 0.3s;
+}
+.ow-stars.active {
+  opacity: 1;
+}
+.ow-star {
+  font-size: 34px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.22);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+.ow-star.on {
+  color: #fff;
+}
+
+/* place */
+.ow-place {
+  position: absolute;
+  left: 40px;
+  top: 34px;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.6s, transform 0.6s;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7);
+}
+.ow-place.show {
+  opacity: 1;
+  transform: none;
+}
+.ow-place-name {
+  font-size: 46px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  background: linear-gradient(90deg, #ffffff, #ffd2e6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ow-place-sub {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ow-cyan);
+}
+
+/* prompt, toasts, card */
+.ow-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translate(-50%, 6px);
+  padding: 9px 18px;
+  border-radius: 4px;
+  background: var(--ow-glass);
+  backdrop-filter: blur(8px);
+  font-size: 16px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.ow-prompt.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ow-toasts {
+  position: absolute;
+  left: 40px;
+  top: 130px;
+  display: grid;
+  gap: 8px;
+}
+.ow-toast {
+  padding: 8px 14px;
+  border-left: 3px solid var(--ow-cyan);
+  background: var(--ow-glass);
+  backdrop-filter: blur(8px);
+  font-size: 15px;
+  font-weight: 700;
+  animation: ow-in 0.3s ease;
+  transition: opacity 0.5s, transform 0.5s;
+}
+.ow-toast.warn {
+  border-color: var(--ow-pink);
+}
+.ow-toast.out {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+@keyframes ow-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+.ow-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38%;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.ow-card.show {
+  opacity: 1;
+}
+.ow-card .c-title {
+  font-size: 110px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.04em;
+  color: #ff3f5a;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, 0.7);
+}
+.ow-card .c-sub {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/* minimap */
+.ow-map {
+  position: absolute;
+  left: 34px;
+  bottom: 30px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 8px 30px rgba(0, 0, 0, 0.5);
+  transition: all 0.35s ease;
+}
+.ow-map canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.ow-map-n {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 4px #000;
+}
+.ow-map.big {
+  left: 50%;
+  bottom: 50%;
+  transform: translate(-50%, 50%);
+  width: min(80vh, 80vw);
+  height: min(80vh, 80vw);
+  border-radius: 10px;
+}
+.ow-map.big .ow-map-n {
+  display: none;
+}
+
+/* help */
+.ow-help {
+  position: absolute;
+  right: 34px;
+  top: 90px;
+  width: 330px;
+  padding: 16px 18px;
+  border-radius: 6px;
+  background: var(--ow-glass);
+  backdrop-filter: blur(10px);
+  transition: opacity 0.8s;
+}
+.ow-help.hide {
+  opacity: 0;
+}
+.ow-help.inmenu {
+  position: static;
+  width: auto;
+  background: transparent;
+  padding: 0;
+  opacity: 1;
+}
+.ow-help .h-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ow-cyan);
+  margin-bottom: 10px;
+}
+.ow-help .h-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  font-size: 14px;
+}
+.ow-help b {
+  font-weight: 900;
+  white-space: nowrap;
+}
+.ow-help span {
+  color: var(--ow-dim);
+}
+.ow-help .h-foot {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ow-dim);
+}
+
+/* menu */
+.ow-menu {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: radial-gradient(120% 100% at 0% 100%, rgba(255, 63, 142, 0.28), rgba(10, 8, 20, 0.82) 55%);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  padding-left: 7vw;
+}
+.ow-menu-panel {
+  width: min(760px, 86vw);
+}
+.ow-menu .m-eyebrow {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ow-cyan);
+}
+.ow-menu .m-title {
+  font-size: 84px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  background: linear-gradient(90deg, #ff4f9a, #ffb36b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 18px;
+}
+.ow-menu .m-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.ow-menu .m-tab {
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ow-dim);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.ow-menu .m-tab.on {
+  color: #fff;
+  border-color: var(--ow-pink);
+}
+.ow-menu .m-body {
+  min-height: 300px;
+}
+.ow-menu .m-h {
+  margin: 16px 0 8px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ow-dim);
+}
+.ow-menu .m-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ow-menu .m-chip {
+  padding: 7px 13px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ow-menu .m-chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.ow-menu .m-chip.on {
+  background: #fff;
+  color: #111;
+}
+.ow-menu .m-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.ow-menu .m-card {
+  padding: 14px 16px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ow-menu .m-card:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+.ow-menu .m-card.on {
+  border-color: var(--ow-pink);
+  background: rgba(255, 63, 142, 0.16);
+}
+.ow-menu .mc-name {
+  font-size: 19px;
+  font-weight: 900;
+}
+.ow-menu .mc-sub {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--ow-dim);
+}
+.ow-menu .m-paints {
+  display: flex;
+  gap: 10px;
+}
+.ow-menu .m-swatch {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 -6px 12px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+.ow-menu .m-swatch.on {
+  box-shadow: inset 0 -6px 12px rgba(0, 0, 0, 0.35), 0 0 0 3px #fff;
+}
+.ow-menu .m-cta {
+  display: inline-block;
+  margin-top: 22px;
+  padding: 12px 26px;
+  border-radius: 4px;
+  background: var(--ow-pink);
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.ow-menu .m-foot {
+  display: flex;
+  gap: 10px;
+  margin-top: 26px;
+}
+.ow-menu .m-btn {
+  padding: 11px 22px;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.ow-menu .m-btn.ghost {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}

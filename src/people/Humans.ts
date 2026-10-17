@@ -159,7 +159,11 @@ export const ROSTER = {
 };
 const ALL = [...new Set([ROSTER.suit, ROSTER.crew, ROSTER.crewF, ROSTER.shirt, ROSTER.shirtF, ...ROSTER.fansM, ...ROSTER.fansF, ...ROSTER.headsM, ...ROSTER.headsF, ...ROSTER.driverHeads])];
 /** the uniforms and every face they wear load first: a driver or a mechanic looks the same wherever they appear */
-const CORE = [...new Set([ROSTER.suit, ROSTER.crew, ROSTER.crewF, ROSTER.shirt, ROSTER.shirtF, ...ROSTER.headsM, ...ROSTER.headsF, ...ROSTER.driverHeads])];
+let CORE = [...new Set([ROSTER.suit, ROSTER.crew, ROSTER.crewF, ROSTER.shirt, ROSTER.shirtF, ...ROSTER.headsM, ...ROSTER.headsF, ...ROSTER.driverHeads])];
+/** load these avatars first instead (before loadPeople): the open world wants street clothes, not uniforms */
+export function setPeopleCore(names: string[]) {
+  CORE = names;
+}
 /** CORE avatars in their own everyday clothes: the fans until the fans' own avatars have loaded */
 const CASUAL_M = ['Male_Adult_07', 'Male_Adult_12', 'Male_Adult_10', 'Male_Adult_16', 'Male_Adult_11', 'Sports_Male_02'];
 const CASUAL_F = ['Pilot_Female_02'];

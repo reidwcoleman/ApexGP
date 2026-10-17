@@ -65,6 +65,8 @@ interface Member {
   phase: number;
   pace: number;
   visible: boolean;
+  /** lean about the member's own x axis (rad): someone knocked flat */
+  tilt: number;
 }
 
 /** an instanced mesh whose slots are filled every frame */
@@ -75,6 +77,9 @@ interface Slotted {
   fit: THREE.InstancedBufferAttribute | null;
   n: number;
 }
+
+const TILT = new THREE.Quaternion();
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 
 export class Extras {
   readonly group = new THREE.Group();
@@ -94,12 +99,13 @@ export class Extras {
   far: number;
   propFar: number;
 
-  constructor(kit: PeopleKit, specs: ExtraSpec[], opts: { name?: string; near?: number; far?: number; propFar?: number; shadows?: boolean } = {}) {
+  constructor(kit: PeopleKit, specs: ExtraSpec[], opts: { name?: string; near?: number; far?: number; propFar?: number; shadows?: boolean; bake?: { key: string; names: string[]; clips: string[] } } = {}) {
     this.group.name = opts.name ?? 'extras';
     this.near = opts.near ?? 28;
     this.far = opts.far ?? 380;
     this.propFar = opts.propFar ?? 160;
-    const baked = (this.baked = bakeExtras(kit));
+    // (a caller with its own cast and clips — the open world's pedestrians — bakes its own set)
+    const baked = (this.baked = opts.bake ? bakeSet(kit, opts.bake) : bakeExtras(kit));
     const names = [...baked.avatars.keys()];
     for (const s of specs) {
       const bk = baked.avatars.get(s.body) ?? baked.avatars.get(names.find((n) => baked.avatars.get(n)!.asset.female === baked.avatars.get(s.body)?.asset.female) ?? names[0])!;
@@ -119,6 +125,7 @@ export class Extras {
         phase: s.phase ?? Math.random(),
         pace: s.pace ?? 1,
         visible: true,
+        tilt: 0,
       });
     }
     const shadows = !!opts.shadows;
@@ -224,6 +231,9 @@ export class Extras {
   setVisible(i: number, on: boolean) {
     this.members[i].visible = on;
   }
+  setTilt(i: number, tilt: number) {
+    this.members[i].tilt = tilt;
+  }
   /** a walking clip's speed, metres per second at pace 1 */
   get walkSpeed(): number {
     return 1.3;
@@ -259,6 +269,7 @@ export class Extras {
       const isNear = d2 < near2;
       const a = m.bake.acts[m.act] ?? m.bake.acts[0];
       this.q.setFromAxisAngle(this.up, m.yaw);
+      if (m.tilt) this.q.multiply(TILT.setFromAxisAngle(X_AXIS, m.tilt));
       this.m4.compose(m.pos, this.q, this.v.set(m.scale, m.scale, m.scale));
       const put = (s: Slotted | null, fill?: (s: Slotted, k: number) => void) => {
         if (!s) return;
