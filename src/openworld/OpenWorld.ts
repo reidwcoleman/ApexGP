@@ -14,6 +14,7 @@ import { bakeCityLights, setCityNight, uploadCityLights } from './city/cityLight
 import { ll } from './geo.ts';
 import { buildBuildings, type BuildingsBuild } from './city/buildings.ts';
 import { buildProps, type PropsBuild } from './city/props.ts';
+import { buildLandmarks, type LandmarkBuild } from './city/landmarks.ts';
 import { facadeUniforms } from './city/facade.ts';
 import { CollisionWorld, type Contact } from './sim/collide.ts';
 import { Input } from './input.ts';
@@ -52,6 +53,7 @@ export class OpenWorld {
   ground!: GroundBuild;
   buildings!: BuildingsBuild;
   props!: PropsBuild;
+  landmarks!: LandmarkBuild;
   time: TimeOfDay;
   kind: WeatherKind;
   private readonly params = new URLSearchParams(location.search);
@@ -153,6 +155,9 @@ export class OpenWorld {
     this.props = buildProps(this.net, roads, this.buildings, this.ground.beachX);
     this.scene.add(this.props.group);
     for (const s of this.props.solids) this.world.add(s);
+    this.landmarks = buildLandmarks(this.buildings, this.net.mask, this.ground.beachX);
+    this.scene.add(this.landmarks.group);
+    for (const s of this.landmarks.solids) this.world.add(s);
     // the reflections: capture the city now that it stands (the environment's own lawn goes)
     await step(0.8, 'Catching the light');
     this.env.adoptScenery({ group: new THREE.Group(), heightAt: () => 0, setLight() {}, update() {}, setQuality() {}, stats: { miami: true } });
@@ -696,6 +701,7 @@ export class OpenWorld {
     facadeUniforms.uFTime.value = this.elapsed;
     for (const wt of this.ground.water) wt.update(this.elapsed);
     this.props.update(this.elapsed, night);
+    this.landmarks.update(this.elapsed, night);
     const dyn = this.police.dynLights(night, this.focus);
     // the player's headlights throw a pool on the road ahead after dark
     const hv = this.vehicle;

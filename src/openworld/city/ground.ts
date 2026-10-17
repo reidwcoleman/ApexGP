@@ -55,8 +55,10 @@ export function buildGround(mask: LandMask): GroundBuild {
   const group = new THREE.Group();
   group.name = 'Ground';
   const lawn = lawnMaterial();
+  // PortMiami's island is all quay, yards and car parks: concrete, not lawn
+  const port = concreteMaterial(0x9d9a93, 0.9, true);
   for (const L of LANDS) {
-    const m = new THREE.Mesh(topGeometry(L.outline), lawn);
+    const m = new THREE.Mesh(topGeometry(L.outline), L.name === 'Dodge Island' ? port : lawn);
     m.receiveShadow = true;
     m.name = 'land_' + L.name;
     group.add(m);

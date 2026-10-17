@@ -38,6 +38,8 @@ export interface BuildingsBuild {
   roofs: { x: number; z: number; y: number; w: number; d: number; yaw: number }[];
   /** podium decks (amenity / parking) */
   decks: RoofDeck[];
+  /** where the landmarks stand (their special parts are built in landmarks.ts) */
+  landmarks: Landmarks;
   /** tower crowns (helipads, masts) */
   crowns: { x: number; z: number; y: number; w: number; d: number; yaw: number; tall: number }[];
   /** neon / sign anchor points on Ocean Drive's hotels */
@@ -353,6 +355,15 @@ function roofFrame(poly: P2[]): RoofFrame {
   return { ox: u0 * ux - v0 * uz, oz: u0 * uz + v0 * ux, ux, uz, W: u1 - u0, D: v1 - v0 };
 }
 
+export interface Landmarks {
+  miamiTower?: { x: number; z: number; y: number; w: number; d: number };
+  freedomTower?: { x: number; z: number; y: number };
+  arena?: { x: number; z: number; y: number; w: number; d: number };
+  pamm?: { x: number; z: number; y: number; w: number; d: number };
+  frost?: { x: number; z: number; y: number; r: number };
+  bayside?: { x: number; z: number; y: number };
+}
+
 /** a podium roof: an amenity deck (pool, loungers, palms) or the open top of a parking garage */
 export interface RoofDeck extends RoofFrame {
   kind: 'amenity' | 'parking';
@@ -433,7 +444,11 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
 
   const stats: Record<string, number> = {};
   const stat = (k: string) => (stats[k] = (stats[k] ?? 0) + 1);
+  /** the landmarks' grounds: nothing else is built in them */
+  const reserved: { x: number; z: number; r: number }[] = [];
+  const isReserved = (x: number, z: number, r = 0) => reserved.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + r);
   const towerAt = (cx: number, cz: number, lotW: number, lotD: number, yaw: number, H: number, seed: number) => {
+    if (isReserved(cx, cz, Math.min(lotW, lotD) * 0.3)) return false;
     // a named tower close by takes the lot
     let nm: (typeof named)[number] | null = null;
     for (const n of named) {
@@ -511,6 +526,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
   };
 
   const midriseAt = (cx: number, cz: number, w: number, d: number, yaw: number, h: number, seed: number, deco = false) => {
+    if (isReserved(cx, cz, Math.min(w, d) * 0.3)) return false;
     const poly = shapePoly(deco ? 'rect' : R() < 0.2 ? 'chamfer' : 'rect', cx, cz, w, d, yaw, R);
     if (!onLand(poly, 3) || !clearOfRoads(poly, 0.4)) return false;
     const floors = Math.max(1, Math.round((h - 4.5) / 3.3));
@@ -523,6 +539,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
   };
 
   const houseAt = (cx: number, cz: number, w: number, d: number, yaw: number, seed: number) => {
+    if (isReserved(cx, cz)) return false;
     const poly = shapePoly('rect', cx, cz, w, d, yaw, R);
     if (!onLand(poly, 2) || !clearOfRoads(poly, 1.5)) return false;
     const floors = R() < 0.7 ? 1 : 2;
@@ -531,6 +548,78 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     B.hipRoof(cx, cz, w, d, yaw, H, 1.8, 2);
     return true;
   };
+
+  // ---- the landmarks (first: their grounds are reserved before the grids fill in round them)
+  const landmarks: Landmarks = {};
+  /** the nearest clear lot to a real address: on land, off the roads */
+  const site = (lat: number, lon: number, w: number, d: number, yaw: number, shape: Shape = 'rect') => {
+    const c = ll(lat, lon);
+    for (let r = 0; r <= 220; r += 10)
+      for (let k = 0; k < Math.max(1, r / 5); k++) {
+        const a = (k / Math.max(1, r / 5)) * Math.PI * 2;
+        const x = c.x + Math.sin(a) * r, z = c.z + Math.cos(a) * r;
+        const poly = shapePoly(shape, x, z, w, d, yaw, R);
+        if (onLand(poly, 2) && clearOfRoads(poly, 0.5) && !isReserved(x, z, Math.min(w, d) * 0.4)) return { x, z, poly };
+      }
+    console.warn('[openworld] no site for landmark at', lat, lon);
+    return null;
+  };
+  {
+    // Miami Tower (100 SE 2nd St, 1987, I. M. Pei): a garage podium, the office shaft, and the
+    // three stepped quarter-round tiers on top that are washed in colour every night
+    const s0 = site(25.7722, -80.1908, 64, 52, 0);
+    if (s0) {
+      reserved.push({ x: s0.x, z: s0.z, r: 40 });
+      B.prism(s0.poly, 0, 5.5, { style: 5, floorH: 4, bayW: 6, seed: 3, wall: 0, glass: 4, groundH: 5.5 }, -1, { collide: false });
+      B.prism(s0.poly, 5.5, 32, { style: 4, floorH: 3.2, bayW: 8.5, seed: 3, wall: 0, glass: 4, groundH: 0 }, 5, { parapet: 1.1 });
+      B.collide(s0.poly, 0, 33);
+      const shaft = shapePoly('rect', s0.x + 6, s0.z, 44, 36, 0, R);
+      B.prism(shaft, 32, 150, { style: 1, floorH: 4, bayW: 1.55, seed: 4, wall: 0, glass: 3, groundH: 0 }, -1);
+      landmarks.miamiTower = { x: s0.x + 6, z: s0.z, y: 150, w: 44, d: 36 };
+      B.colliders.push({ poly: convexHull(shapePoly('rect', s0.x + 6, s0.z, 44, 36, 0, R)), y0: 150, y1: 192, cx: s0.x + 6, cz: s0.z, r: 30 });
+    }
+    // the Freedom Tower (600 Biscayne Blvd, 1925): Spanish Revival, a cupola on a square shaft
+    const s1 = site(25.7797, -80.1898, 44, 32, 0);
+    if (s1) {
+      reserved.push({ x: s1.x, z: s1.z, r: 28 });
+      B.prism(s1.poly, 0, 19, { style: 2, floorH: 3.6, bayW: 3.2, seed: 5, wall: 4, glass: 4, groundH: 4.5 }, 2, { parapet: 0.8 });
+      const sh = shapePoly('rect', s1.x, s1.z, 15, 15, 0, R);
+      B.prism(sh, 19, 58, { style: 2, floorH: 3.6, bayW: 2.6, seed: 6, wall: 4, glass: 4, groundH: 0 }, -1);
+      const oct = shapePoly('round', s1.x, s1.z, 11, 11, 0, R);
+      B.prism(oct, 58, 66, { style: 3, floorH: 4, bayW: 2.4, seed: 7, wall: 4, glass: 4, groundH: 0 }, -1);
+      landmarks.freedomTower = { x: s1.x, z: s1.z, y: 66 };
+    }
+    // the Kaseya Center (601 Biscayne Blvd): the arena by the bay, a glass drum under a white roof
+    const s2 = site(25.7814, -80.1872, 132, 104, 0, 'ellipse');
+    if (s2) {
+      reserved.push({ x: s2.x, z: s2.z, r: 75 });
+      B.prism(s2.poly, 0, 30, { style: 1, floorH: 6, bayW: 3.2, seed: 8, wall: 12, glass: 1, groundH: 0 }, -1, { collide: false });
+      B.collide(s2.poly, 0, 44);
+      landmarks.arena = { x: s2.x, z: s2.z, y: 30, w: 132, d: 104 };
+    }
+    // the Pérez Art Museum (Herzog & de Meuron): a glass box under a vast timber canopy on stilts,
+    // the hanging gardens dangling from it
+    const s3 = site(25.7859, -80.1864, 84, 52, 0);
+    if (s3) {
+      reserved.push({ x: s3.x, z: s3.z, r: 60 });
+      B.prism(s3.poly, 1.5, 15, { style: 1, floorH: 5, bayW: 2.4, seed: 9, wall: 0, glass: 2, groundH: 0 }, 6);
+      landmarks.pamm = { x: s3.x, z: s3.z, y: 20, w: 140, d: 92 };
+    }
+    // Frost Science: white fins and the planetarium sphere
+    const s4 = site(25.7848, -80.1879, 58, 40, 0);
+    if (s4) {
+      reserved.push({ x: s4.x, z: s4.z, r: 42 });
+      B.prism(s4.poly, 0, 24, { style: 6, floorH: 4.5, bayW: 2.6, seed: 10, wall: 9, glass: 7, groundH: 0 }, 0, { parapet: 1 });
+      landmarks.frost = { x: s4.x + 18, z: s4.z - 4, y: 24 + 13, r: 13.5 };
+    }
+    // Bayside Marketplace: the two low pavilions, the SkyViews wheel on the bay
+    const s5 = site(25.7783, -80.1866, 110, 28, 0);
+    if (s5) {
+      reserved.push({ x: s5.x, z: s5.z, r: 58 });
+      B.prism(s5.poly, 0, 9.5, { style: 5, floorH: 4.5, bayW: 6, seed: 11, wall: 4, glass: 6, groundH: 9.5 }, 0, { parapet: 1.2 });
+      landmarks.bayside = { x: s5.x, z: s5.z, y: 10.7 };
+    }
+  }
 
   // ---- the grids
   for (const d of DISTRICTS) {
@@ -685,7 +774,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     const pm = new THREE.MeshStandardMaterial({ color: 0x2bb5c8, roughness: 0.05, metalness: 0.1, emissive: 0x0a5a66, emissiveIntensity: 0.25 });
     group.add(chunkMeshes(B.pools, 900, pm, { name: 'pools' }));
   }
-  return { group, colliders: B.colliders, open, roofs: B.roofTops, decks: B.decks, crowns: B.crowns, decoSigns };
+  return { group, colliders: B.colliders, open, roofs: B.roofTops, decks: B.decks, crowns: B.crowns, decoSigns, landmarks };
 }
 
 const PR = { s: 0, lat: 0, y: 0, tx: 0, tz: 0, off: false, i: 0, t: 0 };
