@@ -177,7 +177,8 @@ facRough = 0.82;
 facMetal = 0.0;
 facEmit = vec3( 0.0 );
 facNudge = vec3( 0.0 );
-float lit = step( fh1( cell * 1.31 + seed * 3.7 ), 0.34 + 0.18 * sin( seed * 7.0 ) ) * uNight;
+// (a real skyline after dark: a fifth to a third of the windows lit, some only dimly)
+float lit = step( fh1( cell * 1.31 + seed * 3.7 ), 0.2 + 0.12 * sin( seed * 7.0 ) ) * uNight * ( 0.45 + 0.55 * step( 0.35, fh1( cell * 2.3 + seed ) ) );
 float litTone = fh1( cell + 17.0 + seed );
 vec3 litC = litTone < 0.62 ? vec3( 1.0, 0.72, 0.45 ) : litTone < 0.9 ? vec3( 0.85, 0.92, 1.0 ) : vec3( 0.45, 0.6, 1.0 ) * ( 0.75 + 0.25 * sin( uFTime * 9.0 + rnd * 40.0 ) );
 float roomK = 1.0;
@@ -354,7 +355,7 @@ if ( glass > 0.01 ) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v5';
+  m.customProgramCacheKey = () => 'ow-facade-v6';
   return m;
 }
 

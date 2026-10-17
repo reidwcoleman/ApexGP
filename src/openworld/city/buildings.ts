@@ -515,12 +515,42 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
       const p2 = shapePoly(shape, cx, cz, tw * 0.78, td * 0.78, tyaw, R);
       B.prism(p2, yTop, tall, fac, 0);
     }
-    // the mechanical crown
-    const cw = tw * 0.42, cd = td * 0.45;
-    const crownH = 4 + R() * 5;
-    const crown = shapePoly('rect', cx, cz, cw, cd, tyaw, R);
-    B.prism(crown, tall, tall + crownH, { style: 7, floorH: 3, bayW: 3, seed, wall: wall === 12 ? 2 : 1, glass: 4, groundH: 0 }, 3);
-    B.crowns.push({ x: cx, z: cz, y: tall + crownH, w: cw, d: cd, yaw: tyaw, tall });
+    // the crown: Miami's towers finish in a statement — a glass screen standing proud of the roof
+    // (lit along its top after dark), a stepped glass crown, or a plain mechanical penthouse
+    const kind = R();
+    const tw2 = setback ? tw * 0.78 : tw, td2 = setback ? td * 0.78 : td;
+    const cw = tw2 * 0.42, cd = td2 * 0.45;
+    let crownTop = tall;
+    if (kind < 0.36 && tall > 70) {
+      const sh = 7 + R() * 9;
+      const ring = shapePoly(shape, cx, cz, tw2 * 0.985, td2 * 0.985, tyaw, R);
+      B.prism(ring, tall, tall + sh, { ...fac, style: R() < 0.5 ? 6 : 1, floorH: sh / 2, bayW: style === 1 ? 1.55 : 2.4, groundH: 0 }, -1, { collide: false, topH: tall + sh });
+      crownTop = tall + sh;
+      // the plant hides inside it
+      const crown = shapePoly('rect', cx, cz, cw, cd, tyaw, R);
+      B.prism(crown, tall, tall + Math.min(sh - 1.5, 5), { style: 7, floorH: 3, bayW: 3, seed, wall: 1, glass: 4, groundH: 0 }, 3, { collide: false });
+      B.crowns.push({ x: cx, z: cz, y: tall + Math.min(sh - 1.5, 5), w: cw, d: cd, yaw: tyaw, tall });
+    } else if (kind < 0.62 && tall > 80) {
+      // stepped: three glass tiers, each smaller
+      let y = tall;
+      let k = 0.86;
+      for (let i = 0; i < 3; i++, k -= 0.16) {
+        const h = 4 + R() * 3;
+        const p3 = shapePoly(shape, cx, cz, tw2 * k, td2 * k, tyaw, R);
+        B.prism(p3, y, y + h, { ...fac, floorH: h, groundH: 0 }, i === 2 ? 3 : 0, { topH: y + h + (i === 2 ? 0 : 50) });
+        y += h;
+      }
+      crownTop = y;
+      B.crowns.push({ x: cx, z: cz, y, w: tw2 * (k + 0.16) * 0.6, d: td2 * (k + 0.16) * 0.6, yaw: tyaw, tall });
+    } else {
+      // the mechanical penthouse
+      const crownH = 4 + R() * 5;
+      const crown = shapePoly('rect', cx, cz, cw, cd, tyaw, R);
+      B.prism(crown, tall, tall + crownH, { style: 7, floorH: 3, bayW: 3, seed, wall: wall === 12 ? 2 : 1, glass: 4, groundH: 0 }, 3);
+      B.crowns.push({ x: cx, z: cz, y: tall + crownH, w: cw, d: cd, yaw: tyaw, tall });
+      crownTop = tall + crownH;
+    }
+    void crownTop;
     B.roofTops.push({ x: cx, z: cz, y: tall, w: tw * 0.8, d: td * 0.8, yaw: tyaw });
     return true;
   };

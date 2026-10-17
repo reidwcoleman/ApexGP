@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loft, table, type Station } from './loft.ts';
 import { mergeBasic } from './parts.ts';
 import { latheX } from './loft.ts';
+import { buildCar, carWheel, liveryTexture } from './carmodel.ts';
 
 /**
  * Miami's traffic, modelled from the same loft as the Roadster but rounded (superellipse-ish
@@ -323,12 +324,13 @@ export class Fleet {
     const paint = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.35, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.05 });
     const chrome = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.22, clearcoat: 0.6 });
     const glass = new THREE.MeshPhysicalMaterial({ color: 0x0a0d10, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0 });
+    const decalMats: Partial<Record<'police' | 'taxi', THREE.MeshStandardMaterial>> = {};
     const lamp = new THREE.MeshBasicMaterial({ vertexColors: true });
     const wheel = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.55, roughness: 0.42 });
     for (const [id, cap] of Object.entries(caps) as [ModelId, number][]) {
       if (!cap) continue;
       const spec = MODELS[id];
-      const g = buildBody(spec);
+      const g = buildCar(spec);
       const mk = (geo: THREE.BufferGeometry, mat: THREE.Material, n: number, cast: boolean) => {
         const im = new THREE.InstancedMesh(geo, mat, n);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -347,8 +349,14 @@ export class Fleet {
         heads.setColorAt(i, new THREE.Color(1, 1, 1));
         tails.setColorAt(i, new THREE.Color(1, 1, 1));
       }
-      const wheels = mk(wheelGeometry(spec.wheelR, spec.id === 'bus' ? 0.32 : 0.24, id === 'gwagon' || id === 'police' || id === 'policeSuv' ? 'black' : id === 'van' || id === 'bus' ? 'steel' : 'alloy'), wheel, cap * 4, true);
-      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: 0 });
+      const wheels = mk(carWheel(spec.wheelR, spec.id === 'bus' ? 0.32 : spec.id === 'pickup' || spec.id === 'gwagon' ? 0.28 : 0.24, id === 'gwagon' || id === 'police' || id === 'policeSuv' ? 'black' : id === 'van' || id === 'bus' ? 'steel' : 'alloy'), wheel, cap * 4, true);
+      let decal: THREE.InstancedMesh | null = null;
+      if (g.decal) {
+        const kind = id === 'taxi' ? 'taxi' : 'police';
+        const dm = (decalMats[kind] ??= new THREE.MeshStandardMaterial({ map: liveryTexture(kind), transparent: true, roughness: 0.35, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
+        decal = mk(g.decal, dm, cap, false);
+      }
+      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, decal, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: 0 });
     }
   }
 
@@ -379,6 +387,7 @@ export class Fleet {
     k.glass.setMatrixAt(s.index, this.zero);
     k.heads.setMatrixAt(s.index, this.zero);
     k.tails.setMatrixAt(s.index, this.zero);
+    k.decal?.setMatrixAt(s.index, this.zero);
     for (let w = 0; w < 4; w++) k.wheels.setMatrixAt(s.index * 4 + w, this.zero);
     k.free.push(s.index);
     k.used--;
@@ -408,6 +417,7 @@ export class Fleet {
     k.glass.setMatrixAt(s.index, this.m4);
     k.heads.setMatrixAt(s.index, this.m4);
     k.tails.setMatrixAt(s.index, this.m4);
+    k.decal?.setMatrixAt(s.index, this.m4);
     const police = sp.id === 'police' || sp.id === 'policeSuv';
     const hk = 0.3 + head * 3.5;
     const bk = 0.45 + brake * 5 + head * 1.0;
@@ -432,6 +442,7 @@ export class Fleet {
       k.glass.instanceMatrix.needsUpdate = true;
       k.heads.instanceMatrix.needsUpdate = true;
       k.tails.instanceMatrix.needsUpdate = true;
+      if (k.decal) k.decal.instanceMatrix.needsUpdate = true;
       if (k.heads.instanceColor) k.heads.instanceColor.needsUpdate = true;
       if (k.tails.instanceColor) k.tails.instanceColor.needsUpdate = true;
       k.wheels.instanceMatrix.needsUpdate = true;
@@ -447,6 +458,7 @@ interface Kind {
   heads: THREE.InstancedMesh;
   tails: THREE.InstancedMesh;
   wheels: THREE.InstancedMesh;
+  decal: THREE.InstancedMesh | null;
   free: number[];
   cap: number;
   used: number;
