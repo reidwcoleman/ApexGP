@@ -7,7 +7,7 @@ import { applyWeatherUniforms } from '../world/weatherUniforms.ts';
 import { loadAsphaltScan } from '../world/trackside/textures.ts';
 import { TIME_PRESETS } from '../world/env/presets.ts';
 import { MIAMI_ENV_TRACK } from './envTrack.ts';
-import { Network } from './roads.ts';
+import { Network, makeSurf } from './roads.ts';
 import { buildRoads } from './city/roadMesh.ts';
 import { buildGround, type GroundBuild } from './city/ground.ts';
 import { bakeCityLights, setCityNight, uploadCityLights } from './city/cityLights.ts';
@@ -546,9 +546,14 @@ export class OpenWorld {
     this.hud.toast(`${car.name} delivered · ${ROADSTER_PAINTS[paint][0]}`);
   }
 
-  private besideYou() {
-    const p = this.vehicle ? this.vehicle.pos : this.people.player.pos;
-    return this.roadPoint(p.x, p.z, p.y) ?? { x: p.x + 4, y: p.y, z: p.z, yaw: 0 };
+  /** a spot on the street beside you (ahead of the car you're in, so it doesn't land on it) */
+  private besideYou(ahead = 0) {
+    const v = this.vehicle;
+    const p = v ? v.pos : this.people.player.pos;
+    const yaw = v ? v.yaw : this.people.player.yaw;
+    const d = ahead || (v ? 9 : 0);
+    const x = p.x + Math.sin(yaw) * d, z = p.z + Math.cos(yaw) * d;
+    return this.roadPoint(x, z, p.y) ?? { x: x + 4, y: p.y, z, yaw: 0 };
   }
 
   private deliver(kind: string) {
@@ -556,7 +561,9 @@ export class OpenWorld {
     let v: Drivable | null = null;
     if (kind === 'heli') {
       const h = new Helicopter('news');
-      const at = this.besideYou();
+      // a clear patch of land for the rotor, or the street well ahead
+      const c = this.clearLand(p.x, p.z, 8);
+      const at = c ? { x: c.x, y: this.net.surface(c.x, c.z, 50, makeSurf()).y, z: c.z, yaw: 0 } : this.besideYou(16);
       h.place(at.x, at.y + 0.05, at.z, at.yaw);
       v = h;
     } else if (kind === 'plane' || kind === 'boat') {

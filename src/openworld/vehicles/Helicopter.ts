@@ -61,19 +61,90 @@ export function buildHeli(livery: HeliLivery) {
     m.castShadow = true;
     body.add(m);
   }
-  // the boom, the fin, the stabiliser
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, 4.4, 12), paint);
+  // the boom (tapering, faired into the pod), the swept fin, the stabiliser with its endplates
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.24, 4.4, 14), paint);
   boom.rotation.x = Math.PI / 2;
-  boom.position.set(0, 1.55, -4.3);
+  boom.position.set(0, 1.58, -4.3);
   boom.castShadow = true;
   body.add(boom);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.3, 0.7), paint);
-  fin.position.set(0, 2.05, -6.35);
-  fin.rotation.x = -0.35;
+  const finShape = new THREE.Shape();
+  finShape.moveTo(0, 0);
+  finShape.lineTo(-0.72, 0);
+  finShape.lineTo(-1.15, 1.25);
+  finShape.lineTo(-0.82, 1.3);
+  finShape.lineTo(-0.2, 0.25);
+  finShape.closePath();
+  const finG = new THREE.ExtrudeGeometry(finShape, { depth: 0.07, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2 });
+  finG.rotateY(-Math.PI / 2);
+  finG.translate(0.035, 0, 0);
+  const fin = new THREE.Mesh(finG, paint);
+  fin.position.set(0, 1.62, -5.95);
+  fin.castShadow = true;
   body.add(fin);
-  const stab = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, 0.45), paint);
-  stab.position.set(0, 1.6, -5.4);
+  const ventral = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.35), paint);
+  ventral.position.set(0, 1.25, -6.25);
+  ventral.rotation.x = 0.4;
+  body.add(ventral);
+  const stab = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.05, 0.42), paint);
+  stab.position.set(0, 1.62, -5.3);
+  stab.castShadow = true;
   body.add(stab);
+  for (const sg of [1, -1]) {
+    const ep = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.42, 0.5), stripe);
+    ep.position.set(sg * 1.0, 1.66, -5.32);
+    body.add(ep);
+  }
+  // the engine cowling over the cabin: a hump with intakes either side and two exhausts
+  {
+    const cowl = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 1.5, 6, 14), paint);
+    cowl.rotation.x = Math.PI / 2;
+    cowl.scale.set(1, 1, 0.62);
+    cowl.position.set(0, 2.22, -0.65);
+    cowl.castShadow = true;
+    body.add(cowl);
+    for (const sg of [1, -1]) {
+      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.16, 14), MAT.blackTrim());
+      intake.rotation.y = (sg * Math.PI) / 2;
+      intake.position.set(sg * 0.43, 2.28, -0.15);
+      body.add(intake);
+      const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.35, 12, 1, true), MAT.nozzle());
+      ex.rotation.x = Math.PI / 2 + 0.3;
+      ex.position.set(sg * 0.2, 2.28, -1.55);
+      body.add(ex);
+    }
+  }
+  // the camera / searchlight ball under the nose, an antenna, the landing light
+  {
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), livery === 'private' ? MAT.gloss() : MAT.rimDark());
+    ball.position.set(0, 0.55, 2.05);
+    body.add(ball);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.1, 14), MAT.glassDark());
+    lens.position.set(0, 0.55, 2.252);
+    body.add(lens);
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.6, 5), MAT.blackTrim());
+    ant.position.set(0, 0.35, 0.4);
+    body.add(ant);
+  }
+  // the livery: lettering on the boom
+  {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 96;
+    const g = c.getContext('2d')!;
+    g.fillStyle = livery === 'news' ? '#c8102e' : livery === 'police' ? '#ffffff' : '#c9a24a';
+    g.font = '900 64px Arial';
+    g.textAlign = 'center';
+    g.fillText(livery === 'news' ? 'NEWS 7' : livery === 'police' ? 'POLICE' : 'N407MA', 256, 72);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.MeshStandardMaterial({ map: t, transparent: true, roughness: 0.4, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const sg of [1, -1]) {
+      const q = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.32), m);
+      q.rotation.y = (sg * Math.PI) / 2;
+      q.position.set(sg * 0.205, 1.6, -3.0);
+      body.add(q);
+    }
+  }
   // skids
   const skidParts: THREE.BufferGeometry[] = [];
   for (const sg of [1, -1]) {
@@ -98,9 +169,22 @@ export function buildHeli(livery: HeliLivery) {
   mast.position.y = -0.15;
   rotor.add(mast);
   const blades: THREE.Mesh[] = [];
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.18, 12), MAT.rimDark());
+  rotor.add(hub);
+  const bladeGeo = (() => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.14, 0);
+    sh.lineTo(0.14, 0);
+    sh.lineTo(0.13, 5.0);
+    sh.quadraticCurveTo(0.05, 5.3, -0.12, 5.25);
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.03, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.01, bevelSegments: 1 });
+    g.rotateX(-Math.PI / 2);
+    g.translate(0, 0, 0.2);
+    return g;
+  })();
   for (let i = 0; i < 4; i++) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.035, 5.3), MAT.blackTrim());
-    b.geometry.translate(0, 0, 2.7);
+    const b = new THREE.Mesh(bladeGeo, MAT.blackTrim());
     b.rotation.y = (i / 4) * Math.PI * 2;
     b.castShadow = true;
     rotor.add(b);

@@ -601,15 +601,26 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
   PortMiami terminals, gantry cranes and container stacks, South Beach's lifeguard towers.
 - **The 2026 Tesla Roadster** in three trims: Performance, Thrust (four rear cold-gas boost
   nozzles) and Rocket (ten: two boost, eight lift — it flies, lands on roofs, kickflips).
-  Lofted body with butterfly doors, the active wing, a gold-tinted canopy, aero wheels, a cockpit.
+  Lofted body with butterfly doors, the active wing, a gold-tinted canopy, aero wheels, bucket
+  seats, a full-width tail light over a carbon diffuser. The cold-gas jets are vapour you can see:
+  nitrogen chilling the humid air into white billows that splash and roll along the ground under a
+  low hover (spray over water), and the nozzles frost over with use.
 - **Other vehicles**: every traffic car can be taken (carjacking ejects the driver), a superbike,
   a helicopter (Watson Island), a seaplane, a go-fast boat with a wake; the menu delivers more.
 - **The city lives**: lane-following traffic with signals and junction paths, parked cars,
   pedestrians (Rocketbox avatars) who cross, dodge and flee, boats in the bay, airliners on the
   MIA approach, a news helicopter.
-- **Miami PD**: crimes raise the wanted level; cruisers route to you (A*), chase, ram and box you
-  in, the helicopter joins at three stars (searchlight at night); stop with a cruiser beside you
-  and you're BUSTED; lose them and the stars clear.
+- **Weapons**: pistol, SMG, carbine, pump shotgun, marksman rifle (scope) and a rocket launcher;
+  generic designs modelled at real size. An over-the-shoulder camera with mouse capture, the
+  character posed by IK onto the gun; hitscan rounds with tracers, muzzle flashes that light the
+  street, brass, bullet holes, sparks and dust; drive-bys with the pistol and SMG. Cars shot up
+  smoke, burn and explode (throwing the cars round them, setting off the next); people go down.
+- **Miami PD**: shots, shootings and explosions raise the wanted level; cruisers route to you (A*),
+  chase and ram; their crews get out and either cuff a suspect who stands still or, from two stars
+  (or at anyone pointing a gun at them), shoot; from three stars passengers fire out of the windows
+  and the helicopter comes over (a rifle in its door from four); roadblocks from four stars; the
+  tactical team in black with carbines at five. Dispatch on the radio, the search area on the map;
+  stop with a cruiser beside you and you're BUSTED; lose them and the stars clear.
 - Physics: a bicycle-model car on Pacejka-shaped tyres (load transfer, traction control, ABS,
   downforce), assisted flight for the Rocket and the helicopter, lift / drag / stall for the
   seaplane, planing for the boat. Synthesised audio (EV whine, thrusters, rotors, sirens, surf).
@@ -623,6 +634,8 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
 | Fly down / bank | X · Q / E | B / ○ |
 | Get in / out | F | Y / △ |
 | Camera · recover · map · menu | C · R · M · Esc | View · D-pad · Menu |
+| Capture the mouse · fire · aim | click · left · right mouse | RT · LT (on foot) |
+| Weapons · holster · reload | 1–6 / wheel · 0 · R (on foot) | D-pad right |
 
 Dev flags (`miami.html?`): `time=night`, `weather=rain`, `trim=performance|thrust|rocket`,
 `traffic=N`, `people=0`, `hud=0`, `carcam=az,el,dist,fov`, `cam=x,y,z&look=x,y,z`, `q=high`.
