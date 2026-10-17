@@ -39,6 +39,10 @@ import { placeAt, WORLD } from './geo.ts';
 import type { CarBody } from './sim/car.ts';
 import type { CamSubject } from './camera.ts';
 import { Particles, fx } from './fx/particles.ts';
+import { Combat } from './combat/Combat.ts';
+import { Gunman } from './combat/Gunman.ts';
+import { WEAPON_ORDER, WEAPONS } from './combat/weapons.ts';
+import { officerLook } from './ai/officers.ts';
 
 /**
  * The open world: Miami, from Brickell to South Beach, at real scale. Owns the renderer, the
@@ -78,6 +82,14 @@ export class OpenWorld {
   hud!: Hud;
   audio = new OpenWorldAudio();
   readonly particles = new Particles();
+  combat!: Combat;
+  /** the player on foot, drawn and posed with a gun */
+  avatar: Gunman | null = null;
+  private aimK = 0;
+  private fireT = 0;
+  private readonly aimRay = new THREE.Ray();
+  private readonly muzzle = new THREE.Vector3();
+  private exploded = false;
   /** vehicles parked about the city for the player (the Roadster is one) */
   readonly owned: Drivable[] = [];
   private paused = false;
@@ -183,6 +195,8 @@ export class OpenWorld {
 
     this.scene.add(this.particles.group);
     fx.p = this.particles;
+    this.combat = new Combat(this);
+    this.scene.add(this.combat.group);
 
     await step(0.85, 'Charging the Roadster');
     this.input = new Input(this.canvas);
@@ -208,6 +222,9 @@ export class OpenWorld {
 
     await step(0.95, 'Warming up');
     this.setupCamera();
+    this.particles.primeDraw(true);
+    await this.combat.warm(this.gfx.renderer, this.camera, this.scene);
+    this.particles.primeDraw(false);
     this.env.update(0, this.camera);
     this.env.setWeather(this.weather.state);
     this.gfx.render(0.016);
@@ -492,6 +509,10 @@ export class OpenWorld {
           /* private mode */
         }
       },
+      onRefill: () => {
+        this.combat.refill();
+        this.hud.toast('Ammo and armour refilled', 'good');
+      },
       onExit: () => (location.href = './'),
     });
   }
@@ -501,6 +522,8 @@ export class OpenWorld {
     this.paused = false;
     this.input.blocked = false;
     this.audio.resume();
+    // (Resume is a click: the mouse can be captured again)
+    this.input.lock();
   }
 
   private replanWeather() {
@@ -593,6 +616,9 @@ export class OpenWorld {
     this.player.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
     this.player.health = 1;
     for (const o of this.owned) o.health = Math.max(o.health, 0.5);
+    this.combat.hp = 100;
+    this.exploded = false;
+    this.avatar?.revive();
     this.enter(this.player);
   }
 
@@ -628,7 +654,7 @@ export class OpenWorld {
     this.govern(dt);
     this.input.update(dt);
     const pad = this.input.s;
-    if (pad.pause) {
+    if (pad.pause || (pad.lockLost && !this.paused)) {
       if (this.paused) this.closeMenu();
       else this.openMenu();
     }
@@ -670,7 +696,8 @@ export class OpenWorld {
     const camYaw = Math.atan2(camFwd.x, camFwd.z);
     // ---- the player's vehicle, and the parked ones settling
     if (this.vehicle) this.vehicle.drive(dt, pad, ctx);
-    else this.people.movePlayer(dt, pad.moveX, pad.moveY, pad.boost, pad.handbrake, camYaw);
+    else if (this.combat.hp > 0) this.people.movePlayer(dt, pad.moveX, pad.moveY, pad.boost && this.aimK < 0.5, pad.handbrake, camYaw);
+    this.guns(dt, camFwd, camYaw);
     for (const o of this.owned) {
       if (o === this.vehicle) continue;
       const d = Math.hypot(o.pos.x - this.focus.x, o.pos.z - this.focus.z);
@@ -685,11 +712,11 @@ export class OpenWorld {
     if (pad.camera) this.cams.mode = CAM_MODES[(CAM_MODES.indexOf(this.cams.mode) + 1) % CAM_MODES.length];
     if (pad.recover) this.recover();
     const cc = this.params.get('carcam');
-    if (cc && this.vehicle) {
+    if (cc) {
       // dev: an orbit shot of the car (azimuth from the nose, elevation, distance)
       // (optionally aimed at a point in the car's frame: tx (left), ty, tz (forward))
       const [az, el, d, fov, tx = 0, ty = 0.55, tz = 0] = cc.split(',').map(Number);
-      const v = this.vehicle;
+      const v = this.vehicle ?? { pos: this.people.player.pos, yaw: this.people.player.yaw };
       const a = v.yaw + (az * Math.PI) / 180, e = (el * Math.PI) / 180;
       const T = this.tmpV.set(tx, ty, tz).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.yaw).add(v.pos);
       this.camera.position.set(T.x + Math.sin(a) * Math.cos(e) * d, T.y + Math.sin(e) * d, T.z + Math.cos(a) * Math.cos(e) * d);
@@ -700,7 +727,7 @@ export class OpenWorld {
       }
     } else if (this.free) this.free.update(dt);
     else {
-      this.cams.look2(pad.lookX, pad.lookY, pad.dragging);
+      this.cams.look2(pad.lookX, pad.lookY, pad.dragging || pad.locked);
       if (this.vehicle && this.vehicle.impact > 4) this.cams.bump(Math.min(1, this.vehicle.impact / 25));
       this.cams.update(dt, this.vehicle ? this.vehicle.subject() : this.footSubject(), this.world);
     }
@@ -724,13 +751,28 @@ export class OpenWorld {
     if (v && body && Math.abs(body.vLong) > 40) this.police.report('speeding', v.pos);
     // ---- the police
     const sus = this.suspect(v, body, hl, hw);
+    sus.threat = this.fireT > 0 || (!v && !!this.combat.current && this.aimK > 0.5);
     this.police.update(dt, sus, ctx, this.camera.position, camFwd, this.night);
+    for (const sh of this.police.shots) this.combat.aiFire(sh.from, sh.to, sh.weapon, sh.acc);
+    for (const r of this.police.radio) this.hud.radio(r);
+    for (const c of this.combat.crimes) this.police.report(c.kind, c.at);
+    this.combat.crimes.length = 0;
+    this.combat.update(dt);
+    if (this.combat.shake > 0.05) this.cams.bump(this.combat.shake * 0.5);
     for (const e of this.police.events) {
       if (e === 'escaped') this.hud.toast('You lost the police', 'good');
       if (e === 'up') this.hud.toast(`Wanted level ${this.police.wanted}`, 'bad');
       if (e === 'busted') this.card('BUSTED', 'Miami PD · released from Downtown HQ', ll(25.7795, -80.1975));
     }
-    if (v && v.health <= 0) this.card('WASTED', 'Jackson Memorial Hospital', ll(25.7905, -80.2105));
+    if (v && v.health <= 0 && this.respawnT <= 0) {
+      if (!this.exploded) this.combat.explode(v.pos.clone().add(new THREE.Vector3(0, 0.8, 0)), 6, 'police');
+      this.exploded = true;
+      this.card('WASTED', 'Jackson Memorial Hospital', ll(25.7905, -80.2105));
+    }
+    if (!v && this.combat.hp <= 0 && this.respawnT <= 0) {
+      this.avatar?.kill(this.camera.position);
+      this.card('WASTED', 'Jackson Memorial Hospital', ll(25.7905, -80.2105));
+    }
     this.fleet.flush();
     // ---- the HUD
     this.updateHud(dt, camYaw);
@@ -755,6 +797,7 @@ export class OpenWorld {
     this.landmarks.update(this.elapsed, night);
     this.ambient.update(dt, ctx, this.camera.position);
     const dyn = this.police.dynLights(night, this.focus);
+    this.combat.lights(dyn);
     // the player's headlights throw a pool on the road ahead after dark
     const hv = this.vehicle;
     if (hv && night > 0.2 && (hv.kind === 'roadster' || hv.kind === 'car' || hv.kind === 'bike')) {
@@ -794,7 +837,7 @@ export class OpenWorld {
   }
 
   /** where the player is (in a vehicle or on foot) */
-  private get focus(): THREE.Vector3 {
+  get focus(): THREE.Vector3 {
     return this.vehicle ? this.vehicle.pos : this.people.player.pos;
   }
 
@@ -805,7 +848,7 @@ export class OpenWorld {
 
   private suspect(v: Drivable | null, body: CarBody | null, hl: number, hw: number): Suspect {
     const foot = this.people.player;
-    if (!v) return { pos: foot.pos, vel: foot.vel, yaw: foot.yaw, hl: 0.3, hw: 0.3, mass: 80, onFoot: true, flying: false, onImpulse: (jx, jz) => foot.vel.set(foot.vel.x + jx, foot.vel.y, foot.vel.z + jz) };
+    if (!v) return { pos: foot.pos, vel: foot.vel, yaw: foot.yaw, hl: 0.3, hw: 0.3, mass: 80, onFoot: true, flying: false, threat: false, onImpulse: (jx, jz) => foot.vel.set(foot.vel.x + jx, foot.vel.y, foot.vel.z + jz) };
     const flying = (v instanceof RoadsterCar && v.flying) || (v instanceof Helicopter && !v.grounded) || (v instanceof Seaplane && !v.onWater) || v instanceof Boat;
     return {
       pos: body ? body.pos : v.pos,
@@ -816,6 +859,7 @@ export class OpenWorld {
       mass: body ? body.spec.mass : 1500,
       onFoot: false,
       flying,
+      threat: false,
       onImpulse: (jx, jz) => {
         if (body) {
           body.vx += jx;
@@ -841,12 +885,130 @@ export class OpenWorld {
     hud.setPrompt(prompt);
     if (++this.mapTick % 2 === 0) {
       const blips: Parameters<Hud['drawMap']>[3] = [];
+      // the search area: where they last saw you, growing while they look
+      const pol = this.police;
+      if (pol.wanted > 0 && pol.unseen > 0.6) {
+        const ph = Math.floor(this.elapsed * 2) % 2;
+        blips.push({ x: pol.lastSeen.x, z: pol.lastSeen.z, color: ph ? 'rgba(255,60,80,0.22)' : 'rgba(70,110,255,0.22)', size: 70 + pol.unseen * 9, shape: 'ring' });
+      }
+      for (const o of pol.officers.list) if (o.state !== 'dead') blips.push({ x: o.pos.x, z: o.pos.z, color: '#6f9bff', size: 2.6 });
       for (const c of this.police.cops) blips.push({ x: c.body.pos.x, z: c.body.pos.z, color: Math.floor(this.elapsed * 4) % 2 ? '#ff4d5e' : '#4d7dff', size: 4 });
       for (const c of this.traffic.cars) if (c.police && c.flags & 1) blips.push({ x: c.pos.x, z: c.pos.z, color: '#4d7dff', size: 3.5 });
       if (this.police.heli) blips.push({ x: this.police.heli.pos.x, z: this.police.heli.pos.z, color: '#4d7dff', size: 6 });
       for (const o of this.owned) if (o !== v) blips.push({ x: o.pos.x, z: o.pos.z, color: o === this.player ? '#ff3f8e' : '#57e8ff', size: 4, shape: 'square' });
       hud.drawMap(f.x, f.z, camYaw, blips, null);
     }
+  }
+
+  /**
+   * The guns: which one is out, aiming, the trigger (on foot from the avatar's muzzle, in a car out
+   * of the window), the avatar's pose and the camera that goes with it.
+   */
+  private guns(dt: number, camFwd: THREE.Vector3, camYaw: number) {
+    const pad = this.input.s;
+    const C = this.combat;
+    const onFoot = !this.vehicle;
+    if (!this.avatar && this.people.kit) {
+      this.avatar = new Gunman(this.people.kit, {
+        female: false, tone: 0.35, hair: 'simpleparted', hairColor: 0x2b1d14, top: 'tshirt', topColor: 0xf2f2f2, bottom: 'jeans', bottomColor: 0x2b3442, body: 'Male_Adult_10',
+      });
+      this.scene.add(this.avatar.root);
+      this.people.avatarMode = true;
+      this.police.kit = this.people.kit;
+      // compile the people's shaders now (an officer's too), not on the first frame one is seen
+      const kit = this.people.kit;
+      void kit.whenAll.then(() => {
+        const cop = new Gunman(kit, officerLook(false, 1));
+        const swat = new Gunman(kit, officerLook(true, 2));
+        for (const g of [cop, swat]) {
+          g.setWeapon('pistol');
+          g.root.position.copy(this.camera.position);
+          this.scene.add(g.root);
+        }
+        this.avatar!.root.visible = true;
+        void this.gfx.renderer.compileAsync(this.scene, this.camera).finally(() => {
+          cop.dispose();
+          swat.dispose();
+        });
+      });
+    }
+    // ---- choosing
+    let switched = false;
+    if (pad.slot >= 0) {
+      C.select(pad.slot === 0 ? null : WEAPON_ORDER[pad.slot - 1]);
+      switched = true;
+    }
+    if (pad.cycle) {
+      C.cycle(Math.sign(pad.cycle));
+      switched = true;
+    }
+    if (onFoot && pad.recover) C.reload();
+    // ---- aiming and the trigger
+    const capture = pad.locked || pad.usingPad;
+    const aiming = onFoot && !!C.current && C.hp > 0 && (pad.aim || pad.padAim);
+    const firing = (pad.fire || (onFoot && pad.padFire)) && C.hp > 0 && this.respawnT <= 0;
+    this.aimK += ((aiming ? 1 : 0) - this.aimK) * Math.min(1, dt * 10);
+    const spec = C.spec;
+    this.cams.freeAim = onFoot && capture;
+    this.cams.aim = this.aimK;
+    this.cams.aimFov = spec?.aimFov ?? 46;
+    this.cams.scope = spec?.id === 'sniper' && aiming;
+    const P = this.people.player;
+    this.fireT = Math.max(0, this.fireT - dt);
+    const ray = this.aimRay;
+    ray.origin.copy(this.camera.position);
+    ray.direction.copy(camFwd);
+    let fired = false;
+    if (onFoot && this.avatar) {
+      const A = this.avatar;
+      A.setWeapon(C.current);
+      // the gun up: facing where the camera looks
+      const up = aiming || firing || this.fireT > 0;
+      A.aiming = up && !!C.current;
+      if (up && capture) P.yaw = camYaw;
+      A.aimDir.copy(camFwd);
+      A.root.visible = this.people.playerVisible;
+      A.update(dt, P.pos, P.yaw, Math.hypot(P.vel.x, P.vel.z), P.onGround);
+      if (C.current && A.aim > 0.6 && C.hp > 0) {
+        A.muzzle(this.muzzle);
+        fired = C.playerTrigger(dt, firing, aiming, ray, this.muzzle, Math.min(1, Math.hypot(P.vel.x, P.vel.z) / 5), false);
+        if (fired) A.kick = 1;
+      } else C.playerTrigger(dt, false, false, ray, this.muzzle, 0, false);
+    } else if (this.vehicle) {
+      if (this.avatar) this.avatar.root.visible = false;
+      // out of the window, toward where the camera looks (the side the camera's on)
+      const v = this.vehicle;
+      const side = Math.sign(-Math.cos(v.yaw) * camFwd.x + Math.sin(v.yaw) * camFwd.z) || 1;
+      this.muzzle.set(v.pos.x - Math.cos(v.yaw) * 0.9 * side, v.pos.y + 1.15, v.pos.z + Math.sin(v.yaw) * 0.9 * side);
+      fired = C.playerTrigger(dt, firing && pad.locked, false, ray, this.muzzle, 1, true);
+    }
+    if (fired) {
+      this.fireT = 1.2;
+      this.cams.kick(C.recoilPitch, C.recoilYaw);
+    }
+    C.recoilPitch = C.recoilYaw = 0;
+    // ---- the HUD
+    const moving = onFoot ? Math.min(1, Math.hypot(P.vel.x, P.vel.z) / 5) : 1;
+    const a = spec ? C.ammo[spec.id] : null;
+    this.hud.setCombat({
+      show: onFoot || (!!spec?.driveBy && pad.locked),
+      cross: (onFoot && !!spec && capture && C.hp > 0) || (!onFoot && !!spec?.driveBy && pad.locked),
+      aim: this.aimK,
+      spread: spec ? (aiming ? spec.spreadAim : spec.spreadHip) * (1 + moving * 0.6) : 0,
+      weapon: spec?.name ?? '',
+      mag: a?.mag ?? 0,
+      spare: a?.spare ?? 0,
+      reloading: C.reloading,
+      hp: C.hp,
+      armor: C.armor,
+      hurt: C.hurt,
+      marker: C.marker,
+      kill: C.markerKill,
+      scope: this.cams.scope && this.aimK > 0.85,
+      list: WEAPON_ORDER.map((w) => ({ name: WEAPONS[w].name, on: w === C.current, ammo: C.ammo[w].mag + C.ammo[w].spare })),
+      listShow: switched,
+      dt,
+    });
   }
 
   private updateAudio(dt: number, v: Drivable | null, body: CarBody | null) {

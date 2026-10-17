@@ -314,6 +314,11 @@ export class Motorbike implements Drivable {
     const b = this.body;
     b.stability = 1.6;
     b.step(dt, pad ? { throttle: pad.throttle, brake: pad.brake, steer: pad.steer, handbrake: pad.handbrake, thrust: 0 } : { throttle: 0, brake: 1, steer: 0, handbrake: false, thrust: 0 }, ctx.net, ctx.world);
+    // nobody on it and barely moving: on its stand (the tyre model creeps at walking pace)
+    if (!pad && Math.hypot(b.vx, b.vz) < 3) {
+      b.vx = b.vz = 0;
+      b.yawRate = 0;
+    }
     this.impact = b.impact;
     if (this.impact > 6) this.health = Math.max(0, this.health - (this.impact - 6) * 0.02);
     this.yaw = b.yaw;

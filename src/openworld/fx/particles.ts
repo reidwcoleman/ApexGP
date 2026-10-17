@@ -283,6 +283,12 @@ export class Particles {
     P.iSize.array[i * 2 + 1] = Math.floor(this.rand() * 4);
   }
 
+  /** draw one of each (for shader warm-up) */
+  primeDraw(on: boolean) {
+    this.smoke.geo.instanceCount = on ? 1 : this.smoke.n;
+    this.glow.geo.instanceCount = on ? 1 : this.glow.n;
+  }
+
   puff(e: Emit) {
     this.add(this.smoke, e);
   }

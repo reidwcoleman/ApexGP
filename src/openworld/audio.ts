@@ -1,5 +1,5 @@
 import { biquad, chain, clamp, gainNode, loopSource, makeBuffers, setT, smoothstep, type AudioBuffers } from '../core/audio/dsp.ts';
-import { CarFx, impactSound } from '../core/audio/fx.ts';
+import { CarFx, explosionSound, impactSound } from '../core/audio/fx.ts';
 
 /**
  * The open world's sound, all synthesised (the race game's noise buffers, tyre model and impact
@@ -252,6 +252,187 @@ export class OpenWorldAudio {
     g.gain.linearRampToValueAtTime(lvl, now + 0.01);
     g.gain.setValueAtTime(lvl, now + len);
     g.gain.linearRampToValueAtTime(0, now + len + 0.04);
+  }
+
+  /**
+   * A gunshot at a distance: the muzzle's crack (a broadband snap, sharper and longer for a rifle's
+   * supersonic round), the body of the blast (low noise and a thump), the mechanism, and the street
+   * canyons throwing it back — a slap off the nearest wall and the long tail of the reverb, which is
+   * most of what you hear of a shot a block away.
+   */
+  shot(kind: 'pistol' | 'smg' | 'rifle' | 'shotgun' | 'sniper' | 'launcher', dist: number) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime, b = this.b, r = Math.random;
+    const P = {
+      pistol: { crack: 0.026, hp: 900, body: 0.07, bodyF: 700, thump: 120, lvl: 0.75, slap: 0.13 },
+      smg: { crack: 0.018, hp: 1100, body: 0.05, bodyF: 800, thump: 140, lvl: 0.6, slap: 0.11 },
+      rifle: { crack: 0.04, hp: 1500, body: 0.09, bodyF: 900, thump: 95, lvl: 0.9, slap: 0.16 },
+      shotgun: { crack: 0.03, hp: 600, body: 0.19, bodyF: 520, thump: 70, lvl: 1.0, slap: 0.18 },
+      sniper: { crack: 0.06, hp: 1300, body: 0.16, bodyF: 600, thump: 60, lvl: 1.15, slap: 0.24 },
+      launcher: { crack: 0.02, hp: 300, body: 0.5, bodyF: 400, thump: 50, lvl: 0.9, slap: 0.2 },
+    }[kind];
+    const near = 1 / (1 + dist / 18);
+    const bus = gainNode(ctx, P.lvl * Math.max(0.05, near));
+    const air = biquad(ctx, 'lowpass', 1200 + 16000 * near * near, 0.5);
+    chain(bus, air, this.sfx);
+    // the reverb gets relatively more of it the further off it is
+    const wet = gainNode(ctx, 0.45 + 0.9 * (1 - near));
+    chain(air, wet, this.verb);
+    // crack
+    const ck = new AudioBufferSourceNode(ctx, { buffer: b.white, playbackRate: 0.9 + r() * 0.2 });
+    const ckG = gainNode(ctx, 0);
+    chain(ck, biquad(ctx, 'highpass', P.hp, 0.6), ckG, bus);
+    ckG.gain.setValueAtTime(0, now);
+    ckG.gain.linearRampToValueAtTime(1.0, now + 0.0006);
+    ckG.gain.setTargetAtTime(0, now + 0.002, P.crack / 3);
+    ck.start(now, r() * 2, 0.3);
+    // body
+    const bo = new AudioBufferSourceNode(ctx, { buffer: b.pink });
+    const boLP = biquad(ctx, 'lowpass', P.bodyF, 0.8);
+    const boG = gainNode(ctx, 0);
+    chain(bo, boLP, boG, bus);
+    boG.gain.setValueAtTime(0, now);
+    boG.gain.linearRampToValueAtTime(0.9, now + 0.002);
+    boG.gain.setTargetAtTime(0, now + 0.006, P.body / 3);
+    bo.start(now, r() * 3, 1);
+    const th = new OscillatorNode(ctx, { type: 'sine', frequency: P.thump });
+    th.frequency.setValueAtTime(P.thump * 1.6, now);
+    th.frequency.exponentialRampToValueAtTime(P.thump * 0.5, now + 0.08);
+    const thG = gainNode(ctx, 0);
+    chain(th, thG, bus);
+    thG.gain.setValueAtTime(0, now);
+    thG.gain.linearRampToValueAtTime(0.8 * near, now + 0.003);
+    thG.gain.setTargetAtTime(0, now + 0.01, 0.03);
+    th.start(now);
+    th.stop(now + 0.3);
+    // the slap off the walls
+    const d = new DelayNode(ctx, { delayTime: P.slap * (0.7 + r() * 0.6), maxDelayTime: 1 });
+    const dG = gainNode(ctx, 0.28);
+    chain(air, d, biquad(ctx, 'lowpass', 2500, 0.5), dG, this.sfx);
+    // the mechanism (close only): a slide or bolt clack
+    if (dist < 25 && kind !== 'launcher') {
+      const m = new AudioBufferSourceNode(ctx, { buffer: b.white });
+      const mG = gainNode(ctx, 0);
+      chain(m, biquad(ctx, 'bandpass', 3200 + r() * 800, 3), mG, this.sfx);
+      const t0 = now + (kind === 'shotgun' || kind === 'sniper' ? 0.35 : 0.03);
+      mG.gain.setValueAtTime(0, t0);
+      mG.gain.linearRampToValueAtTime(0.25 * near, t0 + 0.001);
+      mG.gain.setTargetAtTime(0, t0 + 0.002, 0.008);
+      m.start(t0, r() * 2, 0.1);
+    }
+    if (kind === 'launcher') this.whoosh(dist, 1.2);
+  }
+
+  /** a rocket motor / the air a shell tears through */
+  whoosh(dist: number, len: number) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    const n = new AudioBufferSourceNode(ctx, { buffer: this.b.white, loop: true });
+    const bp = biquad(ctx, 'bandpass', 900, 0.8);
+    bp.frequency.setValueAtTime(2400, now);
+    bp.frequency.exponentialRampToValueAtTime(500, now + len);
+    const g = gainNode(ctx, 0);
+    chain(n, bp, g, this.sfx);
+    const lvl = 0.5 / (1 + dist / 15);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(lvl, now + 0.03);
+    g.gain.setTargetAtTime(0, now + len * 0.6, len * 0.25);
+    n.start(now, Math.random() * 2);
+    n.stop(now + len * 2);
+  }
+
+  /** a round landing: a smack on stone or tarmac, a clang on a car, a plop in water; sometimes a ricochet */
+  hit(surface: 'stone' | 'metal' | 'water' | 'flesh' | 'glass', dist: number) {
+    if (!this.ctx || dist > 90) return;
+    const ctx = this.ctx, now = ctx.currentTime, r = Math.random;
+    const lvl = 0.35 / (1 + dist / 8);
+    const g = gainNode(ctx, 0);
+    const f = surface === 'metal' ? 2600 : surface === 'water' ? 500 : surface === 'glass' ? 5200 : surface === 'flesh' ? 300 : 1500;
+    const n = new AudioBufferSourceNode(ctx, { buffer: this.b.white });
+    chain(n, biquad(ctx, 'bandpass', f * (0.8 + r() * 0.4), surface === 'metal' ? 6 : 1.2), g, this.sfx);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(lvl, now + 0.001);
+    g.gain.setTargetAtTime(0, now + 0.002, surface === 'metal' ? 0.05 : surface === 'water' ? 0.06 : 0.015);
+    n.start(now, r() * 2, 0.3);
+    if (surface === 'metal' || (surface === 'stone' && r() < 0.18)) {
+      // the whine of a ricochet
+      const o = new OscillatorNode(ctx, { type: 'sine', frequency: 3000 });
+      o.frequency.setValueAtTime(2200 + r() * 2500, now + 0.01);
+      o.frequency.exponentialRampToValueAtTime(700 + r() * 500, now + 0.35);
+      const og = gainNode(ctx, 0);
+      chain(o, og, this.sfx);
+      og.gain.setValueAtTime(0, now + 0.01);
+      og.gain.linearRampToValueAtTime(lvl * 0.35, now + 0.02);
+      og.gain.setTargetAtTime(0, now + 0.05, 0.08);
+      o.start(now);
+      o.stop(now + 0.5);
+    }
+  }
+
+  /** a round passing close by your head */
+  whiz() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    const n = new AudioBufferSourceNode(ctx, { buffer: this.b.white });
+    const bp = biquad(ctx, 'bandpass', 3500, 2);
+    bp.frequency.setValueAtTime(5000, now);
+    bp.frequency.exponentialRampToValueAtTime(1500, now + 0.12);
+    const g = gainNode(ctx, 0);
+    chain(n, bp, g, this.sfx);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.22, now + 0.02);
+    g.gain.setTargetAtTime(0, now + 0.04, 0.03);
+    n.start(now, Math.random() * 2, 0.3);
+  }
+
+  /** mag out, mag in, the slide / bolt / pump */
+  reload(kind: string) {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    const clicks = kind === 'shotgun' ? [0.3, 0.6, 0.9, 1.2, 1.5, 2.2, 2.35] : kind === 'launcher' ? [0.4, 1.6, 2.0] : [0.15, 0.55, 0.95, 1.1];
+    for (const t of clicks) {
+      const n = new AudioBufferSourceNode(ctx, { buffer: this.b.white });
+      const g = gainNode(ctx, 0);
+      chain(n, biquad(ctx, 'bandpass', 1800 + Math.random() * 2400, 2.5), g, this.sfx);
+      g.gain.setValueAtTime(0, now + t);
+      g.gain.linearRampToValueAtTime(0.18, now + t + 0.002);
+      g.gain.setTargetAtTime(0, now + t + 0.004, 0.012);
+      n.start(now + t, Math.random() * 2, 0.1);
+    }
+  }
+
+  dry() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    const n = new AudioBufferSourceNode(ctx, { buffer: this.b.white });
+    const g = gainNode(ctx, 0);
+    chain(n, biquad(ctx, 'bandpass', 2800, 4), g, this.sfx);
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.15, now + 0.001);
+    g.gain.setTargetAtTime(0, now + 0.002, 0.006);
+    n.start(now, 0, 0.05);
+  }
+
+  /** brass on the pavement */
+  casing(dist: number) {
+    if (!this.ctx || dist > 12) return;
+    const ctx = this.ctx, now = ctx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const t = now + i * (0.06 + Math.random() * 0.05);
+      const o = new OscillatorNode(ctx, { type: 'triangle', frequency: 4200 + Math.random() * 2500 });
+      const g = gainNode(ctx, 0);
+      chain(o, g, this.sfx);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.04 / (1 + dist / 3) / (i + 1), t + 0.001);
+      g.gain.setTargetAtTime(0, t + 0.002, 0.02);
+      o.start(t);
+      o.stop(t + 0.15);
+    }
+  }
+
+  boom(dist: number) {
+    if (!this.ctx) return;
+    explosionSound(this.ctx, this.b, this.sfx, 1 / (1 + dist / 60), this.ctx.currentTime);
   }
 
   crash(strength: number) {

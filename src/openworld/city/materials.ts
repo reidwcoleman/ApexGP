@@ -107,7 +107,10 @@ float alb = albR * albR * 0.16;
 vec4 mac = texture2D( uMacro, vCW.xz * 0.0137 );
 vec4 mac2 = texture2D( uMacro, vCW.xz * 0.061 + 0.4 );
 float age = smoothstep( 0.25, 0.75, mac.r );
-alb = alb * mix( 1.15, 1.75, age ) + 0.012;
+// (Miami's streets are bleached grey by the sun: aged asphalt sits near 0.12-0.16 albedo)
+alb = alb * mix( 1.7, 2.6, age ) + 0.034;
+// the aggregate catches the light: a fine speckle of lighter stones
+alb += 0.05 * smoothstep( 0.72, 0.95, hgt ) * smoothstep( 0.4, 0.9, texture2D( uNoise, vCW.xz * 2.7 ).r );
 // patched trenches and repairs: darker newer blacktop in rectangles
 vec2 cell = floor( vCW.xz / vec2( 11.0, 7.0 ) );
 float rp = h21( cell );
@@ -192,7 +195,7 @@ diffuseColor.rgb *= col;
       )
       .replace('yellowOff: ;', '');
   };
-  m.customProgramCacheKey = () => 'ow-road-v1';
+  m.customProgramCacheKey = () => 'ow-road-v2';
   return m;
 }
 
@@ -302,12 +305,13 @@ vec3 g1 = texture2D( uGrass, gw ).rgb;
 vec3 g2 = texture2D( uGrass, mat2( 0.8, 0.6, -0.6, 0.8 ) * gw * 0.37 ).rgb;
 vec4 nz = texture2D( uNoise, vCW.xz * 0.004 );
 vec4 nz2 = texture2D( uNoise, vCW.xz * 0.03 );
-vec3 g = mix( g1, g2, 0.45 );
+vec3 g = mix( g1, g2, 0.25 );
 // the scan's own light / dark blotches read as camouflage at this scale: keep its blade detail,
-// pull its large-scale colour to its mean
+// pull its large-scale colour to a single St. Augustine green
 vec3 gMean = texture2D( uGrass, gw * 0.13, 10.0 ).rgb;
-g = gMean + ( g - gMean ) * 0.38;
-g = mix( vec3( dot( g, vec3( 0.3, 0.55, 0.15 ) ) ), g, 0.9 ) * vec3( 0.92, 1.0, 0.82 );
+float gl = dot( g - gMean, vec3( 0.3, 0.55, 0.15 ) );
+g = vec3( 0.2, 0.3, 0.1 ) * 1.05 + vec3( 0.8, 1.0, 0.55 ) * gl * 0.55;
+g *= 0.9 + 0.2 * texture2D( uNoise, vCW.xz * 0.05 ).g;
 // St. Augustine lawns: deep green, yellowed patches in the sun, bare sandy earth where people walk
 float dry = smoothstep( 0.45, 0.95, nz.r * 0.85 + nz2.g * 0.15 );
 g *= mix( vec3( 0.94, 1.0, 0.86 ), vec3( 1.03, 1.02, 0.86 ), dry * 0.4 );
@@ -328,7 +332,7 @@ diffuseColor.rgb *= g;
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-lawn-v3';
+  m.customProgramCacheKey = () => 'ow-lawn-v4';
   return m;
 }
 

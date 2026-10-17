@@ -35,6 +35,19 @@ export interface Pad {
   lookX: number;
   lookY: number;
   dragging: boolean;
+  /** combat: trigger and aim held (mouse, or the pad's triggers on foot) */
+  fire: boolean;
+  aim: boolean;
+  padFire: boolean;
+  padAim: boolean;
+  /** a weapon slot pressed this frame (0 holster, 1-6), -1 none */
+  slot: number;
+  /** mouse wheel / pad bumper steps this frame */
+  cycle: number;
+  /** the mouse is captured */
+  locked: boolean;
+  /** the capture was lost this frame (Esc): the menu opens */
+  lockLost: boolean;
 }
 
 const EDGES = ['enter', 'flight', 'kick', 'camera', 'recover', 'map', 'pause'] as const;
@@ -44,7 +57,14 @@ export class Input {
   readonly s: Pad = {
     throttle: 0, brake: 0, steer: 0, moveX: 0, moveY: 0, handbrake: false, boost: false, up: false, down: false, rollL: false, rollR: false, horn: false,
     enter: false, flight: false, kick: false, camera: false, recover: false, map: false, pause: false, usingPad: false, lookX: 0, lookY: 0, dragging: false,
+    fire: false, aim: false, padFire: false, padAim: false, slot: -1, cycle: 0, locked: false, lockLost: false,
   };
+  private fireHeld = false;
+  private aimHeld = false;
+  private slotPressed = -1;
+  private wheel = 0;
+  private lostFlag = false;
+  private wantLock = false;
   private keys = new Set<string>();
   private pressed = new Set<Edge>();
   private kbSteer = 0;
@@ -56,25 +76,70 @@ export class Input {
   /** set by the UI while a menu is open: the game gets no input */
   blocked = false;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement) {
     const map: Record<string, Edge> = { KeyF: 'enter', Enter: 'enter', KeyT: 'flight', KeyK: 'kick', KeyC: 'camera', KeyR: 'recover', KeyM: 'map', Escape: 'pause', KeyP: 'pause' };
     addEventListener('keydown', (e) => {
-      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      if (e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'Tab') e.preventDefault();
+      if (!this.keys.has(e.code) && /^Digit[0-6]$/.test(e.code)) this.slotPressed = Number(e.code.slice(5));
       if (!this.keys.has(e.code) && map[e.code]) this.pressed.add(map[e.code]);
       this.keys.add(e.code);
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
+    // the mouse: a click captures it (pointer lock) for mouse-look; captured, left fires and right
+    // aims. Uncaptured, dragging still looks around.
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0 || e.button === 2) this.s.dragging = true;
+      if (this.blocked) return;
+      if (!this.s.locked) {
+        if (e.button === 0 || e.button === 2) this.s.dragging = true;
+        this.lock();
+        return;
+      }
+      if (e.button === 0) this.fireHeld = true;
+      if (e.button === 2) this.aimHeld = true;
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    addEventListener('mouseup', () => (this.s.dragging = false));
+    addEventListener('mouseup', (e) => {
+      this.s.dragging = false;
+      if (e.button === 0) this.fireHeld = false;
+      if (e.button === 2) this.aimHeld = false;
+    });
     addEventListener('mousemove', (e) => {
-      if (!this.s.dragging) return;
+      if (!this.s.dragging && !this.s.locked) return;
       this.mx += e.movementX;
       this.my += e.movementY;
     });
+    addEventListener(
+      'wheel',
+      (e) => {
+        if (this.s.locked) this.wheel += Math.sign(e.deltaY);
+      },
+      { passive: true },
+    );
+    document.addEventListener('pointerlockchange', () => {
+      const was = this.s.locked;
+      this.s.locked = document.pointerLockElement === canvas;
+      if (was && !this.s.locked) {
+        this.fireHeld = this.aimHeld = false;
+        if (!this.blocked) this.lostFlag = true;
+      }
+    });
+  }
+
+  /** capture the mouse (needs a user gesture: a click, a key) */
+  lock() {
+    if (document.pointerLockElement === this.canvas) return;
+    try {
+      const r = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch {
+      /* not allowed now */
+    }
+    void this.wantLock;
+  }
+
+  unlock() {
+    if (document.pointerLockElement) document.exitPointerLock();
   }
 
   /** a key held */
@@ -109,6 +174,15 @@ export class Input {
     s.horn = k.has('KeyH');
     for (const e of EDGES) s[e] = this.pressed.has(e);
     this.pressed.clear();
+    s.fire = this.fireHeld;
+    s.aim = this.aimHeld;
+    s.padFire = s.padAim = false;
+    s.slot = this.slotPressed;
+    this.slotPressed = -1;
+    s.cycle = this.wheel;
+    this.wheel = 0;
+    s.lockLost = this.lostFlag;
+    this.lostFlag = false;
     s.lookX = this.mx;
     s.lookY = this.my;
     this.mx = this.my = 0;
@@ -150,12 +224,18 @@ export class Input {
       s.kick ||= edge(11);
       s.lookX += rx * 600 * dt;
       s.lookY += ry * 400 * dt;
+      s.padFire = rt > 0.5;
+      s.padAim = lt > 0.5;
+      if (edge(15)) s.cycle += 1;
       this.padPrev = p.buttons.map((b) => b.pressed);
       break;
     }
     if (this.blocked) {
       s.throttle = s.brake = s.steer = s.moveX = s.moveY = 0;
       s.handbrake = s.boost = s.up = s.down = s.rollL = s.rollR = s.horn = false;
+      s.fire = s.aim = s.padFire = s.padAim = false;
+      s.slot = -1;
+      s.cycle = 0;
       for (const e of EDGES) if (e !== 'pause' && e !== 'map') s[e] = false;
     }
   }

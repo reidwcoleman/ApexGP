@@ -366,6 +366,13 @@ export class Fleet {
     return { model: id, index };
   }
 
+  /** repaint a car (a burnt-out wreck goes black) */
+  paint(s: FleetSlot, color: THREE.ColorRepresentation) {
+    const k = this.kinds.get(s.model)!;
+    k.body.setColorAt(s.index, C.set(color));
+    k.body.instanceColor!.needsUpdate = true;
+  }
+
   free(s: FleetSlot) {
     const k = this.kinds.get(s.model)!;
     k.body.setMatrixAt(s.index, this.zero);

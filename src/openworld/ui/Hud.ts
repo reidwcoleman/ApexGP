@@ -26,6 +26,7 @@ export interface MenuActions {
   onWeather(w: string): void;
   onTraffic(n: number): void;
   onQuality(q: string): void;
+  onRefill(): void;
   onExit(): void;
 }
 
@@ -68,6 +69,20 @@ export class Hud {
   private mapCtx: CanvasRenderingContext2D;
   private help: HTMLElement;
   private menu: HTMLElement | null = null;
+  private cross: HTMLElement;
+  private marker: HTMLElement;
+  private weapon: HTMLElement;
+  private wName: HTMLElement;
+  private wAmmo: HTMLElement;
+  private wSpare: HTMLElement;
+  private wList: HTMLElement;
+  private hpBar: HTMLElement;
+  private arBar: HTMLElement;
+  private hurtEl: HTMLElement;
+  private radioEl: HTMLElement;
+  private scope: HTMLElement;
+  private listT = 0;
+  private radioT = 0;
   private lastPlace = '';
   private placeT = 0;
   menuOpen = false;
@@ -106,6 +121,25 @@ export class Hud {
     this.map.width = 440;
     this.map.height = 440;
     this.mapCtx = this.map.getContext('2d')!;
+    // combat: the crosshair and hit marker, the gun and its rounds, health / armour under the map,
+    // the red edge when hit, the police radio, the scope
+    this.hurtEl = el('div', 'ow-hurt', this.root);
+    this.scope = el('div', 'ow-scope', this.root);
+    this.cross = el('div', 'ow-cross', this.root);
+    for (const k of ['t', 'b', 'l', 'r']) el('i', k, this.cross);
+    el('i', 'dot', this.cross);
+    this.marker = el('div', 'ow-marker', this.root);
+    for (const k of ['a', 'b', 'c', 'd']) el('i', k, this.marker);
+    this.weapon = el('div', 'ow-weapon', this.root);
+    this.wName = el('div', 'w-name', this.weapon, '');
+    const wr = el('div', 'w-row', this.weapon);
+    this.wAmmo = el('div', 'w-ammo', wr, '');
+    this.wSpare = el('div', 'w-spare', wr, '');
+    this.wList = el('div', 'ow-wlist', this.root);
+    const hb = el('div', 'ow-health', this.root);
+    this.hpBar = el('b', 'hp', el('div', 'bar', hb));
+    this.arBar = el('b', 'ar', el('div', 'bar', hb));
+    this.radioEl = el('div', 'ow-radio', this.root);
     // controls help (first visit)
     this.help = el('div', 'ow-help', this.root);
     this.help.innerHTML = `
@@ -120,11 +154,14 @@ export class Hud {
         <b>K</b><span>kickflip</span>
         <b>F</b><span>get in / out (cars, bikes, helicopters, planes)</span>
         <b>C</b><span>camera</span>
-        <b>R</b><span>recover</span>
+        <b>R</b><span>recover · reload on foot</span>
+        <b>Click</b><span>lock the mouse · fire</span>
+        <b>Right mouse</b><span>aim</span>
+        <b>1 – 6 · wheel</b><span>weapons (0 holsters)</span>
         <b>M</b><span>map</span>
         <b>Esc</b><span>menu</span>
       </div>
-      <div class="h-foot">Drag the mouse to look around · gamepad supported</div>`;
+      <div class="h-foot">Click to lock the mouse and look around · gamepad supported (RT fire, LT aim)</div>`;
     let seen = false;
     try {
       seen = localStorage.getItem('apexgp.miami.help') === '1';
@@ -169,6 +206,44 @@ export class Hud {
     });
   }
 
+  /** the combat layer: what's in hand, rounds, health, the crosshair */
+  setCombat(c: {
+    show: boolean; cross: boolean; aim: number; spread: number; weapon: string; mag: number; spare: number; reloading: number;
+    hp: number; armor: number; hurt: number; marker: number; kill: boolean; scope: boolean; list: { name: string; on: boolean; ammo: number }[]; listShow: boolean; dt: number;
+  }) {
+    this.weapon.classList.toggle('show', c.show && !!c.weapon);
+    this.wName.textContent = c.reloading > 0 ? `${c.weapon} · reloading` : c.weapon;
+    this.wAmmo.textContent = c.weapon ? String(c.mag) : '';
+    this.wSpare.textContent = c.weapon ? `/ ${c.spare}` : '';
+    this.wAmmo.classList.toggle('low', c.mag <= 3);
+    this.cross.classList.toggle('show', c.cross && !c.scope);
+    const g = 6 + c.spread * 420;
+    this.cross.style.setProperty('--gap', `${g.toFixed(1)}px`);
+    this.cross.style.opacity = String(0.55 + 0.45 * c.aim);
+    this.marker.classList.toggle('show', c.marker > 0);
+    this.marker.classList.toggle('kill', c.kill);
+    this.scope.classList.toggle('show', c.scope);
+    this.hpBar.style.width = `${Math.max(0, c.hp)}%`;
+    this.arBar.style.width = `${Math.max(0, c.armor)}%`;
+    this.hpBar.classList.toggle('low', c.hp < 30);
+    this.hurtEl.style.opacity = String(Math.min(1, c.hurt + (c.hp < 30 ? 0.25 + 0.15 * Math.sin(performance.now() / 180) : 0)));
+    // the weapon strip, for a moment after switching
+    if (c.listShow) {
+      this.listT = 1.6;
+      this.wList.innerHTML = c.list.map((w) => `<div class="wi${w.on ? ' on' : ''}"><span>${w.name}</span><em>${w.ammo}</em></div>`).join('');
+    }
+    this.listT -= c.dt;
+    this.wList.classList.toggle('show', this.listT > 0);
+    this.radioT -= c.dt;
+    this.radioEl.classList.toggle('show', this.radioT > 0);
+  }
+
+  /** a line of police radio */
+  radio(text: string) {
+    this.radioEl.innerHTML = `<span class="r-tag">DISPATCH</span> ${text}`;
+    this.radioT = 4.5;
+  }
+
   setWanted(level: number, flashing: boolean, t: number) {
     this.starsBox.classList.toggle('active', level > 0);
     this.stars.forEach((s, i) => {
@@ -209,7 +284,7 @@ export class Hud {
   // ---------------------------------------------------------------- the minimap
 
   private landPaths: Path2D[] | null = null;
-  drawMap(px: number, pz: number, heading: number, blips: { x: number; z: number; color: string; size?: number; shape?: 'dot' | 'heli' | 'plane' | 'square' }[], waypoint: P2 | null) {
+  drawMap(px: number, pz: number, heading: number, blips: { x: number; z: number; color: string; size?: number; shape?: 'dot' | 'heli' | 'plane' | 'square' | 'ring' }[], waypoint: P2 | null) {
     const c = this.mapCtx;
     const W = this.map.width;
     const big = this.bigMap;
@@ -253,6 +328,14 @@ export class Hud {
       c.fill();
     }
     for (const b of blips) {
+      if (b.shape === 'ring') {
+        // the police search area: a pulsing red / blue disc
+        c.fillStyle = b.color;
+        c.beginPath();
+        c.arc(b.x, b.z, b.size ?? 80, 0, Math.PI * 2);
+        c.fill();
+        continue;
+      }
       c.fillStyle = b.color;
       const r = (b.size ?? 4) / scale;
       c.beginPath();
@@ -299,6 +382,7 @@ export class Hud {
     const tabDefs: [string, () => void][] = [
       ['Roadster', () => roadster()],
       ['Vehicles', () => vehicles()],
+      ['Weapons', () => weapons()],
       ['World', () => world()],
       ['Controls', () => controls()],
     ];
@@ -379,6 +463,29 @@ export class Hud {
           act.onResume();
         });
       }
+    };
+    const weapons = () => {
+      el('div', 'm-h', body, 'Your guns');
+      const tr = el('div', 'm-cards', body);
+      const list: [string, string, string][] = [
+        ['1', 'Pistol', '17-round polymer pistol · drive-by'],
+        ['2', 'SMG', 'Compact, 900 rounds a minute · drive-by'],
+        ['3', 'Carbine', 'Optic, 30-round mag · long range'],
+        ['4', 'Shotgun', 'Pump action, nine pellets'],
+        ['5', 'Marksman rifle', 'Bolt action · aim for the scope'],
+        ['6', 'Rocket launcher', 'Shoulder-fired · it blows things up'],
+      ];
+      for (const [k, name, sub] of list) {
+        const c = el('div', 'm-card', tr);
+        el('div', 'mc-name', c, `${k} · ${name}`);
+        el('div', 'mc-sub', c, sub);
+      }
+      const go = el('div', 'm-cta', body, 'Refill ammo and armour');
+      go.addEventListener('click', () => {
+        act.onRefill();
+        this.closeMenu();
+        act.onResume();
+      });
     };
     const world = () => {
       el('div', 'm-h', body, 'Time of day');

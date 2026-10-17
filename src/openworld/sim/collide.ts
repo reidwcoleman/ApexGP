@@ -179,6 +179,108 @@ export class CollisionWorld {
   }
 }
 
+export interface RayHit {
+  t: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  solid: Solid;
+}
+
+/**
+ * A ray (unit direction) against the city: footprints extruded y0..y1 and the posts as
+ * cylinders. Walks the ray in 40 m pieces so a long shot only looks at the cells it crosses.
+ */
+export function rayWorld(w: CollisionWorld, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, skipProps = false): RayHit | null {
+  const STEP = 40;
+  let best: RayHit | null = null;
+  const seen = new Set<Solid>();
+  for (let a = 0; a < maxT; a += STEP) {
+    const b = Math.min(maxT, a + STEP);
+    const mx = ox + dx * (a + b) / 2, mz = oz + dz * (a + b) / 2;
+    for (const s of w.query(mx, mz, (b - a) / 2 + 1, RAY_NEAR)) {
+      if (seen.has(s)) continue;
+      seen.add(s);
+      if (skipProps && s.circle !== undefined) continue;
+      const h = rayPrism(s, ox, oy, oz, dx, dy, dz, best ? best.t : maxT);
+      if (h) best = h;
+    }
+    if (best && best.t <= b) break;
+  }
+  return best;
+}
+const RAY_NEAR: Solid[] = [];
+
+function rayPrism(s: Solid, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): RayHit | null {
+  let t0 = 0, t1 = maxT;
+  let nx = 0, ny = 0, nz = 0;
+  // the height slab
+  if (Math.abs(dy) < 1e-9) {
+    if (oy < s.y0 || oy > s.y1) return null;
+  } else {
+    let ta = (s.y0 - oy) / dy, tb = (s.y1 - oy) / dy;
+    let n = -1;
+    if (ta > tb) {
+      const q = ta;
+      ta = tb;
+      tb = q;
+      n = 1;
+    }
+    if (ta > t0) {
+      t0 = ta;
+      ny = n;
+    }
+    t1 = Math.min(t1, tb);
+    if (t0 > t1) return null;
+  }
+  if (s.circle !== undefined) {
+    const px = ox - s.cx, pz = oz - s.cz;
+    const A = dx * dx + dz * dz;
+    if (A < 1e-12) return null;
+    const B = px * dx + pz * dz, C = px * px + pz * pz - s.circle * s.circle;
+    const D = B * B - A * C;
+    if (D < 0) return null;
+    const sq = Math.sqrt(D);
+    const ta = (-B - sq) / A, tb = (-B + sq) / A;
+    if (ta > t0) {
+      t0 = ta;
+      const hx = px + dx * ta, hz = pz + dz * ta;
+      const l = Math.hypot(hx, hz) || 1;
+      nx = hx / l;
+      nz = hz / l;
+      ny = 0;
+    }
+    t1 = Math.min(t1, tb);
+    if (t0 > t1 || t0 < 0) return null;
+    return { t: t0, nx, ny, nz, solid: s };
+  }
+  const P = s.poly;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length];
+    const ex = b.x - a.x, ez = b.z - a.z;
+    const enx = ez, enz = -ex;
+    const num = (a.x - ox) * enx + (a.z - oz) * enz;
+    const den = dx * enx + dz * enz;
+    if (Math.abs(den) < 1e-12) {
+      if (num < 0) return null;
+      continue;
+    }
+    const t = num / den;
+    if (den < 0) {
+      if (t > t0) {
+        t0 = t;
+        const l = Math.hypot(enx, enz) || 1;
+        nx = enx / l;
+        nz = enz / l;
+        ny = 0;
+      }
+    } else t1 = Math.min(t1, t);
+    if (t0 > t1) return null;
+  }
+  if (t0 <= 0) return null;
+  return { t: t0, nx, ny, nz, solid: s };
+}
+
 /** SAT: box corners B (4) vs convex polygon P; the minimum push for the box */
 function satBoxPoly(B: P2[], P: P2[]): { nx: number; nz: number; depth: number; px: number; pz: number } | null {
   let best = Infinity, bx = 0, bz = 0;

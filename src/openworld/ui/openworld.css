@@ -494,3 +494,244 @@
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
+
+/* ---- combat */
+.ow-cross {
+  --gap: 8px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ow-cross.show {
+  display: block;
+}
+.ow-cross:not(.show) {
+  opacity: 0 !important;
+}
+.ow-cross i {
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+  transition: transform 0.06s linear;
+}
+.ow-cross .t,
+.ow-cross .b {
+  width: 2px;
+  height: 9px;
+  left: -1px;
+}
+.ow-cross .t {
+  bottom: var(--gap);
+}
+.ow-cross .b {
+  top: var(--gap);
+}
+.ow-cross .l,
+.ow-cross .r {
+  height: 2px;
+  width: 9px;
+  top: -1px;
+}
+.ow-cross .l {
+  right: var(--gap);
+}
+.ow-cross .r {
+  left: var(--gap);
+}
+.ow-cross .dot {
+  width: 3px;
+  height: 3px;
+  left: -1.5px;
+  top: -1.5px;
+  border-radius: 50%;
+}
+.ow-marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+.ow-marker.show {
+  opacity: 1;
+}
+.ow-marker i {
+  position: absolute;
+  width: 10px;
+  height: 2px;
+  background: #fff;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+}
+.ow-marker.kill i {
+  background: #ff3f5a;
+}
+.ow-marker .a {
+  transform: translate(6px, 6px) rotate(45deg);
+}
+.ow-marker .b {
+  transform: translate(-16px, 6px) rotate(-45deg);
+}
+.ow-marker .c {
+  transform: translate(6px, -8px) rotate(-45deg);
+}
+.ow-marker .d {
+  transform: translate(-16px, -8px) rotate(45deg);
+}
+.ow-scope {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(#000, #000) center / 1px 100% no-repeat,
+    linear-gradient(#000, #000) center / 100% 1px no-repeat,
+    radial-gradient(circle at center, transparent 0, transparent 33vh, rgba(0, 0, 0, 0.97) calc(33vh + 2px));
+}
+.ow-scope.show {
+  opacity: 1;
+}
+.ow-weapon {
+  position: absolute;
+  right: 34px;
+  bottom: 30px;
+  text-align: right;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.ow-weapon.show {
+  opacity: 1;
+  transform: none;
+}
+.ow-weapon .w-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ow-dim);
+}
+.ow-weapon .w-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ow-weapon .w-ammo {
+  font-size: 58px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+.ow-weapon .w-ammo.low {
+  color: #ff4d5e;
+}
+.ow-weapon .w-spare {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ow-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ow-hud:not(.on-foot) .ow-weapon {
+  bottom: 200px;
+}
+.ow-wlist {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translate(-50%, 8px);
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.ow-wlist.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ow-wlist .wi {
+  padding: 7px 12px;
+  border-radius: 4px;
+  background: var(--ow-glass);
+  backdrop-filter: blur(8px);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ow-dim);
+  display: grid;
+  text-align: center;
+}
+.ow-wlist .wi em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.ow-wlist .wi.on {
+  color: #fff;
+  box-shadow: inset 0 -3px 0 var(--ow-pink);
+}
+.ow-health {
+  position: absolute;
+  left: 34px;
+  bottom: 12px;
+  width: 220px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.ow-health .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.ow-health b {
+  display: block;
+  height: 100%;
+  transition: width 0.2s;
+}
+.ow-health .hp {
+  background: #4fd27a;
+}
+.ow-health .hp.low {
+  background: #ff4d5e;
+}
+.ow-health .ar {
+  background: #57b6ff;
+}
+.ow-hurt {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(190, 0, 20, 0.55) 100%);
+}
+.ow-radio {
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  transform: translate(-50%, -6px);
+  padding: 7px 14px;
+  border-radius: 4px;
+  background: rgba(8, 14, 30, 0.6);
+  backdrop-filter: blur(8px);
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  white-space: nowrap;
+}
+.ow-radio.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ow-radio .r-tag {
+  color: #6f9bff;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  margin-right: 6px;
+}

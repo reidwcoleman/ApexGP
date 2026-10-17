@@ -305,6 +305,9 @@ if ( glass > 0.01 ) {
   vec2 cellUv = vec2( fx, fy );
   vec3 room = roomColor( cellUv, cell, vec2( bw, fh ), seed, lit, glow ) * roomK;
   // looking in by day: the room lit by the window; by night its own lamps (or nothing)
+  // (far off, the rooms blur into an even dark: no per-window checkerboard)
+  float farK = smoothstep( 120.0, 420.0, length( vFW - cameraPosition ) );
+  room = mix( room, vec3( 0.32, 0.3, 0.28 ) * roomK, farK );
   vec3 dayIn = room * 0.16 * uDay;
   vec3 nightIn = room * litC * lit * 1.8 + litC * glow * lit * 0.7;
   if ( shop > 0.5 ) {
@@ -342,14 +345,16 @@ totalEmissiveRadiance += facEmit;`,
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
-// glass panes aren't perfectly flat: a slight per-pane warp breaks the mirror into tiles
+// glass panes aren't perfectly flat: a slight per-pane warp breaks the mirror into tiles (close up;
+// far off the panes average out, or the reflection turns to noise)
 if ( glass > 0.01 ) {
-  vec3 tw = vec3( fh1( cell + 1.7 ) - 0.5, fh1( cell + 2.9 ) - 0.5, 0.0 ) * 0.035;
+  float near = 1.0 - smoothstep( 40.0, 220.0, length( vFW - cameraPosition ) );
+  vec3 tw = vec3( fh1( cell + 1.7 ) - 0.5, fh1( cell + 2.9 ) - 0.5, 0.0 ) * 0.03 * near;
   normal = normalize( normal + ( viewMatrix * vec4( tw.x, tw.y, tw.x, 0.0 ) ).xyz );
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v4';
+  m.customProgramCacheKey = () => 'ow-facade-v5';
   return m;
 }
 

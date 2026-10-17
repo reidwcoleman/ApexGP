@@ -43,6 +43,20 @@ export class CameraRig {
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
   fov = 60;
+  /** on foot with the mouse captured: the camera is yours (no drifting back behind) */
+  freeAim = false;
+  /** 0 … 1 aiming down the sights (eased by the caller) */
+  aim = 0;
+  /** aimed field of view (the gun's), and the scope (first person) */
+  aimFov = 46;
+  scope = false;
+  /** the camera's pitch on foot (rad, + up) */
+  footPitch = 0.05;
+  /** recoil: the view kicks up */
+  kick(pitch: number, yaw: number) {
+    this.footPitch = THREE.MathUtils.clamp(this.footPitch + pitch, -1.25, 1.25);
+    this.yawOff += yaw;
+  }
 
   constructor(private readonly cam: THREE.PerspectiveCamera) {}
 
@@ -57,8 +71,10 @@ export class CameraRig {
   /** mouse / stick look (px) */
   look2(dx: number, dy: number, dragging: boolean) {
     if (Math.abs(dx) + Math.abs(dy) > 0 || dragging) this.idle = 0;
-    this.yawOff -= dx * 0.005;
+    const sens = this.freeAim ? 0.0024 * (1 - this.aim * 0.45) * (this.scope ? 0.25 : 1) : 0.005;
+    this.yawOff -= dx * sens;
     this.pitchOff = THREE.MathUtils.clamp(this.pitchOff + dy * 0.004, -0.5, 1.2);
+    this.footPitch = THREE.MathUtils.clamp(this.footPitch - dy * sens, -1.25, 1.25);
   }
 
   update(dt: number, S: CamSubject, world: CollisionWorld) {
@@ -66,7 +82,7 @@ export class CameraRig {
     this.idle += dt;
     const speed = S.vel.length();
     // the look offset drifts back behind once left alone (sooner when moving)
-    if (this.idle > (speed > 4 ? 0.9 : 3)) {
+    if (this.idle > (speed > 4 ? 0.9 : 3) && !(S.kind === 'foot' && this.freeAim)) {
       const k = Math.min(1, dt * (speed > 4 ? 2.2 : 0.8));
       this.yawOff -= this.yawOff * k;
       this.pitchOff += (0.12 - this.pitchOff) * k;
@@ -80,9 +96,16 @@ export class CameraRig {
       // reversing: keep looking forward
       if (Math.abs(d) < 2.2) want = S.yaw + d * 0.55;
     }
-    if (this.first) this.heading = want;
+    if (this.first) {
+      // (into free aim: keep looking the same way)
+      if (S.kind === 'foot' && this.freeAim) {
+        const e = new THREE.Euler().setFromQuaternion(this.cam.quaternion, 'YXZ');
+        this.heading = e.y + Math.PI;
+        this.yawOff = 0;
+      } else this.heading = want;
+    }
     const dh = Math.atan2(Math.sin(want - this.heading), Math.cos(want - this.heading));
-    this.heading += dh * Math.min(1, dt * (S.kind === 'foot' ? 3 : 4.5));
+    if (!(S.kind === 'foot' && this.freeAim)) this.heading += dh * Math.min(1, dt * (S.kind === 'foot' ? 3 : 4.5));
     const sh = this.shake;
     this.shake = Math.max(0, this.shake - dt * 2.2);
     const jitter = () => (Math.random() - 0.5) * sh * 0.25;
@@ -96,6 +119,39 @@ export class CameraRig {
       this.setFov(this.mode === 'cockpit' ? 68 + speed * 0.05 : 64 + speed * 0.12, dt);
       cam.position.x += jitter() * 0.3;
       cam.position.y += jitter() * 0.3;
+      this.first = false;
+      return;
+    }
+
+    // on foot with the mouse: an over-the-shoulder shooter's camera, pivoting at the shoulder
+    if (S.kind === 'foot' && this.freeAim) {
+      const yaw = this.heading + this.yawOff;
+      const p = this.footPitch;
+      const f = this.tmp.set(Math.sin(yaw) * Math.cos(p), Math.sin(p), Math.cos(yaw) * Math.cos(p));
+      const right = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+      const a = this.aim;
+      if (this.scope && a > 0.85) {
+        // through the scope: at the eye
+        cam.position.set(S.pos.x, S.pos.y + 1.62, S.pos.z).addScaledVector(right, 0.06).addScaledVector(f, 0.25);
+        cam.up.set(0, 1, 0);
+        cam.lookAt(this.look.copy(cam.position).add(f));
+        this.setFov(this.aimFov, dt * 4);
+        this.first = false;
+        return;
+      }
+      const pivot = this.tmp2.set(S.pos.x, S.pos.y + 1.58 - a * 0.04, S.pos.z).addScaledVector(right, 0.55 + a * 0.15);
+      const dist = THREE.MathUtils.lerp(3.1, 1.65, a) + Math.max(0, -p) * 0.6;
+      const desired = new THREE.Vector3().copy(pivot).addScaledVector(f, -dist);
+      // walls: pull in along the boom
+      const t = world.segmentHits(pivot.x, pivot.z, desired.x, desired.z, Math.max(pivot.y, desired.y) - 0.3);
+      if (t < 1) desired.lerpVectors(pivot, desired, Math.max(0.12, t - 0.08));
+      if (desired.y < S.pos.y + 0.3) desired.y = S.pos.y + 0.3;
+      cam.position.copy(desired);
+      cam.position.x += jitter() * 0.4;
+      cam.position.y += jitter() * 0.4;
+      cam.up.set(0, 1, 0);
+      cam.lookAt(this.look.copy(pivot).addScaledVector(f, 30));
+      this.setFov(THREE.MathUtils.lerp(58, this.aimFov, a), dt * 2);
       this.first = false;
       return;
     }

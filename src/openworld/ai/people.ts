@@ -25,7 +25,7 @@ const BODIES_F = ['Female_Adult_01', 'Female_Adult_02', 'Female_Adult_04', 'Spor
 const PLAYER_BODY = 'Male_Adult_10';
 const SHIRTS = [0xffffff, 0xf3f0e6, 0x57e8ff, 0xff3f8e, 0xffb547, 0x2a6fdb, 0x1e1e22, 0x7fd18b, 0xe8d3b0, 0xc93a3a, 0x8a5ad6, 0x3ab0a0, 0xf28cb1, 0x0f2a52];
 
-type PState = 'walk' | 'stand' | 'cross' | 'flee' | 'down' | 'off';
+type PState = 'walk' | 'stand' | 'cross' | 'flee' | 'down' | 'dead' | 'off';
 
 interface Ped {
   m: number;
@@ -45,6 +45,7 @@ interface Ped {
   cx0: THREE.Vector3;
   cx1: THREE.Vector3;
   beach: boolean;
+  hp: number;
 }
 
 export interface PlayerFoot {
@@ -66,6 +67,8 @@ export class People {
   private nMembers = 190;
   readonly player: PlayerFoot = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, vy: 0, onGround: true };
   playerVisible = false;
+  /** the player is drawn by the combat avatar (a full skinned person), not by the crowd */
+  avatarMode = false;
   private playerAct: number = ACT.IDLE;
   /** pedestrians struck this frame (for the wanted level) */
   readonly struck: THREE.Vector3[] = [];
@@ -81,7 +84,8 @@ export class People {
     private readonly world: CollisionWorld,
   ) {
     this.group.name = 'People';
-    setPeopleCore([PLAYER_BODY, ...BODIES_M.filter((b) => b !== PLAYER_BODY), ...BODIES_F]);
+    // (and the police uniforms' bodies, for the officers)
+    setPeopleCore([PLAYER_BODY, ...BODIES_M.filter((b) => b !== PLAYER_BODY), ...BODIES_F, 'Pilot_Male_03', 'Gardener_Male_01']);
   }
 
   /** start loading the avatars (resolves when the people are on the streets) */
@@ -114,7 +118,7 @@ export class People {
     for (let i = 1; i < this.nMembers; i++) {
       this.peds.push({
         m: i, state: 'off', e: 0, side: 1, s: 0, dir: 1, lat: 0, speed: 1.3, pos: new THREE.Vector3(0, -500, 0), yaw: 0, t: 0, vel: new THREE.Vector3(), tilt: 0,
-        cx0: new THREE.Vector3(), cx1: new THREE.Vector3(), beach: false,
+        cx0: new THREE.Vector3(), cx1: new THREE.Vector3(), beach: false, hp: 60,
       });
       this.extras.setVisible(i, false);
     }
@@ -130,6 +134,9 @@ export class People {
 
   private spawn(p: Ped, center: THREE.Vector3, minD: number, maxD: number): boolean {
     const R = this.R;
+    p.hp = 60;
+    p.tilt = 0;
+    this.extras!.setTilt(p.m, 0);
     // a tenth of them on the beach (South Beach), the rest on the sidewalks
     const nearBeach = center.x > 5600;
     if (nearBeach && R() < 0.35) {
@@ -250,14 +257,15 @@ export class People {
     if (!this.extras) return;
     this.t = t;
     this.struck.length = 0;
+    this.deaths.length = 0;
     this.crossing.length = 0;
     const net = this.net;
     const ex = this.extras;
     let live = 0;
     for (const p of this.peds) {
       if (p.state === 'off') continue;
-      if (Math.hypot(p.pos.x - center.x, p.pos.z - center.z) > 300) this.hide(p);
-      else live++;
+      if (Math.hypot(p.pos.x - center.x, p.pos.z - center.z) > 300 || (p.state === 'dead' && p.t < -40)) this.hide(p);
+      else if (p.state !== 'dead') live++;
     }
     for (let k = 0, made = 0; k < this.peds.length && live < this.target && made < 8; k++) {
       const p = this.peds[k];
@@ -277,6 +285,11 @@ export class People {
     for (const p of this.peds) {
       if (p.state === 'off') continue;
       p.t -= dt;
+      if (p.state === 'dead') {
+        this.fall(p, dt);
+        ex.setPlace(p.m, p.pos.x, p.pos.y + (p.tilt < -0.5 ? 0.15 : 0), p.pos.z, p.yaw);
+        continue;
+      }
       // ---- danger: a vehicle bearing down, or one hitting
       for (const v of vehicles) {
         const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z;
@@ -285,9 +298,10 @@ export class People {
         const sp = Math.hypot(v.vel.x, v.vel.z);
         const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
         const along = dx * fx + dz * fz, lat = Math.abs(-dx * fz + dz * fx);
-        // inside the box: struck
+        // inside the box: struck (hard enough, killed)
         if (p.state !== 'down' && Math.abs(along) < v.hl + 0.3 && lat < v.hw + 0.3 && sp > 2.2) {
-          p.state = 'down';
+          p.state = sp > 16 ? 'dead' : 'down';
+          if (p.state === 'dead') this.deaths.push(p.pos.clone());
           p.t = 4 + this.R() * 2;
           p.vel.set(v.vel.x * 0.75 + (this.R() - 0.5) * 2, Math.min(7, 2 + sp * 0.18), v.vel.z * 0.75 + (this.R() - 0.5) * 2);
           ex.setAct(p.m, ACT.IDLE);
@@ -390,13 +404,127 @@ export class People {
       ex.setPlace(p.m, p.pos.x, p.pos.y + (p.state === 'down' && p.tilt < -0.5 ? 0.15 : 0), p.pos.z, p.yaw);
     }
     // the player avatar
-    if (this.playerVisible) {
+    if (this.playerVisible && !this.avatarMode) {
       const P = this.player;
       ex.setVisible(0, true);
       ex.setAct(0, this.playerAct);
       ex.setPlace(0, P.pos.x, P.pos.y, P.pos.z, P.yaw);
     } else ex.setVisible(0, false);
     ex.update(t, camera);
+  }
+
+  /** a body flung by a hit or a blast, sliding to rest, lying flat */
+  private fall(p: Ped, dt: number) {
+    p.vel.y -= 9.81 * dt;
+    p.pos.addScaledVector(p.vel, dt);
+    const gy = this.net.surface(p.pos.x, p.pos.z, p.pos.y + 0.5, this.surf).y;
+    if (p.pos.y < gy) {
+      p.pos.y = gy;
+      p.vel.multiplyScalar(0.35);
+      p.vel.y = 0;
+    }
+    this.pushOut(p.pos, 0.3);
+    p.tilt += (-Math.PI / 2 - p.tilt) * Math.min(1, dt * 7);
+    this.extras!.setTilt(p.m, p.tilt);
+  }
+
+  /** people killed this frame (by the player's car, a gun, a blast) */
+  readonly deaths: THREE.Vector3[] = [];
+
+  /**
+   * The first person on a ray (a standing capsule ~1.75 m tall, 0.3 m round), within maxT.
+   * Returns the index to hand back to shoot(), the distance, and whether it was the head.
+   */
+  ray(o: THREE.Vector3, d: THREE.Vector3, maxT: number): { i: number; t: number; head: boolean } | null {
+    let best: { i: number; t: number; head: boolean } | null = null;
+    for (let i = 0; i < this.peds.length; i++) {
+      const p = this.peds[i];
+      if (p.state === 'off') continue;
+      const lying = p.state === 'dead' || (p.state === 'down' && p.tilt < -0.8);
+      // quick reject on the closest approach of the ray to the person's centre
+      const cx = p.pos.x - o.x, cy = p.pos.y + (lying ? 0.2 : 0.9) - o.y, cz = p.pos.z - o.z;
+      const tc = cx * d.x + cy * d.y + cz * d.z;
+      if (tc < 0 || tc > (best ? best.t : maxT) + 1) continue;
+      if (lying) {
+        const ex = cx - d.x * tc, ey = cy - d.y * tc, ez = cz - d.z * tc;
+        if (ex * ex + ey * ey + ez * ez < 0.45 * 0.45) best = { i, t: tc, head: false };
+        continue;
+      }
+      // vertical capsule: closest approach in xz, then the height there
+      const A = d.x * d.x + d.z * d.z;
+      if (A < 1e-6) continue;
+      const tx = (cx * d.x + cz * d.z) / A;
+      const qx = cx - d.x * tx, qz = cz - d.z * tx;
+      const r2 = qx * qx + qz * qz;
+      const R = 0.3;
+      if (r2 > R * R) continue;
+      const dt = Math.sqrt((R * R - r2) / A);
+      const t = tx - dt;
+      if (t < 0 || t > (best ? best.t : maxT)) continue;
+      const y = o.y + d.y * t - p.pos.y;
+      if (y < 0 || y > 1.8) continue;
+      best = { i, t, head: y > 1.52 };
+    }
+    return best;
+  }
+
+  /** a round hits person i: they go down (dead with enough of them), the rest run */
+  shoot(i: number, dmg: number, dir: THREE.Vector3): boolean {
+    const p = this.peds[i];
+    if (!p || p.state === 'off' || p.state === 'dead') return false;
+    p.hp -= dmg;
+    if (p.hp <= 0) {
+      p.state = 'dead';
+      p.t = 0;
+      p.vel.set(dir.x * 1.6, 0.6, dir.z * 1.6);
+      this.extras!.setAct(p.m, ACT.IDLE);
+      this.deaths.push(p.pos.clone());
+      return true;
+    }
+    // wounded: stagger and run
+    p.state = 'flee';
+    p.t = 6;
+    p.yaw = Math.atan2(dir.x, dir.z) + (this.R() - 0.5);
+    this.extras!.setAct(p.m, ACT.RUN);
+    return false;
+  }
+
+  /** gunfire or a blast at `at`: everyone within r runs from it */
+  scare(at: THREE.Vector3, r: number) {
+    for (const p of this.peds) {
+      if (p.state === 'off' || p.state === 'dead' || p.state === 'down') continue;
+      const d = Math.hypot(p.pos.x - at.x, p.pos.z - at.z);
+      if (d > r) continue;
+      p.state = 'flee';
+      p.t = 5 + this.R() * 5;
+      p.yaw = Math.atan2(p.pos.x - at.x, p.pos.z - at.z) + (this.R() - 0.5) * 0.9;
+      this.extras!.setAct(p.m, ACT.RUN);
+    }
+  }
+
+  /** an explosion: killed close in, thrown further out */
+  blast(at: THREE.Vector3, r: number): number {
+    let killed = 0;
+    for (const p of this.peds) {
+      if (p.state === 'off') continue;
+      const dx = p.pos.x - at.x, dz = p.pos.z - at.z;
+      const d = Math.hypot(dx, dz);
+      if (d > r * 1.6 || Math.abs(p.pos.y - at.y) > r) continue;
+      const k = 1 - d / (r * 1.6);
+      p.vel.set((dx / (d || 1)) * 12 * k, 3 + 7 * k, (dz / (d || 1)) * 12 * k);
+      if (p.state !== 'dead' && d < r) {
+        p.state = 'dead';
+        p.t = 0;
+        killed++;
+        this.deaths.push(p.pos.clone());
+        this.extras!.setAct(p.m, ACT.IDLE);
+      } else if (p.state !== 'dead') {
+        p.state = 'down';
+        p.t = 4 + this.R() * 2;
+      }
+    }
+    this.scare(at, r * 6);
+    return killed;
   }
 
   private pushOut(p: THREE.Vector3, r: number) {

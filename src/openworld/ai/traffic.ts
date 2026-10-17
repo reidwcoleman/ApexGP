@@ -51,7 +51,13 @@ export interface AICar {
   key: string;
   /** the driver's temperament (speed factor) */
   temper: number;
+  /** damage left (100 new; bullets and blasts take it; 0 burns, then blows up) */
+  hp?: number;
 }
+
+/** flags: 1 chasing (police), 2 in the water, 4 left by the player, 8 a burnt-out wreck, 16 fleeing */
+export const WRECK = 8;
+export const FLEE = 16;
 
 const tmpP = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
 
@@ -533,15 +539,15 @@ export class Traffic {
     if (b.speed < 0.4) c.rest += dt;
     else c.rest = 0;
     if (b.inWater) c.flags |= 2;
-    // one the player left: parked where it stops
-    if (c.flags & 4 && c.rest > 0.8) {
+    // one the player left (or a wreck): parked where it stops
+    if (c.flags & (4 | WRECK) && c.rest > 0.8) {
       c.state = 'parked';
       c.body = null;
       c.v = 0;
       return;
     }
     // back into the traffic once it's sitting on a lane, facing roughly along it
-    if (c.rest > 3 && !(c.flags & 2)) {
+    if (c.rest > 3 && !(c.flags & 2) && !(c.flags & WRECK)) {
       const hit = this.net.nearestEdge(b.pos.x, b.pos.z, b.pos.y, 6);
       if (hit && hit.e.kind !== 'lane') {
         const e = hit.e;
@@ -618,7 +624,7 @@ export class Traffic {
   nearest(x: number, z: number, r: number): AICar | null {
     let best: AICar | null = null, bd = r;
     for (const c of this.cars) {
-      if (c.state === 'player') continue;
+      if (c.state === 'player' || c.flags & WRECK) continue;
       const d = Math.hypot(c.pos.x - x, c.pos.z - z);
       if (d < bd) {
         bd = d;
@@ -627,6 +633,47 @@ export class Traffic {
     }
     return best;
   }
+}
+
+/** a ray against a car's box (its footprint, from the sills to the roof); t or -1, and the face normal */
+export function rayCar(c: { pos: THREE.Vector3; yaw: number; spec: { L: number; W: number; H: number } }, o: THREE.Vector3, d: THREE.Vector3, maxT: number, n?: THREE.Vector3): number {
+  const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw);
+  // into the car's frame: x left, z forward
+  const px = o.x - c.pos.x, py = o.y - c.pos.y, pz = o.z - c.pos.z;
+  const lx = px * cs - pz * sn, lz = px * sn + pz * cs;
+  const dx = d.x * cs - d.z * sn, dz = d.x * sn + d.z * cs;
+  const lo = [-c.spec.W / 2, 0.25, -c.spec.L / 2], hi = [c.spec.W / 2, c.spec.H * 0.97, c.spec.L / 2];
+  const P = [lx, py, lz], D = [dx, d.y, dz];
+  let t0 = 0, t1 = maxT, axis = -1, sign = 0;
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(D[k]) < 1e-9) {
+      if (P[k] < lo[k] || P[k] > hi[k]) return -1;
+      continue;
+    }
+    let a = (lo[k] - P[k]) / D[k], b = (hi[k] - P[k]) / D[k];
+    let sg = -1;
+    if (a > b) {
+      const q = a;
+      a = b;
+      b = q;
+      sg = 1;
+    }
+    if (a > t0) {
+      t0 = a;
+      axis = k;
+      sign = sg;
+    }
+    t1 = Math.min(t1, b);
+    if (t0 > t1) return -1;
+  }
+  if (axis < 0) return -1;
+  if (n) {
+    const l = [0, 0, 0];
+    l[axis] = sign;
+    // back to the world
+    n.set(l[0] * cs + l[2] * sn, l[1], -l[0] * sn + l[2] * cs);
+  }
+  return t0;
 }
 
 /** SAT between two oriented boxes in xz; the push for B away from A */

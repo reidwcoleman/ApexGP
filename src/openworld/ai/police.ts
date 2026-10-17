@@ -7,6 +7,10 @@ import { carSpecOf, obbOverlap, type Traffic } from './traffic.ts';
 import { Helicopter } from '../vehicles/Helicopter.ts';
 import type { DynLight } from '../city/cityLights.ts';
 import type { WorldCtx } from '../vehicles/drivable.ts';
+import { Officers, type Officer } from './officers.ts';
+import type { ModelSpec } from '../vehicles/fleet.ts';
+import type { WeaponId } from '../combat/weapons.ts';
+import type { PeopleKit } from '../../people/Humans.ts';
 
 /**
  * Miami PD. Crimes raise the wanted level (one to five stars); cruisers are dispatched from out of
@@ -17,7 +21,7 @@ import type { WorldCtx } from '../vehicles/drivable.ts';
  * BUSTED.
  */
 
-export type Crime = 'hitCar' | 'hitPed' | 'steal' | 'hitCop' | 'speeding' | 'stealCop';
+export type Crime = 'hitCar' | 'hitPed' | 'steal' | 'hitCop' | 'speeding' | 'stealCop' | 'shots' | 'shootPed' | 'killPed' | 'shootCop' | 'killCop' | 'explosion' | 'shootCar';
 
 export interface Suspect {
   pos: THREE.Vector3;
@@ -29,6 +33,8 @@ export interface Suspect {
   onFoot: boolean;
   /** flying (cruisers can only watch) */
   flying: boolean;
+  /** a gun out and up, or firing */
+  threat: boolean;
   onImpulse(jx: number, jz: number): void;
 }
 
@@ -49,6 +55,19 @@ interface Cop {
   hl: number;
   hw: number;
   mass: number;
+  spec: ModelSpec;
+  hp: number;
+  /** burnt out: sits where it stopped */
+  wreck: boolean;
+  /** officers still inside */
+  crew: number;
+  /** out of the car: it waits for them */
+  parked: boolean;
+  /** a roadblock (parked across the road until the suspect is by) */
+  block: boolean;
+  swat: boolean;
+  /** the passenger's gun out of the window */
+  shootCool: number;
 }
 
 const COPS_FOR = [0, 2, 3, 5, 6, 8];
@@ -68,6 +87,20 @@ export class Police {
   private t = 0;
   private lastCrime = new Map<Crime, number>();
   private readonly lights: DynLight[] = [];
+  readonly officers: Officers;
+  /** where they last saw the suspect (the search area is round it) */
+  readonly lastSeen = new THREE.Vector3();
+  /** the police helicopter's armour */
+  heliHp = 100;
+  private heliCool = 3;
+  private blockT = 12;
+  /** shots the police fire this frame (the combat module carries them out) */
+  readonly shots: { from: THREE.Vector3; to: THREE.Vector3; weapon: WeaponId; acc: number }[] = [];
+  /** dispatch on the radio this frame */
+  readonly radio: string[] = [];
+  set kit(k: PeopleKit | null) {
+    this.officers.kit = k;
+  }
 
   constructor(
     private readonly net: Network,
@@ -75,7 +108,9 @@ export class Police {
     private readonly fleet: Fleet,
     private readonly traffic: Traffic,
   ) {
-    for (let i = 0; i < 10; i++) this.lights.push({ pos: new THREE.Vector3(), color: new THREE.Color(), intensity: 0, radius: 20 });
+    for (let i = 0; i < 12; i++) this.lights.push({ pos: new THREE.Vector3(), color: new THREE.Color(), intensity: 0, radius: 20 });
+    this.officers = new Officers(net, world);
+    this.group.add(this.officers.group);
   }
 
   /** a crime the police know about: witnessed ones count more */
@@ -105,11 +140,36 @@ export class Police {
       case 'speeding':
         if (copNear) this.wanted = Math.max(this.wanted, 1);
         break;
+      case 'shots':
+        // heard: a cop near, or someone calls it in
+        if (copNear || Math.random() < 0.25) this.wanted = Math.max(this.wanted, 1);
+        break;
+      case 'shootCar':
+        this.wanted = Math.max(this.wanted, copNear ? 2 : 1);
+        break;
+      case 'shootPed':
+        this.wanted = Math.max(this.wanted, 2);
+        break;
+      case 'killPed':
+        this.wanted = Math.max(this.wanted + (this.wanted >= 3 ? 0 : 1), 3);
+        break;
+      case 'shootCop':
+        this.wanted = Math.max(this.wanted, 3);
+        break;
+      case 'killCop':
+        this.wanted = Math.max(this.wanted + 1, 4);
+        break;
+      case 'explosion':
+        this.wanted = Math.max(this.wanted + 1, 3);
+        break;
     }
     this.wanted = Math.min(5, this.wanted);
     if (this.wanted > before) {
       this.unseen = 0;
+      this.lastSeen.copy(at);
       this.events.push('up');
+      this.radio.push(RADIO[c]?.[Math.floor(Math.random() * RADIO[c]!.length)] ?? 'All units, suspect at large');
+      if (this.wanted === 5 && before < 5) this.radio.push('Tactical team is rolling, all units hold the perimeter');
       // the nearest traffic cruiser joins the chase
       for (const k of this.traffic.cars) if (k.police) k.flags |= 1;
     }
@@ -119,13 +179,18 @@ export class Police {
     this.wanted = 0;
     this.unseen = 0;
     this.bustT = 0;
-    for (const c of this.cops) c.leaving = true;
+    for (const c of this.cops) {
+      c.leaving = true;
+      c.block = false;
+    }
     for (const k of this.traffic.cars) k.flags &= ~1;
   }
 
   update(dt: number, s: Suspect, ctx: WorldCtx, camPos: THREE.Vector3, camFwd: THREE.Vector3, night: number) {
     this.t += dt;
     this.events.length = 0;
+    this.shots.length = 0;
+    this.radio.length = 0;
     // ---- dispatch
     const want = COPS_FOR[this.wanted];
     const active = this.cops.filter((c) => !c.leaving).length;
@@ -146,6 +211,18 @@ export class Police {
           continue;
         }
         c.body.step(dt, { throttle: 0, brake: 1, steer: 0, handbrake: false, thrust: 0 }, ctx.net, ctx.world);
+      } else if (c.wreck || c.parked) {
+        c.body.step(dt, { throttle: 0, brake: 1, steer: 0, handbrake: true, thrust: 0 }, ctx.net, ctx.world);
+        c.sees = !c.wreck && d < 120 && this.world.segmentHits(c.body.pos.x, c.body.pos.z, s.pos.x, s.pos.z, c.body.pos.y + 1.2) >= 1;
+        if (c.wreck && d > 260) {
+          this.retire(i);
+          continue;
+        }
+        // a roadblock opens once the suspect is past (or gone the other way)
+        if (c.block && (d > 320 || (d > 60 && !c.sees))) {
+          c.block = false;
+          c.parked = c.crew < 2;
+        }
       } else {
         c.lost = c.sees ? 0 : c.lost + dt;
         if (d > 700 || c.body.inWater || (c.lost > 22 && d > 220)) {
@@ -153,12 +230,32 @@ export class Police {
           continue;
         }
         this.drive(c, dt, s, d, ctx);
+        // pulled up near a suspect on foot (or one who's stopped): the crew gets out
+        if (this.wanted > 0 && c.crew > 0 && c.body.speed < 3 && d < (s.onFoot ? 26 : 16) && !s.flying && this.officers.kit) this.deploy(c, s);
+        // from three stars the passenger shoots out of the window
+        c.shootCool -= dt;
+        if (this.wanted >= 3 && c.sees && d < 40 && c.shootCool <= 0 && !s.flying) {
+          c.shootCool = 0.35 + Math.random() * 0.6;
+          const side = Math.sin(c.body.yaw) * (s.pos.z - b0(c).z) - Math.cos(c.body.yaw) * (s.pos.x - b0(c).x) > 0 ? -1 : 1;
+          const from = new THREE.Vector3(c.body.pos.x + Math.cos(c.body.yaw) * 0.95 * side, c.body.pos.y + 1.15, c.body.pos.z - Math.sin(c.body.yaw) * 0.95 * side);
+          this.shots.push({ from, to: s.pos.clone().add(new THREE.Vector3(0, 0.8, 0)), weapon: c.swat ? 'rifle' : 'smg', acc: 0.45 });
+        }
       }
       if (c.sees) anySees = true;
       const b = c.body;
       const ph = Math.floor(this.t * 6 + i) % 2;
-      const flash = c.leaving ? 0 : 1;
+      const flash = c.leaving || c.wreck ? 0 : 1;
       this.fleet.set(c.slot, b.pos.x, b.pos.y + 0.03, b.pos.z, b.yaw, b.pitch - b.groundPitch, -b.roll + b.groundRoll, b.steer, b.spin, night > 0.3 ? 1 : 0, b.vLong < 0.5 ? 0.6 : 0, flash * ph, flash * (1 - ph));
+    }
+    // ---- the officers on foot
+    const back = this.officers.update(dt, this.wanted, { pos: s.pos, vel: s.vel, onFoot: s.onFoot, threat: s.threat, inVehicle: !s.onFoot }, camPos);
+    for (const o of back) this.reboard(o);
+    for (const o of this.officers.list) if (o.state !== 'dead' && o.seen > 3.5) anySees = true;
+    for (const sh of this.officers.shots) this.shots.push(sh);
+    // ---- roadblocks from four stars, ahead of a suspect on the move
+    this.blockT -= dt;
+    if (this.wanted >= 4 && this.blockT <= 0 && !s.onFoot && !s.flying && Math.hypot(s.vel.x, s.vel.z) > 12) {
+      this.blockT = this.roadblock(s) ? 30 : 4;
     }
     // ---- cop vs cop, cop vs the suspect, cop vs the traffic
     for (let i = 0; i < this.cops.length; i++) {
@@ -187,23 +284,35 @@ export class Police {
       h.drive(dt, null, ctx);
       const hd = Math.hypot(h.pos.x - s.pos.x, h.pos.z - s.pos.z);
       if (this.wanted >= 3 && hd < 260) anySees = true;
+      // from four stars the observer in the door has a rifle
+      this.heliCool -= dt;
+      if (this.wanted >= 4 && hd < 140 && this.heliCool <= 0) {
+        this.heliCool = 0.9 + Math.random() * 1.2;
+        const from = h.pos.clone().add(new THREE.Vector3(Math.cos(h.yaw) * 1.3, 0.6, -Math.sin(h.yaw) * 1.3));
+        if (this.world.segmentHits(from.x, from.z, s.pos.x, s.pos.z, Math.min(from.y, s.pos.y + 2)) >= 1)
+          this.shots.push({ from, to: s.pos.clone().add(new THREE.Vector3(0, 1, 0)), weapon: 'rifle', acc: Math.hypot(s.vel.x, s.vel.z) > 8 ? 0.35 : 0.7 });
+      }
       if (this.wanted < 3 && hd > 1500) {
         this.group.remove(h.root);
         this.heli = null;
+        this.heliHp = 100;
       }
     }
     // ---- seen / evading / busted
     if (this.wanted > 0) {
-      if (anySees) this.unseen = 0;
-      else this.unseen += dt;
+      if (anySees) {
+        this.unseen = 0;
+        this.lastSeen.copy(s.pos);
+      } else this.unseen += dt;
       if (this.unseen > 9 + this.wanted * 3.5) {
         this.clear();
         this.events.push('escaped');
       }
       const sp = Math.hypot(s.vel.x, s.vel.z);
       let close = false;
-      for (const c of this.cops) if (!c.leaving && c.body.pos.distanceTo(s.pos) < (s.onFoot ? 8.5 : 11) && c.body.speed < 4) close = true;
-      if (close && sp < (s.onFoot ? 2.5 : 1.5) && !s.flying) this.bustT += dt;
+      for (const c of this.cops) if (!c.leaving && !c.wreck && c.body.pos.distanceTo(s.pos) < (s.onFoot ? 8.5 : 11) && c.body.speed < 4 && this.wanted <= 2) close = true;
+      if (this.officers.cuffing) close = true;
+      if (close && sp < (s.onFoot ? 2.5 : 1.5) && !s.flying && !s.threat) this.bustT += dt;
       else this.bustT = Math.max(0, this.bustT - dt * 2);
       if (this.bustT > (s.onFoot ? 1.2 : 2.5)) {
         this.events.push('busted');
@@ -218,7 +327,7 @@ export class Police {
     let k = 0;
     const ph = Math.floor(this.t * 6) % 2;
     for (const c of this.cops) {
-      if (c.leaving || k >= 8) continue;
+      if (c.leaving || c.wreck || k >= 9) continue;
       const L = this.lights[k++];
       L.pos.set(c.body.pos.x, c.body.pos.y + 2.2, c.body.pos.z);
       L.color.setRGB(ph ? 1 : 0.05, 0.05, ph ? 0.05 : 1);
@@ -227,7 +336,7 @@ export class Police {
       out.push(L);
     }
     for (const t of this.traffic.cars) {
-      if (!t.police || !(t.flags & 1) || k >= 9) continue;
+      if (!t.police || !(t.flags & 1) || k >= 10) continue;
       const L = this.lights[k++];
       L.pos.set(t.pos.x, t.pos.y + 2.2, t.pos.z);
       L.color.setRGB(ph ? 0.05 : 1, 0.05, ph ? 1 : 0.05);
@@ -236,7 +345,7 @@ export class Police {
       out.push(L);
     }
     if (this.heli && this.wanted >= 3 && night > 0.3) {
-      const L = this.lights[9];
+      const L = this.lights[11];
       L.pos.set(suspect.x, suspect.y + 14, suspect.z);
       L.color.setRGB(1, 0.97, 0.9);
       L.intensity = 14 * night;
@@ -249,7 +358,7 @@ export class Police {
   /** positions of the active sirens */
   sirens(out: THREE.Vector3[]) {
     out.length = 0;
-    for (const c of this.cops) if (!c.leaving) out.push(c.body.pos);
+    for (const c of this.cops) if (!c.leaving && !c.wreck) out.push(c.body.pos);
     for (const t of this.traffic.cars) if (t.police && t.flags & 1) out.push(t.pos);
     return out;
   }
@@ -270,9 +379,10 @@ export class Police {
     // not right in front of the camera
     const vx = tmpP.x - camPos.x, vz = tmpP.z - camPos.z;
     if (Math.hypot(vx, vz) < 120 && vx * camFwd.x + vz * camFwd.z > 0) return false;
-    const id: ModelId = this.wanted >= 3 && R() < 0.5 ? 'policeSuv' : 'police';
+    const swat = this.wanted >= 5 && R() < 0.5;
+    const id: ModelId = swat || (this.wanted >= 3 && R() < 0.5) ? 'policeSuv' : 'police';
     if (this.fleet.available(id) < 1) return false;
-    const slot = this.fleet.alloc(id, 0xf4f5f7);
+    const slot = this.fleet.alloc(id, swat ? 0x15171b : 0xf4f5f7);
     if (!slot) return false;
     const spec = carSpecOf(MODELS[id]);
     // a pursuit-tuned cruiser: more power, more grip than the traffic
@@ -283,14 +393,128 @@ export class Police {
     const body = new CarBody(spec);
     const yaw = Math.atan2(target.x - tmpP.x, target.z - tmpP.z);
     body.place(tmpP.x, tmpP.y, tmpP.z, Math.atan2(tmpP.tx, tmpP.tz) + (Math.cos(Math.atan2(tmpP.tx, tmpP.tz) - yaw) < 0 ? Math.PI : 0));
-    this.cops.push({ slot, id, body, path: [], pi: 0, repath: 0, stuck: 0, reverse: 0, sees: false, leaving: false, lost: 0, hl: spec.hl, hw: spec.hw, mass: spec.mass });
+    this.cops.push(this.cop(slot, id, body, swat));
     return true;
+  }
+
+  private cop(slot: FleetSlot, id: ModelId, body: CarBody, swat: boolean): Cop {
+    const spec = body.spec;
+    return {
+      slot, id, body, path: [], pi: 0, repath: 0, stuck: 0, reverse: 0, sees: false, leaving: false, lost: 0, hl: spec.hl, hw: spec.hw, mass: spec.mass,
+      spec: MODELS[id], hp: swat ? 160 : 100, wreck: false, crew: 2, parked: false, block: false, swat, shootCool: 1 + Math.random(),
+    };
+  }
+
+  /** the crew gets out: one from each front door */
+  private deploy(c: Cop, s: Suspect) {
+    const b = c.body;
+    const cs = Math.cos(b.yaw), sn = Math.sin(b.yaw);
+    const n = c.crew;
+    for (let k = 0; k < n; k++) {
+      const side = k === 0 ? 1 : -1;
+      const at = new THREE.Vector3(b.pos.x + cs * 1.35 * side + sn * 0.3, b.pos.y, b.pos.z - sn * 1.35 * side + cos0(cs) * 0.3);
+      const weapon: WeaponId = c.swat ? 'rifle' : this.wanted >= 4 ? (k === 0 ? 'rifle' : 'shotgun') : this.wanted >= 3 && k === 1 ? 'shotgun' : 'pistol';
+      const o = this.officers.spawn(at, Math.atan2(s.pos.x - at.x, s.pos.z - at.z), weapon, c.swat, c, b.pos);
+      if (o) c.crew--;
+    }
+    if (c.crew < 2) c.parked = true;
+  }
+
+  /** an officer back at the car: in, and once they're all in it drives on */
+  private reboard(o: Officer) {
+    const c = this.cops.find((k) => k === o.car);
+    if (!c) return;
+    c.crew = Math.min(2, c.crew + 1);
+    if (c.crew >= 2 && !c.wreck && !c.block) c.parked = false;
+  }
+
+  /**
+   * Two cruisers across the road a couple of hundred metres ahead of the suspect, the crews out
+   * behind them with long guns.
+   */
+  private roadblock(s: Suspect): boolean {
+    const sp = Math.hypot(s.vel.x, s.vel.z);
+    const ahead = 160 + Math.min(120, sp * 4);
+    const hx = s.vel.x / sp, hz = s.vel.z / sp;
+    const hit = this.net.nearestEdge(s.pos.x + hx * ahead, s.pos.z + hz * ahead, s.pos.y, 60, (e) => e.kind !== 'lane' && e.kind !== 'ramp');
+    if (!hit || hit.e.py.some((y) => y > 1) || !this.officers.kit) return false;
+    const e = hit.e;
+    if (hit.pr.s < e.trimA + 6 || hit.pr.s > e.len - e.trimB - 6) return false;
+    let made = 0;
+    for (const lat of [-1, 1]) {
+      const id: ModelId = this.wanted >= 5 ? 'policeSuv' : 'police';
+      if (this.fleet.available(id) < 1) continue;
+      const swat = this.wanted >= 5;
+      const slot = this.fleet.alloc(id, swat ? 0x15171b : 0xf4f5f7);
+      if (!slot) continue;
+      this.net.point(e, hit.pr.s + lat * 1.2, lat * (e.spec.median + e.spec.lanes * 1.7), tmpP);
+      const along = Math.atan2(tmpP.tx, tmpP.tz);
+      const spec = carSpecOf(MODELS[id]);
+      const body = new CarBody(spec);
+      // nose-to-nose across the lanes, a little angled
+      body.place(tmpP.x, tmpP.y, tmpP.z, along + Math.PI / 2 * lat + 0.25);
+      const c = this.cop(slot, id, body, swat);
+      c.parked = true;
+      c.block = true;
+      c.crew = 0;
+      this.cops.push(c);
+      // the crew behind the car, on the far side from the suspect
+      for (let k = 0; k < 2; k++) {
+        const bx = tmpP.x + Math.sin(along) * (Math.sign(-(hx * Math.sin(along) + hz * Math.cos(along))) * -3.5) + (k - 0.5) * 2.2 * Math.cos(along);
+        const bz = tmpP.z + Math.cos(along) * (Math.sign(-(hx * Math.sin(along) + hz * Math.cos(along))) * -3.5) - (k - 0.5) * 2.2 * Math.sin(along);
+        const at = new THREE.Vector3(bx, tmpP.y, bz);
+        this.officers.spawn(at, Math.atan2(s.pos.x - bx, s.pos.z - bz), swat ? 'rifle' : k ? 'shotgun' : 'rifle', swat, c, body.pos);
+      }
+      made++;
+    }
+    if (made) this.radio.push('Roadblock set up ahead of the suspect');
+    return made > 0;
+  }
+
+  // ------------------------------------------------------------------ gunfire and damage
+
+  rayOfficers(o: THREE.Vector3, d: THREE.Vector3, maxT: number) {
+    return this.officers.ray(o, d, maxT);
+  }
+
+  shootOfficer(i: number, dmg: number, dir: THREE.Vector3, by: 'player' | 'police'): boolean {
+    if (by === 'police') dmg *= 0.25;
+    const killed = this.officers.shoot(i, dmg, dir);
+    if (killed && by === 'player') this.radio.push(Math.random() < 0.5 ? 'Officer down! Officer down!' : 'We have an officer down, send everything');
+    return killed;
+  }
+
+  /** a blast: officers caught in it */
+  blast(at: THREE.Vector3, r: number, by: 'player' | 'police') {
+    const k = this.officers.blast(at, r);
+    if (k && by === 'player') this.radio.push('Officers down in an explosion!');
+  }
+
+  wreckCop(i: number) {
+    const c = this.cops[i];
+    if (!c) return;
+    c.wreck = true;
+    c.parked = true;
+    this.fleet.paint(c.slot, 0x161514);
+  }
+
+  downHeli() {
+    if (!this.heli) return;
+    this.group.remove(this.heli.root);
+    this.heli = null;
+    this.heliHp = 100;
+    this.radio.push('Air unit is down! Air unit is down!');
   }
 
   private retire(i: number) {
     const c = this.cops[i];
     this.fleet.free(c.slot);
     this.cops.splice(i, 1);
+    // its crew's car is gone: they walk off
+    for (const o of this.officers.list) if (o.car === c) {
+      o.car = null;
+      o.carPos = null;
+    }
   }
 
   // ------------------------------------------------------------------ driving
@@ -522,6 +746,26 @@ export class Police {
     B.impact = Math.max(B.impact, -vn);
   }
 }
+
+const b0 = (c: Cop) => c.body.pos;
+const cos0 = (x: number) => x;
+
+/** dispatch, by the crime that raised the stars */
+const RADIO: Partial<Record<Crime, string[]>> = {
+  shots: ['Shots fired, units responding', 'Report of gunfire, all units in the area'],
+  shootPed: ['Shooting victim, suspect armed and dangerous', 'Person shot, suspect still in the area'],
+  killPed: ['We have a homicide, suspect armed, use caution', 'Fatal shooting, all units respond'],
+  shootCop: ['Officer under fire! Requesting backup', 'Shots fired at police!'],
+  killCop: ['Officer down! All units, officer down!'],
+  explosion: ['Explosion reported, suspect armed with explosives'],
+  stealCop: ['Suspect has taken a patrol car!'],
+  steal: ['Report of a stolen vehicle'],
+  hitPed: ['Hit and run, pedestrian struck'],
+  hitCop: ['Suspect rammed a unit, in pursuit'],
+  speeding: ['Speeding vehicle, attempting a stop'],
+  hitCar: ['Suspect vehicle involved in a collision'],
+  shootCar: ['Shots fired at vehicles'],
+};
 
 function heapPush(h: [number, number][], x: [number, number]) {
   h.push(x);
