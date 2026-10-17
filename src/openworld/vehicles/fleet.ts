@@ -72,7 +72,7 @@ function sectionPts(halfW: number, y0: number, y1: number, box: number, n: numbe
 }
 
 /** body + glass geometry of a model, with vertex colours (white = paint, dark = trim, chrome) */
-function buildBody(m: ModelSpec): { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry } {
+export function buildBody(m: ModelSpec): { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry } {
   const hl = m.L / 2, hw = m.W / 2;
   const cowl = m.cowl * hl, roofF = m.roofF * hl, roofR = m.roofR * hl, deck = m.deck * hl;
   const round = 1 - m.box;
@@ -266,7 +266,7 @@ function mergeBasicColored(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
 }
 
 /** a traffic wheel in one mesh: tyre (dark) and rim (silver) in vertex colours; axis = x */
-function wheelGeometry(R: number, W: number, style: 'alloy' | 'steel' | 'black'): THREE.BufferGeometry {
+export function wheelGeometry(R: number, W: number, style: 'alloy' | 'steel' | 'black'): THREE.BufferGeometry {
   const r = R * 0.68;
   const tyre = latheX(
     [

@@ -10,7 +10,7 @@ import { MIAMI_ENV_TRACK } from './envTrack.ts';
 import { Network } from './roads.ts';
 import { buildRoads } from './city/roadMesh.ts';
 import { buildGround, type GroundBuild } from './city/ground.ts';
-import { bakeCityLights, setCityNight } from './city/cityLights.ts';
+import { bakeCityLights, setCityNight, uploadCityLights } from './city/cityLights.ts';
 import { ll } from './geo.ts';
 import { buildBuildings, type BuildingsBuild } from './city/buildings.ts';
 import { buildProps, type PropsBuild } from './city/props.ts';
@@ -32,7 +32,7 @@ import { Motorbike } from './vehicles/Motorbike.ts';
 import { Boat } from './vehicles/Boat.ts';
 import { Hud, ROADSTER_PAINTS, type MenuState } from './ui/Hud.ts';
 import { OpenWorldAudio, type AudioFrame } from './audio.ts';
-import { setDynLights } from './city/cityLights.ts';
+import { setDynLights, type DynLight } from './city/cityLights.ts';
 import { placeAt, WORLD } from './geo.ts';
 import type { CarBody } from './sim/car.ts';
 import type { CamSubject } from './camera.ts';
@@ -83,6 +83,7 @@ export class OpenWorld {
   private readonly sirenPos: THREE.Vector3[] = [];
   private readonly tmpV = new THREE.Vector3();
   private readonly camFwd = new THREE.Vector3();
+  private readonly headlight: DynLight = { pos: new THREE.Vector3(), color: new THREE.Color(1, 0.94, 0.85), intensity: 0, radius: 24 };
   /** a dev free camera (?free=1, or for screenshots: ?cam=x,y,z&look=x,y,z) */
   private free: FreeCam | null = null;
 
@@ -140,6 +141,7 @@ export class OpenWorld {
     const roads = (this.roadsBuild = buildRoads(this.net));
     this.scene.add(roads.group);
     bakeCityLights(roads.lamps);
+    uploadCityLights(this.gfx.renderer);
 
     await step(0.55, 'Raising the skyline');
     this.buildings = buildBuildings(this.net, this.ground.beachX);
@@ -694,7 +696,16 @@ export class OpenWorld {
     facadeUniforms.uFTime.value = this.elapsed;
     for (const wt of this.ground.water) wt.update(this.elapsed);
     this.props.update(this.elapsed, night);
-    setDynLights(this.police.dynLights(night, this.focus), this.camera.position);
+    const dyn = this.police.dynLights(night, this.focus);
+    // the player's headlights throw a pool on the road ahead after dark
+    const hv = this.vehicle;
+    if (hv && night > 0.2 && (hv.kind === 'roadster' || hv.kind === 'car' || hv.kind === 'bike')) {
+      const fwd = 9 + Math.min(8, Math.hypot(hv.vel.x, hv.vel.z) * 0.25);
+      this.headlight.pos.set(hv.pos.x + Math.sin(hv.yaw) * fwd, hv.pos.y + 1.4, hv.pos.z + Math.cos(hv.yaw) * fwd);
+      this.headlight.intensity = 5 * night;
+      dyn.push(this.headlight);
+    }
+    setDynLights(dyn, this.camera.position);
     this.gfx.render(dt);
   }
 

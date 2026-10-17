@@ -181,6 +181,7 @@ float lit = step( fh1( cell * 1.31 + seed * 3.7 ), 0.34 + 0.18 * sin( seed * 7.0
 float litTone = fh1( cell + 17.0 + seed );
 vec3 litC = litTone < 0.62 ? vec3( 1.0, 0.72, 0.45 ) : litTone < 0.9 ? vec3( 0.85, 0.92, 1.0 ) : vec3( 0.45, 0.6, 1.0 ) * ( 0.75 + 0.25 * sin( uFTime * 9.0 + rnd * 40.0 ) );
 float roomK = 1.0;
+float shop = 0.0;
 bool ground = gv < 0.0;
 if ( style < 0.5 ) {
   // condo: slab edge (white), glass rail band, floor-to-ceiling glass
@@ -270,7 +271,13 @@ if ( ground && groundH > 0.5 ) {
   col = mix( vec3( 0.32, 0.31, 0.3 ), wallC * 0.8, pier );
   float sCol = fh1( vec2( floor( u / 6.0 ), seed ) );
   col = mix( col, mix( vec3( 0.08, 0.08, 0.09 ), wallC, step( 0.5, sCol ) ), sign );
-  facEmit += mix( vec3( 1.0, 0.85, 0.6 ), vec3( 0.4, 0.9, 1.0 ), step( 0.7, sCol ) ) * sign * uNight * 0.9 * step( 0.4, sCol );
+  // the shop's name: a row of lit letters centred on a dark fascia (not the whole band)
+  float sfx = fract( u / 6.0 ), sfy = ( gy - 0.82 ) / 0.15;
+  float nameW = 0.25 + 0.3 * fh1( vec2( floor( u / 6.0 ), seed + 2.0 ) );
+  float letters = boxStep( sfx, 0.5 - nameW, 0.5 + nameW ) * boxStep( sfy, 0.22, 0.78 )
+    * step( 0.3, fract( sfx * 22.0 + sCol * 7.0 ) ) * step( 0.18, fh1( vec2( floor( sfx * 22.0 ), sCol * 31.0 ) ) );
+  vec3 signC = sCol < 0.55 ? vec3( 1.0, 0.85, 0.6 ) : sCol < 0.75 ? vec3( 0.4, 0.9, 1.0 ) : sCol < 0.88 ? vec3( 1.0, 0.3, 0.6 ) : vec3( 1.0 );
+  facEmit += signC * sign * letters * uNight * 2.2 * step( 0.3, sCol );
   fl = -1.0;
   fy = gy;
   cell = vec2( floor( u / 6.0 ), -1.0 );
@@ -278,7 +285,8 @@ if ( ground && groundH > 0.5 ) {
   bw = 6.0;
   fh = groundH;
   lit = uNight * step( 0.25, fh1( cell + seed ) );
-  litC = vec3( 1.0, 0.86, 0.66 );
+  litC = fh1( cell + 4.0 ) < 0.6 ? vec3( 1.0, 0.86, 0.66 ) : vec3( 0.92, 0.96, 1.0 );
+  shop = 1.0;
 }
 // the crown: an LED band round the top of some towers
 float crown = step( topH - 2.2, v ) * step( v, topH - 0.6 ) * step( 0.55, fract( seed * 5.3 ) ) * step( 60.0, topH );
@@ -295,6 +303,19 @@ if ( glass > 0.01 ) {
   // looking in by day: the room lit by the window; by night its own lamps (or nothing)
   vec3 dayIn = room * 0.16 * uDay;
   vec3 nightIn = room * litC * lit * 1.8 + litC * glow * lit * 0.7;
+  if ( shop > 0.5 ) {
+    // a shop at night: racks and displays against a lit back wall, downlights in the ceiling,
+    // a darker floor — not a lightbox
+    float r1 = fh1( cell + 9.0 );
+    float nR = 3.0 + floor( r1 * 4.0 );
+    float rackId = floor( fx * nR + r1 );
+    float racks = step( 0.4, fract( fx * nR + r1 ) ) * step( fy, 0.25 + 0.4 * fh1( vec2( rackId, cell.x + 5.0 ) ) ) * step( 0.08, fy )
+      * step( 0.3, fh1( vec2( rackId, cell.x + 11.0 ) ) );
+    float spots = step( 0.82, fract( fx * 8.0 ) ) * boxStep( fy, 0.74, 0.78 );
+    float floorZ = 1.0 - smoothstep( 0.06, 0.22, fy );
+    float k = mix( 0.38, 0.2, racks ) * ( 1.0 - 0.5 * floorZ ) + spots * 1.4;
+    nightIn = litC * lit * k + room * lit * 0.15;
+  }
   // coated glass: a tinted mirror (F0 ≈ the tint), little diffuse; the room shows through it
   vec3 gl = glassC * 1.7;
   col = mix( col, gl, glass );
@@ -324,7 +345,7 @@ if ( glass > 0.01 ) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v1';
+  m.customProgramCacheKey = () => 'ow-facade-v3';
   return m;
 }
 
@@ -334,10 +355,10 @@ export function roofMaterial(): THREE.MeshStandardMaterial {
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uNoise: { value: noiseTexture() } });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute float aRoof;\nvarying float vRoof;\nvarying vec3 vRW;`)
-      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\nvRoof = aRoof;\nvRW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;`);
+      .replace('#include <common>', `#include <common>\nattribute float aRoof;\nattribute vec4 aRoofL;\nvarying float vRoof;\nvarying vec3 vRW;\nvarying vec4 vRoofL;`)
+      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\nvRoof = aRoof;\nvRoofL = aRoofL;\nvRW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform sampler2D uNoise;\nvarying float vRoof;\nvarying vec3 vRW;`)
+      .replace('#include <common>', `#include <common>\nuniform sampler2D uNoise;\nvarying float vRoof;\nvarying vec3 vRW;\nvarying vec4 vRoofL;`)
       .replace(
         '#include <map_fragment>',
         `
@@ -347,17 +368,68 @@ vec3 c;
 if ( vRoof < 0.5 ) c = vec3( 0.72, 0.72, 0.7 ) * ( 0.85 + 0.2 * n2.b );          // white membrane
 else if ( vRoof < 1.5 ) c = vec3( 0.42, 0.41, 0.4 ) * ( 0.8 + 0.4 * n2.a );        // gravel
 else if ( vRoof < 2.5 ) c = vec3( 0.52, 0.3, 0.2 ) * ( 0.8 + 0.3 * n2.g );          // barrel tile
-else c = vec3( 0.35, 0.36, 0.37 );                                                  // dark membrane
+else if ( vRoof < 3.5 ) c = vec3( 0.35, 0.36, 0.37 );                              // dark membrane
+else {
+  // the podium decks, in the roof's own frame (u along it, v across, metres)
+  vec2 L = vRoofL.xy;
+  vec2 S = vRoofL.zw;
+  float edge = min( min( L.x, S.x - L.x ), min( L.y, S.y - L.y ) );
+  if ( vRoof < 4.5 ) {
+    // amenity deck: travertine pavers, a planted border, a lawn, a timber sun deck
+    vec2 tile = fract( L / vec2( 0.9, 0.6 ) + vec2( 0.5 * step( 0.5, fract( L.y / 1.2 ) ), 0.0 ) );
+    float joint = max( smoothstep( 0.03, 0.0, min( tile.x, 1.0 - tile.x ) ), smoothstep( 0.04, 0.0, min( tile.y, 1.0 - tile.y ) ) );
+    c = vec3( 0.8, 0.76, 0.68 ) * ( 0.9 + 0.12 * n2.r ) * ( 1.0 - 0.16 * joint );
+    vec2 q = L / max( S, vec2( 1.0 ) );
+    // the lawn: a block of the deck away from the pool's side
+    float lawn = step( 0.12, q.x ) * step( q.x, 0.42 ) * step( 0.18, q.y ) * step( q.y, 0.48 );
+    // the sun deck: timber boards
+    float wood = step( 0.58, q.x ) * step( q.x, 0.9 ) * step( 0.18, q.y ) * step( q.y, 0.42 );
+    vec3 grass = vec3( 0.2, 0.33, 0.12 ) * ( 0.8 + 0.35 * n2.g ) * ( 0.92 + 0.12 * step( 0.5, fract( L.x / 1.6 ) ) );
+    vec3 boards = vec3( 0.46, 0.3, 0.19 ) * ( 0.85 + 0.25 * fract( sin( floor( L.x / 0.15 ) * 12.9898 ) * 43758.5 ) ) * ( 1.0 - 0.3 * smoothstep( 0.02, 0.0, abs( fract( L.x / 0.15 ) - 0.5 ) - 0.47 ) );
+    c = mix( c, grass, lawn );
+    c = mix( c, boards, wood );
+    // the planters round the parapet, and round beds in the paving: dark soil and shrubs
+    float plant = 1.0 - step( 1.6, edge );
+    for ( int i = 0; i < 3; i++ ) {
+      vec2 bc = S * vec2( 0.2 + 0.3 * float( i ), 0.72 - 0.1 * float( i - 1 ) * float( i - 1 ) );
+      float r = 2.2 + 0.6 * float( i );
+      float dd = length( L - bc );
+      plant = max( plant, 1.0 - step( r, dd ) );
+      // a stone kerb round each bed
+      c = mix( c, vec3( 0.62, 0.6, 0.56 ), ( 1.0 - step( r + 0.3, dd ) ) * step( r, dd ) );
+    }
+    c *= 0.94;
+    vec3 shrub = mix( vec3( 0.08, 0.12, 0.05 ), vec3( 0.16, 0.3, 0.1 ), smoothstep( 0.3, 0.7, n2.b ) );
+    c = mix( c, shrub, plant );
+  } else if ( vRoof < 5.5 ) {
+    // the open top of a parking garage: concrete, stall lines, the aisles, oil stains
+    c = vec3( 0.55, 0.55, 0.53 ) * ( 0.88 + 0.16 * n2.r );
+    float m = 1.6;
+    float vv = mod( L.y - m, 18.0 );
+    float inStall = ( step( vv, 5.4 ) + step( 12.6, vv ) ) * step( m, L.y ) * step( L.y, S.y - m );
+    float lineU = smoothstep( 0.07, 0.0, abs( fract( ( L.x - m ) / 2.6 ) - 0.5 ) - 0.47 ) * step( m, L.x ) * step( L.x, S.x - m );
+    float stop = smoothstep( 0.08, 0.0, abs( vv - 5.4 ) ) + smoothstep( 0.08, 0.0, abs( vv - 12.6 ) );
+    float paint = max( lineU * inStall, stop * step( m, L.x ) * step( L.x, S.x - m ) );
+    c = mix( c, vec3( 0.86, 0.85, 0.8 ), paint * 0.85 );
+    // stains in the stalls, tyre polish in the aisles
+    c *= 1.0 - 0.18 * inStall * smoothstep( 0.55, 0.8, texture2D( uNoise, L * 0.35 ).g );
+    c *= 1.0 - 0.06 * ( 1.0 - inStall ) * smoothstep( 0.0, 1.0, sin( L.x * 0.9 ) * 0.5 + 0.5 );
+  } else {
+    // a green roof: sedum, mottled green to rust
+    c = mix( vec3( 0.2, 0.3, 0.12 ), vec3( 0.42, 0.3, 0.16 ), smoothstep( 0.35, 0.75, n1.g ) ) * ( 0.85 + 0.3 * n2.b );
+    c = mix( c, vec3( 0.5, 0.48, 0.45 ), 1.0 - step( 0.8, edge ) );
+  }
+}
 // seams every 1.8 m and ponding stains
 float seam = smoothstep( 0.04, 0.0, abs( fract( vRW.x / 1.8 ) - 0.5 ) - 0.46 );
 c *= 1.0 - 0.08 * seam * step( vRoof, 0.5 );
-c *= 1.0 - 0.2 * smoothstep( 0.6, 0.85, n1.r );
+c *= 1.0 - 0.2 * smoothstep( 0.6, 0.85, n1.r ) * step( vRoof, 3.5 );
 // tiles: rows of barrels
 if ( vRoof > 1.5 && vRoof < 2.5 ) c *= 0.75 + 0.25 * sin( vRW.x * 14.0 + vRW.z * 2.0 );
 diffuseColor.rgb = c;
 `,
       );
   };
-  m.customProgramCacheKey = () => 'ow-roof-v1';
+  m.customProgramCacheKey = () => 'ow-roof-v3';
   return m;
 }

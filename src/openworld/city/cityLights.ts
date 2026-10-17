@@ -34,16 +34,18 @@ export const DYN_MAX = 8;
 const dynPos = new Float32Array(DYN_MAX * 4);
 const dynCol = new Float32Array(DYN_MAX * 4);
 
+/** shared by reference with every lit built-in material — plain objects, since UniformsUtils.clone
+ *  copies Vector4 / Color instances (each material would freeze its own copy) but not these */
 export const cityUniforms = {
   cityMap: { value: lightTex as THREE.Texture },
   cityDir: { value: dirTex as THREE.Texture },
   /** x0, z0, 1/width, 1/height of the map in world metres */
-  cityRect: { value: new THREE.Vector4(WORLD.x0, WORLD.z0, 1 / (W * CITY_TEX), 1 / (H * CITY_TEX)) },
+  cityRect: { value: { x: WORLD.x0, y: WORLD.z0, z: 1 / (W * CITY_TEX), w: 1 / (H * CITY_TEX) } },
   /** x: overall level (0 by day … 1 at night), y: lamp height, z: wet gloss boost */
-  cityParams: { value: new THREE.Vector4(0, 8.5, 1, 0) },
-  cityWarm: { value: new THREE.Color(1.0, 0.62, 0.3) },
-  cityCool: { value: new THREE.Color(0.82, 0.9, 1.0) },
-  cityNeon: { value: new THREE.Color(1.0, 0.25, 0.65) },
+  cityParams: { value: { x: 0, y: 8.5, z: 1, w: 0 } },
+  cityWarm: { value: { r: 1.0, g: 0.62, b: 0.3 } },
+  cityCool: { value: { r: 0.82, g: 0.9, b: 1.0 } },
+  cityNeon: { value: { r: 1.0, g: 0.25, b: 0.65 } },
   dynPos: { value: dynPos },
   dynCol: { value: dynCol },
 };
@@ -88,7 +90,7 @@ const LIGHT = /* glsl */ `
           RE_Direct( cl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
           // the light bounced off the pavement and the walls round it
           #if defined( RE_IndirectDiffuse )
-          irradiance += col * ( cityParams.x * hk * 0.35 );
+          irradiance += col * ( cityParams.x * hk * 0.55 );
           #endif
         }
       }
@@ -180,6 +182,12 @@ export function bakeCityLights(lamps: Lamp[]) {
   // sqrt just compresses the range so the pools keep a soft skirt at 8 bits)
   lightTex.needsUpdate = true;
   dirTex.needsUpdate = true;
+}
+
+/** upload the maps from the originals (the materials hold clones that share their GPU storage) */
+export function uploadCityLights(renderer: THREE.WebGLRenderer) {
+  renderer.initTexture(lightTex);
+  renderer.initTexture(dirTex);
 }
 
 /** the city's night level 0 … 1 (from the time of day) and the wet gloss */

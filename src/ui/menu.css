@@ -4602,6 +4602,34 @@
   margin-top: var(--s5);
   width: 240px;
 }
+.home-ow {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--s6, 40px);
+  padding-left: var(--s4);
+  border-left: 3px solid #ff3f8e;
+  max-width: 360px;
+}
+.home-ow .eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+.home-ow .ow-title {
+  margin-top: var(--s1, 4px);
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
+}
+.home-ow .meta {
+  margin-top: var(--s1, 4px);
+  font-size: 13px;
+  color: var(--ink2);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
 .home-quick {
   margin-top: var(--s4);
   font-size: 14px;

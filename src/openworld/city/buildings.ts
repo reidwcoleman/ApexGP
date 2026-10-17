@@ -36,6 +36,10 @@ export interface BuildingsBuild {
   open: { x: number; z: number; r: number }[];
   /** roof tops (for the props: AC units, water tanks) */
   roofs: { x: number; z: number; y: number; w: number; d: number; yaw: number }[];
+  /** podium decks (amenity / parking) */
+  decks: RoofDeck[];
+  /** tower crowns (helipads, masts) */
+  crowns: { x: number; z: number; y: number; w: number; d: number; yaw: number; tall: number }[];
   /** neon / sign anchor points on Ocean Drive's hotels */
   decoSigns: { x: number; y: number; z: number; yaw: number; name: string; color: number; h: number }[];
 }
@@ -195,11 +199,13 @@ interface Fac {
 
 class Builder {
   walls = new MeshBuilder().attr('aFUV', 2).attr('aFac', 4).attr('aFPal', 4);
-  roofs = new MeshBuilder().attr('aRoof', 1);
+  roofs = new MeshBuilder().attr('aRoof', 1).attr('aRoofL', 4);
   pools = new MeshBuilder();
   lots = new MeshBuilder().attr('aLot', 3);
   colliders: Collider[] = [];
   roofTops: BuildingsBuild['roofs'] = [];
+  decks: RoofDeck[] = [];
+  crowns: BuildingsBuild['crowns'] = [];
 
   /** walls of a polygon prism from y0 to y1 (+ a roof cap of `roof` kind, -1 = none) */
   prism(poly: P2[], y0: number, y1: number, f: Fac, roof: number, opts: { collide?: boolean; parapet?: number; topH?: number } = {}) {
@@ -248,14 +254,20 @@ class Builder {
       else W.quad(v1, v0, v3, v2);
       u += len;
     }
+    let frame: RoofFrame | null = null;
     if (roof >= 0) {
+      frame = roofFrame(poly);
       this.roofs.set('aRoof', roof);
       const tris = THREE.ShapeUtils.triangulateShape(
         poly.map((p) => new THREE.Vector2(p.x, p.z)),
         [],
       );
       const base = this.roofs.count;
-      for (const p of poly) this.roofs.v(p.x, y1, p.z, 0, 1, 0);
+      for (const p of poly) {
+        const dx = p.x - frame.ox, dz = p.z - frame.oz;
+        this.roofs.set('aRoofL', dx * frame.ux + dz * frame.uz, -dx * frame.uz + dz * frame.ux, frame.W, frame.D);
+        this.roofs.v(p.x, y1, p.z, 0, 1, 0);
+      }
       for (const t of tris) {
         const [a, b, c] = t;
         const ax = poly[a].x, az = poly[a].z;
@@ -265,6 +277,7 @@ class Builder {
       }
     }
     if (opts.collide !== false) this.collide(poly, y0, top);
+    return frame;
   }
 
   collide(poly: P2[], y0: number, y1: number) {
@@ -290,6 +303,7 @@ class Builder {
     const A = P(-ow, -od, y), B = P(ow, -od, y), C = P(ow, od, y), D = P(-ow, od, y);
     const E = P(-r, 0, y + h), F = P(r, 0, y + h);
     this.roofs.set('aRoof', kind);
+    this.roofs.set('aRoofL', 0, 0, 0, 0);
     const face = (p: number[][]) => {
       // make it face up
       const [a, b, cc] = p;
@@ -305,6 +319,45 @@ class Builder {
     face([C, D, E, F]);
     face([D, A, E]);
   }
+}
+
+/** a roof's own frame: u along its longest edge, v across, from the corner of its bounding box */
+export interface RoofFrame {
+  ox: number;
+  oz: number;
+  ux: number;
+  uz: number;
+  W: number;
+  D: number;
+}
+function roofFrame(poly: P2[]): RoofFrame {
+  let best = 0, ux = 1, uz = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const l = Math.hypot(b.x - a.x, b.z - a.z);
+    if (l > best) {
+      best = l;
+      ux = (b.x - a.x) / l;
+      uz = (b.z - a.z) / l;
+    }
+  }
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (const p of poly) {
+    const u = p.x * ux + p.z * uz, v = -p.x * uz + p.z * ux;
+    u0 = Math.min(u0, u);
+    u1 = Math.max(u1, u);
+    v0 = Math.min(v0, v);
+    v1 = Math.max(v1, v);
+  }
+  // the corner (u0, v0) back in world space
+  return { ox: u0 * ux - v0 * uz, oz: u0 * uz + v0 * ux, ux, uz, W: u1 - u0, D: v1 - v0 };
+}
+
+/** a podium roof: an amenity deck (pool, loungers, palms) or the open top of a parking garage */
+export interface RoofDeck extends RoofFrame {
+  kind: 'amenity' | 'parking';
+  y: number;
+  pool: { cx: number; cz: number; w: number; d: number; yaw: number } | null;
 }
 
 function convexHull(poly: P2[]): P2[] {
@@ -401,10 +454,13 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     // the podium: parking decks behind a glass street front (or the whole lot in glass for offices)
     const office = nm ? nm.style === 1 : R() < 0.3;
     B.prism(lot, 0, gfH, { style: 5, floorH: 4, bayW: 6, seed, wall: 2, glass: 4, groundH: gfH }, -1, { collide: false });
-    B.prism(lot, gfH, podiumH, { style: office ? 1 : 4, floorH: 3.2, bayW: office ? 1.6 : 8.5, seed, wall: office ? 12 : 1, glass: 4, groundH: 0 }, 1, { parapet: 1.1 });
+    const amenity = !office && R() < 0.8;
+    const frame = B.prism(lot, gfH, podiumH, { style: office ? 1 : 4, floorH: 3.2, bayW: office ? 1.6 : 8.5, seed, wall: office ? 12 : 1, glass: 4, groundH: 0 }, amenity ? 4 : 5, { parapet: 1.1 })!;
     B.collide(lot, 0, podiumH);
+    const deck: RoofDeck = { ...frame, kind: amenity ? 'amenity' : 'parking', y: podiumH, pool: null };
+    B.decks.push(deck);
     // amenity deck: a pool on the podium roof
-    if (!office && R() < 0.75) {
+    if (amenity) {
       const pw = Math.min(lotW * 0.35, 22), pd = Math.min(lotD * 0.22, 8);
       const off = (lotD / 2 - pd / 2 - 3) * (R() < 0.5 ? 1 : -1);
       const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -412,6 +468,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
       const P = shapePoly('rect', px, pz, pw, pd, yaw, R);
       const ids = P.map((p) => B.pools.v(p.x, podiumH + 0.06, p.z, 0, 1, 0));
       B.pools.quad(ids[0], ids[3], ids[2], ids[1]);
+      deck.pool = { cx: px, cz: pz, w: pw, d: pd, yaw };
     }
     // the tower
     const shape: Shape = nm ? nm.shape : (['rect', 'round', 'round', 'ellipse', 'chamfer'] as Shape[])[Math.floor(R() * 5)];
@@ -448,6 +505,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     const crownH = 4 + R() * 5;
     const crown = shapePoly('rect', cx, cz, cw, cd, tyaw, R);
     B.prism(crown, tall, tall + crownH, { style: 7, floorH: 3, bayW: 3, seed, wall: wall === 12 ? 2 : 1, glass: 4, groundH: 0 }, 3);
+    B.crowns.push({ x: cx, z: cz, y: tall + crownH, w: cw, d: cd, yaw: tyaw, tall });
     B.roofTops.push({ x: cx, z: cz, y: tall, w: tw * 0.8, d: td * 0.8, yaw: tyaw });
     return true;
   };
@@ -459,7 +517,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     const H = 4.5 + floors * 3.3;
     const style = deco ? 3 : [2, 2, 0, 1, 6, 2][Math.floor(R() * 6)];
     const wall = deco ? [5, 6, 7, 8, 9, 9, 13, 14, 10][Math.floor(R() * 9)] : [0, 1, 3, 4, 9, 15, 11][Math.floor(R() * 7)];
-    B.prism(poly, 0, H, { style, floorH: 3.3, bayW: style === 1 ? 1.6 : deco ? 4.2 : 3.2, seed, wall, glass: [0, 2, 4, 6][Math.floor(R() * 4)], groundH: 4.5 }, R() < 0.7 ? 0 : 1, { parapet: 1.0 });
+    B.prism(poly, 0, H, { style, floorH: 3.3, bayW: style === 1 ? 1.6 : deco ? 4.2 : 3.2, seed, wall, glass: [0, 2, 4, 6][Math.floor(R() * 4)], groundH: 4.5 }, R() < 0.12 ? 6 : R() < 0.7 ? 0 : 1, { parapet: 1.0 });
     B.roofTops.push({ x: cx, z: cz, y: H, w: w * 0.8, d: d * 0.8, yaw });
     return true;
   };
@@ -627,7 +685,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
     const pm = new THREE.MeshStandardMaterial({ color: 0x2bb5c8, roughness: 0.05, metalness: 0.1, emissive: 0x0a5a66, emissiveIntensity: 0.25 });
     group.add(chunkMeshes(B.pools, 900, pm, { name: 'pools' }));
   }
-  return { group, colliders: B.colliders, open, roofs: B.roofTops, decoSigns };
+  return { group, colliders: B.colliders, open, roofs: B.roofTops, decks: B.decks, crowns: B.crowns, decoSigns };
 }
 
 const PR = { s: 0, lat: 0, y: 0, tx: 0, tz: 0, off: false, i: 0, t: 0 };

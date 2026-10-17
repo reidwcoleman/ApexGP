@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildRoofDress } from './roofDress.ts';
 import { BEACH_OCEAN_SHORE, ll, type P2 } from '../geo.ts';
 import { signalState, type Network } from '../roads.ts';
 import type { RoadBuild } from './roadMesh.ts';
@@ -438,6 +439,9 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
     solids.push({ poly: [], circle: 0.4, y0: y - 1, y1: y + 12, cx: x, cz: z, r: 0.4, kind: 'palm' });
   };
   for (const p of roads.palms) addPalm(p.x, p.z, p.y, p.kind);
+  // the podium decks and tower tops (their planter palms join the palms here)
+  const roofDress = buildRoofDress(bld, addPalm);
+  group.add(roofDress.group);
   // street palms on the avenues' sidewalks
   const tmp = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
   for (const e of net.edges) {
@@ -585,6 +589,7 @@ export function buildProps(net: Network, roads: RoadBuild, bld: BuildingsBuild, 
     solids,
     update(t, night) {
       windU.uWindT.value = t;
+      roofDress.update(t, night);
       // the signals (every frame: cheap, a colour per disc)
       for (let i = 0; i < discs.length; i++) {
         const d = discs[i];

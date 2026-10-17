@@ -568,6 +568,15 @@ export class Menu {
     }
     const quick = el('div', 'home-quick', box, `Quick race at ${this.setup.track === cd.id ? cd.short : (CIRCUITS.find((c) => c.id === this.setup.track)?.short ?? cd.short)} ›`);
     this.action(quick, () => this.setTab('race'));
+    // the open world: its own page, so none of the race world loads with it
+    const ow = el('div', 'home-ow', p);
+    el('div', 'eyebrow', ow, 'Open world');
+    el('div', 'ow-title', ow, 'Miami');
+    el('div', 'meta', ow, 'Brickell to South Beach in the Roadster — it flies. Traffic, police, helicopters, boats.');
+    const drive = el('div', 'home-quick', ow, 'Drive Miami ›');
+    this.action(drive, () => {
+      location.href = './miami.html';
+    });
     this.sel = 0;
   }
 
