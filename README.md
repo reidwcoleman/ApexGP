@@ -630,7 +630,11 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
   anti-roll bars, so load transfer, dive, squat and roll come out of the suspension (and a soft SUV
   or a van leans hard and lifts its inside wheels); each tyre has its own load, slip angle and slip
   ratio on a combined-slip curve with load sensitivity, its wheel spins up or locks (an implicit
-  wheel solve, ABS, traction control, limited-slip), Ackermann steering, stability control. The city
+  wheel solve, ABS and traction control on the combined slip, limited-slip), Ackermann steering
+  with grip steering (the fronts turn no further than their peak slip angle, so full lock carves),
+  stability control with roll stability (a van stays on four wheels). The Roadster runs semi-slicks
+  and a suction fan with torque vectoring: 0–100 km/h 1.5 s, 0–200 3.3 s, 100–0 in 17 m, 2.2 g
+  on the skidpad; a city sedan pulls 1.0 g and stops from 100 in 35 m. The city
   cars have automatic gearboxes and torque curves (the bus a five-speed diesel); the Roadster and
   the stainless pickup are single-speed EVs that regenerate off the throttle. Grass and sand grip
   less; each wheel rides a curb on its own. It turns into a full rigid body when it trips sideways

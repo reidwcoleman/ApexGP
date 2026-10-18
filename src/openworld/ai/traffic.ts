@@ -132,13 +132,14 @@ export function carSpecOf(m: ModelSpec): CarSpec {
     power: m.power,
     maxForce: m.mass * 9.81 * 0.9,
     frontDrive: id === 'cyber' || id === 'suv' || id === 'gwagon' ? 0.45 : id === 'compact' || id === 'taxi' ? 1 : 0,
-    mu: id === 'coupe' ? 1.12 : heavy ? 0.85 : truck ? 0.95 : 1.0,
+    // (modern performance tyres on the coupe, good all-seasons elsewhere, load-rated ones on the big ones)
+    mu: id === 'coupe' ? 1.3 : heavy ? 0.94 : truck ? 1.05 : 1.12,
     cornerB: 8,
     cdA: m.W * m.H * 0.34,
     clA: 0.05,
     fan: 0,
     maxSteer: 0.6,
-    brakeG: heavy ? 0.8 : 1.0,
+    brakeG: heavy ? 1.0 : 1.3,
     hl: m.L / 2,
     hw: m.W / 2,
     height: m.H,
@@ -150,13 +151,13 @@ export function carSpecOf(m: ModelSpec): CarSpec {
     rideHz: sporty ? 1.65 : heavy ? 1.15 : truck ? 1.25 : 1.35,
     damping: sporty ? 0.38 : 0.3,
     rollF: id === 'coupe' ? 0.55 : 0.64,
-    alphaP: sporty ? 0.11 : truck || heavy ? 0.15 : 0.13,
+    alphaP: sporty ? 0.095 : truck || heavy ? 0.13 : 0.11,
     kappaP: 0.12,
     // an automatic: six speeds (eight in the big SUVs), the bus a five-speed diesel
     gears: ev ? undefined : id === 'bus' ? [3.5, 2.0, 1.4, 1.0, 0.75] : id === 'gwagon' || id === 'suv' || id === 'policeSuv' ? [4.7, 3.1, 2.1, 1.67, 1.29, 1.0, 0.84, 0.67] : [3.9, 2.3, 1.5, 1.14, 0.87, 0.69],
     finalDrive: id === 'bus' ? 5.6 : id === 'coupe' ? 3.7 : id === 'pickup' || id === 'van' ? 3.9 : 3.3,
     redline: id === 'bus' ? 2500 : id === 'coupe' ? 7600 : id === 'pickup' || id === 'van' ? 5600 : 6500,
-    lsd: sporty ? 40 : 0,
+    lsd: sporty ? 60 : 25,
     brakeBias: 0.66,
   };
 }

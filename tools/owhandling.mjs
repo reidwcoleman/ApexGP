@@ -54,7 +54,7 @@ const f2 = (x) => (Math.round(x * 100) / 100).toString();
 {
   const b = fresh(100 / 3.6);
   let d = 0, t = 0, pmax = 0;
-  while (b.speed > 0.05 && t < 15) { b.step(DT, inp({ brake: 1 }), net, world); d += b.speed * DT; t += DT; pmax = Math.max(pmax, b.pitch); }
+  while (b.speed > 0.05 && !b.reverse && t < 15) { b.step(DT, inp({ brake: 1 }), net, world); d += b.speed * DT; t += DT; pmax = Math.max(pmax, b.pitch); }
   console.log(`brake 100-0: ${f2(d)} m, ${f2(t)} s, dive ${f2(pmax * 57.3)}°, yaw ${f2(b.yaw * 57.3)}°`);
 }
 // skidpad: constant speed (throttle PI), ramp steer

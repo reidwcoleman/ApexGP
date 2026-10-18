@@ -509,7 +509,7 @@ export class Police {
     // a pursuit-tuned cruiser: more power, more grip than the traffic
     spec.power *= 2.2;
     spec.maxForce *= 1.25;
-    spec.mu = 1.15;
+    spec.mu = 1.32;
     spec.vmax = 62;
     const body = new CarBody(spec);
     const yaw = Math.atan2(target.x - tmpP.x, target.z - tmpP.z);

@@ -74,6 +74,8 @@ export interface CarSpec {
   lsd?: number;
   /** front share of the braking */
   brakeBias?: number;
+  /** torque vectoring: a yaw moment from the driven wheels toward what the steering asks (share of Iz·rad/s²) */
+  vector?: number;
 }
 
 export const ROADSTER_SPEC: CarSpec = {
@@ -82,24 +84,26 @@ export const ROADSTER_SPEC: CarSpec = {
   b: 1.465,
   cgH: 0.42,
   izK: 1.05,
-  power: 1_000_000,
-  maxForce: 26000,
+  power: 1_250_000,
+  maxForce: 40000,
   // (three motors: one on the front axle, two on the rear)
   frontDrive: 0.35,
-  mu: 1.32,
+  // (semi-slick cup tyres; the suction fan pulls it onto the road from standstill)
+  mu: 1.68,
   cornerB: 9,
   cdA: 0.52,
-  clA: 1.15,
-  fan: 5200,
+  clA: 1.7,
+  fan: 10500,
   maxSteer: 0.6,
-  brakeG: 1.5,
+  brakeG: 2.6,
   rideHz: 1.9,
   damping: 0.38,
   rollF: 0.56,
   track: 0.86,
-  alphaP: 0.105,
-  kappaP: 0.11,
-  lsd: 60,
+  alphaP: 0.09,
+  kappaP: 0.1,
+  lsd: 90,
+  vector: 1.6,
   brakeBias: 0.6,
   hl: 2.29,
   hw: 1.0,
@@ -119,8 +123,8 @@ export interface CarInput {
 }
 
 const G = 9.81;
-/** the tyre curve: F = μ·Fz·sin(TC·atan(TB·s)), s the combined slip (1 at the peak; ~80 % of it sliding) */
-const TC = 1.4;
+/** the tyre curve: F = μ·Fz·sin(TC·atan(TB·s)), s the combined slip (1 at the peak; ~90 % of it sliding) */
+const TC = 1.3;
 const TB = Math.tan(Math.PI / (2 * TC));
 /** the tyres' static compression in the rigid-body mode (m) */
 const SAG = 0.08;
@@ -172,6 +176,8 @@ export class CarBody {
   reverse = false;
   /** assists */
   stability = 1;
+  /** the roll stability's intervention last step (0..1) */
+  rsc = 0;
   private contacts: Contact[] = [];
   private s2 = makeSurf();
   /** rigid-body mode (see the top): orientation, angular velocity (world), centre of mass */
@@ -640,7 +646,16 @@ export class CarBody {
     }
     // ---- steering: speed-sensitive lock, a quick but not instant rack
     const lockK = 1 / (1 + (speed * speed) / 900);
-    const want = inp.steer * S.maxSteer * (0.35 + 0.65 * lockK);
+    let want = inp.steer * S.maxSteer * (0.35 + 0.65 * lockK);
+    // grip steering: rolling, the front wheels turn no further than the tyres' peak slip angle allows
+    // (what a driver feels through the rim), so full lock carves at the limit rather than plowing;
+    // the same window lets the wheel follow a slide for the countersteer. The handbrake frees it.
+    if (ground && vL > 2.5 && !inp.handbrake) {
+      // (narrower while the roll stability is working: a tall car isn't steered onto two wheels)
+      const bf = Math.atan2(vT + this.yawRate * S.a, vL), win = (S.alphaP ?? 0.13) * 1.05 * (1 - 0.75 * this.rsc);
+      const k = THREE.MathUtils.smoothstep(vL, 2.5, 8);
+      want += (THREE.MathUtils.clamp(want, bf - win, bf + win) - want) * k;
+    }
     this.steer += THREE.MathUtils.clamp(want - this.steer, -3.2 * dt, 3.2 * dt);
     // ---- forces (car frame: L forward, T left)
     let FL = 0, FT = 0, Mz = 0;
@@ -758,12 +773,14 @@ export class CarBody {
           w = Math.abs(w) <= dw ? 0 : w - Math.sign(w) * dw;
         }
         // ABS holds a braked wheel just short of locking; traction control a driven one short of spinning
+        // (both on the combined slip: in a corner they leave the tyre the grip it needs to turn)
+        const room = Math.sqrt(Math.max(0.03, 1.05 - syy * syy));
         if (abs && !hb && Tb_i > 0 && Math.abs(vx) > 1.5) {
-          const lim = (vx - Math.sign(vx) * kp * 0.85 * vd) / R;
+          const lim = (vx - Math.sign(vx) * kp * 0.85 * room * vd) / R;
           w = vx > 0 ? Math.max(w, lim) : Math.min(w, lim);
         }
         if (tcs && (Td_i * Math.sign(vx || 1) > 0 || Math.abs(vx) < 0.5)) {
-          const k = kp * (1.1 + 0.6 * (1 - Math.min(1, this.stability)));
+          const k = kp * (0.95 * room + 0.75 * (1 - Math.min(1, this.stability)));
           const lim = (vx + Math.sign(Td_i) * k * vd) / R;
           w = Td_i > 0 ? Math.min(w, Math.max(lim, vx / R)) : Math.max(w, Math.min(lim, vx / R));
         }
@@ -779,7 +796,8 @@ export class CarBody {
         // (never more than closes the slip this step: no jitter at parking speeds)
         const capY = (Math.abs(vy) * m * 0.25) / dt;
         if (Math.abs(Fy) > capY) Fy = Math.sign(Fy) * capY;
-        const capX = (Math.abs(w * R - vx) * m * 0.25) / dt;
+        // (a driven wheel always passes on what its axle delivers: a stiff tyre barely slips at a launch)
+        const capX = Math.max((Math.abs(w * R - vx) * m * 0.25) / dt, Math.abs(Td_i) / R);
         if (Math.abs(Fx) > capX) Fx = Math.sign(Fx) * capX;
         this.wSlip[i] = s;
         sMax = Math.max(sMax, s);
@@ -789,11 +807,21 @@ export class CarBody {
         Mz += z * fyl - x * fxl;
       }
       // squeal and smoke: past the peak
-      this.slip = THREE.MathUtils.clamp((sMax - 0.9) * 1.6 + (inp.handbrake && speed > 5 ? 0.5 : 0), 0, 1.5) * (1 - kin);
+      this.slip = THREE.MathUtils.clamp((sMax - 0.9) * 1.6 + (inp.handbrake && speed > 5 ? 0.5 : 0), 0, 1.5) * (1 - kin) * (noRoll ? THREE.MathUtils.smoothstep(speed, 4, 7) : 1);
       // ---- stability control: brakes the yaw back toward what the steering asks (the grip allows)
       const Iz = S.izK * m * S.a * S.b;
+      // roll stability: the inside wheels going light, it brakes the outside front and opens the line
+      // before a tall car tips (what keeps a van on four wheels at the grip it has)
+      const inner = yr > 0 ? this.wLoad[0] + this.wLoad[2] : this.wLoad[1] + this.wLoad[3];
+      const rsc = !noRoll && speed > 6 && !inp.handbrake ? THREE.MathUtils.clamp(1 - inner / (0.24 * m * G), 0, 1) * Math.min(1, this.stability) : 0;
+      this.rsc = rsc;
+      if (rsc > 0) {
+        Mz -= Math.sign(yr) * rsc * 1.6 * Iz * Math.min(1, Math.abs(yr) * 3);
+        FL -= Math.sign(vL) * rsc * 0.35 * m * G;
+      }
       if (!inp.handbrake && this.stability > 0 && speed > 6) {
-        const muG = S.mu * G * 1.05;
+        // (the grip it has: the downforce counts)
+        const muG = S.mu * (G + down / m) * 1.05;
         let rRef = (vL * Math.tan(st)) / (Lw * (1 + (vL * vL) / 900));
         rRef = THREE.MathUtils.clamp(rRef, -muG / speed, muG / speed);
         const err = yr - rRef;
@@ -802,6 +830,9 @@ export class CarBody {
           Mz -= Math.sign(err) * Math.min(over * 7, 2.5) * Iz * this.stability;
           // (the brake it uses to do it)
           FL -= Math.sign(vL) * Math.min(over * 0.25, 0.25) * m * G * this.stability;
+        } else if (S.vector && over > 0 && rsc < 0.3 && Math.sign(yr) === Math.sign(rRef) && vL > 0) {
+          // understeer: the outside motor drives harder, the inside one regenerates, and the nose comes in
+          Mz -= Math.sign(err) * Math.min(over * 6, 1.2) * Iz * S.vector * this.stability;
         }
       }
       // ---- the air, the rolling tyres
