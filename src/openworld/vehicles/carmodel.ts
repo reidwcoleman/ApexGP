@@ -198,6 +198,69 @@ export function buildCar(m: ModelSpec): CarGeometry {
     b.translate(x, y, z);
     add(b, c);
   };
+  // ---- the cabin, seen through the glass: a dark liner, the dash and the wheel, the seats
+  if (m.id !== 'bus') {
+    const cz0 = cowl - 0.04;
+    const cz1 = m.id === 'pickup' ? roofR - 0.04 : tall || m.id === 'suv' || m.id === 'gwagon' || m.id === 'policeSuv' ? -hl + 0.35 : Math.max(deck + 0.05, roofR - 0.45);
+    const cw = widthAt((cz0 + cz1) / 2) * (1 - m.tumble * 0.6) - 0.06;
+    const fl = clear + 0.22, ceil = m.H - 0.07;
+    // the tub below the windows, seen from inside (the greenhouse above stays open: you see out the far side)
+    {
+      const top = m.beltH - 0.02;
+      const g = new THREE.BoxGeometry(cw * 2, top - fl, cz0 - cz1).toNonIndexed();
+      g.translate(0, (fl + top) / 2, (cz0 + cz1) / 2);
+      const pos = g.getAttribute('position') as THREE.BufferAttribute, nor = g.getAttribute('normal') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i += 3) {
+        // (reverse each triangle, turn its normal in)
+        const x = pos.getX(i + 1), y = pos.getY(i + 1), z = pos.getZ(i + 1);
+        pos.setXYZ(i + 1, pos.getX(i + 2), pos.getY(i + 2), pos.getZ(i + 2));
+        pos.setXYZ(i + 2, x, y, z);
+        for (let k = 0; k < 3; k++) nor.setXYZ(i + k, -nor.getX(i + k), -nor.getY(i + k), -nor.getZ(i + k));
+      }
+      add(g, [0.035, 0.034, 0.033]);
+      // the headliner under the roof panel
+      const hz0 = roofF - 0.04, hz1 = Math.max(roofR + 0.04, cz1);
+      if (hz0 > hz1) {
+        const hw2 = widthAt((hz0 + hz1) / 2) * (1 - m.tumble) - 0.1;
+        const hl2 = new THREE.PlaneGeometry(hw2 * 2, hz0 - hz1);
+        hl2.rotateX(Math.PI / 2);
+        hl2.translate(0, ceil - 0.02, (hz0 + hz1) / 2);
+        add(hl2, [0.32, 0.31, 0.29]);
+      }
+    }
+    const SEAT: RGB = m.id === 'coupe' || m.id === 'police' ? [0.025, 0.025, 0.028] : m.id === 'gwagon' ? [0.22, 0.13, 0.08] : m.id === 'taxi' || m.id === 'van' ? [0.07, 0.07, 0.08] : [0.11, 0.1, 0.095];
+    // the dash across the front, the instrument hood, the wheel on the driver's (left) side
+    // (set back under the windscreen's slope: it mustn't poke through the glass at the cowl)
+    box(cw * 2 - 0.04, 0.16, 0.34, 0, m.beltH - 0.04, cz0 - 0.42, [0.03, 0.03, 0.032]);
+    box(0.32, 0.06, 0.16, cw * 0.42, m.beltH + 0.07, cz0 - 0.5, [0.02, 0.02, 0.022]);
+    {
+      const wh = new THREE.TorusGeometry(0.18, 0.024, 4, 12);
+      wh.rotateX(-0.45);
+      wh.translate(cw * 0.42, m.beltH + 0.02, cz0 - 0.68);
+      add(wh, [0.02, 0.02, 0.022]);
+    }
+    const seat = (x: number, z: number, w: number) => {
+      // the cushion, the back up to a hand below the roof, the headrest
+      const sy = fl + Math.min(0.24, (ceil - fl) * 0.22);
+      const backTop = ceil - 0.3;
+      const bh = Math.max(0.3, backTop - sy - 0.06);
+      box(w, 0.12, 0.5, x, sy, z + 0.22, SEAT);
+      box(w, bh, 0.12, x, sy + 0.06 + bh / 2, z - 0.02, SEAT, 0, -0.18);
+      box(Math.min(0.26, w * 0.5), 0.18, 0.11, x, backTop + 0.11, z - 0.1, SEAT);
+    };
+    // front seats just ahead of the B-pillar, the back seat behind it
+    const zF = pillars.length ? pillars[0] + 0.12 : Math.min(cz0 - 1.0, roofR + 0.5);
+    if (cz0 - zF > 0.6) {
+      seat(cw * 0.45, zF, Math.min(0.52, cw * 0.75));
+      seat(-cw * 0.45, zF, Math.min(0.52, cw * 0.75));
+    }
+    const zR = zF - 0.9;
+    if (m.id !== 'coupe' && m.id !== 'pickup' && zR - 0.3 > cz1) {
+      seat(cw * 0.45, zR, Math.min(0.52, cw * 0.75));
+      seat(-cw * 0.45, zR, Math.min(0.52, cw * 0.75));
+      seat(0, zR, 0.4);
+    }
+  }
   // ---- arch liners (and a thin black lip on SUVs)
   for (const zc of [wz, -wz]) {
     for (const sg of [1, -1]) {
@@ -230,10 +293,17 @@ export function buildCar(m: ModelSpec): CarGeometry {
   const lowY = m.clear + 0.16;
   box(Math.min(hw * 1.25, noseW * 1.7), 0.1, 0.03, 0, lowY, noseZ - 0.01, DARK);
   box(noseW * 2 - 0.04, 0.03, 0.05, 0, lowY - 0.07, hl - 0.012, TRIM);
-  box(0.52, 0.12, 0.012, 0, lowY + 0.13, noseZ + 0.004, PLATE);
+  // the bumper: a painted band proud of the nose, its lower intake, fog lamps either side
+  if (m.id !== 'bus' && m.id !== 'cyber') {
+    box(noseW * 2 - 0.02, 0.15, 0.07, 0, lowY + 0.12, hl + 0.012, m.box > 0.6 ? TRIM : PAINT);
+    box(noseW * 2 - 0.06, 0.012, 0.075, 0, lowY + 0.045, hl + 0.014, DARK);
+    for (const sg of [1, -1]) box(0.14, 0.06, 0.02, sg * (noseW - 0.22), lowY + 0.0, noseZ + 0.012, DARK);
+  }
+  box(0.52, 0.12, 0.012, 0, lowY + 0.13, noseZ + 0.055, PLATE);
   // ---- the tail: plate, a dark diffuser band, exhausts
   const tailZ = -hl - 0.012;
-  box(0.52, 0.12, 0.012, 0, Math.max(m.clear + 0.42, m.deckH - 0.38), tailZ - 0.006, PLATE);
+  if (m.id !== 'bus') box(widthAt(-hl) * 2 - 0.02, 0.16, 0.07, 0, m.clear + 0.32, -hl - 0.012, m.box > 0.6 || m.id === 'pickup' ? TRIM : PAINT);
+  box(0.52, 0.12, 0.012, 0, Math.max(m.clear + 0.5, m.deckH - 0.38), tailZ - 0.02, PLATE);
   box(widthAt(-hl) * 2 - 0.04, 0.09, 0.05, 0, bottomAt(-hl) + 0.03, -hl + 0.012, TRIM);
   if (!tall && m.id !== 'cyber')
     for (const sg of [1, -1]) {
@@ -328,7 +398,8 @@ export function buildCar(m: ModelSpec): CarGeometry {
     b.translate(x, y, z);
     to.push(colorize(b, c));
   };
-  const lightY = Math.min(m.hoodH - 0.1, m.clear + 0.58);
+  // (below the hood's front edge, so the clusters sit in the nose rather than on it)
+  const lightY = Math.min(m.hoodH - 0.1 - 0.08 * round, m.clear + 0.58);
   for (const sg of [1, -1]) {
     // the head cluster: a dark housing on the nose's corner, its projector lenses and a DRL line
     const zH = hl + 0.012;
@@ -341,9 +412,41 @@ export function buildCar(m: ModelSpec): CarGeometry {
       ring.translate(sg * xH, lightY, zH + 0.018);
       heads.push(colorize(ring, [1, 0.97, 0.9]));
     } else {
-      lamp(heads, 0.09, 0.07, 0.03, sg * (xH - 0.07), lightY, zH + 0.018, [1, 0.97, 0.9], ang);
-      lamp(heads, 0.09, 0.07, 0.03, sg * (xH + 0.05), lightY, zH + 0.008, [1, 0.97, 0.9], ang);
-      lamp(heads, hwid, 0.014, 0.02, sg * xH, lightY - hh / 2 - 0.004, zH + 0.02, [0.85, 0.9, 1.0], ang);
+      // a swept cluster: the housing turned back round the nose's corner, a projector and a
+      // reflector behind it, an LED running light along its top edge and down its outer end
+      // (on the nose's own surface: where the plan's outline reaches each end of the cluster)
+      const zAt = (x: number) => {
+        for (let z = hl; z > hl - 1; z -= 0.005) if (widthAt(z) >= x) return z;
+        return hl - 1;
+      };
+      const x0 = grilleW / 2 + 0.04, x1 = Math.min(hw - 0.06, x0 + Math.max(0.32, Math.min(0.55, hw - x0 - 0.1)));
+      const z0 = zAt(x0), z1 = zAt(x1);
+      const wL = Math.hypot(x1 - x0, z0 - z1), hL = m.box > 0.5 ? 0.13 : 0.095;
+      const ry = sg * Math.atan2(z0 - z1, x1 - x0);
+      const nx = Math.sin(ry), nz = Math.cos(ry);
+      const cxL = (sg * (x0 + x1)) / 2, czL = (z0 + z1) / 2 + 0.02;
+      const at = (u: number, out: number): [number, number] => [cxL + u * Math.cos(ry) + nx * out, czL - u * Math.sin(ry) + nz * out];
+      box(wL + 0.03, hL + 0.025, 0.05, cxL - nx * 0.02, lightY, czL - nz * 0.02, DARK, ry);
+      // the reflector bowl behind the clear lens: bright chrome by day
+      {
+        const [x, z] = at(0, 0.012);
+        box(wL - 0.01, hL - 0.012, 0.012, x, lightY - 0.004, z, CHROME, ry);
+      }
+      for (const [u, r] of [[-sg * wL * 0.2, 0.042], [sg * wL * 0.14, 0.036]] as const) {
+        const lens = new THREE.CylinderGeometry(r, r, 0.03, 14);
+        lens.rotateX(Math.PI / 2);
+        lens.rotateY(ry);
+        const [x, z] = at(u, 0.03);
+        lens.translate(x, lightY - 0.005, z);
+        heads.push(colorize(lens, [1.6, 1.55, 1.45]));
+      }
+      {
+        const [x, z] = at(0, 0.035);
+        // (the running lights are on by day: bright even at the lamps' day level)
+        lamp(heads, wL * 0.94, 0.018, 0.018, x, lightY + hL / 2 - 0.008, z, [3.0, 3.1, 3.3], ry);
+        const [x2, z2] = at(sg * wL * 0.47, 0.035);
+        lamp(heads, 0.018, hL * 0.85, 0.018, x2, lightY, z2, [3.0, 3.1, 3.3], ry);
+      }
     }
     // the tail: a bar across the corner and a piece wrapping round the side
     const zT = -hl + 0.008;

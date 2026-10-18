@@ -325,7 +325,8 @@ export class Fleet {
     this.group.name = 'Fleet';
     const paint = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.35, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.05 });
     const chrome = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.22, clearcoat: 0.6 });
-    const glass = glassMaterial(new THREE.MeshPhysicalMaterial({ color: 0x0a0d10, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0 }));
+    // (Miami tint: dark, the cabin a shadow behind it head-on, a mirror at a glance)
+    const glass = glassMaterial(new THREE.MeshPhysicalMaterial({ color: 0x10161a, metalness: 0.1, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0, transparent: true, opacity: 0.84, envMapIntensity: 1.8 }));
     const decalMats: Partial<Record<'police' | 'taxi', THREE.MeshStandardMaterial>> = {};
     const lamp = dentedMaterial(new THREE.MeshBasicMaterial({ vertexColors: true }), true);
     const wheel = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.55, roughness: 0.42 });

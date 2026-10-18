@@ -166,15 +166,21 @@ float bsScuff = 0.0;`,
   // road grime: dust on the sills and the lower doors, some cars filthier than others
   float dirtK = fract( sin( vInst * 12.9898 + 4.1 ) * 43758.5453 );
   float low = 1.0 - smoothstep( 0.1, 0.62, vObjP.y );
-  bsDirt = low * ( 0.15 + 0.5 * dirtK * dirtK ) * ( 0.6 + 0.4 * bsNoise( vObjP * vec3( 9.0, 22.0, 9.0 ) ) );
-  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.13, 0.115, 0.1 ), bsDirt );
+  if ( low > 0.0 ) {
+    // (splashes: a cheap smooth mottle, it's on every car's lower half)
+    float mot = sin( vObjP.x * 7.0 + vObjP.z * 3.0 ) * sin( vObjP.z * 5.3 + vObjP.y * 19.0 );
+    bsDirt = low * ( 0.15 + 0.5 * dirtK * dirtK ) * ( 0.7 + 0.3 * mot );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.13, 0.115, 0.1 ), bsDirt );
+  }
   // crash damage: scuffed through to primer, bare metal at the deepest
   // (scrapes run along the car: long hairlines; where it's crushed, patches through to primer and steel)
-  float crush = smoothstep( 0.02, 0.16, vDent );
-  float streak = smoothstep( 0.62, 0.9, bsNoise( vObjP * vec3( 1.5, 160.0, 1.5 ) + vec3( 0.0, 0.0, vObjP.z * 2.0 ) ) );
-  float bare = smoothstep( 0.45, 0.62, bsNoise( vObjP * 7.0 ) + crush * 0.25 );
-  bsScuff = crush * max( streak * 0.9, bare );
-  diffuseColor.rgb = mix( diffuseColor.rgb, mix( vec3( 0.34, 0.34, 0.33 ), vec3( 0.6, 0.6, 0.62 ), streak ), bsScuff * 0.85 );
+  if ( vDent > 0.02 ) {
+    float crush = smoothstep( 0.02, 0.16, vDent );
+    float streak = smoothstep( 0.62, 0.9, bsNoise( vObjP * vec3( 1.5, 160.0, 1.5 ) + vec3( 0.0, 0.0, vObjP.z * 2.0 ) ) );
+    float bare = smoothstep( 0.45, 0.62, bsNoise( vObjP * 7.0 ) + crush * 0.25 );
+    bsScuff = crush * max( streak * 0.9, bare );
+    diffuseColor.rgb = mix( diffuseColor.rgb, mix( vec3( 0.34, 0.34, 0.33 ), vec3( 0.6, 0.6, 0.62 ), streak ), bsScuff * 0.85 );
+  }
 }`,
       )
       .replace(
@@ -183,7 +189,7 @@ float bsScuff = 0.0;`,
 roughnessFactor = clamp( roughnessFactor + bsDirt * 0.5 + bsScuff * 0.45 + bsSeam * 0.4, 0.0, 1.0 );`,
       );
   };
-  mat.customProgramCacheKey = () => 'ow-body-v1';
+  mat.customProgramCacheKey = () => 'ow-body-v2';
   return mat;
 }
 
@@ -199,12 +205,18 @@ export function glassMaterial(base: THREE.MeshPhysicalMaterial): THREE.MeshPhysi
       '#include <color_fragment>',
       `#include <color_fragment>
 {
+  // glass at a glancing angle is a mirror: the cabin shows head-on, the sky along the slope
+  float fres = pow( 1.0 - abs( dot( normalize( vViewPosition ), normalize( vNormal ) ) ), 3.0 );
+  diffuseColor.a = mix( diffuseColor.a, 1.0, fres * 0.85 );
   // a web of cracks (the noise's contour lines, two scales) over a milky haze of crushed glass
-  float n1 = bsNoise( vObjP * 9.0 ), n2 = bsNoise( vObjP * 23.0 + 3.7 );
-  float web = max( 1.0 - smoothstep( 0.0, 0.035, abs( n1 - 0.5 ) ), 0.7 * ( 1.0 - smoothstep( 0.0, 0.05, abs( n2 - 0.5 ) ) ) );
-  float k = smoothstep( 0.015, 0.08, vDent );
-  bsCraze = k * max( web, 0.25 + 0.3 * k );
-  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.62, 0.64, 0.66 ), bsCraze );
+  if ( vDent > 0.015 ) {
+    float n1 = bsNoise( vObjP * 9.0 ), n2 = bsNoise( vObjP * 23.0 + 3.7 );
+    float web = max( 1.0 - smoothstep( 0.0, 0.035, abs( n1 - 0.5 ) ), 0.7 * ( 1.0 - smoothstep( 0.0, 0.05, abs( n2 - 0.5 ) ) ) );
+    float k = smoothstep( 0.015, 0.08, vDent );
+    bsCraze = k * max( web, 0.25 + 0.3 * k );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.62, 0.64, 0.66 ), bsCraze );
+    diffuseColor.a = max( diffuseColor.a, bsCraze );
+  }
 }`,
     ).replace(
       '#include <roughnessmap_fragment>',
@@ -212,7 +224,7 @@ export function glassMaterial(base: THREE.MeshPhysicalMaterial): THREE.MeshPhysi
 roughnessFactor = clamp( roughnessFactor + bsCraze * 0.7, 0.0, 1.0 );`,
     );
   };
-  mat.customProgramCacheKey = () => 'ow-glass-v1';
+  mat.customProgramCacheKey = () => 'ow-glass-v2';
   return mat;
 }
 
