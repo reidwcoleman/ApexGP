@@ -243,15 +243,28 @@ if ( vSKind > 1.5 ) {
   // curb: a painted face, darker grime at the gutter
   col = vec3( 0.55, 0.54, 0.51 ) * ( 0.82 + 0.25 * nz2.b );
 } else if ( vSKind > 0.5 ) {
-  // Brickell's pavers: terracotta and sand herringbone-ish bricks
-  vec2 b = q / vec2( 0.2, 0.1 );
-  b.x += floor( b.y ) * 0.5;
-  vec2 f = fract( b );
-  float joint = smoothstep( 0.0, 0.08, f.x ) * smoothstep( 1.0, 0.92, f.x ) * smoothstep( 0.0, 0.14, f.y ) * smoothstep( 1.0, 0.86, f.y );
-  float tone = h21( floor( b ) );
-  col = mix( vec3( 0.5, 0.42, 0.36 ), vec3( 0.66, 0.6, 0.52 ), step( 0.55, tone ) ) * ( 0.85 + 0.25 * tone );
-  col *= mix( 0.55, 1.0, joint );
-  swN = normalize( vec3( ( f.x - 0.5 ) * ( 1.0 - joint ) * 0.6, 1.0, ( f.y - 0.5 ) * ( 1.0 - joint ) * 0.6 ) );
+  // Brickell's pavers: a herringbone of grey and sand concrete pavers, the tones close together
+  // (the joints fade out where a paver is smaller than a pixel: no moiré down the street)
+  vec2 b = q / 0.1;
+  // herringbone: alternate 2x1 pavers turned 90° on a diagonal stagger
+  vec2 cellH = floor( b / 2.0 );
+  float turn = mod( cellH.x + cellH.y, 2.0 );
+  vec2 bb = turn > 0.5 ? b.yx : b;
+  bb.x += floor( bb.y ) * 1.0;
+  vec2 pv = vec2( bb.x / 2.0, bb.y );
+  vec2 f = fract( pv );
+  vec2 aa = fwidth( pv ) * 1.5 + 1e-4;
+  float jw = 0.06;
+  float joint = smoothstep( 0.0, jw + aa.x, f.x ) * smoothstep( 1.0, 1.0 - jw - aa.x, f.x ) * smoothstep( 0.0, jw * 2.0 + aa.y, f.y ) * smoothstep( 1.0, 1.0 - jw * 2.0 - aa.y, f.y );
+  float far = smoothstep( 0.45, 1.1, max( aa.x, aa.y ) );
+  float tone = h21( floor( pv ) + turn * 17.0 );
+  col = mix( vec3( 0.46, 0.45, 0.43 ), vec3( 0.58, 0.53, 0.46 ), smoothstep( 0.35, 0.65, tone ) ) * ( 0.92 + 0.12 * h21( floor( pv ) * 1.7 ) );
+  col = mix( col, vec3( 0.5, 0.48, 0.44 ), far );
+  col *= mix( mix( 0.72, 1.0, joint ), 0.94, far );
+  col *= 0.9 + 0.18 * nz2.g;
+  // gum, stains, darker where the feet go
+  col *= 1.0 - 0.18 * smoothstep( 0.62, 0.8, nz.a );
+  swN = normalize( vec3( ( f.x - 0.5 ) * ( 1.0 - joint ) * 0.4 * ( 1.0 - far ), 1.0, ( f.y - 0.5 ) * ( 1.0 - joint ) * 0.4 * ( 1.0 - far ) ) );
 } else {
   // poured concrete: 1.5 m slabs with sawn joints, each slab its own tone
   vec2 sl = q / vec2( 1.5, 1.5 );
@@ -277,7 +290,7 @@ diffuseColor.rgb *= col;
         `if ( vSKind < 1.5 ) normal = normalize( ( viewMatrix * vec4( swN, 0.0 ) ).xyz );`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-sidewalk-v1';
+  m.customProgramCacheKey = () => 'ow-sidewalk-v2';
   return m;
 }
 
@@ -310,11 +323,17 @@ vec3 g = mix( g1, g2, 0.25 );
 // pull its large-scale colour to a single St. Augustine green
 vec3 gMean = texture2D( uGrass, gw * 0.13, 10.0 ).rgb;
 float gl = dot( g - gMean, vec3( 0.3, 0.55, 0.15 ) );
-g = vec3( 0.2, 0.3, 0.1 ) * 1.05 + vec3( 0.8, 1.0, 0.55 ) * gl * 0.55;
-g *= 0.9 + 0.2 * texture2D( uNoise, vCW.xz * 0.05 ).g;
-// St. Augustine lawns: deep green, yellowed patches in the sun, bare sandy earth where people walk
-float dry = smoothstep( 0.45, 0.95, nz.r * 0.85 + nz2.g * 0.15 );
-g *= mix( vec3( 0.94, 1.0, 0.86 ), vec3( 1.03, 1.02, 0.86 ), dry * 0.4 );
+// (a real lawn's albedo: ~0.1 red, ~0.16 green — any brighter and the sun turns it to felt)
+g = vec3( 0.105, 0.16, 0.052 ) + vec3( 0.8, 1.0, 0.55 ) * gl * 0.32;
+g *= 0.88 + 0.24 * texture2D( uNoise, vCW.xz * 0.05 ).g;
+// St. Augustine lawns: deep blue-green where it's watered, straw where the sun has had it
+float dry = smoothstep( 0.4, 0.9, nz.r * 0.85 + nz2.g * 0.15 );
+float lush = smoothstep( 0.55, 0.15, nz.g * 0.7 + nz2.r * 0.3 );
+g = mix( g, g * vec3( 0.82, 0.95, 1.05 ), lush * 0.6 );
+g = mix( g, vec3( 0.2, 0.18, 0.085 ), dry * 0.38 );
+// the mower's stripes, close by
+float mow = sign( sin( ( vCW.x + vCW.z * 0.08 ) * 1.25 ) ) * ( 1.0 - smoothstep( 25.0, 90.0, length( vCW - cameraPosition ) ) );
+g *= 1.0 + 0.05 * mow;
 float bare = smoothstep( 0.78, 0.92, nz2.a ) * ( 1.0 - smoothstep( 60.0, 400.0, length( vCW - cameraPosition ) ) );
 g = mix( g, vec3( 0.36, 0.3, 0.22 ), bare * 0.12 );
 g *= 0.96 + 0.06 * nz2.b;
@@ -332,7 +351,7 @@ diffuseColor.rgb *= g;
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-lawn-v4';
+  m.customProgramCacheKey = () => 'ow-lawn-v5';
   return m;
 }
 

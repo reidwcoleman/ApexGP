@@ -22,24 +22,50 @@ export interface GroundBuild {
 /** the dry beach's width (sand from the waterline inland) */
 export const BEACH_W = 118;
 
+/**
+ * The land's top: the outline triangulated, then cut down to small triangles (≤ ~170 m in the
+ * map, larger out in the far land). The outlines run 30 km past the map, and a triangle that size
+ * interpolates its depth too coarsely: from a few hundred metres the bay, a metre below, showed
+ * through the lawns.
+ */
 function topGeometry(outline: P2[]): THREE.BufferGeometry {
-  const shape = new THREE.Shape(outline.map((p) => new THREE.Vector2(p.x, p.z)));
-  const g = new THREE.ShapeGeometry(shape, 1);
-  const pos = g.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) pos.setXYZ(i, pos.getX(i), 0, pos.getY(i));
-  const idx = g.index!;
-  for (let t = 0; t < idx.count; t += 3) {
-    const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2);
-    const ax = pos.getX(a), az = pos.getZ(a);
-    const cross = (pos.getX(b) - ax) * (pos.getZ(c) - az) - (pos.getZ(b) - az) * (pos.getX(c) - ax);
-    if (cross > 0) {
-      idx.setX(t + 1, c);
-      idx.setX(t + 2, b);
+  const pts = outline.map((p) => new THREE.Vector2(p.x, p.z));
+  const tris = THREE.ShapeUtils.triangulateShape(pts, []);
+  const out: number[] = [];
+  const maxLen = (x: number, z: number) => {
+    const dx = Math.max(WORLD.x0 - x, 0, x - WORLD.x1), dz = Math.max(WORLD.z0 - z, 0, z - WORLD.z1);
+    return 170 + Math.hypot(dx, dz) * 0.6;
+  };
+  const emit = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number, depth: number) => {
+    const lab = Math.hypot(bx - ax, bz - az), lbc = Math.hypot(cx - bx, cz - bz), lca = Math.hypot(ax - cx, az - cz);
+    const l = Math.max(lab, lbc, lca);
+    if (depth < 40 && l > maxLen((ax + bx + cx) / 3, (az + bz + cz) / 3)) {
+      // (halved across its longest side: the slivers the triangulation makes don't multiply)
+      if (l === lab) {
+        const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+        emit(ax, az, mx, mz, cx, cz, depth + 1);
+        emit(mx, mz, bx, bz, cx, cz, depth + 1);
+      } else if (l === lbc) {
+        const mx = (bx + cx) / 2, mz = (bz + cz) / 2;
+        emit(ax, az, bx, bz, mx, mz, depth + 1);
+        emit(ax, az, mx, mz, cx, cz, depth + 1);
+      } else {
+        const mx = (cx + ax) / 2, mz = (cz + az) / 2;
+        emit(ax, az, bx, bz, mx, mz, depth + 1);
+        emit(mx, mz, bx, bz, cx, cz, depth + 1);
+      }
+      return;
     }
-  }
-  g.deleteAttribute('uv');
-  const n = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) n[i * 3 + 1] = 1;
+    // (wound to face up)
+    const cross = (bx - ax) * (cz - az) - (bz - az) * (cx - ax);
+    if (cross > 0) out.push(ax, 0, az, cx, 0, cz, bx, 0, bz);
+    else out.push(ax, 0, az, bx, 0, bz, cx, 0, cz);
+  };
+  for (const [a, b, c] of tris) emit(pts[a].x, pts[a].y, pts[b].x, pts[b].y, pts[c].x, pts[c].y, 0);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  const n = new Float32Array(out.length);
+  for (let i = 1; i < n.length; i += 3) n[i] = 1;
   g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
   g.computeBoundingSphere();
   return g;

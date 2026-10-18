@@ -323,13 +323,20 @@ if ( glass > 0.01 ) {
     float floorZ = 1.0 - smoothstep( 0.06, 0.22, fy );
     float k = mix( 0.38, 0.2, racks ) * ( 1.0 - 0.5 * floorZ ) + spots * 1.4;
     nightIn = litC * lit * k + room * lit * 0.15;
+    // open by day too: most shops are lit inside, the racks and the back wall seen through clear glass
+    float open = step( 0.18, fh1( cell + 21.0 + seed ) ) * uDay;
+    vec3 wares = mix( vec3( 0.9, 0.86, 0.8 ), vec3( 0.55, 0.62, 0.7 ), r1 ) * ( 0.6 + 0.8 * fh1( vec2( rackId, cell.x + 13.0 ) ) );
+    // (indoor light is a hundredth of the sun's: a shop by day is dimmer than the street, but there)
+    dayIn = ( room * 0.75 + litC * k * 0.45 ) * open * mix( vec3( 1.0 ), wares * 0.4, racks * 0.8 ) * 0.2;
   }
   // coated glass: a tinted mirror (F0 ≈ the tint), little diffuse; the room shows through it
   vec3 gl = glassC * 1.7;
   col = mix( col, gl, glass );
   facEmit += ( dayIn + nightIn ) * glass * 0.6;
   facRough = mix( facRough, 0.035 + 0.04 * nz.b, glass );
-  facMetal = mix( facMetal, 0.78, glass );
+  // (shop windows are clear glass, not a tinted mirror: the street reflects less, the shop shows)
+  facMetal = mix( facMetal, shop > 0.5 ? 0.3 : 0.78, glass );
+  if ( shop > 0.5 ) col = mix( col, vec3( 0.04, 0.045, 0.05 ), glass );
 }
 // wet facades darken
 col *= mix( 1.0, 0.8, smoothstep( 0.2, 0.8, uWet ) * ( 1.0 - glass ) );
@@ -355,7 +362,7 @@ if ( glass > 0.01 ) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v6';
+  m.customProgramCacheKey = () => 'ow-facade-v7';
   return m;
 }
 

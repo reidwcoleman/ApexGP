@@ -187,6 +187,12 @@ function shapePoly(shape: Shape, cx: number, cz: number, w: number, d: number, y
   return pts.map((p) => ({ x: cx + p.x * c - p.z * s, z: cz + p.x * s + p.z * c }));
 }
 
+/** a hash 0..1 */
+function fh(x: number): number {
+  const v = Math.sin(x * 127.1 + 311.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
 // ------------------------------------------------------------------------------- builders
 
 interface Fac {
@@ -210,6 +216,58 @@ class Builder {
   crowns: BuildingsBuild['crowns'] = [];
   slabs = new MeshBuilder();
   rails = new MeshBuilder();
+  canopies = new MeshBuilder().attr('color', 3);
+
+  /**
+   * Over the shop fronts: fabric awnings, one per shop bay (the facade shader's 6 m bays, so they sit
+   * between its piers, under its sign band), sloping out over the sidewalk with a valance — or on a
+   * plainer building a concrete canopy along the whole frontage.
+   */
+  private shopfront(a: P2, b: P2, nx: number, nz: number, u: number, len: number, f: Fac, edge: number) {
+    const r = fh(f.seed * 7.3 + edge * 1.7);
+    const kind = fh(f.seed * 3.1);
+    if (kind > 0.8 || len < 5 || r < 0.25) return;
+    const C = this.canopies;
+    const dx = (b.x - a.x) / len, dz = (b.z - a.z) / len;
+    const at = (t: number, out: number, y: number): number[] => [a.x + dx * (t - u) + nx * out, y, a.z + dz * (t - u) + nz * out];
+    const hT = f.groundH * 0.8;
+    if (kind > 0.6) {
+      // a concrete canopy: a slab the length of the wall
+      C.set('color', 0.7, 0.69, 0.66);
+      const t0 = u + 0.4, t1 = u + len - 0.4, D = 1.7, th = 0.2;
+      C.face([at(t0, 0, hT), at(t0, D, hT), at(t1, D, hT), at(t1, 0, hT)]);
+      C.face([at(t1, 0, hT - th), at(t1, D, hT - th), at(t0, D, hT - th), at(t0, 0, hT - th)]);
+      C.face([at(t0, D, hT - th), at(t1, D, hT - th), at(t1, D, hT), at(t0, D, hT)]);
+      return;
+    }
+    // fabric: the building's colour (deep green, navy, burgundy, black, terracotta, teal, a stripe)
+    const pal = [
+      [0.03, 0.12, 0.07],
+      [0.03, 0.05, 0.14],
+      [0.2, 0.03, 0.04],
+      [0.025, 0.025, 0.028],
+      [0.38, 0.12, 0.05],
+      [0.02, 0.17, 0.17],
+      [0.5, 0.48, 0.44],
+    ][Math.floor(fh(f.seed * 5.9) * 7)];
+    const D = 1.3, drop = 0.55, val = 0.24;
+    for (let k = Math.ceil(u / 6); (k + 1) * 6 <= u + len + 0.01; k++) {
+      if (fh(f.seed + k * 3.7 + edge) < 0.18) continue;
+      const t0 = k * 6 + 0.4, t1 = k * 6 + 5.6;
+      const sh = 0.9 + 0.2 * fh(k * 1.3 + f.seed);
+      C.set('color', pal[0] * sh, pal[1] * sh, pal[2] * sh);
+      // the slope (both sides: seen from the street and from under it)
+      const q = [at(t0, 0, hT), at(t0, D, hT - drop), at(t1, D, hT - drop), at(t1, 0, hT)];
+      C.face(q);
+      C.face([q[3], q[2], q[1], q[0]]);
+      // the valance, and the triangular ends
+      const v = [at(t0, D, hT - drop - val), at(t1, D, hT - drop - val), at(t1, D, hT - drop), at(t0, D, hT - drop)];
+      C.face(v);
+      C.face([v[1], v[0], v[3], v[2]]);
+      C.face([at(t0, 0, hT), at(t0, D, hT - drop - val), at(t0, D, hT - drop)]);
+      C.face([at(t1, 0, hT), at(t1, D, hT - drop), at(t1, D, hT - drop - val)]);
+    }
+  }
 
   /**
    * A condo tower's balconies: a concrete slab round the outline at every floor, projecting `out` m,
@@ -306,6 +364,7 @@ class Builder {
       // winding: outward-facing
       if (sgn > 0) W.quad(v0, v1, v2, v3);
       else W.quad(v1, v0, v3, v2);
+      if (y0 < 0.3 && f.groundH >= 3.4 && y1 >= f.groundH) this.shopfront(a, b, en[i].x, en[i].z, u, len, f, i);
       u += len;
     }
     let frame: RoofFrame | null = null;
@@ -854,6 +913,7 @@ export function buildBuildings(net: Network, beachX: (z: number) => number): Bui
   const fm = facadeMaterial();
   group.add(chunkMeshes(B.walls, 1000, fm, { cast: true, receive: true, name: 'walls' }));
   group.add(chunkMeshes(B.roofs, 1000, roofMaterial(), { cast: false, receive: true, name: 'roofs' }));
+  if (B.canopies.count) group.add(chunkMeshes(B.canopies, 800, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }), { cast: true, receive: true, name: 'awnings' }));
   if (B.lots.count) group.add(chunkMeshes(B.lots, 1200, lotMaterial(), { receive: true, name: 'lots' }));
   if (B.slabs.count) {
     group.add(chunkMeshes(B.slabs, 700, new THREE.MeshStandardMaterial({ color: 0xe9e7e2, roughness: 0.78, metalness: 0 }), { cast: true, receive: true, name: 'balconies' }));

@@ -118,16 +118,16 @@ float gust = 0.6 + 0.4 * sin( uGT * 1.7 + wp.x * 0.21 + wp.y * 0.13 );
 p.xz += uWind * 0.02 * gust * position.y * position.y;
 vec3 transformed = vec3( wp.x + p.x, 0.04 + p.y, wp.y + p.z );
 vGT = position.y;
-vGTint = mix( vec3( 0.2, 0.3, 0.1 ), vec3( 0.25, 0.34, 0.11 ), n ) * mix( 1.0, 1.2, smoothstep( 0.7, 1.0, gh( floor( wp * 0.05 ) ) ) * position.y );`,
+vGTint = mix( vec3( 0.11, 0.17, 0.055 ), vec3( 0.14, 0.19, 0.06 ), n ) * mix( 1.0, 1.25, smoothstep( 0.7, 1.0, gh( floor( wp * 0.05 ) ) ) * position.y );`,
       )
       .replace('#include <beginnormal_vertex>', `vec3 objectNormal = vec3( 0.0, 1.0, 0.0 );`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>\nvarying float vGT;\nvarying vec3 vGTint;`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = vGTint * ( 0.85 + 0.4 * vGT );`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = vGTint * ( 1.0 + 0.45 * vGT );`)
       // (both faces lit as the ground is: the blades' normal is the lawn's, whichever side shows)
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>\nnormal = normalize( vNormal );`);
   };
-  mat.customProgramCacheKey = () => 'ow-grass-v4';
+  mat.customProgramCacheKey = () => 'ow-grass-v5';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass';
   mesh.frustumCulled = false;

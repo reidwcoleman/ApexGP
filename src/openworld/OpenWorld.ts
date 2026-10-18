@@ -14,6 +14,7 @@ import { bakeCityLights, setCityNight, uploadCityLights } from './city/cityLight
 import { ll } from './geo.ts';
 import { buildBuildings, type BuildingsBuild } from './city/buildings.ts';
 import { buildProps, type PropsBuild } from './city/props.ts';
+import { buildFurniture, type FurnitureBuild } from './city/furniture.ts';
 import { buildLandmarks, type LandmarkBuild } from './city/landmarks.ts';
 import { buildTrees, type TreesBuild } from './city/trees.ts';
 import { buildLawnMask } from './city/lawnmask.ts';
@@ -76,6 +77,7 @@ export class OpenWorld {
   ground!: GroundBuild;
   buildings!: BuildingsBuild;
   props!: PropsBuild;
+  furniture!: FurnitureBuild;
   landmarks!: LandmarkBuild;
   trees!: TreesBuild;
   grass!: GrassBuild;
@@ -196,6 +198,32 @@ export class OpenWorld {
     this.props = buildProps(this.net, roads, this.buildings, this.ground.beachX);
     this.scene.add(this.props.group);
     for (const s of this.props.solids) this.world.add(s);
+    // the sidewalks' furniture, clear of the palms, poles and signals already standing
+    {
+      const cell = new Map<number, { x: number; z: number; r: number }[]>();
+      const ck = (x: number, z: number) => Math.floor(x / 10) * 100003 + Math.floor(z / 10);
+      for (const so of this.props.solids) {
+        const k = ck(so.cx, so.cz);
+        let b = cell.get(k);
+        if (!b) cell.set(k, (b = []));
+        b.push({ x: so.cx, z: so.cz, r: so.r });
+      }
+      for (const l of roads.lamps) {
+        const k = ck(l.x, l.z);
+        let b = cell.get(k);
+        if (!b) cell.set(k, (b = []));
+        b.push({ x: l.x, z: l.z, r: 1 });
+      }
+      const taken = (x: number, z: number, r: number) => {
+        for (let i = -1; i <= 1; i++)
+          for (let j = -1; j <= 1; j++)
+            for (const o of cell.get(ck(x + i * 10, z + j * 10)) ?? []) if (Math.hypot(o.x - x, o.z - z) < o.r + r + 0.6) return true;
+        return false;
+      };
+      this.furniture = buildFurniture(this.net, taken);
+      this.scene.add(this.furniture.group);
+      for (const so of this.furniture.solids) this.world.add(so);
+    }
     this.landmarks = buildLandmarks(this.buildings, this.net.mask, this.ground.beachX);
     this.scene.add(this.landmarks.group);
     for (const s of this.landmarks.solids) this.world.add(s);
@@ -779,6 +807,19 @@ export class OpenWorld {
       ? { pos: body.pos, vel: v!.vel, yaw: body.yaw, hl, hw, mass: body.spec.mass, onImpulse: (jx: number, jz: number, px: number, pz: number) => body.shove(jx, jz, px, pz) }
       : null;
     this.traffic.update(dt, this.elapsed, this.focus, camFwd, this.night, playerBox);
+    // ---- the street's furniture in the way: bins, news boxes, hydrants go flying
+    if (body && !body.free) {
+      const lost = this.furniture.hit(body.pos.x, body.pos.z, body.pos.y, body.yaw, hl, hw, body.vx, body.vz, body.spec.mass);
+      if (lost > 0) {
+        const k = Math.max(0, 1 - lost / Math.max(body.speed, 0.1));
+        body.vx *= k;
+        body.vz *= k;
+        this.cams.bump(Math.min(0.5, lost / 6));
+        // (the crash sound plays off the vehicle's impact)
+        if (v) v.impact = Math.max(v.impact, 3 + lost * 1.5);
+      }
+    }
+    for (const c of this.police.cops) if (c.body && !c.body.free && c.body.speed > 2) this.furniture.hit(c.body.pos.x, c.body.pos.z, c.body.pos.y, c.body.yaw, c.body.spec.hl, c.body.spec.hw, c.body.vx, c.body.vz, c.body.spec.mass);
     for (const h of this.traffic.hits) {
       if (h.speed > 3) this.cams.bump(Math.min(1, h.speed / 20));
       if (h.speed > 4) this.police.report(h.car.police ? 'hitCop' : 'hitCar', h.car.pos);
@@ -853,6 +894,7 @@ export class OpenWorld {
     this.particles.setLight(night, P.direct ?? 1);
     this.particles.update(dt);
     this.props.update(this.elapsed, night);
+    this.furniture.update(dt, this.camera.position, night, this.elapsed);
     if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
     this.trees.update(this.camera.position, this.elapsed, (1 - night) * (P.direct ?? 1));
