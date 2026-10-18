@@ -42,6 +42,8 @@ import { placeAt, WORLD } from './geo.ts';
 import type { CarBody } from './sim/car.ts';
 import type { CamSubject } from './camera.ts';
 import { Particles, fx } from './fx/particles.ts';
+import { SkidMarks } from './fx/skids.ts';
+import { weatherUniforms } from '../world/weatherUniforms.ts';
 import { Combat } from './combat/Combat.ts';
 import { Gunman } from './combat/Gunman.ts';
 import { WEAPON_ORDER, WEAPONS } from './combat/weapons.ts';
@@ -99,6 +101,7 @@ export class OpenWorld {
   hud!: Hud;
   audio = new OpenWorldAudio();
   readonly particles = new Particles();
+  readonly skids = new SkidMarks();
   combat!: Combat;
   /** the player on foot, drawn and posed with a gun */
   avatar: Gunman | null = null;
@@ -197,9 +200,12 @@ export class OpenWorld {
     this.scene.add(this.landmarks.group);
     for (const s of this.landmarks.solids) this.world.add(s);
     const lawn = (this.lawn = buildLawnMask(this.net, this.buildings, this.ground.beachX));
+    const beachX = this.ground.beachX;
+    this.net.ground = (x, z) => (x > beachX(z) - 4 ? 2 : lawn.lawn(x, z) ? 1 : 0);
     this.trees = buildTrees(this.net, this.world, this.ground.beachX, lawn);
     this.grass = buildGrass(lawn);
     this.scene.add(this.grass.mesh);
+    this.scene.add(this.skids.mesh);
     this.scene.add(this.trees.group);
     for (const s of this.trees.solids) this.world.add(s);
     // the reflections: capture the city now that it stands (the environment's own lawn goes)
@@ -843,6 +849,7 @@ export class OpenWorld {
     facadeUniforms.uFTime.value = this.elapsed;
     for (const wt of this.ground.water) wt.update(this.elapsed);
     this.tyreSmoke(dt, body);
+    this.marks(body);
     this.particles.setLight(night, P.direct ?? 1);
     this.particles.update(dt);
     this.props.update(this.elapsed, night);
@@ -866,7 +873,7 @@ export class OpenWorld {
   }
 
   /** white smoke off the rear tyres when they spin up or slide (the driven ones) */
-  private smokeAcc = 0;
+  private readonly smokeAcc = [0, 0, 0, 0];
   private rimAcc = 0;
   private readonly tmpW = new THREE.Vector3();
   private tyreSmoke(dt: number, body: CarBody | null) {
@@ -900,24 +907,42 @@ export class OpenWorld {
         P.spark({ x: this.tmpW.x, y: body.pos.y + 0.04, z: this.tmpW.z, vx: -v.vel.x * 0.35 + (P.rand() - 0.5) * 3, vy: 0.8 + P.rand() * 2, vz: -v.vel.z * 0.35 + (P.rand() - 0.5) * 3, life: 0.25 + P.rand() * 0.35, s0: 0.05, s1: 0.03, a: 1, r: 5, g: 2.8, b: 1, grav: 1, floor: body.pos.y, stretch: 0.02, fadeIn: 0 });
       }
     }
-    if (!body.onGround) return;
-    const slip = body.slip;
-    if (slip < 0.35) return;
-    const k = Math.min(1, (slip - 0.35) / 0.5);
-    this.smokeAcc += dt * 70 * k;
-    const n = Math.floor(this.smokeAcc);
-    this.smokeAcc -= n;
-    const back = -body.spec.hl * 0.62, half = body.spec.hw * 0.85;
-    for (let i = 0; i < n; i++) {
-      const side = i % 2 ? 1 : -1;
-      const lx = side * half, lz = back;
-      const x = body.pos.x + lx * c + lz * s, z = body.pos.z - lx * s + lz * c;
-      P.puff({
-        x, y: body.pos.y + 0.2, z, vx: v.vel.x * 0.25 + (P.rand() - 0.5) * 2, vy: 0.5 + P.rand(), vz: v.vel.z * 0.25 + (P.rand() - 0.5) * 2,
-        life: 1.8 + P.rand() * 1.6, s0: 0.5, s1: 3.2 + P.rand() * 2, a: 0.22 * k + 0.05, r: 0.93, g: 0.93, b: 0.95,
-        drag: 1.4, lift: 0.35, floor: body.pos.y + 0.05, fadeIn: 0.12,
-      });
+    if (!body.onGround || body.free) return;
+    // each tyre past its peak smokes (on tarmac); one in the dirt throws it up
+    for (let w = 0; w < 4; w++) {
+      const soft = body.wGrip[w] < 0.7;
+      // (smoke wants heat: a tyre sliding hard and fast — a burnout, a lock-up, a drift)
+      const k = soft ? Math.min(1, body.speed / 12) * 0.6 + Math.min(0.4, Math.max(0, body.wSlip[w] - 1)) : THREE.MathUtils.clamp((body.wSlip[w] - 1.4) / 2.5, 0, 1) * Math.min(1, (body.speed + Math.abs(body.wSpin[w]) * body.spec.wheelR * 0.5) / 14);
+      if (k <= 0 || body.wLoad[w] < 50) continue;
+      this.smokeAcc[w] += dt * (soft ? 20 : 13) * k;
+      const n = Math.floor(this.smokeAcc[w]);
+      this.smokeAcc[w] -= n;
+      for (let i = 0; i < n; i++) {
+        at(w, this.tmpW);
+        if (soft)
+          P.puff({
+            x: this.tmpW.x, y: body.pos.y + 0.15, z: this.tmpW.z, vx: v.vel.x * 0.2 + (P.rand() - 0.5) * 2, vy: 0.4 + P.rand() * 1.2, vz: v.vel.z * 0.2 + (P.rand() - 0.5) * 2,
+            life: 1.2 + P.rand(), s0: 0.3, s1: 1.8 + P.rand() * 1.5, a: 0.3 * k, r: 0.36, g: 0.3, b: 0.22,
+            drag: 1.8, lift: 0.05, grav: 0.3, floor: body.pos.y, fadeIn: 0.05,
+          });
+        else
+          P.puff({
+            x: this.tmpW.x, y: body.pos.y + 0.2, z: this.tmpW.z, vx: v.vel.x * 0.25 + (P.rand() - 0.5) * 2, vy: 0.5 + P.rand(), vz: v.vel.z * 0.25 + (P.rand() - 0.5) * 2,
+            life: 1.6 + P.rand() * 1.4, s0: 0.45, s1: 2.6 + P.rand() * 1.8, a: 0.16 * k + 0.03, r: 0.93, g: 0.93, b: 0.95,
+            drag: 1.4, lift: 0.35, floor: body.pos.y + 0.05, fadeIn: 0.12,
+          });
+      }
     }
+  }
+
+  /** tyre marks: the player's car and every physical car near the camera */
+  private marks(body: CarBody | null) {
+    const wet = weatherUniforms.uWetness.value;
+    if (body && this.vehicle && !(this.vehicle instanceof Helicopter) && !(this.vehicle instanceof Seaplane) && !(this.vehicle instanceof Boat)) this.skids.add(body, wet);
+    const cam = this.camera.position;
+    for (const c of this.police.cops) if (c.body && c.body !== body && Math.abs(c.body.pos.x - cam.x) + Math.abs(c.body.pos.z - cam.z) < 250) this.skids.add(c.body, wet);
+    for (const c of this.traffic.cars) if (c.body && c.body !== body && c.state !== 'player' && Math.abs(c.pos.x - cam.x) + Math.abs(c.pos.z - cam.z) < 200) this.skids.add(c.body, wet);
+    this.skids.flush();
   }
 
   /** where the player is (in a vehicle or on foot) */
@@ -1120,6 +1145,7 @@ export class OpenWorld {
       slip: body ? body.slip : 0,
       thrust,
       rpm,
+      engineRpm: v instanceof FleetCar ? v.body.rpm : 0,
       airborne,
       impact: v ? v.impact : 0,
       horn: pad.horn && !(v instanceof FleetCar && v.police),

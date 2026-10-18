@@ -43,6 +43,8 @@ export interface Suspect {
 
 interface Cop {
   slot: FleetSlot;
+  /** the dents last drawn (CarBody.dentVer) */
+  dv?: number;
   id: ModelId;
   body: CarBody;
   path: THREE.Vector3[];
@@ -316,7 +318,11 @@ export class Police {
       const b = c.body;
       const ph = Math.floor(this.t * 6 + i) % 2;
       const flash = c.leaving || c.wreck ? 0 : 1;
-      this.fleet.set(c.slot, b.pos.x, b.pos.y + 0.03, b.pos.z, b.yaw, b.pitch - b.groundPitch, -b.roll + b.groundRoll, b.steer, b.spin, night > 0.3 ? 1 : 0, b.vLong < 0.5 ? 0.6 : 0, flash * ph, flash * (1 - ph));
+      this.fleet.set(c.slot, b.pos.x, b.pos.y + 0.03, b.pos.z, b.yaw, -b.groundPitch, b.groundRoll, b.steer, b.spin, night > 0.3 ? 1 : 0, b.vLong < 0.5 ? 0.6 : 0, flash * ph, flash * (1 - ph), b.pitch, -b.roll, b.heave, b.wDrop);
+      if (c.dv !== b.dentVer) {
+        c.dv = b.dentVer;
+        this.fleet.dent(c.slot, b.dents);
+      }
     }
     // ---- the officers on foot
     const back = this.officers.update(dt, this.wanted, { pos: s.pos, vel: s.vel, onFoot: s.onFoot, threat: s.threat, inVehicle: !s.onFoot }, camPos);

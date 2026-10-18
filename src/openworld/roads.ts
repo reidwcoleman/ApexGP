@@ -120,6 +120,8 @@ export class Network {
   /** spatial hash of edge points: cell → edge ids */
   private readonly hash = new Map<number, number[]>();
   static readonly CELL = 40;
+  /** what the land off the paving is (0 paved, 1 grass, 2 sand), once the city knows its lawns */
+  ground: ((x: number, z: number) => number) | null = null;
 
   constructor() {
     this.mask = new LandMask(LANDS);
@@ -562,6 +564,7 @@ export class Network {
     let road = -Infinity, rEdge = -1, rLat = 0, rS = 0, rTx = 0, rTz = 0;
     out.edge = -1;
     out.sidewalk = false;
+    out.grass = out.sand = false;
     const pr = PROJ;
     for (const id of this.near(x, z)) {
       const e = this.edges[id];
@@ -613,6 +616,11 @@ export class Network {
     const land = this.mask.land(x, z);
     out.y = land ? 0 : WATER_Y - 3;
     out.water = !land;
+    if (land && this.ground) {
+      const k = this.ground(x, z);
+      out.grass = k === 1;
+      out.sand = k === 2;
+    }
     return out;
   }
 
@@ -665,11 +673,14 @@ export interface Surf {
   tz: number;
   water: boolean;
   sidewalk: boolean;
+  /** off the paving: a lawn, the beach (see Network.ground) */
+  grass: boolean;
+  sand: boolean;
 }
 const PROJ: Proj = { s: 0, lat: 0, y: 0, tx: 0, tz: 0, off: false, i: 0, t: 0 };
 
 export function makeSurf(): Surf {
-  return { y: 0, edge: -1, lat: 0, s: 0, tx: 1, tz: 0, water: false, sidewalk: false };
+  return { y: 0, edge: -1, lat: 0, s: 0, tx: 1, tz: 0, water: false, sidewalk: false, grass: false, sand: false };
 }
 
 const NE_Q = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };

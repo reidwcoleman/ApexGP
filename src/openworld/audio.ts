@@ -21,6 +21,8 @@ export interface AudioFrame {
   thrust: number;
   /** rotor / prop speed 0..1 */
   rpm: number;
+  /** a city car's engine (its gearbox's rpm), 0 when it has none */
+  engineRpm?: number;
   airborne: boolean;
   impact: number;
   horn: boolean;
@@ -458,7 +460,7 @@ export class OpenWorldAudio {
     const bike = k === 'bike';
     const gearV = bike ? 14 : 11;
     const g = Math.min(5, Math.floor(v / gearV));
-    const rpm = (bike ? 2200 : 900) + (((v - g * gearV) / gearV) * 0.75 + 0.25 * f.throttle) * (bike ? 9000 : 4800) * (v < 0.5 ? 0.3 * f.throttle + 0.05 : 1);
+    const rpm = f.engineRpm ? f.engineRpm : (bike ? 2200 : 900) + (((v - g * gearV) / gearV) * 0.75 + 0.25 * f.throttle) * (bike ? 9000 : 4800) * (v < 0.5 ? 0.3 * f.throttle + 0.05 : 1);
     const fire = (rpm / 60) * (bike ? 2 : k === 'boat' ? 4 : 2);
     setT(this.iceA.frequency, fire, now, 0.04);
     setT(this.iceB.frequency, fire / 2, now, 0.04);

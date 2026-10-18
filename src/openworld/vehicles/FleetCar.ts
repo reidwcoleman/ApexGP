@@ -66,7 +66,11 @@ export class FleetCar implements Drivable {
     this.hornWas = !!pad?.horn;
     const brake = pad ? (b.reverse ? pad.throttle : pad.brake) : 0;
     const ph = Math.floor(this.t * 6) % 2;
-    this.traffic.fleet.set(c.slot, b.pos.x, b.pos.y + 0.03, b.pos.z, b.yaw, b.pitch - b.groundPitch, -b.roll + b.groundRoll, b.steer, b.spin, ctx.night > 0.3 ? 1 : 0, brake, this.siren ? ph : 0, this.siren ? 1 - ph : 0);
+    this.traffic.fleet.set(c.slot, b.pos.x, b.pos.y + 0.03, b.pos.z, b.yaw, -b.groundPitch, b.groundRoll, b.steer, b.spin, ctx.night > 0.3 ? 1 : 0, brake, this.siren ? ph : 0, this.siren ? 1 - ph : 0, b.pitch, -b.roll, b.heave, b.wDrop);
+    if (c.dv !== b.dentVer) {
+      c.dv = b.dentVer;
+      this.traffic.fleet.dent(c.slot, b.dents);
+    }
   }
 
   subject(): CamSubject {

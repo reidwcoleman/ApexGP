@@ -20,6 +20,16 @@ import { fx } from '../fx/particles.ts';
  */
 
 const G = 9.81;
+const M1 = new THREE.Matrix4();
+const M2 = new THREE.Matrix4();
+const M3 = new THREE.Matrix4();
+const N1 = new THREE.Matrix3();
+const N2 = new THREE.Matrix3();
+const P = new THREE.Vector3();
+const OFF = new THREE.Vector3();
+const TILT = new THREE.Vector3();
+const DP = new THREE.Vector3();
+const NN = new THREE.Vector3();
 
 export class RoadsterCar implements Drivable {
   readonly kind = 'roadster' as const;
@@ -254,11 +264,18 @@ export class RoadsterCar implements Drivable {
     } else {
       r.root.rotation.set(-c.groundPitch, c.yaw, c.groundRoll, 'YXZ');
       r.body.rotation.set(c.pitch, 0, -c.roll);
-      r.body.position.y = 0;
+      r.body.position.y = c.heave;
     }
     if (this.kick) r.body.rotation.z += this.kick;
+    if (c.dentVer !== this.dentVer) this.crumple();
     r.setSteer(c.steer);
-    r.spinWheels(dt * (c.vLong / ROADSTER_SPEC.wheelR));
+    // each wheel on its own: riding over a curb, hanging off a crest, spinning up or locked
+    for (const w of r.wheels) {
+      const i = (w.front ? 0 : 2) + (w.left ? 0 : 1);
+      w.steer.position.y = w.rest.y + (this.flying ? -0.05 : c.wDrop[i]);
+      w.spin.rotation.x += dt * c.wSpin[i];
+    }
+    void ROADSTER_SPEC;
     r.setBrake(this.braking > 0.05 ? Math.min(1, this.braking * 1.5) : 0);
     r.setHeadlights(night > 0.3 ? 1 : 0);
     r.setDoors(this.doorOpen);
@@ -272,6 +289,72 @@ export class RoadsterCar implements Drivable {
     if (dt > 0 && this.ctxRef) this.emitGas(dt, this.ctxRef);
     void p;
     void this.tq;
+  }
+
+  private dentVer = 0;
+  private skins: { mesh: THREE.Mesh; p: Float32Array; n: Float32Array | null }[] | null = null;
+  /**
+   * The body after a crash: every panel within reach of a dent pushed in toward the middle of the
+   * car and rippled (the same shape the traffic's shader gives its dents), its normals tilted into
+   * the crater. On the CPU, once per new dent: the Roadster is one car, its meshes its own.
+   */
+  private crumple() {
+    const c = this.car, body = this.rig.body;
+    this.dentVer = c.dentVer;
+    if (!this.skins) {
+      this.skins = [];
+      body.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || (m as unknown as THREE.InstancedMesh).isInstancedMesh) return;
+        // (its own copy: the geometry may be shared with the menu's car, or cached)
+        m.geometry = m.geometry.clone();
+        const pa = m.geometry.getAttribute('position'), na = m.geometry.getAttribute('normal');
+        if (!pa || (pa as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute) return;
+        this.skins!.push({ mesh: m, p: Float32Array.from(pa.array as ArrayLike<number>), n: na ? Float32Array.from(na.array as ArrayLike<number>) : null });
+      });
+    }
+    const D = c.dents;
+    body.updateMatrixWorld(true);
+    const inv = M1.copy(body.matrixWorld).invert();
+    for (const s of this.skins) {
+      const M = M2.multiplyMatrices(inv, s.mesh.matrixWorld);
+      const Mi = M3.copy(M).invert();
+      const N = N1.getNormalMatrix(M), Ni = N2.getNormalMatrix(Mi);
+      const pa = s.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const na = s.mesh.geometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
+      for (let i = 0; i < pa.count; i++) {
+        P.fromArray(s.p, i * 3).applyMatrix4(M);
+        OFF.set(0, 0, 0);
+        TILT.set(0, 0, 0);
+        for (let k = 0; k < 4; k++) {
+          const d = D[k * 4 + 3];
+          if (d <= 0) continue;
+          const r = 0.42 + d * 2.4;
+          DP.set(P.x - D[k * 4], P.y - D[k * 4 + 1], P.z - D[k * 4 + 2]);
+          const dl = DP.length();
+          const t = Math.min(1, dl / r);
+          const f = 1 - t * t * (3 - 2 * t);
+          if (f <= 0) continue;
+          NN.set(-D[k * 4], 0.62 - D[k * 4 + 1], -D[k * 4 + 2]).normalize();
+          const wr = 0.7 + 0.3 * Math.sin(P.x * 23 + P.y * 31 + P.z * 17) * Math.sin(P.z * 13 - P.x * 7 + P.y * 5);
+          OFF.addScaledVector(NN, d * f * wr);
+          const slope = (d * 6 * t * (1 - t)) / r;
+          TILT.addScaledVector(DP, (-slope * 1.4) / Math.max(dl, 1e-3));
+          TILT.x += Math.sin(P.y * 41 + P.z * 9) * f * d * 1.6;
+          TILT.y += Math.sin(P.x * 37 + P.z * 3) * f * d * 1.6;
+          TILT.z += Math.sin(P.z * 29 + P.y * 11) * f * d * 1.6;
+        }
+        P.add(OFF).applyMatrix4(Mi);
+        pa.setXYZ(i, P.x, P.y, P.z);
+        if (na && s.n) {
+          P.fromArray(s.n, i * 3).applyMatrix3(N).add(TILT).applyMatrix3(Ni).normalize();
+          na.setXYZ(i, P.x, P.y, P.z);
+        }
+      }
+      pa.needsUpdate = true;
+      if (na) na.needsUpdate = true;
+      s.mesh.geometry.computeBoundingSphere();
+    }
   }
 
   private ctxRef: WorldCtx | null = null;

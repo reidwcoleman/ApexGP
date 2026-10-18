@@ -41,6 +41,10 @@ export interface AICar {
   steer: number;
   spin: number;
   brake: number;
+  /** the drawn body's sway: pitch, its rate, roll, its rate, last speed, last heading */
+  sw?: number[];
+  /** the body's dents last drawn (CarBody.dentVer) */
+  dv?: number;
   body: CarBody | null;
   rest: number;
   wait: number;
@@ -114,6 +118,11 @@ const MIX: [ModelId, number][] = [
 
 export function carSpecOf(m: ModelSpec): CarSpec {
   const hb = m.wb / 2;
+  const id = m.id;
+  const ev = id === 'cyber';
+  const heavy = id === 'bus' || id === 'van';
+  const truck = id === 'pickup' || id === 'gwagon' || id === 'suv' || id === 'policeSuv';
+  const sporty = id === 'coupe' || id === 'police';
   return {
     mass: m.mass,
     a: hb,
@@ -122,20 +131,33 @@ export function carSpecOf(m: ModelSpec): CarSpec {
     izK: 1.1,
     power: m.power,
     maxForce: m.mass * 9.81 * 0.9,
-    frontDrive: m.id === 'cyber' || m.id === 'suv' || m.id === 'gwagon' ? 0.45 : 0,
-    mu: m.id === 'coupe' ? 1.15 : 1.0,
+    frontDrive: id === 'cyber' || id === 'suv' || id === 'gwagon' ? 0.45 : id === 'compact' || id === 'taxi' ? 1 : 0,
+    mu: id === 'coupe' ? 1.12 : heavy ? 0.85 : truck ? 0.95 : 1.0,
     cornerB: 8,
     cdA: m.W * m.H * 0.34,
     clA: 0.05,
     fan: 0,
     maxSteer: 0.6,
-    brakeG: 1.0,
+    brakeG: heavy ? 0.8 : 1.0,
     hl: m.L / 2,
     hw: m.W / 2,
     height: m.H,
     wheelR: m.wheelR,
-    vmax: m.id === 'bus' ? 26 : m.id === 'coupe' ? 85 : 60,
+    vmax: id === 'bus' ? 26 : id === 'coupe' ? 85 : 60,
     vrev: 10,
+    track: m.W / 2 - 0.13,
+    // the springs: soft on the big ones (body roll you can see), firm on the coupe and the cruiser
+    rideHz: sporty ? 1.65 : heavy ? 1.15 : truck ? 1.25 : 1.35,
+    damping: sporty ? 0.38 : 0.3,
+    rollF: id === 'coupe' ? 0.55 : 0.64,
+    alphaP: sporty ? 0.11 : truck || heavy ? 0.15 : 0.13,
+    kappaP: 0.12,
+    // an automatic: six speeds (eight in the big SUVs), the bus a five-speed diesel
+    gears: ev ? undefined : id === 'bus' ? [3.5, 2.0, 1.4, 1.0, 0.75] : id === 'gwagon' || id === 'suv' || id === 'policeSuv' ? [4.7, 3.1, 2.1, 1.67, 1.29, 1.0, 0.84, 0.67] : [3.9, 2.3, 1.5, 1.14, 0.87, 0.69],
+    finalDrive: id === 'bus' ? 5.6 : id === 'coupe' ? 3.7 : id === 'pickup' || id === 'van' ? 3.9 : 3.3,
+    redline: id === 'bus' ? 2500 : id === 'coupe' ? 7600 : id === 'pickup' || id === 'van' ? 5600 : 6500,
+    lsd: sporty ? 40 : 0,
+    brakeBias: 0.66,
   };
 }
 
@@ -567,9 +589,40 @@ export class Traffic {
       const lit = night > 0.3 ? 1 : 0;
       const flash = c.police && (c.flags & 1) !== 0;
       const ph = Math.floor(t * 6) % 2;
-      this.fleet.set(c.slot, c.pos.x, c.pos.y, c.pos.z, c.yaw, c.body ? c.body.pitch - c.body.groundPitch : c.tp ?? 0, c.body ? -c.body.roll + c.body.groundRoll : c.tr ?? 0, c.steer, c.spin, lit, c.brake, flash ? ph : 0, flash ? 1 - ph : 0);
+      const b = c.body;
+      if (b) {
+        this.fleet.set(c.slot, c.pos.x, c.pos.y, c.pos.z, c.yaw, -b.groundPitch, b.groundRoll, c.steer, c.spin, lit, c.brake, flash ? ph : 0, flash ? 1 - ph : 0, b.pitch, -b.roll, b.heave, b.wDrop);
+        if (c.dv !== b.dentVer) {
+          c.dv = b.dentVer;
+          this.fleet.dent(c.slot, b.dents);
+        }
+      }
+      else {
+        this.sway(c, dt);
+        this.fleet.set(c.slot, c.pos.x, c.pos.y, c.pos.z, c.yaw, c.tp ?? 0, c.tr ?? 0, c.steer, c.spin, lit, c.brake, flash ? ph : 0, flash ? 1 - ph : 0, c.sw?.[0] ?? 0, c.sw?.[2] ?? 0);
+      }
     }
     this.blockers.length = 0;
+  }
+
+  /**
+   * A lane car's body on its springs (it has no physics of its own): it dives as it brakes, squats
+   * pulling away and leans out of the turns, from its speed and its turn rate.
+   */
+  private sway(c: AICar, dt: number) {
+    if (dt <= 0) return;
+    const sw = (c.sw ??= [0, 0, 0, 0, c.v, c.yaw]);
+    const acc = THREE.MathUtils.clamp((c.v - sw[4]) / dt, -9, 6);
+    const yr = Math.atan2(Math.sin(c.yaw - sw[5]), Math.cos(c.yaw - sw[5])) / dt;
+    const lat = THREE.MathUtils.clamp(c.v * yr, -8, 8);
+    sw[4] = c.v;
+    sw[5] = c.yaw;
+    const soft = c.spec.H > 1.7 ? 1.5 : 1;
+    const w = 8, z = 0.45;
+    sw[1] += (w * w * (-acc * 0.006 * soft - sw[0]) - 2 * z * w * sw[1]) * dt;
+    sw[0] += sw[1] * dt;
+    sw[3] += (w * w * (lat * 0.009 * soft - sw[2]) - 2 * z * w * sw[3]) * dt;
+    sw[2] += sw[3] * dt;
   }
 
   private place(c: AICar, x: number, y: number, z: number, yaw: number, dt: number) {

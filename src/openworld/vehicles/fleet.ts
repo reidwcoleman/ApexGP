@@ -3,6 +3,7 @@ import { loft, table, type Station } from './loft.ts';
 import { mergeBasic } from './parts.ts';
 import { latheX } from './loft.ts';
 import { buildCar, carWheel, liveryTexture } from './carmodel.ts';
+import { bodyMaterial, dentedMaterial, glassMaterial, seamsOf, DENT_ATTRS } from './bodyshader.ts';
 
 /**
  * Miami's traffic, modelled from the same loft as the Roadster but rounded (superellipse-ish
@@ -313,6 +314,7 @@ export class Fleet {
   private readonly kinds = new Map<ModelId, Kind>();
   private readonly m4 = new THREE.Matrix4();
   private readonly m5 = new THREE.Matrix4();
+  private readonly mc = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
   private readonly qw = new THREE.Quaternion();
   private readonly v = new THREE.Vector3();
@@ -323,14 +325,19 @@ export class Fleet {
     this.group.name = 'Fleet';
     const paint = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.35, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.05 });
     const chrome = new THREE.MeshPhysicalMaterial({ vertexColors: true, metalness: 0.92, roughness: 0.22, clearcoat: 0.6 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: 0x0a0d10, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0 });
+    const glass = glassMaterial(new THREE.MeshPhysicalMaterial({ color: 0x0a0d10, metalness: 0.2, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0 }));
     const decalMats: Partial<Record<'police' | 'taxi', THREE.MeshStandardMaterial>> = {};
-    const lamp = new THREE.MeshBasicMaterial({ vertexColors: true });
+    const lamp = dentedMaterial(new THREE.MeshBasicMaterial({ vertexColors: true }), true);
     const wheel = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.55, roughness: 0.42 });
     for (const [id, cap] of Object.entries(caps) as [ModelId, number][]) {
       if (!cap) continue;
       const spec = MODELS[id];
       const g = buildCar(spec);
+      // the dents: four per car, shared by the body and its glass
+      const dents = DENT_ATTRS.map(() => new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage));
+      DENT_ATTRS.forEach((k, i) => {
+        for (const geo of [g.body, g.glass, g.heads, g.tails, g.decal]) geo?.setAttribute(k, dents[i]);
+      });
       const mk = (geo: THREE.BufferGeometry, mat: THREE.Material, n: number, cast: boolean) => {
         const im = new THREE.InstancedMesh(geo, mat, n);
         im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -341,7 +348,7 @@ export class Fleet {
         this.group.add(im);
         return im;
       };
-      const body = mk(g.body, id === 'cyber' ? chrome : paint, cap, true);
+      const body = mk(g.body, bodyMaterial(id === 'cyber' ? chrome : paint, seamsOf(spec)), cap, true);
       for (let i = 0; i < cap; i++) body.setColorAt(i, new THREE.Color(1, 1, 1));
       const heads = mk(g.heads, lamp, cap, false);
       const tails = mk(g.tails, lamp, cap, false);
@@ -353,10 +360,10 @@ export class Fleet {
       let decal: THREE.InstancedMesh | null = null;
       if (g.decal) {
         const kind = id === 'taxi' ? 'taxi' : 'police';
-        const dm = (decalMats[kind] ??= new THREE.MeshStandardMaterial({ map: liveryTexture(kind), transparent: true, roughness: 0.35, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
+        const dm = (decalMats[kind] ??= dentedMaterial(new THREE.MeshStandardMaterial({ map: liveryTexture(kind), transparent: true, roughness: 0.35, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }), false));
         decal = mk(g.decal, dm, cap, false);
       }
-      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, decal, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: new Set<number>() });
+      this.kinds.set(id, { spec, body, glass: mk(g.glass, glass, cap, false), heads, tails, wheels, decal, dents, free: Array.from({ length: cap }, (_, i) => cap - 1 - i), cap, used: new Set<number>() });
     }
   }
 
@@ -374,7 +381,18 @@ export class Fleet {
     this.dirty(k);
     k.body.setColorAt(index, new THREE.Color(paint));
     k.body.instanceColor!.needsUpdate = true;
+    this.dent({ model: id, index }, null);
     return { model: id, index };
+  }
+
+  /** a car's crash damage (CarBody.dents: [x, y, z, depth] × 4), or none */
+  dent(s: FleetSlot, d: ArrayLike<number> | null) {
+    const k = this.kinds.get(s.model)!;
+    for (let i = 0; i < 4; i++) {
+      const a = k.dents[i];
+      a.setXYZW(s.index, d ? d[i * 4] : 0, d ? d[i * 4 + 1] : 0, d ? d[i * 4 + 2] : 0, d ? d[i * 4 + 3] : 0);
+      a.needsUpdate = true;
+    }
   }
 
   /** repaint a car (a burnt-out wreck goes black) */
@@ -407,15 +425,22 @@ export class Fleet {
   }
 
   /**
-   * Place a car: position (ground under its middle), heading, body pitch/roll, front steer, wheel
-   * spin angle; lamps: head (0..1), brake (0..1), police red / blue (0..1 each).
+   * Place a car: position (ground under its middle), heading, the chassis's pitch/roll (the ground
+   * it sits on, or how it lies), front steer, wheel spin angle; lamps: head (0..1), brake (0..1),
+   * police red / blue (0..1 each); the body on its springs (pitch, roll, heave) and each wheel's
+   * height (0 FL, 1 FR, 2 RL, 3 RR: over a curb, hanging under a lifted body).
    */
-  set(s: FleetSlot, x: number, y: number, z: number, yaw: number, pitch: number, roll: number, steer: number, spin: number, head: number, brake: number, red = 0, blue = 0) {
+  set(s: FleetSlot, x: number, y: number, z: number, yaw: number, pitch: number, roll: number, steer: number, spin: number, head: number, brake: number, red = 0, blue = 0, bp = 0, br = 0, hv = 0, drop: readonly number[] | null = null) {
     const k = this.kinds.get(s.model)!;
     const sp = k.spec;
     this.q.setFromEuler(E.set(pitch, yaw, roll, 'YXZ'));
     this.v.set(x, y, z);
-    this.m4.compose(this.v, this.q, this.one);
+    // the chassis (the wheels hang off it), then the sprung body over it
+    this.mc.compose(this.v, this.q, this.one);
+    if (bp || br || hv) {
+      this.qw.setFromEuler(E.set(bp, 0, br, 'YXZ'));
+      this.m4.compose(this.v.set(0, hv, 0), this.qw, this.one).premultiply(this.mc);
+    } else this.m4.copy(this.mc);
     k.body.setMatrixAt(s.index, this.m4);
     k.glass.setMatrixAt(s.index, this.m4);
     k.heads.setMatrixAt(s.index, this.m4);
@@ -431,8 +456,8 @@ export class Fleet {
       const front = w < 2, left = w % 2 === 0;
       const lx = (left ? 1 : -1) * tw, lz = front ? hl : -hl;
       this.qw.setFromEuler(E.set(spin, front ? steer : 0, 0, 'YXZ'));
-      this.m5.compose(this.v.set(lx, sp.wheelR, lz), this.qw, left ? this.one : NEG_X);
-      this.m5.premultiply(this.m4);
+      this.m5.compose(this.v.set(lx, sp.wheelR + (drop ? drop[w] : 0), lz), this.qw, left ? this.one : NEG_X);
+      this.m5.premultiply(this.mc);
       k.wheels.setMatrixAt(s.index * 4 + w, this.m5);
     }
     this.dirty(k);
@@ -467,6 +492,7 @@ interface Kind {
   tails: THREE.InstancedMesh;
   wheels: THREE.InstancedMesh;
   decal: THREE.InstancedMesh | null;
+  dents: THREE.InstancedBufferAttribute[];
   free: number[];
   cap: number;
   used: Set<number>;
