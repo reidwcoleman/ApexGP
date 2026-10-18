@@ -626,12 +626,25 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
   and the helicopter comes over (a rifle in its door from four); roadblocks from four stars; the
   tactical team in black with carbines at five. Dispatch on the radio, the search area on the map;
   stop with a cruiser beside you and you're BUSTED; lose them and the stars clear.
-- Physics: a bicycle-model car on Pacejka-shaped tyres (load transfer, traction control, ABS,
-  downforce, flat tyres) that turns into a full rigid body when it trips sideways over a curb, takes
-  a blast or a heavy side hit, or is in the air a while: sprung wheels that only grip across the
-  tread, a body that digs in and scrapes, rollovers onto the side or the roof (the player's car rights
-  itself after a moment). Off-centre hits spin cars by their lever arm. Assisted flight for the Rocket and the helicopter, lift / drag / stall for the
-  seaplane, planing for the boat. Synthesised audio (EV whine, thrusters, rotors, sirens, surf).
+- **Physics**: a four-wheel car. The body rides on a spring and damper at each corner with
+  anti-roll bars, so load transfer, dive, squat and roll come out of the suspension (and a soft SUV
+  or a van leans hard and lifts its inside wheels); each tyre has its own load, slip angle and slip
+  ratio on a combined-slip curve with load sensitivity, its wheel spins up or locks (an implicit
+  wheel solve, ABS, traction control, limited-slip), Ackermann steering, stability control. The city
+  cars have automatic gearboxes and torque curves (the bus a five-speed diesel); the Roadster and
+  the stainless pickup are single-speed EVs that regenerate off the throttle. Grass and sand grip
+  less; each wheel rides a curb on its own. It turns into a full rigid body when it trips sideways
+  over a curb, lifts two wheels past the tipping point, takes a blast or a heavy side hit, or is in
+  the air a while: rollovers onto the side or the roof (the player's car rights itself). Tyre marks
+  and ruts, per-wheel smoke and dust. Crash damage: dents crumple the panels where a car is hit
+  (scuffed paint, crazed glass, dead lamps) on every car. `tools/owhandling.mjs [model]` benches
+  launch, braking, skidpad and stability. Assisted flight for the Rocket and the helicopter, lift /
+  drag / stall for the seaplane, planing for the boat. Synthesised audio (EV whine, an engine that
+  shifts, thrusters, rotors, sirens, surf).
+- **The street**: hydrants (a car shears one off and it gushes for half a minute), bins, newspaper
+  boxes and pay stations that go flying, benches, bus shelters with lit adverts; awnings over the
+  shop fronts, open and lit shops; herringbone pavers; St. Augustine lawns with mowing stripes.
+  The traffic has cabins behind tinted glass, LED headlight clusters, panel gaps and road grime.
 
 | | Keyboard | Gamepad |
 |---|---|---|
