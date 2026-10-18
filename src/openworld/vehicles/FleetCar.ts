@@ -33,9 +33,16 @@ export class FleetCar implements Drivable {
   ) {
     const spec = MODELS[car.spec.id as ModelId];
     this.body = new CarBody(carSpecOf(spec));
-    this.body.place(car.pos.x, car.pos.y, car.pos.z, car.yaw);
-    this.body.vx = Math.sin(car.yaw) * car.v;
-    this.body.vz = Math.cos(car.yaw) * car.v;
+    if (car.body) {
+      // (already a body: keep it, tumbling or on its roof as it is)
+      this.body = car.body;
+    } else this.body.placeTilted(car.pos.x, car.pos.y, car.pos.z, car.tp ?? 0, car.yaw, car.tr ?? 0);
+    this.body.autoRight = true;
+    car.tp = car.tr = 0;
+    if (!car.body) {
+      this.body.vx = Math.sin(car.yaw) * car.v;
+      this.body.vz = Math.cos(car.yaw) * car.v;
+    }
     this.pos = this.body.pos;
     this.police = car.police;
     this.name = NAMES[spec.id] ?? 'Car';
@@ -80,6 +87,7 @@ export class FleetCar implements Drivable {
   release() {
     const c = this.car;
     c.flags |= 4;
+    this.body.autoRight = false;
     c.body = this.body;
     c.state = 'dynamic';
     c.rest = 0;

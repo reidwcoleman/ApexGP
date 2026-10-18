@@ -18,14 +18,17 @@ import { makeSurf } from '../roads.ts';
  * makes them run; one that hits them knocks them flat — they lie a moment, get up and run.
  */
 
-export const ACT = { IDLE: 0, WALK: 1, RUN: 2, PHONE: 3, TALK: 4, LOOK: 5, SIT: 6, WAVE: 7 } as const;
-const CLIPS = ['idle', 'walk', 'run', 'phone', 'talk', 'look_around', 'sit', 'wave'];
+export const ACT = { IDLE: 0, WALK: 1, RUN: 2, PHONE: 3, TALK: 4, LOOK: 5, SIT: 6, WAVE: 7, CROUCH: 8 } as const;
+const CLIPS = ['idle', 'walk', 'run', 'phone', 'talk', 'look_around', 'sit', 'wave', 'crouch'];
+/** crimes a witness phones in, least to worst */
+const SEVERITY = ['shots', 'shootCar', 'explosion', 'shootPed', 'killPed'];
 const BODIES_M = ['Male_Adult_01', 'Male_Adult_05', 'Male_Adult_08', 'Male_Adult_14', 'Male_Adult_07', 'Male_Adult_10', 'Sports_Male_02'];
 const BODIES_F = ['Female_Adult_01', 'Female_Adult_02', 'Female_Adult_04', 'Sports_Female_02'];
 const PLAYER_BODY = 'Male_Adult_10';
 const SHIRTS = [0xffffff, 0xf3f0e6, 0x57e8ff, 0xff3f8e, 0xffb547, 0x2a6fdb, 0x1e1e22, 0x7fd18b, 0xe8d3b0, 0xc93a3a, 0x8a5ad6, 0x3ab0a0, 0xf28cb1, 0x0f2a52];
 
-type PState = 'walk' | 'stand' | 'cross' | 'flee' | 'down' | 'dead' | 'off';
+/** cower: down on their haunches, hands over their head, until the shooting stops; call: on the phone to 911 */
+type PState = 'walk' | 'stand' | 'cross' | 'flee' | 'down' | 'dead' | 'off' | 'cower' | 'call';
 
 interface Ped {
   m: number;
@@ -46,6 +49,8 @@ interface Ped {
   cx1: THREE.Vector3;
   beach: boolean;
   hp: number;
+  /** a crime they saw and will phone in (t: seconds until they get the phone out) */
+  call: { kind: string; at: THREE.Vector3; t: number } | null;
 }
 
 export interface PlayerFoot {
@@ -118,7 +123,7 @@ export class People {
     for (let i = 1; i < this.nMembers; i++) {
       this.peds.push({
         m: i, state: 'off', e: 0, side: 1, s: 0, dir: 1, lat: 0, speed: 1.3, pos: new THREE.Vector3(0, -500, 0), yaw: 0, t: 0, vel: new THREE.Vector3(), tilt: 0,
-        cx0: new THREE.Vector3(), cx1: new THREE.Vector3(), beach: false, hp: 60,
+        cx0: new THREE.Vector3(), cx1: new THREE.Vector3(), beach: false, hp: 60, call: null,
       });
       this.extras.setVisible(i, false);
     }
@@ -194,6 +199,7 @@ export class People {
 
   private hide(p: Ped) {
     p.state = 'off';
+    p.call = null;
     this.extras!.setVisible(p.m, false);
     this.extras!.setTilt(p.m, 0);
     p.tilt = 0;
@@ -259,6 +265,7 @@ export class People {
     this.struck.length = 0;
     this.deaths.length = 0;
     this.crossing.length = 0;
+    this.calls.length = 0;
     const net = this.net;
     const ex = this.extras;
     let live = 0;
@@ -290,6 +297,17 @@ export class People {
         ex.setPlace(p.m, p.pos.x, p.pos.y + (p.tilt < -0.5 ? 0.15 : 0), p.pos.z, p.yaw);
         continue;
       }
+      // ---- a witness: once they're clear of it, the phone comes out
+      if (p.call && (p.state === 'walk' || p.state === 'stand' || p.state === 'cross' || p.state === 'flee')) {
+        p.call.t -= dt;
+        if (p.call.t <= 0) {
+          p.state = 'call';
+          p.t = 3 + this.R() * 1.5;
+          // (back to it, talking)
+          p.yaw = Math.atan2(p.pos.x - p.call.at.x, p.pos.z - p.call.at.z) + (this.R() - 0.5) * 1.2;
+          ex.setAct(p.m, ACT.PHONE);
+        }
+      }
       // ---- danger: a vehicle bearing down, or one hitting
       for (const v of vehicles) {
         const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z;
@@ -310,7 +328,7 @@ export class People {
         }
         if ((p.state === 'walk' || p.state === 'stand' || p.state === 'cross') && sp > 7 && along < -2 && along > -sp * 1.6 && lat < v.hw + 2.2) fleeFrom(p, v.pos);
       }
-      if (panic > 0 && p.state !== 'down' && p.state !== 'flee' && this.R() < panic * dt * 0.4) fleeFrom(p, center);
+      if (panic > 0 && p.state !== 'down' && p.state !== 'flee' && p.state !== 'cower' && p.state !== 'call' && this.R() < panic * dt * 0.4) fleeFrom(p, center);
       // ---- move
       if (p.state === 'walk' && !p.beach) {
         const e = net.edges[p.e];
@@ -380,6 +398,17 @@ export class People {
             p.state = 'walk';
             ex.setAct(p.m, ACT.WALK);
           } else this.hide(p);
+        }
+      } else if (p.state === 'cower') {
+        // (it holds while the shots keep coming: scare() tops the timer up)
+        if (p.t < 0) fleeFrom(p, this.lastScare);
+      } else if (p.state === 'call') {
+        if (p.t < 0) {
+          if (p.call) this.calls.push({ kind: p.call.kind, at: p.call.at });
+          const at = p.call?.at ?? center;
+          p.call = null;
+          fleeFrom(p, at);
+          p.t = 2 + this.R() * 2;
         }
       } else if (p.state === 'down') {
         // thrown, then lying flat, then up and running
@@ -489,12 +518,53 @@ export class People {
     return false;
   }
 
-  /** gunfire or a blast at `at`: everyone within r runs from it */
-  scare(at: THREE.Vector3, r: number) {
+  /** crimes phoned in this frame (by a witness who lived to make the call) */
+  readonly calls: { kind: string; at: THREE.Vector3 }[] = [];
+  private readonly lastScare = new THREE.Vector3();
+
+  /**
+   * Someone near enough saw it: the nearest person (who isn't down) will call it in once they've
+   * got clear, a few seconds on. Returns false when nobody's about to see it.
+   */
+  witness(kind: string, at: THREE.Vector3, r = 70): boolean {
+    let best: Ped | null = null, bd = r;
     for (const p of this.peds) {
       if (p.state === 'off' || p.state === 'dead' || p.state === 'down') continue;
       const d = Math.hypot(p.pos.x - at.x, p.pos.z - at.z);
+      if (d < bd && Math.abs(p.pos.y - at.y) < 8) {
+        bd = d;
+        best = p;
+      }
+    }
+    if (!best) return false;
+    if (best.call) {
+      // (already calling: they tell them the worst of it)
+      if (SEVERITY.indexOf(kind) > SEVERITY.indexOf(best.call.kind)) {
+        best.call.kind = kind;
+        best.call.at.copy(at);
+      }
+    } else best.call = { kind, at: at.clone(), t: 1.5 + this.R() * 2 };
+    return true;
+  }
+
+  /** gunfire or a blast at `at`: everyone within r runs from it — or, close in, drops and covers */
+  scare(at: THREE.Vector3, r: number) {
+    this.lastScare.copy(at);
+    for (const p of this.peds) {
+      if (p.state === 'off' || p.state === 'dead' || p.state === 'down' || p.state === 'call') continue;
+      const d = Math.hypot(p.pos.x - at.x, p.pos.z - at.z);
       if (d > r) continue;
+      if (p.state === 'cower') {
+        p.t = Math.max(p.t, 1.5 + this.R() * 2);
+        continue;
+      }
+      if (p.state !== 'flee' && d < r * 0.45 && this.R() < 0.45) {
+        p.state = 'cower';
+        p.t = 2.5 + this.R() * 3;
+        p.yaw = Math.atan2(at.x - p.pos.x, at.z - p.pos.z) + Math.PI + (this.R() - 0.5);
+        this.extras!.setAct(p.m, ACT.CROUCH);
+        continue;
+      }
       p.state = 'flee';
       p.t = 5 + this.R() * 5;
       p.yaw = Math.atan2(p.pos.x - at.x, p.pos.z - at.z) + (this.R() - 0.5) * 0.9;

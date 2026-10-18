@@ -28,7 +28,7 @@ import type { Drivable, WorldCtx } from './vehicles/drivable.ts';
 import { Fleet, PAINTS, type ModelId } from './vehicles/fleet.ts';
 import { Traffic } from './ai/traffic.ts';
 import { People } from './ai/people.ts';
-import { Police, type Suspect } from './ai/police.ts';
+import { Police, type Crime, type Suspect } from './ai/police.ts';
 import { Ambient } from './ambient.ts';
 import { FleetCar } from './vehicles/FleetCar.ts';
 import { Helicopter } from './vehicles/Helicopter.ts';
@@ -52,7 +52,19 @@ import { officerLook } from './ai/officers.ts';
  * race game's sky / weather / grade (the same Environment, so it looks like ApexGP), the city,
  * the traffic, the people, the police and the player.
  */
+/** what a 911 caller tells dispatch */
+const CALLS: Partial<Record<string, string>> = {
+  shots: '911 caller reports shots fired in the area',
+  shootPed: '911 caller: someone has been shot',
+  killPed: '911 caller reports a body, the shooter fled',
+  explosion: '911: an explosion, possible vehicle fire',
+  shootCar: '911 caller: someone is shooting at cars',
+};
+
 export class OpenWorld {
+  lawn: import('./city/lawnmask.ts').LawnMask | null = null;
+  /** crimes nobody saw: reported late, by somebody who heard */
+  private readonly lateCalls: { kind: Crime; at: THREE.Vector3; t: number }[] = [];
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.15, 30000);
   readonly gfx: Renderer;
@@ -184,7 +196,7 @@ export class OpenWorld {
     this.landmarks = buildLandmarks(this.buildings, this.net.mask, this.ground.beachX);
     this.scene.add(this.landmarks.group);
     for (const s of this.landmarks.solids) this.world.add(s);
-    const lawn = buildLawnMask(this.net, this.buildings, this.ground.beachX);
+    const lawn = (this.lawn = buildLawnMask(this.net, this.buildings, this.ground.beachX));
     this.trees = buildTrees(this.net, this.world, this.ground.beachX, lawn);
     this.grass = buildGrass(lawn);
     this.scene.add(this.grass.mesh);
@@ -758,7 +770,7 @@ export class OpenWorld {
     const hl = v instanceof FleetCar ? v.car.spec.L / 2 : body ? body.spec.hl : 0.3;
     const hw = v instanceof FleetCar ? v.car.spec.W / 2 : body ? body.spec.hw : 0.3;
     const playerBox = body
-      ? { pos: body.pos, vel: v!.vel, yaw: body.yaw, hl, hw, mass: body.spec.mass, onImpulse: (jx: number, jz: number) => { body.vx += jx; body.vz += jz; } }
+      ? { pos: body.pos, vel: v!.vel, yaw: body.yaw, hl, hw, mass: body.spec.mass, onImpulse: (jx: number, jz: number, px: number, pz: number) => body.shove(jx, jz, px, pz) }
       : null;
     this.traffic.update(dt, this.elapsed, this.focus, camFwd, this.night, playerBox);
     for (const h of this.traffic.hits) {
@@ -776,8 +788,28 @@ export class OpenWorld {
     this.police.update(dt, sus, ctx, this.camera.position, camFwd, this.night);
     for (const sh of this.police.shots) this.combat.aiFire(sh.from, sh.to, sh.weapon, sh.acc);
     for (const r of this.police.radio) this.hud.radio(r);
-    for (const c of this.combat.crimes) this.police.report(c.kind, c.at);
+    for (const r of this.police.shouts) this.hud.radio(r, 'POLICE');
+    // a crime the police see (or one against them) counts at once; otherwise it waits on a witness's 911 call
+    for (const c of this.combat.crimes) {
+      if (c.kind === 'shootCop' || c.kind === 'killCop' || this.police.watching(c.at)) this.police.report(c.kind, c.at);
+      else if (!this.people.witness(c.kind, c.at, c.kind === 'shots' || c.kind === 'explosion' ? 110 : 70) && (c.kind === 'explosion' || Math.random() < 0.04)) {
+        // (nobody in sight: somebody further off heard it, sooner or later)
+        this.lateCalls.push({ kind: c.kind, at: c.at.clone(), t: 12 + Math.random() * 10 });
+      }
+    }
     this.combat.crimes.length = 0;
+    for (const k of this.people.calls) {
+      this.police.report(k.kind as Crime, k.at);
+      this.hud.radio(CALLS[k.kind] ?? '911 caller reporting a disturbance', '911');
+    }
+    for (let i = this.lateCalls.length - 1; i >= 0; i--) {
+      const k = this.lateCalls[i];
+      k.t -= dt;
+      if (k.t > 0) continue;
+      this.lateCalls.splice(i, 1);
+      this.police.report(k.kind, k.at);
+      this.hud.radio(CALLS[k.kind] ?? '911 caller reporting a disturbance', '911');
+    }
     this.combat.update(dt);
     if (this.combat.shake > 0.05) this.cams.bump(this.combat.shake * 0.5);
     for (const e of this.police.events) {
@@ -835,17 +867,46 @@ export class OpenWorld {
 
   /** white smoke off the rear tyres when they spin up or slide (the driven ones) */
   private smokeAcc = 0;
+  private rimAcc = 0;
+  private readonly tmpW = new THREE.Vector3();
   private tyreSmoke(dt: number, body: CarBody | null) {
     const v = this.vehicle;
-    if (!body || !v || !body.onGround) return;
+    if (!body || !v) return;
+    const P = this.particles;
+    const c = Math.cos(body.yaw), s = Math.sin(body.yaw);
+    const at = (w: number, out: THREE.Vector3) => {
+      const lx = (w % 2 === 0 ? 1 : -1) * body.spec.hw * 0.85, lz = w < 2 ? body.spec.a : -body.spec.b;
+      return out.set(body.pos.x + lx * c + lz * s, body.pos.y + 0.12, body.pos.z - lx * s + lz * c);
+    };
+    // a tyre going: the bang and a burst of rubber dust
+    if (body.popped) {
+      for (let w = 0; w < 4; w++) {
+        if (!(body.popped & (1 << w))) continue;
+        at(w, this.tmpW);
+        this.audio.shot('pistol', 6);
+        for (let i = 0; i < 6; i++)
+          P.puff({ x: this.tmpW.x, y: this.tmpW.y, z: this.tmpW.z, vx: (P.rand() - 0.5) * 3, vy: 0.6 + P.rand(), vz: (P.rand() - 0.5) * 3, life: 1.2 + P.rand(), s0: 0.2, s1: 1.4, a: 0.35, r: 0.3, g: 0.29, b: 0.28, drag: 2, lift: 0.2, floor: body.pos.y, fadeIn: 0.03 });
+      }
+      body.popped = 0;
+    }
+    // on the rims: sparks off the road
+    if (body.flats && body.onGround && body.speed > 5) {
+      this.rimAcc += dt * Math.min(60, body.speed * 2.2);
+      while (this.rimAcc >= 1) {
+        this.rimAcc -= 1;
+        const w = Math.floor(P.rand() * 4);
+        if (!(body.flats & (1 << w))) continue;
+        at(w, this.tmpW);
+        P.spark({ x: this.tmpW.x, y: body.pos.y + 0.04, z: this.tmpW.z, vx: -v.vel.x * 0.35 + (P.rand() - 0.5) * 3, vy: 0.8 + P.rand() * 2, vz: -v.vel.z * 0.35 + (P.rand() - 0.5) * 3, life: 0.25 + P.rand() * 0.35, s0: 0.05, s1: 0.03, a: 1, r: 5, g: 2.8, b: 1, grav: 1, floor: body.pos.y, stretch: 0.02, fadeIn: 0 });
+      }
+    }
+    if (!body.onGround) return;
     const slip = body.slip;
     if (slip < 0.35) return;
     const k = Math.min(1, (slip - 0.35) / 0.5);
     this.smokeAcc += dt * 70 * k;
     const n = Math.floor(this.smokeAcc);
     this.smokeAcc -= n;
-    const P = this.particles;
-    const c = Math.cos(body.yaw), s = Math.sin(body.yaw);
     const back = -body.spec.hl * 0.62, half = body.spec.hw * 0.85;
     for (let i = 0; i < n; i++) {
       const side = i % 2 ? 1 : -1;
@@ -883,12 +944,8 @@ export class OpenWorld {
       onFoot: false,
       flying,
       threat: false,
-      onImpulse: (jx, jz) => {
-        if (body) {
-          body.vx += jx;
-          body.vz += jz;
-        }
-      },
+      onImpulse: (jx, jz, px, pz) => body?.shove(jx, jz, px, pz),
+      burst: (mask) => (body ? body.burst(mask) : 0),
     };
   }
 

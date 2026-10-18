@@ -607,22 +607,30 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
   low hover (spray over water), and the nozzles frost over with use.
 - **Other vehicles**: every traffic car can be taken (carjacking ejects the driver), a superbike,
   a helicopter (Watson Island), a seaplane, a go-fast boat with a wake; the menu delivers more.
-- **The city lives**: lane-following traffic with signals and junction paths, parked cars,
-  pedestrians (Rocketbox avatars) who cross, dodge and flee, boats in the bay, airliners on the
-  MIA approach, a news helicopter.
+- **The city lives**: lane-following traffic with signals and junction paths that slows for,
+  queues behind and changes lanes round wrecks, abandoned cars and roadblocks; parked cars;
+  pedestrians (Rocketbox avatars) who cross, dodge and flee, or drop and cover close to gunfire;
+  drivers who bail out of a car that's shot at; boats in the bay, airliners on the MIA approach,
+  a news helicopter. Shoot out a tyre and the car limps to a stop.
 - **Weapons**: pistol, SMG, carbine, pump shotgun, marksman rifle (scope) and a rocket launcher;
   generic designs modelled at real size. An over-the-shoulder camera with mouse capture, the
   character posed by IK onto the gun; hitscan rounds with tracers, muzzle flashes that light the
   street, brass, bullet holes, sparks and dust; drive-bys with the pistol and SMG. Cars shot up
   smoke, burn and explode (throwing the cars round them, setting off the next); people go down.
-- **Miami PD**: shots, shootings and explosions raise the wanted level; cruisers route to you (A*),
-  chase and ram; their crews get out and either cuff a suspect who stands still or, from two stars
+- **Miami PD**: crimes the police see raise the wanted level at once; the rest wait on a witness,
+  who gets clear and phones 911 (kill the witness and nobody calls). Cruisers route to you (A*),
+  chase and ram, and from two stars one unit lines up beside your rear quarter for a PIT; roadblocks
+  lay a spike strip ahead (the tyres go, you're on the rims in sparks). Officers shout, take cover
+  behind their cruisers and pop up over the hood to fire; their crews get out and either cuff a suspect who stands still or, from two stars
   (or at anyone pointing a gun at them), shoot; from three stars passengers fire out of the windows
   and the helicopter comes over (a rifle in its door from four); roadblocks from four stars; the
   tactical team in black with carbines at five. Dispatch on the radio, the search area on the map;
   stop with a cruiser beside you and you're BUSTED; lose them and the stars clear.
 - Physics: a bicycle-model car on Pacejka-shaped tyres (load transfer, traction control, ABS,
-  downforce), assisted flight for the Rocket and the helicopter, lift / drag / stall for the
+  downforce, flat tyres) that turns into a full rigid body when it trips sideways over a curb, takes
+  a blast or a heavy side hit, or is in the air a while: sprung wheels that only grip across the
+  tread, a body that digs in and scrapes, rollovers onto the side or the roof (the player's car rights
+  itself after a moment). Off-centre hits spin cars by their lever arm. Assisted flight for the Rocket and the helicopter, lift / drag / stall for the
   seaplane, planing for the boat. Synthesised audio (EV whine, thrusters, rotors, sirens, surf).
 
 | | Keyboard | Gamepad |

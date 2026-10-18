@@ -53,11 +53,29 @@ export interface AICar {
   temper: number;
   /** damage left (100 new; bullets and blasts take it; 0 burns, then blows up) */
   hp?: number;
+  /** a parked car's tilt (as the fleet draws it): one left on its roof or side */
+  tp?: number;
+  tr?: number;
+  /** a lane change: the offset from the new lane, easing out; seconds stuck behind something that won't move */
+  offX?: number;
+  offZ?: number;
+  blockT?: number;
+}
+
+/** something in the road that isn't driving: a wreck, an abandoned car, a cruiser, a roadblock */
+export interface Blocker {
+  x: number;
+  y: number;
+  z: number;
+  hl: number;
+  hw: number;
 }
 
 /** flags: 1 chasing (police), 2 in the water, 4 left by the player, 8 a burnt-out wreck, 16 fleeing */
 export const WRECK = 8;
 export const FLEE = 16;
+/** rolled onto its roof or side: never drives on */
+export const OVER = 32;
 
 const tmpP = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
 
@@ -129,6 +147,8 @@ export class Traffic {
   target = 70;
   /** honks this frame (positions) for the audio */
   readonly honks: THREE.Vector3[] = [];
+  /** stopped things in the road this frame (traffic's own wrecks, plus what the police add for the next frame) */
+  readonly blockers: Blocker[] = [];
   /** player-vs-traffic impacts this frame */
   readonly hits: { car: AICar; speed: number }[] = [];
   private parkedOn = new Map<number, AICar>();
@@ -301,7 +321,7 @@ export class Traffic {
   private readonly jt = new THREE.Vector3();
   private readonly playerFwd = new THREE.Vector3();
 
-  update(dt: number, t: number, center: THREE.Vector3, camFwd: THREE.Vector3, night: number, player: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number) => void } | null) {
+  update(dt: number, t: number, center: THREE.Vector3, camFwd: THREE.Vector3, night: number, player: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number, px: number, pz: number) => void } | null) {
     const net = this.net;
     this.honks.length = 0;
     this.hits.length = 0;
@@ -335,6 +355,11 @@ export class Traffic {
       l.push(c);
     }
     if (player) this.playerFwd.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+    // what's stopped in the road (the police add their cruisers)
+    const B = this.blockers;
+    for (const c of this.cars)
+      if (c.state === 'dynamic' || (c.state === 'parked' && c.flags & (4 | WRECK | OVER)))
+        B.push({ x: c.pos.x, y: c.pos.y, z: c.pos.z, hl: c.spec.L / 2, hw: c.spec.W / 2 });
 
     for (const c of this.cars) {
       if (c.state === 'parked' || c.state === 'player') continue;
@@ -398,6 +423,63 @@ export class Traffic {
       } else {
         // in a junction: only the player (below)
       }
+      // ---- a wreck, an abandoned car, a cruiser across the lane
+      let blocked = false;
+      {
+        const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+        for (const o of B) {
+          const dx = o.x - c.pos.x, dz = o.z - c.pos.z;
+          const along = dx * fx + dz * fz;
+          if (along <= 0.5 || along > 50 || Math.abs(o.y - c.pos.y) > 3) continue;
+          const lat = -dx * fz + dz * fx;
+          if (Math.abs(lat) > o.hw + c.spec.W / 2 + 0.25) continue;
+          const g = along - c.spec.L / 2 - o.hl;
+          if (g < gap) {
+            gap = g;
+            vLead = 0;
+            blocked = true;
+          }
+        }
+      }
+      // round it: a free lane alongside, signalled and eased into
+      if (blocked && gap < 22 && c.state === 'lane' && e.spec.lanes > 1 && s1 - c.s > 30) {
+        for (const L of [c.lane - 1, c.lane + 1]) {
+          if (L < 0 || L >= e.spec.lanes) continue;
+          lanePoint(net, e, c.dir, L, c.s, tmpP);
+          const px = tmpP.x, pz = tmpP.z, tx = tmpP.tx, tz = tmpP.tz;
+          let free = true;
+          for (const o of B) {
+            const dx = o.x - px, dz = o.z - pz;
+            const along = dx * tx + dz * tz;
+            if (along > -6 && along < 30 && Math.abs(-dx * tz + dz * tx) < o.hw + c.spec.W / 2 + 0.3) free = false;
+          }
+          const nl = this.lanes.get(`${c.e}:${c.dir}:${L}`);
+          if (nl) for (const o of nl) if (Math.abs(o.s - c.s) < 10 + Math.max(0, o.v - c.v) * 1.5) free = false;
+          if (!free) continue;
+          c.offX = (c.offX ?? 0) + c.pos.x - px;
+          c.offZ = (c.offZ ?? 0) + c.pos.z - pz;
+          c.lane = L;
+          c.key = `${c.e}:${c.dir}:${L}`;
+          (nl ?? this.lanes.set(c.key, []).get(c.key)!).push(c);
+          nl?.sort((a, b) => a.s - b.s);
+          gap = 1e9;
+          blocked = false;
+          break;
+        }
+      }
+      // nowhere to go: wait (and lean on the horn); a long wait out of sight and they've turned off
+      if (blocked && c.v < 0.5) {
+        c.blockT = (c.blockT ?? 0) + dt;
+        c.honk += dt * 0.6;
+        if (c.honk > 1.6) {
+          c.honk = -3 - this.R() * 4;
+          this.honks.push(c.pos.clone());
+        }
+        if (c.blockT > 9 && (!player || Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z) > 70)) {
+          this.retire(c);
+          continue;
+        }
+      } else c.blockT = 0;
       // ---- the player in our way
       if (player) {
         const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
@@ -442,7 +524,19 @@ export class Traffic {
           this.enterJunction(c);
         } else {
           lanePoint(net, e, c.dir, c.lane, c.s, tmpP);
-          this.place(c, tmpP.x, tmpP.y, tmpP.z, Math.atan2(tmpP.tx, tmpP.tz), dt);
+          let ox = 0, oz = 0, yaw = Math.atan2(tmpP.tx, tmpP.tz);
+          if (c.offX || c.offZ) {
+            // easing across into the new lane, nosed toward it
+            const k = Math.exp(-dt * 1.1);
+            c.offX! *= k;
+            c.offZ! *= k;
+            if (Math.abs(c.offX!) + Math.abs(c.offZ!) < 0.02) c.offX = c.offZ = 0;
+            ox = c.offX!;
+            oz = c.offZ!;
+            const sideV = -(ox * tmpP.tz - oz * tmpP.tx) * 1.1;
+            yaw += Math.atan2(sideV, Math.max(c.v, 2)) * 0.9;
+          }
+          this.place(c, tmpP.x + ox, tmpP.y, tmpP.z + oz, yaw, dt);
         }
       }
       if (c.state === 'junction') {
@@ -473,8 +567,9 @@ export class Traffic {
       const lit = night > 0.3 ? 1 : 0;
       const flash = c.police && (c.flags & 1) !== 0;
       const ph = Math.floor(t * 6) % 2;
-      this.fleet.set(c.slot, c.pos.x, c.pos.y, c.pos.z, c.yaw, c.body ? c.body.pitch : 0, c.body ? -c.body.roll : 0, c.steer, c.spin, lit, c.brake, flash ? ph : 0, flash ? 1 - ph : 0);
+      this.fleet.set(c.slot, c.pos.x, c.pos.y, c.pos.z, c.yaw, c.body ? c.body.pitch - c.body.groundPitch : c.tp ?? 0, c.body ? -c.body.roll + c.body.groundRoll : c.tr ?? 0, c.steer, c.spin, lit, c.brake, flash ? ph : 0, flash ? 1 - ph : 0);
     }
+    this.blockers.length = 0;
   }
 
   private place(c: AICar, x: number, y: number, z: number, yaw: number, dt: number) {
@@ -486,12 +581,12 @@ export class Traffic {
   }
 
   /** a body (the player's car, a cruiser) against every traffic car near it */
-  collide(p: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number) => void }) {
+  collide(p: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number, px: number, pz: number) => void }) {
     for (const c of this.cars) if (c.state !== 'player') this.contact(c, p);
   }
 
   /** box vs box with the player: push apart, exchange the impulse, the AI car goes physical */
-  private contact(c: AICar, p: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number) => void }) {
+  private contact(c: AICar, p: { pos: THREE.Vector3; vel: THREE.Vector3; yaw: number; hl: number; hw: number; mass: number; onImpulse: (jx: number, jz: number, px: number, pz: number) => void }) {
     const dx = c.pos.x - p.pos.x, dz = c.pos.z - p.pos.z;
     if (dx * dx + dz * dz > 100 || Math.abs(c.pos.y - p.pos.y) > 1.6) return;
     const hit = obbOverlap(p.pos.x, p.pos.z, p.yaw, p.hl, p.hw, c.pos.x, c.pos.z, c.yaw, c.spec.L / 2, c.spec.W / 2);
@@ -509,17 +604,20 @@ export class Traffic {
     const vn = rvx * hit.nx + rvz * hit.nz;
     if (vn >= 0) return;
     const j = (-(1 + 0.25) * vn) / (1 / m1 + 1 / m2);
-    b.vx += (j * hit.nx) / m2;
-    b.vz += (j * hit.nz) / m2;
-    // a glancing blow spins it
-    b.yawRate += ((Math.random() - 0.5) * j) / m2 * 0.6;
-    p.onImpulse((-j * hit.nx) / m1, (-j * hit.nz) / m1);
+    if (j / m2 > 8 || b.free) {
+      // a heavy hit (or one already tumbling): into the rigid body, struck low at the bumper line
+      b.kick(j * hit.nx, j * 0.04, j * hit.nz, hit.px, b.pos.y + 0.35, hit.pz);
+    } else {
+      // (struck off-centre it spins: the lever arm)
+      b.shove((j * hit.nx) / m2, (j * hit.nz) / m2, hit.px, hit.pz);
+    }
+    p.onImpulse((-j * hit.nx) / m1, (-j * hit.nz) / m1, hit.px, hit.pz);
     this.hits.push({ car: c, speed: -vn });
   }
 
   makeDynamic(c: AICar) {
     const b = new CarBody(carSpecOf(c.spec));
-    b.place(c.pos.x, c.pos.y, c.pos.z, c.yaw);
+    b.placeTilted(c.pos.x, c.pos.y, c.pos.z, c.tp ?? 0, c.yaw, c.tr ?? 0);
     b.vx = Math.sin(c.yaw) * c.v;
     b.vz = Math.cos(c.yaw) * c.v;
     c.body = b;
@@ -539,15 +637,19 @@ export class Traffic {
     if (b.speed < 0.4) c.rest += dt;
     else c.rest = 0;
     if (b.inWater) c.flags |= 2;
-    // one the player left (or a wreck): parked where it stops
-    if (c.flags & (4 | WRECK) && c.rest > 0.8) {
+    if (b.overturned) c.flags |= OVER;
+    else if (!b.free) c.flags &= ~OVER;
+    // one the player left (or a wreck, or rolled over): parked where it stops, as it lies
+    if (c.flags & (4 | WRECK | OVER) && c.rest > 0.8 && (!b.free || b.overturned)) {
       c.state = 'parked';
+      c.tp = b.pitch - b.groundPitch;
+      c.tr = -b.roll + b.groundRoll;
       c.body = null;
       c.v = 0;
       return;
     }
     // back into the traffic once it's sitting on a lane, facing roughly along it
-    if (c.rest > 3 && !(c.flags & 2) && !(c.flags & WRECK)) {
+    if (c.rest > 3 && !b.free && !(c.flags & (2 | WRECK | OVER))) {
       const hit = this.net.nearestEdge(b.pos.x, b.pos.z, b.pos.y, 6);
       if (hit && hit.e.kind !== 'lane') {
         const e = hit.e;
@@ -677,7 +779,7 @@ export function rayCar(c: { pos: THREE.Vector3; yaw: number; spec: { L: number; 
 }
 
 /** SAT between two oriented boxes in xz; the push for B away from A */
-export function obbOverlap(ax: number, az: number, ayaw: number, ahl: number, ahw: number, bx: number, bz: number, byaw: number, bhl: number, bhw: number): { nx: number; nz: number; depth: number } | null {
+export function obbOverlap(ax: number, az: number, ayaw: number, ahl: number, ahw: number, bx: number, bz: number, byaw: number, bhl: number, bhw: number): { nx: number; nz: number; depth: number; px: number; pz: number } | null {
   const axes = [
     [Math.sin(ayaw), Math.cos(ayaw)],
     [Math.cos(ayaw), -Math.sin(ayaw)],
@@ -699,5 +801,17 @@ export function obbOverlap(ax: number, az: number, ayaw: number, ahl: number, ah
       bnz = z * s;
     }
   }
-  return { nx: bnx, nz: bnz, depth: best };
+  // the contact point: halfway between each box's support toward the other (a face's middle if it's flat on)
+  const sup = (x: number, z: number, yaw: number, hl: number, hw: number, nx: number, nz: number, out: number[]) => {
+    const fx = Math.sin(yaw), fz = Math.cos(yaw), lx = Math.cos(yaw), lz = -Math.sin(yaw);
+    const df = nx * fx + nz * fz, dl = nx * lx + nz * lz;
+    // (a side near-square to n: its middle, not a corner)
+    const sf = Math.abs(df) < 0.15 ? 0 : Math.sign(df), sl = Math.abs(dl) < 0.15 ? 0 : Math.sign(dl);
+    out[0] = x + fx * hl * sf + lx * hw * sl;
+    out[1] = z + fz * hl * sf + lz * hw * sl;
+  };
+  sup(ax, az, ayaw, ahl, ahw, bnx, bnz, SA);
+  sup(bx, bz, byaw, bhl, bhw, -bnx, -bnz, SB);
+  return { nx: bnx, nz: bnz, depth: best, px: (SA[0] + SB[0]) / 2, pz: (SA[1] + SB[1]) / 2 };
 }
+const SA = [0, 0], SB = [0, 0];

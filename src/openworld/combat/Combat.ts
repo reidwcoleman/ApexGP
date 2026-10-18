@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { rayWorld } from '../sim/collide.ts';
 import { makeSurf, type Network } from '../roads.ts';
 import type { CollisionWorld } from '../sim/collide.ts';
+import type { CarBody } from '../sim/car.ts';
 import { rayCar, WRECK, type AICar, type Traffic } from '../ai/traffic.ts';
 import type { People } from '../ai/people.ts';
 import type { Police } from '../ai/police.ts';
@@ -483,8 +484,14 @@ export class Combat {
       case 'player': {
         this.sparks(h.point, h.normal, 4 + Math.floor(Math.random() * 5), 1.3);
         H.audio.hit(Math.random() < 0.25 ? 'glass' : 'metal', dist);
-        if (h.kind === 'car') this.damageCar(h.car!, dmg * 0.22, h.point, by);
-        else if (h.kind === 'cop') this.damageCop(h.cop!, dmg * 0.22, by);
+        if (h.kind === 'car') {
+          this.damageCar(h.car!, dmg * 0.22, h.point, by);
+          this.tyreShot(h.car!, null, h.point, dist);
+        } else if (h.kind === 'cop') {
+          this.damageCop(h.cop!, dmg * 0.22, by);
+          const cop = H.police.cops[h.cop!];
+          if (cop) this.tyreShot(null, cop.body, h.point, dist);
+        }
         else if (h.kind === 'heli') {
           H.police.heliHp -= dmg * 0.12;
           if (by === 'player') this.mark(false);
@@ -502,6 +509,30 @@ export class Combat {
       }
     }
     void s;
+  }
+
+  /** a round into a tyre: it goes (a car in the traffic becomes a body that limps to a stop) */
+  private tyreShot(c: AICar | null, b: CarBody | null, at: THREE.Vector3, dist: number) {
+    const pos = c ? c.pos : b!.pos, yaw = c ? c.yaw : b!.yaw;
+    const spec = c ? { a: c.spec.wb / 2, b: c.spec.wb / 2, hw: c.spec.W / 2, r: c.spec.wheelR } : { a: b!.spec.a, b: b!.spec.b, hw: b!.spec.hw, r: b!.spec.wheelR };
+    if (at.y - pos.y > spec.r * 2 + 0.1) return;
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    const px = at.x - pos.x, pz = at.z - pos.z;
+    const lx = px * cs - pz * sn, lz = px * sn + pz * cs;
+    let w = -1;
+    for (let k = 0; k < 4; k++) {
+      const wz = k < 2 ? spec.a : -spec.b;
+      if (Math.abs(lz - wz) < spec.r * 1.1 && Math.abs(Math.abs(lx) - spec.hw * 0.85) < 0.3 && (lx > 0) === (k % 2 === 0)) w = k;
+    }
+    if (w < 0) return;
+    if (c && c.state === 'player') return;
+    if (c && !c.body) this.H.traffic.makeDynamic(c);
+    const body = c ? c.body! : b!;
+    if (body.burst(1 << w)) {
+      body.popped = 0;
+      this.H.audio.shot('pistol', dist + 8);
+      this.dust(at, new THREE.Vector3(0, 1, 0), 0.3, 0.6);
+    }
   }
 
   private mark(kill: boolean) {
@@ -530,10 +561,17 @@ export class Combat {
     const hp = (c.hp ?? 100) - dmg;
     c.hp = hp;
     if (by === 'player' && at) this.mark(false);
-    // a driver under fire floors it
+    // a driver under fire: stopped (or losing their nerve) they bail out and run; otherwise they floor it
     if (c.state === 'lane' || c.state === 'junction') {
-      c.vmax *= 1.4;
-      c.flags |= 16;
+      if (!c.police && (c.v < 4 || Math.random() < 0.3)) {
+        const cs = Math.cos(c.yaw), sn = Math.sin(c.yaw), w = c.spec.W / 2 + 0.5;
+        this.H.traffic.makeDynamic(c);
+        c.flags |= 4;
+        this.H.people.ejectDriver(new THREE.Vector3(c.pos.x + cs * w, c.pos.y, c.pos.z - sn * w), at ?? c.pos);
+      } else {
+        c.vmax *= 1.4;
+        c.flags |= 16;
+      }
     }
     if (hp <= 0 && !this.fires.some((f) => f.car === c)) this.fires.push({ car: c, pos: c.pos, t: 0, fuse: 3.5 + Math.random() * 3, smoke: 0 });
   }
@@ -604,11 +642,7 @@ export class Combat {
       const k = 1 - d / (r * 1.5);
       if (c.state !== 'player') {
         if (!c.body) H.traffic.makeDynamic(c);
-        const b = c.body!;
-        b.vx += (dx / (d || 1)) * 9 * k;
-        b.vz += (dz / (d || 1)) * 9 * k;
-        b.vy = Math.max(b.vy, 4 * k);
-        b.yawRate += (R() - 0.5) * 3 * k;
+        blastBody(c.body!, dx, dz, d, k, R);
         this.damageCar(c, 140 * k, null, by);
       }
     }
@@ -619,9 +653,7 @@ export class Combat {
       const d = Math.hypot(dx, dz);
       if (d > r * 1.5) continue;
       const k = 1 - d / (r * 1.5);
-      b.vx += (dx / (d || 1)) * 9 * k;
-      b.vz += (dz / (d || 1)) * 9 * k;
-      b.vy = Math.max(b.vy, 4 * k);
+      blastBody(b, dx, dz, d, k, R);
       this.damageCop(i, 140 * k, by);
     }
     for (const v of H.owned) {
@@ -805,8 +837,9 @@ export class Combat {
             f.car.flags |= WRECK;
             H.traffic.fleet.paint(f.car.slot, 0x161514);
             if (f.car.body) {
-              f.car.body.vy = Math.max(f.car.body.vy, 5);
-              f.car.body.yawRate += (Math.random() - 0.5) * 2;
+              // the tank goes: the wreck jumps and twists off an off-centre kick from underneath
+              const b = f.car.body, m = b.spec.mass;
+              b.kick(0, m * (4 + Math.random() * 2.5), 0, b.pos.x + (Math.random() - 0.5) * 2, b.pos.y, b.pos.z + (Math.random() - 0.5) * 3);
             }
           }
           if (f.copIdx !== undefined) H.police.wreckCop(f.copIdx);
@@ -927,4 +960,11 @@ function vehicleBox(v: Drivable): { L: number; W: number; H: number } | null {
     default:
       return null;
   }
+}
+
+/** a blast on a car: thrown away and up, struck low on the near side, so it rolls away from the blast */
+function blastBody(b: CarBody, dx: number, dz: number, d: number, k: number, R: () => number) {
+  const m = b.spec.mass;
+  const nx = dx / (d || 1), nz = dz / (d || 1);
+  b.kick(nx * m * 9 * k, m * (4.5 + 2.5 * R()) * k, nz * m * 9 * k, b.pos.x - nx * b.spec.hw * 0.8 + (R() - 0.5) * b.spec.hl * 0.6 * nz, b.pos.y + 0.1, b.pos.z - nz * b.spec.hw * 0.8 - (R() - 0.5) * b.spec.hl * 0.6 * nx);
 }

@@ -558,6 +558,8 @@ export class Network {
    */
   surface(x: number, z: number, y: number, out: Surf): Surf {
     let best = -Infinity;
+    // (a carriageway beats the sidewalk band of a road meeting it: the junction's corners are road)
+    let road = -Infinity, rEdge = -1, rLat = 0, rS = 0, rTx = 0, rTz = 0;
     out.edge = -1;
     out.sidewalk = false;
     const pr = PROJ;
@@ -576,6 +578,14 @@ export class Network {
       } else if (a <= curb + 1.2 && pr.y > 0.5) h = pr.y; // the barrier strip of a deck
       else continue;
       if (h > y + 1.4) continue;
+      if (!walk && h > road) {
+        road = h;
+        rEdge = id;
+        rLat = pr.lat;
+        rS = pr.s;
+        rTx = pr.tx;
+        rTz = pr.tz;
+      }
       if (h > best) {
         best = h;
         out.edge = id;
@@ -585,6 +595,15 @@ export class Network {
         out.tz = pr.tz;
         out.sidewalk = walk;
       }
+    }
+    if (out.sidewalk && road > best - 0.2) {
+      best = road;
+      out.edge = rEdge;
+      out.lat = rLat;
+      out.s = rS;
+      out.tx = rTx;
+      out.tz = rTz;
+      out.sidewalk = false;
     }
     if (best > -Infinity) {
       out.y = best;

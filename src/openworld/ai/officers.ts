@@ -15,7 +15,8 @@ import { rayCapsule } from '../combat/Combat.ts';
  * tactical team comes in black with carbines. Back in their car when the suspect drives off.
  */
 
-export type OfficerState = 'exit' | 'chase' | 'hold' | 'return' | 'dead';
+/** cover: behind their cruiser (the engine block between them and the suspect), down, then up to fire */
+export type OfficerState = 'exit' | 'chase' | 'hold' | 'cover' | 'return' | 'dead';
 
 export interface Officer {
   g: Gunman;
@@ -38,6 +39,8 @@ export interface Officer {
   side: number;
   onGround: boolean;
   vy: number;
+  /** down behind the car right now */
+  down: boolean;
 }
 
 export interface Target {
@@ -79,6 +82,9 @@ export class Officers {
   readonly shots: { from: THREE.Vector3; to: THREE.Vector3; weapon: WeaponId; acc: number }[] = [];
   /** an officer close enough to cuff a still suspect */
   cuffing = false;
+  /** what they shout this frame */
+  readonly callouts: string[] = [];
+  private shoutT = 0;
   private readonly surf = makeSurf();
   private readonly contacts: Contact[] = [];
   private seed = 1;
@@ -102,7 +108,7 @@ export class Officers {
     this.group.add(g.root);
     const o: Officer = {
       g, pos: at.clone(), vel: new THREE.Vector3(), yaw, hp: swat ? 170 : 100, state: 'exit', t: 0.6, weapon, car, carPos, cool: 0.8 + Math.random(), burst: 0,
-      seen: 0, last: at.clone(), swat, side: Math.random() < 0.5 ? 1 : -1, onGround: true, vy: 0,
+      seen: 0, last: at.clone(), swat, side: Math.random() < 0.5 ? 1 : -1, onGround: true, vy: 0, down: false,
     };
     this.list.push(o);
     return o;
@@ -120,8 +126,9 @@ export class Officers {
     for (let i = 0; i < this.list.length; i++) {
       const f = this.list[i];
       if (f.state === 'dead') continue;
-      const t = rayCapsule(o, d, f.pos, 0.33, 1.82);
-      if (t >= 0 && t < (best ? best.t : maxT)) best = { i, t, head: o.y + d.y * t - f.pos.y > 1.55 };
+      const h = f.down ? 1.1 : 1.82;
+      const t = rayCapsule(o, d, f.pos, 0.33, h);
+      if (t >= 0 && t < (best ? best.t : maxT)) best = { i, t, head: o.y + d.y * t - f.pos.y > h - 0.27 };
     }
     return best;
   }
@@ -158,6 +165,8 @@ export class Officers {
    */
   update(dt: number, wanted: number, T: Target, camPos: THREE.Vector3): Officer[] {
     this.shots.length = 0;
+    this.callouts.length = 0;
+    this.shoutT -= dt;
     this.cuffing = false;
     const back: Officer[] = [];
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -182,6 +191,19 @@ export class Officers {
       let aiming = false;
       let speed = 0;
       if (wanted === 0 || (T.inVehicle && d > 70)) o.state = 'return';
+      // the first sight of the suspect: the shout
+      if (sees && this.shoutT <= 0 && d < 40 && o.state !== 'return') {
+        this.shoutT = 7 + Math.random() * 5;
+        this.callouts.push(T.threat ? pick(['Police! Drop the weapon!', 'Gun! Drop it, drop it now!', 'Put the gun down!']) : T.onFoot ? pick(['Police! Freeze!', "Don't move! Hands where I can see them!", 'On the ground, now!']) : pick(['Police! Step out of the vehicle!', 'Turn the engine off! Hands out the window!']));
+      }
+      // under fire with their car close by: get behind it
+      const carNear = o.carPos && Math.hypot(o.carPos.x - o.pos.x, o.carPos.z - o.pos.z) < 30 && d < 60;
+      if (hostile && (T.threat || wanted >= 3) && carNear && o.seen > 0 && (o.state === 'chase' || o.state === 'hold')) {
+        o.state = 'cover';
+        o.t = 0.8 + Math.random();
+        o.down = false;
+      }
+      o.g.crouch = false;
       switch (o.state) {
         case 'exit':
           // round the door, gun coming up
@@ -224,6 +246,36 @@ export class Officers {
           if (!hostile) o.state = 'chase';
           break;
         }
+        case 'cover': {
+          face = Math.atan2(dx, dz);
+          if (!o.carPos || !carNear || !hostile || (!sees && o.seen < -2)) {
+            o.down = false;
+            o.state = 'chase';
+            break;
+          }
+          // the spot: the far side of the car from the suspect, by a wheel (the engine or the axle stops rounds)
+          const cx = o.carPos.x - T.pos.x, cz = o.carPos.z - T.pos.z, cd = Math.hypot(cx, cz) || 1;
+          const sx = -cz / cd * o.side * 1.1, sz = cx / cd * o.side * 1.1;
+          const gx = o.carPos.x + (cx / cd) * 2.1 + sx - o.pos.x, gz = o.carPos.z + (cz / cd) * 2.1 + sz - o.pos.z;
+          const gd = Math.hypot(gx, gz);
+          if (gd > 0.6) {
+            // running to it, low
+            speed = gd > 3 ? 4.6 : 2.2;
+            want.set(gx / gd, 0, gz / gd).multiplyScalar(speed);
+            face = Math.atan2(gx, gz);
+            o.down = false;
+            aiming = false;
+          } else {
+            // down, then up over the hood for a string of shots, then down again
+            if (o.t <= 0) {
+              o.down = !o.down;
+              o.t = o.down ? 1.2 + Math.random() * 1.6 : 1.4 + Math.random() * 1.4;
+            }
+            o.g.crouch = o.down;
+            aiming = !o.down;
+          }
+          break;
+        }
         case 'return': {
           aiming = false;
           if (!o.carPos) {
@@ -259,7 +311,8 @@ export class Officers {
           const acc = THREE.MathUtils.clamp(1 - d / 70, 0.15, 0.95) * (tv > 3 ? 0.55 : 1) * (o.swat ? 1.15 : 1);
           const m = o.g.muzzle(new THREE.Vector3());
           // a miss is aimed off the body: the round goes past
-          const miss = Math.random() > acc * 0.7;
+          // (real-world police hit rates are low: most rounds in a gunfight miss)
+          const miss = Math.random() > acc * (o.swat ? 0.62 : 0.48);
           const aimAt = chest.clone();
           if (miss) aimAt.add(new THREE.Vector3((Math.random() - 0.5) * 3, (Math.random() - 0.2) * 2, (Math.random() - 0.5) * 3));
           this.shots.push({ from: m, to: aimAt, weapon: o.weapon, acc: miss ? 0.3 : 0.95 });
@@ -309,4 +362,8 @@ export class Officers {
   clear() {
     for (const o of [...this.list]) this.remove(o);
   }
+}
+
+function pick<T>(a: T[]): T {
+  return a[Math.floor(Math.random() * a.length)];
 }

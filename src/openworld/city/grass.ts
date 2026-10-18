@@ -110,7 +110,8 @@ float n = gh( floor( wp * 0.35 ) );
 float hgt = aOff.w * ( 0.7 + 0.6 * n ) * on;
 float ca = cos( aOff.z ), sa = sin( aOff.z );
 vec3 p = position;
-p.xz = vec2( p.x * ca - p.z * sa, p.x * sa + p.z * ca ) * ( 0.6 + 0.6 * on );
+// (off the lawn the whole tuft goes to nothing: flattened it would still lie on the paving as a sliver)
+p.xz = vec2( p.x * ca - p.z * sa, p.x * sa + p.z * ca ) * ( 0.6 + 0.6 * on ) * step( 0.02, on );
 p.y *= hgt;
 // the wind: tips bend downwind, gusting
 float gust = 0.6 + 0.4 * sin( uGT * 1.7 + wp.x * 0.21 + wp.y * 0.13 );
@@ -126,7 +127,7 @@ vGTint = mix( vec3( 0.2, 0.3, 0.1 ), vec3( 0.25, 0.34, 0.11 ), n ) * mix( 1.0, 1
       // (both faces lit as the ground is: the blades' normal is the lawn's, whichever side shows)
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>\nnormal = normalize( vNormal );`);
   };
-  mat.customProgramCacheKey = () => 'ow-grass-v3';
+  mat.customProgramCacheKey = () => 'ow-grass-v4';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass';
   mesh.frustumCulled = false;

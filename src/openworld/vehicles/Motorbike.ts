@@ -15,6 +15,7 @@ import type { Drivable, HudInfo, WorldCtx } from './drivable.ts';
  */
 
 const BIKE: CarSpec = {
+  tumble: false,
   mass: 290,
   a: 0.72,
   b: 0.72,

@@ -21,6 +21,8 @@ export class Gunman {
   /** 0 relaxed … 1 aiming (eased) */
   aim = 0;
   aiming = false;
+  /** down behind cover (the crouch clip when still) */
+  crouch = false;
   readonly aimDir = new THREE.Vector3(0, 0, 1);
   /** recoil kick (decays) */
   kick = 0;
@@ -83,6 +85,7 @@ export class Gunman {
     let clip = 'idle', rate = 1;
     if (this.dead >= 0) clip = 'idle';
     else if (!onGround) clip = 'jog';
+    else if (this.crouch && speed < 0.5) clip = 'crouch';
     else if (speed > 4.2) {
       clip = 'run';
       rate = speed / 5.6;

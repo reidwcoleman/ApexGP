@@ -239,8 +239,8 @@ export class Hud {
   }
 
   /** a line of police radio */
-  radio(text: string) {
-    this.radioEl.innerHTML = `<span class="r-tag">DISPATCH</span> ${text}`;
+  radio(text: string, tag = 'DISPATCH') {
+    this.radioEl.innerHTML = `<span class="r-tag">${tag}</span> ${text}`;
     this.radioT = 4.5;
   }
 

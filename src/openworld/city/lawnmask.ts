@@ -44,7 +44,15 @@ export function buildLawnMask(net: Network, bld: BuildingsBuild, beachX: (z: num
       for (let s = 0; s <= n; s++) clearDisc(ax + ((bx - ax) * s) / n, az + ((bz - az) * s) / n, r);
     }
   }
-  for (const nd of net.nodes) clearDisc(nd.x, nd.z, 14);
+  // the junctions: as wide as the widest road into them, with its sidewalks and the corner fillets
+  for (const nd of net.nodes) {
+    let r = 14;
+    for (const id of nd.edges) {
+      const e = net.edges[id];
+      r = Math.max(r, e.hw + e.spec.sidewalk + 6);
+    }
+    clearDisc(nd.x, nd.z, r);
+  }
   // a triangle (xz) cleared
   const clearTri = (ax: number, az: number, bx: number, bz: number, cx: number, cz: number) => {
     const i0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - WORLD.x0) / C)), i1 = Math.min(W - 1, Math.floor((Math.max(ax, bx, cx) - WORLD.x0) / C));
@@ -86,7 +94,14 @@ export function buildLawnMask(net: Network, bld: BuildingsBuild, beachX: (z: num
     },
     texture() {
       if (tex) return tex;
-      tex = new THREE.DataTexture(data, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+      // (eroded a cell for the blades: the linear filter would bleed them a cell onto the paving)
+      const er = new Uint8Array(W * H);
+      for (let j = 1; j < H - 1; j++)
+        for (let i = 1; i < W - 1; i++) {
+          const k = j * W + i;
+          er[k] = data[k] && data[k - 1] && data[k + 1] && data[k - W] && data[k + W] ? 255 : 0;
+        }
+      tex = new THREE.DataTexture(er, W, H, THREE.RedFormat, THREE.UnsignedByteType);
       tex.magFilter = THREE.LinearFilter;
       tex.minFilter = THREE.LinearFilter;
       tex.needsUpdate = true;

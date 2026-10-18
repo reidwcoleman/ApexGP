@@ -14,6 +14,14 @@ import { weatherUniforms } from '../../world/weatherUniforms.ts';
  * braking and to the rear under power. The motor is power-limited (P / v) and traction-limited
  * with a traction control; the handbrake locks the rears for a drift. Aero: drag and downforce
  * (the Roadster's suction fan adds a fixed downforce from standstill).
+ *
+ * Rollover: the planar model can't tip, so a car that trips (sliding sideways into a curb), takes a
+ * blast or a big side hit, or is in the air for a while switches to a full rigid body ("free"): a
+ * box with the car's inertia, its orientation q and angular velocity w, sprung wheels (grip across
+ * the tread only, so a sideways slide over grippy tyres rolls it), body points on the sills, the
+ * belt line and the roof that dig in and scrape, the walls as 3D impulses. It hands back to the
+ * planar model once it sits on its wheels again; on its roof or side it stays there (overturned)
+ * until autoRight (the player's car) rights it.
  */
 
 export interface CarSpec {
@@ -46,6 +54,8 @@ export interface CarSpec {
   vmax: number;
   /** reverse limit (m/s) */
   vrev: number;
+  /** false: never goes into the rigid-body tumble (the bike) */
+  tumble?: boolean;
 }
 
 export const ROADSTER_SPEC: CarSpec = {
@@ -82,6 +92,19 @@ export interface CarInput {
 }
 
 const G = 9.81;
+/** the tyres' static compression in the rigid-body mode (m) */
+const SAG = 0.08;
+const EU = new THREE.Euler();
+const QI = new THREE.Quaternion();
+const V1 = new THREE.Vector3();
+const V2 = new THREE.Vector3();
+const V3 = new THREE.Vector3();
+const V4 = new THREE.Vector3();
+const VF = new THREE.Vector3();
+const VT = new THREE.Vector3();
+const AX = new THREE.Vector3();
+const AZ = new THREE.Vector3();
+const UP = new THREE.Vector3();
 
 export class CarBody {
   readonly pos = new THREE.Vector3();
@@ -121,8 +144,52 @@ export class CarBody {
   stability = 1;
   private contacts: Contact[] = [];
   private s2 = makeSurf();
+  /** rigid-body mode (see the top): orientation, angular velocity (world), centre of mass */
+  free = false;
+  /** resting on its roof or side */
+  overturned = false;
+  /** the player's car: rights itself after a moment overturned */
+  autoRight = false;
+  /** burst tyres (bits: 1 front-left, 2 front-right, 4 rear-left, 8 rear-right) and the ones that just went */
+  flats = 0;
+  popped = 0;
+  readonly q = new THREE.Quaternion();
+  readonly w = new THREE.Vector3();
+  readonly com = new THREE.Vector3();
+  private readonly vel = new THREE.Vector3();
+  private freeT = 0;
+  private restT = 0;
+  private rightT = -1;
+  private wheelsDown = 0;
+  private readonly q0 = new THREE.Quaternion();
+  private readonly pts: { x: number; y: number; z: number; wheel: boolean }[];
+  private readonly iInv: THREE.Vector3;
+  private readonly h0: number;
 
-  constructor(public spec: CarSpec) {}
+  constructor(public spec: CarSpec) {
+    const S = spec;
+    this.h0 = S.cgH;
+    const W = 2 * S.hw, L = 2 * S.hl, H = S.height;
+    // a box's inertia (local x across, y up, z along)
+    this.iInv = new THREE.Vector3(12 / (S.mass * (H * H + L * L)), 12 / (S.mass * (W * W + L * L)), 12 / (S.mass * (W * W + H * H)));
+    const y0 = -this.h0, yt = H - this.h0;
+    const tw = S.hw - 0.12;
+    this.pts = [
+      // the tyres' contact patches (sitting SAG below the hub line: the static compression)
+      { x: tw, y: y0 - SAG, z: S.a, wheel: true },
+      { x: -tw, y: y0 - SAG, z: S.a, wheel: true },
+      { x: tw, y: y0 - SAG, z: -S.b, wheel: true },
+      { x: -tw, y: y0 - SAG, z: -S.b, wheel: true },
+    ];
+    // the sills and bumpers, the belt line, the roof
+    for (const sx of [1, -1])
+      for (const sz of [1, -1]) {
+        // (the sills tuck in under the doors: the body is widest at the belt)
+        this.pts.push({ x: sx * S.hw * 0.84, y: y0 + 0.28, z: sz * S.hl, wheel: false });
+        this.pts.push({ x: sx * S.hw, y: y0 + H * 0.6, z: sz * S.hl * 0.92, wheel: false });
+        this.pts.push({ x: sx * S.hw * 0.72, y: yt, z: sz * S.hl * 0.42, wheel: false });
+      }
+  }
 
   get speed() {
     return Math.hypot(this.vx, this.vz);
@@ -139,6 +206,103 @@ export class CarBody {
     this.pitch = this.roll = this.pitchV = this.rollV = 0;
     this.onGround = true;
     this.inWater = false;
+    this.free = this.overturned = false;
+    this.rightT = -1;
+    this.flats = this.popped = 0;
+  }
+
+  /** placed with a tilt (an Euler YXZ as the fleet draws it): a parked car left on its roof stays there */
+  placeTilted(x: number, y: number, z: number, pitch: number, yaw: number, roll: number) {
+    this.place(x, y, z, yaw);
+    if (Math.abs(pitch) < 0.25 && Math.abs(roll) < 0.25) return;
+    this.q.setFromEuler(EU.set(pitch, yaw, roll, 'YXZ'));
+    this.com.set(0, this.h0, 0).applyQuaternion(this.q).add(this.pos);
+    this.vel.set(0, 0, 0);
+    this.w.set(0, 0, 0);
+    this.free = true;
+    this.freeT = 1;
+    this.restT = 1;
+    this.overturned = true;
+  }
+
+  /** an impulse (N·s) at a world point: a blast, a ram. It goes into the rigid body (the tumble) */
+  kick(jx: number, jy: number, jz: number, px: number, py: number, pz: number) {
+    if (this.spec.tumble === false) {
+      this.vx += jx / this.spec.mass;
+      this.vz += jz / this.spec.mass;
+      this.vy = Math.max(this.vy, jy / this.spec.mass);
+      return;
+    }
+    this.enterFree();
+    this.impulse(V1.set(jx, jy, jz), px, py, pz);
+    this.sync();
+  }
+
+  /** tyres gone (a spike strip, a bullet): the bits of the ones that weren't flat already */
+  burst(mask: number) {
+    const fresh = mask & ~this.flats;
+    this.flats |= fresh;
+    this.popped |= fresh;
+    return fresh;
+  }
+
+  /** a velocity change (m/s) from a hit at a world point (x, z): the off-centre part spins it */
+  shove(dvx: number, dvz: number, px: number, pz: number) {
+    if (this.free) {
+      const m = this.spec.mass;
+      this.impulse(V1.set(dvx * m, 0, dvz * m), px, this.com.y, pz);
+      this.sync();
+      return;
+    }
+    this.vx += dvx;
+    this.vz += dvz;
+    const S = this.spec;
+    const rx = px - this.pos.x, rz = pz - this.pos.z;
+    const Iz = S.izK * S.mass * S.a * S.b;
+    this.yawRate += ((rz * dvx - rx * dvz) * S.mass) / Iz;
+  }
+
+  private enterFree() {
+    if (this.free) return;
+    this.free = true;
+    this.overturned = false;
+    this.freeT = 0;
+    this.restT = 0;
+    this.rightT = -1;
+    this.q.setFromEuler(EU.set(-this.groundPitch + this.pitch, this.yaw, this.groundRoll - this.roll, 'YXZ'));
+    this.com.set(0, this.h0, 0).applyQuaternion(this.q).add(this.pos);
+    this.vel.set(this.vx, this.vy, this.vz);
+    this.w.set(this.pitchV, 0, -this.rollV).applyQuaternion(this.q);
+    this.w.y += this.yawRate;
+  }
+
+  /** the world inverse inertia applied to v (in place) */
+  private invI(v: THREE.Vector3) {
+    QI.copy(this.q).invert();
+    v.applyQuaternion(QI).multiply(this.iInv).applyQuaternion(this.q);
+    return v;
+  }
+
+  /** an impulse j at world point p on the rigid body */
+  private impulse(j: THREE.Vector3, px: number, py: number, pz: number) {
+    const m = this.spec.mass;
+    this.vel.addScaledVector(j, 1 / m);
+    V2.set(px - this.com.x, py - this.com.y, pz - this.com.z).cross(j);
+    this.w.add(this.invI(V2));
+  }
+
+  /** the planar state (pos at the wheels' ground point, yaw, the tilt as groundPitch / groundRoll) from the rigid body */
+  private sync() {
+    EU.setFromQuaternion(this.q, 'YXZ');
+    this.yaw = EU.y;
+    this.groundPitch = -EU.x;
+    this.groundRoll = EU.z;
+    this.pitch = this.roll = this.pitchV = this.rollV = 0;
+    this.pos.set(0, -this.h0, 0).applyQuaternion(this.q).add(this.com);
+    this.vx = this.vel.x;
+    this.vz = this.vel.z;
+    this.vy = this.vel.y;
+    this.yawRate = this.w.y;
   }
 
   step(dt: number, inp: CarInput, net: Network, world: CollisionWorld) {
@@ -147,7 +311,18 @@ export class CarBody {
     this.impactSolid = null;
     const n = Math.max(1, Math.ceil(dt / (1 / 120)));
     const h = dt / n;
-    for (let i = 0; i < n; i++) this.sub(h, inp, net, world);
+    if (this.free) {
+      this.freeStep(dt, n, inp, net, world);
+      return;
+    }
+    for (let i = 0; i < n; i++) {
+      this.sub(h, inp, net, world);
+      if (this.free) {
+        // it tripped / took off for good: the rest of the frame as a rigid body
+        this.freeStep(h * (n - i - 1), n - i - 1, inp, net, world);
+        return;
+      }
+    }
     // the look: body pitch/roll springs toward the load transfer
     const kp = 0.0042, kr = 0.0058;
     const tp = THREE.MathUtils.clamp(-this.ax * kp, -0.06, 0.06);
@@ -208,8 +383,46 @@ export class CarBody {
       this.onGround = true;
       this.airTime = 0;
     }
-    this.groundPitch += (slopeP - this.groundPitch) * Math.min(1, dt * 20);
-    this.groundRoll += (slopeR - this.groundRoll) * Math.min(1, dt * 20);
+    // (in the air it keeps the attitude it took off with)
+    if (this.onGround) {
+      this.groundPitch += (slopeP - this.groundPitch) * Math.min(1, dt * 20);
+      this.groundRoll += (slopeR - this.groundRoll) * Math.min(1, dt * 20);
+    }
+    if (this.spec.tumble !== false && !surf.water) {
+      // a long flight: the rigid body takes it (it lands nose- or tail-first, as it left the ramp)
+      if (!this.onGround && this.airTime > 0.3) {
+        this.enterFree();
+        return;
+      }
+      // the trip: sliding sideways into a curb at speed, the tyres catch it and the body goes over
+      if (this.onGround && Math.abs(vT) > 5.5) {
+        const side = Math.sign(vT);
+        const kx = this.pos.x + cy * side * (S.hw + 0.2), kz = this.pos.z - sy * side * (S.hw + 0.2);
+        const ks = net.surface(kx, kz, this.pos.y + 0.6, this.s2);
+        const rise = ks.y - gy;
+        if (ks.sidewalk && !surf.sidewalk && rise > 0.1 && rise < 0.5) {
+          this.enterFree();
+          // the curb face stops the lower edge: the impulse that kills its sideways speed (less the
+          // tyre's give) — both a shove and a roll, the rigid body decides whether it goes over
+          const ex = this.pos.x + cy * side * S.hw * 0.9, ez = this.pos.z - sy * side * S.hw * 0.9, ey = gy + 0.12;
+          const nx = -cy * side, nz = sy * side;
+          const rx = ex - this.com.x, ry = ey - this.com.y, rz = ez - this.com.z;
+          V3.set(rx, ry, rz);
+          const vpn = (this.vel.x + this.w.y * rz - this.w.z * ry) * nx + (this.vel.z + this.w.x * ry - this.w.y * rx) * nz;
+          if (vpn < 0) {
+            V2.set(nx, 0, nz);
+            V4.copy(V3).cross(V2);
+            this.invI(V4).cross(V3);
+            const k = 1 / S.mass + V4.dot(V2);
+            const j = (-vpn / k) * 0.72;
+            this.impulse(V1.set(nx * j, 0, nz * j), ex, ey, ez);
+            this.impact = Math.max(this.impact, -vpn * 0.6);
+          }
+          this.sync();
+          return;
+        }
+      }
+    }
     // water: the car goes in
     this.inWater = surf.water && this.pos.y < WATER_Y + 0.4;
     // ---- steering: speed-sensitive lock, a quick but not instant rack
@@ -229,6 +442,10 @@ export class CarBody {
       Fzf = Math.max(Fzf, 0.15 * Fz);
       Fzr = Math.max(Fzr, 0.15 * Fz);
       const mu = S.mu * (surf.sidewalk ? 0.95 : 1) * (1 - 0.3 * weatherUniforms.uWetness.value);
+      // flat tyres: a rim on the road grips a third as well, drags, and pulls toward its side
+      const fl = this.flats;
+      const nF = (fl & 1) + ((fl >> 1) & 1), nR = ((fl >> 2) & 1) + ((fl >> 3) & 1);
+      const muF = mu * (1 - 0.33 * nF), muR = mu * (1 - 0.33 * nR);
       // drive: reverse when braking from (near) standstill, D otherwise
       if (vL < 0.6 && inp.brake > 0.1 && inp.throttle < 0.05) this.reverse = true;
       if (inp.throttle > 0.1 && vL > -0.6) this.reverse = false;
@@ -242,14 +459,14 @@ export class CarBody {
       let Fdf = drive * S.frontDrive;
       let Fdr = drive * (1 - S.frontDrive);
       // traction control: never more than the tyres take
-      const tcF = mu * Fzf * 0.98, tcR = mu * Fzr * 0.98;
+      const tcF = muF * Fzf * 0.98, tcR = muR * Fzr * 0.98;
       Fdf = THREE.MathUtils.clamp(Fdf, -tcF, tcF);
       if (!inp.handbrake) Fdr = THREE.MathUtils.clamp(Fdr, -tcR, tcR * (1.04 - 0.1 * this.stability));
       // brakes (with ABS): 60 / 40
       const bF = brake * S.brakeG * m * G;
-      let Bf = Math.min(bF * 0.6, mu * Fzf) * Math.sign(vL);
-      let Br = Math.min(bF * 0.4, mu * Fzr) * Math.sign(vL);
-      if (inp.handbrake) Br = Math.min(mu * Fzr * 0.8, bF * 0.4 + m * G * 0.6) * Math.sign(vL);
+      let Bf = Math.min(bF * 0.6, muF * Fzf) * Math.sign(vL);
+      let Br = Math.min(bF * 0.4, muR * Fzr) * Math.sign(vL);
+      if (inp.handbrake) Br = Math.min(muR * Fzr * 0.8, bF * 0.4 + m * G * 0.6) * Math.sign(vL);
       if (Math.abs(vL) < 0.3) {
         Bf *= Math.abs(vL) / 0.3;
         Br *= Math.abs(vL) / 0.3;
@@ -261,12 +478,12 @@ export class CarBody {
       const af = Math.atan2(vT + S.a * this.yawRate, vlat) - this.steer * Math.sign(vL || 1);
       const ar = Math.atan2(vT - S.b * this.yawRate, vlat);
       const lat = (alpha: number, Fz: number, Fx: number, grip: number) => {
-        const max = Math.sqrt(Math.max(0, (mu * Fz * grip) ** 2 - Fx * Fx));
+        const max = Math.sqrt(Math.max(0, (grip * Fz) ** 2 - Fx * Fx));
         return -max * Math.sin(1.6 * Math.atan(S.cornerB * alpha));
       };
       const rearGrip = inp.handbrake ? 0.38 : 1;
-      let Fyf = lat(af, Fzf, FxF, 1);
-      let Fyr = lat(ar, Fzr, FxR, rearGrip);
+      let Fyf = lat(af, Fzf, FxF, muF);
+      let Fyr = lat(ar, Fzr, FxR, muR * rearGrip);
       // at walking pace the slip angles mean nothing: blend to a kinematic turn
       const kin = 1 - THREE.MathUtils.smoothstep(speed, 1.2, 4.5);
       this.slip = THREE.MathUtils.clamp((Math.max(Math.abs(af), Math.abs(ar)) - 0.08) * 6 + (inp.handbrake && speed > 5 ? 0.6 : 0), 0, 1.5) * (1 - kin);
@@ -276,10 +493,17 @@ export class CarBody {
       FT = Fyf * cs + FxF * sn + Fyr;
       Mz = S.a * (Fyf * cs + FxF * sn) - S.b * Fyr;
       // aero drag and rolling
-      const drag = 0.5 * 1.2 * S.cdA * speed * speed + 0.012 * m * G;
+      const nFlat = nF + nR;
+      // (a rim chewing up the road: its drag grows with speed — you won't get far or fast on them)
+      const drag = 0.5 * 1.2 * S.cdA * speed * speed + (0.012 + (0.035 + 0.004 * speed) * nFlat) * m * G;
       if (speed > 0.01) {
         FL -= (drag * vL) / speed;
         FT -= (drag * vT) / speed;
+      }
+      // a flat's drag on one side: a yaw toward it
+      if (fl) {
+        const pull = ((fl & 1) + ((fl >> 2) & 1) - ((fl >> 1) & 1) - ((fl >> 3) & 1)) * 0.035 * m * G * S.hw * Math.sign(vL) * Math.min(1, speed / 4);
+        Mz += pull;
       }
       // gravity along the slope
       FL -= m * G * Math.sin(this.groundPitch);
@@ -331,6 +555,178 @@ export class CarBody {
     this.spin += (vL / S.wheelR) * dt;
     // ---- collisions
     this.collide(dt, net, world);
+  }
+
+  // ---- the rigid body
+  private freeStep(dt: number, n: number, inp: CarInput, net: Network, world: CollisionWorld) {
+    if (n > 0) {
+      const h = dt / n;
+      if (this.rightT >= 0) this.righting(dt, net);
+      else for (let i = 0; i < n; i++) this.freeSub(h, inp, net, world);
+    }
+    this.freeT += dt;
+    this.sync();
+    if (!this.free) return;
+    UP.set(0, 1, 0).applyQuaternion(this.q);
+    const spin = Math.hypot(this.w.x, this.w.z);
+    this.slip = this.wheelsDown > 0 && this.vel.length() > 3 ? 0.8 : 0;
+    this.onGround = this.wheelsDown > 0;
+    this.airTime = this.onGround ? 0 : this.airTime + dt;
+    // back on its wheels: the planar model again
+    if (this.rightT < 0 && this.freeT > 0.2 && UP.y > 0.86 && this.wheelsDown >= 3 && spin < 1.1 && Math.abs(this.vel.y) < 2.5) {
+      this.land();
+      return;
+    }
+    // at rest on its roof or side
+    if (UP.y < 0.6 && this.vel.length() < 0.7 && this.w.length() < 0.6) this.restT += dt;
+    else this.restT = 0;
+    this.overturned = this.restT > 0.6;
+    if (this.overturned && this.autoRight && this.restT > 2.2 && this.rightT < 0) {
+      this.rightT = 0;
+      this.q0.copy(this.q);
+    }
+  }
+
+  private land() {
+    this.free = false;
+    this.overturned = false;
+    this.rightT = -1;
+    this.onGround = true;
+    this.airTime = 0;
+    this.vy = 0;
+    this.yawRate = this.w.y;
+    this.pos.y = this.groundY = Math.max(this.groundY, this.pos.y);
+  }
+
+  /** the player's car back onto its wheels: lifted and turned upright over a second */
+  private righting(dt: number, net: Network) {
+    this.rightT = Math.min(1, this.rightT + dt / 1.1);
+    const k = this.rightT, e = k * k * (3 - 2 * k);
+    // facing: the yaw of its forward axis (or of its up axis, nose-down)
+    VF.set(0, 0, 1).applyQuaternion(this.q0);
+    const yaw = Math.hypot(VF.x, VF.z) > 0.3 ? Math.atan2(VF.x, VF.z) : Math.atan2(-UP.set(0, 1, 0).applyQuaternion(this.q0).x, -UP.z);
+    QI.setFromEuler(EU.set(0, yaw, 0, 'YXZ'));
+    this.q.slerpQuaternions(this.q0, QI, e);
+    const gy = net.surface(this.com.x, this.com.z, this.com.y + 0.5, this.s2).y;
+    this.com.y = gy + this.h0 + Math.sin(Math.PI * k) * 0.9 + (1 - k) * 0.2;
+    this.vel.set(0, 0, 0);
+    this.w.set(0, 0, 0);
+    if (k >= 1) {
+      this.sync();
+      this.pos.y = gy;
+      this.groundY = gy;
+      this.land();
+    }
+  }
+
+  private freeSub(dt: number, inp: CarInput, net: Network, world: CollisionWorld) {
+    const S = this.spec, m = S.mass, q = this.q, c = this.com, v = this.vel, w = this.w;
+    const surf = net.surface(c.x, c.z, c.y + 0.3, this.surf);
+    this.inWater = surf.water && c.y < WATER_Y + 0.6;
+    this.groundY = surf.water ? WATER_Y - 4 : surf.y;
+    const F = V1.set(0, -m * G, 0);
+    const T = V2.set(0, 0, 0);
+    const sp = v.length();
+    F.addScaledVector(v, -0.6 * S.cdA * sp);
+    AX.set(1, 0, 0).applyQuaternion(q);
+    AZ.set(0, 0, 1).applyQuaternion(q);
+    F.addScaledVector(AZ, inp.thrust);
+    let wheels = 0;
+    const kw = (m * G) / (4 * SAG), cw = 0.9 * Math.sqrt(kw * m * 0.25);
+    const kb = m * 60, cb = 1.3 * Math.sqrt(kb * m * 0.25);
+    const fCap = (m * 0.25) / dt;
+    for (const p of this.pts) {
+      V3.set(p.x, p.y, p.z).applyQuaternion(q);
+      const px = c.x + V3.x, py = c.y + V3.y, pz = c.z + V3.z;
+      if (py > this.groundY + 1.6) continue;
+      const g = net.surface(px, pz, py + 0.5, this.s2);
+      const gy = g.water ? WATER_Y - 4 : g.y;
+      const pen = Math.min(gy - py, 0.3);
+      if (pen <= 0) continue;
+      // the point's velocity: v + w × r
+      VT.copy(w).cross(V3).add(v);
+      let fn: number;
+      if (p.wheel) {
+        wheels++;
+        fn = Math.max(0, kw * pen - cw * VT.y);
+        // grip across the tread (a rolling tyre gives nothing along it but the brakes)
+        const lx = AX.x, lz = AX.z, ll = Math.hypot(lx, lz) || 1;
+        const vl = (VT.x * lx + VT.z * lz) / ll;
+        const fl = THREE.MathUtils.clamp(-vl * fCap * 0.5, -S.mu * 0.9 * fn, S.mu * 0.9 * fn);
+        const fx = AZ.x, fz = AZ.z, fll = Math.hypot(fx, fz) || 1;
+        const vf = (VT.x * fx + VT.z * fz) / fll;
+        const fb = THREE.MathUtils.clamp(-vf * fCap * 0.5, -(0.015 + 0.8 * Math.max(inp.brake, inp.handbrake ? 0.6 : 0)) * fn, (0.015 + 0.8 * Math.max(inp.brake, inp.handbrake ? 0.6 : 0)) * fn);
+        VF.set((fl * lx) / ll + (fb * fx) / fll, fn, (fl * lz) / ll + (fb * fz) / fll);
+      } else {
+        fn = Math.max(0, kb * pen - cb * VT.y);
+        if (VT.y < -3) this.impact = Math.max(this.impact, -VT.y * 0.5);
+        // metal on the road: it scrapes
+        const vt = Math.hypot(VT.x, VT.z);
+        const ft = vt > 1e-3 ? Math.min(0.55 * fn, (vt * fCap * 0.5)) / vt : 0;
+        VF.set(-VT.x * ft, fn, -VT.z * ft);
+      }
+      F.add(VF);
+      T.add(V4.copy(V3).cross(VF));
+    }
+    if (wheels > 0 && S.fan > 0) F.y -= S.fan;
+    this.wheelsDown = wheels;
+    v.addScaledVector(F, dt / m);
+    w.addScaledVector(this.invI(T), dt);
+    // the air and the body's own damping
+    w.multiplyScalar(1 - Math.min(1, dt * 0.25));
+    if (this.inWater) {
+      v.multiplyScalar(1 - Math.min(1, dt * 1.5));
+      v.y = Math.max(v.y, -1.5);
+      w.multiplyScalar(1 - Math.min(1, dt * 2));
+    }
+    c.addScaledVector(v, dt);
+    // orientation: q += ½ (0, w) q dt
+    QI.set(w.x, w.y, w.z, 0).multiply(q);
+    q.set(q.x + QI.x * 0.5 * dt, q.y + QI.y * 0.5 * dt, q.z + QI.z * 0.5 * dt, q.w + QI.w * 0.5 * dt).normalize();
+    // ---- the walls: the planar box at the body's height, resolved as 3D impulses
+    EU.setFromQuaternion(q, 'YXZ');
+    const C = world.boxContacts(c.x, c.z, EU.y, S.hl, S.hw, c.y - 0.35, c.y + 0.6, this.contacts);
+    for (const k of C) {
+      this.wall(k.nx, k.nz, k.depth, k.px, c.y, k.pz, k.solid.kind === 'palm' || k.solid.kind === 'pole' ? 0.15 : 0.25);
+      if (this.lastImpact > this.impact) {
+        this.impact = this.lastImpact;
+        this.impactSolid = k.solid;
+      }
+    }
+    if (surf.edge >= 0) {
+      const e = net.edges[surf.edge];
+      const elevated = e.elevated || e.kind === 'causeway' || e.kind === 'highway' || e.kind === 'ramp' || e.water.some((x) => x);
+      if (elevated && c.y > 0.9 && c.y < surf.y + 2.2) {
+        const lim = e.hw + (e.spec.sidewalk > 0 ? e.spec.sidewalk : 0) - S.hw * 0.9;
+        if (Math.abs(surf.lat) > lim) {
+          const side = Math.sign(surf.lat);
+          this.wall(surf.tz * side, -surf.tx * side, Math.abs(surf.lat) - lim, c.x, c.y, c.z, 0.2);
+          if (this.lastImpact > this.impact) this.impact = this.lastImpact;
+        }
+      }
+    }
+  }
+
+  /** the rigid body against a wall: push out, an impulse at the contact (with the lever arm, in 3D), scrape */
+  private wall(nx: number, nz: number, depth: number, px: number, py: number, pz: number, rest: number) {
+    this.lastImpact = 0;
+    const c = this.com, m = this.spec.mass;
+    c.x += nx * depth;
+    c.z += nz * depth;
+    V3.set(px - c.x, py - c.y, pz - c.z);
+    VT.copy(this.w).cross(V3).add(this.vel);
+    const vn = VT.x * nx + VT.z * nz;
+    if (vn >= 0) return;
+    this.lastImpact = -vn;
+    VF.set(nx, 0, nz);
+    V4.copy(V3).cross(VF);
+    this.invI(V4).cross(V3);
+    const j = (-(1 + rest) * vn) / (1 / m + V4.dot(VF));
+    // scrape along the wall
+    const tx = -nz, tz = nx;
+    const vt = VT.x * tx + VT.z * tz;
+    const fr = Math.min(Math.abs(vt) * m * 0.5, j * 0.35) * Math.sign(vt);
+    this.impulse(VF.set(nx * j - tx * fr, 0, nz * j - tz * fr), px, py, pz);
   }
 
   private collide(dt: number, net: Network, world: CollisionWorld) {

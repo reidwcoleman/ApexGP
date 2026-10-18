@@ -25,7 +25,7 @@ export class RoadsterCar implements Drivable {
   readonly kind = 'roadster' as const;
   name = 'Tesla Roadster';
   readonly rig: RoadsterRig;
-  readonly car = new CarBody(ROADSTER_SPEC);
+  readonly car = Object.assign(new CarBody(ROADSTER_SPEC), { autoRight: true });
   readonly root: THREE.Group;
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
@@ -122,6 +122,7 @@ export class RoadsterCar implements Drivable {
   private liftOff() {
     this.flying = true;
     const c = this.car;
+    c.free = c.overturned = false;
     this.q.setFromEuler(new THREE.Euler(-c.groundPitch, c.yaw, c.groundRoll, 'YXZ'));
     this.fv.set(c.vx, Math.max(c.vy, 2.5), c.vz);
     this.w.set(0, 0, 0);
@@ -232,6 +233,7 @@ export class RoadsterCar implements Drivable {
   private land(gy: number) {
     const c = this.car;
     this.flying = false;
+    c.free = c.overturned = false;
     c.pos.y = gy;
     c.vy = 0;
     c.yawRate = 0;
