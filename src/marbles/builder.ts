@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Kin, Mat, World, RADIUS } from './physics.ts';
+import { Kin, Mat, World, RADIUS, type Shape } from './physics.ts';
 import { paintMaterial, Pattern, SPECIES, woodAttr, woodMaterial, type PaintSpec, type WoodSpecies } from './shaders.ts';
 
 /**
@@ -20,6 +20,8 @@ export interface Sect {
   /** banking (rad, + lifts the left side: for a right-hand turn) */
   bank: number;
   floor: boolean;
+  /** false: the walls and fillets stay but the flat of the floor is left out (a roller bed fills it) */
+  deck: boolean;
 }
 
 export interface Cmd {
@@ -35,8 +37,14 @@ export interface Cmd {
   /** bank (deg); default: from the turn */
   bank?: number;
   floor?: boolean;
+  /** false: no flat floor between the fillets (rollers or a machine bed go there) */
+  deck?: boolean;
   /** metres over which the width eases to its new value */
   easeW?: number;
+  /** metres over which the slope eases to its new value (default 5; small: a sharp step down) */
+  easeS?: number;
+  /** metres over which the turn rate eases (default 3) */
+  easeT?: number;
   /** a tag at this command's start (obstacles are placed from them) */
   tag?: string;
 }
@@ -73,16 +81,16 @@ export class Path {
       last = { w: tW, wl: tWl, wr: tWr };
       const autoBank = THREE.MathUtils.clamp(-tRate * 14, -0.42, 0.42);
       const tBank = c.bank !== undefined ? THREE.MathUtils.degToRad(c.bank) : autoBank;
-      const easeW = c.easeW ?? 3;
+      const easeW = c.easeW ?? 3, easeS = c.easeS ?? 5, easeT = c.easeT ?? 3;
       const n = Math.max(1, Math.round(c.len / DS));
       for (let i = 0; i < n; i++) {
-        slope += (tSlope - slope) * Math.min(1, DS / 5);
-        rate += (tRate - rate) * Math.min(1, DS / 3);
+        slope += (tSlope - slope) * Math.min(1, DS / easeS);
+        rate += (tRate - rate) * Math.min(1, DS / easeT);
         bank += (tBank - bank) * Math.min(1, DS / 5);
         w += (tW - w) * Math.min(1, DS / easeW);
         wl += (tWl - wl) * Math.min(1, DS / 1.5);
         wr += (tWr - wr) * Math.min(1, DS / 1.5);
-        this.push(p, h, slope, bank, { w, wallL: wl, wallR: wr, bank, floor: c.floor !== false });
+        this.push(p, h, slope, bank, { w, wallL: wl, wallR: wr, bank, floor: c.floor !== false, deck: c.deck !== false });
         h += rate * DS;
         p.x += Math.sin(h) * Math.cos(slope) * DS;
         p.z += Math.cos(h) * Math.cos(slope) * DS;
@@ -115,6 +123,31 @@ export class Path {
 
   get count() {
     return this.P.length;
+  }
+
+  /**
+   * A lane alongside another path between s0 and s1, `lat` m right of its centre line, sharing its
+   * frames (so it bends and banks with it): the two sides of a split. `sect` shapes it along the way.
+   */
+  static lane(main: Path, s0: number, s1: number, lat: (s: number) => number, sect: (s: number) => Partial<Sect>) {
+    const p = new Path(main.P[0].clone(), 0, [{ len: DS }]);
+    for (const a of [p.P, p.T, p.U, p.Rt, p.sec]) a.length = 0;
+    const i0 = main.index(s0), i1 = main.index(s1);
+    for (let i = i0; i <= i1; i++) {
+      const s = i * DS;
+      const l = lat(s);
+      // (a lane that moves sideways leans its tangent with it)
+      const dl = (lat(s + DS) - lat(s - DS)) / (2 * DS);
+      const T = main.T[i].clone().addScaledVector(main.Rt[i], dl).normalize();
+      const Rt = new THREE.Vector3().crossVectors(T, main.U[i]).normalize();
+      p.P.push(main.P[i].clone().addScaledVector(main.Rt[i], l));
+      p.T.push(T);
+      p.U.push(main.U[i].clone());
+      p.Rt.push(Rt);
+      p.sec.push({ w: 4, wallL: 1, wallR: 1, bank: main.sec[i].bank, floor: true, deck: true, ...sect(s) });
+    }
+    p.length = (p.P.length - 1) * DS;
+    return p;
   }
   index(s: number) {
     return THREE.MathUtils.clamp(Math.round(s / DS), 0, this.P.length - 1);
@@ -155,29 +188,58 @@ export class Path {
 }
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** collects meshes by material, then merges them */
+/**
+ * Collects meshes by material and by where they are (cells of CELL m), then merges each lot: a few
+ * draw calls, and the parts of a long course out of view (or out of the sun's shadow box) are culled.
+ */
+const CELL = 64;
 class Batch {
-  readonly parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  readonly parts = new Map<THREE.Material, Map<string, THREE.BufferGeometry[]>>();
   add(m: THREE.Material, g: THREE.BufferGeometry) {
-    let l = this.parts.get(m);
-    if (!l) this.parts.set(m, (l = []));
+    let cells = this.parts.get(m);
+    if (!cells) this.parts.set(m, (cells = new Map()));
+    // (its cell: where its first and last vertices are, which is near enough)
+    const p = g.getAttribute('position');
+    const x = (p.getX(0) + p.getX(p.count - 1)) / 2, z = (p.getZ(0) + p.getZ(p.count - 1)) / 2;
+    const k = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+    let l = cells.get(k);
+    if (!l) cells.set(k, (l = []));
     l.push(g);
   }
   flush(group: THREE.Group, cast = true) {
-    for (const [m, gs] of this.parts) {
-      const norm = gs.map((g) => (g.index ? g.toNonIndexed() : g));
-      for (const g of norm) {
-        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'aWood') g.deleteAttribute(k);
+    for (const [m, cells] of this.parts) {
+      for (const gs of cells.values()) {
+        const merged = mergeAll(gs);
+        if (!merged) continue;
+        merged.computeBoundingSphere();
+        const mesh = new THREE.Mesh(merged, m);
+        mesh.castShadow = cast;
+        mesh.receiveShadow = true;
+        group.add(mesh);
       }
-      const merged = mergeGeometries(norm, false);
-      if (!merged) continue;
-      const mesh = new THREE.Mesh(merged, m);
-      mesh.castShadow = cast;
-      mesh.receiveShadow = true;
-      group.add(mesh);
     }
     this.parts.clear();
   }
+}
+
+/**
+ * Merges geometries that may differ in attributes and indexing: keeps position, normal and aWood
+ * (filling what's missing) and indexes the unindexed ones (cheaper than un-indexing the rest).
+ */
+export function mergeAll(gs: THREE.BufferGeometry[]) {
+  if (!gs.length) return null;
+  for (const g of gs) {
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'aWood') g.deleteAttribute(k);
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
+    const n = g.getAttribute('position').count;
+    if (!g.getAttribute('aWood')) g.setAttribute('aWood', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    if (!g.index) {
+      const idx = n > 65535 ? new Uint32Array(n) : new Uint16Array(n);
+      for (let i = 0; i < n; i++) idx[i] = i;
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+    }
+  }
+  return mergeGeometries(gs, false);
 }
 
 export interface Obstacle {
@@ -196,6 +258,13 @@ export class CourseBuilder {
   readonly railWood = woodMaterial(SPECIES.walnut, 0.8);
   readonly postWood = woodMaterial(SPECIES.pine, 0.2);
   readonly darkWood = woodMaterial(SPECIES.cherry, 0.8);
+  /** the hardware: brass bolts and caps, blued steel axles and chains */
+  readonly brass = new THREE.MeshPhysicalMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.3, clearcoat: 0.4, clearcoatRoughness: 0.2 });
+  readonly steel = new THREE.MeshPhysicalMaterial({ color: 0x9aa3ad, metalness: 1, roughness: 0.38 });
+  /** AI-only hazards (not in the world): places not to be at a time — beside a moving bridge, between two lanes */
+  readonly ghosts: Kin[] = [];
+  /** called every frame with the physics time (instanced parts, signs that turn) */
+  readonly animators: ((t: number) => void)[] = [];
   private paints = new Map<string, THREE.MeshPhysicalMaterial>();
 
   paint(p: PaintSpec, wood?: WoodSpecies) {
@@ -248,35 +317,72 @@ export class CourseBuilder {
       const outL: Pt[] = [[-hw - RAIL, -DEPTH, -1, 0, 60], [-hw - RAIL, sec.wallL, -1, 0, 60 + sec.wallL + DEPTH]];
       return [inner, topL, topR, outR, bottom, outL];
     };
-    const profs = path.sec.map(profile);
+    // (eased sections settle to the same shape: share the profiles of identical ones)
+    const cache = new Map<string, Pt[][]>();
+    const profs = path.sec.map((sec) => {
+      const key = `${sec.w.toFixed(3)},${sec.wallL.toFixed(3)},${sec.wallR.toFixed(3)}`;
+      let pr = cache.get(key);
+      if (!pr) cache.set(key, (pr = profile(sec)));
+      return pr;
+    });
     const mats = [floorMat, railMat, railMat, railMat, railMat, railMat];
     const collide = [true, true, true, true, false, true];
-    for (let k = 0; k < 6; k++) {
-      const pos: number[] = [], nor: number[] = [], wood: number[] = [], idx: number[] = [];
-      const m = profs[0][k].length;
-      for (let i = 0; i < n; i++) {
-        const P = path.P[i], R = path.Rt[i], U = path.U[i];
-        const s = i * DS;
-        for (const q of profs[i][k]) {
-          pos.push(P.x + R.x * q[0] + U.x * q[1], P.y + R.y * q[0] + U.y * q[1], P.z + R.z * q[0] + U.z * q[1]);
-          nor.push(R.x * q[2] + U.x * q[3], R.y * q[2] + U.y * q[3], R.z * q[2] + U.z * q[3]);
-          wood.push(s, q[4], k === 0 ? 0 : q[0] * 0.3);
+    // in pieces of CHUNK samples (each its own lot in the batch, so it culls)
+    const CHUNK = 200;
+    for (let c0 = 0; c0 < n - 1; c0 += CHUNK) {
+      const c1 = Math.min(n - 1, c0 + CHUNK);
+      for (let k = 0; k < 6; k++) {
+        const pos: number[] = [], nor: number[] = [], wood: number[] = [], idx: number[] = [];
+        const m = profs[0][k].length;
+        for (let i = c0; i <= c1; i++) {
+          const P = path.P[i], R = path.Rt[i], U = path.U[i];
+          const s = i * DS;
+          for (const q of profs[i][k]) {
+            pos.push(P.x + R.x * q[0] + U.x * q[1], P.y + R.y * q[0] + U.y * q[1], P.z + R.z * q[0] + U.z * q[1]);
+            nor.push(R.x * q[2] + U.x * q[3], R.y * q[2] + U.y * q[3], R.z * q[2] + U.z * q[3]);
+            wood.push(s, q[4], k === 0 ? 0 : q[0] * 0.3);
+          }
+        }
+        // quads between rings a and b (b > a: the collision skips every other ring)
+        const quads = (out: number[], a0: number, b0: number) => {
+          for (let i = a0; i < b0; i++) if (!path.sec[i].floor || !path.sec[i + 1].floor) return;
+          let deck = true;
+          for (let i = a0; i <= b0; i++) deck = deck && path.sec[i].deck;
+          const ra = (a0 - c0) * m, rb = (b0 - c0) * m;
+          for (let j = 0; j < m - 1; j++) {
+            // (an open deck: the flat between the fillets left out)
+            if (k === 0 && !deck && j === ARC + 1) continue;
+            const a = ra + j, b = a + 1, c = rb + j, d = c + 1;
+            out.push(a, b, c, b, d, c);
+          }
+        };
+        for (let i = c0; i < c1; i++) quads(idx, i, i + 1);
+        if (!idx.length) continue;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+        g.setAttribute('aWood', new THREE.Float32BufferAttribute(wood, 3));
+        g.setIndex(idx);
+        this.batch.add(mats[k], g);
+        if (collide[k]) {
+          // the physics takes every other ring (the chord error is millimetres), keeping each
+          // ring where the floor starts or stops, or the slope or deck changes sharply
+          const cidx: number[] = [];
+          const keep = (i: number) => {
+            if (i === c0 || i === c1 || (i - c0) % 2 === 0) return true;
+            const a = path.sec[i - 1], b = path.sec[i], c = path.sec[i + 1];
+            if (a.floor !== b.floor || b.floor !== c.floor || a.deck !== b.deck || b.deck !== c.deck) return true;
+            return path.T[i - 1].dot(path.T[i + 1]) < 0.9995;
+          };
+          let prev = c0;
+          for (let i = c0 + 1; i <= c1; i++) {
+            if (!keep(i)) continue;
+            quads(cidx, prev, i);
+            prev = i;
+          }
+          this.world.statics.add(pos, cidx, Mat.Wood);
         }
       }
-      for (let i = 0; i < n - 1; i++) {
-        if (!path.sec[i].floor || !path.sec[i + 1].floor) continue;
-        for (let j = 0; j < m - 1; j++) {
-          const a = i * m + j, b = a + 1, c = a + m, d = c + 1;
-          idx.push(a, b, c, b, d, c);
-        }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-      g.setAttribute('aWood', new THREE.Float32BufferAttribute(wood, 3));
-      g.setIndex(idx);
-      this.batch.add(mats[k], g);
-      if (collide[k]) this.world.statics.addGeometry(g, Mat.Wood);
     }
     // the cut ends: the start, the finish, each side of a gap
     for (let i = 0; i < n; i++) {
@@ -318,7 +424,7 @@ export class CourseBuilder {
   /** the posts under the chute, down to the lake (none where another part of the course is below) */
   private trestles(path: Path) {
     const parts: THREE.BufferGeometry[] = [];
-    const step = 9;
+    const step = 13;
     for (let s = 4; s < path.length - 2; s += step) {
       const i = path.index(s);
       if (!path.sec[i].floor) continue;
@@ -327,8 +433,8 @@ export class CourseBuilder {
       const yaw = Math.atan2(Tn.x, Tn.z);
       const tops: THREE.Vector3[] = [];
       for (const side of [-1, 1]) tops.push(P.clone().addScaledVector(R, side * hw).addScaledVector(U, -0.5));
-      // (something below: the post would go through it)
-      const blocked = tops.some((t) => this.world.statics.floorBelow(t.x, t.y - 1.5, t.z, 400) > -Infinity);
+      // (something below: the post would go through it — the course, or a machine)
+      const blocked = tops.some((t) => this.world.statics.floorBelow(t.x, t.y - 1.5, t.z, 400) > -Infinity || this.world.kins.some((k) => k.pos.y < t.y - 1 && Math.hypot(k.pos.x - t.x, k.pos.z - t.z) < k.bound + 0.6));
       if (blocked) continue;
       const bottom = this.lakeY - 2;
       for (const t of tops) {
@@ -386,8 +492,29 @@ export class CourseBuilder {
     return kin;
   }
 
+  /** a hazard only the AI sees: a static spot (pos/quat) or a moving one (pose) */
+  ghost(shape: Shape, pose: ((t: number, pos: THREE.Vector3, quat: THREE.Quaternion) => void) | null, pos?: THREE.Vector3, quat?: THREE.Quaternion) {
+    const k = new Kin(shape, Mat.Wood, pose);
+    if (pos) k.pos.copy(pos);
+    if (quat) k.quat.copy(quat);
+    k.set(this.world.time);
+    this.hazards.push(k);
+    if (pose) this.ghosts.push(k);
+    return k;
+  }
+
+  /** a fixed obstacle: its collider in the world, its visual merged into the batch (no draw call of its own) */
+  fixed(kin: Kin, parts: { toBatch(b: CourseBuilder, m: THREE.Matrix4): void }, hazard = true) {
+    this.world.addKin(kin);
+    parts.toBatch(this, new THREE.Matrix4().compose(kin.pos, kin.quat, new THREE.Vector3(1, 1, 1)));
+    if (hazard) this.hazards.push(kin);
+    return kin;
+  }
+
   /** syncs the visuals to their colliders (and lets the bumpers glow after a hit) */
   sync(t: number) {
+    for (const g of this.ghosts) g.set(t);
+    for (const f of this.animators) f(t);
     for (const o of this.obstacles) {
       o.vis.position.copy(o.kin.pos);
       o.vis.quaternion.copy(o.kin.quat);

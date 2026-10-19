@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CourseBuilder, Path, PAINT, cylAttr, flatAttr, roundBox, fixWinding } from './builder.ts';
 import { Kin, Mat } from './physics.ts';
 import { paintMaterial, Pattern, SPECIES, woodAttr, type PaintSpec } from './shaders.ts';
+import { Parts, band, bolt, boltRing, dome, gantry, hub, mat, plank, rod, rotX } from './obs-kit.ts';
 
 /**
  * The painted obstacles. Each is a collider whose pose is a function of time (so the AI can ask
@@ -31,13 +32,15 @@ export function peg(b: CourseBuilder, path: Path, s: number, lat: number, o: { r
   const kin = new Kin({ type: 'cyl', r, hh: h / 2 }, Mat.Paint);
   kin.pos.copy(base).addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(q), h / 2);
   kin.quat.copy(q);
-  const g = new THREE.Group();
+  // (fixed: its paint goes into the course batch)
+  const p = new Parts();
   const m = b.paint(o.paint ?? { a: PAINT.red, b: PAINT.white, pattern: Pattern.Stripes, scale: 2.2 });
-  g.add(new THREE.Mesh(cyl(r, h), m));
-  const top = new THREE.Mesh(cylAttr(new THREE.SphereGeometry(r, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2)), m);
-  top.position.y = h / 2;
-  g.add(top);
-  return b.obstacle(kin, g);
+  p.add(m, rod(r, h, 20));
+  p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid, wear: 0.05 }), dome(r * 1.02, 0.8, 16), mat(0, h / 2, 0));
+  p.add(b.brass, dome(r * 0.35, 0.8, 10), mat(0, h / 2 + r * 0.78, 0));
+  // a turned collar where it stands in the floor
+  p.add(b.darkWood, rod(r * 1.45, 0.16, 20), mat(0, -h / 2 + 0.08, 0));
+  return b.fixed(kin, p);
 }
 
 /** a pinball bumper: kicks a marble away with a ding and a flash */
@@ -57,6 +60,11 @@ export function bumper(b: CourseBuilder, path: Path, s: number, lat: number, o: 
   const base = new THREE.Mesh(cyl(r * 0.75, h * 0.6), baseM);
   base.position.y = -h * 0.2;
   g.add(base);
+  const bp = new Parts();
+  bp.add(b.brass, band(r * 0.78, 0.05, 28), mat(0, -h * 0.45, 0));
+  boltRing(bp, b, mat(0, -h * 0.5, 0), r * 0.95, 8, 0.05);
+  bp.add(b.darkWood, rod(r * 1.08, 0.08, 28), mat(0, -h * 0.5 + 0.04, 0));
+  g.add(bp.group());
   const top = new THREE.Group();
   const ring = new THREE.Mesh(cylAttr(new THREE.TorusGeometry(r * 0.92, 0.12, 12, 36).rotateX(Math.PI / 2)), ringM);
   ring.position.y = 0.05;
@@ -90,11 +98,12 @@ export function sweeper(b: CourseBuilder, center: THREE.Vector3, up: THREE.Quate
   const g = new THREE.Group();
   const m = b.paint(o.paint ?? { a: PAINT.yellow, b: PAINT.black, pattern: Pattern.Rings, scale: 1.4 });
   g.add(new THREE.Mesh(cyl(r, o.len, 24), m));
+  const ap = new Parts();
   for (const e of [-1, 1]) {
-    const ball = new THREE.Mesh(cylAttr(new THREE.SphereGeometry(r * 1.25, 20, 12)), b.paint({ a: PAINT.red, b: PAINT.red, pattern: Pattern.Solid }));
-    ball.position.y = (e * o.len) / 2;
-    g.add(ball);
+    ap.add(b.paint({ a: PAINT.red, b: PAINT.red, pattern: Pattern.Solid }), cylAttr(new THREE.SphereGeometry(r * 1.25, 20, 12)), mat(0, (e * o.len) / 2, 0));
+    ap.add(b.brass, band(r + 0.01, 0.045, 18), mat(0, (e * o.len) / 2 - e * r * 1.3, 0));
   }
+  g.add(ap.group());
   b.obstacle(kin, g);
   // the post it turns on
   const hubR = o.hub ?? 0.7;
@@ -102,13 +111,16 @@ export function sweeper(b: CourseBuilder, center: THREE.Vector3, up: THREE.Quate
   const post = new Kin({ type: 'cyl', r: hubR, hh: postH / 2 }, Mat.Paint);
   post.pos.copy(center).addScaledVector(upV, postH / 2);
   post.quat.copy(up);
-  const pg = new THREE.Group();
-  pg.add(new THREE.Mesh(cyl(hubR, postH), b.paint({ a: PAINT.blue, b: PAINT.white, pattern: Pattern.Stripes, scale: 2 })));
-  const capM = b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid });
-  const capG = new THREE.Mesh(cylAttr(new THREE.SphereGeometry(hubR, 24, 10, 0, Math.PI * 2, 0, Math.PI / 2)), capM);
-  capG.position.y = postH / 2;
-  pg.add(capG);
-  b.obstacle(post, pg);
+  const pg = new Parts();
+  pg.add(b.paint({ a: PAINT.blue, b: PAINT.white, pattern: Pattern.Stripes, scale: 2 }), rod(hubR, postH, 32));
+  if (hubR > 0.1) {
+    pg.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), dome(hubR, 0.6, 24), mat(0, postH / 2, 0));
+    pg.add(b.brass, dome(hubR * 0.4, 0.7, 14), mat(0, postH / 2 + hubR * 0.55, 0));
+    pg.add(b.paint({ a: PAINT.yellow, b: PAINT.yellow, pattern: Pattern.Solid }), band(hubR + 0.02, 0.06, 32), mat(0, ht - postH / 2, 0));
+    pg.add(b.darkWood, rod(hubR * 1.5, 0.12, 32), mat(0, -postH / 2 + 0.06, 0));
+    boltRing(pg, b, mat(0, -postH / 2 + 0.12, 0), hubR * 1.25, 8, 0.06);
+  }
+  b.fixed(post, pg);
   return kin;
 }
 
@@ -131,38 +143,27 @@ export function hammer(b: CourseBuilder, path: Path, s: number, o: { amp?: numbe
     pos.copy(pivot).add(off);
     quat.copy(qs).multiply(base);
   });
-  const g = new THREE.Group();
+  const p = new Parts();
   const col = o.color ?? PAINT.red;
-  const head = new THREE.Mesh(cyl(0.95, 1.7, 32), b.paint({ a: col, b: PAINT.white, pattern: Pattern.Rings, scale: 1.6 }));
-  g.add(head);
+  p.add(b.paint({ a: col, b: PAINT.white, pattern: Pattern.Rings, scale: 1.6 }), rod(0.95, 1.7, 32));
   for (const e of [-1, 1]) {
-    const band = new THREE.Mesh(cylAttr(new THREE.TorusGeometry(0.97, 0.07, 10, 32).rotateX(Math.PI / 2)), b.paint({ a: PAINT.yellow, b: PAINT.yellow, pattern: Pattern.Solid }));
-    band.position.y = e * 0.85;
-    g.add(band);
+    p.add(b.paint({ a: PAINT.yellow, b: PAINT.yellow, pattern: Pattern.Solid }), band(0.97, 0.07, 32), mat(0, e * 0.82, 0));
+    // brass end caps, bolted
+    const face = mat(0, e * 0.85, 0, e > 0 ? undefined : rotX(Math.PI));
+    p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), dome(0.82, 0.22, 28), face.clone());
+    p.add(b.brass, dome(0.3, 0.6, 14), face.clone().multiply(mat(0, 0.16, 0)));
+    boltRing(p, b, face.clone().multiply(mat(0, 0.12, 0)), 0.55, 6, 0.06);
   }
-  // the handle up to the pivot (local +z points at it)
-  const rod = new THREE.Mesh(woodAttr(new THREE.CylinderGeometry(0.16, 0.16, L, 12).rotateX(Math.PI / 2), 'z'), b.railWood);
-  rod.position.z = L / 2;
-  g.add(rod);
-  b.obstacle(kin, g);
-  // the gantry: two posts and a beam (static, out of the marbles' way above the walls)
-  const hw = sec.w / 2 + 0.5;
-  const gantry: THREE.BufferGeometry[] = [];
-  for (const side of [-1, 1]) {
-    const foot = path.at(s, side * hw, -0.4);
-    const top = path.at(s, side * hw, L + 1.3);
-    const len = top.distanceTo(foot);
-    const pg = woodAttr(new THREE.BoxGeometry(0.4, len, 0.4), 'y', s + side);
-    pg.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(Y, top.clone().sub(foot).normalize()));
-    pg.translate((foot.x + top.x) / 2, (foot.y + top.y) / 2, (foot.z + top.z) / 2);
-    gantry.push(pg);
-  }
-  const beamC = path.at(s, 0, L + 1.25);
-  const beam = woodAttr(new THREE.BoxGeometry(hw * 2 + 0.8, 0.45, 0.5), 'x', s);
-  beam.applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(R, U, T)));
-  beam.translate(beamC.x, beamC.y, beamC.z);
-  gantry.push(beam);
-  for (const gg of gantry) b.batch.add(b.railWood, gg.toNonIndexed());
+  // the handle up to the pivot (local +z points at it), with a steel collar where it meets the head
+  p.add(b.railWood, plank(0.3, 0.3, L, 0.06, 'z', s), mat(0, 0, L / 2));
+  p.add(b.steel, plank(0.46, 0.46, 0.5, 0.06, 'z'), mat(0, 0, 1.15));
+  for (const e of [-1, 1]) bolt(p, b, mat(e * 0.23, 0, 1.15, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (-e * Math.PI) / 2)), 0.05);
+  b.obstacle(kin, p.group());
+  // the gantry and the pivot
+  gantry(b, path, s, L + 0.95, { span: sec.w });
+  const pb = new Parts();
+  hub(pb, b, mat(0, 0, 0, rotX(Math.PI / 2)), 0.34, 0.8, b.paint({ a: PAINT.yellow, b: PAINT.yellow, pattern: Pattern.Solid }));
+  pb.toBatch(b, new THREE.Matrix4().compose(pivot, frameQuat(path, s), new THREE.Vector3(1, 1, 1)));
   return kin;
 }
 
@@ -217,9 +218,20 @@ export function slider(b: CourseBuilder, path: Path, s: number, o: { period?: nu
     pos.copy(base).addScaledVector(R, travel * Math.sin(w * t + ph));
     quat.copy(q);
   });
-  const g = new THREE.Group();
-  g.add(new THREE.Mesh(woodAttr(roundBox(size, 1.5, 1.8, 0.14), 'x', s), b.paint({ a: o.color ?? PAINT.orange, b: PAINT.white, pattern: Pattern.Dots, scale: 2.2 })));
-  return b.obstacle(kin, g);
+  const p = new Parts();
+  p.add(b.paint({ a: o.color ?? PAINT.orange, b: PAINT.white, pattern: Pattern.Dots, scale: 2.2 }), woodAttr(roundBox(size, 1.5, 1.8, 0.14), 'x', s));
+  // white bumpers on its ends and bolts on its faces
+  for (const e of [-1, 1]) {
+    p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), plank(0.16, 1.2, 1.5, 0.07, 'y'), mat((e * size) / 2, 0, 0));
+    for (const dx of [-size / 2 + 0.3, size / 2 - 0.3]) for (const dy of [-0.5, 0.5]) bolt(p, b, mat(dx, dy, e * 0.9, rotX((e * Math.PI) / 2)), 0.06);
+  }
+  p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), plank(size - 0.3, 0.1, 1.86, 0.04, 'x'), mat(0, 0.3, 0));
+  const kk = b.obstacle(kin, p.group());
+  // its track: two steel rails in the floor, wall to wall
+  const tp = new Parts();
+  for (const e of [-1, 1]) tp.add(b.steel, plank(sec.w - 1.4, 0.05, 0.12, 0.02, 'x'), mat(0, 0.02, e * 0.65));
+  tp.toBatch(b, new THREE.Matrix4().compose(path.at(s, 0, 0), q, new THREE.Vector3(1, 1, 1)));
+  return kk;
 }
 
 /** a wall of doors that rise and fall, each on its own beat */
