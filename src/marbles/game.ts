@@ -1,13 +1,11 @@
 import * as THREE from 'three';
-import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
-import { N8AOPostPass } from 'n8ao';
 import { Bot } from './ai.ts';
 import { Sound } from './audio.ts';
 import { buildRound, SHOW, type Course } from './courses.ts';
-import { clouds, environment, giants, lake, skyDome } from './env.ts';
 import { Confetti, Splashes } from './fx.ts';
 import { Marble, RADIUS } from './physics.ts';
-import { DESIGNS, marbleMaterial, paintMaterial, Pattern } from './shaders.ts';
+import { Stage } from './render.ts';
+import { DESIGNS, marbleMaterial } from './shaders.ts';
 import { ordinal, UI, type Row } from './ui.ts';
 
 /**
@@ -47,17 +45,13 @@ type State = 'menu' | 'intro' | 'countdown' | 'play' | 'over' | 'results' | 'cha
 
 const NAMES = ['Pebble', 'Glassy', 'Bonk', 'Swirlz', 'Mr. Roundy', 'Clink', 'Shiny', 'Rolo', 'Bubbles', 'Twister', 'Agate', 'Cosmo', 'Taw', 'Jellybean', 'Sparky', 'Comet', 'Biscuit', 'Nugget', 'Ziggy', 'Pip', 'Dotty', 'Boulder', 'Ollie', 'Sprocket', 'Gizmo', 'Tumbles', 'Lucky', 'Mochi', 'Rocket', 'Peanut'];
 const FIELD = 24;
-const SUN = new THREE.Vector3(-0.45, 0.8, 0.38).normalize();
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class MarbleGame {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
-  private composer!: EffectComposer;
-  private sun!: THREE.DirectionalLight;
-  private lake!: THREE.Mesh;
-  private backdrop = new THREE.Group();
+  private stage!: Stage;
   private ui: UI;
   readonly sound = new Sound();
   private course: Course | null = null;
@@ -91,7 +85,6 @@ export class MarbleGame {
   private quality = 1;
   private fpsAcc = 0;
   private fpsN = 0;
-  private ao!: N8AOPostPass;
   private menuMarbles: Racer[] = [];
 
   constructor(
@@ -100,10 +93,6 @@ export class MarbleGame {
   ) {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false }));
     r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFShadowMap;
-    r.toneMapping = THREE.NoToneMapping;
-    r.outputColorSpace = THREE.SRGBColorSpace;
     this.ui = new UI(root);
     this.bindInput();
     window.addEventListener('resize', () => this.resize());
@@ -112,39 +101,9 @@ export class MarbleGame {
   async boot(progress: (f: number, s: string) => void) {
     const r = this.renderer;
     progress(0.1, 'Mixing the paint');
-    this.scene.environment = environment(r, SUN);
-    this.scene.environmentIntensity = 0.85;
-    this.scene.add(skyDome(SUN));
-    this.scene.fog = new THREE.Fog(0xd8e4ff, 260, 1500);
-    const hemi = new THREE.HemisphereLight(0xcfe4ff, 0x9a6a40, 0.55);
-    this.scene.add(hemi);
-    const sun = (this.sun = new THREE.DirectionalLight(0xfff1dc, 3.1));
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera;
-    sc.left = sc.bottom = -34;
-    sc.right = sc.top = 34;
-    sc.near = 1;
-    sc.far = 160;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.03;
-    sun.shadow.radius = 3;
-    this.scene.add(sun, sun.target);
-    this.lake = lake(0);
-    this.scene.add(this.lake);
-    this.scene.add(this.backdrop);
-    this.backdrop.add(clouds(new THREE.Vector3(), 0));
-    this.backdrop.add(
-      giants(
-        new THREE.Vector3(),
-        0,
-        (a, b) => paintMaterial({ a, b, pattern: Pattern.Stripes, scale: 1, wear: 0.02 }),
-        (i) => marbleMaterial(DESIGNS[i % DESIGNS.length], i),
-      ),
-    );
+    this.stage = new Stage(r, this.scene, this.camera);
     this.scene.add(this.confetti.mesh, this.splashes.group);
     progress(0.3, 'Laying the planks');
-    this.composerSetup();
     this.resize();
     // the menu's backdrop: the first course with marbles rolling about the start
     await this.loadRound(0, true);
@@ -164,31 +123,10 @@ export class MarbleGame {
     r.setAnimationLoop(() => this.frame());
   }
 
-  private composerSetup() {
-    const r = this.renderer;
-    const c = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
-    c.addPass(new RenderPass(this.scene, this.camera));
-    const ao = (this.ao = new N8AOPostPass(this.scene, this.camera, 1, 1));
-    ao.configuration.aoRadius = 0.9;
-    ao.configuration.distanceFalloff = 1.0;
-    ao.configuration.intensity = 2.2;
-    ao.configuration.gammaCorrection = false;
-    ao.configuration.halfRes = true;
-    ao.configuration.depthAwareUpsampling = true;
-    ao.configuration.color = new THREE.Color(0x1a0e08);
-    ao.setQualityMode('Medium');
-    c.addPass(ao);
-    const bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 1.0, luminanceSmoothing: 0.4, intensity: 0.75, radius: 0.7 });
-    const tmq = new URLSearchParams(location.search).get('tm');
-    const tm = new ToneMappingEffect({ mode: tmq === 'agx' ? ToneMappingMode.AGX : tmq === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
-    c.addPass(new EffectPass(this.camera, bloom, tm, new VignetteEffect({ darkness: 0.32, offset: 0.32 })));
-    c.addPass(new EffectPass(this.camera, new SMAAEffect()));
-  }
-
   private resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
-    this.composer?.setSize(w, h);
+    this.stage?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -347,10 +285,9 @@ export class MarbleGame {
     this.ui.clearTags();
     const c = (this.course = buildRound(SHOW[idx].id));
     this.scene.add(c.b.group);
-    this.lake.position.y = c.lakeY;
     this.splashes.y = c.lakeY;
     const ctr = c.path ? c.path.P[Math.floor(c.path.count / 2)] : c.plate!.center;
-    this.backdrop.position.set(ctr.x, c.lakeY, ctr.z);
+    this.stage.setCourse(c.lakeY, ctr);
     const field = menu ? this.menuField() : this.roster.filter((x) => !x.out);
     const grid = c.grid(field.length);
     // (the player at a random spot on the grid)
@@ -494,12 +431,8 @@ export class MarbleGame {
   private lastCount = 0;
 
   private render() {
-    const sh = this.sun;
-    const f = this.camLook;
-    // the shadow follows the action
-    sh.position.copy(f).addScaledVector(SUN, 80);
-    sh.target.position.copy(f);
-    this.composer.render();
+    // (the shadow follows the action)
+    this.stage.render(this.camLook);
   }
 
   /** the resolution follows the frame rate */
@@ -847,14 +780,11 @@ export class MarbleGame {
       const s = o.userData.giant as number | undefined;
       if (s) u.uRotW!.value.multiplyScalar(1);
     });
-    (this.lake.userData.u as { uTime: { value: number } }).uTime.value = t;
+    this.stage.update(dt, t);
     this.confetti.update(dt, t);
     this.splashes.update(dt);
     const crown = this.course?.crown;
     if (crown) crown.rotation.y += dt * 0.8;
-    this.backdrop.traverse((o) => {
-      if (o.userData.giant) o.rotation.y += dt * 0.05;
-    });
   }
 
   // ------------------------------------------------------------------------------------- camera
