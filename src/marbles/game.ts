@@ -328,8 +328,8 @@ export class MarbleGame {
       const i = c.path.index(p.s || 0);
       this.camYaw = Math.atan2(c.path.T[i].x, c.path.T[i].z);
     }
-    // a frame of shader work up front for the new materials
-    await new Promise((r) => setTimeout(r, 0));
+    // the new materials' shaders compiled up front, not mid-race
+    await this.renderer.compileAsync(this.scene, this.camera).catch(() => undefined);
   }
 
   private menuField(): Contestant[] {
