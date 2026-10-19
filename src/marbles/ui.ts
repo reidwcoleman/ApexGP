@@ -1,3 +1,4 @@
+import { SHOW } from './courses.ts';
 /** The show's screens and HUD (DOM over the canvas). */
 
 const h = (tag: string, cls = '', html = '') => {
@@ -69,8 +70,8 @@ export class UI {
       <a class="mm-back" href="./">&#8592; All games</a>
       <div>
         <div class="mm-title">Marble<span>Mania</span></div>
-        <div class="mm-tag">24 marbles. 4 rounds. 1 crown.</div>
-        <div class="mm-show"><i>1 · Timber Tumble</i><i>2 · Paint Mill</i><i>3 · Jump Club</i><i>Final · Crown Summit</i></div>
+        <div class="mm-tag">24 marbles. ${SHOW.length} rounds. 1 crown.</div>
+        <div class="mm-show">${SHOW.map((x, i) => `<i>${x.kind === 'final' ? 'Final' : i + 1} · ${x.name}</i>`).join('')}</div>
         <div class="mm-picker">
           <button class="mm-arrow" data-a="prev" aria-label="Previous marble">&#8249;</button>
           <div class="mm-dname"></div>

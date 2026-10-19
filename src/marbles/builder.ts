@@ -569,12 +569,14 @@ function rotateAbout(g: THREE.BufferGeometry, yaw: number, x: number, z: number)
 /** a cylinder's paint coordinates: along its axis, round its circumference, radius */
 export function cylAttr(g: THREE.BufferGeometry, seed = 0) {
   const p = g.getAttribute('position');
+  // the angle from the uv where there is one: atan2 wraps partway round and leaves a seam
+  const uv = g.getAttribute('uv');
   const a = new Float32Array(p.count * 3);
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     const r = Math.hypot(x, z);
     a[i * 3] = y + seed;
-    a[i * 3 + 1] = Math.atan2(z, x) * Math.max(r, 0.3);
+    a[i * 3 + 1] = (uv ? uv.getX(i) * Math.PI * 2 - Math.PI : Math.atan2(z, x)) * Math.max(r, 0.3);
     a[i * 3 + 2] = r;
   }
   g.setAttribute('aWood', new THREE.BufferAttribute(a, 3));

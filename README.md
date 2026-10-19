@@ -683,37 +683,47 @@ Research: [Tesla Roadster (second generation)](https://en.wikipedia.org/wiki/Tes
 **▶ https://reidwcoleman.github.io/ApexGP/marbles.html** — a knockout show for 24 glass marbles on
 wooden courses, everything generated in code (`src/marbles/`; no image, model or sound files).
 
-- **The show**: Timber Tumble (race, about two thirds qualify), Paint Mill (race), Jump Club
-  (survival: hop the low bar, never jump into the high one that rises 15 s in, the bars
-  speeding up) and Crown Summit (the final: first across the line takes the crown). Out of the
-  show, you can watch it to the end (←/→ switches marble). 23 bots of mixed skill.
-- **Courses**: a turtle path (straights and arcs with slope, width, walls and banking, all eased)
-  swept into a bent-plank chute — maple boards along the floor curving up the walls on fillets,
-  walnut rails, cut ends at the gaps — on trestles down into a sea of marbled paint. The same
-  triangles are the physics. Obstacles are painted wood on analytic colliders whose pose is a
-  function of time: candy pegs, pinball bumpers, sweepers, swinging hammers on gantries, a
-  turntable with paddles, sliding blocks, a wall of rising doors, launch ramps over gaps.
+- **The show**, six rounds: Timber Tumble (race), Paint Mill (race), Jump Club (survival: hop the
+  low bar, never into the high one; the bars speed up, reverse, and the plate's rings crumble),
+  Rickety Ridge (race), Tip Top (survival on a tipping dish swept by a bar, bumpers popping up)
+  and Crown Summit (the final: first across the line takes the crown). Each round keeps
+  `SHOW[i].keep` of the field (24 → 19 → 14 → 10 → 8 → 6). Races are 1.1–1.3 km, about 65–95 s
+  for the leaders; survival rounds escalate until enough have fallen (110 s at most). Out of the
+  show, you can watch it to the end (←/→ switches marble).
+- **Courses** (`courses.ts`, one `course-*.ts` per round, `course-kit.ts`): a turtle path
+  (straights and arcs with slope, width, walls and banking, all eased) swept into a bent-plank
+  chute on trestles down into a sea of marbled paint; the same triangles are the physics. Split
+  paths with a risky shortcut that pays, switchbacks, cascades, spirals. Obstacles
+  (`obstacles.ts`, `obs-*.ts`) are painted wood on analytic colliders whose pose is a function of
+  time: pegs, bumpers, sweepers, hammers, turntables, sliders, door walls, kickers, windmills,
+  turnstiles, roller beds, pinball flippers, axes, wrecking balls, rolling logs, boulders,
+  seesaws, rocking planks, sliding bridges, a trampoline pit.
 - **Physics** (`physics.ts`): solid spheres with real rolling (I = 2/5·m·r², friction impulses at
   the contact point: a sliding marble spins up, a spinning one grabs when it lands, a turntable
   carries it), restitution per surface, marble-on-marble impacts with glass friction, 240 Hz
   substeps. You roll by torque (like the marble drives itself), with a hop and a dash.
-- **Bots** (`ai.ts`): look ahead along the course, ask each obstacle where it will be when they
-  arrive, pick the clearest line (inside of the bend for the skilled ones), wait for a hammer,
-  time jumps over gaps and bars with errors that shrink with skill, barge with a dash.
-- **Looks** (`shaders.ts`): wood with real grain (growth rings cut at a slant, streaks, pores, each
-  board its own log and tint, staggered butt joints, seams as grooves) under varnish; enamel
-  paint in stripes / rings / dots / checks / spirals / chevrons with brush streaks and chips to
-  the wood; glass marbles ray-marched inside in their own frame (cat's-eye vanes, ribbons,
-  galaxies, candy, bubbles, lava, opal) with the sky or the warm wood refracted through.
-  N8AO, bloom, neutral tone mapping, SMAA; adaptive resolution.
-- **Sound** (`audio.ts`), all synthesised: the glass-on-glass clack (five inharmonic modes of a
-  glass sphere around 3–4 kHz plus a contact click), the hollow knock of glass on the wooden
-  chute (the board's modes and box resonance plus the marble's own tick), painted blocks that
-  knock like temple blocks, rolling rumble per marble with the grain in it, bumper dings, paint
-  splashes, a crowd, and a marimba soundtrack.
+- **Bots** (`ai.ts`, `ai-course.ts`, `ai-plate.ts`): each course is read once (a racing line pulled
+  tight, a safe speed braked back from every bend, the jumps and their run-up speed, every
+  collider sorted into ride-on or keep-off). Ten times a second a bot plays the next 1.6 s ahead
+  for a spread of lines and paces against every obstacle's future pose, the floor and the others;
+  steering is damped with bend feed-forward. On the plates they time hops per frame against both
+  bars. Skill scales pace, nerve, timing error, lapses and dashes.
+- **Looks** (`shaders.ts`, `fx*.ts`): lacquered wood with board-by-board grain that calms with
+  distance, candy enamel with crisp patterns and raised chips, glass marbles ray-marched inside
+  (18 designs) with dispersion and a sun focus, coloured caustic shadows, foil confetti and paint
+  splash crowns. The stage (`render.ts`, `env*.ts`, `post-*.ts`): cascaded sun shadows, a
+  stylised sky shared by the dome, the image light and the aerial fog, billboard cumulus, a
+  glossy marbled-paint sea with a planar mirror, toy pegs, floating block islands and balloons;
+  temporal AA with per-marble reprojection, N8AO, bloom, a grade. Quality steps down on its own
+  (`?gfx=high|medium|low` pins it, `?aa=smaa`).
+- **Sound** (`audio.ts`), all synthesised: glass clacks bright with velocity (each marble its own
+  pitch) with rebound chatter, hollow floor tocks against thinner rail taks, sub thumps on hard
+  landings, board joints ticking under your marble, bumper dings, splashes, a crowd (murmur, ooh,
+  aww, cheers), and music in a new key each round that builds as the race closes.
 - **Testing**: `?round=N&auto=1&go=1[&cut=K]` jumps into a round with a bot driving you;
   `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
-  captures several camera views in one session.
+  captures several camera views in one session; `tools/marblebench.mjs` races every round
+  headless and reports times, falls, skill ordering and AI cost.
 
 ## Apex Lawn
 

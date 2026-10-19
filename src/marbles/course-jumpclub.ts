@@ -119,7 +119,8 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
     b.group.add(rmesh);
   }
 
-  // the bars' speed: ω = 0.5 + 0.0055·τ, turning back at the two reversals (smoothly, over 2 s)
+  // the bars' speed: ω = 0.5 + 0.0055·τ, and from 45 s faster and faster; turning back at the two
+  // reversals (smoothly, over 2 s)
   const N = 12000, DT = 0.025;
   const table = new Float32Array(N + 1);
   {
@@ -131,7 +132,7 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
     for (let i = 0; i <= N; i++) {
       table[i] = a;
       const x = i * DT;
-      a += dir(x) * (0.5 + 0.0055 * x) * DT;
+      a += dir(x) * (0.5 + 0.0055 * x + 0.0005 * Math.max(0, x - 45) ** 2) * DT;
     }
   }
   const spun = (x: number) => {

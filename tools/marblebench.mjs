@@ -3,10 +3,10 @@
 // prints per round: the leader's time, the last qualifier's, falls, stuck time, DNFs, how well the
 // results follow the bots' skill (Spearman), how the autopilot did, and the AI's cost per frame.
 //
-//   node tools/marblebench.mjs [--port 5214] [--rounds 0,1,2,3] [--runs 3] [--par 2] [--cut 0 | --show 1] [--human 1] [--json out.json]
+//   node tools/marblebench.mjs [--port 5214] [--rounds 0,1,2,3,4,5] [--runs 3] [--par 2] [--cut 0 | --show 1] [--human 1] [--json out.json]
 //
 // (the round runs past its normal end — races until everyone is home or 150 s, the plate until
-// one is left or 80 s — so the whole field is ranked; the qualifying cut is the game's own)
+// one is left or 110 s — so the whole field is ranked; the qualifying cut is the game's own)
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import { CHROME, ANGLE } from './chrome.mjs';
@@ -17,15 +17,15 @@ const opt = (k, d) => {
   return i >= 0 ? args[i + 1] : d;
 };
 const port = opt('port', '5214');
-const rounds = opt('rounds', '0,1,2,3').split(',').map(Number);
+const rounds = opt('rounds', '0,1,2,3,4,5').split(',').map(Number);
 const runs = Number(opt('runs', 3));
 const par = Number(opt('par', 2));
 // (--show: each round with the field the show would have left by then: 24, 16, 10, 5)
-const cuts = opt('show', null) ? [0, 8, 14, 19] : null;
+const cuts = opt('show', null) ? [0, 5, 10, 14, 16, 19] : null;
 const cut = (round) => (cuts ? cuts[round] ?? 0 : Number(opt('cut', 0)));
 const jsonOut = opt('json', null);
 const human = opt('human', null) === '1';
-const NAMES = ['Timber Tumble', 'Paint Mill', 'Jump Club', 'Crown Summit', 'Round 5', 'Round 6', 'Round 7', 'Round 8'];
+const NAMES = ['Timber Tumble', 'Paint Mill', 'Jump Club', 'Rickety Ridge', 'Tip Top', 'Crown Summit'];
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 
@@ -70,7 +70,7 @@ async function runOnce(round, k) {
     // run the whole field home: a final ends at its first finisher, so it's timed as a race
     if (kind === 'final') c.kind = 'race';
     g.slots = c.plate ? 0 : g.racers.length;
-    const maxT = c.plate ? 80 : 150;
+    const maxT = c.plate ? 110 : 180;
     const R = g.racers;
     const st = new Map(R.map((r) => [r, { id: r.c.id, skill: r.c.player ? 0.9 : r.c.skill, player: r.c.player, falls: 0, stuck: 0, finT: 0, fin: 0, outT: 0, dash: 0, hop: 0 }]));
     const drop = g.drop;

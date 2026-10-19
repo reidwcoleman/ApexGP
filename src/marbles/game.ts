@@ -262,7 +262,7 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    this.slots = c.kind === 'final' ? 1 : c.kind === 'survival' ? Math.max(2, Math.ceil(alive / 2)) : Math.max(2, Math.round(alive * (this.roundIdx === 0 ? 0.66 : 0.62)));
+    this.slots = c.kind === 'final' ? 1 : Math.max(2, (c.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
     const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} on the plate go through` : `First ${this.slots} of ${alive} qualify`;
     this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : 'RACE', goal, blurb: info.blurb });
     this.state = 'intro';
@@ -389,7 +389,7 @@ export class MarbleGame {
         this.menuTick(dt);
         break;
       case 'intro':
-        if (this.stateT > 6.2 || this.pressed.has('Space') || this.pressed.has('Enter')) this.toCountdown();
+        if (this.stateT > INTRO_T || this.pressed.has('Space') || this.pressed.has('Enter')) this.toCountdown();
         break;
       case 'countdown': {
         const n = 3 - Math.floor(this.stateT);
@@ -571,7 +571,7 @@ export class MarbleGame {
         }
       }
       const alive = this.racers.filter((r) => !r.out).length;
-      if (this.state === 'play' && (alive <= this.slots || this.playT > 80)) this.endRound();
+      if (this.state === 'play' && (alive <= this.slots || this.playT > SURVIVE_T)) this.endRound();
       return;
     }
     const path = c.path!;
@@ -631,7 +631,7 @@ export class MarbleGame {
       }
     }
     // the clock: two and a half minutes
-    if (this.state === 'play' && this.playT > 150) this.endRound();
+    if (this.state === 'play' && this.playT > RACE_T) this.endRound();
     void p;
   }
 
@@ -880,7 +880,7 @@ export class MarbleGame {
   private introCam() {
     const c = this.course!;
     const cam = this.camera;
-    const t = this.stateT / 6.2;
+    const t = Math.min(1, this.stateT / INTRO_T);
     if (c.plate) {
       const a = 0.6 + t * 2.4;
       const r = 32 - t * 10;
@@ -890,9 +890,9 @@ export class MarbleGame {
       return;
     }
     const path = c.path!;
-    // high over the course, start to finish, then a swoop back to the grid
+    // high over the opening of the course (the whole of it is too long to fly in the time)
     const e = t * t * (3 - 2 * t);
-    const s = e * path.length * 0.92;
+    const s = e * Math.min(path.length * 0.92, 640);
     const i = path.index(s);
     const side = new THREE.Vector3().crossVectors(path.T[i], UP).normalize();
     const p = path.at(s, 0, 0).addScaledVector(side, 16).add(new THREE.Vector3(0, 22, 0)).addScaledVector(path.T[i], -14);
@@ -974,9 +974,8 @@ export class MarbleGame {
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
     if (c.plate && (this.state === 'play' || this.state === 'over')) {
-      const left = Math.max(0, 80 - this.playT);
-      timer = `0:${String(Math.ceil(left)).padStart(2, '0')}`;
-    } else if (race && this.state === 'play' && this.playT > 120) timer = `0:${String(Math.ceil(150 - this.playT)).padStart(2, '0')}`;
+      timer = clock(SURVIVE_T - this.playT);
+    } else if (race && this.state === 'play' && this.playT > RACE_T - 30) timer = clock(RACE_T - this.playT);
     const spectating = p && p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch` : undefined;
     if (spectating && (this.pressed.has('ArrowLeft') || this.pressed.has('KeyA'))) this.spectate--;
     if (spectating && (this.pressed.has('ArrowRight') || this.pressed.has('KeyD'))) this.spectate++;
@@ -1004,6 +1003,16 @@ function lerpAngle(a: number, b: number, k: number) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return a + d * k;
+}
+
+/** the round clocks: a race's time limit, how long a survival round lasts, the intro flyover */
+const RACE_T = 180;
+const SURVIVE_T = 110;
+const INTRO_T = 8;
+
+function clock(sec: number) {
+  const k = Math.max(0, Math.ceil(sec));
+  return `${Math.floor(k / 60)}:${String(k % 60).padStart(2, '0')}`;
 }
 
 function kindName(k: number) {
