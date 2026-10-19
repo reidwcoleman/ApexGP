@@ -183,3 +183,7 @@ body { font-family: var(--font); color: var(--ink); user-select: none; -webkit-u
 .card.compact .earn { font-size: 46px; margin: 2px 0 10px; }
 .card.compact .earn .coin-ico { width: 36px; height: 36px; }
 .card.compact .earn .coin-ico::after { inset: 8px; }
+
+#fade { position: fixed; inset: 0; z-index: 25; background: #0e1a10; opacity: 0; pointer-events: none; transition: opacity 0.65s ease; }
+#fade.on { opacity: 1; pointer-events: all; }
+#loading .lstep { text-align: center; margin-top: 14px; font-size: 15px; letter-spacing: 0.08em; opacity: 0.85; text-shadow: 0 2px 8px rgba(30, 90, 40, 0.4); }

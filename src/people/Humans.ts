@@ -164,6 +164,11 @@ let CORE = [...new Set([ROSTER.suit, ROSTER.crew, ROSTER.crewF, ROSTER.shirt, RO
 export function setPeopleCore(names: string[]) {
   CORE = names;
 }
+/** a game that wants only its CORE avatars (Apex Lawn: one gardener) can skip fetching the fans behind them */
+let LOAD_REST = true;
+export function setPeopleRest(on: boolean) {
+  LOAD_REST = on;
+}
 /** CORE avatars in their own everyday clothes: the fans until the fans' own avatars have loaded */
 const CASUAL_M = ['Male_Adult_07', 'Male_Adult_12', 'Male_Adult_10', 'Male_Adult_16', 'Male_Adult_11', 'Sports_Male_02'];
 const CASUAL_F = ['Pilot_Female_02'];
@@ -293,7 +298,7 @@ async function load(): Promise<PeopleKit> {
   kit.male = kit.asset(firstLoaded(kit, ROSTER.fansM));
   kit.female = kit.asset(firstLoaded(kit, ROSTER.fansF));
   // the rest behind
-  const rest = ALL.filter((n) => !avatars.has(n)).map((n) => loadAvatar(n).then((a) => void avatars.set(n, a)).catch((e) => console.warn('people:', n, e)));
+  const rest = (LOAD_REST ? ALL : []).filter((n) => !avatars.has(n)).map((n) => loadAvatar(n).then((a) => void avatars.set(n, a)).catch((e) => console.warn('people:', n, e)));
   kit.whenAll = Promise.all(rest).then(() => void (kit.complete = true));
   return kit;
 }

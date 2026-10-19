@@ -1,7 +1,10 @@
 /**
- * Where the mower can go: the lawn's tiles, the things standing on them, and a flood fill of
- * what the mower can actually reach (so every blade the player is asked to cut can be cut).
+ * Where the mower can go: the lawn's tiles (2 m squares), the things standing on them, and a flood
+ * fill of what the mower can actually reach (so every blade the player is asked to cut can be cut).
+ * Everything here is in metres, the lawn centred on the origin.
  */
+
+export const TS = 2;
 
 export interface Circle {
   t: 0;
@@ -25,10 +28,10 @@ export interface Hit {
 }
 
 /** Widest body the game ever drives; reach is judged with it so no mower is promised a blade it can't get. */
-export const REACH_BODY = 0.56;
+export const REACH_BODY = 0.66;
 /** Narrowest deck half-width: a cell within this of a reachable spot is a cell every mower can cut. */
-export const REACH_DECK = 0.64;
-export const COARSE = 0.2;
+export const REACH_DECK = 0.28;
+export const COARSE = 0.25;
 
 export function shapeGap(a: Shape, b: Shape): number {
   if (a.t === 0 && b.t === 0) return Math.hypot(a.x - b.x, a.z - b.z) - a.r - b.r;
@@ -47,11 +50,12 @@ function circleBox(c: Circle, b: Box): number {
 }
 
 export class Nav {
-  /** Tiles are 1x1; (0,0) of the grid is at (-w/2, -h/2). */
-  readonly shapes: Shape[] = [];
-  private readonly walls: Box[] = [];
+  readonly shapes: Shape[];
+  readonly walls: Box[] = [];
   readonly cw: number;
   readonly ch: number;
+  readonly width: number;
+  readonly depth: number;
   private reach: Uint8Array = new Uint8Array(0);
   private cover: Uint8Array = new Uint8Array(0);
 
@@ -62,6 +66,8 @@ export class Nav {
     obstacles: Shape[],
   ) {
     this.shapes = obstacles;
+    this.width = w * TS;
+    this.depth = h * TS;
     // boundary: every void tile (and the ring outside the grid) that touches a playable one is a wall
     for (let j = -1; j <= h; j++) {
       for (let i = -1; i <= w; i++) {
@@ -69,14 +75,14 @@ export class Nav {
         let near = false;
         for (let dj = -1; dj <= 1 && !near; dj++) for (let di = -1; di <= 1; di++) if (this.tile(i + di, j + dj)) near = true;
         if (near) {
-          const x0 = i - w / 2;
-          const z0 = j - h / 2;
-          this.walls.push({ t: 1, x0, z0, x1: x0 + 1, z1: z0 + 1 });
+          const x0 = i * TS - this.width / 2;
+          const z0 = j * TS - this.depth / 2;
+          this.walls.push({ t: 1, x0, z0, x1: x0 + TS, z1: z0 + TS });
         }
       }
     }
-    this.cw = Math.ceil(w / COARSE);
-    this.ch = Math.ceil(h / COARSE);
+    this.cw = Math.ceil(this.width / COARSE);
+    this.ch = Math.ceil(this.depth / COARSE);
   }
 
   tile(i: number, j: number): boolean {
@@ -84,15 +90,16 @@ export class Nav {
   }
   /** Is this point over a playable tile? */
   playable(x: number, z: number): boolean {
-    return this.tile(Math.floor(x + this.w / 2), Math.floor(z + this.h / 2));
+    return this.tile(Math.floor((x + this.width / 2) / TS), Math.floor((z + this.depth / 2) / TS));
   }
 
   /** Push a disc of radius R out of everything solid. Returns the deepest push, if any. */
   resolve(p: { x: number; z: number }, R: number): Hit | null {
     let best: Hit | null = null;
+    const n = this.shapes.length + this.walls.length;
     for (let pass = 0; pass < 3; pass++) {
       let any = false;
-      for (let k = 0; k < this.shapes.length + this.walls.length; k++) {
+      for (let k = 0; k < n; k++) {
         const s = k < this.shapes.length ? this.shapes[k] : this.walls[k - this.shapes.length];
         let nx = 0;
         let nz = 0;
@@ -171,8 +178,8 @@ export class Nav {
   computeReach(sx: number, sz: number) {
     const { cw, ch } = this;
     const free = new Uint8Array(cw * ch);
-    const ox = -this.w / 2;
-    const oz = -this.h / 2;
+    const ox = -this.width / 2;
+    const oz = -this.depth / 2;
     for (let j = 0; j < ch; j++) {
       for (let i = 0; i < cw; i++) {
         const x = ox + (i + 0.5) * COARSE;
@@ -186,7 +193,7 @@ export class Nav {
     const stack: number[] = [];
     // the start may sit a hair inside a blocked cell: begin at the nearest free one
     let found = -1;
-    for (let r = 0; r < 12 && found < 0; r++) {
+    for (let r = 0; r < 16 && found < 0; r++) {
       for (let dj = -r; dj <= r && found < 0; dj++) {
         for (let di = -r; di <= r; di++) {
           const i = si + di;
@@ -217,7 +224,8 @@ export class Nav {
     this.reach = reach;
     // cover: coarse cells within the narrowest deck of a reachable cell
     const cover = new Uint8Array(cw * ch);
-    const rr = Math.ceil(REACH_DECK / COARSE);
+    const rr = Math.ceil(REACH_DECK / COARSE) + 1;
+    const lim = REACH_DECK + COARSE * 0.75;
     for (let j = 0; j < ch; j++) {
       for (let i = 0; i < cw; i++) {
         let ok = 0;
@@ -226,7 +234,7 @@ export class Nav {
             const a = i + di;
             const b = j + dj;
             if (a < 0 || b < 0 || a >= cw || b >= ch || !reach[b * cw + a]) continue;
-            if (Math.hypot(di, dj) * COARSE <= REACH_DECK + COARSE * 0.5) {
+            if (Math.hypot(di, dj) * COARSE <= lim) {
               ok = 1;
               break;
             }
@@ -239,8 +247,8 @@ export class Nav {
   }
 
   private coarseIndex(x: number, z: number): number {
-    const i = Math.floor((x + this.w / 2) / COARSE);
-    const j = Math.floor((z + this.h / 2) / COARSE);
+    const i = Math.floor((x + this.width / 2) / COARSE);
+    const j = Math.floor((z + this.depth / 2) / COARSE);
     if (i < 0 || j < 0 || i >= this.cw || j >= this.ch) return -1;
     return j * this.cw + i;
   }
@@ -255,9 +263,6 @@ export class Nav {
   }
   /** Is this point inside an obstacle (grass doesn't grow there)? */
   solidAt(x: number, z: number, pad = 0): boolean {
-    return this.insideShape(x, z, pad);
-  }
-  private insideShape(x: number, z: number, pad: number): boolean {
     for (const s of this.shapes) {
       if (s.t === 0) {
         if (Math.hypot(x - s.x, z - s.z) < s.r + pad) return true;

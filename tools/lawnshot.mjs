@@ -27,7 +27,7 @@ const logs = [];
 page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warning' || m.text().startsWith('[lawn]')) logs.push(`[${m.type()}] ${m.text()}`);
 });
-page.on('pageerror', (e) => logs.push('[pageerror] ' + e.message));
+page.on('pageerror', (e) => logs.push('[pageerror] ' + (process.env.STACK ? e.stack : e.message)));
 await page.goto(`http://localhost:${port}/lawn.html?${query}`, { waitUntil: 'load' });
 try {
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });

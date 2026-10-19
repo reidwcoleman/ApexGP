@@ -717,35 +717,34 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
 
 ## Apex Lawn
 
-**▶ https://reidwcoleman.github.io/ApexGP/lawn.html** — a peaceful mowing game: drag to push a
-mower over a tiny floating lawn, the grass folds down in stripes, coins and flowers pop, and when the
-lawn is done the next one drops out of the sky. No timer, no failing; everything is generated in code
-(`src/lawn/`, no image, model or sound files).
+**▶ https://reidwcoleman.github.io/ApexGP/lawn.html** — a peaceful, realistic mowing game: push a
+mower over a real-looking garden, the grass folds down in stripes, coins and flowers pop, and when the
+lawn is done the next, bigger one fades in. No timer, no failing. Lawns run from 14 x 12 m to about
+50 x 36 m.
 
 - **Controls**: drag anywhere (a floating stick that follows your finger past its edge, so reversing is
-  instant), WASD / arrows, or a gamepad stick. The mower swings round to follow a wall while you push
-  against it, so edges and corners are easy. Esc pauses.
-- **Grass** (`lawn.ts`): tens of thousands of instanced tufts whose height and stripe tone come from a
-  mask texture the mower paints each frame (a swept rectangle the width of the deck). Cut cells fold
-  down over a tenth of a second, the stripe tone is the direction you drove as seen from the camera
-  (so passes alternate light and dark like a real lawn), tall grass sways and bends away from the
-  mower, and shadows from trees and hedges are baked into the same mask. The last 1.5% finishes itself
-  in a ripple of classic mowing stripes.
-- **Lawns** (`levels.ts`, `nav.ts`): lawn N is a pure function of N: a shape of 1x1 tiles (rectangle,
-  rounded, L, plus, blob, bridge) with rocks, trees, bushes, gnomes, flower beds, ponds with ducks,
-  hedges, fences, benches, picnic tables and lanterns, coins in lines and arcs, and flowers. Four themes
-  every three lawns (Meadow, Blossom, Harvest, Dusk) with their own sky, light, falling petals / leaves
-  or fireflies. A flood fill from the start decides what the widest mower can reach; whatever it can't
-  is never asked of the player, and obstacles that would wall off grass are dropped.
-- **Progress**: coins and flowers pay, each lawn pays a bonus (more if every coin and flower is
-  collected); the Shed sells four upgrades (engine, deck width, coin magnet, golden coins) and five
-  mowers (three push mowers with a gardener walking behind, two ride-ons). Saved in `localStorage`
+  instant), WASD / arrows, or a gamepad stick; wheel / Q / E zooms. The mower swings round to follow a
+  wall while you push against it. Esc pauses.
+- **Look**: a photographed HDR sky per time of day (Poly Haven, CC0, `public/lawn/`) lights the scene
+  with a real shadow-mapped sun aligned to the sky's own sun; the engine's scanned trees (wind, thin-leaf
+  light, crown AO), Rocketbox gardener, PBR fences / walls / house / patio, HalfFloat + MSAA + N8AO +
+  bloom + neutral tone mapping, an adaptive governor (`post.ts`). Trees between the camera and the
+  mower dissolve.
+- **Grass** (`grass.ts`, `mask.ts`): 4-blade tufts in 4 m chunks with per-tuft stochastic LOD around the
+  mower, custom translucent grass lighting. The mower paints a 20 cells/m mask texture (height + stripe
+  tone from the heading as seen from the camera) a row at a time; cut cells fold down in a tenth of a
+  second; the last 1.5% finishes itself in a ripple of classic stripes.
+- **Lawns** (`levels.ts`, `nav.ts`): lawn N is a pure function of N: tiled shapes with trees, bushes,
+  rocks, gnomes, flower beds, ponds, hedges, fences, sheds, benches, tables, lanterns; coins and
+  flowers; a house with a patio from lawn 4. Four times of day (morning, day, autumn, dusk). A flood
+  fill decides what the widest mower can reach, and obstacles that would wall off grass are dropped.
+- **Progress**: coins and flowers pay, each lawn pays a bonus; the Shed sells four upgrades and five
+  mowers (three push mowers with the gardener walking behind, two ride-ons). Saved in `localStorage`
   (`apexlawn.save.v1`).
-- **Sound** (`audio.ts`), all synthesised: engine, the cutter's shhh (rising with progress), coins on a
-  rising pentatonic scale for a chain, flower blips, bumps, a chime for a finished lawn, a soft
-  generative tune per theme, birds (crickets at dusk).
-- **Testing**: `?lawn=N` starts at lawn N, `?auto` has a bot drive; `tools/lawnshot.mjs <dir> "<query>"
-  step...` drives the page headlessly (until:, click via eval:, down:/move:/up: for the pointer).
+- **Sound** (`audio.ts`), all synthesised: engine, the cutter's shhh, coin chains, a generative tune.
+- **Assets**: `tools/fetch_lawn_assets.mjs` downloads and packs the Poly Haven models / textures / HDRIs.
+- **Testing**: `?lawn=N` starts at lawn N, `?auto` has a bot drive, `?noao` / `?dof` toggle post
+  effects; `tools/lawnshot.mjs <dir> "<query>" step...` drives the page headlessly.
 
 ## Controls
 

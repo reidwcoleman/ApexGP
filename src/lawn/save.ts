@@ -36,11 +36,11 @@ export interface MowerDef {
 }
 
 export const MOWERS: MowerDef[] = [
-  { id: 'classic', name: 'Classic', tagline: 'Reliable and red', price: 0, kind: 'push', body: '#e8452f', trim: '#2b2f3a', speed: 4.4, width: 1.3, radius: 0.4 },
-  { id: 'sprout', name: 'Sprout', tagline: 'Mint and cheerful', price: 260, kind: 'push', body: '#4fd0a0', trim: '#f4f1e6', speed: 4.8, width: 1.45, radius: 0.4 },
-  { id: 'breeze', name: 'Breeze', tagline: 'Quick and sky blue', price: 800, kind: 'push', body: '#4aa3ff', trim: '#ffffff', speed: 5.6, width: 1.5, radius: 0.4 },
-  { id: 'sunny', name: 'Sunny rider', tagline: 'Sit down, mow wide', price: 1800, kind: 'rider', body: '#ffc21a', trim: '#2b2f3a', speed: 5.2, width: 2.0, radius: 0.52 },
-  { id: 'royal', name: 'Royal rider', tagline: 'Fit for a very big lawn', price: 4200, kind: 'rider', body: '#8b5cf6', trim: '#ffd35a', speed: 6.4, width: 2.35, radius: 0.55 },
+  { id: 'classic', name: 'Classic', tagline: 'Reliable and red', price: 0, kind: 'push', body: '#d92b1d', trim: '#22252b', speed: 3.0, width: 0.56, radius: 0.32 },
+  { id: 'sprout', name: 'Sprout', tagline: 'Wider cut, mint green', price: 260, kind: 'push', body: '#2fbf8a', trim: '#e9ece6', speed: 3.5, width: 0.66, radius: 0.34 },
+  { id: 'breeze', name: 'Breeze', tagline: 'Quick and sky blue', price: 800, kind: 'push', body: '#2f7fe0', trim: '#f4f6fa', speed: 4.2, width: 0.76, radius: 0.34 },
+  { id: 'sunny', name: 'Sunny rider', tagline: 'Sit down, mow wide', price: 1800, kind: 'rider', body: '#f2b300', trim: '#22252b', speed: 4.8, width: 1.05, radius: 0.55 },
+  { id: 'royal', name: 'Royal rider', tagline: 'Fit for a very big lawn', price: 4200, kind: 'rider', body: '#6d3fd6', trim: '#d9b24a', speed: 6.2, width: 1.4, radius: 0.62 },
 ];
 
 export interface SaveData {
@@ -103,7 +103,7 @@ export function stats(s: SaveData) {
     mower: m,
     speed: m.speed * (1 + 0.075 * s.upgrades.speed),
     width: m.width * (1 + 0.065 * s.upgrades.width),
-    magnet: 0.78 + 0.42 * s.upgrades.magnet,
+    magnet: 1.5 + 0.8 * s.upgrades.magnet,
     coinValue: Math.round(5 * (1 + 0.3 * s.upgrades.value)),
   };
 }
