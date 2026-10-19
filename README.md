@@ -757,7 +757,17 @@ lawn is done the next, bigger one fades in. No timer, no failing. Lawns run from
 - **Progress**: coins and flowers pay, each lawn pays a bonus; the Shed sells four upgrades and five
   mowers (three push mowers with the gardener walking behind, two ride-ons). Saved in `localStorage`
   (`apexlawn.save.v1`).
-- **Sound** (`audio.ts`), all synthesised: engine, the cutter's shhh, coin chains, a generative tune.
+- **Sound** (`audio.ts`): real recordings (Wikimedia Commons, public domain / CC0 / CC BY, credits in
+  `public/lawn/sfx/CREDITS.txt`, cut by `tools/build_lawn_sounds.py`): a real mower in two gapless loops
+  (free-running and chewing grass) kept at one pitch and crossfaded by load, revs following speed and
+  throttle and dipping in thick grass, a pull-cord start and a spin-down; thuds by what was hit (wood,
+  stone, metal, leaves); real coin clinks climbing the scale; windchime / glockenspiel chimes; applause;
+  a birds / breeze / frogs bed per time of day. Synthesised on top: a grain of snipping per bit of lawn cut,
+  footsteps, UI ticks and the generative tune. `node tools/lawnaudio.mjs out.wav "lawn=3&auto" 20` records
+  the master bus headlessly and prints its levels.
+- **Meadow** (`meadow.ts`): the uncut field beyond the fences, tall dried tufts and wildflowers growing
+  right up to the boards; cut lawn carries the grain of a scanned turf map, clippings and drifting cloud
+  shadows.
 - **Assets**: `tools/fetch_lawn_assets.mjs` downloads and packs the Poly Haven models / textures / HDRIs.
 - **Testing**: `?lawn=N` starts at lawn N, `?auto` has a bot drive, `?noao` / `?dof` toggle post
   effects; `tools/lawnshot.mjs <dir> "<query>" step...` drives the page headlessly.

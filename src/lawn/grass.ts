@@ -214,16 +214,36 @@ export function makeGroundMaterial(u: GrassU, turfN: THREE.Texture, outside: boo
   float tall = mix(1.0, mk.r, inside);
   // the root layer under long grass is dark; cut ground is the stripe's colour
   vec3 c = lawnColour(vWp, 0.18 + 0.1 * gNoise(vWp * 5.0), gNoise(vWp * 3.0), tall, mk.g);
-  ${outside ? 'c = mix(c, uDry * 0.8, 0.25 + 0.3 * gFbm(vWp * 0.07)); c *= 0.9;' : ''}
+  ${outside ? `c = mix(c, uDry * 0.8, 0.25 + 0.3 * gFbm(vWp * 0.07));
+  c = mix(c, uDry * 0.7, smoothstep(0.5, 0.82, gFbm(vWp * 0.035 + 5.0)) * 0.45);
+  // the stalks and tussocks of the field, as seen from further off than the tufts reach
+  float fine = gNoise(vWp * vec2(5.0, 7.0)) * 0.45 + gNoise(vWp * vec2(19.0, 23.0)) * 0.35 + gNoise(vWp * 2.3) * 0.2;
+  c *= (0.78 + 0.5 * fine) * 0.92;` : ''}
   // the grain of real turf on the cut ground: a scanned colour map at two scales, as light and dark only
   float g1 = dot(texture2D(uTurfC, vWp / 1.4).rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.0716;
   float g2 = dot(texture2D(uTurfC, vWp / 4.3 + 0.37).rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.0716;
   c *= mix(pow(clamp(g1 * g2, 0.25, 4.0), 0.27), 1.0, tall * 0.85);
+  ${outside ? '' : `// clippings lying on the cut lawn: pale slivers lying every which way
+  {
+    vec2 cp = vWp * 27.0;
+    vec2 cell = floor(cp);
+    vec2 fr = fract(cp) - 0.5;
+    float h1 = gHash(cell + 3.1);
+    float h2 = gHash(cell + 17.7);
+    float a = h2 * 6.2832;
+    vec2 d = vec2(cos(a), sin(a));
+    float along = dot(fr, d);
+    float across = dot(fr, vec2(-d.y, d.x));
+    float sliver = smoothstep(0.42, 0.28, abs(along)) * smoothstep(0.1, 0.03, abs(across));
+    float on = step(0.78, h1) * smoothstep(0.1, 0.55, mk.b) * (1.0 - tall);
+    vec3 clipC = mix(uTipA, uDry, 0.35 + 0.4 * h2) * (1.0 + 0.4 * h1);
+    c = mix(c, clipC, sliver * on * 0.75);
+  }`}
   diffuseColor.rgb = c * (${outside ? '0.8' : '0.62'} + 0.38 * smoothstep(0.0, 1.0, 1.0 - tall));
 }`,
       );
   };
-  m.customProgramCacheKey = () => (outside ? 'lawn-ground-out-v2' : 'lawn-ground-v2');
+  m.customProgramCacheKey = () => (outside ? 'lawn-ground-out-v3' : 'lawn-ground-v3');
   return m;
 }
 

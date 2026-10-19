@@ -104,7 +104,7 @@ export class GameAudio {
     const ctx = new AC();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this.sound ? 1.15 : 0;
+    this.master.gain.value = this.sound ? 1.0 : 0;
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -12;
     comp.knee.value = 14;
@@ -244,7 +244,7 @@ export class GameAudio {
 
   setSound(on: boolean) {
     this.sound = on;
-    if (this.ctx) this.master.gain.setTargetAtTime(on ? 1.15 : 0, this.ctx.currentTime, 0.05);
+    if (this.ctx) this.master.gain.setTargetAtTime(on ? 1.0 : 0, this.ctx.currentTime, 0.05);
   }
   setMusic(on: boolean) {
     this.music = on;
@@ -357,7 +357,7 @@ export class GameAudio {
     this.gLo.gain.setTargetAtTime(1 - load * 0.85, t, 0.12);
     this.gHi.gain.setTargetAtTime(0.2 + load * 0.95, t, 0.1);
     this.engFilter.frequency.setTargetAtTime(2600 + this.rpm * 2200 + cutting * 1200, t, 0.1);
-    this.engGain.gain.setTargetAtTime(0.62 + this.rpm * 0.5 + cutting * 0.15, t, 0.1);
+    this.engGain.gain.setTargetAtTime(0.52 + this.rpm * 0.4 + cutting * 0.08, t, 0.1);
     this.rollFilter.frequency.setTargetAtTime(900 + speed01 * 1700, t, 0.1);
     this.rollGain.gain.setTargetAtTime(speed01 * 0.05, t, 0.12);
     this.bedBus.gain.setTargetAtTime(0.28, t, 0.5);

@@ -2,6 +2,7 @@
  * The mowing mask: a texture the size of the lawn (20 cells a metre) that the mower paints.
  *   R  how tall the grass still is (255 uncut, 0 cut), eased down over a tenth of a second
  *   G  the stripe tone of what has been cut (the direction it was driven, seen from the camera)
+ *   B  the clippings lying where it was cut (the ground draws them as flecks)
  * and a CPU copy of the state to count progress, find flowers and coins' ground, and drive the
  * finishing ripple. Only the rows the mower touched are re-uploaded.
  */
@@ -182,6 +183,7 @@ export class MaskField {
           this.active.push(k);
           this.done++;
           newCells.push(k);
+          this.data[k * 4 + 2] = 130 + ((k * 2654435761) >>> 25);
         }
       }
     }
@@ -242,6 +244,7 @@ export class MaskField {
           this.done++;
           // the classic mowing stripes, a metre wide
           this.data[k * 4 + 1] = (Math.floor((p.z + this.H / 2) / 1.0) & 1) * 255;
+          this.data[k * 4 + 2] = 150;
           this.d.full = true;
           if (n++ < 60) newCells.push(k);
         }
