@@ -3,8 +3,9 @@ import { Bot } from './ai.ts';
 import { Sound } from './audio.ts';
 import { buildRound, SHOW, type Course } from './courses.ts';
 import { Confetti, Splashes } from './fx.ts';
+import { Caustics } from './fx-caustics.ts';
 import { Marble, RADIUS } from './physics.ts';
-import { Stage } from './render.ts';
+import { Stage, SUN } from './render.ts';
 import { DESIGNS, marbleMaterial } from './shaders.ts';
 import { ordinal, UI, type Row } from './ui.ts';
 
@@ -74,6 +75,7 @@ export class MarbleGame {
   private camLook = new THREE.Vector3();
   private spectate = 0;
   private confetti = new Confetti();
+  private caustics = new Caustics(48);
   private splashes = new Splashes();
   private timeScale = 1;
   private slowUntil = 0;
@@ -102,7 +104,7 @@ export class MarbleGame {
     const r = this.renderer;
     progress(0.1, 'Mixing the paint');
     this.stage = new Stage(r, this.scene, this.camera);
-    this.scene.add(this.confetti.mesh, this.splashes.group);
+    this.scene.add(this.confetti.mesh, this.splashes.group, this.caustics.mesh);
     progress(0.3, 'Laying the planks');
     this.resize();
     // the menu's backdrop: the first course with marbles rolling about the start
@@ -794,6 +796,14 @@ export class MarbleGame {
       const s = o.userData.giant as number | undefined;
       if (s) u.uRotW!.value.multiplyScalar(1);
     });
+    // the light through the glass: tinted shadows, the lens's bright focus
+    const statics = this.course!.b.world.statics;
+    this.caustics.update(
+      this.racers.filter((r) => r.mesh.visible).map((r) => ({ pos: r.m.pos, design: DESIGNS[r.c.design] })),
+      SUN,
+      (x, y, z, d) => statics.floorBelow(x, y, z, d),
+      this.camLook,
+    );
     this.stage.update(dt, t);
     this.confetti.update(dt, t);
     this.splashes.update(dt);
@@ -995,7 +1005,7 @@ function lerpAngle(a: number, b: number, k: number) {
 }
 
 function kindName(k: number) {
-  return ["Cat's eye", 'Ribbon', 'Galaxy', 'Candy', 'Bubble glass', 'Lava core', 'Rainbow vane', 'Opal'][k] ?? 'Glass';
+  return ["Cat's eye", 'Ribbon', 'Galaxy', 'Candy', 'Bubble glass', 'Lava core', 'Rainbow vane', 'Opal', 'Swirl', 'Mica', 'Pearl'][k] ?? 'Glass';
 }
 
 function disposeGroup(g: THREE.Object3D) {
