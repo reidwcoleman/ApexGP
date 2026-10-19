@@ -715,6 +715,38 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
   `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
   captures several camera views in one session.
 
+## Apex Lawn
+
+**▶ https://reidwcoleman.github.io/ApexGP/lawn.html** — a peaceful mowing game: drag to push a
+mower over a tiny floating lawn, the grass folds down in stripes, coins and flowers pop, and when the
+lawn is done the next one drops out of the sky. No timer, no failing; everything is generated in code
+(`src/lawn/`, no image, model or sound files).
+
+- **Controls**: drag anywhere (a floating stick that follows your finger past its edge, so reversing is
+  instant), WASD / arrows, or a gamepad stick. The mower swings round to follow a wall while you push
+  against it, so edges and corners are easy. Esc pauses.
+- **Grass** (`lawn.ts`): tens of thousands of instanced tufts whose height and stripe tone come from a
+  mask texture the mower paints each frame (a swept rectangle the width of the deck). Cut cells fold
+  down over a tenth of a second, the stripe tone is the direction you drove as seen from the camera
+  (so passes alternate light and dark like a real lawn), tall grass sways and bends away from the
+  mower, and shadows from trees and hedges are baked into the same mask. The last 1.5% finishes itself
+  in a ripple of classic mowing stripes.
+- **Lawns** (`levels.ts`, `nav.ts`): lawn N is a pure function of N: a shape of 1x1 tiles (rectangle,
+  rounded, L, plus, blob, bridge) with rocks, trees, bushes, gnomes, flower beds, ponds with ducks,
+  hedges, fences, benches, picnic tables and lanterns, coins in lines and arcs, and flowers. Four themes
+  every three lawns (Meadow, Blossom, Harvest, Dusk) with their own sky, light, falling petals / leaves
+  or fireflies. A flood fill from the start decides what the widest mower can reach; whatever it can't
+  is never asked of the player, and obstacles that would wall off grass are dropped.
+- **Progress**: coins and flowers pay, each lawn pays a bonus (more if every coin and flower is
+  collected); the Shed sells four upgrades (engine, deck width, coin magnet, golden coins) and five
+  mowers (three push mowers with a gardener walking behind, two ride-ons). Saved in `localStorage`
+  (`apexlawn.save.v1`).
+- **Sound** (`audio.ts`), all synthesised: engine, the cutter's shhh (rising with progress), coins on a
+  rising pentatonic scale for a chain, flower blips, bumps, a chime for a finished lawn, a soft
+  generative tune per theme, birds (crickets at dusk).
+- **Testing**: `?lawn=N` starts at lawn N, `?auto` has a bot drive; `tools/lawnshot.mjs <dir> "<query>"
+  step...` drives the page headlessly (until:, click via eval:, down:/move:/up: for the pointer).
+
 ## Controls
 
 | | Keyboard | Gamepad |
@@ -757,6 +789,7 @@ src/
            upsampled depth-aware so cars in spray keep clean outlines), SkidMarks (rubber, offs, braking
            film, marbles)
   ui/      HUD, Menu, design tokens
+  lawn/    Apex Lawn (lawn.html): Lawn (grass mask + instanced tufts), Mower, levels / nav, props, fx, audio, UI
   core/    Renderer (post chain: N8AO, TAA, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
            PBR Neutral / ACES-fit by look, film print + grain, SMAA below High, lens + sharpen;
            adaptive resolution that never trusts Apple's GPU timer), Input, Audio

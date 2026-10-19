@@ -123,6 +123,10 @@
           <span class="pk-art"></span>
           <span class="pk-txt"><span class="pk-k">3</span><b>Marble Mania</b><i>Party knockout</i><em>24 glass marbles, wooden courses, 4 rounds and 1 crown</em></span>
         </button>
+        <button class="pk-card" data-game="lawn" style="--art: url(loading/lawn_diorama.webp); --acc: #7be86a">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">4</span><b>Apex Lawn</b><i>Peaceful mowing</i><em>Mow stripes into tiny floating lawns, one more lawn at a time</em></span>
+        </button>
       </div>
       <div class="pk-foot">Only the game you pick is loaded</div>
     </div>
@@ -133,7 +137,7 @@
       #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
       #picker .pk-logo span { color: #ff2b3f; }
       #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
-      #picker .pk-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2vw; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2vw; }
       #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
       #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
       #picker .pk-art { position: absolute; inset: 0; background: var(--art) center / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
@@ -146,6 +150,10 @@
       #picker .pk-k { position: absolute; top: -34px; right: 20px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; font-weight: 700; background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.8); }
       #picker .pk-last::before { content: "Last played"; position: absolute; top: 14px; left: 14px; z-index: 2; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: 8px; background: var(--acc); color: #06070a; }
       #picker .pk-foot { font-size: 13px; color: rgba(255, 255, 255, 0.35); letter-spacing: 0.04em; }
+      @media (max-width: 1100px) and (min-width: 761px) {
+        #picker .pk-cards { grid-template-columns: repeat(2, 1fr); }
+        #picker .pk-card { aspect-ratio: 16 / 9; min-height: 0; }
+      }
       @media (max-width: 760px) {
         #picker { justify-content: flex-start; }
         #picker .pk-cards { grid-template-columns: 1fr; }
@@ -154,7 +162,7 @@
     </style>
     <script>
       // the game picker, before anything heavy: the racing game's loader, its pictures and its
-      // downloads only start once it's picked; Miami and Marble Mania are pages of their own.
+      // downloads only start once it's picked; Miami, Marble Mania and Apex Lawn are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
       (function () {
         var go;
@@ -178,6 +186,7 @@
           try { localStorage.setItem('apexgp.pick', g); } catch (e) {}
           if (g === 'miami') location.href = 'miami.html';
           else if (g === 'marbles') location.href = 'marbles.html';
+          else if (g === 'lawn') location.href = 'lawn.html';
           else start();
         };
         cards.forEach(function (c) {
@@ -187,7 +196,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles', Digit4: 'lawn' }[e.code];
           if (n) pick(n);
         });
       })();
