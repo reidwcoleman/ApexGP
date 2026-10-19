@@ -11,7 +11,9 @@
     "shot": "node tools/shot.mjs"
   },
   "dependencies": {
+    "@fontsource/fredoka": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/lilita-one": "^5.3.0",
     "@fontsource/titillium-web": "^5.3.0",
     "n8ao": "^2.0.1",
     "postprocessing": "^6.39.5",

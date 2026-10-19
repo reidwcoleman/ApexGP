@@ -4,6 +4,12 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
+The site opens on a game picker — **Apex GP** (this racing game), **Miami** (the open world) and
+**Marble Mania** (a marble knockout show) — and only the game you pick is loaded: the racing game's
+loader, pictures and bundle wait behind the picker (`src/boot.ts`); Miami and Marble Mania are
+pages of their own. Links with parameters, the test tools and the desktop build skip it; `?pick`
+forces it.
+
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
 **Almost everything is generated in code at startup** — the circuits, the cars and their liveries,
@@ -671,6 +677,43 @@ Research: [Tesla Roadster (second generation)](https://en.wikipedia.org/wiki/Tes
 [The EV Report on the cold-gas thrusters](https://theevreport.com/tesla-roadster-unveil-spacex-cold-gas-thrusters),
 [List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
 [CTBUH Skyscraper Center: Miami](https://www.skyscrapercenter.com/city/miami).
+
+## Marble Mania
+
+**▶ https://reidwcoleman.github.io/ApexGP/marbles.html** — a knockout show for 24 glass marbles on
+wooden courses, everything generated in code (`src/marbles/`; no image, model or sound files).
+
+- **The show**: Timber Tumble (race, about two thirds qualify), Paint Mill (race), Jump Club
+  (survival: hop the low bar, never jump into the high one that rises 15 s in, the bars
+  speeding up) and Crown Summit (the final: first across the line takes the crown). Out of the
+  show, you can watch it to the end (←/→ switches marble). 23 bots of mixed skill.
+- **Courses**: a turtle path (straights and arcs with slope, width, walls and banking, all eased)
+  swept into a bent-plank chute — maple boards along the floor curving up the walls on fillets,
+  walnut rails, cut ends at the gaps — on trestles down into a sea of marbled paint. The same
+  triangles are the physics. Obstacles are painted wood on analytic colliders whose pose is a
+  function of time: candy pegs, pinball bumpers, sweepers, swinging hammers on gantries, a
+  turntable with paddles, sliding blocks, a wall of rising doors, launch ramps over gaps.
+- **Physics** (`physics.ts`): solid spheres with real rolling (I = 2/5·m·r², friction impulses at
+  the contact point: a sliding marble spins up, a spinning one grabs when it lands, a turntable
+  carries it), restitution per surface, marble-on-marble impacts with glass friction, 240 Hz
+  substeps. You roll by torque (like the marble drives itself), with a hop and a dash.
+- **Bots** (`ai.ts`): look ahead along the course, ask each obstacle where it will be when they
+  arrive, pick the clearest line (inside of the bend for the skilled ones), wait for a hammer,
+  time jumps over gaps and bars with errors that shrink with skill, barge with a dash.
+- **Looks** (`shaders.ts`): wood with real grain (growth rings cut at a slant, streaks, pores, each
+  board its own log and tint, staggered butt joints, seams as grooves) under varnish; enamel
+  paint in stripes / rings / dots / checks / spirals / chevrons with brush streaks and chips to
+  the wood; glass marbles ray-marched inside in their own frame (cat's-eye vanes, ribbons,
+  galaxies, candy, bubbles, lava, opal) with the sky or the warm wood refracted through.
+  N8AO, bloom, neutral tone mapping, SMAA; adaptive resolution.
+- **Sound** (`audio.ts`), all synthesised: the glass-on-glass clack (five inharmonic modes of a
+  glass sphere around 3–4 kHz plus a contact click), the hollow knock of glass on the wooden
+  chute (the board's modes and box resonance plus the marble's own tick), painted blocks that
+  knock like temple blocks, rolling rumble per marble with the grain in it, bumper dings, paint
+  splashes, a crowd, and a marimba soundtrack.
+- **Testing**: `?round=N&auto=1&go=1[&cut=K]` jumps into a round with a bot driving you;
+  `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
+  captures several camera views in one session.
 
 ## Controls
 

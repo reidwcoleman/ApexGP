@@ -44,7 +44,8 @@
     <script>
       // the loading pictures, before the bundle has even parsed: a slideshow that starts on a
       // different picture every visit, a new one every 5 s, each fading out over the next (keep in step with src/ui/loadingArt.ts BOOT_ART)
-      (function () {
+      // (run once the racing game is picked: the picker below decides)
+      window.__apexArt = function () {
         var L = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa_rain', 'interlagos_rain', 'suzuka_dusk', 'hungaroring_golden', 'melbourne_golden', 'silverstone_drizzle', 'mexico_golden', 'monza_sunset', 'monza_rain'];
         var i = 0;
         try {
@@ -82,13 +83,13 @@
           else setTimeout(function (im, src) { return function () { if (im.isConnected) im.src = src; }; }(im, src), Math.max(0, (k * SLOT - FADE - 3) * 1000));
           box.insertBefore(im, box.firstChild);
         }
-      })();
+      };
     </script>
     <script>
       // the garage's people (src/people/Humans.ts CORE, and their animation clips) start downloading
       // now, beside the bundle, instead of after it has parsed: rocketbox.ts fetches the same URLs and
       // picks these responses up (keep the list in step with CORE)
-      (function () {
+      window.__apexPreload = function () {
         var B = 'models/rocketbox/';
         var hair = { Gardener_Male_01: 1, Male_Adult_07: 1, Male_Adult_10: 1 };
         var core = ['Gardener_Male_01', 'Pilot_Female_01', 'Pilot_Male_03', 'Pilot_Female_02', 'Sports_Male_01', 'Sports_Male_02', 'Male_Adult_07', 'Male_Adult_10', 'Male_Adult_12', 'Male_Adult_11', 'Male_Adult_16'];
@@ -105,8 +106,92 @@
           l.href = B + u;
           document.head.appendChild(l);
         });
+      };
+    </script>
+    <div id="picker" hidden>
+      <div class="pk-head"><div class="pk-logo">Apex <span>GP</span></div><div class="pk-ask">Pick a game</div></div>
+      <div class="pk-cards">
+        <button class="pk-card" data-game="f1" style="--art: url(loading/yas_chase.webp); --acc: #ff2b3f">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">1</span><b>Apex GP</b><i>Formula racing</i><em>Career, grand prix weekends and time trials on real circuits</em></span>
+        </button>
+        <button class="pk-card" data-game="miami" style="--art: url(loading/miami_rocket.webp); --acc: #ff4f9a">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">2</span><b>Miami</b><i>Open world</i><em>The Roadster from Brickell to South Beach, with the police on your tail</em></span>
+        </button>
+        <button class="pk-card" data-game="marbles" style="--art: url(loading/marbles_grid.webp) 50% 80%; --acc: #ffd23a">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">3</span><b>Marble Mania</b><i>Party knockout</i><em>24 glass marbles, wooden courses, 4 rounds and 1 crown</em></span>
+        </button>
+      </div>
+      <div class="pk-foot">Only the game you pick is loaded</div>
+    </div>
+    <style>
+      #picker { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; justify-content: center; gap: 4vh; padding: 5vh 5vw; box-sizing: border-box; overflow: auto; background: radial-gradient(90% 70% at 50% 0%, #1a1d29 0%, #06070a 70%); color: #fff; font-family: "Titillium Web", "Arial Narrow", Arial, sans-serif; }
+      #picker[hidden] { display: none; }
+      #picker .pk-head { display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap; }
+      #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
+      #picker .pk-logo span { color: #ff2b3f; }
+      #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2vw; }
+      #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
+      #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
+      #picker .pk-art { position: absolute; inset: 0; background: var(--art) center / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
+      #picker .pk-card:hover .pk-art { transform: scale(1.1); }
+      #picker .pk-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6, 7, 10, 0) 35%, rgba(6, 7, 10, 0.92) 88%); }
+      #picker .pk-txt { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 4px; }
+      #picker .pk-txt b { font-size: clamp(26px, 2.8vw, 40px); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; }
+      #picker .pk-txt i { font-style: normal; font-size: 13px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--acc); }
+      #picker .pk-txt em { font-style: normal; font-size: 15px; line-height: 1.35; color: rgba(255, 255, 255, 0.72); margin-top: 4px; }
+      #picker .pk-k { position: absolute; top: -34px; right: 20px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; font-weight: 700; background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.8); }
+      #picker .pk-last::before { content: "Last played"; position: absolute; top: 14px; left: 14px; z-index: 2; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: 8px; background: var(--acc); color: #06070a; }
+      #picker .pk-foot { font-size: 13px; color: rgba(255, 255, 255, 0.35); letter-spacing: 0.04em; }
+      @media (max-width: 760px) {
+        #picker { justify-content: flex-start; }
+        #picker .pk-cards { grid-template-columns: 1fr; }
+        #picker .pk-card { aspect-ratio: 16 / 9; min-height: 0; }
+      }
+    </style>
+    <script>
+      // the game picker, before anything heavy: the racing game's loader, its pictures and its
+      // downloads only start once it's picked; Miami and Marble Mania are pages of their own.
+      // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
+      (function () {
+        var go;
+        window.__apexPick = new Promise(function (r) { go = r; });
+        var q = location.search;
+        var skip = q.indexOf('pick') < 0 && (location.protocol === 'app:' || navigator.webdriver || q.length > 1);
+        var start = function () {
+          var p = document.getElementById('picker');
+          if (p) p.remove();
+          window.__apexArt();
+          window.__apexPreload();
+          go();
+        };
+        if (skip) return start();
+        var pk = document.getElementById('picker');
+        pk.hidden = false;
+        var last = null;
+        try { last = localStorage.getItem('apexgp.pick'); } catch (e) {}
+        var cards = pk.querySelectorAll('.pk-card');
+        var pick = function (g) {
+          try { localStorage.setItem('apexgp.pick', g); } catch (e) {}
+          if (g === 'miami') location.href = 'miami.html';
+          else if (g === 'marbles') location.href = 'marbles.html';
+          else start();
+        };
+        cards.forEach(function (c) {
+          if (c.getAttribute('data-game') === last) c.classList.add('pk-last');
+          c.addEventListener('click', function () { pick(c.getAttribute('data-game')); });
+        });
+        (pk.querySelector('.pk-last') || cards[0]).focus();
+        window.addEventListener('keydown', function k(e) {
+          if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
+          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles' }[e.code];
+          if (n) pick(n);
+        });
       })();
     </script>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>
