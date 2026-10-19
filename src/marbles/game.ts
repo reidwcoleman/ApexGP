@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Bot } from './ai.ts';
+import { courseAI } from './ai-course.ts';
 import { Sound } from './audio.ts';
 import { buildRound, SHOW, type Course } from './courses.ts';
 import { Confetti, Splashes } from './fx.ts';
@@ -287,6 +288,7 @@ export class MarbleGame {
     this.preview = null;
     this.ui.clearTags();
     const c = (this.course = buildRound(SHOW[idx].id));
+    if (c.path) courseAI(c);
     this.scene.add(c.b.group);
     this.splashes.y = c.lakeY;
     const ctr = c.path ? c.path.P[Math.floor(c.path.count / 2)] : c.plate!.center;
