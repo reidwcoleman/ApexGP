@@ -708,6 +708,12 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
   for a spread of lines and paces against every obstacle's future pose, the floor and the others;
   steering is damped with bend feed-forward. On the plates they time hops per frame against both
   bars. Skill scales pace, nerve, timing error, lapses and dashes.
+- **Difficulty and styles** (`ai-style.ts`): the menu's BOTS setting (Easy, Normal, Hard, Insane;
+  remembered, `?diff=` for tests) sets the field's skill spread and an edge on top (reactions,
+  timing, nerve, dashes). Every bot has a style, shown on the results: a Racer, a Bruiser who
+  shoves (into walls too), a Daredevil who runs hot, stands near the plate's edge and nearly
+  always takes the shortcut, a Steady one who leaves room and takes the safe way, and a Closer
+  who saves its dashes for the last stretch.
 - **Looks** (`shaders.ts`, `fx*.ts`): lacquered wood with board-by-board grain that calms with
   distance, candy enamel with crisp patterns and raised chips, glass marbles ray-marched inside
   (18 designs) with dispersion and a sun focus, coloured caustic shadows, foil confetti and paint
@@ -723,7 +729,7 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
 - **Testing**: `?round=N&auto=1&go=1[&cut=K]` jumps into a round with a bot driving you;
   `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
   captures several camera views in one session; `tools/marblebench.mjs` races every round
-  headless and reports times, falls, skill ordering and AI cost.
+  headless (`--diff` for the difficulty) and reports times, falls, skill ordering and AI cost.
 
 ## Apex Lawn
 

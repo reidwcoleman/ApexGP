@@ -253,6 +253,8 @@ export class CourseBuilder {
   readonly obstacles: Obstacle[] = [];
   /** shapes the AI steers round */
   readonly hazards: Kin[] = [];
+  /** the forks (path s range, and the laterals of the shortcut and the safe way) for the AI */
+  readonly splits: { s0: number; s1: number; fast: number; safe: number }[] = [];
   readonly batch = new Batch();
   readonly floorWood = woodMaterial(SPECIES.maple, 0.75);
   readonly railWood = woodMaterial(SPECIES.walnut, 0.8);

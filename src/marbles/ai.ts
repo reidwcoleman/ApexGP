@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
+import { STYLES, type Style } from './ai-style.ts';
 import type { Course } from './courses.ts';
 import { GRAVITY, JUMP_V, RADIUS, type Marble } from './physics.ts';
 
@@ -18,6 +19,9 @@ import { GRAVITY, JUMP_V, RADIUS, type Marble } from './physics.ts';
  * out of a scrum, and (an aggressive one) into a rival who's nearer an open edge than it is.
  * Its mistakes shrink with skill: a misjudged clock on the obstacles, a slower glance ahead, a
  * looser line and less pace, corners taken a bit hot, the odd lapse of concentration.
+ * Each has a style (ai-style.ts): a Bruiser shoves, a Daredevil runs hot and close to the edge, a
+ * Steady one leaves room, a Closer saves its dashes for the end. `boost` (the hardest settings) is an
+ * edge on top of skill: quicker, sharper, braver.
  * On the plate (survival) it hands over to PlateBrain.
  */
 
@@ -75,30 +79,36 @@ export class Bot {
   private stuckT = 0;
   private sMark = 0;
   private sMarkT = 0;
+  /** how long it's been waiting on purpose (a wait that never ends is a stall: go anyway) */
+  private waitT = 0;
   private plate: PlateBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
   private riding = false;
+  /** the lane it's chosen at each fork (lateral; NaN: not chosen yet) */
+  private lanes: number[] = [];
   constructor(
     readonly m: Marble,
     readonly skill: number,
     seed: number,
+    readonly style: Style = STYLES.racer,
+    readonly boost = 0,
   ) {
     let s = (seed * 9301 + 49297) % 2147483647;
     if (s <= 0) s += 2147483646;
     this.rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-    const k = skill;
-    this.aggr = this.rnd();
+    const k = skill, st = style, b = boost;
+    this.aggr = st.aggr[0] + (st.aggr[1] - st.aggr[0]) * this.rnd();
     this.bias = (this.rnd() - 0.5) * 0.8;
     this.pace = 0.86 + 0.14 * k;
-    this.cornerK = 0.62 + 0.38 * k;
+    this.cornerK = 0.62 + 0.38 * k + st.corner + 0.03 * b;
     this.lineUse = 0.35 + 0.65 * k;
-    this.thinkDt = 0.07 + (1 - k) * 0.16;
-    this.tSigma = 0.02 + (1 - k) * 0.4;
-    this.margin = 0.12 + (1 - k) * 0.45;
-    this.jumpSigma = 0.004 + (1 - k) * 0.07;
-    this.dashUse = Math.max(0, (k - 0.35) / 0.62) ** 1.5;
-    this.react = 0.03 + (1 - k) * (0.1 + this.rnd() * 0.3);
-    this.nerve = 12 + 16 * k;
+    this.thinkDt = (0.07 + (1 - k) * 0.16) * (1 - 0.3 * b);
+    this.tSigma = (0.02 + (1 - k) * 0.4) * (1 - 0.5 * b);
+    this.margin = (0.12 + (1 - k) * 0.45) * st.margin;
+    this.jumpSigma = (0.004 + (1 - k) * 0.07) * (1 - 0.4 * b);
+    this.dashUse = Math.min(1.6, (Math.max(0, (k - 0.35) / 0.62) ** 1.5 + 0.25 * b) * st.dash);
+    this.react = (0.03 + (1 - k) * (0.1 + this.rnd() * 0.3)) * (1 - 0.6 * b);
+    this.nerve = 12 + 16 * k + st.nerve + 4 * b;
     this.newJumpErr();
   }
 
@@ -118,6 +128,19 @@ export class Bot {
     this.nextThink = 0;
     this.stuckT = 0;
     this.sMarkT = 0;
+    this.lanes = [];
+  }
+
+  /** shortcut or safe way: a daredevil nearly always gambles, a steady one nearly never, the rest
+   * by skill (and the hardest settings gamble more) */
+  private lane(c: Course, k: number) {
+    if (this.lanes[k] === undefined) {
+      const sp = c.b.splits[k];
+      const st = this.style.id;
+      const base = st === 'daredevil' ? 0.9 : st === 'steady' ? 0.08 : st === 'bruiser' ? 0.35 : 0.2 + 0.5 * this.skill;
+      this.lanes[k] = this.rnd() < Math.min(0.97, base + 0.3 * this.boost) ? sp.fast : sp.safe;
+    }
+    return this.lanes[k];
   }
 
   update(dt: number, t: number, c: Course, all: Marble[]) {
@@ -129,7 +152,7 @@ export class Bot {
     m.input.set(0, 0, 0);
     if (!m.active || m.frozen) return;
     if (c.plate) {
-      this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr);
+      this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);
       return this.plate.update(dt, t, c, all);
     }
     if (t < c.state.go + this.react) return;
@@ -151,7 +174,7 @@ export class Bot {
       return;
     }
     const lapse = t < this.lapseEnd;
-    if (!lapse && this.rnd() < (1 - this.skill) ** 2 * dt * 0.22) this.lapseEnd = t + 0.4 + this.rnd() * 0.6;
+    if (!lapse && this.rnd() < (1 - this.skill) ** 2 * dt * 0.22 * this.style.lapse) this.lapseEnd = t + 0.4 + this.rnd() * 0.6;
     if (t >= this.nextThink && !lapse) {
       // (nothing ahead but chute and nobody near: a glance now and then will do)
       const busy = this.think(t, A, s, lat, vAlong, vLat, m.groundT < 0.08, all);
@@ -209,16 +232,19 @@ export class Bot {
     // ---- dashes
     if (m.dashCD <= 0 && m.grounded && !lapse && this.mode === 0) {
       const aligned = Math.abs(vLat) < 3 && (!open || Math.abs(latGoal - lat) < 0.7);
-      const finish = s > A.finishS - 45;
+      // (a closer goes all in over the last stretch, and holds back before it)
+      const late = this.style.late;
+      const finish = s > A.finishS - (late ? A.finishS * 0.3 : 45);
+      const hold = late && s < A.finishS * 0.55 ? 0.35 : 1;
       // (the speed profile is already braked back from every bend: under it here, a dash is free speed)
       const room = Math.min(A.vcap[A.index(s + 1.5)], A.vcap[A.index(s + 5)]) * this.cornerK;
       const straight = Math.abs(A.kap[A.index(s + 4)]) < 0.035 && Math.abs(A.kap[A.index(s + 10)]) < 0.05;
       const runUp = jumping && s < J!.s0 && vAlong < J!.vNeed + 2;
       const clear = this.planHit < 0.05 && Math.min(room, this.nerve) > vAlong + 7 - 6 * this.skill && straight && !(jumping && !runUp);
-      if (aligned && (clear || runUp || (finish && room > vAlong + 4)) && this.rnd() < this.dashUse * dt * (finish || runUp ? 12 : 4)) {
+      if (aligned && (clear || runUp || (finish && room > vAlong + 4)) && this.rnd() < this.dashUse * hold * dt * (finish || runUp ? 12 : 4)) {
         m.input.set(tx, 0, tz).addScaledVector(TMP.set(rx, 0, rz), THREE.MathUtils.clamp((latGoal - lat) * 0.15, -0.2, 0.2)).normalize();
         m.dash = true;
-      } else if (open && this.aggr * this.skill > 0.3) this.barge(dt, A, i, lat, tx, tz, rx, rz, all);
+      } else if ((open || this.style.walls) && this.aggr * this.skill * this.style.shove > 0.3) this.barge(dt, A, i, lat, tx, tz, rx, rz, all, open > 0);
     }
     // ---- stuck (not waiting on purpose): hop, dash, go
     const slow = m.vel.lengthSq() < 0.6 * 0.6 && this.mode !== 2;
@@ -227,6 +253,13 @@ export class Bot {
       if (this.sMarkT > 0 && s - this.sMark < 1.5 && this.mode !== 2) this.stuckT = Math.max(this.stuckT, 0.9);
       this.sMark = s;
       this.sMarkT = t;
+    }
+    this.waitT = this.mode === 2 && m.vel.lengthSq() < 1 ? this.waitT + dt : 0;
+    if (this.waitT > 2.5) {
+      this.mode = 0;
+      this.waitT = 0;
+      this.nextThink = t + 1.2;
+      this.stuckT = 0.9;
     }
     if (this.stuckT > 0.8) {
       m.jump = true;
@@ -242,10 +275,10 @@ export class Bot {
     return null;
   }
 
-  /** a shove: a rival beside me, nearer an open edge than I am */
-  private barge(dt: number, A: CourseAI, i: number, lat: number, tx: number, tz: number, rx: number, rz: number, all: Marble[]) {
+  /** a shove: a rival beside me, nearer an open edge than I am (a bruiser: anyone beside it, into the wall) */
+  private barge(dt: number, A: CourseAI, i: number, lat: number, tx: number, tz: number, rx: number, rz: number, all: Marble[], open: boolean) {
     const m = this.m;
-    if (this.rnd() > this.aggr * dt * 3) return;
+    if (this.rnd() > this.aggr * dt * 3 * this.style.shove) return;
     for (const o of all) {
       if (o === m || !o.active || o.frozen) continue;
       const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, dy = o.pos.y - m.pos.y;
@@ -253,7 +286,8 @@ export class Bot {
       const ds = dx * tx + dz * tz, dl = dx * rx + dz * rz;
       if (Math.abs(ds) > 1.3 || Math.abs(dl) < 0.9 || Math.abs(dl) > 2.4) continue;
       const side = Math.sign(dl);
-      if (!(side < 0 ? A.openL[i] : A.openR[i])) continue;
+      const edge = side < 0 ? A.openL[i] : A.openR[i];
+      if (!edge && !(this.style.walls && !open)) continue;
       // (me safely inside after it)
       if (side * lat > (side < 0 ? -A.lo[i] : A.hi[i]) - 1.2) continue;
       m.input.set(dx, 0, dz).normalize();
@@ -284,6 +318,10 @@ export class Bot {
     }
     const sLook = s + THREE.MathUtils.clamp(vAlong * 0.6, 3, 9);
     const iL = A.index(sLook);
+    // a fork coming: be on the side of the lane it's chosen well before the wedge
+    let laneL = NaN;
+    const sps = A.c.b.splits;
+    for (let k = 0; k < sps.length; k++) if (sLook > sps[k].s0 - 30 && s < sps[k].s1) laneL = this.lane(A.c, k);
     const lo = A.lo[iL], hi = A.hi[iL];
     const lineL = A.line[iL] * this.lineUse + this.bias * (hi - lo) * 0.08;
     const N = 9;
@@ -292,7 +330,7 @@ export class Bot {
     const tryOne = (L: number, mode: number, jd: number) => {
       const cost = this.run(t, A, s, lat, vAlong, vLat, L, mode, jd, grounded, no, lineL);
       // a line nearer the racing line and the current plan is worth a little
-      const c = cost + 0.02 * Math.abs(L - lineL) + 0.05 * Math.abs(L - this.latT) + (mode === this.mode ? 0 : 0.03) + (jd >= 0 ? 0.05 : 0) + this.rnd() * (1 - this.skill) * 0.15;
+      const c = cost + (Number.isNaN(laneL) ? 0 : 0.12 * Math.abs(L - laneL)) + 0.02 * Math.abs(L - lineL) + 0.05 * Math.abs(L - this.latT) + (mode === this.mode ? 0 : 0.03) + (jd >= 0 ? 0.05 : 0) + this.rnd() * (1 - this.skill) * 0.15;
       if (mode === 0 && jd < 0 && tried < CAND) (CL[tried] = L), (CC[tried++] = c);
       if (c < bestC) {
         bestC = c;
@@ -307,6 +345,7 @@ export class Bot {
     for (let k = 0; k < N; k++) tryOne(lo + ((hi - lo) * k) / (N - 1), 0, -1);
     tryOne(THREE.MathUtils.clamp(lineL, lo, hi), 0, -1);
     tryOne(THREE.MathUtils.clamp(this.latT, lo, hi), 0, -1);
+    if (!Number.isNaN(laneL)) tryOne(THREE.MathUtils.clamp(laneL, lo, hi), 0, -1);
     // something in the way of every one: easing off or stopping on the three most promising
     if (bestHit >= 0.02) {
       for (let r = 0; r < 3; r++) {
@@ -394,7 +433,7 @@ export class Bot {
         const j = A.index(s);
         const off = (lat < A.lo[j] - 0.75 && A.openL[j]) || (lat > A.hi[j] + 0.75 && A.openR[j]);
         if (off || !A.supported(s, lat, te + tau)) {
-          cost += 5 * disc;
+          cost += 5 * disc * this.style.edge;
           break;
         }
       }
@@ -420,7 +459,7 @@ export class Bot {
           const o = k * 6;
           const dx = OX[o] + OX[o + 3] * tau - p.x, dy = OX[o + 1] - p.y, dz = OX[o + 2] + OX[o + 5] * tau - p.z;
           const d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 < 1.3 * 1.3) cost += (1.3 - Math.sqrt(d2)) * (A.openL[i] || A.openR[i] ? 0.35 : 0.12) * disc * (dt / 0.05);
+          if (d2 < 1.3 * 1.3) cost += (1.3 - Math.sqrt(d2)) * (A.openL[i] || A.openR[i] ? 0.35 : 0.12) * this.style.crowd * disc * (dt / 0.05);
         }
       }
     }

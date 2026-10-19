@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Bot } from './ai.ts';
 import { courseAI } from './ai-course.ts';
+import { level, LEVELS, roll, STYLES, type Level, type StyleId } from './ai-style.ts';
 import { Sound } from './audio.ts';
 import { buildRound, SHOW, type Course } from './courses.ts';
 import { Confetti, Splashes } from './fx.ts';
@@ -22,6 +23,7 @@ interface Contestant {
   design: number;
   seed: number;
   skill: number;
+  style: StyleId;
   player: boolean;
   out: boolean;
 }
@@ -59,6 +61,8 @@ export class MarbleGame {
   private course: Course | null = null;
   private racers: Racer[] = [];
   private roster: Contestant[] = [];
+  /** the bots' difficulty (the menu's choice, remembered; ?diff= for tests) */
+  private level: Level = level(readPref());
   private roundIdx = 0;
   private state: State = 'menu';
   private stateT = 0;
@@ -115,6 +119,7 @@ export class MarbleGame {
     progress(1, 'Ready');
     const q = new URLSearchParams(location.search);
     // (test hooks: ?round=N jumps into the show at that round, ?auto=1 lets a bot drive you)
+    if (q.get('diff')) this.level = level(q.get('diff'));
     if (q.get('round')) {
       this.autopilot = q.get('auto') === '1';
       this.newShow();
@@ -215,6 +220,14 @@ export class MarbleGame {
       onPrev: () => this.pickDesign(-1),
       onNext: () => this.pickDesign(1),
       onPlay: () => this.newShow(),
+      levels: LEVELS.map((l) => ({ id: l.id, name: l.name, blurb: l.blurb })),
+      level: this.level.id,
+      onLevel: (id) => {
+        this.sound.start();
+        this.sound.click();
+        this.level = level(id);
+        writePref(id);
+      },
     });
     this.sound.setMusic('menu');
   }
@@ -240,18 +253,11 @@ export class MarbleGame {
     const designs = DESIGNS.map((_, i) => i).filter((i) => i !== this.design);
     const names = [...NAMES].sort(() => Math.random() - 0.5);
     this.roster = [];
-    this.roster.push({ id: 0, name: 'You', design: this.design, seed: 0.37, skill: 1, player: true, out: false });
+    this.roster.push({ id: 0, name: 'You', design: this.design, seed: 0.37, skill: 1, style: 'racer', player: true, out: false });
     for (let k = 1; k < FIELD; k++) {
-      this.roster.push({
-        id: k,
-        name: names[k % names.length],
-        design: designs[(k * 7) % designs.length],
-        seed: Math.random() * 10,
-        // a spread of ability: a few naturals, a solid middle, some hopeless
-        skill: THREE.MathUtils.clamp(0.42 + Math.random() * 0.5 + (Math.random() < 0.15 ? 0.1 : 0), 0.4, 0.97),
-        player: false,
-        out: false,
-      });
+      // a spread of ability for the difficulty (a few naturals at the top), and a style each
+      const { skill, style } = roll(this.level, Math.random);
+      this.roster.push({ id: k, name: names[k % names.length], design: designs[(k * 7) % designs.length], seed: Math.random() * 10, skill, style, player: false, out: false });
     }
     this.roundIdx = 0;
     void this.startRound();
@@ -310,7 +316,7 @@ export class MarbleGame {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.scene.add(mesh);
-      const bot = x.player && !(this.autopilot && !menu) ? null : new Bot(m, x.player ? 0.9 : x.skill, x.id * 31 + idx * 7);
+      const bot = x.player && !(this.autopilot && !menu) ? null : new Bot(m, x.player ? 0.9 : x.skill, x.id * 31 + idx * 7, STYLES[x.style], x.player || menu ? 0 : this.level.boost);
       const hint = c.path ? c.path.projectAll(m.pos).i : 0;
       bot?.reset(hint);
       const r: Racer = { c: x, m, mesh, mat, bot, hint, s: 0, cp: c.checkpoints[0] ?? 0, fin: 0, out: false, fell: 0, hold: 0 };
@@ -333,8 +339,8 @@ export class MarbleGame {
   }
 
   private menuField(): Contestant[] {
-    const out: Contestant[] = [{ id: 0, name: 'You', design: this.design, seed: 0.37, skill: 1, player: true, out: false }];
-    for (let k = 1; k < 9; k++) out.push({ id: k, name: NAMES[k], design: (k * 5) % DESIGNS.length, seed: k * 1.7, skill: 0.6 + (k % 4) * 0.1, player: false, out: false });
+    const out: Contestant[] = [{ id: 0, name: 'You', design: this.design, seed: 0.37, skill: 1, style: 'racer', player: true, out: false }];
+    for (let k = 1; k < 9; k++) out.push({ id: k, name: NAMES[k], design: (k * 5) % DESIGNS.length, seed: k * 1.7, skill: 0.6 + (k % 4) * 0.1, style: 'racer', player: false, out: false });
     return out;
   }
 
@@ -710,6 +716,7 @@ export class MarbleGame {
       color: DESIGNS[r.c.design].a,
       state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out ? 'out' : 'q',
       me: r.c.player,
+      style: r.c.player ? undefined : STYLES[r.c.style].name,
       note: final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
     }));
     if (final) {
@@ -1013,6 +1020,21 @@ const INTRO_T = 8;
 function clock(sec: number) {
   const k = Math.max(0, Math.ceil(sec));
   return `${Math.floor(k / 60)}:${String(k % 60).padStart(2, '0')}`;
+}
+
+function readPref() {
+  try {
+    return localStorage.getItem('mm.level');
+  } catch {
+    return null;
+  }
+}
+function writePref(id: string) {
+  try {
+    localStorage.setItem('mm.level', id);
+  } catch {
+    /* (private window: not remembered) */
+  }
 }
 
 function kindName(k: number) {

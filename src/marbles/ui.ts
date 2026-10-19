@@ -19,6 +19,8 @@ export interface Row {
   color: number;
   state: 'q' | 'out' | 'win' | 'live';
   me: boolean;
+  /** a bot's racing style */
+  style?: string;
   note?: string;
 }
 
@@ -64,7 +66,7 @@ export class UI {
   }
 
   // ------------------------------------------------------------------ menu
-  menu(o: { design: string; kind: string; onPrev(): void; onNext(): void; onPlay(): void }) {
+  menu(o: { design: string; kind: string; onPrev(): void; onNext(): void; onPlay(): void; levels: { id: string; name: string; blurb: string }[]; level: string; onLevel(id: string): void }) {
     const m = this.menuEl;
     m.innerHTML = `
       <a class="mm-back" href="./">&#8592; All games</a>
@@ -77,6 +79,11 @@ export class UI {
           <div class="mm-dname"></div>
           <button class="mm-arrow" data-a="next" aria-label="Next marble">&#8250;</button>
         </div>
+        <div class="mm-level">
+          <span class="mm-level-k">BOTS</span>
+          <div class="mm-seg" role="radiogroup" aria-label="Bot difficulty">${o.levels.map((l) => `<button role="radio" data-l="${l.id}" class="${l.id}">${esc(l.name)}</button>`).join('')}</div>
+          <div class="mm-level-b"></div>
+        </div>
         <div class="mm-actions"><button class="mm-btn" data-a="play">PLAY</button></div>
         <div class="mm-help">
           <b>WASD / Arrows</b><span>roll your marble</span>
@@ -88,6 +95,17 @@ export class UI {
     m.querySelector('[data-a=prev]')!.addEventListener('click', o.onPrev);
     m.querySelector('[data-a=next]')!.addEventListener('click', o.onNext);
     m.querySelector('[data-a=play]')!.addEventListener('click', o.onPlay);
+    const pick = (id: string) => {
+      for (const b of m.querySelectorAll<HTMLButtonElement>('.mm-seg button')) b.setAttribute('aria-checked', String(b.dataset.l === id));
+      const l = o.levels.find((x) => x.id === id);
+      m.querySelector('.mm-level-b')!.textContent = l?.blurb ?? '';
+    };
+    for (const b of m.querySelectorAll<HTMLButtonElement>('.mm-seg button'))
+      b.addEventListener('click', () => {
+        pick(b.dataset.l!);
+        o.onLevel(b.dataset.l!);
+      });
+    pick(o.level);
     this.design(o.design, o.kind);
     m.classList.remove('mm-hide');
   }
@@ -200,7 +218,7 @@ export class UI {
     const rows = o.rows
       .map(
         (x, k) =>
-          `<div class="${x.state === 'out' ? 'out' : ''} ${x.me ? 'me' : ''} ${x.state === 'win' ? 'win' : ''}" style="animation-delay:${Math.min(k * 0.025, 0.6)}s"><i style="background:${css(x.color)}"></i>${esc(x.name)}<em>${esc(x.note ?? (x.state === 'q' ? 'IN' : x.state === 'win' ? 'CROWN' : x.state === 'out' ? 'OUT' : ''))}</em></div>`,
+          `<div class="${x.state === 'out' ? 'out' : ''} ${x.me ? 'me' : ''} ${x.state === 'win' ? 'win' : ''}" style="animation-delay:${Math.min(k * 0.025, 0.6)}s"><i style="background:${css(x.color)}"></i>${esc(x.name)}${x.style ? `<small>${esc(x.style)}</small>` : ''}<em>${esc(x.note ?? (x.state === 'q' ? 'IN' : x.state === 'win' ? 'CROWN' : x.state === 'out' ? 'OUT' : ''))}</em></div>`,
       )
       .join('');
     r.innerHTML = `<div class="panel"><h2>${esc(o.title)}</h2><div class="sub">${esc(o.sub)}</div><div class="mm-grid">${rows}</div>

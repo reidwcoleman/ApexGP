@@ -35,14 +35,25 @@
 .mm-menu { display: grid; grid-template-columns: minmax(300px, 520px) 1fr; align-items: center; padding: 0 6vw; background: linear-gradient(90deg, rgba(36, 20, 44, 0.55) 0%, rgba(36, 20, 44, 0.2) 40%, transparent 60%); }
 .mm-menu .mm-title { font-size: clamp(64px, 9vw, 120px); transform: rotate(-3deg); transform-origin: left center; animation: mm-wobble 4s ease-in-out infinite; }
 @keyframes mm-wobble { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(-1.5deg) translateY(-4px); } }
-.mm-tag { margin-top: 22px; font-size: 20px; font-weight: 600; color: var(--mm-cream); text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
-.mm-picker { margin-top: 26px; display: flex; align-items: center; gap: 14px; pointer-events: auto; }
+.mm-tag { margin-top: 16px; font-size: 20px; font-weight: 600; color: var(--mm-cream); text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+.mm-picker { margin-top: 20px; display: flex; align-items: center; gap: 14px; pointer-events: auto; }
 .mm-arrow { pointer-events: auto; width: 52px; height: 52px; border-radius: 50%; border: 0; cursor: pointer; background: var(--mm-cream); color: var(--mm-ink); font: 30px/1 var(--mm-display); box-shadow: 0 5px 0 #9b8a73, 0 8px 14px rgba(0, 0, 0, 0.3); }
 .mm-arrow:active { transform: translateY(3px); box-shadow: 0 2px 0 #9b8a73; }
 .mm-dname { min-width: 210px; text-align: center; font-family: var(--mm-display); font-size: 28px; color: #fff; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); }
 .mm-dname small { display: block; font-family: var(--mm-body); font-weight: 600; font-size: 14px; color: rgba(255, 248, 236, 0.75); letter-spacing: 0.08em; text-transform: uppercase; }
-.mm-actions { margin-top: 30px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-.mm-help { margin-top: 26px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 15px; font-weight: 600; color: rgba(255, 248, 236, 0.92); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); }
+.mm-level { margin-top: 16px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px; pointer-events: auto; max-width: 460px; }
+.mm-level-k { font-family: var(--mm-display); font-size: 15px; color: var(--mm-yellow); letter-spacing: 0.06em; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); }
+.mm-seg { display: flex; padding: 4px; gap: 4px; border-radius: 14px; background: rgba(36, 20, 44, 0.5); backdrop-filter: blur(4px); width: max-content; max-width: 100%; }
+.mm-seg button { border: 0; cursor: pointer; padding: 8px 13px; border-radius: 10px; background: transparent; color: rgba(255, 248, 236, 0.8); font: 15px/1 var(--mm-display); letter-spacing: 0.02em; transition: background 0.15s, color 0.15s, transform 0.15s; }
+.mm-seg button:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.mm-seg button[aria-checked='true'] { color: var(--mm-ink); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25); }
+.mm-seg button.easy[aria-checked='true'] { background: var(--mm-green); }
+.mm-seg button.normal[aria-checked='true'] { background: var(--mm-yellow); }
+.mm-seg button.hard[aria-checked='true'] { background: var(--mm-orange); }
+.mm-seg button.insane[aria-checked='true'] { background: var(--mm-red); color: #fff; }
+.mm-level-b { grid-column: 2; font-size: 14px; font-weight: 600; color: rgba(255, 248, 236, 0.9); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); min-height: 1.3em; }
+.mm-actions { margin-top: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.mm-help { margin-top: 20px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 15px; font-weight: 600; color: rgba(255, 248, 236, 0.92); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); }
 .mm-help b { font-family: var(--mm-display); font-weight: 400; color: var(--mm-yellow); letter-spacing: 0.03em; }
 .mm-back { position: absolute; top: 18px; left: 20px; pointer-events: auto; color: var(--mm-cream); text-decoration: none; font-weight: 700; font-size: 15px; background: rgba(36, 20, 44, 0.45); padding: 8px 14px; border-radius: 12px; }
 .mm-back:hover { background: rgba(36, 20, 44, 0.7); }
@@ -110,6 +121,7 @@
 .mm-grid div.me { background: var(--mm-yellow); color: var(--mm-ink); font-weight: 700; }
 .mm-grid div.win { background: linear-gradient(90deg, #ffe066, #ffb300); color: var(--mm-ink); }
 .mm-grid div i { width: 18px; height: 18px; border-radius: 50%; flex: none; box-shadow: inset -3px -3px 5px rgba(0, 0, 0, 0.35), inset 2px 2px 4px rgba(255, 255, 255, 0.6); }
+.mm-grid div small { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.6; }
 .mm-grid div em { margin-left: auto; font-style: normal; font-family: var(--mm-display); font-size: 13px; opacity: 0.8; }
 @keyframes mm-in { from { transform: translateY(10px); opacity: 0; } }
 .mm-results .row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
@@ -133,4 +145,10 @@
   .mm-help { display: none; }
   .mm-pos { font-size: 44px; }
   .mm-keys { display: none; }
+}
+
+/* short screens: a smaller title so the menu fits under the back link */
+@media (max-height: 800px) {
+  .mm-menu .mm-title { font-size: clamp(56px, 7vw, 88px); }
+  .mm-help { font-size: 14px; gap: 4px 14px; }
 }

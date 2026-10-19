@@ -203,6 +203,7 @@ export function split(b: CourseBuilder, path: Path, s0: number, s1: number, o: {
     else b.ghost({ type: 'box', hx: gW2 / 2, hy: 1, hz: (se - s) / 2 }, null, path.at((s + se) / 2, gMid2, 0.6), f.q);
     b.ghost({ type: 'box', hx: 2, hy: 1, hz: (se - s) / 2 }, null, path.at((s + se) / 2, outer, 0.6), f.q);
   }
+  b.splits.push({ s0, s1, fast: o.fastLat, safe: o.safeLat });
   return { fast, safe, off };
 }
 

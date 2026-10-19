@@ -3,7 +3,7 @@
 // prints per round: the leader's time, the last qualifier's, falls, stuck time, DNFs, how well the
 // results follow the bots' skill (Spearman), how the autopilot did, and the AI's cost per frame.
 //
-//   node tools/marblebench.mjs [--port 5214] [--rounds 0,1,2,3,4,5] [--runs 3] [--par 2] [--cut 0 | --show 1] [--human 1] [--json out.json]
+//   node tools/marblebench.mjs [--port 5214] [--rounds 0,1,2,3,4,5] [--runs 3] [--par 2] [--cut 0 | --show 1] [--human 1] [--diff easy|normal|hard|insane] [--json out.json]
 //
 // (the round runs past its normal end — races until everyone is home or 150 s, the plate until
 // one is left or 110 s — so the whole field is ranked; the qualifying cut is the game's own)
@@ -25,6 +25,7 @@ const cuts = opt('show', null) ? [0, 5, 10, 14, 16, 19] : null;
 const cut = (round) => (cuts ? cuts[round] ?? 0 : Number(opt('cut', 0)));
 const jsonOut = opt('json', null);
 const human = opt('human', null) === '1';
+const diff = opt('diff', 'normal');
 const NAMES = ['Timber Tumble', 'Paint Mill', 'Jump Club', 'Rickety Ridge', 'Tip Top', 'Crown Summit'];
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
@@ -35,7 +36,7 @@ async function runOnce(round, k) {
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
   page.on('console', (m) => m.type() === 'error' && !m.text().startsWith('Failed to load resource') && errs.push(m.text()));
-  await page.goto(`http://localhost:${port}/marbles.html?round=${round}&auto=1&go=1&cut=${cut(round)}&nohud=1&settle=100`);
+  await page.goto(`http://localhost:${port}/marbles.html?round=${round}&auto=1&go=1&cut=${cut(round)}&nohud=1&settle=100&diff=${diff}`);
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
   const res = await page.evaluate((human) => {
     const g = window.__marbles;

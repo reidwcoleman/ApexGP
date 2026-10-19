@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { hzAxis, hzDist, makeHz, type Hz } from './ai-course.ts';
+import type { Style } from './ai-style.ts';
 import type { Course } from './courses.ts';
 import { GRAVITY, JUMP_V, RADIUS, type Marble } from './physics.ts';
 
@@ -60,18 +61,21 @@ export class PlateBrain {
     readonly skill: number,
     private rnd: () => number,
     private aggr: number,
+    private style: Style,
+    private boost: number,
   ) {
-    // out where the bars pass fast (a short window to clear), but not near the edge
-    this.ring = 7.4 + 1.9 * skill + (rnd() - 0.5) * 1.2;
+    // out where the bars pass fast (a short window to clear), but not near the edge (a daredevil
+    // stands further out, a steady one further in)
+    this.ring = 7.4 + 1.9 * skill + style.ring + (rnd() - 0.5) * 1.2;
     this.newErr();
   }
 
   private newErr() {
     const r = this.rnd;
     const g = (r() + r() + r() - 1.5) * 1.15;
-    this.err = g * (0.008 + 0.3 * Math.pow(1 - this.skill, 1.6));
+    this.err = g * (0.008 + 0.3 * Math.pow(1 - this.skill, 1.6)) * (1 - 0.5 * this.boost);
     // a lapse: late (or early) by a beat
-    if (r() < 0.8 * (1 - this.skill) ** 2) this.err += (r() < 0.7 ? 1 : -1) * (0.14 + r() * 0.22);
+    if (r() < 0.8 * (1 - this.skill) ** 2 * this.style.lapse) this.err += (r() < 0.7 ? 1 : -1) * (0.14 + r() * 0.22);
   }
 
   update(dt: number, t: number, c: Course, all: Marble[]) {
@@ -210,8 +214,8 @@ export class PlateBrain {
   private shove(t: number, c: Course, all: Marble[], rad: number, ux: number, uz: number) {
     const m = this.m;
     if (t < this.pushCD || m.dashCD > 0 || this.due < 1.0 || !m.grounded) return;
-    if (this.aggr * this.skill < 0.25 || rad > c.plate!.radius - 4.2) return;
-    if (this.rnd() > 0.04 * this.aggr) return;
+    if (this.aggr * this.skill * this.style.shove < 0.25 || rad > c.plate!.radius - 4.2) return;
+    if (this.rnd() > 0.04 * this.aggr * this.style.shove) return;
     const P = c.plate!;
     for (const o of all) {
       if (o === m || !o.active || o.groundT > 0.1) continue;
@@ -225,7 +229,7 @@ export class PlateBrain {
       TAN.set(ox / d, 0, oz / d);
       m.input.copy(TAN);
       m.dash = true;
-      this.pushCD = t + 5 + this.rnd() * 5;
+      this.pushCD = t + (5 + this.rnd() * 5) / Math.max(1, this.style.shove * 0.7);
       return;
     }
   }
