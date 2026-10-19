@@ -109,7 +109,6 @@ export async function buildHouse(level: LevelDef): Promise<Scenery> {
   box(trim, W + 0.9, 0.18, 0.1, cx, H - 0.05, front + 0.5, 1);
   const gut = new THREE.CylinderGeometry(0.06, 0.06, W + 0.9, 10, 1, true, 0, Math.PI);
   gut.rotateZ(Math.PI / 2);
-  gut.rotateY(Math.PI / 2);
   gut.translate(cx, H - 0.2, front + 0.58);
   trim.push(gut);
   // a chimney

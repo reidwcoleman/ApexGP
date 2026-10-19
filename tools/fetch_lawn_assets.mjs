@@ -26,8 +26,7 @@ const TEXTURES = {
 const MODELS = [
   'garden_gnome', 'outdoor_table_chair_set_01', 'painted_wooden_bench', 'garden_sprinkler_01', 'planter_box_01', 'planter_box_02',
   'boulder_01', 'rock_07', 'rock_09', 'stone_01', 'rock_moss_set_01', 'tree_stump_01',
-  'stone_fire_pit', 
-  
+  'stone_fire_pit',
 ];
 const HDRIS = {
   morning: 'spruit_sunrise',

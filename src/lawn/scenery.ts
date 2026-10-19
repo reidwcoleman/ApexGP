@@ -41,7 +41,9 @@ export async function buildScenery(level: LevelDef, mask: MaskField, fx: Particl
       const g = gardenTree(o.variant, o.size);
       trees.push({ proto: g.proto, x: o.x, z: o.z, s: g.s, rot: o.seed % 6.28, tint: tint(0.9), lod: 0, shade: true, fade: true });
     } else if (o.kind === 'shrub') {
-      trees.push({ proto: SHRUBS[o.variant % SHRUBS.length], x: o.x, z: o.z, s: o.size * 0.55, rot: o.seed % 6.28, tint: tint(0.7), lod: 0, shade: false, fade: false });
+      // a bush: a small leafy scanned crown (the kit's own shrub scans are thin and yellow)
+      const g = gardenTree([0, 1, 2][o.variant % 3], o.size * 0.145);
+      trees.push({ proto: g.proto, x: o.x, z: o.z, s: g.s, rot: o.seed % 6.28, tint: tint(0.85), lod: 0, shade: false, fade: false });
     }
   }
 

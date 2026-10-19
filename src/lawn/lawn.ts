@@ -6,11 +6,12 @@ import * as THREE from 'three';
 import type { LevelDef } from './levels.ts';
 import { TS } from './nav.ts';
 import { MaskField } from './mask.ts';
+import { Meadow } from './meadow.ts';
 import { Grass, groundGeometry, grassUniforms, makeGroundMaterial, type GrassU } from './grass.ts';
 import { FlowerField } from './flowers.ts';
 import { Ambient, Particles } from './fx.ts';
 import { buildScenery, type Scenery } from './scenery.ts';
-import { loadTurfNormal } from './assets.ts';
+import { loadTurfColour, loadTurfNormal } from './assets.ts';
 import { damp, lerp, smoothstep } from './util.ts';
 import type { Mower } from './mower.ts';
 
@@ -46,6 +47,7 @@ export class Lawn {
   readonly events: LawnEvents = {};
   readonly mask: MaskField;
   readonly grass: Grass;
+  private meadow: Meadow;
   readonly u: GrassU;
   readonly coinTotal: number;
   readonly flowerTotal: number;
@@ -67,12 +69,13 @@ export class Lawn {
   private newCells: number[] = [];
   private mower = new THREE.Vector3(0, 0, 0.3);
 
-  private constructor(readonly level: LevelDef, turfN: THREE.Texture) {
+  private constructor(readonly level: LevelDef, turfN: THREE.Texture, turfC: THREE.Texture) {
     this.mask = new MaskField(level);
     this.u = grassUniforms(level.theme, this.mask);
     this.grass = new Grass(level, this.mask, this.u);
-    const gm = makeGroundMaterial(this.u, turfN, false);
-    const om = makeGroundMaterial(this.u, turfN, true);
+    this.meadow = new Meadow(level, this.u);
+    const gm = makeGroundMaterial(this.u, turfN, false, turfC);
+    const om = makeGroundMaterial(this.u, turfN, true, turfC);
     this.groundMats.push(gm, om);
     this.ground = new THREE.Mesh(groundGeometry(level), gm);
     this.ground.receiveShadow = true;
@@ -85,7 +88,7 @@ export class Lawn {
     this.outside = new THREE.Mesh(og, om);
     this.outside.position.y = -0.015;
     this.outside.receiveShadow = true;
-    this.group.add(this.outside, this.ground, this.grass.group, this.fx.group);
+    this.group.add(this.outside, this.ground, this.grass.group, this.meadow.group, this.fx.group);
 
     this.flowers = new FlowerField(level.flowers, this.mask);
     this.flowerTotal = level.flowers.length;
@@ -125,9 +128,10 @@ export class Lawn {
   }
 
   static async create(level: LevelDef): Promise<Lawn> {
-    const turfN = await loadTurfNormal();
+    const [turfN, turfC] = await Promise.all([loadTurfNormal(), loadTurfColour()]);
     turfN.anisotropy = 8;
-    const lawn = new Lawn(level, turfN);
+    turfC.anisotropy = 8;
+    const lawn = new Lawn(level, turfN, turfC);
     const sc = await buildScenery(level, lawn.mask, lawn.fx);
     lawn.scenery = sc;
     for (const s of sc) lawn.group.add(s.group);
@@ -252,6 +256,7 @@ export class Lawn {
     }
 
     this.grass.update(m.x, m.z, setup.dens);
+    this.meadow.update(m.x, m.z, setup.dens);
     this.ambient.setCamera(view.cam.quaternion);
     this.ambient.update(this.time);
     this.fx.update(dt, view.cam);
@@ -265,6 +270,7 @@ export class Lawn {
   dispose() {
     for (const s of this.scenery) s.dispose?.();
     this.grass.dispose();
+    this.meadow.dispose();
     this.flowers.dispose();
     this.fx.dispose();
     this.ambient.dispose();

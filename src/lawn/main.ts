@@ -3,10 +3,10 @@ import '@fontsource/fredoka/600.css';
 import '@fontsource/lilita-one/400.css';
 import './lawn.css';
 import * as THREE from 'three';
-import { buildLevel, THEMES, type LevelDef, type Theme } from './levels.ts';
+import { buildLevel, THEMES, type LevelDef, type ObstacleKind, type Theme } from './levels.ts';
 import { Lawn, type View } from './lawn.ts';
 import { Mower } from './mower.ts';
-import { GameAudio } from './audio.ts';
+import { GameAudio, prefetchSounds, type Material } from './audio.ts';
 import { Input } from './input.ts';
 import { UI } from './ui.ts';
 import { Environment } from './env.ts';
@@ -111,6 +111,7 @@ class Game {
     this.input = new Input(this.canvas);
     this.ui.click = () => this.audio.tap();
     this.ui.tick = () => this.audio.count();
+    prefetchSounds();
     this.audio.sound = this.save.sound;
     this.audio.music = this.save.music;
     this.ui.setToggles(this.save.sound, this.save.music);
@@ -191,7 +192,7 @@ class Game {
     const old = this.lawn;
     this.scene.add(lawn.group);
     lawn.events.coin = (x, z) => this.onCoin(x, z);
-    lawn.events.flower = () => this.onFlower();
+    lawn.events.flower = (x, z) => this.onFlower(x, z);
     lawn.events.milestone = (p) => this.onMilestone(p);
     lawn.events.finished = () => this.onFinished();
     this.lawn = lawn;
@@ -338,6 +339,7 @@ class Game {
   }
 
   private beginLawn() {
+    this.audio.engineStart();
     this.runCoins = 0;
     this.runFlowers = 0;
     this.chain = 0;
@@ -491,6 +493,46 @@ class Game {
 
   // ------------------------------------------------------------------ events
 
+  /** stereo position of a spot on the lawn, from where it is on screen */
+  private pan(x: number, z: number) {
+    const v = new THREE.Vector3(x, 0.3, z).project(this.camera);
+    return clamp(v.x * 0.8, -0.85, 0.85);
+  }
+
+  /** what the mower just ran into, for the sound of it */
+  private materialAt(x: number, z: number): Material {
+    const lvl = this.level;
+    let best = 1.6;
+    let kind: ObstacleKind | null = null;
+    for (const o of lvl.obstacles) {
+      const r = o.kind === 'tree' || o.kind === 'shrub' || o.kind === 'rock' || o.kind === 'pond' ? o.size * 0.5 : Math.max(o.hw, o.hd);
+      const d = Math.hypot(o.x - x, o.z - z) - r;
+      if (d < best) {
+        best = d;
+        kind = o.kind;
+      }
+    }
+    switch (kind) {
+      case 'rock':
+      case 'firepit':
+        return 'stone';
+      case 'gnome':
+      case 'lantern':
+      case 'sprinkler':
+        return 'metal';
+      case 'shrub':
+      case 'hedge':
+        return 'leaf';
+      case 'bed':
+      case 'pond':
+        return 'soft';
+      case null:
+        return lvl.fence === 'hedge' ? 'leaf' : lvl.fence === 'stone' ? 'stone' : 'wood';
+      default:
+        return 'wood';
+    }
+  }
+
   private project(x: number, y: number, z: number) {
     const v = new THREE.Vector3(x, y, z).project(this.camera);
     return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight };
@@ -502,7 +544,7 @@ class Game {
     this.runCoins += v;
     this.chain = this.time - this.lastCoinT < 1.5 ? this.chain + 1 : 0;
     this.lastCoinT = this.time;
-    this.audio.coin(this.chain);
+    this.audio.coin(this.chain, this.pan(x, z));
     navigator.vibrate?.(8);
     const p = this.project(x, 0.7, z);
     this.ui.floatText(p.x, p.y - 8, `+${v}`);
@@ -511,10 +553,10 @@ class Game {
       this.ui.bumpCoins();
     });
   }
-  private onFlower() {
+  private onFlower(x: number, z: number) {
     this.save.coins += 1;
     this.runFlowers += 1;
-    this.audio.flower();
+    this.audio.flower(this.pan(x, z));
     this.ui.setCoins(this.save.coins);
   }
   private onMilestone(p: number) {
@@ -637,7 +679,9 @@ class Game {
     }
     const res = m.update(dt, drive, lawn.level.nav);
     if (res.impact > 0.9) {
-      this.audio.bump(res.impact);
+      const hx = m.x + (res.hit ? -res.hit.nx * m.radius : 0);
+      const hz = m.z + (res.hit ? -res.hit.nz * m.radius : 0);
+      this.audio.bump(res.impact, this.materialAt(hx, hz), this.pan(hx, hz));
       this.shake = Math.min(1, this.shake + res.impact * 0.1);
       navigator.vibrate?.(12);
       for (let i = 0; i < 4; i++) {
@@ -651,6 +695,8 @@ class Game {
     this.cutSound = damp(this.cutSound, cutRate, 14, dt);
     const speed01 = m.speed / m.maxSpeed;
     this.audio.setProgress(lawn.progress);
+    this.audio.cut(lawn.mask.done - before, speed01);
+    if (m.def.kind !== 'rider') this.audio.steps(m.odo, speed01);
     this.audio.drive(speed01, m.throttle, this.cutSound, this.mode === 'play' || this.mode === 'finishing');
 
     // exhaust

@@ -70,7 +70,7 @@ float gFbm(vec2 p) { return gNoise(p) * 0.55 + gNoise(p * 2.07 + 4.3) * 0.3 + gN
 `;
 
 const COLOR_FS = /* glsl */ `
-uniform vec3 uBase; uniform vec3 uTipA; uniform vec3 uTipB; uniform vec3 uCutL; uniform vec3 uCutD; uniform vec3 uDry;
+uniform vec3 uBase; uniform vec3 uTipA; uniform vec3 uTipB; uniform vec3 uCutL; uniform vec3 uCutD; uniform vec3 uDry; uniform float uTime;
 // the lawn's colour at a point: long grass at height t (0 root … 1 tip), or cut to a stripe tone
 vec3 lawnColour(vec2 wp, float t, float rnd, float tall, float stripe) {
   float big = gFbm(wp * 0.11);
@@ -82,7 +82,11 @@ vec3 lawnColour(vec2 wp, float t, float rnd, float tall, float stripe) {
   vec3 cutC = mix(uCutD, uCutL, stripe) * mix(0.72, 1.04, t) * (0.94 + 0.12 * rnd);
   cutC = mix(cutC, uDry * 0.92, dryM * 0.3);
   cutC *= 0.94 + 0.12 * mid;
-  return mix(cutC, tallC, smoothstep(0.15, 0.75, tall));
+  cutC = mix(vec3(dot(cutC, vec3(0.3, 0.59, 0.11))), cutC, 0.86) * 0.96;
+  // clouds drifting over: slow patches of a little more and a little less light
+  float cl = gFbm(wp * 0.05 + vec2(uTime * 0.5, uTime * 0.18));
+  float cloud = mix(0.9, 1.06, smoothstep(0.3, 0.72, cl));
+  return mix(cutC, tallC, smoothstep(0.15, 0.75, tall)) * cloud;
 }
 `;
 
@@ -109,10 +113,15 @@ void RE_Direct_Grass( const in IncidentLight directLight, const in vec3 geometry
 #define RE_Direct RE_Direct_Grass
 `;
 
-export function makeGrassMaterial(u: GrassU): THREE.MeshStandardMaterial {
+/** `wild`: the uncut meadow beyond the fences: always tall, coarser, taller, a little dry. */
+export function makeGrassMaterial(u: GrassU, wild = false): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.62, metalness: 0, side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
+    if (wild) {
+      sh.vertexShader = '#define WILD\n' + sh.vertexShader;
+      sh.fragmentShader = '#define WILD\n' + sh.fragmentShader;
+    }
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -136,6 +145,9 @@ vec3 objectNormal = vec3(cy * normal.x + sy * normal.z, normal.y, -sy * normal.x
 {
   vec2 wp = iPos.xy;
   vec4 mk = texture2D(uMask, wp / uSize + 0.5);
+#ifdef WILD
+  mk = vec4(1.0, 0.5, 0.0, 1.0);
+#endif
   float tall = mk.r;
   float k = tall * tall * (3.0 - 2.0 * tall);
   float dd = distance(wp, uFocus);
@@ -143,6 +155,10 @@ vec3 objectNormal = vec3(cy * normal.x + sy * normal.z, normal.y, -sy * normal.x
   float vis = smoothstep(0.0, 0.2, dens - iRnd.w);
   float comp = clamp(inversesqrt(max(lodDens(dd), 0.05)), 1.0, 3.2);
   float H = mix(uStub * (0.8 + 0.5 * iRnd.y), uH * (0.72 + 0.56 * iRnd.y), k) * vis;
+#ifdef WILD
+  H = uH * (1.05 + 1.5 * iRnd.y * iRnd.y + 0.5 * iRnd.x) * vis;
+  comp *= 1.5;
+#endif
   float t = aT;
   mat2 R = mat2(cy, -sy, sy, cy);
   vec2 base = R * position.xz;
@@ -169,23 +185,27 @@ vec3 objectNormal = vec3(cy * normal.x + sy * normal.z, normal.y, -sy * normal.x
       .replace('#include <common>', `#include <common>\nvarying float vT; varying float vTall; varying float vStripe; varying float vRnd; varying vec2 vWp;\n${NOISE}\n${COLOR_FS}`)
       .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${BLADE_LIGHT}`)
       .replace('#include <color_fragment>', `diffuseColor.rgb = lawnColour(vWp, clamp(vT, 0.0, 1.0), vRnd, vTall, clamp(vStripe, 0.0, 1.0));
-diffuseColor.rgb *= mix(1.0, mix(0.32, 1.0, smoothstep(0.0, 0.5, clamp(vT, 0.0, 1.0))), vTall);`);
+diffuseColor.rgb *= mix(1.0, mix(0.32, 1.0, smoothstep(0.0, 0.5, clamp(vT, 0.0, 1.0))), vTall);
+#ifdef WILD
+diffuseColor.rgb = mix(diffuseColor.rgb, uDry * (0.5 + 0.7 * vT) * (0.8 + 0.4 * vRnd), 0.18 + 0.4 * gFbm(vWp * 0.17));
+#endif`);
   };
-  m.customProgramCacheKey = () => 'lawn-grass-v1';
+  m.customProgramCacheKey = () => (wild ? 'lawn-grass-wild-v2' : 'lawn-grass-v2');
   return m;
 }
 
 // ---------------------------------------------------------------- ground
 
-export function makeGroundMaterial(u: GrassU, turfN: THREE.Texture, outside: boolean): THREE.MeshStandardMaterial {
+export function makeGroundMaterial(u: GrassU, turfN: THREE.Texture, outside: boolean, turfC?: THREE.Texture): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, normalMap: turfN, normalScale: new THREE.Vector2(0.9, 0.9) });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
+    sh.uniforms.uTurfC = { value: turfC ?? null };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vWp;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec2 vWp; uniform sampler2D uMask; uniform vec2 uSize; uniform float uMaskOn;\n${NOISE}\n${COLOR_FS}`)
+      .replace('#include <common>', `#include <common>\nvarying vec2 vWp; uniform sampler2D uMask; uniform vec2 uSize; uniform float uMaskOn; uniform sampler2D uTurfC;\n${NOISE}\n${COLOR_FS}`)
       .replace(
         '#include <color_fragment>',
         `{
@@ -195,11 +215,15 @@ export function makeGroundMaterial(u: GrassU, turfN: THREE.Texture, outside: boo
   // the root layer under long grass is dark; cut ground is the stripe's colour
   vec3 c = lawnColour(vWp, 0.18 + 0.1 * gNoise(vWp * 5.0), gNoise(vWp * 3.0), tall, mk.g);
   ${outside ? 'c = mix(c, uDry * 0.8, 0.25 + 0.3 * gFbm(vWp * 0.07)); c *= 0.9;' : ''}
+  // the grain of real turf on the cut ground: a scanned colour map at two scales, as light and dark only
+  float g1 = dot(texture2D(uTurfC, vWp / 1.4).rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.0716;
+  float g2 = dot(texture2D(uTurfC, vWp / 4.3 + 0.37).rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.0716;
+  c *= mix(pow(clamp(g1 * g2, 0.25, 4.0), 0.27), 1.0, tall * 0.85);
   diffuseColor.rgb = c * (${outside ? '0.8' : '0.62'} + 0.38 * smoothstep(0.0, 1.0, 1.0 - tall));
 }`,
       );
   };
-  m.customProgramCacheKey = () => (outside ? 'lawn-ground-out-v1' : 'lawn-ground-v1');
+  m.customProgramCacheKey = () => (outside ? 'lawn-ground-out-v2' : 'lawn-ground-v2');
   return m;
 }
 
@@ -234,7 +258,7 @@ export function groundGeometry(level: LevelDef): THREE.BufferGeometry {
 // ---------------------------------------------------------------- tufts
 
 /** One tuft: four blades of three segments, shared by every chunk. */
-function tuftGeometry(): { position: THREE.BufferAttribute; aT: THREE.BufferAttribute; aW: THREE.BufferAttribute; aLean: THREE.BufferAttribute; normal: THREE.BufferAttribute; index: THREE.BufferAttribute } {
+export function tuftGeometry(): { position: THREE.BufferAttribute; aT: THREE.BufferAttribute; aW: THREE.BufferAttribute; aLean: THREE.BufferAttribute; normal: THREE.BufferAttribute; index: THREE.BufferAttribute } {
   const rng = new Rng(4242);
   const pos: number[] = [];
   const aT: number[] = [];
