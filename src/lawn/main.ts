@@ -220,6 +220,7 @@ class Game {
   private equipMower() {
     const s = stats(this.save);
     this.mower.setDef(s.mower, s.width, s.speed);
+    this.audio.setMower(s.mower.kind, s.width);
   }
 
   private placeMower() {
@@ -654,6 +655,7 @@ class Game {
     this.stepCamera(dt);
     if (this.mode === 'paused' || this.busy) {
       this.lawn.fx.update(0, this.camera);
+      this.audio.drive(0, 0, 0, false);
       return;
     }
     this.driveAndCut(dt);
@@ -715,6 +717,7 @@ class Game {
         this.mode = 'finishing';
         this.input.enabled = false;
         lawn.startFinish(m);
+        this.audio.ripple();
       }
       this.updateArrow(dt);
     } else if (this.mode === 'finishing') {

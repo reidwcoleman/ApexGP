@@ -79,6 +79,8 @@ export class GameAudio {
   private rpm = 0;
   private startT = 0;
   private running = false;
+  /** what this mower's engine is like: a big rider is lower and fuller than a push mower */
+  private voice = { pitch: 1, gain: 1, dark: 1 };
   private bed: { name: Sample; src: AudioBufferSourceNode; g: GainNode } | null = null;
   private stepDist = 0;
   private lastCoin = 0;
@@ -350,14 +352,14 @@ export class GameAudio {
     const wob = Math.sin(t * 3.3) * 0.012 + Math.sin(t * 8.1) * 0.006 + Math.sin(t * 23) * 0.003;
     const target = 0.2 + throttle * 0.5 + speed01 * 0.2 - cutting * 0.1 + wob;
     this.rpm += (target - this.rpm) * (target < this.rpm ? 0.14 : 0.07);
-    const rate = 0.8 + this.rpm * 0.62;
+    const rate = (0.8 + this.rpm * 0.62) * this.voice.pitch;
     this.engLo.playbackRate.setTargetAtTime(rate, t, 0.05);
     this.engHi.playbackRate.setTargetAtTime(rate * 0.875, t, 0.05);
     const load = Math.min(1, cutting * 1.15 + throttle * 0.2);
     this.gLo.gain.setTargetAtTime(1 - load * 0.85, t, 0.12);
     this.gHi.gain.setTargetAtTime(0.2 + load * 0.95, t, 0.1);
-    this.engFilter.frequency.setTargetAtTime(2600 + this.rpm * 2200 + cutting * 1200, t, 0.1);
-    this.engGain.gain.setTargetAtTime(0.52 + this.rpm * 0.4 + cutting * 0.08, t, 0.1);
+    this.engFilter.frequency.setTargetAtTime((2600 + this.rpm * 2200 + cutting * 1200) * this.voice.dark, t, 0.1);
+    this.engGain.gain.setTargetAtTime((0.52 + this.rpm * 0.4 + cutting * 0.08) * this.voice.gain, t, 0.1);
     this.rollFilter.frequency.setTargetAtTime(900 + speed01 * 1700, t, 0.1);
     this.rollGain.gain.setTargetAtTime(speed01 * 0.05, t, 0.12);
     this.bedBus.gain.setTargetAtTime(0.28, t, 0.5);
@@ -365,6 +367,17 @@ export class GameAudio {
 
   setProgress(p: number) {
     this.level = p;
+  }
+
+  setMower(kind: 'push' | 'rider', width: number) {
+    this.voice = kind === 'rider' ? { pitch: 0.7 - (width - 1) * 0.12, gain: 1.2, dark: 0.7 } : { pitch: 1.04 - (width - 0.56) * 0.5, gain: 1, dark: 1 };
+  }
+
+  /** the last of the lawn folding down in a ripple: a long rising hush of blades */
+  ripple() {
+    this.noiseBurst(2.2, 0.16, 350, 5200, 0.0, 0.5);
+    this.noiseBurst(2.2, 0.08, 1800, 7000, 0.15, 0.8);
+    this.tone(180, 1.6, 0.05, 'sine', 0, 520);
   }
 
   /** `n` bits of lawn were just cut: a grain of snipping for some of them */
