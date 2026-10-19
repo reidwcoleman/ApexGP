@@ -265,8 +265,9 @@ export class MarbleGame {
     this.state = 'intro';
     this.stateT = 0;
     this.ui.hud(false);
+    this.sound.setKey(this.roundIdx);
     this.sound.setMusic('calm');
-    this.sound.notes([67, 72], 0.12, 0.4);
+    this.sound.notes([67, 72], 0.12, 0.4, true);
   }
 
   /** builds a round's course and puts the field (or, for the menu, a handful) on the grid */
@@ -422,7 +423,7 @@ export class MarbleGame {
     for (const r of this.racers) if (r.bot && !r.out) r.bot.update(dt, w.time, c, w.marbles);
     w.step(dt);
     c.b.sync(w.time);
-    this.sounds();
+    this.sounds(dt);
     this.visuals(dt, now / 1000);
     this.cameraUpdate(dt);
     this.hud();
@@ -557,6 +558,8 @@ export class MarbleGame {
           r.out = true;
           r.m.active = false;
           this.drop(r);
+          // (the crowd reacts to anyone going over near the camera)
+          if (!r.c.player && r.m.pos.distanceTo(this.camera.position) < 25 && Math.random() < 0.6) this.sound.ooh();
           if (r.c.player && this.state === 'play') {
             this.ui.banner('ELIMINATED', 'bad', 'Knocked off the plate');
             this.sound.eliminated();
@@ -588,7 +591,10 @@ export class MarbleGame {
       if (m.pos.y < c.killY || pr.h < -9) {
         r.fell = w.time;
         this.drop(r);
-        if (r.c.player) this.sound.notes([60, 55], 0.12, 0.3);
+        if (r.c.player) {
+          this.sound.notes([60, 55], 0.12, 0.3);
+          this.sound.ooh();
+        }
         continue;
       }
       for (const cp of c.checkpoints) if (pr.s > cp + 1 && cp > r.cp && m.grounded && pr.d < 6) r.cp = cp;
@@ -648,6 +654,7 @@ export class MarbleGame {
     const i = path.index(r.cp);
     r.m.vel.copy(path.T[i]).multiplyScalar(3);
     r.bot?.reset(i);
+    if (r.c.player) this.sound.respawn();
   }
 
   private placeAt(r: Racer, s: number, lat: number) {
@@ -738,7 +745,7 @@ export class MarbleGame {
   }
 
   // ------------------------------------------------------------------------------------- sound
-  private sounds() {
+  private sounds(dt: number) {
     const c = this.course!;
     const s = this.sound;
     if (!s.ctx) return;
@@ -749,8 +756,15 @@ export class MarbleGame {
     const list = this.racers
       .filter((r) => r.m.active && !r.m.frozen)
       .map((r) => ({ key: r.c.id, x: r.m.pos.x, y: r.m.pos.y, z: r.m.pos.z, speed: r.m.vel.length(), on: r.m.groundT < 0.05, mat: r.m.groundMat }));
-    s.rolling(list);
+    s.rolling(list, p?.c.id, dt);
     s.windAt(p ? p.m.vel.length() : 0);
+    // the music heats up: the leader near the line, a survival round getting late
+    const live = this.state === 'play';
+    s.crowd(live || this.state === 'over' || this.state === 'countdown');
+    if (live) {
+      const lead = c.path ? Math.max(0, ...this.racers.map((r) => (r.fin ? 1 : r.s / c.finishS))) : this.playT / 70;
+      s.setHeat(THREE.MathUtils.clamp((lead - 0.45) / 0.45, 0, 1));
+    } else s.setHeat(0);
     for (const r of this.racers) {
       if (r.m.hopped && r.m.pos.distanceToSquared(this.camera.position) < 900) s.hop(r.m.pos.x, r.m.pos.y, r.m.pos.z, r.m.groundMat);
       if (r.m.dashed && r.m.pos.distanceToSquared(this.camera.position) < 900) s.dash(r.m.pos.x, r.m.pos.y, r.m.pos.z);

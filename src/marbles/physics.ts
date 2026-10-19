@@ -44,6 +44,8 @@ export interface Hit {
   x: number;
   y: number;
   z: number;
+  /** the surface normal's up component (1: a floor, 0: a wall) */
+  ny: number;
   a: Marble;
   b?: Marble;
   kin?: Kin;
@@ -493,7 +495,7 @@ export class World {
       W0.copy(R).cross(VT).multiplyScalar(-jt / IR);
       m.ang.add(W0);
     }
-    if (imp > 0.9) this.emit(m, kin ?? mat, 'surface', mat, imp, m.pos.x - n.x * RADIUS, m.pos.y - n.y * RADIUS, m.pos.z - n.z * RADIUS, undefined, kin ?? undefined);
+    if (imp > 0.9) this.emit(m, kin ?? mat, 'surface', mat, imp, m.pos.x - n.x * RADIUS, m.pos.y - n.y * RADIUS, m.pos.z - n.z * RADIUS, n.y, undefined, kin ?? undefined);
   }
 
   private pairs() {
@@ -545,17 +547,17 @@ export class World {
           W0.copy(R).cross(VT).multiplyScalar((-jt * kb) / IR);
           b.ang.add(W0);
         }
-        if (imp > 0.5) this.emit(a, b, 'glass', Mat.Metal, imp, a.pos.x + N.x * RADIUS, a.pos.y + N.y * RADIUS, a.pos.z + N.z * RADIUS, b);
+        if (imp > 0.5) this.emit(a, b, 'glass', Mat.Metal, imp, a.pos.x + N.x * RADIUS, a.pos.y + N.y * RADIUS, a.pos.z + N.z * RADIUS, 0, b);
       }
     }
   }
 
-  private emit(m: Marble, partner: unknown, kind: 'glass' | 'surface', mat: Mat, speed: number, x: number, y: number, z: number, b?: Marble, kin?: Kin) {
+  private emit(m: Marble, partner: unknown, kind: 'glass' | 'surface', mat: Mat, speed: number, x: number, y: number, z: number, ny: number, b?: Marble, kin?: Kin) {
     // a contact rattling at rest isn't a new knock: one per partner per 70 ms, louder ones always
     const last = m.quiet.get(partner);
     if (last !== undefined && this.time - last < 0.07 && speed < 4) return;
     m.quiet.set(partner, this.time);
-    this.hits.push({ kind, mat, speed, x, y, z, a: m, b, kin });
+    this.hits.push({ kind, mat, speed, x, y, z, ny, a: m, b, kin });
   }
 }
 const UP = new THREE.Vector3(0, 1, 0);
