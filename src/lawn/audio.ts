@@ -79,6 +79,8 @@ export class GameAudio {
   private rpm = 0;
   private startT = 0;
   private running = false;
+  private lastDrive = 0;
+  private lastActive = false;
   /** what this mower's engine is like: a big rider is lower and fuller than a push mower */
   private voice = { pitch: 1, gain: 1, dark: 1 };
   private bed: { name: Sample; src: AudioBufferSourceNode; g: GainNode } | null = null;
@@ -322,6 +324,10 @@ export class GameAudio {
     const c = this.ctx;
     if (!c || !this.engLo || !this.engHi) return;
     const t = c.currentTime;
+    // (a few dozen updates a second are plenty for a motor; every call adds automation events)
+    if (active === this.lastActive && t - this.lastDrive < 0.03) return;
+    this.lastDrive = t;
+    this.lastActive = active;
     const starting = t < this.startT;
     if (!active) {
       // spinning down

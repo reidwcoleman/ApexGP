@@ -376,6 +376,10 @@ export class UI {
       this.click();
       mu.classList.toggle('off', this.musicBtn.classList.contains('off'));
     };
+    const cr = el('a', 'credit', card, 'Sounds: recordings from Wikimedia Commons') as HTMLAnchorElement;
+    cr.href = `${import.meta.env.BASE_URL}lawn/sfx/CREDITS.txt`;
+    cr.target = '_blank';
+    cr.rel = 'noopener';
     p.classList.add('on');
   }
   hidePause() {
