@@ -36,6 +36,36 @@ npm run check    # tsc --noEmit
   and the steel bull), Zandvoort (banked Hugenholtz and Arie Luyendijk, dunes, the North Sea and
   the orange army), Circuit of the Americas (the Turn 1 hill, the tower) and Interlagos (the bowl,
   the Senna S, São Paulo all around). Switching circuit rebuilds the world in-page — no reload.
+- **Scenic roads** — three fictional road courses in places no Grand Prix goes, open from the start
+  for quick races, time trials and simulated races (listed under the calendar on the Quick race tab;
+  not career rounds):
+  - **Circuito di Capo Serena** (4.8 km) — a clifftop road on a Mediterranean headland: the pit
+    straight along the cliff edge with the sea 40 m below, the lighthouse hairpin on the cape, olive
+    terraces, umbrella pines and cypresses, mountain-road switchbacks down from the ridge, a harbour
+    village climbing the slope, sea stacks, yachts.
+  - **Bergsee Ring** (4.5 km) — the floor of a glacial valley: the pit straight along a turquoise
+    lake, a climb into the spruce on the moraine past a chapel, 2 500 m peaks with rock and snow on
+    every side, a boathouse and jetty, two villages.
+  - **Red Mesa Raceway** (5.7 km) — a high-desert speedway: a kilometre-long straight, a plunge into
+    a dry wash, banded red sandstone buttes (one in the infield), a 270 m escarpment, hoodoos,
+    junipers and sagebrush.
+  Layouts are authored as straights and corners (`src/world/circuits/scenic.ts`, closed by
+  CircuitGen); each place is built round wherever the lap lands (`src/world/env/venues/scenicLand.ts`:
+  coast, lake and mesas as functions of the lap's own outline; sea cliffs, mesa walls and the wash
+  are carved exactly over the smooth 32 m grid by `scenicCarve`), with its own ground in the terrain
+  shader (`uScenic`: limestone faces, alpine rock/scree/snow line, sandstone strata), horizon
+  (a new `mesa` kind in horizon.ts), stands (`scenicLayout.ts`), and scenery (`scenicScenery.ts`).
+  `node tools/_scenicshots.mjs <out> serena,bergsee,redmesa [time] [quality] [views]` shoots each
+  from the track, the air and hand-placed hero views.
+- **Heat haze** (`src/core/heatHaze.ts`) — on a hot, sunny, dry day the air over the asphalt wobbles
+  far down the straights (stronger down a long lens), and every car's exhaust plume shimmers what is
+  seen through it. After the TAA, High quality and up, ~0.3 ms. `node tools/_hazeshot.mjs`.
+- **Physics: the track and the brakes** — the circuit rubbers in through a race (green at the start,
+  washed by rain); the racing line grips best and the dust and marbles off it cost up to ~4.5 %.
+  Carbon brakes have a temperature per corner: poor bite cold (under ~300 °C), fade past ~1 100 °C,
+  their glow is that temperature. A wheel locked solid grinds a flat spot that thumps once a turn
+  through the car and costs a little grip until the next set. The HUD's tyre widget shows each
+  corner's brake temperature and flags a flat spot.
 - **Driver career** — the game's main mode, like the F1 games' My Driver: create a driver (name, nationality,
   number, helmet colours, skin and hair) and start in Formula 2 with one of three junior teams, or take over a
   current F1 driver's seat. The hub (Overview · Inbox · Standings · Driver · History) runs the life around the races:

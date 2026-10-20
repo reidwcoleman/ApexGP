@@ -109,6 +109,10 @@ LOADING = [
     ('monza_rain', None, True, 0.55),
     ('sakhir_night', 'sakhir', False, 0.5),
     ('montreal_sunset', 'montreal', False, 0.55),
+    # the scenic road courses
+    ('serena_golden', 'serena', False, 0.55),
+    ('bergsee_valley', 'bergsee', False, 0.5),
+    ('redmesa_golden', 'redmesa', False, 0.6),
 ]
 # where the wordmark sits in the 1920×1080 frame (the loader's HTML lines up with it)
 LOGO_X, LOGO_Y, LOGO_W = 96, 420, 640

@@ -1,6 +1,6 @@
 // Solo AI laps at a list of pace levels: lap time, time off the road, spins. node tools/aipace.mjs [track] [paces]
 import { Track } from '../src/world/Track.ts';
-import { CIRCUITS } from '../src/world/Circuits.ts';
+import { ALL_CIRCUITS as CIRCUITS } from '../src/world/Circuits.ts';
 import { CarPhysics, F1_SPEC } from '../src/sim/CarPhysics.ts';
 import { RacingProfile } from '../src/sim/RacingProfile.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';

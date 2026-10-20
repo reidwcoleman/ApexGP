@@ -3,7 +3,7 @@ import { MOTION_CARS, Renderer, type QualityLevel } from '../core/Renderer.ts';
 import { Input } from '../core/Input.ts';
 import { GameAudio } from '../core/Audio.ts';
 import { Track, SURF } from '../world/Track.ts';
-import { CIRCUITS, MONZA } from '../world/Circuits.ts';
+import { ALL_CIRCUITS, CIRCUITS, MONZA, layoutPoints } from '../world/Circuits.ts';
 import type { CircuitDef } from '../world/CircuitGen.ts';
 import { collectDeep, collectResources, disposeTree, holdMaterials, releaseHeldMaterials, sweepGpu, trackGpuUploads } from '../core/dispose.ts';
 import { createCloudNoise } from '../world/env/skyNoise.ts';
@@ -433,7 +433,7 @@ export class Game {
     const next = this.dc.nextTrack ?? picked ?? this.career.nextRound() ?? unlocked[unlocked.length - 1]?.id ?? MONZA.id;
     const want = new URLSearchParams(location.search).get('track') ?? next;
     await this.buildWorld(
-      CIRCUITS.find((c) => c.id === want) ?? MONZA,
+      ALL_CIRCUITS.find((c) => c.id === want) ?? MONZA,
       async (f, step) => {
         progress(0.06 + f * 0.56, step);
         await tick();
@@ -1653,7 +1653,7 @@ export class Game {
     const w = this.race.weatherState;
     const card = document.createElement('div');
     card.className = 'race-intro';
-    const path = d.centerline ? circuitPath(d.centerline.points, 200, 140, 8) : '';
+    const path = circuitPath(layoutPoints(d), 200, 140, 8);
     const kicker = this.careerRace ? `Career · Round ${String(i + 1).padStart(2, '0')}` : 'Grand Prix';
     card.innerHTML =
       `<svg class="ri-map" viewBox="0 0 200 140"><path d="${path}"/></svg>` +
@@ -2659,8 +2659,8 @@ export class Game {
     this.simSetup.hide();
     const c = { ...cfg };
     if (c.track === 'random') {
-      const others = CIRCUITS.filter((x) => x.id !== this.track.def.id);
-      c.track = (others.length ? others : CIRCUITS)[Math.floor(Math.random() * (others.length || CIRCUITS.length))].id;
+      const others = ALL_CIRCUITS.filter((x) => x.id !== this.track.def.id);
+      c.track = (others.length ? others : ALL_CIRCUITS)[Math.floor(Math.random() * (others.length || ALL_CIRCUITS.length))].id;
     }
     this.simCfg = c;
     this.menu.setup.track = c.track;
@@ -3256,7 +3256,7 @@ export class Game {
     const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
     while (this.travelTo && (this.travelTo !== this.track.def.id || this.travelForce)) {
       this.travelForce = false;
-      const def = CIRCUITS.find((c) => c.id === this.travelTo);
+      const def = ALL_CIRCUITS.find((c) => c.id === this.travelTo);
       if (!def) break;
       const t0 = performance.now();
       const screen = this.menu.screen;
@@ -3286,7 +3286,7 @@ export class Game {
       await Promise.race([artReady, wait(350)]);
       await wait(120);
       // the newest destination, now that the screen is covered
-      const dest = CIRCUITS.find((c) => c.id === this.travelTo) ?? def;
+      const dest = ALL_CIRCUITS.find((c) => c.id === this.travelTo) ?? def;
       (veil.querySelector('b') as HTMLElement).textContent = dest.name;
       // the old circuit's background build (if still going) stops at its next slice
       this.worldGen++;
@@ -3965,6 +3965,13 @@ export class Game {
     if (this.cams.cuts !== this.lastCuts) {
       this.lastCuts = this.cams.cuts;
       g.motionCut = true;
+    }
+    // heat haze: a mirage over the road on a hot, sunny, dry day; exhaust shimmer behind the cars always
+    {
+      const w = this.race.weatherState;
+      const sun = w.time === 'night' || w.time === 'dusk' ? 0 : w.time === 'dawn' || w.time === 'sunset' ? 0.35 : w.time === 'golden' || w.time === 'morning' ? 0.7 : 1;
+      g.heatHaze = onTrack ? THREE.MathUtils.clamp((w.trackTemp - 24) / 18, 0, 1) * sun * (1 - w.cloud * 0.8) * (1 - Math.min(1, w.wetness * 2)) : 0;
+      g.heatExhaust = onTrack ? 1 : 0;
     }
     const out = g.motionCars;
     out.length = 0;

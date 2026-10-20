@@ -1,3 +1,4 @@
+import { scenicSpecies, scenicTreeLook, scenicTreeOk } from './venues/scenicLand.ts';
 import * as THREE from 'three';
 import { WorldMap } from './worldmap.ts';
 import { fbm2, hash2i, rng, smoothstep } from './noise.ts';
@@ -149,6 +150,11 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (sp === 'spruce') c.multiply(SPRUCE_K).multiplyScalar(0.92 + h3 * 0.18);
     else if (sp === 'shrub') c.multiply(SHRUB_K);
     else c.multiply(BROAD_K);
+    // the scenic venues: cypress, olive and pine; spruce and larch; juniper and pinyon (scenicLand.ts)
+    if (map.scenic) {
+      const L = scenicTreeLook(map.scenic, sp, h3);
+      return c.multiply(new THREE.Color(L.tint[0], L.tint[1], L.tint[2]));
+    }
     // São Paulo in spring (November): deep, glossy tropical greens, nothing turning
     if (map.venue === 'interlagos') return c.multiply(new THREE.Color(0.9, 1.06, 0.84));
     // a few trees already turning (September): planes go yellow-brown, chestnuts brown
@@ -174,6 +180,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const n2 = fbm2(x / 90 - 1.3, z / 90 + 8.8, 2);
     // the Ardennes: spruce plantations with stands of beech/oak (the chestnut crowns stand in for beech)
     // (about a quarter broadleaf, in stands, so the hills read as dark conifer with patches of lighter beech)
+    if (map.scenic) return scenicSpecies(map.scenic, map, x, z, n, n2, h);
     if (map.venue === 'ardennes') return n < 0.12 || (n < 0.3 && h > 0.4) || h > 0.85 ? 'spruce' : n2 > -0.1 ? 'chestnut' : 'oak';
     // English lowland: oak and ash (the plane crowns stand in for ash), a few horse chestnuts and poplars
     if (map.venue === 'airfield') return n < 0.05 ? 'oak' : n < 0.3 ? 'plane' : n2 > 0.3 ? 'poplar' : 'chestnut';
@@ -222,9 +229,10 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.ovalClearance(x, z) < 1.5) return false;
     if (map.pathDistance(x, z).d < 1.2) return false;
     if (map.inPitZone(x, z, 8)) return false;
+    if (map.scenic && !scenicTreeOk(map, x, z)) return false;
     return true;
   };
-  const add = (sp: SpeciesId, x: number, z: number, scale: number, h: number, h2: number) => {
+  const add = (sp: SpeciesId, x: number, z: number, scale: number, h: number, h2: number, tintK?: THREE.Color) => {
     // (Zandvoort: the pines out in the open dunes are small and wind-bent, the scrub dense and low)
     if (map.venue === 'zandvoort' && (map.forest(x, z) < 0.55 || map.distToTrack(x, z) <= 480)) scale *= sp === 'spruce' ? 0.5 : sp === 'shrub' ? 1.3 : 1;
     const y = map.height(x, z) - 0.12;
@@ -235,7 +243,10 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     // the gums stand tall over the park
     if (map.venue === 'melbourne') scale *= sp === 'oak' ? 1.15 : 1;
     if (map.venue === 'yasmarina') scale *= sp === 'shrub' ? 0.9 : 0.6;
-    trees.push({ x, y, z, proto: pick(sp, h), s: scale, rot: h2 * Math.PI * 2 * 7.3, tint: tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2), flip: h > 0.5 });
+    if (map.scenic) scale *= scenicTreeLook(map.scenic, sp, hash2i(Math.floor(x * 2), Math.floor(z * 2), 77)).scale;
+    const tint = tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2);
+    if (tintK) tint.multiply(tintK);
+    trees.push({ x, y, z, proto: pick(sp, h), s: scale, rot: h2 * Math.PI * 2 * 7.3, tint, flip: h > 0.5 });
   };
 
   // ---------------------------------------------------------------- the woods (jittered grid)
@@ -321,8 +332,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // ---------------------------------------------------------------- desert scrub by the circuit
   // (Sakhir, Yas: the sand beyond the fences isn't bare — low saltbush and grass tussocks dot it,
   // in loose clumps, thinning out with distance; nothing on the lawns or the paving)
-  if (map.venue === 'sakhir' || map.venue === 'yasmarina') {
-    for (let k = 0; k < 9000; k++) {
+  if (map.venue === 'sakhir' || map.venue === 'yasmarina' || map.venue === 'canyon') {
+    for (let k = 0, K = map.venue === 'canyon' ? 16000 : 9000; k < K; k++) {
       const i = Math.floor(r() * track.n);
       const side = r() < 0.5 ? -1 : 1;
       const far = r();
@@ -337,9 +348,52 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
       for (let j = 0; j < n; j++) {
         const x = q.x + (r() - 0.5) * 5, z = q.z + (r() - 0.5) * 5;
         if (!okTree(x, z, 5)) continue;
-        add('shrub', x, z, 0.35 + r() * 0.45, r(), 0.5);
+        add('shrub', x, z, (map.venue === 'canyon' ? 0.55 : 0.35) + r() * 0.45, r(), 0.5);
       }
     }
+  }
+  // ---------------------------------------------------------------- the Riviera's macchia and olive groves
+  // (Capo Serena: the open land between the pine woods is dense evergreen scrub in clumps; on the
+  // gentle slopes, olive trees stand in rows on the terraces, silver-grey, each its own size)
+  if (map.venue === 'riviera') {
+    for (let k = 0; k < 11000; k++) {
+      const i = Math.floor(r() * track.n);
+      const side = r() < 0.5 ? -1 : 1;
+      const far = r();
+      const lat = side * (track.barrierAt(i, side) + 8 + far * far * 420);
+      const q = track.point(i, lat, 0);
+      const clump = fbm2(q.x / 48 + 3.3, q.z / 48 - 7.1, 2);
+      if (clump < 0.12 + far * 0.15) continue;
+      if (map.forest(q.x, q.z) > 0.6 || map.pathDistance(q.x, q.z).d < 3 || map.urban(q.x, q.z) > 0.2) continue;
+      if (!okTree(q.x, q.z, 6)) continue;
+      const n = 1 + Math.floor(r() * 3);
+      for (let j = 0; j < n; j++) {
+        const x = q.x + (r() - 0.5) * 6, z = q.z + (r() - 0.5) * 6;
+        if (!okTree(x, z, 6)) continue;
+        add('shrub', x, z, 0.5 + r() * 0.6, r(), 0.5);
+      }
+    }
+    const OLIVE = new THREE.Color(1.3, 1.22, 1.08);
+    const bb = map.A.bb;
+    const C = 8;
+    for (let z = bb.z0 - 900; z < bb.z1 + 900; z += C)
+      for (let x = bb.x0 - 900; x < bb.x1 + 900; x += C) {
+        // groves in blocks, each block's rows at its own angle
+        const g = fbm2(x / 330 + 1.7, z / 330 - 6.2, 3);
+        if (g < 0.12) continue;
+        const bx = Math.floor(x / 160), bz = Math.floor(z / 160);
+        const a = hash2i(bx, bz, 91) * Math.PI;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        // (snap to the block's own rotated grid: rows, with a little hand-planted wobble)
+        const u = Math.round((x * ca + z * sa) / C) * C, v = Math.round((-x * sa + z * ca) / C) * C;
+        const px = u * ca - v * sa + (hash2i(Math.floor(x), Math.floor(z), 92) - 0.5) * 1.2;
+        const pz = u * sa + v * ca + (hash2i(Math.floor(x), Math.floor(z), 93) - 0.5) * 1.2;
+        if (hash2i(Math.floor(px / 4), Math.floor(pz / 4), 94) < 0.12) continue;
+        const d = map.distToTrack(px, pz);
+        if (d < 70 || d > 1100 || map.forest(px, pz) > 0.3 || map.urban(px, pz) > 0.1 || map.slope(px, pz) < 0.9) continue;
+        if (!okTree(px, pz, 8)) continue;
+        add('shrub', px, pz, 1.9 + hash2i(Math.floor(px), Math.floor(pz), 95) * 0.9, 0.3, 0.5, OLIVE);
+      }
   }
   // ---------------------------------------------------------------- avenues & poplar rows
   for (const q of layout.avenueTrees) {

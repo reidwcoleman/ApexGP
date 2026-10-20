@@ -25,6 +25,12 @@ import type { Weather } from '../world/Weather.ts';
  *  - Tyre temperatures: sliding and rolling heat them, speed and water cool
  *    them; grip peaks in each compound's working window, wear rises when hot.
  *  - Fuel: the car carries and burns it, so it gets lighter through a race.
+ *  - The track rubbers in: the racing line grips best, off it the tyres run over dust and marbles
+ *    (more so the more rubber is down); a green track grips a little less everywhere.
+ *  - Carbon brakes with a temperature: they bite poorly cold (the first stop after a safety car, a
+ *    long straight on a cold day) and fade when cooked; their glow is that temperature.
+ *  - Flat spots: a locked wheel grinds one into the tread, and every turn of the wheel it thumps —
+ *    a vibration through the car and a little less grip, until the next set.
  *
  * Body frame: vx forward, vy LEFT, r = yaw rate (+ turns left, same as heading).
  * World: heading θ → forward (sin θ, cos θ) in XZ; yaw is rotation about +Y.
@@ -332,6 +338,27 @@ const YAW_LAG_DAMP = 24000;
 // wheel order: 0 FL, 1 FR, 2 RL, 3 RR
 const FRONT = [true, true, false, false];
 
+/** a green track grips this much less everywhere; off the rubbered line, up to this much less again */
+const LINE_GREEN = 0.03;
+const LINE_OFF = 0.045;
+/** carbon brakes: temperature at the start (after the out- or formation lap, °C), heat capacity of a
+ *  corner's disc + pads + caliper (J/K), cooling (1/s, still and per m/s through the ducts) */
+const BRAKE_START = 420;
+const BRAKE_C_F = 4200;
+const BRAKE_C_R = 3600;
+const BRAKE_COOL_0 = 0.02;
+const BRAKE_COOL_V = 0.0012;
+/** how fast a locked wheel grinds a flat spot (per s of full lock at 216 km/h) */
+const FLAT_RATE = 0.8;
+const smooth01 = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** carbon's bite by temperature: poor when cold, best 400–1 000 °C, fading when cooked */
+export function brakeEff(T: number): number {
+  return (0.6 + 0.4 * smooth01(120, 420, T)) * (1 - 0.2 * smooth01(1050, 1350, T));
+}
+
 export class CarPhysics {
   readonly spec: CarSpec;
   assists: Assists = { traction: 'full', abs: true, stability: true, autoGear: true };
@@ -366,6 +393,19 @@ export class CarPhysics {
   allowReverse = true;
   private reverseTimer = 0;
 
+  /**
+   * How rubbered-in the circuit is, 0 (green, dusty) … 1 (a thick black line), set by the race: the
+   * whole track grips LINE_GREEN less when green, and the further a wheel runs from the racing line
+   * the more it loses (LINE_OFF × rubber: the dust and marbles off line).
+   */
+  static rubber = 0.85;
+  /** carbon brake temperature per wheel (°C) */
+  readonly brakeTemp = [BRAKE_START, BRAKE_START, BRAKE_START - 20, BRAKE_START - 20];
+  /** flat spot per wheel 0 … 1, ground in by a locked wheel */
+  readonly flatSpot = [0, 0, 0, 0];
+  private readonly flatPhase = [0, 0, 0, 0];
+  private flatSet = 0;
+  private readonly tbUsed = [0, 0, 0, 0];
   /** set by the race each step: slipstream (0..1) and dirty air (0..1) from the car ahead */
   tow = 0;
   dirty = 0;
@@ -525,7 +565,10 @@ export class CarPhysics {
     this.gear = 1;
     this.rpm = this.spec.rpmIdle;
     this.reverse = false;
-    for (let i = 0; i < 4; i++) this.omega[i] = 0;
+    for (let i = 0; i < 4; i++) {
+      this.omega[i] = 0;
+      this.brakeTemp[i] = BRAKE_START - (i < 2 ? 0 : 20);
+    }
   }
 
   /**
@@ -839,13 +882,17 @@ export class CarPhysics {
       Tdrive[3] = -axleTorque / 2;
     }
 
-    // ---- brakes
+    // ---- brakes (each corner's torque by its carbon's temperature)
     const Tb = [0, 0, 0, 0];
     if (!this.reverse && brake > 0) {
       const tf = brake * sp.brakeTorque * sp.brakeBias * 0.5;
       const tr = brake * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
-      Tb[0] = Tb[1] = tf;
-      Tb[2] = Tb[3] = tr;
+      for (let i = 0; i < 4; i++) Tb[i] = (i < 2 ? tf : tr) * brakeEff(this.brakeTemp[i]);
+    }
+    // a new set of tyres: no flat spots
+    if (this.flatSet !== this.tyreSet) {
+      this.flatSet = this.tyreSet;
+      this.flatSpot.fill(0);
     }
 
     // ---- per-wheel tyre forces with implicit wheel spin
@@ -909,7 +956,14 @@ export class CarPhysics {
       // damaged suspension: the wheel is out of alignment, a broken one barely touches the road
       const sd8 = this.damageMode === 'full' ? this.susp[i] : 0;
       const suspGrip = sd8 >= 0.999 ? 0.3 : 1 - 0.4 * sd8;
-      const cond = weatherGrip * tGrip * pressGrip * wearGrip * this.compoundGrip * suspGrip;
+      // the rubbered line and the dust off it (on the circuit's own asphalt; a wet track hides it)
+      let lineGrip = 1 - 0.02 * this.flatSpot[i];
+      if (sc === SURF.ROAD) {
+        const off = Math.abs(this.wL[i] - track.racingLineAt(this.wS[i]));
+        const rb = CarPhysics.rubber;
+        lineGrip *= (1 - LINE_GREEN * (1 - rb)) * (1 - LINE_OFF * rb * (1 - Math.min(1, wet * 3)) * smooth01(1.6, 4.4, off));
+      }
+      const cond = weatherGrip * tGrip * pressGrip * wearGrip * this.compoundGrip * suspGrip * lineGrip;
       gripSum += cond;
       const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond * (this.assists.arcade ? ARCADE_GRIP : 1);
       const Fmax = muI * Fz;
@@ -971,8 +1025,11 @@ export class CarPhysics {
         }
       }
       this.omega[i] = w1;
+      this.tbUsed[i] = tb;
 
       const k1 = (w1 * R - vl) / vref;
+      // a wheel locked solid at speed grinds a flat into the tread
+      if (k1 < -0.55 && vl > 12) this.flatSpot[i] = Math.min(1, this.flatSpot[i] + dt * (-k1 - 0.55) * FLAT_RATE * Math.min(1.5, vl / 60));
       this.slipRatio[i] = k1;
       this.slipAngle[i] = Math.atan2(vt, vref);
       this.tyre(k1 / kp, sy, Fmax, tmp);
@@ -1012,6 +1069,13 @@ export class CarPhysics {
       this.tyreTemp[i] = T + (heat - cool) * dt;
     }
     this.gripFactor = gripSum / 4;
+    // carbon brakes: the braking power goes into the discs and pads, the air through the ducts takes
+    // it away (more the faster the car goes)
+    for (let i = 0; i < 4; i++) {
+      const P = this.tbUsed[i] * Math.abs(this.omega[i]);
+      const T = this.brakeTemp[i];
+      this.brakeTemp[i] = T + (P / (i < 2 ? BRAKE_C_F : BRAKE_C_R) - (BRAKE_COOL_0 + BRAKE_COOL_V * v) * (T - tAmb)) * dt;
+    }
     if (this.burnFuel && this.fuel > 0) this.fuel = Math.max(0, this.fuel - FUEL_FLOW * throttle * (this.ersDeploying ? 1 : 0.97) * dt);
     this.slipFront = slipF;
     this.slipRear = slipR;
@@ -1121,8 +1185,8 @@ export class CarPhysics {
     this.brake = brake;
     this.wheelAngleF += ((this.omega[0] + this.omega[1]) / 2) * dt;
     this.wheelAngleR += rearOmega * dt;
-    const heatIn = brake * Math.max(0, v - 15) * 0.012;
-    this.brakeHeat = Math.min(1, Math.max(0, this.brakeHeat + (heatIn - this.brakeHeat * 0.9) * dt * 1.6));
+    // (the discs' glow: dull red from ~550 °C, orange-white at 1 000 °C and over)
+    this.brakeHeat = smooth01(520, 1050, Math.max(this.brakeTemp[0], this.brakeTemp[1]));
 
     // ---- suspension (what the chassis visibly does). An F1 car is stiff: ~2.5° of dive at 5 g on
     // the brakes, ~1.5° of roll at 4 g, squatting ~2 cm on its aero at top speed — springs with a
@@ -1135,6 +1199,11 @@ export class CarPhysics {
       const sc = this.surface[i];
       let z = roadBump(track, this.wS[i], this.wL[i]) * Math.min(1, v / 8);
       if (sc === SURF.KERB) z += 0.0065 * Math.sin(this.kerbPhase[i]) * vis;
+      // a flat spot thumps once a turn of the wheel
+      if (this.flatSpot[i] > 0.01) {
+        this.flatPhase[i] = (this.flatPhase[i] + this.omega[i] * dt) % (Math.PI * 2);
+        z += 0.0035 * this.flatSpot[i] * Math.pow(Math.max(0, Math.cos(this.flatPhase[i])), 12) * vis;
+      }
       else if (sc === SURF.GRASS || sc === SURF.GRAVEL) z += (Math.random() - 0.5) * (sc === SURF.GRAVEL ? 0.03 : 0.018) * Math.min(1, v / 15);
       const st = this.strikeT[i];
       if (st < 0.25) z += 0.024 * this.strikeA[i] * Math.exp(-st * 16) * Math.sin(st * Math.PI * 2 * 13);

@@ -1,6 +1,6 @@
 // Headless full race through Race.ts: lights, laps, finish, classification.
 import { Track } from '../src/world/Track.ts';
-import { CIRCUITS } from '../src/world/Circuits.ts';
+import { ALL_CIRCUITS as CIRCUITS } from '../src/world/Circuits.ts';
 import { Race, mulberry32 } from '../src/race/Race.ts';
 import { allEntries } from '../src/race/Teams.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';

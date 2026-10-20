@@ -13,6 +13,7 @@ import { planMexico } from './venues/mexico.ts';
 import { planSakhir } from './venues/sakhir.ts';
 import { planHungaroring } from './venues/hungaroring.ts';
 import { planYasmarina } from './venues/yasmarina.ts';
+import { planScenic } from './venues/scenicLayout.ts';
 import { planMonzaDress } from './venues/monzaDress.ts';
 import { planSpaDress } from './venues/spaDress.ts';
 import { planSilverstoneDress } from './venues/silverstoneDress.ts';
@@ -203,6 +204,7 @@ export function planLayout(track: Track, map: WorldMap): Layout {
   if (track.def.id === 'sakhir') return planSakhir(track, map, addStand, gs);
   if (track.def.id === 'hungaroring') return planHungaroring(track, map, addStand, gs);
   if (track.def.id === 'yasmarina') return planYasmarina(track, map, addStand, gs);
+  if (map.scenic) return planScenic(track, map, addStand, gs);
   if (!oval) return planSpa(track, map, addStand, gs);
   // main straight: west side, opposite the pits
   addStand('Tribuna Centrale', 452, 660, L, 28, 'centrale', 8, 105);

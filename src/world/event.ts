@@ -33,6 +33,9 @@ const EVENTS: Record<string, Omit<EventNames, 'title' | 'titled'>> = {
   yasmarina: { place: 'YAS MARINA', gp: 'ABU DHABI GRAND PRIX', colours: ['#00732f', '#ffffff', '#000000'] },
   mexico: { place: 'MÉXICO', gp: 'GRAN PREMIO DE LA CIUDAD DE MÉXICO', colours: ['#006847', '#ffffff', '#ce1126'] },
   hungaroring: { place: 'HUNGARORING', gp: 'MAGYAR NAGYDÍJ', colours: ['#ce2939', '#ffffff', '#477050'] },
+  serena: { place: 'CAPO SERENA', gp: 'GRAN PREMIO DELLA RIVIERA', colours: ['#0a4c8c', '#ffffff', '#ffe14d'] },
+  bergsee: { place: 'BERGSEE', gp: 'GRAND PRIX DER ALPEN', colours: ['#c8102e', '#ffffff', '#c8102e'] },
+  redmesa: { place: 'RED MESA', gp: 'HIGH DESERT GRAND PRIX', colours: ['#b84a22', '#f6d28a', '#2a1a12'] },
 };
 
 const titledOf = (gp: string): Pick<EventNames, 'title' | 'titled'> => {

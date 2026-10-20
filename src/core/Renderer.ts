@@ -20,6 +20,7 @@ import { N8AOPostPass } from 'n8ao';
 import { MOTION_CARS, MotionBlurEffect } from './motionBlur';
 import { AutoExposure } from './autoExposure';
 import { OnboardEffect } from './onboard';
+import { HAZE_CARS, HeatHazeEffect } from './heatHaze';
 import { TAAPass, TAA_JITTER } from './taa';
 
 export { MOTION_CARS };
@@ -1165,6 +1166,12 @@ export class Renderer {
     this.taa = new TAAPass();
     this.composer.addPass(this.taa);
 
+    // heat haze: the mirage over a hot track far down the straights and the exhaust plumes (heatHaze.ts)
+    this.heat = new HeatHazeEffect();
+    this.heatPass = new EffectPass(camera, this.heat);
+    this.heatPass.enabled = false;
+    this.composer.addPass(this.heatPass);
+
     this.motion = new MotionBlurEffect();
     this.motionPass = new EffectPass(camera, this.motion);
     this.motionPass.enabled = false;
@@ -1732,6 +1739,7 @@ export class Renderer {
     this.updateScene();
     // (before updateMotion, which moves last frame's camera and car matrices on to this frame's)
     this.updateTaa();
+    this.updateHeat(dt);
     this.updateMotion(dt);
     this.updateOnboard();
     this.grade.operatorInside = this.onboardCar !== null;
@@ -1806,6 +1814,46 @@ export class Renderer {
   private readonly prevWheel = new THREE.Matrix4();
   private prevWheelObj: THREE.Object3D | null = null;
   private prevWheelFrame = -1;
+
+  /**
+   * Heat haze (HeatHazeEffect): `heatHaze` 0 … 1 is the mirage over the road (the game sets it from
+   * the track temperature, the sun and a dry track); `heatExhaust` 0 … 1 the exhaust plumes behind the
+   * tracked cars (motionCars). High quality and up.
+   */
+  heatHaze = 0;
+  heatExhaust = 1;
+  private heatTime = 0;
+  private readonly heat: HeatHazeEffect;
+  private readonly heatPass: EffectPass;
+  private updateHeat(dt: number) {
+    const q = this.qualityLevel;
+    const on = (q === 'high' || ultraUp(q)) && !this.indoor && (this.heatHaze > 0.01 || (this.heatExhaust > 0.01 && this.motionCars.length > 0));
+    this.heatPass.enabled = on;
+    if (!on) return;
+    const cam = this.camera;
+    const u = this.heat.uniforms;
+    this.heatTime += Math.min(dt, 0.1);
+    u.get('time')!.value = this.heatTime;
+    (u.get('projInv')!.value as THREE.Matrix4).copy(cam.projectionMatrixInverse);
+    (u.get('camWorld')!.value as THREE.Matrix4).copy(cam.matrixWorld);
+    u.get('strength')!.value = this.heatHaze;
+    // (down a long lens each pixel spans less: the same refraction moves the image more pixels)
+    u.get('lensK')!.value = THREE.MathUtils.clamp(Math.sqrt(40 / Math.max(cam.fov, 1)), 0.8, 2.2);
+    u.get('exhaustK')!.value = this.heatExhaust;
+    const pos = u.get('exPos')!.value as THREE.Vector3[];
+    const dir = u.get('exDir')!.value as THREE.Vector3[];
+    let n = 0;
+    for (const o of this.motionCars) {
+      if (n >= HAZE_CARS) break;
+      // the exhaust exit under the rear wing, and the plume back and a little up from it
+      pos[n].set(0, 0.6, -2.45).applyMatrix4(o.matrixWorld);
+      dir[n].set(0, 0.45, -2.6).transformDirection(o.matrixWorld).multiplyScalar(2.65);
+      // (the onboard camera's own car: its plume is behind the lens, never in the shot)
+      if (o === this.onboardCar) continue;
+      n++;
+    }
+    u.get('exCount')!.value = n;
+  }
 
   /** the car an onboard camera rides in (null = not onboard): its own cockpit is shaded and defocused */
   onboardCar: THREE.Object3D | null = null;

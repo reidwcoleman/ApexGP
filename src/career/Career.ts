@@ -1,7 +1,7 @@
 import { everUnlocked, unlockForever } from './Unlocks.ts';
 import { F1_SPEC, type CarSpec } from '../sim/CarPhysics.ts';
 import { POINTS, AI_SKILL } from '../race/Race.ts';
-import { CIRCUITS } from '../world/Circuits.ts';
+import { CIRCUITS, isScenic } from '../world/Circuits.ts';
 import type { LiveryPattern, Team } from '../race/Teams.ts';
 
 /**
@@ -209,7 +209,8 @@ export class Career {
   static extraUnlocked: ((id: string) => boolean) | null = null;
   isUnlocked(id: string): boolean {
     // (once opened, open for good: a new season or a new career never locks it again)
-    if (UNLOCK_ALL || everUnlocked(id)) return true;
+    // (the scenic road courses are outside the calendar: always open)
+    if (UNLOCK_ALL || everUnlocked(id) || isScenic(id)) return true;
     let open = !!Career.extraUnlocked?.(id);
     if (!open) {
       const i = CIRCUITS.findIndex((c) => c.id === id);

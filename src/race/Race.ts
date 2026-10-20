@@ -109,6 +109,8 @@ export function aiPace(entry: Entry, difficulty: number): number {
 export const LIMIT_PACE: Record<string, number> = {
   monza: 1.03, spa: 1.0, silverstone: 1.0, suzuka: 0.97, montreal: 0.99, melbourne: 1.03, spielberg: 1.03,
   zandvoort: 0.97, austin: 0.98, interlagos: 0.98, hungaroring: 0.98, sakhir: 1.02, mexico: 1.02, yasmarina: 0.98,
+  // the scenic road courses (measured 2026-10-20 with the rubbered-line physics)
+  serena: 1.0, bergsee: 1.03, redmesa: 1.02,
 };
 /**
  * A pace as the AI drives it at this circuit: unchanged in the midfield of the difficulties, and the
@@ -711,6 +713,13 @@ export class Race {
   update(dt: number) {
     this.events.length = 0;
     this.time += dt;
+    // the track rubbers in through the race (practice and qualifying laid most of it down; a time
+    // trial runs on a rubbered track), and rain washes it off
+    if (this.isTimeTrial) CarPhysics.rubber = 0.9;
+    else {
+      const target = 0.72 + 0.28 * (1 - Math.exp(-this.raceTime / 700));
+      CarPhysics.rubber = Math.max(0.35, Math.min(target, CarPhysics.rubber + dt * 0.002) - this.weather.state.rain * dt * 0.0015);
+    }
     this.weather.update(dt, this.phase === 'racing' ? 1 : 0.2);
     this.strategyTimer -= dt;
     if (this.strategyTimer <= 0) {

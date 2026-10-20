@@ -3,6 +3,7 @@ import { FAR_CELL, FINE_CELL, MID_CELL, WorldMap } from './worldmap.ts';
 import { detailNormalTexture, noiseTexture } from './textures.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
 import type { ParkMasks } from './parkmask.ts';
+import { RIVIERA_SEA } from './venues/scenicLand.ts';
 
 /**
  * Terrain meshes: 4 m chunks around the circuit, 16 m chunks over the 6 km
@@ -81,6 +82,12 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   spielberg: { forest: 0.14, pasture: 0.85 },
   // the St Lawrence plain: dairy farms and maize
   montreal: { forest: -0.05, pasture: 0.35 },
+  // Capo Serena: Mediterranean summer — sun-bleached grass, red earth, pale limestone, dark pine and macchia
+  riviera: { lawn: 0x55703a, meadow: 0x6c7446, straw: 0x948a60, grassDark: 0x485530, earth: 0x8c5a3a, gravel: 0xc7b89a, rock: 0xa49884, canopy: 0x2c3a22, forest: 0.12, pasture: 0.25 },
+  // Bergsee: lush alpine hay meadows, dark spruce on every slope
+  alpine: { lawn: 0x4f7a32, meadow: 0x5c7c36, straw: 0x8f8d50, grassDark: 0x3a5a24, canopy: 0x223422, forest: 0.22, pasture: 1 },
+  // Red Mesa: red sand, slickrock and dark juniper
+  canyon: { arid: 1, sand: 0xb07c58, rock: 0x8e5236, earth: 0x9a6a48, gravel: 0xb08a68, lawn: 0x6a6a3a, meadow: 0x8a7a4c, straw: 0xa8885a, canopy: 0x3a3a26 },
 };
 const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid' | 'forest' | 'pasture'>, string> = {
   lawn: 'uLawn', meadow: 'uMeadow', straw: 'uStraw', grassDark: 'uGrassDark', earth: 'uEarth', gravel: 'uGravel',
@@ -133,6 +140,11 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uSand: { value: lin(0xc2a472) },
     uRock: { value: lin(0x86705a) },
     uArid: { value: 0 },
+    /** the scenic venues' ground: 0 none, 1 Capo Serena (limestone cliffs), 2 Bergsee (rock, scree, snow), 3 Red Mesa (sandstone strata) */
+    uScenic: { value: 0 },
+    /** Bergsee: mean height (world y) of the snow line; Capo Serena: the sea's surface */
+    uSnowLine: { value: 1e5 },
+    uSeaLevel: { value: -1e5 },
     uForestCover: { value: 0 },
     uPasture: { value: 0.32 },
     /** 1 = the city goes on to the horizon beyond the square (São Paulo), 0 = towns ringed by farmland */
@@ -189,6 +201,7 @@ uniform sampler2D uMaskTrack;
 uniform vec2 uFineO, uFineS, uSqO, uSqS, uCenter;
 uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uGravel, uGravelDark, uAsphalt, uEarth, uCanopy, uRoof, uSand, uRock;
 uniform float uArid;
+uniform float uScenic, uSnowLine, uSeaLevel;
 uniform float uForestCover, uPasture;
 uniform float uWetness, uRain, uWTime;
 uniform float uCity;
@@ -373,7 +386,7 @@ float tWoodAt( vec2 q, float fShift ) {
   float rc = length( p - uCenter );
   float procUrban = ( 1.0 - smoothstep( 3500.0, 7000.0, rc ) ) * smoothstep( 0.55, 0.7, mFar * 0.7 + m2 * 0.3 ) + smoothstep( 0.68, 0.8, mFar ) * 0.7;
   procUrban = mix( procUrban, smoothstep( 0.3, 0.42, m1 * 0.55 + m2 * 0.45 ), uCity );
-  float urban = mix( procUrban * ( 1.0 - park ), mc.b, inSq ) * ( 1.0 - inFine * 0.0 );
+  float urban = mix( procUrban * ( 1.0 - park ) * ( 1.0 - step( 2.5, uScenic ) ), mc.b, inSq ) * ( 1.0 - inFine * 0.0 );
   float mtn = smoothstep( 90.0, 320.0, vWPos.y );
   float farm = ( 1.0 - park ) * ( 1.0 - forest ) * ( 1.0 - urban ) * ( 1.0 - mtn );
   if ( farm > 0.01 ) {
@@ -543,6 +556,82 @@ float tWoodAt( vec2 q, float fShift ) {
     tRipple *= aridK;
   }
 
+  // ---- the scenic venues (venues/scenicLand.ts)
+  if ( uScenic > 0.5 ) {
+    float steep = smoothstep( 0.3, 0.62, slopeT );
+    float bare = ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * ( 1.0 - lawn * 0.85 );
+    if ( uScenic < 1.5 ) {
+      // Capo Serena: pale limestone on the cliffs and the steep hillsides — bedding planes, iron
+      // stains, a black wet band at the waterline; the unmown land is dry straw and sage in summer
+      // (on a face the noise runs along the wall and up it — sampled from above it would only streak)
+      vec3 wn = normalize( vWNormal );
+      vec2 fq = vec2( abs( wn.x ) > abs( wn.z ) ? p.y : p.x, vWPos.y );
+      float f1 = texture2D( uNoise, fq * 0.043 + vec2( 0.31, 0.62 ) ).g;
+      float f2 = texture2D( uNoise, fq * 0.19 + vec2( 0.7, 0.2 ) ).b;
+      float f3 = texture2D( uNoise, fq * 0.71 ).a;
+      vec3 lime = mix( vec3( 0.34, 0.31, 0.26 ), vec3( 0.56, 0.52, 0.44 ), f2 ) * ( 0.74 + 0.36 * f1 ) * ( 0.9 + 0.2 * f3 );
+      float bed = smoothstep( 0.32, 0.5, abs( fract( vWPos.y * 0.23 + f1 * 0.9 ) - 0.5 ) );
+      lime *= 0.8 + 0.2 * bed;
+      lime = mix( lime, lime * vec3( 0.86, 0.6, 0.4 ), smoothstep( 0.55, 0.85, f1 * 0.7 + f3 * 0.3 ) * 0.55 );
+      // ledges and overhangs: dark shadow lines and lighter fresh fall scars
+      lime *= 0.75 + 0.25 * smoothstep( 0.2, 0.45, f2 );
+      // streaks where the rain runs down the face
+      float runs = texture2D( uNoise, vec2( dot( p, vec2( 0.71, 0.71 ) ) * 0.045, vWPos.y * 0.0015 ) ).g;
+      lime *= 0.82 + 0.3 * smoothstep( 0.3, 0.7, runs );
+      float wetFoot = 1.0 - smoothstep( uSeaLevel + 0.6, uSeaLevel + 3.5 + d2 * 2.5, vWPos.y );
+      lime = mix( lime, vec3( 0.035, 0.04, 0.035 ), wetFoot * 0.8 );
+      // (the face itself: steep ground near the sea; inland only real crags, not the terrace risers)
+      float cliffZ = 1.0 - smoothstep( uSeaLevel + 50.0, uSeaLevel + 80.0, vWPos.y );
+      float k = max( max( steep * cliffZ, smoothstep( 0.5, 0.72, slopeT ) ), wetFoot ) * bare;
+      // dry summer grass on the unmown land (the verges and lawns stay as they are)
+      vec3 dryC = mix( uStraw, uMeadow, 0.35 + 0.3 * m2 ) * ( 0.85 + 0.25 * d1 );
+      col = mix( col, dryC, ( 1.0 - lawn ) * ( 1.0 - forest ) * ( 1.0 - urban ) * ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * 0.28 * ( 1.0 - k ) );
+      col = mix( col, lime, k );
+    } else if ( uScenic < 2.5 ) {
+      // Bergsee: the forest on the valley walls is a dark canopy (the placed trees stand in it, not on meadow)
+      {
+        vec3 cc = mix( uCanopy, uCanopy * vec3( 0.66, 0.78, 0.86 ), smoothstep( 0.4, 0.6, m1 ) ) * ( 0.5 + 0.36 * m3 + 0.18 * d1 );
+        col = mix( col, cc, clamp( forest * 1.15, 0.0, 1.0 ) * smoothstep( 30.0, 110.0, vWPos.y ) * ( 1.0 - lawn ) );
+      }
+      // grey gneiss on every steep face, scree fans under the walls, snow above the snow line
+      vec3 rockA = mix( vec3( 0.2, 0.2, 0.2 ), vec3( 0.36, 0.35, 0.33 ), d2 ) * ( 0.72 + 0.4 * m3 );
+      float strata = smoothstep( 0.2, 0.5, abs( fract( vWPos.y * 0.012 + m2 * 2.0 ) - 0.5 ) );
+      rockA *= 0.85 + 0.2 * strata;
+      float hi = smoothstep( 60.0, 300.0, vWPos.y );
+      float rockK = max( steep * smoothstep( 20.0, 90.0, vWPos.y ), smoothstep( 0.42, 0.62, slopeT + ( m3 - 0.5 ) * 0.3 ) * hi );
+      vec3 scree = mix( vec3( 0.3, 0.29, 0.27 ), vec3( 0.44, 0.42, 0.38 ), d3 );
+      float screeK = smoothstep( 0.18, 0.3, slopeT ) * ( 1.0 - steep ) * smoothstep( 900.0, 1300.0, vWPos.y + m2 * 300.0 );
+      col = mix( col, scree, screeK * bare );
+      col = mix( col, rockA, rockK * bare );
+      float snowH = uSnowLine + ( m2 - 0.5 ) * 520.0 + ( m3 - 0.5 ) * 160.0 + ( d1 - 0.5 ) * 40.0;
+      float snow = smoothstep( snowH - 50.0, snowH + 50.0, vWPos.y ) * ( 1.0 - smoothstep( 0.5, 0.78, slopeT ) * 0.85 );
+      // snow lies in the gullies and on the ledges longer: a broken edge, not a contour
+      snow = clamp( snow + smoothstep( snowH - 400.0, snowH, vWPos.y ) * smoothstep( 0.62, 0.8, m1 * 0.5 + d2 * 0.5 ) * ( 1.0 - steep ), 0.0, 1.0 );
+      col = mix( col, vec3( 0.82, 0.85, 0.9 ) * ( 0.92 + 0.1 * d1 ), snow );
+      tWood *= 1.0 - max( rockK, snow );
+    } else {
+      // Red Mesa: banded sandstone on the walls (deep red and orange, a paler bed here and there), desert varnish
+      // streaking down from the rims, red sand and slickrock on the floor
+      float band = vWPos.y * 0.055 + ( m2 - 0.5 ) * 0.9 + ( d1 - 0.5 ) * 0.12;
+      float bf = fract( band );
+      vec3 sRed = vec3( 0.3, 0.07, 0.03 ), sOra = vec3( 0.46, 0.15, 0.06 ), sCream = vec3( 0.58, 0.34, 0.18 ), sPale = vec3( 0.66, 0.46, 0.3 );
+      float which = h21( vec2( floor( band ), 3.7 ) );
+      // (mostly the same deep red-orange: the beds differ by a shade, a paler one now and then)
+      vec3 layer = which < 0.5 ? sRed * 1.15 : which < 0.9 ? mix( sRed, sOra, 0.7 ) : mix( sOra, sCream, 0.5 );
+      // thin ledges between the beds
+      layer = mix( layer, mix( sOra, sCream, 0.4 ), smoothstep( 0.92, 0.97, bf ) * 0.35 );
+      layer *= 0.8 + 0.3 * d2 + 0.12 * ( m3 - 0.5 );
+      float varnish = texture2D( uNoise, vec2( dot( p, vec2( 0.66, 0.75 ) ) * 0.06, vWPos.y * 0.0012 + m1 * 0.1 ) ).r;
+      layer = mix( layer, layer * vec3( 0.32, 0.26, 0.24 ), smoothstep( 0.55, 0.8, varnish ) * 0.75 );
+      float wallK = smoothstep( 0.22, 0.5, slopeT ) * bare;
+      col = mix( col, layer, wallK );
+      // talus and slickrock: broken red rock on the gentler slopes under the walls
+      vec3 talus = mix( sRed * 1.2, sOra * 1.1, d3 ) * ( 0.8 + 0.3 * d1 );
+      col = mix( col, talus, smoothstep( 0.08, 0.22, slopeT ) * ( 1.0 - wallK ) * bare * 0.8 );
+      tWood = 0.0;
+    }
+  }
+
   // ---- paths and paving
   vec3 grav = mix( uGravel, uGravelDark, d1 * 0.6 + m3 * 0.4 ) * ( 0.88 + 0.24 * d3 );
   col = mix( col, grav, smoothstep( 0.35, 0.75, gravel ) );
@@ -623,7 +712,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v10';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v11';
   return { material, uniforms };
 }
 
@@ -722,6 +811,11 @@ export function buildTerrain(map: WorldMap, maxAniso: number): TerrainBuild {
   group.name = 'Terrain';
   const { material, uniforms } = createTerrainMaterial(maxAniso);
   applyTerrainPalette(uniforms, TERRAIN_PALETTES[map.venue]);
+  uniforms.uScenic.value = map.scenic === 'riviera' ? 1 : map.scenic === 'alpine' ? 2 : map.scenic === 'canyon' ? 3 : 0;
+  // (the scenic villages are real houses close to the road: gardens and yards under them, not painted roofs)
+  if (map.scenic) uniforms.uTownYard.value = 0.85;
+  if (map.scenic === 'riviera') uniforms.uSeaLevel.value = RIVIERA_SEA;
+  if (map.scenic === 'alpine') uniforms.uSnowLine.value = 1650;
 
   const addMesh = (geo: THREE.BufferGeometry | null, name: string) => {
     if (!geo) return;

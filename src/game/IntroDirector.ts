@@ -353,6 +353,12 @@ export class IntroDirector {
         return named('mel_city', 'Melbourne', 'skyline') ?? corner('Lauda');
       case 'interlagos':
         return corner('S do Senna', 'S do Senna') ?? named('SaoPaulo', 'São Paulo', 'skyline');
+      case 'serena':
+        return corner('Faro', 'The lighthouse hairpin');
+      case 'bergsee':
+        return corner('Kapelle', 'The chapel hairpin');
+      case 'redmesa':
+        return corner('Butte', 'The Butte');
     }
     return t.corners.length ? corner(t.corners.find((c) => t.delta(t.startS, c.sApex) > 150)?.name ?? t.corners[0].name) : null;
   }

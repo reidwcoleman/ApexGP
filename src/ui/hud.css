@@ -743,6 +743,9 @@
   color: var(--ink2);
 }
 .tyt .tw { color: var(--ink3); }
+.tyt .tbk { font-size: 0.82em; color: var(--ink3); }
+.tyt .tbk.cold { color: #7fb4ff; }
+.tyt .tbk.bad { color: #ff6a4d; }
 
 /* ---------- minimap (bottom-left) ---------- */
 .minimap {

@@ -54,6 +54,10 @@ const ROOFS_BE = [0x383b40, 0x32353a, 0x404348, 0x2c2f33, 0x46494e, 0x3a3836];
 const WALLS_AU = [0x9a5a44, 0xa8674c, 0xd9ccb0, 0xe8e2d4, 0xc9b79a, 0xf1eee6, 0x8e4f3c, 0xbfae95].map((h) => new THREE.Color(h));
 const ROOFS_AU = [0x8c9094, 0x7a7e82, 0x9fa3a6, 0xa4553a, 0x964a32, 0x4a4d52];
 
+// the Riviera: Ligurian ochre, rose, saffron and peach render with green shutters, terracotta roofs
+const WALLS_LI = [0xd6b07a, 0xd8a08e, 0xe2c88e, 0xc99272, 0xe2c2a2, 0xeadcc4, 0xcf9a84, 0xdcbc8e].map((h) => new THREE.Color(h));
+const ROOFS_LI = [0x6a6660, 0x77726b, 0x5c5853, 0xa4543a, 0x8a4430, 0x6e6a64];
+
 export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
   if (map.venue === 'interlagos') return buildInterlagosCity(map, layout);
   if (map.venue === 'montreal') return buildMontrealCity(map);
@@ -67,8 +71,11 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
   const hu = map.venue === 'hungaroring';
   const au = map.venue === 'melbourne';
   const be = map.venue === 'ardennes';
-  const wallPal = be ? WALLS_BE : au ? WALLS_AU : hu ? WALLS_HU : nl ? WALLS_NL : at ? WALLS_AT : us ? US_WALLS.map((h) => new THREE.Color(h)) : uk ? WALLS_UK : jp ? WALLS_JP : WALLS;
-  const roofPal = be ? ROOFS_BE : au ? ROOFS_AU : hu ? ROOFS_HU : nl ? ROOFS_NL : at ? ROOFS_AT : us ? US_ROOFS : uk ? ROOFS_UK : jp ? ROOFS_JP : ROOFS;
+  // the scenic venues: a Ligurian village climbing from the harbour, Alpine chalets (Styrian palette)
+  const li = map.venue === 'riviera';
+  const al = map.venue === 'alpine';
+  const wallPal = li ? WALLS_LI : al ? WALLS_AT : be ? WALLS_BE : au ? WALLS_AU : hu ? WALLS_HU : nl ? WALLS_NL : at ? WALLS_AT : us ? US_WALLS.map((h) => new THREE.Color(h)) : uk ? WALLS_UK : jp ? WALLS_JP : WALLS;
+  const roofPal = li ? ROOFS_LI : al ? ROOFS_AT : be ? ROOFS_BE : au ? ROOFS_AU : hu ? ROOFS_HU : nl ? ROOFS_NL : at ? ROOFS_AT : us ? US_ROOFS : uk ? ROOFS_UK : jp ? ROOFS_JP : ROOFS;
   const S = map.SQUARE;
   const r = rng(515);
   type B = { x: number; z: number; y: number; w: number; d: number; h: number; rot: number; wall: THREE.Color; roof: THREE.Color; flat: boolean };
@@ -80,9 +87,11 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       const u = map.urban(x, z);
       if (u < 0.35) continue;
       // (the Ardennes are all "park": their villages are placed by urban() alone)
-      const pd = be ? 0 : map.parkDistance(x, z);
-      if (!be && (pd < 30 || pd > 2200)) continue;
-      if (hash2i(ix, iz, 3) > u * (be ? 0.6 : 0.42) * (1 - pd / 3000)) continue;
+      const free = be || li || al;
+      const pd = free ? 0 : map.parkDistance(x, z);
+      if (!free && (pd < 30 || pd > 2200)) continue;
+      if (hash2i(ix, iz, 3) > u * (li ? 0.62 : free ? 0.6 : 0.42) * (1 - pd / 3000)) continue;
+      if (li && map.trackClearance(x, z) < 40) continue;
       // local street grid orientation (matches the ground pattern's blocks roughly)
       const ang = Math.floor(hash2i(Math.floor(x / 500), Math.floor(z / 500), 9) * 4) * 0.4 + 0.2;
       const jx = (hash2i(ix, iz, 5) - 0.5) * (be ? 14 : 6), jz = (hash2i(ix, iz, 6) - 0.5) * (be ? 14 : 6);
@@ -91,7 +100,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       const block = big > (be ? 0.96 : au ? 0.9 : hu ? 0.97 : at ? 0.94 : us ? 0.97 : uk ? 0.95 : jp ? 0.88 : 0.8); // condominio / mansion block
       const w = block ? 22 + big * 12 : 11 + hash2i(ix, iz, 8) * 10;
       const d = block ? 13 + hash2i(ix, iz, 10) * 6 : 9 + hash2i(ix, iz, 11) * 7;
-      const h = block ? (be ? 10 + hash2i(ix, iz, 12) * 5 : 14 + hash2i(ix, iz, 12) * 13) : hu ? 4 + hash2i(ix, iz, 13) * 3 : 6 + hash2i(ix, iz, 13) * 5; // (Hungarian village houses: one storey)
+      const h = li && !block ? 6 + hash2i(ix, iz, 13) * 10 : block ? (be ? 10 + hash2i(ix, iz, 12) * 5 : 14 + hash2i(ix, iz, 12) * 13) : hu ? 4 + hash2i(ix, iz, 13) * 3 : 6 + hash2i(ix, iz, 13) * 5; // (Hungarian village houses: one storey)
       list.push({
         x: px, z: pz, y: map.height(px, pz) - 0.3, w, d, h, rot: -ang + (be ? (hash2i(ix, iz, 17) - 0.5) * 0.7 : 0),
         wall: wallPal[Math.floor(hash2i(ix, iz, 14) * wallPal.length)].clone().multiplyScalar(0.85 + r() * 0.2),

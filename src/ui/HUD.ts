@@ -85,6 +85,7 @@ interface TyreCell {
   temp: HTMLElement;
   psi: HTMLElement;
   wear: HTMLElement;
+  brake: HTMLElement;
 }
 
 /**
@@ -288,7 +289,9 @@ export class HUD {
       const temp = el('b', '', txt, '');
       const psi = el('span', '', txt, '');
       const wear = el('span', 'tw', txt, '');
-      this.tyres.push({ block, fill, temp, psi, wear });
+      // the carbon brake's temperature at this corner (blue cold, white working, red cooked)
+      const brake = el('span', 'tbk', txt, '');
+      this.tyres.push({ block, fill, temp, psi, wear, brake });
     }
   }
 
@@ -679,7 +682,12 @@ export class HUD {
       this.setText(c.psi, (car.tyrePress?.[i] ?? tyrePsi(i, T)).toFixed(1));
       const life = 1 - car.wear[i];
       this.setScale(c.fill, life, 'Y');
-      this.setText(c.wear, `${Math.floor(life * 100)}%`);
+      // (a flat spot ground in by a lock-up shows instead of the life left once it's bad enough to feel)
+      const flat = car.flatSpot?.[i] ?? 0;
+      this.setText(c.wear, flat > 0.25 ? 'Flat' : `${Math.floor(life * 100)}%`);
+      const B = car.brakeTemp?.[i] ?? 500;
+      this.setText(c.brake, `B ${Math.round(B / 10) * 10}°`);
+      this.setClass(c.brake, 'tbk ' + (B < 300 ? 'cold' : B > 1050 ? 'bad' : 'ok'));
     }
     const wd = car.wingDamage;
     this.setText(this.wingEl, wd < 0.15 ? 'Wing OK' : `Wing ${Math.round(wd * 100)}%`);

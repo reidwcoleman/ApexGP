@@ -68,5 +68,20 @@
   "file": "montreal_sunset.webp",
   "track": "montreal",
   "boot": false
+ },
+ {
+  "file": "serena_golden.webp",
+  "track": "serena",
+  "boot": false
+ },
+ {
+  "file": "bergsee_valley.webp",
+  "track": "bergsee",
+  "boot": false
+ },
+ {
+  "file": "redmesa_golden.webp",
+  "track": "redmesa",
+  "boot": false
  }
 ]

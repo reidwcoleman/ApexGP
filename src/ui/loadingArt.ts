@@ -18,6 +18,9 @@ const BY_TRACK: Record<string, string[]> = {
   monza: ['monza_sunset', 'monza_rain'],
   sakhir: ['sakhir_night'],
   montreal: ['montreal_sunset'],
+  serena: ['serena_golden'],
+  bergsee: ['bergsee_valley'],
+  redmesa: ['redmesa_golden'],
 };
 
 /** the picture for a trip to this circuit (its own, else one from the rotation) */

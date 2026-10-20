@@ -241,6 +241,46 @@ const VENUES: Record<string, VenueSet> = {
       heviz: { name: 'HÉVÍZ', tag: 'THERMAL LAKE · SPA', cat: 'tourism', bg: '#e6f2ef', fg: '#00665e', accent: '#ce2939', mark: 'sun', weight: 700, track: 0.12 },
     },
   },
+  // the scenic road courses (circuits/scenic.ts) — fictional races in fictional places:
+  // Capo Serena: the cruise line's Riviera race; a seaside bank, limoncello, olive oil, a scooter
+  // maker, the coast's telecom, the tourist board
+  serena: {
+    title: 'cruise',
+    local: {
+      bancamare: { name: 'BANCA DEL MARE', tag: 'DAL 1902', cat: 'bank', bg: '#0a3d62', fg: '#ffffff', accent: '#f2c75c', mark: 'wave', weight: 700, track: 0.06 },
+      limonaia: { name: 'LIMONAIA', tag: 'LIMONCELLO DELLA COSTA', cat: 'drink', bg: '#ffe14d', fg: '#1d4d2b', accent: '#1d4d2b', mark: 'sun', weight: 900, italic: true },
+      olivara: { name: 'Olivara', tag: 'OLIO EXTRAVERGINE', cat: 'food', bg: '#3d4a1e', fg: '#e8dca8', accent: '#c9a45c', mark: 'leaf', weight: 600, italic: true, lower: true },
+      vespetta: { name: 'VESPETTA', tag: 'SCOOTER · DAL 1948', cat: 'car maker', bg: '#e8e2d2', fg: '#7a1f1f', accent: '#5f8fa8', mark: 'ring', weight: 700, italic: true, track: 0.04 },
+      marefon: { name: 'MAREFON', tag: 'FIBRA · 5G', cat: 'telecom', bg: '#ff5a1f', fg: '#ffffff', accent: '#ffffff', mark: 'dot', weight: 900 },
+      serenatour: { name: 'CAPO SERENA', tag: 'IL MARE CHE TI ASPETTA', cat: 'tourism', bg: '#ffffff', fg: '#0a4c8c', accent: '#d7141a', mark: 'sun', weight: 700, track: 0.12 },
+    },
+  },
+  // Bergsee: the watch house's Alpine race; spring water, a private bank, chocolate, alpine cheese,
+  // the lift company, a telecom
+  bergsee: {
+    title: 'timing',
+    local: {
+      gletscher: { name: 'GLETSCHERQUELL', tag: 'ALPINES MINERALWASSER', cat: 'water', bg: '#e3f1f8', fg: '#00527a', accent: '#5bb4e5', mark: 'wave', weight: 600, track: 0.08 },
+      bergbank: { name: 'BERGBANK', tag: 'PRIVATBANK SEIT 1888', cat: 'bank', bg: '#1a1a1a', fg: '#e6d6a8', accent: '#c8102e', mark: 'shield', weight: 300, track: 0.24 },
+      kristall: { name: 'KRISTALL', tag: 'SCHOKOLADE', cat: 'chocolate', bg: '#4a2414', fg: '#f3e2c0', accent: '#d9a441', mark: 'diamond', weight: 700, italic: true },
+      sennerei: { name: 'SENNEREI', tag: 'ALPKÄSE VOM BERG', cat: 'food', bg: '#f6c400', fg: '#3a2a12', accent: '#c8102e', mark: 'star', weight: 900 },
+      seebahn: { name: 'BERGSEE BAHNEN', tag: 'SKI · WANDERN · SEE', cat: 'tourism', bg: '#c8102e', fg: '#ffffff', accent: '#ffffff', mark: 'chevron', weight: 700, track: 0.06 },
+      helvecom: { name: 'HELVECOM', tag: '5G BIS ZUM GIPFEL', cat: 'telecom', bg: '#00205b', fg: '#ffffff', accent: '#00b5e2', mark: 'dot', weight: 900, italic: true },
+    },
+  },
+  // Red Mesa: the energy company's desert race; a truck maker, a state bank, a root beer, outdoor
+  // gear, a wireless carrier, the tourist board
+  redmesa: {
+    title: 'energy',
+    local: {
+      rimrock: { name: 'RIMROCK', tag: 'TRUCKS · 4X4', cat: 'car maker', bg: '#2a1a12', fg: '#f2e2c8', accent: '#d2602a', mark: 'chevron', weight: 900, italic: true, sx: 1.08 },
+      canyonbank: { name: 'CANYON STATE', tag: 'BANK · SINCE 1912', cat: 'bank', bg: '#f4ead8', fg: '#7a2a14', accent: '#2a4c6a', mark: 'shield', weight: 700, track: 0.05 },
+      sagebrush: { name: 'SAGEBRUSH', tag: 'ROOT BEER', cat: 'drink', bg: '#5a2a14', fg: '#f6d28a', accent: '#f6d28a', mark: 'ring', weight: 900, italic: true },
+      dustline: { name: 'DUSTLINE', tag: 'OUTFITTERS · TRAIL GEAR', cat: 'outdoor', bg: '#d2602a', fg: '#ffffff', accent: '#2a1a12', mark: 'diamond', weight: 700, track: 0.08 },
+      highplains: { name: 'HIGH PLAINS', tag: 'WIRELESS', cat: 'telecom', bg: '#00205b', fg: '#ffffff', accent: '#ff9900', mark: 'wave', weight: 900 },
+      redrock: { name: 'RED ROCK COUNTRY', tag: 'VISIT THE HIGH DESERT', cat: 'tourism', bg: '#b84a22', fg: '#ffffff', accent: '#f6d28a', mark: 'sun', weight: 700, track: 0.1 },
+    },
+  },
   // Sakhir: the national airline's Bahrain GP (navy and gold); a telecom, the state energy company,
   // a bank, the aluminium smelter, a resort
   sakhir: {

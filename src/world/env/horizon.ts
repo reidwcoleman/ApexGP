@@ -26,6 +26,8 @@ import { HAZE_EASE } from './terrain.ts';
  *             'forest' a tree line (bumpy dark silhouette)
  *             'city'   a skyline of lit blocks with window bands; set
  *                      `center`/`spread` for a downtown cluster of towers
+ *             'mesa'   flat-topped buttes and mesas with sheer walls over talus aprons (the
+ *                      desert of the scenic Red Mesa); `rough` = share of the arc they stand on
  *             'volcano' one lone cone (Popocatépetl): summit at bearing `center`,
  *                      base half-width `spread` (deg), snow cap; `rough` 0 dome … 1 steep cone
  *     dist:   distance from the circuit centre, metres (any: 1 500 … 60 000)
@@ -59,7 +61,7 @@ import { HAZE_EASE } from './terrain.ts';
  * shadows.
  */
 
-export type HorizonKind = 'ridge' | 'dunes' | 'forest' | 'city' | 'volcano';
+export type HorizonKind = 'ridge' | 'dunes' | 'forest' | 'city' | 'volcano' | 'mesa';
 
 export interface HorizonLayer {
   kind: HorizonKind;
@@ -288,6 +290,35 @@ export const HORIZON_PRESETS: Record<Venue, HorizonSpec> = {
       { kind: 'forest', dist: 8500, height: 20, rough: 0.7, haze: 1.1, seed: 149, color: [0.05, 0.065, 0.03] },
     ],
   },
+  // Capo Serena: the sea from the east round to the south-west, two islands and the far shore of the
+  // gulf on it; inland the Maritime Alps (a little snow on the highest crests), the coastal range nearer
+  riviera: {
+    layers: [
+      { kind: 'ridge', dist: 46000, height: 2400, from: 250, to: 25, rough: 0.9, snow: 0.9, haze: 0.55, seed: 201 },
+      { kind: 'ridge', dist: 26000, height: 1100, from: 235, to: 40, rough: 0.7, haze: 0.75, seed: 202, color: [0.05, 0.065, 0.035], fields: 0.25 },
+      { kind: 'ridge', dist: 38000, height: 520, from: 30, to: 82, rough: 0.55, haze: 0.85, seed: 203, base: -38, color: [0.06, 0.07, 0.04] },
+      { kind: 'ridge', dist: 21000, height: 330, from: 118, to: 136, rough: 0.75, haze: 0.85, seed: 204, base: -38, color: [0.07, 0.075, 0.045] },
+      { kind: 'ridge', dist: 33000, height: 450, from: 186, to: 204, rough: 0.6, haze: 0.85, seed: 205, base: -38, color: [0.07, 0.075, 0.045] },
+      { kind: 'forest', dist: 5500, height: 22, from: 240, to: 20, rough: 0.7, seed: 206, color: [0.04, 0.055, 0.03] },
+    ],
+  },
+  // Bergsee: the high Alps beyond the valley's own walls — glaciated crests all round
+  alpine: {
+    layers: [
+      { kind: 'ridge', dist: 42000, height: 3600, rough: 1, snow: 0.5, haze: 0.5, seed: 211 },
+      { kind: 'ridge', dist: 24000, height: 3000, from: 300, to: 60, rough: 1, snow: 0.48, haze: 0.6, seed: 212 },
+      { kind: 'ridge', dist: 22000, height: 2800, from: 120, to: 240, rough: 0.95, snow: 0.52, haze: 0.65, seed: 213 },
+    ],
+  },
+  // Red Mesa: buttes and mesas all round the plain, rank on rank into the haze
+  canyon: {
+    layers: [
+      { kind: 'ridge', dist: 52000, height: 900, rough: 0.35, haze: 0.8, seed: 221, color: [0.2, 0.09, 0.06] },
+      { kind: 'mesa', dist: 34000, height: 420, rough: 0.55, scale: 1800, haze: 0.85, seed: 222, color: [0.34, 0.12, 0.06] },
+      { kind: 'mesa', dist: 22000, height: 300, rough: 0.45, scale: 1300, haze: 0.9, seed: 223, color: [0.38, 0.13, 0.06] },
+      { kind: 'mesa', dist: 16500, height: 230, rough: 0.4, scale: 900, haze: 1, seed: 224, color: [0.4, 0.14, 0.06] },
+    ],
+  },
 };
 
 /** replace a venue's horizon (call before the scenery is built) */
@@ -425,13 +456,14 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
   // pasture, rock, snow) is decided per pixel in the shader from aEx; the vertices carry the
   // shape and the layer's base albedo.
   const dunes = L.kind === 'dunes';
-  const rough = dunes ? 0.1 : (L.rough ?? 0.5);
+  const mesa = L.kind === 'mesa';
+  const rough = dunes || mesa ? 0.1 : (L.rough ?? 0.5);
   const scale = L.scale ?? Math.max(dunes ? 220 : 600, L.height * (dunes ? 9 : 3.5));
   const depth = Math.min(D * 0.45, Math.max(scale * 1.6, L.height * 5));
   // (rows and columns where they show: a low far ridge is a few pixels tall, a big range needs them;
   // the fine relief is per pixel anyway)
   const angH = L.height / D / DEG;
-  const K = dunes || angH < 0.5 ? 4 : angH < 1.5 ? 7 : 11;
+  const K = mesa ? 12 : dunes || angH < 0.5 ? 4 : angH < 1.5 ? 7 : 11;
   const step = Math.max(Math.max(0.07, Math.min(angH, 0.25)) * DEG, Math.min(0.32 * DEG, scale / 14 / D));
   const azs = arc(L, step);
   const ox = r() * 100, oz = r() * 100;
@@ -451,13 +483,21 @@ function buildLayer(b: Builder, L: HorizonLayer, cx: number, cz: number, groundY
       const px = sx * d, pz = sz * d;
       // crest height along this azimuth, and the slope's own spurs and gullies (they run down
       // the face, so the lit/shaded ribs read like real mountainsides, not a smooth sheet)
-      const crest = ridgeNoise(px / scale + ox, pz / scale + oz, rough);
+      let crest = ridgeNoise(px / scale + ox, pz / scale + oz, rough);
       const rib = perlin2(px / (scale * 0.22) - oz, pz / (scale * 0.22) + ox);
-      const prof = dunes ? Math.pow(u, 0.8) : u * u * (3 - 2 * u) * 0.65 + Math.pow(u, 1.6) * 0.35;
-      let h01 = crest * prof + (dunes ? 0 : 0.17 * rib * u * (1 - u) * 4 * (0.35 + 0.65 * rough));
+      let prof = dunes ? Math.pow(u, 0.8) : u * u * (3 - 2 * u) * 0.65 + Math.pow(u, 1.6) * 0.35;
+      if (mesa) {
+        // buttes along the arc where a slow noise is high: a flat cap (two heights), a sheer wall over a talus apron
+        const m = perlin2((sx * D) / (scale * 1.4) + ox, (sz * D) / (scale * 1.4) + oz) * 0.5 + 0.5;
+        const on = Math.min(1, Math.max(0, (m - (1 - (L.rough ?? 0.5))) / 0.035));
+        crest = on * (0.62 + 0.38 * (perlin2((sx * D) / (scale * 4) - oz, (sz * D) / (scale * 4)) > 0 ? 1 : 0.7)) + 0.07;
+        const wall = Math.min(1, Math.max(0, (u - 0.62) / 0.08));
+        prof = 0.28 * Math.min(1, u / 0.62) + 0.72 * wall * wall * (3 - 2 * wall);
+      }
+      let h01 = crest * prof + (dunes || mesa ? 0 : 0.17 * rib * u * (1 - u) * 4 * (0.35 + 0.65 * rough));
       h01 = Math.max(0, h01) * fade;
       const y = foot - (u === 0 ? 60 : 0) + L.height * h01;
-      col.push(b.v(cx + px, y, cz + pz, [forest[0] * jit, forest[1] * jit, forest[2] * jit], az * d, u, dunes ? 2 : 0, h01, hz, ex));
+      col.push(b.v(cx + px, y, cz + pz, [forest[0] * jit, forest[1] * jit, forest[2] * jit], az * d, u, dunes && !mesa ? 2 : 0, h01, hz, ex));
     }
     grid.push(col);
   }

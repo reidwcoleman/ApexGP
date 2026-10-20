@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { Track } from '../src/world/Track.ts';
-import { CIRCUITS } from '../src/world/Circuits.ts';
+import { ALL_CIRCUITS as CIRCUITS } from '../src/world/Circuits.ts';
 for (const def of CIRCUITS) {
   const t0 = performance.now();
   const t = new Track(def);

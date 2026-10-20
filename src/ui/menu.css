@@ -1036,6 +1036,16 @@
 .ccard .cmeta span + span {
   color: var(--ink3);
 }
+.ccard.scenic .cmeta {
+  overflow: hidden;
+}
+.ccard.scenic .cmeta span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ccard.scenic .rnd {
+  color: var(--accent);
+}
 .ccard .cstat {
   display: grid;
   justify-items: end;

@@ -11,6 +11,7 @@ import { sakhirForest, sakhirNatural, sakhirPark, sakhirUrban } from './venues/s
 import { mexicoForest, mexicoNatural, mexicoPark, mexicoUrban } from './venues/mexicoLand.ts';
 import { yasmarinaForest, yasmarinaNatural, yasmarinaPark, yasmarinaUrban } from './venues/yasmarinaLand.ts';
 import { hungaroringForest, hungaroringNatural, hungaroringPark, hungaroringUrban } from './venues/hungaroringLand.ts';
+import { SCENIC_VENUE, scenicCarve, scenicForest, scenicNatural, scenicPark, scenicUrban, type ScenicVenue } from './venues/scenicLand.ts';
 
 /**
  * The shape of the land around Monza: the Parco di Monza (flat royal park,
@@ -74,7 +75,7 @@ export interface Anchors {
 const floorTo = (v: number, k: number) => Math.floor(v / k) * k;
 const ceilTo = (v: number, k: number) => Math.ceil(v / k) * k;
 
-export type Venue = 'park' | 'ardennes' | 'airfield' | 'suzuka' | 'interlagos' | 'montreal' | 'zandvoort' | 'spielberg' | 'austin' | 'melbourne' | 'sakhir' | 'yasmarina' | 'mexico' | 'hungaroring';
+export type Venue = 'park' | 'ardennes' | 'airfield' | 'suzuka' | 'interlagos' | 'montreal' | 'zandvoort' | 'spielberg' | 'austin' | 'melbourne' | 'sakhir' | 'yasmarina' | 'mexico' | 'hungaroring' | ScenicVenue;
 
 export class WorldMap {
   readonly track: Track;
@@ -88,6 +89,8 @@ export class WorldMap {
   readonly park: { cx: number; cz: number; rx: number; rz: number };
   /** the land the circuit sits in: Monza's flat royal park or the hills and spruce woods of the Ardennes */
   readonly venue: Venue;
+  /** the scenic venues' land (their sharp cliffs and walls are carved exactly over the smooth grid) */
+  readonly scenic: ScenicVenue | null = null;
   private pitBox!: Bounds;
   private readonly proj = { s: 0, lat: 0 };
   private readonly platform: Float32Array;
@@ -155,6 +158,8 @@ export class WorldMap {
     if (id === 'yasmarina') { this.venue = 'yasmarina'; this.park = yasmarinaPark(this); }
     // Hungaroring: the valley bowl in the Gödöllő Hills by Mogyoród (see venues/hungaroringLand.ts)
     if (id === 'hungaroring') { this.venue = 'hungaroring'; this.park = hungaroringPark(this); }
+    // the scenic road courses: a sea cape, an alpine lake, a desert of mesas (see venues/scenicLand.ts)
+    if (SCENIC_VENUE[id]) { this.venue = SCENIC_VENUE[id]; this.scenic = SCENIC_VENUE[id]; this.park = scenicPark(this); }
     this.crossings = track.crossings.map((c) => ({ lower: c.lower, upper: c.upper, x: (track.px[c.lower] + track.px[c.upper]) / 2, z: (track.pz[c.lower] + track.pz[c.upper]) / 2 }));
     this.dfFar = track.buildDistanceField(40, 700, 560);
     this.dfNear = track.buildDistanceField(8, 170, 124);
@@ -364,6 +369,7 @@ export class WorldMap {
     if (this.venue === 'mexico') return mexicoUrban(this, x, z);
     if (this.venue === 'yasmarina') return yasmarinaUrban(this, x, z);
     if (this.venue === 'hungaroring') return hungaroringUrban(this, x, z);
+    if (this.scenic) return scenicUrban(this.scenic, this, x, z);
     if (this.venue === 'ardennes') return ardennesUrban(this, x, z);
     const out = this.outsidePark(x, z);
     if (out <= 0) return 0;
@@ -386,6 +392,12 @@ export class WorldMap {
 
   /** natural land height (before track and pads) — exact evaluation */
   naturalExact(x: number, z: number): number {
+    const h = this.naturalBase(x, z);
+    return this.scenic ? scenicCarve(this.scenic, this, x, z, h) : h;
+  }
+
+  /** the smooth natural land (what the 32 m grid holds) */
+  private naturalBase(x: number, z: number): number {
     const { center } = this.A;
     const P = this.platformAt(x, z);
     const dT = this.distToTrack(x, z);
@@ -400,6 +412,7 @@ export class WorldMap {
     if (this.venue === 'mexico') return mexicoNatural(this, x, z, P, dT, far);
     if (this.venue === 'yasmarina') return yasmarinaNatural(this, x, z, P, dT, far);
     if (this.venue === 'hungaroring') return hungaroringNatural(this, x, z, P, dT);
+    if (this.scenic) return scenicNatural(this.scenic, this, x, z, P, dT);
     if (this.venue === 'austin') return h + austinNatural(this, x, z, dT, far);
     if (this.venue === 'ardennes') {
       // wooded valley sides near the circuit, rolling ridges of 100–200 m further out
@@ -467,7 +480,8 @@ export class WorldMap {
   }
 
   natural(x: number, z: number): number {
-    return this.natBicubic(x, z) + 0.12 * perlin2(x / 21 + 0.37, z / 21 + 0.71);
+    const h = this.natBicubic(x, z) + 0.12 * perlin2(x / 21 + 0.37, z / 21 + 0.71);
+    return this.scenic ? scenicCarve(this.scenic, this, x, z, h) : h;
   }
 
   private natBicubic(x: number, z: number): number {
@@ -661,7 +675,7 @@ export class WorldMap {
       this.natGrid = new Float32Array(this.natW * this.natH);
       for (let j = 0; j < this.natH; j++)
         for (let i = 0; i < this.natW; i++)
-          this.natGrid[j * this.natW + i] = this.naturalExact(this.natX0 + i * C, this.natZ0 + j * C);
+          this.natGrid[j * this.natW + i] = this.naturalBase(this.natX0 + i * C, this.natZ0 + j * C);
     }
     lap('nat');
     {
@@ -948,6 +962,7 @@ export class WorldMap {
     if (this.venue === 'mexico') return mexicoForest(this, x, z);
     if (this.venue === 'yasmarina') return yasmarinaForest(this, x, z);
     if (this.venue === 'hungaroring') return hungaroringForest(this, x, z);
+    if (this.scenic) return scenicForest(this.scenic, this, x, z);
     const dT = this.distToTrack(x, z);
     const n1 = fbm2(x / 520 + 11.3, z / 520 - 7.7, 4);
     const n2 = fbm2(x / 170 - 2.3, z / 170 + 6.1, 3);

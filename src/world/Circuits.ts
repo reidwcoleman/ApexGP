@@ -1,4 +1,4 @@
-import type { CircuitDef } from './CircuitGen.ts';
+import { generateCircuit, type CircuitDef } from './CircuitGen.ts';
 import { MONZA_LINE } from './circuits/monzaLine.ts';
 import { SPA_LINE } from './circuits/spaLine.ts';
 import { SILVERSTONE_LINE } from './circuits/silverstoneLine.ts';
@@ -13,6 +13,7 @@ import { MEXICO } from './circuits/mexico.ts';
 import { HUNGARORING } from './circuits/hungaroring.ts';
 import { SAKHIR } from './circuits/sakhir.ts';
 import { YASMARINA } from './circuits/yasmarina.ts';
+import { SCENIC } from './circuits/scenic.ts';
 
 /**
  * Autodromo Nazionale Monza — the Temple of Speed. 5.79 km, clockwise, 11
@@ -332,3 +333,26 @@ export const SUZUKA: CircuitDef = {
 };
 
 export const CIRCUITS: CircuitDef[] = [MONZA, SPA, SILVERSTONE, SUZUKA, MONTREAL, MELBOURNE, SPIELBERG, ZANDVOORT, AUSTIN, INTERLAGOS, HUNGARORING, SAKHIR, MEXICO, YASMARINA];
+
+/**
+ * The scenic road courses (circuits/scenic.ts): fictional circuits in places no Grand Prix goes. Not
+ * part of the calendar (no career rounds, no unlocks): open from the start for quick races, time
+ * trials and simulated races.
+ */
+export { SCENIC };
+export const ALL_CIRCUITS: CircuitDef[] = [...CIRCUITS, ...SCENIC];
+export const isScenic = (id: string) => SCENIC.some((c) => c.id === id);
+
+const _layout = new Map<string, number[]>();
+/** the lap as flat [x0, z0, x1, z1, …] for drawing (the surveyed centreline, or the authored layout generated) */
+export function layoutPoints(def: CircuitDef): number[] {
+  if (def.centerline) return def.centerline.points;
+  let pts = _layout.get(def.id);
+  if (!pts) {
+    const c = generateCircuit(def);
+    pts = [];
+    for (let i = 0; i < c.n; i += 8) pts.push(c.x[i], c.z[i]);
+    _layout.set(def.id, pts);
+  }
+  return pts;
+}

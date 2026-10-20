@@ -2,7 +2,7 @@ import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
 import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, NO_OFFSET, driveCamera, type CamPrefs, type CamOffset } from '../game/Cameras.ts';
-import { CIRCUITS } from '../world/Circuits.ts';
+import { ALL_CIRCUITS, CIRCUITS, SCENIC, layoutPoints } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
 import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
@@ -179,6 +179,9 @@ export const CIRCUIT_INFO: Record<string, { country: string; km: string; turns: 
   yasmarina: { country: 'Abu Dhabi', km: '5.554', turns: 21, line: 'Twilight at the marina, under the Yas hotel' },
   mexico: { country: 'Mexico', km: '4.304', turns: 17, line: 'Thin air, the long run to Turn 1 and the Foro Sol' },
   hungaroring: { country: 'Hungary', km: '4.381', turns: 14, line: 'Twisting through the hills outside Budapest' },
+  serena: { country: 'Riviera', km: '4.845', turns: 16, line: 'Clifftop road above the sea, round the lighthouse and up the switchbacks' },
+  bergsee: { country: 'Alps', km: '4.487', turns: 14, line: 'Along the glacier lake, up through the spruce under snowy peaks' },
+  redmesa: { country: 'High desert', km: '5.723', turns: 11, line: 'Flat out across the plain, down into the wash among the buttes' },
 };
 
 const fmtCr = (n: number) => '₵\u2009' + Math.round(n).toLocaleString('en-US');
@@ -304,7 +307,7 @@ export class Menu {
     if (!DAMAGE.includes(this.setup.damage)) this.setup.damage = 'full';
     // saves from before per-assist settings stored a preset index
     if (!this.setup.compound) this.setup.compound = 'auto';
-    if (!CIRCUITS.some((c) => c.id === this.setup.track)) this.setup.track = CIRCUITS[0].id;
+    if (!ALL_CIRCUITS.some((c) => c.id === this.setup.track)) this.setup.track = CIRCUITS[0].id;
     // (a save from when every circuit was open may sit at one the career hasn't reached yet)
     if (!career.isUnlocked(this.setup.track)) this.setup.track = career.nextRound() ?? CIRCUITS[0].id;
     // saves from before the weather system
@@ -487,7 +490,7 @@ export class Menu {
       const here = cd.id === this.setup.track;
       const best = this.career.data.best[cd.id];
       const card = el('div', 'ccard' + (open ? '' : ' locked') + (here ? ' here' : ''), p);
-      const path = cd.centerline ? circuitPath(cd.centerline.points, 64, 44, 3) : '';
+      const path = circuitPath(layoutPoints(cd), 64, 44, 3);
       const prev = CIRCUITS[i - 1];
       // right-hand status: where you are, your best here, or what unlocks it
       const status = !open
@@ -509,6 +512,26 @@ export class Menu {
         }
       }, !open);
     });
+    // the scenic road courses: fictional circuits in beautiful places, open from the start
+    el('div', 'hp-cap', p, 'Scenic roads');
+    SCENIC.forEach((cd) => {
+      const info = CIRCUIT_INFO[cd.id];
+      const here = cd.id === this.setup.track;
+      const best = this.career.data.best[cd.id];
+      const card = el('div', 'ccard scenic' + (here ? ' here' : ''), p);
+      const status = here ? `<span class="here-tag">In the garage</span>` : best !== undefined ? `<span class="best"><em>Best</em><b>P${best}</b></span>` : '';
+      card.innerHTML = `<span class="rnd">✦</span><svg class="map" viewBox="0 0 64 44"><path d="${circuitPath(layoutPoints(cd), 64, 44, 3)}"/></svg><div class="cinfo"><div class="cname">${cd.name}</div><div class="cmeta"><span>${info.country}</span><span>${info.km} km</span><span>${info.line}</span></div></div><div class="cstat">${status}</div>`;
+      this.action(card, () => {
+        if (here) {
+          this.mode = 'race';
+          this.show('setup');
+        } else {
+          this.setup.track = cd.id;
+          save('apexgp.setup', this.setup);
+          this.cb.onTravel(cd.id);
+        }
+      });
+    });
     const row = el('div', 'hp-actions', p);
     const race = el('div', 'cta', row, 'Race weekend');
     const tt = el('div', 'cta ghost', row, 'Time trial');
@@ -525,9 +548,9 @@ export class Menu {
       const watch = el('div', 'cta ghost watch', row, 'Watch a simulated race');
       this.action(watch, () => this.cb.onSpectate?.({ ...this.setup }));
     }
-    el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Quick races run at any circuit your career has opened, with your own laps and weather. Medals and new circuits come from Career.`);
+    el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Quick races run at any circuit your career has opened, with your own laps and weather; the scenic roads are always open. Medals and new circuits come from Career.`);
     // start on the Race button, with the circuit you're at scrolled into view (14+ rounds overflow)
-    this.sel = CIRCUITS.length;
+    this.sel = CIRCUITS.length + SCENIC.length;
     const here = p.querySelector<HTMLElement>('.ccard.here');
     if (here) requestAnimationFrame(() => this.reveal(here, 'center', 'auto'));
   }
@@ -544,7 +567,7 @@ export class Menu {
   private tabHome(p: HTMLElement) {
     const dc = this.cb.driverCareer?.();
     const nt = dc?.active ? dc.nextTrack : null;
-    const cd = CIRCUITS.find((c) => c.id === (nt ?? this.setup.track)) ?? CIRCUITS[0];
+    const cd = ALL_CIRCUITS.find((c) => c.id === (nt ?? this.setup.track)) ?? CIRCUITS[0];
     const info = CIRCUIT_INFO[cd.id];
     const box = el('div', 'home-next', p);
     if (dc?.active && nt) {
@@ -566,7 +589,7 @@ export class Menu {
       const go = el('div', 'cta home-go', box, 'Start career');
       this.action(go, () => this.openCareerWizard());
     }
-    const quick = el('div', 'home-quick', box, `Quick race at ${this.setup.track === cd.id ? cd.short : (CIRCUITS.find((c) => c.id === this.setup.track)?.short ?? cd.short)} ›`);
+    const quick = el('div', 'home-quick', box, `Quick race at ${this.setup.track === cd.id ? cd.short : (ALL_CIRCUITS.find((c) => c.id === this.setup.track)?.short ?? cd.short)} ›`);
     this.action(quick, () => this.setTab('race'));
     // the open world: its own page, so none of the race world loads with it
     const ow = el('div', 'home-ow', p);
@@ -607,7 +630,7 @@ export class Menu {
         onDevelop: () => this.setTab('car'),
         forecast: (id) => fcLabel(this.cb.careerForecast(id)),
         circuitPath: (pts) => circuitPath(pts, 120, 84, 6),
-        info: (id) => CIRCUIT_INFO[id] ?? { country: CIRCUITS.find((c) => c.id === id)?.country ?? '', km: '', turns: 0 },
+        info: (id) => CIRCUIT_INFO[id] ?? { country: ALL_CIRCUITS.find((c) => c.id === id)?.country ?? '', km: '', turns: 0 },
       });
       this.sel = 0;
       return;
@@ -1003,9 +1026,9 @@ export class Menu {
       const i = Math.max(0, TRACK_LIMITS.indexOf(st.trackLimits));
       st.trackLimits = TRACK_LIMITS[(i + d + TRACK_LIMITS.length) % TRACK_LIMITS.length];
     });
-    const open = this.career.unlockedCircuits();
+    const open = [...this.career.unlockedCircuits(), ...SCENIC];
     if (open.length > 1 && !career)
-      this.opt(p, 'Circuit', () => (CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
+      this.opt(p, 'Circuit', () => (ALL_CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
         const i = Math.max(0, open.findIndex((c) => c.id === st.track));
         st.track = open[(i + d + open.length) % open.length].id;
       });

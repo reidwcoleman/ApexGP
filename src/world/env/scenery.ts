@@ -29,6 +29,7 @@ import { buildSakhirScenery } from './venues/sakhirScenery.ts';
 import { buildHungaroringScenery } from './venues/hungaroringScenery.ts';
 import { buildMonzaScenery } from './venues/monzaScenery.ts';
 import { buildVenueDress } from './venues/dress.ts';
+import { buildScenicScenery } from './venues/scenicScenery.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -187,6 +188,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   if (zv) group.add(zv.group);
   if (map.venue === 'sakhir') group.add(buildSakhirScenery(layout, track, map, terrain).group);
   if (map.venue === 'hungaroring') group.add(buildHungaroringScenery(layout, track, map, terrain));
+  // the scenic road courses: the sea, the lake, the lighthouse, boats, chapels, boulders
+  const scenic = map.scenic ? buildScenicScenery(map) : null;
+  if (scenic) group.add(scenic.group);
   // Monza: the Villa Reale, Milan's towers across the plain
   if (track.def.id === 'monza') group.add(buildMonzaScenery(layout, map).group);
   // the venue's own race-weekend dressing: gantries, hoardings, footbridges, LED boards, painted run-off,
@@ -235,6 +239,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
       mel?.update(elapsed);
       mex?.update(elapsed);
       yas?.update(elapsed);
+      scenic?.update(elapsed);
       stands.update(elapsed);
       skyline?.update(elapsed);
       strollers.update(_dt, camera);

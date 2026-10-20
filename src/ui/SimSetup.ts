@@ -1,4 +1,4 @@
-import { CIRCUITS } from '../world/Circuits.ts';
+import { ALL_CIRCUITS as CIRCUITS, layoutPoints } from '../world/Circuits.ts';
 import { allEntries, uiColor } from '../race/Teams.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice, type WeatherKind, type TimeOfDay } from '../world/Weather.ts';
 import type { DamageMode } from '../sim/CarPhysics.ts';
@@ -219,7 +219,7 @@ export class SimSetup {
       return;
     }
     const info = CIRCUIT_INFO[cd.id];
-    const path = cd.centerline ? circuitPath(cd.centerline.points, 180, 120, 6) : '';
+    const path = circuitPath(layoutPoints(cd), 180, 120, 6);
     this.card.innerHTML = `<svg class="sc-map" viewBox="0 0 180 120"><path d="${path}"/></svg><div class="sc-round">${info?.country ?? cd.country}${info ? ` · ${info.km} km` : ''}</div><div class="sc-name">${cd.name}</div><div class="sc-meta">${c.laps} laps${info?.line ? ` · ${info.line}` : ''}</div>`;
   }
 
