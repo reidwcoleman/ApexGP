@@ -734,6 +734,26 @@ export class Sound {
     this.notes([84], 0, 0.25);
   }
 
+  /** a firework bursting `d` metres off: the thump (later the further it is), the long roll, a crackle */
+  boom(x: number, y: number, z: number) {
+    const { pan, d } = this.spatial(x, y, z);
+    const when = Math.min(0.6, d / 340);
+    const g = THREE.MathUtils.clamp(60 / Math.max(d, 30), 0.2, 1);
+    this.play(this.sub, 0.9 * g, pan * 0.5, 0.42 + Math.random() * 0.08, 0.7, 500, when);
+    this.play(this.whooshB, 0.35 * g, pan * 0.5, 0.32, 0.8, 900, when);
+    for (let k = 0; k < 9; k++) this.play(this.tick[(Math.random() * this.tick.length) | 0], 0.12 * g, pan * 0.6 + (Math.random() - 0.5) * 0.4, 1.4 + Math.random(), 0.5, 0, when + 0.5 + Math.random() * 0.9);
+  }
+
+  /** a bet placed (a chip down on the felt), and money paid out (a run of bright coins) */
+  chip() {
+    this.play(this.tick[(Math.random() * this.tick.length) | 0], 0.5, 0, 0.55, 0.1);
+    this.play(this.tick[(Math.random() * this.tick.length) | 0], 0.35, 0, 0.8, 0.1, 0, 0.035);
+  }
+  coins(n = 12) {
+    for (let k = 0; k < n; k++) this.play(this.tick[(Math.random() * this.tick.length) | 0], 0.3, (Math.random() - 0.5) * 0.8, 2.2 + Math.random() * 0.8, 0.2, 0, k * 0.045 + Math.random() * 0.03);
+    this.notes([84, 88, 91, 96], 0.06, 0.4, true);
+  }
+
   setMusic(mode: 'off' | 'menu' | 'play' | 'calm') {
     if (!this.music) return;
     this.music.mode(this.musicOn ? mode : 'off');

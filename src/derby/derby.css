@@ -1,0 +1,172 @@
+:root {
+  --dy-ink: #07060f;
+  --dy-panel: rgba(13, 9, 30, 0.8);
+  --dy-line: rgba(255, 255, 255, 0.09);
+  --dy-text: #f6f1ff;
+  --dy-dim: rgba(236, 228, 255, 0.62);
+  --dy-gold: #ffcf3a;
+  --dy-pink: #ff2f9a;
+  --dy-cyan: #2ad8ff;
+  --dy-green: #3bf08a;
+  --dy-red: #ff4d5e;
+  --dy-display: 'Lilita One', 'Arial Black', sans-serif;
+  --dy-body: 'Fredoka', 'Arial Rounded MT Bold', sans-serif;
+}
+
+.dy { position: fixed; inset: 0; pointer-events: none; color: var(--dy-text); font-family: var(--dy-body); font-weight: 500; -webkit-font-smoothing: antialiased; }
+.dy button { font: inherit; color: inherit; }
+.dy-hide { display: none !important; }
+
+/* ---------------------------------------------------------------- the top bar */
+.dy-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 18px; padding: 14px 20px; background: linear-gradient(180deg, rgba(5, 3, 14, 0.75), rgba(5, 3, 14, 0)); }
+.dy-back { pointer-events: auto; color: var(--dy-dim); text-decoration: none; font-weight: 600; font-size: 14px; padding: 7px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); }
+.dy-back:hover { color: #fff; background: rgba(255, 255, 255, 0.14); }
+.dy-logo { font-family: var(--dy-display); font-size: 30px; line-height: 1; letter-spacing: 0.01em; display: flex; gap: 8px; }
+.dy-logo b { font-weight: 400; color: #fff; text-shadow: 0 0 6px var(--dy-cyan), 0 0 18px var(--dy-cyan); }
+.dy-logo span { color: #ffd7ef; text-shadow: 0 0 6px var(--dy-pink), 0 0 20px var(--dy-pink), 0 0 40px rgba(255, 47, 154, 0.6); }
+.dy-race { font-family: var(--dy-display); font-size: 20px; color: #fff; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6); display: flex; align-items: baseline; gap: 10px; }
+.dy-race small { font-family: var(--dy-body); font-weight: 700; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dy-gold); }
+.dy-right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.dy-snd { pointer-events: auto; width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(255, 255, 255, 0.08); font-size: 18px !important; }
+.dy-snd.off { opacity: 0.4; text-decoration: line-through; }
+.dy-purse { display: flex; align-items: center; gap: 8px; padding: 6px 16px 6px 8px; border-radius: 999px; background: rgba(10, 6, 24, 0.75); box-shadow: inset 0 0 0 1px rgba(255, 207, 58, 0.35), 0 0 24px rgba(255, 207, 58, 0.15); font-family: var(--dy-display); font-size: 22px; color: var(--dy-gold); }
+.dy-coin { width: 26px; height: 26px; border-radius: 50%; display: inline-block; flex: none; background: radial-gradient(circle at 35% 30%, #fff6c8, #ffd23a 35%, #d08a00 75%, #8a5600); box-shadow: inset 0 0 0 2px rgba(138, 86, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4); }
+
+/* ---------------------------------------------------------------- the race card */
+.dy-card { pointer-events: auto; position: absolute; top: 72px; right: 18px; bottom: 18px; width: min(560px, calc(100vw - 36px)); display: flex; flex-direction: column; border-radius: 20px; background: var(--dy-panel); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--dy-line); overflow: hidden; animation: dy-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+@keyframes dy-in { from { opacity: 0; transform: translateX(30px); } }
+.dy-head { padding: 18px 22px 6px; }
+.dy-head h2 { margin: 0; font-family: var(--dy-display); font-weight: 400; font-size: 26px; color: #fff; }
+.dy-head p { margin: 4px 0 0; font-size: 14px; color: var(--dy-dim); line-height: 1.35; }
+.dy-chips { display: flex; align-items: center; gap: 8px; padding: 10px 22px 12px; }
+.dy-chips span { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dy-dim); margin-right: 4px; }
+.dy-chips button { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; font-family: var(--dy-display); font-size: 14px; color: #fff; position: relative; transition: transform 0.15s; background: radial-gradient(circle, var(--c) 0 52%, #fff 53% 58%, var(--c) 59%); box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85), 0 4px 0 rgba(0, 0, 0, 0.35); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+.dy-chips button.c10 { --c: #3a7bff; }
+.dy-chips button.c50 { --c: #e8322f; }
+.dy-chips button.c100 { --c: #1fa85a; }
+.dy-chips button.c250 { --c: #8a4bff; }
+.dy-chips button.c1000 { --c: #111; }
+.dy-chips button[aria-checked='true'] { transform: translateY(-5px) scale(1.08); box-shadow: inset 0 0 0 3px #fff, 0 0 0 3px var(--dy-gold), 0 8px 18px rgba(0, 0, 0, 0.45); }
+.dy-cols { display: grid; grid-template-columns: 1fr 70px 82px 82px; gap: 8px; padding: 0 22px 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dy-dim); }
+.dy-cols span:nth-child(n + 2) { text-align: center; }
+.dy-rows { flex: 1; overflow-y: auto; padding: 0 12px; min-height: 0; }
+.dy-row { display: grid; grid-template-columns: 1fr 70px 82px 82px; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 14px; cursor: default; transition: background 0.15s; }
+.dy-row:hover { background: rgba(255, 255, 255, 0.06); }
+.dy-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dy-who em { font-style: normal; font-family: var(--dy-display); font-size: 15px; color: var(--dy-gold); width: 14px; text-align: center; }
+.dy-who div { min-width: 0; }
+.dy-who b { display: block; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dy-who small { font-size: 12px; color: var(--dy-dim); }
+.dy-stars { color: var(--dy-gold); letter-spacing: 1px; }
+.dy-stars s { text-decoration: none; color: rgba(255, 255, 255, 0.18); }
+.dy-ball { width: 28px; height: 28px; border-radius: 50%; flex: none; display: inline-block; background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.9) 0 8%, transparent 22%), conic-gradient(from 30deg, var(--a), var(--b), var(--a), var(--b), var(--a)); box-shadow: inset -4px -5px 8px rgba(0, 0, 0, 0.45), inset 3px 3px 6px rgba(255, 255, 255, 0.35), 0 0 12px color-mix(in srgb, var(--a) 50%, transparent); }
+.dy-form { text-align: center; }
+.dy-form b { display: block; font-family: var(--dy-display); font-weight: 400; font-size: 15px; letter-spacing: 0.08em; }
+.dy-form small { font-size: 11px; color: var(--dy-dim); }
+.dy-odds { position: relative; height: 44px; border-radius: 12px; border: 0; cursor: pointer; font-family: var(--dy-display); font-size: 18px; color: #fff; background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); transition: background 0.15s, transform 0.12s, box-shadow 0.15s; }
+.dy-odds:hover { background: rgba(42, 216, 255, 0.18); box-shadow: inset 0 0 0 1px var(--dy-cyan), 0 0 16px rgba(42, 216, 255, 0.3); }
+.dy-odds:active { transform: scale(0.95); }
+.dy-odds.on { background: linear-gradient(180deg, #ffe27a, #ffb800); color: #2a1600; box-shadow: 0 0 18px rgba(255, 207, 58, 0.45); }
+.dy-odds i { position: absolute; top: -8px; right: -6px; font-style: normal; font-family: var(--dy-body); font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 999px; background: var(--dy-pink); color: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); }
+.dy-slip { padding: 12px 22px 18px; border-top: 1px solid var(--dy-line); background: rgba(0, 0, 0, 0.18); }
+.dy-empty { font-size: 14px; color: var(--dy-dim); line-height: 1.4; margin-bottom: 12px; }
+.dy-empty b { color: #fff; }
+.dy-bets { max-height: 132px; overflow-y: auto; display: grid; gap: 6px; margin-bottom: 10px; }
+.dy-bets div { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.dy-bets .dy-ball { width: 20px; height: 20px; }
+.dy-bets span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dy-dim); }
+.dy-bets span b { color: #fff; }
+.dy-bets em { font-style: normal; font-weight: 700; color: var(--dy-gold); }
+.dy-bets button { width: 26px; height: 26px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(255, 255, 255, 0.1); font-size: 16px; line-height: 1; }
+.dy-bets button:hover { background: var(--dy-red); }
+.dy-tot { display: flex; gap: 18px; align-items: center; font-size: 13px; color: var(--dy-dim); margin-bottom: 12px; }
+.dy-tot b { color: #fff; font-size: 15px; }
+.dy-link { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--dy-dim) !important; text-decoration: underline; font-size: 13px !important; }
+.dy-btn { pointer-events: auto; width: 100%; height: 56px; border: 0; border-radius: 16px; cursor: pointer; font-family: var(--dy-display) !important; font-size: 22px !important; letter-spacing: 0.04em; color: #fff !important; background: linear-gradient(180deg, #ff4fae, #e0157a); box-shadow: 0 6px 0 #8a0a48, 0 0 30px rgba(255, 47, 154, 0.45); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); transition: transform 0.12s, box-shadow 0.12s; }
+.dy-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 0 #8a0a48, 0 0 40px rgba(255, 47, 154, 0.6); }
+.dy-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #8a0a48; }
+.dy-btn.alt { height: 44px; font-size: 16px !important; margin-bottom: 10px; background: linear-gradient(180deg, #ffe27a, #ffb800); color: #2a1600 !important; box-shadow: 0 5px 0 #8a5a00; text-shadow: none; }
+
+/* ---------------------------------------------------------------- the race */
+.dy-live { position: absolute; top: 74px; left: 18px; width: 300px; display: flex; flex-direction: column; gap: 10px; }
+.dy-clock { padding: 10px 14px; border-radius: 14px; background: var(--dy-panel); backdrop-filter: blur(10px); box-shadow: inset 0 0 0 1px var(--dy-line); }
+.dy-clock b { font-family: var(--dy-display); font-weight: 400; font-size: 26px; font-variant-numeric: tabular-nums; }
+.dy-bar { margin-top: 6px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.dy-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--dy-cyan), var(--dy-pink)); box-shadow: 0 0 10px var(--dy-pink); transition: width 0.2s linear; }
+.dy-board { display: grid; gap: 4px; }
+.dy-lr { pointer-events: auto; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; border: 0; border-radius: 11px; cursor: pointer; text-align: left; background: rgba(13, 9, 30, 0.72); backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px var(--dy-line); transition: background 0.15s; }
+.dy-lr:hover { background: rgba(40, 30, 80, 0.85); }
+.dy-lr .p { font-family: var(--dy-display); width: 18px; text-align: center; color: var(--dy-dim); }
+.dy-lr .dy-ball { width: 20px; height: 20px; }
+.dy-lr .n { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 14px; }
+.dy-lr .n em { font-style: normal; font-family: var(--dy-display); color: var(--dy-gold); margin-right: 6px; }
+.dy-lr .g { font-size: 12px; font-weight: 700; color: var(--dy-dim); font-variant-numeric: tabular-nums; }
+.dy-lr .tag { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 6px; background: var(--dy-gold); color: #2a1600; }
+.dy-lr .tag.top3 { background: var(--dy-cyan); color: #00222c; }
+.dy-lr.mine { box-shadow: inset 0 0 0 1.5px var(--dy-gold), 0 0 14px rgba(255, 207, 58, 0.25); }
+.dy-lr.won { background: linear-gradient(90deg, rgba(255, 207, 58, 0.35), rgba(13, 9, 30, 0.75)); }
+.dy-lr.won .p { color: var(--dy-gold); }
+.dy-lr.fell .g { color: var(--dy-cyan); }
+.dy-lr.follow { box-shadow: inset 0 0 0 2px var(--dy-cyan); }
+.dy-shot { font-size: 12px; color: var(--dy-dim); padding-left: 4px; }
+.dy-shot b { color: #fff; }
+.dy-cap { position: absolute; left: 50%; bottom: 7vh; transform: translateX(-50%); max-width: min(760px, 90vw); }
+.dy-cap span { display: block; padding: 12px 26px; border-radius: 14px; font-family: var(--dy-display); font-size: clamp(20px, 2.4vw, 30px); text-align: center; background: linear-gradient(90deg, rgba(255, 47, 154, 0.9), rgba(122, 52, 255, 0.9)); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45), 0 0 30px rgba(255, 47, 154, 0.35); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); }
+.dy-cap.pop span { animation: dy-pop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+@keyframes dy-pop { from { opacity: 0; transform: translateY(14px) scale(0.92); } }
+.dy-count { position: absolute; inset: 0; display: grid; place-items: center; }
+.dy-count b { font-family: var(--dy-display); font-weight: 400; font-size: clamp(110px, 18vw, 220px); color: #fff; text-shadow: 0 0 20px var(--dy-cyan), 0 0 60px var(--dy-cyan), 0 8px 0 rgba(0, 0, 0, 0.35); animation: dy-num 0.9s ease-out both; }
+.dy-count b.go { color: #ffe1f1; text-shadow: 0 0 20px var(--dy-pink), 0 0 70px var(--dy-pink), 0 8px 0 rgba(0, 0, 0, 0.35); }
+@keyframes dy-num { from { opacity: 0; transform: scale(1.6); } 30% { opacity: 1; transform: scale(1); } to { opacity: 0.9; } }
+.dy-banner { position: absolute; top: 18vh; left: 0; right: 0; display: grid; place-items: center; }
+.dy-banner div { text-align: center; animation: dy-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.dy-banner b { display: block; font-family: var(--dy-display); font-weight: 400; font-size: clamp(44px, 7vw, 96px); line-height: 1; color: #fff; text-shadow: 0 0 18px var(--c), 0 0 50px var(--c), 0 6px 0 rgba(0, 0, 0, 0.4); }
+.dy-banner small { display: inline-block; margin-top: 10px; font-weight: 700; font-size: 18px; letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 16px; border-radius: 999px; background: rgba(0, 0, 0, 0.5); }
+
+/* ---------------------------------------------------------------- the payout */
+.dy-res { position: absolute; inset: 0; display: grid; place-items: center; padding: 70px 16px 16px; background: radial-gradient(60% 60% at 50% 50%, rgba(5, 3, 14, 0.25), rgba(5, 3, 14, 0.7)); }
+.dy-panel { pointer-events: auto; width: min(560px, 100%); max-height: 100%; overflow-y: auto; padding: 24px 26px 22px; border-radius: 24px; background: var(--dy-panel); backdrop-filter: blur(16px); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), inset 0 0 0 1px var(--dy-line); animation: dy-pop 0.5s cubic-bezier(0.2, 1.3, 0.4, 1) both; box-sizing: border-box; }
+.dy-panel.win { box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6), inset 0 0 0 2px var(--dy-gold), 0 0 60px rgba(255, 207, 58, 0.3); }
+.dy-panel h2 { margin: 0 0 16px; text-align: center; font-family: var(--dy-display); font-weight: 400; font-size: 34px; color: #fff; }
+.dy-panel.win h2 { color: var(--dy-gold); text-shadow: 0 0 20px rgba(255, 207, 58, 0.6); }
+.dy-podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 8px; align-items: end; margin-bottom: 10px; }
+.dy-podium .pl { text-align: center; padding: 12px 6px 0; border-radius: 14px 14px 0 0; background: rgba(255, 255, 255, 0.06); position: relative; }
+.dy-podium .pl .dy-ball { width: 38px; height: 38px; }
+.dy-podium .pl b { display: block; font-size: 15px; margin-top: 6px; }
+.dy-podium .pl small { display: block; font-size: 11px; color: var(--dy-dim); margin-bottom: 6px; }
+.dy-podium .pl span { display: block; font-family: var(--dy-display); font-size: 28px; padding: 6px 0; border-radius: 10px 10px 0 0; }
+.dy-podium .p1 span { background: linear-gradient(180deg, #ffe27a, #d89a00); color: #2a1600; padding: 18px 0; }
+.dy-podium .p2 span { background: linear-gradient(180deg, #e6ecf5, #8a96a8); color: #1a2030; padding: 10px 0; }
+.dy-podium .p3 span { background: linear-gradient(180deg, #f2b27a, #a05a20); color: #2a1200; }
+.dy-restline { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--dy-dim); margin: 0 0 14px; justify-content: center; }
+.dy-lines { display: grid; gap: 6px; margin-bottom: 14px; }
+.dy-lines div { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); font-size: 14px; }
+.dy-lines .dy-ball { width: 20px; height: 20px; }
+.dy-lines span { flex: 1; color: var(--dy-dim); min-width: 0; }
+.dy-lines span b { color: #fff; }
+.dy-lines em { font-style: normal; font-weight: 700; color: var(--dy-dim); }
+.dy-lines strong { font-family: var(--dy-display); font-weight: 400; font-size: 18px; min-width: 70px; text-align: right; }
+.dy-lines .w { background: rgba(59, 240, 138, 0.1); box-shadow: inset 0 0 0 1px rgba(59, 240, 138, 0.35); }
+.dy-lines .w strong { color: var(--dy-green); }
+.dy-lines .l strong { color: var(--dy-red); }
+.dy-bal { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; }
+.dy-bal span { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dy-dim); }
+.dy-bal b { font-family: var(--dy-display); font-weight: 400; font-size: 34px; color: var(--dy-gold); font-variant-numeric: tabular-nums; }
+.dy-toast { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 12px; background: rgba(10, 6, 24, 0.92); box-shadow: inset 0 0 0 1px var(--dy-gold); font-weight: 600; }
+
+/* ---------------------------------------------------------------- phones */
+@media (max-width: 760px) {
+  .dy-top { padding: 10px 12px; gap: 10px; }
+  .dy-logo { font-size: 22px; }
+  .dy-race { display: none; }
+  .dy-back { display: none; }
+  .dy-card { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 64vh; border-radius: 18px; }
+  .dy-cols, .dy-row { grid-template-columns: 1fr 66px 66px; }
+  .dy-cols span:nth-child(2), .dy-form { display: none; }
+  .dy-chips button { width: 40px; height: 40px; font-size: 12px; }
+  .dy-live { width: 210px; top: 60px; left: 8px; }
+  .dy-lr { height: 30px; }
+  .dy-lr .n { font-size: 12px; }
+  .dy-lr .tag, .dy-shot { display: none; }
+  .dy-cap { bottom: 3vh; }
+}
