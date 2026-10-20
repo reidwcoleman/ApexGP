@@ -4,7 +4,8 @@ import { buildWaters, type Water, type WaterSpec } from '../water.ts';
 import { fbm2, hash2i, rng } from '../noise.ts';
 import { weatherUniforms } from '../../weatherUniforms.ts';
 import { Plain } from './monzaScenery.ts';
-import { ALPINE_LAKE, RIVIERA_SEA, alpineLake, alpineLakeOutline, rivieraCoast, rivieraSpots } from './scenicLand.ts';
+import { ALPINE_LAKE, RIVIERA_SEA, alpineLake, alpineLakeOutline, canyonWallFeet, rivieraCoast, rivieraSpots } from './scenicLand.ts';
+import { boulders, rockMeshes, rockMaterial, type RockSpot } from './rocks.ts';
 
 /**
  * What stands in the scenic venues' land (scenicLand.ts) besides trees and houses: the sea under the
@@ -170,44 +171,131 @@ function boatFleet(geo: THREE.BufferGeometry, boats: Boat[], y: number, name: st
 
 // ------------------------------------------------------------------------------------------ rocks
 
-/** a lumpy rock (displaced icosahedron), unit size */
-function rockGeometry(seed: number): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(1, 2);
-  const p = g.attributes.position as THREE.BufferAttribute;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const n = 1 + 0.28 * fbm2(v.x * 1.7 + seed, v.z * 1.7 + v.y * 1.3 - seed, 3) + 0.08 * fbm2(v.x * 5 - seed, v.y * 5 + seed, 2);
-    v.multiplyScalar(n);
-    // flatter underneath, a little squat
-    v.y = v.y < 0 ? v.y * 0.35 : v.y * 0.72;
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  g.computeVertexNormals();
+/**
+ * Capo Serena's cliffs in rock. The terrain mesh out there is 16 m, so on its own a face is one smooth
+ * slope; here it is built up of limestone blocks bedded into that slope (buttresses, overhangs,
+ * ledges between them), with a rubble of fallen blocks along the waterline, outcrops along the top
+ * edge, and the sea stacks clad the same way.
+ */
+function cliffRock(map: WorldMap): THREE.Group {
+  const S = map.SQUARE;
+  const sea = RIVIERA_SEA;
+  const r = rng(733);
+  const C0 = 24;
+  const nx = Math.ceil((S.x1 - S.x0) / C0), nz = Math.ceil((S.z1 - S.z0) / C0);
+  const coarse = new Float32Array(nx * nz);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) coarse[j * nx + i] = map.height(S.x0 + (i + 0.5) * C0, S.z0 + (j + 0.5) * C0);
+  const nearSea = (i: number, j: number) => {
+    for (let b = -2; b <= 2; b++)
+      for (let a = -2; a <= 2; a++) {
+        const ii = i + a, jj = j + b;
+        if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && coarse[jj * nx + ii] < sea + 1.5) return true;
+      }
+    return false;
+  };
+  const face: RockSpot[] = [], foot: RockSpot[] = [], stacks: RockSpot[] = [], top: RockSpot[] = [];
+  const F = 6;
+  for (let j = 0; j < nz; j++)
+    for (let i = 0; i < nx; i++) {
+      if (coarse[j * nx + i] > sea + 80 || !nearSea(i, j)) continue;
+      for (let b = 0; b < C0 / F; b++)
+        for (let a = 0; a < C0 / F; a++) {
+          const x = S.x0 + i * C0 + (a + 0.5) * F + (r() - 0.5) * F * 0.9;
+          const z = S.z0 + j * C0 + (b + 0.5) * F + (r() - 0.5) * F * 0.9;
+          const h = map.height(x, z);
+          if (h < sea - 3) continue;
+          if (map.trackClearance(x, z) < 34 || map.inPitZone(x, z, 20) || map.excluded(x, z, 4)) continue;
+          const gx = (map.height(x + 3, z) - map.height(x - 3, z)) / 6, gz = (map.height(x, z + 3) - map.height(x, z - 3)) / 6;
+          const grad = Math.hypot(gx, gz);
+          const cd = rivieraCoast(map, x, z);
+          if (cd < -45) continue;
+          // facing downhill (out to sea)
+          const yaw = Math.atan2(-gx, -gz);
+          const k = 0.82 + r() * 0.34;
+          if (cd > 28 && h > sea + 3) {
+            // a sea stack: tall blocks, stacked, the waves' notch at the foot
+            if (r() < 0.85) {
+              const H = Math.min(34, (h - sea) * 0.85 + 4);
+              stacks.push({ x, z, y: sea + H * 0.42, w: 9 + r() * 7, h: H, d: 8 + r() * 6, rot: r() * 6.28, tx: (r() - 0.5) * 0.12, tz: (r() - 0.5) * 0.12, k });
+            }
+          } else if (grad > 0.9 && h > sea + 2) {
+            // the face: a block bedded into the slope, its outer face roughly the cliff's
+            // (big: a buttress or a slab the height of a third of the cliff, so the face is a jumble
+            // of facets and shadowed re-entrants, not a wall with pebbles on it)
+            if (r() < 0.8) {
+              const d = 8 + r() * 8;
+              face.push({ x: x + (gx / grad) * d * 0.3, z: z + (gz / grad) * d * 0.3, y: h + (r() - 0.35) * 5, w: 11 + r() * 14, h: 9 + r() * 15, d, rot: yaw + (r() - 0.5) * 0.6, tx: (r() - 0.5) * 0.3, tz: (r() - 0.5) * 0.25, k });
+            }
+          } else if (h < sea + 4.5 && cd > -18) {
+            // the waterline: fallen blocks, half in the sea
+            if (r() < 0.6) {
+              const s = 1.2 + Math.pow(r(), 2) * 6;
+              foot.push({ x, z, y: Math.max(h, sea - 1.2) + s * 0.15, w: s * (0.9 + r() * 0.5), h: s * (0.55 + r() * 0.35), d: s * (0.8 + r() * 0.4), rot: r() * 6.28, tx: (r() - 0.5) * 0.4, tz: (r() - 0.5) * 0.4, k });
+            }
+          } else if (grad > 0.3 && h > sea + 15 && r() < 0.14) {
+            // the top edge: low outcrops breaking through the turf (flat slabs, not boulders)
+            const s = 0.9 + r() * 2.2;
+            top.push({ x, z, y: h - s * 0.05, w: s * 1.5, h: s * 0.38, d: s * 1.1, rot: yaw + (r() - 0.5), tx: (r() - 0.5) * 0.2, tz: (r() - 0.5) * 0.2, k: k * 0.85 });
+          }
+        }
+    }
+  const g = new THREE.Group();
+  g.name = 'riviera_cliffs';
+  g.add(rockMeshes(face, 'limestone', 'riviera_cliff_face', { blocky: 0.9, detail: 2, shapes: 5, seed: 11 }));
+  g.add(rockMeshes(stacks, 'limestone', 'riviera_stacks', { blocky: 0.85, detail: 3, shapes: 4, seed: 12 }));
+  g.add(rockMeshes(foot, 'limestone', 'riviera_shore_rocks', { blocky: 0.6, detail: 2, shapes: 5, seed: 13 }));
+  g.add(rockMeshes(top, 'limestone', 'riviera_outcrops', { blocky: 0.8, detail: 2, shapes: 3, seed: 14 }));
+  if (import.meta.env.DEV) console.debug('[scenic] cliff rocks', face.length, stacks.length, foot.length, top.length);
   return g;
 }
 
-function rockField(map: WorldMap, spots: { x: number; z: number; s: number; rot: number }[], color: number, name: string): THREE.InstancedMesh {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.92, metalness: 0, flatShading: true });
-  const mesh = new THREE.InstancedMesh(rockGeometry(3.1), mat, Math.max(1, spots.length));
-  mesh.name = name;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
-  spots.forEach((r, i) => {
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r.rot);
-    v.set(r.x, map.height(r.x, r.z) + r.s * 0.12, r.z);
-    sc.set(r.s * (1 + 0.3 * Math.sin(r.rot * 3)), r.s, r.s * (1 + 0.3 * Math.cos(r.rot * 5)));
-    m.compose(v, q, sc);
-    mesh.setMatrixAt(i, m);
-    col.setScalar(0.8 + 0.4 * hash2i(Math.floor(r.x), Math.floor(r.z), 5));
-    mesh.setColorAt(i, col);
-  });
-  mesh.count = spots.length;
-  mesh.computeBoundingSphere();
-  return mesh;
+/** Bergsee's shore: granite boulders and shingle along the waterline, a few out in the shallows */
+function alpineShore(map: WorldMap): THREE.Group {
+  const r = rng(551);
+  const pts: { x: number; z: number }[] = [];
+  const line = alpineLakeOutline(map, 0);
+  for (let k = 0; k < line.length; k++) {
+    const A = line[k], B = line[(k + 1) % line.length];
+    const L = Math.hypot(B.x - A.x, B.z - A.z);
+    for (let t = 0; t < L; t += 5 + r() * 6) {
+      const x = A.x + ((B.x - A.x) * t) / L + (r() - 0.5) * 16, z = A.z + ((B.z - A.z) * t) / L + (r() - 0.5) * 16;
+      if (!map.inSquare(x, z) || map.trackClearance(x, z) < 30 || map.inPitZone(x, z, 10) || map.excluded(x, z, 3)) continue;
+      if (map.height(x, z) < ALPINE_LAKE - 2.5) continue;
+      pts.push({ x, z });
+    }
+  }
+  const spots = boulders(map, pts, [0.5, 3.8], 552).map((s) => ({ ...s, y: Math.max(s.y, ALPINE_LAKE - 0.3 + s.h * 0.15) }));
+  return rockMeshes(spots, 'granite', 'alpine_shore', { blocky: 0.2, detail: 2, seed: 9 });
 }
 
+/**
+ * Red Mesa's talus: the walls drop their rock at their feet. Big fallen slabs leaning at the base,
+ * boulders thinning and shrinking out across the apron, round every butte near the lap and along the
+ * escarpment.
+ */
+function canyonTalus(map: WorldMap): THREE.Group {
+  const r = rng(919);
+  const slabs: RockSpot[] = [], blocks: RockSpot[] = [];
+  for (const f of canyonWallFeet(map, 3200, 8, r)) {
+    if (!map.inSquare(f.x, f.z) && Math.hypot(f.x - map.A.center.x, f.z - map.A.center.z) > 3200) continue;
+    if (map.trackClearance(f.x, f.z) < 26 || map.inPitZone(f.x, f.z, 20) || map.excluded(f.x, f.z, 3)) continue;
+    const near = 1 - Math.min(1, f.d / (f.wallH * 0.7));
+    const y = map.height(f.x, f.z);
+    if (f.d < 12 && r() < 0.35) {
+      const H = 7 + r() * 12;
+      slabs.push({ x: f.x, z: f.z, y: y + H * 0.3, w: 6 + r() * 9, h: H, d: 3 + r() * 4, rot: f.out + (r() - 0.5) * 0.7, tx: (r() - 0.5) * 0.6, tz: (r() - 0.5) * 0.3, k: 0.85 + r() * 0.3 });
+    } else {
+      const s = (1 + 8 * near * near) * (0.35 + 0.65 * r());
+      blocks.push({ x: f.x, z: f.z, y: y + s * (0.15 + r() * 0.1), w: s * (0.9 + r() * 0.6), h: s * (0.5 + r() * 0.4), d: s * (0.8 + r() * 0.5), rot: r() * 6.28, tx: (r() - 0.5) * 0.5, tz: (r() - 0.5) * 0.5, k: 0.8 + r() * 0.35 });
+    }
+  }
+  const g = new THREE.Group();
+  g.name = 'canyon_talus';
+  g.add(rockMeshes(slabs, 'sandstone', 'canyon_slabs', { blocky: 0.95, detail: 2, shapes: 4, seed: 21 }));
+  g.add(rockMeshes(blocks, 'sandstone', 'canyon_blocks', { blocky: 0.8, detail: 2, shapes: 5, seed: 22 }));
+  if (import.meta.env.DEV) console.debug('[scenic] talus', slabs.length, blocks.length);
+  return g;
+}
 /** scatter spots round the lap (lat from `near` to `far` m beyond the barriers), filtered */
 function scatter(map: WorldMap, n: number, near: number, far: number, seed: number, ok: (x: number, z: number) => boolean, size: [number, number]) {
   const r = rng(seed);
@@ -297,8 +385,9 @@ function buildRiviera(map: WorldMap, group: THREE.Group): (t: number) => void {
   group.add(sf.mesh);
 
   // pale limestone boulders on the clifftops and among the macchia
-  const rocks = scatter(map, 260, 10, 220, 41, (x, z) => rivieraCoast(map, x, z) < -6 && map.slope(x, z) > 0.8, [0.5, 2.6]);
-  group.add(rockField(map, rocks, 0x9c9282, 'riviera_rocks'));
+  const rocks = scatter(map, 320, 10, 260, 41, (x, z) => rivieraCoast(map, x, z) < -6 && map.slope(x, z) > 0.8, [0.5, 3.2]);
+  group.add(rockMeshes(boulders(map, rocks, [0.5, 3.2], 42), 'limestone', 'riviera_rocks', { blocky: 0.7, seed: 4 }));
+  group.add(cliffRock(map));
 
   return (t) => {
     water.update(t);
@@ -387,8 +476,9 @@ function buildAlpine(map: WorldMap, group: THREE.Group): (t: number) => void {
     }
   }
   // grey granite boulders dropped by the glacier, on the meadows and the moraine
-  const rocks = scatter(map, 200, 8, 260, 52, (x, z) => alpineLake(map, x, z) < -12, [0.6, 3.2]);
-  group.add(rockField(map, rocks, 0x86847e, 'alpine_rocks'));
+  const rocks = scatter(map, 320, 8, 300, 52, (x, z) => alpineLake(map, x, z) < -12, [0.6, 3.6]);
+  group.add(rockMeshes(boulders(map, rocks, [0.6, 3.6], 53), 'granite', 'alpine_rocks', { blocky: 0.15, seed: 5 }));
+  group.add(alpineShore(map));
   group.add(plainMesh(p, 'alpine_buildings'));
 
   // rowing boats and a sail or two on the lake
@@ -413,10 +503,11 @@ function buildAlpine(map: WorldMap, group: THREE.Group): (t: number) => void {
 
 function buildCanyon(map: WorldMap, group: THREE.Group): (t: number) => void {
   // boulders fallen from the walls, red and dark, thick round the buttes' feet and along the wash
-  const big = scatter(map, 360, 10, 420, 63, () => true, [0.7, 4.2]);
-  group.add(rockField(map, big, 0x8a4a30, 'canyon_rocks'));
-  const small = scatter(map, 500, 4, 120, 64, () => true, [0.25, 0.9]);
-  group.add(rockField(map, small, 0x7a4632, 'canyon_stones'));
+  const big = scatter(map, 420, 10, 420, 63, () => true, [0.7, 4.2]);
+  group.add(rockMeshes(boulders(map, big, [0.7, 4.2], 65), 'sandstone', 'canyon_rocks', { blocky: 0.75, seed: 6 }));
+  const small = scatter(map, 900, 4, 160, 64, () => true, [0.2, 0.9]);
+  group.add(rockMeshes(boulders(map, small, [0.2, 0.9], 66), 'sandstone', 'canyon_stones', { blocky: 0.5, detail: 2, seed: 7, shadows: false }));
+  group.add(canyonTalus(map));
   // hoodoos: thin spires of soft rock with a hard cap, in a few clusters off the lap
   const p = new Plain();
   const r = rng(77);
@@ -442,13 +533,23 @@ function buildCanyon(map: WorldMap, group: THREE.Group): (t: number) => void {
       map.exclusions.push({ cx: x, cz: z, halfW: w, halfL: w, angle: 0 });
     }
   }
-  group.add(plainMesh(p, 'canyon_hoodoos', 0.95));
+  {
+    const m = new THREE.Mesh(p.geometry(), rockMaterial('sandstone', true));
+    m.name = 'canyon_hoodoos';
+    m.castShadow = m.receiveShadow = true;
+    group.add(m);
+  }
   return () => {};
 }
 
 export function buildScenicScenery(map: WorldMap): ScenicSceneryBuild {
   const group = new THREE.Group();
   group.name = 'ScenicScenery';
-  const update = map.scenic === 'riviera' ? buildRiviera(map, group) : map.scenic === 'alpine' ? buildAlpine(map, group) : buildCanyon(map, group);
-  return { group, update };
+  const tick = map.scenic === 'riviera' ? buildRiviera(map, group) : map.scenic === 'alpine' ? buildAlpine(map, group) : buildCanyon(map, group);
+  return {
+    group,
+    update(elapsed) {
+      tick(elapsed);
+    },
+  };
 }

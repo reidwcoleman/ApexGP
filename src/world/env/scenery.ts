@@ -30,6 +30,7 @@ import { buildHungaroringScenery } from './venues/hungaroringScenery.ts';
 import { buildMonzaScenery } from './venues/monzaScenery.ts';
 import { buildVenueDress } from './venues/dress.ts';
 import { buildScenicScenery } from './venues/scenicScenery.ts';
+import { buildGroundCover, type GroundCover } from './venues/groundCover.ts';
 
 /**
  * Scenery: everything beyond the barriers that isn't sky or light — the Parco
@@ -141,6 +142,18 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   } catch (e) {
     console.error('[scenery] grass blades failed — skipping them', e);
   }
+  // tussocks and wildflowers on the rough meadow, sagebrush on Red Mesa's floor (High/Ultra)
+  let cover: GroundCover | null = null;
+  try {
+    const tu = terrain.uniforms;
+    cover = buildGroundCover(map, masks, { meadow: tu.uMeadow.value as THREE.Color, straw: tu.uStraw.value as THREE.Color });
+    if (cover) {
+      cover.setEnabled(gfx.qualityLevel === 'high' || gfx.qualityLevel === 'ultra' || gfx.qualityLevel === 'tuned');
+      group.add(cover.group);
+    }
+  } catch (e) {
+    console.error('[scenery] ground cover failed — skipping it', e);
+  }
   lap('grass');
   yield { group, step: 'grass' };
   tLap = performance.now();
@@ -215,6 +228,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   // (the camera the scenery was last laid out for, and the grass's own visibility, while the feed borrows them)
   let mainCam: THREE.Camera | null = null;
   let grassShown = false;
+  let coverShown = false;
 
   return {
     group,
@@ -240,6 +254,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
       mex?.update(elapsed);
       yas?.update(elapsed);
       scenic?.update(elapsed);
+      cover?.update(camera);
       stands.update(elapsed);
       skyline?.update(elapsed);
       strollers.update(_dt, camera);
@@ -252,6 +267,12 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
           grass.mesh.visible = false;
         } else grass.mesh.visible = grassShown;
       }
+      if (cover) {
+        if (cam) {
+          coverShown = cover.group.visible;
+          cover.group.visible = false;
+        } else cover.group.visible = coverShown;
+      }
       const hc = cam ?? mainCam;
       if (hc) {
         horizon.update(hc);
@@ -261,6 +282,7 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
     setQuality(q) {
       veg.setDetail(q);
       grass?.setEnabled(q === 'high' || q === 'ultra' || q === 'tuned');
+      cover?.setEnabled(q === 'high' || q === 'ultra' || q === 'tuned');
     },
     stats: { timings, trees: veg.count, treesNear: veg.near, people: stands.people, flags: stands.flags, banking: banking?.stats ?? null, buildings: villages.count, buildMs: Math.round(performance.now() - t0), map: map.timings, veg: veg.timings, masks: masks.timings },
   };

@@ -29,6 +29,9 @@ import type { Weather } from '../world/Weather.ts';
  *    (more so the more rubber is down); a green track grips a little less everywhere.
  *  - Carbon brakes with a temperature: they bite poorly cold (the first stop after a safety car, a
  *    long straight on a cold day) and fade when cooked; their glow is that temperature.
+ *  - Wind from the weather: head- and tailwinds change drag and downforce, crosswinds and gusts push
+ *    the car at its centre of pressure. Downforce falls away with yaw (a sliding car loses its rear
+ *    first), rises as the floor runs lower and stalls for a moment when it bottoms out over a bump.
  *  - Flat spots: a locked wheel grinds one into the tread, and every turn of the wheel it thumps —
  *    a vibration through the car and a little less grip, until the next set.
  *
@@ -318,6 +321,16 @@ const SLIDE_W2 = 2 * 2;
  * sausages, and why ACC punishes too much kerb at speed.
  */
 const KERB_AERO = 0.1;
+/**
+ * Ground effect: downforce rises FLOOR_GAIN per metre the sprung chassis sits lower (≈ +4 % squatted
+ * 2 cm at top speed); past FLOOR_STALL (m) of travel, with the road's bumps added, the plank touches
+ * and the floor stalls for a moment.
+ */
+const FLOOR_GAIN = 2;
+const FLOOR_STALL = 0.03;
+/** side force area (Cy·A, m²) and the centre of pressure behind the CG (m), for crosswinds and slides */
+const SIDE_CYA = 1.5;
+const SIDE_XCP = 0.3;
 const KERB_AERO_STRIKE = 0.12;
 
 /** fuel burn at full throttle (kg/s): ~100 kg/h, the regulation flow limit */
@@ -399,6 +412,10 @@ export class CarPhysics {
    * the more it loses (LINE_OFF × rubber: the dust and marbles off line).
    */
   static rubber = 0.85;
+  /** the airflow's angle to the car (rad, 0 … 0.35): sliding or a crosswind, it costs downforce */
+  aeroYaw = 0;
+  /** the floor stalled by bottoming out (0 … 1) */
+  floorStall = 0;
   /** carbon brake temperature per wheel (°C) */
   readonly brakeTemp = [BRAKE_START, BRAKE_START, BRAKE_START - 20, BRAKE_START - 20];
   /** flat spot per wheel 0 … 1, ground in by a locked wheel */
@@ -773,15 +790,45 @@ export class CarPhysics {
 
     // ---- aero
     const v = Math.max(0, this.vx);
-    const q = 0.5 * RHO * v * v;
+    // the air the car moves through: the weather's wind (with its gusts) in the body frame. A
+    // headwind is more drag and more downforce, a tailwind into a braking zone less of both
+    // (the car arrives faster and brakes with less grip), and a crosswind pushes the car sideways
+    // at its centre of pressure, behind the centre of gravity — it weathervanes into the wind
+    let wF = 0, wL = 0;
+    if (this.weather) {
+      const s = this.weather.state;
+      const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+      const wx = s.windX || 0, wz = s.windZ || 0;
+      wF = wx * sy + wz * cy;
+      wL = wx * cy - wz * sy;
+    }
+    const ua = this.vx - wF;
+    const va = this.vy - wL;
+    const uaP = Math.max(0, ua);
+    const q = 0.5 * RHO * uaP * uaP;
+    // yaw: the floor and the wings work in a straight airflow; a car sliding (or crabbing in a
+    // crosswind) loses downforce, the rear most (the diffuser's flow detaches first) — why a
+    // high-speed slide snaps instead of settling
+    const yawA = Math.min(0.35, Math.abs(Math.atan2(va, Math.max(uaP, 4))));
+    const yawF = 1 - 1.4 * yawA * yawA;
+    const yawR = Math.max(0.55, 1 - 4.2 * yawA * yawA);
+    this.aeroYaw = yawA;
     this.drsOpen = drsAllowed && this.drsOpen && brake < 0.05;
     this.drsAnim += ((this.drsOpen ? 1 : 0) - this.drsAnim) * Math.min(1, dt * 12);
     const floorFactor = this.offTrack ? 0.72 : 1;
     const bodyDmg = 1 - 0.1 * dm[DMG.FLOOR] - 0.04 * (dm[DMG.PODL] + dm[DMG.PODR]);
     const clA = (sp.clA - sp.drsLift * this.drsAnim) * (1 - 0.16 * this.dirty) * floorFactor * bodyDmg;
     const cdA = (sp.cdA - sp.drsDrag * this.drsAnim) * (1 - 0.28 * this.tow) * (1 + 0.06 * (dm[DMG.RW] + dm[DMG.PODL] + dm[DMG.PODR]) + 0.05 * dm[DMG.FLOOR]);
-    const down = q * clA;
-    const drag = q * cdA;
+    // ride height: the floor makes more downforce the closer it runs to the road (ground effect,
+    // from the sprung heave: the car squats on its aero) — and stalls when it bottoms out over a bump
+    // at speed (the plank on the road chokes the flow), coming back within a tenth of a second
+    const low = Math.max(0, -this.heaveS);
+    const bottom = Math.max(0, -this.heave - FLOOR_STALL);
+    if (bottom > 0 && v > 50) this.floorStall = Math.min(1, this.floorStall + bottom * 120);
+    this.floorStall = Math.max(0, this.floorStall - dt * 9);
+    const ground = (1 + FLOOR_GAIN * low) * (1 - 0.22 * this.floorStall);
+    const down = q * clA * ground;
+    const drag = 0.5 * RHO * cdA * ua * Math.abs(ua);
     const balance = Math.max(0.36, Math.min(0.5, sp.aeroFront + Math.max(-0.015, Math.min(0.022, -this.ax * sp.pitchAero))));
     // kerbs unseal the floor at that axle (KERB_AERO): riding them, plus a moment's lift from a strike
     let kerbF = 0;
@@ -795,8 +842,11 @@ export class CarPhysics {
     const kerbAeroF = 1 - KERB_AERO * Math.min(2, kerbF);
     const kerbAeroR = 1 - KERB_AERO * Math.min(2, kerbR);
     // a broken front wing costs front downforce (understeer), a broken rear wing the rear (oversteer)
-    const downF = down * balance * kerbAeroF * (1 - 0.2 * (dm[DMG.FWL] + dm[DMG.FWR]) - 0.12 * dm[DMG.NOSE]);
-    const downR = down * (1 - balance) * kerbAeroR * (1 - 0.45 * dm[DMG.RW]);
+    const downF = down * balance * kerbAeroF * yawF * (1 - 0.2 * (dm[DMG.FWL] + dm[DMG.FWR]) - 0.12 * dm[DMG.NOSE]);
+    const downR = down * (1 - balance) * kerbAeroR * yawR * (1 - 0.45 * dm[DMG.RW]);
+    // the crosswind's side force (N, + left) and its yaw moment about the CG (centre of pressure behind it)
+    const airSpd = Math.hypot(ua, va);
+    const sideAir = -0.5 * RHO * SIDE_CYA * va * airSpd;
 
     // ---- loads
     const Fz0 = (sp.mass * G) / 4;
@@ -1109,8 +1159,7 @@ export class CarPhysics {
     const gSide = G * uy * (ux * cyaw - uz * syaw);
 
     // ---- equations of motion
-    const sgn = this.vx >= 0 ? 1 : -1;
-    const Fx = Fxb - drag * sgn;
+    const Fx = Fxb - drag;
     let axBody = Fx / m + gAlong;
     // arcade braking (the F1 games' feel): carbon brakes that bite harder than the tyre model
     // alone allows — up to ~1.9 g more on a dry track, scaled by the grip there is (wet, worn,
@@ -1119,7 +1168,8 @@ export class CarPhysics {
       const k = Math.min(1, (this.vx - 1.5) / 10) * Math.min(1, this.gripFactor) * (this.offTrack ? 0.45 : 1);
       axBody -= brake * ARCADE_BRAKE * k;
     }
-    const ayBody = Fyb / m + gSide;
+    const ayBody = (Fyb + sideAir) / m + gSide;
+    Mz -= SIDE_XCP * sideAir;
     this.vx += (axBody + this.vy * this.r) * dt;
     this.vy += (ayBody - this.vx * this.r) * dt;
     this.r += (Mz / sp.iz) * dt;
@@ -1204,7 +1254,7 @@ export class CarPhysics {
         this.flatPhase[i] = (this.flatPhase[i] + this.omega[i] * dt) % (Math.PI * 2);
         z += 0.0035 * this.flatSpot[i] * Math.pow(Math.max(0, Math.cos(this.flatPhase[i])), 12) * vis;
       }
-      else if (sc === SURF.GRASS || sc === SURF.GRAVEL) z += (Math.random() - 0.5) * (sc === SURF.GRAVEL ? 0.03 : 0.018) * Math.min(1, v / 15);
+      if (sc === SURF.GRASS || sc === SURF.GRAVEL) z += (Math.random() - 0.5) * (sc === SURF.GRAVEL ? 0.03 : 0.018) * Math.min(1, v / 15);
       const st = this.strikeT[i];
       if (st < 0.25) z += 0.024 * this.strikeA[i] * Math.exp(-st * 16) * Math.sin(st * Math.PI * 2 * 13);
       const dz = z - this.roadZ[i];

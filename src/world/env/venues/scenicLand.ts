@@ -505,6 +505,37 @@ function canyonCarve(map: WorldMap, x: number, z: number, h: number): number {
   return y;
 }
 
+/**
+ * Where rock has fallen from the walls (scenicScenery.ts piles boulders and slabs there): the foot
+ * of every butte and mesa within `reach` m of the circuit's centre, and of the escarpment. Each
+ * spot: position, outward direction (yaw, rad), how far out from the wall (m) and the wall's height.
+ */
+export function canyonWallFeet(map: WorldMap, reach: number, step: number, rand: () => number): { x: number; z: number; out: number; d: number; wallH: number }[] {
+  const c = map.A.center;
+  const out: { x: number; z: number; out: number; d: number; wallH: number }[] = [];
+  for (const B of BUTTES) {
+    if (Math.hypot(B.x, B.z) - B.r > reach) continue;
+    const ex = B.e ?? 1;
+    const n = Math.ceil((2 * Math.PI * B.r * Math.max(ex, 1 / ex)) / step);
+    for (let k = 0; k < n; k++) {
+      const ang = rand() * Math.PI * 2;
+      const R = B.r * (1 + 0.16 * Math.sin(ang * 3 + B.x) + 0.1 * Math.sin(ang * 7 + B.z));
+      const d = 2 + Math.pow(rand(), 1.8) * B.h * 0.75;
+      // (rr is measured in the mesa's squashed frame: back out to the world)
+      const rr = R + d;
+      const x = c.x + B.x + (Math.cos(ang) * rr) / Math.sqrt(ex), z = c.z + B.z + Math.sin(ang) * rr * Math.sqrt(ex);
+      out.push({ x, z, out: Math.atan2(Math.cos(ang) / Math.sqrt(ex), Math.sin(ang) * Math.sqrt(ex)), d, wallH: B.h });
+    }
+  }
+  for (let z = c.z - reach; z < c.z + reach; z += step) {
+    const zz = z + (rand() - 0.5) * step;
+    const rx = rimX(c, zz) + 14 * fbm2(zz / 60, rimX(c, zz) / 60, 2);
+    const d = 3 + Math.pow(rand(), 1.8) * 120;
+    out.push({ x: rx + d, z: zz, out: Math.PI / 2, d, wallH: 95 });
+  }
+  return out;
+}
+
 function canyonForest(map: WorldMap, x: number, z: number): number {
   const dT = map.distToTrack(x, z);
   const n1 = fbm2(x / 300 + 11.3, z / 300 - 7.7, 3);
@@ -601,5 +632,5 @@ export function scenicTreeLook(v: ScenicVenue, sp: string, h: number): { tint: [
   }
   // the desert: junipers small, dark and dusty; sagebrush low and silver-grey
   if (sp === 'oak') return { tint: [0.62, 0.7, 0.58], scale: 0.3 + h * 0.12 };
-  return { tint: [1.15, 1.12, 0.9], scale: 0.42 + h * 0.25 };
+  return { tint: [1.3, 1.22, 0.98], scale: 0.38 + h * 0.3 };
 }

@@ -57,6 +57,20 @@ npm run check    # tsc --noEmit
   (a new `mesa` kind in horizon.ts), stands (`scenicLayout.ts`), and scenery (`scenicScenery.ts`).
   `node tools/_scenicshots.mjs <out> serena,bergsee,redmesa [time] [quality] [views]` shoots each
   from the track, the air and hand-placed hero views.
+  Rock (`venues/rocks.ts`): fractured boulders and blocks (a lumpy sphere cut along joint planes) in
+  one stone shader — triplanar world-space noise, the kind's beds (limestone, granite, sandstone),
+  crevices, lichen, desert varnish, soil round the foot, a grain bump, dark and glossy in the rain.
+  Capo Serena's cliffs are built of big limestone blocks bedded into the 16 m terrain face, with
+  fallen blocks along the waterline, outcrops on the top edge and clad sea stacks; Red Mesa's buttes
+  and escarpment drop slabs and talus round their feet; Bergsee's shore is granite boulders. The
+  terrain shader gives the rock faces relief (ledges at the beds, vertical joints and flutes) and
+  paints Red Mesa's floor (red sand sheets, buff drifts, silt, desert pavement, crust, sagebrush).
+- **Ground cover** (`src/world/env/venues/groundCover.ts`, High and up) — what stands up out of the
+  ground near the camera: Red Mesa's sagebrush (each bush with its shade; the terrain paints them
+  beyond 130 m), and on every other venue with open country tussocks of long grass, seed heads and
+  wildflowers on the unmown meadow (tinted from the venue's meadow and straw: green and flowering
+  at Bergsee, Styria and the Ardennes, summer-dry at Capo Serena). Crossed cards streamed in 48 m
+  chunks round the camera (two built a frame, kept), shrinking into the ground at the ring's edge.
 - **Heat haze** (`src/core/heatHaze.ts`) — on a hot, sunny, dry day the air over the asphalt wobbles
   far down the straights (stronger down a long lens), and every car's exhaust plume shimmers what is
   seen through it. After the TAA, High quality and up, ~0.3 ms. `node tools/_hazeshot.mjs`.
@@ -66,6 +80,13 @@ npm run check    # tsc --noEmit
   their glow is that temperature. A wheel locked solid grinds a flat spot that thumps once a turn
   through the car and costs a little grip until the next set. The HUD's tyre widget shows each
   corner's brake temperature and flags a flat spot.
+- **Physics: the air** — the weather's wind (with its gusts) acts on the car: a headwind is more drag
+  and downforce, a tailwind into a braking zone less of both, and a crosswind pushes the car at its
+  centre of pressure behind the CG (it weathervanes into the wind); the HUD's weather row shows the
+  wind once it's over ~13 km/h and where it blows relative to the car. Downforce falls away with yaw
+  — a sliding car loses its rear first, which is why a high-speed slide snaps — rises as the floor
+  runs lower on its springs (ground effect) and stalls for a moment when the plank bottoms out over a
+  bump at speed. On a windy day laps are ~1 s slower (`SEED=4 node tools/racetest.mjs 3 windy`).
 - **Driver career** — the game's main mode, like the F1 games' My Driver: create a driver (name, nationality,
   number, helmet colours, skin and hair) and start in Formula 2 with one of three junior teams, or take over a
   current F1 driver's seat. The hub (Overview · Inbox · Standings · Driver · History) runs the life around the races:

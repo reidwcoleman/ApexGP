@@ -213,6 +213,17 @@ float tAO;
 float tWood = 0.0;
 float tAridK = 0.0;
 vec3 tRipple = vec3( 0.0 );
+// relief on the scenic venues' rock faces (cliffs, mesa walls, crags): ledges and joints in the shading
+vec3 tWallN = vec3( 0.0 );
+vec3 tReliefN( float H ) {
+  vec3 n0 = normalize( vWNormal );
+  vec3 dpx = dFdx( vWPos ), dpy = dFdy( vWPos );
+  vec3 r1 = cross( dpy, n0 ), r2 = cross( n0, dpx );
+  float det = dot( dpx, r1 );
+  if ( abs( det ) < 1e-6 ) return vec3( 0.0 );
+  vec3 grad = sign( det ) * ( dFdx( H ) * r1 + dFdy( H ) * r2 );
+  return normalize( abs( det ) * n0 - grad ) - n0;
+}
 vec3 tDetailN;
 float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 // the painted woods beyond the square (the same mask as procF below), sampled anywhere
@@ -587,6 +598,9 @@ float tWoodAt( vec2 q, float fShift ) {
       vec3 dryC = mix( uStraw, uMeadow, 0.35 + 0.3 * m2 ) * ( 0.85 + 0.25 * d1 );
       col = mix( col, dryC, ( 1.0 - lawn ) * ( 1.0 - forest ) * ( 1.0 - urban ) * ( 1.0 - smoothstep( 0.3, 0.7, paved ) ) * 0.28 * ( 1.0 - k ) );
       col = mix( col, lime, k );
+      // ledges stepping out at each bed, vertical joints and buttresses (the mesh is 16 m out here)
+      float Hl = smoothstep( 0.0, 0.3, fract( vWPos.y * 0.23 + f1 * 0.9 ) ) * 0.9 + f1 * 7.0 + texture2D( uNoise, vec2( fq.x * 0.031, vWPos.y * 0.006 ) ).g * 9.0;
+      tWallN = tReliefN( Hl ) * k * 0.9;
     } else if ( uScenic < 2.5 ) {
       // Bergsee: the forest on the valley walls is a dark canopy (the placed trees stand in it, not on meadow)
       {
@@ -603,6 +617,12 @@ float tWoodAt( vec2 q, float fShift ) {
       float screeK = smoothstep( 0.18, 0.3, slopeT ) * ( 1.0 - steep ) * smoothstep( 900.0, 1300.0, vWPos.y + m2 * 300.0 );
       col = mix( col, scree, screeK * bare );
       col = mix( col, rockA, rockK * bare );
+      {
+        vec3 wn = normalize( vWNormal );
+        float al = abs( wn.x ) > abs( wn.z ) ? p.y : p.x;
+        float Ha = texture2D( uNoise, vec2( al * 0.011, vWPos.y * 0.004 ) ).g * 26.0 + texture2D( uNoise, vec2( al * 0.05, vWPos.y * 0.02 ) ).b * 6.0 + strata * 3.0;
+        tWallN = tReliefN( Ha ) * rockK * bare * 0.8;
+      }
       float snowH = uSnowLine + ( m2 - 0.5 ) * 520.0 + ( m3 - 0.5 ) * 160.0 + ( d1 - 0.5 ) * 40.0;
       float snow = smoothstep( snowH - 50.0, snowH + 50.0, vWPos.y ) * ( 1.0 - smoothstep( 0.5, 0.78, slopeT ) * 0.85 );
       // snow lies in the gullies and on the ledges longer: a broken edge, not a contour
@@ -625,9 +645,51 @@ float tWoodAt( vec2 q, float fShift ) {
       layer = mix( layer, layer * vec3( 0.32, 0.26, 0.24 ), smoothstep( 0.55, 0.8, varnish ) * 0.75 );
       float wallK = smoothstep( 0.22, 0.5, slopeT ) * bare;
       col = mix( col, layer, wallK );
+      // the walls in the light: every bed a ledge, the weaker ones cut back into alcoves, vertical joints
+      // and flutes where the water runs down (the mesh is 16–256 m: this is all the wall's shape up close)
+      {
+        vec3 wn = normalize( vWNormal );
+        float al = abs( wn.x ) > abs( wn.z ) ? p.y : p.x;
+        float Hc = smoothstep( 0.0, 0.2, bf ) * ( which < 0.5 ? 1.6 : 0.8 ) + texture2D( uNoise, vec2( al * 0.017, vWPos.y * 0.0035 ) ).g * 16.0 + texture2D( uNoise, vec2( al * 0.07, vWPos.y * 0.012 ) ).b * 4.0;
+        tWallN = tReliefN( Hc ) * wallK * 0.9;
+      }
       // talus and slickrock: broken red rock on the gentler slopes under the walls
       vec3 talus = mix( sRed * 1.2, sOra * 1.1, d3 ) * ( 0.8 + 0.3 * d1 );
       col = mix( col, talus, smoothstep( 0.08, 0.22, slopeT ) * ( 1.0 - wallK ) * bare * 0.8 );
+      // the valley floor: never one tone — red sand sheets, pale buff drifts, darker silt in the
+      // hollows, grey-brown desert pavement on the benches, dark knobbly crust, and the sagebrush:
+      // grey-green clumps every few metres, each sitting in its own shade (their share of the pixel
+      // once they are smaller than one)
+      {
+        float flatK = ( 1.0 - wallK ) * ( 1.0 - smoothstep( 0.08, 0.22, slopeT ) * 0.8 ) * bare * ( 1.0 - smoothstep( 0.3, 0.7, paved ) );
+        vec3 redS = vec3( 0.4, 0.17, 0.09 ), buff = vec3( 0.53, 0.33, 0.2 ), silt = vec3( 0.28, 0.12, 0.065 ), pav = vec3( 0.24, 0.16, 0.11 );
+        float sheetK = smoothstep( 0.3, 0.7, m2 * 0.5 + m1 * 0.3 + d1 * 0.2 );
+        vec3 fl = mix( redS, buff, sheetK * 0.65 );
+        fl *= 0.88 + 0.14 * d1 + 0.08 * ( d2 - 0.5 );
+        fl = mix( fl, silt, smoothstep( 0.62, 0.82, m3 * 0.55 + m2 * 0.25 + d1 * 0.2 ) * 0.5 );
+        float paveK = smoothstep( 0.56, 0.74, m1 * 0.35 + m3 * 0.35 + d1 * 0.3 ) * 0.75;
+        vec3 peb = pav * mix( 0.85, 0.65 + 0.7 * step( 0.55, d3 ), nearF );
+        fl = mix( fl, peb, paveK );
+        fl *= 1.0 - 0.12 * smoothstep( 0.58, 0.72, d2 * 0.6 + d1 * 0.4 ) * ( 1.0 - paveK );
+        vec2 sq = p / 3.4;
+        vec2 ci = floor( sq ), cf = fract( sq );
+        float dens = ( 0.25 + 0.55 * smoothstep( 0.3, 0.7, m2 * 0.6 + m3 * 0.4 ) ) * ( 1.0 - paveK * 0.6 );
+        float has = step( h21( ci + 17.3 ), dens );
+        vec2 dv = cf - ( vec2( h21( ci + 7.1 ), h21( ci + 3.3 ) ) * 0.56 + 0.22 );
+        float rad = 0.12 + 0.13 * h21( ci + 1.9 );
+        float dd = length( dv );
+        // (a ragged outline: twigs, not a disc)
+        float edgeN = ( d3 - 0.5 ) * rad * 0.9 + ( d2 - 0.5 ) * rad * 0.4;
+        float bush = ( 1.0 - smoothstep( rad * 0.55, rad * 0.9, dd + edgeN ) ) * has;
+        float shade = ( 1.0 - smoothstep( rad * 0.8, rad * 1.8, dd + edgeN * 0.5 ) ) * has * ( 1.0 - bush );
+        float aa = max( smoothstep( 0.12, 0.5, length( fwidth( sq ) ) ), 1.0 - smoothstep( 125.0, 140.0, camDist ) );
+        vec3 sage = mix( vec3( 0.1, 0.105, 0.07 ), vec3( 0.21, 0.21, 0.15 ), h21( ci + 5.5 ) ) * ( 0.6 + 0.5 * clamp( 1.0 - dd / rad, 0.0, 1.0 ) ) * ( 0.75 + 0.5 * d3 );
+        vec3 flNear = mix( fl * ( 1.0 - 0.5 * shade ), sage, bush );
+        vec3 flFar = mix( fl, vec3( 0.14, 0.14, 0.09 ), dens * 0.14 );
+        fl = mix( flNear, flFar, aa );
+        tRipple = tRipple * 0.25 + vec3( dv.x, 0.0, dv.y ) / rad * bush * 0.35 * ( 1.0 - aa );
+        col = mix( col, fl, flatK );
+      }
       tWood = 0.0;
     }
   }
@@ -659,6 +721,7 @@ float tWoodAt( vec2 q, float fShift ) {
   vec3 dn1 = texture2D( uDetailN, p * 0.31 ).rgb * 2.0 - 1.0;
   vec3 dn2 = texture2D( uDetailN, mat2( 0.6, 0.8, -0.8, 0.6 ) * p * 0.083 ).rgb * 2.0 - 1.0;
   tDetailN = vec3( dn1.x + dn2.x * 0.8, 0.0, dn1.y + dn2.y * 0.8 ) * ( 0.45 + 0.35 * forest ) * dStr + tRipple * ( 1.0 - pud );
+  tDetailN += tWallN;
   // a painted canopy seen from afar: crowns ~20 m across, sunlit on one side and shaded on the other,
   // so the woods have texture and relief in the light instead of one flat green (mipmapped: it
   // averages away smoothly where the crowns are smaller than a pixel)
@@ -712,7 +775,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 }`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v11';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v12';
   return { material, uniforms };
 }
 

@@ -333,7 +333,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   // (Sakhir, Yas: the sand beyond the fences isn't bare — low saltbush and grass tussocks dot it,
   // in loose clumps, thinning out with distance; nothing on the lawns or the paving)
   if (map.venue === 'sakhir' || map.venue === 'yasmarina' || map.venue === 'canyon') {
-    for (let k = 0, K = map.venue === 'canyon' ? 16000 : 9000; k < K; k++) {
+    for (let k = 0, K = map.venue === 'canyon' ? 30000 : 9000; k < K; k++) {
       const i = Math.floor(r() * track.n);
       const side = r() < 0.5 ? -1 : 1;
       const far = r();

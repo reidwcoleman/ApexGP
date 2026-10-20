@@ -116,9 +116,11 @@ export function buildParkMasks(map: WorldMap, layout: Layout, trees: TreeShade[]
       ctx.fillRect((-g.length / 2 - 18) * sx, (-g.depth / 2 - 26) * sz, (g.length + 36) * sx, (g.depth + 40) * sz);
       ctx.restore();
     }
-    // clearings close to the circuit are mown; far ones are meadow
+    // clearings close to the circuit are mown; far ones are meadow (the scenic road courses are
+    // country circuits: only what's right by the road is cut, the rest is hay meadow and pasture)
+    const mowTo = map.scenic ? 90 : 260;
     for (const c of map.clearings) {
-      if (map.distToTrack(c.x, c.z) > 260) continue;
+      if (map.distToTrack(c.x, c.z) > mowTo) continue;
       ctx.beginPath();
       ctx.ellipse(X(c.x), Z(c.z), (c.r + c.soft * 0.4) * sx, (c.r + c.soft * 0.4) * sz, 0, 0, Math.PI * 2);
       ctx.fill();

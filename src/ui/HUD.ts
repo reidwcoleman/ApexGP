@@ -710,7 +710,17 @@ export class HUD {
     }
     const soon = race.weather.forecast(150);
     const change = isWet(soon) !== isWet(w.kind) && !race.isTimeTrial;
-    const info = change ? (isWet(soon) ? 'Rain coming' : 'Drying soon') : `Track ${Math.round(w.trackTemp)}°`;
+    // the wind, once it's enough to feel in the car: its speed and where it blows relative to the car
+    // (↓ = a headwind, ↑ = a tailwind, sideways = a crosswind)
+    let windTxt = '';
+    const ws = Math.hypot(w.windX, w.windZ);
+    if (ws > 3.5) {
+      const sy = Math.sin(p.car.yaw), cy = Math.cos(p.car.yaw);
+      const wF = w.windX * sy + w.windZ * cy, wL = w.windX * cy - w.windZ * sy;
+      const k = ((Math.round(Math.atan2(-wL, wF) / (Math.PI / 4)) % 8) + 8) % 8;
+      windTxt = ` · ${'↑↗→↘↓↙←↖'[k]} ${Math.round(ws * 3.6)} km/h`;
+    }
+    const info = change ? (isWet(soon) ? 'Rain coming' : 'Drying soon') : `Track ${Math.round(w.trackTemp)}°${windTxt}`;
     this.setText(this.wxInfo, info);
     this.wxInfo.classList.toggle('warn', change);
 
