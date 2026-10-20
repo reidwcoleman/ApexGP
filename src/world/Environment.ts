@@ -1100,6 +1100,10 @@ export function createEnvironment(
   // prime the clouds and the env map so the first frame is complete
   clouds.update(0, camPos.set(track.px[0] ?? 0, 2, track.pz[0] ?? 0));
   sky.uniforms.uPano.value = clouds.texture;
+  // (perf) and the cumulus' ground shadow once, so its program is the boot's prewarmed one, in use:
+  // otherwise the prewarm's release dropped it and the first broken-cloud race frame linked it (~110 ms)
+  clouds.bakeShadow(camPos.x, camPos.z, 0, 0, 0);
+  clouds.invalidate();
   // a sky-only env map first, so the world capture already renders (and compiles) every material
   // with the env map it will race with — capturing with no env map compiled each program twice
   bakeNow();

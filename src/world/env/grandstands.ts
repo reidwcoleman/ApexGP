@@ -866,6 +866,8 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   // hairpin, a parallel straight): any fan that ends up on a road or inside its barriers goes,
   // and so does any concourse walk that would cross one.
   const onCircuit = (x: number, z: number, hint = -1) => {
+    // (perf) nowhere near the centreline (the far rows of most stands): off it, without project()'s whole-lap scan
+    if (!track.nearCentre(x, z)) return false;
     const pr = track.project(x, z, hint);
     const lat = Math.abs(pr.lateral);
     if (lat < track.halfWidthAt(pr.s) + 3) return true;
@@ -932,14 +934,23 @@ export function buildGrandstands(layout: Layout, track: Track, map: WorldMap): G
   people.forEach((p, i) => (shade[i] = p.shade));
   personGeo.setAttribute('aShade', new THREE.InstancedBufferAttribute(shade, 1));
   // where along the track each fan watches from (what the crowd reacts to is in track distance)
+  // (perf) one projection per 8 m cell: a fan far from the track sends project() round the whole lap,
+  // and the crowd's reactions need no finer a place than that
+  const cellS = new Map<number, number>();
   const trackS = (list: { m: THREE.Matrix4; s?: number }[]) => {
     const out = new Float32Array(Math.max(1, list.length));
     let hint = -1;
     list.forEach((p, i) => {
       if (p.s === undefined) {
-        const pr = track.project(p.m.elements[12], p.m.elements[14], hint);
-        hint = pr.index;
-        p.s = pr.s;
+        const x = p.m.elements[12], z = p.m.elements[14];
+        const key = (Math.floor(x / 8) + 4096) * 8192 + Math.floor(z / 8) + 4096;
+        let s = cellS.get(key);
+        if (s === undefined) {
+          const pr = track.project(x, z, hint);
+          hint = pr.index;
+          cellS.set(key, (s = pr.s));
+        }
+        p.s = s;
       }
       out[i] = p.s;
     });

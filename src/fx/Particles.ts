@@ -635,6 +635,8 @@ export class Particles {
   private probeEnv: THREE.Texture | null = null;
   private probeIntensity = -1;
   private probeT = 0;
+  /** a probe readback in flight (its answer arrives a frame or two later) */
+  private probeReading = false;
   private skyAmbient = new THREE.Color(-1, -1, -1);
   private readonly lighting: FxLighting = { sunDir: new THREE.Vector3(0.3, 0.8, 0.5).normalize(), sunColor: new THREE.Color(2, 2, 2), ambient: new THREE.Color(0.8, 0.84, 0.9) };
 
@@ -902,7 +904,7 @@ export class Particles {
       // sky light: measured from the environment map when there is one, else the haze colour
       const env = scene.environment;
       const now = performance.now();
-      if (env && (env !== this.probeEnv || scene.environmentIntensity !== this.probeIntensity) && now - this.probeT > 800) {
+      if (env && !this.probeReading && (env !== this.probeEnv || scene.environmentIntensity !== this.probeIntensity) && now - this.probeT > 800) {
         this.probeT = now;
         this.probeEnv = env;
         this.probeIntensity = scene.environmentIntensity;
@@ -978,20 +980,28 @@ export class Particles {
     renderer.setClearColor(0x000000, 0);
     renderer.clear(true, true, false);
     renderer.render(pr.scene, pr.cam);
-    renderer.readRenderTargetPixels(pr.rt, 0, 0, 16, 16, pr.buf);
+    // (perf) read back without waiting: a synchronous readPixels waits for the GPU to finish everything
+    // queued before it (~130 ms at the start of a race); the light changes slowly, a frame late is fine
+    const B = pr.buf;
+    const apply = () => {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < 256; i++) {
+        if (B[i * 4 + 3] < 0.5) continue;
+        r += B[i * 4];
+        g += B[i * 4 + 1];
+        b += B[i * 4 + 2];
+        n++;
+      }
+      if (n > 0 && isFinite(r + g + b)) this.skyAmbient.setRGB(r / n, g / n, b / n);
+    };
+    this.probeReading = true;
+    renderer
+      .readRenderTargetPixelsAsync(pr.rt, 0, 0, 16, 16, B)
+      .then(apply, () => undefined)
+      .finally(() => (this.probeReading = false));
     renderer.setRenderTarget(cur);
     renderer.setClearColor(this.tmpC, ca);
     renderer.autoClear = autoClear;
-    let r = 0, g = 0, b = 0, n = 0;
-    const B = pr.buf;
-    for (let i = 0; i < 256; i++) {
-      if (B[i * 4 + 3] < 0.5) continue;
-      r += B[i * 4];
-      g += B[i * 4 + 1];
-      b += B[i * 4 + 2];
-      n++;
-    }
-    if (n > 0 && isFinite(r + g + b)) this.skyAmbient.setRGB(r / n, g / n, b / n);
   }
 
   /** current lighting (read by the veil and the rain-light glows) */

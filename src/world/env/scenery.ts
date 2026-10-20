@@ -132,6 +132,10 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
     veg.uniforms.uCanopy.value = masks.fine;
     veg.uniforms.uCanopyB.value.copy(roadUniforms.uCanopyB.value);
   }
+  lap('masks');
+  // (a frame between each of these: in one step they were a 0.3–0.6 s garage frame)
+  yield { group, step: 'masks' };
+  tLap = performance.now();
   // grass blades on the verges around the camera (High/Ultra)
   let grass: GrassBuild | null = null;
   try {
@@ -142,6 +146,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   } catch (e) {
     console.error('[scenery] grass blades failed — skipping them', e);
   }
+  lap('grass');
+  yield { group, step: 'grass' };
+  tLap = performance.now();
   // tussocks and wildflowers on the rough meadow, sagebrush on Red Mesa's floor (High/Ultra)
   let cover: GroundCover | null = null;
   try {
@@ -154,10 +161,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   } catch (e) {
     console.error('[scenery] ground cover failed — skipping it', e);
   }
-  lap('grass');
-  yield { group, step: 'grass' };
+  lap('cover');
+  yield { group, step: 'cover' };
   tLap = performance.now();
-  lap('masks');
   // (a failure in the stands — e.g. the crowd's avatar kit — must not take the whole landscape with it)
   let stands: Pick<ReturnType<typeof buildGrandstands>, 'group' | 'update' | 'people' | 'flags' | 'concourse'>;
   try {
@@ -167,11 +173,14 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
     stands = { group: new THREE.Group(), update: () => {}, people: 0, flags: 0 };
   }
   group.add(stands.group);
+  lap('stands');
+  yield { group, step: 'stands' };
+  tLap = performance.now();
   // fans walking the concourses behind the stands
   const strollers = concourseCrowd(stands.concourse ?? []);
   group.add(strollers.group);
-  lap('stands');
-  yield { group, step: 'stands' };
+  lap('strollers');
+  yield { group, step: 'strollers' };
   tLap = performance.now();
   const banking = layout.oval ? buildBanking(layout.oval, track, map, terrain.material) : null;
   if (banking) group.add(banking.group);
@@ -180,6 +189,9 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   tLap = performance.now();
   const villages = buildVillages(map, layout);
   group.add(villages.group);
+  lap('villages');
+  yield { group, step: 'villages' };
+  tLap = performance.now();
   if (map.venue === 'airfield') group.add(buildSilverstoneScenery(layout, map));
   if (map.venue === 'ardennes') { group.add(buildSpaScenery(map).group); spaTerrainLook(terrain.uniforms); }
   if (map.venue === 'austin') { group.add(buildAustinScenery(layout, track, map).group); austinTerrainLook(terrain.uniforms); }
@@ -206,12 +218,15 @@ export function* sceneryBuilder(track: Track, gfx: Renderer): Generator<{ group:
   if (scenic) group.add(scenic.group);
   // Monza: the Villa Reale, Milan's towers across the plain
   if (track.def.id === 'monza') group.add(buildMonzaScenery(layout, map).group);
+  lap('venue');
+  yield { group, step: 'venue' };
+  tLap = performance.now();
   // the venue's own race-weekend dressing: gantries, hoardings, footbridges, LED boards, painted run-off,
   // old pit rows, its pit roof (venues/dress.ts)
   const dress = buildVenueDress(track, map, layout);
   if (dress) group.add(dress);
-  lap('villages');
-  yield { group, step: 'villages' };
+  lap('dress');
+  yield { group, step: 'dress' };
   tLap = performance.now();
   // wind farms, pylon lines, oil field: what stands up out of each venue's countryside
   const skyline = buildSkyline(map);

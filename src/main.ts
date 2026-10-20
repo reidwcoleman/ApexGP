@@ -6,7 +6,7 @@ import './ui/hud.css';
 import './ui/menu.css';
 import { Game } from './game/Game.ts';
 import { initUiScale } from './ui/scale.ts';
-import { loadPeople } from './people/Humans.ts';
+import { loadPeople, setPeopleRestGate } from './people/Humans.ts';
 import { preloadPixels } from './core/pixelCache.ts';
 import { loadAsphaltScan } from './world/trackside/textures.ts';
 import { BRAND_FONTS } from './world/brands.ts';
@@ -46,12 +46,12 @@ const startLoads = () => {
   // (the baked trees, ~6 MB, only once the people are in: the landscape behind the garage is the
   // first thing to draw them, and on a real connection they took bandwidth from what the garage waits for)
   // (the road and grass scans too: the garage doesn't draw them)
-  loadPeople()
-    .catch(() => undefined)
-    .then(() => {
-      void loadAsphaltScan();
-      void loadTreeKit();
-    });
+  // (and the fans' avatars only after those two: the circuit is built from them, not from the fans)
+  setPeopleRestGate(
+    loadPeople()
+      .catch(() => undefined)
+      .then(() => Promise.all([loadAsphaltScan(), loadTreeKit()])),
+  );
   void preloadPixels();
   Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
     () => performance.mark('apex:fonts'),

@@ -671,9 +671,13 @@ export class Game {
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;
     let scenery: Scenery | null = null;
-    const SLICES = 10;
+    const SLICES = 15;
     for (let n = 0; ; n++) {
-      await frame();
+      // (the quick steps share a gap between garage frames, the slow ones get one each)
+      if (n === 0) {
+        await frame();
+        tGap = performance.now();
+      } else await slice();
       if (gen !== this.worldGen) {
         if (partial) disposeTree(partial);
         return;
@@ -3660,8 +3664,12 @@ export class Game {
     this.gfx.grade.set(RACE_GRADE);
     this.gfx.vignette.darkness = this.garageVignette;
     this.gfx.maxDynamic = L.maxDyn;
-    // (a session starts at full resolution whatever the menu stepped down to; the governor takes it from there)
-    this.gfx.setDynamicScale(Math.min(1, L.maxDyn));
+    // (a session starts at full resolution whatever the menu stepped down to — or, once a race has
+    // settled on this graphics level, a step above where it settled: each step the governor takes is
+    // a reallocation of the post chain and a visible hitch, and walking down from 1 every race made a
+    // few of them in the opening seconds; it takes it from there)
+    const memo = this.scaleMemo()[this.gfx.qualityLevel];
+    this.gfx.setDynamicScale(Math.min(1, L.maxDyn, memo ? Math.max(this.gfx.minDynamic, memo + 0.05) : 1));
     for (const l of L.suns) {
       l.shadow.autoUpdate = true;
       l.shadow.needsUpdate = true;
@@ -4177,7 +4185,9 @@ export class Game {
         aq.ceilingUntil = now + 30;
       }
       aq.raisedFrom = 0;
-      const k = timed ? THREE.MathUtils.clamp(Math.sqrt(17 / gpu), 0.8, 0.95) : fps < 40 ? 0.86 : 0.93;
+      // (untimed: the frame time goes with the pixel count, the square of the scale — one step to
+      // about where 58 fps is rather than several small ones, each a hitch of its own)
+      const k = timed ? THREE.MathUtils.clamp(Math.sqrt(17 / gpu), 0.8, 0.95) : THREE.MathUtils.clamp(Math.sqrt(fps / 58), 0.78, 0.95);
       const next = Math.max(gfx.minDynamic, Math.floor(gfx.dynamicScale * k * 20) / 20);
       if (next < gfx.dynamicScale - 0.001) {
         gfx.setDynamicScale(next);
@@ -4207,6 +4217,7 @@ export class Game {
         }
       } else aq.slowAtFloor = 0;
     } else if (roomy && fps >= 57) {
+      this.noteScale(0.5);
       aq.slowAtFloor = 0;
       const ceil = now < aq.ceilingUntil ? Math.min(aq.ceiling, gfx.maxDynamic) : gfx.maxDynamic;
       if (++aq.headroom >= 4 && gfx.dynamicScale < ceil - 0.001) {
@@ -4216,7 +4227,43 @@ export class Game {
         aq.headroom = 0;
         aq.settleUntil = now + 0.8;
       }
-    } else aq.headroom = Math.max(0, aq.headroom - 1);
+    } else {
+      aq.headroom = Math.max(0, aq.headroom - 1);
+      // (holding 54–57 fps: settled)
+      this.noteScale(0.5);
+    }
+  }
+  /** the resolution races settled on, by graphics level (kept in the browser: see leaveGarageLook) */
+  private scaleMemoCache: Partial<Record<QualityLevel, number>> | null = null;
+  private scaleMemo(): Partial<Record<QualityLevel, number>> {
+    if (!this.scaleMemoCache) {
+      try {
+        this.scaleMemoCache = JSON.parse(localStorage.getItem('apexgp.dynscale') ?? '{}') ?? {};
+      } catch {
+        this.scaleMemoCache = {};
+      }
+    }
+    return this.scaleMemoCache!;
+  }
+  /** a governor window without a step down: ten seconds of them at one scale and that's where this level settles */
+  private noteScale(dt: number) {
+    const aq = this.aq;
+    const v = this.gfx.dynamicScale;
+    if (Math.abs(v - aq.steadyAt) > 1e-3) {
+      aq.steadyAt = v;
+      aq.steady = 0;
+    }
+    aq.steady += dt;
+    if (aq.steady < 10 || aq.steady - dt >= 10) return;
+    const memo = this.scaleMemo();
+    const q = this.gfx.qualityLevel;
+    if (memo[q] !== undefined && Math.abs(memo[q]! - v) < 1e-3) return;
+    memo[q] = +v.toFixed(2);
+    try {
+      localStorage.setItem('apexgp.dynscale', JSON.stringify(memo));
+    } catch {
+      /* private mode: this session only */
+    }
   }
   private setAutoQuality(q: QualityLevel) {
     // this session only: the saved setting stays what the player (or the default) chose
@@ -4227,7 +4274,7 @@ export class Game {
     this.aq.settleUntil = performance.now() / 1000 + 1.5;
   }
   /** adaptive resolution state (see adaptQuality) */
-  private readonly aq = { t: 0, frames: 0, headroom: 0, slowAtFloor: 0, settleUntil: 0, raisedFrom: 0, raisedAt: 0, ceiling: 1, ceilingUntil: 0 };
+  private readonly aq = { t: 0, frames: 0, headroom: 0, slowAtFloor: 0, settleUntil: 0, raisedFrom: 0, raisedAt: 0, ceiling: 1, ceilingUntil: 0, steady: 0, steadyAt: -1 };
 }
 
 /** a car's driver identity (a new name or helmet repaints it) */

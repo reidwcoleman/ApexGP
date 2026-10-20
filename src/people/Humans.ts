@@ -169,6 +169,15 @@ let LOAD_REST = true;
 export function setPeopleRest(on: boolean) {
   LOAD_REST = on;
 }
+/**
+ * The fans' avatars (~6.8 MB) start downloading once this settles: main.ts holds them back until the
+ * road scan and the baked trees are in, which the circuit behind the garage is built from (the
+ * fans can wait: the stands paint from the CORE bodies meanwhile)
+ */
+let restGate: Promise<unknown> = Promise.resolve();
+export function setPeopleRestGate(p: Promise<unknown>) {
+  restGate = p.catch(() => undefined);
+}
 /** CORE avatars in their own everyday clothes: the fans until the fans' own avatars have loaded */
 const CASUAL_M = ['Male_Adult_07', 'Male_Adult_12', 'Male_Adult_10', 'Male_Adult_16', 'Male_Adult_11', 'Sports_Male_02'];
 const CASUAL_F = ['Pilot_Female_02'];
@@ -298,8 +307,10 @@ async function load(): Promise<PeopleKit> {
   kit.male = kit.asset(firstLoaded(kit, ROSTER.fansM));
   kit.female = kit.asset(firstLoaded(kit, ROSTER.fansF));
   // the rest behind
-  const rest = (LOAD_REST ? ALL : []).filter((n) => !avatars.has(n)).map((n) => loadAvatar(n).then((a) => void avatars.set(n, a)).catch((e) => console.warn('people:', n, e)));
-  kit.whenAll = Promise.all(rest).then(() => void (kit.complete = true));
+  const rest = (LOAD_REST ? ALL : []).filter((n) => !avatars.has(n));
+  kit.whenAll = restGate
+    .then(() => Promise.all(rest.map((n) => loadAvatar(n).then((a) => void avatars.set(n, a)).catch((e) => console.warn('people:', n, e)))))
+    .then(() => void (kit.complete = true));
   return kit;
 }
 

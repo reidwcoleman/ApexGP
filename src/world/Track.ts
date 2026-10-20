@@ -554,6 +554,19 @@ export class Track {
     return best;
   }
 
+  /**
+   * Whether any centreline sample lies in the hash cells round (x, z) — within 48 m at least. A point
+   * farther out sends project() to a scan of the whole lap: callers sifting thousands of far points
+   * (the stands' fans) ask this first.
+   */
+  nearCentre(x: number, z: number): boolean {
+    const C = Track.HASH_CELL;
+    const cx = Math.floor(x / C);
+    const cz = Math.floor(z / C);
+    for (let ox = -2; ox <= 2; ox++) for (let oz = -2; oz <= 2; oz++) if (this.hash.get(this.hashKeyCell(cx + ox, cz + oz))) return true;
+    return false;
+  }
+
   // ---------------------------------------------------------------- build
 
   private hashKey(x: number, z: number) {

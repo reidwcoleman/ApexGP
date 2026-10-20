@@ -5,7 +5,8 @@
  * Other generated data (a circuit's sight-line grid, the ground textures) is kept the same way as
  * raw bytes in a second store, read per key when it is needed (loadData / keepData).
  *
- * Keys carry the build id, so a new deploy repaints everything once and sweeps the old entries.
+ * Keys carry the build id — a hash of the code and assets that paint these (vite.config.ts pixelBuild),
+ * so a deploy that changes them repaints everything once and sweeps the old entries; others keep them.
  * Off in the dev server (source edits would be masked by stale pixels) unless the URL has ?pixcache.
  */
 declare const __BUILD__: string;

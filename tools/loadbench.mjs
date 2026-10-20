@@ -59,7 +59,7 @@ async function visit(ctx, url) {
     } catch {}
   });
   const c0 = await cpu();
-  await page.goto(url);
+  await page.goto(url, { waitUntil: 'commit', timeout: TIMEOUT });
   await page.waitForFunction(() => performance.getEntriesByName('apex:garage').length > 0, null, { timeout: TIMEOUT, polling: 100 });
   const c1 = await cpu();
   await page.waitForFunction(() => performance.getEntriesByName('apex:world').length > 0, null, { timeout: TIMEOUT, polling: 250 });

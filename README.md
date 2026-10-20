@@ -168,9 +168,17 @@ npm run check    # tsc --noEmit
   the garage camera frames, and the floor mirror's own light set) — the rest of the garage's programs build
   behind it. `PORT=… node tools/_boottrace.mjs` (cold profile; `ALL=1 KEYS=1 USED=1 AFTER=1` for detail) lists every
   program and upload the boot still waits on and why, `tools/_bootshots.mjs <out>` shoots the boot's stages. three's per-program error check
-  is off in production builds (`?shadercheck` turns it on). IndexedDB (`src/core/pixelCache.ts`, keyed by the
-  build) keeps, besides the liveries / fan atlas / leaf atlas, the ground pixels and each circuit's sight-line
-  grid, so a returning player's boot and circuit switches skip them. Measure with `tools/loadbench.mjs`.
+  is off in production builds (`?shadercheck` turns it on). IndexedDB (`src/core/pixelCache.ts`) keeps, besides the
+  liveries / fan atlas / leaf atlas, the ground pixels and each circuit's sight-line grid, so a returning player's
+  boot and circuit switches skip them. Its key is a hash of what paints them (`pixelBuild` in vite.config.ts: the
+  painters and everything they import, the avatars' and ground textures, the three.js version), not the build
+  time, so a deploy that doesn't touch them keeps the cache. Downloads go in the order the build needs them: the
+  garage's people (uniforms and faces), then the road scan and the baked trees, and only then the fans' avatars
+  (`setPeopleRestGate`), which nothing waits for. The avatars' normal maps are 1024 wide and the fans-only
+  avatars' colour and hair maps half size (−6 MB; `python3 tools/shrink_rocketbox.py` after a rebuild of them). Measure with `tools/loadbench.mjs`; `tools/_netsize.mjs`
+  lists every download of a boot (`MBPS=40` throttles), `tools/_bootframes.mjs` the long frames of a boot and a
+  race start with the game functions in each, `tools/_midcompile.mjs <track> <weather> <time>` any shader program
+  built or first used after the race is under way (each one a stalled frame; it should print 0).
 - **Backdrops in depth** — beyond the barriers the land recedes in layers like circuit footage: verge → parkland
   and fields → tree lines → hills → hazy horizon. The far countryside (beyond the 6 km square, painted, no trees)
   is wooded on steep ground first, a venue's own share of woodland and pasture (`TERRAIN_PALETTES` `forest` /
@@ -592,7 +600,11 @@ npm run check    # tsc --noEmit
   lock). The cockpit view sits at the driver's eyes (halo hoop across the top, the pillar
   in the middle, front tyres at the sides, a full 2026 wheel with dome buttons, rotaries and paddles
   at the bottom); every onboard gets a tight fine-texel shadow cascade, and on High/Ultra the frame is
-  upscaled to native resolution (bicubic + contrast-adaptive sharpening). The front and rear
+  upscaled to native resolution (bicubic + contrast-adaptive sharpening). The resolution governor steps in
+  proportion to how far the frame rate is short (one step to about 58 fps, not several), each step resizes the
+  internal buffers only (the canvas and the composer are left alone unless the window changes), and a race
+  starts a step above the scale the last one settled on at that graphics level (`apexgp.dynscale` in the
+  browser) rather than walking down from full resolution with a hitch per step. The front and rear
   suspension links are live: they run from the chassis pickups to the upright clevises and follow
   the steering and the body's motion.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to
@@ -922,6 +934,9 @@ In the browser (dev server on :5191, `npx vite --config vite.stable.config.mjs`)
 - `node tools/bootwarm.mjs [track]` / `node tools/pixcheck.mjs` — cold vs warm boot steps + a CPU profile / the image cache filling, against `npx vite preview --port 5194` after `npm run build`.
 - `node tools/tris.mjs`, `tools/cartris.mjs`, `tools/casters.mjs`, `tools/raceprof.mjs` — triangles/draw calls by group, per car LOD, shadow casters, a race-frame CPU profile.
 - `node tools/perfnow.mjs [track] [cam]` — fps, render scale and draw calls in a live race at Retina 2×.
+  On Apple GPUs the timer queries are off (their numbers are never trusted there, and reading one back was a
+  blocking round trip every frame): add `&gputime` to the URL for the `__gpuMs` readout.
+- `node tools/_cpuframes.mjs [track] [secs] [port]` — main-thread ms of each race frame and what ran in the slow ones.
 - `node tools/cuts.mjs [secs] [track] [speed]` — how often the TV director cuts in a simulated race.
 - `node tools/fanprobe.mjs <ids…>` — fans standing on a road or inside the barriers (should be 0).
 - `node tools/flow.mjs` — garage → race → pause → restart → simulated race (with travel): page errors.

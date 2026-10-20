@@ -1138,13 +1138,18 @@ export class Renderer {
       }
     };
     const gl = this.renderer.getContext() as WebGL2RenderingContext;
-    this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
     // Apple's tile-based GPUs report timer-query times that run well past the real frame time
     // (≈20 ms on an M1 holding a steady 60 fps): the adaptive resolution must not believe them
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     const gpuName = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     this.gpuName = gpuName;
     this.timerTrusted = !/apple|m1|m2|m3|m4/i.test(gpuName);
+    // (perf) …so there they aren't run at all (?gputime for the readout): reading a result back asks
+    // the GPU process whether the timer was disjoint, a blocking round trip behind the frame just sent
+    this.timerExt = this.timerTrusted || /[?&]gputime\b/.test(location.search) ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
+    // (perf) three reads the unpack state back (a blocking round trip, ~250 ms once behind a busy
+    // GPU at the start of a race) before its first partial texture update: tell its cache the defaults
+    for (const p of [gl.UNPACK_ROW_LENGTH, gl.UNPACK_SKIP_PIXELS, gl.UNPACK_SKIP_ROWS, gl.UNPACK_IMAGE_HEIGHT, gl.UNPACK_SKIP_IMAGES]) this.renderer.state.pixelStorei(p, 0);
 
     this.composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
     this.renderPass = new RenderPass(scene, camera);
@@ -1614,8 +1619,16 @@ export class Renderer {
     const internal = this.renderScale * this.dynamicScale;
     const native = Math.min(window.devicePixelRatio || 1, 2);
     const out = this.upscaleOn ? Math.max(internal, native) : internal;
-    this.renderer.setPixelRatio(out);
-    this.composer.setSize(w, h);
+    // (perf) the canvas only when it changes: setting its size again (even the same size) reallocates
+    // the drawing buffer, and the composer's setSize sizes every pass's buffers to the canvas — only
+    // for the lines below to size them again to the internal frame. A resolution step of the
+    // governor (canvas unchanged, the frame upscaled into it) now reallocates each buffer once
+    const size = this.renderer.getSize(this.tmpSize);
+    if (!this.sized || Math.abs(this.renderer.getPixelRatio() - out) > 1e-6 || size.x !== w || size.y !== h) {
+      this.sized = true;
+      this.renderer.setPixelRatio(out);
+      this.composer.setSize(w, h);
+    }
     const iw = Math.max(1, Math.round(w * internal));
     const ih = Math.max(1, Math.round(h * internal));
     // (for code that sizes its own buffers off "the frame": the internal size, not the canvas)
@@ -1628,6 +1641,8 @@ export class Renderer {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
+  private readonly tmpSize = new THREE.Vector2();
+  private sized = false;
   /** the internal frame size in pixels (what the scene renders at, before the upscale) */
   get frameSize(): { w: number; h: number } {
     const k = this.renderScale * this.dynamicScale;
