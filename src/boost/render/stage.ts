@@ -186,7 +186,8 @@ export class Stage {
       this.renderer.render(this.scene, this.camera);
     } else this.composer.render(dt);
     this.watch(dt);
-    if (!this.autoQuality) return;
+    // (a frame over 100 ms is a hitch or a throttled background window, not the GPU's pace)
+    if (!this.autoQuality || dt > 0.1) return;
     this.frameAvg += (dt * 1000 - this.frameAvg) * 0.05;
     if (this.frameAvg > 21) {
       this.slow += dt;
