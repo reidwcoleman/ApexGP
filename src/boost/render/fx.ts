@@ -193,7 +193,7 @@ export class FX {
       side: THREE.DoubleSide,
       uniforms: { uK: { value: 1 }, uC: { value: c } },
       vertexShader: `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: `uniform float uK; uniform vec3 uC; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0-abs(dot(vN,vV)), 3.0); gl_FragColor = vec4(uC*f*uK, f*uK); }`,
+      fragmentShader: `uniform float uK; uniform vec3 uC; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(max(1.0-abs(dot(normalize(vN),normalize(vV))), 0.0), 3.0); gl_FragColor = vec4(uC*f*uK, f*uK); }`,
     });
     const m = new THREE.Mesh(this.waveGeo, mat);
     m.position.set(x, y, z);

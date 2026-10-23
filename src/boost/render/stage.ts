@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BloomEffect, ChromaticAberrationEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
+import { BloomEffect, Effect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { GradeEffect } from '../../marbles/post-grade.ts';
 
 /**
@@ -8,8 +8,20 @@ import { GradeEffect } from '../../marbles/post-grade.ts';
  * game's), sky and pitch bounce, an image light baked from a little scene of the floodlight banks so
  * the paint and the ball pick up long highlights, then bloom, a filmic curve, the grade.
  *
- * Quality: ?gfx=high|medium|low pins it; otherwise the resolution scale follows the frame rate.
+ * Quality: ?gfx=high|medium|low pins it; integrated GPUs start on medium; otherwise the resolution
+ * scale follows the frame rate.
+ *
+ * Safety: the first pass clamps the scene to finite values (Direct3D turns pow() of a hair-negative
+ * base into NaN, and bloom smears one NaN pixel over the whole screen), a lost context is waited out,
+ * and a watchdog that finds the frame pure black falls back to a plain render without post.
  */
+
+/** max/min return the other operand for NaN on D3D11 and desktop GL, so this flushes NaN and inf */
+class SanitizeEffect extends Effect {
+  constructor() {
+    super('SanitizeEffect', 'void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){ outputColor = vec4(min(max(inputColor.rgb, vec3(0.0)), vec3(64.0)), clamp(inputColor.a, 0.0, 1.0)); }');
+  }
+}
 
 export const S = 0.01; // cm → m
 export const KEY_DIR = new THREE.Vector3(0.25, 1, 0.35).normalize();
@@ -21,7 +33,16 @@ export class Stage {
   readonly composer: EffectComposer;
   readonly key: THREE.DirectionalLight;
   readonly bloom: BloomEffect;
-  readonly chroma: ChromaticAberrationEffect;
+  readonly gpu: string;
+  /** the context is gone (driver reset); nothing renders until it's back */
+  lost = false;
+  onRestored: (() => void) | null = null;
+  /** post disabled after the watchdog saw a black frame */
+  safe = false;
+  /** the game says the camera should be looking at something lit */
+  expectLit = false;
+  private blackRuns = 0;
+  private checkT = 0;
   readonly flash: THREE.PointLight;
   quality: 0 | 1 | 2 = 2;
   autoQuality = true;
@@ -37,6 +58,21 @@ export class Stage {
     r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.NoToneMapping;
     r.outputColorSpace = THREE.SRGBColorSpace;
+    const gl = r.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    this.gpu = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
+    if (/intel|mali|adreno|powervr|swiftshader|llvmpipe|microsoft basic/i.test(this.gpu)) this.quality = 1;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.lost = true;
+      console.warn('[boost] WebGL context lost');
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.lost = false;
+      console.warn('[boost] WebGL context restored');
+      this.resize();
+      this.onRestored?.();
+    });
     const q = new URLSearchParams(location.search).get('gfx');
     if (q === 'low' || q === 'medium' || q === 'high') {
       this.quality = q === 'low' ? 0 : q === 'medium' ? 1 : 2;
@@ -80,13 +116,13 @@ export class Stage {
     const comp = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
     comp.addPass(new RenderPass(sc, this.camera));
     this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72 });
-    this.chroma = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0, 0), radialModulation: true, modulationOffset: 0.3 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
     const grade = new GradeEffect({ vibrance: 0.22, contrast: 0.12, lift: 0.01 });
     const vig = new VignetteEffect({ offset: 0.3, darkness: 0.55 });
-    const smaa = new SMAAEffect({ preset: SMAAPreset.HIGH });
-    comp.addPass(new EffectPass(this.camera, this.bloom, this.chroma));
-    comp.addPass(new EffectPass(this.camera, tone, grade, vig, smaa));
+    const smaa = new SMAAEffect({ preset: this.quality === 2 ? SMAAPreset.HIGH : SMAAPreset.MEDIUM });
+    comp.addPass(new EffectPass(this.camera, new SanitizeEffect()));
+    // SMAA samples its input, so it leads the merged pass
+    comp.addPass(new EffectPass(this.camera, smaa, this.bloom, tone, grade, vig));
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -94,7 +130,7 @@ export class Stage {
   resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const pr = Math.min(window.devicePixelRatio, 2) * this.scale * (this.quality === 0 ? 0.7 : 1);
+    const pr = Math.min(window.devicePixelRatio, this.quality === 2 ? 2 : 1) * this.scale * (this.quality === 0 ? 0.7 : 1);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h, false);
@@ -111,7 +147,12 @@ export class Stage {
   }
 
   render(dt: number): void {
-    this.composer.render(dt);
+    if (this.lost) return;
+    if (this.safe) {
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.render(this.scene, this.camera);
+    } else this.composer.render(dt);
+    this.watch(dt);
     if (!this.autoQuality) return;
     this.frameAvg += (dt * 1000 - this.frameAvg) * 0.05;
     if (this.frameAvg > 21) {
@@ -129,6 +170,31 @@ export class Stage {
       this.scale = Math.min(1, this.scale + 0.1);
       this.fast = 0;
       this.resize();
+    }
+  }
+
+  /** once a second read three pixels of the finished frame; pure black three times running = broken post */
+  private watch(dt: number): void {
+    this.checkT += dt;
+    if (this.safe || this.checkT < 1) return;
+    this.checkT = 0;
+    if (!this.expectLit) {
+      this.blackRuns = 0;
+      return;
+    }
+    const gl = this.renderer.getContext();
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    const px = new Uint8Array(4);
+    let sum = 0;
+    for (const [fx, fy] of [[0.5, 0.3], [0.2, 0.25], [0.8, 0.25]]) {
+      gl.readPixels(Math.floor(w * fx), Math.floor(h * fy), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      sum += px[0] + px[1] + px[2];
+    }
+    this.blackRuns = sum < 4 ? this.blackRuns + 1 : 0;
+    if (this.blackRuns >= 3) {
+      this.safe = true;
+      console.warn('[boost] black frames from the post chain; falling back to a plain render');
     }
   }
 

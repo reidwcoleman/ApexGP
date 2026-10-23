@@ -99,6 +99,10 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement, uiRoot: HTMLElement) {
     this.stage = new Stage(canvas);
+    // a driver reset loses the env map and render targets; outside an online match a reload is cleanest
+    this.stage.onRestored = () => {
+      if (this.mode !== 'host' && this.mode !== 'guest') location.reload();
+    };
     this.field.rotation.x = -Math.PI / 2;
     this.field.scale.setScalar(S);
     this.arena = buildArena();
@@ -936,10 +940,6 @@ export class Game {
     this.stage.flash.intensity = this.flashK * this.flashK * 6000;
     const nearGoal = THREE.MathUtils.smoothstep(Math.abs(w.ball.pos.y), 2500, 5000);
     this.excite = Math.max(this.excite - dt * 0.25, nearGoal * 0.5);
-    const sb = this.me >= 0 && w.cars[this.me]?.supersonic ? 0.0012 : 0;
-    const ch = this.stage.chroma.offset;
-    ch.x += (sb - ch.x) * Math.min(1, dt * 6);
-    ch.y = ch.x * 0.5;
     this.arena.update(this.time, w.pads, this.excite, w.score, this.ui.clockText(w.clock, w.overtime));
 
     // hud + sound
@@ -1086,6 +1086,7 @@ export class Game {
     this.stage.render(0.016);
     this.field.remove(v.group);
     for (let k = 0; k < 400; k++) this.fx.update(0.05);
+    this.stage.expectLit = true;
   }
 
   /** url switches for tests and links */

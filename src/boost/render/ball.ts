@@ -78,7 +78,7 @@ export class BallView {
       blending: THREE.AdditiveBlending,
       uniforms: { uK: { value: 0 }, uCol: this.uCol },
       vertexShader: `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: `uniform float uK; uniform vec3 uCol; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 2.5); gl_FragColor = vec4(uCol * f * uK * 1.5, f*uK); }`,
+      fragmentShader: `uniform float uK; uniform vec3 uCol; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(max(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0), 2.5); gl_FragColor = vec4(uCol * f * uK * 1.5, f*uK); }`,
     });
     this.glow = new THREE.Mesh(new THREE.SphereGeometry(BALL.R * 1.18, 32, 24), halo);
     this.glow.renderOrder = 7;

@@ -553,7 +553,7 @@ function lights(): THREE.Group {
     side: THREE.DoubleSide,
     uniforms: {},
     vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vT = uv.y; vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-    fragmentShader: `varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); float a = f * pow(vT, 2.5) * 0.035; gl_FragColor = vec4(vec3(0.85,0.9,1.0)*a, a); }`,
+    fragmentShader: `varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(min(abs(dot(normalize(vN), normalize(vV))), 1.0), 2.0); float a = f * pow(clamp(vT, 0.0, 1.0), 2.5) * 0.035; gl_FragColor = vec4(vec3(0.85,0.9,1.0)*a, a); }`,
   });
   const lamps = new THREE.InstancedMesh(lampG, lampM, per.length);
   const housings = new THREE.InstancedMesh(new THREE.BoxGeometry(300, 90, 160), housingM, per.length);
