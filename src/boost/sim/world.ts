@@ -242,7 +242,11 @@ export class World {
       this.ball.step(dt);
       if (this.ball.bounce > 150) this.events.push({ t: 'bounce', speed: this.ball.bounce });
     }
-    if (this.phase === 'play' || this.phase === 'countdown') for (let i = 0; i < this.cars.length; i++) this.carBall(i);
+    if (this.phase === 'play' || this.phase === 'countdown') {
+      // alternate who's resolved first, so a dead-even 50/50 doesn't always break the same way
+      const n = this.cars.length;
+      for (let k = 0; k < n; k++) this.carBall(this.tick & 1 ? n - 1 - k : k);
+    }
     this.carCars();
     this.padsStep(dt);
 

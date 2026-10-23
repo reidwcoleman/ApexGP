@@ -79,8 +79,8 @@ const WHEELS: [number, number, number][] = [
   [-33.75, -29.5, 15],
 ];
 const SUSP_REST = 12;
-const SUSP_K = 180; // per unit compression, as acceleration of the whole car shared by four
-const SUSP_C = 16;
+const SUSP_K = 600; // per unit compression, as acceleration of the whole car shared by four
+const SUSP_C = 38;
 const STATIC_X = (1.5 * GRAVITY) / SUSP_K; // gravity plus the sticky pull
 const conn = (r: number) => SUSP_REST - STATIC_X + r - CAR.REST_Z; // local z of each suspension's top
 
@@ -379,7 +379,10 @@ export class Car {
     const wOther = tmpB.copy(this.w).addScaled(u, -this.w.dot(u));
     this.w.addScaled(wOther, -Math.min(1, dt * 10));
     // sticky wheels: half a gravity into the surface
-    if (contacts >= 3) this.vel.addScaled(this.surfaceN, -0.5 * GRAVITY * dt);
+    if (contacts >= 2) this.vel.addScaled(this.surfaceN, -0.5 * GRAVITY * dt);
+    // and the suspension holds the car on: rebound off a ramp or a wall is soaked up
+    const away = this.vel.dot(this.surfaceN);
+    if (away > 0 && this.surfaceN.z > -0.5) this.vel.addScaled(this.surfaceN, -away * Math.min(1, dt * 14));
   }
 
   private air(dt: number, inp: Input): void {

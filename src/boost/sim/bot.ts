@@ -53,6 +53,8 @@ export class Bot {
   private last: Input = noInput();
   private kickDodge = false;
   private stuckT = 0;
+  /** when to dodge into the kickoff: varies kickoff to kickoff */
+  private kickDist = 650;
   private backT = 0;
 
   constructor(
@@ -140,11 +142,14 @@ export class Bot {
     if (kickoff && p.role === 'attack') {
       inp.boost = true;
       inp.throttle = 1;
-      if (bd < 650 + speed * 0.08 && !this.kickDodge && speed > 1100) {
+      if (bd < this.kickDist + speed * 0.08 && !this.kickDodge && speed > 1100) {
         this.kickDodge = true;
         this.start('jump', toBall);
       }
-    } else this.kickDodge = false;
+    } else {
+      if (this.kickDodge || this.kickDist === 650) this.kickDist = 560 + Math.random() * 220;
+      this.kickDodge = false;
+    }
     if (p.role === 'attack' && !kickoff && c.onGround) {
       const closing = bd / Math.max(300, speed);
       if (b.z > 160 && b.z < 330 && bd < 260 + speed * 0.12 && Math.abs(toBall) < 0.5) this.start('jump', 0, true);
