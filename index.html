@@ -131,6 +131,10 @@
           <span class="pk-art"></span>
           <span class="pk-txt"><span class="pk-k">5</span><b>Marble Derby</b><i>Bet on the race</i><em>A neon night track: read the card, back a marble, watch it run</em></span>
         </button>
+        <button class="pk-card" data-game="boost" style="--art: url(loading/boost_hero.webp); --pos: 32% 50%; --acc: #2f7bff">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">6</span><b>Boostball</b><i>Car soccer · online</i><em>Jump, flip and fly into the ball; play bots or a lobby with your friends</em></span>
+        </button>
       </div>
       <div class="pk-foot">Only the game you pick is loaded</div>
     </div>
@@ -141,7 +145,7 @@
       #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
       #picker .pk-logo span { color: #ff2b3f; }
       #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
-      #picker .pk-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.6vw; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1.4vw; }
       #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
       #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
       #picker .pk-art { position: absolute; inset: 0; background: var(--art) var(--pos, center) / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
@@ -192,6 +196,7 @@
           else if (g === 'marbles') location.href = 'marbles.html';
           else if (g === 'lawn') location.href = 'lawn.html';
           else if (g === 'derby') location.href = 'derby.html';
+          else if (g === 'boost') location.href = 'boost.html';
           else start();
         };
         cards.forEach(function (c) {
@@ -201,7 +206,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles', Digit4: 'lawn', Digit5: 'derby' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles', Digit4: 'lawn', Digit5: 'derby', Digit6: 'boost' }[e.code];
           if (n) pick(n);
         });
       })();

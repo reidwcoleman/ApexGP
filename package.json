@@ -16,6 +16,7 @@
     "@fontsource/lilita-one": "^5.3.0",
     "@fontsource/titillium-web": "^5.3.0",
     "n8ao": "^2.0.1",
+    "peerjs": "^1.5.5",
     "postprocessing": "^6.39.5",
     "three": "^0.186.0"
   },
