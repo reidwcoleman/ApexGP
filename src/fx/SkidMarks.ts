@@ -346,8 +346,9 @@ export class SkidMarks {
         const lock = smooth(1.1, 2.6, -k);
         const spin = smooth(1.1, 3.0, k);
         const slide = smooth(1.2, 2.8, a) * 0.9;
-        // launches: TC holds the rears near peak slip, which still lays rubber off the line
-        const launch = !front && k > 0.45 && v < 26 ? (0.3 + 0.45 * smooth(0.45, 1, k)) * (1 - smooth(6, 26, v)) : 0;
+        // launches: with the clutch and TC holding the rears under peak slip a modern start leaves almost
+        // nothing; only real wheelspin off the line (past the peak) lays a short, faint streak
+        const launch = !front && k > 1.0 && v < 14 ? 0.18 * smooth(1.0, 1.6, k) * (1 - smooth(4, 14, v)) : 0;
         inten = Math.max(lock, spin, slide, launch) * rubberK;
         if (inten < 0.06) {
           // a hard stop at the ABS limit: a faint film that builds up lap after lap

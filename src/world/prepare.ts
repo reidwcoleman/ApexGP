@@ -75,7 +75,10 @@ export const frameClock = {
   },
   budget(base: number): number {
     const dt = this.gaps.length >= 4 ? Math.min(...this.gaps) : 1000 / 60;
-    return Math.min(40, Math.max(base, dt * 0.25));
+    // the circuit is built while the player sits in the menus: the garage behind them may run at ~30 fps
+    // for those seconds — the build gets most of each frame (on a slow laptop a quarter of a 40 ms
+    // garage frame made it a 17 s wait before a race could start)
+    return Math.min(60, Math.max(base * 2.5, dt * 0.8));
   },
 };
 const nextFrame = () => frameClock.next();
