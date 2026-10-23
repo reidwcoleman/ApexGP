@@ -170,6 +170,7 @@ export class Game {
     }
     this.mode = 'attract';
     this.me = -1;
+    this.tvSnap = true;
     this.setup(this.botRoster(2, 0.75, false), true);
     this.world.start({ minutes: 99, freeplay: false });
     this.world.phaseT = 0.5;
@@ -1035,14 +1036,16 @@ export class Game {
   /** the broadcast camera (menu backdrop, spectating): high on the side, tracking the ball */
   private tvCam = new V3(-5200, 0, 2200);
   private tvLook = new V3();
+  private tvSnap = true;
   private tvCamera(bp: V3, dt: number): void {
     const t = this.time * 0.05;
     const want = new V3(Math.cos(t) * 3300, Math.max(-3800, Math.min(3800, bp.y * 0.5 + Math.sin(t) * 1400)), 1000 + Math.sin(t * 1.7) * 350);
-    const k = Math.min(1, dt * 0.8);
+    const k = this.tvSnap ? 1 : Math.min(1, dt * 0.8);
     this.tvCam.x += (want.x - this.tvCam.x) * k;
     this.tvCam.y += (want.y - this.tvCam.y) * k;
     this.tvCam.z += (want.z - this.tvCam.z) * k;
-    const kl = Math.min(1, dt * 2.5);
+    const kl = this.tvSnap ? 1 : Math.min(1, dt * 2.5);
+    this.tvSnap = false;
     this.tvLook.x += (bp.x * 0.8 - this.tvLook.x) * kl;
     this.tvLook.y += (bp.y - this.tvLook.y) * kl;
     this.tvLook.z += (bp.z * 0.5 - this.tvLook.z) * kl;
