@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BloomEffect, Effect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
+import { BloomEffect, Effect, EffectComposer, EffectPass, FXAAEffect, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { GradeEffect } from '../../marbles/post-grade.ts';
 
 /**
@@ -124,14 +124,15 @@ export class Stage {
 
     const comp = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
     comp.addPass(new RenderPass(sc, this.camera));
-    this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72 });
+    this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72, levels: this.quality === 2 ? 8 : 5 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
     const grade = new GradeEffect({ vibrance: 0.22, contrast: 0.12, lift: 0.01 });
     const vig = new VignetteEffect({ offset: 0.3, darkness: 0.55 });
-    const smaa = new SMAAEffect({ preset: this.quality === 2 ? SMAAPreset.HIGH : SMAAPreset.MEDIUM });
+    // SMAA (three passes) on real GPUs, FXAA (one) on integrated ones
+    const aa = this.quality === 2 ? new SMAAEffect({ preset: SMAAPreset.HIGH }) : new FXAAEffect();
     comp.addPass(new EffectPass(this.camera, new SanitizeEffect()));
-    // SMAA samples its input, so it leads the merged pass
-    comp.addPass(new EffectPass(this.camera, smaa, this.bloom, tone, grade, vig));
+    // the AA samples its input, so it leads the merged pass
+    comp.addPass(new EffectPass(this.camera, aa, this.bloom, tone, grade, vig));
     this.setDay(true);
     this.resize();
     window.addEventListener('resize', () => this.resize());

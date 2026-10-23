@@ -17,7 +17,8 @@
 /* ---------- menu ---------- */
 .menu { position: absolute; inset: 0; display: flex; background: linear-gradient(90deg, rgba(3, 6, 16, 0.92) 0%, rgba(3, 6, 16, 0.65) 36%, rgba(3, 6, 16, 0) 62%); }
 .menu[hidden] { display: none; }
-.menu .side { width: min(520px, 92vw); padding: 6vh 0 4vh 5vw; display: flex; flex-direction: column; gap: 3vh; }
+.menu .side { width: min(520px, 92vw); padding: 6vh 0 4vh 5vw; display: flex; flex-direction: column; gap: 3vh; overflow-y: auto; scrollbar-width: none; }
+.menu .side::-webkit-scrollbar { display: none; }
 .logo { font-weight: 900; font-style: italic; font-size: clamp(54px, 7vw, 92px); line-height: 0.85; letter-spacing: -0.04em; text-transform: uppercase; filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.6)); }
 .logo b { color: var(--blue); }
 .logo i { color: var(--orange); font-style: italic; }
@@ -162,4 +163,14 @@
   .boost { width: 130px; height: 130px; }
   .boost .num { font-size: 42px; }
   .boost .lbl { bottom: 24px; }
+}
+
+/* short windows (a laptop with the browser chrome showing): tighter menu */
+@media (max-height: 760px) {
+  .menu .side { padding-top: 3.5vh; gap: 1.6vh; }
+  .logo { font-size: clamp(44px, 5.4vw, 72px); }
+  .logo small { margin-top: 8px; font-size: 13px; }
+  .mbtn { padding: 11px 20px; font-size: 21px; }
+  .mhead { font-size: 13px; margin: 0; }
+  .screen { gap: 8px; }
 }
