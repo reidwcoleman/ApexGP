@@ -694,6 +694,7 @@ export class Game {
     // in: now, so the landscape's programs below include theirs (not in the first garage frame)
     if (kit?.complete) work(() => scenery!.update(0, this.camera, 0));
     lap('bgScenery');
+    console.info(`[shot] [scenery] ${JSON.stringify({ timings: scenery.stats.timings, map: scenery.stats.map, veg: scenery.stats.veg, masks: scenery.stats.masks })}`);
     // the landscape's programs queued before it is adopted, a slice of objects per frame, with the
     // shadow pass's depth programs and the textures: lit as its reflection capture and the race see
     // it (sun and sky, the garage's work lights out) and as the garage frame sees it (work lights on:

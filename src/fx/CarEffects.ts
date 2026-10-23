@@ -272,10 +272,12 @@ export class CarEffects {
         const att = Math.exp(-dist / 900);
         const self = c.id === selfId;
         // your own light is already right there (emissive LED + bloom): only other cars get the flare
-        if (!self) P.glow(a, 0.06 + 0.04 * I, 24 * lvl, 1 * lvl, 0.5 * lvl, att, 0.35);
+        // (a small hot point: brighter than this and the long lenses' depth of field defocus it into a
+        // pink disc the size of the car)
+        if (!self) P.glow(a, 0.05 + 0.03 * I, 9 * lvl, 0.45 * lvl, 0.2 * lvl, att, 0.35);
         // the red light scattering in the spray around it
         const haze = Math.max(I, wetBase * 0.4, fogHaze * smoothstep(20, 45, dist));
-        if (haze > 0.03 && !self) P.haloGlow(a, 0.6 + 1.4 * haze, 0.22 * lvl * haze, 0.011 * lvl * haze, 0.006 * lvl * haze, att);
+        if (haze > 0.03 && !self) P.haloGlow(a, 0.5 + 1.1 * haze, 0.13 * lvl * haze, 0.008 * lvl * haze, 0.004 * lvl * haze, att);
       }
 
       if (dist > 260) {

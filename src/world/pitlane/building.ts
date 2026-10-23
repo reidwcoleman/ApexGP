@@ -723,6 +723,11 @@ function buildPaddock(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: Building
   const { solid, detail, print, glass } = o;
   const fr = new Frame();
   const l0 = 60, l1 = 76;
+  // (the ground is levelled to the paddock's reach and falls away to the natural land past it: on a
+  // tight site — the Hungaroring, Interlagos — what doesn't fit isn't built, or it stood in mid-air)
+  const room = p.paddockEnd + 6;
+  if (room < l1 + 1) return;
+  const trucks = room >= 101;
   TEAMS.forEach((t, k) => {
     const c = p.mid + (k - 4.5) * 28;
     const a = c - 11, b = c + 11;
@@ -785,7 +790,7 @@ function buildPaddock(p: PitPlan, ts: TrackSpace, atlas: PrintAtlas, o: Building
       fr.box(detail, 0, 0.75, 0, 1.0, 0.35, 0.45);
     }
     // two transporters behind, noses toward the building
-    for (const ds of [-3.4, 3.4]) {
+    for (const ds of trucks ? [-3.4, 3.4] : []) {
       const s = c + ds;
       solid.color(prim).mat(0.3, 0.4, 0, 1);
       ts.box(solid, s - 1.27, s + 1.27, 86.6, 100.2, 1.0, 4.0, 63);

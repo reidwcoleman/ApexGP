@@ -102,7 +102,9 @@ export class SprayEmitters {
     // (it never clips where the sky doesn't). At 0.54 a plume 150 m down the road read as dark
     // smoke against the wet haze, darker than the air it hung in.
     const bright = (0.7 + 0.06 * I) * p.mistGain;
-    const selfK = c.self ? 0.4 : 1;
+    // (the camera's own car: what it throws hangs right over its own wheels from the chase cam — thinner
+    // there, or the car reads as a translucent ghost inside its spray)
+    const selfK = c.self ? 0.3 : 1;
     // standing water, not just a wet surface: a storm's flooded track throws a taller, wider plume
     // that hangs longer (Spa 2021, Silverstone 2023: a wall of spray 4–6 m high behind every car)
     const deep = smooth(0.45, 1, c.wet);
@@ -187,7 +189,7 @@ export class SprayEmitters {
         wx, g + 0.3 + rnd() * 0.2, wz,
         vx * k + cy * out, (2.5 + rnd() * 3.5) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.3 + rnd() * 0.25, 0.18, 0.7 + rnd() * 0.5,
-        0.6 * I * (c.self ? 0.6 : 1), 0.8 * p.mistGain, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
+        0.6 * I * (c.self ? 0.3 : 1), 0.8 * p.mistGain, 3.0, 2.5, 0.035, g, 0.25, 0.05, 3.0, pre,
       );
     };
     run(E_SHEET_L, spS, sheet(1));
@@ -206,7 +208,7 @@ export class SprayEmitters {
         wx, g + 0.18 + rnd() * 0.15, wz,
         vx * k + cy * out, (0.7 + rnd() * 1.6) * (0.5 + 0.5 * I), vz * k - sy * out,
         0.35 + rnd() * 0.35, 0.16, 0.8 + rnd() * 0.5,
-        0.32 * I * (c.self ? 0.6 : 1), 0.76 * p.mistGain, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
+        0.32 * I * (c.self ? 0.3 : 1), 0.76 * p.mistGain, 2.6, 1.2, 0.012, g, 0.35, 0.06, 2.0, pre,
       );
     };
     run(E_FRONT_L, spF, front(1));
@@ -229,7 +231,7 @@ export class SprayEmitters {
           wx, g + TYRE_R * (1.75 + rnd() * 0.3), wz,
           vx * k + cy * out, (1.5 + rnd() * 2.5) * (0.5 + 0.5 * I), vz * k - sy * out,
           0.2 + rnd() * 0.2, 0.05, 0.25 + rnd() * 0.25,
-          0.42 * I * (c.self ? 0.75 : 1), 0.82 * p.mistGain, 9.0, 2.0, 0.03, g, 0.45, 0.05, 4.0, pre,
+          0.42 * I * (c.self ? 0.45 : 1), 0.82 * p.mistGain, 9.0, 2.0, 0.03, g, 0.45, 0.05, 4.0, pre,
         );
       };
       run(E_TREAD_L, spT, tread(1));
