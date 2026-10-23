@@ -126,6 +126,7 @@ export class Game {
     CAM.HEIGHT = p.height;
     this.cam.ballCam = p.ballCam;
     this.audio.setVolume(p.volume);
+    this.controls.classic = p.keys === 'classic';
     this.ui.cam(this.cam.ballCam);
     // the arena follows your setting except inside an online lobby, where the host picks
     if (!this.lobby) this.setDay(p.arena !== 'night');

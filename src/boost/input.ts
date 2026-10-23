@@ -3,7 +3,8 @@ import { noInput, type Input } from './sim/car.ts';
 /**
  * Keyboard + mouse + gamepad into the car's controls. Keyboard: W/S drive (and pitch in the air),
  * A/D steer (yaw), Space jump, Shift boost, X powerslide / air roll, Q/E air roll left/right, C ball
- * cam. Mouse: left boost, right jump. A pad uses the real game's layout: RT/LT, A jump, B boost,
+ * cam. Mouse: left boost, right jump. The classic layout is the genre's PC default instead: mouse
+ * jump and boost, Shift powerslide / air roll, Space ball cam. A pad uses the real game's layout: RT/LT, A jump, B boost,
  * X powerslide, Y ball cam, LB/RB directional air roll.
  */
 
@@ -16,6 +17,7 @@ export class Controls {
   private padPrev: boolean[] = [];
   enabled = true;
   lastPad = false;
+  classic = false;
 
   constructor(target: HTMLElement) {
     window.addEventListener('keydown', (e) => {
@@ -24,7 +26,7 @@ export class Controls {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.lastPad = false;
-      if (e.code === 'KeyC') this.onAction('ballcam');
+      if (e.code === 'KeyC' || (this.classic && e.code === 'Space')) this.onAction('ballcam');
       if (e.code === 'Escape') this.onAction('pause');
       if (e.code === 'Tab') this.onAction('board');
       if (e.code === 'Enter') this.onAction('skip');
@@ -62,9 +64,10 @@ export class Controls {
     i.pitch = back - fwd;
     i.yaw = right - left;
     i.roll = this.k('KeyE') - this.k('KeyQ');
-    i.jump = this.keys.has('Space') || this.mouse.has(2);
-    i.boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.mouse.has(0);
-    i.handbrake = this.keys.has('KeyX') || this.keys.has('ControlRight');
+    const shift = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    i.jump = (!this.classic && this.keys.has('Space')) || this.mouse.has(2);
+    i.boost = (!this.classic && shift) || this.mouse.has(0);
+    i.handbrake = (this.classic && shift) || this.keys.has('KeyX') || this.keys.has('ControlRight');
     const pads = navigator.getGamepads?.() ?? [];
     for (const p of pads) {
       if (!p || !p.connected) continue;

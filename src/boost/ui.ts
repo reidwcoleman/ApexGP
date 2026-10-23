@@ -20,10 +20,12 @@ export interface Profile {
   volume: number;
   shake: boolean;
   arena: 'day' | 'night';
+  /** arcade: Space jump, Shift boost · classic: the genre's PC defaults (mouse jump/boost, Shift slide, Space ball cam) */
+  keys: 'arcade' | 'classic';
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, arena: 'day' };
+  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, arena: 'day', keys: 'arcade' };
   try {
     return { ...def, ...JSON.parse(localStorage.getItem('boostball.profile') ?? '{}') };
   } catch {
@@ -36,6 +38,20 @@ export function saveProfile(p: Profile): void {
   } catch {
     /* private mode */
   }
+}
+
+function keyList(layout: Profile['keys']): string {
+  const classic = layout === 'classic';
+  return `
+        <div><kbd>W</kbd><kbd>S</kbd></div><span>Drive · reverse (pitch in the air)</span>
+        <div><kbd>A</kbd><kbd>D</kbd></div><span>Steer (yaw in the air)</span>
+        <div>${classic ? '<kbd>RMB</kbd>' : '<kbd>Space</kbd> / <kbd>RMB</kbd>'}</div><span>Jump · tap again to double jump; with a direction it's a flip</span>
+        <div>${classic ? '<kbd>LMB</kbd>' : '<kbd>Shift</kbd> / <kbd>LMB</kbd>'}</div><span>Boost</span>
+        <div>${classic ? '<kbd>Shift</kbd>' : '<kbd>X</kbd>'}</div><span>Powerslide · air roll (hold)</span>
+        <div><kbd>Q</kbd><kbd>E</kbd></div><span>Air roll left · right</span>
+        <div>${classic ? '<kbd>Space</kbd> / <kbd>C</kbd>' : '<kbd>C</kbd>'}</div><span>Ball cam on / off</span>
+        <div><kbd>Tab</kbd></div><span>Scoreboard</span>
+        <div><kbd>Esc</kbd></div><span>Pause · settings</span>`;
 }
 
 export class UI {
@@ -114,17 +130,9 @@ export class UI {
       <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
     </div>
     <div class="screen" id="s-controls" hidden>
-      <div class="keys">
-        <div><kbd>W</kbd><kbd>S</kbd></div><span>Drive · reverse (pitch in the air)</span>
-        <div><kbd>A</kbd><kbd>D</kbd></div><span>Steer (yaw in the air)</span>
-        <div><kbd>Space</kbd> / <kbd>RMB</kbd></div><span>Jump · tap again to double jump; with a direction it's a flip</span>
-        <div><kbd>Shift</kbd> / <kbd>LMB</kbd></div><span>Boost</span>
-        <div><kbd>X</kbd></div><span>Powerslide · air roll (hold)</span>
-        <div><kbd>Q</kbd><kbd>E</kbd></div><span>Air roll left · right</span>
-        <div><kbd>C</kbd></div><span>Ball cam on / off</span>
-        <div><kbd>Tab</kbd></div><span>Scoreboard</span>
-        <div><kbd>Esc</kbd></div><span>Pause · settings</span>
-      </div>
+      <div class="mhead">Keyboard layout</div>
+      <div class="seg" id="seg-keys"><button data-v="arcade" class="${p.keys !== 'classic' ? 'on' : ''}">Arcade</button><button data-v="classic" class="${p.keys === 'classic' ? 'on' : ''}">Classic</button></div>
+      <div class="keys" id="keylist">${keyList(p.keys)}</div>
       <div class="hint">Controllers work too, with the usual layout: RT/LT drive, A jump, B boost, X powerslide, Y ball cam, LB/RB air roll.</div>
       <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
     </div>
@@ -270,6 +278,11 @@ export class UI {
     slider('#p-dist', 'dist');
     slider('#p-height', 'height');
     slider('#p-vol', 'volume', (v) => String(Math.round(v * 100)));
+    seg('#seg-keys', (v) => {
+      this.profile.keys = v === 'classic' ? 'classic' : 'arcade';
+      this.$('#keylist').innerHTML = keyList(this.profile.keys);
+      this.save();
+    });
     seg('#p-shake', (v) => {
       this.profile.shake = v === '1';
       this.save();
