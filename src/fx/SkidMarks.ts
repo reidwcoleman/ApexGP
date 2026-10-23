@@ -344,7 +344,9 @@ export class SkidMarks {
         w.dirt = 1;
       } else {
         const lock = smooth(1.1, 2.6, -k);
-        const spin = smooth(1.1, 3.0, k);
+        // (wheelspin off the line — twenty cars at full power for the first metres — is a faint grey film, not
+        // forty black streaks down the grid; a spin-up at speed, a snap on the power, still marks the road)
+        const spin = smooth(1.1, 3.0, k) * (front ? 1 : 0.12 + 0.88 * smooth(14, 26, v));
         const slide = smooth(1.2, 2.8, a) * 0.9;
         // launches: with the clutch and TC holding the rears under peak slip a modern start leaves almost
         // nothing; only real wheelspin off the line (past the peak) lays a short, faint streak

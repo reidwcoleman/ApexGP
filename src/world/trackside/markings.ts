@@ -122,28 +122,16 @@ export function buildMarkings(ctx: Ctx, atlas: DecalAtlas) {
     // position number ahead of the box, text reading toward +s
     const num = atlas.number(k + 1);
     rect(front + 0.35, front + 1.55, lat - 0.62, lat + 0.62, num);
-    // launch marks: rear tyres at ±0.78 m, a season of starts' worth (this year's, the support races',
-    // practice starts): a short black pair right off the box and longer, fainter ones fanning a little
-    // either way, the odd one kinked where a car squirmed off the line
-    for (let rep = 0; rep < 5; rep++) {
-      const jit = rep === 0 ? rng.range(-0.04, 0.04) : rng.range(-0.18, 0.18);
-      const len = rep === 0 ? rng.range(3, 5) : rng.range(4.5, 15);
-      const st = s - 1.75 + rng.range(-0.25, 0.25);
-      const k = rep === 0 ? 0.018 : rng.range(0.024, 0.05);
-      const dark = [k, k, k * 1.06];
-      const w = rep === 0 ? 0.17 : rng.range(0.12, 0.17);
-      const skew = rep === 0 ? 0 : rng.range(-0.12, 0.12);
+    // launch marks: rear tyres at ±0.78 m — with the launch clutch and TC a modern start leaves only a short,
+    // faint pair off each box (a darker shade of the asphalt, ~0.12 albedo), not black streaks down the grid
+    {
+      const len = rng.range(2, 3.5);
+      const st = s - 1.75 + rng.range(-0.2, 0.2);
+      const k = rng.range(0.07, 0.085);
+      const dark = [k, k, k * 1.04];
       for (const side of [-1, 1]) {
-        const cl = lat + side * 0.78 + jit;
-        if (Math.abs(skew) < 0.06) rect(st, st + len, cl - w, cl + w, atlas.streak, dark, true);
-        else {
-          // drifting sideways as it goes: two pieces, the second stepped over
-          const half = len / 2;
-          const st2 = st + half;
-          const mid = (atlas.streak.u0 + atlas.streak.u1) / 2;
-          rect(st, st2, cl - w, cl + w, { ...atlas.streak, u1: mid }, dark, true);
-          rect(st2, st + len, cl + skew - w, cl + skew + w, { ...atlas.streak, u0: mid }, dark, true);
-        }
+        const cl = lat + side * 0.78 + rng.range(-0.04, 0.04);
+        rect(st, st + len, cl - 0.15, cl + 0.15, atlas.streak, dark, true);
       }
     }
   }
