@@ -55,6 +55,7 @@ export class UI {
   onAgain: () => void = () => {};
   onProfile: (p: Profile) => void = () => {};
   onClick: () => void = () => {};
+  onScreen: (id: string) => void = () => {};
   profile: Profile;
   private feedEl: HTMLElement;
   private playSize = 2;
@@ -276,6 +277,7 @@ export class UI {
   // ------------------------------------------------------------ screens
   screen(id: string): void {
     this.root.querySelectorAll('#m-menu .screen').forEach((s) => ((s as HTMLElement).hidden = s.id !== id));
+    this.onScreen(id);
   }
   showMenu(v: boolean): void {
     this.$('#m-menu').hidden = !v;

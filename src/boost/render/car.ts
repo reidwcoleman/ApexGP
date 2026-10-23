@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Car } from '../sim/car.ts';
 
 /**
@@ -139,7 +139,8 @@ function geos() {
   const flame = new THREE.ConeGeometry(1, 1, 18, 6, true);
   flame.rotateZ(Math.PI / 2); // tip toward +x... flipped below
   flame.translate(-0.5, 0, 0);
-  shared = { body, cabin, roof, fender, skirt, wing, tyre, rim, nozzle, flame };
+  const crease = (g: THREE.BufferGeometry) => toCreasedNormals(g, (50 * Math.PI) / 180);
+  shared = { body: crease(body), cabin: crease(cabin), roof: crease(roof), fender, skirt, wing: crease(wing), tyre, rim, nozzle, flame };
   return shared;
 }
 

@@ -164,6 +164,10 @@ export class Game {
 
   attract(): void {
     this.leaveNet();
+    if (this.showcase) {
+      this.field.remove(this.showcase.group);
+      this.showcase = null;
+    }
     this.mode = 'attract';
     this.me = -1;
     this.setup(this.botRoster(2, 0.75, false), true);
@@ -196,6 +200,10 @@ export class Game {
 
   private enterMatch(): void {
     this.paused = false;
+    if (this.showcase) {
+      this.field.remove(this.showcase.group);
+      this.showcase = null;
+    }
     this.ui.showMenu(false);
     this.ui.showLobby(false);
     this.ui.showHud(true);
@@ -216,7 +224,18 @@ export class Game {
     ui.onFreeplay = () => this.freeplay();
     ui.onHost = () => this.hostLobby();
     ui.onJoin = (code) => this.joinLobby(code);
-    ui.onProfile = (p) => this.applyProfile(p);
+    ui.onProfile = (p) => {
+      this.applyProfile(p);
+      if (this.showcase) this.buildShowcase();
+    };
+    ui.onScreen = (id) => {
+      if (this.mode !== 'attract') return;
+      if (id === 's-garage') this.buildShowcase();
+      else if (this.showcase) {
+        this.field.remove(this.showcase.group);
+        this.showcase = null;
+      }
+    };
     ui.onResume = () => this.setPause(false);
     ui.onLeave = () => this.leaveMatch();
     ui.onAgain = () => {
@@ -884,7 +903,8 @@ export class Game {
         if (c.bodyTouch && c.vel.len() > 900 && Math.random() < 0.5) this.fx.burst(sv.x, sv.y, sv.z, 4, 600, new THREE.Color(2.6, 1.8, 0.8), 14, 0.3, 650);
       }
       // camera
-      if (this.dbgCam) {
+      if (this.showcase && this.mode === 'attract') this.garage(dt);
+      else if (this.dbgCam) {
         this.stage.camera.fov = this.dbgCam.fov;
         this.stage.camera.updateProjectionMatrix();
         placeCam(this.stage.camera, this.dbgCam.pos, this.dbgCam.look);
@@ -982,6 +1002,30 @@ export class Game {
       this.fx.smoke({ x: pos.x + back.x * 70, y: pos.y + back.y * 70, z: pos.z + 17 + back.z * 70, vx: vel.x * 0.1, vy: vel.y * 0.1, vz: 30, r: 0.3, g: 0.32, b: 0.36, life: 0.8, size: 40, grow: 120, drag: 2 });
   }
 
+  /** the garage: your car on the centre spot, the camera orbiting it */
+  private showcase: CarView | null = null;
+  private buildShowcase(): void {
+    if (this.showcase) this.field.remove(this.showcase.group);
+    const v = (this.showcase = new CarView(0, this.ui.profile.accent, this.ui.profile.name));
+    this.field.add(v.group);
+  }
+  private garage(dt: number): void {
+    const v = this.showcase!;
+    v.group.position.set(0, 0, 17);
+    v.group.quaternion.identity();
+    v.group.visible = true;
+    v.boostVis = 0;
+    const a = this.time * 0.35;
+    this.stage.camera.fov = 34;
+    this.stage.camera.updateProjectionMatrix();
+    // (offset so the car sits right of the menu)
+    placeCam(this.stage.camera, new V3(Math.cos(a) * 560, Math.sin(a) * 560, 150), new V3(Math.sin(a) * 120, -Math.cos(a) * 120, 22));
+    v.showTag(false);
+    for (const cv of this.views) cv.group.visible = false;
+    this.ball.mesh.visible = this.ball.glow.visible = false;
+    void dt;
+  }
+
   /** a fixed camera for screenshots: __boost.debugCam([x,y,z],[x,y,z],fov) in sim cm */
   dbgCam: { pos: V3; look: V3; fov: number } | null = null;
   debugCam(p: number[] | null, l?: number[], fov = 60): void {
@@ -993,7 +1037,7 @@ export class Game {
   private tvLook = new V3();
   private tvCamera(bp: V3, dt: number): void {
     const t = this.time * 0.05;
-    const want = new V3(Math.cos(t) * 5400, bp.y * 0.55 + Math.sin(t) * 1500, 1500 + Math.sin(t * 1.7) * 500);
+    const want = new V3(Math.cos(t) * 3300, Math.max(-3800, Math.min(3800, bp.y * 0.5 + Math.sin(t) * 1400)), 1000 + Math.sin(t * 1.7) * 350);
     const k = Math.min(1, dt * 0.8);
     this.tvCam.x += (want.x - this.tvCam.x) * k;
     this.tvCam.y += (want.y - this.tvCam.y) * k;
@@ -1002,7 +1046,7 @@ export class Game {
     this.tvLook.x += (bp.x * 0.8 - this.tvLook.x) * kl;
     this.tvLook.y += (bp.y - this.tvLook.y) * kl;
     this.tvLook.z += (bp.z * 0.5 - this.tvLook.z) * kl;
-    this.stage.camera.fov = 52;
+    this.stage.camera.fov = 58;
     this.stage.camera.updateProjectionMatrix();
     placeCam(this.stage.camera, this.tvCam, this.tvLook);
     this.cam.pos.copy(this.tvCam);
