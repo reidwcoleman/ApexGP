@@ -42,6 +42,12 @@ export class Stage {
   /** the game says the camera should be looking at something lit */
   expectLit = false;
   private blackRuns = 0;
+  private hemi: THREE.HemisphereLight;
+  private fill: THREE.DirectionalLight;
+  private skyU = { uTime: { value: 0 }, uDay: { value: 1 }, uSun: { value: KEY_DIR.clone() } };
+  private envDay: THREE.Texture;
+  private envNight: THREE.Texture;
+  day = true;
   private checkT = 0;
   readonly flash: THREE.PointLight;
   quality: 0 | 1 | 2 = 2;
@@ -82,10 +88,13 @@ export class Stage {
     this.camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 2000);
     const sc = this.scene;
     sc.fog = new THREE.FogExp2(0x0a1430, 0.0026);
-    sc.environment = this.envMap();
+    this.envNight = this.envMap(false);
+    this.envDay = this.envMap(true);
+    sc.environment = this.envDay;
     sc.environmentIntensity = 0.75;
 
-    sc.add(new THREE.HemisphereLight(0x8fb4ff, 0x1d3a16, 0.55));
+    this.hemi = new THREE.HemisphereLight(0x8fb4ff, 0x1d3a16, 0.55);
+    sc.add(this.hemi);
     const key = (this.key = new THREE.DirectionalLight(0xf2f5ff, 2.6));
     key.position.copy(KEY_DIR).multiplyScalar(120);
     key.target.position.set(0, 0, 0);
@@ -104,7 +113,7 @@ export class Stage {
     key.shadow.radius = 2.5;
     sc.add(key, key.target);
     // a warm fill from the opposite light ring (no shadows)
-    const fill = new THREE.DirectionalLight(0xffe2c4, 0.7);
+    const fill = (this.fill = new THREE.DirectionalLight(0xffe2c4, 0.7));
     fill.position.set(-30, 60, -50);
     sc.add(fill);
     // the goal flash
@@ -123,8 +132,30 @@ export class Stage {
     comp.addPass(new EffectPass(this.camera, new SanitizeEffect()));
     // SMAA samples its input, so it leads the merged pass
     comp.addPass(new EffectPass(this.camera, smaa, this.bloom, tone, grade, vig));
+    this.setDay(true);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** a sunny afternoon or a floodlit night */
+  setDay(day: boolean): void {
+    this.day = day;
+    const sc = this.scene;
+    this.skyU.uDay.value = day ? 1 : 0;
+    sc.environment = day ? this.envDay : this.envNight;
+    sc.environmentIntensity = day ? 0.6 : 0.75;
+    const fog = sc.fog as THREE.FogExp2;
+    fog.color.set(day ? 0xa8c2de : 0x0a1430);
+    fog.density = day ? 0.0007 : 0.0026;
+    this.hemi.color.set(day ? 0xd2e4ff : 0x8fb4ff);
+    this.hemi.groundColor.set(day ? 0x56703a : 0x1d3a16);
+    this.hemi.intensity = day ? 0.55 : 0.55;
+    this.key.color.set(day ? 0xfff0dc : 0xf2f5ff);
+    this.key.intensity = day ? 2.7 : 2.6;
+    this.fill.color.set(day ? 0xbcd2ff : 0xffe2c4);
+    this.fill.intensity = day ? 0.55 : 0.7;
+    this.bloom.intensity = day ? 0.55 : 1.15;
+    this.bloom.luminanceMaterial.threshold = day ? 0.92 : 0.78;
   }
 
   resize(): void {
@@ -148,6 +179,7 @@ export class Stage {
 
   render(dt: number): void {
     if (this.lost) return;
+    this.skyU.uTime.value += dt;
     if (this.safe) {
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.renderer.render(this.scene, this.camera);
@@ -199,19 +231,40 @@ export class Stage {
   }
 
   /** the image light: a sky with banks of floodlights all round and a green floor */
-  private envMap(): THREE.Texture {
+  private envMap(day: boolean): THREE.Texture {
     const es = new THREE.Scene();
     const skyM = new THREE.ShaderMaterial({
       side: THREE.BackSide,
-      uniforms: {},
+      uniforms: { uSun: { value: KEY_DIR } },
       vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
-      fragmentShader: `varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = d.y;
+      fragmentShader: day
+        ? `uniform vec3 uSun; varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = d.y;
+        vec3 c = mix(vec3(0.62,0.74,0.9), vec3(0.18,0.38,0.78), smoothstep(0.0, 0.7, h));
+        c = mix(vec3(0.16,0.22,0.12), c, smoothstep(-0.25, 0.02, h));
+        float s = max(dot(d, uSun), 0.0);
+        c += vec3(1.0,0.9,0.75) * (pow(s, 600.0) * 60.0 + pow(s, 8.0) * 0.5);
+        gl_FragColor = vec4(c, 1.); }`
+        : `varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = d.y;
         vec3 c = mix(vec3(0.05,0.09,0.06), vec3(0.03,0.05,0.12), smoothstep(-0.2, 0.05, h));
         c = mix(c, vec3(0.012,0.02,0.06), smoothstep(0.1, 0.8, h));
         c += vec3(0.12,0.1,0.16) * exp(-abs(h - 0.08) * 18.0);
         gl_FragColor = vec4(c, 1.); }`,
     });
     es.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), skyM));
+    if (day) {
+      // the stands as a grey band round the horizon, the pitch below
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(44, 44, 18, 32, 1, true), new THREE.MeshBasicMaterial({ color: 0x3c3a3e, side: THREE.BackSide }));
+      band.position.y = 6;
+      es.add(band);
+      const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: 0x2e5a1c }));
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -4;
+      es.add(floor);
+      const pm = new THREE.PMREMGenerator(this.renderer);
+      const rt = pm.fromScene(es, 0.02);
+      pm.dispose();
+      return rt.texture;
+    }
     const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 6.4) });
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2;
@@ -241,19 +294,33 @@ export class Stage {
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
-      uniforms: { uTime: { value: 0 } },
+      uniforms: this.skyU,
       vertexShader: 'varying vec3 vP; void main(){ vP = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }',
-      fragmentShader: `varying vec3 vP;
+      fragmentShader: `uniform float uTime; uniform float uDay; uniform vec3 uSun; varying vec3 vP;
         float h21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
+        float n2(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
+          return mix(mix(h21(i), h21(i+vec2(1,0)), u.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), u.x), u.y); }
+        float fbm(vec2 p){ float a = 0.5, v = 0.0; for (int k = 0; k < 5; k++){ v += a*n2(p); p = p*2.03 + 7.1; a *= 0.5; } return v; }
         void main(){ vec3 d = normalize(vP); float h = d.y;
-          vec3 c = mix(vec3(0.07,0.11,0.24), vec3(0.008,0.014,0.045), smoothstep(0.0, 0.55, h));
-          c += vec3(0.25,0.22,0.35) * exp(-max(h,0.)*9.0) * 0.6;
-          c = mix(c, vec3(0.02,0.03,0.05), smoothstep(0.0,-0.15,h));
+          // night: deep blue, a glow over the lights, stars
+          vec3 cn = mix(vec3(0.07,0.11,0.24), vec3(0.008,0.014,0.045), smoothstep(0.0, 0.55, h));
+          cn += vec3(0.25,0.22,0.35) * exp(-max(h,0.)*9.0) * 0.6;
+          cn = mix(cn, vec3(0.02,0.03,0.05), smoothstep(0.0,-0.15,h));
           vec2 sp = vec2(atan(d.z,d.x)*120., h*240.);
           vec2 id = floor(sp); vec2 f = fract(sp)-0.5;
-          float s = h21(id); float star = step(0.985, s) * smoothstep(0.2, 0.0, length(f)) * smoothstep(0.05,0.4,h);
-          c += vec3(0.9,0.95,1.0) * star * (0.4 + 0.6*h21(id+3.1));
-          gl_FragColor = vec4(c,1.); }`,
+          float s = h21(id); float star = step(0.985, s) * (1.0 - smoothstep(0.0, 0.2, length(f))) * smoothstep(0.05,0.4,h);
+          cn += vec3(0.9,0.95,1.0) * star * (0.4 + 0.6*h21(id+3.1));
+          // day: a blue dome paling to the haze, the sun, drifting cumulus
+          vec3 cd = mix(vec3(0.66,0.78,0.92), vec3(0.16,0.36,0.78), smoothstep(0.0, 0.65, h));
+          float sd = max(dot(d, uSun), 0.0);
+          vec2 cp = d.xz / max(h + 0.12, 0.05) * 1.6 + vec2(uTime * 0.006, uTime * 0.002);
+          float cl = smoothstep(0.52, 0.78, fbm(cp)) * smoothstep(0.02, 0.22, h);
+          float shade = fbm(cp + vec2(0.35, 0.2));
+          vec3 cloudC = mix(vec3(0.62,0.66,0.74), vec3(1.05,1.04,1.0), smoothstep(0.35, 0.75, shade)) * (1.0 + pow(sd, 6.0) * 0.6);
+          cd = mix(cd, cloudC, cl * 0.92);
+          cd += vec3(1.0,0.92,0.78) * (pow(sd, 900.0) * 40.0 + pow(sd, 12.0) * 0.35) * (1.0 - cl * 0.8);
+          cd = mix(cd, vec3(0.3,0.33,0.36), smoothstep(0.0,-0.15,h));
+          gl_FragColor = vec4(mix(cn, cd, uDay), 1.); }`,
     });
     const s = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 24), m);
     s.renderOrder = -10;

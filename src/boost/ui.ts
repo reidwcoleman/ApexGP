@@ -19,10 +19,11 @@ export interface Profile {
   ballCam: boolean;
   volume: number;
   shake: boolean;
+  arena: 'day' | 'night';
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true };
+  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, arena: 'day' };
   try {
     return { ...def, ...JSON.parse(localStorage.getItem('boostball.profile') ?? '{}') };
   } catch {
@@ -47,7 +48,7 @@ export class UI {
   onLobbyTeam: (team: 0 | 1) => void = () => {};
   onLobbyStart: () => void = () => {};
   onLobbyLeave: () => void = () => {};
-  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'fill' | 'botSkill'>>) => void = () => {};
+  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'fill' | 'botSkill' | 'arena'>>) => void = () => {};
   onLobbyKick: (id: string) => void = () => {};
   onChat: (text: string) => void = () => {};
   onResume: () => void = () => {};
@@ -93,6 +94,8 @@ export class UI {
       <div class="seg" id="seg-skill"><button data-v="0.3">Rookie</button><button data-v="0.55" class="on">Pro</button><button data-v="0.85">All-Star</button></div>
       <div class="mhead">Match length</div>
       <div class="seg" id="seg-min"><button data-v="3">3 min</button><button data-v="5" class="on">5 min</button><button data-v="10">10 min</button></div>
+      <div class="mhead">Arena</div>
+      <div class="seg" id="seg-arena"><button data-v="day" class="${p.arena !== 'night' ? 'on' : ''}">Day</button><button data-v="night" class="${p.arena === 'night' ? 'on' : ''}">Night</button></div>
       <button class="mbtn primary" id="b-go" style="margin-top:10px"><span>Kick off</span></button>
       <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
     </div>
@@ -143,6 +146,7 @@ export class UI {
       <div class="seg" id="l-size"><button data-v="1">1v1</button><button data-v="2">2v2</button><button data-v="3">3v3</button><button data-v="4">4v4</button></div>
       <div class="seg" id="l-min"><button data-v="3">3 min</button><button data-v="5">5 min</button><button data-v="10">10 min</button></div>
       <div class="seg" id="l-fill"><button data-v="1">Fill with bots</button><button data-v="0">No bots</button></div>
+      <div class="seg" id="l-arena"><button data-v="day">Day</button><button data-v="night">Night</button></div>
     </div>
     <div class="chat"><div class="log" id="l-log"></div><input type="text" id="l-chat" maxlength="120" placeholder="Say something… (Enter)" /></div>
     <div class="row">
@@ -203,6 +207,10 @@ export class UI {
     seg('#seg-size', (v) => (this.playSize = Number(v)));
     seg('#seg-skill', (v) => (this.playSkill = Number(v)));
     seg('#seg-min', (v) => (this.playMin = Number(v)));
+    seg('#seg-arena', (v) => {
+      this.profile.arena = v === 'night' ? 'night' : 'day';
+      this.save();
+    });
     this.$('#b-go').addEventListener('click', () => this.onPlay(this.playSize, this.playSkill, this.playMin));
     this.$('#b-free').addEventListener('click', () => this.onFreeplay());
     this.$('#b-games').addEventListener('click', () => (location.href = './?pick'));
@@ -232,6 +240,7 @@ export class UI {
     seg('#l-size', (v) => this.onLobbyOpt({ size: Number(v) as 1 | 2 | 3 | 4 }));
     seg('#l-min', (v) => this.onLobbyOpt({ minutes: Number(v) }));
     seg('#l-fill', (v) => this.onLobbyOpt({ fill: v === '1' }));
+    seg('#l-arena', (v) => this.onLobbyOpt({ arena: v === 'night' ? 'night' : 'day' }));
     this.$('#l-copy').addEventListener('click', () => {
       const c = this.$('#l-code').textContent ?? '';
       const url = `${location.origin}${location.pathname}?join=${c}`;
@@ -315,6 +324,7 @@ export class UI {
     mark('#l-size', String(l.size));
     mark('#l-min', String(l.minutes));
     mark('#l-fill', l.fill ? '1' : '0');
+    mark('#l-arena', l.arena === 'night' ? 'night' : 'day');
   }
 
   chat(from: string, text: string): void {

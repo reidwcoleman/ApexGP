@@ -13,7 +13,11 @@ const R = ARENA.R;
 const BLUE = new THREE.Color(0x1d6dff);
 const ORANGE = new THREE.Color(0xff7417);
 
+/** 1 by day, 0 at night: every arena shader reads it, so the switch costs no recompiles */
+export const uDay = { value: 1 };
+
 const GLSL_COMMON = /* glsl */ `
+uniform float uDay;
 float bbHash(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p, p+23.45); return fract(p.x*p.y); }
 float bbNoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
   return mix(mix(bbHash(i), bbHash(i+vec2(1,0)), u.x), mix(bbHash(i+vec2(0,1)), bbHash(i+vec2(1,1)), u.x), u.y); }
@@ -33,7 +37,7 @@ function simPatch(mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, 
   const key = 'bb' + hashStr(frag + decl);
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, uniforms);
+    Object.assign(sh.uniforms, uniforms, { uDay });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvSim = position;\nvBB = uv;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;\n' + GLSL_COMMON + decl)
@@ -50,6 +54,7 @@ function hashStr(s: string): string {
 
 export interface ArenaView {
   root: THREE.Group;
+  setDay(day: boolean): void;
   update(t: number, pads: Float32Array, excite: number, score: [number, number], clock: string): void;
 }
 
@@ -172,7 +177,7 @@ function pitch(): THREE.Mesh {
     // grass: mown bands, mottling, blade grain
     float band = step(0.5, fract(P.y / 1024.0 + 0.25));
     float diag = step(0.5, fract((P.x + P.y) / 2048.0));
-    vec3 g1 = vec3(0.105, 0.255, 0.075), g2 = vec3(0.085, 0.215, 0.06);
+    vec3 g1 = mix(vec3(0.105, 0.255, 0.075), vec3(0.1, 0.29, 0.04), uDay), g2 = mix(vec3(0.085, 0.215, 0.06), vec3(0.07, 0.215, 0.03), uDay);
     vec3 col = mix(g1, g2, band);
     col *= 0.94 + 0.06 * diag;
     float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
@@ -208,7 +213,8 @@ function pitch(): THREE.Mesh {
     float hex = bbHexEdge(P / 140.0);
     col = mix(col, vec3(0.03, 0.035, 0.05) + team * 0.06 * (1.0 - smoothstep(0.0, 0.06, hex)), gIn);
     diffuseColor.rgb *= col;
-    vec3 bbEmit = lineC * L * 0.09 + team * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5);
+    float glowK = mix(1.0, 0.45, uDay);
+    vec3 bbEmit = lineC * L * mix(0.09, 0.03, uDay) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5);
     `,
   );
   mat.roughness = 0.85;
@@ -237,10 +243,11 @@ function shell(): THREE.Group {
     vec3 col = mix(vec3(0.075, 0.12, 0.07), vec3(0.06, 0.065, 0.08), smoothstep(40.0, 260.0, z));
     col *= 0.85 + 0.3 * n;
     col *= 0.85 + 0.15 * smoothstep(0.0, 0.08, hex);
+    col *= mix(1.0, 2.4, uDay);
     diffuseColor.rgb *= col;
     float stripe = smoothstep(14.0, 0.0, abs(z - 330.0)) ;
     float seam = 1.0 - smoothstep(0.0, 0.05, hex);
-    vec3 bbEmit = teamMix * (stripe * 2.2 + seam * 0.08 * smoothstep(80.0, 300.0, z));
+    vec3 bbEmit = teamMix * (stripe * mix(2.2, 1.3, uDay) + seam * 0.08 * smoothstep(80.0, 300.0, z) * (1.0 - uDay));
     `,
   );
   const low = new THREE.Mesh(shellGeometry(0, 345), lowMat);
@@ -261,8 +268,8 @@ function shell(): THREE.Group {
     float fade = 1.0 - smoothstep(500.0, 2300.0, z);
     float pulse = 0.5 + 0.5 * sin(uTime * 1.3 + vBB.x * 0.002 - z * 0.003);
     diffuseColor.rgb = mix(vec3(0.5, 0.6, 0.75), team, 0.4);
-    diffuseColor.a = 0.035 + edge * (0.28 * fade + 0.05) ;
-    vec3 bbEmit = team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade;
+    diffuseColor.a = 0.035 + uDay * 0.03 + edge * (0.28 * fade + 0.05) ;
+    vec3 bbEmit = (team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade) * mix(1.0, 0.4, uDay);
     `,
     { uTime: uT },
     'uniform float uTime;',
@@ -414,20 +421,22 @@ function stands(uT: { value: number }, uEx: { value: number }): THREE.Group {
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
     vec3 shirt = h2 < 0.5 ? teamC * 0.8 : (h2 < 0.68 ? vec3(0.7) : (h2 < 0.8 ? vec3(0.08) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.6));
     vec3 skin = mix(vec3(0.85, 0.62, 0.48), vec3(0.3, 0.19, 0.13), fract(h * 13.0));
-    vec3 seatC = vec3(0.05, 0.055, 0.07) + teamC * 0.05;
+    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.05, teamC * 0.16 + vec3(0.035, 0.04, 0.05), uDay);
     // the riser: each row's front edge in shadow
     seatC *= 0.55 + 0.45 * smoothstep(0.0, 0.2, f.y);
     vec3 col = mix(seatC, head > body ? skin : shirt, person);
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
-    vec3 avg = mix(seatC, teamC * 0.55 + vec3(0.12), 0.42);
+    vec3 avg = mix(seatC, mix(vec3(0.16, 0.15, 0.15), teamC * 0.5, 0.25), 0.55);
     col = mix(col, avg, smoothstep(0.25, 0.7, px));
+    // in the sun the crowd is a shade darker than its lit seats read; the roof shades the upper rows
+    col *= mix(1.0, 0.62, uDay) * (1.0 - uDay * 0.45 * smoothstep(2300.0, 4300.0, vSim.z));
     float aisle = step(fract(vBB.x / 1500.0), 0.035);
     col = mix(col, vec3(0.035), aisle);
     diffuseColor.rgb *= col;
     // phone lights and camera flashes
-    float flash = step(0.9993, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - smoothstep(0.5, 1.5, px));
-    vec3 bbEmit = vec3(1.0) * flash * 2.5 + col * 0.12;
+    float flash = step(0.9993, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay);
+    vec3 bbEmit = vec3(1.0) * flash * 2.5 + col * 0.12 * (1.0 - uDay);
     `,
     { uTime: uT, uExcite: uEx },
     'uniform float uTime; uniform float uExcite;',
@@ -494,11 +503,17 @@ function stands(uT: { value: number }, uEx: { value: number }): THREE.Group {
   bg.setAttribute('position', new THREE.Float32BufferAttribute(back, 3));
   bg.setIndex(bi);
   bg.computeVertexNormals();
-  grp.add(new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1, side: THREE.DoubleSide })));
+  const backM = new THREE.MeshStandardMaterial({ color: 0x0b0d14, roughness: 1, side: THREE.DoubleSide });
+  grp.add(new THREE.Mesh(bg, backM));
   // the concourse floor between the glass and the first tier
-  const fl = new THREE.Mesh(new THREE.PlaneGeometry(26000, 30000), new THREE.MeshStandardMaterial({ color: 0x090b10, roughness: 0.95 }));
+  const floorM = new THREE.MeshStandardMaterial({ color: 0x090b10, roughness: 0.95 });
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(26000, 30000), floorM);
   fl.position.z = -6;
   grp.add(fl);
+  grp.userData.theme = (day: boolean) => {
+    backM.color.set(day ? 0x2a2e36 : 0x0b0d14);
+    floorM.color.set(day ? 0x30343c : 0x090b10);
+  };
   return grp;
 }
 
@@ -588,6 +603,11 @@ function lights(): THREE.Group {
     }
   }
   g.add(lamps, housings);
+  const beams = g.children.filter((c) => (c as THREE.Mesh).material === beamM);
+  g.userData.theme = (day: boolean) => {
+    lampM.color.setScalar(day ? 1.6 : 9).b *= 1.05;
+    for (const b of beams) b.visible = !day;
+  };
   // the roof ring and its trusses
   const ringPts: number[] = [];
   for (const [x, y, nx, ny] of perimeter(0, 600).p) ringPts.push(x + nx * (off + 200), y + ny * (off + 200));
@@ -605,6 +625,59 @@ function lights(): THREE.Group {
     }
   }
   return g;
+}
+
+/** the roof: a canopy ring over the upper tier, ribbed underneath, open over the pitch */
+function roof(): THREE.Mesh {
+  const { p: per } = perimeter(0, 400, 10);
+  const rings: [number, number][] = [
+    [5600, 6650],
+    [6400, 6900],
+    [8200, 7350],
+    [9800, 7500],
+  ];
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  const W = per.length;
+  let u = 0;
+  const us = [0];
+  for (let i = 1; i < W; i++) {
+    u += Math.hypot(per[i][0] - per[i - 1][0], per[i][1] - per[i - 1][1]);
+    us.push(u);
+  }
+  rings.forEach(([o, z], j) => {
+    for (let i = 0; i < W; i++) {
+      const [x, y, nx, ny] = per[i];
+      pos.push(x + nx * (R + o), y + ny * (R + o), z);
+      uv.push(us[i], j);
+    }
+  });
+  for (let j = 0; j < rings.length - 1; j++)
+    for (let i = 0; i < W - 1; i++) {
+      const a = j * W + i;
+      idx.push(a, a + W, a + 1, a + 1, a + W, a + W + 1);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide });
+  simPatch(
+    mat,
+    /* glsl */ `
+    float rib = smoothstep(0.88, 0.95, abs(fract(vBB.x / 900.0) - 0.5) * 2.0);
+    float edge = 1.0 - smoothstep(0.0, 0.08, vBB.y);
+    vec3 col = mix(vec3(0.05, 0.055, 0.065), vec3(0.75, 0.77, 0.8), uDay);
+    col *= 0.75 + 0.25 * rib;
+    diffuseColor.rgb *= col;
+    float tw = smoothstep(-3000.0, 3000.0, vSim.y);
+    vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
+    vec3 bbEmit = teamC * edge * mix(2.0, 0.8, uDay) + col * 0.12 * uDay;
+    `,
+  );
+  return new THREE.Mesh(g, mat);
 }
 
 /** the screens at each end, drawn from a canvas */
@@ -700,13 +773,19 @@ export function buildArena(): ArenaView {
   root.add(goal(-1, BLUE), goal(1, ORANGE));
   const pd = pads();
   root.add(pd.group);
-  root.add(stands(uT, uEx));
-  root.add(lights());
+  const st = stands(uT, uEx);
+  const li = lights();
+  root.add(st, li, roof());
   const scr = screens();
   root.add(scr.group);
   const shellT = sh.userData.uT as { value: number };
   return {
     root,
+    setDay(day) {
+      uDay.value = day ? 1 : 0;
+      st.userData.theme(day);
+      li.userData.theme(day);
+    },
     update(t, padT, excite, score, clock) {
       uT.value = t;
       shellT.value = t;

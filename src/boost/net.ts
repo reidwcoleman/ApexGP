@@ -35,6 +35,7 @@ export interface LobbyState {
   fill: boolean;
   botSkill: number;
   inMatch: boolean;
+  arena?: 'day' | 'night';
 }
 
 export type CtlMsg =

@@ -75,3 +75,21 @@ const run = (w, n, f) => { for (let i = 0; i < n; i++) w.step([f(i * TICK)]); };
   console.log('car hits ball: ball speed', w.ball.vel.len().toFixed(0), 'dir', w.ball.vel.y.toFixed(0), w.ball.vel.z.toFixed(0), 'touches', w.stats[0].touches);
 }
 console.log('sdf floor', sdf(0, 0, 50).toFixed(1), 'corner', sdf(3500, 4500, 50).toFixed(1), 'goal', sdf(0, 5500, 100).toFixed(1), 'post', sdf(893 + 50, 5100, 300).toFixed(1));
+{
+  // flip reset: a car that has used its flip lands wheels-first on a ball in the air
+  const { w, c } = mk();
+  w.ball.pos.set(0, 0, 900);
+  w.ball.vel.set(0, 0, 0);
+  c.pos.set(0, 0, 900 + 92 + 40);
+  c.vel.set(0, 0, -300);
+  c.rot.fromEuler(0);
+  c.onGround = false;
+  c.jumped = c.flipped = true;
+  c.airTimeSinceJump = 3;
+  let got = -1;
+  for (let i = 0; i < 60 && got < 0; i++) {
+    w.step([noInput()]);
+    if (w.events.some((e) => e.t === 'reset')) got = i;
+  }
+  console.log('flip reset on the ball: tick', got, 'flip available', !c.flipped && !c.jumped);
+}

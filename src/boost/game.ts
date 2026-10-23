@@ -127,7 +127,18 @@ export class Game {
     this.cam.ballCam = p.ballCam;
     this.audio.setVolume(p.volume);
     this.ui.cam(this.cam.ballCam);
+    // the arena follows your setting except inside an online lobby, where the host picks
+    if (!this.lobby) this.setDay(p.arena !== 'night');
   }
+
+  setDay(day: boolean): void {
+    if (this.stage.day === day && this.dayApplied) return;
+    this.dayApplied = true;
+    this.stage.setDay(day);
+    this.arena.setDay(day);
+  }
+  private dayApplied = false;
+  private lastReset: number[] = Array(8).fill(-9);
 
   /** build cars for a roster */
   private setup(roster: Player[], authority: boolean): void {
@@ -175,6 +186,7 @@ export class Game {
     this.mode = 'attract';
     this.me = -1;
     this.tvSnap = true;
+    if (!this.lobby) this.setDay(this.ui.profile.arena !== 'night');
     this.setup(this.botRoster(2, 0.75, false), true);
     this.world.start({ minutes: 99, freeplay: false });
     this.world.phaseT = 0.5;
@@ -257,6 +269,7 @@ export class Game {
     ui.onLobbyOpt = (o) => {
       if (!this.host || !this.lobby) return;
       Object.assign(this.lobby, o);
+      if (o.arena) this.setDay(o.arena !== 'night');
       this.pushLobby();
     };
     ui.onLobbyKick = (id) => this.host?.kick(id);
@@ -340,6 +353,7 @@ export class Game {
         fill: true,
         botSkill: 0.55,
         inMatch: false,
+        arena: this.ui.profile.arena,
       };
       this.ui.onlineMsg('');
       this.ui.showMenu(false);
@@ -481,6 +495,7 @@ export class Game {
     if (m.t === 'welcome') {
       this.myId = m.id;
       this.lobby = m.lobby;
+      this.setDay(m.lobby.arena !== 'night');
       this.ui.onlineMsg('');
       this.ui.showMenu(false);
       this.ui.showLobby(!m.lobby.inMatch);
@@ -488,6 +503,7 @@ export class Game {
       if (m.lobby.inMatch) this.ui.toast('A match is on — you are in the next one');
     } else if (m.t === 'lobby') {
       this.lobby = m.lobby;
+      this.setDay(m.lobby.arena !== 'night');
       if (this.mode !== 'guest') this.ui.lobby(m.lobby, this.myId, false);
     } else if (m.t === 'chat') this.ui.chat(m.from, m.text);
     else if (m.t === 'start') {
@@ -729,6 +745,17 @@ export class Game {
         const c = w.cars[e.car];
         if (c && playing) this.audio.whoosh(att(c.pos.x, c.pos.y, c.pos.z) * (e.car === this.me ? 1 : 0.6), pan(c.pos.x, c.pos.y), e.t === 'dodge');
         if (c && e.t === 'jump' && c.pos.z < 60) for (let k = 0; k < 10; k++) this.fx.smoke({ x: c.pos.x + (Math.random() - 0.5) * 80, y: c.pos.y + (Math.random() - 0.5) * 80, z: 6, vx: (Math.random() - 0.5) * 300, vy: (Math.random() - 0.5) * 300, vz: 40, r: 0.4, g: 0.42, b: 0.38, life: 0.7, size: 70, grow: 120, drag: 3 });
+        break;
+      }
+      case 'reset': {
+        const c = w.cars[e.car];
+        if (!c || !playing) break;
+        // (a guest's resimulation can repeat the event; once a second is plenty)
+        if (this.time - this.lastReset[e.car] < 1) break;
+        this.lastReset[e.car] = this.time;
+        this.fx.burst(c.pos.x, c.pos.y, c.pos.z, 26, 500, new THREE.Color(1.6, 1.8, 2.4), 22, 0.4, 0);
+        this.audio.pad(false);
+        if (e.car === this.me) this.ui.feed('Flip reset', w.players[e.car].team);
         break;
       }
       case 'pad': {

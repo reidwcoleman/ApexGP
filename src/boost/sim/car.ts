@@ -72,7 +72,7 @@ const D_PITCH = -2.8;
 const D_YAW = -1.89;
 
 // wheels: local x, |y|, radius
-const WHEELS: [number, number, number][] = [
+export const WHEELS: [number, number, number][] = [
   [51.25, 25.9, 12.5],
   [51.25, -25.9, 12.5],
   [-33.75, 29.5, 15],
@@ -159,6 +159,14 @@ export class Car {
     this.supersonic = false;
     this.boosting = false;
     this.demoTimer = 0;
+  }
+
+  /** four wheels on the ball count as landing: the jump and the dodge come back (a flip reset) */
+  flipReset(): boolean {
+    if (!this.jumped && !this.flipped && !this.doubleJumped) return false;
+    this.jumped = this.doubleJumped = this.flipped = this.jumping = false;
+    this.airTimeSinceJump = 0;
+    return true;
   }
 
   /** apply an impulse J (mass × velocity) at world point p */

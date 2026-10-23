@@ -1,6 +1,6 @@
 import { inGoal, KICKOFFS, PADS, RESPAWNS, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
-import { Car, CAR, noInput, type Input } from './car.ts';
+import { Car, CAR, noInput, WHEELS, type Input } from './car.ts';
 import { curve, rng, V3 } from './math.ts';
 
 /**
@@ -44,6 +44,7 @@ export type WEvent =
   | { t: 'pad'; car: number; pad: number }
   | { t: 'jump'; car: number }
   | { t: 'dodge'; car: number }
+  | { t: 'reset'; car: number }
   | { t: 'bounce'; speed: number }
   | { t: 'bump'; car: number; power: number }
   | { t: 'count'; n: number }
@@ -338,6 +339,18 @@ export class World {
     const c = this.cars[i];
     if (!c.alive) return;
     const b = this.ball;
+    // flip reset: airborne with the wheels planted on the ball
+    if (!c.onGround && !c.flipping && (c.jumped || c.flipped || c.doubleJumped)) {
+      tB.subVectors(b.pos, c.pos);
+      if (tB.len2() < 260 * 260 && tB.dot(c.rot.u) < -0.3 * tB.len()) {
+        let on = 0;
+        for (const [wx, wy, wr] of WHEELS) {
+          c.rot.toWorld(wx, wy, wr - CAR.REST_Z, tP).add(c.pos);
+          if (tP.dist(b.pos) < BALL.R + wr + 6) on++;
+        }
+        if (on >= 3 && c.flipReset()) this.events.push({ t: 'reset', car: i });
+      }
+    }
     const ctr = c.center(tA);
     const rel = tB.subVectors(b.pos, ctr);
     const lx = rel.dot(c.rot.f);
