@@ -65,9 +65,9 @@ export interface Settings {
 export const LAPS = [3, 5, 10, 15, 20, 30];
 /** AI level. Dynamic (the default) races at the player's own rating (career.aiSkill), learnt race by race */
 export const DIFFICULTY = [
-  { label: 'Dynamic', value: 0.92, dynamic: true },
-  { label: 'Rookie', value: 0.9, dynamic: false },
-  { label: 'Pro', value: 0.95, dynamic: false },
+  { label: 'Dynamic', value: 0.96, dynamic: true },
+  { label: 'Rookie', value: 0.925, dynamic: false },
+  { label: 'Pro', value: 0.965, dynamic: false },
   // (Legend: the front of the field at each circuit's own limit (Race.limitedPace), sim-prepared,
   // metronomic, rarely a bad start; Elite a few tenths behind it)
   { label: 'Elite', value: 0.985, dynamic: false },

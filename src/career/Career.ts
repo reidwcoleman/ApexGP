@@ -131,6 +131,8 @@ export interface CareerData {
   setup: Record<SetupId, number>;
   /** Dynamic difficulty: the AI pace (fraction of the limit) that matches the player, updated after every race */
   aiSkill?: number;
+  /** 2: the AI rating was lifted once when the field got quicker off the line and in traffic (2026-10-23) */
+  aiSkillV?: number;
 }
 
 export interface RaceReward {
@@ -187,6 +189,11 @@ export class Career {
       }
     } catch {
       /* a broken save starts a new career */
+    }
+    // the AI used to idle away the opening seconds and sat far down the scale: lift old ratings once
+    if (this.data.aiSkillV !== 2) {
+      if (typeof this.data.aiSkill === 'number') this.data.aiSkill = Math.max(this.data.aiSkill, 0.955);
+      this.data.aiSkillV = 2;
     }
   }
 

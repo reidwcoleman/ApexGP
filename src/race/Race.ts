@@ -255,9 +255,9 @@ export interface RaceEvent {
 export const FUEL_PER_LAP = 1.8;
 
 /** Dynamic difficulty: where a new player starts and the range the rating can move in (fraction of the limit) */
-export const AI_SKILL = { start: 0.92, min: 0.72, max: 1.06 };
+export const AI_SKILL = { start: 0.96, min: 0.86, max: 1.06 };
 /** Dynamic difficulty: the most the AI's pace moves during a race */
-const DYN_TRIM = 0.025;
+const DYN_TRIM = 0.035;
 
 function median(xs: number[]): number {
   if (!xs.length) return NaN;
@@ -861,12 +861,17 @@ export class Race {
    */
   private aeroWake() {
     const cars = this.cars;
+    // overtake mode (the 2026 rules' manual override): within a second of the car ahead, the battery
+    // deploys harder — how a train breaks up without DRS doing it all
+    const otOn = this.phase === 'racing' && !this.isTimeTrial && this.vsc === 'none' && this.raceTime > 30;
     for (const c of cars) {
       let tow = 0;
       let dirty = 0;
+      let near = Infinity;
       for (const o of cars) {
         if (o === c || o.pit.phase !== 'none' || c.pit.phase !== 'none' || o.removed) continue;
         const ds = this.track.delta(c.car.s, o.car.s);
+        if (ds > 2 && ds < near && !o.retired) near = ds;
         if (ds <= 2 || ds > 55) continue;
         const dl = Math.abs(o.car.lateral - c.car.lateral);
         if (dl > 3.2) continue;
@@ -877,6 +882,7 @@ export class Race {
       }
       c.car.tow = tow;
       c.car.dirty = dirty;
+      c.car.overtake = otOn && !c.retired && near < Math.max(25, c.car.vx * 1.0) ? 1 : 0;
     }
   }
 
@@ -1647,20 +1653,28 @@ export class Race {
     run.length = 0;
     for (const c of this.cars) if (!c.retired && !c.finished && !c.removed && c.pit.phase === 'none') run.push(c);
     run.sort((a, b) => b.raceDist - a.raceDist);
+    // (every AI-driven car: the field, and the autopilot in the player's seat in a simulated race)
     for (const c of this.cars) {
-      if (!c.ai) continue;
-      c.ai.attackId = c.ai.defendId = -1;
+      const ai = this.driverOf(c);
+      if (!ai) continue;
+      ai.attackId = ai.defendId = -1;
     }
     for (let i = 0; i < run.length; i++) {
       const c = run[i];
-      if (!c.ai || !live) continue;
+      const ai = this.driverOf(c);
+      if (!ai || !live) continue;
       const gapTo = (a: Competitor, b: Competitor) => (a.raceDist - b.raceDist) / Math.max(20, b.car.vx);
       const ahead = run[i - 1];
       const behind = run[i + 1];
-      if (ahead && ahead.raceDist - c.raceDist < L * 0.5 && gapTo(ahead, c) < 1.2) c.ai.attackId = ahead.id;
-      if (behind && c.raceDist - behind.raceDist < L * 0.5 && gapTo(c, behind) < 1.0) c.ai.defendId = behind.id;
+      if (ahead && ahead.raceDist - c.raceDist < L * 0.5 && gapTo(ahead, c) < 1.2) ai.attackId = ahead.id;
+      if (behind && c.raceDist - behind.raceDist < L * 0.5 && gapTo(c, behind) < 1.0) ai.defendId = behind.id;
     }
     for (const c of this.cars) {
+      const ai = this.driverOf(c);
+      if (ai && !c.ai) {
+        ai.defend = ai.defendId >= 0 ? 1 : 0;
+        ai.attack = ai.attackId >= 0 ? 1 : 0;
+      }
       if (!c.ai) continue;
       const defend = c.ai.defendId >= 0 ? 1 : 0;
       const attack = c.ai.attackId >= 0 ? 1 : 0;

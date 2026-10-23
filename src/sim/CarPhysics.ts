@@ -425,6 +425,8 @@ export class CarPhysics {
   private readonly tbUsed = [0, 0, 0, 0];
   /** set by the race each step: slipstream (0..1) and dirty air (0..1) from the car ahead */
   tow = 0;
+  /** overtake mode (set by the race): within a second of the car ahead the battery deploys harder */
+  overtake = 0;
   dirty = 0;
   /**
    * Structural damage per zone 0..1 (see DMG): front wing halves, nose, rear wing,
@@ -817,7 +819,7 @@ export class CarPhysics {
     this.drsAnim += ((this.drsOpen ? 1 : 0) - this.drsAnim) * Math.min(1, dt * 12);
     const floorFactor = this.offTrack ? 0.72 : 1;
     const bodyDmg = 1 - 0.1 * dm[DMG.FLOOR] - 0.04 * (dm[DMG.PODL] + dm[DMG.PODR]);
-    const clA = (sp.clA - sp.drsLift * this.drsAnim) * (1 - 0.16 * this.dirty) * floorFactor * bodyDmg;
+    const clA = (sp.clA - sp.drsLift * this.drsAnim) * (1 - 0.12 * this.dirty) * floorFactor * bodyDmg;
     const cdA = (sp.cdA - sp.drsDrag * this.drsAnim) * (1 - 0.28 * this.tow) * (1 + 0.06 * (dm[DMG.RW] + dm[DMG.PODL] + dm[DMG.PODR]) + 0.05 * dm[DMG.FLOOR]);
     // ride height: the floor makes more downforce the closer it runs to the road (ground effect,
     // from the sprung heave: the car squats on its aero) — and stalls when it bottoms out over a bump
@@ -910,7 +912,7 @@ export class CarPhysics {
     this.ersDeploying = input.ers && this.ers > 0.001 && throttle > 0.5 && !this.reverse;
     let power = this.powerAt(engRpm) * (1 - 0.45 * dm[DMG.ENGINE]);
     if (this.ersDeploying) {
-      power += sp.ersBoost;
+      power += sp.ersBoost * (1 + 0.5 * this.overtake);
       this.ers = Math.max(0, this.ers - dt / 22);
     }
     if (brake > 0.2 && v > 10) this.ers = Math.min(1, this.ers + (brake * dt) / 30);

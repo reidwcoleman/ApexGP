@@ -20,6 +20,7 @@ const race = new Race(track, { mode: 'race', laps: LAPS, difficulty: Number(proc
 const auto = new AIDriver(0.975, 0.6, mulberry32((race.seed ^ 0x5eed) >>> 0));
 auto.startFrom(race.player.car, track);
 race.adoptPlayerAI?.(auto);
+race.playerDrsAuto = true;
 race.startLights();
 const contactLog = [];
 if (process.env.DIAG) {
