@@ -1506,10 +1506,11 @@ export class Cameras {
     const fov = wide ?? THREE.MathUtils.clamp(Math.max(THREE.MathUtils.radToDeg(2 * Math.atan(tc.frame / (2 * dz * aspect))), off * 2.6), tc.kind === 'long' ? 0.9 : 2.2, tc.kind === 'stand' ? 60 : 50);
     this.setFov(fov, fov > this.fov ? dt * 2 : dt * 0.5, !this.initialized);
     this.initialized = true;
-    // focus pull on the car; a long lens has a shallow depth of field
+    // focus pull on the car; a long lens has a shallow depth of field (kept moderate: on broadcast
+    // footage the stands and trees behind stay readable, soft rather than smeared to blobs)
     this.tvFocus.copy(carPos);
     this.tvFocus.y += 0.5;
-    this.tvDof = wide ? 0.5 : THREE.MathUtils.clamp((tc.kind === 'long' ? 14 : 8) / Math.max(tc.kind === 'long' ? 1.5 : 3, this.fov), 0.5, tc.kind === 'long' ? 2.2 : 1.8);
+    this.tvDof = wide ? 0.5 : THREE.MathUtils.clamp((tc.kind === 'long' ? 10 : 6) / Math.max(tc.kind === 'long' ? 1.5 : 3, this.fov), 0.5, tc.kind === 'long' ? 1.5 : 1.3);
     this.tvRange = Math.max(4, dist * (tc.kind === 'long' ? 0.05 : 0.1));
   }
   private tvAge = 0;

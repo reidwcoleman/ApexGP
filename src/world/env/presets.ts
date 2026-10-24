@@ -160,10 +160,12 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     // (the light itself is orange now — a 7.5° sun through the daylight-locus sky (atmosphere.ts) — so
     // the grade's own push is halved: on top of that light the old one counted the orange twice and
     // took the TV and helicopter shots to sepia — grass and asphalt the same brown, saturation ~0.75)
-    saturation: 1.24,
-    contrast: 1.18,
-    tint: [1.03, 0.9, 0.72],
-    shadowTint: [1.14, 0.94, 0.74],
+    // (2026-10-23: still sepia — the TV straight read as one brown, grass and asphalt alike. The warmth is
+    // in the light; the shade the low sun leaves is lit by the blue sky and stays near neutral)
+    saturation: 1.12,
+    contrast: 1.16,
+    tint: [1.03, 0.93, 0.8],
+    shadowTint: [0.96, 0.97, 1.03],
     bloom: 1.0,
     bloomThreshold: 1.05,
     shafts: 0.55,
@@ -181,11 +183,14 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     fogDensity: 1.6e-4,
     fogFalloff: 1 / 900,
     fogLobe: 2.1,
-    exposure: 1.0,
-    saturation: 1.4,
-    contrast: 1.16,
-    tint: [1.06, 0.78, 0.56],
-    shadowTint: [0.9, 0.84, 1.1],
+    // (sunset footage: the lit asphalt amber-gold, the shade a cool slate blue-grey from the sky — never
+    // violet: a shadow tint with more red than green under the blue turned the shaded track magenta and the
+    // lit patches salmon; the camera exposes for the track, not the sky)
+    exposure: 1.1,
+    saturation: 1.12,
+    contrast: 1.14,
+    tint: [1.05, 0.88, 0.68],
+    shadowTint: [0.86, 0.94, 1.08],
     bloom: 1.35,
     bloomThreshold: 1.0,
     shafts: 0.85,
@@ -272,8 +277,8 @@ const TONE_CONTRAST = 1.0;
  * touch cool: footage's low-sun shade is a warm near-black, not the navy of a game's skylight.)
  */
 const LOOK_EXPOSURE = 0.84;
-const LOOK_FILL = 0.74;
-const LOOK_SHADOW: [number, number, number] = [0.96, 0.99, 1.04];
+const LOOK_FILL = 0.9;
+const LOOK_SHADOW: [number, number, number] = [1.0, 1.0, 0.95];
 const LOOK_HIGH: [number, number, number] = [1.04, 1.0, 0.95];
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -451,7 +456,7 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const overK = overcast * dryK * (1 - thick);
   const mistK = smooth(0.4, 0.95, fog) * dryK;
   const dExposure = (1 + 0.08 * overK) * (1 + 0.04 * hazeK);
-  const dContrast = (1 + 0.12 * clearK + 0.12 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK);
+  const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK);
   const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 - 0.13 * overK) * (1 - 0.08 * hazeK);
   // (a low sun is orange enough on its own: haze on top of it turned every grey olive)
   const warm = hazeK * 0.06 * smooth(8, 25, P.elevation);

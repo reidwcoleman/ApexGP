@@ -27,18 +27,26 @@ import { weatherUniforms } from './weatherUniforms.ts';
  * the sky is spared (`skyComp`: a camera exposed for a grey day's ground leaves the sky near white)
  */
 const FILM = {
-  exposure: 0.9,
+  // (2026-10-23, measured against 2024 British GP broadcast frames with tools/lookcompare.py: the game's
+  // ground sat at mid-grey 0.20–0.27 against the footage's ~0.45, its mids yellow (b/g 0.76 vs 0.90) and
+  // over-saturated (0.28 vs 0.19), its sky 3× the ground against ~1.1×. Broadcast cameras expose for the
+  // track and grade near neutral: brighter, cleaner, only a touch warm in sunshine)
+  exposure: 1.75,
+  /** a grey day's exposure (the eye adaptation already meters a dim day up; sunshine needs the extra stop) */
+  exposureGrey: 1.3,
+  /** with the sun at the horizon and below (dusk): the floodlights and headlights carry the picture */
+  duskExposure: 0.9,
   nightExposure: 1.1,
-  saturation: 0.68,
-  contrast: 1.08,
-  // (measured on the onboard footage: highlights only a touch warm (b/g ≈ 0.95), the mids more; a
-  // stronger blue cut turned every grey cloud and every misty sky olive)
-  tint: [1.12, 1.0, 0.76],
-  shadowTint: [1.06, 0.98, 0.86],
+  saturation: 0.6,
+  contrast: 0.9,
+  tint: [1.05, 1.0, 0.9],
+  shadowTint: [1.0, 0.99, 1.0],
+  /** the sky held back from the brighter exposure (the camera's knee) */
+  skyExposure: 0.7,
   bloom: 1.35,
   bloomThreshold: 0.9,
   skyComp: 0.1,
-  adaptPow: 0.62,
+  adaptPow: 0.42,
   adaptPowGrey: 0.84,
   maxAdapt: 9.5,
   /**
@@ -55,9 +63,9 @@ const FILM = {
   stormSky: 0.5,
   stormExposure: 0.25,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
-  skyHot: 0.45,
+  skyHot: 0.3,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
-  dayMilk: 0.3,
+  dayMilk: 0.55,
 };
 
 /**
@@ -561,7 +569,11 @@ export function createEnvironment(
     // back and a warm yellow cast like sodium-tinted broadcast footage; nights a touch darker so the
     // headlights and the lights round the track carry them
     const filmDay = 1 - THREE.MathUtils.smoothstep(nightK, 0.5, 1);
-    gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(FILM.nightExposure, FILM.exposure, filmDay);
+    gradeLook.exposure = L.exposure * adapt * THREE.MathUtils.lerp(
+      FILM.nightExposure,
+      THREE.MathUtils.lerp(FILM.duskExposure, THREE.MathUtils.lerp(FILM.exposureGrey, FILM.exposure, L.sunVis), THREE.MathUtils.smoothstep(P.elevation, 0.5, 4)),
+      filmDay,
+    );
     // (and doesn't meter a storm's gloom all the way back up to a bright day: it stays dim)
     gradeLook.exposure *= 1 - FILM.stormExposure * stormK;
     // (a misty blue hour is darker than a clear one: the mist eats the last light — sim dusk footage sits
@@ -572,10 +584,10 @@ export function createEnvironment(
     const skyHot = 1 + FILM.skyHot * L.sunVis * filmDay * THREE.MathUtils.smoothstep(P.elevation, 8, 30);
     // (and a dry grey day's sky: a camera metering the land under a deck leaves the sky a bright grey-
     // white, as in overcast race footage — the deck the dome draws is the light's, dim beside that)
-    const greyHot = 1 + 0.6 * L.overcast * (1 - wetK) * filmDay;
+    const greyHot = 1 + 0.25 * L.overcast * (1 - wetK) * filmDay;
     // (a broadcast camera in a storm is set for the land and its knee holds the sky back: the deck
     // stays a dark, textured grey, where a light shower's sky goes near white)
-    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot * (1 - FILM.stormSky * stormK);
+    const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot * (1 - FILM.stormSky * stormK) * THREE.MathUtils.lerp(1, FILM.skyExposure, filmDay);
     sky.uniforms.uSkyComp.value = skyComp;
     // the low sky veiled by the mist / rain that veils the land (in the land's colour, so they meet):
     // how much of the horizon a few km of the air beyond the clear-day haze hides

@@ -308,7 +308,7 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
     // (a race-worn mid grey, as the TV pictures show it in sun: the binder long oxidised off the
     // chip tops; the fine chips give a tight ±25 % grain up close)
-    col = vec3(0.118, 0.116, 0.112) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
+    col = vec3(0.2, 0.196, 0.189) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
     // the odd pale chip (quartz, limestone) among the dark ones, resolved only up close
     col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, pxA));
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
