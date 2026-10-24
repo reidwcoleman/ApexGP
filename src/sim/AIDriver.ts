@@ -113,6 +113,8 @@ export class AIDriver {
   /** the road a car alongside leaves us: our path stays right of capL and left of capR (±Infinity: free) */
   private capL = -Infinity;
   private capR = Infinity;
+  /** metres we'll be inside a car alongside's space in 0.4 s at this lateral rate (+ = must go right) */
+  private squeeze = 0;
   /** a stricken car ahead: metres to it (yellow flag), Infinity = none (read by the tools) */
   yellowIn = Infinity;
   /** virtual safety car: slow to the VSC speed, no overtaking */
@@ -602,6 +604,17 @@ export class AIDriver {
     const room = Math.min(0.3, Math.max(0, Math.abs(aR) - 0.09) * 1.4);
     // dirty air: the wake buffets the car behind — small quick corrections at the wheel
     if (car.dirty > 0.05) steer += lim * 0.1 * car.dirty * Math.sin(this.wobblePhase * 9.3) * Math.sin(this.wobblePhase * 3.1 + 1.3);
+    // a car alongside, and the car still sliding across toward it: the path keeps a car's width, but on a
+    // hairpin's exit the line swings 9 m across the road in a second and the momentum carries straight
+    // through the path's cap (wheels banged at every track-out). Where we'll be in 0.4 s decides it: steer
+    // away now, and (below) lift so the car tightens its line instead of drifting into the other
+    const latRate = (car.lateral - this.prevLat) / Math.max(dt, 1e-3);
+    const latPred = car.lateral + latRate * 0.4;
+    let squeeze = 0;
+    if (this.capL > -1e9) squeeze += Math.max(0, this.capL - 0.55 - latPred);
+    if (this.capR < 1e9) squeeze -= Math.max(0, latPred - (this.capR + 0.55));
+    this.squeeze = squeeze;
+    if (squeeze !== 0 && this.parkSide === 0) steer -= Math.sign(squeeze) * Math.min(lim * 0.8, Math.abs(squeeze) * 0.05);
     const hiLim = lim + (aR > 0 ? room : 0);
     const loLim = lim + (aR < 0 ? room : 0);
     inp.steer = Math.max(-loLim, Math.min(hiLim, steer));
@@ -748,6 +761,8 @@ export class AIDriver {
         const wide = crossErr * Math.sign(kPath);
         if (wide > 0.35 && !noLift) inp.throttle *= Math.max(0.15, 1 - (wide - 0.35) * 0.7);
       }
+      // sliding across into a car alongside (see squeeze): off the throttle until the nose comes back
+      if (this.squeeze !== 0) inp.throttle *= Math.max(0.2, 1 - Math.abs(this.squeeze) * 0.45);
       // about to run out of road (outer wheels at the kerb's edge and drifting out): lift
       const side = car.lateral >= 0 ? 1 : -1;
       const edge = hw + track.kerbAt(car.s + v * 0.2, side) - 0.95;
