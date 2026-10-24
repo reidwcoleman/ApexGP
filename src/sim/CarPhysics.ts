@@ -97,10 +97,14 @@ export interface CarSpec {
   halfWidth: number;
 }
 
-/** extra deceleration (m/s²) the assisted model's brakes give at full pedal on a dry track */
-const ARCADE_BRAKE = 5;
-/** assisted handling: tyre grip multiplier (the F1 games' generous-but-real limit) */
-const ARCADE_GRIP = 1.13;
+/**
+ * Extra deceleration (m/s²) the assisted model's brakes give at full pedal on a dry track, and its tyre
+ * grip multiplier. The AI never has them: an assist is there to keep the car on the road, not to make it
+ * faster than the field — at 5 m/s² and +13 % grip a player out-braked half the grid into Turn 1 and the
+ * AI looked slow everywhere (2026-10-23). What's left is a little bite that steadies a stab of the pedal.
+ */
+const ARCADE_BRAKE = 1.2;
+const ARCADE_GRIP = 1.02;
 /**
  * Assisted handling's slide catcher: the rear may slide this far (rad) untouched — the car visibly
  * rotates on entry and steps out on the power — then the slide is pulled back toward the line the

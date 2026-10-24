@@ -132,6 +132,11 @@ export class AIDriver {
   private passTimer = 0;
   /** true once the race has started for this driver */
   launched = false;
+  /**
+   * Drives the start like a human chasing places (the tools' stand-in for the player): no opening
+   * caution, no early braking in the first-lap pack, never backs out of a corner it has a nose in
+   */
+  bold = false;
   /** blue flags: side of the road to move to (−1 left, 1 right, 0 = racing) */
   yieldSide = 0;
   /** retired: pull off to this side of the road (−1 / 1) and stop; 0 = racing */
@@ -155,6 +160,8 @@ export class AIDriver {
   /** seconds stuck behind the same car within a second without a way past (makes them try harder) */
   stuckBehind = 0;
   private stuckWith = -1;
+  /** the last step's speed decision, for the tools */
+  readonly dbg = { vt: 0, vRef: 0, pathK: 1, offLoss: 0, follow: Infinity, late: 0 };
   /** an ERS burst in progress (one straight) */
   private ersRun = false;
   /** the car ahead in our lane last step, its speed, and its acceleration (smoothed): is it braking harder than we are? */
@@ -271,8 +278,8 @@ export class AIDriver {
     const L = car.spec.a + car.spec.b;
     const hw = track.halfWidthAt(car.s);
     // opening seconds: flat out off the line like everyone else, a little more room to the car ahead
-    // and no dive-bombs into the first braking zone (a real start is full attack, not a procession)
-    const calm = Math.max(0, 1 - this.startTimer / 8);
+    // for the first moments (a real start is full attack, not a procession)
+    const calm = this.bold ? 0 : Math.max(0, 1 - this.startTimer / 6);
 
     // ---- the next corner (a few times a second): its braking point and which side its inside is
     this.scanT -= dt;
@@ -286,7 +293,10 @@ export class AIDriver {
     const tight = Math.max(0, Math.min(1, (48 - vAhead) / 18));
     // the opening lap's braking zones in a pack (Turn 1 three abreast): file in, a car's length more
     // room and a touch earlier on the brakes; the straights stay flat out
-    const pack = this.startTimer < 40 && (this.brakeIn < 140 || tight > 0.3) ? Math.max(0, 1 - this.startTimer / 40) : 0;
+    // the opening lap's braking zones in a pack (Turn 1 three abreast): a little more room to the car ahead
+    // and no lunges, but braking where they always brake (an early brake hands the place to whoever
+    // doesn't); the straights stay flat out
+    const pack = !this.bold && this.startTimer < 35 && (this.brakeIn < 140 || tight > 0.3) ? Math.max(0, 1 - this.startTimer / 35) : 0;
 
     // ---- racecraft: traffic ahead / alongside / behind
     let followSpeed = Infinity;
@@ -342,8 +352,8 @@ export class AIDriver {
         // less than half alongside, or round the outside of a tight one, backs out and tucks in behind
         const nearApex = tight > 0.3 || (this.inside !== 0 && this.apexIn < 70);
         const outside = this.inside !== 0 && Math.sign(dl) === this.inside;
-        const concede = nearApex && ds > 0 && (ds > 2.5 - 2 * pack || (outside && tight > 0.5 - 0.4 * pack));
-        if ((squeezed && ds > 0.5) || concede) followSpeed = Math.min(followSpeed, o.speed - 1.5);
+        const concede = nearApex && ds > 0 && (ds > 2.5 || (outside && tight > 0.5));
+        if ((squeezed && ds > 0.5) || (concede && !this.bold)) followSpeed = Math.min(followSpeed, o.speed - 1.5);
       }
       // a stricken car ahead (spun, stopped, retired, crawling): yellow flag — steer round it on the
       // side with more road, and if there's no way round, stop behind it. Never a pile-up.
@@ -380,7 +390,7 @@ export class AIDriver {
     this.passTimer -= dt;
     this.cutT -= dt;
     // racing is on: not in the opening seconds' procession, under the VSC, a yellow flag or a blue flag
-    const racingOn = calm < 0.88 && !this.vsc && yellow > 250 && this.yieldSide === 0;
+    const racingOn = calm < 0.85 && !this.vsc && yellow > 250 && this.yieldSide === 0;
     // the car ahead in our lane: how hard is it slowing? (one braking harder than we expect — backing out
     // of a move, lifting, locked up — is how rear-enders happen)
     if (lead && lead.id === this.leadId) this.leadA += ((lead.speed - this.leadV) / Math.max(dt, 1e-3) - this.leadA) * Math.min(1, dt * 12);
@@ -434,8 +444,11 @@ export class AIDriver {
       // don't run into the back of it (nose to tail in a train once the start is done)
       const tGap = ds / Math.max(1, v);
       // (more room through the chicanes and hairpins: cars turned across the road are longer than the gap along it)
-      const minGap = 7.5 + 2.5 * calm + 1.5 * tight + 6 * pack;
-      if (tGap < 0.36 + 0.14 * calm + 0.3 * pack || ds < minGap) followSpeed = Math.min(followSpeed, lead.speed - (minGap - ds) * 0.4);
+      // (into a braking zone, where both are slowing, a queue runs nose to tail: a time gap made for the
+      // straight spread the first-lap queue over a hundred metres and slowed its tail long before the corner)
+      const braking = this.brakeIn < 90 || (tight > 0.3 && v > vAhead + 3);
+      const minGap = (braking ? 7.0 : 7.5) + 2 * calm + 1.2 * tight + 4 * pack;
+      if (tGap < (braking ? 0.3 : 0.36) + 0.12 * calm + 0.2 * pack || ds < minGap) followSpeed = Math.min(followSpeed, lead.speed - (minGap - ds) * 0.4);
       // it's slowing more than the corner calls for (backing out of a move, lifting, a mistake, a car ahead
       // of it): our stopping distance (what our brakes have over its) must fit in the gap — brake now, not
       // at our own braking point (a car just braking for the corner is out-braked, not followed)
@@ -654,10 +667,7 @@ export class AIDriver {
     // (only once pulled out of its wheel tracks: from right behind it, a later braking point is a rear-ender)
     if (this.attack > 0.5 && followSpeed < Infinity && !this.vsc && (!lead || Math.abs(lead.lateral - myLat) > 1.85)) late = Math.max(late, 4 + 3 * this.aggression + 3 * frustration);
     // the first lap's pack: no late lunges, a few metres early with cars close by
-    if (pack > 0 && (side || (lead && leadDs < 30))) {
-      craftLate = Math.min(craftLate, 0);
-      late = Math.min(late, -7 * pack);
-    }
+    if (pack > 0 && (side || (lead && leadDs < 30))) craftLate = Math.min(craftLate, 0);
     // side by side into the corner (see craftLate): later down the inside, earlier round the outside
     if (craftLate > 0) late = Math.max(late, craftLate);
     else if (craftLate < 0 && late === 0) late = craftLate;
@@ -684,10 +694,21 @@ export class AIDriver {
       };
       const s0 = car.s + v * 0.12;
       const vBase = Math.max(1, vAt(s0));
+      // (far ahead the offset won't still be there: it eases back toward the line for the corner, and a car
+      // alongside now is ahead or behind by then — judging a chicane 150 m away by the lane held three
+      // abreast now braked the whole front row early)
+      const ahead = (dd: number) => (ss: number) => {
+        const hwS = track.halfWidthAt(ss);
+        const keep = dd < 25 ? 1 : Math.exp(-(dd - 25) / 45);
+        const lat = Math.max(-hwS + 1.1, Math.min(hwS - 1.1, track.racingLineAt(ss) * 0.9 + this.offset * keep));
+        if (dd >= 25) return lat;
+        const cl = this.capL > this.capR ? (this.capL + this.capR) / 2 : Math.max(this.capL, Math.min(this.capR, lat));
+        return Math.max(-hwS + 0.9, Math.min(hwS - 0.9, cl));
+      };
       for (let k = 0; k < 5; k++) {
         const d = 8 + k * Math.max(12, v * 0.45);
         const ss = s0 + d;
-        const r = Math.min(1, Math.sqrt((pathCurv(track, base, ss) + 1 / 600) / (pathCurv(track, pathLat, ss) + 1 / 600)));
+        const r = Math.min(1, Math.sqrt((pathCurv(track, base, ss) + 1 / 600) / (pathCurv(track, ahead(d), ss) + 1 / 600)));
         if (r > 0.995) continue;
         const vReq = vAt(ss) * Math.max(0.5, r);
         pathK = Math.min(pathK, Math.sqrt(vReq * vReq + 2 * 28 * d) / vBase);
@@ -702,7 +723,7 @@ export class AIDriver {
     if (know && !lockNow) late += know.brakeLate(sNow);
     const stillBraking = vAt(sNow + 12) < vAt(sNow) - 0.5;
     const vRef = late > 0 && !stillBraking && !lockNow ? vAt(sNow) : vAt(sNow - late);
-    let vt = vRef * this.pace * this.trim * this.push * (1 + this.rhythm) * this.trouble * (corner ? over : 1) * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (1 - 0.006 * calm) * (yellow < 250 ? 0.96 : 1) * (corner && since(track, this.defendS, car.s) < this.defendCost ? 0.985 : 1);
+    let vt = vRef * this.pace * this.trim * this.push * (1 + this.rhythm) * this.trouble * (corner ? over : 1) * (1 - offLoss) * (1 - dirtyLoss) * (this.yieldSide !== 0 ? 0.97 : 1) * (yellow < 250 ? 0.96 : 1) * (corner && since(track, this.defendS, car.s) < this.defendCost ? 0.985 : 1);
     // understeer in traffic: the wheel at the front tyres' limit and the car still drifting wide of the path
     // (turned in from the inside, off its line, in dirty air): scrub speed until the nose bites, like a driver
     // would (alone on the line the profile already has the margin: the solo pace is untouched)
@@ -710,7 +731,13 @@ export class AIDriver {
     if ((lead || side || chaser || Math.abs(this.offset) > 0.3) && Math.abs(inp.steer) > lim * 0.97 && wideNow > 1.0 && !noLift) vt *= 1 - Math.min(0.18, (wideNow - 1.0) * 0.06);
     // virtual safety car: everyone at the same reduced speed (the gaps hold)
     if (this.vsc) vt = Math.min(vt, Math.max(15, vAt(car.s + v * 0.12) * VSC_SPEED));
+    this.dbg.vRef = vRef;
+    this.dbg.pathK = pathK;
+    this.dbg.offLoss = offLoss;
+    this.dbg.follow = followSpeed;
+    this.dbg.late = late;
     vt = Math.min(vt, followSpeed);
+    this.dbg.vt = vt;
     const err = vt - v;
     let edgeLift = false;
     if (err > 0) {
