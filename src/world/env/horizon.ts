@@ -6,7 +6,7 @@ import { CLOUD_SHADOW_AT_GLSL, cloudShadowA, cloudShadowB, cloudShadowC, cloudSh
 import { CLOUD_FIELD_GLSL } from './skyClouds.ts';
 // (m) beyond this the ring's haze distance grows only as √distance (see the vertex shader); the
 // far terrain eases its haze from the same distance, so a tree line stands in the same air as its land
-import { HAZE_EASE } from './terrain.ts';
+import { HAZE_EASE, hazeEaseK, horizonVeil } from './terrain.ts';
 
 /**
  * Distant horizon: a parametric backdrop ring of mountain ranges, hills, dunes,
@@ -658,6 +658,8 @@ export function buildHorizon(
     uCloudB: { value: cloudShadowB },
     uCloudC: { value: cloudShadowC },
     uCloudMap: { value: cloudShadowTexture },
+    uHzVeil: { value: horizonVeil },
+    uHazeEaseK: hazeEaseK,
   };
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   mat.onBeforeCompile = (sh) => {
@@ -670,6 +672,7 @@ attribute vec4 aInfo;
 attribute float aHaze;
 attribute vec4 aEx;
 uniform vec3 uOrigin;
+uniform float uHazeEaseK;
 varying vec4 vInfo;
 varying vec4 vEx;
 varying vec3 vHN;
@@ -686,7 +689,8 @@ varying vec3 vW;`,
   // farthest ranges are blue silhouettes, and each fold in between is a step paler: the layers read.
   {
     float hzA = length( vFogRay ) * ${SQUEEZE.toFixed(1)} * aHaze;
-    float hzE = hzA > ${HAZE_EASE.toFixed(1)} ? sqrt( hzA * ${HAZE_EASE.toFixed(1)} ) : hzA;
+    float he = ${HAZE_EASE.toFixed(1)} * uHazeEaseK;
+    float hzE = hzA > he ? sqrt( hzA * he ) : hzA;
     vFogRay *= ${SQUEEZE.toFixed(1)} * aHaze * hzE / max( hzA, 1.0 );
   }
 #endif
@@ -702,6 +706,7 @@ gl_Position.z = gl_Position.w * 0.999995;`,
         '#include <common>',
         `#include <common>
 uniform vec3 uSunDir;
+uniform vec2 uHzVeil;
 uniform vec3 uSunCol;
 uniform vec3 uSkyCol;
 uniform vec3 uOrigin;
@@ -873,10 +878,14 @@ float hzFoot = 0.0;
 #ifdef USE_FOG
   // layered depth: the low ground between ranges is milkier than the crests above it
   gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, hzFoot * 0.28 );
+  // under a grey deck, in rain or mist the far ranges sink into the sky's own horizon tone (a shade
+  // under the land's haze): a faint silhouette, never a white ridge glowing over a darker sky
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor * uHzVeil.x, uHzVeil.y );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, min( gl_FragColor.rgb, fogColor * uHzVeil.x ), smoothstep( 0.0, 0.35, uHzVeil.y ) );
 #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-horizon-v4';
+  mat.customProgramCacheKey = () => 'apex-horizon-v5';
   const mesh = new THREE.Mesh(g, mat);
   mesh.name = 'horizon';
   mesh.frustumCulled = false;

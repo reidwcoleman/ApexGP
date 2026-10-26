@@ -187,14 +187,14 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // taps by the streak's length (a tap every ~3 px of the full streak), half along the
   // neighbourhood's longest streak and half along this pixel's own (when it has one of its own):
   // the two differ where a car crosses the flowing background
-  float n = clamp(floor(lmax * 0.7), 4.0, maxTaps);
+  float n = clamp(floor(lmax * 0.8), 4.0, maxTaps);
   vec2 dirOwn = lx > 1.5 ? vx : vmax;
   float lOwn = lx > 1.5 ? lx : lmax;
   // interleaved gradient noise: the tap positions shift per pixel, so the steps read as grain
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
   float w = 1.0 / lx;
   vec3 acc = mbSafe(inputColor.rgb) * w;
-  for (int i = 0; i < 24; i++) {
+  for (int i = 0; i < 32; i++) {
     if (float(i) >= n) break;
     float t = mix(-1.0, 1.0, (float(i) + 0.5 + jit) / n);
     bool own = mod(float(i), 2.0) > 0.5;

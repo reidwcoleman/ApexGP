@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hazeEaseK, horizonVeil } from './env/terrain.ts';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
 import type { Renderer, QualityLevel, GradeLook } from '../core/Renderer.ts';
@@ -26,6 +27,8 @@ import { weatherUniforms } from './weatherUniforms.ts';
  * how hard the camera's exposure chases a dim day (`adaptPow`, up to `maxAdapt`) and how much of that
  * the sky is spared (`skyComp`: a camera exposed for a grey day's ground leaves the sky near white)
  */
+/** the far ranges' veil (horizon.ts): sink toward fog × tone by overcast, wet and mist */
+export const HZ_VEIL = { tone: 0.72, ov: 0.6, wet: 0.7, mist: 0.6, max: 0.85, ease: 60 };
 const FILM = {
   // (2026-10-23, measured against 2024 British GP broadcast frames with tools/lookcompare.py: the game's
   // ground sat at mid-grey 0.20–0.27 against the footage's ~0.45, its mids yellow (b/g 0.76 vs 0.90) and
@@ -635,6 +638,12 @@ export function createEnvironment(
     lightInfo.eGround = +eGround.toFixed(3);
     if (worldE > 0) worldUniforms.uWorldScale.value = eGround / worldE;
     worldUniforms.uWorldVeil.value = THREE.MathUtils.clamp(0.8 * wetK + 0.3 * ov + 0.4 * L.mist, 0, 0.85);
+    {
+      const murk = THREE.MathUtils.clamp(HZ_VEIL.ov * ov + HZ_VEIL.wet * wetK + HZ_VEIL.mist * L.mist, 0, HZ_VEIL.max);
+      horizonVeil.set(HZ_VEIL.tone, murk * dayK);
+      // (the far land's eased haze back to the full air in murk: ×1 clear … ×ease at the veil's max)
+      hazeEaseK.value = Math.pow(HZ_VEIL.ease, murk / HZ_VEIL.max);
+    }
     lightInfo.adapt = +adapt.toFixed(3);
     lightInfo.deckRad = +deckRad.toFixed(3);
     lightInfo.skyIrr = +C.skyIrr.toFixed(3);

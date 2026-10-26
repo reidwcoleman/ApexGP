@@ -25,6 +25,18 @@ export interface TerrainBuild {
 const lin = (hex: number) => new THREE.Color(hex);
 /** (m) where the far land's haze starts to ease (the horizon ring uses the same distance) */
 export const HAZE_EASE = 5000;
+/**
+ * × the ease distance, set per weather by Environment: the eased haze keeps far hills legible through a
+ * summer haze, but under a grey deck, in rain or mist the air is full of droplets and the far land
+ * must sink into the sky's horizon tone (eased, a lit snow ridge stood brighter than the sky behind it)
+ */
+export const hazeEaseK = { value: 1 };
+/**
+ * (tone, amount) in murk (Environment, per weather): the far land and the horizon ring are held at or
+ * under the haze colour × tone — lit snow and pale slopes 20–50 km off read as a grey silhouette under a
+ * grey deck, never a white ridge brighter than the sky behind it
+ */
+export const horizonVeil = new THREE.Vector2(1, 0);
 
 /**
  * Per-venue ground palette (track agents: tune your venue here). Colour keys override the
@@ -160,6 +172,8 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
      * (São Paulo's city): they must not be hazier than the ground under them.
      */
     uHazeEase: { value: HAZE_EASE },
+    uHazeEaseK: hazeEaseK,
+    uHzVeil: { value: horizonVeil },
     uWetness: weatherUniforms.uWetness,
     uRain: weatherUniforms.uRain,
     uWTime: weatherUniforms.uWeatherTime,
@@ -172,6 +186,7 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
         '#include <common>',
         `#include <common>
 uniform float uHazeEase;
+uniform float uHazeEaseK;
 varying vec3 vWPos;
 varying vec3 vWNormal;`,
       )
@@ -181,7 +196,8 @@ varying vec3 vWNormal;`,
 #ifdef USE_FOG
 {
   float fd = length( vFogRay );
-  if ( fd > uHazeEase ) vFogRay *= sqrt( uHazeEase / fd );
+  float he = uHazeEase * uHazeEaseK;
+  if ( fd > he ) vFogRay *= sqrt( he / fd );
 }
 #endif`,
       )
@@ -195,6 +211,7 @@ vWNormal = normalize( mat3( modelMatrix ) * objectNormal );`,
       .replace(
         '#include <common>',
         `#include <common>
+uniform vec2 uHzVeil;
 uniform sampler2D uNoise;
 uniform sampler2D uDetailN;
 uniform sampler2D uMaskFine;
@@ -775,9 +792,20 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
   vec3 nW = normalize( vWNormal + tDetailN );
   normal = normalize( ( viewMatrix * vec4( nW, 0.0 ) ).xyz );
 }`,
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `#include <fog_fragment>
+#ifdef USE_FOG
+  // in murk the far land sinks into the haze: never brighter than the haze tone (horizonVeil)
+  {
+    float vk = smoothstep( 0.0, 0.35, uHzVeil.y ) * smoothstep( 5000.0, 7500.0, length( vFogRay ) );
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, min( gl_FragColor.rgb, fogColor * uHzVeil.x ), vk );
+  }
+#endif`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v12';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v13';
   return { material, uniforms };
 }
 

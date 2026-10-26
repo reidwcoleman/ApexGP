@@ -95,6 +95,9 @@ const SPRUCE_K = new THREE.Color(0.3, 0.45, 0.4);
 const SHRUB_K = new THREE.Color(0.56, 0.7, 0.6);
 const NEAR_BAND = 125; // trees closer than this to the circuit get a 3D version
 const R3D = 170;
+/** tan(30°): the lens the LOD distances are tuned for (a 60° view) — and the most a long lens may stretch them */
+const LENS_REF = Math.tan(Math.PI / 6);
+const LENS_MAX = 4;
 const LOD0 = 72;
 const LOD1 = 100;
 /** look-ahead: seconds of the camera's travel the detail reaches ahead of it (capped per quality level) */
@@ -529,6 +532,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
   const last = new THREE.Vector3(1e9, 0, 0);
   let frames = 0;
   let reach = R3D + 16;
+  const lensDir = new THREE.Vector3();
+  let lastZoom = 1;
   let reachC = R3D + 16;
   let lod0 = LOD0;
   let lod1 = LOD1;
@@ -856,7 +861,29 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     prevT = elapsed;
     haveCam = true;
     frames++;
-    if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0) return;
+    // a long lens (TV cameras, the helicopter's zoom) magnifies the trees it looks at: inside its view
+    // cone each tree is judged at its distance ÷ the zoom, so the 3D trees and their detail reach as far
+    // as they would on a normal lens (an impostor seen through 4× glass showed its atlas as a mosaic of
+    // triangles). Outside the cone nothing changes; zoomed trees cast no extra shadows.
+    let zoom = 1;
+    let lfx = 0, lfz = 0, lcos = 2;
+    const pc = camera as THREE.PerspectiveCamera;
+    if (pc.isPerspectiveCamera) {
+      const tv = Math.tan(THREE.MathUtils.degToRad(pc.getEffectiveFOV() / 2));
+      zoom = THREE.MathUtils.clamp(LENS_REF / tv, 1, LENS_MAX);
+      if (zoom > 1.05) {
+        camera.getWorldDirection(lensDir);
+        const h = Math.hypot(lensDir.x, lensDir.z);
+        if (h > 0.2) {
+          lfx = lensDir.x / h;
+          lfz = lensDir.z / h;
+          // (the horizontal half-angle, with a margin for the trees' crowns at the frame's edges)
+          lcos = Math.cos(Math.min(Math.PI / 2, Math.atan(tv * pc.aspect) * 1.25 + 0.05));
+        } else zoom = 1;
+      } else zoom = 1;
+    }
+    if (cam.distanceToSquared(last) < 4 && frames % 15 !== 0 && Math.abs(zoom - lastZoom) < 0.1) return;
+    lastZoom = zoom;
     last.copy(cam);
     // the look-ahead for this pass (the CPU decides every change: the shader only plays the dissolve):
     // the near detail (LODs, conifers, all within ~60 m) by the full reach, the broadleaf 3D range
@@ -867,7 +894,7 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     const ux = aN > 0 ? velX / sp : 0, uz = aN > 0 ? velZ / sp : 0;
     gen++;
     next.length = 0;
-    const R = Math.max(reach, reachC) * Math.max(1, debug.reach) + HYST;
+    const R = Math.max(reach, reachC) * Math.max(1, debug.reach) * zoom + HYST;
     const ex = cam.x + ux * aN, ez = cam.z + uz * aN;
     const c0x = Math.floor((Math.min(cam.x, ex) - R) / CELL), c1x = Math.floor((Math.max(cam.x, ex) + R) / CELL);
     const c0z = Math.floor((Math.min(cam.z, ez) - R) / CELL), c1z = Math.floor((Math.max(cam.z, ez) + R) / CELL);
@@ -882,13 +909,18 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
           const al = dx * ux + dz * uz;
           const pN = Math.min(Math.max(al, 0), aN), pF = Math.min(Math.max(al, 0), aF);
           const nx = dx - ux * pN, nz = dz - uz * pN, fx = dx - ux * pF, fz = dz - uz * pF;
-          const dN = Math.sqrt(nx * nx + nz * nz + dy * dy);
+          const dN0 = Math.sqrt(nx * nx + nz * nz + dy * dy);
           const dF = Math.sqrt(fx * fx + fz * fz + dy * dy);
+          // (in the long lens's cone: judged at the distance it looks)
+          const hd = Math.hypot(dx, dz);
+          const inLens = zoom > 1 && hd > 1 && (dx * lfx + dz * lfz) > lcos * hd;
+          const dN = inLens ? dN0 / zoom : dN0;
+          const dFz = inLens ? dF / zoom : dF;
           const fir = isNear[nearIdx[k]] === 2;
           // the detail it should have — each boundary moved HYST m away from the side it is on
           const c = cur[k];
           const h3 = c >= 0 ? HYST : -HYST;
-          const in3D = fir ? dN < reachC * debug.reach + h3 : dF < reach * debug.reach + h3;
+          const in3D = fir ? dN < reachC * debug.reach + h3 : dFz < reach * debug.reach + h3;
           const want = !in3D ? -1 : dN < lod0 + (c === 0 ? HYST : -HYST) ? 0 : dN < lod1 + (c === 0 || c === 1 ? HYST : -HYST) ? 1 : 2;
           change(k, want, snap);
           const sh = dF < (fir ? Math.min(shadeR, reachC) : shadeR) + (shadeOn[k] ? HYST : -HYST);
