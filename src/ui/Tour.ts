@@ -101,7 +101,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     else todo += seg;
   }
   const pinSvg = pts
-    .map(({ cd, id, st, x, y, ox, oy, scenic }) => {
+    .map(({ cd, id, st, x, y, ox, oy, scenic }, i) => {
       const m = medalFor(best(id));
       const sh = ctx.circuitPath(ctx.layoutPoints(cd), 26, 26, 2);
       const tile = scenic ? `<rect class="tile" x="-17" y="-17" width="34" height="34" rx="6" transform="rotate(45)"/>` : `<rect class="tile" x="-19" y="-19" width="38" height="38" rx="9"/>`;
@@ -110,7 +110,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       const stars = st === 'locked' ? '' : `<g class="pst" transform="translate(0 ${scenic ? 33 : 30})">${[0, 1, 2].map((i) => `<path class="${i < (m ? STARS[m] : 0) ? 'on' : ''}" transform="translate(${(i - 1) * 11} 0) scale(0.95)" d="M0-5.2l1.53 3.1 3.42.5-2.47 2.41.58 3.4L0 2.6l-3.06 1.61.58-3.4-2.47-2.41 3.42-.5z"/>`).join('')}</g>`;
       const nm = `<g class="tag" transform="translate(0 ${st === 'locked' ? 32 : 47})"><text>${esc(cd.short.toUpperCase())}</text></g>`;
       return (
-        `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
+        `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}" style="--i:${i}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
         `<g class="pin" transform="translate(${ox} ${oy})"><circle class="halo" r="30"/>${tile}<g class="trk" transform="translate(-13 -13)"><path d="${sh}"/></g>${badge}${stars}${nm}</g></g>`
       );
     })
@@ -124,7 +124,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     `<g class="tr-world">` +
     `<path class="sea" d="${WORLD_OUTLINE}"/><path class="grat" d="${WORLD_GRATICULE}"/>` +
     `<path class="shore" d="${WORLD_LAND}"/><path class="land" d="${WORLD_LAND}"/><path class="dots" d="${WORLD_LAND}"/><path class="borders" d="${WORLD_BORDERS}"/><path class="coast" d="${WORLD_LAND}"/>` +
-    `<path class="route todo" d="${todo}"/><path class="route done-glow" d="${done}"/><path class="route done" d="${done}"/><path class="route lead" d="${lead}"/>` +
+    `<path class="route todo" d="${todo}"/><path class="route done-glow" pathLength="1" d="${done}"/><path class="route done" pathLength="1" d="${done}"/><path class="route lead" d="${lead}"/>` +
     `${pinSvg}</g>` +
     `<rect class="vig" width="${WORLD_W}" height="${WORLD_H}" fill="url(#tr-vig)" pointer-events="none"/></svg>`;
 
@@ -165,39 +165,130 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   const go = el('div', 'cta tr-go', acts, 'Race');
   const fwd = el('div', 'cta ghost tr-step', acts, '›');
 
-  // pan and zoom: the picked circuit glides into the part of the map the card leaves free
+  // ---------------------------------------------------------------- the camera: pan (drag), zoom (wheel,
+  // buttons), the world view with every circuit on it, and a glide onto a picked circuit
   const world = map.querySelector<SVGGElement>('.tr-world')!;
   const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
-  let instant = true;
-  const focus = (id: string) => {
-    const q = at(id);
-    const g = GEO[id] ?? [45, 10];
-    const europe = g[0] > 38 && g[0] < 58 && g[1] > -12 && g[1] < 28;
-    const k = europe ? 2.6 : 1.7;
+  const view = { k: 1, tx: 0, ty: 0 };
+  const K_MIN = 0.55;
+  const K_MAX = 5;
+  /** the svg's slice: map units per screen px, and the part of the map in view at k = 1 */
+  const frame = () => {
     const cw = map.clientWidth || 1200;
     const ch = map.clientHeight || 600;
     const s = Math.max(cw / WORLD_W, ch / WORLD_H);
     const vw = cw / s;
     const vh = ch / s;
-    const left = WORLD_W / 2 - vw / 2;
-    const top = WORLD_H / 2 - vh / 2;
-    const free = Math.max(vw * 0.4, vw - (card.offsetWidth + 40) / s);
-    const fx = q.x + q.ox / k;
-    const fy = q.y + q.oy / k;
-    const tx = Math.min(left, Math.max(left + vw - WORLD_W * k, left + free / 2 - fx * k));
-    const ty = Math.min(top, Math.max(top + vh - WORLD_H * k, top + vh * 0.56 - fy * k));
-    map.classList.toggle('instant', instant);
-    world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
-    // pins keep their size on screen
-    for (const w of pinws) {
-      w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
-      w.classList.toggle('sel', w.dataset.id === id);
-    }
-    if (instant) requestAnimationFrame(() => map.classList.remove('instant'));
-    instant = false;
+    return { s, vw, vh, left: WORLD_W / 2 - vw / 2, top: WORLD_H / 2 - vh / 2, free: Math.max(vw * 0.4, vw - (card.offsetWidth + 40) / s) };
   };
+  const apply = (glide: boolean) => {
+    const f = frame();
+    view.k = Math.max(K_MIN, Math.min(K_MAX, view.k));
+    // (free to wander, but the world never leaves the frame: at least a third of it stays in view)
+    const lim = (v: number, a: number, b: number) => Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
+    view.tx = lim(view.tx, f.left + f.vw * 0.33 - WORLD_W * view.k, f.left + f.vw * 0.67);
+    view.ty = lim(view.ty, f.top + f.vh * 0.33 - WORLD_H * view.k, f.top + f.vh * 0.67);
+    map.classList.toggle('instant', !glide);
+    world.style.transform = `translate(${view.tx.toFixed(1)}px, ${view.ty.toFixed(1)}px) scale(${view.k.toFixed(4)})`;
+    // pins keep their size on screen — a little smaller zoomed right out, where Europe's are close together
+    const ps = Math.max(0.6, Math.min(1, 0.6 + 0.2 * (view.k - 1)));
+    for (const w of pinws) w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(ps / view.k).toFixed(4)})`;
+    map.classList.toggle('wide', view.k < 1.6);
+  };
+  const mark = (id: string) => {
+    for (const w of pinws) w.classList.toggle('sel', w.dataset.id === id);
+  };
+  /** glide onto a circuit, into the part of the map the card leaves free */
+  const focus = (id: string, glide = true) => {
+    const q = at(id);
+    const g = GEO[id] ?? [45, 10];
+    const europe = g[0] > 38 && g[0] < 58 && g[1] > -12 && g[1] < 28;
+    const k = Math.max(view.k, europe ? 2.6 : 1.8);
+    const f = frame();
+    view.k = k;
+    view.tx = f.left + f.free / 2 - (q.x + q.ox / k) * k;
+    view.ty = f.top + f.vh * 0.55 - (q.y + q.oy / k) * k;
+    apply(glide);
+  };
+  /** the world view: every circuit on the tour in the part of the map the card leaves free */
+  const overview = (glide = true) => {
+    const f = frame();
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const q of pts) {
+      x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x);
+      y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y);
+    }
+    // (below the tour's title block, left of the card)
+    const padX = 40, padY = 50;
+    const k = Math.max(K_MIN, Math.min(2.2, Math.min(f.free / (x1 - x0 + padX * 2), (f.vh * 0.74) / (y1 - y0 + padY * 2))));
+    view.k = k;
+    view.tx = f.left + f.free / 2 - ((x0 + x1) / 2) * k;
+    view.ty = f.top + f.vh * 0.6 - ((y0 + y1) / 2) * k;
+    apply(glide);
+  };
+  // drag to pan (a press that moves less than a few pixels is still a click on a pin)
+  let drag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null;
+  map.addEventListener('pointerdown', (e) => {
+    if ((e.target as Element).closest('.tr-zoom')) return;
+    drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false };
+    map.setPointerCapture(e.pointerId);
+  });
+  map.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true;
+    map.classList.add('dragging');
+    // (screen px → map units: the svg's slice scale and the menu's own zoom)
+    const z = frame().s * (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1);
+    view.tx = drag.tx + dx / z;
+    view.ty = drag.ty + dy / z;
+    apply(false);
+  });
+  const endDrag = () => {
+    map.classList.remove('dragging');
+    setTimeout(() => (drag = null), 0);
+  };
+  map.addEventListener('pointerup', endDrag);
+  map.addEventListener('pointercancel', endDrag);
+  // wheel / pinch to zoom, about the point under the cursor
+  map.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const f = frame();
+      const r = map.getBoundingClientRect();
+      const ux = f.left + ((e.clientX - r.left) / r.width) * f.vw;
+      const uy = f.top + ((e.clientY - r.top) / r.height) * f.vh;
+      const wx = (ux - view.tx) / view.k, wy = (uy - view.ty) / view.k;
+      view.k = Math.max(K_MIN, Math.min(K_MAX, view.k * Math.exp(-e.deltaY * 0.0016)));
+      view.tx = ux - wx * view.k;
+      view.ty = uy - wy * view.k;
+      apply(false);
+    },
+    { passive: false },
+  );
+  const zoomBy = (m: number) => {
+    const f = frame();
+    const ux = f.left + f.free / 2, uy = f.top + f.vh / 2;
+    const wx = (ux - view.tx) / view.k, wy = (uy - view.ty) / view.k;
+    view.k = Math.max(K_MIN, Math.min(K_MAX, view.k * m));
+    view.tx = ux - wx * view.k;
+    view.ty = uy - wy * view.k;
+    apply(true);
+  };
+  const zoom = el('div', 'tr-zoom', map);
+  const zin = el('button', 'zb', zoom, '+');
+  const zout = el('button', 'zb', zoom, '−');
+  const zall = el('button', 'zb all', zoom, '<svg viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.8 8h12.4M8 1.8c-2.4 2.2-2.4 10.2 0 12.4M8 1.8c2.4 2.2 2.4 10.2 0 12.4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>World</span>');
+  zin.title = 'Zoom in';
+  zout.title = 'Zoom out';
+  zall.title = 'Every circuit';
+  zin.addEventListener('click', () => zoomBy(1.5));
+  zout.addEventListener('click', () => zoomBy(1 / 1.5));
+  zall.addEventListener('click', () => overview());
 
-  const draw = () => {
+  const draw = (glideTo = true) => {
     const id = sel!;
     const cd = ALL_CIRCUITS.find((x) => x.id === id)!;
     const st = states.get(id)!;
@@ -206,7 +297,8 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     const m = medalFor(b);
     const scenic = isScenic(id);
     const round = CIRCUITS.findIndex((x) => x.id === id);
-    focus(id);
+    mark(id);
+    if (glideTo) focus(id);
     card.className = `tr-card ${st}${m ? ` ${m}` : ''}`;
     body.innerHTML = '';
     const art = el('div', 'tr-art', body);
@@ -258,6 +350,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   });
   ctx.action(fwd, () => step(1));
   map.addEventListener('click', (e) => {
+    if (drag?.moved) return;
     const g = (e.target as Element).closest<SVGGElement>('.pinw');
     if (!g?.dataset.id) return;
     sel = g.dataset.id;
@@ -267,11 +360,10 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     const g = (e.target as Element).closest<SVGGElement>('.pinw');
     if (g?.dataset.id && states.get(g.dataset.id) !== 'locked') ctx.onRace(g.dataset.id);
   });
-  draw();
-  // (the first focus ran before the panel had its size: frame again once laid out)
-  requestAnimationFrame(() => {
-    instant = true;
-    focus(sel!);
-  });
+  // opens on the world view: every circuit on the map, the next one picked
+  draw(false);
+  overview(false);
+  // (the panel had no size yet: frame the world again once laid out)
+  requestAnimationFrame(() => overview(false));
   return { go };
 }
