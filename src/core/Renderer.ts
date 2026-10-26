@@ -630,6 +630,23 @@ class SunShaftsEffect extends Effect {
       // lens flare: ghosts of the sun reflected between the lens elements, strung along the
       // line through the image centre, each a soft aperture-shaped disc with a coloured rim;
       // the sun's visibility (how much of it the trees, stands and cars cover) scales them
+      // the front element is never spotless: greasy smudges and dust specks, invisible until the sun
+      // is in or near the frame and lights them up
+      float ldH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float ldN(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(ldH(i), ldH(i + vec2(1.0, 0.0)), f.x), mix(ldH(i + vec2(0.0, 1.0)), ldH(i + vec2(1.0, 1.0)), f.x), f.y);
+      }
+      float lensDirt(vec2 uv) {
+        vec2 p = uv * vec2(aspect, 1.0);
+        float sm = smoothstep(0.55, 0.92, ldN(p * 3.1) * 0.6 + ldN(p * 7.3 + 4.1) * 0.4);
+        vec2 g = p * 24.0;
+        vec2 c = floor(g);
+        vec2 o = vec2(0.25) + 0.5 * vec2(ldH(c), ldH(c + 17.3));
+        float sp = (1.0 - smoothstep(0.02, 0.3, length(fract(g) - o))) * step(0.9, ldH(c + 3.7)) * (0.4 + 0.6 * ldH(c + 9.1));
+        return sm * 0.8 + sp * 0.5;
+      }
       float ghost(vec2 uv, vec2 c, float r, float soft) {
         vec2 d = (uv - c) * vec2(aspect, 1.0);
         // hexagonal aperture
@@ -658,7 +675,8 @@ class SunShaftsEffect extends Effect {
             // veiling glare: the lens's own scatter, strong round the sun and a thin wash over the whole
             // frame (it lifts the shadows and flattens the contrast of everything shot into the light)
             float veil = exp(-length(sd) * 7.0) * 0.18 + exp(-length(sd) * 1.6) * 0.012 + 0.004;
-            col += flareColor * (g + ring * vec3(0.7, 0.8, 1.0) + veil) * flare * vis;
+            float dirt = lensDirt(uv) * exp(-length(sd) * 3.2) * 0.06;
+            col += flareColor * (g + ring * vec3(0.7, 0.8, 1.0) + veil + dirt) * flare * vis;
           }
         }
         outputColor = vec4(col, inputColor.a);
