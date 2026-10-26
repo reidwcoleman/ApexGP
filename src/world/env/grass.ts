@@ -252,7 +252,9 @@ ${CAR_WAKE_GLSL}`,
   vec3 col = mix( uMeadowC, uLawnC, mown );
   col = mix( col, uStrawC, smoothstep( 0.45, 0.8, dry ) * ( 1.0 - mown * 0.6 ) * 0.7 + fract( rnd * 3.7 ) * 0.12 );
   // every blade its own shade, a few dead straw ones in the lawn
-  vGC = col * ( 0.72 + 0.56 * fract( rnd * 5.3 ) );
+  // (lifted with the verge shader's lush lawn — trackside/materials.ts GRASS_FRAG — or the blades stand
+  // darker than the ground they grow from)
+  vGC = col * vec3( 1.06, 1.18, 0.78 ) * ( 0.8 + 0.5 * fract( rnd * 5.3 ) );
   vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
   if ( uDebug > 0.0 ) vGC = vec3( g.r, clamp( g.g * 0.2 + 0.5, 0.0, 1.0 ), g.b );
 }`,
@@ -270,7 +272,7 @@ reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
 reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v7';
+  mat.customProgramCacheKey = () => 'apex-grass-v8';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;

@@ -925,6 +925,8 @@ export interface AsphaltOptions {
   runoffPaint?: RunoffPaint;
 }
 
+/** the dry road's share of the sun's specular (see the lights_fragment_end patch) */
+const DRY_GLARE = 0.4;
 export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): THREE.MeshStandardMaterial {
   const kerbA = kerbColor(opts.kerb?.[0], new THREE.Color(0.59, 0.023, 0.018));
   const kerbB = kerbColor(opts.kerb?.[1], new THREE.Color(0.84, 0.84, 0.82));
@@ -937,7 +939,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-14', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-15', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
@@ -959,6 +961,10 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
       .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
+      // dry asphalt's chips shadow and mask each other at grazing angles, which the smooth GGX lobe doesn't
+      // know: into a high sun it turned a dry road silver-white (and the relief drew a starburst of streaks
+      // in it). Water fills the cavities, so a wet road keeps its full glare.
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\nreflectedLight.directSpecular *= mix(${DRY_GLARE.toFixed(2)}, 1.0, tsWater);`)
       .replace(
         '#include <lights_fragment_maps>',
         `#include <lights_fragment_maps>
@@ -1101,7 +1107,7 @@ float gStripe = 0.0;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
   // (a lush, sunlit, well-kept verge: the bright yellow-green of a sim's circuit lawn — Assetto Corsa
   // Monza — rather than the dull green of compressed TV footage)
-  col *= vec3(1.0, 1.16, 0.6) * 1.06;
+  col *= vec3(1.0, 1.12, 0.64);
   // drier, yellower patches (fewer when it rains)
   float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
@@ -1170,7 +1176,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-5-desert' : 'apex-ts-grass-5', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-6-desert' : 'apex-ts-grass-6', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other

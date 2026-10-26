@@ -5,7 +5,7 @@ import { hash2 } from './noise.ts';
 import { BELTS, adMixed, type PrintAtlas, type UVRect } from './atlas.ts';
 
 /**
- * Barriers along barrierL/barrierR: armco double rails on posts, concrete walls
+ * Barriers along barrierL/barrierR: armco triple rails on posts, concrete walls
  * with painted sponsor panels, tyre walls with conveyor-belt covers, TecPro
  * blocks, the pit wall; debris fences with posts and overhang; fence banners.
  *
@@ -38,6 +38,8 @@ const BELT_PAL: string[][] = [
   ['belt_red', 'belt_logo0', 'belt_white', 'belt_blue'],
 ];
 
+/** the W-beams' bottom edges (each 0.31 m tall): three tiers with a hand's gap, 1.28 m to the top rail */
+const ARMCO_RAILS = [0.3, 0.635, 0.97];
 const V = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 const FR = new Frame3();
 
@@ -257,13 +259,13 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
       if (!isWallK(P.kind[W(rA - 1)]) || !prevOk) cap(capB, rA, xb0, xb0 + T, 0, H, -1, kind === 'pitwall' ? chev : undefined);
       if (!isWallK(P.kind[iB]) || !nextOk) cap(capB, rB, xb1, xb1 + T, 0, H, 1, kind === 'pitwall' ? chev : undefined);
     } else if (!gate) {
-      // armco: two W-beam rails (galvanised steel)
+      // armco: the FIA's triple W-beam guardrail (galvanised steel), as every modern circuit runs it
       props.color(0xa3a7ab).mat(0.52, 0.8, 0);
-      for (const y0 of [0.46, 0.83]) armcoRail(props, rA, rB, y0, xb0, xb1);
+      for (const y0 of ARMCO_RAILS) armcoRail(props, rA, rB, y0, xb0, xb1);
       // sponsor boards bolted over the rails
       if (P.boards[i]) {
         print.rgb(1, 1, 1).mat(0.5, 0, 0.04);
-        strip(print, rA, rB, -0.02, 0.44, -0.02, 1.15, -1, 0, xb0, xb1, { len: 4, cell: (k) => adCell(k, sd * 41 + 3), vy0: 0.02, vy1: 0.98 });
+        strip(print, rA, rB, -0.02, 0.34, -0.02, 1.22, -1, 0, xb0, xb1, { len: 4, cell: (k) => adCell(k, sd * 41 + 3), vy0: 0.02, vy1: 0.98 });
       }
     }
 
@@ -303,10 +305,10 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     // galvanised I-post (dull, weathered: brighter only where the rails are)
     props.color(0x6c7176).mat(0.62, 0.55, 0);
     frameAt(rf, P.backOff[i] + 0.2, 0);
-    box(props, FR, 0, 0.58, 0, 0.1, 1.16, 0.14, 0b110111);
+    box(props, FR, 0, 0.66, 0, 0.1, 1.32, 0.14, 0b110111);
     // spacer block behind the rails
     props.color(0x7c8085);
-    box(props, FR, -0.09 * sd, 0.82, 0, 0.09, 0.62, 0.08, 0b110011);
+    box(props, FR, -0.09 * sd, 0.78, 0, 0.09, 0.98, 0.08, 0b110011);
   }
   // fence posts every 4 m (+ overhang arm)
   for (let p = 2; p < total; p += 4) {
@@ -365,7 +367,7 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     if (P.kind[i] === 'armco') {
       const r0 = Math.max(0, r - 3), r1 = Math.min(n, rEnd + 3);
       props.color(0xa3a7ab).mat(0.52, 0.8, 0);
-      for (let q = r0; q < r1; q++) for (const y0 of [0.46, 0.83]) armcoRail(props, q, q + 1, y0, P.backOff[W(q)] + 2.2, P.backOff[W(q + 1)] + 2.2);
+      for (let q = r0; q < r1; q++) for (const y0 of ARMCO_RAILS) armcoRail(props, q, q + 1, y0, P.backOff[W(q)] + 2.2, P.backOff[W(q + 1)] + 2.2);
     }
   }
 
