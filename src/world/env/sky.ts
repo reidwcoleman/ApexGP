@@ -195,7 +195,7 @@ vec3 rainbow( vec3 d, out float dark ) {
   vec3 a = normalize( vec3( -uSunDir.x, 0.0, -uSunDir.z ) );
   a = normalize( a * cos( uBowEl ) + vec3( 0.0, sin( uBowEl ), 0.0 ) );
   float th = acos( clamp( dot( d, a ), -1.0, 1.0 ) ) * 57.2958;
-  vec3 c = spectral( ( th - 40.4 ) / 2.2 ) * 1.0 + spectral( 1.0 - ( th - 50.0 ) / 3.4 ) * 0.38;
+  vec3 c = spectral( ( th - 40.4 ) / 2.2 ) * 1.0 + spectral( 1.0 - ( th - 50.0 ) / 3.6 ) * 0.22;
   dark = smoothstep( 41.5, 43.0, th ) * smoothstep( 51.0, 49.5, th );
   // the sky inside the bow is lit up a touch
   c += vec3( 0.05 ) * smoothstep( 41.0, 36.0, th ) * smoothstep( 20.0, 34.0, th );

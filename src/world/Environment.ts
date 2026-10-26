@@ -62,8 +62,8 @@ const FILM = {
   /** how much brighter the rain's grey veil (fog) is than the deck that lights it */
   rainVeil: 0.7,
   /** a storm's deck held back from white (share of the visible sky) and its frame left dimmer */
-  stormSky: 0.5,
-  stormExposure: 0.25,
+  stormSky: 0.78,
+  stormExposure: 0.32,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
   skyHot: 0.3,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
