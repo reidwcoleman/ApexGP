@@ -232,6 +232,7 @@ export interface RaceEvent {
     | 'contact'
     | 'lights-out'
     | 'pit-in'
+    | 'pit-forced'
     | 'pit-stop'
     | 'pit-out'
     | 'box-now'
@@ -253,6 +254,8 @@ export interface RaceEvent {
 
 /** fuel for a lap of Monza at racing speed (kg) */
 export const FUEL_PER_LAP = 1.8;
+/** races this long have pit stops (a mandatory one for everyone); anything shorter is run without a single stop */
+export const PIT_RACE_LAPS = 10;
 
 /** Dynamic difficulty: where a new player starts and the range the rating can move in (fraction of the limit) */
 export const AI_SKILL = { start: 0.96, min: 0.86, max: 1.06 };
@@ -308,6 +311,10 @@ export class Race {
   readonly pitLane: PitLane;
   /** races this long must use two dry compounds (F1 rule, as in the game) */
   readonly twoCompoundRule: boolean;
+  /** pit stops are part of this race (PIT_RACE_LAPS or more): every car stops at least once; shorter races are flat out, no AI stops at all */
+  readonly pitStops: boolean;
+  /** the player's mandatory stop is being called in by the team (can't be cancelled) */
+  playerPitForced = false;
   /** live delta to the player's best lap (s, NaN until there is one) */
   playerDelta = NaN;
   private deltaCur = new Float32Array(1).fill(-1);
@@ -468,7 +475,8 @@ export class Race {
     this.pitLane = new PitLane(track);
     this.pitLane.trackSpeed = (s) => this.profile.at(s);
     this.pitLane.mergeBusy = (ps, tRel) => this.mergeBusy(ps, tRel);
-    this.twoCompoundRule = opts.mode === 'race' && opts.laps >= 10;
+    this.pitStops = opts.mode === 'race' && opts.laps >= PIT_RACE_LAPS;
+    this.twoCompoundRule = this.pitStops;
     const startType = tyreTypeFor(this.weather.wetnessAt(0, 0));
     for (const c of this.cars) {
       let start: Compound;
@@ -477,7 +485,7 @@ export class Race {
       else if (startType === 1) start = 'inter';
       else if (startType === 2) start = 'wet';
       else if (opts.mode === 'timetrial' || opts.laps < 5) start = 'soft';
-      else if (opts.laps < 8) start = c.isPlayer || this.rand() > 0.18 ? 'soft' : 'medium';
+      else if (opts.laps < PIT_RACE_LAPS) start = c.isPlayer || this.rand() > 0.18 ? 'soft' : 'medium';
       else if (c.isPlayer) start = opts.laps >= 10 ? 'medium' : 'soft';
       else {
         // strategies differ: the brave start on softs, the back of the grid gambles on hards
@@ -836,7 +844,7 @@ export class Race {
           }
           this.events.push({ kind: 'retired', car: c.id, value: car.destroyed ? 1 : mech && !broken ? 2 : 0 });
           this.maybeVsc(c, car.destroyed ? 0.85 : broken ? 0.6 : 0.3);
-        } else if (c.ai && c.pitLap < 0 && car.wingDamage > 0.45 && car.damageMode === 'full') {
+        } else if (c.ai && this.pitStops && c.pitLap < 0 && car.wingDamage > 0.45 && car.damageMode === 'full') {
           // a new nose at the end of this lap
           c.pitLap = c.laps + 1;
         }
@@ -969,6 +977,9 @@ export class Race {
    */
   private weatherStrategy() {
     if (this.isTimeTrial || this.phase !== 'racing') return;
+    this.mandatoryStop();
+    // short races (quick races, sprints): nobody from the AI comes in, whatever the weather or the tyres
+    if (!this.pitStops) return;
     const N = this.opts.laps;
     const wet = this.lineWetness;
     for (const c of this.cars) {
@@ -1041,14 +1052,9 @@ export class Race {
    */
   private planStops(start: Compound, id: number): number[] {
     const N = this.opts.laps;
-    if (N < 8) return [];
+    if (!this.pitStops) return [];
     const r = () => this.rand();
     const cl = (x: number) => Math.max(2, Math.min(N - 2, Math.round(x)));
-    if (N < 10) {
-      if (!isDry(start)) return [];
-      const frac = start === 'soft' ? 0.35 : start === 'medium' ? 0.5 : 0.62;
-      return [Math.max(2, Math.min(N - 1, Math.round(N * frac + (r() - 0.5) * 2)))];
-    }
     const life: Record<Compound, number> = { soft: 0.62, medium: 1, hard: 1.55, inter: 0.95, wet: 1.1 };
     // a per-driver spread so the stops don't all fall on the same lap
     const spread = (((id * 7) % 5) - 2) * 0.35 + (r() - 0.5) * 1.6;
@@ -1063,6 +1069,21 @@ export class Race {
     const a = cl((N * life[start]) / w + spread);
     const b = Math.max(a + 3, cl((N * (life[start] + life[mid])) / w + spread * 0.6));
     return b <= N - 2 ? [a, b] : [a];
+  }
+
+  /** races with pit stops: a player who hasn't stopped by the second-to-last lap is called in (no cancelling) */
+  private mandatoryStop() {
+    const p = this.player;
+    if (!this.pitStops || p.stops > 0 || p.finished || p.retired || p.pit.phase !== 'none' || p.laps < 0) return;
+    if (this.opts.laps - p.laps > 2 || this.playerPitForced) return;
+    this.playerPitForced = true;
+    this.playerPitRequest = true;
+    this.events.push({ kind: 'pit-forced', car: p.id });
+  }
+
+  /** the player still owes the race's mandatory stop */
+  owesStop(c: Competitor): boolean {
+    return this.pitStops && c.stops === 0;
   }
 
   /** the next planned stop still to come (−1: none) */
@@ -1139,7 +1160,7 @@ export class Race {
     if (c.pit.phase === 'none') {
       c.pitApproach = false;
       if (!racing || c.finished || c.retired) return false;
-      const want = c.isPlayer ? this.playerPitRequest : c.pitLap >= 0 && c.laps + 1 >= c.pitLap;
+      const want = c.isPlayer ? this.playerPitRequest : this.pitStops && c.pitLap >= 0 && c.laps + 1 >= c.pitLap;
       if (!want) return false;
       const ahead = this.pitLane.toTakeover(c.car.s);
       if (ahead > 0) {
@@ -1172,7 +1193,7 @@ export class Race {
         c.car.repairFrontWing();
         c.stops++;
         c.pitLastLap = c.laps;
-        if (c.isPlayer) this.playerPitRequest = false;
+        if (c.isPlayer) this.playerPitRequest = this.playerPitForced = false;
         else {
           c.weatherCall = false;
           c.pitPlan = c.pitPlan.filter((l) => l > c.laps + 2);
@@ -1270,10 +1291,10 @@ export class Race {
         if (c.isPlayer && c.laps === this.opts.laps - 1) this.events.push({ kind: 'final-lap', car: c.id });
         if (!c.finished && !c.retired && (c.laps >= this.opts.laps || (this.phase === 'finished' && c.laps >= 1))) {
           c.finished = true;
-          // two-compound rule: finishing a long race on one compound costs 30 s
-          if (this.owesSecondCompound(c)) {
+          // mandatory stop / two-compound rule: finishing a long race without a stop or on one compound costs 30 s
+          if (this.owesStop(c) || this.owesSecondCompound(c)) {
             c.penalty += 30;
-            if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 30 });
+            if (c.isPlayer) this.events.push({ kind: 'penalty', car: c.id, value: 30, reason: this.owesStop(c) ? 'no pit stop' : 'one compound only' });
           }
           c.finishTime = t + c.penalty;
           // cool-down lap (nothing to learn from it)

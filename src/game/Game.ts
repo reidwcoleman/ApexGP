@@ -24,7 +24,7 @@ import { DASH_GLOW, SCREEN_GLOW, createCar, feedMirrors, preloadCarAssets, type 
 import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
-import { Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
+import { PIT_RACE_LAPS, Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
 import { Cameras, CAMERA_LABEL, ONBOARD, INSIDE_CAR, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
@@ -2230,7 +2230,9 @@ export class Game {
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
         if (race.isTimeTrial && this.stateTime > 4) this.hud.setHint(null);
         if (st.reset) this.startFlashback();
-        if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none') {
+        if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none' && race.playerPitForced) {
+          this.hud.flash('Mandatory pit stop', 'the team is calling you in', 'yellow', 1.6);
+        } else if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none') {
           race.playerPitRequest = !race.playerPitRequest;
           const next = COMPOUNDS[race.playerNextCompound()].label;
           if (race.playerPitRequest) this.hud.flash('Box this lap', `${next} tyres`, 'green', 2.2);
@@ -2717,7 +2719,7 @@ export class Game {
       ai.pace *= 1 + (Math.random() * 2 - 1) * spread;
       if (field === 'wild') ai.aggression = Math.min(1, ai.aggression + 0.25 + Math.random() * 0.2);
     }
-    this.specPitLap = setup.laps >= 8 ? Math.max(2, Math.round(setup.laps * (0.4 + Math.random() * 0.2))) : -1;
+    this.specPitLap = setup.laps >= PIT_RACE_LAPS ? Math.max(2, Math.round(setup.laps * (0.4 + Math.random() * 0.2))) : -1;
     this.specFinish = -1;
     this.state = 'spectate';
     this.stateTime = 0;
@@ -2763,6 +2765,7 @@ export class Game {
     const wrongTyre = COMPOUNDS[p.compound].type !== race.conditionsType();
     const planned = this.specPitLap >= 0 && p.stops === 0 && p.laps + 1 >= this.specPitLap;
     const lapsLeft = race.opts.laps - p.laps;
+    if (!race.pitStops) return;
     if ((planned || wrongTyre || p.car.wingDamage > 0.45) && lapsLeft > 1) race.playerPitRequest = true;
   }
 

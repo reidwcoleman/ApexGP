@@ -538,6 +538,9 @@ export class HUD {
         case 'pit-in':
           this.flash('Pit limiter', '80 km/h', '', 2);
           break;
+        case 'pit-forced':
+          this.flash('Mandatory pit stop', `boxing this lap · ${COMPOUNDS[race.playerNextCompound()].label} tyres`, 'yellow', 3.2);
+          break;
         case 'pit-stop':
           this.flash('Pit stop', `${(e.value ?? 0).toFixed(1)} s · ${COMPOUNDS[c.compound].label} tyres`, 'green', 3);
           break;

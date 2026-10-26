@@ -4,7 +4,7 @@ import type { CameraMode } from '../game/Cameras.ts';
 import { CAMERA_LABEL, CAMERA_ORDER, DEFAULT_CAM, NO_OFFSET, driveCamera, type CamPrefs, type CamOffset } from '../game/Cameras.ts';
 import { ALL_CIRCUITS, CIRCUITS, SCENIC, layoutPoints } from '../world/Circuits.ts';
 import { fmtTime } from './HUD.ts';
-import { POINTS, type TrackLimitsMode } from '../race/Race.ts';
+import { PIT_RACE_LAPS, POINTS, type TrackLimitsMode } from '../race/Race.ts';
 import { uiColor, type Entry } from '../race/Teams.ts';
 import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
@@ -984,14 +984,14 @@ export class Menu {
     el('div', 'pcap', p, racing ? 'Race' : 'Session');
     // a driver career's distance is the player's (5 laps by default), kept with the career
     if (dcd)
-      this.opt(p, 'Laps', () => `${dc!.laps}${dc!.laps === LAP_CHOICES[0] ? ' <span class="dim">· sprint</span>' : dc!.laps >= 10 ? ' <span class="dim">· two compounds, a pit stop</span>' : ''}`, (d) => {
+      this.opt(p, 'Laps', () => `${dc!.laps}${dc!.laps === LAP_CHOICES[0] ? ' <span class="dim">· sprint</span>' : dc!.laps >= PIT_RACE_LAPS ? ' <span class="dim">· mandatory pit stop</span>' : ' <span class="dim">· no pit stops</span>'}`, (d) => {
         const i = Math.max(0, LAP_CHOICES.indexOf(dc!.laps));
         dc!.setLaps(LAP_CHOICES[(i + d + LAP_CHOICES.length) % LAP_CHOICES.length]);
       });
     else if (career) this.fixed(p, 'Laps', `${CAREER_LAPS} <span class="dim">· career distance</span>`);
     if (racing) {
       if (!career)
-        this.opt(p, 'Laps', () => String(st.laps), (d) => {
+        this.opt(p, 'Laps', () => `${st.laps} <span class="dim">· ${st.laps >= PIT_RACE_LAPS ? 'mandatory pit stop' : 'no pit stops'}</span>`, (d) => {
           const i = LAPS.indexOf(st.laps);
           st.laps = LAPS[(Math.max(0, i) + d + LAPS.length) % LAPS.length];
         });

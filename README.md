@@ -124,8 +124,9 @@ npm run check    # tsc --noEmit
   locked but for round 1, and the way in (`DriverCareer.recordRound`, `CareerHub.ts` overview / `renderStart`).
 - **Race distance** — 5 laps by default everywhere. Career races pick 5 / 10 / 15 / 20 / 30 laps (on the map's
   card or the race screen, kept with the career; saves from before default to 5), quick races 3 / 5 / 10 / 15 /
-  20 / 30. Fuel is loaded for the distance (1.8 kg a lap + a reserve); under 8 laps nobody stops (softs), from 10
-  the two-compound rule and the AI's planned stops, from 12 some two-stoppers, more of them the longer it gets.
+  20 / 30. Fuel is loaded for the distance (1.8 kg a lap + a reserve); under 10 laps (quick races, sprints) the AI never
+  stops — not for weather, wear or damage; from 10 every car makes a mandatory stop (the team calls the player in
+  before the last lap if they haven't boxed, and it can't be cancelled), the two-compound rule and the AI's planned stops, from 12 some two-stoppers, more of them the longer it gets.
   Career races take their weather and time of day from the circuit's climate (Sakhir and Yas at night, Spa and
   Interlagos changeable…), re-rolled after every race there; **Next round** on the results screen flies you
   straight on. **Quick race** keeps free laps and weather at any circuit your career has reached.

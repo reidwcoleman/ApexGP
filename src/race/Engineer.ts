@@ -244,9 +244,9 @@ export class Engineer {
           this.saidTyres = true;
           this.say(`The tyres are going off — ${Math.round(wear * 100)}% worn. Box this lap, press I.`, true);
         }
-        if (race.owesSecondCompound(p) && lapsLeft <= Math.ceil(race.opts.laps * 0.4) && lapsLeft > 1 && !this.saidRule) {
+        if ((race.owesStop(p) || race.owesSecondCompound(p)) && lapsLeft <= Math.ceil(race.opts.laps * 0.4) && lapsLeft > 2 && !this.saidRule) {
           this.saidRule = true;
-          this.say('We still have to run a second compound. Box, box — press I.', true);
+          this.say(race.owesStop(p) ? "The stop is mandatory — box when you're ready, press I. We'll call you in before the last lap." : 'We still have to run a second compound. Box, box — press I.', true);
         }
       }
     }

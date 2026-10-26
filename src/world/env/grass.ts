@@ -25,16 +25,24 @@ const LAT = 18;
 const BIN = 0.5;
 const BINS = Math.round((2 * LAT) / BIN) + 1;
 const TILES = 64;
+/** Ultra / Ultra Tuned: the window runs on to TILES_FAR metres, the extra tiles at FAR_DENS of the density (the LOD thins them that much anyway) */
+const TILES_FAR = 116;
+const FAR_DENS = 0.4;
+/** metres of the window behind the camera */
+const BACK = 12;
 const PER_M2 = 34;
 /** blades per tuft: each instance is a little clump (the blades a lawn is made of, not one in a square foot) */
 const TUFT = 3;
 const FADE: [number, number] = [18, 30];
+const FADE_FAR: [number, number] = [40, 66];
 const ROW = 2048;
 
 export interface GrassBuild {
   mesh: THREE.Mesh;
   update(camera: THREE.Camera, elapsed: number): void;
   setEnabled(on: boolean): void;
+  /** Ultra and up: blades on out to ~66 m instead of ~30 m */
+  setLong(on: boolean): void;
 }
 
 export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: THREE.Color; straw: THREE.Color }): GrassBuild {
@@ -105,15 +113,16 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
   tGround.wrapT = THREE.RepeatWrapping;
   tGround.needsUpdate = true;
 
-  // ---- blades: TILES metres × ±LAT, PER_M2, one triangle each
-  const count = Math.round(TILES * 2 * LAT * PER_M2);
+  // ---- blades: TILES metres × ±LAT, PER_M2, one triangle each (then the sparser far tiles, drawn on Ultra and up)
+  const nearCount = Math.round(TILES * 2 * LAT * PER_M2);
+  const count = nearCount + Math.round((TILES_FAR - TILES) * 2 * LAT * PER_M2 * FAR_DENS);
   const V = 3 * TUFT;
   const aBlade = new Float32Array(count * V * 4);
   const aCorner = new Float32Array(count * V);
   let seed = 12345;
   const rnd = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
   for (let k = 0; k < count; k++) {
-    const tile = Math.floor(rnd() * TILES);
+    const tile = k < nearCount ? Math.floor(rnd() * TILES) : TILES + Math.floor(rnd() * (TILES_FAR - TILES));
     const lat = -LAT + rnd() * 2 * LAT;
     const ds = rnd();
     const r = rnd();
@@ -127,12 +136,15 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
   geo.setAttribute('aBlade', new THREE.BufferAttribute(aBlade, 4));
   geo.setAttribute('aCorner', new THREE.BufferAttribute(aCorner, 1));
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e7);
+  geo.setDrawRange(0, nearCount * V);
 
   const uniforms = {
     tFrame: { value: tFrame },
     tGround: { value: tGround },
     tNoise: { value: noiseTexture() },
     uS0: { value: 0 },
+    /** +1: the window runs ahead of the camera along the lap, −1: back down it (looking backwards) */
+    uDir: { value: 1 },
     uN: { value: n },
     uRows: { value: rows },
     uTime: { value: 0 },
@@ -158,7 +170,7 @@ attribute float aCorner;
 uniform highp sampler2D tFrame;
 uniform sampler2D tGround;
 uniform sampler2D tNoise;
-uniform float uS0, uN, uRows, uTime, uDebug;
+uniform float uS0, uDir, uN, uRows, uTime, uDebug;
 uniform vec2 uFade, uWind;
 uniform vec3 uLawnC, uMeadowC, uStrawC;
 varying vec3 vGC;
@@ -179,7 +191,9 @@ ${CAR_WAKE_GLSL}`,
         '#include <begin_vertex>',
         `vec3 transformed;
 {
-  float tileS = uS0 + aBlade.x;
+  float tileS = uS0 + ( uDir > 0.0 ? aBlade.x - ${BACK.toFixed(1)} : ${(BACK - 1).toFixed(1)} - aBlade.x );
+  // the far tiles carry FAR_DENS of the blades: the distance LOD keeps all of them
+  float tileDens = aBlade.x < ${TILES.toFixed(1)} ? 1.0 : ${FAR_DENS.toFixed(2)};
   // per-metre variety: shift the lateral pattern and the along-track offset
   float hsh = gHash( vec2( mod( tileS, uN ), 3.7 ) );
   float lat = mod( aBlade.y + ${LAT.toFixed(1)} + hsh * 7.31, ${(2 * LAT).toFixed(1)} ) - ${LAT.toFixed(1)};
@@ -202,7 +216,7 @@ ${CAR_WAKE_GLSL}`,
   float dist = length( base - cameraPosition );
   // density: surface mask, and thinning with distance (fewer, slightly larger blades far off)
   float lod = mix( 1.0, 0.35, smoothstep( 6.0, uFade.y, dist ) );
-  float keep = step( aBlade.w, g.r * lod );
+  float keep = step( aBlade.w, g.r * min( 1.0, lod / tileDens ) );
   float fade = 1.0 - smoothstep( uFade.x, uFade.y, dist );
   // clumps: tufts of taller grass and bare patches
   float clump = texture2D( tNoise, base.xz * 0.37 ).a;
@@ -256,14 +270,14 @@ reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
 reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v6';
+  mat.customProgramCacheKey = () => 'apex-grass-v7';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.receiveShadow = true;
   mesh.matrixAutoUpdate = false;
-  mesh.userData.stats = { grassBins, bins: BINS * n, blades: count, bakeMs: Math.round(bakeMs) };
+  mesh.userData.stats = { grassBins, bins: BINS * n, blades: nearCount, bladesLong: count, bakeMs: Math.round(bakeMs) };
   mesh.userData.uniforms = uniforms;
 
   const cam = new THREE.Vector3();
@@ -288,9 +302,13 @@ reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       const i = pr.index;
       const j = (i + 3) % n;
       const along = fwd.x * (track.px[j] - track.px[i]) + fwd.z * (track.pz[j] - track.pz[i]);
-      // most of the window ahead of where the camera looks
-      const back = along >= 0 ? 12 : TILES - 12;
-      uniforms.uS0.value = Math.floor(pr.s) - back;
+      // the window runs on ahead of where the camera looks
+      uniforms.uS0.value = Math.floor(pr.s);
+      uniforms.uDir.value = along >= 0 ? 1 : -1;
+    },
+    setLong(on) {
+      geo.setDrawRange(0, (on ? count : nearCount) * V);
+      uniforms.uFade.value.set(...(on ? FADE_FAR : FADE));
     },
     setEnabled(on) {
       enabled = on;

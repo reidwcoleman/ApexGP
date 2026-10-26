@@ -31,14 +31,16 @@ const FILM = {
   // ground sat at mid-grey 0.20–0.27 against the footage's ~0.45, its mids yellow (b/g 0.76 vs 0.90) and
   // over-saturated (0.28 vs 0.19), its sky 3× the ground against ~1.1×. Broadcast cameras expose for the
   // track and grade near neutral: brighter, cleaner, only a touch warm in sunshine)
-  exposure: 1.75,
+  // (2026-10-26, Reid: "insane graphics" — the broadcast-neutral grade read milky and flat next to a
+  // modern F1 game: richer colour and contrast in every look, and a deep blue sunny sky)
+  exposure: 1.65,
   /** a grey day's exposure (the eye adaptation already meters a dim day up; sunshine needs the extra stop) */
   exposureGrey: 1.3,
   /** with the sun at the horizon and below (dusk): the floodlights and headlights carry the picture */
   duskExposure: 0.9,
   nightExposure: 1.1,
-  saturation: 0.6,
-  contrast: 0.9,
+  saturation: 0.86,
+  contrast: 1.03,
   tint: [1.05, 1.0, 0.9],
   shadowTint: [1.0, 0.99, 1.0],
   /** the sky held back from the brighter exposure (the camera's knee) */
@@ -65,7 +67,7 @@ const FILM = {
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
   skyHot: 0.3,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
-  dayMilk: 0.55,
+  dayMilk: 0.2,
 };
 
 /**
