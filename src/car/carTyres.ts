@@ -48,6 +48,8 @@ export interface TyreUniforms {
   uTyreB: { value: THREE.Vector4 };
   uTyreC: { value: THREE.Vector4 };
   uTyreD: { value: THREE.Vector4 };
+  /** wheel-cover ring: linear team colour, w = on */
+  uTyreE: { value: THREE.Vector4 };
 }
 export function tyreUniforms(): TyreUniforms {
   return {
@@ -55,6 +57,7 @@ export function tyreUniforms(): TyreUniforms {
     uTyreB: { value: new THREE.Vector4(0, 0, 0, 0) },
     uTyreC: { value: new THREE.Vector4(0, 0, 0, 0) },
     uTyreD: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTyreE: { value: new THREE.Vector4(0, 0, 0, 0) },
   };
 }
 export function applyTyreLook(u: TyreUniforms, s: TyreLook) {
@@ -225,6 +228,7 @@ const FRAG_PARS = /* glsl */ `
 uniform vec4 uTyreA;
 uniform vec4 uTyreB;
 uniform vec4 uTyreC;
+uniform vec4 uTyreE;
 uniform sampler2D tyreDetail;
 vec3 tyrePerturb( vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir ) {
   vec3 vSigmaX = normalize( dFdx( surf_pos.xyz ) );
@@ -363,6 +367,9 @@ if ( tyTread > 0.5 ) {
   tyC = mix( tyC, vec3( 0.06, 0.05, 0.041 ), dust * 0.55 );
   tyRough += dust * 0.22;
   tyDirtAll = dust;
+  // the team's ring on the cover (orm red marks it; uTyreE: linear colour, w = on)
+  float tyTint = texture2D( roughnessMap, vRoughnessMapUv ).r * uTyreE.w;
+  tyC = mix( tyC, uTyreE.rgb * ( 1.0 - dust * 0.4 ), tyTint );
 }
 // carbon-black rubber reflects ~2.5 % (a charcoal, not a hole): the atlas paints it near 0.7 %, which read as
 // cut-outs in the frame in any light, the sidewall's shape and sheen gone. Lifted here (after the region
@@ -414,6 +421,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
     sh.uniforms.uTyreB = u.uTyreB;
     sh.uniforms.uTyreC = u.uTyreC;
     sh.uniforms.uTyreD = u.uTyreD;
+    sh.uniforms.uTyreE = u.uTyreE;
     sh.uniforms.tyreDetail = { value: tyreDetailTexture() };
     // (the world's sky fill, as for the bodywork: carAO CAR_FILL)
     sh.uniforms.uCarFill = CAR_FILL;
@@ -429,7 +437,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_LIGHTS);
   };
-  mat.customProgramCacheKey = () => 'apex-tyre-v4';
+  mat.customProgramCacheKey = () => 'apex-tyre-v5';
 }
 
 /** a wheel material with its own condition uniforms */

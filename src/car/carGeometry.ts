@@ -487,7 +487,9 @@ function frontWing(b: Buckets, level: Level) {
       [0.02, 0.03, 0.05, 0.04, 0.04, 0.05, 0.08, 0.05, 0.03],
       level === 2 ? 1 : 3,
     );
-    plate(P.carbon, ep, [(FW_SPAN + 0.006) * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);
+    // outer face in the livery (as the teams run them: the endplate is a billboard seen side-on),
+    // the edges and the inner face bare carbon
+    plate(P.paint, ep, [(FW_SPAN + 0.006) * side, 0, 0], [0, 0, 1], [0, 1, 0], 0.012, (_a, _b, face) => paintCellUV(face !== 0 && face * side < 0 ? PC.primary : PC.carbon), CUV);
     if (level < 2) {
       // footplate: a horizontal strip along the endplate foot, curling outboard
       plate(P.carbon, roundPoly([[3.02, 0], [2.46, 0], [2.46, 0.07], [3.02, 0.085]], 0.02, 2), [(FW_SPAN - 0.03) * side, 0.03, 0], [0, 0, 1], [side, 0, 0], 0.006, (a, bb) => [a / CARBON_TILE, bb / CARBON_TILE]);

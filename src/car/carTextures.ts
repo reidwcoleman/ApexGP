@@ -375,6 +375,15 @@ export function wheelTextures(compound: Compound = 'soft'): WheelSet {
     go.arc(cx, cy, rr(RIM_R - 0.006), 0, Math.PI * 2, true);
     go.fillStyle = 'rgb(0, 80, 255)';
     go.fill();
+    // the team's ring round the cover (orm red = the tint mask: the tyre shader paints it the car's
+    // colour), and a fine one hugging the nut
+    for (const [r0, r1, rough] of [[RIM_R - 0.044, RIM_R - 0.027, 56], [0.052, 0.058, 56]] as const) {
+      go.beginPath();
+      go.arc(cx, cy, rr(r1), 0, Math.PI * 2);
+      go.arc(cx, cy, rr(r0), 0, Math.PI * 2, true);
+      go.fillStyle = `rgb(255, ${rough}, 0)`;
+      go.fill();
+    }
 
     // ------------------------------------------ blur disc (transparent), radius ↔ WHEEL_R − 0.006
     const b = ctx2d(bl);

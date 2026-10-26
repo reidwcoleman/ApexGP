@@ -969,6 +969,12 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   let compound: Compound = 'soft';
   // one wheel material per corner (FL FR RL RR): each tyre shows its own wear; one shared program
   const tyres = [0, 1, 2, 3].map((i) => createTyreMaterial(compound, `car-wheel-${['FL', 'FR', 'RL', 'RR'][i]}`));
+  // the cover's ring in the team colour (the secondary when the primary would vanish on the black cover)
+  {
+    const ring = new THREE.Color(team.primary);
+    if (ring.r * 0.2126 + ring.g * 0.7152 + ring.b * 0.0722 < 0.03) ring.set(team.secondary);
+    for (const t of tyres) t.u.uTyreE.value.set(ring.r, ring.g, ring.b, 1);
+  }
   const ts = trimShared();
   const trimTex = trimTexture(team, driver, seat);
   const uniforms: TrimUniforms = { uHeat: { value: 0 }, uRainLight: { value: 0 }, uSelf: DASH_GLOW };

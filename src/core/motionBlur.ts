@@ -76,11 +76,13 @@ void main() {
   vec3 vp = ray.xyz * (vz / ray.z);
   vec3 wpos = (camWorld * vec4(vp, 1.0)).xyz;
   vec3 prev = wpos;
+  float onCar = 0.0;
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
     if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
       prev = (carPrev[i] * vec4(l, 1.0)).xyz;
+      onCar = 1.0;
       break;
     }
   }
@@ -92,7 +94,8 @@ void main() {
   // (half extents from here on; the longest streak is held to maxLen of the frame height)
   float len = length(v * vec2(aspect, 1.0));
   if (len > maxLen * 0.5) v *= maxLen * 0.5 / len;
-  gl_FragColor = vec4(v, -vz, 1.0);
+  // (w: 1 on a tracked car — the gather keeps the road from borrowing its colour)
+  gl_FragColor = vec4(v, -vz, onCar);
 }
 `;
 
@@ -204,7 +207,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     float ly = max(length(cy.xy * resolution), 0.5);
     float d = abs(t) * (own ? lOwn : lmax);
     float f = mbFront(cy.z, zx);
-    float b = mbFront(zx, cy.z);
+    // (b: what is behind X shows through X's own streak — right for a moving object over its
+    // background, wrong for the road just in front of a sharp tracked car: the road's streak runs up
+    // into the car, which is no more "behind" it than the next metre of road, and the car's colour
+    // was pulled down onto the tarmac as a ghost trail under the rear wing)
+    float b = mbFront(zx, cy.z) * (cy.w > 0.5 && cx.w < 0.5 ? 0.0 : 1.0);
     float a = f * mbCone(d, ly) + b * mbCone(d, lx) + mbCyl(d, ly) * mbCyl(d, lx) * 2.0;
     acc += mbSafe(texture2D(inputBuffer, su).rgb) * a;
     w += a;

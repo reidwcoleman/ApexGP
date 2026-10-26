@@ -93,6 +93,22 @@ vec3 history(vec2 uv) {
   return max(r / wsum, 0.0);
 }
 
+// the world position under a screen point (this frame's depth)
+vec3 worldAt(vec2 uv, float d) {
+  float vz = perspectiveDepthToViewZ(d, cameraNear, cameraFar);
+  vec4 ray = projInv * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+  ray.xyz /= ray.w;
+  return (camWorld * vec4(ray.xyz * (vz / ray.z), 1.0)).xyz;
+}
+bool onCar(vec3 wpos) {
+  for (int i = 0; i < ${MOTION_CARS}; i++) {
+    if (i >= carCount) break;
+    vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
+    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) return true;
+  }
+  return false;
+}
+
 // clip a point toward the box centre until it lies inside the box (not a per-axis clamp: that
 // shifts the colour's hue)
 vec3 clipBox(vec3 h, vec3 mn, vec3 mx) {
@@ -135,14 +151,16 @@ void main() {
   vec3 wpos = (camWorld * vec4(ray.xyz * (vz / ray.z), 1.0)).xyz;
   vec3 prev = wpos;
   vec3 wl;
+  bool curCar = false;
   // the steering wheel turns inside its car: back through its own last frame
-  if (onWheel(wpos, wl)) prev = (wheelPrev * vec4(wl, 1.0)).xyz;
+  if (onWheel(wpos, wl)) { prev = (wheelPrev * vec4(wl, 1.0)).xyz; curCar = true; }
   else
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
     if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
       prev = (carPrev[i] * vec4(l, 1.0)).xyz;
+      curCar = true;
       break;
     }
   }
@@ -154,6 +172,14 @@ void main() {
     return;
   }
 
+  // disocclusion by a car that holds its place on screen (the one you chase): the road streaming out
+  // from under its diffuser reprojects up into the car, whose dark underside sat inside the shadowed
+  // road's colour box and trailed down the tarmac as a ghost of the strakes. Where the history
+  // lands on a tracked car and this pixel is world, the history is someone else's: start over.
+  if (!curCar && onCar(worldAt(hUv, texture2D(tDepth, hUv).r))) {
+    gl_FragColor = vec4(itmap(rgb(cur)), 1.0);
+    return;
+  }
   vec3 hist = ycocg(tmap(history(hUv)));
   // variance clipping (γ = 1), inside the neighbourhood's min / max
   vec3 mean = m1 / 9.0;
