@@ -1,0 +1,683 @@
+/* ======================================================================
+   The World Tour (Career): the world map of circuits, the tour's score over
+   its top-left, the picked circuit's card on the right (src/ui/Tour.ts).
+   Medal colours are the only colours besides the team accent.
+   ====================================================================== */
+#menu .hub-panel.wide.wtour {
+  --gold: #e9c25d;
+  --silver: #c9d0d9;
+  --bronze: #c98950;
+  display: block;
+  padding: 0;
+  bottom: 56px;
+  background: #07080c;
+}
+
+/* ---------------------------------------------------------------- map */
+.tr-map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 40% 45%, #0f1420 0%, #090b11 60%, #06070a 100%);
+  cursor: grab;
+}
+.tr-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.tr-world {
+  transform-origin: 0 0;
+  transition: transform 0.9s cubic-bezier(0.65, 0, 0.25, 1);
+}
+.tr-map.instant .tr-world,
+.tr-map.instant .pinw {
+  transition: none;
+}
+.tr-svg .sea {
+  fill: #0b1019;
+  stroke: rgba(140, 170, 220, 0.1);
+  stroke-width: 0.5;
+}
+.tr-svg .grat {
+  fill: none;
+  stroke: rgba(140, 170, 220, 0.07);
+  stroke-width: 0.35;
+}
+/* the land: a soft lit edge under it, a gradient fill, the dot grid of a broadcast map over it,
+   hairline borders and a crisp coast */
+.tr-svg .shore {
+  fill: none;
+  stroke: rgba(120, 160, 230, 0.16);
+  stroke-width: 3.2;
+  stroke-linejoin: round;
+  filter: url(#tr-glow);
+}
+.tr-svg .land {
+  fill: url(#tr-land);
+}
+.tr-svg .dots {
+  fill: url(#tr-dots);
+}
+#tr-dots circle {
+  fill: rgba(255, 255, 255, 0.07);
+}
+.tr-svg .borders {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 0.3;
+  stroke-linejoin: round;
+}
+.tr-svg .coast {
+  fill: none;
+  stroke: rgba(200, 215, 240, 0.32);
+  stroke-width: 0.4;
+  stroke-linejoin: round;
+}
+
+/* the route: flown legs in the accent with a glow, the leg to the next circuit marching, the rest dotted */
+.tr-svg .route {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.tr-svg .route.todo {
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 1.4;
+  stroke-dasharray: 1 5;
+}
+.tr-svg .route.done {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+.tr-svg .route.done-glow {
+  stroke: var(--accent);
+  stroke-width: 7;
+  opacity: 0.25;
+  filter: url(#tr-glow);
+}
+.tr-svg .route.lead {
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 7 6;
+  animation: tr-march 1.1s linear infinite;
+}
+@keyframes tr-march {
+  to {
+    stroke-dashoffset: -13;
+  }
+}
+
+/* ---------------------------------------------------------------- pins: the circuit's own shape on a tile */
+.tr-svg .pinw {
+  cursor: pointer;
+  transition: transform 0.9s cubic-bezier(0.65, 0, 0.25, 1);
+}
+.tr-svg .spot {
+  fill: #fff;
+  stroke: #07080c;
+  stroke-width: 1.2;
+}
+.tr-svg .leader {
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 1;
+}
+.tr-svg .pin {
+  transition: opacity 0.3s;
+}
+.tr-svg .tile {
+  fill: rgba(12, 14, 20, 0.94);
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1.5;
+  transition: stroke 0.25s, fill 0.25s;
+}
+.tr-svg .trk path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+.tr-svg .halo {
+  fill: var(--accent);
+  opacity: 0;
+}
+.tr-svg .pst path {
+  fill: rgba(255, 255, 255, 0.18);
+}
+.tr-svg .pinw.gold .pst path.on {
+  fill: var(--gold);
+}
+.tr-svg .pinw.silver .pst path.on {
+  fill: var(--silver);
+}
+.tr-svg .pinw.bronze .pst path.on {
+  fill: var(--bronze);
+}
+.tr-svg .pinw.gold .tile {
+  stroke: var(--gold);
+  stroke-width: 2.2;
+}
+.tr-svg .pinw.silver .tile {
+  stroke: var(--silver);
+  stroke-width: 2.2;
+}
+.tr-svg .pinw.bronze .tile {
+  stroke: var(--bronze);
+  stroke-width: 2.2;
+}
+.tr-svg .tag text {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  fill: #fff;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgba(5, 6, 10, 0.9);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.tr-svg .pinw:hover .tag text,
+.tr-svg .pinw.sel .tag text,
+.tr-svg .pinw.next .tag text {
+  opacity: 1;
+}
+/* the next circuit: an accent tile, a pulse behind it */
+.tr-svg .pinw.next .tile {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 2;
+}
+.tr-svg .pinw.next .halo {
+  animation: tr-pulse 2s ease-out infinite;
+}
+@keyframes tr-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.55);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+/* locked: dim, the padlock on the corner */
+.tr-svg .pinw.locked .tile {
+  fill: rgba(10, 11, 15, 0.9);
+  stroke: rgba(255, 255, 255, 0.16);
+}
+.tr-svg .pinw.locked .trk path {
+  stroke: rgba(255, 255, 255, 0.3);
+}
+.tr-svg .pinw.locked .spot {
+  fill: rgba(255, 255, 255, 0.45);
+}
+.tr-svg .lkb circle {
+  fill: #20232b;
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 1;
+}
+.tr-svg .lkb .lk {
+  color: rgba(255, 255, 255, 0.75);
+}
+/* the picked one: lifted, a white ring */
+.tr-svg .pinw.sel .tile {
+  stroke: #fff;
+  stroke-width: 2.6;
+}
+.tr-svg .pinw.sel .pin {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25));
+}
+.tr-svg .pinw.scenic.locked .tile {
+  stroke-dasharray: 3 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tr-world,
+  .tr-svg .pinw {
+    transition: none;
+  }
+  .tr-svg .route.lead,
+  .tr-svg .pinw.next .halo {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- the tour's title and score */
+.tr-head {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: var(--s5) var(--s6) var(--s6) var(--s5);
+  background: radial-gradient(120% 120% at 0% 0%, rgba(6, 7, 10, 0.92) 30%, rgba(6, 7, 10, 0) 70%);
+  pointer-events: none;
+}
+.tr-head .eyebrow {
+  font-size: var(--t-cap);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.tr-title {
+  margin-top: var(--s1);
+  font-family: var(--font-display);
+  font-size: 58px;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+.tr-title span {
+  color: var(--accent);
+}
+.tr-sub {
+  margin-top: var(--s2);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink2);
+}
+.tr-stats {
+  display: flex;
+  gap: var(--s5);
+  margin-top: var(--s4);
+}
+.tr-stats .ts b {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
+.tr-stats .ts b small {
+  font-size: 17px;
+  color: var(--ink3);
+  font-weight: 600;
+}
+.tr-stats .ts span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.tr-stats .ts.med b {
+  gap: 6px;
+  font-size: 24px;
+}
+.tr-stats .ts.med .md {
+  margin-left: 4px;
+}
+.tr-stats .ts.med .md:first-child {
+  margin-left: 0;
+}
+.wtour .st {
+  fill: rgba(255, 255, 255, 0.2);
+  flex: none;
+}
+.wtour .st.on {
+  fill: var(--gold);
+}
+.tr-prog {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: var(--s4);
+}
+.tr-prog i {
+  width: 18px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  transform: skewX(-18deg);
+}
+.tr-prog i.open,
+.tr-prog i.done {
+  background: rgba(255, 255, 255, 0.5);
+}
+.tr-prog i.next {
+  background: var(--accent);
+}
+.tr-prog i.gold { background: var(--gold); }
+.tr-prog i.silver { background: var(--silver); }
+.tr-prog i.bronze { background: var(--bronze); }
+.tr-prog em {
+  margin-left: var(--s2);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink2);
+}
+.wtour .md.gold { background: var(--gold); }
+.wtour .md.silver { background: var(--silver); }
+.wtour .md.bronze { background: var(--bronze); }
+
+.tr-legend {
+  position: absolute;
+  left: var(--s5);
+  bottom: var(--s4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+  pointer-events: none;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+.tr-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tr-legend .lg {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6);
+  background: #0c0e14;
+  color: rgba(255, 255, 255, 0.7);
+}
+.tr-legend .lg.next {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1.5px #fff;
+}
+.tr-legend .lg.locked {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.18);
+}
+.tr-legend .lg.locked .lk-i {
+  width: 9px;
+  height: 9px;
+}
+.tr-legend .lg.dia {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+.tr-legend .md-l .md + .md {
+  margin-left: var(--s2);
+}
+
+/* ---------------------------------------------------------------- the picked circuit's card */
+.tr-card {
+  position: absolute;
+  top: var(--s4);
+  right: var(--s4);
+  max-height: calc(100% - 2 * var(--s4));
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(11, 12, 17, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 20px 50px rgba(0, 0, 0, 0.45);
+  clip-path: var(--chamfer);
+  overflow: hidden;
+}
+.tr-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.tr-art {
+  position: relative;
+  height: 170px;
+  /* (the key art carries the wordmark on its left: framed on its right half) */
+  background-size: auto 180%;
+  background-position: 100% 45%;
+}
+.tr-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(11, 12, 17, 0.1) 0%, rgba(11, 12, 17, 0.35) 55%, rgba(11, 12, 17, 1) 100%);
+}
+.tr-card.locked .tr-art {
+  filter: grayscale(0.85) brightness(0.55);
+}
+.tr-art-trk {
+  position: absolute;
+  right: var(--s3);
+  bottom: var(--s2);
+  width: 120px;
+  height: 84px;
+  z-index: 1;
+}
+.tr-art-trk path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.8));
+}
+.tr-art .badge {
+  position: absolute;
+  left: var(--s4);
+  top: var(--s4);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: rgba(10, 11, 15, 0.82);
+  color: #fff;
+  clip-path: var(--chamfer-sm);
+}
+.tr-art .badge.next {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.tr-card.gold .tr-art .badge { background: var(--gold); color: #1a1406; }
+.tr-card.silver .tr-art .badge { background: var(--silver); color: #12151a; }
+.tr-card.bronze .tr-art .badge { background: var(--bronze); color: #1a0f06; }
+.tr-art .badge .lk-i {
+  width: 11px;
+  height: 11px;
+}
+.tr-art .rno {
+  position: absolute;
+  left: var(--s4);
+  bottom: 2px;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: 54px;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.92);
+  text-transform: uppercase;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.6);
+}
+.tr-id {
+  padding: var(--s2) var(--s4) 0;
+}
+.tr-id .cap {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.tr-id .nm {
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.05;
+}
+.tr-id .facts {
+  display: flex;
+  gap: var(--s3);
+  margin-top: var(--s1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+.tr-id .ln {
+  margin-top: var(--s2);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+.tr-id .fc {
+  margin-top: var(--s1);
+  font-size: 12px;
+  color: var(--ink3);
+}
+.tr-ladder {
+  display: grid;
+  gap: 2px;
+  margin: var(--s3) var(--s4) 0;
+}
+.tr-ladder .rung {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 30px;
+  padding: 0 var(--s3);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink3);
+}
+.tr-ladder .rung .md {
+  opacity: 0.35;
+}
+.tr-ladder .rung em {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.tr-ladder .rung.won {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+}
+.tr-ladder .rung.won .md {
+  opacity: 1;
+}
+.tr-why {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+  margin: var(--s3) var(--s4) var(--s3);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+.tr-why b {
+  color: var(--ink);
+}
+.tr-why .lk-i {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink3);
+}
+.tr-laps {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.tr-laps > span {
+  margin-right: auto;
+}
+.tr-lap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 6px 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink2);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  clip-path: var(--chamfer-sm);
+  transition: background 0.2s, color 0.2s;
+}
+.tr-lap small {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: inherit;
+  opacity: 0.8;
+}
+.tr-lap.on {
+  background: #fff;
+  color: #0a0c11;
+}
+.tr-lap.sel {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+.tr-acts {
+  display: grid;
+  grid-template-columns: 52px 1fr 52px;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4) var(--s4);
+}
+.tr-acts .cta {
+  margin: 0;
+  height: 52px;
+}
+.tr-acts .tr-step {
+  font-size: 26px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+}
+.tr-acts .tr-go.dis {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink3);
+  cursor: default;
+}
+
+/* short windows: a slimmer card */
+@media (max-height: 640px) {
+  .tr-art {
+    height: 120px;
+  }
+  .tr-title {
+    font-size: 44px;
+  }
+}
+/* narrow: the card along the bottom, the map above it */
+@media (max-width: 574px) {
+  .tr-card {
+    top: auto;
+    left: var(--s3);
+    right: var(--s3);
+    width: auto;
+    height: 52%;
+  }
+  .tr-head {
+    padding: var(--s3);
+  }
+  .tr-title {
+    font-size: 36px;
+  }
+  .tr-stats,
+  .tr-legend {
+    display: none;
+  }
+}

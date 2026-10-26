@@ -7,7 +7,7 @@ export const BOOT_ART = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa
 
 const BY_TRACK: Record<string, string[]> = {
   yasmarina: ['yas_chase'],
-  suzuka: ['suzuka_onboard', 'suzuka_dusk'],
+  suzuka: ['suzuka_dusk', 'suzuka_onboard'],
   zandvoort: ['zandvoort_sunset'],
   spa: ['spa_rain'],
   interlagos: ['interlagos_rain'],
@@ -23,6 +23,11 @@ const BY_TRACK: Record<string, string[]> = {
   redmesa: ['redmesa_golden'],
 };
 
+/** one fixed key art per circuit (the tour's card: the same picture every time it's picked) */
+export function stillFor(track: string): string {
+  const list = BY_TRACK[track] ?? BOOT_ART;
+  return `${import.meta.env.BASE_URL}loading/${list[0]}.webp`;
+}
 /** the picture for a trip to this circuit (its own, else one from the rotation) */
 export function artFor(track: string): string {
   const list = BY_TRACK[track] ?? BOOT_ART;

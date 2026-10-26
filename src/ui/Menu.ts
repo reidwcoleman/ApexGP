@@ -11,11 +11,12 @@ import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
-import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
+import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SCENIC_STARS, TOUR_LAPS, medalFor, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
-import { openWizard, renderHub, renderRd, renderRoundSummary, renderStart, resetSeasonMap } from './CareerHub.ts';
+import { openWizard, renderHub, renderRd, renderRoundSummary, renderStart } from './CareerHub.ts';
+import { renderTour, resetTour } from './Tour.ts';
 import { LAP_CHOICES, type DriverCareer, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import type { PlayerDriver } from '../career/Series.ts';
 import { BIND_PROMPT, BIND_STEPS, Binder, DEFAULT_CONTROLS, controlPrefs, deviceName, findDev, isWheelId, padSteer, pedal, wheelSteer, type ControlPrefs } from '../core/controllers.ts';
@@ -387,7 +388,7 @@ export class Menu {
 
   private buildTitle() {
     // (back in the garage: the career map opens on the round you're working on)
-    resetSeasonMap();
+    resetTour();
     const s = this.screens.get('title')!;
     s.innerHTML = '';
     s.classList.add('hub');
@@ -515,14 +516,17 @@ export class Menu {
         }
       }, !open);
     });
-    // the scenic road courses: fictional circuits in beautiful places, open from the start
+    // the scenic road courses: fictional circuits in beautiful places, opened by World Tour stars
     el('div', 'hp-cap', p, 'Scenic roads');
     SCENIC.forEach((cd) => {
       const info = CIRCUIT_INFO[cd.id];
       const here = cd.id === this.setup.track;
       const best = this.career.data.best[cd.id];
-      const card = el('div', 'ccard scenic' + (here ? ' here' : ''), p);
-      const status = here ? `<span class="here-tag">In the garage</span>` : best !== undefined ? `<span class="best"><em>Best</em><b>P${best}</b></span>` : '';
+      const open = this.career.isUnlocked(cd.id);
+      const card = el('div', 'ccard scenic' + (open ? '' : ' locked') + (here ? ' here' : ''), p);
+      const status = !open
+        ? `<span class="lock"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="7" width="10" height="7" rx="1.6" fill="currentColor"/></svg>${SCENIC_STARS[cd.id]} stars</span>`
+        : here ? `<span class="here-tag">In the garage</span>` : best !== undefined ? `<span class="best"><em>Best</em><b>P${best}</b></span>` : '';
       card.innerHTML = `<span class="rnd">✦</span><svg class="map" viewBox="0 0 64 44"><path d="${circuitPath(layoutPoints(cd), 64, 44, 3)}"/></svg><div class="cinfo"><div class="cname">${cd.name}</div><div class="cmeta"><span>${info.country}</span><span>${info.km} km</span><span>${info.line}</span></div></div><div class="cstat">${status}</div>`;
       this.action(card, () => {
         if (here) {
@@ -533,7 +537,7 @@ export class Menu {
           save('apexgp.setup', this.setup);
           this.cb.onTravel(cd.id);
         }
-      });
+      }, !open);
     });
     const row = el('div', 'hp-actions', p);
     const race = el('div', 'cta', row, 'Race weekend');
@@ -551,7 +555,7 @@ export class Menu {
       const watch = el('div', 'cta ghost watch', row, 'Watch a simulated race');
       this.action(watch, () => this.cb.onSpectate?.({ ...this.setup }));
     }
-    el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Quick races run at any circuit your career has opened, with your own laps and weather; the scenic roads are always open. Medals and new circuits come from Career.`);
+    el('div', 'hp-note', p, UNLOCK_ALL ? 'Every circuit is open: pick any round and race. Points pay credits for car development.' : `Quick races run at any circuit the World Tour has opened, with your own laps and weather. Medals, stars and new circuits come from the World Tour in Career.`);
     // start on the Race button, with the circuit you're at scrolled into view (14+ rounds overflow)
     this.sel = CIRCUITS.length + SCENIC.length;
     const here = p.querySelector<HTMLElement>('.ccard.here');
@@ -586,11 +590,17 @@ export class Menu {
       const go = el('div', 'cta home-go', box, 'Career');
       this.action(go, () => this.setTab('career'));
     } else {
-      el('div', 'eyebrow', box, 'Your journey to Formula 1');
-      el('div', 'title', box, 'Start your career');
-      el('div', 'meta', box, 'Create a driver, sign with a team and race the season.');
-      const go = el('div', 'cta home-go', box, 'Start career');
-      this.action(go, () => this.openCareerWizard());
+      // the World Tour: the next circuit to win your way through, or the tour complete
+      const tn = this.career.nextRound();
+      const tc = tn ? ALL_CIRCUITS.find((c) => c.id === tn)! : null;
+      const st = this.career.stars();
+      el('div', 'eyebrow', box, `World Tour · ${st} of ${ALL_CIRCUITS.length * 3} stars`);
+      el('div', 'title', box, tc ? `Next up: ${tc.short}` : 'Every circuit open');
+      el('div', 'meta', box, tc ? `Top ${UNLOCK_POS} at ${tc.short} opens the next circuit on the map.` : 'Go back for the wins: every win is three stars.');
+      const go = el('div', 'cta home-go', box, tc ? `Race ${tc.short}` : 'World Tour');
+      this.action(go, () => (tc ? this.cb.onCareerRace(tc.id) : this.setTab('career')));
+      const map = el('div', 'home-quick', box, 'World Tour map ›');
+      this.action(map, () => this.setTab('career'));
     }
     const quick = el('div', 'home-quick', box, `Quick race at ${this.setup.track === cd.id ? cd.short : (ALL_CIRCUITS.find((c) => c.id === this.setup.track)?.short ?? cd.short)} ›`);
     this.action(quick, () => this.setTab('race'));
@@ -614,7 +624,6 @@ export class Menu {
         action: (e, fn, dis) => this.action(e, fn, dis),
         onRace: (id) => this.cb.onCareerRace(id),
         onQuickRace: (id) => {
-          // to the Quick race tab, travelling to the circuit first if the garage is elsewhere
           this.setTab('race');
           if (id !== this.setup.track) {
             this.setup.track = id;
@@ -638,9 +647,19 @@ export class Menu {
       this.sel = 0;
       return;
     }
-    // no career yet: the season map to come, and the way in
-    renderStart(p, { action: (e, fn, dis) => this.action(e, fn, dis), onNewCareer: () => this.openCareerWizard() });
-    this.sel = this.items.length - 1;
+    // the World Tour: the world map of circuits, each opened by a top-five finish at the one before
+    const before = this.items.length;
+    const { go } = renderTour(p, {
+      career: this.career,
+      action: (e, fn, dis) => this.action(e, fn, dis),
+      onRace: (id) => this.cb.onCareerRace(id),
+      forecast: (id) => fcLabel(this.cb.careerForecast(id)),
+      info: (id) => CIRCUIT_INFO[id] ?? { country: ALL_CIRCUITS.find((c) => c.id === id)?.country ?? '', km: '', turns: 0 },
+      circuitPath,
+      layoutPoints,
+    });
+    // (focus starts on the race button)
+    this.sel = Math.max(before, this.items.findIndex((it) => it.el === go));
   }
 
   private tabCar(p: HTMLElement) {
@@ -961,9 +980,13 @@ export class Menu {
       el('div', 'pcap', ob, 'Team targets');
       for (const o of dc!.objectives()) el('div', 'ch-o', ob, `<i></i><span>${o.label}</span><b>+${o.rp} RP</b>`);
     } else if (career) {
-      el('div', 'pcap round', p, `Career · Round ${ri + 1} of ${CIRCUITS.length}`);
-      el('h2', '', p, CIRCUITS[ri]?.name ?? 'Race');
-      el('p', 'lede', p, `${CAREER_LAPS} laps · ${fcLabel(fc!)} · top ${UNLOCK_POS} unlocks ${CIRCUITS[ri + 1]?.short ?? 'the season finale'}`);
+      const cd = ALL_CIRCUITS.find((c) => c.id === st.track);
+      const scenic = ri < 0;
+      el('div', 'pcap round', p, scenic ? 'World Tour · Scenic bonus' : `World Tour · Round ${ri + 1} of ${CIRCUITS.length}`);
+      el('h2', '', p, cd?.name ?? 'Race');
+      const m = medalFor(this.career.data.best[st.track]);
+      const goal = !m ? (scenic ? `top ${UNLOCK_POS} earns your first star` : `top ${UNLOCK_POS} opens ${CIRCUITS[ri + 1]?.short ?? 'the last stars'}`) : m === 'gold' ? 'all three stars won here' : `beat P${this.career.data.best[st.track]} for more stars`;
+      el('p', 'lede', p, `${fcLabel(fc!)} · ${goal}`);
     } else {
       el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
       el('p', 'lede', p, this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.');
@@ -991,7 +1014,11 @@ export class Menu {
         const i = Math.max(0, LAP_CHOICES.indexOf(dc!.laps));
         dc!.setLaps(LAP_CHOICES[(i + d + LAP_CHOICES.length) % LAP_CHOICES.length]);
       });
-    else if (career) this.fixed(p, 'Laps', `${CAREER_LAPS} <span class="dim">· career distance</span>`);
+    else if (career)
+      this.opt(p, 'Laps', () => `${this.career.tourLaps}${this.career.tourLaps >= PIT_RACE_LAPS ? ' <span class="dim">· mandatory pit stop</span>' : ' <span class="dim">· no pit stops</span>'}`, (d) => {
+        const i = Math.max(0, TOUR_LAPS.indexOf(this.career.tourLaps as 5 | 10));
+        this.career.setTourLaps(TOUR_LAPS[(i + d + TOUR_LAPS.length) % TOUR_LAPS.length]);
+      });
     if (racing) {
       if (!career)
         this.opt(p, 'Laps', () => `${st.laps} <span class="dim">· ${st.laps >= PIT_RACE_LAPS ? 'mandatory pit stop' : 'no pit stops'}</span>`, (d) => {

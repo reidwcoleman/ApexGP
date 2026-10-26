@@ -1,7 +1,7 @@
 import { everUnlocked, unlockForever } from './Unlocks.ts';
 import { F1_SPEC, type CarSpec } from '../sim/CarPhysics.ts';
 import { POINTS, AI_SKILL } from '../race/Race.ts';
-import { CIRCUITS, isScenic } from '../world/Circuits.ts';
+import { ALL_CIRCUITS, CIRCUITS, isScenic } from '../world/Circuits.ts';
 import type { LiveryPattern, Team } from '../race/Teams.ts';
 
 /**
@@ -133,6 +133,8 @@ export interface CareerData {
   aiSkill?: number;
   /** 2: the AI rating was lifted once when the field got quicker off the line and in traffic (2026-10-23) */
   aiSkillV?: number;
+  /** the World Tour's race distance (5, or 10 with the mandatory stop) */
+  tourLaps?: number;
 }
 
 export interface RaceReward {
@@ -174,6 +176,12 @@ export type Medal = 'gold' | 'silver' | 'bronze' | null;
 export function medalFor(best: number | undefined): Medal {
   return best === undefined ? null : best === 1 ? 'gold' : best <= 3 ? 'silver' : best <= UNLOCK_POS ? 'bronze' : null;
 }
+/** stars a medal is worth on the World Tour */
+export const STARS: Record<Exclude<Medal, null>, number> = { gold: 3, silver: 2, bronze: 1 };
+/** the scenic road courses are the tour's bonus circuits: opened by stars, not by the chain */
+export const SCENIC_STARS: Record<string, number> = { serena: 5, bergsee: 12, redmesa: 20 };
+/** the World Tour's race distances */
+export const TOUR_LAPS = [5, 10] as const;
 
 export class Career {
   data: CareerData;
@@ -217,7 +225,12 @@ export class Career {
   isUnlocked(id: string): boolean {
     // (once opened, open for good: a new season or a new career never locks it again)
     // (the scenic road courses are outside the calendar: always open)
-    if (UNLOCK_ALL || everUnlocked(id) || isScenic(id)) return true;
+    if (UNLOCK_ALL || everUnlocked(id)) return true;
+    if (isScenic(id)) {
+      const open = this.stars() >= (SCENIC_STARS[id] ?? 0);
+      if (open) unlockForever(id);
+      return open;
+    }
     let open = !!Career.extraUnlocked?.(id);
     if (!open) {
       const i = CIRCUITS.findIndex((c) => c.id === id);
@@ -243,10 +256,26 @@ export class Career {
     }
     return null;
   }
+  /** stars won on the World Tour (every circuit's best medal: win 3, podium 2, top five 1) */
+  stars(): number {
+    let n = 0;
+    for (const c of ALL_CIRCUITS) {
+      const k = medalFor(this.data.best[c.id]);
+      if (k) n += STARS[k];
+    }
+    return n;
+  }
+  get tourLaps(): number {
+    return TOUR_LAPS.includes(this.data.tourLaps as 5 | 10) ? this.data.tourLaps! : TOUR_LAPS[0];
+  }
+  setTourLaps(n: number) {
+    this.data.tourLaps = n;
+    this.save();
+  }
   /** medals won so far */
   medals() {
     const m = { gold: 0, silver: 0, bronze: 0 };
-    for (const c of CIRCUITS) {
+    for (const c of ALL_CIRCUITS) {
       const k = medalFor(this.data.best[c.id]);
       if (k) m[k]++;
     }

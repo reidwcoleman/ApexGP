@@ -1,0 +1,277 @@
+import { ALL_CIRCUITS, CIRCUITS, SCENIC, isScenic } from '../world/Circuits.ts';
+import type { CircuitDef } from '../world/CircuitGen.ts';
+import { SCENIC_STARS, STARS, TOUR_LAPS, UNLOCK_POS, medalFor, type Career, type Medal } from '../career/Career.ts';
+import { GEO, PIN_OFFSET } from '../career/Season.ts';
+import { WORLD_BORDERS, WORLD_GRATICULE, WORLD_H, WORLD_LAND, WORLD_OUTLINE, WORLD_PROJ, WORLD_W } from '../career/worldLand.ts';
+import { stillFor } from './loadingArt.ts';
+
+/**
+ * The career: the World Tour. No team to join, no season — a map of the world with every circuit on
+ * it. The first is open; a top-five finish at one opens the next along the route, and each circuit's
+ * best result is a medal worth stars (top five 1, podium 2, win 3). Stars open the three scenic road
+ * courses. You race with the car and team you've set up in the garage.
+ *
+ * Rendered into the garage's wide hub panel: the map fills it, the tour's title and score sit over
+ * its top-left, the picked circuit's card on the right.
+ */
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, parent?: HTMLElement, html?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  parent?.appendChild(e);
+  return e;
+}
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+export interface TourCtx {
+  career: Career;
+  /** register a clickable for the menu's keyboard/gamepad navigation */
+  action(e: HTMLElement, fn: () => void, disabled?: boolean): void;
+  /** race a tour round at this circuit (travels there first) */
+  onRace(id: string): void;
+  forecast(id: string): string;
+  info(id: string): { country: string; km: string; turns: number; line?: string };
+  circuitPath(points: number[], w: number, h: number, pad: number): string;
+  layoutPoints(def: CircuitDef): number[];
+}
+
+/** Natural Earth I, as tools/build_world.mjs projects the land */
+export function worldProject(lat: number, lon: number): [number, number] {
+  const R = Math.PI / 180;
+  const p = lat * R, l = lon * R, p2 = p * p, p4 = p2 * p2;
+  const x = l * (0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4)));
+  const y = p * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)));
+  return [(x + WORLD_PROJ.xMax) * WORLD_PROJ.s, (WORLD_PROJ.yTop - y) * WORLD_PROJ.s];
+}
+
+/** the circuit picked on the map (null: the round you're working on) */
+let sel: string | null = null;
+/** back in the garage: the map opens on the next round */
+export function resetTour() {
+  sel = null;
+}
+
+type State = 'done' | 'next' | 'open' | 'locked';
+const MEDAL_WORD: Record<Exclude<Medal, null>, string> = { gold: 'Win', silver: 'Podium', bronze: `Top ${UNLOCK_POS}` };
+const LOCK = `<path d="M-2.6 -0.6v-1.7a2.6 2.6 0 0 1 5.2 0V-0.6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="-3.8" y="-0.7" width="7.6" height="5.4" rx="1.2" fill="currentColor"/>`;
+const LOCK_ICON = `<svg class="lk-i" viewBox="-5 -5 10 10" width="14" height="14">${LOCK}</svg>`;
+const STAR = `<path d="M0-5.2l1.53 3.1 3.42.5-2.47 2.41.58 3.4L0 2.6l-3.06 1.61.58-3.4-2.47-2.41 3.42-.5z"/>`;
+const starsSvg = (n: number, size = 12) => [0, 1, 2].map((i) => `<svg class="st${i < n ? ' on' : ''}" viewBox="-6 -6 12 12" width="${size}" height="${size}">${STAR}</svg>`).join('');
+/** the leader offsets for the scenic pins (their spots sit close to real circuits) */
+const OFFSET: Record<string, [number, number]> = { ...PIN_OFFSET, serena: [46, 42], bergsee: [-3, -38], redmesa: [-30, -18] };
+
+export function renderTour(p: HTMLElement, ctx: TourCtx) {
+  const c = ctx.career;
+  p.classList.add('wtour');
+  const best = (id: string) => c.data.best[id];
+  const stateOf = (id: string): State => {
+    if (!c.isUnlocked(id)) return 'locked';
+    if (medalFor(best(id))) return 'done';
+    return 'open';
+  };
+  const next = c.nextRound();
+  const states = new Map<string, State>(ALL_CIRCUITS.map((cd) => [cd.id, cd.id === next ? 'next' : stateOf(cd.id)]));
+  const stars = c.stars();
+  const maxStars = ALL_CIRCUITS.length * 3;
+  const opened = ALL_CIRCUITS.filter((cd) => states.get(cd.id) !== 'locked').length;
+  const med = c.medals();
+  if (!sel || !ALL_CIRCUITS.some((cd) => cd.id === sel)) sel = next ?? [...CIRCUITS].reverse().find((cd) => states.get(cd.id) !== 'locked')?.id ?? CIRCUITS[0].id;
+
+  // ---------------------------------------------------------------- the map
+  const map = el('div', 'tr-map', p);
+  const pts = ALL_CIRCUITS.map((cd) => {
+    const g = GEO[cd.id] ?? [0, 0];
+    const [x, y] = worldProject(g[0], g[1]);
+    const o = OFFSET[cd.id] ?? [0, 0];
+    return { cd, id: cd.id, x, y, ox: o[0], oy: o[1], st: states.get(cd.id)!, scenic: isScenic(cd.id) };
+  });
+  const at = (id: string) => pts.find((q) => q.id === id)!;
+  // the route: the calendar's chain, each leg a shallow arc between the circuits' own spots
+  let done = '';
+  let lead = '';
+  let todo = '';
+  for (let i = 1; i < CIRCUITS.length; i++) {
+    const a = at(CIRCUITS[i - 1].id);
+    const b = at(CIRCUITS[i].id);
+    const dd = Math.hypot(b.x - a.x, b.y - a.y);
+    const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${((a.x + b.x) / 2).toFixed(1)} ${((a.y + b.y) / 2 - Math.min(60, dd * 0.25)).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+    if (b.st !== 'locked' && b.st !== 'next') done += seg;
+    else if (b.st === 'next' && a.st !== 'locked') lead += seg;
+    else todo += seg;
+  }
+  const pinSvg = pts
+    .map(({ cd, id, st, x, y, ox, oy, scenic }) => {
+      const m = medalFor(best(id));
+      const sh = ctx.circuitPath(ctx.layoutPoints(cd), 26, 26, 2);
+      const tile = scenic ? `<rect class="tile" x="-17" y="-17" width="34" height="34" rx="6" transform="rotate(45)"/>` : `<rect class="tile" x="-19" y="-19" width="38" height="38" rx="9"/>`;
+      const badge = st === 'locked' ? `<g class="lkb" transform="translate(15 -15)"><circle r="7.5"/><g class="lk" transform="scale(1.05)">${LOCK}</g></g>` : '';
+      const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
+      const stars = st === 'locked' ? '' : `<g class="pst" transform="translate(0 ${scenic ? 33 : 30})">${[0, 1, 2].map((i) => `<path class="${i < (m ? STARS[m] : 0) ? 'on' : ''}" transform="translate(${(i - 1) * 11} 0) scale(0.95)" d="M0-5.2l1.53 3.1 3.42.5-2.47 2.41.58 3.4L0 2.6l-3.06 1.61.58-3.4-2.47-2.41 3.42-.5z"/>`).join('')}</g>`;
+      const nm = `<g class="tag" transform="translate(0 ${st === 'locked' ? 32 : 47})"><text>${esc(cd.short.toUpperCase())}</text></g>`;
+      return (
+        `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
+        `<g class="pin" transform="translate(${ox} ${oy})"><circle class="halo" r="30"/>${tile}<g class="trk" transform="translate(-13 -13)"><path d="${sh}"/></g>${badge}${stars}${nm}</g></g>`
+      );
+    })
+    .join('');
+  map.innerHTML =
+    `<svg class="tr-svg" viewBox="0 0 ${WORLD_W} ${WORLD_H}" preserveAspectRatio="xMidYMid slice">` +
+    `<defs><pattern id="tr-dots" width="3.2" height="3.2" patternUnits="userSpaceOnUse"><circle cx="1.6" cy="1.6" r="0.62"/></pattern>` +
+    `<linearGradient id="tr-land" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#323947"/><stop offset="1" stop-color="#1f242d"/></linearGradient>` +
+    `<filter id="tr-glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>` +
+    `<radialGradient id="tr-vig" cx="45%" cy="50%" r="75%"><stop offset="55%" stop-color="#05060a" stop-opacity="0"/><stop offset="100%" stop-color="#05060a" stop-opacity="0.75"/></radialGradient></defs>` +
+    `<g class="tr-world">` +
+    `<path class="sea" d="${WORLD_OUTLINE}"/><path class="grat" d="${WORLD_GRATICULE}"/>` +
+    `<path class="shore" d="${WORLD_LAND}"/><path class="land" d="${WORLD_LAND}"/><path class="dots" d="${WORLD_LAND}"/><path class="borders" d="${WORLD_BORDERS}"/><path class="coast" d="${WORLD_LAND}"/>` +
+    `<path class="route todo" d="${todo}"/><path class="route done-glow" d="${done}"/><path class="route done" d="${done}"/><path class="route lead" d="${lead}"/>` +
+    `${pinSvg}</g>` +
+    `<rect class="vig" width="${WORLD_W}" height="${WORLD_H}" fill="url(#tr-vig)" pointer-events="none"/></svg>`;
+
+  // the tour's title and score over the map's top-left
+  const chainDone = CIRCUITS.filter((cd) => medalFor(best(cd.id))).length;
+  map.insertAdjacentHTML(
+    'beforeend',
+    `<div class="tr-head"><div class="eyebrow">Career</div><div class="tr-title">World <span>Tour</span></div>` +
+      `<div class="tr-sub">Finish top ${UNLOCK_POS} to open the next circuit. Stars open the scenic roads.</div>` +
+      `<div class="tr-stats"><div class="ts big"><b>${stars}<small>/${maxStars}</small></b><span>${starsSvg(1, 11)}Stars</span></div>` +
+      `<div class="ts"><b>${opened}<small>/${ALL_CIRCUITS.length}</small></b><span>Circuits open</span></div>` +
+      `<div class="ts med"><b><i class="md gold"></i>${med.gold}<i class="md silver"></i>${med.silver}<i class="md bronze"></i>${med.bronze}</b><span>Medals</span></div></div>` +
+      `<div class="tr-prog">${CIRCUITS.map((cd) => {
+        const s = states.get(cd.id)!;
+        const m = medalFor(best(cd.id));
+        return `<i class="${s}${m ? ` ${m}` : ''}"></i>`;
+      }).join('')}<em>${chainDone}/${CIRCUITS.length}</em></div></div>` +
+      `<div class="tr-legend"><span><i class="lg tile"></i>Open</span><span><i class="lg next"></i>Next</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span><span><i class="lg dia"></i>Scenic bonus</span>` +
+      `<span class="md-l"><i class="md gold"></i>Win ★★★<i class="md silver"></i>Podium ★★<i class="md bronze"></i>Top ${UNLOCK_POS} ★</span></div>`,
+  );
+
+  // ---------------------------------------------------------------- the picked circuit
+  const card = el('div', 'tr-card', p);
+  const body = el('div', 'tr-body', card);
+  const lapsRow = el('div', 'tr-laps', card, '<span>Race distance</span>');
+  const chips = TOUR_LAPS.map((n) => {
+    const b = el('div', 'tr-lap' + (n === c.tourLaps ? ' on' : ''), lapsRow, `${n}<small>${n >= 10 ? 'laps · 1 stop' : 'laps'}</small>`);
+    ctx.action(b, () => {
+      c.setTourLaps(n);
+      chips.forEach((k, i) => k.classList.toggle('on', TOUR_LAPS[i] === c.tourLaps));
+      const f = body.querySelector('.facts .laps');
+      if (f) f.textContent = `${c.tourLaps} laps`;
+    });
+    return b;
+  });
+  const acts = el('div', 'tr-acts', card);
+  const prev = el('div', 'cta ghost tr-step', acts, '‹');
+  const go = el('div', 'cta tr-go', acts, 'Race');
+  const fwd = el('div', 'cta ghost tr-step', acts, '›');
+
+  // pan and zoom: the picked circuit glides into the part of the map the card leaves free
+  const world = map.querySelector<SVGGElement>('.tr-world')!;
+  const pinws = Array.from(map.querySelectorAll<SVGGElement>('.pinw'));
+  let instant = true;
+  const focus = (id: string) => {
+    const q = at(id);
+    const g = GEO[id] ?? [45, 10];
+    const europe = g[0] > 38 && g[0] < 58 && g[1] > -12 && g[1] < 28;
+    const k = europe ? 2.6 : 1.7;
+    const cw = map.clientWidth || 1200;
+    const ch = map.clientHeight || 600;
+    const s = Math.max(cw / WORLD_W, ch / WORLD_H);
+    const vw = cw / s;
+    const vh = ch / s;
+    const left = WORLD_W / 2 - vw / 2;
+    const top = WORLD_H / 2 - vh / 2;
+    const free = Math.max(vw * 0.4, vw - (card.offsetWidth + 40) / s);
+    const fx = q.x + q.ox / k;
+    const fy = q.y + q.oy / k;
+    const tx = Math.min(left, Math.max(left + vw - WORLD_W * k, left + free / 2 - fx * k));
+    const ty = Math.min(top, Math.max(top + vh - WORLD_H * k, top + vh * 0.56 - fy * k));
+    map.classList.toggle('instant', instant);
+    world.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${k})`;
+    // pins keep their size on screen
+    for (const w of pinws) {
+      w.style.transform = `translate(${w.dataset.x}px, ${w.dataset.y}px) scale(${(1 / k).toFixed(4)})`;
+      w.classList.toggle('sel', w.dataset.id === id);
+    }
+    if (instant) requestAnimationFrame(() => map.classList.remove('instant'));
+    instant = false;
+  };
+
+  const draw = () => {
+    const id = sel!;
+    const cd = ALL_CIRCUITS.find((x) => x.id === id)!;
+    const st = states.get(id)!;
+    const info = ctx.info(id);
+    const b = best(id);
+    const m = medalFor(b);
+    const scenic = isScenic(id);
+    const round = CIRCUITS.findIndex((x) => x.id === id);
+    focus(id);
+    card.className = `tr-card ${st}${m ? ` ${m}` : ''}`;
+    body.innerHTML = '';
+    const art = el('div', 'tr-art', body);
+    art.style.backgroundImage = `url("${stillFor(id)}")`;
+    art.innerHTML =
+      `<svg class="tr-art-trk" viewBox="0 0 120 84"><path d="${ctx.circuitPath(ctx.layoutPoints(cd), 120, 84, 6)}"/></svg>` +
+      `<span class="badge ${st}">${st === 'locked' ? `${LOCK_ICON}Locked` : st === 'next' ? 'Next up' : m ? MEDAL_WORD[m] : 'Open'}</span>` +
+      `<span class="rno">${scenic ? 'Scenic' : String(round + 1).padStart(2, '0')}</span>`;
+    el(
+      'div',
+      'tr-id',
+      body,
+      `<div class="cap">${esc(info.country)}${scenic ? ' · Bonus circuit' : ` · Round ${round + 1} of ${CIRCUITS.length}`}</div><div class="nm">${esc(cd.name)}</div>` +
+        `<div class="facts">${st !== 'locked' ? `<span class="laps">${c.tourLaps} laps</span>` : ''}${info.km ? `<span>${info.km} km</span>` : ''}${info.turns ? `<span>${info.turns} turns</span>` : ''}</div>` +
+        (info.line ? `<div class="ln">${esc(info.line)}</div>` : '') +
+        (st !== 'locked' ? `<div class="fc">Forecast · ${esc(ctx.forecast(id))}</div>` : ''),
+    );
+    // the medal ladder: what each finish is worth, the ones won ticked
+    const got = m ? STARS[m] : 0;
+    const ladder = el('div', 'tr-ladder', body);
+    for (const [k, word] of [['bronze', `Top ${UNLOCK_POS}`], ['silver', 'Podium'], ['gold', 'Win']] as const) {
+      const n = STARS[k];
+      el('div', `rung ${k}${got >= n ? ' won' : ''}`, ladder, `<i class="md ${k}"></i><span>${word}</span><em>${starsSvg(n, 11)}</em>`);
+    }
+    if (st === 'locked') {
+      const why = scenic
+        ? `<b>${SCENIC_STARS[id]} stars</b> open it — you have ${stars}.`
+        : `<b>Finish top ${UNLOCK_POS}</b> at ${esc(CIRCUITS[round - 1]?.short ?? 'the circuit before')} to open it.`;
+      el('div', 'tr-why locked', body, `${LOCK_ICON}<span>${why}</span>`);
+    } else if (b !== undefined) {
+      el('div', 'tr-why', body, `<span>Best finish <b>P${b}</b>${m === 'gold' ? ' · every star here is yours' : ' · race again for more stars'}</span>`);
+    } else if (!scenic) {
+      const after = CIRCUITS[round + 1];
+      el('div', 'tr-why', body, `<span><b>Top ${UNLOCK_POS}</b> ${after ? `opens ${esc(after.short)}` : 'completes the tour'}.</span>`);
+    }
+    lapsRow.hidden = st === 'locked';
+    go.classList.toggle('dis', st === 'locked');
+    go.textContent = st === 'locked' ? 'Locked' : `Race ${cd.short}`;
+  };
+  const order = [...CIRCUITS, ...SCENIC].map((x) => x.id);
+  const step = (k: number) => {
+    const i = order.indexOf(sel!);
+    sel = order[(i + k + order.length) % order.length];
+    draw();
+  };
+  ctx.action(prev, () => step(-1));
+  ctx.action(go, () => {
+    if (states.get(sel!) !== 'locked') ctx.onRace(sel!);
+  });
+  ctx.action(fwd, () => step(1));
+  map.addEventListener('click', (e) => {
+    const g = (e.target as Element).closest<SVGGElement>('.pinw');
+    if (!g?.dataset.id) return;
+    sel = g.dataset.id;
+    draw();
+  });
+  map.addEventListener('dblclick', (e) => {
+    const g = (e.target as Element).closest<SVGGElement>('.pinw');
+    if (g?.dataset.id && states.get(g.dataset.id) !== 'locked') ctx.onRace(g.dataset.id);
+  });
+  draw();
+  // (the first focus ran before the panel had its size: frame again once laid out)
+  requestAnimationFrame(() => {
+    instant = true;
+    focus(sel!);
+  });
+  return { go };
+}

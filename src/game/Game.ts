@@ -1498,7 +1498,7 @@ export class Game {
   private sessionSetup(s: RaceSetup): RaceSetup {
     if (!this.careerRace) return s;
     const f = this.careerForecast(this.track.def.id);
-    return { ...s, laps: this.dc.active ? this.dc.laps : CAREER_LAPS, weather: f.weather, time: f.time };
+    return { ...s, laps: this.dc.active ? this.dc.laps : this.career.tourLaps, weather: f.weather, time: f.time };
   }
   /** on to a career round: travel there if it's another circuit, then its race screen */
   private async goCareerRound(id: string) {

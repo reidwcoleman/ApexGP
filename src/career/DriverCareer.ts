@@ -372,11 +372,18 @@ type Row = { code: string; name: string; team: string; teamId: string; color: st
 const RANK: Record<Status, number> = { second: 0, equal: 1, lead: 2 };
 const ZERO_RD = (): Record<RdArea, number> => ({ aero: 0, power: 0, chassis: 0, ers: 0 });
 
+/** the team-and-seasons driver career (off: the World Tour replaced it) */
+const DRIVER_CAREER = false;
+
 export class DriverCareer {
   data: DCData | null = null;
   private listeners: (() => void)[] = [];
 
   constructor() {
+    // (retired 2026-10-26: the career is the World Tour now — no teams to join, no seasons. A saved
+    // driver career is left in storage untouched, but never loaded; the circuits it opened stay open
+    // through Unlocks.ts)
+    if (!DRIVER_CAREER) return;
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) this.data = this.migrate(JSON.parse(raw));

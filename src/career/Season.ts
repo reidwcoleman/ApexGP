@@ -21,6 +21,10 @@ export const GEO: Record<string, [number, number]> = {
   yasmarina: [24.47, 54.6],
   mexico: [19.4, -99.09],
   hungaroring: [47.58, 19.25],
+  // the scenic road courses (fictional: where they'd be)
+  serena: [44.05, 9.85],
+  bergsee: [47.1, 11.3],
+  redmesa: [36.95, -110.1],
 };
 
 /**
