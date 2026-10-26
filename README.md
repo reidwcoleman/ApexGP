@@ -984,6 +984,12 @@ achievements, SteamPipe upload via `steam/upload.sh`, store page); store capsule
 
 ## Credits
 
+2026 car: the bodywork is ["My take on the 2026 f1 regulations"](https://sketchfab.com/3d-models/my-take-on-the-2026-f1-regulations-4b77c9b72dc44803a530eaaff18ed590)
+by [MaG80](https://sketchfab.com/MaG80), licensed under [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/)
+(`public/models/car2026/LICENSE.txt`). `tools/build_car_shell.mjs` puts it in the game's car frame (its wheels dropped, the
+wings split for damage, a simplified middle LOD, quantized); `src/car/carShell.ts` repaints it per team at load (the
+source's FIA/F1 marks painted out). Settings › Car model switches back to the procedural car.
+
 All nine circuit centrelines are derived from the [TUMFTM racetrack-database](https://github.com/TUMFTM/racetrack-database)
 (Technical University of Munich, LGPL-3.0), traced from satellite imagery.
 
