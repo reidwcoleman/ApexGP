@@ -21,7 +21,9 @@ const m3 = (m, p) => { const v = [m[0]*p[0]+m[4]*p[1]+m[8]*p[2], m[1]*p[0]+m[5]*
 const toCar = (w) => { const x = w[0] * S, z = (w[2] - ZMID) * S; return [x, w[1] * S + a + b * z, z]; };
 
 // gather triangles per output part
-const parts = { body: [], nose: [], fwL: [], fwR: [], rw: [], light: [] };
+const parts = { body: [], nose: [], pillar: [], fwL: [], fwR: [], rw: [], light: [] };
+// the halo's centre pillar (its own part: the cockpit camera's "halo column" setting hides it)
+const inPillar = (c) => Math.abs(c[0]) < 0.05 && c[2] > 0.72 && c[2] < 1.0 && c[1] > 0.765 && c[1] < 0.94;
 for (const n of doc.getRoot().listNodes()) {
   const mesh = n.getMesh(); if (!mesh) continue;
   const name = n.getName();
@@ -45,9 +47,55 @@ for (const n of doc.getRoot().listNodes()) {
       const tri = [verts[idx[t]], verts[idx[t + 1]], verts[idx[t + 2]]];
       let k = key;
       if (k === 'fw') k = (tri[0][0] + tri[1][0] + tri[2][0]) > 0 ? 'fwL' : 'fwR';
+      if (k === 'body') {
+        const c = [0, 1, 2].map((j) => (tri[0][j] + tri[1][j] + tri[2][j]) / 3);
+        if (inPillar(c)) k = 'pillar';
+      }
       parts[k].push(tri);
     }
   }
+}
+
+// the car number on the nose's crest: a patch draped on the bodywork 3 mm proud (uv 0–1: u along +X —
+// read from the front —, v toward the rear; the game maps it into the driver sheet's nose-number cell)
+function surfaceY(x, z) {
+  let best = -1;
+  for (const k of ['body', 'nose']) for (const t of parts[k]) {
+    const [a, b, c] = t;
+    const d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
+    if (Math.abs(d) < 1e-12) continue;
+    const l1 = ((b[2] - c[2]) * (x - c[0]) + (c[0] - b[0]) * (z - c[2])) / d;
+    const l2 = ((c[2] - a[2]) * (x - c[0]) + (a[0] - c[0]) * (z - c[2])) / d;
+    const l3 = 1 - l1 - l2;
+    if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+    best = Math.max(best, l1 * a[1] + l2 * b[1] + l3 * c[1]);
+  }
+  return best;
+}
+{
+  const X0 = -0.1, X1 = 0.1, Z0 = 1.92, Z1 = 2.2, NU = 8, NV = 10;
+  const grid = [];
+  for (let j = 0; j <= NV; j++) for (let i = 0; i <= NU; i++) {
+    const x = X0 + (X1 - X0) * i / NU, z = Z1 - (Z1 - Z0) * j / NV;
+    grid.push([x, surfaceY(x, z) + 0.003, z, 0, 1, 0, i / NU, j / NV]);
+  }
+  const tris = [];
+  for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
+    const a = j * (NU + 1) + i, b = a + 1, c = a + NU + 1, d = c + 1;
+    tris.push([grid[a], grid[c], grid[b]], [grid[b], grid[c], grid[d]]);
+  }
+  // normals from the draped grid
+  for (const t of tris) {
+    const u = [0, 1, 2].map((k) => t[1][k] - t[0][k]), w = [0, 1, 2].map((k) => t[2][k] - t[0][k]);
+    let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    if (n[1] < 0) { n = n.map((x) => -x); t.reverse(); }
+    const l = Math.hypot(...n);
+    for (const v of t) { v[3] = n[0] / l; v[4] = n[1] / l; v[5] = n[2] / l; }
+  }
+  parts.num = tris.map((t) => t.map((v) => [...v]));
+  const ys = grid.map((g) => g[1]);
+  if (Math.min(...ys) < 0.3) throw new Error('nose number patch runs off the nose');
+  console.error('nose number patch y', Math.min(...ys).toFixed(3), Math.max(...ys).toFixed(3));
 }
 
 // indexed geometry per part (welded on exact attribute match), and a simplified LOD
@@ -82,7 +130,7 @@ const stats = {};
 for (const [k, tris] of Object.entries(parts)) {
   if (!tris.length) continue;
   const g0 = indexed(tris);
-  const levels = k === 'light' ? [g0] : [g0, simplify(g0, k === 'body' ? 0.22 : 0.3, 0.004)];
+  const levels = k === 'light' || k === 'num' || k === 'pillar' ? [g0] : [g0, simplify(g0, k === 'body' ? 0.22 : 0.3, 0.004)];
   levels.forEach((g, lv) => {
     // compact the vertex buffer to what the indices use
     const remap = new Int32Array(g.vb.length / 8).fill(-1); const vb = []; const ib = new Uint32Array(g.ib.length);

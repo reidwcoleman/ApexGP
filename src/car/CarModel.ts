@@ -143,7 +143,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.pillar, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.pillar, l.body.trim, l.body.driver, l.body.driverBare, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -1085,6 +1085,14 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     const shL = sh && shellPaint && lv < 2 ? sh.levels[lv] : null;
     if (shL) {
       for (const k of ['body', 'nose'] as ShellPart[]) if (shL.geo[k]) g.add(mesh(shL.geo[k]!, shellPaint!));
+      if (shL.geo.pillar) {
+        const pm = mesh(shL.geo.pillar, shellPaint!);
+        pm.name = 'halo_pillar';
+        pillars.push(pm);
+        g.add(pm);
+      }
+      // the car number on the nose (the driver sheet's cell, alpha-tested like the procedural decals)
+      if (shL.geo.num) g.add(mesh(shL.geo.num, driverMat, false));
       if (shL.geo.light) g.add(mesh(shL.geo.light, shellLight!, false));
     } else {
       g.add(mesh(L.body.paint, paintMat));
@@ -1099,10 +1107,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       g.add(pm);
     }
     if (L.body.driver) {
-      const all = mesh(L.body.driver, driverMat);
+      const all = mesh(shL && L.body.driverBare ? L.body.driverBare : L.body.driver, driverMat);
       g.add(all);
       let dec: THREE.Mesh | null = null;
-      if (L.body.decals) {
+      if (L.body.decals && !shL) {
         dec = mesh(L.body.decals, driverMat, false);
         dec.visible = false;
         g.add(dec);

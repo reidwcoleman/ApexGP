@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { Team } from '../race/Teams.ts';
 import { FONT } from './carTextures.ts';
+import { DRV_H, DRV_W, R_NUM_NOSE, rectUV } from './carLayout.ts';
 
 /**
  * The 2026 car's bodywork from a scanned-quality model: "My take on the 2026 f1 regulations" by MaG80
@@ -19,7 +20,7 @@ import { FONT } from './carTextures.ts';
  * title sponsor lettered where the big marks were.
  */
 
-export type ShellPart = 'body' | 'nose' | 'fwL' | 'fwR' | 'rw' | 'light';
+export type ShellPart = 'body' | 'nose' | 'pillar' | 'num' | 'fwL' | 'fwR' | 'rw' | 'light';
 export interface ShellLevel {
   geo: Partial<Record<ShellPart, THREE.BufferGeometry>>;
 }
@@ -72,12 +73,20 @@ export function loadCarShell(): Promise<void> {
         if (!m.isMesh) return;
         const [part, lv] = m.name.split('_L') as [ShellPart, string];
         const g = floatGeometry(m.geometry, m.matrixWorld);
-        if (part === 'light') {
-          // (one rain light for both levels)
-          levels[0].geo.light = g;
-          levels[1].geo.light = g;
+        if (part === 'light' || part === 'pillar' || part === 'num') {
+          // (one rain light, halo pillar and number patch for both levels)
+          if (part === 'num') {
+            // the patch's 0–1 uv into the driver sheet's nose-number cell (CarModel's driver material)
+            const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+            for (let i = 0; i < uv.count; i++) {
+              const [u, v] = rectUV(R_NUM_NOSE, uv.getX(i), uv.getY(i), DRV_W, DRV_H);
+              uv.setXY(i, u, v);
+            }
+          }
+          levels[0].geo[part] = g;
+          levels[1].geo[part] = g;
         } else levels[Number(lv)].geo[part] = g;
-        if (part !== 'light') livery = m.material as THREE.MeshStandardMaterial;
+        if (part !== 'light' && part !== 'num') livery = m.material as THREE.MeshStandardMaterial;
       });
       const img = livery!.map!.image as ImageBitmap | HTMLImageElement;
       const c = document.createElement('canvas');
