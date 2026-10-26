@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { ARENA, PADS } from '../sim/arena.ts';
+import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
+import { buildSurround, type SurroundView } from './surround.ts';
 
 /**
  * The stadium, authored in the simulation's own frame (cm, z up) under one root group that turns it
@@ -15,9 +17,12 @@ const ORANGE = new THREE.Color(0xff7417);
 
 /** 1 by day, 0 at night: every arena shader reads it, so the switch costs no recompiles */
 export const uDay = { value: 1 };
+/** the arena's grass colour (multiplies the pitch) */
+const uGrassTint = { value: new THREE.Color(1, 1, 1) };
 
 const GLSL_COMMON = /* glsl */ `
 uniform float uDay;
+uniform vec3 uGrassTint;
 float bbHash(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p, p+23.45); return fract(p.x*p.y); }
 float bbNoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
   return mix(mix(bbHash(i), bbHash(i+vec2(1,0)), u.x), mix(bbHash(i+vec2(0,1)), bbHash(i+vec2(1,1)), u.x), u.y); }
@@ -37,7 +42,7 @@ function simPatch(mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, 
   const key = 'bb' + hashStr(frag + decl);
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, uniforms, { uDay });
+    Object.assign(sh.uniforms, uniforms, { uDay, uGrassTint });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvSim = position;\nvBB = uv;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;\n' + GLSL_COMMON + decl)
@@ -55,6 +60,7 @@ function hashStr(s: string): string {
 export interface ArenaView {
   root: THREE.Group;
   setDay(day: boolean): void;
+  setLook(t: TimeLook, map: MapLook): void;
   update(t: number, pads: Float32Array, excite: number, score: [number, number], clock: string): void;
 }
 
@@ -183,6 +189,7 @@ function pitch(): THREE.Mesh {
     float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
     col *= 0.82 + 0.36 * n;
     col *= 0.94 + 0.12 * bbNoise(P * 0.9);
+    col *= uGrassTint;
     // a wash of team colour toward each end
     col = mix(col, col * (0.55 + team * 0.9), smoothstep(800.0, 5000.0, abs(P.y)) * 0.55);
     // lines
@@ -390,14 +397,17 @@ function pads(): { group: THREE.Group; items: PadMesh[] } {
 }
 
 /** stands rising behind the glass: rows of fans drawn in a shader, with a bounce on goals */
-function stands(uT: { value: number }, uEx: { value: number }): THREE.Group {
+function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): THREE.Group {
   const grp = new THREE.Group();
   const { p: per, len } = perimeter(0, 300, 12);
   const tiers: [number, number, number, number][] = [
     // (offset from the wall, z bottom, offset top, z top)
     [700, 120, 3600, 2000],
     [4100, 2600, 6600, 4300],
-  ];
+  ].slice(0, count) as [number, number, number, number][];
+  // the back of the bowl: just behind and above the top row (the sky and what's beyond show over it)
+  const backO = count === 2 ? 7000 : 3800;
+  const backZ = count === 2 ? 4700 : 2200;
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
   simPatch(
     mat,
@@ -496,7 +506,7 @@ function stands(uT: { value: number }, uEx: { value: number }): THREE.Group {
   for (let j = 0; j <= 1; j++)
     for (let i = 0; i < W; i++) {
       const [x, y, nx, ny] = per[i];
-      back.push(x + nx * (R + 7200), y + ny * (R + 7200), j ? 6200 : -200);
+      back.push(x + nx * (R + backO), y + ny * (R + backO), j ? backZ : -200);
     }
   for (let i = 0; i < W - 1; i++) bi.push(i, i + 1, i + W, i + 1, i + W + 1, i + W);
   const bg = new THREE.BufferGeometry();
@@ -510,9 +520,9 @@ function stands(uT: { value: number }, uEx: { value: number }): THREE.Group {
   const fl = new THREE.Mesh(new THREE.PlaneGeometry(26000, 30000), floorM);
   fl.position.z = -6;
   grp.add(fl);
-  grp.userData.theme = (day: boolean) => {
-    backM.color.set(day ? 0x2a2e36 : 0x0b0d14);
-    floorM.color.set(day ? 0x30343c : 0x090b10);
+  grp.userData.theme = (day: number, concourse: number) => {
+    backM.color.set(0x0b0d14).lerp(new THREE.Color(concourse), day);
+    floorM.color.set(0x090b10).lerp(new THREE.Color(concourse).multiplyScalar(1.1), day);
   };
   return grp;
 }
@@ -604,9 +614,9 @@ function lights(): THREE.Group {
   }
   g.add(lamps, housings);
   const beams = g.children.filter((c) => (c as THREE.Mesh).material === beamM);
-  g.userData.theme = (day: boolean) => {
-    lampM.color.setScalar(day ? 1.6 : 9).b *= 1.05;
-    for (const b of beams) b.visible = !day;
+  g.userData.theme = (t: TimeLook) => {
+    lampM.color.setScalar(t.floods ? 9 - 5 * t.day : 1.6).b *= 1.05;
+    for (const b of beams) b.visible = t.floods;
   };
   // the roof ring and its trusses
   const ringPts: number[] = [];
@@ -624,6 +634,64 @@ function lights(): THREE.Group {
       g.add(t);
     }
   }
+  return g;
+}
+
+/** open-air floodlights: four masts at the corners, each with a bank of lamps aimed at the centre spot */
+function masts(tall: number): THREE.Group {
+  const g = new THREE.Group();
+  const lampM = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 9, 9.5) });
+  const steelM = new THREE.MeshStandardMaterial({ color: 0x8a9099, roughness: 0.45, metalness: 0.8 });
+  const darkM = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.6, metalness: 0.7 });
+  const beamM = new THREE.ShaderMaterial({
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vT = uv.y; vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
+    fragmentShader: `varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(min(abs(dot(normalize(vN), normalize(vV))), 1.0), 2.0); float a = f * pow(clamp(vT, 0.0, 1.0), 2.5) * 0.04; gl_FragColor = vec4(vec3(0.85,0.9,1.0)*a, a); }`,
+  });
+  const beams: THREE.Mesh[] = [];
+  const cx = ARENA.X + (tall > 6000 ? 6200 : 3400);
+  const cy = ARENA.Y + (tall > 6000 ? 4200 : 2200);
+  for (const sx of [-1, 1])
+    for (const sy of [-1, 1]) {
+      const x = sx * cx;
+      const y = sy * cy;
+      // a tapering lattice column (as a slim box) on a footing
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(70, 150, tall, 6), steelM);
+      col.rotation.x = Math.PI / 2;
+      col.position.set(x, y, tall / 2);
+      g.add(col);
+      // the head: a grid of lamps in a frame, tilted down at the centre
+      const head = new THREE.Group();
+      head.position.set(x, y, tall + 300);
+      head.up.set(0, 0, 1);
+      head.lookAt(0, 0, -tall * 0.4);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(1500, 700, 80), darkM);
+      frame.position.z = -50;
+      head.add(frame);
+      const lamps = new THREE.InstancedMesh(new THREE.BoxGeometry(150, 110, 40), lampM, 32);
+      const m4 = new THREE.Matrix4();
+      let k = 0;
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 8; c++) lamps.setMatrixAt(k++, m4.makeTranslation(-610 + c * 175, -240 + r * 160, 10));
+      head.add(lamps);
+      g.add(head);
+      const dir = new THREE.Vector3(-x, -y, -tall).normalize();
+      const L = Math.hypot(x, y, tall) * 0.8;
+      const cone = new THREE.ConeGeometry(1600, L, 24, 1, true);
+      cone.translate(0, -L / 2, 0);
+      const beam = new THREE.Mesh(cone, beamM);
+      beam.position.set(x, y, tall + 300);
+      beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+      beam.renderOrder = 8;
+      beams.push(beam);
+      g.add(beam);
+    }
+  g.userData.theme = (t: TimeLook) => {
+    lampM.color.setScalar(t.floods ? 9 - 5 * t.day : 1.6).b *= 1.05;
+    for (const b of beams) b.visible = t.floods;
+  };
   return g;
 }
 
@@ -773,18 +841,52 @@ export function buildArena(): ArenaView {
   root.add(goal(-1, BLUE), goal(1, ORANGE));
   const pd = pads();
   root.add(pd.group);
-  const st = stands(uT, uEx);
-  const li = lights();
-  root.add(st, li, roof());
+  // the dressing that changes with the arena: built on first use, then only shown or hidden
+  const standsBy = new Map<number, THREE.Group>();
+  const lightsBy = new Map<string, THREE.Group>();
+  const surroundBy = new Map<MapId, SurroundView | null>();
+  const rf = roof();
+  root.add(rf);
   const scr = screens();
   root.add(scr.group);
   const shellT = sh.userData.uT as { value: number };
-  return {
+  let curMap: MapLook = MAPS.apex;
+  let curTime: TimeLook = TIMES.day;
+  const view: ArenaView = {
     root,
     setDay(day) {
-      uDay.value = day ? 1 : 0;
-      st.userData.theme(day);
-      li.userData.theme(day);
+      view.setLook(day ? TIMES.day : TIMES.night, curMap);
+    },
+    setLook(t, map) {
+      curMap = map;
+      curTime = t;
+      uDay.value = t.day;
+      uGrassTint.value.setRGB(...map.grass);
+      for (const [n, g] of standsBy) g.visible = n === map.tiers;
+      let st = standsBy.get(map.tiers);
+      if (!st) {
+        st = stands(uT, uEx, map.tiers);
+        standsBy.set(map.tiers, st);
+        root.add(st);
+      }
+      st.userData.theme(t.day, map.concourse);
+      const lk = map.lights === 'ring' ? 'ring' : 'masts' + map.tiers;
+      for (const [k, g] of lightsBy) g.visible = k === lk;
+      let li = lightsBy.get(lk);
+      if (!li) {
+        li = map.lights === 'ring' ? lights() : masts(map.tiers === 2 ? 7600 : 4600);
+        lightsBy.set(lk, li);
+        root.add(li);
+      }
+      li.userData.theme(t);
+      rf.visible = map.roof;
+      for (const [id, sv] of surroundBy) if (sv) sv.group.visible = id === map.id;
+      if (!surroundBy.has(map.id)) {
+        const sv = buildSurround(map);
+        surroundBy.set(map.id, sv);
+        if (sv) root.add(sv.group);
+      }
+      surroundBy.get(map.id)?.setLook(t, t.keyDir);
     },
     update(t, padT, excite, score, clock) {
       uT.value = t;
@@ -804,4 +906,6 @@ export function buildArena(): ArenaView {
       }
     },
   };
+  view.setLook(curTime, curMap);
+  return view;
 }

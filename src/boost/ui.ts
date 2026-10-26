@@ -1,4 +1,5 @@
 import { botPlan, type BotMode, type LobbyState } from './net.ts';
+import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import type { Stats } from './sim/world.ts';
 
 /**
@@ -19,15 +20,23 @@ export interface Profile {
   ballCam: boolean;
   volume: number;
   shake: boolean;
-  arena: 'day' | 'night';
+  map: MapId;
+  time: TimeId;
   /** arcade: Space jump, Shift boost · classic: the genre's PC defaults (mouse jump/boost, Shift slide, Space ball cam) */
   keys: 'arcade' | 'classic';
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, arena: 'day', keys: 'arcade' };
+  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', keys: 'arcade' };
   try {
-    return { ...def, ...JSON.parse(localStorage.getItem('boostball.profile') ?? '{}') };
+    const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
+    // (profiles from before arenas and times: the old Day / Night switch)
+    if (raw.arena && !raw.time) raw.time = raw.arena === 'night' ? 'night' : 'day';
+    delete raw.arena;
+    const p = { ...def, ...raw };
+    p.map = asMap(p.map);
+    p.time = asTime(p.time);
+    return p;
   } catch {
     return def;
   }
@@ -64,7 +73,7 @@ export class UI {
   onLobbyTeam: (team: 0 | 1) => void = () => {};
   onLobbyStart: () => void = () => {};
   onLobbyLeave: () => void = () => {};
-  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'bots' | 'botSkill' | 'arena'>>) => void = () => {};
+  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'bots' | 'botSkill' | 'map' | 'time'>>) => void = () => {};
   onLobbyKick: (id: string) => void = () => {};
   onChat: (text: string) => void = () => {};
   onResume: () => void = () => {};
@@ -111,7 +120,9 @@ export class UI {
       <div class="mhead">Match length</div>
       <div class="seg" id="seg-min"><button data-v="3">3 min</button><button data-v="5" class="on">5 min</button><button data-v="10">10 min</button></div>
       <div class="mhead">Arena</div>
-      <div class="seg" id="seg-arena"><button data-v="day" class="${p.arena !== 'night' ? 'on' : ''}">Day</button><button data-v="night" class="${p.arena === 'night' ? 'on' : ''}">Night</button></div>
+      <div class="seg wrap" id="seg-map">${MAP_IDS.map((id) => `<button data-v="${id}" class="${p.map === id ? 'on' : ''}" title="${MAPS[id].blurb}">${MAPS[id].name}</button>`).join('')}</div>
+      <div class="mhead">Time of day</div>
+      <div class="seg" id="seg-time">${TIME_IDS.map((id) => `<button data-v="${id}" class="${p.time === id ? 'on' : ''}">${TIMES[id].name}</button>`).join('')}</div>
       <button class="mbtn primary" id="b-go" style="margin-top:10px"><span>Kick off</span></button>
       <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
     </div>
@@ -150,11 +161,12 @@ export class UI {
       <div class="team b"><h3>Blue <button data-team="0">Join blue</button></h3><div id="l-blue"></div></div>
       <div class="team o"><h3>Orange <button data-team="1">Join orange</button></h3><div id="l-orange"></div></div>
     </div>
-    <div class="row" id="l-host-opts">
-      <div class="seg" id="l-size"><button data-v="1">1v1</button><button data-v="2">2v2</button><button data-v="3">3v3</button><button data-v="4">4v4</button></div>
-      <div class="seg" id="l-min"><button data-v="3">3 min</button><button data-v="5">5 min</button><button data-v="10">10 min</button></div>
-      <div class="seg" id="l-fill" title="Even teams: bots only make up a short side (4 players in a 2v2 = no bots, 2 v 1 = one bot). Fill: every empty seat up to the team size."><button data-v="even">Even teams</button><button data-v="full">Fill seats</button><button data-v="none">No bots</button></div>
-      <div class="seg" id="l-arena"><button data-v="day">Day</button><button data-v="night">Night</button></div>
+    <div class="opts" id="l-host-opts">
+      <div class="opt"><label>Bots</label><div class="seg small" id="l-fill" title="Even teams: bots only make up a short side (4 players in a 2v2 = no bots, 2 v 1 = one bot). Fill seats: every empty seat up to the team size."><button data-v="even">Even teams</button><button data-v="full">Fill seats</button><button data-v="none">No bots</button></div></div>
+      <div class="opt" id="l-size-opt"><label>Team size</label><div class="seg small" id="l-size"><button data-v="1">1v1</button><button data-v="2">2v2</button><button data-v="3">3v3</button><button data-v="4">4v4</button></div></div>
+      <div class="opt"><label>Length</label><div class="seg small" id="l-min"><button data-v="3">3 min</button><button data-v="5">5 min</button><button data-v="10">10 min</button></div></div>
+      <div class="opt wide"><label>Arena</label><div class="seg small" id="l-map">${MAP_IDS.map((id) => `<button data-v="${id}" title="${MAPS[id].blurb}">${MAPS[id].name}</button>`).join('')}</div></div>
+      <div class="opt wide"><label>Time of day</label><div class="seg small" id="l-time">${TIME_IDS.map((id) => `<button data-v="${id}">${TIMES[id].name}</button>`).join('')}</div></div>
     </div>
     <div class="chat"><div class="log" id="l-log"></div><input type="text" id="l-chat" maxlength="120" placeholder="Say something… (Enter)" /></div>
     <div class="row">
@@ -215,8 +227,12 @@ export class UI {
     seg('#seg-size', (v) => (this.playSize = Number(v)));
     seg('#seg-skill', (v) => (this.playSkill = Number(v)));
     seg('#seg-min', (v) => (this.playMin = Number(v)));
-    seg('#seg-arena', (v) => {
-      this.profile.arena = v === 'night' ? 'night' : 'day';
+    seg('#seg-map', (v) => {
+      this.profile.map = asMap(v);
+      this.save();
+    });
+    seg('#seg-time', (v) => {
+      this.profile.time = asTime(v);
       this.save();
     });
     this.$('#b-go').addEventListener('click', () => this.onPlay(this.playSize, this.playSkill, this.playMin));
@@ -248,7 +264,8 @@ export class UI {
     seg('#l-size', (v) => this.onLobbyOpt({ size: Number(v) as 1 | 2 | 3 | 4 }));
     seg('#l-min', (v) => this.onLobbyOpt({ minutes: Number(v) }));
     seg('#l-fill', (v) => this.onLobbyOpt({ bots: (v === 'full' || v === 'none' ? v : 'even') as BotMode }));
-    seg('#l-arena', (v) => this.onLobbyOpt({ arena: v === 'night' ? 'night' : 'day' }));
+    seg('#l-map', (v) => this.onLobbyOpt({ map: asMap(v) }));
+    seg('#l-time', (v) => this.onLobbyOpt({ time: asTime(v) }));
     this.$('#l-copy').addEventListener('click', () => {
       const c = this.$('#l-code').textContent ?? '';
       const url = `${location.origin}${location.pathname}?join=${c}`;
@@ -339,10 +356,11 @@ export class UI {
     const mark = (id: string, v: string) => this.$(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.getAttribute('data-v') === v));
     mark('#l-size', String(l.size));
     // (the team size only matters when every seat is filled)
-    this.$('#l-size').style.display = l.bots === 'full' ? '' : 'none';
+    this.$('#l-size-opt').style.display = l.bots === 'full' ? '' : 'none';
     mark('#l-min', String(l.minutes));
     mark('#l-fill', l.bots ?? 'even');
-    mark('#l-arena', l.arena === 'night' ? 'night' : 'day');
+    mark('#l-map', asMap(l.map));
+    mark('#l-time', asTime(l.time));
   }
 
   chat(from: string, text: string): void {

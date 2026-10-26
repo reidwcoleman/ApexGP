@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BloomEffect, Effect, EffectComposer, EffectPass, FXAAEffect, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { GradeEffect } from '../../marbles/post-grade.ts';
+import { MAPS, TIMES, type MapLook, type TimeLook } from './looks.ts';
 
 /**
  * The renderer and the night: a floodlit stadium under a deep sky. One key light (high, from the
@@ -44,10 +45,26 @@ export class Stage {
   private blackRuns = 0;
   private hemi: THREE.HemisphereLight;
   private fill: THREE.DirectionalLight;
-  private skyU = { uTime: { value: 0 }, uDay: { value: 1 }, uSun: { value: KEY_DIR.clone() } };
-  private envDay: THREE.Texture;
-  private envNight: THREE.Texture;
+  private skyU = {
+    uTime: { value: 0 },
+    uSun: { value: KEY_DIR.clone() },
+    uZen: { value: new THREE.Color() },
+    uHor: { value: new THREE.Color() },
+    uGlow: { value: new THREE.Color() },
+    uSunCol: { value: new THREE.Color() },
+    uDisc: { value: 1 },
+    uCloud: { value: 0.5 },
+    uCloudLit: { value: new THREE.Color() },
+    uCloudShade: { value: new THREE.Color() },
+    uStars: { value: 0 },
+    /** a dome of light over a city (night) */
+    uCity: { value: 0 },
+  };
+  private skyMat!: THREE.ShaderMaterial;
+  private envCache = new Map<string, THREE.Texture>();
   day = true;
+  look: TimeLook = TIMES.day;
+  map: MapLook = MAPS.apex;
   private checkT = 0;
   readonly flash: THREE.PointLight;
   quality: 0 | 1 | 2 = 2;
@@ -85,12 +102,9 @@ export class Stage {
       this.autoQuality = false;
     }
 
-    this.camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 2000);
+    this.camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 5000);
     const sc = this.scene;
     sc.fog = new THREE.FogExp2(0x0a1430, 0.0026);
-    this.envNight = this.envMap(false);
-    this.envDay = this.envMap(true);
-    sc.environment = this.envDay;
     sc.environmentIntensity = 0.75;
 
     this.hemi = new THREE.HemisphereLight(0x8fb4ff, 0x1d3a16, 0.55);
@@ -133,30 +147,68 @@ export class Stage {
     comp.addPass(new EffectPass(this.camera, new SanitizeEffect()));
     // the AA samples its input, so it leads the merged pass
     comp.addPass(new EffectPass(this.camera, aa, this.bloom, tone, grade, vig));
-    this.setDay(true);
+    this.setLook(TIMES.day, MAPS.apex);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
-  /** a sunny afternoon or a floodlit night */
-  setDay(day: boolean): void {
-    this.day = day;
+  /** a time of day (and the arena, for the image light and the city glow) */
+  setLook(t: TimeLook, map: MapLook = this.map): void {
+    this.look = t;
+    this.map = map;
+    this.day = t.day > 0.5;
     const sc = this.scene;
-    this.skyU.uDay.value = day ? 1 : 0;
-    sc.environment = day ? this.envDay : this.envNight;
-    sc.environmentIntensity = day ? 0.6 : 0.75;
+    const u = this.skyU;
+    u.uSun.value.set(...t.keyDir);
+    u.uZen.value.setRGB(...t.zenith);
+    u.uHor.value.setRGB(...t.horizon);
+    u.uGlow.value.setRGB(...t.glow);
+    u.uSunCol.value.setRGB(...t.sunCol);
+    u.uDisc.value = t.disc;
+    u.uCloud.value = t.cloud;
+    u.uCloudLit.value.setRGB(...t.cloudLit);
+    u.uCloudShade.value.setRGB(...t.cloudShade);
+    u.uStars.value = t.stars * (map.surround === 'city' ? 0.35 : 1);
+    u.uCity.value = map.surround === 'city' ? 1 - t.day : 0;
     const fog = sc.fog as THREE.FogExp2;
-    fog.color.set(day ? 0xa8c2de : 0x0a1430);
-    fog.density = day ? 0.0007 : 0.0026;
-    this.hemi.color.set(day ? 0xd2e4ff : 0x8fb4ff);
-    this.hemi.groundColor.set(day ? 0x56703a : 0x1d3a16);
-    this.hemi.intensity = day ? 0.55 : 0.55;
-    this.key.color.set(day ? 0xfff0dc : 0xf2f5ff);
-    this.key.intensity = day ? 2.7 : 2.6;
-    this.fill.color.set(day ? 0xbcd2ff : 0xffe2c4);
-    this.fill.intensity = day ? 0.55 : 0.7;
-    this.bloom.intensity = day ? 0.55 : 1.15;
-    this.bloom.luminanceMaterial.threshold = day ? 0.92 : 0.78;
+    fog.color.setRGB(...t.fog);
+    fog.density = t.fogDensity;
+    this.hemi.color.setRGB(...t.hemiSky);
+    this.hemi.groundColor.setRGB(...t.hemiGround);
+    this.hemi.intensity = t.hemiI;
+    this.key.color.setRGB(...t.keyCol);
+    this.key.intensity = t.keyI;
+    // the shadow camera stays on the pitch whichever way the light comes from
+    this.key.position.set(...t.keyDir).multiplyScalar(150);
+    this.key.shadow.camera.near = 40;
+    this.key.shadow.camera.far = 320;
+    const r = Math.max(64, 64 / Math.max(0.35, t.keyDir[1]));
+    this.key.shadow.camera.top = r;
+    this.key.shadow.camera.bottom = -r;
+    this.key.shadow.camera.left = -r;
+    this.key.shadow.camera.right = r;
+    this.key.shadow.camera.updateProjectionMatrix();
+    this.fill.color.setRGB(...t.fillCol);
+    this.fill.intensity = t.fillI;
+    this.bloom.intensity = t.bloom;
+    this.bloom.luminanceMaterial.threshold = t.bloomThreshold;
+    sc.environment = this.envFor(t, map);
+    sc.environmentIntensity = t.envI;
+  }
+
+  /** the old two-way switch */
+  setDay(day: boolean): void {
+    this.setLook(day ? TIMES.day : TIMES.night);
+  }
+
+  private envFor(t: TimeLook, map: MapLook): THREE.Texture {
+    const k = t.id + '/' + map.id;
+    let e = this.envCache.get(k);
+    if (!e) {
+      e = this.envMap(t, map);
+      this.envCache.set(k, e);
+    }
+    return e;
   }
 
   resize(): void {
@@ -232,98 +284,89 @@ export class Stage {
     }
   }
 
-  /** the image light: a sky with banks of floodlights all round and a green floor */
-  private envMap(day: boolean): THREE.Texture {
+  /** the image light: this sky, the stands as a band round the horizon, floodlights when on, the pitch */
+  private envMap(t: TimeLook, map: MapLook): THREE.Texture {
     const es = new THREE.Scene();
-    const skyM = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      uniforms: { uSun: { value: KEY_DIR } },
-      vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
-      fragmentShader: day
-        ? `uniform vec3 uSun; varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = d.y;
-        vec3 c = mix(vec3(0.62,0.74,0.9), vec3(0.18,0.38,0.78), smoothstep(0.0, 0.7, h));
-        c = mix(vec3(0.16,0.22,0.12), c, smoothstep(-0.25, 0.02, h));
-        float s = max(dot(d, uSun), 0.0);
-        c += vec3(1.0,0.9,0.75) * (pow(s, 600.0) * 60.0 + pow(s, 8.0) * 0.5);
-        gl_FragColor = vec4(c, 1.); }`
-        : `varying vec3 vP; void main(){ vec3 d = normalize(vP); float h = d.y;
-        vec3 c = mix(vec3(0.05,0.09,0.06), vec3(0.03,0.05,0.12), smoothstep(-0.2, 0.05, h));
-        c = mix(c, vec3(0.012,0.02,0.06), smoothstep(0.1, 0.8, h));
-        c += vec3(0.12,0.1,0.16) * exp(-abs(h - 0.08) * 18.0);
-        gl_FragColor = vec4(c, 1.); }`,
-    });
-    es.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), skyM));
-    if (day) {
-      // the stands as a grey band round the horizon, the pitch below
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(44, 44, 18, 32, 1, true), new THREE.MeshBasicMaterial({ color: 0x3c3a3e, side: THREE.BackSide }));
-      band.position.y = 6;
-      es.add(band);
-      const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: 0x2e5a1c }));
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.y = -4;
-      es.add(floor);
-      const pm = new THREE.PMREMGenerator(this.renderer);
-      const rt = pm.fromScene(es, 0.02);
-      pm.dispose();
-      return rt.texture;
-    }
-    const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 6.4) });
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.2), lamp);
-      m.position.set(Math.cos(a) * 40, 22, Math.sin(a) * 40);
-      m.lookAt(0, 0, 0);
-      es.add(m);
-    }
-    const strip = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.5, 1.8) });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(42, 0.6, 6, 64), strip);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 30;
-    es.add(ring);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: 0x0f2a12 }));
+    es.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), this.skyMat));
+    const dk = t.day;
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(44, 44, map.tiers === 2 ? 18 : 8, 32, 1, true),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.012, 0.014, 0.02).lerp(new THREE.Color(map.snow ? 0x8c9096 : 0x3c3a3e), dk), side: THREE.BackSide }),
+    );
+    band.position.y = map.tiers === 2 ? 6 : 1;
+    es.add(band);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x0f2a12).lerp(new THREE.Color(0x2e5a1c), dk) }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -4;
     es.add(floor);
+    if (t.floods) {
+      const lamp = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 6.4).multiplyScalar(1 - 0.6 * dk) });
+      const n = map.lights === 'masts' ? 4 : 12;
+      for (let i = 0; i < n; i++) {
+        const a = ((i + (n === 4 ? 0.5 : 0)) / n) * Math.PI * 2;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(n === 4 ? 14 : 9, n === 4 ? 6 : 2.2), lamp);
+        m.position.set(Math.cos(a) * 40, n === 4 ? 30 : 22, Math.sin(a) * 40);
+        m.lookAt(0, 0, 0);
+        es.add(m);
+      }
+      if (map.lights === 'ring') {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(42, 0.6, 6, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.5, 1.8).multiplyScalar(1 - 0.6 * dk) }));
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = 30;
+        es.add(ring);
+      }
+    }
     const pm = new THREE.PMREMGenerator(this.renderer);
     const rt = pm.fromScene(es, 0.02);
     pm.dispose();
     return rt.texture;
   }
 
-  /** a night sky: deep blue, a glow over the stadium lights, stars */
+  /** the sky for any time: a gradient dome with a horizon glow, the sun, drifting cumulus, stars */
   private sky(): THREE.Mesh {
-    const m = new THREE.ShaderMaterial({
+    const m = (this.skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
       uniforms: this.skyU,
       vertexShader: 'varying vec3 vP; void main(){ vP = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }',
-      fragmentShader: `uniform float uTime; uniform float uDay; uniform vec3 uSun; varying vec3 vP;
+      fragmentShader: `uniform float uTime; uniform vec3 uSun; uniform vec3 uZen; uniform vec3 uHor; uniform vec3 uGlow; uniform vec3 uSunCol;
+        uniform float uDisc; uniform float uCloud; uniform vec3 uCloudLit; uniform vec3 uCloudShade; uniform float uStars; uniform float uCity;
+        varying vec3 vP;
         float h21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
         float n2(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
           return mix(mix(h21(i), h21(i+vec2(1,0)), u.x), mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), u.x), u.y); }
         float fbm(vec2 p){ float a = 0.5, v = 0.0; for (int k = 0; k < 5; k++){ v += a*n2(p); p = p*2.03 + 7.1; a *= 0.5; } return v; }
         void main(){ vec3 d = normalize(vP); float h = d.y;
-          // night: deep blue, a glow over the lights, stars
-          vec3 cn = mix(vec3(0.07,0.11,0.24), vec3(0.008,0.014,0.045), smoothstep(0.0, 0.55, h));
-          cn += vec3(0.25,0.22,0.35) * exp(-max(h,0.)*9.0) * 0.6;
-          cn = mix(cn, vec3(0.02,0.03,0.05), smoothstep(0.0,-0.15,h));
+          float hp = max(h, 0.0);
+          float sd = max(dot(d, uSun), 0.0);
+          // the dome: zenith to horizon, the glow lying on the horizon (strongest toward the sun)
+          vec3 c = mix(uHor, uZen, smoothstep(0.0, 0.6, pow(hp, 0.8)));
+          float toward = pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-4), normalize(vec3(uSun.x, 0.0, uSun.z) + 1e-4)), 0.0), 3.0);
+          c += uGlow * exp(-hp * 7.0) * (0.25 + 0.75 * toward) * 0.55;
+          // a city's light dome
+          c += vec3(0.32, 0.2, 0.3) * exp(-hp * 5.0) * uCity * 0.5;
+          // the sun's halo and disc
+          c += uSunCol * (pow(sd, 8.0) * 0.45 + pow(sd, 64.0) * 0.5);
+          // stars
           vec2 sp = vec2(atan(d.z,d.x)*120., h*240.);
           vec2 id = floor(sp); vec2 f = fract(sp)-0.5;
-          float s = h21(id); float star = step(0.985, s) * (1.0 - smoothstep(0.0, 0.2, length(f))) * smoothstep(0.05,0.4,h);
-          cn += vec3(0.9,0.95,1.0) * star * (0.4 + 0.6*h21(id+3.1));
-          // day: a blue dome paling to the haze, the sun, drifting cumulus
-          vec3 cd = mix(vec3(0.66,0.78,0.92), vec3(0.16,0.36,0.78), smoothstep(0.0, 0.65, h));
-          float sd = max(dot(d, uSun), 0.0);
+          float st = step(0.985, h21(id)) * (1.0 - smoothstep(0.0, 0.2, length(f))) * smoothstep(0.05,0.4,h);
+          c += vec3(0.9,0.95,1.0) * st * (0.4 + 0.6*h21(id+3.1)) * uStars;
+          // cumulus, drifting: lit toward the sun, shaded underneath
           vec2 cp = d.xz / max(h + 0.12, 0.05) * 1.6 + vec2(uTime * 0.006, uTime * 0.002);
-          float cl = smoothstep(0.52, 0.78, fbm(cp)) * smoothstep(0.02, 0.22, h);
+          float thr = mix(0.78, 0.42, uCloud);
+          float cl = smoothstep(thr, thr + 0.24, fbm(cp)) * smoothstep(0.01, 0.2, h);
           float shade = fbm(cp + vec2(0.35, 0.2));
-          vec3 cloudC = mix(vec3(0.62,0.66,0.74), vec3(1.05,1.04,1.0), smoothstep(0.35, 0.75, shade)) * (1.0 + pow(sd, 6.0) * 0.6);
-          cd = mix(cd, cloudC, cl * 0.92);
-          cd += vec3(1.0,0.92,0.78) * (pow(sd, 900.0) * 40.0 + pow(sd, 12.0) * 0.35) * (1.0 - cl * 0.8);
-          cd = mix(cd, vec3(0.3,0.33,0.36), smoothstep(0.0,-0.15,h));
-          gl_FragColor = vec4(mix(cn, cd, uDay), 1.); }`,
-    });
+          vec3 cloudC = mix(uCloudShade, uCloudLit, smoothstep(0.3, 0.75, shade)) * (1.0 + pow(sd, 5.0) * 0.8);
+          // (edges near the sun glow with it)
+          cloudC += uSunCol * pow(sd, 14.0) * (1.0 - cl) * 1.5;
+          c = mix(c, cloudC, cl * 0.92);
+          c += uSunCol * pow(sd, 1600.0) * uDisc * (1.0 - cl * 0.85);
+          // below the horizon: the ground's shade
+          c = mix(c, uHor * 0.35, smoothstep(0.0, -0.15, h));
+          gl_FragColor = vec4(c, 1.); }`,
+    }));
     const s = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 24), m);
     s.renderOrder = -10;
     s.frustumCulled = false;

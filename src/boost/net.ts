@@ -27,6 +27,8 @@ export interface LobbyPlayer {
   skill: number;
   ping: number;
 }
+import type { MapId, TimeId } from './render/looks.ts';
+
 export type BotMode = 'even' | 'full' | 'none';
 
 /** how many bots each team gets at kick-off, and the match size that makes */
@@ -50,7 +52,8 @@ export interface LobbyState {
   bots: BotMode;
   botSkill: number;
   inMatch: boolean;
-  arena?: 'day' | 'night';
+  map?: MapId;
+  time?: TimeId;
 }
 
 export type CtlMsg =

@@ -3,6 +3,7 @@ import { Audio } from './audio.ts';
 import { Controls } from './input.ts';
 import { botPlan, Guest2, Host, makeCode, packInputs, quant, type CtlMsg, type LobbyPlayer, type LobbyState } from './net.ts';
 import { buildArena, type ArenaView } from './render/arena.ts';
+import { asMap, asTime, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
 import { CarView, TEAM_COLORS } from './render/car.ts';
@@ -129,16 +130,21 @@ export class Game {
     this.controls.classic = p.keys === 'classic';
     this.ui.cam(this.cam.ballCam);
     // the arena follows your setting except inside an online lobby, where the host picks
-    if (!this.lobby) this.setDay(p.arena !== 'night');
+    if (!this.lobby) this.setLook(this.q.get('map') ?? p.map, this.q.get('time') ?? p.time);
   }
+  /** ?map= and ?time= pin the look (links, screenshots) */
+  private readonly q = new URLSearchParams(location.search);
 
-  setDay(day: boolean): void {
-    if (this.stage.day === day && this.dayApplied) return;
-    this.dayApplied = true;
-    this.stage.setDay(day);
-    this.arena.setDay(day);
+  /** the arena and the time of day (the stage's light and the arena's dressing together) */
+  setLook(map: MapId | string | undefined, time: TimeId | string | undefined): void {
+    const m = MAPS[asMap(map)];
+    const t = TIMES[asTime(time)];
+    if (this.lookKey === m.id + t.id) return;
+    this.lookKey = m.id + t.id;
+    this.stage.setLook(t, m);
+    this.arena.setLook(t, m);
   }
-  private dayApplied = false;
+  private lookKey = '';
   private lastReset: number[] = Array(8).fill(-9);
 
   /** build cars for a roster */
@@ -187,7 +193,7 @@ export class Game {
     this.mode = 'attract';
     this.me = -1;
     this.tvSnap = true;
-    if (!this.lobby) this.setDay(this.ui.profile.arena !== 'night');
+    if (!this.lobby) this.setLook(this.q.get('map') ?? this.ui.profile.map, this.q.get('time') ?? this.ui.profile.time);
     this.setup(this.botRoster(2, 0.75, false), true);
     this.world.start({ minutes: 99, freeplay: false });
     this.world.phaseT = 0.5;
@@ -270,7 +276,7 @@ export class Game {
     ui.onLobbyOpt = (o) => {
       if (!this.host || !this.lobby) return;
       Object.assign(this.lobby, o);
-      if (o.arena) this.setDay(o.arena !== 'night');
+      if (o.map || o.time) this.setLook(this.lobby.map, this.lobby.time);
       this.pushLobby();
     };
     ui.onLobbyKick = (id) => this.host?.kick(id);
@@ -354,7 +360,8 @@ export class Game {
         bots: 'even',
         botSkill: 0.55,
         inMatch: false,
-        arena: this.ui.profile.arena,
+        map: this.ui.profile.map,
+        time: this.ui.profile.time,
       };
       this.ui.onlineMsg('');
       this.ui.showMenu(false);
@@ -492,7 +499,7 @@ export class Game {
     if (m.t === 'welcome') {
       this.myId = m.id;
       this.lobby = m.lobby;
-      this.setDay(m.lobby.arena !== 'night');
+      this.setLook(m.lobby.map, m.lobby.time);
       this.ui.onlineMsg('');
       this.ui.showMenu(false);
       this.ui.showLobby(!m.lobby.inMatch);
@@ -500,7 +507,7 @@ export class Game {
       if (m.lobby.inMatch) this.ui.toast('A match is on — you are in the next one');
     } else if (m.t === 'lobby') {
       this.lobby = m.lobby;
-      this.setDay(m.lobby.arena !== 'night');
+      this.setLook(m.lobby.map, m.lobby.time);
       if (this.mode !== 'guest') this.ui.lobby(m.lobby, this.myId, false);
     } else if (m.t === 'chat') this.ui.chat(m.from, m.text);
     else if (m.t === 'start') {
