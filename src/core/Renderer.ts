@@ -1069,6 +1069,9 @@ export class GradeEffect extends Effect {
   }
 }
 
+/** the CAS sharpen's base strength at full resolution (Assetto Corsa footage holds ~30 % more fine detail than 0.4 gave) */
+const SHARP_BASE = 0.58;
+
 export class Renderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly composer: EffectComposer;
@@ -1526,7 +1529,7 @@ export class Renderer {
     if (Math.abs(v - this.dynamicScale) < 0.001) return;
     this.dynamicScale = v;
     // sharpen harder when the image is being upscaled
-    this.sharpBase = THREE.MathUtils.clamp(0.4 + (1 - v) * 0.5, 0.4, 0.65);
+    this.sharpBase = THREE.MathUtils.clamp(SHARP_BASE + (1 - v) * 0.5, SHARP_BASE, SHARP_BASE + 0.25);
     this.resize();
   }
 
@@ -1712,7 +1715,7 @@ export class Renderer {
    * looks are the same light shot by two cameras.
    */
   broadcast = 0;
-  private sharpBase = 0.4;
+  private sharpBase = SHARP_BASE;
   private appliedLook = -1;
   private applyLook() {
     const b = THREE.MathUtils.clamp(this.broadcast, 0, 1);

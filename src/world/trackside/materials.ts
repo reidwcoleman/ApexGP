@@ -306,9 +306,10 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // A deep, even charcoal binder-rich stone-mastic surface: the chips are small and coated,
     // so they barely read in colour (±8 %); only a faint, large-scale evenness variation.
     float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
-    // (a race-worn mid grey, as the TV pictures show it in sun: the binder long oxidised off the
-    // chip tops; the fine chips give a tight ±25 % grain up close)
-    col = vec3(0.2, 0.196, 0.189) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
+    // (a race-worn mid grey, a shade deeper than TV footage's (0.2): against the richer grade and the lush
+    // verges it reads as asphalt, not concrete, and the lines and kerbs pop as in a sim; the fine chips
+    // give a tight ±25 % grain up close)
+    col = vec3(0.158, 0.156, 0.152) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
     // the odd pale chip (quartz, limestone) among the dark ones, resolved only up close
     col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, pxA));
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
@@ -936,7 +937,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-13', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-14', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
@@ -1098,8 +1099,9 @@ float gStripe = 0.0;
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.61, 0.17));
   float clump = texture2D(uMacro, vTrk / 6.0 + vec2(0.7, 0.2)).b;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
-  // (the deep, slightly dull green of real verges in camera footage — not a game's lawn green)
-  col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.92) * vec3(0.92, 1.0, 0.74) * 0.86;
+  // (a lush, sunlit, well-kept verge: the bright yellow-green of a sim's circuit lawn — Assetto Corsa
+  // Monza — rather than the dull green of compressed TV footage)
+  col *= vec3(1.0, 1.16, 0.6) * 1.06;
   // drier, yellower patches (fewer when it rains)
   float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
@@ -1168,7 +1170,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-4-desert' : 'apex-ts-grass-4', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-5-desert' : 'apex-ts-grass-5', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other

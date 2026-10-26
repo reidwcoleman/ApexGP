@@ -25,7 +25,7 @@ const LAT = 18;
 const BIN = 0.5;
 const BINS = Math.round((2 * LAT) / BIN) + 1;
 const TILES = 64;
-/** Ultra / Ultra Tuned: the window runs on to TILES_FAR metres, the extra tiles at FAR_DENS of the density (the LOD thins them that much anyway) */
+/** High and up: the window runs on to TILES_FAR metres, the extra tiles at FAR_DENS of the density (the LOD thins them that much anyway) */
 const TILES_FAR = 116;
 const FAR_DENS = 0.4;
 /** metres of the window behind the camera */
@@ -41,7 +41,7 @@ export interface GrassBuild {
   mesh: THREE.Mesh;
   update(camera: THREE.Camera, elapsed: number): void;
   setEnabled(on: boolean): void;
-  /** Ultra and up: blades on out to ~66 m instead of ~30 m */
+  /** High and up: blades on out to ~66 m instead of ~30 m */
   setLong(on: boolean): void;
 }
 

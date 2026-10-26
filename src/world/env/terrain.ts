@@ -89,6 +89,8 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   // Red Mesa: red sand, slickrock and dark juniper
   canyon: { arid: 1, sand: 0xb07c58, rock: 0x8e5236, earth: 0x9a6a48, gravel: 0xb08a68, lawn: 0x6a6a3a, meadow: 0x8a7a4c, straw: 0xa8885a, canopy: 0x3a3a26 },
 };
+const LAWN_LUSH = new THREE.Color(1.0, 1.03, 0.92);
+const MEADOW_LUSH = new THREE.Color(1.04, 1.08, 0.92);
 const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid' | 'forest' | 'pasture'>, string> = {
   lawn: 'uLawn', meadow: 'uMeadow', straw: 'uStraw', grassDark: 'uGrassDark', earth: 'uEarth', gravel: 'uGravel',
   sand: 'uSand', rock: 'uRock', litter: 'uLitter', canopy: 'uCanopy',
@@ -874,6 +876,10 @@ export function buildTerrain(map: WorldMap, maxAniso: number): TerrainBuild {
   group.name = 'Terrain';
   const { material, uniforms } = createTerrainMaterial(maxAniso);
   applyTerrainPalette(uniforms, TERRAIN_PALETTES[map.venue]);
+  // (lusher, brighter lawns and meadows than the palettes' footage greens — the verge shader and the grass
+  // blades were lifted the same way, so near and far still meet)
+  (uniforms.uLawn.value as THREE.Color).multiply(LAWN_LUSH);
+  (uniforms.uMeadow.value as THREE.Color).multiply(MEADOW_LUSH);
   uniforms.uScenic.value = map.scenic === 'riviera' ? 1 : map.scenic === 'alpine' ? 2 : map.scenic === 'canyon' ? 3 : 0;
   // (the scenic villages are real houses close to the road: gardens and yards under them, not painted roofs)
   if (map.scenic) uniforms.uTownYard.value = 0.85;

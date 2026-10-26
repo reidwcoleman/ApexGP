@@ -368,6 +368,7 @@ float ignF( vec2 p ) { return ign( p + 5.588238 * mod( uFrame, 64.0 ) ); }
 
 /** RE_Direct wrapper: thin-leaf transmission + crown self-shadowing */
 const LEAF_LIGHT = /* glsl */ `
+const vec3 FOLIAGE_TINT = vec3( 1.04, 1.12, 0.84 );
 varying float vLeafL;
 varying float vAOL;
 varying float vSunOcc;
@@ -552,10 +553,9 @@ if ( leafK > 0.5 ) {
   int l0 = int( floor( lc0 ) );
   float cg = mix( texelFetch( uLeafCover, ivec2( ci, l0 ), 0 ).r, texelFetch( uLeafCover, ivec2( ci, min( l0 + 1, int( uLeafCoverN ) - 1 ) ), 0 ).r, fract( lc0 ) );
   if ( lt.a * cg * rim < thr ) discard;
-  // foliage as camera footage shows it: a dark olive mass, not a bright game green (the clumps are the
-  // scans' own leaves; a touch of desaturation and warmth matches them to the graded footage)
-  vec3 lc = lt.rgb;
-  lc = mix( vec3( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ) ), lc, 0.86 ) * vec3( 1.0, 1.0, 0.88 );
+  // foliage as a sim shows it on a summer race day: full, living, sunlit green (Assetto Corsa's Monza
+  // park), a touch warmer than the scans; FOLIAGE_TINT is shared with the impostors so near and far match
+  vec3 lc = lt.rgb * FOLIAGE_TINT;
   diffuseColor.rgb *= lc;
 } else {
   // the scan's own bark colour is in the vertex colour; the bark tile adds the detail around it
@@ -623,7 +623,7 @@ roughnessFactor *= mix( 1.0, mix( 0.8, 0.55, leafK ), uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v13';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v14';
   return mat;
 }
 
@@ -879,8 +879,8 @@ vec4 ia = mix( ia0, ia1, vIW );
 }
 // (sRGB atlas: the colour arrives linear)
 diffuseColor.rgb = ia.rgb * vITint;
-// (the same footage foliage tint as the 3D trees, so near and far match)
-diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) ), diffuseColor.rgb, 0.86 ) * vec3( 1.0, 1.0, 0.88 );
+// (the same foliage tint as the 3D trees, so near and far match)
+diffuseColor.rgb *= FOLIAGE_TINT;
 `,
       )
       .replace(
@@ -911,6 +911,6 @@ diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.072
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-impostor-v10';
+  mat.customProgramCacheKey = () => 'apex-tree-impostor-v11';
   return mat;
 }

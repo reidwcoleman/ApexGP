@@ -44,7 +44,7 @@ const FILM = {
   tint: [1.05, 1.0, 0.9],
   shadowTint: [1.0, 0.99, 1.0],
   /** the sky held back from the brighter exposure (the camera's knee) */
-  skyExposure: 0.7,
+  skyExposure: 0.55,
   bloom: 1.35,
   bloomThreshold: 0.9,
   skyComp: 0.1,
@@ -68,6 +68,8 @@ const FILM = {
   skyHot: 0.3,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
   dayMilk: 0.2,
+  /** extra saturation on a dry overcast day (×(1 + greySat · overcast)) */
+  greySat: 0.35,
 };
 
 /**
@@ -610,7 +612,8 @@ export function createEnvironment(
     // of standing as a glowing white ridge under a darker sky — as they did while a shower came in)
     curtain.w = (0.03 * wetK + 0.02 * stormK) * dayK;
     sky.uniforms.uHalo.value = (isLowSun(L.time) ? 1.6 : L.time === 'morning' ? 1.2 : 0.8) * (0.4 + 0.6 * L.sunVis);
-    gradeLook.saturation = L.saturation * FILM.saturation;
+    // (a dry grey day keeps its colour: a sim's overcast Monza is still green grass and coloured boards, not grey on grey)
+    gradeLook.saturation = L.saturation * FILM.saturation * (1 + FILM.greySat * L.overcast * (1 - wetK) * filmDay);
     gradeLook.contrast = L.contrast * FILM.contrast;
     // the warm cast is the sun's: full in sunshine, eased off under a grey deck, gone in the blue hour
     // after sunset and in a misty dusk (footage there is cool blue-grey, not brown)
