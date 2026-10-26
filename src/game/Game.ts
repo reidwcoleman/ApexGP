@@ -1659,7 +1659,7 @@ export class Game {
     const card = document.createElement('div');
     card.className = 'race-intro';
     const path = circuitPath(layoutPoints(d), 200, 140, 8);
-    const kicker = this.careerRace ? `Career · Round ${String(i + 1).padStart(2, '0')}` : 'Grand Prix';
+    const kicker = this.careerRace ? (i >= 0 ? `World Tour · Round ${String(i + 1).padStart(2, '0')}` : 'World Tour · Scenic') : 'Grand Prix';
     card.innerHTML =
       `<svg class="ri-map" viewBox="0 0 200 140"><path d="${path}"/></svg>` +
       `<div class="ri-text"><div class="ri-kick">${kicker}</div><div class="ri-name">${d.name}</div>` +
@@ -2172,7 +2172,7 @@ export class Game {
       const nc = CIRCUITS[i + 1];
       if (nc && this.career.isUnlocked(nc.id)) next = { label: `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
     }
-    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `Career round · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
+    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `World Tour · ${this.career.stars()} of ${ALL_CIRCUITS.length * 3} stars · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
   }
 
   // ------------------------------------------------------------------ frame

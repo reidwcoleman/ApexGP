@@ -542,6 +542,8 @@ uniform vec2 uFWind;
 varying vec2 vUv;
 varying float vAlpha;
 varying float vHeat;
+varying float vAge;
+varying float vSeed;
 #include <fog_pars_vertex>
 void main() {
   const float LIFE = 12.0;
@@ -558,8 +560,10 @@ void main() {
   // a dense column rising off the flare, spreading and leaning downwind as it cools
   c.y += 0.8 + 2.2 * t - 0.045 * t * t;
   c.xz += drift * t * ( 0.6 + 0.08 * t ) + vec2( sin( aInfo.z * 40.0 ), cos( aInfo.z * 31.0 ) ) * ( 0.25 + 0.42 * t );
-  float size = ( 0.7 + 0.95 * t ) * aInfo.w * burning;
-  vAlpha = smoothstep( 0.0, 0.06, age01 ) * ( 1.0 - smoothstep( 0.35, 1.0, age01 ) ) * 0.5;
+  float size = ( 0.8 + 1.35 * t ) * aInfo.w * burning;
+  vAlpha = smoothstep( 0.0, 0.06, age01 ) * ( 1.0 - smoothstep( 0.3, 1.0, age01 ) ) * 0.36;
+  vAge = age01;
+  vSeed = aInfo.z;
   vHeat = 1.0 - smoothstep( 0.0, 0.18, age01 );
   vec4 mv = modelViewMatrix * vec4( c, 1.0 );
   float rot = aInfo.z * 6.28 + t * 0.2;
@@ -578,15 +582,21 @@ uniform vec3 uFLight;
 varying vec2 vUv;
 varying float vAlpha;
 varying float vHeat;
+varying float vAge;
+varying float vSeed;
 #include <fog_pars_fragment>
 void main() {
   vec2 q = vUv - 0.5;
   float r = length( q ) * 2.0;
-  float puff = 1.0 - smoothstep( 0.35, 1.0, r + 0.18 * sin( q.x * 11.0 + q.y * 7.0 ) );
+  // a soft, torn billow (no hard rim): gaussian falloff broken by a per-particle swirl
+  float sw = sin( q.x * 9.0 + vSeed * 20.0 ) * sin( q.y * 8.0 - vSeed * 13.0 + q.x * 4.0 );
+  float puff = exp( -r * r * 2.6 ) * ( 0.7 + 0.3 * sw ) * ( 1.0 - smoothstep( 0.8, 1.0, r ) );
   float a = puff * vAlpha;
   if ( a < 0.01 ) discard;
-  // lit from above: brighter crown, the burning core glowing at the root
-  vec3 col = uFCol * uFLight * ( 0.72 + 0.4 * ( 0.5 - q.y ) ) + vec3( 1.0, 0.55, 0.2 ) * vHeat * 2.2;
+  // lit from above: brighter crown, the burning core glowing at the root; the plume thins and pales to a
+  // dusty peach as it rises and mixes with the air
+  vec3 smoke = mix( uFCol, uFCol * 0.5 + vec3( 0.36, 0.31, 0.28 ), smoothstep( 0.08, 0.75, vAge ) );
+  vec3 col = smoke * uFLight * ( 0.72 + 0.4 * ( 0.5 - q.y ) ) + vec3( 1.0, 0.55, 0.2 ) * vHeat * 2.2;
   gl_FragColor = vec4( col, a );
   #include <fog_fragment>
 }
