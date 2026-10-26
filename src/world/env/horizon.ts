@@ -858,7 +858,7 @@ float hzFoot = 0.0;
     if ( snowL > 0.0 ) {
       // snow lies above the line, thinner on steep rock, longer down the gullies
       float sk = smoothstep( snowL - 0.03, snowL + 0.04, h01 + 0.22 * ( r0 - 0.5 ) - slope * 0.25 );
-      c = mix( c, vec3( 0.8, 0.82, 0.86 ), sk * ( 1.0 - 0.45 * smoothstep( 0.45, 0.8, slope ) ) );
+      c = mix( c, vec3( 0.56, 0.59, 0.65 ) * ( 0.84 + 0.22 * r0 ), sk * ( 1.0 - 0.45 * smoothstep( 0.45, 0.8, slope ) ) );
     }
     diffuseColor.rgb = c;
     // valley mist: the foot of each range sits in the air between it and the next
@@ -885,7 +885,7 @@ float hzFoot = 0.0;
 #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-horizon-v5';
+  mat.customProgramCacheKey = () => 'apex-horizon-v6';
   const mesh = new THREE.Mesh(g, mat);
   mesh.name = 'horizon';
   mesh.frustumCulled = false;

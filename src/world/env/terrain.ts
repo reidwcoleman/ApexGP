@@ -646,7 +646,16 @@ float tWoodAt( vec2 q, float fShift ) {
       float snow = smoothstep( snowH - 50.0, snowH + 50.0, vWPos.y ) * ( 1.0 - smoothstep( 0.5, 0.78, slopeT ) * 0.85 );
       // snow lies in the gullies and on the ledges longer: a broken edge, not a contour
       snow = clamp( snow + smoothstep( snowH - 400.0, snowH, vWPos.y ) * smoothstep( 0.62, 0.8, m1 * 0.5 + d2 * 0.5 ) * ( 1.0 - steep ), 0.0, 1.0 );
-      col = mix( col, vec3( 0.82, 0.85, 0.9 ) * ( 0.92 + 0.1 * d1 ), snow );
+      // (rock poking through the cover on the ribs, and the snow itself never one white: wind crust,
+      // old grey avalanche debris, a bluer cast in the hollows — a flat 0.85 white read as a paper cut-out)
+      snow *= 1.0 - 0.7 * smoothstep( 0.6, 0.82, d2 * 0.6 + m1 * 0.4 ) * smoothstep( 0.25, 0.55, slopeT );
+      // gullies down the fall line: darker runnels where the wind scoured it thin
+      float run = smoothstep( 0.55, 0.85, texture2D( uNoise, vec2( ( vWPos.x + vWPos.z ) * 0.012, vWPos.y * 0.0015 ) ).g ) * smoothstep( 0.3, 0.6, slopeT );
+      col = mix( col, mix( vec3( 0.64, 0.67, 0.72 ), vec3( 0.5, 0.56, 0.66 ), smoothstep( 0.4, 0.75, m3 ) ) * ( 0.8 + 0.26 * d1 ) * ( 1.0 - 0.3 * run ), snow );
+      // (the walls face the sun square-on, two to three times the light the valley floor gets: at the
+      // valley's exposure the gneiss and the snow burned out to one flat white. Held down with height,
+      // as a camera's highlight roll-off would, so the faces keep their gullies and their shading)
+      col *= mix( 1.0, 0.58, smoothstep( 150.0, 700.0, vWPos.y ) );
       tWood *= 1.0 - max( rockK, snow );
     } else {
       // Red Mesa: banded sandstone on the walls (deep red and orange, a paler bed here and there), desert varnish
@@ -805,7 +814,7 @@ reflectedLight.indirectSpecular *= tAO * tAO;`,
 #endif`,
       );
   };
-  material.customProgramCacheKey = () => 'apex-park-terrain-v13';
+  material.customProgramCacheKey = () => 'apex-park-terrain-v14';
   return { material, uniforms };
 }
 

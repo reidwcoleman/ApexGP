@@ -23,12 +23,14 @@ interface BarrierPath {
   len: Float64Array;
 }
 
+// (a season out in the sun and the spray: the polyethylene's red and blue gone a little chalky, the white
+// never white — not the toy-box primaries of a new block)
 const TECPRO_PAL: [number, number][] = [
-  [0xc8201e, 0xe8e8e4],
-  [0x1f4fa8, 0xe8e8e4],
-  [0xc8201e, 0x1f4fa8],
-  [0xf2c200, 0x1f4fa8],
-  [0xe8e8e4, 0x222222],
+  [0xa0302b, 0xd0cfc9],
+  [0x31508a, 0xd0cfc9],
+  [0xa0302b, 0x31508a],
+  [0xcca528, 0x31508a],
+  [0xd0cfc9, 0x2a2a2a],
 ];
 const BELT_PAL: string[][] = [
   ['belt_red', 'belt_white', 'belt_red', 'belt_logo0'],
@@ -382,7 +384,8 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     }
     const pal = TECPRO_PAL[Math.max(0, P.palette[i]) % TECPRO_PAL.length];
     const props = cs.get(i, 'props');
-    props.color(pal[blockIdx++ % 2]).mat(0.55, 0, 0, WEATHER.PLASTIC);
+    // every block its own age: some newer and brighter, some bleached or grimy (replaced after a crash)
+    props.color(pal[blockIdx++ % 2], 0.84 + 0.24 * hash2(Math.floor(p * 10), sd, 11)).mat(0.55 + 0.2 * hash2(Math.floor(p * 10), sd, 13), 0, 0, WEATHER.PLASTIC);
     frameAt(rf, 0.48, 0);
     FR.yaw((hash2(Math.floor(p * 10), sd, 3) - 0.5) * 0.03);
     const hl = 0.7, hd = 0.47, c = 0.12;
