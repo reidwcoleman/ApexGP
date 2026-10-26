@@ -181,25 +181,54 @@ vec3 stars( vec3 d ) {
   return tint * ( exp( -r2 * 60.0 ) * ( 0.25 + 4.0 * mag ) * tw );
 }
 
-// a rainbow opposite the sun: the primary bow at 42°, the fainter reversed secondary at 51°,
-// Alexander's dark band between them and the brighter sky inside the primary
-vec3 spectral( float t ) {
-  // t 0 = violet … 1 = red
-  vec3 c = vec3(
-    smoothstep( 0.45, 0.85, t ) + 0.35 * smoothstep( 0.25, 0.0, t ),
-    smoothstep( 0.2, 0.5, t ) * smoothstep( 0.95, 0.6, t ),
-    smoothstep( 0.55, 0.15, t ) );
-  return c * smoothstep( 0.0, 0.08, t ) * smoothstep( 1.0, 0.9, t );
+// a rainbow opposite the sun, built the way the drops make it: each wavelength bends to its own angle
+// (the primary from violet 40.6° to red 42.4°, the secondary reversed from red 50.3° to violet 53.6°),
+// every colour band blurred by the sun's half-degree disc, so the bands overlap into pastel mixtures
+// rather than flat stripes; a sharp outer edge (the rainbow ray's caustic) fading inward, with the
+// faint supernumerary fringes inside the primary; the secondary ~40 % as bright and wider; the dark
+// band of Alexander between them and the brighter sky inside the primary. Along the arc it is as
+// patchy as the rain behind it — strongest in its legs, where the shower is nearest the ground.
+vec3 wlRGB( float t ) {
+  // t 0 = violet (400 nm) … 1 = red (700 nm): a smooth fit of the eye's response, linear light
+  return vec3(
+    exp( -pow( ( t - 0.84 ) / 0.17, 2.0 ) ) + 0.3 * exp( -pow( ( t - 0.04 ) / 0.09, 2.0 ) ),
+    exp( -pow( ( t - 0.53 ) / 0.17, 2.0 ) ),
+    exp( -pow( ( t - 0.16 ) / 0.14, 2.0 ) ) );
 }
 vec3 rainbow( vec3 d, out float dark ) {
   vec3 a = normalize( vec3( -uSunDir.x, 0.0, -uSunDir.z ) );
   a = normalize( a * cos( uBowEl ) + vec3( 0.0, sin( uBowEl ), 0.0 ) );
   float th = acos( clamp( dot( d, a ), -1.0, 1.0 ) ) * 57.2958;
-  vec3 c = spectral( ( th - 40.4 ) / 2.2 ) * 1.0 + spectral( 1.0 - ( th - 50.0 ) / 3.6 ) * 0.22;
-  dark = smoothstep( 41.5, 43.0, th ) * smoothstep( 51.0, 49.5, th );
-  // the sky inside the bow is lit up a touch
-  c += vec3( 0.05 ) * smoothstep( 41.0, 36.0, th ) * smoothstep( 20.0, 34.0, th );
-  return c;
+  dark = 0.0;
+  if ( th < 30.0 || th > 58.0 ) {
+    // the sky inside the bow is lit up a touch
+    return vec3( 0.045 ) * smoothstep( 41.0, 36.0, th ) * smoothstep( 20.0, 34.0, th );
+  }
+  vec3 c = vec3( 0.0 ), wsum = vec3( 0.0 );
+  for ( int i = 0; i < 10; i++ ) {
+    float t = ( float( i ) + 0.5 ) / 10.0;
+    vec3 w = wlRGB( t );
+    wsum += w;
+    float x = th - mix( 40.6, 42.4, t );
+    // primary: a crisp outer edge, the main lobe falling off inward, two faint supernumeraries
+    float p = x > 0.0 ? exp( -x * x / 0.07 ) : exp( -x * x / 0.42 ) + 0.26 * exp( -pow( x + 1.45, 2.0 ) / 0.1 ) + 0.12 * exp( -pow( x + 2.35, 2.0 ) / 0.09 );
+    // secondary: reversed, the sharp edge on its inside, broader and fainter
+    float y = th - mix( 50.3, 53.6, 1.0 - t );
+    float q = y < 0.0 ? exp( -y * y / 0.12 ) : exp( -y * y / 0.9 );
+    c += w * ( p + 0.38 * q );
+  }
+  c /= wsum;
+  // (overlapping bands: a mixture of the sun's colours, never a pure spectral stripe)
+  c = mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, 0.82 );
+  dark = smoothstep( 42.4, 43.4, th ) * smoothstep( 50.6, 49.6, th );
+  c += vec3( 0.045 ) * smoothstep( 41.0, 36.0, th ) * smoothstep( 20.0, 34.0, th );
+  // patchy along the arc with the rain behind it, strongest low in the legs
+  vec3 e1 = normalize( cross( a, vec3( 0.0, 1.0, 0.0 ) ) );
+  vec3 e2 = cross( e1, a );
+  float phi = atan( dot( d, e2 ), dot( d, e1 ) );
+  float rainK = 0.35 + 0.65 * smoothstep( 0.25, 0.7, vnoise2( vec2( phi * 2.2 + 3.1, 0.7 ) ) * 0.7 + vnoise2( vec2( phi * 6.0, 4.3 ) ) * 0.3 );
+  float legs = 0.65 + 0.35 * smoothstep( 0.4, 0.05, max( d.y, 0.0 ) );
+  return c * rainK * legs * 1.5;
 }
 
 // jagged noise for the bolt: straight segments between random kinks (a real channel is a chain of
@@ -328,7 +357,7 @@ void main() {
   if ( uBow > 0.001 && uEnv < 0.5 && sy > -0.01 ) {
     float dark;
     vec3 bow = rainbow( d, dark );
-    col *= 1.0 - 0.12 * dark * uBow;
+    col *= 1.0 - 0.16 * dark * uBow;
     col += uBowCol * bow * uBow * smoothstep( -0.01, 0.03, sy );
   }
   // the visible sky is held back a little on dim days (a graduated filter), the env map is not
