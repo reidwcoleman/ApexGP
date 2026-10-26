@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Audio } from './audio.ts';
 import { Controls } from './input.ts';
-import { Guest2, Host, makeCode, packInputs, quant, type CtlMsg, type LobbyPlayer, type LobbyState } from './net.ts';
+import { botPlan, Guest2, Host, makeCode, packInputs, quant, type CtlMsg, type LobbyPlayer, type LobbyState } from './net.ts';
 import { buildArena, type ArenaView } from './render/arena.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
@@ -351,7 +351,7 @@ export class Game {
         players: [{ id: 'host', name: this.ui.profile.name, team: 0, color: this.ui.profile.accent, bot: false, skill: 1, ping: 0 }],
         size: 2,
         minutes: 5,
-        fill: true,
+        bots: 'even',
         botSkill: 0.55,
         inMatch: false,
         arena: this.ui.profile.arena,
@@ -419,16 +419,12 @@ export class Game {
     const L = this.lobby;
     if (!L || !this.host) return;
     const roster: Player[] = L.players.map((p) => ({ name: p.name, team: p.team, bot: false, skill: 1, color: p.color, owner: p.id }));
-    if (L.fill) {
-      const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Echo'];
-      let n = 0;
-      for (const team of [0, 1] as Team[]) {
-        const have = roster.filter((p) => p.team === team).length;
-        for (let k = have; k < L.size; k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: 0xffffff, owner: 'bot' });
-      }
-    }
+    const plan = botPlan(L);
+    const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Echo'];
+    let n = 0;
+    for (const team of [0, 1] as Team[]) for (let k = 0; k < (team === 0 ? plan.blue : plan.orange); k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: 0xffffff, owner: 'bot' });
     if (!roster.some((p) => p.team === 0) || !roster.some((p) => p.team === 1)) {
-      this.ui.toast('Each team needs at least one car (or turn on bots)');
+      this.ui.toast('Each team needs at least one car (or turn bots on)');
       return;
     }
     L.inMatch = true;

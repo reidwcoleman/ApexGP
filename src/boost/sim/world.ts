@@ -589,7 +589,7 @@ export class World {
       const inp = c.input;
       w(inp.throttle), w(inp.steer), w(inp.pitch), w(inp.yaw), w(inp.roll), w(inp.jump ? 1 : 0), w(inp.boost ? 1 : 0), w(inp.handbrake ? 1 : 0);
       w(acks[i] ?? 0);
-      w(0), w(0);
+      w(c.supersonicTime), w(c.autoFlip);
     }
     return out;
   }
@@ -660,7 +660,8 @@ export class World {
       inp.boost = r() > 0;
       inp.handbrake = r() > 0;
       acks.push(r());
-      r(), r();
+      c.supersonicTime = r();
+      c.autoFlip = r();
       void full;
     }
     return acks;

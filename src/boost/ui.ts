@@ -1,4 +1,4 @@
-import type { LobbyState } from './net.ts';
+import { botPlan, type BotMode, type LobbyState } from './net.ts';
 import type { Stats } from './sim/world.ts';
 
 /**
@@ -64,7 +64,7 @@ export class UI {
   onLobbyTeam: (team: 0 | 1) => void = () => {};
   onLobbyStart: () => void = () => {};
   onLobbyLeave: () => void = () => {};
-  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'fill' | 'botSkill' | 'arena'>>) => void = () => {};
+  onLobbyOpt: (o: Partial<Pick<LobbyState, 'size' | 'minutes' | 'bots' | 'botSkill' | 'arena'>>) => void = () => {};
   onLobbyKick: (id: string) => void = () => {};
   onChat: (text: string) => void = () => {};
   onResume: () => void = () => {};
@@ -153,7 +153,7 @@ export class UI {
     <div class="row" id="l-host-opts">
       <div class="seg" id="l-size"><button data-v="1">1v1</button><button data-v="2">2v2</button><button data-v="3">3v3</button><button data-v="4">4v4</button></div>
       <div class="seg" id="l-min"><button data-v="3">3 min</button><button data-v="5">5 min</button><button data-v="10">10 min</button></div>
-      <div class="seg" id="l-fill"><button data-v="1">Fill with bots</button><button data-v="0">No bots</button></div>
+      <div class="seg" id="l-fill" title="Even teams: bots only make up a short side (4 players in a 2v2 = no bots, 2 v 1 = one bot). Fill: every empty seat up to the team size."><button data-v="even">Even teams</button><button data-v="full">Fill seats</button><button data-v="none">No bots</button></div>
       <div class="seg" id="l-arena"><button data-v="day">Day</button><button data-v="night">Night</button></div>
     </div>
     <div class="chat"><div class="log" id="l-log"></div><input type="text" id="l-chat" maxlength="120" placeholder="Say something… (Enter)" /></div>
@@ -247,7 +247,7 @@ export class UI {
     this.$('#l-leave').addEventListener('click', () => this.onLobbyLeave());
     seg('#l-size', (v) => this.onLobbyOpt({ size: Number(v) as 1 | 2 | 3 | 4 }));
     seg('#l-min', (v) => this.onLobbyOpt({ minutes: Number(v) }));
-    seg('#l-fill', (v) => this.onLobbyOpt({ fill: v === '1' }));
+    seg('#l-fill', (v) => this.onLobbyOpt({ bots: (v === 'full' || v === 'none' ? v : 'even') as BotMode }));
     seg('#l-arena', (v) => this.onLobbyOpt({ arena: v === 'night' ? 'night' : 'day' }));
     this.$('#l-copy').addEventListener('click', () => {
       const c = this.$('#l-code').textContent ?? '';
@@ -325,18 +325,23 @@ export class UI {
 
   lobby(l: LobbyState, me: string, host: boolean): void {
     this.$('#l-code').textContent = l.code;
-    this.$('#l-title').textContent = l.inMatch ? 'Match in progress' : `${l.size}v${l.size} private match`;
+    this.$('#l-title').textContent = l.inMatch ? 'Match in progress' : `${l.bots === 'full' ? `${l.size}v${l.size} ` : ''}private match`;
     const card = (p: LobbyState['players'][number]) =>
       `<div class="pl ${p.id === me ? 'me' : ''}"><i style="background:${hex(p.color)}"></i>${esc(p.name)}${p.bot ? ' <em>BOT</em>' : `<em>${p.id === 'host' ? 'HOST' : p.ping ? Math.round(p.ping) + ' ms' : ''}</em>`}${host && p.id !== 'host' && !p.bot ? `<button data-kick="${esc(p.id)}" title="Kick">✕</button>` : ''}</div>`;
     this.$('#l-blue').innerHTML = l.players.filter((p) => p.team === 0).map(card).join('');
     this.$('#l-orange').innerHTML = l.players.filter((p) => p.team === 1).map(card).join('');
     this.$('#l-host-opts').style.display = host ? '' : 'none';
     this.$('#l-start').style.display = host ? '' : 'none';
-    this.$('#l-wait').textContent = host ? (l.fill ? 'Empty seats get bots.' : '') : 'Waiting for the host to start…';
+    const plan = botPlan(l);
+    const nb = plan.blue + plan.orange;
+    const kick = `Kick-off: ${plan.size}v${plan.size}` + (nb ? ` · ${nb} bot${nb > 1 ? 's' : ''} (${plan.blue ? plan.blue + ' blue' : ''}${plan.blue && plan.orange ? ', ' : ''}${plan.orange ? plan.orange + ' orange' : ''})` : ' · no bots');
+    this.$('#l-wait').textContent = host ? kick : `${kick} · waiting for the host to start…`;
     const mark = (id: string, v: string) => this.$(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.getAttribute('data-v') === v));
     mark('#l-size', String(l.size));
+    // (the team size only matters when every seat is filled)
+    this.$('#l-size').style.display = l.bots === 'full' ? '' : 'none';
     mark('#l-min', String(l.minutes));
-    mark('#l-fill', l.fill ? '1' : '0');
+    mark('#l-fill', l.bots ?? 'even');
     mark('#l-arena', l.arena === 'night' ? 'night' : 'day');
   }
 

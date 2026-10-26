@@ -28,6 +28,7 @@ export const CAR = {
   MAX_SPEED: 2300,
   SUPERSONIC: 2200,
   BOOST_ACCEL: 991.667,
+  BOOST_ACCEL_AIR: 1058.333,
   BOOST_USE: 100 / 3,
   AIR_THROTTLE: 66.667,
   BRAKE: 3500,
@@ -35,6 +36,7 @@ export const CAR = {
   JUMP_IMPULSE: 291.667,
   JUMP_HOLD: 1458.333,
   JUMP_HOLD_T: 0.2,
+  JUMP_MIN_T: 0.025,
   FLIP_WINDOW: 1.25,
   DODGE_IMPULSE: 500,
   FLIP_TIME: 0.65,
@@ -63,13 +65,39 @@ const CURVATURE: [number, number][] = [
   [1750, 0.0011],
   [2300, 0.00088],
 ];
-// air control (per input / per rad/s), RLBot's measured values
-const T_ROLL = 36.08;
-const T_PITCH = 12.15;
-const T_YAW = 8.92;
-const D_ROLL = -4.47;
-const D_PITCH = -2.8;
-const D_YAW = -1.89;
+// air control: RocketSim's CAR_AIR_CONTROL_TORQUE (130, 95, 400) and _DAMPING (30, 20, 50), pitch /
+// yaw / roll, times CAR_TORQUE_SCALE (2π / 65536 × 1000) = angular acceleration in rad/s² per input
+const TORQUE_SCALE = ((2 * Math.PI) / 65536) * 1000;
+const T_ROLL = 400 * TORQUE_SCALE;
+const T_PITCH = 130 * TORQUE_SCALE;
+const T_YAW = 95 * TORQUE_SCALE;
+const D_ROLL = -50 * TORQUE_SCALE;
+const D_PITCH = -30 * TORQUE_SCALE;
+const D_YAW = -20 * TORQUE_SCALE;
+// the flip: an angular acceleration about roll (left/right dodge) and pitch (front/back) for 0.65 s
+const FLIP_TORQUE_X = 260;
+const FLIP_TORQUE_Y = 224;
+const FLIP_TORQUE_TIME = 0.65;
+const FLIP_PITCHLOCK_EXTRA = 0.3;
+// steering: the front wheels' angle at each forward speed, and the wider one a powerslide allows
+const STEER_ANGLE: [number, number][] = [
+  [0, 0.53356],
+  [500, 0.3193],
+  [1000, 0.18203],
+  [1500, 0.1057],
+  [1750, 0.08507],
+  [3000, 0.03454],
+];
+const SLIDE_STEER_ANGLE: [number, number][] = [
+  [0, 0.39235],
+  [2500, 0.1261],
+];
+// no throttle: the tyres let go on walls and the ceiling (by the surface normal's z)
+const NON_STICKY: [number, number][] = [
+  [0, 0.1],
+  [0.7075, 0.5],
+  [1, 1],
+];
 
 // wheels: local x, |y|, radius
 export const WHEELS: [number, number, number][] = [
@@ -124,6 +152,10 @@ export class Car {
   boosting = false;
   boostHold = 0; // boost stays on at least 0.1 s
   supersonic = false;
+  /** seconds supersonic (it holds down to 2100 uu/s for at most 1 s) */
+  supersonicTime = 0;
+  /** > 0 while the turtle auto-flip rights the car (seconds left, sign = roll direction) */
+  autoFlip = 0;
   demoTimer = 0; // > 0 while demolished
   handbrake = 0; // smoothed 0..1
   surfaceN = new V3(0, 0, 1);
@@ -157,7 +189,10 @@ export class Car {
     this.onGround = true;
     this.wheelContact.fill(true);
     this.supersonic = false;
+    this.supersonicTime = 0;
+    this.autoFlip = 0;
     this.boosting = false;
+    this.handbrake = 0;
     this.demoTimer = 0;
   }
 
@@ -206,7 +241,10 @@ export class Car {
     if (this.demoTimer > 0) return;
     this.input = inp;
     const r = this.rot;
-    this.handbrake += ((inp.handbrake ? 1 : 0) - this.handbrake) * Math.min(1, dt * (inp.handbrake ? 12 : 5));
+    // the powerslide is analog: it rises at 5/s and falls at 2/s
+    this.handbrake = clamp(this.handbrake + (inp.handbrake ? 5 : -2) * dt, 0, 1);
+    // boosting (with charge) holds the throttle down
+    const realThrottle = inp.boost && this.boost > 0 ? 1 : inp.throttle;
 
     // --- suspension ---
     let contacts = 0;
@@ -243,80 +281,118 @@ export class Car {
     }
     const grounded = contacts >= 3;
     if (contacts > 0) this.surfaceN.copy(nAvg.norm());
-
-    // landing resets the jump state
-    if (grounded && !this.jumping) {
-      if (this.jumped || this.flipped || this.doubleJumped) {
-        if (this.airTime > 0.05 || this.vel.dot(this.surfaceN) <= 0) {
-          this.jumped = this.doubleJumped = this.flipped = false;
-          this.airTimeSinceJump = 0;
-        }
-      }
-      if (!this.flipping) this.flipTime = 0;
-    }
     this.onGround = grounded;
     this.airTime = grounded ? 0 : this.airTime + dt;
+    const jumpPressed = inp.jump && !this.lastJump;
+    this.lastJump = inp.jump;
+    const vfwd = this.vel.dot(r.f);
 
     // --- gravity ---
     this.vel.z -= GRAVITY * dt;
 
-    // --- boost ---
-    const wantBoost = inp.boost && this.boost > 0;
-    if (wantBoost) this.boostHold = 0.1;
-    else this.boostHold = Math.max(0, this.boostHold - dt);
-    this.boosting = (wantBoost || this.boostHold > 0) && this.boost > 0;
-    if (this.boosting) {
-      this.boost = Math.max(0, this.boost - CAR.BOOST_USE * dt);
-      this.vel.addScaled(r.f, CAR.BOOST_ACCEL * dt);
+    // --- sticky wheels (any wheel down): half a gravity into the surface, and on a wall or the
+    // ceiling, while driving, as much again as the surface's tilt takes away from gravity
+    if (contacts > 0) {
+      const up = this.surfaceN;
+      const full = realThrottle !== 0 || Math.abs(vfwd) > 25;
+      const k = 0.5 + (full ? 1 - Math.abs(up.z) : 0);
+      this.vel.addScaled(up, -k * GRAVITY * dt);
     }
 
-    // --- jumping ---
-    const jumpPressed = inp.jump && !this.lastJump;
-    this.lastJump = inp.jump;
-    if (grounded && jumpPressed && !this.jumped) {
-      this.jumped = true;
-      this.jumping = true;
-      this.jumpTime = 0;
-      this.airTimeSinceJump = 0;
-      this.vel.addScaled(r.u, CAR.JUMP_IMPULSE);
-    } else if (this.jumping) {
-      this.jumpTime += dt;
-      // the hold: at least a few ticks, at most 0.2 s
-      if ((inp.jump || this.jumpTime < 0.025) && this.jumpTime < CAR.JUMP_HOLD_T) this.vel.addScaled(r.u, CAR.JUMP_HOLD * dt);
-      else this.jumping = false;
-    } else if (!grounded && jumpPressed && this.bodyAgo < 0.1 && contacts < 2 && r.u.dot(this.surfaceN) < 0.5) {
-      // stuck on the roof or a side: a hop and a roll back onto the wheels
-      this.vel.addScaled(this.surfaceN, 330);
-      const loc = r.toLocal(this.w, tmpB);
-      loc.x = (r.l.dot(this.surfaceN) > 0 ? -1 : 1) * CAR.MAX_W;
-      r.toWorld(loc.x, loc.y, loc.z, this.w);
-    } else if (!grounded && jumpPressed && !this.doubleJumped && !this.flipped && (!this.jumped || this.airTimeSinceJump < CAR.FLIP_WINDOW)) {
-      const fx = -inp.pitch; // stick forward
-      const fy = inp.yaw; // stick right
-      if (Math.abs(fx) + Math.abs(fy) >= 0.5) this.dodge(fx, fy);
-      else {
-        this.doubleJumped = true;
-        this.vel.addScaled(r.u, CAR.JUMP_IMPULSE);
+    // --- driving or flying ---
+    if (grounded && !this.jumping) {
+      this.flipping = false;
+      this.drive(dt, inp, realThrottle);
+    } else {
+      if (grounded) this.flipping = false;
+      else this.air(dt, inp, contacts === 0);
+    }
+
+    // --- the jump (RocketSim Car::_UpdateJump) ---
+    if (grounded && !this.jumping) {
+      // (not straight away after a minimum jump: we may still be leaving the ground)
+      if (!(this.jumped && this.jumpTime < CAR.JUMP_MIN_T + 0.025)) {
+        this.jumped = false;
+        this.jumpTime = 0;
       }
     }
-    if (this.jumped && !grounded) this.airTimeSinceJump += dt;
+    if (this.jumping) {
+      if (!(this.jumpTime < CAR.JUMP_MIN_T || (inp.jump && this.jumpTime < CAR.JUMP_HOLD_T))) this.jumping = false;
+    } else if (grounded && jumpPressed) {
+      this.jumping = true;
+      this.jumpTime = 0;
+      this.vel.addScaled(r.u, CAR.JUMP_IMPULSE);
+    }
+    if (this.jumping) {
+      this.jumped = true;
+      this.vel.addScaled(r.u, CAR.JUMP_HOLD * (this.jumpTime < CAR.JUMP_MIN_T ? 0.62 : 1) * dt);
+    }
+    if (this.jumping || this.jumped) this.jumpTime += dt;
 
-    if (grounded && !this.jumping) this.drive(dt, inp, contacts);
-    else this.air(dt, inp);
+    // --- turtle auto-flip: jump while lying on the roof (Car::_UpdateAutoFlip) ---
+    if (jumpPressed && this.bodyAgo < 0.05 && this.surfaceN.z > Math.SQRT1_2 && r.u.z < Math.cos(2.8)) {
+      // roll whichever way brings the wheels round to the ground quicker
+      const side = tmpA.crossVectors(r.f, r.u).z >= 0 ? 1 : -1;
+      const roll = Math.acos(clamp(r.u.z, -1, 1));
+      this.autoFlip = side * Math.max(1e-3, (0.4 * roll) / Math.PI);
+      this.vel.addScaled(r.u, -200);
+    }
+    if (this.autoFlip !== 0) {
+      const left = Math.abs(this.autoFlip) - dt;
+      this.w.addScaled(r.f, 50 * Math.sign(this.autoFlip) * dt);
+      this.autoFlip = left <= 0 ? 0 : Math.sign(this.autoFlip) * left;
+    }
 
-    // flip z damping: the first 0.21 s of a flip hold the car's height
+    // --- double jump or dodge (Car::_UpdateDoubleJumpOrFlip) ---
+    if (grounded) {
+      this.doubleJumped = this.flipped = false;
+      this.airTimeSinceJump = 0;
+      this.flipTime = 0;
+    } else {
+      if (this.jumped && !this.jumping) this.airTimeSinceJump += dt;
+      else this.airTimeSinceJump = 0;
+      if (jumpPressed && this.airTimeSinceJump < CAR.FLIP_WINDOW && !this.doubleJumped && !this.flipped && this.autoFlip === 0) {
+        if (Math.abs(inp.yaw) + Math.abs(inp.pitch) + Math.abs(inp.roll) >= 0.5) this.dodge(-inp.pitch, inp.yaw + inp.roll, vfwd);
+        else {
+          this.doubleJumped = true;
+          this.vel.addScaled(r.u, CAR.JUMP_IMPULSE);
+        }
+      }
+    }
     if (this.flipping) {
       this.flipTime += dt;
-      if (this.flipTime < 0.21 && (this.vel.z < 0 || this.flipTime < 0.15)) this.vel.z *= 0.65;
-      if (this.flipTime >= CAR.FLIP_TIME) this.flipping = false;
+      // the flip holds the car's height: from 0.15 s, always until 0.21 s and while falling after
+      if (this.flipTime <= FLIP_TORQUE_TIME && this.flipTime >= 0.15 && (this.vel.z < 0 || this.flipTime < 0.21)) this.vel.z *= Math.pow(0.65, dt * 120);
+    } else if (this.flipped) this.flipTime += dt;
+
+    // --- auto-roll: throttle with some wheels (or the body) on a surface eases the car flat onto it ---
+    if (realThrottle !== 0 && ((contacts > 0 && contacts < 4) || this.bodyAgo < 0.02)) {
+      const gUp = this.surfaceN;
+      this.vel.addScaled(gUp, -100 * dt);
+      const ax = tmpA.crossVectors(r.u, gUp);
+      const al = ax.len();
+      if (al > 1e-4) this.w.addScaled(ax, (80 * Math.min(1, 1 - clamp(r.u.dot(gUp), 0, 1) + al * 0.5) * dt) / al);
+    }
+
+    // --- boost (Car::_UpdateBoost): 0.1 s minimum, more push in the air ---
+    if (this.boost > 0) {
+      if (this.boosting) this.boosting = inp.boost || this.boostHold < 0.1;
+      else this.boosting = inp.boost;
+    } else this.boosting = false;
+    this.boostHold = this.boosting ? this.boostHold + dt : 0;
+    if (this.boosting) {
+      this.boost = Math.max(0, this.boost - CAR.BOOST_USE * dt);
+      this.vel.addScaled(r.f, (grounded ? CAR.BOOST_ACCEL : CAR.BOOST_ACCEL_AIR) * dt);
     }
 
     // speed caps
     this.vel.clampLen(CAR.MAX_SPEED);
     this.w.clampLen(CAR.MAX_W);
-    const s = this.vel.len();
-    if (s >= CAR.SUPERSONIC) this.supersonic = true;
-    else if (s < 2100) this.supersonic = false;
+    // supersonic from 2200; held down to 2100 for at most a second
+    const s2 = this.vel.len2();
+    if (this.supersonic && this.supersonicTime < 1) this.supersonic = s2 >= 2100 * 2100;
+    else this.supersonic = s2 >= CAR.SUPERSONIC * CAR.SUPERSONIC;
+    this.supersonicTime = this.supersonic ? this.supersonicTime + dt : 0;
 
     // integrate
     this.pos.addScaled(this.vel, dt);
@@ -325,94 +401,116 @@ export class Car {
     this.collideArena();
   }
 
-  private dodge(fx: number, fy: number): void {
+  /** a dodge (RocketSim, after RLUtilities): x = forward share, y = right share of the stick */
+  private dodge(dx: number, dy: number, forwardSpeed: number): void {
     this.flipped = true;
     this.flipping = true;
     this.flipTime = 0;
-    const l = Math.hypot(fx, fy);
-    fx /= l;
-    fy /= l;
-    this.dodgeX = fx;
-    this.dodgeY = fy;
-    // forward on the ground plane
+    let x = dx;
+    let y = dy;
+    if (Math.abs(y) < 0.1 && Math.abs(x) < 0.1) x = y = 0;
+    else {
+      const l = Math.hypot(x, y);
+      x /= l;
+      y /= l;
+    }
+    // the torque it will spin with (zero: a stall)
+    this.dodgeX = x;
+    this.dodgeY = y;
+    if (Math.abs(x) < 0.1) x = 0;
+    if (Math.abs(y) < 0.1) y = 0;
+    if (x === 0 && y === 0) return;
+    const ratio = Math.abs(forwardSpeed) / CAR.MAX_SPEED;
+    const backwards = Math.abs(forwardSpeed) < 100 ? x < 0 : x >= 0 !== forwardSpeed >= 0;
+    let ix = x * 500 * ((backwards ? 2.5 : 1) - 1) * ratio + x * 500;
+    const iy = y * 500 * ((1.9 - 1) * ratio + 1);
+    if (backwards) ix *= 16 / 15;
+    // along the car's heading on the ground plane
     const f2 = tmpA.set(this.rot.f.x, this.rot.f.y, 0);
-    if (f2.len2() < 1e-4) f2.set(-this.rot.u.x, -this.rot.u.y, 0);
+    if (f2.len2() < 1e-6) f2.set(-this.rot.u.x, -this.rot.u.y, 0);
     f2.norm();
-    const r2x = f2.y; // right on the ground plane
-    const r2y = -f2.x;
-    const fwdSpeed = this.vel.x * f2.x + this.vel.y * f2.y;
-    const ratio = Math.min(1, Math.abs(fwdSpeed) / CAR.MAX_SPEED);
-    const backwards = fx < 0;
-    let ix = fx * CAR.DODGE_IMPULSE * (backwards ? (16 / 15 - 1) * ratio + 1 : 1);
-    if (backwards) ix *= 1.0667;
-    const iy = fy * CAR.DODGE_IMPULSE * ((1.9 - 1) * ratio + 1);
-    this.vel.x += f2.x * ix + r2x * iy;
-    this.vel.y += f2.y * ix + r2y * iy;
-    if (this.vel.z < 0) this.vel.z = 0;
-    // spin straight up to flip speed
-    const loc = this.rot.toLocal(this.w, tmpB);
-    loc.x = fy * CAR.MAX_W; // roll right for a right dodge
-    loc.y = fx * CAR.MAX_W; // + about left = nose down for a front flip
-    this.rot.toWorld(loc.x, loc.y, loc.z, this.w);
+    // (right on the ground plane)
+    const rx = f2.y;
+    const ry = -f2.x;
+    this.vel.x += f2.x * ix + rx * iy;
+    this.vel.y += f2.y * ix + ry * iy;
   }
 
-  private drive(dt: number, inp: Input, contacts: number): void {
+  private drive(dt: number, inp: Input, thr: number): void {
     const r = this.rot;
     const u = r.u;
     const vf = this.vel.dot(r.f);
     const vl = this.vel.dot(r.l);
     const speed = Math.abs(vf);
-    // throttle / brake / coast
-    const thr = this.boosting ? 1 : inp.throttle;
+    const hb = this.handbrake;
+    // throttle / brake / coast (Car::_UpdateWheels): driving against the motion brakes, with nothing
+    // pressed the car coasts on 15 % brake, and under 25 uu/s it stops
     let a = 0;
-    if (Math.abs(thr) > 0.01) {
-      if (vf * thr >= 0 || speed < 50) a = thr * curve(THROTTLE_CURVE, speed);
-      else a = Math.sign(thr) * CAR.BRAKE;
-    } else if (speed > 1) {
-      a = -Math.sign(vf) * Math.min(CAR.COAST, speed / dt);
+    if (Math.abs(thr) >= 0.001) {
+      if (!inp.handbrake && speed > 25 && Math.sign(thr) !== Math.sign(vf)) a = Math.sign(thr) * CAR.BRAKE;
+      else a = thr * curve(THROTTLE_CURVE, speed);
+    } else if (!inp.handbrake && speed > 0) {
+      a = -Math.sign(vf) * (speed < 25 ? CAR.BRAKE : CAR.COAST);
+      if (Math.abs(a * dt) > speed) a = -vf / dt;
     }
-    if (a !== 0 && Math.abs(thr) < 0.01 && Math.abs(a * dt) > speed) a = -vf / dt;
     this.vel.addScaled(r.f, a * dt);
-    // lateral grip; the powerslide lets it go
-    const grip = 22 * (1 - this.handbrake) + 1.6 * this.handbrake;
+    // lateral grip: the powerslide takes it down to a tenth; with no throttle on a wall it lets go
+    let grip = 22 * (1 + (0.1 - 1) * hb);
+    if (thr === 0) grip *= curve(NON_STICKY, this.surfaceN.z);
     this.vel.addScaled(r.l, -vl * (1 - Math.exp(-grip * dt)));
-    // steering: a yaw rate from the turning-circle curve
-    const k = curve(CURVATURE, speed);
-    let yaw = -inp.steer * k * vf * (1 + 0.5 * this.handbrake);
+    // steering: a yaw rate from the turning-circle curve, widened by the powerslide's steering angle
+    let k = curve(CURVATURE, speed);
+    if (hb > 0) {
+      const sa = curve(STEER_ANGLE, speed);
+      const ps = sa + (curve(SLIDE_STEER_ANGLE, speed) - sa) * hb;
+      k *= Math.tan(ps) / Math.tan(sa);
+    }
+    let yaw = -inp.steer * k * vf;
     // turning on the spot isn't a thing; a little rate below walking pace
     if (speed < 20) yaw *= speed / 20;
     // angular velocity: keep the yaw we want, damp the rest (the springs align the car)
     const wu = this.w.dot(u);
-    this.w.addScaled(u, (yaw - wu) * Math.min(1, dt * 18));
+    this.w.addScaled(u, (yaw - wu) * Math.min(1, dt * (18 - 12 * hb)));
     const wOther = tmpB.copy(this.w).addScaled(u, -this.w.dot(u));
     this.w.addScaled(wOther, -Math.min(1, dt * 10));
-    // sticky wheels: half a gravity into the surface
-    if (contacts >= 2) this.vel.addScaled(this.surfaceN, -0.5 * GRAVITY * dt);
     // and the suspension holds the car on: rebound off a ramp or a wall is soaked up
     const away = this.vel.dot(this.surfaceN);
     if (away > 0 && this.surfaceN.z > -0.5) this.vel.addScaled(this.surfaceN, -away * Math.min(1, dt * 14));
   }
 
-  private air(dt: number, inp: Input): void {
+  /** in the air (or on fewer than three wheels): the flip's torque, else air control (only with no wheel down) */
+  private air(dt: number, inp: Input, control: boolean): void {
     const r = this.rot;
-    if (Math.abs(inp.throttle) > 0.01 && !this.boosting) this.vel.addScaled(r.f, inp.throttle * CAR.AIR_THROTTLE * dt);
+    if (Math.abs(inp.throttle) > 0.001) this.vel.addScaled(r.f, inp.throttle * CAR.AIR_THROTTLE * dt);
     const loc = r.toLocal(this.w, tmpB);
-    // (local: x roll about forward, y about left = nose down, z about up = turn left)
+    // (local: x roll about forward (+ right), y about left = nose down, z about up = turn left)
     let roll = inp.roll;
     let yaw = inp.yaw;
     if (inp.handbrake && roll === 0) {
       roll = inp.yaw;
       yaw = 0;
     }
+    if (this.flipping) this.flipping = this.flipped && this.flipTime < FLIP_TORQUE_TIME;
+    let doControl = true;
     if (this.flipping) {
-      // the flip owns pitch/roll; pulling against it cancels the flip
-      const cancel = clamp(this.dodgeX * inp.pitch, 0, 1); // stick back during a front flip (pitch up)
-      loc.x = this.dodgeY * CAR.MAX_W;
-      loc.y = this.dodgeX * CAR.MAX_W * (1 - cancel);
-      loc.z += (-T_YAW * yaw + D_YAW * loc.z * (1 - Math.abs(yaw))) * dt;
-    } else {
+      if (this.dodgeX !== 0 || this.dodgeY !== 0) {
+        // pulling the stick against the flip's pitch cancels it (and hands back air control)
+        let pitchScale = 1;
+        doControl = false;
+        if (this.dodgeX !== 0 && inp.pitch !== 0 && Math.sign(this.dodgeX) === Math.sign(inp.pitch)) {
+          pitchScale = 1 - Math.min(1, Math.abs(inp.pitch));
+          doControl = true;
+        }
+        loc.x += this.dodgeY * FLIP_TORQUE_X * dt;
+        loc.y += this.dodgeX * pitchScale * FLIP_TORQUE_Y * dt;
+      }
+    }
+    if (doControl && control && this.autoFlip === 0) {
+      // no pitch during the flip and for 0.3 s after it
+      const pitchScale = this.flipping || (this.flipped && this.flipTime < FLIP_TORQUE_TIME + FLIP_PITCHLOCK_EXTRA) ? 0 : 1;
+      const p = inp.pitch * pitchScale;
       loc.x += (T_ROLL * roll + D_ROLL * loc.x) * dt;
-      loc.y += (-T_PITCH * inp.pitch + D_PITCH * loc.y * (1 - Math.abs(inp.pitch))) * dt;
+      loc.y += (-T_PITCH * p + D_PITCH * loc.y * (1 - Math.abs(p))) * dt;
       loc.z += (-T_YAW * yaw + D_YAW * loc.z * (1 - Math.abs(yaw))) * dt;
     }
     r.toWorld(loc.x, loc.y, loc.z, this.w);

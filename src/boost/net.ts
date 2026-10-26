@@ -27,12 +27,27 @@ export interface LobbyPlayer {
   skill: number;
   ping: number;
 }
+export type BotMode = 'even' | 'full' | 'none';
+
+/** how many bots each team gets at kick-off, and the match size that makes */
+export function botPlan(l: Pick<LobbyState, 'players' | 'size' | 'bots'>): { blue: number; orange: number; size: number } {
+  const humans = l.players.filter((p) => !p.bot);
+  const b = humans.filter((p) => p.team === 0).length;
+  const o = humans.filter((p) => p.team === 1).length;
+  if (l.bots === 'none') return { blue: 0, orange: 0, size: Math.max(b, o) };
+  // (a lone player still gets an opponent)
+  const size = l.bots === 'full' ? Math.max(l.size, b, o) : Math.max(b, o, 1);
+  return { blue: Math.max(0, size - b), orange: Math.max(0, size - o), size };
+}
+
 export interface LobbyState {
   code: string;
   players: LobbyPlayer[];
   size: 1 | 2 | 3 | 4;
   minutes: number;
-  fill: boolean;
+  /** bots: 'even' adds only what evens the teams (4 players in a 2v2: none; 2 v 1: one on the short
+   * side), 'full' fills both teams to size, 'none' plays with whoever is there */
+  bots: BotMode;
   botSkill: number;
   inMatch: boolean;
   arena?: 'day' | 'night';
