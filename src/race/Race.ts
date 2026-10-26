@@ -142,6 +142,8 @@ export interface Competitor {
   car: CarPhysics;
   ai: AIDriver | null;
   isPlayer: boolean;
+  /** dynamic difficulty: 0 … 1, how hard this car is chasing a player who broke away from it */
+  chaseBoost: number;
   /** laps completed (−1 until the first crossing of the line from the grid) */
   laps: number;
   lapDist: number;
@@ -258,9 +260,16 @@ export const FUEL_PER_LAP = 1.8;
 export const PIT_RACE_LAPS = 10;
 
 /** Dynamic difficulty: where a new player starts and the range the rating can move in (fraction of the limit) */
-export const AI_SKILL = { start: 0.96, min: 0.86, max: 1.06 };
-/** Dynamic difficulty: the most the AI's pace moves during a race */
-const DYN_TRIM = 0.035;
+export const AI_SKILL = { start: 0.96, min: 0.86, max: 1.08 };
+/**
+ * Dynamic difficulty during a race, lopsided on purpose: the field finds a lot more when you're
+ * getting away (up to +DYN_UP: grip, power and commitment), and gives back only a touch when you're
+ * struggling (−DYN_DOWN). It climbs in seconds and eases off slowly.
+ */
+const DYN_UP = 0.07;
+const DYN_DOWN = 0.012;
+/** (the old symmetric range: the hold value of the signal is kept in its units) */
+const DYN_TRIM = DYN_UP;
 
 function median(xs: number[]): number {
   if (!xs.length) return NaN;
@@ -418,6 +427,7 @@ export class Race {
         lastLap: 0,
         bestLap: Infinity,
         lapTimes: [],
+        chaseBoost: 0,
         sector: 0,
         sectorStart: 0,
         sectorTimes: [0, 0, 0],
@@ -1631,11 +1641,31 @@ export class Race {
     this.dynTimer -= dt;
     if (this.dynTimer <= 0) {
       this.dynTimer = 1;
-      this.aiTrimTarget = 1 + DYN_TRIM * this.paceSignal();
+      const sig = this.paceSignal();
+      this.aiTrimTarget = 1 + (sig > 0 ? DYN_UP * sig : DYN_DOWN * sig);
     }
-    const step = (DYN_TRIM / 10) * dt;
-    this.aiTrim += Math.max(-step, Math.min(step, this.aiTrimTarget - this.aiTrim));
-    for (const c of this.cars) if (c.ai) c.ai.trim = this.aiTrim;
+    // quick to find pace (the full range in ~8 s), slow to give it back (~1 % a minute)
+    const d = this.aiTrimTarget - this.aiTrim;
+    const step = (d > 0 ? DYN_UP / 8 : DYN_DOWN / 60) * dt;
+    this.aiTrim += Math.max(-step, Math.min(step, d));
+    // the cars just behind you, when you've broken away from them, dig deeper still: never a lonely lead
+    const p = this.player;
+    const live = this.phase === 'racing' && !p.finished && !p.retired;
+    for (const c of this.cars) {
+      if (!c.ai) continue;
+      let chase = 0;
+      if (live && c.position > p.position && c.position <= p.position + 3 && !c.retired && c.pit.phase === 'none') {
+        const gap = (p.raceDist - c.raceDist) / Math.max(25, c.car.vx);
+        chase = Math.max(0, Math.min(1, (gap - 1.2) / 4)) * (c.position === p.position + 1 ? 1 : 0.6);
+      }
+      c.chaseBoost += (chase - c.chaseBoost) * Math.min(1, dt * (chase > c.chaseBoost ? 0.5 : 0.15));
+      const b = this.aiTrim - 1 + 0.03 * c.chaseBoost;
+      // above the car as built: more grip and power (what the profile follows), a little more commitment;
+      // below it: just a touch less commitment
+      c.ai.trim = b > 0 ? 1 + b * 0.3 : 1 + b;
+      c.car.perfGrip = 1 + Math.max(0, b) * 1.5;
+      c.car.perfPower = 1 + Math.max(0, b) * 2.6;
+    }
   }
 
   /**
@@ -1713,8 +1743,9 @@ export class Race {
   /** −1 … 1: + = the player is getting away from the AI around them (they should be a touch quicker) */
   private paceSignal(): number {
     const p = this.player;
-    const hold = (this.aiTrimTarget - 1) / DYN_TRIM;
-    if (this.phase !== 'racing' || this.raceTime < 30 || p.finished || p.retired || p.pit.phase !== 'none') return hold;
+    const t1 = this.aiTrimTarget - 1;
+    const hold = t1 > 0 ? t1 / DYN_UP : t1 / DYN_DOWN;
+    if (this.phase !== 'racing' || this.raceTime < 12 || p.finished || p.retired || p.pit.phase !== 'none') return hold;
     const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
     // last-lap pace against the cars around (clean-ish laps only: no pit stops or big moments)
     let ePace = 0;
@@ -1734,20 +1765,25 @@ export class Race {
     const gA = Math.min(30, p.gapAhead);
     const gB = behind ? Math.min(30, behind.gapAhead) : 0;
     let eGap = 0;
-    if (!ahead && behind) eGap = clamp((gB - 3) / 10, 0, 1);
+    // (leading: the field answers from a second's lead and is all-in by six; never a lonely lead)
+    if (!ahead && behind) eGap = clamp((gB - 1) / 5, 0, 1);
     else if (ahead && !behind) eGap = -clamp((gA - 3) / 10, 0, 1);
     else if (ahead && behind) {
       const x = gB - gA;
-      eGap = Math.sign(x) * clamp((Math.abs(x) - 4) / 12, 0, 1) * 0.5;
+      eGap = Math.sign(x) * clamp((Math.abs(x) - 3) / 10, 0, 1) * 0.6;
     }
-    return clamp(havePace ? 0.6 * ePace + 0.4 * eGap : eGap, -1, 1);
+    // (up at the front the field always has something to find)
+    const front = p.position <= 3 ? 0.2 : 0;
+    // quicker than the cars round you or pulling away: the big weight; slower: only the gaps decide
+    const sig = havePace ? (ePace > 0 ? 0.65 * ePace + 0.35 * Math.max(eGap, 0) : 0.4 * ePace + 0.6 * eGap) : eGap;
+    return clamp(sig + front, -1, 1);
   }
 
   /**
    * Dynamic difficulty after the race: the AI level (fraction of the limit) for
    * the next one. Mostly the lap-time comparison — the player's typical clean lap
    * against the field's, converted to the pace that would match it — plus a
-   * nudge from the result. Can move up to ±6% in one race.
+   * nudge from the result. Can rise up to 7% in one race, fall at most 1.2%.
    */
   rateAiSkill(): number {
     const old = this.opts.difficulty;
@@ -1772,7 +1808,8 @@ export class Race {
       const match = old * trim * (1 - (ratio - 1) / 0.65);
       next = old + (match - old) * 0.75 + result * 0.5;
     }
-    return clamp(old + clamp(next - old, -0.06, 0.06), AI_SKILL.min, AI_SKILL.max);
+    // (lopsided like the in-race trim: up to 7 % quicker for the next race, never more than 1.2 % easier)
+    return clamp(old + clamp(next - old, -0.012, 0.07), AI_SKILL.min, AI_SKILL.max);
   }
 
   /** classification rows for the results screen */

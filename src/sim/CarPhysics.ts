@@ -483,6 +483,9 @@ export class CarPhysics {
    * limit and the AI use it to drive to the conditions.
    */
   gripFactor = 1;
+  /** dynamic difficulty: an AI car's extra tyre grip and engine power (1 = the car as built; Race.dynamicPace) */
+  perfGrip = 1;
+  perfPower = 1;
 
   // wheels
   readonly omega = [0, 0, 0, 0];
@@ -914,7 +917,7 @@ export class CarPhysics {
     if (engRpm > sp.rpmLimit) engRpm = sp.rpmLimit;
 
     this.ersDeploying = input.ers && this.ers > 0.001 && throttle > 0.5 && !this.reverse;
-    let power = this.powerAt(engRpm) * (1 - 0.45 * dm[DMG.ENGINE]);
+    let power = this.powerAt(engRpm) * (1 - 0.45 * dm[DMG.ENGINE]) * this.perfPower;
     if (this.ersDeploying) {
       power += sp.ersBoost * (1 + 0.5 * this.overtake);
       this.ers = Math.max(0, this.ers - dt / 22);
@@ -1019,7 +1022,7 @@ export class CarPhysics {
         const rb = CarPhysics.rubber;
         lineGrip *= (1 - LINE_GREEN * (1 - rb)) * (1 - LINE_OFF * rb * (1 - Math.min(1, wet * 3)) * smooth01(1.6, 4.4, off));
       }
-      const cond = weatherGrip * tGrip * pressGrip * wearGrip * this.compoundGrip * suspGrip * lineGrip;
+      const cond = weatherGrip * tGrip * pressGrip * wearGrip * this.compoundGrip * suspGrip * lineGrip * this.perfGrip;
       gripSum += cond;
       const muI = sp.mu * (front ? 1 : sp.muRear) * Math.max(0.55, 1 - sp.loadSens * (Fz / Fz0 - 1)) * surfGrip * cond * (this.assists.arcade ? ARCADE_GRIP : 1);
       const Fmax = muI * Fz;
