@@ -1,4 +1,4 @@
-import { inGoal, KICKOFFS, PADS, RESPAWNS, type Team } from './arena.ts';
+import { inGoal, KICKOFFS, normalAt, PADS, RESPAWNS, sdf, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
 import { Car, CAR, noInput, WHEELS, type Input } from './car.ts';
 import { curve, rng, V3 } from './math.ts';
@@ -59,6 +59,23 @@ const tB = new V3();
 const tC = new V3();
 const tN = new V3();
 const tP = new V3();
+interface Contact {
+  /** the car, or −1 for the arena */
+  car: number;
+  n: V3;
+  P: V3;
+  pen: number;
+  /** from the ball's centre to the contact */
+  r: V3;
+  mu: number;
+  /** the normal velocity it must leave with: the wall's bounce, kept while the car pushes back (that's the pinch) */
+  bias: number;
+  /** accumulated normal and friction impulses */
+  jn: number;
+  jt: V3;
+  extra: V3 | null;
+  extraS: number;
+}
 const EXTRA_CURVE: [number, number][] = [
   [0, 0.65],
   [500, 0.65],
@@ -66,17 +83,17 @@ const EXTRA_CURVE: [number, number][] = [
   [4600, 0.3],
 ];
 const BUMP_GROUND: [number, number][] = [
-  [0, 0],
+  [0, 5 / 6],
   [1400, 1100],
   [2200, 1530],
 ];
 const BUMP_AIR: [number, number][] = [
-  [0, 0],
+  [0, 5 / 6],
   [1400, 1390],
   [2200, 1945],
 ];
 const BUMP_UP: [number, number][] = [
-  [0, 0],
+  [0, 2 / 6],
   [1400, 278],
   [2200, 417],
 ];
@@ -110,6 +127,7 @@ export class World {
   opts: MatchOpts = { minutes: 5, freeplay: false, unlimitedBoost: false };
   private lastExtra: number[] = [];
   private bumpCool = new Map<number, number>();
+  private shotCheck = -99;
   private countShown = 4;
   /** ticks since the clock ran out while the ball was in the air */
   private zeroWait = false;
@@ -245,8 +263,7 @@ export class World {
     }
     if (this.phase === 'play' || this.phase === 'countdown') {
       // alternate who's resolved first, so a dead-even 50/50 doesn't always break the same way
-      const n = this.cars.length;
-      for (let k = 0; k < n; k++) this.carBall(this.tick & 1 ? n - 1 - k : k);
+      this.ballContacts();
     }
     this.carCars();
     this.padsStep(dt);
@@ -334,23 +351,9 @@ export class World {
     }
   }
 
-  /** ball vs one car's hitbox (an oriented box) */
-  private carBall(i: number): void {
-    const c = this.cars[i];
-    if (!c.alive) return;
+  /** the ball against one car's hitbox (an oriented box): normal (car to ball), depth, the point on the box */
+  private boxContact(c: Car, out: { n: V3; P: V3; pen: number }): boolean {
     const b = this.ball;
-    // flip reset: airborne with the wheels planted on the ball
-    if (!c.onGround && !c.flipping && (c.jumped || c.flipped || c.doubleJumped)) {
-      tB.subVectors(b.pos, c.pos);
-      if (tB.len2() < 260 * 260 && tB.dot(c.rot.u) < -0.3 * tB.len()) {
-        let on = 0;
-        for (const [wx, wy, wr] of WHEELS) {
-          c.rot.toWorld(wx, wy, wr - CAR.REST_Z, tP).add(c.pos);
-          if (tP.dist(b.pos) < BALL.R + wr + 6) on++;
-        }
-        if (on >= 3 && c.flipReset()) this.events.push({ t: 'reset', car: i });
-      }
-    }
     const ctr = c.center(tA);
     const rel = tB.subVectors(b.pos, ctr);
     const lx = rel.dot(c.rot.f);
@@ -362,9 +365,8 @@ export class World {
     let nx = lx - cx;
     let ny = ly - cy;
     let nz = lz - cz;
-    let dist = Math.hypot(nx, ny, nz);
-    if (dist >= BALL.R) return;
-    let pen: number;
+    const dist = Math.hypot(nx, ny, nz);
+    if (dist >= BALL.R) return false;
     if (dist < 1e-6) {
       // centre inside the box: out along the shallowest face
       const px = CAR.HX - Math.abs(lx);
@@ -374,66 +376,150 @@ export class World {
       if (px < py && px < pz) nx = Math.sign(lx) || 1;
       else if (py < pz) ny = Math.sign(ly) || 1;
       else nz = Math.sign(lz) || 1;
-      dist = 0;
-      pen = BALL.R + Math.min(px, py, pz);
+      out.pen = BALL.R + Math.min(px, py, pz);
     } else {
       nx /= dist;
       ny /= dist;
       nz /= dist;
-      pen = BALL.R - dist;
+      out.pen = BALL.R - dist;
     }
-    // Psyonix's extra hit impulse from the velocities before contact, at most every other tick
-    let extra: V3 | null = null;
-    let extraS = 0;
-    if (this.tick > this.lastExtra[i] + 1) {
-      const rs = Math.min(new V3().subVectors(b.vel, c.vel).len(), 4600);
-      if (rs > 0) {
-        const hd = new V3().subVectors(b.pos, c.pos);
-        hd.z *= 0.35;
-        hd.norm();
-        const fd = hd.dot(c.rot.f) * 0.35;
-        hd.addScaled(c.rot.f, -fd).norm();
-        extra = hd.scale(rs * curve(EXTRA_CURVE, rs));
-        extraS = rs;
+    c.rot.toWorld(nx, ny, nz, out.n);
+    c.rot.toWorld(cx, cy, cz, out.P).add(ctr);
+    return true;
+  }
+
+  /**
+   * The ball's contacts, solved together like the real game's physics engine does: every car touching
+   * it and the wall or floor behind it. Solving them at once is what makes pinches: a ball squeezed
+   * between a car and a wall can only escape along the wedge, and it leaves fast. Then Psyonix's
+   * extra hit impulse from the velocities before the solve, at most every other tick per car.
+   */
+  private ballContacts(): void {
+    const b = this.ball;
+    const cs: Contact[] = [];
+    const n = this.cars.length;
+    for (let k = 0; k < n; k++) {
+      const i = this.tick & 1 ? n - 1 - k : k;
+      const c = this.cars[i];
+      if (!c.alive) continue;
+      this.flipResetCheck(i);
+      const ct: Contact = { car: i, n: new V3(), P: new V3(), pen: 0, r: new V3(), mu: 2, bias: 0, jn: 0, jt: new V3(), extra: null, extraS: 0 };
+      if (!this.boxContact(c, ct)) continue;
+      // the extra impulse comes from the state at the moment of contact
+      if (this.tick > this.lastExtra[i] + 1) {
+        const rs = Math.min(tC.subVectors(b.vel, c.vel).len(), 4600);
+        if (rs > 0) {
+          const hd = new V3().subVectors(b.pos, c.pos);
+          hd.z *= 0.35;
+          hd.norm();
+          const fd = hd.dot(c.rot.f) * 0.35;
+          hd.addScaled(c.rot.f, -fd).norm();
+          ct.extra = hd.scale(rs * curve(EXTRA_CURVE, rs));
+          ct.extraS = rs;
+        }
+      }
+      cs.push(ct);
+    }
+    if (!cs.length) return;
+    // positions: out of the cars (the car is six times heavier) and out of the walls (which don't move)
+    for (let it = 0; it < 4; it++) {
+      let pushed = false;
+      for (const ct of cs) {
+        const c = this.cars[ct.car];
+        if (!this.boxContact(c, ct)) continue;
+        const wall = sdf(b.pos.x, b.pos.y, b.pos.z) < BALL.R + 1;
+        const share = wall && it > 0 ? 0 : 6 / 7;
+        b.pos.addScaled(ct.n, ct.pen * share);
+        c.pos.addScaled(ct.n, -ct.pen * (1 - share));
+        pushed = true;
+      }
+      const d = sdf(b.pos.x, b.pos.y, b.pos.z);
+      if (d < BALL.R) b.pos.addScaled(normalAt(b.pos.x, b.pos.y, b.pos.z, tN), BALL.R - d);
+      if (!pushed) break;
+    }
+    for (const ct of cs) {
+      this.boxContact(this.cars[ct.car], ct);
+      ct.r.copy(ct.n).scale(-BALL.R);
+    }
+    const d = sdf(b.pos.x, b.pos.y, b.pos.z);
+    if (d < BALL.R + 2) {
+      const nw = normalAt(b.pos.x, b.pos.y, b.pos.z, new V3());
+      cs.push({ car: -1, n: nw, P: new V3(), pen: 0, r: nw.clone().scale(-BALL.R), mu: BALL.MU, bias: b.bounce > 25 ? BALL.E * b.bounce : 0, jn: 0, jt: new V3(), extra: null, extraS: 0 });
+    }
+    // velocities: sequential impulses, accumulated and clamped (non-negative normal, friction cone)
+    const im = 1 / BALL.MASS;
+    const ii = 1 / (0.4 * BALL.MASS * BALL.R * BALL.R);
+    const vr = new V3();
+    const J = new V3();
+    const tt = new V3();
+    const applyBall = (j: V3, r: V3) => {
+      b.vel.addScaled(j, im);
+      b.w.x += (r.y * j.z - r.z * j.y) * ii;
+      b.w.y += (r.z * j.x - r.x * j.z) * ii;
+      b.w.z += (r.x * j.y - r.y * j.x) * ii;
+    };
+    const relVel = (ct: Contact) => {
+      vr.crossVectors(b.w, ct.r).add(b.vel);
+      if (ct.car >= 0) vr.sub(this.cars[ct.car].pointVel(ct.P, tA));
+      return vr;
+    };
+    for (let it = 0; it < 10; it++) {
+      for (const ct of cs) {
+        const c = ct.car >= 0 ? this.cars[ct.car] : null;
+        // normal
+        const vn = relVel(ct).dot(ct.n);
+        const kn = im + (c ? c.invMassAt(ct.P, ct.n) : 0);
+        const jn = Math.max(0, ct.jn + (ct.bias - vn) / kn);
+        const dj = jn - ct.jn;
+        ct.jn = jn;
+        if (dj !== 0) {
+          J.copy(ct.n).scale(dj);
+          applyBall(J, ct.r);
+          if (c) c.impulse(J.scale(-1), ct.P);
+        }
+        // friction
+        relVel(ct);
+        tt.copy(vr).addScaled(ct.n, -vr.dot(ct.n));
+        const vtl = tt.len();
+        if (vtl < 1e-3) continue;
+        tt.scale(1 / vtl);
+        const kt = 3.5 * im + (c ? c.invMassAt(ct.P, tt) : 0);
+        J.copy(ct.jt).addScaled(tt, -vtl / kt);
+        const lim = ct.mu * ct.jn;
+        const jl = J.len();
+        if (jl > lim) J.scale(lim / jl);
+        const dJ = new V3().subVectors(J, ct.jt);
+        ct.jt.copy(J);
+        applyBall(dJ, ct.r);
+        if (c) c.impulse(dJ.scale(-1), ct.P);
       }
     }
-    const n = c.rot.toWorld(nx, ny, nz, tN);
-    const P = c.rot.toWorld(cx, cy, cz, tP).add(ctr);
-    // push the ball out (the car is six times heavier)
-    b.pos.addScaled(n, pen * (6 / 7));
-    c.pos.addScaled(n, -pen * (1 / 7));
-    // relative velocity at the contact (ball surface point minus car point)
-    const vb = tC.crossVectors(b.w, n).scale(-BALL.R).add(b.vel);
-    const vc = c.pointVel(P, tA);
-    const vr = vb.sub(vc);
-    const vn = vr.dot(n);
-    let hit = false;
-    if (vn < 0) {
-      const imC = c.invMassAt(P, n);
-      const jn = -vn / (1 / BALL.MASS + imC);
-      const J = new V3().copy(n).scale(jn);
-      // friction (μ 2): the ball grips the car's paint
-      const vt = vr.clone().addScaled(n, -vn);
-      const vtl = vt.len();
-      if (vtl > 1e-3) {
-        const tdir = vt.clone().scale(1 / vtl);
-        const jt = Math.min(vtl / (3.5 / BALL.MASS + c.invMassAt(P, tdir)), 2 * jn);
-        J.addScaled(tdir, -jt);
+    for (const ct of cs) {
+      if (ct.car < 0) continue;
+      if (ct.extra) {
+        b.vel.add(ct.extra);
+        this.lastExtra[ct.car] = this.tick;
+        this.touch(ct.car, ct.extraS);
       }
-      b.vel.addScaled(J, 1 / BALL.MASS);
-      // spin: r = −R n
-      const k = 1 / (0.4 * BALL.MASS * BALL.R);
-      b.w.x += (-n.y * J.z + n.z * J.y) * k;
-      b.w.y += (-n.z * J.x + n.x * J.z) * k;
-      b.w.z += (-n.x * J.y + n.y * J.x) * k;
-      c.impulse(J.scale(-1), P);
-      hit = true;
     }
-    if (extra) {
-      b.vel.add(extra);
-      this.lastExtra[i] = this.tick;
-      this.touch(i, extraS);
-    } else if (hit) this.lastExtra[i] = this.tick;
+    b.vel.clampLen(BALL.MAX_SPEED);
+    b.w.clampLen(BALL.MAX_W);
+  }
+
+  /** flip reset: airborne with the wheels planted on the ball */
+  private flipResetCheck(i: number): void {
+    const c = this.cars[i];
+    const b = this.ball;
+    if (c.onGround || c.flipping || !(c.jumped || c.flipped || c.doubleJumped)) return;
+    tB.subVectors(b.pos, c.pos);
+    if (tB.len2() < 260 * 260 && tB.dot(c.rot.u) < -0.3 * tB.len()) {
+      let on = 0;
+      for (const [wx, wy, wr] of WHEELS) {
+        c.rot.toWorld(wx, wy, wr - CAR.REST_Z, tP).add(c.pos);
+        if (tP.dist(b.pos) < BALL.R + wr + 6) on++;
+      }
+      if (on >= 3 && c.flipReset()) this.events.push({ t: 'reset', car: i });
+    }
   }
 
   private touch(i: number, power: number): void {
@@ -441,10 +527,17 @@ export class World {
     if (!st) return;
     const prevOn = this.shotOn;
     const team = this.players[i].team;
-    if (!this.touches.length || this.touches[0][0] !== i || this.tick - this.touches[0][1] > 30) st.touches++;
-    this.touches = [[i, this.tick] as [number, number], ...this.touches.filter(([c]) => c !== i)].slice(0, 6);
-    this.events.push({ t: 'hit', car: i, power });
+    // a contact that carries on (a dribble, a pinch) is one touch; where the ball's going is checked again now and then
+    if (this.touches.length && this.touches[0][0] === i && this.tick - this.touches[0][1] < 8) {
+      this.touches[0][1] = this.tick;
+      if (this.tick - this.shotCheck < 6) return;
+    } else {
+      if (!this.touches.length || this.touches[0][0] !== i || this.tick - this.touches[0][1] > 30) st.touches++;
+      this.touches = [[i, this.tick] as [number, number], ...this.touches.filter(([c]) => c !== i)].slice(0, 6);
+      this.events.push({ t: 'hit', car: i, power });
+    }
     if (!this.authority || this.phase !== 'play') return;
+    this.shotCheck = this.tick;
     // after the touch: is it on frame?
     const on = this.predictGoal();
     if (prevOn === team && on !== team) {
@@ -506,36 +599,39 @@ export class World {
           a.vel.addScaled(nrm, -jn / CAR.MASS);
           b.vel.addScaled(nrm, jn / CAR.MASS);
         }
-        // who did the hitting: the car whose nose is into the other, moving at it faster (host only)
+        // bumps and demos (RocketSim's Arena::_BtCallback_OnCarCarCollision), each way round: the hitter
+        // moves at the other faster than it gets away, and the contact is on its front bumper
         if (!this.authority) continue;
-        const key = i * 64 + j;
-        const cool = this.bumpCool.get(key) ?? -999;
-        if (this.tick - cool < 30) continue;
-        for (const [hi, vi, dir] of [
-          [i, j, 1],
-          [j, i, -1],
-        ] as [number, number, number][]) {
+        for (const [hi, vi] of [
+          [i, j],
+          [j, i],
+        ] as [number, number][]) {
           const h = this.cars[hi];
           const v = this.cars[vi];
-          const to = new V3().copy(nrm).scale(dir);
-          const lf = to.dot(h.rot.f);
-          const closing = h.vel.dot(to) - v.vel.dot(to);
-          if (lf > 0.6 && closing > 200) {
-            this.bumpCool.set(key, this.tick);
-            if (h.supersonic && this.players[hi].team !== this.players[vi].team) {
-              v.demoTimer = 3;
-              this.stats[hi].demos++;
-              this.stats[hi].score += 10;
-              this.events.push({ t: 'demo', by: hi, car: vi, x: v.pos.x, y: v.pos.y, z: v.pos.z });
-            } else {
-              const spd = h.vel.len();
-              const flat = new V3(to.x, to.y, 0).norm();
-              const amt = curve(v.onGround ? BUMP_GROUND : BUMP_AIR, spd);
-              v.vel.addScaled(flat, amt).addScaled(v.rot.u, curve(BUMP_UP, spd));
-              v.vel.clampLen(CAR.MAX_SPEED);
-              this.events.push({ t: 'bump', car: vi, power: spd });
-            }
-            break;
+          if (!v.alive) break;
+          const key = hi * 64 + vi;
+          if (this.tick - (this.bumpCool.get(key) ?? -999) < 30) continue;
+          const delta = new V3().subVectors(v.pos, h.pos);
+          if (h.vel.dot(delta) <= 0) continue;
+          const velDir = h.vel.clone().norm();
+          const towards = h.vel.dot(delta.norm());
+          if (towards <= v.vel.dot(velDir)) continue;
+          // (the other car's nearest point, brought onto the hitter's box, must be ahead of 64.5)
+          const lx = tP.subVectors(hi === i ? pb : pa, h.pos).dot(h.rot.f);
+          if (Math.min(CAR.OX + CAR.HX, lx) <= 64.5) continue;
+          this.bumpCool.set(key, this.tick);
+          if (h.supersonic && this.players[hi].team !== this.players[vi].team) {
+            v.demoTimer = 3;
+            this.stats[hi].demos++;
+            this.stats[hi].score += 10;
+            this.events.push({ t: 'demo', by: hi, car: vi, x: v.pos.x, y: v.pos.y, z: v.pos.z });
+          } else {
+            const amt = curve(v.onGround ? BUMP_GROUND : BUMP_AIR, towards);
+            v.vel.addScaled(velDir, amt);
+            if (v.onGround) v.vel.addScaled(v.rot.u, curve(BUMP_UP, towards));
+            else v.vel.z += curve(BUMP_UP, towards);
+            v.vel.clampLen(CAR.MAX_SPEED);
+            this.events.push({ t: 'bump', car: vi, power: towards });
           }
         }
       }

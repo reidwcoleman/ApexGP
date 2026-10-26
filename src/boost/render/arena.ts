@@ -427,17 +427,18 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     float body = smoothstep(0.34, 0.26, abs(f.x - 0.5)) * step(f.y, 0.5 + bob) * step(0.08, f.y);
     float head = smoothstep(0.2, 0.14, length((f - vec2(0.5, 0.66 + bob)) * vec2(1.0, 1.2)));
     float person = max(body, head) * occupied;
-    float tw = smoothstep(-1800.0, 1800.0, vSim.y);
+    // each half of the bowl in its team's colour, split at halfway
+    float tw = smoothstep(-250.0, 250.0, vSim.y);
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
-    vec3 shirt = h2 < 0.5 ? teamC * 0.8 : (h2 < 0.68 ? vec3(0.7) : (h2 < 0.8 ? vec3(0.08) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.6));
+    vec3 shirt = h2 < 0.38 ? teamC * 0.75 : (h2 < 0.58 ? vec3(0.62) : (h2 < 0.8 ? vec3(0.06) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.5));
     vec3 skin = mix(vec3(0.85, 0.62, 0.48), vec3(0.3, 0.19, 0.13), fract(h * 13.0));
-    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.05, teamC * 0.16 + vec3(0.035, 0.04, 0.05), uDay);
+    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.06, teamC * 0.22 + vec3(0.03, 0.035, 0.045), uDay);
     // the riser: each row's front edge in shadow
     seatC *= 0.55 + 0.45 * smoothstep(0.0, 0.2, f.y);
     vec3 col = mix(seatC, head > body ? skin : shirt, person);
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
-    vec3 avg = mix(seatC, mix(vec3(0.16, 0.15, 0.15), teamC * 0.5, 0.25), 0.55);
+    vec3 avg = mix(seatC, mix(vec3(0.13, 0.13, 0.14), teamC * 0.5, 0.2), 0.5);
     col = mix(col, avg, smoothstep(0.25, 0.7, px));
     // in the sun the crowd is a shade darker than its lit seats read; the roof shades the upper rows
     col *= mix(1.0, 0.62, uDay) * (1.0 - uDay * 0.45 * smoothstep(2300.0, 4300.0, vSim.z));

@@ -1052,6 +1052,11 @@ export class Game {
     this.stage.camera.updateProjectionMatrix();
     // (offset so the car sits right of the menu)
     placeCam(this.stage.camera, new V3(Math.cos(a) * 560, Math.sin(a) * 560, 150), new V3(Math.sin(a) * 120, -Math.cos(a) * 120, 22));
+    if (this.dbgCam) {
+      this.stage.camera.fov = this.dbgCam.fov;
+      this.stage.camera.updateProjectionMatrix();
+      placeCam(this.stage.camera, this.dbgCam.pos, this.dbgCam.look);
+    }
     v.showTag(false);
     for (const cv of this.views) cv.group.visible = false;
     this.ball.mesh.visible = this.ball.glow.visible = false;

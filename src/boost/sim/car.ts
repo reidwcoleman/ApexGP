@@ -41,10 +41,10 @@ export const CAR = {
   DODGE_IMPULSE: 500,
   FLIP_TIME: 0.65,
   MAX_W: 5.5,
-  // hitbox (Octane) half extents and offset from the car origin
-  HX: 59.0037,
-  HY: 42.0997,
-  HZ: 18.0796,
+  // hitbox (Octane, RocketSim's sizes, which match the game's inertia) half extents and offset from the car origin
+  HX: 60.2535,
+  HY: 43.3497,
+  HZ: 19.32955,
   OX: 13.8757,
   OZ: 20.755,
   REST_Z: 17,
@@ -539,7 +539,7 @@ export class Car {
     const pv = this.pointVel(dp, new V3());
     const vn = pv.dot(dn);
     if (vn < 0) {
-      const e = 0.25;
+      const e = 0.3;
       const im = this.invMassAt(dp, dn);
       const jn = (-(1 + e) * vn) / im;
       const J = dn.clone().scale(jn);
@@ -548,7 +548,7 @@ export class Car {
       const vtl = vt.len();
       if (vtl > 1e-3) {
         const imt = this.invMassAt(dp, vt.clone().scale(1 / vtl));
-        const jt = Math.min(vtl / imt, 0.6 * jn);
+        const jt = Math.min(vtl / imt, 0.3 * jn);
         J.addScaled(vt, -jt / vtl);
       }
       this.impulse(J, dp);
