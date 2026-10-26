@@ -1639,6 +1639,11 @@ export class Renderer {
     if (out > internal + 1e-3) {
       this.composer.inputBuffer.setSize(iw, ih);
       this.composer.outputBuffer.setSize(iw, ih);
+      // (and the stable depth every pass reads: left at the canvas size, the frame's depth was blitted
+      // stretched into it, and N8AO — which fetches depth by pixel against its own internal size — laid
+      // each car's occlusion ~18 % up and right of the car at a 0.85 dynamic scale: a dark "ghost car"
+      // beside the player on Ultra)
+      (this.composer as unknown as { depthRenderTarget: THREE.WebGLRenderTarget | null }).depthRenderTarget?.setSize(iw, ih);
       for (const p of this.composer.passes) p.setSize(iw, ih);
     }
     this.camera.aspect = w / h;
