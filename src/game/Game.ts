@@ -57,6 +57,7 @@ import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
 import { Career, SETUP } from '../career/Career.ts';
 import { rollForecast, CAREER_LAPS, type Forecast } from '../career/Season.ts';
+import { freshest } from '../world/weatherHistory.ts';
 import { ACHIEVEMENTS as ACH, unlockAchievement } from '../core/steam.ts';
 import { artFor } from '../ui/loadingArt.ts';
 import { loadPeople } from '../people/Humans.ts';
@@ -1489,7 +1490,7 @@ export class Game {
   private careerForecast(id: string): Forecast {
     let f = this.careerFc.get(id);
     if (!f) {
-      f = rollForecast(id, this.lastFc.get(id));
+      f = freshest(() => rollForecast(id, this.lastFc.get(id)), (q) => `${q.weather}>${q.weather}@${q.time}`, 12);
       this.careerFc.set(id, f);
     }
     return f;
@@ -1517,14 +1518,9 @@ export class Game {
   private planFresh = false;
   private rollWeather(setup: RaceSetup) {
     const laps = setup.laps;
-    // a different sky from the last race's (Random only: a fixed choice is a fixed choice)
-    const last = this.plan;
-    for (let i = 0; i < 8; i++) {
-      this.plan = planWeather(setup.weather, setup.time, laps * 85 + 60);
-      const skyNew = setup.weather !== 'random' || this.plan.start !== last?.start || this.plan.end !== last?.end;
-      const lightNew = setup.time !== 'random' || this.plan.time !== last?.time;
-      if (!last || (skyNew && lightNew)) break;
-    }
+    // never the same sky twice: rolled until it's one not raced lately (weatherHistory.ts; a fixed choice
+    // is a fixed choice, only what's Random is rolled again)
+    this.plan = freshest(() => planWeather(setup.weather, setup.time, laps * 85 + 60), (p) => `${p.start}>${p.end}@${p.time}`);
     this.planFresh = true;
     // a new weekend: new form for every driver
     this.weekendSeed = (Math.random() * 2 ** 31) | 0;
