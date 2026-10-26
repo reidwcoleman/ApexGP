@@ -256,6 +256,24 @@ ${CAR_WAKE_GLSL}`,
   // darker than the ground they grow from)
   vGC = col * vec3( 1.06, 1.18, 0.78 ) * ( 0.8 + 0.5 * fract( rnd * 5.3 ) );
   vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
+  // ...and the sward varies field by field: blue-green rye in the hollows, yellower on the crowns
+  {
+    float sp = texture2D( tNoise, base.xz * 0.032 + vec2( 0.27, 0.71 ) ).g;
+    vGC = mix( vGC, vGC * vec3( 0.84, 0.95, 1.08 ), smoothstep( 0.5, 0.8, sp ) * 0.5 );
+    vGC = mix( vGC, vGC * vec3( 1.1, 1.05, 0.8 ), smoothstep( 0.45, 0.2, sp ) * 0.4 );
+  }
+  // mown stripes: the blades of each pass lie the way the mower went — that lean is most of a lawn's
+  // stripes — brighter where they lean away from the eye; the same bands as the ground under them
+  // (trackside/materials.ts GRASS_FRAG: period 12 m on the diagonal, each pass its own strength)
+  if ( mown > 0.5 ) {
+    vec3 tg = gFetch( i0 + 1.0, 0.0 ) - gFetch( i0, 0.0 );
+    tg = normalize( vec3( tg.x, 0.0, tg.z ) + vec3( 1e-5 ) );
+    float sx = ( s + lat * 0.55 ) / 12.0 + 0.12 * sin( s * 0.045 + lat * 0.11 ) + 0.08 * sin( s * 0.017 - lat * 0.07 );
+    float band = ( fract( sx ) < 0.5 ? 1.0 : -1.0 ) * ( 0.55 + 0.45 * gHash( vec2( floor( sx ), 7.3 ) ) );
+    vec3 toEye = normalize( vec3( cameraPosition.x - base.x, 0.0, cameraPosition.z - base.z ) + vec3( 1e-5 ) );
+    vGC *= 1.0 - 0.22 * band * dot( toEye, tg );
+    transformed += tg * band * 0.06 * vGH;
+  }
   if ( uDebug > 0.0 ) vGC = vec3( g.r, clamp( g.g * 0.2 + 0.5, 0.0, 1.0 ), g.b );
 }`,
       );
@@ -272,7 +290,7 @@ reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
 reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v8';
+  mat.customProgramCacheKey = () => 'apex-grass-v9';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;

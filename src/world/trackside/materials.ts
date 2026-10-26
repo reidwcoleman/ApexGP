@@ -1117,13 +1117,53 @@ float gStripe = 0.0;
   // mottling at a few metres (clover, rye, thinner sward on the crowns): a verge is never one flat colour
   float mot = texture2D(uMacro, vTrk * (1.0 / 3.1) + vec2(0.13, 0.57)).g;
   col *= 0.9 + 0.2 * mot;
+  // ...nor one sward: blue-green rye in the damp hollows, a yellower fescue on the dry crowns, a darker
+  // lusher band where the drains run — tens of metres across, so a verge reads as a field, not a fill
+  {
+    float sp = texture2D(uMacro, vTrk * (1.0 / 31.0) + vec2(0.27, 0.71)).g;
+    float dm = texture2D(uMacro, vTrk * (1.0 / 17.0) + vec2(0.66, 0.38)).b;
+    col = mix(col, col * vec3(0.82, 0.94, 1.08), smoothstep(0.45, 0.8, sp) * 0.5);
+    col = mix(col, col * vec3(1.12, 1.06, 0.78), smoothstep(0.55, 0.2, sp) * 0.4 * (1.0 - uWetness));
+    col *= 1.0 - 0.18 * smoothstep(0.6, 0.85, dm);
+  }
   // worn / muddy strip right next to a hard edge (vA1.y = metres from the inner edge)
   float wear = 1.0 - smoothstep(0.0, 0.5 + 0.6 * mB.b, vA1.y);
   col = mix(col, vec3(0.06, 0.05, 0.035), wear * 0.55);
-  // mown stripes (diagonal bands), sign flips per band
-  gStripe = tsSquare((vTrk.y + vTrk.x * 0.55) / 12.0, 0.5) * 2.0 - 1.0;
+  // mown stripes (diagonal bands), sign flips per band — a mower's passes, never ruled lines: each
+  // pass its own strength (some barely there), the edges wandering a little, faded where the sward thins
+  {
+    // (the wander is the same closed form the grass blades use — env/grass.ts — so their bands line up)
+    float sx = (vTrk.y + vTrk.x * 0.55) / 12.0 + 0.12 * sin(vTrk.y * 0.045 + vTrk.x * 0.11) + 0.08 * sin(vTrk.y * 0.017 - vTrk.x * 0.07);
+    float bStr = 0.55 + 0.45 * tsHash(vec2(floor(sx), 7.3));
+    gStripe = (tsSquare(sx, 0.5) * 2.0 - 1.0) * bStr * (0.7 + 0.3 * smoothstep(0.2, 0.7, mA.g));
+  }
   // (the stripes read from every angle on TV: part of it is the cut itself, not only the sheen)
-  col *= 1.0 + 0.13 * gStripe;
+  col *= 1.0 + 0.26 * gStripe;
+  // worn, bare patches: where the marshals stand, a puddle sat for a week, a recovery truck turned
+  {
+    float bp = texture2D(uMacro, vTrk * (1.0 / 9.0) + vec2(0.83, 0.29)).r;
+    float bare = smoothstep(0.72, 0.86, bp) * smoothstep(0.35, 0.7, mB.g) * (0.6 + 0.4 * mot);
+    col = mix(col, vec3(0.11, 0.088, 0.06) * (0.8 + 0.4 * clump), bare * 0.7);
+  }
+  // off-track moments: now and then a car ran wide, two dark ruts curving out over the grass and back,
+  // the sward flattened round them (a few per lap, on either side)
+  {
+    float side = vTrk.x < 0.0 ? 1.0 : 2.0;
+    float cell = floor(vTrk.y / 55.0);
+    float h = tsHash(vec2(cell, side * 3.1));
+    float s0 = cell * 55.0 + tsHash(vec2(cell, side + 9.0)) * 22.0;
+    float L = 14.0 + 24.0 * tsHash(vec2(cell, side + 4.0));
+    float t = (vTrk.y - s0) / L;
+    if (h > 0.5 && t > 0.0 && t < 1.0) {
+      float reach = (0.8 + 4.5 * tsHash(vec2(cell, side + 2.0))) * sin(t * 3.14159);
+      float e = vA1.y - reach;
+      float fade = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.65, 1.0, t)) * (0.55 + 0.45 * h);
+      float ruts = max(1.0 - smoothstep(0.1, 0.26, abs(e)), 1.0 - smoothstep(0.1, 0.26, abs(e - 1.6)));
+      float laid = 1.0 - smoothstep(0.6, 1.4, abs(e - 0.8));
+      col = mix(col, col * vec3(1.12, 1.08, 0.8), laid * fade * 0.35);
+      col = mix(col, vec3(0.075, 0.062, 0.042) * (0.8 + 0.4 * mot), ruts * fade * 0.8);
+    }
+  }
   float wet = smoothstep(0.0, 0.35, uWetness);
   col *= 1.0 - 0.32 * wet;
   float rough = mix(0.95, 0.68, wet);
@@ -1178,7 +1218,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-6-desert' : 'apex-ts-grass-6', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-7-desert' : 'apex-ts-grass-7', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
@@ -1312,6 +1352,22 @@ if ( pCls > 0.5 ) {
 }
 `;
 
+const PRINT_AGE = /* glsl */ `
+#ifdef PRINT_AGE
+{
+  float bh = pwH( floor( vWP.xz / 4.5 ) + 0.5 );
+  float age = bh * bh;
+  vec3 c = diffuseColor.rgb;
+  float l = dot( c, vec3( 0.3, 0.59, 0.11 ) );
+  c = mix( c, vec3( l ), 0.35 * age );
+  c = c * ( 1.0 - 0.16 * age ) + vec3( 0.045, 0.045, 0.05 ) * age;
+  float dust = smoothstep( 0.55, 0.85, pwN( vWP.xz * 0.6 + vWP.y * 1.3 ) );
+  c = mix( c, c * 0.8 + vec3( 0.04, 0.037, 0.032 ), dust * 0.35 );
+  diffuseColor.rgb = c;
+}
+#endif
+`;
+
 function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = W.uWetness;
@@ -1322,7 +1378,7 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
       .replace('#include <project_vertex>', '#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vPBR;\nvarying vec3 vWP;\nuniform float uWetness;\nuniform float uSignGlow;\n' + PW_COMMON)
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_WEATHER + PROP_ZINC + PROP_WET)
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nroughnessFactor = vPBR.x;\nmetalnessFactor = vPBR.y;\n' + PROP_WEATHER + PRINT_AGE + PROP_ZINC + PROP_WET)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vPBR.z * (vPBR.z < 0.9 ? uSignGlow : 1.0);');
   };
   m.customProgramCacheKey = () => key;
@@ -1337,8 +1393,11 @@ export function propsMaterial(): THREE.MeshStandardMaterial {
 
 /** Printed surfaces: atlas map × vertex colour, per-vertex PBR. */
 export function printMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial {
+  // (PRINT_AGE: boards are never all new — each a few metres of print bleached a little differently by
+  // the sun, the blacks lifted, the colours gone chalky, and a grey film of road dust in patches)
   const m = new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.6, metalness: 0 });
-  patchPBR(m, 'apex-ts-print-5');
+  m.defines = { PRINT_AGE: '' };
+  patchPBR(m, 'apex-ts-print-6');
   return m;
 }
 
