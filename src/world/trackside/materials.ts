@@ -1157,14 +1157,17 @@ float gStripe = 0.0;
     float s0 = cell * 55.0 + tsHash(vec2(cell, side + 9.0)) * 22.0;
     float L = 14.0 + 24.0 * tsHash(vec2(cell, side + 4.0));
     float t = (vTrk.y - s0) / L;
-    if (h > 0.5 && t > 0.0 && t < 1.0) {
+    if (h > 0.74 && t > 0.0 && t < 1.0) {
       float reach = (0.8 + 4.5 * tsHash(vec2(cell, side + 2.0))) * sin(t * 3.14159);
       float e = vA1.y - reach;
       float fade = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.65, 1.0, t)) * (0.55 + 0.45 * h);
-      float ruts = max(1.0 - smoothstep(0.1, 0.26, abs(e)), 1.0 - smoothstep(0.1, 0.26, abs(e - 1.6)));
+      // (torn, not ruled: each rut comes and goes with the ground's give, one wheel bit in deeper than the other)
+      float br = smoothstep(0.25, 0.65, texture2D(uMacro, vTrk * (1.0 / 4.3) + vec2(0.19, 0.83)).r);
+      float r1 = (1.0 - smoothstep(0.08, 0.3, abs(e))) * br;
+      float r2 = (1.0 - smoothstep(0.08, 0.3, abs(e - 1.6))) * (1.0 - 0.5 * br) * (0.5 + 0.5 * h);
       float laid = 1.0 - smoothstep(0.6, 1.4, abs(e - 0.8));
-      col = mix(col, col * vec3(1.12, 1.08, 0.8), laid * fade * 0.35);
-      col = mix(col, vec3(0.075, 0.062, 0.042) * (0.8 + 0.4 * mot), ruts * fade * 0.8);
+      col = mix(col, col * vec3(1.1, 1.06, 0.82), laid * fade * 0.3);
+      col = mix(col, col * 0.45 + vec3(0.03, 0.025, 0.015), max(r1, r2) * fade * 0.6);
     }
   }
   float wet = smoothstep(0.0, 0.35, uWetness);
@@ -1221,7 +1224,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-7-desert' : 'apex-ts-grass-7', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-8-desert' : 'apex-ts-grass-8', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
