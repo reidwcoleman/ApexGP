@@ -10,7 +10,7 @@ import {
 import {
   PC, TC, WC, paintCellUV, trimUV, wheelCellUV, rectUV,
   R_FLAP, R_MAIN, R_FWING, R_EP_OL, R_EP_OR, R_EP_IN, R_FIN_L, R_FIN_R,
-  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, DRV_W, DRV_H,
+  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, R_HALO_SPON, DRV_W, DRV_H,
   DC, drvCellUV, TRIM_W, TRIM_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WHEEL_TEX_W, WHEEL_TEX_H,
   WHEEL_R, RIM_R, TYRE_W_F, TYRE_W_R, TRACK_F, TRACK_R, Z_FRONT_AXLE, Z_REAR_AXLE, SIDEWALL_R0, SIDEWALL_R1,
   DASH_W, DASH_H, R_SCREEN, R_SHIFT, SHIFT_N, SHIFT_CELL, SCREEN_W, SCREEN_H, SCREEN_CY, faceUV, WHEEL_BUTTONS, WHEEL_ROTARIES,
@@ -1322,6 +1322,56 @@ function decals(mb: MB) {
       }
     }
     void ids;
+  }
+  // the title sponsor across the hoop's front arc — what the onboard and T-cam look over (the F1
+  // games and the sims all brand it): read from the cockpit, left (+X) to right
+  {
+    const sel: number[] = [];
+    for (let i = 0; i < n; i++) if (path[i][2] > 0.31) sel.push(i);
+    const arc: number[] = [0];
+    for (let q = 1; q < sel.length; q++) {
+      const a = path[sel[q - 1]], c = path[sel[q]];
+      arc.push(arc[q - 1] + Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]));
+    }
+    const L = arc[arc.length - 1];
+    // (the path runs −X → +X: the driver's left is +X, so the text starts at the far end)
+    const flip = path[sel[0]][0] < path[sel[sel.length - 1]][0];
+    const nv = 4;
+    const base = mb.count;
+    for (let q = 0; q < sel.length; q++) {
+      const i = sel[q];
+      const a = flip ? 1 - arc[q] / L : arc[q] / L;
+      const out: V3 = norm3([path[i][0], 0, path[i][2] - 0.12]);
+      // which side of the section is the hoop's outside here
+      const so = Math.sign(dot3(fr[i].u, out)) || 1;
+      for (let k = 0; k <= nv; k++) {
+        // (the upper face turned toward the driver, where the cameras behind see it square on; v runs
+        // from its lower, inner edge up to the crown: the letters' tops toward the crown)
+        const psi = lerp(-1.3, -0.04, k / nv) * so;
+        // on the painted fairing's crown (the top sweep's section: d is up, 1.09·cos + 0.04 in sx units)
+        const cd = Math.cos(psi) * 1.09 + 0.04 + 0.05;
+        const off = add3(scl3(fr[i].d, cd * 0.022), scl3(fr[i].u, Math.sin(psi) * 1.08 * 0.03));
+        const nn = norm3(add3(scl3(fr[i].d, Math.cos(psi) / 0.022), scl3(fr[i].u, Math.sin(psi) / 0.03)));
+        mb.vert(add3(path[i], off), nn, drvUV(R_HALO_SPON, a, k / nv));
+      }
+    }
+    for (let q = 0; q < sel.length - 1; q++) {
+      for (let k = 0; k < nv; k++) {
+        const a = base + q * (nv + 1) + k;
+        const b2 = a + nv + 1;
+        const pa: V3 = [mb.pos[a * 3], mb.pos[a * 3 + 1], mb.pos[a * 3 + 2]];
+        const pb: V3 = [mb.pos[b2 * 3], mb.pos[b2 * 3 + 1], mb.pos[b2 * 3 + 2]];
+        const pc: V3 = [mb.pos[(a + 1) * 3], mb.pos[(a + 1) * 3 + 1], mb.pos[(a + 1) * 3 + 2]];
+        // (facing up, out of the fairing)
+        if (cross3(sub3(pb, pa), sub3(pc, pa))[1] > 0) {
+          mb.tri(a, b2, a + 1);
+          mb.tri(a + 1, b2, b2 + 1);
+        } else {
+          mb.tri(a, a + 1, b2);
+          mb.tri(a + 1, b2 + 1, b2);
+        }
+      }
+    }
   }
 }
 

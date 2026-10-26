@@ -12,7 +12,7 @@ import {
   GLOVE_W, GLOVE_H, R_GL_BACK, R_GL_PALM, R_GL_FINGER, R_GL_THUMB, R_GL_CUFF,
   WHEEL_TEX_W, WHEEL_TEX_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WC, WHEEL_PROPS, WHEEL_CELL,
   SIDEWALL_R0, SIDEWALL_R1, RIM_R, WHEEL_R,
-  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, type Rect,
+  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, R_HALO_SPON, type Rect,
 } from './carLayout.ts';
 
 export const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
@@ -1213,6 +1213,10 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     const code = `${driver.code}  ${driver.number}`;
     drawInRect(g, R_CODE_L, code, contrastOn(team.primary), null, 0.85, 1.4, 900, false);
     drawInRect(g, R_CODE_R, code, contrastOn(team.primary), null, 0.85, 1.4, 900, false);
+    // the title sponsor on the halo's front arc, in the ink that reads on the hoop's fairing (PC.halo)
+    // (the strip is ~16:1 on the car, as the cell)
+    const haloPaint = team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary;
+    drawInRect(g, R_HALO_SPON, team.sponsor, contrastOn(haloPaint), null, 0.94, 1.05, 900, false);
     // flat cells: visor, suit, suit2, HANS, gloves, belts
     const cells = ['#121722', team.primary, team.secondary, '#18191b', team.secondary, team.accent];
     cells.forEach((col, i) => {
