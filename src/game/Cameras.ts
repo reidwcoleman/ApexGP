@@ -1127,6 +1127,8 @@ export class Cameras {
     holder.getWorldQuaternion(this.q);
     const O = this.off();
     const P = this.v3.set(mount.pos[0] + O.lat, mount.pos[1] + O.up, mount.pos[2] + O.fwd);
+    const cl = rig.camLift?.[m];
+    if (cl) P.set(P.x + cl[0], P.y + cl[1], P.z + cl[2]);
     if (mount.cockpit) P.add(rig.anchors.cockpit.position);
     P.applyMatrix4(holder.matrixWorld);
     // a housing on a stalk flexes: its view trails the chassis by a few milliseconds (the jolts soften)
@@ -1214,12 +1216,13 @@ export class Cameras {
       // the driver's eyes: low in the tub and forward against the headrest's front, so the halo's
       // hoop frames the top of the picture, the centre pillar splits it, the front tyres sit at the
       // sides and the wheel's screen and shift lights fill the bottom — the real onboard proportions
-      this.v3.addScaledVector(up, COCKPIT_EYE_UP).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
+      this.v3.addScaledVector(up, COCKPIT_EYE_UP + (rig.camLift?.cockpit?.[1] ?? 0)).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), COCKPIT_EYE_FWD);
     } else {
       // the driver's own eyes: the camera rides the head (it leans against the G, nods under
       // braking and turns into the corners — see CarRig.setG), with the engine's buzz through the
       // seat and only a little of the chassis roll taken out by the neck
       up.lerp(this.v5.set(0, 1, 0), this.prefs.horizon * 0.45).normalize();
+      this.v3.addScaledVector(up, rig.camLift?.helmet?.[1] ?? 0);
     }
     // the player's offsets (F1 25's cockpit sliders), in the car's frame
     this.v3.addScaledVector(leftV, O.lat).addScaledVector(up, O.up).addScaledVector(this.fV.set(0, 0, 1).applyQuaternion(this.q), O.fwd);
