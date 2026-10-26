@@ -1042,11 +1042,13 @@ float gRake = 0.0;
   {
     float far = smoothstep(0.03, 0.2, px);
     vec4 mD = texture2D(uMacro, vTrk * (1.0 / 2.3) + vec2(0.27, 0.61));
-    col *= 1.0 + far * (0.22 * (mD.g - 0.5) + 0.14 * (mC.g - 0.5));
-    col *= 1.0 - far * 0.12 * smoothstep(0.55, 0.85, mB.g);
+    col *= 1.0 + far * (0.34 * (mD.g - 0.5) + 0.22 * (mC.g - 0.5));
+    col *= 1.0 - far * 0.18 * smoothstep(0.55, 0.85, mB.g);
   }
-  // (a light grey-beige river gravel, not a sand-yellow)
-  diffuseColor.rgb = col * vec3(0.82, 0.78, 0.71);
+  // (a grey-beige river gravel, not a sand-yellow: a shade deeper and greyer than it was — under the
+  // richer grade a trap read as a pale beige plane, where the sims' (and the TV's) gravel is a
+  // stony mid-grey-brown that holds its grain)
+  diffuseColor.rgb = col * vec3(0.72, 0.69, 0.64);
   roughnessFactor = rough;
 }
 `;
@@ -1065,7 +1067,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-6', t, GRAVEL_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-gravel-7', t, GRAVEL_FRAG, (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
