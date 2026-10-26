@@ -1,6 +1,13 @@
 import '@fontsource/titillium-web/600.css';
 import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
+import '@fontsource/barlow/latin-500.css';
+import '@fontsource/barlow/latin-600.css';
+import '@fontsource/barlow/latin-700.css';
+import '@fontsource/barlow-condensed/latin-600.css';
+import '@fontsource/barlow-condensed/latin-700.css';
+import '@fontsource/barlow-condensed/latin-800.css';
+import '@fontsource/barlow-condensed/latin-800-italic.css';
 import './ui/tokens.css';
 import './ui/hud.css';
 import './ui/menu.css';

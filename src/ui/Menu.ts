@@ -152,6 +152,9 @@ export interface MenuCallbacks {
   onCareerChanged?(): void;
 }
 
+/** menu navigation edges (src/core/Input.ts) */
+type MenuNav = { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean; tabL?: boolean; tabR?: boolean };
+
 export type HubTab = 'home' | 'race' | 'career' | 'highlights' | 'car' | 'setup' | 'paint' | 'settings';
 const HUB_TABS: { id: HubTab; label: string }[] = [
   { id: 'home', label: 'Home' },
@@ -396,19 +399,18 @@ export class Menu {
     s.style.setProperty('--on-accent', onColor(accent));
     if (!s.querySelector(':scope > .hub-scrim')) s.prepend(el('div', 'hub-scrim'));
     const c = this.career.data;
+    // the nameplate, bottom-left: the number big in the team colour, the surname bigger still
     el(
       'div',
       'hub-id',
       s,
-      `<div class="num">${d.number}</div><div class="who"><div class="name">${d.first} <b>${d.last}</b></div><div class="sub"><span>${team.name}</span><span>${this.careerSub(c)}</span></div></div>`,
+      `<div class="num">${d.number}</div><div class="who"><div class="first">${d.first}</div><div class="name">${d.last}</div><div class="sub"><span>${team.name}</span><span>${this.careerSub(c)}</span></div></div>`,
     );
-    this.hubCredits = el('div', 'hub-credits', s);
-    this.renderCredits();
-    // a soft shade down the left edge: the tab rail and the driver's name stay readable over
-    // whatever the garage has behind them (the wall's big number, the monitors)
-    el('div', 'hub-scrim', s);
-    const rail = el('div', 'hub-rail', s);
-    el('div', 'hub-brand', rail, 'Apex <span>GP</span>');
+    // the bar across the top: the brand, the tabs (Q / E or the bumpers step through them), the credits
+    const top = el('div', 'hub-top', s);
+    el('div', 'hub-brand', top, 'Apex<span>GP</span>');
+    const rail = el('div', 'hub-rail', top);
+    el('kbd', 'hub-bump', rail, 'Q');
     this.hubTabs = HUB_TABS.map((t, i) => {
       const e = el('div', 'htab', rail, t.label);
       e.addEventListener('click', () => {
@@ -417,13 +419,13 @@ export class Menu {
         this.sel = 0;
         this.highlight();
       });
-      e.addEventListener('mouseenter', () => {
-        if (this.hubTab !== t.id) return;
-      });
       return e;
     });
+    el('kbd', 'hub-bump', rail, 'E');
+    this.hubCredits = el('div', 'hub-credits', top);
+    this.renderCredits();
     this.hubPanel = el('div', 'hub-panel', s);
-    el('div', 'keys hub-keys', s, '<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span><span>Gamepad ready</span>');
+    el('div', 'keys hub-keys', s, '<span><kbd>Q</kbd><kbd>E</kbd> tabs</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span>');
     this.setTab(this.hubTab);
   }
 
@@ -1118,7 +1120,7 @@ export class Menu {
       st.motionBlur = MOTION_BLUR[(i + d + MOTION_BLUR.length) % MOTION_BLUR.length];
     }, true);
     // (the 2026 bodywork is "My take on the 2026 f1 regulations" by MaG80, CC-BY-4.0 — credited here)
-    this.opt(p, 'Car model', () => (shellPrefs.enabled ? '2026 <span class="dim">· model by MaG80 (Sketchfab, CC-BY)</span>' : 'Classic') + ' <span class="dim">· from the next session</span>', () => {
+    this.opt(p, 'Car model', () => (shellPrefs.enabled ? '2026 <span class="dim">· MaG80, CC-BY</span>' : 'Classic') + ' <span class="dim">· next race</span>', () => {
       setShellEnabled(!shellPrefs.enabled);
     }, true);
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
@@ -1670,20 +1672,37 @@ export class Menu {
     });
   }
 
-  private hubNav(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }) {
+  private hubNav(nav: MenuNav) {
+    // Q / E step through the tabs from anywhere in the hub
+    if (nav.tabL || nav.tabR) {
+      const i = HUB_TABS.findIndex((t) => t.id === this.hubTab);
+      const n = HUB_TABS.length;
+      this.setTab(HUB_TABS[(i + (nav.tabR ? 1 : -1) + n) % n].id);
+      this.hubFocus = 'tabs';
+      this.highlight();
+      this.cb.onUi('move');
+      return;
+    }
     if (this.hubFocus === 'tabs') {
-      if (nav.up || nav.down) {
+      if (nav.left || nav.right) {
         const i = HUB_TABS.findIndex((t) => t.id === this.hubTab);
         const n = HUB_TABS.length;
-        this.setTab(HUB_TABS[(i + (nav.down ? 1 : -1) + n) % n].id);
+        this.setTab(HUB_TABS[(i + (nav.right ? 1 : -1) + n) % n].id);
         this.cb.onUi('move');
       }
-      if ((nav.accept || nav.right) && this.items.length) {
+      if ((nav.accept || nav.down) && this.items.length) {
         this.hubFocus = 'panel';
         this.sel = Math.min(this.sel, this.items.length - 1);
         this.highlight();
         this.cb.onUi('select');
       }
+      return;
+    }
+    // up from the panel's first row climbs back to the tab bar above it
+    if (nav.up && this.sel === 0) {
+      this.hubFocus = 'tabs';
+      this.highlight();
+      this.cb.onUi('move');
       return;
     }
     if (nav.up || nav.down) {
@@ -1707,7 +1726,7 @@ export class Menu {
   }
 
   /** keyboard/gamepad navigation */
-  update(nav: { up: boolean; down: boolean; left: boolean; right: boolean; accept: boolean; back: boolean }) {
+  update(nav: MenuNav) {
     if (this.wizardOpen) return;
     // binding a wheel: its own buttons and axes must not navigate (Enter / Esc are read directly)
     if (this.binder) return;

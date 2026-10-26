@@ -33,6 +33,8 @@
   -webkit-backdrop-filter: none;
   border-radius: var(--hud-r);
   box-shadow: inset 0 0 0 1px var(--hud-edge);
+  /* the system's chamfer: every panel's top-right corner cut */
+  clip-path: var(--chamfer-sm);
 }
 /* the small grey caps every widget labels its figures with */
 #hud .k {
@@ -83,8 +85,10 @@
 }
 .tower-head b {
   color: var(--ink);
+  font-family: var(--font-display);
   font-weight: 700;
-  font-size: var(--t-row);
+  font-size: 20px;
+  line-height: 1;
   letter-spacing: 0.02em;
 }
 .tower-rows {
@@ -110,12 +114,15 @@
   align-items: center;
   gap: 0 var(--s2);
   padding: 0 var(--s3) 0 var(--s1);
-  font-size: var(--t-row);
+  font-size: 15px;
   font-weight: 600;
   transition: transform 0.45s var(--spring), background 0.3s;
 }
 .trow .pos {
   text-align: right;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
   color: var(--ink2);
   padding-right: 2px;
   border-radius: 2px;
@@ -125,8 +132,10 @@
   border-radius: 1px;
 }
 .trow .code {
+  font-family: var(--font-display);
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 .trow .gap {
   color: var(--ink2);
@@ -170,6 +179,7 @@
 }
 .deltabar .dnum {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 28px;
   color: var(--ink3);
@@ -243,8 +253,10 @@
   background: var(--hud-head);
 }
 .timing .pbig {
-  font-size: 40px;
-  font-weight: 700;
+  font-size: 46px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
   line-height: 1;
   letter-spacing: -0.01em;
 }
@@ -265,6 +277,7 @@
 .timing .lap b {
   color: var(--ink);
   font-size: var(--t-time);
+  font-family: var(--font-display);
   letter-spacing: 0;
   margin-left: var(--s1);
 }
@@ -292,6 +305,7 @@
 }
 .tline .curt {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   line-height: 28px;
 }
 .tline .curt.invalid {
@@ -520,13 +534,17 @@
   background: var(--well);
   display: grid;
   place-items: center;
-  font-size: 50px;
-  font-weight: 700;
+  font-size: 54px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
   line-height: 1;
 }
 .speed .spv {
-  font-size: 40px;
-  font-weight: 700;
+  font-size: 46px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -788,6 +806,7 @@
   transform: translate(-50%, -8px);
   padding: 10px 22px 10px 26px;
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0.02em;
   opacity: 0;
@@ -1050,10 +1069,13 @@
   color: var(--accent);
 }
 .race-intro .ri-name {
-  font-size: 54px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.05;
+  font-size: 72px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 0.95;
   margin: 6px 0 12px;
 }
 .race-intro .ri-facts {
@@ -1167,9 +1189,12 @@
   color: var(--ink2);
 }
 .intro-film .if-title {
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: 36px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0;
   line-height: 1.15;
   margin-top: 4px;
 }

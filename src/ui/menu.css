@@ -48,7 +48,8 @@
 }
 .logo {
   font-size: clamp(56px, calc(8 * var(--vw)), 104px);
-  font-weight: 900;
+  font-family: var(--font-display);
+  font-weight: 800;
   font-style: italic;
   line-height: 0.86;
   letter-spacing: -0.04em;
@@ -71,7 +72,10 @@
 .mitem {
   position: relative;
   font-size: var(--t-time);
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--ink2);
   padding: 8px 0 8px 20px;
   cursor: pointer;
@@ -159,9 +163,13 @@
 }
 .panel h2 {
   margin: 0 0 var(--s1);
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 40px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  line-height: 1;
+  letter-spacing: -0.01em;
 }
 .panel .lede {
   margin: 0 0 var(--s3);
@@ -174,9 +182,9 @@
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  height: 44px;
+  height: 46px;
   padding: 0 var(--s2) 0 var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -192,15 +200,15 @@
   position: absolute;
   left: 0;
   top: 50%;
-  width: 3px;
+  width: 4px;
   height: 0;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--accent);
   transform: translateY(-50%);
   transition: height 0.3s var(--spring);
 }
 .opt.sel::before {
-  height: 20px;
+  height: 100%;
 }
 .opt .k {
   font-size: var(--t-row);
@@ -269,19 +277,26 @@
 .cta {
   margin-top: var(--s5);
   height: 56px;
-  border-radius: 12px;
   background: var(--accent);
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: var(--t-row);
+  clip-path: var(--chamfer2);
+  font-family: var(--font-display);
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: transform 0.25s var(--spring), box-shadow 0.25s;
+  transition: transform 0.25s var(--spring), box-shadow 0.25s, filter 0.2s;
 }
+.cta:hover {
+  filter: brightness(1.08);
+}
+/* focus: a white ring inside the chamfer (an outer glow would be clipped) */
 .cta.sel {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85), 0 10px 30px rgba(255, 43, 63, 0.35);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.92);
+  filter: brightness(1.1);
 }
 .cta:active {
   transform: scale(0.97);
@@ -303,7 +318,8 @@
 }
 .drivercard .num {
   font-size: 88px;
-  font-weight: 900;
+  font-family: var(--font-display);
+  font-weight: 800;
   font-style: italic;
   line-height: 0.8;
   letter-spacing: -0.04em;
@@ -311,6 +327,7 @@
 .drivercard .name {
   margin-top: var(--s2);
   font-size: 34px;
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -369,6 +386,7 @@
 .pause-stats b {
   display: block;
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -399,9 +417,18 @@
 }
 .results h2 {
   margin: 0;
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 46px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+/* the menus' panels share the chamfer */
+.panel.glass,
+.results.glass {
+  clip-path: var(--chamfer);
 }
 .results .lede {
   margin: var(--s1) 0 var(--s4);
@@ -464,6 +491,9 @@
 }
 .rrow .p {
   text-align: right;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
   color: var(--ink2);
 }
 .rrow .bar {
@@ -481,6 +511,10 @@
 }
 .rrow .best.purple {
   color: var(--purple);
+}
+.rrow.head .p {
+  font-family: var(--font);
+  font-size: var(--t-cap);
 }
 .rrow.me {
   background: var(--ink);
@@ -591,6 +625,7 @@
 }
 #loading .logo {
   font-size: 64px;
+  font-family: var(--font-display);
 }
 #loading .lbar {
   margin-top: var(--s5);
@@ -727,49 +762,61 @@
   --on-accent: #fff;
   font-variant-numeric: tabular-nums;
 }
+/* one shade under every hub element (it's the first child): dark along the top for the tab
+   bar, in the bottom-left corner for the nameplate, down the right for the panel; the car in
+   the middle stays clean */
 .hub-scrim {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(270deg, rgba(6, 7, 10, 0.72) 0%, rgba(6, 7, 10, 0.3) 30%, rgba(6, 7, 10, 0) 48%),
-    linear-gradient(90deg, rgba(6, 7, 10, 0.84) 0%, rgba(6, 7, 10, 0.55) 17%, rgba(6, 7, 10, 0) 34%),
-    linear-gradient(180deg, rgba(6, 7, 10, 0.6) 0%, rgba(6, 7, 10, 0) 18%, rgba(6, 7, 10, 0) 80%, rgba(6, 7, 10, 0.55) 100%);
+    linear-gradient(180deg, rgba(5, 6, 9, 0.88) 0, rgba(5, 6, 9, 0.5) 72px, rgba(5, 6, 9, 0) 168px),
+    radial-gradient(52% 46% at 0% 100%, rgba(5, 6, 9, 0.86) 0%, rgba(5, 6, 9, 0.45) 55%, rgba(5, 6, 9, 0) 100%),
+    linear-gradient(270deg, rgba(5, 6, 9, 0.7) 0%, rgba(5, 6, 9, 0.28) 28%, rgba(5, 6, 9, 0) 44%);
   pointer-events: none;
 }
 
-/* identity, top-left */
+/* the nameplate, bottom-left: the number in the team colour, the surname in big italic caps */
 .hub-id {
   position: absolute;
   left: var(--s6);
-  top: var(--s5);
+  bottom: 64px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--s4);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
 }
 .hub-id .num {
-  font-size: var(--t-hero);
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 128px;
+  font-weight: 800;
   font-style: italic;
-  line-height: 1;
+  line-height: 0.74;
   color: var(--accent);
-  letter-spacing: -0.03em;
-  min-width: 1.1em;
+  letter-spacing: -0.04em;
+  min-width: 0.9em;
+}
+.hub-id .first {
+  font-size: var(--t-row);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink2);
 }
 .hub-id .name {
-  font-size: var(--t-time);
-  font-weight: 600;
-  line-height: 1.1;
-}
-.hub-id .name b {
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: var(--t-hero);
+  font-weight: 800;
+  font-style: italic;
+  line-height: 0.92;
+  letter-spacing: -0.01em;
   text-transform: uppercase;
-  letter-spacing: 0.01em;
 }
 .hub-id .sub {
   display: flex;
   gap: var(--s3);
-  margin-top: var(--s1);
-  font-size: var(--t-row);
+  margin-top: var(--s2);
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink2);
 }
@@ -777,12 +824,109 @@
   color: var(--ink3);
 }
 
-/* credits, top-right */
-.hub-credits {
+/* the bar across the top: brand · tabs · credits, on one hairline */
+.hub-top {
   position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 72px;
+  display: flex;
+  align-items: stretch;
+  gap: var(--s6);
+  padding: 0 var(--s6);
+}
+.hub-top::after {
+  content: '';
+  position: absolute;
+  left: var(--s6);
   right: var(--s6);
-  top: var(--s5);
+  bottom: 0;
+  height: 1px;
+  background: var(--line-strong);
+}
+.hub-brand {
+  align-self: center;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* GP on a slanted tab of the team colour (the brand's one mark) */
+.hub-brand span {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 8px 0 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  transform: skewX(-12deg);
+}
+.hub-rail {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s1);
+  min-width: 0;
+}
+.htab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s3);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink2);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.htab:hover {
+  color: var(--ink);
+}
+/* the open tab: white, an accent bar sitting on the hairline */
+.htab::after {
+  content: '';
+  position: absolute;
+  left: var(--s3);
+  right: var(--s3);
+  bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transition: transform 0.3s var(--ease-out);
+  z-index: 1;
+}
+.htab.on {
+  color: var(--ink);
+}
+.htab.on::after {
+  transform: none;
+}
+/* focus on the bar itself (keyboard / pad): a soft well behind the open tab */
+.htab.sel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.1) 100%);
+}
+.hub-bump {
+  align-self: center;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink3);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.hub-credits {
+  margin-left: auto;
+  align-self: center;
   text-align: right;
+  white-space: nowrap;
 }
 .hub-credits .cap,
 .hp-cap,
@@ -794,81 +938,10 @@
   color: var(--ink3);
 }
 .hub-credits .val {
-  margin-top: var(--s1);
+  font-family: var(--font-display);
   font-size: var(--t-time);
   font-weight: 700;
-}
-
-/* the shade behind the rail (under every hub element: it's the first child) */
-.hub-scrim {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 460px;
-  background: linear-gradient(90deg, rgba(6, 8, 12, 0.82) 0%, rgba(6, 8, 12, 0.6) 45%, rgba(6, 8, 12, 0) 100%);
-  pointer-events: none;
-}
-
-/* tab rail, left */
-.hub-rail {
-  position: absolute;
-  left: var(--s6);
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  gap: var(--s1);
-}
-.hub-brand {
-  margin-bottom: var(--s4);
-  font-size: var(--t-cap);
-  font-weight: 700;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: var(--ink3);
-}
-.hub-brand span {
-  color: var(--accent);
-}
-.htab {
-  position: relative;
-  padding: var(--s2) 0 var(--s2) var(--s5);
-  font-size: var(--t-time);
-  font-weight: 600;
-  color: var(--ink2);
-  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
-  cursor: pointer;
-  transition: color 0.2s, transform 0.35s var(--spring);
-}
-.htab:hover {
-  color: var(--ink);
-}
-.htab::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 4px;
-  height: 0;
-  border-radius: 2px;
-  background: var(--accent);
-  transform: translateY(-50%);
-  transition: height 0.3s var(--spring);
-}
-.htab.on {
-  color: var(--ink);
-  font-weight: 700;
-}
-.htab.on::before {
-  height: 8px;
-  opacity: 0.55;
-}
-.htab.sel {
-  transform: translateX(4px);
-}
-.htab.sel::before {
-  height: 26px;
-  opacity: 1;
+  line-height: 1.05;
 }
 .hub-keys {
   position: absolute;
@@ -883,7 +956,7 @@
   right: var(--s6);
   top: 96px;
   max-height: calc(calc(100 * var(--vh)) - 168px);
-  width: min(440px, calc(44 * var(--vw)));
+  width: min(468px, calc(44 * var(--vw)));
   padding: var(--s5);
   overflow-y: auto;
   scrollbar-width: none;
@@ -923,8 +996,28 @@
 .hub-panel .hp-cap {
   margin-top: var(--s2);
 }
-.hub-panel .hp-cap:first-child {
+/* the panel's chamfered corner, and its first caption read as the panel's title */
+.hub-panel.glass {
+  clip-path: var(--chamfer);
+}
+.hub-panel > .hp-cap:first-child {
   margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.hub-panel > .hp-cap:first-child::before {
+  content: '';
+  width: 5px;
+  height: 18px;
+  background: var(--accent);
+  transform: skewX(-14deg);
+  flex: none;
 }
 .hp-note {
   font-size: var(--t-cap);
@@ -941,7 +1034,7 @@
   color: var(--ink);
 }
 .hub-panel .cta.sel {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.92);
 }
 .hp-actions {
   display: grid;
@@ -974,7 +1067,7 @@
   align-items: center;
   min-height: 44px;
   padding: var(--s2) var(--s3) var(--s2) var(--s2);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   box-shadow: inset 0 0 0 1px transparent;
   cursor: pointer;
   transition: box-shadow 0.2s, background 0.2s, transform 0.3s var(--spring);
@@ -1111,7 +1204,7 @@
 }
 .stat {
   padding: var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
 }
 .stat.hero {
@@ -1119,11 +1212,13 @@
 }
 .stat .v {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.1;
 }
 .stat.hero .v {
   font-size: var(--t-hero);
+  font-family: var(--font-display);
   line-height: 1;
   color: var(--ink);
 }
@@ -1214,7 +1309,7 @@
   align-items: center;
   gap: var(--s4);
   padding: var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
   cursor: pointer;
   box-shadow: inset 0 0 0 1px transparent;
@@ -1259,7 +1354,7 @@
   min-width: 96px;
   height: 36px;
   padding: 0 var(--s3);
-  border-radius: 8px;
+  border-radius: var(--r-panel);
   display: grid;
   place-items: center;
   font-size: var(--t-row);
@@ -1293,7 +1388,7 @@
 /* paint shop */
 .prow {
   padding: var(--s2) var(--s3) var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   box-shadow: inset 0 0 0 1px transparent;
   transition: box-shadow 0.2s, background 0.2s;
 }
@@ -1352,7 +1447,7 @@
   align-items: center;
   height: 52px;
   padding: 0 var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   font-size: var(--t-row);
   font-weight: 600;
   cursor: pointer;
@@ -1375,13 +1470,14 @@
   align-items: center;
   margin-top: var(--s4);
   padding: var(--s4);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
   font-variant-numeric: tabular-nums;
 }
 .reward .val {
   margin-top: var(--s1);
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   color: var(--green);
 }
@@ -1399,7 +1495,7 @@
 .rw-unlock {
   margin-top: var(--s3);
   padding: var(--s3) var(--s4);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   font-size: var(--t-row);
   font-weight: 600;
   color: var(--ink);
@@ -1455,6 +1551,7 @@
   display: block;
   margin-top: var(--s2);
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
 }
 /* in-process circuit switch: a thin bar under the name (the boot loader's, same accent) and the step
@@ -1506,21 +1603,25 @@
 
 /* narrow layout: 820 layout px, i.e. 574 screen px at the 0.7 UI zoom floor (src/ui/scale.ts) */
 @media (max-width: 574px) {
-  .hub-rail {
-    top: auto;
-    bottom: 56px;
-    transform: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 var(--s3);
+  .hub-top {
+    padding: 0 var(--s4);
+    gap: var(--s3);
+  }
+  .hub-top::after {
+    left: var(--s4);
     right: var(--s4);
   }
-  .hub-brand {
+  .hub-brand,
+  .hub-bump {
     display: none;
+  }
+  .hub-rail {
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .htab {
     font-size: var(--t-row);
-    padding: var(--s1) 0 var(--s1) var(--s3);
+    padding: 0 var(--s2);
   }
   .hub-panel {
     left: var(--s4);
@@ -1529,13 +1630,16 @@
     top: calc(45 * var(--vh));
     bottom: 120px;
   }
-  .hub-id,
-  .hub-rail,
-  .hub-keys {
+  .hub-id {
     left: var(--s4);
+    bottom: auto;
+    top: 88px;
   }
-  .hub-credits {
-    right: var(--s4);
+  .hub-id .num {
+    font-size: 72px;
+  }
+  .hub-id .name {
+    font-size: 40px;
   }
   .hub-keys {
     display: none;
@@ -1550,7 +1654,7 @@
 }
 .hp-empty {
   padding: var(--s4);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
   font-size: var(--t-row);
   line-height: 1.5;
@@ -1568,7 +1672,7 @@
   gap: var(--s4);
   align-items: center;
   padding: var(--s2);
-  border-radius: 12px;
+  border-radius: var(--r-panel);
   background: var(--well);
   box-shadow: inset 0 0 0 1px transparent;
   cursor: pointer;
@@ -1587,7 +1691,7 @@
   position: relative;
   width: 128px;
   height: 72px;
-  border-radius: 8px;
+  border-radius: var(--r-panel);
   overflow: hidden;
   background: #111318;
 }
@@ -1724,7 +1828,7 @@
   display: grid;
   gap: var(--s2);
   padding: var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
 }
 .setsum .sb {
@@ -1761,6 +1865,7 @@
 }
 .setsum .sb.top strong {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   color: var(--ink);
   text-align: right;
@@ -1771,7 +1876,7 @@
 }
 .setrow {
   padding: var(--s3);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   box-shadow: inset 0 0 0 1px transparent;
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
@@ -1991,7 +2096,8 @@
    aside (the panel, the tabs and the keys fade out).
    ====================================================================== */
 #menu .hub .hub-panel,
-#menu .hub .hub-rail,
+#menu .hub .hub-top,
+#menu .hub .hub-id,
 #menu .hub .hub-credits,
 #menu .hub .hub-keys,
 #menu .hub .hub-scrim {
@@ -2002,12 +2108,12 @@
   transform: translateX(24px);
   pointer-events: none;
 }
-#menu .hub.exploring .hub-rail {
+#menu .hub.exploring .hub-top {
   opacity: 0;
-  transform: translate(-16px, -50%);
+  transform: translateY(-16px);
   pointer-events: none;
 }
-#menu .hub.exploring .hub-credits,
+#menu .hub.exploring .hub-id,
 #menu .hub.exploring .hub-keys {
   opacity: 0;
   pointer-events: none;
@@ -2052,7 +2158,7 @@
   padding: 0 var(--s3) 0 0;
   height: 28px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: rgba(10, 12, 17, 0.62);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   backdrop-filter: blur(10px);
@@ -2166,7 +2272,7 @@
   width: 44px;
   height: 44px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: transparent;
   color: var(--ink2);
   cursor: pointer;
@@ -2207,7 +2313,7 @@
   height: 32px;
   padding: 0 var(--s2) 0 var(--s3);
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--r-panel);
   color: var(--ink2);
   font: 600 var(--t-cap) var(--font);
   cursor: pointer;
@@ -2285,7 +2391,7 @@
 
 /* ---------- career: the season map ---------- */
 .hub-panel.wide {
-  left: 300px;
+  left: var(--s6);
   right: var(--s6);
   width: auto;
   top: 96px;
@@ -2654,6 +2760,7 @@
   display: grid;
   place-items: center;
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #fff;
@@ -2670,6 +2777,7 @@
 }
 .ch-name {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 400;
   white-space: nowrap;
 }
@@ -2700,6 +2808,7 @@
 }
 .ch-stats b {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -2743,6 +2852,7 @@
 }
 .ch-next .nm {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.15;
   margin-top: var(--s1);
@@ -2796,7 +2906,7 @@
   height: 18px;
   margin-left: var(--s2);
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--r-panel);
   background: var(--accent);
   color: var(--on-accent, #fff);
   font-style: normal;
@@ -2970,6 +3080,7 @@
 }
 .ch-choose-h .big {
   font-size: var(--t-hero);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.02;
   letter-spacing: -0.02em;
@@ -3004,6 +3115,7 @@
 .ch-offer .nm,
 .cw-offer .nm {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
 }
 .ch-offer .lv,
@@ -3062,6 +3174,7 @@
 .cw h1 {
   margin: var(--s2) 0 0;
   font-size: var(--t-hero);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.02;
   letter-spacing: -0.02em;
@@ -3114,6 +3227,7 @@
 }
 .cw-path b {
   font-size: var(--t-time);
+  font-family: var(--font-display);
 }
 .cw-path span {
   font-size: var(--t-row);
@@ -3235,12 +3349,14 @@
   position: absolute;
   bottom: 14%;
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   color: #fff;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 .cw-pname {
   font-size: var(--t-time);
+  font-family: var(--font-display);
 }
 .cw-pname b {
   font-weight: 700;
@@ -3378,7 +3494,7 @@
   height: 18px;
   margin-left: var(--s1);
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--r-panel);
   background: var(--accent);
   color: var(--on-accent, #fff);
   font-style: normal;
@@ -3527,6 +3643,7 @@
 }
 .ch-ovr b {
   font-size: var(--t-hero);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -3609,6 +3726,7 @@
 }
 .ch-vs .side b {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -3637,6 +3755,7 @@
 }
 .ch-totals b {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -3756,6 +3875,7 @@
 }
 .ch-talks-in .big {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
 }
 .ch-talks-in .sub,
@@ -3873,7 +3993,7 @@
   gap: var(--s5);
   margin-top: var(--s4);
   padding: var(--s4);
-  border-radius: 10px;
+  border-radius: var(--r-panel);
   background: var(--well);
 }
 .rc-col {
@@ -4050,6 +4170,7 @@
 }
 .ch-map-cap .big {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.15;
 }
@@ -4294,6 +4415,7 @@
 }
 .ch-rnd-id .nm {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   line-height: 1.15;
   margin-top: var(--s1);
@@ -4334,6 +4456,7 @@
 }
 .ch-rnd-res b {
   font-size: var(--t-hero);
+  font-family: var(--font-display);
   line-height: 1;
   font-weight: 700;
   color: var(--ink);
@@ -4436,6 +4559,7 @@
 .ch-rnd-acts .ch-step {
   height: 52px;
   font-size: 22px;
+  font-family: var(--font-display);
   padding: 0;
 }
 .ch-rnd-acts .cta.dis {
@@ -4597,6 +4721,7 @@
 .home-next .title {
   margin-top: var(--s2);
   font-size: 30px;
+  font-family: var(--font-display);
   line-height: 1.1;
   font-weight: 700;
   color: #fff;
@@ -4630,6 +4755,7 @@
 .home-ow .ow-title {
   margin-top: var(--s1, 4px);
   font-size: 22px;
+  font-family: var(--font-display);
   font-weight: 700;
   color: #fff;
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);

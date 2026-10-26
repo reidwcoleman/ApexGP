@@ -1,11 +1,21 @@
-/* APEX GP design tokens — one typeface, 4 sizes per screen, 2 weights, one accent. */
+/* APEX GP design tokens — Barlow for reading, Barlow Condensed for display (names, titles, big
+   figures), 4 sizes per screen, one accent. The signature shape is the chamfer: one corner cut at
+   45 degrees (--cut), on panels, buttons and the timing tower's position chips. */
 :root {
-  --font: 'Titillium Web', system-ui, sans-serif;
+  --font: 'Barlow', system-ui, sans-serif;
+  --font-display: 'Barlow Condensed', 'Barlow', system-ui, sans-serif;
+  --cut: 14px;
+  --cut-sm: 8px;
+  /* the chamfer as a clip: top-right corner cut */
+  --chamfer: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
+  --chamfer-sm: polygon(0 0, calc(100% - var(--cut-sm)) 0, 100% var(--cut-sm), 100% 100%, 0 100%);
+  /* both diagonal corners cut (buttons) */
+  --chamfer2: polygon(var(--cut-sm) 0, 100% 0, 100% calc(100% - var(--cut-sm)), calc(100% - var(--cut-sm)) 100%, 0 100%, 0 var(--cut-sm));
 
   /* ground: tinted near-black (never grey), glass over the 3D scene */
-  --ground: rgba(10, 12, 17, 0.78);
+  --ground: rgba(9, 10, 14, 0.86);
   --ground-solid: #0a0c11;
-  --raised: rgba(24, 27, 35, 0.86);
+  --raised: rgba(22, 24, 31, 0.92);
   --well: rgba(255, 255, 255, 0.06);
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.16);
@@ -37,9 +47,10 @@
 
   /* type scale */
   --t-cap: 12px;
-  --t-row: 15px;
-  --t-time: 22px;
-  --t-hero: 54px;
+  --t-row: 16px;
+  --t-time: 24px;
+  --t-title: 34px;
+  --t-hero: 64px;
 
   /* spacing (4pt) */
   --s1: 4px;
@@ -49,8 +60,8 @@
   --s5: 24px;
   --s6: 32px;
 
-  --r-pill: 6px;
-  --r-panel: 12px;
+  --r-pill: 3px;
+  --r-panel: 4px;
 
   /* overlay zoom: the UI is laid out at 1600 × 900 and scaled with the window (src/ui/scale.ts) */
   --ui: 1;

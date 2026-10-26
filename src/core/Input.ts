@@ -99,7 +99,7 @@ export class Input {
   private wheelPrevSteer = 0;
   private wheelBtnPrev = { up: false, down: false };
   /** menu navigation edges, consumed by UI */
-  readonly nav = { up: false, down: false, left: false, right: false, accept: false, back: false };
+  readonly nav = { up: false, down: false, left: false, right: false, accept: false, back: false, tabL: false, tabR: false };
   private padNavCooldown = 0;
   /** gamepad vibration */
   private pad: Gamepad | null = null;
@@ -164,6 +164,9 @@ export class Input {
     this.nav.right = edge('right');
     this.nav.accept = edge('accept') || edge('drs');
     this.nav.back = edge('back') || edge('pause');
+    // the garage's tab bar: Q / E (the shift keys), the bumpers on a pad
+    this.nav.tabL = edge('shiftDown');
+    this.nav.tabR = edge('shiftUp');
 
     const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
 
@@ -256,6 +259,8 @@ export class Input {
       this.nav.right ||= navRight;
       this.nav.accept ||= pEdge(0);
       this.nav.back ||= pEdge(1) || pEdge(9);
+      this.nav.tabL ||= pEdge(4);
+      this.nav.tabR ||= pEdge(5);
 
       this.padPrev = pad.buttons.map((b) => b.pressed);
     }

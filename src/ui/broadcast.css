@@ -147,6 +147,7 @@
 .bc-pos {
   min-width: 44px;
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 700;
   text-align: center;
 }
@@ -161,6 +162,7 @@
 }
 .bc-name {
   font-size: var(--t-time);
+  font-family: var(--font-display);
   font-weight: 600;
   line-height: 1.05;
   white-space: nowrap;
@@ -267,7 +269,7 @@
   width: 36px;
   height: 36px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-panel);
   background: var(--well);
   color: var(--ink);
   font-family: var(--font);
@@ -509,6 +511,7 @@
   display: grid;
   place-items: center;
   font-size: 54px;
+  font-family: var(--font-display);
   font-weight: 700;
   color: var(--ink3);
   border-radius: var(--r-panel);
@@ -523,6 +526,7 @@
 }
 .simcard .sc-name {
   font-size: 34px;
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
