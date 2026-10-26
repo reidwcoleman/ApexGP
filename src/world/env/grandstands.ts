@@ -245,6 +245,22 @@ function crowdMaterial(atlas: THREE.Texture, uniforms: { uTime: THREE.IUniform }
     Object.assign(sh.uniforms, crowdUniforms);
     sh.vertexShader = sh.vertexShader
       .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+// each fan turns about the vertical to face the camera (a cylindrical billboard): laid out facing the
+// track, a flat card seen from up the bank or along the fence was a sliver, or nothing at all
+float cRc = 1.0, cRs = 0.0;
+#ifdef USE_INSTANCING
+{
+  mat4 cM = modelMatrix * instanceMatrix;
+  vec3 lc = transpose( mat3( cM ) ) * ( cameraPosition - cM[3].xyz );
+  float r = length( lc.xz );
+  if ( r > 1e-4 ) { cRs = -lc.x / r; cRc = -lc.z / r; }
+  objectNormal.xz = vec2( cRc * objectNormal.x + cRs * objectNormal.z, -cRs * objectNormal.x + cRc * objectNormal.z );
+}
+#endif`,
+      )
+      .replace(
         '#include <common>',
         `#include <common>
 attribute float aShade;
@@ -277,6 +293,7 @@ ${REACT_GLSL}`,
   transformed.x += ( sin( uTime * 0.8 + id * 3.1 ) * 0.02 + sin( uTime * 3.6 + id * 3.1 ) * 0.03 * up ) * position.y;
   vCrowdUv = vec2( ( variant + uv.x ) / ${variants.toFixed(1)}, ( ( 1.0 - wave ) + uv.y ) / 2.0 );
   vShade = aShade;
+  transformed.xz = vec2( cRc * transformed.x + cRs * transformed.z, -cRs * transformed.x + cRc * transformed.z );
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
@@ -299,12 +316,18 @@ varying float vShade;`,
     vec3 tint = vec3( 1.0 );
   #endif
   diffuseColor.rgb = mix( t.rgb, tint * ( dot( t.rgb, vec3( 0.3333 ) ) / 0.97 ), shirt ) * vShade;
-  diffuseColor.a = t.a;
+  // (each mip averages the figure's edge with the clear round it, so past a few levels the alpha
+  // test kept only the torso: a distant bank of fans became a field of glowing ovals. Lifting the
+  // alpha by the mip level keeps the figure's coverage — Golus, "Anti-aliased alpha test", 2017.)
+  vec2 cTs = vec2( textureSize( uCrowd, 0 ) );
+  vec2 cDx = dFdx( vCrowdUv * cTs ), cDy = dFdy( vCrowdUv * cTs );
+  float cLod = max( 0.0, 0.5 * log2( max( dot( cDx, cDx ), dot( cDy, cDy ) ) ) );
+  diffuseColor.a = t.a * ( 1.0 + cLod * 0.25 );
 }`,
       )
       .replace('#include <color_fragment>', '');
   };
-  mat.customProgramCacheKey = () => 'apex-crowd-v5-' + variants;
+  mat.customProgramCacheKey = () => 'apex-crowd-v7-' + variants;
   return mat;
 }
 
