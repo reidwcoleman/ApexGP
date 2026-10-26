@@ -1695,7 +1695,7 @@ function blurDisc(mb: MB, w: number) {
 
 // ================================================================================================ public
 export interface CarGeoLevel {
-  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; driverBare: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null; mirror: THREE.BufferGeometry | null; pillar: THREE.BufferGeometry | null };
+  body: { paint: THREE.BufferGeometry; carbon: THREE.BufferGeometry; trim: THREE.BufferGeometry; driver: THREE.BufferGeometry | null; head: THREE.BufferGeometry | null; decals: THREE.BufferGeometry | null; mirror: THREE.BufferGeometry | null; pillar: THREE.BufferGeometry | null };
   /** breakable parts, body space */
   parts: Record<PartId, { paint: THREE.BufferGeometry | null; carbon: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null }>;
   flap: THREE.BufferGeometry;
@@ -1822,13 +1822,11 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
   // driver sheet: full (helmet + body + decals) and decals-only variant for setDriverVisible(false)
   let driverAll: THREE.BufferGeometry | null = null;
   let decalsOnly: THREE.BufferGeometry | null = null;
-  // (and the driver alone: the 2026 bodywork carries its own number, so the procedural decals stay off it)
-  let driverBare: THREE.BufferGeometry | null = null;
   if (b.driver.count) {
     const dAll = new MB();
     const g1 = b.driver.build();
     dAll.addGeometry(g1);
-    driverBare = g1;
+    g1.dispose();
     if (b.decals.count) {
       const g2 = b.decals.build();
       dAll.addGeometry(g2);
@@ -1837,7 +1835,7 @@ export function buildCarGeometry(level: Level): CarGeoLevel {
     driverAll = dAll.build();
   }
   const out: CarGeoLevel = {
-    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, driverBare, head: b.head.count ? b.head.build() : null, decals: decalsOnly, mirror: b.mirror.count ? b.mirror.build() : null, pillar: b.pillar.count ? b.pillar.build() : null },
+    body: { paint: b.paint.build(), carbon: b.carbon.build(), trim: b.trim.build(), driver: driverAll, head: b.head.count ? b.head.build() : null, decals: decalsOnly, mirror: b.mirror.count ? b.mirror.build() : null, pillar: b.pillar.count ? b.pillar.build() : null },
     parts: Object.fromEntries(
       PART_IDS.map((k) => {
         const q = b.parts[k];

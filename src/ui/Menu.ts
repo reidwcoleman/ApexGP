@@ -1,4 +1,3 @@
-import { setShellEnabled, shellPrefs } from '../car/carShell.ts';
 import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
@@ -1145,10 +1144,6 @@ export class Menu {
     this.opt(p, 'Motion blur', () => MOTION_BLUR_LABEL[st.motionBlur ?? 'cinematic'], (d) => {
       const i = MOTION_BLUR.indexOf(st.motionBlur ?? 'cinematic');
       st.motionBlur = MOTION_BLUR[(i + d + MOTION_BLUR.length) % MOTION_BLUR.length];
-    }, true);
-    // (the 2026 bodywork is "My take on the 2026 f1 regulations" by MaG80, CC-BY-4.0 — credited here)
-    this.opt(p, 'Car model', () => (shellPrefs.enabled ? '2026 <span class="dim">· MaG80, CC-BY</span>' : 'Classic') + ' <span class="dim">· next race</span>', () => {
-      setShellEnabled(!shellPrefs.enabled);
     }, true);
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {
       const i = CAMERA_ORDER.indexOf(st.camera);

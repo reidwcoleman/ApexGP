@@ -13,7 +13,6 @@
  *
  * Geometry is built once per detail level and shared by every car; materials are per team/driver.
  */
-import { SHELL_CAM_LIFT, acquireShellLivery, carShell, loadCarShell, releaseShellLivery, shellPaintMaterial, type ShellPart } from './carShell.ts';
 import { bakeCarAO, withCarAO, CAR_FILL } from './carAO.ts';
 import * as THREE from 'three';
 import type { Team, Driver } from '../race/Teams.ts';
@@ -113,16 +112,13 @@ export interface CarRig {
     /** the driver's eyes, riding the animated head (the helmet cam) */
     eyes?: THREE.Object3D;
   };
-  /** onboard cameras' extra offsets on this body (car frame, m; the 2026 bodywork's tub and nose sit higher) */
-  readonly camLift?: Partial<Record<string, readonly [number, number, number]>>;
   readonly dims: { wheelbase: number; trackFront: number; trackRear: number; length: number; width: number; wheelRadius: number };
   dispose(): void;
 }
 
 /** resolves when the livery fonts are loaded (textures repaint automatically either way) */
 export function preloadCarAssets(): Promise<void> {
-  // (the 2026 bodywork: a failed load leaves the procedural car everywhere)
-  return Promise.all([fontsLoaded, loadCarShell()]).then(() => undefined);
+  return fontsLoaded.then(() => undefined);
 }
 
 // ------------------------------------------------------------------------------------ shared geometry
@@ -143,7 +139,7 @@ function releaseGeo() {
   for (const g of SHADOW_GEO) g?.dispose();
   SHADOW_GEO.length = 0;
   for (const l of GEO) {
-    const all = [l.body.paint, l.body.carbon, l.body.pillar, l.body.trim, l.body.driver, l.body.driverBare, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
+    const all = [l.body.paint, l.body.carbon, l.body.pillar, l.body.trim, l.body.driver, l.body.decals, l.flap, ...l.fwFlaps, l.steer, l.steerFace, l.steerDash, l.arms, l.unsprung.carbon, l.unsprung.trim,
       l.unsprung.blurRear, l.armUnit, l.frontAssy, l.blurFront, l.wheelF, l.wheelR, l.spokesF, l.spokesR, l.wheelsMerged];
     for (const g of all) g?.dispose();
     for (const k of PART_IDS) for (const g of Object.values(l.parts[k])) g?.dispose();
@@ -1042,13 +1038,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const mirror = makeMirrorMaterial(bodyColor);
   const own: THREE.Material[] = [trim, driverMat, blurMat, paint, carbon, faceMat, dashMat, gloveMat, mirror.mat, ...tyres.map((t) => t.mat)];
   const paintMat: THREE.Material = paint;
-  // the 2026 bodywork (carShell.ts) on the near and middle levels, when it loaded
-  const sh = carShell();
-  const shellPaint = sh ? shellPaintMaterial(team, acquireShellLivery(team)) : null;
-  if (shellPaint) own.push(withCarAO(shellPaint));
-  // the 2026 body's rain lights (the crash structure's and the wing endplates' strips), on the trim's LED clock
-  const shellLight = shellPaint ? new THREE.MeshStandardMaterial({ name: 'car-shell-light', color: 0x1a0303, roughness: 0.3, emissive: 0xff0806, emissiveIntensity: 0 }) : null;
-  if (shellLight) own.push(shellLight);
   if (opts.envMap) for (const m of own as THREE.MeshStandardMaterial[]) m.envMap = opts.envMap;
 
   const root = new THREE.Group();
@@ -1082,35 +1071,21 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     const L = geo[lv];
     const g = new THREE.Group();
     g.name = `L${lv}`;
-    const shL = sh && shellPaint && lv < 2 ? sh.levels[lv] : null;
-    if (shL) {
-      for (const k of ['body', 'nose'] as ShellPart[]) if (shL.geo[k]) g.add(mesh(shL.geo[k]!, shellPaint!));
-      if (shL.geo.pillar) {
-        const pm = mesh(shL.geo.pillar, shellPaint!);
-        pm.name = 'halo_pillar';
-        pillars.push(pm);
-        g.add(pm);
-      }
-      // the car number on the nose (the driver sheet's cell, alpha-tested like the procedural decals)
-      if (shL.geo.num) g.add(mesh(shL.geo.num, driverMat, false));
-      if (shL.geo.light) g.add(mesh(shL.geo.light, shellLight!, false));
-    } else {
-      g.add(mesh(L.body.paint, paintMat));
-      g.add(mesh(L.body.carbon, carbon));
-      g.add(mesh(L.body.trim, trim));
-      if (L.body.mirror) g.add(mesh(L.body.mirror, mirror.mat, false, false));
-    }
-    if (L.body.pillar && !shL) {
+    g.add(mesh(L.body.paint, paintMat));
+    g.add(mesh(L.body.carbon, carbon));
+    g.add(mesh(L.body.trim, trim));
+    if (L.body.mirror) g.add(mesh(L.body.mirror, mirror.mat, false, false));
+    if (L.body.pillar) {
       const pm = mesh(L.body.pillar, carbon);
       pm.name = 'halo_pillar';
       pillars.push(pm);
       g.add(pm);
     }
     if (L.body.driver) {
-      const all = mesh(shL && L.body.driverBare ? L.body.driverBare : L.body.driver, driverMat);
+      const all = mesh(L.body.driver, driverMat);
       g.add(all);
       let dec: THREE.Mesh | null = null;
-      if (L.body.decals && !shL) {
+      if (L.body.decals) {
         dec = mesh(L.body.decals, driverMat, false);
         dec.visible = false;
         g.add(dec);
@@ -1136,14 +1111,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       pv.position.set(h[0], h[1], h[2]);
       const inner = new THREE.Group();
       inner.position.set(-h[0], -h[1], -h[2]);
-      if (shL) {
-        const sg = shL.geo[k as ShellPart];
-        if (sg) inner.add(mesh(sg, shellPaint!));
-      } else
-        for (const mk of ['paint', 'carbon', 'trim'] as const) {
-          const pg = L.parts[k][mk];
-          if (pg) inner.add(mesh(pg, partMats[mk]));
-        }
+      for (const mk of ['paint', 'carbon', 'trim'] as const) {
+        const pg = L.parts[k][mk];
+        if (pg) inner.add(mesh(pg, partMats[mk]));
+      }
       pv.add(inner);
       g.add(pv);
       pivOf[k] = pv;
@@ -1151,7 +1122,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     }
     const fp = new THREE.Group();
     fp.position.set(FLAP_PIVOT[0] - PART_HINGE.rw[0], FLAP_PIVOT[1] - PART_HINGE.rw[1], FLAP_PIVOT[2] - PART_HINGE.rw[2]);
-    if (!shL) fp.add(mesh(L.flap, paintMat));
+    fp.add(mesh(L.flap, paintMat));
     // the active rear flaps go wherever the rear wing goes
     pivOf.rw.add(fp);
     flapPivots.push(fp);
@@ -1159,7 +1130,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     (['fwL', 'fwR'] as const).forEach((k, i) => {
       const f = new THREE.Group();
       f.position.set(FW_FLAP_PIVOT[0] - PART_HINGE[k][0], FW_FLAP_PIVOT[1] - PART_HINGE[k][1], FW_FLAP_PIVOT[2] - PART_HINGE[k][2]);
-      if (!shL) f.add(mesh(L.fwFlaps[i], paintMat));
+      f.add(mesh(L.fwFlaps[i], paintMat));
       pivOf[k].add(f);
       fwFlapPivots.push(f);
     });
@@ -1497,7 +1468,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       }
       u.uMirN.value = n;
     },
-    camLift: shellPaint ? SHELL_CAM_LIFT : undefined,
     dims: { wheelbase: WHEELBASE, trackFront: TRACK_F, trackRear: TRACK_R, length: 5.46, width: CAR_WIDTH, wheelRadius: WHEEL_R },
     setSteer(rad) {
       FL.steer.rotation.y = rad;
@@ -1532,7 +1502,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
       // each car's LED runs on its own clock
       rainT = Math.random() * 0.25;
       if (!on) uniforms.uRainLight.value = rainLevel = 0;
-      if (shellLight) shellLight.emissiveIntensity = uniforms.uRainLight.value * 0.6;
     },
     rainLightLevel() {
       return rainLevel;
@@ -1614,8 +1583,7 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
         rainLevel = on ? 1 : 0.015;
         // bright enough to bloom, not so bright the bloom swallows your own car in chase view
         uniforms.uRainLight.value = on ? 8 : 0.25;
-        if (shellLight) shellLight.emissiveIntensity = uniforms.uRainLight.value * 0.6;
-      }
+        }
     },
     setDamage(parts, susp, char) {
       for (const k of PART_IDS) {
@@ -1725,7 +1693,6 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
     dispose() {
       root.removeFromParent();
       for (const m of own) m.dispose();
-      if (shellPaint?.map) releaseShellLivery(shellPaint.map);
       trimTex.dispose();
       drvTex.dispose();
       liveDash?.tex.dispose();
