@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bleedAlpha } from '../../../core/alphaBleed.ts';
 import { hash2i } from '../noise.ts';
 import { sampleNoise } from '../textures.ts';
 import { weatherUniforms } from '../../weatherUniforms.ts';
@@ -53,7 +54,7 @@ function cardGeometry(W: number, H: number, up: number): THREE.BufferGeometry {
 }
 
 /** the card: a dome of small silver-grey leaves on dark twigs, ragged at the edge (drawn once) */
-function bushTexture(): THREE.CanvasTexture {
+function bushTexture(): THREE.Texture {
   const W = 256, H = 160;
   const cv = document.createElement('canvas');
   cv.width = W;
@@ -99,7 +100,8 @@ function bushTexture(): THREE.CanvasTexture {
       g.fill();
     }
   }
-  const t = new THREE.CanvasTexture(cv);
+  // (the empty texels filled from the leaves: no dark outline round each card at a distance)
+  const t = bleedAlpha(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
@@ -156,7 +158,7 @@ function cardMaterial(map: THREE.Texture, key: string, fade: [number, number], k
 }
 
 /** a tussock: long blades fanning from the root, some bent over, seed heads; `flowers` adds a few blooms */
-function grassTexture(flowers: boolean, seed0: number): THREE.CanvasTexture {
+function grassTexture(flowers: boolean, seed0: number): THREE.Texture {
   const W = 256, H = 192;
   const cv = document.createElement('canvas');
   cv.width = W;
@@ -219,7 +221,8 @@ function grassTexture(flowers: boolean, seed0: number): THREE.CanvasTexture {
       }
     }
   }
-  const t = new THREE.CanvasTexture(cv);
+  // (the empty texels filled from the leaves: no dark outline round each card at a distance)
+  const t = bleedAlpha(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;

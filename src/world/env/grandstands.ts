@@ -1,4 +1,5 @@
 import type { Venue } from './worldmap.ts';
+import { bleedAlpha } from '../../core/alphaBleed.ts';
 import * as THREE from 'three';
 import { MeshBuilder, srgb } from './geom.ts';
 import type { GrandstandSpec, Layout, ScreenSpec, SpectatorBank } from './layout.ts';
@@ -74,17 +75,20 @@ const ZANDVOORT_SEATS: number[][] = [
 // ---------------------------------------------------------------- crowd atlas + material
 
 /** the grandstand crowd: the ten 3D fan types rendered to sprites (falls back to the drawn set) */
-function crowdAtlas(): { tex: THREE.CanvasTexture; variants: number } {
+function crowdAtlas(): { tex: THREE.Texture; variants: number } {
   const kit = peopleKit();
   const cv = kit ? renderFanAtlas(kit) : null;
   if (kit && cv && cv.width > 0 && hasInk(cv)) {
-    const tex = canvasTexture(cv, true, 4);
+    // (the empty texels round each fan filled from the fan: no dark outline once the atlas is mipped)
+    const tex = bleedAlpha(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
     // (drawn with stand-ins while the fans' own avatars are still loading: redrawn when they're in)
     if (!kit.complete)
       kit.whenAll.then(() => {
         const full = renderFanAtlas(kit);
         if (full.width > 0 && hasInk(full)) {
-          tex.image = full;
+          tex.image = bleedAlpha(full).image;
           tex.needsUpdate = true;
         }
       });
