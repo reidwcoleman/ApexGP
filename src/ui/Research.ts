@@ -166,6 +166,17 @@ const PARTS: Record<UpgradeId, { d: string; label: [number, number, number, numb
 const AXIS: Record<UpgradeId, string> = { engine: 'POWER', aero: 'AERO', chassis: 'GRIP', brakes: 'BRAKES', ers: 'ERS' };
 const LABEL: Record<UpgradeId, string> = { aero: 'Aerodynamics', chassis: 'Suspension', brakes: 'Brakes', ers: 'Energy recovery', engine: 'Power unit' };
 
+/** an overall car rating, 70 bare … 99 fully developed (each area weighted by what it's worth a lap) */
+const rating = (lvOf: (id: UpgradeId) => number) => {
+  let w = 0, a = 0;
+  for (const u of UPGRADES) {
+    const k = DEPTS[u.id].lap;
+    w += k;
+    a += (k * lvOf(u.id)) / MAX_LEVEL;
+  }
+  return Math.round(70 + 29 * (a / w));
+};
+
 /** a department's gain at n tiers, as the cards print it ("+4.5", "+0") */
 const pctOf = (d: Dept, n: number) => (n === 0 ? '0' : d.per % 1 ? (d.per * n).toFixed(1) : String(d.per * n));
 
@@ -195,7 +206,9 @@ export function renderResearch(p: HTMLElement, ctx: ResearchCtx) {
     `<div class="eyebrow">Car development</div><div class="rl-title">R&amp;D <span>Centre</span></div>` +
       `<div class="rl-overall"><svg class="ring" viewBox="0 0 72 72"><circle class="bg" cx="36" cy="36" r="${R}"/><circle class="fg" cx="36" cy="36" r="${R}" stroke-dasharray="${((C * total) / all).toFixed(1)} ${C.toFixed(1)}"/></svg>` +
       `<div class="ro-n"><b>${pct}<small>%</small></b><span>Developed</span></div>` +
-      `<div class="ro-n"><b>${total}<small>/${all}</small></b><span>Tiers</span></div></div>`,
+      `<div class="ro-n"><b>${total}<small>/${all}</small></b><span>Tiers</span></div></div>` +
+      `<div class="rl-rate"><div class="rt you"><span>Your car</span><b>${rating(lv)}</b></div><div class="rt vs">vs</div><div class="rt riv"><span>Rivals</span><b>${rating((id) => c.rivalLevel(id))}</b></div>` +
+      `<div class="rt-note">${rating(lv) >= rating((id) => c.rivalLevel(id)) ? 'Ahead of the field on paper' : 'The rivals develop too: keep researching'}</div></div>`,
   );
   const list = el('div', 'rl-depts', left);
   const cards = new Map<UpgradeId, HTMLElement>();
@@ -210,7 +223,8 @@ export function renderResearch(p: HTMLElement, ctx: ResearchCtx) {
     card.innerHTML =
       `<span class="ic"><svg viewBox="0 0 16 16" width="18" height="18">${d.icon}</svg></span>` +
       `<div class="dn"><b>${u.name}</b><span class="pips">${pips}</span></div>` +
-      `<div class="dv"><b>+${pctOf(d, n)}%</b><span>${u.stat}</span></div>`;
+      `<div class="dv"><b>+${pctOf(d, n)}%</b><span>${u.stat}</span></div>` +
+      `<i class="vs ${n >= c.rivalLevel(u.id) - 0.05 ? 'up' : 'dn'}" title="${n >= c.rivalLevel(u.id) - 0.05 ? 'Ahead of the rivals here' : 'Behind the rivals here'}"></i>`;
     cards.set(u.id, card);
     ctx.action(card, () => choose(u.id));
     card.addEventListener('mouseenter', () => hover(u.id));
@@ -234,7 +248,17 @@ export function renderResearch(p: HTMLElement, ctx: ResearchCtx) {
     `<div class="bp-grid"></div>` +
     `<svg class="bp" viewBox="-110 0 460 520" preserveAspectRatio="xMidYMid meet"><g class="bp-base">${BLUEPRINT_BASE}</g>${groups}</svg>` +
     `<div class="bp-scan"></div>` +
-    `<div class="bp-tag"><span>Chassis</span><b>AGP-26</b><em>Plan view · 1:20</em></div>`;
+    `<div class="bp-tag"><span>Chassis</span><b>AGP-26</b><em>Plan view · 1:20</em></div>` +
+    // a tier researched a moment ago: its name over the drawing, then it fades
+    (just ? `<div class="bp-toast"><em>Tier ${just.n} researched</em><b>${DEPTS[just.id].tiers[just.n - 1][0]}</b><span>${LABEL[just.id]} · ${DEPTS[just.id].tiers[just.n - 1][1]}</span></div>` : '');
+  // the drawing leans toward the cursor, a light table under glass
+  const bpEl = stage.querySelector<SVGElement>('.bp')!;
+  stage.addEventListener('pointermove', (e) => {
+    const r = stage.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+    bpEl.style.transform = `perspective(1400px) rotateX(${(-y * 7).toFixed(2)}deg) rotateY(${(x * 9).toFixed(2)}deg)`;
+  });
+  stage.addEventListener('pointerleave', () => (bpEl.style.transform = ''));
   // the profile: five axes, the car as it is (filled) and with the picked department's next tier (dashed)
   const radar = el('div', 'rl-radar', left);
   const ax = UPGRADES.map((u, i) => {
@@ -250,10 +274,11 @@ export function renderResearch(p: HTMLElement, ctx: ResearchCtx) {
       `<svg viewBox="-112 -82 224 160">` +
       [1, 2, 3, 4, 5].map((k) => `<polygon class="ring" points="${poly(() => k)}"/>`).join('') +
       ax.map(({ x, y }) => `<line class="ax" x1="0" y1="0" x2="${(x * 60).toFixed(1)}" y2="${(y * 60).toFixed(1)}"/>`).join('') +
-      `<polygon class="next" points="${poly(nx)}"/><polygon class="now" points="${poly(lv)}"/>` +
+      `<polygon class="riv" points="${poly((id) => c.rivalLevel(id))}"/><polygon class="next" points="${poly(nx)}"/><polygon class="now" points="${poly(lv)}"/>` +
       ax.map(({ u, x, y }) => `<circle class="pt${u.id === pick ? ' on' : ''}" cx="${(x * rr(lv(u.id))).toFixed(1)}" cy="${(y * rr(lv(u.id))).toFixed(1)}" r="2.6"/>`).join('') +
       ax.map(({ u, x, y }) => `<text class="${u.id === pick ? 'on' : ''}" x="${(x * 72).toFixed(1)}" y="${(y * 72 + 3).toFixed(1)}" text-anchor="${Math.abs(x) < 0.2 ? 'middle' : x > 0 ? 'start' : 'end'}">${AXIS[u.id]}</text>`).join('') +
-      `</svg>`;
+      `</svg` +
+      `<div class="lgd"><i class="l-you"></i>You<i class="l-riv"></i>Rivals<i class="l-nx"></i>Next tier</div>`;
   };
 
   // ---------------------------------------------------------------- right: the picked department

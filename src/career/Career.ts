@@ -446,9 +446,13 @@ export class Career {
    */
   rivalSpec(): CarSpec {
     const s: CarSpec = { ...F1_SPEC, gears: F1_SPEC.gears.slice() };
-    const season = Math.max(0, this.unlockedCircuits().length - 1) / Math.max(1, CIRCUITS.length - 1);
-    for (const u of UPGRADES) u.apply(s, Math.min(MAX_LEVEL, this.level(u.id) * 0.75 + season * 1.5));
+    for (const u of UPGRADES) u.apply(s, this.rivalLevel(u.id));
     return s;
+  }
+  /** the rivals' development in one area (0..MAX_LEVEL, fractional) */
+  rivalLevel(id: UpgradeId): number {
+    const season = Math.max(0, this.unlockedCircuits().length - 1) / Math.max(1, CIRCUITS.length - 1);
+    return Math.min(MAX_LEVEL, this.level(id) * 0.75 + season * 1.5);
   }
 
   /** record a finished race; returns what it earned. `career`: a career round (counts for the medals and the unlocks) */
