@@ -144,6 +144,8 @@ export interface Competitor {
   isPlayer: boolean;
   /** dynamic difficulty: 0 … 1, how hard this car is chasing a player who broke away from it */
   chaseBoost: number;
+  /** 0..1: the player has caught this car — its dynamic lift is set aside so it can be passed */
+  passWin: number;
   /** laps completed (−1 until the first crossing of the line from the grid) */
   laps: number;
   lapDist: number;
@@ -429,6 +431,7 @@ export class Race {
         bestLap: Infinity,
         lapTimes: [],
         chaseBoost: 0,
+        passWin: 0,
         sector: 0,
         sectorStart: 0,
         sectorTimes: [0, 0, 0],
@@ -1660,7 +1663,18 @@ export class Race {
         chase = Math.max(0, Math.min(1, (gap - 1.2) / 4)) * (c.position === p.position + 1 ? 1 : 0.6);
       }
       c.chaseBoost += (chase - c.chaseBoost) * Math.min(1, dt * (chase > c.chaseBoost ? 0.5 : 0.15));
-      const b = this.aiTrim - 1 + 0.03 * c.chaseBoost;
+      let b = this.aiTrim - 1 + 0.03 * c.chaseBoost;
+      // …but a pass is always on: the cars just ahead that you've caught run as built (no dynamic lift),
+      // and a touch under it once you're right on their gearbox — the boost was what made a car you'd
+      // caught impossible to get by (it found the pace you brought with you)
+      if (live && c.position < p.position && c.position >= p.position - 3 && !c.retired && c.pit.phase === 'none') {
+        const gapAhead = (c.raceDist - p.raceDist) / Math.max(25, p.car.vx);
+        if (gapAhead < 3) {
+          c.passWin += (1 - c.passWin) * Math.min(1, dt * 0.8);
+          const close = 1 - Math.max(0, Math.min(1, (gapAhead - 0.4) / 1.6));
+          b = Math.min(b, 0) * (1 - c.passWin) + (c.passWin * -0.012 * close);
+        } else c.passWin *= Math.max(0, 1 - dt * 0.3);
+      } else c.passWin *= Math.max(0, 1 - dt * 0.3);
       // above the car as built: more grip and power (what the profile follows), a little more commitment;
       // below it: just a touch less commitment
       c.ai.trim = b > 0 ? 1 + b * 0.3 : 1 + b;
@@ -1736,7 +1750,8 @@ export class Race {
       const vsPlayer = playerLive && !c.finished && !c.retired && c.pit.phase === 'none';
       const defP = vsPlayer && c.position === p.position - 1 && p.gapAhead < 1.0 ? 1 : 0;
       const attP = vsPlayer && c.position === p.position + 1 && c.gapAhead < 1.2 ? 1 : 0;
-      const want = 1 + (defP ? 0.007 : 0.0015 * defend) + (attP ? 0.009 : 0.0025 * attack);
+      // (defending against the player: a little more commitment, not a wall)
+      const want = 1 + (defP ? 0.002 : 0.0015 * defend) + (attP ? 0.009 : 0.0025 * attack);
       c.ai.push += (want - c.ai.push) * 0.02;
     }
   }

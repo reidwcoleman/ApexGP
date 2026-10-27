@@ -17,21 +17,25 @@ export interface AssistConfig {
   drs: 'auto' | 'manual';
 }
 
-export type AssistPreset = 'casual' | 'standard' | 'expert';
+export type AssistPreset = 'casual' | 'standard' | 'realistic' | 'expert';
 
 export const ASSIST_PRESETS: Record<AssistPreset, AssistConfig> = {
   casual: { traction: 'full', abs: true, stability: true, arcade: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
-  // the default: approachable, with a low braking assist that only helps where you'd overshoot
+  // approachable, with a low braking assist that only helps where you'd overshoot
   standard: { traction: 'medium', abs: true, stability: true, arcade: true, braking: 'low', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  // the default: the real car's handling and steering (no arcade grip, no turn-in help, no braking
+  // assist, no line), with only what a road car would have — ABS, traction and stability control, auto gears
+  realistic: { traction: 'medium', abs: true, stability: true, arcade: false, braking: 'off', line: 'off', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  // the full simulation: nothing between you and the car
   expert: { traction: 'off', abs: false, stability: false, arcade: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
 };
 
 /** what a new player (or a save from before these defaults) starts with */
-export const DEFAULT_PRESET: AssistPreset = 'standard';
+export const DEFAULT_PRESET: AssistPreset = 'realistic';
 export const DEFAULT_ASSISTS: AssistConfig = ASSIST_PRESETS[DEFAULT_PRESET];
 
-export const PRESET_ORDER: AssistPreset[] = ['casual', 'standard', 'expert'];
-export const PRESET_LABEL: Record<AssistPreset, string> = { casual: 'Casual', standard: 'Standard', expert: 'Expert' };
+export const PRESET_ORDER: AssistPreset[] = ['casual', 'standard', 'realistic', 'expert'];
+export const PRESET_LABEL: Record<AssistPreset, string> = { casual: 'Casual', standard: 'Standard', realistic: 'Realistic', expert: 'Simulation' };
 
 export function presetOf(c: AssistConfig): AssistPreset | 'custom' {
   for (const p of PRESET_ORDER) {

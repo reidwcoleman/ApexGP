@@ -86,7 +86,7 @@ export function aiLevel(setup: RaceSetup, career: Career): { value: number; dyna
 const TRACK_LIMITS: TrackLimitsMode[] = ['lenient', 'strict', 'off'];
 const TRACK_LIMITS_LABEL: Record<TrackLimitsMode, string> = { lenient: 'Lenient', strict: 'Strict', off: 'Off' };
 /** the setup save format (2: dynamic AI, lenient track limits; 3: random weather and time of day; 4: medium braking assist, weather and time random again; 5: low braking assist; 6: low again for every save) */
-const SETUP_V = 6;
+const SETUP_V = 7;
 const DEFAULT_SETUP: RaceSetup = { v: SETUP_V, team: 0, seat: 0, laps: 5, difficulty: 0, grid: 1, weather: 'random', time: 'random', assists: { ...DEFAULT_ASSISTS }, compound: 'auto', track: 'monza', damage: 'full', trackLimits: 'lenient' };
 export const GRID = [
   { label: 'Pole position', slot: 0 },
@@ -307,6 +307,8 @@ export class Menu {
     if (sv < 5) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'low' } };
     // (6: the braking assist back to its default, low, on every save)
     if (sv < 6) this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS, ...(this.setup.assists ?? {}), braking: 'low' } };
+    // (7: realistic driving — the real handling and steering — is the default; a Simulation save stays)
+    if (sv < 7 && presetOf(this.setup.assists) !== 'expert') this.setup = { ...this.setup, assists: { ...DEFAULT_ASSISTS } };
     if (sv < SETUP_V) {
       this.setup.v = SETUP_V;
       save('apexgp.setup', this.setup);
