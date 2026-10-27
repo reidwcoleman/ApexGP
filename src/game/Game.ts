@@ -236,7 +236,7 @@ export class Game {
   /** livery id each rig was built with (the player's may wear their own paint) */
   private rigTeam = new Map<Entry, string>();
   /** the garage (menu) camera: framing per hub tab, eased */
-  private hubTab: HubTab = 'race';
+  private hubTab: HubTab = 'home';
   private garageCam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), vl: new THREE.Vector3(), init: false, th: 0, r: 0, y: 0, fov: 38, vth: 0, vr: 0, vy: 0, vfov: 0 };
   private garageLights = new THREE.Group();
   private lastReward: import('../career/Career.ts').RaceReward | null = null;
@@ -287,6 +287,7 @@ export class Game {
       },
       careerForecast: (id) => this.careerForecast(id),
       onCareerRace: (id) => void this.goCareerRound(id),
+      onTimeTrial: (id) => void this.goTimeTrial(id),
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.resume(),
       onRestart: () => (this.spectating && this.simCfg ? void this.startSimulation(this.simCfg) : this.startRace(this.mode, this.sessionSetup(this.menu.setup))),
@@ -300,7 +301,7 @@ export class Game {
         this.hubTab = t;
         this.garageOrbit.active = false;
         if (this.tour.at) this.tourExit();
-        if (t === 'career' || t === 'race') this.garage?.refreshStats();
+        if (t === 'career') this.garage?.refreshStats();
       },
       onFocusPart: (p) => (this.focusPart = p),
       onPlayHighlight: (id) => this.garage?.playHighlight(id),
@@ -1510,6 +1511,15 @@ export class Game {
     else if (this.state !== 'menu') this.toMenu();
     if (this.track.def.id !== id) return;
     this.menu.showCareerSetup();
+  }
+
+  /** a time trial at an open circuit: travel there if needed, then its session screen */
+  private async goTimeTrial(id: string) {
+    if (!this.career.isUnlocked(id)) return;
+    if (id !== this.track.def.id) await this.travel(id);
+    else if (this.state !== 'menu') this.toMenu();
+    if (this.track.def.id !== id) return;
+    this.menu.showTimeTrialSetup();
   }
 
   /** roll a new forecast for the setup's weather/time choices */
@@ -3456,7 +3466,6 @@ export class Game {
     const shots: Record<HubTab, Shot> = {
       // home: the car alone, a low three-quarter hero from the open side, centred in the frame
       home: { cam: [3.9, 0.95, 4.4], look: [0, 0.5, 0.15], shift: 1.0, fov: 34 },
-      race: { cam: [3.5, 1.3, 6.2], look: [0, 0.75, -0.6], shift: 1.45, fov: 38 },
       career: { cam: [3.45, 1.78, -4.85], look: [3.45, 1.35, -7.35], shift: 0.62, fov: 44 },
       highlights: { cam: [1.6, 2.5, -0.2], look: [0, 2.05, -6.0], shift: 1.0, fov: 42 },
       car: { cam: [3.4, 1.7, -4.6], look: [0, 0.45, -0.5], shift: 1.45, fov: 36 },

@@ -30,6 +30,10 @@ export interface TourCtx {
   action(e: HTMLElement, fn: () => void, disabled?: boolean): void;
   /** race a tour round at this circuit (travels there first) */
   onRace(id: string): void;
+  /** a time trial at this circuit (travels there first) */
+  onTimeTrial(id: string): void;
+  /** watch a simulated race (its own setup screen) */
+  onWatch?(): void;
   forecast(id: string): string;
   info(id: string): { country: string; km: string; turns: number; line?: string };
   circuitPath(points: number[], w: number, h: number, pad: number): string;
@@ -164,6 +168,10 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   const prev = el('div', 'cta ghost tr-step', acts, '‹');
   const go = el('div', 'cta tr-go', acts, 'Race');
   const fwd = el('div', 'cta ghost tr-step', acts, '›');
+  // the other ways to drive an open circuit: a flying lap on your own, or a race to watch
+  const more = el('div', 'tr-more', card);
+  const tt = el('div', 'tr-alt', more, '<svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="9" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 9V6M6.4 1.8h3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Time trial</span>');
+  const watch = ctx.onWatch ? el('div', 'tr-alt', more, '<svg viewBox="0 0 16 16" width="14" height="14"><rect x="1.5" y="3" width="13" height="9" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.6 5.6v3.8L9.8 7.5z" fill="currentColor"/></svg><span>Watch a race</span>') : null;
 
   // ---------------------------------------------------------------- the camera: pan (drag), zoom (wheel,
   // buttons), the world view with every circuit on it, and a glide onto a picked circuit
@@ -335,6 +343,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       el('div', 'tr-why', body, `<span><b>Top ${UNLOCK_POS}</b> ${after ? `opens ${esc(after.short)}` : 'completes the tour'}.</span>`);
     }
     lapsRow.hidden = st === 'locked';
+    tt.classList.toggle('dis', st === 'locked');
     go.classList.toggle('dis', st === 'locked');
     go.textContent = st === 'locked' ? 'Locked' : `Race ${cd.short}`;
   };
@@ -349,6 +358,10 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     if (states.get(sel!) !== 'locked') ctx.onRace(sel!);
   });
   ctx.action(fwd, () => step(1));
+  ctx.action(tt, () => {
+    if (states.get(sel!) !== 'locked') ctx.onTimeTrial(sel!);
+  });
+  if (watch) ctx.action(watch, () => ctx.onWatch?.());
   map.addEventListener('click', (e) => {
     if (drag?.moved) return;
     const g = (e.target as Element).closest<SVGGElement>('.pinw');
