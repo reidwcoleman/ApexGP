@@ -78,8 +78,11 @@ export const frameClock = {
     // the circuit is built while the player sits in the menus: the garage behind them may run at ~30 fps
     // for those seconds — the build gets most of each frame (on a slow laptop a quarter of a 40 ms
     // garage frame made it a 17 s wait before a race could start)
-    return Math.min(60, Math.max(base * 2.5, dt * 0.8));
+    // (while the garage draws every other frame for the build — throttle — the build gets nearly two)
+    return Math.min(60, Math.max(base * 2.5, dt * (this.throttle ? 1.75 : 0.8)));
   },
+  /** the menu's garage is drawn at half rate so the circuit behind it builds faster (Game sets it) */
+  throttle: false,
 };
 const nextFrame = () => frameClock.next();
 

@@ -521,9 +521,15 @@ export class Game {
       this.timer.update(now);
       const dt = Math.min(this.timer.getDelta(), 1 / 20);
       // (nothing to draw while a new circuit is being built behind the travel veil)
-      if (!this.worldBusy) {
+      // (while the circuit is still building behind the garage menu, the garage — a still life — is
+      // drawn every other frame and the build takes the frame between: the race is ready sooner)
+      frameClock.throttle = this.state === 'menu' && this.worldProgress < 1 && !this.worldBusy;
+      const skip = frameClock.throttle && (this.skipTick = !this.skipTick);
+      if (skip) this.skippedDt += dt;
+      if (!this.worldBusy && !skip) {
         this.gfx.gpuFrameBegin();
-        this.frame(dt);
+        this.frame(dt + this.skippedDt);
+        this.skippedDt = 0;
         this.gfx.gpuFrameEnd();
         // (highlight production: after the frame, outside its GPU timing; paused while racing)
         this.highlights.tick(dt, this.state);
@@ -608,6 +614,8 @@ export class Game {
   whenWorld(): Promise<void> {
     return this.worldDone;
   }
+  private skipTick = false;
+  private skippedDt = 0;
   private completeWorldInBackground(): Promise<void> {
     const gen = ++this.worldGen;
     this.worldProgress = 0;
