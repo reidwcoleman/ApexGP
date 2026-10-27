@@ -6,6 +6,7 @@
 
 export type LiveryPattern =
   | 'sweep' | 'split' | 'fade' | 'stripe' | 'block' | 'arrow'
+  | 'twotone' | 'chevron' | 'pinstripe' | 'checker' | 'bolt' | 'camo'
   | 'ferrari' | 'mercedes' | 'redbull' | 'mclaren' | 'aston' | 'alpine' | 'williams' | 'haas' | 'racingbulls' | 'audi' | 'cadillac';
 
 export interface Team {
@@ -25,6 +26,12 @@ export interface Team {
   /** metal-flake paint 0..1 (default: automatic for silvers) */
   metallic?: number;
   sponsor: string;
+  /** paint shop overrides: the halo's fairing, the front-wing flaps and endplates, the wheel covers' ring */
+  halo?: string;
+  wing?: string;
+  rim?: string;
+  /** the paint shop's own title sponsor: it takes the engine cover too */
+  ownSponsor?: boolean;
   pace: number;
   drivers: [Driver, Driver];
 }

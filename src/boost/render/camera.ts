@@ -148,17 +148,40 @@ export class ChaseCam {
   private compute(t: CamTarget, dt: number, snap: boolean): void {
     const up = this.up;
     const h = this.heading;
-    // the rig tilted by the pitch: its back and its up
     const side = tA.set(h.y * up.z - h.z * up.y, h.z * up.x - h.x * up.z, h.x * up.y - h.y * up.x).norm();
-    const fw = new V3().copy(h).scale(Math.cos(this.pitch)).addScaled(up, Math.sin(this.pitch));
-    const rup = new V3().copy(up).scale(Math.cos(this.pitch)).addScaled(h, -Math.sin(this.pitch));
+    // the rig tilted by a pitch: its forward and its up
+    const fw = new V3();
+    const rup = new V3();
+    const tilt = (p: number) => {
+      fw.copy(h).scale(Math.cos(p)).addScaled(up, Math.sin(p));
+      rup.copy(up).scale(Math.cos(p)).addScaled(h, -Math.sin(p));
+    };
     // stiffness: the camera drops back a little as the car pulls away from it
-    const away = Math.max(0, t.vel.dot(fw));
+    const away = Math.max(0, t.vel.dot(h));
     const wantLag = (1 - CAM.STIFF) * away * 0.075;
     this.lag = snap ? wantLag : this.lag + (wantLag - this.lag) * (1 - Math.exp(-dt * 3));
     const dist = CAM.DIST + this.lag;
-    const want = new V3().copy(t.pos).addScaled(fw, -dist).addScaled(rup, CAM.HEIGHT);
-    // keep it inside the arena: slide along the surface (the floor under a high ball, a wall behind)
+    const want = new V3();
+    const place = (p: number) => {
+      tilt(p);
+      want.copy(t.pos).addScaled(fw, -dist).addScaled(rup, CAM.HEIGHT);
+      return sdf(want.x, want.y, want.z) >= 45;
+    };
+    // a high ball dips the rig under it until the floor (or the wall behind) stops it; the view
+    // still tilts up the full amount below, so the camera keeps its distance and looks up
+    if (!place(this.pitch) && this.pitch > 0) {
+      let lo = 0;
+      let hi = this.pitch;
+      if (place(0)) {
+        for (let k = 0; k < 6; k++) {
+          const m = (lo + hi) / 2;
+          if (place(m)) lo = m;
+          else hi = m;
+        }
+      }
+      place(lo);
+    }
+    // still against something (a wall right behind): slide out along it
     for (let k = 0; k < 2; k++) {
       const d = sdf(want.x, want.y, want.z);
       if (d >= 45) break;
@@ -173,18 +196,22 @@ export class ChaseCam {
       this.pos.y += (want.y - this.pos.y) * k;
       this.pos.z += (want.z - this.pos.z) * k;
     }
-    // look along the rig, angled down a few degrees
+    // look along the full pitch, angled down a few degrees
+    tilt(this.pitch);
     const a = (CAM.ANGLE * Math.PI) / 180;
     const dir = new V3().copy(fw).scale(Math.cos(a)).addScaled(rup, Math.sin(a));
-    // pushed off a surface: tip down far enough to keep the car in frame
+    // keep the car in frame: tip down if it would drop off the bottom
     const toCar = tC.subVectors(t.pos, this.pos);
     const cl = toCar.len();
     if (cl > 1) {
       toCar.scale(1 / cl);
-      const vHalf = 0.5 * 2 * Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
+      const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
       const below = Math.asin(Math.max(-1, Math.min(1, -toCar.dot(rup)))) - Math.asin(Math.max(-1, Math.min(1, -dir.dot(rup))));
-      const over = below - (vHalf - 0.12);
-      if (over > 0) rotate(dir, side, -over);
+      const over = below - (vHalf - 0.14);
+      if (over > 0) {
+        rotate(dir, side, -over);
+        rotate(rup, side, -over);
+      }
     }
     this.look.copy(this.pos).addScaled(dir, 1000);
     // the camera's own up, for the renderer

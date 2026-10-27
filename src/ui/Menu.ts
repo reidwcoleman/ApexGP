@@ -10,7 +10,7 @@ import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
-import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, FINISHES, UNLOCK_POS, UNLOCK_ALL, SCENIC_STARS, TOUR_LAPS, medalFor, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
+import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, TEAM_PATTERNS, FINISHES, CARBON, PART_PAINTS, RIMS, SPONSORS, UNLOCK_POS, UNLOCK_ALL, SCENIC_STARS, TOUR_LAPS, medalFor, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
@@ -406,7 +406,7 @@ export class Menu {
       'div',
       'hub-id',
       s,
-      `<div class="num">${d.number}</div><div class="who"><div class="first">${d.first}</div><div class="name">${d.last}</div><div class="sub"><span>${team.name}</span><span>${this.careerSub(c)}</span></div></div>`,
+      `<div class="num">${this.career.paintFor(this.setup.team)?.number ?? d.number}</div><div class="who"><div class="first">${d.first}</div><div class="name">${d.last}</div><div class="sub"><span>${team.name}</span><span>${this.careerSub(c)}</span></div></div>`,
     );
     // the bar across the top: the brand, the tabs (Q / E or the bumpers step through them), the credits
     const top = el('div', 'hub-top', s);
@@ -627,64 +627,96 @@ export class Menu {
     });
   }
 
+  private paintSec: 'colours' | 'design' | 'details' | 'number' = 'colours';
   private tabPaint(p: HTMLElement) {
     const team = TEAMS[this.setup.team];
-    const cur: Paint = this.career.paintFor(this.setup.team) ?? { primary: team.primary, secondary: team.secondary, accent: team.accent, pattern: 'sweep', finish: team.matte > 0.6 ? 'matte' : 'gloss' };
+    const driver = team.drivers[this.setup.seat] ?? team.drivers[0];
+    const cur: Paint = { ...(this.career.paintFor(this.setup.team) ?? { primary: team.primary, secondary: team.secondary, accent: team.accent, pattern: team.pattern, finish: team.matte > 0.6 ? 'matte' : 'gloss' }) };
     const custom = !!this.career.paintFor(this.setup.team);
+    p.classList.add('paintshop');
     el('div', 'hp-cap', p, `Paint shop · ${custom ? 'Your livery' : team.name + ' livery'}`);
     let timer = 0;
-    const commit = (next: Paint) => {
-      this.career.setPaint(this.setup.team, next);
+    const commit = (wait = 140) => {
+      this.career.setPaint(this.setup.team, { ...cur });
       clearTimeout(timer);
-      timer = window.setTimeout(() => this.cb.onCarChange(), 120);
+      timer = window.setTimeout(() => this.cb.onCarChange(), wait);
       const hub = this.screens.get('title')!;
-      const a = next.primary === '#111214' || next.primary === '#2a2d33' ? next.secondary : next.primary;
+      const a = cur.primary === '#111214' || cur.primary === '#2a2d33' ? cur.secondary : cur.primary;
       hub.style.setProperty('--accent', a);
       hub.style.setProperty('--on-accent', onColor(a));
     };
-    const swatches = (label: string, key: 'primary' | 'secondary' | 'accent') => {
-      const row = el('div', 'prow', p);
-      el('div', 'pk', row, label);
-      const wrap = el('div', 'sw', row);
-      const draw = () => {
-        wrap.innerHTML = '';
-        PALETTE.forEach((c) => {
-          const b = el('i', c.toLowerCase() === cur[key].toLowerCase() ? 'on' : '', wrap);
-          b.style.background = c;
-          b.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cur[key] = c;
-            commit({ ...cur });
-            draw();
-          });
-        });
-      };
-      draw();
-      const idx = this.items.length;
-      this.items.push({
-        el: row,
-        kind: 'option',
-        change: (d) => {
-          let i = PALETTE.findIndex((c) => c.toLowerCase() === cur[key].toLowerCase());
-          i = (i < 0 ? 0 : i + d + PALETTE.length) % PALETTE.length;
-          cur[key] = PALETTE[i];
-          commit({ ...cur });
-          draw();
-          this.cb.onUi('move');
-        },
-        select: () => {},
+    // the sections, as a segmented bar
+    const SECS = [
+      { id: 'colours', name: 'Colours' },
+      { id: 'design', name: 'Design' },
+      { id: 'details', name: 'Details' },
+      { id: 'number', name: 'Number' },
+    ] as const;
+    const seg = el('div', 'ps-seg', p);
+    for (const sc of SECS) {
+      const b = el('div', 'ps-tab' + (sc.id === this.paintSec ? ' on' : ''), seg, sc.name);
+      this.action(b, () => {
+        if (this.paintSec === sc.id) return;
+        this.paintSec = sc.id;
+        const keep = this.sel;
+        this.renderTab();
+        this.sel = keep;
+        this.highlight();
       });
+    }
+    /** a row the arrows step through (change) */
+    const optRow = (row: HTMLElement, change: (d: number) => void) => {
+      const idx = this.items.length;
+      this.items.push({ el: row, kind: 'option', change: (d) => { change(d); this.cb.onUi('move'); }, select: () => {} });
       row.addEventListener('mouseenter', () => {
         this.hubFocus = 'panel';
         this.sel = idx;
         this.highlight();
       });
     };
-    swatches('Base', 'primary');
-    swatches('Secondary', 'secondary');
-    swatches('Accent', 'accent');
-    const chips = <T extends string>(label: string, list: { id: T; name: string }[], get: () => T, set: (v: T) => void) => {
+    const swatches = (label: string, get: () => string, set: (c: string) => void) => {
       const row = el('div', 'prow', p);
+      el('div', 'pk', row, label);
+      const wrap = el('div', 'sw', row);
+      const draw = () => {
+        wrap.innerHTML = '';
+        const now = get().toLowerCase();
+        PALETTE.forEach((c) => {
+          const b = el('i', c.toLowerCase() === now ? 'on' : '', wrap);
+          b.style.background = c;
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            set(c);
+            commit();
+            draw();
+          });
+        });
+        // any colour at all: the system picker
+        const own = !PALETTE.some((c) => c.toLowerCase() === now);
+        const pk = el('label', 'pick' + (own ? ' on' : ''), wrap);
+        pk.title = 'Any colour';
+        if (own) pk.style.background = get();
+        const inp = el('input', '', pk);
+        inp.type = 'color';
+        inp.value = get();
+        inp.addEventListener('input', () => {
+          set(inp.value);
+          pk.style.background = inp.value;
+          commit(260);
+        });
+        inp.addEventListener('change', () => draw());
+      };
+      draw();
+      optRow(row, (d) => {
+        let i = PALETTE.findIndex((c) => c.toLowerCase() === get().toLowerCase());
+        i = (i < 0 ? 0 : i + d + PALETTE.length) % PALETTE.length;
+        set(PALETTE[i]);
+        commit();
+        draw();
+      });
+    };
+    const chips = <T extends string>(label: string, list: readonly { id: T; name: string }[], get: () => T, set: (v: T) => void, cls = '') => {
+      const row = el('div', 'prow ' + cls, p);
       el('div', 'pk', row, label);
       const wrap = el('div', 'chips', row);
       const draw = () => {
@@ -694,33 +726,107 @@ export class Menu {
           b.addEventListener('click', (e) => {
             e.stopPropagation();
             set(it.id);
-            commit({ ...cur });
+            commit();
             draw();
           });
         }
       };
       draw();
-      const idx = this.items.length;
-      this.items.push({
-        el: row,
-        kind: 'option',
-        change: (d) => {
-          const i = list.findIndex((x) => x.id === get());
-          set(list[(i + d + list.length) % list.length].id);
-          commit({ ...cur });
-          draw();
-          this.cb.onUi('move');
-        },
-        select: () => {},
-      });
-      row.addEventListener('mouseenter', () => {
-        this.hubFocus = 'panel';
-        this.sel = idx;
-        this.highlight();
+      optRow(row, (d) => {
+        const i = Math.max(0, list.findIndex((x) => x.id === get()));
+        set(list[(i + d + list.length) % list.length].id);
+        commit();
+        draw();
       });
     };
-    chips('Design', PATTERNS, () => cur.pattern, (v) => (cur.pattern = v));
-    chips('Finish', FINISHES, () => cur.finish, (v) => (cur.finish = v));
+    if (this.paintSec === 'colours') {
+      swatches('Base', () => cur.primary, (c) => (cur.primary = c));
+      swatches('Secondary', () => cur.secondary, (c) => (cur.secondary = c));
+      swatches('Accent', () => cur.accent, (c) => (cur.accent = c));
+      chips('Finish', FINISHES, () => cur.finish, (v) => (cur.finish = v));
+    } else if (this.paintSec === 'design') {
+      chips('Design', PATTERNS, () => cur.pattern, (v) => (cur.pattern = v), 'wide');
+      chips('Grid layouts', TEAM_PATTERNS, () => cur.pattern, (v) => (cur.pattern = v), 'wide');
+      chips('Bare carbon', CARBON, () => cur.carbon ?? (team.carbon > 0.45 ? 'lots' : team.carbon > 0.1 ? 'some' : 'none'), (v) => (cur.carbon = v));
+    } else if (this.paintSec === 'details') {
+      chips('Halo', PART_PAINTS, () => cur.halo ?? 'team', (v) => (cur.halo = v));
+      chips('Front wing', PART_PAINTS, () => cur.wing ?? 'team', (v) => (cur.wing = v));
+      chips('Wheel rings', RIMS, () => cur.rim ?? 'team', (v) => (cur.rim = v));
+      swatches('Helmet', () => (cur.helmet ?? driver.helmet)[0], (c) => (cur.helmet = [c, (cur.helmet ?? driver.helmet)[1]]));
+      swatches('Helmet stripe', () => (cur.helmet ?? driver.helmet)[1], (c) => (cur.helmet = [(cur.helmet ?? driver.helmet)[0], c]));
+    } else {
+      // the race number: big, stepped with the arrows or typed
+      const row = el('div', 'prow ps-num', p);
+      el('div', 'pk', row, 'Race number');
+      const box = el('div', 'num-box', row);
+      const dn = el('span', 'chev', box, '‹');
+      const val = el('input', 'num-in', box);
+      val.type = 'text';
+      val.inputMode = 'numeric';
+      val.maxLength = 2;
+      const up = el('span', 'chev', box, '›');
+      const num = () => cur.number ?? driver.number;
+      const show = () => (val.value = String(num()));
+      show();
+      const step = (d: number) => {
+        cur.number = ((num() - 1 + d + 99) % 99) + 1;
+        show();
+        commit(450);
+      };
+      dn.addEventListener('click', (e) => (e.stopPropagation(), step(-1)));
+      up.addEventListener('click', (e) => (e.stopPropagation(), step(1)));
+      val.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter' || e.key === 'Escape') val.blur();
+      });
+      val.addEventListener('input', () => {
+        const n = parseInt(val.value.replace(/\D/g, ''), 10);
+        if (n >= 1 && n <= 99) {
+          cur.number = n;
+          commit(600);
+        }
+      });
+      val.addEventListener('blur', show);
+      optRow(row, step);
+      // the title sponsor: typed, or one of the suggestions
+      const srow = el('div', 'prow ps-spon', p);
+      el('div', 'pk', srow, 'Title sponsor');
+      const inp = el('input', 'spon-in', srow);
+      inp.type = 'text';
+      inp.maxLength = 10;
+      inp.spellcheck = false;
+      inp.placeholder = team.sponsor;
+      inp.value = cur.sponsor ?? '';
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter' || e.key === 'Escape') inp.blur();
+      });
+      inp.addEventListener('input', () => {
+        inp.value = inp.value.toUpperCase().replace(/[^A-Z0-9 &.-]/g, '');
+        cur.sponsor = inp.value;
+        for (const k of Array.from(sugg.children)) k.classList.toggle('on', k.textContent === (inp.value || team.sponsor));
+        commit(700);
+      });
+      const sugg = el('div', 'chips', srow);
+      for (const sp of SPONSORS) {
+        const b = el('span', sp === (cur.sponsor || team.sponsor) ? 'on' : '', sugg, sp);
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          cur.sponsor = sp;
+          inp.value = sp;
+          for (const k of Array.from(sugg.children)) k.classList.toggle('on', k === b);
+          commit();
+        });
+      }
+      optRow(srow, (d) => {
+        const i = SPONSORS.indexOf(cur.sponsor || team.sponsor);
+        cur.sponsor = SPONSORS[(i + d + SPONSORS.length) % SPONSORS.length];
+        inp.value = cur.sponsor;
+        for (const k of Array.from(sugg.children)) k.classList.toggle('on', k.textContent === cur.sponsor);
+        commit();
+      });
+      el('div', 'hp-note', p, 'The number goes on the nose, the fin and the halo; the sponsor on the sidepods, the wings and the helmet.');
+    }
     const reset = el('div', 'cta ghost', p, 'Restore team livery');
     this.action(reset, () => {
       this.career.setPaint(this.setup.team, null);

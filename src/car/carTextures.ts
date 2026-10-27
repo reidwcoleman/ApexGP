@@ -1224,7 +1224,7 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     drawInRect(g, R_CODE_R, code, contrastOn(team.primary), null, 0.85, 1.4, 900, false);
     // the title sponsor on the halo's front arc, in the ink that reads on the hoop's fairing (PC.halo)
     // (the strip is ~16:1 on the car, as the cell)
-    const haloPaint = team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary;
+    const haloPaint = team.halo ?? (team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary);
     drawInRect(g, R_HALO_SPON, team.sponsor, contrastOn(haloPaint), null, 0.94, 1.05, 900, false);
     // flat cells: visor, suit, suit2, HANS, gloves, belts
     const cells = ['#121722', team.primary, team.secondary, '#18191b', team.secondary, team.accent];

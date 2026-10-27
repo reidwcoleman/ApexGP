@@ -1403,8 +1403,142 @@
 }
 .sw {
   display: grid;
-  grid-template-columns: repeat(11, 1fr);
-  gap: var(--s2);
+  grid-template-columns: repeat(12, 1fr);
+  gap: 7px;
+}
+/* any colour: a rainbow well that opens the system picker (the chosen colour fills it) */
+.sw .pick {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  background: conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff2d55, #ff3b30);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: transform 0.25s var(--spring);
+}
+.sw .pick::after {
+  content: '+';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.sw .pick.on {
+  box-shadow: 0 0 0 2px var(--ground-solid), 0 0 0 4px #fff;
+}
+.sw .pick.on::after {
+  content: '';
+}
+.sw .pick:hover {
+  transform: scale(1.12);
+}
+.sw .pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+/* the paint shop's sections */
+.ps-seg {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin-bottom: var(--s3);
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  clip-path: var(--chamfer-sm);
+}
+.ps-tab {
+  padding: 8px 0;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.ps-tab:hover {
+  color: var(--ink);
+}
+.ps-tab.on {
+  background: #fff;
+  color: var(--ink-dark);
+}
+.ps-tab.sel {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.prow.wide .chips span {
+  font-size: 14px;
+  padding: 3px 10px;
+}
+.num-box {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.num-box .chev {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 56px;
+  font-size: 26px;
+  color: var(--ink2);
+  background: var(--well);
+  cursor: pointer;
+  clip-path: var(--chamfer-sm);
+}
+.num-box .chev:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.12);
+}
+.num-in {
+  width: 120px;
+  height: 64px;
+  font-family: var(--font-display);
+  font-size: 58px;
+  font-weight: 800;
+  font-style: italic;
+  text-align: center;
+  color: var(--accent);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-strong);
+  outline: none;
+}
+.num-in:focus,
+.spon-in:focus {
+  border-color: #fff;
+}
+.spon-in {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-bottom: var(--s2);
+  padding: 0 var(--s3);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-strong);
+  outline: none;
+}
+.spon-in::placeholder {
+  color: var(--ink3);
+}
+.ps-spon .chips span {
+  font-size: 13px;
+  padding: 3px 9px;
 }
 .sw i {
   aspect-ratio: 1;

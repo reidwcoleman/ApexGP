@@ -72,12 +72,14 @@ export const SETUP: SetupDef[] = [
     apply: (s, v) => { s.mu *= 1 - Math.abs(v - 5) * 0.004; s.slipAnglePeak *= 1 - (v - 6) * 0.02; s.slipAnglePeakRear *= 1 - (v - 6) * 0.02; } },
 ];
 
-export type Finish = 'gloss' | 'satin' | 'matte' | 'metallic';
+export type Finish = 'gloss' | 'satin' | 'matte' | 'metallic' | 'pearl' | 'chrome';
 export const FINISHES: { id: Finish; name: string }[] = [
   { id: 'gloss', name: 'Gloss' },
   { id: 'satin', name: 'Satin' },
   { id: 'matte', name: 'Matte' },
   { id: 'metallic', name: 'Metallic' },
+  { id: 'pearl', name: 'Pearl' },
+  { id: 'chrome', name: 'Chrome' },
 ];
 
 export interface Paint {
@@ -86,7 +88,45 @@ export interface Paint {
   accent: string;
   pattern: LiveryPattern;
   finish: Finish;
+  /** the details (absent: the team's own) */
+  carbon?: CarbonLevel;
+  halo?: PartPaint;
+  wing?: PartPaint;
+  /** the wheel covers' ring: a colour, 'team' or 'none' */
+  rim?: string;
+  /** the race number on the nose and fin, 1–99 */
+  number?: number;
+  /** the title sponsor's name on the sidepods, wings and halo */
+  sponsor?: string;
+  /** the helmet's two colours */
+  helmet?: [string, string];
 }
+
+export type CarbonLevel = 'none' | 'some' | 'lots';
+export const CARBON: { id: CarbonLevel; name: string; amt: number }[] = [
+  { id: 'none', name: 'Fully painted', amt: 0 },
+  { id: 'some', name: 'Some', amt: 0.3 },
+  { id: 'lots', name: 'Lots', amt: 0.62 },
+];
+/** a part painted in one of the livery's colours or left in carbon */
+export type PartPaint = 'team' | 'primary' | 'secondary' | 'accent' | 'carbon';
+export const PART_PAINTS: { id: PartPaint; name: string }[] = [
+  { id: 'team', name: 'Livery' },
+  { id: 'primary', name: 'Base' },
+  { id: 'secondary', name: 'Secondary' },
+  { id: 'accent', name: 'Accent' },
+  { id: 'carbon', name: 'Carbon' },
+];
+export const RIMS: { id: string; name: string }[] = [
+  { id: 'team', name: 'Livery' },
+  { id: 'accent', name: 'Accent' },
+  { id: '#ffffff', name: 'White' },
+  { id: '#d6b25e', name: 'Gold' },
+  { id: '#c9ccd1', name: 'Silver' },
+  { id: 'none', name: 'None' },
+];
+/** sponsor names the shop suggests (fictional) */
+export const SPONSORS = ['VELOCE', 'ORBIS', 'NOVAQ', 'HALCYON', 'ZEPHYR', 'KRONOS', 'APEX', 'LUMEN', 'TITAN', 'AURORA'];
 
 /** paint colours offered in the shop (sRGB): reds, oranges, yellows, greens, blues, purples, pinks, neutrals */
 export const PALETTE = [
@@ -101,6 +141,26 @@ export const PATTERNS: { id: LiveryPattern; name: string }[] = [
   { id: 'stripe', name: 'Stripe' },
   { id: 'block', name: 'Block' },
   { id: 'arrow', name: 'Arrow' },
+  { id: 'twotone', name: 'Two-tone' },
+  { id: 'chevron', name: 'Chevrons' },
+  { id: 'pinstripe', name: 'Pinstripe' },
+  { id: 'checker', name: 'Chequered' },
+  { id: 'bolt', name: 'Lightning' },
+  { id: 'camo', name: 'Camo' },
+];
+/** the grid's own layouts, offered in the shop under their teams' names */
+export const TEAM_PATTERNS: { id: LiveryPattern; name: string }[] = [
+  { id: 'ferrari', name: 'Rossa' },
+  { id: 'mercedes', name: 'Stellar' },
+  { id: 'redbull', name: 'Taurus' },
+  { id: 'mclaren', name: 'Solis' },
+  { id: 'aston', name: 'Verdant' },
+  { id: 'alpine', name: 'Azure' },
+  { id: 'williams', name: 'Kestrel' },
+  { id: 'haas', name: 'Forge' },
+  { id: 'racingbulls', name: 'Nova' },
+  { id: 'audi', name: 'Vektor' },
+  { id: 'cadillac', name: 'Liberty' },
 ];
 
 export interface RaceRecord {
@@ -416,11 +476,15 @@ export class Career {
   /** the team as the player's car wears it (a derived Team with its own livery cache id) */
   static painted(team: Team, p: Paint | null): Team {
     if (!p) return team;
-    const key = `${p.primary}${p.secondary}${p.accent}${p.pattern}${p.finish}`.replace(/#/g, '');
+    const key = JSON.stringify([p.primary, p.secondary, p.accent, p.pattern, p.finish, p.carbon, p.halo, p.wing, p.rim, p.number, p.sponsor, p.helmet])
+      .replace(/[^a-z0-9]/gi, '')
+      .toLowerCase();
     const lum = (hex: string) => {
       const n = parseInt(hex.slice(1), 16);
       return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
     };
+    const part = (v: PartPaint | undefined) =>
+      !v || v === 'team' ? undefined : v === 'carbon' ? '#1b1c1f' : v === 'primary' ? p.primary : v === 'secondary' ? p.secondary : p.accent;
     return {
       ...team,
       id: `custom-${team.id}-${key}`,
@@ -429,8 +493,14 @@ export class Career {
       accent: p.accent,
       ink: lum(p.primary) > 0.6 ? '#111214' : '#ffffff',
       pattern: p.pattern,
-      matte: p.finish === 'matte' ? 1 : p.finish === 'satin' ? 0.5 : 0,
-      metallic: p.finish === 'metallic' ? 0.65 : undefined,
+      matte: p.finish === 'matte' ? 1 : p.finish === 'satin' ? 0.5 : p.finish === 'pearl' ? 0.25 : 0,
+      metallic: p.finish === 'metallic' ? 0.65 : p.finish === 'pearl' ? 0.35 : p.finish === 'chrome' ? 1 : undefined,
+      carbon: p.carbon ? CARBON.find((c) => c.id === p.carbon)!.amt : team.carbon,
+      halo: part(p.halo),
+      wing: part(p.wing),
+      rim: !p.rim || p.rim === 'team' ? undefined : p.rim === 'accent' ? p.accent : p.rim,
+      sponsor: p.sponsor?.trim() ? p.sponsor.trim().toUpperCase().slice(0, 10) : team.sponsor,
+      ownSponsor: !!p.sponsor?.trim(),
     };
   }
 

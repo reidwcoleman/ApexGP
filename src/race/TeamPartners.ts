@@ -112,5 +112,7 @@ export const TEAM_PARTNERS: Record<string, TeamPartners> = {
 
 /** a team's partners (a fallback built from its name for a team without its own list) */
 export function partnersOf(id: string): TeamPartners {
+  // (a paint-shop livery keeps its team's partners: custom-<team>-<scheme>)
+  if (id.startsWith('custom-')) id = id.slice(7, id.indexOf('-', 7) > 0 ? id.indexOf('-', 7) : undefined);
   return TEAM_PARTNERS[id] ?? TEAM_PARTNERS.rossa;
 }

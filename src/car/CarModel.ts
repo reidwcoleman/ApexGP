@@ -826,7 +826,8 @@ function acquirePaint(team: Team): PaintBase {
   const mat = new THREE.MeshPhysicalMaterial({
     name: `car-paint-${team.id}`,
     map: liv.map,
-    roughness: 0.46 + 0.22 * m - metallic * 0.12,
+    // (a paint-shop chrome wrap: a near mirror)
+    roughness: metallic >= 0.95 ? 0.13 : 0.46 + 0.22 * m - metallic * 0.12,
     metalness: metallic,
     clearcoat: 1 - 0.72 * m,
     // (a race car's lacquer is no showroom mirror: orange peel, vinyl wrap edges and a film of road dust
@@ -842,7 +843,7 @@ function acquirePaint(team: Team): PaintBase {
     sheenRoughness: 0.7,
     sheenColor: new THREE.Color(0.3, 0.3, 0.32),
   });
-  const base: PaintBase = { mat, mask: liv.mask, flake: THREE.MathUtils.clamp((metallic - 0.05) * 1.6, 0, 1) * (1 - 0.7 * m), refs: 1 };
+  const base: PaintBase = { mat, mask: liv.mask, flake: THREE.MathUtils.clamp((metallic - 0.05) * 1.6, 0, 1) * (1 - 0.7 * m) * (metallic >= 0.95 ? 0.2 : 1), refs: 1 };
   paintCache.set(team.id, base);
   return base;
 }
@@ -971,9 +972,10 @@ export function createCar(team: Team, driver: Driver, seat: 0 | 1, opts: { envMa
   const tyres = [0, 1, 2, 3].map((i) => createTyreMaterial(compound, `car-wheel-${['FL', 'FR', 'RL', 'RR'][i]}`));
   // the cover's ring in the team colour (the secondary when the primary would vanish on the black cover)
   {
-    const ring = new THREE.Color(team.primary);
-    if (ring.r * 0.2126 + ring.g * 0.7152 + ring.b * 0.0722 < 0.03) ring.set(team.secondary);
-    for (const t of tyres) t.u.uTyreE.value.set(ring.r, ring.g, ring.b, 1);
+    const rimOff = team.rim === 'none';
+    const ring = new THREE.Color(team.rim && !rimOff ? team.rim : team.primary);
+    if (!team.rim && ring.r * 0.2126 + ring.g * 0.7152 + ring.b * 0.0722 < 0.03) ring.set(team.secondary);
+    for (const t of tyres) t.u.uTyreE.value.set(ring.r, ring.g, ring.b, rimOff ? 0 : 1);
   }
   const ts = trimShared();
   const trimTex = trimTexture(team, driver, seat);

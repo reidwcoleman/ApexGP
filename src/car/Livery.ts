@@ -331,8 +331,84 @@ function cadillac(t: Tx, p: Pal): RGB {
   return c;
 }
 
+// ------------------------------------------------------------------------------------ paint shop extras
+function twotone(t: Tx, p: Pal): RGB {
+  // front half one colour, back half the other, split on a raked line with a broad accent band
+  const k = t.z - 0.35 - (t.y - 0.45) * 1.4;
+  let c = mix(p.S, p.P, cov(-k));
+  c = mix(c, p.A, cov(Math.abs(k + 0.05) - 0.035));
+  return c;
+}
+
+function chevron(t: Tx, p: Pal): RGB {
+  // a run of forward-pointing chevrons down the sidepod, the first in the accent
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const u = t.z + Math.abs(t.y - 0.44) * 0.9 + 1.3;
+  const per = 0.3;
+  const k = Math.floor(u / per);
+  const f = u - k * per;
+  const inZ = k >= 0 && k <= 5 ? 1 : 0;
+  const inY = Math.min(cov((0.22 - t.y) / slope), cov((t.y - 0.7) / slope));
+  const on = Math.min(cov(f - 0.13), cov(0.004 - f)) * inZ * inY;
+  c = mix(c, k === 5 ? p.A : p.S, on);
+  c = mix(c, p.S, cov((t.y - lowLine(t.z, 0.2, 0.06)) / slope));
+  return c;
+}
+
+function pinstripe(t: Tx, p: Pal): RGB {
+  // three fine lines sweeping from the nose along the sidepods to the engine cover, a spine line on top
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const ys = 0.36 + 0.22 * smooth(0.4, -1.5, t.z) - 0.12 * smooth(0.6, 2.6, t.z);
+  const len = smooth(-2.0, -1.7, t.z);
+  c = mix(c, p.A, line(t, ys, 0.006) * len);
+  c = mix(c, p.S, line(t, ys + 0.03, 0.006) * len);
+  c = mix(c, p.A, line(t, ys + 0.06, 0.006) * len);
+  c = mix(c, p.A, cov(Math.abs(Math.abs(t.s) - 0.03) - 0.005) * (t.ny > 0.5 ? 1 : 0));
+  c = mix(c, p.S, cov((t.y - (ys - 0.1)) / slope));
+  return c;
+}
+
+function checker(t: Tx, p: Pal): RGB {
+  // a chequered flag waving over the back of the car, the accent on its leading edge
+  const edge = -0.55 + 0.12 * Math.sin(t.y * 9 + t.s * 4);
+  const cell = 0.055;
+  const ch = (Math.floor(t.z / cell) + Math.floor((t.s + t.y) / cell)) & 1;
+  const zone = cov(t.z - edge);
+  let c = mix(p.P, ch ? p.S : p.W, zone * smooth(-0.1, 0.25, t.y));
+  c = mix(c, p.A, cov(Math.abs(t.z - edge - 0.02) - 0.018) * smooth(0.12, 0.2, t.y));
+  return c;
+}
+
+function bolt(t: Tx, p: Pal): RGB {
+  // a lightning bolt down each flank, tapering to a point at the nose
+  const slope = Math.max(0.2, t.nx);
+  let c = p.P;
+  const per = 0.42;
+  const ph = (t.z + 3) / per;
+  const tri = Math.abs(ph - Math.floor(ph) - 0.5) * 2 - 0.5;
+  const yc = 0.42 + 0.09 * tri + 0.12 * smooth(0.6, -1.6, t.z) - 0.12 * smooth(1.0, 2.6, t.z);
+  const half = 0.045 * smooth(2.5, 0.8, t.z) + 0.006;
+  const inZ = smooth(-2.0, -1.75, t.z);
+  const d = Math.abs(t.y - yc) / slope;
+  c = mix(c, p.S, cov(d - half - 0.012) * inZ);
+  c = mix(c, p.A, cov(d - half) * inZ);
+  return c;
+}
+
+function camo(t: Tx, p: Pal): RGB {
+  // soft-edged camouflage blotches in the three colours
+  const n = Math.sin(t.z * 7.1 + t.s * 3.3) + Math.sin(t.z * 3.7 - t.s * 8.2 + 1.3) + 0.8 * Math.sin((t.z + t.s) * 5.3 + t.y * 6 + 2.1);
+  let c = p.P;
+  c = mix(c, p.S, cov((0.7 - n) / 14));
+  c = mix(c, p.A, cov((n + 1.25) / 14));
+  return c;
+}
+
 const PATTERNS: Record<Team['pattern'], Pattern> = {
   sweep, split, fade, stripe, block, arrow,
+  twotone, chevron, pinstripe, checker, bolt, camo,
   ferrari, mercedes, redbull, mclaren, aston, alpine, williams, haas, racingbulls, audi, cadillac,
 };
 
@@ -542,7 +618,7 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     const sideCol = inkFor(sample(-0.3, 7.2, side));
     hullText(g, m, { text: team.sponsor, zFront: 0.2, zRear: -0.95, side, guide: { kt: 7.15 }, height: 0.13, color: sideCol });
     const coverCol = inkFor(sample(-0.85, 3.55, side));
-    hullText(g, m, { text: P.principal[0].name, zFront: -0.42, zRear: -1.3, side, guide: { kt: 3.52 }, height: 0.074, color: coverCol });
+    hullText(g, m, { text: team.ownSponsor ? team.sponsor : P.principal[0].name, zFront: -0.42, zRear: -1.3, side, guide: { kt: 3.52 }, height: 0.074, color: coverCol });
     // the power unit's badge on the cover behind the cockpit
     const puCol = inkFor(sample(-0.2, 3.52, side));
     hullText(g, m, { text: P.engine, zFront: -0.04, zRear: -0.36, side, guide: { kt: 3.52 }, height: 0.03, color: puCol, weight: 700, italic: false, track: 0.16 });
@@ -578,12 +654,12 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     [PC.white]: '#ececec',
     [PC.inlet]: '#050506',
     [PC.carbon]: '#1b1c1f',
-    [PC.halo]: team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary,
+    [PC.halo]: team.halo ?? (team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary),
     [PC.mirror]: team.primary,
     [PC.airbox]: team.primary,
-    [PC.fwFlap]: team.accent,
-    [PC.fwFlap2]: team.primary,
-    [PC.endplateIn]: team.secondary,
+    [PC.fwFlap]: team.wing ?? team.accent,
+    [PC.fwFlap2]: team.wing ?? team.primary,
+    [PC.endplateIn]: team.wing ?? team.secondary,
     [PC.primaryDark]: hexOf(shade(pal.P, 0.7)),
     [PC.chrome]: '#c9ccd1',
   };

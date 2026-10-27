@@ -21,7 +21,7 @@ import { ScenePrep, frameClock, type LightMode } from '../world/prepare.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
 import { DASH_GLOW, SCREEN_GLOW, createCar, feedMirrors, preloadCarAssets, type CarRig } from '../car/CarModel.ts';
-import { TEAMS, allEntries, uiColor, type Entry, type Team } from '../race/Teams.ts';
+import { TEAMS, allEntries, uiColor, type Driver, type Entry, type Team } from '../race/Teams.ts';
 import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { PIT_RACE_LAPS, Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
@@ -55,7 +55,7 @@ import { RacingLineAssist } from './RacingLineAssist.ts';
 import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
-import { Career, SETUP } from '../career/Career.ts';
+import { Career, SETUP, type Paint } from '../career/Career.ts';
 import { rollForecast, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { freshest } from '../world/weatherHistory.ts';
 import { ACHIEVEMENTS as ACH, unlockAchievement } from '../core/steam.ts';
@@ -125,6 +125,12 @@ type CompoundRig = CarRig & { setCompound?: (c: string) => void };
  * test what is on screen (Cameras.view: under the TV director, the shot it has on air).
  */
 const EYE_CAMS = ONBOARD;
+
+/** the player's driver as the paint shop has them: their own race number and helmet colours */
+function paintedDriver(d: Driver, p: Paint | null): Driver {
+  if (!p || (!p.number && !p.helmet)) return d;
+  return { ...d, number: p.number ?? d.number, helmet: p.helmet ?? d.helmet };
+}
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -491,8 +497,9 @@ export class Game {
       rigKey: (e) => this.rigTeam.get(e) ?? e.team.id,
       makeRig: (e) => {
         const painted = (this.rigTeam.get(e) ?? e.team.id) !== e.team.id;
-        const team = painted ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
-        return withContactShadow(createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined }));
+        const paint = painted ? this.career.paintFor(TEAMS.indexOf(e.team)) : null;
+        const team = painted ? Career.painted(e.team, paint) : e.team;
+        return withContactShadow(createCar(team, paintedDriver(e.driver, paint), e.seat, { envMap: this.scene.environment ?? undefined }));
       },
     });
     this.bindGarageInput();
@@ -3229,12 +3236,13 @@ export class Game {
     if (!this.race || this.rigs.size === 0) return;
     const player = this.race.player.entry;
     for (const [e, rig] of this.rigs) {
-      const team = e === player ? Career.painted(e.team, this.career.paintFor(TEAMS.indexOf(e.team))) : e.team;
+      const paint = e === player ? this.career.paintFor(TEAMS.indexOf(e.team)) : null;
+      const team = e === player ? Career.painted(e.team, paint) : e.team;
       if (this.rigTeam.get(e) === team.id && this.rigDriverKey.get(e) === driverKey(e)) continue;
       const visible = rig.root.visible;
       rig.root.removeFromParent();
       rig.dispose();
-      const next = withContactShadow(createCar(team, e.driver, e.seat, { envMap: this.scene.environment ?? undefined }));
+      const next = withContactShadow(createCar(team, paintedDriver(e.driver, paint), e.seat, { envMap: this.scene.environment ?? undefined }));
       next.root.visible = visible;
       this.rigs.set(e, next);
       this.rigTeam.set(e, team.id);
