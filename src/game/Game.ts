@@ -55,7 +55,7 @@ import { RacingLineAssist } from './RacingLineAssist.ts';
 import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
 import { COMPOUNDS, newStopPose, stopPose } from '../race/Pit.ts';
-import { Career, SETUP, type Paint } from '../career/Career.ts';
+import { Career, CHALLENGE_PURSE, SETUP, type Paint } from '../career/Career.ts';
 import { rollForecast, CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { freshest } from '../world/weatherHistory.ts';
 import { ACHIEVEMENTS as ACH, unlockAchievement } from '../core/steam.ts';
@@ -2142,6 +2142,18 @@ export class Game {
       this.recorded = true;
       const me = rows.find((r) => r.isPlayer)!;
       reward = this.career.recordRace(this.track.def.id, me.pos, !!me.dnf, me.fastest && me.pos <= 10, TEAMS.indexOf(me.entry.team), rows.length, this.careerRace);
+      // the circuit's World Tour challenge: a fourth star and a purse
+      if (this.careerRace && !this.race.isTimeTrial) {
+        const mi = rows.indexOf(me);
+        const behind = rows[mi + 1];
+        const margin = me.pos === 1 && behind && !behind.dnf ? (behind.gap > 0 ? behind.gap : NaN) : NaN;
+        const ch = this.career.checkChallenge(this.track.def.id, { pos: me.pos, start: this.race.playerStart, dnf: !!me.dnf, fastest: !!me.fastest, penalty: me.penalty ?? 0, margin, field: rows.length });
+        if (ch) {
+          reward.challenge = ch.text;
+          reward.credits += CHALLENGE_PURSE;
+          reward.breakdown.push({ label: 'Challenge purse', credits: CHALLENGE_PURSE });
+        }
+      }
       // a new weekend here next time: the round's weather is rolled again
       if (this.careerRace) {
         const f = this.careerFc.get(this.track.def.id);
@@ -2198,7 +2210,7 @@ export class Game {
         next = nc ? { label: `Next · ${nc.short}`, go: () => void this.goCareerRound(nc.id) } : { label: 'World Tour map', go: () => this.toTourMap() };
       }
     }
-    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `World Tour · ${this.career.stars()} of ${ALL_CIRCUITS.length * 3} stars · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
+    this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `World Tour · ${this.career.stars()} of ${this.career.maxStars()} stars · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
   }
 
   // ------------------------------------------------------------------ frame

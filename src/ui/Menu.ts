@@ -519,7 +519,7 @@ export class Menu {
       const tc = tn ? ALL_CIRCUITS.find((c) => c.id === tn)! : null;
       const st = this.career.stars();
       const pz = this.career.passes();
-      el('div', 'eyebrow', box, `World Tour · ${this.career.rank().name} · ${st} of ${ALL_CIRCUITS.length * 3} stars`);
+      el('div', 'eyebrow', box, `World Tour · ${this.career.rank().name} · ${st} of ${this.career.maxStars()} stars`);
       el('div', 'title', box, tc ? `Next up: ${tc.short}` : pz ? 'Open a new circuit' : 'Go for the wins');
       el('div', 'meta', box, pz ? `You have ${pz} Tour pass${pz === 1 ? '' : 'es'}: open any circuit on the map.` : tc ? `Top ${UNLOCK_POS} at ${tc.short} earns a star and a Tour pass to open any circuit.` : 'Every win is three stars. Race any open circuit, in any order.');
       const go = el('div', 'cta home-go', box, tc ? `Race ${tc.short}` : 'World Tour');
@@ -1622,6 +1622,7 @@ export class Menu {
         const word = reward.medal === 'gold' ? 'Gold · the win' : reward.medal === 'silver' ? 'Silver · a podium' : `Bronze · top ${UNLOCK_POS}`;
         el('div', `rw-medal ${reward.medal}`, box, `<i class="md ${reward.medal}"></i><b>New medal</b> · ${word} · ${'★'.repeat(reward.medal === 'gold' ? 3 : reward.medal === 'silver' ? 2 : 1)}`);
       }
+      if (reward.challenge) el('div', 'rw-medal gold', box, `<b>Challenge complete</b> · ${reward.challenge} · ★`);
       if (reward.pass) el('div', 'rw-unlock', box, `<b>Tour pass earned</b> · open any circuit you like on the World Tour map (${this.career.passes()} in hand)`);
       else if (reward.unlocked) {
         const cd = ALL_CIRCUITS.find((c) => c.id === reward.unlocked);

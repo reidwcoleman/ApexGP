@@ -87,7 +87,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   const next = c.nextRound();
   const states = new Map<string, State>(ALL_CIRCUITS.map((cd) => [cd.id, cd.id === next ? 'next' : stateOf(cd.id)]));
   const stars = c.stars();
-  const maxStars = ALL_CIRCUITS.length * 3;
+  const maxStars = c.maxStars();
   const opened = ALL_CIRCUITS.filter((cd) => states.get(cd.id) !== 'locked').length;
   const med = c.medals();
   if (!sel || !ALL_CIRCUITS.some((cd) => cd.id === sel)) sel = next ?? [...CIRCUITS].reverse().find((cd) => states.get(cd.id) !== 'locked')?.id ?? CIRCUITS[0].id;
@@ -358,6 +358,9 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       const n = STARS[k];
       el('div', `rung ${k}${got >= n ? ' won' : ''}`, ladder, `<i class="md ${k}"></i><span>${word}</span><em>${starsSvg(n, 11)}</em>`);
     }
+    // the circuit's bonus challenge: a fourth star
+    const ch = c.challengeFor(id);
+    el('div', `tr-chal${ch.done ? ' done' : ''}`, body, `<i>${ch.done ? '<svg viewBox="0 0 12 12" width="10" height="10"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '★'}</i><span><em>Challenge</em>${esc(ch.c.text)}</span>`);
     const rec = c.recordAt(id);
     if (st === 'locked') {
       const why = scenic

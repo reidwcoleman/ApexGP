@@ -383,6 +383,7 @@ export class Race {
       order.splice(pSlot, 0, opts.playerEntry);
     }
 
+    this.playerStart = order.indexOf(opts.playerEntry) + 1;
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
       const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : !isPlayer && opts.aiSpec ? opts.aiSpec : F1_SPEC);
@@ -1813,6 +1814,9 @@ export class Race {
   }
 
   /** classification rows for the results screen */
+  /** the player's grid position (1 = pole) */
+  playerStart = 1;
+
   classification() {
     const L = this.track.length;
     return this.cars

@@ -197,6 +197,8 @@ export interface CareerData {
   tourLaps?: number;
   /** circuits opened with Tour passes, in the order the player chose them */
   opened?: string[];
+  /** circuit ids whose World Tour challenge is done */
+  challenges?: Record<string, true>;
 }
 
 export interface RaceReward {
@@ -209,6 +211,8 @@ export interface RaceReward {
   pass?: boolean;
   /** the medal this result won, when it's better than the one held before */
   medal?: Medal;
+  /** the circuit's challenge, done by this race */
+  challenge?: string;
   bestBefore: number | null;
   /** a career round */
   career?: boolean;
@@ -248,14 +252,39 @@ export const STARS: Record<Exclude<Medal, null>, number> = { gold: 3, silver: 2,
 export const START_OPEN = ['monza', 'spa', 'silverstone'];
 /** a first medal at a circuit pays for opening it, as well as a pass */
 export const MEDAL_BONUS: Record<Exclude<Medal, null>, number> = { bronze: 6000, silver: 12000, gold: 25000 };
+/** what a race looked like, for the challenges */
+export interface RaceFacts {
+  pos: number;
+  start: number;
+  dnf: boolean;
+  fastest: boolean;
+  penalty: number;
+  /** seconds to the car behind (the winner's margin; NaN unknown) */
+  margin: number;
+  field: number;
+}
+/** each circuit's bonus challenge: a fourth star and a purse */
+export interface Challenge {
+  id: string;
+  text: string;
+  met(f: RaceFacts): boolean;
+}
+export const CHALLENGES: Challenge[] = [
+  { id: 'climb', text: 'Gain 5 places from your grid slot', met: (f) => !f.dnf && f.start - f.pos >= 5 },
+  { id: 'fastest', text: 'Set the fastest lap of the race', met: (f) => !f.dnf && f.fastest },
+  { id: 'clean', text: 'Finish in the points with no penalties', met: (f) => !f.dnf && f.pos <= 10 && f.penalty <= 0 },
+  { id: 'margin', text: 'Win by more than 2 seconds', met: (f) => !f.dnf && f.pos === 1 && f.margin > 2 },
+  { id: 'podium-back', text: 'Reach the podium from P8 or lower', met: (f) => !f.dnf && f.pos <= 3 && f.start >= 8 },
+];
+export const CHALLENGE_PURSE = 15000;
 /** the tour ranks, by stars */
 export const RANKS: { name: string; stars: number }[] = [
   { name: 'Rookie', stars: 0 },
   { name: 'Contender', stars: 6 },
   { name: 'Front-runner', stars: 14 },
   { name: 'Race winner', stars: 24 },
-  { name: 'Champion', stars: 36 },
-  { name: 'Legend', stars: 48 },
+  { name: 'Champion', stars: 38 },
+  { name: 'Legend', stars: 56 },
 ];
 /** the scenic road courses are the tour's bonus circuits: opened by stars, not by passes */
 export const SCENIC_STARS: Record<string, number> = { serena: 5, bergsee: 12, redmesa: 20 };
@@ -335,6 +364,25 @@ export class Career {
     unlockForever(id);
     return true;
   }
+  /** this circuit's challenge (fixed per circuit) and whether it's done */
+  challengeFor(id: string): { c: Challenge; done: boolean } {
+    const i = ALL_CIRCUITS.findIndex((x) => x.id === id);
+    const c = CHALLENGES[(Math.max(0, i) * 3 + 1) % CHALLENGES.length];
+    return { c, done: !!this.data.challenges?.[id] };
+  }
+  /** a career race's challenge check: true when it's newly done (a star and the purse are added) */
+  checkChallenge(id: string, f: RaceFacts): Challenge | null {
+    const { c, done } = this.challengeFor(id);
+    if (done || !c.met(f)) return null;
+    (this.data.challenges ??= {})[id] = true;
+    this.data.credits += CHALLENGE_PURSE;
+    this.save();
+    return c;
+  }
+  /** stars the tour can give: three medals' worth and a challenge per circuit */
+  maxStars(): number {
+    return ALL_CIRCUITS.length * 4;
+  }
   /** the tour rank from the stars, and how far to the next */
   rank() {
     const st = this.stars();
@@ -362,6 +410,7 @@ export class Career {
     for (const c of ALL_CIRCUITS) {
       const k = medalFor(this.data.best[c.id]);
       if (k) n += STARS[k];
+      if (this.data.challenges?.[c.id]) n++;
     }
     return n;
   }
