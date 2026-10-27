@@ -90,6 +90,13 @@ void main() {
   vec3 wpos = (camWorld * vec4(vp, 1.0)).xyz;
   vec3 prev = wpos;
   float onCar = 0.0;
+  // the road just under and around a car carries its shadow, which moves with the car: streaked with
+  // the road it was smeared out behind the car in dark trails. Within ~0.7 m of a car's footprint the
+  // road's motion eases toward the car's (soft, so no sharp patch of road shows round it)
+  vec3 under = wpos;
+  float uw = 0.0;
+  vec3 bc = (boxMin + boxMax) * 0.5;
+  vec3 bh = (boxMax - boxMin) * 0.5;
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
@@ -98,7 +105,16 @@ void main() {
       onCar = 1.0;
       break;
     }
+    if (l.y < boxMin.y + 0.25 && l.y > -0.35) {
+      float dxz = length(max(abs(l.xz - bc.xz) - bh.xz, 0.0));
+      float w = (1.0 - smoothstep(0.0, 0.7, dxz)) * 0.85;
+      if (w > uw) {
+        uw = w;
+        under = (carPrev[i] * vec4(l, 1.0)).xyz;
+      }
+    }
   }
+  if (onCar < 0.5 && uw > 0.0) prev = mix(prev, under, uw);
   vec4 pc = prevViewProj * vec4(prev, 1.0);
   vec2 v = pc.w > 0.0 ? (vUv - (pc.xy / pc.w * 0.5 + 0.5)) * (0.5 * shutter) : vec2(0.0);
   // (the wheel and the hands on it: no streak at all, whatever the camera's shake inside the car)
