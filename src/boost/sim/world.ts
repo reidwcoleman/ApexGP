@@ -640,7 +640,7 @@ export class World {
 
   // ------------------------------------------------------------ snapshots
   static readonly HEAD = 12;
-  static readonly CARF = 38;
+  static readonly CARF = 48;
   snapSize(): number {
     return World.HEAD + 9 + PADS.length + this.cars.length * World.CARF;
   }
@@ -686,6 +686,8 @@ export class World {
       w(inp.throttle), w(inp.steer), w(inp.pitch), w(inp.yaw), w(inp.roll), w(inp.jump ? 1 : 0), w(inp.boost ? 1 : 0), w(inp.handbrake ? 1 : 0);
       w(acks[i] ?? 0);
       w(c.supersonicTime), w(c.autoFlip);
+      w(c.steerAngle), w(c.engine), w(c.brake);
+      for (const W of c.wheels) w(W.latF), w(W.long);
     }
     return out;
   }
@@ -758,6 +760,13 @@ export class World {
       acks.push(r());
       c.supersonicTime = r();
       c.autoFlip = r();
+      c.steerAngle = r();
+      c.engine = r();
+      c.brake = r();
+      for (const W of c.wheels) {
+        W.latF = r();
+        W.long = r();
+      }
       void full;
     }
     return acks;
