@@ -37,6 +37,9 @@ export interface RaceSetup {
   damage: DamageMode;
   /** track-limit rules */
   trackLimits: TrackLimitsMode;
+  /** a World Tour round's sky: 'auto' (its own rolled forecast) or the player's pick */
+  tourWx?: WeatherChoice | 'auto';
+  tourTime?: TimeChoice | 'auto';
   /** save format: bumped when the defaults change in a way old saves should pick up */
   v?: number;
 }
@@ -1016,7 +1019,7 @@ export class Menu {
       el('h2', '', p, cd?.name ?? 'Race');
       const m = medalFor(this.career.data.best[st.track]);
       const goal = !m ? (scenic ? `top ${UNLOCK_POS} earns your first star` : `top ${UNLOCK_POS} earns a star and a Tour pass`) : m === 'gold' ? 'all three stars won here' : `beat P${this.career.data.best[st.track]} for more stars`;
-      el('p', 'lede', p, `${fcLabel(fc!)} · ${goal}`);
+      el('p', 'lede', p, `Forecast ${fcLabel(fc!)} · ${goal}`);
     } else {
       el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
       el('p', 'lede', p, this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.');
@@ -1093,8 +1096,20 @@ export class Menu {
         st.track = open[(i + d + open.length) % open.length].id;
       });
     el('div', 'pcap', p, 'Conditions');
-    if (career) this.fixed(p, 'Forecast', `${fcLabel(fc!)} <span class="dim">· ${CIRCUITS[ri]?.short ?? ''}</span>`);
-    else {
+    if (career && dcd) this.fixed(p, 'Forecast', `${fcLabel(fc!)} <span class="dim">· ${CIRCUITS[ri]?.short ?? ''}</span>`);
+    else if (career) {
+      // automatic unless you pick: the round's own forecast (never the same sky twice), or any sky you like
+      const WX: (WeatherChoice | 'auto')[] = ['auto', ...WEATHERS.filter((w) => w !== 'random')];
+      const TM: (TimeChoice | 'auto')[] = ['auto', ...TIMES.filter((t) => t !== 'random')];
+      this.opt(p, 'Weather', () => (!st.tourWx || st.tourWx === 'auto' ? `Automatic <span class="dim">· ${weatherLabel(fc!.weather)}</span>` : weatherLabel(st.tourWx)), (d) => {
+        const i = Math.max(0, WX.indexOf(st.tourWx ?? 'auto'));
+        st.tourWx = WX[(i + d + WX.length) % WX.length];
+      });
+      this.opt(p, 'Time of day', () => (!st.tourTime || st.tourTime === 'auto' ? `Automatic <span class="dim">· ${timeLabel(fc!.time)}</span>` : timeLabel(st.tourTime)), (d) => {
+        const i = Math.max(0, TM.indexOf(st.tourTime ?? 'auto'));
+        st.tourTime = TM[(i + d + TM.length) % TM.length];
+      });
+    } else {
       this.opt(p, 'Weather', () => (st.weather === 'random' || st.weather === 'changeable' ? `${weatherLabel(st.weather)} <span class="dim">· ${this.cb.forecast().weather}</span>` : weatherLabel(st.weather)), (d) => {
         const i = WEATHERS.indexOf(st.weather);
         st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
@@ -1149,6 +1164,11 @@ export class Menu {
   showCareerSetup() {
     this.mode = 'career';
     this.show('setup');
+  }
+
+  /** a World Tour race screen is open (the garage previews that round's sky) */
+  isCareerSetup() {
+    return this.screen === 'setup' && this.mode === 'career';
   }
 
   /** the time trial screen for the circuit the garage is at */

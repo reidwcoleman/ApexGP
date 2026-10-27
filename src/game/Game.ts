@@ -1497,6 +1497,14 @@ export class Game {
     return this.race;
   }
 
+  /** the setup a World Tour race screen previews: the round's sky, or the one picked over it */
+  private careerPreview(s: RaceSetup): RaceSetup {
+    const was = this.careerRace;
+    this.careerRace = true;
+    const v = this.sessionSetup(s);
+    this.careerRace = was;
+    return v;
+  }
   /** a career round's forecast (kept until it has been raced) */
   private careerForecast(id: string): Forecast {
     let f = this.careerFc.get(id);
@@ -1510,7 +1518,11 @@ export class Game {
   private sessionSetup(s: RaceSetup): RaceSetup {
     if (!this.careerRace) return s;
     const f = this.careerForecast(this.track.def.id);
-    return { ...s, laps: this.dc.active ? this.dc.laps : this.career.tourLaps, weather: f.weather, time: f.time };
+    // (the World Tour's sky is automatic unless the player picked one on the race screen)
+    const own = !this.dc.active;
+    const weather = own && s.tourWx && s.tourWx !== 'auto' ? s.tourWx : f.weather;
+    const time = own && s.tourTime && s.tourTime !== 'auto' ? s.tourTime : f.time;
+    return { ...s, laps: this.dc.active ? this.dc.laps : this.career.tourLaps, weather, time };
   }
   /** on to a career round: travel there if it's another circuit, then its race screen */
   private async goCareerRound(id: string) {
@@ -1599,8 +1611,10 @@ export class Game {
       }, 700);
       return;
     }
-    if (`${s.weather}/${s.time}` !== this.planKey) this.rollWeather(s);
-    this.makeRace('race', s);
+    // (on a World Tour race screen the garage shows the sky that round will have: its forecast or your pick)
+    const v = this.menu?.isCareerSetup?.() ? this.careerPreview(s) : s;
+    if (`${v.weather}/${v.time}` !== this.planKey) this.rollWeather(v);
+    this.makeRace('race', v);
   }
 
   private applySettings(s: Settings) {
