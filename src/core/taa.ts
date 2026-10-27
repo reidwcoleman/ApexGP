@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Pass } from 'postprocessing';
-import { MOTION_CARS, WHEEL_BOX_GLSL, wheelUniforms } from './motionBlur';
+import { CAR_BOX_GLSL, MOTION_CARS, WHEEL_BOX_GLSL, wheelUniforms } from './motionBlur';
 
 /**
  * Temporal anti-aliasing (High/Ultra), as Unreal Engine 4 — and so ACC — does it: every frame the
@@ -58,6 +58,7 @@ uniform vec3 boxMin;
 uniform vec3 boxMax;
 uniform float reset;
 ${WHEEL_BOX_GLSL}
+${CAR_BOX_GLSL}
 
 // tone-mapped working space (and back): bright texels count as ~1, not as 50
 vec3 tmap(vec3 c) { return c / (1.0 + max(c.r, max(c.g, c.b))); }
@@ -104,7 +105,7 @@ bool onCar(vec3 wpos) {
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
-    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) return true;
+    if (inCarBox(l)) return true;
   }
   return false;
 }
@@ -158,7 +159,7 @@ void main() {
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
-    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
+    if (inCarBox(l)) {
       prev = (carPrev[i] * vec4(l, 1.0)).xyz;
       curCar = true;
       break;
@@ -188,9 +189,12 @@ void main() {
   vec3 bMax = min(mean + sigma, mx);
   hist = clipBox(hist, bMin, bMax);
 
-  // the new frame's share: ~9 % in a steady view, up to a quarter for fast motion across the screen
+  // the new frame's share: ~9 % in a steady view, up to half for fast motion across the screen. The
+  // road under a chased car streams 20–40 px a frame while the car's shadow holds its place: at a
+  // quarter the shadow's trailing edge (and the kerbs' stripes) dragged a soft smear a hand's width
+  // down the tarmac; ground moving that fast is smeared by the motion blur anyway
   float px = length(vel * size);
-  float a = mix(0.09, 0.25, smoothstep(2.0, 24.0, px));
+  float a = mix(0.09, 0.5, smoothstep(2.0, 32.0, px));
   // additive particles (sparks, flames, glows: Particles.ts's hot pool) leave the frame's alpha above
   // 1 (an additive blend's alpha adds up on a half-float target): they fly on their own paths with no
   // depth to reproject them by, so they pass nearly as drawn instead of being averaged to a trace.

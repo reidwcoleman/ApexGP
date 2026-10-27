@@ -18,6 +18,18 @@ bool onWheel(vec3 wpos, out vec3 wl) {
   return wheelOn > 0.5 && all(lessThan(abs(wl - vec3(0.0, -0.005, -0.008)), vec3(0.2, 0.105, 0.068)));
 }
 `;
+/**
+ * Inside a tracked car's box (car-local point; the box uniforms are declared by the shader). Its floor
+ * rises toward the sides: a car rolled into a corner, or on a cambered road, tilts the tarmac beside
+ * its wheels up into a flat box, and that patch of road was carried along with the car — no blur on
+ * it while the rest of the road streaked, and in the TAA a darker rectangle of road beside the car
+ * (its shadow held in the history). The wedge keeps ~10° of roll clear at the box's edge.
+ */
+export const CAR_BOX_GLSL = /* glsl */ `
+bool inCarBox(vec3 l) {
+  return all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax)) && l.y > boxMin.y + max(abs(l.x) - 0.55, 0.0) * 0.25;
+}
+`;
 export function wheelUniforms() {
   return { wheelInv: { value: new THREE.Matrix4() }, wheelPrev: { value: new THREE.Matrix4() }, wheelOn: { value: 0 } };
 }
@@ -68,6 +80,7 @@ uniform float shutter;
 uniform float maxLen;
 uniform float aspect;
 ${WHEEL_BOX_GLSL}
+${CAR_BOX_GLSL}
 void main() {
   float d = texture2D(tDepth, vUv).r;
   float vz = perspectiveDepthToViewZ(d, cameraNear, cameraFar);
@@ -80,7 +93,7 @@ void main() {
   for (int i = 0; i < ${MOTION_CARS}; i++) {
     if (i >= carCount) break;
     vec3 l = (carInv[i] * vec4(wpos, 1.0)).xyz;
-    if (all(greaterThan(l, boxMin)) && all(lessThan(l, boxMax))) {
+    if (inCarBox(l)) {
       prev = (carPrev[i] * vec4(l, 1.0)).xyz;
       onCar = 1.0;
       break;
