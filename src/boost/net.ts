@@ -239,6 +239,14 @@ export class Host {
     for (const g of this.guests.values()) if (g.ctl?.open) g.ctl.send(m);
   }
 
+  /** a new match: forget the inputs buffered from the last one (sequence numbers carry on) */
+  newMatch(): void {
+    for (const g of this.guests.values()) {
+      g.queue = [];
+      g.lastInput = null;
+    }
+  }
+
   /** this tick's input for a guest (repeats the last one when the buffer is dry) */
   nextInput(id: string): { input: Input | null; seq: number } {
     const g = this.guests.get(id);

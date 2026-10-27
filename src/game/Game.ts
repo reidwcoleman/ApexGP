@@ -3873,7 +3873,7 @@ export class Game {
       spots: this.garage?.spots ?? null,
       camera: this.camera,
       // (the parts you can click to look at up close: on the car development tab, not over every screen)
-      overviewMarkers: this.hubTab === 'car',
+      overviewMarkers: false,
       panelLeft: this.tour.at ? innerWidth : innerWidth - 500 * uiScale(),
       flying: !!this.tour.flight,
     });

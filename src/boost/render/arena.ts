@@ -19,6 +19,8 @@ const ORANGE = new THREE.Color(0xff7417);
 export const uDay = { value: 1 };
 /** the arena's grass colour (multiplies the pitch) */
 const uGrassTint = { value: new THREE.Color(1, 1, 1) };
+/** the ball (0) and up to 8 cars, in sim cm (w = 1 for the ball): the wall's hex panels light up around them */
+export const uNear = { value: Array.from({ length: 9 }, () => new THREE.Vector4(0, 0, -9999, 0)) };
 
 const GLSL_COMMON = /* glsl */ `
 uniform float uDay;
@@ -274,12 +276,21 @@ function shell(): THREE.Group {
     float edge = 1.0 - smoothstep(0.0, 0.035, hex);
     float fade = 1.0 - smoothstep(500.0, 2300.0, z);
     float pulse = 0.5 + 0.5 * sin(uTime * 1.3 + vBB.x * 0.002 - z * 0.003);
+    // the panels light up where the ball or a car comes near (driving on the wall, a ball off it)
+    float near = 0.0;
+    for (int i = 0; i < 9; i++) {
+      float d = distance(vSim, uNear[i].xyz);
+      float r = uNear[i].w > 0.5 ? 620.0 : 430.0;
+      near = max(near, (1.0 - smoothstep(0.0, r, d)) * (uNear[i].w > 0.5 ? 1.0 : 0.8));
+    }
+    float rim = 1.0 - smoothstep(0.0, 0.09, hex);
     diffuseColor.rgb = mix(vec3(0.5, 0.6, 0.75), team, 0.4);
-    diffuseColor.a = 0.035 + uDay * 0.03 + edge * (0.28 * fade + 0.05) ;
-    vec3 bbEmit = (team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade) * mix(1.0, 0.4, uDay);
+    diffuseColor.a = 0.035 + uDay * 0.03 + edge * (0.28 * fade + 0.05) + near * (0.1 + rim * 0.55);
+    vec3 bbEmit = (team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade) * mix(1.0, 0.4, uDay)
+      + mix(team, vec3(0.9, 0.95, 1.0), 0.35) * near * (rim * 1.6 + 0.12);
     `,
-    { uTime: uT },
-    'uniform float uTime;',
+    { uTime: uT, uNear },
+    'uniform float uTime;\nuniform vec4 uNear[9];',
   );
   const glass = new THREE.Mesh(shellGeometry(345, ARENA.Z + 1), glassMat);
   glass.renderOrder = 5;

@@ -15,6 +15,7 @@ import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
 import { artFor } from './loadingArt.ts';
 import { openWizard, renderHub, renderRd, renderRoundSummary, renderStart } from './CareerHub.ts';
+import { renderResearch } from './Research.ts';
 import { renderTour, resetTour } from './Tour.ts';
 import { LAP_CHOICES, type DriverCareer, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import type { PlayerDriver } from '../career/Series.ts';
@@ -449,7 +450,7 @@ export class Menu {
     const p = this.hubPanel;
     if (!p) return;
     p.innerHTML = '';
-    p.className = this.hubTab === 'home' ? 'hub-panel home' : 'hub-panel glass' + (this.hubTab === 'career' ? ' wide' : '');
+    p.className = this.hubTab === 'home' ? 'hub-panel home' : 'hub-panel glass' + (this.hubTab === 'career' || this.hubTab === 'car' ? ' wide' : '');
     p.style.backgroundImage = '';
     p.style.removeProperty('--team');
     void p.offsetWidth;
@@ -609,31 +610,21 @@ export class Menu {
       });
       return;
     }
-    el('div', 'hp-cap', p, 'Car development');
-    const dev = Math.round(this.career.development() * 100);
-    el('div', 'devbar', p, `<div class="lbl"><span>Overall</span><b>${dev}%</b></div><div class="track"><i style="width:${dev}%"></i></div>`);
-    for (const u of UPGRADES) {
-      const n = this.career.level(u.id);
-      const max = n >= MAX_LEVEL;
-      const cost = upgradeCost(n);
-      const afford = this.career.data.credits >= cost;
-      const row = el('div', 'uprow' + (max ? ' max' : !afford ? ' poor' : ''), p);
-      const pips = Array.from({ length: MAX_LEVEL }, (_, k) => `<i class="${k < n ? 'on' : ''}"></i>`).join('');
-      row.innerHTML = `<div class="ul"><div class="un">${u.name}</div><div class="us">${max ? 'Fully developed' : `Next: ${u.step}`}</div></div><div class="pips">${pips}</div><div class="ubtn">${max ? 'Max' : fmtCr(cost)}</div>`;
-      this.action(row, () => {
-        if (this.career.buy(u.id)) {
-          this.cb.onCarChange();
-          const keep = this.sel;
-          this.renderCredits();
-          this.renderTab();
-          this.sel = keep;
-          this.highlight();
-          const r = this.items[keep]?.el;
-          r?.classList.add('bought');
-        }
-      }, max || !afford);
-    }
-    el('div', 'hp-note', p, 'Upgrades apply to your car only. Earn credits by scoring points: a win pays ' + fmtCr(75000) + '.');
+    renderResearch(p, {
+      career: this.career,
+      action: (e, fn, dis) => this.action(e, fn, dis),
+      fmtCr,
+      sound: (k) => this.cb.onUi(k),
+      researched: () => {
+        this.cb.onCarChange();
+        this.cb.onUi('select');
+        const keep = this.sel;
+        this.renderCredits();
+        this.renderTab();
+        this.sel = keep;
+        this.highlight();
+      },
+    });
   }
 
   private tabPaint(p: HTMLElement) {

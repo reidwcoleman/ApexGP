@@ -17,6 +17,10 @@ export interface Profile {
   fov: number;
   dist: number;
   height: number;
+  /** degrees, -15..0 */
+  angle: number;
+  stiff: number;
+  trans: number;
   ballCam: boolean;
   volume: number;
   shake: boolean;
@@ -27,7 +31,7 @@ export interface Profile {
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', keys: 'arcade' };
+  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', keys: 'arcade' };
   try {
     const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
     // (profiles from before arenas and times: the old Day / Night switch)
@@ -197,6 +201,9 @@ export class UI {
     <div class="slider"><span>Field of view</span><input type="range" id="p-fov" min="70" max="120" step="1" value="${p.fov}" /><b id="p-fov-v">${p.fov}</b></div>
     <div class="slider"><span>Cam distance</span><input type="range" id="p-dist" min="180" max="400" step="10" value="${p.dist}" /><b id="p-dist-v">${p.dist}</b></div>
     <div class="slider"><span>Cam height</span><input type="range" id="p-height" min="50" max="200" step="5" value="${p.height}" /><b id="p-height-v">${p.height}</b></div>
+    <div class="slider"><span>Cam angle</span><input type="range" id="p-angle" min="-15" max="0" step="1" value="${p.angle}" /><b id="p-angle-v">${p.angle}</b></div>
+    <div class="slider"><span>Cam stiffness</span><input type="range" id="p-stiff" min="0" max="1" step="0.05" value="${p.stiff}" /><b id="p-stiff-v">${p.stiff.toFixed(2)}</b></div>
+    <div class="slider"><span>Transition speed</span><input type="range" id="p-trans" min="1" max="2" step="0.1" value="${p.trans}" /><b id="p-trans-v">${p.trans.toFixed(1)}</b></div>
     <div class="slider"><span>Volume</span><input type="range" id="p-vol" min="0" max="1" step="0.05" value="${p.volume}" /><b id="p-vol-v">${Math.round(p.volume * 100)}</b></div>
     <div class="seg" id="p-shake"><button data-v="1" class="${p.shake ? 'on' : ''}">Camera shake</button><button data-v="0" class="${p.shake ? '' : 'on'}">No shake</button></div>
     <button class="mbtn primary small" id="p-resume" style="margin-top:8px"><span>Resume</span></button>
@@ -283,7 +290,7 @@ export class UI {
       if (k) this.onLobbyKick(k.getAttribute('data-kick')!);
     });
     // pause
-    const slider = (id: string, key: 'fov' | 'dist' | 'height' | 'volume', fmt = (v: number) => String(v)) => {
+    const slider = (id: string, key: 'fov' | 'dist' | 'height' | 'angle' | 'stiff' | 'trans' | 'volume', fmt = (v: number) => String(v)) => {
       const el = this.$<HTMLInputElement>(id);
       el.addEventListener('input', () => {
         this.profile[key] = Number(el.value);
@@ -294,6 +301,9 @@ export class UI {
     slider('#p-fov', 'fov');
     slider('#p-dist', 'dist');
     slider('#p-height', 'height');
+    slider('#p-angle', 'angle');
+    slider('#p-stiff', 'stiff', (v) => v.toFixed(2));
+    slider('#p-trans', 'trans', (v) => v.toFixed(1));
     slider('#p-vol', 'volume', (v) => String(Math.round(v * 100)));
     seg('#seg-keys', (v) => {
       this.profile.keys = v === 'classic' ? 'classic' : 'arcade';

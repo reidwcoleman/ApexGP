@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Audio } from './audio.ts';
 import { Controls } from './input.ts';
 import { botPlan, Guest2, Host, makeCode, packInputs, quant, type CtlMsg, type LobbyPlayer, type LobbyState } from './net.ts';
-import { buildArena, type ArenaView } from './render/arena.ts';
+import { buildArena, uNear, type ArenaView } from './render/arena.ts';
 import { asMap, asTime, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
@@ -125,6 +125,9 @@ export class Game {
     CAM.FOV = p.fov;
     CAM.DIST = p.dist;
     CAM.HEIGHT = p.height;
+    CAM.ANGLE = p.angle;
+    CAM.STIFF = p.stiff;
+    CAM.TRANS = p.trans;
     this.cam.ballCam = p.ballCam;
     this.audio.setVolume(p.volume);
     this.controls.classic = p.keys === 'classic';
@@ -437,6 +440,7 @@ export class Game {
     L.inMatch = true;
     this.lobbyIdle = false;
     const seed = (Math.random() * 1e9) | 0;
+    this.host.newMatch();
     this.host.broadcast({ t: 'start', roster, minutes: L.minutes, seed });
     this.mode = 'host';
     this.setup(roster, true);
@@ -516,13 +520,14 @@ export class Game {
       this.me = m.roster.findIndex((p) => p.owner === this.myId);
       this.world.seed = m.seed;
       this.world.start({ minutes: m.minutes });
-      this.seq = 0;
+      // sequence numbers carry on across matches: the host keeps the last one it saw from us
       this.hist = [];
       this.snap = null;
       this.lastSnapTick = -1;
       this.enterMatch();
       if (this.me < 0) this.ui.tip('Spectating — you are in the next match');
     } else if (m.t === 'toLobby') {
+      this.snap = null;
       this.mode = 'attract';
       this.me = -1;
       this.ui.showHud(false);
@@ -962,6 +967,15 @@ export class Game {
         }
         this.cam.apply(this.stage.camera, dt);
       }
+    }
+
+    // the wall panels light up near the ball and the cars
+    if (this.ball.mesh.visible) uNear.value[0].set(bp.x, bp.y, bp.z, 1);
+    else uNear.value[0].set(0, 0, -99999, 1);
+    for (let i = 1; i < 9; i++) {
+      const v = this.views[i - 1];
+      if (v && v.group.visible && (!w.cars[i - 1] || w.cars[i - 1].alive)) uNear.value[i].set(v.group.position.x, v.group.position.y, v.group.position.z, 0);
+      else uNear.value[i].set(0, 0, -99999, 0);
     }
 
     // effects

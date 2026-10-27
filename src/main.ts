@@ -12,6 +12,7 @@ import './ui/tokens.css';
 import './ui/hud.css';
 import './ui/menu.css';
 import './ui/tour.css';
+import './ui/research.css';
 import { Game } from './game/Game.ts';
 import { initUiScale } from './ui/scale.ts';
 import { loadPeople, setPeopleRestGate } from './people/Humans.ts';
