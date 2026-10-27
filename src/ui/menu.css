@@ -4921,3 +4921,9 @@
   pointer-events: none;
   z-index: -1;
 }
+
+/* walking round the car in the garage */
+body.garage-drag,
+body.garage-drag * {
+  cursor: grabbing !important;
+}

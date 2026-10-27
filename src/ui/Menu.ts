@@ -427,7 +427,7 @@ export class Menu {
     this.hubCredits = el('div', 'hub-credits', top);
     this.renderCredits();
     this.hubPanel = el('div', 'hub-panel', s);
-    el('div', 'keys hub-keys', s, '<span><kbd>Q</kbd><kbd>E</kbd> tabs</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span>');
+    el('div', 'keys hub-keys', s, '<span><kbd>Q</kbd><kbd>E</kbd> tabs</span><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span><span><kbd>Drag</kbd><kbd>Scroll</kbd> look around the car</span>');
     this.setTab(this.hubTab);
   }
 

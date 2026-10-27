@@ -305,6 +305,9 @@ export class Game {
       onUi: (k) => this.audioReady && this.audio.ui(k),
       onHubTab: (t) => {
         this.hubTab = t;
+        // (each tab's shot starts composed)
+        this.garageWalk.ty = this.garageWalk.tp = 0;
+        this.garageWalk.tz = 1;
         this.garageOrbit.active = false;
         if (this.tour.at) this.tourExit();
         if (t === 'career') this.garage?.refreshStats();
@@ -3523,6 +3526,33 @@ export class Game {
       toW([sh.cam[0], sh.cam[1] + Math.sin(t * 0.17) * 0.05, sh.cam[2] + drift], wantPos);
       toW(sh.look, wantLook);
       if (this.hubTab === 'highlights') wantLook.copy(this.garage.wallCenter);
+      // where you've walked the shot to: a swing round the car, up or down, a step in or back
+      const L = this.garageWalk;
+      const kl = 1 - Math.exp(-(L.drag ? 12 : 4) * dt);
+      L.yaw += (L.ty - L.yaw) * kl;
+      L.pitch += (L.tp - L.pitch) * kl;
+      L.zoom += (L.tz - L.zoom) * kl;
+      if (Math.abs(L.yaw) + Math.abs(L.pitch) + Math.abs(L.zoom - 1) > 1e-4) {
+        const pivot = this.tmp2.copy(c).setY(c.y + 0.5);
+        const off = wantPos.clone().sub(pivot).applyAxisAngle(up, L.yaw);
+        const flat = Math.hypot(off.x, off.z);
+        const el = THREE.MathUtils.clamp(Math.atan2(off.y, flat) + L.pitch, -0.02, 1.15);
+        let r = off.length() * L.zoom;
+        const az = Math.atan2(off.x, off.z);
+        // never walked into the racks and benches: a ray from the car out to the camera, a few times a second
+        const dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+        if (t - L.checked > 0.2) {
+          L.checked = t;
+          const props: THREE.Object3D[] = [];
+          for (const o of this.garage.group.children) if (o.name === 'garage-props') props.push(o);
+          const rc = new THREE.Raycaster(pivot.clone(), dir, 0.8, r + 0.7);
+          const hit = rc.intersectObjects(props, false)[0];
+          L.maxR = hit ? Math.max(1.6, hit.distance - 0.7) : Infinity;
+        }
+        r = Math.min(r, L.maxR);
+        wantPos.set(pivot.x + Math.sin(az) * Math.cos(el) * r, pivot.y + Math.sin(el) * r, pivot.z + Math.cos(az) * Math.cos(el) * r);
+        wantPos.y = Math.max(wantPos.y, c.y + 0.35);
+      }
     }
     // push the subject left of centre: the hub panel is on the right (not while touring: it steps aside)
     if (spot) sh = { ...sh, shift: 0 };
@@ -3823,6 +3853,8 @@ export class Game {
   private garageRig: CarRig | null = null;
   private focusPart: SetupPart | null = null;
   private garageOrbit = { active: false, dragging: false, yaw: 0.8, pitch: 0.25, dist: 6.2, lx: 0, ly: 0 };
+  /** the walk-around: drag swings the shot round the car (a little), the wheel steps in or back */
+  private garageWalk = { yaw: 0, pitch: 0, zoom: 1, ty: 0, tp: 0, tz: 1, checked: -1, maxR: Infinity, drag: null as { x: number; y: number; ty: number; tp: number } | null };
   /** the cursor, -1..1 (target) and eased: the garage shots lean with it a little */
   private garageParallax = { tx: 0, ty: 0, x: 0, y: 0 };
   private hotspotLayer: HTMLDivElement | null = null;
@@ -3837,6 +3869,41 @@ export class Game {
     void O;
     void onUi;
     void freeLook;
+    // walk round the car a little: drag on the garage (not the panels) to swing the shot round it and
+    // up or down, the wheel to step in or back; a double click walks back to the shot. Bounded, so the
+    // composed shots stay composed.
+    const L = this.garageWalk;
+    const inGarage = (e: Event) => this.state === 'menu' && this.menu.screen === 'title' && !T.at && !onUi(e);
+    addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !inGarage(e)) return;
+      L.drag = { x: e.clientX, y: e.clientY, ty: L.ty, tp: L.tp };
+      document.body.classList.add('garage-drag');
+    });
+    addEventListener('pointermove', (e) => {
+      if (!L.drag) return;
+      const k = 2.6 / Math.max(600, innerWidth);
+      L.ty = THREE.MathUtils.clamp(L.drag.ty - (e.clientX - L.drag.x) * k, -0.55, 0.55);
+      L.tp = THREE.MathUtils.clamp(L.drag.tp + (e.clientY - L.drag.y) * k * 0.8, -0.1, 0.4);
+    });
+    const endDrag = () => {
+      L.drag = null;
+      document.body.classList.remove('garage-drag');
+    };
+    addEventListener('pointerup', endDrag);
+    addEventListener('pointercancel', endDrag);
+    addEventListener(
+      'wheel',
+      (e) => {
+        if (!inGarage(e)) return;
+        L.tz = THREE.MathUtils.clamp(L.tz * Math.exp(e.deltaY * 0.0012), 0.7, 1.15);
+      },
+      { passive: true },
+    );
+    addEventListener('dblclick', (e) => {
+      if (!inGarage(e)) return;
+      L.ty = L.tp = 0;
+      L.tz = 1;
+    });
     addEventListener('pointermove', (e) => {
       this.garageParallax.tx = THREE.MathUtils.clamp((e.clientX / Math.max(1, innerWidth)) * 2 - 1, -1, 1);
       this.garageParallax.ty = THREE.MathUtils.clamp((e.clientY / Math.max(1, innerHeight)) * 2 - 1, -1, 1);
