@@ -55,8 +55,28 @@ export function worldProject(lat: number, lon: number): [number, number] {
 
 /** the circuit picked on the map (null: the round you're working on) */
 let sel: string | null = null;
+/** the map's filter (kept while the garage is open) */
+let filter: 'all' | 'open' | 'medals' | 'challenges' = 'all';
 /** the circuit a pass has just opened (its pin bursts on the redraw) */
 let justOpened: string | null = null;
+/** a forecast's icon, from its label ("Rain · Afternoon"): sun, moon, cloud, rain, storm, fog */
+function wxKind(label: string): 'sun' | 'moon' | 'cloud' | 'rain' | 'storm' | 'fog' {
+  const l = label.toLowerCase();
+  if (/thunder|storm/.test(l)) return 'storm';
+  if (/rain|drizzle|shower|wet|changeable/.test(l)) return 'rain';
+  if (/fog|mist|haze/.test(l)) return 'fog';
+  if (/cloud|overcast/.test(l)) return 'cloud';
+  return /night|dusk/.test(l) ? 'moon' : 'sun';
+}
+const WX_ICON: Record<ReturnType<typeof wxKind>, string> = {
+  sun: '<circle r="2.6" fill="#ffd25a"/><path d="M0-5.2v1.4M0 3.8v1.4M-5.2 0h1.4M3.8 0h1.4M-3.7-3.7l1 1M2.7 2.7l1 1M-3.7 3.7l1-1M2.7-2.7l1-1" stroke="#ffd25a" stroke-width="1.1" stroke-linecap="round"/>',
+  moon: '<path d="M1.6-4.2a4.4 4.4 0 1 0 2.8 6.4A3.6 3.6 0 0 1 1.6-4.2z" fill="#cfd8ff"/>',
+  cloud: '<path d="M-4.2 2.6h7.6a2.4 2.4 0 0 0 0-4.8 3.2 3.2 0 0 0-6.1-.7A2.3 2.3 0 0 0-4.2 2.6z" fill="#dfe5ee"/>',
+  rain: '<path d="M-4.2 0.6h7.6a2.3 2.3 0 0 0 0-4.6 3.1 3.1 0 0 0-5.9-.7A2.2 2.2 0 0 0-4.2.6z" fill="#b8c4d4"/><path d="M-2.6 2.2l-.8 2.2M0 2.2l-.8 2.2M2.6 2.2l-.8 2.2" stroke="#5fb4ff" stroke-width="1.1" stroke-linecap="round"/>',
+  storm: '<path d="M-4.2 0.4h7.6a2.3 2.3 0 0 0 0-4.6 3.1 3.1 0 0 0-5.9-.7A2.2 2.2 0 0 0-4.2.4z" fill="#8f9aab"/><path d="M0.4 0.8L-1.2 3.4h1.6L-.6 5.6 1.8 2.6H.2z" fill="#ffd25a"/>',
+  fog: '<path d="M-4.4-2h8.8M-3.6 0h7.2M-4.4 2h8.8" stroke="#c9d1dc" stroke-width="1.2" stroke-linecap="round"/>',
+};
+
 const agoText = (t: number) => {
   const d = Math.floor((Date.now() - t) / 86400000);
   return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 7 ? `${d} days ago` : d < 14 ? 'last week' : `${Math.floor(d / 7)} weeks ago`;
@@ -128,9 +148,11 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       const leader = ox || oy ? `<line class="leader" x1="0" y1="0" x2="${ox}" y2="${oy}"/>` : '';
       const stars = st === 'locked' ? '' : `<g class="pst" transform="translate(0 ${scenic ? 33 : 30})">${[0, 1, 2].map((i) => `<path class="${i < (m ? STARS[m] : 0) ? 'on' : ''}" transform="translate(${(i - 1) * 11} 0) scale(0.95)" d="M0-5.2l1.53 3.1 3.42.5-2.47 2.41.58 3.4L0 2.6l-3.06 1.61.58-3.4-2.47-2.41 3.42-.5z"/>`).join('')}</g>`;
       const nm = `<g class="tag" transform="translate(0 ${st === 'locked' ? 32 : 47})"><text>${esc(cd.short.toUpperCase())}</text></g>`;
+      // the weekend's forecast on every open circuit (top-left corner of the tile)
+      const wx = st === 'locked' ? '' : `<g class="wxb" transform="translate(-16 -16)"><circle r="7.5"/>${WX_ICON[wxKind(ctx.forecast(id))]}</g>`;
       return (
         `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}${id === justOpened ? ' fresh' : ''}" style="--i:${i}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
-        `<g class="pin" transform="translate(${ox} ${oy})"><circle class="halo" r="30"/>${tile}<g class="trk" transform="translate(-13 -13)"><path d="${sh}"/></g>${badge}${stars}${nm}</g></g>`
+        `<g class="pin" transform="translate(${ox} ${oy})"><circle class="halo" r="30"/>${tile}<g class="trk" transform="translate(-13 -13)"><path d="${sh}"/></g>${badge}${wx}${stars}${nm}</g></g>`
       );
     })
     .join('');
@@ -319,6 +341,55 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   zin.title = 'Zoom in';
   zout.title = 'Zoom out';
   zall.title = 'Every circuit';
+  // filters: dim every pin but the ones that matter for what you're after
+  type Filter = 'all' | 'open' | 'medals' | 'challenges';
+  const filt = el('div', 'tr-filt', map);
+  const FILTERS: [Filter, string][] = [['all', 'All'], ['open', 'Open'], ['medals', 'Stars to win'], ['challenges', 'Challenges']];
+  const keep = (id: string, f: Filter) => {
+    const stt = states.get(id)!;
+    if (f === 'all') return true;
+    if (stt === 'locked') return false;
+    if (f === 'open') return true;
+    if (f === 'medals') return medalFor(best(id)) !== 'gold';
+    return !c.challengeFor(id).done;
+  };
+  const chipsF = FILTERS.map(([f, label]) => {
+    const b = el('button', 'fb' + (f === filter ? ' on' : ''), filt, label);
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      filter = f;
+      chipsF.forEach((k, i) => k.classList.toggle('on', FILTERS[i][0] === f));
+      for (const w of pinws) w.classList.toggle('dim', !keep(w.dataset.id!, f));
+    });
+    return b;
+  });
+  for (const w of pinws) w.classList.toggle('dim', !keep(w.dataset.id!, filter));
+  // hover: a small card by the pin — the circuit, its medal, the forecast, the challenge
+  const tip = el('div', 'tr-tip', map);
+  map.addEventListener('pointerover', (e) => {
+    const g = (e.target as Element).closest<SVGGElement>('.pinw');
+    if (!g?.dataset.id || drag?.moved) return;
+    const id = g.dataset.id;
+    const cd = ALL_CIRCUITS.find((x) => x.id === id)!;
+    const stt = states.get(id)!;
+    const m = medalFor(best(id));
+    const ch = c.challengeFor(id);
+    tip.innerHTML =
+      `<b>${esc(cd.name)}</b><span class="tc">${esc(ctx.info(id).country)}</span>` +
+      (stt === 'locked'
+        ? `<span class="tl">${isScenic(id) ? `${SCENIC_STARS[id]} stars to open` : c.passes() ? 'Open it with a Tour pass' : 'Locked · earn a Tour pass'}</span>`
+        : `<span class="tf"><svg viewBox="-6 -6 12 12" width="14" height="14">${WX_ICON[wxKind(ctx.forecast(id))]}</svg>${esc(ctx.forecast(id))}</span>` +
+          `<span class="tm">${m ? `<i class="md ${m}"></i>${MEDAL_WORD[m]} · best P${best(id)}` : 'No medal yet'}${ch.done ? ' · challenge done' : ''}</span>`);
+    const r = map.getBoundingClientRect();
+    const pr = g.querySelector('.pin')!.getBoundingClientRect();
+    const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
+    tip.style.left = `${(pr.right - r.left) / z + 10}px`;
+    tip.style.top = `${(pr.top - r.top) / z}px`;
+    tip.classList.add('on');
+  });
+  map.addEventListener('pointerout', (e) => {
+    if (!(e.relatedTarget as Element | null)?.closest?.('.pinw')) tip.classList.remove('on');
+  });
   zin.addEventListener('click', () => zoomBy(1.5));
   zout.addEventListener('click', () => zoomBy(1 / 1.5));
   zall.addEventListener('click', () => overview());

@@ -1008,3 +1008,86 @@
   color: #1a1406;
   background: var(--gold);
 }
+
+/* the forecast on each open pin */
+.tr-svg .wxb > circle {
+  fill: #12151c;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1;
+}
+/* filtered out: faded back */
+.tr-svg .pinw.dim {
+  opacity: 0.22;
+}
+.tr-svg .pinw {
+  transition: opacity 0.3s;
+}
+.tr-filt {
+  position: absolute;
+  right: calc(360px + var(--s4) * 2);
+  top: var(--s4);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(8, 10, 14, 0.85);
+  clip-path: var(--chamfer-sm);
+}
+.tr-filt .fb {
+  padding: 6px 10px;
+  font: 600 12px var(--font);
+  color: var(--ink2);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.tr-filt .fb:hover {
+  color: var(--ink);
+}
+.tr-filt .fb.on {
+  color: var(--ink-dark);
+  background: #fff;
+}
+/* the pin's hover card */
+.tr-tip {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 170px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: var(--ink2);
+  background: rgba(8, 10, 14, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  clip-path: var(--chamfer-sm);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.tr-tip.on {
+  opacity: 1;
+  transform: none;
+}
+.tr-tip b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.tr-tip .tc {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.tr-tip .tf,
+.tr-tip .tm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tr-tip .tl {
+  color: var(--accent);
+}
