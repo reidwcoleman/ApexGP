@@ -127,6 +127,11 @@ const HB_LAT_FRICTION = 0.1;
 const THROTTLE_TORQUE = (CAR.MASS * 400) / 50;
 const BRAKE_TORQUE = (CAR.MASS * (14.25 + 1 / 3)) / 50;
 const ROLLING_MAGIC = 113.73963;
+// car against the arena (CARWORLD_COLLISION_*)
+const CAR_WORLD_E = 0.3;
+const CAR_WORLD_MU = 0.3;
+const Z_AXIS = new V3(0, 0, 1);
+const X_AXIS = new V3(1, 0, 0);
 
 // inertia of the hitbox (diagonal, local)
 const IXX = (CAR.MASS / 12) * ((2 * CAR.HY) ** 2 + (2 * CAR.HZ) ** 2);
@@ -192,6 +197,10 @@ export class Car {
   bodyAgo = 9;
   /** the surface normal at the hitbox's last wall contact */
   bodyN = new V3(0, 0, 1);
+  private contacts: { p: V3; d: number; n: V3; t: V3; jn: number; jt: number; jp: number; bias: number; imn: number; imt: number }[] = [];
+  // split-impulse push velocities: move the car out of overlap this tick, then vanish
+  private pushV = new V3();
+  private pushW = new V3();
   // btVehicleRL state carried between ticks (set by _UpdateWheels, used from the next tick)
   steerAngle = 0;
   engine = 0;
@@ -402,9 +411,9 @@ export class Car {
     // ---- the physics step: forces, then contacts, then positions
     this.vel.addScaled(acc, dt);
     this.w.addScaled(ang, dt);
-    this.collideArena();
-    this.pos.addScaled(this.vel, dt);
-    r.integrate(this.w, dt);
+    this.collideArena(dt);
+    this.pos.addScaled(this.vel, dt).addScaled(this.pushV, dt);
+    r.integrate(tmpT.copy(this.w).add(this.pushW), dt);
 
     // ---- Car::_FinishPhysicsTick / _PostTickUpdate: caps, supersonic
     this.vel.clampLen(CAR.MAX_SPEED);
@@ -691,42 +700,96 @@ export class Car {
     if (inp.throttle !== 0) acc.addScaled(r.f, inp.throttle * CAR.AIR_THROTTLE);
   }
 
-  /** the hitbox against the walls: push out and kill the inward velocity */
-  private collideArena(): void {
-    const p = tmpC;
-    let deepest = 0;
-    let dn: V3 | null = null;
-    let dp: V3 | null = null;
+  /**
+   * The hitbox against the arena, as Bullet solves it for the car's box: up to four contact points
+   * (the deepest, then the most spread out, like a persistent manifold), ten sequential-impulse
+   * iterations of a non-penetration constraint with restitution 0.3 (above 10 uu/s) and one
+   * friction direction along the slide (μ 0.3), and split impulse: overlap is pushed out with its
+   * own velocity (erp2 0.8) that moves the car this tick without adding to its momentum.
+   */
+  private collideArena(dt: number): void {
+    const cs = this.contacts;
+    cs.length = 0;
     for (const lp of BODY_PTS) {
-      this.rot.toWorld(lp.x, lp.y, lp.z, p).add(this.pos);
+      const p = this.rot.toWorld(lp.x, lp.y, lp.z, new V3()).add(this.pos);
       const d = sdf(p.x, p.y, p.z);
-      if (d < deepest) {
-        deepest = d;
-        dp = p.clone();
-        dn = normalAt(p.x, p.y, p.z, new V3());
+      if (d < 1) cs.push({ p, d, n: normalAt(p.x, p.y, p.z, new V3()), t: new V3(), jn: 0, jt: 0, jp: 0, bias: 0, imn: 0, imt: 0 });
+    }
+    this.pushV.set(0, 0, 0);
+    this.pushW.set(0, 0, 0);
+    this.bodyTouch = cs.length > 0;
+    this.bodyAgo = this.bodyTouch ? 0 : this.bodyAgo + dt;
+    if (!cs.length) return;
+    // the manifold: the deepest point, then each next the farthest from those already kept
+    cs.sort((a, b) => a.d - b.d);
+    const keep = [cs[0]];
+    while (keep.length < 4 && keep.length < cs.length) {
+      let best = -1;
+      let bi = -1;
+      for (let i = 0; i < cs.length; i++) {
+        if (keep.includes(cs[i])) continue;
+        let m = Infinity;
+        for (const k of keep) m = Math.min(m, k.p.dist(cs[i].p));
+        if (m > best) {
+          best = m;
+          bi = i;
+        }
+      }
+      if (bi < 0 || best < 4) break;
+      keep.push(cs[bi]);
+    }
+    cs.length = 0;
+    cs.push(...keep);
+    this.bodyN.copy(cs[cs.length - 1].n);
+    // set up: restitution from the approach speed, the friction direction from the slide
+    for (const c of cs) {
+      const v = this.pointVel(c.p, q1);
+      const vn = v.dot(c.n);
+      c.imn = this.invMassAt(c.p, c.n);
+      c.bias = vn < -10 ? -CAR_WORLD_E * vn : 0;
+      // (a point just short of the wall may close the gap this tick, no more)
+      if (c.d > 0) c.bias -= c.d / dt;
+      c.t.copy(v).addScaled(c.n, -vn);
+      if (c.t.len2() > 1e-6) c.t.norm();
+      else c.t.crossVectors(c.n, Math.abs(c.n.z) < 0.9 ? Z_AXIS : X_AXIS).norm();
+      c.imt = this.invMassAt(c.p, c.t);
+    }
+    // Bullet's order each iteration: every contact's normal, then every contact's friction
+    for (let it = 0; it < 10; it++) {
+      for (const c of cs) {
+        const vn = this.pointVel(c.p, q1).dot(c.n);
+        const old = c.jn;
+        c.jn = Math.max(0, c.jn + (c.bias - vn) / c.imn);
+        if (c.jn !== old) this.impulse(q2.copy(c.n).scale(c.jn - old), c.p);
+      }
+      for (const c of cs) {
+        const vt = this.pointVel(c.p, q1).dot(c.t);
+        const old = c.jt;
+        const lim = CAR_WORLD_MU * c.jn;
+        c.jt = clamp(c.jt - vt / c.imt, -lim, lim);
+        if (c.jt !== old) this.impulse(q2.copy(c.t).scale(c.jt - old), c.p);
       }
     }
-    this.bodyTouch = !!dn;
-    this.bodyAgo = dn ? 0 : this.bodyAgo + 1 / 120;
-    if (!dn || !dp) return;
-    this.bodyN.copy(dn);
-    this.pos.addScaled(dn, -deepest);
-    const pv = this.pointVel(dp, new V3());
-    const vn = pv.dot(dn);
-    if (vn < 0) {
-      const e = 0.3;
-      const im = this.invMassAt(dp, dn);
-      const jn = (-(1 + e) * vn) / im;
-      const J = dn.clone().scale(jn);
-      // friction on the slide
-      const vt = pv.clone().addScaled(dn, -vn);
-      const vtl = vt.len();
-      if (vtl > 1e-3) {
-        const imt = this.invMassAt(dp, vt.clone().scale(1 / vtl));
-        const jt = Math.min(vtl / imt, 0.3 * jn);
-        J.addScaled(vt, -jt / vtl);
+    // split impulse: the overlap's own push velocity, solved after
+    for (let it = 0; it < 10; it++) {
+      for (const c of cs) {
+        if (c.d >= 0) continue;
+        const pv = q3.subVectors(c.p, this.pos);
+        const pn = q4.crossVectors(this.pushW, pv).add(this.pushV).dot(c.n);
+        const old = c.jp;
+        c.jp = Math.max(0, c.jp + ((-c.d * 0.8) / dt - pn) / c.imn);
+        if (c.jp !== old) this.pushImpulse(q2.copy(c.n).scale(c.jp - old), c.p);
       }
-      this.impulse(J, dp);
     }
+  }
+
+  /** an impulse on the split-impulse push velocities only */
+  private pushImpulse(J: V3, p: V3): void {
+    this.pushV.addScaled(J, 1 / CAR.MASS);
+    tmpA.subVectors(p, this.pos);
+    tmpB.crossVectors(tmpA, J);
+    this.rot.toLocal(tmpB, tmpC);
+    tmpC.set(tmpC.x / IXX, tmpC.y / IYY, tmpC.z / IZZ);
+    this.pushW.add(this.rot.toWorld(tmpC.x, tmpC.y, tmpC.z, tmpB));
   }
 }

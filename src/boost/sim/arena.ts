@@ -1,9 +1,11 @@
 import { V3 } from './math.ts';
 
 /**
- * The standard pitch, to the real game's measurements (cm): side walls at x = ±4096, back walls at
- * y = ±5120, the ceiling at 2044, the four corners cut by |x| + |y| = 8064, every edge rounded with
- * a 300 radius (the ramps you drive up the walls on). Goals 1786 wide, 642.8 tall, 880 deep.
+ * The standard pitch, to the real game's published measurements (cm, RLBot / RLGym game values):
+ * side walls at x = ±4096, back walls at y = ±5120, the ceiling at 2044, the four corners cut 1152
+ * along each wall (|x| + |y| = 8064), the ramps up the walls 256 high (every edge is rounded with
+ * that radius; the ceiling's isn't published, so it shares it). Goals 892.755 either side of
+ * centre, 642.775 tall, back of the net at 6000.
  *
  * Collision runs on a signed distance (positive in the open air) built from exact pieces: the
  * rounded arena interior, the goal boxes, and the goal mouth's posts and crossbar as segments.
@@ -14,8 +16,8 @@ export const ARENA = {
   Y: 5120,
   Z: 2044,
   CORNER: 8064,
-  R: 300,
-  GOAL_W: 893, // half width
+  R: 256,
+  GOAL_W: 892.755, // half width
   GOAL_H: 642.775,
   GOAL_D: 880,
 } as const;
