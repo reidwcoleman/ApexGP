@@ -439,7 +439,7 @@ export class Menu {
       : `<div class="cap">Credits</div><div class="val">${fmtCr(this.career.data.credits)}</div>`;
   }
 
-  private setTab(tab: HubTab) {
+  setTab(tab: HubTab) {
     this.hubTab = tab;
     this.hubTabs.forEach((e, i) => e.classList.toggle('on', HUB_TABS[i].id === tab));
     this.cb.onHubTab(tab);
@@ -518,9 +518,10 @@ export class Menu {
       const tn = this.career.nextRound();
       const tc = tn ? ALL_CIRCUITS.find((c) => c.id === tn)! : null;
       const st = this.career.stars();
-      el('div', 'eyebrow', box, `World Tour · ${st} of ${ALL_CIRCUITS.length * 3} stars`);
-      el('div', 'title', box, tc ? `Next up: ${tc.short}` : 'Every circuit open');
-      el('div', 'meta', box, tc ? `Top ${UNLOCK_POS} at ${tc.short} opens the next circuit on the map.` : 'Go back for the wins: every win is three stars.');
+      const pz = this.career.passes();
+      el('div', 'eyebrow', box, `World Tour · ${this.career.rank().name} · ${st} of ${ALL_CIRCUITS.length * 3} stars`);
+      el('div', 'title', box, tc ? `Next up: ${tc.short}` : pz ? 'Open a new circuit' : 'Go for the wins');
+      el('div', 'meta', box, pz ? `You have ${pz} Tour pass${pz === 1 ? '' : 'es'}: open any circuit on the map.` : tc ? `Top ${UNLOCK_POS} at ${tc.short} earns a star and a Tour pass to open any circuit.` : 'Every win is three stars. Race any open circuit, in any order.');
       const go = el('div', 'cta home-go', box, tc ? `Race ${tc.short}` : 'World Tour');
       this.action(go, () => (tc ? this.cb.onCareerRace(tc.id) : this.setTab('career')));
       const map = el('div', 'home-quick', box, 'World Tour map ›');
@@ -581,6 +582,11 @@ export class Menu {
         this.cb.onTimeTrial?.(id);
       },
       onWatch: this.cb.onSpectate ? () => this.cb.onSpectate?.({ ...this.setup }) : undefined,
+      rerender: () => {
+        this.renderTab();
+        this.renderCredits();
+      },
+      sound: (k) => this.cb.onUi(k),
       forecast: (id) => fcLabel(this.cb.careerForecast(id)),
       info: (id) => CIRCUIT_INFO[id] ?? { country: ALL_CIRCUITS.find((c) => c.id === id)?.country ?? '', km: '', turns: 0 },
       circuitPath,
@@ -1009,7 +1015,7 @@ export class Menu {
       el('div', 'pcap round', p, scenic ? 'World Tour · Scenic bonus' : `World Tour · Round ${ri + 1} of ${CIRCUITS.length}`);
       el('h2', '', p, cd?.name ?? 'Race');
       const m = medalFor(this.career.data.best[st.track]);
-      const goal = !m ? (scenic ? `top ${UNLOCK_POS} earns your first star` : `top ${UNLOCK_POS} opens ${CIRCUITS[ri + 1]?.short ?? 'the last stars'}`) : m === 'gold' ? 'all three stars won here' : `beat P${this.career.data.best[st.track]} for more stars`;
+      const goal = !m ? (scenic ? `top ${UNLOCK_POS} earns your first star` : `top ${UNLOCK_POS} earns a star and a Tour pass`) : m === 'gold' ? 'all three stars won here' : `beat P${this.career.data.best[st.track]} for more stars`;
       el('p', 'lede', p, `${fcLabel(fc!)} · ${goal}`);
     } else {
       el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
@@ -1612,9 +1618,14 @@ export class Menu {
       const parts = reward.breakdown.map((b) => `<span>${b.label} <b>+${fmtCr(b.credits)}</b></span>`).join('');
       el('div', 'rw-main', rw, `<div class="cap">Prize money</div><div class="val">+${fmtCr(reward.credits)}</div>`);
       el('div', 'rw-parts', rw, parts + `<span>Balance <b>${fmtCr(this.career.data.credits)}</b></span>`);
-      if (reward.unlocked) {
-        const cd = CIRCUITS.find((c) => c.id === reward.unlocked);
-        el('div', 'rw-unlock', box, `<b>New circuit unlocked</b> · ${cd?.name ?? reward.unlocked} is open in the garage`);
+      if (reward.medal) {
+        const word = reward.medal === 'gold' ? 'Gold · the win' : reward.medal === 'silver' ? 'Silver · a podium' : `Bronze · top ${UNLOCK_POS}`;
+        el('div', `rw-medal ${reward.medal}`, box, `<i class="md ${reward.medal}"></i><b>New medal</b> · ${word} · ${'★'.repeat(reward.medal === 'gold' ? 3 : reward.medal === 'silver' ? 2 : 1)}`);
+      }
+      if (reward.pass) el('div', 'rw-unlock', box, `<b>Tour pass earned</b> · open any circuit you like on the World Tour map (${this.career.passes()} in hand)`);
+      else if (reward.unlocked) {
+        const cd = ALL_CIRCUITS.find((c) => c.id === reward.unlocked);
+        el('div', 'rw-unlock', box, `<b>New circuit unlocked</b> · ${cd?.name ?? reward.unlocked} is open on the map`);
       }
     }
     if (career) renderRoundSummary(box, career);

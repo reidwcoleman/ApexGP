@@ -1523,6 +1523,12 @@ export class Game {
     this.menu.showCareerSetup();
   }
 
+  /** back to the garage on the World Tour map */
+  private toTourMap() {
+    this.toMenu();
+    this.menu.setTab('career');
+  }
+
   /** a time trial at an open circuit: travel there if needed, then its session screen */
   private async goTimeTrial(id: string) {
     if (!this.career.isUnlocked(id)) return;
@@ -2184,9 +2190,13 @@ export class Game {
       // (outside the top five the round stays the next one: race it again)
       if (nc) next = { label: careerSum?.cleared === false ? `Retry round · ${nc.short}` : this.dc.data!.round === 0 ? `New season · ${nc.short}` : `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
     } else if (this.careerRace && !this.spectating && !this.race.isTimeTrial) {
-      const i = CIRCUITS.findIndex((c) => c.id === this.track.def.id);
-      const nc = CIRCUITS[i + 1];
-      if (nc && this.career.isUnlocked(nc.id)) next = { label: `Next round · ${nc.short}`, go: () => void this.goCareerRound(nc.id) };
+      // a pass to spend: back to the map to pick the next circuit; else the next open circuit without a medal
+      if (this.career.passes() > 0) next = { label: 'Spend your Tour pass', go: () => this.toTourMap() };
+      else {
+        const nid = this.career.nextRound();
+        const nc = nid && nid !== this.track.def.id ? ALL_CIRCUITS.find((c) => c.id === nid) : null;
+        next = nc ? { label: `Next · ${nc.short}`, go: () => void this.goCareerRound(nc.id) } : { label: 'World Tour map', go: () => this.toTourMap() };
+      }
     }
     this.menu.showResults(rows, title, this.spectating ? `Simulated race · ${lede}` : this.careerRace ? `World Tour · ${this.career.stars()} of ${ALL_CIRCUITS.length * 3} stars · ${lede}` : lede, again, () => this.toMenu(), () => this.startReplay(), careerSum ? null : reward, next, careerSum);
   }

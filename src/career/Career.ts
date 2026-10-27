@@ -195,6 +195,8 @@ export interface CareerData {
   aiSkillV?: number;
   /** the World Tour's race distance (5, or 10 with the mandatory stop) */
   tourLaps?: number;
+  /** circuits opened with Tour passes, in the order the player chose them */
+  opened?: string[];
 }
 
 export interface RaceReward {
@@ -203,6 +205,10 @@ export interface RaceReward {
   breakdown: { label: string; credits: number }[];
   /** circuit id unlocked by this result */
   unlocked: string | null;
+  /** a Tour pass earned by this result (a first medal at this circuit) */
+  pass?: boolean;
+  /** the medal this result won, when it's better than the one held before */
+  medal?: Medal;
   bestBefore: number | null;
   /** a career round */
   career?: boolean;
@@ -238,7 +244,20 @@ export function medalFor(best: number | undefined): Medal {
 }
 /** stars a medal is worth on the World Tour */
 export const STARS: Record<Exclude<Medal, null>, number> = { gold: 3, silver: 2, bronze: 1 };
-/** the scenic road courses are the tour's bonus circuits: opened by stars, not by the chain */
+/** the World Tour starts with these three open; every other calendar circuit is opened with a Tour pass */
+export const START_OPEN = ['monza', 'spa', 'silverstone'];
+/** a first medal at a circuit pays for opening it, as well as a pass */
+export const MEDAL_BONUS: Record<Exclude<Medal, null>, number> = { bronze: 6000, silver: 12000, gold: 25000 };
+/** the tour ranks, by stars */
+export const RANKS: { name: string; stars: number }[] = [
+  { name: 'Rookie', stars: 0 },
+  { name: 'Contender', stars: 6 },
+  { name: 'Front-runner', stars: 14 },
+  { name: 'Race winner', stars: 24 },
+  { name: 'Champion', stars: 36 },
+  { name: 'Legend', stars: 48 },
+];
+/** the scenic road courses are the tour's bonus circuits: opened by stars, not by passes */
 export const SCENIC_STARS: Record<string, number> = { serena: 5, bergsee: 12, redmesa: 20 };
 /** the World Tour's race distances */
 export const TOUR_LAPS = [5, 10] as const;
@@ -279,41 +298,62 @@ export class Career {
   }
 
   // ------------------------------------------------------------------ circuits
-  /** circuits are unlocked in calendar order: the first always, then one per top-five finish at the one before */
+  /**
+   * The World Tour opens in any order: three circuits to start, and every first medal (a top five)
+   * at a circuit earns a Tour pass that opens any calendar circuit you like.
+   */
   /** circuits opened another way (the driver career: every circuit its seasons have reached) */
   static extraUnlocked: ((id: string) => boolean) | null = null;
   isUnlocked(id: string): boolean {
     // (once opened, open for good: a new season or a new career never locks it again)
-    // (the scenic road courses are outside the calendar: always open)
     if (UNLOCK_ALL || everUnlocked(id)) return true;
     if (isScenic(id)) {
       const open = this.stars() >= (SCENIC_STARS[id] ?? 0);
       if (open) unlockForever(id);
       return open;
     }
-    let open = !!Career.extraUnlocked?.(id);
-    if (!open) {
-      const i = CIRCUITS.findIndex((c) => c.id === id);
-      if (i <= 0) open = true;
-      else {
-        const prev = this.data.best[CIRCUITS[i - 1].id];
-        open = prev !== undefined && prev <= UNLOCK_POS;
-      }
-    }
+    const open = START_OPEN.includes(id) || (this.data.opened ?? []).includes(id) || !!Career.extraUnlocked?.(id);
     if (open) unlockForever(id);
     return open;
   }
   unlockedCircuits() {
     return CIRCUITS.filter((c) => this.isUnlocked(c.id));
   }
+  /** Tour passes earned: one per calendar circuit with a medal */
+  passesEarned(): number {
+    return CIRCUITS.filter((c) => medalFor(this.data.best[c.id])).length;
+  }
+  /** Tour passes in hand */
+  passes(): number {
+    return Math.max(0, this.passesEarned() - (this.data.opened ?? []).length);
+  }
+  /** open a locked calendar circuit with a Tour pass */
+  openWithPass(id: string): boolean {
+    if (isScenic(id) || this.isUnlocked(id) || this.passes() <= 0 || !CIRCUITS.some((c) => c.id === id)) return false;
+    (this.data.opened ??= []).push(id);
+    this.save();
+    unlockForever(id);
+    return true;
+  }
+  /** the tour rank from the stars, and how far to the next */
+  rank() {
+    const st = this.stars();
+    let i = 0;
+    while (i + 1 < RANKS.length && st >= RANKS[i + 1].stars) i++;
+    const next = RANKS[i + 1] ?? null;
+    const k = next ? (st - RANKS[i].stars) / (next.stars - RANKS[i].stars) : 1;
+    return { index: i, name: RANKS[i].name, next: next?.name ?? null, toNext: next ? next.stars - st : 0, k };
+  }
+  /** this circuit's record: races run, best finish, the last result */
+  recordAt(id: string) {
+    const h = this.data.history.filter((r) => r.track === id);
+    return { races: h.length, best: this.data.best[id], last: h[0] ?? null };
+  }
 
   // ------------------------------------------------------------------ results
-  /** the next round the career is working on: the last unlocked one without a medal (null = season complete) */
+  /** the round to suggest: the first open circuit without a medal, in calendar order (null: all medalled) */
   nextRound(): string | null {
-    for (const c of CIRCUITS) {
-      if (!this.isUnlocked(c.id)) return null;
-      if (medalFor(this.data.best[c.id]) === null) return c.id;
-    }
+    for (const c of CIRCUITS) if (this.isUnlocked(c.id) && medalFor(this.data.best[c.id]) === null) return c.id;
     return null;
   }
   /** stars won on the World Tour (every circuit's best medal: win 3, podium 2, top five 1) */
@@ -373,9 +413,15 @@ export class Career {
     if (!dnf && pos === 1) breakdown.push({ label: 'Race win bonus', credits: 20000 });
     else if (!dnf && pos <= 3) breakdown.push({ label: 'Podium bonus', credits: 8000 });
     if (!dnf && pos > 10) breakdown.push({ label: `Beat ${field - pos} cars`, credits: Math.max(0, field - pos) * 300 });
+    const bestBefore = d.best[track] ?? null;
+    // a better medal here than before: a bonus, and a Tour pass for the first one at a calendar circuit
+    const medalNow = career && !dnf ? medalFor(pos) : null;
+    const rankOf = (m: Medal) => (m ? STARS[m] : 0);
+    const medal = medalNow && rankOf(medalNow) > rankOf(medalFor(bestBefore ?? undefined)) ? medalNow : null;
+    if (medal) breakdown.push({ label: `${medal === 'gold' ? 'Gold' : medal === 'silver' ? 'Silver' : 'Bronze'} medal bonus`, credits: MEDAL_BONUS[medal] });
+    const pass = !!medal && !medalFor(bestBefore ?? undefined) && CIRCUITS.some((c) => c.id === track);
     const credits = breakdown.reduce((a, b) => a + b.credits, 0);
     const wasUnlocked = new Set(this.unlockedCircuits().map((c) => c.id));
-    const bestBefore = d.best[track] ?? null;
     d.races++;
     d.points += points;
     d.credits += credits;
@@ -389,7 +435,7 @@ export class Career {
     d.history.length = Math.min(d.history.length, 40);
     const unlocked = this.unlockedCircuits().find((c) => !wasUnlocked.has(c.id))?.id ?? null;
     this.save();
-    return { points, credits, breakdown, unlocked, bestBefore, career };
+    return { points, credits, breakdown, unlocked, bestBefore, career, pass, medal };
   }
 
   // ------------------------------------------------------------------ dynamic difficulty

@@ -4927,3 +4927,28 @@ body.garage-drag,
 body.garage-drag * {
   cursor: grabbing !important;
 }
+
+/* a new World Tour medal on the results screen */
+.rw-medal {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  padding: var(--s3) var(--s4);
+  font-size: var(--t-row);
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  clip-path: var(--chamfer-sm);
+  animation: rw-medal 0.8s var(--ease-out) 0.5s both;
+}
+.rw-medal .md {
+  width: 14px;
+  height: 14px;
+}
+.rw-medal.gold { box-shadow: inset 3px 0 0 #d9b45a; color: #f3d98f; }
+.rw-medal.silver { box-shadow: inset 3px 0 0 #c3c8cf; }
+.rw-medal.bronze { box-shadow: inset 3px 0 0 #b77b4f; }
+@keyframes rw-medal {
+  from { opacity: 0; transform: translateX(-12px); }
+}

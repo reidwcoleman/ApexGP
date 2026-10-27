@@ -821,3 +821,149 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------- rank, passes, recent results */
+.tr-stats .ts.pass b {
+  gap: 6px;
+  color: var(--ink3);
+}
+.tr-stats .ts.pass.have b {
+  color: #fff;
+}
+.tr-stats .ts.pass.have b svg {
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px var(--accent));
+  animation: tr-pass 2.2s ease-in-out infinite;
+}
+@keyframes tr-pass {
+  50% { transform: rotate(-8deg) scale(1.1); }
+}
+.tr-rank {
+  margin-top: var(--s4);
+  width: 340px;
+}
+.rk-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.rk-top .rk-i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--on-accent, #fff);
+  background: var(--accent);
+  clip-path: var(--chamfer-sm);
+}
+.rk-top b {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.rk-top em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--ink3);
+}
+.rk-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+  margin-top: 6px;
+}
+.rk-bar i {
+  position: relative;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  transform: skewX(-20deg);
+  overflow: hidden;
+}
+.rk-bar i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--k));
+  transition: transform 1s var(--ease-out);
+}
+.tr-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s4);
+  max-width: 420px;
+}
+.tr-recent .cap {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.tr-recent .rr {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--ink2);
+  background: rgba(255, 255, 255, 0.06);
+  clip-path: var(--chamfer-sm);
+}
+.tr-recent .rr b {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--ink);
+}
+.tr-recent .rr.gold b { color: var(--gold); }
+.tr-recent .rr.silver b { color: var(--silver); }
+.tr-recent .rr.bronze b { color: var(--bronze); }
+.tr-recent .rr.dnf b { color: var(--ink3); }
+
+/* a pass in hand: the locked calendar pins glow, waiting to be picked */
+.tr-map.can-open .tr-svg .pinw.locked:not(.scenic) .tile {
+  stroke: var(--accent);
+  stroke-dasharray: none;
+  animation: tr-openable 1.8s ease-in-out infinite;
+}
+@keyframes tr-openable {
+  50% { stroke-opacity: 0.35; }
+}
+.tr-map.can-open .tr-svg .pinw.locked:not(.scenic) .lkb circle {
+  fill: var(--accent);
+  stroke: #fff;
+}
+.tr-why.can .lk-i {
+  color: var(--accent);
+}
+.tr-acts .tr-go.pass {
+  background: #fff;
+  color: var(--ink-dark);
+}
+/* just opened with a pass: the pin bursts, the card flashes */
+.tr-svg .pinw.fresh .halo {
+  animation: tr-pulse 1.1s ease-out 3;
+}
+.tr-svg .pinw.fresh .tile {
+  animation: tr-fresh 0.9s var(--ease-out);
+}
+@keyframes tr-fresh {
+  0% { fill: #fff; transform: scale(1.6); }
+}
+.tr-card.opened {
+  animation: tr-opened 0.9s var(--ease-out);
+}
+@keyframes tr-opened {
+  0% { box-shadow: inset 0 0 0 3px var(--accent), inset 0 0 80px color-mix(in srgb, var(--accent) 45%, transparent); }
+}

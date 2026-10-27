@@ -1,15 +1,16 @@
 import { ALL_CIRCUITS, CIRCUITS, SCENIC, isScenic } from '../world/Circuits.ts';
 import type { CircuitDef } from '../world/CircuitGen.ts';
-import { SCENIC_STARS, STARS, TOUR_LAPS, UNLOCK_POS, medalFor, type Career, type Medal } from '../career/Career.ts';
+import { RANKS, SCENIC_STARS, START_OPEN, STARS, TOUR_LAPS, UNLOCK_POS, medalFor, type Career, type Medal } from '../career/Career.ts';
 import { GEO, PIN_OFFSET } from '../career/Season.ts';
 import { WORLD_BORDERS, WORLD_GRATICULE, WORLD_H, WORLD_LAND, WORLD_OUTLINE, WORLD_PROJ, WORLD_W } from '../career/worldLand.ts';
 import { stillFor } from './loadingArt.ts';
 
 /**
  * The career: the World Tour. No team to join, no season — a map of the world with every circuit on
- * it. The first is open; a top-five finish at one opens the next along the route, and each circuit's
- * best result is a medal worth stars (top five 1, podium 2, win 3). Stars open the three scenic road
- * courses. You race with the car and team you've set up in the garage.
+ * it. Three are open to start and you race them in any order; a first medal (a top five) at a circuit
+ * earns a Tour pass that opens any circuit you choose. Each circuit's best result is a medal worth
+ * stars (top five 1, podium 2, win 3); stars raise your rank and open the three scenic road courses.
+ * You race with the car and team you've set up in the garage.
  *
  * Rendered into the garage's wide hub panel: the map fills it, the tour's title and score sit over
  * its top-left, the picked circuit's card on the right.
@@ -34,6 +35,9 @@ export interface TourCtx {
   onTimeTrial(id: string): void;
   /** watch a simulated race (its own setup screen) */
   onWatch?(): void;
+  /** the tour changed (a circuit opened with a pass): draw it again */
+  rerender(): void;
+  sound(kind: 'move' | 'select' | 'back'): void;
   forecast(id: string): string;
   info(id: string): { country: string; km: string; turns: number; line?: string };
   circuitPath(points: number[], w: number, h: number, pad: number): string;
@@ -51,6 +55,12 @@ export function worldProject(lat: number, lon: number): [number, number] {
 
 /** the circuit picked on the map (null: the round you're working on) */
 let sel: string | null = null;
+/** the circuit a pass has just opened (its pin bursts on the redraw) */
+let justOpened: string | null = null;
+const agoText = (t: number) => {
+  const d = Math.floor((Date.now() - t) / 86400000);
+  return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 7 ? `${d} days ago` : d < 14 ? 'last week' : `${Math.floor(d / 7)} weeks ago`;
+};
 /** back in the garage: the map opens on the next round */
 export function resetTour() {
   sel = null;
@@ -91,18 +101,23 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     return { cd, id: cd.id, x, y, ox: o[0], oy: o[1], st: states.get(cd.id)!, scenic: isScenic(cd.id) };
   });
   const at = (id: string) => pts.find((q) => q.id === id)!;
-  // the route: the calendar's chain, each leg a shallow arc between the circuits' own spots
+  // the route: your own journey, circuit to circuit in the order they opened (the three you start with,
+  // then every one a pass opened), each leg a shallow arc; the legs still to fly, to the circuits you
+  // could open next, dotted
   let done = '';
   let lead = '';
   let todo = '';
-  for (let i = 1; i < CIRCUITS.length; i++) {
-    const a = at(CIRCUITS[i - 1].id);
-    const b = at(CIRCUITS[i].id);
+  const leg = (a: (typeof pts)[number], b: (typeof pts)[number]) => {
     const dd = Math.hypot(b.x - a.x, b.y - a.y);
-    const seg = `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${((a.x + b.x) / 2).toFixed(1)} ${((a.y + b.y) / 2 - Math.min(60, dd * 0.25)).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
-    if (b.st !== 'locked' && b.st !== 'next') done += seg;
-    else if (b.st === 'next' && a.st !== 'locked') lead += seg;
-    else todo += seg;
+    return `M${a.x.toFixed(1)} ${a.y.toFixed(1)}Q${((a.x + b.x) / 2).toFixed(1)} ${((a.y + b.y) / 2 - Math.min(60, dd * 0.25)).toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+  };
+  const journey = [...START_OPEN, ...(c.data.opened ?? [])].filter((id, i, arr) => arr.indexOf(id) === i && pts.some((q) => q.id === id));
+  for (let i = 1; i < journey.length; i++) done += leg(at(journey[i - 1]), at(journey[i]));
+  if (journey.length) {
+    const last = at(journey[journey.length - 1]);
+    // (from where you are now: the nearest locked calendar circuits, the ones a pass would open)
+    const near = pts.filter((q) => q.st === 'locked' && !q.scenic).sort((p1, p2) => Math.hypot(p1.x - last.x, p1.y - last.y) - Math.hypot(p2.x - last.x, p2.y - last.y)).slice(0, 3);
+    for (const q of near) (c.passes() > 0 ? (lead += leg(last, q)) : (todo += leg(last, q)));
   }
   const pinSvg = pts
     .map(({ cd, id, st, x, y, ox, oy, scenic }, i) => {
@@ -114,7 +129,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       const stars = st === 'locked' ? '' : `<g class="pst" transform="translate(0 ${scenic ? 33 : 30})">${[0, 1, 2].map((i) => `<path class="${i < (m ? STARS[m] : 0) ? 'on' : ''}" transform="translate(${(i - 1) * 11} 0) scale(0.95)" d="M0-5.2l1.53 3.1 3.42.5-2.47 2.41.58 3.4L0 2.6l-3.06 1.61.58-3.4-2.47-2.41 3.42-.5z"/>`).join('')}</g>`;
       const nm = `<g class="tag" transform="translate(0 ${st === 'locked' ? 32 : 47})"><text>${esc(cd.short.toUpperCase())}</text></g>`;
       return (
-        `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}" style="--i:${i}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
+        `<g class="pinw ${st}${scenic ? ' scenic' : ''}${m ? ` ${m}` : ''}${id === justOpened ? ' fresh' : ''}" style="--i:${i}" data-id="${id}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}">${leader}<circle class="spot" r="3"/>` +
         `<g class="pin" transform="translate(${ox} ${oy})"><circle class="halo" r="30"/>${tile}<g class="trk" transform="translate(-13 -13)"><path d="${sh}"/></g>${badge}${stars}${nm}</g></g>`
       );
     })
@@ -132,23 +147,34 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     `${pinSvg}</g>` +
     `<rect class="vig" width="${WORLD_W}" height="${WORLD_H}" fill="url(#tr-vig)" pointer-events="none"/></svg>`;
 
-  // the tour's title and score over the map's top-left
-  const chainDone = CIRCUITS.filter((cd) => medalFor(best(cd.id))).length;
+  // the tour's title, rank and score over the map's top-left
+  const passes = c.passes();
+  const rk = c.rank();
+  const recent = c.data.history.slice(0, 6);
+  const shortOf = (id: string) => ALL_CIRCUITS.find((x) => x.id === id)?.short ?? id;
   map.insertAdjacentHTML(
     'beforeend',
-    `<div class="tr-head"><div class="eyebrow">Career</div><div class="tr-title">World <span>Tour</span></div>` +
-      `<div class="tr-sub">Finish top ${UNLOCK_POS} to open the next circuit. Stars open the scenic roads.</div>` +
+    `<div class="tr-head"><div class="eyebrow">Career · ${esc(rk.name)}</div><div class="tr-title">World <span>Tour</span></div>` +
+      `<div class="tr-sub">Race any open circuit, in any order. A first top ${UNLOCK_POS} at a circuit earns a Tour pass: spend it to open any circuit you like.</div>` +
       `<div class="tr-stats"><div class="ts big"><b>${stars}<small>/${maxStars}</small></b><span>${starsSvg(1, 11)}Stars</span></div>` +
       `<div class="ts"><b>${opened}<small>/${ALL_CIRCUITS.length}</small></b><span>Circuits open</span></div>` +
-      `<div class="ts med"><b><i class="md gold"></i>${med.gold}<i class="md silver"></i>${med.silver}<i class="md bronze"></i>${med.bronze}</b><span>Medals</span></div></div>` +
-      `<div class="tr-prog">${CIRCUITS.map((cd) => {
-        const s = states.get(cd.id)!;
-        const m = medalFor(best(cd.id));
-        return `<i class="${s}${m ? ` ${m}` : ''}"></i>`;
-      }).join('')}<em>${chainDone}/${CIRCUITS.length}</em></div></div>` +
-      `<div class="tr-legend"><span><i class="lg tile"></i>Open</span><span><i class="lg next"></i>Next</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span><span><i class="lg dia"></i>Scenic bonus</span>` +
+      `<div class="ts med"><b><i class="md gold"></i>${med.gold}<i class="md silver"></i>${med.silver}<i class="md bronze"></i>${med.bronze}</b><span>Medals</span></div>` +
+      `<div class="ts pass${passes ? ' have' : ''}"><b><svg viewBox="0 0 16 16" width="20" height="20"><path d="M2 4.5h12v2.2a1.6 1.6 0 0 0 0 3.1v2.2H2V9.8a1.6 1.6 0 0 0 0-3.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 5v6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.4 1.4"/></svg>${passes}</b><span>Tour pass${passes === 1 ? '' : 'es'}</span></div></div>` +
+      `<div class="tr-rank"><div class="rk-top"><span class="rk-i">${rk.index + 1}</span><b>${esc(rk.name)}</b>${rk.next ? `<em>${rk.toNext} star${rk.toNext === 1 ? '' : 's'} to ${esc(rk.next)}</em>` : '<em>Top rank</em>'}</div>` +
+      `<div class="rk-bar">${RANKS.slice(1).map((r, i) => `<i class="${i < rk.index ? 'on' : i === rk.index ? 'cur' : ''}" style="--k:${i === rk.index ? rk.k.toFixed(3) : i < rk.index ? 1 : 0}"></i>`).join('')}</div></div>` +
+      (recent.length
+        ? `<div class="tr-recent"><span class="cap">Last races</span>${recent
+            .map((r) => {
+              const m = r.dnf ? null : medalFor(r.pos);
+              return `<span class="rr ${m ?? ''}${r.dnf ? ' dnf' : ''}"><b>${r.dnf ? 'DNF' : `P${r.pos}`}</b>${esc(shortOf(r.track))}</span>`;
+            })
+            .join('')}</div>`
+        : '') +
+      `</div>` +
+      `<div class="tr-legend"><span><i class="lg tile"></i>Open</span><span><i class="lg next"></i>Suggested</span><span><i class="lg locked">${LOCK_ICON}</i>Locked</span><span><i class="lg dia"></i>Scenic bonus</span>` +
       `<span class="md-l"><i class="md gold"></i>Win ★★★<i class="md silver"></i>Podium ★★<i class="md bronze"></i>Top ${UNLOCK_POS} ★</span></div>`,
   );
+  map.classList.toggle('can-open', passes > 0);
 
   // ---------------------------------------------------------------- the picked circuit
   const card = el('div', 'tr-card', p);
@@ -228,10 +254,11 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     }
     // (below the tour's title block, left of the card)
     const padX = 40, padY = 50;
-    const k = Math.max(K_MIN, Math.min(2.2, Math.min(f.free / (x1 - x0 + padX * 2), (f.vh * 0.74) / (y1 - y0 + padY * 2))));
+    // (the title block now carries the rank and the last races: the pins sit in the lower two thirds)
+    const k = Math.max(K_MIN, Math.min(2.2, Math.min(f.free / (x1 - x0 + padX * 2), (f.vh * 0.6) / (y1 - y0 + padY * 2))));
     view.k = k;
     view.tx = f.left + f.free / 2 - ((x0 + x1) / 2) * k;
-    view.ty = f.top + f.vh * 0.6 - ((y0 + y1) / 2) * k;
+    view.ty = f.top + f.vh * 0.66 - ((y0 + y1) / 2) * k;
     apply(glide);
   };
   // drag to pan (a press that moves less than a few pixels is still a click on a pin)
@@ -331,21 +358,31 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
       const n = STARS[k];
       el('div', `rung ${k}${got >= n ? ' won' : ''}`, ladder, `<i class="md ${k}"></i><span>${word}</span><em>${starsSvg(n, 11)}</em>`);
     }
+    const rec = c.recordAt(id);
     if (st === 'locked') {
       const why = scenic
         ? `<b>${SCENIC_STARS[id]} stars</b> open it — you have ${stars}.`
-        : `<b>Finish top ${UNLOCK_POS}</b> at ${esc(CIRCUITS[round - 1]?.short ?? 'the circuit before')} to open it.`;
-      el('div', 'tr-why locked', body, `${LOCK_ICON}<span>${why}</span>`);
-    } else if (b !== undefined) {
-      el('div', 'tr-why', body, `<span>Best finish <b>P${b}</b>${m === 'gold' ? ' · every star here is yours' : ' · race again for more stars'}</span>`);
-    } else if (!scenic) {
-      const after = CIRCUITS[round + 1];
-      el('div', 'tr-why', body, `<span><b>Top ${UNLOCK_POS}</b> ${after ? `opens ${esc(after.short)}` : 'completes the tour'}.</span>`);
+        : passes > 0
+          ? `Spend a <b>Tour pass</b> to open it — you have ${passes}.`
+          : `<b>Earn a Tour pass</b>: finish top ${UNLOCK_POS} at any open circuit you haven't medalled at yet.`;
+      el('div', 'tr-why locked' + (!scenic && passes > 0 ? ' can' : ''), body, `${LOCK_ICON}<span>${why}</span>`);
+    } else if (rec.races) {
+      const ago = rec.last ? agoText(rec.last.date) : '';
+      el(
+        'div',
+        'tr-why rec',
+        body,
+        `<span>Raced <b>${rec.races}×</b>${b !== undefined ? ` · best <b>P${b}</b>` : ''}${rec.last ? ` · last ${rec.last.dnf ? '<b>DNF</b>' : `<b>P${rec.last.pos}</b>`} ${ago}` : ''}${m === 'gold' ? ' · every star here is yours' : m ? ' · race again for more stars' : ''}</span>`,
+      );
+    } else {
+      el('div', 'tr-why', body, `<span>Not raced yet. <b>Top ${UNLOCK_POS}</b> ${scenic ? 'earns its first star' : 'earns a star and a Tour pass'}.</span>`);
     }
+    const openable = st === 'locked' && !scenic && passes > 0;
     lapsRow.hidden = st === 'locked';
     tt.classList.toggle('dis', st === 'locked');
-    go.classList.toggle('dis', st === 'locked');
-    go.textContent = st === 'locked' ? 'Locked' : `Race ${cd.short}`;
+    go.classList.toggle('dis', st === 'locked' && !openable);
+    go.classList.toggle('pass', openable);
+    go.textContent = openable ? 'Open with a pass' : st === 'locked' ? 'Locked' : `Race ${cd.short}`;
   };
   const order = [...CIRCUITS, ...SCENIC].map((x) => x.id);
   const step = (k: number) => {
@@ -355,7 +392,13 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   };
   ctx.action(prev, () => step(-1));
   ctx.action(go, () => {
-    if (states.get(sel!) !== 'locked') ctx.onRace(sel!);
+    if (states.get(sel!) !== 'locked') return ctx.onRace(sel!);
+    // a Tour pass spent: the circuit opens (and the map is drawn again with it lit)
+    if (c.openWithPass(sel!)) {
+      justOpened = sel;
+      ctx.sound('select');
+      ctx.rerender();
+    } else ctx.sound('back');
   });
   ctx.action(fwd, () => step(1));
   ctx.action(tt, () => {
@@ -374,6 +417,15 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
     if (g?.dataset.id && states.get(g.dataset.id) !== 'locked') ctx.onRace(g.dataset.id);
   });
   // opens on the world view: every circuit on the map, the next one picked
+  const fresh = justOpened;
+  justOpened = null;
+  if (fresh) {
+    // (a circuit just opened: the map goes straight to it)
+    draw(false);
+    requestAnimationFrame(() => focus(fresh, false));
+    card.classList.add('opened');
+    return { go };
+  }
   draw(false);
   overview(false);
   // (the panel had no size yet: frame the world again once laid out)
