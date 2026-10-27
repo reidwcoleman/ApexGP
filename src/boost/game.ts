@@ -108,7 +108,7 @@ export class Game {
     this.field.scale.setScalar(S);
     this.arena = buildArena();
     this.stage.scene.add(this.arena.root, this.field);
-    this.field.add(this.ball.mesh, this.ball.glow, this.fx.group);
+    this.field.add(this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group);
     this.controls = new Controls(canvas);
     this.ui = new UI(uiRoot);
     this.applyProfile(this.ui.profile);
@@ -889,6 +889,7 @@ export class Game {
       tq.set(f.ball[3], f.ball[4], f.ball[5], f.ball[6]);
       this.ball.update(tv3.set(bp.x, bp.y, bp.z), tq, 0, dt);
       this.ball.mesh.visible = true;
+      this.ball.shadow.visible = true;
       for (let i = 0; i < this.views.length; i++) {
         const cf = f.cars[i];
         if (!cf) continue;
@@ -907,6 +908,7 @@ export class Game {
       this.ball.update(tv3.set(bp.x, bp.y, bp.z), this.ballQ, w.ball.vel.len(), dt);
       this.ball.mesh.visible = w.phase !== 'goal' && w.phase !== 'replay';
       this.ball.glow.visible = this.ball.mesh.visible;
+      this.ball.shadow.visible = this.ball.mesh.visible;
       const sp = w.ball.vel.len();
       if (sp > 3200 && this.ball.mesh.visible) {
         const team = w.touches[0] ? w.players[w.touches[0][0]]?.team : -1;
@@ -1021,7 +1023,7 @@ export class Game {
   /** boost exhaust: glowing particles from both nozzles */
   private trail(i: number, pos: V3, q: THREE.Quaternion, vel: V3): void {
     const team = this.world.players[i]?.team ?? 0;
-    const col = team === 0 ? [0.5, 1.1, 3.2] : [3.2, 1.3, 0.35];
+    const col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
     const back = new THREE.Vector3(-1, 0, 0).applyQuaternion(q);
     for (const sy of [-1, 1]) {
       const o = new THREE.Vector3(-63, sy * 11, 15).applyQuaternion(q);
@@ -1038,7 +1040,7 @@ export class Game {
           g: col[1],
           b: col[2],
           life: 0.32 + Math.random() * 0.15,
-          size: 38,
+          size: 30,
           grow: -40,
           drag: 2.5,
         });

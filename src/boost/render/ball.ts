@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { sdf } from '../sim/arena.ts';
 import { BALL } from '../sim/ball.ts';
 
 /**
@@ -33,6 +34,8 @@ function panelCentres(): THREE.Vector3[] {
 export class BallView {
   readonly mesh: THREE.Mesh;
   readonly glow: THREE.Mesh;
+  /** the shadow straight under the ball on the floor (the real game's read for aerials), whatever the light */
+  readonly shadow: THREE.Mesh;
   private uHit = { value: 0 };
   private uCol = { value: new THREE.Color(1, 1, 1) };
 
@@ -69,8 +72,19 @@ export class BallView {
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, seam);');
     };
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL.R, 96, 64), mat);
-    this.mesh.castShadow = true;
+    this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
+    const sm = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uA: { value: 0.6 } },
+      vertexShader: `varying vec2 vU; void main(){ vU = uv * 2.0 - 1.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform float uA; varying vec2 vU; void main(){ float d = length(vU); float k = 1.0 - smoothstep(0.55, 1.0, d); gl_FragColor = vec4(0.0, 0.0, 0.0, k * uA); }`,
+    });
+    sm.polygonOffset = true;
+    sm.polygonOffsetFactor = -2;
+    this.shadow = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), sm);
+    this.shadow.renderOrder = 3;
     // a soft fresnel halo that shows when it's moving fast
     const halo = new THREE.ShaderMaterial({
       transparent: true,
@@ -93,6 +107,13 @@ export class BallView {
     this.mesh.position.copy(pos);
     this.mesh.quaternion.copy(quat);
     this.glow.position.copy(pos);
+    // darker and tighter near the floor, wider and fainter up high
+    const h = Math.max(0, pos.z - BALL.R);
+    this.shadow.position.set(pos.x, pos.y, 1.5);
+    this.shadow.scale.setScalar(BALL.R * (0.95 + Math.min(0.6, h / 2500)));
+    // (on the flat floor only: it fades out where the floor curves up into the walls)
+    const edge = THREE.MathUtils.smoothstep(sdf(pos.x, pos.y, 40), 20, 160);
+    (this.shadow.material as THREE.ShaderMaterial).uniforms.uA.value = (0.62 - Math.min(0.32, h / 4000)) * edge;
     this.uHit.value = Math.max(0, this.uHit.value - dt * 2.2);
     (this.glow.material as THREE.ShaderMaterial).uniforms.uK.value = THREE.MathUtils.smoothstep(speed, 2500, 5000) * 0.9 + this.uHit.value * 0.4;
   }

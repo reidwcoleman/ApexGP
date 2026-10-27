@@ -45,7 +45,7 @@ function pool(max: number, additive: boolean): Pool {
     uniforms: { uScale: { value: 800 } },
     vertexShader: `attribute float size; attribute float alpha; attribute vec3 color; varying vec3 vC; varying float vA; uniform float uScale;
       void main(){ vC = color; vA = alpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
-        gl_PointSize = min(400.0, size * 0.01 * uScale / max(0.2, -mv.z)); }`,
+        gl_PointSize = min(400.0, size * 0.01 * uScale / max(0.2, -mv.z)); vA *= smoothstep(0.8, 3.2, -mv.z); }`,
     fragmentShader: additive
       ? `varying vec3 vC; varying float vA; void main(){ vec2 p = gl_PointCoord*2.0-1.0; float d = dot(p,p); if (d > 1.0) discard; float k = exp(-d*3.2); gl_FragColor = vec4(vC * k * vA, k * vA); }`
       : `varying vec3 vC; varying float vA; void main(){ vec2 p = gl_PointCoord*2.0-1.0; float d = dot(p,p); if (d > 1.0) discard; float k = (1.0-d); gl_FragColor = vec4(vC, k*k*vA); }`,

@@ -28,21 +28,34 @@ console.log('guest in lobby:', await B.evaluate(() => window.__boost.lobby.playe
 await B.click('.team.o h3 button');
 await A.waitForTimeout(800);
 console.log('host sees:', await A.evaluate(() => window.__boost.lobby.players.map((p) => `${p.name}/${p.team}`).join(', ')));
-await A.click('#l-start');
-await B.waitForFunction(() => window.__boost.mode === 'guest' && window.__boost.me >= 0, null, { timeout: 15000 });
-await B.waitForTimeout(4500); // countdown
-const before = await B.evaluate(() => { const g = window.__boost; const c = g.world.cars[g.me]; return { me: g.me, x: c.pos.x, y: c.pos.y }; });
-await B.keyboard.down('KeyW');
-await B.keyboard.down('ShiftLeft');
-await B.waitForTimeout(1500);
-await B.keyboard.up('ShiftLeft');
-await B.keyboard.up('KeyW');
-await B.waitForTimeout(300);
-const guestView = await B.evaluate(() => { const g = window.__boost; const c = g.world.cars[g.me]; return { x: c.pos.x, y: c.pos.y, snapTick: g.lastSnapTick, seq: g.seq, phase: g.world.phase }; });
-const hostView = await A.evaluate((me) => { const g = window.__boost; const c = g.world.cars[me]; return { x: c.pos.x, y: c.pos.y, tick: g.world.tick, phase: g.world.phase, owners: g.owners }; }, before.me);
-console.log('guest car before', before, '\nguest view', guestView, '\nhost view ', hostView);
-const d = Math.hypot(guestView.x - hostView.x, guestView.y - hostView.y);
-console.log(`moved ${Math.hypot(guestView.x - before.x, guestView.y - before.y).toFixed(0)} uu; host/guest disagree by ${d.toFixed(0)} uu`);
+async function round(n) {
+  await A.click('#l-start');
+  await B.waitForFunction(() => window.__boost.mode === 'guest' && window.__boost.me >= 0, null, { timeout: 15000 });
+  await B.waitForTimeout(4500); // countdown
+  const me = await B.evaluate(() => window.__boost.me);
+  const hostMe = await A.evaluate(() => window.__boost.me);
+  const at = (p, i) => p.evaluate((i) => { const c = window.__boost.world.cars[i]; return { x: c.pos.x, y: c.pos.y }; }, i);
+  const g0 = await at(A, me);
+  const h0 = await at(A, hostMe);
+  await B.keyboard.down('KeyW');
+  await A.keyboard.down('KeyW');
+  await B.waitForTimeout(1500);
+  await B.keyboard.up('KeyW');
+  await A.keyboard.up('KeyW');
+  await B.waitForTimeout(300);
+  const gB = await at(B, me);
+  const gA = await at(A, me);
+  const h1 = await at(A, hostMe);
+  const mv = (a, b) => Math.hypot(a.x - b.x, a.y - b.y).toFixed(0);
+  console.log(`round ${n}: guest car moved ${mv(gA, g0)} uu on the host's screen, host car moved ${mv(h1, h0)} uu; host/guest disagree by ${mv(gA, gB)} uu`);
+}
+await round(1);
+// end the match on the host, back to the lobby, play again
+await A.evaluate(() => { const w = window.__boost.world; w.phase = 'end'; w.events.push({ t: 'end' }); });
+await A.waitForSelector('#e-again', { timeout: 8000 });
+await A.click('#e-again');
+await A.waitForTimeout(800);
+await round(2);
 await A.screenshot({ path: 'shots/boost/net_host.png' });
 await B.screenshot({ path: 'shots/boost/net_guest.png' });
 await browser.close();
