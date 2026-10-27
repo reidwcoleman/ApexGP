@@ -28,18 +28,252 @@
       #loading.art-in .lwrap { position: absolute; zoom: 1 !important; left: calc(104 * var(--k)); top: calc(50vh + (498 - 540) * var(--k)); width: calc(540 * var(--k)); }
       #loading.art-in .lbar { margin-top: 0; height: max(3px, calc(4 * var(--k))); background: rgba(255, 255, 255, 0.14); }
       #loading.art-in .lstep { font-size: max(12px, calc(17 * var(--k))); color: rgba(255, 255, 255, 0.78); margin-top: calc(14 * var(--k)); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8); }
+      /* ---------- the loading screen, broadcast-style: start lights, a live corner, the pit wall ticker ---------- */
+      #loading .lfx {
+        display: block;
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      /* shade for legibility: down the left behind the lights, along the bottom behind the ticker */
+      #loading .lsh {
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(90deg, rgba(4, 5, 8, 0.55) 0%, rgba(4, 5, 8, 0) 45%),
+          linear-gradient(0deg, rgba(4, 5, 8, 0.85) 0%, rgba(4, 5, 8, 0) 22%),
+          radial-gradient(130% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+      }
+      /* a light sweep across the picture now and then (compositor-only: transform) */
+      #loading .lsweep {
+        position: absolute;
+        top: -20%;
+        bottom: -20%;
+        left: 0;
+        width: 22%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07) 45%, rgba(255, 255, 255, 0.13) 50%, rgba(255, 255, 255, 0.07) 55%, transparent);
+        transform: translateX(-120%) skewX(-18deg);
+        animation: l-sweep 7s cubic-bezier(0.6, 0, 0.3, 1) 1.2s infinite;
+        mix-blend-mode: screen;
+      }
+      @keyframes l-sweep {
+        0% { transform: translateX(-120%) skewX(-18deg); }
+        35%, 100% { transform: translateX(560%) skewX(-18deg); }
+      }
+      /* film grain: a fixed noise tile shaken a few pixels a frame (transform only) */
+      #loading .lgrain {
+        position: absolute;
+        inset: -40px;
+        opacity: 0.09;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+        animation: l-grain 0.5s steps(4) infinite;
+      }
+      @keyframes l-grain {
+        0% { transform: translate(0, 0); }
+        25% { transform: translate(-17px, 9px); }
+        50% { transform: translate(11px, -14px); }
+        75% { transform: translate(-6px, -21px); }
+        100% { transform: translate(14px, 6px); }
+      }
+      /* the live corner */
+      #loading .lcorner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        position: absolute;
+        top: 28px;
+        right: 32px;
+        padding: 7px 12px;
+        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
+        font-size: 15px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        background: rgba(6, 7, 10, 0.72);
+        clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+        animation: l-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+      }
+      #loading .lcorner em {
+        margin-left: 6px;
+        padding-left: 10px;
+        font-family: "Barlow", Arial, sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        font-style: normal;
+        letter-spacing: 0.04em;
+        text-transform: none;
+        color: rgba(255, 255, 255, 0.62);
+        border-left: 1px solid rgba(255, 255, 255, 0.16);
+      }
+      #loading .ldot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #ff2b3f;
+        box-shadow: 0 0 10px #ff2b3f;
+        animation: l-dot 1.2s ease-in-out infinite;
+      }
+      @keyframes l-dot {
+        50% { opacity: 0.25; }
+      }
+      /* the start lights: five gantry units, two lamps each, lit one by one as the build goes on
+         (--p, 0..1, set by main.ts); on finish, all out together */
+      #loading .llights {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      #loading .llights span {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 6px;
+        background: #0b0c10;
+        border-radius: 7px;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 16px rgba(0, 0, 0, 0.5);
+      }
+      #loading .llights i {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 40% 35%, #3a1418, #1a0a0c 70%);
+        position: relative;
+      }
+      #loading .llights i::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: radial-gradient(circle at 40% 35%, #ff8a8a, #ff1a2e 45%, #a8000f 75%);
+        box-shadow: 0 0 14px 3px rgba(255, 30, 50, 0.75), 0 0 34px 8px rgba(255, 30, 50, 0.3);
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      #loading .llights span:nth-child(1) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 0.15) * 8), 1); }
+      #loading .llights span:nth-child(2) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 1.15) * 8), 1); }
+      #loading .llights span:nth-child(3) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 2.15) * 8), 1); }
+      #loading .llights span:nth-child(4) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 3.15) * 8), 1); }
+      #loading .llights span:nth-child(5) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 4.15) * 8), 1); }
+      /* lights out */
+      #loading.out .llights i::after {
+        opacity: 0 !important;
+        transition: opacity 0.05s;
+      }
+      #loading.out .lstep {
+        color: #fff;
+      }
+      /* the readout under the bar: the step, and the percentage big in the display face */
+      #loading .lrow {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      #loading .lrow .lpct {
+        display: block;
+        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
+        font-size: 30px;
+        font-weight: 800;
+        font-style: italic;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
+      }
+      #loading .lpct small {
+        font-size: 16px;
+        color: #ff2b3f;
+      }
+      #loading .lbar b {
+        box-shadow: 0 0 12px #ff2b3f;
+      }
+      /* the pit-wall ticker: one tip at a time, cycling on CSS (6 × 5 s) */
+      #loading .ltick {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        position: absolute;
+        left: 50%;
+        bottom: 34px;
+        transform: translateX(-50%);
+        width: min(880px, 90%);
+        padding: 10px 16px;
+        background: rgba(6, 7, 10, 0.78);
+        clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+        animation: l-in-x 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
+      }
+      #loading .ltick > b {
+        flex: none;
+        padding: 3px 8px;
+        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #fff;
+        background: #ff2b3f;
+      }
+      #loading .ltips {
+        position: relative;
+        flex: 1;
+        height: 20px;
+        overflow: hidden;
+      }
+      #loading .ltips span {
+        position: absolute;
+        inset: 0;
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.92);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0;
+        animation: l-tip 30s linear infinite;
+      }
+      #loading .ltips span:nth-child(2) { animation-delay: 5s; }
+      #loading .ltips span:nth-child(3) { animation-delay: 10s; }
+      #loading .ltips span:nth-child(4) { animation-delay: 15s; }
+      #loading .ltips span:nth-child(5) { animation-delay: 20s; }
+      #loading .ltips span:nth-child(6) { animation-delay: 25s; }
+      @keyframes l-tip {
+        0% { opacity: 0; transform: translateY(12px); }
+        2%, 15% { opacity: 1; transform: none; }
+        17%, 100% { opacity: 0; transform: translateY(-12px); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #loading .lsweep,
+        #loading .lgrain {
+          animation: none;
+        }
+      }
+      @keyframes l-in { from { opacity: 0; transform: translateY(8px); } }
+      @keyframes l-in-x { from { opacity: 0; transform: translate(-50%, 8px); } }
     </style>
   </head>
   <body>
     <canvas id="gl"></canvas>
     <div id="ui"></div>
     <div id="loading">
+      <div class="lfx"><i class="lsh"></i><i class="lsweep"></i><i class="lgrain"></i></div>
+      <div class="lcorner"><span class="ldot"></span>Live<em>Apex GP · World Tour</em></div>
       <div class="lwrap">
         <div class="logo">Apex <span class="gp">GP</span></div>
+        <div class="llights"><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span></div>
         <div class="lbar"><b></b></div>
-        <div class="lstep">Starting</div>
+        <div class="lrow"><div class="lstep">Starting</div><div class="lpct">0<small>%</small></div></div>
         <div class="lerr"></div>
       </div>
+      <div class="ltick"><b>Pit wall</b><div class="ltips">
+        <span>A first top 5 at any circuit earns a Tour pass: open whichever circuit you want next</span>
+        <span>Every circuit has a bonus challenge worth a fourth star and a 15,000 purse</span>
+        <span>Weather is automatic, but the race screen lets you pick any sky and time of day</span>
+        <span>Drag in the garage to walk round the car, scroll to step in</span>
+        <span>Research upgrades your car; the rivals develop through the tour too</span>
+        <span>Catch a car and stay on its gearbox: the pass is always on</span>
+      </div></div>
     </div>
     <script>
       // the loading pictures, before the bundle has even parsed: a slideshow that starts on a

@@ -4952,3 +4952,180 @@ body.garage-drag * {
 @keyframes rw-medal {
   from { opacity: 0; transform: translateX(-12px); }
 }
+
+/* ---------- the travel screen, broadcast-style: start lights, the circuit card, the pit wall ---------- */
+.travel-veil .tv-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(4, 5, 8, 0.55) 0%, rgba(4, 5, 8, 0) 45%),
+    linear-gradient(0deg, rgba(4, 5, 8, 0.85) 0%, rgba(4, 5, 8, 0) 22%),
+    linear-gradient(270deg, rgba(4, 5, 8, 0.6) 0%, rgba(4, 5, 8, 0) 32%);
+  pointer-events: none;
+}
+.travel-veil .tv-lights {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.travel-veil:not(.art) .tv-lights {
+  justify-content: center;
+}
+.travel-veil .tv-lights span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  background: #0b0c10;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.travel-veil .tv-lights i {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #3a1418, #1a0a0c 70%);
+}
+.travel-veil .tv-lights i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ff8a8a, #ff1a2e 45%, #a8000f 75%);
+  box-shadow: 0 0 12px 3px rgba(255, 30, 50, 0.7);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.travel-veil .tv-lights span:nth-child(1) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 0.15) * 8), 1); }
+.travel-veil .tv-lights span:nth-child(2) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 1.15) * 8), 1); }
+.travel-veil .tv-lights span:nth-child(3) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 2.15) * 8), 1); }
+.travel-veil .tv-lights span:nth-child(4) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 3.15) * 8), 1); }
+.travel-veil .tv-lights span:nth-child(5) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 4.15) * 8), 1); }
+.travel-veil .tv-bar {
+  margin-top: 12px !important;
+}
+/* the circuit card, right: the layout drawing itself in, its facts and forecast */
+.travel-veil .tv-card {
+  position: absolute;
+  right: 4vw;
+  top: 50%;
+  transform: translateY(-50%);
+  zoom: var(--ui);
+  width: 280px;
+  padding: 18px 20px 16px;
+  text-align: left;
+  background: rgba(6, 7, 10, 0.78);
+  clip-path: var(--chamfer);
+  animation: tv-card 0.7s var(--ease-out) 0.25s both;
+}
+@keyframes tv-card {
+  from { opacity: 0; transform: translate(16px, -50%); }
+}
+.travel-veil .tv-card svg {
+  display: block;
+  width: 100%;
+}
+.travel-veil .tv-card path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent));
+  animation: tv-draw 2.2s var(--ease-out) 0.4s forwards;
+}
+@keyframes tv-draw {
+  to { stroke-dashoffset: 0; }
+}
+.travel-veil .tv-card dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 12px 0 0;
+}
+.travel-veil .tv-card dt {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.travel-veil .tv-card dd {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+.travel-veil .tv-card p {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+/* the pit wall ticker */
+.travel-veil .tv-tick {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  zoom: var(--ui);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(880px, 90%);
+  padding: 10px 16px;
+  text-align: left;
+  background: rgba(6, 7, 10, 0.78);
+  clip-path: var(--chamfer);
+}
+.travel-veil .tv-tick > b {
+  flex: none;
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--on-accent, #fff);
+  background: var(--accent);
+}
+.travel-veil .tv-tick > div {
+  position: relative;
+  flex: 1;
+  height: 20px;
+  overflow: hidden;
+  text-align: left;
+}
+.travel-veil .tv-tick em {
+  position: absolute;
+  inset: 0;
+  font-style: normal;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  animation: l-tip 30s linear infinite;
+}
+.travel-veil .tv-tick em:nth-child(2) { animation-delay: 5s; }
+.travel-veil .tv-tick em:nth-child(3) { animation-delay: 10s; }
+.travel-veil .tv-tick em:nth-child(4) { animation-delay: 15s; }
+.travel-veil .tv-tick em:nth-child(5) { animation-delay: 20s; }
+.travel-veil .tv-tick em:nth-child(6) { animation-delay: 25s; }
+@keyframes l-tip {
+  0% { opacity: 0; transform: translateY(12px); }
+  2%, 15% { opacity: 1; transform: none; }
+  17%, 100% { opacity: 0; transform: translateY(-12px); }
+}
+@media (max-width: 760px) {
+  .travel-veil .tv-card {
+    display: none;
+  }
+}
+.travel-veil .tv-card div {
+  text-align: left;
+}

@@ -35,6 +35,7 @@ const loading = document.getElementById('loading')!;
 const bar = loading.querySelector('.lbar b') as HTMLElement;
 const step = loading.querySelector('.lstep') as HTMLElement;
 const err = loading.querySelector('.lerr') as HTMLElement;
+const pct = loading.querySelector('.lpct') as HTMLElement | null;
 
 // the overlays scale with the window (laid out at 1600 × 900)
 initUiScale();
@@ -104,10 +105,16 @@ game
   .boot((f, s) => {
     bar.style.width = `${Math.round(f * 100)}%`;
     step.textContent = s;
+    // (the start lights fill with it: a CSS variable, so they go on even mid-step)
+    loading.style.setProperty('--p', f.toFixed(3));
+    if (pct) pct.firstChild!.textContent = String(Math.round(f * 100));
   })
   .then(async () => {
     performance.mark('apex:garage');
-    loading.classList.add('done');
+    // lights out: all five on, then off together, and the garage behind
+    loading.style.setProperty('--p', '1');
+    loading.classList.add('out');
+    setTimeout(() => loading.classList.add('done'), 420);
     // once faded out, drop the slideshow (its looping layers would keep compositing under the game)
     setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1500);
     const q = new URLSearchParams(location.search);

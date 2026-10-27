@@ -126,6 +126,21 @@ type CompoundRig = CarRig & { setCompound?: (c: string) => void };
  */
 const EYE_CAMS = ONBOARD;
 
+/** the pit wall's tips on the travel screen */
+const TRAVEL_TIPS = [
+  'A first top 5 at any circuit earns a Tour pass: open whichever circuit you want next',
+  'Every circuit has a bonus challenge worth a fourth star and a 15,000 purse',
+  'Weather is automatic, but the race screen lets you pick any sky and time of day',
+  'Research upgrades your car; the rivals develop through the tour too',
+  'Catch a car and stay on its gearbox: the pass is always on',
+  'Drag in the garage to walk round the car, scroll to step in',
+];
+/** "Rain · Afternoon" for a forecast (weather and time words as the menus print them) */
+function fcText(f: { weather: string; time: string }): string {
+  const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+  return `${(WEATHER_LABEL as Record<string, string>)[f.weather] ?? cap(f.weather)} · ${(TIME_LABEL as Record<string, string>)[f.time] ?? cap(f.time)}`;
+}
+
 /** the player's driver as the paint shop has them: their own race number and helmet colours */
 function paintedDriver(d: Driver, p: Paint | null): Driver {
   if (!p || (!p.number && !p.helmet)) return d;
@@ -3334,7 +3349,16 @@ export class Game {
       // a title card over the circuit's own key art while its garage is built (the rest follows
       // behind the garage): no "travelling" screen to sit through
       const round = CIRCUITS.indexOf(def) + 1;
-      veil.innerHTML = `<img class="tv-art" alt=""><div><span>Round ${round} · ${def.country}</span><b>${def.name}</b><div class="tv-bar"><i></i></div><div class="tv-step"></div></div>`;
+      const info = CIRCUIT_INFO[def.id];
+      const fc = this.career.isUnlocked(def.id) && !this.dc.active ? this.careerForecast(def.id) : null;
+      const lights = '<span><i></i><i></i></span>'.repeat(5);
+      const tips = TRAVEL_TIPS.map((t) => `<em>${t}</em>`).join('');
+      veil.innerHTML =
+        `<img class="tv-art" alt=""><i class="tv-shade"></i>` +
+        `<div><span>${round ? `Round ${round} · ` : 'Scenic road · '}${def.country}</span><b>${def.name}</b><div class="tv-lights">${lights}</div><div class="tv-bar"><i></i></div><div class="tv-step"></div></div>` +
+        `<aside class="tv-card"><svg viewBox="0 0 220 150"><path pathLength="1" d="${circuitPath(layoutPoints(def), 220, 150, 10)}"/></svg>` +
+        `<dl>${info ? `<div><dt>Length</dt><dd>${info.km} km</dd></div><div><dt>Turns</dt><dd>${info.turns}</dd></div>` : ''}${fc ? `<div><dt>Forecast</dt><dd>${fcText(fc)}</dd></div>` : ''}</dl>${info?.line ? `<p>${info.line}</p>` : ''}</aside>` +
+        `<footer class="tv-tick"><b>Pit wall</b><div>${tips}</div></footer>`;
       // the destination's key art (decoded before the build blocks the main thread)
       const art = veil.querySelector('img') as HTMLImageElement;
       art.src = artFor(def.id);
@@ -3345,6 +3369,7 @@ export class Game {
       const bar = veil.querySelector('.tv-bar i') as HTMLElement;
       const step = veil.querySelector('.tv-step') as HTMLElement;
       const set = (f: number, label: string) => {
+        veil.style.setProperty('--p', Math.max(0, Math.min(1, f)).toFixed(3));
         bar.style.transform = `scaleX(${Math.max(0, Math.min(1, f)).toFixed(3)})`;
         step.textContent = label;
       };
