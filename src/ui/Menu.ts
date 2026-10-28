@@ -1114,13 +1114,15 @@ export class Menu {
 
     // ---- conditions: a window onto the sky (the chosen weather and time, painted live), the race's forecast
     // lap by lap, then every sky as tiles in families and the time of day as a ruler
+    // (the window is the screen's right side: race day painted big, the forecast along its foot)
     el('div', 'pcap', p, 'Conditions');
     const wx = el('div', 'wxcard', p);
-    const stageBox = el('div', 'wx-stage', wx);
+    const win = el('div', 'br-window', s);
+    const stageBox = el('div', 'wx-stage', win);
     const stage = createSkyStage();
     stageBox.appendChild(stage.el);
     const now = el('div', 'wx-now', stageBox);
-    const fcBox = el('div', 'wx-fc', wx);
+    const fcBox = el('div', 'wx-fc', win);
     const wxChoice = (): WeatherChoice => (dcd ? fc!.weather : career ? (!st.tourWx || st.tourWx === 'auto' ? fc!.weather : st.tourWx) : st.weather);
     const tmChoice = (): TimeChoice => (dcd ? fc!.time : career ? (!st.tourTime || st.tourTime === 'auto' ? fc!.time : st.tourTime) : st.time);
     const wxIcon = (w: WeatherChoice) => `<svg viewBox="0 0 16 16">${w === 'random' || w === 'changeable' ? WX_CHOICE_ICON[w] : WX_ICON[w]}</svg>`;
@@ -1142,6 +1144,7 @@ export class Menu {
         `<div class="wx-txt"><small>${timeLabel(t)}</small><b>${weatherLabel(w)}</b><div class="wx-sub">${feel}</div></div>` +
         (career ? `<em class="${auto ? 'on' : ''}">${dcd ? 'Forecast' : auto ? 'Automatic' : 'Your pick'}</em>` : '');
       now.dataset.kind = w;
+      stage.tint(TEAMS[st.team].primary);
       stage.set(w, tod);
       fcBox.innerHTML = forecastStrip(w, t, lapsNow(), info ? parseFloat(info.km) : 5);
     };
@@ -1168,7 +1171,6 @@ export class Menu {
         (v) => (v === 'auto' ? 'Auto' : v === 'random' ? 'Random' : TIME_SHORT[v as TimeOfDay]),
       );
     }
-    wx.appendChild(fcBox);
     renderNow();
 
     // ---- the race's rules, as tiles
@@ -1272,7 +1274,7 @@ export class Menu {
     this.items.push({ el: cta, kind: 'action', select: () => this.cb.onStart(this.mode, { ...this.setup }) });
     cta.addEventListener('click', () => this.cb.onStart(this.mode, { ...this.setup }));
     el('div', 'keys', foot, '<span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span>');
-    this.driverCard = el('div', 'drivercard', s);
+    this.driverCard = el('div', 'drivercard', stageBox);
     this.updateDriverCard();
     this.sel = this.items.length - 1;
   }
@@ -1828,10 +1830,40 @@ export class Menu {
     s.innerHTML = '';
     el('div', 'pause-bg', s);
     const box = el('div', 'results glass', s);
-    const head = el('div', '', box);
-    el('h2', '', head, title);
-    el('p', 'lede', head, lede);
-    const table = el('div', 'rtable', box);
+    // ---- the hero: your grid slot (big), the lap that set it, the top three on their steps
+    const me = rows.find((r) => r.isPlayer);
+    const hero = el('div', 'res-hero', box);
+    if (me) {
+      hero.style.setProperty('--tc', uiColor(me.entry.team));
+      el('div', 'res-pos' + (me.pos <= 3 ? ` top3 p${me.pos}` : ''), hero, `<small>P</small><b>${me.pos}</b><span>on the grid</span>`);
+    }
+    // (the place is the big number: the title says the rest — "Finished P8" reads "Finished")
+    el('h2', '', hero, me ? title.replace(/\s*(·\s*)?(P\d+|DNF)$/, '') : title);
+    el('p', 'lede', hero, lede);
+    if (me)
+      el(
+        'div',
+        'res-stats',
+        hero,
+        `<div><span>Lap time</span><b>${isFinite(me.time) ? fmtTime(me.time) : '—'}</b></div>` +
+          `<div><span>${me.pos === 1 ? 'Pole by' : 'To pole'}</span><b>${me.pos === 1 ? (rows[1] && isFinite(rows[1].gap) ? `${rows[1].gap.toFixed(3)}` : '—') : isFinite(me.gap) ? `+${me.gap.toFixed(3)}` : '—'}</b></div>`,
+      );
+    const pod = el('div', 'podium', hero);
+    for (const pos of [2, 1, 3]) {
+      const r = rows[pos - 1];
+      if (!r) continue;
+      const gap = pos === 1 ? (isFinite(r.time) ? fmtTime(r.time) : '') : isFinite(r.gap) ? `+${r.gap.toFixed(3)}` : '';
+      const pd = el(
+        'div',
+        `pd p${pos}${r.isPlayer ? ' me' : ''}`,
+        pod,
+        `<div class="pd-who"><small>${r.entry.driver.first}</small><b>${r.entry.driver.last}</b><span>${r.entry.team.name}</span><em>${gap}</em></div><div class="pd-step"><i>${pos}</i></div>`,
+      );
+      pd.style.setProperty('--tc', uiColor(r.entry.team));
+      pd.style.animationDelay = `${0.25 + [0, 0.12, 0.2][pos - 1]}s`;
+    }
+    const main = el('div', 'res-main', box);
+    const table = el('div', 'rtable', main);
     el('div', 'rrow head', table, '<span class="p">Pos</span><span></span><span>Driver</span><span>Team</span><span class="gap">Time</span><span class="best">Gap</span><span class="pts"></span>');
     rows.forEach((r, i) => {
       const t = isFinite(r.time) ? fmtTime(r.time) : 'No time';
@@ -1844,7 +1876,7 @@ export class Menu {
       );
       row.style.animationDelay = `${0.15 + i * 0.035}s`;
     });
-    const act = el('div', 'actions', box);
+    const act = el('div', 'actions', main);
     const start = el('div', 'cta', act, 'Start race');
     const menu = el('div', 'cta ghost', act, 'Main menu');
     this.items = [
@@ -1863,10 +1895,46 @@ export class Menu {
     s.innerHTML = '';
     el('div', 'pause-bg', s);
     const box = el('div', 'results glass', s);
-    const head = el('div', '', box);
-    el('h2', '', head, title);
-    el('p', 'lede', head, lede);
-    const table = el('div', 'rtable', box);
+    // ---- the hero: where you finished (big), what it was worth, and the podium on its steps
+    const me = rows.find((r) => r.isPlayer);
+    const hero = el('div', 'res-hero', box);
+    if (me) {
+      hero.style.setProperty('--tc', uiColor(me.entry.team));
+      el('div', 'res-pos' + (me.dnf ? ' dnf' : me.pos <= 3 ? ` top3 p${me.pos}` : ''), hero, me.dnf ? '<b>DNF</b>' : `<small>P</small><b>${me.pos}</b><span>of ${rows.length}</span>`);
+    }
+    // (the place is the big number: the title says the rest — "Finished P8" reads "Finished")
+    el('h2', '', hero, me ? title.replace(/\s*(·\s*)?(P\d+|DNF)$/, '') : title);
+    el('p', 'lede', hero, lede);
+    if (me) {
+      const lead = rows[0];
+      const gapTxt = me.dnf ? 'Retired' : me.pos === 1 ? (rows[1] && isFinite(rows[1].gap) && rows[1].gap > 0 ? `−${rows[1].gap.toFixed(3)}` : 'Leader') : me.gap < 0 ? `+${-me.gap} lap${me.gap < -1 ? 's' : ''}` : isFinite(me.gap) ? `+${me.gap.toFixed(3)}` : '—';
+      const pts = me.pos <= 10 && !me.dnf ? POINTS[me.pos - 1] + (me.fastest ? 1 : 0) : 0;
+      el(
+        'div',
+        'res-stats',
+        hero,
+        `<div><span>Race time</span><b>${me.dnf || !isFinite(me.time) ? '—' : fmtTime(me.time)}</b></div>` +
+          `<div><span>${me.pos === 1 ? 'Margin' : `To ${lead.entry.driver.last}`}</span><b>${gapTxt}</b></div>` +
+          `<div><span>Best lap</span><b class="${me.fastest ? 'purple' : ''}">${fmtTime(me.best)}</b></div>` +
+          `<div><span>Points</span><b>${pts}</b></div>`,
+      );
+    }
+    const pod = el('div', 'podium', hero);
+    for (const pos of [2, 1, 3]) {
+      const r = rows[pos - 1];
+      if (!r) continue;
+      const gap = pos === 1 ? (isFinite(r.time) ? fmtTime(r.time) : '') : r.gap < 0 ? `+${-r.gap} lap${r.gap < -1 ? 's' : ''}` : isFinite(r.gap) && r.gap > 0 ? `+${r.gap.toFixed(3)}` : '';
+      const pd = el(
+        'div',
+        `pd p${pos}${r.isPlayer ? ' me' : ''}`,
+        pod,
+        `<div class="pd-who"><small>${r.entry.driver.first}</small><b>${r.entry.driver.last}</b><span>${r.entry.team.name}</span><em>${gap}</em></div><div class="pd-step"><i>${pos}</i></div>`,
+      );
+      pd.style.setProperty('--tc', uiColor(r.entry.team));
+      pd.style.animationDelay = `${0.25 + [0, 0.12, 0.2][pos - 1]}s`;
+    }
+    const main = el('div', 'res-main', box);
+    const table = el('div', 'rtable', main);
     el('div', 'rrow head', table, '<span class="p">Pos</span><span></span><span>Driver</span><span>Team</span><span class="gap">Time</span><span class="best">Best lap</span><span class="pts">Pts</span>');
     rows.forEach((r, i) => {
       const gap = r.dnf ? 'DNF' : r.pos === 1 ? (isFinite(r.time) ? fmtTime(r.time) : 'Leader') : r.gap < 0 ? `+${-r.gap} lap${r.gap < -1 ? 's' : ''}` : isFinite(r.gap) && r.gap > 0 ? `+${r.gap.toFixed(3)}` : '—';
@@ -1879,24 +1947,26 @@ export class Menu {
       );
       row.style.animationDelay = `${0.15 + i * 0.035}s`;
     });
+    const extra = el('div', 'res-extra', main);
     if (reward) {
-      const rw = el('div', 'reward', box);
+      const rw = el('div', 'reward', extra);
       const parts = reward.breakdown.map((b) => `<span>${b.label} <b>+${fmtCr(b.credits)}</b></span>`).join('');
       el('div', 'rw-main', rw, `<div class="cap">Prize money</div><div class="val">+${fmtCr(reward.credits)}</div>`);
       el('div', 'rw-parts', rw, parts + `<span>Balance <b>${fmtCr(this.career.data.credits)}</b></span>`);
       if (reward.medal) {
         const word = reward.medal === 'gold' ? 'Gold · the win' : reward.medal === 'silver' ? 'Silver · a podium' : `Bronze · top ${UNLOCK_POS}`;
-        el('div', `rw-medal ${reward.medal}`, box, `<i class="md ${reward.medal}"></i><b>New medal</b> · ${word} · ${'★'.repeat(reward.medal === 'gold' ? 3 : reward.medal === 'silver' ? 2 : 1)}`);
+        el('div', `rw-medal ${reward.medal}`, extra, `<i class="md ${reward.medal}"></i><b>New medal</b> · ${word} · ${'★'.repeat(reward.medal === 'gold' ? 3 : reward.medal === 'silver' ? 2 : 1)}`);
       }
-      if (reward.challenge) el('div', 'rw-medal gold', box, `<b>Challenge complete</b> · ${reward.challenge} · ★`);
-      if (reward.pass) el('div', 'rw-unlock', box, `<b>Tour pass earned</b> · open any circuit you like on the World Tour map (${this.career.passes()} in hand)`);
+      if (reward.challenge) el('div', 'rw-medal gold', extra, `<b>Challenge complete</b> · ${reward.challenge} · ★`);
+      if (reward.pass) el('div', 'rw-unlock', extra, `<b>Tour pass earned</b> · open any circuit you like on the World Tour map (${this.career.passes()} in hand)`);
       else if (reward.unlocked) {
         const cd = ALL_CIRCUITS.find((c) => c.id === reward.unlocked);
-        el('div', 'rw-unlock', box, `<b>New circuit unlocked</b> · ${cd?.name ?? reward.unlocked} is open on the map`);
+        el('div', 'rw-unlock', extra, `<b>New circuit unlocked</b> · ${cd?.name ?? reward.unlocked} is open on the map`);
       }
     }
-    if (career) renderRoundSummary(box, career);
-    const act = el('div', 'actions' + (onReplay || onNext ? ' three' : '') + (onReplay && onNext ? ' four' : ''), box);
+    if (career) renderRoundSummary(extra, career);
+    if (!extra.childElementCount) extra.remove();
+    const act = el('div', 'actions' + (onReplay || onNext ? ' three' : '') + (onReplay && onNext ? ' four' : ''), main);
     this.items = [];
     if (onNext) {
       const nx = el('div', 'cta', act, onNext.label);
