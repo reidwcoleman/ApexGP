@@ -434,6 +434,8 @@ export class CarView {
   private tag: THREE.Sprite | null = null;
   readonly team: number;
   boostVis = 0;
+  /** a soft contact shadow on whatever surface the wheels are on */
+  private contact: THREE.Mesh;
 
   constructor(team: number, accent: number, name?: string) {
     this.team = team;
@@ -475,6 +477,17 @@ export class CarView {
           diffuseColor.rgb *= 1.0 - seam * 0.7;
           // dark rockers along the bottom
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.025), smoothstep(6.5, 5.0, o.z) * step(ay, 37.5));`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+          // metallic flake under the clear coat: a fine glitter in the base layer's highlights
+          {
+            vec3 fc = floor(vObj * 7.0);
+            vec3 fr = fract(sin(vec3(dot(fc, vec3(12.9898, 78.233, 37.719)), dot(fc, vec3(39.346, 11.135, 83.155)), dot(fc, vec3(73.156, 52.235, 9.151)))) * 43758.5453) - 0.5;
+            // (fading out once a flake is under a pixel, so it never turns to noise)
+            normal = normalize(normal + fr * 0.07 * (1.0 - smoothstep(0.05, 0.14, length(fwidth(vObj)))));
+          }`,
         );
     };
     this.paint.customProgramCacheKey = () => 'bbcarpaint';
@@ -488,6 +501,8 @@ export class CarView {
     const chrome = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, roughness: 0.12, metalness: 1, envMapIntensity: 2 });
     const discM = new THREE.MeshStandardMaterial({ color: 0x3a3c42, roughness: 0.45, metalness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.5, metalness: 0.5 });
+    // the exhaust pipes: brushed metal, seen inside too
+    const nozzleM = new THREE.MeshStandardMaterial({ color: 0x55585f, roughness: 0.35, metalness: 0.9, side: THREE.DoubleSide });
 
     const add = (geo: THREE.BufferGeometry, m: THREE.Material, cast = true) => {
       const mesh = new THREE.Mesh(geo, m);
@@ -504,7 +519,7 @@ export class CarView {
     add(g.head, new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 5, 5.6) }), false);
     add(g.tail, new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 0.3, 0.22) }), false);
     // boost nozzles and flames
-    this.nozzleGlow = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 0.4, 0.1) });
+    this.nozzleGlow = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.035, 0.02, 0.015) });
     this.flameMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -521,9 +536,10 @@ export class CarView {
           gl_FragColor = vec4(c * a * 2.2, a); }`,
     });
     for (const sy of [-1, 1]) {
-      const nz = add(g.nozzle, dark, false);
+      const nz = add(g.nozzle, nozzleM, false);
       nz.position.set(-55, sy * 12, 12.5);
-      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(-57.5, sy * 12, 12.5), this.nozzleGlow, false);
+      // the glow sits deep in the pipe: a dark bore at rest, white-hot when boosting
+      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(-52.5, sy * 12, 12.5), this.nozzleGlow, false);
       const fl = new THREE.Mesh(g.flame, this.flameMat);
       fl.position.set(-60, sy * 12, 12.5);
       fl.scale.set(60, 5.4, 5.4);
@@ -531,6 +547,35 @@ export class CarView {
       fl.frustumCulled = false;
       this.group.add(fl);
       this.flames.push(fl);
+    }
+    {
+      const m = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        uniforms: { uA: { value: 0.7 } },
+        vertexShader: `varying vec2 vU; void main(){ vU = uv * 2.0 - 1.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uA; varying vec2 vU; void main(){ float d = length(vU * vec2(1.0, 1.0)); float k = pow(1.0 - smoothstep(0.25, 1.0, d), 1.6); gl_FragColor = vec4(0.0, 0.0, 0.0, k * uA); }`,
+      });
+      m.polygonOffset = true;
+      m.polygonOffsetFactor = -3;
+      this.contact = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+      this.contact.scale.set(150, 104, 1);
+      this.contact.position.set(8, 0, -16.4);
+      this.contact.renderOrder = 2;
+      this.group.add(this.contact);
+    }
+    // an antenna off the rear deck, leaning back, with a little team-coloured topper
+    {
+      const d = new THREE.Vector3(-Math.sin(0.3), 0, Math.cos(0.3));
+      const base = new THREE.Vector3(-43, 13, 26.5);
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.45, 30, 6), dark);
+      rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+      rod.position.copy(base).addScaledVector(d, 15);
+      this.group.add(rod);
+      const top = new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 10), accentM);
+      top.position.copy(base).addScaledVector(d, 30);
+      top.castShadow = true;
+      this.group.add(top);
     }
     // wheels: the right-hand ones mirrored so every rim's face looks out
     for (const [wx, wy, wr] of WHEELS) {
@@ -605,6 +650,11 @@ export class CarView {
       const target = w.z0 + (car.wheelContact[i] ? Math.min(6, comp) - 1.5 : -3.5);
       w.pivot.position.z += (target - w.pivot.position.z) * Math.min(1, dt * 25);
     }
+    // the contact shadow fades as the wheels leave the surface
+    const down = car.wheelContact.filter(Boolean).length;
+    const sm = this.contact.material as THREE.ShaderMaterial;
+    sm.uniforms.uA.value += ((down >= 2 ? 0.72 : 0) - sm.uniforms.uA.value) * Math.min(1, dt * 14);
+    this.contact.visible = sm.uniforms.uA.value > 0.01;
     const k = car.boosting ? 1 : 0;
     this.boostVis += (k - this.boostVis) * Math.min(1, dt * (k ? 30 : 12));
     this.flameMat.uniforms.uT.value = t;
@@ -614,6 +664,6 @@ export class CarView {
       const L = 44 + 34 * this.boostVis + Math.sin(t * 70 + f.position.y) * 6;
       f.scale.set(L, 5 + this.boostVis, 5 + this.boostVis);
     }
-    this.nozzleGlow.color.setRGB(0.3 + this.boostVis * 5.7, 0.1 + this.boostVis * 2.75, 0.04 + this.boostVis * 1.26);
+    this.nozzleGlow.color.setRGB(0.035 + this.boostVis * 6, 0.02 + this.boostVis * 2.9, 0.015 + this.boostVis * 1.3);
   }
 }

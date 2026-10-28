@@ -945,7 +945,8 @@ export class Game {
         }
         if (c.bodyTouch && c.vel.len() > 900 && Math.random() < 0.5) this.fx.burst(sv.x, sv.y, sv.z, 4, 600, new THREE.Color(2.6, 1.8, 0.8), 14, 0.3, 650);
       }
-      // camera
+      // camera (the garage hides the match still playing behind it, its sparks too)
+      this.fx.group.visible = !(this.showcase && this.mode === 'attract');
       if (this.showcase && this.mode === 'attract') this.garage(dt);
       else if (this.dbgCam) {
         this.stage.camera.fov = this.dbgCam.fov;
@@ -1075,7 +1076,7 @@ export class Game {
     }
     v.showTag(false);
     for (const cv of this.views) cv.group.visible = false;
-    this.ball.mesh.visible = this.ball.glow.visible = false;
+    this.ball.mesh.visible = this.ball.glow.visible = this.ball.shadow.visible = false;
     void dt;
   }
 

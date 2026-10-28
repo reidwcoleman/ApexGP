@@ -190,6 +190,9 @@ function pitch(): THREE.Mesh {
     col *= 0.94 + 0.06 * diag;
     float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
     col *= 0.82 + 0.36 * n;
+    // blade-scale grain up close, faded out before it can shimmer
+    float fw = fwidth(P.y) + fwidth(P.x);
+    col *= 1.0 + (bbNoise(P * 2.7) - 0.5) * 0.22 * (1.0 - smoothstep(1.5, 5.0, fw));
     col *= 0.94 + 0.12 * bbNoise(P * 0.9);
     col *= uGrassTint;
     // a wash of team colour toward each end
@@ -285,7 +288,7 @@ function shell(): THREE.Group {
     }
     float rim = 1.0 - smoothstep(0.0, 0.09, hex);
     diffuseColor.rgb = mix(vec3(0.5, 0.6, 0.75), team, 0.4);
-    diffuseColor.a = 0.035 + uDay * 0.03 + edge * (0.28 * fade + 0.05) + near * (0.1 + rim * 0.55);
+    diffuseColor.a = 0.03 + uDay * 0.015 + edge * (0.2 * fade + 0.025) + near * (0.1 + rim * 0.55);
     vec3 bbEmit = (team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade) * mix(1.0, 0.4, uDay)
       + mix(team, vec3(0.9, 0.95, 1.0), 0.35) * near * (rim * 1.6 + 0.12);
     `,
@@ -443,14 +446,21 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
     vec3 shirt = h2 < 0.38 ? teamC * 0.75 : (h2 < 0.58 ? vec3(0.62) : (h2 < 0.8 ? vec3(0.06) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.5));
     vec3 skin = mix(vec3(0.85, 0.62, 0.48), vec3(0.3, 0.19, 0.13), fract(h * 13.0));
-    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.06, teamC * 0.22 + vec3(0.03, 0.035, 0.045), uDay);
+    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.06, vec3(0.07, 0.075, 0.09) + teamC * 0.07, uDay);
     // the riser: each row's front edge in shadow
     seatC *= 0.55 + 0.45 * smoothstep(0.0, 0.2, f.y);
     vec3 col = mix(seatC, head > body ? skin : shirt, person);
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
-    vec3 avg = mix(seatC, mix(vec3(0.13, 0.13, 0.14), teamC * 0.5, 0.2), 0.5);
+    // (the average of a crowd: shirts, faces and seats; denser and sparser blocks, a sea of team colour)
+    vec3 crowdAvg = mix(vec3(0.13, 0.13, 0.14), teamC * 0.55, 0.28);
+    float dens = 0.7 + 0.6 * bbNoise(vBB / vec2(420.0, 260.0)) + 0.25 * (bbNoise(vBB / vec2(90.0, 120.0)) - 0.5);
+    vec3 avg = mix(seatC, crowdAvg * dens, 0.7);
     col = mix(col, avg, smoothstep(0.25, 0.7, px));
+    // a walkway every dozen rows, and the risers' shadow lines as the rows go
+    float walk = step(fract(vBB.y / (rowH * 12.0)), 1.0 / 12.0);
+    col = mix(col, vec3(0.03, 0.032, 0.04), walk * 0.7);
+    col *= 0.9 + 0.1 * smoothstep(0.0, 0.25, fract(vBB.y / rowH)) * (1.0 - smoothstep(0.6, 1.2, px));
     // in the sun the crowd is a shade darker than its lit seats read; the roof shades the upper rows
     col *= mix(1.0, 0.62, uDay) * (1.0 - uDay * 0.45 * smoothstep(2300.0, 4300.0, vSim.z));
     float aisle = step(fract(vBB.x / 1500.0), 0.035);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BloomEffect, Effect, EffectComposer, EffectPass, FXAAEffect, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
+import { N8AOPostPass } from 'n8ao';
 import { GradeEffect } from '../../marbles/post-grade.ts';
 import { MAPS, TIMES, type MapLook, type TimeLook } from './looks.ts';
 
@@ -34,6 +35,7 @@ export class Stage {
   readonly composer: EffectComposer;
   readonly key: THREE.DirectionalLight;
   readonly bloom: BloomEffect;
+  ao: N8AOPostPass | null = null;
   readonly gpu: string;
   /** the context is gone (driver reset); nothing renders until it's back */
   lost = false;
@@ -138,6 +140,22 @@ export class Stage {
 
     const comp = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
     comp.addPass(new RenderPass(sc, this.camera));
+    // ambient occlusion: the car's arches and underside, the seams of the stands, contact with the pitch
+    if (this.quality > 0) {
+      const ao = (this.ao = new N8AOPostPass(sc, this.camera, 1, 1));
+      ao.configuration.aoRadius = 0.9;
+      ao.configuration.distanceFalloff = 0.6;
+      ao.configuration.intensity = 2.2;
+      ao.configuration.gammaCorrection = false;
+      ao.configuration.halfRes = this.quality < 2;
+      ao.configuration.depthAwareUpsampling = true;
+      ao.configuration.color = new THREE.Color(0x05070c);
+      ao.setQualityMode(this.quality === 2 ? 'Medium' : 'Performance');
+      // (the particles, glass and nets are far from any crease)
+      (ao as unknown as { autoDetectTransparency: boolean }).autoDetectTransparency = false;
+      ao.configuration.transparencyAware = false;
+      comp.addPass(ao);
+    }
     this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72, levels: this.quality === 2 ? 8 : 5 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
     const grade = new GradeEffect({ vibrance: 0.22, contrast: 0.12, lift: 0.01 });
@@ -295,6 +313,35 @@ export class Stage {
     );
     band.position.y = map.tiers === 2 ? 6 : 1;
     es.add(band);
+    // the stands' two halves in team colour, and the LED ribbons along the fascia and the roof edge:
+    // long bright lines that the clear coat catches as crisp highlight bands
+    for (const [col, a0] of [
+      [new THREE.Color(0.05, 0.12, 0.42), -Math.PI / 2],
+      [new THREE.Color(0.45, 0.16, 0.03), Math.PI / 2],
+    ] as [THREE.Color, number][]) {
+      const half = new THREE.Mesh(
+        new THREE.CylinderGeometry(43.5, 43.5, map.tiers === 2 ? 10 : 5, 24, 1, true, a0, Math.PI),
+        new THREE.MeshBasicMaterial({ color: col.clone().multiplyScalar(0.35 + 0.65 * dk), side: THREE.BackSide }),
+      );
+      half.position.y = map.tiers === 2 ? 4 : 1;
+      es.add(half);
+    }
+    const led = (y: number, h: number, c: THREE.Color) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(42.5, 42.5, h, 48, 1, true), new THREE.MeshBasicMaterial({ color: c, side: THREE.BackSide }));
+      m.position.y = y;
+      es.add(m);
+    };
+    led(-1.2, 0.5, new THREE.Color(2.2, 2.4, 3.0));
+    if (map.tiers === 2) led(map.roof ? 15.5 : 14, 0.7, new THREE.Color(3.2, 3.3, 3.6));
+    // big soft panels high up (the roof's underside lit, or the open sky's brightest part)
+    const soft = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.65, 1.8).multiplyScalar(0.6 + 0.6 * dk), side: THREE.DoubleSide });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.3;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(16, 3), soft);
+      m.position.set(Math.cos(a) * 30, 30, Math.sin(a) * 30);
+      m.lookAt(0, 0, 0);
+      es.add(m);
+    }
     const floor = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x0f2a12).lerp(new THREE.Color(0x2e5a1c), dk) }));
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -4;
