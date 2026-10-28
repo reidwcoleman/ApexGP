@@ -1,7 +1,7 @@
 import { ACTS, DEFAULT_KEYS, DEFAULT_PAD, keyName, padName, type Act, type KeyBinds, type PadBinds } from './input.ts';
 import { botPlan, type BotMode, type LobbyState } from './net.ts';
 import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type MapLook, type TimeId } from './render/looks.ts';
-import { DECALS, FINISHES } from './render/car.ts';
+import { BODIES, BOOMS, DECALS, FINISHES, packLoadout, TRAILS } from './loadout.ts';
 import type { Stats } from './sim/world.ts';
 
 /**
@@ -43,6 +43,34 @@ function arenaArt(id: MapId): string {
   };
   return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${far[m.surround]}${bowl}</svg>`;
 }
+// garage swatches: a sketch of each car's stance, each trail's colours, each explosion's look
+const BODY_ART = [
+  'linear-gradient(160deg,#3d8bff 0 45%,#0d1a33 46%)',
+  'linear-gradient(172deg,#3d8bff 0 52%,#0d1a33 53%)',
+  'linear-gradient(176deg,#3d8bff 0 60%,#0d1a33 61%)',
+  'linear-gradient(168deg,#3d8bff 0 55%,#0d1a33 56%)',
+  'linear-gradient(165deg,#3d8bff 0 50%,#0d1a33 51%)',
+  'linear-gradient(180deg,#0d1a33 0 18%,#3d8bff 19% 62%,#0d1a33 63%)',
+];
+const TRAIL_ART = [
+  'linear-gradient(90deg,transparent,#3d8bff 40%,#bfe0ff)',
+  'linear-gradient(90deg,transparent,#c14cff 40%,#ffe0ff)',
+  'linear-gradient(90deg,#ff4040,#ffb020,#ffff40,#40ff70,#40b0ff,#b050ff)',
+  'repeating-linear-gradient(115deg,#0b1430 0 6px,#9fe6ff 6px 8px,#0b1430 8px 14px)',
+  'linear-gradient(90deg,#2a1208,#ff3a0a 40%,#ffd040)',
+  'radial-gradient(circle at 20% 40%,#fff 0 2px,transparent 3px),radial-gradient(circle at 60% 70%,#ffe08a 0 2px,transparent 3px),radial-gradient(circle at 80% 30%,#fff 0 1.5px,transparent 2.5px),linear-gradient(90deg,#0b1430,#3a2f6a)',
+];
+const TRAIL_BLURB = ['Your team\'s jet, sparks and smoke', 'A clean jet in your accent paint', 'Every colour, cycling', 'Crackling blue-white arcs', 'Roaring flames, thick smoke', 'Glittering gold and white'];
+const BOOM_ART = [
+  'radial-gradient(circle,#fff 0 12%,#ffb040 25%,#ff5a0a 45%,#1a0d05 75%)',
+  'radial-gradient(circle,#fff 0 8%,transparent 9% 30%,#8fd8ff 31% 36%,transparent 37% 55%,#4fa0ff 56% 60%,#08101e 61%)',
+  'radial-gradient(circle at 30% 40%,#ff5ab0 0 8%,transparent 9%),radial-gradient(circle at 70% 35%,#5affc0 0 8%,transparent 9%),radial-gradient(circle at 50% 70%,#ffd040 0 9%,transparent 10%),#0a0e20',
+  'conic-gradient(from 0deg,#2a1060,#8a5aff,#2a1060,#c0a0ff,#2a1060)',
+  'radial-gradient(circle at 20% 30%,#ff4060 0 4px,transparent 5px),radial-gradient(circle at 70% 60%,#40d0ff 0 4px,transparent 5px),radial-gradient(circle at 40% 75%,#ffe040 0 4px,transparent 5px),radial-gradient(circle at 80% 25%,#60ff80 0 4px,transparent 5px),#1a1d2e',
+  'radial-gradient(circle,#000 0 22%,#7a3cff 30%,#1a0a33 50%,#05030a 75%)',
+];
+const BOOM_BLURB = ['A white-hot fireball and fireworks', 'Rings of light racing out', 'A barrage of coloured rockets', 'A twister of light up to the roof', 'A blast of party confetti', 'Everything sucked in, then out'];
+
 const arenaCards = (sel?: MapId) =>
   MAP_IDS.map((id) => `<button data-v="${id}" class="acard ${sel === id ? 'on' : ''}" title="${MAPS[id].blurb}"><span class="art" style="background:${MAPS[id].theme.css}">${arenaArt(id)}</span><b>${MAPS[id].name}</b><small>${MAPS[id].blurb}</small></button>`).join('');
 const timePills = (sel?: TimeId) => TIME_IDS.map((id) => `<button data-v="${id}" class="${sel === id ? 'on' : ''}">${TIME_ICON[id]}<span>${TIMES[id].name}</span></button>`).join('');
@@ -53,6 +81,9 @@ export interface Profile {
   accent: number;
   decal: number;
   finish: number;
+  body: number;
+  trail: number;
+  boom: number;
   fov: number;
   dist: number;
   height: number;
@@ -76,7 +107,7 @@ export interface Profile {
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, decal: 0, finish: 0, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
+  const def: Profile = { name: 'Player', accent: 0xffffff, decal: 0, finish: 0, body: 0, trail: 0, boom: 0, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
   try {
     const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
     // (profiles from before arenas and times: the old Day / Night switch)
@@ -121,6 +152,11 @@ export class UI {
   onProfile: (p: Profile) => void = () => {};
   onClick: () => void = () => {};
   onScreen: (id: string) => void = () => {};
+  /** the garage wants a preview on the car: its boost trail, its goal explosion (null: none) */
+  onPreview: (what: 'trail' | 'boom' | null) => void = () => {};
+  private afterName: (() => void) | null = null;
+  /** the garage tab open (the trail tab keeps the car boosting) */
+  gTab = 'car';
   /** start capturing a bind (the game hands the next key / button back through bindTo) */
   onCaptureStart: (act: Act, kind: 'key' | 'pad', slot: number) => void = () => {};
   onCaptureEnd: () => void = () => {};
@@ -150,10 +186,10 @@ export class UI {
   <div class="side">
     <div class="logo"><b>BOOST</b><i>BALL</i><small>Rocket-powered car soccer</small></div>
     <div class="screen" id="s-main">
-      <button class="mbtn primary" data-go="s-online"><i class="ic">${ICON.friends}</i><span>Play with friends<em>Online lobby · share a code</em></span></button>
+      <button class="mbtn primary" id="b-friends"><i class="ic">${ICON.friends}</i><span>Play with friends<em>Online lobby · share a code</em></span></button>
       <button class="mbtn" data-go="s-play"><i class="ic">${ICON.bots}</i><span>Play vs bots<em>1v1 · 2v2 · 3v3</em></span></button>
       <button class="mbtn" id="b-free"><i class="ic">${ICON.free}</i><span>Free play<em>Just you and the ball</em></span></button>
-      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Garage<em>Paint · decals · finish</em></span></button>
+      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Garage<em>Car · paint · boost · goal explosion</em></span></button>
       <button class="mbtn" id="b-binds"><i class="ic">${ICON.controls}</i><span>Controls<em id="pad-status">Keyboard &amp; mouse · controller</em></span></button>
       <button class="mbtn back" id="b-games"><i class="ic">${ICON.back}</i><span>All games</span></button>
     </div>
@@ -179,11 +215,36 @@ export class UI {
       <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="screen" id="s-garage" hidden>
-      <div class="field"><label>Name</label><input type="text" id="i-name" maxlength="16" value="${esc(p.name)}" spellcheck="false" /></div>
-      <div class="field"><label>Accent paint</label><div class="swatches" id="sw">${PAINTS.map((c) => `<button data-c="${c}" style="background:${hex(c)}" class="${c === p.accent ? 'on' : ''}"></button>`).join('')}</div></div>
-      <div class="field"><label>Decal</label><div class="seg wrap three" id="seg-decal">${DECALS.map((d, k) => `<button data-v="${k}" class="${p.decal === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
-      <div class="field"><label>Finish</label><div class="seg" id="seg-finish">${FINISHES.map((d, k) => `<button data-v="${k}" class="${p.finish === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
-      <div class="hint">Your car wears your team's colour; the accent paints the decal, the wing and the rims.</div>
+      <div class="field"><label>Car name <small>shown over your car in online matches</small></label><input type="text" class="i-name" id="i-name" maxlength="16" value="${esc(p.name)}" spellcheck="false" /></div>
+      <div class="tabs" id="g-tabs"><button data-tab="car" class="on">Car</button><button data-tab="paint">Paint</button><button data-tab="trail">Boost</button><button data-tab="boom">Goal explosion</button></div>
+      <div class="pane" data-pane="car">
+        <div class="items" id="seg-body">${BODIES.map((b, k) => `<button data-v="${k}" class="item ${p.body === k ? 'on' : ''}"><span class="sw" style="background:${BODY_ART[k]}"></span><b>${b.name}</b><small>${b.blurb}</small></button>`).join('')}</div>
+      </div>
+      <div class="pane" data-pane="paint" hidden>
+        <div class="field"><label>Accent paint</label><div class="swatches" id="sw">${PAINTS.map((c) => `<button data-c="${c}" style="background:${hex(c)}" class="${c === p.accent ? 'on' : ''}"></button>`).join('')}</div></div>
+        <div class="field"><label>Decal</label><div class="seg wrap three" id="seg-decal">${DECALS.map((d, k) => `<button data-v="${k}" class="${p.decal === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
+        <div class="field"><label>Finish</label><div class="seg" id="seg-finish">${FINISHES.map((d, k) => `<button data-v="${k}" class="${p.finish === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
+        <div class="hint">Your car wears your team's colour; the accent paints the decal, the wing and the rims.</div>
+      </div>
+      <div class="pane" data-pane="trail" hidden>
+        <div class="items" id="seg-trail">${TRAILS.map((t, k) => `<button data-v="${k}" class="item ${p.trail === k ? 'on' : ''}"><span class="sw" style="background:${TRAIL_ART[k]}"></span><b>${t}</b><small>${TRAIL_BLURB[k]}</small></button>`).join('')}</div>
+      </div>
+      <div class="pane" data-pane="boom" hidden>
+        <div class="items" id="seg-boom">${BOOMS.map((t, k) => `<button data-v="${k}" class="item ${p.boom === k ? 'on' : ''}"><span class="sw" style="background:${BOOM_ART[k]}"></span><b>${t}</b><small>${BOOM_BLURB[k]}</small></button>`).join('')}</div>
+        <button class="mbtn small" id="b-boom"><i class="ic">${ICON.go}</i><span>Preview explosion</span></button>
+      </div>
+      <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
+    </div>
+    <div class="screen" id="s-name" hidden>
+      <div class="mhead">Before you play online</div>
+      <div class="namecard">
+        <b>Name your car</b>
+        <small>Your friends see it over your car and on the scoreboard.</small>
+        <input type="text" class="i-name" id="i-name2" maxlength="16" placeholder="Your car's name" spellcheck="false" autocomplete="off" />
+        <div class="msg" id="name-msg"></div>
+      </div>
+      <button class="mbtn primary" id="b-name-ok"><i class="ic">${ICON.go}</i><span>Continue<em>On to the online lobby</em></span></button>
+      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Equip it first<em>Car · paint · boost · explosion</em></span></button>
       <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="foot">An original fan-made game. Physics tuned to the published numbers of the rocket-car genre.</div>
@@ -314,6 +375,41 @@ export class UI {
       this.profile.name = name.value.trim().slice(0, 16) || 'Player';
       this.save();
     });
+    // the garage's tabs, and what each one previews on the car
+    this.$('#g-tabs').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button');
+      if (!b) return;
+      const tab = b.getAttribute('data-tab')!;
+      this.garageTab(tab);
+    });
+    const equip = (id: string, key: 'body' | 'trail' | 'boom') =>
+      seg(id, (v) => {
+        this.profile[key] = Number(v);
+        this.save();
+        if (key === 'boom') this.onPreview('boom');
+      });
+    equip('#seg-body', 'body');
+    equip('#seg-trail', 'trail');
+    equip('#seg-boom', 'boom');
+    this.$('#b-boom').addEventListener('click', () => this.onPreview('boom'));
+    // online play needs a name on the car first
+    this.$('#b-friends').addEventListener('click', () => this.needName(() => this.screen('s-online')));
+    const name2 = this.$<HTMLInputElement>('#i-name2');
+    const nameOk = () => {
+      const v = name2.value.trim();
+      const bad = v.length < 2 ? 'At least 2 characters' : /^player$/i.test(v) ? 'Pick a name of your own' : '';
+      this.$('#name-msg').textContent = bad;
+      if (bad) return;
+      this.profile.name = v.slice(0, 16);
+      name.value = this.profile.name;
+      this.save();
+      const then = this.afterName;
+      this.afterName = null;
+      (then ?? (() => this.screen('s-online')))();
+    };
+    name2.addEventListener('keydown', (e) => e.key === 'Enter' && nameOk());
+    name2.addEventListener('input', () => (this.$('#name-msg').textContent = ''));
+    this.$('#b-name-ok').addEventListener('click', nameOk);
     this.$('#sw').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('button');
       if (!b) return;
@@ -485,6 +581,37 @@ export class UI {
   }
 
   // ------------------------------------------------------------ screens
+  /** the profile's loadout as a car colour number */
+  carColor(): number {
+    return packLoadout(this.profile);
+  }
+
+  /** a name of your own: 2+ characters, not the default */
+  nameOk(): boolean {
+    const n = this.profile.name.trim();
+    return n.length >= 2 && !/^player$/i.test(n);
+  }
+
+  /** run `then` once the car has a name, asking for one first if it hasn't */
+  needName(then: () => void): void {
+    if (this.nameOk()) return then();
+    this.afterName = then;
+    this.$('#m-menu').hidden = false;
+    this.screen('s-name');
+    const i = this.$<HTMLInputElement>('#i-name2');
+    i.value = /^player$/i.test(this.profile.name) ? '' : this.profile.name;
+    setTimeout(() => i.focus(), 50);
+  }
+
+  garageTab(tab: string): void {
+    this.gTab = tab;
+    this.$('#g-tabs')
+      .querySelectorAll('button')
+      .forEach((x) => x.classList.toggle('on', x.getAttribute('data-tab') === tab));
+    this.root.querySelectorAll<HTMLElement>('#s-garage .pane').forEach((p) => (p.hidden = p.getAttribute('data-pane') !== tab));
+    this.onPreview(tab === 'trail' ? 'trail' : null);
+  }
+
   screen(id: string): void {
     this.root.querySelectorAll('#m-menu .screen').forEach((s) => ((s as HTMLElement).hidden = s.id !== id));
     this.onScreen(id);

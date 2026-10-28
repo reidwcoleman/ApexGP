@@ -17,12 +17,17 @@ for (const [n, p] of [['host', A], ['guest', B]]) {
 await A.goto(base);
 await A.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
 await A.click('text=Play with friends');
+// (online play asks for a car name first)
+await A.fill('#i-name2', 'Hosty');
+await A.click('#b-name-ok');
 await A.click('#b-host');
 await A.waitForFunction(() => window.__boost?.lobby?.code, null, { timeout: 30000 });
 const code = await A.evaluate(() => window.__boost.lobby.code);
 console.log('lobby code', code);
 await B.goto(`${base}?join=${code}`);
 await B.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
+await B.fill('#i-name2', 'Guesty');
+await B.click('#b-name-ok');
 await B.waitForFunction(() => window.__boost?.lobby?.players?.length >= 2, null, { timeout: 30000 });
 console.log('guest in lobby:', await B.evaluate(() => window.__boost.lobby.players.map((p) => `${p.name}/${p.team}`).join(', ')));
 await B.click('.team.o h3 button');

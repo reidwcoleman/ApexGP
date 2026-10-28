@@ -278,3 +278,28 @@
 #s-play .pills { max-width: 560px; }
 #s-play #b-go { max-width: 560px; }
 @media (max-width: 900px) { #s-play .arenas { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } .row3 { grid-template-columns: 1fr; } }
+
+/* ---- garage: tabs of things to equip */
+.menu .side:has(#s-garage:not([hidden])) { width: min(640px, 96vw); }
+.field label small { margin-left: 8px; font-size: 11px; letter-spacing: 0.08em; text-transform: none; color: rgba(233, 240, 255, 0.45); font-weight: 600; }
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: rgba(8, 12, 24, 0.66); border: 1px solid rgba(255, 255, 255, 0.06); }
+.tabs button { flex: 1; padding: 10px 6px; border: 0; border-radius: 7px; background: transparent; color: var(--dim); font: italic 900 15px var(--font); text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap; }
+.tabs button.on { background: rgba(255, 255, 255, 0.12); color: #fff; box-shadow: inset 0 -3px 0 #ffd34a; }
+.tabs button:hover:not(.on) { color: #fff; }
+.pane { display: flex; flex-direction: column; gap: 10px; }
+.pane[hidden] { display: none; }
+.items { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.item { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 0 9px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; overflow: hidden; background: rgba(8, 12, 24, 0.72); color: var(--ink); text-align: left; cursor: pointer; transition: transform 0.15s, border-color 0.15s; }
+.item .sw { display: block; width: 100%; height: 46px; margin-bottom: 6px; }
+.item b { padding: 0 10px; font-size: 15px; font-weight: 900; font-style: italic; text-transform: uppercase; }
+.item small { padding: 0 10px; font-size: 11.5px; line-height: 1.3; color: var(--dim); }
+.item:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.25); }
+.item.on { border-color: #ffd34a; box-shadow: 0 0 0 1px #ffd34a; }
+.item.on::after { content: "EQUIPPED"; position: absolute; top: 6px; right: 6px; padding: 2px 6px; border-radius: 4px; background: #ffd34a; color: #101420; font: 900 9px var(--font); letter-spacing: 0.12em; }
+#b-boom { align-self: flex-start; width: auto; }
+.namecard { display: flex; flex-direction: column; gap: 8px; padding: 18px; border-radius: 12px; background: linear-gradient(160deg, rgba(47, 123, 255, 0.22), rgba(8, 12, 24, 0.75)); border: 1px solid rgba(120, 170, 255, 0.3); }
+.namecard b { font-size: 30px; font-weight: 900; font-style: italic; text-transform: uppercase; line-height: 1; }
+.namecard small { font-size: 14px; color: var(--dim); }
+.namecard input { margin-top: 6px; width: 100%; padding: 14px 16px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.5); color: var(--ink); font: 700 24px var(--font); letter-spacing: 0.04em; outline: none; }
+.namecard input:focus { border-color: #ffd34a; box-shadow: 0 0 0 3px rgba(255, 211, 74, 0.25); }
+@media (max-width: 640px) { .items { grid-template-columns: repeat(2, 1fr); } }

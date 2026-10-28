@@ -1,3 +1,4 @@
+import { BODIES, unpackLoadout } from '../loadout.ts';
 import { ARENA, inGoal, KICKOFFS, PADS, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
 import { Car, noInput, type Input } from './car.ts';
@@ -139,7 +140,7 @@ export class World {
     this.cars.push(c);
     this.players.push(p);
     this.stats.push(newStats());
-    this.rsId.push(this.rs.addCar(p.team));
+    this.rsId.push(this.rs.addCar(p.team, BODIES[unpackLoadout(p.color).body].preset));
     this.prevHit.push(-1);
     this.prevFlags.push(0);
     this.seen.push(new Float64Array(16).fill(NaN));

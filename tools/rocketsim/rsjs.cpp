@@ -46,8 +46,10 @@ EMSCRIPTEN_KEEPALIVE void rs_create() {
 	arena->SetCarBumpCallback(onBump, nullptr);
 }
 
-EMSCRIPTEN_KEEPALIVE int rs_add_car(int team) {
-	Car* c = arena->AddCar(team ? Team::ORANGE : Team::BLUE, CAR_CONFIG_OCTANE);
+// preset: the hitbox class, 0 octane, 1 dominus, 2 plank, 3 breakout, 4 hybrid, 5 merc
+EMSCRIPTEN_KEEPALIVE int rs_add_car(int team, int preset) {
+	static const CarConfig* const presets[6] = { &CAR_CONFIG_OCTANE, &CAR_CONFIG_DOMINUS, &CAR_CONFIG_PLANK, &CAR_CONFIG_BREAKOUT, &CAR_CONFIG_HYBRID, &CAR_CONFIG_MERC };
+	Car* c = arena->AddCar(team ? Team::ORANGE : Team::BLUE, *presets[preset < 0 || preset > 5 ? 0 : preset]);
 	cars[(int)c->id] = c;
 	return (int)c->id;
 }

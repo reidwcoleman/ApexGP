@@ -15,7 +15,7 @@ interface RSModule {
   HEAPU8: Uint8Array;
   _rs_init(p: number, n: number): number;
   _rs_create(): void;
-  _rs_add_car(team: number): number;
+  _rs_add_car(team: number, preset: number): number;
   _rs_clear_cars(): void;
   _rs_controls(id: number, th: number, st: number, pi: number, ya: number, ro: number, j: number, b: number, h: number): void;
   _rs_step(n: number): void;
@@ -118,8 +118,9 @@ export class RSArena {
   constructor() {
     mod()._rs_create();
   }
-  addCar(team: number): number {
-    return mod()._rs_add_car(team);
+  /** preset: the hitbox class (0 octane, 1 dominus, 2 plank, 3 breakout, 4 hybrid, 5 merc) */
+  addCar(team: number, preset = 0): number {
+    return mod()._rs_add_car(team, preset);
   }
   clearCars(): void {
     mod()._rs_clear_cars();

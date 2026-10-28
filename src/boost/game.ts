@@ -6,7 +6,8 @@ import { buildArena, uNear, type ArenaView } from './render/arena.ts';
 import { asMap, asTime, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
-import { carColor, CarView, TEAM_COLORS } from './render/car.ts';
+import { CarView, TEAM_COLORS } from './render/car.ts';
+import { packLoadout, unpackLoadout } from './loadout.ts';
 import { FX } from './render/fx.ts';
 import { S, Stage } from './render/stage.ts';
 import { ARENA, PADS, type Team } from './sim/arena.ts';
@@ -47,6 +48,9 @@ interface Cut {
 }
 
 const tq = new THREE.Quaternion();
+/** a bot's car: a spread of bodies, paints, trails and explosions so a lobby looks lived in */
+const botLoadout = (n: number, k: number) =>
+  packLoadout({ accent: [0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff, 0x2ee6e6][(n + k) % 6], decal: (n * 7 + k) % 6, finish: (n + k * 3) % 4, body: (n * 5 + k * 2) % 6, trail: (n * 3 + k) % 6, boom: (n + k * 5) % 6 });
 const rq = new THREE.Quaternion();
 const tm = new THREE.Matrix4();
 const tv3 = new THREE.Vector3();
@@ -68,6 +72,8 @@ export class Game {
   readonly arena: ArenaView;
   readonly ball = new BallView();
   readonly fx = new FX();
+  /** the garage's own effects (the menu's match keeps playing, hidden, behind it) */
+  private readonly gfx = new FX();
   readonly cam = new ChaseCam();
   readonly audio = new Audio();
   readonly controls: Controls;
@@ -140,7 +146,7 @@ export class Game {
     this.field.scale.setScalar(S);
     this.arena = buildArena();
     this.stage.scene.add(this.arena.root, this.field);
-    this.field.add(this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group);
+    this.field.add(this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group, this.gfx.group);
     this.controls = new Controls(canvas);
     this.ui = new UI(uiRoot);
     this.applyProfile(this.ui.profile);
@@ -214,10 +220,10 @@ export class Game {
     const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Sundown', 'Echo', 'Maverick', 'Pulse', 'Sizzle', 'Turbo', 'Halo'];
     const r: Player[] = [];
     let n = Math.floor(Math.random() * names.length);
-    if (withMe) r.push({ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), owner: 'local' });
+    if (withMe) r.push({ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: this.ui.carColor(), owner: 'local' });
     for (const team of [0, 1] as Team[]) {
       const have = r.filter((p) => p.team === team).length;
-      for (let k = have; k < size; k++) r.push({ name: names[n++ % names.length], team, bot: true, skill, color: carColor([0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff][k % 5], (n * 7 + k) % 6, (n + k * 3) % 4), owner: 'bot' });
+      for (let k = have; k < size; k++) r.push({ name: names[n++ % names.length], team, bot: true, skill, color: botLoadout(n, k), owner: 'bot' });
     }
     return r;
   }
@@ -252,7 +258,7 @@ export class Game {
 
   freeplay(): void {
     this.mode = 'freeplay';
-    this.setup([{ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), owner: 'local' }], true);
+    this.setup([{ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: this.ui.carColor(), owner: 'local' }], true);
     this.me = 0;
     this.world.start({ freeplay: true, unlimitedBoost: true });
     this.world.placeBall(0, 600, BALL.REST_Z);
@@ -292,9 +298,18 @@ export class Game {
       this.applyProfile(p);
       if (this.showcase) this.buildShowcase();
     };
+    ui.onPreview = (w) => {
+      this.previewTrail = w === 'trail';
+      if (w === 'boom' && this.showcase) {
+        // (on the far side of the car from the orbiting camera)
+        const a = this.time * 0.35;
+        this.gfx.preview(-Math.cos(a) * 760, -Math.sin(a) * 760, 200, 0, this.ui.profile.boom, 0.42);
+      }
+    };
     ui.onScreen = (id) => {
       if (this.mode !== 'attract') return;
-      if (id === 's-garage') this.buildShowcase();
+      this.previewTrail = id === 's-garage' && this.ui.gTab === 'trail';
+      if (id === 's-garage' || id === 's-name') this.buildShowcase();
       else if (this.showcase) {
         this.field.remove(this.showcase.group);
         this.showcase = null;
@@ -421,7 +436,7 @@ export class Game {
     h.onOpen = () => {
       this.lobby = {
         code: h.code,
-        players: [{ id: 'host', name: this.ui.profile.name, team: 0, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), bot: false, skill: 1, ping: 0 }],
+        players: [{ id: 'host', name: this.ui.profile.name, team: 0, color: this.ui.carColor(), bot: false, skill: 1, ping: 0 }],
         size: 2,
         minutes: 5,
         bots: 'even',
@@ -498,7 +513,7 @@ export class Game {
     const plan = botPlan(L);
     const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Echo'];
     let n = 0;
-    for (const team of [0, 1] as Team[]) for (let k = 0; k < (team === 0 ? plan.blue : plan.orange); k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: carColor(0xffffff, (n * 5 + k) % 6, (n + k) % 4), owner: 'bot' });
+    for (const team of [0, 1] as Team[]) for (let k = 0; k < (team === 0 ? plan.blue : plan.orange); k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: botLoadout(n, k + team * 3), owner: 'bot' });
     if (!roster.some((p) => p.team === 0) || !roster.some((p) => p.team === 1)) {
       this.ui.toast('Each team needs at least one car (or turn bots on)');
       return;
@@ -545,7 +560,7 @@ export class Game {
     }
     this.leaveNet();
     this.ui.onlineMsg(`Connecting to ${code}…`);
-    const g = (this.guest = new Guest2(code, { name: this.ui.profile.name, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish) }));
+    const g = (this.guest = new Guest2(code, { name: this.ui.profile.name, color: this.ui.carColor() }));
     g.onClose = (why) => {
       if (this.guest !== g) return;
       this.guest = null;
@@ -874,7 +889,7 @@ export class Game {
         }
         break;
       case 'goal': {
-        this.fx.goal(e.x, e.y, Math.max(200, e.z), e.team);
+        this.fx.goal(e.x, e.y, Math.max(200, e.z), e.team, this.views[e.scorer]?.loadout.boom ?? 0);
         this.stage.flash.color.set(e.team === 0 ? 0x4a8dff : 0xff8a3a);
         this.flashK = 1;
         this.stage.flash.position.set(e.x * S, Math.max(2, e.z * S), -e.y * S);
@@ -1075,7 +1090,7 @@ export class Game {
         this.clipBoom = true;
         const gb = this.clip[this.clipGi].ball;
         const team = this.clipGoal?.team ?? (gb[1] > 0 ? 0 : 1);
-        this.fx.goal(gb[0], gb[1], Math.max(200, gb[2]), team);
+        this.fx.goal(gb[0], gb[1], Math.max(200, gb[2]), team, this.views[this.clipGoal?.scorer ?? -1]?.loadout.boom ?? 0);
         this.stage.flash.color.set(team === 0 ? 0x4a8dff : 0xff8a3a);
         this.flashK = 1;
         this.stage.flash.position.set(gb[0] * S, Math.max(2, gb[2] * S), -gb[1] * S);
@@ -1128,6 +1143,7 @@ export class Game {
       }
       // camera (the garage hides the match still playing behind it, its sparks too)
       this.fx.group.visible = !(this.showcase && this.mode === 'attract');
+      this.gfx.group.visible = !this.fx.group.visible;
       if (this.showcase && this.mode === 'attract') this.garage(dt);
       else if (this.dbgCam) {
         this.stage.camera.fov = this.dbgCam.fov;
@@ -1165,6 +1181,8 @@ export class Game {
     // effects
     this.fx.setViewport(this.stage.renderer.domElement.height, this.stage.camera.fov);
     this.fx.update(dt);
+    this.gfx.setViewport(this.stage.renderer.domElement.height, this.stage.camera.fov);
+    this.gfx.update(dt);
     this.flashK = Math.max(0, this.flashK - dt * 1.4);
     this.stage.flash.intensity = this.flashK * this.flashK * 6000;
     const nearGoal = THREE.MathUtils.smoothstep(Math.abs(w.ball.pos.y), 2500, 5000);
@@ -1203,54 +1221,96 @@ export class Game {
   }
 
   /** boost exhaust: glowing particles from both nozzles */
-  private trail(i: number, pos: V3, q: THREE.Quaternion, vel: V3): void {
-    const team = this.world.players[i]?.team ?? 0;
-    const col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
+  /** a boost trail from car i's jets (i < 0: the garage's car), in the style it has equipped */
+  private trail(i: number, pos: V3, q: THREE.Quaternion, vel: V3, lk = 1): void {
+    const view = i < 0 ? this.showcase : this.views[i];
+    const lo = view?.loadout ?? unpackLoadout(0);
+    const team = i < 0 ? 0 : (this.world.players[i]?.team ?? 0);
+    const style = lo.trail;
+    const fx = i < 0 ? this.gfx : this.fx;
     const back = new THREE.Vector3(-1, 0, 0).applyQuaternion(q);
-    for (const sy of [-1, 1]) {
-      const o = new THREE.Vector3(-63, sy * 11, 15).applyQuaternion(q);
-      for (let k = 0; k < 3; k++) {
-        const sp = 500 + Math.random() * 400;
-        this.fx.spark({
+    const jets = view?.jets.length ? view.jets : [new THREE.Vector3(-63, 11, 15), new THREE.Vector3(-63, -11, 15)];
+    let col: number[];
+    if (style === 1) {
+      const a = new THREE.Color(lo.accent);
+      col = [a.r * 2.4 + 0.1, a.g * 2.4 + 0.1, a.b * 2.4 + 0.1];
+    } else if (style === 2) {
+      const h = new THREE.Color().setHSL((this.time * 0.6 + (i < 0 ? 0 : i) * 0.13) % 1, 1, 0.55);
+      col = [h.r * 2.6, h.g * 2.6, h.b * 2.6];
+    } else if (style === 3) col = [1.1, 2.2, 3.2];
+    else if (style === 4) col = [3, 0.9, 0.12];
+    else if (style === 5) col = [2.6, 2.2, 1.3];
+    else col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
+    const per = style === 1 ? 4 : style === 5 ? 2 : 3;
+    for (const jet of jets) {
+      const o = jet.clone().applyQuaternion(q);
+      for (let k = 0; k < per; k++) {
+        const sp = style === 1 ? 650 + Math.random() * 150 : 500 + Math.random() * 400;
+        const jit = style === 3 ? 380 : style === 1 ? 40 : 120;
+        fx.spark({
           x: pos.x + o.x,
           y: pos.y + o.y,
           z: pos.z + o.z,
-          vx: vel.x * 0.25 + back.x * sp + (Math.random() - 0.5) * 120,
-          vy: vel.y * 0.25 + back.y * sp + (Math.random() - 0.5) * 120,
-          vz: vel.z * 0.25 + back.z * sp + (Math.random() - 0.5) * 120,
+          vx: vel.x * 0.25 + back.x * sp + (Math.random() - 0.5) * jit,
+          vy: vel.y * 0.25 + back.y * sp + (Math.random() - 0.5) * jit,
+          vz: vel.z * 0.25 + back.z * sp + (Math.random() - 0.5) * jit,
           r: col[0],
           g: col[1],
           b: col[2],
-          life: 0.38 + Math.random() * 0.2,
-          size: 34 + Math.random() * 10,
-          grow: -45,
-          drag: 2.5,
+          life: (style === 3 ? 0.16 + Math.random() * 0.12 : style === 5 ? 0.7 + Math.random() * 0.5 : 0.38 + Math.random() * 0.2) * lk,
+          size: style === 1 ? 26 + Math.random() * 6 : style === 4 ? 44 + Math.random() * 16 : style === 5 ? 14 + Math.random() * 10 : 34 + Math.random() * 10,
+          grow: style === 4 ? 30 : -45,
+          drag: style === 5 ? 4 : 2.5,
+          grav: style === 4 ? -300 : style === 5 ? 60 : 0,
         });
       }
     }
-    // a hot white fleck or two down the middle of the trail, then the smoke it leaves
-    if (Math.random() < 0.6) {
-      const sp = 700 + Math.random() * 300;
-      const o = new THREE.Vector3(-66, (Math.random() - 0.5) * 20, 14).applyQuaternion(q);
-      this.fx.spark({ x: pos.x + o.x, y: pos.y + o.y, z: pos.z + o.z, vx: vel.x * 0.2 + back.x * sp, vy: vel.y * 0.2 + back.y * sp, vz: vel.z * 0.2 + back.z * sp, r: 2.4, g: 2.1, b: 1.6, life: 0.18, size: 18, grow: -30, drag: 2 });
+    const sp = 700 + Math.random() * 300;
+    const o = jets[0].clone().lerp(jets[jets.length - 1], 0.5).add(new THREE.Vector3(-3, (Math.random() - 0.5) * 20, 1)).applyQuaternion(q);
+    if (style === 3) {
+      // lightning: a jagged white arc snapping off the back now and then
+      if (Math.random() < 0.35) {
+        let px = pos.x + o.x;
+        let py = pos.y + o.y;
+        let pz = pos.z + o.z;
+        for (let s = 0; s < 7; s++) {
+          px += back.x * 40 + (Math.random() - 0.5) * 50;
+          py += back.y * 40 + (Math.random() - 0.5) * 50;
+          pz += back.z * 40 + (Math.random() - 0.5) * 50;
+          fx.spark({ x: px, y: py, z: pz, vx: vel.x * 0.3, vy: vel.y * 0.3, vz: vel.z * 0.3, r: 2.8, g: 3, b: 3.3, life: (0.09) * lk, size: 20, drag: 1 });
+        }
+      }
+    } else if (style === 5) {
+      // stardust: glints that twinkle and hang in the air
+      if (Math.random() < 0.8) fx.spark({ x: pos.x + o.x + (Math.random() - 0.5) * 50, y: pos.y + o.y + (Math.random() - 0.5) * 50, z: pos.z + o.z + (Math.random() - 0.5) * 40, vx: vel.x * 0.05, vy: vel.y * 0.05, vz: 20, r: 3.2, g: 3.1, b: 2.8, life: (0.5 + Math.random() * 0.8) * lk, size: 22, grow: -30, drag: 3 });
+    } else if (Math.random() < 0.6) {
+      // a hot white fleck or two down the middle of the trail
+      fx.spark({ x: pos.x + o.x, y: pos.y + o.y, z: pos.z + o.z, vx: vel.x * 0.2 + back.x * sp, vy: vel.y * 0.2 + back.y * sp, vz: vel.z * 0.2 + back.z * sp, r: 2.4, g: 2.1, b: 1.6, life: (0.18) * lk, size: 18, grow: -30, drag: 2 });
     }
-    if (Math.random() < 0.55)
-      this.fx.smoke({ x: pos.x + back.x * 80, y: pos.y + back.y * 80, z: pos.z + 15 + back.z * 80, vx: vel.x * 0.1, vy: vel.y * 0.1, vz: 30, r: 0.32, g: 0.33, b: 0.37, life: 0.9, size: 42, grow: 140, drag: 2 });
+    // and the smoke it leaves (thick and dark behind flames, none behind a clean jet)
+    const smk = style === 4 ? 0.9 : style === 1 || style === 5 ? 0 : 0.55;
+    if (Math.random() < smk) {
+      const g = style === 4 ? 0.16 : 0.32;
+      fx.smoke({ x: pos.x + back.x * 80, y: pos.y + back.y * 80, z: pos.z + 15 + back.z * 80, vx: vel.x * 0.1, vy: vel.y * 0.1, vz: style === 4 ? 90 : 30, r: g, g: g * 1.03, b: g * 1.15, life: (style === 4 ? 1.4 : 0.9) * lk, size: style === 4 ? 60 : 42, grow: style === 4 ? 200 : 140, drag: 2 });
+    }
   }
 
   /** the garage: your car on the centre spot, the camera orbiting it */
   private showcase: CarView | null = null;
+  /** the garage's car is showing off its boost trail */
+  private previewTrail = false;
   private buildShowcase(): void {
     if (this.showcase) this.field.remove(this.showcase.group);
-    const v = (this.showcase = new CarView(0, carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), this.ui.profile.name));
+    const v = (this.showcase = new CarView(0, this.ui.carColor(), this.ui.profile.name));
     this.field.add(v.group);
   }
   private garage(dt: number): void {
     const v = this.showcase!;
-    v.group.position.set(0, 0, 17);
+    v.group.position.set(0, 0, v.rest);
     v.group.quaternion.identity();
     v.group.visible = true;
-    v.boostVis = 0;
+    v.idle(this.time, dt, this.previewTrail);
+    if (this.previewTrail) this.trail(-1, new V3(0, 0, v.rest), v.group.quaternion, new V3(), 0.4);
     const a = this.time * 0.35;
     this.stage.camera.fov = 34;
     this.stage.camera.updateProjectionMatrix();
@@ -1413,7 +1473,7 @@ export class Game {
     const v = new CarView(0, 0xffffff, 'warm');
     this.field.add(v.group);
     // (the pearl paint is its own program)
-    const v2 = new CarView(1, carColor(0xffffff, 0, 3), 'warm');
+    const v2 = new CarView(1, packLoadout({ finish: 3 }), 'warm');
     v2.group.position.set(0, 3, 0);
     this.field.add(v2.group);
     this.fx.goal(0, 0, 300, 0);
@@ -1434,9 +1494,12 @@ export class Game {
     if (q.get('auto')) this.playOffline(Number(q.get('size') ?? 2), Number(q.get('skill') ?? 0.55), Number(q.get('min') ?? 5));
     else if (q.get('free')) this.freeplay();
     else if (join) {
-      this.ui.screen('s-online');
-      this.ui.setJoinCode(join.toUpperCase());
-      this.joinLobby(join);
+      // (an invite link: name the car first if it hasn't been)
+      this.ui.needName(() => {
+        this.ui.screen('s-online');
+        this.ui.setJoinCode(join.toUpperCase());
+        this.joinLobby(join);
+      });
     }
     void ARENA;
     void BALL;
