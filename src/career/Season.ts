@@ -115,19 +115,22 @@ interface Climate {
 /** what each round's weekend tends to look like (weights) */
 const CLIMATE: Record<string, Climate> = {
   monza: { weather: [['clear', 4], ['haze', 2], ['cloudy', 2], ['changeable', 1], ['rain', 1]], time: [['afternoon', 3], ['golden', 2], ['midday', 1], ['morning', 1]] },
-  spa: { weather: [['cloudy', 2], ['overcast', 2], ['changeable', 3], ['drizzle', 2], ['rain', 2], ['mist', 1], ['clear', 1]], time: [['afternoon', 3], ['morning', 1], ['golden', 1]] },
-  silverstone: { weather: [['cloudy', 3], ['overcast', 2], ['windy', 2], ['changeable', 2], ['drizzle', 1], ['clear', 2]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
+  spa: { weather: [['cloudy', 2], ['overcast', 2], ['changeable', 3], ['drizzle', 2], ['rain', 2], ['mist', 1], ['clear', 1], ['sleet', 1], ['hail', 1]], time: [['afternoon', 3], ['morning', 1], ['golden', 1]] },
+  silverstone: { weather: [['cloudy', 3], ['overcast', 2], ['windy', 2], ['changeable', 2], ['drizzle', 1], ['clear', 2], ['hail', 1], ['frost', 1]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
   suzuka: { weather: [['clear', 2], ['cloudy', 2], ['changeable', 2], ['rain', 1], ['sunshower', 1]], time: [['afternoon', 2], ['golden', 2], ['sunset', 1]] },
   interlagos: { weather: [['changeable', 3], ['storm', 1], ['thunderstorm', 1], ['rain', 1], ['cloudy', 2], ['clear', 1]], time: [['afternoon', 3], ['golden', 1]] },
-  spielberg: { weather: [['clear', 3], ['cloudy', 2], ['changeable', 2], ['thunderstorm', 1]], time: [['afternoon', 3], ['golden', 1], ['morning', 1]] },
+  spielberg: { weather: [['clear', 3], ['cloudy', 2], ['changeable', 2], ['thunderstorm', 1], ['hail', 1], ['flurries', 1], ['frost', 1]], time: [['afternoon', 3], ['golden', 1], ['morning', 1]] },
   zandvoort: { weather: [['windy', 3], ['cloudy', 2], ['clear', 2], ['changeable', 1], ['drizzle', 1]], time: [['afternoon', 3], ['golden', 1]] },
-  austin: { weather: [['clear', 4], ['haze', 1], ['windy', 1], ['cloudy', 1]], time: [['afternoon', 2], ['golden', 2], ['sunset', 2]] },
-  montreal: { weather: [['clear', 2], ['cloudy', 2], ['changeable', 2], ['rain', 1], ['sunshower', 1]], time: [['afternoon', 3], ['golden', 1]] },
-  melbourne: { weather: [['clear', 3], ['windy', 1], ['cloudy', 2], ['changeable', 1]], time: [['afternoon', 2], ['golden', 1], ['sunset', 1]] },
-  sakhir: { weather: [['clear', 3], ['haze', 2]], time: [['dusk', 1], ['night', 4], ['sunset', 1]] },
-  yasmarina: { weather: [['clear', 3], ['haze', 2]], time: [['sunset', 2], ['dusk', 2], ['night', 2]] },
-  mexico: { weather: [['clear', 2], ['haze', 3], ['cloudy', 1]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
-  hungaroring: { weather: [['clear', 4], ['haze', 2], ['thunderstorm', 1]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
+  austin: { weather: [['clear', 4], ['haze', 1], ['windy', 1], ['cloudy', 1], ['heatwave', 1], ['hail', 1]], time: [['afternoon', 2], ['golden', 2], ['sunset', 2]] },
+  montreal: { weather: [['clear', 2], ['cloudy', 2], ['changeable', 2], ['rain', 1], ['sunshower', 1], ['flurries', 1]], time: [['afternoon', 3], ['golden', 1]] },
+  melbourne: { weather: [['clear', 3], ['windy', 1], ['cloudy', 2], ['changeable', 1], ['heatwave', 1]], time: [['afternoon', 2], ['golden', 1], ['sunset', 1]] },
+  sakhir: { weather: [['clear', 3], ['haze', 2], ['sandstorm', 1], ['heatwave', 1]], time: [['dusk', 1], ['night', 4], ['sunset', 1]] },
+  yasmarina: { weather: [['clear', 3], ['haze', 2], ['sandstorm', 1]], time: [['sunset', 2], ['dusk', 2], ['night', 2]] },
+  mexico: { weather: [['clear', 2], ['haze', 3], ['cloudy', 1], ['hail', 1]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
+  hungaroring: { weather: [['clear', 4], ['haze', 2], ['thunderstorm', 1], ['heatwave', 2]], time: [['afternoon', 3], ['midday', 1], ['golden', 1]] },
+  // the scenic roads: an alpine valley that can snow, a desert that can blow
+  bergsee: { weather: [['clear', 2], ['cloudy', 2], ['snow', 2], ['flurries', 2], ['blizzard', 1], ['frost', 1], ['changeable', 1]], time: [['morning', 2], ['afternoon', 2], ['golden', 1]] },
+  redmesa: { weather: [['clear', 3], ['heatwave', 2], ['sandstorm', 2], ['haze', 1]], time: [['afternoon', 2], ['golden', 2], ['sunset', 1]] },
 };
 const FALLBACK: Climate = { weather: [['clear', 3], ['cloudy', 2], ['changeable', 1]], time: [['afternoon', 2], ['golden', 1]] };
 
@@ -146,8 +149,13 @@ function pick<K>(list: [K, number][], r: number): K {
 /** a weekend's weather and light at this circuit, from its climate; `avoid` = the last one there (roll something else) */
 export function rollForecast(circuit: string, avoid?: Forecast | null): Forecast {
   const c = CLIMATE[circuit] ?? FALLBACK;
-  let f: Forecast = { weather: pick(c.weather, Math.random()), time: pick(c.time, Math.random()) };
-  for (let i = 0; i < 6 && avoid && f.weather === avoid.weather && f.time === avoid.time; i++) f = { weather: pick(c.weather, Math.random()), time: pick(c.time, Math.random()) };
+  // (a frost is a morning thing: it has melted by the afternoon)
+  const roll = (): Forecast => {
+    const weather = pick(c.weather, Math.random());
+    return { weather, time: weather === 'frost' ? pick<T>([['dawn', 1], ['morning', 2]], Math.random()) : pick(c.time, Math.random()) };
+  };
+  let f = roll();
+  for (let i = 0; i < 6 && avoid && f.weather === avoid.weather && f.time === avoid.time; i++) f = roll();
   return f;
 }
 

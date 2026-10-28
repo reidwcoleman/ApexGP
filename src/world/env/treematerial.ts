@@ -408,6 +408,7 @@ export function treeMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStandardM
       uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
+      uSnowCover: weatherUniforms.uSnowCover,
       uLeafMap: { value: kit.leafMap },
       uLeafN: { value: kit.leafNormal },
       uBark: { value: kit.bark },
@@ -494,6 +495,7 @@ uniform sampler2D uLeafN;
 uniform sampler2D uBark;
 uniform vec2 uLeafSize;
 uniform float uWet;
+uniform float uSnowCover;
 uniform vec4 uLeafCut;
 uniform sampler2D uLeafCover;
 uniform float uLeafCoverN;
@@ -557,6 +559,8 @@ if ( leafK > 0.5 ) {
   // park), a touch warmer than the scans; FOLIAGE_TINT is shared with the impostors so near and far match
   vec3 lc = lt.rgb * FOLIAGE_TINT;
   diffuseColor.rgb *= lc;
+  // snow laden on the sprays: the paler, upper leaves carry it, the shaded inner ones stay dark
+  if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.73, 0.78 ), uSnowCover * mix( 0.3, 0.72, smoothstep( 0.04, 0.2, lt.g ) ) );
 } else {
   // the scan's own bark colour is in the vertex colour; the bark tile adds the detail around it
   vec4 bk = texture2D( uBark, vTUv );
@@ -728,6 +732,7 @@ export function impostorMaterial(kit: TreeKit, u: TreeUniforms): THREE.MeshStand
       uFrame: u.uFrame,
       uWind: weatherUniforms.uWind,
       uWet: weatherUniforms.uWetness,
+      uSnowCover: weatherUniforms.uSnowCover,
       uImpA: { value: kit.impC },
       uImpN: { value: kit.impN },
       uProtos: { value: protos },
@@ -850,6 +855,7 @@ uniform sampler2D uImpA;
 uniform sampler2D uImpN;
 uniform vec2 uImpSize;
 uniform float uWet;
+uniform float uSnowCover;
 uniform vec3 uLeafFill;
 varying vec4 vIUv;
 varying float vIW;
@@ -881,6 +887,8 @@ vec4 ia = mix( ia0, ia1, vIW );
 diffuseColor.rgb = ia.rgb * vITint;
 // (the same foliage tint as the 3D trees, so near and far match)
 diffuseColor.rgb *= FOLIAGE_TINT;
+// (the far woods under snow: grey-white crowns, as the 3D trees' sprays)
+if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.69, 0.75 ), uSnowCover * 0.5 * smoothstep( 0.02, 0.12, ia.g ) );
 `,
       )
       .replace(

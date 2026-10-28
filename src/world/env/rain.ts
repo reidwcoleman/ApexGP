@@ -12,6 +12,12 @@ import { HL_MAX, headlightUniforms } from './headlights.ts';
  * the lens, and it slants with the wind. Streaks are lit by the sky (and
  * lightning) and drawn additively after the opaque pass, depth-tested.
  * `mesh.count` scales with the rain rate, so drizzle costs almost nothing.
+ *
+ * The same drops fall as other things (`setKind`): snowflakes (a share of them
+ * by the snow fraction, so sleet is rain and wet snow together) drift down at
+ * ~1.3 m/s, flutter and draw as soft white flakes — streaking only when the
+ * camera rushes through them; hail is fast white pellets; blown sand is a fine
+ * ochre grit riding the wind with hardly any fall.
  */
 
 const VERT = /* glsl */ `
@@ -27,6 +33,9 @@ uniform float uWidth;
 uniform float uPixel;
 uniform float uZoom;
 uniform float uSheets;
+uniform float uSnow;
+uniform float uHail;
+uniform float uDust;
 uniform vec3 uSunDirR;
 uniform vec4 hlPos[ ${HL_MAX} ];
 uniform vec4 hlDir[ ${HL_MAX} ];
@@ -35,23 +44,37 @@ varying float vAlpha;
 varying vec2 vQuad;
 varying float vGlint;
 varying float vLamp;
+varying float vFlake;
 
 void main() {
-  float fall = uFall * ( 0.8 + 0.4 * aSeed.w );
+  // (which drops are flakes: a fixed share by the snow fraction, so sleet mixes the two)
+  float fl = step( fract( aSeed.x * 73.13 + aSeed.z * 11.7 ), uSnow );
+  vFlake = fl;
+  float fall = uFall * ( 0.8 + 0.4 * aSeed.w ) * ( 1.0 + 0.6 * uHail );
+  // snowflakes fall at ~1–1.6 m/s whatever the rate (a flake's terminal velocity barely changes)
+  fall = mix( fall, 0.9 + 0.7 * aSeed.w, fl );
+  // blown sand hardly falls: it rides the wind, lifted and dropped by the gusts
+  fall = mix( fall, 0.1 + 0.25 * aSeed.w, uDust );
   vec3 vel = vec3( uWind.x, -fall, uWind.z );
   vec3 base = aSeed.xyz * uSize + vel * uTime;
+  // flakes flutter and spiral a few decimetres as they come down; sand swirls in the gusts
+  base.xz += fl * 0.35 * vec2( sin( uTime * ( 1.1 + aSeed.w ) + aSeed.y * 40.0 ), cos( uTime * ( 0.9 + aSeed.x ) + aSeed.z * 40.0 ) );
+  base.y += uDust * 0.8 * sin( uTime * ( 1.7 + aSeed.w ) + aSeed.x * 50.0 );
   vec3 rel = mod( base - uCam, uSize ) - 0.5 * uSize;
   vec3 p = uCam + rel;
   // streak: where the drop was relative to the camera one shutter-time ago
   vec3 rv = vel - uCamVel;
   float rl = length( rv );
   vec3 dir = rv / max( rl, 1e-3 );
-  float len = clamp( rl * uShutter, 0.06, 4.5 );
   float dist = length( rel );
   vec3 side = normalize( cross( dir, rel + vec3( 1e-3, 0.0, 0.0 ) ) );
+  // (a flake is ~1–2 cm across, a hailstone ~1 cm: both far fatter than a raindrop's streak)
+  float w0 = uWidth * mix( 1.0 + 1.4 * uHail, 2.6 + 1.6 * aSeed.w, fl ) * ( 1.0 + 0.8 * uDust );
+  // a flake is round unless the camera rushes through it; a drop is always a streak
+  float len = clamp( rl * uShutter, mix( 0.06, 2.0 * w0, fl ), 4.5 );
   // keep streaks at least ~1 px wide, conserving their brightness
-  float w = max( uWidth, dist * uPixel * 0.9 );
-  float thin = uWidth / w;
+  float w = max( w0, dist * uPixel * 0.9 );
+  float thin = w0 / w;
   vec3 wp = p - dir * len * position.y + side * w * position.x;
   vQuad = position.xy;
   float r = 0.5 * uSize;
@@ -104,19 +127,26 @@ const FRAG = /* glsl */ `
 uniform vec3 uColor;
 uniform vec3 uGlint;
 uniform float uOpacity;
+uniform float uHail;
+uniform float uDust;
 uniform vec3 hlColor;
 varying float vAlpha;
 varying vec2 vQuad;
 varying float vGlint;
 varying float vLamp;
+varying float vFlake;
 void main() {
   float across = 1.0 - vQuad.x * vQuad.x;
-  float along = smoothstep( 0.0, 0.25, vQuad.y ) * smoothstep( 1.0, 0.6, vQuad.y );
+  // (a drop's streak has a bright head; a flake is a soft, even dot or smear)
+  float along = mix( smoothstep( 0.0, 0.25, vQuad.y ) * smoothstep( 1.0, 0.6, vQuad.y ), 4.0 * vQuad.y * ( 1.0 - vQuad.y ), vFlake );
   float a = vAlpha * across * along * uOpacity;
   if ( a < 0.002 ) discard;
+  // snow and hail are ice: they scatter the whole sky's light and read white, not as grey streaks
+  float ice = max( vFlake, uHail );
+  vec3 col = uColor * mix( 1.0, 2.1, ice ) * mix( vec3( 1.0 ), vec3( 1.4, 1.0, 0.62 ), uDust );
   // premultiplied: the streak's light is added, and a drop also blocks a little of what is behind
   // it — so rain still reads against a bright sky, as grey streaks, instead of vanishing
-  gl_FragColor = vec4( ( uColor + uGlint * vGlint + hlColor * vLamp * 0.18 ) * a, a * 0.45 );
+  gl_FragColor = vec4( ( col + uGlint * vGlint * ( 1.0 - 0.5 * ice ) + hlColor * vLamp * 0.18 ) * a, a * mix( 0.45, 0.8, ice ) );
 }
 `;
 
@@ -219,6 +249,9 @@ function makeLayer(max: number, size: number, width: number, fall: number, opaci
     uPixel: { value: 0.001 },
     uZoom: { value: 1 },
     uSheets: { value: 0 },
+    uSnow: { value: 0 },
+    uHail: { value: 0 },
+    uDust: { value: 0 },
     uSunDirR: { value: new THREE.Vector3(0, 1, 0) },
     uGlint: { value: new THREE.Color(0, 0, 0) },
     uColor: { value: new THREE.Color(0.5, 0.5, 0.55) },
@@ -253,6 +286,8 @@ export interface RainSystem {
   group: THREE.Group;
   /** rain rate 0 … 1, wind (m/s), streak colour (linear radiance) */
   set(rain: number, windX: number, windZ: number, color: THREE.Color): void;
+  /** what falls: the snow share 0 … 1 (sleet between), hail 0 … 1, blown sand 0 … 1 */
+  setKind(snow: number, hail: number, dust: number): void;
   update(dt: number, camera: THREE.Camera): void;
   setDensity(scale: number): void;
   /** the sun seen through the rain: direction toward it and its glint colour (0 = none) */
@@ -317,6 +352,8 @@ export function createRain(): RainSystem {
   const sp = new THREE.Vector3();
   const fwd = new THREE.Vector3();
   let rain = 0;
+  let snowK = 0;
+  let hailK = 0;
   let density = 1;
   let time = 0;
   const lastCam = new THREE.Vector3();
@@ -353,7 +390,18 @@ export function createRain(): RainSystem {
         (l.uniforms.uWind.value as THREE.Vector3).set(wx * 0.9, 0, wz * 0.9);
         (l.uniforms.uColor.value as THREE.Color).copy(color);
       }
-      sU.uColor.value.copy(color).multiplyScalar(0.5);
+      sU.uColor.value.copy(color).multiplyScalar(0.5 + 0.9 * hailK);
+    },
+    setKind(snow, hail, dust) {
+      snowK = snow;
+      hailK = hail;
+      for (const l of layers) {
+        l.uniforms.uSnow.value = snow;
+        l.uniforms.uHail.value = hail;
+        l.uniforms.uDust.value = dust;
+      }
+      // a hailstone bounces off the asphalt in a bright white burst
+      sU.uLife.value = hail > 0.3 ? 0.4 : 0.28;
     },
     setSun(dir, glint) {
       for (const l of layers) {
@@ -400,12 +448,13 @@ export function createRain(): RainSystem {
       // splashes round the car being watched (or ahead of the camera), up to ~2600 drops a second
       sU.uTime.value = time;
       sU.uCam.value.copy(pos);
-      splashes.visible = !!surface && rain > 0.05;
+      // (flakes land without a splash; blown sand neither)
+      splashes.visible = !!surface && rain > 0.05 && snowK < 0.75 && (layers[0].uniforms.uDust.value as number) < 0.5;
       if (splashes.visible && dt > 0) {
         camera.getWorldDirection(fwd);
         const cx = haveFocus && pos.distanceTo(focusP) < 60 ? focusP.x : pos.x + fwd.x * 10;
         const cz = haveFocus && pos.distanceTo(focusP) < 60 ? focusP.z : pos.z + fwd.z * 10;
-        sAcc += dt * 2600 * Math.min(1, rain * 1.3) * density;
+        sAcc += dt * 2600 * Math.min(1, rain * 1.3) * density * (1 - snowK);
         let n = Math.min(160, Math.floor(sAcc));
         sAcc -= n;
         let touched = false;

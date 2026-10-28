@@ -4,23 +4,8 @@ import { uiColor } from '../race/Teams.ts';
 import { COMPOUNDS } from '../race/Pit.ts';
 import { WEATHER_LABEL, isWetKind, type WeatherKind } from '../world/Weather.ts';
 import { uiHeight } from './scale.ts';
+import { WX_ICON } from './wxIcons.ts';
 
-/** 16px line icons for the weather row (stroke = currentColor) */
-const WX_ICON: Record<WeatherKind, string> = {
-  clear: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/>',
-  cloudy: '<path d="M6 3.2a2.6 2.6 0 0 1 4.3 1.2"/><path d="M4.5 13h7a2.6 2.6 0 0 0 .3-5.2 3.6 3.6 0 0 0-6.9-.6A2.9 2.9 0 0 0 4.5 13z"/>',
-  overcast: '<path d="M4 12.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 12.5z"/>',
-  drizzle: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M6 12v1M10 12v1"/>',
-  rain: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M5 11.5l-.8 2.5M8 11.5l-.8 2.5M11 11.5l-.8 2.5"/>',
-  storm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M5 11.5l-.8 2.5M8 11.5l-.8 2.5M11 11.5l-.8 2.5"/><path d="M6.5 11l-.6 1.6M9.5 11l-.6 1.6"/>',
-  thunderstorm: '<path d="M4 9.5h7.8a2.8 2.8 0 0 0 .3-5.6 3.8 3.8 0 0 0-7.3-.7A3.1 3.1 0 0 0 4 9.5z"/><path d="M8.6 10.5 6.8 13h2.4l-1.6 2.5"/>',
-  haze: '<circle cx="8" cy="6.5" r="2.6"/><path d="M2 11h12M3.5 13.5h9"/>',
-  fog: '<path d="M2 5.5h12M3 8h10M2 10.5h12M4 13h8"/>',
-  mist: '<circle cx="8" cy="5.5" r="2.4"/><path d="M2 10h12M3.5 12.5h9"/>',
-  windy: '<path d="M2 6h8.5a2 2 0 1 0-2-2M2 9.5h11a2 2 0 1 1-2 2M2 13h6"/>',
-  drying: '<circle cx="8" cy="6" r="2.8"/><path d="M8 1v1.2M3 6h1.2M11.8 6H13M4.5 2.5l.8.8M11.5 2.5l-.8.8"/><path d="M2.5 12.5c1.5-1 3-1 4.5 0s3 1 4.5 0"/>',
-  sunshower: '<circle cx="5.5" cy="5" r="2.2"/><path d="M5.5 1v.9M1.5 5h.9M2.7 2.2l.6.6"/><path d="M7.5 10.5h5a2 2 0 0 0 .2-4 2.8 2.8 0 0 0-5.3-.3A2.2 2.2 0 0 0 7.5 10.5z"/><path d="M9 12.3l-.5 1.7M12 12.3l-.5 1.7"/>',
-};
 const MOON_ICON = '<path d="M11.5 10.8A5 5 0 0 1 6.2 3a5 5 0 1 0 5.3 7.8z"/><path d="M12 2.5v1.4M11.3 3.2h1.4"/>';
 const isWet = (k: WeatherKind) => isWetKind(k);
 
@@ -707,7 +692,7 @@ export class HUD {
     if (nightKey !== this.wxKind) {
       this.wxKind = nightKey;
       // a clear or hazy sky after sunset shows the moon, not the sun
-      const moon = nightKey.endsWith('/n') && (w.kind === 'clear' || w.kind === 'haze' || w.kind === 'drying' || w.kind === 'windy');
+      const moon = nightKey.endsWith('/n') && (w.kind === 'clear' || w.kind === 'haze' || w.kind === 'drying' || w.kind === 'windy' || w.kind === 'frost' || w.kind === 'heatwave');
       this.wxIcon.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${moon ? MOON_ICON : WX_ICON[w.kind]}</svg>`;
       this.setText(this.wxLabel, WEATHER_LABEL[w.kind]);
     }

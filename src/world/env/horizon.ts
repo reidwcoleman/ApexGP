@@ -7,6 +7,7 @@ import { CLOUD_FIELD_GLSL } from './skyClouds.ts';
 // (m) beyond this the ring's haze distance grows only as √distance (see the vertex shader); the
 // far terrain eases its haze from the same distance, so a tree line stands in the same air as its land
 import { HAZE_EASE, hazeEaseK, horizonVeil } from './terrain.ts';
+import { weatherUniforms } from '../weatherUniforms.ts';
 
 /**
  * Distant horizon: a parametric backdrop ring of mountain ranges, hills, dunes,
@@ -660,6 +661,7 @@ export function buildHorizon(
     uCloudMap: { value: cloudShadowTexture },
     uHzVeil: { value: horizonVeil },
     uHazeEaseK: hazeEaseK,
+    uSnowCover: weatherUniforms.uSnowCover,
   };
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: true });
   mat.onBeforeCompile = (sh) => {
@@ -706,6 +708,7 @@ gl_Position.z = gl_Position.w * 0.999995;`,
         '#include <common>',
         `#include <common>
 uniform vec3 uSunDir;
+uniform float uSnowCover;
 uniform vec2 uHzVeil;
 uniform vec3 uSunCol;
 uniform vec3 uSkyCol;
@@ -864,6 +867,9 @@ float hzFoot = 0.0;
     // valley mist: the foot of each range sits in the air between it and the next
     hzFoot = 1.0 - smoothstep( 0.0, 0.42, vInfo.y * 0.6 + h01 * 0.6 );
   }
+  // a snowfall whitens the whole landscape: the fields, the treetops, the gentle slopes (the steep
+  // faces and the forest's dark trunks still show through)
+  if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.56, 0.59, 0.65 ), uSnowCover * 0.82 * smoothstep( 0.45, 0.85, n.y ) );
   float ndl = max( dot( n, uSunDir ), 0.0 );
   // soft wrap on vegetated slopes (forest canopy scatters)
   float wrap = kind < 1.5 ? max( ( dot( n, uSunDir ) + 0.3 ) / 1.3, 0.0 ) : ndl;

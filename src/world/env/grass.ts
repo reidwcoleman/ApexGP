@@ -156,6 +156,7 @@ export function buildGrass(map: WorldMap, palette: { lawn: THREE.Color; meadow: 
     uStrawC: { value: palette.straw },
     uWind: weatherUniforms.uWind,
     uWet: weatherUniforms.uWetness,
+    uSnowCover: weatherUniforms.uSnowCover,
     ...wakeUniforms,
   };
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
@@ -278,9 +279,9 @@ ${CAR_WAKE_GLSL}`,
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vGC;\nvarying float vGH;\nvarying float vGRoot;\nuniform float uWet;`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vGC;\nvarying float vGH;\nvarying float vGRoot;\nuniform float uWet;\nuniform float uSnowCover;`)
       // dark in the thatch at the root, the sun-bleached tip paler and yellower: what makes a lawn read as blades
-      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = mix( vGC * vGRoot, vGC * vec3( 1.35, 1.32, 1.05 ), vGH * vGH ) * mix( 1.0, 0.7, uWet );`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb = mix( vGC * vGRoot, vGC * vec3( 1.35, 1.32, 1.05 ), vGH * vGH ) * mix( 1.0, 0.7, uWet );\n// buried in snow to the tips (a frost: white-rimed blades)\ndiffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.78, 0.81, 0.86 ), uSnowCover * mix( 0.95, 0.7, vGH ) );`)
       .replace('normal *= faceDirection;', '')
       .replace(
         '#include <aomap_fragment>',

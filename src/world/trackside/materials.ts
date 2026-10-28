@@ -76,6 +76,26 @@ uniform float uWetness;
 uniform float uRain;
 uniform float uDryLine;
 uniform float uWeatherTime;
+uniform float uSnowCover;
+`;
+
+/**
+ * Snow (or a frost) lying on the verges and in the traps: patchy while it settles, the cars' slush and
+ * spray thrown dirty-grey along the edge of the track (\`edge\`: metres from the track's edge).
+ */
+const snowGround = (edge: string) => /* glsl */ `
+if (uSnowCover > 0.002) {
+  vec4 sA = texture2D(uMacro, vTrk * (1.0 / 23.0) + vec2(0.71, 0.13));
+  vec4 sB = texture2D(uMacro, vTrk * (1.0 / 3.1) + vec2(0.37, 0.58));
+  float lie = uSnowCover * 1.3 - (sA.g - 0.5) * 0.8 - (sB.r - 0.5) * 0.25;
+  // (a thin cover — a frost, the first minutes of a snowfall — is a pale rime, not a white sheet)
+  float sk = smoothstep(0.05, 0.35, lie) * smoothstep(0.0, 0.65, uSnowCover);
+  vec3 sc = mix(vec3(0.8, 0.83, 0.88), vec3(0.66, 0.72, 0.82), smoothstep(0.4, 0.75, sA.b)) * (0.9 + 0.14 * sB.g);
+  float sEdge = 1.0 - smoothstep(0.0, 1.5 + 2.5 * sA.r, ${edge});
+  sc = mix(sc, vec3(0.34, 0.34, 0.35) * (0.8 + 0.3 * sB.b), sEdge * 0.6);
+  diffuseColor.rgb = mix(diffuseColor.rgb, sc, sk);
+  roughnessFactor = mix(roughnessFactor, 0.7, sk);
+}
 `;
 
 /** Rain drop rings: two layers of cells, each with one ring expanding and fading. Returns a normal offset. */
@@ -901,6 +921,7 @@ function patchGround(m: THREE.MeshStandardMaterial, key: string, t: GroundTextur
     sh.uniforms.uRain = W.uRain;
     sh.uniforms.uDryLine = W.uDryLine;
     sh.uniforms.uWeatherTime = W.uWeatherTime;
+    sh.uniforms.uSnowCover = W.uSnowCover;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + VERT_PARS)
       .replace('#include <uv_vertex>', '#include <uv_vertex>\n' + VERT_MAIN);
@@ -1079,7 +1100,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-8', t, GRAVEL_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-gravel-9', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
@@ -1233,7 +1254,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-8-desert' : 'apex-ts-grass-8', t, opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG, (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-9-desert' : 'apex-ts-grass-9', t, (opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG) + snowGround('vA1.y'), (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other

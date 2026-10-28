@@ -21,6 +21,8 @@ export const weatherUniforms = {
   uDryLine: { value: 0 },
   /** cloud cover 0 … 1 */
   uCloud: { value: 0 },
+  /** snow (or hoar frost) lying on the ground, the run-off and the roofs 0 … 1 (set by the Environment) */
+  uSnowCover: { value: 0 },
   /** lightning flash 0 … 1 */
   uLightning: { value: 0 },
   /** wind (m/s) in world x/z */

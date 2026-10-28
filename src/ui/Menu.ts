@@ -9,7 +9,8 @@ import { uiColor, type Entry } from '../race/Teams.ts';
 import type { DamageMode } from '../sim/CarPhysics.ts';
 import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, type AssistConfig } from '../game/Assists.ts';
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
-import { WEATHER_LABEL, TIME_LABEL, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
+import { WEATHER_LABEL, TIME_LABEL, Weather, planWeather, type WeatherChoice, type TimeChoice, type TimeOfDay } from '../world/Weather.ts';
+import { WX_ICON, WX_CHOICE_ICON } from './wxIcons.ts';
 import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, TEAM_PATTERNS, FINISHES, CARBON, PART_PAINTS, RIMS, SPONSORS, UNLOCK_POS, UNLOCK_ALL, SCENIC_STARS, TOUR_LAPS, medalFor, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
@@ -94,7 +95,31 @@ export const GRID = [
   { label: 'Back of the grid', slot: 21 },
   { label: 'Qualifying lap', slot: -1 },
 ];
-const WEATHERS: WeatherChoice[] = ['random', 'clear', 'haze', 'windy', 'cloudy', 'overcast', 'mist', 'fog', 'drying', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm', 'changeable'];
+const WEATHERS: WeatherChoice[] = [
+  'random',
+  'clear',
+  'haze',
+  'heatwave',
+  'windy',
+  'cloudy',
+  'overcast',
+  'mist',
+  'fog',
+  'frost',
+  'sandstorm',
+  'drying',
+  'sunshower',
+  'drizzle',
+  'rain',
+  'storm',
+  'thunderstorm',
+  'hail',
+  'sleet',
+  'flurries',
+  'snow',
+  'blizzard',
+  'changeable',
+];
 const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
 const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset', 'dusk', 'night'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
@@ -271,6 +296,8 @@ export class Menu {
   private sel = 0;
   private settingsReturn: ScreenId = 'title';
   private assistsReturn: ScreenId = 'setup';
+  /** the race briefing's live parts (facts, the sky card): redrawn when the set-up changes */
+  private briefRefresh: (() => void) | null = null;
   private controlsReturn: ScreenId = 'settings';
   /** the Controls screen's live-input loop, and the wheel binding in progress */
   private ctlRaf = 0;
@@ -997,82 +1024,135 @@ export class Menu {
     const s = this.screens.get('setup')!;
     s.innerHTML = '';
     el('div', 'scrim', s);
-    const p = el('div', 'panel glass', s);
+    // the race briefing: where and what for, the sky (picked from its own strip), the race's rules as
+    // tiles, and the start pinned at the foot of the panel
+    const p = el('div', 'panel glass brief', s);
     const st = this.setup;
     const career = this.mode === 'career';
     const racing = this.mode === 'race' || career;
     const ri = CIRCUITS.findIndex((c) => c.id === st.track);
+    const def = ALL_CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0];
+    const info = CIRCUIT_INFO[def.id];
     const fc = career ? this.cb.careerForecast(st.track) : null;
     const dc = career ? this.cb.driverCareer?.() : undefined;
     const dcd = dc?.active ? dc.data! : null;
+
+    // ---- header: the round, the circuit, what's at stake; its layout drawn beside it
+    const head = el('div', 'br-head', p);
+    const ht = el('div', 'br-title', head);
+    let goal = '';
     if (dcd) {
       const r = dcd.calendar.indexOf(st.track);
-      el('div', 'pcap round', p, `${dcd.series === 'f2' ? 'Formula 2' : 'Formula 1'} ${dcd.year} · Round ${r + 1} of ${dcd.calendar.length}`);
-      el('h2', '', p, CIRCUITS[ri]?.name ?? 'Race');
+      el('div', 'pcap round', ht, `${dcd.series === 'f2' ? 'Formula 2' : 'Formula 1'} ${dcd.year} · Round ${r + 1} of ${dcd.calendar.length}`);
       const next = dcd.calendar[r + 1] ? CIRCUITS.find((c) => c.id === dcd.calendar[r + 1]) : null;
-      el('p', 'lede', p, `${fcLabel(fc!)} · the car should finish around P${dc!.expected()} · top ${UNLOCK_POS} ${next ? `unlocks ${next.short}` : 'completes the season'}`);
-      const ob = el('div', 'setup-obj', p);
-      el('div', 'pcap', ob, 'Team targets');
-      for (const o of dc!.objectives()) el('div', 'ch-o', ob, `<i></i><span>${o.label}</span><b>+${o.rp} RP</b>`);
+      goal = `The car should finish around P${dc!.expected()}. Top ${UNLOCK_POS} ${next ? `unlocks ${next.short}` : 'completes the season'}.`;
     } else if (career) {
-      const cd = ALL_CIRCUITS.find((c) => c.id === st.track);
       const scenic = ri < 0;
-      el('div', 'pcap round', p, scenic ? 'World Tour · Scenic bonus' : `World Tour · Round ${ri + 1} of ${CIRCUITS.length}`);
-      el('h2', '', p, cd?.name ?? 'Race');
+      el('div', 'pcap round', ht, scenic ? 'World Tour · Scenic road' : `World Tour · Round ${ri + 1} of ${CIRCUITS.length}`);
       const m = medalFor(this.career.data.best[st.track]);
-      const goal = !m ? (scenic ? `top ${UNLOCK_POS} earns your first star` : `top ${UNLOCK_POS} earns a star and a Tour pass`) : m === 'gold' ? 'all three stars won here' : `beat P${this.career.data.best[st.track]} for more stars`;
-      el('p', 'lede', p, `Forecast ${fcLabel(fc!)} · ${goal}`);
-    } else {
-      el('h2', '', p, this.mode === 'race' ? 'Race' : 'Time trial');
-      el('p', 'lede', p, this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.');
-    }
-    // (a driver career races its own seat: the driver card shows it)
+      goal = !m ? (scenic ? `Top ${UNLOCK_POS} earns your first star here.` : `Top ${UNLOCK_POS} earns a star and a Tour pass.`) : m === 'gold' ? 'All three stars won here. Race for the fun of it.' : `Your best here is P${this.career.data.best[st.track]}. Beat it for more stars.`;
+    } else el('div', 'pcap round', ht, this.mode === 'race' ? 'Race' : 'Time trial');
+    el('h2', '', ht, def.name);
+    if (!career) goal = this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.';
+    const stars = career && !dcd ? ['bronze', 'silver', 'gold'].indexOf(medalFor(this.career.data.best[st.track]) ?? '') + 1 : -1;
+    el('p', 'br-goal', ht, (stars >= 0 ? `<span class="br-stars">${[0, 1, 2].map((i) => `<i class="${i < stars ? 'on' : ''}"></i>`).join('')}</span>` : '') + goal);
+    head.insertAdjacentHTML('beforeend', `<svg class="br-map" viewBox="0 0 150 110"><path class="b" d="${circuitPath(layoutPoints(def), 150, 110, 6)}"/><path class="f" pathLength="1" d="${circuitPath(layoutPoints(def), 150, 110, 6)}"/></svg>`);
+    const facts = el('div', 'br-facts', p);
+    const lapsNow = () => (dcd ? dc!.laps : career ? this.career.tourLaps : st.laps);
+    const renderFacts = () => {
+      const laps = lapsNow();
+      facts.innerHTML =
+        (info ? `<div><span>Length</span><b>${info.km}<small> km</small></b></div><div><span>Turns</span><b>${info.turns}</b></div>` : '') +
+        (racing ? `<div><span>Laps</span><b>${laps}</b></div><div><span>Distance</span><b>${info ? (parseFloat(info.km) * laps).toFixed(0) : '—'}<small> km</small></b></div>` : '') +
+        `<div><span>Country</span><b>${info?.country ?? def.country}</b></div>`;
+    };
+    renderFacts();
+
+    // ---- conditions: the sky now, then every sky as a strip of chips (and the time of day)
+    el('div', 'pcap', p, 'Conditions');
+    const wx = el('div', 'wxcard', p);
+    const now = el('div', 'wx-now', wx);
+    const wxChoice = (): WeatherChoice => (dcd ? fc!.weather : career ? (!st.tourWx || st.tourWx === 'auto' ? fc!.weather : st.tourWx) : st.weather);
+    const tmChoice = (): TimeChoice => (dcd ? fc!.time : career ? (!st.tourTime || st.tourTime === 'auto' ? fc!.time : st.tourTime) : st.time);
+    const wxIcon = (w: WeatherChoice) => `<svg viewBox="0 0 16 16">${w === 'random' || w === 'changeable' ? WX_CHOICE_ICON[w] : WX_ICON[w]}</svg>`;
+    const renderNow = () => {
+      const w = wxChoice();
+      const t = tmChoice();
+      const auto = career && (dcd || !st.tourWx || st.tourWx === 'auto');
+      // what that sky feels like: a fixed sky rolled with a fixed seed (the race rolls its own)
+      let feel = '';
+      if (w !== 'random') {
+        const tod: TimeOfDay = t === 'random' ? 'afternoon' : t;
+        const plan = planWeather(w, tod, 600, 7);
+        const ws = new Weather(plan).state;
+        const kmh = Math.round(Math.hypot(ws.windX, ws.windZ) * 3.6);
+        const label = w === 'changeable' ? `${WEATHER_LABEL[plan.start]} turning ${WEATHER_LABEL[plan.end].toLowerCase()}` : '';
+        feel = `${label ? `<span>${label}</span>` : ''}<span>Air ${Math.round(ws.airTemp)}°</span><span>Track ${Math.round(ws.trackTemp)}°</span><span>Wind ${kmh} km/h</span>`;
+      } else feel = '<span>Rolled when the lights go out</span>';
+      now.innerHTML =
+        `<div class="wx-ic">${wxIcon(w)}</div><div class="wx-txt"><b>${weatherLabel(w)}</b><div class="wx-sub"><span>${timeLabel(t)}</span>${feel}</div></div>` +
+        (career ? `<em class="${auto ? 'on' : ''}">${dcd ? 'Forecast' : auto ? 'Automatic' : 'Your pick'}</em>` : '');
+      now.dataset.kind = w;
+    };
+    renderNow();
     if (!dcd) {
-    el('div', 'pcap', p, 'Driver');
-    this.opt(p, 'Team', () => {
-      const t = TEAMS[st.team];
-      return `<span class="swatch" style="background:${t.primary}"></span>${t.name}`;
-    }, (d) => {
-      st.team = (st.team + d + TEAMS.length) % TEAMS.length;
-    });
-    this.opt(p, 'Driver', () => {
-      const dr = TEAMS[st.team].drivers[st.seat];
-      return `${dr.first} ${dr.last}`;
-    }, () => {
-      st.seat = st.seat === 0 ? 1 : 0;
-    });
+      const WX: (WeatherChoice | 'auto')[] = career ? ['auto', ...WEATHERS.filter((w) => w !== 'random')] : WEATHERS;
+      const TM: (TimeChoice | 'auto')[] = career ? ['auto', ...TIMES.filter((t) => t !== 'random')] : TIMES;
+      this.chips(
+        wx,
+        'Weather',
+        WX,
+        () => (career ? (st.tourWx ?? 'auto') : st.weather),
+        (v) => {
+          if (career) st.tourWx = v as WeatherChoice | 'auto';
+          else st.weather = v as WeatherChoice;
+        },
+        (v) => (v === 'auto' ? `${wxIcon(fc!.weather)}<span>Auto</span>` : `${wxIcon(v as WeatherChoice)}<span>${weatherLabel(v as WeatherChoice)}</span>`),
+      );
+      this.chips(
+        wx,
+        'Time of day',
+        TM,
+        () => (career ? (st.tourTime ?? 'auto') : st.time),
+        (v) => {
+          if (career) st.tourTime = v as TimeChoice | 'auto';
+          else st.time = v as TimeChoice;
+        },
+        (v) => `<span>${v === 'auto' ? 'Auto' : timeLabel(v as TimeChoice)}</span>`,
+      );
     }
+
+    // ---- the race's rules, as tiles
     el('div', 'pcap', p, racing ? 'Race' : 'Session');
+    const grid = el('div', 'br-grid', p);
     // a driver career's distance is the player's (5 laps by default), kept with the career
     if (dcd)
-      this.opt(p, 'Laps', () => `${dc!.laps}${dc!.laps === LAP_CHOICES[0] ? ' <span class="dim">· sprint</span>' : dc!.laps >= PIT_RACE_LAPS ? ' <span class="dim">· mandatory pit stop</span>' : ' <span class="dim">· no pit stops</span>'}`, (d) => {
+      this.opt(grid, 'Laps', () => `${dc!.laps}<span class="dim">${dc!.laps === LAP_CHOICES[0] ? 'Sprint' : dc!.laps >= PIT_RACE_LAPS ? 'Mandatory stop' : 'No pit stops'}</span>`, (d) => {
         const i = Math.max(0, LAP_CHOICES.indexOf(dc!.laps));
         dc!.setLaps(LAP_CHOICES[(i + d + LAP_CHOICES.length) % LAP_CHOICES.length]);
       });
     else if (career)
-      this.opt(p, 'Laps', () => `${this.career.tourLaps}${this.career.tourLaps >= PIT_RACE_LAPS ? ' <span class="dim">· mandatory pit stop</span>' : ' <span class="dim">· no pit stops</span>'}`, (d) => {
+      this.opt(grid, 'Laps', () => `${this.career.tourLaps}<span class="dim">${this.career.tourLaps >= PIT_RACE_LAPS ? 'Mandatory stop' : 'No pit stops'}</span>`, (d) => {
         const i = Math.max(0, TOUR_LAPS.indexOf(this.career.tourLaps as 5 | 10));
         this.career.setTourLaps(TOUR_LAPS[(i + d + TOUR_LAPS.length) % TOUR_LAPS.length]);
       });
     if (racing) {
       if (!career)
-        this.opt(p, 'Laps', () => `${st.laps} <span class="dim">· ${st.laps >= PIT_RACE_LAPS ? 'mandatory pit stop' : 'no pit stops'}</span>`, (d) => {
+        this.opt(grid, 'Laps', () => `${st.laps}<span class="dim">${st.laps >= PIT_RACE_LAPS ? 'Mandatory stop' : 'No pit stops'}</span>`, (d) => {
           const i = LAPS.indexOf(st.laps);
           st.laps = LAPS[(Math.max(0, i) + d + LAPS.length) % LAPS.length];
         });
-      this.opt(p, 'Opponents', () => {
+      this.opt(grid, 'Opponents', () => {
         const dd = DIFFICULTY[st.difficulty] ?? DIFFICULTY[0];
-        return dd.dynamic ? `Dynamic <span class="dim">· ${Math.round(this.career.aiSkill * 100)}%</span>` : dd.label;
+        return dd.dynamic ? `Dynamic<span class="dim">${Math.round(this.career.aiSkill * 100)}% pace</span>` : dd.label;
       }, (d) => {
         st.difficulty = (st.difficulty + d + DIFFICULTY.length) % DIFFICULTY.length;
       });
-      this.opt(p, 'Start from', () => GRID[st.grid].label, (d) => {
+      this.opt(grid, 'Start from', () => GRID[st.grid].label, (d) => {
         st.grid = (st.grid + d + GRID.length) % GRID.length;
       });
-    }
-    if (racing) {
       this.opt(
-        p,
+        grid,
         'Starting tyres',
         () => (st.compound === 'auto' ? 'Team choice' : `<span class="tyredot" style="background:${COMPOUNDS[st.compound].color}"></span>${COMPOUNDS[st.compound].label}`),
         (d) => {
@@ -1080,58 +1160,44 @@ export class Menu {
           st.compound = TYRE_CHOICES[(i + d + TYRE_CHOICES.length) % TYRE_CHOICES.length];
         },
       );
-    }
-    if (racing) {
-      this.opt(p, 'Damage', () => DAMAGE_LABEL[st.damage], (d) => {
+      this.opt(grid, 'Damage', () => DAMAGE_LABEL[st.damage].replace(' · ', '<span class="dim">').replace(/$/, DAMAGE_LABEL[st.damage].includes(' · ') ? '</span>' : ''), (d) => {
         const i = DAMAGE.indexOf(st.damage);
         st.damage = DAMAGE[(i + d + DAMAGE.length) % DAMAGE.length];
       });
     }
-    this.opt(p, 'Track limits', () => TRACK_LIMITS_LABEL[st.trackLimits] ?? 'Lenient', (d) => {
+    this.opt(grid, 'Track limits', () => TRACK_LIMITS_LABEL[st.trackLimits] ?? 'Lenient', (d) => {
       const i = Math.max(0, TRACK_LIMITS.indexOf(st.trackLimits));
       st.trackLimits = TRACK_LIMITS[(i + d + TRACK_LIMITS.length) % TRACK_LIMITS.length];
     });
     const open = [...this.career.unlockedCircuits(), ...SCENIC];
     if (open.length > 1 && !career)
-      this.opt(p, 'Circuit', () => (ALL_CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
+      this.opt(grid, 'Circuit', () => (ALL_CIRCUITS.find((c) => c.id === st.track) ?? CIRCUITS[0]).name, (d) => {
         const i = Math.max(0, open.findIndex((c) => c.id === st.track));
         st.track = open[(i + d + open.length) % open.length].id;
       });
-    el('div', 'pcap', p, 'Conditions');
-    if (career && dcd) this.fixed(p, 'Forecast', `${fcLabel(fc!)} <span class="dim">· ${CIRCUITS[ri]?.short ?? ''}</span>`);
-    else if (career) {
-      // automatic unless you pick: the round's own forecast (never the same sky twice), or any sky you like
-      const WX: (WeatherChoice | 'auto')[] = ['auto', ...WEATHERS.filter((w) => w !== 'random')];
-      const TM: (TimeChoice | 'auto')[] = ['auto', ...TIMES.filter((t) => t !== 'random')];
-      this.opt(p, 'Weather', () => (!st.tourWx || st.tourWx === 'auto' ? `Automatic <span class="dim">· ${weatherLabel(fc!.weather)}</span>` : weatherLabel(st.tourWx)), (d) => {
-        const i = Math.max(0, WX.indexOf(st.tourWx ?? 'auto'));
-        st.tourWx = WX[(i + d + WX.length) % WX.length];
+    // (a driver career races its own seat: the driver card shows it)
+    el('div', 'pcap', p, dcd ? 'Driving' : 'Driver');
+    const g2 = el('div', 'br-grid', p);
+    if (!dcd) {
+      this.opt(g2, 'Team', () => {
+        const t = TEAMS[st.team];
+        return `<span class="swatch" style="background:${t.primary}"></span>${t.name}`;
+      }, (d) => {
+        st.team = (st.team + d + TEAMS.length) % TEAMS.length;
       });
-      this.opt(p, 'Time of day', () => (!st.tourTime || st.tourTime === 'auto' ? `Automatic <span class="dim">· ${timeLabel(fc!.time)}</span>` : timeLabel(st.tourTime)), (d) => {
-        const i = Math.max(0, TM.indexOf(st.tourTime ?? 'auto'));
-        st.tourTime = TM[(i + d + TM.length) % TM.length];
-      });
-    } else {
-      this.opt(p, 'Weather', () => (st.weather === 'random' || st.weather === 'changeable' ? `${weatherLabel(st.weather)} <span class="dim">· ${this.cb.forecast().weather}</span>` : weatherLabel(st.weather)), (d) => {
-        const i = WEATHERS.indexOf(st.weather);
-        st.weather = WEATHERS[(i + d + WEATHERS.length) % WEATHERS.length];
-      });
-      // night mode in one press: floodlights, headlights on every car, the city glowing under the clouds
-      this.opt(p, 'Night race', () => (st.time === 'night' ? 'On <span class="dim">· no floodlights, headlights only</span>' : 'Off'), () => {
-        st.time = st.time === 'night' ? 'random' : 'night';
-      });
-      this.opt(p, 'Time of day', () => (st.time === 'random' ? `Random <span class="dim">· ${this.cb.forecast().time}</span>` : timeLabel(st.time)), (d) => {
-        const i = TIMES.indexOf(st.time);
-        st.time = TIMES[(i + d + TIMES.length) % TIMES.length];
+      this.opt(g2, 'Driver', () => {
+        const dr = TEAMS[st.team].drivers[st.seat];
+        return `${dr.first} ${dr.last}`;
+      }, () => {
+        st.seat = st.seat === 0 ? 1 : 0;
       });
     }
-    el('div', 'pcap', p, 'Driving');
     this.opt(
-      p,
+      g2,
       'Assists',
       () => {
         const pr = presetOf(st.assists);
-        return pr === 'custom' ? 'Custom' : PRESET_LABEL[pr];
+        return `${pr === 'custom' ? 'Custom' : PRESET_LABEL[pr]}<span class="dim">Enter to fine-tune</span>`;
       },
       (d) => {
         const pr = presetOf(st.assists);
@@ -1144,15 +1210,77 @@ export class Menu {
         this.show('assists');
       },
     );
+    this.briefRefresh = () => {
+      renderFacts();
+      renderNow();
+    };
+
+    // ---- the start, pinned to the foot of the panel
     // (a driver career's round number is its place in the career's own calendar, not the circuit list's)
     const round = dcd ? dcd.calendar.indexOf(st.track) + 1 : ri + 1;
-    const cta = el('div', 'cta', p, career ? `Start round ${round}` : this.mode === 'race' ? 'Start race' : 'Start time trial');
+    const foot = el('div', 'br-foot', p);
+    const cta = el('div', 'cta', foot, `<span>${career ? (ri < 0 && !dcd ? 'Start the drive' : `Start round ${round}`) : this.mode === 'race' ? 'Start race' : 'Start time trial'}</span><i class="go">›</i>`);
     this.items.push({ el: cta, kind: 'action', select: () => this.cb.onStart(this.mode, { ...this.setup }) });
     cta.addEventListener('click', () => this.cb.onStart(this.mode, { ...this.setup }));
-    el('div', 'back', p, 'Esc to go back');
+    el('div', 'keys', foot, '<span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>←</kbd><kbd>→</kbd> change</span><span><kbd>Esc</kbd> back</span>');
     this.driverCard = el('div', 'drivercard', s);
     this.updateDriverCard();
     this.sel = this.items.length - 1;
+  }
+
+  /**
+   * A row of chips (the race briefing's sky and time of day): the choice reads at a glance, and the
+   * whole range is one click away. ← → step through it like any option row.
+   */
+  private chips<V extends string>(parent: HTMLElement, key: string, values: V[], get: () => V, set: (v: V) => void, chip: (v: V) => string) {
+    const row = el('div', 'chiprow', parent);
+    el('span', 'k', row, key);
+    const strip = el('div', 'chipstrip', row);
+    const els = values.map((v) => {
+      const c = el('button', 'chip', strip, chip(v));
+      c.type = 'button';
+      c.tabIndex = -1;
+      c.addEventListener('click', (e) => {
+        e.stopPropagation();
+        set(v);
+        sync(true);
+        this.cb.onUi('move');
+        this.commitSetup();
+      });
+      return c;
+    });
+    const sync = (smooth: boolean) => {
+      const i = Math.max(0, values.indexOf(get()));
+      els.forEach((c, j) => c.classList.toggle('on', j === i));
+      // keep the picked chip in view, centred in the strip (never scrolling the panel itself)
+      const c = els[i];
+      const left = c.offsetLeft - (strip.clientWidth - c.offsetWidth) / 2;
+      strip.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
+    };
+    requestAnimationFrame(() => sync(false));
+    const change = (d: number) => {
+      const i = Math.max(0, values.indexOf(get()));
+      set(values[(i + d + values.length) % values.length]);
+      sync(true);
+      this.cb.onUi('move');
+      this.commitSetup();
+    };
+    const idx = this.items.length;
+    row.addEventListener('mouseenter', () => {
+      this.sel = idx;
+      this.highlight();
+    });
+    this.items.push({ el: row, kind: 'option', change, select: () => change(1) });
+  }
+
+  /** the race set-up changed: keep it, tell the garage, redraw what depends on it */
+  private commitSetup() {
+    save('apexgp.setup', this.setup);
+    this.updateDriverCard();
+    this.cb.onSetupChange({ ...this.setup });
+    // the driver name depends on the team
+    this.items.forEach((it) => it.el.dispatchEvent(new Event('rerender')));
+    this.briefRefresh?.();
   }
 
   /** a read-only row (career rules the player can't change) */
@@ -1679,7 +1807,7 @@ export class Menu {
     el('span', 'k', row, key);
     const v = el('span', 'v', row);
     const render = () => {
-      v.innerHTML = `<span class="chev" data-d="-1">‹</span>${value()}<span class="chev" data-d="1">›</span>`;
+      v.innerHTML = `<span class="chev" data-d="-1">‹</span><span class="val">${value()}</span><span class="chev" data-d="1">›</span>`;
     };
     render();
     const doChange = (d: number) => {
@@ -1689,13 +1817,7 @@ export class Menu {
       if (isSetting) {
         save('apexgp.settings', this.settings);
         this.cb.onSettings({ ...this.settings });
-      } else {
-        save('apexgp.setup', this.setup);
-        this.updateDriverCard();
-        this.cb.onSetupChange({ ...this.setup });
-        // the driver name depends on the team
-        this.items.forEach((it) => it.el.dispatchEvent(new Event('rerender')));
-      }
+      } else this.commitSetup();
     };
     row.addEventListener('rerender', render);
     row.addEventListener('click', (e) => {
@@ -1719,7 +1841,7 @@ export class Menu {
     const box = e.closest<HTMLElement>('.hub-panel, .panel');
     if (!box || box.scrollHeight <= box.clientHeight + 1) return;
     // (the sticky actions scroll with the panel: an item inside them is always in view)
-    const foot = box.querySelector<HTMLElement>(':scope > .hp-actions');
+    const foot = box.querySelector<HTMLElement>(':scope > .hp-actions, :scope > .br-foot');
     if (foot?.contains(e)) return;
     const b = box.getBoundingClientRect();
     const r = e.getBoundingClientRect();

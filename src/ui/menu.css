@@ -625,6 +625,12 @@
   background: #6cb8ff;
 }
 .opt .v .dim { opacity: 0.55; }
+/* (the value between the steppers: laid out as the row's own content was) */
+.opt .v .val {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
 
 /* ---------- Settings → Controls: live input meters and the wheel binding prompt ---------- */
 .ctl-meters {
@@ -5063,4 +5069,436 @@ body.garage-drag * {
     left: 24px;
     width: calc(100% - 48px);
   }
+}
+
+/* ---------- the race briefing (the set-up before a race): where and what for, the sky picked from
+   its own strip of chips, the rules as tiles, the start pinned at the foot ---------- */
+.panel.brief {
+  top: clamp(16px, calc(4 * var(--vh)), 40px);
+  bottom: clamp(16px, calc(4 * var(--vh)), 40px);
+  transform: none;
+  max-height: none;
+  width: min(600px, calc(88 * var(--vw)));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  animation: brief-in 0.55s var(--ease-out);
+}
+@keyframes brief-in {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+.screen.on .brief > * {
+  animation: brief-up 0.5s var(--ease-out) both;
+}
+.screen.on .brief > :nth-child(2) { animation-delay: 0.05s; }
+.screen.on .brief > :nth-child(3) { animation-delay: 0.09s; }
+.screen.on .brief > :nth-child(4) { animation-delay: 0.13s; }
+.screen.on .brief > :nth-child(5) { animation-delay: 0.17s; }
+.screen.on .brief > :nth-child(n + 6) { animation-delay: 0.21s; }
+.screen.on .brief > .br-foot { animation-delay: 0.26s; }
+@keyframes brief-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.brief .br-head {
+  display: grid;
+  grid-template-columns: 1fr 132px;
+  gap: var(--s4);
+  align-items: center;
+  padding: var(--s5) var(--s5) 0;
+}
+.brief .br-head .pcap.round {
+  margin: 0 0 var(--s2);
+}
+.brief h2 {
+  font-size: 44px;
+  line-height: 0.95;
+  margin: 0;
+  text-wrap: balance;
+}
+.brief .br-goal {
+  margin: var(--s3) 0 0;
+  font-size: var(--t-row);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+.brief .br-stars {
+  display: inline-flex;
+  gap: 4px;
+  margin-right: var(--s2);
+  vertical-align: -1px;
+}
+.brief .br-stars i {
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+.brief .br-stars i.on {
+  background: var(--yellow);
+}
+.brief .br-map {
+  width: 132px;
+  height: auto;
+  overflow: visible;
+}
+.brief .br-map path {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.brief .br-map .b {
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 7;
+}
+.brief .br-map .f {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: br-draw 1.6s var(--ease-out) 0.25s forwards;
+}
+@keyframes br-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.brief .br-facts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  margin: var(--s5) var(--s5) 0;
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.brief .br-facts div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.brief .br-facts span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.brief .br-facts b {
+  font-family: var(--font-display);
+  font-size: var(--t-time);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brief .br-facts small {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+.panel.brief .pcap {
+  margin: var(--s5) var(--s5) var(--s2);
+}
+
+/* the sky card */
+.brief .wxcard {
+  margin: 0 var(--s5);
+  padding: var(--s4);
+  border-radius: var(--r-panel);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.brief .wx-now {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: var(--s4);
+  align-items: center;
+}
+.brief .wx-ic {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+}
+.brief .wx-ic svg {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: wx-pop 0.45s var(--spring);
+}
+@keyframes wx-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.7) rotate(-12deg);
+  }
+}
+.brief .wx-txt {
+  min-width: 0;
+}
+.brief .wx-txt b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--t-title);
+  font-weight: 800;
+  font-style: italic;
+  text-transform: uppercase;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  animation: wx-slide 0.35s var(--ease-out);
+}
+@keyframes wx-slide {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+.brief .wx-sub {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--s3);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums;
+}
+.brief .wx-sub span:first-child {
+  color: var(--ink);
+}
+.brief .wx-now em {
+  align-self: start;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  padding: 4px 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.brief .wx-now em.on {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+/* chip strips: the sky, the time of day */
+.brief .chiprow {
+  position: relative;
+  margin-top: var(--s4);
+  cursor: pointer;
+}
+.brief .chiprow .k {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  transition: color 0.2s;
+}
+.brief .chiprow.sel .k {
+  color: var(--ink);
+}
+.brief .chiprow::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--s4));
+  top: 0;
+  width: 4px;
+  height: 0;
+  background: var(--accent);
+  transition: height 0.3s var(--spring);
+}
+.brief .chiprow.sel::before {
+  height: 100%;
+}
+.brief .chipstrip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 3px 2px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent);
+}
+.brief .chipstrip::-webkit-scrollbar {
+  display: none;
+}
+.brief .chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink2);
+  font: 600 13px var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s, transform 0.25s var(--spring);
+}
+.brief .chip svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.brief .chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+}
+.brief .chip:active {
+  transform: scale(0.95);
+}
+.brief .chip.on {
+  background: var(--ink);
+  color: var(--ink-dark);
+  box-shadow: none;
+}
+.brief .chiprow.sel .chip.on {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* the rules as tiles: label above, the value big, the steppers to its right */
+.brief .br-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 var(--s5);
+}
+.brief .br-grid .opt {
+  height: auto;
+  min-height: 66px;
+  grid-template-columns: 1fr;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 10px 10px var(--s4);
+  border-radius: var(--r-panel);
+  background: rgba(255, 255, 255, 0.035);
+}
+.brief .br-grid .opt:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.brief .br-grid .opt.sel {
+  background: rgba(255, 255, 255, 0.09);
+}
+.brief .br-grid .opt:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+.brief .br-grid .opt .k {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+.brief .br-grid .opt.sel .k {
+  color: var(--ink2);
+}
+.brief .br-grid .opt .v {
+  gap: 2px;
+  font-size: var(--t-row);
+}
+.brief .br-grid .opt .v .val {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.brief .br-grid .opt .v .chev {
+  order: 2;
+}
+.brief .br-grid .opt .val .dim {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink3);
+  opacity: 1;
+}
+.brief .br-grid .opt .val .swatch,
+.brief .br-grid .opt .val .tyredot {
+  display: inline-block;
+  margin-right: var(--s2);
+  vertical-align: -2px;
+}
+
+/* the start, pinned to the foot */
+.brief .br-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding: var(--s6) var(--s5) var(--s4);
+  background: linear-gradient(180deg, rgba(10, 12, 17, 0), rgba(10, 12, 17, 0.97) 34%, #0a0c11 60%);
+}
+.brief .br-foot .cta {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+}
+.brief .br-foot .cta .go {
+  font-style: normal;
+  font-size: 30px;
+  line-height: 0;
+  margin-top: -3px;
+  transition: transform 0.3s var(--spring);
+}
+.brief .br-foot .cta.sel .go,
+.brief .br-foot .cta:hover .go {
+  animation: br-nudge 0.9s var(--ease-out) infinite;
+}
+@keyframes br-nudge {
+  0%,
+  100% {
+    transform: none;
+  }
+  45% {
+    transform: translateX(5px);
+  }
+}
+.brief .br-foot .keys {
+  margin-top: var(--s3);
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .brief .br-map .f {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .brief .br-foot .cta .go {
+    animation: none !important;
+  }
+}
+.brief .chip:focus {
+  outline: none;
 }

@@ -1,7 +1,7 @@
 import type { Race, RaceEvent } from './Race.ts';
 import { fmtTime } from '../ui/HUD.ts';
 import { COMPOUNDS } from './Pit.ts';
-import { isWetKind } from '../world/Weather.ts';
+import { isWetKind, isSnowKind } from '../world/Weather.ts';
 import { MISTAKE } from '../sim/AIDriver.ts';
 
 /**
@@ -26,6 +26,7 @@ export class Engineer {
   /** weather calls already made (so each is said once per change) */
   private saidRainSoon = false;
   private wasWet = false;
+  private wasSnow = false;
   private tyreCall = -1;
   private tyreCallTimer = 0;
   private posSaidAt = -100;
@@ -195,15 +196,29 @@ export class Engineer {
       // weather
       const w = race.weatherState;
       const wetNow = isWetKind(w.kind);
-      if (wetNow && !this.wasWet) this.say(w.rain > 0.45 ? 'Rain is here, and it is heavy. Careful.' : "It's starting to rain.", true);
-      if (!wetNow && this.wasWet) this.say('Rain has stopped. The line will start to dry.', false);
+      if (wetNow && !this.wasWet)
+        this.say(
+          w.kind === 'hail'
+            ? 'Hail! Ice on the track, keep it straight and gentle.'
+            : w.kind === 'blizzard'
+              ? 'Blizzard. We can barely see you on the cameras. Slow in, no heroics.'
+              : isSnowKind(w.kind)
+                ? 'Snow is falling. Cold tyres, slushy track. Be smooth.'
+                : w.rain > 0.45
+                  ? 'Rain is here, and it is heavy. Careful.'
+                  : "It's starting to rain.",
+          true,
+        );
+      if (!wetNow && this.wasWet) this.say(this.wasSnow ? 'Snow has stopped. The line is clearing.' : 'Rain has stopped. The line will start to dry.', false);
+      if (wetNow) this.wasSnow = isSnowKind(w.kind) || w.kind === 'hail';
       this.wasWet = wetNow;
       if (!wetNow && !this.saidRainSoon) {
         for (let ahead = 30; ahead <= 300; ahead += 30) {
-          if (isWetKind(race.weather.forecast(ahead))) {
+          const fk = race.weather.forecast(ahead);
+          if (isWetKind(fk)) {
             this.saidRainSoon = true;
             const min = Math.max(1, Math.round(ahead / 60));
-            this.say(`Radar shows rain in about ${min} minute${min === 1 ? '' : 's'}.`, false);
+            this.say(`Radar shows ${fk === 'hail' ? 'hail' : isSnowKind(fk) ? 'snow' : 'rain'} in about ${min} minute${min === 1 ? '' : 's'}.`, false);
             break;
           }
         }

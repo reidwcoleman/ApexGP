@@ -177,6 +177,7 @@ export function createTerrainMaterial(maxAniso: number): { material: THREE.MeshS
     uWetness: weatherUniforms.uWetness,
     uRain: weatherUniforms.uRain,
     uWTime: weatherUniforms.uWeatherTime,
+    uSnowCover: weatherUniforms.uSnowCover,
   };
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
   material.onBeforeCompile = (sh) => {
@@ -222,7 +223,7 @@ uniform vec3 uLawn, uMeadow, uStraw, uGrassDark, uLitter, uLitterDark, uMoss, uG
 uniform float uArid;
 uniform float uScenic, uSnowLine, uSeaLevel;
 uniform float uForestCover, uPasture;
-uniform float uWetness, uRain, uWTime;
+uniform float uWetness, uRain, uWTime, uSnowCover;
 uniform float uCity;
 uniform float uTownYard;
 varying vec3 vWPos;
@@ -737,6 +738,19 @@ float tWoodAt( vec2 q, float fShift ) {
   pud *= max( smoothstep( 0.4, 0.8, gravel ), pv * 0.9 ) + 0.25 * lawn * step( 0.72, m2 ) + mudK * 1.4;
   col = mix( col, col * 0.32 + vec3( 0.004 ), pud );
 
+  // ---- snow (or a hoar frost) lying on the open ground: patchy while it settles, thinner on steep
+  // banks and under the trees, the paths and paving trodden and swept to grey slush
+  float snowK = 0.0;
+  if ( uSnowCover > 0.002 ) {
+    float up = clamp( normalize( vWNormal ).y, 0.0, 1.0 );
+    float lie = uSnowCover * 1.35 - ( 1.0 - up ) * 2.2 - ( d1 * 0.55 + m3 * 0.45 - 0.5 ) * 0.7;
+    snowK = smoothstep( 0.0, 0.3, lie ) * smoothstep( 0.0, 0.65, uSnowCover ) * ( 1.0 - 0.55 * forest ) * ( 1.0 - 0.45 * pv );
+    // (never one flat white: wind crust, footprints and tyre ruts, a bluer cast in the hollows)
+    vec3 snowCol = mix( vec3( 0.8, 0.83, 0.88 ), vec3( 0.66, 0.72, 0.82 ), smoothstep( 0.45, 0.75, m3 ) ) * ( 0.9 + 0.12 * d3 );
+    snowCol = mix( snowCol, vec3( 0.42, 0.42, 0.43 ), 0.6 * pv );
+    col = mix( col, snowCol, snowK );
+  }
+
   diffuseColor.rgb *= col;
   // sky occlusion: under the canopy the ground sees little sky (and the trees' own green bounce)
   tAO = 1.0 - 0.6 * clamp( forest * 1.2, 0.0, 1.0 ) * ( 1.0 - farF * 0.5 );
@@ -744,7 +758,8 @@ float tWoodAt( vec2 q, float fShift ) {
   tRough = mix( tRough, 0.86, lawn * ( 1.0 - forest ) );
   tRough = mix( tRough, 0.82, pv );
   tRough = mix( tRough, tRough * mix( 0.75, 0.45, soil ), wet );
-  tRough = mix( tRough, 0.06, pud );
+  tRough = mix( tRough, 0.06, pud * ( 1.0 - snowK ) );
+  tRough = mix( tRough, 0.72, snowK );
   float dStr = nearF * ( 0.6 + 0.4 * ( 1.0 - pv ) ) * ( 1.0 - pud );
   vec3 dn1 = texture2D( uDetailN, p * 0.31 ).rgb * 2.0 - 1.0;
   vec3 dn2 = texture2D( uDetailN, mat2( 0.6, 0.8, -0.8, 0.6 ) * p * 0.083 ).rgb * 2.0 - 1.0;

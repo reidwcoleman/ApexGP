@@ -332,7 +332,7 @@ export function createEnvironment(
   let lastLightning = 0;
   let lastStrike = 0;
   let flashLevel = 0;
-  const last = { cloud: -1, rain: -1, fog: -1, time: '' as string };
+  const last = { cloud: -1, rain: -1, fog: -1, snow: -1, dust: -1, cover: -1, time: '' as string };
   let indoor = 0;
 
   // colours derived from the atmosphere for the current time (linear radiance)
@@ -430,6 +430,8 @@ export function createEnvironment(
     const skyGrey = C.zenith.r * 0.2 + C.zenith.g * 0.7 + C.zenith.b * 0.1;
     // deck colour: cool neutral grey, a touch warm at golden hour
     deck.setRGB(0.93, 0.97, 1.05).multiplyScalar(deckRad);
+    // (in a sandstorm the 'deck' is the dust itself: the whole sky a dim ochre)
+    if (L.dust > 0.001) deck.lerp(tmpB.setRGB(1.3, 0.92, 0.58).multiplyScalar(deckRad * 0.85), L.dust);
     if (isLowSun(L.time) && (P.direct ?? 1) > 0.5) deck.multiply(tmpA.setRGB(1.06, 1.0, 0.94));
 
     // ---- clouds
@@ -498,13 +500,17 @@ export function createEnvironment(
     const blueHour = (1 - (P.direct ?? 1)) * (1 - THREE.MathUtils.smoothstep(P.night ?? 0, 0.5, 1));
     const fogLum = fogCol.r * 0.2126 + fogCol.g * 0.7152 + fogCol.b * 0.0722;
     fogCol.lerp(tmpB.setRGB(0.74, 1.0, 1.26).multiplyScalar(fogLum), 0.9 * blueHour);
+    // a sandstorm: the murk is the sand's own ochre, lit by a sun it has nearly swallowed
+    if (L.dust > 0.001) fogCol.lerp(tmpB.setRGB(1.25, 0.86, 0.52).multiplyScalar(fogLum * 1.05), 0.85 * L.dust);
+    // falling snow: the air is a bright, cold white-grey
+    if (L.snow > 0.001) fogCol.lerp(tmpB.setRGB(0.96, 1.0, 1.08).multiplyScalar(fogLum * 1.12), 0.6 * L.snow * THREE.MathUtils.smoothstep(L.precip, 0.05, 0.6));
     fog.color.copy(fogCol);
     aerialParams.x = L.fogDensity;
     aerialParams.y = L.fogFalloff;
     aerialParams.z = 0;
     aerialParams.w = L.fogMax;
     // clear air turns distance blue-grey (per-channel extinction); droplets in mist and rain are grey
-    aerialLens.y = THREE.MathUtils.clamp(1 - Math.max(L.mist * 1.4, wetK), 0, 1) * (1 - 0.6 * ov);
+    aerialLens.y = THREE.MathUtils.clamp(1 - Math.max(L.mist * 1.4, wetK), 0, 1) * (1 - 0.6 * ov) * (1 - L.dust);
     // (the sun's forward-scatter glow in the haze goes with the sun: a faint afterglow once it has set)
     const lobe = tmpB.copy(C.horizonToward).sub(fogCol).multiplyScalar((L.fogLobe / 1.45) * Math.sqrt(P.direct ?? 1));
     aerialSunColor.r = Math.max(0, lobe.r);
@@ -558,7 +564,10 @@ export function createEnvironment(
     const rc = tmpA.set(skyGrey, skyGrey, skyGrey).lerp(deck, ov).multiplyScalar(0.55);
     // …and by the sun when it shines through a shower: each drop throws a glint of it
     rc.add(tmpB.copy(C.sunCol).multiplyScalar(P.sunIntensity * (P.direct ?? 1) * L.sunVis * 0.012));
-    rain.set(L.rain, wind.x, wind.z, rc);
+    // (snow is white and scatters the whole sky's light: flakes read bright even under a dark deck;
+    // blown sand takes the murk's own ochre)
+    rain.setKind(L.snow, L.hail, L.dust);
+    rain.set(L.precip, wind.x, wind.z, rc);
     rainBase.copy(rc);
 
     // ---- eye adaptation: expose (partially) for the light falling on the ground, so a grey
@@ -818,7 +827,7 @@ export function createEnvironment(
     if (night > 0.5) u.uHalo.value = 0.35 * L.sunVis;
     // a rainbow: rain falling while the sun shines, opposite it (lifted a little when the sun is high,
     // or it would sit below the horizon all afternoon)
-    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.rain, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
+    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.precip * (1 - L.snow) * (1 - L.hail) * (1 - L.dust), 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
     // (a shower's own spray mist is where the bow is seen: only real fog washes it out)
     u.uBow.value = bow;
     // rain lit from behind by the sun glitters (each drop a tiny lens throwing the sun at the camera:
@@ -839,7 +848,7 @@ export function createEnvironment(
     const ab = cu.uAmbBase.value as THREE.Vector3;
     ab.multiplyScalar(1 - 0.5 * night).add(nightV.set(cityCol.r * city * 0.9 + floodCol.r * glow * 0.5, cityCol.g * city * 0.9 + floodCol.g * glow * 0.5, cityCol.b * city * 0.9 + floodCol.b * glow * 0.5));
     // rain streaks catch the floodlights
-    rain.set(L.rain, wind.x, wind.z, nightTmp.copy(rainBase).add(tmpB.copy(floodCol).multiplyScalar(F * 0.12)));
+    rain.set(L.precip, wind.x, wind.z, nightTmp.copy(rainBase).add(tmpB.copy(floodCol).multiplyScalar(F * 0.12)));
   }
   const sceneryLight: SceneryLight = {
     sunDir,
@@ -992,11 +1001,21 @@ export function createEnvironment(
     sceneryLight.windZ = w.windZ;
     const changed =
       convChanged ||
-      w.time !== last.time || Math.abs(w.cloud - last.cloud) > 0.002 || Math.abs(w.rain - last.rain) > 0.002 || Math.abs(w.fog - last.fog) > 0.004;
+      w.time !== last.time ||
+      Math.abs(w.cloud - last.cloud) > 0.002 ||
+      Math.abs(w.rain - last.rain) > 0.002 ||
+      Math.abs(w.fog - last.fog) > 0.004 ||
+      Math.abs((w.snow ?? 0) - last.snow) > 0.004 ||
+      Math.abs((w.dust ?? 0) - last.dust) > 0.004 ||
+      Math.abs((w.snowCover ?? 0) - last.cover) > 0.01;
+    weatherUniforms.uSnowCover.value = w.snowCover ?? 0;
     if (changed) {
       last.cloud = w.cloud;
       last.rain = w.rain;
       last.fog = w.fog;
+      last.snow = w.snow ?? 0;
+      last.dust = w.dust ?? 0;
+      last.cover = w.snowCover ?? 0;
       const timeChanged = w.time !== last.time;
       last.time = w.time;
       look = weatherLook(w);

@@ -59,10 +59,12 @@ let sel: string | null = null;
 let filter: 'all' | 'open' | 'medals' | 'challenges' = 'all';
 /** the circuit a pass has just opened (its pin bursts on the redraw) */
 let justOpened: string | null = null;
-/** a forecast's icon, from its label ("Rain · Afternoon"): sun, moon, cloud, rain, storm, fog */
-function wxKind(label: string): 'sun' | 'moon' | 'cloud' | 'rain' | 'storm' | 'fog' {
+/** a forecast's icon, from its label ("Rain · Afternoon"): sun, moon, cloud, rain, storm, fog, snow, dust */
+function wxKind(label: string): 'sun' | 'moon' | 'cloud' | 'rain' | 'storm' | 'fog' | 'snow' | 'dust' {
   const l = label.toLowerCase();
-  if (/thunder|storm/.test(l)) return 'storm';
+  if (/sand/.test(l)) return 'dust';
+  if (/snow|blizzard|sleet|frost/.test(l)) return 'snow';
+  if (/thunder|storm|hail/.test(l)) return 'storm';
   if (/rain|drizzle|shower|wet|changeable/.test(l)) return 'rain';
   if (/fog|mist|haze/.test(l)) return 'fog';
   if (/cloud|overcast/.test(l)) return 'cloud';
@@ -75,6 +77,8 @@ const WX_ICON: Record<ReturnType<typeof wxKind>, string> = {
   rain: '<path d="M-4.2 0.6h7.6a2.3 2.3 0 0 0 0-4.6 3.1 3.1 0 0 0-5.9-.7A2.2 2.2 0 0 0-4.2.6z" fill="#b8c4d4"/><path d="M-2.6 2.2l-.8 2.2M0 2.2l-.8 2.2M2.6 2.2l-.8 2.2" stroke="#5fb4ff" stroke-width="1.1" stroke-linecap="round"/>',
   storm: '<path d="M-4.2 0.4h7.6a2.3 2.3 0 0 0 0-4.6 3.1 3.1 0 0 0-5.9-.7A2.2 2.2 0 0 0-4.2.4z" fill="#8f9aab"/><path d="M0.4 0.8L-1.2 3.4h1.6L-.6 5.6 1.8 2.6H.2z" fill="#ffd25a"/>',
   fog: '<path d="M-4.4-2h8.8M-3.6 0h7.2M-4.4 2h8.8" stroke="#c9d1dc" stroke-width="1.2" stroke-linecap="round"/>',
+  snow: '<path d="M0-4.8v9.6M-4.2-2.4l8.4 4.8M-4.2 2.4l8.4-4.8M-1.2-4 0-2.8 1.2-4M-1.2 4 0 2.8 1.2 4" stroke="#e8f1ff" stroke-width="1.1" stroke-linecap="round" fill="none"/>',
+  dust: '<path d="M-4.6-2.2h5.6a1.4 1.4 0 1 0-1.4-1.4M-4.6.6h7.4a1.4 1.4 0 1 1-1.4 1.4M-4.6 3.2h3.6" stroke="#e0b878" stroke-width="1.1" stroke-linecap="round" fill="none"/>',
 };
 
 const agoText = (t: number) => {
