@@ -226,7 +226,7 @@ function readPad(p: Gamepad): PadState {
   return { b, ax: [p.axes[0] ?? 0, p.axes[1] ?? 0, p.axes[2] ?? 0, p.axes[5] ?? 0], ps, pad: p };
 }
 
-type ActionEvent = 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'chat1' | 'chat2' | 'chat3' | 'chat4';
+type ActionEvent = 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'skipReplay' | 'chat1' | 'chat2' | 'chat3' | 'chat4';
 const CHATS = ['chat1', 'chat2', 'chat3', 'chat4'] as const;
 
 export class Controls {
@@ -306,7 +306,11 @@ export class Controls {
     if (this.bound('board', code)) this.onAction('board');
     if (this.bound('reset', code)) this.onAction('skip');
     if (this.bound('jump', code)) this.tapJump = true;
-    if (this.bound('boost', code)) this.tapBoost = true;
+    if (this.bound('boost', code)) {
+      this.tapBoost = true;
+      // (boost skips a replay, as in the real game)
+      this.onAction('skipReplay');
+    }
     for (const c of CHATS) if (this.bound(c, code)) this.onAction(c);
   }
   private up(code: string): void {
@@ -375,6 +379,7 @@ export class Controls {
       if (release(this.padBinds.board)) this.onAction('boardUp');
       if (press(this.padBinds.reset)) this.onAction('skip');
       if (press(this.padBinds.jump)) this.tapJump = true;
+      if (press(this.padBinds.boost)) this.onAction('skipReplay');
       for (const c of CHATS) if (press(this.padBinds[c])) this.onAction(c);
     }
     this.prevB = b.slice();

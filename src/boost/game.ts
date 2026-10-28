@@ -385,7 +385,7 @@ export class Game {
   }
   private qcNext = 0;
 
-  private action(a: 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'chat1' | 'chat2' | 'chat3' | 'chat4'): void {
+  private action(a: 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'skipReplay' | 'chat1' | 'chat2' | 'chat3' | 'chat4'): void {
     // Esc / Options closes the controls screen first
     if (a === 'pause' && this.ui.bindsOpen()) {
       this.ui.root.querySelector<HTMLElement>('#b-done')!.click();
@@ -409,7 +409,7 @@ export class Game {
         this.world.placeBall(0, 0, BALL.REST_Z);
         this.world.phase = 'play';
       } else if (this.world.phase === 'replay') this.voteSkip();
-    }
+    } else if (a === 'skipReplay' && this.mode !== 'freeplay' && this.world.phase === 'replay') this.voteSkip();
   }
 
   /** the replay skips once every human in the match has asked (alone, that's at once) */

@@ -786,7 +786,7 @@ export class UI {
 
   /** the skip tally under REPLAY: n of `of` players (n = -1: you've asked, waiting on the host) */
   skipVotes(n: number, of: number, pad = false, voted = false): void {
-    const key = (pad ? padName(this.profile.padBinds.reset, this.padPS) : keyName(this.profile.binds.reset[0])).toUpperCase();
+    const key = (pad ? padName(this.profile.padBinds.boost, this.padPS) : keyName(this.profile.binds.boost[0])).toUpperCase();
     let t = `${key} TO SKIP`;
     if (n < 0) t = 'WAITING FOR THE OTHERS';
     else if (n > 0 && n >= of) t = 'SKIPPING';
