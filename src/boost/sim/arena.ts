@@ -47,11 +47,33 @@ export function goalProfile(arcSteps = 12): [number, number][] {
   return p;
 }
 
+/** the radius of the vertical joints between the corner panels and the walls */
+export const CORNER_R = 640;
+
+/** the octagon shrunk by CORNER_R, counter-clockwise from the +x wall's −y end: offset outward by
+ * CORNER_R − R (straight along the edges, fanned round the vertices) it is the arena shrunk by R */
+export function octCore(): [number, number][] {
+  const sx = ARENA.X - CORNER_R;
+  const sy = ARENA.Y - CORNER_R;
+  const sc = ARENA.CORNER - CORNER_R * Math.SQRT2;
+  return [
+    [sx, -(sc - sx)],
+    [sx, sc - sx],
+    [sc - sy, sy],
+    [-(sc - sy), sy],
+    [-sx, sc - sx],
+    [-sx, -(sc - sx)],
+    [-(sc - sy), -sy],
+    [sc - sy, -sy],
+  ];
+}
+
 const R = ARENA.R;
-// the arena shrunk by R: an octagon in xy, z in [R, Z - R]
-const SX = ARENA.X - R;
-const SY = ARENA.Y - R;
-const SC = ARENA.CORNER - R * Math.SQRT2;
+// the arena shrunk by R is the core octagon rounded by CORNER_R − R; z in [R, Z − R]
+const SX = ARENA.X - CORNER_R;
+const SY = ARENA.Y - CORNER_R;
+const SC = ARENA.CORNER - CORNER_R * Math.SQRT2;
+const RC = CORNER_R - R;
 // octagon vertices (counter-clockwise)
 const OCT: [number, number][] = [
   [SX, SC - SX],
@@ -65,8 +87,13 @@ const OCT: [number, number][] = [
 ];
 
 
-/** exact signed distance to the shrunk octagon in 2D (negative inside) */
+/** exact signed distance to the arena shrunk by R in 2D (negative inside) */
 function sdOct(x: number, y: number): number {
+  return sdCore(x, y) - RC;
+}
+
+/** exact signed distance to the core octagon */
+function sdCore(x: number, y: number): number {
   // inside test via max of plane distances; outside via nearest edge
   let inside = -Infinity;
   inside = Math.max(inside, x - SX, -x - SX, y - SY, -y - SY, (Math.abs(x) + Math.abs(y) - SC) / Math.SQRT2);

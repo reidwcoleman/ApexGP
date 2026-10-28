@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ARENA, goalProfile, GOAL_BACK_R, GOAL_TOP_R, PADS } from '../sim/arena.ts';
+import { ARENA, CORNER_R, goalProfile, GOAL_BACK_R, GOAL_TOP_R, octCore, PADS } from '../sim/arena.ts';
 import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
 import { buildSurround, type SurroundView } from './surround.ts';
 
@@ -82,20 +82,10 @@ export interface ArenaView {
 
 /** the shrunk octagon as a loop of (x, y, nx, ny) samples with fanned corners; len = arc length at the wall */
 function perimeter(offset: number, step: number, fan = 4): { p: number[][]; len: number[] } {
-  const sx = ARENA.X - R;
-  const sy = ARENA.Y - R;
-  const sc = ARENA.CORNER - R * Math.SQRT2;
-  // counter-clockwise, so the outward normal of edge a→b is (ey, −ex)
-  const V: [number, number][] = [
-    [sx, -(sc - sx)],
-    [sx, sc - sx],
-    [sc - sy, sy],
-    [-(sc - sy), sy],
-    [-sx, sc - sx],
-    [-sx, -(sc - sx)],
-    [-(sc - sy), -sy],
-    [sc - sy, -sy],
-  ];
+  // the core octagon, its edges pushed out and its vertices fanned by CORNER_R − R
+  const V = octCore();
+  const rc = CORNER_R - R;
+  fan = Math.max(fan, 8);
   const edgeN = (i: number) => {
     const a = V[i];
     const b = V[(i + 1) % V.length];
@@ -112,9 +102,13 @@ function perimeter(offset: number, step: number, fan = 4): { p: number[][]; len:
     let d = Math.atan2(ny, nx) - a0;
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
-    for (let k = 1; k < fan; k++) pts.push([a[0], a[1], Math.cos(a0 + (d * k) / fan), Math.sin(a0 + (d * k) / fan)]);
+    for (let k = 1; k < fan; k++) {
+      const c = Math.cos(a0 + (d * k) / fan);
+      const sn = Math.sin(a0 + (d * k) / fan);
+      pts.push([a[0] + c * rc, a[1] + sn * rc, c, sn]);
+    }
     const n = Math.max(2, Math.ceil(L / step));
-    for (let k = 0; k < n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, nx, ny]);
+    for (let k = 0; k < n; k++) pts.push([a[0] + ((b[0] - a[0]) * k) / n + nx * rc, a[1] + ((b[1] - a[1]) * k) / n + ny * rc, nx, ny]);
   }
   pts.push(pts[0]);
   const len = [0];
@@ -363,19 +357,7 @@ function shell(): THREE.Group {
   // the ceiling: the octagon pulled in by the ramp radius, at the roof
   const ceilMat = glassMat.clone();
   simPatch(ceilMat, glassFrag(true), { uTime: uT, uNear }, 'uniform float uTime;\nuniform vec4 uNear[9];');
-  const cx = ARENA.X - R;
-  const cy = ARENA.Y - R;
-  const cc = ARENA.CORNER - R * Math.SQRT2;
-  const oct = new THREE.Shape([
-    new THREE.Vector2(cx, -(cc - cx)),
-    new THREE.Vector2(cx, cc - cx),
-    new THREE.Vector2(cc - cy, cy),
-    new THREE.Vector2(-(cc - cy), cy),
-    new THREE.Vector2(-cx, cc - cx),
-    new THREE.Vector2(-cx, -(cc - cx)),
-    new THREE.Vector2(-(cc - cy), -cy),
-    new THREE.Vector2(cc - cy, -cy),
-  ]);
+  const oct = new THREE.Shape(perimeter(0, 1e5, 10).p.slice(0, -1).map(([x, y]) => new THREE.Vector2(x, y)));
   const cg = new THREE.ShapeGeometry(oct);
   cg.translate(0, 0, ARENA.Z + 0.5);
   const ceiling = new THREE.Mesh(cg, ceilMat);
@@ -641,7 +623,9 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
         lp.push(x + nx * (R + o0 - 10), y + ny * (R + o0 - 10), z0 - 120 + j * 120);
         luv.push(len[i], j);
       }
-    for (let i = 0; i < W - 1; i++) li.push(i, i + 1, i + W, i + 1, i + W + 1, i + W);
+    // (none of it through the goals: the housings take that space)
+    const inGoal = (i: number) => Math.abs(lp[i * 3]) < ARENA.GOAL_W + 300 && Math.abs(lp[i * 3 + 1]) > ARENA.Y && z0 - 120 < ARENA.GOAL_H + 120;
+    for (let i = 0; i < W - 1; i++) if (!inGoal(i) && !inGoal(i + 1)) li.push(i, i + 1, i + W, i + 1, i + W + 1, i + W);
     const lg = new THREE.BufferGeometry();
     lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
     lg.setAttribute('uv', new THREE.Float32BufferAttribute(luv, 2));

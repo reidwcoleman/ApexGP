@@ -1,11 +1,11 @@
 // Builds the arena collision meshes RocketSim loads (its .cmf format, in bullet units = uu / 50), from
 // the published measurements in src/boost/sim/arena.ts: the rounded shell (ramps 256, corners cut
-// 1152 along each wall, the back walls, the ceiling's edge) with the goal mouths cut out exactly, the
+// 1152 along each wall and swept into the walls on CORNER_R, the back walls, the ceiling's edge) with the goal mouths cut out exactly, the
 // faces where the ramp stops either side of each mouth, and the goal boxes. RocketSim adds its own
 // planes for the floor, the ceiling and the side walls.
 //   node --experimental-transform-types --no-warnings tools/boost_rsmesh.mjs
 import { writeFileSync } from 'node:fs';
-import { ARENA, goalProfile } from '../src/boost/sim/arena.ts';
+import { ARENA, CORNER_R, goalProfile, octCore } from '../src/boost/sim/arena.ts';
 
 const prof2 = goalProfile(14);
 
@@ -42,19 +42,11 @@ function mesh() {
 
 // ---- the shrunk octagon's loop (x, y, nx, ny), counter-clockwise, its corners fanned (the rounded
 // vertical edges), the back-wall stretches split exactly at the goal posts
-const SX = ARENA.X - R;
 const SY = ARENA.Y - R;
-const SC = ARENA.CORNER - R * Math.SQRT2;
-const V = [
-  [SX, -(SC - SX)],
-  [SX, SC - SX],
-  [SC - SY, SY],
-  [-(SC - SY), SY],
-  [-SX, SC - SX],
-  [-SX, -(SC - SX)],
-  [-(SC - SY), -SY],
-  [SC - SY, -SY],
-];
+// the core octagon; the loop is it pushed out by CORNER_R − R, its vertices fanned (the wide
+// vertical joints between the corner panels and the walls)
+const V = octCore();
+const RC = CORNER_R - R;
 const loop = [];
 for (let i = 0; i < V.length; i++) {
   const [ax, ay] = V[i];
@@ -68,8 +60,8 @@ for (let i = 0; i < V.length; i++) {
   const ts = new Set([0]);
   const n = Math.max(1, Math.ceil(len / 120));
   for (let k = 1; k < n; k++) ts.add(k / n);
-  if (Math.abs(ay) === SY && ay === by) for (const gx of [-GW, GW]) ts.add((gx - ax) / ex);
-  for (const tt of [...ts].filter((x) => x >= 0 && x < 1).sort((a, b) => a - b)) loop.push([ax + ex * tt, ay + ey * tt, nx, ny]);
+  if (Math.abs(ay + ny * RC) === SY && ay === by) for (const gx of [-GW, GW]) ts.add((gx - ax) / ex);
+  for (const tt of [...ts].filter((x) => x >= 0 && x < 1).sort((a, b) => a - b)) loop.push([ax + ex * tt + nx * RC, ay + ey * tt + ny * RC, nx, ny]);
   // the fan round the next vertex, from this edge's normal to the next one's
   const [cx, cy] = V[(i + 2) % V.length];
   const fx = cx - bx;
@@ -78,10 +70,10 @@ for (let i = 0; i < V.length; i++) {
   const a0 = Math.atan2(ny, nx);
   let a1 = Math.atan2(-fx / fl, fy / fl);
   while (a1 < a0) a1 += Math.PI * 2;
-  const steps = 8;
+  const steps = 16;
   for (let k = 0; k < steps; k++) {
     const a = a0 + ((a1 - a0) * k) / steps;
-    loop.push([bx, by, Math.cos(a), Math.sin(a)]);
+    loop.push([bx + Math.cos(a) * RC, by + Math.sin(a) * RC, Math.cos(a), Math.sin(a)]);
   }
 }
 

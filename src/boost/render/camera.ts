@@ -142,7 +142,8 @@ export class ChaseCam {
     const wantUp = t.onGround ? t.u : tD.set(0, 0, 1);
     const ang = Math.acos(Math.max(-1, Math.min(1, this.up.dot(wantUp))));
     if (ang > 1e-4) {
-      const rate = t.onGround ? 9 : this.airT < 0.15 ? 0 : 3.2;
+      // (held a moment after leaving a surface, so wall taps and jumps don't swing it)
+      const rate = t.onGround ? 13 : this.airT < 0.1 ? 0 : 4.5;
       const step = ang * (1 - Math.exp(-dt * rate));
       const axis = new V3(this.up.y * wantUp.z - this.up.z * wantUp.y, this.up.z * wantUp.x - this.up.x * wantUp.z, this.up.x * wantUp.y - this.up.y * wantUp.x);
       if (axis.len2() < 1e-8) axis.copy(this.heading);
@@ -207,7 +208,21 @@ export class ChaseCam {
       }
       place(lo);
     }
-    // still against something (a wall right behind): slide out along it
+    // blocked even level (riding into the ceiling, falling just under it, a wall right behind):
+    // swing the boom round, over or under the car, to the nearest clear spot at full length
+    if (sdf(want.x, want.y, want.z) < 45) {
+      const p0 = Math.min(0, this.pitch);
+      let ok = false;
+      for (let k = 1; k <= 9 && !ok; k++) ok = place(Math.max(-1.35, p0 - k * 0.15)) || place(Math.min(1.2, p0 + k * 0.15));
+      if (!ok) place(p0);
+    }
+    // still against something: the boom pulls in toward the car (never closer than 140), then
+    // slides out along the surface as a last resort
+    for (let k = 0; k < 10 && sdf(want.x, want.y, want.z) < 45 && want.dist(t.pos) > 140; k++) {
+      want.x = t.pos.x + (want.x - t.pos.x) * 0.85;
+      want.y = t.pos.y + (want.y - t.pos.y) * 0.85;
+      want.z = t.pos.z + (want.z - t.pos.z) * 0.85;
+    }
     for (let k = 0; k < 2; k++) {
       const d = sdf(want.x, want.y, want.z);
       if (d >= 45) break;
@@ -226,17 +241,23 @@ export class ChaseCam {
     tilt(this.pitch);
     const a = (CAM.ANGLE * Math.PI) / 180;
     const dir = new V3().copy(fw).scale(Math.cos(a)).addScaled(rup, Math.sin(a));
-    // keep the car in frame: tip down if it would drop off the bottom
+    // keep the whole car in frame wherever it is (below, above, off to a side, even behind): turn
+    // the view toward it by just enough that it sits inside the frame's height, with a margin
     const toCar = tC.subVectors(t.pos, this.pos);
     const cl = toCar.len();
     if (cl > 1) {
       toCar.scale(1 / cl);
       const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
-      const below = Math.asin(Math.max(-1, Math.min(1, -toCar.dot(rup)))) - Math.asin(Math.max(-1, Math.min(1, -dir.dot(rup))));
-      const over = below - (vHalf - 0.14);
-      if (over > 0) {
-        rotate(dir, side, -over);
-        rotate(rup, side, -over);
+      // (the car's own half height, seen from here, plus a margin)
+      const allowed = vHalf - Math.atan2(70, cl) - 0.06;
+      const th = Math.acos(Math.max(-1, Math.min(1, dir.dot(toCar))));
+      if (th > allowed) {
+        const axis = new V3(dir.y * toCar.z - dir.z * toCar.y, dir.z * toCar.x - dir.x * toCar.z, dir.x * toCar.y - dir.y * toCar.x);
+        if (axis.len2() < 1e-8) axis.copy(side);
+        axis.norm();
+        rotate(dir, axis, th - allowed).norm();
+        rotate(rup, axis, th - allowed);
+        rup.addScaled(dir, -rup.dot(dir)).norm();
       }
     }
     this.look.copy(this.pos).addScaled(dir, 1000);
