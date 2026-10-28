@@ -251,19 +251,19 @@ export class CarView {
     for (const sy of [-1, 1]) {
       const nz = add(g.nozzle, nozzleM, false);
       const [jx, jy, jz] = R.jets[sy < 0 ? 1 : 0];
-      nz.position.set(jx + 1, jy, jz);
+      nz.position.set(jx, jy, jz);
       // the glow sits deep in the pipe: a dark bore at rest, white-hot when boosting
-      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(jx + 3.5, jy, jz), this.nozzleGlow, false);
-      this.jets.push(new THREE.Vector3(jx - 7, jy, jz));
+      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(jx + 3, jy, jz), this.nozzleGlow, false);
+      this.jets.push(new THREE.Vector3(jx - 6, jy, jz));
       const fl = new THREE.Mesh(g.flame, this.flameMat);
-      fl.position.set(jx - 4, jy, jz);
+      fl.position.set(jx - 3, jy, jz);
       fl.scale.set(60, 5.4, 5.4);
       fl.renderOrder = 9;
       fl.frustumCulled = false;
       this.group.add(fl);
       this.flames.push(fl);
       const core = new THREE.Mesh(g.flame, this.coreMat);
-      core.position.set(jx - 2, jy, jz);
+      core.position.set(jx - 1, jy, jz);
       core.renderOrder = 10;
       core.frustumCulled = false;
       this.group.add(core);

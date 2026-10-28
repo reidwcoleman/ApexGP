@@ -520,28 +520,80 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
     });
   paint.push(loftRings(roof, [0.5, 0.5]));
 
-  // nose: grille, splitter, lights; tail: diffuser, light bar, nozzles
+  // nose and tail details sit on the body's real surface: rays find it
+  const hull = new THREE.Mesh(paint[0], new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  const ray = new THREE.Raycaster();
+  const at = (y: number, z: number, dir: 1 | -1): { p: THREE.Vector3; n: THREE.Vector3 } => {
+    ray.set(new THREE.Vector3(dir * 200, y, z), new THREE.Vector3(-dir, 0, 0));
+    const h = ray.intersectObject(hull)[0];
+    if (!h) return { p: new THREE.Vector3(dir > 0 ? sp.body[0].x : sp.body[sp.body.length - 1].x, y, z), n: new THREE.Vector3(dir, 0, 0) };
+    const n = h.face!.normal.clone();
+    if (n.x * dir < 0) n.negate();
+    return { p: h.point, n };
+  };
+  const X = new THREE.Vector3(1, 0, 0);
+  /** a rounded slab standing on the surface: thickness along the normal, w across, h tall */
+  const plate = (s: { p: THREE.Vector3; n: THREE.Vector3 }, t: number, w: number, h: number, off: number, r = 0.5, roll = 0) => {
+    const g = prep(new RoundedBoxGeometry(t, w, h, 2, Math.min(r, t / 2.1, w / 2.1, h / 2.1)));
+    g.rotateX(roll);
+    const n = s.n.clone();
+    n.z *= 0.6;
+    n.normalize();
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(X.clone().multiplyScalar(Math.sign(n.x) || 1), n));
+    return g.translate(s.p.x + n.x * off, s.p.y + n.y * off, s.p.z + n.z * off);
+  };
   const f0 = sp.body[0];
   const f1 = sp.body[1];
-  const grille = new THREE.PlaneGeometry(Math.max(4, f1.zm - f1.zb), f1.wb * 1.15, 1, 1)
-    .rotateY(Math.PI / 2 + 0.25)
-    .translate(f0.x - 1.2, 0, (f0.zb + f0.zm) / 2 + 1);
-  carbon.push(box(9, f0.wb * 2 + 10, 1.4, f0.x - 5, 0, f0.zb + 0.4, 0.5));
-  for (const sy of [-1, 1]) {
-    const h = new THREE.BoxGeometry(10, 1.6, 1.6);
-    h.rotateY(0.38);
-    h.rotateZ(sy * 0.32);
-    h.translate(sp.head[0], sy * sp.head[1], sp.head[2]);
-    head.push(h);
-    head.push(new THREE.CylinderGeometry(1.6, 1.6, 1, 14).rotateZ(Math.PI / 2).translate(f0.x - 0.6, sy * (f1.wb * 0.75), f0.zb + 2.5));
-    tail.push(new THREE.BoxGeometry(1.2, 9, 3.2).translate(sp.tail[0], sy * sp.tail[1], sp.tail[2]));
-  }
-  tail.push(new THREE.BoxGeometry(1, sp.tail[1] * 1.6, 1).translate(sp.tail[0] - 0.2, 0, sp.tail[2] + 1.2));
   const t0 = sp.body[sp.body.length - 1];
+  const t1 = sp.body[sp.body.length - 2];
+  const floorZ = Math.min(...sp.body.map((s) => s.zb));
+  // the front: a splitter, a wide lower intake with its mesh, headlight pods with LED blades
+  carbon.push(box(9, f0.wb * 2 + 10, 1.4, f0.x - 5, 0, f0.zb + 0.4, 0.5));
+  const mz = f0.zb + Math.max(2.6, (f0.zm - f0.zb) * 0.45);
+  const mh = Math.max(3, Math.min(7, (f0.zm - f0.zb) * 0.75));
+  const mw = f1.wb * 1.25;
+  const mouth = at(0, mz, 1);
+  carbon.push(plate(mouth, 3, mw + 3, mh + 2.2, -0.6, 1.2));
+  const grille = new THREE.PlaneGeometry(mh, mw, 1, 1).rotateY(Math.PI / 2);
+  grille.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(X, new THREE.Vector3(mouth.n.x, 0, mouth.n.z * 0.6).normalize()));
+  grille.translate(mouth.p.x + 0.95, 0, mouth.p.z);
+  for (const sy of [-1, 1]) {
+    const hp = at(sy * sp.head[1], sp.head[2], 1);
+    carbon.push(plate(hp, 2.2, 11, 5, -0.2, 1.4, sy * -0.18));
+    head.push(plate(hp, 1, 9, 1.5, 0.75, 0.5, sy * -0.18));
+    head.push(plate(at(sy * (sp.head[1] - 6.5), sp.head[2] - 2.6, 1), 1, 1.4, 1.4, 0.4, 0.6));
+    head.push(plate(at(sy * (sp.head[1] - 3.5), sp.head[2] - 2.6, 1), 1, 1.4, 1.4, 0.4, 0.6));
+    // fog lamps in the intake's corners
+    head.push(plate(at(sy * (mw / 2 - 2.5), mz, 1), 1, 2.6, 1.6, 0.9, 0.7));
+  }
+  // the tail: a dark fascia carrying the nozzles, wraparound lamps and a light bar, a finned diffuser
+  const jz = sp.jet[2];
+  const fas = at(0, jz + 1, -1);
+  carbon.push(plate(fas, 2.6, sp.jet[1] * 2 + 18, Math.min(14, (t1.zs - t1.zb) * 0.9), -0.7, 1.6));
+  const jx: number[] = [];
+  for (const sy of [-1, 1]) {
+    const nz = at(sy * sp.jet[1], jz, -1);
+    jx.push(nz.p.x);
+    carbon.push(plate(nz, 3.4, 14, 13, 0.2, 2.2));
+    const tp = at(sy * sp.tail[1], sp.tail[2], -1);
+    carbon.push(plate(tp, 1.8, 11, 5, -0.2, 1.2));
+    tail.push(plate(tp, 1, 9.5, 2.6, 0.6, 0.5));
+    tail.push(plate(at(sy * (sp.tail[1] + 3.2), sp.tail[2] - 0.6, -1), 1, 3.6, 2.2, 0.45, 0.4));
+  }
+  {
+    const bar = at(0, sp.tail[2] + 1.6, -1);
+    tail.push(plate(bar, 0.8, sp.tail[1] * 1.55, 0.9, 0.5, 0.3));
+  }
   carbon.push(box(12, t0.wm * 1.5, 7, t0.x + 3, 0, t0.zb + 2.5, 1));
   for (const fy of [-0.5, -0.17, 0.17, 0.5]) carbon.push(box(10, 0.9, 5, t0.x + 1, fy * t0.wm * 1.3, t0.zb + 2.2, 0.3));
-  // the floor pan between the wheels
-  carbon.push(box(90, sp.inner * 2, 2, 8, 0, Math.min(...sp.body.map((s) => s.zb)) + 1.2, 0.8));
+  // the floor pan between the wheels, side skirts along the rockers
+  carbon.push(box(90, sp.inner * 2, 2, 8, 0, floorZ + 1.2, 0.8));
+  {
+    const x0 = sp.wr[0] + sp.wr[1] + 4;
+    const x1 = sp.wf[0] - sp.wf[1] - 4;
+    const mid = sp.body.reduce((a, s) => (Math.abs(s.x - (x0 + x1) / 2) < Math.abs(a.x - (x0 + x1) / 2) ? s : a));
+    for (const sy of [-1, 1]) carbon.push(box(x1 - x0, 2.4, 2.6, (x0 + x1) / 2, sy * (mid.wb + 0.9), mid.zb + 1.3, 1));
+  }
 
   // the wing
   const [wx0, wx1] = sp.wx;
@@ -554,7 +606,17 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
     const deck = archZ(wx0, []) > -1e8 ? 0 : 0;
     const deckZ = sp.body[sp.body.length - 3].zt + deck;
     for (const sy of [-1, 1]) {
-      carbon.push(box(chord + 4, 1.2, 9, (wx0 + wx1) / 2 - 1, sy * (sp.ws + 0.6), sp.wz, 0.5));
+      const ep = new THREE.Shape();
+      ep.moveTo(wx1 + 1, -2.5);
+      ep.lineTo(wx0 - 2, -4.5);
+      ep.lineTo(wx0 - 3, 3.5);
+      ep.lineTo(wx0 + 2, 4.5);
+      ep.lineTo(wx1 - 2, 1.5);
+      ep.closePath();
+      const e = new THREE.ExtrudeGeometry(ep, { depth: 1, bevelEnabled: true, bevelThickness: 0.3, bevelSize: 0.3, bevelSegments: 1 });
+      e.rotateX(Math.PI / 2);
+      e.translate(0, sy * (sp.ws + 0.4) + 0.5, sp.wz);
+      carbon.push(prep(e));
       const h = sp.wz - deckZ;
       const st = prep(new RoundedBoxGeometry(4.5, 1.6, h + 1, 1, 0.5));
       st.rotateY(0.25);
@@ -637,8 +699,11 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
   const cal = prep(new RoundedBoxGeometry(0.34, 0.16, 0.2, 2, 0.05));
   cal.translate(0, 0.1, 0.38);
   cal.rotateY(0.7);
-  const nozzle = new THREE.CylinderGeometry(5.6, 4.2, 10, 24, 1, true);
-  nozzle.rotateZ(Math.PI / 2);
+  const nozzle = mergeGeometries([
+    prep(new THREE.CylinderGeometry(4.6, 4.4, 9, 24, 1, true).rotateZ(Math.PI / 2).translate(2, 0, 0)),
+    prep(new THREE.TorusGeometry(4.9, 0.75, 8, 28).rotateY(Math.PI / 2).translate(-2.5, 0, 0)),
+    prep(new THREE.CylinderGeometry(5.6, 5.6, 1.4, 24, 1, true).rotateZ(Math.PI / 2).translate(-1.6, 0, 0)),
+  ]);
   const flame = new THREE.ConeGeometry(1, 1, 18, 6, true);
   flame.rotateZ(Math.PI / 2);
   flame.translate(-0.5, 0, 0);
@@ -674,8 +739,8 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
     ground: -rest,
     wk: (bs.reduce((a, s) => Math.max(a, s.wm), 0) / 43.5) * 1,
     jets: [
-      [sp.jet[0], sp.jet[1], sp.jet[2] + dz],
-      [sp.jet[0], -sp.jet[1], sp.jet[2] + dz],
+      [jx[1] - 0.5, sp.jet[1], sp.jet[2] + dz],
+      [jx[0] - 0.5, -sp.jet[1], sp.jet[2] + dz],
     ],
     antenna: [sp.antenna[0], sp.antenna[1], sp.antenna[2] + dz],
   };

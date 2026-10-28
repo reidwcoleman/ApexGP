@@ -364,7 +364,7 @@ export class Game {
     };
   }
 
-  /** quick chat: the open category (-1: none) and when it closes */
+  /** quick chat, with no menu on screen: the first press picks a category (-1: none), the second a line */
   private qcCat = -1;
   private qcT = 0;
   private quickChat(k: number): void {
@@ -372,12 +372,10 @@ export class Game {
     if (this.qcCat < 0 || this.time > this.qcT) {
       this.qcCat = k;
       this.qcT = this.time + 2.5;
-      this.ui.quickChat(QUICK_CHAT[k], this.controls.lastPad, this.controls.padPS);
       return;
     }
     const text = QUICK_CHAT[this.qcCat][k];
     this.qcCat = -1;
-    this.ui.quickChat(null);
     // (a few seconds between lines, as the real one limits spam)
     if (this.time < this.qcNext) return;
     this.qcNext = this.time + 1.2;
@@ -694,10 +692,7 @@ export class Game {
       const lk = this.controls.look;
       this.cam.orbit.x = lk.x;
       this.cam.orbit.y = lk.y;
-      if (this.qcCat >= 0 && this.time > this.qcT) {
-        this.qcCat = -1;
-        this.ui.quickChat(null);
-      }
+      if (this.qcCat >= 0 && this.time > this.qcT) this.qcCat = -1;
       this.advance(dt);
       this.render(dt);
     };

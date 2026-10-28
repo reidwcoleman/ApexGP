@@ -305,10 +305,6 @@
 @media (max-width: 640px) { .items { grid-template-columns: repeat(2, 1fr); } }
 
 /* quick chat */
-.qc { position: absolute; left: 3vw; top: 34%; display: flex; flex-direction: column; gap: 5px; }
-.qc[hidden] { display: none; }
-.qc div { display: flex; align-items: center; gap: 10px; padding: 7px 14px 7px 7px; border-radius: 8px; background: rgba(6, 9, 18, 0.82); border: 1px solid rgba(255, 255, 255, 0.1); font-size: 17px; font-weight: 700; animation: feedin 0.18s ease-out; }
-.qc kbd { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.14); font: 900 14px var(--font); color: #ffd34a; }
 .namerow { display: flex; gap: 8px; align-items: stretch; margin-top: 6px; }
 .namerow input { margin-top: 0 !important; flex: 1; min-width: 0; }
 .dice { flex: none; padding: 0 16px; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: var(--ink); font: italic 900 15px var(--font); text-transform: uppercase; cursor: pointer; }

@@ -294,7 +294,6 @@ export class UI {
   <div class="tip" id="h-tip"></div>
   <div class="toast" id="h-toast"></div>
   <div class="awards" id="h-awards"></div>
-  <div class="qc" id="h-qc" hidden></div>
 </div>
 
 <div class="overlay" id="o-board" hidden><div class="board" id="board"></div></div>
@@ -673,16 +672,6 @@ export class UI {
     mark('#l-fill', l.bots ?? 'even');
     mark('#l-map', asMap(l.map));
     mark('#l-time', asTime(l.time));
-  }
-
-  /** the quick chat menu: a category's four lines and the buttons that pick them (null closes it) */
-  quickChat(lines: string[] | null, pad = false, ps = false): void {
-    const el = this.$('#h-qc');
-    el.hidden = !lines;
-    if (!lines) return;
-    const keys = pad ? (ps ? ['▲', '◀', '▶', '▼'] : ['↑', '←', '→', '↓']) : ACTS.filter((a) => a.id.startsWith('chat')).map((a) => keyName(this.profile.binds[a.id][0]));
-    // (on a pad the d-pad picks: up, left, right, down)
-    el.innerHTML = lines.map((l, k) => `<div><kbd>${esc(keys[k] ?? String(k + 1))}</kbd>${esc(l)}</div>`).join('');
   }
 
   chat(from: string, text: string): void {
