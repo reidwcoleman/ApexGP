@@ -158,7 +158,7 @@ export class Stage {
     }
     this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72, levels: this.quality === 2 ? 8 : 5 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
-    const grade = new GradeEffect({ vibrance: 0.22, contrast: 0.12, lift: 0.01 });
+    const grade = new GradeEffect({ vibrance: 0.34, contrast: 0.22, lift: 0.005 });
     const vig = new VignetteEffect({ offset: 0.3, darkness: 0.55 });
     // SMAA (three passes) on real GPUs, FXAA (one) on integrated ones
     const aa = this.quality === 2 ? new SMAAEffect({ preset: SMAAPreset.HIGH }) : new FXAAEffect();
