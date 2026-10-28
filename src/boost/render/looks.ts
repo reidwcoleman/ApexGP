@@ -7,7 +7,7 @@
  */
 
 export type TimeId = 'morning' | 'day' | 'sunset' | 'night';
-export type MapId = 'apex' | 'alpine' | 'harbor' | 'meadow';
+export type MapId = 'apex' | 'alpine' | 'harbor' | 'meadow' | 'canyon';
 
 export interface TimeLook {
   id: TimeId;
@@ -55,13 +55,39 @@ export interface MapLook {
   tiers: 1 | 2;
   /** floodlights on the roof ring, or four masts at the corners */
   lights: 'ring' | 'masts';
-  surround: 'none' | 'mountains' | 'city' | 'hills';
-  /** multiplies the pitch's grass */
-  grass: [number, number, number];
+  surround: 'none' | 'mountains' | 'city' | 'hills' | 'canyon';
+  /** how the arena itself is dressed: pitch, walls, glass, seats */
+  theme: ArenaTheme;
   /** snow on the roof, the concourse and the tops of things */
   snow: number;
   /** the concourse and the backs of the stands (day colour) */
   concourse: number;
+}
+
+type C3 = [number, number, number];
+
+/** an arena's own palette (linear colours, as lit by day; the shaders darken them for night) */
+export interface ArenaTheme {
+  /** the pitch's two mowing colours */
+  pitchA: C3;
+  pitchB: C3;
+  /** how it's mown: 0 bands, 1 checks, 2 diamonds, 3 rings, 4 synthetic hex turf */
+  pattern: number;
+  /** the painted lines, and how much they glow (0 paint … 1 neon) */
+  line: C3;
+  lineGlow: number;
+  /** the padded walls of the ramps */
+  wall: C3;
+  /** the glass tint */
+  glass: C3;
+  /** the seats */
+  seat: C3;
+  /** frost on the pitch's edges and snow in the aisles */
+  frost: number;
+  /** structure: roof, goal housings, frames */
+  trim: C3;
+  /** the swatch the menus show for it (css) */
+  css: string;
 }
 
 const n3 = (x: number, y: number, z: number): [number, number, number] => {
@@ -197,9 +223,21 @@ export const MAPS: Record<MapId, MapLook> = {
     tiers: 2,
     lights: 'ring',
     surround: 'none',
-    grass: [1, 1, 1],
     snow: 0,
     concourse: 0x2a2e36,
+    theme: {
+      pitchA: [0.1, 0.29, 0.04],
+      pitchB: [0.07, 0.215, 0.03],
+      pattern: 0,
+      line: [0.92, 0.95, 1.0],
+      lineGlow: 0.05,
+      wall: [0.06, 0.065, 0.08],
+      glass: [0.06, 0.075, 0.1],
+      seat: [0.07, 0.075, 0.09],
+      frost: 0,
+      trim: [0.75, 0.77, 0.8],
+      css: 'linear-gradient(160deg,#16306b 0%,#1d5a2a 55%,#0f2e14 100%)',
+    },
   },
   alpine: {
     id: 'alpine',
@@ -209,21 +247,45 @@ export const MAPS: Record<MapId, MapLook> = {
     tiers: 2,
     lights: 'masts',
     surround: 'mountains',
-    grass: [0.92, 1.0, 1.02],
     snow: 1,
     concourse: 0x8a9098,
+    theme: {
+      pitchA: [0.085, 0.255, 0.07],
+      pitchB: [0.062, 0.2, 0.058],
+      pattern: 2,
+      line: [0.85, 0.95, 1.1],
+      lineGlow: 0.25,
+      wall: [0.42, 0.47, 0.54],
+      glass: [0.07, 0.1, 0.14],
+      seat: [0.3, 0.36, 0.45],
+      frost: 1,
+      trim: [0.9, 0.92, 0.95],
+      css: 'linear-gradient(160deg,#cfe3f5 0%,#7fa4c4 40%,#1d4d3c 100%)',
+    },
   },
   harbor: {
     id: 'harbor',
     name: 'Neon Harbor',
-    blurb: 'Downtown towers over the roof line',
+    blurb: 'Neon turf on the waterfront, downtown over the roof',
     roof: true,
     tiers: 2,
     lights: 'ring',
     surround: 'city',
-    grass: [0.95, 0.98, 1.0],
     snow: 0,
     concourse: 0x24262c,
+    theme: {
+      pitchA: [0.022, 0.045, 0.085],
+      pitchB: [0.016, 0.032, 0.065],
+      pattern: 4,
+      line: [0.25, 0.95, 1.25],
+      lineGlow: 1,
+      wall: [0.035, 0.025, 0.07],
+      glass: [0.07, 0.035, 0.12],
+      seat: [0.05, 0.03, 0.09],
+      frost: 0,
+      trim: [0.18, 0.18, 0.24],
+      css: 'linear-gradient(160deg,#2a0b4d 0%,#0b2a5c 50%,#06c2d9 100%)',
+    },
   },
   meadow: {
     id: 'meadow',
@@ -233,9 +295,45 @@ export const MAPS: Record<MapId, MapLook> = {
     tiers: 1,
     lights: 'masts',
     surround: 'hills',
-    grass: [1.04, 1.06, 0.92],
     snow: 0,
     concourse: 0x3a3d33,
+    theme: {
+      pitchA: [0.15, 0.34, 0.045],
+      pitchB: [0.1, 0.26, 0.035],
+      pattern: 1,
+      line: [1.0, 0.97, 0.88],
+      lineGlow: 0,
+      wall: [0.14, 0.1, 0.065],
+      glass: [0.06, 0.085, 0.07],
+      seat: [0.05, 0.13, 0.06],
+      frost: 0,
+      trim: [0.62, 0.55, 0.44],
+      css: 'linear-gradient(160deg,#8cc8f0 0%,#5f9a3a 50%,#2f5a1c 100%)',
+    },
+  },
+  canyon: {
+    id: 'canyon',
+    name: 'Sunspire Canyon',
+    blurb: 'A sandstone bowl among the red mesas',
+    roof: false,
+    tiers: 1,
+    lights: 'masts',
+    surround: 'canyon',
+    snow: 0,
+    concourse: 0x6b4a33,
+    theme: {
+      pitchA: [0.18, 0.26, 0.05],
+      pitchB: [0.115, 0.165, 0.032],
+      pattern: 3,
+      line: [1.0, 0.93, 0.8],
+      lineGlow: 0,
+      wall: [0.32, 0.14, 0.07],
+      glass: [0.1, 0.07, 0.05],
+      seat: [0.3, 0.12, 0.05],
+      frost: 0,
+      trim: [0.72, 0.55, 0.38],
+      css: 'linear-gradient(160deg,#f2b267 0%,#c2582a 45%,#5a2412 100%)',
+    },
   },
 };
 

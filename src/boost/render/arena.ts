@@ -17,14 +17,28 @@ const ORANGE = new THREE.Color(0xff7417);
 
 /** 1 by day, 0 at night: every arena shader reads it, so the switch costs no recompiles */
 export const uDay = { value: 1 };
-/** the arena's grass colour (multiplies the pitch) */
-const uGrassTint = { value: new THREE.Color(1, 1, 1) };
+/** the arena's palette (see ArenaTheme), shared by every arena shader */
+const TH = {
+  uPitchA: { value: new THREE.Color() },
+  uPitchB: { value: new THREE.Color() },
+  uPattern: { value: 0 },
+  uLine: { value: new THREE.Color() },
+  uLineGlow: { value: 0 },
+  uWall: { value: new THREE.Color() },
+  uGlass: { value: new THREE.Color() },
+  uSeat: { value: new THREE.Color() },
+  uFrost: { value: 0 },
+  uTrim: { value: new THREE.Color() },
+};
+/** the goal housings' structure (coloured with the arena) */
+const houseM = new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.75, metalness: 0.25 });
 /** the ball (0) and up to 8 cars, in sim cm (w = 1 for the ball): the wall's hex panels light up around them */
 export const uNear = { value: Array.from({ length: 9 }, () => new THREE.Vector4(0, 0, -9999, 0)) };
 
 const GLSL_COMMON = /* glsl */ `
 uniform float uDay;
-uniform vec3 uGrassTint;
+uniform vec3 uPitchA, uPitchB, uLine, uWall, uGlass, uSeat, uTrim;
+uniform float uPattern, uLineGlow, uFrost;
 float bbHash(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p, p+23.45); return fract(p.x*p.y); }
 float bbNoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
   return mix(mix(bbHash(i), bbHash(i+vec2(1,0)), u.x), mix(bbHash(i+vec2(0,1)), bbHash(i+vec2(1,1)), u.x), u.y); }
@@ -44,7 +58,7 @@ function simPatch(mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, 
   const key = 'bb' + hashStr(frag + decl);
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, uniforms, { uDay, uGrassTint });
+    Object.assign(sh.uniforms, uniforms, { uDay }, TH);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvSim = position;\nvBB = uv;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;\n' + GLSL_COMMON + decl)
@@ -182,19 +196,43 @@ function pitch(): THREE.Mesh {
     if (oct > 0.0 && !inGoal) discard;
     float side = sign(P.y);
     vec3 team = side < 0.0 ? vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}) : vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)});
-    // grass: mown bands, mottling, blade grain
-    float band = step(0.5, fract(P.y / 1024.0 + 0.25));
-    float diag = step(0.5, fract((P.x + P.y) / 2048.0));
-    vec3 g1 = mix(vec3(0.105, 0.255, 0.075), vec3(0.1, 0.29, 0.04), uDay), g2 = mix(vec3(0.085, 0.215, 0.06), vec3(0.07, 0.215, 0.03), uDay);
-    vec3 col = mix(g1, g2, band);
-    col *= 0.94 + 0.06 * diag;
-    float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
-    col *= 0.82 + 0.36 * n;
-    // blade-scale grain up close, faded out before it can shimmer
+    // the turf, mown to the arena's pattern: bands, checks, diamonds or rings (or synthetic panels)
+    float synth = step(3.5, uPattern);
     float fw = fwidth(P.y) + fwidth(P.x);
+    float pw = 18.0 + fw;
+    float band;
+    if (uPattern < 0.5) band = smoothstep(-pw, pw, abs(fract(P.y / 1024.0 + 0.25) - 0.5) * 1024.0 - 256.0);
+    else if (uPattern < 1.5) {
+      vec2 c = abs(fract(P / 1024.0) - 0.5) * 1024.0 - 256.0;
+      band = abs(smoothstep(-pw, pw, c.x) - smoothstep(-pw, pw, c.y));
+    } else if (uPattern < 2.5) {
+      vec2 d = vec2(P.x + P.y, P.x - P.y) * 0.7071;
+      vec2 c = abs(fract(d / 1100.0) - 0.5) * 1100.0 - 275.0;
+      band = abs(smoothstep(-pw, pw, c.x) - smoothstep(-pw, pw, c.y));
+    } else if (uPattern < 3.5) band = smoothstep(-pw, pw, abs(fract(length(P) / 1000.0) - 0.5) * 1000.0 - 250.0);
+    else band = 0.5 + 0.5 * step(0.5, fract(P.y / 2048.0));
+    vec3 col = mix(uPitchA, uPitchB, band) * mix(0.85, 1.0, uDay);
+    float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
+    col *= mix(0.82 + 0.36 * n, 0.94 + 0.12 * n, synth);
+    // blade-scale grain up close, faded out before it can shimmer
     col *= 1.0 + (bbNoise(P * 2.7) - 0.5) * 0.22 * (1.0 - smoothstep(1.5, 5.0, fw));
     col *= 0.94 + 0.12 * bbNoise(P * 0.9);
-    col *= uGrassTint;
+    // mown grass changes shade with the way you look along it (each stripe's blades lie the other way)
+    vec3 camSim = vec3(cameraPosition.x * 100.0, -cameraPosition.z * 100.0, cameraPosition.y * 100.0);
+    vec3 vd = normalize(vSim - camSim);
+    float lean = uPattern < 0.5 || uPattern > 2.5 ? vd.y : (uPattern < 1.5 ? vd.x * 0.6 + vd.y * 0.6 : (vd.x + vd.y) * 0.7071);
+    col *= 1.0 + 0.2 * lean * (band * 2.0 - 1.0) * (1.0 - synth);
+    // the turf darkens where it runs up under the walls
+    col *= mix(0.8, 1.0, smoothstep(0.0, 700.0, -(oct + ${R.toFixed(1)})));
+    // synthetic turf: hex panels with lit seams
+    float sHex = bbHexEdge(P / 300.0);
+    float seamS = (1.0 - smoothstep(0.0, 0.025 + fw / 600.0, sHex)) * synth * (1.0 - smoothstep(4.0, 14.0, fw));
+    col *= 1.0 - synth * 0.18 * (1.0 - smoothstep(0.0, 0.2, sHex));
+    // frost: white round the edges, patchy, and a dusting all over
+    float rim = smoothstep(-1000.0, -150.0, oct);
+    float fn = bbNoise(P * 0.004) * 0.6 + bbNoise(P * 0.03) * 0.4;
+    float frost = uFrost * clamp(rim * (0.2 + 1.1 * fn) + smoothstep(0.78, 0.95, fn) * 0.2, 0.0, 1.0);
+    col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), frost * 0.75);
     // a wash of team colour toward each end
     col = mix(col, col * (0.55 + team * 0.9), smoothstep(800.0, 5000.0, abs(P.y)) * 0.55);
     // lines
@@ -217,8 +255,8 @@ function pitch(): THREE.Mesh {
     float bnd = 1.0 - smoothstep(lw - aa, lw + aa, edge);
     // the goal line
     float gl = (1.0 - smoothstep(30.0 - aa, 30.0 + aa, abs(abs(P.y) - ${ARENA.Y.toFixed(1)}))) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)});
-    vec3 lineC = vec3(0.92, 0.95, 1.0);
-    col = mix(col, lineC, L * 0.85);
+    vec3 lineC = uLine;
+    col = mix(col, lineC, L * mix(0.85, 0.55, uLineGlow));
     col = mix(col, team * 1.2, bnd);
     // inside the goals: a dark glossy floor with team light
     float gIn = step(${ARENA.Y.toFixed(1)}, abs(P.y)) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)});
@@ -226,7 +264,8 @@ function pitch(): THREE.Mesh {
     col = mix(col, vec3(0.03, 0.035, 0.05) + team * 0.06 * (1.0 - smoothstep(0.0, 0.06, hex)), gIn);
     diffuseColor.rgb *= col;
     float glowK = mix(1.0, 0.45, uDay);
-    vec3 bbEmit = lineC * L * mix(0.09, 0.03, uDay) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5);
+    vec3 bbEmit = lineC * L * (mix(0.09, 0.03, uDay) + uLineGlow * mix(1.6, 0.9, uDay)) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5)
+      + mix(lineC, team, 0.5 + 0.5 * sign(P.y) * smoothstep(0.0, 4000.0, abs(P.y))) * seamS * (0.25 + 0.35 * (1.0 - uDay)) * (1.0 - gIn);
     `,
   );
   mat.roughness = 0.85;
@@ -252,10 +291,12 @@ function shell(): THREE.Group {
     vec2 q = vec2(vBB.x, z) / 120.0;
     float hex = bbHexEdge(q);
     float n = bbNoise(vec2(vBB.x, z) * 0.02);
-    vec3 col = mix(vec3(0.075, 0.12, 0.07), vec3(0.06, 0.065, 0.08), smoothstep(40.0, 260.0, z));
+    vec3 col = mix(uPitchA * 0.62, uWall, smoothstep(40.0, 260.0, z));
     col *= 0.85 + 0.3 * n;
     col *= 0.85 + 0.15 * smoothstep(0.0, 0.08, hex);
-    col *= mix(1.0, 2.4, uDay);
+    col *= mix(1.0, mix(2.4, 1.15, smoothstep(0.15, 0.4, max(uWall.r, max(uWall.g, uWall.b)))), uDay);
+    // snow banked at the foot of the walls
+    col = mix(col, vec3(0.8, 0.85, 0.9) * mix(0.6, 1.0, uDay), uFrost * (1.0 - smoothstep(30.0, 140.0 + n * 80.0, z)) * 0.85);
     diffuseColor.rgb *= col;
     float stripe = smoothstep(14.0, 0.0, abs(z - 330.0)) ;
     float seam = 1.0 - smoothstep(0.0, 0.05, hex);
@@ -299,8 +340,8 @@ function shell(): THREE.Group {
       near = max(near, (1.0 - smoothstep(0.0, r, d)) * (uNear[i].w > 0.5 ? 1.0 : 0.85));
     }
     float pulse = 0.5 + 0.5 * sin(uTime * 1.3 + W.x * 0.002 - W.y * 0.003);
-    vec3 glassC = mix(vec3(0.06, 0.075, 0.1), team * 0.35 + 0.03, 0.25 + lower * 0.15);
-    vec3 frameC = vec3(0.1, 0.11, 0.13);
+    vec3 glassC = mix(uGlass, team * 0.35 + 0.03, 0.25 + lower * 0.15);
+    vec3 frameC = mix(vec3(0.1, 0.11, 0.13), uTrim * 0.3, 0.5);
     vec3 col = mix(glassC * (0.8 + 0.4 * smudge), vec3(0.15, 0.18, 0.23), hexL * 0.5);
     col = mix(col, frameC, frame);
     diffuseColor.rgb = col;
@@ -426,7 +467,6 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   beam(W * 2, 6, 6, 0, by - sideSign * 3, H - GOAL_TOP_R, strip);
   beam(W * 2, 6, 6, 0, by - sideSign * 3, GOAL_BACK_R, strip);
   // the housing round the box: dark structure, so nothing behind (the seats) shows into the goal
-  const houseM = new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.8, metalness: 0.2 });
   // (outer slabs only: behind the back, outside the sides, over the roof; the mouth stays open)
   const slab = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), houseM);
@@ -438,6 +478,15 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   slab(W * 2 + 120, 60, H + 60, 0, by + sideSign * 34, (H + 60) / 2 - 2);
   for (const sx of [-1, 1]) slab(60, D + 20, H + 60, sx * (W + 34), ym, (H + 60) / 2 - 2);
   slab(W * 2 + 120, D + 20, 60, 0, ym, H + 34);
+  // team light round the housing's top, so it reads as part of the goal from the stands
+  const edgeM = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(2.2) });
+  const edge = (sx: number, sy: number, x: number, y: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, 14), edgeM);
+    m.position.set(x, y, H + 66);
+    g.add(m);
+  };
+  edge(W * 2 + 130, 14, 0, Y + sideSign * (D + 30));
+  for (const sx of [-1, 1]) edge(14, D + 30, sx * (W + 65), ym);
   // the inner glow light
   const pl = new THREE.PointLight(team, 6, 14, 2);
   pl.position.set(0, Y + sideSign * (D - 200), H * 0.6);
@@ -524,25 +573,25 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
     vec3 shirt = h2 < 0.38 ? teamC * 0.75 : (h2 < 0.58 ? vec3(0.62) : (h2 < 0.8 ? vec3(0.06) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.5));
     vec3 skin = mix(vec3(0.85, 0.62, 0.48), vec3(0.3, 0.19, 0.13), fract(h * 13.0));
-    vec3 seatC = mix(vec3(0.05, 0.055, 0.07) + teamC * 0.06, vec3(0.07, 0.075, 0.09) + teamC * 0.07, uDay);
+    vec3 seatC = uSeat * mix(0.7, 1.0, uDay) + teamC * mix(0.06, 0.04, uDay);
     // the riser: each row's front edge in shadow
     seatC *= 0.55 + 0.45 * smoothstep(0.0, 0.2, f.y);
     vec3 col = mix(seatC, head > body ? skin : shirt, person);
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
     // (the average of a crowd: shirts, faces and seats; denser and sparser blocks, a sea of team colour)
-    vec3 crowdAvg = mix(vec3(0.13, 0.13, 0.14), teamC * 0.55, 0.28);
+    vec3 crowdAvg = mix(mix(vec3(0.1, 0.1, 0.11), uSeat * 1.4 + 0.02, 0.4), teamC * 0.6, 0.3);
     float dens = 0.7 + 0.6 * bbNoise(vBB / vec2(420.0, 260.0)) + 0.25 * (bbNoise(vBB / vec2(90.0, 120.0)) - 0.5);
     vec3 avg = mix(seatC, crowdAvg * dens, 0.7);
     col = mix(col, avg, smoothstep(0.25, 0.7, px));
     // a walkway every dozen rows, and the risers' shadow lines as the rows go
     float walk = step(fract(vBB.y / (rowH * 12.0)), 1.0 / 12.0);
-    col = mix(col, vec3(0.03, 0.032, 0.04), walk * 0.7);
+    col = mix(col, mix(vec3(0.03, 0.032, 0.04), vec3(0.75, 0.8, 0.86) * mix(0.4, 1.0, uDay), uFrost), walk * 0.7);
     col *= 0.9 + 0.1 * smoothstep(0.0, 0.25, fract(vBB.y / rowH)) * (1.0 - smoothstep(0.6, 1.2, px));
     // in the sun the crowd is a shade darker than its lit seats read; the roof shades the upper rows
     col *= mix(1.0, 0.62, uDay) * (1.0 - uDay * 0.45 * smoothstep(2300.0, 4300.0, vSim.z));
     float aisle = step(fract(vBB.x / 1500.0), 0.035);
-    col = mix(col, vec3(0.035), aisle);
+    col = mix(col, mix(vec3(0.035), uTrim * 0.25, 0.5), aisle);
     diffuseColor.rgb *= col;
     // phone lights and camera flashes
     float flash = step(0.9993, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay);
@@ -837,7 +886,7 @@ function roof(): THREE.Mesh {
     /* glsl */ `
     float rib = smoothstep(0.88, 0.95, abs(fract(vBB.x / 900.0) - 0.5) * 2.0);
     float edge = 1.0 - smoothstep(0.0, 0.08, vBB.y);
-    vec3 col = mix(vec3(0.05, 0.055, 0.065), vec3(0.75, 0.77, 0.8), uDay);
+    vec3 col = mix(vec3(0.05, 0.055, 0.065), uTrim, uDay);
     col *= 0.75 + 0.25 * rib;
     diffuseColor.rgb *= col;
     float tw = smoothstep(-3000.0, 3000.0, vSim.y);
@@ -928,6 +977,56 @@ function centreLogo(): THREE.Mesh {
   return m;
 }
 
+/** snow drifting down through the bowl (Frostpeak): points wrapped round a box over the pitch */
+function snowfall(uT: { value: number }): THREE.Points {
+  const N = 7000;
+  const pos = new Float32Array(N * 3);
+  const seed = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 14000;
+    pos[i * 3 + 1] = (Math.random() - 0.5) * 17000;
+    pos[i * 3 + 2] = Math.random() * 5200;
+    seed[i] = Math.random();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('seed', new THREE.BufferAttribute(seed, 1));
+  const m = new THREE.ShaderMaterial({
+    uniforms: { uTime: uT, uDayS: uDay, uPx: { value: 1 } },
+    transparent: true,
+    depthWrite: false,
+    vertexShader: /* glsl */ `
+      attribute float seed;
+      uniform float uTime; uniform float uPx;
+      varying float vA;
+      void main(){
+        vec3 p = position;
+        float fall = 70.0 + seed * 60.0;
+        p.z = mod(p.z - uTime * fall, 5200.0);
+        p.x += sin(uTime * (0.4 + seed * 0.5) + seed * 40.0) * 120.0 + uTime * 25.0;
+        p.y += cos(uTime * (0.3 + seed * 0.4) + seed * 17.0) * 90.0;
+        p.x = mod(p.x + 7000.0, 14000.0) - 7000.0;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp((0.09 + seed * 0.09) * 650.0 * uPx / -mv.z, 0.8, 7.0);
+        // fade in from the top, out at the floor and very near the lens
+        vA = smoothstep(0.0, 300.0, p.z) * (1.0 - smoothstep(4400.0, 5200.0, p.z)) * smoothstep(0.6, 3.0, -mv.z);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uDayS;
+      varying float vA;
+      void main(){
+        float d = length(gl_PointCoord - 0.5);
+        float a = (1.0 - smoothstep(0.15, 0.5, d)) * vA * 0.7;
+        gl_FragColor = vec4(vec3(mix(0.7, 1.0, uDayS)), a);
+      }`,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.frustumCulled = false;
+  pts.renderOrder = 6;
+  return pts;
+}
+
 export function buildArena(): ArenaView {
   const root = new THREE.Group();
   root.rotation.x = -Math.PI / 2;
@@ -950,6 +1049,9 @@ export function buildArena(): ArenaView {
   const scr = screens();
   root.add(scr.group);
   const shellT = sh.userData.uT as { value: number };
+  const snow = snowfall(uT);
+  snow.visible = false;
+  root.add(snow);
   let curMap: MapLook = MAPS.apex;
   let curTime: TimeLook = TIMES.day;
   const view: ArenaView = {
@@ -961,7 +1063,18 @@ export function buildArena(): ArenaView {
       curMap = map;
       curTime = t;
       uDay.value = t.day;
-      uGrassTint.value.setRGB(...map.grass);
+      const th = map.theme;
+      TH.uPitchA.value.setRGB(...th.pitchA);
+      TH.uPitchB.value.setRGB(...th.pitchB);
+      TH.uPattern.value = th.pattern;
+      TH.uLine.value.setRGB(...th.line);
+      TH.uLineGlow.value = th.lineGlow;
+      TH.uWall.value.setRGB(...th.wall);
+      TH.uGlass.value.setRGB(...th.glass);
+      TH.uSeat.value.setRGB(...th.seat);
+      TH.uFrost.value = th.frost;
+      TH.uTrim.value.setRGB(...th.trim);
+      houseM.color.setRGB(...th.trim).multiplyScalar(0.05 + 0.07 * t.day);
       for (const [n, g] of standsBy) g.visible = n === map.tiers;
       let st = standsBy.get(map.tiers);
       if (!st) {
@@ -980,6 +1093,7 @@ export function buildArena(): ArenaView {
       }
       li.userData.theme(t);
       rf.visible = map.roof;
+      snow.visible = map.theme.frost > 0.5;
       for (const [id, sv] of surroundBy) if (sv) sv.group.visible = id === map.id;
       if (!surroundBy.has(map.id)) {
         const sv = buildSurround(map);

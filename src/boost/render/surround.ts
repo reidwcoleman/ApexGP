@@ -99,7 +99,7 @@ vec3 air(vec3 c, vec3 w){
 }`;
 
 /** a range: forest low down, rock on the steep faces, snow above the snow line */
-function terrainMaterial(kind: 'peaks' | 'hills'): THREE.ShaderMaterial {
+function terrainMaterial(kind: 'peaks' | 'hills' | 'mesa'): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: U,
     vertexShader: LIT_VERT,
@@ -122,7 +122,16 @@ function terrainMaterial(kind: 'peaks' | 'hills'): THREE.ShaderMaterial {
         float streak = fract(sin(dot(floor(vW.xz * 0.02), vec2(12.9898, 78.233))) * 43758.5453);
         float snow = smoothstep(uSnowLine - 0.05, uSnowLine + 0.05, rel + vCol.y * 0.1 + streak * 0.06 - smoothstep(0.8, 0.97, slope) * 0.35);
         col = mix(col, vec3(0.9, 0.93, 0.97), snow);`
-            : `col = mix(meadow, forest, smoothstep(0.35, 0.6, vCol.y + slope * 0.8));
+            : kind === 'mesa'
+              ? `// sandstone in strata: red and cream bands on the cliffs, scrub and sand on the flat tops
+        float strata = 0.5 + 0.5 * sin(vH * 0.0021 + sin(vH * 0.0007) * 2.0 + vCol.y * 0.6);
+        vec3 red = mix(vec3(0.3, 0.085, 0.03), vec3(0.42, 0.14, 0.05), vCol.y);
+        vec3 cream = vec3(0.55, 0.36, 0.2);
+        col = mix(red, cream, smoothstep(0.55, 0.9, strata) * 0.8);
+        col *= 0.8 + 0.25 * smoothstep(0.3, 0.8, strata);
+        vec3 top = mix(vec3(0.5, 0.33, 0.17), vec3(0.32, 0.3, 0.13), vCol.y * 0.6);
+        col = mix(col, top, smoothstep(0.35, 0.12, slope));`
+              : `col = mix(meadow, forest, smoothstep(0.35, 0.6, vCol.y + slope * 0.8));
         col = mix(col, meadow * 1.15, smoothstep(0.75, 0.9, rel) * 0.5);`
         }
         vec3 c = shade(col, n);
@@ -132,7 +141,7 @@ function terrainMaterial(kind: 'peaks' | 'hills'): THREE.ShaderMaterial {
 }
 
 /** a polar heightfield ring between r0 and r1 (cm) */
-function rangeRing(r0: number, r1: number, peak: number, scale: number, seed: number, segs = 720, rows = 22): THREE.BufferGeometry {
+function rangeRing(r0: number, r1: number, peak: number, scale: number, seed: number, segs = 720, rows = 22, terrace = 0): THREE.BufferGeometry {
   const pos: number[] = [];
   const col: number[] = [];
   const idx: number[] = [];
@@ -146,7 +155,13 @@ function rangeRing(r0: number, r1: number, peak: number, scale: number, seed: nu
       const prof = Math.sin(Math.PI * Math.min(1, t * 1.25)) ** 0.8;
       const rg = ridge(th + t * 0.35, scale, seed) + 0.25 * ridge(th * 1.7 - t, scale * 2.3, seed + 5);
       const local = 0.7 + 0.6 * noise2(Math.cos(th) * 9 + t * 3, Math.sin(th) * 9 + seed);
-      const h = peak * prof * rg * local;
+      let h = peak * prof * rg * local;
+      // mesas: flat benches broken by cliffs
+      if (terrace > 0) {
+        const k = h / terrace;
+        const f = k - Math.floor(k);
+        h = (Math.floor(k) + Math.min(1, Math.max(0, (f - 0.72) / 0.28)) ** 2) * terrace;
+      }
       hs.push(h);
       hmax = Math.max(hmax, h);
     }
@@ -200,6 +215,42 @@ function groundDisk(color: THREE.Color, r: number): THREE.Mesh {
   });
   const mesh = new THREE.Mesh(g, m);
   mesh.position.z = -800;
+  return mesh;
+}
+
+/** the harbour: dark water round the stadium, giving back the sky and the city's lights */
+function water(): THREE.Mesh {
+  const g = new THREE.RingGeometry(16000, 46000, 160, 4);
+  const n = g.attributes.position.count;
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(n * 3).fill(0), 3));
+  const m = new THREE.ShaderMaterial({
+    uniforms: { ...U, uT: { value: 0 } },
+    vertexShader: LIT_VERT,
+    fragmentShader: /* glsl */ `
+      ${LIT_COMMON}
+      varying vec3 vCol; varying vec3 vN; varying vec3 vW; varying float vH;
+      float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
+        return mix(mix(h2(i), h2(i+vec2(1,0)), u.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), u.x), u.y); }
+      void main(){
+        vec3 v = normalize(vW - cameraPosition);
+        // ripples tilt the normal a little
+        vec2 q = vW.xz * 0.35;
+        vec3 n = normalize(vec3((vn(q) - 0.5) * 0.12, 1.0, (vn(q * 1.7 + 5.0) - 0.5) * 0.12));
+        float fr = 0.04 + 0.96 * pow(1.0 - max(dot(-v, n), 0.0), 5.0);
+        vec3 deep = mix(vec3(0.01, 0.03, 0.045), vec3(0.004, 0.006, 0.014), uNight);
+        vec3 sky = uFogCol * mix(1.0, 0.6, uNight);
+        vec3 c = mix(deep, sky, fr);
+        // the sun's glitter, and at night the neon of the waterfront in streaks
+        vec3 r = reflect(v, n);
+        c += uSunCol * pow(max(dot(r, uSunDir), 0.0), 220.0) * 2.0 * (1.0 - uNight);
+        float streak = step(0.82, vn(vec2(atan(vW.z, vW.x) * 60.0, length(vW.xz) * 0.02)));
+        c += mix(vec3(0.1, 0.7, 1.0), vec3(1.0, 0.2, 0.7), vn(vW.xz * 0.004)) * streak * uNight * 0.35 * fr;
+        gl_FragColor = vec4(air(c, vW), 1.0);
+      }`,
+  });
+  const mesh = new THREE.Mesh(g, m);
+  mesh.position.z = -500;
   return mesh;
 }
 
@@ -352,8 +403,14 @@ export function buildSurround(map: MapLook): SurroundView | null {
     group.add(woods(hills, 5000, 12, 650));
     // and a blue line of far ridges
     group.add(new THREE.Mesh(rangeRing(160000, 260000, 52000, 1.1, 13, 360, 10), terrainMaterial('hills')));
+  } else if (map.surround === 'canyon') {
+    group.add(groundDisk(new THREE.Color(0.42, 0.25, 0.13), 330000));
+    // near: broken red benches; far: the big mesas and buttes
+    group.add(new THREE.Mesh(rangeRing(42000, 110000, 26000, 2.6, 31, 600, 30, 5200), terrainMaterial('mesa')));
+    group.add(new THREE.Mesh(rangeRing(150000, 330000, 90000, 1.4, 37, 720, 36, 16000), terrainMaterial('mesa')));
   } else if (map.surround === 'city') {
     group.add(groundDisk(new THREE.Color(0.07, 0.075, 0.08), 300000));
+    group.add(water());
     group.add(skyline(21));
     group.add(new THREE.Mesh(rangeRing(190000, 280000, 40000, 1.2, 23, 360, 10), terrainMaterial('hills')));
   }

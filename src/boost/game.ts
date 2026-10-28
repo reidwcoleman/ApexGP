@@ -6,7 +6,7 @@ import { buildArena, uNear, type ArenaView } from './render/arena.ts';
 import { asMap, asTime, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
-import { CarView, TEAM_COLORS } from './render/car.ts';
+import { carColor, CarView, TEAM_COLORS } from './render/car.ts';
 import { FX } from './render/fx.ts';
 import { S, Stage } from './render/stage.ts';
 import { ARENA, PADS, type Team } from './sim/arena.ts';
@@ -214,10 +214,10 @@ export class Game {
     const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Sundown', 'Echo', 'Maverick', 'Pulse', 'Sizzle', 'Turbo', 'Halo'];
     const r: Player[] = [];
     let n = Math.floor(Math.random() * names.length);
-    if (withMe) r.push({ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: this.ui.profile.accent, owner: 'local' });
+    if (withMe) r.push({ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), owner: 'local' });
     for (const team of [0, 1] as Team[]) {
       const have = r.filter((p) => p.team === team).length;
-      for (let k = have; k < size; k++) r.push({ name: names[n++ % names.length], team, bot: true, skill, color: [0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff][k % 5], owner: 'bot' });
+      for (let k = have; k < size; k++) r.push({ name: names[n++ % names.length], team, bot: true, skill, color: carColor([0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff][k % 5], (n * 7 + k) % 6, (n + k * 3) % 4), owner: 'bot' });
     }
     return r;
   }
@@ -252,7 +252,7 @@ export class Game {
 
   freeplay(): void {
     this.mode = 'freeplay';
-    this.setup([{ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: this.ui.profile.accent, owner: 'local' }], true);
+    this.setup([{ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), owner: 'local' }], true);
     this.me = 0;
     this.world.start({ freeplay: true, unlimitedBoost: true });
     this.world.placeBall(0, 600, BALL.REST_Z);
@@ -421,7 +421,7 @@ export class Game {
     h.onOpen = () => {
       this.lobby = {
         code: h.code,
-        players: [{ id: 'host', name: this.ui.profile.name, team: 0, color: this.ui.profile.accent, bot: false, skill: 1, ping: 0 }],
+        players: [{ id: 'host', name: this.ui.profile.name, team: 0, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), bot: false, skill: 1, ping: 0 }],
         size: 2,
         minutes: 5,
         bots: 'even',
@@ -498,7 +498,7 @@ export class Game {
     const plan = botPlan(L);
     const names = ['Blaze', 'Nova', 'Vortex', 'Comet', 'Torque', 'Rook', 'Jinx', 'Echo'];
     let n = 0;
-    for (const team of [0, 1] as Team[]) for (let k = 0; k < (team === 0 ? plan.blue : plan.orange); k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: 0xffffff, owner: 'bot' });
+    for (const team of [0, 1] as Team[]) for (let k = 0; k < (team === 0 ? plan.blue : plan.orange); k++) roster.push({ name: names[n++ % names.length], team, bot: true, skill: L.botSkill, color: carColor(0xffffff, (n * 5 + k) % 6, (n + k) % 4), owner: 'bot' });
     if (!roster.some((p) => p.team === 0) || !roster.some((p) => p.team === 1)) {
       this.ui.toast('Each team needs at least one car (or turn bots on)');
       return;
@@ -545,7 +545,7 @@ export class Game {
     }
     this.leaveNet();
     this.ui.onlineMsg(`Connecting to ${code}…`);
-    const g = (this.guest = new Guest2(code, { name: this.ui.profile.name, color: this.ui.profile.accent }));
+    const g = (this.guest = new Guest2(code, { name: this.ui.profile.name, color: carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish) }));
     g.onClose = (why) => {
       if (this.guest !== g) return;
       this.guest = null;
@@ -1242,7 +1242,7 @@ export class Game {
   private showcase: CarView | null = null;
   private buildShowcase(): void {
     if (this.showcase) this.field.remove(this.showcase.group);
-    const v = (this.showcase = new CarView(0, this.ui.profile.accent, this.ui.profile.name));
+    const v = (this.showcase = new CarView(0, carColor(this.ui.profile.accent, this.ui.profile.decal, this.ui.profile.finish), this.ui.profile.name));
     this.field.add(v.group);
   }
   private garage(dt: number): void {
@@ -1412,12 +1412,16 @@ export class Game {
   async warm(): Promise<void> {
     const v = new CarView(0, 0xffffff, 'warm');
     this.field.add(v.group);
+    // (the pearl paint is its own program)
+    const v2 = new CarView(1, carColor(0xffffff, 0, 3), 'warm');
+    v2.group.position.set(0, 3, 0);
+    this.field.add(v2.group);
     this.fx.goal(0, 0, 300, 0);
     this.fx.demo(0, 0, 100);
     for (let k = 0; k < 3; k++) this.fx.update(0.016);
     await this.stage.renderer.compileAsync(this.stage.scene, this.stage.camera);
     this.stage.render(0.016);
-    this.field.remove(v.group);
+    this.field.remove(v.group, v2.group);
     for (let k = 0; k < 400; k++) this.fx.update(0.05);
     this.stage.expectLit = true;
   }

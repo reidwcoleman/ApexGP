@@ -479,6 +479,19 @@ const WHEELS: P3[] = [
   [WR[0], -WR[1], WR[2]],
 ];
 
+/** decals and paint finishes a car can wear (indexes into the shader's and the material's options) */
+export const DECALS = ['Twin stripes', 'Blade', 'Le Mans', 'Two-tone', 'Hex', 'Clean'];
+export const FINISHES = ['Gloss', 'Matte', 'Metallic', 'Pearl'];
+const BIT24 = 0x1000000;
+/** a car's colour number: the accent (24 bits), then the decal (4 bits) and the finish over it */
+export function carColor(accent: number, decal: number, finish: number): number {
+  return (accent % BIT24) + ((finish & 15) * 16 + (decal & 15)) * BIT24;
+}
+export function carLook(color: number): { accent: number; decal: number; finish: number } {
+  const st = Math.floor(color / BIT24);
+  return { accent: color % BIT24, decal: Math.min(DECALS.length - 1, st % 16), finish: Math.min(FINISHES.length - 1, Math.floor(st / 16) % 16) };
+}
+
 export class CarView {
   readonly group = new THREE.Group();
   private readonly paint: THREE.MeshPhysicalMaterial;
@@ -495,21 +508,33 @@ export class CarView {
   /** a soft contact shadow on whatever surface the wheels are on */
   private contact: THREE.Mesh;
 
-  constructor(team: number, accent: number, name?: string) {
+  /** color: the accent in the low 24 bits, the decal and finish above them (see carLook) */
+  constructor(team: number, color: number, name?: string) {
     this.team = team;
     const g = geos();
+    const look = carLook(color);
     const teamC = new THREE.Color(TEAM_COLORS[team]);
-    const accC = new THREE.Color(accent);
-    // candy paint: a saturated base under a mirror clear coat
-    this.paint = new THREE.MeshPhysicalMaterial({ color: teamC, metalness: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8 });
+    const accC = new THREE.Color(look.accent);
+    // the paint: candy gloss (a saturated base under a mirror clear coat), matte, metallic or pearl
+    const fin = [
+      { metalness: 0.35, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8 },
+      { metalness: 0.05, roughness: 0.62, clearcoat: 0.15, clearcoatRoughness: 0.6, envMapIntensity: 0.7 },
+      { metalness: 0.88, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 2.2 },
+      { metalness: 0.4, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.9, iridescence: 1, iridescenceIOR: 1.7, iridescenceThicknessRange: [250, 700] as [number, number] },
+    ][look.finish];
+    this.paint = new THREE.MeshPhysicalMaterial({ color: teamC, ...fin });
     const uAcc = { value: accC };
     const uTeam = { value: teamC.clone() };
+    const uDecal = { value: look.decal };
+    const uFlake = { value: look.finish === 1 ? 0 : look.finish === 2 ? 1.6 : 1 };
     this.paint.onBeforeCompile = (sh) => {
       sh.uniforms.uAcc = uAcc;
       sh.uniforms.uTeam = uTeam;
+      sh.uniforms.uDecal = uDecal;
+      sh.uniforms.uFlake = uFlake;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vObj;\nuniform vec3 uAcc;\nuniform vec3 uTeam;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vObj;\nuniform vec3 uAcc;\nuniform vec3 uTeam;\nuniform float uDecal;\nuniform float uFlake;')
         .replace(
           '#include <map_fragment>',
           `#include <map_fragment>
@@ -528,7 +553,31 @@ export class CarView {
           float hr = abs(length(o.xz - vec2(-33.75, ${wz(WR[2]).toFixed(2)})) - ${(AR + 0.9).toFixed(2)});
           float lip = (1.0 - smoothstep(0.55, 0.85, min(hf, hr))) * step(38.5, ay);
           float onArch = step(min(hf, hr), 3.5);
-          float dec = max(max(st, lip), max(sws, pin) * (1.0 - onArch));
+          float blade = max(sws, pin) * (1.0 - onArch);
+          float dec;
+          if (uDecal < 0.5) dec = max(max(st, lip), blade);
+          else if (uDecal < 1.5) dec = max(lip, blade);
+          else if (uDecal < 2.5) {
+            // one wide stripe nose to tail, with thin pinstripes either side
+            float w = (1.0 - smoothstep(7.0, 7.5, ay)) + (1.0 - smoothstep(0.3, 0.6, abs(ay - 9.2)));
+            dec = max(lip, min(1.0, w) * step(14.0, o.z) * step(ay, 20.0));
+          } else if (uDecal < 3.5) {
+            // two-tone: the upper body in the accent, split along a sharp waistline
+            float waist = 20.0 + o.x * 0.04;
+            dec = max(lip, smoothstep(waist - 0.25, waist + 0.25, o.z));
+          } else if (uDecal < 4.5) {
+            // hex cells breaking up toward the tail
+            vec2 hp = vec2(o.x, o.z + ay * 0.6) / 4.2;
+            vec2 hs = vec2(1.0, 1.7320508);
+            vec2 a = mod(hp, hs) - hs * 0.5;
+            vec2 b2 = mod(hp - hs * 0.5, hs) - hs * 0.5;
+            vec2 gh = dot(a, a) < dot(b2, b2) ? a : b2;
+            vec2 cellId = hp - gh;
+            float hcell = fract(sin(dot(floor(cellId * 2.0), vec2(12.9898, 78.233))) * 43758.5453);
+            float fill = step(hcell, smoothstep(30.0, -50.0, o.x) * 1.2 - 0.1);
+            float inside = step(0.08, 0.5 - max(dot(abs(gh), normalize(hs)), abs(gh.x)));
+            dec = max(lip, fill * inside * step(6.0, o.z));
+          } else dec = lip;
           diffuseColor.rgb = mix(diffuseColor.rgb, uAcc, dec);
           // panel seams: the hood's edges, the doors
           float seam = (1.0 - smoothstep(0.12, 0.3, abs(ay - 21.5))) * step(38.0, o.x) * step(o.x, 72.0) * step(12.0, o.z);
@@ -546,14 +595,14 @@ export class CarView {
             vec3 fc = floor(vObj * 7.0);
             vec3 fr = fract(sin(vec3(dot(fc, vec3(12.9898, 78.233, 37.719)), dot(fc, vec3(39.346, 11.135, 83.155)), dot(fc, vec3(73.156, 52.235, 9.151)))) * 43758.5453) - 0.5;
             // (fading out once a flake is under a pixel, so it never turns to noise)
-            normal = normalize(normal + fr * 0.07 * (1.0 - smoothstep(0.05, 0.14, length(fwidth(vObj)))));
+            normal = normalize(normal + fr * 0.07 * uFlake * (1.0 - smoothstep(0.05, 0.14, length(fwidth(vObj)))));
           }`,
         );
     };
-    this.paint.customProgramCacheKey = () => 'bbcarpaint';
+    this.paint.customProgramCacheKey = () => 'bbcarpaint' + (look.finish === 3 ? 'i' : '');
     const carbon = new THREE.MeshPhysicalMaterial({ color: 0x121317, roughness: 0.42, metalness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.3 });
     const glass = new THREE.MeshPhysicalMaterial({ color: 0x04070c, roughness: 0.03, metalness: 0.8, envMapIntensity: 2.2, clearcoat: 1, clearcoatRoughness: 0 });
-    const accentM = new THREE.MeshPhysicalMaterial({ color: accC, metalness: 0.5, roughness: 0.26, clearcoat: 1, clearcoatRoughness: 0.05 });
+    const accentM = new THREE.MeshPhysicalMaterial({ color: accC, metalness: look.finish === 2 ? 0.85 : 0.5, roughness: look.finish === 1 ? 0.55 : 0.26, clearcoat: look.finish === 1 ? 0.1 : 1, clearcoatRoughness: 0.05 });
     const grilleM = new THREE.MeshStandardMaterial({ map: grilleTex(), roughness: 0.6, metalness: 0.3 });
     grilleM.map!.repeat.set(1, 1);
     const rubber = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.86, metalness: 0, bumpMap: tread(), bumpScale: 3 });

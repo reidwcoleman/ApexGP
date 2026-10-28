@@ -1,6 +1,7 @@
 import { ACTS, DEFAULT_KEYS, DEFAULT_PAD, keyName, padName, type Act, type KeyBinds, type PadBinds } from './input.ts';
 import { botPlan, type BotMode, type LobbyState } from './net.ts';
-import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type TimeId } from './render/looks.ts';
+import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type MapLook, type TimeId } from './render/looks.ts';
+import { DECALS, FINISHES } from './render/car.ts';
 import type { Stats } from './sim/world.ts';
 
 /**
@@ -9,12 +10,49 @@ import type { Stats } from './sim/world.ts';
  */
 
 export const PAINTS = [0xffffff, 0x1b1d22, 0xffd23a, 0x39e07a, 0xff3b5c, 0xb06bff, 0x2ee6e6, 0xff8ad1, 0xa8ff3a, 0x8a5a2b, 0xc0c6d0, 0xff5a1f, 0x3a6bff, 0x00b38f, 0xffb3a1, 0x6a7380];
-const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+const hex = (c: number) => '#' + (c % 0x1000000).toString(16).padStart(6, '0');
+
+// line icons for the menus (24×24, stroked in currentColor)
+const svg = (d: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICON = {
+  friends: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.4"/><path d="M16 14.2c2.9.3 5 2.6 5 5.8"/>'),
+  bots: svg('<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3.5" r="1"/><circle cx="9.5" cy="13.5" r="1.3"/><circle cx="14.5" cy="13.5" r="1.3"/><path d="M2.5 13v2M21.5 13v2"/>'),
+  free: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5l2.6 4.3-2.6 3.2-2.6-3.2z"/><path d="M4.2 9.6l4.6 1.4 1 4-3.6 2.6M19.8 9.6l-4.6 1.4-1 4 3.6 2.6"/>'),
+  garage: svg('<path d="M3 15l2-5.5C5.5 8 6.6 7 8 7h8c1.4 0 2.5 1 3 2.5L21 15v3h-2.5M5.5 18H3v-3"/><circle cx="7.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/><path d="M9.5 17.5h5M3 13h18"/>'),
+  controls: svg('<path d="M6.5 8h11a4.5 4.5 0 0 1 4.3 5.8l-1 3.4a2.4 2.4 0 0 1-4.1.9L14.6 16H9.4l-2.1 2.1a2.4 2.4 0 0 1-4.1-.9l-1-3.4A4.5 4.5 0 0 1 6.5 8z"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="11.5" r=".6"/><circle cx="18" cy="13.5" r=".6"/>'),
+  back: svg('<path d="M15 5l-7 7 7 7"/>'),
+  go: svg('<path d="M7 4.5v15l12-7.5z"/>'),
+};
+const TIME_ICON: Record<TimeId, string> = {
+  morning: svg('<path d="M3 18h18M6 18a6 6 0 0 1 12 0"/><path d="M12 6v2M5.6 9.6l1.4 1.4M18.4 9.6L17 11"/>'),
+  day: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>'),
+  sunset: svg('<path d="M3 17h18M7 17a5 5 0 0 1 10 0"/><path d="M12 9V4M9.5 6.5L12 4l2.5 2.5"/><path d="M5 21h14"/>'),
+  night: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+};
+/** the skyline drawn over an arena card's colour (what stands beyond its bowl) */
+function arenaArt(id: MapId): string {
+  const m = MAPS[id];
+  const fill = 'rgba(4,8,18,0.55)';
+  const bowl = `<path d="M0 74 Q50 54 100 74 L100 100 L0 100Z" fill="rgba(4,8,18,0.7)"/><path d="M8 80 Q50 64 92 80" stroke="rgba(255,255,255,0.45)" stroke-width="1.2" fill="none"/>`;
+  const far: Record<MapLook['surround'], string> = {
+    none: `<path d="M0 60 Q50 30 100 60 L100 70 Q50 44 0 70Z" fill="${fill}"/><g fill="rgba(255,255,255,0.75)">${[14, 30, 50, 70, 86].map((x) => `<rect x="${x - 2}" y="${48 - Math.sin((x / 100) * Math.PI) * 12}" width="4" height="2" rx="1"/>`).join('')}</g>`,
+    mountains: `<path d="M0 66 L14 40 L22 50 L36 22 L48 44 L58 32 L72 52 L84 30 L100 56 L100 74 L0 74Z" fill="${fill}"/><path d="M33 27 L36 22 L40 29 L37 28Z M81 35 L84 30 L88 37 L85 36Z" fill="rgba(255,255,255,0.85)"/>`,
+    city: `<g fill="${fill}">${[[4, 36], [12, 24], [20, 44], [28, 14], [36, 32], [46, 20], [56, 40], [64, 10], [74, 30], [84, 22], [92, 40]].map(([x, y]) => `<rect x="${x}" y="${y}" width="7" height="${74 - y}"/>`).join('')}</g><g fill="rgba(120,240,255,0.8)">${[[30, 20], [66, 16], [48, 26], [86, 28]].map(([x, y]) => `<rect x="${x}" y="${y}" width="2" height="2"/>`).join('')}</g>`,
+    hills: `<path d="M0 60 Q20 40 40 56 T80 50 T100 54 L100 74 L0 74Z" fill="${fill}"/><g fill="rgba(4,30,10,0.6)">${[10, 18, 62, 70, 78, 90].map((x, k) => `<circle cx="${x}" cy="${52 - (k % 2) * 3}" r="4"/>`).join('')}</g>`,
+    canyon: `<path d="M0 60 L8 60 L8 40 L26 40 L26 52 L44 52 L44 30 L60 30 L60 48 L74 48 L74 36 L92 36 L92 56 L100 56 L100 74 L0 74Z" fill="${fill}"/>`,
+  };
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none">${far[m.surround]}${bowl}</svg>`;
+}
+const arenaCards = (sel?: MapId) =>
+  MAP_IDS.map((id) => `<button data-v="${id}" class="acard ${sel === id ? 'on' : ''}" title="${MAPS[id].blurb}"><span class="art" style="background:${MAPS[id].theme.css}">${arenaArt(id)}</span><b>${MAPS[id].name}</b><small>${MAPS[id].blurb}</small></button>`).join('');
+const timePills = (sel?: TimeId) => TIME_IDS.map((id) => `<button data-v="${id}" class="${sel === id ? 'on' : ''}">${TIME_ICON[id]}<span>${TIMES[id].name}</span></button>`).join('');
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 export interface Profile {
   name: string;
   accent: number;
+  decal: number;
+  finish: number;
   fov: number;
   dist: number;
   height: number;
@@ -38,7 +76,7 @@ export interface Profile {
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
+  const def: Profile = { name: 'Player', accent: 0xffffff, decal: 0, finish: 0, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
   try {
     const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
     // (profiles from before arenas and times: the old Day / Night switch)
@@ -112,26 +150,25 @@ export class UI {
   <div class="side">
     <div class="logo"><b>BOOST</b><i>BALL</i><small>Rocket-powered car soccer</small></div>
     <div class="screen" id="s-main">
-      <button class="mbtn primary" data-go="s-online"><span>Play with friends</span><em>Online lobby · share a code</em></button>
-      <button class="mbtn" data-go="s-play"><span>Play vs bots</span><em>1v1 · 2v2 · 3v3</em></button>
-      <button class="mbtn" id="b-free"><span>Free play</span><em>Just you and the ball</em></button>
-      <button class="mbtn" data-go="s-garage"><span>Garage</span><em>Name · paint</em></button>
-      <button class="mbtn" id="b-binds"><span>Controls</span><em id="pad-status">Keyboard &amp; mouse · controller</em></button>
-      <button class="mbtn back" id="b-games"><span>← All games</span></button>
+      <button class="mbtn primary" data-go="s-online"><i class="ic">${ICON.friends}</i><span>Play with friends<em>Online lobby · share a code</em></span></button>
+      <button class="mbtn" data-go="s-play"><i class="ic">${ICON.bots}</i><span>Play vs bots<em>1v1 · 2v2 · 3v3</em></span></button>
+      <button class="mbtn" id="b-free"><i class="ic">${ICON.free}</i><span>Free play<em>Just you and the ball</em></span></button>
+      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Garage<em>Paint · decals · finish</em></span></button>
+      <button class="mbtn" id="b-binds"><i class="ic">${ICON.controls}</i><span>Controls<em id="pad-status">Keyboard &amp; mouse · controller</em></span></button>
+      <button class="mbtn back" id="b-games"><i class="ic">${ICON.back}</i><span>All games</span></button>
     </div>
     <div class="screen" id="s-play" hidden>
-      <div class="mhead">Team size</div>
-      <div class="seg" id="seg-size"><button data-v="1">1v1</button><button data-v="2" class="on">2v2</button><button data-v="3">3v3</button></div>
-      <div class="mhead">Bot skill</div>
-      <div class="seg" id="seg-skill"><button data-v="0.3">Rookie</button><button data-v="0.55" class="on">Pro</button><button data-v="0.85">All-Star</button></div>
-      <div class="mhead">Match length</div>
-      <div class="seg" id="seg-min"><button data-v="3">3 min</button><button data-v="5" class="on">5 min</button><button data-v="10">10 min</button></div>
+      <div class="row3">
+        <div><div class="mhead">Team size</div><div class="seg" id="seg-size"><button data-v="1">1v1</button><button data-v="2" class="on">2v2</button><button data-v="3">3v3</button></div></div>
+        <div><div class="mhead">Bot skill</div><div class="seg" id="seg-skill"><button data-v="0.3">Rookie</button><button data-v="0.55" class="on">Pro</button><button data-v="0.85">All-Star</button></div></div>
+        <div><div class="mhead">Length</div><div class="seg" id="seg-min"><button data-v="3">3 min</button><button data-v="5" class="on">5 min</button><button data-v="10">10 min</button></div></div>
+      </div>
       <div class="mhead">Arena</div>
-      <div class="seg wrap" id="seg-map">${MAP_IDS.map((id) => `<button data-v="${id}" class="${p.map === id ? 'on' : ''}" title="${MAPS[id].blurb}">${MAPS[id].name}</button>`).join('')}</div>
+      <div class="arenas" id="seg-map">${arenaCards(p.map)}</div>
       <div class="mhead">Time of day</div>
-      <div class="seg" id="seg-time">${TIME_IDS.map((id) => `<button data-v="${id}" class="${p.time === id ? 'on' : ''}">${TIMES[id].name}</button>`).join('')}</div>
-      <button class="mbtn primary" id="b-go" style="margin-top:10px"><span>Kick off</span></button>
-      <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
+      <div class="pills" id="seg-time">${timePills(p.time)}</div>
+      <button class="mbtn primary" id="b-go" style="margin-top:10px"><i class="ic">${ICON.go}</i><span>Kick off<em>Into the arena</em></span></button>
+      <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="screen" id="s-online" hidden>
       <div class="hint">Make a lobby and send your friends the code or the link. Up to 8 cars; empty seats can be filled with bots.</div>
@@ -139,13 +176,15 @@ export class UI {
       <div class="field" style="margin-top:12px"><label>Join with a code</label><input type="text" class="code-in" id="i-code" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false" /></div>
       <button class="mbtn" id="b-join"><span>Join lobby</span></button>
       <div class="msg" id="online-msg"></div>
-      <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
+      <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="screen" id="s-garage" hidden>
       <div class="field"><label>Name</label><input type="text" id="i-name" maxlength="16" value="${esc(p.name)}" spellcheck="false" /></div>
       <div class="field"><label>Accent paint</label><div class="swatches" id="sw">${PAINTS.map((c) => `<button data-c="${c}" style="background:${hex(c)}" class="${c === p.accent ? 'on' : ''}"></button>`).join('')}</div></div>
-      <div class="hint">Your car wears your team's colour; the accent goes on the stripes, the wing and the rims.</div>
-      <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
+      <div class="field"><label>Decal</label><div class="seg wrap three" id="seg-decal">${DECALS.map((d, k) => `<button data-v="${k}" class="${p.decal === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
+      <div class="field"><label>Finish</label><div class="seg" id="seg-finish">${FINISHES.map((d, k) => `<button data-v="${k}" class="${p.finish === k ? 'on' : ''}">${d}</button>`).join('')}</div></div>
+      <div class="hint">Your car wears your team's colour; the accent paints the decal, the wing and the rims.</div>
+      <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="foot">An original fan-made game. Physics tuned to the published numbers of the rocket-car genre.</div>
   </div>
@@ -165,8 +204,8 @@ export class UI {
       <div class="opt"><label>Bots</label><div class="seg small" id="l-fill" title="Even teams: bots only make up a short side (4 players in a 2v2 = no bots, 2 v 1 = one bot). Fill seats: every empty seat up to the team size."><button data-v="even">Even teams</button><button data-v="full">Fill seats</button><button data-v="none">No bots</button></div></div>
       <div class="opt" id="l-size-opt"><label>Team size</label><div class="seg small" id="l-size"><button data-v="1">1v1</button><button data-v="2">2v2</button><button data-v="3">3v3</button><button data-v="4">4v4</button></div></div>
       <div class="opt"><label>Length</label><div class="seg small" id="l-min"><button data-v="3">3 min</button><button data-v="5">5 min</button><button data-v="10">10 min</button></div></div>
-      <div class="opt wide"><label>Arena</label><div class="seg small" id="l-map">${MAP_IDS.map((id) => `<button data-v="${id}" title="${MAPS[id].blurb}">${MAPS[id].name}</button>`).join('')}</div></div>
-      <div class="opt wide"><label>Time of day</label><div class="seg small" id="l-time">${TIME_IDS.map((id) => `<button data-v="${id}">${TIMES[id].name}</button>`).join('')}</div></div>
+      <div class="opt full"><label>Arena</label><div class="arenas small" id="l-map">${arenaCards()}</div></div>
+      <div class="opt"><label>Time of day</label><div class="pills small" id="l-time">${timePills()}</div></div>
     </div>
     <div class="chat"><div class="log" id="l-log"></div><input type="text" id="l-chat" maxlength="120" placeholder="Say something… (Enter)" /></div>
     <div class="row">
@@ -252,6 +291,14 @@ export class UI {
     });
     seg('#seg-time', (v) => {
       this.profile.time = asTime(v);
+      this.save();
+    });
+    seg('#seg-decal', (v) => {
+      this.profile.decal = Number(v);
+      this.save();
+    });
+    seg('#seg-finish', (v) => {
+      this.profile.finish = Number(v);
       this.save();
     });
     this.$('#b-go').addEventListener('click', () => this.onPlay(this.playSize, this.playSkill, this.playMin));
@@ -526,11 +573,24 @@ export class UI {
     };
     const col = team === 0 ? '#3d8bff' : '#ff8a30';
     const hot = b >= 100 ? '#ffd34a' : col;
+    // 30 segments round a 270° sweep, lit up to the boost; a soft glow under the lit ones
+    const N = 30;
+    let segs = '';
+    for (let k = 0; k < N; k++) {
+      const f0 = k / N + 0.006;
+      const f1 = (k + 1) / N - 0.006;
+      const ra = a0 + sweep * f0;
+      const rb = a0 + sweep * f1;
+      const p = (r: number, a: number) => `${(100 + Math.cos(a) * r).toFixed(1)} ${(100 + Math.sin(a) * r).toFixed(1)}`;
+      const lit = (k + 0.5) / N <= b / 100;
+      segs += `<path d="M${p(90, ra)} A90 90 0 0 1 ${p(90, rb)} L${p(76, rb)} A76 76 0 0 0 ${p(76, ra)}Z" fill="${lit ? hot : 'rgba(255,255,255,0.09)'}"/>`;
+    }
     this.$('#h-bsvg').innerHTML = `
-      <defs><filter id="bg"><feGaussianBlur stdDeviation="4"/></filter></defs>
-      <circle cx="100" cy="100" r="78" fill="rgba(6,9,18,0.72)"/>
-      <path d="${arc(84, 1)}" stroke="rgba(255,255,255,0.12)" stroke-width="12" fill="none" stroke-linecap="round"/>
-      ${b > 0 ? `<path d="${arc(84, b / 100)}" stroke="${hot}" stroke-width="12" fill="none" stroke-linecap="round" filter="url(#bg)" opacity="0.8"/><path d="${arc(84, b / 100)}" stroke="${hot}" stroke-width="10" fill="none" stroke-linecap="round"/>` : ''}`;
+      <defs><filter id="bg"><feGaussianBlur stdDeviation="5"/></filter>
+      <radialGradient id="bd" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="rgba(30,38,62,0.92)"/><stop offset="1" stop-color="rgba(6,9,18,0.9)"/></radialGradient></defs>
+      <circle cx="100" cy="100" r="70" fill="url(#bd)" stroke="rgba(255,255,255,0.1)" stroke-width="1.5"/>
+      ${b > 0 ? `<path d="${arc(83, b / 100)}" stroke="${hot}" stroke-width="14" fill="none" filter="url(#bg)" opacity="0.55"/>` : ''}
+      ${segs}`;
   }
 
   count(n: number | 'GO!'): void {
