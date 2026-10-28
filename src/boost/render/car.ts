@@ -4,10 +4,11 @@ import type { Car } from '../sim/car.ts';
 
 /**
  * A battle car built from code, in the simulation's car frame (cm; x forward, y left, z up, the
- * ground at z = −17). The proportions of the arena game's cars: big exposed wheels on long travel, a
- * high-riding tub, flared hoops over the tyres, a low bubble canopy set back, a wing on struts and
- * twin boost nozzles. Every panel is a lofted superellipse so the paint carries smooth reflections;
- * candy team paint under a clear coat with the player's accent in the stripes, swoosh, wing and rims.
+ * ground at z = −17). An original body in the arena game's proportions: a compact tub filling the
+ * hitbox, fenders swelling over chunky wheels with slim arch lips and dark wells, a tall cabin with a
+ * steep screen and big glass, a short nose, a ducktail spoiler and twin boost nozzles. Every panel is
+ * a lofted superellipse so the paint carries smooth reflections; team paint under a clear coat with
+ * the player's accent in the stripes, swoosh, spoiler and rims.
  */
 
 export const TEAM_COLORS = [0x1458ff, 0xff5a0a];
@@ -91,6 +92,8 @@ interface Sec {
   n?: number;
   /** the top this much narrower than the bottom (0..1) */
   tumble?: number;
+  /** the bottom this much narrower than the middle (0..1): the body tucked in behind the wheels */
+  tuck?: number;
 }
 
 /** a body lofted along x through superellipse sections, the ends rounded over `round` cm */
@@ -116,7 +119,7 @@ function loft(x0: number, x1: number, sec: (x: number) => Sec, o: { nu?: number;
       const zs = spow(Math.sin(a), 2 / n);
       const zm = (s.zb + s.zt) / 2;
       const hh = (s.zt - s.zb) / 2;
-      const w = s.w * (1 - (s.tumble ?? 0) * Math.max(0, zs));
+      const w = s.w * (1 - (s.tumble ?? 0) * Math.max(0, zs) - (s.tuck ?? 0) * Math.max(0, -zs) ** 1.5);
       return [x, (s.yc ?? 0) + w * ys * k, zm + hh * zs * k];
     },
     (u) => {
@@ -157,40 +160,47 @@ function hoop(cx: number, cz: number, R: number, t0: number, t1: number, yc: num
 }
 
 // ------------------------------------------------------------------ the shape
-const WF: P3 = [51.25, 34.5, 13]; // front wheel: x, |y|, radius (drawn)
-const WR: P3 = [-33.75, 35.5, 15.5];
+// the proportions of the arena game's battle cars, an original body: a compact tub that fills the
+// hitbox, fenders swelling out over chunky wheels, a tall cabin with big glass, a short nose
+const WF: P3 = [51.25, 34.5, 13.5]; // front wheel: x, |y|, radius (drawn)
+const WR: P3 = [-33.75, 35, 16];
 const wz = (r: number) => r - 17;
 
 const bodyTop: [number, number][] = [
-  [79, 11],
-  [72, 15.5],
-  [62, 19],
-  [46, 21.5],
-  [30, 23.5],
-  [0, 26],
-  [-30, 27.4],
-  [-46, 27.6],
-  [-52, 24],
+  [76, 12],
+  [70, 16.5],
+  [58, 19.5],
+  [42, 21.5],
+  [30, 23],
+  [0, 25.5],
+  [-30, 27],
+  [-44, 27.5],
+  [-50, 25],
 ];
+// the plan: fenders over each axle, a waist between, a narrower nose and tail
 const bodyHalfW: [number, number][] = [
-  [79, 21],
-  [71, 27.5],
-  [60, 29],
-  [40, 29.5],
-  [30, 34],
-  [12, 36.5],
-  [-8, 36.5],
-  [-16, 31],
-  [-40, 31.5],
-  [-52, 29],
+  [76, 24],
+  [70, 31],
+  [62, 36.5],
+  [51, 38.5],
+  [40, 36.5],
+  [26, 33],
+  [4, 33],
+  [-18, 35.5],
+  [-34, 39.5],
+  [-44, 37.5],
+  [-50, 33],
 ];
 
+// near each wheel the lower body tucks in behind the tyre, so the fender swells out over it
+const nearWheel = (x: number) => Math.max(0, 1 - Math.abs(x - WF[0]) / (WF[2] + 6)) ** 0.6 + Math.max(0, 1 - Math.abs(x - WR[0]) / (WR[2] + 6)) ** 0.6;
 const bodySec = (x: number): Sec => ({
   w: pl(bodyHalfW, x),
-  zb: 3 + Math.max(0, x - 62) * 0.38 + Math.max(0, -44 - x) * 0.7,
+  zb: -1.5 + Math.max(0, x - 62) * 0.55 + Math.max(0, -40 - x) * 1.0,
   zt: pl(bodyTop, x),
-  n: 3.4,
-  tumble: 0.2,
+  n: 4.2,
+  tumble: 0.16,
+  tuck: 0.1 + 0.26 * Math.min(1, nearWheel(x)),
 });
 
 let shared: {
@@ -215,84 +225,73 @@ function geos() {
   const carbon: THREE.BufferGeometry[] = [];
   const accent: THREE.BufferGeometry[] = [];
 
-  // the tub: blunt nose, a hood climbing to the cowl, side pods between the wheels, a flat deck
-  paint.push(loft(-52, 79, bodySec, { nu: 56, nv: 40, round: 7 }));
-  // a bulge down the middle of the hood
+  // the tub
+  paint.push(loft(-50, 76, bodySec, { nu: 64, nv: 44, round: 8 }));
+  // a raised centre on the hood, running back to the cowl
   paint.push(
     loft(
-      28,
-      68,
-      (x) => ({ w: 10 - Math.max(0, x - 50) * 0.18, zb: pl(bodyTop, x) - 4, zt: pl(bodyTop, x) + 2.2 - Math.max(0, x - 52) * 0.08, n: 3 }),
+      30,
+      66,
+      (x) => ({ w: 12 - Math.max(0, x - 50) * 0.22, zb: pl(bodyTop, x) - 4, zt: pl(bodyTop, x) + 1.8 - Math.max(0, x - 54) * 0.1, n: 4 }),
       { nu: 20, nv: 20, round: 8 },
     ),
   );
-  // the hoops over the tyres
+  // slim arch lips over the wheels, flush with the fenders
   for (const sy of [-1, 1]) {
-    paint.push(hoop(WF[0], wz(WF[2]), WF[2] + 5, 0.12, Math.PI - 0.02, sy * (WF[1] + 0.5), 8.2, 2.6));
-    paint.push(hoop(WR[0], wz(WR[2]), WR[2] + 5, 0.02, Math.PI - 0.1, sy * (WR[1] + 0.5), 8.8, 2.8));
+    paint.push(hoop(WF[0], wz(WF[2]), WF[2] + 3.2, 0.25, Math.PI - 0.15, sy * (pl(bodyHalfW, WF[0]) - 3.2), 3.6, 1.4));
+    paint.push(hoop(WR[0], wz(WR[2]), WR[2] + 3.2, 0.15, Math.PI - 0.3, sy * (pl(bodyHalfW, WR[0]) - 3.2), 3.6, 1.4));
   }
-  // the canopy: a low bubble set back over the rear axle
+  // the cabin: a tall greenhouse, a steep screen, the roof over the back axle's front
   const cabTop: [number, number][] = [
-    [31, 23],
-    [16, 35.5],
-    [2, 42],
-    [-14, 43.2],
-    [-28, 39.5],
-    [-38, 29],
+    [37, 22],
+    [26, 33],
+    [14, 42.5],
+    [2, 46.5],
+    [-16, 47],
+    [-28, 43],
+    [-40, 30],
   ];
   const cabW: [number, number][] = [
-    [31, 24],
-    [12, 26.5],
-    [-20, 26.5],
-    [-38, 23],
+    [37, 28],
+    [16, 29.5],
+    [-22, 29.5],
+    [-40, 26],
   ];
-  const cabSec = (x: number): Sec => ({ w: pl(cabW, x), zb: pl(bodyTop, x) - 3, zt: pl(cabTop, x), n: 2.7, tumble: 0.34 });
-  const glass = loft(-38, 31, cabSec, { nu: 36, nv: 36, round: 5 });
-  // the painted roof: the canopy's top, a hair proud of the glass
+  const cabSec = (x: number): Sec => ({ w: pl(cabW, x), zb: pl(bodyTop, x) - 3, zt: pl(cabTop, x), n: 3.2, tumble: 0.3 });
+  const glass = loft(-40, 37, cabSec, { nu: 40, nv: 40, round: 5 });
+  // the painted roof and pillars: the cabin's top band, a hair proud of the glass
   paint.push(
     loft(
-      -30,
-      10,
+      -32,
+      12,
       (x) => {
         const s = cabSec(x);
         return { ...s, w: s.w + 0.5, zt: s.zt + 0.6, zb: s.zb - 0.5 };
       },
-      { nu: 24, nv: 18, round: 6, a0: Math.PI * 0.2, a1: Math.PI * 0.8 },
+      { nu: 28, nv: 20, round: 7, a0: Math.PI * 0.18, a1: Math.PI * 0.82 },
     ),
   );
-  // the wing: an airfoil plate on two struts, with end plates
-  const wing = loft(-37, 37, () => ({ w: 8.5, zb: -1.1, zt: 1.1, n: 2.2 }), { nu: 16, nv: 16, round: 3 });
-  wing.rotateZ(Math.PI / 2);
-  wing.rotateY(0.1);
-  wing.translate(-49, 0, 45);
-  accent.push(wing);
-  for (const sy of [-1, 1]) {
-    accent.push(new THREE.BoxGeometry(17, 1.2, 7).translate(-49, sy * 37.4, 44));
-    const strut = new THREE.BoxGeometry(5, 2.2, 18);
-    strut.rotateY(-0.35);
-    strut.translate(-45.5, sy * 15, 36);
-    carbon.push(strut);
-  }
-  // nose: splitter, bumper, a grille surround; tail: diffuser; under: a tray and the arms
-  carbon.push(loft(60, 82, (x) => ({ w: 30 - Math.max(0, x - 74) * 0.9, zb: 1.5 + Math.max(0, x - 70) * 0.25, zt: 8.5, n: 4 }), { nu: 14, nv: 20, round: 4 }));
-  carbon.push(new THREE.BoxGeometry(18, 60, 1.6).translate(73, 0, 1.2));
-  carbon.push(loft(-55, -38, () => ({ w: 28, zb: 2, zt: 10, n: 4 }), { nu: 10, nv: 20, round: 3 }));
-  carbon.push(new THREE.BoxGeometry(110, 52, 2).translate(10, 0, 3));
+  // a ducktail spoiler on the deck
+  paint.push(loft(-52, -40, (x) => ({ w: 33 - Math.max(0, -48 - x) * 1.2, zb: 24, zt: 28.5 + (-40 - x) * 0.32, n: 3.6 }), { nu: 14, nv: 18, round: 3 }));
+  // the spoiler's lip in the accent colour
+  accent.push(loft(-53.5, -50.5, () => ({ w: 31, zb: 28.2, zt: 30.6, n: 3 }), { nu: 6, nv: 14, round: 1.4 }));
+  // nose: a lower bumper and splitter; tail: a diffuser; under: a tray
+  carbon.push(loft(58, 79, (x) => ({ w: 31 - Math.max(0, x - 72) * 1.0, zb: 1.5 + Math.max(0, x - 70) * 0.3, zt: 7.5, n: 4.5 }), { nu: 14, nv: 20, round: 4 }));
+  carbon.push(loft(-53, -38, () => ({ w: 30, zb: 2, zt: 9.5, n: 4.5 }), { nu: 10, nv: 20, round: 3 }));
+  carbon.push(new THREE.BoxGeometry(100, 52, 2).translate(10, 0, 3));
+  // dark wheel wells over the tyres, so the fenders read as arches
   for (const [wx, wy, wr] of [WF, WR]) {
     for (const sy of [-1, 1]) {
-      for (const dz of [-3, 3]) {
-        const arm = new THREE.BoxGeometry(5, wy - 18, 1.6);
-        arm.translate(wx + dz * 0.6, sy * (18 + (wy - 18) / 2), wz(wr) + dz);
-        carbon.push(arm);
-      }
+      // (a part-cylinder about the axle, y; the arc over the top of the tyre)
+      const well = new THREE.CylinderGeometry(wr + 2.4, wr + 2.4, 13, 24, 1, true, -Math.PI * 0.62, Math.PI * 1.24);
+      well.translate(wx, sy * (wy - 2), wz(wr));
+      carbon.push(well);
     }
   }
-  // side intakes behind the front wheels
-  for (const sy of [-1, 1]) carbon.push(new THREE.BoxGeometry(9, 2, 5).translate(31, sy * 34.2, 11));
   // the grille: a dark mesh plane in the nose
-  const grille = new THREE.PlaneGeometry(7, 30, 1, 1);
+  const grille = new THREE.PlaneGeometry(7, 32, 1, 1);
   grille.rotateY(Math.PI / 2);
-  grille.translate(78.3, 0, 11.4);
+  grille.translate(75.8, 0, 10.6);
   // lights: slanted headlamp slits, tail bars
   const head: THREE.BufferGeometry[] = [];
   const tail: THREE.BufferGeometry[] = [];
@@ -300,9 +299,9 @@ function geos() {
     const h = new THREE.BoxGeometry(5, 10, 1.6);
     h.rotateY(-0.55);
     h.rotateZ(sy * 0.25);
-    h.translate(74.5, sy * 18, 14.2);
+    h.translate(72.2, sy * 19, 14.6);
     head.push(h);
-    tail.push(new THREE.BoxGeometry(1.4, 12, 2.6).translate(-52.4, sy * 20, 20.5));
+    tail.push(new THREE.BoxGeometry(1.4, 13, 2.8).translate(-50.4, sy * 21, 20.5));
   }
 
   // tyre: a fat sidewall and rounded shoulders (axle along y, unit radius, width 1)
@@ -466,9 +465,9 @@ export class CarView {
           // a thin pinstripe under it
           float pin = (1.0 - smoothstep(0.25, 0.55, abs(sw + swW + 1.6))) * step(27.0, ay) * step(o.x, 66.0) * step(-48.0, o.x);
           // not on the hoops over the wheels
-          float hf = abs(length(o.xz - vec2(51.25, -4.0)) - 18.0);
-          float hr = abs(length(o.xz - vec2(-33.75, -1.5)) - 20.5);
-          float onHoop = step(33.0, ay) * step(min(hf, hr), 5.0);
+          float hf = abs(length(o.xz - vec2(51.25, -3.5)) - 16.7);
+          float hr = abs(length(o.xz - vec2(-33.75, -1.0)) - 19.2);
+          float onHoop = step(31.0, ay) * step(min(hf, hr), 4.0);
           float dec = max(st, max(sws, pin) * (1.0 - onHoop));
           diffuseColor.rgb = mix(diffuseColor.rgb, uAcc, dec);
           // panel seams: the cowl, the doors
@@ -567,7 +566,7 @@ export class CarView {
     // an antenna off the rear deck, leaning back, with a little team-coloured topper
     {
       const d = new THREE.Vector3(-Math.sin(0.3), 0, Math.cos(0.3));
-      const base = new THREE.Vector3(-43, 13, 26.5);
+      const base = new THREE.Vector3(-45, 25, 27.5);
       const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.45, 30, 6), dark);
       rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
       rod.position.copy(base).addScaledVector(d, 15);
