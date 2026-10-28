@@ -11,6 +11,10 @@ import { V3 } from './math.ts';
  * rounded arena interior, the goal boxes, and the goal mouth's posts and crossbar as segments.
  */
 
+/** Bullet's collision margin on the arena mesh: bodies touch it this far out (the ball rests at
+ * 93.15, not at its radius of 91.25); the wheels' raycasts hit the bare surface */
+export const ARENA_MARGIN = 1.9;
+
 export const ARENA = {
   X: 4096,
   Y: 5120,

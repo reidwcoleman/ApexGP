@@ -8,272 +8,111 @@
     <style>
       html, body { margin: 0; height: 100%; background: #06070a; overflow: hidden; }
       #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-      /* the loader, styled before the bundle has even parsed (menu.css refines it) */
-      #loading { position: fixed; inset: 0; background: #06070a; display: grid; place-items: center; z-index: 20; color: rgba(255, 255, 255, 0.92); font-family: "Barlow", "Titillium Web", Arial, sans-serif; }
-      #loading .lwrap { width: min(420px, 80vw); }
-      #loading .logo { font-size: 64px; font-weight: 900; font-style: italic; line-height: 0.86; letter-spacing: -0.04em; text-transform: uppercase; }
-      #loading .logo .gp { color: #ff2b3f; }
-      #loading .lbar { margin-top: 24px; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden; }
-      #loading .lbar b { display: block; height: 100%; width: 0; background: #ff2b3f; }
-      #loading .lstep { margin-top: 12px; font-size: 13px; color: rgba(255, 255, 255, 0.4); letter-spacing: 0.04em; font-weight: 600; }
-      /* key art: a 1920×1080 picture with the wordmark baked in at (96, 420); the bar sits under it
-         wherever the cover crop puts it (--k = the cover scale) */
-      /* the pictures cycle on pure CSS animations (opacity + a slight drift, anchored on the logo so
-         the wordmark stays put): the compositor runs them even while a build step blocks the main
-         thread, which a timer can't. Keyframes and delays are written by the script below. */
-      #loading .lart { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: left center; opacity: 0; transform-origin: 6% 39%; will-change: opacity, transform; }
+      /* ---------- the loader: a race engineer's display, styled before the bundle has even parsed ----------
+         Left, the wheel's display — the shift-light strip and the rev gauge fill with the build, the
+         sectors below go purple as each third completes, the engineer on the radio. Right, the key art
+         in a raked frame with its location caption (the pictures' baked wordmark is cropped away).
+         Everything that moves is a CSS animation or a CSS variable (--p, 0..1, from main.ts): the
+         compositor keeps it going while a build step blocks the main thread. */
+      #loading { --acc: #ff2b3f; --p: 0; position: fixed; inset: 0; z-index: 20; overflow: hidden; background: #050608; color: rgba(255, 255, 255, 0.92); font-family: "Barlow", "Titillium Web", Arial, sans-serif; transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+      #loading .lwrap { display: none; }
+      #loading .lart-box { position: absolute; top: 0; right: 0; bottom: 0; width: 60%; clip-path: polygon(10% 0, 100% 0, 100% 100%, 0 100%); background: #0b0d12; }
+      #loading .lart { position: absolute; inset: 0; margin: 0; opacity: 0; will-change: opacity, transform; transform-origin: 70% 50%; }
+      #loading .lart img { width: 100%; height: 100%; object-fit: cover; object-position: right center; display: block; }
+      #loading .lart figcaption { position: absolute; right: 4%; bottom: 7%; text-align: right; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9); }
+      #loading .lart figcaption em { display: block; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+      #loading .lart figcaption b { display: block; margin-top: 4px; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(22px, 2.6vw, 40px); font-weight: 800; font-style: italic; text-transform: uppercase; letter-spacing: 0.01em; }
       @media (prefers-reduced-motion: reduce) { #loading .lart { animation-name: lart-still !important; } }
-      #loading.art-in { --k: max(calc(100vw / 1920), calc(100vh / 1080)); }
-      #loading.art-in .logo { display: none; }
-      #loading.art-in .lwrap { position: absolute; zoom: 1 !important; left: calc(104 * var(--k)); top: calc(50vh + (498 - 540) * var(--k)); width: calc(540 * var(--k)); }
-      #loading.art-in .lbar { margin-top: 0; height: max(3px, calc(4 * var(--k))); background: rgba(255, 255, 255, 0.14); }
-      #loading.art-in .lstep { font-size: max(12px, calc(17 * var(--k))); color: rgba(255, 255, 255, 0.78); margin-top: calc(14 * var(--k)); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8); }
-      /* ---------- the loading screen, broadcast-style: start lights, a live corner, the pit wall ticker ---------- */
-      #loading .lfx {
-        display: block;
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        overflow: hidden;
+      /* the frame's inner edge: a hard accent rule along the rake, scanlines and a soft vignette over the art */
+      #loading .lart-box::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 70% 50%, transparent 50%, rgba(0, 0, 0, 0.55)); pointer-events: none; }
+      #loading .lrake { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+      #loading .lrake line { stroke: var(--acc); stroke-width: 4px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 10px var(--acc)); }
+      /* the display panel */
+      #loading .lpanel { position: absolute; left: 0; top: 0; bottom: 0; width: calc(40% - 28px); display: flex; flex-direction: column; justify-content: center; gap: clamp(14px, 2.4vh, 26px); padding: 0 0 0 clamp(28px, 5vw, 96px); box-sizing: border-box; }
+      #loading .lbrand { display: flex; align-items: baseline; gap: 0.18em; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(54px, 7.6vw, 128px); font-weight: 800; font-style: italic; line-height: 0.82; text-transform: uppercase; letter-spacing: -0.02em; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) both; }
+      #loading .lbrand .g { color: var(--acc); }
+      #loading .lsub { margin-top: -6px; font-size: 12px; font-weight: 700; letter-spacing: 0.32em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both; }
+      #loading .lwheel { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(18px, 2.4vw, 34px); max-width: 100%; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.16s both; }
+      /* the rev gauge: 270° of arc, filled by --p */
+      #loading .lgauge { width: clamp(110px, 12vw, 190px); height: auto; overflow: visible; }
+      #loading .lgauge .trk { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 10; stroke-dasharray: 75 100; }
+      #loading .lgauge .val { fill: none; stroke: var(--acc); stroke-width: 10; stroke-dasharray: calc(var(--p) * 75) 100; filter: drop-shadow(0 0 8px var(--acc)); transition: stroke-dasharray 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+      #loading .lgauge .tick { stroke: rgba(255, 255, 255, 0.35); stroke-width: 2; }
+      #loading .lgauge .tick.red { stroke: var(--acc); }
+      #loading .lgauge text { fill: rgba(255, 255, 255, 0.4); font: 700 9px "Barlow", Arial, sans-serif; letter-spacing: 0.14em; text-anchor: middle; }
+      #loading .lpct { font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(56px, 6vw, 92px); font-weight: 800; font-style: italic; line-height: 0.9; font-variant-numeric: tabular-nums; }
+      #loading .lpct small { font-size: 0.4em; color: var(--acc); margin-left: 2px; }
+      #loading .lstep { margin-top: 6px; font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.6); letter-spacing: 0.02em; min-height: 1.2em; }
+      /* the shift lights: 5 green, 5 red, 5 blue — lit one by one with --p; at the finish they all flash blue */
+      #loading .lshift { display: flex; gap: clamp(3px, 0.35vw, 6px); margin-bottom: 14px; }
+      #loading .lshift i { width: clamp(8px, 0.85vw, 14px); height: clamp(8px, 0.85vw, 14px); border-radius: 50%; background: #121419; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); position: relative; }
+      #loading .lshift i::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px 2px var(--c); opacity: clamp(0, calc((var(--p) * 15 - var(--k)) * 6), 1); transition: opacity 0.12s; }
+      #loading.out .lshift i::after { background: #3d8bff; box-shadow: 0 0 12px 3px #3d8bff; opacity: 1; animation: l-flash 0.14s steps(2) 3; }
+      /* sectors: three thirds of the build, each goes purple when done */
+      #loading .lsect { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 100%; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both; }
+      #loading .lsect div { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; color: rgba(255, 255, 255, 0.4); }
+      #loading .lsect div i { display: block; height: 6px; margin-top: 6px; background: rgba(255, 255, 255, 0.07); overflow: hidden; transform: skewX(-20deg); }
+      #loading .lsect div i::after { content: ""; display: block; height: 100%; background: #ffd23f; transform-origin: 0 50%; transform: scaleX(clamp(0, calc(var(--p) * 3 - var(--k)), 1)); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+      #loading .lsect div:nth-child(1) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 0.98) * 50, 1) * 100%), #22d17a); }
+      #loading .lsect div:nth-child(2) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 1.98) * 50, 1) * 100%), #22d17a); }
+      #loading .lsect div:nth-child(3) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 2.98) * 50, 1) * 100%), #22d17a); }
+      #loading .lbar { display: none; }
+      /* the engineer on the radio: a waveform and one message at a time (6 × 5 s) */
+      #loading .lradio { display: flex; align-items: center; gap: 12px; max-width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.04); border-left: 3px solid var(--acc); animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both; }
+      #loading .lradio > b { flex: none; font-size: 10px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; color: var(--acc); }
+      #loading .lwave { flex: none; display: flex; align-items: center; gap: 2px; height: 18px; }
+      #loading .lwave i { width: 2px; height: 100%; background: rgba(255, 255, 255, 0.7); transform-origin: 50% 50%; animation: l-wave 0.9s ease-in-out infinite; }
+      #loading .lwave i:nth-child(2n) { animation-delay: -0.3s; } #loading .lwave i:nth-child(3n) { animation-delay: -0.55s; } #loading .lwave i:nth-child(5n) { animation-delay: -0.15s; }
+      #loading .ltips { position: relative; flex: 1; height: 38px; }
+      #loading .ltips span { position: absolute; inset: 0; display: flex; align-items: center; font-size: 13px; line-height: 1.35; color: rgba(255, 255, 255, 0.82); opacity: 0; animation: l-tip 30s linear infinite; }
+      #loading .ltips span:nth-child(2) { animation-delay: 5s; } #loading .ltips span:nth-child(3) { animation-delay: 10s; } #loading .ltips span:nth-child(4) { animation-delay: 15s; } #loading .ltips span:nth-child(5) { animation-delay: 20s; } #loading .ltips span:nth-child(6) { animation-delay: 25s; }
+      #loading .lerr { color: var(--acc); font-size: 15px; white-space: pre-wrap; max-width: 560px; }
+      /* film grain over everything */
+      #loading .lgrain { position: absolute; inset: -40px; opacity: 0.07; pointer-events: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); animation: l-grain 0.5s steps(4) infinite; }
+      /* the finish: the display slides away left, the art opens out to the full screen, then the garage */
+      #loading.out .lpanel { transform: translateX(-30%); opacity: 0; transition: transform 0.55s cubic-bezier(0.7, 0, 0.84, 0) 0.2s, opacity 0.45s 0.25s; }
+      #loading.out .lart-box { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); width: 100%; transition: clip-path 0.6s cubic-bezier(0.7, 0, 0.3, 1) 0.2s, width 0.6s cubic-bezier(0.7, 0, 0.3, 1) 0.2s; }
+      #loading.out .lrake { opacity: 0; transition: opacity 0.2s; }
+      #loading.done { opacity: 0; pointer-events: none; }
+      @keyframes l-up { from { opacity: 0; transform: translateY(14px); } }
+      @keyframes l-wave { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+      @keyframes l-tip { 0% { opacity: 0; transform: translateY(8px); } 2%, 15% { opacity: 1; transform: none; } 17%, 100% { opacity: 0; transform: translateY(-8px); } }
+      @keyframes l-flash { 50% { opacity: 0.2; } }
+      @keyframes l-grain { 0% { transform: translate(0, 0); } 25% { transform: translate(-17px, 9px); } 50% { transform: translate(11px, -14px); } 75% { transform: translate(-6px, -21px); } 100% { transform: translate(14px, 6px); } }
+      /* portrait / narrow: the art above, the display below */
+      @media (max-aspect-ratio: 1/1) {
+        #loading .lart-box { width: 100%; height: 46%; bottom: auto; clip-path: polygon(0 0, 100% 0, 100% 86%, 0 100%); }
+        #loading .lrake { display: none; }
+        #loading .lpanel { top: 44%; width: 100%; justify-content: flex-start; padding: 24px; }
       }
-      /* shade for legibility: down the left behind the lights, along the bottom behind the ticker */
-      #loading .lsh {
-        position: absolute;
-        inset: 0;
-        background:
-          linear-gradient(90deg, rgba(4, 5, 8, 0.55) 0%, rgba(4, 5, 8, 0) 45%),
-          linear-gradient(0deg, rgba(4, 5, 8, 0.85) 0%, rgba(4, 5, 8, 0) 22%),
-          radial-gradient(130% 100% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
-      }
-      /* a light sweep across the picture now and then (compositor-only: transform) */
-      #loading .lsweep {
-        position: absolute;
-        top: -20%;
-        bottom: -20%;
-        left: 0;
-        width: 22%;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07) 45%, rgba(255, 255, 255, 0.13) 50%, rgba(255, 255, 255, 0.07) 55%, transparent);
-        transform: translateX(-120%) skewX(-18deg);
-        animation: l-sweep 7s cubic-bezier(0.6, 0, 0.3, 1) 1.2s infinite;
-        mix-blend-mode: screen;
-      }
-      @keyframes l-sweep {
-        0% { transform: translateX(-120%) skewX(-18deg); }
-        35%, 100% { transform: translateX(560%) skewX(-18deg); }
-      }
-      /* film grain: a fixed noise tile shaken a few pixels a frame (transform only) */
-      #loading .lgrain {
-        position: absolute;
-        inset: -40px;
-        opacity: 0.09;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-        animation: l-grain 0.5s steps(4) infinite;
-      }
-      @keyframes l-grain {
-        0% { transform: translate(0, 0); }
-        25% { transform: translate(-17px, 9px); }
-        50% { transform: translate(11px, -14px); }
-        75% { transform: translate(-6px, -21px); }
-        100% { transform: translate(14px, 6px); }
-      }
-      /* the live corner */
-      #loading .lcorner {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        position: absolute;
-        top: 28px;
-        right: 32px;
-        padding: 7px 12px;
-        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
-        font-size: 15px;
-        font-weight: 800;
-        font-style: italic;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        background: rgba(6, 7, 10, 0.72);
-        clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
-        animation: l-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
-      }
-      #loading .lcorner em {
-        margin-left: 6px;
-        padding-left: 10px;
-        font-family: "Barlow", Arial, sans-serif;
-        font-size: 12px;
-        font-weight: 600;
-        font-style: normal;
-        letter-spacing: 0.04em;
-        text-transform: none;
-        color: rgba(255, 255, 255, 0.62);
-        border-left: 1px solid rgba(255, 255, 255, 0.16);
-      }
-      #loading .ldot {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: #ff2b3f;
-        box-shadow: 0 0 10px #ff2b3f;
-        animation: l-dot 1.2s ease-in-out infinite;
-      }
-      @keyframes l-dot {
-        50% { opacity: 0.25; }
-      }
-      /* the start lights: five gantry units, two lamps each, lit one by one as the build goes on
-         (--p, 0..1, set by main.ts); on finish, all out together */
-      #loading .llights {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 14px;
-      }
-      #loading .llights span {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-        padding: 6px;
-        background: #0b0c10;
-        border-radius: 7px;
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 16px rgba(0, 0, 0, 0.5);
-      }
-      #loading .llights i {
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 40% 35%, #3a1418, #1a0a0c 70%);
-        position: relative;
-      }
-      #loading .llights i::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: 50%;
-        background: radial-gradient(circle at 40% 35%, #ff8a8a, #ff1a2e 45%, #a8000f 75%);
-        box-shadow: 0 0 14px 3px rgba(255, 30, 50, 0.75), 0 0 34px 8px rgba(255, 30, 50, 0.3);
-        opacity: 0;
-        transition: opacity 0.12s;
-      }
-      #loading .llights span:nth-child(1) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 0.15) * 8), 1); }
-      #loading .llights span:nth-child(2) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 1.15) * 8), 1); }
-      #loading .llights span:nth-child(3) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 2.15) * 8), 1); }
-      #loading .llights span:nth-child(4) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 3.15) * 8), 1); }
-      #loading .llights span:nth-child(5) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 4.15) * 8), 1); }
-      /* lights out */
-      #loading.out .llights i::after {
-        opacity: 0 !important;
-        transition: opacity 0.05s;
-      }
-      #loading.out .lstep {
-        color: #fff;
-      }
-      /* the readout under the bar: the step, and the percentage big in the display face */
-      #loading .lrow {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 16px;
-      }
-      #loading .lrow .lpct {
-        display: block;
-        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
-        font-size: 30px;
-        font-weight: 800;
-        font-style: italic;
-        line-height: 1;
-        font-variant-numeric: tabular-nums;
-        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
-      }
-      #loading .lpct small {
-        font-size: 16px;
-        color: #ff2b3f;
-      }
-      #loading .lbar b {
-        box-shadow: 0 0 12px #ff2b3f;
-      }
-      /* the pit-wall ticker: one tip at a time, cycling on CSS (6 × 5 s) */
-      #loading .ltick {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        position: absolute;
-        left: 50%;
-        bottom: 34px;
-        transform: translateX(-50%);
-        width: min(880px, 90%);
-        padding: 10px 16px;
-        background: rgba(6, 7, 10, 0.78);
-        clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
-        animation: l-in-x 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both;
-      }
-      #loading .ltick > b {
-        flex: none;
-        padding: 3px 8px;
-        font-family: "Barlow Condensed", "Barlow", Arial, sans-serif;
-        font-size: 13px;
-        font-weight: 800;
-        font-style: italic;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #fff;
-        background: #ff2b3f;
-      }
-      #loading .ltips {
-        position: relative;
-        flex: 1;
-        height: 20px;
-        overflow: hidden;
-      }
-      #loading .ltips span {
-        position: absolute;
-        inset: 0;
-        font-size: 14px;
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.92);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        opacity: 0;
-        animation: l-tip 30s linear infinite;
-      }
-      #loading .ltips span:nth-child(2) { animation-delay: 5s; }
-      #loading .ltips span:nth-child(3) { animation-delay: 10s; }
-      #loading .ltips span:nth-child(4) { animation-delay: 15s; }
-      #loading .ltips span:nth-child(5) { animation-delay: 20s; }
-      #loading .ltips span:nth-child(6) { animation-delay: 25s; }
-      @keyframes l-tip {
-        0% { opacity: 0; transform: translateY(12px); }
-        2%, 15% { opacity: 1; transform: none; }
-        17%, 100% { opacity: 0; transform: translateY(-12px); }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #loading .lsweep,
-        #loading .lgrain {
-          animation: none;
-        }
-      }
-      @keyframes l-in { from { opacity: 0; transform: translateY(8px); } }
-      @keyframes l-in-x { from { opacity: 0; transform: translate(-50%, 8px); } }
     </style>
   </head>
   <body>
     <canvas id="gl"></canvas>
     <div id="ui"></div>
     <div id="loading">
-      <div class="lfx"><i class="lsh"></i><i class="lsweep"></i><i class="lgrain"></i></div>
-      <div class="lcorner"><span class="ldot"></span>Live<em>Apex GP · World Tour</em></div>
-      <div class="lwrap">
-        <div class="logo">Apex <span class="gp">GP</span></div>
-        <div class="llights"><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span><span><i></i><i></i></span></div>
+      <div class="lart-box"></div>
+      <svg class="lrake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="46" y1="-1" x2="40" y2="101"/></svg>
+      <div class="lpanel">
+        <div><div class="lbrand"><span>Apex</span><span class="g">GP</span></div></div>
+        <div class="lsub">World Tour · 2026 season</div>
+        <div class="lwheel">
+          <svg class="lgauge" viewBox="0 0 200 200"><circle class="trk" cx="100" cy="100" r="82" pathLength="100" transform="rotate(135 100 100)"/><circle class="val" cx="100" cy="100" r="82" pathLength="100" transform="rotate(135 100 100)"/><line class="tick" x1="50.5" y1="149.5" x2="56.2" y2="143.8"/><line class="tick" x1="33.4" y1="121.6" x2="41.0" y2="119.2"/><line class="tick" x1="30.9" y1="89.0" x2="38.8" y2="90.3"/><line class="tick" x1="43.4" y1="58.9" x2="49.8" y2="63.6"/><line class="tick" x1="68.2" y1="37.6" x2="71.9" y2="44.8"/><line class="tick" x1="100.0" y1="30.0" x2="100.0" y2="38.0"/><line class="tick" x1="131.8" y1="37.6" x2="128.1" y2="44.8"/><line class="tick" x1="156.6" y1="58.9" x2="150.2" y2="63.6"/><line class="tick red" x1="169.1" y1="89.0" x2="161.2" y2="90.3"/><line class="tick red" x1="166.6" y1="121.6" x2="159.0" y2="119.2"/><line class="tick red" x1="149.5" y1="149.5" x2="143.8" y2="143.8"/><text x="100" y="160">BUILD</text></svg>
+          <div><div class="lshift"><i style="--k:0;--c:#22d17a"></i><i style="--k:1;--c:#22d17a"></i><i style="--k:2;--c:#22d17a"></i><i style="--k:3;--c:#22d17a"></i><i style="--k:4;--c:#22d17a"></i><i style="--k:5;--c:#ff2b3f"></i><i style="--k:6;--c:#ff2b3f"></i><i style="--k:7;--c:#ff2b3f"></i><i style="--k:8;--c:#ff2b3f"></i><i style="--k:9;--c:#ff2b3f"></i><i style="--k:10;--c:#3d8bff"></i><i style="--k:11;--c:#3d8bff"></i><i style="--k:12;--c:#3d8bff"></i><i style="--k:13;--c:#3d8bff"></i><i style="--k:14;--c:#3d8bff"></i></div><div class="lpct">0<small>%</small></div><div class="lstep">Starting</div></div>
+        </div>
+        <div class="lsect"><div style="--k:0">SECTOR 1<i></i></div><div style="--k:1">SECTOR 2<i></i></div><div style="--k:2">SECTOR 3<i></i></div></div>
         <div class="lbar"><b></b></div>
-        <div class="lrow"><div class="lstep">Starting</div><div class="lpct">0<small>%</small></div></div>
+        <div class="lradio"><b>Radio</b><div class="lwave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="ltips">
+          <span>A first top 5 at any circuit earns a Tour pass. Open whichever circuit you want next.</span>
+          <span>Every circuit has a bonus challenge, worth a fourth star and a 15,000 purse.</span>
+          <span>Weather's automatic, but you can call any sky and time of day on the race screen.</span>
+          <span>Drag in the garage to walk round the car. Scroll to step in.</span>
+          <span>Research upgrades the car. The rivals are developing too, so keep pushing.</span>
+          <span>Catch a car and stay on its gearbox. The pass is always on.</span>
+        </div></div>
         <div class="lerr"></div>
       </div>
-      <div class="ltick"><b>Pit wall</b><div class="ltips">
-        <span>A first top 5 at any circuit earns a Tour pass: open whichever circuit you want next</span>
-        <span>Every circuit has a bonus challenge worth a fourth star and a 15,000 purse</span>
-        <span>Weather is automatic, but the race screen lets you pick any sky and time of day</span>
-        <span>Drag in the garage to walk round the car, scroll to step in</span>
-        <span>Research upgrades your car; the rivals develop through the tour too</span>
-        <span>Catch a car and stay on its gearbox: the pass is always on</span>
-      </div></div>
+      <i class="lgrain"></i>
     </div>
     <script>
       // the loading pictures, before the bundle has even parsed: a slideshow that starts on a
@@ -300,22 +139,30 @@
         var st = document.createElement('style');
         st.textContent = css;
         document.head.appendChild(st);
-        var box = document.getElementById('loading');
+        var box = document.querySelector('#loading .lart-box');
+        // where each picture was taken, for its caption
+        var CAP = { yas_chase: ['Abu Dhabi · Twilight', 'Yas Marina'], suzuka_onboard: ['Japan · Onboard', 'Suzuka'], zandvoort_sunset: ['Netherlands · Sunset', 'Zandvoort'], spa_rain: ['Belgium · Rain', 'Spa-Francorchamps'], interlagos_rain: ['Brazil · Rain', 'Interlagos'], suzuka_dusk: ['Japan · Dusk', 'Suzuka'], hungaroring_golden: ['Hungary · Golden hour', 'Hungaroring'], melbourne_golden: ['Australia · Golden hour', 'Albert Park'], silverstone_drizzle: ['Great Britain · Drizzle', 'Silverstone'], mexico_golden: ['Mexico · Golden hour', 'Mexico City'], monza_sunset: ['Italy · Sunset', 'Monza'], monza_rain: ['Italy · Rain', 'Monza'] };
         for (var k = N - 1; k >= 0; k--) {
+          var key = L[(i + k) % L.length];
+          var fig = document.createElement('figure');
+          fig.className = 'lart';
           var im = new Image();
-          im.className = 'lart';
           im.alt = '';
           im.decoding = 'async';
+          fig.appendChild(im);
+          var cap = document.createElement('figcaption');
+          var c = CAP[key] || ['', ''];
+          cap.innerHTML = '<em>' + c[0] + '</em><b>' + c[1] + '</b>';
+          fig.appendChild(cap);
           // (the first starts fully in)
-          im.style.animation = 'lart-cycle ' + T + 's linear ' + (k * SLOT - FADE) + 's infinite';
-          if (k === 0) im.onload = function () { box.classList.add('art-in'); };
+          fig.style.animation = 'lart-cycle ' + T + 's linear ' + (k * SLOT - FADE) + 's infinite';
           // the first picture now; each of the others ~3 s before its turn, and only if the loader is
           // still up then (they no longer share the first second's bandwidth with the bundle, and a
           // quick boot never fetches the ones it would not show)
-          var src = 'loading/' + L[(i + k) % L.length] + '.webp';
+          var src = 'loading/' + key + '.webp';
           if (k === 0) im.src = src;
           else setTimeout(function (im, src) { return function () { if (im.isConnected) im.src = src; }; }(im, src), Math.max(0, (k * SLOT - FADE - 3) * 1000));
-          box.insertBefore(im, box.firstChild);
+          box.insertBefore(fig, box.firstChild);
         }
       };
     </script>

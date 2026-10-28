@@ -1,4 +1,4 @@
-import { inGoal, KICKOFFS, normalAt, PADS, RESPAWNS, sdf, type Team } from './arena.ts';
+import { ARENA_MARGIN, inGoal, KICKOFFS, normalAt, PADS, RESPAWNS, sdf, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
 import { Car, CAR, noInput, WHEELS, type Input } from './car.ts';
 import { clamp, curve, rng, V3 } from './math.ts';
@@ -426,13 +426,13 @@ export class World {
       for (const ct of cs) {
         const c = this.cars[ct.car];
         if (!this.boxContact(c, ct)) continue;
-        const wall = sdf(b.pos.x, b.pos.y, b.pos.z) < BALL.R + 1;
+        const wall = sdf(b.pos.x, b.pos.y, b.pos.z) - ARENA_MARGIN < BALL.R + 1;
         const share = wall && it > 0 ? 0 : 6 / 7;
         b.pos.addScaled(ct.n, ct.pen * share);
         c.pos.addScaled(ct.n, -ct.pen * (1 - share));
         pushed = true;
       }
-      const d = sdf(b.pos.x, b.pos.y, b.pos.z);
+      const d = sdf(b.pos.x, b.pos.y, b.pos.z) - ARENA_MARGIN;
       if (d < BALL.R) b.pos.addScaled(normalAt(b.pos.x, b.pos.y, b.pos.z, tN), BALL.R - d);
       if (!pushed) break;
     }
@@ -440,10 +440,10 @@ export class World {
       this.boxContact(this.cars[ct.car], ct);
       ct.r.copy(ct.n).scale(-BALL.R);
     }
-    const d = sdf(b.pos.x, b.pos.y, b.pos.z);
+    const d = sdf(b.pos.x, b.pos.y, b.pos.z) - ARENA_MARGIN;
     if (d < BALL.R + 2) {
       const nw = normalAt(b.pos.x, b.pos.y, b.pos.z, new V3());
-      cs.push({ car: -1, n: nw, P: new V3(), pen: 0, r: nw.clone().scale(-BALL.R), mu: BALL.MU, bias: b.bounce > 25 ? BALL.E * b.bounce : 0, jn: 0, jt: new V3(), extra: null, extraS: 0 });
+      cs.push({ car: -1, n: nw, P: new V3(), pen: 0, r: nw.clone().scale(-BALL.R), mu: BALL.MU, bias: b.bounce > 10 ? BALL.E * b.bounce : 0, jn: 0, jt: new V3(), extra: null, extraS: 0 });
     }
     // velocities: sequential impulses, accumulated and clamped (non-negative normal, friction cone)
     const im = 1 / BALL.MASS;

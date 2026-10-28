@@ -1,8 +1,8 @@
-import { normalAt, sdf } from './arena.ts';
+import { ARENA_MARGIN, normalAt, sdf } from './arena.ts';
 import { V3 } from './math.ts';
 
 /**
- * The ball: radius 91.25, mass 30, 6000 uu/s and 6 rad/s caps, a little air drag, bounces off the
+ * The ball: radius 91.25 (resting at 93.15 on the arena's collision margin), mass 30, 6000 uu/s and 6 rad/s caps, a little air drag, bounces off the
  * arena with restitution 0.6 and Coulomb friction 0.35 on a solid sphere (so it rolls, spins up off
  * walls and carries its spin into the next bounce).
  */
@@ -15,7 +15,7 @@ export const BALL = {
   DRAG: 0.03,
   E: 0.6,
   MU: 0.35,
-  REST_Z: 92.75,
+  REST_Z: 91.25 + ARENA_MARGIN,
 } as const;
 
 const GRAVITY = 650;
@@ -48,14 +48,15 @@ export class Ball {
 
   collide(): void {
     const p = this.pos;
-    const d = sdf(p.x, p.y, p.z);
+    const d = sdf(p.x, p.y, p.z) - ARENA_MARGIN;
     if (d >= BALL.R) return;
     const n = normalAt(p.x, p.y, p.z, tN);
     p.addScaled(n, BALL.R - d);
     const vn = this.vel.dot(n);
     if (vn >= 0) return;
     this.bounce = -vn;
-    const e = -vn < 25 ? 0 : BALL.E;
+    // (Bullet's restitution threshold: 0.2 bullet units = 10 uu/s)
+    const e = -vn < 10 ? 0 : BALL.E;
     // normal
     this.vel.addScaled(n, -(1 + e) * vn);
     // contact slip: v_t − R (w × n)

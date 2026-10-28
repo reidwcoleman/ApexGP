@@ -1,4 +1,4 @@
-import { normalAt, sdf, type Team } from './arena.ts';
+import { ARENA_MARGIN, normalAt, sdf, type Team } from './arena.ts';
 import { Basis, clamp, curve, V3 } from './math.ts';
 
 /**
@@ -717,7 +717,7 @@ export class Car {
     cs.length = 0;
     for (const lp of BODY_PTS) {
       const p = this.rot.toWorld(lp.x, lp.y, lp.z, new V3()).add(this.pos);
-      const d = sdf(p.x, p.y, p.z);
+      const d = sdf(p.x, p.y, p.z) - ARENA_MARGIN;
       if (d < 1) cs.push({ p, d, n: normalAt(p.x, p.y, p.z, new V3()), t: new V3(), jn: 0, jt: 0, jp: 0, bias: 0, imn: 0, imt: 0 });
     }
     this.pushV.set(0, 0, 0);
