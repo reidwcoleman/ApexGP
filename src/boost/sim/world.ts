@@ -551,18 +551,31 @@ export class World {
       }
     }
     const b = this.ball.pos;
-    // the explosion throws nearby cars away (picked up as an edit and sent into RocketSim next tick)
-    const blast = 1500;
-    for (const c of this.cars) {
+    // the explosion throws nearby cars violently away and up into the air, tumbling (picked up as
+    // an edit and sent into RocketSim next tick, which caps a car at 2300)
+    const blast = 2300;
+    for (let ci = 0; ci < this.cars.length; ci++) {
+      const c = this.cars[ci];
       if (!c.alive) continue;
       const d = new V3().subVectors(c.pos, b);
       const dist = d.len();
       if (dist > blast) continue;
-      const k = 1 - dist / blast;
-      d.z += 260;
-      d.norm();
-      c.vel.addScaled(d, 2300 * k);
-      c.w.set(c.w.x + (d.y * 5 - d.x) * k, c.w.y + d.x * 5 * k, c.w.z + (d.x - d.y) * 2 * k);
+      const k = Math.pow(1 - dist / blast, 0.55);
+      let hx = d.x;
+      let hy = d.y;
+      const hl = Math.hypot(hx, hy);
+      if (hl < 1) {
+        hx = Math.cos(ci * 2.4);
+        hy = Math.sin(ci * 2.4);
+      } else {
+        hx /= hl;
+        hy /= hl;
+      }
+      const v = 2300 * k;
+      c.vel.set(c.vel.x * (1 - k) + hx * v * 0.72, c.vel.y * (1 - k) + hy * v * 0.72, Math.max(0, c.vel.z) * (1 - k) + v * 0.7 + 250 * k);
+      // tumbling: flipped over away from the blast, with a twist
+      const tw = (ci % 2 ? 1 : -1) * 2.5 * k;
+      c.w.set(c.w.x * (1 - k) - hy * 5.5 * k, c.w.y * (1 - k) + hx * 5.5 * k, c.w.z * (1 - k) + tw);
     }
     const ev = { t: 'goal' as const, team, scorer, assist, speed: this.ball.vel.len(), x: b.x, y: b.y, z: b.z };
     this.lastGoal = ev;

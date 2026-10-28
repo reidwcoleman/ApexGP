@@ -9,6 +9,7 @@ import { CAM, ChaseCam, placeCam } from './render/camera.ts';
 import { CarView, TEAM_COLORS } from './render/car.ts';
 import { packLoadout, unpackLoadout } from './loadout.ts';
 import { FX } from './render/fx.ts';
+import { Ribbon, type RibbonStyle } from './render/trail.ts';
 import { S, Stage } from './render/stage.ts';
 import { ARENA, PADS, type Team } from './sim/arena.ts';
 import { BALL } from './sim/ball.ts';
@@ -1127,7 +1128,7 @@ export class Game {
         v.group.quaternion.set(cf.q[0], cf.q[1], cf.q[2], cf.q[3]).slerp(rq.set(cg.q[0], cg.q[1], cg.q[2], cg.q[3]), fk);
         v.boostVis = cf.boost ? 1 : v.boostVis * 0.8;
         v.showTag(false);
-        if (cf.boost && Math.random() < Math.max(0.35, this.speedAt(i0))) this.trail(i, new V3(v.group.position.x, v.group.position.y, v.group.position.z), v.group.quaternion, new V3());
+        if (cf.boost) this.trail(i, new V3(v.group.position.x, v.group.position.y, v.group.position.z), v.group.quaternion, new V3(), 1, Math.max(0.35, this.speedAt(i0)));
       }
       // the ball goes in again: the explosion again
       if (!live && !this.clipBoom && i0 > this.clipGi) {
@@ -1227,6 +1228,7 @@ export class Game {
     this.fx.update(dt);
     this.gfx.setViewport(this.stage.renderer.domElement.height, this.stage.camera.fov);
     this.gfx.update(dt);
+    this.updateRibbons();
     this.flashK = Math.max(0, this.flashK - dt * 1.4);
     this.stage.flash.intensity = this.flashK * this.flashK * 6000;
     const nearGoal = THREE.MathUtils.smoothstep(Math.abs(w.ball.pos.y), 2500, 5000);
@@ -1264,9 +1266,46 @@ export class Game {
     this.padsPrev.set(w.pads);
   }
 
-  /** boost exhaust: glowing particles from both nozzles */
-  /** a boost trail from car i's jets (i < 0: the garage's car), in the style it has equipped */
-  private trail(i: number, pos: V3, q: THREE.Quaternion, vel: V3, lk = 1): void {
+  /** the boost ribbons per car (−1: the garage's), one per nozzle */
+  private ribbons = new Map<number, { r: Ribbon[]; fx: FX; i: number }>();
+
+  /** the ribbon look for car i's equipped trail */
+  private ribbonStyle(i: number): RibbonStyle {
+    const view = i < 0 ? this.showcase : this.views[i];
+    const lo = view?.loadout ?? unpackLoadout(0);
+    const team = i < 0 ? 0 : (this.world.players[i]?.team ?? 0);
+    const hot = new THREE.Color(2.6, 2.4, 2.1);
+    switch (lo.trail) {
+      case 1: {
+        const a = new THREE.Color(lo.accent);
+        return { head: hot, body: a.multiplyScalar(2.2).addScalar(0.08), life: 0.42, w0: 7, w1: 15, kind: 0 };
+      }
+      case 2:
+        return { head: hot, body: new THREE.Color(1, 1, 1), life: 0.55, w0: 8, w1: 18, kind: 2 };
+      case 3:
+        return { head: new THREE.Color(2.4, 2.8, 3.2), body: new THREE.Color(0.9, 2.0, 3.2), life: 0.22, w0: 5, w1: 9, kind: 1 };
+      case 4:
+        return { head: new THREE.Color(3, 2.4, 1.2), body: new THREE.Color(3, 0.75, 0.1), life: 0.5, w0: 10, w1: 28, kind: 0 };
+      case 5:
+        return { head: hot, body: new THREE.Color(2.4, 2.0, 1.1), life: 0.6, w0: 4, w1: 9, kind: 0 };
+      default:
+        return { head: hot, body: team === 0 ? new THREE.Color(0.45, 1.2, 3.8) : new THREE.Color(3.8, 1.2, 0.25), life: 0.5, w0: 10, w1: 26, kind: 0 };
+    }
+  }
+
+  /** every ribbon aged and turned to face the camera this frame */
+  private updateRibbons(): void {
+    const cp = this.stage.camera.position;
+    const cam = new THREE.Vector3(cp.x / S, -cp.z / S, cp.y / S);
+    for (const [, rb] of this.ribbons) {
+      const st = this.ribbonStyle(rb.i);
+      for (const r of rb.r) r.update(this.time, cam, st);
+    }
+  }
+
+  /** a boost trail from car i's jets (i < 0: the garage's car), in the style it has equipped: a
+   * ribbon of light from each nozzle and a light sprinkle of particles (`parts`: how many) */
+  private trail(i: number, pos: V3, q: THREE.Quaternion, vel: V3, lk = 1, parts = 1): void {
     const view = i < 0 ? this.showcase : this.views[i];
     const lo = view?.loadout ?? unpackLoadout(0);
     const team = i < 0 ? 0 : (this.world.players[i]?.team ?? 0);
@@ -1274,6 +1313,18 @@ export class Game {
     const fx = i < 0 ? this.gfx : this.fx;
     const back = new THREE.Vector3(-1, 0, 0).applyQuaternion(q);
     const jets = view?.jets.length ? view.jets : [new THREE.Vector3(-63, 11, 15), new THREE.Vector3(-63, -11, 15)];
+    let rb = this.ribbons.get(i);
+    if (!rb || rb.fx !== fx || rb.r.length !== jets.length) {
+      if (rb) for (const r of rb.r) r.mesh.removeFromParent();
+      rb = { r: jets.map(() => new Ribbon()), fx, i };
+      for (const r of rb.r) fx.group.add(r.mesh);
+      this.ribbons.set(i, rb);
+    }
+    jets.forEach((jet, k) => {
+      const o = jet.clone().applyQuaternion(q);
+      rb!.r[k].push(pos.x + o.x, pos.y + o.y, pos.z + o.z, this.time);
+    });
+    if (Math.random() > parts) return;
     let col: number[];
     if (style === 1) {
       const a = new THREE.Color(lo.accent);
@@ -1285,7 +1336,8 @@ export class Game {
     else if (style === 4) col = [3, 0.9, 0.12];
     else if (style === 5) col = [2.6, 2.2, 1.3];
     else col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
-    const per = style === 1 ? 4 : style === 5 ? 2 : 3;
+    // (the ribbon carries the trail: the particles are just a sprinkle on it)
+    const per = style === 4 ? 2 : 1;
     for (const jet of jets) {
       const o = jet.clone().applyQuaternion(q);
       for (let k = 0; k < per; k++) {

@@ -41,7 +41,7 @@ export class BallView {
 
   constructor() {
     const pts = panelCentres();
-    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.75, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.15, envMapIntensity: 1.3 });
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.34, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.2 });
     const uPts = { value: pts };
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uPts = uPts;
@@ -59,9 +59,23 @@ export class BallView {
           float seam = 1.0 - smoothstep(0.0, 0.012, b1 - b2);
           float inset = smoothstep(0.004, 0.02, b1 - b2) * (1.0 - smoothstep(0.035, 0.05, b1 - b2));
           float pent = bi < 12 ? 1.0 : 0.0;
-          vec3 base = mix(vec3(0.82, 0.84, 0.88), vec3(0.22, 0.24, 0.28), pent);
-          base = mix(base, base * 0.55, inset);
-          diffuseColor.rgb = mix(base, vec3(0.05), seam);
+          // a fine honeycomb pressed into every panel, laid out in the panel's own plane
+          vec3 pc = uPts[0];
+          for (int i = 0; i < 32; i++) if (i == bi) pc = uPts[i];
+          vec3 ax = normalize(cross(pc, abs(pc.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+          vec3 ay = cross(pc, ax);
+          vec2 hp = vec2(dot(d, ax), dot(d, ay)) * 26.0;
+          vec2 hs = vec2(1.0, 1.7320508);
+          vec2 ha = mod(hp, hs) - hs * 0.5;
+          vec2 hb = mod(hp - hs * 0.5, hs) - hs * 0.5;
+          vec2 hg = dot(ha, ha) < dot(hb, hb) ? ha : hb;
+          hg = abs(hg);
+          float hexE = 0.5 - max(dot(hg, normalize(hs)), hg.x);
+          float comb = (1.0 - smoothstep(0.03, 0.09, hexE)) * (1.0 - smoothstep(0.6, 1.4, length(fwidth(hp))));
+          vec3 base = mix(vec3(0.86, 0.87, 0.9), vec3(0.2, 0.21, 0.24), pent);
+          base *= 1.0 - comb * 0.22;
+          base = mix(base, base * 0.5, inset);
+          diffuseColor.rgb = mix(base, vec3(0.04), seam);
           `,
         )
         .replace(
@@ -69,7 +83,7 @@ export class BallView {
           `#include <emissivemap_fragment>
           totalEmissiveRadiance += uCol * (seam * (0.35 + 3.0 * uHit) + inset * 0.6 * uHit + pent * 0.08);`,
         )
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, seam);');
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, seam) + comb * 0.15;');
     };
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL.R, 96, 64), mat);
     this.mesh.castShadow = false;

@@ -74,6 +74,92 @@ function pool(max: number, additive: boolean): Pool {
   };
 }
 
+/** fast sparks drawn as clean streaks of light: a line from each spark back along its velocity */
+class Streaks {
+  readonly lines: THREE.LineSegments;
+  private n = 0;
+  private pos: Float32Array;
+  private vel: Float32Array;
+  private col: Float32Array;
+  private life: Float32Array;
+  private age: Float32Array;
+  private drag: Float32Array;
+  private grav: Float32Array;
+  private len: Float32Array;
+  private aPos: THREE.BufferAttribute;
+  private aCol: THREE.BufferAttribute;
+  constructor(private max: number) {
+    this.pos = new Float32Array(max * 3);
+    this.vel = new Float32Array(max * 3);
+    this.col = new Float32Array(max * 3);
+    this.life = new Float32Array(max);
+    this.age = new Float32Array(max);
+    this.drag = new Float32Array(max);
+    this.grav = new Float32Array(max);
+    this.len = new Float32Array(max);
+    const g = new THREE.BufferGeometry();
+    this.aPos = new THREE.BufferAttribute(new Float32Array(max * 6), 3).setUsage(THREE.DynamicDrawUsage);
+    this.aCol = new THREE.BufferAttribute(new Float32Array(max * 6), 3).setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('position', this.aPos);
+    g.setAttribute('color', this.aCol);
+    g.setDrawRange(0, 0);
+    this.lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.lines.frustumCulled = false;
+    this.lines.renderOrder = 12;
+  }
+  add(x: number, y: number, z: number, vx: number, vy: number, vz: number, c: THREE.Color, life: number, len = 0.045, drag = 1.8, grav = 400): void {
+    if (this.n >= this.max) return;
+    const i = this.n++;
+    this.pos.set([x, y, z], i * 3);
+    this.vel.set([vx, vy, vz], i * 3);
+    this.col.set([c.r, c.g, c.b], i * 3);
+    this.life[i] = life;
+    this.age[i] = 0;
+    this.drag[i] = drag;
+    this.grav[i] = grav;
+    this.len[i] = len;
+  }
+  update(dt: number): void {
+    const P = this.aPos.array as Float32Array;
+    const C = this.aCol.array as Float32Array;
+    let j = 0;
+    for (let i = 0; i < this.n; i++) {
+      const age = this.age[i] + dt;
+      if (age >= this.life[i]) continue;
+      if (j !== i) {
+        this.pos.copyWithin(j * 3, i * 3, i * 3 + 3);
+        this.vel.copyWithin(j * 3, i * 3, i * 3 + 3);
+        this.col.copyWithin(j * 3, i * 3, i * 3 + 3);
+        this.life[j] = this.life[i];
+        this.drag[j] = this.drag[i];
+        this.grav[j] = this.grav[i];
+        this.len[j] = this.len[i];
+      }
+      this.age[j] = age;
+      const dr = Math.exp(-this.drag[j] * dt);
+      const v = this.vel;
+      v[j * 3] *= dr;
+      v[j * 3 + 1] *= dr;
+      v[j * 3 + 2] = v[j * 3 + 2] * dr - this.grav[j] * dt;
+      for (let k = 0; k < 3; k++) this.pos[j * 3 + k] += v[j * 3 + k] * dt;
+      const t = age / this.life[j];
+      const a = (1 - t) * (1 - t);
+      const L = this.len[j];
+      for (let k = 0; k < 3; k++) {
+        P[j * 6 + k] = this.pos[j * 3 + k];
+        P[j * 6 + 3 + k] = this.pos[j * 3 + k] - v[j * 3 + k] * L;
+        C[j * 6 + k] = this.col[j * 3 + k] * a;
+        C[j * 6 + 3 + k] = 0;
+      }
+      j++;
+    }
+    this.n = j;
+    this.lines.geometry.setDrawRange(0, j * 2);
+    this.aPos.needsUpdate = true;
+    this.aCol.needsUpdate = true;
+  }
+}
+
 export interface Emit {
   x: number;
   y: number;
@@ -109,9 +195,15 @@ export class FX {
   private ringGeo = new THREE.RingGeometry(0.86, 1, 96, 1);
   /** firework streamers: points that trail sparks, then burst */
   private rockets: { x: number; y: number; z: number; vx: number; vy: number; vz: number; age: number; life: number; col: THREE.Color; pop: THREE.Color }[] = [];
+  private streaks = new Streaks(3000);
 
   constructor() {
-    this.group.add(this.soft.points, this.glow.points);
+    this.group.add(this.soft.points, this.glow.points, this.streaks.lines);
+  }
+
+  /** a clean streak of light (sparks thrown fast) */
+  streak(x: number, y: number, z: number, vx: number, vy: number, vz: number, c: THREE.Color, life: number, len?: number, drag?: number, grav?: number): void {
+    this.streaks.add(x, y, z, vx, vy, vz, c, life, len, drag, grav);
   }
 
   setViewport(h: number, fovDeg: number): void {
@@ -153,7 +245,10 @@ export class FX {
       const a = Math.random() * Math.PI * 2;
       const s = Math.sqrt(1 - u * u);
       const v = speed * (0.3 + Math.random() * 0.7);
-      this.spark({ x, y, z, vx: Math.cos(a) * s * v, vy: Math.sin(a) * s * v, vz: u * v, r: col.r, g: col.g, b: col.b, life: life * (0.5 + Math.random() * 0.5), size: size * (0.5 + Math.random()), drag: 1.5, grav });
+      // (the fast ones as clean streaks, the rest soft glows; fewer of each)
+      if (k % 2) continue;
+      if (k % 4 === 0) this.streak(x, y, z, Math.cos(a) * s * v * 1.2, Math.sin(a) * s * v * 1.2, u * v * 1.2, col, life * (0.5 + Math.random() * 0.5), 0.045, 1.5, grav);
+      else this.spark({ x, y, z, vx: Math.cos(a) * s * v, vy: Math.sin(a) * s * v, vz: u * v, r: col.r, g: col.g, b: col.b, life: life * (0.5 + Math.random() * 0.5), size: size * (0.8 + Math.random() * 1.2), drag: 1.5, grav });
     }
   }
 
@@ -195,50 +290,50 @@ export class FX {
     const c = tc.clone().multiplyScalar(3.2);
     const pale = tc.clone().lerp(new THREE.Color(1, 1, 1), 0.55).multiplyScalar(3);
     const n = (v: number) => Math.round(v * Math.max(0.35, K));
-    // the core: a dense white-hot ball that blooms out and cools to the team colour
-    for (let k = 0; k < n(700); k++) {
+    // a white-hot flash, then one crisp shock shell racing out and a ring over the floor
+    this.wave(x, y, z, 800 * K, 0.35, hot, 3);
+    this.wave(x, y, z, 1100 * K, 0.9, c, 1.6);
+    this.wave(x, y, z, 2800 * K, 1.0, pale, 0);
+    this.ring(x, y, Math.max(3, z - 300), 3800 * K, 1.3, c);
+    this.ring(x, y, Math.max(3, z - 300), 2400 * K, 0.9, hot);
+    // clean streaks of light thrown out in every direction
+    const hs = hot.clone().multiplyScalar(1.6);
+    const ps = pale.clone().multiplyScalar(1.5);
+    for (let k = 0; k < n(520); k++) {
+      const d = out(rnd3());
+      const v = (2600 + Math.random() * 4400) * K;
+      this.streak(x, y, z, d[0] * v, d[1] * v, d[2] * v * 0.85 + 300, Math.random() < 0.35 ? hs : Math.random() < 0.5 ? ps : c, 0.8 + Math.random() * 0.8, 0.075, 1.9, 500);
+    }
+    // big soft balls of energy blooming out of the core and cooling to the team colour
+    for (let k = 0; k < n(240); k++) {
       const d = out(rnd3());
       const v = (900 + Math.random() * 2600) * K;
-      const col = Math.random() < 0.25 ? hot : Math.random() < 0.4 ? pale : c;
-      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, r: col.r, g: col.g, b: col.b, life: 0.7 + Math.random() * 0.8, size: (150 + Math.random() * 200) * K, grow: -70, drag: 3.2, grav: -80 });
+      const col = Math.random() < 0.3 ? hot : Math.random() < 0.5 ? pale : c;
+      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, r: col.r, g: col.g, b: col.b, life: 0.9 + Math.random() * 0.6, size: (300 + Math.random() * 300) * K, grow: -200 * K, drag: 2.6, grav: -60 });
     }
-    // fast sparks thrown far
-    for (let k = 0; k < n(900); k++) {
+    // a few streamers arcing high and popping
+    for (let k = 0; k < n(10); k++) {
       const d = out(rnd3());
-      const v = (2500 + Math.random() * 4200) * K;
-      const col = Math.random() < 0.2 ? hot : c;
-      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v * 0.8 + 500, r: col.r, g: col.g, b: col.b, life: 0.7 + Math.random() * 1.1, size: 26 + Math.random() * 30, drag: 1.6, grav: 520 });
+      d[2] = Math.abs(d[2]) * 0.9 + 0.45;
+      const v = (2600 + Math.random() * 1800) * K;
+      this.rockets.push({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, age: 0, life: 0.5 + Math.random() * 0.4, col: pale.clone(), pop: Math.random() < 0.7 ? c.clone() : hot.clone() });
     }
-    // streamers: firework rockets trailing light, each popping into a burst of its own
+    // embers drifting down after
+    for (let k = 0; k < n(110); k++) {
+      const d = out(rnd3());
+      const v = (500 + Math.random() * 1400) * K;
+      this.spark({ x, y, z: z + 100, vx: d[0] * v, vy: d[1] * v, vz: Math.abs(d[2]) * v + 500, r: c.r * 0.7, g: c.g * 0.7, b: c.b * 0.7, life: 1.8 + Math.random() * 1.4, size: 18 + Math.random() * 14, drag: 1.2, grav: 240 });
+    }
+    // smoke: a low rolling ring and a soft column, lightly team-tinted
+    const sm = new THREE.Color(0.16, 0.17, 0.2).lerp(tc, 0.2);
     for (let k = 0; k < n(22); k++) {
-      const d = out(rnd3());
-      d[2] = Math.abs(d[2]) * 0.9 + 0.35;
-      const v = (2600 + Math.random() * 2200) * K;
-      this.rockets.push({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, age: 0, life: 0.55 + Math.random() * 0.5, col: Math.random() < 0.3 ? hot.clone() : pale.clone(), pop: Math.random() < 0.75 ? c.clone() : hot.clone() });
-    }
-    // embers drifting down for a while after
-    for (let k = 0; k < n(500); k++) {
-      const d = out(rnd3());
-      const v = (600 + Math.random() * 1800) * K;
-      this.spark({ x, y, z: z + 100, vx: d[0] * v, vy: d[1] * v, vz: Math.abs(d[2]) * v + 600, r: c.r * 0.8, g: c.g * 0.8, b: c.b * 0.8, life: 2.2 + Math.random() * 1.8, size: 14 + Math.random() * 12, drag: 1.1, grav: 260 });
-    }
-    // smoke: a rolling ring outward and a column rising, tinted by the team
-    const sm = new THREE.Color(0.11, 0.12, 0.15).lerp(tc, 0.18);
-    for (let k = 0; k < n(60); k++) {
       const a = sy > 0 ? Math.PI + Math.random() * Math.PI : Math.random() * Math.PI;
-      const v = (900 + Math.random() * 1400) * K;
-      this.smoke({ x, y, z: Math.max(40, z * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 100 + Math.random() * 300, r: sm.r, g: sm.g, b: sm.b, life: 1.8 + Math.random() * 1.2, size: 160 * K, grow: 260 * K, drag: 1.8, grav: -60 });
+      const v = (800 + Math.random() * 1100) * K;
+      this.smoke({ x, y, z: Math.max(40, z * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 100 + Math.random() * 250, r: sm.r, g: sm.g, b: sm.b, life: 1.6 + Math.random() * 1.0, size: 240 * K, grow: 300 * K, drag: 1.9, grav: -60 });
     }
-    for (let k = 0; k < n(36); k++) {
-      this.smoke({ x: x + (Math.random() - 0.5) * 300, y: y + (Math.random() - 0.5) * 300, z, vx: (Math.random() - 0.5) * 300, vy: (Math.random() - 0.5) * 300, vz: 500 + Math.random() * 900, r: sm.r * 1.2, g: sm.g * 1.2, b: sm.b * 1.2, life: 3 + Math.random() * 2, size: 260 * K, grow: 360 * K, drag: 0.9, grav: -30 });
+    for (let k = 0; k < n(12); k++) {
+      this.smoke({ x: x + (Math.random() - 0.5) * 300, y: y + (Math.random() - 0.5) * 300, z, vx: (Math.random() - 0.5) * 250, vy: (Math.random() - 0.5) * 250, vz: 500 + Math.random() * 700, r: sm.r * 1.2, g: sm.g * 1.2, b: sm.b * 1.2, life: 2.6 + Math.random() * 1.5, size: 320 * K, grow: 380 * K, drag: 0.9, grav: -30 });
     }
-    // the flash, the waves
-    this.wave(x, y, z, 1100 * K, 0.45, hot, 2.2);
-    this.wave(x, y, z, 1700 * K, 0.7, c, 1.2);
-    this.wave(x, y, z, 3200 * K, 1.25, c, 0);
-    this.wave(x, y, z, 1900 * K, 0.8, pale, 0);
-    this.ring(x, y, Math.max(3, z - 300), 4200 * K, 1.4, c);
-    this.ring(x, y, Math.max(3, z - 300), 2600 * K, 0.9, hot);
   }
 
   private shockwave(x: number, y: number, z: number, tc: THREE.Color, hot: THREE.Color, K: number, out: (d: [number, number, number]) => [number, number, number]): void {
@@ -375,7 +470,7 @@ export class FX {
       side: THREE.DoubleSide,
       uniforms: { uK: { value: 1 }, uC: { value: c }, uCore: { value: core } },
       vertexShader: `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: `uniform float uK; uniform vec3 uC; uniform float uCore; varying vec3 vN; varying vec3 vV; void main(){ float ndv = abs(dot(normalize(vN),normalize(vV))); float f = pow(max(1.0-ndv, 0.0), 3.0) + uCore * pow(ndv, 1.5) * 0.5; gl_FragColor = vec4(uC*f*uK, min(1.0, f*uK)); }`,
+      fragmentShader: `uniform float uK; uniform vec3 uC; uniform float uCore; varying vec3 vN; varying vec3 vV; void main(){ float ndv = abs(dot(normalize(vN),normalize(vV))); float f = pow(max(1.0-ndv, 0.0), 5.0) * 1.4 + uCore * pow(ndv, 1.5) * 0.5; gl_FragColor = vec4(uC*f*uK, min(1.0, f*uK)); }`,
     });
     const m = new THREE.Mesh(this.waveGeo, mat);
     m.position.set(x, y, z);
@@ -403,6 +498,7 @@ export class FX {
   }
 
   update(dt: number): void {
+    this.streaks.update(dt);
     for (let k = this.later.length - 1; k >= 0; k--) {
       const l = this.later[k];
       l.t -= dt;
@@ -422,10 +518,13 @@ export class FX {
       r.x += r.vx * dt;
       r.y += r.vy * dt;
       r.z += r.vz * dt;
-      for (let q = 0; q < 3; q++)
-        this.spark({ x: r.x - r.vx * dt * (q / 3), y: r.y - r.vy * dt * (q / 3), z: r.z - r.vz * dt * (q / 3), vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, vz: (Math.random() - 0.5) * 60, r: r.col.r, g: r.col.g, b: r.col.b, life: 0.35 + Math.random() * 0.25, size: 34, grow: -50, drag: 2, grav: 120 });
+      this.spark({ x: r.x, y: r.y, z: r.z, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40, vz: (Math.random() - 0.5) * 40, r: r.col.r, g: r.col.g, b: r.col.b, life: 0.4 + Math.random() * 0.2, size: 46, grow: -70, drag: 2, grav: 100 });
       if (r.age >= r.life || r.z < 20) {
-        this.burst(r.x, r.y, Math.max(30, r.z), 70, 900, r.pop, 34, 0.9, 380);
+        for (let q = 0; q < 40; q++) {
+          const d = rnd3();
+          const v = 500 + Math.random() * 700;
+          this.streak(r.x, r.y, Math.max(30, r.z), d[0] * v, d[1] * v, d[2] * v, r.pop, 0.6 + Math.random() * 0.4, 0.06, 2, 300);
+        }
         this.spark({ x: r.x, y: r.y, z: r.z, r: 3, g: 2.9, b: 2.7, life: 0.18, size: 260, grow: -400 });
         this.rockets.splice(k, 1);
       }
@@ -504,7 +603,7 @@ export class FX {
         continue;
       }
       w.mesh.scale.setScalar(w.max * (1 - Math.pow(1 - t, 3)));
-      ((w.mesh.material as THREE.ShaderMaterial).uniforms.uK as { value: number }).value = 1 - t;
+      ((w.mesh.material as THREE.ShaderMaterial).uniforms.uK as { value: number }).value = (1 - t) * (1 - t);
     }
   }
 }
