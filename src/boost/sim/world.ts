@@ -15,6 +15,8 @@ import { BS, CS, K, RSArena, spinIn, spinOut, vecIn, vecOut } from './rocketsim.
  */
 
 export const TICK = 1 / 120;
+/** how long a goal replay runs (the director in game.ts fits its cuts into this) */
+export const REPLAY_T = 7;
 export type Phase = 'countdown' | 'play' | 'goal' | 'replay' | 'end';
 export const PHASES: Phase[] = ['countdown', 'play', 'goal', 'replay', 'end'];
 
@@ -353,7 +355,7 @@ export class World {
         this.setPhase('play', 0);
       } else {
         if (this.endCheck()) return;
-        this.setPhase('replay', 5);
+        this.setPhase('replay', REPLAY_T);
       }
     } else if (this.phase === 'replay' && this.phaseT <= 0 && this.authority) {
       if (this.endCheck()) return;

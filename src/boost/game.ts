@@ -14,7 +14,7 @@ import { BALL } from './sim/ball.ts';
 import { Bot } from './sim/bot.ts';
 import { noInput, type Input } from './sim/car.ts';
 import { V3 } from './sim/math.ts';
-import { TICK, World, type Player, type WEvent } from './sim/world.ts';
+import { REPLAY_T, TICK, World, type Player, type WEvent } from './sim/world.ts';
 import { UI, type Profile } from './ui.ts';
 
 /**
@@ -30,9 +30,24 @@ type Mode = 'attract' | 'offline' | 'freeplay' | 'host' | 'guest';
 interface Frame {
   ball: [number, number, number, number, number, number, number];
   cars: { p: [number, number, number]; q: [number, number, number, number]; boost: boolean; alive: boolean }[];
+  /** the car that touched the ball this frame (-1: none) */
+  hit: number;
+  /** the ball is in play (false once it's gone in and blown up) */
+  live: boolean;
+}
+
+/** a goal replay's camera angles, cut between as it plays */
+type Shot = 'wide' | 'chase' | 'follow' | 'goal' | 'react';
+interface Cut {
+  shot: Shot;
+  /** clip frames [a, b) */
+  a: number;
+  b: number;
+  speed: number;
 }
 
 const tq = new THREE.Quaternion();
+const rq = new THREE.Quaternion();
 const tm = new THREE.Matrix4();
 const tv3 = new THREE.Vector3();
 const fwd3 = new THREE.Vector3();
@@ -78,6 +93,21 @@ export class Game {
   private frames: Frame[] = [];
   private clip: Frame[] = [];
   private clipT = 0;
+  /** frames recorded after the ball went in (the blast) */
+  private tailN = 0;
+  private clipGoal: { x: number; y: number; z: number; team: number; scorer: number } | null = null;
+  private clipReady = false;
+  private cuts: Cut[] = [];
+  private clipPos = 0;
+  /** the last live frame (the ball crossing the line), the scorer's shot, who took it */
+  private clipGi = 0;
+  private clipTi = 0;
+  private clipWho = -1;
+  private clipSlow = 1;
+  private clipCut = -1;
+  private clipBoom = false;
+  private goalView = 0;
+  private rcSide = 1;
   /** who has asked to skip this replay */
   private skipVotes = new Set<string>();
   private replayCam = new V3();
@@ -849,7 +879,7 @@ export class Game {
         this.flashK = 1;
         this.stage.flash.position.set(e.x * S, Math.max(2, e.z * S), -e.y * S);
         this.excite = 1;
-        this.clip = this.frames.slice(-280);
+        this.clipGoal = { x: e.x, y: e.y, z: e.z, team: e.team, scorer: e.scorer };
         this.skipVotes.clear();
         this.ui.skipVotes(0, 0, this.controls.lastPad);
         if (playing) {
@@ -901,16 +931,94 @@ export class Game {
   // ------------------------------------------------------------------ replays
   private recordFrame(): void {
     const w = this.world;
-    if (w.tick % 2 || w.phase !== 'play') return;
+    // play at 60 Hz, then the second after the ball goes in (the cars thrown by the blast)
+    if (w.phase === 'play') this.tailN = 0;
+    else if (w.phase !== 'goal' || this.tailN >= 60 || !this.frames.length) return;
+    const goalTick = w.phase === 'goal' && this.tailN === 0;
+    if (w.tick % 2 && !goalTick) return;
     const b = w.ball;
+    const lg = w.lastGoal;
+    const last = this.frames[this.frames.length - 1];
+    const ball: Frame['ball'] =
+      w.phase === 'play'
+        ? [b.pos.x, b.pos.y, b.pos.z, this.ballQ.x, this.ballQ.y, this.ballQ.z, this.ballQ.w]
+        : goalTick && lg && w.authority
+          ? [lg.x, lg.y, lg.z, this.ballQ.x, this.ballQ.y, this.ballQ.z, this.ballQ.w]
+          : last.ball;
+    const t0 = w.touches[0];
     this.frames.push({
-      ball: [b.pos.x, b.pos.y, b.pos.z, this.ballQ.x, this.ballQ.y, this.ballQ.z, this.ballQ.w],
+      ball,
       cars: w.cars.map((c) => {
         const q = carQuat(c, tq);
         return { p: [c.pos.x, c.pos.y, c.pos.z], q: [q.x, q.y, q.z, q.w], boost: c.boosting, alive: c.alive };
       }),
+      hit: t0 && w.tick - t0[1] <= 1 ? t0[0] : -1,
+      live: w.phase === 'play' || goalTick,
     });
-    if (this.frames.length > 400) this.frames.splice(0, this.frames.length - 400);
+    if (w.phase === 'goal') this.tailN++;
+    if (this.frames.length > 660) this.frames.splice(0, this.frames.length - 660);
+  }
+
+  /**
+   * Cut the replay together: a wide shot of the build-up, behind the scorer for the shot (slowed
+   * right at the touch), chasing the ball if it has far to go, a goal-mouth camera in slow motion
+   * as it goes in, then the blast from up the field. The start is trimmed so it all fits REPLAY_T.
+   */
+  private buildClip(): void {
+    this.clipReady = true;
+    const fr = this.frames;
+    this.frames = [];
+    this.tailN = 60;
+    let gi = -1;
+    for (let k = fr.length - 1; k >= 0 && gi < 0; k--) if (fr[k].live) gi = k;
+    this.clip = gi >= 10 ? fr : [];
+    if (!this.clip.length) return;
+    const scorer = this.clipGoal?.scorer ?? -1;
+    let ti = -1;
+    for (let k = gi; k >= Math.max(0, gi - 420) && ti < 0; k--) if (fr[k].hit >= 0 && (scorer < 0 || fr[k].hit === scorer)) ti = k;
+    if (ti < 0) ti = Math.max(0, gi - 50);
+    this.clipGi = gi;
+    this.clipTi = ti;
+    this.clipWho = fr[ti].hit >= 0 ? fr[ti].hit : scorer;
+    this.goalView = (this.goalView + 1) % 3;
+    const end = fr.length;
+    const c0 = Math.max(0, ti - 54);
+    let c1 = Math.max(c0, Math.min(gi - 20, ti + 26));
+    const g0 = Math.max(c1, gi - 20);
+    const cuts: Cut[] = [
+      { shot: 'wide', a: 0, b: c0, speed: 1 },
+      { shot: 'chase', a: c0, b: c1, speed: 1 },
+      { shot: 'follow', a: c1, b: g0, speed: 1 },
+      { shot: 'goal', a: g0, b: gi + 1, speed: 0.32 },
+      { shot: 'react', a: gi + 1, b: end, speed: 0.75 },
+    ];
+    // a short chase of the ball isn't worth its own cut
+    if (g0 - c1 < 30) {
+      cuts[1].b = g0;
+      c1 = g0;
+      cuts[2].a = g0;
+    }
+    this.cuts = cuts.filter((c) => c.b > c.a);
+    this.clipSlow = 1;
+    // fit: everything after the wide shot plays in full, the build-up gets what time is left
+    const budget = REPLAY_T - 0.45;
+    let rest = 0;
+    for (let k = c0; k < end; k++) rest += 1 / (60 * this.speedAt(k));
+    if (rest > budget) this.clipSlow = rest / budget;
+    const wideT = Math.max(0, budget - rest / this.clipSlow);
+    this.clipPos = Math.max(0, c0 - wideT * 60);
+    this.clipCut = -1;
+    this.clipBoom = false;
+  }
+
+  /** playback speed at a clip frame (1 = real time) */
+  private speedAt(k: number): number {
+    const c = this.cuts.find((c) => k < c.b) ?? this.cuts[this.cuts.length - 1];
+    if (!c) return 1;
+    let s = c.speed;
+    // slow motion through the shot itself
+    if (c.shot === 'chase' || c.shot === 'follow') s *= 0.4 + 0.6 * Math.min(1, Math.max(0, (Math.abs(k - this.clipTi) - 5) / 16));
+    return s * this.clipSlow;
   }
 
   // ------------------------------------------------------------------ rendering
@@ -926,6 +1034,8 @@ export class Game {
     const w = this.world;
     const alpha = this.paused && this.mode !== 'host' && this.mode !== 'guest' ? 1 : this.acc / TICK;
     const decay = Math.exp(-dt * 9);
+    if (w.phase !== 'replay') this.clipReady = false;
+    else if (!this.clipReady && this.mode !== 'attract') this.buildClip();
     const replaying = w.phase === 'replay' && this.clip.length > 10 && this.mode !== 'attract';
     this.ui.replay(replaying);
 
@@ -933,24 +1043,45 @@ export class Game {
     const bp = new V3();
     if (replaying) {
       this.clipT += dt;
-      const fi = Math.min(this.clip.length - 1, Math.floor(this.clipT * 60 * 0.75));
-      const f = this.clip[fi];
-      bp.set(f.ball[0], f.ball[1], f.ball[2]);
-      tq.set(f.ball[3], f.ball[4], f.ball[5], f.ball[6]);
+      const n = this.clip.length;
+      this.clipPos = Math.min(n - 1, this.clipPos + dt * 60 * this.speedAt(Math.floor(this.clipPos)));
+      // (between recorded frames, so slow motion stays smooth)
+      const i0 = Math.floor(this.clipPos);
+      const i1 = Math.min(n - 1, i0 + 1);
+      const fk = this.clipPos - i0;
+      const f = this.clip[i0];
+      const g = this.clip[i1];
+      const live = f.live;
+      bp.set(f.ball[0] + (g.ball[0] - f.ball[0]) * fk, f.ball[1] + (g.ball[1] - f.ball[1]) * fk, f.ball[2] + (g.ball[2] - f.ball[2]) * fk);
+      tq.set(f.ball[3], f.ball[4], f.ball[5], f.ball[6]).slerp(rq.set(g.ball[3], g.ball[4], g.ball[5], g.ball[6]), fk);
       this.ball.update(tv3.set(bp.x, bp.y, bp.z), tq, 0, dt);
-      this.ball.mesh.visible = true;
-      this.ball.shadow.visible = true;
+      this.ball.mesh.visible = live;
+      this.ball.glow.visible = live;
+      this.ball.shadow.visible = live;
       for (let i = 0; i < this.views.length; i++) {
         const cf = f.cars[i];
+        const cg = g.cars[i] ?? cf;
         if (!cf) continue;
         const v = this.views[i];
         v.group.visible = cf.alive;
-        v.group.position.set(cf.p[0], cf.p[1], cf.p[2]);
-        v.group.quaternion.set(cf.q[0], cf.q[1], cf.q[2], cf.q[3]);
+        v.group.position.set(cf.p[0] + (cg.p[0] - cf.p[0]) * fk, cf.p[1] + (cg.p[1] - cf.p[1]) * fk, cf.p[2] + (cg.p[2] - cf.p[2]) * fk);
+        v.group.quaternion.set(cf.q[0], cf.q[1], cf.q[2], cf.q[3]).slerp(rq.set(cg.q[0], cg.q[1], cg.q[2], cg.q[3]), fk);
         v.boostVis = cf.boost ? 1 : v.boostVis * 0.8;
-        if (cf.boost) this.trail(i, new V3(cf.p[0], cf.p[1], cf.p[2]), v.group.quaternion, new V3());
+        v.showTag(false);
+        if (cf.boost && Math.random() < Math.max(0.35, this.speedAt(i0))) this.trail(i, new V3(v.group.position.x, v.group.position.y, v.group.position.z), v.group.quaternion, new V3());
       }
-      this.replayCamera(bp, dt);
+      // the ball goes in again: the explosion again
+      if (!live && !this.clipBoom && i0 > this.clipGi) {
+        this.clipBoom = true;
+        const gb = this.clip[this.clipGi].ball;
+        const team = this.clipGoal?.team ?? (gb[1] > 0 ? 0 : 1);
+        this.fx.goal(gb[0], gb[1], Math.max(200, gb[2]), team);
+        this.stage.flash.color.set(team === 0 ? 0x4a8dff : 0xff8a3a);
+        this.flashK = 1;
+        this.stage.flash.position.set(gb[0] * S, Math.max(2, gb[2] * S), -gb[1] * S);
+        this.audio.goal();
+      }
+      this.replayCamera(bp, i0, fk, dt);
     } else {
       this.clipT = 0;
       this.ballOff.scale(decay);
@@ -1164,21 +1295,114 @@ export class Game {
     this.cam.pos.copy(this.tvCam);
   }
 
-  private replayCamera(bp: V3, dt: number): void {
-    if (this.clipT < dt * 1.5) {
-      this.replayCam.set(bp.x + (bp.x > 0 ? 1 : -1) * 1500, bp.y - Math.sign(bp.y || 1) * 1800, 700);
-      this.replayLook.copy(bp);
+  private replayCamera(bp: V3, i0: number, fk: number, dt: number): void {
+    const ci = Math.max(0, this.cuts.findIndex((c) => i0 < c.b));
+    const cut = this.cuts[ci] ?? this.cuts[this.cuts.length - 1];
+    const snap = ci !== this.clipCut;
+    this.clipCut = ci;
+    const gb = this.clip[this.clipGi].ball;
+    const gy = Math.sign(this.clipGoal?.y ?? gb[1]) || 1;
+    const goalY = gy * ARENA.Y;
+    if (snap) this.rcSide = (gb[0] || 1) > 0 ? 1 : -1;
+    const sx = this.rcSide;
+    const want = new V3();
+    const look = new V3().copy(bp);
+    let fov = 60;
+    let kp = 3;
+    let kl = 7;
+    // where a car or the ball is between two frames
+    const at = (k: number, i: number) => {
+      const f = this.clip[Math.min(this.clip.length - 1, k)];
+      const g = this.clip[Math.min(this.clip.length - 1, k + 1)];
+      const p = i < 0 ? f.ball : f.cars[i]?.p;
+      const q = i < 0 ? g.ball : g.cars[i]?.p;
+      if (!p || !q) return null;
+      return new V3(p[0] + (q[0] - p[0]) * fk, p[1] + (q[1] - p[1]) * fk, p[2] + (q[2] - p[2]) * fk);
+    };
+    switch (cut.shot) {
+      case 'wide': {
+        // the broadcast camera, high on the far side
+        want.set(-sx * 3900, Math.max(-3700, Math.min(3700, bp.y * 0.7)), 1350);
+        look.set(bp.x * 0.7, bp.y, bp.z * 0.5);
+        fov = 55;
+        kp = 1.6;
+        kl = 4;
+        break;
+      }
+      case 'chase': {
+        // behind the scorer, the ball ahead
+        const c = this.clipWho >= 0 ? at(i0, this.clipWho) : null;
+        if (!c) {
+          want.set(bp.x - sx * 900, bp.y - gy * 1400, bp.z + 500);
+          break;
+        }
+        const d = new V3(bp.x - c.x, bp.y - c.y, 0);
+        if (d.len() < 1) d.set(0, gy, 0);
+        d.norm();
+        want.set(c.x - d.x * 560, c.y - d.y * 560, Math.max(c.z, 17) + 210);
+        look.set(c.x + (bp.x - c.x) * 0.55, c.y + (bp.y - c.y) * 0.55, c.z + (bp.z - c.z) * 0.55 + 60);
+        fov = 72;
+        kp = 5;
+        kl = 8;
+        break;
+      }
+      case 'follow': {
+        // trailing the ball towards the goal
+        const p = at(Math.max(0, i0 - 3), -1) ?? bp;
+        const d = new V3(bp.x - p.x, bp.y - p.y, 0);
+        if (d.len() < 1) d.set(0, gy, 0);
+        d.norm();
+        want.set(bp.x - d.x * 900, bp.y - d.y * 900, bp.z + 300);
+        look.set(bp.x + (0 - bp.x) * 0.25, bp.y + (goalY - bp.y) * 0.25, bp.z + (320 - bp.z) * 0.25);
+        fov = 68;
+        kp = 3.5;
+        break;
+      }
+      case 'goal': {
+        if (this.goalView === 0) {
+          // inside the goal, the ball coming at the lens
+          want.set(Math.max(-450, Math.min(450, gb[0] * 0.3)), gy * (ARENA.Y + 640), 420);
+          fov = 78;
+        } else if (this.goalView === 1) {
+          // low, out beside the post, across the goal mouth
+          want.set(sx * (ARENA.GOAL_W + 900), gy * (ARENA.Y - 1000), 190);
+          look.set(bp.x * 0.6, bp.y + (goalY - bp.y) * 0.45, bp.z * 0.6 + 120);
+          fov = 64;
+        } else {
+          // high on the far side, looking down across the mouth
+          want.set(-sx * 2100, gy * (ARENA.Y - 1500), 1100);
+          look.set(bp.x * 0.6, bp.y + (goalY - bp.y) * 0.4, bp.z * 0.6 + 130);
+          fov = 60;
+        }
+        kp = 0;
+        kl = 9;
+        break;
+      }
+      case 'react': {
+        // up the field: the blast and the cars it throws, pushing in slowly
+        const t = Math.min(1, (i0 - cut.a) / Math.max(1, cut.b - cut.a));
+        want.set(sx * (2700 - t * 500), gy * (ARENA.Y - 2900 + t * 500), 1050 - t * 150);
+        look.set(gb[0] * 0.5, goalY, 330);
+        fov = 64;
+        kp = 4;
+        kl = 4;
+        break;
+      }
     }
-    const want = new V3(bp.x * 0.7 + (bp.x > 0 ? 900 : -900), bp.y - Math.sign(this.world.lastGoal?.y ?? 1) * 1500, Math.max(350, bp.z + 380));
-    const k = Math.min(1, dt * 1.6);
-    this.replayCam.x += (want.x - this.replayCam.x) * k;
-    this.replayCam.y += (want.y - this.replayCam.y) * k;
-    this.replayCam.z += (want.z - this.replayCam.z) * k;
-    const kl = Math.min(1, dt * 6);
-    this.replayLook.x += (bp.x - this.replayLook.x) * kl;
-    this.replayLook.y += (bp.y - this.replayLook.y) * kl;
-    this.replayLook.z += (bp.z - this.replayLook.z) * kl;
-    this.stage.camera.fov = 60;
+    if (snap) {
+      this.replayCam.copy(want);
+      this.replayLook.copy(look);
+    } else {
+      const a = Math.min(1, dt * kp);
+      const b = Math.min(1, dt * kl);
+      this.replayCam.x += (want.x - this.replayCam.x) * a;
+      this.replayCam.y += (want.y - this.replayCam.y) * a;
+      this.replayCam.z += (want.z - this.replayCam.z) * a;
+      this.replayLook.x += (look.x - this.replayLook.x) * b;
+      this.replayLook.y += (look.y - this.replayLook.y) * b;
+      this.replayLook.z += (look.z - this.replayLook.z) * b;
+    }
+    this.stage.camera.fov = fov;
     this.stage.camera.updateProjectionMatrix();
     placeCam(this.stage.camera, this.replayCam, this.replayLook);
   }
