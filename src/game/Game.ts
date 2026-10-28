@@ -3357,13 +3357,12 @@ export class Game {
       // drawing itself in, the facts and the forecast, the shift lights and sectors filling with the build;
       // the key art in the raked frame on the right
       veil.innerHTML =
-        `<div class="tv-artbox"><img class="tv-art" alt=""></div><svg class="tv-rake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="46" y1="-1" x2="40" y2="101"/></svg>` +
-        `<div class="tv-panel"><span class="tv-kick">${round ? `Round ${String(round).padStart(2, '0')}` : 'Scenic road'} · ${def.country}</span><b>${def.name}</b>` +
+        `<div class="tv-artbox"><img class="tv-art" alt=""></div><svg class="tv-rake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="49" y1="-1" x2="42" y2="101" pathLength="1"/></svg>` +
+        `<div class="tv-panel"><div class="tv-kick"><span>${round ? `Round ${String(round).padStart(2, '0')}` : 'Scenic road'}</span><i></i><span>${def.country}</span></div><b>${def.name}</b>` +
         `<svg class="tv-map" viewBox="0 0 260 170"><path pathLength="1" d="${circuitPath(layoutPoints(def), 260, 170, 8)}"/></svg>` +
         `<dl>${info ? `<div><dt>Length</dt><dd>${info.km} km</dd></div><div><dt>Turns</dt><dd>${info.turns}</dd></div>` : ''}${fc ? `<div><dt>Forecast</dt><dd>${fcText(fc)}</dd></div>` : ''}</dl>` +
-        `<div class="tv-shift">${leds}</div><div class="tv-row"><div class="tv-pct">0<small>%</small></div><div class="tv-step"></div></div>` +
-        `<div class="tv-sect"><div style="--k:0">SECTOR 1<i></i></div><div style="--k:1">SECTOR 2<i></i></div><div style="--k:2">SECTOR 3<i></i></div></div><div class="tv-bar"><i></i></div>` +
-        `<div class="tv-radio"><b>Radio</b><div class="tv-tips">${tips}</div></div></div>`;
+        `<div class="tv-meter"><div class="tv-pct">0<small>%</small></div><div class="tv-step"></div></div><div class="tv-shift">${leds}</div><div class="tv-bar"><i></i></div></div>` +
+        `<div class="tv-radio"><b>Radio</b><div class="tv-wave">${'<i></i>'.repeat(9)}</div><div class="tv-tips">${tips}</div></div>`;
       // the destination's key art (decoded before the build blocks the main thread)
       const art = veil.querySelector('img') as HTMLImageElement;
       art.src = artFor(def.id);

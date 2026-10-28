@@ -8,82 +8,83 @@
     <style>
       html, body { margin: 0; height: 100%; background: #06070a; overflow: hidden; }
       #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-      /* ---------- the loader: a race engineer's display, styled before the bundle has even parsed ----------
-         Left, the wheel's display — the shift-light strip and the rev gauge fill with the build, the
-         sectors below go purple as each third completes, the engineer on the radio. Right, the key art
-         in a raked frame with its location caption (the pictures' baked wordmark is cropped away).
-         Everything that moves is a CSS animation or a CSS variable (--p, 0..1, from main.ts): the
-         compositor keeps it going while a build step blocks the main thread. */
-      #loading { --acc: #ff2b3f; --p: 0; position: fixed; inset: 0; z-index: 20; overflow: hidden; background: #050608; color: rgba(255, 255, 255, 0.92); font-family: "Barlow", "Titillium Web", Arial, sans-serif; transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+      /* ---------- the loader, clean: the wordmark, one big number, the shift-light bar ----------
+         Left, on black: the season line, APEX GP, the percentage and the step, the shift lights as the
+         progress bar, the engineer's tip pinned at the foot. Right, the key art (framed for this panel:
+         tools/loadart.mjs) behind a raked edge, its place named in the corner. Everything that moves is a
+         CSS animation or the CSS variable --p (0..1, from main.ts): the compositor keeps it going while a
+         build step blocks the main thread. */
+      #loading { --acc: #ff2b3f; --p: 0; --ease: cubic-bezier(0.16, 1, 0.3, 1); position: fixed; inset: 0; z-index: 20; overflow: hidden; background: #050608; color: rgba(255, 255, 255, 0.94); font-family: "Barlow", "Titillium Web", Arial, sans-serif; transition: opacity 0.8s var(--ease); }
       #loading .lwrap { display: none; }
-      #loading .lart-box { position: absolute; top: 0; right: 0; bottom: 0; width: 60%; clip-path: polygon(10% 0, 100% 0, 100% 100%, 0 100%); background: #0b0d12; }
-      #loading .lart { position: absolute; inset: 0; margin: 0; opacity: 0; will-change: opacity, transform; transform-origin: 70% 50%; }
-      #loading .lart img { width: 100%; height: 100%; object-fit: cover; object-position: right center; display: block; }
-      #loading .lart figcaption { position: absolute; right: 4%; bottom: 7%; text-align: right; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.9); }
-      #loading .lart figcaption em { display: block; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
-      #loading .lart figcaption b { display: block; margin-top: 4px; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(22px, 2.6vw, 40px); font-weight: 800; font-style: italic; text-transform: uppercase; letter-spacing: 0.01em; }
+      /* the art: wiped in from the right, a slow push-in, crossfading every 5 s */
+      #loading .lart-box { position: absolute; top: 0; right: 0; bottom: 0; width: 58%; clip-path: polygon(12% 0, 100% 0, 100% 100%, 0 100%); background: #0b0d12; animation: l-wipe 1.1s var(--ease) both; }
+      #loading .lart { position: absolute; inset: 0; margin: 0; opacity: 0; will-change: opacity, transform; transform-origin: 50% 55%; }
+      #loading .lart img { width: 100%; height: 100%; object-fit: cover; object-position: center 55%; display: block; }
+      #loading .lart-box::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(5, 6, 8, 0.45), transparent 22%), linear-gradient(0deg, rgba(5, 6, 8, 0.6), transparent 30%); }
+      #loading .lart figcaption { position: absolute; right: 40px; bottom: 36px; z-index: 1; text-align: right; }
+      #loading .lart figcaption::before { content: ""; display: block; width: 28px; height: 2px; margin: 0 0 10px auto; background: var(--acc); }
+      #loading .lart figcaption em { display: block; font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: 0.24em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+      #loading .lart figcaption b { display: block; margin-top: 4px; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(22px, 2.2vw, 34px); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
       @media (prefers-reduced-motion: reduce) { #loading .lart { animation-name: lart-still !important; } }
-      /* the frame's inner edge: a hard accent rule along the rake, scanlines and a soft vignette over the art */
-      #loading .lart-box::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 70% 50%, transparent 50%, rgba(0, 0, 0, 0.55)); pointer-events: none; }
-      #loading .lrake { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-      #loading .lrake line { stroke: var(--acc); stroke-width: 4px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 10px var(--acc)); }
-      /* the display panel */
-      #loading .lpanel { position: absolute; left: 0; top: 0; bottom: 0; width: calc(40% - 28px); display: flex; flex-direction: column; justify-content: center; gap: clamp(14px, 2.4vh, 26px); padding: 0 0 0 clamp(28px, 5vw, 96px); box-sizing: border-box; }
-      #loading .lbrand { display: flex; align-items: baseline; gap: 0.18em; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(54px, 7.6vw, 128px); font-weight: 800; font-style: italic; line-height: 0.82; text-transform: uppercase; letter-spacing: -0.02em; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) both; }
-      #loading .lbrand .g { color: var(--acc); }
-      #loading .lsub { margin-top: -6px; font-size: 12px; font-weight: 700; letter-spacing: 0.32em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both; }
-      #loading .lwheel { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(18px, 2.4vw, 34px); max-width: 100%; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.16s both; }
-      /* the rev gauge: 270° of arc, filled by --p */
-      #loading .lgauge { width: clamp(110px, 12vw, 190px); height: auto; overflow: visible; }
-      #loading .lgauge .trk { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 10; stroke-dasharray: 75 100; }
-      #loading .lgauge .val { fill: none; stroke: var(--acc); stroke-width: 10; stroke-dasharray: calc(var(--p) * 75) 100; filter: drop-shadow(0 0 8px var(--acc)); transition: stroke-dasharray 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
-      #loading .lgauge .tick { stroke: rgba(255, 255, 255, 0.35); stroke-width: 2; }
-      #loading .lgauge .tick.red { stroke: var(--acc); }
-      #loading .lgauge text { fill: rgba(255, 255, 255, 0.4); font: 700 9px "Barlow", Arial, sans-serif; letter-spacing: 0.14em; text-anchor: middle; }
-      #loading .lpct { font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(56px, 6vw, 92px); font-weight: 800; font-style: italic; line-height: 0.9; font-variant-numeric: tabular-nums; }
-      #loading .lpct small { font-size: 0.4em; color: var(--acc); margin-left: 2px; }
-      #loading .lstep { margin-top: 6px; font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, 0.6); letter-spacing: 0.02em; min-height: 1.2em; }
-      /* the shift lights: 5 green, 5 red, 5 blue — lit one by one with --p; at the finish they all flash blue */
-      #loading .lshift { display: flex; gap: clamp(3px, 0.35vw, 6px); margin-bottom: 14px; }
-      #loading .lshift i { width: clamp(8px, 0.85vw, 14px); height: clamp(8px, 0.85vw, 14px); border-radius: 50%; background: #121419; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); position: relative; }
-      #loading .lshift i::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px 2px var(--c); opacity: clamp(0, calc((var(--p) * 15 - var(--k)) * 6), 1); transition: opacity 0.12s; }
-      #loading.out .lshift i::after { background: #3d8bff; box-shadow: 0 0 12px 3px #3d8bff; opacity: 1; animation: l-flash 0.14s steps(2) 3; }
-      /* sectors: three thirds of the build, each goes purple when done */
-      #loading .lsect { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 100%; animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both; }
-      #loading .lsect div { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; color: rgba(255, 255, 255, 0.4); }
-      #loading .lsect div i { display: block; height: 6px; margin-top: 6px; background: rgba(255, 255, 255, 0.07); overflow: hidden; transform: skewX(-20deg); }
-      #loading .lsect div i::after { content: ""; display: block; height: 100%; background: #ffd23f; transform-origin: 0 50%; transform: scaleX(clamp(0, calc(var(--p) * 3 - var(--k)), 1)); transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
-      #loading .lsect div:nth-child(1) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 0.98) * 50, 1) * 100%), #22d17a); }
-      #loading .lsect div:nth-child(2) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 1.98) * 50, 1) * 100%), #22d17a); }
-      #loading .lsect div:nth-child(3) i::after { background: color-mix(in srgb, #b249f8 calc(clamp(0, (var(--p) * 3 - 2.98) * 50, 1) * 100%), #22d17a); }
+      /* the raked edge: a hairline in the accent, drawn top to bottom */
+      #loading .lrake { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      #loading .lrake { clip-path: inset(0 0 100% 0); animation: l-rake 1.1s var(--ease) 0.25s forwards; }
+      #loading .lrake line { stroke: var(--acc); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+      @keyframes l-rake { to { clip-path: inset(0 0 0 0); } }
+      /* the panel */
+      #loading .lpanel { position: absolute; left: 0; top: 0; bottom: 0; width: calc(42% - 40px); box-sizing: border-box; padding: 0 0 0 clamp(32px, 6vw, 112px); display: flex; flex-direction: column; justify-content: center; }
+      #loading .lkick { display: flex; align-items: center; gap: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); animation: l-up 0.8s var(--ease) 0.15s both; }
+      #loading .lkick i { width: 28px; height: 1px; background: rgba(255, 255, 255, 0.35); }
+      #loading .lbrand { margin-top: 14px; display: flex; gap: 0.16em; font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(60px, 7.4vw, 124px); font-weight: 800; font-style: italic; line-height: 0.84; text-transform: uppercase; letter-spacing: -0.015em; }
+      #loading .lbrand span { display: block; clip-path: inset(-10% 100% -10% 0); animation: l-reveal 0.9s var(--ease) both; }
+      #loading .lbrand .w { animation-delay: 0.25s; }
+      #loading .lbrand .g { color: var(--acc); animation-delay: 0.42s; }
+      /* the number and the step */
+      #loading .lmeter { margin-top: clamp(28px, 6vh, 64px); display: flex; align-items: flex-end; gap: 18px; animation: l-up 0.8s var(--ease) 0.55s both; }
+      #loading .lpct { font-family: "Barlow Condensed", "Barlow", Arial, sans-serif; font-size: clamp(54px, 5.4vw, 88px); font-weight: 600; line-height: 0.78; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+      #loading .lpct small { font-size: 0.36em; font-weight: 700; color: var(--acc); margin-left: 3px; }
+      #loading .lstep { padding-bottom: 2px; font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.55); min-height: 1.2em; }
+      /* the shift lights as the bar: 15 segments, green, red, blue, lit with --p; a soft scan runs over the dark ones */
+      #loading .lshift { position: relative; margin-top: 18px; display: grid; grid-template-columns: repeat(15, 1fr); gap: 4px; max-width: 460px; }
+      #loading .lshift i { position: relative; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); animation: l-pop 0.5s var(--ease) both; animation-delay: calc(0.6s + var(--k) * 0.03s); }
+      #loading .lshift i::after { content: ""; position: absolute; inset: 0; border-radius: 3px; background: var(--c); box-shadow: 0 0 10px var(--c); opacity: clamp(0, calc((var(--p) * 15 - var(--k)) * 4), 1); transition: opacity 0.2s; }
+      #loading .lshift::after { content: ""; position: absolute; top: -3px; bottom: -3px; width: 18%; left: 0; border-radius: 6px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent); animation: l-scan 2.4s ease-in-out 1.4s infinite; pointer-events: none; }
+      #loading.out .lshift i::after { background: #3d8bff; box-shadow: 0 0 12px #3d8bff; opacity: 1; animation: l-flash 0.12s steps(2) 3; }
       #loading .lbar { display: none; }
-      /* the engineer on the radio: a waveform and one message at a time (6 × 5 s) */
-      #loading .lradio { display: flex; align-items: center; gap: 12px; max-width: 100%; padding: 12px 14px; background: rgba(255, 255, 255, 0.04); border-left: 3px solid var(--acc); animation: l-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both; }
-      #loading .lradio > b { flex: none; font-size: 10px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; color: var(--acc); }
-      #loading .lwave { flex: none; display: flex; align-items: center; gap: 2px; height: 18px; }
-      #loading .lwave i { width: 2px; height: 100%; background: rgba(255, 255, 255, 0.7); transform-origin: 50% 50%; animation: l-wave 0.9s ease-in-out infinite; }
+      /* the engineer, pinned at the foot of the panel */
+      #loading .lradio { position: absolute; left: clamp(32px, 6vw, 112px); right: 40px; bottom: 40px; display: flex; align-items: center; gap: 14px; animation: l-up 0.8s var(--ease) 0.8s both; }
+      #loading .lradio > b { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase; color: var(--acc); }
+      #loading .lwave { flex: none; display: flex; align-items: center; gap: 2px; height: 14px; }
+      #loading .lwave i { width: 2px; height: 100%; border-radius: 1px; background: rgba(255, 255, 255, 0.55); animation: l-wave 0.9s ease-in-out infinite; }
       #loading .lwave i:nth-child(2n) { animation-delay: -0.3s; } #loading .lwave i:nth-child(3n) { animation-delay: -0.55s; } #loading .lwave i:nth-child(5n) { animation-delay: -0.15s; }
-      #loading .ltips { position: relative; flex: 1; height: 38px; }
-      #loading .ltips span { position: absolute; inset: 0; display: flex; align-items: center; font-size: 13px; line-height: 1.35; color: rgba(255, 255, 255, 0.82); opacity: 0; animation: l-tip 30s linear infinite; }
+      #loading .ltips { position: relative; flex: 1; height: 36px; }
+      #loading .ltips span { position: absolute; inset: 0; display: flex; align-items: center; font-size: 13px; line-height: 1.4; color: rgba(255, 255, 255, 0.7); opacity: 0; animation: l-tip 30s linear infinite; }
       #loading .ltips span:nth-child(2) { animation-delay: 5s; } #loading .ltips span:nth-child(3) { animation-delay: 10s; } #loading .ltips span:nth-child(4) { animation-delay: 15s; } #loading .ltips span:nth-child(5) { animation-delay: 20s; } #loading .ltips span:nth-child(6) { animation-delay: 25s; }
-      #loading .lerr { color: var(--acc); font-size: 15px; white-space: pre-wrap; max-width: 560px; }
-      /* film grain over everything */
-      #loading .lgrain { position: absolute; inset: -40px; opacity: 0.07; pointer-events: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); animation: l-grain 0.5s steps(4) infinite; }
-      /* the finish: the display slides away left, the art opens out to the full screen, then the garage */
-      #loading.out .lpanel { transform: translateX(-30%); opacity: 0; transition: transform 0.55s cubic-bezier(0.7, 0, 0.84, 0) 0.2s, opacity 0.45s 0.25s; }
-      #loading.out .lart-box { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); width: 100%; transition: clip-path 0.6s cubic-bezier(0.7, 0, 0.3, 1) 0.2s, width 0.6s cubic-bezier(0.7, 0, 0.3, 1) 0.2s; }
-      #loading.out .lrake { opacity: 0; transition: opacity 0.2s; }
+      #loading .lerr { margin-top: 18px; color: var(--acc); font-size: 14px; white-space: pre-wrap; }
+      #loading .lgrain { position: absolute; inset: -40px; opacity: 0.045; pointer-events: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); animation: l-grain 0.5s steps(4) infinite; }
+      /* the finish: the lights flash blue, the panel lifts away line by line, the art opens to the full screen */
+      #loading.out .lkick, #loading.out .lbrand, #loading.out .lmeter, #loading.out .lshift, #loading.out .lradio { transition: transform 0.5s cubic-bezier(0.7, 0, 0.84, 0), opacity 0.4s; transform: translateY(-18px); opacity: 0; }
+      #loading.out .lkick { transition-delay: 0.18s; } #loading.out .lbrand { transition-delay: 0.22s; } #loading.out .lmeter { transition-delay: 0.26s; } #loading.out .lshift { transition-delay: 0.3s; } #loading.out .lradio { transition-delay: 0.2s; }
+      #loading.out .lart-box { width: 100%; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); transition: clip-path 0.7s cubic-bezier(0.7, 0, 0.3, 1) 0.25s, width 0.7s cubic-bezier(0.7, 0, 0.3, 1) 0.25s; }
+      #loading.out .lrake { opacity: 0; transition: opacity 0.25s 0.2s; }
       #loading.done { opacity: 0; pointer-events: none; }
-      @keyframes l-up { from { opacity: 0; transform: translateY(14px); } }
+      @keyframes l-up { from { opacity: 0; transform: translateY(12px); } }
+      @keyframes l-reveal { from { clip-path: inset(-10% 100% -10% 0); transform: translateX(-12px); } to { clip-path: inset(-10% -5% -10% 0); transform: none; } }
+      @keyframes l-wipe { from { clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%); } }
+      @keyframes l-draw { to { stroke-dashoffset: 0; } }
+      @keyframes l-pop { from { opacity: 0; transform: scaleX(0.3); } }
+      @keyframes l-scan { 0% { transform: translateX(-100%); opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateX(560%); opacity: 0; } }
       @keyframes l-wave { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
-      @keyframes l-tip { 0% { opacity: 0; transform: translateY(8px); } 2%, 15% { opacity: 1; transform: none; } 17%, 100% { opacity: 0; transform: translateY(-8px); } }
-      @keyframes l-flash { 50% { opacity: 0.2; } }
+      @keyframes l-tip { 0% { opacity: 0; transform: translateY(6px); } 2%, 15% { opacity: 1; transform: none; } 17%, 100% { opacity: 0; transform: translateY(-6px); } }
+      @keyframes l-flash { 50% { opacity: 0.25; } }
       @keyframes l-grain { 0% { transform: translate(0, 0); } 25% { transform: translate(-17px, 9px); } 50% { transform: translate(11px, -14px); } 75% { transform: translate(-6px, -21px); } 100% { transform: translate(14px, 6px); } }
-      /* portrait / narrow: the art above, the display below */
+      @media (prefers-reduced-motion: reduce) { #loading .lshift::after, #loading .lgrain { animation: none; } }
+      /* portrait / narrow: the art above, the panel below */
       @media (max-aspect-ratio: 1/1) {
-        #loading .lart-box { width: 100%; height: 46%; bottom: auto; clip-path: polygon(0 0, 100% 0, 100% 86%, 0 100%); }
+        #loading .lart-box { width: 100%; height: 44%; bottom: auto; clip-path: polygon(0 0, 100% 0, 100% 88%, 0 100%); }
         #loading .lrake { display: none; }
-        #loading .lpanel { top: 44%; width: 100%; justify-content: flex-start; padding: 24px; }
+        #loading .lpanel { top: 44%; width: 100%; padding: 28px; justify-content: flex-start; }
+        #loading .lradio { left: 28px; right: 28px; }
       }
     </style>
   </head>
@@ -92,17 +93,15 @@
     <div id="ui"></div>
     <div id="loading">
       <div class="lart-box"></div>
-      <svg class="lrake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="46" y1="-1" x2="40" y2="101"/></svg>
+      <svg class="lrake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="49" y1="-1" x2="42" y2="101" pathLength="1"/></svg>
       <div class="lpanel">
-        <div><div class="lbrand"><span>Apex</span><span class="g">GP</span></div></div>
-        <div class="lsub">World Tour · 2026 season</div>
-        <div class="lwheel">
-          <svg class="lgauge" viewBox="0 0 200 200"><circle class="trk" cx="100" cy="100" r="82" pathLength="100" transform="rotate(135 100 100)"/><circle class="val" cx="100" cy="100" r="82" pathLength="100" transform="rotate(135 100 100)"/><line class="tick" x1="50.5" y1="149.5" x2="56.2" y2="143.8"/><line class="tick" x1="33.4" y1="121.6" x2="41.0" y2="119.2"/><line class="tick" x1="30.9" y1="89.0" x2="38.8" y2="90.3"/><line class="tick" x1="43.4" y1="58.9" x2="49.8" y2="63.6"/><line class="tick" x1="68.2" y1="37.6" x2="71.9" y2="44.8"/><line class="tick" x1="100.0" y1="30.0" x2="100.0" y2="38.0"/><line class="tick" x1="131.8" y1="37.6" x2="128.1" y2="44.8"/><line class="tick" x1="156.6" y1="58.9" x2="150.2" y2="63.6"/><line class="tick red" x1="169.1" y1="89.0" x2="161.2" y2="90.3"/><line class="tick red" x1="166.6" y1="121.6" x2="159.0" y2="119.2"/><line class="tick red" x1="149.5" y1="149.5" x2="143.8" y2="143.8"/><text x="100" y="160">BUILD</text></svg>
-          <div><div class="lshift"><i style="--k:0;--c:#22d17a"></i><i style="--k:1;--c:#22d17a"></i><i style="--k:2;--c:#22d17a"></i><i style="--k:3;--c:#22d17a"></i><i style="--k:4;--c:#22d17a"></i><i style="--k:5;--c:#ff2b3f"></i><i style="--k:6;--c:#ff2b3f"></i><i style="--k:7;--c:#ff2b3f"></i><i style="--k:8;--c:#ff2b3f"></i><i style="--k:9;--c:#ff2b3f"></i><i style="--k:10;--c:#3d8bff"></i><i style="--k:11;--c:#3d8bff"></i><i style="--k:12;--c:#3d8bff"></i><i style="--k:13;--c:#3d8bff"></i><i style="--k:14;--c:#3d8bff"></i></div><div class="lpct">0<small>%</small></div><div class="lstep">Starting</div></div>
-        </div>
-        <div class="lsect"><div style="--k:0">SECTOR 1<i></i></div><div style="--k:1">SECTOR 2<i></i></div><div style="--k:2">SECTOR 3<i></i></div></div>
+        <div class="lkick"><span>World Tour</span><i></i><span>2026</span></div>
+        <div class="lbrand"><span class="w">Apex</span><span class="g">GP</span></div>
+        <div class="lmeter"><div class="lpct">0<small>%</small></div><div class="lstep">Starting</div></div>
+        <div class="lshift"><i style="--k:0;--c:#22d17a"></i><i style="--k:1;--c:#22d17a"></i><i style="--k:2;--c:#22d17a"></i><i style="--k:3;--c:#22d17a"></i><i style="--k:4;--c:#22d17a"></i><i style="--k:5;--c:#ff2b3f"></i><i style="--k:6;--c:#ff2b3f"></i><i style="--k:7;--c:#ff2b3f"></i><i style="--k:8;--c:#ff2b3f"></i><i style="--k:9;--c:#ff2b3f"></i><i style="--k:10;--c:#3d8bff"></i><i style="--k:11;--c:#3d8bff"></i><i style="--k:12;--c:#3d8bff"></i><i style="--k:13;--c:#3d8bff"></i><i style="--k:14;--c:#3d8bff"></i></div>
         <div class="lbar"><b></b></div>
-        <div class="lradio"><b>Radio</b><div class="lwave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="ltips">
+        <div class="lerr"></div>
+        <div class="lradio"><b>Radio</b><div class="lwave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="ltips">
           <span>A first top 5 at any circuit earns a Tour pass. Open whichever circuit you want next.</span>
           <span>Every circuit has a bonus challenge, worth a fourth star and a 15,000 purse.</span>
           <span>Weather's automatic, but you can call any sky and time of day on the race screen.</span>
@@ -110,7 +109,6 @@
           <span>Research upgrades the car. The rivals are developing too, so keep pushing.</span>
           <span>Catch a car and stay on its gearbox. The pass is always on.</span>
         </div></div>
-        <div class="lerr"></div>
       </div>
       <i class="lgrain"></i>
     </div>

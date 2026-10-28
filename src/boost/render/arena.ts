@@ -308,60 +308,78 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   const H = ARENA.GOAL_H;
   const D = ARENA.GOAL_D;
   const Y = ARENA.Y * sideSign;
-  // frame: posts and crossbar, white with a team light inside
-  const frameM = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, roughness: 0.25, metalness: 0.6, emissive: team, emissiveIntensity: 0.6 });
-  const post = new THREE.CylinderGeometry(14, 14, H, 16);
-  for (const sx of [-1, 1]) {
-    const p = new THREE.Mesh(post, frameM);
-    p.rotation.x = Math.PI / 2;
-    p.position.set(sx * (W + 10), Y + sideSign * 10, H / 2);
-    p.castShadow = true;
-    g.add(p);
-  }
-  const bar = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, W * 2 + 48, 16), frameM);
-  bar.rotation.z = Math.PI / 2;
-  bar.position.set(0, Y + sideSign * 10, H + 10);
-  bar.castShadow = true;
-  g.add(bar);
-  // the box edges, glowing
-  const glow = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(3.2) });
-  const edgeBox = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), glow);
-    m.position.set(x, y, z);
-    g.add(m);
-  };
   const by = Y + sideSign * D;
-  edgeBox(W * 2, 8, 8, 0, by, 2);
-  edgeBox(W * 2, 8, 8, 0, by, H);
+  // the frame: squared beams flush with the back wall, light grey, a team light strip on the inside
+  const frameM = new THREE.MeshStandardMaterial({ color: 0xd9dde4, roughness: 0.3, metalness: 0.55 });
+  const strip = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(3.4) });
+  const T = 36;
+  const beam = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material = frameM) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = m === frameM;
+    mesh.receiveShadow = true;
+    g.add(mesh);
+    return mesh;
+  };
   for (const sx of [-1, 1]) {
-    edgeBox(8, 8, H, sx * W, by, H / 2);
-    edgeBox(8, D, 8, sx * W, Y + (sideSign * D) / 2, H);
-    edgeBox(8, D, 8, sx * W, Y + (sideSign * D) / 2, 2);
+    beam(T, T, H + T, sx * (W + T / 2), Y + sideSign * (T / 2 - 4), (H + T) / 2);
+    beam(5, 6, H, sx * (W - 1), Y + sideSign * 4, H / 2, strip);
   }
-  // net: back, sides and top as a hex mesh
-  const netM = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, side: THREE.DoubleSide, depthWrite: false, roughness: 0.5 });
+  beam(W * 2 + T * 2, T, T, 0, Y + sideSign * (T / 2 - 4), H + T / 2);
+  beam(W * 2, 6, 5, 0, Y + sideSign * 4, H - 1, strip);
+  // inside: solid dark panels carrying the net (sides, roof and back), lit by the team light
+  const netM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide });
   simPatch(
     netM,
     /* glsl */ `
-    vec2 q = (abs(vSim.x) > ${(W - 2).toFixed(1)} ? vSim.yz : (vSim.z > ${(H - 2).toFixed(1)} ? vSim.xy : vSim.xz)) / 34.0;
-    float e = 1.0 - smoothstep(0.0, 0.07, bbHexEdge(q));
-    diffuseColor.rgb = vec3(0.9);
-    diffuseColor.a = e * 0.75 + 0.04;
-    vec3 bbEmit = vec3(${team.r.toFixed(3)}, ${team.g.toFixed(3)}, ${team.b.toFixed(3)}) * (e * 0.55 + 0.05);
+    bool sideWall = abs(vSim.x) > ${(W - 2).toFixed(1)};
+    bool roof = vSim.z > ${(H - 2).toFixed(1)};
+    vec2 q = (sideWall ? vSim.yz : (roof ? vSim.xy : vSim.xz)) / 30.0;
+    float e = 1.0 - smoothstep(0.0, 0.08, bbHexEdge(q));
+    // panel joints every 2 m, the net a little proud of them
+    vec2 pq = (sideWall ? vSim.yz : (roof ? vSim.xy : vSim.xz)) / 220.0;
+    float joint = 1.0 - smoothstep(0.0, 0.02, min(abs(fract(pq.x) - 0.5), abs(fract(pq.y) - 0.5)) - 0.47);
+    vec3 base = vec3(0.045, 0.05, 0.065) * (1.0 - joint * 0.5);
+    // brighter toward the mouth, darker at the back
+    float depth = clamp((abs(vSim.y) - ${ARENA.Y.toFixed(1)}) / ${D.toFixed(1)}, 0.0, 1.0);
+    diffuseColor.rgb = mix(base, vec3(0.6), e * 0.3);
+    vec3 tc = vec3(${team.r.toFixed(3)}, ${team.g.toFixed(3)}, ${team.b.toFixed(3)});
+    vec3 bbEmit = tc * (e * (0.16 - depth * 0.08) + 0.025);
     `,
   );
-  const plane = (w: number, h: number, pos: THREE.Vector3, rot: THREE.Euler) => {
+  const panel = (w: number, h: number, pos: THREE.Vector3, rot: THREE.Euler) => {
     const geo = new THREE.PlaneGeometry(w, h);
     geo.rotateX(rot.x).rotateY(rot.y).rotateZ(rot.z);
     geo.translate(pos.x, pos.y, pos.z);
     const m = new THREE.Mesh(geo, netM);
-    m.renderOrder = 6;
+    m.receiveShadow = true;
     g.add(m);
   };
-  plane(W * 2, H, new THREE.Vector3(0, by, H / 2), new THREE.Euler(Math.PI / 2, 0, 0));
-  plane(D, H, new THREE.Vector3(-W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
-  plane(D, H, new THREE.Vector3(W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
-  plane(W * 2, D, new THREE.Vector3(0, Y + (sideSign * D) / 2, H), new THREE.Euler(0, 0, 0));
+  panel(W * 2, H, new THREE.Vector3(0, by, H / 2), new THREE.Euler(Math.PI / 2, 0, 0));
+  panel(D, H, new THREE.Vector3(-W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
+  panel(D, H, new THREE.Vector3(W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
+  panel(W * 2, D, new THREE.Vector3(0, Y + (sideSign * D) / 2, H), new THREE.Euler(0, 0, 0));
+  // glowing edges along the back of the box
+  const edge = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => beam(sx, sy, sz, x, y, z, strip);
+  edge(W * 2, 6, 6, 0, by - sideSign * 3, 3);
+  edge(W * 2, 6, 6, 0, by - sideSign * 3, H - 3);
+  for (const sx of [-1, 1]) {
+    edge(6, 6, H, sx * (W - 3), by - sideSign * 3, H / 2);
+    edge(6, D, 6, sx * (W - 3), Y + (sideSign * D) / 2, H - 3);
+  }
+  // the housing round the box: dark structure, so nothing behind (the seats) shows into the goal
+  const houseM = new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.8, metalness: 0.2 });
+  // (outer slabs only: behind the back, outside the sides, over the roof; the mouth stays open)
+  const slab = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), houseM);
+    m.position.set(x, y, z);
+    g.add(m);
+  };
+  const ym = Y + sideSign * (D / 2 + 20);
+  // (each set 4 back from the panel it covers, so they never fight over the same depth)
+  slab(W * 2 + 120, 60, H + 60, 0, by + sideSign * 34, (H + 60) / 2 - 2);
+  for (const sx of [-1, 1]) slab(60, D + 20, H + 60, sx * (W + 34), ym, (H + 60) / 2 - 2);
+  slab(W * 2 + 120, D + 20, 60, 0, ym, H + 34);
   // the inner glow light
   const pl = new THREE.PointLight(team, 6, 14, 2);
   pl.position.set(0, Y + sideSign * (D - 200), H * 0.6);
@@ -426,6 +444,8 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
   simPatch(
     mat,
     /* glsl */ `
+    // (the goals' housings take this space)
+    if (abs(vSim.x) < ${(ARENA.GOAL_W + 300).toFixed(1)} && abs(vSim.y) > ${ARENA.Y.toFixed(1)} && vSim.z < ${(ARENA.GOAL_H + 120).toFixed(1)}) discard;
     // u along the bowl, v up the slope (in rows)
     float rowH = 85.0;
     float row = floor(vBB.y / rowH);

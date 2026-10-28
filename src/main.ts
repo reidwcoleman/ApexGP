@@ -114,7 +114,7 @@ game
     // lights out: all five on, then off together, and the garage behind
     loading.style.setProperty('--p', '1');
     loading.classList.add('out');
-    setTimeout(() => loading.classList.add('done'), 700);
+    setTimeout(() => loading.classList.add('done'), 950);
     // once faded out, drop the slideshow (its looping layers would keep compositing under the game)
     setTimeout(() => loading.querySelectorAll('.lart').forEach((im) => im.remove()), 1500);
     const q = new URLSearchParams(location.search);

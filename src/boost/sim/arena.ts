@@ -18,7 +18,7 @@ export const ARENA_MARGIN = 1.9;
 export const ARENA = {
   X: 4096,
   Y: 5120,
-  Z: 2044,
+  Z: 2048, // (RocketSim's ceiling plane; RLGym quotes 2044 for where things meet it)
   CORNER: 8064,
   R: 256,
   GOAL_W: 892.755, // half width
