@@ -15,7 +15,7 @@
 .tour-bar,
 .tour-pill,
 #loading .lwrap,
-.travel-veil > div {
+.travel-veil-unused > div {
   zoom: var(--ui);
 }
 #menu .screen {
@@ -1584,87 +1584,6 @@
   white-space: nowrap;
 }
 
-/* travelling between circuits */
-.travel-veil {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  background: #06070a;
-  opacity: 0;
-  transition: opacity 0.5s var(--ease-out);
-  font-family: var(--font);
-  color: var(--ink);
-}
-.travel-veil.on {
-  opacity: 1;
-}
-.travel-veil div {
-  text-align: center;
-}
-.travel-veil span {
-  display: block;
-  font-size: var(--t-cap);
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--ink3);
-}
-.travel-veil b {
-  display: block;
-  margin-top: var(--s2);
-  font-size: var(--t-time);
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-/* in-process circuit switch: a thin bar under the name (the boot loader's, same accent) and the step
-   below it; the shimmer runs on the compositor so it keeps moving while a build step blocks JS */
-.travel-veil .tv-bar {
-  position: relative;
-  width: min(360px, calc(70 * var(--vw)));
-  height: 3px;
-  margin: var(--s5) auto 0;
-  background: var(--well);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.travel-veil .tv-bar i {
-  position: absolute;
-  inset: 0;
-  transform-origin: 0 50%;
-  transform: scaleX(0);
-  background: var(--accent);
-  transition: transform 0.45s var(--ease-out);
-}
-.travel-veil .tv-bar::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 30%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-  transform: translateX(-100%);
-  animation: tv-shimmer 1.3s var(--ease-out) infinite;
-}
-.travel-veil .tv-step {
-  margin-top: var(--s3);
-  font-size: var(--t-cap);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--ink3);
-  text-transform: none;
-}
-@keyframes tv-shimmer {
-  to {
-    transform: translateX(340%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .travel-veil .tv-bar::after {
-    animation: none;
-  }
-}
-
 /* narrow layout: 820 layout px, i.e. 574 screen px at the 0.7 UI zoom floor (src/ui/scale.ts) */
 @media (max-width: 574px) {
   .hub-top {
@@ -2655,53 +2574,6 @@
 
 .tour-pill[hidden] {
   display: none !important;
-}
-
-/* ---------- travel veil with the destination's key art (wordmark baked in at 96, 420 of 1920×1080) ---------- */
-.travel-veil .tv-art {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: left center;
-  opacity: 0;
-  transition: opacity 0.6s var(--ease-out);
-}
-.travel-veil.art {
-  --k: max(calc(100vw / 1920), calc(100vh / 1080));
-  display: block;
-}
-.travel-veil.art .tv-art {
-  opacity: 1;
-}
-.travel-veil.art > div {
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8);
-  position: absolute;
-  zoom: 1;
-  left: calc(104 * var(--k));
-  top: calc(50vh + (486 - 540) * var(--k));
-  width: calc(540 * var(--k));
-  text-align: left;
-}
-.travel-veil.art span {
-  font-size: max(11px, calc(14 * var(--k)));
-  color: rgba(255, 255, 255, 0.6);
-}
-.travel-veil.art b {
-  font-size: max(18px, calc(34 * var(--k)));
-  margin-top: calc(6 * var(--k));
-}
-.travel-veil.art .tv-bar {
-  width: 100%;
-  margin: calc(18 * var(--k)) 0 0;
-  height: max(3px, calc(4 * var(--k)));
-  background: rgba(255, 255, 255, 0.14);
-}
-.travel-veil.art .tv-step {
-  text-align: left;
-  font-size: max(12px, calc(16 * var(--k)));
-  color: rgba(255, 255, 255, 0.7);
 }
 
 /* ---------- the circuit still growing behind the garage ---------- */
@@ -4883,80 +4755,108 @@ body.garage-drag * {
   from { opacity: 0; transform: translateX(-12px); }
 }
 
-/* ---------- the travel screen, broadcast-style: start lights, the circuit card, the pit wall ---------- */
-.travel-veil .tv-shade {
-  position: absolute;
+/* ---------- travelling between circuits: the engineer's display (the boot loader's look, index.html) ---------- */
+.travel-veil {
+  --p: 0;
+  position: fixed;
   inset: 0;
-  background:
-    linear-gradient(90deg, rgba(4, 5, 8, 0.55) 0%, rgba(4, 5, 8, 0) 45%),
-    linear-gradient(0deg, rgba(4, 5, 8, 0.85) 0%, rgba(4, 5, 8, 0) 22%),
-    linear-gradient(270deg, rgba(4, 5, 8, 0.6) 0%, rgba(4, 5, 8, 0) 32%);
-  pointer-events: none;
+  z-index: 50;
+  overflow: hidden;
+  background: #050608;
+  font-family: var(--font);
+  color: var(--ink);
+  opacity: 0;
+  transition: opacity 0.45s var(--ease-out);
 }
-.travel-veil .tv-lights {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
+.travel-veil.on {
+  opacity: 1;
 }
-.travel-veil:not(.art) .tv-lights {
-  justify-content: center;
+.travel-veil .tv-artbox {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 60%;
+  clip-path: polygon(10% 0, 100% 0, 100% 100%, 0 100%);
+  background: #0b0d12;
 }
-.travel-veil .tv-lights span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px;
-  background: #0b0c10;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.travel-veil .tv-lights i {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #3a1418, #1a0a0c 70%);
-}
-.travel-veil .tv-lights i::after {
+.travel-veil .tv-artbox::after {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #ff8a8a, #ff1a2e 45%, #a8000f 75%);
-  box-shadow: 0 0 12px 3px rgba(255, 30, 50, 0.7);
-  opacity: 0;
-  transition: opacity 0.12s;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px), radial-gradient(120% 90% at 70% 50%, transparent 50%, rgba(0, 0, 0, 0.55));
 }
-.travel-veil .tv-lights span:nth-child(1) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 0.15) * 8), 1); }
-.travel-veil .tv-lights span:nth-child(2) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 1.15) * 8), 1); }
-.travel-veil .tv-lights span:nth-child(3) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 2.15) * 8), 1); }
-.travel-veil .tv-lights span:nth-child(4) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 3.15) * 8), 1); }
-.travel-veil .tv-lights span:nth-child(5) i::after { opacity: clamp(0, calc((var(--p, 0) * 5 - 4.15) * 8), 1); }
-.travel-veil .tv-bar {
-  margin-top: 12px !important;
-}
-/* the circuit card, right: the layout drawing itself in, its facts and forecast */
-.travel-veil .tv-card {
-  position: absolute;
-  right: 4vw;
-  top: 50%;
-  transform: translateY(-50%);
-  zoom: var(--ui);
-  width: 280px;
-  padding: 18px 20px 16px;
-  text-align: left;
-  background: rgba(6, 7, 10, 0.78);
-  clip-path: var(--chamfer);
-  animation: tv-card 0.7s var(--ease-out) 0.25s both;
-}
-@keyframes tv-card {
-  from { opacity: 0; transform: translate(16px, -50%); }
-}
-.travel-veil .tv-card svg {
-  display: block;
+.travel-veil .tv-art {
   width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+  opacity: 0;
+  transform: scale(1.04);
+  transition: opacity 0.6s var(--ease-out), transform 6s linear;
 }
-.travel-veil .tv-card path {
+.travel-veil.art .tv-art {
+  opacity: 1;
+  transform: scale(1);
+}
+.travel-veil .tv-rake {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.travel-veil .tv-rake line {
+  stroke: var(--accent);
+  stroke-width: 4px;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 10px var(--accent));
+}
+.travel-veil .tv-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: calc(40% - 28px);
+  box-sizing: border-box;
+  padding-left: clamp(28px, 5vw, 96px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(10px, 1.8vh, 18px);
+}
+.travel-veil .tv-panel > * {
+  animation: tv-up 0.7s var(--ease-out) both;
+}
+.travel-veil .tv-panel > :nth-child(2) { animation-delay: 0.05s; }
+.travel-veil .tv-panel > :nth-child(3) { animation-delay: 0.1s; }
+.travel-veil .tv-panel > :nth-child(4) { animation-delay: 0.15s; }
+.travel-veil .tv-panel > :nth-child(n + 5) { animation-delay: 0.2s; }
+@keyframes tv-up {
+  from { opacity: 0; transform: translateY(12px); }
+}
+.travel-veil .tv-kick {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.travel-veil .tv-panel > b {
+  font-family: var(--font-display);
+  font-size: clamp(34px, 4vw, 64px);
+  font-weight: 800;
+  font-style: italic;
+  line-height: 0.92;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+.travel-veil .tv-map {
+  width: min(100%, 300px);
+  height: auto;
+  overflow: visible;
+}
+.travel-veil .tv-map path {
   fill: none;
   stroke: #fff;
   stroke-width: 3;
@@ -4965,97 +4865,162 @@ body.garage-drag * {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent));
-  animation: tv-draw 2.2s var(--ease-out) 0.4s forwards;
+  animation: tv-draw 2.4s var(--ease-out) 0.3s forwards;
 }
 @keyframes tv-draw {
   to { stroke-dashoffset: 0; }
 }
-.travel-veil .tv-card dl {
+.travel-veil dl {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 18px;
-  margin: 12px 0 0;
+  gap: 8px 22px;
+  margin: 0;
 }
-.travel-veil .tv-card dt {
+.travel-veil dt {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink3);
 }
-.travel-veil .tv-card dd {
+.travel-veil dd {
   margin: 2px 0 0;
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
 }
-.travel-veil .tv-card p {
-  margin: 10px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--ink2);
-}
-/* the pit wall ticker */
-.travel-veil .tv-tick {
-  position: absolute;
-  left: 50%;
-  bottom: 34px;
-  transform: translateX(-50%);
-  zoom: var(--ui);
+.travel-veil .tv-shift {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  width: min(880px, 90%);
-  padding: 10px 16px;
-  text-align: left;
-  background: rgba(6, 7, 10, 0.78);
-  clip-path: var(--chamfer);
+  gap: clamp(3px, 0.35vw, 6px);
+  margin-top: 6px;
 }
-.travel-veil .tv-tick > b {
-  flex: none;
-  margin: 0;
-  padding: 3px 8px;
-  font-size: 13px;
-  font-weight: 800;
-  font-style: italic;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--on-accent, #fff);
-  background: var(--accent);
-}
-.travel-veil .tv-tick > div {
+.travel-veil .tv-shift i {
   position: relative;
-  flex: 1;
-  height: 20px;
-  overflow: hidden;
-  text-align: left;
+  width: clamp(8px, 0.85vw, 13px);
+  height: clamp(8px, 0.85vw, 13px);
+  border-radius: 50%;
+  background: #121419;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
-.travel-veil .tv-tick em {
+.travel-veil .tv-shift i::after {
+  content: '';
   position: absolute;
   inset: 0;
-  font-style: normal;
-  font-size: 14px;
-  white-space: nowrap;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 10px 2px var(--c);
+  opacity: clamp(0, calc((var(--p) * 15 - var(--k)) * 6), 1);
+  transition: opacity 0.12s;
+}
+.travel-veil .tv-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.travel-veil .tv-pct {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 4vw, 64px);
+  font-weight: 800;
+  font-style: italic;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
+.travel-veil .tv-pct small {
+  font-size: 0.4em;
+  color: var(--accent);
+}
+.travel-veil .tv-step {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+.travel-veil .tv-bar {
+  display: none;
+}
+.travel-veil .tv-sect {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.travel-veil .tv-sect div {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--ink3);
+}
+.travel-veil .tv-sect i {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  background: rgba(255, 255, 255, 0.07);
   overflow: hidden;
-  text-overflow: ellipsis;
+  transform: skewX(-20deg);
+}
+.travel-veil .tv-sect i::after {
+  content: '';
+  display: block;
+  height: 100%;
+  background: var(--green);
+  transform-origin: 0 50%;
+  transform: scaleX(clamp(0, calc(var(--p) * 3 - var(--k)), 1));
+  transition: transform 0.35s var(--ease-out);
+}
+.travel-veil .tv-radio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid var(--accent);
+}
+.travel-veil .tv-radio > b {
+  flex: none;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.travel-veil .tv-tips {
+  position: relative;
+  flex: 1;
+  height: 36px;
+}
+.travel-veil .tv-tips em {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1.35;
   opacity: 0;
-  animation: l-tip 30s linear infinite;
+  animation: tv-tip 30s linear infinite;
 }
-.travel-veil .tv-tick em:nth-child(2) { animation-delay: 5s; }
-.travel-veil .tv-tick em:nth-child(3) { animation-delay: 10s; }
-.travel-veil .tv-tick em:nth-child(4) { animation-delay: 15s; }
-.travel-veil .tv-tick em:nth-child(5) { animation-delay: 20s; }
-.travel-veil .tv-tick em:nth-child(6) { animation-delay: 25s; }
-@keyframes l-tip {
-  0% { opacity: 0; transform: translateY(12px); }
+.travel-veil .tv-tips em:nth-child(2) { animation-delay: 5s; }
+.travel-veil .tv-tips em:nth-child(3) { animation-delay: 10s; }
+.travel-veil .tv-tips em:nth-child(4) { animation-delay: 15s; }
+.travel-veil .tv-tips em:nth-child(5) { animation-delay: 20s; }
+.travel-veil .tv-tips em:nth-child(6) { animation-delay: 25s; }
+@keyframes tv-tip {
+  0% { opacity: 0; transform: translateY(8px); }
   2%, 15% { opacity: 1; transform: none; }
-  17%, 100% { opacity: 0; transform: translateY(-12px); }
+  17%, 100% { opacity: 0; transform: translateY(-8px); }
 }
-@media (max-width: 760px) {
-  .travel-veil .tv-card {
+@media (max-aspect-ratio: 1/1) {
+  .travel-veil .tv-artbox {
+    width: 100%;
+    height: 40%;
+    bottom: auto;
+    clip-path: polygon(0 0, 100% 0, 100% 86%, 0 100%);
+  }
+  .travel-veil .tv-rake {
     display: none;
   }
-}
-.travel-veil .tv-card div {
-  text-align: left;
+  .travel-veil .tv-panel {
+    top: 38%;
+    width: 100%;
+    padding: 24px;
+    justify-content: flex-start;
+  }
 }

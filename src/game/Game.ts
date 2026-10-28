@@ -3351,14 +3351,19 @@ export class Game {
       const round = CIRCUITS.indexOf(def) + 1;
       const info = CIRCUIT_INFO[def.id];
       const fc = this.career.isUnlocked(def.id) && !this.dc.active ? this.careerForecast(def.id) : null;
-      const lights = '<span><i></i><i></i></span>'.repeat(5);
+      const leds = Array.from({ length: 15 }, (_, k) => `<i style="--k:${k};--c:${k < 5 ? '#22d17a' : k < 10 ? '#ff2b3f' : '#3d8bff'}"></i>`).join('');
       const tips = TRAVEL_TIPS.map((t) => `<em>${t}</em>`).join('');
+      // the engineer's display (as the boot loader's, index.html): the destination named big, its layout
+      // drawing itself in, the facts and the forecast, the shift lights and sectors filling with the build;
+      // the key art in the raked frame on the right
       veil.innerHTML =
-        `<img class="tv-art" alt=""><i class="tv-shade"></i>` +
-        `<div><span>${round ? `Round ${round} · ` : 'Scenic road · '}${def.country}</span><b>${def.name}</b><div class="tv-lights">${lights}</div><div class="tv-bar"><i></i></div><div class="tv-step"></div></div>` +
-        `<aside class="tv-card"><svg viewBox="0 0 220 150"><path pathLength="1" d="${circuitPath(layoutPoints(def), 220, 150, 10)}"/></svg>` +
-        `<dl>${info ? `<div><dt>Length</dt><dd>${info.km} km</dd></div><div><dt>Turns</dt><dd>${info.turns}</dd></div>` : ''}${fc ? `<div><dt>Forecast</dt><dd>${fcText(fc)}</dd></div>` : ''}</dl>${info?.line ? `<p>${info.line}</p>` : ''}</aside>` +
-        `<footer class="tv-tick"><b>Pit wall</b><div>${tips}</div></footer>`;
+        `<div class="tv-artbox"><img class="tv-art" alt=""></div><svg class="tv-rake" viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="46" y1="-1" x2="40" y2="101"/></svg>` +
+        `<div class="tv-panel"><span class="tv-kick">${round ? `Round ${String(round).padStart(2, '0')}` : 'Scenic road'} · ${def.country}</span><b>${def.name}</b>` +
+        `<svg class="tv-map" viewBox="0 0 260 170"><path pathLength="1" d="${circuitPath(layoutPoints(def), 260, 170, 8)}"/></svg>` +
+        `<dl>${info ? `<div><dt>Length</dt><dd>${info.km} km</dd></div><div><dt>Turns</dt><dd>${info.turns}</dd></div>` : ''}${fc ? `<div><dt>Forecast</dt><dd>${fcText(fc)}</dd></div>` : ''}</dl>` +
+        `<div class="tv-shift">${leds}</div><div class="tv-row"><div class="tv-pct">0<small>%</small></div><div class="tv-step"></div></div>` +
+        `<div class="tv-sect"><div style="--k:0">SECTOR 1<i></i></div><div style="--k:1">SECTOR 2<i></i></div><div style="--k:2">SECTOR 3<i></i></div></div><div class="tv-bar"><i></i></div>` +
+        `<div class="tv-radio"><b>Radio</b><div class="tv-tips">${tips}</div></div></div>`;
       // the destination's key art (decoded before the build blocks the main thread)
       const art = veil.querySelector('img') as HTMLImageElement;
       art.src = artFor(def.id);
@@ -3368,8 +3373,10 @@ export class Game {
       );
       const bar = veil.querySelector('.tv-bar i') as HTMLElement;
       const step = veil.querySelector('.tv-step') as HTMLElement;
+      const pctEl = veil.querySelector('.tv-pct') as HTMLElement;
       const set = (f: number, label: string) => {
         veil.style.setProperty('--p', Math.max(0, Math.min(1, f)).toFixed(3));
+        pctEl.firstChild!.textContent = String(Math.round(Math.max(0, Math.min(1, f)) * 100));
         bar.style.transform = `scaleX(${Math.max(0, Math.min(1, f)).toFixed(3)})`;
         step.textContent = label;
       };
