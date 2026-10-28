@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Car } from '../sim/car.ts';
-import { BODIES, unpackLoadout } from '../loadout.ts';
+import { unpackLoadout } from '../loadout.ts';
+import { carModel } from './carmodel.ts';
 
 /**
  * A battle car built from code, in the simulation's car frame (cm; x forward, y left, z up, the
@@ -14,569 +14,28 @@ import { BODIES, unpackLoadout } from '../loadout.ts';
 
 export const TEAM_COLORS = [0x1458ff, 0xff5a0a];
 
-type P3 = [number, number, number];
-const spow = (v: number, p: number) => Math.sign(v) * Math.pow(Math.abs(v), p);
-/** piecewise-linear lookup in [x, y] knots (x descending or ascending) */
-function pl(k: [number, number][], x: number): number {
-  const asc = k[0][0] < k[k.length - 1][0];
-  const a = asc ? k : [...k].reverse();
-  if (x <= a[0][0]) return a[0][1];
-  for (let i = 1; i < a.length; i++) {
-    if (x <= a[i][0]) {
-      const t = (x - a[i - 1][0]) / (a[i][0] - a[i - 1][0]);
-      const s = t * t * (3 - 2 * t);
-      return a[i - 1][1] + (a[i][1] - a[i - 1][1]) * (0.35 * t + 0.65 * s);
-    }
-  }
-  return a[a.length - 1][1];
-}
-
-/**
- * a (nu+1) × (nv+1) grid surface; `centre(u)` is a point inside the surface at station u, used to
- * turn the triangles outward. Closed in v: the seam's normals are averaged.
- */
-function grid(nu: number, nv: number, P: (u: number, v: number) => P3, centre: (u: number) => P3, closedV: boolean): THREE.BufferGeometry {
-  const pos: number[] = [];
-  const uv: number[] = [];
-  for (let i = 0; i <= nu; i++)
-    for (let j = 0; j <= nv; j++) {
-      const p = P(i / nu, j / nv);
-      pos.push(p[0], p[1], p[2]);
-      uv.push(i / nu, j / nv);
-    }
-  const idx: number[] = [];
-  const at = (i: number, j: number) => i * (nv + 1) + j;
-  for (let i = 0; i < nu; i++)
-    for (let j = 0; j < nv; j++) {
-      const a = at(i, j);
-      const b = at(i, j + 1);
-      const c = at(i + 1, j);
-      const d = at(i + 1, j + 1);
-      idx.push(a, b, c, b, d, c);
-    }
-  // orientation probe at the middle
-  const i0 = nu >> 1;
-  const j0 = nv >> 2;
-  const v = (k: number) => new THREE.Vector3(pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]);
-  const pa = v(at(i0, j0));
-  const n = new THREE.Vector3().subVectors(v(at(i0, j0 + 1)), pa).cross(new THREE.Vector3().subVectors(v(at(i0 + 1, j0)), pa));
-  const c = centre(i0 / nu);
-  if (n.dot(pa.clone().sub(new THREE.Vector3(c[0], c[1], c[2]))) < 0) for (let k = 0; k < idx.length; k += 3) [idx[k + 1], idx[k + 2]] = [idx[k + 2], idx[k + 1]];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  if (closedV) {
-    const nr = g.attributes.normal as THREE.BufferAttribute;
-    for (let i = 0; i <= nu; i++) {
-      const a = at(i, 0);
-      const b = at(i, nv);
-      const x = nr.getX(a) + nr.getX(b);
-      const y = nr.getY(a) + nr.getY(b);
-      const z = nr.getZ(a) + nr.getZ(b);
-      const l = Math.hypot(x, y, z) || 1;
-      nr.setXYZ(a, x / l, y / l, z / l);
-      nr.setXYZ(b, x / l, y / l, z / l);
-    }
-  }
-  return g;
-}
-
-interface Sec {
-  /** half width */
-  w: number;
-  zb: number;
-  zt: number;
-  yc?: number;
-  /** superellipse exponent: 2 an ellipse, 4 a rounded box */
-  n?: number;
-  /** the top this much narrower than the bottom (0..1) */
-  tumble?: number;
-  /** the bottom this much narrower than the middle (0..1): the body tucked in behind the wheels */
-  tuck?: number;
-}
-
-/** a body lofted along x through superellipse sections, the ends rounded over `round` cm */
-function loft(x0: number, x1: number, sec: (x: number) => Sec, o: { nu?: number; nv?: number; round?: number; a0?: number; a1?: number } = {}): THREE.BufferGeometry {
-  const nu = o.nu ?? 40;
-  const nv = o.nv ?? 32;
-  const round = o.round ?? 6;
-  const a0 = o.a0 ?? 0;
-  const a1 = o.a1 ?? Math.PI * 2;
-  const closed = a1 - a0 > 6.28;
-  const xAt = (u: number) => x0 + (x1 - x0) * (0.5 - 0.5 * Math.cos(Math.PI * u));
-  return grid(
-    nu,
-    nv,
-    (u, v) => {
-      const x = xAt(u);
-      const s = sec(x);
-      const d = Math.min(x - x0, x1 - x);
-      const k = d < round ? Math.sqrt(Math.max(0, 1 - (1 - d / round) ** 2)) : 1;
-      const a = a0 + (a1 - a0) * v;
-      const n = s.n ?? 3;
-      const ys = spow(Math.cos(a), 2 / n);
-      const zs = spow(Math.sin(a), 2 / n);
-      const zm = (s.zb + s.zt) / 2;
-      const hh = (s.zt - s.zb) / 2;
-      const w = s.w * (1 - (s.tumble ?? 0) * Math.max(0, zs) - (s.tuck ?? 0) * Math.max(0, -zs) ** 1.5);
-      return [x, (s.yc ?? 0) + w * ys * k, zm + hh * zs * k];
-    },
-    (u) => {
-      const x = xAt(u);
-      const s = sec(x);
-      return [x, s.yc ?? 0, (s.zb + s.zt) / 2];
-    },
-    closed,
-  );
-}
-
-/** a hoop swept round a wheel (centre cx, cz in the x–z plane) from angle t0 to t1 */
-function hoop(cx: number, cz: number, R: number, t0: number, t1: number, yc: number, halfY: number, halfT: number): THREE.BufferGeometry {
-  const nu = 30;
-  const nv = 20;
-  const span = t1 - t0;
-  return grid(
-    nu,
-    nv,
-    (u, v) => {
-      const t = t0 + span * u;
-      const d = Math.min(u, 1 - u) * span * R;
-      const k = d < 4 ? Math.sqrt(Math.max(0, 1 - (1 - d / 4) ** 2)) : 1;
-      const a = Math.PI * 2 * v;
-      const ys = spow(Math.cos(a), 0.5);
-      const rs = spow(Math.sin(a), 0.5);
-      // the outer edge flares out and down a little
-      const flare = Math.max(0, ys) * 1.5;
-      const r = R + rs * halfT * k + flare;
-      return [cx + Math.cos(t) * r, yc + ys * halfY * k * Math.sign(yc), cz + Math.sin(t) * r];
-    },
-    (u) => {
-      const t = t0 + span * u;
-      return [cx + Math.cos(t) * R, yc, cz + Math.sin(t) * R];
-    },
-    true,
-  );
-}
-
-// ------------------------------------------------------------------ the shape
-// an original battle car in the arena game's proportions: a wedge hull between the wheels, side
-// bodies whose undersides rise into real arches so the fenders sit over the tyres as muscular
-// haunches, a raked cabin set back, a scooped hood, a wing on struts
-const WF: P3 = [51.25, 34.5, 14.4]; // front wheel: x, |y|, radius (drawn)
-const WR: P3 = [-33.75, 35, 17];
-const wz = (r: number) => r - 17;
-/** the arch openings: the wheel's radius plus clearance */
-const AF = WF[2] + 3.6;
-const AR = WR[2] + 3.6;
-
-// the hull's top: a low nose, the hood rising to the cowl, the deck high at the back
-const hullTop: [number, number][] = [
-  [78.5, 7],
-  [73.5, 12],
-  [65, 15],
-  [50, 17.5],
-  [36, 19.5],
-  [0, 22.5],
-  [-34, 28],
-  [-46, 29.5],
-  [-56, 25],
-];
-const hullHalfW: [number, number][] = [
-  [78.5, 18.5],
-  [73.5, 23.5],
-  [62, 26.5],
-  [30, 27],
-  [-40, 27],
-  [-56, 24],
-];
-const hullSec = (x: number): Sec => ({
-  w: pl(hullHalfW, x),
-  zb: 1 + Math.max(0, x - 70) * 0.45 + Math.max(0, -48 - x) * 0.5,
-  zt: pl(hullTop, x),
-  n: 4.2,
-  tumble: 0.12,
-});
-// the side bodies: shoulders peaking over each axle, a waist between
-const sideTop: [number, number][] = [
-  [77, 9.5],
-  [69, 18],
-  [56, 22.5],
-  [47, 23],
-  [34, 22.2],
-  [16, 22.8],
-  [-4, 24.8],
-  [-22, 28.6],
-  [-34, 30.5],
-  [-46, 30],
-  [-55, 26],
-];
-const sideHalfW: [number, number][] = [
-  [77, 3.5],
-  [71, 7.5],
-  [60, 9.6],
-  [50, 10],
-  [38, 9],
-  [20, 8.2],
-  [0, 8.2],
-  [-18, 9.2],
-  [-34, 10.6],
-  [-46, 10],
-  [-55, 7],
-];
-/** the arches a body is cut for: [x, drawn radius, opening radius] front and rear (the shape's own frame) */
-type Arches = [number, number, number][];
-const BASE_ARCHES: Arches = [
-  [WF[0], WF[2], AF],
-  [WR[0], WR[2], AR],
-];
-/** the underside of a side body: the sill, cut up into an arch over each wheel */
-function sideBottom(x: number, arches: Arches): number {
-  let z = 1 + Math.max(0, x - 70) * 0.5 + Math.max(0, -49 - x) * 0.6;
-  for (const [wx, r, R] of arches) {
-    const dx = x - wx;
-    if (Math.abs(dx) < R) z = Math.max(z, wz(r) + Math.sqrt(R * R - dx * dx));
-  }
-  return z;
-}
-const sideSec = (sy: number, arches: Arches) => (x: number): Sec => {
-  const w = pl(sideHalfW, x);
-  // (the waist pulls the outer face in more than the inner)
-  const yc = sy * (34.8 - (10 - w) * 0.55);
-  return { w, yc, zb: sideBottom(x, arches), zt: pl(sideTop, x), n: 4, tumble: 0.34 };
-};
-
-// ------------------------------------------------------------------ the cars
-// Every body is the same lofted car warped into its own proportions (longer or shorter at each end,
-// lower or taller in the shoulders and the cabin, the cabin raked back or stood up, wider or
-// narrower), with its own wing, on its hitbox class's wheels and ride height from RocketSim.
-type Wing = 'blade' | 'duck' | 'wide' | 'tall' | 'fin' | 'none';
-interface Shape {
-  /** front and rear length scales */
-  fx: number;
-  rx: number;
-  /** shoulder (z 14…26) and cabin (above 26) height scales */
-  zk: number;
-  ck: number;
-  wk: number;
-  /** the cabin's top pushed back this far (cm) */
-  rake: number;
-  wing: Wing;
-}
-const SHAPES: Shape[] = [
-  { fx: 1, rx: 1, zk: 1, ck: 1, wk: 1, rake: 0, wing: 'blade' },
-  { fx: 1.04, rx: 1.08, zk: 0.8, ck: 0.7, wk: 1.0, rake: 7, wing: 'duck' },
-  { fx: 1.06, rx: 1.06, zk: 0.62, ck: 0.55, wk: 1.04, rake: 9, wing: 'wide' },
-  { fx: 1.16, rx: 1.0, zk: 0.72, ck: 0.66, wk: 0.95, rake: 3, wing: 'tall' },
-  { fx: 1.05, rx: 1.1, zk: 0.9, ck: 0.82, wk: 0.98, rake: 10, wing: 'fin' },
-  { fx: 0.98, rx: 1.02, zk: 1.15, ck: 1.3, wk: 0.94, rake: -5, wing: 'none' },
-];
-// RocketSim's wheels for each hitbox class (x, radius) and the ride height a car settles at
-const PHYS: { f: [number, number]; r: [number, number]; rest: number }[] = [
-  { f: [51.25, 12.5], r: [-33.75, 15], rest: 17.03 },
-  { f: [50.3, 12], r: [-34.75, 13.5], rest: 17.07 },
-  { f: [49.97, 12.5], r: [-35.43, 17], rest: 18.67 },
-  { f: [51.5, 13.5], r: [-35.75, 15], rest: 18.36 },
-  { f: [51.25, 12.5], r: [-34, 15], rest: 17.03 },
-  { f: [51.25, 15], r: [-33.75, 15], rest: 18.81 },
-];
-export interface Rig {
-  shape: Shape;
-  /** the shape frame → the car frame */
-  warp: (x: number, y: number, z: number) => P3;
-  /** wheels in the car frame: x, y, drawn radius, resting centre z */
-  wheels: [number, number, number, number][];
-  /** the arches in the car frame for the paint's lips: x, z, opening radius */
-  archF: P3;
-  archR: P3;
-  ground: number;
-}
-const rigs = new Map<number, Rig>();
-export function rig(body: number): Rig {
-  const b = Math.max(0, Math.min(SHAPES.length - 1, body | 0));
-  let r = rigs.get(b);
-  if (r) return r;
-  const shape = SHAPES[b];
-  const ph = PHYS[BODIES[b].preset];
-  const dz = 17 - ph.rest;
-  const warp = (x: number, y: number, z: number): P3 => {
-    const fz = z <= 14 ? z : z <= 26 ? 14 + (z - 14) * shape.zk : 14 + 12 * shape.zk + (z - 26) * shape.ck;
-    const rk = Math.min(1, Math.max(0, (z - 20) / 22));
-    return [(x >= 0 ? x * shape.fx : x * shape.rx) - shape.rake * rk, y * shape.wk, fz + dz];
-  };
-  const rf = ph.f[1] + 1.9;
-  const rr = ph.r[1] + 2;
-  const wy = [34.5 * shape.wk, 35 * shape.wk];
-  r = {
-    shape,
-    warp,
-    wheels: [
-      [ph.f[0], wy[0], rf, rf - ph.rest],
-      [ph.f[0], -wy[0], rf, rf - ph.rest],
-      [ph.r[0], wy[1], rr, rr - ph.rest],
-      [ph.r[0], -wy[1], rr, rr - ph.rest],
-    ],
-    archF: [ph.f[0], rf - ph.rest, rf + 3.6 + 0.9],
-    archR: [ph.r[0], rr - ph.rest, rr + 3.6 + 0.9],
-    ground: -ph.rest,
-  };
-  rigs.set(b, r);
-  return r;
-}
-/** move a geometry through a warp: positions, and normals by the warp's local inverse transpose */
-function warpGeo(g: THREE.BufferGeometry, warp: Rig['warp']): THREE.BufferGeometry {
-  const p = g.attributes.position as THREE.BufferAttribute;
-  const n = g.attributes.normal as THREE.BufferAttribute | undefined;
-  const e = 0.05;
-  const m = new THREE.Matrix3();
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    const y = p.getY(i);
-    const z = p.getZ(i);
-    const o = warp(x, y, z);
-    if (n) {
-      const ax = warp(x + e, y, z);
-      const ay = warp(x, y + e, z);
-      const az = warp(x, y, z + e);
-      // columns: the warp's partial derivatives
-      m.set((ax[0] - o[0]) / e, (ay[0] - o[0]) / e, (az[0] - o[0]) / e, (ax[1] - o[1]) / e, (ay[1] - o[1]) / e, (az[1] - o[1]) / e, (ax[2] - o[2]) / e, (ay[2] - o[2]) / e, (az[2] - o[2]) / e);
-      m.invert().transpose();
-      v.set(n.getX(i), n.getY(i), n.getZ(i)).applyMatrix3(m).normalize();
-      n.setXYZ(i, v.x, v.y, v.z);
-    }
-    p.setXYZ(i, o[0], o[1], o[2]);
-  }
-  p.needsUpdate = true;
-  g.computeBoundingSphere();
-  return g;
-}
-
-type Geos = {
-  paint: THREE.BufferGeometry;
-  glass: THREE.BufferGeometry;
-  carbon: THREE.BufferGeometry;
-  accent: THREE.BufferGeometry;
-  grille: THREE.BufferGeometry;
-  head: THREE.BufferGeometry;
-  tail: THREE.BufferGeometry;
-  tyre: THREE.BufferGeometry;
-  rim: THREE.BufferGeometry;
-  rimLip: THREE.BufferGeometry;
-  disc: THREE.BufferGeometry;
-  nozzle: THREE.BufferGeometry;
-  flame: THREE.BufferGeometry;
-};
-const geoCache = new Map<number, Geos>();
-
-function geos(body = 0): Geos {
-  const hit = geoCache.get(body);
-  if (hit) return hit;
-  const R = rig(body);
-  const wing = R.shape.wing;
-  // the arches in the shape's frame, so they land on the physics wheels once warped
-  const arches: Arches = [
-    [R.wheels[0][0] / R.shape.fx, R.wheels[0][2], R.wheels[0][2] + 3.6],
-    [R.wheels[2][0] / R.shape.rx, R.wheels[2][2], R.wheels[2][2] + 3.6],
-  ];
-  const paint: THREE.BufferGeometry[] = [];
-  const carbon: THREE.BufferGeometry[] = [];
-  const accent: THREE.BufferGeometry[] = [];
-
-  // the hull and the two side bodies
-  paint.push(loft(-56, 78.5, hullSec, { nu: 72, nv: 40, round: 7 }));
-  for (const sy of [-1, 1]) paint.push(loft(-55, 77, sideSec(sy, arches), { nu: 150, nv: 32, round: 6 }));
-  // a scoop on the hood, open at the front
-  paint.push(loft(38, 61, (x) => ({ w: 8 - Math.max(0, x - 50) * 0.12, zb: pl(hullTop, x) - 3, zt: pl(hullTop, x) + 2.6 - Math.max(0, x - 52) * 0.08, n: 4 }), { nu: 18, nv: 18, round: 2.5 }));
-  carbon.push(new THREE.PlaneGeometry(12, 3).rotateY(Math.PI / 2).translate(61.2, 0, pl(hullTop, 61) + 0.9));
-  // the cabin: a raked screen, a short flat roof, the glass wrapping down to the shoulders
-  const cabTop: [number, number][] = [
-    [37, 20],
-    [28, 27],
-    [18, 34.5],
-    [8, 40],
-    [-4, 42.2],
-    [-18, 42.2],
-    [-28, 40],
-    [-36, 35],
-    [-43, 29.5],
-  ];
-  const cabW: [number, number][] = [
-    [37, 24.5],
-    [20, 25.5],
-    [-20, 25],
-    [-43, 22.5],
-  ];
-  const cabSec = (x: number): Sec => ({ w: pl(cabW, x), zb: pl(hullTop, x) - 3, zt: pl(cabTop, x), n: 3.4, tumble: 0.34 });
-  const glass = loft(-43, 37, cabSec, { nu: 44, nv: 40, round: 5 });
-  // the painted roof, a hair proud of the glass, and the pillars down each corner
-  paint.push(
-    loft(
-      -34,
-      9,
-      (x) => {
-        const s = cabSec(x);
-        return { ...s, w: s.w + 0.5, zt: s.zt + 0.6, zb: s.zb - 0.5 };
-      },
-      { nu: 28, nv: 20, round: 7, a0: Math.PI * 0.2, a1: Math.PI * 0.8 },
-    ),
-  );
-  for (const sy of [-1, 1]) {
-    // A pillars: along the screen's edge; C pillars: wide, swept into the haunches
-    paint.push(loft(10, 34, (x) => { const s = cabSec(x); const k = pl([[34, 0], [10, 1]], x); return { w: 2.2, yc: sy * (s.w - 1.2 - k * 6.5), zb: s.zb + 1, zt: s.zt + 0.5, n: 3 }; }, { nu: 16, nv: 12, round: 2 }));
-    paint.push(loft(-42, -22, (x) => { const s = cabSec(x); return { w: 5.5, yc: sy * (s.w - 4.6), zb: s.zb, zt: s.zt + 0.5, n: 3, tumble: 0.4 }; }, { nu: 16, nv: 14, round: 3 }));
-  }
-  // the wing: a blade on two struts over the deck (low and wide, or up high), endplates in carbon,
-  // the blade in the accent; or a ducktail, or a shark fin, or nothing
-  if (wing === 'blade' || wing === 'wide' || wing === 'tall') {
-    const zw = wing === 'tall' ? 46 : wing === 'wide' ? 33 : 37;
-    const ww = wing === 'wide' ? 36 : wing === 'tall' ? 29 : 32;
-    accent.push(loft(-60, -48, (x) => { const t = (x + 60) / 12; const th = 1.0 + 2.2 * Math.sin(Math.PI * Math.min(1, t * 1.25)) ** 0.7; return { w: ww, zb: zw + t * 1.6 - th * 0.35, zt: zw + t * 1.6 + th * 0.65, n: 8 }; }, { nu: 16, nv: 20, round: 1.2 }));
-    for (const sy of [-1, 1]) {
-      carbon.push(loft(-61, -47, (x) => ({ w: 0.7, yc: sy * (ww + 0.4), zb: zw - 3.5 + (x + 61) * 0.12, zt: zw + 3.5 + (x + 61) * 0.05, n: 4 }), { nu: 8, nv: 10, round: 3 }));
-      const sh = zw - 28.5;
-      const strut = new THREE.BoxGeometry(4.5, 1.6, sh);
-      strut.rotateY(0.28);
-      strut.translate(-51, sy * 15, 28.5 + sh / 2);
-      carbon.push(strut);
-    }
-  } else if (wing === 'duck') {
-    accent.push(loft(-58, -45, (x) => { const t = (x + 58) / 13; return { w: 26 - t * 2, zb: 26 + t * 1.5, zt: 33.5 - t * 3.5, n: 5, tumble: 0.2 }; }, { nu: 14, nv: 18, round: 3 }));
-  } else if (wing === 'fin') {
-    accent.push(loft(-57, -24, (x) => { const t = (x + 57) / 33; return { w: 0.9, zb: 24, zt: 41 - t * 13, n: 3 }; }, { nu: 18, nv: 10, round: 4 }));
-    accent.push(loft(-58, -50, () => ({ w: 25, zb: 28.5, zt: 31, n: 6 }), { nu: 8, nv: 12, round: 2 }));
-  } else {
-    // a roof rack and a bull bar
-    for (const rx of [-22, -6, 6]) carbon.push(new THREE.BoxGeometry(2.2, 46, 1.8).translate(rx, 0, 44.5));
-    for (const sy of [-1, 1]) {
-      accent.push(new THREE.BoxGeometry(34, 1.8, 1.8).translate(-8, sy * 22, 44.5));
-      carbon.push(new THREE.BoxGeometry(1.8, 1.8, 13).translate(80, sy * 16, 8));
-    }
-    carbon.push(new THREE.BoxGeometry(2, 40, 2).translate(80.5, 0, 14));
-    carbon.push(new THREE.BoxGeometry(2, 40, 2).translate(80.5, 0, 5));
-  }
-  // nose: a bumper with a splitter; tail: a finned diffuser; sides: skirts and intakes
-  carbon.push(loft(63, 80.5, (x) => ({ w: 30 - Math.max(0, x - 72) * 1.1, zb: 0.5 + Math.max(0, x - 70) * 0.25, zt: 6.5, n: 4.5 }), { nu: 14, nv: 20, round: 4 }));
-  carbon.push(new THREE.BoxGeometry(14, 58, 1.1).translate(74.5, 0, 0.3));
-  carbon.push(loft(-58, -44, () => ({ w: 26, zb: 1, zt: 8.5, n: 4.5 }), { nu: 10, nv: 20, round: 3 }));
-  for (const fy of [-16, -6, 6, 16]) carbon.push(new THREE.BoxGeometry(11, 0.9, 5.5).translate(-55, fy, 2.8));
-  for (const sy of [-1, 1]) {
-    carbon.push(new THREE.BoxGeometry(40, 2.2, 3.4).translate(12, sy * 40.6, 2.2));
-    const intake = new THREE.BoxGeometry(10, 1.6, 7.5);
-    intake.rotateX(sy * -0.34);
-    intake.rotateZ(sy * 0.2);
-    intake.translate(26.5, sy * 39.6, 11.5);
-    carbon.push(intake);
-  }
-  carbon.push(new THREE.BoxGeometry(104, 50, 2).translate(12, 0, 2.5));
-  // dark wells lining each arch, so the openings read deep
-  for (const [wx, wr, AR2] of arches) {
-    for (const sy of [-1, 1]) {
-      // (a part-cylinder about the axle, y; the arc over the top of the tyre)
-      const well = new THREE.CylinderGeometry(AR2 - 0.6, AR2 - 0.6, 18, 28, 1, true, -Math.PI * 0.6, Math.PI * 1.2);
-      well.translate(wx, sy * 34.5, wz(wr));
-      carbon.push(well);
-    }
-  }
-  // the grille: a dark mesh in the bumper's face
-  const grille = new THREE.PlaneGeometry(6.5, 34, 1, 1);
-  grille.rotateY(Math.PI / 2 + 0.35);
-  grille.translate(78.2, 0, 7.2);
-  // lights: LED blades along the nose, fog lamps low, a full-width tail bar
-  const head: THREE.BufferGeometry[] = [];
-  const tail: THREE.BufferGeometry[] = [];
-  for (const sy of [-1, 1]) {
-    const h = new THREE.BoxGeometry(9, 1.4, 1.5);
-    h.rotateY(0.42);
-    h.rotateZ(sy * 0.42);
-    h.translate(71.4, sy * 19.5, 12.6);
-    head.push(h);
-    head.push(new THREE.CylinderGeometry(1.7, 1.7, 1, 14).rotateZ(Math.PI / 2).translate(79.1, sy * 21, 3.6));
-    tail.push(new THREE.BoxGeometry(1.4, 8, 3).translate(-55.4, sy * 23, 21.5));
-  }
-  tail.push(new THREE.BoxGeometry(1.2, 38, 1.1).translate(-55.8, 0, 22.8));
-
-  // tyre: a fat sidewall and rounded shoulders (axle along y, unit radius, width 1)
-  const tp: THREE.Vector2[] = [new THREE.Vector2(0.62, -0.47)];
-  for (let k = 0; k <= 10; k++) {
-    const a = (k / 10) * Math.PI;
-    tp.push(new THREE.Vector2(0.8 + 0.2 * Math.sin(a) ** 0.6, -0.5 + 0.5 * (1 - Math.cos(a))));
-  }
-  tp.push(new THREE.Vector2(0.62, 0.47));
-  const tyre = new THREE.LatheGeometry(tp, 44);
-  // the rim: a dish (outer face +y) with five split spokes and a centre cap
-  const dish = new THREE.LatheGeometry(
-    [new THREE.Vector2(0.001, 0.43), new THREE.Vector2(0.15, 0.43), new THREE.Vector2(0.19, 0.38), new THREE.Vector2(0.56, 0.2), new THREE.Vector2(0.6, 0.18), new THREE.Vector2(0.62, -0.3)],
-    32,
-  );
-  const spokes: THREE.BufferGeometry[] = [dish];
-  for (let k = 0; k < 5; k++) {
-    for (const off of [-0.07, 0.07]) {
-      const b = new THREE.BoxGeometry(0.07, 0.12, 0.44);
-      b.rotateX(0.32);
-      b.translate(off, 0.33, 0.37);
-      b.rotateY((k / 5) * Math.PI * 2);
-      spokes.push(b.toNonIndexed());
-    }
-  }
-  const rim = mergeGeometries(spokes.map((g) => (g.index ? g.toNonIndexed() : g)));
-  const rimLip = new THREE.TorusGeometry(0.64, 0.035, 8, 40);
-  rimLip.rotateX(Math.PI / 2);
-  rimLip.translate(0, 0.42, 0);
-  const disc = mergeGeometries([new THREE.CylinderGeometry(0.5, 0.5, 0.06, 28).translate(0, 0.05, 0), new THREE.BoxGeometry(0.22, 0.22, 0.34).translate(0, 0.12, 0.42)].map((g) => g.toNonIndexed()));
-  const nozzle = new THREE.CylinderGeometry(5.6, 4.2, 10, 24, 1, true);
-  nozzle.rotateZ(Math.PI / 2);
-  const flame = new THREE.ConeGeometry(1, 1, 18, 6, true);
-  flame.rotateZ(Math.PI / 2);
-  flame.translate(-0.5, 0, 0);
-  const m = (a: THREE.BufferGeometry[]) => mergeGeometries(a);
-  const w = (g: THREE.BufferGeometry) => (body === 0 ? g : warpGeo(g, R.warp));
-  const out: Geos = {
-    paint: w(m(paint)),
-    glass: w(glass),
-    carbon: w(m(carbon)),
-    accent: w(m(accent)),
-    grille: w(grille),
-    head: w(m(head)),
-    tail: w(m(tail)),
-    tyre,
-    rim,
-    rimLip,
-    disc,
-    nozzle,
-    flame,
-  };
-  geoCache.set(body, out);
-  return out;
-}
-
-/** knobbly tread for the bump map: offset blocks with a centre rib */
+/** a slick's tread for the bump map: three circumferential grooves and fine sipes, a raised
+ * lettering band on the sidewall (the lathe's v runs across the tyre) */
 let treadTex: THREE.CanvasTexture | null = null;
 function tread(): THREE.CanvasTexture {
   if (treadTex) return treadTex;
   const c = document.createElement('canvas');
   c.width = 512;
-  c.height = 64;
+  c.height = 256;
   const x = c.getContext('2d')!;
-  x.fillStyle = '#000';
-  x.fillRect(0, 0, 512, 64);
   x.fillStyle = '#fff';
-  const n = 24;
-  for (let i = 0; i < n; i++) {
-    const u = (i / n) * 512;
-    const w = 512 / n;
-    x.fillRect(u + 2, i % 2 ? 2 : 6, w * 0.62, 16);
-    x.fillRect(u + 2, i % 2 ? 46 : 42, w * 0.62, 16);
-    x.beginPath();
-    x.moveTo(u + 3, 24);
-    x.lineTo(u + w * 0.45, 32);
-    x.lineTo(u + 3, 40);
-    x.lineTo(u + w * 0.3, 40);
-    x.lineTo(u + w * 0.75, 32);
-    x.lineTo(u + w * 0.3, 24);
-    x.fill();
+  x.fillRect(0, 0, 512, 256);
+  x.fillStyle = '#000';
+  for (const v of [0.4, 0.5, 0.6]) x.fillRect(0, v * 256 - 2, 512, 4);
+  x.fillStyle = '#777';
+  for (let i = 0; i < 64; i++) {
+    const u = (i / 64) * 512;
+    x.fillRect(u, 0.33 * 256, 2, 0.06 * 256);
+    x.fillRect(u + 4, 0.61 * 256, 2, 0.06 * 256);
   }
+  // sidewall rings
+  x.fillStyle = '#bbb';
+  for (const v of [0.12, 0.88]) x.fillRect(0, v * 256 - 3, 512, 6);
   treadTex = new THREE.CanvasTexture(c);
   treadTex.wrapS = THREE.RepeatWrapping;
   treadTex.anisotropy = 4;
@@ -638,9 +97,8 @@ export class CarView {
     this.team = team;
     const look = unpackLoadout(color);
     this.loadout = look;
-    const R = rig(look.body);
+    const { g, rig: R } = carModel(look.body);
     this.rest = -R.ground;
-    const g = geos(look.body);
     const teamC = new THREE.Color(TEAM_COLORS[team]);
     const accC = new THREE.Color(look.accent);
     // the paint: candy gloss (a saturated base under a mirror clear coat), matte, metallic or pearl
@@ -656,7 +114,7 @@ export class CarView {
     const uDecal = { value: look.decal };
     const uArchF = { value: new THREE.Vector3(...R.archF) };
     const uArchR = { value: new THREE.Vector3(...R.archR) };
-    const uWk = { value: R.shape.wk };
+    const uWk = { value: R.wk };
     const uFlake = { value: look.finish === 1 ? 0 : look.finish === 2 ? 1.6 : 1 };
     this.paint.onBeforeCompile = (sh) => {
       sh.uniforms.uAcc = uAcc;
@@ -718,8 +176,11 @@ export class CarView {
           seam = max(seam, (1.0 - smoothstep(0.12, 0.3, abs(o.x + 12.0))) * step(33.0, ay) * step(4.0, o.z));
           seam = max(seam, (1.0 - smoothstep(0.12, 0.3, abs(o.x - 30.0))) * step(33.0, ay) * step(4.0, o.z) * step(o.z, 20.0));
           diffuseColor.rgb *= 1.0 - seam * 0.7;
-          // dark rockers along the bottom
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.025), smoothstep(5.5, 4.0, o.z));`,
+          // the wheel wells: dark inside each arch
+          float well = max(step(length(o.xz - uArchF.xy), uArchF.z - 0.5), step(length(o.xz - uArchR.xy), uArchR.z - 0.5));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.018), well);
+          // dark sills along the bottom
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03), smoothstep(-8.0, -10.0, o.z));`,
         )
         .replace(
           '#include <normal_fragment_maps>',
@@ -739,8 +200,9 @@ export class CarView {
     const accentM = new THREE.MeshPhysicalMaterial({ color: accC, metalness: look.finish === 2 ? 0.85 : 0.5, roughness: look.finish === 1 ? 0.55 : 0.26, clearcoat: look.finish === 1 ? 0.1 : 1, clearcoatRoughness: 0.05 });
     const grilleM = new THREE.MeshStandardMaterial({ map: grilleTex(), roughness: 0.6, metalness: 0.3 });
     grilleM.map!.repeat.set(1, 1);
-    const rubber = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.86, metalness: 0, bumpMap: tread(), bumpScale: 3 });
-    const rimM = new THREE.MeshPhysicalMaterial({ color: accC.clone().lerp(new THREE.Color(0xd8dce4), 0.35), roughness: 0.22, metalness: 0.75, clearcoat: 0.8, envMapIntensity: 1.7 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.86, metalness: 0, bumpMap: tread(), bumpScale: 1.2 });
+    // gunmetal rims (a painted accent shows on the calipers and the centre caps)
+    const rimM = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(0x3a3e46).lerp(accC, look.accent === 0xffffff ? 0 : 0.18), roughness: 0.28, metalness: 0.85, clearcoat: 0.8, envMapIntensity: 1.6 });
     const chrome = new THREE.MeshStandardMaterial({ color: 0xe8ecf2, roughness: 0.12, metalness: 1, envMapIntensity: 2 });
     const discM = new THREE.MeshStandardMaterial({ color: 0x3a3c42, roughness: 0.45, metalness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.5, metalness: 0.5 });
@@ -788,19 +250,20 @@ export class CarView {
     this.coreMat.uniforms.uHot.value = 1;
     for (const sy of [-1, 1]) {
       const nz = add(g.nozzle, nozzleM, false);
-      nz.position.set(...R.warp(-55, sy * 12, 12.5));
+      const [jx, jy, jz] = R.jets[sy < 0 ? 1 : 0];
+      nz.position.set(jx + 1, jy, jz);
       // the glow sits deep in the pipe: a dark bore at rest, white-hot when boosting
-      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(...R.warp(-52.5, sy * 12, 12.5)), this.nozzleGlow, false);
-      this.jets.push(new THREE.Vector3(...R.warp(-63, sy * 11, 12.5)));
+      add(new THREE.CircleGeometry(4.2, 18).rotateY(-Math.PI / 2).translate(jx + 3.5, jy, jz), this.nozzleGlow, false);
+      this.jets.push(new THREE.Vector3(jx - 7, jy, jz));
       const fl = new THREE.Mesh(g.flame, this.flameMat);
-      fl.position.set(...R.warp(-60, sy * 12, 12.5));
+      fl.position.set(jx - 4, jy, jz);
       fl.scale.set(60, 5.4, 5.4);
       fl.renderOrder = 9;
       fl.frustumCulled = false;
       this.group.add(fl);
       this.flames.push(fl);
       const core = new THREE.Mesh(g.flame, this.coreMat);
-      core.position.set(...R.warp(-58, sy * 12, 12.5));
+      core.position.set(jx - 2, jy, jz);
       core.renderOrder = 10;
       core.frustumCulled = false;
       this.group.add(core);
@@ -825,7 +288,7 @@ export class CarView {
     // an antenna off the rear deck, leaning back, with a little team-coloured topper
     {
       const d = new THREE.Vector3(-Math.sin(0.3), 0, Math.cos(0.3));
-      const base = new THREE.Vector3(...R.warp(-40, 17, 28.2));
+      const base = new THREE.Vector3(...R.antenna);
       const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.45, 30, 6), dark);
       rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
       rod.position.copy(base).addScaledVector(d, 15);
@@ -836,11 +299,11 @@ export class CarView {
       this.group.add(top);
     }
     // wheels: the right-hand ones mirrored so every rim's face looks out
-    for (const [wx, wy, wr, z0] of R.wheels) {
+    const caliperM = new THREE.MeshPhysicalMaterial({ color: accC.clone().lerp(new THREE.Color(0xff2a1a), look.accent === 0xffffff ? 0.8 : 0), roughness: 0.35, metalness: 0.3, clearcoat: 1 });
+    for (const [wx, wy, wr, z0, w] of R.wheels) {
       const pivot = new THREE.Group();
       const spin = new THREE.Group();
       pivot.position.set(wx, wy, z0);
-      const w = wr < 16 ? 13 : 15.5;
       const side = Math.sign(wy);
       const t = new THREE.Mesh(g.tyre, rubber);
       t.scale.set(wr, w, wr);
@@ -852,7 +315,9 @@ export class CarView {
       spin.add(t, rm, lip);
       const dc = new THREE.Mesh(g.disc, discM);
       dc.scale.set(wr, w * side, wr);
-      pivot.add(spin, dc);
+      const cp = new THREE.Mesh(g.caliper, caliperM);
+      cp.scale.set(wr, w * side, wr);
+      pivot.add(spin, dc, cp);
       this.group.add(pivot);
       this.wheels.push({ pivot, spin, r: wr, front: wx > 0, z0 });
     }

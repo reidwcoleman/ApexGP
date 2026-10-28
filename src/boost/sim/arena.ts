@@ -149,9 +149,12 @@ export function normalAt(x: number, y: number, z: number, out: V3): V3 {
 export type Team = 0 | 1; // 0 blue (defends y < 0), 1 orange
 
 /** true when the whole ball has crossed into this team's goal */
+/** a goal, exactly as RocketSim (and the real game) score one: the ball's centre past the base
+ * threshold (5124.25) plus its radius */
+const GOAL_THRESHOLD_Y = 5124.25;
 export function inGoal(p: V3, radius: number): Team | -1 {
-  if (p.y < -(ARENA.Y + radius)) return 0;
-  if (p.y > ARENA.Y + radius) return 1;
+  if (p.y < -(GOAL_THRESHOLD_Y + radius)) return 0;
+  if (p.y > GOAL_THRESHOLD_Y + radius) return 1;
   return -1;
 }
 
