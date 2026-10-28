@@ -24,11 +24,14 @@ interface BallPt {
 }
 
 let pathTick = -1;
+let pathWorld: World | null = null;
 let path: BallPt[] = [];
 
-/** the ball's next 3 s (shared by every bot, refreshed every few ticks) */
+/** the ball's next 3 s (shared by every bot of a match, refreshed every few ticks) */
 function ballPath(w: World): BallPt[] {
-  if (w.tick - pathTick < 4 && path.length) return path;
+  // (a new match is a new world whose clock starts again from zero)
+  if (w === pathWorld && w.tick >= pathTick && w.tick - pathTick < 4 && path.length) return path;
+  pathWorld = w;
   pathTick = w.tick;
   const b = new Ball();
   b.pos.copy(w.ball.pos);

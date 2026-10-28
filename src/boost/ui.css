@@ -214,3 +214,12 @@
 #ui .padfocus { outline: 3px solid #ffd34a !important; outline-offset: 2px; }
 #ui .mbtn.padfocus { background: linear-gradient(90deg, rgba(47, 123, 255, 0.55), rgba(255, 122, 31, 0.15)); transform: skewX(-10deg) translateX(8px); box-shadow: inset 4px 0 0 var(--orange); }
 #ui .mbtn.primary.padfocus { background: linear-gradient(90deg, #4a8dff, var(--blue)); }
+
+/* points pop-ups */
+.awards { position: absolute; left: 50%; bottom: 17vh; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.awards div { display: flex; align-items: baseline; gap: 12px; padding: 5px 18px; background: linear-gradient(90deg, transparent, rgba(6, 9, 18, 0.8) 18%, rgba(6, 9, 18, 0.8) 82%, transparent); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 0.06em; animation: awardin 0.28s cubic-bezier(0.2, 1.5, 0.4, 1); transition: opacity 0.45s, transform 0.45s; }
+.awards div b { font-size: 20px; color: #fff; }
+.awards div i { font-size: 20px; color: #ffd34a; font-style: italic; }
+.awards div.big b, .awards div.big i { font-size: 26px; }
+.awards div.out { opacity: 0; transform: translateY(-10px); }
+@keyframes awardin { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }

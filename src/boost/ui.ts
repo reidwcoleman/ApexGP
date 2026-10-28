@@ -188,6 +188,7 @@ export class UI {
   <div class="replay" id="h-replay">REPLAY<small>ENTER TO SKIP</small></div>
   <div class="tip" id="h-tip"></div>
   <div class="toast" id="h-toast"></div>
+  <div class="awards" id="h-awards"></div>
 </div>
 
 <div class="overlay" id="o-board" hidden><div class="board" id="board"></div></div>
@@ -587,6 +588,18 @@ export class UI {
     t.classList.add('on');
     clearTimeout(this.toastT);
     this.toastT = window.setTimeout(() => t.classList.remove('on'), ms);
+  }
+
+  /** a points pop-up for you, stacking like the arena game's */
+  award(what: string, pts: number): void {
+    const box = this.$('#h-awards');
+    const d = document.createElement('div');
+    d.innerHTML = `<b>${esc(what)}</b><i>+${pts}</i>`;
+    if (pts >= 50) d.classList.add('big');
+    box.prepend(d);
+    while (box.children.length > 4) box.lastElementChild!.remove();
+    setTimeout(() => d.classList.add('out'), 2200);
+    setTimeout(() => d.remove(), 2700);
   }
 
   board(show: boolean, rows?: { name: string; team: number; st: Stats; me: boolean; ping?: number }[], score?: [number, number]): void {

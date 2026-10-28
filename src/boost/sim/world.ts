@@ -1,4 +1,4 @@
-import { inGoal, KICKOFFS, PADS, type Team } from './arena.ts';
+import { ARENA, inGoal, KICKOFFS, PADS, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
 import { Car, noInput, type Input } from './car.ts';
 import { rng, V3 } from './math.ts';
@@ -55,6 +55,8 @@ export type WEvent =
   | { t: 'go' }
   | { t: 'save'; car: number }
   | { t: 'shot'; car: number }
+  /** points the way the arena game hands them out (shown as a pop-up for that player) */
+  | { t: 'award'; car: number; what: string; pts: number }
   | { t: 'end' }
   | { t: 'overtime' };
 
@@ -105,6 +107,11 @@ export class World {
   private zeroWait = false;
   /** a shot is on frame toward this team's goal (0/1), else -1 */
   private shotOn: Team | -1 = -1;
+  private touchCtx: ({ aerial: boolean; backwards: boolean; long: boolean; bicycle: boolean; turtle: boolean } | undefined)[] = [];
+  private lastTouchPts: number[] = [];
+  private lastStyle: number[] = [];
+  /** teammates who've celebrated this goal with the scorer */
+  private fived = new Set<number>();
 
   constructor() {
     // match our pad list to RocketSim's by position
@@ -390,6 +397,7 @@ export class World {
     // (after a goal the ball is parked out of reach, held still, until the kickoff)
     const ballLive = this.phase === 'play' || this.phase === 'countdown';
     this.rs.step(1);
+    const touched: [number, number][] = [];
     for (let i = 0; i < this.cars.length; i++) {
       const c = this.cars[i];
       const wasAlive = c.alive;
@@ -412,7 +420,7 @@ export class World {
       if (hit >= 0 && hit !== this.prevHit[i] && ballLive) {
         this.prevHit[i] = hit;
         const rel = new V3().subVectors(this.ballVelAfter(), c.vel);
-        this.touch(i, rel.len());
+        touched.push([i, rel.len()]);
       } else this.prevHit[i] = hit;
     }
     if (ballLive) {
@@ -421,6 +429,8 @@ export class World {
       if (this.prevBallVz < -150 && vz > 0 && this.ball.pos.z < 200) this.events.push({ t: 'bounce', speed: -this.prevBallVz });
       this.prevBallVz = vz;
     }
+    // (touches are judged on the ball as it leaves the car, so after it's been read back)
+    for (const [i, power] of touched) this.touch(i, power);
     // boost pads: RocketSim picks them up and times them; we mirror the state and say who took one
     const pst = new Float64Array(this.rs.padCount() * 3);
     this.rs.getPads(pst);
@@ -451,9 +461,18 @@ export class World {
       const v = this.cars[vi];
       if (demo) {
         this.stats[hi].demos++;
-        this.stats[hi].score += 10;
+        if (this.stats[hi].demos === 7) this.award(hi, 'Extermination', 20);
         this.events.push({ t: 'demo', by: hi, car: vi, x: v.pos.x, y: v.pos.y, z: v.pos.z });
-      } else this.events.push({ t: 'bump', car: vi, power: this.cars[hi].vel.len() });
+      } else {
+        this.events.push({ t: 'bump', car: vi, power: this.cars[hi].vel.len() });
+        // celebrating: bump the scorer (both in the air: a high five)
+        const lg = this.lastGoal;
+        if (this.phase === 'goal' && lg && vi === lg.scorer && this.players[hi]?.team === lg.team && !this.fived.has(hi)) {
+          this.fived.add(hi);
+          const high = !this.cars[hi].onGround && !v.onGround;
+          this.award(hi, high ? 'High five' : 'Low five', high ? 20 : 5);
+        }
+      }
     }
 
     if (this.phase === 'play' && this.authority) {
@@ -504,14 +523,28 @@ export class World {
     const scorerT = this.touches.find(([c]) => this.players[c]?.team === team);
     const scorer = scorerT ? scorerT[0] : -1;
     let assist = -1;
+    this.fived.clear();
     if (scorer >= 0) {
-      const a = this.touches.find(([c, t]) => c !== scorer && this.players[c]?.team === team && this.tick - t < 120 * 5);
+      // an assist: a teammate's touch shortly before the scorer's
+      const sT = scorerT![1];
+      const a = this.touches.find(([c, t]) => c !== scorer && this.players[c]?.team === team && sT - t < 120 * 3 && t <= sT);
       if (a) assist = a[0];
-      this.stats[scorer].goals++;
-      this.stats[scorer].score += 100;
+      const st = this.stats[scorer];
+      st.goals++;
+      st.score += 100;
+      // the flourishes: how the last touch was made
+      const k = this.touchCtx[scorer];
+      if (k) {
+        const flourish = k.turtle ? 'Turtle goal' : k.bicycle ? 'Bicycle goal' : k.aerial ? 'Aerial goal' : k.backwards ? 'Backwards goal' : k.long ? 'Long goal' : '';
+        if (flourish) this.award(scorer, flourish, 20);
+      }
+      if (this.overtime) this.award(scorer, 'Overtime goal', 25);
+      if (st.goals === 3) this.award(scorer, 'Hat trick', 25);
       if (assist >= 0) {
-        this.stats[assist].assists++;
-        this.stats[assist].score += 50;
+        const sa = this.stats[assist];
+        sa.assists++;
+        this.award(assist, 'Assist', 50);
+        if (sa.assists === 3) this.award(assist, 'Playmaker', 25);
       }
     }
     const b = this.ball.pos;
@@ -531,7 +564,15 @@ export class World {
       this.touches[0][1] = this.tick;
       if (this.tick - this.shotCheck < 6) return;
     } else {
-      if (!this.touches.length || this.touches[0][0] !== i || this.tick - this.touches[0][1] > 30) st.touches++;
+      if (!this.touches.length || this.touches[0][0] !== i || this.tick - this.touches[0][1] > 30) {
+        st.touches++;
+        // a ball touch: 2 points, with a short cooldown
+        if (this.authority && this.phase === 'play' && this.tick - (this.lastTouchPts[i] ?? -999) > 60) {
+          st.score += 2;
+          this.lastTouchPts[i] = this.tick;
+        }
+      }
+      this.noteTouch(i);
       this.touches = [[i, this.tick] as [number, number], ...this.touches.filter(([c]) => c !== i)].slice(0, 6);
       this.events.push({ t: 'hit', car: i, power });
     }
@@ -539,17 +580,54 @@ export class World {
     this.shotCheck = this.tick;
     // after the touch: is it on frame?
     const on = this.predictGoal();
+    const b = this.ball;
+    const dirY = team === 0 ? 1 : -1;
+    const fromOwn = (b.pos.y + dirY * ARENA.Y) * dirY;
     if (prevOn === team && on !== team) {
       st.saves++;
-      st.score += 50;
+      // an epic save: it was about to go in
+      const epic = fromOwn < 650 && Math.abs(b.pos.x) < ARENA.GOAL_W + 250;
+      this.award(i, epic ? 'Epic save' : 'Save', epic ? 75 : 50);
       this.events.push({ t: 'save', car: i });
-    }
-    if (on === 1 - team && prevOn !== on) {
+      if (st.saves === 3) this.award(i, 'Savior', 25);
+    } else if (on === 1 - team && prevOn !== on) {
       st.shots++;
-      st.score += 20;
+      this.award(i, 'Shot on goal', 10);
       this.events.push({ t: 'shot', car: i });
+    } else if (on === -1 && this.tick - (this.lastStyle[i] ?? -999) > 240) {
+      // a clear out of our end, or a centre from the attacking corners
+      const toward = b.vel.y * dirY;
+      if (fromOwn < 2800 && toward > 900) {
+        this.award(i, 'Clear ball', 20);
+        this.lastStyle[i] = this.tick;
+      } else if (fromOwn > ARENA.Y * 2 - 2800 && Math.abs(b.pos.x) > 1300 && b.vel.x * Math.sign(b.pos.x) < -600) {
+        this.award(i, 'Center ball', 10);
+        this.lastStyle[i] = this.tick;
+      }
     }
     this.shotOn = on;
+  }
+
+  private award(i: number, what: string, pts: number): void {
+    const st = this.stats[i];
+    if (!st || !this.authority) return;
+    st.score += pts;
+    this.events.push({ t: 'award', car: i, what, pts });
+  }
+
+  /** how car i is touching the ball now (for the goal flourishes) */
+  private noteTouch(i: number): void {
+    const c = this.cars[i];
+    const dirY = this.players[i].team === 0 ? 1 : -1;
+    const toGoal = new V3(-c.pos.x * 0.3, dirY * ARENA.Y - c.pos.y, 0).norm();
+    const air = !c.onGround && !c.bodyTouch;
+    this.touchCtx[i] = {
+      aerial: air && this.ball.pos.z > 300,
+      backwards: c.rot.f.dot(toGoal) < -0.55 && c.vel.dot(c.rot.f) < -200,
+      long: c.pos.y * dirY < 0,
+      bicycle: air && c.rot.u.z < -0.25 && this.ball.pos.z > 200,
+      turtle: c.rot.u.z < -0.7 && c.pos.z < 80,
+    };
   }
 
   /** run a copy of the ball 2.5 s ahead: whose goal does it end up in? */

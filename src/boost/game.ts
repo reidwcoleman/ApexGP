@@ -741,7 +741,7 @@ export class Game {
     };
     const playing = this.mode !== 'attract';
     // the host relays the rules' events to guests
-    if (this.mode === 'host' && this.host && !remote && ['goal', 'demo', 'save', 'shot', 'end', 'overtime'].includes(e.t)) {
+    if (this.mode === 'host' && this.host && !remote && ['goal', 'demo', 'save', 'shot', 'award', 'end', 'overtime'].includes(e.t)) {
       this.host.broadcast({ t: 'ev', ev: e });
       if (e.t === 'goal' || e.t === 'end') this.host.broadcast({ t: 'stats', stats: w.stats });
     }
@@ -837,11 +837,13 @@ export class Game {
       }
       case 'save':
         if (playing) this.ui.feed(`Save! · ${name(e.car)}`, w.players[e.car]?.team ?? -1);
-        if (e.car === this.me) this.ui.toast('SAVE  +50');
+        break;
+      case 'award':
+        if (playing && e.car === this.me) this.ui.award(e.what, e.pts);
+        if (playing && e.pts >= 75) this.ui.feed(`${e.what}! · ${name(e.car)}`, w.players[e.car]?.team ?? -1);
         break;
       case 'shot':
         if (playing) this.ui.feed(`Shot on goal · ${name(e.car)}`, w.players[e.car]?.team ?? -1);
-        if (e.car === this.me) this.ui.toast('SHOT ON GOAL  +20', 1400);
         break;
       case 'overtime':
         if (playing) this.ui.banner('Overtime', 'Next goal wins', -1, 2600);
