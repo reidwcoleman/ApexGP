@@ -2,6 +2,8 @@
 // brake, boost from rest, landing.   node --experimental-transform-types --no-warnings tools/boostdrive.mjs
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { noInput } from '../src/boost/sim/car.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 const mk = () => { const w = new World(); w.addCar({ name: 'a', team: 0, bot: false, skill: 1, color: 0, owner: 'l' }); w.start({ freeplay: true, unlimitedBoost: true }); w.phase = 'play'; const c = w.cars[0]; c.place(0, -3000, Math.PI / 2); w.ball.pos.set(4000, 4000, 93); return { w, c }; };
 // RLBot-measured max curvature by speed
 const ref = [[0, 0.0069], [500, 0.00398], [1000, 0.00235], [1500, 0.001375], [1750, 0.0011], [2300, 0.00088]];

@@ -1,6 +1,8 @@
 // Car against car: a bump, a supersonic demo, overlap separation, head-on.   node --experimental-transform-types --no-warnings tools/boostcars.mjs
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { noInput } from '../src/boost/sim/car.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 const mk = (teamB = 1) => { const w = new World(); w.addCar({ name: 'a', team: 0, bot: false, skill: 1, color: 0, owner: 'l' }); w.addCar({ name: 'b', team: teamB, bot: false, skill: 1, color: 0, owner: 'l' }); w.start({ freeplay: true }); w.phase = 'play'; w.ball.pos.set(-3000, 4000, 93); return { w, a: w.cars[0], b: w.cars[1] }; };
 { // a at 1400 into stationary b's side (T-bone)
   const { w, a, b } = mk(0); a.place(0, -400, Math.PI / 2); b.place(0, 0, 0); a.vel.set(0, 1400, 0);

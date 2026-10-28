@@ -2,6 +2,8 @@
 //   node --experimental-transform-types --no-warnings tools/boostbody.mjs
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { noInput } from '../src/boost/sim/car.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 const mk = () => { const w = new World(); w.addCar({ name: 'a', team: 0, bot: false, skill: 1, color: 0, owner: 'l' }); w.start({ freeplay: true }); w.phase = 'play'; const c = w.cars[0]; w.ball.pos.set(-3000, 4000, 93); return { w, c }; };
 { // airborne into the side wall, nose first, 1500 uu/s
   const { w, c } = mk(); c.place(3600, 0, 0); c.pos.z = 600; c.vel.set(1500, 0, 0);

@@ -1,6 +1,8 @@
 // Checks of the RocketSim-matched mechanics: node --experimental-transform-types --no-warnings tools/_boostmech.mjs
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { noInput } from '../src/boost/sim/car.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 const mk = () => {
   const w = new World();
   w.addCar({ name: 'a', team: 0, bot: false, skill: 1, color: 0, owner: 'local' });

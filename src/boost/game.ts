@@ -220,7 +220,7 @@ export class Game {
     this.setup([{ name: this.ui.profile.name, team: 0, bot: false, skill: 1, color: this.ui.profile.accent, owner: 'local' }], true);
     this.me = 0;
     this.world.start({ freeplay: true, unlimitedBoost: true });
-    this.world.ball.pos.set(0, 600, BALL.REST_Z);
+    this.world.placeBall(0, 600, BALL.REST_Z);
     this.enterMatch();
     this.ui.tip('Free play · unlimited boost · Enter resets the ball');
   }
@@ -309,8 +309,7 @@ export class Game {
       this.ui.board(false);
     } else if (a === 'skip') {
       if (this.mode === 'freeplay') {
-        this.world.ball.reset();
-        this.world.ball.pos.set(0, 0, BALL.REST_Z);
+        this.world.placeBall(0, 0, BALL.REST_Z);
         this.world.phase = 'play';
       } else if (this.world.phase === 'replay' && this.world.authority) this.world.phaseT = Math.min(this.world.phaseT, 0.05);
       else if (this.world.phase === 'replay') this.clipT = 99;

@@ -2,6 +2,8 @@
 //   node --experimental-transform-types --no-warnings tools/boostsim.mjs [size=2] [skill=0.6] [minutes=2]
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { Bot } from '../src/boost/sim/bot.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 const size = Number(process.argv[2] ?? 2), skill = Number(process.argv[3] ?? 0.6), minutes = Number(process.argv[4] ?? 2);
 const w = new World();
 for (const team of [0, 1]) for (let k = 0; k < size; k++) w.addCar({ name: `${team ? 'O' : 'B'}${k}`, team, bot: true, skill, color: 0, owner: 'bot' });

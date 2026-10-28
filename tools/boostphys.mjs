@@ -3,6 +3,8 @@
 import { World, TICK } from '../src/boost/sim/world.ts';
 import { noInput } from '../src/boost/sim/car.ts';
 import { sdf } from '../src/boost/sim/arena.ts';
+import { loadRocketSim } from '../src/boost/sim/rocketsim.ts';
+await loadRocketSim();
 
 const mk = () => {
   const w = new World();
@@ -64,8 +66,8 @@ const run = (w, n, f) => { for (let i = 0; i < n; i++) w.step([f(i * TICK)]); };
   w.ball.pos.set(0, 0, 1000); w.ball.vel.set(500, 0, 0);
   const zs = [];
   let prev = 0;
-  run(w, 600, () => { if (w.ball.bounce) zs.push(Math.round(w.ball.bounce)); return noInput(); });
-  console.log('ball bounces', zs.slice(0, 6).join(','), 'spin', w.ball.w.len().toFixed(2), 'vx', w.ball.vel.x.toFixed(0));
+  run(w, 600, () => { if (prev < -150 && w.ball.vel.z > 0) zs.push(Math.round(w.ball.vel.z)); prev = w.ball.vel.z; return noInput(); });
+  console.log('ball bounces (up speeds)', zs.slice(0, 6).join(','), 'spin', w.ball.w.len().toFixed(2), 'vx', w.ball.vel.x.toFixed(0));
 }
 {
   const { w, c } = mk();

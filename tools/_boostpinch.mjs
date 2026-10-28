@@ -3,6 +3,7 @@
 //   node --experimental-transform-types --no-warnings tools/_boostpinch.mjs [simDir]
 const dir = process.argv[2] ?? '../src/boost/sim';
 const { World, TICK } = await import(`${dir}/world.ts`);
+await (await import(`${dir}/rocketsim.ts`)).loadRocketSim();
 const { noInput } = await import(`${dir}/car.ts`);
 const mk = () => {
   const w = new World();

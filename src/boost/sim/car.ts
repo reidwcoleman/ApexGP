@@ -2,6 +2,9 @@ import { ARENA_MARGIN, normalAt, sdf, type Team } from './arena.ts';
 import { Basis, clamp, curve, V3 } from './math.ts';
 
 /**
+ * A car's state as the game reads it (filled from RocketSim every tick by World; see rocketsim.ts).
+ * step() below is the earlier TypeScript port of RocketSim's car, kept for reference and unused.
+ *
  * A car, ported from RocketSim (Car.cpp and its btVehicleRL), which matches the real game tick for
  * tick: the Octane's hitbox, inertia and wheels; four raycast suspensions with the game's stiffness,
  * damping, per-axle force scales and the extra push-back when a wheel bottoms out; per-wheel tyre

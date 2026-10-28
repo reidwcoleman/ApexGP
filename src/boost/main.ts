@@ -4,6 +4,7 @@ import '@fontsource/titillium-web/700-italic.css';
 import '@fontsource/titillium-web/900.css';
 import './ui.css';
 import { Game } from './game.ts';
+import { loadRocketSim } from './sim/rocketsim.ts';
 
 /** Boostball's own page (boost.html): nothing of the racing game is loaded. */
 
@@ -29,6 +30,8 @@ try {
   set(0.1, 'Painting the lines');
   await Promise.all([document.fonts.load('italic 900 40px "Titillium Web"'), document.fonts.load('700 40px "Titillium Web"')]).catch(() => undefined);
   await tick();
+  set(0.25, 'Starting the physics');
+  await loadRocketSim();
   set(0.35, 'Building the stadium');
   const game = new Game(document.getElementById('gl') as HTMLCanvasElement, document.getElementById('ui')!);
   window.__boost = game;
