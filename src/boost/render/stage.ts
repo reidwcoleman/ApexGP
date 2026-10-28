@@ -214,6 +214,33 @@ export class Stage {
     sc.environmentIntensity = t.envI;
   }
 
+  /** reflections of the real stadium: the arena rendered from above the centre spot into a cube,
+   * prefiltered for roughness. Cars and the ball reflect this, so their paint carries the actual
+   * stands, lights, pitch and sky of the arena they're in (cached per arena and time) */
+  private capCache = new Map<string, THREE.Texture>();
+  captureEnv(hide: THREE.Object3D[]): THREE.Texture {
+    const k = this.look.id + '/' + this.map.id;
+    const hit = this.capCache.get(k);
+    if (hit) return hit;
+    const rt = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType, generateMipmaps: false });
+    const cam = new THREE.CubeCamera(0.5, 6000, rt);
+    cam.position.set(0, 2.5, 0);
+    const was = hide.map((o) => o.visible);
+    hide.forEach((o) => (o.visible = false));
+    const fog = this.scene.fog;
+    // (no fog in the capture: reflections up close are sharp)
+    this.scene.fog = null;
+    cam.update(this.renderer, this.scene);
+    this.scene.fog = fog;
+    hide.forEach((o, i) => (o.visible = was[i]));
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const env = pm.fromCubemap(rt.texture).texture;
+    pm.dispose();
+    rt.dispose();
+    this.capCache.set(k, env);
+    return env;
+  }
+
   /** the old two-way switch */
   setDay(day: boolean): void {
     this.setLook(day ? TIMES.day : TIMES.night);

@@ -71,6 +71,8 @@ export class ChaseCam {
   ballCam = true;
   /** look behind (held): the rig turns to face back past the car's tail, no ball tracking */
   behind = false;
+  /** the right stick swinging the camera round the car (−1…1 each way): a full push looks back */
+  orbit = { x: 0, y: 0 };
   private wasBehind = false;
   private ballK = 1;
   private shakeT = 0;
@@ -118,6 +120,14 @@ export class ChaseCam {
       flat(t.f, up, hr, this.heading);
       return [hr.scale(-1), 0];
     }
+    const ox = this.orbit.x;
+    const oy = this.orbit.y;
+    if (Math.abs(ox) > 0.02 || Math.abs(oy) > 0.02) {
+      const hr = new V3();
+      flat(t.f, up, hr, this.heading);
+      rotate(hr, up, -ox * Math.PI).norm();
+      return [hr, Math.max(-0.3, Math.min(0.9, oy * 0.8))];
+    }
     const k = this.ballK;
     const h = new V3().copy(hc).scale(1 - k).addScaled(hb, k);
     if (h.len2() < 1e-4) h.copy(k > 0.5 ? hb : hc);
@@ -154,7 +164,8 @@ export class ChaseCam {
       this.lag = 0;
     }
     const da = angleAbout(this.heading, h, this.up);
-    const turn = 1 - Math.exp(-dt * (this.behind ? 30 : 10 + 2 * this.ballK));
+    const free = Math.abs(this.orbit.x) > 0.02 || Math.abs(this.orbit.y) > 0.02;
+    const turn = 1 - Math.exp(-dt * (this.behind ? 30 : free ? 16 : 10 + 2 * this.ballK));
     rotate(this.heading, this.up, da * turn).norm();
     this.pitch += (p - this.pitch) * (1 - Math.exp(-dt * 7));
     this.compute(t, dt, false);

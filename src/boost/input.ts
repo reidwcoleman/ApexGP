@@ -9,7 +9,9 @@ import { noInput, type Input } from './sim/car.ts';
  * scoreboard. PlayStation pads are read through the standard mapping, or their raw HID layout where
  * the browser gives no standard one; DualSense / DualShock rumble on hits, demos and goals.
  *
- * Holding air roll turns left/right into roll (yaw stops), as in the real game. Away from the car
+ * The right stick swings the camera round the car; the d-pad (or 1–4) opens quick chat, a second
+ * press picks the line. A jump or boost tap shorter than a physics tick is held for one tick so it
+ * still counts. Holding air roll turns left/right into roll (yaw stops), as in the real game. Away from the car
  * (menus, the lobby, pause) the pad's d-pad / stick moves a focus ring, Cross presses, Circle backs out.
  */
 
@@ -30,7 +32,11 @@ export type Act =
   | 'behind'
   | 'board'
   | 'reset'
-  | 'pause';
+  | 'pause'
+  | 'chat1'
+  | 'chat2'
+  | 'chat3'
+  | 'chat4';
 
 export const ACTS: { id: Act; name: string; pad: boolean }[] = [
   { id: 'forward', name: 'Drive forward', pad: true },
@@ -50,6 +56,10 @@ export const ACTS: { id: Act; name: string; pad: boolean }[] = [
   { id: 'board', name: 'Scoreboard', pad: true },
   { id: 'reset', name: 'Reset ball (free play) · skip replay', pad: true },
   { id: 'pause', name: 'Pause', pad: true },
+  { id: 'chat1', name: 'Quick chat: information', pad: true },
+  { id: 'chat2', name: 'Quick chat: compliments', pad: true },
+  { id: 'chat3', name: 'Quick chat: reactions', pad: true },
+  { id: 'chat4', name: 'Quick chat: apologies', pad: true },
 ];
 
 export type KeyBinds = Record<Act, [string, string]>;
@@ -73,6 +83,10 @@ export const DEFAULT_KEYS: KeyBinds = {
   board: ['Tab', ''],
   reset: ['Enter', 'Backspace'],
   pause: ['Escape', ''],
+  chat1: ['Digit1', ''],
+  chat2: ['Digit2', ''],
+  chat3: ['Digit3', ''],
+  chat4: ['Digit4', ''],
 };
 
 // standard-mapping button numbers
@@ -87,14 +101,21 @@ export const DEFAULT_PAD: PadBinds = {
   boost: 1,
   slide: 2,
   airRoll: 2,
-  rollLeft: 4,
-  rollRight: 5,
+  // (air roll left / right have no default on a controller in the genre's layout: hold Square instead)
+  rollLeft: -1,
+  rollRight: -1,
   ballCam: 3,
   behind: 11,
   board: 17,
   reset: 8,
   pause: 9,
+  chat1: 12,
+  chat2: 14,
+  chat3: 15,
+  chat4: 13,
 };
+/** the pad defaults before they matched the genre's exactly (profiles still on them are moved over) */
+export const OLD_PAD_ROLL = [4, 5];
 
 export interface PadSettings {
   deadzone: number;
@@ -205,10 +226,14 @@ function readPad(p: Gamepad): PadState {
   return { b, ax: [p.axes[0] ?? 0, p.axes[1] ?? 0, p.axes[2] ?? 0, p.axes[5] ?? 0], ps, pad: p };
 }
 
-type ActionEvent = 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip';
+type ActionEvent = 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'chat1' | 'chat2' | 'chat3' | 'chat4';
+const CHATS = ['chat1', 'chat2', 'chat3', 'chat4'] as const;
 
 export class Controls {
   private keys = new Set<string>();
+  /** presses since the last read, so a tap shorter than a tick still jumps (or boosts) */
+  private tapJump = false;
+  private tapBoost = false;
   /** edge events for the game */
   onAction: (a: ActionEvent) => void = () => {};
   /** a bind being captured: the next key, mouse button or pad button goes to it */
@@ -280,6 +305,9 @@ export class Controls {
     if (this.bound('ballCam', code)) this.onAction('ballcam');
     if (this.bound('board', code)) this.onAction('board');
     if (this.bound('reset', code)) this.onAction('skip');
+    if (this.bound('jump', code)) this.tapJump = true;
+    if (this.bound('boost', code)) this.tapBoost = true;
+    for (const c of CHATS) if (this.bound(c, code)) this.onAction(c);
   }
   private up(code: string): void {
     if (!this.keys.delete(code)) return;
@@ -346,8 +374,19 @@ export class Controls {
       if (press(this.padBinds.board)) this.onAction('board');
       if (release(this.padBinds.board)) this.onAction('boardUp');
       if (press(this.padBinds.reset)) this.onAction('skip');
+      if (press(this.padBinds.jump)) this.tapJump = true;
+      for (const c of CHATS) if (press(this.padBinds[c])) this.onAction(c);
     }
     this.prevB = b.slice();
+  }
+
+  /** the right stick: the camera swung round the car (x left/right, y up/down, −1…1) */
+  get look(): { x: number; y: number } {
+    const s = this.state;
+    if (!s || !this.enabled || this.menuMode || !this.lastPad) return { x: 0, y: 0 };
+    const dz = Math.max(0.15, this.pad.deadzone);
+    const dead = (x: number) => (Math.abs(x) < dz ? 0 : (x - Math.sign(x) * dz) / (1 - dz));
+    return { x: dead(s.ax[2]), y: dead(s.ax[3]) };
   }
 
   /** look behind is held (key or pad) */
@@ -364,8 +403,9 @@ export class Controls {
     let steer = h('right') - h('left');
     let pitch = h('pitchUp') - h('pitchDown');
     let roll = h('rollRight') - h('rollLeft');
-    let jump = this.held('jump');
-    let boost = this.held('boost');
+    let jump = this.held('jump') || this.tapJump;
+    let boost = this.held('boost') || this.tapBoost;
+    this.tapJump = this.tapBoost = false;
     let slide = this.held('slide');
     let airRoll = this.held('airRoll');
     // pad (analog values fresh for this tick)

@@ -1,4 +1,4 @@
-import { ACTS, DEFAULT_KEYS, DEFAULT_PAD, keyName, padName, type Act, type KeyBinds, type PadBinds } from './input.ts';
+import { ACTS, DEFAULT_KEYS, DEFAULT_PAD, keyName, OLD_PAD_ROLL, padName, type Act, type KeyBinds, type PadBinds } from './input.ts';
 import { botPlan, type BotMode, type LobbyState } from './net.ts';
 import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type MapLook, type TimeId } from './render/looks.ts';
 import { BODIES, BOOMS, DECALS, FINISHES, packLoadout, TRAILS } from './loadout.ts';
@@ -118,6 +118,11 @@ export function loadProfile(): Profile {
     const p = { ...def, ...raw };
     p.binds = { ...structuredClone(DEFAULT_KEYS), ...(raw.binds ?? {}) };
     p.padBinds = { ...DEFAULT_PAD, ...(raw.padBinds ?? {}) };
+    // (L1 / R1 air roll were our own extra defaults: back to the genre's, unbound, unless changed)
+    if (p.padBinds.rollLeft === OLD_PAD_ROLL[0] && p.padBinds.rollRight === OLD_PAD_ROLL[1]) {
+      p.padBinds.rollLeft = -1;
+      p.padBinds.rollRight = -1;
+    }
     p.map = asMap(p.map);
     p.time = asTime(p.time);
     return p;
@@ -240,7 +245,7 @@ export class UI {
       <div class="namecard">
         <b>Name your car</b>
         <small>Your friends see it over your car and on the scoreboard.</small>
-        <input type="text" class="i-name" id="i-name2" maxlength="16" placeholder="Your car's name" spellcheck="false" autocomplete="off" />
+        <div class="namerow"><input type="text" class="i-name" id="i-name2" maxlength="16" placeholder="Your car's name" spellcheck="false" autocomplete="off" /><button class="dice" id="b-name-rnd" title="Random name">Random</button></div>
         <div class="msg" id="name-msg"></div>
       </div>
       <button class="mbtn primary" id="b-name-ok"><i class="ic">${ICON.go}</i><span>Continue<em>On to the online lobby</em></span></button>
@@ -289,6 +294,7 @@ export class UI {
   <div class="tip" id="h-tip"></div>
   <div class="toast" id="h-toast"></div>
   <div class="awards" id="h-awards"></div>
+  <div class="qc" id="h-qc" hidden></div>
 </div>
 
 <div class="overlay" id="o-board" hidden><div class="board" id="board"></div></div>
@@ -408,6 +414,14 @@ export class UI {
       (then ?? (() => this.screen('s-online')))();
     };
     name2.addEventListener('keydown', (e) => e.key === 'Enter' && nameOk());
+    // (no keyboard on a controller: roll one)
+    this.$('#b-name-rnd').addEventListener('click', () => {
+      const a = ['Turbo', 'Nitro', 'Rapid', 'Sonic', 'Blaze', 'Rocket', 'Comet', 'Thunder', 'Neon', 'Apex', 'Drift', 'Flash'];
+      const b = ['Fox', 'Viper', 'Hawk', 'Shark', 'Wolf', 'Bolt', 'Racer', 'Storm', 'Falcon', 'Tiger', 'Jet', 'Ace'];
+      const r = (l: string[]) => l[Math.floor(Math.random() * l.length)];
+      name2.value = `${r(a)} ${r(b)}`;
+      this.$('#name-msg').textContent = '';
+    });
     name2.addEventListener('input', () => (this.$('#name-msg').textContent = ''));
     this.$('#b-name-ok').addEventListener('click', nameOk);
     this.$('#sw').addEventListener('click', (e) => {
@@ -661,7 +675,19 @@ export class UI {
     mark('#l-time', asTime(l.time));
   }
 
+  /** the quick chat menu: a category's four lines and the buttons that pick them (null closes it) */
+  quickChat(lines: string[] | null, pad = false, ps = false): void {
+    const el = this.$('#h-qc');
+    el.hidden = !lines;
+    if (!lines) return;
+    const keys = pad ? (ps ? ['▲', '◀', '▶', '▼'] : ['↑', '←', '→', '↓']) : ACTS.filter((a) => a.id.startsWith('chat')).map((a) => keyName(this.profile.binds[a.id][0]));
+    // (on a pad the d-pad picks: up, left, right, down)
+    el.innerHTML = lines.map((l, k) => `<div><kbd>${esc(keys[k] ?? String(k + 1))}</kbd>${esc(l)}</div>`).join('');
+  }
+
   chat(from: string, text: string): void {
+    // in a match the line shows in the feed too
+    if (!this.$('#hud').hidden) this.feed(`${from}: ${text}`, -1);
     const log = this.$('#l-log');
     log.insertAdjacentHTML('beforeend', `<div><b>${esc(from)}:</b> ${esc(text)}</div>`);
     log.scrollTop = log.scrollHeight;

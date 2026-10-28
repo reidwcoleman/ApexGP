@@ -48,6 +48,13 @@ interface Cut {
 }
 
 const tq = new THREE.Quaternion();
+/** quick chat lines: information, compliments, reactions, apologies */
+const QUICK_CHAT = [
+  ['I got it!', 'Need boost!', 'Take the shot!', 'Defending...'],
+  ['Nice shot!', 'Great pass!', 'Thanks!', 'What a save!'],
+  ['OMG!', 'Noooo!', 'Wow!', 'Close one!'],
+  ['$#@%!', 'No problem.', 'Whoops...', 'Sorry!'],
+];
 /** a bot's car: a spread of bodies, paints, trails and explosions so a lobby looks lived in */
 const botLoadout = (n: number, k: number) =>
   packLoadout({ accent: [0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff, 0x2ee6e6][(n + k) % 6], decal: (n * 7 + k) % 6, finish: (n + k * 3) % 4, body: (n * 5 + k * 2) % 6, trail: (n * 3 + k) % 6, boom: (n + k * 5) % 6 });
@@ -187,7 +194,17 @@ export class Game {
     this.lookKey = m.id + t.id;
     this.stage.setLook(t, m);
     this.arena.setLook(t, m);
+    // the cars and the ball reflect the real stadium around them
+    const hide: THREE.Object3D[] = [...this.views.map((v) => v.group), this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group, this.gfx.group];
+    if (this.showcase) hide.push(this.showcase.group);
+    this.reflect = this.stage.captureEnv(hide);
+    for (const v of this.views) v.setEnv(this.reflect);
+    this.showcase?.setEnv(this.reflect);
+    const bm = this.ball.mesh.material as THREE.MeshStandardMaterial;
+    bm.envMap = this.reflect;
+    bm.needsUpdate = true;
   }
+  private reflect: THREE.Texture | null = null;
   private lookKey = '';
   private lastReset: number[] = Array(8).fill(-9);
 
@@ -203,6 +220,7 @@ export class Game {
     roster.forEach((p, i) => {
       this.world.addCar(p);
       const v = new CarView(p.team, p.color, this.mode === 'host' || this.mode === 'guest' ? p.name : undefined);
+      v.setEnv(this.reflect);
       this.views.push(v);
       this.field.add(v.group);
       if (p.bot && authority) this.bots.set(i, new Bot(i, p.skill));
@@ -346,13 +364,37 @@ export class Game {
     };
   }
 
-  private action(a: 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip'): void {
+  /** quick chat: the open category (-1: none) and when it closes */
+  private qcCat = -1;
+  private qcT = 0;
+  private quickChat(k: number): void {
+    if (this.me < 0) return;
+    if (this.qcCat < 0 || this.time > this.qcT) {
+      this.qcCat = k;
+      this.qcT = this.time + 2.5;
+      this.ui.quickChat(QUICK_CHAT[k], this.controls.lastPad, this.controls.padPS);
+      return;
+    }
+    const text = QUICK_CHAT[this.qcCat][k];
+    this.qcCat = -1;
+    this.ui.quickChat(null);
+    // (a few seconds between lines, as the real one limits spam)
+    if (this.time < this.qcNext) return;
+    this.qcNext = this.time + 1.2;
+    const team = this.world.players[this.me]?.team ?? -1;
+    if (this.host || this.guest) this.ui.onChat(text);
+    else this.ui.feed(`${this.ui.profile.name}: ${text}`, team);
+  }
+  private qcNext = 0;
+
+  private action(a: 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip' | 'chat1' | 'chat2' | 'chat3' | 'chat4'): void {
     // Esc / Options closes the controls screen first
     if (a === 'pause' && this.ui.bindsOpen()) {
       this.ui.root.querySelector<HTMLElement>('#b-done')!.click();
       return;
     }
     if (this.mode === 'attract') return;
+    if (a.startsWith('chat')) return this.quickChat(Number(a.slice(4)) - 1);
     if (a === 'ballcam') {
       this.cam.ballCam = !this.cam.ballCam;
       this.ui.profile.ballCam = this.cam.ballCam;
@@ -649,6 +691,13 @@ export class Game {
       this.controls.menuMode = this.mode === 'attract' || this.paused || this.ui.menuOpen();
       this.controls.poll(dt);
       this.cam.behind = this.controls.behind;
+      const lk = this.controls.look;
+      this.cam.orbit.x = lk.x;
+      this.cam.orbit.y = lk.y;
+      if (this.qcCat >= 0 && this.time > this.qcT) {
+        this.qcCat = -1;
+        this.ui.quickChat(null);
+      }
       this.advance(dt);
       this.render(dt);
     };
@@ -1302,6 +1351,7 @@ export class Game {
   private buildShowcase(): void {
     if (this.showcase) this.field.remove(this.showcase.group);
     const v = (this.showcase = new CarView(0, this.ui.carColor(), this.ui.profile.name));
+    v.setEnv(this.reflect);
     this.field.add(v.group);
   }
   private garage(dt: number): void {

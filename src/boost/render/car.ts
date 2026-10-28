@@ -859,6 +859,17 @@ export class CarView {
     if (name) this.setName(name);
   }
 
+  /** reflect this environment (the arena's capture) in the paint, glass and metal */
+  setEnv(tex: THREE.Texture | null): void {
+    this.group.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (m && 'envMap' in m && (m as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+        m.envMap = tex;
+        m.needsUpdate = true;
+      }
+    });
+  }
+
   setName(name: string): void {
     const c = document.createElement('canvas');
     c.width = 512;
