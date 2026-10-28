@@ -577,7 +577,16 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float red = tsSquare(sv / 2.0, 0.5);     // 1 m blocks
     vec3 cr = uKerbA;
     vec3 cw = uKerbB;
-    vec3 paint = mix(cw, cr, red);
+    vec3 paint;
+    // no two blocks quite alike: each its own coat (a shade lighter or darker, the red a touch more orange
+    // or more crimson), and now and then one recently repainted, brighter and cleaner than its neighbours
+    {
+      float kb = tsHash(vec2(floor(sv), sign(lat) * 5.3 + 1.7));
+      float kb2 = tsHash(vec2(floor(sv) + 0.5, sign(lat) * 2.9));
+      cr *= vec3(1.0, 0.86 + 0.28 * kb2, 0.88 + 0.24 * kb2);
+      cw *= 0.94 + 0.08 * kb2;
+      paint = mix(cw, cr, red) * (0.92 + 0.14 * kb) * (kb > 0.92 ? 1.1 : 1.0);
+    }
     if (vA1.z > 2.5) {
       // wide exit kerb: an outer band of green/white
       float outer = tsAA(0.62, kd);
@@ -939,7 +948,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-15', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-16', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };

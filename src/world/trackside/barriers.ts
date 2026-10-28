@@ -72,6 +72,28 @@ function makePath(ctx: Ctx, P: SidePlan): BarrierPath {
     oz[r] = tx * P.side;
     if (r > 0) len[r] = len[r - 1] + Math.hypot(bx[r] - bx[r - 1], bz[r] - bz[r - 1]);
   }
+  // nothing trackside is laid perfectly: the barrier line wanders a few centimetres in and out and up
+  // and down, and here and there a section has been hit and bent back (a dent a metre or two long)
+  const seed = P.side * 17.3 + (t.length % 97);
+  const hash = (k: number) => {
+    const x = Math.sin(k * 127.1 + seed * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  for (let r = 0; r < n; r++) {
+    const L = len[r];
+    let lat = 0.028 * Math.sin(L * 0.071 + seed) + 0.016 * Math.sin(L * 0.23 + seed * 2.1);
+    const cell = Math.floor(L / 41);
+    if (hash(cell) < 0.2) {
+      const c = (cell + 0.25 + hash(cell + 0.5) * 0.5) * 41;
+      lat += (0.05 + 0.06 * hash(cell + 0.7)) * Math.exp(-(((L - c) / 2.2) ** 2));
+    }
+    bx[r] += ox[r] * lat;
+    bz[r] += oz[r] * lat;
+    by[r] += 0.011 * Math.sin(L * 0.19 + seed * 1.3) + 0.007 * Math.sin(L * 0.53 + seed);
+  }
+  bx[n] = bx[0];
+  by[n] = by[0];
+  bz[n] = bz[0];
   return { bx, by, bz, ox, oz, len };
 }
 
@@ -322,9 +344,14 @@ function buildSide(ctx: Ctx, atlas: PrintAtlas, P: SidePlan) {
     props.color(0x4a4e52).mat(0.5, 0.7, 0);
     const x = P.backOff[i] + 0.66;
     const tall = P.fence[i] === 2;
+    // (each post a little out of true: a lean of a few centimetres either way at the top)
+    const lean = Math.sin(p * 12.9898 + sd * 78.233) * 43758.5453;
+    const lx = ((lean - Math.floor(lean)) - 0.5) * 0.12;
+    const lz = ((lean * 1.7 - Math.floor(lean * 1.7)) - 0.5) * 0.1;
+    const rf2 = rowAt(Math.min(total - 0.01, p + lz));
     atF(rf, x, 0, V[0]);
-    atF(rf, x, tall ? 5.22 : 3.62, V[1]);
-    atF(rf, x - (tall ? 0.93 : 0.78), tall ? 6.1 : 4.4, V[2]);
+    atF(rf2, x + lx, tall ? 5.22 : 3.62, V[1]);
+    atF(rf2, x + lx * 1.3 - (tall ? 0.93 : 0.78), tall ? 6.1 : 4.4, V[2]);
     beam(props, V[0], V[1], 0.11, 0.11);
     beam(props, V[1], V[2], 0.08, 0.08);
   }

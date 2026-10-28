@@ -1715,7 +1715,9 @@ export class Renderer {
     const fov = this.camera.fov;
     // how wide the lens is (vertical fov): a long trackside lens (a few degrees) 0, the onboards ~0.8, chase 1
     // (a real lens's character is the broadcast look's: the sim's camera is an ideal rectilinear one)
-    const lens = this.lensCharacter ? this.broadcast : 0;
+    // (the cameras you drive with get a third of it: no real lens is perfect, and a perfectly rectilinear,
+    // fringe-free picture is part of what reads as CG)
+    const lens = this.lensCharacter ? THREE.MathUtils.lerp(0.35, 1, this.broadcast) : 0;
     const wide = THREE.MathUtils.smoothstep(fov, 20, 60);
     this.sharpen.setLens(0.05 * wide * lens, (0.0012 + 0.0024 * wide) * lens);
   }
