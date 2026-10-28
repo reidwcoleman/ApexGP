@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ARENA, PADS } from '../sim/arena.ts';
+import { ARENA, goalProfile, GOAL_BACK_R, GOAL_TOP_R, PADS } from '../sim/arena.ts';
 import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
 import { buildSurround, type SurroundView } from './surround.ts';
 
@@ -375,11 +375,12 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
     netM,
     /* glsl */ `
     bool sideWall = abs(vSim.x) > ${(W - 2).toFixed(1)};
-    bool roof = vSim.z > ${(H - 2).toFixed(1)};
-    vec2 q = (sideWall ? vSim.yz : (roof ? vSim.xy : vSim.xz)) / 30.0;
+    // the curved back unrolled: across, and up the profile (depth plus height)
+    vec2 uvb = vec2(vSim.x, vSim.z + abs(vSim.y) - ${ARENA.Y.toFixed(1)});
+    vec2 q = (sideWall ? vSim.yz : uvb) / 30.0;
     float e = 1.0 - smoothstep(0.0, 0.08, bbHexEdge(q));
     // panel joints every 2 m, the net a little proud of them
-    vec2 pq = (sideWall ? vSim.yz : (roof ? vSim.xy : vSim.xz)) / 220.0;
+    vec2 pq = (sideWall ? vSim.yz : uvb) / 220.0;
     float joint = 1.0 - smoothstep(0.0, 0.02, min(abs(fract(pq.x) - 0.5), abs(fract(pq.y) - 0.5)) - 0.47);
     vec3 base = vec3(0.045, 0.05, 0.065) * (1.0 - joint * 0.5);
     // brighter toward the mouth, darker at the back
@@ -389,26 +390,41 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
     vec3 bbEmit = tc * (e * (0.16 - depth * 0.08) + 0.025);
     `,
   );
-  const panel = (w: number, h: number, pos: THREE.Vector3, rot: THREE.Euler) => {
-    const geo = new THREE.PlaneGeometry(w, h);
-    geo.rotateX(rot.x).rotateY(rot.y).rotateZ(rot.z);
-    geo.translate(pos.x, pos.y, pos.z);
+  // the profile: the floor ramping up into the back wall, the curve over into the roof
+  const prof = goalProfile(16);
+  {
+    // across the width: from the ramp's foot round to the roof at the mouth
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const rows = prof.slice(1);
+    for (const [d, z] of rows) pos.push(-W, Y + sideSign * d, z, W, Y + sideSign * d, z);
+    for (let k = 0; k < rows.length - 1; k++) idx.push(k * 2, k * 2 + 1, k * 2 + 2, k * 2 + 1, k * 2 + 3, k * 2 + 2);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
     const m = new THREE.Mesh(geo, netM);
     m.receiveShadow = true;
     g.add(m);
-  };
-  panel(W * 2, H, new THREE.Vector3(0, by, H / 2), new THREE.Euler(Math.PI / 2, 0, 0));
-  panel(D, H, new THREE.Vector3(-W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
-  panel(D, H, new THREE.Vector3(W, Y + (sideSign * D) / 2, H / 2), new THREE.Euler(Math.PI / 2, Math.PI / 2, 0));
-  panel(W * 2, D, new THREE.Vector3(0, Y + (sideSign * D) / 2, H), new THREE.Euler(0, 0, 0));
-  // glowing edges along the back of the box
-  const edge = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => beam(sx, sy, sz, x, y, z, strip);
-  edge(W * 2, 6, 6, 0, by - sideSign * 3, 3);
-  edge(W * 2, 6, 6, 0, by - sideSign * 3, H - 3);
-  for (const sx of [-1, 1]) {
-    edge(6, 6, H, sx * (W - 3), by - sideSign * 3, H / 2);
-    edge(6, D, 6, sx * (W - 3), Y + (sideSign * D) / 2, H - 3);
+    // the sides, cut to the profile (shape x = depth behind the line, y = height)
+    const shape = new THREE.Shape(prof.map(([d, z]) => new THREE.Vector2(d, z)));
+    for (const sx of [-1, 1]) {
+      const sg = new THREE.ShapeGeometry(shape);
+      const p2 = sg.attributes.position as THREE.BufferAttribute;
+      for (let k = 0; k < p2.count; k++) p2.setXYZ(k, sx * W, Y + sideSign * p2.getX(k), p2.getY(k));
+      sg.computeVertexNormals();
+      const sm = new THREE.Mesh(sg, netM);
+      sm.receiveShadow = true;
+      g.add(sm);
+    }
   }
+  // glowing edges following the profile down each side, and across the back where it bends
+  for (const sx of [-1, 1]) {
+    const pts = prof.slice(1, -1).map(([d, z]) => new THREE.Vector3(sx * (W - 4), Y + sideSign * Math.max(0, d - 4), Math.min(H - 4, Math.max(4, z))));
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 3.2, 6, false), strip));
+  }
+  beam(W * 2, 6, 6, 0, by - sideSign * 3, H - GOAL_TOP_R, strip);
+  beam(W * 2, 6, 6, 0, by - sideSign * 3, GOAL_BACK_R, strip);
   // the housing round the box: dark structure, so nothing behind (the seats) shows into the goal
   const houseM = new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.8, metalness: 0.2 });
   // (outer slabs only: behind the back, outside the sides, over the roof; the mouth stays open)

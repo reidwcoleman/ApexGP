@@ -26,6 +26,27 @@ export const ARENA = {
   GOAL_D: 880,
 } as const;
 
+/** the inside of each goal, seen from the side: the floor runs back and ramps up into the back
+ * wall like the arena's own ramps, and the back wall curves over into the roof */
+export const GOAL_BACK_R = 256;
+export const GOAL_TOP_R = 128;
+/** that profile as (depth behind the goal line, z) from the floor at the mouth round to the roof at the mouth */
+export function goalProfile(arcSteps = 12): [number, number][] {
+  const D = ARENA.GOAL_D;
+  const H = ARENA.GOAL_H;
+  const p: [number, number][] = [[0, 0]];
+  for (let k = 0; k <= arcSteps; k++) {
+    const a = -Math.PI / 2 + (k / arcSteps) * (Math.PI / 2);
+    p.push([D - GOAL_BACK_R + GOAL_BACK_R * Math.cos(a), GOAL_BACK_R + GOAL_BACK_R * Math.sin(a)]);
+  }
+  for (let k = 0; k <= arcSteps; k++) {
+    const a = (k / arcSteps) * (Math.PI / 2);
+    p.push([D - GOAL_TOP_R + GOAL_TOP_R * Math.cos(a), H - GOAL_TOP_R + GOAL_TOP_R * Math.sin(a)]);
+  }
+  p.push([0, H]);
+  return p;
+}
+
 const R = ARENA.R;
 // the arena shrunk by R: an octagon in xy, z in [R, Z - R]
 const SX = ARENA.X - R;

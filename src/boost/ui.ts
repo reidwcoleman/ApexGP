@@ -185,7 +185,7 @@ export class UI {
   <div class="banner" id="h-banner"><div class="big" id="h-bbig"></div><div class="sub" id="h-bsub"></div></div>
   <div class="camtag" id="h-cam">BALL CAM</div>
   <div class="net" id="h-net"></div>
-  <div class="replay" id="h-replay">REPLAY<small>ENTER TO SKIP</small></div>
+  <div class="replay" id="h-replay">REPLAY<small id="h-skip"></small></div>
   <div class="tip" id="h-tip"></div>
   <div class="toast" id="h-toast"></div>
   <div class="awards" id="h-awards"></div>
@@ -580,6 +580,16 @@ export class UI {
 
   replay(v: boolean): void {
     this.$('#h-replay').style.display = v ? 'block' : 'none';
+  }
+
+  /** the skip tally under REPLAY: n of `of` players (n = -1: you've asked, waiting on the host) */
+  skipVotes(n: number, of: number, pad = false, voted = false): void {
+    const key = (pad ? padName(this.profile.padBinds.reset, this.padPS) : keyName(this.profile.binds.reset[0])).toUpperCase();
+    let t = `${key} TO SKIP`;
+    if (n < 0) t = 'WAITING FOR THE OTHERS';
+    else if (n > 0 && n >= of) t = 'SKIPPING';
+    else if (n > 0) t = `${n}/${of} WANT TO SKIP · ${voted ? 'WAITING FOR THE OTHERS' : `${key} TO SKIP`}`;
+    this.$('#h-skip').textContent = t;
   }
 
   toast(s: string, ms = 2200): void {

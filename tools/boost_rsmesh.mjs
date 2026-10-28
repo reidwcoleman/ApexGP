@@ -5,7 +5,9 @@
 // planes for the floor, the ceiling and the side walls.
 //   node --experimental-transform-types --no-warnings tools/boost_rsmesh.mjs
 import { writeFileSync } from 'node:fs';
-import { ARENA } from '../src/boost/sim/arena.ts';
+import { ARENA, goalProfile } from '../src/boost/sim/arena.ts';
+
+const prof2 = goalProfile(14);
 
 const R = ARENA.R;
 const Z = ARENA.Z;
@@ -133,11 +135,20 @@ for (const s of [-1, 1]) {
       const y1 = s * (SY + R * Math.cos(a1));
       g.quad(g.vert(x, y0, 0), g.vert(x, y1, 0), g.vert(x, y1, R + R * Math.sin(a1)), g.vert(x, y0, R + R * Math.sin(a0)));
     }
-    // behind the back wall: the full side
-    g.quad(g.vert(x, s * Y, 0), g.vert(x, s * GY1, 0), g.vert(x, s * GY1, GH), g.vert(x, s * Y, GH));
+    // behind the back wall: the side, cut to the goal's profile (a convex outline: a fan from inside)
+    const c = g.vert(x, s * (Y + ARENA.GOAL_D * 0.45), GH * 0.5);
+    for (let k = 0; k < prof2.length; k++) {
+      const [d0, z0] = prof2[k];
+      const [d1, z1] = prof2[(k + 1) % prof2.length];
+      g.tri(c, g.vert(x, s * (Y + d0), z0), g.vert(x, s * (Y + d1), z1));
+    }
   }
-  g.quad(g.vert(-GW, s * Y, GH), g.vert(GW, s * Y, GH), g.vert(GW, s * GY1, GH), g.vert(-GW, s * GY1, GH));
-  g.quad(g.vert(-GW, s * GY1, 0), g.vert(GW, s * GY1, 0), g.vert(GW, s * GY1, GH), g.vert(-GW, s * GY1, GH));
+  // the floor's ramp, the back wall, the curve over and the roof, across the goal's width
+  for (let k = 1; k < prof2.length - 1; k++) {
+    const [d0, z0] = prof2[k];
+    const [d1, z1] = prof2[k + 1];
+    g.quad(g.vert(-GW, s * (Y + d0), z0), g.vert(GW, s * (Y + d0), z0), g.vert(GW, s * (Y + d1), z1), g.vert(-GW, s * (Y + d1), z1));
+  }
   goals.push(g);
 }
 

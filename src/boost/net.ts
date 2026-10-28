@@ -68,7 +68,10 @@ export type CtlMsg =
   | { t: 'pong'; ts: number }
   | { t: 'kick' }
   | { t: 'ev'; ev: WEvent }
-  | { t: 'stats'; stats: Stats[] };
+  | { t: 'stats'; stats: Stats[] }
+  /** a guest wants the goal replay skipped; the host's tally of who does */
+  | { t: 'skip' }
+  | { t: 'skipv'; n: number; of: number };
 
 export const makeCode = () => Array.from({ length: 4 }, () => ALPHA[Math.floor(Math.random() * ALPHA.length)]).join('');
 

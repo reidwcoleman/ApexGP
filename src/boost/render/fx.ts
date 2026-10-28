@@ -91,12 +91,24 @@ export interface Emit {
   grav?: number;
 }
 
+/** a random unit vector */
+function rnd3(): [number, number, number] {
+  const u = Math.random() * 2 - 1;
+  const a = Math.random() * Math.PI * 2;
+  const r = Math.sqrt(1 - u * u);
+  return [r * Math.cos(a), r * Math.sin(a), u];
+}
+
 export class FX {
   readonly group = new THREE.Group();
-  private glow = pool(7000, true);
+  private glow = pool(12000, true);
   private soft = pool(2500, false);
   private waves: { mesh: THREE.Mesh; age: number; life: number; max: number }[] = [];
   private waveGeo = new THREE.SphereGeometry(1, 48, 24);
+  private rings: { mesh: THREE.Mesh; age: number; life: number; max: number }[] = [];
+  private ringGeo = new THREE.RingGeometry(0.86, 1, 96, 1);
+  /** firework streamers: points that trail sparks, then burst */
+  private rockets: { x: number; y: number; z: number; vx: number; vy: number; vz: number; age: number; life: number; col: THREE.Color; pop: THREE.Color }[] = [];
 
   constructor() {
     this.group.add(this.soft.points, this.glow.points);
@@ -145,32 +157,66 @@ export class FX {
     }
   }
 
-  goal(x: number, y: number, z: number, team: number): void {
-    const c = new THREE.Color(team === 0 ? 0x3d8bff : 0xff7a1f).multiplyScalar(3);
-    const w = new THREE.Color(3, 2.8, 2.5);
-    this.burst(x, y, z, 900, 5200, c, 70, 2.4, 400);
-    this.burst(x, y, z, 400, 3000, w, 50, 1.6, 300);
-    // rising fountains
-    for (let k = 0; k < 260; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 300;
-      this.spark({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, z, vx: Math.cos(a) * 400, vy: Math.sin(a) * 400, vz: 2400 + Math.random() * 2400, r: c.r, g: c.g, b: c.b, life: 2 + Math.random(), size: 60, drag: 0.6, grav: 900 });
+  /** the goal explosion: a white-hot flash into a team fireball, firework streamers that burst
+   * again where they die, a shock ring racing over the floor and a spherical wave, embers raining
+   * down and a column of team-tinted smoke */
+  goal(x: number, y: number, z0: number, team: number): void {
+    // (from the goal mouth, thrown out toward the field: the back of the net would hide half of it)
+    const sy = Math.sign(y) || 1;
+    y = sy * Math.min(Math.abs(y), 5060);
+    const z = Math.max(120, Math.min(z0, 520));
+    const out = (d: [number, number, number]) => {
+      if (d[1] * sy > 0) d[1] = -d[1] * 0.75;
+      return d;
+    };
+    const tc = new THREE.Color(team === 0 ? 0x2f7bff : 0xff6a10);
+    const hot = new THREE.Color(3.2, 3.0, 2.7);
+    const c = tc.clone().multiplyScalar(3.2);
+    const pale = tc.clone().lerp(new THREE.Color(1, 1, 1), 0.55).multiplyScalar(3);
+    // the core: a dense white-hot ball that blooms out and cools to the team colour
+    for (let k = 0; k < 700; k++) {
+      const d = out(rnd3());
+      const v = 900 + Math.random() * 2600;
+      const col = Math.random() < 0.25 ? hot : Math.random() < 0.4 ? pale : c;
+      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, r: col.r, g: col.g, b: col.b, life: 0.7 + Math.random() * 0.8, size: 150 + Math.random() * 200, grow: -70, drag: 3.2, grav: -80 });
     }
-    // smoke and confetti
-    for (let k = 0; k < 160; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = 600 + Math.random() * 1200;
-      this.smoke({ x, y, z, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: Math.random() * 600, r: 0.25, g: 0.27, b: 0.32, life: 3 + Math.random() * 2, size: 300, grow: 260, drag: 1.4, grav: -40 });
+    // fast sparks thrown far
+    for (let k = 0; k < 900; k++) {
+      const d = out(rnd3());
+      const v = 2500 + Math.random() * 4200;
+      const col = Math.random() < 0.2 ? hot : c;
+      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v * 0.8 + 500, r: col.r, g: col.g, b: col.b, life: 0.7 + Math.random() * 1.1, size: 26 + Math.random() * 30, drag: 1.6, grav: 520 });
     }
-    for (let k = 0; k < 400; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = 800 + Math.random() * 2500;
-      const cc = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
-      if (Math.random() < 0.5) cc.set(team === 0 ? 0x3d8bff : 0xff7a1f);
-      this.smoke({ x, y, z: z + 200, vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 1200 + Math.random() * 2000, r: cc.r, g: cc.g, b: cc.b, life: 4 + Math.random() * 2, size: 22, drag: 2.2, grav: 300 });
+    // streamers: firework rockets trailing light, each popping into a burst of its own
+    for (let k = 0; k < 22; k++) {
+      const d = out(rnd3());
+      d[2] = Math.abs(d[2]) * 0.9 + 0.35;
+      const v = 2600 + Math.random() * 2200;
+      this.rockets.push({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: d[2] * v, age: 0, life: 0.55 + Math.random() * 0.5, col: Math.random() < 0.3 ? hot.clone() : pale.clone(), pop: Math.random() < 0.75 ? c.clone() : hot.clone() });
     }
-    this.wave(x, y, z, 2600, 1.1, c);
-    this.wave(x, y, z, 1500, 0.7, w);
+    // embers drifting down for a while after
+    for (let k = 0; k < 500; k++) {
+      const d = out(rnd3());
+      const v = 600 + Math.random() * 1800;
+      this.spark({ x, y, z: z + 100, vx: d[0] * v, vy: d[1] * v, vz: Math.abs(d[2]) * v + 600, r: c.r * 0.8, g: c.g * 0.8, b: c.b * 0.8, life: 2.2 + Math.random() * 1.8, size: 14 + Math.random() * 12, drag: 1.1, grav: 260 });
+    }
+    // smoke: a rolling ring outward and a column rising, tinted by the team
+    const sm = new THREE.Color(0.11, 0.12, 0.15).lerp(tc, 0.18);
+    for (let k = 0; k < 60; k++) {
+      const a = sy > 0 ? Math.PI + Math.random() * Math.PI : Math.random() * Math.PI;
+      const v = 900 + Math.random() * 1400;
+      this.smoke({ x, y, z: Math.max(40, z * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, vz: 100 + Math.random() * 300, r: sm.r, g: sm.g, b: sm.b, life: 1.8 + Math.random() * 1.2, size: 160, grow: 260, drag: 1.8, grav: -60 });
+    }
+    for (let k = 0; k < 36; k++) {
+      this.smoke({ x: x + (Math.random() - 0.5) * 300, y: y + (Math.random() - 0.5) * 300, z, vx: (Math.random() - 0.5) * 300, vy: (Math.random() - 0.5) * 300, vz: 500 + Math.random() * 900, r: sm.r * 1.2, g: sm.g * 1.2, b: sm.b * 1.2, life: 3 + Math.random() * 2, size: 260, grow: 360, drag: 0.9, grav: -30 });
+    }
+    // the flash, the waves
+    this.wave(x, y, z, 1100, 0.45, hot, 2.2);
+    this.wave(x, y, z, 1700, 0.7, c, 1.2);
+    this.wave(x, y, z, 3200, 1.25, c, 0);
+    this.wave(x, y, z, 1900, 0.8, pale, 0);
+    this.ring(x, y, 3, 4200, 1.4, c);
+    this.ring(x, y, 3, 2600, 0.9, hot);
   }
 
   demo(x: number, y: number, z: number): void {
@@ -185,15 +231,16 @@ export class FX {
     this.wave(x, y, z, 700, 0.45, f);
   }
 
-  private wave(x: number, y: number, z: number, max: number, life: number, c: THREE.Color): void {
+  /** a spherical wave: a bright rim (fresnel), or with `core` a glowing ball that fills in */
+  private wave(x: number, y: number, z: number, max: number, life: number, c: THREE.Color, core = 0): void {
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
-      uniforms: { uK: { value: 1 }, uC: { value: c } },
+      uniforms: { uK: { value: 1 }, uC: { value: c }, uCore: { value: core } },
       vertexShader: `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
-      fragmentShader: `uniform float uK; uniform vec3 uC; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(max(1.0-abs(dot(normalize(vN),normalize(vV))), 0.0), 3.0); gl_FragColor = vec4(uC*f*uK, f*uK); }`,
+      fragmentShader: `uniform float uK; uniform vec3 uC; uniform float uCore; varying vec3 vN; varying vec3 vV; void main(){ float ndv = abs(dot(normalize(vN),normalize(vV))); float f = pow(max(1.0-ndv, 0.0), 3.0) + uCore * pow(ndv, 1.5) * 0.5; gl_FragColor = vec4(uC*f*uK, min(1.0, f*uK)); }`,
     });
     const m = new THREE.Mesh(this.waveGeo, mat);
     m.position.set(x, y, z);
@@ -202,7 +249,57 @@ export class FX {
     this.waves.push({ mesh: m, age: 0, life, max });
   }
 
+  /** a shock ring racing out over the floor (sim z = up) */
+  private ring(x: number, y: number, z: number, max: number, life: number, c: THREE.Color): void {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { uK: { value: 1 }, uC: { value: c } },
+      vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+      fragmentShader: `uniform float uK; uniform vec3 uC; varying vec2 vP; void main(){ float r = length(vP); float e = smoothstep(0.86, 0.97, r) * (1.0 - smoothstep(0.97, 1.0, r)); gl_FragColor = vec4(uC*e*uK, e*uK); }`,
+    });
+    const m = new THREE.Mesh(this.ringGeo, mat);
+    m.position.set(x, y, z);
+    m.renderOrder = 13;
+    this.group.add(m);
+    this.rings.push({ mesh: m, age: 0, life, max });
+  }
+
   update(dt: number): void {
+    // streamers: trail, fall, burst where they die
+    for (let k = this.rockets.length - 1; k >= 0; k--) {
+      const r = this.rockets[k];
+      r.age += dt;
+      const dr = Math.exp(-0.9 * dt);
+      r.vx *= dr;
+      r.vy *= dr;
+      r.vz = r.vz * dr - 700 * dt;
+      r.x += r.vx * dt;
+      r.y += r.vy * dt;
+      r.z += r.vz * dt;
+      for (let q = 0; q < 3; q++)
+        this.spark({ x: r.x - r.vx * dt * (q / 3), y: r.y - r.vy * dt * (q / 3), z: r.z - r.vz * dt * (q / 3), vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 60, vz: (Math.random() - 0.5) * 60, r: r.col.r, g: r.col.g, b: r.col.b, life: 0.35 + Math.random() * 0.25, size: 34, grow: -50, drag: 2, grav: 120 });
+      if (r.age >= r.life || r.z < 20) {
+        this.burst(r.x, r.y, Math.max(30, r.z), 70, 900, r.pop, 34, 0.9, 380);
+        this.spark({ x: r.x, y: r.y, z: r.z, r: 3, g: 2.9, b: 2.7, life: 0.18, size: 260, grow: -400 });
+        this.rockets.splice(k, 1);
+      }
+    }
+    for (let k = this.rings.length - 1; k >= 0; k--) {
+      const w = this.rings[k];
+      w.age += dt;
+      const t = w.age / w.life;
+      if (t >= 1) {
+        this.group.remove(w.mesh);
+        (w.mesh.material as THREE.Material).dispose();
+        this.rings.splice(k, 1);
+        continue;
+      }
+      w.mesh.scale.setScalar(w.max * (1 - Math.pow(1 - t, 2.4)));
+      ((w.mesh.material as THREE.ShaderMaterial).uniforms.uK as { value: number }).value = (1 - t) * (1 - t) * 1.6;
+    }
     for (const p of [this.glow, this.soft]) {
       let j = 0;
       for (let i = 0; i < p.n; i++) {

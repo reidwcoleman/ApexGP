@@ -548,6 +548,19 @@ export class World {
       }
     }
     const b = this.ball.pos;
+    // the explosion throws nearby cars away (picked up as an edit and sent into RocketSim next tick)
+    const blast = 1500;
+    for (const c of this.cars) {
+      if (!c.alive) continue;
+      const d = new V3().subVectors(c.pos, b);
+      const dist = d.len();
+      if (dist > blast) continue;
+      const k = 1 - dist / blast;
+      d.z += 260;
+      d.norm();
+      c.vel.addScaled(d, 2300 * k);
+      c.w.set(c.w.x + (d.y * 5 - d.x) * k, c.w.y + d.x * 5 * k, c.w.z + (d.x - d.y) * 2 * k);
+    }
     const ev = { t: 'goal' as const, team, scorer, assist, speed: this.ball.vel.len(), x: b.x, y: b.y, z: b.z };
     this.lastGoal = ev;
     this.events.push(ev);

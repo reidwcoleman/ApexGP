@@ -78,6 +78,8 @@ export class Game {
   private frames: Frame[] = [];
   private clip: Frame[] = [];
   private clipT = 0;
+  /** who has asked to skip this replay */
+  private skipVotes = new Set<string>();
   private replayCam = new V3();
   private replayLook = new V3();
   // online
@@ -321,9 +323,32 @@ export class Game {
       if (this.mode === 'freeplay') {
         this.world.placeBall(0, 0, BALL.REST_Z);
         this.world.phase = 'play';
-      } else if (this.world.phase === 'replay' && this.world.authority) this.world.phaseT = Math.min(this.world.phaseT, 0.05);
-      else if (this.world.phase === 'replay') this.clipT = 99;
+      } else if (this.world.phase === 'replay') this.voteSkip();
     }
+  }
+
+  /** the replay skips once every human in the match has asked (alone, that's at once) */
+  private voteSkip(): void {
+    if (this.mode === 'guest') {
+      if (!this.skipVotes.has('me')) {
+        this.skipVotes.add('me');
+        this.guest?.send({ t: 'skip' });
+        this.ui.skipVotes(-1, 0, this.controls.lastPad);
+      }
+      return;
+    }
+    this.hostSkip(this.mode === 'host' ? 'host' : 'local');
+  }
+  private hostSkip(id: string): void {
+    const w = this.world;
+    if (w.phase !== 'replay') return;
+    this.skipVotes.add(id);
+    const humans = new Set(this.owners.filter((o) => o === 'local' || o === 'host' || (this.host?.guests.has(o) ?? false)));
+    const n = [...this.skipVotes].filter((v) => humans.has(v)).length;
+    const of = Math.max(1, humans.size);
+    if (n >= of) w.phaseT = Math.min(w.phaseT, 0.05);
+    this.ui.skipVotes(n, of, this.controls.lastPad, this.skipVotes.has(this.mode === 'host' ? 'host' : 'local'));
+    this.host?.broadcast({ t: 'skipv', n, of });
   }
 
   private showBoard(): void {
@@ -419,6 +444,8 @@ export class Game {
       const p = L.players.find((x) => x.id === from);
       if (p) p.team = m.team;
       this.pushLobby();
+    } else if (m.t === 'skip') {
+      this.hostSkip(from);
     } else if (m.t === 'chat') {
       const p = L.players.find((x) => x.id === from);
       const text = m.text.slice(0, 120);
@@ -545,6 +572,8 @@ export class Game {
       if (this.lobby) this.ui.lobby(this.lobby, this.myId, false);
       this.setup(this.botRoster(2, 0.75, false), true);
       this.world.start({ minutes: 99 });
+    } else if (m.t === 'skipv') {
+      if (this.mode === 'guest') this.ui.skipVotes(m.n, m.of, this.controls.lastPad, this.skipVotes.has('me'));
     } else if (m.t === 'ev') {
       if (this.mode === 'guest') this.onEvent(m.ev, true);
     } else if (m.t === 'stats') {
@@ -821,6 +850,8 @@ export class Game {
         this.stage.flash.position.set(e.x * S, Math.max(2, e.z * S), -e.y * S);
         this.excite = 1;
         this.clip = this.frames.slice(-280);
+        this.skipVotes.clear();
+        this.ui.skipVotes(0, 0, this.controls.lastPad);
         if (playing) {
           this.audio.goal();
           if (this.ui.profile.shake) this.cam.shake(40, 0.9);
