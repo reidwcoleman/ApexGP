@@ -5,10 +5,13 @@ import { clamp, V3 } from './math.ts';
 import { TICK, type World } from './world.ts';
 
 /**
- * Bots. Each tick a bot reads the world and decides: who on its team goes for the ball (the one
- * that gets there first), who supports, who keeps goal; the attacker picks the first point on the
- * predicted ball path it can reach in time, lines up behind it toward the far goal, boosts when it's
- * pointed, jumps or dodges through the ball, and goes up for an aerial at high skill. In the air it
+ * Bots. Each team rotates like players do: a first man who keeps the ball until a teammate is
+ * clearly better placed (and rotates out round the back post after a touch), a second man behind
+ * the play on the far side from the first, and a last man deep and central who drops into the net
+ * when the ball's dangerous; nobody parks on a teammate, and they defer to a human on the ball.
+ * The first man picks the first point on the predicted ball path it can reach in time (up the walls
+ * too), lines up for a shot (a centre from the corners, a clear when it can't get goal-side, straight
+ * through a 50/50), boosts when it's pointed, jumps or dodges through the ball, and flies for aerials. In the air it
  * rights itself to land on its wheels. Skill (0..1) sets the reaction time, the boost discipline,
  * the shot accuracy and whether it'll fly.
  */
@@ -102,6 +105,13 @@ export class Bot {
     inp.steer = clamp(-ang * (2.2 + this.skill * 1.6), -1, 1);
     inp.throttle = 1;
     if (Math.abs(ang) > 1.7 && speed > 600 && dist > 300) inp.handbrake = true;
+    // target behind and little speed (in a goal, off a wall): a reversing three-point turn
+    if (Math.abs(ang) > 2.1 && speed < 450 && dist > 350 && p.role !== 'goal') {
+      inp.throttle = -1;
+      inp.steer = Math.sign(ang) || 1;
+      this.last = inp;
+      return inp;
+    }
     // arrive on time: ease off when early
     const need = dist / Math.max(900, speed);
     if (p.role !== 'goal' && p.t > 0.3 && need < p.t * 0.6 && dist < 2500) inp.throttle = clamp(need / (p.t * 0.6), 0.25, 1);
@@ -155,7 +165,7 @@ export class Bot {
       if (b.z > 160 && b.z < 330 && bd < 260 + speed * 0.12 && Math.abs(toBall) < 0.5) this.start('jump', 0, true);
       else if (b.z >= 330 && b.z < 560 && closing < 0.42 && bd < 900 && Math.abs(toBall) < 0.35) this.start('djump', 0);
       else if (b.z < 150 && bd < 330 && speed > 700 && Math.abs(toBall) < 0.35 && this.skill > 0.25) this.start('jump', toBall);
-      else if (this.skill > 0.72 && b.z > 650 && b.z < 1700 && c.boost > 30 && bd < 1400 && Math.abs(toBall) < 0.3 && w.ball.vel.z < 400) this.start('aerial', 0);
+      else if (this.skill > 0.5 && b.z > 600 && b.z < 1700 && c.boost > 30 && bd < 1400 && Math.abs(toBall) < 0.3 && w.ball.vel.z < 400) this.start('aerial', 0);
     }
     void ownY;
     this.last = inp;
@@ -288,116 +298,258 @@ export class Bot {
     const dirY = team === 0 ? 1 : -1;
     const ownY = -dirY * ARENA.Y;
     const pth = ballPath(w);
-    // when can each teammate reach the ball?
+    const b = w.ball.pos;
+    // when can each teammate reach the ball? (being goal-side of it counts for a lot)
     const eta = (ci: number) => {
       const cc = w.cars[ci];
       if (!cc.alive) return 99;
       const sp = Math.max(1200, cc.vel.len()) + (cc.boost > 20 ? 400 : 0);
       for (const q of pth) {
         const d = Math.hypot(q.x - cc.pos.x, q.y - cc.pos.y) - 150;
-        // behind the ball counts for more
-        const wrongSide = (cc.pos.y - q.y) * dirY > 200 ? 0.5 : 0;
+        const wrongSide = (cc.pos.y - q.y) * dirY > 200 ? 0.6 : 0;
         if (q.z < 300 && d / sp + wrongSide <= q.t) return q.t + wrongSide;
       }
       return 5;
     };
     const mates = w.players.map((p, i) => (p.team === team ? i : -1)).filter((i) => i >= 0);
-    const order = mates.map((i) => ({ i, e: eta(i) })).sort((a, b) => a.e - b.e);
-    const rank = order.findIndex((o) => o.i === this.idx);
-    const b = w.ball.pos;
-    // the ball heading into our net: whoever's nearest the goal defends
-    const danger = (b.y - ownY) * -dirY < 3500 || (w.ball.vel.y * -dirY > 800 && (b.y - ownY) * -dirY < 6000);
-    let role: 'attack' | 'support' | 'goal' = rank === 0 ? 'attack' : rank === 1 && mates.length > 2 ? 'support' : 'goal';
-    if (mates.length === 1) role = 'attack';
-    if (mates.length === 2 && rank === 1) role = danger ? 'goal' : 'support';
+    const m = teamMind(w, team);
+    // (a human teammate gets the ball when it's close to even: bots don't double-commit on you)
+    const etas = new Map(mates.map((i) => [i, eta(i) - (w.players[i].bot ? 0 : 0.35)]));
+    const best = mates.reduce((a, i) => (etas.get(i)! < etas.get(a)! ? i : a), mates[0]);
+    // the first man keeps the ball until a teammate is clearly better placed (no flip-flopping, no
+    // two cars on one ball); whoever gives it up rotates out the back
+    if (m.tick !== w.tick) {
+      m.tick = w.tick;
+      const cur = m.first;
+      if (!mates.includes(cur) || !w.cars[cur]?.alive) m.first = best;
+      else if (best !== cur && etas.get(best)! < etas.get(cur)! - 0.45) {
+        m.first = best;
+        m.out.set(cur, w.tick + Math.round(1.6 / TICK));
+      }
+      // a touch also sends the toucher round the back once the ball's away
+      const lt = w.touches[0];
+      if (lt && lt[1] > m.seen) {
+        m.seen = lt[1];
+        if (lt[0] === cur && mates.length > 1) m.touched = lt[1];
+      }
+      if (m.touched > 0 && w.tick - m.touched > 50 && m.first === cur && best !== cur && mates.length > 1) {
+        m.first = best;
+        m.out.set(cur, w.tick + Math.round(1.4 / TICK));
+        m.touched = 0;
+      }
+    }
+    const first = m.first;
+    const kickoff = w.ball.vel.len2() < 1 && Math.abs(b.x) < 1 && Math.abs(b.y) < 1;
+    // the others: the one nearer the play is second man, the rest stay deep
+    const rest = mates.filter((i) => i !== first);
+    const outUntil = m.out.get(this.idx) ?? 0;
+    const rotating = outUntil > w.tick && this.idx !== first;
+    const depth = (i: number) => (w.cars[i].pos.y - ownY) * dirY - ((m.out.get(i) ?? 0) > w.tick ? 4000 : 0);
+    rest.sort((a, bb) => depth(bb) - depth(a));
+    const slot = this.idx === first ? 0 : 1 + rest.indexOf(this.idx);
+    // the ball near our goal, or coming at it fast (distances measured up the field from our line)
+    const fromGoal = (b.y - ownY) * dirY;
+    const danger = (fromGoal < 2600 && Math.abs(b.x) < 2600) || (w.ball.vel.y * -dirY > 900 && fromGoal < 5000);
     const p = this.plan;
-    p.role = role;
     p.boost = true;
-    if (role === 'attack') {
-      // the first reachable point on the ball's path
-      const sp = Math.max(1100, c.vel.len()) + (c.boost > 15 ? 600 * this.skill : 0);
-      let pick = pth[pth.length - 1];
-      for (const q of pth) {
-        const d = Math.hypot(q.x - c.pos.x, q.y - c.pos.y) - 120;
-        if (q.z < 260 + this.skill * 200 && d / sp <= q.t) {
-          pick = q;
-          break;
-        }
-      }
-      // aim: the far goal, a little inside the posts; skill tightens the aim
-      const gx = clamp(pick.x * 0.25, -500, 500) * (1 - this.skill * 0.5);
-      const gy = dirY * (ARENA.Y + 300);
-      let ax = gx - pick.x;
-      let ay = gy - pick.y;
-      const al = Math.hypot(ax, ay);
-      ax /= al;
-      ay /= al;
-      // behind the ball? if not, go round it (toward our own side)
-      const rel = (c.pos.x - pick.x) * ax + (c.pos.y - pick.y) * ay;
-      const back = BALL.R + CAR.HX + 20;
-      let tx = pick.x - ax * back;
-      let ty = pick.y - ay * back;
-      if (rel > -100) {
-        // swing wide around the ball toward our goal
-        const side = Math.sign((c.pos.x - pick.x) * ay - (c.pos.y - pick.y) * ax) || 1;
-        tx = pick.x - ax * 700 + side * ay * 500;
-        ty = pick.y - ay * 700 - side * ax * 500;
+    p.tz = 0;
+    p.t = 0;
+    const lastMan = slot === mates.length - 1 && mates.length > 1;
+    if (kickoff && slot > 0) {
+      // kickoff: second man cheats up a little, the last one fetches the back corner boost
+      if (slot === 1 && mates.length > 2) {
+        p.role = 'support';
+        p.tx = clamp(c.pos.x * 0.3, -800, 800);
+        p.ty = ownY + dirY * 3300;
+        p.boost = false;
       } else {
-        // the closer we get, the more we commit to the ball itself
-        const dd = Math.hypot(c.pos.x - pick.x, c.pos.y - pick.y);
-        const k = clamp(1 - dd / 1600, 0, 0.75);
-        tx += (pick.x - tx) * k;
-        ty += (pick.y - ty) * k;
+        const sx = Math.sign(c.pos.x) || 1;
+        const pad = PADS.findIndex((q) => q.big && Math.sign(q.x) === sx && (q.y - ownY) * -dirY > -1 && Math.abs(q.y - ownY) < 1500);
+        p.role = 'support';
+        p.tx = pad >= 0 && c.boost < 90 ? PADS[pad].x : clamp(c.pos.x, -700, 700);
+        p.ty = pad >= 0 && c.boost < 90 ? PADS[pad].y : ownY + dirY * 600;
       }
-      // keep the target inside the walls
-      tx = clamp(tx, -ARENA.X + 200, ARENA.X - 200);
-      ty = clamp(ty, -ARENA.Y + 200, ARENA.Y - 200);
-      p.tx = tx;
-      p.ty = ty;
-      p.tz = 0;
-      p.t = pick.t;
-    } else if (role === 'support') {
-      p.tx = b.x * 0.5;
-      p.ty = b.y + (ownY - b.y) * 0.45;
-      p.tz = 0;
-      p.t = 0;
-      p.boost = false;
-      // top up on the way if low
-      if (c.boost < 40) {
-        let best = -1;
-        let bd = 1e9;
-        for (let k = 0; k < PADS.length; k++) {
-          if (w.pads[k] > 0 || !PADS[k].big) continue;
-          const d = Math.hypot(PADS[k].x - c.pos.x, PADS[k].y - c.pos.y) + Math.abs(PADS[k].y - p.ty) * 0.5;
-          if (d < bd) ((bd = d), (best = k));
+      return;
+    }
+    if (slot === 0 || mates.length === 1) {
+      p.role = 'attack';
+      this.attackPlan(w, pth, dirY, mates.length > 1);
+      return;
+    }
+    // the shot's coming in and we're last back: save it
+    const on = w.predictGoal();
+    if (on === team && (lastMan || rankNear(w, this.idx, team))) {
+      for (const q of pth)
+        if ((q.y - ownY) * -dirY < 1300 && q.z < 400) {
+          p.tx = q.x;
+          p.ty = q.y;
+          p.role = 'attack';
+          return;
         }
-        if (best >= 0 && bd < 3500) {
-          p.tx = PADS[best].x;
-          p.ty = PADS[best].y;
-        }
-      }
+    }
+    const fx = w.cars[first].pos.x;
+    if (rotating) {
+      // back-post rotation: away from the ball's side, down toward our goal, through any boost
+      p.role = 'support';
+      const sx = b.x > 0 ? -1 : 1;
+      p.tx = sx * 1600;
+      p.ty = ownY + dirY * 1700;
+      p.boost = Math.abs(c.pos.y - p.ty) > 3000;
+      if (c.boost < 70) this.grabBoost(w, p.tx, p.ty, 3000);
+    } else if (slot === 1 && !(lastMan && danger)) {
+      // second man: behind the play on the far side from the first man, ready for the pass / rebound
+      p.role = 'support';
+      const side = fx > b.x ? -1 : 1;
+      const back = mates.length > 2 ? 1900 : 2600;
+      p.tx = clamp(b.x * 0.4 + side * 1300, -ARENA.X + 600, ARENA.X - 600);
+      p.ty = b.y - dirY * back;
+      // never behind our own goal line area, never past the ball's side of midfield by much
+      if ((p.ty - ownY) * dirY < 900) p.ty = ownY + dirY * 900;
+      p.boost = Math.hypot(p.tx - c.pos.x, p.ty - c.pos.y) > 2200;
+      if (c.boost < 50) this.grabBoost(w, p.tx, p.ty, 2600);
     } else {
-      // goal: on the line between the ball and the middle of our goal
-      const gy = ownY + dirY * 250;
-      p.tx = clamp(b.x * 0.35, -650, 650);
-      p.ty = gy;
-      p.tz = 0;
-      p.t = 0;
-      p.boost = Math.abs(c.pos.y - gy) > 2500;
-      // shot coming: go and meet it
-      const on = w.predictGoal();
-      if (on === team && rankNear(w, this.idx, team)) {
-        for (const q of pth)
-          if ((q.y - ownY) * -dirY < 1200 && q.z < 400) {
-            p.tx = q.x;
-            p.ty = q.y - dirY * 0;
-            p.role = 'attack';
-            p.boost = true;
-            break;
-          }
+      // last man: deep and central, sliding with the ball; in the net when it's dangerous
+      if (danger) {
+        p.role = 'goal';
+        p.tx = clamp(b.x * 0.35, -650, 650);
+        p.ty = ownY + dirY * 250;
+        p.boost = Math.abs(c.pos.y - p.ty) > 2500;
+      } else {
+        p.role = 'support';
+        const deep = clamp((b.y - ownY) * dirY * 0.38, 900, 3400);
+        p.tx = clamp(b.x * 0.3, -1400, 1400);
+        p.ty = ownY + dirY * deep;
+        p.boost = Math.abs(c.pos.y - p.ty) > 2800;
+        if (c.boost < 60) this.grabBoost(w, p.tx, p.ty, 2400);
+      }
+    }
+    // keep apart: never park on top of a teammate
+    for (const i of mates) {
+      if (i === this.idx) continue;
+      const o = w.cars[i].pos;
+      const dx = p.tx - o.x;
+      const dy = p.ty - o.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 900 && p.role !== 'goal') {
+        const k = (900 - d) / Math.max(1, d);
+        p.tx = clamp(p.tx + (d > 1 ? dx * k : 900), -ARENA.X + 400, ARENA.X - 400);
+        p.ty = clamp(p.ty + (d > 1 ? dy * k : 0), -ARENA.Y + 400, ARENA.Y - 400);
       }
     }
   }
+
+  /** a big pad (or a small one) near the way to (x, y), if worth the detour */
+  private grabBoost(w: World, x: number, y: number, reach: number): void {
+    const c = w.cars[this.idx];
+    let best = -1;
+    let bd = 1e9;
+    for (let k = 0; k < PADS.length; k++) {
+      if (w.pads[k] > 0) continue;
+      const q = PADS[k];
+      const d = Math.hypot(q.x - c.pos.x, q.y - c.pos.y) + Math.hypot(q.x - x, q.y - y) * 0.6 - (q.big ? 900 : 0);
+      if (d < bd) ((bd = d), (best = k));
+    }
+    if (best >= 0 && bd < reach) {
+      this.plan.tx = PADS[best].x;
+      this.plan.ty = PADS[best].y;
+    }
+  }
+
+  /** the first man: the first reachable point on the ball's path (up the wall too), lined up for a
+   * shot, a centre, or just a clear when it can't get goal-side; straight in when it's a 50/50 */
+  private attackPlan(w: World, pth: BallPt[], dirY: number, hasMates: boolean): void {
+    const c = w.cars[this.idx];
+    const p = this.plan;
+    const team = w.players[this.idx].team;
+    const ownY = -dirY * ARENA.Y;
+    const sp = Math.max(1100, c.vel.len()) + (c.boost > 15 ? 600 * this.skill : 0);
+    const onWall = (q: BallPt) => Math.abs(q.x) > ARENA.X - 450 || (Math.abs(q.y) > ARENA.Y - 450 && Math.abs(q.x) > ARENA.GOAL_W + 200);
+    let pick = pth[pth.length - 1];
+    for (const q of pth) {
+      const d = Math.hypot(q.x - c.pos.x, q.y - c.pos.y) - 120 + (onWall(q) ? q.z * 0.8 : 0);
+      const zMax = onWall(q) ? 1150 : 260 + this.skill * 200;
+      if (q.z < zMax && d / sp <= q.t) {
+        pick = q;
+        break;
+      }
+    }
+    const wall = onWall(pick) && pick.z > 250;
+    // the shot: the far goal, a little inside the posts; deep in the corner with a teammate up, a
+    // centre in front of goal instead (a pass for the second man)
+    let gx = clamp(pick.x * 0.25, -500, 500) * (1 - this.skill * 0.5);
+    let gy = dirY * (ARENA.Y + 300);
+    const deep = pick.y * dirY > 3300 && Math.abs(pick.x) > 1900;
+    if (deep && hasMates && (this.idx + (w.tick >> 9)) % 3 !== 0) {
+      gx = 0;
+      gy = dirY * (ARENA.Y - 1200);
+    }
+    const dirTo = (x: number, y: number): [number, number] => {
+      const l = Math.hypot(x, y) || 1;
+      return [x / l, y / l];
+    };
+    // how far goal-side of the ball we are for an aim (negative = behind it, good)
+    const relFor = (a: [number, number]) => (c.pos.x - pick.x) * a[0] + (c.pos.y - pick.y) * a[1];
+    let aim = dirTo(gx - pick.x, gy - pick.y);
+    let rel = relFor(aim);
+    if (rel > -100) {
+      // can't shoot from here: anything that sends it away from our goal will do
+      const clear = dirTo(pick.x - 0, pick.y - ownY);
+      const side = dirTo(Math.sign(pick.x || 1), 0.35 * dirY);
+      for (const a of [clear, side]) {
+        if (relFor(a) < rel - 150 && relFor(a) < 50) {
+          aim = a;
+          rel = relFor(a);
+          break;
+        }
+      }
+    }
+    const [ax, ay] = aim;
+    const back = BALL.R + CAR.HX + 20;
+    let tx = pick.x - ax * back;
+    let ty = pick.y - ay * back;
+    const dd = Math.hypot(c.pos.x - pick.x, c.pos.y - pick.y);
+    // a 50/50: an opponent's about to get there, so go straight through the ball
+    let rival = 1e9;
+    w.cars.forEach((o, i) => {
+      if (w.players[i].team !== team && o.alive) rival = Math.min(rival, Math.hypot(o.pos.x - w.ball.pos.x, o.pos.y - w.ball.pos.y));
+    });
+    const challenge = rival < 900 && dd < 1300 && relFor(dirTo(pick.x - 0, pick.y - ownY)) < 200;
+    if (challenge || wall) {
+      tx = pick.x - ax * 60;
+      ty = pick.y - ay * 60;
+    } else if (rel > -100) {
+      // swing round the ball toward our own side
+      const sd = Math.sign((c.pos.x - pick.x) * ay - (c.pos.y - pick.y) * ax) || 1;
+      tx = pick.x - ax * 520 + sd * ay * 380;
+      ty = pick.y - ay * 520 - sd * ax * 380;
+    } else {
+      // the closer we get, the more we commit to the ball itself
+      const k = clamp(1 - dd / 1600, 0, 0.8);
+      tx += (pick.x - tx) * k;
+      ty += (pick.y - ty) * k;
+    }
+    const lim = wall ? 60 : 200;
+    p.tx = clamp(tx, -ARENA.X + lim, ARENA.X - lim);
+    p.ty = clamp(ty, -ARENA.Y + lim, ARENA.Y - lim);
+    p.tz = wall ? pick.z : 0;
+    p.t = pick.t;
+  }
+}
+
+interface TeamMind {
+  first: number;
+  tick: number;
+  touched: number;
+  /** the last touch already looked at */
+  seen: number;
+  /** players rotating out, until which tick */
+  out: Map<number, number>;
+}
+const minds = new WeakMap<World, TeamMind[]>();
+function teamMind(w: World, team: number): TeamMind {
+  let m = minds.get(w);
+  if (!m) minds.set(w, (m = [0, 1].map(() => ({ first: -1, tick: -1, touched: 0, seen: -1, out: new Map() }))));
+  return m[team];
 }
 
 /** the teammate nearest our goal handles the save */
