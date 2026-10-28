@@ -551,16 +551,17 @@ export class World {
       }
     }
     const b = this.ball.pos;
-    // the explosion throws nearby cars violently away and up into the air, tumbling (picked up as
-    // an edit and sent into RocketSim next tick, which caps a car at 2300)
-    const blast = 2300;
+    // the explosion stops every car near it dead and blows it hard back, away from the ball, and up
+    // into the air, tumbling: near full force over most of the blast, dropping off only at its edge
+    // (picked up as an edit and sent into RocketSim next tick, which caps a car at 2300)
+    const blast = 2400;
     for (let ci = 0; ci < this.cars.length; ci++) {
       const c = this.cars[ci];
       if (!c.alive) continue;
       const d = new V3().subVectors(c.pos, b);
       const dist = d.len();
       if (dist > blast) continue;
-      const k = Math.pow(1 - dist / blast, 0.55);
+      const k = Math.min(1, 1.25 * Math.pow(1 - dist / blast, 0.35));
       let hx = d.x;
       let hy = d.y;
       const hl = Math.hypot(hx, hy);
@@ -572,10 +573,9 @@ export class World {
         hy /= hl;
       }
       const v = 2300 * k;
-      c.vel.set(c.vel.x * (1 - k) + hx * v * 0.72, c.vel.y * (1 - k) + hy * v * 0.72, Math.max(0, c.vel.z) * (1 - k) + v * 0.7 + 250 * k);
-      // tumbling: flipped over away from the blast, with a twist
-      const tw = (ci % 2 ? 1 : -1) * 2.5 * k;
-      c.w.set(c.w.x * (1 - k) - hy * 5.5 * k, c.w.y * (1 - k) + hx * 5.5 * k, c.w.z * (1 - k) + tw);
+      c.vel.set(hx * v * 0.7, hy * v * 0.7, v * 0.72);
+      // tumbling end over end away from the blast, with a twist
+      c.w.set(-hy * 5.5 * k, hx * 5.5 * k, (ci % 2 ? 1 : -1) * 2.5 * k);
     }
     const ev = { t: 'goal' as const, team, scorer, assist, speed: this.ball.vel.len(), x: b.x, y: b.y, z: b.z };
     this.lastGoal = ev;
