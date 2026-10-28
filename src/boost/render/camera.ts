@@ -80,6 +80,11 @@ export class ChaseCam {
   /** smoothed extra distance from stiffness */
   private lag = 0;
   private airT = 0;
+  /** how far the camera's pivot trails the car along the rig's up (a jump lifts the car in the
+   * frame before the camera follows), and where the car was last frame */
+  private lagUp = 0;
+  private prevPos = new V3();
+  private havePrev = false;
   fov = CAM.FOV;
 
   shake(a: number, t = 0.5): void {
@@ -95,6 +100,9 @@ export class ChaseCam {
     this.heading.copy(h);
     this.pitch = p;
     this.lag = 0;
+    this.lagUp = 0;
+    this.prevPos.copy(t.pos);
+    this.havePrev = true;
     this.compute(t, 1, true);
   }
 
@@ -169,11 +177,20 @@ export class ChaseCam {
     const turn = 1 - Math.exp(-dt * (this.behind ? 30 : free ? 16 : 10 + 2 * this.ballK));
     rotate(this.heading, this.up, da * turn).norm();
     this.pitch += (p - this.pitch) * (1 - Math.exp(-dt * 7));
+    // the pivot trails the car's moves along up (jumps, landings, climbs), catching up in ~0.15 s;
+    // a teleport (kickoff, respawn) resets it
+    if (this.havePrev && this.prevPos.dist(t.pos) < 400) {
+      const du = (this.prevPos.x - t.pos.x) * this.up.x + (this.prevPos.y - t.pos.y) * this.up.y + (this.prevPos.z - t.pos.z) * this.up.z;
+      this.lagUp = Math.max(-140, Math.min(140, (this.lagUp + du) * Math.exp(-dt * 7)));
+    } else this.lagUp = 0;
+    this.prevPos.copy(t.pos);
+    this.havePrev = true;
     this.compute(t, dt, false);
   }
 
   private compute(t: CamTarget, dt: number, snap: boolean): void {
     const up = this.up;
+    const pivot = new V3(t.pos.x + up.x * this.lagUp, t.pos.y + up.y * this.lagUp, t.pos.z + up.z * this.lagUp);
     const h = this.heading;
     const side = tA.set(h.y * up.z - h.z * up.y, h.z * up.x - h.x * up.z, h.x * up.y - h.y * up.x).norm();
     // the rig tilted by a pitch: its forward and its up
@@ -191,7 +208,7 @@ export class ChaseCam {
     const want = new V3();
     const place = (p: number) => {
       tilt(p);
-      want.copy(t.pos).addScaled(fw, -dist).addScaled(rup, CAM.HEIGHT);
+      want.copy(pivot).addScaled(fw, -dist).addScaled(rup, CAM.HEIGHT);
       return sdf(want.x, want.y, want.z) >= 45;
     };
     // a high ball dips the rig under it until the floor (or the wall behind) stops it; the view
@@ -218,10 +235,10 @@ export class ChaseCam {
     }
     // still against something: the boom pulls in toward the car (never closer than 140), then
     // slides out along the surface as a last resort
-    for (let k = 0; k < 10 && sdf(want.x, want.y, want.z) < 45 && want.dist(t.pos) > 140; k++) {
-      want.x = t.pos.x + (want.x - t.pos.x) * 0.85;
-      want.y = t.pos.y + (want.y - t.pos.y) * 0.85;
-      want.z = t.pos.z + (want.z - t.pos.z) * 0.85;
+    for (let k = 0; k < 10 && sdf(want.x, want.y, want.z) < 45 && want.dist(pivot) > 140; k++) {
+      want.x = pivot.x + (want.x - pivot.x) * 0.85;
+      want.y = pivot.y + (want.y - pivot.y) * 0.85;
+      want.z = pivot.z + (want.z - pivot.z) * 0.85;
     }
     for (let k = 0; k < 2; k++) {
       const d = sdf(want.x, want.y, want.z);

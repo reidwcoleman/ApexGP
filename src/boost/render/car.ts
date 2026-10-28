@@ -386,7 +386,8 @@ export class CarView {
     // the contact shadow fades as the wheels leave the surface
     const down = car.wheelContact.filter(Boolean).length;
     const sm = this.contact.material as THREE.ShaderMaterial;
-    sm.uniforms.uA.value += ((down >= 2 ? 0.72 : 0) - sm.uniforms.uA.value) * Math.min(1, dt * 14);
+    // (gone at once when the wheels lift, or it rides up with the car as a grey smear)
+    sm.uniforms.uA.value += ((down >= 2 ? 0.72 : 0) - sm.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 14 : 60));
     this.contact.visible = sm.uniforms.uA.value > 0.01;
     this.jet(car.boosting, t, dt);
   }
