@@ -194,21 +194,17 @@
           <span class="pk-art"></span>
           <span class="pk-txt"><span class="pk-k">1</span><b>Apex GP</b><i>Formula racing</i><em>Career, grand prix weekends and time trials on real circuits</em></span>
         </button>
+        <button class="pk-card" data-game="boost" style="--art: url(loading/boost_hero.webp); --pos: 32% 50%; --acc: #2f7bff">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">2</span><b>Boostball</b><i>Car soccer · online</i><em>Jump, flip and fly into the ball; play bots or a lobby with your friends</em></span>
+        </button>
         <button class="pk-card" data-game="miami" style="--art: url(loading/miami_rocket.webp); --acc: #ff4f9a">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">2</span><b>Miami</b><i>Open world</i><em>The Roadster from Brickell to South Beach, with the police on your tail</em></span>
+          <span class="pk-txt"><span class="pk-k">3</span><b>Miami</b><i>Open world</i><em>The Roadster from Brickell to South Beach, with the police on your tail</em></span>
         </button>
         <button class="pk-card" data-game="marbles" style="--art: url(loading/marbles_grid.webp); --pos: 50% 80%; --acc: #ffd23a">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">3</span><b>Marble Mania</b><i>Party knockout</i><em>24 glass marbles, wooden courses, 6 rounds and 1 crown</em></span>
-        </button>
-        <button class="pk-card" data-game="lawn" style="--art: url(loading/lawn_diorama.webp); --acc: #7be86a">
-          <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">4</span><b>Apex Lawn</b><i>Peaceful mowing</i><em>Mow stripes into tiny floating lawns, one more lawn at a time</em></span>
-        </button>
-        <button class="pk-card" data-game="boost" style="--art: url(loading/boost_hero.webp); --pos: 32% 50%; --acc: #2f7bff">
-          <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">5</span><b>Boostball</b><i>Car soccer · online</i><em>Jump, flip and fly into the ball; play bots or a lobby with your friends</em></span>
+          <span class="pk-txt"><span class="pk-k">4</span><b>Marble Mania</b><i>Party knockout</i><em>24 glass marbles, wooden courses, 6 rounds and 1 crown</em></span>
         </button>
       </div>
       <div class="pk-foot">Only the game you pick is loaded</div>
@@ -220,7 +216,7 @@
       #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
       #picker .pk-logo span { color: #ff2b3f; }
       #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
-      #picker .pk-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.4vw; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.4vw; }
       #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
       #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
       #picker .pk-art { position: absolute; inset: 0; background: var(--art) var(--pos, center) / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
@@ -245,7 +241,7 @@
     </style>
     <script>
       // the game picker, before anything heavy: the racing game's loader, its pictures and its
-      // downloads only start once it's picked; Miami, Marble Mania and Apex Lawn are pages of their own.
+      // downloads only start once it's picked; Boostball, Miami and Marble Mania are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
       (function () {
         var go;
@@ -269,7 +265,6 @@
           try { localStorage.setItem('apexgp.pick', g); } catch (e) {}
           if (g === 'miami') location.href = 'miami.html';
           else if (g === 'marbles') location.href = 'marbles.html';
-          else if (g === 'lawn') location.href = 'lawn.html';
           else if (g === 'boost') location.href = 'boost.html';
           else start();
         };
@@ -280,7 +275,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'miami', Digit3: 'marbles', Digit4: 'lawn', Digit5: 'boost' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles' }[e.code];
           if (n) pick(n);
         });
       })();

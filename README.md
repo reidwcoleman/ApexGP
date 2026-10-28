@@ -4,9 +4,8 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
-The site opens on a game picker — **Apex GP** (this racing game), **Miami** (the open world),
-**Marble Mania** (a marble knockout show), **Apex Lawn** (mowing) and **Boostball** (car soccer)
-— and only the game you pick is loaded: the racing game's loader, pictures and bundle
+The site opens on a game picker — **Apex GP** (this racing game), **Boostball** (car soccer),
+**Miami** (the open world) and **Marble Mania** (a marble knockout show) — and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it; `?pick`
 forces it.
 
@@ -795,47 +794,6 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
   captures several camera views in one session; `tools/marblebench.mjs` races every round
   headless (`--diff` for the difficulty) and reports times, falls, skill ordering and AI cost.
 
-## Apex Lawn
-
-**▶ https://reidwcoleman.github.io/ApexGP/lawn.html** — a peaceful, realistic mowing game: push a
-mower over a real-looking garden, the grass folds down in stripes, coins and flowers pop, and when the
-lawn is done the next, bigger one fades in. No timer, no failing. Lawns run from 14 x 12 m to about
-50 x 36 m.
-
-- **Controls**: drag anywhere (a floating stick that follows your finger past its edge, so reversing is
-  instant), WASD / arrows, or a gamepad stick; wheel / Q / E zooms. The mower swings round to follow a
-  wall while you push against it. Esc pauses.
-- **Look**: a photographed HDR sky per time of day (Poly Haven, CC0, `public/lawn/`) lights the scene
-  with a real shadow-mapped sun aligned to the sky's own sun; the engine's scanned trees (wind, thin-leaf
-  light, crown AO), Rocketbox gardener, PBR fences / walls / house / patio, HalfFloat + MSAA + N8AO +
-  bloom + neutral tone mapping, an adaptive governor (`post.ts`). Trees between the camera and the
-  mower dissolve.
-- **Grass** (`grass.ts`, `mask.ts`): 4-blade tufts in 4 m chunks with per-tuft stochastic LOD around the
-  mower, custom translucent grass lighting. The mower paints a 20 cells/m mask texture (height + stripe
-  tone from the heading as seen from the camera) a row at a time; cut cells fold down in a tenth of a
-  second; the last 1.5% finishes itself in a ripple of classic stripes.
-- **Lawns** (`levels.ts`, `nav.ts`): lawn N is a pure function of N: tiled shapes with trees, bushes,
-  rocks, gnomes, flower beds, ponds, hedges, fences, sheds, benches, tables, lanterns; coins and
-  flowers; a house with a patio from lawn 4. Four times of day (morning, day, autumn, dusk). A flood
-  fill decides what the widest mower can reach, and obstacles that would wall off grass are dropped.
-- **Progress**: coins and flowers pay, each lawn pays a bonus; the Shed sells four upgrades and five
-  mowers (three push mowers with the gardener walking behind, two ride-ons). Saved in `localStorage`
-  (`apexlawn.save.v1`).
-- **Sound** (`audio.ts`): real recordings (Wikimedia Commons, public domain / CC0 / CC BY, credits in
-  `public/lawn/sfx/CREDITS.txt`, cut by `tools/build_lawn_sounds.py`): a real mower in two gapless loops
-  (free-running and chewing grass) kept at one pitch and crossfaded by load, revs following speed and
-  throttle and dipping in thick grass, a pull-cord start and a spin-down; thuds by what was hit (wood,
-  stone, metal, leaves); real coin clinks climbing the scale; windchime / glockenspiel chimes; applause;
-  a birds / breeze / frogs bed per time of day. Synthesised on top: a grain of snipping per bit of lawn cut,
-  footsteps, UI ticks and the generative tune. `node tools/lawnaudio.mjs out.wav "lawn=3&auto" 20` records
-  the master bus headlessly and prints its levels.
-- **Meadow** (`meadow.ts`): the uncut field beyond the fences, tall dried tufts and wildflowers growing
-  right up to the boards; cut lawn carries the grain of a scanned turf map, clippings and drifting cloud
-  shadows.
-- **Assets**: `tools/fetch_lawn_assets.mjs` downloads and packs the Poly Haven models / textures / HDRIs.
-- **Testing**: `?lawn=N` starts at lawn N, `?auto` has a bot drive, `?noao` / `?dof` toggle post
-  effects; `tools/lawnshot.mjs <dir> "<query>" step...` drives the page headlessly.
-
 ## Controls
 
 | | Keyboard | Gamepad |
@@ -878,7 +836,6 @@ src/
            upsampled depth-aware so cars in spray keep clean outlines), SkidMarks (rubber, offs, braking
            film, marbles)
   ui/      HUD, Menu, design tokens
-  lawn/    Apex Lawn (lawn.html): Lawn (grass mask + instanced tufts), Mower, levels / nav, props, fx, audio, UI
   core/    Renderer (post chain: N8AO, TAA, motion blur, onboard lens, bloom, speed blur + CA, grade + auto exposure,
            PBR Neutral / ACES-fit by look, film print + grain, SMAA below High, lens + sharpen;
            adaptive resolution that never trusts Apple's GPU timer), Input, Audio
