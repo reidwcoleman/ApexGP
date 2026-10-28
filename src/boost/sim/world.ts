@@ -1,7 +1,7 @@
 import { inGoal, KICKOFFS, normalAt, PADS, RESPAWNS, sdf, type Team } from './arena.ts';
 import { Ball, BALL } from './ball.ts';
 import { Car, CAR, noInput, WHEELS, type Input } from './car.ts';
-import { curve, rng, V3 } from './math.ts';
+import { clamp, curve, rng, V3 } from './math.ts';
 
 /**
  * One match: the cars, the ball, the 34 boost pads, the clock and the rules (kickoff countdown,
@@ -126,7 +126,6 @@ export class World {
   seed = 1;
   opts: MatchOpts = { minutes: 5, freeplay: false, unlimitedBoost: false };
   private lastExtra: number[] = [];
-  private bumpCool = new Map<number, number>();
   private shotCheck = -99;
   private countShown = 4;
   /** ticks since the clock ran out while the ball was in the air */
@@ -569,6 +568,12 @@ export class World {
   }
 
   /** car vs car: capsules for contact, bumps and demolitions on top */
+  /**
+   * Car against car, as Bullet and RocketSim do it: the two hitboxes (oriented boxes) touch at up to
+   * four manifold points, solved with ten sequential-impulse iterations at CARCAR friction 0.09 and
+   * restitution 0.1, the overlap pushed apart. Each new contact runs RocketSim's bump / demo check
+   * both ways round (Arena::_BtCallback_OnCarCarCollision), with its 0.25 s per-car cooldown.
+   */
   private carCars(): void {
     const n = this.cars.length;
     for (let i = 0; i < n; i++) {
@@ -577,63 +582,84 @@ export class World {
       for (let j = i + 1; j < n; j++) {
         const b = this.cars[j];
         if (!b.alive) continue;
-        const ca = a.center(tA);
-        const cb = b.center(tB);
-        if (ca.dist(cb) > 160) continue;
-        // closest points between the two capsule segments (along each car's length)
-        const half = CAR.HX - 30;
-        const rad = 38;
-        const [pa, pb] = closestSegs(ca, a.rot.f, cb, b.rot.f, half);
-        const d = pa.dist(pb);
-        if (d >= rad * 2) continue;
-        const nrm = new V3().subVectors(pb, pa);
-        if (nrm.len() < 1e-4) nrm.set(0, 0, 1);
-        nrm.norm();
-        const pen = rad * 2 - d;
-        a.pos.addScaled(nrm, -pen / 2);
-        b.pos.addScaled(nrm, pen / 2);
-        const vrel = new V3().subVectors(b.vel, a.vel);
-        const vn = vrel.dot(nrm);
-        if (vn < 0) {
-          const jn = (-1.1 * vn) / (2 / CAR.MASS);
-          a.vel.addScaled(nrm, -jn / CAR.MASS);
-          b.vel.addScaled(nrm, jn / CAR.MASS);
+        if (a.center(tA).dist(b.center(tB)) > 2 * (CAR.HX + 20)) continue;
+        const cs = boxContacts(a, b);
+        if (!cs.length) continue;
+        if (this.authority) for (const c of cs) this.bumpCheck(i, j, c.p);
+        if (!a.alive || !b.alive) continue;
+        // restitution from the approach speed, the friction direction from the slide (n points a → b)
+        for (const c of cs) {
+          relVel(a, b, c.p, tC);
+          const vn = tC.dot(c.n);
+          c.imn = a.invMassAt(c.p, c.n) + b.invMassAt(c.p, c.n);
+          c.bias = vn < -10 ? -0.1 * vn : 0;
+          c.t.copy(tC).addScaled(c.n, -vn);
+          if (c.t.len2() > 1e-6) c.t.norm();
+          else c.t.crossVectors(c.n, Math.abs(c.n.z) < 0.9 ? Z_UP : X_FWD).norm();
+          c.imt = a.invMassAt(c.p, c.t) + b.invMassAt(c.p, c.t);
         }
-        // bumps and demos (RocketSim's Arena::_BtCallback_OnCarCarCollision), each way round: the hitter
-        // moves at the other faster than it gets away, and the contact is on its front bumper
-        if (!this.authority) continue;
-        for (const [hi, vi] of [
-          [i, j],
-          [j, i],
-        ] as [number, number][]) {
-          const h = this.cars[hi];
-          const v = this.cars[vi];
-          if (!v.alive) break;
-          const key = hi * 64 + vi;
-          if (this.tick - (this.bumpCool.get(key) ?? -999) < 30) continue;
-          const delta = new V3().subVectors(v.pos, h.pos);
-          if (h.vel.dot(delta) <= 0) continue;
-          const velDir = h.vel.clone().norm();
-          const towards = h.vel.dot(delta.norm());
-          if (towards <= v.vel.dot(velDir)) continue;
-          // (the other car's nearest point, brought onto the hitter's box, must be ahead of 64.5)
-          const lx = tP.subVectors(hi === i ? pb : pa, h.pos).dot(h.rot.f);
-          if (Math.min(CAR.OX + CAR.HX, lx) <= 64.5) continue;
-          this.bumpCool.set(key, this.tick);
-          if (h.supersonic && this.players[hi].team !== this.players[vi].team) {
-            v.demoTimer = 3;
-            this.stats[hi].demos++;
-            this.stats[hi].score += 10;
-            this.events.push({ t: 'demo', by: hi, car: vi, x: v.pos.x, y: v.pos.y, z: v.pos.z });
-          } else {
-            const amt = curve(v.onGround ? BUMP_GROUND : BUMP_AIR, towards);
-            v.vel.addScaled(velDir, amt);
-            if (v.onGround) v.vel.addScaled(v.rot.u, curve(BUMP_UP, towards));
-            else v.vel.z += curve(BUMP_UP, towards);
-            v.vel.clampLen(CAR.MAX_SPEED);
-            this.events.push({ t: 'bump', car: vi, power: towards });
+        for (let it = 0; it < 10; it++) {
+          for (const c of cs) {
+            const vn = relVel(a, b, c.p, tC).dot(c.n);
+            const old = c.jn;
+            c.jn = Math.max(0, c.jn + (c.bias - vn) / c.imn);
+            if (c.jn !== old) pairImpulse(a, b, tN.copy(c.n).scale(c.jn - old), c.p);
+          }
+          for (const c of cs) {
+            const vt = relVel(a, b, c.p, tC).dot(c.t);
+            const old = c.jt;
+            const lim = 0.09 * c.jn;
+            c.jt = clamp(c.jt - vt / c.imt, -lim, lim);
+            if (c.jt !== old) pairImpulse(a, b, tN.copy(c.t).scale(c.jt - old), c.p);
           }
         }
+        // push the overlap apart (erp2 0.8, shared)
+        const deep = cs[0];
+        a.pos.addScaled(deep.n, -0.4 * deep.d);
+        b.pos.addScaled(deep.n, 0.4 * deep.d);
+      }
+    }
+    for (const c of this.cars) {
+      if (c.bumpT > 0) c.bumpT = Math.max(0, c.bumpT - TICK);
+      if (c.bumpV.len2() > 0) {
+        c.vel.add(c.bumpV).clampLen(CAR.MAX_SPEED);
+        c.bumpV.set(0, 0, 0);
+      }
+    }
+  }
+
+  /** RocketSim's bump / demo rule for one contact point, tried with each car as the hitter */
+  private bumpCheck(i: number, j: number, p: V3): void {
+    for (const [hi, vi] of [
+      [i, j],
+      [j, i],
+    ] as [number, number][]) {
+      const h = this.cars[hi];
+      const v = this.cars[vi];
+      if (!h.alive || !v.alive) return;
+      if (h.bumpWith === vi && h.bumpT > 0) continue;
+      const delta = tP.subVectors(v.pos, h.pos);
+      if (h.vel.dot(delta) <= 0) continue;
+      const velDir = h.vel.clone().norm();
+      const towards = h.vel.dot(delta.norm());
+      if (towards <= v.vel.dot(velDir)) continue;
+      // the contact on the hitter's front bumper
+      if (tP.subVectors(p, h.pos).dot(h.rot.f) <= 64.5) continue;
+      h.bumpWith = vi;
+      h.bumpT = 0.25;
+      if (h.supersonic && this.players[hi].team !== this.players[vi].team) {
+        v.demoTimer = 3;
+        this.stats[hi].demos++;
+        this.stats[hi].score += 10;
+        this.events.push({ t: 'demo', by: hi, car: vi, x: v.pos.x, y: v.pos.y, z: v.pos.z });
+      } else {
+        // (into the victim's impulse cache: added after the tick, so the other way round sees the same speeds)
+        const amt = curve(v.onGround ? BUMP_GROUND : BUMP_AIR, towards);
+        const up = curve(BUMP_UP, towards);
+        v.bumpV.addScaled(velDir, amt);
+        if (v.onGround) v.bumpV.addScaled(v.rot.u, up);
+        else v.bumpV.z += up;
+        this.events.push({ t: 'bump', car: vi, power: towards });
       }
     }
   }
@@ -774,18 +800,91 @@ export class World {
 }
 
 /** closest points of two segments c ± d·h */
-function closestSegs(c1: V3, d1: V3, c2: V3, d2: V3, h: number): [V3, V3] {
-  const r = new V3().subVectors(c1, c2);
-  const a = d1.dot(d1);
-  const e = d2.dot(d2);
-  const f = d2.dot(r);
-  const b = d1.dot(d2);
-  const c = d1.dot(r);
-  const den = a * e - b * b;
-  let s = den > 1e-6 ? (b * f - c * e) / den : 0;
-  s = Math.max(-h, Math.min(h, s));
-  let t = (b * s + f) / e;
-  t = Math.max(-h, Math.min(h, t));
-  s = Math.max(-h, Math.min(h, (b * t - c) / a));
-  return [new V3().copy(c1).addScaled(d1, s), new V3().copy(c2).addScaled(d2, t)];
+const Z_UP = new V3(0, 0, 1);
+const X_FWD = new V3(1, 0, 0);
+interface CarContact {
+  p: V3;
+  n: V3; // a → b
+  d: number; // overlap depth
+  t: V3;
+  jn: number;
+  jt: number;
+  imn: number;
+  imt: number;
+  bias: number;
+}
+// points over each hitbox: corners, five along every edge, the face centres (local to the box centre, unit)
+const BOX_PTS: [number, number, number][] = [];
+for (const x of [-1, -0.5, 0, 0.5, 1])
+  for (const y of [-1, -0.5, 0, 0.5, 1])
+    for (const z of [-1, -0.5, 0, 0.5, 1]) {
+      const onEdge = [x, y, z].filter((k) => Math.abs(k) === 1).length;
+      if (onEdge >= 2 || (onEdge === 1 && x * x + y * y + z * z === 1)) BOX_PTS.push([x, y, z]);
+    }
+const cp = new V3();
+const cl = new V3();
+/** where car b's hitbox points sit inside car a's: contact point, normal out of a's face, depth */
+function inside(a: Car, b: Car, out: CarContact[], flip: boolean): void {
+  const ca = a.center(new V3());
+  const cb = b.center(new V3());
+  for (const [x, y, z] of BOX_PTS) {
+    b.rot.toWorld(x * CAR.HX, y * CAR.HY, z * CAR.HZ, cp).add(cb);
+    a.rot.toLocal(cl.subVectors(cp, ca), cl);
+    const px = CAR.HX - Math.abs(cl.x);
+    const py = CAR.HY - Math.abs(cl.y);
+    const pz = CAR.HZ - Math.abs(cl.z);
+    if (px <= 0 || py <= 0 || pz <= 0) continue;
+    // out through the nearest face
+    let d = px;
+    let ax = a.rot.f;
+    let sg = Math.sign(cl.x) || 1;
+    if (py < d) {
+      d = py;
+      ax = a.rot.l;
+      sg = Math.sign(cl.y) || 1;
+    }
+    if (pz < d) {
+      d = pz;
+      ax = a.rot.u;
+      sg = Math.sign(cl.z) || 1;
+    }
+    // (normal from a toward b: out of a's face; flipped when a is really the second car)
+    const nrm = ax.clone().scale(flip ? -sg : sg);
+    out.push({ p: cp.clone(), n: nrm, d, t: new V3(), jn: 0, jt: 0, imn: 0, imt: 0, bias: 0 });
+  }
+}
+/** the contact manifold between two hitboxes: up to four points, deepest first, spread out */
+function boxContacts(a: Car, b: Car): CarContact[] {
+  const all: CarContact[] = [];
+  inside(a, b, all, false);
+  inside(b, a, all, true);
+  if (!all.length) return all;
+  all.sort((p, q) => q.d - p.d);
+  const keep = [all[0]];
+  while (keep.length < 4) {
+    let best = -1;
+    let bi = -1;
+    for (let i = 0; i < all.length; i++) {
+      if (keep.includes(all[i])) continue;
+      let m = Infinity;
+      for (const k of keep) m = Math.min(m, k.p.dist(all[i].p));
+      if (m > best) {
+        best = m;
+        bi = i;
+      }
+    }
+    if (bi < 0 || best < 4) break;
+    keep.push(all[bi]);
+  }
+  return keep;
+}
+/** velocity of b relative to a at a world point */
+function relVel(a: Car, b: Car, p: V3, out: V3): V3 {
+  const vb = b.pointVel(p, new V3());
+  return out.copy(vb).sub(a.pointVel(p, new V3()));
+}
+/** equal and opposite: +J on b, −J on a */
+function pairImpulse(a: Car, b: Car, J: V3, p: V3): void {
+  b.impulse(J.clone(), p);
+  a.impulse(J.clone().scale(-1), p);
 }

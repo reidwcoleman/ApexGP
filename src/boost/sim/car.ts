@@ -195,6 +195,11 @@ export class Car {
   bodyTouch = false;
   /** seconds since the hitbox last touched a wall */
   bodyAgo = 9;
+  /** RocketSim's carContact: the car last bumped and the cooldown before it can be bumped by us again */
+  bumpWith = -1;
+  bumpT = 0;
+  /** bump velocity waiting to be added at the end of the tick (RocketSim's _velocityImpulseCache) */
+  bumpV = new V3();
   /** the surface normal at the hitbox's last wall contact */
   bodyN = new V3(0, 0, 1);
   private contacts: { p: V3; d: number; n: V3; t: V3; jn: number; jt: number; jp: number; bias: number; imn: number; imt: number }[] = [];
