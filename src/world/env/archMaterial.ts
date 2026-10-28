@@ -121,7 +121,7 @@ float arLine( float x, float p, float w, float fw ) {
  */
 export function archMaterial(fine = false): THREE.MeshStandardMaterial {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
-  if (fine) m.defines = { ARCH_FINE: '' };
+  m.defines = fine ? { ARCH_FINE: '', SNOW_TOP: '' } : { SNOW_TOP: '' };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWetness = weatherUniforms.uWetness;
     sh.vertexShader = sh.vertexShader

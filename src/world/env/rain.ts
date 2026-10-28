@@ -68,8 +68,9 @@ void main() {
   vec3 dir = rv / max( rl, 1e-3 );
   float dist = length( rel );
   vec3 side = normalize( cross( dir, rel + vec3( 1e-3, 0.0, 0.0 ) ) );
-  // (a flake is ~1–2 cm across, a hailstone ~1 cm: both far fatter than a raindrop's streak)
-  float w0 = uWidth * mix( 1.0 + 1.4 * uHail, 2.6 + 1.6 * aSeed.w, fl ) * ( 1.0 + 0.8 * uDust );
+  // (a flake is ~1–3 cm across — the big wet ones clumped bigger still — a hailstone ~1 cm: both far fatter
+  // than a raindrop's streak; and a camera sees flakes near the lens as soft out-of-focus blobs)
+  float w0 = uWidth * mix( 1.0 + 1.6 * uHail, 3.6 + 5.0 * aSeed.w * aSeed.w * aSeed.w, fl ) * ( 1.0 + 0.8 * uDust );
   // a flake is round unless the camera rushes through it; a drop is always a streak
   float len = clamp( rl * uShutter, mix( 0.06, 2.0 * w0, fl ), 4.5 );
   // keep streaks at least ~1 px wide, conserving their brightness
@@ -143,10 +144,11 @@ void main() {
   if ( a < 0.002 ) discard;
   // snow and hail are ice: they scatter the whole sky's light and read white, not as grey streaks
   float ice = max( vFlake, uHail );
-  vec3 col = uColor * mix( 1.0, 2.1, ice ) * mix( vec3( 1.0 ), vec3( 1.4, 1.0, 0.62 ), uDust );
+  vec3 col = uColor * mix( 1.0, 2.5, ice ) * mix( vec3( 1.0 ), vec3( 1.4, 1.0, 0.62 ), uDust );
   // premultiplied: the streak's light is added, and a drop also blocks a little of what is behind
   // it — so rain still reads against a bright sky, as grey streaks, instead of vanishing
-  gl_FragColor = vec4( ( col + uGlint * vGlint * ( 1.0 - 0.5 * ice ) + hlColor * vLamp * 0.18 ) * a, a * mix( 0.45, 0.8, ice ) );
+  // (a flake blocks what is behind it: against a bright sky it still reads, as a grey-white speck)
+  gl_FragColor = vec4( ( col + uGlint * vGlint * ( 1.0 - 0.5 * ice ) + hlColor * vLamp * 0.18 ) * a, a * mix( 0.45, 0.9, ice ) );
 }
 `;
 
@@ -157,6 +159,7 @@ attribute float aSize;
 uniform float uTime;
 uniform float uLife;
 uniform vec3 uCam;
+uniform float uHail;
 varying vec2 vQ;
 varying float vT;
 varying float vSeed;
@@ -179,13 +182,16 @@ void main() {
   vFade = 1.0 - 0.7 * smoothstep( 12.0, 45.0, length( toCam ) );
   vec2 f = normalize( toCam.xz + vec2( 1e-4 ) );
   vec3 right = vec3( -f.y, 0.0, f.x );
-  vec3 wp = aSplash.xyz + right * position.x * aSize + vec3( 0.0, position.y * aSize * 1.3, 0.0 );
+  // (a hailstone bounces knee high off the asphalt: a taller quad for its arc)
+  float sz = aSize * ( 1.0 + 1.2 * uHail );
+  vec3 wp = aSplash.xyz + right * position.x * sz + vec3( 0.0, position.y * sz * ( 1.3 + 1.7 * uHail ), 0.0 );
   gl_Position = projectionMatrix * viewMatrix * vec4( wp, 1.0 );
 }
 `;
 
 const SPLASH_FRAG = /* glsl */ `
 uniform vec3 uColor;
+uniform float uHail;
 varying vec2 vQ;
 varying float vT;
 varying float vSeed;
@@ -193,17 +199,21 @@ varying float vFade;
 void main() {
   float t = vT;
   float a = 0.0;
+  // hail: no crown, no spray — the stone itself (and a chip or two of it) bouncing off on a high arc
   // droplets thrown up and out on little parabolas
   for ( int i = 0; i < 5; i++ ) {
     float fi = float( i );
     float dx = ( fi - 2.0 ) * 0.36 + ( fract( vSeed * ( 7.0 + fi * 3.1 ) ) - 0.5 ) * 0.2;
     float up = 0.75 + 0.5 * fract( vSeed * ( 13.0 + fi * 5.7 ) ) - abs( fi - 2.0 ) * 0.14;
+    float keep = mix( 1.0, fi == 2.0 ? 1.0 : ( fi == 3.0 ? 0.5 : 0.0 ), uHail );
+    dx *= mix( 1.0, 0.6, uHail );
+    up = mix( up, 1.1 + 0.6 * fract( vSeed * 23.0 ), uHail );
     vec2 p = vec2( dx * t * 1.6, up * ( 2.4 * t - 2.6 * t * t ) );
-    vec2 d = ( vQ - p ) * vec2( 1.0, 0.5 );
-    a += exp( -dot( d, d ) * 320.0 );
+    vec2 d = ( vQ - p ) * vec2( 1.0, mix( 0.5, 0.9, uHail ) );
+    a += keep * exp( -dot( d, d ) * mix( 320.0, 220.0, uHail ) );
   }
   // the crown wall, low and brief, and the ring spreading on the water
-  float crown = exp( -pow( ( abs( vQ.x ) - t * 0.9 ) * 14.0, 2.0 ) ) * smoothstep( 0.35 * ( 1.0 - t ), 0.0, vQ.y ) * step( 0.0, vQ.y ) * ( 1.0 - t );
+  float crown = ( 1.0 - uHail ) * exp( -pow( ( abs( vQ.x ) - t * 0.9 ) * 14.0, 2.0 ) ) * smoothstep( 0.35 * ( 1.0 - t ), 0.0, vQ.y ) * step( 0.0, vQ.y ) * ( 1.0 - t );
   a = a * ( 1.0 - t * 0.6 ) + crown * 0.8;
   a *= smoothstep( 1.0, 0.7, t ) * vFade;
   if ( a < 0.004 ) discard;
@@ -324,7 +334,7 @@ export function createRain(): RainSystem {
   zAttr.setUsage(THREE.DynamicDrawUsage);
   sGeo.setAttribute('aSize', zAttr);
   sGeo.instanceCount = SPLASH_MAX;
-  const sU = { uTime: { value: 0 }, uLife: { value: 0.28 }, uCam: { value: new THREE.Vector3() }, uColor: { value: new THREE.Color(0.5, 0.5, 0.55) } };
+  const sU = { uTime: { value: 0 }, uLife: { value: 0.28 }, uCam: { value: new THREE.Vector3() }, uColor: { value: new THREE.Color(0.5, 0.5, 0.55) }, uHail: { value: 0 } };
   const sMat = new THREE.ShaderMaterial({
     uniforms: sU,
     vertexShader: SPLASH_VERT,
@@ -401,7 +411,8 @@ export function createRain(): RainSystem {
         l.uniforms.uDust.value = dust;
       }
       // a hailstone bounces off the asphalt in a bright white burst
-      sU.uLife.value = hail > 0.3 ? 0.4 : 0.28;
+      sU.uLife.value = hail > 0.3 ? 0.55 : 0.28;
+      sU.uHail.value = hail > 0.3 ? 1 : 0;
     },
     setSun(dir, glint) {
       for (const l of layers) {

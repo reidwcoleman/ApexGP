@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { snowTop } from '../env/snowTop.ts';
 import { ASPHALT_ALB_MAX, ASPHALT_TILE, GRASS_TILE, GRAVEL_TILE, type GroundTextures } from './textures.ts';
 import { weatherUniforms } from '../weatherUniforms.ts';
 import type { RunoffPaint } from '../CircuitGen.ts';
@@ -77,6 +78,33 @@ uniform float uRain;
 uniform float uDryLine;
 uniform float uWeatherTime;
 uniform float uSnowCover;
+uniform vec4 uSurfWx;
+uniform vec2 uWind;
+uniform float uFrost;
+`;
+
+const SURF_COMMON = /* glsl */ `
+// hailstones lying: 6–14 mm ice balls on a jittered 3 cm grid, \`amt\` of the cells filled — each one
+// resolved up close, only their coverage further away
+float tsHailBalls(vec2 p, float amt, float px) {
+  vec2 c = p * 33.0;
+  vec2 ci = floor(c);
+  vec2 cf = fract(c) - 0.5;
+  vec2 o = (vec2(tsHash(ci + 1.3), tsHash(ci + 7.9)) - 0.5) * 0.35;
+  float r = 0.17 + 0.2 * tsHash(ci + 4.1);
+  float ball = step(tsHash(ci + 12.7), amt) * (1.0 - smoothstep(0.55, 1.0, length(cf - o) / r));
+  return mix(ball, amt * 0.42, smoothstep(0.004, 0.02, px));
+}
+// blowing snow or sand: ribbons streaming low across the ground with the wind (world x/z), the fine
+// ones racing, the broad ones lagging behind
+float tsDrift(vec2 wxz, vec2 wind, float t) {
+  float sp = max(length(wind), 1.0);
+  vec2 wd = wind / sp;
+  vec2 q = vec2(dot(wxz, wd), dot(wxz, vec2(-wd.y, wd.x)));
+  float a = texture2D(uMacro, (q - vec2(t * sp * 0.55, 0.0)) * vec2(1.0 / 19.0, 1.0 / 1.6) + vec2(0.31, 0.77)).g;
+  float b = texture2D(uMacro, (q - vec2(t * sp * 0.95, 0.0)) * vec2(1.0 / 6.5, 1.0 / 0.42) + vec2(0.13, 0.41)).b;
+  return smoothstep(0.52, 0.86, a * 0.6 + b * 0.6);
+}
 `;
 
 /**
@@ -91,10 +119,34 @@ if (uSnowCover > 0.002) {
   // (a thin cover — a frost, the first minutes of a snowfall — is a pale rime, not a white sheet)
   float sk = smoothstep(0.05, 0.35, lie) * smoothstep(0.0, 0.65, uSnowCover);
   vec3 sc = mix(vec3(0.8, 0.83, 0.88), vec3(0.66, 0.72, 0.82), smoothstep(0.4, 0.75, sA.b)) * (0.9 + 0.14 * sB.g);
+  // (a hoar frost is a silver-blue rime the green shows through, thickest in the shade and the hollows)
+  sc = mix(sc, vec3(0.62, 0.68, 0.76) * (0.9 + 0.2 * sB.g), uFrost);
+  sk *= 1.0 - 0.3 * uFrost;
   float sEdge = 1.0 - smoothstep(0.0, 1.5 + 2.5 * sA.r, ${edge});
   sc = mix(sc, vec3(0.34, 0.34, 0.35) * (0.8 + 0.3 * sB.b), sEdge * 0.6);
+  float sPx = length(fwidth(vTrk));
+  // (hail lies as balls between the blades and the stones, not as a sheet)
+  if (uSurfWx.y > 0.002) {
+    sk = mix(sk, tsHailBalls(vTrk, sk, sPx), uSurfWx.y);
+    sc = mix(sc, vec3(0.74, 0.77, 0.82), uSurfWx.y);
+  }
+  // the crystals of a frost or fresh snow catch the light one by one: a glitter that moves with the eye
+  vec2 gC = floor(vTrk * 60.0);
+  vec3 gV = normalize(vViewPosition);
+  float glit = step(0.986, tsHash(gC + floor(gV.xz * 24.0) * 7.13)) * (1.0 - smoothstep(0.003, 0.012, sPx)) * (1.0 - uWetness);
+  sc *= 1.0 + 1.8 * glit * (1.0 - sEdge);
   diffuseColor.rgb = mix(diffuseColor.rgb, sc, sk);
   roughnessFactor = mix(roughnessFactor, 0.7, sk);
+}
+// sand blown onto the verges and into the traps: an ochre film, drifted thickest in the lee of the edge
+if (uSurfWx.w > 0.01) {
+  vec4 dA = texture2D(uMacro, vTrk * (1.0 / 13.0) + vec2(0.17, 0.83));
+  float film = uSurfWx.w * uSurfWx.x * smoothstep(0.25, 0.75, dA.g + 0.35 - 0.12 * ${edge});
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.31, 0.19) * (0.85 + 0.3 * dA.b), clamp(film * 1.3, 0.0, 0.85));
+}
+if (uSurfWx.z > 0.002) {
+  float dr = tsDrift(vWXZ, uWind, uWeatherTime) * uSurfWx.z;
+  diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.76, 0.79, 0.85), vec3(0.44, 0.32, 0.19), uSurfWx.w), dr * 0.5);
 }
 `;
 
@@ -216,11 +268,13 @@ attribute vec4 aA1;
 varying vec2 vTrk;
 varying vec4 vA0;
 varying vec4 vA1;
+varying vec2 vWXZ;
 `;
 const VERT_MAIN = /* glsl */ `
 vTrk = uv;
 vA0 = aA0;
 vA1 = aA1;
+vWXZ = (modelMatrix * vec4(position, 1.0)).xz;
 `;
 
 // --------------------------------------------------------------------------------------------- asphalt family
@@ -320,6 +374,9 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
   tsMac = (mN.rg * 2.0 - 1.0) * 0.045 + (mN2.rg * 2.0 - 1.0) * 0.03;
   vec3 tint = mix(vec3(1.03, 1.0, 0.96), vec3(0.97, 1.0, 1.04), m96.a);
   float dryBand = 0.0;
+  // (how far from the racing line and from the road's edge: where snow and sand can lie)
+  float tsLineD = 99.0;
+  float tsEdgeD = 99.0;
 
   if (zone < 0.5 || (zone > 3.5 && zone < 4.5)) {
     // ================================================= racing asphalt: freshly laid, high-grade surface
@@ -395,6 +452,8 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
 
     // rubbered-in racing line: builds with the session (uRaceRubber), baked strength per corner (vA0.y)
     float d = lat - vA0.x;
+    tsLineD = abs(d);
+    tsEdgeD = edgeD;
     float dd = d + (m24.b - 0.5) * 0.7;
     // (the outside tyres carry the corner: their track lays down more — vA2.w is the line's lateral load,
     // signed toward the inside of the bend)
@@ -895,6 +954,43 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
       rough = max(rough, 0.035 + 0.07 * uRain * (1.0 - fadeR) * sub);
     }
   }
+  // ================================================= snow, hail and sand
+  // Nothing lies where the traffic runs: each car clears two black tyre tracks, the field a wet band either
+  // side of the line; the slush it churns is pushed out into a grey ridge, then the untouched snow (or the
+  // sand a sandstorm drifts in) lies toward the edges, on the kerbs and over the run-off.
+  if (uSurfWx.x > 0.002) {
+    float rs = uSurfWx.x;
+    vec4 sA = texture2D(uMacro, vTrk * (1.0 / 23.0) + vec2(0.71, 0.13));
+    float nz = (sA.g - 0.5) * 0.7 + (m3.b - 0.5) * 0.35;
+    float lie;
+    if (zone < 0.5) {
+      float ld = tsLineD + (mN.a - 0.5) * 1.1 + (m24.b - 0.5) * 0.8;
+      float qT = (ld - 0.8) / 0.32;
+      float used = 1.0 - smoothstep(1.4, 3.4, ld);
+      lie = rs * 1.4 - used * 0.95 - exp(-qT * qT) * 0.8 + nz + (1.0 - smoothstep(0.0, 1.5, tsEdgeD)) * 0.25;
+    } else if (zone < 1.5) lie = rs * 1.3 - 0.3 + nz;
+    else lie = rs * 1.45 - 0.05 + nz;
+    float sk = smoothstep(0.0, 0.32, lie) * smoothstep(0.0, 0.45, rs);
+    float deep = smoothstep(0.25, 0.75, lie);
+    // slush (the churned snow: wet, grey, glossy) → fresh snow; loose sand → drifted sand
+    vec3 cS = mix(vec3(0.27, 0.285, 0.3) * (0.8 + 0.4 * m3.r), vec3(0.78, 0.81, 0.86) * (0.92 + 0.12 * sA.b), deep);
+    vec3 cD = mix(vec3(0.3, 0.22, 0.14), vec3(0.46, 0.35, 0.22), deep) * (0.85 + 0.3 * sA.b);
+    // (hail lies as balls, not as a sheet: where the tyres haven't flicked them away)
+    float hb = uSurfWx.y > 0.002 ? tsHailBalls(vTrk, sk * uSurfWx.y, px) : 0.0;
+    sk *= 1.0 - uSurfWx.y;
+    col = mix(col, mix(cS, cD, uSurfWx.w), sk);
+    rough = mix(rough, mix(mix(0.22, 0.8, deep), 0.95, uSurfWx.w), sk);
+    tsDetail *= 1.0 - 0.75 * sk * deep;
+    tsSpecOcc = mix(tsSpecOcc, 1.0, sk);
+    col = mix(col, vec3(0.7, 0.73, 0.78), hb);
+    rough = mix(rough, 0.3, hb);
+  }
+  if (uSurfWx.z > 0.002) {
+    float dr = tsDrift(vWXZ, uWind, uWeatherTime) * uSurfWx.z;
+    col = mix(col, mix(vec3(0.74, 0.77, 0.83), vec3(0.42, 0.31, 0.19), uSurfWx.w), dr * 0.55);
+    rough = mix(rough, 0.85, dr * 0.5);
+    tsDetail *= 1.0 - 0.5 * dr;
+  }
   diffuseColor.rgb = col;
   roughnessFactor = clamp(rough, 0.03, 1.0);
 }
@@ -922,13 +1018,16 @@ function patchGround(m: THREE.MeshStandardMaterial, key: string, t: GroundTextur
     sh.uniforms.uDryLine = W.uDryLine;
     sh.uniforms.uWeatherTime = W.uWeatherTime;
     sh.uniforms.uSnowCover = W.uSnowCover;
+    sh.uniforms.uSurfWx = W.uSurfWx;
+    sh.uniforms.uFrost = W.uFrost;
+    sh.uniforms.uWind = W.uWind;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + VERT_PARS)
       .replace('#include <uv_vertex>', '#include <uv_vertex>\n' + VERT_MAIN);
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
-        '#include <common>\nuniform sampler2D uMacro;\nuniform sampler2D uMacroN;\nvarying vec2 vTrk;\nvarying vec4 vA0;\nvarying vec4 vA1;\n' + WEATHER_PARS + COMMON + RIPPLE,
+        '#include <common>\nuniform sampler2D uMacro;\nuniform sampler2D uMacroN;\nvarying vec2 vTrk;\nvarying vec4 vA0;\nvarying vec4 vA1;\nvarying vec2 vWXZ;\n' + WEATHER_PARS + COMMON + SURF_COMMON + RIPPLE,
       )
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n' + fragMain);
     extra?.(sh);
@@ -969,7 +1068,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-16', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-17', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
@@ -984,10 +1083,10 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     // the road's third attribute (wear: elevens, dirt per side, line load), asphalt only; and its world x/z
     // (the tree cover over it)
     sh.vertexShader = sh.vertexShader
-      .replace('attribute vec4 aA1;', 'attribute vec4 aA1;\nattribute vec4 aA2;\nvarying vec4 vA2;\nvarying vec2 vWXZ;')
-      .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;\nvWXZ = (modelMatrix * vec4(position, 1.0)).xz;');
+      .replace('attribute vec4 aA1;', 'attribute vec4 aA1;\nattribute vec4 aA2;\nvarying vec4 vA2;')
+      .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;\nvarying vec2 vWXZ;\nuniform sampler2D uCanopy;\nuniform vec4 uCanopyB;')
+      .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;\nuniform sampler2D uCanopy;\nuniform vec4 uCanopyB;')
       .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
@@ -1100,7 +1199,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-9', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
+  patchGround(m, 'apex-ts-gravel-10', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
@@ -1254,7 +1353,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-9-desert' : 'apex-ts-grass-9', t, (opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG) + snowGround('vA1.y'), (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-10-desert' : 'apex-ts-grass-10', t, (opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG) + snowGround('vA1.y'), (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
@@ -1422,7 +1521,7 @@ function patchPBR(m: THREE.MeshStandardMaterial, key: string) {
 
 /** Untextured props: vertex colour + per-vertex roughness/metalness/emissive. */
 export function propsMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 });
+  const m = snowTop(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 }));
   patchPBR(m, 'apex-ts-props-5');
   return m;
 }
@@ -1432,7 +1531,7 @@ export function printMaterial(atlas: THREE.Texture): THREE.MeshStandardMaterial 
   // (PRINT_AGE: boards are never all new — each a few metres of print bleached a little differently by
   // the sun, the blacks lifted, the colours gone chalky, and a grey film of road dust in patches)
   const m = new THREE.MeshStandardMaterial({ map: atlas, vertexColors: true, roughness: 0.6, metalness: 0 });
-  m.defines = { PRINT_AGE: '' };
+  m.defines = { PRINT_AGE: '', SNOW_TOP: '' };
   patchPBR(m, 'apex-ts-print-6');
   return m;
 }

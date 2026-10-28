@@ -178,14 +178,15 @@ const REGIME: Record<WeatherKind, Regime> = {
   // (a haboob: a wall of sand on a gale, the sun a pale disc in an orange-brown murk)
   sandstorm: { cloud: 0.32, rain: 0, fog: 0.55, heat: 0, conv: 0.1, dust: 1, chill: 4 },
   // (a clear, still night left a hoar frost on the grass: it glitters, then melts as the sun gets up)
-  frost: { cloud: 0.08, rain: 0, fog: 0.3, heat: 0, conv: 0, chill: -16 },
+  // (with a thin mist lying in the low ground, burning off with the frost)
+  frost: { cloud: 0.06, rain: 0, fog: 0.42, heat: 0, conv: 0, chill: -16 },
   // (hail falls out of a big convective cell: a short, violent battering of ice, the track turned white)
   hail: { cloud: 0.92, rain: 0.5, fog: 0.4, heat: 0, conv: 0.9, hail: 1, chill: -8 },
   // (rain and wet snow together, just above freezing: grey, raw, a slushy track)
-  sleet: { cloud: 0.95, rain: 0.34, fog: 0.42, heat: 0, conv: 0, snow: 0.45, chill: -17 },
-  flurries: { cloud: 0.66, rain: 0, fog: 0.2, heat: 0, conv: 0.1, snow: 0.3, chill: -19 },
-  snow: { cloud: 0.93, rain: 0, fog: 0.45, heat: 0, conv: 0, snow: 0.72, chill: -22 },
-  blizzard: { cloud: 1, rain: 0, fog: 0.82, heat: 0, conv: 0, snow: 1, chill: -26 },
+  sleet: { cloud: 0.95, rain: 0.34, fog: 0.42, heat: 0, conv: 0, snow: 0.45, chill: -14 },
+  flurries: { cloud: 0.66, rain: 0, fog: 0.2, heat: 0, conv: 0.1, snow: 0.3, chill: -22 },
+  snow: { cloud: 0.93, rain: 0, fog: 0.45, heat: 0, conv: 0, snow: 0.72, chill: -25 },
+  blizzard: { cloud: 1, rain: 0, fog: 0.82, heat: 0, conv: 0, snow: 1, chill: -29 },
 };
 
 /** regimes that can't be told apart from cloud + rain alone */
@@ -357,7 +358,7 @@ export function planWeather(choice: WeatherChoice, timeChoice: TimeChoice, durat
     }
     const key = { t, ...wob(k) };
     // morning mist burns off over the session (a lighter veil lingers in the hollows)
-    if (k === 'mist') key.fog *= Math.max(0.18, 1 - t / Math.max(360, duration * 0.85));
+    if (k === 'mist' || k === 'frost') key.fog *= Math.max(0.18, 1 - t / Math.max(360, duration * 0.85));
     // scattered showers: bursts of rain from towering cumulus, with sunny spells between
     // (the first key rains, so the session starts under a shower with the sun out)
     if (k === 'sunshower') {
@@ -577,7 +578,8 @@ export class Weather {
     // strike is a leader flash then 1–3 return strokes down the same channel (the flicker you
     // see), about a third are sheet lightning — the clouds light up but no bolt shows
     this.flashT += dt;
-    const thunder = s.kind === 'thunderstorm';
+    // (a hailstorm is a thunderstorm's core: the hail and the lightning come out of the same cell)
+    const thunder = s.kind === 'thunderstorm' || s.kind === 'hail';
     if (s.rain > 0.78 || thunder) {
       this.nextFlash -= dt;
       if (this.nextFlash <= 0) {

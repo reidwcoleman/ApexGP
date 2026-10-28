@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { snowTopUniform } from './env/snowTop.ts';
 import { hazeEaseK, horizonVeil } from './env/terrain.ts';
 import type { SunLight } from 'three/examples/jsm/lights/SunLight.js';
 import type { Track } from './Track.ts';
@@ -431,7 +432,9 @@ export function createEnvironment(
     // deck colour: cool neutral grey, a touch warm at golden hour
     deck.setRGB(0.93, 0.97, 1.05).multiplyScalar(deckRad);
     // (in a sandstorm the 'deck' is the dust itself: the whole sky a dim ochre)
-    if (L.dust > 0.001) deck.lerp(tmpB.setRGB(1.3, 0.92, 0.58).multiplyScalar(deckRad * 0.85), L.dust);
+    if (L.dust > 0.001) deck.lerp(tmpB.setRGB(1.34, 0.84, 0.48).multiplyScalar(deckRad * 0.72), L.dust);
+    // (and a hail cell's underside has the green-grey cast storm chasers know)
+    if (L.hail > 0.001) deck.lerp(tmpB.setRGB(0.8, 0.98, 0.9).multiplyScalar(deckRad * 0.9), 0.55 * L.hail);
     if (isLowSun(L.time) && (P.direct ?? 1) > 0.5) deck.multiply(tmpA.setRGB(1.06, 1.0, 0.94));
 
     // ---- clouds
@@ -501,9 +504,11 @@ export function createEnvironment(
     const fogLum = fogCol.r * 0.2126 + fogCol.g * 0.7152 + fogCol.b * 0.0722;
     fogCol.lerp(tmpB.setRGB(0.74, 1.0, 1.26).multiplyScalar(fogLum), 0.9 * blueHour);
     // a sandstorm: the murk is the sand's own ochre, lit by a sun it has nearly swallowed
-    if (L.dust > 0.001) fogCol.lerp(tmpB.setRGB(1.25, 0.86, 0.52).multiplyScalar(fogLum * 1.05), 0.85 * L.dust);
+    if (L.dust > 0.001) fogCol.lerp(tmpB.setRGB(1.32, 0.8, 0.45).multiplyScalar(fogLum * 0.92), 0.92 * L.dust);
     // falling snow: the air is a bright, cold white-grey
-    if (L.snow > 0.001) fogCol.lerp(tmpB.setRGB(0.96, 1.0, 1.08).multiplyScalar(fogLum * 1.12), 0.6 * L.snow * THREE.MathUtils.smoothstep(L.precip, 0.05, 0.6));
+    // (a pale, cold blue-grey — not paper white: the far trees go grey in it, they don't vanish into a glow)
+    if (L.snow > 0.001) fogCol.lerp(tmpB.setRGB(0.9, 0.95, 1.05).multiplyScalar(fogLum * 0.98), 0.6 * L.snow * THREE.MathUtils.smoothstep(L.precip, 0.05, 0.6));
+    if (L.hail > 0.001) fogCol.multiply(tmpB.setRGB(0.93, 1.0, 0.96));
     fog.color.copy(fogCol);
     aerialParams.x = L.fogDensity;
     aerialParams.y = L.fogFalloff;
@@ -827,7 +832,7 @@ export function createEnvironment(
     if (night > 0.5) u.uHalo.value = 0.35 * L.sunVis;
     // a rainbow: rain falling while the sun shines, opposite it (lifted a little when the sun is high,
     // or it would sit below the horizon all afternoon)
-    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.precip * (1 - L.snow) * (1 - L.hail) * (1 - L.dust), 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
+    const bow = (1 - night) * (P.direct ?? 1) * L.sunVis * THREE.MathUtils.smoothstep(L.liquid, 0.04, 0.22) * (1 - L.overcast * 0.7) * (1 - 0.8 * THREE.MathUtils.smoothstep(L.mist, 0.5, 1));
     // (a shower's own spray mist is where the bow is seen: only real fog washes it out)
     u.uBow.value = bow;
     // rain lit from behind by the sun glitters (each drop a tiny lens throwing the sun at the camera:
@@ -1009,6 +1014,24 @@ export function createEnvironment(
       Math.abs((w.dust ?? 0) - last.dust) > 0.004 ||
       Math.abs((w.snowCover ?? 0) - last.cover) > 0.01;
     weatherUniforms.uSnowCover.value = w.snowCover ?? 0;
+    snowTopUniform.x = w.snowCover ?? 0;
+    {
+      // what lies on the road and what blows across it: snow lies off the line (a frost never settles on
+      // warm asphalt), sand drifts in at the edges of a sandstorm; a gale streams either across the ground
+      const dust = w.dust ?? 0;
+      const cover = w.snowCover ?? 0;
+      const gale = THREE.MathUtils.smoothstep(Math.hypot(w.windX, w.windZ), 6, 14);
+      // (snow only settles on asphalt that is at freezing or near it, and only once the verges are well covered:
+      // light flurries on a mild track leave it wet and black)
+      const settle = w.kind === 'frost' ? 0 : Math.pow(cover, 1.5) * (1 - THREE.MathUtils.smoothstep(w.trackTemp, 0.5, 6));
+      weatherUniforms.uFrost.value = w.kind === 'frost' ? 1 : 0;
+      weatherUniforms.uSurfWx.value.set(
+        Math.max(settle, dust * 0.6),
+        THREE.MathUtils.clamp((w.hail ?? 0) * 1.5, 0, 1),
+        gale * Math.max(Math.min(1, (w.snow ?? 0) * 1.2) * THREE.MathUtils.smoothstep(cover, 0.1, 0.5), dust),
+        THREE.MathUtils.smoothstep(dust, 0, 0.15),
+      );
+    }
     if (changed) {
       last.cloud = w.cloud;
       last.rain = w.rain;

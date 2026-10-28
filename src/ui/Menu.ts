@@ -11,6 +11,7 @@ import { ASSIST_PRESETS, DEFAULT_ASSISTS, PRESET_LABEL, PRESET_ORDER, presetOf, 
 import { COMPOUNDS, COMPOUND_ORDER, type Compound } from '../race/Pit.ts';
 import { WEATHER_LABEL, TIME_LABEL, Weather, planWeather, type WeatherChoice, type TimeChoice, type TimeOfDay } from '../world/Weather.ts';
 import { WX_ICON, WX_CHOICE_ICON } from './wxIcons.ts';
+import { createSkyStage } from './skyStage.ts';
 import { Career, UPGRADES, MAX_LEVEL, upgradeCost, PALETTE, PATTERNS, TEAM_PATTERNS, FINISHES, CARBON, PART_PAINTS, RIMS, SPONSORS, UNLOCK_POS, UNLOCK_ALL, SCENIC_STARS, TOUR_LAPS, medalFor, SETUP, type Paint, type RaceReward, type SetupPart } from '../career/Career.ts';
 import { CAREER_LAPS, type Forecast } from '../career/Season.ts';
 import { MOMENT_LABEL, type Highlights } from '../career/Highlights.ts';
@@ -123,6 +124,49 @@ const WEATHERS: WeatherChoice[] = [
 const weatherLabel = (w: WeatherChoice) => (w === 'random' ? 'Random' : w === 'changeable' ? 'Changeable' : WEATHER_LABEL[w]);
 const TIMES: TimeChoice[] = ['random', 'dawn', 'morning', 'midday', 'afternoon', 'golden', 'sunset', 'dusk', 'night'];
 const timeLabel = (t: TimeChoice) => (t === 'random' ? 'Random' : TIME_LABEL[t]);
+const TIME_SHORT: Record<TimeOfDay, string> = { dawn: 'Dawn', morning: 'Morning', midday: 'Midday', afternoon: 'Afternoon', golden: 'Golden', sunset: 'Sunset', dusk: 'Twilight', night: 'Night' };
+/** the briefing's sky families (the first is filled in per mode: Auto or Random, and Changeable) */
+const WX_GROUPS: { id: string; label: string; kinds: (WeatherChoice | 'auto')[] }[] = [
+  { id: 'mix', label: 'Mixed', kinds: [] },
+  { id: 'dry', label: 'Dry', kinds: ['clear', 'haze', 'heatwave', 'cloudy', 'windy', 'overcast'] },
+  { id: 'wet', label: 'Wet', kinds: ['drying', 'sunshower', 'drizzle', 'rain', 'storm', 'thunderstorm'] },
+  { id: 'winter', label: 'Winter', kinds: ['frost', 'flurries', 'sleet', 'snow', 'blizzard'] },
+  { id: 'wild', label: 'Murk & wild', kinds: ['mist', 'fog', 'hail', 'sandstorm'] },
+];
+
+/**
+ * The race's weather lap by lap: the chosen sky simulated over the race's length (a fixed seed — the race
+ * rolls its own, so this is the forecast, not a promise): what is falling, the track temperature, and a bar
+ * for how hard it comes down.
+ */
+function forecastStrip(w: WeatherChoice, t: TimeChoice, laps: number, km: number): string {
+  if (w === 'random') return '<div class="fc-none">The weather is rolled when the lights go out.</div>';
+  const lapS = (km / 205) * 3600;
+  const dur = Math.max(1, laps) * lapS;
+  const tod: TimeOfDay = t === 'random' ? 'afternoon' : t;
+  const wx = new Weather(planWeather(w, tod, dur, 7));
+  const N = Math.min(6, Math.max(2, laps + 1));
+  const cols: string[] = [];
+  let simT = 0;
+  for (let i = 0; i < N; i++) {
+    const at = (dur * i) / (N - 1);
+    while (simT < at - 1e-3) {
+      const dt = Math.min(5, at - simT);
+      wx.update(dt);
+      simT += dt;
+    }
+    const s = wx.state;
+    const fall = Math.max(s.rain, s.snow ?? 0, s.hail ?? 0, s.dust ?? 0);
+    const kind = (s.dust ?? 0) > 0.2 ? 'dust' : (s.hail ?? 0) > 0.2 ? 'hail' : (s.snow ?? 0) > s.rain ? 'snow' : 'rain';
+    const surf = (s.snowCover ?? 0) > 0.35 && (s.snow ?? 0) > 0.05 ? 'Slush' : s.wetness > 0.55 ? 'Wet' : s.wetness > 0.12 ? 'Damp' : 'Dry';
+    const lap = i === 0 ? 'Start' : i === N - 1 ? 'Finish' : `Lap ${Math.max(1, Math.round((laps * i) / (N - 1)))}`;
+    cols.push(
+      `<div class="fc-col"><span class="fc-lap">${lap}</span><svg viewBox="0 0 16 16">${WX_ICON[s.kind]}</svg>` +
+        `<b>${Math.round(s.trackTemp)}°</b><i class="fc-bar ${kind}" style="--h:${fall > 0.02 ? Math.max(0.12, Math.min(1, fall)) : 0}"></i><span class="fc-surf ${surf.toLowerCase()}">${surf}</span></div>`,
+    );
+  }
+  return `<div class="fc-k">Race forecast</div><div class="fc-row">${cols.join('')}</div>`;
+}
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'];
 const SETTINGS_V = 3;
@@ -1068,59 +1112,64 @@ export class Menu {
     };
     renderFacts();
 
-    // ---- conditions: the sky now, then every sky as a strip of chips (and the time of day)
+    // ---- conditions: a window onto the sky (the chosen weather and time, painted live), the race's forecast
+    // lap by lap, then every sky as tiles in families and the time of day as a ruler
     el('div', 'pcap', p, 'Conditions');
     const wx = el('div', 'wxcard', p);
-    const now = el('div', 'wx-now', wx);
+    const stageBox = el('div', 'wx-stage', wx);
+    const stage = createSkyStage();
+    stageBox.appendChild(stage.el);
+    const now = el('div', 'wx-now', stageBox);
+    const fcBox = el('div', 'wx-fc', wx);
     const wxChoice = (): WeatherChoice => (dcd ? fc!.weather : career ? (!st.tourWx || st.tourWx === 'auto' ? fc!.weather : st.tourWx) : st.weather);
     const tmChoice = (): TimeChoice => (dcd ? fc!.time : career ? (!st.tourTime || st.tourTime === 'auto' ? fc!.time : st.tourTime) : st.time);
     const wxIcon = (w: WeatherChoice) => `<svg viewBox="0 0 16 16">${w === 'random' || w === 'changeable' ? WX_CHOICE_ICON[w] : WX_ICON[w]}</svg>`;
     const renderNow = () => {
       const w = wxChoice();
       const t = tmChoice();
+      const tod: TimeOfDay = t === 'random' ? 'afternoon' : t;
       const auto = career && (dcd || !st.tourWx || st.tourWx === 'auto');
       // what that sky feels like: a fixed sky rolled with a fixed seed (the race rolls its own)
       let feel = '';
       if (w !== 'random') {
-        const tod: TimeOfDay = t === 'random' ? 'afternoon' : t;
         const plan = planWeather(w, tod, 600, 7);
         const ws = new Weather(plan).state;
         const kmh = Math.round(Math.hypot(ws.windX, ws.windZ) * 3.6);
         const label = w === 'changeable' ? `${WEATHER_LABEL[plan.start]} turning ${WEATHER_LABEL[plan.end].toLowerCase()}` : '';
-        feel = `${label ? `<span>${label}</span>` : ''}<span>Air ${Math.round(ws.airTemp)}°</span><span>Track ${Math.round(ws.trackTemp)}°</span><span>Wind ${kmh} km/h</span>`;
+        feel = `${label ? `<span>${label}</span>` : ''}<span><i>Air</i> ${Math.round(ws.airTemp)}°</span><span><i>Track</i> ${Math.round(ws.trackTemp)}°</span><span><i>Wind</i> ${kmh} km/h</span>`;
       } else feel = '<span>Rolled when the lights go out</span>';
       now.innerHTML =
-        `<div class="wx-ic">${wxIcon(w)}</div><div class="wx-txt"><b>${weatherLabel(w)}</b><div class="wx-sub"><span>${timeLabel(t)}</span>${feel}</div></div>` +
+        `<div class="wx-txt"><small>${timeLabel(t)}</small><b>${weatherLabel(w)}</b><div class="wx-sub">${feel}</div></div>` +
         (career ? `<em class="${auto ? 'on' : ''}">${dcd ? 'Forecast' : auto ? 'Automatic' : 'Your pick'}</em>` : '');
       now.dataset.kind = w;
+      stage.set(w, tod);
+      fcBox.innerHTML = forecastStrip(w, t, lapsNow(), info ? parseFloat(info.km) : 5);
     };
-    renderNow();
     if (!dcd) {
-      const WX: (WeatherChoice | 'auto')[] = career ? ['auto', ...WEATHERS.filter((w) => w !== 'random')] : WEATHERS;
-      const TM: (TimeChoice | 'auto')[] = career ? ['auto', ...TIMES.filter((t) => t !== 'random')] : TIMES;
-      this.chips(
+      this.wxPicker(
         wx,
-        'Weather',
-        WX,
+        career ? 'auto' : 'random',
         () => (career ? (st.tourWx ?? 'auto') : st.weather),
         (v) => {
-          if (career) st.tourWx = v as WeatherChoice | 'auto';
+          if (career) st.tourWx = v;
           else st.weather = v as WeatherChoice;
         },
-        (v) => (v === 'auto' ? `${wxIcon(fc!.weather)}<span>Auto</span>` : `${wxIcon(v as WeatherChoice)}<span>${weatherLabel(v as WeatherChoice)}</span>`),
+        (v) => (v === 'auto' ? `${wxIcon(fc!.weather)}<b>Auto</b><small>${weatherLabel(fc!.weather)}</small>` : `${wxIcon(v)}<b>${weatherLabel(v)}</b>`),
       );
-      this.chips(
+      const TM: (TimeChoice | 'auto')[] = career ? ['auto', ...TIMES.filter((t) => t !== 'random')] : TIMES;
+      this.timeRuler(
         wx,
-        'Time of day',
         TM,
         () => (career ? (st.tourTime ?? 'auto') : st.time),
         (v) => {
           if (career) st.tourTime = v as TimeChoice | 'auto';
           else st.time = v as TimeChoice;
         },
-        (v) => `<span>${v === 'auto' ? 'Auto' : timeLabel(v as TimeChoice)}</span>`,
+        (v) => (v === 'auto' ? 'Auto' : v === 'random' ? 'Random' : TIME_SHORT[v as TimeOfDay]),
       );
     }
+    wx.appendChild(fcBox);
+    renderNow();
 
     // ---- the race's rules, as tiles
     el('div', 'pcap', p, racing ? 'Race' : 'Session');
@@ -1229,41 +1278,108 @@ export class Menu {
   }
 
   /**
-   * A row of chips (the race briefing's sky and time of day): the choice reads at a glance, and the
-   * whole range is one click away. ← → step through it like any option row.
+   * The briefing's sky picker: the skies in families (dry, wet, winter, the murky and the wild) behind a row
+   * of tabs, each a tile with its icon. A click picks; ← → step through every sky in turn (the tabs follow).
    */
-  private chips<V extends string>(parent: HTMLElement, key: string, values: V[], get: () => V, set: (v: V) => void, chip: (v: V) => string) {
-    const row = el('div', 'chiprow', parent);
-    el('span', 'k', row, key);
-    const strip = el('div', 'chipstrip', row);
-    const els = values.map((v) => {
-      const c = el('button', 'chip', strip, chip(v));
-      c.type = 'button';
-      c.tabIndex = -1;
-      c.addEventListener('click', (e) => {
+  private wxPicker(parent: HTMLElement, first: 'auto' | 'random', get: () => WeatherChoice | 'auto', set: (v: WeatherChoice | 'auto') => void, tile: (v: WeatherChoice | 'auto') => string) {
+    const groups = WX_GROUPS.map((g) => (g.id === 'mix' ? { ...g, label: first === 'auto' ? 'Auto' : 'Mixed', kinds: [first, 'changeable'] as (WeatherChoice | 'auto')[] } : g));
+    const flat = groups.flatMap((g) => g.kinds);
+    const row = el('div', 'chiprow wxpick', parent);
+    const head = el('div', 'wxp-head', row);
+    el('span', 'k', head, 'Weather');
+    const tabs = el('div', 'wxp-tabs', head);
+    const tiles = el('div', 'wxp-tiles', row);
+    const groupOf = (v: WeatherChoice | 'auto') => Math.max(0, groups.findIndex((g) => g.kinds.includes(v)));
+    let shown = groupOf(get());
+    const tabEls = groups.map((g, i) => {
+      const t = el('button', 'wxp-tab', tabs, g.label);
+      t.type = 'button';
+      t.tabIndex = -1;
+      t.addEventListener('click', (e) => {
         e.stopPropagation();
-        set(v);
-        sync(true);
+        if (shown === i) return;
+        shown = i;
         this.cb.onUi('move');
-        this.commitSetup();
+        render(true);
       });
-      return c;
+      return t;
     });
-    const sync = (smooth: boolean) => {
-      const i = Math.max(0, values.indexOf(get()));
-      els.forEach((c, j) => c.classList.toggle('on', j === i));
-      // keep the picked chip in view, centred in the strip (never scrolling the panel itself)
-      const c = els[i];
-      const left = c.offsetLeft - (strip.clientWidth - c.offsetWidth) / 2;
-      strip.scrollTo({ left: Math.max(0, left), behavior: smooth ? 'smooth' : 'auto' });
-    };
-    requestAnimationFrame(() => sync(false));
-    const change = (d: number) => {
-      const i = Math.max(0, values.indexOf(get()));
-      set(values[(i + d + values.length) % values.length]);
-      sync(true);
+    const pick = (v: WeatherChoice | 'auto') => {
+      set(v);
+      shown = groupOf(v);
+      render(false);
       this.cb.onUi('move');
       this.commitSetup();
+    };
+    let lastShown = -1;
+    const render = (animate: boolean) => {
+      const cur = get();
+      tabEls.forEach((t, i) => {
+        t.classList.toggle('on', i === shown);
+        t.classList.toggle('has', i === groupOf(cur));
+      });
+      if (shown !== lastShown) {
+        tiles.innerHTML = '';
+        tiles.classList.toggle('swap', animate);
+        tiles.style.setProperty('--n', String(Math.max(4, groups[shown].kinds.length)));
+        groups[shown].kinds.forEach((v, j) => {
+          const b = el('button', 'wxp-tile', tiles, tile(v));
+          b.type = 'button';
+          b.tabIndex = -1;
+          b.dataset.v = v;
+          b.style.setProperty('--i', String(j));
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            pick(v);
+          });
+        });
+        lastShown = shown;
+      }
+      tiles.querySelectorAll<HTMLElement>('.wxp-tile').forEach((b) => b.classList.toggle('on', b.dataset.v === cur));
+    };
+    render(false);
+    const change = (d: number) => {
+      const i = Math.max(0, flat.indexOf(get()));
+      pick(flat[(i + d + flat.length) % flat.length]);
+    };
+    const idx = this.items.length;
+    row.addEventListener('mouseenter', () => {
+      this.sel = idx;
+      this.highlight();
+    });
+    this.items.push({ el: row, kind: 'option', change, select: () => change(1) });
+  }
+
+  /** the time of day as a ruler across the sky window: every hour visible, the picked one lit */
+  private timeRuler<V extends string>(parent: HTMLElement, values: V[], get: () => V, set: (v: V) => void, label: (v: V) => string) {
+    const row = el('div', 'chiprow tmrow', parent);
+    el('span', 'k', row, 'Time of day');
+    const ruler = el('div', 'tm-ruler', row);
+    const els = values.map((v) => {
+      const b = el('button', 'tm-seg', ruler, `<i></i><span>${label(v)}</span>`);
+      b.type = 'button';
+      b.tabIndex = -1;
+      b.dataset.v = v;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pickT(v);
+      });
+      return b;
+    });
+    const sync = () => {
+      const cur = get();
+      els.forEach((b) => b.classList.toggle('on', b.dataset.v === cur));
+    };
+    const pickT = (v: V) => {
+      set(v);
+      sync();
+      this.cb.onUi('move');
+      this.commitSetup();
+    };
+    sync();
+    const change = (d: number) => {
+      const i = Math.max(0, values.indexOf(get()));
+      pickT(values[(i + d + values.length) % values.length]);
     };
     const idx = this.items.length;
     row.addEventListener('mouseenter', () => {

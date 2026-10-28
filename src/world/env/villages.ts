@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { snowTop } from './snowTop.ts';
 import type { WorldMap } from './worldmap.ts';
 import type { Layout } from './layout.ts';
 import { hash2i, rng } from './noise.ts';
@@ -133,7 +134,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
     roof.setIndex(idx);
     roof.computeVertexNormals();
   }
-  const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 });
+  const wallMat = snowTop(new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }));
   /**
    * The façades, laid out per house in its own metres (not world stripes): storeys of 3 m, the
    * width split into whole window bays centred on each face, a deeper ground floor with a door in
@@ -205,7 +206,7 @@ export function buildVillages(map: WorldMap, layout: Layout): VillagesBuild {
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vgLit;');
   };
   wallMat.customProgramCacheKey = () => 'apex-village-walls-v2';
-  const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0 });
+  const roofMat = snowTop(new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0 }));
   const walls = new THREE.InstancedMesh(box, wallMat, Math.max(1, list.length));
   const roofs = new THREE.InstancedMesh(roof, roofMat, Math.max(1, list.length));
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();

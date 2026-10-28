@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { WeatherState } from './Weather.ts';
 // installs the floodlight chunk into three's lit materials before anything compiles
 import './env/night.ts';
+// (and the snow that settles on the tops of things, env/snowTop.ts)
+import './env/snowTop.ts';
 /** the menu garage is indoors: no floodlight term there (see env/night.ts) */
 export { suppressFloods } from './env/night.ts';
 
@@ -23,6 +25,14 @@ export const weatherUniforms = {
   uCloud: { value: 0 },
   /** snow (or hoar frost) lying on the ground, the run-off and the roofs 0 … 1 (set by the Environment) */
   uSnowCover: { value: 0 },
+  /**
+   * what else lies on, or blows across, the ground (set by the Environment): x snow or sand lying on the
+   * road off the racing line, y how much of what lies is hailstones (pebbles, not a sheet), z blowing
+   * snow / sand streaming across the surface with the wind, w 0 … 1 snow → sand
+   */
+  uSurfWx: { value: new THREE.Vector4() },
+  /** 0 … 1: the cover is a hoar frost (a silver rime on the blades), not snow */
+  uFrost: { value: 0 },
   /** lightning flash 0 … 1 */
   uLightning: { value: 0 },
   /** wind (m/s) in world x/z */

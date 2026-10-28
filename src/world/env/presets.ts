@@ -356,6 +356,8 @@ export interface WeatherLook {
   dust: number;
   /** snow lying on the ground 0 … 1 (a white world lifts the exposure and the bounce) */
   snowCover: number;
+  /** liquid rain falling 0 … 1 (no snow, hail or sand): what can make a rainbow */
+  liquid: number;
 }
 
 export function weatherLook(w: WeatherState): WeatherLook {
@@ -364,6 +366,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const snowFall = clamp01(w.snow ?? 0);
   const dust = clamp01(w.dust ?? 0);
   const cover = clamp01(w.snowCover ?? 0);
+  // (a hail cell is the darkest deck there is: kilometres of cloud overhead, the light gone green-grey)
+  const hailK = clamp01(w.hail ?? 0);
   // (falling snow darkens and lowers the deck like rain, a little less: a snow sky is a pale, bright grey)
   const rain = clamp01(w.rain + snowFall * 0.6);
   const fog = clamp01(w.fog);
@@ -381,11 +385,12 @@ export function weatherLook(w: WeatherState): WeatherLook {
   //     ground of a hilly circuit while the crests stand clear of it)
   // (a changeable fog that burns off has fog → 0 by the time the kind flips: no pop)
   const fogKind = w.kind === 'fog' ? smooth(0.5, 0.95, fog) : 0;
-  const mistKind = w.kind === 'mist' ? smooth(0.1, 0.85, fog) : 0;
+  // (a frosty morning has its own thin mist in the hollows, the same radiation layer)
+  const mistKind = w.kind === 'mist' || w.kind === 'frost' ? smooth(0.1, 0.85, fog) : 0;
   const layerK = Math.max(fogKind, mistKind);
   const fogDeep = fogKind / Math.max(1e-4, fogKind + mistKind);
   // (blown sand is a deep ground layer of its own: ~90 m of murk that hides the far side of the circuit)
-  const groundFog = fogKind * 6.5e-3 + mistKind * 5.2e-3 + dust * 7e-3;
+  const groundFog = fogKind * 6.5e-3 + mistKind * 5.2e-3 + dust * 1.3e-2;
   const groundFall = 1 / mix(mix(14, 45, fogDeep), 90, dust);
   // direct sun: survives broken cumulus, dies under a deck, gone in rain from a full deck
   // (a shower from broken cloud keeps the sun: a sun shower)
@@ -403,8 +408,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const cloudThick = mix(mix(700, 1300, smooth(0.25, 0.8, cloud)), 2600, wetK);
   const coverage = cloud;
   const cloudExt = mix(0.035, 0.03, overcast) * (1 + wetK * 0.4);
-  const cloudDark = clamp01(wetK * 0.85 + overcast * 0.2);
-  const deckLight = mix(1, mix(0.62, 0.3, wetK), overcast);
+  const cloudDark = Math.max(clamp01(wetK * 0.85 + overcast * 0.2), 0.95 * hailK);
+  const deckLight = mix(1, mix(0.62, 0.3, wetK), overcast) * (1 - 0.35 * hailK);
 
   // grey gradient visibility: 25 km clear → ~2 km drizzle → ~0.6 km downpour (trees across the
   // track already greyed by the rain, as in wet onboard footage)
@@ -431,14 +436,15 @@ export function weatherLook(w: WeatherState): WeatherLook {
     heatK * 1.7e-4 +
     // (heavy snow is the thickest air there is short of fog: ~300 m in a blizzard; blown sand ~400 m)
     snowFall * snowFall * 4.2e-3 +
-    dust * 6.5e-3;
+    dust * 7.5e-3;
   const fogFalloff = mix(mix(P.fogFalloff, 1 / 420, Math.max(wetK, fog * 0.6)), 1 / 1500, 0.85 * heatK);
   const cloudHaze = mix(32000, 9000, Math.max(wetK, fog * 0.7)) * (1 - 0.4 * heatK) * (1 + 0.35 * windK);
   // the sun through the fog / mist is what the layer's optical depth on the slant up to it leaves: a
   // high sun burns through a shallow mist (sharp shadows on a misty morning), a low one is gone in it
   const fogTau = fogDensity / fogFalloff + groundFog / groundFall;
   const fogT = Math.exp(-fogTau / Math.max(0.07, Math.sin((P.elevation * Math.PI) / 180)));
-  const sunVis = sunAbove * mix(1 - 0.75 * thick, fogT, layerK) * (1 - 0.55 * dust);
+  // (a haboob swallows the sun: a pale, dim disc at best)
+  const sunVis = sunAbove * mix(1 - 0.75 * thick, fogT, layerK) * (1 - 0.82 * dust);
   const dim = 1 - sunVis;
 
   // grade: filmic sun, flat grey overcast, dark desaturated rain
@@ -449,7 +455,9 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // mist keeps the colour of what is close — the murk itself does the greying)
   // (snow on the ground: the camera meters for a white world, so it isn't the dim grey of a rain day)
   const snowK = Math.max(cover, snowFall);
-  const exposure = P.exposure * mix(1, 0.86, wetDark * (1 - 0.8 * snowK)) * mix(1, 1.06, overcast * (1 - wetK)) * (1 - 0.1 * fogKind) * (1 + 0.06 * snowK) * LOOK_EXPOSURE;
+  // (while it snows the camera holds the falling flakes and the pale-grey sky off white — it is the lying snow
+  // that reads brightest; a haboob is dim, the light of a late dusk at midday; a hail cell darker than rain)
+  const exposure = P.exposure * mix(1, 0.86, wetDark * (1 - 0.8 * snowK)) * mix(1, 1.06, overcast * (1 - wetK)) * (1 - 0.1 * fogKind) * (1 + 0.06 * cover - 0.11 * snowFall) * (1 - 0.28 * dust) * (1 - 0.08 * hailK) * LOOK_EXPOSURE;
   const greyK = thick * (1 - 0.7 * mistKind);
   const saturation = mix(P.saturation, mix(0.93, 0.78, wetDark), dim) * (1 - 0.12 * fog * (1 - 0.5 * mistKind) - 0.14 * greyK) * TONE_SAT;
   const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * greyK) * TONE_CONTRAST;
@@ -475,11 +483,12 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const overK = overcast * dryK * (1 - thick);
   const mistK = smooth(0.4, 0.95, fog) * dryK;
   const dExposure = (1 + 0.08 * overK) * (1 + 0.04 * hazeK);
-  const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK);
-  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 - 0.13 * overK) * (1 - 0.08 * hazeK) * (1 - 0.12 * snowK);
+  const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK) * (1 + 0.07 * snowFall) * (1 - 0.08 * dust);
+  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 - 0.13 * overK) * (1 - 0.08 * hazeK) * (1 - 0.12 * snowK) * (1 - 0.12 * dust);
   // (a low sun is orange enough on its own: haze on top of it turned every grey olive)
-  const warm = hazeK * 0.06 * smooth(8, 25, P.elevation) + dust * 0.1;
-  const cool = overK * 0.03 + snowK * 0.035;
+  const warm = hazeK * 0.06 * smooth(8, 25, P.elevation) + dust * 0.15;
+  // (snow light is blue: the shade on white lit by the sky alone)
+  const cool = overK * 0.03 + snowK * 0.05;
   const dTint: [number, number, number] = [1 + warm - cool, 1 + warm * 0.25 - cool * 0.3, 1 - warm * 1.4 + cool];
   const dShafts = 1 + 0.6 * clearK + 1.2 * brokenK + 2.2 * mistK * sunVis + 0.8 * hazeK;
   const dLobe = 1 + 1.6 * hazeK + 1.0 * mistK;
@@ -529,6 +538,7 @@ export function weatherLook(w: WeatherState): WeatherLook {
     hail: clamp01(w.hail ?? 0),
     dust,
     snowCover: cover,
+    liquid: clamp01(w.rain) * (1 - hailK),
   };
 }
 
