@@ -5,8 +5,8 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
 The site opens on a game picker — **Apex GP** (this racing game), **Miami** (the open world),
-**Marble Mania** (a marble knockout show), **Apex Lawn** (mowing) and **Marble Derby** (bet on a
-marble race) — and only the game you pick is loaded: the racing game's loader, pictures and bundle
+**Marble Mania** (a marble knockout show), **Apex Lawn** (mowing) and **Boostball** (car soccer)
+— and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it; `?pick`
 forces it.
 
@@ -794,31 +794,6 @@ wooden courses, everything generated in code (`src/marbles/`; no image, model or
   `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
   captures several camera views in one session; `tools/marblebench.mjs` races every round
   headless (`--diff` for the difficulty) and reports times, falls, skill ordering and AI cost.
-
-## Marble Derby
-
-**▶ https://reidwcoleman.github.io/ApexGP/derby.html** — bet on marble races on a neon night track
-(`src/derby/`, built on Marble Mania's physics, obstacles, bots and sound; no image or sound files).
-The coins are play money, kept in the browser.
-
-- **The card**: eight runners from a stable of sixteen, each with a hidden ability, a racing style
-  (the bots' styles from `ai-style.ts`), a star rating, its record and its last five finishes. Bet
-  any of them to **win** or to finish in the **top 3**, with chips of 10 to 1,000; as many bets as
-  you like. Out of coins, the house spots you 250.
-- **The odds** (`book.ts`): a Plackett–Luce model, strength exp(β · ability), with β fitted per
-  track to races run headless (`tools/derbysim.mjs`), so the prices match how often runners
-  really win, less the house's 12 %. Form on the night moves each runner a little.
-- **The race** (about 40–55 s): a director cuts between a chase camera, side-on over the rail, a
-  helicopter shot, fixed cameras the field rushes past and the photo-finish camera at the line;
-  click a runner (or 1–8) to follow it. A commentary caption calls lead changes, falls, shortcut
-  gambles and the finish; the live board shows the order, the gaps and your bets.
-- **The night** (`night.ts`): a starry sky with the galaxy and a moon, a lit skyline round a black
-  lake that mirrors it, floodlight towers with beams in the haze, mahogany boards under deep lacquer
-  with marquee bulbs chasing along the rails (`tracks.ts`), pools of neon light following the race,
-  a grandstand of people with phone flashes and a big screen showing the odds and the order,
-  fireworks for the winner. Three tracks in turn: The Neon Mile, Moonlight Spiral, Casino Cascade.
-- **Testing**: `?race=N` (that race's card), `?bet=1,2` (100 on those runners to win), `?go=1`
-  (start at once), `window.__derby.ff(seconds)`, `window.__cam`.
 
 ## Apex Lawn
 
