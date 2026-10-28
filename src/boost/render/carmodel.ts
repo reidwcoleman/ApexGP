@@ -264,6 +264,38 @@ const SPECS: Spec[] = [
 
 // RocketSim's ride height for each hitbox class (where the origin settles on flat ground)
 const REST = [17.03, 17.07, 18.67, 18.36, 17.03, 18.81];
+// each class's hitbox, back and front (RocketSim's sizes and offsets along x)
+const HITX: [number, number][] = [
+  [13.8757 - 120.507 / 2, 13.8757 + 120.507 / 2],
+  [9 - 130.427 / 2, 9 + 130.427 / 2],
+  [9.00857 - 131.32 / 2, 9.00857 + 131.32 / 2],
+  [12.5 - 133.992 / 2, 12.5 + 133.992 / 2],
+  [13.8757 - 129.519 / 2, 13.8757 + 129.519 / 2],
+  [11.3757 - 123.22 / 2, 11.3757 + 123.22 / 2],
+];
+
+/** the spec with its overhangs pulled in so the nose ends where the hitbox does (what you see
+ * reach the ball is what reaches it) and the tail as near its end as the rear tyres allow */
+function fitted(sp: Spec, preset: number): Spec {
+  const [hb, hf] = HITX[preset];
+  const xf = sp.body[0].x;
+  const xr = sp.body[sp.body.length - 1].x;
+  const kf = Math.min(1, (hf + 1 - sp.bulge[0] - sp.wf[0]) / (xf - sp.wf[0]));
+  const rearTo = Math.max(hb - 2, sp.wr[0] - sp.wr[1] - 5);
+  const kr = Math.min(1, (rearTo + sp.bulge[1] - sp.wr[0]) / (xr - sp.wr[0]));
+  const m = (x: number) => (x > sp.wf[0] ? sp.wf[0] + (x - sp.wf[0]) * kf : x < sp.wr[0] ? sp.wr[0] + (x - sp.wr[0]) * kr : x);
+  return {
+    ...sp,
+    body: sp.body.map((s) => ({ ...s, x: m(s.x) })),
+    cabin: sp.cabin.map((s) => ({ ...s, x: m(s.x) })),
+    pillar: m(sp.pillar),
+    wx: [m(sp.wx[0]), m(sp.wx[1])],
+    head: [m(sp.head[0]), sp.head[1], sp.head[2]],
+    tail: [m(sp.tail[0]), sp.tail[1], sp.tail[2]],
+    jet: [m(sp.jet[0]), sp.jet[1], sp.jet[2]],
+    antenna: [m(sp.antenna[0]), sp.antenna[1], sp.antenna[2]],
+  };
+}
 
 // ------------------------------------------------------------------ lofting
 /** Catmull-Rom through a sequence of numbers at parameter t ∈ [0, n−1] */
@@ -488,7 +520,7 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
   const b = Math.max(0, Math.min(SPECS.length - 1, body | 0));
   const hit = cache.get(b);
   if (hit) return hit;
-  const sp = SPECS[b];
+  const sp = fitted(SPECS[b], BODIES[b].preset);
   const dz = 17 - REST[BODIES[b].preset];
   const wheels: Wheel[] = [
     { x: sp.wf[0], r: sp.wf[1], y: sp.wf[2], w: sp.wf[3] },

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { ARENA, CORNER_R, goalProfile, GOAL_BACK_R, GOAL_TOP_R, octCore, PADS } from '../sim/arena.ts';
 import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
 import { buildSurround, type SurroundView } from './surround.ts';
@@ -48,6 +50,9 @@ float bbHex(vec2 p){ p = abs(p); vec2 q = vec2(p.x*1.1547, p.y + p.x*0.57735);
   float ca = step(1., v), cb = step(2., v); vec2 ma = step(pf.xy, pf.yx);
   float e = dot(ma, 1.0 - pf.yx + ca*(pf.x+pf.y-1.0) + cb*(pf.yx-2.0*pf.xy));
   return e; }
+// a height's screen-space slope turned into a perturbed normal (three's bump mapping, inlined)
+vec3 bbBump(vec3 sp, vec3 sn, vec2 dh, float fd){ vec3 sx = dFdx(sp), sy = dFdy(sp); vec3 r1 = cross(sy, sn), r2 = cross(sn, sx);
+  float det = dot(sx, r1) * fd; vec3 g = sign(det) * (dh.x * r1 + dh.y * r2); return normalize(abs(det) * sn - g); }
 float bbHexEdge(vec2 p){ vec2 s = vec2(1.0, 1.7320508); vec2 a = mod(p, s) - s*0.5; vec2 b = mod(p - s*0.5, s) - s*0.5;
   vec2 g = dot(a,a) < dot(b,b) ? a : b; g = abs(g); return 0.5 - max(dot(g, normalize(s)), g.x); }
 `;
@@ -63,7 +68,9 @@ function simPatch(mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, 
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSim;\nvarying vec2 vBB;\n' + GLSL_COMMON + decl)
       .replace('#include <map_fragment>', frag)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += bbEmit;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += bbEmit;')
+      // (a patch that defines BB_NRM gives a height bbH, in metres, to relief the surface with)
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#ifdef BB_NRM\nnormal = bbBump(-vViewPosition, normal, vec2(dFdx(bbH), dFdy(bbH)), faceDirection);\n#endif');
   };
 }
 
@@ -206,11 +213,21 @@ function pitch(): THREE.Mesh {
     } else if (uPattern < 3.5) band = smoothstep(-pw, pw, abs(fract(length(P) / 1000.0) - 0.5) * 1000.0 - 250.0);
     else band = 0.5 + 0.5 * step(0.5, fract(P.y / 2048.0));
     vec3 col = mix(uPitchA, uPitchB, band) * mix(0.85, 1.0, uDay);
-    float n = bbNoise(P * 0.012) * 0.5 + bbNoise(P * 0.045) * 0.3 + bbNoise(P * 0.21) * 0.2;
-    col *= mix(0.82 + 0.36 * n, 0.94 + 0.12 * n, synth);
-    // blade-scale grain up close, faded out before it can shimmer
-    col *= 1.0 + (bbNoise(P * 2.7) - 0.5) * 0.22 * (1.0 - smoothstep(1.5, 5.0, fw));
-    col *= 0.94 + 0.12 * bbNoise(P * 0.9);
+    // the turf at every scale: broad patches, clumps, tufts and blades, each octave fading out
+    // before it gets smaller than a pixel (so there's grain at every distance and no shimmer)
+    float n = bbNoise(P * 0.0035) * 0.4 + bbNoise(P * 0.012) * 0.35 + bbNoise(P * 0.045) * 0.25;
+    col *= mix(0.84 + 0.32 * n, 0.94 + 0.12 * n, synth);
+    float o1 = (bbNoise(P * 0.21) - 0.5) * (1.0 - smoothstep(4.0, 10.0, fw));
+    float o2 = (bbNoise(P * vec2(0.9, 0.7) + 17.0) - 0.5) * (1.0 - smoothstep(1.2, 3.0, fw));
+    float o3 = (bbNoise(P * vec2(2.9, 2.2) + 41.0) - 0.5) * (1.0 - smoothstep(0.4, 1.0, fw));
+    float blades = (o1 * 0.5 + o2 * 0.8 + o3) * (1.0 - synth);
+    col *= 1.0 + blades * 0.28;
+    // sunlit tips here and there
+    float tip = smoothstep(0.8, 0.95, bbNoise(P * 1.7 + 5.0)) * (1.0 - smoothstep(1.0, 2.5, fw)) * (1.0 - synth);
+    col = mix(col, col * vec3(1.22, 1.2, 0.86), tip * 0.5);
+    // the blades' relief for the light (not on the goals' floors)
+    float bbH = blades * 0.0035 * (1.0 - step(${ARENA.Y.toFixed(1)}, abs(P.y)) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)}));
+    #define BB_NRM
     // mown grass changes shade with the way you look along it (each stripe's blades lie the other way)
     vec3 camSim = vec3(cameraPosition.x * 100.0, -cameraPosition.z * 100.0, cameraPosition.y * 100.0);
     vec3 vd = normalize(vSim - camSim);
@@ -229,28 +246,31 @@ function pitch(): THREE.Mesh {
     col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), frost * 0.75);
     // a wash of team colour toward each end
     col = mix(col, col * (0.55 + team * 0.9), smoothstep(800.0, 5000.0, abs(P.y)) * 0.55);
-    // lines
-    float aa = fwidth(P.x) * 1.5 + 1.0;
+    // lines: crisp painted strips (one distance to the nearest, so the edges stay sharp and even),
+    // a soft glow round them
+    float aa = fwidth(P.x) * 1.2 + 0.8;
     float lw = 22.0;
-    float L = 0.0;
-    L = max(L, 1.0 - smoothstep(lw - aa, lw + aa, abs(P.y)));
     float r = length(P);
-    L = max(L, 1.0 - smoothstep(lw - aa, lw + aa, abs(r - 1100.0)));
-    L = max(L, 1.0 - smoothstep(60.0 - aa, 60.0 + aa, r));
-    // goal boxes
     vec2 gb = vec2(abs(P.x), ${ARENA.Y.toFixed(1)} - abs(P.y));
     float box = max(gb.x - 1800.0, gb.y - 1150.0);
-    L = max(L, (1.0 - smoothstep(lw - aa, lw + aa, abs(box))) * step(0.0, gb.y));
-    // the arc in front of each box
     float arc = abs(length(vec2(P.x, abs(P.y) - (${ARENA.Y.toFixed(1)} - 1150.0))) - 900.0);
-    L = max(L, (1.0 - smoothstep(lw - aa, lw + aa, arc)) * step(abs(P.y), ${ARENA.Y.toFixed(1)} - 1150.0));
+    float dl = abs(P.y) - lw;
+    dl = min(dl, abs(r - 1100.0) - lw);
+    dl = min(dl, r - 60.0);
+    if (gb.y >= 0.0) dl = min(dl, abs(box) - lw);
+    if (abs(P.y) <= ${ARENA.Y.toFixed(1)} - 1150.0) dl = min(dl, arc - lw);
+    float L = 1.0 - smoothstep(-aa, aa, dl);
+    float halo = exp(-max(dl, 0.0) / 45.0) * (1.0 - L);
+    bbH *= 1.0 - L;
     // the boundary where the ramp starts
     float edge = abs(oct + ${R.toFixed(1)});
     float bnd = 1.0 - smoothstep(lw - aa, lw + aa, edge);
     // the goal line
     float gl = (1.0 - smoothstep(30.0 - aa, 30.0 + aa, abs(abs(P.y) - ${ARENA.Y.toFixed(1)}))) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)});
     vec3 lineC = uLine;
-    col = mix(col, lineC, L * mix(0.85, 0.55, uLineGlow));
+    // (painted on: a touch of wear, the turf's shading still under it)
+    float wear = 0.9 + 0.1 * bbNoise(P * 0.35);
+    col = mix(col, lineC * wear, L * mix(0.94, 0.6, uLineGlow));
     col = mix(col, team * 1.2, bnd);
     // inside the goals: a dark glossy floor with team light
     float gIn = step(${ARENA.Y.toFixed(1)}, abs(P.y)) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)});
@@ -258,7 +278,7 @@ function pitch(): THREE.Mesh {
     col = mix(col, vec3(0.03, 0.035, 0.05) + team * 0.06 * (1.0 - smoothstep(0.0, 0.06, hex)), gIn);
     diffuseColor.rgb *= col;
     float glowK = mix(1.0, 0.45, uDay);
-    vec3 bbEmit = lineC * L * (mix(0.09, 0.03, uDay) + uLineGlow * mix(1.6, 0.9, uDay)) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5)
+    vec3 bbEmit = lineC * L * (mix(0.09, 0.03, uDay) + uLineGlow * mix(1.6, 0.9, uDay)) + lineC * halo * (0.02 + uLineGlow * 0.3) * mix(1.0, 0.45, uDay) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5)
       + mix(lineC, team, 0.5 + 0.5 * sign(P.y) * smoothstep(0.0, 4000.0, abs(P.y))) * seamS * (0.25 + 0.35 * (1.0 - uDay)) * (1.0 - gIn);
     `,
   );
@@ -375,11 +395,12 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   const Y = ARENA.Y * sideSign;
   const by = Y + sideSign * D;
   // the frame: squared beams flush with the back wall, light grey, a team light strip on the inside
-  const frameM = new THREE.MeshStandardMaterial({ color: 0xd9dde4, roughness: 0.3, metalness: 0.55 });
+  const frameM = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.22, metalness: 0.7, envMapIntensity: 1.4 });
   const strip = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(3.4) });
   const T = 36;
   const beam = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material = frameM) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m);
+    // (the frame's beams bevelled, so they catch a highlight along every edge)
+    const mesh = new THREE.Mesh(m === frameM ? new RoundedBoxGeometry(sx, sy, sz, 3, Math.min(8, sx / 3, sy / 3, sz / 3)) : new THREE.BoxGeometry(sx, sy, sz), m);
     mesh.position.set(x, y, z);
     mesh.castShadow = m === frameM;
     mesh.receiveShadow = true;
@@ -400,17 +421,30 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
     bool sideWall = abs(vSim.x) > ${(W - 2).toFixed(1)};
     // the curved back unrolled: across, and up the profile (depth plus height)
     vec2 uvb = vec2(vSim.x, vSim.z + abs(vSim.y) - ${ARENA.Y.toFixed(1)});
-    vec2 q = (sideWall ? vSim.yz : uvb) / 30.0;
-    float e = 1.0 - smoothstep(0.0, 0.08, bbHexEdge(q));
-    // panel joints every 2 m, the net a little proud of them
-    vec2 pq = (sideWall ? vSim.yz : uvb) / 220.0;
+    vec2 uvn = sideWall ? vSim.yz : uvb;
+    // a hex net strung in front of a dark padded panel: the wires catch the light, and their
+    // shadow on the panel behind slides with the view (parallax), so the net reads as a net
+    vec3 camSim = vec3(cameraPosition.x * 100.0, -cameraPosition.z * 100.0, cameraPosition.y * 100.0);
+    vec3 vd = normalize(vSim - camSim);
+    vec2 vt = sideWall ? vd.yz / max(0.25, abs(vd.x)) : vec2(vd.x, vd.z) / max(0.25, length(vd.yz));
+    float fwn = length(fwidth(uvn)) / 30.0;
+    float wire = 1.0 - smoothstep(0.0, 0.05 + fwn, bbHexEdge(uvn / 30.0));
+    float shade = 1.0 - smoothstep(0.0, 0.1 + fwn, bbHexEdge((uvn + vt * 30.0) / 30.0));
+    // far off the wires average out to a grey sheen instead of shimmering
+    float far = smoothstep(0.15, 0.45, fwn);
+    wire = mix(wire, 0.28, far);
+    shade = mix(shade, 0.3, far);
+    // the panel: joints every 2 m, darker in the net's shadow
+    vec2 pq = uvn / 220.0;
     float joint = 1.0 - smoothstep(0.0, 0.02, min(abs(fract(pq.x) - 0.5), abs(fract(pq.y) - 0.5)) - 0.47);
-    vec3 base = vec3(0.045, 0.05, 0.065) * (1.0 - joint * 0.5);
+    vec3 base = vec3(0.05, 0.055, 0.07) * (1.0 - joint * 0.5) * (1.0 - shade * 0.55);
     // brighter toward the mouth, darker at the back
     float depth = clamp((abs(vSim.y) - ${ARENA.Y.toFixed(1)}) / ${D.toFixed(1)}, 0.0, 1.0);
-    diffuseColor.rgb = mix(base, vec3(0.6), e * 0.3);
+    diffuseColor.rgb = mix(base, vec3(0.78, 0.8, 0.84), wire * 0.6);
     vec3 tc = vec3(${team.r.toFixed(3)}, ${team.g.toFixed(3)}, ${team.b.toFixed(3)});
-    vec3 bbEmit = tc * (e * (0.16 - depth * 0.08) + 0.025);
+    // team light: the wires glow with it, and it pools low in the net
+    float low = 1.0 - smoothstep(0.0, 260.0, vSim.z);
+    vec3 bbEmit = tc * (wire * (0.2 - depth * 0.09) + 0.02 + low * 0.06 * (1.0 - shade * 0.5));
     `,
   );
   // the profile: the floor ramping up into the back wall, the curve over into the roof
@@ -477,44 +511,175 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
 }
 
 interface PadMesh {
-  base: THREE.Mesh;
-  orb: THREE.Mesh | null;
-  glow: THREE.Mesh;
+  /** the energy disc, rim lights and orb / puck: dimmed, refilled and hidden by the update */
+  disc: THREE.ShaderMaterial;
+  rim: THREE.MeshBasicMaterial;
+  orb: THREE.Group | null;
+  puck: THREE.Mesh | null;
   big: boolean;
 }
 
-function pads(): { group: THREE.Group; items: PadMesh[] } {
+const PAD_HOT = new THREE.Color(1.0, 0.6, 0.14);
+
+/** the energy in a pad's recess: rings running outward over a radial grille, filling back up
+ * round the dial while the pad recharges (uK 0…1), bright when live */
+function padDiscMat(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uT: { value: 0 }, uK: { value: 1 }, uLive: { value: 1 }, uC: { value: PAD_HOT } },
+    vertexShader: `varying vec2 vU; void main(){ vU = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uT, uK, uLive; uniform vec3 uC; varying vec2 vU;
+      void main(){
+        float r = length(vU);
+        float a = atan(vU.y, vU.x) / 6.2831853 + 0.5;
+        // rings running outward, a radial grille, a hot core
+        float rings = 0.5 + 0.5 * sin(r * 18.0 - uT * 7.0);
+        float grille = smoothstep(0.08, 0.0, abs(fract(a * 24.0) - 0.5) - 0.38);
+        float core = exp(-r * r * 6.0);
+        // recharging: the dial fills clockwise, dim
+        float fill = step(a, uK);
+        float on = mix(fill * 0.28, 1.0, uLive);
+        float k = (0.35 + 0.65 * rings) * (1.0 - grille * 0.55) * smoothstep(1.0, 0.82, r) + core * 1.4 * uLive;
+        // a thin bright edge
+        k += smoothstep(0.05, 0.0, abs(r - 0.93)) * 1.2;
+        gl_FragColor = vec4(uC * k * on * 0.9, 1.0);
+      }`,
+  });
+}
+
+function pads(): { group: THREE.Group; items: PadMesh[]; sparks: THREE.Points; sparkLive: THREE.BufferAttribute } {
   const group = new THREE.Group();
   const items: PadMesh[] = [];
-  const baseBig = new THREE.CylinderGeometry(150, 170, 14, 40);
-  baseBig.rotateX(Math.PI / 2);
-  const baseSmall = new THREE.CylinderGeometry(95, 110, 8, 32);
-  baseSmall.rotateX(Math.PI / 2);
-  const baseM = new THREE.MeshStandardMaterial({ color: 0x23262e, roughness: 0.35, metalness: 0.7 });
-  const ringBig = new THREE.RingGeometry(110, 140, 48);
-  const ringSmall = new THREE.RingGeometry(55, 78, 40);
-  const orbG = new THREE.IcosahedronGeometry(62, 3);
+  // the bases: a bevelled metal plinth with a recess for the energy disc
+  const plinth = (R: number, h: number, rr: number) => {
+    const pts = [
+      [0.001, h - 3],
+      [rr - 2, h - 3],
+      [rr, h],
+      [rr + 6, h + 1.5],
+      [R - 10, h + 1.5],
+      [R - 4, h - 1],
+      [R, 2],
+      [R + 4, 0],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const g = new THREE.LatheGeometry(pts, 48);
+    g.rotateX(Math.PI / 2);
+    return g;
+  };
+  const baseBig = plinth(176, 12, 118);
+  const baseSmall = plinth(108, 7, 66);
+  const baseM = new THREE.MeshStandardMaterial({ color: 0x2a2e37, roughness: 0.28, metalness: 0.85 });
+  const discG = new THREE.CircleGeometry(1, 56);
+  // rim lights: a ring of short lit segments round the plinth's shoulder
+  const rimSeg = (R: number, n: number, z: number) => {
+    const parts: THREE.BufferGeometry[] = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      const seg = new THREE.BoxGeometry(R * 0.32, 4, 2.4);
+      seg.rotateZ(a + Math.PI / 2);
+      seg.translate(Math.cos(a) * R, Math.sin(a) * R, z);
+      parts.push(seg);
+    }
+    return mergeGeometries(parts);
+  };
+  const rimBig = rimSeg(150, 12, 14);
+  const rimSmall = rimSeg(90, 8, 8.8);
+  // the big orb: a white-hot core in a glowing fresnel shell with a crackle of energy
+  const coreM = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.1, 0.9, 0.12) });
+  const shellM = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uT: { value: 0 }, uC: { value: PAD_HOT } },
+    vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main(){ vP = position; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uT; uniform vec3 uC; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main(){ float f = 1.0 - abs(dot(vN, vV));
+        vec3 q = normalize(vP) * 3.0;
+        float crackle = 0.5 + 0.5 * sin(q.x * 3.1 + uT * 3.0) * sin(q.y * 2.7 - uT * 2.3) * sin(q.z * 3.3 + uT * 1.7);
+        float k = pow(f, 2.0) * 1.8 + smoothstep(0.7, 1.0, crackle) * 0.5;
+        gl_FragColor = vec4(uC * k * 0.75, 1.0); }`,
+  });
+  const coreG = new THREE.IcosahedronGeometry(52, 4);
+  const shellG = new THREE.IcosahedronGeometry(64, 4);
+  // the small pads' puck: a short glowing cylinder hovering over the disc
+  const puckG = new THREE.CylinderGeometry(30, 34, 9, 32).rotateX(Math.PI / 2);
+  const puckM = new THREE.MeshStandardMaterial({ color: 0xffb040, emissive: PAD_HOT, emissiveIntensity: 2.6, roughness: 0.25, metalness: 0.2 });
   for (const p of PADS) {
     const base = new THREE.Mesh(p.big ? baseBig : baseSmall, baseM);
-    base.position.set(p.x, p.y, p.big ? 4 : 2);
+    base.position.set(p.x, p.y, 0);
     base.receiveShadow = true;
     group.add(base);
-    const glowM = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.62, 0.12).multiplyScalar(2.5), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-    const glow = new THREE.Mesh(p.big ? ringBig : ringSmall, glowM);
-    glow.position.set(p.x, p.y, p.big ? 12 : 7);
-    group.add(glow);
-    let orb: THREE.Mesh | null = null;
+    const disc = padDiscMat();
+    const dm = new THREE.Mesh(discG, disc);
+    dm.scale.setScalar(p.big ? 118 : 66);
+    dm.position.set(p.x, p.y, p.big ? 9.6 : 4.6);
+    dm.renderOrder = 3;
+    group.add(dm);
+    const rim = new THREE.MeshBasicMaterial({ color: PAD_HOT.clone().multiplyScalar(3) });
+    const rm = new THREE.Mesh(p.big ? rimBig : rimSmall, rim);
+    rm.position.set(p.x, p.y, 0);
+    group.add(rm);
+    let orb: THREE.Group | null = null;
+    let puck: THREE.Mesh | null = null;
     if (p.big) {
-      orb = new THREE.Mesh(
-        orbG,
-        new THREE.MeshStandardMaterial({ color: 0xffb030, emissive: new THREE.Color(1.0, 0.55, 0.1), emissiveIntensity: 3.2, roughness: 0.2, transparent: true, opacity: 0.92 }),
-      );
+      orb = new THREE.Group();
+      orb.add(new THREE.Mesh(coreG, coreM));
+      const sh = new THREE.Mesh(shellG, shellM);
+      sh.renderOrder = 8;
+      orb.add(sh);
       orb.position.set(p.x, p.y, 120);
       group.add(orb);
+    } else {
+      puck = new THREE.Mesh(puckG, puckM);
+      puck.position.set(p.x, p.y, 24);
+      puck.castShadow = false;
+      group.add(puck);
     }
-    items.push({ base, orb, glow, big: p.big });
+    items.push({ disc, rim, orb, puck, big: p.big });
   }
-  return { group, items };
+  // sparks rising off every live pad (one draw: each spark knows its pad and phase)
+  const N = 22;
+  const pos: number[] = [];
+  const seed: number[] = [];
+  const live: number[] = [];
+  PADS.forEach((p, k) => {
+    const n = p.big ? N : 8;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = (p.big ? 110 : 60) * Math.sqrt(Math.random());
+      pos.push(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, 0);
+      seed.push(Math.random(), p.big ? 1 : 0, k);
+      live.push(1);
+    }
+  });
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  sg.setAttribute('seed', new THREE.Float32BufferAttribute(seed, 3));
+  const sparkLive = new THREE.Float32BufferAttribute(live, 1);
+  sg.setAttribute('live', sparkLive);
+  const sm = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uT: { value: 0 }, uC: { value: PAD_HOT }, uPx: { value: 1 } },
+    vertexShader: `attribute vec3 seed; attribute float live; uniform float uT; uniform float uPx; varying float vA;
+      void main(){ float h = seed.y > 0.5 ? 320.0 : 110.0; float ph = fract(uT * (seed.y > 0.5 ? 0.45 : 0.7) + seed.x);
+        vec3 p = position; p.z = ph * h; p.xy += vec2(sin(uT * 2.0 + seed.x * 30.0), cos(uT * 1.7 + seed.x * 20.0)) * 6.0;
+        vA = (1.0 - ph) * smoothstep(0.0, 0.08, ph) * live;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = clamp((seed.y > 0.5 ? 0.08 : 0.055) * 650.0 * uPx / max(0.5, -mv.z), 1.0, 24.0); }`,
+    fragmentShader: `uniform vec3 uC; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float k = smoothstep(0.5, 0.0, d);
+      gl_FragColor = vec4(uC * 1.4 * k * vA, 1.0); }`,
+  });
+  const sparks = new THREE.Points(sg, sm);
+  sparks.frustumCulled = false;
+  sparks.renderOrder = 9;
+  group.add(sparks);
+  group.userData.anim = [shellM, sm];
+  return { group, items, sparks, sparkLive };
 }
 
 /** stands rising behind the glass: rows of fans drawn in a shader, with a bounce on goals */
@@ -1091,17 +1256,31 @@ export function buildArena(): ArenaView {
       shellT.value = t;
       uEx.value = excite;
       scr.draw(score, clock);
+      for (const m of pd.group.userData.anim as THREE.ShaderMaterial[]) m.uniforms.uT.value = t;
+      const sl = pd.sparkLive.array as Float32Array;
+      const seeds = (pd.sparks.geometry.attributes.seed as THREE.BufferAttribute).array as Float32Array;
       for (let k = 0; k < pd.items.length; k++) {
         const it = pd.items[k];
         const live = padT[k] <= 0;
+        // (a big pad takes 10 s to come back, a small one 4)
+        const k01 = live ? 1 : 1 - Math.min(1, padT[k] / (it.big ? 10 : 4));
+        it.disc.uniforms.uT.value = t + k * 0.37;
+        it.disc.uniforms.uLive.value = live ? 1 : 0;
+        it.disc.uniforms.uK.value = k01;
+        it.rim.color.copy(PAD_HOT).multiplyScalar(live ? 2.6 + 0.6 * Math.sin(t * 4 + k) : 0.35);
         if (it.orb) {
           it.orb.visible = live;
-          it.orb.position.z = 120 + Math.sin(t * 2.2 + k) * 12;
+          it.orb.position.z = 120 + Math.sin(t * 2.2 + k) * 10;
           it.orb.rotation.z = t * 0.8;
         }
-        const gm = it.glow.material as THREE.MeshBasicMaterial;
-        gm.opacity = live ? 0.85 + 0.15 * Math.sin(t * 4 + k) : 0.12;
+        if (it.puck) {
+          it.puck.visible = live;
+          it.puck.position.z = 24 + Math.sin(t * 3 + k) * 3;
+          it.puck.rotation.z = t * 1.5;
+        }
       }
+      for (let i = 0; i < sl.length; i++) sl[i] = padT[seeds[i * 3 + 2]] <= 0 ? 1 : 0;
+      pd.sparkLive.needsUpdate = true;
     },
   };
   view.setLook(curTime, curMap);
