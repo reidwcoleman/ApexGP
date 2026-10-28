@@ -1,3 +1,4 @@
+import { ACTS, DEFAULT_KEYS, DEFAULT_PAD, keyName, padName, type Act, type KeyBinds, type PadBinds } from './input.ts';
 import { botPlan, type BotMode, type LobbyState } from './net.ts';
 import { asMap, asTime, MAP_IDS, MAPS, TIME_IDS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import type { Stats } from './sim/world.ts';
@@ -26,18 +27,28 @@ export interface Profile {
   shake: boolean;
   map: MapId;
   time: TimeId;
-  /** arcade: Space jump, Shift boost · classic: the genre's PC defaults (mouse jump/boost, Shift slide, Space ball cam) */
-  keys: 'arcade' | 'classic';
+  /** keyboard / mouse binds, two per action */
+  binds: KeyBinds;
+  /** controller binds (standard-mapping buttons) */
+  padBinds: PadBinds;
+  deadzone: number;
+  steerSens: number;
+  airSens: number;
+  rumble: boolean;
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', keys: 'arcade' };
+  const def: Profile = { name: 'Player', accent: 0xffffff, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
   try {
     const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
     // (profiles from before arenas and times: the old Day / Night switch)
     if (raw.arena && !raw.time) raw.time = raw.arena === 'night' ? 'night' : 'day';
     delete raw.arena;
+    // (the old two-layout switch: everyone starts on the genre's PC defaults)
+    delete raw.keys;
     const p = { ...def, ...raw };
+    p.binds = { ...structuredClone(DEFAULT_KEYS), ...(raw.binds ?? {}) };
+    p.padBinds = { ...DEFAULT_PAD, ...(raw.padBinds ?? {}) };
     p.map = asMap(p.map);
     p.time = asTime(p.time);
     return p;
@@ -51,20 +62,6 @@ export function saveProfile(p: Profile): void {
   } catch {
     /* private mode */
   }
-}
-
-function keyList(layout: Profile['keys']): string {
-  const classic = layout === 'classic';
-  return `
-        <div><kbd>W</kbd><kbd>S</kbd></div><span>Drive · reverse (pitch in the air)</span>
-        <div><kbd>A</kbd><kbd>D</kbd></div><span>Steer (yaw in the air)</span>
-        <div>${classic ? '<kbd>RMB</kbd>' : '<kbd>Space</kbd> / <kbd>RMB</kbd>'}</div><span>Jump · tap again to double jump; with a direction it's a flip</span>
-        <div>${classic ? '<kbd>LMB</kbd>' : '<kbd>Shift</kbd> / <kbd>LMB</kbd>'}</div><span>Boost</span>
-        <div>${classic ? '<kbd>Shift</kbd>' : '<kbd>X</kbd>'}</div><span>Powerslide · air roll (hold)</span>
-        <div><kbd>Q</kbd><kbd>E</kbd></div><span>Air roll left · right</span>
-        <div>${classic ? '<kbd>Space</kbd> / <kbd>C</kbd>' : '<kbd>C</kbd>'}</div><span>Ball cam on / off</span>
-        <div><kbd>Tab</kbd></div><span>Scoreboard</span>
-        <div><kbd>Esc</kbd></div><span>Pause · settings</span>`;
 }
 
 export class UI {
@@ -86,6 +83,12 @@ export class UI {
   onProfile: (p: Profile) => void = () => {};
   onClick: () => void = () => {};
   onScreen: (id: string) => void = () => {};
+  /** start capturing a bind (the game hands the next key / button back through bindTo) */
+  onCaptureStart: (act: Act, kind: 'key' | 'pad', slot: number) => void = () => {};
+  onCaptureEnd: () => void = () => {};
+  onBindsOpen: (open: boolean) => void = () => {};
+  padPS = false;
+  private cap: { act: Act; kind: 'key' | 'pad'; slot: number } | null = null;
   profile: Profile;
   private feedEl: HTMLElement;
   private playSize = 2;
@@ -109,11 +112,11 @@ export class UI {
   <div class="side">
     <div class="logo"><b>BOOST</b><i>BALL</i><small>Rocket-powered car soccer</small></div>
     <div class="screen" id="s-main">
-      <button class="mbtn primary" data-go="s-play"><span>Play vs bots</span><em>1v1 · 2v2 · 3v3</em></button>
-      <button class="mbtn" data-go="s-online"><span>Play with friends</span><em>Online lobby</em></button>
+      <button class="mbtn primary" data-go="s-online"><span>Play with friends</span><em>Online lobby · share a code</em></button>
+      <button class="mbtn" data-go="s-play"><span>Play vs bots</span><em>1v1 · 2v2 · 3v3</em></button>
       <button class="mbtn" id="b-free"><span>Free play</span><em>Just you and the ball</em></button>
       <button class="mbtn" data-go="s-garage"><span>Garage</span><em>Name · paint</em></button>
-      <button class="mbtn" data-go="s-controls"><span>Controls</span></button>
+      <button class="mbtn" id="b-binds"><span>Controls</span><em id="pad-status">Keyboard &amp; mouse · controller</em></button>
       <button class="mbtn back" id="b-games"><span>← All games</span></button>
     </div>
     <div class="screen" id="s-play" hidden>
@@ -142,13 +145,6 @@ export class UI {
       <div class="field"><label>Name</label><input type="text" id="i-name" maxlength="16" value="${esc(p.name)}" spellcheck="false" /></div>
       <div class="field"><label>Accent paint</label><div class="swatches" id="sw">${PAINTS.map((c) => `<button data-c="${c}" style="background:${hex(c)}" class="${c === p.accent ? 'on' : ''}"></button>`).join('')}</div></div>
       <div class="hint">Your car wears your team's colour; the accent goes on the stripes, the wing and the rims.</div>
-      <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
-    </div>
-    <div class="screen" id="s-controls" hidden>
-      <div class="mhead">Keyboard layout</div>
-      <div class="seg" id="seg-keys"><button data-v="arcade" class="${p.keys !== 'classic' ? 'on' : ''}">Arcade</button><button data-v="classic" class="${p.keys === 'classic' ? 'on' : ''}">Classic</button></div>
-      <div class="keys" id="keylist">${keyList(p.keys)}</div>
-      <div class="hint">Controllers work too, with the usual layout: RT/LT drive, A jump, B boost, X powerslide, Y ball cam, LB/RB air roll.</div>
       <button class="mbtn back" data-go="s-main"><span>← Back</span></button>
     </div>
     <div class="foot">An original fan-made game. Physics tuned to the published numbers of the rocket-car genre.</div>
@@ -206,8 +202,23 @@ export class UI {
     <div class="slider"><span>Transition speed</span><input type="range" id="p-trans" min="1" max="2" step="0.1" value="${p.trans}" /><b id="p-trans-v">${p.trans.toFixed(1)}</b></div>
     <div class="slider"><span>Volume</span><input type="range" id="p-vol" min="0" max="1" step="0.05" value="${p.volume}" /><b id="p-vol-v">${Math.round(p.volume * 100)}</b></div>
     <div class="seg" id="p-shake"><button data-v="1" class="${p.shake ? 'on' : ''}">Camera shake</button><button data-v="0" class="${p.shake ? '' : 'on'}">No shake</button></div>
-    <button class="mbtn primary small" id="p-resume" style="margin-top:8px"><span>Resume</span></button>
+    <button class="mbtn small" id="p-binds" style="margin-top:8px"><span>Controls</span></button>
+    <button class="mbtn primary small" id="p-resume"><span>Resume</span></button>
     <button class="mbtn small" id="p-leave"><span>Leave match</span></button>
+  </div>
+</div>
+<div class="overlay" id="o-binds" hidden>
+  <div class="binds screen">
+    <div class="bhead"><h2>Controls</h2><div class="padinfo" id="b-pad">No controller connected</div></div>
+    <div class="btable" id="b-table"></div>
+    <div class="bsets">
+      <div class="slider"><span>Controller deadzone</span><input type="range" id="b-dz" min="0.02" max="0.3" step="0.01" value="${p.deadzone}" /><b id="b-dz-v">${p.deadzone.toFixed(2)}</b></div>
+      <div class="slider"><span>Steering sensitivity</span><input type="range" id="b-ss" min="0.5" max="2" step="0.05" value="${p.steerSens}" /><b id="b-ss-v">${p.steerSens.toFixed(2)}</b></div>
+      <div class="slider"><span>Aerial sensitivity</span><input type="range" id="b-as" min="0.5" max="2" step="0.05" value="${p.airSens}" /><b id="b-as-v">${p.airSens.toFixed(2)}</b></div>
+      <div class="seg" id="b-rumble"><button data-v="1" class="${p.rumble ? 'on' : ''}">Vibration on</button><button data-v="0" class="${p.rumble ? '' : 'on'}">Vibration off</button></div>
+    </div>
+    <div class="row"><button class="mbtn small" id="b-reset"><span>Reset to defaults</span></button><button class="mbtn primary small" id="b-done" data-pad-back><span>Done</span></button></div>
+    <div class="capture" id="b-cap" hidden><div><b id="b-cap-t">Press a key</b><small>Esc cancels · Delete clears</small><button class="mbtn small" id="b-cap-x" data-cap-ui><span>Cancel</span></button></div></div>
   </div>
 </div>
 <div class="overlay" id="o-end" hidden><div class="end screen" id="end"></div></div>
@@ -305,22 +316,124 @@ export class UI {
     slider('#p-stiff', 'stiff', (v) => v.toFixed(2));
     slider('#p-trans', 'trans', (v) => v.toFixed(1));
     slider('#p-vol', 'volume', (v) => String(Math.round(v * 100)));
-    seg('#seg-keys', (v) => {
-      this.profile.keys = v === 'classic' ? 'classic' : 'arcade';
-      this.$('#keylist').innerHTML = keyList(this.profile.keys);
-      this.save();
-    });
     seg('#p-shake', (v) => {
       this.profile.shake = v === '1';
       this.save();
     });
     this.$('#p-resume').addEventListener('click', () => this.onResume());
+    this.wireBinds(seg);
     this.$('#p-leave').addEventListener('click', () => this.onLeave());
   }
 
   private save(): void {
     saveProfile(this.profile);
     this.onProfile(this.profile);
+  }
+
+  // ------------------------------------------------------------ controls (rebinding)
+  private wireBinds(seg: (id: string, f: (v: string) => void) => void): void {
+    const open = () => {
+      this.drawBinds();
+      this.$('#o-binds').hidden = false;
+      this.onBindsOpen(true);
+    };
+    this.$('#b-binds').addEventListener('click', open);
+    this.$('#p-binds').addEventListener('click', open);
+    this.$('#b-done').addEventListener('click', () => {
+      this.stopCapture();
+      this.$('#o-binds').hidden = true;
+      this.onBindsOpen(false);
+    });
+    this.$('#b-reset').addEventListener('click', () => {
+      this.profile.binds = structuredClone(DEFAULT_KEYS);
+      this.profile.padBinds = { ...DEFAULT_PAD };
+      this.save();
+      this.drawBinds();
+      this.toast('Controls reset to the defaults');
+    });
+    this.$('#b-table').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-bind]');
+      if (!b) return;
+      const [act, kind, slot] = b.getAttribute('data-bind')!.split(':');
+      this.cap = { act: act as Act, kind: kind as 'key' | 'pad', slot: Number(slot) };
+      this.$('#b-cap-t').textContent = kind === 'pad' ? `Press a controller button for ${ACTS.find((a) => a.id === act)!.name}` : `Press a key or mouse button for ${ACTS.find((a) => a.id === act)!.name}`;
+      this.$('#b-cap').hidden = false;
+      this.onCaptureStart(this.cap.act, this.cap.kind, this.cap.slot);
+    });
+    this.$('#b-cap-x').addEventListener('click', () => this.stopCapture());
+    const pslider = (id: string, key: 'deadzone' | 'steerSens' | 'airSens') => {
+      const el = this.$<HTMLInputElement>(id);
+      el.addEventListener('input', () => {
+        this.profile[key] = Number(el.value);
+        this.$(id + '-v').textContent = Number(el.value).toFixed(2);
+        this.save();
+      });
+    };
+    pslider('#b-dz', 'deadzone');
+    pslider('#b-ss', 'steerSens');
+    pslider('#b-as', 'airSens');
+    seg('#b-rumble', (v) => {
+      this.profile.rumble = v === '1';
+      this.save();
+    });
+  }
+
+  private stopCapture(): void {
+    if (!this.cap) return;
+    this.cap = null;
+    this.$('#b-cap').hidden = true;
+    this.onCaptureEnd();
+  }
+
+  /** the captured key / button: Escape cancels, Delete / Backspace clears the slot */
+  bindTo(kind: 'key' | 'pad', code: string | number): void {
+    const c = this.cap;
+    if (!c) return;
+    if (kind === 'key' && code === 'Escape') return this.stopCapture();
+    const clear = kind === 'key' && (code === 'Delete' || code === 'Backspace');
+    if (c.kind === 'key') {
+      if (kind !== 'key') return;
+      if (c.act === 'pause' && clear) return this.stopCapture();
+      this.profile.binds[c.act][c.slot] = clear ? '' : String(code);
+    } else {
+      if (kind === 'key' && !clear) return;
+      this.profile.padBinds[c.act] = clear ? -1 : Number(code);
+    }
+    this.save();
+    this.stopCapture();
+    this.drawBinds();
+  }
+
+  bindsOpen(): boolean {
+    return !this.$('#o-binds').hidden;
+  }
+
+  /** the connected controller, for the menu and the controls screen */
+  padInfo(name: string, ps: boolean): void {
+    this.padPS = ps;
+    const label = name ? (ps ? 'PlayStation controller connected' : 'Controller connected') : 'No controller connected';
+    this.$('#b-pad').textContent = name ? `${label} · ${name.replace(/\s*\(.*$/, '').slice(0, 40)}` : `${label} · plug one in or pair it over Bluetooth, then press a button`;
+    this.$('#pad-status').textContent = name ? (ps ? 'PlayStation controller ready' : 'Controller ready') : 'Keyboard & mouse · controller';
+    if (!this.$('#o-binds').hidden) this.drawBinds();
+  }
+
+  private drawBinds(): void {
+    const p = this.profile;
+    const ps = this.padPS;
+    const fixed: Partial<Record<Act, string>> = { left: 'Left stick', right: 'Left stick', pitchUp: 'Left stick', pitchDown: 'Left stick' };
+    const cell = (act: Act, kind: 'key' | 'pad', slot: number, label: string) => `<button class="bind ${label === '—' ? 'none' : ''}" data-bind="${act}:${kind}:${slot}">${esc(label)}</button>`;
+    this.$('#b-table').innerHTML =
+      `<div class="bh"><span>Action</span><span>Key</span><span>Alternate</span><span>${ps ? 'PlayStation' : 'Controller'}</span></div>` +
+      ACTS.map((a) => {
+        const k = p.binds[a.id];
+        const pad = a.pad ? cell(a.id, 'pad', 0, padName(p.padBinds[a.id], ps)) : `<em class="fixed">${fixed[a.id] ?? '—'}</em>`;
+        return `<div class="br"><span>${esc(a.name)}</span>${cell(a.id, 'key', 0, keyName(k[0]))}${cell(a.id, 'key', 1, keyName(k[1]))}${pad}</div>`;
+      }).join('');
+  }
+
+  /** a menu or overlay is up (the pad drives the focus ring, not the car) */
+  menuOpen(): boolean {
+    return ['#m-menu', '#m-lobby', '#o-pause', '#o-end', '#o-binds'].some((id) => !this.$(id).hidden);
   }
 
   // ------------------------------------------------------------ screens

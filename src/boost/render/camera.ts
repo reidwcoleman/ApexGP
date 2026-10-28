@@ -69,6 +69,9 @@ export class ChaseCam {
   /** the rig's tilt toward a high (or low) ball, radians */
   pitch = 0;
   ballCam = true;
+  /** look behind (held): the rig turns to face back past the car's tail, no ball tracking */
+  behind = false;
+  private wasBehind = false;
   private ballK = 1;
   private shakeT = 0;
   private shakeA = 0;
@@ -110,6 +113,11 @@ export class ChaseCam {
     const sure = Math.min(1, horiz / 260);
     hb.scale(sure).addScaled(hc, 1 - sure).norm();
     const pb = Math.max(-0.3, Math.min(1.0, Math.atan2(along - 40, Math.max(1, horiz)) * 0.85));
+    if (this.behind) {
+      const hr = new V3();
+      flat(t.f, up, hr, this.heading);
+      return [hr.scale(-1), 0];
+    }
     const k = this.ballK;
     const h = new V3().copy(hc).scale(1 - k).addScaled(hb, k);
     if (h.len2() < 1e-4) h.copy(k > 0.5 ? hb : hc);
@@ -138,8 +146,15 @@ export class ChaseCam {
     this.heading.norm();
     // turn toward the wanted heading (swivel): quicker in ball cam, like the real thing
     const [h, p] = this.aim(t);
+    if (this.behind !== this.wasBehind) {
+      // the rear view cuts straight round (and back), as the real one does
+      this.wasBehind = this.behind;
+      this.heading.copy(h);
+      this.pitch = p;
+      this.lag = 0;
+    }
     const da = angleAbout(this.heading, h, this.up);
-    const turn = 1 - Math.exp(-dt * (10 + 2 * this.ballK));
+    const turn = 1 - Math.exp(-dt * (this.behind ? 30 : 10 + 2 * this.ballK));
     rotate(this.heading, this.up, da * turn).norm();
     this.pitch += (p - this.pitch) * (1 - Math.exp(-dt * 7));
     this.compute(t, dt, false);

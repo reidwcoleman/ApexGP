@@ -265,39 +265,81 @@ function shell(): THREE.Group {
   const low = new THREE.Mesh(shellGeometry(0, 345), lowMat);
   low.receiveShadow = true;
   grp.add(low);
-  // the glass: hex panels that glow, fading as they go up
-  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.08, metalness: 0, transparent: true, opacity: 1, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.4 });
-  simPatch(
-    glassMat,
-    /* glsl */ `
-    ${GOAL_CUT}
+  // the glass: tinted panels in dark frames with a fine honeycomb, a frosted lower band, and a sheen
+  // toward grazing angles so the surface reads plainly when a car drives on it; the panels light up
+  // round the ball and the cars. The ceiling is the same glass, gridded flat.
+  const glassFrag = (ceil: boolean) => /* glsl */ `
+    ${ceil ? '' : GOAL_CUT}
     float tw = smoothstep(-3000.0, 3000.0, vSim.y);
     vec3 team = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
     float z = vSim.z;
-    vec2 q = vec2(vBB.x, z) / 260.0;
-    float hex = bbHexEdge(q);
-    float edge = 1.0 - smoothstep(0.0, 0.035, hex);
-    float fade = 1.0 - smoothstep(500.0, 2300.0, z);
-    float pulse = 0.5 + 0.5 * sin(uTime * 1.3 + vBB.x * 0.002 - z * 0.003);
-    // the panels light up where the ball or a car comes near (driving on the wall, a ball off it)
+    vec2 W = ${ceil ? 'vSim.xy' : 'vec2(vBB.x, z)'};
+    float fw = max(fwidth(W.x), fwidth(W.y)) + 0.01;
+    // frames: mullions every 1024 along the wall, rails at 1000 and 1500 (a grid on the ceiling)
+    vec2 cell = abs(fract(W / 1024.0 + 0.5) - 0.5) * 1024.0;
+    float dFrame = ${ceil ? '9999.0' : 'min(cell.x, abs(z - 1000.0))'};
+    float frame = (1.0 - smoothstep(10.0, 10.0 + fw * 1.5, dFrame)) * ${ceil ? '0.0' : '(1.0 - smoothstep(1300.0, 1750.0, z))'};
+    float frameLine = 1.0 - smoothstep(2.5, 2.5 + fw, dFrame);
+    // the honeycomb, faded out before it can shimmer
+    float hs = 95.0;
+    float hex = bbHexEdge(W / hs);
+    float hfw = fw / hs;
+    float hexL = (1.0 - smoothstep(0.0, 0.07 + hfw * 1.2, hex)) * (1.0 - smoothstep(0.04, 0.16, hfw));
+    float hexB = 1.0 - smoothstep(0.0, 0.03 + fw / 300.0, bbHexEdge(W / 300.0));
+    // a surface's grazing sheen (its normal from the screen-space derivatives)
+    vec3 gn = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+    float ndv = abs(dot(gn, normalize(vViewPosition)));
+    float fres = pow(1.0 - ndv, 2.0);
+    float lower = ${ceil ? '0.0' : '1.0 - smoothstep(900.0, 1100.0, z)'};
+    float smudge = bbNoise(W * 0.004) * 0.6 + bbNoise(W * 0.02) * 0.4;
     float near = 0.0;
     for (int i = 0; i < 9; i++) {
       float d = distance(vSim, uNear[i].xyz);
-      float r = uNear[i].w > 0.5 ? 620.0 : 430.0;
-      near = max(near, (1.0 - smoothstep(0.0, r, d)) * (uNear[i].w > 0.5 ? 1.0 : 0.8));
+      float r = uNear[i].w > 0.5 ? 620.0 : 460.0;
+      near = max(near, (1.0 - smoothstep(0.0, r, d)) * (uNear[i].w > 0.5 ? 1.0 : 0.85));
     }
-    float rim = 1.0 - smoothstep(0.0, 0.09, hex);
-    diffuseColor.rgb = mix(vec3(0.5, 0.6, 0.75), team, 0.4);
-    diffuseColor.a = 0.03 + uDay * 0.015 + edge * (0.2 * fade + 0.025) + near * (0.1 + rim * 0.55);
-    vec3 bbEmit = (team * edge * (0.7 * fade + 0.12) * (0.75 + 0.25 * pulse) + team * 0.03 * fade) * mix(1.0, 0.4, uDay)
-      + mix(team, vec3(0.9, 0.95, 1.0), 0.35) * near * (rim * 1.6 + 0.12);
-    `,
-    { uTime: uT, uNear },
-    'uniform float uTime;\nuniform vec4 uNear[9];',
-  );
+    float pulse = 0.5 + 0.5 * sin(uTime * 1.3 + W.x * 0.002 - W.y * 0.003);
+    vec3 glassC = mix(vec3(0.06, 0.075, 0.1), team * 0.35 + 0.03, 0.25 + lower * 0.15);
+    vec3 frameC = vec3(0.1, 0.11, 0.13);
+    vec3 col = mix(glassC * (0.8 + 0.4 * smudge), vec3(0.15, 0.18, 0.23), hexL * 0.5);
+    col = mix(col, frameC, frame);
+    diffuseColor.rgb = col;
+    float a = ${ceil ? '0.05' : '0.1 + lower * 0.12'} + fres * 0.6 + hexL * 0.1 + hexB * 0.03 + smudge * 0.04;
+    a = mix(a, 0.85, frame);
+    a += near * near * (0.06 + hexL * 0.3);
+    diffuseColor.a = clamp(a, 0.0, 1.0);
+    float night = mix(1.0, 0.45, uDay);
+    vec3 bbEmit = team * frameLine * frame * ${ceil ? '0.0' : '0.55'} * night
+      + team * hexB * (0.08 + 0.06 * pulse) * ${ceil ? '0.3' : '(0.4 + lower * 0.6)'} * night
+      + team * hexL * (0.025 + 0.02 * pulse) * night
+      + mix(team, vec3(0.9, 0.95, 1.0), 0.2) * near * near * (hexL * 0.9 + 0.08);
+    `;
+  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0, transparent: true, opacity: 1, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 0.55, specularIntensity: 0.45 });
+  simPatch(glassMat, glassFrag(false), { uTime: uT, uNear }, 'uniform float uTime;\nuniform vec4 uNear[9];');
   const glass = new THREE.Mesh(shellGeometry(345, ARENA.Z + 1), glassMat);
   glass.renderOrder = 5;
   grp.add(glass);
+  // the ceiling: the octagon pulled in by the ramp radius, at the roof
+  const ceilMat = glassMat.clone();
+  simPatch(ceilMat, glassFrag(true), { uTime: uT, uNear }, 'uniform float uTime;\nuniform vec4 uNear[9];');
+  const cx = ARENA.X - R;
+  const cy = ARENA.Y - R;
+  const cc = ARENA.CORNER - R * Math.SQRT2;
+  const oct = new THREE.Shape([
+    new THREE.Vector2(cx, -(cc - cx)),
+    new THREE.Vector2(cx, cc - cx),
+    new THREE.Vector2(cc - cy, cy),
+    new THREE.Vector2(-(cc - cy), cy),
+    new THREE.Vector2(-cx, cc - cx),
+    new THREE.Vector2(-cx, -(cc - cx)),
+    new THREE.Vector2(-(cc - cy), -cy),
+    new THREE.Vector2(cc - cy, -cy),
+  ]);
+  const cg = new THREE.ShapeGeometry(oct);
+  cg.translate(0, 0, ARENA.Z + 0.5);
+  const ceiling = new THREE.Mesh(cg, ceilMat);
+  ceiling.renderOrder = 5;
+  grp.add(ceiling);
   grp.userData.uT = uT;
   return grp;
 }

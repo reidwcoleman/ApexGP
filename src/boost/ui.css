@@ -182,3 +182,35 @@
   .mhead { font-size: 13px; margin: 0; }
   .screen { gap: 8px; }
 }
+
+/* ---- controls: rebinding */
+#o-binds { z-index: 5; }
+.binds { width: min(860px, 94vw); max-height: 92vh; display: flex; flex-direction: column; gap: 12px; position: relative; }
+.binds .bhead { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.binds h2 { margin: 0; font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.02em; }
+.binds .padinfo { font-size: 14px; font-weight: 700; color: var(--dim); letter-spacing: 0.04em; }
+.btable { overflow-y: auto; border-radius: 6px; background: rgba(0, 0, 0, 0.35); padding: 6px 10px; scrollbar-width: thin; }
+.btable .bh, .btable .br { display: grid; grid-template-columns: minmax(150px, 1.5fr) 1fr 1fr 1fr; gap: 8px; align-items: center; padding: 4px 0; }
+.btable .bh { font-size: 12px; letter-spacing: 0.2em; font-weight: 800; color: var(--dim); text-transform: uppercase; position: sticky; top: -6px; background: rgba(8, 12, 22, 0.96); padding: 8px 0; }
+.btable .br { border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 16px; font-weight: 700; }
+.btable .br > span { color: var(--ink); }
+.btable .bind { border: 0; border-radius: 3px; padding: 8px 6px; background: rgba(255, 255, 255, 0.08); color: #fff; font: 700 15px var(--font); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btable .bind:hover { background: var(--blue); }
+.btable .bind.none { color: rgba(233, 240, 255, 0.3); }
+.btable .fixed { font-style: normal; font-size: 14px; color: var(--dim); text-align: center; }
+.binds .bsets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; align-items: center; }
+.binds .bsets .slider { grid-template-columns: 150px 1fr 44px; }
+.binds .row { display: flex; gap: 10px; justify-content: flex-end; }
+.binds .row .mbtn { width: auto; }
+.binds .capture { position: absolute; inset: -12px; display: grid; place-items: center; background: rgba(3, 6, 14, 0.82); border-radius: 8px; }
+.binds .capture[hidden] { display: none; }
+.binds .capture > div { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.binds .capture b { font-size: 26px; font-weight: 900; font-style: italic; text-transform: uppercase; max-width: 560px; }
+.binds .capture small { font-size: 14px; color: var(--dim); letter-spacing: 0.08em; }
+.binds .capture .mbtn { width: auto; }
+@media (max-width: 640px) { .binds .bsets { grid-template-columns: 1fr; } .btable .bh, .btable .br { grid-template-columns: 1.2fr 1fr 1fr 1fr; font-size: 13px; } }
+
+/* a controller's focus ring */
+#ui .padfocus { outline: 3px solid #ffd34a !important; outline-offset: 2px; }
+#ui .mbtn.padfocus { background: linear-gradient(90deg, rgba(47, 123, 255, 0.55), rgba(255, 122, 31, 0.15)); transform: skewX(-10deg) translateX(8px); box-shadow: inset 4px 0 0 var(--orange); }
+#ui .mbtn.primary.padfocus { background: linear-gradient(90deg, #4a8dff, var(--blue)); }

@@ -114,6 +114,7 @@ export class Game {
     this.applyProfile(this.ui.profile);
     this.wireUI();
     this.controls.onAction = (a) => this.action(a);
+    this.controls.onPadChange = () => this.ui.padInfo(this.controls.padName, this.controls.padPS);
     window.addEventListener('pointerdown', () => this.audio.unlock(), { capture: true });
     window.addEventListener('keydown', () => this.audio.unlock(), { capture: true });
     document.addEventListener('visibilitychange', () => this.onVisibility());
@@ -130,7 +131,9 @@ export class Game {
     CAM.TRANS = p.trans;
     this.cam.ballCam = p.ballCam;
     this.audio.setVolume(p.volume);
-    this.controls.classic = p.keys === 'classic';
+    this.controls.keyBinds = p.binds;
+    this.controls.padBinds = p.padBinds;
+    this.controls.pad = { deadzone: p.deadzone, steerSens: p.steerSens, airSens: p.airSens, rumble: p.rumble };
     this.ui.cam(this.cam.ballCam);
     // the arena follows your setting except inside an online lobby, where the host picks
     if (!this.lobby) this.setLook(this.q.get('map') ?? p.map, this.q.get('time') ?? p.time);
@@ -247,6 +250,8 @@ export class Game {
   private wireUI(): void {
     const ui = this.ui;
     ui.onClick = () => this.audio.ui();
+    ui.onCaptureStart = () => (this.controls.onCapture = (kind, code) => this.ui.bindTo(kind, code));
+    ui.onCaptureEnd = () => (this.controls.onCapture = null);
     ui.onPlay = (size, skill, minutes) => this.playOffline(size, skill, minutes);
     ui.onFreeplay = () => this.freeplay();
     ui.onHost = () => this.hostLobby();
@@ -295,6 +300,11 @@ export class Game {
   }
 
   private action(a: 'ballcam' | 'pause' | 'board' | 'boardUp' | 'skip'): void {
+    // Esc / Options closes the controls screen first
+    if (a === 'pause' && this.ui.bindsOpen()) {
+      this.ui.root.querySelector<HTMLElement>('#b-done')!.click();
+      return;
+    }
     if (this.mode === 'attract') return;
     if (a === 'ballcam') {
       this.cam.ballCam = !this.cam.ballCam;
@@ -562,6 +572,9 @@ export class Game {
       const now = performance.now();
       const dt = Math.min(0.1, (now - this.last) / 1000);
       this.last = now;
+      this.controls.menuMode = this.mode === 'attract' || this.paused || this.ui.menuOpen();
+      this.controls.poll(dt);
+      this.cam.behind = this.controls.behind;
       this.advance(dt);
       this.render(dt);
     };
@@ -743,6 +756,7 @@ export class Game {
         if (e.power > 600) this.fx.burst(mid.x, mid.y, mid.z, Math.min(60, 8 + e.power / 50), 900 + e.power * 0.3, new THREE.Color(2.2, 2.2, 2.4), 22, 0.35, 300);
         if (playing) this.audio.hit(e.power, att(b.x, b.y, b.z), pan(b.x, b.y));
         if (e.car === this.me && e.power > 1800 && this.ui.profile.shake) this.cam.shake(14, 0.18);
+        if (e.car === this.me && playing) this.controls.rumble(Math.min(1, e.power / 3500), Math.min(1, 0.25 + e.power / 2500), 90 + Math.min(120, e.power / 30));
         break;
       }
       case 'bounce':
@@ -776,6 +790,7 @@ export class Game {
       case 'bump': {
         const c = w.cars[e.car];
         if (c && playing) this.audio.hit(e.power * 0.6, att(c.pos.x, c.pos.y, c.pos.z), pan(c.pos.x, c.pos.y));
+        if (playing && e.car === this.me) this.controls.rumble(0.7, 0.5, 160);
         break;
       }
       case 'demo': {
@@ -783,6 +798,8 @@ export class Game {
         if (playing) this.audio.explosion(att(e.x, e.y, e.z), pan(e.x, e.y), false);
         if (playing && e.by >= 0) this.ui.feed(`${name(e.by)} demolished ${name(e.car)}`, w.players[e.by]?.team ?? -1);
         if (e.car === this.me && this.ui.profile.shake) this.cam.shake(30, 0.5);
+        if (playing && e.car === this.me) this.controls.rumble(1, 1, 450);
+        else if (playing && e.by === this.me) this.controls.rumble(0.8, 0.6, 220);
         break;
       }
       case 'count':
@@ -807,6 +824,7 @@ export class Game {
         if (playing) {
           this.audio.goal();
           if (this.ui.profile.shake) this.cam.shake(40, 0.9);
+          if (this.me >= 0) this.controls.rumble(w.players[this.me]?.team === e.team ? 0.9 : 0.4, 0.8, 600);
           const kph = Math.round(e.speed * 0.036);
           const who = e.scorer >= 0 ? name(e.scorer) : e.team === 0 ? 'Blue' : 'Orange';
           const lt = w.touches[0]?.[0];
@@ -1027,7 +1045,7 @@ export class Game {
     const back = new THREE.Vector3(-1, 0, 0).applyQuaternion(q);
     for (const sy of [-1, 1]) {
       const o = new THREE.Vector3(-63, sy * 11, 15).applyQuaternion(q);
-      for (let k = 0; k < 2; k++) {
+      for (let k = 0; k < 3; k++) {
         const sp = 500 + Math.random() * 400;
         this.fx.spark({
           x: pos.x + o.x,
@@ -1039,15 +1057,21 @@ export class Game {
           r: col[0],
           g: col[1],
           b: col[2],
-          life: 0.32 + Math.random() * 0.15,
-          size: 30,
-          grow: -40,
+          life: 0.38 + Math.random() * 0.2,
+          size: 34 + Math.random() * 10,
+          grow: -45,
           drag: 2.5,
         });
       }
     }
-    if (Math.random() < 0.4)
-      this.fx.smoke({ x: pos.x + back.x * 70, y: pos.y + back.y * 70, z: pos.z + 17 + back.z * 70, vx: vel.x * 0.1, vy: vel.y * 0.1, vz: 30, r: 0.3, g: 0.32, b: 0.36, life: 0.8, size: 40, grow: 120, drag: 2 });
+    // a hot white fleck or two down the middle of the trail, then the smoke it leaves
+    if (Math.random() < 0.6) {
+      const sp = 700 + Math.random() * 300;
+      const o = new THREE.Vector3(-66, (Math.random() - 0.5) * 20, 14).applyQuaternion(q);
+      this.fx.spark({ x: pos.x + o.x, y: pos.y + o.y, z: pos.z + o.z, vx: vel.x * 0.2 + back.x * sp, vy: vel.y * 0.2 + back.y * sp, vz: vel.z * 0.2 + back.z * sp, r: 2.4, g: 2.1, b: 1.6, life: 0.18, size: 18, grow: -30, drag: 2 });
+    }
+    if (Math.random() < 0.55)
+      this.fx.smoke({ x: pos.x + back.x * 80, y: pos.y + back.y * 80, z: pos.z + 15 + back.z * 80, vx: vel.x * 0.1, vy: vel.y * 0.1, vz: 30, r: 0.32, g: 0.33, b: 0.37, life: 0.9, size: 42, grow: 140, drag: 2 });
   }
 
   /** the garage: your car on the centre spot, the camera orbiting it */

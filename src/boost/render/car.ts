@@ -428,6 +428,8 @@ export class CarView {
   private wheels: { pivot: THREE.Group; spin: THREE.Group; r: number; front: boolean; z0: number }[] = [];
   private flames: THREE.Mesh[] = [];
   private flameMat: THREE.ShaderMaterial;
+  private coreMat: THREE.ShaderMaterial;
+  private cores: THREE.Mesh[] = [];
   private nozzleGlow: THREE.MeshBasicMaterial;
   private spin = 0;
   private tag: THREE.Sprite | null = null;
@@ -524,16 +526,21 @@ export class CarView {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
-      uniforms: { uT: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x5fb0ff : 0xffa040) }, uK: { value: 0 } },
+      uniforms: { uT: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x4f9dff : 0xff8a2a) }, uK: { value: 0 }, uHot: { value: 0 } },
       vertexShader: `varying vec3 vP; varying vec2 vU; void main(){ vP = position; vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
-      fragmentShader: `uniform float uT; uniform vec3 uC; uniform float uK; varying vec3 vP; varying vec2 vU;
+      fragmentShader: `uniform float uT; uniform vec3 uC; uniform float uK; uniform float uHot; varying vec3 vP; varying vec2 vU;
         void main(){ float t = clamp(-vP.x, 0.0, 1.0);
+          // flickering shock bands running down the jet
           float n = 0.5 + 0.5*sin(vU.x*40.0 + uT*60.0) * sin(t*20.0 - uT*80.0);
+          float bands = 0.75 + 0.25*sin(t*34.0 - uT*95.0);
           float core = (1.0 - t) * (1.0 - t);
-          vec3 c = mix(uC * 1.6, vec3(1.6, 1.5, 1.2), core * 0.8);
-          float a = (1.0 - t) * (0.6 + 0.4*n) * uK;
-          gl_FragColor = vec4(c * a * 2.2, a); }`,
+          vec3 c = mix(uC * 1.7, vec3(1.8, 1.55, 1.1), mix(core * 0.85, 0.85, uHot));
+          float a = pow(1.0 - t, mix(1.1, 1.8, uHot)) * (0.55 + 0.45*n) * bands * uK;
+          gl_FragColor = vec4(c * a * mix(2.4, 3.4, uHot), a); }`,
     });
+    // a short white-hot core inside each jet
+    this.coreMat = this.flameMat.clone();
+    this.coreMat.uniforms.uHot.value = 1;
     for (const sy of [-1, 1]) {
       const nz = add(g.nozzle, nozzleM, false);
       nz.position.set(-55, sy * 12, 12.5);
@@ -546,6 +553,12 @@ export class CarView {
       fl.frustumCulled = false;
       this.group.add(fl);
       this.flames.push(fl);
+      const core = new THREE.Mesh(g.flame, this.coreMat);
+      core.position.set(-58, sy * 12, 12.5);
+      core.renderOrder = 10;
+      core.frustumCulled = false;
+      this.group.add(core);
+      this.cores.push(core);
     }
     {
       const m = new THREE.ShaderMaterial({
@@ -658,10 +671,16 @@ export class CarView {
     this.boostVis += (k - this.boostVis) * Math.min(1, dt * (k ? 30 : 12));
     this.flameMat.uniforms.uT.value = t;
     this.flameMat.uniforms.uK.value = this.boostVis;
+    this.coreMat.uniforms.uT.value = t;
+    this.coreMat.uniforms.uK.value = this.boostVis;
+    for (const f of this.cores) {
+      f.visible = this.boostVis > 0.02;
+      f.scale.set(22 + 12 * this.boostVis + Math.sin(t * 90 + f.position.y) * 3, 3.2, 3.2);
+    }
     for (const f of this.flames) {
       f.visible = this.boostVis > 0.02;
-      const L = 44 + 34 * this.boostVis + Math.sin(t * 70 + f.position.y) * 6;
-      f.scale.set(L, 5 + this.boostVis, 5 + this.boostVis);
+      const L = 50 + 50 * this.boostVis + Math.sin(t * 70 + f.position.y) * 8;
+      f.scale.set(L, 5.2 + 1.6 * this.boostVis, 5.2 + 1.6 * this.boostVis);
     }
     this.nozzleGlow.color.setRGB(0.035 + this.boostVis * 6, 0.02 + this.boostVis * 2.9, 0.015 + this.boostVis * 1.3);
   }
