@@ -23,9 +23,9 @@ export const ASSIST_PRESETS: Record<AssistPreset, AssistConfig> = {
   casual: { traction: 'full', abs: true, stability: true, arcade: true, braking: 'medium', line: 'full', gearbox: 'auto', keyboard: 'rate', drs: 'auto' },
   // approachable, with a low braking assist that only helps where you'd overshoot
   standard: { traction: 'medium', abs: true, stability: true, arcade: true, braking: 'low', line: 'corners', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
-  // the default: the real car's handling and steering (no arcade grip, no turn-in help, no braking
-  // assist, no line), with only what a road car would have — ABS, traction and stability control, auto gears
-  realistic: { traction: 'medium', abs: true, stability: true, arcade: false, braking: 'off', line: 'off', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
+  // the default: the real car's handling and steering (no arcade grip, no turn-in help, no line), with
+  // what a road car would have — ABS, traction and stability control, auto gears — and a low braking assist
+  realistic: { traction: 'medium', abs: true, stability: true, arcade: false, braking: 'low', line: 'off', gearbox: 'auto', keyboard: 'rate', drs: 'manual' },
   // the full simulation: nothing between you and the car
   expert: { traction: 'off', abs: false, stability: false, arcade: false, braking: 'off', line: 'off', gearbox: 'manual', keyboard: 'direct', drs: 'manual' },
 };
