@@ -14,7 +14,10 @@ import { weatherUniforms } from '../../world/weatherUniforms.ts';
  * signature), 1 office curtain wall (mullions, spandrels), 2 punched windows in stucco/concrete,
  * 3 art deco (pastel, eyebrow ledges, glass-block strips), 4 parking garage (open decks), 5 shop
  * fronts (one floor of glass, a sign band), 6 vertical fins, 7 blank (mechanical, podium sides),
- * 8 house (stucco, a few windows with frames).
+ * 8 house (stucco, a few windows with frames), 9 a garage behind a painted perforated screen.
+ *
+ * Murals: the fraction of aFac.x (×2) is the chance a 22 m stretch of the wall is a painted mural
+ * instead (Wynwood style: sunsets, waves, Memphis dots, rainbow stripes, giant flowers, splits).
  *
  * Behind every window is a room (interior mapping: the view ray traced through a box the size of
  * the bay × floor × 7 m), its walls, floor and ceiling a colour of their own; after dark a share of
@@ -40,6 +43,15 @@ export const WALL_PAL = [
   [0.8, 0.64, 0.86], // 13 deco lavender
   [0.94, 0.62, 0.44], // 14 deco coral
   [0.66, 0.7, 0.66], // 15 sage
+  // Miami in colour: the brighter walls
+  [0.95, 0.4, 0.58], // 16 flamingo
+  [0.32, 0.8, 0.8], // 17 aqua
+  [0.98, 0.55, 0.28], // 18 tangerine
+  [0.98, 0.84, 0.32], // 19 lemon
+  [0.6, 0.86, 0.38], // 20 lime
+  [0.64, 0.52, 0.92], // 21 lilac
+  [0.42, 0.68, 0.95], // 22 sky
+  [0.98, 0.58, 0.48], // 23 salmon
 ];
 export const GLASS_PAL = [
   [0.1, 0.2, 0.24], // 0 blue-green (the Miami condo glass)
@@ -96,7 +108,7 @@ vFN = normalize( mat3( modelMatrix ) * objectNormal );`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform vec3 uWallPal[ 16 ];
+uniform vec3 uWallPal[ 24 ];
 uniform vec3 uGlassPal[ 8 ];
 uniform sampler2D uNoise;
 uniform float uNight, uDay, uFTime, uWet;
@@ -108,6 +120,73 @@ varying vec3 vFN;
 float fh1( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 float fh3( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
 float boxStep( float x, float a, float b ) { float w = fwidth( x ) * 0.8 + 1e-4; return smoothstep( a - w, a + w, x ) * ( 1.0 - smoothstep( b - w, b + w, x ) ); }
+// the street-art palette: hot pink, turquoise, tangerine, lemon, lime, violet, electric blue, coral
+vec3 vividC( float k ) {
+  k = mod( floor( k ), 8.0 );
+  if ( k < 0.5 ) return vec3( 0.92, 0.07, 0.32 );
+  if ( k < 1.5 ) return vec3( 0.0, 0.6, 0.62 );
+  if ( k < 2.5 ) return vec3( 1.0, 0.3, 0.02 );
+  if ( k < 3.5 ) return vec3( 0.98, 0.74, 0.04 );
+  if ( k < 4.5 ) return vec3( 0.28, 0.72, 0.05 );
+  if ( k < 5.5 ) return vec3( 0.3, 0.08, 0.82 );
+  if ( k < 6.5 ) return vec3( 0.02, 0.24, 0.88 );
+  return vec3( 0.95, 0.24, 0.14 );
+}
+// a mural on a 22 m panel of wall: pu, pv 0..1 across and up it, W x H metres
+vec3 mural( float pu, float pv, float W, float H, float pid, float seed ) {
+  float d = floor( fh1( vec2( pid, seed + 11.0 ) ) * 6.0 );
+  float k = floor( fh1( vec2( pid, seed + 13.0 ) ) * 8.0 );
+  vec2 p = vec2( ( pu - 0.5 ) * W, ( pv - 0.5 ) * H );
+  vec3 m;
+  if ( d < 0.5 ) {
+    // a synthwave sunset: the banded sky, a striped sun, a neon grid underfoot
+    m = mix( vec3( 1.0, 0.5, 0.04 ), vec3( 0.92, 0.1, 0.4 ), smoothstep( 0.25, 0.6, pv ) );
+    m = mix( m, vec3( 0.18, 0.03, 0.45 ), smoothstep( 0.62, 1.0, pv ) );
+    vec2 sc = p - vec2( 0.0, H * 0.05 );
+    float sr = H * 0.3;
+    float sun = 1.0 - step( sr, length( sc ) );
+    float cut = step( sc.y, -sr * 0.1 ) * step( 0.55 + 0.35 * sc.y / sr, fract( sc.y * 0.9 ) );
+    m = mix( m, mix( vec3( 1.0, 0.82, 0.1 ), vec3( 1.0, 0.25, 0.3 ), smoothstep( sr, -sr, sc.y ) ), sun * ( 1.0 - cut ) );
+    float gnd = step( pv, 0.26 );
+    float depth = 0.3 + ( 0.26 - pv ) * 5.0;
+    float grid = max( boxStep( fract( p.x / depth * 0.35 ), 0.0, 0.06 ), boxStep( fract( pv * 22.0 / max( depth, 0.4 ) ), 0.0, 0.08 ) );
+    m = mix( m, mix( vec3( 0.08, 0.02, 0.2 ), vec3( 1.0, 0.2, 0.75 ), grid ), gnd );
+  } else if ( d < 1.5 ) {
+    // waves of colour, white lines between
+    float b = pv * 5.0 + 0.4 * sin( pu * 12.566 + pid * 2.0 ) + 0.15 * sin( pu * 31.4 );
+    m = vividC( floor( b ) + k );
+    m = mix( m, vec3( 0.95 ), boxStep( fract( b ), 0.0, 0.07 ) );
+  } else if ( d < 2.5 ) {
+    // Memphis: a pale ground, dots, a squiggle, a zigzag
+    m = mix( vividC( k ), vec3( 0.95, 0.93, 0.88 ), 0.6 );
+    vec2 c = fract( p / 1.8 ) - 0.5;
+    m = mix( m, vividC( k + 3.0 ), 1.0 - step( 0.28, length( c ) ) );
+    float sq = abs( p.y - 1.4 * sin( p.x * 0.7 ) - H * 0.12 );
+    m = mix( m, vividC( k + 5.0 ), 1.0 - step( 0.45, sq ) );
+    float zz = abs( p.y + H * 0.22 - ( abs( fract( p.x * 0.25 ) - 0.5 ) * 4.0 - 1.0 ) );
+    m = mix( m, vec3( 0.04 ), 1.0 - step( 0.3, zz ) );
+  } else if ( d < 3.5 ) {
+    // diagonal rainbow stripes
+    m = vividC( floor( ( p.x + p.y ) * 0.24 ) + k );
+  } else if ( d < 4.5 ) {
+    // a giant flower on a dotted ground
+    float rr = length( p );
+    float a = atan( p.y, p.x );
+    float f = rr / ( H * 0.42 ) / ( 1.0 + 0.28 * sin( a * 6.0 + pid ) );
+    m = vividC( k + 2.0 );
+    vec2 c = fract( p / 1.2 ) - 0.5;
+    m = mix( m, m * 0.6 + 0.3, 1.0 - step( 0.18, length( c ) ) );
+    m = mix( m, vividC( k ), step( f, 1.0 ) );
+    m = mix( m, vec3( 1.0, 0.82, 0.1 ), step( f, 0.32 ) );
+    m = mix( m, vec3( 0.95 ), step( abs( f - 1.0 ), 0.04 ) );
+  } else {
+    // a bold split with racing stripes along it
+    float s = p.y - p.x * 0.55;
+    m = mix( vividC( k ), vividC( k + 4.0 ), step( 0.0, s ) );
+    for ( int i = 1; i < 4; i++ ) m = mix( m, i == 2 ? vec3( 0.95 ) : vividC( k + float( i ) + 1.0 ), boxStep( s, float( i ) * 0.9, float( i ) * 0.9 + 0.45 ) );
+  }
+  return m;
+}
 vec3 facEmit;
 float facRough, facMetal;
 vec3 facNudge;
@@ -156,7 +235,8 @@ vec3 roomColor( vec2 cellUv, vec2 cellId, vec2 size, float seed, float lit, out 
       .replace(
         '#include <map_fragment>',
         `
-float style = vFac.x;
+float style = floor( vFac.x + 0.001 );
+float muralK = fract( vFac.x + 0.001 ) * 2.0;
 float fh = max( vFac.y, 2.5 );
 float bw = max( vFac.z, 0.8 );
 float seed = vFac.w;
@@ -259,12 +339,43 @@ if ( style < 0.5 ) {
   float louv = step( topH - 3.5, v ) * step( 0.5, fract( v * 4.0 ) );
   col *= 1.0 - 0.3 * louv;
   roomK = 0.0;
-} else {
+} else if ( style < 8.5 ) {
   // house: stucco, windows with white frames and shutters
   float w = boxStep( fx, 0.3, 0.7 ) * boxStep( fy, 0.3, 0.8 );
   float frame = boxStep( fx, 0.27, 0.73 ) * boxStep( fy, 0.27, 0.83 ) * ( 1.0 - w );
   glass = w * step( 0.3, rnd );
   col = mix( col, vec3( 0.92 ), frame * step( 0.3, rnd ) );
+} else {
+  // a garage behind a painted screen: perforated panels in a wave of colour across the facade,
+  // the slab edges and piers between them
+  float open = boxStep( fy, 0.22, 0.94 );
+  float pier = 1.0 - boxStep( fract( u / 12.0 ), 0.02, 0.98 );
+  float band = v * 0.07 + sin( u * 0.045 + seed * 3.0 ) * 1.2 + sin( u * 0.011 + seed ) * 1.8;
+  vec3 sc = mix( vividC( floor( band ) + seed * 7.0 ), vividC( floor( band ) + 1.0 + seed * 7.0 ), smoothstep( 0.75, 1.0, fract( band ) ) );
+  vec2 pq = fract( vec2( u, v ) / 0.3 ) - 0.5;
+  float hole = ( 1.0 - step( 0.2, length( pq ) ) ) * ( 1.0 - smoothstep( 0.04, 0.1, fwidth( u ) ) );
+  float o = open * ( 1.0 - pier );
+  col = mix( col, mix( sc * 0.82, vec3( 0.05 ), hole * 0.55 ), o );
+  facEmit += sc * o * uNight * 0.18;
+  facRough = mix( facRough, 0.45, o );
+  facMetal = mix( facMetal, 0.35, o );
+  roomK = 0.0;
+}
+// a mural: some 22 m stretches of the wall painted, from the shops' sign band (or the ground) up
+float pid = floor( u / 22.0 );
+float mBase = groundH > 0.5 ? groundH : 0.0;
+float mTop = min( topH - 0.6, mBase + 22.0 );
+if ( muralK > 0.0 && fh1( vec2( pid, seed + 4.0 ) ) < muralK && v > mBase && v < mTop && mTop - mBase > 3.0 ) {
+  vec3 m = mural( fract( u / 22.0 ), ( v - mBase ) / ( mTop - mBase ), 22.0, mTop - mBase, pid, seed );
+  // (weathered: the stucco shows through a little)
+  col = m * ( 0.86 + 0.14 * nz.g );
+  glass = 0.0;
+  roomK = 0.0;
+  facEmit *= 0.0;
+  facRough = 0.85;
+  facMetal = 0.0;
+  // a strip of lights over it after dark
+  facEmit += m * uNight * 0.12 * smoothstep( mTop - 3.0, mTop, v );
 }
 if ( ground && groundH > 0.5 ) {
   // the street level: a stone base, tall shop glass between piers, a sign band
@@ -275,14 +386,17 @@ if ( ground && groundH > 0.5 ) {
   glass = ( 1.0 - pier ) * ( 1.0 - sign ) * ( 1.0 - base ) * step( gy, 1.0 );
   col = mix( vec3( 0.32, 0.31, 0.3 ), wallC * 0.8, pier );
   float sCol = fh1( vec2( floor( u / 6.0 ), seed ) );
-  col = mix( col, mix( vec3( 0.08, 0.08, 0.09 ), wallC, step( 0.5, sCol ) ), sign );
+  vec3 fascia = sCol < 0.35 ? vec3( 0.06, 0.06, 0.07 ) : vividC( floor( sCol * 23.0 ) ) * 0.8;
+  col = mix( col, fascia, sign );
   // the shop's name: a row of lit letters centred on a dark fascia (not the whole band)
   float sfx = fract( u / 6.0 ), sfy = ( gy - 0.82 ) / 0.15;
   float nameW = 0.25 + 0.3 * fh1( vec2( floor( u / 6.0 ), seed + 2.0 ) );
   float letters = boxStep( sfx, 0.5 - nameW, 0.5 + nameW ) * boxStep( sfy, 0.22, 0.78 )
     * step( 0.3, fract( sfx * 22.0 + sCol * 7.0 ) ) * step( 0.18, fh1( vec2( floor( sfx * 22.0 ), sCol * 31.0 ) ) );
-  vec3 signC = sCol < 0.55 ? vec3( 1.0, 0.85, 0.6 ) : sCol < 0.75 ? vec3( 0.4, 0.9, 1.0 ) : sCol < 0.88 ? vec3( 1.0, 0.3, 0.6 ) : vec3( 1.0 );
-  facEmit += signC * sign * letters * uNight * 2.2 * step( 0.3, sCol );
+  vec3 signC = sCol < 0.35 ? vec3( 1.0, 0.35, 0.7 ) : sCol < 0.55 ? vec3( 1.0, 0.85, 0.6 ) : sCol < 0.75 ? vec3( 0.4, 0.9, 1.0 ) : sCol < 0.88 ? vec3( 1.0, 0.3, 0.6 ) : vec3( 1.0 );
+  // the letters: white on the painted fascias by day, neon after dark
+  col = mix( col, vec3( 0.92 ), sign * letters * step( 0.35, sCol ) * ( 1.0 - uNight ) );
+  facEmit += signC * sign * letters * uNight * 3.0;
   fl = -1.0;
   fy = gy;
   cell = vec2( floor( u / 6.0 ), -1.0 );
@@ -362,7 +476,7 @@ if ( glass > 0.01 ) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'ow-facade-v7';
+  m.customProgramCacheKey = () => 'ow-facade-v8';
   return m;
 }
 

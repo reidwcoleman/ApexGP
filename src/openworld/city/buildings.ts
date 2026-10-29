@@ -203,6 +203,44 @@ interface Fac {
   wall: number;
   glass: number;
   groundH: number;
+  /** the share of the wall's 22 m stretches painted with a mural (0..0.9; set by vivid()) */
+  mural?: number;
+}
+
+/** pastel and bright walls (WALL_PAL indices) */
+const PASTEL = [5, 6, 7, 8, 13, 14, 10, 16, 17, 19, 21, 22, 23, 18, 20];
+const BRIGHT = [16, 17, 18, 19, 20, 21, 22, 23];
+
+/**
+ * Miami in colour: the plain walls painted (most of the low and mid-rise, some of the condos),
+ * garages behind painted screens, and murals on the walls people walk and drive past. Keyed on the
+ * building's seed, so a podium and its tower agree.
+ */
+function vivid(f: Fac, y0: number, topH: number): Fac & { mural: number } {
+  const h = fh(f.seed * 13.7 + 0.31), h2 = fh(f.seed * 5.3 + 1.7), h3 = fh(f.seed * 2.9 + 7.1);
+  let { style, wall } = f;
+  let mural = 0;
+  const low = topH < 40;
+  if (style === 7) {
+    // blank walls at street level are the murals' canvas
+    if (y0 < 1 && topH > 4) mural = 0.85;
+  } else if (style === 4) {
+    if (h < 0.55) style = 9;
+    else mural = 0.45;
+    if (h2 < 0.6) wall = PASTEL[Math.floor(h3 * PASTEL.length)];
+  } else if (style === 5) {
+    if (h2 < 0.65) wall = PASTEL[Math.floor(h3 * PASTEL.length)];
+  } else if (style === 2 || style === 8) {
+    if (h2 < 0.85) wall = PASTEL[Math.floor(h3 * PASTEL.length)];
+    if (low) mural = style === 8 ? 0.15 : 0.32;
+  } else if (style === 3) {
+    if (h2 < 0.45) wall = BRIGHT[Math.floor(h3 * BRIGHT.length)];
+    mural = 0.08;
+  } else if (style === 0 || style === 6) {
+    if (h2 < 0.28) wall = [6, 5, 7, 8, 16, 17, 22, 21][Math.floor(h3 * 8)];
+    if (low) mural = 0.25;
+  } else if (style === 1 && low) mural = 0.2;
+  return { ...f, style, wall, mural };
 }
 
 class Builder {
@@ -240,30 +278,40 @@ class Builder {
       C.face([at(t0, D, hT - th), at(t1, D, hT - th), at(t1, D, hT), at(t0, D, hT)]);
       return;
     }
-    // fabric: the building's colour (deep green, navy, burgundy, black, terracotta, teal, a stripe)
+    // fabric: Miami's awnings — candy stripes of a bright colour and white, or a solid colour
     const pal = [
+      [0.85, 0.08, 0.3],
+      [0.0, 0.5, 0.55],
+      [0.95, 0.35, 0.03],
+      [0.95, 0.72, 0.05],
+      [0.22, 0.55, 0.08],
+      [0.28, 0.1, 0.7],
+      [0.04, 0.2, 0.7],
       [0.03, 0.12, 0.07],
-      [0.03, 0.05, 0.14],
-      [0.2, 0.03, 0.04],
       [0.025, 0.025, 0.028],
-      [0.38, 0.12, 0.05],
-      [0.02, 0.17, 0.17],
-      [0.5, 0.48, 0.44],
-    ][Math.floor(fh(f.seed * 5.9) * 7)];
+    ][Math.floor(fh(f.seed * 5.9) * 9)];
+    const striped = fh(f.seed * 8.3) < 0.6;
     const D = 1.3, drop = 0.55, val = 0.24;
     for (let k = Math.ceil(u / 6); (k + 1) * 6 <= u + len + 0.01; k++) {
       if (fh(f.seed + k * 3.7 + edge) < 0.18) continue;
-      const t0 = k * 6 + 0.4, t1 = k * 6 + 5.6;
       const sh = 0.9 + 0.2 * fh(k * 1.3 + f.seed);
+      const strips = striped ? 8 : 1;
+      for (let j = 0; j < strips; j++) {
+        const t0 = k * 6 + 0.4 + (5.2 * j) / strips, t1 = k * 6 + 0.4 + (5.2 * (j + 1)) / strips;
+        if (striped && j % 2) C.set('color', 0.88, 0.87, 0.84);
+        else C.set('color', pal[0] * sh, pal[1] * sh, pal[2] * sh);
+        // the slope (both sides: seen from the street and from under it)
+        const q = [at(t0, 0, hT), at(t0, D, hT - drop), at(t1, D, hT - drop), at(t1, 0, hT)];
+        C.face(q);
+        C.face([q[3], q[2], q[1], q[0]]);
+        // the valance
+        const v = [at(t0, D, hT - drop - val), at(t1, D, hT - drop - val), at(t1, D, hT - drop), at(t0, D, hT - drop)];
+        C.face(v);
+        C.face([v[1], v[0], v[3], v[2]]);
+      }
+      // the triangular ends
       C.set('color', pal[0] * sh, pal[1] * sh, pal[2] * sh);
-      // the slope (both sides: seen from the street and from under it)
-      const q = [at(t0, 0, hT), at(t0, D, hT - drop), at(t1, D, hT - drop), at(t1, 0, hT)];
-      C.face(q);
-      C.face([q[3], q[2], q[1], q[0]]);
-      // the valance, and the triangular ends
-      const v = [at(t0, D, hT - drop - val), at(t1, D, hT - drop - val), at(t1, D, hT - drop), at(t0, D, hT - drop)];
-      C.face(v);
-      C.face([v[1], v[0], v[3], v[2]]);
+      const t0 = k * 6 + 0.4, t1 = k * 6 + 5.6;
       C.face([at(t0, 0, hT), at(t0, D, hT - drop - val), at(t0, D, hT - drop)]);
       C.face([at(t1, 0, hT), at(t1, D, hT - drop), at(t1, D, hT - drop - val)]);
     }
@@ -346,8 +394,9 @@ class Builder {
     };
     let u = 0;
     const W = this.walls;
-    W.set('aFac', f.style, f.floorH, f.bayW, f.seed);
-    W.set('aFPal', f.wall, f.glass, f.groundH, topH);
+    const F = vivid(f, y0, topH);
+    W.set('aFac', F.style + Math.min(0.9, F.mural) * 0.5, F.floorH, F.bayW, F.seed);
+    W.set('aFPal', F.wall, F.glass, F.groundH, topH);
     for (let i = 0; i < n; i++) {
       const a = poly[i], b = poly[(i + 1) % n];
       const len = Math.hypot(b.x - a.x, b.z - a.z);
