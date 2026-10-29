@@ -1,11 +1,11 @@
 // Miami handling bench: CarBody on a flat plane, no walls. Prints launch / braking / skidpad / stability numbers.
-//   node --experimental-transform-types --no-warnings tools/owhandling.mjs [roadster|sedan|suv|van|coupe|...]
-const { CarBody, ROADSTER_SPEC } = await import('../src/openworld/sim/car.ts');
+//   node --experimental-transform-types --no-warnings tools/owhandling.mjs [super|muscle|sedan|suv|van|coupe|...]
+const { CarBody } = await import('../src/openworld/sim/car.ts');
 const { carSpecOf } = await import('../src/openworld/ai/traffic.ts');
 const { MODELS } = await import('../src/openworld/vehicles/fleet.ts');
-const which = process.argv[2] ?? 'roadster';
+const which = process.argv[2] ?? 'super';
 const BIKE = { tumble: false, mass: 290, a: 0.72, b: 0.72, cgH: 0.62, izK: 0.9, power: 150000, maxForce: 4800, frontDrive: 0, mu: 1.25, cornerB: 8, cdA: 0.32, clA: 0.01, fan: 0, maxSteer: 0.42, brakeG: 1.15, hl: 1.05, hw: 0.38, height: 1.2, wheelR: 0.31, vmax: 83, vrev: 2 };
-const spec = which === 'roadster' ? ROADSTER_SPEC : which === 'bike' ? BIKE : carSpecOf(MODELS[which]);
+const spec = which === 'bike' ? BIKE : carSpecOf(MODELS[which]);
 const net = {
   edges: [],
   surface(x, z, y, o) {

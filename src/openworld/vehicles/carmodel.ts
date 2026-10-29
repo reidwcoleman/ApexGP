@@ -228,7 +228,7 @@ export function buildCar(m: ModelSpec): CarGeometry {
         add(hl2, [0.32, 0.31, 0.29]);
       }
     }
-    const SEAT: RGB = m.id === 'coupe' || m.id === 'police' ? [0.025, 0.025, 0.028] : m.id === 'gwagon' ? [0.22, 0.13, 0.08] : m.id === 'taxi' || m.id === 'van' ? [0.07, 0.07, 0.08] : [0.11, 0.1, 0.095];
+    const SEAT: RGB = m.id === 'super' ? [0.32, 0.05, 0.04] : m.id === 'coupe' || m.id === 'police' || m.id === 'muscle' ? [0.025, 0.025, 0.028] : m.id === 'gwagon' ? [0.22, 0.13, 0.08] : m.id === 'taxi' || m.id === 'van' ? [0.07, 0.07, 0.08] : [0.11, 0.1, 0.095];
     // the dash across the front, the instrument hood, the wheel on the driver's (left) side
     // (set back under the windscreen's slope: it mustn't poke through the glass at the cowl)
     box(cw * 2 - 0.04, 0.16, 0.34, 0, m.beltH - 0.04, cz0 - 0.42, [0.03, 0.03, 0.032]);
@@ -255,7 +255,7 @@ export function buildCar(m: ModelSpec): CarGeometry {
       seat(-cw * 0.45, zF, Math.min(0.52, cw * 0.75));
     }
     const zR = zF - 0.9;
-    if (m.id !== 'coupe' && m.id !== 'pickup' && zR - 0.3 > cz1) {
+    if (m.id !== 'coupe' && m.id !== 'super' && m.id !== 'muscle' && m.id !== 'pickup' && zR - 0.3 > cz1) {
       seat(cw * 0.45, zR, Math.min(0.52, cw * 0.75));
       seat(-cw * 0.45, zR, Math.min(0.52, cw * 0.75));
       seat(0, zR, 0.4);
@@ -309,8 +309,8 @@ export function buildCar(m: ModelSpec): CarGeometry {
     for (const sg of [1, -1]) {
       const ex = new THREE.CylinderGeometry(0.035, 0.035, 0.12, 10);
       ex.rotateX(Math.PI / 2);
-      ex.translate(sg * hw * 0.55, m.clear + 0.06, tailZ);
-      add(ex, CHROME);
+      ex.translate(sg * hw * (m.id === 'super' || m.id === 'muscle' ? 0.32 : 0.55), bottomAt(-hl) + 0.06, tailZ + 0.02);
+      add(ex, TRIM);
     }
   // ---- mirrors on stalks, door handles
   for (const sg of [1, -1]) {
@@ -367,6 +367,31 @@ export function buildCar(m: ModelSpec): CarGeometry {
     // sliding door track and the cargo panel line
     for (const sg of [1, -1]) box(0.012, 0.02, 2.2, sg * (hw + 0.004), m.beltH + 0.4, -0.3, TRIM);
   }
+  // ---- the sports cars: the supercar's wing, side intakes and engine-cover louvres; the muscle
+  // car's twin bonnet stripes and scoop; a ducktail on the coupe
+  if (m.id === 'super') {
+    const wy = m.deckH + 0.2, wzc = -hl + 0.22;
+    box(hw * 1.7, 0.03, 0.3, 0, wy, wzc, DARK, 0, 0.12);
+    for (const sg of [1, -1]) {
+      box(0.03, 0.16, 0.26, sg * hw * 0.84, wy - 0.02, wzc, DARK);
+      box(0.04, 0.2, 0.06, sg * hw * 0.45, wy - 0.12, wzc + 0.02, DARK);
+      // the intake behind the door, scooping air to the engine
+      box(0.05, 0.18, 0.5, sg * (widthAt(-0.35) - 0.01), m.beltH - 0.22, -0.35, DARK);
+    }
+    for (let i = 0; i < 5; i++) box(hw * 0.9, 0.012, 0.03, 0, m.deckH + 0.05 - i * 0.012, deck + 0.25 - i * 0.14, DARK);
+    box(hw * 1.6, 0.05, 0.22, 0, m.clear + 0.03, hl - 0.1, DARK);
+  }
+  if (m.id === 'muscle') {
+    for (const sg of [1, -1]) {
+      box(0.2, 0.006, hl - cowl + 0.02, sg * 0.17, m.hoodH + 0.045, (hl + cowl) / 2, DARK);
+      box(0.2, 0.006, roofF - roofR, sg * 0.17, m.H + 0.006, (roofF + roofR) / 2, DARK);
+      box(0.2, 0.006, -deck - hl * 0.0 + 0.2, sg * 0.17, m.deckH + 0.06, (deck - hl) / 2 + 0.1, DARK);
+    }
+    box(0.62, 0.09, 0.7, 0, m.hoodH + 0.07, cowl + 0.55, PAINT);
+    box(0.5, 0.05, 0.02, 0, m.hoodH + 0.09, cowl + 0.9, DARK);
+    box(hw * 1.5, 0.03, 0.08, 0, m.deckH + 0.03, -hl + 0.06, PAINT);
+  }
+  if (m.id === 'coupe') box(hw * 1.5, 0.025, 0.14, 0, m.deckH + 0.07, -hl + 0.12, PAINT, 0, -0.2);
   // ---- police: push bar, light bar base, spotlight, antenna
   const police = m.id === 'police' || m.id === 'policeSuv';
   const barZ = (roofF + roofR) / 2 + 0.12;

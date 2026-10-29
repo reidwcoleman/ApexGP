@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { aerialUniforms } from '../../world/env/fog.ts';
 
 /**
- * Soft particles for the open world: the cold-gas vapour of the Roadster's thrusters, tyre smoke,
+ * Soft particles for the open world: tyre smoke,
  * gun smoke and muzzle flashes, dust and sparks where bullets land, fire and smoke from wrecks,
  * explosions.
  *

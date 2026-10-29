@@ -947,8 +947,6 @@ export function rayCapsule(o: THREE.Vector3, d: THREE.Vector3, base: THREE.Vecto
 /** a rough box for the player's own vehicles */
 function vehicleBox(v: Drivable): { L: number; W: number; H: number } | null {
   switch (v.kind) {
-    case 'roadster':
-      return { L: 4.6, W: 2.0, H: 1.15 };
     case 'bike':
       return { L: 2.1, W: 0.7, H: 1.2 };
     case 'heli':

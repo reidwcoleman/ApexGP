@@ -23,8 +23,6 @@ import { facadeUniforms } from './city/facade.ts';
 import { CollisionWorld, type Contact } from './sim/collide.ts';
 import { Input } from './input.ts';
 import { CameraRig, CAM_MODES } from './camera.ts';
-import { RoadsterCar } from './vehicles/RoadsterCar.ts';
-import type { Trim } from './vehicles/roadster.ts';
 import type { Drivable, WorldCtx } from './vehicles/drivable.ts';
 import { Fleet, PAINTS, type ModelId } from './vehicles/fleet.ts';
 import { Traffic } from './ai/traffic.ts';
@@ -36,7 +34,7 @@ import { Helicopter } from './vehicles/Helicopter.ts';
 import { Seaplane } from './vehicles/Seaplane.ts';
 import { Motorbike } from './vehicles/Motorbike.ts';
 import { Boat } from './vehicles/Boat.ts';
-import { Hud, ROADSTER_PAINTS, type MenuState } from './ui/Hud.ts';
+import { Hud, SPORT_PAINTS, SPORT_CARS, type MenuState } from './ui/Hud.ts';
 import { OpenWorldAudio, type AudioFrame } from './audio.ts';
 import { setDynLights, type DynLight } from './city/cityLights.ts';
 import { placeAt, WORLD } from './geo.ts';
@@ -90,7 +88,6 @@ export class OpenWorld {
   readonly world = new CollisionWorld();
   input!: Input;
   cams!: CameraRig;
-  player!: RoadsterCar;
   /** what the player is driving (null on foot) */
   vehicle: Drivable | null = null;
   fleet!: Fleet;
@@ -115,11 +112,10 @@ export class OpenWorld {
   private readonly aimRay = new THREE.Ray();
   private readonly muzzle = new THREE.Vector3();
   private exploded = false;
-  /** vehicles parked about the city for the player (the Roadster is one) */
+  /** vehicles parked about the city for the player (helicopters, the boat, the seaplane, bikes) */
   readonly owned: Drivable[] = [];
   private paused = false;
-  private menuState: MenuState = { trim: 'rocket', paint: 0, time: 'afternoon', weather: 'clear', traffic: 70, quality: 'high' };
-  private doorT = 0;
+  private menuState: MenuState = { car: 'super', paint: 0, time: 'afternoon', weather: 'clear', traffic: 70, quality: 'high' };
   private respawnT = 0;
   private respawnAt: { x: number; z: number } | null = null;
   private mapTick = 0;
@@ -241,7 +237,7 @@ export class OpenWorld {
     this.env.adoptScenery({ group: new THREE.Group(), heightAt: () => 0, setLight() {}, update() {}, setQuality() {}, stats: { miami: true } });
 
     await step(0.78, 'Filling the streets');
-    this.fleet = new Fleet({ sedan: 56, suv: 48, compact: 30, pickup: 22, gwagon: 18, coupe: 18, cyber: 12, van: 14, taxi: 16, bus: 5, police: 14, policeSuv: 10 });
+    this.fleet = new Fleet({ sedan: 52, suv: 44, compact: 28, pickup: 20, gwagon: 16, coupe: 20, super: 18, muscle: 18, van: 12, taxi: 16, bus: 5, police: 16, policeSuv: 12 });
     this.scene.add(this.fleet.group);
     this.traffic = new Traffic(this.net, this.fleet, this.world, roads.parking);
     this.traffic.target = Number(this.params.get('traffic') ?? 70);
@@ -258,23 +254,23 @@ export class OpenWorld {
     this.combat = new Combat(this);
     this.scene.add(this.combat.group);
 
-    await step(0.85, 'Charging the Roadster');
+    await step(0.85, 'Fuelling the car');
     this.input = new Input(this.canvas);
     this.cams = new CameraRig(this.camera);
-    const trim = (this.params.get('trim') as Trim) ?? 'rocket';
-    this.menuState.trim = trim;
     this.menuState.time = this.time;
     this.menuState.weather = this.kind;
     this.menuState.traffic = this.traffic.target;
     this.menuState.quality = this.gfx.qualityLevel;
-    this.player = new RoadsterCar(trim, ROADSTER_PAINTS[0][1]);
-    this.scene.add(this.player.root);
-    this.owned.push(this.player);
-    this.spawnPlayer();
-    this.vehicle = this.player;
-    this.player.occupied = true;
+    // the start: on the street in a sports car (?foot=1: on foot)
+    const sp = this.spawnPoint();
+    this.people.player.pos.set(sp.x, sp.y, sp.z);
+    this.people.player.yaw = sp.yaw;
+    if (this.params.get('foot') !== '1') {
+      const car = this.traffic.spawnParked((this.params.get('car') as ModelId) ?? 'super', sp.x, sp.y + 0.03, sp.z, sp.yaw, SPORT_PAINTS[0][1]);
+      if (car) this.enter(new FleetCar(car, this.traffic));
+    } else this.people.playerVisible = true;
     this.gfx.motionBlur = 0.9;
-    this.placeLandmarkVehicles();
+    this.placeLandmarkVehicles(sp);
     this.hud = new Hud(this.ui, this.net);
     // (clean frames for key art: ?hud=0)
     if (this.params.get('hud') === '0') this.ui.style.display = 'none';
@@ -320,12 +316,9 @@ export class OpenWorld {
   }
 
   /** the start: Brickell Avenue, heading north toward the river and Downtown */
-  spawnPlayer() {
+  spawnPoint(): { x: number; y: number; z: number; yaw: number } {
     const s = this.params.get('spawn')?.split(',').map(Number);
-    if (s && s.length >= 3) {
-      this.player.place(s[0], 0, s[1], s[2]);
-      return;
-    }
+    if (s && s.length >= 3) return { x: s[0], y: 0, z: s[1], yaw: s[2] };
     const at = ll(25.7595, -80.1945);
     const hit = this.net.nearestEdge(at.x, at.z, 0, 200);
     if (hit) {
@@ -335,8 +328,9 @@ export class OpenWorld {
       const north = e.pz[e.pz.length - 1] < e.pz[0];
       this.net.point(e, hit.pr.s, (north ? 1 : -1) * (e.spec.median + 1.7), pt);
       const yaw = Math.atan2(pt.tx, pt.tz) + (north ? 0 : Math.PI);
-      this.player.place(pt.x, pt.y + 0.03, pt.z, yaw);
-    } else this.player.place(at.x, 0, at.z, Math.PI);
+      return { x: pt.x, y: pt.y, z: pt.z, yaw };
+    }
+    return { x: at.x, y: 0, z: at.z, yaw: Math.PI };
   }
 
   /** back on the nearest road, upright, facing along it */
@@ -344,11 +338,10 @@ export class OpenWorld {
     const v = this.vehicle;
     if (!v) return;
     const body = this.bodyOf(v);
-    if (!body && v !== this.player) return;
+    if (!body) return;
     const pt = this.roadPoint(v.pos.x, v.pos.z, v.pos.y);
-    if (!pt) return v === this.player ? this.spawnPlayer() : undefined;
-    if (v === this.player) this.player.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
-    else if (v instanceof Motorbike) v.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
+    if (!pt) return;
+    if (v instanceof Motorbike) v.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
     else body!.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
     this.cams.cut();
   }
@@ -399,7 +392,7 @@ export class OpenWorld {
 
   /** the vehicles waiting about the city: the police helicopter pad on Watson Island, the
    *  seaplane base beside it, a superbike on Brickell, a go-fast boat off Bayside */
-  private placeLandmarkVehicles() {
+  private placeLandmarkVehicles(start: { x: number; y: number; z: number; yaw: number }) {
     const heli = new Helicopter('private');
     const hp = ll(25.7898, -80.1745);
     const hpt = this.clearLand(hp.x, hp.z, 16) ?? hp;
@@ -419,8 +412,7 @@ export class OpenWorld {
       boat.place(bw.x, 0, bw.z, Math.PI);
       this.addOwned(boat);
     }
-    const p = this.player.pos;
-    const kerb = this.roadPoint(p.x + Math.sin(this.player.yaw) * 14, p.z + Math.cos(this.player.yaw) * 14, p.y);
+    const kerb = this.roadPoint(start.x + Math.sin(start.yaw) * 14, start.z + Math.cos(start.yaw) * 14, start.y);
     if (kerb) {
       const bike = new Motorbike(0xc8102e);
       bike.place(kerb.x + Math.cos(kerb.yaw) * 2.4, kerb.y, kerb.z - Math.sin(kerb.yaw) * 2.4, kerb.yaw);
@@ -441,7 +433,6 @@ export class OpenWorld {
 
   /** the tyre body under a ground vehicle */
   private bodyOf(v: Drivable): CarBody | null {
-    if (v instanceof RoadsterCar) return v.flying ? null : v.car;
     if (v instanceof FleetCar) return v.body;
     if (v instanceof Motorbike) return v.body;
     return null;
@@ -455,7 +446,6 @@ export class OpenWorld {
 
   private canExit(v: Drivable): string | null {
     const sp = Math.hypot(v.vel.x, v.vel.z);
-    if (v instanceof RoadsterCar && v.flying) return 'Land first (T)';
     if (v instanceof Helicopter && !v.grounded) return 'Land first';
     if (sp > 7) return 'Slow down to get out';
     if (v instanceof Boat || v instanceof Seaplane) {
@@ -483,7 +473,6 @@ export class OpenWorld {
     P.yaw = v.yaw;
     this.people.playerVisible = true;
     if (v instanceof FleetCar) v.release();
-    if (v === this.player) this.doorT = 1.4;
     this.vehicle = null;
     this.cams.cut();
   }
@@ -521,7 +510,6 @@ export class OpenWorld {
     this.vehicle = v;
     v.occupied = true;
     this.people.playerVisible = false;
-    if (v === this.player) this.doorT = 1.2;
     this.cams.cut();
   }
 
@@ -545,7 +533,7 @@ export class OpenWorld {
     this.audio.suspend();
     this.hud.openMenu(this.menuState, {
       onResume: () => this.closeMenu(),
-      onSpawnRoadster: (trim, paint) => this.deliverRoadster(trim, paint),
+      onSpawnCar: (model, paint) => this.deliverCar(model as ModelId, paint),
       onSpawnVehicle: (kind) => this.deliver(kind),
       onTime: (t) => {
         this.time = t as TimeOfDay;
@@ -592,18 +580,29 @@ export class OpenWorld {
     this.env.setWeather(this.weather.state);
   }
 
-  /** a new Roadster at the kerb beside you (the old one is towed) */
-  private deliverRoadster(trim: Trim, paint: number) {
-    const old = this.player;
-    const driving = this.vehicle === old;
-    const at = driving ? { x: old.pos.x, y: old.pos.y, z: old.pos.z, yaw: old.yaw } : this.besideYou();
-    this.dropOwned(old);
-    const car = new RoadsterCar(trim, ROADSTER_PAINTS[paint][1]);
-    this.player = car;
-    this.addOwned(car);
-    car.place(at.x, at.y + 0.03, at.z, at.yaw);
-    if (driving || this.onFoot) this.enter(car);
-    this.hud.toast(`${car.name} delivered · ${ROADSTER_PAINTS[paint][0]}`);
+  /** a sports car from the garage, at the kerb beside you (or swapped for the one you're in) */
+  private deliverCar(model: ModelId, paint: number) {
+    const v = this.vehicle;
+    const at = v instanceof FleetCar ? { x: v.pos.x, y: v.pos.y, z: v.pos.z, yaw: v.yaw } : this.besideYou();
+    if (v instanceof FleetCar) {
+      this.exitVehicleNow();
+      this.traffic.retire(v.car);
+    }
+    const c = this.traffic.spawnParked(model, at.x, at.y + 0.03, at.z, at.yaw, SPORT_PAINTS[paint]?.[1] ?? 0xff3f8e);
+    if (!c) return this.hud.toast('None available right now');
+    this.enter(new FleetCar(c, this.traffic));
+    const name = SPORT_CARS.find(([id]) => id === model)?.[1] ?? 'Car';
+    this.hud.toast(`${name} delivered · ${SPORT_PAINTS[paint]?.[0] ?? ''}`);
+  }
+
+  /** out of the vehicle at once, wherever it is (a respawn, a swap) */
+  private exitVehicleNow() {
+    const v = this.vehicle;
+    if (!v) return;
+    v.occupied = false;
+    if (v instanceof FleetCar) v.release();
+    this.vehicle = null;
+    this.people.playerVisible = true;
   }
 
   /** a spot on the street beside you (ahead of the car you're in, so it doesn't land on it) */
@@ -652,8 +651,8 @@ export class OpenWorld {
       this.enter(new FleetCar(c, this.traffic));
       return;
     }
-    // too many about: the oldest unused one goes (never the Roadster)
-    const spare = this.owned.filter((o) => o !== this.player && o !== this.vehicle);
+    // too many about: the oldest unused one goes
+    const spare = this.owned.filter((o) => o !== this.vehicle);
     if (spare.length > 6) this.dropOwned(spare[0]);
     this.addOwned(v);
     this.enter(v);
@@ -669,25 +668,29 @@ export class OpenWorld {
     this.respawnAt = at;
   }
 
+  /** back on the street on foot, as GTA does it: out of the hospital, or out of the station */
   private respawn() {
     const at = this.respawnAt!;
     this.respawnAt = null;
-    if (this.vehicle) {
-      const v = this.vehicle;
-      v.occupied = false;
-      if (v instanceof FleetCar) v.release();
-      this.vehicle = null;
-    }
+    this.exitVehicleNow();
     this.police.clear();
     const pt = this.roadPoint(at.x, at.z) ?? { x: at.x, y: 0, z: at.z, yaw: 0 };
-    this.player.place(pt.x, pt.y + 0.03, pt.z, pt.yaw);
-    this.player.health = 1;
+    // (on the sidewalk beside the lane, facing along it)
+    const P = this.people.player;
+    P.pos.set(pt.x + Math.cos(pt.yaw) * 4.5, pt.y + 0.2, pt.z - Math.sin(pt.yaw) * 4.5);
+    P.vel.set(0, 0, 0);
+    P.yaw = pt.yaw;
+    this.people.playerVisible = true;
     for (const o of this.owned) o.health = Math.max(o.health, 0.5);
     this.combat.hp = 100;
     this.exploded = false;
     this.avatar?.revive();
-    this.enter(this.player);
+    this.cams.cut();
+    this.onRespawn?.();
   }
+
+  /** the story hears about a respawn (a failed mission) */
+  onRespawn: (() => void) | null = null;
 
   private govern(dt: number) {
     const g = this.gov;
@@ -773,9 +776,6 @@ export class OpenWorld {
       o.root.visible = Math.hypot(o.pos.x - this.camera.position.x, o.pos.z - this.camera.position.z) < 650;
     }
     if (this.vehicle) this.vehicle.root.visible = true;
-    // the Roadster's butterfly doors swing up as you get in and out
-    this.doorT -= dt;
-    this.player.doorTarget = this.doorT > 0 || (!this.player.occupied && Math.hypot(this.player.vel.x, this.player.vel.z) < 0.5 && Math.hypot(this.people.player.pos.x - this.player.pos.x, this.people.player.pos.z - this.player.pos.z) < 6) ? 1 : 0;
     if (pad.camera) this.cams.mode = CAM_MODES[(CAM_MODES.indexOf(this.cams.mode) + 1) % CAM_MODES.length];
     if (pad.recover) this.recover();
     const cc = this.params.get('carcam');
@@ -825,7 +825,7 @@ export class OpenWorld {
       if (h.speed > 4) this.police.report(h.car.police ? 'hitCop' : 'hitCar', h.car.pos);
     }
     // ---- the people (they dodge, or don't, the player's vehicle)
-    const pv = v && !(v instanceof Helicopter && !v.grounded) && !(v instanceof RoadsterCar && v.flying) ? [{ pos: v.pos, vel: v.vel, yaw: v.yaw, hl: Math.max(hl, 1), hw: Math.max(hw, 0.5) }] : [];
+    const pv = v && !(v instanceof Helicopter && !v.grounded) ? [{ pos: v.pos, vel: v.vel, yaw: v.yaw, hl: Math.max(hl, 1), hw: Math.max(hw, 0.5) }] : [];
     this.people.update(dt, this.elapsed, this.focus, this.camera, pv, this.police.wanted >= 3 ? 0.3 : 0);
     for (const s of this.people.struck) this.police.report('hitPed', s);
     if (v && body && Math.abs(body.vLong) > 40) this.police.report('speeding', v.pos);
@@ -904,7 +904,7 @@ export class OpenWorld {
     this.combat.lights(dyn);
     // the player's headlights throw a pool on the road ahead after dark
     const hv = this.vehicle;
-    if (hv && night > 0.2 && (hv.kind === 'roadster' || hv.kind === 'car' || hv.kind === 'bike')) {
+    if (hv && night > 0.2 && (hv.kind === 'car' || hv.kind === 'bike')) {
       const fwd = 9 + Math.min(8, Math.hypot(hv.vel.x, hv.vel.z) * 0.25);
       this.headlight.pos.set(hv.pos.x + Math.sin(hv.yaw) * fwd, hv.pos.y + 1.4, hv.pos.z + Math.cos(hv.yaw) * fwd);
       this.headlight.intensity = 5 * night;
@@ -1000,7 +1000,7 @@ export class OpenWorld {
   private suspect(v: Drivable | null, body: CarBody | null, hl: number, hw: number): Suspect {
     const foot = this.people.player;
     if (!v) return { pos: foot.pos, vel: foot.vel, yaw: foot.yaw, hl: 0.3, hw: 0.3, mass: 80, onFoot: true, flying: false, threat: false, onImpulse: (jx, jz) => foot.vel.set(foot.vel.x + jx, foot.vel.y, foot.vel.z + jz) };
-    const flying = (v instanceof RoadsterCar && v.flying) || (v instanceof Helicopter && !v.grounded) || (v instanceof Seaplane && !v.onWater) || v instanceof Boat;
+    const flying = (v instanceof Helicopter && !v.grounded) || (v instanceof Seaplane && !v.onWater) || v instanceof Boat;
     return {
       pos: body ? body.pos : v.pos,
       vel: v.vel,
@@ -1028,7 +1028,7 @@ export class OpenWorld {
     if (!v && this.respawnT <= 0) {
       const n = this.nearVehicleName();
       if (n) prompt = `F  ·  get in ${n}`;
-    } else if (v === this.player && this.player.trim === 'rocket' && !this.player.flying && Math.hypot(v.vel.x, v.vel.z) < 2) prompt = 'T  ·  lift off';
+    }
     hud.setPrompt(prompt);
     if (++this.mapTick % 2 === 0) {
       const blips: Parameters<Hud['drawMap']>[3] = [];
@@ -1042,7 +1042,7 @@ export class OpenWorld {
       for (const c of this.police.cops) blips.push({ x: c.body.pos.x, z: c.body.pos.z, color: Math.floor(this.elapsed * 4) % 2 ? '#ff4d5e' : '#4d7dff', size: 4 });
       for (const c of this.traffic.cars) if (c.police && c.flags & 1) blips.push({ x: c.pos.x, z: c.pos.z, color: '#4d7dff', size: 3.5 });
       if (this.police.heli) blips.push({ x: this.police.heli.pos.x, z: this.police.heli.pos.z, color: '#4d7dff', size: 6 });
-      for (const o of this.owned) if (o !== v) blips.push({ x: o.pos.x, z: o.pos.z, color: o === this.player ? '#ff3f8e' : '#57e8ff', size: 4, shape: 'square' });
+      for (const o of this.owned) if (o !== v) blips.push({ x: o.pos.x, z: o.pos.z, color: '#57e8ff', size: 4, shape: 'square' });
       hud.drawMap(f.x, f.z, camYaw, blips, null);
     }
   }
@@ -1176,9 +1176,9 @@ export class OpenWorld {
     let city = 0;
     for (const c of this.traffic.cars) if (Math.abs(c.pos.x - f.x) < 150 && Math.abs(c.pos.z - f.z) < 150) city++;
     const surf = Math.abs(f.x - this.ground.beachX(f.z));
-    const thrust = v instanceof RoadsterCar ? v.thrustLevel : 0;
+    const thrust = 0;
     const rpm = v instanceof Helicopter ? v.rpm : v instanceof Seaplane ? v.throttle : 0;
-    const airborne = v instanceof RoadsterCar ? v.flying || !v.car.onGround : v instanceof Helicopter ? !v.grounded : v instanceof Seaplane ? !v.onWater : false;
+    const airborne = v instanceof FleetCar ? !v.body.onGround : v instanceof Helicopter ? !v.grounded : v instanceof Seaplane ? !v.onWater : false;
     this.audio.update(dt, {
       kind,
       speed: v ? Math.hypot(v.vel.x, v.vel.z) : 0,

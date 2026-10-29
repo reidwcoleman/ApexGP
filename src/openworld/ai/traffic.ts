@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LANE_W, signalState, type Network, type REdge } from '../roads.ts';
-import { Fleet, MODELS, PAINTS, type FleetSlot, type ModelId, type ModelSpec } from '../vehicles/fleet.ts';
+import { Fleet, MODELS, PAINTS, SPORT_PAINT, type FleetSlot, type ModelId, type ModelSpec } from '../vehicles/fleet.ts';
 import { CarBody, type CarSpec } from '../sim/car.ts';
 import type { CollisionWorld } from '../sim/collide.ts';
 import { rng } from '../city/build.ts';
@@ -109,7 +109,8 @@ const MIX: [ModelId, number][] = [
   ['pickup', 8],
   ['gwagon', 6],
   ['coupe', 6],
-  ['cyber', 4],
+  ['super', 4],
+  ['muscle', 5],
   ['van', 5],
   ['taxi', 7],
   ['bus', 2],
@@ -122,43 +123,46 @@ export function carSpecOf(m: ModelSpec): CarSpec {
   const ev = id === 'cyber';
   const heavy = id === 'bus' || id === 'van';
   const truck = id === 'pickup' || id === 'gwagon' || id === 'suv' || id === 'policeSuv';
-  const sporty = id === 'coupe' || id === 'police';
+  const sport = id === 'coupe' || id === 'super' || id === 'muscle';
+  const sporty = sport || id === 'police';
   return {
     mass: m.mass,
-    a: hb,
-    b: hb,
-    cgH: m.H * 0.38,
-    izK: 1.1,
+    // (the supercar's engine sits behind the cabin: its weight is on the rear axle)
+    a: id === 'super' ? hb * 1.12 : id === 'muscle' ? hb * 0.94 : hb,
+    b: id === 'super' ? hb * 0.88 : id === 'muscle' ? hb * 1.06 : hb,
+    cgH: m.H * (id === 'super' ? 0.33 : 0.38),
+    izK: 1.05,
     power: m.power,
-    maxForce: m.mass * 9.81 * 0.9,
-    frontDrive: id === 'cyber' || id === 'suv' || id === 'gwagon' ? 0.45 : id === 'compact' || id === 'taxi' ? 1 : 0,
-    // (modern performance tyres on the coupe, good all-seasons elsewhere, load-rated ones on the big ones)
-    mu: id === 'coupe' ? 1.3 : heavy ? 0.94 : truck ? 1.05 : 1.12,
+    maxForce: m.mass * 9.81 * (id === 'super' ? 1.25 : sport ? 1.0 : 0.9),
+    frontDrive: id === 'super' ? 0.3 : id === 'cyber' || id === 'suv' || id === 'gwagon' ? 0.45 : id === 'compact' || id === 'taxi' ? 1 : 0,
+    // (sticky tyres on the sports cars, good all-seasons elsewhere, load-rated ones on the big ones)
+    mu: id === 'super' ? 1.5 : id === 'coupe' ? 1.4 : id === 'muscle' ? 1.22 : id === 'police' || id === 'policeSuv' ? 1.3 : heavy ? 1.0 : truck ? 1.12 : 1.18,
     cornerB: 8,
-    cdA: m.W * m.H * 0.34,
-    clA: 0.05,
+    cdA: m.W * m.H * (id === 'super' ? 0.28 : 0.34),
+    clA: id === 'super' ? 0.45 : id === 'coupe' ? 0.15 : 0.05,
     fan: 0,
-    maxSteer: 0.6,
-    brakeG: heavy ? 1.0 : 1.3,
+    maxSteer: sport ? 0.58 : heavy ? 0.5 : 0.56,
+    brakeG: heavy ? 1.0 : sport ? 1.5 : 1.3,
     hl: m.L / 2,
     hw: m.W / 2,
     height: m.H,
     wheelR: m.wheelR,
-    vmax: id === 'bus' ? 26 : id === 'coupe' ? 85 : 60,
+    vmax: id === 'bus' ? 26 : id === 'super' ? 96 : id === 'coupe' ? 85 : id === 'muscle' ? 80 : id === 'police' || id === 'policeSuv' ? 75 : 60,
     vrev: 10,
     track: m.W / 2 - 0.13,
-    // the springs: soft on the big ones (body roll you can see), firm on the coupe and the cruiser
-    rideHz: sporty ? 1.65 : heavy ? 1.15 : truck ? 1.25 : 1.35,
-    damping: sporty ? 0.38 : 0.3,
-    rollF: id === 'coupe' ? 0.55 : 0.64,
-    alphaP: sporty ? 0.095 : truck || heavy ? 0.13 : 0.11,
+    // the body on its springs: soft on the big ones (body roll you can see), firm on the sports cars
+    rideHz: sporty ? 1.8 : heavy ? 1.15 : truck ? 1.25 : 1.4,
+    damping: sporty ? 0.45 : 0.32,
+    rollF: 0.6,
+    alphaP: sport ? 0.11 : truck || heavy ? 0.14 : 0.125,
     kappaP: 0.12,
-    // an automatic: six speeds (eight in the big SUVs), the bus a five-speed diesel
-    gears: ev ? undefined : id === 'bus' ? [3.5, 2.0, 1.4, 1.0, 0.75] : id === 'gwagon' || id === 'suv' || id === 'policeSuv' ? [4.7, 3.1, 2.1, 1.67, 1.29, 1.0, 0.84, 0.67] : [3.9, 2.3, 1.5, 1.14, 0.87, 0.69],
-    finalDrive: id === 'bus' ? 5.6 : id === 'coupe' ? 3.7 : id === 'pickup' || id === 'van' ? 3.9 : 3.3,
-    redline: id === 'bus' ? 2500 : id === 'coupe' ? 7600 : id === 'pickup' || id === 'van' ? 5600 : 6500,
+    // automatics: six speeds (seven on the supercar, eight in the big SUVs), the bus a five-speed diesel
+    gears: ev ? undefined : id === 'bus' ? [3.5, 2.0, 1.4, 1.0, 0.75] : id === 'super' ? [3.1, 2.2, 1.7, 1.35, 1.1, 0.92, 0.78] : id === 'gwagon' || id === 'suv' || id === 'policeSuv' ? [4.7, 3.1, 2.1, 1.67, 1.29, 1.0, 0.84, 0.67] : [3.9, 2.3, 1.5, 1.14, 0.87, 0.69],
+    finalDrive: id === 'bus' ? 5.6 : id === 'super' ? 3.9 : id === 'coupe' ? 3.7 : id === 'muscle' ? 3.3 : id === 'pickup' || id === 'van' ? 3.9 : 3.3,
+    redline: id === 'bus' ? 2500 : id === 'super' ? 8700 : id === 'coupe' ? 7600 : id === 'muscle' ? 6800 : id === 'pickup' || id === 'van' ? 5600 : 6500,
     lsd: sporty ? 60 : 25,
-    brakeBias: 0.66,
+    brakeBias: 0.64,
+    vector: id === 'super' ? 1.0 : id === 'coupe' ? 0.5 : undefined,
   };
 }
 
@@ -220,7 +224,7 @@ export class Traffic {
     lanePoint(this.net, e, dir, lane, s, tmpP);
     if (Math.hypot(tmpP.x - center.x, tmpP.z - center.z) < minD * 0.8) return false;
     const model = this.pickModel(e);
-    const paint = model === 'taxi' ? 0xf2c41b : model === 'police' || model === 'policeSuv' ? 0xf4f5f7 : model === 'bus' ? 0xf0f0ee : PAINTS[Math.floor(R() * PAINTS.length)];
+    const paint = model === 'taxi' ? 0xf2c41b : model === 'police' || model === 'policeSuv' ? 0xf4f5f7 : model === 'bus' ? 0xf0f0ee : model === 'super' || model === 'muscle' || model === 'coupe' ? SPORT_PAINT[Math.floor(R() * SPORT_PAINT.length)] : PAINTS[Math.floor(R() * PAINTS.length)];
     const slot = this.fleet.alloc(model, paint);
     if (!slot) return false;
     const spec = MODELS[model];
@@ -744,9 +748,10 @@ export class Traffic {
       if ((p.x - center.x) ** 2 + (p.z - center.z) ** 2 > R2) continue;
       const h = (Math.sin(i * 12.9898) * 43758.5453) % 1;
       const r = Math.abs(h);
-      const model: ModelId = r < 0.3 ? 'sedan' : r < 0.52 ? 'suv' : r < 0.66 ? 'compact' : r < 0.74 ? 'pickup' : r < 0.82 ? 'gwagon' : r < 0.88 ? 'coupe' : r < 0.92 ? 'cyber' : 'van';
+      const model: ModelId = r < 0.3 ? 'sedan' : r < 0.52 ? 'suv' : r < 0.66 ? 'compact' : r < 0.74 ? 'pickup' : r < 0.8 ? 'gwagon' : r < 0.86 ? 'coupe' : r < 0.9 ? 'super' : r < 0.95 ? 'muscle' : 'van';
       if (this.fleet.available(model) < 4) continue;
-      const slot = this.fleet.alloc(model, PAINTS[Math.floor(r * 997) % PAINTS.length]);
+      const pal = model === 'super' || model === 'muscle' || model === 'coupe' ? SPORT_PAINT : PAINTS;
+      const slot = this.fleet.alloc(model, pal[Math.floor(r * 997) % pal.length]);
       if (!slot) continue;
       budget--;
       const spec = MODELS[model];

@@ -609,7 +609,7 @@ export class Menu {
     const ow = el('div', 'home-ow', p);
     el('div', 'eyebrow', ow, 'Open world');
     el('div', 'ow-title', ow, 'Miami');
-    el('div', 'meta', ow, 'Brickell to South Beach in the Roadster — it flies. Traffic, police, helicopters, boats.');
+    el('div', 'meta', ow, 'A crime story from Brickell to South Beach: sports cars, helicopters, boats and the police on your tail.');
     const drive = el('div', 'home-quick', ow, 'Drive Miami ›');
     this.action(drive, () => {
       location.href = './miami.html';

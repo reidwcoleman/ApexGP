@@ -12,7 +12,7 @@ import { CarFx, explosionSound, impactSound } from '../core/audio/fx.ts';
 
 export interface AudioFrame {
   /** what the player is in */
-  kind: 'roadster' | 'car' | 'bike' | 'heli' | 'plane' | 'boat' | 'foot';
+  kind: 'car' | 'bike' | 'heli' | 'plane' | 'boat' | 'foot';
   speed: number;
   throttle: number;
   brake: number;
@@ -447,8 +447,8 @@ export class OpenWorldAudio {
     const now = this.ctx.currentTime;
     const v = f.speed;
     const k = f.kind;
-    // the EV motor (the Roadster; three motors, ~20 000 rpm at the top)
-    const ev = k === 'roadster' ? 1 : 0;
+    // the EV motor (unused since the Roadster left; kept silent)
+    const ev = 0;
     const mf = 55 + v * 9.5;
     setT(this.evA.frequency, mf, now, 0.03);
     setT(this.evB.frequency, mf * 2.02, now, 0.03);
@@ -483,7 +483,7 @@ export class OpenWorldAudio {
     // water
     setT(this.hullG.gain, (k === 'boat' ? 0.22 : k === 'plane' && !f.airborne ? 0.12 : 0) * smoothstep(1, 20, v), now, 0.1);
     // tyres + wind (ground vehicles)
-    const ground = (k === 'roadster' || k === 'car' || k === 'bike') && !f.airborne;
+    const ground = (k === 'car' || k === 'bike') && !f.airborne;
     this.carFx.set(
       { speed: v, slip: ground ? f.slip : 0, brake: f.brake, throttle: f.throttle, surface: 0, onKerb: false, drs: false },
       { tyres: ground ? 1 : 0, wind: k === 'foot' ? 0 : 0.9, buffet: k === 'bike' ? 1 : 0.2 },

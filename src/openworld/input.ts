@@ -1,12 +1,12 @@
 /**
  * The open world's controls: keyboard and a standard-mapping gamepad merged into one state.
  *
- * Driving: W/S or ↑/↓ throttle / brake-reverse, A/D or ←/→ steer, Space handbrake, Shift boost
- * (the Thrust and Rocket trims' cold-gas thrusters), H horn.
- * Flying (Roadster Rocket in flight, helicopter): W/S pitch forward/back, A/D yaw, Space up, X down,
+ * Driving: W/S or ↑/↓ throttle / brake-reverse, A/D or ←/→ steer, Space handbrake, H horn
+ * (the siren in a cruiser).
+ * Flying (helicopter): W/S pitch forward/back, A/D yaw, Space up, X down,
  * Q/E roll, Shift boost. Plane: W/S pitch, A/D roll, Q/E rudder, Shift/X throttle up/down.
  * On foot: WASD move, Shift run, Space jump.
- * Anywhere: F enter/exit a vehicle, T thrusters (Rocket flight on/off), K kickflip, C camera,
+ * Anywhere: F enter/exit a vehicle (or steal one), C camera,
  * R recover, M map, Esc menu. Mouse drag looks around.
  */
 export interface Pad {

@@ -104,11 +104,11 @@ export function seamsOf(m: ModelSpec): Seams {
   const bp = (roofF + roofR) / 2 + 0.05;
   const N = 99;
   let doors: Seams['doors'] = [zf, bp, zr, N];
-  if (m.id === 'coupe') doors = [zf, bp - 0.1, N, N];
+  if (m.id === 'coupe' || m.id === 'super' || m.id === 'muscle') doors = [zf, bp - 0.1, N, N];
   else if (m.id === 'pickup') doors = [zf, (cowl + roofR) / 2 - 0.1, roofR - 0.02, N];
   else if (m.id === 'van') doors = [zf, zf - 0.95, zf - 1.05, zf - 2.3];
   else if (m.id === 'bus') doors = [N, N, N, N];
-  const lidded = m.id === 'sedan' || m.id === 'taxi' || m.id === 'police' || m.id === 'coupe';
+  const lidded = m.id === 'sedan' || m.id === 'taxi' || m.id === 'police' || m.id === 'coupe' || m.id === 'muscle';
   return {
     doors,
     cowl: m.id === 'bus' || m.id === 'van' ? N : cowl + 0.03,

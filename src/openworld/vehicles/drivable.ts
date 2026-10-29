@@ -23,7 +23,7 @@ export interface WorldCtx {
 }
 
 export interface Drivable {
-  kind: 'roadster' | 'car' | 'bike' | 'heli' | 'plane' | 'boat';
+  kind: 'car' | 'bike' | 'heli' | 'plane' | 'boat';
   name: string;
   root: THREE.Object3D;
   readonly pos: THREE.Vector3;

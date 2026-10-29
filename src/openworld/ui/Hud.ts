@@ -10,7 +10,7 @@ import type { HudInfo } from '../vehicles/drivable.ts';
  */
 
 export interface MenuState {
-  trim: 'performance' | 'thrust' | 'rocket';
+  car: string;
   paint: number;
   time: string;
   weather: string;
@@ -20,7 +20,7 @@ export interface MenuState {
 
 export interface MenuActions {
   onResume(): void;
-  onSpawnRoadster(trim: MenuState['trim'], paint: number): void;
+  onSpawnCar(model: string, paint: number): void;
   onSpawnVehicle(kind: string): void;
   onTime(t: string): void;
   onWeather(w: string): void;
@@ -30,15 +30,24 @@ export interface MenuActions {
   onExit(): void;
 }
 
-export const ROADSTER_PAINTS: [string, number][] = [
-  ['Ano White', 0xe9e8e3],
-  ['Stealth Grey', 0x3c3f44],
-  ['Ultra Red', 0x9d0b12],
-  ['Midnight Silver', 0x5c636c],
-  ['Deep Blue', 0x13306b],
-  ['Quicksilver', 0xb8bcc2],
-  ['Diamond Black', 0x0b0c0e],
-  ['Miami Pink', 0xf2549a],
+/** the garage's paints: Miami colours */
+export const SPORT_PAINTS: [string, number][] = [
+  ['Flamingo', 0xff3f8e],
+  ['Lagoon', 0x12c6d6],
+  ['Sunset Orange', 0xff6a1a],
+  ['Lime Squeeze', 0x9be22a],
+  ['Electric Violet', 0x7b3cff],
+  ['Rosso', 0xc40d16],
+  ['Gold Leaf', 0xe0b21d],
+  ['Pearl White', 0xf1efe9],
+  ['Gloss Black', 0x0b0c0e],
+];
+
+/** the sports cars the garage delivers */
+export const SPORT_CARS: [string, string, string][] = [
+  ['super', 'Vespera GT-R', 'Mid-engine V10 · 470 kW · the fastest thing in Miami'],
+  ['muscle', 'Bravado Stallion', 'Front V8 · 360 kW · rear-drive, loves to slide'],
+  ['coupe', 'Kestrel S', 'Twin-turbo six · 330 kW · grippy and sharp'],
 ];
 
 const el = (tag: string, cls: string, parent?: HTMLElement, text?: string) => {
@@ -95,7 +104,7 @@ export class Hud {
     this.root = el('div', 'ow-hud', ui);
     // speed panel
     const sp = el('div', 'ow-speed', this.root);
-    this.vname = el('div', 'ow-vname', sp, 'Roadster');
+    this.vname = el('div', 'ow-vname', sp, '');
     const row = el('div', 'ow-speed-row', sp);
     this.speed = el('div', 'ow-speed-num', row, '0');
     const side = el('div', 'ow-speed-side', row);
@@ -147,12 +156,11 @@ export class Hud {
       <div class="h-grid">
         <b>W A S D</b><span>drive · steer</span>
         <b>Space</b><span>handbrake</span>
-        <b>Shift</b><span>cold-gas boost (Thrust / Rocket)</span>
-        <b>T</b><span>Rocket: lift off / land</span>
-        <b>Space · X</b><span>fly up · down</span>
-        <b>Q · E</b><span>bank</span>
-        <b>K</b><span>kickflip</span>
-        <b>F</b><span>get in / out (cars, bikes, helicopters, planes)</span>
+        <b>Shift</b><span>sprint on foot</span>
+        <b>Space · X</b><span>helicopter up · down</span>
+        <b>Q · E</b><span>helicopter bank</span>
+        <b>F</b><span>get in / out · steal a car</span>
+        <b>H</b><span>horn · siren in a cruiser</span>
         <b>C</b><span>camera</span>
         <b>R</b><span>recover · reload on foot</span>
         <b>Click</b><span>lock the mouse · fire</span>
@@ -380,7 +388,7 @@ export class Hud {
     const tabs = el('div', 'm-tabs', panel);
     const body = el('div', 'm-body', panel);
     const tabDefs: [string, () => void][] = [
-      ['Roadster', () => roadster()],
+      ['Garage', () => garage()],
       ['Vehicles', () => vehicles()],
       ['Weapons', () => weapons()],
       ['World', () => world()],
@@ -403,27 +411,22 @@ export class Hud {
         });
       }
     };
-    const roadster = () => {
-      el('div', 'm-h', body, 'Trim');
-      const trims: [MenuState['trim'], string, string][] = [
-        ['performance', 'Performance', 'Road ready · 1 MW · suction fan · 0–60 in under 1.6 s'],
-        ['thrust', 'Thrust', 'Race ready · 4 rear cold-gas thrusters · 0–60 in 0.81 s'],
-        ['rocket', 'Rocket', 'Air ready · 10 cold-gas thrusters · it flies'],
-      ];
+    const garage = () => {
+      el('div', 'm-h', body, 'Car');
       const tr = el('div', 'm-cards', body);
-      for (const [id, name, sub] of trims) {
-        const c = el('div', 'm-card' + (id === state.trim ? ' on' : ''), tr);
+      for (const [id, name, sub] of SPORT_CARS) {
+        const c = el('div', 'm-card' + (id === state.car ? ' on' : ''), tr);
         el('div', 'mc-name', c, name);
         el('div', 'mc-sub', c, sub);
         c.addEventListener('click', () => {
-          state.trim = id;
+          state.car = id;
           [...tr.children].forEach((x) => x.classList.remove('on'));
           c.classList.add('on');
         });
       }
       el('div', 'm-h', body, 'Paint');
       const pr = el('div', 'm-paints', body);
-      ROADSTER_PAINTS.forEach(([name, hex], i) => {
+      SPORT_PAINTS.forEach(([name, hex], i) => {
         const sw = el('div', 'm-swatch' + (i === state.paint ? ' on' : ''), pr);
         sw.style.background = '#' + hex.toString(16).padStart(6, '0');
         sw.title = name;
@@ -433,9 +436,9 @@ export class Hud {
           sw.classList.add('on');
         });
       });
-      const go = el('div', 'm-cta', body, 'Deliver Roadster');
+      const go = el('div', 'm-cta', body, 'Deliver it');
       go.addEventListener('click', () => {
-        act.onSpawnRoadster(state.trim, state.paint);
+        act.onSpawnCar(state.car, state.paint);
         this.closeMenu();
         act.onResume();
       });
@@ -446,10 +449,9 @@ export class Hud {
         ['heli', 'Helicopter', 'Bell-style light helicopter'],
         ['plane', 'Seaplane', 'Amphibious single-prop · takes off from the bay'],
         ['bike', 'Motorcycle', 'Superbike'],
-        ['gwagon', 'G-Wagon', 'The Brickell valet favourite'],
-        ['cyber', 'Cyber pickup', 'Stainless steel'],
-        ['coupe', 'Sports coupe', '330 kW'],
+        ['gwagon', 'Off-roader', 'The Brickell valet favourite'],
         ['police', 'Police cruiser', 'Miami PD'],
+        ['policeSuv', 'Police interceptor', 'Miami PD SUV'],
         ['boat', 'Speedboat', 'Go-fast boat · from the nearest water'],
       ];
       const tr = el('div', 'm-cards', body);
