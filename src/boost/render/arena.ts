@@ -95,6 +95,8 @@ export interface ArenaView {
   root: THREE.Group;
   setDay(day: boolean): void;
   setLook(t: TimeLook, map: MapLook): void;
+  /** 0 low … 2 high: how much grass grows */
+  setQuality(q: number): void;
   update(t: number, pads: Float32Array, excite: number, score: [number, number], clock: string): void;
 }
 
@@ -321,6 +323,190 @@ function pitch(): THREE.Mesh {
   const m = new THREE.Mesh(g, mat);
   m.receiveShadow = true;
   return m;
+}
+
+/** real grass: blades of turf grown around the camera (instanced, placed by the shader from a grid
+ * that follows the view, each blade fixed to its spot so nothing swims). Two layers: fine blades close
+ * in, coarser ones further out, both fading into the mown surface beyond. The blades take the pitch's
+ * own colour (stripes, lines, team wash, frost), lean with the mowing (each stripe the other way, which
+ * is what makes a cut pitch striped), sway in the wind, lie flat under cars and the ball, and catch
+ * the cars' shadows. */
+function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: (on: boolean) => void } {
+  const grp = new THREE.Group();
+  // one blade: a tapering strip, three segments and a tip (x across, z up the blade)
+  const bg = new THREE.BufferGeometry();
+  const T = [0, 0.38, 0.7];
+  const pos: number[] = [];
+  const uv: number[] = [];
+  for (const t of T) {
+    const w = 0.5 * (1 - t * 0.75);
+    pos.push(-w, 0, t, w, 0, t);
+    uv.push(0, t, 1, t);
+  }
+  pos.push(0.08, 0, 1);
+  uv.push(0.5, 1);
+  bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  bg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  bg.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  bg.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6]);
+  const layers: { mesh: THREE.Mesh; uN: { value: number }; n: number[] }[] = [];
+  const uOrigin = { value: new THREE.Vector2() };
+  const uCam = { value: new THREE.Vector2() };
+  const make = (spacing: number, h: number, w: number, n: number[], far: number) => {
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.index = bg.index;
+    geo.setAttribute('position', bg.attributes.position);
+    geo.setAttribute('uv', bg.attributes.uv);
+    geo.setAttribute('normal', bg.attributes.normal);
+    geo.instanceCount = n[2] * n[2];
+    const uN = { value: n[2] };
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0, side: THREE.DoubleSide });
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, { uDay, uNear, uOrigin, uCam, uN }, TH);
+      sh.vertexShader = sh.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uDay;
+          uniform vec3 uPitchA, uPitchB, uLine;
+          uniform float uPattern, uFrost, uCaus, uClock;
+          uniform vec4 uNear[9];
+          uniform vec2 uOrigin, uCam;
+          uniform float uN;
+          varying vec3 vGrass;
+          varying float vT;
+          float gh(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+          float gn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(gh(i), gh(i + vec2(1, 0)), u.x), mix(gh(i + vec2(0, 1)), gh(i + vec2(1, 1)), u.x), u.y); }`,
+        )
+        .replace(
+          '#include <beginnormal_vertex>',
+          `// where this blade grows: its cell in a grid that follows the view, jittered by the cell's hash
+          float fid = float(gl_InstanceID);
+          vec2 cell = floor(uOrigin / ${spacing.toFixed(1)}) + vec2(mod(fid, uN), floor(fid / uN)) - floor(uN * 0.5);
+          vec2 P = (cell + vec2(gh(cell), gh(cell + 17.3))) * ${spacing.toFixed(1)};
+          float ang = gh(cell + 5.1) * 6.2832;
+          float rnd = gh(cell + 9.7);
+          // only on the flat turf: not up the ramps, not in the goals, not on synthetic turf
+          float oct = max(max(abs(P.x) - ${ARENA.X.toFixed(1)}, abs(P.y) - ${ARENA.Y.toFixed(1)}), (abs(P.x) + abs(P.y) - ${ARENA.CORNER.toFixed(1)}) * 0.7071);
+          float onTurf = smoothstep(20.0, 140.0, -(oct + ${R.toFixed(1)})) * (1.0 - step(3.5, uPattern));
+          // the mowing: which stripe this is, the way its blades lie
+          float pw = 18.0;
+          float band;
+          vec2 leanD;
+          if (uPattern < 0.5) { band = smoothstep(-pw, pw, abs(fract(P.y / 1024.0 + 0.25) - 0.5) * 1024.0 - 256.0); leanD = vec2(0.0, 1.0); }
+          else if (uPattern < 1.5) { vec2 c = abs(fract(P / 1024.0) - 0.5) * 1024.0 - 256.0; band = abs(smoothstep(-pw, pw, c.x) - smoothstep(-pw, pw, c.y)); leanD = vec2(0.7071); }
+          else if (uPattern < 2.5) { vec2 d = vec2(P.x + P.y, P.x - P.y) * 0.7071; vec2 c = abs(fract(d / 1100.0) - 0.5) * 1100.0 - 275.0; band = abs(smoothstep(-pw, pw, c.x) - smoothstep(-pw, pw, c.y)); leanD = vec2(1.0, 0.0); }
+          else { band = smoothstep(-pw, pw, abs(fract(length(P) / 1000.0) - 0.5) * 1000.0 - 250.0); leanD = normalize(P + 0.01); }
+          vec3 col = mix(uPitchA, uPitchB, band) * mix(0.85, 1.0, uDay);
+          float n = gn(P * 0.0035) * 0.4 + gn(P * 0.012) * 0.35 + gn(P * 0.045) * 0.25;
+          col *= 0.84 + 0.32 * n;
+          col *= 0.88 + 0.24 * rnd;
+          // a little yellow and a little blue-green from blade to blade
+          col *= mix(vec3(1.08, 1.04, 0.82), vec3(0.92, 1.0, 1.05), gh(cell + 2.2));
+          float side = sign(P.y);
+          vec3 team = side < 0.0 ? vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}) : vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)});
+          col = mix(col, col * (0.55 + team * 0.9), smoothstep(800.0, 5000.0, abs(P.y)) * 0.55);
+          // the painted lines: the blades there are painted too
+          float r = length(P);
+          vec2 gb = vec2(abs(P.x), ${ARENA.Y.toFixed(1)} - abs(P.y));
+          float box = max(gb.x - 1800.0, gb.y - 1150.0);
+          float arc = abs(length(vec2(P.x, abs(P.y) - (${ARENA.Y.toFixed(1)} - 1150.0))) - 900.0);
+          float dl = abs(P.y) - 22.0;
+          dl = min(dl, abs(r - 1100.0) - 22.0);
+          dl = min(dl, r - 60.0);
+          if (gb.y >= 0.0) dl = min(dl, abs(box) - 22.0);
+          if (abs(P.y) <= ${ARENA.Y.toFixed(1)} - 1150.0) dl = min(dl, arc - 22.0);
+          float L = 1.0 - smoothstep(-2.0, 2.0, dl);
+          col = mix(col, uLine * 0.85, L * 0.9);
+          float fr = uFrost * smoothstep(0.55, 0.9, gn(P * 0.004) * 0.6 + gn(P * 0.03) * 0.4 + smoothstep(-1000.0, -150.0, oct) * 0.5);
+          col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), fr * 0.7);
+          col *= 1.0 + bbCausV(P / 330.0, uClock) * uCaus * 1.25;
+          // how tall: fading in round the view's edge (so the layer has no border), shorter on lines
+          float dc = distance(P, uCam);
+          float k = (1.0 - smoothstep(${(far * 0.55).toFixed(1)}, ${far.toFixed(1)}, dc)) * onTurf;
+          float ht = ${h.toFixed(1)} * (0.55 + 0.9 * rnd) * k * (1.0 - L * 0.45);
+          float wd = ${w.toFixed(2)} * (0.7 + 0.6 * gh(cell + 4.4)) * (0.4 + 0.6 * k);
+          float t = position.z;
+          // lean: with the mowing, a breeze running over it, and down flat away from cars and the ball
+          vec2 lean = leanD * (band * 2.0 - 1.0) * 0.55 + vec2(cos(ang), sin(ang)) * 0.25;
+          float gust = sin(uClock * 1.7 + P.x * 0.004 + P.y * 0.003) * 0.5 + sin(uClock * 3.1 + P.x * 0.011) * 0.25;
+          lean += vec2(0.8, 0.45) * gust * 0.35;
+          float press = 0.0;
+          for (int i = 0; i < 9; i++) {
+            vec4 q = uNear[i];
+            vec2 dv = P - q.xy;
+            float rr = q.w > 0.5 ? 95.0 : 120.0;
+            float hit = (1.0 - smoothstep(rr * 0.4, rr, length(dv))) * (1.0 - smoothstep(60.0, 160.0, q.z - (q.w > 0.5 ? 93.0 : 17.0)));
+            if (hit > press) { press = hit; }
+            lean += normalize(dv + 0.01) * hit * 0.8;
+          }
+          vec2 bendXY = lean * t * t * ht;
+          float bendZ = t * ht * (1.0 - 0.25 * min(length(lean), 1.6)) * (1.0 - press * 0.45);
+          vec2 across = vec2(-sin(ang), cos(ang));
+          vec3 bladePos = vec3(P + across * position.x * wd + bendXY, bendZ + 0.6);
+          // lit mostly as the turf (up), a little as the blade
+          vec3 objectNormal = normalize(vec3(vec2(cos(ang), sin(ang)) * 0.35 + lean * 0.2, 1.0));
+          #ifdef USE_TANGENT
+          vec3 objectTangent = vec3(1.0, 0.0, 0.0);
+          #endif
+          // darker down in the turf, bright at the tips
+          vec3 tipC = col * vec3(1.12, 1.14, 1.0) + vec3(0.012, 0.016, 0.0);
+          // (into the mown surface's own colour as the blades fade out, so there's no edge)
+          vGrass = mix(col, mix(col * 0.72, tipC, smoothstep(0.0, 1.0, t)), smoothstep(0.0, 0.6, k));
+          vT = t;`,
+        )
+        .replace('#include <begin_vertex>', 'vec3 transformed = bladePos;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGrass;\nvarying float vT;')
+        .replace('#include <color_fragment>', 'diffuseColor.rgb = vGrass;')
+        // (light through the blades: a touch of their own colour glows at the tips)
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGrass * vT * vT * 0.12;');
+      // the caustic needs to be in the vertex shader too
+      sh.vertexShader = sh.vertexShader.replace(
+        'varying vec3 vGrass;',
+        `varying vec3 vGrass;
+        float bbCausV(vec2 p, float t){ float c = 0.0;
+          for (int k = 0; k < 2; k++){ float s = k == 0 ? 1.0 : -1.0;
+            vec2 q = p * (k == 0 ? 1.0 : 1.37) + vec2(t * 0.21, -t * 0.17) * s;
+            q += 0.6 * vec2(sin(q.y * 1.7 + t * 0.9), sin(q.x * 1.5 - t * 0.8));
+            q += 0.35 * vec2(sin(q.y * 3.1 - t * 1.3), sin(q.x * 2.9 + t * 1.1));
+            vec2 w = abs(sin(q * 1.9)); c += pow(1.0 - min(w.x, w.y), 7.0); }
+          return c * 0.6; }`,
+      );
+    };
+    mat.customProgramCacheKey = () => 'bbgrass' + spacing;
+    const m = new THREE.Mesh(geo, mat);
+    m.frustumCulled = false;
+    m.receiveShadow = true;
+    m.castShadow = false;
+    // the grid follows the camera's footprint, pushed ahead along the view so the blades sit in shot
+    m.onBeforeRender = (_r, _s, cam) => {
+      const cx = cam.position.x * 100;
+      const cy = -cam.position.z * 100;
+      const d = new THREE.Vector3();
+      cam.getWorldDirection(d);
+      const f = Math.hypot(d.x, d.z) || 1;
+      const ahead = far * 0.45;
+      uCam.value.set(cx, cy);
+      uOrigin.value.set(cx + (d.x / f) * ahead, cy - (d.z / f) * ahead);
+    };
+    grp.add(m);
+    layers.push({ mesh: m, uN, n });
+  };
+  // (spacing cm, blade height, width, grid size at quality 0/1/2, fade-out radius)
+  make(4.2, 6.5, 1.3, [0, 170, 250], 600);
+  make(9, 7.5, 2.2, [140, 210, 280], 1500);
+  const setQuality = (q: number) => {
+    for (const l of layers) {
+      const n = l.n[Math.max(0, Math.min(2, q))];
+      l.uN.value = n;
+      (l.mesh.geometry as THREE.InstancedBufferGeometry).instanceCount = n * n;
+      l.mesh.visible = n > 0;
+    }
+  };
+  setQuality(2);
+  return { group: grp, setQuality, setOn: (on) => (grp.visible = on) };
 }
 
 function shell(): THREE.Group {
@@ -1391,6 +1577,8 @@ export function buildArena(): ArenaView {
   const uT = { value: 0 };
   const uEx = { value: 0 };
   root.add(pitch());
+  const turf = grass();
+  root.add(turf.group);
   root.add(centreLogo());
   const sh = shell();
   root.add(sh);
@@ -1416,8 +1604,12 @@ export function buildArena(): ArenaView {
     setDay(day) {
       view.setLook(day ? TIMES.day : TIMES.night, curMap);
     },
+    setQuality(q) {
+      turf.setQuality(q);
+    },
     setLook(t, map) {
       curMap = map;
+      turf.setOn(map.theme.pattern < 3.5);
       curTime = t;
       uDay.value = t.day;
       const th = map.theme;

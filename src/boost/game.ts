@@ -156,6 +156,7 @@ export class Game {
     this.field.rotation.x = -Math.PI / 2;
     this.field.scale.setScalar(S);
     this.arena = buildArena();
+    this.arena.setQuality(this.stage.quality);
     this.stage.scene.add(this.arena.root, this.field);
     this.field.add(this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group, this.gfx.group);
     this.controls = new Controls(canvas);
