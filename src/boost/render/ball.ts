@@ -44,7 +44,8 @@ export class BallView {
 
   constructor() {
     const pts = panelCentres();
-    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.62, roughness: 0.3, clearcoat: 0.9, clearcoatRoughness: 0.08, envMapIntensity: 1.4 });
+    // (a solid, satin ball: grey panels that read at any distance, not a chrome mirror)
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.18, roughness: 0.46, clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 0.85 });
     const uPts = { value: pts };
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uPts = uPts;
@@ -61,7 +62,7 @@ export class BallView {
           vec3 d = normalize(vDir);
           float b1 = -2.0, b2 = -2.0; int bi = 0;
           for (int i = 0; i < 32; i++) { float k = dot(d, uPts[i]); if (k > b1) { b2 = b1; b1 = k; bi = i; } else if (k > b2) { b2 = k; } }
-          float seam = 1.0 - smoothstep(0.0, 0.012, b1 - b2);
+          float seam = 1.0 - smoothstep(0.004, 0.02, b1 - b2);
           float inset = smoothstep(0.004, 0.02, b1 - b2) * (1.0 - smoothstep(0.035, 0.05, b1 - b2));
           float pent = bi < 12 ? 1.0 : 0.0;
           // a fine honeycomb pressed into every panel, laid out in the panel's own plane
@@ -77,10 +78,13 @@ export class BallView {
           hg = abs(hg);
           float hexE = 0.5 - max(dot(hg, normalize(hs)), hg.x);
           float comb = (1.0 - smoothstep(0.03, 0.09, hexE)) * (1.0 - smoothstep(0.6, 1.4, length(fwidth(hp))));
-          vec3 base = mix(vec3(0.86, 0.87, 0.9), vec3(0.2, 0.21, 0.24), pent);
-          base *= 1.0 - comb * 0.22;
-          base = mix(base, base * 0.5, inset);
-          diffuseColor.rgb = mix(base, vec3(0.04), seam);
+          // even grey panels (a hair lighter and darker by turns, so the pattern reads as it rolls),
+          // a soft bevel round each, crisp dark seams between
+          float alt = fract(float(bi) * 0.618034);
+          vec3 base = vec3(0.6, 0.61, 0.64) * (0.92 + 0.14 * alt);
+          base *= 1.0 - comb * 0.06;
+          base = mix(base, base * 1.18, inset);
+          diffuseColor.rgb = mix(base, vec3(0.06, 0.065, 0.075), seam);
           `,
         )
         .replace(
@@ -89,13 +93,13 @@ export class BallView {
           // energy running along the seams: pulses racing round the ball after a hit, a steady
           // shimmer at speed
           float flow = pow(0.5 + 0.5 * sin(dot(d, vec3(0.6, 0.5, 0.62)) * 22.0 - uT * 9.0), 6.0);
-          float seamE = seam * (0.3 + 3.2 * uHit + uSpd * 1.4 + flow * (1.6 * uHit + 0.9 * uSpd));
-          totalEmissiveRadiance += uCol * (seamE + inset * (0.6 * uHit + 0.25 * uSpd) + pent * (0.08 + 0.2 * uSpd));
+          float seamE = seam * (0.12 + 3.2 * uHit + uSpd * 1.4 + flow * (1.6 * uHit + 0.9 * uSpd));
+          totalEmissiveRadiance += uCol * (seamE * 0.8 + inset * (0.6 * uHit + 0.25 * uSpd) + pent * 0.1 * uSpd);
           // a rim of the last toucher's light round the silhouette
           float rimV = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 3.0);
-          totalEmissiveRadiance += uCol * rimV * (0.12 + 0.6 * uSpd + 0.8 * uHit);`,
+          totalEmissiveRadiance += uCol * rimV * (0.3 * uSpd + 0.6 * uHit);`,
         )
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, seam) + comb * 0.15;');
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.7, seam);');
     };
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL.R, 96, 64), mat);
     this.mesh.castShadow = false;
@@ -120,7 +124,7 @@ export class BallView {
       vertexShader: `varying vec3 vN; varying vec3 vV; void main(){ vN = normalize(normalMatrix*normal); vec4 mv = modelViewMatrix*vec4(position,1.); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
       fragmentShader: `uniform float uK; uniform vec3 uCol; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(max(1.0 - abs(dot(normalize(vN), normalize(vV))), 0.0), 2.5); gl_FragColor = vec4(uCol * f * uK * 1.5, f*uK); }`,
     });
-    this.glow = new THREE.Mesh(new THREE.SphereGeometry(BALL.R * 1.18, 32, 24), halo);
+    this.glow = new THREE.Mesh(new THREE.SphereGeometry(BALL.R * 1.07, 32, 24), halo);
     this.glow.renderOrder = 7;
   }
 
