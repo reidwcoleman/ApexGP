@@ -174,6 +174,9 @@ export class UI {
   private playSkill = 0.55;
   private playMin = 5;
   private toastT = 0;
+  /** the points pop-ups in a run: their total, and when the run ends */
+  private awardSum = 0;
+  private awardEnd = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -802,16 +805,44 @@ export class UI {
     this.toastT = window.setTimeout(() => t.classList.remove('on'), ms);
   }
 
-  /** a points pop-up for you, stacking like the arena game's */
+  /** a points pop-up for you, stacking like the arena game's; a run of them adds up underneath */
   award(what: string, pts: number): void {
     const box = this.$('#h-awards');
     const d = document.createElement('div');
+    d.className = 'aw';
     d.innerHTML = `<b>${esc(what)}</b><i>+${pts}</i>`;
     if (pts >= 50) d.classList.add('big');
-    box.prepend(d);
-    while (box.children.length > 4) box.lastElementChild!.remove();
-    setTimeout(() => d.classList.add('out'), 2200);
-    setTimeout(() => d.remove(), 2700);
+    if (what === 'Goal') d.classList.add('goal');
+    let sum = box.querySelector<HTMLElement>('.sum');
+    const now = performance.now();
+    if (!sum || now > this.awardEnd) {
+      this.awardSum = 0;
+      sum?.remove();
+      sum = document.createElement('div');
+      sum.className = 'sum';
+      box.append(sum);
+    }
+    this.awardSum += pts;
+    box.insertBefore(d, box.firstChild);
+    const rows = box.querySelectorAll('.aw');
+    for (let k = 4; k < rows.length; k++) rows[k].remove();
+    // the total shows once there's more than one in the run, and pops as it grows
+    const many = box.querySelectorAll('.aw:not(.out)').length > 1;
+    sum.innerHTML = `<i>+${this.awardSum}</i>`;
+    sum.classList.toggle('on', many);
+    sum.classList.remove('pop');
+    void sum.offsetWidth;
+    sum.classList.add('pop');
+    this.awardEnd = now + 2600;
+    setTimeout(() => d.classList.add('out'), 2600);
+    setTimeout(() => d.remove(), 3100);
+    const s2 = sum;
+    setTimeout(() => {
+      if (performance.now() >= this.awardEnd - 5) {
+        s2.classList.add('out');
+        setTimeout(() => s2.remove(), 500);
+      }
+    }, 2700);
   }
 
   board(show: boolean, rows?: { name: string; team: number; st: Stats; me: boolean; ping?: number }[], score?: [number, number]): void {

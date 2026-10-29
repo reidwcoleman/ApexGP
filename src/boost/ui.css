@@ -260,12 +260,20 @@
 #ui .mbtn.primary.padfocus { background: linear-gradient(90deg, #4a8dff, var(--blue)); }
 
 /* points pop-ups */
-.awards { position: absolute; left: 50%; bottom: 17vh; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-.awards div { display: flex; align-items: baseline; gap: 12px; padding: 5px 18px; background: linear-gradient(90deg, transparent, rgba(6, 9, 18, 0.8) 18%, rgba(6, 9, 18, 0.8) 82%, transparent); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 0.06em; animation: awardin 0.28s cubic-bezier(0.2, 1.5, 0.4, 1); transition: opacity 0.45s, transform 0.45s; }
-.awards div b { font-size: 20px; color: #fff; }
-.awards div i { font-size: 20px; color: #ffd34a; font-style: italic; }
-.awards div.big b, .awards div.big i { font-size: 26px; }
-.awards div.out { opacity: 0; transform: translateY(-10px); }
+.awards { position: absolute; left: 50%; bottom: 17vh; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none; }
+.awards .aw { display: flex; align-items: baseline; gap: 14px; padding: 5px 26px; background: linear-gradient(90deg, transparent, rgba(6, 9, 18, 0.82) 16%, rgba(6, 9, 18, 0.82) 84%, transparent); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: 0.06em; animation: awardin 0.3s cubic-bezier(0.2, 1.5, 0.4, 1); transition: opacity 0.45s, transform 0.45s; }
+.awards .aw b { font-size: 20px; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); }
+.awards .aw i { font-size: 20px; color: #ffd34a; font-style: italic; text-shadow: 0 0 12px rgba(255, 190, 40, 0.55); }
+.awards .aw.big b, .awards .aw.big i { font-size: 26px; }
+.awards .aw.goal { background: linear-gradient(90deg, transparent, rgba(255, 170, 30, 0.28) 14%, rgba(6, 9, 18, 0.85) 40%, rgba(6, 9, 18, 0.85) 60%, rgba(255, 170, 30, 0.28) 86%, transparent); }
+.awards .aw.goal b, .awards .aw.goal i { font-size: 30px; }
+.awards .aw.out { opacity: 0; transform: translateY(-10px); }
+.awards .sum { order: 99; margin-top: 2px; opacity: 0; transition: opacity 0.3s; }
+.awards .sum.on { opacity: 1; }
+.awards .sum.out { opacity: 0; }
+.awards .sum i { display: inline-block; font-size: 34px; font-weight: 900; font-style: italic; color: #ffe27a; letter-spacing: 0.04em; text-shadow: 0 0 18px rgba(255, 190, 40, 0.7), 0 2px 6px rgba(0, 0, 0, 0.7); }
+.awards .sum.pop i { animation: sumpop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes sumpop { from { transform: scale(1.45); } to { transform: none; } }
 @keyframes awardin { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }
 
 /* the match setup gets a wider panel: options in a row, the arenas in one strip */

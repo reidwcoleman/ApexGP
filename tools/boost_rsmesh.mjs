@@ -1,20 +1,18 @@
 // Builds the arena collision meshes RocketSim loads (its .cmf format, in bullet units = uu / 50), from
 // the published measurements in src/boost/sim/arena.ts: the rounded shell (ramps 256, corners cut
-// 1152 along each wall and swept into the walls on CORNER_R, the back walls, the ceiling's edge) with the goal mouths cut out exactly, the
-// faces where the ramp stops either side of each mouth, and the goal boxes. RocketSim adds its own
+// 1152 along each wall and swept into the walls on CORNER_R, the back walls, the ceiling's edge) with the goal mouths cut out exactly, and
+// each goal (sim/arena.ts goalSurfaces): the box with its rounded inside edges, the rounded posts and crossbar, what's left of the
+// back wall round the mouth's top corners and the faces where the floor's ramp stops either side of it. RocketSim adds its own
 // planes for the floor, the ceiling and the side walls.
 //   node --experimental-transform-types --no-warnings tools/boost_rsmesh.mjs
 import { writeFileSync } from 'node:fs';
-import { ARENA, CORNER_R, goalProfile, octCore } from '../src/boost/sim/arena.ts';
-
-const prof2 = goalProfile(14);
+import { ARENA, CORNER_R, GOAL_POST_R, goalSurfaces, octCore } from '../src/boost/sim/arena.ts';
 
 const R = ARENA.R;
 const Z = ARENA.Z;
-const GW = ARENA.GOAL_W;
-const GH = ARENA.GOAL_H;
-const Y = ARENA.Y;
-const GY1 = ARENA.Y + ARENA.GOAL_D;
+// the mouth in the back wall: the goal plus its rounded posts and crossbar
+const GW = ARENA.GOAL_W + GOAL_POST_R;
+const GH = ARENA.GOAL_H + GOAL_POST_R;
 
 function mesh() {
   const v = [];
@@ -113,33 +111,15 @@ for (let i = 0; i < P; i++) {
   }
 }
 
-// ---- each goal: side walls (with the faces where the ramp stops), roof, back
+// ---- each goal: the box, the rounded posts and crossbar, the back wall's corners over the mouth and the ramp's end faces
 const goals = [];
 for (const s of [-1, 1]) {
   const g = mesh();
-  for (const sx of [-1, 1]) {
-    const x = sx * GW;
-    // in front of the back wall: from the floor up to the ramp, on the shell's own rings
-    for (let k = 0; k < ARC; k++) {
-      const a0 = -Math.PI / 2 + (k / ARC) * (Math.PI / 2);
-      const a1 = -Math.PI / 2 + ((k + 1) / ARC) * (Math.PI / 2);
-      const y0 = s * (SY + R * Math.cos(a0));
-      const y1 = s * (SY + R * Math.cos(a1));
-      g.quad(g.vert(x, y0, 0), g.vert(x, y1, 0), g.vert(x, y1, R + R * Math.sin(a1)), g.vert(x, y0, R + R * Math.sin(a0)));
-    }
-    // behind the back wall: the side, cut to the goal's profile (a convex outline: a fan from inside)
-    const c = g.vert(x, s * (Y + ARENA.GOAL_D * 0.45), GH * 0.5);
-    for (let k = 0; k < prof2.length; k++) {
-      const [d0, z0] = prof2[k];
-      const [d1, z1] = prof2[(k + 1) % prof2.length];
-      g.tri(c, g.vert(x, s * (Y + d0), z0), g.vert(x, s * (Y + d1), z1));
-    }
-  }
-  // the floor's ramp, the back wall, the curve over and the roof, across the goal's width
-  for (let k = 1; k < prof2.length - 1; k++) {
-    const [d0, z0] = prof2[k];
-    const [d1, z1] = prof2[k + 1];
-    g.quad(g.vert(-GW, s * (Y + d0), z0), g.vert(GW, s * (Y + d0), z0), g.vert(GW, s * (Y + d1), z1), g.vert(-GW, s * (Y + d1), z1));
+  const parts = goalSurfaces(s, 14, 6);
+  for (const m of [parts.inner, parts.frame, parts.corners, parts.ramps]) {
+    const base = [];
+    for (let i = 0; i < m.v.length; i += 3) base.push(g.vert(m.v[i], m.v[i + 1], m.v[i + 2]));
+    for (let i = 0; i < m.t.length; i += 3) g.tri(base[m.t[i]], base[m.t[i + 1]], base[m.t[i + 2]]);
   }
   goals.push(g);
 }

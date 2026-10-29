@@ -110,6 +110,8 @@ export class World {
   private zeroWait = false;
   /** a shot is on frame toward this team's goal (0/1), else -1 */
   private shotOn: Team | -1 = -1;
+  /** whose touch has been credited as the shot now heading in (−1: none) */
+  private shooter = -1;
   private touchCtx: ({ aerial: boolean; backwards: boolean; long: boolean; bicycle: boolean; turtle: boolean } | undefined)[] = [];
   private lastTouchPts: number[] = [];
   private lastStyle: number[] = [];
@@ -302,6 +304,7 @@ export class World {
     this.pads.fill(0);
     this.touches = [];
     this.shotOn = -1;
+    this.shooter = -1;
     this.seed = (this.seed * 1103515245 + 12345) >>> 0;
     const r = rng(this.seed);
     // the same random set of spots for both teams, orange mirrored
@@ -426,6 +429,9 @@ export class World {
         touched.push([i, rel.len()]);
       } else this.prevHit[i] = hit;
     }
+    // where the ball was headed just before this tick's touches (so a save or a shot is judged on
+    // the ball as it came to the car, not on a guess made at some earlier touch)
+    const before = touched.length && this.authority && this.phase === 'play' ? this.predictGoal() : this.shotOn;
     if (ballLive) {
       this.pullBall();
       const vz = this.ball.vel.z;
@@ -433,7 +439,7 @@ export class World {
       this.prevBallVz = vz;
     }
     // (touches are judged on the ball as it leaves the car, so after it's been read back)
-    for (const [i, power] of touched) this.touch(i, power);
+    for (const [i, power] of touched) this.touch(i, power, before);
     // boost pads: RocketSim picks them up and times them; we mirror the state and say who took one
     const pst = new Float64Array(this.rs.padCount() * 3);
     this.rs.getPads(pst);
@@ -533,8 +539,13 @@ export class World {
       const a = this.touches.find(([c, t]) => c !== scorer && this.players[c]?.team === team && sT - t < 120 * 3 && t <= sT);
       if (a) assist = a[0];
       const st = this.stats[scorer];
+      // (every goal is a shot on goal, even one the prediction didn't see coming)
+      if (this.shooter !== scorer) {
+        st.shots++;
+        this.award(scorer, 'Shot on goal', 10);
+      }
       st.goals++;
-      st.score += 100;
+      this.award(scorer, 'Goal', 100);
       // the flourishes: how the last touch was made
       const k = this.touchCtx[scorer];
       if (k) {
@@ -583,10 +594,10 @@ export class World {
     this.setPhase('goal', this.opts.freeplay ? 1.6 : 3);
   }
 
-  private touch(i: number, power: number): void {
+  private touch(i: number, power: number, before: Team | -1): void {
     const st = this.stats[i];
     if (!st) return;
-    const prevOn = this.shotOn;
+    const prevOn = before;
     const team = this.players[i].team;
     // a contact that carries on (a dribble, a pinch) is one touch; where the ball's going is checked again now and then
     if (this.touches.length && this.touches[0][0] === i && this.tick - this.touches[0][1] < 8) {
@@ -621,6 +632,7 @@ export class World {
       if (st.saves === 3) this.award(i, 'Savior', 25);
     } else if (on === 1 - team && prevOn !== on) {
       st.shots++;
+      this.shooter = i;
       this.award(i, 'Shot on goal', 10);
       this.events.push({ t: 'shot', car: i });
     } else if (on === -1 && this.tick - (this.lastStyle[i] ?? -999) > 240) {
@@ -634,6 +646,7 @@ export class World {
         this.lastStyle[i] = this.tick;
       }
     }
+    if (on !== 1 - team) this.shooter = -1;
     this.shotOn = on;
   }
 
@@ -665,7 +678,7 @@ export class World {
     b.pos.copy(this.ball.pos);
     b.vel.copy(this.ball.vel);
     b.w.copy(this.ball.w);
-    for (let k = 0; k < 300; k++) {
+    for (let k = 0; k < 480; k++) {
       b.step(TICK);
       const g = inGoal(b.pos, BALL.R);
       if (g !== -1) return g;

@@ -226,8 +226,8 @@ export const MAPS: Record<MapId, MapLook> = {
     snow: 0,
     concourse: 0x2a2e36,
     theme: {
-      pitchA: [0.1, 0.29, 0.04],
-      pitchB: [0.07, 0.215, 0.03],
+      pitchA: [0.095, 0.285, 0.045],
+      pitchB: [0.06, 0.195, 0.03],
       pattern: 0,
       line: [0.92, 0.95, 1.0],
       lineGlow: 0.05,
@@ -251,7 +251,7 @@ export const MAPS: Record<MapId, MapLook> = {
     concourse: 0x8a9098,
     theme: {
       pitchA: [0.085, 0.255, 0.07],
-      pitchB: [0.062, 0.2, 0.058],
+      pitchB: [0.055, 0.18, 0.052],
       pattern: 2,
       line: [0.85, 0.95, 1.1],
       lineGlow: 0.25,

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { ARENA, CORNER_R, goalProfile, GOAL_BACK_R, GOAL_TOP_R, octCore, PADS } from '../sim/arena.ts';
+import { ARENA, CORNER_R, GOAL_BACK_R, GOAL_EDGE_R, GOAL_POST_R, goalSurfaces, GOAL_TOP_R, octCore, PADS, type TriMesh } from '../sim/arena.ts';
 import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
 import { buildSurround, type SurroundView } from './surround.ts';
 
@@ -180,9 +180,24 @@ function shellGeometry(z0: number, z1: number): THREE.BufferGeometry {
   return g;
 }
 
+// (the mouth in the back wall: as wide and tall as the goal plus its rounded posts and crossbar, its
+// top corners rounded; sim/arena.ts inMouth)
 const GOAL_CUT = /* glsl */ `
-  if (abs(vSim.x) < ${ARENA.GOAL_W.toFixed(1)} && vSim.z < ${ARENA.GOAL_H.toFixed(1)} && abs(vSim.y) > ${(ARENA.Y - R - 25).toFixed(1)}) discard;
+  {
+    vec2 gq = vec2(abs(vSim.x) - ${(ARENA.GOAL_W - GOAL_EDGE_R).toFixed(1)}, vSim.z - ${(ARENA.GOAL_H - GOAL_EDGE_R).toFixed(1)});
+    if (abs(vSim.y) > ${(ARENA.Y - R - 25).toFixed(1)} && abs(vSim.x) < ${(ARENA.GOAL_W + GOAL_POST_R).toFixed(1)} && vSim.z < ${(ARENA.GOAL_H + GOAL_POST_R).toFixed(1)}
+      && (gq.x <= 0.0 || gq.y <= 0.0 || length(gq) < ${(GOAL_EDGE_R + GOAL_POST_R).toFixed(1)})) discard;
+  }
 `;
+
+/** a sim-frame triangle mesh as geometry with smooth normals */
+function triGeo(m: TriMesh): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(m.v, 3));
+  g.setIndex(m.t);
+  g.computeVertexNormals();
+  return g;
+}
 
 function pitch(): THREE.Mesh {
   const g = new THREE.PlaneGeometry(ARENA.X * 2, (ARENA.Y + ARENA.GOAL_D) * 2, 8, 10);
@@ -193,7 +208,7 @@ function pitch(): THREE.Mesh {
     vec2 P = vSim.xy;
     // outside the octagon and not in a goal: nothing (the ramps cover the edge)
     float oct = max(max(abs(P.x) - ${ARENA.X.toFixed(1)}, abs(P.y) - ${ARENA.Y.toFixed(1)}), (abs(P.x)+abs(P.y) - ${ARENA.CORNER.toFixed(1)})*0.7071);
-    bool inGoal = abs(P.x) < ${ARENA.GOAL_W.toFixed(1)} && abs(P.y) < ${(ARENA.Y + ARENA.GOAL_D).toFixed(1)};
+    bool inGoal = (abs(P.x) < ${ARENA.GOAL_W.toFixed(1)} && abs(P.y) < ${(ARENA.Y + ARENA.GOAL_D).toFixed(1)}) || (abs(P.x) < ${(ARENA.GOAL_W + GOAL_POST_R).toFixed(1)} && abs(P.y) < ${(ARENA.Y + GOAL_POST_R).toFixed(1)});
     if (oct > 0.0 && !inGoal) discard;
     float side = sign(P.y);
     vec3 team = side < 0.0 ? vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}) : vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)});
@@ -232,7 +247,12 @@ function pitch(): THREE.Mesh {
     vec3 camSim = vec3(cameraPosition.x * 100.0, -cameraPosition.z * 100.0, cameraPosition.y * 100.0);
     vec3 vd = normalize(vSim - camSim);
     float lean = uPattern < 0.5 || uPattern > 2.5 ? vd.y : (uPattern < 1.5 ? vd.x * 0.6 + vd.y * 0.6 : (vd.x + vd.y) * 0.7071);
-    col *= 1.0 + 0.2 * lean * (band * 2.0 - 1.0) * (1.0 - synth);
+    // (never cancelling the stripes out: they read from every end, just stronger along the cut)
+    col *= 1.0 + 0.09 * abs(lean) * (band * 2.0 - 1.0) * (1.0 - synth);
+    // each stripe its own faint shade, and a cooler, bluer cast on the dark ones
+    float sid = floor(P.y / 512.0) + floor(P.x / 1024.0) * step(0.5, uPattern) * step(uPattern, 1.5);
+    col *= 0.96 + 0.08 * bbHash(vec2(sid, 3.7)) * (1.0 - synth);
+    col = mix(col, col * vec3(0.92, 1.0, 1.08), (1.0 - band) * 0.5 * (1.0 - synth));
     // the turf darkens where it runs up under the walls
     col *= mix(0.8, 1.0, smoothstep(0.0, 700.0, -(oct + ${R.toFixed(1)})));
     // synthetic turf: hex panels with lit seams
@@ -394,25 +414,34 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   const D = ARENA.GOAL_D;
   const Y = ARENA.Y * sideSign;
   const by = Y + sideSign * D;
-  // the frame: squared beams flush with the back wall, light grey, a team light strip on the inside
-  const frameM = new THREE.MeshStandardMaterial({ color: 0xe4e8ee, roughness: 0.22, metalness: 0.7, envMapIntensity: 1.4 });
+  const surf = goalSurfaces(sideSign as 1 | -1, 16, 8);
+  // the frame: the posts and crossbar rounded from the back wall into the goal, polished light
+  // grey, and the faces where the floor's ramp stops either side; a team light strip runs round the
+  // mouth where the frame meets the goal's walls
+  const frameM = new THREE.MeshPhysicalMaterial({ color: 0xf1f3f6, roughness: 0.38, metalness: 0.08, clearcoat: 1, clearcoatRoughness: 0.12, envMapIntensity: 0.9 });
   const strip = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(3.4) });
-  const T = 36;
-  const beam = (sx: number, sy: number, sz: number, x: number, y: number, z: number, m: THREE.Material = frameM) => {
-    // (the frame's beams bevelled, so they catch a highlight along every edge)
-    const mesh = new THREE.Mesh(m === frameM ? new RoundedBoxGeometry(sx, sy, sz, 3, Math.min(8, sx / 3, sy / 3, sz / 3)) : new THREE.BoxGeometry(sx, sy, sz), m);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = m === frameM;
-    mesh.receiveShadow = true;
-    g.add(mesh);
-    return mesh;
-  };
-  for (const sx of [-1, 1]) {
-    beam(T, T, H + T, sx * (W + T / 2), Y + sideSign * (T / 2 - 4), (H + T) / 2);
-    beam(5, 6, H, sx * (W - 1), Y + sideSign * 4, H / 2, strip);
+  for (const part of [surf.frame, surf.ramps]) {
+    const m = new THREE.Mesh(triGeo(part), frameM);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    g.add(m);
   }
-  beam(W * 2 + T * 2, T, T, 0, Y + sideSign * (T / 2 - 4), H + T / 2);
-  beam(W * 2, 6, 5, 0, Y + sideSign * 4, H - 1, strip);
+  {
+    const RS = GOAL_EDGE_R;
+    const pts: THREE.Vector3[] = [];
+    const yl = Y + sideSign * (GOAL_POST_R + 3);
+    for (let k = 0; k <= 4; k++) pts.push(new THREE.Vector3(-(W - 3), yl, 3 + ((H - RS - 3) * k) / 4));
+    for (let k = 1; k < 12; k++) {
+      const a = Math.PI - (k / 12) * (Math.PI / 2);
+      pts.push(new THREE.Vector3(-(W - RS) + (RS - 3) * Math.cos(a), yl, H - RS + (RS - 3) * Math.sin(a)));
+    }
+    for (let k = 0; k < 12; k++) {
+      const a = Math.PI / 2 - (k / 12) * (Math.PI / 2);
+      pts.push(new THREE.Vector3(W - RS + (RS - 3) * Math.cos(a), yl, H - RS + (RS - 3) * Math.sin(a)));
+    }
+    for (let k = 0; k <= 4; k++) pts.push(new THREE.Vector3(W - 3, yl, H - RS - ((H - RS - 3) * k) / 4));
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'centripetal'), 160, 3.4, 6, false), strip));
+  }
   // inside: solid dark panels carrying the net (sides, roof and back), lit by the team light
   const netM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.35, side: THREE.DoubleSide });
   simPatch(
@@ -447,41 +476,19 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
     vec3 bbEmit = tc * (wire * (0.2 - depth * 0.09) + 0.02 + low * 0.06 * (1.0 - shade * 0.5));
     `,
   );
-  // the profile: the floor ramping up into the back wall, the curve over into the roof
-  const prof = goalProfile(16);
+  // the box: the floor ramping up into the back wall, the curve over into the roof, the sides joined
+  // to both by rounded edges
   {
-    // across the width: from the ramp's foot round to the roof at the mouth
-    const pos: number[] = [];
-    const idx: number[] = [];
-    const rows = prof.slice(1);
-    for (const [d, z] of rows) pos.push(-W, Y + sideSign * d, z, W, Y + sideSign * d, z);
-    for (let k = 0; k < rows.length - 1; k++) idx.push(k * 2, k * 2 + 1, k * 2 + 2, k * 2 + 1, k * 2 + 3, k * 2 + 2);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const m = new THREE.Mesh(geo, netM);
+    const m = new THREE.Mesh(triGeo(surf.inner), netM);
     m.receiveShadow = true;
     g.add(m);
-    // the sides, cut to the profile (shape x = depth behind the line, y = height)
-    const shape = new THREE.Shape(prof.map(([d, z]) => new THREE.Vector2(d, z)));
-    for (const sx of [-1, 1]) {
-      const sg = new THREE.ShapeGeometry(shape);
-      const p2 = sg.attributes.position as THREE.BufferAttribute;
-      for (let k = 0; k < p2.count; k++) p2.setXYZ(k, sx * W, Y + sideSign * p2.getX(k), p2.getY(k));
-      sg.computeVertexNormals();
-      const sm = new THREE.Mesh(sg, netM);
-      sm.receiveShadow = true;
-      g.add(sm);
-    }
   }
-  // glowing edges following the profile down each side, and across the back where it bends
-  for (const sx of [-1, 1]) {
-    const pts = prof.slice(1, -1).map(([d, z]) => new THREE.Vector3(sx * (W - 4), Y + sideSign * Math.max(0, d - 4), Math.min(H - 4, Math.max(4, z))));
-    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 3.2, 6, false), strip));
+  // team light along the back where it bends
+  for (const z of [H - GOAL_TOP_R, GOAL_BACK_R]) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(2 * (W - GOAL_EDGE_R), 6, 6), strip);
+    m.position.set(0, by - sideSign * 3, z);
+    g.add(m);
   }
-  beam(W * 2, 6, 6, 0, by - sideSign * 3, H - GOAL_TOP_R, strip);
-  beam(W * 2, 6, 6, 0, by - sideSign * 3, GOAL_BACK_R, strip);
   // the housing round the box: dark structure, so nothing behind (the seats) shows into the goal
   // (outer slabs only: behind the back, outside the sides, over the roof; the mouth stays open)
   const slab = (sx: number, sy: number, sz: number, x: number, y: number, z: number) => {
@@ -490,19 +497,21 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
     g.add(m);
   };
   const ym = Y + sideSign * (D / 2 + 20);
-  // (each set 4 back from the panel it covers, so they never fight over the same depth)
-  slab(W * 2 + 120, 60, H + 60, 0, by + sideSign * 34, (H + 60) / 2 - 2);
-  for (const sx of [-1, 1]) slab(60, D + 20, H + 60, sx * (W + 34), ym, (H + 60) / 2 - 2);
-  slab(W * 2 + 120, D + 20, 60, 0, ym, H + 34);
+  const P = GOAL_POST_R;
+  // (each set 4 back from the panel it covers, so they never fight over the same depth; clear of the
+  // rounded frame)
+  slab(W * 2 + 2 * P + 128, 60, H + P + 64, 0, by + sideSign * 34, (H + P + 64) / 2 - 2);
+  for (const sx of [-1, 1]) slab(60, D + 20, H + P + 64, sx * (W + P + 34), ym, (H + P + 64) / 2 - 2);
+  slab(W * 2 + 2 * P + 128, D + 20, 60, 0, ym, H + P + 34);
   // team light round the housing's top, so it reads as part of the goal from the stands
   const edgeM = new THREE.MeshBasicMaterial({ color: team.clone().multiplyScalar(2.2) });
   const edge = (sx: number, sy: number, x: number, y: number) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, 14), edgeM);
-    m.position.set(x, y, H + 66);
+    m.position.set(x, y, H + P + 66);
     g.add(m);
   };
-  edge(W * 2 + 130, 14, 0, Y + sideSign * (D + 30));
-  for (const sx of [-1, 1]) edge(14, D + 30, sx * (W + 65), ym);
+  edge(W * 2 + 2 * P + 138, 14, 0, Y + sideSign * (D + 30));
+  for (const sx of [-1, 1]) edge(14, D + 30, sx * (W + P + 65), ym);
   // the inner glow light
   const pl = new THREE.PointLight(team, 6, 14, 2);
   pl.position.set(0, Y + sideSign * (D - 200), H * 0.6);
@@ -683,6 +692,10 @@ function pads(): { group: THREE.Group; items: PadMesh[]; sparks: THREE.Points; s
 }
 
 /** stands rising behind the glass: rows of fans drawn in a shader, with a bounce on goals */
+/** the stands' rows: how high each riser is, and how far each takes v (the shader's row height) */
+const ROW_RISE = 82;
+const ROW_H = 85;
+
 function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): THREE.Group {
   const grp = new THREE.Group();
   const { p: per, len } = perimeter(0, 300, 12);
@@ -700,9 +713,12 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     /* glsl */ `
     // (the goals' housings take this space)
     if (abs(vSim.x) < ${(ARENA.GOAL_W + 300).toFixed(1)} && abs(vSim.y) > ${ARENA.Y.toFixed(1)} && vSim.z < ${(ARENA.GOAL_H + 120).toFixed(1)}) discard;
-    // u along the bowl, v up the slope (in rows)
-    float rowH = 85.0;
-    float row = floor(vBB.y / rowH);
+    // u along the bowl, v up the rows: each row a tread (to sit on) and a riser (facing the pitch,
+    // where the crowd is drawn: seat backs, bodies, heads)
+    float rowH = ${ROW_H.toFixed(1)};
+    vec3 sn = normalize(cross(dFdx(vSim), dFdy(vSim)));
+    float tread = step(0.7, abs(sn.z));
+    float row = floor(vBB.y / rowH + tread * 0.5);
     float seatW = 62.0;
     // alternate rows sit half a seat over
     float sx = vBB.x / seatW + mod(row, 2.0) * 0.5;
@@ -710,49 +726,61 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     vec2 f = vec2(fract(sx), fract(vBB.y / rowH));
     float h = bbHash(vec2(seat, row));
     float h2 = bbHash(vec2(seat * 1.7 + 3.1, row * 0.9 + 7.0));
-    float occupied = step(0.1, h);
+    // sections: a block every 1500 along, split by a stair; a few rows of each tier left as a walkway,
+    // and tunnel mouths through it into the concourse
+    float block = floor(vBB.x / 1500.0);
+    float hb = bbHash(vec2(block, floor(row / 11.0) + 0.5));
+    float walk = step(mod(row, 11.0), 0.5) * step(1.0, row);
+    float tunnel = walk * step(abs(fract(vBB.x / 1500.0) - 0.5), 0.09) * step(0.35, hb);
+    float occupied = step(0.08 + 0.35 * step(hb, 0.12), h) * (1.0 - walk);
     float bob = uExcite * max(0.0, sin(uTime * (7.0 + h2 * 5.0) + h * 30.0)) * 0.3 + 0.03 * sin(uTime * 2.0 + h * 40.0);
-    float body = smoothstep(0.34, 0.26, abs(f.x - 0.5)) * step(f.y, 0.5 + bob) * step(0.08, f.y);
-    float head = smoothstep(0.2, 0.14, length((f - vec2(0.5, 0.66 + bob)) * vec2(1.0, 1.2)));
-    float person = max(body, head) * occupied;
-    // each half of the bowl in its team's colour, split at halfway
+    float body = smoothstep(0.34, 0.26, abs(f.x - 0.5)) * step(f.y, 0.5 + bob) * step(0.1, f.y);
+    float head = smoothstep(0.2, 0.14, length((f - vec2(0.5, 0.68 + bob)) * vec2(1.0, 1.2)));
+    float person = max(body, head) * occupied * (1.0 - tread);
+    // each half of the bowl leans to its team's colours, split at halfway
     float tw = smoothstep(-250.0, 250.0, vSim.y);
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
-    vec3 shirt = h2 < 0.38 ? teamC * 0.75 : (h2 < 0.58 ? vec3(0.62) : (h2 < 0.8 ? vec3(0.06) : vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7)) * 0.5));
+    vec3 rnd = vec3(fract(h2 * 7.3), fract(h2 * 3.1), fract(h2 * 5.7));
+    vec3 shirt = h2 < 0.3 ? teamC * 0.7 : (h2 < 0.5 ? vec3(0.55, 0.56, 0.58) : (h2 < 0.72 ? vec3(0.045) : mix(vec3(0.25), rnd * 0.5, 0.6)));
     vec3 skin = mix(vec3(0.85, 0.62, 0.48), vec3(0.3, 0.19, 0.13), fract(h * 13.0));
-    vec3 seatC = uSeat * mix(0.7, 1.0, uDay) + teamC * mix(0.06, 0.04, uDay);
-    // the riser: each row's front edge in shadow
-    seatC *= 0.55 + 0.45 * smoothstep(0.0, 0.2, f.y);
-    vec3 col = mix(seatC, head > body ? skin : shirt, person);
+    // the seats: the arena's colour, picked out in team colour block by block near each end
+    vec3 seatC = uSeat * mix(0.7, 1.0, uDay);
+    seatC = mix(seatC, teamC * 0.32, step(0.62, hb) * smoothstep(2500.0, 4500.0, abs(vSim.y)));
+    // the riser: the seat back, darker toward the tread it meets (the row's own shadow)
+    vec3 riser = seatC * (0.5 + 0.5 * smoothstep(0.0, 0.35, f.y));
+    vec3 floorC = mix(vec3(0.07, 0.072, 0.08), vec3(0.75, 0.8, 0.86), uFrost * 0.8) * mix(0.55, 1.0, uDay);
+    vec3 col = mix(mix(riser, head > body ? skin : shirt, person), floorC, tread);
+    col = mix(col, mix(vec3(0.11, 0.115, 0.13), floorC, uFrost) * mix(0.6, 1.0, uDay), walk * (1.0 - tread));
+    col = mix(col, vec3(0.006), tunnel * (1.0 - tread));
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
-    // (the average of a crowd: shirts, faces and seats; denser and sparser blocks, a sea of team colour)
-    vec3 crowdAvg = mix(mix(vec3(0.1, 0.1, 0.11), uSeat * 1.4 + 0.02, 0.4), teamC * 0.6, 0.3);
-    float dens = 0.7 + 0.6 * bbNoise(vBB / vec2(420.0, 260.0)) + 0.25 * (bbNoise(vBB / vec2(90.0, 120.0)) - 0.5);
-    vec3 avg = mix(seatC, crowdAvg * dens, 0.7);
-    col = mix(col, avg, smoothstep(0.25, 0.7, px));
-    // a walkway every dozen rows, and the risers' shadow lines as the rows go
-    float walk = step(fract(vBB.y / (rowH * 12.0)), 1.0 / 12.0);
-    col = mix(col, mix(vec3(0.03, 0.032, 0.04), vec3(0.75, 0.8, 0.86) * mix(0.4, 1.0, uDay), uFrost), walk * 0.7);
-    col *= 0.9 + 0.1 * smoothstep(0.0, 0.25, fract(vBB.y / rowH)) * (1.0 - smoothstep(0.6, 1.2, px));
-    // in the sun the crowd is a shade darker than its lit seats read; the roof shades the upper rows
-    col *= mix(1.0, 0.62, uDay) * (1.0 - uDay * 0.45 * smoothstep(2300.0, 4300.0, vSim.z));
-    float aisle = step(fract(vBB.x / 1500.0), 0.035);
-    col = mix(col, mix(vec3(0.035), uTrim * 0.25, 0.5), aisle);
+    float dens = 0.75 + 0.5 * bbNoise(vBB / vec2(420.0, 260.0)) + 0.2 * (bbNoise(vBB / vec2(90.0, 120.0)) - 0.5);
+    vec3 crowdAvg = mix(vec3(0.12, 0.12, 0.13), teamC * 0.55, 0.14) * dens * (1.0 - walk) + vec3(0.1) * walk;
+    vec3 avg = mix(seatC, crowdAvg, 0.75 * (1.0 - step(hb, 0.12) * 0.5));
+    col = mix(col, mix(avg, floorC, tread * 0.6), smoothstep(0.3, 0.8, px));
+    // the roof shades the upper rows by day
+    col *= mix(1.0, 1.2, uDay) * (1.0 - uDay * 0.35 * smoothstep(2300.0, 4300.0, vSim.z));
+    float aisle = step(fract(vBB.x / 1500.0), 0.03);
+    col = mix(col, mix(vec3(0.05), uTrim * 0.3, 0.5) * mix(0.6, 1.0, uDay), aisle);
     diffuseColor.rgb *= col;
-    // phone lights and camera flashes
-    float flash = step(0.9993, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay);
-    vec3 bbEmit = vec3(1.0) * flash * 2.5 + col * 0.12 * (1.0 - uDay);
+    // phone lights and camera flashes (more of them in a big moment)
+    float flash = step(0.9992 - uExcite * 0.003, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - tread) * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay * (1.0 - uExcite));
+    vec3 bbEmit = vec3(1.0) * flash * mix(2.5, 1.2, uDay) + col * 0.1 * (1.0 - uDay) + vec3(1.0, 0.9, 0.7) * tunnel * (1.0 - tread) * 0.02;
     `,
     { uTime: uT, uExcite: uEx },
     'uniform float uTime; uniform float uExcite;',
   );
   for (const [o0, z0, o1, z1] of tiers) {
     const pos: number[] = [];
+    const nrm: number[] = [];
     const uv: number[] = [];
     const idx: number[] = [];
     const W = per.length;
-    const slope = Math.hypot(o1 - o0, z1 - z0);
+    // real rows: a tread to sit on, a riser up to the next (the crowd is drawn on the risers, which
+    // face the pitch); each riser one row high in v, so the shader's rows land on them
+    const rows = Math.max(4, Math.round((z1 - z0) / ROW_RISE));
+    const rise = (z1 - z0) / rows;
+    const run = (o1 - o0) / rows;
     // u: arc length along the middle of the tier, so seats keep their size round the corners
     const om = (o0 + o1) / 2;
     const us = [0];
@@ -761,21 +789,30 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
       const [bx, by, bnx, bny] = per[i];
       us.push(us[i - 1] + Math.hypot(bx + bnx * (R + om) - ax - anx * (R + om), by + bny * (R + om) - ay - any * (R + om)));
     }
-    for (let j = 0; j <= 1; j++) {
-      const o = j ? o1 : o0;
-      const z = j ? z1 : z0;
-      for (let i = 0; i < W; i++) {
-        const [x, y, nx, ny] = per[i];
-        pos.push(x + nx * (R + o), y + ny * (R + o), z);
-        uv.push(us[i], j * slope);
-      }
+    // a strip round the bowl between two (offset, z) points, its v running v0 → v1
+    const strip = (oa: number, za: number, ob: number, zb: number, va: number, vb: number, riser: boolean) => {
+      const base = pos.length / 3;
+      for (const [o, z, v] of [[oa, za, va], [ob, zb, vb]])
+        for (let i = 0; i < W; i++) {
+          const [x, y, nx, ny] = per[i];
+          pos.push(x + nx * (R + o), y + ny * (R + o), z);
+          nrm.push(riser ? -nx : 0, riser ? -ny : 0, riser ? 0 : 1);
+          uv.push(us[i], v);
+        }
+      for (let i = 0; i < W - 1; i++) idx.push(base + i, base + i + W, base + i + 1, base + i + 1, base + i + W, base + i + W + 1);
+    };
+    for (let k = 0; k < rows; k++) {
+      const o = o0 + k * run;
+      const z = z0 + k * rise;
+      // (a tread carries its row's v all across; the shader tells treads from risers by their normal)
+      strip(o, z, o + run, z, k * ROW_H, k * ROW_H, false);
+      strip(o + run, z, o + run, z + rise, k * ROW_H, (k + 1) * ROW_H, true);
     }
-    for (let i = 0; i < W - 1; i++) idx.push(i, i + W, i + 1, i + 1, i + W, i + W + 1);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx);
-    g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat);
     grp.add(m);
     // the front parapet of each tier: an LED ribbon
