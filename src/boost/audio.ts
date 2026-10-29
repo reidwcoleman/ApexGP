@@ -6,6 +6,8 @@
  * Panned and attenuated from the camera.
  */
 
+import { Music } from './music.ts';
+
 export class Audio {
   ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -14,6 +16,9 @@ export class Audio {
   private engines: { osc1: OscillatorNode; osc2: OscillatorNode; filt: BiquadFilterNode; gain: GainNode; boost: GainNode; boostF: BiquadFilterNode; whine: OscillatorNode; whineG: GainNode; pan: StereoPannerNode }[] = [];
   private crowd!: { gain: GainNode; filt: BiquadFilterNode };
   volume = 0.8;
+  /** the background music (made when sound unlocks) and its volume */
+  music: Music | null = null;
+  musicVolume = 0.5;
 
   /** browsers only allow sound after a gesture */
   unlock(): void {
@@ -57,6 +62,14 @@ export class Audio {
     src.connect(filt).connect(gain).connect(this.master);
     src.start();
     this.crowd = { gain, filt };
+    this.music = new Music(ctx, this.master, this.noise);
+    this.music.setVolume(this.musicVolume);
+    this.music.start();
+  }
+
+  setMusicVolume(v: number): void {
+    this.musicVolume = v;
+    this.music?.setVolume(v);
   }
 
   setVolume(v: number): void {

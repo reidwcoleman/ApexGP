@@ -86,6 +86,8 @@ export interface Profile {
   trail: number;
   boom: number;
   fov: number;
+  /** the music's volume 0…1 */
+  music: number;
   dist: number;
   height: number;
   /** degrees, -15..0 */
@@ -108,7 +110,7 @@ export interface Profile {
 }
 
 export function loadProfile(): Profile {
-  const def: Profile = { name: 'Player', accent: 0xffffff, decal: 0, finish: 0, body: 0, trail: 0, boom: 0, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
+  const def: Profile = { name: 'Player', accent: 0xffffff, decal: 0, finish: 0, body: 0, trail: 0, boom: 0, fov: 110, dist: 270, height: 100, angle: -4, stiff: 0.45, trans: 1.2, ballCam: true, volume: 0.8, music: 0.5, shake: true, map: 'apex', time: 'day', binds: structuredClone(DEFAULT_KEYS), padBinds: { ...DEFAULT_PAD }, deadzone: 0.1, steerSens: 1, airSens: 1, rumble: true };
   try {
     const raw = JSON.parse(localStorage.getItem('boostball.profile') ?? '{}');
     // (profiles from before arenas and times: the old Day / Night switch)
@@ -328,6 +330,7 @@ export class UI {
     <div class="slider"><span>Cam stiffness</span><input type="range" id="p-stiff" min="0" max="1" step="0.05" value="${p.stiff}" /><b id="p-stiff-v">${p.stiff.toFixed(2)}</b></div>
     <div class="slider"><span>Transition speed</span><input type="range" id="p-trans" min="1" max="2" step="0.1" value="${p.trans}" /><b id="p-trans-v">${p.trans.toFixed(1)}</b></div>
     <div class="slider"><span>Volume</span><input type="range" id="p-vol" min="0" max="1" step="0.05" value="${p.volume}" /><b id="p-vol-v">${Math.round(p.volume * 100)}</b></div>
+    <div class="slider"><span>Music</span><input type="range" id="p-music" min="0" max="1" step="0.05" value="${p.music}" /><b id="p-music-v">${Math.round(p.music * 100)}</b></div>
     <div class="seg" id="p-shake"><button data-v="1" class="${p.shake ? 'on' : ''}">Camera shake</button><button data-v="0" class="${p.shake ? '' : 'on'}">No shake</button></div>
     <button class="mbtn small" id="p-binds" style="margin-top:8px"><span>Controls</span></button>
     <button class="mbtn primary small" id="p-resume"><span>Resume</span></button>
@@ -479,7 +482,7 @@ export class UI {
       if (k) this.onLobbyKick(k.getAttribute('data-kick')!);
     });
     // pause
-    const slider = (id: string, key: 'fov' | 'dist' | 'height' | 'angle' | 'stiff' | 'trans' | 'volume', fmt = (v: number) => String(v)) => {
+    const slider = (id: string, key: 'fov' | 'dist' | 'height' | 'angle' | 'stiff' | 'trans' | 'volume' | 'music', fmt = (v: number) => String(v)) => {
       const el = this.$<HTMLInputElement>(id);
       el.addEventListener('input', () => {
         this.profile[key] = Number(el.value);
@@ -494,6 +497,7 @@ export class UI {
     slider('#p-stiff', 'stiff', (v) => v.toFixed(2));
     slider('#p-trans', 'trans', (v) => v.toFixed(1));
     slider('#p-vol', 'volume', (v) => String(Math.round(v * 100)));
+    slider('#p-music', 'music', (v) => String(Math.round(v * 100)));
     seg('#p-shake', (v) => {
       this.profile.shake = v === '1';
       this.save();

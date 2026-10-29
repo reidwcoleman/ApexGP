@@ -182,6 +182,7 @@ export class Game {
     CAM.TRANS = p.trans;
     this.cam.ballCam = p.ballCam;
     this.audio.setVolume(p.volume);
+    this.audio.setMusicVolume(p.music ?? 0.5);
     this.controls.keyBinds = p.binds;
     this.controls.padBinds = p.padBinds;
     this.controls.pad = { deadzone: p.deadzone, steerSens: p.steerSens, airSens: p.airSens, rumble: p.rumble };
@@ -1305,10 +1306,15 @@ export class Game {
         this.audio.engine(i, c.vel.dot(c.rot.f), c.input.throttle, c.boosting, c.supersonic, d, pan, c.alive && this.mode !== 'attract', i === this.me);
       }
       this.audio.crowdLevel(this.mode === 'attract' ? 0.15 : this.excite);
+      // the music: full in the menus, pulled back under play
+      this.audio.music?.setMood(this.mode === 'attract' ? 1 : this.paused ? 0.8 : 0.45);
     }
     this.stage.render(dt);
     this.padsPrev.set(w.pads);
   }
+
+  /** where each car's nozzles were when it last laid boost (to fill the plume in between frames) */
+  private lastJets = new Map<number, { t: number; p: THREE.Vector3[] }>();
 
   /** the boost ribbons per car (−1: the garage's, BALL_RIBBON: the ball's streak), one per nozzle */
   private ribbons = new Map<number, { r: Ribbon[]; fx: FX; i: number }>();
@@ -1338,8 +1344,8 @@ export class Game {
       case 5:
         return { head: hot, body: new THREE.Color(2.4, 2.0, 1.1), life: 0.6, w0: 4, w1: 9, kind: 0 };
       default:
-        // (a short hot core: the billowing flame puffs carry this trail)
-        return { head: hot, body: team === 0 ? new THREE.Color(0.45, 1.2, 3.8) : new THREE.Color(3.8, 1.2, 0.25), life: 0.28, w0: 6, w1: 12, kind: 0 };
+        // (just a short hot core: the billowing flame puffs carry this trail)
+        return { head: hot, body: team === 0 ? new THREE.Color(0.35, 0.9, 2.6) : new THREE.Color(2.6, 0.9, 0.2), life: 0.12, w0: 5, w1: 9, kind: 0 };
     }
   }
 
@@ -1387,28 +1393,46 @@ export class Game {
     else if (style === 5) col = [2.6, 2.2, 1.3];
     else col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
     if (style === 0) {
-      // the classic jet: a white-hot flame at each nozzle billowing out into big soft puffs of team
-      // fire that swell, drift and cool to dark smoke
-      const fire = team === 0 ? [0.35, 0.95, 3.2] : [3.2, 1.05, 0.18];
-      const mid = team === 0 ? [1.3, 2.2, 3.4] : [3.4, 2.1, 0.8];
-      for (const jet of jets) {
+      // the classic plume: an unbroken stream of flame left hanging in the air behind each nozzle,
+      // white-hot where it leaves, the team's fire through the body of it, cooling to smoke at the
+      // tail. Puffs are laid along the path the nozzle travelled since the last frame, so it never
+      // breaks into dots at speed
+      const fire = team === 0 ? [0.16, 0.5, 1.9] : [2.0, 0.6, 0.08];
+      const mid = team === 0 ? [0.8, 1.45, 2.4] : [2.4, 1.4, 0.45];
+      const prev = this.lastJets.get(i);
+      const now: THREE.Vector3[] = [];
+      const fresh = prev && this.time - prev.t < 0.06;
+      jets.forEach((jet, j) => {
         const o = jet.clone().applyQuaternion(q);
-        const x = pos.x + o.x;
-        const y = pos.y + o.y;
-        const z = pos.z + o.z;
-        for (let k = 0; k < 3; k++) {
-          const sp = 450 + Math.random() * 500;
-          const j = 90;
-          const c = k === 0 ? mid : fire;
-          fx.spark({ x, y, z, vx: vel.x * 0.35 + back.x * sp + (Math.random() - 0.5) * j, vy: vel.y * 0.35 + back.y * sp + (Math.random() - 0.5) * j, vz: vel.z * 0.35 + back.z * sp + (Math.random() - 0.5) * j, r: c[0], g: c[1], b: c[2], life: (k === 0 ? 0.16 : 0.32 + Math.random() * 0.2) * lk, size: k === 0 ? 30 : 34 + Math.random() * 18, grow: k === 0 ? 60 : 150, drag: 3.2, grav: -60 });
+        const p1 = new THREE.Vector3(pos.x + o.x, pos.y + o.y, pos.z + o.z);
+        now.push(p1);
+        const p0 = fresh ? prev!.p[j] : p1;
+        const steps = Math.max(1, Math.min(8, Math.ceil(p0.distanceTo(p1) / 14)));
+        for (let k = 0; k < steps; k++) {
+          const u = (k + Math.random()) / steps;
+          const x = p0.x + (p1.x - p0.x) * u;
+          const y = p0.y + (p1.y - p0.y) * u;
+          const z = p0.z + (p1.z - p0.z) * u;
+          // (laid earlier along the path = older already)
+          const age = (1 - u) / 60;
+          const sp = 300 + Math.random() * 260;
+          const j2 = 160;
+          // the body of the flame, swelling as it hangs
+          fx.spark({ x, y, z, vx: vel.x * 0.12 + back.x * sp + (Math.random() - 0.5) * j2, vy: vel.y * 0.12 + back.y * sp + (Math.random() - 0.5) * j2, vz: vel.z * 0.12 + back.z * sp + (Math.random() - 0.5) * j2 + 20, r: fire[0], g: fire[1], b: fire[2], life: Math.max(0.1, (0.3 + Math.random() * 0.18) * lk - age), size: 38 + Math.random() * 22, grow: 260, drag: 3.6, grav: -120 });
+          // a brighter, shorter heart to it
+          if (k % 2 === 0) fx.spark({ x, y, z, vx: vel.x * 0.2 + back.x * sp, vy: vel.y * 0.2 + back.y * sp, vz: vel.z * 0.2 + back.z * sp, r: mid[0], g: mid[1], b: mid[2], life: Math.max(0.06, 0.13 * lk - age), size: 30, grow: 110, drag: 3 });
         }
-        fx.spark({ x, y, z, vx: vel.x * 0.5 + back.x * 300, vy: vel.y * 0.5 + back.y * 300, vz: vel.z * 0.5 + back.z * 300, r: 3, g: 2.8, b: 2.4, life: 0.07 * lk, size: 24, grow: 40, drag: 2 });
-        if (Math.random() < 0.35 * parts)
-          fx.spark({ x, y, z, vx: vel.x * 0.3 + back.x * 900 + (Math.random() - 0.5) * 500, vy: vel.y * 0.3 + back.y * 900 + (Math.random() - 0.5) * 500, vz: vel.z * 0.3 + back.z * 900 + (Math.random() - 0.5) * 500, r: 3, g: 2.2, b: 1, life: 0.35 * lk, size: 9, drag: 2.5, grav: 350 });
-      }
-      if (Math.random() < 0.7) {
-        const g = 0.2;
-        fx.smoke({ x: pos.x + back.x * 120, y: pos.y + back.y * 120, z: pos.z + 15 + back.z * 120, vx: vel.x * 0.1 + back.x * 120, vy: vel.y * 0.1 + back.y * 120, vz: 50, r: g, g: g * 1.02, b: g * 1.1, life: 0.9 * lk, size: 70, grow: 220, drag: 2 });
+        // white-hot right at the nozzle
+        fx.spark({ x: p1.x, y: p1.y, z: p1.z, vx: vel.x * 0.5 + back.x * 300, vy: vel.y * 0.5 + back.y * 300, vz: vel.z * 0.5 + back.z * 300, r: 3.2, g: 3.0, b: 2.6, life: 0.07 * lk, size: 26, grow: 50, drag: 2 });
+        if (Math.random() < 0.4 * parts)
+          fx.spark({ x: p1.x, y: p1.y, z: p1.z, vx: vel.x * 0.3 + back.x * 900 + (Math.random() - 0.5) * 500, vy: vel.y * 0.3 + back.y * 900 + (Math.random() - 0.5) * 500, vz: vel.z * 0.3 + back.z * 900 + (Math.random() - 0.5) * 500, r: 3, g: 2.2, b: 1, life: 0.35 * lk, size: 9, drag: 2.5, grav: 350 });
+      });
+      this.lastJets.set(i, { t: this.time, p: now });
+      // and the smoke it cools into, rolling out behind
+      if (Math.random() < 0.85) {
+        const g = 0.18;
+        const mp = now[0].clone().lerp(now[now.length - 1], 0.5);
+        fx.smoke({ x: mp.x + back.x * 90, y: mp.y + back.y * 90, z: mp.z + 10 + back.z * 90, vx: vel.x * 0.08 + back.x * 140, vy: vel.y * 0.08 + back.y * 140, vz: 45, r: g, g: g * 1.02, b: g * 1.1, life: 1.0 * lk, size: 70, grow: 240, drag: 2 });
       }
       return;
     }
