@@ -1629,25 +1629,37 @@ export class Game {
   // ------------------------------------------------------------------ boot helpers
   /** compile every shader up front so the first boost / goal doesn't hitch */
   async warm(): Promise<void> {
-    const v = new CarView(0, 0xffffff, 'warm');
-    this.field.add(v.group);
-    // (the pearl paint is its own program)
-    const v2 = new CarView(1, packLoadout({ finish: 3 }), 'warm');
-    v2.group.position.set(0, 3, 0);
-    this.field.add(v2.group);
-    this.fx.goal(0, 0, 300, 0);
-    this.fx.demo(0, 0, 100);
-    for (let k = 0; k < 3; k++) this.fx.update(0.016);
-    // (the shaders compile on the GPU's own threads while the physics does its one-off setup here)
-    const compiled = this.stage.renderer.compileAsync(this.stage.scene, this.stage.camera);
+    // what the menu shows compiles on the GPU's own threads while the physics does its one-off setup
+    const compiled = this.stage.compile(this.stage.scene);
     primeRocketSim();
     await compiled;
     this.warmed = true;
     this.capture();
     this.stage.render(0.016);
-    this.field.remove(v.group, v2.group);
-    for (let k = 0; k < 400; k++) this.fx.update(0.05);
     this.stage.expectLit = true;
+    // everything else (explosions, sparks, the other paints) compiles behind the menu, on throwaway
+    // copies off the scene: the programs are shared by everything that draws the same way
+    void this.warmRest();
+  }
+
+  private async warmRest(): Promise<void> {
+    const g = new THREE.Group();
+    const fx = new FX();
+    g.add(fx.group);
+    for (const [k, boom] of [0, 1, 2, 3, 4, 5].entries()) fx.preview(k * 400, 0, 300, k % 2, boom, 0.3);
+    fx.goal(0, 0, 300, 0);
+    fx.demo(0, 0, 100);
+    for (let k = 0; k < 40; k++) fx.update(0.016);
+    for (const [k, finish] of [0, 1, 2, 3].entries()) {
+      const v = new CarView(k % 2, packLoadout({ finish, trail: k }), 'warm');
+      v.setEnv(this.reflect);
+      g.add(v.group);
+    }
+    try {
+      await this.stage.compile(g, this.stage.scene);
+    } catch (e) {
+      console.warn('[boost] background compile', e);
+    }
   }
 
   /** url switches for tests and links */

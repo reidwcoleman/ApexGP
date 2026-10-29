@@ -291,6 +291,19 @@ export class Stage {
     return env;
   }
 
+  /** compile what `obj` needs (as if drawn in `into`) on the GPU's own threads. Everything is drawn
+   * into the post chain's buffers, never straight to the canvas, and a program for a buffer differs
+   * from one for the screen (linear output): so compile with a buffer bound, or it's all compiled
+   * again, synchronously, on the first frame */
+  compile(obj: THREE.Object3D, into: THREE.Scene | null = null): Promise<unknown> {
+    const r = this.renderer;
+    const was = r.getRenderTarget();
+    r.setRenderTarget(this.composer.inputBuffer);
+    const p = r.compileAsync(obj, this.camera, into);
+    r.setRenderTarget(was);
+    return p;
+  }
+
   /** the old two-way switch */
   setDay(day: boolean): void {
     this.setLook(day ? TIMES.day : TIMES.night);

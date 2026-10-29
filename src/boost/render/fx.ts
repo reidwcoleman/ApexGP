@@ -288,6 +288,17 @@ export class FX {
         });
       }
     }
+    // confetti raining down over the scoring end: the team's colour, gold and white, fluttering
+    const cc = [tc, new THREE.Color(0xffd34a), new THREE.Color(0xffffff), tc.clone().lerp(new THREE.Color(1, 1, 1), 0.5)];
+    for (let k = 0; k < 520; k++) {
+      this.later.push({
+        t: Math.random() * 1.6,
+        fn: () => {
+          const c = cc[k % cc.length];
+          this.smoke({ x: (Math.random() - 0.5) * 7000, y: gy * (0.35 + Math.random() * 0.6), z: 2000 + Math.random() * 1400, vx: (Math.random() - 0.5) * 300, vy: (Math.random() - 0.5) * 300, vz: -60 - Math.random() * 80, r: c.r, g: c.g, b: c.b, life: 4 + Math.random() * 2.5, size: 44 + Math.random() * 26, drag: 0.8, grav: 35 });
+        },
+      });
+    }
     const pale = tc.clone().lerp(new THREE.Color(1, 1, 1), 0.4).multiplyScalar(3);
     const hot = new THREE.Color(3, 2.9, 2.6);
     for (let k = 0; k < 14; k++) {

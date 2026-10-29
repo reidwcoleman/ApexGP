@@ -4,6 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { ARENA, CORNER_R, GOAL_BACK_R, GOAL_EDGE_R, GOAL_POST_R, goalSurfaces, GOAL_TOP_R, octCore, PADS, type TriMesh } from '../sim/arena.ts';
 import { MAPS, TIMES, type MapId, type MapLook, type TimeLook } from './looks.ts';
 import { buildSurround, type SurroundView } from './surround.ts';
+import { buildSpectacle, type Spectacle } from './spectacle.ts';
 
 /**
  * The stadium, authored in the simulation's own frame (cm, z up) under one root group that turns it
@@ -1627,6 +1628,7 @@ export function buildArena(): ArenaView {
   const standsBy = new Map<number, THREE.Group>();
   const lightsBy = new Map<string, THREE.Group>();
   const surroundBy = new Map<MapId, SurroundView | null>();
+  const specBy = new Map<MapId, Spectacle | null>();
   const rf = roof();
   root.add(rf);
   const scr = screens();
@@ -1693,11 +1695,18 @@ export function buildArena(): ArenaView {
         if (sv) root.add(sv.group);
       }
       surroundBy.get(map.id)?.setLook(t, t.keyDir);
+      for (const [id, sp] of specBy) if (sp) sp.group.visible = id === map.id;
+      if (!specBy.has(map.id)) {
+        const sp = buildSpectacle(map);
+        specBy.set(map.id, sp);
+        if (sp) root.add(sp.group);
+      }
     },
     update(t, padT, excite, score, clock) {
       uT.value = t;
       TH.uClock.value = t;
       surroundBy.get(curMap.id)?.update?.(t);
+      specBy.get(curMap.id)?.update(t, curTime.day);
       standsBy.get(curMap.tiers)?.userData.search?.(t, curTime.day, excite);
       shellT.value = t;
       uEx.value = excite;
