@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BloomEffect, Effect, EffectComposer, EffectPass, FXAAEffect, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
+import { BloomEffect, Effect, EffectAttribute, EffectComposer, EffectPass, FXAAEffect, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 import { GradeEffect } from '../../marbles/post-grade.ts';
 import { MAPS, TIMES, type MapLook, type TimeLook } from './looks.ts';
@@ -25,6 +25,37 @@ class SanitizeEffect extends Effect {
   }
 }
 
+/** the lens: a radial streak toward the edges at speed, a faint colour fringe toward the corners, and a
+ * grain under it all so gradients (sky, glows, fog) never band */
+class LensEffect extends Effect {
+  constructor() {
+    super(
+      'LensEffect',
+      `uniform float uSpeed; uniform float uTime;
+      float lh(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
+      void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
+        vec2 d = uv - 0.5;
+        float r = length(d);
+        vec3 c = inputColor.rgb;
+        if (uSpeed > 0.01) {
+          float k = uSpeed * 0.05 * smoothstep(0.12, 0.7, r);
+          vec3 acc = c;
+          for (int i = 1; i < 7; i++) acc += texture2D(inputBuffer, uv - d * k * float(i) / 6.0).rgb;
+          c = acc / 7.0;
+        }
+        float ca = 0.0018 * smoothstep(0.35, 0.85, r);
+        if (ca > 0.0) {
+          c.r = mix(c.r, texture2D(inputBuffer, uv - d * ca).r, 0.85);
+          c.b = mix(c.b, texture2D(inputBuffer, uv + d * ca).b, 0.85);
+        }
+        c += (lh(uv * 1000.0 + fract(uTime) * 61.0) - 0.5) / 160.0;
+        outputColor = vec4(c, inputColor.a);
+      }`,
+      { attributes: EffectAttribute.CONVOLUTION, uniforms: new Map([['uSpeed', new THREE.Uniform(0)], ['uTime', new THREE.Uniform(0)]]) },
+    );
+  }
+}
+
 export const S = 0.01; // cm → m
 export const KEY_DIR = new THREE.Vector3(0.25, 1, 0.35).normalize();
 
@@ -35,6 +66,9 @@ export class Stage {
   readonly composer: EffectComposer;
   readonly key: THREE.DirectionalLight;
   readonly bloom: BloomEffect;
+  readonly lens = new LensEffect();
+  /** 0…1: how fast the camera's car is going (the lens streaks at supersonic) */
+  speed = 0;
   ao: N8AOPostPass | null = null;
   readonly gpu: string;
   /** the context is gone (driver reset); nothing renders until it's back */
@@ -90,6 +124,8 @@ export class Stage {
     r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.NoToneMapping;
     r.outputColorSpace = THREE.SRGBColorSpace;
+    // (checking every program for errors makes the browser wait on the GPU for each one: development only)
+    r.debug.checkShaderErrors = import.meta.env.DEV;
     const gl = r.getContext();
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     this.gpu = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : '';
@@ -173,6 +209,7 @@ export class Stage {
     comp.addPass(new EffectPass(this.camera, new SanitizeEffect()));
     // the AA samples its input, so it leads the merged pass
     comp.addPass(new EffectPass(this.camera, aa, this.bloom, tone, grade, vig));
+    comp.addPass(new EffectPass(this.camera, this.lens));
     this.setLook(TIMES.day, MAPS.apex);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -238,11 +275,13 @@ export class Stage {
     cam.position.set(0, 2.5, 0);
     const was = hide.map((o) => o.visible);
     hide.forEach((o) => (o.visible = false));
-    const fog = this.scene.fog;
-    // (no fog in the capture: reflections up close are sharp)
-    this.scene.fog = null;
+    // (no fog in the capture: reflections up close are sharp. Thinned to nothing rather than taken
+    // away, so every material keeps the program it already has instead of compiling a fogless one)
+    const fog = this.scene.fog as THREE.FogExp2;
+    const dens = fog.density;
+    fog.density = 0;
     cam.update(this.renderer, this.scene);
-    this.scene.fog = fog;
+    fog.density = dens;
     hide.forEach((o, i) => (o.visible = was[i]));
     const pm = new THREE.PMREMGenerator(this.renderer);
     const env = pm.fromCubemap(rt.texture).texture;
@@ -289,6 +328,8 @@ export class Stage {
   render(dt: number): void {
     if (this.lost) return;
     this.skyU.uTime.value += dt;
+    (this.lens.uniforms.get('uSpeed') as THREE.Uniform).value = this.speed;
+    (this.lens.uniforms.get('uTime') as THREE.Uniform).value = this.skyU.uTime.value;
     if (this.safe) {
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.renderer.render(this.scene, this.camera);

@@ -1252,6 +1252,14 @@ export class Game {
     this.gfx.update(dt);
     this.updateRibbons();
     this.flashK = Math.max(0, this.flashK - dt * 1.4);
+    // the lens streaks round the edges as your car goes supersonic
+    {
+      const mc = this.me >= 0 ? w.cars[this.me] : undefined;
+      const live = !!mc && mc.alive && this.mode !== 'attract' && w.phase !== 'replay' && w.phase !== 'goal';
+      const sp = mc ? mc.vel.len() : 0;
+      const target = live ? (mc!.supersonic ? 1 : THREE.MathUtils.smoothstep(sp, 1500, 2200) * 0.35) : 0;
+      this.stage.speed += (target - this.stage.speed) * Math.min(1, dt * 4);
+    }
     this.stage.flash.intensity = this.flashK * this.flashK * 6000;
     const nearGoal = THREE.MathUtils.smoothstep(Math.abs(w.ball.pos.y), 2500, 5000);
     this.excite = Math.max(this.excite - dt * 0.25, nearGoal * 0.5);

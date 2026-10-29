@@ -37,10 +37,11 @@ const lap = (what: string) => {
 try {
   await tick();
   set(0.1, 'Painting the lines');
+  // (the physics downloads while the fonts do)
+  const physics = loadRocketSim();
   await Promise.all([document.fonts.load('italic 900 40px "Titillium Web"'), document.fonts.load('700 40px "Titillium Web"')]).catch(() => undefined);
-  await tick();
   set(0.25, 'Starting the physics');
-  await loadRocketSim();
+  await physics;
   lap('physics');
   set(0.35, 'Building the stadium');
   const game = new Game(document.getElementById('gl') as HTMLCanvasElement, document.getElementById('ui')!);
