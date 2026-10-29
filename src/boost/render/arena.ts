@@ -390,6 +390,15 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           // only on the flat turf: not up the ramps, not in the goals, not on synthetic turf
           float oct = max(max(abs(P.x) - ${ARENA.X.toFixed(1)}, abs(P.y) - ${ARENA.Y.toFixed(1)}), (abs(P.x) + abs(P.y) - ${ARENA.CORNER.toFixed(1)}) * 0.7071);
           float onTurf = smoothstep(20.0, 140.0, -(oct + ${R.toFixed(1)})) * (1.0 - step(3.5, uPattern));
+          // how much of a blade there is here: none off the turf or past the fade (and then none of
+          // the work below either)
+          float dc = distance(P, uCam);
+          float k = (1.0 - smoothstep(${(far * 0.55).toFixed(1)}, ${far.toFixed(1)}, dc)) * onTurf;
+          vec3 bladePos = vec3(P, -500.0);
+          vec3 objectNormal = vec3(0.0, 0.0, 1.0);
+          vGrass = vec3(0.0);
+          vT = 0.0;
+          if (k > 0.002) {
           // the mowing: which stripe this is, the way its blades lie
           float pw = 18.0;
           float band;
@@ -422,9 +431,7 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           float fr = uFrost * smoothstep(0.55, 0.9, gn(P * 0.004) * 0.6 + gn(P * 0.03) * 0.4 + smoothstep(-1000.0, -150.0, oct) * 0.5);
           col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), fr * 0.7);
           col *= 1.0 + bbCausV(P / 330.0, uClock) * uCaus * 1.25;
-          // how tall: fading in round the view's edge (so the layer has no border), shorter on lines
-          float dc = distance(P, uCam);
-          float k = (1.0 - smoothstep(${(far * 0.55).toFixed(1)}, ${far.toFixed(1)}, dc)) * onTurf;
+          // how tall: shorter toward the fade (so the layer has no border) and on the lines
           float ht = ${h.toFixed(1)} * (0.55 + 0.9 * rnd) * k * (1.0 - L * 0.45);
           float wd = ${w.toFixed(2)} * (0.7 + 0.6 * gh(cell + 4.4)) * (0.4 + 0.6 * k);
           float t = position.z;
@@ -444,22 +451,23 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           vec2 bendXY = lean * t * t * ht;
           float bendZ = t * ht * (1.0 - 0.25 * min(length(lean), 1.6)) * (1.0 - press * 0.45);
           vec2 across = vec2(-sin(ang), cos(ang));
-          vec3 bladePos = vec3(P + across * position.x * wd + bendXY, bendZ + 0.6);
+          bladePos = vec3(P + across * position.x * wd + bendXY, bendZ + 0.6);
           // lit mostly as the turf (up), a little as the blade
-          vec3 objectNormal = normalize(vec3(vec2(cos(ang), sin(ang)) * 0.35 + lean * 0.2, 1.0));
-          #ifdef USE_TANGENT
-          vec3 objectTangent = vec3(1.0, 0.0, 0.0);
-          #endif
+          objectNormal = normalize(vec3(vec2(cos(ang), sin(ang)) * 0.35 + lean * 0.2, 1.0));
           // darker down in the turf, bright at the tips
           vec3 tipC = col * vec3(1.12, 1.14, 1.0) + vec3(0.012, 0.016, 0.0);
           // (into the mown surface's own colour as the blades fade out, so there's no edge)
           vGrass = mix(col, mix(col * 0.72, tipC, smoothstep(0.0, 1.0, t)), smoothstep(0.0, 0.6, k));
-          vT = t;`,
+          vT = t;
+          }`,
         )
         .replace('#include <begin_vertex>', 'vec3 transformed = bladePos;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vGrass;\nvarying float vT;')
         .replace('#include <color_fragment>', 'diffuseColor.rgb = vGrass;')
+        // (both sides of a blade lit alike: three turns a back face's normal away from the light,
+        // which drew every blade seen from behind as a black spike)
+        .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);')
         // (light through the blades: a touch of their own colour glows at the tips)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vGrass * vT * vT * 0.12;');
       // the caustic needs to be in the vertex shader too
@@ -478,7 +486,8 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
     mat.customProgramCacheKey = () => 'bbgrass' + spacing;
     const m = new THREE.Mesh(geo, mat);
     m.frustumCulled = false;
-    m.receiveShadow = true;
+    // (the cars' shadows land close by: only the fine layer takes them)
+    m.receiveShadow = spacing < 6;
     m.castShadow = false;
     // the grid follows the camera's footprint, pushed ahead along the view so the blades sit in shot
     m.onBeforeRender = (_r, _s, cam) => {
@@ -495,8 +504,8 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
     layers.push({ mesh: m, uN, n });
   };
   // (spacing cm, blade height, width, grid size at quality 0/1/2, fade-out radius)
-  make(4.2, 6.5, 1.3, [0, 170, 250], 600);
-  make(9, 7.5, 2.2, [140, 210, 280], 1500);
+  make(4.6, 6.5, 1.4, [0, 150, 220], 600);
+  make(10, 7.5, 2.4, [120, 190, 250], 1500);
   const setQuality = (q: number) => {
     for (const l of layers) {
       const n = l.n[Math.max(0, Math.min(2, q))];

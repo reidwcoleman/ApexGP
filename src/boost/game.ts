@@ -16,6 +16,7 @@ import { BALL } from './sim/ball.ts';
 import { Bot } from './sim/bot.ts';
 import { noInput, type Input } from './sim/car.ts';
 import { V3 } from './sim/math.ts';
+import { primeRocketSim } from './sim/rocketsim.ts';
 import { REPLAY_T, TICK, World, type Player, type WEvent } from './sim/world.ts';
 import { UI, type Profile } from './ui.ts';
 
@@ -200,7 +201,12 @@ export class Game {
     carNight.value = 1 - Math.min(1, t.day * 1.4);
     this.stage.setLook(t, m);
     this.arena.setLook(t, m);
-    // the cars and the ball reflect the real stadium around them
+    // the cars and the ball reflect the real stadium around them (once the shaders are compiled:
+    // capturing before that links every program on the spot, which stalls the load)
+    if (this.warmed) this.capture();
+  }
+  /** the stadium captured into the reflections of the cars and the ball */
+  private capture(): void {
     const hide: THREE.Object3D[] = [...this.views.map((v) => v.group), this.ball.mesh, this.ball.glow, this.ball.shadow, this.fx.group, this.gfx.group];
     if (this.showcase) hide.push(this.showcase.group);
     this.reflect = this.stage.captureEnv(hide);
@@ -211,6 +217,7 @@ export class Game {
     bm.needsUpdate = true;
   }
   private reflect: THREE.Texture | null = null;
+  private warmed = false;
   private lookKey = '';
   private lastReset: number[] = Array(8).fill(-9);
 
@@ -1623,7 +1630,12 @@ export class Game {
     this.fx.goal(0, 0, 300, 0);
     this.fx.demo(0, 0, 100);
     for (let k = 0; k < 3; k++) this.fx.update(0.016);
-    await this.stage.renderer.compileAsync(this.stage.scene, this.stage.camera);
+    // (the shaders compile on the GPU's own threads while the physics does its one-off setup here)
+    const compiled = this.stage.renderer.compileAsync(this.stage.scene, this.stage.camera);
+    primeRocketSim();
+    await compiled;
+    this.warmed = true;
+    this.capture();
     this.stage.render(0.016);
     this.field.remove(v.group, v2.group);
     for (let k = 0; k < 400; k++) this.fx.update(0.05);

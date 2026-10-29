@@ -113,10 +113,47 @@ function mod(): RSModule {
 }
 const heap = () => new Float64Array(mod().HEAPF64.buffer, buf, 512);
 
-/** one RocketSim arena (the module holds a single one; making another replaces it) */
+/** the arena as it was made (ball on the spot, every pad live): what a reused arena is reset to */
+let fresh: { ball: Float64Array; pads: Float64Array } | null = null;
+let primed = true;
+
+/** the arena's first step does seconds of one-off setup inside Bullet: the page calls this while it
+ * loads (alongside the GPU compiling shaders) so it never lands on a frame of play. The ball, the pads
+ * and the clock go back as they were; the cars move one tick. */
+export function primeRocketSim(): void {
+  if (primed || !M || !fresh) return;
+  primed = true;
+  const ball = new Float64Array(BS);
+  const pads = new Float64Array(fresh.pads.length);
+  const a = Object.create(RSArena.prototype) as RSArena;
+  a.getBall(ball);
+  a.getPads(pads);
+  const t = M._rs_tick();
+  M._rs_step(1);
+  a.setBall(ball);
+  a.setPads(pads);
+  M._rs_set_tick(t);
+}
+
+/** one RocketSim arena. The module holds a single one, and building it (the collision meshes into
+ * Bullet, then its first step) takes seconds, so it's built once: every later arena clears the cars
+ * and puts the ball, the pads and the clock back to how they started. */
 export class RSArena {
   constructor() {
-    mod()._rs_create();
+    const m = mod();
+    if (!fresh) {
+      m._rs_create();
+      fresh = { ball: new Float64Array(BS), pads: new Float64Array(this.padCount() * 3) };
+      this.getBall(fresh.ball);
+      this.getPads(fresh.pads);
+      primed = false;
+    } else {
+      m._rs_clear_cars();
+      this.setBall(fresh.ball);
+      this.setPads(fresh.pads);
+      m._rs_set_tick(0);
+      this.events();
+    }
   }
   /** preset: the hitbox class (0 octane, 1 dominus, 2 plank, 3 breakout, 4 hybrid, 5 merc) */
   addCar(team: number, preset = 0): number {

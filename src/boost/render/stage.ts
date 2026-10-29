@@ -122,7 +122,7 @@ export class Stage {
     key.position.copy(KEY_DIR).multiplyScalar(120);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
-    const sz = this.quality === 2 ? 4096 : 2048;
+    const sz = 2048;
     key.shadow.mapSize.set(sz, sz);
     const cam = key.shadow.camera;
     cam.left = -48;
@@ -154,7 +154,8 @@ export class Stage {
       ao.configuration.distanceFalloff = 0.6;
       ao.configuration.intensity = 2.2;
       ao.configuration.gammaCorrection = false;
-      ao.configuration.halfRes = this.quality < 2;
+      // (half resolution with depth-aware upsampling: looks the same, a fraction of the cost)
+      ao.configuration.halfRes = true;
       ao.configuration.depthAwareUpsampling = true;
       ao.configuration.color = new THREE.Color(0x05070c);
       ao.setQualityMode(this.quality === 2 ? 'Medium' : 'Performance');
@@ -315,28 +316,59 @@ export class Stage {
   }
 
   /** once a second read three pixels of the finished frame; pure black three times running = broken post */
+  /** the watchdog's readback: three pixels copied into a buffer on the GPU and fenced, read a second
+   * later once the copy is done (a plain readPixels waits for the GPU to finish the frame: a hitch
+   * every second) */
+  private probe: { buf: WebGLBuffer; sync: WebGLSync | null } | null = null;
+  /** lit frames the watchdog has seen: once a driver has shown a few, the post chain works on it and
+   * the checks stop (any readback, even fenced, stalls Chrome's pipeline: a hitch each time) */
+  private litSeen = 0;
   private watch(dt: number): void {
     this.checkT += dt;
-    if (this.safe || this.checkT < 1) return;
+    if (this.safe || this.checkT < 1 || this.litSeen >= 4) return;
     this.checkT = 0;
     if (!this.expectLit) {
       this.blackRuns = 0;
       return;
     }
-    const gl = this.renderer.getContext();
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    if (!this.probe) {
+      const buf = gl.createBuffer();
+      if (!buf) return;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, 12, gl.STREAM_READ);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      this.probe = { buf, sync: null };
+    }
+    const pr = this.probe;
+    // last second's pixels, if the GPU has them by now
+    if (pr.sync) {
+      if (gl.getSyncParameter(pr.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return;
+      gl.deleteSync(pr.sync);
+      pr.sync = null;
+      const px = new Uint8Array(12);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pr.buf);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += px[k * 4] + px[k * 4 + 1] + px[k * 4 + 2];
+      this.blackRuns = sum < 4 ? this.blackRuns + 1 : 0;
+      if (sum >= 4) this.litSeen++;
+      if (this.blackRuns >= 3) {
+        this.safe = true;
+        console.warn('[boost] black frames from the post chain; falling back to a plain render');
+        return;
+      }
+    }
+    // and ask for this frame's
     const w = gl.drawingBufferWidth;
     const h = gl.drawingBufferHeight;
-    const px = new Uint8Array(4);
-    let sum = 0;
-    for (const [fx, fy] of [[0.5, 0.3], [0.2, 0.25], [0.8, 0.25]]) {
-      gl.readPixels(Math.floor(w * fx), Math.floor(h * fy), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      sum += px[0] + px[1] + px[2];
-    }
-    this.blackRuns = sum < 4 ? this.blackRuns + 1 : 0;
-    if (this.blackRuns >= 3) {
-      this.safe = true;
-      console.warn('[boost] black frames from the post chain; falling back to a plain render');
-    }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pr.buf);
+    [[0.5, 0.3], [0.2, 0.25], [0.8, 0.25]].forEach(([fx, fy], k) => gl.readPixels(Math.floor(w * fx), Math.floor(h * fy), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, k * 4));
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    pr.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
   }
 
   /** the image light: this sky, the stands as a band round the horizon, floodlights when on, the pitch */
