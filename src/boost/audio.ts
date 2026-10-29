@@ -194,6 +194,34 @@ export class Audio {
     n.stop(t + 0.3);
   }
 
+  /** a perfect hit: a hard crack and a deep thump with a bright metal ring over them */
+  perfect(att: number, pan: number): void {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const n = this.noiseSrc(2);
+    const f = ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 2600;
+    this.env(n.connect(f), 0.5 * att, 0.001, 0.09, pan);
+    n.stop(t + 0.2);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(170, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.25);
+    this.env(o, 0.75 * att, 0.002, 0.35, pan);
+    o.start();
+    o.stop(t + 0.45);
+    for (const [fq, g] of [[1568, 0.07], [2349, 0.05], [3136, 0.03]]) {
+      const r = ctx.createOscillator();
+      r.type = 'sine';
+      r.frequency.value = fq;
+      this.env(r, g * att, 0.004, 0.7, pan);
+      r.start();
+      r.stop(t + 0.8);
+    }
+  }
+
   bounce(speed: number, att: number, pan: number): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

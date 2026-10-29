@@ -857,6 +857,7 @@ export class UI {
     d.innerHTML = `<b>${esc(what)}</b><i>+${pts}</i>`;
     if (pts >= 50) d.classList.add('big');
     if (what === 'Goal') d.classList.add('goal');
+    if (what === 'Perfect hit') d.classList.add('perfect');
     let sum = box.querySelector<HTMLElement>('.sum');
     const now = performance.now();
     if (!sum || now > this.awardEnd) {

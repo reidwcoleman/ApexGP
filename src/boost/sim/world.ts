@@ -42,10 +42,19 @@ export interface Stats {
   touches: number;
   score: number;
 }
+/** what makes a perfect hit: the ball's centre this close to the car's centre line (side) and
+ * between these heights over its origin (front bumper to the leading edge of the bonnet), closing
+ * at least this fast; it leaves this much faster */
+export const PERFECT = { SIDE: 24, LOW: -10, HIGH: 95, CLOSING: 1500, GAIN: 1.25 };
+const tA = new V3();
+const tB = new V3();
+const tV = new V3();
+
 const newStats = (): Stats => ({ goals: 0, assists: 0, saves: 0, shots: 0, demos: 0, touches: 0, score: 0 });
 
 export type WEvent =
   | { t: 'hit'; car: number; power: number }
+  | { t: 'perfect'; car: number; speed: number }
   | { t: 'goal'; team: Team; scorer: number; assist: number; speed: number; x: number; y: number; z: number }
   | { t: 'demo'; by: number; car: number; x: number; y: number; z: number }
   | { t: 'pad'; car: number; pad: number }
@@ -407,6 +416,7 @@ export class World {
     for (let i = 0; i < this.cars.length; i++) {
       const c = this.cars[i];
       const wasAlive = c.alive;
+      const v0 = tV.copy(c.vel);
       this.pullCar(i);
       const st = this.st;
       // events from the state's edges
@@ -425,6 +435,7 @@ export class World {
       const hit = st[K.hitTick];
       if (hit >= 0 && hit !== this.prevHit[i] && ballLive) {
         this.prevHit[i] = hit;
+        this.perfectHit(i, v0);
         const rel = new V3().subVectors(this.ballVelAfter(), c.vel);
         touched.push([i, rel.len()]);
       } else this.prevHit[i] = hit;
@@ -491,6 +502,37 @@ export class World {
         this.parkBall();
       }
     }
+  }
+
+  /**
+   * A perfect hit: the ball met square on the dead centre of the front bumper, closing fast, flies
+   * off harder. It rewards the clean power shot (nose straight through the middle of the ball,
+   * the way the best strikes are made) with a quarter more pace, up to the ball's top speed.
+   * Not a carried-on dribble or pinch; judged on the car's way in and the ball's way out.
+   */
+  private perfectHit(i: number, v0: V3): void {
+    const c = this.cars[i];
+    const last = this.touches.find(([k]) => k === i);
+    if (last && this.tick - last[1] < 30) return;
+    const st = this.st;
+    this.rs.getBall(st);
+    const rel = vecIn(st, 0, tA).sub(c.pos);
+    const fwd = rel.dot(c.rot.f);
+    const side = Math.abs(rel.dot(c.rot.l));
+    const up = rel.dot(c.rot.u);
+    if (fwd <= 0 || side > PERFECT.SIDE || up < PERFECT.LOW || up > PERFECT.HIGH) return;
+    // the closing speed along the line of the hit, before it
+    const closing = tB.subVectors(v0, this.ball.vel).dot(rel.norm());
+    if (closing < PERFECT.CLOSING) return;
+    const out = vecIn(st, 3, tB);
+    const sp = out.len();
+    if (sp < 1) return;
+    const to = Math.min(BALL.MAX_SPEED, sp * PERFECT.GAIN);
+    if (to <= sp) return;
+    vecOut(out.scale(to / sp), st, 3);
+    this.rs.setBall(st);
+    this.events.push({ t: 'perfect', car: i, speed: to });
+    if (this.phase === 'play') this.award(i, 'Perfect hit', 15);
   }
 
   private ballVelAfter(): V3 {

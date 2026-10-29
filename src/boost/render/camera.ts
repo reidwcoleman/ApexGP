@@ -9,12 +9,17 @@ import { S } from './stage.ts';
  *
  * Car cam: the heading is the bonnet while the wheels are down (on a wall or the ceiling the rig's
  * "up" becomes the surface, so the car stays upright on screen), and the direction of travel in
- * the air (the rig returns to the world's up), with no pitch. Ball cam: the heading and the pitch
- * both point at the ball, so the rig swings round and dips under a high ball, keeping the car at
- * the bottom of the frame and the ball over its roof. Stiffness lets the camera fall back a little
+ * the air (the rig returns to the world's up), with no pitch. Ball cam: the heading points at the
+ * ball and the view stays level, as the real one does (a ball on the roof, or a fair way up, needs
+ * no tilt at all); a ball climbing out of the top of the frame tilts the view up just enough to keep
+ * it in, and only once the car would drop out of the bottom does the rig swing down under the ball.
+ * Stiffness lets the camera fall back a little
  * at speed, transition speed sets how fast the two cams blend. Kept inside the arena; shakes on
  * goals and demolitions. Positions are in the simulation frame (cm, z up).
  */
+
+/** the car's half height from behind, wheels and all, for keeping it in frame */
+const CAR_H = 45;
 
 export const CAM = { FOV: 110, DIST: 270, HEIGHT: 100, ANGLE: -4, STIFF: 0.45, TRANS: 1.2 };
 
@@ -68,6 +73,8 @@ export class ChaseCam {
   heading = new V3(0, 1, 0);
   /** the rig's tilt toward a high (or low) ball, radians */
   pitch = 0;
+  /** the view's own tilt on top of the angle setting, radians */
+  view = 0;
   ballCam = true;
   /** look behind (held): the rig turns to face back past the car's tail, no ball tracking */
   behind = false;
@@ -96,9 +103,10 @@ export class ChaseCam {
     this.ballK = this.ballCam ? 1 : 0;
     this.up.set(0, 0, 1);
     if (t.onGround) this.up.copy(t.u);
-    const [h, p] = this.aim(t);
+    const [h, p, v] = this.aim(t);
     this.heading.copy(h);
     this.pitch = p;
+    this.view = v;
     this.lag = 0;
     this.lagUp = 0;
     this.prevPos.copy(t.pos);
@@ -106,8 +114,8 @@ export class ChaseCam {
     this.compute(t, 1, true);
   }
 
-  /** the heading and pitch this frame wants (blended car cam / ball cam) */
-  private aim(t: CamTarget): [V3, number] {
+  /** the heading, the rig's pitch and the view's tilt this frame wants (blended car cam / ball cam) */
+  private aim(t: CamTarget): [V3, number, number] {
     const up = this.up;
     // car cam: the bonnet on a surface; the direction of travel in the air (the bonnet when slow)
     const hc = tA;
@@ -122,11 +130,26 @@ export class ChaseCam {
     // close underneath the ball its bearing swings wildly: lean on the car's heading there
     const sure = Math.min(1, horiz / 260);
     hb.scale(sure).addScaled(hc, 1 - sure).norm();
-    const pb = Math.max(-0.3, Math.min(1.0, Math.atan2(along - 40, Math.max(1, horiz)) * 0.85));
+    // the tilt is worked out from where the camera sits (back and up from the car), not from the car:
+    // the view the ball wants so its top (or bottom) just fits inside the frame...
+    const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
+    const bx = horiz + CAM.DIST;
+    const by = along - CAM.HEIGHT;
+    const br = Math.atan2(92, Math.hypot(bx, by));
+    const elev = Math.atan2(by, bx);
+    const a0 = (CAM.ANGLE * Math.PI) / 180;
+    let v = Math.max(a0, elev + br - vHalf + 0.12);
+    v = Math.min(v, elev - br + vHalf - 0.05);
+    // ...and how far the view can go before the car falls out of the bottom (or the top): past
+    // that the rig swings round the car instead
+    const vMax = Math.max(a0, vHalf - Math.atan2(CAM.HEIGHT, CAM.DIST) - Math.atan2(CAR_H, Math.hypot(CAM.HEIGHT, CAM.DIST)) - 0.04);
+    const vMin = Math.min(a0, -vHalf + 0.25);
+    const pb = v > vMax ? Math.min(1, v - vMax) : v < vMin ? Math.max(-0.3, v - vMin) : 0;
+    const vb = v - pb - a0;
     if (this.behind) {
       const hr = new V3();
       flat(t.f, up, hr, this.heading);
-      return [hr.scale(-1), 0];
+      return [hr.scale(-1), 0, 0];
     }
     const ox = this.orbit.x;
     const oy = this.orbit.y;
@@ -134,12 +157,12 @@ export class ChaseCam {
       const hr = new V3();
       flat(t.f, up, hr, this.heading);
       rotate(hr, up, -ox * Math.PI).norm();
-      return [hr, Math.max(-0.3, Math.min(0.9, oy * 0.8))];
+      return [hr, Math.max(-0.3, Math.min(0.9, oy * 0.8)), 0];
     }
     const k = this.ballK;
     const h = new V3().copy(hc).scale(1 - k).addScaled(hb, k);
     if (h.len2() < 1e-4) h.copy(k > 0.5 ? hb : hc);
-    return [h.norm(), pb * k];
+    return [h.norm(), pb * k, vb * k];
   }
 
   update(t: CamTarget, dt: number): void {
@@ -164,12 +187,13 @@ export class ChaseCam {
     if (this.heading.len2() < 1e-6) flat(t.f, this.up, this.heading, t.vel);
     this.heading.norm();
     // turn toward the wanted heading (swivel): quicker in ball cam, like the real thing
-    const [h, p] = this.aim(t);
+    const [h, p, v] = this.aim(t);
     if (this.behind !== this.wasBehind) {
       // the rear view cuts straight round (and back), as the real one does
       this.wasBehind = this.behind;
       this.heading.copy(h);
       this.pitch = p;
+      this.view = v;
       this.lag = 0;
     }
     const da = angleAbout(this.heading, h, this.up);
@@ -177,6 +201,7 @@ export class ChaseCam {
     const turn = 1 - Math.exp(-dt * (this.behind ? 30 : free ? 16 : 10 + 2 * this.ballK));
     rotate(this.heading, this.up, da * turn).norm();
     this.pitch += (p - this.pitch) * (1 - Math.exp(-dt * 7));
+    this.view += (v - this.view) * (1 - Math.exp(-dt * 7));
     // the pivot trails the car's moves along up (jumps, landings, climbs), catching up in ~0.15 s;
     // a teleport (kickoff, respawn) resets it
     if (this.havePrev && this.prevPos.dist(t.pos) < 400) {
@@ -254,19 +279,37 @@ export class ChaseCam {
       this.pos.y += (want.y - this.pos.y) * k;
       this.pos.z += (want.z - this.pos.z) * k;
     }
-    // look along the full pitch, angled down a few degrees
+    // look along the full pitch, angled down a few degrees (and tilted on toward a high ball)
     tilt(this.pitch);
-    const a = (CAM.ANGLE * Math.PI) / 180;
+    const a = (CAM.ANGLE * Math.PI) / 180 + this.view;
     const dir = new V3().copy(fw).scale(Math.cos(a)).addScaled(rup, Math.sin(a));
+    rup.copy(rup).scale(Math.cos(a)).addScaled(fw, -Math.sin(a));
+    const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
+    // ball cam, from where the camera really ended up: a ball still over the top of the frame (clear
+    // of the scoreboard) or under the bottom turns the view toward it by just the excess
+    const toBall = tD.subVectors(t.ball, this.pos);
+    const bl = toBall.len();
+    const ahead = toBall.dot(dir);
+    if (this.ballK > 0.01 && bl > 1 && ahead > 0) {
+      const e = Math.atan2(toBall.dot(rup), ahead);
+      const br = Math.atan2(92, bl);
+      const over = e + br - (vHalf - 0.12);
+      const under = e - br + (vHalf - 0.06);
+      const turn = (over > 0 ? over : under < 0 ? under : 0) * this.ballK;
+      if (turn !== 0) {
+        const axis = new V3(dir.y * rup.z - dir.z * rup.y, dir.z * rup.x - dir.x * rup.z, dir.x * rup.y - dir.y * rup.x).norm();
+        rotate(dir, axis, turn).norm();
+        rotate(rup, axis, turn).norm();
+      }
+    }
     // keep the whole car in frame wherever it is (below, above, off to a side, even behind): turn
     // the view toward it by just enough that it sits inside the frame's height, with a margin
     const toCar = tC.subVectors(t.pos, this.pos);
     const cl = toCar.len();
     if (cl > 1) {
       toCar.scale(1 / cl);
-      const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
       // (the car's own half height, seen from here, plus a margin)
-      const allowed = vHalf - Math.atan2(70, cl) - 0.06;
+      const allowed = vHalf - Math.atan2(CAR_H, cl) - 0.04;
       const th = Math.acos(Math.max(-1, Math.min(1, dir.dot(toCar))));
       if (th > allowed) {
         const axis = new V3(dir.y * toCar.z - dir.z * toCar.y, dir.z * toCar.x - dir.x * toCar.z, dir.x * toCar.y - dir.y * toCar.x);

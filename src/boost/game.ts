@@ -899,6 +899,22 @@ export class Game {
         if (e.car === this.me && playing) this.controls.rumble(Math.min(1, e.power / 3500), Math.min(1, 0.25 + e.power / 2500), 90 + Math.min(120, e.power / 30));
         break;
       }
+      case 'perfect': {
+        // a perfect hit: a white-gold crack at the contact, a ring blown out round it, a hard snap
+        const c = w.cars[e.car];
+        const b = w.ball.pos;
+        if (!c) break;
+        const dx = c.pos.x - b.x;
+        const dy = c.pos.y - b.y;
+        const dz = c.pos.z - b.z;
+        const dl = Math.hypot(dx, dy, dz) || 1;
+        this.fx.perfect(b.x + (dx / dl) * BALL.R, b.y + (dy / dl) * BALL.R, b.z + (dz / dl) * BALL.R, b.x, b.y, b.z);
+        this.ball.hit(4000, w.players[e.car].team);
+        if (playing) this.audio.perfect(att(b.x, b.y, b.z), pan(b.x, b.y));
+        if (e.car === this.me && this.ui.profile.shake) this.cam.shake(22, 0.25);
+        if (e.car === this.me && playing) this.controls.rumble(1, 1, 220);
+        break;
+      }
       case 'bounce':
         if (playing) this.audio.bounce(e.speed, att(w.ball.pos.x, w.ball.pos.y, w.ball.pos.z), pan(w.ball.pos.x, w.ball.pos.y));
         break;

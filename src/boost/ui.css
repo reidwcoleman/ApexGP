@@ -349,6 +349,8 @@
 .awards .aw.big b, .awards .aw.big i { font-size: 26px; }
 .awards .aw.goal { background: linear-gradient(90deg, transparent, rgba(255, 170, 30, 0.3) 14%, rgba(6, 9, 18, 0.88) 40%, rgba(6, 9, 18, 0.88) 60%, rgba(255, 170, 30, 0.3) 86%, transparent); }
 .awards .aw.goal b, .awards .aw.goal i { font-size: 30px; }
+.awards .aw.perfect { background: linear-gradient(90deg, transparent, rgba(255, 236, 160, 0.32) 14%, rgba(6, 9, 18, 0.88) 40%, rgba(6, 9, 18, 0.88) 60%, rgba(255, 236, 160, 0.32) 86%, transparent); }
+.awards .aw.perfect b { font-size: 26px; color: #fff6d8; text-shadow: 0 0 16px rgba(255, 220, 120, 0.85), 0 2px 8px rgba(0, 0, 0, 0.6); }
 .awards .aw.out { opacity: 0; transform: translateY(-10px); }
 .awards .sum { order: 99; margin-top: 2px; opacity: 0; transition: opacity 0.3s; }
 .awards .sum.on { opacity: 1; }

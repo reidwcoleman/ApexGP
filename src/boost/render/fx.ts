@@ -567,6 +567,26 @@ export class FX {
     }
   }
 
+  /** a perfect hit: a white-hot crack at the contact (x, y, z), a gold shell blown out round the
+   * ball (bx, by, bz) and a spray of streaks thrown on ahead of it */
+  perfect(x: number, y: number, z: number, bx: number, by: number, bz: number): void {
+    const white = new THREE.Color(3.4, 3.3, 3.0);
+    const gold = new THREE.Color(3.2, 2.4, 1.0);
+    this.wave(x, y, z, 280, 0.14, white, 2.6);
+    this.wave(bx, by, bz, 950, 0.45, gold, 0);
+    this.wave(bx, by, bz, 1700, 0.75, new THREE.Color(1.5, 1.1, 0.45), 0);
+    const dl = Math.hypot(bx - x, by - y, bz - z) || 1;
+    const d = [(bx - x) / dl, (by - y) / dl, (bz - z) / dl];
+    for (let q = 0; q < 80; q++) {
+      const r = rnd3();
+      const fx = d[0] * 1.5 + r[0];
+      const fy = d[1] * 1.5 + r[1];
+      const fz = d[2] * 1.5 + r[2];
+      const v = (1800 + Math.random() * 2800) / (Math.hypot(fx, fy, fz) || 1);
+      this.streak(x, y, z, fx * v, fy * v, fz * v, Math.random() < 0.5 ? white : gold, 0.3 + Math.random() * 0.35, 0.06, 2.2, 400);
+    }
+  }
+
   demo(x: number, y: number, z: number): void {
     const f = new THREE.Color(3, 1.3, 0.3);
     this.burst(x, y, z, 260, 1800, f, 80, 1.0, 200);
