@@ -13,6 +13,33 @@ import { carModel } from './carmodel.ts';
  */
 
 export const TEAM_COLORS = [0x1458ff, 0xff5a0a];
+/** 0 by day … 1 at night: lamps, beams and underglow come up with the dark (set with the time) */
+export const carNight = { value: 0 };
+
+/** a soft round glow for the lamps' glare */
+let glareTex: THREE.CanvasTexture | null = null;
+function glare(): THREE.CanvasTexture {
+  if (glareTex) return glareTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d')!;
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.15, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.45, 'rgba(255,255,255,0.12)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 128, 128);
+  // a thin horizontal streak through it
+  const s = x.createLinearGradient(0, 0, 128, 0);
+  s.addColorStop(0, 'rgba(255,255,255,0)');
+  s.addColorStop(0.5, 'rgba(255,255,255,0.7)');
+  s.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = s;
+  x.fillRect(0, 62, 128, 4);
+  glareTex = new THREE.CanvasTexture(c);
+  return glareTex;
+}
 
 /** a slick's tread for the bump map: three circumferential grooves and fine sipes, a raised
  * lettering band on the sidewall (the lathe's v runs across the tyre) */
@@ -91,6 +118,14 @@ export class CarView {
   readonly rest: number;
   /** a soft contact shadow on whatever surface the wheels are on */
   private contact: THREE.Mesh;
+  /** team light thrown on the ground under the car */
+  private under: THREE.Mesh;
+  /** the headlights' beams and the lamps' glare */
+  private beams: THREE.ShaderMaterial;
+  private glares: THREE.Sprite[] = [];
+  /** the shock cone round the nose when supersonic */
+  private mach: THREE.Mesh;
+  private machK = 0;
 
   /** color: the accent in the low 24 bits, the decal and finish above them (see carLook) */
   constructor(team: number, color: number, name?: string) {
@@ -191,6 +226,12 @@ export class CarView {
             vec3 fr = fract(sin(vec3(dot(fc, vec3(12.9898, 78.233, 37.719)), dot(fc, vec3(39.346, 11.135, 83.155)), dot(fc, vec3(73.156, 52.235, 9.151)))) * 43758.5453) - 0.5;
             // (fading out once a flake is under a pixel, so it never turns to noise)
             normal = normalize(normal + fr * 0.07 * uFlake * (1.0 - smoothstep(0.05, 0.14, length(fwidth(vObj)))));
+          }
+          // candy depth: the colour deepens and saturates where the panel turns away, glows where it faces you
+          {
+            float ndv = clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0);
+            vec3 deep = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(1.35));
+            diffuseColor.rgb = mix(deep * 0.7, diffuseColor.rgb * 1.12, pow(ndv, 0.6));
           }`,
         );
     };
@@ -284,6 +325,90 @@ export class CarView {
       this.contact.position.set(8, 0, R.ground + 0.6);
       this.contact.renderOrder = 2;
       this.group.add(this.contact);
+    }
+    {
+      const m = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uA: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x2a7bff : 0xff7a1a) }, uT: { value: 0 } },
+        vertexShader: `varying vec2 vU; void main(){ vU = uv * 2.0 - 1.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform float uA; uniform vec3 uC; uniform float uT; varying vec2 vU; void main(){ vec2 q = vU * vec2(1.0, 1.25); float d = length(q); float k = pow(max(1.0 - d, 0.0), 2.0) * (0.85 + 0.15 * sin(uT * 3.0)); gl_FragColor = vec4(uC * k * uA * 2.2, k * uA); }`,
+      });
+      m.polygonOffset = true;
+      m.polygonOffsetFactor = -4;
+      this.under = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+      this.under.scale.set(260, 190, 1);
+      this.under.position.set(4, 0, R.ground + 0.9);
+      this.under.renderOrder = 3;
+      this.group.add(this.under);
+    }
+    // the lamps: where the head and tail light geometry sits
+    g.head.computeBoundingBox();
+    g.tail.computeBoundingBox();
+    const hb = g.head.boundingBox!;
+    const tb = g.tail.boundingBox!;
+    const hy = Math.max(8, hb.max.y * 0.78);
+    const hz = (hb.min.z + hb.max.z) / 2;
+    this.beams = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { uK: { value: 0 } },
+      vertexShader: `varying float vL; varying vec3 vN; varying vec3 vV; void main(){ vL = uv.y; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float uK; varying float vL; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(clamp(vL, 0.0, 1.0), 1.8) * uK; gl_FragColor = vec4(vec3(0.95, 0.97, 1.0) * a, a); }`,
+    });
+    const glareM = (c: THREE.Color) => new THREE.SpriteMaterial({ map: glare(), color: c, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+    const headG = glareM(new THREE.Color(1.6, 1.65, 1.8));
+    const tailG = glareM(new THREE.Color(1.8, 0.12, 0.08));
+    for (const sy of [-1, 1]) {
+      // a cone of light reaching forward and a little down
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 70, 520, 16, 1, true), this.beams);
+      cone.geometry.rotateZ(Math.PI / 2);
+      cone.geometry.translate(260, 0, 0);
+      cone.position.set(hb.max.x - 1, sy * hy, hz);
+      cone.rotation.set(0, 0.12, sy * -0.04);
+      cone.renderOrder = 8;
+      cone.frustumCulled = false;
+      this.group.add(cone);
+      const h = new THREE.Sprite(headG);
+      h.position.set(hb.max.x + 1.5, sy * hy, hz);
+      h.scale.setScalar(22);
+      h.renderOrder = 12;
+      this.group.add(h);
+      this.glares.push(h);
+      const tl = new THREE.Sprite(tailG);
+      tl.position.set(tb.min.x - 1.5, sy * Math.max(8, tb.max.y * 0.8), (tb.min.z + tb.max.z) / 2);
+      tl.scale.setScalar(16);
+      tl.renderOrder = 12;
+      this.group.add(tl);
+      this.glares.push(tl);
+    }
+    // the shock cone: a thin shell swept back from the nose, bright only at its rim
+    {
+      const cg = new THREE.ConeGeometry(95, 230, 32, 1, true);
+      cg.rotateZ(-Math.PI / 2);
+      cg.translate(-30, 0, 0);
+      const m = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        uniforms: { uK: { value: 0 }, uT: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x9cc8ff : 0xffc89c) } },
+        vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP; void main(){ vP = position; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uK; uniform float uT; uniform vec3 uC; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+          void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.0);
+            float along = clamp((85.0 - vP.x) / 230.0, 0.0, 1.0);
+            float rip = 0.6 + 0.4 * sin(vP.x * 0.12 + uT * 40.0);
+            float a = f * (1.0 - along) * smoothstep(0.0, 0.08, along) * rip * uK;
+            gl_FragColor = vec4(uC * a * 1.6, a); }`,
+      });
+      this.mach = new THREE.Mesh(cg, m);
+      this.mach.visible = false;
+      this.mach.renderOrder = 9;
+      this.mach.frustumCulled = false;
+      this.group.add(this.mach);
     }
     // an antenna off the rear deck, leaning back, with a little team-coloured topper
     {
@@ -389,12 +514,34 @@ export class CarView {
     // (gone at once when the wheels lift, or it rides up with the car as a grey smear)
     sm.uniforms.uA.value += ((down >= 2 ? 0.72 : 0) - sm.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 14 : 60));
     this.contact.visible = sm.uniforms.uA.value > 0.01;
+    const um = this.under.material as THREE.ShaderMaterial;
+    um.uniforms.uA.value += ((down >= 2 ? 0.25 + 0.75 * carNight.value : 0) - um.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 8 : 40));
+    um.uniforms.uT.value = t;
+    this.under.visible = um.uniforms.uA.value > 0.01;
+    this.lamps();
+    // the shock cone grows in as the car goes supersonic
+    this.machK += ((car.supersonic ? 1 : 0) - this.machK) * Math.min(1, dt * (car.supersonic ? 6 : 10));
+    const mm = this.mach.material as THREE.ShaderMaterial;
+    mm.uniforms.uK.value = this.machK * 0.55;
+    mm.uniforms.uT.value = t;
+    this.mach.visible = this.machK > 0.02;
     this.jet(car.boosting, t, dt);
   }
 
   /** parked (the garage): wheels at rest, the jets lit or not */
   idle(t: number, dt: number, boost: boolean): void {
+    const um = this.under.material as THREE.ShaderMaterial;
+    um.uniforms.uA.value = 0.35 + 0.65 * carNight.value;
+    um.uniforms.uT.value = t;
+    this.lamps();
     this.jet(boost, t, dt);
+  }
+
+  /** headlight beams and glare: faint by day, bright at night */
+  private lamps(): void {
+    const n = carNight.value;
+    this.beams.uniforms.uK.value = 0.012 + 0.11 * n;
+    for (const g of this.glares) g.material.opacity = 0.35 + 0.65 * n;
   }
 
   private jet(boosting: boolean, t: number, dt: number): void {

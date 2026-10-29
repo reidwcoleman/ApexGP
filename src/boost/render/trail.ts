@@ -42,10 +42,10 @@ export class Ribbon {
   constructor() {
     this.geo = new THREE.BufferGeometry();
     this.pos = new Float32Array(MAX * 2 * 3);
-    this.aux = new Float32Array(MAX * 2 * 2);
+    this.aux = new Float32Array(MAX * 2 * 3);
     this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
-    // aux: (age 0…1, side −1/+1)
-    this.geo.setAttribute('aux', new THREE.BufferAttribute(this.aux, 2).setUsage(THREE.DynamicDrawUsage));
+    // aux: (age 0…1, side −1/+1, when the point was laid: the wisps stay fixed to the air they're in)
+    this.geo.setAttribute('aux', new THREE.BufferAttribute(this.aux, 3).setUsage(THREE.DynamicDrawUsage));
     this.idx = new THREE.BufferAttribute(new Uint16Array((MAX - 1) * 6), 1).setUsage(THREE.DynamicDrawUsage);
     this.geo.setIndex(this.idx);
     this.mat = new THREE.ShaderMaterial({
@@ -54,19 +54,30 @@ export class Ribbon {
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       uniforms: { uHead: { value: new THREE.Color() }, uBody: { value: new THREE.Color() }, uT: { value: 0 }, uKind: { value: 0 } },
-      vertexShader: `attribute vec2 aux; varying vec2 vA; void main(){ vA = aux; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `uniform vec3 uHead, uBody; uniform float uT, uKind; varying vec2 vA;
+      vertexShader: `attribute vec3 aux; varying vec3 vA; void main(){ vA = aux; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform vec3 uHead, uBody; uniform float uT, uKind; varying vec3 vA;
         vec3 hue(float h){ return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+        float h21(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+        float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
         void main(){
           float a = vA.x;
-          // soft across the strip, a brighter core line down the middle
-          float e = 1.0 - abs(vA.y);
-          float across = e * (0.5 + 0.8 * e * e * e);
-          vec3 body = uKind > 1.5 ? hue(a * 1.6 - uT * 0.8) * 2.6 : uBody;
+          float y = vA.y;
+          float s = vA.z;
+          // filaments of energy: noise fixed to where each piece was laid, drifting across as it ages
+          float n = vn(vec2(s * 18.0, y * 2.2 + a * 3.0 + s * 4.0)) * 0.65 + vn(vec2(s * 41.0, y * 5.0 - a * 4.0)) * 0.35;
+          // a tight white-hot core, a soft halo round it, the wisps between
+          float core = exp(-y * y * 30.0) * (1.0 - a * 0.6);
+          float halo = exp(-y * y * 2.6) * 0.38;
+          float fil = smoothstep(0.45, 0.85, n) * exp(-y * y * 5.0) * 0.9;
+          // the edges eat in as it cools, so it breaks up into smoke-like tatters
+          float erode = smoothstep(0.0, 0.25, n + 0.55 - abs(y) * (0.4 + a * 1.1));
+          vec3 body = uKind > 1.5 ? hue(a * 1.6 - uT * 0.8 + y * 0.1) * 2.6 : uBody;
           vec3 c = mix(uHead, body, smoothstep(0.0, 0.3, a));
-          float fade = pow(1.0 - a, 1.6) * smoothstep(0.0, 0.03, a + 0.01);
-          if (uKind > 0.5 && uKind < 1.5) fade *= 0.55 + 0.45 * step(0.5, fract(a * 9.0 - uT * 14.0));
-          float k = across * fade;
+          c = mix(c, uHead * 1.2 + 0.4, core * (1.0 - smoothstep(0.0, 0.5, a)) * 0.6);
+          float fade = pow(1.0 - a, 1.5) * smoothstep(0.0, 0.03, a + 0.01);
+          if (uKind > 0.5 && uKind < 1.5) fade *= 0.5 + 0.5 * step(0.5, fract(a * 9.0 - uT * 14.0 + n * 0.6));
+          float k = (core * 1.5 + halo + fil) * erode * fade;
           gl_FragColor = vec4(c * k, k);
         }`,
     });
@@ -109,15 +120,17 @@ export class Ribbon {
       if (side.lengthSq() < 1e-6) side.set(0, 0, 1);
       side.normalize();
       const age = Math.min(1, (t - P[i].t) / st.life);
-      const w = st.w0 + (st.w1 - st.w0) * Math.sqrt(age);
+      // (wide: the halo and the wisps fill it, the core stays narrow)
+      const w = (st.w0 + (st.w1 - st.w0) * Math.sqrt(age)) * 1.7;
       for (let s = 0; s < 2; s++) {
         const k = s ? 1 : -1;
         const o = (i * 2 + s) * 3;
         this.pos[o] = P[i].x + side.x * w * k;
         this.pos[o + 1] = P[i].y + side.y * w * k;
         this.pos[o + 2] = P[i].z + side.z * w * k;
-        this.aux[(i * 2 + s) * 2] = age;
-        this.aux[(i * 2 + s) * 2 + 1] = k;
+        this.aux[(i * 2 + s) * 3] = age;
+        this.aux[(i * 2 + s) * 3 + 1] = k;
+        this.aux[(i * 2 + s) * 3 + 2] = P[i].t % 512;
       }
     }
     // the strip's quads, leaving out any that would bridge a gap

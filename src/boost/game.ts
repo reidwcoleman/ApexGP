@@ -3,10 +3,10 @@ import { Audio } from './audio.ts';
 import { Controls } from './input.ts';
 import { botPlan, Guest2, Host, makeCode, packInputs, quant, type CtlMsg, type LobbyPlayer, type LobbyState } from './net.ts';
 import { buildArena, uNear, type ArenaView } from './render/arena.ts';
-import { asMap, asTime, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
+import { asMap, asTime, lookFor, MAPS, TIMES, type MapId, type TimeId } from './render/looks.ts';
 import { BallView } from './render/ball.ts';
 import { CAM, ChaseCam, placeCam } from './render/camera.ts';
-import { CarView, TEAM_COLORS } from './render/car.ts';
+import { CarView, carNight, TEAM_COLORS } from './render/car.ts';
 import { packLoadout, unpackLoadout } from './loadout.ts';
 import { FX } from './render/fx.ts';
 import { Ribbon, type RibbonStyle } from './render/trail.ts';
@@ -190,9 +190,10 @@ export class Game {
   /** the arena and the time of day (the stage's light and the arena's dressing together) */
   setLook(map: MapId | string | undefined, time: TimeId | string | undefined): void {
     const m = MAPS[asMap(map)];
-    const t = TIMES[asTime(time)];
+    const t = lookFor(TIMES[asTime(time)], m);
     if (this.lookKey === m.id + t.id) return;
     this.lookKey = m.id + t.id;
+    carNight.value = 1 - Math.min(1, t.day * 1.4);
     this.stage.setLook(t, m);
     this.arena.setLook(t, m);
     // the cars and the ball reflect the real stadium around them

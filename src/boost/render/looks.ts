@@ -7,7 +7,7 @@
  */
 
 export type TimeId = 'morning' | 'day' | 'sunset' | 'night';
-export type MapId = 'apex' | 'alpine' | 'harbor' | 'meadow' | 'canyon';
+export type MapId = 'apex' | 'alpine' | 'harbor' | 'meadow' | 'canyon' | 'reef';
 
 export interface TimeLook {
   id: TimeId;
@@ -55,7 +55,7 @@ export interface MapLook {
   tiers: 1 | 2;
   /** floodlights on the roof ring, or four masts at the corners */
   lights: 'ring' | 'masts';
-  surround: 'none' | 'mountains' | 'city' | 'hills' | 'canyon';
+  surround: 'none' | 'mountains' | 'city' | 'hills' | 'canyon' | 'ocean';
   /** how the arena itself is dressed: pitch, walls, glass, seats */
   theme: ArenaTheme;
   /** snow on the roof, the concourse and the tops of things */
@@ -115,7 +115,7 @@ export const TIMES: Record<TimeId, TimeLook> = {
     envI: 0.6,
     bloom: 0.62,
     bloomThreshold: 0.9,
-    zenith: [0.2, 0.38, 0.72],
+    zenith: [0.13, 0.32, 0.8],
     horizon: [0.78, 0.8, 0.84],
     glow: [1.0, 0.78, 0.55],
     sunCol: [1.0, 0.82, 0.6],
@@ -144,8 +144,8 @@ export const TIMES: Record<TimeId, TimeLook> = {
     envI: 0.6,
     bloom: 0.55,
     bloomThreshold: 0.92,
-    zenith: [0.16, 0.36, 0.78],
-    horizon: [0.66, 0.78, 0.92],
+    zenith: [0.09, 0.29, 0.86],
+    horizon: [0.6, 0.76, 0.95],
     glow: [0.75, 0.82, 0.92],
     sunCol: [1.0, 0.92, 0.78],
     disc: 40,
@@ -335,7 +335,70 @@ export const MAPS: Record<MapId, MapLook> = {
       css: 'linear-gradient(160deg,#f2b267 0%,#c2582a 45%,#5a2412 100%)',
     },
   },
+  reef: {
+    id: 'reef',
+    name: 'Coral Deep',
+    blurb: 'A glass bowl on the sea floor, reefs and fish all round',
+    roof: false,
+    tiers: 1,
+    lights: 'masts',
+    surround: 'ocean',
+    snow: 0,
+    concourse: 0x1c4450,
+    theme: {
+      pitchA: [0.075, 0.27, 0.1],
+      pitchB: [0.045, 0.175, 0.075],
+      pattern: 3,
+      line: [0.45, 1.05, 1.15],
+      lineGlow: 0.65,
+      wall: [0.03, 0.13, 0.17],
+      glass: [0.03, 0.12, 0.15],
+      seat: [0.02, 0.2, 0.24],
+      frost: 0,
+      trim: [0.55, 0.8, 0.85],
+      css: 'linear-gradient(180deg,#7ff0ff 0%,#0f86a8 38%,#04304a 100%)',
+    },
+  },
 };
+
+type C3m = [number, number, number];
+const mix3 = (a: C3m, b: C3m, k: number): C3m => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+
+/** the light an arena actually gets at a time: on the sea floor the sun comes down steep through the
+ * waves, the red is gone, and everything fades into deep blue-green water; elsewhere the time as is */
+export function lookFor(t: TimeLook, map: MapLook): TimeLook {
+  if (map.surround !== 'ocean') return t;
+  const d = t.day;
+  const warm = t.id === 'sunset' ? 0.35 : t.id === 'morning' ? 0.12 : 0;
+  const fog = mix3(mix3([0.004, 0.025, 0.05], [0.03, 0.27, 0.36], d), [0.25, 0.2, 0.2], warm * 0.3);
+  // (refracted at the surface: the light comes down steeper than the sun stands)
+  const kd = n3(t.keyDir[0] * 0.35, Math.max(0.6, t.keyDir[1]) + 0.6, t.keyDir[2] * 0.35);
+  const lit = d > 0.25;
+  return {
+    ...t,
+    keyDir: t.floods && !lit ? t.keyDir : kd,
+    keyCol: lit ? mix3([0.72, 0.97, 1.0], [1.0, 0.8, 0.6], warm) : mix3(t.keyCol, [0.75, 0.95, 1.0], 0.4),
+    keyI: lit ? t.keyI * 1.0 : t.keyI,
+    hemiSky: mix3([0.08, 0.3, 0.42], [0.3, 0.78, 0.92], d),
+    hemiGround: [0.04, 0.16, 0.14],
+    hemiI: t.hemiI * 1.15,
+    fillCol: [0.35, 0.85, 0.95],
+    fillI: t.fillI * 0.9,
+    fog,
+    fogDensity: lit ? 0.003 : 0.0042,
+    envI: t.envI * 1.05,
+    bloom: t.bloom + 0.25,
+    bloomThreshold: t.bloomThreshold - 0.06,
+    // the sky dome becomes the water: the surface's bright window overhead, the blue all round
+    zenith: mix3(mix3([0.03, 0.1, 0.18], [0.75, 1.25, 1.3], d), [1.2, 0.85, 0.6], warm),
+    horizon: fog,
+    glow: [0, 0, 0],
+    sunCol: mix3(lit ? [0.9, 1.0, 0.95] : [0.25, 0.35, 0.5], t.sunCol, warm),
+    disc: lit ? 1 : 0.2,
+    cloud: 0,
+    stars: 0,
+  };
+}
 
 export const MAP_IDS = Object.keys(MAPS) as MapId[];
 export const TIME_IDS = Object.keys(TIMES) as TimeId[];

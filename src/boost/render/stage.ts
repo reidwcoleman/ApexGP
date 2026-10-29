@@ -61,6 +61,8 @@ export class Stage {
     uStars: { value: 0 },
     /** a dome of light over a city (night) */
     uCity: { value: 0 },
+    /** under the sea: the dome is the water, the surface overhead */
+    uOcean: { value: 0 },
   };
   private skyMat!: THREE.ShaderMaterial;
   private envCache = new Map<string, THREE.Texture>();
@@ -158,7 +160,7 @@ export class Stage {
     }
     this.bloom = new BloomEffect({ intensity: 1.15, luminanceThreshold: 0.78, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.72, levels: this.quality === 2 ? 8 : 5 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
-    const grade = new GradeEffect({ vibrance: 0.34, contrast: 0.22, lift: 0.005 });
+    const grade = new GradeEffect({ vibrance: 0.48, contrast: 0.25, lift: 0.005 });
     const vig = new VignetteEffect({ offset: 0.3, darkness: 0.55 });
     // SMAA (three passes) on real GPUs, FXAA (one) on integrated ones
     const aa = this.quality === 2 ? new SMAAEffect({ preset: SMAAPreset.HIGH }) : new FXAAEffect();
@@ -188,6 +190,7 @@ export class Stage {
     u.uCloudShade.value.setRGB(...t.cloudShade);
     u.uStars.value = t.stars * (map.surround === 'city' ? 0.35 : 1);
     u.uCity.value = map.surround === 'city' ? 1 - t.day : 0;
+    u.uOcean.value = map.surround === 'ocean' ? 1 : 0;
     const fog = sc.fog as THREE.FogExp2;
     fog.color.setRGB(...t.fog);
     fog.density = t.fogDensity;
@@ -405,7 +408,7 @@ export class Stage {
       uniforms: this.skyU,
       vertexShader: 'varying vec3 vP; void main(){ vP = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }',
       fragmentShader: `uniform float uTime; uniform vec3 uSun; uniform vec3 uZen; uniform vec3 uHor; uniform vec3 uGlow; uniform vec3 uSunCol;
-        uniform float uDisc; uniform float uCloud; uniform vec3 uCloudLit; uniform vec3 uCloudShade; uniform float uStars; uniform float uCity;
+        uniform float uDisc; uniform float uCloud; uniform vec3 uCloudLit; uniform vec3 uCloudShade; uniform float uStars; uniform float uCity; uniform float uOcean;
         varying vec3 vP;
         float h21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
         float n2(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
@@ -414,6 +417,23 @@ export class Stage {
         void main(){ vec3 d = normalize(vP); float h = d.y;
           float hp = max(h, 0.0);
           float sd = max(dot(d, uSun), 0.0);
+          if (uOcean > 0.5) {
+            // looking up through the water: the surface's bright window overhead, rippling, the sun's
+            // glare in it, shafts fanning down; the blue all round, darker below
+            vec3 o = mix(uHor * 0.25, uHor, smoothstep(-0.7, 0.15, h));
+            o = mix(o, uHor * 1.35 + uZen * 0.08, smoothstep(0.1, 0.62, h));
+            vec2 sp = d.xz / max(h, 0.08) * 2.2;
+            float rip = n2(sp + vec2(uTime * 0.12, uTime * 0.05)) * 0.6 + n2(sp * 2.7 - vec2(uTime * 0.18, -uTime * 0.1)) * 0.4;
+            float web = pow(1.0 - abs(n2(sp * 1.6 + uTime * 0.2) * 2.0 - 1.0), 6.0);
+            float win = smoothstep(0.62, 0.8, h);
+            o = mix(o, uZen * (0.6 + 0.55 * rip + 0.5 * web), win);
+            o += uSunCol * (pow(sd, 18.0) * 1.2 + pow(sd, 200.0) * 4.0 * uDisc) * smoothstep(0.4, 0.8, h);
+            float ang = atan(d.z, d.x);
+            float rays = pow(n2(vec2(ang * 22.0, uTime * 0.25)), 4.0) * smoothstep(-0.1, 0.55, h) * (1.0 - win);
+            o += uZen * rays * 0.22;
+            gl_FragColor = vec4(o, 1.);
+            return;
+          }
           // the dome: zenith to horizon, the glow lying on the horizon (strongest toward the sun)
           vec3 c = mix(uHor, uZen, smoothstep(0.0, 0.6, pow(hp, 0.8)));
           float toward = pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-4), normalize(vec3(uSun.x, 0.0, uSun.z) + 1e-4)), 0.0), 3.0);

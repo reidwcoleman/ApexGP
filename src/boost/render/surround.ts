@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { MapLook, TimeLook } from './looks.ts';
+import { buildOcean } from './ocean.ts';
 
 /**
  * What stands beyond the bowl: a snow range (Frostpeak), a downtown skyline (Neon Harbor), rolling
@@ -11,6 +12,8 @@ import type { MapLook, TimeLook } from './looks.ts';
 export interface SurroundView {
   group: THREE.Group;
   setLook(t: TimeLook, keyDirThree: [number, number, number]): void;
+  /** things that move (the sea's fish, kelp and bubbles) */
+  update?(t: number): void;
 }
 
 // a shared set of uniforms for every surround material
@@ -389,6 +392,10 @@ function skyline(seed: number): THREE.Group {
 export function buildSurround(map: MapLook): SurroundView | null {
   const group = new THREE.Group();
   if (map.surround === 'none') return null;
+  if (map.surround === 'ocean') {
+    const o = buildOcean();
+    return { group: o.group, setLook: (t) => o.setLook(t), update: (t) => o.update(t) };
+  }
   if (map.surround === 'mountains') {
     group.add(groundDisk(new THREE.Color(0.62, 0.65, 0.7), 330000));
     // near: wooded foothills; far: the snow range

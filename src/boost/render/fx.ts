@@ -196,6 +196,11 @@ export class FX {
   /** firework streamers: points that trail sparks, then burst */
   private rockets: { x: number; y: number; z: number; vx: number; vy: number; vz: number; age: number; life: number; col: THREE.Color; pop: THREE.Color }[] = [];
   private streaks = new Streaks(3000);
+  /** columns of light and screen-wide flare streaks */
+  private pillars: { mesh: THREE.Mesh; age: number; life: number; w: number; h: number }[] = [];
+  private pillarGeo = new THREE.CylinderGeometry(1, 1, 1, 32, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5);
+  private flares: { sp: THREE.Sprite; age: number; life: number; w: number }[] = [];
+  private flareTex: THREE.CanvasTexture | null = null;
 
   constructor() {
     this.group.add(this.soft.points, this.glow.points, this.streaks.lines);
@@ -261,6 +266,83 @@ export class FX {
     y = sy * Math.min(Math.abs(y), 5060);
     const z = Math.max(120, Math.min(z0, 520));
     this.explode(x, y, z, team, style, 1, sy);
+    this.celebrate(team, sy);
+  }
+
+  /** what the stadium does for a goal whatever the explosion: flame jets roaring up off the goal's
+   * housing, and fireworks going up from behind the stands in the scoring team's colour */
+  private celebrate(team: number, sy: number): void {
+    const tc = new THREE.Color(team === 0 ? 0x2f7bff : 0xff6a10);
+    const gy = sy * 5300;
+    for (const gx of [-1250, 1250]) {
+      for (let f = 0; f < 22; f++) {
+        this.later.push({
+          t: 0.05 + f * 0.06,
+          fn: () => {
+            for (let k = 0; k < 9; k++) {
+              const hot = Math.random() < 0.4;
+              this.spark({ x: gx + (Math.random() - 0.5) * 60, y: gy + (Math.random() - 0.5) * 60, z: 820, vx: (Math.random() - 0.5) * 160, vy: (Math.random() - 0.5) * 160, vz: 2600 + Math.random() * 1400, r: hot ? 3 : 2.8, g: hot ? 2.2 : 0.9, b: hot ? 1.0 : 0.15, life: 0.6 + Math.random() * 0.4, size: 200 + Math.random() * 140, grow: 220, drag: 1.8, grav: -200 });
+            }
+            this.smoke({ x: gx, y: gy, z: 1400, vx: (Math.random() - 0.5) * 100, vy: (Math.random() - 0.5) * 100, vz: 500, r: 0.14, g: 0.12, b: 0.12, life: 1.6, size: 180, grow: 260, drag: 1.2, grav: -40 });
+          },
+        });
+      }
+    }
+    const pale = tc.clone().lerp(new THREE.Color(1, 1, 1), 0.4).multiplyScalar(3);
+    const hot = new THREE.Color(3, 2.9, 2.6);
+    for (let k = 0; k < 14; k++) {
+      const a = (k / 14) * Math.PI * 2 + Math.random() * 0.3;
+      const bx = Math.cos(a) * 6800;
+      const by = Math.sin(a) * 8200;
+      this.later.push({
+        t: 0.4 + Math.random() * 2.2,
+        fn: () => this.rockets.push({ x: bx, y: by, z: 1900, vx: -bx * 0.32 + (Math.random() - 0.5) * 400, vy: -by * 0.3 + (Math.random() - 0.5) * 400, vz: 1800 + Math.random() * 700, age: 0, life: 0.9 + Math.random() * 0.35, col: hot.clone(), pop: k % 3 === 0 ? pale.clone() : tc.clone().multiplyScalar(3.2) }),
+      });
+    }
+  }
+
+  /** a column of light standing on the floor */
+  private pillar(x: number, y: number, w: number, h: number, life: number, c: THREE.Color): void {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { uK: { value: 1 }, uC: { value: c } },
+      vertexShader: `varying float vH; varying vec3 vN; varying vec3 vV; void main(){ vH = position.z; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float uK; uniform vec3 uC; varying float vH; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); float a = f * pow(1.0 - vH, 1.5) * uK; gl_FragColor = vec4(uC * a, a); }`,
+    });
+    const m = new THREE.Mesh(this.pillarGeo, mat);
+    m.position.set(x, y, 0);
+    m.renderOrder = 13;
+    m.frustumCulled = false;
+    this.group.add(m);
+    this.pillars.push({ mesh: m, age: 0, life, w, h });
+  }
+
+  /** a wide horizontal lens streak across the burst */
+  private flare(x: number, y: number, z: number, w: number, life: number, c: THREE.Color): void {
+    if (!this.flareTex) {
+      const cv = document.createElement('canvas');
+      cv.width = 256;
+      cv.height = 32;
+      const g = cv.getContext('2d')!;
+      const lg = g.createLinearGradient(0, 0, 256, 0);
+      lg.addColorStop(0, 'rgba(255,255,255,0)');
+      lg.addColorStop(0.5, 'rgba(255,255,255,1)');
+      lg.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = lg;
+      for (let r = 0; r < 32; r++) {
+        g.globalAlpha = Math.exp(-((r - 15.5) ** 2) / 18);
+        g.fillRect(0, r, 256, 1);
+      }
+      this.flareTex = new THREE.CanvasTexture(cv);
+    }
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flareTex, color: c, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
+    sp.position.set(x, y, z);
+    sp.renderOrder = 14;
+    this.group.add(sp);
+    this.flares.push({ sp, age: 0, life, w });
   }
 
   /** an explosion in the open (the garage's preview): `k` scales it, nothing is thrown away from a goal */
@@ -278,6 +360,16 @@ export class FX {
     };
     const tc = new THREE.Color(team === 0 ? 0x2f7bff : 0xff6a10);
     const hot = new THREE.Color(3.2, 3.0, 2.7);
+    // every explosion: a pillar of team light, a lens streak, hot debris bouncing over the floor
+    this.pillar(x, y, 520 * K, 5200 * K, 1.5, tc.clone().multiplyScalar(2.4));
+    this.pillar(x, y, 160 * K, 7000 * K, 0.8, hot.clone());
+    this.flare(x, y, z, 9000 * K, 0.7, tc.clone().lerp(new THREE.Color(1, 1, 1), 0.35).multiplyScalar(2.2));
+    for (let k = 0; k < Math.round(70 * Math.max(0.4, K)); k++) {
+      const d = out(rnd3());
+      const v = (900 + Math.random() * 2200) * K;
+      const c = Math.random() < 0.5 ? hot : tc.clone().multiplyScalar(2.8);
+      this.spark({ x, y, z, vx: d[0] * v, vy: d[1] * v, vz: Math.abs(d[2]) * v * 0.8 + 600, r: c.r, g: c.g, b: c.b, life: 1.8 + Math.random() * 1.4, size: (26 + Math.random() * 26) * K, grow: -6, drag: 0.6, grav: 1100 });
+    }
     if (style === 1) return this.shockwave(x, y, z, tc, hot, K, out);
     if (style === 2) return this.fireworks(x, y, z, tc, hot, K, out);
     if (style === 3) return this.vortex(x, y, z, tc, hot, K);
@@ -499,6 +591,33 @@ export class FX {
 
   update(dt: number): void {
     this.streaks.update(dt);
+    for (let k = this.pillars.length - 1; k >= 0; k--) {
+      const p = this.pillars[k];
+      p.age += dt;
+      const t = p.age / p.life;
+      if (t >= 1) {
+        this.group.remove(p.mesh);
+        (p.mesh.material as THREE.Material).dispose();
+        this.pillars.splice(k, 1);
+        continue;
+      }
+      const g = 1 - Math.pow(1 - Math.min(1, t * 4), 3);
+      p.mesh.scale.set(p.w * (0.4 + 0.6 * g) * (1 + t * 0.6), p.w * (0.4 + 0.6 * g) * (1 + t * 0.6), p.h * g);
+      ((p.mesh.material as THREE.ShaderMaterial).uniforms.uK as { value: number }).value = (1 - t) * (1 - t) * 1.2;
+    }
+    for (let k = this.flares.length - 1; k >= 0; k--) {
+      const f = this.flares[k];
+      f.age += dt;
+      const t = f.age / f.life;
+      if (t >= 1) {
+        this.group.remove(f.sp);
+        f.sp.material.dispose();
+        this.flares.splice(k, 1);
+        continue;
+      }
+      f.sp.scale.set(f.w * (0.5 + t), f.w * 0.035 * (1 - t * 0.5), 1);
+      f.sp.material.opacity = (1 - t) * (1 - t);
+    }
     for (let k = this.later.length - 1; k >= 0; k--) {
       const l = this.later[k];
       l.t -= dt;

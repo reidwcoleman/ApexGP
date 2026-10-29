@@ -31,6 +31,9 @@ const TH = {
   uSeat: { value: new THREE.Color() },
   uFrost: { value: 0 },
   uTrim: { value: new THREE.Color() },
+  /** caustics thrown over the pitch from the waves above (the sea floor arena), and their clock */
+  uCaus: { value: 0 },
+  uClock: { value: 0 },
 };
 /** the goal housings' structure (coloured with the arena) */
 const houseM = new THREE.MeshStandardMaterial({ color: 0x0c0e13, roughness: 0.75, metalness: 0.25 });
@@ -40,7 +43,7 @@ export const uNear = { value: Array.from({ length: 9 }, () => new THREE.Vector4(
 const GLSL_COMMON = /* glsl */ `
 uniform float uDay;
 uniform vec3 uPitchA, uPitchB, uLine, uWall, uGlass, uSeat, uTrim;
-uniform float uPattern, uLineGlow, uFrost;
+uniform float uPattern, uLineGlow, uFrost, uCaus, uClock;
 float bbHash(vec2 p){ p = fract(p*vec2(233.34,851.73)); p += dot(p, p+23.45); return fract(p.x*p.y); }
 float bbNoise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
   return mix(mix(bbHash(i), bbHash(i+vec2(1,0)), u.x), mix(bbHash(i+vec2(0,1)), bbHash(i+vec2(1,1)), u.x), u.y); }
@@ -55,6 +58,14 @@ vec3 bbBump(vec3 sp, vec3 sn, vec2 dh, float fd){ vec3 sx = dFdx(sp), sy = dFdy(
   float det = dot(sx, r1) * fd; vec3 g = sign(det) * (dh.x * r1 + dh.y * r2); return normalize(abs(det) * sn - g); }
 float bbHexEdge(vec2 p){ vec2 s = vec2(1.0, 1.7320508); vec2 a = mod(p, s) - s*0.5; vec2 b = mod(p - s*0.5, s) - s*0.5;
   vec2 g = dot(a,a) < dot(b,b) ? a : b; g = abs(g); return 0.5 - max(dot(g, normalize(s)), g.x); }
+// caustics: two drifting layers of a warped sine lattice, bright where the folds bunch up
+float bbCaus(vec2 p, float t){ float c = 0.0;
+  for (int k = 0; k < 2; k++){ float s = k == 0 ? 1.0 : -1.0;
+    vec2 q = p * (k == 0 ? 1.0 : 1.37) + vec2(t * 0.21, -t * 0.17) * s;
+    q += 0.6 * vec2(sin(q.y * 1.7 + t * 0.9), sin(q.x * 1.5 - t * 0.8));
+    q += 0.35 * vec2(sin(q.y * 3.1 - t * 1.3), sin(q.x * 2.9 + t * 1.1));
+    vec2 w = abs(sin(q * 1.9)); c += pow(1.0 - min(w.x, w.y), 7.0); }
+  return c * 0.6; }
 `;
 
 /** shader hooks onto a standard material: vSim = the vertex in simulation coordinates */
@@ -296,6 +307,10 @@ function pitch(): THREE.Mesh {
     float gIn = step(${ARENA.Y.toFixed(1)}, abs(P.y)) * step(abs(P.x), ${ARENA.GOAL_W.toFixed(1)});
     float hex = bbHexEdge(P / 140.0);
     col = mix(col, vec3(0.03, 0.035, 0.05) + team * 0.06 * (1.0 - smoothstep(0.0, 0.06, hex)), gIn);
+    // the sea floor arena: the waves' caustics dancing over the turf, a cooler cast
+    float cz = bbCaus(P / 330.0, uClock) * uCaus * (1.0 - smoothstep(25.0, 90.0, fw)) * (1.0 - gIn);
+    col *= 1.0 + cz * 1.25;
+    col = mix(col, col * vec3(0.88, 1.04, 1.06), min(uCaus, 1.0) * 0.2);
     diffuseColor.rgb *= col;
     float glowK = mix(1.0, 0.45, uDay);
     vec3 bbEmit = lineC * L * (mix(0.09, 0.03, uDay) + uLineGlow * mix(1.6, 0.9, uDay)) + lineC * halo * (0.02 + uLineGlow * 0.3) * mix(1.0, 0.45, uDay) + team * glowK * (bnd * 1.6 + gl * 2.4 + gIn * (1.0 - smoothstep(0.0, 0.05, hex)) * 0.5)
@@ -331,6 +346,7 @@ function shell(): THREE.Group {
     col *= mix(1.0, mix(2.4, 1.15, smoothstep(0.15, 0.4, max(uWall.r, max(uWall.g, uWall.b)))), uDay);
     // snow banked at the foot of the walls
     col = mix(col, vec3(0.8, 0.85, 0.9) * mix(0.6, 1.0, uDay), uFrost * (1.0 - smoothstep(30.0, 140.0 + n * 80.0, z)) * 0.85);
+    col *= 1.0 + bbCaus(vec2(vBB.x, z) / 330.0, uClock) * uCaus * 1.3 * (1.0 - smoothstep(25.0, 90.0, fwidth(vBB.x)));
     diffuseColor.rgb *= col;
     float stripe = smoothstep(14.0, 0.0, abs(z - 330.0)) ;
     float seam = 1.0 - smoothstep(0.0, 0.05, hex);
@@ -1164,6 +1180,161 @@ function centreLogo(): THREE.Mesh {
 }
 
 /** snow drifting down through the bowl (Frostpeak): points wrapped round a box over the pitch */
+/** flags on poles round the rim of the bowl, waving over the top row in the two teams' colours
+ * (gold and white over halfway), seen against the sky from every seat */
+function flags(uT: { value: number }, count: 1 | 2): THREE.Group {
+  const grp = new THREE.Group();
+  const { p: per, len } = perimeter(0, 200, 12);
+  const backO = count === 2 ? 7000 : 3800;
+  const backZ = count === 2 ? 4700 : 2200;
+  const pos: number[] = [];
+  const col: number[] = [];
+  const nrm: number[] = [];
+  const fuv: number[] = [];
+  const idx: number[] = [];
+  const poles: THREE.BufferGeometry[] = [];
+  const total = len[len.length - 1];
+  const N = Math.round(total / (count === 2 ? 1500 : 1250));
+  const FW = 820;
+  const FH = 520;
+  const top = backZ + 1500;
+  let j = 0;
+  for (let f = 0; f < N; f++) {
+    const at = (f / N) * total;
+    while (j < len.length - 2 && len[j + 1] < at) j++;
+    const [x0, y0, nx, ny] = per[j];
+    const x = x0 + nx * (R + backO + 60);
+    const y = y0 + ny * (R + backO + 60);
+    // the flag streams along the bowl
+    const tx = -ny;
+    const ty = nx;
+    const c = Math.abs(y) < 1400 ? (f % 2 ? new THREE.Color(1.0, 0.78, 0.15) : new THREE.Color(0.95, 0.96, 1.0)) : y < 0 ? new THREE.Color(0.06, 0.32, 1.0) : new THREE.Color(1.0, 0.36, 0.04);
+    const base = pos.length / 3;
+    const SX = 10;
+    const SZ = 5;
+    for (let b = 0; b <= SZ; b++)
+      for (let a = 0; a <= SX; a++) {
+        const u = a / SX;
+        const v = b / SZ;
+        pos.push(x + tx * u * FW, y + ty * u * FW, top - FH + v * FH);
+        col.push(c.r, c.g, c.b);
+        nrm.push(nx, ny, 0);
+        fuv.push(u, v, f);
+      }
+    for (let b = 0; b < SZ; b++)
+      for (let a = 0; a < SX; a++) {
+        const i = base + b * (SX + 1) + a;
+        idx.push(i, i + 1, i + SX + 1, i + 1, i + SX + 2, i + SX + 1);
+      }
+    const pole = new THREE.CylinderGeometry(9, 14, top - backZ + 120, 6, 1).rotateX(Math.PI / 2).translate(x, y, (top + backZ) / 2 + 20);
+    poles.push(pole.deleteAttribute('uv'));
+    poles.push(new THREE.SphereGeometry(22, 8, 6).translate(x, y, top + 90).deleteAttribute('uv'));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('fuv', new THREE.Float32BufferAttribute(fuv, 3));
+  g.setIndex(idx);
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = uT;
+    Object.assign(sh.uniforms, { uDay });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uT;\nattribute vec3 fuv;\nvarying vec3 vF;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vF = fuv;
+        // a wave running out from the pole, growing toward the free end
+        float ph = fuv.z * 1.7;
+        float wv = sin(uT * 5.5 + ph - fuv.x * 7.0) * 0.7 + sin(uT * 8.3 + ph * 1.3 - fuv.x * 11.0 + fuv.y * 2.0) * 0.3;
+        transformed += normal * wv * fuv.x * 70.0;
+        transformed.z -= fuv.x * fuv.x * 60.0;`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uDay;\nvarying vec3 vF;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        // a white chevron and a hem along the edge
+        float chev = 1.0 - smoothstep(0.06, 0.09, abs(abs(vF.y - 0.5) * 1.1 - (vF.x - 0.35)));
+        float hem = step(vF.y, 0.07) + step(0.93, vF.y);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95), clamp(chev + hem, 0.0, 1.0) * 0.9);
+        // (lit from the stadium at night: never dark against the sky)
+        vec3 flagGlow = diffuseColor.rgb * mix(0.35, 0.08, uDay);`,
+      )
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += flagGlow;');
+  };
+  m.customProgramCacheKey = () => 'bbflags';
+  const fl = new THREE.Mesh(g, m);
+  fl.castShadow = false;
+  grp.add(fl);
+  const pm = new THREE.Mesh(mergeGeometries(poles), new THREE.MeshStandardMaterial({ color: 0xc8ccd4, roughness: 0.35, metalness: 0.85 }));
+  grp.add(pm);
+  return grp;
+}
+
+/** searchlights behind the stands sweeping the sky in the teams' colours and neon: they come up
+ * with the evening and the excitement */
+function searchlights(count: 1 | 2): { group: THREE.Group; update: (t: number, day: number, ex: number) => void } {
+  const grp = new THREE.Group();
+  const backO = count === 2 ? 7400 : 4200;
+  const z = count === 2 ? 4900 : 2500;
+  const geo = new THREE.CylinderGeometry(1500, 60, 40000, 24, 1, true).translate(0, 20000, 0).rotateX(Math.PI / 2);
+  const cols = [new THREE.Color(0.2, 0.5, 1.6), new THREE.Color(1.6, 0.55, 0.12), new THREE.Color(1.3, 0.25, 1.2), new THREE.Color(0.25, 1.3, 1.4)];
+  const beams: { m: THREE.Mesh; mat: THREE.ShaderMaterial; ph: number; base: THREE.Vector2 }[] = [];
+  const pts: [number, number][] = [];
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2 + 0.31;
+    const ex = Math.cos(a) * (ARENA.X + R + backO);
+    const ey = Math.sin(a) * (ARENA.Y + R + backO);
+    pts.push([ex, ey]);
+  }
+  pts.forEach(([x, y], k) => {
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      fog: false,
+      uniforms: { uC: { value: cols[(y < 0 ? 0 : 1) + (k % 3 === 2 ? 2 : 0)].clone() }, uK: { value: 0 } },
+      vertexShader: `varying float vL; varying vec3 vN; varying vec3 vV; void main(){ vL = position.z / 40000.0; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform vec3 uC; uniform float uK; varying float vL; varying vec3 vN; varying vec3 vV;
+        void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); float a = (0.25 + f) * pow(1.0 - clamp(vL, 0.0, 1.0), 2.0) * uK; gl_FragColor = vec4(uC * a, a); }`,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.frustumCulled = false;
+    m.renderOrder = 4;
+    grp.add(m);
+    // a lamp head
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(70, 90, 120, 12).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: (mat.uniforms.uC.value as THREE.Color).clone().multiplyScalar(2.5) }));
+    head.position.set(x, y, z);
+    grp.add(head);
+    beams.push({ m, mat, ph: k * 1.7, base: new THREE.Vector2(x, y).normalize() });
+  });
+  const q = new THREE.Quaternion();
+  const d = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 0, 1);
+  return {
+    group: grp,
+    update(t, day, ex) {
+      const k = (1 - Math.min(1, day * 1.15)) * 0.22 + ex * 0.14 + 0.01;
+      for (const b of beams) {
+        // lean out over the stands and sweep side to side, crossing overhead now and then
+        const sw = Math.sin(t * 0.35 + b.ph) * 0.9;
+        const lean = 0.62 + 0.22 * Math.sin(t * 0.23 + b.ph * 1.3);
+        const ox = -(b.base.x * Math.cos(sw) - b.base.y * Math.sin(sw));
+        const oy = -(b.base.x * Math.sin(sw) + b.base.y * Math.cos(sw));
+        d.set(ox * Math.sin(lean), oy * Math.sin(lean), Math.cos(lean)).normalize();
+        b.m.quaternion.copy(q.setFromUnitVectors(up, d));
+        b.mat.uniforms.uK.value = k;
+      }
+    },
+  };
+}
+
 function snowfall(uT: { value: number }): THREE.Points {
   const N = 7000;
   const pos = new Float32Array(N * 3);
@@ -1260,11 +1431,16 @@ export function buildArena(): ArenaView {
       TH.uSeat.value.setRGB(...th.seat);
       TH.uFrost.value = th.frost;
       TH.uTrim.value.setRGB(...th.trim);
+      TH.uCaus.value = map.surround === 'ocean' ? (t.day > 0.25 ? 0.5 + 0.5 * t.day : 0.12) : 0;
       houseM.color.setRGB(...th.trim).multiplyScalar(0.05 + 0.07 * t.day);
       for (const [n, g] of standsBy) g.visible = n === map.tiers;
       let st = standsBy.get(map.tiers);
       if (!st) {
         st = stands(uT, uEx, map.tiers);
+        st.add(flags(uT, map.tiers));
+        const sl = searchlights(map.tiers);
+        st.add(sl.group);
+        st.userData.search = sl.update;
         standsBy.set(map.tiers, st);
         root.add(st);
       }
@@ -1290,6 +1466,9 @@ export function buildArena(): ArenaView {
     },
     update(t, padT, excite, score, clock) {
       uT.value = t;
+      TH.uClock.value = t;
+      surroundBy.get(curMap.id)?.update?.(t);
+      standsBy.get(curMap.tiers)?.userData.search?.(t, curTime.day, excite);
       shellT.value = t;
       uEx.value = excite;
       scr.draw(score, clock);
