@@ -37,6 +37,14 @@ const tB = new V3();
 const tC = new V3();
 const tD = new V3();
 
+/** an angular speed moved toward the one wanted, no faster than max and changing by no more than
+ * acc per second */
+function ease(w: number, want: number, max: number, acc: number, dt: number): number {
+  const target = Math.max(-max, Math.min(max, want));
+  const step = acc * dt;
+  return w + Math.max(-step, Math.min(step, target - w));
+}
+
 /** rotate v about the unit axis k by angle a (Rodrigues), in place */
 function rotate(v: V3, k: V3, a: number): V3 {
   const c = Math.cos(a);
@@ -81,6 +89,13 @@ export class ChaseCam {
   /** the right stick swinging the camera round the car (−1…1 each way): a full push looks back */
   orbit = { x: 0, y: 0 };
   private wasBehind = false;
+  /** how fast the rig is swivelling round its up, and rolling its up over (rad/s): eased in and
+   * out, so a ball passing overhead or a landing on a wall swings the view round, never snaps it */
+  private headW = 0;
+  private rollW = 0;
+  /** the view's eased turn to keep the ball and the car in frame: up (pitch) and right (yaw) */
+  private fixP = 0;
+  private fixY = 0;
   private ballK = 1;
   private shakeT = 0;
   private shakeA = 0;
@@ -109,6 +124,7 @@ export class ChaseCam {
     this.view = v;
     this.lag = 0;
     this.lagUp = 0;
+    this.headW = this.rollW = 0;
     this.prevPos.copy(t.pos);
     this.havePrev = true;
     this.compute(t, 1, true);
@@ -172,10 +188,11 @@ export class ChaseCam {
     this.airT = t.onGround ? 0 : this.airT + dt;
     const wantUp = t.onGround ? t.u : tD.set(0, 0, 1);
     const ang = Math.acos(Math.max(-1, Math.min(1, this.up.dot(wantUp))));
+    // (held a moment after leaving a surface, so wall taps and jumps don't swing it)
+    const rate = t.onGround ? 13 : this.airT < 0.1 ? 0 : 4.5;
+    this.rollW = ease(this.rollW, ang * rate, 7, 30, dt);
     if (ang > 1e-4) {
-      // (held a moment after leaving a surface, so wall taps and jumps don't swing it)
-      const rate = t.onGround ? 13 : this.airT < 0.1 ? 0 : 4.5;
-      const step = ang * (1 - Math.exp(-dt * rate));
+      const step = Math.min(ang, this.rollW * dt);
       const axis = new V3(this.up.y * wantUp.z - this.up.z * wantUp.y, this.up.z * wantUp.x - this.up.x * wantUp.z, this.up.x * wantUp.y - this.up.y * wantUp.x);
       if (axis.len2() < 1e-8) axis.copy(this.heading);
       axis.norm();
@@ -198,8 +215,15 @@ export class ChaseCam {
     }
     const da = angleAbout(this.heading, h, this.up);
     const free = Math.abs(this.orbit.x) > 0.02 || Math.abs(this.orbit.y) > 0.02;
-    const turn = 1 - Math.exp(-dt * (this.behind ? 30 : free ? 16 : 10 + 2 * this.ballK));
-    rotate(this.heading, this.up, da * turn).norm();
+    if (this.behind || free) {
+      // (the stick swings it directly)
+      rotate(this.heading, this.up, da * (1 - Math.exp(-dt * (this.behind ? 30 : 16)))).norm();
+      this.headW = 0;
+    } else {
+      // quicker in ball cam, like the real thing
+      this.headW = ease(this.headW, da * (10 + 2 * this.ballK), 8, 55, dt);
+      rotate(this.heading, this.up, Math.abs(this.headW * dt) > Math.abs(da) ? da : this.headW * dt).norm();
+    }
     this.pitch += (p - this.pitch) * (1 - Math.exp(-dt * 7));
     this.view += (v - this.view) * (1 - Math.exp(-dt * 7));
     // the pivot trails the car's moves along up (jumps, landings, climbs), catching up in ~0.15 s;
@@ -217,7 +241,6 @@ export class ChaseCam {
     const up = this.up;
     const pivot = new V3(t.pos.x + up.x * this.lagUp, t.pos.y + up.y * this.lagUp, t.pos.z + up.z * this.lagUp);
     const h = this.heading;
-    const side = tA.set(h.y * up.z - h.z * up.y, h.z * up.x - h.x * up.z, h.x * up.y - h.y * up.x).norm();
     // the rig tilted by a pitch: its forward and its up
     const fw = new V3();
     const rup = new V3();
@@ -250,8 +273,30 @@ export class ChaseCam {
       }
       place(lo);
     }
-    // blocked even level (riding into the ceiling, falling just under it, a wall right behind):
-    // swing the boom round, over or under the car, to the nearest clear spot at full length
+    // blocked (a wall or a corner right behind, the ceiling overhead): the boom shortens toward the
+    // car first, as the real one does, keeping the view from behind...
+    if (sdf(want.x, want.y, want.z) < 45) {
+      const fx = want.x - pivot.x;
+      const fy = want.y - pivot.y;
+      const fz = want.z - pivot.z;
+      const at = (k: number) => {
+        want.set(pivot.x + fx * k, pivot.y + fy * k, pivot.z + fz * k);
+        return sdf(want.x, want.y, want.z) >= 45;
+      };
+      const k0 = 150 / Math.max(150, Math.hypot(fx, fy, fz));
+      if (at(k0)) {
+        let lo = k0;
+        let hi = 1;
+        for (let k = 0; k < 7; k++) {
+          const m = (lo + hi) / 2;
+          if (at(m)) lo = m;
+          else hi = m;
+        }
+        at(lo);
+      } else at(1);
+    }
+    // ...and only when even a short boom won't fit (riding into the ceiling, falling just under it)
+    // does it swing round, over or under the car, to the nearest clear spot at full length
     if (sdf(want.x, want.y, want.z) < 45) {
       const p0 = Math.min(0, this.pitch);
       let ok = false;
@@ -284,42 +329,44 @@ export class ChaseCam {
     const a = (CAM.ANGLE * Math.PI) / 180 + this.view;
     const dir = new V3().copy(fw).scale(Math.cos(a)).addScaled(rup, Math.sin(a));
     rup.copy(rup).scale(Math.cos(a)).addScaled(fw, -Math.sin(a));
+    const right = tA.set(dir.y * rup.z - dir.z * rup.y, dir.z * rup.x - dir.x * rup.z, dir.x * rup.y - dir.y * rup.x).norm();
     const vHalf = Math.atan(Math.tan((CAM.FOV * Math.PI) / 360) / (16 / 9));
-    // ball cam, from where the camera really ended up: a ball still over the top of the frame (clear
-    // of the scoreboard) or under the bottom turns the view toward it by just the excess
+    const hHalf = (CAM.FOV * Math.PI) / 360;
+    // what still falls outside the frame, from where the camera really ended up: a ball over the
+    // top (clear of the scoreboard) or under the bottom in ball cam, and any of the car, wherever it
+    // is; the view turns by just the excess (the car winning), eased so it swings rather than jolts
+    let wantP = 0;
+    let wantY = 0;
     const toBall = tD.subVectors(t.ball, this.pos);
     const bl = toBall.len();
-    const ahead = toBall.dot(dir);
-    if (this.ballK > 0.01 && bl > 1 && ahead > 0) {
-      const e = Math.atan2(toBall.dot(rup), ahead);
+    const bAhead = toBall.dot(dir);
+    if (this.ballK > 0.01 && bl > 1 && bAhead > 0) {
+      const e = Math.atan2(toBall.dot(rup), bAhead);
       const br = Math.atan2(92, bl);
       const over = e + br - (vHalf - 0.12);
       const under = e - br + (vHalf - 0.06);
-      const turn = (over > 0 ? over : under < 0 ? under : 0) * this.ballK;
-      if (turn !== 0) {
-        const axis = new V3(dir.y * rup.z - dir.z * rup.y, dir.z * rup.x - dir.x * rup.z, dir.x * rup.y - dir.y * rup.x).norm();
-        rotate(dir, axis, turn).norm();
-        rotate(rup, axis, turn).norm();
-      }
+      wantP = (over > 0 ? over : under < 0 ? under : 0) * this.ballK;
     }
-    // keep the whole car in frame wherever it is (below, above, off to a side, even behind): turn
-    // the view toward it by just enough that it sits inside the frame's height, with a margin
     const toCar = tC.subVectors(t.pos, this.pos);
     const cl = toCar.len();
+    const cAhead = toCar.dot(dir);
     if (cl > 1) {
-      toCar.scale(1 / cl);
-      // (the car's own half height, seen from here, plus a margin)
-      const allowed = vHalf - Math.atan2(CAR_H, cl) - 0.04;
-      const th = Math.acos(Math.max(-1, Math.min(1, dir.dot(toCar))));
-      if (th > allowed) {
-        const axis = new V3(dir.y * toCar.z - dir.z * toCar.y, dir.z * toCar.x - dir.x * toCar.z, dir.x * toCar.y - dir.y * toCar.x);
-        if (axis.len2() < 1e-8) axis.copy(side);
-        axis.norm();
-        rotate(dir, axis, th - allowed).norm();
-        rotate(rup, axis, th - allowed);
-        rup.addScaled(dir, -rup.dot(dir)).norm();
-      }
+      const m = Math.atan2(CAR_H, cl) + 0.04;
+      const ce = Math.atan2(toCar.dot(rup), Math.max(1, cAhead)) - wantP;
+      if (ce < -(vHalf - m)) wantP += ce + (vHalf - m);
+      else if (ce > vHalf - m) wantP += ce - (vHalf - m);
+      const ca = Math.atan2(toCar.dot(right), cAhead);
+      const mh = hHalf - Math.atan2(CAR_H * 1.6, cl) - 0.04;
+      if (Math.abs(ca) > mh) wantY = ca - Math.sign(ca) * mh;
     }
+    const ek = snap ? 1 : 1 - Math.exp(-dt * 14);
+    this.fixP += (wantP - this.fixP) * ek;
+    this.fixY += (wantY - this.fixY) * ek;
+    if (this.fixP !== 0) {
+      rotate(dir, right, this.fixP).norm();
+      rotate(rup, right, this.fixP).norm();
+    }
+    if (this.fixY !== 0) rotate(dir, rup, -this.fixY).norm();
     this.look.copy(this.pos).addScaled(dir, 1000);
     // the camera's own up, for the renderer
     this.camUp.copy(rup);

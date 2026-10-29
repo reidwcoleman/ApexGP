@@ -13,6 +13,7 @@ import { Ribbon, type RibbonStyle } from './render/trail.ts';
 import { S, Stage } from './render/stage.ts';
 import { ARENA, PADS, type Team } from './sim/arena.ts';
 import { BALL } from './sim/ball.ts';
+import { aerialAssist } from './sim/assist.ts';
 import { Bot } from './sim/bot.ts';
 import { noInput, type Input } from './sim/car.ts';
 import { V3 } from './sim/math.ts';
@@ -759,7 +760,7 @@ export class Game {
     if (this.mode === 'guest') this.guestTick();
     else {
       const inputs: Input[] = [];
-      const mine = this.me >= 0 ? this.controls.read() : noInput();
+      const mine = this.me >= 0 ? this.myInput() : noInput();
       for (let i = 0; i < w.cars.length; i++) {
         const bot = this.bots.get(i);
         if (i === this.me) inputs.push(mine);
@@ -799,6 +800,11 @@ export class Game {
     }
   }
 
+  /** the stick, with the aerial assist (the player's setting) blended in */
+  private myInput(): Input {
+    return aerialAssist(this.world, this.me, this.controls.read(), this.ui.profile.assist ?? 0.6);
+  }
+
   private guestTick(): void {
     const w = this.world;
     if (!this.guest) return;
@@ -806,7 +812,7 @@ export class Game {
     if (this.snap && this.snap[0] > this.lastSnapTick) this.applySnapshot(this.snap);
     this.snap = null;
     this.seq++;
-    const inp = this.me >= 0 ? quant(this.controls.read()) : noInput();
+    const inp = this.me >= 0 ? quant(this.myInput()) : noInput();
     this.hist[this.seq & 255] = inp;
     const send: Input[] = [];
     for (let k = 0; k < 6 && this.seq - k > 0; k++) send.push(this.hist[(this.seq - k) & 255]);

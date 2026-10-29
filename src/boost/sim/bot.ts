@@ -16,7 +16,7 @@ import { TICK, type World } from './world.ts';
  * the shot accuracy and whether it'll fly.
  */
 
-interface BallPt {
+export interface BallPt {
   t: number;
   x: number;
   y: number;
@@ -28,7 +28,7 @@ let pathWorld: World | null = null;
 let path: BallPt[] = [];
 
 /** the ball's next 3 s (shared by every bot of a match, refreshed every few ticks) */
-function ballPath(w: World): BallPt[] {
+export function ballPath(w: World): BallPt[] {
   // (a new match is a new world whose clock starts again from zero)
   if (w === pathWorld && w.tick >= pathTick && w.tick - pathTick < 4 && path.length) return path;
   pathWorld = w;

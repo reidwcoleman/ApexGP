@@ -956,7 +956,7 @@ const ROW_H = 85;
 
 function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): THREE.Group {
   const grp = new THREE.Group();
-  const { p: per, len } = perimeter(0, 300, 12);
+  const { p: per } = perimeter(0, 300, 12);
   const tiers: [number, number, number, number][] = [
     // (offset from the wall, z bottom, offset top, z top)
     [700, 120, 3600, 2000],
@@ -991,10 +991,18 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     float walk = step(mod(row, 11.0), 0.5) * step(1.0, row);
     float tunnel = walk * step(abs(fract(vBB.x / 1500.0) - 0.5), 0.09) * step(0.35, hb);
     float occupied = step(0.08 + 0.35 * step(hb, 0.12), h) * (1.0 - walk);
-    float bob = uExcite * max(0.0, sin(uTime * (7.0 + h2 * 5.0) + h * 30.0)) * 0.3 + 0.03 * sin(uTime * 2.0 + h * 40.0);
+    // a Mexican wave now and then: it runs round the bowl for twenty seconds in every forty-five,
+    // each section up on its feet (arms up) as it passes
+    float wph = atan(vSim.y * 0.8, vSim.x);
+    float wd = mod(wph - uTime * 0.42 + 3.14159, 6.28318) - 3.14159;
+    float wcyc = mod(uTime, 45.0);
+    float wave = exp(-wd * wd / 0.05) * smoothstep(0.0, 2.0, wcyc) * (1.0 - smoothstep(18.0, 20.0, wcyc));
+    float bob = uExcite * max(0.0, sin(uTime * (7.0 + h2 * 5.0) + h * 30.0)) * 0.3 + 0.03 * sin(uTime * 2.0 + h * 40.0) + wave * (0.32 + 0.08 * h2);
     float body = smoothstep(0.34, 0.26, abs(f.x - 0.5)) * step(f.y, 0.5 + bob) * step(0.1, f.y);
     float head = smoothstep(0.2, 0.14, length((f - vec2(0.5, 0.68 + bob)) * vec2(1.0, 1.2)));
-    float person = max(body, head) * occupied * (1.0 - tread);
+    // (arms thrown up as the wave goes through)
+    float arms = wave * step(0.5, h2 + wave * 0.3) * smoothstep(0.1, 0.04, abs(abs(f.x - 0.5) - 0.24)) * step(0.62 + bob * 0.5, f.y) * step(f.y, 0.98);
+    float person = max(max(body, head), arms) * occupied * (1.0 - tread);
     // each half of the bowl leans to its team's colours, split at halfway
     float tw = smoothstep(-250.0, 250.0, vSim.y);
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
@@ -1013,7 +1021,7 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     // far away the seats are under a pixel: blend to the average instead of shimmering
     float px = max(fwidth(sx), fwidth(vBB.y / rowH));
     float dens = 0.75 + 0.5 * bbNoise(vBB / vec2(420.0, 260.0)) + 0.2 * (bbNoise(vBB / vec2(90.0, 120.0)) - 0.5);
-    vec3 crowdAvg = mix(vec3(0.12, 0.12, 0.13), teamC * 0.55, 0.14) * dens * (1.0 - walk) + vec3(0.1) * walk;
+    vec3 crowdAvg = mix(vec3(0.12, 0.12, 0.13), teamC * 0.55, 0.14 + 0.3 * wave) * dens * (1.0 - walk) * (1.0 + wave * 2.2) + vec3(0.1) * walk;
     vec3 avg = mix(seatC, crowdAvg, 0.75 * (1.0 - step(hb, 0.12) * 0.5));
     col = mix(col, mix(avg, floorC, tread * 0.6), smoothstep(0.3, 0.8, px));
     // the roof shades the upper rows by day
@@ -1022,12 +1030,50 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     col = mix(col, mix(vec3(0.05), uTrim * 0.3, 0.5) * mix(0.6, 1.0, uDay), aisle);
     diffuseColor.rgb *= col;
     // phone lights and camera flashes (more of them in a big moment)
-    float flash = step(0.9992 - uExcite * 0.003, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - tread) * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay * (1.0 - uExcite));
-    vec3 bbEmit = vec3(1.0) * flash * mix(2.5, 1.2, uDay) + col * 0.1 * (1.0 - uDay) + vec3(1.0, 0.9, 0.7) * tunnel * (1.0 - tread) * 0.02;
+    float flash = step(0.9992 - uExcite * 0.003 - wave * 0.01, bbHash(vec2(seat, row) + floor(uTime * 5.0) * 0.37)) * occupied * (1.0 - tread) * (1.0 - smoothstep(0.5, 1.5, px)) * (1.0 - uDay * (1.0 - uExcite));
+    // a team-coloured light strip along the foot of each walkway, warm step lights up the aisles and
+    // the tunnel mouths lit from the concourse (all mostly for the night)
+    float night = 1.0 - uDay;
+    float wstrip = walk * (1.0 - tread) * smoothstep(0.16, 0.08, f.y) * (1.0 - tunnel);
+    float step_ = aisle * (1.0 - tread) * smoothstep(0.3, 0.15, abs(f.y - 0.25)) * smoothstep(0.8, 0.3, px);
+    vec3 bbEmit = vec3(1.0) * flash * mix(2.5, 1.2, uDay) + col * 0.1 * night
+      + teamC * wstrip * mix(0.5, 2.2, night) * (1.0 + uExcite * 1.5 * step(0.5, fract(uTime * 3.0 + vBB.x / 3000.0)))
+      + vec3(1.0, 0.72, 0.38) * step_ * 1.6 * night
+      + vec3(1.0, 0.82, 0.55) * tunnel * (1.0 - tread) * mix(0.08, 0.9, night);
     `,
     { uTime: uT, uExcite: uEx },
     'uniform float uTime; uniform float uExcite;',
   );
+  // an LED ribbon facing the pitch, offset o from the wall, its top at z0, lh tall: round the pitch at
+  // the bottom; up between the tiers (or along the crown of a single tier) a tall fascia
+  const ribbon = (o0: number, z0: number, lh: number) => {
+    const W = per.length;
+    const lp: number[] = [];
+    const luv: number[] = [];
+    const li: number[] = [];
+    // (u: the arc length along the ribbon itself, so the letters keep their shape round the corners)
+    const ul = [0];
+    for (let i = 1; i < W; i++) {
+      const [ax, ay, anx, any] = per[i - 1];
+      const [bx, by, bnx, bny] = per[i];
+      const ro = R + o0 - 10;
+      ul.push(ul[i - 1] + Math.hypot(bx + bnx * ro - ax - anx * ro, by + bny * ro - ay - any * ro));
+    }
+    for (let j = 0; j <= 1; j++)
+      for (let i = 0; i < W; i++) {
+        const [x, y, nx, ny] = per[i];
+        lp.push(x + nx * (R + o0 - 10), y + ny * (R + o0 - 10), z0 - lh + j * lh);
+        luv.push(ul[i], j);
+      }
+    // (none of it through the goals: the housings take that space)
+    const inGoal = (i: number) => Math.abs(lp[i * 3]) < ARENA.GOAL_W + 300 && Math.abs(lp[i * 3 + 1]) > ARENA.Y && z0 - lh < ARENA.GOAL_H + 120;
+    for (let i = 0; i < W - 1; i++) if (!inGoal(i) && !inGoal(i + 1)) li.push(i, i + 1, i + W, i + 1, i + W + 1, i + W);
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+    lg.setAttribute('uv', new THREE.Float32BufferAttribute(luv, 2));
+    lg.setIndex(li);
+    grp.add(new THREE.Mesh(lg, ledMaterial(uT, uEx, lh)));
+  };
   for (const [o0, z0, o1, z1] of tiers) {
     const pos: number[] = [];
     const nrm: number[] = [];
@@ -1073,25 +1119,9 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
     g.setIndex(idx);
     const m = new THREE.Mesh(g, mat);
     grp.add(m);
-    // the front parapet of each tier: an LED ribbon
-    const lp: number[] = [];
-    const luv: number[] = [];
-    const li: number[] = [];
-    for (let j = 0; j <= 1; j++)
-      for (let i = 0; i < W; i++) {
-        const [x, y, nx, ny] = per[i];
-        lp.push(x + nx * (R + o0 - 10), y + ny * (R + o0 - 10), z0 - 120 + j * 120);
-        luv.push(len[i], j);
-      }
-    // (none of it through the goals: the housings take that space)
-    const inGoal = (i: number) => Math.abs(lp[i * 3]) < ARENA.GOAL_W + 300 && Math.abs(lp[i * 3 + 1]) > ARENA.Y && z0 - 120 < ARENA.GOAL_H + 120;
-    for (let i = 0; i < W - 1; i++) if (!inGoal(i) && !inGoal(i + 1)) li.push(i, i + 1, i + W, i + 1, i + W + 1, i + W);
-    const lg = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
-    lg.setAttribute('uv', new THREE.Float32BufferAttribute(luv, 2));
-    lg.setIndex(li);
-    grp.add(new THREE.Mesh(lg, ledMaterial(uT)));
+    ribbon(o0, z0, z0 > 600 ? 560 : 120);
   }
+  if (count === 1) ribbon(backO - 30, backZ + 380, 420);
   // under the stands: a dark concourse wall so nothing shows through the gaps
   const back: number[] = [];
   const bi: number[] = [];
@@ -1120,8 +1150,9 @@ function stands(uT: { value: number }, uEx: { value: number }, count: 1 | 2): TH
   return grp;
 }
 
-/** a scrolling LED board: original sponsor-free slogans */
-function ledMaterial(uT: { value: number }): THREE.MeshBasicMaterial {
+/** a scrolling LED board: original sponsor-free slogans, taking turns with a light show (team
+ * chevrons sweeping round from each end, a gold chase) and strobing in team colours in a big moment */
+function ledMaterial(uT: { value: number }, uEx: { value: number }, h: number): THREE.MeshBasicMaterial {
   const c = document.createElement('canvas');
   c.width = 2048;
   c.height = 64;
@@ -1133,8 +1164,10 @@ function ledMaterial(uT: { value: number }): THREE.MeshBasicMaterial {
   x.textBaseline = 'middle';
   let px = 20;
   let k = 0;
-  while (px < c.width) {
+  while (true) {
     const w = words[k % words.length];
+    // (no word cut at the seam)
+    if (px + x.measureText(w).width > c.width - 20) break;
     x.fillStyle = k % 3 === 0 ? '#2f8bff' : k % 3 === 1 ? '#ff8a2a' : '#e8f0ff';
     x.fillText(w, px, 34);
     px += x.measureText(w).width + 90;
@@ -1145,13 +1178,43 @@ function ledMaterial(uT: { value: number }): THREE.MeshBasicMaterial {
   t.colorSpace = THREE.SRGBColorSpace;
   t.repeat.set(12, 1);
   t.anisotropy = 8;
-  const m = new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.6, 1.6, 1.6) });
+  const m = new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.6, 1.6, 1.6), side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = uT;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv.x += uTime * 0.02;');
+    sh.uniforms.uEx = uEx;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying vec3 vLed;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv.x += uTime * 0.02;\nvLed = vec3(uv, position.y);');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uEx;\nvarying vec3 vLed;').replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+      {
+        float u = vLed.x * ${(120 / h).toFixed(4)};
+        float v = vLed.y;
+        vec3 team = mix(vec3(0.15, 0.45, 1.6), vec3(1.7, 0.6, 0.12), smoothstep(-300.0, 300.0, vLed.z));
+        // chevrons pointing along the board, sweeping away from each team's end
+        float chev = step(0.55, fract((u + abs(v - 0.5) * 260.0) / 520.0 - uTime * 1.6 * sign(vLed.z + 0.01)));
+        vec3 chevC = team * (0.12 + 1.4 * chev);
+        // a gold chase: bright bands running round the bowl over a dim glow
+        float band = pow(max(0.0, sin(u / 2200.0 * 6.28318 - uTime * 5.0)), 18.0);
+        vec3 chaseC = vec3(1.9, 1.3, 0.45) * 1.6 * band + team * 0.06;
+        float cyc = mod(uTime, 36.0);
+        float mChev = smoothstep(16.0, 17.0, cyc) * (1.0 - smoothstep(24.0, 25.0, cyc));
+        float mChase = smoothstep(25.0, 26.0, cyc) * (1.0 - smoothstep(34.0, 35.0, cyc));
+        vec3 c = diffuseColor.rgb;
+        c = mix(c, chevC, mChev);
+        c = mix(c, chaseC, mChase);
+        // a goal: the whole ring strobes
+        float strobe = step(0.5, fract(uTime * 5.0 + u / 4000.0));
+        c = mix(c, team * (0.4 + 1.6 * strobe) + vec3(0.6) * strobe, smoothstep(0.35, 0.7, uEx));
+        diffuseColor.rgb = c;
+      }`,
+    );
   };
-  // UVs are in cm along the bowl: scale them into board widths
-  m.map!.repeat.set(1 / 9000, 1);
+  m.customProgramCacheKey = () => 'bbled2' + h;
+  // UVs are in cm along the bowl: scale them into board widths (a taller board, bigger letters)
+  // (negative: the bowl's arc length runs right to left seen from the pitch)
+  m.map!.repeat.set(-120 / (9000 * h), 1);
   return m;
 }
 
@@ -1335,14 +1398,18 @@ function roof(): THREE.Mesh {
     diffuseColor.rgb *= col;
     float tw = smoothstep(-3000.0, 3000.0, vSim.y);
     vec3 teamC = mix(vec3(${BLUE.r.toFixed(3)}, ${BLUE.g.toFixed(3)}, ${BLUE.b.toFixed(3)}), vec3(${ORANGE.r.toFixed(3)}, ${ORANGE.g.toFixed(3)}, ${ORANGE.b.toFixed(3)}), tw);
-    vec3 bbEmit = teamC * edge * mix(2.0, 0.8, uDay) + col * 0.12 * uDay;
+    // rows of downlights under the canopy, lit after dark
+    float lx = fract(vBB.x / 450.0) - 0.5;
+    float ly = fract(vBB.y * 2.0 + 0.25) - 0.5;
+    float lamp = smoothstep(0.14, 0.06, length(vec2(lx, ly * 0.5))) * step(0.12, vBB.y);
+    vec3 bbEmit = teamC * edge * mix(2.0, 0.8, uDay) + col * 0.12 * uDay + vec3(1.0, 0.93, 0.8) * lamp * (1.0 - uDay) * 2.4;
     `,
   );
   return new THREE.Mesh(g, mat);
 }
 
 /** the screens at each end, drawn from a canvas */
-function screens(): { group: THREE.Group; draw: (s: [number, number], clock: string) => void } {
+function screens(): { group: THREE.Group; draw: (s: [number, number], clock: string, t: number, excite: number) => void } {
   const c = document.createElement('canvas');
   c.width = 1024;
   c.height = 384;
@@ -1363,10 +1430,33 @@ function screens(): { group: THREE.Group; draw: (s: [number, number], clock: str
     g.add(scr, fr);
   }
   let last = '';
-  const draw = (sc: [number, number], clock: string) => {
-    const key = `${sc[0]}-${sc[1]}-${clock}`;
+  let prevSc = '';
+  let goalT = -99;
+  let goalSide = 0;
+  const draw = (sc: [number, number], clock: string, t: number, excite: number) => {
+    // a goal: the screens flash GOAL! in the scorer's colours for a few seconds
+    const sk = `${sc[0]}-${sc[1]}`;
+    if (prevSc && sk !== prevSc) {
+      goalT = t;
+      goalSide = sc[1] > Number(prevSc.split('-')[1]) ? 1 : 0;
+    }
+    prevSc = sk;
+    const flashing = t - goalT < 4.5 && excite > 0.2;
+    const key = flashing ? `goal-${Math.floor((t - goalT) * 4)}` : `${sk}-${clock}`;
     if (key === last) return;
     last = key;
+    if (flashing) {
+      const on = Math.floor((t - goalT) * 4) % 2 === 0;
+      x.fillStyle = goalSide ? (on ? '#ff7a10' : '#3a1404') : on ? '#1f6bff' : '#061636';
+      x.fillRect(0, 0, 1024, 384);
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      x.fillStyle = on ? '#fff' : goalSide ? '#ffb070' : '#8fb8ff';
+      x.font = 'italic 900 230px "Titillium Web", Arial, sans-serif';
+      x.fillText('GOAL!', 512, 205);
+      tex.needsUpdate = true;
+      return;
+    }
     x.fillStyle = '#05070c';
     x.fillRect(0, 0, 1024, 384);
     const grd = x.createLinearGradient(0, 0, 1024, 0);
@@ -1727,7 +1817,7 @@ export function buildArena(): ArenaView {
       standsBy.get(curMap.tiers)?.userData.search?.(t, curTime.day, excite);
       shellT.value = t;
       uEx.value = excite;
-      scr.draw(score, clock);
+      scr.draw(score, clock, t, excite);
       for (const m of pd.group.userData.anim as THREE.ShaderMaterial[]) m.uniforms.uT.value = t;
       const sl = pd.sparkLive.array as Float32Array;
       const seeds = (pd.sparks.geometry.attributes.seed as THREE.BufferAttribute).array as Float32Array;
