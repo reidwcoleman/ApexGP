@@ -48,6 +48,7 @@ import { Gunman } from './combat/Gunman.ts';
 import { WEAPON_ORDER, WEAPONS } from './combat/weapons.ts';
 import { officerLook } from './ai/officers.ts';
 import { Story } from './story/Story.ts';
+import { buildStreetLife, type StreetLifeBuild } from './city/streetlife.ts';
 
 /**
  * The open world: Miami, from Brickell to South Beach, at real scale. Owns the renderer, the
@@ -79,6 +80,7 @@ export class OpenWorld {
   furniture!: FurnitureBuild;
   landmarks!: LandmarkBuild;
   trees!: TreesBuild;
+  streetLife!: StreetLifeBuild;
   grass!: GrassBuild;
   time: TimeOfDay;
   kind: WeatherKind;
@@ -222,6 +224,8 @@ export class OpenWorld {
       this.scene.add(this.furniture.group);
       for (const so of this.furniture.solids) this.world.add(so);
     }
+    this.streetLife = buildStreetLife(this.net, this.buildings);
+    this.scene.add(this.streetLife.group);
     this.landmarks = buildLandmarks(this.buildings, this.net.mask, this.ground.beachX);
     this.scene.add(this.landmarks.group);
     for (const s of this.landmarks.solids) this.world.add(s);
@@ -236,6 +240,12 @@ export class OpenWorld {
     for (const s of this.trees.solids) this.world.add(s);
     // the reflections: capture the city now that it stands (the environment's own lawn goes)
     await step(0.8, 'Catching the light');
+    // Miami's grade: richer colour, a little more contrast, a clean sky (the race game's is broadcast-neutral)
+    {
+      const st = this.env.stats as { film?: Record<string, unknown>; relook?: () => void };
+      if (st.film) Object.assign(st.film, { saturation: 1.1, contrast: 1.09, dayMilk: 0.08, tint: [1.04, 1.0, 0.93] });
+      st.relook?.();
+    }
     this.env.adoptScenery({ group: new THREE.Group(), heightAt: () => 0, setLight() {}, update() {}, setQuality() {}, stats: { miami: true } });
 
     await step(0.78, 'Filling the streets');
@@ -939,6 +949,7 @@ export class OpenWorld {
     this.furniture.update(dt, this.camera.position, night, this.elapsed);
     if ((this.mapTick & 7) === 0) this.props.cull(this.camera.position);
     this.landmarks.update(this.elapsed, night);
+    this.streetLife.update(night);
     this.trees.update(this.camera.position, this.elapsed, (1 - night) * (P.direct ?? 1));
     this.grass.update(this.camera.position, this.elapsed);
     this.ambient.update(dt, ctx, this.camera.position);
