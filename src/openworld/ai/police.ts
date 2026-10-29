@@ -8,6 +8,8 @@ import { Helicopter } from '../vehicles/Helicopter.ts';
 import type { DynLight } from '../city/cityLights.ts';
 import type { WorldCtx } from '../vehicles/drivable.ts';
 import { Officers, type Officer } from './officers.ts';
+import { planRoute } from './route.ts';
+import { steerLock } from '../sim/car.ts';
 import type { ModelSpec } from '../vehicles/fleet.ts';
 import type { WeaponId } from '../combat/weapons.ts';
 import type { PeopleKit } from '../../people/Humans.ts';
@@ -765,7 +767,7 @@ export class Police {
     // (behind us: full lock round toward it — pure pursuit's sin() would go straight on)
     const delta = Math.abs(err) > Math.PI / 2 ? Math.sign(err) * b.spec.maxSteer : Math.atan((2 * L * Math.sin(err)) / dT);
     // (the rack's speed-sensitive lock scales the input down: undo it)
-    const lock = 0.35 + 0.65 / (1 + (b.speed * b.speed) / 900);
+    const lock = steerLock(b.speed);
     let steer = THREE.MathUtils.clamp(delta / (b.spec.maxSteer * lock), -1, 1);
     // stuck: back off, turn the other way
     if (c.reverse > 0) {
@@ -790,85 +792,8 @@ export class Police {
 
   /** A* over the road graph from the cop to the node nearest the target */
   private route(c: Cop, to: THREE.Vector3) {
-    const net = this.net;
-    const b = c.body;
-    const drivable = (e: REdge) => e.kind !== 'lane';
-    const from = net.nearestEdge(b.pos.x, b.pos.z, b.pos.y, 80, drivable);
-    const goal = net.nearestEdge(to.x, to.z, to.y, 160, drivable) ?? net.nearestEdge(to.x, to.z, 0, 300, drivable);
-    c.path.length = 0;
+    planRoute(this.net, c.body.pos, c.body.yaw, to, c.path);
     c.pi = 0;
-    if (!from || !goal) return;
-    const fwd = { x: Math.sin(b.yaw), z: Math.cos(b.yaw) };
-    // start at the end of our edge we're heading toward
-    const ea = net.nodes[from.e.a], eb = net.nodes[from.e.b];
-    const start = (eb.x - ea.x) * fwd.x + (eb.z - ea.z) * fwd.z > 0 ? eb.id : ea.id;
-    const goals = new Set([goal.e.a, goal.e.b]);
-    const n = net.nodes.length;
-    const g = new Float64Array(n).fill(Infinity);
-    const prev = new Int32Array(n).fill(-1);
-    const prevE = new Int32Array(n).fill(-1);
-    const open: [number, number][] = [];
-    const h = (i: number) => Math.hypot(net.nodes[i].x - to.x, net.nodes[i].z - to.z);
-    g[start] = 0;
-    open.push([h(start), start]);
-    let end = -1;
-    let iters = 0;
-    while (open.length && iters++ < 4000) {
-      // (a small binary heap)
-      const [, u] = heapPop(open);
-      if (goals.has(u)) {
-        end = u;
-        break;
-      }
-      for (const eid of net.nodes[u].edges) {
-        const e = net.edges[eid];
-        if (e.kind === 'lane') continue;
-        const w = e.a === u ? e.b : e.a;
-        const ng = g[u] + e.len;
-        if (ng < g[w]) {
-          g[w] = ng;
-          prev[w] = u;
-          prevE[w] = eid;
-          heapPush(open, [ng + h(w), w]);
-        }
-      }
-    }
-    if (end < 0) {
-      c.path.push(new THREE.Vector3(to.x, to.y, to.z));
-      return;
-    }
-    const chain: { e: REdge; fwd: boolean }[] = [];
-    for (let u = end; prev[u] >= 0; u = prev[u]) {
-      const e = net.edges[prevE[u]];
-      chain.push({ e, fwd: e.b === u });
-    }
-    chain.reverse();
-    // the rest of our own edge first
-    const pts = c.path;
-    const lane = (e: REdge, dir: number) => dir * (e.spec.median + 1.7);
-    const ownDir = start === from.e.b ? 1 : -1;
-    for (let s = from.pr.s; ownDir > 0 ? s < from.e.len : s > 0; s += ownDir * 10) {
-      net.point(from.e, s, lane(from.e, ownDir), tmpP);
-      pts.push(new THREE.Vector3(tmpP.x, tmpP.y, tmpP.z));
-    }
-    for (const { e, fwd: f } of chain) {
-      const dir = f ? 1 : -1;
-      const n2 = Math.max(2, Math.ceil(e.len / 10));
-      for (let k = 1; k <= n2; k++) {
-        const s = f ? (k / n2) * e.len : e.len - (k / n2) * e.len;
-        net.point(e, s, lane(e, dir), tmpP);
-        pts.push(new THREE.Vector3(tmpP.x, tmpP.y, tmpP.z));
-      }
-    }
-    // and along the goal edge to the point beside the target
-    const ge = goal.e;
-    const fromA = end === ge.a;
-    const gdir = fromA ? 1 : -1;
-    for (let s = fromA ? 10 : ge.len - 10; fromA ? s < goal.pr.s : s > goal.pr.s; s += gdir * 10) {
-      net.point(ge, s, lane(ge, gdir), tmpP);
-      pts.push(new THREE.Vector3(tmpP.x, tmpP.y, tmpP.z));
-    }
-    pts.push(new THREE.Vector3(to.x, to.y, to.z));
   }
 
   // ------------------------------------------------------------------ contact

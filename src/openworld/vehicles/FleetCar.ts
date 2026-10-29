@@ -21,6 +21,7 @@ export class FleetCar implements Drivable {
   impact = 0;
   health = 1;
   police: boolean;
+  aiDriven = false;
   readonly body: CarBody;
   /** police lights and siren (H toggles in a cruiser) */
   siren = false;

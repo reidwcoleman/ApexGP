@@ -106,6 +106,11 @@ const AX = new THREE.Vector3();
 const AZ = new THREE.Vector3();
 const UP = new THREE.Vector3();
 
+/** the share of full steering lock the rack allows at a speed (m/s): AI drivers undo it */
+export function steerLock(speed: number) {
+  return Math.max(0.2, 1 / (1 + (speed / 19) ** 2));
+}
+
 /** the tyre's force (share of μ·Fz) at a slip x (1 = the peak): a smooth rise, 85 % sliding */
 function tyre(x: number) {
   const s = Math.abs(x);
@@ -484,8 +489,7 @@ export class CarBody {
     const ground = this.onGround && !this.inWater;
 
     // ---- steering: the lock falls with speed, a quick rack, quicker back to the middle
-    const lockK = 1 / (1 + (speed / 19) ** 2);
-    const want = inp.steer * S.maxSteer * Math.max(0.2, lockK);
+    const want = inp.steer * S.maxSteer * steerLock(speed);
     const back = Math.abs(want) < Math.abs(this.steer) ? 6 : 3.4;
     this.steer += THREE.MathUtils.clamp(want - this.steer, -back * dt, back * dt);
 

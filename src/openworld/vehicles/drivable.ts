@@ -43,5 +43,7 @@ export interface Drivable {
   police?: boolean;
   /** health 0..1 */
   health: number;
+  /** driven by somebody else (the story's runner): the game leaves it alone when parked */
+  aiDriven?: boolean;
   dispose?(): void;
 }

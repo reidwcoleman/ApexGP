@@ -80,6 +80,8 @@ export const WRECK = 8;
 export const FLEE = 16;
 /** rolled onto its roof or side: never drives on */
 export const OVER = 32;
+/** a car the story needs: never cleared away for being far off */
+export const KEEP = 64;
 
 const tmpP = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
 
@@ -357,7 +359,7 @@ export class Traffic {
       const c = this.cars[i];
       if (c.state === 'player') continue;
       const d = Math.hypot(c.pos.x - center.x, c.pos.z - center.z);
-      if (d > 720 && (c.state !== 'parked' || c.flags & 4)) this.retire(c);
+      if (d > 720 && !(c.flags & KEEP) && (c.state !== 'parked' || c.flags & 4)) this.retire(c);
     }
     let live = this.cars.filter((c) => c.state === 'lane' || c.state === 'junction' || c.state === 'dynamic').length;
     for (let k = 0; k < 6 && live < this.target; k++) if (this.spawnOne(center, camFwd, live < this.target * 0.5 ? 120 : 260, 560)) live++;

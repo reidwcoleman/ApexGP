@@ -735,3 +735,204 @@
   font-size: 11px;
   margin-right: 6px;
 }
+
+/* ---- the story */
+.ow-cash {
+  position: absolute;
+  right: 36px;
+  top: 70px;
+  font-size: 34px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: #7dff9a;
+  text-shadow: 0 2px 0 #0b3a17, 0 3px 16px rgba(0, 0, 0, 0.6);
+  transition: transform 0.2s;
+}
+.ow-cash.up {
+  transform: scale(1.08);
+}
+.ow-sub {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  transform: translateX(-50%);
+  max-width: 900px;
+  width: max-content;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.ow-sub.show {
+  opacity: 1;
+}
+.ow-sub .who {
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  margin-right: 10px;
+}
+.ow-obj {
+  position: absolute;
+  left: 50%;
+  bottom: 80px;
+  transform: translate(-50%, 8px);
+  max-width: 900px;
+  width: max-content;
+  text-align: center;
+  font-size: 23px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9), 0 0 18px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.35s, transform 0.35s;
+}
+.ow-obj.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ow-obj::first-letter {
+  color: #ffd23f;
+}
+.ow-timer {
+  position: absolute;
+  left: 50%;
+  top: 26px;
+  transform: translateX(-50%);
+  padding: 4px 20px;
+  font-size: 42px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.ow-timer.show {
+  opacity: 1;
+}
+.ow-timer.low {
+  color: #ff5a6e;
+}
+.ow-tbar {
+  position: absolute;
+  left: 50%;
+  top: 90px;
+  transform: translateX(-50%);
+  width: 320px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.ow-tbar.show {
+  opacity: 1;
+}
+.ow-tbar .tb-label {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  margin-bottom: 5px;
+}
+.ow-tbar .tb-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.ow-tbar .tb-track b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ff3f5a, #ff8a3d);
+  transition: width 0.2s;
+}
+.ow-mcard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 30%;
+  text-align: center;
+  opacity: 0;
+  transform: scale(1.06);
+  transition: opacity 0.45s, transform 0.6s;
+}
+.ow-mcard.show {
+  opacity: 1;
+  transform: scale(1);
+}
+.ow-mcard .mc-t {
+  font-size: 92px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff3b0, #ffc53d 55%, #ff8a1f);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 4px 0 rgba(60, 20, 0, 0.8)) drop-shadow(0 10px 30px rgba(0, 0, 0, 0.6));
+}
+.ow-mcard.title .mc-t {
+  background: linear-gradient(180deg, #ffffff, #ffd6ea 45%, #ff3f8e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 4px 0 rgba(80, 0, 40, 0.8)) drop-shadow(0 10px 30px rgba(0, 0, 0, 0.6));
+}
+.ow-mcard.fail .mc-t {
+  background: linear-gradient(180deg, #ffb3bd, #ff3f5a 60%, #b3122b);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.ow-mcard .mc-s {
+  margin-top: 12px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+.ow-mcard.pass .mc-s {
+  color: #7dff9a;
+  font-size: 40px;
+  letter-spacing: 0.02em;
+}
+.m-story .ms-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.m-story .ms-n {
+  font-weight: 900;
+  font-size: 18px;
+  color: var(--ow-dim);
+}
+.m-story .ms-row.done .ms-n {
+  color: #7dff9a;
+}
+.m-story .ms-row.next .ms-n {
+  color: #ffd23f;
+}
+.m-story .ms-row.locked {
+  opacity: 0.4;
+}
+.m-story .ms-t {
+  font-weight: 800;
+  font-size: 16px;
+}
+.m-story .ms-b {
+  font-size: 13px;
+  color: var(--ow-dim);
+}
+.m-story .ms-r {
+  font-weight: 800;
+  color: #7dff9a;
+  font-variant-numeric: tabular-nums;
+}

@@ -28,6 +28,9 @@ export interface MenuActions {
   onQuality(q: string): void;
   onRefill(): void;
   onExit(): void;
+  /** the story's missions for the Story tab, and a fresh start */
+  story(): { title: string; blurb: string; reward: number; state: string }[];
+  onResetStory(): void;
 }
 
 /** the garage's paints: Miami colours */
@@ -96,6 +99,18 @@ export class Hud {
   private placeT = 0;
   menuOpen = false;
   bigMap = false;
+  // the story's pieces
+  private cashEl: HTMLElement;
+  private subEl: HTMLElement;
+  private objEl: HTMLElement;
+  private timerEl: HTMLElement;
+  private tbar: HTMLElement;
+  private tbarFill: HTMLElement;
+  private tbarLabel: HTMLElement;
+  private mcard: HTMLElement;
+  private objT = 0;
+  private cashShown = 0;
+  private cashTo = 0;
 
   constructor(
     ui: HTMLElement,
@@ -149,6 +164,16 @@ export class Hud {
     this.hpBar = el('b', 'hp', el('div', 'bar', hb));
     this.arBar = el('b', 'ar', el('div', 'bar', hb));
     this.radioEl = el('div', 'ow-radio', this.root);
+    // the story: cash under the stars, the subtitles and the objective at the bottom, a timer and a
+    // target's health at the top, the mission title / passed / failed card
+    this.cashEl = el('div', 'ow-cash', this.root, '$0');
+    this.subEl = el('div', 'ow-sub', this.root);
+    this.objEl = el('div', 'ow-obj', this.root);
+    this.timerEl = el('div', 'ow-timer', this.root);
+    this.tbar = el('div', 'ow-tbar', this.root);
+    this.tbarLabel = el('div', 'tb-label', this.tbar);
+    this.tbarFill = el('b', '', el('div', 'tb-track', this.tbar));
+    this.mcard = el('div', 'ow-mcard', this.root);
     // controls help (first visit)
     this.help = el('div', 'ow-help', this.root);
     this.help.innerHTML = `
@@ -283,6 +308,93 @@ export class Hud {
     setTimeout(() => t.remove(), 3800);
   }
 
+  // ---------------------------------------------------------------- the story
+
+  setCash(n: number) {
+    this.cashTo = n;
+    if (!this.cashShown) this.cashShown = n;
+    this.cashEl.textContent = '$' + Math.round(this.cashShown).toLocaleString('en-US');
+  }
+
+  /** count the cash up toward its new value (each frame) */
+  tickCash(dt: number) {
+    if (this.cashShown === this.cashTo) return;
+    const d = this.cashTo - this.cashShown;
+    this.cashShown = Math.abs(d) < 1 ? this.cashTo : this.cashShown + d * Math.min(1, dt * 3) + Math.sign(d);
+    this.cashEl.textContent = '$' + Math.round(this.cashShown).toLocaleString('en-US');
+    this.cashEl.classList.toggle('up', this.cashShown !== this.cashTo);
+  }
+
+  subtitle(who: string, text: string, color: string) {
+    if (!text) {
+      this.subEl.classList.remove('show');
+      return;
+    }
+    this.subEl.innerHTML = '';
+    const w = el('span', 'who', this.subEl, who);
+    w.style.color = color;
+    el('span', 'txt', this.subEl, text);
+    this.subEl.classList.add('show');
+    this.objEl.classList.remove('show');
+  }
+
+  setObjective(text: string) {
+    if (!text) {
+      this.objEl.classList.remove('show');
+      return;
+    }
+    this.objEl.textContent = text;
+    this.objEl.classList.add('show');
+    this.objT = 7;
+  }
+
+  /** the objective fades after a while (the map still shows where) */
+  tickObjective(dt: number) {
+    if (this.objT <= 0) return;
+    this.objT -= dt;
+    if (this.objT <= 0) this.objEl.classList.remove('show');
+  }
+
+  setTimer(sec: number | null) {
+    if (sec === null) {
+      this.timerEl.classList.remove('show');
+      return;
+    }
+    const s = Math.max(0, Math.ceil(sec));
+    this.timerEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    this.timerEl.classList.add('show');
+    this.timerEl.classList.toggle('low', sec < 20);
+  }
+
+  setTargetBar(label: string | null, frac: number) {
+    if (!label) {
+      this.tbar.classList.remove('show');
+      return;
+    }
+    this.tbarLabel.textContent = label;
+    this.tbarFill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+    this.tbar.classList.add('show');
+  }
+
+  missionTitle(title: string, sub: string) {
+    this.mcard.className = 'ow-mcard title';
+    this.mcard.innerHTML = `<div class="mc-t">${title}</div><div class="mc-s">${sub}</div>`;
+    void this.mcard.offsetWidth;
+    this.mcard.classList.add('show');
+    clearTimeout(this.mcardT);
+    this.mcardT = setTimeout(() => this.mcard.classList.remove('show'), 3600);
+  }
+
+  missionResult(pass: boolean, sub: string) {
+    this.mcard.className = 'ow-mcard ' + (pass ? 'pass' : 'fail');
+    this.mcard.innerHTML = `<div class="mc-t">${pass ? 'Mission passed' : 'Mission failed'}</div><div class="mc-s">${sub}</div>`;
+    void this.mcard.offsetWidth;
+    this.mcard.classList.add('show');
+    clearTimeout(this.mcardT);
+    this.mcardT = setTimeout(() => this.mcard.classList.remove('show'), 4200);
+  }
+  private mcardT: ReturnType<typeof setTimeout> | undefined;
+
   showCard(title: string, sub: string) {
     this.card.innerHTML = `<div class="c-title">${title}</div><div class="c-sub">${sub}</div>`;
     this.card.classList.add('show');
@@ -292,7 +404,7 @@ export class Hud {
   // ---------------------------------------------------------------- the minimap
 
   private landPaths: Path2D[] | null = null;
-  drawMap(px: number, pz: number, heading: number, blips: { x: number; z: number; color: string; size?: number; shape?: 'dot' | 'heli' | 'plane' | 'square' | 'ring' }[], waypoint: P2 | null) {
+  drawMap(px: number, pz: number, heading: number, blips: { x: number; z: number; color: string; size?: number; shape?: 'dot' | 'heli' | 'plane' | 'square' | 'ring'; edge?: boolean; label?: string }[], waypoint: P2 | null, route: P2[] | null = null) {
     const c = this.mapCtx;
     const W = this.map.width;
     const big = this.bigMap;
@@ -329,6 +441,18 @@ export class Hud {
       for (let i = 0; i < e.px.length; i++) (i ? c.lineTo(e.px[i], e.pz[i]) : c.moveTo(e.px[i], e.pz[i]));
       c.stroke();
     }
+    // the GPS route to the objective
+    if (route && route.length > 1) {
+      c.strokeStyle = 'rgba(0,0,0,0.45)';
+      c.lineWidth = 9 / scale;
+      c.lineJoin = 'round';
+      c.beginPath();
+      route.forEach((q, i) => (i ? c.lineTo(q.x, q.z) : c.moveTo(q.x, q.z)));
+      c.stroke();
+      c.strokeStyle = '#ffd23f';
+      c.lineWidth = 5 / scale;
+      c.stroke();
+    }
     if (waypoint) {
       c.fillStyle = '#ff3f8e';
       c.beginPath();
@@ -336,6 +460,7 @@ export class Hud {
       c.fill();
     }
     for (const b of blips) {
+      if (b.edge || b.label) continue;
       if (b.shape === 'ring') {
         // the police search area: a pulsing red / blue disc
         c.fillStyle = b.color;
@@ -352,6 +477,48 @@ export class Hud {
       c.fill();
     }
     c.restore();
+    // objective blips: pinned to the rim when they're off the map, a letter for a mission giver
+    const rot = big ? 0 : heading - Math.PI;
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+    for (const b of blips) {
+      if (!b.edge && !b.label) continue;
+      const dx = (b.x - px) * scale, dz = (b.z - pz) * scale;
+      let sx = dx * cr - dz * sr, sy = dx * sr + dz * cr;
+      const rim = W / 2 - 18;
+      const d = Math.hypot(sx, sy);
+      const out = d > rim;
+      if (out) {
+        sx *= rim / d;
+        sy *= rim / d;
+      }
+      const r = (b.size ?? 6) * (b.label ? 2.2 : 1.6);
+      c.save();
+      c.translate(W / 2 + sx, W / 2 + sy);
+      c.fillStyle = b.color;
+      c.strokeStyle = 'rgba(0,0,0,0.65)';
+      c.lineWidth = 3;
+      c.beginPath();
+      if (out && !b.label) {
+        // an arrowhead pointing off the map
+        const a = Math.atan2(sy, sx);
+        c.rotate(a);
+        c.moveTo(r * 1.3, 0);
+        c.lineTo(-r * 0.8, r);
+        c.lineTo(-r * 0.4, 0);
+        c.lineTo(-r * 0.8, -r);
+        c.closePath();
+      } else c.arc(0, 0, r, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      if (b.label) {
+        c.fillStyle = '#14110a';
+        c.font = `900 ${Math.round(r * 1.25)}px Titillium Web, Arial`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(b.label, 0, r * 0.08);
+      }
+      c.restore();
+    }
     // the player arrow
     c.save();
     c.translate(W / 2, W / 2);
@@ -388,6 +555,7 @@ export class Hud {
     const tabs = el('div', 'm-tabs', panel);
     const body = el('div', 'm-body', panel);
     const tabDefs: [string, () => void][] = [
+      ['Story', () => story()],
       ['Garage', () => garage()],
       ['Vehicles', () => vehicles()],
       ['Weapons', () => weapons()],
@@ -410,6 +578,24 @@ export class Hud {
           on(v);
         });
       }
+    };
+    const story = () => {
+      el('div', 'm-h', body, 'Rafa Vega · a Miami story');
+      const list = el('div', 'm-story', body);
+      act.story().forEach((m, i) => {
+        const r = el('div', 'ms-row ' + m.state, list);
+        el('div', 'ms-n', r, m.state === 'done' ? '✓' : String(i + 1));
+        const mid = el('div', '', r);
+        el('div', 'ms-t', mid, m.title);
+        el('div', 'ms-b', mid, m.state === 'locked' ? 'Locked' : m.state === 'next' ? `${m.blurb} · go to the yellow letter on the map` : m.blurb);
+        el('div', 'ms-r', r, '$' + m.reward.toLocaleString('en-US'));
+      });
+      const go = el('div', 'm-btn', body, 'Start the story over');
+      go.style.marginTop = '16px';
+      go.addEventListener('click', () => {
+        act.onResetStory();
+        setTab(0);
+      });
     };
     const garage = () => {
       el('div', 'm-h', body, 'Car');

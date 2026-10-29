@@ -955,6 +955,11 @@ function vehicleBox(v: Drivable): { L: number; W: number; H: number } | null {
       return { L: 9, W: 3, H: 3 };
     case 'boat':
       return { L: 9, W: 2.6, H: 1.6 };
+    case 'car': {
+      // a city car the player owns or the story sends: its model's box
+      const s = (v as { car?: { spec?: { L: number; W: number; H: number } } }).car?.spec;
+      return s ? { L: s.L, W: s.W, H: s.H } : null;
+    }
     default:
       return null;
   }

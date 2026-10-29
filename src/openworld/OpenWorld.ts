@@ -47,6 +47,7 @@ import { Combat } from './combat/Combat.ts';
 import { Gunman } from './combat/Gunman.ts';
 import { WEAPON_ORDER, WEAPONS } from './combat/weapons.ts';
 import { officerLook } from './ai/officers.ts';
+import { Story } from './story/Story.ts';
 
 /**
  * The open world: Miami, from Brickell to South Beach, at real scale. Owns the renderer, the
@@ -98,6 +99,7 @@ export class OpenWorld {
   police!: Police;
   ambient!: Ambient;
   hud!: Hud;
+  story!: Story;
   audio = new OpenWorldAudio();
   readonly particles = new Particles();
   readonly skids = new SkidMarks();
@@ -272,6 +274,39 @@ export class OpenWorld {
     this.gfx.motionBlur = 0.9;
     this.placeLandmarkVehicles(sp);
     this.hud = new Hud(this.ui, this.net);
+    this.story = new Story({
+      scene: this.scene,
+      camera: this.camera,
+      net: this.net,
+      traffic: this.traffic,
+      police: this.police,
+      combat: this.combat,
+      hud: this.hud,
+      owned: this.owned,
+      vehicle: () => this.vehicle,
+      focus: () => this.focus,
+      roadSpot: (x, z) => this.roadPoint(x, z),
+      waterNear: (x, z, c) => this.waterNear(x, z, c),
+      clearLand: (x, z, r) => this.clearLand(x, z, r),
+      roofNear: (x, z, minY) => {
+        let best: { x: number; y: number; z: number } | null = null, bd = 400;
+        for (const r of this.buildings.roofs) {
+          if (r.y < minY) continue;
+          const d = Math.hypot(r.x - x, r.z - z);
+          if (d < bd) {
+            bd = d;
+            best = { x: r.x, y: r.y, z: r.z };
+          }
+        }
+        return best;
+      },
+      addOwned: (v) => this.addOwned(v),
+      dropOwned: (v) => this.dropOwned(v),
+      ctx: () => ({ net: this.net, world: this.world, t: this.elapsed, night: this.night }),
+    });
+    // dev: ?mission=N starts the story at mission N (1-based), ?story=0 leaves it off
+    const mq = Number(this.params.get('mission'));
+    if (mq > 0) this.story.progress = mq - 1;
     // (clean frames for key art: ?hud=0)
     if (this.params.get('hud') === '0') this.ui.style.display = 'none';
     this.audio.arm();
@@ -348,7 +383,8 @@ export class OpenWorld {
 
   /** the right-hand lane of the nearest road, facing along it */
   private roadPoint(x: number, z: number, y = 0, side = 0) {
-    const hit = this.net.nearestEdge(x, z, y, 400) ?? this.net.nearestEdge(x, z, 0, 900);
+    const road = (e: { kind: string }) => e.kind !== 'lane';
+    const hit = this.net.nearestEdge(x, z, y, 400, road) ?? this.net.nearestEdge(x, z, 0, 900, road);
     if (!hit) return null;
     const pt = { x: 0, y: 0, z: 0, tx: 0, tz: 0 };
     const sgn = side || Math.sign(hit.pr.lat || 1);
@@ -562,6 +598,8 @@ export class OpenWorld {
         this.hud.toast('Ammo and armour refilled', 'good');
       },
       onExit: () => (location.href = './'),
+      story: () => this.story.missions,
+      onResetStory: () => this.story.reset(),
     });
   }
 
@@ -663,6 +701,7 @@ export class OpenWorld {
 
   private card(title: string, sub: string, at: { x: number; z: number }) {
     if (this.respawnT > 0) return;
+    this.story.down(title === 'BUSTED' ? 'busted' : 'wasted');
     this.hud.showCard(title, sub);
     this.respawnT = 3.2;
     this.respawnAt = at;
@@ -771,7 +810,7 @@ export class OpenWorld {
     for (const o of this.owned) {
       if (o === this.vehicle) continue;
       const d = Math.hypot(o.pos.x - this.focus.x, o.pos.z - this.focus.z);
-      if (d < 400) o.drive(dt, null, ctx);
+      if (d < 400 && !o.aiDriven) o.drive(dt, null, ctx);
       // (parked a long way off: not drawn — a car at 600 m is a few pixels and a hundred draws)
       o.root.visible = Math.hypot(o.pos.x - this.camera.position.x, o.pos.z - this.camera.position.z) < 650;
     }
@@ -822,6 +861,8 @@ export class OpenWorld {
     for (const c of this.police.cops) if (c.body && !c.body.free && c.body.speed > 2) this.furniture.hit(c.body.pos.x, c.body.pos.z, c.body.pos.y, c.body.yaw, c.body.spec.hl, c.body.spec.hw, c.body.vx, c.body.vz, c.body.spec.mass);
     for (const h of this.traffic.hits) {
       if (h.speed > 3) this.cams.bump(Math.min(1, h.speed / 20));
+      // a hard crash wrecks the other car (smoke, then fire, then it goes up)
+      if (h.speed > 7) this.combat.damageCar(h.car, (h.speed - 7) * 6, null, 'player');
       if (h.speed > 4) this.police.report(h.car.police ? 'hitCop' : 'hitCar', h.car.pos);
     }
     // ---- the people (they dodge, or don't, the player's vehicle)
@@ -857,6 +898,7 @@ export class OpenWorld {
       this.police.report(k.kind, k.at);
       this.hud.radio(CALLS[k.kind] ?? '911 caller reporting a disturbance', '911');
     }
+    if (this.params.get('story') !== '0') this.story.update(dt);
     this.combat.update(dt);
     if (this.combat.shake > 0.05) this.cams.bump(this.combat.shake * 0.5);
     for (const e of this.police.events) {
@@ -1030,6 +1072,8 @@ export class OpenWorld {
       if (n) prompt = `F  ·  get in ${n}`;
     }
     hud.setPrompt(prompt);
+    hud.tickCash(dt);
+    hud.tickObjective(dt);
     if (++this.mapTick % 2 === 0) {
       const blips: Parameters<Hud['drawMap']>[3] = [];
       // the search area: where they last saw you, growing while they look
@@ -1043,7 +1087,8 @@ export class OpenWorld {
       for (const c of this.traffic.cars) if (c.police && c.flags & 1) blips.push({ x: c.pos.x, z: c.pos.z, color: '#4d7dff', size: 3.5 });
       if (this.police.heli) blips.push({ x: this.police.heli.pos.x, z: this.police.heli.pos.z, color: '#4d7dff', size: 6 });
       for (const o of this.owned) if (o !== v) blips.push({ x: o.pos.x, z: o.pos.z, color: '#57e8ff', size: 4, shape: 'square' });
-      hud.drawMap(f.x, f.z, camYaw, blips, null);
+      for (const b of this.story.blips) blips.push(b);
+      hud.drawMap(f.x, f.z, camYaw, blips, null, this.story.routeOut);
     }
   }
 
