@@ -81,26 +81,116 @@ export const K = {
 let M: RSModule | null = null;
 let buf = 0;
 
-/** load the module and the arena meshes (once, before any World is made) */
-export async function loadRocketSim(): Promise<void> {
-  if (M) return;
-  const create = (await import('./rs/rs.mjs')).default as (o?: object) => Promise<RSModule>;
-  const meshUrl = new URL('./rs/arena.bin', import.meta.url);
-  let bin: Uint8Array;
-  if (typeof window === 'undefined') {
+const isNode = typeof window === 'undefined';
+async function readFile(u: URL): Promise<Uint8Array> {
+  if (isNode) {
     // (headless tools under node; the name is built so the bundler leaves it alone)
     const fs = (await import(/* @vite-ignore */ 'node:' + 'fs')) as { readFileSync(u: URL): Uint8Array };
-    bin = new Uint8Array(fs.readFileSync(meshUrl));
-  } else bin = new Uint8Array(await (await fetch(meshUrl)).arrayBuffer());
-  const m = await create();
+    return new Uint8Array(fs.readFileSync(u));
+  }
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`${u} ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+const meshUrl = () => new URL('./rs/arena.bin', import.meta.url);
+const snapUrl = () => new URL('./rs/arena.snap', import.meta.url);
+const fnv = (b: Uint8Array) => {
+  let h = 2166136261;
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 16777619);
+  return h >>> 0;
+};
+const makeModule = async () => ((await import('./rs/rs.mjs')).default as (o?: object) => Promise<RSModule>)();
+
+/** a module with the arena meshes loaded the slow way: RocketSim reads them into Bullet */
+async function initModule(bin: Uint8Array): Promise<RSModule> {
+  const m = await makeModule();
   const p = m._rs_malloc(bin.length);
   m.HEAPU8.set(bin, p);
   let count = 0;
   const dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
   for (let o = 0; o < bin.length; o += 4 + dv.getInt32(o, true)) count++;
   m._rs_init(p, count);
+  // (RocketSim keeps its own copy: clear ours so it doesn't bloat the snapshot)
+  m.HEAPU8.fill(0, p, p + bin.length);
+  (m as unknown as { _rs_free(p: number): void })._rs_free(p);
   buf = m._rs_malloc(8 * 512);
+  return m;
+}
+
+/**
+ * The snapshot (rs/arena.snap, from tools/boost_rssnap.mjs): the module's whole memory just after the
+ * arena was built and stepped once, gzipped. Building it takes RocketSim seconds and comes out the
+ * same every time, so the page copies the finished memory into a new module instead. Header: "RSS1",
+ * then u32 scratch buffer address, memory length, hash of arena.bin, length of rs.wasm.
+ */
+const SNAP_MAGIC = 0x31535352;
+async function restore(m: RSModule, snap: Uint8Array): Promise<boolean> {
+  const dv = new DataView(snap.buffer, snap.byteOffset, snap.byteLength);
+  if (snap.length < 20 || dv.getUint32(0, true) !== SNAP_MAGIC) return false;
+  const bufP = dv.getUint32(4, true);
+  const memLen = dv.getUint32(8, true);
+  if (isNode) {
+    // (the tools check it still matches the meshes and the build: a stale one is a mistake to fix)
+    const mesh = await readFile(meshUrl());
+    const wasm = await readFile(new URL('./rs/rs.wasm', import.meta.url));
+    if (fnv(mesh) !== dv.getUint32(12, true) || wasm.length !== dv.getUint32(16, true)) throw new Error('src/boost/sim/rs/arena.snap is stale: run node --experimental-transform-types tools/boost_rssnap.mjs');
+  }
+  let body = snap.subarray(20);
+  // (gzipped, unless a server already took the gzip off)
+  if (body[0] === 0x1f && body[1] === 0x8b) body = new Uint8Array(await new Response(new Blob([body as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+  if (body.length !== memLen) return false;
+  // grow the memory to the snapshot's size (any allocation is overwritten by the copy anyway)
+  if (m.HEAPU8.length < memLen) m._rs_malloc(memLen - m.HEAPU8.length + 65536);
+  if (m.HEAPU8.length < memLen) return false;
+  m.HEAPU8.set(body);
+  buf = bufP;
+  return true;
+}
+
+/** load the module and the arena (once, before any World is made): from the snapshot when there is
+ * one, else from the meshes (`snapshot: false` forces that, for baking a new snapshot) */
+export async function loadRocketSim(opts: { snapshot?: boolean } = {}): Promise<void> {
+  if (M) return;
+  if (opts.snapshot !== false && typeof DecompressionStream !== 'undefined') {
+    try {
+      const [snap, m] = await Promise.all([readFile(snapUrl()), makeModule()]);
+      if (await restore(m, snap)) {
+        M = m;
+        const a = Object.create(RSArena.prototype) as RSArena;
+        fresh = { ball: new Float64Array(BS), pads: new Float64Array(a.padCount() * 3) };
+        a.getBall(fresh.ball);
+        a.getPads(fresh.pads);
+        primed = true;
+        return;
+      }
+    } catch (e) {
+      if (isNode && String(e).includes('stale')) throw e;
+      console.warn('[boost] physics snapshot unusable, building the arena instead', e);
+    }
+  }
+  M = await initModule(await readFile(meshUrl()));
+}
+
+/** the snapshot's bytes (node only): the arena built, stepped once and put back, then the memory */
+export async function bakeRocketSim(): Promise<Uint8Array> {
+  const mesh = await readFile(meshUrl());
+  const m = await initModule(mesh);
   M = m;
+  new RSArena();
+  primeRocketSim();
+  const zlib = (await import(/* @vite-ignore */ 'node:' + 'zlib')) as { gzipSync(b: Uint8Array, o: object): Uint8Array };
+  const mem = m.HEAPU8.slice();
+  const gz = zlib.gzipSync(mem, { level: 9 });
+  const wasm = await readFile(new URL('./rs/rs.wasm', import.meta.url));
+  const out = new Uint8Array(20 + gz.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, SNAP_MAGIC, true);
+  dv.setUint32(4, buf, true);
+  dv.setUint32(8, mem.length, true);
+  dv.setUint32(12, fnv(mesh), true);
+  dv.setUint32(16, wasm.length, true);
+  out.set(gz, 20);
+  return out;
 }
 
 export function rocketSimReady(): boolean {

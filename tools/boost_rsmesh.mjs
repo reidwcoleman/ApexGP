@@ -148,3 +148,4 @@ for (const f of files) {
 }
 writeFileSync(new URL('../src/boost/sim/rs/arena.bin', import.meta.url), out);
 console.log(`shell ${shell.t.length / 3} tris, goals ${goals.map((g) => g.t.length / 3).join('+')} tris, ${(total / 1024).toFixed(0)} KB`);
+console.log('now rebake the physics snapshot: node --experimental-transform-types --no-warnings tools/boost_rssnap.mjs');

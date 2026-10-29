@@ -360,7 +360,14 @@ export class Stage {
         return;
       }
     }
-    // and ask for this frame's
+    // and ask for this frame's (into a new buffer: rewriting a fenced one throws away Chrome's copy)
+    gl.deleteBuffer(pr.buf);
+    const nb = gl.createBuffer();
+    if (!nb) return;
+    pr.buf = nb;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, nb);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, 12, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     const w = gl.drawingBufferWidth;
     const h = gl.drawingBufferHeight;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
