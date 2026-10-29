@@ -1252,6 +1252,12 @@ export class Game {
       if (v && v.group.visible && (!w.cars[i - 1] || w.cars[i - 1].alive)) uNear.value[i].set(v.group.position.x, v.group.position.y, v.group.position.z, 0);
       else uNear.value[i].set(0, 0, -99999, 0);
     }
+    // (the garage's car lies the grass down under it too: the first free slot)
+    if (this.showcase?.group.visible) {
+      const free = uNear.value.findIndex((v, k) => k > 0 && v.z < -9999);
+      const sp = this.showcase.group.position;
+      if (free > 0) uNear.value[free].set(sp.x, sp.y, sp.z, 0);
+    }
 
     // effects
     this.fx.setViewport(this.stage.renderer.domElement.height, this.stage.camera.fov);

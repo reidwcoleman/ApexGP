@@ -497,7 +497,7 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           // lit as the blade (each half of the fold its own way), softened toward the turf's up
           float halfSide = position.x < -0.01 ? -1.0 : (position.x > 0.01 ? 1.0 : 0.0);
           vec3 bn = normalize(vec3(face - across * halfSide * 0.7 - lean * 0.6, 0.35 + t * 0.2));
-          objectNormal = normalize(mix(vec3(0.0, 0.0, 1.0), bn, 0.6));
+          objectNormal = normalize(mix(vec3(0.0, 0.0, 1.0), bn, 0.6 * (1.0 - press * 0.7)));
           // darker down in the turf, bright and a touch yellow at the tips, straw on a dead blade,
           // lighter where a gust has turned the blades' backs up; into the mown surface's own colour
           // as the blades fade out, so there's no edge
@@ -505,6 +505,8 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           vec3 g = mix(col * 0.55, tipC, smoothstep(0.0, 1.0, t));
           g = mix(g, vec3(0.42, 0.36, 0.16) * (0.6 + 0.4 * uDay), dry * smoothstep(0.2, 0.9, t));
           g *= 1.0 + gust * 0.1 * t;
+          // (trampled grass is darker: crushed, and showing its shaded side)
+          g *= 1.0 - press * 0.45;
           vGrass = mix(col, g, smoothstep(0.0, 0.6, k));
           vT = t;
           }`,

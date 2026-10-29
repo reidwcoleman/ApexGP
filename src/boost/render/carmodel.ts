@@ -618,6 +618,68 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
   }
   carbon.push(box(12, t0.wm * 1.5, 7, t0.x + 3, 0, t0.zb + 2.5, 1));
   for (const fy of [-0.5, -0.17, 0.17, 0.5]) carbon.push(box(10, 0.9, 5, t0.x + 1, fy * t0.wm * 1.3, t0.zb + 2.2, 0.3));
+  // the details that make it a car up close: daytime running lights over the headlamps, side mirrors
+  // on stalks at the base of the screen, door handles, a slatted vent behind each front wheel, a pair
+  // of hood vents. All placed on the body's real surface (rays from the side and from above)
+  const side = (x: number, z: number, sy: number): { p: THREE.Vector3; n: THREE.Vector3 } | null => {
+    ray.set(new THREE.Vector3(x, sy * 200, z), new THREE.Vector3(0, -sy, 0));
+    const h = ray.intersectObject(hull)[0];
+    if (!h) return null;
+    const n = h.face!.normal.clone();
+    if (n.y * sy < 0) n.negate();
+    return { p: h.point, n };
+  };
+  const top = (x: number, y: number): { p: THREE.Vector3; n: THREE.Vector3 } | null => {
+    ray.set(new THREE.Vector3(x, y, 200), new THREE.Vector3(0, 0, -1));
+    const h = ray.intersectObject(hull)[0];
+    if (!h) return null;
+    const n = h.face!.normal.clone();
+    if (n.z < 0) n.negate();
+    return { p: h.point, n };
+  };
+  const near = (x: number) => sp.body.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a));
+  const mirrorGlass: THREE.BufferGeometry[] = [];
+  for (const sy of [-1, 1]) {
+    head.push(plate(at(sy * (sp.head[1] - 0.5), sp.head[2] + 2.9, 1), 0.6, 10.5, 0.7, 0.9, 0.3, sy * -0.18));
+    // the mirror: a painted housing on a dark stalk, its glass facing back
+    const c0 = sp.cabin[0];
+    const mx = c0.x - 5;
+    const mb = near(mx);
+    const my = sy * (mb.ws + 2.6);
+    const mz = mb.zs + 4.2;
+    paint.push(box(5, 3.4, 3.4, mx, my, mz, 1.2));
+    carbon.push(box(2, Math.abs(my) - c0.wb, 1.2, mx + 0.6, sy * (c0.wb + (Math.abs(my) - c0.wb) / 2), mz - 1.6, 0.4));
+    mirrorGlass.push(box(0.4, 2.8, 2.6, mx - 2.55, my, mz, 0.5));
+    // a door handle a little behind the middle of the door
+    const x0 = sp.wr[0] + sp.wr[1] + 4;
+    const x1 = sp.wf[0] - sp.wf[1] - 4;
+    const hx = (x0 + x1) / 2 + 2;
+    const hs = side(hx, near(hx).zm + 3.5, sy);
+    if (hs) carbon.push(plate(hs, 0.9, 6.5, 1.3, 0.25, 0.45));
+    // the vent behind the front wheel: a dark recess with three slats
+    const vx = sp.wf[0] - sp.wf[1] - 7;
+    const vb = near(vx);
+    const vz = (vb.zb + vb.zm) / 2 + 2;
+    const vs = side(vx, vz, sy);
+    if (vs) {
+      carbon.push(plate(vs, 0.8, 8, 5.6, -0.05, 1));
+      for (const dz of [-1.6, 0, 1.6]) {
+        const sl = side(vx, vz + dz, sy);
+        if (sl) accent.push(plate(sl, 0.5, 7, 0.55, 0.45, 0.25));
+      }
+    }
+    // a hood vent each side of the centre line
+    const hvx = (sp.body[1].x + sp.cabin[0].x) / 2;
+    const tv = top(hvx, sy * 9);
+    if (tv) {
+      carbon.push(plate(tv, 0.7, 5.5, 9, 0.05, 0.9));
+      for (const dy of [-1.6, 0, 1.6]) {
+        const sl = top(hvx, sy * 9 + dy);
+        if (sl) accent.push(plate(sl, 0.45, 0.55, 8, 0.4, 0.2));
+      }
+    }
+  }
+
   // the floor pan between the wheels, side skirts along the rockers
   carbon.push(box(90, sp.inner * 2, 2, 8, 0, floorZ + 1.2, 0.8));
   {
@@ -744,7 +806,7 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
   const drop = (g: THREE.BufferGeometry) => g.translate(0, 0, dz);
   const g: CarGeos = {
     paint: drop(merge(paint)),
-    glass: drop(prep(glass)),
+    glass: drop(merge([glass, ...mirrorGlass])),
     carbon: drop(merge(carbon)),
     accent: drop(merge(accent.length ? accent : [box(0.1, 0.1, 0.1, 0, 0, -10)])),
     grille: drop(grille),

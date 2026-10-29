@@ -240,8 +240,35 @@ export class CarView {
         );
     };
     this.paint.customProgramCacheKey = () => 'bbcarpaint' + (look.finish === 3 ? 'i' : '');
-    const carbon = new THREE.MeshPhysicalMaterial({ color: 0x121317, roughness: 0.42, metalness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.3 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: 0x04070c, roughness: 0.03, metalness: 0.8, envMapIntensity: 2.2, clearcoat: 1, clearcoatRoughness: 0 });
+    // woven carbon under a clear coat: a twill of tows, each catching the light across its width
+    const carbon = new THREE.MeshPhysicalMaterial({ color: 0x1a1c22, roughness: 0.38, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.2 });
+    carbon.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCo;\nvarying vec3 vCn;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCo = position;\nvCn = normal;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCo;\nvarying vec3 vCn;\nfloat cWeave;')
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+          {
+            vec3 an = abs(vCn);
+            vec2 q = (an.x > an.y && an.x > an.z ? vCo.yz : (an.y > an.z ? vCo.xz : vCo.xy)) * 1.7;
+            // (a twill: each tow steps one over from the last, so the weave runs on the diagonal)
+            vec2 c = floor(q + vec2(floor(q.y) * 0.5, 0.0));
+            vec2 f = fract(q + vec2(floor(q.y) * 0.5, 0.0));
+            float dir = mod(c.x + c.y, 2.0);
+            float tow = sin((dir < 0.5 ? f.x : f.y) * 3.14159);
+            float k = 1.0 - smoothstep(0.35, 0.9, length(fwidth(q)));
+            cWeave = mix(0.5, mix(0.45, 1.0, tow) * (dir < 0.5 ? 1.0 : 0.72), k);
+            diffuseColor.rgb *= 0.55 + cWeave;
+          }`,
+        )
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor *= mix(1.25, 0.75, cWeave);');
+    };
+    carbon.customProgramCacheKey = () => 'bbcarbon';
+    // tinted glass: dark looking straight in, the stadium in it toward the edges (as glass does)
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0x020306, roughness: 0.03, metalness: 0, envMapIntensity: 1.6, clearcoat: 1, clearcoatRoughness: 0, specularIntensity: 1 });
     const accentM = new THREE.MeshPhysicalMaterial({ color: accC, metalness: look.finish === 2 ? 0.85 : 0.5, roughness: look.finish === 1 ? 0.55 : 0.26, clearcoat: look.finish === 1 ? 0.1 : 1, clearcoatRoughness: 0.05 });
     const grilleM = new THREE.MeshStandardMaterial({ map: grilleTex(), roughness: 0.6, metalness: 0.3 });
     grilleM.map!.repeat.set(1, 1);
@@ -252,7 +279,7 @@ export class CarView {
     const discM = new THREE.MeshStandardMaterial({ color: 0x3a3c42, roughness: 0.45, metalness: 0.8 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.5, metalness: 0.5 });
     // the exhaust pipes: brushed metal, seen inside too
-    const nozzleM = new THREE.MeshStandardMaterial({ color: 0x55585f, roughness: 0.35, metalness: 0.9, side: THREE.DoubleSide });
+    const nozzleM = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.18, metalness: 1, envMapIntensity: 1.6, side: THREE.DoubleSide });
 
     const add = (geo: THREE.BufferGeometry, m: THREE.Material, cast = true) => {
       const mesh = new THREE.Mesh(geo, m);
@@ -551,7 +578,7 @@ export class CarView {
     sm.uniforms.uA.value += ((down >= 2 ? 0.72 : 0) - sm.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 14 : 60));
     this.contact.visible = sm.uniforms.uA.value > 0.01;
     const um = this.under.material as THREE.ShaderMaterial;
-    um.uniforms.uA.value += ((down >= 2 ? 0.25 + 0.75 * carNight.value : 0) - um.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 8 : 40));
+    um.uniforms.uA.value += ((down >= 2 ? 0.85 * carNight.value : 0) - um.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 8 : 40));
     um.uniforms.uT.value = t;
     this.under.visible = um.uniforms.uA.value > 0.01;
     // the jets light up the ground behind the car while it's down on it
@@ -572,7 +599,8 @@ export class CarView {
   /** parked (the garage): wheels at rest, the jets lit or not */
   idle(t: number, dt: number, boost: boolean): void {
     const um = this.under.material as THREE.ShaderMaterial;
-    um.uniforms.uA.value = 0.35 + 0.65 * carNight.value;
+    // (a glow you only see in the dark: by day it just bleached the grass)
+    um.uniforms.uA.value = 0.85 * carNight.value;
     um.uniforms.uT.value = t;
     this.lamps();
     this.jet(boost, t, dt);

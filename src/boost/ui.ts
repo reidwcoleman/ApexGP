@@ -266,6 +266,15 @@ export class UI {
     <div class="chip look"><i class="tb-art" id="tb-art"></i><span><small>Next match</small><b id="tb-look"></b></span></div>
     <div class="chip me"><i class="av" id="tb-av"></i><span><small>Driver</small><b id="tb-name"></b></span></div>
   </div>
+  <div class="carcard" id="carcard">
+    <div class="cc-head"><small>Your car</small><b id="cc-body"></b></div>
+    <div class="cc-rows">
+      <div><i class="cc-sw" id="cc-paint"></i><span><small>Paint</small><b id="cc-finish"></b></span></div>
+      <div><i class="cc-sw" id="cc-trail"></i><span><small>Boost</small><b id="cc-trail-n"></b></span></div>
+      <div><i class="cc-sw" id="cc-boom"></i><span><small>Goal explosion</small><b id="cc-boom-n"></b></span></div>
+    </div>
+    <button class="cc-go" data-go="s-garage">Open garage</button>
+  </div>
 </div>
 
 <div class="lobby" id="m-lobby" hidden>
@@ -504,6 +513,14 @@ export class UI {
     this.$('#tb-name').textContent = p.name || 'Rookie';
     (this.$('#tb-av') as HTMLElement).textContent = (p.name || 'R').trim().charAt(0).toUpperCase();
     (this.$('#tb-av') as HTMLElement).style.background = `linear-gradient(140deg, ${hex(p.accent)}, #1d5ae6)`;
+    // the car card: what you've got equipped, each with its swatch
+    this.$('#cc-body').textContent = BODIES[p.body]?.name ?? '';
+    (this.$('#cc-paint') as HTMLElement).style.background = `linear-gradient(135deg, #2f7bff 0 55%, ${hex(p.accent)} 55%)`;
+    this.$('#cc-finish').textContent = `${FINISHES[p.finish] ?? ''} · ${DECALS[p.decal] ?? ''}`;
+    (this.$('#cc-trail') as HTMLElement).style.background = TRAIL_ART[p.trail] ?? '';
+    this.$('#cc-trail-n').textContent = TRAILS[p.trail] ?? '';
+    (this.$('#cc-boom') as HTMLElement).style.background = BOOM_ART[p.boom] ?? '';
+    this.$('#cc-boom-n').textContent = BOOMS[p.boom] ?? '';
   }
 
   private save(): void {
@@ -728,6 +745,7 @@ export class UI {
     if (b === this.lastBoost) return;
     this.lastBoost = b;
     this.$('#h-bn').textContent = String(b);
+    this.$('.boost').classList.toggle('full', b >= 100);
     const a0 = Math.PI * 0.75;
     const sweep = Math.PI * 1.5;
     const arc = (r: number, f: number) => {
