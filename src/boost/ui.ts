@@ -186,6 +186,7 @@ export class UI {
     this.feedEl = this.$('.feed');
     this.wire();
     this.drawBoost(33);
+    this.topbar();
   }
 
   private html(): string {
@@ -195,24 +196,27 @@ export class UI {
   <div class="side">
     <div class="logo"><b>BOOST</b><i>BALL</i><small>Rocket-powered car soccer</small></div>
     <div class="screen" id="s-main">
-      <button class="mbtn primary" id="b-friends"><i class="ic">${ICON.friends}</i><span>Play with friends<em>Online lobby · share a code</em></span></button>
-      <button class="mbtn" data-go="s-play"><i class="ic">${ICON.bots}</i><span>Play vs bots<em>1v1 · 2v2 · 3v3</em></span></button>
-      <button class="mbtn" id="b-free"><i class="ic">${ICON.free}</i><span>Free play<em>Just you and the ball</em></span></button>
-      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Garage<em>Car · paint · boost · goal explosion</em></span></button>
-      <button class="mbtn" id="b-binds"><i class="ic">${ICON.controls}</i><span>Controls<em id="pad-status">Keyboard &amp; mouse · controller</em></span></button>
+      <button class="mbtn primary" id="b-friends"><i class="ic">${ICON.friends}</i><span>Play with friends<em>Online lobby · share a code</em></span><b class="n">01</b></button>
+      <button class="mbtn" data-go="s-play"><i class="ic">${ICON.bots}</i><span>Play vs bots<em>1v1 · 2v2 · 3v3</em></span><b class="n">02</b></button>
+      <button class="mbtn" id="b-free"><i class="ic">${ICON.free}</i><span>Free play<em>Just you and the ball</em></span><b class="n">03</b></button>
+      <button class="mbtn" data-go="s-garage"><i class="ic">${ICON.garage}</i><span>Garage<em>Car · paint · boost · goal explosion</em></span><b class="n">04</b></button>
+      <button class="mbtn" id="b-binds"><i class="ic">${ICON.controls}</i><span>Controls<em id="pad-status">Keyboard &amp; mouse · controller</em></span><b class="n">05</b></button>
       <button class="mbtn back" id="b-games"><i class="ic">${ICON.back}</i><span>All games</span></button>
     </div>
     <div class="screen" id="s-play" hidden>
+      <div class="playgrid"><div class="pcol">
       <div class="row3">
         <div><div class="mhead">Team size</div><div class="seg" id="seg-size"><button data-v="1">1v1</button><button data-v="2" class="on">2v2</button><button data-v="3">3v3</button></div></div>
         <div><div class="mhead">Bot skill</div><div class="seg" id="seg-skill"><button data-v="0.3">Rookie</button><button data-v="0.55" class="on">Pro</button><button data-v="0.85">All-Star</button></div></div>
         <div><div class="mhead">Length</div><div class="seg" id="seg-min"><button data-v="3">3 min</button><button data-v="5" class="on">5 min</button><button data-v="10">10 min</button></div></div>
       </div>
-      <div class="mhead">Arena</div>
-      <div class="arenas" id="seg-map">${arenaCards(p.map)}</div>
       <div class="mhead">Time of day</div>
       <div class="pills" id="seg-time">${timePills(p.time)}</div>
-      <button class="mbtn primary" id="b-go" style="margin-top:10px"><i class="ic">${ICON.go}</i><span>Kick off<em>Into the arena</em></span></button>
+      <button class="mbtn primary go" id="b-go"><i class="ic">${ICON.go}</i><span>Kick off<em>Into the arena</em></span></button>
+      </div><div class="pcol">
+      <div class="mhead">Arena</div>
+      <div class="arenas" id="seg-map">${arenaCards(p.map)}</div>
+      </div></div>
       <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="screen" id="s-online" hidden>
@@ -257,6 +261,10 @@ export class UI {
       <button class="mbtn back" data-go="s-main"><i class="ic">${ICON.back}</i><span>Back</span></button>
     </div>
     <div class="foot">An original fan-made game. Physics tuned to the published numbers of the rocket-car genre.</div>
+  </div>
+  <div class="topbar">
+    <div class="chip look"><i class="tb-art" id="tb-art"></i><span><small>Next match</small><b id="tb-look"></b></span></div>
+    <div class="chip me"><i class="av" id="tb-av"></i><span><small>Driver</small><b id="tb-name"></b></span></div>
   </div>
 </div>
 
@@ -486,9 +494,22 @@ export class UI {
     this.$('#p-leave').addEventListener('click', () => this.onLeave());
   }
 
+  /** the menu's top bar: who you are and where the next match is */
+  private topbar(): void {
+    const p = this.profile;
+    const m = MAPS[asMap(p.map)];
+    const t = TIMES[asTime(p.time)];
+    this.$('#tb-look').textContent = `${m.name} · ${t.name}`;
+    (this.$('#tb-art') as HTMLElement).style.background = m.theme.css;
+    this.$('#tb-name').textContent = p.name || 'Rookie';
+    (this.$('#tb-av') as HTMLElement).textContent = (p.name || 'R').trim().charAt(0).toUpperCase();
+    (this.$('#tb-av') as HTMLElement).style.background = `linear-gradient(140deg, ${hex(p.accent)}, #1d5ae6)`;
+  }
+
   private save(): void {
     saveProfile(this.profile);
     this.onProfile(this.profile);
+    this.topbar();
   }
 
   // ------------------------------------------------------------ controls (rebinding)

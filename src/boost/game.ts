@@ -56,6 +56,9 @@ const QUICK_CHAT = [
   ['OMG!', 'Noooo!', 'Wow!', 'Close one!'],
   ['$#@%!', 'No problem.', 'Whoops...', 'Sorry!'],
 ];
+/** the ribbon key for the ball's speed streak */
+const BALL_RIBBON = 100;
+
 /** a bot's car: a spread of bodies, paints, trails and explosions so a lobby looks lived in */
 const botLoadout = (n: number, k: number) =>
   packLoadout({ accent: [0xffffff, 0xffd23a, 0x39e07a, 0x1b1d22, 0xb06bff, 0x2ee6e6][(n + k) % 6], decal: (n * 7 + k) % 6, finish: (n + k * 3) % 4, body: (n * 5 + k * 2) % 6, trail: (n * 3 + k) % 6, boom: (n + k * 5) % 6 });
@@ -1152,6 +1155,16 @@ export class Game {
       this.ball.glow.visible = this.ball.mesh.visible;
       this.ball.shadow.visible = this.ball.mesh.visible;
       const sp = w.ball.vel.len();
+      // a streak of light behind a hard-hit ball, in the colour of the team that hit it
+      if (sp > 2300 && this.ball.mesh.visible) {
+        let rb = this.ribbons.get(BALL_RIBBON);
+        if (!rb) {
+          rb = { r: [new Ribbon()], fx: this.fx, i: BALL_RIBBON };
+          this.fx.group.add(rb.r[0].mesh);
+          this.ribbons.set(BALL_RIBBON, rb);
+        }
+        rb.r[0].push(bp.x, bp.y, bp.z, this.time);
+      }
       if (sp > 3200 && this.ball.mesh.visible) {
         const team = w.touches[0] ? w.players[w.touches[0][0]]?.team : -1;
         const c = team === 0 ? [0.6, 1.2, 2.6] : team === 1 ? [2.6, 1.2, 0.4] : [1.8, 1.8, 2];
@@ -1267,11 +1280,16 @@ export class Game {
     this.padsPrev.set(w.pads);
   }
 
-  /** the boost ribbons per car (−1: the garage's), one per nozzle */
+  /** the boost ribbons per car (−1: the garage's, BALL_RIBBON: the ball's streak), one per nozzle */
   private ribbons = new Map<number, { r: Ribbon[]; fx: FX; i: number }>();
 
   /** the ribbon look for car i's equipped trail */
   private ribbonStyle(i: number): RibbonStyle {
+    if (i === BALL_RIBBON) {
+      const t0 = this.world.touches[0] ? this.world.players[this.world.touches[0][0]]?.team : -1;
+      const body = t0 === 0 ? new THREE.Color(0.5, 1.1, 3.0) : t0 === 1 ? new THREE.Color(3.0, 1.2, 0.35) : new THREE.Color(1.6, 1.7, 2.0);
+      return { head: new THREE.Color(1.6, 1.6, 1.7), body, life: 0.35, w0: 60, w1: 20, kind: 0 };
+    }
     const view = i < 0 ? this.showcase : this.views[i];
     const lo = view?.loadout ?? unpackLoadout(0);
     const team = i < 0 ? 0 : (this.world.players[i]?.team ?? 0);
@@ -1290,7 +1308,8 @@ export class Game {
       case 5:
         return { head: hot, body: new THREE.Color(2.4, 2.0, 1.1), life: 0.6, w0: 4, w1: 9, kind: 0 };
       default:
-        return { head: hot, body: team === 0 ? new THREE.Color(0.45, 1.2, 3.8) : new THREE.Color(3.8, 1.2, 0.25), life: 0.5, w0: 10, w1: 26, kind: 0 };
+        // (a short hot core: the billowing flame puffs carry this trail)
+        return { head: hot, body: team === 0 ? new THREE.Color(0.45, 1.2, 3.8) : new THREE.Color(3.8, 1.2, 0.25), life: 0.28, w0: 6, w1: 12, kind: 0 };
     }
   }
 
@@ -1337,6 +1356,32 @@ export class Game {
     else if (style === 4) col = [3, 0.9, 0.12];
     else if (style === 5) col = [2.6, 2.2, 1.3];
     else col = team === 0 ? [0.22, 0.6, 2.2] : [2.2, 0.75, 0.15];
+    if (style === 0) {
+      // the classic jet: a white-hot flame at each nozzle billowing out into big soft puffs of team
+      // fire that swell, drift and cool to dark smoke
+      const fire = team === 0 ? [0.35, 0.95, 3.2] : [3.2, 1.05, 0.18];
+      const mid = team === 0 ? [1.3, 2.2, 3.4] : [3.4, 2.1, 0.8];
+      for (const jet of jets) {
+        const o = jet.clone().applyQuaternion(q);
+        const x = pos.x + o.x;
+        const y = pos.y + o.y;
+        const z = pos.z + o.z;
+        for (let k = 0; k < 3; k++) {
+          const sp = 450 + Math.random() * 500;
+          const j = 90;
+          const c = k === 0 ? mid : fire;
+          fx.spark({ x, y, z, vx: vel.x * 0.35 + back.x * sp + (Math.random() - 0.5) * j, vy: vel.y * 0.35 + back.y * sp + (Math.random() - 0.5) * j, vz: vel.z * 0.35 + back.z * sp + (Math.random() - 0.5) * j, r: c[0], g: c[1], b: c[2], life: (k === 0 ? 0.16 : 0.32 + Math.random() * 0.2) * lk, size: k === 0 ? 30 : 34 + Math.random() * 18, grow: k === 0 ? 60 : 150, drag: 3.2, grav: -60 });
+        }
+        fx.spark({ x, y, z, vx: vel.x * 0.5 + back.x * 300, vy: vel.y * 0.5 + back.y * 300, vz: vel.z * 0.5 + back.z * 300, r: 3, g: 2.8, b: 2.4, life: 0.07 * lk, size: 24, grow: 40, drag: 2 });
+        if (Math.random() < 0.35 * parts)
+          fx.spark({ x, y, z, vx: vel.x * 0.3 + back.x * 900 + (Math.random() - 0.5) * 500, vy: vel.y * 0.3 + back.y * 900 + (Math.random() - 0.5) * 500, vz: vel.z * 0.3 + back.z * 900 + (Math.random() - 0.5) * 500, r: 3, g: 2.2, b: 1, life: 0.35 * lk, size: 9, drag: 2.5, grav: 350 });
+      }
+      if (Math.random() < 0.7) {
+        const g = 0.2;
+        fx.smoke({ x: pos.x + back.x * 120, y: pos.y + back.y * 120, z: pos.z + 15 + back.z * 120, vx: vel.x * 0.1 + back.x * 120, vy: vel.y * 0.1 + back.y * 120, vz: 50, r: g, g: g * 1.02, b: g * 1.1, life: 0.9 * lk, size: 70, grow: 220, drag: 2 });
+      }
+      return;
+    }
     // (the ribbon carries the trail: the particles are just a sprinkle on it)
     const per = style === 4 ? 2 : 1;
     for (const jet of jets) {

@@ -63,6 +63,11 @@ export class Stage {
     uCity: { value: 0 },
     /** under the sea: the dome is the water, the surface overhead */
     uOcean: { value: 0 },
+    /** night: the moon, the band of the galaxy, curtains of aurora */
+    uMoon: { value: new THREE.Vector3(-0.45, 0.55, -0.7).normalize() },
+    uAurora: { value: 0 },
+    /** low sun: rays fanning out through the clouds */
+    uRays: { value: 0 },
   };
   private skyMat!: THREE.ShaderMaterial;
   private envCache = new Map<string, THREE.Texture>();
@@ -191,6 +196,8 @@ export class Stage {
     u.uStars.value = t.stars * (map.surround === 'city' ? 0.35 : 1);
     u.uCity.value = map.surround === 'city' ? 1 - t.day : 0;
     u.uOcean.value = map.surround === 'ocean' ? 1 : 0;
+    u.uAurora.value = t.id === 'night' ? (map.surround === 'city' ? 0.35 : 1) : 0;
+    u.uRays.value = t.id === 'sunset' ? 1 : t.id === 'morning' ? 0.6 : 0;
     const fog = sc.fog as THREE.FogExp2;
     fog.color.setRGB(...t.fog);
     fog.density = t.fogDensity;
@@ -408,7 +415,7 @@ export class Stage {
       uniforms: this.skyU,
       vertexShader: 'varying vec3 vP; void main(){ vP = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.); gl_Position = p.xyww; }',
       fragmentShader: `uniform float uTime; uniform vec3 uSun; uniform vec3 uZen; uniform vec3 uHor; uniform vec3 uGlow; uniform vec3 uSunCol;
-        uniform float uDisc; uniform float uCloud; uniform vec3 uCloudLit; uniform vec3 uCloudShade; uniform float uStars; uniform float uCity; uniform float uOcean;
+        uniform float uDisc; uniform float uCloud; uniform vec3 uCloudLit; uniform vec3 uCloudShade; uniform float uStars; uniform float uCity; uniform float uOcean; uniform vec3 uMoon; uniform float uAurora; uniform float uRays;
         varying vec3 vP;
         float h21(vec2 p){ p = fract(p*vec2(123.34,456.21)); p += dot(p,p+45.32); return fract(p.x*p.y); }
         float n2(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.-2.*f);
@@ -447,6 +454,48 @@ export class Stage {
           vec2 id = floor(sp); vec2 f = fract(sp)-0.5;
           float st = step(0.985, h21(id)) * (1.0 - smoothstep(0.0, 0.2, length(f))) * smoothstep(0.05,0.4,h);
           c += vec3(0.9,0.95,1.0) * st * (0.4 + 0.6*h21(id+3.1)) * uStars;
+          // the galaxy: a dusty band of light across the night, with dark lanes through it
+          if (uStars > 0.01) {
+            vec3 gp = normalize(vec3(0.35, 0.55, 0.76));
+            float band = exp(-pow(dot(d, gp) / 0.16, 2.0));
+            float dust = fbm(vec2(atan(d.z, d.x) * 6.0, d.y * 9.0) + 3.0);
+            float lane = smoothstep(0.35, 0.65, fbm(vec2(atan(d.z, d.x) * 14.0, d.y * 22.0) + 11.0));
+            c += vec3(0.55, 0.5, 0.75) * band * (0.25 + 0.75 * dust) * (1.0 - 0.6 * lane) * 0.09 * uStars * smoothstep(0.0, 0.3, h);
+            // a denser scatter of faint stars inside the band
+            vec2 sp2 = vec2(atan(d.z, d.x) * 260.0, h * 520.0);
+            float st2 = step(0.975, h21(floor(sp2) + 7.0)) * (1.0 - smoothstep(0.0, 0.3, length(fract(sp2) - 0.5)));
+            c += vec3(0.8, 0.85, 1.0) * st2 * band * 0.5 * uStars;
+            // the moon: a cratered disc with a soft halo
+            float md = dot(d, uMoon);
+            float disc = smoothstep(0.99955, 0.99968, md);
+            vec3 mloc = d - uMoon * md;
+            float crat = fbm(mloc.xy * 900.0 + mloc.z * 300.0);
+            c = mix(c, vec3(0.95, 0.94, 0.88) * (0.75 + 0.35 * crat) * 1.6, disc * uStars);
+            c += vec3(0.5, 0.6, 0.85) * (pow(max(md, 0.0), 900.0) * 0.6 + pow(max(md, 0.0), 40.0) * 0.06) * uStars;
+            // a shooting star now and then
+            float sid = floor(uTime / 7.0);
+            float sk = fract(uTime / 7.0);
+            vec3 s0 = normalize(vec3(h21(vec2(sid, 1.0)) - 0.5, 0.5 + 0.4 * h21(vec2(sid, 2.0)), h21(vec2(sid, 3.0)) - 0.5));
+            vec3 s1 = normalize(s0 + vec3(0.25, -0.12, 0.1));
+            vec3 sh = normalize(mix(s0, s1, sk * 3.0));
+            vec3 seg = s1 - s0;
+            float along = clamp(dot(d - s0, seg) / dot(seg, seg), 0.0, sk * 3.0);
+            float sdist = length(d - (s0 + seg * along));
+            c += vec3(1.0) * (1.0 - smoothstep(0.0, 0.0025, sdist)) * smoothstep(sk * 3.0 - 0.5, sk * 3.0, along) * step(sk, 0.33) * uStars * 0.8;
+          }
+          // aurora: curtains of green and violet light rippling across the north of the sky
+          if (uAurora > 0.01 && h > 0.0) {
+            vec3 aur = vec3(0.0);
+            for (int k = 0; k < 3; k++) {
+              float fk = float(k);
+              vec2 ap = d.xz / (h + 0.25) * (1.4 + fk * 0.35);
+              float x = ap.x * 1.2 + sin(ap.y * 1.7 + uTime * 0.12 + fk) * 0.6 + n2(vec2(ap.y * 2.0, uTime * 0.05 + fk)) * 0.8;
+              float curtain = exp(-pow((ap.y + 0.9 - fk * 0.35 + sin(x * 1.3 + uTime * 0.2) * 0.25) / 0.18, 2.0));
+              float rays = 0.45 + 0.55 * pow(n2(vec2(x * 9.0, uTime * 0.4 + fk * 5.0)), 2.0);
+              aur += mix(vec3(0.1, 1.0, 0.45), vec3(0.6, 0.25, 1.0), smoothstep(0.15, 0.6, h + fk * 0.08)) * curtain * rays;
+            }
+            c += aur * uAurora * 0.32 * smoothstep(0.03, 0.25, h) * (1.0 - smoothstep(0.75, 0.95, h));
+          }
           // cumulus, drifting: lit toward the sun, shaded underneath
           vec2 cp = d.xz / max(h + 0.12, 0.05) * 1.6 + vec2(uTime * 0.006, uTime * 0.002);
           float thr = mix(0.78, 0.42, uCloud);
@@ -457,6 +506,17 @@ export class Stage {
           cloudC += uSunCol * pow(sd, 14.0) * (1.0 - cl) * 1.5;
           c = mix(c, cloudC, cl * 0.92);
           c += uSunCol * pow(sd, 1600.0) * uDisc * (1.0 - cl * 0.85);
+          // rays fanning out from a low sun through the gaps in the clouds
+          if (uRays > 0.01) {
+            vec3 sv = normalize(uSun);
+            vec3 ra = normalize(cross(sv, vec3(0.0, 1.0, 0.0)));
+            vec3 rb = cross(ra, sv);
+            vec3 dl = d - sv * dot(d, sv);
+            float ang = atan(dot(dl, rb), dot(dl, ra));
+            float beams = pow(n2(vec2(ang * 9.0, 0.5 + uTime * 0.02)), 3.0) * 1.4 + pow(n2(vec2(ang * 23.0, 3.0)), 4.0);
+            float near = pow(sd, 3.0) * (1.0 - pow(sd, 400.0));
+            c += uSunCol * beams * near * uRays * 0.35 * smoothstep(-0.05, 0.1, h);
+          }
           // below the horizon: the ground's shade
           c = mix(c, uHor * 0.35, smoothstep(0.0, -0.15, h));
           gl_FragColor = vec4(c, 1.); }`,
