@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Boostball</title>
     <link rel="icon" href="data:," />
+    <!-- the physics (its engine and its arena, ready-made) starts downloading with the page, not after the scripts -->
+    <link rel="preload" href="/src/boost/sim/rs/arena.snap" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/src/boost/sim/rs/rs.wasm" as="fetch" crossorigin="anonymous" />
     <style>
       html, body { margin: 0; height: 100%; background: #03060f; overflow: hidden; touch-action: none; }
       #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }

@@ -274,10 +274,12 @@ function pitch(): THREE.Mesh {
     float seamS = (1.0 - smoothstep(0.0, 0.025 + fw / 600.0, sHex)) * synth * (1.0 - smoothstep(4.0, 14.0, fw));
     col *= 1.0 - synth * 0.18 * (1.0 - smoothstep(0.0, 0.2, sHex));
     // frost: white round the edges, patchy, and a dusting all over
-    float rim = smoothstep(-1000.0, -150.0, oct);
-    float fn = bbNoise(P * 0.004) * 0.6 + bbNoise(P * 0.03) * 0.4;
-    float frost = uFrost * clamp(rim * (0.2 + 1.1 * fn) + smoothstep(0.78, 0.95, fn) * 0.2, 0.0, 1.0);
-    col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), frost * 0.75);
+    if (uFrost > 0.0) {
+      float rim = smoothstep(-1000.0, -150.0, oct);
+      float fn = bbNoise(P * 0.004) * 0.6 + bbNoise(P * 0.03) * 0.4;
+      float frost = uFrost * clamp(rim * (0.2 + 1.1 * fn) + smoothstep(0.78, 0.95, fn) * 0.2, 0.0, 1.0);
+      col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), frost * 0.75);
+    }
     // a wash of team colour toward each end
     col = mix(col, col * (0.55 + team * 0.9), smoothstep(800.0, 5000.0, abs(P.y)) * 0.55);
     // lines: crisp painted strips (one distance to the nearest, so the edges stay sharp and even),
@@ -314,7 +316,8 @@ function pitch(): THREE.Mesh {
     float thatch = (1.0 - smoothstep(825.0, 1500.0, distance(P, camSim.xy))) * (1.0 - synth) * smoothstep(20.0, 140.0, -(oct + ${R.toFixed(1)})) * step(abs(P.y), ${ARENA.Y.toFixed(1)});
     col = mix(col, col * vec3(0.62, 0.6, 0.48), thatch * 0.55);
     // the sea floor arena: the waves' caustics dancing over the turf, a cooler cast
-    float cz = bbCaus(P / 330.0, uClock) * uCaus * (1.0 - smoothstep(25.0, 90.0, fw)) * (1.0 - gIn);
+    // (a uniform branch: every other arena skips the work, not just multiplies it by nothing)
+    float cz = uCaus > 0.0 ? bbCaus(P / 330.0, uClock) * uCaus * (1.0 - smoothstep(25.0, 90.0, fw)) * (1.0 - gIn) : 0.0;
     col *= 1.0 + cz * 1.25;
     col = mix(col, col * vec3(0.88, 1.04, 1.06), min(uCaus, 1.0) * 0.2);
     diffuseColor.rgb *= col;
@@ -361,14 +364,26 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
   bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   bg.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length).fill(0), 3));
   bg.setIndex(idx);
+  // the far layer's blades are a few pixels tall: a plain tapered strip (7 points, not 16) looks the
+  // same there and costs the vertex shader less than half
+  const far: number[] = [];
+  for (const t of [0, 0.45, 0.78]) {
+    const w = 0.5 * (1 - Math.pow(t, 1.6) * 0.82);
+    far.push(-w, 0, t, w, 0, t);
+  }
+  far.push(0, 0, 1);
+  const bgFar = new THREE.BufferGeometry();
+  bgFar.setAttribute('position', new THREE.Float32BufferAttribute(far, 3));
+  bgFar.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(far.length).fill(0), 3));
+  bgFar.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6]);
   const layers: { mesh: THREE.Mesh; uN: { value: number }; n: number[] }[] = [];
   const uOrigin = { value: new THREE.Vector2() };
   const uCam = { value: new THREE.Vector2() };
-  const make = (spacing: number, h: number, w: number, n: number[], far: number) => {
+  const make = (spacing: number, h: number, w: number, n: number[], far: number, blade: THREE.BufferGeometry) => {
     const geo = new THREE.InstancedBufferGeometry();
-    geo.index = bg.index;
-    geo.setAttribute('position', bg.attributes.position);
-    geo.setAttribute('normal', bg.attributes.normal);
+    geo.index = blade.index;
+    geo.setAttribute('position', blade.attributes.position);
+    geo.setAttribute('normal', blade.attributes.normal);
     geo.instanceCount = n[2] * n[2];
     const uN = { value: n[2] };
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0, side: THREE.DoubleSide });
@@ -446,9 +461,9 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
           if (abs(P.y) <= ${ARENA.Y.toFixed(1)} - 1150.0) dl = min(dl, arc - 22.0);
           float L = 1.0 - smoothstep(-2.0, 2.0, dl);
           col = mix(col, uLine * 0.85, L * 0.9);
-          float fr = uFrost * smoothstep(0.55, 0.9, gn(P * 0.004) * 0.6 + gn(P * 0.03) * 0.4 + smoothstep(-1000.0, -150.0, oct) * 0.5);
+          float fr = uFrost > 0.0 ? uFrost * smoothstep(0.55, 0.9, gn(P * 0.004) * 0.6 + gn(P * 0.03) * 0.4 + smoothstep(-1000.0, -150.0, oct) * 0.5) : 0.0;
           col = mix(col, vec3(0.62, 0.68, 0.74) * mix(0.6, 1.0, uDay), fr * 0.7);
-          col *= 1.0 + bbCausV(P / 330.0, uClock) * uCaus * 1.25;
+          if (uCaus > 0.0) col *= 1.0 + bbCausV(P / 330.0, uClock) * uCaus * 1.25;
           // the odd dead blade: straw from the tip down
           float dry = step(0.94, gh(cell + 11.1)) * (1.0 - L);
           // how tall: in clumps, shorter toward the fade (so the layer has no border) and on the lines
@@ -534,8 +549,8 @@ function grass(): { group: THREE.Group; setQuality: (q: number) => void; setOn: 
     layers.push({ mesh: m, uN, n });
   };
   // (spacing cm, blade height, width, grid size at quality 0/1/2, fade-out radius)
-  make(4, 6.5, 1.5, [0, 160, 240], 600);
-  make(10, 7.5, 2.4, [120, 190, 250], 1500);
+  make(4, 6.5, 1.5, [0, 160, 240], 600, bg);
+  make(10, 7.5, 2.4, [120, 190, 250], 1500, bgFar);
   const setQuality = (q: number) => {
     for (const l of layers) {
       const n = l.n[Math.max(0, Math.min(2, q))];
@@ -571,7 +586,7 @@ function shell(): THREE.Group {
     col *= mix(1.0, mix(2.4, 1.15, smoothstep(0.15, 0.4, max(uWall.r, max(uWall.g, uWall.b)))), uDay);
     // snow banked at the foot of the walls
     col = mix(col, vec3(0.8, 0.85, 0.9) * mix(0.6, 1.0, uDay), uFrost * (1.0 - smoothstep(30.0, 140.0 + n * 80.0, z)) * 0.85);
-    col *= 1.0 + bbCaus(vec2(vBB.x, z) / 330.0, uClock) * uCaus * 1.3 * (1.0 - smoothstep(25.0, 90.0, fwidth(vBB.x)));
+    if (uCaus > 0.0) col *= 1.0 + bbCaus(vec2(vBB.x, z) / 330.0, uClock) * uCaus * 1.3 * (1.0 - smoothstep(25.0, 90.0, fwidth(vBB.x)));
     diffuseColor.rgb *= col;
     float stripe = smoothstep(14.0, 0.0, abs(z - 330.0)) ;
     float seam = 1.0 - smoothstep(0.0, 0.05, hex);

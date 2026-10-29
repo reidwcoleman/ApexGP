@@ -52,7 +52,8 @@ vec3 olight(vec3 alb, vec3 n, vec3 w){
   float ndl = max(dot(n, uSunDir), 0.0);
   float sky = 0.5 + 0.5 * n.y;
   float d = length(w - cameraPosition);
-  float cs = caus(w.xz / 3.2, uTime) * uCaus * smoothstep(-0.1, 0.7, n.y) * (1.0 - smoothstep(60.0, 260.0, d));
+  // (only where they show: past 260 m they're gone into the blue, so the work is skipped)
+  float cs = d < 260.0 && uCaus > 0.0 ? caus(w.xz / 3.2, uTime) * uCaus * smoothstep(-0.1, 0.7, n.y) * (1.0 - smoothstep(60.0, 260.0, d)) : 0.0;
   return alb * (uSunCol * (ndl * 0.8 + 0.2) * (0.55 + 1.9 * cs) + uAmb * sky);
 }
 // the water: red goes first, then everything sinks into the blue
