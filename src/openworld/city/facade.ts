@@ -498,7 +498,7 @@ vec4 n2 = texture2D( uNoise, vRW.xz * 0.6 );
 vec3 c;
 if ( vRoof < 0.5 ) c = vec3( 0.72, 0.72, 0.7 ) * ( 0.85 + 0.2 * n2.b );          // white membrane
 else if ( vRoof < 1.5 ) c = vec3( 0.42, 0.41, 0.4 ) * ( 0.8 + 0.4 * n2.a );        // gravel
-else if ( vRoof < 2.5 ) c = vec3( 0.52, 0.3, 0.2 ) * ( 0.8 + 0.3 * n2.g );          // barrel tile
+else if ( vRoof < 2.5 ) c = vec3( 0.78, 0.42, 0.26 ) * ( 0.8 + 0.3 * n2.g );          // barrel tile
 else if ( vRoof < 3.5 ) c = vec3( 0.35, 0.36, 0.37 );                              // dark membrane
 else {
   // the podium decks, in the roof's own frame (u along it, v across, metres)
@@ -561,6 +561,6 @@ diffuseColor.rgb = c;
 `,
       );
   };
-  m.customProgramCacheKey = () => 'ow-roof-v3';
+  m.customProgramCacheKey = () => 'ow-roof-v4';
   return m;
 }

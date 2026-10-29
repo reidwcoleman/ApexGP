@@ -668,12 +668,22 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
 - **Landmarks**: Miami Tower's three lit tiers, the Freedom Tower, the Kaseya Center, PAMM's canopy
   and hanging gardens, Frost Science's sphere, the SkyViews wheel at Bayside, cruise ships at the
   PortMiami terminals, gantry cranes and container stacks, South Beach's lifeguard towers.
-- **The 2026 Tesla Roadster** in three trims: Performance, Thrust (four rear cold-gas boost
-  nozzles) and Rocket (ten: two boost, eight lift — it flies, lands on roofs, kickflips).
-  Lofted body with butterfly doors, the active wing, a gold-tinted canopy, aero wheels, bucket
-  seats, a full-width tail light over a carbon diffuser. The cold-gas jets are vapour you can see:
-  nitrogen chilling the humid air into white billows that splash and roll along the ground under a
-  low hover (spray over water), and the nozzles frost over with use.
+- **The story** (`src/openworld/story/`): an original crime story in eight missions. Rafa Vega, a
+  getaway driver back in Miami, owes Dante Cruz forty grand; Lola Marín puts him to work from her
+  garage on Calle Ocho. Steal and deliver a car, lose the police, a timed run to Ocean Drive, chase
+  down and wreck a runner, fly a helicopter to a tower roof and land, burn three cars on Ocean
+  Drive, a four-star escape by boat. Each is offered at a letter on the map and starts when you stop
+  in its marker; subtitled dialogue, objectives, a GPS route on the minimap, light-column markers
+  and chevrons in the world, timers, mission passed / failed cards, cash. Progress and cash are
+  saved (localStorage); the menu's Story tab lists them and starts over.
+- **Sports cars**: you start in a mid-engine supercar (Vespera GT-R); the garage in the menu
+  delivers it, a V8 muscle car (Bravado Stallion) or a twin-turbo coupe (Kestrel S) in Miami
+  colours, and they're common in the traffic.
+- **Miami in colour**: most low and mid-rise walls in pastels and brights, parking podiums behind
+  perforated screens painted in waves of colour (glowing after dark), Wynwood-style murals on 22 m
+  stretches of wall (synthwave sunsets, waves, Memphis dots, rainbow stripes, giant flowers),
+  painted shop fascias with neon letters at night, candy-striped awnings, rooftop billboards for
+  made-up brands, flag bunting across Calle Ocho, Ocean Drive and Washington Ave.
 - **Other vehicles**: every traffic car can be taken (carjacking ejects the driver), a superbike,
   a helicopter (Watson Island), a seaplane, a go-fast boat with a wake; the menu delivers more.
 - **The city lives**: lane-following traffic with signals and junction paths that slows for,
@@ -695,25 +705,17 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
   and the helicopter comes over (a rifle in its door from four); roadblocks from four stars; the
   tactical team in black with carbines at five. Dispatch on the radio, the search area on the map;
   stop with a cruiser beside you and you're BUSTED; lose them and the stars clear.
-- **Physics**: a four-wheel car. The body rides on a spring and damper at each corner with
-  anti-roll bars, so load transfer, dive, squat and roll come out of the suspension (and a soft SUV
-  or a van leans hard and lifts its inside wheels); each tyre has its own load, slip angle and slip
-  ratio on a combined-slip curve with load sensitivity, its wheel spins up or locks (an implicit
-  wheel solve, ABS and traction control on the combined slip, limited-slip), Ackermann steering
-  with grip steering (the fronts turn no further than their peak slip angle, so full lock carves),
-  stability control with roll stability (a van stays on four wheels). The Roadster runs semi-slicks
-  and a suction fan with torque vectoring: 0–100 km/h 1.5 s, 0–200 3.3 s, 100–0 in 17 m, 2.2 g
-  on the skidpad; a city sedan pulls 1.0 g and stops from 100 in 35 m. The city
-  cars have automatic gearboxes and torque curves (the bus a five-speed diesel); the Roadster and
-  the stainless pickup are single-speed EVs that regenerate off the throttle. Grass and sand grip
-  less; each wheel rides a curb on its own. It turns into a full rigid body when it trips sideways
-  over a curb, lifts two wheels past the tipping point, takes a blast or a heavy side hit, or is in
-  the air a while: rollovers onto the side or the roof (the player's car rights itself). Tyre marks
-  and ruts, per-wheel smoke and dust. Crash damage: dents crumple the panels where a car is hit
-  (scuffed paint, crazed glass, dead lamps) on every car. `tools/owhandling.mjs [model]` benches
-  launch, braking, skidpad and stability. Assisted flight for the Rocket and the helicopter, lift /
-  drag / stall for the seaplane, planing for the boat. Synthesised audio (EV whine, an engine that
-  shifts, thrusters, rotors, sirens, surf).
+- **Physics** (`sim/car.ts`): tuned to drive like a street-racing game: planted, quick to answer,
+  happy to slide when asked and easy to catch. An axle-pair tyre model with a peak and a sliding
+  plateau, load transfer under braking and power, a friction circle per axle with ABS and traction
+  control keeping grip for the steering, stability control that trims the yaw unless the handbrake
+  is up, speed-sensitive steering lock, automatic gearboxes with torque curves. Each wheel reads
+  the ground but only climbs curb-height steps, so ramps launch you and decks overhead don't; the
+  car flies off crests and lands on its suspension. Blasts and heavy rams turn it into a tumbling
+  rigid body (the player's car rights itself). Supercar 0–100 km/h 2.4 s and 1.5 g; a city sedan
+  6 s and 1.15 g. A sprung display body (dive, squat, roll), tyre marks, per-wheel smoke, dents.
+  `tools/owhandling.mjs [model]` benches launch, braking, skidpad and stability. Assisted flight
+  for the helicopter, lift / drag / stall for the seaplane, planing for the boat.
 - **The street**: hydrants (a car shears one off and it gushes for half a minute), bins, newspaper
   boxes and pay stations that go flying, benches, bus shelters with lit adverts; awnings over the
   shop fronts, open and lit shops; herringbone pavers; St. Augustine lawns with mowing stripes.
@@ -722,23 +724,19 @@ engine (the race game's renderer, sky, weather, grade, reflections) and the city
 | | Keyboard | Gamepad |
 |---|---|---|
 | Drive / steer | W A S D | RT / LT, left stick |
-| Handbrake (fly up) | Space | A / ✕ |
-| Cold-gas boost | Shift | RB |
-| Rocket: lift off / land | T | X / □ |
-| Fly down / bank | X · Q / E | B / ○ |
-| Get in / out | F | Y / △ |
+| Handbrake (helicopter: up) | Space | A / ✕ |
+| Sprint on foot | Shift | RB |
+| Helicopter down / bank | X · Q / E | B / ○ |
+| Get in / out, steal a car | F | Y / △ |
 | Camera · recover · map · menu | C · R · M · Esc | View · D-pad · Menu |
 | Capture the mouse · fire · aim | click · left · right mouse | RT · LT (on foot) |
 | Weapons · holster · reload | 1–6 / wheel · 0 · R (on foot) | D-pad right |
 
-Dev flags (`miami.html?`): `time=night`, `weather=rain`, `trim=performance|thrust|rocket`,
+Dev flags (`miami.html?`): `time=night`, `weather=rain`, `car=super|muscle|coupe|…`, `foot=1`,
+`mission=N` (start the story at mission N), `story=0`,
 `traffic=N`, `people=0`, `hud=0`, `carcam=az,el,dist,fov`, `cam=x,y,z&look=x,y,z`, `q=high`.
 
-Research: [Tesla Roadster (second generation)](https://en.wikipedia.org/wiki/Tesla_Roadster_(second_generation)),
-[TechCrunch on the reveal](https://techcrunch.com/2026/10/15/tesla-reveals-spacex-powered-roadster-that-flies-and-falls-with-style/),
-[Electrek](https://electrek.co/2026/10/15/tesla-unveils-cyberfied-new-roadster-kickflip/),
-[The EV Report on the cold-gas thrusters](https://theevreport.com/tesla-roadster-unveil-spacex-cold-gas-thrusters),
-[List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
+Research: [List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
 [CTBUH Skyscraper Center: Miami](https://www.skyscrapercenter.com/city/miami).
 
 ## Marble Mania
