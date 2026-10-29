@@ -106,6 +106,10 @@ export class CarView {
   private flameMat: THREE.ShaderMaterial;
   private coreMat: THREE.ShaderMaterial;
   private cores: THREE.Mesh[] = [];
+  private haloMat: THREE.ShaderMaterial;
+  private halos: THREE.Mesh[] = [];
+  /** the jets' light thrown on the ground behind the car */
+  private boostPool: THREE.Mesh;
   private nozzleGlow: THREE.MeshBasicMaterial;
   private spin = 0;
   private tag: THREE.Sprite | null = null;
@@ -271,24 +275,40 @@ export class CarView {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
-      uniforms: { uT: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x4f9dff : 0xff8a2a) }, uK: { value: 0 }, uHot: { value: 0 } },
-      vertexShader: `varying vec3 vP; varying vec2 vU; void main(){ vP = position; vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
-      fragmentShader: `uniform float uT; uniform vec3 uC; uniform float uK; uniform float uHot; varying vec3 vP; varying vec2 vU;
-        void main(){ float t = clamp(-vP.x, 0.0, 1.0);
-          // flickering shock bands running down the jet
-          float n = 0.5 + 0.5*sin(vU.x*40.0 + uT*60.0) * sin(t*20.0 - uT*80.0);
-          float bands = 0.75 + 0.25*sin(t*34.0 - uT*95.0);
-          float core = (1.0 - t) * (1.0 - t);
-          vec3 c = mix(uC * 1.7, vec3(1.8, 1.55, 1.1), mix(core * 0.85, 0.85, uHot));
-          float a = pow(1.0 - t, mix(1.1, 1.8, uHot)) * (0.55 + 0.45*n) * bands * uK;
-          gl_FragColor = vec4(c * a * mix(2.4, 3.4, uHot), a); }`,
+      uniforms: { uT: { value: 0 }, uC: { value: new THREE.Color(team === 0 ? 0x4f9dff : 0xff8a2a) }, uK: { value: 0 }, uHot: { value: 0 }, uSoft: { value: 0 } },
+      vertexShader: `varying vec3 vP; varying vec2 vU; varying vec3 vN; varying vec3 vV;
+        void main(){ vP = position; vU = uv; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      // a jet of flame: white-hot at the nozzle cooling into the trail's colour, a row of shock
+      // diamonds, turbulence flowing back along it, a ragged flickering tail; bright through its
+      // middle and soft at its edges (so the cone reads as a body of light, not a shell)
+      fragmentShader: `uniform float uT; uniform vec3 uC; uniform float uK; uniform float uHot; uniform float uSoft; varying vec3 vP; varying vec2 vU; varying vec3 vN; varying vec3 vV;
+        float fh(vec2 p){ p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+        float fn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(fh(i), fh(i + vec2(1, 0)), u.x), mix(fh(i + vec2(0, 1)), fh(i + vec2(1, 1)), u.x), u.y); }
+        void main(){
+          float t = clamp(-vP.x, 0.0, 1.0);
+          float face = abs(dot(normalize(vN), normalize(vV)));
+          float body = pow(face, mix(1.1, 3.0, uSoft));
+          float n = fn(vec2(vU.x * 9.0, t * 7.0 - uT * 24.0)) * 0.6 + fn(vec2(vU.x * 19.0, t * 15.0 - uT * 43.0)) * 0.4;
+          float diam = 1.0 + 0.7 * pow(0.5 + 0.5 * cos(t * 31.0), 4.0) * (1.0 - t) * (1.0 - uSoft);
+          float tail = pow(1.0 - t, mix(1.25, 2.3, uHot));
+          float rag = smoothstep(0.0, 0.3, (1.0 - t) - n * 0.35);
+          float a = body * diam * tail * rag * (0.55 + 0.7 * n) * uK * mix(1.0, 0.32, uSoft);
+          vec3 hot = vec3(2.1, 1.95, 1.7);
+          vec3 c = mix(hot, uC * 1.9, smoothstep(0.0, 0.42, t + (1.0 - face) * 0.35 - uHot * 0.45));
+          c = mix(c, uC * 0.85, smoothstep(0.55, 1.0, t));
+          gl_FragColor = vec4(c * a * mix(2.4, 3.6, uHot), a);
+        }`,
     });
     // the jet takes the trail's colour
     const jc = [null, new THREE.Color(look.accent), null, new THREE.Color(0x9fe6ff), new THREE.Color(0xff5a10), new THREE.Color(0xffd27a)][look.trail];
     if (jc) (this.flameMat.uniforms.uC.value as THREE.Color).copy(jc);
-    // a short white-hot core inside each jet
+    // a short white-hot core inside each jet, and a soft wide glow round it
     this.coreMat = this.flameMat.clone();
     this.coreMat.uniforms.uHot.value = 1;
+    this.haloMat = this.flameMat.clone();
+    this.haloMat.uniforms.uSoft.value = 1;
+    this.haloMat.uniforms.uC = this.flameMat.uniforms.uC;
     for (const sy of [-1, 1]) {
       const nz = add(g.nozzle, nozzleM, false);
       const [jx, jy, jz] = R.jets[sy < 0 ? 1 : 0];
@@ -303,6 +323,12 @@ export class CarView {
       fl.frustumCulled = false;
       this.group.add(fl);
       this.flames.push(fl);
+      const halo = new THREE.Mesh(g.flame, this.haloMat);
+      halo.position.set(jx - 1, jy, jz);
+      halo.renderOrder = 8;
+      halo.frustumCulled = false;
+      this.group.add(halo);
+      this.halos.push(halo);
       const core = new THREE.Mesh(g.flame, this.coreMat);
       core.position.set(jx - 1, jy, jz);
       core.renderOrder = 10;
@@ -342,6 +368,16 @@ export class CarView {
       this.under.position.set(4, 0, R.ground + 0.9);
       this.under.renderOrder = 3;
       this.group.add(this.under);
+    }
+    {
+      const m = (this.under.material as THREE.ShaderMaterial).clone();
+      m.uniforms.uC = this.flameMat.uniforms.uC;
+      this.boostPool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), m);
+      this.boostPool.scale.set(420, 240, 1);
+      this.boostPool.position.set(-150, 0, R.ground + 1.1);
+      this.boostPool.renderOrder = 3;
+      this.boostPool.visible = false;
+      this.group.add(this.boostPool);
     }
     // the lamps: where the head and tail light geometry sits
     g.head.computeBoundingBox();
@@ -518,6 +554,11 @@ export class CarView {
     um.uniforms.uA.value += ((down >= 2 ? 0.25 + 0.75 * carNight.value : 0) - um.uniforms.uA.value) * Math.min(1, dt * (down >= 2 ? 8 : 40));
     um.uniforms.uT.value = t;
     this.under.visible = um.uniforms.uA.value > 0.01;
+    // the jets light up the ground behind the car while it's down on it
+    const pm = this.boostPool.material as THREE.ShaderMaterial;
+    pm.uniforms.uA.value = this.boostVis * (down >= 2 ? 1 : 0) * (0.5 + 0.6 * carNight.value);
+    pm.uniforms.uT.value = t * 6;
+    this.boostPool.visible = pm.uniforms.uA.value > 0.01;
     this.lamps();
     // the shock cone grows in as the car goes supersonic
     this.machK += ((car.supersonic ? 1 : 0) - this.machK) * Math.min(1, dt * (car.supersonic ? 6 : 10));
@@ -556,9 +597,15 @@ export class CarView {
       f.visible = this.boostVis > 0.02;
       f.scale.set(22 + 12 * this.boostVis + Math.sin(t * 90 + f.position.y) * 3, 3.2, 3.2);
     }
+    this.haloMat.uniforms.uT.value = t;
+    this.haloMat.uniforms.uK.value = this.boostVis;
+    for (const f of this.halos) {
+      f.visible = this.boostVis > 0.02;
+      f.scale.set(70 + 70 * this.boostVis + Math.sin(t * 50 + f.position.y) * 6, 13 + 3 * this.boostVis, 13 + 3 * this.boostVis);
+    }
     for (const f of this.flames) {
       f.visible = this.boostVis > 0.02;
-      const L = 50 + 50 * this.boostVis + Math.sin(t * 70 + f.position.y) * 8;
+      const L = 60 + 62 * this.boostVis + Math.sin(t * 70 + f.position.y) * 8;
       f.scale.set(L, 5.2 + 1.6 * this.boostVis, 5.2 + 1.6 * this.boostVis);
     }
     this.nozzleGlow.color.setRGB(0.035 + this.boostVis * 6, 0.02 + this.boostVis * 2.9, 0.015 + this.boostVis * 1.3);

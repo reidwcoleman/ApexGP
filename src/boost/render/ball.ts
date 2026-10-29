@@ -38,18 +38,23 @@ export class BallView {
   readonly shadow: THREE.Mesh;
   private uHit = { value: 0 };
   private uCol = { value: new THREE.Color(1, 1, 1) };
+  private uT = { value: 0 };
+  /** 0…1 how fast it's going (the seams and the rim burn brighter) */
+  private uSpd = { value: 0 };
 
   constructor() {
     const pts = panelCentres();
-    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.6, roughness: 0.34, clearcoat: 0.5, clearcoatRoughness: 0.2, envMapIntensity: 1.2 });
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.62, roughness: 0.3, clearcoat: 0.9, clearcoatRoughness: 0.08, envMapIntensity: 1.4 });
     const uPts = { value: pts };
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uPts = uPts;
       sh.uniforms.uHit = this.uHit;
       sh.uniforms.uCol = this.uCol;
+      sh.uniforms.uT = this.uT;
+      sh.uniforms.uSpd = this.uSpd;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vDir;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvDir = normalize(position);');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vDir;\nuniform vec3 uPts[32];\nuniform float uHit;\nuniform vec3 uCol;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vDir;\nuniform vec3 uPts[32];\nuniform float uHit;\nuniform vec3 uCol;\nuniform float uT;\nuniform float uSpd;')
         .replace(
           '#include <map_fragment>',
           `#include <map_fragment>
@@ -81,7 +86,14 @@ export class BallView {
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
-          totalEmissiveRadiance += uCol * (seam * (0.35 + 3.0 * uHit) + inset * 0.6 * uHit + pent * 0.08);`,
+          // energy running along the seams: pulses racing round the ball after a hit, a steady
+          // shimmer at speed
+          float flow = pow(0.5 + 0.5 * sin(dot(d, vec3(0.6, 0.5, 0.62)) * 22.0 - uT * 9.0), 6.0);
+          float seamE = seam * (0.3 + 3.2 * uHit + uSpd * 1.4 + flow * (1.6 * uHit + 0.9 * uSpd));
+          totalEmissiveRadiance += uCol * (seamE + inset * (0.6 * uHit + 0.25 * uSpd) + pent * (0.08 + 0.2 * uSpd));
+          // a rim of the last toucher's light round the silhouette
+          float rimV = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 3.0);
+          totalEmissiveRadiance += uCol * rimV * (0.12 + 0.6 * uSpd + 0.8 * uHit);`,
         )
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.55, seam) + comb * 0.15;');
     };
@@ -128,7 +140,9 @@ export class BallView {
     // (on the flat floor only: it fades out where the floor curves up into the walls)
     const edge = THREE.MathUtils.smoothstep(sdf(pos.x, pos.y, 40), 20, 160);
     (this.shadow.material as THREE.ShaderMaterial).uniforms.uA.value = (0.62 - Math.min(0.32, h / 4000)) * edge;
-    this.uHit.value = Math.max(0, this.uHit.value - dt * 2.2);
+    this.uHit.value = Math.max(0, this.uHit.value - dt * 1.6);
+    this.uT.value += dt;
+    this.uSpd.value += (THREE.MathUtils.smoothstep(speed, 1800, 4500) - this.uSpd.value) * Math.min(1, dt * 6);
     (this.glow.material as THREE.ShaderMaterial).uniforms.uK.value = THREE.MathUtils.smoothstep(speed, 2500, 5000) * 0.9 + this.uHit.value * 0.4;
   }
 }

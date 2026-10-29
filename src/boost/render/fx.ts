@@ -552,6 +552,21 @@ export class FX {
     });
   }
 
+  /** a touch on the ball: a white flash, a shock shell in the hitter's colour and sparks thrown off,
+   * all scaled by how hard it was hit */
+  impact(x: number, y: number, z: number, power: number, c: THREE.Color): void {
+    const k = Math.min(1, power / 3200);
+    if (k < 0.12) return;
+    const col = c.clone().multiplyScalar(2.6);
+    this.wave(x, y, z, 90 + 160 * k, 0.16, new THREE.Color(2.6, 2.6, 2.8), 2.2);
+    this.wave(x, y, z, 220 + 620 * k, 0.32 + 0.2 * k, col, 0);
+    for (let q = 0; q < Math.round(10 + 40 * k); q++) {
+      const d = rnd3();
+      const v = (700 + Math.random() * 1600) * (0.5 + k);
+      this.streak(x, y, z, d[0] * v, d[1] * v, d[2] * v, Math.random() < 0.4 ? new THREE.Color(2.8, 2.7, 2.5) : col, 0.25 + Math.random() * 0.3, 0.05, 2.5, 500);
+    }
+  }
+
   demo(x: number, y: number, z: number): void {
     const f = new THREE.Color(3, 1.3, 0.3);
     this.burst(x, y, z, 260, 1800, f, 80, 1.0, 200);

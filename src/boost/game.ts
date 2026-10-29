@@ -885,6 +885,14 @@ export class Game {
         this.ball.hit(e.power, w.players[e.car].team);
         const mid = new V3().copy(b).add(c.pos).scale(0.5);
         if (e.power > 600) this.fx.burst(mid.x, mid.y, mid.z, Math.min(60, 8 + e.power / 50), 900 + e.power * 0.3, new THREE.Color(2.2, 2.2, 2.4), 22, 0.35, 300);
+        // (at the ball's surface, on the hitter's side)
+        {
+          const dx = c.pos.x - b.x;
+          const dy = c.pos.y - b.y;
+          const dz = c.pos.z - b.z;
+          const dl = Math.hypot(dx, dy, dz) || 1;
+          this.fx.impact(b.x + (dx / dl) * BALL.R, b.y + (dy / dl) * BALL.R, b.z + (dz / dl) * BALL.R, e.power, new THREE.Color(w.players[e.car].team === 0 ? 0x4aa0ff : 0xff8a30));
+        }
         if (playing) this.audio.hit(e.power, att(b.x, b.y, b.z), pan(b.x, b.y));
         if (e.car === this.me && e.power > 1800 && this.ui.profile.shake) this.cam.shake(14, 0.18);
         if (e.car === this.me && playing) this.controls.rumble(Math.min(1, e.power / 3500), Math.min(1, 0.25 + e.power / 2500), 90 + Math.min(120, e.power / 30));
