@@ -108,7 +108,7 @@ export class Game {
     this.scene.add(this.sun, this.sun.target, this.hemi);
     const comp = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
     comp.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 0.9, luminanceSmoothing: 0.2, mipmapBlur: true, radius: 0.7, levels: 6 });
+    this.bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 1.05, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.7, levels: 6 });
     comp.addPass(new EffectPass(this.camera, this.bloom, new HueSaturationEffect({ saturation: 0.12 }), new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }), new VignetteEffect({ offset: 0.32, darkness: 0.45 })));
     comp.addPass(new EffectPass(this.camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
     this.fx = new Fx(this.scene);
@@ -120,6 +120,10 @@ export class Game {
       fighters: () => this.fighters,
       sfx: (n, at, g) => this.sfx(n, at, g),
       burst: (at, c, n) => this.fx.hit(at, new THREE.Vector3(0, 1, 0), n ?? 8, c),
+      splash: (at) => {
+        this.fx.splash(at);
+        this.sound.splash();
+      },
     };
     addEventListener('resize', () => this.resize());
     this.resize();

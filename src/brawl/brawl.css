@@ -97,11 +97,11 @@ kbd { font-family: var(--body); font-weight: 600; font-size: 0.85em; background:
 .pp-call { background: var(--card); border-radius: 14px; padding: 7px 14px; font-weight: 600; font-size: 16px; border-left: 0; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.22), inset 5px 0 0 var(--c); animation: pp-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1); transition: opacity 0.5s ease, transform 0.5s ease; }
 .pp-call.gone { opacity: 0; transform: translateX(20px); }
 @keyframes pp-in { from { transform: translateX(30px) scale(0.9); opacity: 0; } }
-.pp-big { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(0.6); font-family: var(--display); font-size: clamp(90px, 16vw, 220px); color: var(--yellow); text-shadow: 0 8px 0 #e0752a, 0 16px 0 #6b2a1a, 0 26px 50px rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none; white-space: nowrap; }
+.pp-big { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) scale(0.6); font-family: var(--display); font-size: clamp(90px, 16vw, 220px); color: var(--yellow); text-shadow: 0 8px 0 #e0752a, 0 16px 0 #6b2a1a, 0 26px 50px rgba(0, 0, 0, 0.5); opacity: 0; pointer-events: none; white-space: nowrap; }
 .pp-big.show { animation: pp-pop 0.9s cubic-bezier(0.2, 1.5, 0.4, 1) forwards; }
 .pp-big.go { color: #fff; text-shadow: 0 8px 0 var(--pink), 0 16px 0 #6b1a3c, 0 26px 50px rgba(0, 0, 0, 0.5); }
 @keyframes pp-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-8deg); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1.05) rotate(2deg); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.15); } }
-.pp-banner { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(0.8); text-align: center; opacity: 0; transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1); pointer-events: none; }
+.pp-banner { position: absolute; left: 50%; top: 19%; transform: translate(-50%, -50%) scale(0.8); text-align: center; opacity: 0; transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1); pointer-events: none; }
 .pp-banner.intro, .pp-banner.result { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .pp-banner small { display: block; font-family: var(--display); font-size: 26px; color: var(--cream); text-shadow: 0 3px 10px rgba(0, 0, 0, 0.5); }
 .pp-banner b { --c: #fff; display: block; font-family: var(--display); font-weight: 400; font-size: clamp(56px, 8vw, 110px); color: var(--c); line-height: 1; text-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 18px 40px rgba(0, 0, 0, 0.45); }

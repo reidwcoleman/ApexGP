@@ -797,8 +797,8 @@ export class Fighter {
         const mult = part === HEAD ? 1.55 : part === CHE || part === PEL ? 1 : 0.6;
         const dmg = THREE.MathUtils.clamp((rel - 1) * (kind === 'kick' ? 2.2 : 1.6), 4, 26) * mult;
         const push = Math.min(9, 2.6 + rel * 0.35) * (kind === 'kick' ? 1.35 : 1);
-        ob.applyImpulse(rv(_d.copy(dir).multiplyScalar(push * ob.mass() * 1.2)), true);
-        f.bodies[CHE].applyImpulse(rv(_d.copy(dir).multiplyScalar(push * 6)), true);
+        ob.applyImpulse(rv(_d.copy(dir).multiplyScalar(push * ob.mass() * 0.9)), true);
+        f.bodies[CHE].applyImpulse(rv(_d.copy(dir).multiplyScalar(push * 4)), true);
         f.takeDaze(dmg, this, at, part, kind);
       } else if (ob.isDynamic() && !seen.has(ob)) {
         seen.add(ob);

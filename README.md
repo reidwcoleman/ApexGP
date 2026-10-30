@@ -804,6 +804,21 @@ and bots; the contestants are original bean characters, not marbles.
   difficulty) and reports times, falls, skill ordering and AI cost. For party play, open two
   browser windows, HOST PARTY in one and JOIN with its code in the other.
 
+## Plush Panic
+
+`brawl.html` (card 5 on the picker): a wobbly ragdoll party brawler for 1–8 players (keyboard, a second keyboard layout, any number of controllers, CPUs to fill). Plush toys punch, kick, grab, lift and throw each other off the arena; last one standing wins the round, first to 1/3/5 wins the match. Original characters, arenas and rules.
+
+- **Fighters** (`src/brawl/fighter.ts`): an active ragdoll of 11 Rapier bodies. Every joint is a spring-damper torque toward a pose that pushes back on its parent; chest and pelvis are held upright by an implicit (stable at any gain) balance torque; a spring under the pelvis, fed by five down-rays, carries the weight, so the legs only walk for show and to kick. Hands are steered by forces that push back on the chest; a grab is a spherical joint made where the hand touches something (a fighter, a prop, a ledge: hang, then jump to climb). Hits build a daze meter that ends in a limp knockout; mash to wake or to wriggle free.
+- **Look** (`src/brawl/look.ts`): `public/brawl/fighter.glb` is a skinned plush built in Blender (metaball limbs, button eyes, stitched smile, belly patch, 11 bones that match the 11 bodies one to one); bones are set straight from the bodies every frame. Felt shader, per-fighter dye, 13 hats from `hats.glb`.
+- **Arenas** are Blender scenes read by naming convention (`src/brawl/arena.ts`): `col_box_*` / `col_hull_*` / `col_mesh_*` collision, `mov_*` kinematic movers the arena script animates, `dyn_*` loose props, `spawn_*`. Scripts in `src/brawl/arenas/`:
+  - **Tilt**: a pinball table tilted 6°, flippers on a timer, pop bumpers and slingshots that kick, a chrome ball that rolls down and gets shot back up the lane, the drain between the flippers.
+  - **Tick Tock**: gears turning at different heights round a copper hub (spoked ones have holes), a pendulum sweeping through the middle.
+  - **Sushi Spin**: a conveyor belt (surface velocity) round the chef's island, plates riding it, maki rolls to throw, a chef's knife that chops where the red ring shows.
+  - **Splash Tub**: a clawfoot bathtub; the rim, a bath caddy and floating toys (buoyancy in the script: duck, slippery soap, sponge, boat); the water is out.
+- **CPUs** (`src/brawl/ai.ts`) press the same buttons as players, check the ground ahead with ray casts (and the arena's `safe()`), drag dazed victims to the nearest drop and throw them.
+
+Blender: `blender -b --python blender/brawl/<fighter|hats|tilt|clock|sushi|bath>.py` writes `public/brawl/<name>.glb` (occlusion baked into vertex colours); `blender/brawl/preview.py -- <name> out.png` renders one. Tools: `tools/brawlprobe.mjs <stand|walk|jump|duel|grab|brawl> [--arena id]` (physics log), `tools/brawlshot.mjs <arena> out.png` (CPU match screenshot), `tools/brawlflow.mjs <dir>` (title → lobby → fight with real key presses). Test hooks: `brawl.html?manual` stops the loop, `window.__brawl.tick(dt)` / `.draw(dt)` run it.
+
 ## Controls
 
 | | Keyboard | Gamepad |

@@ -300,3 +300,111 @@ def star_pts(r0, r1, n=5, a0=0.0):
 def circle_pts(r, n=32, rz=None):
     rz = r if rz is None else rz
     return [(r * math.cos(i / n * math.tau), rz * math.sin(i / n * math.tau)) for i in range(n)]
+
+
+def annulus(name, r_in, r_out, h, material=None, seg=48, parent=None, c=(0, 0, 0)):
+    """a flat ring (game frame: lying in xz, from y - h/2 to y + h/2)"""
+    bm = bmesh.new()
+    rings = []
+    for (r, y) in ((r_out, h / 2), (r_in, h / 2), (r_in, -h / 2), (r_out, -h / 2)):
+        rings.append([bm.verts.new(Vector((math.cos(i / seg * math.tau) * r, math.sin(i / seg * math.tau) * r, y))) for i in range(seg)])
+    for k in range(4):
+        a, b = rings[k], rings[(k + 1) % 4]
+        for i in range(seg):
+            j = (i + 1) % seg
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    o = obj_from_bm(bm, name, material, parent)
+    o.location = G(*c)
+    smooth(o, math.radians(30))
+    return o
+
+
+def gear(name, c, r, h, teeth, material, spokes=0, hub_mat=None, parent=None, tooth=0.42, yaw=0.0, hole_r=0.0):
+    """a gear on a mov_<name> node: rim + teeth (+ spokes and a hub, or a solid disc), with collision.
+    Returns the node."""
+    node = empty('mov_' + name, c, parent=parent, yaw=yaw)
+    parts = []
+    if spokes:
+        r_in = r - 0.75
+        parts.append(annulus(name + '_rim', r_in, r, h, material, seg=max(48, teeth * 3), parent=node))
+        n = 24
+        for i in range(n):
+            a0, a1 = i / n * math.tau, (i + 1) / n * math.tau
+            am = (a0 + a1) / 2
+            rm = (r + r_in) / 2
+            L = 2 * r * math.sin(math.pi / n) + 0.05
+            col_box(name + '_rim', (math.cos(am) * rm, 0, math.sin(am) * rm), (r - r_in, h, L), rot=(0, -am, 0), parent=node)
+        for i in range(spokes):
+            a = i / spokes * math.tau
+            L = r_in - 0.4
+            parts.append(box(name + '_spoke', (math.cos(a) * (0.4 + L / 2), 0, math.sin(a) * (0.4 + L / 2)), (L + 0.2, h * 0.8, 0.55), material, bevel=0.05, rot=(0, -a, 0), parent=node))
+            col_box(name + '_spoke', (math.cos(a) * (0.4 + L / 2), 0, math.sin(a) * (0.4 + L / 2)), (L + 0.2, h * 0.8, 0.55), rot=(0, -a, 0), parent=node)
+        parts.append(cyl(name + '_hub', (0, 0.05, 0), 0.9, h + 0.1, hub_mat or material, seg=32, parent=node, bevel=0.04))
+        cyl('col_hull_' + name + '_hub', (0, 0.05, 0), 0.9, h + 0.1, None, seg=16, parent=node)
+    else:
+        parts.append(cyl(name + '_disc', (0, 0, 0), r, h, material, seg=max(48, teeth * 3), parent=node, bevel=0.03))
+        cyl('col_hull_' + name + '_disc', (0, 0, 0), r, h, None, seg=32, parent=node)
+        parts.append(cyl(name + '_cap', (0, h / 2 + 0.05, 0), 0.7, 0.12, hub_mat or material, seg=32, parent=node, bevel=0.03))
+    for i in range(teeth):
+        a = i / teeth * math.tau
+        w = 2 * math.pi * r / teeth * 0.5
+        tc = (math.cos(a) * (r + tooth / 2 - 0.02), 0, math.sin(a) * (r + tooth / 2 - 0.02))
+        parts.append(box(name + '_tooth', tc, (tooth + 0.04, h, w), material, bevel=0.04, rot=(0, -a, 0), parent=node))
+        col_box(name + '_tooth', tc, (tooth + 0.04, h, w), rot=(0, -a, 0), parent=node)
+    return node, parts
+
+
+def stadium_pts(R, L, n=24):
+    """a stadium outline (two straights of half-length L along x, ends of radius R), counter-clockwise
+    seen from above in game xz, starting at the front straight's left end"""
+    pts = []
+    for i in range(n):
+        pts.append((-L + 2 * L * i / n, R))
+    for i in range(n):
+        a = math.pi / 2 - math.pi * i / n
+        pts.append((L + R * math.cos(a), R * math.sin(a)))
+    for i in range(n):
+        pts.append((L - 2 * L * i / n, -R))
+    for i in range(n):
+        a = -math.pi / 2 - math.pi * i / n
+        pts.append((-L + R * math.cos(a), R * math.sin(a)))
+    return pts
+
+
+def ring_solid(name, inner, outer, y_top, depth, material=None, parent=None):
+    """a closed band between two matching outlines (game xz lists), top at y_top"""
+    bm = bmesh.new()
+    n = len(inner)
+    loops = []
+    for pts, y in ((outer, y_top), (inner, y_top), (inner, y_top - depth), (outer, y_top - depth)):
+        loops.append([bm.verts.new(G(x, y, z)) for x, z in pts])
+    for k in range(4):
+        a, b = loops[k], loops[(k + 1) % 4]
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    o = obj_from_bm(bm, name, material, parent)
+    return o
+
+
+def ell_pts(a, b, n=64):
+    return [(a * math.cos(i / n * math.tau), b * math.sin(i / n * math.tau)) for i in range(n)]
+
+
+def loft(name, loops, material=None, cap_last=False, parent=None, flip=False):
+    """quads between consecutive outlines: loops = [(pts, y), ...] (same point count each)"""
+    bm = bmesh.new()
+    vl = [[bm.verts.new(G(x, y, z)) for x, z in pts] for pts, y in loops]
+    n = len(vl[0])
+    for k in range(len(vl) - 1):
+        a, b = vl[k], vl[k + 1]
+        for i in range(n):
+            j = (i + 1) % n
+            f = bm.faces.new((a[i], a[j], b[j], b[i]) if not flip else (b[i], b[j], a[j], a[i]))
+    if cap_last:
+        last = vl[-1]
+        f = bm.faces.new(last if not flip else last[::-1])
+    o = obj_from_bm(bm, name, material, parent)
+    return o

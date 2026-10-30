@@ -285,14 +285,13 @@ export class Ui {
         this.drawLobby();
       }
     }
-    const k = inp.keys;
-    if (this.edge('KeyB', k)) this.addCpu();
-    if (this.edge('KeyN', k)) this.delCpu();
-    if (this.edge('Escape', k)) this.showTitle();
+    if (this.edge('KeyB')) this.addCpu();
+    if (this.edge('KeyN')) this.delCpu();
+    if (this.edge('Escape')) this.showTitle();
   }
   private prevKeys = new Set<string>();
-  private edge(code: string, k: Set<string>) {
-    return k.has(code) && !this.prevKeys.has(code);
+  private edge(code: string) {
+    return this.g.input.key(code) && !this.prevKeys.has(code);
   }
 
   // ------------------------------------------------------------------ per frame
@@ -310,7 +309,7 @@ export class Ui {
       for (const d of inp.list()) if (d.pressed('back') || d.pressed('confirm')) this.show('title');
     } else if (this.screen === 'game' || this.screen === 'pause') {
       for (const d of inp.list()) {
-        if (d.pressed('start') || (d.id === 'kb1' && this.edge('Escape', inp.keys))) {
+        if (d.pressed('start') || (d.id === 'kb1' && this.edge('Escape'))) {
           if (this.g.state === 'loading') continue;
           this.g.paused = !this.g.paused;
           this.show(this.g.paused ? 'pause' : 'game');
@@ -324,7 +323,7 @@ export class Ui {
         }
       }
     }
-    this.prevKeys = new Set(inp.keys);
+    this.prevKeys = inp.active();
     this.hintT += dt;
   }
 

@@ -68,6 +68,9 @@ export class Device {
 
 export class Input {
   keys = new Set<string>();
+  /** keys that went down since the last poll (a tap shorter than a frame still counts) */
+  private taps = new Set<string>();
+  private tapped = new Set<string>();
   mouse = { l: false, r: false };
   devices = new Map<string, Device>();
   lastKind: 'kb' | 'pad' = 'kb';
@@ -80,6 +83,7 @@ export class Input {
     addEventListener('keydown', (e) => {
       if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       this.keys.add(e.code);
+      this.taps.add(e.code);
       this.lastKind = 'kb';
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -105,6 +109,8 @@ export class Input {
       d.cur = t;
       for (const k in d.cur) (d.cur as unknown as Record<string, number | boolean>)[k] = k === 'lx' || k === 'ly' ? 0 : false;
     }
+    this.tapped = this.taps;
+    this.taps = new Set();
     this.readKeyboard('kb1');
     this.readKeyboard('kb2');
     const kb1 = this.devices.get('kb1')!.cur;
@@ -133,7 +139,8 @@ export class Input {
   }
 
   private readKeyboard(id: string) {
-    const L = KB[id], d = this.devices.get(id)!, k = this.keys, s = d.cur;
+    const L = KB[id], d = this.devices.get(id)!, s = d.cur;
+    const k = { has: (c: string) => this.keys.has(c) || this.tapped.has(c) };
     const any = (codes: string[]) => codes.some((c) => k.has(c));
     s.lx = (k.has(L.move.right) ? 1 : 0) - (k.has(L.move.left) ? 1 : 0);
     s.ly = (k.has(L.move.down) ? 1 : 0) - (k.has(L.move.up) ? 1 : 0);
@@ -192,6 +199,15 @@ export class Input {
     s.next = b(5);
     s.any = p.buttons.some((q, i) => i < 8 && q && q.pressed);
     if (s.any || m > 0.5) this.lastKind = 'pad';
+  }
+
+  /** a key held now or tapped since the last poll */
+  key(code: string) {
+    return this.keys.has(code) || this.tapped.has(code);
+  }
+  /** every key that counts as down this frame */
+  active() {
+    return new Set([...this.keys, ...this.tapped]);
   }
 
   list() {

@@ -20,6 +20,7 @@ export interface ArenaCtx {
   fighters: () => Fighter[];
   sfx: (name: string, at?: THREE.Vector3, gain?: number) => void;
   burst: (at: THREE.Vector3, color: number, n?: number) => void;
+  splash: (at: THREE.Vector3) => void;
 }
 
 export interface Mover {

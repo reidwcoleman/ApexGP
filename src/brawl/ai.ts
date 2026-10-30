@@ -136,20 +136,31 @@ export class Brain {
       } else if (this.plan !== 'approach') this.plan = 'approach';
     }
 
-    // never walk off on your own
-    if (!holding && !b.hanging() && (mx || mz)) {
+    // never walk off on your own: if the way ahead isn't solid, take the solid direction closest to it
+    if (!b.hanging() && (mx || mz)) {
       const m = Math.hypot(mx, mz) || 1;
-      const ahead = W.safe(p.x + (mx / m) * 1.3, p.y, p.z + (mz / m) * 1.3);
-      if (!ahead) {
-        w.set(W.center.x - p.x, 0, W.center.z - p.z).normalize();
-        if (W.safe(p.x, p.y, p.z)) {
-          mx = mx * 0.15 + w.x * 0.85;
-          mz = mz * 0.15 + w.z * 0.85;
-        } else {
-          mx = w.x;
-          mz = w.z;
-          I.run = true;
+      const dx = mx / m, dz = mz / m;
+      const look = holding ? 0.9 : 1.3;
+      if (!W.safe(p.x + dx * look, p.y, p.z + dz * look)) {
+        let bx = 0, bz = 0, bs = -9;
+        for (let k = 0; k < 16; k++) {
+          const a = (k / 16) * Math.PI * 2;
+          const x = Math.sin(a), z = Math.cos(a);
+          if (!W.safe(p.x + x * 1.3, p.y, p.z + z * 1.3) || !W.safe(p.x + x * 0.7, p.y, p.z + z * 0.7)) continue;
+          const s = x * dx + z * dz;
+          if (s > bs) {
+            bs = s;
+            bx = x;
+            bz = z;
+          }
         }
+        if (bs > -9 && !holding) {
+          mx = bx * 0.8;
+          mz = bz * 0.8;
+        } else if (!holding) {
+          mx = mz = 0;
+        }
+        if (!holding) I.run = false;
       }
     }
     // stuck against something: hop
@@ -157,7 +168,8 @@ export class Brain {
     if (Math.hypot(mx, mz) > 0.5 && sp < 0.35 && b.grounded) this.stuckT += dt;
     else this.stuckT = 0;
     if (this.stuckT > 0.9) {
-      I.jump = true;
+      const m2 = Math.hypot(mx, mz) || 1;
+      if (W.safe(p.x + (mx / m2) * 1.2, p.y, p.z + (mz / m2) * 1.2)) I.jump = true;
       this.stuckT = 0;
     }
     const m = Math.hypot(mx, mz);
@@ -193,6 +205,14 @@ export class Brain {
       if (o === b || !o.alive || o.out) continue;
       const q = o.pos[PEL];
       let s = Math.hypot(q.x - p.x, q.z - p.z) + Math.random() * 3;
+      // someone across a gap is a poor choice
+      for (let k = 1; k <= 3; k++) {
+        const t = k / 4;
+        if (!W.safe(p.x + (q.x - p.x) * t, p.y, p.z + (q.z - p.z) * t)) {
+          s += 7;
+          break;
+        }
+      }
       if (o.ko > 0) s -= 3;
       if (!o.cpu) s -= 0.6;
       if (s < bs) {

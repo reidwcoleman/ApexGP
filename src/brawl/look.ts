@@ -87,9 +87,10 @@ export class FighterLook {
           const c = new THREE.Color(color);
           if (n === 'patch') c.lerp(new THREE.Color(0xfff6e8), 0.55);
           m.color.copy(c);
-          m.sheen = 1;
-          m.sheenRoughness = 0.5;
-          m.sheenColor = new THREE.Color(c).lerp(new THREE.Color(0xffffff), 0.6);
+          m.sheen = 0.7;
+          m.sheenRoughness = 0.55;
+          m.sheenColor = new THREE.Color(c).lerp(new THREE.Color(0xffffff), 0.25);
+          m.envMapIntensity = 0.6;
           m.roughness = 0.92;
           feltify(m);
           this.mats.push(m);
