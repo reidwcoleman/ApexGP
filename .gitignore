@@ -11,3 +11,4 @@ desktop/node_modules
 release
 steam/art/raw
 steam/output
+__pycache__/
