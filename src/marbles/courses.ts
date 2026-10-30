@@ -30,7 +30,7 @@ export interface Course {
   gaps: [number, number][];
   /** respawn points (s), in order; none in a jump, on a beam or among the hammers */
   checkpoints: number[];
-  /** below this a marble is out (a fall) */
+  /** below this a bean is out (a fall) */
   killY: number;
   lakeY: number;
   state: { go: number };
@@ -54,9 +54,9 @@ export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' |
 export const SHOW: { id: RoundId; name: string; kind: RoundKind; blurb: string; keep: number }[] = [
   { id: 'timber', name: 'Timber Tumble', kind: 'race', blurb: 'Pegs, rolling logs, the big jump, a shortcut beam and the great spiral', keep: 0.8 },
   { id: 'paintmill', name: 'Paint Mill', kind: 'race', blurb: 'Hammers, flippers, a conveyor running back at you, the spinners and the axes', keep: 0.75 },
-  { id: 'jumpclub', name: 'Jump Club', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
+  { id: 'jumpclub', name: 'Bar Hop', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
   { id: 'ridge', name: 'Rickety Ridge', kind: 'race', blurb: 'Seesaws, boulders, sliding bridges, wrecking balls, a trampoline pit: nothing holds still', keep: 0.75 },
-  { id: 'tiptop', name: 'Tip Top', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
+  { id: 'tiptop', name: 'Tilt-a-Dish', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
   { id: 'summit', name: 'Crown Summit', kind: 'final', blurb: 'Everything at once. First across the line takes the crown', keep: 0 },
 ];
 

@@ -32,12 +32,15 @@ export class UI {
   private hudEl: HTMLElement;
   private resultsEl: HTMLElement;
   private pauseEl: HTMLElement;
+  private lobbyEl: HTMLElement;
+  private noteEl: HTMLElement;
+  private noteT = 0;
   private tagsEl: HTMLElement;
   private tags = new Map<number, HTMLElement>();
   private progEl: HTMLElement;
   private dots = new Map<number, HTMLElement>();
   private bannerT = 0;
-  touch: { x: number; y: number; jump: boolean; dash: boolean } | null = null;
+  touch: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean } | null = null;
 
   constructor(private root: HTMLElement) {
     this.tagsEl = this.layer('mm-tags');
@@ -47,8 +50,8 @@ export class UI {
       <div class="top"><div class="mm-pill" data-k="title"></div><div class="mm-pill yel" data-k="status"></div><div class="mm-pill hot mm-hide" data-k="timer"></div></div>
       <div class="mm-spec mm-hide"></div>
       <div class="mm-prog"><div class="flag"></div></div>
-      <div class="mm-dash"><span>DASH</span></div>
-      <div class="mm-keys"><b>WASD</b> roll &nbsp; <b>SPACE</b> jump &nbsp; <b>SHIFT</b> dash &nbsp; <b>ESC</b> pause</div>`;
+      <div class="mm-dash"><span>DIVE</span></div>
+      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>SPACE</b> jump &nbsp; <b>SHIFT</b> dive &nbsp; <b>E</b> grab &nbsp; <b>ESC</b> pause</div>`;
     this.progEl = this.hudEl.querySelector('.mm-prog') as HTMLElement;
     this.cardEl = this.layer('mm-card mm-hide');
     this.countEl = this.layer('mm-count mm-hide');
@@ -56,6 +59,8 @@ export class UI {
     this.menuEl = this.layer('mm-menu mm-hide');
     this.resultsEl = this.layer('mm-results mm-hide');
     this.pauseEl = this.layer('mm-pause mm-hide');
+    this.lobbyEl = this.layer('mm-lobby mm-hide');
+    this.noteEl = this.layer('mm-note mm-hide');
     if (matchMedia('(pointer: coarse)').matches) this.touchControls();
   }
 
@@ -66,35 +71,73 @@ export class UI {
   }
 
   // ------------------------------------------------------------------ menu
-  menu(o: { design: string; kind: string; onPrev(): void; onNext(): void; onPlay(): void; levels: { id: string; name: string; blurb: string }[]; level: string; onLevel(id: string): void }) {
+  menu(o: {
+    design: string;
+    kind: string;
+    onPrev(): void;
+    onNext(): void;
+    onPlay(): void;
+    onHost(): void;
+    onJoin(code: string): void;
+    name: string;
+    onName(n: string): void;
+    levels: { id: string; name: string; blurb: string }[];
+    level: string;
+    onLevel(id: string): void;
+  }) {
     const m = this.menuEl;
     m.innerHTML = `
       <a class="mm-back" href="./">&#8592; All games</a>
       <div>
-        <div class="mm-title">Marble<span>Mania</span></div>
-        <div class="mm-tag">24 marbles. ${SHOW.length} rounds. 1 crown.</div>
+        <div class="mm-title">Wobble<span>Mania</span></div>
+        <div class="mm-tag">24 jelly beans. ${SHOW.length} rounds. 1 crown.</div>
         <div class="mm-show">${SHOW.map((x, i) => `<i>${x.kind === 'final' ? 'Final' : i + 1} · ${x.name}</i>`).join('')}</div>
         <div class="mm-picker">
-          <button class="mm-arrow" data-a="prev" aria-label="Previous marble">&#8249;</button>
+          <button class="mm-arrow" data-a="prev" aria-label="Previous outfit">&#8249;</button>
           <div class="mm-dname"></div>
-          <button class="mm-arrow" data-a="next" aria-label="Next marble">&#8250;</button>
+          <button class="mm-arrow" data-a="next" aria-label="Next outfit">&#8250;</button>
         </div>
+        <label class="mm-name"><span>NAME</span><input maxlength="14" spellcheck="false" autocomplete="off" value="${esc(o.name)}" placeholder="Your name" aria-label="Your name"></label>
         <div class="mm-level">
           <span class="mm-level-k">BOTS</span>
           <div class="mm-seg" role="radiogroup" aria-label="Bot difficulty">${o.levels.map((l) => `<button role="radio" data-l="${l.id}" class="${l.id}">${esc(l.name)}</button>`).join('')}</div>
           <div class="mm-level-b"></div>
         </div>
-        <div class="mm-actions"><button class="mm-btn" data-a="play">PLAY</button></div>
+        <div class="mm-actions">
+          <button class="mm-btn" data-a="play">PLAY</button>
+          <button class="mm-btn pink" data-a="host">HOST PARTY</button>
+          <span class="mm-join"><input maxlength="4" placeholder="CODE" spellcheck="false" autocomplete="off" aria-label="Party code"><button class="mm-btn alt" data-a="join">JOIN</button></span>
+        </div>
         <div class="mm-help">
-          <b>WASD / Arrows</b><span>roll your marble</span>
+          <b>WASD / Arrows</b><span>run</span>
           <b>Space</b><span>jump</span>
-          <b>Shift</b><span>dash (barge the others)</span>
+          <b>Shift</b><span>dive (and bowl the others over)</span>
+          <b>E (hold)</b><span>grab whoever is in front of you</span>
           <b>Drag</b><span>look around &nbsp;·&nbsp; <b>M</b> music</span>
         </div>
       </div><div></div>`;
     m.querySelector('[data-a=prev]')!.addEventListener('click', o.onPrev);
     m.querySelector('[data-a=next]')!.addEventListener('click', o.onNext);
     m.querySelector('[data-a=play]')!.addEventListener('click', o.onPlay);
+    m.querySelector('[data-a=host]')!.addEventListener('click', o.onHost);
+    const code = m.querySelector('.mm-join input') as HTMLInputElement;
+    const join = () => {
+      const c = code.value.trim().toUpperCase();
+      if (c.length === 4) o.onJoin(c);
+      else {
+        code.focus();
+        this.note('Type the 4-letter party code first');
+      }
+    };
+    m.querySelector('[data-a=join]')!.addEventListener('click', join);
+    code.addEventListener('input', () => (code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, '')));
+    code.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') join();
+    });
+    const name = m.querySelector('.mm-name input') as HTMLInputElement;
+    name.addEventListener('keydown', (e) => e.stopPropagation());
+    name.addEventListener('input', () => o.onName(name.value.trim()));
     const pick = (id: string) => {
       for (const b of m.querySelectorAll<HTMLButtonElement>('.mm-seg button')) b.setAttribute('aria-checked', String(b.dataset.l === id));
       const l = o.levels.find((x) => x.id === id);
@@ -108,6 +151,34 @@ export class UI {
     pick(o.level);
     this.design(o.design, o.kind);
     m.classList.remove('mm-hide');
+  }
+
+  // ------------------------------------------------------------------ the party lobby
+  lobby(o: { code: string; host: boolean; members: { name: string; color: number; me: boolean; host: boolean }[]; max: number; status?: string; inShow?: boolean; onStart(): void; onLeave(): void }) {
+    const l = this.lobbyEl;
+    const list = o.members.map((x) => `<div class="${x.me ? 'me' : ''}"><i style="background:${css(x.color)}"></i>${esc(x.name)}${x.host ? '<em>HOST</em>' : ''}</div>`).join('');
+    const bots = 24 - o.members.length;
+    l.innerHTML = `<div class="panel">
+      <div class="k">PARTY CODE</div>
+      <div class="code">${esc(o.code || '····')}</div>
+      <div class="hint">${o.host ? 'Friends join from the menu with this code' : esc(o.status ?? 'Waiting for the host to start the show')}</div>
+      <div class="mm-grid">${list}</div>
+      <div class="hint">${o.members.length} / ${o.max} players${bots > 0 ? ` · ${bots} bots fill the show` : ''}</div>
+      <div class="row">${o.host ? `<button class="mm-btn" data-a="start" ${o.code ? '' : 'disabled'}>START SHOW</button>` : ''}<button class="mm-btn alt" data-a="leave">LEAVE</button></div>
+    </div>`;
+    l.querySelector('[data-a=start]')?.addEventListener('click', o.onStart);
+    l.querySelector('[data-a=leave]')!.addEventListener('click', o.onLeave);
+    l.classList.remove('mm-hide');
+  }
+  hideLobby() {
+    this.lobbyEl.classList.add('mm-hide');
+  }
+  /** a short message at the top of the screen */
+  note(text: string, ms = 3500) {
+    this.noteEl.innerHTML = `<div>${esc(text)}</div>`;
+    this.noteEl.classList.remove('mm-hide');
+    clearTimeout(this.noteT);
+    this.noteT = window.setTimeout(() => this.noteEl.classList.add('mm-hide'), ms);
   }
   design(name: string, kind: string) {
     const d = this.menuEl.querySelector('.mm-dname');
@@ -190,10 +261,10 @@ export class UI {
     }
   }
 
-  tag(id: number, name: string, x: number, y: number, show: boolean, me: boolean) {
+  tag(id: number, name: string, x: number, y: number, show: boolean, me: boolean, human = false) {
     let e = this.tags.get(id);
     if (!e) {
-      e = h('div', me ? 'me' : '');
+      e = h('div', me ? 'me' : human ? 'pal' : '');
       e.textContent = name;
       this.tagsEl.appendChild(e);
       this.tags.set(id, e);
@@ -213,7 +284,7 @@ export class UI {
   }
 
   // ------------------------------------------------------------------ results, champion
-  results(o: { title: string; sub: string; rows: Row[]; next: string; onNext(): void; extra?: { label: string; on(): void }; auto?: number }) {
+  results(o: { title: string; sub: string; rows: Row[]; next: string; onNext(): void; extra?: { label: string; on(): void }; auto?: number; wait?: boolean }) {
     const r = this.resultsEl;
     const rows = o.rows
       .map(
@@ -222,7 +293,7 @@ export class UI {
       )
       .join('');
     r.innerHTML = `<div class="panel"><h2>${esc(o.title)}</h2><div class="sub">${esc(o.sub)}</div><div class="mm-grid">${rows}</div>
-      <div class="row"><button class="mm-btn" data-a="next">${esc(o.next)}</button>${o.extra ? `<button class="mm-btn alt" data-a="extra">${esc(o.extra.label)}</button>` : ''}</div>
+      <div class="row"><button class="mm-btn" data-a="next" ${o.wait ? 'disabled' : ''}>${esc(o.next)}</button>${o.extra ? `<button class="mm-btn alt" data-a="extra">${esc(o.extra.label)}</button>` : ''}</div>
       ${o.auto ? `<div class="mm-auto">Continuing in <span>${o.auto}</span>…</div>` : ''}</div>`;
     r.querySelector('[data-a=next]')!.addEventListener('click', o.onNext);
     if (o.extra) r.querySelector('[data-a=extra]')!.addEventListener('click', o.extra.on);
@@ -236,13 +307,14 @@ export class UI {
     this.resultsEl.classList.add('mm-hide');
   }
 
-  pause(show: boolean, o?: { onResume(): void; onMusic(): void; onQuit(): void; music: boolean }) {
+  pause(show: boolean, o?: { onResume(): void; onMusic(): void; onQuit(): void; music: boolean; online?: boolean }) {
     this.pauseEl.classList.toggle('mm-hide', !show);
     if (!show || !o) return;
-    this.pauseEl.innerHTML = `<div class="panel"><h2>Paused</h2>
+    this.pauseEl.innerHTML = `<div class="panel"><h2>${o.online ? 'Menu' : 'Paused'}</h2>
+      ${o.online ? '<div class="hint">The show goes on while you look</div>' : ''}
       <button class="mm-btn" data-a="r">RESUME</button>
       <button class="mm-btn alt" data-a="m">MUSIC: ${o.music ? 'ON' : 'OFF'}</button>
-      <button class="mm-btn alt" data-a="q">QUIT SHOW</button></div>`;
+      <button class="mm-btn alt" data-a="q">${o.online ? 'LEAVE PARTY' : 'QUIT SHOW'}</button></div>`;
     this.pauseEl.querySelector('[data-a=r]')!.addEventListener('click', o.onResume);
     this.pauseEl.querySelector('[data-a=m]')!.addEventListener('click', o.onMusic);
     this.pauseEl.querySelector('[data-a=q]')!.addEventListener('click', o.onQuit);
@@ -250,7 +322,7 @@ export class UI {
 
   // ------------------------------------------------------------------ touch
   private touchControls() {
-    const t: { x: number; y: number; jump: boolean; dash: boolean } = { x: 0, y: 0, jump: false, dash: false };
+    const t: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean } = { x: 0, y: 0, jump: false, dash: false, grab: false };
     this.touch = t;
     const layer = this.layer('mm-touch');
     const stick = h('div', 'mm-stick');
@@ -281,12 +353,14 @@ export class UI {
     };
     stick.addEventListener('pointerup', up);
     stick.addEventListener('pointercancel', up);
-    for (const [cls, label, k] of [['j', 'JUMP', 'jump'], ['d', 'DASH', 'dash']] as const) {
+    for (const [cls, label, k] of [['j', 'JUMP', 'jump'], ['d', 'DIVE', 'dash'], ['g', 'GRAB', 'grab']] as const) {
       const b = h('button', 'mm-tbtn ' + cls, label);
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         t[k] = true;
       });
+      // (grab is held)
+      if (k === 'grab') for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => (t.grab = false));
       layer.appendChild(b);
     }
   }

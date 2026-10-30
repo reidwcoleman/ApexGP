@@ -1,23 +1,41 @@
 import * as THREE from 'three';
 
 /**
- * Marble physics: solid glass spheres (I = 2/5·m·r²) rolling on a static triangle mesh (the wooden
- * course) and on analytic moving shapes (sweepers, hammers, turntables, pegs, bumpers), and off each
- * other. Impulses at the contact point, so a marble really rolls: it spins up from sliding, a spinning
- * marble grabs when it lands, a turntable carries it round. Control is a torque (the marble drives
- * itself by spinning, like a hamster ball), a little air control, a hop off the ground and a dash.
- * Fixed substeps (≤ 1/240 s) keep a fast marble from passing through a rail.
+ * The physics of the show. Every contestant is a bean: a body that stands, runs, jumps, dives,
+ * grabs and, when something hits it hard enough, goes over and tumbles like a ball until it can get
+ * back up. Standing, it is two spheres (the feet and the head, one above the other) against the
+ * course's static triangles, the analytic moving shapes (sweepers, hammers, turntables, pegs,
+ * bumpers) and the other beans (capsule on capsule); running is a velocity controller relative to
+ * whatever it stands on, so a turntable carries it, a conveyor fights it and a booster bed flings it.
+ * Tumbling, it is a solid ball again (I = 2/5·m·r²): impulses at the contact point, real rolling.
+ * A puppet is a bean someone else simulates (a player online, or a bot on the host): it pushes the
+ * local beans about and is moved only by the network. Fixed substeps (≤ 1/240 s).
  */
 
 export const RADIUS = 0.5;
 export const GRAVITY = 24;
 const SUB = 1 / 240;
-/** the roll the marble can give itself: angular acceleration (rad/s²) and its own top spin (rad/s) */
+/** a tumbling bean's roll (the old marble's: angular acceleration and top spin) */
 const ROLL_ACC = 92;
 const ROLL_MAX = 29;
-const AIR_ACC = 7;
 export const JUMP_V = 8.6;
 const IR = 0.4 * RADIUS * RADIUS;
+/** running: top speed on the flat (m/s), how fast it gets there, and the push it has in the air */
+export const RUN = 9.4;
+const RUN_K = 11;
+const RUN_ACC = 70;
+const AIR_ACC = 15;
+/** the head sphere: its centre above the feet sphere's, and its radius; the body's for bean on bean */
+export const HEAD_UP = 0.62;
+const HEAD_R = 0.4;
+const BODY_R = 0.44;
+/** the dive: its launch speed, and the wait before the next */
+export const DIVE_V = 12.5;
+export const DASH_CD = 1.2;
+/** grabbing: reach, how long a hold lasts, the wait after */
+const GRAB_REACH = 1.45;
+const GRAB_T = 2.6;
+const GRAB_CD = 1.0;
 
 export const enum Mat {
   Wood = 0,
@@ -36,7 +54,7 @@ const MATS = [
 ];
 
 export interface Hit {
-  /** 'glass': marble on marble; 'surface': marble on the course or an obstacle */
+  /** 'glass': bean on bean; 'surface': bean on the course or an obstacle */
   kind: 'glass' | 'surface';
   mat: Mat;
   /** closing speed along the normal (m/s) */
@@ -51,32 +69,90 @@ export interface Hit {
   kin?: Kin;
 }
 
+/** something a local bean did to a puppet (the game tells its owner) */
+export interface Shove {
+  target: Marble;
+  kind: 'knock' | 'grab';
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
+export const enum Mode {
+  Run = 0,
+  Dive = 1,
+  Tumble = 2,
+}
+
+/** a contestant's body (the name stays from the marble days: the AI and the show speak of marbles) */
 export class Marble {
   readonly pos = new THREE.Vector3();
   readonly vel = new THREE.Vector3();
   readonly ang = new THREE.Vector3();
+  /** the tumble's orientation (standing, the body is upright and turned to `yaw`) */
   readonly quat = new THREE.Quaternion();
-  /** desired roll direction (horizontal, world), length 0..1 */
+  /** desired run direction (horizontal, world), length 0..1 */
   readonly input = new THREE.Vector3();
   jump = false;
   dash = false;
+  /** the grab button, held */
+  grab = false;
   /** seconds since a contact that counts as ground */
   groundT = 1;
   readonly groundN = new THREE.Vector3(0, 1, 0);
+  /** the velocity of what it stands on (a turntable, a conveyor, a roller bed) */
+  readonly groundVel = new THREE.Vector3();
   groundMat: Mat = Mat.Wood;
   dashCD = 0;
   /** in the simulation at all */
   active = true;
   /** held in place (the start gate, a respawn) */
   frozen = false;
+  /** simulated elsewhere: the network moves it */
+  puppet = false;
+  mode: Mode = Mode.Run;
+  /** facing (rad, atan2(x, z)) */
+  yaw = 0;
+  /** time left in a tumble; time into a dive */
+  tumbleT = 0;
+  diveT = 0;
+  /** getting up after a dive or a tumble (no running yet) */
+  upT = 0;
+  /** the bean it holds, and how long it has; being held (seconds left, refreshed by the holder) */
+  holding: Marble | null = null;
+  holdT = 0;
+  grabCD = 0;
+  heldT = 0;
   /** per-partner sound cooldowns */
   readonly quiet = new Map<unknown, number>();
-  /** jumped / dashed this frame (for the sound) */
+  /** this frame: jumped, dived, knocked over, landed (speed), grabbed someone */
   hopped = false;
   dashed = false;
+  knocked = false;
+  landed = 0;
+  grabbed = false;
   constructor(readonly id: number) {}
   get grounded() {
     return this.groundT < 0.1;
+  }
+  /** knocked over: a tumble of `t` seconds (longer if it's already going) */
+  knock(t: number) {
+    if (this.puppet || this.frozen) return;
+    if (this.mode !== Mode.Tumble) {
+      this.mode = Mode.Tumble;
+      this.knocked = true;
+      // (start it rolling the way it's flying, from upright)
+      this.quat.setFromAxisAngle(UP, this.yaw);
+      this.ang.set(this.vel.z, 0, -this.vel.x).multiplyScalar(1 / RADIUS);
+      this.ang.y += (Math.random() - 0.5) * 8;
+      this.release();
+    }
+    this.tumbleT = Math.max(this.tumbleT, t);
+  }
+  release() {
+    if (this.holding) this.grabCD = GRAB_CD;
+    this.holding = null;
+    this.holdT = 0;
   }
 }
 
@@ -333,6 +409,8 @@ export class World {
   readonly marbles: Marble[] = [];
   readonly kins: Kin[] = [];
   readonly hits: Hit[] = [];
+  /** what local beans did to puppets this frame */
+  readonly shoves: Shove[] = [];
   statics = new StaticMesh();
   time = 0;
   /** the slowest the course allows before a fall counts (m below) */
@@ -347,9 +425,10 @@ export class World {
 
   step(dt: number) {
     this.hits.length = 0;
+    this.shoves.length = 0;
     const n = Math.max(1, Math.ceil(dt / SUB - 1e-6));
     const h = (this.h = dt / n);
-    for (const m of this.marbles) this.controlFrame(m);
+    for (const m of this.marbles) this.controlFrame(m, dt);
     for (let k = 0; k < n; k++) {
       this.time += h;
       for (const kin of this.kins) {
@@ -357,108 +436,303 @@ export class World {
         kin.set(this.time);
       }
       for (const m of this.marbles) if (m.active && !m.frozen) this.integrate(m, h);
-      for (const m of this.marbles) if (m.active && !m.frozen) this.collide(m);
+      for (const m of this.marbles) if (m.active && !m.frozen && !m.puppet) this.collide(m);
       this.pairs();
+      this.holds(h);
     }
     for (const m of this.marbles) {
       for (const [k, t] of m.quiet) if (t < this.time - 0.5) m.quiet.delete(k);
     }
   }
 
-  /** per frame: the hop and the dash */
-  private controlFrame(m: Marble) {
-    m.hopped = m.dashed = false;
-    if (!m.active || m.frozen) return;
-    m.dashCD = Math.max(0, m.dashCD - this.h);
-    if (m.jump && m.groundT < 0.14) {
-      const vn = m.vel.dot(m.groundN);
-      // (off a slope it leaves along the surface's normal, mostly up)
-      TMP.copy(m.groundN).lerp(UP, 0.35).normalize();
-      m.vel.addScaledVector(TMP, Math.max(0, JUMP_V - Math.max(0, vn)));
+  /** per frame: the jump, the dive, the grab */
+  private controlFrame(m: Marble, dt: number) {
+    m.hopped = m.dashed = m.knocked = m.grabbed = false;
+    m.landed = 0;
+    if (!m.active || m.frozen || m.puppet) {
+      m.jump = m.dash = false;
+      return;
+    }
+    m.dashCD = Math.max(0, m.dashCD - dt);
+    m.grabCD = Math.max(0, m.grabCD - dt);
+    m.heldT = Math.max(0, m.heldT - dt);
+    const ok = m.mode === Mode.Run && m.upT <= 0;
+    if (m.jump && ok && m.groundT < 0.14) {
+      // (straight up, whatever the slope; a held bean struggles)
+      const v = m.heldT > 0 ? JUMP_V * 0.72 : JUMP_V;
+      m.vel.y = Math.max(m.vel.y - m.groundVel.y, 0) * 0.3 + m.groundVel.y + v;
       m.groundT = 1;
       m.hopped = true;
     }
     m.jump = false;
-    if (m.dash && m.dashCD <= 0) {
+    if (m.dash && ok && m.dashCD <= 0) {
       L.copy(m.input);
-      if (L.lengthSq() < 0.01) L.set(m.vel.x, 0, m.vel.z);
-      if (L.lengthSq() > 1e-4) {
-        L.normalize();
-        m.vel.addScaledVector(L, 7.5);
-        if (m.grounded) m.vel.y += 2.5;
-        m.dashCD = 1.8;
-        m.dashed = true;
-      }
+      L.y = 0;
+      if (L.lengthSq() < 0.01) L.set(Math.sin(m.yaw), 0, Math.cos(m.yaw));
+      L.normalize();
+      // a dive: thrown forward flat out, a little up off the ground
+      const along = m.vel.x * L.x + m.vel.z * L.z;
+      const sp = Math.max(DIVE_V * (m.heldT > 0 ? 0.6 : 1), along + 2.5);
+      const up = m.grounded ? 4.2 : Math.max(m.vel.y, 2.6);
+      m.vel.set(L.x * sp, up, L.z * sp);
+      m.yaw = Math.atan2(L.x, L.z);
+      m.mode = Mode.Dive;
+      m.diveT = 0;
+      m.groundT = 1;
+      m.dashCD = DASH_CD;
+      m.dashed = true;
+      m.release();
     }
     m.dash = false;
+    // the grab: someone just in front, within reach
+    if (m.grab && ok && !m.holding && m.grabCD <= 0) {
+      const fx = Math.sin(m.yaw), fz = Math.cos(m.yaw);
+      let best: Marble | null = null, bd = GRAB_REACH;
+      for (const o of this.marbles) {
+        if (o === m || !o.active || o.frozen || o.mode === Mode.Tumble) continue;
+        const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, dy = o.pos.y - m.pos.y;
+        if (Math.abs(dy) > 1.1) continue;
+        const d = Math.hypot(dx, dz);
+        if (d > bd || d < 1e-3 || (dx * fx + dz * fz) / d < 0.45) continue;
+        best = o;
+        bd = d;
+      }
+      if (best) {
+        m.holding = best;
+        m.holdT = GRAB_T;
+        m.grabbed = true;
+      }
+    }
+    if (m.holding && (!m.grab || m.holdT <= 0 || m.mode !== Mode.Run || !m.holding.active || m.holding.mode === Mode.Tumble)) m.release();
+  }
+
+  /** holds: the one held is slowed and dragged back toward the one holding */
+  private holds(h: number) {
+    for (const m of this.marbles) {
+      const o = m.holding;
+      if (!o || m.puppet) continue;
+      m.holdT -= h;
+      const dx = m.pos.x - o.pos.x, dz = m.pos.z - o.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > GRAB_REACH + 0.9) {
+        m.release();
+        continue;
+      }
+      if (o.puppet) {
+        this.shoves.push({ target: o, kind: 'grab', vx: d > 1.1 ? (dx / d) * 2.5 : 0, vy: 0, vz: d > 1.1 ? (dz / d) * 2.5 : 0 });
+        continue;
+      }
+      o.heldT = Math.max(o.heldT, 0.2);
+      if (d > 1.1) {
+        // (pulled back in, a little at a time)
+        const k = Math.min(1, (d - 1.1) * 6 * h);
+        o.vel.x += (dx / d) * 9 * k;
+        o.vel.z += (dz / d) * 9 * k;
+      }
+    }
   }
 
   private integrate(m: Marble, h: number) {
+    if (m.puppet) {
+      // (between packets it carries on as it was going)
+      m.pos.addScaledVector(m.vel, h);
+      return;
+    }
+    if (m.mode === Mode.Tumble) return this.roll(m, h);
+    const grounded = m.groundT < 0.08;
     const inp = m.input;
-    const il = Math.min(1, inp.length());
-    if (il > 0.02) {
-      if (m.groundT < 0.08) {
-        // spin about the axis that rolls it along the input: up × dir (on a slope, the ground's normal)
-        const n = m.groundN;
-        TMP.copy(n).cross(inp).normalize();
-        const along = m.ang.dot(TMP);
-        if (along < ROLL_MAX * il) m.ang.addScaledVector(TMP, ROLL_ACC * il * h);
-      } else {
-        m.vel.addScaledVector(inp, (AIR_ACC * h) / Math.max(il, 1));
-        // (the spin it was given in the air is what grabs on landing)
-        TMP.set(inp.z, 0, -inp.x);
-        if (m.ang.dot(TMP) < ROLL_MAX * il) m.ang.addScaledVector(TMP, ROLL_ACC * 0.4 * h);
+    const il = Math.min(1, Math.hypot(inp.x, inp.z));
+    m.upT = Math.max(0, m.upT - h);
+    if (m.mode === Mode.Dive) {
+      m.diveT += h;
+      if (grounded) {
+        // the belly slide: no steering, it scrubs off
+        const rx = m.vel.x - m.groundVel.x, rz = m.vel.z - m.groundVel.z;
+        const sp = Math.hypot(rx, rz);
+        const k = sp > 1e-4 ? Math.max(0, sp - 16 * h) / sp : 0;
+        m.vel.x = m.groundVel.x + rx * k;
+        m.vel.z = m.groundVel.z + rz * k;
+        if (m.diveT > 0.42 && sp < 7) {
+          m.mode = Mode.Run;
+          m.upT = 0.16;
+        }
+      } else if (m.diveT > 2.5) m.mode = Mode.Run;
+    } else if (grounded) {
+      // running: toward the input's velocity relative to the ground, faster downhill
+      const n = m.groundN;
+      let run = RUN * (m.heldT > 0 ? 0.38 : m.holding ? 0.6 : 1);
+      if (il > 0.02) run *= 1 + 3.2 * Math.max(0, (n.x * inp.x + n.z * inp.z) / il);
+      if (m.upT > 0) run = 0;
+      const tx = m.groundVel.x + inp.x * run, tz = m.groundVel.z + inp.z * run;
+      let ax = (tx - m.vel.x) * RUN_K, az = (tz - m.vel.z) * RUN_K;
+      const a = Math.hypot(ax, az);
+      // (the grip goes on a tilt: past ~11 degrees the feet start to slip, past ~25 it's a slide)
+      const grip = RUN_ACC * THREE.MathUtils.clamp((n.y - 0.9) / (0.98 - 0.9), 0.1, 1);
+      if (a > grip) (ax *= grip / a), (az *= grip / a);
+      m.vel.x += ax * h;
+      m.vel.z += az * h;
+    } else if (il > 0.02) {
+      // air control: a push toward the input up to running speed; it never brakes a launch
+      const dx = inp.x / il, dz = inp.z / il;
+      const along = m.vel.x * dx + m.vel.z * dz;
+      const want = RUN * il * (m.heldT > 0 ? 0.5 : 1);
+      if (along < want) {
+        const dv = Math.min(AIR_ACC * h, want - along);
+        m.vel.x += dx * dv;
+        m.vel.z += dz * dv;
       }
+      // (and the sideways drift dies away)
+      const sx = m.vel.x - dx * along, sz = m.vel.z - dz * along;
+      const k = Math.min(1, 1.6 * il * h);
+      m.vel.x -= sx * k;
+      m.vel.z -= sz * k;
     }
     m.vel.y -= GRAVITY * h;
-    // air drag (quadratic, slight) and the rolling resistance of a marble on wood
     const sp = m.vel.length();
     if (sp > 0) m.vel.multiplyScalar(1 - Math.min(0.5, 0.0035 * sp * h));
-    if (m.groundT < 0.08) m.ang.multiplyScalar(1 - 0.2 * h);
-    const wl = m.ang.length();
-    if (wl > 90) m.ang.multiplyScalar(90 / wl);
+    // facing: where it's running (or trying to)
+    if (m.mode === Mode.Run) {
+      const rx = m.vel.x - (grounded ? m.groundVel.x : 0), rz = m.vel.z - (grounded ? m.groundVel.z : 0);
+      let want = NaN;
+      if (il > 0.2) want = Math.atan2(inp.x, inp.z);
+      else if (rx * rx + rz * rz > 1) want = Math.atan2(rx, rz);
+      if (!Number.isNaN(want)) {
+        let d = want - m.yaw;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        m.yaw += THREE.MathUtils.clamp(d, -14 * h, 14 * h);
+      }
+    }
     m.pos.addScaledVector(m.vel, h);
-    // orientation: dq = ½·ω·q·h
-    QD.set(m.ang.x * 0.5 * h, m.ang.y * 0.5 * h, m.ang.z * 0.5 * h, 0).multiply(m.quat);
-    m.quat.set(m.quat.x + QD.x, m.quat.y + QD.y, m.quat.z + QD.z, m.quat.w + QD.w).normalize();
     m.groundT += h;
   }
 
+  /** tumbling: the marble it was, rolling free; up again once it's on the ground and slow */
+  private roll(m: Marble, h: number) {
+    const inp = m.input;
+    const il = Math.min(1, inp.length());
+    if (il > 0.02 && m.groundT >= 0.08) m.vel.addScaledVector(inp, (3 * h) / Math.max(il, 1));
+    else if (il > 0.02) {
+      TMP.copy(m.groundN).cross(inp).normalize();
+      if (m.ang.dot(TMP) < ROLL_MAX * 0.3 * il) m.ang.addScaledVector(TMP, ROLL_ACC * 0.3 * il * h);
+    }
+    m.vel.y -= GRAVITY * h;
+    const sp = m.vel.length();
+    if (sp > 0) m.vel.multiplyScalar(1 - Math.min(0.5, 0.0035 * sp * h));
+    if (m.groundT < 0.08) {
+      m.ang.multiplyScalar(1 - 1.2 * h);
+      // (a bean is no marble: it scrubs to a stop)
+      m.vel.x *= 1 - 1.4 * h;
+      m.vel.z *= 1 - 1.4 * h;
+    }
+    const wl = m.ang.length();
+    if (wl > 40) m.ang.multiplyScalar(40 / wl);
+    m.pos.addScaledVector(m.vel, h);
+    QD.set(m.ang.x * 0.5 * h, m.ang.y * 0.5 * h, m.ang.z * 0.5 * h, 0).multiply(m.quat);
+    m.quat.set(m.quat.x + QD.x, m.quat.y + QD.y, m.quat.z + QD.z, m.quat.w + QD.w).normalize();
+    m.groundT += h;
+    m.tumbleT -= h;
+    if (m.tumbleT <= 0 && m.groundT < 0.08 && m.vel.length() < 4.5) {
+      m.mode = Mode.Run;
+      m.upT = 0.3;
+      m.ang.set(0, 0, 0);
+      const e = new THREE.Euler().setFromQuaternion(m.quat, 'YXZ');
+      m.yaw = e.y;
+    } else if (m.tumbleT < -3) m.tumbleT = 0.5;
+  }
+
   private collide(m: Marble) {
+    this.sphere(m, 0, RADIUS);
+    if (m.mode === Mode.Run) this.sphere(m, HEAD_UP, HEAD_R);
+  }
+
+  /** one of the bean's spheres (its centre `up` above the feet) against the course and the obstacles */
+  private sphere(m: Marble, up: number, r: number) {
     const T = this.statics.tris;
-    const p = m.pos;
-    this.statics.query(p, RADIUS + 0.05, (o, mat) => {
+    const p = SP.copy(m.pos);
+    p.y += up;
+    const feet = up === 0;
+    this.statics.query(p, r + 0.05, (o, mat) => {
       closestOnTri(T, o, p.x, p.y, p.z, CP);
       N.copy(p).sub(CP);
       const d2 = N.lengthSq();
-      if (d2 >= RADIUS * RADIUS) return;
+      if (d2 >= r * r) return;
       const d = Math.sqrt(d2);
       if (d < 1e-6) {
         // (on the plane: the face normal)
         const ax = T[o], ay = T[o + 1], az = T[o + 2];
         N.set(T[o + 3] - ax, T[o + 4] - ay, T[o + 5] - az).cross(TMP.set(T[o + 6] - ax, T[o + 7] - ay, T[o + 8] - az)).normalize();
       } else N.divideScalar(d);
-      this.respond(m, N, RADIUS - d, null, mat, null);
+      p.addScaledVector(N, r - d);
+      this.respond(m, N, r - d, null, mat, null, feet);
     });
     for (const k of this.kins) {
       if (!k.enabled) continue;
       const dx = p.x - k.pos.x, dy = p.y - k.pos.y, dz = p.z - k.pos.z;
-      const br = k.bound + RADIUS;
+      const br = k.bound + r;
       if (dx * dx + dy * dy + dz * dz > br * br) continue;
       L.copy(p).applyMatrix4(k.inv);
       const d = closestOnShape(k.shape, L, LP, LN);
-      if (d >= RADIUS) continue;
+      if (d >= r) continue;
       // the surface's velocity at the contact: where that point of the shape was a substep ago
       CP.copy(LP).applyMatrix4(k.m);
       SV.copy(LP).applyMatrix4(k.prev);
       SV.subVectors(CP, SV).divideScalar(this.h);
       N.copy(LN).transformDirection(k.m);
-      this.respond(m, N, RADIUS - d, SV, k.mat, k);
+      p.addScaledVector(N, r - d);
+      this.respond(m, N, r - d, SV, k.mat, k, feet);
     }
   }
 
-  private respond(m: Marble, n: THREE.Vector3, pen: number, sv: THREE.Vector3 | null, mat: Mat, kin: Kin | null) {
+  private respond(m: Marble, n: THREE.Vector3, pen: number, sv: THREE.Vector3 | null, mat: Mat, kin: Kin | null, feet: boolean) {
     m.pos.addScaledVector(n, pen);
+    if (m.mode === Mode.Tumble) return this.respondBall(m, n, sv, mat, kin);
+    VC.copy(m.vel);
+    if (sv) VC.sub(sv);
+    const vn = VC.dot(n);
+    const floor = n.y > 0.55;
+    if (floor && feet) {
+      if (m.groundT > 0.05 && vn < -3) m.landed = Math.max(m.landed, -vn);
+      m.groundT = 0;
+      m.groundN.copy(n);
+      m.groundMat = mat;
+      if (sv) m.groundVel.copy(sv);
+      else m.groundVel.set(0, 0, 0);
+    }
+    if (vn >= 0) return;
+    const imp = -vn;
+    m.vel.addScaledVector(n, imp);
+    if (kin) {
+      if (kin.kick > 0 && imp > 0.3) {
+        if (floor) {
+          // a trampoline: thrown back up
+          m.vel.addScaledVector(n, imp * 0.7 + kin.kick * 1.6);
+          m.groundT = 1;
+        } else {
+          // a bumper: a smack and over it goes
+          m.vel.addScaledVector(n, kin.kick * 1.3 + imp * 0.5);
+          m.vel.y += 2.5;
+          m.knock(0.7);
+        }
+      } else if (sv && !floor) {
+        // something moving hit it: a hammer, a sweeper, a swinging axe
+        const push = sv.dot(n);
+        if (push > 4.2 || (push > 2.4 && imp > 7)) {
+          // (sent flying the way it was swung: a little faster than the thing that hit it, and up)
+          m.vel.copy(sv).multiplyScalar(1.15).addScaledVector(n, 2.5);
+          m.vel.y = Math.max(m.vel.y, 0) + 4.5;
+          m.knock(1.1);
+        }
+      }
+      if (imp > 0.8) {
+        kin.lastHit = this.time;
+        kin.onHit?.(m, imp);
+      }
+    } else if (!floor && imp > 9 && m.mode === Mode.Dive) m.knock(0.6);
+    if (imp > 0.9) this.emit(m, kin ?? mat, 'surface', mat, imp, m.pos.x - n.x * RADIUS, m.pos.y - n.y * RADIUS, m.pos.z - n.z * RADIUS, n.y, undefined, kin ?? undefined);
+  }
+
+  /** a tumbling bean: the marble's contact (impulse at the point, rolling friction) */
+  private respondBall(m: Marble, n: THREE.Vector3, sv: THREE.Vector3 | null, mat: Mat, kin: Kin | null) {
     const M = MATS[mat];
     R.copy(n).multiplyScalar(-RADIUS);
     VC.copy(m.ang).cross(R).add(m.vel);
@@ -468,10 +742,12 @@ export class World {
       m.groundT = 0;
       m.groundN.copy(n);
       m.groundMat = mat;
+      if (sv) m.groundVel.copy(sv);
+      else m.groundVel.set(0, 0, 0);
     }
     if (vn >= 0) return;
     const imp = -vn;
-    const e = imp > 1.6 ? M.e : 0;
+    const e = imp > 1.6 ? M.e * 0.8 : 0;
     let jn = (1 + e) * imp;
     m.vel.addScaledVector(n, jn);
     if (kin) {
@@ -484,8 +760,6 @@ export class World {
         kin.onHit?.(m, imp);
       }
     }
-    // friction at the contact point: brings the slip to zero (rolling) within the Coulomb limit;
-    // the effective mass of a solid sphere's contact point is 2/7 of its mass
     VT.copy(VC).addScaledVector(n, -vn);
     const vt = VT.length();
     if (vt > 1e-6) {
@@ -498,56 +772,68 @@ export class World {
     if (imp > 0.9) this.emit(m, kin ?? mat, 'surface', mat, imp, m.pos.x - n.x * RADIUS, m.pos.y - n.y * RADIUS, m.pos.z - n.z * RADIUS, n.y, undefined, kin ?? undefined);
   }
 
+  /** bean on bean: two upright capsules (a tumbling one is a ball) */
   private pairs() {
     const ms = this.marbles;
-    const D = 2 * RADIUS;
+    const D = 2 * BODY_R;
     for (let i = 0; i < ms.length; i++) {
       const a = ms[i];
       if (!a.active) continue;
+      const ah = a.mode === Mode.Run ? HEAD_UP : 0;
       for (let j = i + 1; j < ms.length; j++) {
         const b = ms[j];
-        if (!b.active || (a.frozen && b.frozen)) continue;
-        const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, dz = b.pos.z - a.pos.z;
+        if (!b.active || ((a.frozen || a.puppet) && (b.frozen || b.puppet))) continue;
+        const bh = b.mode === Mode.Run ? HEAD_UP : 0;
+        // the nearest points of the two vertical segments
+        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+        if (dx * dx + dz * dz >= D * D) continue;
+        let dy = b.pos.y - a.pos.y;
+        if (dy > ah) dy -= ah;
+        else if (dy < -bh) dy += bh;
+        else dy = 0;
         const d2 = dx * dx + dy * dy + dz * dz;
         if (d2 >= D * D || d2 < 1e-10) continue;
         const d = Math.sqrt(d2);
         N.set(dx / d, dy / d, dz / d);
         const pen = D - d;
-        // (a held marble is a wall)
-        const wa = a.frozen ? 0 : b.frozen ? 1 : 0.5, wb = 1 - wa;
+        // (a held or remote bean is a wall to this one)
+        const fa = a.frozen || a.puppet, fb = b.frozen || b.puppet;
+        const wa = fa ? 0 : fb ? 1 : 0.5, wb = fb ? 0 : fa ? 1 : 0.5;
         a.pos.addScaledVector(N, -pen * wa);
         b.pos.addScaledVector(N, pen * wb);
-        // relative velocity of the touching points
-        R.copy(N).multiplyScalar(RADIUS);
-        VC.copy(a.ang).cross(R).add(a.vel);
-        R.negate();
-        TMP.copy(b.ang).cross(R).add(b.vel);
-        VC.sub(TMP).negate();
+        // standing on a head: that's ground
+        if (N.y < -0.6 && wa > 0) {
+          a.groundT = 0;
+          a.groundN.copy(N).negate();
+          a.groundVel.copy(b.vel);
+        } else if (N.y > 0.6 && wb > 0) {
+          b.groundT = 0;
+          b.groundN.copy(N);
+          b.groundVel.copy(a.vel);
+        }
+        VC.subVectors(b.vel, a.vel);
         const vn = VC.dot(N);
         if (vn >= 0) continue;
         const imp = -vn;
-        const e = imp > 0.6 ? 0.9 : 0.3;
+        const e = imp > 3 ? 0.5 : 0.1;
         const jn = (1 + e) * imp;
-        // equal masses (a frozen one infinitely heavy)
-        const ka = a.frozen ? 0 : b.frozen ? 1 : 0.5, kb = b.frozen ? 0 : a.frozen ? 1 : 0.5;
-        a.vel.addScaledVector(N, -jn * ka);
-        b.vel.addScaledVector(N, jn * kb);
-        // a little glass-on-glass friction: spins traded on a glancing hit
-        VT.copy(VC).addScaledVector(N, -vn);
-        const vt = VT.length();
-        if (vt > 1e-5) {
-          const jt = Math.min(vt * (1 / 7), 0.12 * jn);
-          VT.divideScalar(vt);
-          a.vel.addScaledVector(VT, jt * ka);
-          b.vel.addScaledVector(VT, -jt * kb);
-          R.copy(N).multiplyScalar(RADIUS);
-          W0.copy(R).cross(VT).multiplyScalar((jt * ka) / IR);
-          a.ang.add(W0);
-          R.negate();
-          W0.copy(R).cross(VT).multiplyScalar((-jt * kb) / IR);
-          b.ang.add(W0);
+        // (who hit whom: the faster one going in)
+        const aFast = a.vel.lengthSq() > b.vel.lengthSq();
+        a.vel.addScaledVector(N, -jn * wa);
+        b.vel.addScaledVector(N, jn * wb);
+        // a dive into someone (or a flying body) bowls them over
+        if (imp > 7.5) {
+          const hitter = aFast ? a : b;
+          const target = hitter === a ? b : a;
+          if (hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
+            if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * 0.6, vy: 3, vz: hitter.vel.z * 0.6 });
+            else {
+              target.vel.y += 3;
+              target.knock(0.8);
+            }
+          }
         }
-        if (imp > 0.5) this.emit(a, b, 'glass', Mat.Metal, imp, a.pos.x + N.x * RADIUS, a.pos.y + N.y * RADIUS, a.pos.z + N.z * RADIUS, 0, b);
+        if (imp > 1.2) this.emit(a, b, 'glass', Mat.Felt, imp, a.pos.x + N.x * BODY_R, a.pos.y + N.y * BODY_R, a.pos.z + N.z * BODY_R, 0, b);
       }
     }
   }
@@ -560,6 +846,7 @@ export class World {
     this.hits.push({ kind, mat, speed, x, y, z, ny, a: m, b, kin });
   }
 }
+const SP = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 
 const KP = new THREE.Vector3();

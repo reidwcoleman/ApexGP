@@ -243,7 +243,7 @@ export class TAAPass extends Pass {
    * Before the frame: shift the projection by this frame's sub-pixel offset, note the camera and
    * where each marble (`balls`: their meshes, radius from the geometry) has moved since last frame.
    */
-  begin(camera: THREE.PerspectiveCamera, w: number, h: number, balls: THREE.Mesh[]) {
+  begin(camera: THREE.PerspectiveCamera, w: number, h: number, balls: THREE.Object3D[]) {
     const u = this.resolveMat.uniforms;
     camera.updateMatrixWorld();
     // a cut: the camera jumped, or zoomed hard
@@ -274,9 +274,8 @@ export class TAAPass extends Pass {
       b.updateWorldMatrix(true, false);
       const c = this.tc.setFromMatrixPosition(b.matrixWorld);
       const q = this.tq2.setFromRotationMatrix(this.tm.extractRotation(b.matrixWorld));
-      const g = b.geometry;
-      if (!g.boundingSphere) g.computeBoundingSphere();
-      const r = g.boundingSphere!.radius * b.matrixWorld.getMaxScaleOnAxis() * 1.04;
+      // (a bean: the body centre, a sphere round the whole bean)
+      const r = 0.95;
       let was = this.prevBalls.get(b);
       bv[n].set(c.x, c.y, c.z, r);
       if (was) {

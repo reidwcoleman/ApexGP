@@ -9,7 +9,8 @@ import { Props } from './env-props.ts';
 import { makeSun } from './env-sun.ts';
 import { GradeEffect } from './post-grade.ts';
 import { TAAPass } from './post-taa.ts';
-import { DESIGNS, marbleMaterial, paintMaterial, Pattern } from './shaders.ts';
+import { paintMaterial, Pattern } from './shaders.ts';
+import { beanStatue, OUTFITS } from './bean.ts';
 
 /**
  * The stage everything plays on: the light (the sun with its two shadow cascades, the sky light,
@@ -34,7 +35,8 @@ export class Stage {
   readonly props = new Props();
   readonly aa: 'taa' | 'smaa';
   readonly taa: TAAPass | null = null;
-  private balls: THREE.Mesh[] = [];
+  /** the beans (each one's body centre, which moves and turns with it) for the TAA */
+  movers: THREE.Object3D[] = [];
   private size = new THREE.Vector2();
   /** 2: everything; 1: no mirror in the paint; 0: no ambient occlusion either, smaller shadow maps */
   quality = 2;
@@ -75,7 +77,7 @@ export class Stage {
         new THREE.Vector3(),
         0,
         (a, b) => paintMaterial({ a, b, pattern: Pattern.Stripes, scale: 1, wear: 0.02 }),
-        (i) => marbleMaterial(DESIGNS[i % DESIGNS.length], i),
+        (i) => beanStatue(OUTFITS[(i * 5 + 3) % OUTFITS.length]),
       ),
     );
 
@@ -210,14 +212,8 @@ export class Stage {
     if (this.sun.shadow.map) this.mirror.render(this.renderer, this.scene, this.camera, this.lake.position.y, [this.lake]);
     const taa = this.taa;
     if (taa) {
-      // (the glass marbles: the spheres standing in the scene itself, not the backdrop's giants)
-      this.balls.length = 0;
-      for (const o of this.scene.children) {
-        const m = o as THREE.Mesh;
-        if (m.isMesh && m.visible && m.geometry.type === 'SphereGeometry') this.balls.push(m);
-      }
       this.renderer.getDrawingBufferSize(this.size);
-      taa.begin(this.camera, this.size.x, this.size.y, this.balls);
+      taa.begin(this.camera, this.size.x, this.size.y, this.movers);
     }
     this.composer.render();
     taa?.end(this.camera);

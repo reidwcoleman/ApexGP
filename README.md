@@ -5,7 +5,7 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
 The site opens on a game picker — **Apex GP** (this racing game), **Boostball** (car soccer),
-**Miami** (the open world) and **Marble Mania** (a marble knockout show) — and only the game you pick is loaded: the racing game's loader, pictures and bundle
+**Miami** (the open world) and **Wobble Mania** (a jelly-bean knockout party, online with friends) — and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it; `?pick`
 forces it.
 
@@ -739,58 +739,70 @@ Dev flags (`miami.html?`): `time=night`, `weather=rain`, `car=super|muscle|coupe
 Research: [List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
 [CTBUH Skyscraper Center: Miami](https://www.skyscrapercenter.com/city/miami).
 
-## Marble Mania
+## Wobble Mania
 
-**▶ https://reidwcoleman.github.io/ApexGP/marbles.html** — a knockout show for 24 glass marbles on
-wooden courses, everything generated in code (`src/marbles/`; no image, model or sound files).
+**▶ https://reidwcoleman.github.io/ApexGP/marbles.html** — a knockout party show for 24 jelly beans
+on wooden obstacle courses, solo against bots or online with friends. Everything is generated in
+code (`src/marbles/`; no image, model or sound files). It took over Marble Mania's page, courses
+and bots; the contestants are original bean characters, not marbles.
 
-- **The show**, six rounds: Timber Tumble (race), Paint Mill (race), Jump Club (survival: hop the
+- **The show**, six rounds: Timber Tumble (race), Paint Mill (race), Bar Hop (survival: hop the
   low bar, never into the high one; the bars speed up, reverse, and the plate's rings crumble),
-  Rickety Ridge (race), Tip Top (survival on a tipping dish swept by a bar, bumpers popping up)
-  and Crown Summit (the final: first across the line takes the crown). Each round keeps
-  `SHOW[i].keep` of the field (24 → 19 → 14 → 10 → 8 → 6). Races are 1.1–1.3 km, about 65–95 s
-  for the leaders; survival rounds escalate until enough have fallen (110 s at most). Out of the
-  show, you can watch it to the end (←/→ switches marble).
+  Rickety Ridge (race), Tilt-a-Dish (survival on a dish that tips further and further, swept by a
+  bar, bumpers popping up) and Crown Summit (the final: first across the line takes the crown).
+  Each round keeps `SHOW[i].keep` of the field. Races run about 95–120 s for the leaders; survival
+  rounds cut the field at about 90–100 s (110 s at most). Out of the show, you can watch it to the
+  end (←/→ switches bean).
+- **The beans** (`bean.ts`): a lathe-turned jelly body under a clearcoat, googly eyes on springs,
+  little arms and legs, 24 named outfits (a colour, one of 12 patterns painted on a canvas, one of
+  12 hats) and random ones for the bots. Animated from the body: a waddling run timed to the speed
+  over the ground, lean and jelly wobble on every change of speed, squash and stretch, arms up in
+  the air, a belly flop in a dive, limbs everywhere in a tumble, a struggle when held, a cheer.
+  Giant bean statues stand on the pegs out in the paint.
+- **Physics** (`physics.ts`): a standing bean is two spheres (feet and head) on the course
+  triangles and the analytic obstacles, and an upright capsule against the other beans. Running is
+  a velocity controller relative to the ground under it (turntables carry you, conveyors fight you,
+  roller beds fling you), faster downhill, losing grip past ~11° of tilt. Jump, dive (Shift: a
+  lunge into a belly slide that bowls over whoever it hits) and grab (hold E: the bean in front is
+  slowed and dragged). A hammer, a sweeper, a bumper or a diving bean knocks you over: you become
+  a rolling ball (I = 2/5·m·r², friction impulses at the contact) until you're slow enough on the
+  ground to get up. 240 Hz substeps.
+- **Party play** (`net.ts`): HOST PARTY opens a lobby with a 4-letter code; friends type it under
+  JOIN (up to 12 players, bots make up the 24). Peer to peer over WebRTC (PeerJS's broker only
+  introduces the browsers). Each browser runs its own bean (no lag on your own jumps) and sends it
+  30 times a second; the host runs the bots, the show's clock that every obstacle turns to (guests
+  keep their world time on it), the places at the line, eliminations and the round changes. Remote
+  beans are eased toward their latest state; a dive or grab on someone else's bean is sent to
+  its owner.
 - **Courses** (`courses.ts`, one `course-*.ts` per round, `course-kit.ts`): a turtle path
   (straights and arcs with slope, width, walls and banking, all eased) swept into a bent-plank
   chute on trestles down into a sea of marbled paint; the same triangles are the physics. Split
-  paths with a risky shortcut that pays, switchbacks, cascades, spirals. Obstacles
-  (`obstacles.ts`, `obs-*.ts`) are painted wood on analytic colliders whose pose is a function of
-  time: pegs, bumpers, sweepers, hammers, turntables, sliders, door walls, kickers, windmills,
-  turnstiles, roller beds, pinball flippers, axes, wrecking balls, rolling logs, boulders,
-  seesaws, rocking planks, sliding bridges, a trampoline pit.
-- **Physics** (`physics.ts`): solid spheres with real rolling (I = 2/5·m·r², friction impulses at
-  the contact point: a sliding marble spins up, a spinning one grabs when it lands, a turntable
-  carries it), restitution per surface, marble-on-marble impacts with glass friction, 240 Hz
-  substeps. You roll by torque (like the marble drives itself), with a hop and a dash.
-- **Bots** (`ai.ts`, `ai-course.ts`, `ai-plate.ts`): each course is read once (a racing line pulled
-  tight, a safe speed braked back from every bend, the jumps and their run-up speed, every
-  collider sorted into ride-on or keep-off). Ten times a second a bot plays the next 1.6 s ahead
-  for a spread of lines and paces against every obstacle's future pose, the floor and the others;
-  steering is damped with bend feed-forward. On the plates they time hops per frame against both
-  bars. Skill scales pace, nerve, timing error, lapses and dashes.
-- **Difficulty and styles** (`ai-style.ts`): the menu's BOTS setting (Easy, Normal, Hard, Insane;
-  remembered, `?diff=` for tests) sets the field's skill spread and an edge on top (reactions,
-  timing, nerve, dashes). Every bot has a style, shown on the results: a Racer, a Bruiser who
-  shoves (into walls too), a Daredevil who runs hot, stands near the plate's edge and nearly
-  always takes the shortcut, a Steady one who leaves room and takes the safe way, and a Closer
-  who saves its dashes for the last stretch.
-- **Looks** (`shaders.ts`, `fx*.ts`): lacquered wood with board-by-board grain that calms with
-  distance, candy enamel with crisp patterns and raised chips, glass marbles ray-marched inside
-  (18 designs) with dispersion and a sun focus, coloured caustic shadows, foil confetti and paint
-  splash crowns. The stage (`render.ts`, `env*.ts`, `post-*.ts`): cascaded sun shadows, a
-  stylised sky shared by the dome, the image light and the aerial fog, billboard cumulus, a
-  glossy marbled-paint sea with a planar mirror, toy pegs, floating block islands and balloons;
-  temporal AA with per-marble reprojection, N8AO, bloom, a grade. Quality steps down on its own
-  (`?gfx=high|medium|low` pins it, `?aa=smaa`).
-- **Sound** (`audio.ts`), all synthesised: glass clacks bright with velocity (each marble its own
-  pitch) with rebound chatter, hollow floor tocks against thinner rail taks, sub thumps on hard
-  landings, board joints ticking under your marble, bumper dings, splashes, a crowd (murmur, ooh,
-  aww, cheers), and music in a new key each round that builds as the race closes.
+  paths with a risky shortcut, switchbacks, cascades, spirals. Obstacles (`obstacles.ts`,
+  `obs-*.ts`) are painted wood on analytic colliders whose pose is a function of time: pegs,
+  bumpers, sweepers, hammers, turntables, sliders, door walls, kickers, windmills, turnstiles,
+  roller beds, pinball flippers, axes, wrecking balls, rolling logs, boulders, seesaws, rocking
+  planks, sliding bridges, a trampoline pit.
+- **Bots** (`ai.ts`, `ai-course.ts`, `ai-plate.ts`): each course is read once (a racing line, a
+  safe speed braked back from every bend, the jumps and their run-up). Ten times a second a bot
+  plays the next 1.6 s ahead for a spread of lines and paces against every obstacle's future pose,
+  the floor and the others. They jump at the lip of a gap and dive at the top of the jump, never
+  dive on the run-up. On the plates they time hops against both bars. Skill scales pace, nerve,
+  timing error, lapses and dives; the menu's BOTS setting (Easy, Normal, Hard, Insane) and a style
+  per bot (Racer, Bruiser, Daredevil, Steady, Closer) are in `ai-style.ts`.
+- **Looks**: lacquered wood with board-by-board grain, candy enamel with crisp patterns, foil
+  confetti and paint splash crowns. The stage (`render.ts`, `env*.ts`, `post-*.ts`): cascaded sun
+  shadows, a stylised sky, billboard cumulus, a glossy marbled-paint sea with a planar mirror, toy
+  pegs, floating block islands and balloons; temporal AA that follows each bean's body, N8AO,
+  bloom, a grade. Quality steps down on its own (`?gfx=high|medium|low` pins it, `?aa=smaa`).
+- **Sound** (`audio.ts`), all synthesised: little formant voices (a "hup!" on a jump, a "hyah!"
+  into a dive, an "oof" when knocked over, a falling "waaah", a cheer at the line; each bean its
+  own pitch), rubbery footfalls, squashy bumps, floor tocks, bumper dings, splashes, a crowd, and
+  music in a new key each round that builds as the race closes.
 - **Testing**: `?round=N&auto=1&go=1[&cut=K]` jumps into a round with a bot driving you;
   `window.__marbles.ff(seconds)` runs the show ahead without drawing; `tools/marbleshots.mjs`
-  captures several camera views in one session; `tools/marblebench.mjs` races every round
-  headless (`--diff` for the difficulty) and reports times, falls, skill ordering and AI cost.
+  captures camera views; `tools/marblebench.mjs` runs every round headless (`--diff` for the
+  difficulty) and reports times, falls, skill ordering and AI cost. For party play, open two
+  browser windows, HOST PARTY in one and JOIN with its code in the other.
 
 ## Controls
 

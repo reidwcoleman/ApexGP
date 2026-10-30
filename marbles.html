@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Marble Mania</title>
+    <title>Wobble Mania</title>
     <link rel="icon" href="data:," />
     <style>
       html, body { margin: 0; height: 100%; background: #2a1a10; overflow: hidden; touch-action: none; }
@@ -19,7 +19,7 @@
       #loading .logo { font-size: clamp(54px, 10vw, 104px); line-height: 0.9; letter-spacing: 0.01em; color: #ffd23a; text-shadow: 0 6px 0 #c2410c, 0 10px 0 #5a2a10, 0 18px 30px rgba(0, 0, 0, 0.45); transform: rotate(-3deg); }
       #loading .logo span { display: block; color: #fff; text-shadow: 0 6px 0 #2f74ff, 0 10px 0 #1a2a6a, 0 18px 30px rgba(0, 0, 0, 0.45); }
       #loading .balls { margin: 26px auto 0; display: flex; gap: 12px; justify-content: center; }
-      #loading .balls i { width: 22px; height: 22px; border-radius: 50%; display: block; box-shadow: inset -4px -5px 8px rgba(0, 0, 0, 0.35), inset 4px 4px 6px rgba(255, 255, 255, 0.6); animation: lb 0.9s ease-in-out infinite; }
+      #loading .balls i { width: 22px; height: 30px; border-radius: 50% 50% 46% 46% / 58% 58% 42% 42%; display: block; box-shadow: inset -4px -5px 8px rgba(0, 0, 0, 0.35), inset 4px 4px 6px rgba(255, 255, 255, 0.6); animation: lb 0.9s ease-in-out infinite; }
       #loading .balls i:nth-child(1) { background: #ff3a4a; }
       #loading .balls i:nth-child(2) { background: #2f9bff; animation-delay: 0.12s; }
       #loading .balls i:nth-child(3) { background: #ffd23a; animation-delay: 0.24s; }
@@ -36,7 +36,7 @@
     <div id="ui"></div>
     <div id="loading">
       <div class="lwrap">
-        <div class="logo">Marble<span>Mania</span></div>
+        <div class="logo">Wobble<span>Mania</span></div>
         <div class="balls"><i></i><i></i><i></i><i></i></div>
         <div class="lbar"><b></b></div>
         <div class="lstep">Sanding the planks</div>

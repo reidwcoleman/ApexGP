@@ -229,6 +229,11 @@ export class Bot {
       if (m.groundT < 0.12) m.jump = true;
       this.jumpAt = Infinity;
     }
+    // ---- over a gap: dive at the top of the jump to stretch it
+    if (jumping && J && !m.grounded && s > J.s0 - 1 && s < J.s1 - 1 && m.vel.y < 1.5 && m.dashCD <= 0) {
+      m.input.set(tx, 0, tz);
+      m.dash = true;
+    }
     // ---- dashes
     if (m.dashCD <= 0 && m.grounded && !lapse && this.mode === 0) {
       const aligned = Math.abs(vLat) < 3 && (!open || Math.abs(latGoal - lat) < 0.7);
@@ -239,9 +244,9 @@ export class Bot {
       // (the speed profile is already braked back from every bend: under it here, a dash is free speed)
       const room = Math.min(A.vcap[A.index(s + 1.5)], A.vcap[A.index(s + 5)]) * this.cornerK;
       const straight = Math.abs(A.kap[A.index(s + 4)]) < 0.035 && Math.abs(A.kap[A.index(s + 10)]) < 0.05;
-      const runUp = jumping && s < J!.s0 && vAlong < J!.vNeed + 2;
-      const clear = this.planHit < 0.05 && Math.min(room, this.nerve) > vAlong + 7 - 6 * this.skill && straight && !(jumping && !runUp);
-      if (aligned && (clear || runUp || (finish && room > vAlong + 4)) && this.rnd() < this.dashUse * hold * dt * (finish || runUp ? 12 : 4)) {
+      // (a dive is a belly flop at the end: never on the run-up to a jump, it can't take off from one)
+      const clear = this.planHit < 0.05 && Math.min(room, this.nerve) > vAlong + 7 - 6 * this.skill && straight && !jumping;
+      if (aligned && (clear || (finish && room > vAlong + 4 && !jumping)) && this.rnd() < this.dashUse * hold * dt * (finish ? 6 : 1.2)) {
         m.input.set(tx, 0, tz).addScaledVector(TMP.set(rx, 0, rz), THREE.MathUtils.clamp((latGoal - lat) * 0.15, -0.2, 0.2)).normalize();
         m.dash = true;
       } else if ((open || this.style.walls) && this.aggr * this.skill * this.style.shove > 0.3) this.barge(dt, A, i, lat, tx, tz, rx, rz, all, open > 0);

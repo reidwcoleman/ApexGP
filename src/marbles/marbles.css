@@ -60,6 +60,30 @@
 .mm-show { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; }
 .mm-show i { font-style: normal; font-size: 13px; font-weight: 700; padding: 5px 11px; border-radius: 10px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(4px); }
 
+/* ---------- name, party code */
+.mm-name { margin-top: 14px; display: flex; align-items: center; gap: 12px; pointer-events: auto; }
+.mm-name span { font-family: var(--mm-display); font-size: 15px; color: var(--mm-yellow); letter-spacing: 0.06em; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); }
+.mm-name input, .mm-join input { font: 18px/1 var(--mm-display); letter-spacing: 0.04em; color: var(--mm-ink); background: var(--mm-cream); border: 0; border-radius: 12px; padding: 9px 12px 7px; width: 190px; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.15); pointer-events: auto; }
+.mm-join { display: inline-flex; gap: 8px; align-items: center; }
+.mm-join input { width: 96px; text-align: center; text-transform: uppercase; letter-spacing: 0.18em; }
+.mm-name input:focus-visible, .mm-join input:focus-visible { outline: 3px solid var(--mm-yellow); outline-offset: 2px; }
+.mm-btn[disabled] { opacity: 0.55; cursor: default; transform: none; filter: grayscale(0.4); }
+.mm-actions .mm-btn { font-size: 22px; padding: 12px 22px 10px; }
+.mm-actions .mm-btn.alt { font-size: 18px; padding: 10px 16px 8px; }
+
+/* ---------- the party lobby */
+.mm-lobby { display: grid; place-items: center; background: rgba(36, 20, 44, 0.5); backdrop-filter: blur(3px); pointer-events: auto; }
+.mm-lobby .panel { width: min(760px, 92vw); text-align: center; animation: mm-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.mm-lobby .k { font-weight: 700; font-size: 15px; letter-spacing: 0.2em; opacity: 0.85; }
+.mm-lobby .code { font-family: var(--mm-display); font-size: clamp(72px, 12vw, 120px); line-height: 1; letter-spacing: 0.12em; color: var(--mm-yellow); text-shadow: 0 6px 0 #c2410c, 0 10px 0 #5a2a10, 0 18px 30px rgba(0, 0, 0, 0.4); user-select: text; -webkit-user-select: text; }
+.mm-lobby .hint { margin-top: 10px; font-weight: 600; font-size: 16px; opacity: 0.9; }
+.mm-lobby .mm-grid div em { opacity: 1; color: var(--mm-pink); }
+.mm-lobby .row { margin-top: 18px; display: flex; gap: 12px; justify-content: center; }
+.mm-note { display: flex; justify-content: center; align-items: flex-start; padding-top: 80px; }
+.mm-note div { font-weight: 700; font-size: 17px; padding: 10px 18px; border-radius: 14px; background: rgba(36, 20, 44, 0.8); animation: mm-in 0.3s ease both; }
+.mm-pause .hint { font-weight: 600; opacity: 0.85; margin-bottom: 6px; }
+.mm-tbtn.g { bottom: 40px; right: 140px; width: 74px; height: 74px; font-size: 15px; background: var(--mm-sky); box-shadow: 0 5px 0 #1f6fa8; }
+
 /* ---------- round card */
 .mm-card { display: grid; place-items: center; }
 .mm-card .box { text-align: center; padding: 26px 46px 30px; border-radius: 30px; background: linear-gradient(160deg, var(--mm-pink), var(--mm-purple)); box-shadow: 0 10px 0 #4a1f7a, 0 20px 40px rgba(0, 0, 0, 0.35); transform: rotate(-2deg); animation: mm-pop 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both; max-width: 86vw; }
@@ -108,6 +132,7 @@
 .mm-tags { position: absolute; inset: 0; overflow: hidden; }
 .mm-tags div { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 9px; background: rgba(36, 20, 44, 0.55); white-space: nowrap; will-change: transform; }
 .mm-tags div.me { font-family: var(--mm-display); font-weight: 400; font-size: 17px; background: var(--mm-yellow); color: var(--mm-ink); padding: 3px 11px 1px; }
+.mm-tags div.pal { background: var(--mm-pink); font-size: 15px; }
 .mm-tags div.me::after { content: ""; position: absolute; left: 50%; bottom: -8px; margin-left: -7px; border: 7px solid transparent; border-top-color: var(--mm-yellow); border-bottom: 0; }
 
 /* ---------- results */
@@ -115,7 +140,9 @@
 .mm-results .panel { width: min(860px, 92vw); text-align: center; animation: mm-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 .mm-results h2 { margin: 0; font-family: var(--mm-display); font-weight: 400; font-size: clamp(38px, 5vw, 60px); color: var(--mm-yellow); text-shadow: 0 4px 0 #c2410c, 0 8px 18px rgba(0, 0, 0, 0.35); }
 .mm-results .sub { margin-top: 6px; font-weight: 600; font-size: 18px; }
-.mm-grid { margin: 22px 0 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.mm-grid { margin: 22px 0 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 8px; }
+.mm-grid div { min-width: 0; }
+.mm-grid div small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mm-grid div { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.14); font-weight: 600; font-size: 14px; text-align: left; animation: mm-in 0.35s ease both; }
 .mm-grid div.out { opacity: 0.38; filter: grayscale(0.8); }
 .mm-grid div.me { background: var(--mm-yellow); color: var(--mm-ink); font-weight: 700; }
@@ -151,4 +178,20 @@
 @media (max-height: 800px) {
   .mm-menu .mm-title { font-size: clamp(56px, 7vw, 88px); }
   .mm-help { font-size: 14px; gap: 4px 14px; }
+}
+
+/* the menu has more rows now (name, party): keep it inside short windows */
+@media (max-height: 760px) {
+  .mm-menu .mm-title { font-size: clamp(48px, 6vw, 72px); }
+  .mm-tag { margin-top: 10px; font-size: 17px; }
+  .mm-show { margin-top: 10px; }
+  .mm-picker { margin-top: 12px; }
+  .mm-name, .mm-level { margin-top: 10px; }
+  .mm-actions { margin-top: 14px; }
+  .mm-help { display: none; }
+}
+@media (max-height: 600px) {
+  .mm-show { display: none; }
+  .mm-menu .mm-title { font-size: 46px; }
+  .mm-arrow { width: 44px; height: 44px; }
 }

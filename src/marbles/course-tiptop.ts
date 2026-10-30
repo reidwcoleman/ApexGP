@@ -12,7 +12,7 @@ import type { Course } from './courses.ts';
  * it (hop it). At 40 s a ring of bumpers starts popping up out of the dish. Last half on it go through.
  */
 
-export const TIP_TOP = { barSpeed: 0.5, popAt: 30, tiltMax: 0.34 };
+export const TIP_TOP = { barSpeed: 0.5, popAt: 30, tiltMax: 0.44 };
 
 export function tiptop(info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
@@ -21,8 +21,8 @@ export function tiptop(info: { name: string; blurb: string }): Course {
   b.lakeY = center.y - 36;
   const state = { go: 1e9 };
   const tau = (t: number) => Math.max(0, t - state.go);
-  // the tilt: grows to 8° by 30 s and on to the max by 100 s; the low side precesses round
-  const tilt = (x: number) => Math.min(TIP_TOP.tiltMax, 0.14 * THREE.MathUtils.smoothstep(x, 0, 30) + 0.003 * Math.max(0, x - 30));
+  // the tilt: grows to 9° by 30 s and on to the max (25°, where a bean's feet go) by about 95 s; the low side precesses round
+  const tilt = (x: number) => Math.min(TIP_TOP.tiltMax, 0.16 * THREE.MathUtils.smoothstep(x, 0, 30) + 0.0043 * Math.max(0, x - 30));
   const prec = (x: number) => 0.45 * x + 0.003 * x * x;
   const AX = new THREE.Vector3(), QT = new THREE.Quaternion(), QS = new THREE.Quaternion(), QR = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
   /** the dish's tilt at t (no spin) */

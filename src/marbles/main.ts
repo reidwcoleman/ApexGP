@@ -5,7 +5,7 @@ import '@fontsource/fredoka/700.css';
 import './marbles.css';
 import { MarbleGame } from './game.ts';
 
-/** Marble Mania's own page (marbles.html): nothing of the racing game or Miami is loaded. */
+/** Wobble Mania's own page (marbles.html, where Marble Mania used to be): nothing of the racing game or Miami is loaded. */
 
 declare global {
   interface Window {

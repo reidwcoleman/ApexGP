@@ -234,17 +234,17 @@ export function lake(y: number, mirror?: { target: THREE.WebGLRenderTarget; matr
 
 /**
  * Giant painted toy pegs standing in the paint: a fat turned peg with a rounded crown and a collar,
- * striped like a barber's pole, a few with a giant marble resting in a cup on top; a ring of
- * paint pulled up round each foot.
+ * striped like a barber's pole, a few with a giant bean standing in a cup on top, cheering; a ring
+ * of paint pulled up round each foot.
  */
-export function giants(center: THREE.Vector3, lakeY: number, paint: (a: number, b: number) => THREE.Material, marble: (i: number) => THREE.Material) {
+export function giants(center: THREE.Vector3, lakeY: number, paint: (a: number, b: number) => THREE.Material, statue: (i: number) => THREE.Object3D) {
   const g = new THREE.Group();
   let s = 11;
   const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   const pal = [0xe8322f, 0x2f74ff, 0xffcf2a, 0x37c25a, 0x8a4bff, 0xff8a1f, 0xff5fa8, 0x1fc8c0];
   const N = 16;
   const pegProfile = (rad: number, h: number, cup: boolean) => {
-    // (turned like a toy: a flared foot, the shaft, a collar, a rounded crown or a cup for a marble)
+    // (turned like a toy: a flared foot, the shaft, a collar, a rounded crown or a cup for a bean)
     const pts: THREE.Vector2[] = [];
     pts.push(new THREE.Vector2(0.001, -2), new THREE.Vector2(rad * 1.25, -2), new THREE.Vector2(rad * 1.18, 1.2), new THREE.Vector2(rad, 3));
     pts.push(new THREE.Vector2(rad, h - 5), new THREE.Vector2(rad * 1.22, h - 4), new THREE.Vector2(rad * 1.22, h - 2.6), new THREE.Vector2(rad * 0.96, h - 2));
@@ -280,11 +280,12 @@ export function giants(center: THREE.Vector3, lakeY: number, paint: (a: number, 
     mesh.userData.peg = rad * 1.25;
     g.add(mesh);
     if (cup) {
-      const br = rad * 1.05;
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(br, 48, 32), marble(k));
-      ball.position.copy(mesh.position).add(new THREE.Vector3(0, h + br * 0.82, 0));
-      ball.userData.giant = br;
-      g.add(ball);
+      const bean = statue(k);
+      bean.scale.setScalar(rad * 1.1);
+      bean.position.copy(mesh.position).add(new THREE.Vector3(0, h - 0.2, 0));
+      bean.rotation.y = rnd() * Math.PI * 2;
+      bean.userData.giant = rad;
+      g.add(bean);
     }
   }
   return g;

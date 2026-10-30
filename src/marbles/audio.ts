@@ -86,6 +86,58 @@ function pulse(d: Float32Array, sr: number, amp: number, w: number, at = 0) {
 
 type Bank = AudioBuffer[];
 
+/** vowel formants (F1, F2, F3) for a small cartoon voice */
+const VOW: Record<string, [number, number, number]> = { a: [850, 1350, 2800], o: [560, 950, 2600], u: [380, 900, 2400], e: [560, 2000, 2800], i: [360, 2500, 3200] };
+
+/**
+ * A little voice: a pulse train (summed harmonics, so no aliasing) through three formant resonators
+ * gliding between vowels, a breath of noise on top. `f0` and the vowel follow `t` 0..1.
+ */
+function vox(d: Float32Array, sr: number, f0: (t: number) => number, vowels: string[], env: (t: number) => number, r: () => number, breath = 0.08) {
+  const n = d.length;
+  let ph = 0;
+  const y1 = [0, 0, 0], y2 = [0, 0, 0];
+  const co = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ];
+  const gains = [1, 0.55, 0.22];
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    if (i % 32 === 0) {
+      // (the formants glide through the vowels in turn)
+      const x = t * (vowels.length - 1);
+      const k = Math.min(vowels.length - 2, Math.floor(x));
+      const f = x - k;
+      const A = VOW[vowels[k]], B = VOW[vowels[Math.min(vowels.length - 1, k + 1)]];
+      for (let j = 0; j < 3; j++) {
+        const F = (A[j] + (B[j] - A[j]) * f) * 1.18;
+        const bw = 80 + j * 60;
+        const rr = Math.exp((-Math.PI * bw) / sr);
+        co[j][0] = 1 - rr;
+        co[j][1] = 2 * rr * Math.cos((2 * Math.PI * F) / sr);
+        co[j][2] = -rr * rr;
+      }
+    }
+    const f = f0(t);
+    ph += f / sr;
+    if (ph > 1) ph -= 1;
+    let src = 0;
+    const H = Math.min(14, Math.floor(4800 / f));
+    for (let h = 1; h <= H; h++) src += Math.sin(2 * Math.PI * h * ph) / h;
+    src = src * 0.5 + (r() * 2 - 1) * breath;
+    let out = 0;
+    for (let j = 0; j < 3; j++) {
+      const y = co[j][0] * src + co[j][1] * y1[j] + co[j][2] * y2[j];
+      y2[j] = y1[j];
+      y1[j] = y;
+      out += y * gains[j];
+    }
+    d[i] = out * env(t);
+  }
+}
+
 export class Sound {
   ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -109,6 +161,8 @@ export class Sound {
   private oohB: AudioBuffer | null = null;
   private awwB: AudioBuffer | null = null;
   private popB!: AudioBuffer;
+  private vox = new Map<string, AudioBuffer[]>();
+  private stepB: Bank = [];
   private whooshB!: AudioBuffer;
   private voices = 0;
   private rolls: { src: AudioBufferSourceNode; f: BiquadFilterNode; lp: BiquadFilterNode; g: GainNode; p: StereoPannerNode }[] = [];
@@ -176,6 +230,7 @@ export class Sound {
 
   private bake() {
     const ctx = this.ctx!;
+    this.bakeVoices(ctx);
     // ---- glass on glass
     for (let v = 0; v < 16; v++) {
       const r = rng(100 + v);
@@ -503,6 +558,52 @@ export class Sound {
     return 0.9 + ((m.id * 0.618) % 1) * 0.22;
   }
 
+  private bakeVoices(ctx: AudioContext) {
+    const env = (a: number, rel: number) => (t: number) => Math.min(1, t / a) * Math.pow(Math.max(0, 1 - t), rel);
+    const mk = (dur: number, f0: (t: number) => number, vowels: string[], e: (t: number) => number, seed: number, breath = 0.08) =>
+      buffer(ctx, dur, (d, sr) => vox(d, sr, f0, vowels, e, rng(seed), breath), 1, 0.8);
+    const set = (k: string, ...b: AudioBuffer[]) => this.vox.set(k, b);
+    set('hup', mk(0.15, (t) => 470 + 90 * t, ['u', 'a'], env(0.08, 1.4), 1), mk(0.13, (t) => 520 + 60 * t, ['e', 'a'], env(0.08, 1.6), 2), mk(0.16, (t) => 430 + 120 * t, ['o', 'a'], env(0.1, 1.3), 3));
+    set('hyah', mk(0.3, (t) => 560 - 120 * t, ['i', 'a', 'a'], env(0.06, 1.2), 4), mk(0.28, (t) => 600 - 160 * t, ['e', 'a'], env(0.05, 1.1), 5));
+    set('oof', mk(0.24, (t) => 380 - 150 * t, ['u', 'o'], env(0.04, 1.8), 6, 0.2), mk(0.2, (t) => 420 - 170 * t, ['o', 'u'], env(0.03, 2), 7, 0.25));
+    set('wah', mk(1.15, (t) => 640 - 380 * t + Math.sin(t * 50) * 22, ['a', 'a', 'o', 'u'], env(0.05, 0.7), 8), mk(1.0, (t) => 700 - 420 * t + Math.sin(t * 44) * 26, ['o', 'a', 'o'], env(0.04, 0.8), 9));
+    set('yay', mk(0.6, (t) => 460 + 300 * Math.min(1, t * 1.6), ['e', 'a', 'i'], env(0.05, 0.9), 10), mk(0.5, (t) => 500 + 260 * Math.min(1, t * 1.8), ['i', 'a', 'e'], env(0.05, 1), 11));
+    set('heh', mk(0.17, (t) => 520 - 40 * t, ['e', 'e'], (t) => Math.min(1, t / 0.05) * (t < 0.45 ? 1 : t < 0.55 ? 0.15 : 1) * (1 - t), 12, 0.15));
+    set('aww', mk(0.8, (t) => 470 - 200 * t, ['a', 'o', 'u'], env(0.1, 0.8), 13));
+    // a soft rubber footfall: a thump and a squeak of the sole
+    for (let v = 0; v < 6; v++) {
+      const r = rng(300 + v);
+      this.stepB.push(
+        buffer(ctx, 0.09, (d, sr) => {
+          const f = 90 + r() * 40, sq = 900 + r() * 700;
+          for (let i = 0; i < d.length; i++) {
+            const t = i / sr;
+            d[i] = Math.sin(2 * Math.PI * f * t) * Math.exp(-t * 60) * 0.9 + (r() * 2 - 1) * Math.exp(-t * 140) * 0.35 + Math.sin(2 * Math.PI * sq * t) * Math.exp(-t * 90) * 0.12;
+          }
+        }),
+      );
+    }
+  }
+
+  /** a bean says something; each bean's voice has its own pitch */
+  voice(kind: string, id: number, x: number, y: number, z: number, mine = false) {
+    const b = this.vox.get(kind);
+    if (!b || !this.ctx) return;
+    const { pan, g } = this.spatial(x, y, z);
+    const lvl = mine ? 0.42 : Math.min(0.35, g * 0.8);
+    if (lvl < 0.02) return;
+    const rate = 0.84 + ((id * 0.618) % 1) * 0.42 + (Math.random() - 0.5) * 0.05;
+    this.play(b[(Math.random() * b.length) | 0], lvl, mine ? pan * 0.3 : pan, rate, 0.18);
+  }
+
+  /** a footfall */
+  step(x: number, y: number, z: number, mine: boolean, mat: Mat) {
+    const { pan, g } = this.spatial(x, y, z);
+    const lvl = (mine ? 0.2 : g * 0.22) * (mat === Mat.Paint ? 0.8 : 1);
+    if (lvl < 0.015) return;
+    this.play(this.stepB[(Math.random() * this.stepB.length) | 0], lvl, pan, 0.85 + Math.random() * 0.3, 0.06, mat === Mat.Paint ? 1800 : 3500);
+  }
+
   /** the physics' contacts this frame */
   hits(list: Hit[], player: unknown) {
     if (!this.ctx) return;
@@ -513,6 +614,13 @@ export class Sound {
       const near = mine ? Math.max(g, 0.6) : g;
       const v = h.speed;
       if (h.kind === 'glass') {
+        // bean on bean: a squashy bump
+        const k = THREE.MathUtils.clamp((v - 1) / 9, 0, 1);
+        this.play(this.felt[(Math.random() * this.felt.length) | 0], k * near * 0.9, pan, 0.7 + Math.random() * 0.2, 0.15, 1400 + k * 2000);
+        if (v > 4) this.play(this.sub, k * near * 0.6, pan * 0.5, 1.3 + Math.random() * 0.3, 0.05);
+        continue;
+      }
+      if (h.kind === ('marble' as string)) {
         const k = THREE.MathUtils.clamp((v - 0.3) / 9, 0, 1);
         const amp = Math.pow(k, 0.85) * 0.95 * near;
         const buf = this.glass[(Math.random() * this.glass.length) | 0];
