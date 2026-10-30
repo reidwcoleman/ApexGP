@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu'] });
+const page = await browser.newPage();
+page.on('console', (m) => console.log('[c]', m.text()));
+await page.goto('http://localhost:5196/brawl.html?manual', { waitUntil: 'load' });
+await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
+const r = await page.evaluate(process.argv[2]);
+console.log(JSON.stringify(r, null, 1));
+await browser.close();

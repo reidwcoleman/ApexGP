@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Plush Panic</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #14081e; overflow: hidden; touch-action: none; }
+      #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      #loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; color: #fff7ec; font-family: "Arial Rounded MT Bold", "Arial Black", sans-serif; transition: opacity 0.7s ease;
+        background: radial-gradient(80% 60% at 50% 110%, rgba(255, 90, 140, 0.35), transparent 60%), radial-gradient(60% 50% at 20% 0%, rgba(89, 184, 255, 0.25), transparent 60%), #14081e; }
+      #loading.done { opacity: 0; pointer-events: none; }
+      #loading .lwrap { text-align: center; width: min(520px, 86vw); }
+      #loading .logo { font-size: clamp(54px, 10vw, 104px); line-height: 0.85; color: #ffd23a; text-shadow: 0 6px 0 #e0752a, 0 12px 0 #6b2a1a, 0 18px 30px rgba(0, 0, 0, 0.45); transform: rotate(-4deg); }
+      #loading .logo span { display: block; color: #fff; text-shadow: 0 6px 0 #ff5a8c, 0 12px 0 #6b1a3c, 0 18px 30px rgba(0, 0, 0, 0.45); }
+      #loading .lbar { margin: 34px auto 0; width: 70%; height: 12px; background: rgba(255, 247, 236, 0.12); border-radius: 8px; overflow: hidden; }
+      #loading .lbar b { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ffd23a, #ff5a8c); border-radius: 8px; transition: width 0.2s ease; }
+      #loading .lstep { margin-top: 12px; font-size: 15px; color: rgba(255, 247, 236, 0.8); }
+      #loading .lerr { margin-top: 12px; color: #ffd0d0; font: 12px/1.4 monospace; white-space: pre-wrap; max-height: 40vh; overflow: auto; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="ui"></div>
+    <div id="loading">
+      <div class="lwrap">
+        <div class="logo">PLUSH<span>PANIC</span></div>
+        <div class="lbar"><b></b></div>
+        <div class="lstep">Loading</div>
+        <div class="lerr"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/brawl/main.ts"></script>
+  </body>
+</html>

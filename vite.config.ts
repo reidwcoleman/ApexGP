@@ -36,7 +36,7 @@ export default defineConfig(({ command }) => ({
     target: 'es2022',
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
-      input: { main: resolve(__dirname, 'index.html'), miami: resolve(__dirname, 'miami.html'), marbles: resolve(__dirname, 'marbles.html'), boost: resolve(__dirname, 'boost.html') },
+      input: { main: resolve(__dirname, 'index.html'), miami: resolve(__dirname, 'miami.html'), marbles: resolve(__dirname, 'marbles.html'), boost: resolve(__dirname, 'boost.html'), brawl: resolve(__dirname, 'brawl.html') },
     },
   },
 }));
