@@ -217,6 +217,8 @@ export interface MenuCallbacks {
   onCareerRace(track: string): void;
   /** a time trial at an open circuit: travel there if needed, then open its session screen */
   onTimeTrial?(track: string): void;
+  /** race friends online (src/online) */
+  onOnline?(): void;
   /** the session at a glance for the pause screen (circuit, session kind, a few numbers) */
   pauseInfo?(): { title: string; kind: string; stats: [string, string][] } | null;
   /** the driver career (the game's main mode) */
@@ -339,6 +341,8 @@ export class Menu {
   private items: Item[] = [];
   private sel = 0;
   private settingsReturn: ScreenId = 'title';
+  /** in an online race: the pause menu has no restart, and quitting goes back to the room */
+  online = false;
   private assistsReturn: ScreenId = 'setup';
   /** the race briefing's live parts (facts, the sky card): redrawn when the set-up changes */
   private briefRefresh: (() => void) | null = null;
@@ -604,6 +608,15 @@ export class Menu {
       this.action(go, () => (tc ? this.cb.onCareerRace(tc.id) : this.setTab('career')));
       const map = el('div', 'home-quick', box, 'World Tour map ›');
       this.action(map, () => this.setTab('career'));
+    }
+    // online: race friends
+    if (this.cb.onOnline) {
+      const on = el('div', 'home-ow online', p);
+      el('div', 'eyebrow', on, 'Online · new');
+      el('div', 'ow-title', on, 'Race your friends');
+      el('div', 'meta', on, 'Open a room, send the link, and go wheel to wheel. Up to 12 players, AI to fill the grid.');
+      const go = el('div', 'home-quick', on, 'Play online ›');
+      this.action(go, () => this.cb.onOnline?.());
     }
     // the open world: its own page, so none of the race world loads with it
     const ow = el('div', 'home-ow', p);
@@ -1816,12 +1829,14 @@ export class Menu {
     };
     add('Resume', () => this.cb.onResume());
     add('Reset car to track', () => this.cb.onResetCar());
-    add('Restart', () => this.cb.onRestart());
+    // (online the race goes on while you're here: your car drives itself; no restarts)
+    if (!this.online) add('Restart', () => this.cb.onRestart());
     add('Settings', () => {
       this.settingsReturn = 'pause';
       this.show('settings');
     });
-    add('Quit to garage', () => this.cb.onQuit());
+    add(this.online ? 'Leave the race (back to the lobby)' : 'Quit to garage', () => this.cb.onQuit());
+    if (this.online) el('div', 'pause-cap', w, '<span>Online</span><span>the race goes on · your car is on autopilot</span>');
     el('div', 'keys', w, '<span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> select</span><span><kbd>Esc</kbd> resume</span>');
   }
 
@@ -1891,7 +1906,7 @@ export class Menu {
     this.highlight();
   }
 
-  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void, reward?: RaceReward | null, onNext?: { label: string; go: () => void }, career?: RoundSummary | null) {
+  showResults(rows: ResultRow[], title: string, lede: string, onAgain: () => void, onMenu: () => void, onReplay?: () => void, reward?: RaceReward | null, onNext?: { label: string; go: () => void }, career?: RoundSummary | null, labels?: { again?: string; menu?: string }) {
     this.show('results');
     const s = this.screens.get('results')!;
     s.innerHTML = '';
@@ -1975,7 +1990,7 @@ export class Menu {
       this.items.push({ el: nx, kind: 'action', select: onNext.go });
       nx.addEventListener('click', onNext.go);
     }
-    const again = el('div', onNext ? 'cta ghost' : 'cta', act, 'Race again');
+    const again = el('div', onNext ? 'cta ghost' : 'cta', act, labels?.again ?? 'Race again');
     this.items.push({ el: again, kind: 'action', select: onAgain });
     again.addEventListener('click', onAgain);
     if (onReplay) {
@@ -1983,7 +1998,7 @@ export class Menu {
       this.items.push({ el: rp, kind: 'action', select: onReplay });
       rp.addEventListener('click', onReplay);
     }
-    const menu = el('div', 'cta ghost', act, 'Back to garage');
+    const menu = el('div', 'cta ghost', act, labels?.menu ?? 'Back to garage');
     this.items.push({ el: menu, kind: 'action', select: onMenu });
     menu.addEventListener('click', onMenu);
     this.sel = 0;

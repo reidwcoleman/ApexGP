@@ -925,6 +925,10 @@ Regression checks (all headless, no browser):
 - `node tools/simtest.mjs 20 3` / `node tools/racetest.mjs 3 [weather]` — 20 AI cars racing: lap
   times, wall hits, off-tracks, penalties, weather and tyre calls, classification
   (`SEED=6 node tools/racetest.mjs 8 changeable` brings rain mid-race).
+- `node tools/racenet.mjs [port] [seconds] [full]` — online races (src/online): two headless browsers, one
+  opens a room, the other joins by invite link; checks the lights go out together and both screens agree
+  where every car is (`full`: autopilot to the flag, results on both, then a rematch; `LAPS=1` for speed).
+  Needs the no-HMR server on that port.
 - `node tools/camshake.mjs [track]` — how much each car-mounted camera vibrates per frame (% of the frame height) on straights, kerbs and the grass over an AI lap.
 - `PORT=… node tools/_studiocam.mjs <out> 'name=px,py,pz/dx,dy,dz/fov[/&query]' …` — onboard lens framings on the studio car (car frame, e.g. the T-cam mount); `PORT=… [SKIP=s N=k] node tools/_mirrorprobe.mjs <out> [weather] [time]` — a live race with the cockpit lens swung onto each rear-view mirror (14°), and where the cars behind are.
 - `node tools/diag.mjs 2 rain wet` — one AI car: lap times, tyre temperatures, grip, wear, fuel.

@@ -63,6 +63,18 @@ export interface RaceOptions {
    * value to the qualifying session and the race so they agree (default: from seed).
    */
   formSeed?: number;
+  /**
+   * An online race (src/online): the cars of the entries `remote` says are driven elsewhere — the
+   * other players' cars, and on a guest's machine the host's AI too — are moved by the network, not
+   * simulated here. `contact` false: the network's cars ghost through everyone.
+   */
+  online?: { remote: (e: Entry) => boolean; contact: boolean };
+}
+
+/** an online race's hook: runs at the start and the end of every Race.update */
+export interface RaceNet {
+  before(race: Race, dt: number): void;
+  after(race: Race, dt: number): void;
 }
 
 /** a small fast seeded generator (0 … 1) */
@@ -220,6 +232,10 @@ export interface Competitor {
   errSeen: number;
   /** seconds of no car-to-car contact after being put back on the track */
   resetGhost: number;
+  /** online: the network moves this car (another player's, or the host's AI on a guest) */
+  remote: boolean;
+  /** online: the owner says it's in the pit lane / reset (no contact) */
+  netGhost: boolean;
 }
 
 export interface RaceEvent {
@@ -388,6 +404,7 @@ export class Race {
     this.playerStart = order.indexOf(opts.playerEntry) + 1;
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
+      const remote = !isPlayer && !!opts.online?.remote(entry);
       const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : !isPlayer && opts.aiSpec ? opts.aiSpec : F1_SPEC);
       car.weather = this.weather;
       car.damageMode = opts.damage ?? 'full';
@@ -404,7 +421,7 @@ export class Race {
       }
       let aiDriver: AIDriver | null = null;
       const f = this.forms.get(entry);
-      if (!isPlayer) {
+      if (!isPlayer && !remote) {
         const pace = limitedPace(aiPace(entry, opts.difficulty) * (f?.form ?? 1) * (f?.suit ?? 1) * this.learning.devPace(entry.driver.code), track.def.id);
         aiDriver = new AIDriver(pace, entry.driver.aggression, () => this.rand());
         // what this driver knows of the circuit (learned here before, or new to it) — and learns today
@@ -415,7 +432,7 @@ export class Race {
         car.allowReverse = false;
       }
       // a rare mechanical failure somewhere in the race (AI only, and only with full damage)
-      const pFail = !isPlayer && opts.mode === 'race' && (opts.damage ?? 'full') === 'full' ? Math.min(0.04, 0.0016 * opts.laps) : 0;
+      const pFail = !isPlayer && !remote && opts.mode === 'race' && (opts.damage ?? 'full') === 'full' ? Math.min(0.04, 0.0016 * opts.laps) : 0;
       const failLap = this.rand() < pFail ? opts.laps * (0.1 + 0.85 * this.rand()) : -1;
       const c: Competitor = {
         id: i,
@@ -478,6 +495,8 @@ export class Race {
         stratLap: -1,
         errSeen: 0,
         resetGhost: 0,
+        remote,
+        netGhost: false,
       };
       c.raceDist = c.laps * track.length + c.lapDist;
       this.cars.push(c);
@@ -511,7 +530,7 @@ export class Race {
       c.compound = start;
       c.compoundsUsed = [start];
       fitTyres(c.car, start);
-      if (!c.isPlayer && opts.mode === 'race') {
+      if (!c.isPlayer && !c.remote && opts.mode === 'race') {
         c.pitPlan = this.planStops(start, c.id);
         c.pitLap = c.pitPlan.length ? c.pitPlan[0] : -1;
       }
@@ -666,6 +685,7 @@ export class Race {
 
   /** a stranded car may bring out the VSC (never on the leader's last lap) */
   private maybeVsc(c: Competitor, p: number) {
+    if (this.opts.online) return;
     if (this.vsc !== 'none' || this.isTimeTrial || this.phase !== 'racing' || this.raceTime < 3) return;
     if (this.leaderLaps >= this.opts.laps - 1) return;
     // (at most two a race, and not straight after the last one)
@@ -724,16 +744,30 @@ export class Race {
   }
 
   /** begin the start-light sequence */
-  startLights() {
+  startLights(hold?: number) {
     if (this.phase !== 'grid') return;
     this.phase = 'lights';
     this.lightsLit = 0;
     this.lightsTimer = 0;
-    this.lightsHold = 0.6 + this.rand() * 2.2;
+    this.lightsHold = hold ?? 0.6 + this.rand() * 2.2;
   }
+  /** online: the lights and the race clock follow the session's clock (s since the lights started) */
+  syncLights(t: number, out: number) {
+    if (this.phase === 'lights') this.lightsTimer = Math.max(this.lightsTimer, Math.min(t, 5 + this.lightsHold));
+    else if ((this.phase === 'racing' || this.phase === 'finished') && out > 0) this.raceTime = out;
+  }
+  /** online: the network hook (src/online/RaceSync.ts) */
+  net: RaceNet | null = null;
+  /** events from outside the step (the network's cars) for the next update's list */
+  readonly pendingEvents: RaceEvent[] = [];
 
   update(dt: number) {
     this.events.length = 0;
+    if (this.pendingEvents.length) {
+      this.events.push(...this.pendingEvents);
+      this.pendingEvents.length = 0;
+    }
+    this.net?.before(this, dt);
     this.time += dt;
     // the track rubbers in through the race (practice and qualifying laid most of it down; a time
     // trial runs on a rubbered track), and rain washes it off
@@ -790,6 +824,8 @@ export class Race {
         if (c.removed) continue;
         const zone = this.drsLapDist[c.drsZone];
         const inZone = !!zone && c.drsEligible && this.vsc === 'none' && this.inRange(c.lapDist, zone.start, zone.end);
+        // (online: moved by the network)
+        if (c.remote) continue;
         // pit assist: requested stop + crossing the takeover point → scripted pit lane
         if (this.pitStep(c, h)) continue;
         if (c.isPlayer) {
@@ -824,6 +860,7 @@ export class Race {
     this.rankCars();
     this.dynamicPace(dt);
     this.battles();
+    this.net?.after(this, dt);
   }
 
   /**
@@ -835,6 +872,7 @@ export class Race {
     if (this.phase !== 'racing' && this.phase !== 'finished') return;
     for (const c of this.cars) {
       const car = c.car;
+      if (c.remote) continue;
       if (!c.retired && !c.finished) {
         const broken = !c.isPlayer && car.susp.some((d) => d >= 0.999) && car.damageMode === 'full';
         // a mechanical failure: smoke and a loss of power first, then it's over
@@ -1141,7 +1179,7 @@ export class Race {
 
   /** no car-to-car contact: in the pit lane (its own queueing keeps cars apart), entering, or merging back */
   private isPitGhost(c: Competitor): boolean {
-    return c.pit.phase !== 'none' || c.pitGhost > 0 || c.resetGhost > 0 || (c.pitApproach && this.pitLane.toTakeover(c.car.s) < 160);
+    return c.netGhost || c.pit.phase !== 'none' || c.pitGhost > 0 || c.resetGhost > 0 || (c.pitApproach && this.pitLane.toTakeover(c.car.s) < 160);
   }
 
   private pitGhosts(dt: number) {
@@ -1263,6 +1301,19 @@ export class Race {
     const prev = c.lapDist;
     const d = track.lapDistance(c.car.s);
     c.lapDist = d;
+    if (c.remote) {
+      // (the owner counts the laps, sectors and the flag: RaceSync sets laps and finished; here only
+      // the distance, and the checkpoint clock the gaps are timed with)
+      c.raceDist = c.laps * L + d;
+      if (this.phase === 'racing' || this.phase === 'finished') {
+        const cp = Math.floor(c.raceDist / CP);
+        if (cp !== c.cpIndex && cp >= 0) {
+          for (let k = Math.max(c.cpIndex + 1, cp - 5); k <= cp; k++) c.cpTimes[((k % CP_RING) + CP_RING) % CP_RING] = this.raceTime;
+          c.cpIndex = cp;
+        }
+      }
+      return;
+    }
     const racing = this.phase === 'racing' || this.phase === 'finished';
     if (!racing) {
       c.raceDist = c.laps * L + d;
@@ -1525,6 +1576,14 @@ export class Race {
       if (this.isPitGhost(cars[i]) || cars[i].removed) continue;
       for (let j = i + 1; j < cars.length; j++) {
         if (this.isPitGhost(cars[j]) || cars[j].removed) continue;
+        // online: a network car is moved by its owner, who sees the same contact from their side and
+        // takes their own half of it — here only the car simulated here reacts (and no contact at all
+        // when the session ghosts the cars)
+        const rA = cars[i].remote, rB = cars[j].remote;
+        if (rA && rB) continue;
+        if ((rA || rB) && this.opts.online && !this.opts.online.contact) continue;
+        const kA = rA ? 0 : rB ? 1.2 : 1;
+        const kB = rB ? 0 : rA ? 1.2 : 1;
         const B = cars[j].car;
         const dxc = A.x - B.x;
         const dzc = A.z - B.z;
@@ -1553,10 +1612,10 @@ export class Race {
         }
         if (best <= 0) continue;
         // separate (equal masses)
-        A.x += nx * best * 0.5;
-        A.z += nz * best * 0.5;
-        B.x -= nx * best * 0.5;
-        B.z -= nz * best * 0.5;
+        A.x += nx * best * 0.5 * kA;
+        A.z += nz * best * 0.5 * kA;
+        B.x -= nx * best * 0.5 * kB;
+        B.z -= nz * best * 0.5 * kB;
         // relative velocity at the contact point (n points from B to A)
         const [avx, avz] = A.pointVelocity(px, pz);
         const [bvx, bvz] = B.pointVelocity(px, pz);
@@ -1584,8 +1643,8 @@ export class Race {
         }
         const jx = nx * jn - tx * jt;
         const jz = nz * jn - tz * jt;
-        A.applyImpulse(px, pz, jx, jz);
-        B.applyImpulse(px, pz, -jx, -jz);
+        if (kA) A.applyImpulse(px, pz, jx * kA, jz * kA);
+        if (kB) B.applyImpulse(px, pz, -jx * kB, -jz * kB);
         const strength = -vn;
         const pk = i * 64 + j;
         if (this.raceTime - (this.pairContact.get(pk) ?? -9) > 1.5) {
@@ -1598,8 +1657,8 @@ export class Race {
         // bodywork damage on both cars where they touched (carbon on carbon, glancing: much softer than a wall)
         const localA = [(px - A.x) * sa + (pz - A.z) * ca, (px - A.x) * ca - (pz - A.z) * sa];
         const localB = [(px - B.x) * sb + (pz - B.z) * cb, (px - B.x) * cb - (pz - B.z) * sb];
-        A.addImpact(localA[0], localA[1], strength * 0.75, px, pz, -nx, -nz);
-        B.addImpact(localB[0], localB[1], strength * 0.75, px, pz, nx, nz);
+        if (kA) A.addImpact(localA[0], localA[1], strength * 0.75, px, pz, -nx, -nz);
+        if (kB) B.addImpact(localB[0], localB[1], strength * 0.75, px, pz, nx, nz);
       }
     }
   }

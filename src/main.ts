@@ -121,6 +121,9 @@ game
     // the garage is up; demo sessions and the ready signal wait for the whole circuit behind it
     await game.whenWorld();
     performance.mark('apex:world');
+    // an invite link (?join=CODE): straight into the friend's room
+    const join = q.get('join');
+    if (join) game.online.show(join);
     const demo = q.get('demo');
     if (demo) {
       game.debugStart({

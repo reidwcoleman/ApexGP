@@ -77,6 +77,8 @@ import { withContactShadow } from '../world/env/contactShadow.ts';
 import type { SetupPart } from '../career/Career.ts';
 import type { HubTab } from '../ui/Menu.ts';
 import { ScreenFeed, type FeedSource } from './ScreenFeed.ts';
+import { Online, AI_LEVELS } from '../online/Online.ts';
+import type { RaceConfig } from '../online/net.ts';
 
 /** objects that cast shadows into the garage key light (see buildGarageLights) */
 const GARAGE_SHADOW_LAYER = 3;
@@ -239,6 +241,14 @@ export class Game {
   private lastDt = 0.016;
   private engineer = new Engineer();
   private autopilot: AIDriver | null = null;
+  /** online races with friends (src/online) */
+  readonly online: Online;
+  /** the online race being run (its grid as entries; the cars the network drives) */
+  private onlineCfg: { cfg: RaceConfig; entries: Entry[]; remote: Set<Entry> } | null = null;
+  /** online: drives your car while the pause menu is open (the race goes on for everyone else) */
+  private idlePilot: AIDriver | null = null;
+  /** online: the race stepped this frame (else it's stepped in the background: the race never waits) */
+  private raceTicked = false;
   private quali: { setup: RaceSetup } | null = null;
   private gridOrder: Entry[] | null = null;
   private control = new PlayerControl();
@@ -340,6 +350,7 @@ export class Game {
         if (this.syncCareerGrid()) void this.travel(this.dc.nextTrack ?? this.track.def.id, true);
       },
       onSpectate: () => this.openSimSetup(),
+      onOnline: () => this.online.show(),
       // (UI only) the session at a glance on the pause screen
       pauseInfo: () => {
         const r = this.race;
@@ -356,6 +367,21 @@ export class Game {
         return { title: this.track.def.name, kind: this.spectating ? 'Simulated race' : r.isTimeTrial ? 'Time trial' : this.quali ? 'Qualifying' : 'Race', stats };
       },
     }, this.career);
+    this.online = new Online(uiRoot, {
+      travel: async (id) => {
+        if (this.state !== 'menu') this.toMenu();
+        // (the garage's own circuit follows: back in the room, the garage is where the race was)
+        this.menu.setup.track = id;
+        if (id !== this.track.def.id) await this.travel(id);
+        return (await this.worldReady()) && this.track.def.id === id;
+      },
+      begin: (cfg, me) => this.startOnline(cfg, me),
+      end: () => this.leaveOnline(),
+      ui: (k) => this.audioReady && this.audio.ui(k),
+      rig: (e) => this.rigs.get(e)?.root ?? null,
+      camera: this.camera,
+      currentTrack: () => this.track?.def.id ?? '',
+    });
     this.simSetup = new SimSetup(this.menu.root, {
       onStart: (cfg) => void this.startSimulation(cfg),
       onBack: () => {
@@ -1468,6 +1494,31 @@ export class Game {
   private makeRace(mode: 'race' | 'timetrial', setup: RaceSetup): Race {
     const team = TEAMS[setup.team];
     const playerEntry = this.entries.find((e) => e.team === team && e.seat === setup.seat)!;
+    const on = this.onlineCfg;
+    if (on) {
+      // an online race: the host's grid and seeds, the same car for everyone, the network's cars
+      const s = on.cfg.settings;
+      this.race = new Race(this.track, {
+        mode: 'race',
+        laps: s.laps,
+        difficulty: AI_LEVELS[s.level]?.v ?? 0.965,
+        dynamicAI: false,
+        learning: false,
+        trackLimits: 'lenient',
+        formSeed: on.cfg.formSeed,
+        seed: on.cfg.seed,
+        playerEntry,
+        playerGrid: 0,
+        entries: on.entries,
+        playerCompound: 'auto',
+        gridOrder: on.entries,
+        weather: this.plan,
+        damage: s.damage === 'visual' ? 'cosmetic' : s.damage,
+        playerSpec: F1_SPEC,
+        aiSpec: F1_SPEC,
+        online: { remote: (e) => on.remote.has(e), contact: s.contact },
+      });
+    } else
     this.race = new Race(this.track, {
       mode,
       laps: setup.laps,
@@ -1608,6 +1659,16 @@ export class Game {
     this.gridOrder = null;
     this.spectating = false;
     this.leaveBroadcast();
+    // (an online race's network hook stays with it: the garage's race is a fresh one)
+    if (this.race) this.race.net = null;
+    if (this.onlineCfg && this.online.inRace) {
+      // quitting the race from the pause menu: back to the room's lobby
+      this.onlineCfg = null;
+      this.menu.online = false;
+      queueMicrotask(() => this.online.toLobby());
+    }
+    this.onlineCfg = null;
+    this.menu.online = false;
     this.makeRace('race', this.menu.setup);
     this.hud.show(false);
     this.menu.show('title');
@@ -1946,7 +2007,7 @@ export class Game {
           cam.fov = F.fov + (cam.fov - F.fov) * e;
           cam.updateProjectionMatrix();
         } else this.introFrom = null;
-        if (t > END + 0.5 && race.phase === 'grid') race.startLights();
+        if (t > END + 0.5 && race.phase === 'grid' && !this.onlineCfg) race.startLights();
       }
     } else {
       // the short intro: the low sweep round your car, then your camera and the lights
@@ -1969,7 +2030,7 @@ export class Game {
           this.gfx.setDepthOfField(false);
         }
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
-        if (t0 > IC + 0.8 && race.phase === 'grid') race.startLights();
+        if (race.phase === 'grid' && (this.onlineCfg ? this.online.lightsDue() : t0 > IC + 0.8)) race.startLights(this.onlineCfg ? this.online.hold : undefined);
       }
     }
     if (race.phase === 'racing') {
@@ -1977,6 +2038,83 @@ export class Game {
       this.hud.setHint(null);
     }
     this.handleRaceEvents();
+  }
+
+  /** an online race: built from the host's config (Online calls this when the start comes in) */
+  private startOnline(cfg: RaceConfig, me: string): Race | null {
+    if (!this.track || this.track.def.id !== cfg.settings.track) return null;
+    const entries = cfg.grid.map((g) => this.entries.find((e) => e.team === TEAMS[g.team] && e.seat === g.seat));
+    if (entries.some((e) => !e)) return null;
+    const grid = entries as Entry[];
+    const mine = cfg.grid.findIndex((g) => g.owner === me);
+    if (mine < 0) return null;
+    // (the host simulates the AI; on a guest every car but its own comes over the network)
+    const host = me === 'host';
+    const remote = new Set(grid.filter((_, i) => i !== mine && (!host || !!cfg.grid[i].owner)));
+    this.onlineCfg = { cfg, entries: grid, remote };
+    const s = cfg.settings;
+    const my = grid[mine];
+    const setup: RaceSetup = {
+      ...this.menu.setup,
+      team: TEAMS.indexOf(my.team),
+      seat: my.seat,
+      laps: s.laps,
+      weather: s.weather as WeatherChoice,
+      time: s.time as TimeChoice,
+      compound: 'auto',
+      track: s.track,
+      grid: 1,
+    };
+    // everyone gets the same sky: the host's seed
+    this.plan = planWeather(setup.weather, setup.time, s.laps * 85 + 60, cfg.wxSeed);
+    this.planKey = `${setup.weather}/${setup.time}`;
+    this.planFresh = true;
+    this.weekendSeed = cfg.formSeed;
+    this.gridOrder = grid;
+    this.careerRace = false;
+    this.idlePilot = null;
+    this.menu.online = true;
+    if (this.state === 'paused' || this.state === 'results') this.state = 'menu';
+    this.startRace('race', setup);
+    return this.race;
+  }
+
+  /** out of an online race (Online decides where to: the lobby, or the garage) */
+  private leaveOnline() {
+    this.onlineCfg = null;
+    this.idlePilot = null;
+    this.menu.online = false;
+    if (this.state !== 'menu') this.toMenu();
+  }
+
+  /** online: R puts the car back on the road (no flashbacks: the race doesn't rewind for everyone) */
+  private onlineReset() {
+    const p = this.race.player;
+    if (p.retired || p.finished || p.pit.phase !== 'none') return;
+    this.resetPlayer();
+    p.resetGhost = 3;
+  }
+
+  /** online: the race runs on while the pause menu (or a replay) is up; your car drives itself */
+  private onlineIdle(dt: number) {
+    const race = this.race;
+    const p = race.player;
+    if (race.phase === 'grid' && this.online.lightsDue()) race.startLights(this.online.hold);
+    if (!this.autopilot && !p.finished && !p.retired && (race.phase === 'racing' || race.phase === 'finished')) {
+      if (!this.idlePilot) {
+        this.idlePilot = new AIDriver(0.82, 0.2);
+        this.idlePilot.startFrom(p.car, this.track);
+      }
+      const neigh = race.cars.map((c) => ({ id: c.id, s: c.car.s, lateral: c.car.lateral, speed: c.car.vx }));
+      this.idlePilot.update(dt, p.car, this.track, race.profile, true, neigh, p.id);
+      Object.assign(race.playerInput, this.idlePilot.input);
+      race.playerInput.shiftUp = race.playerInput.shiftDown = false;
+    } else if (this.autopilot) this.driveInput(dt);
+    else {
+      race.playerInput.throttle = 0;
+      race.playerInput.brake = race.phase === 'grid' || race.phase === 'lights' ? 0 : 1;
+    }
+    race.update(dt);
   }
 
   private startRace(mode: 'race' | 'timetrial', setup: RaceSetup, qualifying = false) {
@@ -2012,11 +2150,12 @@ export class Game {
     this.state = mode === 'timetrial' ? 'race' : 'intro';
     this.stateTime = 0;
     this.hud.show(true);
-    this.introLong = mode === 'race' && !restart;
+    this.introLong = mode === 'race' && !restart && !this.onlineCfg;
     this.introDirector = null;
     if (this.introLong) this.showIntroCard();
     else this.hideIntroCard(true);
-    if (mode === 'race') this.hud.setHint('Lights out soon · hold <kbd>↑</kbd> to rev, launch when they go out');
+    if (this.onlineCfg) this.hud.setHint('Online race · lights out together · hold <kbd>↑</kbd> to rev · <kbd>R</kbd> back on track');
+    else if (mode === 'race') this.hud.setHint('Lights out soon · hold <kbd>↑</kbd> to rev, launch when they go out');
     else {
       const rec = this.loadRecord();
       this.hud.setHint(`Flying lap${isFinite(rec) ? ` · record ${fmtTime(rec)}` : ''} · <kbd>Space</kbd> DRS · <kbd>Shift</kbd> ERS`);
@@ -2042,6 +2181,7 @@ export class Game {
   }
 
   private resume() {
+    this.idlePilot = null;
     this.menu.show('none');
     this.state = this.spectating ? 'spectate' : this.race.phase === 'grid' ? 'intro' : 'race';
     if (this.spectating) this.broadcast.show('live');
@@ -2169,6 +2309,18 @@ export class Game {
     const laps = this.race.opts.laps;
     const lede = `${laps} lap${laps === 1 ? '' : 's'} · ${this.track.def.name} · ${WEATHER_LABEL[this.race.weatherState.kind]}`;
     this.hud.show(false);
+    if (this.onlineCfg) {
+      // an online race: no career points, the room's buttons (the race runs on behind the results)
+      const others = rows.filter((r) => !r.isPlayer && this.onlineCfg!.cfg.grid.some((g) => g.owner && TEAMS[g.team] === r.entry.team && g.seat === r.entry.seat));
+      const beat = others.filter((r) => r.pos > p.position).length;
+      const ttl = p.retired ? 'Retired · DNF' : p.position === 1 ? 'Victory' : p.position <= 3 ? `Podium · P${p.position}` : `Finished P${p.position}`;
+      const sub = others.length ? ` · you beat ${beat} of ${others.length} friend${others.length === 1 ? '' : 's'}` : '';
+      this.menu.showResults(rows, ttl, `Online · Room ${this.online.code} · ${lede}${sub}`, () => this.online.toLobby(), () => this.online.leave(), () => this.startReplay(), null, undefined, null, {
+        again: this.online.isHost ? 'Back to lobby (ends the race)' : 'Back to lobby',
+        menu: 'Leave room',
+      });
+      return;
+    }
     // what the AI drivers learned today, for the next race here (once per race)
     this.race.saveLearning();
     // the next race gets new weather
@@ -2261,7 +2413,10 @@ export class Game {
     // the key that closes a menu must not also act in the game this frame
     const menuFrame = this.state === 'menu' || this.state === 'results' || this.state === 'paused';
     if (menuFrame) {
-      if (this.simSetup.open) this.simSetup.update(this.input.nav);
+      // (the online room's screens take the keys and the mouse while they're up)
+      if (this.online.open) {
+        /* nothing */
+      } else if (this.simSetup.open) this.simSetup.update(this.input.nav);
       else this.menu.update(this.input.nav);
       st.pause = false;
       st.camera = false;
@@ -2270,6 +2425,7 @@ export class Game {
     }
     // read the session after the menu acted — it may have started a new one
     const race = this.race;
+    const raceT0 = race.time;
 
     this.garageLights.visible = this.state === 'menu';
     suppressFloods(this.state === 'menu');
@@ -2304,7 +2460,10 @@ export class Game {
         this.cams.lookBack = st.lookBack;
         this.cams.update(dt, race.player.car, this.rigs.get(race.player.entry)!, this.track);
         if (race.isTimeTrial && this.stateTime > 4) this.hud.setHint(null);
-        if (st.reset) this.startFlashback();
+        if (st.reset) {
+          if (this.onlineCfg) this.onlineReset();
+          else this.startFlashback();
+        }
         if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none' && race.playerPitForced) {
           this.hud.flash('Mandatory pit stop', 'the team is calling you in', 'yellow', 1.6);
         } else if (st.pit && !race.isTimeTrial && !race.player.finished && race.player.pit.phase === 'none') {
@@ -2478,6 +2637,10 @@ export class Game {
     // a long lens looks through hundreds of metres of air at its subject, yet broadcast telephoto
     // shots stay contrasty: thin the haze as the lens narrows (full below ~28°, a third at ~3°)
     aerialLens.x = THREE.MathUtils.clamp(0.33 + (this.camera.fov - 3) * (0.67 / 25), 0.33, 1);
+    // online: the race never waits (pause menu, replays): stepped here if nothing else did; and the
+    // other players' name tags
+    if (this.onlineCfg && this.race === race && race.time === raceT0 && this.online.inRace) this.onlineIdle(Math.min(dt, 0.1));
+    this.online.frame(this.state === 'race' || this.state === 'intro');
     this.gfx.render(dt);
     this.screenFeed.frame(dt, this.feedSource(dt));
     // (nothing is filmed while racing: highlights come from the replay recording; the podium is captured)

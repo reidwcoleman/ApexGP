@@ -6092,3 +6092,9 @@ body.garage-drag * {
 .brief .tm-seg:focus {
   outline: none;
 }
+.home-ow.online {
+  border-left-color: var(--accent);
+}
+.home-ow.online + .home-ow {
+  margin-top: var(--s5, 28px);
+}
