@@ -51,7 +51,7 @@ export class UI {
       <div class="mm-spec mm-hide"></div>
       <div class="mm-prog"><div class="flag"></div></div>
       <div class="mm-dash"><span>DIVE</span></div>
-      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>SPACE</b> jump &nbsp; <b>SHIFT</b> dive &nbsp; <b>E</b> grab &nbsp; <b>ESC</b> pause</div>`;
+      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>SPACE</b> jump &nbsp; <b>CTRL</b> dive &nbsp; <b>SHIFT</b> grab (hold) &nbsp; <b>MOUSE</b> camera (click) &nbsp; <b>ESC</b> pause</div>`;
     this.progEl = this.hudEl.querySelector('.mm-prog') as HTMLElement;
     this.cardEl = this.layer('mm-card mm-hide');
     this.countEl = this.layer('mm-count mm-hide');
@@ -105,7 +105,7 @@ export class UI {
         </div>
         <div class="mm-actions">
           <button class="mm-btn" data-a="play">PLAY</button>
-          <button class="mm-btn pink" data-a="host">HOST PARTY</button>
+          <button class="mm-btn pink" data-a="host">PLAY WITH FRIENDS</button>
           <span class="mm-join"><input maxlength="4" placeholder="CODE" spellcheck="false" autocomplete="off" aria-label="Party code"><button class="mm-btn alt" data-a="join">JOIN</button></span>
         </div>
         <div class="mm-help">
@@ -161,12 +161,19 @@ export class UI {
     l.innerHTML = `<div class="panel">
       <div class="k">PARTY CODE</div>
       <div class="code">${esc(o.code || '····')}</div>
-      <div class="hint">${o.host ? 'Friends join from the menu with this code' : esc(o.status ?? 'Waiting for the host to start the show')}</div>
+      <div class="hint">${o.host ? 'Send friends the link, or they type the code under JOIN' : esc(o.status ?? 'Waiting for the host to start the show')}</div>
+      ${o.host && o.code ? `<div class="row"><button class="mm-btn pink" data-a="copy">COPY INVITE LINK</button></div>` : ''}
       <div class="mm-grid">${list}</div>
       <div class="hint">${o.members.length} / ${o.max} players${bots > 0 ? ` · ${bots} bots fill the show` : ''}</div>
       <div class="row">${o.host ? `<button class="mm-btn" data-a="start" ${o.code ? '' : 'disabled'}>START SHOW</button>` : ''}<button class="mm-btn alt" data-a="leave">LEAVE</button></div>
     </div>`;
     l.querySelector('[data-a=start]')?.addEventListener('click', o.onStart);
+    const cp = l.querySelector('[data-a=copy]') as HTMLButtonElement | null;
+    cp?.addEventListener('click', () => {
+      const url = `${location.origin}${location.pathname}?join=${o.code}`;
+      const done = () => (cp.textContent = 'LINK COPIED');
+      navigator.clipboard?.writeText(url).then(done, () => window.prompt('Invite link', url));
+    });
     l.querySelector('[data-a=leave]')!.addEventListener('click', o.onLeave);
     l.classList.remove('mm-hide');
   }

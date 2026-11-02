@@ -768,21 +768,29 @@ and bots; the contestants are original bean characters, not marbles.
     rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
     order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring).
   - Out of the show, you can watch it to the end (←/→ switches bean).
-- **The beans** (`bean.ts`): a lathe-turned jelly body under a clearcoat, googly eyes on springs,
-  little arms and legs, 24 named outfits (a colour, one of 12 patterns painted on a canvas, one of
-  12 hats) and random ones for the bots. Animated from the body: a waddling run timed to the speed
-  over the ground, lean and jelly wobble on every change of speed, squash and stretch, arms up in
-  the air, a belly flop in a dive, limbs everywhere in a tumble, a struggle when held, a cheer.
-  Giant bean statues stand on the pegs out in the paint.
+- **The beans** (`bean.ts`): tall soft jelly beans on short legs, big googly eyes on springs,
+  eyebrows (up in a fright, down and in on a dive or a grab), 24 named outfits (a colour, one of
+  12 patterns painted on a canvas, one of 12 hats) and random ones for the bots. The body wobbles
+  like jelly: a spring-driven shear in the vertex shader lags every change of speed and swings
+  back, with the face and hat riding it; squash on landing, stretch on take-off, a waddling run
+  timed to the speed over the ground. The arms and legs are simulated: each limb is three Verlet
+  points with momentum and gravity, pulled toward the animated pose (firmly when the bean is in
+  control, barely at all when it's knocked flying), on one skinned mesh per bean (world-space bone
+  matrices: an attached skin cancels its own transform). Dust puffs on hard landings and dives,
+  stars on a knock-down. Giant bean statues stand on the pegs out in the paint.
 - **Physics** (`physics.ts`): a standing bean is two spheres (feet and head) on the course
   triangles and the analytic obstacles, and an upright capsule against the other beans. Running is
   a velocity controller relative to the ground under it (turntables carry you, conveyors fight you,
   roller beds fling you), faster downhill, losing grip past ~11° of tilt. Jump, dive (Shift: a
-  lunge into a belly slide that bowls over whoever it hits) and grab (hold E: the bean in front is
+  lunge into a belly slide that bowls over whoever it hits) and grab (hold: the bean in front is
   slowed and dragged). A hammer, a sweeper, a bumper or a diving bean knocks you over: you become
   a rolling ball (I = 2/5·m·r², friction impulses at the contact) until you're slow enough on the
   ground to get up. 240 Hz substeps.
-- **Party play** (`net.ts`): HOST PARTY opens a lobby with a 4-letter code; friends type it under
+- **Controls**, the usual party-game layout: WASD run, Space jump, Ctrl dive (or C), Shift grab
+  (hold, or E), the mouse turns the camera (click to lock the pointer, ESC lets go) and tilts it;
+  a pad: left stick, A jump, X/Square or B dive, RT grab, right stick camera.
+- **Party play** (`net.ts`): PLAY WITH FRIENDS opens a lobby with a 4-letter code and a COPY
+  INVITE LINK button (`marbles.html?join=CODE` joins straight in); friends can also type the code under
   JOIN (up to 12 players, bots make up the 24). Peer to peer over WebRTC (PeerJS's broker only
   introduces the browsers). Each browser runs its own bean (no lag on your own jumps) and sends it
   30 times a second; the host runs the bots, the show's clock that every obstacle turns to (guests

@@ -22,8 +22,8 @@ export const JUMP_V = 8.6;
 const IR = 0.4 * RADIUS * RADIUS;
 /** running: top speed on the flat (m/s), how fast it gets there, and the push it has in the air */
 export const RUN = 9.4;
-const RUN_K = 11;
-const RUN_ACC = 70;
+const RUN_K = 8;
+const RUN_ACC = 56;
 const AIR_ACC = 15;
 /** the head sphere: its centre above the feet sphere's, and its radius; the body's for bean on bean */
 export const HEAD_UP = 0.62;

@@ -13,9 +13,11 @@ import { Marble, Mode } from './physics.ts';
  */
 
 /** body proportions (m), from the ground under the feet */
-const HIP_Y = 0.33;
-const CORE_Y = 0.8;
-const TOP_Y = 1.5;
+const HIP_Y = 0.36;
+const CORE_Y = 0.86;
+const TOP_Y = 1.62;
+const FACE_Y = 1.2;
+const SHOULDER_Y = 0.98;
 
 export type Pat = 'solid' | 'belly' | 'stripes' | 'dots' | 'split' | 'zigzag' | 'stars' | 'hearts' | 'checker' | 'spots' | 'swirl' | 'fade';
 export type Hat = 'none' | 'beanie' | 'party' | 'propeller' | 'bow' | 'horns' | 'antenna' | 'flower' | 'tophat' | 'headphones' | 'sprout' | 'cap';
@@ -192,78 +194,6 @@ function heart(g: CanvasRenderingContext2D, x: number, y: number, r: number) {
   g.fill();
 }
 
-// ----------------------------------------------------------------------------------- shapes
-let G: ReturnType<typeof shapes> | null = null;
-function shapes() {
-  // the body: a jelly bean's profile turned round (the seam at the back)
-  const prof = new THREE.SplineCurve(
-    [
-      [0.001, 0.17],
-      [0.2, 0.19],
-      [0.36, 0.27],
-      [0.445, 0.42],
-      [0.47, 0.62],
-      [0.46, 0.86],
-      [0.43, 1.06],
-      [0.37, 1.26],
-      [0.27, 1.41],
-      [0.13, 1.49],
-      [0.001, 1.505],
-    ].map(([x, y]) => new THREE.Vector2(x, y)),
-  );
-  const body = new THREE.LatheGeometry(prof.getPoints(40), 48).rotateY(Math.PI);
-  body.translate(0, -HIP_Y, 0);
-  const cap = (r: number, l: number) => new THREE.CapsuleGeometry(r, l, 6, 14);
-  // an arm hanging from the shoulder, its hand at the end
-  const arm = mergeGeometries([cap(0.068, 0.24).translate(0, -0.16, 0), new THREE.SphereGeometry(0.098, 16, 12).translate(0, -0.33, 0.01)]);
-  // a leg from the hip, its foot pointing forward
-  const leg = mergeGeometries([cap(0.085, 0.14).translate(0, -0.12, 0), new THREE.SphereGeometry(1, 18, 12).scale(0.115, 0.08, 0.165).translate(0, -0.26, 0.05)]);
-  const eye = new THREE.SphereGeometry(0.118, 24, 16).scale(1, 1.12, 0.62);
-  // the pupil with its glint (vertex colours: black, a white fleck)
-  const pup = new THREE.SphereGeometry(0.062, 16, 12).scale(1, 1.1, 0.5);
-  const glint = new THREE.SphereGeometry(0.018, 8, 6).translate(0.022, 0.026, 0.03);
-  const paint = (g: THREE.BufferGeometry, c: number) => {
-    const col = new THREE.Color(c);
-    const n = g.getAttribute('position').count;
-    const a = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) a.set([col.r, col.g, col.b], i * 3);
-    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
-    return g;
-  };
-  const pupil = mergeGeometries([paint(pup, 0x0b0b10), paint(glint, 0xffffff)]);
-  const smile = new THREE.TorusGeometry(0.075, 0.017, 8, 20, Math.PI * 0.9).rotateZ(Math.PI * 1.05);
-  const ooh = new THREE.SphereGeometry(0.055, 14, 10).scale(1, 1.25, 0.4);
-  const cheek = new THREE.SphereGeometry(0.06, 12, 8).scale(1.3, 0.8, 0.3);
-  return { body, arm, leg, eye, pupil, smile, ooh, cheek };
-}
-
-const shared: Record<string, THREE.Material> = {};
-function sharedMats() {
-  if (shared.eye) return shared;
-  shared.eye = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.1 });
-  shared.pupil = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15 });
-  shared.mouth = new THREE.MeshStandardMaterial({ color: 0x3a0a14, roughness: 0.5 });
-  shared.cheek = new THREE.MeshStandardMaterial({ color: 0xff8aa8, roughness: 0.7, transparent: true, opacity: 0.55, depthWrite: false });
-  return shared;
-}
-
-/** the jelly: a soft clearcoat over the painted skin, a little of its own colour glowing in the shade */
-function jelly(map: THREE.Texture | null, color: number) {
-  const m = new THREE.MeshPhysicalMaterial({
-    color: map ? 0xffffff : color,
-    map,
-    roughness: 0.42,
-    clearcoat: 0.55,
-    clearcoatRoughness: 0.3,
-    sheen: 0.5,
-    sheenRoughness: 0.45,
-    sheenColor: new THREE.Color(0xffffff),
-  });
-  m.emissive.set(map ? 0x1e1e1e : new THREE.Color(color).multiplyScalar(0.12));
-  if (map) m.emissiveMap = map;
-  return m;
-}
-
 // ----------------------------------------------------------------------------------- hats
 function hat(o: Outfit): THREE.Object3D | null {
   const h1 = o.h1 ?? 0xff4060, h2 = o.h2 ?? 0xffffff;
@@ -392,11 +322,133 @@ function hat(o: Outfit): THREE.Object3D | null {
   return g;
 }
 
+// ----------------------------------------------------------------------------------- shapes
+let G: ReturnType<typeof shapes> | null = null;
+/** limb sizes (m) */
+const ARM_A = 0.22, ARM_B = 0.2, ARM_R = 0.068, HAND_R = 0.105;
+const LEG_A = 0.15, LEG_B = 0.15, LEG_R = 0.088;
+function shapes() {
+  // the body: a tall soft bean turned round (the seam at the back), straight-sided, a round dome on top
+  const prof = new THREE.SplineCurve(
+    [
+      [0.001, 0.2],
+      [0.2, 0.215],
+      [0.34, 0.27],
+      [0.42, 0.4],
+      [0.445, 0.58],
+      [0.448, 0.86],
+      [0.44, 1.1],
+      [0.41, 1.3],
+      [0.34, 1.46],
+      [0.22, 1.565],
+      [0.1, 1.61],
+      [0.001, 1.62],
+    ].map(([x, y]) => new THREE.Vector2(x, y)),
+  );
+  const body = new THREE.LatheGeometry(prof.getPoints(48), 56).rotateY(Math.PI);
+  body.translate(0, -HIP_Y, 0);
+  // the limbs: one skinned mesh, three bones a limb (upper, lower, hand or foot), each part modelled
+  // pointing down -y from its bone
+  const parts: THREE.BufferGeometry[] = [];
+  const bone = (g: THREE.BufferGeometry, b: number) => {
+    const n = g.getAttribute('position').count;
+    const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      si[i * 4] = b;
+      sw[i * 4] = 1;
+    }
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    g.deleteAttribute('uv');
+    parts.push(g.index ? g.toNonIndexed() : g);
+  };
+  const seg = (r: number, len: number) => new THREE.CapsuleGeometry(r, len, 5, 12).translate(0, -len / 2, 0);
+  for (let L = 0; L < 4; L++) {
+    const arm = L < 2;
+    bone(seg(arm ? ARM_R : LEG_R, arm ? ARM_A : LEG_A), L * 3);
+    bone(seg(arm ? ARM_R * 0.92 : LEG_R * 0.92, arm ? ARM_B : LEG_B), L * 3 + 1);
+    // a round mitten; a chunky rounded boot pointing forward (+z)
+    if (arm) bone(new THREE.SphereGeometry(HAND_R, 16, 12).scale(1, 1.08, 0.9), L * 3 + 2);
+    else bone(new THREE.SphereGeometry(1, 18, 12).scale(0.125, 0.085, 0.185).translate(0, -0.02, 0.06), L * 3 + 2);
+  }
+  const limbs = mergeGeometries(parts)!;
+  const eye = new THREE.SphereGeometry(0.135, 28, 18).scale(1, 1.14, 0.6);
+  const pup = new THREE.SphereGeometry(0.07, 18, 12).scale(1, 1.12, 0.5);
+  const glint = new THREE.SphereGeometry(0.02, 8, 6).translate(0.025, 0.03, 0.035);
+  const paint = (g: THREE.BufferGeometry, c: number) => {
+    const col = new THREE.Color(c);
+    const n = g.getAttribute('position').count;
+    const a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) a.set([col.r, col.g, col.b], i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+    return g;
+  };
+  const pupil = mergeGeometries([paint(pup, 0x0b0b10), paint(glint, 0xffffff)]);
+  const smile = new THREE.TorusGeometry(0.085, 0.019, 8, 22, Math.PI * 0.9).rotateZ(Math.PI * 1.05);
+  const ooh = new THREE.SphereGeometry(0.06, 14, 10).scale(1, 1.25, 0.4);
+  const cheek = new THREE.SphereGeometry(0.065, 12, 8).scale(1.3, 0.8, 0.3);
+  const brow = new THREE.CapsuleGeometry(0.022, 0.1, 4, 8).rotateZ(Math.PI / 2);
+  return { body, limbs, eye, pupil, smile, ooh, cheek, brow };
+}
+
+const shared: Record<string, THREE.Material> = {};
+function sharedMats() {
+  if (shared.eye) return shared;
+  shared.eye = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.08 });
+  shared.pupil = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15 });
+  shared.mouth = new THREE.MeshStandardMaterial({ color: 0x3a0a14, roughness: 0.5 });
+  shared.brow = new THREE.MeshStandardMaterial({ color: 0x2a1a22, roughness: 0.6 });
+  shared.cheek = new THREE.MeshStandardMaterial({ color: 0xff8aa8, roughness: 0.7, transparent: true, opacity: 0.55, depthWrite: false });
+  return shared;
+}
+
+/**
+ * The jelly: a soft clearcoat over the painted skin, a little of its own colour glowing in the
+ * shade, light bleeding through the thin edges; `jig` (the body's wobble, metres at the top) shears
+ * the body, the more the higher up.
+ */
+function jelly(map: THREE.Texture | null, color: number, jig?: { value: THREE.Vector2 }) {
+  const m = new THREE.MeshPhysicalMaterial({
+    color: map ? 0xffffff : color,
+    map,
+    roughness: 0.38,
+    clearcoat: 0.7,
+    clearcoatRoughness: 0.22,
+    sheen: 0.6,
+    sheenRoughness: 0.4,
+    sheenColor: new THREE.Color(0xffffff),
+  });
+  m.emissive.set(map ? 0x1e1e1e : new THREE.Color(color).multiplyScalar(0.12));
+  if (map) m.emissiveMap = map;
+  m.onBeforeCompile = (sh) => {
+    if (jig) {
+      sh.uniforms.uJig = jig;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform vec2 uJig;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float jh = clamp(transformed.y / ${(TOP_Y - HIP_Y).toFixed(3)}, 0.0, 1.2);
+        transformed.xz += uJig * jh * jh;`);
+    }
+    // (the rim of a jelly glows with the light coming through it)
+    sh.fragmentShader = sh.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      { float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.5);
+        totalEmissiveRadiance += diffuseColor.rgb * rimF * 0.35; }`,
+    );
+  };
+  m.customProgramCacheKey = () => (jig ? 'bean-jig' : 'bean-limb');
+  return m;
+}
+
 // ----------------------------------------------------------------------------------- the rig
 const Q = new THREE.Quaternion();
 const Q2 = new THREE.Quaternion();
 const V = new THREE.Vector3();
+const V2 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
+const E = new THREE.Euler();
 
 /** a spring with a velocity (for the jelly) */
 class Spring {
@@ -414,6 +466,60 @@ class Spring {
   }
 }
 
+/**
+ * A limb: three points (the shoulder or hip, the elbow or knee, the hand or foot) simulated with
+ * Verlet — they carry their own momentum and fall under gravity, are pulled toward the pose the
+ * animation wants (hard when the bean is in control, hardly at all when it's knocked flying), and
+ * keep their lengths. So arms trail when it turns, flop when it lands, and fly about loose in a
+ * tumble, all on their own.
+ */
+class Limb {
+  p = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  o = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  private fresh = true;
+  constructor(
+    readonly a: number,
+    readonly b: number,
+    readonly r: number,
+  ) {}
+  step(dt: number, anchor: THREE.Vector3, tMid: THREE.Vector3, tEnd: THREE.Vector3, rate: number, floorY: number) {
+    const p = this.p, o = this.o;
+    if (this.fresh || p[0].distanceToSquared(anchor) > 4) {
+      p[0].copy(anchor);
+      p[1].copy(tMid);
+      p[2].copy(tEnd);
+      for (let i = 0; i < 3; i++) o[i].copy(p[i]);
+      this.fresh = false;
+      return;
+    }
+    p[0].copy(anchor);
+    const damp = Math.pow(0.9, dt * 60);
+    const pull = 1 - Math.exp(-rate * dt);
+    const g = 24 * dt * dt;
+    for (let i = 1; i < 3; i++) {
+      V.subVectors(p[i], o[i]).multiplyScalar(damp);
+      o[i].copy(p[i]);
+      p[i].add(V);
+      p[i].y -= g;
+      p[i].lerp(i === 1 ? tMid : tEnd, pull);
+    }
+    for (let it = 0; it < 3; it++) {
+      this.fix(p[0], p[1], this.a, 1);
+      this.fix(p[1], p[2], this.b, 0.5);
+      // (never through the floor under it)
+      for (let i = 1; i < 3; i++) if (p[i].y < floorY + this.r) p[i].y = floorY + this.r;
+    }
+  }
+  /** keeps b at `len` from a; `w`: b's share of the move (1: a is pinned) */
+  private fix(a: THREE.Vector3, b: THREE.Vector3, len: number, w: number) {
+    V.subVectors(b, a);
+    const d = V.length() || 1e-6;
+    const k = (d - len) / d;
+    b.addScaledVector(V, -k * w);
+    if (w < 1) a.addScaledVector(V, k * (1 - w));
+  }
+}
+
 export class BeanRig {
   readonly root = new THREE.Group();
   /** the body centre (for the TAA: it moves and turns with the bean) */
@@ -424,16 +530,19 @@ export class BeanRig {
   private tumbler = new THREE.Group();
   private inner = new THREE.Group();
   private hips = new THREE.Group();
-  private armL = new THREE.Group();
-  private armR = new THREE.Group();
-  private legL = new THREE.Group();
-  private legR = new THREE.Group();
+  /** what rides on the wobble: the face (part way up) and the hat (the top) */
+  private face = new THREE.Group();
+  private crownG = new THREE.Group();
   private eyes = new THREE.Group();
   private pupils: THREE.Mesh;
   private smile: THREE.Mesh;
   private ooh: THREE.Mesh;
+  private brows: THREE.Mesh[] = [];
   private prop: THREE.Object3D | null = null;
   private mats: THREE.Material[] = [];
+  private limbMesh: THREE.SkinnedMesh;
+  private bones: THREE.Bone[] = [];
+  private limbs: Limb[];
   // the animation state
   private phase = Math.random() * 6;
   private yaw = 0;
@@ -441,10 +550,15 @@ export class BeanRig {
   private tBlend = 0;
   private lean = new Spring(90, 9);
   private side = new Spring(80, 8);
-  private squash = new Spring(260, 11);
+  private squash = new Spring(260, 10);
+  /** the jelly wobble: the top's offset (hips frame x, z) on a soft spring */
+  private jig = { value: new THREE.Vector2() };
+  private jv = new THREE.Vector2();
   private pup = { x: 0, y: 0, vx: 0, vy: 0 };
   private prevVel = new THREE.Vector3();
   private wasGround = true;
+  private floorY = -1e9;
+  private floorT = 9;
   private blinkT = 2 + Math.random() * 3;
   private lookT = 0;
   private lookX = 0;
@@ -453,7 +567,7 @@ export class BeanRig {
   private air = 0;
   private hold = 0;
   private held = 0;
-  private stepAcc = 0;
+  private flop = 0;
   /** set by the game: a pose for the shows (results, the crown) */
   pose: 'win' | 'sad' | 'wave' | null = null;
   /** a foot hit the ground this frame (for the patter) */
@@ -463,7 +577,7 @@ export class BeanRig {
     this.outfit = outfit;
     G ??= shapes();
     const S = sharedMats();
-    const body = jelly(skin(outfit), outfit.a);
+    const body = jelly(skin(outfit), outfit.a, this.jig);
     const limb = jelly(null, outfit.limb ?? outfit.a);
     this.mats.push(body, limb);
     const mesh = (g: THREE.BufferGeometry, m: THREE.Material, shadow = true) => {
@@ -476,56 +590,60 @@ export class BeanRig {
     this.tumbler.add(this.inner);
     this.inner.position.y = -CORE_Y;
     this.tumbler.position.y = CORE_Y;
-    this.inner.add(this.hips, this.legL, this.legR);
+    this.inner.add(this.hips);
     this.hips.position.y = HIP_Y;
     this.hips.add(mesh(G.body, body));
     this.core.position.y = CORE_Y - HIP_Y;
+    this.hips.add(this.core, this.face, this.crownG);
     this.top.position.y = TOP_Y - HIP_Y;
-    this.hips.add(this.core, this.top);
+    this.crownG.add(this.top);
     // the face
-    const fy = 1.12 - HIP_Y;
+    const fy = FACE_Y - HIP_Y;
     for (const s of [-1, 1]) {
       const e = mesh(G.eye, S.eye, false);
-      e.position.set(s * 0.135, fy, 0.355);
-      e.rotation.y = s * 0.28;
+      e.position.set(s * 0.15, fy, 0.36);
+      e.rotation.y = s * 0.3;
       this.eyes.add(e);
+      const br = mesh(G.brow, S.brow, false);
+      br.position.set(s * 0.16, fy + 0.2, 0.39);
+      br.rotation.y = s * 0.3;
+      this.brows.push(br);
+      this.face.add(br);
     }
-    this.hips.add(this.eyes);
-    this.pupils = new THREE.Mesh(mergeGeometries([G.pupil.clone().translate(-0.135, 0, 0), G.pupil.clone().translate(0.135, 0, 0)]), S.pupil);
-    this.pupils.position.set(0, fy, 0.43);
-    this.hips.add(this.pupils);
+    this.face.add(this.eyes);
+    this.pupils = new THREE.Mesh(mergeGeometries([G.pupil.clone().translate(-0.15, 0, 0), G.pupil.clone().translate(0.15, 0, 0)]), S.pupil);
+    this.pupils.position.set(0, fy, 0.44);
+    this.face.add(this.pupils);
     this.smile = mesh(G.smile, S.mouth, false);
-    this.smile.position.set(0, 0.955 - HIP_Y, 0.435);
-    this.smile.rotation.x = -0.25;
+    this.smile.position.set(0, fy - 0.19, 0.43);
+    this.smile.rotation.x = -0.22;
     this.ooh = mesh(G.ooh, S.mouth, false);
-    this.ooh.position.set(0, 0.94 - HIP_Y, 0.435);
+    this.ooh.position.set(0, fy - 0.2, 0.43);
     this.ooh.visible = false;
-    this.hips.add(this.smile, this.ooh);
+    this.face.add(this.smile, this.ooh);
     for (const s of [-1, 1]) {
       const c = mesh(G.cheek, S.cheek, false);
-      c.position.set(s * 0.25, 0.99 - HIP_Y, 0.37);
-      c.rotation.y = s * 0.6;
-      this.hips.add(c);
+      c.position.set(s * 0.27, fy - 0.14, 0.355);
+      c.rotation.y = s * 0.62;
+      this.face.add(c);
     }
-    // arms and legs
-    for (const [arm, s] of [
-      [this.armL, 1],
-      [this.armR, -1],
-    ] as const) {
-      arm.position.set(s * 0.4, 0.86 - HIP_Y, 0);
-      arm.add(mesh(G.arm, limb));
-      this.hips.add(arm);
+    // the limbs: twelve free bones (not in the scene graph: the rig sets their matrices itself)
+    for (let k = 0; k < 12; k++) {
+      const b = new THREE.Bone();
+      b.matrixAutoUpdate = false;
+      b.matrixWorldAutoUpdate = false;
+      this.bones.push(b);
     }
-    for (const [leg, s] of [
-      [this.legL, 1],
-      [this.legR, -1],
-    ] as const) {
-      leg.position.set(s * 0.17, HIP_Y - 0.01, 0);
-      leg.add(mesh(G.leg, limb));
-    }
+    this.limbMesh = new THREE.SkinnedMesh(G.limbs, limb);
+    this.limbMesh.bind(new THREE.Skeleton(this.bones, this.bones.map(() => new THREE.Matrix4())), new THREE.Matrix4());
+    this.limbMesh.castShadow = true;
+    this.limbMesh.receiveShadow = true;
+    this.limbMesh.frustumCulled = false;
+    this.root.add(this.limbMesh);
+    this.limbs = [new Limb(ARM_A, ARM_B, HAND_R), new Limb(ARM_A, ARM_B, HAND_R), new Limb(LEG_A, LEG_B, 0.08), new Limb(LEG_A, LEG_B, 0.08)];
     const h = hat(outfit);
     if (h) {
-      this.hips.add(h);
+      this.crownG.add(h);
       h.traverse((o) => {
         if (o.userData.spin) this.prop = o;
       });
@@ -534,16 +652,22 @@ export class BeanRig {
 
   dispose() {
     for (const m of this.mats) m.dispose();
+    this.limbMesh.skeleton.dispose();
   }
 
   /** puts the rig where the body is, and moves it */
   update(m: Marble, dt: number, t: number) {
+    dt = Math.min(dt, 1 / 20);
     const tumbling = m.mode === Mode.Tumble;
     const diving = m.mode === Mode.Dive;
     const grounded = m.groundT < 0.12;
     // where: the feet sphere's bottom; tumbling, the body centre on the ball's
     this.root.position.copy(m.pos);
     this.root.position.y -= 0.5;
+    if (m.groundT < 0.2) {
+      this.floorY = m.pos.y - 0.5;
+      this.floorT = 0;
+    } else if ((this.floorT += dt) > 0.6) this.floorY = -1e9;
     // the turn: standing, the facing; tumbling, the physics' own orientation
     if (tumbling) {
       if (this.tBlend === 0) this.yaw = m.yaw;
@@ -552,19 +676,20 @@ export class BeanRig {
       this.tBlend = 1;
     } else {
       if (this.tBlend > 0) {
-        // (out of a tumble: from where it lay to upright, quickly)
+        // (out of a tumble: from where it lay to upright, with a wobble)
         if (this.tBlend === 1) {
           Q.setFromAxisAngle(UP, this.yaw).multiply(this.tq);
           this.yaw = m.yaw;
           this.tq.copy(Q2.setFromAxisAngle(UP, -this.yaw).multiply(Q));
+          this.squash.v -= 4;
         }
-        this.tBlend = Math.max(0, this.tBlend - dt * 4.5);
-        this.tq.slerp(Q.identity(), 1 - Math.exp(-dt * 16));
+        this.tBlend = Math.max(0, this.tBlend - dt * 4);
+        this.tq.slerp(Q.identity(), 1 - Math.exp(-dt * 13));
         if (this.tBlend === 0) this.tq.identity();
       }
       let d = m.yaw - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      this.yaw += d * Math.min(1, dt * 18);
+      this.yaw += d * Math.min(1, dt * 16);
     }
     this.root.rotation.y = this.yaw;
     this.tumbler.quaternion.copy(this.tq);
@@ -576,119 +701,188 @@ export class BeanRig {
     const speed = Math.hypot(rvx, rvz);
     const ax = (m.vel.x - this.prevVel.x) / Math.max(dt, 1e-3), az = (m.vel.z - this.prevVel.z) / Math.max(dt, 1e-3), ay = (m.vel.y - this.prevVel.y) / Math.max(dt, 1e-3);
     this.prevVel.copy(m.vel);
-    const aF = THREE.MathUtils.clamp(ax * fx + az * fz, -60, 60), aS = THREE.MathUtils.clamp(ax * fz - az * fx, -60, 60);
-    // landing and take-off: squash and stretch
-    if (grounded && !this.wasGround && !tumbling) this.squash.v -= Math.min(9, 1.5 + Math.abs(m.landed || 6) * 0.5);
-    if (!grounded && this.wasGround && m.vel.y > 3) this.squash.v += 5;
+    const aF = THREE.MathUtils.clamp(ax * fx + az * fz, -80, 80), aS = THREE.MathUtils.clamp(ax * fz - az * fx, -80, 80);
+    // landing and take-off: squash and stretch (a hard landing squashes more)
+    if (grounded && !this.wasGround && !tumbling) this.squash.v -= Math.min(10, 2 + Math.abs(m.landed || 6) * 0.6);
+    if (!grounded && this.wasGround && m.vel.y > 3) this.squash.v += 5.5;
     this.wasGround = grounded;
-    const sq = 1 + this.squash.step(0, dt);
-    const k = (x: number, rate: number) => 1 - Math.exp(-dt * rate) + 0 * x;
-    this.dive += ((diving ? 1 : 0) - this.dive) * k(0, diving ? 16 : 9);
-    this.air += ((!grounded && !tumbling ? 1 : 0) - this.air) * k(0, 10);
-    this.hold += ((m.holding ? 1 : 0) - this.hold) * k(0, 12);
-    this.held += ((m.heldT > 0 ? 1 : 0) - this.held) * k(0, 12);
+    const sq = 1 + THREE.MathUtils.clamp(this.squash.step(0, dt), -0.35, 0.3);
+    // the wobble: the top lags every change of speed and swings back past the middle
+    if (!tumbling) {
+      const J = this.jig.value;
+      const k = 150, dmp = 7;
+      // (hips frame: +x is the bean's left, +z forward)
+      this.jv.x += (-J.x * k - this.jv.x * dmp + aS * 0.012) * dt;
+      this.jv.y += (-J.y * k - this.jv.y * dmp - aF * 0.012) * dt;
+      J.x = THREE.MathUtils.clamp(J.x + this.jv.x * dt, -0.16, 0.16);
+      J.y = THREE.MathUtils.clamp(J.y + this.jv.y * dt, -0.16, 0.16);
+      if (m.knocked) this.jv.set((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);
+    } else this.jig.value.multiplyScalar(1 - Math.min(1, dt * 6));
+    const J = this.jig.value;
+    const fh = (FACE_Y - HIP_Y) / (TOP_Y - HIP_Y);
+    this.face.position.set(J.x * fh * fh, 0, J.y * fh * fh);
+    this.crownG.position.set(J.x, 0, J.y);
+    const ease = (target: number, cur: number, rate: number) => cur + (target - cur) * (1 - Math.exp(-dt * rate));
+    this.dive = ease(diving ? 1 : 0, this.dive, diving ? 16 : 8);
+    this.air = ease(!grounded && !tumbling ? 1 : 0, this.air, 10);
+    this.hold = ease(m.holding ? 1 : 0, this.hold, 12);
+    this.held = ease(m.heldT > 0 ? 1 : 0, this.held, 12);
+    // floppy: knocked over, the limbs go loose; they firm up as it gets back up
+    this.flop = tumbling ? 1 : ease(0, this.flop, 2.5);
 
     // the run: the stride from the speed over the ground
     const run = grounded && !tumbling && !diving ? Math.min(1, speed / 7) : 0;
     const prev = Math.sin(this.phase);
-    this.phase += dt * (speed * 1.55 + (run > 0.05 ? 3 : 0));
+    this.phase += dt * (speed * 1.6 + (run > 0.05 ? 3 : 0));
     this.step = run > 0.2 && Math.sign(Math.sin(this.phase)) !== Math.sign(prev);
-    void this.stepAcc;
     const sw = Math.sin(this.phase);
-    const bob = Math.abs(Math.cos(this.phase)) * 0.06 * run;
-    // lean into the run, wobble on every change of speed; the waddle side to side
-    const leanT = run * 0.2 - aF * 0.006 + this.held * -0.2;
+    const bob = Math.abs(Math.cos(this.phase)) * 0.07 * run;
+    // lean into the run, back on a stop; the waddle side to side
+    const leanT = run * 0.22 - aF * 0.005 + this.held * -0.2;
     const lean = this.lean.step(leanT, dt);
-    const side = this.side.step(sw * 0.1 * run + aS * 0.004, dt);
+    const side = this.side.step(sw * 0.11 * run + aS * 0.004, dt);
     const breathe = Math.sin(t * 2.4 + this.phase) * 0.012 * (1 - run);
     const s = sq + breathe;
     this.hips.scale.set(1 / Math.sqrt(s), s, 1 / Math.sqrt(s));
     this.hips.rotation.set(lean * (1 - this.dive) + this.dive * 1.38, 0, side * (1 - this.dive));
     this.hips.position.y = HIP_Y + bob + this.dive * 0.12;
-    this.inner.position.y = -CORE_Y;
+    if (this.pose === 'win') this.hips.position.y += Math.abs(Math.sin(t * 6)) * 0.2;
+    this.root.updateMatrixWorld(true);
 
-    // arms: swing with the stride; up in the air; reaching out in a grab; forward in a dive
+    // ---- the limbs: the pose wanted (hips frame), then the simulation
     const fl = Math.sin(t * 17 + this.phase);
-    const tumbleFl = tumbling ? 1 : 0;
-    const flail = Math.max(tumbleFl, this.held, this.air * (m.vel.y < -7 ? 1 : 0.35));
-    for (const [arm, sgn] of [
-      [this.armL, 1],
-      [this.armR, -1],
-    ] as const) {
-      let rx = -sw * sgn * 0.9 * run;
-      let rz = sgn * (0.22 + run * 0.12);
-      // the air: arms flung up and out
-      rz = THREE.MathUtils.lerp(rz, sgn * (1.9 + fl * sgn * 0.45 * flail), this.air);
+    const flail = Math.max(this.held, this.air * (m.vel.y < -7 ? 1 : 0.35));
+    const hm = this.hips.matrixWorld;
+    const toW = (x: number, y: number, z: number, out: THREE.Vector3) => out.set(x, y, z).applyMatrix4(hm);
+    const anchor = new THREE.Vector3(), mid = new THREE.Vector3(), end = new THREE.Vector3();
+    const dir = (rx: number, rz: number, out: THREE.Vector3) => out.copy(DOWN).applyEuler(E.set(rx, 0, rz));
+    const jl = (h: number) => (h / (TOP_Y - HIP_Y)) ** 2;
+    // how hard each limb is held to its pose (per second)
+    const rate = THREE.MathUtils.lerp(this.air > 0.5 ? 14 : 34, 0.8, this.flop);
+    for (let L = 0; L < 2; L++) {
+      const sgn = L === 0 ? 1 : -1;
+      let rx = -sw * sgn * 0.95 * run;
+      let rz = sgn * (0.28 + run * 0.12);
+      let bend = 0.35 + run * 0.5;
+      rz = THREE.MathUtils.lerp(rz, sgn * (2.0 + fl * sgn * 0.45 * flail), this.air);
       rx = THREE.MathUtils.lerp(rx, fl * sgn * 0.5 * flail, this.air);
-      // tumbling, held: windmilling
-      if (flail > 0.5 && !this.air) {
-        rz = sgn * (1.2 + Math.sin(t * 19 + sgn) * 0.9);
-        rx = Math.sin(t * 15 + sgn * 2) * 1.2;
+      if (this.held > 0.5) {
+        rz = sgn * (1.3 + Math.sin(t * 19 + sgn) * 0.8);
+        rx = Math.sin(t * 15 + sgn * 2) * 1.1;
       }
-      // a grab: both arms out in front
-      rx = THREE.MathUtils.lerp(rx, -1.45, this.hold);
-      rz = THREE.MathUtils.lerp(rz, sgn * 0.12, this.hold);
-      // a dive: arms forward past the head
+      rx = THREE.MathUtils.lerp(rx, -1.5, this.hold);
+      rz = THREE.MathUtils.lerp(rz, sgn * 0.14, this.hold);
+      bend = THREE.MathUtils.lerp(bend, 0.1, this.hold);
       rx = THREE.MathUtils.lerp(rx, -2.9, this.dive);
       rz = THREE.MathUtils.lerp(rz, sgn * 0.3, this.dive);
+      bend = THREE.MathUtils.lerp(bend, 0, this.dive);
       if (this.pose === 'win') {
         rx = -0.2;
         rz = sgn * (2.6 + Math.sin(t * 9 + sgn) * 0.35);
+        bend = 0.2;
       } else if (this.pose === 'wave' && sgn < 0) {
         rx = -0.3;
         rz = -2.4 + Math.sin(t * 8) * 0.4;
+        bend = 0.6 + Math.sin(t * 8) * 0.3;
       } else if (this.pose === 'sad') {
         rx = 0.15;
-        rz = sgn * 0.08;
+        rz = sgn * 0.1;
+        bend = 0.1;
       }
-      arm.rotation.set(rx, 0, rz);
+      const sy = SHOULDER_Y - HIP_Y, j = jl(sy);
+      toW(sgn * 0.44 + J.x * j, sy, J.y * j, anchor);
+      dir(rx, rz, V2);
+      const ls = new THREE.Vector3(sgn * 0.44 + J.x * j, sy, J.y * j).addScaledVector(V2, ARM_A);
+      toW(ls.x, ls.y, ls.z, mid);
+      dir(rx - bend, rz, V2);
+      ls.addScaledVector(V2, ARM_B + HAND_R * 0.6);
+      toW(ls.x, ls.y, ls.z, end);
+      this.limbs[L].step(dt, anchor, mid, end, rate, this.floorY);
     }
-    // legs: the stride; dangling and kicking in the air; straight out behind in a dive
-    for (const [leg, sgn] of [
-      [this.legL, 1],
-      [this.legR, -1],
-    ] as const) {
-      let rx = sw * sgn * 0.85 * run;
-      rx = THREE.MathUtils.lerp(rx, 0.35 + Math.sin(t * 13 + sgn * 1.5) * 0.4 * flail, this.air);
-      if (tumbling) rx = Math.sin(t * 14 + sgn * 2) * 0.9;
-      rx = THREE.MathUtils.lerp(rx, 1.25, this.dive);
-      leg.rotation.set(rx, 0, sgn * 0.04);
-      // (in a dive the legs hang off the hips, which have pitched forward)
-      leg.position.set(sgn * 0.17, HIP_Y - 0.01 + this.dive * 0.1, -this.dive * 0.18);
+    for (let L = 2; L < 4; L++) {
+      const sgn = L === 2 ? 1 : -1;
+      let rx = sw * sgn * 0.9 * run;
+      // (the knee bends as the foot comes forward off the ground)
+      let knee = Math.max(0, Math.sin(this.phase + (sgn > 0 ? 0 : Math.PI)) * 1.3 * run);
+      rx = THREE.MathUtils.lerp(rx, 0.3 + Math.sin(t * 13 + sgn * 1.5) * 0.45 * flail, this.air);
+      knee = THREE.MathUtils.lerp(knee, 0.7, this.air);
+      rx = THREE.MathUtils.lerp(rx, 1.3, this.dive);
+      knee = THREE.MathUtils.lerp(knee, 0.2, this.dive);
+      const hy = 0.0, j = jl(0.05);
+      toW(sgn * 0.17 + J.x * j, hy, J.y * j, anchor);
+      dir(rx, sgn * 0.05, V2);
+      const ls = new THREE.Vector3(sgn * 0.17, hy, 0).addScaledVector(V2, LEG_A);
+      toW(ls.x, ls.y, ls.z, mid);
+      dir(rx - knee, sgn * 0.05, V2);
+      ls.addScaledVector(V2, LEG_B + 0.04);
+      toW(ls.x, ls.y, ls.z, end);
+      this.limbs[L].step(dt, anchor, mid, end, rate * 1.2, this.floorY);
     }
-    if (this.pose === 'win') this.hips.position.y += Math.abs(Math.sin(t * 6)) * 0.2;
+    // ---- the bones from the simulated points (world space: an attached skin cancels its own matrix)
+    const fwd = new THREE.Vector3(fx, 0, fz);
+    for (let L = 0; L < 4; L++) {
+      const p = this.limbs[L].p;
+      for (let k = 0; k < 3; k++) {
+        const b = this.bones[L * 3 + k];
+        const from = p[Math.min(k, 2)];
+        let ydir: THREE.Vector3;
+        if (k < 2) ydir = V.subVectors(p[k], p[k + 1]);
+        else ydir = V.subVectors(p[1], p[2]);
+        ydir.normalize();
+        // a foot stays flat-ish and points forward; a hand follows its forearm
+        if (L >= 2 && k === 2) {
+          const flat = 1 - this.flop * 0.8;
+          ydir.lerp(UP, flat).normalize();
+          const z = V2.copy(fwd).addScaledVector(ydir, -fwd.dot(ydir)).normalize();
+          const x = new THREE.Vector3().crossVectors(ydir, z);
+          b.matrixWorld.makeBasis(x, ydir, z).setPosition(from);
+        } else {
+          Q.setFromUnitVectors(UP, ydir);
+          b.matrixWorld.compose(from, Q, ONE);
+        }
+      }
+    }
 
-    // the face: googly pupils on springs, blinks, a mouth that drops open when things go wrong
+    // ---- the face: googly pupils on springs, blinks, brows, a mouth that drops open when things go wrong
     const p = this.pup;
     const kx = -aS * 0.0016, ky = -(ay + 24) * 0.0009 * (grounded ? 0.3 : 1);
     this.lookT -= dt;
     if (this.lookT <= 0) {
       this.lookT = 0.6 + Math.random() * 2.2;
-      this.lookX = (Math.random() - 0.5) * 0.04;
-      this.lookY = (Math.random() - 0.4) * 0.025;
+      this.lookX = (Math.random() - 0.5) * 0.045;
+      this.lookY = (Math.random() - 0.4) * 0.028;
     }
-    const tx = this.lookX * (1 - run) + (tumbling ? Math.sin(t * 20) * 0.04 : 0), ty = this.lookY * (1 - run) + (tumbling ? Math.cos(t * 20) * 0.04 : 0);
+    const tx = this.lookX * (1 - run) + (tumbling ? Math.sin(t * 20) * 0.045 : 0), ty = this.lookY * (1 - run) + (tumbling ? Math.cos(t * 20) * 0.045 : 0);
     p.vx += ((tx - p.x) * 320 - p.vx * 14 + kx * 320) * dt;
     p.vy += ((ty - p.y) * 320 - p.vy * 14 + ky * 320) * dt;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     const pl = Math.hypot(p.x, p.y);
-    if (pl > 0.045) (p.x *= 0.045 / pl), (p.y *= 0.045 / pl);
+    if (pl > 0.05) (p.x *= 0.05 / pl), (p.y *= 0.05 / pl);
     this.pupils.position.x = p.x;
-    this.pupils.position.y = 1.12 - HIP_Y + p.y;
+    this.pupils.position.y = FACE_Y - HIP_Y + p.y;
     this.blinkT -= dt;
     const blink = this.blinkT < 0.12 && this.blinkT > 0 ? 0.12 : 1;
     if (this.blinkT < 0) this.blinkT = 1.5 + Math.random() * 4;
     this.eyes.scale.y = blink;
     this.pupils.visible = blink > 0.5;
     const shock = tumbling || this.held > 0.5 || (this.air > 0.5 && m.vel.y < -9) || this.pose === 'sad';
+    const fierce = this.dive > 0.5 || this.hold > 0.5;
     this.smile.visible = !shock;
     this.ooh.visible = shock;
     this.smile.scale.setScalar(this.pose === 'win' ? 1.4 : 1);
+    // brows: up in a fright, down and in when it means it, a happy lift on the podium
+    this.brows.forEach((br, i) => {
+      const sgn = i === 0 ? -1 : 1;
+      const tilt = fierce ? -sgn * 0.45 : shock ? sgn * 0.35 : this.pose === 'win' ? sgn * 0.2 : 0;
+      const lift = shock ? 0.05 : fierce ? -0.03 : this.pose === 'win' ? 0.03 : 0;
+      br.rotation.z = ease(tilt, br.rotation.z, 18);
+      br.position.y = ease(FACE_Y - HIP_Y + 0.2 + lift, br.position.y, 18);
+    });
     if (this.prop) this.prop.rotation.y += dt * (8 + speed * 2.5 + this.air * 20);
-    void V;
   }
 }
+const ONE = new THREE.Vector3(1, 1, 1);
 
 /** a bean that stands still and cheers (the giant ones on the pegs out in the paint) */
 export function beanStatue(o: Outfit): THREE.Object3D {
@@ -697,8 +891,9 @@ export function beanStatue(o: Outfit): THREE.Object3D {
   const m = new Marble(-1);
   m.groundT = 0;
   m.pos.set(0, 0.5, 0);
-  rig.update(m, 1 / 60, 0.4);
+  for (let k = 0; k < 30; k++) rig.update(m, 1 / 60, 0.4 + k / 60);
   rig.root.position.set(0, 0, 0);
+  rig.root.updateMatrixWorld(true);
   rig.root.traverse((x) => {
     x.castShadow = false;
   });

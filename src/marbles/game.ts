@@ -7,7 +7,7 @@ import { buildRound, dealShow, setShow, DEFAULT_SHOW, POOL, ROUNDS, SHOW, type C
 import { TeamPlay } from './team.ts';
 import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
-import { Confetti, Splashes } from './fx.ts';
+import { Confetti, Puffs, Splashes } from './fx.ts';
 import { DASH_CD, Marble, Mode } from './physics.ts';
 import { Stage } from './render.ts';
 import { ordinal, UI, type Row } from './ui.ts';
@@ -82,6 +82,7 @@ export class MarbleGame {
   private level: Level = level(readPref());
   private roundIdx = 0;
   private teamPlay: TeamPlay | null = null;
+  private puffs = new Puffs();
   /** test links: no round wheel */
   private quick = false;
   private state: State = 'menu';
@@ -95,6 +96,10 @@ export class MarbleGame {
   private paused = false;
   private camYaw = 0;
   private yawOff = 0;
+  /** the camera's tilt (mouse or right stick): up looks down from higher */
+  private pitchOff = 0;
+  /** the player has taken the camera: it stays where they put it */
+  private manualCam = false;
   private dragging = false;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
@@ -145,7 +150,7 @@ export class MarbleGame {
     const r = this.renderer;
     progress(0.1, 'Mixing the paint');
     this.stage = new Stage(r, this.scene, this.camera);
-    this.scene.add(this.confetti.mesh, this.splashes.group);
+    this.scene.add(this.confetti.mesh, this.splashes.group, this.puffs.group);
     progress(0.3, 'Laying the planks');
     this.resize();
     // the menu's backdrop: the first course with marbles rolling about the start
@@ -165,7 +170,12 @@ export class MarbleGame {
       for (const x of this.roster) x.out = x.id >= FIELD - Number(q.get('cut') ?? 0);
       await this.startRound();
       if (q.get('go') === '1') this.toCountdown();
-    } else this.toMenu();
+    } else {
+      this.toMenu();
+      // an invite link: straight into the friend's party
+      const j = q.get('join');
+      if (j && /^[a-z0-9]{4}$/i.test(j)) this.joinParty(j.toUpperCase());
+    }
     r.setAnimationLoop(() => this.frame());
   }
 
@@ -192,12 +202,24 @@ export class MarbleGame {
     window.addEventListener('blur', () => this.keys.clear());
     this.canvas.addEventListener('pointerdown', (e) => {
       this.sound.start();
+      if (this.state === 'intro') this.pressed.add('Space');
+      // the mouse steers the camera (the pointer is locked to the game while you play; ESC lets it go)
+      if (e.pointerType === 'mouse' && this.state !== 'menu' && !this.paused && !document.pointerLockElement) {
+        const r = this.canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
+        r?.catch?.(() => undefined);
+        return;
+      }
       this.dragging = true;
       this.canvas.setPointerCapture(e.pointerId);
-      if (this.state === 'intro') this.pressed.add('Space');
     });
     this.canvas.addEventListener('pointermove', (e) => {
       if (this.dragging && e.pointerType === 'mouse') this.yawOff -= e.movementX * 0.006;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement !== this.canvas) return;
+      this.manualCam = true;
+      this.yawOff -= e.movementX * 0.0032;
+      this.pitchOff = THREE.MathUtils.clamp(this.pitchOff + e.movementY * 0.0026, -0.55, 0.9);
     });
     const up = () => (this.dragging = false);
     this.canvas.addEventListener('pointerup', up);
@@ -228,6 +250,7 @@ export class MarbleGame {
     if (this.state !== 'play' && this.state !== 'countdown' && this.state !== 'intro' && this.state !== 'over') return;
     this.paused = !this.paused;
     if (this.paused) this.keys.clear();
+    if (this.paused && document.pointerLockElement) document.exitPointerLock();
     this.ui.pause(this.paused, {
       onResume: () => this.togglePause(),
       onMusic: () => {
@@ -254,7 +277,7 @@ export class MarbleGame {
     for (const p of pads) {
       if (!p) continue;
       const x = Math.abs(p.axes[0]) > 0.15 ? p.axes[0] : 0, y = Math.abs(p.axes[1]) > 0.15 ? -p.axes[1] : 0;
-      return { x, y, jump: !!p.buttons[0]?.pressed, dash: !!(p.buttons[2]?.pressed || p.buttons[1]?.pressed), grab: !!(p.buttons[7]?.pressed || p.buttons[5]?.pressed || p.buttons[3]?.pressed), cam: Math.abs(p.axes[2] ?? 0) > 0.2 ? p.axes[2] : 0 };
+      return { x, y, jump: !!p.buttons[0]?.pressed, dash: !!(p.buttons[2]?.pressed || p.buttons[1]?.pressed), grab: !!(p.buttons[7]?.pressed || p.buttons[5]?.pressed || p.buttons[3]?.pressed), cam: Math.abs(p.axes[2] ?? 0) > 0.2 ? p.axes[2] : 0, tilt: Math.abs(p.axes[3] ?? 0) > 0.2 ? p.axes[3] : 0 };
     }
     return null;
   }
@@ -263,6 +286,7 @@ export class MarbleGame {
 
   // ------------------------------------------------------------------------------------- the show
   private toMenu() {
+    if (document.pointerLockElement) document.exitPointerLock();
     this.state = 'menu';
     this.stateT = 0;
     this.ui.hud(false);
@@ -578,7 +602,8 @@ export class MarbleGame {
   private controls() {
     const p = this.player();
     const pad = this.gamepad();
-    if (pad?.cam) this.yawOff -= pad.cam * 0.04;
+    if (pad?.cam) (this.yawOff -= pad.cam * 0.045), (this.manualCam = true);
+    if (pad?.tilt) this.pitchOff = THREE.MathUtils.clamp(this.pitchOff + pad.tilt * 0.025, -0.55, 0.9);
     if (!p || p.out || this.state === 'menu' || this.autopilot) return;
     const k = this.keys;
     let fx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
@@ -599,8 +624,9 @@ export class MarbleGame {
     if (inp.lengthSq() > 1) inp.normalize();
     const live = this.state === 'play' || this.state === 'over';
     let jump = this.pressed.has('Space') || !!t?.jump;
-    let dash = this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.pressed.has('ControlLeft') || !!t?.dash;
-    let grab = k.has('KeyE') || k.has('KeyF') || !!t?.grab;
+    // (the party-game layout: Ctrl dives, Shift grabs while held; C and E work too)
+    let dash = this.pressed.has('ControlLeft') || this.pressed.has('ControlRight') || this.pressed.has('KeyC') || !!t?.dash;
+    let grab = k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyE') || !!t?.grab;
     if (pad) {
       if (pad.jump && !this.padJump) jump = true;
       if (pad.dash && !this.padDash) dash = true;
@@ -756,7 +782,14 @@ export class MarbleGame {
         }
         continue;
       }
-      for (const cp of c.checkpoints) if (pr.s > cp + 1 && cp > r.cp && m.grounded && pr.d < 6) r.cp = cp;
+      for (const cp of c.checkpoints)
+        if (pr.s > cp + 1 && cp > r.cp && m.grounded && pr.d < 6) {
+          if (r.c.player && r.cp > 0 && this.state === 'play') {
+            this.ui.note('Checkpoint!', 1100);
+            this.sound.notes([76, 81], 0.06, 0.18, true);
+          }
+          r.cp = cp;
+        }
       if (!r.fin && !r.pend && pr.s >= c.finishS && pr.d < 8 && this.state === 'play') {
         if (this.guest) {
           // (the host gives out the places)
@@ -913,6 +946,8 @@ export class MarbleGame {
 
   private toResults() {
     const c = this.course!;
+    // (the cursor back for the buttons)
+    if (document.pointerLockElement) document.exitPointerLock();
     const final = c.kind === 'final';
     const p = this.player();
     this.host?.broadcast({ t: final ? 'champion' : 'results' });
@@ -1390,6 +1425,18 @@ export class MarbleGame {
     this.stage.update(dt, t);
     this.confetti.update(dt, t);
     this.splashes.update(dt);
+    // dust and stars: hard landings, dives, knock-downs (whoever's near enough to see)
+    for (const r of this.racers) {
+      const m = r.m;
+      if (!m.active || !r.rig.root.visible || m.pos.distanceToSquared(cam.position) > 45 * 45) continue;
+      const feet = V_FEET.copy(m.pos);
+      feet.y -= 0.5;
+      if (m.landed > 9) this.puffs.dust(feet, 7, 0.2 + Math.min(0.15, m.landed * 0.01), 2 + m.landed * 0.08);
+      if (m.dashed && m.groundT < 0.2) this.puffs.dust(feet, 5, 0.18, 1.8);
+      if (m.knocked) this.puffs.stars(m.pos);
+      if (r.rig.step && r.c.player && m.vel.lengthSq() > 40) this.puffs.dust(feet, 1, 0.12, 0.8);
+    }
+    this.puffs.update(dt);
     const crown = this.course?.crown;
     if (crown) crown.rotation.y += dt * 0.8;
   }
@@ -1413,7 +1460,7 @@ export class MarbleGame {
     if (!f) return;
     const m = f.m;
     const speed = m.vel.length();
-    if (!this.dragging) this.yawOff *= 1 - Math.min(1, dt * (c.plate ? 0.2 : 0.7));
+    if (!this.dragging && !this.manualCam) this.yawOff *= 1 - Math.min(1, dt * (c.plate ? 0.2 : 0.7));
     let want = this.camYaw;
     if (c.plate) {
       const d = m.pos.clone().sub(c.plate.center);
@@ -1428,10 +1475,12 @@ export class MarbleGame {
         want = lerpAngle(want, vy, 0.35);
       }
     }
-    this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
+    // (the player's camera holds still; otherwise it swings round behind the way ahead)
+    if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
     const yaw = this.camYaw + this.yawOff;
-    const dist = c.plate ? 8.6 : 5.5 + Math.min(speed, 20) * 0.06;
-    const hgt = c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035;
+    const pt = this.pitchOff;
+    const dist = (c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * 1.1);
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     const pos = new THREE.Vector3(tgt.x - Math.sin(yaw) * dist, tgt.y + hgt, tgt.z - Math.cos(yaw) * dist);
@@ -1604,6 +1653,7 @@ function lerpAngle(a: number, b: number, k: number) {
 }
 
 /** the round clocks: a race's time limit, how long a survival round lasts, the intro flyover */
+const V_FEET = new THREE.Vector3();
 const RACE_T = 180;
 const SURVIVE_T = 110;
 const TEAM_T = TEAM_ROUND_T;

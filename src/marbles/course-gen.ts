@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { CourseBuilder, Path, PAINT, type Cmd } from './builder.ts';
+import { CourseBuilder, Path, PAINT, cylAttr, type Cmd } from './builder.ts';
 import { arch, bumper, bunting, doorWall, frameQuat, hammer, kicker, peg, slider, startGate, sweeper } from './obstacles.ts';
-import { Pattern } from './shaders.ts';
+import { foamTheme, Pattern } from './shaders.ts';
 import { flippers, rollers, turnstile, windmill } from './obs-spin.ts';
 import { logRoll, seesaw, slideBridge, trampoline, wobblePlank } from './obs-move.ts';
 import { axe, wreckingBall } from './obs-swing.ts';
@@ -349,6 +349,32 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
     if (z.gaps) gaps.push(...z.gaps(ctx));
   }
   for (const g of linkGaps) gaps.push(t(g));
+  // checkpoint flags: a striped pole each side and a flag in the course's colour, waving
+  {
+    const th = foamTheme();
+    const poleM = b.paint({ a: PAINT.white, b: th.post, pattern: Pattern.Stripes, scale: 2.4 });
+    const flagM = new THREE.MeshStandardMaterial({ color: th.rail, roughness: 0.6, side: THREE.DoubleSide });
+    const tri = new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(0.95, -0.32), new THREE.Vector2(0, -0.64)]);
+    const flagG = new THREE.ShapeGeometry(tri);
+    cps.filter((s) => s > gateS + 2).forEach((s, k) => {
+      const i = path.index(s);
+      const hw = path.sec[i].w / 2;
+      for (const side of [-1, 1]) {
+        const base = path.at(s, side * (hw - 0.15), 0);
+        const pole = new THREE.Mesh(cylAttr(new THREE.CylinderGeometry(0.07, 0.09, 2.7, 12)), poleM);
+        pole.position.copy(base).add(new THREE.Vector3(0, 1.35, 0));
+        pole.castShadow = true;
+        b.group.add(pole);
+        const flag = new THREE.Mesh(flagG, flagM);
+        flag.position.copy(base).add(new THREE.Vector3(0, 2.65, 0));
+        flag.rotation.y = Math.atan2(path.T[i].x, path.T[i].z) + Math.PI / 2 + (side < 0 ? Math.PI : 0);
+        const y0 = flag.rotation.y;
+        b.animators.push((tt) => (flag.rotation.y = y0 + Math.sin(tt * 3.1 + k + side) * 0.3));
+        flag.castShadow = true;
+        b.group.add(flag);
+      }
+    });
+  }
   const [f0] = t('finish');
   const fs = f0 + 14;
   finishDressing(b, path, fs);

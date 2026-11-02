@@ -329,3 +329,88 @@ export class Splashes {
     }
   }
 }
+
+/**
+ * Little soft puffs of dust where a bean lands hard, kicks off a dive or skids, and a burst of
+ * spinning stars when one is knocked flat. One instanced mesh each, a fixed pool.
+ */
+export class Puffs {
+  readonly group = new THREE.Group();
+  private puff: THREE.InstancedMesh;
+  private star: THREE.InstancedMesh;
+  private P: { p: THREE.Vector3; v: THREE.Vector3; life: number; max: number; s: number; spin: number; star: boolean }[] = [];
+  private m = new THREE.Matrix4();
+  private q = new THREE.Quaternion();
+  private e = new THREE.Euler();
+  private sc = new THREE.Vector3();
+  private static N = 360;
+  constructor() {
+    const pm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.8, depthWrite: false });
+    this.puff = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 2), pm, Puffs.N);
+    const sh = new THREE.Shape();
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2 + Math.PI / 2, r = k % 2 ? 0.42 : 1;
+      if (k) sh.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      else sh.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    const sg = new THREE.ExtrudeGeometry(sh, { depth: 0.35, bevelEnabled: true, bevelSize: 0.12, bevelThickness: 0.12, bevelSegments: 2 });
+    sg.center();
+    this.star = new THREE.InstancedMesh(sg, new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xffb000, emissiveIntensity: 0.6, roughness: 0.35 }), 120);
+    for (const im of [this.puff, this.star]) {
+      im.count = 0;
+      im.frustumCulled = false;
+      this.group.add(im);
+    }
+  }
+  /** a ring of dust at a bean's feet */
+  dust(at: THREE.Vector3, n: number, size = 0.22, speed = 2.2) {
+    for (let k = 0; k < n && this.P.length < Puffs.N; k++) {
+      const a = (k / n) * Math.PI * 2 + Math.random() * 0.6;
+      const v = new THREE.Vector3(Math.cos(a) * speed * (0.6 + Math.random() * 0.6), 0.5 + Math.random() * 0.9, Math.sin(a) * speed * (0.6 + Math.random() * 0.6));
+      const life = 0.45 + Math.random() * 0.3;
+      this.P.push({ p: at.clone().add(new THREE.Vector3(Math.cos(a) * 0.25, 0.08, Math.sin(a) * 0.25)), v, life, max: life, s: size * (0.7 + Math.random() * 0.6), spin: 0, star: false });
+    }
+  }
+  /** knocked flat: stars fly out round the head */
+  stars(at: THREE.Vector3) {
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      const life = 0.8 + Math.random() * 0.3;
+      this.P.push({ p: at.clone().add(new THREE.Vector3(0, 1.2, 0)), v: new THREE.Vector3(Math.cos(a) * 2.6, 3 + Math.random() * 1.5, Math.sin(a) * 2.6), life, max: life, s: 0.13, spin: (Math.random() - 0.5) * 14, star: true });
+    }
+  }
+  update(dt: number) {
+    let np = 0, ns = 0;
+    for (let i = this.P.length - 1; i >= 0; i--) {
+      const o = this.P[i];
+      o.life -= dt;
+      if (o.life <= 0) {
+        this.P.splice(i, 1);
+        continue;
+      }
+      const k = o.life / o.max;
+      if (o.star) o.v.y -= 9 * dt;
+      else o.v.multiplyScalar(1 - Math.min(1, dt * 4));
+      o.p.addScaledVector(o.v, dt);
+      if (o.star) {
+        if (ns >= 120) continue;
+        this.q.setFromEuler(this.e.set(0, o.spin * o.life, o.spin * 0.3 * o.life));
+        const s = o.s * Math.min(1, k * 3);
+        this.m.compose(o.p, this.q, this.sc.set(s, s, s));
+        this.star.setMatrixAt(ns++, this.m);
+      } else {
+        // (a puff swells as it fades)
+        const s = o.s * (1.6 - k * 0.9) * Math.min(1, k * 4);
+        this.m.compose(o.p, this.q.identity(), this.sc.set(s, s * 0.8, s));
+        this.puff.setMatrixAt(np++, this.m);
+      }
+    }
+    this.puff.count = np;
+    this.star.count = ns;
+    this.puff.instanceMatrix.needsUpdate = true;
+    this.star.instanceMatrix.needsUpdate = true;
+  }
+  clear() {
+    this.P.length = 0;
+  }
+}
