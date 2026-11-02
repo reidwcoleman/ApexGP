@@ -781,10 +781,13 @@ and bots; the contestants are original bean characters, not marbles.
     moment after it's stood on, so you fall floor to floor; the tiles are cheap `World.pads`, the
     host sends the drop times) and Meltdown (one ice floe melting in from the edge with holes
     opening in it, the same on every screen; push the others in).
-  - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams paint tiles
-    their colour by walking over them; after 75 s the team with the least floor goes home. Paint
+  - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams on a big arena;
+    every bean leaves a trail of its team's paint as it runs (a dive smears a wider stripe, a
+    landing splats a blob), drawn from a fine paint map (25 cm texels, a channel per team) as glossy
+    raised paint with blobby edges; after 75 s the team with the least floor goes home. Paint
     bombs drop in every few seconds (the same spots in every browser): run into one and it splashes
-    your team's colour all round you. Online the host's floor is sent to everyone twice a second. Paint
+    your team's colour all round you. Online the host's floor (run-length coded) goes to everyone
+    once a second, never over what a guest has just painted itself. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
     bar that speeds up: hop it).
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.

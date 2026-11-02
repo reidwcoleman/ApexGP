@@ -31,7 +31,7 @@ export class TeamBrain {
       // a few looks round: the best tile to go and paint
       let best = -1e9;
       for (let k = 0; k < 18; k++) {
-        const a = this.rnd() * Math.PI * 2, r = 1.5 + this.rnd() * (3 + 6 * this.skill);
+        const a = this.rnd() * Math.PI * 2, r = 1.5 + this.rnd() * (4 + 8 * this.skill);
         const x = m.pos.x + Math.cos(a) * r, z = m.pos.z + Math.sin(a) * r;
         const i = A.cellAt(x, z);
         if (i < 0) continue;

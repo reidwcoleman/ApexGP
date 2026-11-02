@@ -9,10 +9,12 @@ import type { Course } from './courses.ts';
 import { dressArena } from './course-dress.ts';
 
 /**
- * The team round, Paint Party: a walled padded square split into tiles. The field is cut into
- * teams; a bean standing on a tile paints it its team's colour (over anyone else's). A turntable
- * with fins turns in the middle and bumpers pop beans about. When the clock runs out the team with
- * the least floor goes home.
+ * The team round, Paint Party: a big walled padded square (or Splat Ring, a round one). The field
+ * is cut into teams; every bean on its feet leaves a trail of its team's paint behind it as it runs
+ * (over anyone else's), a dive smears a wider stripe and a landing splats a blob. The paint lives
+ * in a fine map (a quarter of a metre a texel) drawn as wet, glossy, raised paint with soft blobby
+ * edges; the bots read a coarse grid summed from it. A turntable with fins turns in the middle
+ * and bumpers pop beans about. When the clock runs out the team with the least floor goes home.
  */
 
 export const TEAM_COLORS = [0xff4f9a, 0x2f9bff, 0xffc21f];
@@ -29,8 +31,10 @@ export interface TeamArena {
   teams: number;
   /** team of each bean (marble id) */
   of: Map<number, number>;
-  /** paints the tile under (x, z) for a team; true if it changed */
-  paint(x: number, z: number, team: number): boolean;
+  /** paints a round brush at (x, z) for a team; true if anything changed */
+  paint(x: number, z: number, team: number, r?: number): boolean;
+  /** paints a stroke from one point to another (a bean's step) */
+  stroke(x0: number, z0: number, x1: number, z1: number, team: number, r: number): boolean;
   cellAt(x: number, z: number): number;
   centreOf(i: number, out: THREE.Vector3): THREE.Vector3;
   counts(): number[];
@@ -63,7 +67,9 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
   };
   const b = new CourseBuilder();
   const center = new THREE.Vector3(0, 110, 0);
-  const N = 20, CELL = 1.4, HALF = (N * CELL) / 2;
+  // the coarse grid the bots read (N cells of CELL m) and the fine paint map (NF texels of F m)
+  const N = 28, CELL = 1.5, HALF = (N * CELL) / 2;
+  const F = 0.25, SUB = Math.round(CELL / F), NF = N * SUB;
   b.lakeY = center.y - 30;
   const state = { go: 1e9 };
   const th = foamTheme();
@@ -122,54 +128,127 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     ped.translate(center.x, (center.y + b.lakeY) / 2 - 1.2, center.z);
     b.batch.add(b.postWood, ped);
   }
-  // the tiles: a texture a texel a tile, drawn over the slab
+  // the paint: a fine map, one texel a quarter metre; a channel per team (so a filtered sample is
+  // each team's share there), and a coarse grid for the bots summed from it
   const cells = new Uint8Array(N * N);
-  const data = new Uint8Array(N * N * 4);
-  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const blank = new THREE.Color(0xf4eefc);
-  // (a round arena: only the tiles inside the ring are floor)
-  const valid = new Uint8Array(N * N);
+  const fine = new Uint8Array(NF * NF);
+  const data = new Uint8Array(NF * NF * 4);
+  const tex = new THREE.DataTexture(data, NF, NF, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.colorSpace = THREE.NoColorSpace;
+  const validF = new Uint8Array(NF * NF);
+  /** each texel's wobble (the same everywhere): the brush's edge goes in and out with it */
+  const wob = new Float32Array(NF * NF);
+  /** when this browser last painted a texel itself (the host's floor doesn't paint over that) */
+  const mineT = new Float32Array(NF * NF).fill(-1e9);
+  const ccount = new Uint16Array(N * N * 3);
+  const cvalid = new Uint16Array(N * N);
+  const tcount = [0, 0, 0];
   let total = 0;
-  for (let i = 0; i < N * N; i++) {
-    const x = -HALF + ((i % N) + 0.5) * CELL, z = -HALF + (Math.floor(i / N) + 0.5) * CELL;
-    const ok = !ROUND || Math.hypot(x, z) < HALF - 0.5;
-    const hub = ROUND ? 1.2 : 3.5;
-    valid[i] = ok && Math.hypot(x, z) > hub ? 1 : 0;
-    total += valid[i];
-  }
-  const cols = TEAM_COLORS.map((c) => new THREE.Color(c));
-  const setTexel = (i: number) => {
-    const c = cells[i] ? cols[cells[i] - 1] : blank;
-    // (checker the blank tiles a touch so the grid reads)
-    const k = cells[i] ? 1 : ((i % N) + Math.floor(i / N)) % 2 ? 0.93 : 1;
-    data[i * 4] = Math.round(c.r * 255 * k);
-    data[i * 4 + 1] = Math.round(c.g * 255 * k);
-    data[i * 4 + 2] = Math.round(c.b * 255 * k);
-    data[i * 4 + 3] = 255;
-  };
-  for (let i = 0; i < N * N; i++) setTexel(i);
+  const hub = ROUND ? 1.2 : 3.6;
+  for (let j = 0; j < NF; j++)
+    for (let i = 0; i < NF; i++) {
+      const x = -HALF + (i + 0.5) * F, z = -HALF + (j + 0.5) * F;
+      const r = Math.hypot(x, z);
+      const ok = (!ROUND || r < HALF - 0.45) && r > hub;
+      const k = j * NF + i;
+      validF[k] = ok ? 1 : 0;
+      wob[k] = 0.5 + 0.22 * Math.sin(x * 1.9 + Math.sin(z * 1.3) * 2) + 0.22 * Math.sin(z * 2.3 + Math.sin(x * 1.1) * 2) + 0.06 * Math.sin((x + z) * 7.1);
+      if (ok) {
+        total++;
+        cvalid[Math.floor(j / SUB) * N + Math.floor(i / SUB)]++;
+      }
+      data[k * 4 + 3] = 255;
+    }
   tex.needsUpdate = true;
-  const tileM = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.25, sheen: 0.4, sheenColor: new THREE.Color(0xffffff) });
-  // a soft groove round every tile, each tile puffed a little
+  const setFine = (k: number, v: number) => {
+    const old = fine[k];
+    if (old === v) return false;
+    fine[k] = v;
+    data[k * 4] = v === 1 ? 255 : 0;
+    data[k * 4 + 1] = v === 2 ? 255 : 0;
+    data[k * 4 + 2] = v === 3 ? 255 : 0;
+    const i = k % NF, j = Math.floor(k / NF);
+    const ci = Math.floor(j / SUB) * N + Math.floor(i / SUB);
+    if (old) (ccount[ci * 3 + old - 1]--, tcount[old - 1]--);
+    if (v) (ccount[ci * 3 + v - 1]++, tcount[v - 1]++);
+    // (the coarse cell: whoever has the most of it, if they have a good part of it)
+    let best = 0, bn = cvalid[ci] * 0.35;
+    for (let q = 0; q < 3; q++) if (ccount[ci * 3 + q] > bn) (bn = ccount[ci * 3 + q]), (best = q + 1);
+    cells[ci] = best;
+    return true;
+  };
+  /** a round brush of radius r at (x, z): wobbly edged; how many texels changed */
+  const stamp = (x: number, z: number, r: number, team: number, now: number) => {
+    const fx = (x - center.x + HALF) / F, fz = (z - center.z + HALF) / F;
+    const rr = (r * 1.25) / F;
+    const i0 = Math.max(0, Math.floor(fx - rr)), i1 = Math.min(NF - 1, Math.ceil(fx + rr));
+    const j0 = Math.max(0, Math.floor(fz - rr)), j1 = Math.min(NF - 1, Math.ceil(fz + rr));
+    let n = 0;
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        const k = j * NF + i;
+        if (!validF[k]) continue;
+        const d = Math.hypot(i + 0.5 - fx, j + 0.5 - fz) * F;
+        if (d > r * (0.78 + 0.44 * wob[k])) continue;
+        mineT[k] = now;
+        if (setFine(k, team + 1)) n++;
+      }
+    if (n) tex.needsUpdate = true;
+    return n;
+  };
+  const clock = () => performance.now() / 1000;
+  const T0 = new THREE.Color(TEAM_COLORS[0]), T1 = new THREE.Color(TEAM_COLORS[1]), T2 = new THREE.Color(TEAM_COLORS[2]);
+  const tileM = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.5, clearcoat: 0.6, clearcoatRoughness: 0.2, sheen: 0.3, sheenColor: new THREE.Color(0xffffff) });
+  // the floor: soft padded tiles where it's bare; where it's painted, glossy paint in the team's
+  // colour, with blobby edges (the filtered map's contour), a darker wet rim and a raised lip
   tileM.onBeforeCompile = (sh) => {
     sh.uniforms.uN = { value: N };
+    sh.uniforms.uNF = { value: NF };
+    sh.uniforms.uT0 = { value: T0 };
+    sh.uniforms.uT1 = { value: T1 };
+    sh.uniforms.uT2 = { value: T2 };
+    sh.uniforms.uBlank = { value: new THREE.Color(0xf4eefc) };
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uN;')
+      .replace('#include <common>', '#include <common>\nuniform float uN; uniform float uNF; uniform vec3 uT0, uT1, uT2, uBlank; float pcov;')
       .replace(
         '#include <map_fragment>',
-        `#include <map_fragment>
+        `vec2 pt = vec2(0.8 / uNF);
+        vec3 pw = (texture2D(map, vMapUv).rgb * 2.0 + texture2D(map, vMapUv + pt).rgb + texture2D(map, vMapUv - pt).rgb + texture2D(map, vMapUv + vec2(pt.x, -pt.y)).rgb + texture2D(map, vMapUv + vec2(-pt.x, pt.y)).rgb) / 6.0;
+        float psum = pw.r + pw.g + pw.b;
+        float paa = fwidth(psum) * 0.7 + 0.02;
+        pcov = smoothstep(0.5 - paa, 0.5 + paa, psum);
+        vec3 p4 = pw * pw; p4 *= p4;
+        vec3 pc = (p4.r * uT0 + p4.g * uT1 + p4.b * uT2) / max(p4.r + p4.g + p4.b, 1e-4);
         vec2 tg = fract(vMapUv * uN) - 0.5;
         float td = 0.5 - max(abs(tg.x), abs(tg.y));
         float tw = fwidth(vMapUv.x * uN);
-        diffuseColor.rgb *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.05 + tw, td));
-        diffuseColor.rgb *= 0.94 + 0.08 * (1.0 - pow(abs(2.0 * tg.x), 4.0)) * (1.0 - pow(abs(2.0 * tg.y), 4.0));`,
+        vec3 base = uBlank * (1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.05 + tw, td)));
+        base *= 0.95 + 0.06 * (1.0 - pow(abs(2.0 * tg.x), 4.0)) * (1.0 - pow(abs(2.0 * tg.y), 4.0));
+        // (the wet rim: a touch darker just inside the edge)
+        float rim = 1.0 - smoothstep(0.5, 0.85, psum);
+        pc *= 1.0 - 0.22 * rim;
+        diffuseColor.rgb = mix(base, pc, pcov);`,
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(roughness, 0.16, pcov);')
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        { float ph = smoothstep(0.3, 0.7, psum) * 0.035;
+          vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition); vec2 dh = vec2(dFdx(ph), dFdy(ph));
+          vec3 R1 = cross(sy, normal), R2 = cross(normal, sx); float det = dot(sx, R1);
+          normal = normalize(abs(det) * normal - sign(det) * (dh.x * R1 + dh.y * R2)); }`,
       );
   };
-  tileM.customProgramCacheKey = () => 'mm-tiles-1';
-  const tiles = new THREE.Mesh((ROUND ? new THREE.CircleGeometry(HALF, 128) : new THREE.PlaneGeometry(HALF * 2, HALF * 2)).rotateX(-Math.PI / 2), tileM);
+  tileM.customProgramCacheKey = () => 'mm-paint-3';
+  const floorG = (ROUND ? new THREE.CircleGeometry(HALF, 128) : new THREE.PlaneGeometry(HALF * 2, HALF * 2)).rotateX(-Math.PI / 2);
+  // (laid flat, the geometry's v runs toward -z; the paint map's rows run toward +z)
+  {
+    const uv = floorG.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+  }
+  const tiles = new THREE.Mesh(floorG, tileM);
   tiles.position.set(center.x, center.y + 0.012, center.z);
   tiles.receiveShadow = true;
   b.group.add(tiles);
@@ -180,10 +259,14 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     sweeper(b, center.clone(), up, { len: HALF * 2 - 0.9, height: 0.55, angle: barAngle, paint: { a: th.rail, b: PAINT.white, pattern: 2, scale: 1.4 }, hub: 0.9 });
   } else turntable(b, center.clone(), new THREE.Quaternion(), { r: 3.4, omega: 0.7, fins: 2, finH: 0.45 });
   for (const [x, z, c] of ROUND ? [] : [
-    [-7, -7, PAINT.pink],
-    [7, -7, PAINT.teal],
-    [-7, 7, PAINT.yellow],
-    [7, 7, PAINT.purple],
+    [-9, -9, PAINT.pink],
+    [9, -9, PAINT.teal],
+    [-9, 9, PAINT.yellow],
+    [9, 9, PAINT.purple],
+    [0, -13, PAINT.orange],
+    [0, 13, PAINT.green],
+    [-13, 0, PAINT.blue],
+    [13, 0, PAINT.red],
   ] as const) bumperAt(b, new THREE.Vector3(center.x + x, center.y, center.z + z), up, { r: 0.9, color: c });
   // the sign
   {
@@ -202,7 +285,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
   let teams = 3;
   const cellAt = (x: number, z: number) => {
     const i = Math.floor((x - center.x + HALF) / CELL), j = Math.floor((z - center.z + HALF) / CELL);
-    if (i < 0 || j < 0 || i >= N || j >= N || !valid[j * N + i]) return -1;
+    if (i < 0 || j < 0 || i >= N || j >= N || !cvalid[j * N + i]) return -1;
     return j * N + i;
   };
   const arena: TeamArena = {
@@ -219,42 +302,47 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     },
     of,
     cellAt,
-    paint(x, z, team) {
-      const i = cellAt(x, z);
-      if (i < 0 || cells[i] === team + 1) return false;
-      cells[i] = team + 1;
-      setTexel(i);
-      tex.needsUpdate = true;
-      return true;
+    paint(x, z, team, r = 0.95) {
+      return stamp(x, z, r, team, clock()) > 0;
+    },
+    stroke(x0, z0, x1, z1, team, r) {
+      const d = Math.hypot(x1 - x0, z1 - z0);
+      const steps = Math.max(1, Math.ceil(d / (r * 0.45)));
+      const now = clock();
+      let n = 0;
+      for (let k = 1; k <= steps; k++) n += stamp(x0 + ((x1 - x0) * k) / steps, z0 + ((z1 - z0) * k) / steps, r, team, now);
+      return n > 0;
     },
     splat(x, z, r, team) {
-      let n = 0;
-      for (let dz = -r; dz <= r + 1e-6; dz += CELL * 0.5)
-        for (let dx = -r; dx <= r + 1e-6; dx += CELL * 0.5) {
-          if (dx * dx + dz * dz > r * r) continue;
-          const i = cellAt(x + dx, z + dz);
-          if (i < 0 || cells[i] === team + 1) continue;
-          cells[i] = team + 1;
-          setTexel(i);
-          n++;
-        }
-      if (n) tex.needsUpdate = true;
-      return n;
+      return stamp(x, z, r, team, clock());
     },
+    // (run-length: a digit for the team and the run's length in base 36, then a dot)
     save() {
-      let out = '';
-      for (let i = 0; i < cells.length; i++) out += cells[i];
-      return out;
+      const out: string[] = [];
+      let v = fine[0], n = 0;
+      for (let k = 0; k <= fine.length; k++) {
+        if (k < fine.length && fine[k] === v) {
+          n++;
+          continue;
+        }
+        out.push(v + n.toString(36) + '.');
+        if (k < fine.length) (v = fine[k]), (n = 1);
+      }
+      return out.join('');
     },
     load(str) {
-      if (str.length !== cells.length) return;
-      let any = false;
-      for (let i = 0; i < cells.length; i++) {
-        const v = str.charCodeAt(i) - 48;
-        if (v < 0 || v > 3 || cells[i] === v || !valid[i]) continue;
-        cells[i] = v;
-        setTexel(i);
-        any = true;
+      const now = clock();
+      let k = 0, any = false;
+      for (const run of str.split('.')) {
+        if (!run) continue;
+        const v = run.charCodeAt(0) - 48;
+        const n = parseInt(run.slice(1), 36);
+        if (!(v >= 0 && v <= 3) || !(n > 0)) return;
+        for (let e = Math.min(fine.length, k + n); k < e; k++) {
+          // (not what this browser just painted: the host hasn't seen it yet)
+          if (!validF[k] || now - mineT[k] < 1.2) continue;
+          if (setFine(k, v)) any = true;
+        }
       }
       if (any) tex.needsUpdate = true;
     },
@@ -270,9 +358,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
       return ROUND ? Math.hypot(cx, cz) > HALF - m : Math.abs(cx) > HALF - m || Math.abs(cz) > HALF - m;
     },
     counts() {
-      const c = [0, 0, 0];
-      for (let i = 0; i < cells.length; i++) if (cells[i]) c[cells[i] - 1]++;
-      return c.slice(0, teams);
+      return tcount.slice(0, teams);
     },
     base(team) {
       const a = (team / teams) * Math.PI * 2 + Math.PI / 2;

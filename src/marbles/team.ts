@@ -33,7 +33,7 @@ interface Pickup {
   born: number;
 }
 /** the k-th paint bomb drops at GO + FIRST + k·EVERY, and lies there until it's taken or LIFE runs out */
-const FIRST = 4, EVERY = 4.5, LIFE = 14, SPLAT_R = 2.6;
+const FIRST = 4, EVERY = 4.5, LIFE = 14, SPLAT_R = 3.6;
 
 export class TeamPlay {
   private rings = new Map<number, THREE.Mesh>();
@@ -182,15 +182,34 @@ export class TeamPlay {
     return { name: TEAM_NAMES[t], color: TEAM_COLORS[t] };
   }
 
-  /** paint under every bean that's on its feet */
+  /** where each bean last painted (a stroke joins it to where it is now) */
+  private last = new Map<number, { x: number; z: number }>();
+  /**
+   * Paint: every bean on its feet leaves a trail of its team's colour as it runs (a stroke from
+   * where it last painted, so a fast run is a solid stripe); a belly slide smears a wider one, and
+   * coming down from a jump splats a blob.
+   */
   paint() {
     const now = performance.now();
+    const A = this.arena;
     for (const r of this.who()) {
       const m = r.m;
-      if (r.out || r.fell || !m.active || m.groundT > 0.12) continue;
-      if (this.arena.paint(m.pos.x, m.pos.z, this.teamOf(r.c.id)) && r.c.player && now - this.blipT > 70) {
+      const id = r.c.id;
+      const onFloor = m.pos.y - A.center.y < 0.9;
+      if (r.out || r.fell || !m.active || m.groundT > 0.12 || !onFloor) {
+        this.last.delete(id);
+        continue;
+      }
+      const team = this.teamOf(id);
+      const L = this.last.get(id);
+      const wide = m.mode === Mode.Dive ? 1.35 : m.mode === Mode.Tumble ? 1.1 : 0.95;
+      let did = L && Math.hypot(m.pos.x - L.x, m.pos.z - L.z) < 3 ? A.stroke(L.x, L.z, m.pos.x, m.pos.z, team, wide) : A.paint(m.pos.x, m.pos.z, team, wide);
+      if (m.landed > 5) did = A.splat(m.pos.x, m.pos.z, 1.2 + Math.min(1, (m.landed - 5) / 6) * 0.8, team) > 0 || did;
+      if (L) (L.x = m.pos.x), (L.z = m.pos.z);
+      else this.last.set(id, { x: m.pos.x, z: m.pos.z });
+      if (did && r.c.player && now - this.blipT > 90) {
         this.blipT = now;
-        this.sound.notes([72 + Math.floor(Math.random() * 3) * 2], 0, 0.06, true);
+        this.sound.notes([72 + Math.floor(Math.random() * 3) * 2], 0, 0.05, true);
       }
     }
   }

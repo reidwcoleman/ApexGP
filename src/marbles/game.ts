@@ -1405,7 +1405,7 @@ export class MarbleGame {
     // the team round: the host's floor to everyone twice a second (so every screen shows the same paint)
     if (this.host && this.teamPlay && (this.state === 'play' || this.state === 'over')) {
       this.tilesAcc += dt;
-      if (this.tilesAcc > 0.5) {
+      if (this.tilesAcc > 1) {
         this.tilesAcc = 0;
         this.host.broadcast({ t: 'tiles', c: this.teamPlay.arena.save() });
       }
@@ -1573,7 +1573,19 @@ export class MarbleGame {
     const speed = m.vel.length();
     if (!this.dragging && !this.manualCam) this.yawOff *= 1 - Math.min(1, dt * (c.plate ? 0.2 : 0.7));
     let want = this.camYaw;
-    if (c.plate) {
+    // the free arenas (Cookie Crumble, Meltdown, the paint rounds): behind you, turning with the way
+    // you run (only as much as you're running forward, so a sidestep doesn't spin it round)
+    const free = !!(c.crumble || c.team);
+    let freeK = 0;
+    if (free) {
+      const hs = Math.hypot(m.vel.x, m.vel.z);
+      if (hs > 2.2 && !f.fell) {
+        const vy = Math.atan2(m.vel.x, m.vel.z);
+        const fwd = Math.cos(vy - (this.camYaw + this.yawOff));
+        freeK = Math.max(0, fwd) * Math.min(1, (hs - 2.2) / 4);
+        want = vy - this.yawOff;
+      }
+    } else if (c.plate) {
       const d = m.pos.clone().sub(c.plate.center);
       d.y = 0;
       if (d.length() > 1) want = Math.atan2(-d.x, -d.z);
@@ -1587,13 +1599,15 @@ export class MarbleGame {
       }
     }
     // (the player's camera holds still; otherwise it swings round behind the way ahead)
-    if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
+    if (free) {
+      if (!this.dragging) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * 2.2 * freeK));
+    } else if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
     const yaw = this.camYaw + this.yawOff;
     const pt = this.pitchOff;
     // (Cookie Crumble: the floors above the one you're on fade away, and the camera looks down on yours)
     if (c.crumble) c.crumble.view(Math.max(0, c.crumble.layerAt(m.pos.y + (f.fell ? 0 : 0.3))), dt);
-    const dist = (c.crumble ? 8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
-    const hgt = (c.crumble ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
+    const dist = (c.crumble ? 7 : c.team ? 7.2 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.crumble ? 4.6 : c.team ? 4.2 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     const pos = new THREE.Vector3(tgt.x - Math.sin(yaw) * dist, tgt.y + hgt, tgt.z - Math.cos(yaw) * dist);
@@ -1603,9 +1617,9 @@ export class MarbleGame {
       const ex = (A.round ? Math.hypot(pos.x - A.center.x, pos.z - A.center.z) : Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z))) - (A.half - 0.5);
       if (ex > 0) pos.y += ex * 1.3;
     }
-    const look = c.crumble ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 1.6, 0.4, Math.cos(yaw) * 1.6)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
-    // (toward the middle; Cookie Crumble's middle at the height of the floor you're on)
-    if (c.plate) look.lerp(c.crumble ? new THREE.Vector3(c.plate.center.x, tgt.y, c.plate.center.z) : c.plate.center, 0.25);
+    // (the free arenas: a few metres out in front of you, at your feet's height)
+    const look = free ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.2, 0.5, Math.cos(yaw) * 3.2)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
+    if (c.plate && !free) look.lerp(c.plate.center, 0.25);
     if (this.snapCam) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
