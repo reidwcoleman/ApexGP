@@ -1590,9 +1590,10 @@ export class MarbleGame {
     if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
     const yaw = this.camYaw + this.yawOff;
     const pt = this.pitchOff;
-    // (Cookie Crumble: in close and low, under the floor above)
-    const dist = (c.crumble ? 7 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
-    const hgt = (c.crumble ? 3.4 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.6 : 1.1));
+    // (Cookie Crumble: the floors above the one you're on fade away, and the camera looks down on yours)
+    if (c.crumble) c.crumble.view(Math.max(0, c.crumble.layerAt(m.pos.y + (f.fell ? 0 : 0.3))), dt);
+    const dist = (c.crumble ? 8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.crumble ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     const pos = new THREE.Vector3(tgt.x - Math.sin(yaw) * dist, tgt.y + hgt, tgt.z - Math.cos(yaw) * dist);
@@ -1602,8 +1603,9 @@ export class MarbleGame {
       const ex = (A.round ? Math.hypot(pos.x - A.center.x, pos.z - A.center.z) : Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z))) - (A.half - 0.5);
       if (ex > 0) pos.y += ex * 1.3;
     }
-    const look = tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
-    if (c.plate) look.lerp(c.plate.center, 0.25);
+    const look = c.crumble ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 1.6, 0.4, Math.cos(yaw) * 1.6)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
+    // (toward the middle; Cookie Crumble's middle at the height of the floor you're on)
+    if (c.plate) look.lerp(c.crumble ? new THREE.Vector3(c.plate.center.x, tgt.y, c.plate.center.z) : c.plate.center, 0.25);
     if (this.snapCam) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
@@ -1613,7 +1615,7 @@ export class MarbleGame {
       const k = Math.min(1, dt * 7);
       this.camPos.x += (pos.x - this.camPos.x) * k;
       this.camPos.z += (pos.z - this.camPos.z) * k;
-      this.camPos.y += (pos.y - this.camPos.y) * Math.min(1, dt * 4.5);
+      this.camPos.y += (pos.y - this.camPos.y) * Math.min(1, dt * (c.crumble ? 9 : 4.5));
       this.camLook.lerp(look, Math.min(1, dt * 10));
     }
     cam.position.copy(this.camPos);

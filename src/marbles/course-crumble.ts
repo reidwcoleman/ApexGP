@@ -49,6 +49,8 @@ export class CrumbleArena {
   readonly mode: 'step' | 'melt';
   /** Meltdown: how far out the floe still reaches */
   rNow = Infinity;
+  /** the camera's floor: the floors above it fade away so they don't block the view (set by the builder) */
+  view: (L: number, dt: number) => void = () => undefined;
   private holeK = 0;
   constructor(
     readonly center: THREE.Vector3,
@@ -230,6 +232,24 @@ export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 
     b.group.add(m);
     return m;
   });
+  // the floors above the one the camera is watching fade out (they'd only show their undersides)
+  const alpha = A.layers.map(() => 1);
+  A.view = (Lv, dt) => {
+    meshes.forEach((m, L) => {
+      const want = L < Lv ? 0 : 1;
+      const a = (alpha[L] += (want - alpha[L]) * Math.min(1, dt * 7));
+      const mat = m.material as THREE.MeshPhysicalMaterial;
+      const solid = a > 0.985;
+      if (mat.transparent === solid) {
+        mat.transparent = !solid;
+        mat.depthWrite = solid;
+        mat.needsUpdate = true;
+      }
+      mat.opacity = solid ? 1 : a;
+      m.visible = a > 0.02;
+      m.castShadow = a > 0.5;
+    });
+  };
   const base = A.layers.map((_, L) => new THREE.Color(LAYER_C[L % LAYER_C.length]));
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(1, 1, 1), Z = new THREE.Vector3(0, 0, 0);
   const hot = new THREE.Color(0xff3a4a), white = new THREE.Color(0xffffff), col = new THREE.Color();
