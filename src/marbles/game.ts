@@ -210,8 +210,26 @@ export class MarbleGame {
         r?.catch?.(() => undefined);
         return;
       }
+      // (locked: the buttons jump and dive, see below; the mouse already turns the camera)
+      if (document.pointerLockElement === this.canvas) return;
       this.dragging = true;
       this.canvas.setPointerCapture(e.pointerId);
+    });
+    // with the pointer locked: left button jumps, right button dives (every press, even with the
+    // other held down, so these are mousedowns rather than pointerdowns)
+    document.addEventListener('mousedown', (e) => {
+      if (document.pointerLockElement !== this.canvas) return;
+      if (e.button === 0) this.pressed.add('MouseLeft');
+      else if (e.button === 2) this.pressed.add('MouseRight');
+      else if (e.button === 1) this.keys.add('MouseMiddle');
+      e.preventDefault();
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 1) this.keys.delete('MouseMiddle');
+    });
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== this.canvas) this.keys.delete('MouseMiddle');
     });
     this.canvas.addEventListener('pointermove', (e) => {
       if (this.dragging && e.pointerType === 'mouse') this.yawOff -= e.movementX * 0.006;
@@ -624,10 +642,11 @@ export class MarbleGame {
     const inp = p.m.input.set(0, 0, 0).addScaledVector(fwd, fy).addScaledVector(right, fx);
     if (inp.lengthSq() > 1) inp.normalize();
     const live = this.state === 'play' || this.state === 'over';
-    let jump = this.pressed.has('Space') || !!t?.jump;
-    // (the party-game layout: Ctrl dives, Shift grabs while held; C and E work too)
-    let dash = this.pressed.has('ControlLeft') || this.pressed.has('ControlRight') || this.pressed.has('KeyC') || !!t?.dash;
-    let grab = k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyE') || !!t?.grab;
+    let jump = this.pressed.has('Space') || this.pressed.has('MouseLeft') || !!t?.jump;
+    // (the party-game layout: right mouse button or Ctrl dives, Shift grabs while held; C, E and
+    // the middle mouse button work too)
+    let dash = this.pressed.has('MouseRight') || this.pressed.has('ControlLeft') || this.pressed.has('ControlRight') || this.pressed.has('KeyC') || !!t?.dash;
+    let grab = k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyE') || k.has('MouseMiddle') || !!t?.grab;
     if (pad) {
       if (pad.jump && !this.padJump) jump = true;
       if (pad.dash && !this.padDash) dash = true;

@@ -22,9 +22,11 @@ export const JUMP_V = 8.6;
 const IR = 0.4 * RADIUS * RADIUS;
 /** running: top speed on the flat (m/s), how fast it gets there, and the push it has in the air */
 export const RUN = 9.4;
-const RUN_K = 8;
-const RUN_ACC = 56;
-const AIR_ACC = 15;
+const RUN_K = 10.5;
+const RUN_ACC = 66;
+const AIR_ACC = 21;
+/** a jump or a dive pressed this long before it can happen still happens (a press just before landing counts) */
+const BUFFER = 0.16;
 /** the head sphere: its centre above the feet sphere's, and its radius; the body's for bean on bean */
 export const HEAD_UP = 0.62;
 const HEAD_R = 0.4;
@@ -104,6 +106,9 @@ export class Marble {
   readonly groundVel = new THREE.Vector3();
   groundMat: Mat = Mat.Wood;
   dashCD = 0;
+  /** a jump / a dive asked for and not yet done (seconds left to do it) */
+  jumpBuf = 0;
+  dashBuf = 0;
   /** in the simulation at all */
   active = true;
   /** held in place (the start gate, a respawn) */
@@ -455,21 +460,27 @@ export class World {
     m.landed = 0;
     if (!m.active || m.frozen || m.puppet) {
       m.jump = m.dash = false;
+      m.jumpBuf = m.dashBuf = 0;
       return;
     }
+    if (m.jump) m.jumpBuf = BUFFER;
+    if (m.dash) m.dashBuf = BUFFER;
+    m.jump = m.dash = false;
     m.dashCD = Math.max(0, m.dashCD - dt);
     m.grabCD = Math.max(0, m.grabCD - dt);
     m.heldT = Math.max(0, m.heldT - dt);
     const ok = m.mode === Mode.Run && m.upT <= 0;
-    if (m.jump && ok && m.groundT < 0.14) {
+    if (m.jumpBuf > 0 && ok && m.groundT < 0.14) {
+      m.jumpBuf = 0;
       // (straight up, whatever the slope; a held bean struggles)
       const v = m.heldT > 0 ? JUMP_V * 0.72 : JUMP_V;
       m.vel.y = Math.max(m.vel.y - m.groundVel.y, 0) * 0.3 + m.groundVel.y + v;
       m.groundT = 1;
       m.hopped = true;
     }
-    m.jump = false;
-    if (m.dash && ok && m.dashCD <= 0) {
+    m.jumpBuf = Math.max(0, m.jumpBuf - dt);
+    if (m.dashBuf > 0 && ok && m.dashCD <= 0) {
+      m.dashBuf = 0;
       L.copy(m.input);
       L.y = 0;
       if (L.lengthSq() < 0.01) L.set(Math.sin(m.yaw), 0, Math.cos(m.yaw));
@@ -487,7 +498,7 @@ export class World {
       m.dashed = true;
       m.release();
     }
-    m.dash = false;
+    m.dashBuf = Math.max(0, m.dashBuf - dt);
     // the grab: someone just in front, within reach
     if (m.grab && ok && !m.holding && m.grabCD <= 0) {
       const fx = Math.sin(m.yaw), fz = Math.cos(m.yaw);

@@ -51,7 +51,7 @@ export class UI {
       <div class="mm-spec mm-hide"></div>
       <div class="mm-prog"><div class="flag"></div></div>
       <div class="mm-dash"><span>DIVE</span></div>
-      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>SPACE</b> jump &nbsp; <b>CTRL</b> dive &nbsp; <b>SHIFT</b> grab (hold) &nbsp; <b>MOUSE</b> camera (click) &nbsp; <b>ESC</b> pause</div>`;
+      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>LEFT CLICK</b> / <b>SPACE</b> jump &nbsp; <b>RIGHT CLICK</b> / <b>CTRL</b> dive &nbsp; <b>SHIFT</b> grab (hold) &nbsp; <b>MOUSE</b> camera &nbsp; <b>ESC</b> pause</div>`;
     this.progEl = this.hudEl.querySelector('.mm-prog') as HTMLElement;
     this.cardEl = this.layer('mm-card mm-hide');
     this.countEl = this.layer('mm-count mm-hide');
@@ -110,10 +110,10 @@ export class UI {
         </div>
         <div class="mm-help">
           <b>WASD / Arrows</b><span>run</span>
-          <b>Space</b><span>jump</span>
-          <b>Shift</b><span>dive (and bowl the others over)</span>
-          <b>E (hold)</b><span>grab whoever is in front of you</span>
-          <b>Drag</b><span>look around &nbsp;·&nbsp; <b>M</b> music</span>
+          <b>Left click / Space</b><span>jump</span>
+          <b>Right click / Ctrl</b><span>dive (and bowl the others over)</span>
+          <b>Shift / E (hold)</b><span>grab whoever is in front of you</span>
+          <b>Mouse</b><span>look around (click the game first) &nbsp;·&nbsp; <b>M</b> music</span>
         </div>
       </div><div></div>`;
     m.querySelector('[data-a=prev]')!.addEventListener('click', o.onPrev);
