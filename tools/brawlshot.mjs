@@ -19,8 +19,8 @@ const info = await page.evaluate(async ({ arena, n, secs, ui, ev }) => {
   if (!ui) document.getElementById('ui').style.display = 'none';
   g.state = 'fight';
   for (let k = 0; k < secs * 60; k++) { g.tick(1 / 60); if (k % 2 === 0) g.draw(1 / 30); }
-  if (ev) eval(ev);
   g.draw(1 / 60);
+  if (ev) { eval(ev); g.composer.render(1 / 60); }
   return { alive: g.fighters.filter((f) => f.alive && !f.out).length, arena: g.arenaId };
 }, { arena, n, secs, ui: args.includes('--ui'), ev: opt('eval', null) });
 await page.screenshot({ path: out });

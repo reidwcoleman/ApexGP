@@ -66,6 +66,19 @@ class Pool {
   }
 }
 
+function lumpy(r: number, amt: number) {
+  const g = new THREE.SphereGeometry(r, 12, 9);
+  const pa = g.getAttribute('position');
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pa.count; i++) {
+    v.fromBufferAttribute(pa, i).normalize();
+    const k = 1 + amt * (Math.sin(v.x * 5.1 + 1.3) * Math.sin(v.y * 4.3 + 0.7) * Math.sin(v.z * 4.7 + 2.1) * 1.6 + Math.sin(v.x * 9 + v.z * 7) * 0.4);
+    pa.setXYZ(i, v.x * r * k, v.y * r * k * 0.85, v.z * r * k);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 export class Fx {
   private fluff: Pool;
   private flash: Pool;
@@ -73,16 +86,11 @@ export class Fx {
   private conf: Pool;
   private drops: Pool;
   constructor(scene: THREE.Scene) {
-    const tuft = new THREE.IcosahedronGeometry(0.06, 1);
-    const pa = tuft.getAttribute('position');
-    for (let i = 0; i < pa.count; i++) {
-      const k = 0.75 + Math.random() * 0.5;
-      pa.setXYZ(i, pa.getX(i) * k, pa.getY(i) * k, pa.getZ(i) * k);
-    }
-    tuft.computeVertexNormals();
+    // a lumpy cotton ball: smooth sphere pushed in and out by a function of direction (seams stay shut)
+    const tuft = lumpy(0.06, 0.22);
     this.fluff = new Pool(scene, tuft, new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 1, envMapIntensity: 0.4 }), 260);
     this.flash = new Pool(scene, new THREE.SphereGeometry(0.12, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 40);
-    this.dust = new Pool(scene, new THREE.IcosahedronGeometry(0.12, 1), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.55, depthWrite: false }), 200);
+    this.dust = new Pool(scene, lumpy(0.12, 0.15), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, depthWrite: false }), 200);
     this.conf = new Pool(scene, new THREE.PlaneGeometry(0.08, 0.05), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false }), 500);
     this.drops = new Pool(scene, new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, metalness: 0, transparent: true, opacity: 0.8 }), 300);
   }

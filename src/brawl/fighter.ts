@@ -540,8 +540,10 @@ export class Fighter {
       top *= 1 - Math.min(0.5, this.daze / 200);
       if (this.getup > 0 || this.hanging()) top = 0;
       const wx = inp.mx * top, wz = inp.mz * top;
-      let ax = (wx - vRel.x) * 9, az = (wz - vRel.z) * 9;
-      const amax = 30 * grip;
+      // snappy: hard braking/turning when the stick points away from where you're going
+      const rev = mv > 0.2 && wx * vRel.x + wz * vRel.z < 0 ? 1.6 : 1;
+      let ax = (wx - vRel.x) * 13 * rev, az = (wz - vRel.z) * 13 * rev;
+      const amax = (mv < 0.1 && this.grounded ? 34 : 42) * grip * rev;
       const al = Math.hypot(ax, az);
       if (al > amax) { ax *= amax / al; az *= amax / al; }
       if (!this.grounded && mv < 0.1) { ax = 0; az = 0; }

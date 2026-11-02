@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode, VignetteEffect, HueSaturationEffect } from 'postprocessing';
+import { N8AOPostPass } from 'n8ao';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { initPhysics, makeWorld, STEP, R, solidQuery, type PartRef } from './phys.ts';
@@ -78,6 +79,8 @@ export class Game {
   private camPos = new THREE.Vector3(0, 10, 20);
   private camTgt = new THREE.Vector3();
   private shake = 0;
+  /** scenery between the camera and the fighters fades out (original material kept to put back) */
+  private occ = { meshes: [] as THREE.Mesh[], faded: new Map<THREE.Mesh, { orig: THREE.Material | THREE.Material[]; mat: THREE.Material[]; a: number; hit: number }>(), ray: new THREE.Raycaster(), n: 0, floorY: 0, playR: 30, center: new THREE.Vector3() };
   private lastFrame = 0;
   private outT = new Map<Fighter, number>();
   attract = true;
@@ -111,6 +114,19 @@ export class Game {
     this.scene.add(this.sun, this.sun.target, this.hemi);
     const comp = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
     comp.addPass(new RenderPass(this.scene, this.camera));
+    // soft contact shadows: plushies sit in the scene instead of floating on it
+    const ao = new N8AOPostPass(this.scene, this.camera, 1, 1);
+    ao.configuration.aoRadius = 1.1;
+    ao.configuration.distanceFalloff = 0.7;
+    ao.configuration.intensity = 2.4;
+    ao.configuration.gammaCorrection = false;
+    ao.configuration.halfRes = true;
+    ao.configuration.depthAwareUpsampling = true;
+    ao.configuration.color = new THREE.Color(0x1a0e08);
+    (ao as unknown as { autoDetectTransparency: boolean }).autoDetectTransparency = false;
+    ao.configuration.transparencyAware = false;
+    ao.setQualityMode('Performance');
+    comp.addPass(ao);
     this.bloom = new BloomEffect({ intensity: 0.9, luminanceThreshold: 1.05, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.7, levels: 6 });
     comp.addPass(new EffectPass(this.camera, this.bloom, new HueSaturationEffect({ saturation: 0.12 }), new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }), new VignetteEffect({ offset: 0.32, darkness: 0.45 })));
     comp.addPass(new EffectPass(this.camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
@@ -180,11 +196,89 @@ export class Game {
       this.gltf.set(def.file, root);
     }
     this.clearFighters();
+    this.resetOccluders();
     if (this.arena) this.arena.dispose(this.ctx);
     this.arena = new Arena(def);
     this.arena.build(root, this.ctx);
     this.arenaId = def.id;
     this.applyLook(def);
+    this.setupOccluders();
+  }
+
+  private setupOccluders() {
+    const a = this.arena!, O = this.occ;
+    O.meshes = [];
+    a.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !(m as THREE.SkinnedMesh).isSkinnedMesh && m.visible && !/flame|sky|sun|cloud|bubble|knife|blade/i.test(m.name)) O.meshes.push(m);
+    });
+    const sp = a.spawns;
+    O.floorY = sp.length ? Math.min(...sp.map((p) => p.y)) : 0;
+    O.center.set(0, 0, 0);
+    for (const p of sp) O.center.add(p);
+    if (sp.length) O.center.multiplyScalar(1 / sp.length);
+    O.playR = Math.max(6, ...sp.map((p) => Math.hypot(p.x - O.center.x, p.z - O.center.z))) + 5;
+  }
+
+  private resetOccluders() {
+    for (const [m, f] of this.occ.faded) {
+      m.material = f.orig;
+      for (const x of f.mat) x.dispose();
+    }
+    this.occ.faded.clear();
+  }
+
+  /** fighters that count for the camera: still in play, not flying off into the distance */
+  private inPlay(f: Fighter) {
+    const O = this.occ, p = f.pos[CHE];
+    if (!f.alive || f.out) return false;
+    if (p.y < O.floorY - 3.5) return false;
+    return Math.hypot(p.x - O.center.x, p.z - O.center.z) < O.playR;
+  }
+
+  private updateOccluders(dt: number) {
+    const O = this.occ;
+    if (++O.n % 3 === 0) {
+      const cam = this.camera.position;
+      const pts = this.fighters.filter((f) => this.inPlay(f)).map((f) => f.pos[CHE]);
+      pts.push(this.camTgt);
+      const dir = new THREE.Vector3();
+      for (const p of pts) {
+        dir.copy(p).sub(cam);
+        const far = dir.length() - 0.7;
+        if (far <= 0) continue;
+        O.ray.set(cam, dir.normalize());
+        O.ray.far = far;
+        for (const h of O.ray.intersectObjects(O.meshes, false)) {
+          const m = h.object as THREE.Mesh;
+          let f = O.faded.get(m);
+          if (!f) {
+            const orig = m.material;
+            const mat = (Array.isArray(orig) ? orig : [orig]).map((x) => {
+              const c = x.clone();
+              c.transparent = true;
+              c.depthWrite = false;
+              return c;
+            });
+            m.material = Array.isArray(orig) ? mat : mat[0];
+            f = { orig, mat, a: 1, hit: 0 };
+            O.faded.set(m, f);
+          }
+          f.hit = 0.45;
+        }
+      }
+    }
+    for (const [m, f] of O.faded) {
+      f.hit -= dt;
+      const want = f.hit > 0 ? 0.18 : 1;
+      f.a += (want - f.a) * Math.min(1, dt * 8);
+      for (const x of f.mat) x.opacity = f.a;
+      if (f.hit <= 0 && f.a > 0.98) {
+        m.material = f.orig;
+        for (const x of f.mat) x.dispose();
+        O.faded.delete(m);
+      }
+    }
   }
 
   private applyLook(def: ArenaDef) {
@@ -505,7 +599,8 @@ export class Game {
     const a = this.arena;
     if (!a) return;
     const def = a.def;
-    const pts = this.fighters.filter((f) => f.alive && (!f.out || (this.outT.get(f) ?? 0) < 0.8)).map((f) => f.pos[CHE]);
+    let pts = this.fighters.filter((f) => this.inPlay(f)).map((f) => f.pos[CHE]);
+    if (!pts.length) pts = this.fighters.filter((f) => f.alive && (!f.out || (this.outT.get(f) ?? 0) < 0.8)).map((f) => f.pos[CHE]);
     const c = new THREE.Vector3();
     if (pts.length) {
       for (const p of pts) c.add(p);
@@ -514,7 +609,8 @@ export class Game {
     let r = 2;
     for (const p of pts) r = Math.max(r, p.distanceTo(c));
     const aspect = Math.min(1.6, this.camera.aspect);
-    const dist = THREE.MathUtils.clamp((r * 2.1) / aspect + 7, def.camMin, 46);
+    // close enough that the plushies read: they're the show
+    const dist = THREE.MathUtils.clamp((r * 1.85) / aspect + 5.5, def.camMin * 0.78, 40);
     const yaw = def.camYaw + (this.state === 'menu' ? Math.sin(this.time * 0.07) * 0.35 : 0);
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(def.camPitch), Math.sin(def.camPitch), Math.cos(yaw) * Math.cos(def.camPitch));
     const tgt = c.clone().add(new THREE.Vector3(0, 0.3, 0));
@@ -540,6 +636,7 @@ export class Game {
     if (!this.arena) return;
     if (!this.paused) {
       this.updateCamera(dt);
+      this.updateOccluders(dt);
       for (let i = 0; i < this.fighters.length; i++) this.looks[i].sync(this.fighters[i], this.time, dt);
       this.fx.update(dt);
     }

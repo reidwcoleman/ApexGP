@@ -11,7 +11,7 @@ random.seed(11)
 
 BELT = mat('belt', (0.16, 0.17, 0.2), 0.55)
 SLAT = mat('slat', (0.3, 0.32, 0.36), 0.4, metal=0.5)
-STEEL = mat('steel', (0.8, 0.82, 0.86), 0.2, metal=1.0)
+STEEL = mat('steel', (0.86, 0.88, 0.92), 0.34, metal=0.75, clearcoat=0.4)
 WOOD = mat('wood_light', (0.86, 0.66, 0.42), 0.55, clearcoat=0.3)
 WOOD2 = mat('wood_dark', (0.42, 0.24, 0.12), 0.6)
 RICE = mat('rice', (0.97, 0.96, 0.92), 0.85, sheen=0.5)

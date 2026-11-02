@@ -67,9 +67,18 @@ def basket(name, W, D, H, mats, ladders=False, burner_h=3.0, env_r=6.0, env_y=11
         V(box(name + '_wall', (sx, H / 2, sz), (w, H, d), WICKER, parent=node))
         col_box(name + '_wall', (sx, H / 2, sz), (w, H, d), parent=node)
         V(box(name + '_rim', (sx, H + 0.05, sz), (w + 0.12, 0.14, d + 0.12), LEATHER, bevel=0.04, parent=node))
-        n = int(max(w, d) / 0.32)
-        for k in range(1, 4):
-            V(box(name + '_weave', (sx, H * k / 4, sz), (w + 0.02, 0.06, d + 0.02), WICKER2, parent=node))
+        for k in range(1, 5):
+            V(box(name + '_weave', (sx, H * k / 5, sz), (w + 0.03, 0.07, d + 0.03), WICKER2, parent=node))
+        staves = []
+        long = w > d
+        n = int((w if long else d) / 0.22)
+        for i in range(n + 1):
+            u = -0.5 + i / n
+            px, pz = (sx + u * (w - 0.1), sz) if long else (sx, sz + u * (d - 0.1))
+            staves.append(box(name + '_stave', (px, H / 2, pz), (0.07 if long else w + 0.04, H - 0.05, d + 0.04 if long else 0.07), WICKER2))
+        st = join(staves, name + '_staves')
+        st.parent = node
+        V(st)
     # corner poles up to the burner frame (grab them)
     for sx in (-1, 1):
         for sz in (-1, 1):
@@ -139,7 +148,7 @@ for k in range(46):
     x, z = math.cos(a) * r, math.sin(a) * r - 14
     if z > 4:
         z = -z
-    y = random.uniform(-24, -17) if r < 30 else random.uniform(-20, 0)
+    y = random.uniform(-34, -27) if r < 30 else random.uniform(-30, -8)
     for j in range(random.randint(3, 6)):
         s = random.uniform(2.0, 5.0) * (1 + r / 60)
         clouds.append(sphere('cloud', (x + random.uniform(-4, 4), y + random.uniform(-0.6, 1.2), z + random.uniform(-3, 3)), s, CLOUD if random.random() < 0.6 else CLOUD2, seg=16, rings=10, scale=(1.4, 1, 0.65)))

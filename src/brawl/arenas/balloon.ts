@@ -12,9 +12,9 @@ export const BALLOON: ArenaDef = {
   file: 'balloon',
   killY: -12,
   camYaw: 0,
-  camPitch: 0.34,
+  camPitch: 0.46,
   camMin: 19,
-  look: { sky: [0x5a74c8, 0xffb48a], fog: 0xffc2a0, fogNear: 70, fogFar: 200, sun: 0xffd6a8, sunI: 2.9, sunDir: [-0.45, 0.85, 0.6], hemi: [0xc0ccff, 0xffa888, 0.75], exposure: 0.9, bloom: 0.9 },
+  look: { sky: [0x2f4fae, 0xff9a6a], fog: 0xf2a98a, fogNear: 60, fogFar: 190, sun: 0xffd2a0, sunI: 3.1, sunDir: [-0.45, 0.8, 0.6], hemi: [0xa8b8ff, 0xff9a80, 0.7], exposure: 0.85, bloom: 0.9 },
   script(a, ctx) {
     const B = {
       main: a.nodes.get('mov_basket_main')!,
