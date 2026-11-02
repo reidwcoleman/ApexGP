@@ -313,10 +313,11 @@ export class CourseBuilder {
   }
 
   /** the chute along a path */
-  chute(path: Path, opts: { floorMat?: THREE.Material; railMat?: THREE.Material; trestles?: boolean } = {}) {
+  chute(path: Path, opts: { floorMat?: THREE.Material; railMat?: THREE.Material; trestles?: boolean; depth?: number } = {}) {
     const floorMat = opts.floorMat ?? this.floorWood;
     const railMat = opts.railMat ?? this.railWood;
-    const RAIL = 0.32, DEPTH = 0.42, ARC = 5;
+    // (depth: a thin chute, or a thick floating platform)
+    const RAIL = 0.32, DEPTH = opts.depth ?? 0.42, ARC = 5;
     const n = path.count;
     // the profile at a sample: strips of (x, y, nx, ny, u)
     type Pt = [number, number, number, number, number];
@@ -363,7 +364,7 @@ export class CourseBuilder {
       if (!pr) cache.set(key, (pr = profile(sec)));
       return pr;
     });
-    const mats = [floorMat, railMat, railMat, railMat, railMat, railMat];
+    const mats = [floorMat, railMat, railMat, railMat, DEPTH > 1 ? this.darkWood : railMat, railMat];
     const collide = [true, true, true, true, false, true];
     // in pieces of CHUNK samples (each its own lot in the batch, so it culls)
     const CHUNK = 200;
@@ -457,15 +458,43 @@ export class CourseBuilder {
       this.world.statics.addGeometry(g, Mat.Wood);
     }
     if (opts.trestles !== false) this.trestlePaths.push(path);
-    this.tubes(path, RAIL);
+    this.tubes(path, RAIL, DEPTH > 1);
   }
   private trestlePaths: Path[] = [];
 
   /** fat inflated tubes along the tops of the walls, candy-striped (for show: the wall is the collider) */
-  private tubes(path: Path, RAIL: number) {
+  private tubes(path: Path, RAIL: number, edges: boolean) {
     const th = foamTheme();
     const m = this.paint({ a: th.rail, b: th.railB, pattern: Pattern.Stripes, scale: 1.5 });
     const R = 0.27, SEG = 14, STEP = 2;
+    // a platform's open edges: a fat padded bumper round the slab, just under the floor's lip
+    if (edges) {
+      const me = this.paint({ a: th.railB, b: th.post, pattern: Pattern.Stripes, scale: 0.9 });
+      const RE = 0.36;
+      for (const side of [-1, 1]) {
+        let ring: THREE.Vector3[][] = [];
+        const flush = () => {
+          if (ring.length >= 2) this.batch.add(me, tubeGeo(ring, RE, SEG));
+          ring = [];
+        };
+        for (let i = 0; i < path.count; i += STEP) {
+          const sec = path.sec[i];
+          const wall = side < 0 ? sec.wallL : sec.wallR;
+          if (!sec.floor || wall > 0.05) {
+            flush();
+            continue;
+          }
+          const c = path.P[i].clone().addScaledVector(path.Rt[i], side * (sec.w / 2 + RAIL - 0.08)).addScaledVector(path.U[i], -RE - 0.03);
+          ring.push([c, path.Rt[i].clone(), path.U[i].clone(), new THREE.Vector3(i * DS, 0, 0)]);
+          if (ring.length > 120) {
+            const last = ring[ring.length - 1];
+            flush();
+            ring.push(last);
+          }
+        }
+        flush();
+      }
+    }
     for (const side of [-1, 1]) {
       let ring: THREE.Vector3[][] = [];
       const flush = () => {

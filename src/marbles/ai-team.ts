@@ -36,7 +36,7 @@ export class TeamBrain {
         const i = A.cellAt(x, z);
         if (i < 0) continue;
         const cx = x - A.center.x, cz = z - A.center.z;
-        if (cx * cx + cz * cz < 4.2 * 4.2) continue;
+        if (!A.round && cx * cx + cz * cz < 4.2 * 4.2) continue;
         const v = A.cells[i];
         let sc = v === team + 1 ? -2 : v === 0 ? 1 : 1.3 + 0.4 * this.skill;
         // (patches around it of other colours are worth more)
@@ -46,7 +46,7 @@ export class TeamBrain {
         }
         sc -= r * 0.07;
         // (away from the walls)
-        if (Math.abs(cx) > A.half - 1 || Math.abs(cz) > A.half - 1) sc -= 0.8;
+        if (A.nearWall(x, z, 1)) sc -= 0.8;
         sc += (this.rnd() - 0.5) * (1.2 - this.skill);
         if (sc > best) {
           best = sc;
@@ -68,6 +68,20 @@ export class TeamBrain {
       m.jump = true;
       this.stuckT = 0;
       this.nextPick = t;
+    }
+    // the ring's bar coming round: hop it (a moment early or late by skill)
+    if (A.bar && m.groundT < 0.05) {
+      const dx = m.pos.x - A.center.x, dz = m.pos.z - A.center.z;
+      if (dx * dx + dz * dz > 1.5) {
+        const phi = Math.atan2(-dz, dx);
+        let d = (phi - A.bar.angle(t)) % Math.PI;
+        if (d < 0) d += Math.PI;
+        // (time until the bar touches: it meets the body a bean's width before the centre line)
+        const r = Math.sqrt(dx * dx + dz * dz);
+        const eta = (d - 0.95 / r) / A.bar.omega(t);
+        const lead = 0.26 + (this.rnd() - 0.5) * 0.12 * (1.2 - this.skill);
+        if (eta > -0.1 && eta < lead) m.jump = true;
+      }
     }
     // a rival right in front: dive into it now and then
     this.diveCD -= dt;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CourseBuilder, PAINT, cylAttr } from './builder.ts';
-import { bumperAt, signTexture, turntable } from './obstacles.ts';
+import { bumperAt, signTexture, sweeper, turntable } from './obstacles.ts';
 import { Mat } from './physics.ts';
 import { foamTheme, woodAttr } from './shaders.ts';
 import { roundBox } from './builder.ts';
@@ -33,11 +33,26 @@ export interface TeamArena {
   cellAt(x: number, z: number): number;
   centreOf(i: number, out: THREE.Vector3): THREE.Vector3;
   counts(): number[];
+  /** tiles there are to paint */
+  total: number;
+  /** the ring's bar (angle about +y from +x, and its rate) */
+  bar?: { angle(t: number): number; omega(t: number): number };
+  /** a round arena (or a square one) */
+  round: boolean;
+  /** close to the wall at (x, z) */
+  nearWall(x: number, z: number, m: number): boolean;
   /** where a team's beans start and come back after a fall */
   base(team: number): THREE.Vector3;
 }
 
-export function paintparty(info: { name: string; blurb: string }): Course {
+/** 'square': the walled square with a turntable; 'ring': a round arena swept by a long bar (hop it) */
+export function paintparty(info: { id?: string; name: string; blurb: string }, variant: 'square' | 'ring' = 'square'): Course {
+  const ROUND = variant === 'ring';
+  /** the ring's bar: its angle at t (it turns faster as the round goes on) */
+  const barAngle = (t: number) => {
+    const x = Math.max(0, t - state.go);
+    return 0.55 * x + 0.0025 * x * x;
+  };
   const b = new CourseBuilder();
   const center = new THREE.Vector3(0, 110, 0);
   const N = 20, CELL = 1.4, HALF = (N * CELL) / 2;
@@ -46,14 +61,38 @@ export function paintparty(info: { name: string; blurb: string }): Course {
   const th = foamTheme();
   // the slab
   {
-    const g = roundBox(HALF * 2 + 1.6, 1.2, HALF * 2 + 1.6, 0.3);
-    woodAttr(g, 'x', 1);
+    const g = ROUND ? new THREE.CylinderGeometry(HALF + 0.9, HALF + 0.5, 1.2, 96) : roundBox(HALF * 2 + 1.6, 1.2, HALF * 2 + 1.6, 0.3);
+    woodAttr(g, ROUND ? 'y' : 'x', 1);
     g.translate(center.x, center.y - 0.6, center.z);
     b.solid(g, b.darkWood, Mat.Paint);
   }
   // the padded walls round it, with fat tubes along the tops
   const WH = 1.3;
-  for (const [x, z, w, d] of [
+  if (ROUND) {
+    // a ring of padded blocks, one fat tube round the top
+    const SEGS = 40, RW = HALF + 0.4;
+    for (let k = 0; k < SEGS; k++) {
+      const a = (k / SEGS) * Math.PI * 2;
+      const g = roundBox(((Math.PI * 2 * RW) / SEGS) * 1.06, WH, 0.8, 0.12);
+      woodAttr(g, 'x', k);
+      g.rotateY(-a + Math.PI / 2);
+      g.translate(center.x + Math.cos(a) * RW, center.y + WH / 2, center.z + Math.sin(a) * RW);
+      b.solid(g, b.railWood, Mat.Felt);
+    }
+    const tg = new THREE.TorusGeometry(RW, 0.42, 16, 160).rotateX(Math.PI / 2);
+    const uv = tg.getAttribute('uv'), wd = new Float32Array(uv.count * 3);
+    for (let k = 0; k < uv.count; k++) {
+      wd[k * 3] = uv.getX(k) * Math.PI * 2 * RW;
+      wd[k * 3 + 1] = uv.getY(k) * Math.PI * 2 * 0.42;
+      wd[k * 3 + 2] = 0.42;
+    }
+    tg.setAttribute('aWood', new THREE.BufferAttribute(wd, 3));
+    const tube = new THREE.Mesh(tg, b.paint({ a: th.rail, b: th.railB, pattern: 1, scale: 1.4 }));
+    tube.position.set(center.x, center.y + WH + 0.2, center.z);
+    tube.castShadow = true;
+    b.group.add(tube);
+  }
+  for (const [x, z, w, d] of ROUND ? [] : [
     [0, -HALF - 0.4, HALF * 2 + 1.6, 0.8],
     [0, HALF + 0.4, HALF * 2 + 1.6, 0.8],
     [-HALF - 0.4, 0, 0.8, HALF * 2],
@@ -83,6 +122,16 @@ export function paintparty(info: { name: string; blurb: string }): Course {
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
   const blank = new THREE.Color(0xf4eefc);
+  // (a round arena: only the tiles inside the ring are floor)
+  const valid = new Uint8Array(N * N);
+  let total = 0;
+  for (let i = 0; i < N * N; i++) {
+    const x = -HALF + ((i % N) + 0.5) * CELL, z = -HALF + (Math.floor(i / N) + 0.5) * CELL;
+    const ok = !ROUND || Math.hypot(x, z) < HALF - 0.5;
+    const hub = ROUND ? 1.2 : 3.5;
+    valid[i] = ok && Math.hypot(x, z) > hub ? 1 : 0;
+    total += valid[i];
+  }
   const cols = TEAM_COLORS.map((c) => new THREE.Color(c));
   const setTexel = (i: number) => {
     const c = cells[i] ? cols[cells[i] - 1] : blank;
@@ -112,14 +161,17 @@ export function paintparty(info: { name: string; blurb: string }): Course {
       );
   };
   tileM.customProgramCacheKey = () => 'mm-tiles-1';
-  const tiles = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, HALF * 2).rotateX(-Math.PI / 2), tileM);
+  const tiles = new THREE.Mesh((ROUND ? new THREE.CircleGeometry(HALF, 128) : new THREE.PlaneGeometry(HALF * 2, HALF * 2)).rotateX(-Math.PI / 2), tileM);
   tiles.position.set(center.x, center.y + 0.012, center.z);
   tiles.receiveShadow = true;
   b.group.add(tiles);
   // the turntable in the middle, and bumpers out at the corners of the middle
-  turntable(b, center.clone(), new THREE.Quaternion(), { r: 3.4, omega: 0.7, fins: 2, finH: 0.45 });
   const up = new THREE.Quaternion();
-  for (const [x, z, c] of [
+  if (ROUND) {
+    // one long bar turning over the floor from a hub in the middle, speeding up as it goes: hop it
+    sweeper(b, center.clone(), up, { len: HALF * 2 - 0.9, height: 0.55, angle: barAngle, paint: { a: th.rail, b: PAINT.white, pattern: 2, scale: 1.4 }, hub: 0.9 });
+  } else turntable(b, center.clone(), new THREE.Quaternion(), { r: 3.4, omega: 0.7, fins: 2, finH: 0.45 });
+  for (const [x, z, c] of ROUND ? [] : [
     [-7, -7, PAINT.pink],
     [7, -7, PAINT.teal],
     [-7, 7, PAINT.yellow],
@@ -131,7 +183,7 @@ export function paintparty(info: { name: string; blurb: string }): Course {
     p.add(b.railWood, plank(9.4, 2.0, 0.3, 0.08, 'x'), mat(0, 7.5, -0.18));
     for (const sx of [-4.2, 4.2]) post(p, b, mat(sx, -6, -0.3), 14.6, { w: 0.42 });
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z - HALF - 4));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), 'Team round · Paint the floor', PAINT.pink), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink), roughness: 0.4, clearcoat: 0.8 }));
     sign.position.set(center.x, center.y + 7.5, center.z - HALF - 4);
     b.group.add(sign);
   }
@@ -141,7 +193,7 @@ export function paintparty(info: { name: string; blurb: string }): Course {
   let teams = 3;
   const cellAt = (x: number, z: number) => {
     const i = Math.floor((x - center.x + HALF) / CELL), j = Math.floor((z - center.z + HALF) / CELL);
-    if (i < 0 || j < 0 || i >= N || j >= N) return -1;
+    if (i < 0 || j < 0 || i >= N || j >= N || !valid[j * N + i]) return -1;
     return j * N + i;
   };
   const arena: TeamArena = {
@@ -161,9 +213,6 @@ export function paintparty(info: { name: string; blurb: string }): Course {
     paint(x, z, team) {
       const i = cellAt(x, z);
       if (i < 0 || cells[i] === team + 1) return false;
-      // (the turntable's disk isn't floor)
-      const cx = x - center.x, cz = z - center.z;
-      if (cx * cx + cz * cz < 3.5 * 3.5) return false;
       cells[i] = team + 1;
       setTexel(i);
       tex.needsUpdate = true;
@@ -171,6 +220,13 @@ export function paintparty(info: { name: string; blurb: string }): Course {
     },
     centreOf(i, out) {
       return out.set(center.x - HALF + ((i % N) + 0.5) * CELL, center.y, center.z - HALF + (Math.floor(i / N) + 0.5) * CELL);
+    },
+    total,
+    round: ROUND,
+    bar: ROUND ? { angle: barAngle, omega: (t: number) => 0.55 + 0.005 * Math.max(0, t - state.go) } : undefined,
+    nearWall(x, z, m) {
+      const cx = x - center.x, cz = z - center.z;
+      return ROUND ? Math.hypot(cx, cz) > HALF - m : Math.abs(cx) > HALF - m || Math.abs(cz) > HALF - m;
     },
     counts() {
       const c = [0, 0, 0];
@@ -183,7 +239,7 @@ export function paintparty(info: { name: string; blurb: string }): Course {
     },
   };
   return {
-    id: 'paintparty',
+    id: info.id ?? 'paintparty',
     name: info.name,
     kind: 'team',
     blurb: info.blurb,

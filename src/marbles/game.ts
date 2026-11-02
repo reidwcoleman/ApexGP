@@ -3,7 +3,7 @@ import { Bot } from './ai.ts';
 import { courseAI } from './ai-course.ts';
 import { level, LEVELS, roll, STYLES, type Level, type StyleId } from './ai-style.ts';
 import { Sound } from './audio.ts';
-import { buildRound, dealShow, setShow, DEFAULT_SHOW, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
+import { buildRound, dealShow, setShow, DEFAULT_SHOW, POOL, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
 import { TeamPlay } from './team.ts';
 import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
@@ -274,7 +274,7 @@ export class MarbleGame {
     this.overlay = false;
     this.ui.clearTags();
     this.confetti.clear();
-    if (!this.course || this.course.id !== 'timber' || this.racers.length === 0 || this.menuMarbles.length === 0) void this.loadRound(0, true);
+    if (!this.course || this.course.id !== 'hopscotch' || this.racers.length === 0 || this.menuMarbles.length === 0) void this.loadRound(0, true);
     this.ui.menu({
       design: OUTFITS[this.design].name,
       kind: hatName(OUTFITS[this.design]),
@@ -347,7 +347,7 @@ export class MarbleGame {
     this.loadedBy.clear();
     this.host?.broadcast({ t: 'round', idx: this.roundIdx, order, slots: this.slots, out: this.roster.filter((x) => x.out).map((x) => x.id), key: this.roundKey(), lineup: SHOW.map((x) => x.id) });
     // the wheel spins while the course builds
-    await Promise.all([this.ui.reveal(Object.values(ROUNDS), SHOW[this.roundIdx], this.roundIdx + 1, SHOW.length, this.quick), this.loadRound(this.roundIdx, false, order)]);
+    await Promise.all([this.ui.reveal(POOL.map((id) => ROUNDS[id]), SHOW[this.roundIdx], this.roundIdx + 1, SHOW.length, this.quick), this.loadRound(this.roundIdx, false, order)]);
     this.introCard();
   }
 
@@ -382,7 +382,8 @@ export class MarbleGame {
     this.ui.clearTags();
     this.teamPlay?.dispose();
     this.teamPlay = null;
-    const c = (this.course = buildRound(SHOW[idx].id));
+    // (the menu stands on the first platform course)
+    const c = (this.course = buildRound(menu ? 'hopscotch' : SHOW[idx].id));
     if (c.path) courseAI(c);
     this.scene.add(c.b.group);
     this.splashes.y = c.lakeY;
@@ -958,7 +959,7 @@ export class MarbleGame {
     };
     this.ui.results({
       title: playerIn ? 'YOU QUALIFIED!' : 'ROUND OVER',
-      sub: `${left} beans go through to ${SHOW[this.roundIdx + 1].name}`,
+      sub: `${left} beans go through to ${SHOW[this.roundIdx + 1]?.name ?? "the next round"}`,
       rows,
       next: this.guest ? 'NEXT ROUND SOON' : playerIn || this.host ? 'NEXT ROUND' : 'WATCH THE SHOW',
       wait: !!this.guest,
@@ -1105,7 +1106,7 @@ export class MarbleGame {
         this.ui.hideResults();
         this.confetti.clear();
         if (m.lineup) setShow(m.lineup as RoundId[]);
-        await Promise.all([this.ui.reveal(Object.values(ROUNDS), SHOW[m.idx], m.idx + 1, SHOW.length), this.loadRound(m.idx, false, m.order)]);
+        await Promise.all([this.ui.reveal(POOL.map((id) => ROUNDS[id]), SHOW[m.idx], m.idx + 1, SHOW.length), this.loadRound(m.idx, false, m.order)]);
         g.send({ t: 'loaded' });
         this.introCard();
         if (!Number.isNaN(this.pendingGo)) this.toCountdown(this.pendingGo);
@@ -1437,7 +1438,7 @@ export class MarbleGame {
     // (the team arena has walls: out past them, the camera climbs and looks down over them instead)
     if (c.team) {
       const A = c.team;
-      const ex = Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z)) - (A.half - 0.5);
+      const ex = (A.round ? Math.hypot(pos.x - A.center.x, pos.z - A.center.z) : Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z))) - (A.half - 0.5);
       if (ex > 0) pos.y += ex * 1.3;
     }
     const look = tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));

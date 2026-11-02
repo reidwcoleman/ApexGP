@@ -224,3 +224,7 @@
 .mm-teams .bar { height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
 .mm-teams .bar i { display: block; height: 100%; border-radius: 6px; background: var(--tc); transition: width 0.25s ease; }
 .mm-teams .pc { text-align: right; font-variant-numeric: tabular-nums; }
+.mm-show i.k-race { background: color-mix(in srgb, var(--mm-pink) 42%, transparent); }
+.mm-show i.k-survival { background: color-mix(in srgb, var(--mm-orange) 42%, transparent); }
+.mm-show i.k-team { background: color-mix(in srgb, var(--mm-sky) 42%, transparent); }
+.mm-show i.k-final { background: color-mix(in srgb, var(--mm-yellow) 42%, transparent); }

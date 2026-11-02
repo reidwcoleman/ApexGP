@@ -825,6 +825,16 @@ export const FOAM_THEMES: Record<string, FoamTheme> = {
   ridge: { floorA: 0x9eecc9, floorB: 0xb6f4d8, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0x1fc8c0, base: 0x2b4c86 },
   summit: { floorA: 0xffde85, floorB: 0xffe9a8, wall: 0x2f74ff, rail: 0x2f74ff, railB: 0xffffff, post: 0xff5fa8, base: 0x2a3a8f },
   arena: { floorA: 0xa9d8ff, floorB: 0xc0e3ff, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0xffcf2a, base: 0x3a2f8a },
+  hopscotch: { floorA: 0xffc2dd, floorB: 0xffd6e8, wall: 0x2fbfd8, rail: 0x2fbfd8, railB: 0xffffff, post: 0xff5fa8, base: 0x5a2f8a },
+  bonkbay: { floorA: 0x9fe6ff, floorB: 0xbdeeff, wall: 0xff8a1f, rail: 0xff8a1f, railB: 0xfff4d6, post: 0x1fc8c0, base: 0x234a8a },
+  knockknock: { floorA: 0xffd59a, floorB: 0xffe3b8, wall: 0x8a4bff, rail: 0x8a4bff, railB: 0xffffff, post: 0xff8a1f, base: 0x4a2a7a },
+  whirligig: { floorA: 0xd8b8ff, floorB: 0xe6d0ff, wall: 0x37c25a, rail: 0x37c25a, railB: 0xffffff, post: 0xffcf2a, base: 0x3a2a7a },
+  bonkalley: { floorA: 0xffb7a8, floorB: 0xffcabf, wall: 0x2f74ff, rail: 0x2f74ff, railB: 0xffffff, post: 0xff3a4a, base: 0x2a2f7a },
+  wobblewalk: { floorA: 0xb8f0a8, floorB: 0xcdf6c0, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0x8a4bff, base: 0x2f5a6a },
+  skystairs: { floorA: 0xa8c8ff, floorB: 0xc0d8ff, wall: 0xffcf2a, rail: 0xffcf2a, railB: 0xffffff, post: 0x2f74ff, base: 0x26307a },
+  jellyjunction: { floorA: 0xfff0a0, floorB: 0xfff6c2, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0x1fc8c0, base: 0x5a2f7a },
+  splatring: { floorA: 0xc8b0ff, floorB: 0xd8c6ff, wall: 0x1fc8c0, rail: 0x1fc8c0, railB: 0xffffff, post: 0xff5fa8, base: 0x2a2a70 },
+  crownpeak: { floorA: 0xffe08a, floorB: 0xffeab0, wall: 0x8a4bff, rail: 0x8a4bff, railB: 0xffd23a, post: 0xff5fa8, base: 0x3a2070 },
 };
 let theme: FoamTheme = FOAM_THEMES.timber;
 export const foamTheme = () => theme;

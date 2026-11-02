@@ -746,17 +746,28 @@ on wooden obstacle courses, solo against bots or online with friends. Everything
 code (`src/marbles/`; no image, model or sound files). It took over Marble Mania's page, courses
 and bots; the contestants are original bean characters, not marbles.
 
-- **The show**: six rounds dealt fresh every show (`dealShow` in `courses.ts`): a race to open, a
-  survival, the team round, another race, another survival, then the final. A wheel of round names
-  spins and lands on each one while it builds. Races: Timber Tumble, Paint Mill, Rickety Ridge.
-  Survival: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse, and the
-  plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further, swept by a bar,
-  bumpers popping up). Team: **Paint Party** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`):
-  the field is split into two or three teams on a walled tile floor; a bean on its feet paints the
-  tile under it its team's colour (over anyone else's), a turntable and bumpers knock beans about,
-  and after 75 s the team with the least floor goes home. Final: Crown Summit (first across the
-  line takes the crown). Out of the show, you can watch it to the end (←/→ switches bean). Test
-  links use a fixed order (`DEFAULT_SHOW`: 0–5 as before, 6 is Paint Party).
+- **The show**: six rounds dealt fresh every show from 13 (`POOL` / `dealShow` in `courses.ts`):
+  race, survival, race, team, race, the final. A wheel of round names spins and lands on each one
+  while it builds.
+  - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
+    paint, open edges (fall off and you're back at the last checkpoint), flat or climbing, joined
+    by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 20 (pins,
+    sweeping bars, hammers, door walls, rolling logs, seesaws, sliding bridges, spinning floors, an
+    uphill belt, wrecking balls, axes, a kicker jump, a bounce pit, rocking planks, windmills,
+    sliders, turnstiles, a bumper field with flippers, island hops, climbs). Hop Scotch, Bonk Bay,
+    Knock Knock, Whirligig, Bonk Alley, Wobble Walk, Sky Stairs, Jelly Junction; each has its own
+    palette. A new course is one line in `GEN`.
+  - **Survival**: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse,
+    and the plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further).
+  - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams paint tiles
+    their colour by standing on them; after 75 s the team with the least floor goes home. Paint
+    Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
+    bar that speeds up: hop it).
+  - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
+  - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
+    rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
+    order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring).
+  - Out of the show, you can watch it to the end (←/→ switches bean).
 - **The beans** (`bean.ts`): a lathe-turned jelly body under a clearcoat, googly eyes on springs,
   little arms and legs, 24 named outfits (a colour, one of 12 patterns painted on a canvas, one of
   12 hats) and random ones for the bots. Animated from the body: a waddling run timed to the speed

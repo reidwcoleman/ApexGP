@@ -104,7 +104,7 @@ export class TeamPlay {
 
   scores(): TeamScore[] {
     const c = this.arena.counts();
-    const total = this.arena.n * this.arena.n;
+    const total = this.arena.total;
     const mine = this.mine();
     return c.map((n, k) => ({ name: TEAM_NAMES[k], color: TEAM_COLORS[k], share: n / total, mine: mine?.name === TEAM_NAMES[k] }));
   }

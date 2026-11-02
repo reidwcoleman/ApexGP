@@ -1,4 +1,4 @@
-import { SHOW } from './courses.ts';
+import { POOL, ROUNDS } from './courses.ts';
 /** The show's screens and HUD (DOM over the canvas). */
 
 const h = (tag: string, cls = '', html = '') => {
@@ -90,8 +90,8 @@ export class UI {
       <a class="mm-back" href="./">&#8592; All games</a>
       <div>
         <div class="mm-title">Wobble<span>Mania</span></div>
-        <div class="mm-tag">24 jelly beans. ${SHOW.length} rounds. 1 crown.</div>
-        <div class="mm-show">${SHOW.map((x, i) => `<i>${x.kind === 'final' ? 'Final' : i + 1} · ${x.name}</i>`).join('')}</div>
+        <div class="mm-tag">24 jelly beans. 6 rounds, dealt from ${POOL.length}. 1 crown.</div>
+        <div class="mm-show">${POOL.map((id) => ROUNDS[id]).map((x) => `<i class="k-${x.kind}">${x.name}</i>`).join('')}</div>
         <div class="mm-picker">
           <button class="mm-arrow" data-a="prev" aria-label="Previous outfit">&#8249;</button>
           <div class="mm-dname"></div>
