@@ -22,7 +22,11 @@ import { lake, paintLakeFor } from './env.ts';
  */
 
 const COLS = [PAINT.red, PAINT.blue, PAINT.green, PAINT.orange, PAINT.purple, PAINT.pink, PAINT.teal, PAINT.yellow];
-const col = (k: number) => COLS[((k % COLS.length) + COLS.length) % COLS.length];
+/** an obstacle's colour: the world's own (its arches' colours), else the toy box's */
+const col = (k: number) => {
+  const a = biome().id === 'candy' ? COLS : biome().deck.arch;
+  return a[((k % a.length) + a.length) % a.length];
+};
 
 interface Ctx {
   b: CourseBuilder;

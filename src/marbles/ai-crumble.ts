@@ -49,7 +49,7 @@ export class CrumbleBrain {
     // (no hurry: a bean that runs flat out eats its own floor)
     m.input.set(dx / d, 0, dz / d).multiplyScalar(d < 1.2 ? 0.45 : this.pace);
     // tile to tile in hops (a hop only touches where it lands: the floor lasts longer)
-    if (m.grounded && d > 2.2 && d < 4.6 && this.rnd() < 0.05 + 0.2 * this.skill) {
+    if (A.mode === 'step' && m.grounded && d > 2.2 && d < 4.6 && this.rnd() < 0.05 + 0.2 * this.skill) {
       m.input.set(dx / d, 0, dz / d).multiplyScalar(Math.min(1, d / 5));
       m.jump = true;
       return;
@@ -83,7 +83,7 @@ export class CrumbleBrain {
       if (tiles[i].L !== L || !A.intact(i)) continue;
       const tl = tiles[i];
       const d = Math.hypot(tl.x - m.pos.x, tl.z - m.pos.z);
-      if (d > reach || d < 1.4) continue;
+      if (d > reach || (d < 1.4 && A.mode === 'step')) continue;
       // room to go on: whole tiles round it
       let room = 0;
       NB.length = 0;
@@ -94,7 +94,8 @@ export class CrumbleBrain {
         const od = Math.hypot(o.pos.x - tl.x, o.pos.z - tl.z);
         if (od < 2.4 && Math.abs(o.pos.y - m.pos.y) < 2) crowd += (2.4 - od) / 2.4;
       }
-      const edge = Math.max(0, Math.hypot(tl.x - A.center.x, tl.z - A.center.z) - (ly.r - 3));
+      // (Meltdown: the edge is where the melt has got to, and it keeps coming)
+      const edge = Math.max(0, Math.hypot(tl.x - A.center.x, tl.z - A.center.z) - (Math.min(ly.r, A.rNow) - (A.mode === 'melt' ? 3.5 : 3))) * (A.mode === 'melt' ? 3 : 1);
       const sc = room * 0.7 * (0.5 + this.skill) - Math.abs(d - 3.2) * 0.4 - crowd * 2.2 - edge * 1.2 + this.rnd() * (1.5 - this.skill);
       if (sc > bs) (bs = sc), (best = i);
     }

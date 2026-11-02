@@ -26,6 +26,8 @@ export const CRUMBLE = {
 };
 
 const UND: number[] = [];
+/** Meltdown: the floe's melt (m/s in from the edge, down to minR) and a hole every `hole` s */
+export const MELT = { r0: 15, rate: 0.12, minR: 3.2, hole: 1.5 };
 
 export interface CrumbleTile {
   x: number;
@@ -42,8 +44,18 @@ export class CrumbleArena {
   readonly layers: { top: number; r: number; i0: number; i1: number }[] = [];
   /** newly touched since the last call to `fresh` (the host sends these) */
   private news: number[] = [];
-  constructor(readonly center: THREE.Vector3) {
-    const C = CRUMBLE;
+  /** 'step': a tile goes when stood on (Cookie Crumble); 'melt': the floe melts in from the edge
+   * and holes open in it, and standing is fine (Meltdown) */
+  readonly mode: 'step' | 'melt';
+  /** Meltdown: how far out the floe still reaches */
+  rNow = Infinity;
+  private holeK = 0;
+  constructor(
+    readonly center: THREE.Vector3,
+    o: { layers?: number; gap?: number; r0?: number; dr?: number; mode?: 'step' | 'melt' } = {},
+  ) {
+    const C = { ...CRUMBLE, ...o };
+    this.mode = o.mode ?? 'step';
     const rowH = (C.sp * Math.sqrt(3)) / 2;
     for (let L = 0; L < C.layers; L++) {
       const y = center.y - L * C.gap;
@@ -119,6 +131,30 @@ export class CrumbleArena {
   set(i: number, at: number) {
     if (i >= 0 && i < this.drop.length && at < this.drop[i]) this.drop[i] = at;
   }
+  /** Meltdown, at t (the same on every screen): the edge melts in, and a hole opens every so often */
+  meltTick(t: number, go: number) {
+    const ly = this.layers[0];
+    const R0 = ly.r;
+    this.rNow = t < go + 4 ? R0 : Math.max(MELT.minR, R0 - (t - go - 4) * MELT.rate);
+    for (let i = ly.i0; i < ly.i1; i++) {
+      if (this.drop[i] !== Infinity) continue;
+      const tl = this.tiles[i];
+      if (Math.hypot(tl.x - this.center.x, tl.z - this.center.z) > this.rNow) this.touch(i, t);
+    }
+    // the holes: a tile and its two nearest, picked by a hash of the count (the same everywhere)
+    while (t > go + 6 + this.holeK * MELT.hole) {
+      const k = this.holeK++;
+      const h = Math.abs(Math.sin(k * 12.9898 + 4.1) * 43758.5453) % 1;
+      const i = ly.i0 + Math.floor(h * (ly.i1 - ly.i0));
+      const tl = this.tiles[i];
+      // (never the very middle: there has to be somewhere to stand at the end)
+      if (Math.hypot(tl.x - this.center.x, tl.z - this.center.z) < MELT.minR) continue;
+      const near: number[] = [];
+      this.around(tl.x, tl.z, CRUMBLE.sp * 1.2, near);
+      near.sort((a, b) => Math.hypot(this.tiles[a].x - tl.x, this.tiles[a].z - tl.z) - Math.hypot(this.tiles[b].x - tl.x, this.tiles[b].z - tl.z));
+      for (const j of near.slice(0, 3)) if (this.tiles[j].L === 0) this.touch(j, Math.max(t, go + 6 + k * MELT.hole));
+    }
+  }
   fresh() {
     const n = this.news;
     this.news = [];
@@ -139,7 +175,7 @@ export class CrumbleArena {
 }
 
 /** a cookie: a fat rounded disc, a domed top of icing with a darker rim of baked dough */
-function cookieGeo() {
+function cookieGeo(side = 0xf0c088) {
   const C = CRUMBLE;
   const R = C.tile, h = C.hh;
   const pts: [number, number][] = [[0, -h], [R * 0.9, -h], [R, -h * 0.55], [R, h * 0.35], [R * 0.93, h * 0.85], [R * 0.82, h], [R * 0.4, h * 1.12], [0, h * 1.15]];
@@ -150,7 +186,7 @@ function cookieGeo() {
   for (let i = 0; i < p.count; i++) {
     // (the icing on top takes the tile's colour; the dough round the side stays warm)
     if (p.getY(i) > h * 0.8) c.setRGB(1, 1, 1);
-    else c.set(0xf0c088);
+    else c.set(side);
     c.toArray(col, i * 3);
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -158,11 +194,12 @@ function cookieGeo() {
   return g;
 }
 
-export function crumble(info: { name: string; blurb: string }): Course {
+export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 'melt' = 'cookie'): Course {
   const b = new CourseBuilder();
   const center = new THREE.Vector3(0, 140, 0);
-  const A = new CrumbleArena(center);
-  const C = CRUMBLE;
+  const melt = kind === 'melt';
+  const A = melt ? new CrumbleArena(center, { layers: 1, r0: MELT.r0, mode: 'melt' }) : new CrumbleArena(center);
+  const C = { ...CRUMBLE, layers: A.layers.length, r0: A.layers[0].r };
   const bottom = center.y - (C.layers - 1) * C.gap;
   b.lakeY = bottom - 34;
   const state = { go: 1e9 };
@@ -184,8 +221,8 @@ export function crumble(info: { name: string; blurb: string }): Course {
     at: (i, o) => o.set(A.tiles[i].x, A.tiles[i].y, A.tiles[i].z),
     on: (i, t) => t < A.drop[i],
   };
-  const LAYER_C = [0xff9cc8, 0xffc070, 0xc8a0ff, 0x8ae0c8, 0xfff08a, 0x9ad0ff];
-  const geo = cookieGeo();
+  const LAYER_C = melt ? [0xe8f6ff] : [0xff9cc8, 0xffc070, 0xc8a0ff, 0x8ae0c8, 0xfff08a, 0x9ad0ff];
+  const geo = cookieGeo(melt ? 0x9fd6f2 : 0xf0c088);
   const meshes = A.layers.map((ly, L) => {
     const m = new THREE.InstancedMesh(geo, new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.3, sheen: 0.4, sheenColor: new THREE.Color(0xffffff) }), ly.i1 - ly.i0);
     m.castShadow = m.receiveShadow = true;
@@ -242,7 +279,7 @@ export function crumble(info: { name: string; blurb: string }): Course {
   // a rough cut for the bots' and the camera's sake
   const plate = { center, radius: C.r0 + (C.layers - 1) * C.dr, bars: [] };
   return {
-    id: 'crumble',
+    id: melt ? 'meltdown' : 'crumble',
     name: info.name,
     kind: 'survival',
     blurb: info.blurb,

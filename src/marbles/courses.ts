@@ -58,7 +58,7 @@ export interface Course {
 }
 
 export type GenId = 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -76,6 +76,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   jumpclub: { id: 'jumpclub', name: 'Bar Hop', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
   tiptop: { id: 'tiptop', name: 'Tilt-a-Dish', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
   crumble: { id: 'crumble', name: 'Cookie Crumble', kind: 'survival', blurb: 'Four floors of cookies. Each one crumbles a moment after you step on it. Keep moving, last ones standing win.', keep: 0.6 },
+  meltdown: { id: 'meltdown', name: 'Meltdown', kind: 'survival', blurb: 'An ice floe melting in from the edge, holes opening in it. Hold your spot, push the others in.', keep: 0.6 },
   lavarush: { id: 'lavarush', name: 'Lava Rush', kind: 'race', blurb: 'Climb! The lava rises up the course behind you. Get caught and you are out.', keep: 0.7 },
   paintparty: { id: 'paintparty', name: 'Paint Party', kind: 'team', blurb: 'Run over the tiles to paint them your team colour. Steal theirs. Least floor goes home.', keep: 0.67 },
   splatring: { id: 'splatring', name: 'Splat Ring', kind: 'team', blurb: 'Paint the ring your colour. A long bar sweeps round faster and faster: hop it.', keep: 0.67 },
@@ -98,17 +99,17 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** a new show: a race, a survival, a race, the team round, a race, the final (which races and which survival is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush'];
-export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'crumble', 'paintparty', 'splatring', 'crownpeak'];
+export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'crumble', 'meltdown', 'paintparty', 'splatring', 'crownpeak'];
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
   // (the platform courses; the old chutes are still there for the test links)
   const races = shuffle<RoundId>(RACE_POOL);
-  const surv = shuffle<RoundId>(['jumpclub', 'tiptop', 'crumble']);
+  const surv = shuffle<RoundId>(['jumpclub', 'tiptop', 'crumble', 'meltdown']);
   const team: RoundId = rnd() < 0.5 ? 'paintparty' : 'splatring';
   setShow([races[0], surv[0], races[1], team, races[2], 'crownpeak']);
   return SHOW.map((x) => x.id);
@@ -145,6 +146,8 @@ export function buildRound(id: RoundId): Course {
       return summit(info);
     case 'crumble':
       return crumble(info);
+    case 'meltdown':
+      return crumble(info, 'melt');
     default:
       return genCourse(GEN[id], info);
   }

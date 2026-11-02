@@ -746,7 +746,14 @@ on wooden obstacle courses, solo against bots or online with friends. Everything
 code (`src/marbles/`; no image, model or sound files). It took over Marble Mania's page, courses
 and bots; the contestants are original bean characters, not marbles.
 
-- **The show**: six rounds dealt fresh every show from 15 (`POOL` / `dealShow` in `courses.ts`):
+- **Worlds** (`biome.ts`, `env-biomes.ts`): every round is in a world of its own: candy, a
+  tropical beach, a volcano, the arctic (with an aurora), a jungle, autumn woods, outer space,
+  a haunted night under a big moon, neon synthwave, a desert, a candy sunset, and a royal sky of
+  castles. Each sets the sky (gradient, sun, moon, stars, aurora, a striped synthwave sun), the sea
+  below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
+  light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
+  colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
+- **The show**: six rounds dealt fresh every show from 18 (`POOL` / `dealShow` in `courses.ts`):
   race, survival, race, team, race, the final. A wheel of round names spins and lands on each one
   while it builds.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
@@ -757,7 +764,9 @@ and bots; the contestants are original bean characters, not marbles.
     sliders, turnstiles, a bumper field with flippers, island hops, climbs, and in `obs-new.ts`
     fists punching out across an open deck, balls dropped from hoppers rolling down a hill at you,
     and padded gates swinging shut). Hop Scotch, Bonk Bay, Knock Knock, Whirligig, Bonk Alley,
-    Wobble Walk, Sky Stairs, Jelly Junction, Punch Line, Rumble Hill; each has its own palette, and
+    Wobble Walk, Sky Stairs, Jelly Junction, Punch Line, Rumble Hill, Lava Rush (an uphill race
+    with lava flooding up the course behind the field: caught by it, or falling with your
+    checkpoint already under it, and you're out; `GenSpec.lava`); each in its own world, and
     every zone its own floor (`zonedFloor` in `shaders.ts`: tile colours and a pattern — tiles,
     stripes, spots or chevrons — looked up along the path, a striped band where it starts). A new
     course is one line in `GEN`.
@@ -767,7 +776,11 @@ and bots; the contestants are original bean characters, not marbles.
     ice creams, stars; some turn and bob), and grandstands of instanced beans bouncing and waving.
     The survival and team arenas are ringed with grandstands and toy islands too (`dressArena`).
   - **Survival**: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse,
-    and the plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further).
+    and the plate's rings crumble), Tilt-a-Dish (a dish that tips further and further), Cookie
+    Crumble (`course-crumble.ts`, `ai-crumble.ts`: six floors of cookie tiles, each dropping a
+    moment after it's stood on, so you fall floor to floor; the tiles are cheap `World.pads`, the
+    host sends the drop times) and Meltdown (one ice floe melting in from the edge with holes
+    opening in it, the same on every screen; push the others in).
   - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams paint tiles
     their colour by walking over them; after 75 s the team with the least floor goes home. Paint
     bombs drop in every few seconds (the same spots in every browser): run into one and it splashes
@@ -778,7 +791,7 @@ and bots; the contestants are original bean characters, not marbles.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
     order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
-    18 Rumble Hill).
+    18 Rumble Hill, 19 Cookie Crumble, 20 Lava Rush, 21 Meltdown).
   - Out of the show, you can watch it to the end (←/→ switches bean).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,

@@ -756,10 +756,12 @@ export class MarbleGame {
       // seen here, and it tells the guests when each drops; a guest: its own, until the host says)
       if (c.crumble && (this.state === 'play' || this.state === 'over')) {
         const A = c.crumble;
-        for (const r of this.racers) {
-          if (r.out || (this.guest && !r.local) || (r.local && r.m.groundT > 0.12)) continue;
-          A.touch(A.under(r.m.pos), w.time);
-        }
+        if (A.mode === 'melt') A.meltTick(w.time, c.state.go);
+        else
+          for (const r of this.racers) {
+            if (r.out || (this.guest && !r.local) || (r.local && r.m.groundT > 0.12)) continue;
+            A.touch(A.under(r.m.pos), w.time);
+          }
         const fresh = A.fresh();
         if (this.host && fresh.length) this.host.broadcast({ t: 'crumble', k: fresh, at: fresh.map((i) => A.drop[i]) });
       }
@@ -934,7 +936,7 @@ export class MarbleGame {
     // (the crowd reacts to anyone going over near the camera)
     if (!r.c.player && m.pos.distanceTo(this.camera.position) < 25 && Math.random() < 0.6) this.sound.ooh();
     if (r.c.player && this.state === 'play') {
-      this.ui.banner('ELIMINATED', 'bad', c.crumble ? 'Fell through the floors' : c.lava ? 'Caught by the lava' : 'Knocked off the plate');
+      this.ui.banner('ELIMINATED', 'bad', c.crumble ? (c.crumble.mode === 'melt' ? 'Into the icy water' : 'Fell through the floors') : c.lava ? 'Caught by the lava' : 'Knocked off the plate');
       this.sound.eliminated();
     }
   }
