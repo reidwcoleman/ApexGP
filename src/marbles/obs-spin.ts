@@ -142,13 +142,16 @@ export function rollers(b: CourseBuilder, path: Path, s0: number, s1: number, o:
     const f = frameAt(path, s);
     // the axis across the track: local y turned onto local x
     const q = f.q.clone().multiply(rotZ(Math.PI / 2));
-    const pos = path.at(s, 0, -0.12);
+    // (the tops stand just proud of the floor whatever the size)
+    const pos = path.at(s, 0, 0.18 - r);
     const hh = o.half ?? path.sec[path.index(s0)].w / 2 - 0.55;
     const kin = new Kin({ type: 'cyl', r, hh }, Mat.Paint, (t, p, qq) => {
       QA.setFromAxisAngle(Y, -om * t + k * 0.7);
       qq.copy(q).multiply(QA);
       p.copy(pos);
     });
+    // (the bots run over a roller bed: it's floor, not something to steer round)
+    (kin as unknown as { aiRole: string }).aiRole = 'ride';
     b.world.addKin(kin);
     kins.push(kin);
     base.push({ pos, q });

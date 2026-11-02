@@ -56,6 +56,20 @@ export class TeamBrain {
       }
       this.nextPick = t + 0.7 + this.rnd() * (1.6 - this.skill);
     }
+    // a paint bomb near: go and get it (the better ones spot them from further off)
+    let near: THREE.Vector3 | null = null, nd = 4 + 7 * this.skill;
+    for (const q of A.pickups) {
+      const dq = Math.hypot(q.x - m.pos.x, q.z - m.pos.z);
+      if (dq < nd) {
+        nd = dq;
+        near = q;
+      }
+    }
+    if (near) {
+      this.tgt.set(near.x, A.center.y, near.z);
+      this.has = true;
+      this.nextPick = t + 0.3;
+    }
     P.set(this.tgt.x - m.pos.x, 0, this.tgt.z - m.pos.z);
     const d = P.length();
     if (d > 0.01) P.multiplyScalar(1 / d);

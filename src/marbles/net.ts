@@ -59,6 +59,9 @@ export type CtlMsg =
   /** a bean did something to someone else's (sent to the host, which passes it on to the owner) */
   | { t: 'shove'; id: number; kind: 'knock' | 'grab'; v: [number, number, number] }
   | { t: 'lobby' }
+  /** the team round: the host's floor (one digit a tile), and a paint bomb set off */
+  | { t: 'tiles'; c: string }
+  | { t: 'splat'; k: number; id: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }
   | { t: 'kick'; why: string };

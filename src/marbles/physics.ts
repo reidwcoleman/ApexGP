@@ -118,6 +118,9 @@ export class Marble {
   diveT = 0;
   /** getting up after a dive or a tumble (no running yet) */
   upT = 0;
+  /** just back on its feet: a moment it can't be knocked straight over again (so a sweeper or a
+   * spinner pushing it can't keep it on the floor) */
+  guardT = 0;
   /** the bean it holds, and how long it has; being held (seconds left, refreshed by the holder) */
   holding: Marble | null = null;
   holdT = 0;
@@ -138,6 +141,7 @@ export class Marble {
   /** knocked over: a tumble of `t` seconds (longer if it's already going) */
   knock(t: number) {
     if (this.puppet || this.frozen) return;
+    if (this.mode !== Mode.Tumble && this.guardT > 0) return;
     if (this.mode !== Mode.Tumble) {
       this.mode = Mode.Tumble;
       this.knocked = true;
@@ -538,6 +542,7 @@ export class World {
       m.pos.addScaledVector(m.vel, h);
       return;
     }
+    m.guardT = Math.max(0, m.guardT - h);
     if (m.mode === Mode.Tumble) return this.roll(m, h);
     const grounded = m.groundT < 0.08;
     const inp = m.input;
@@ -631,13 +636,25 @@ export class World {
     m.quat.set(m.quat.x + QD.x, m.quat.y + QD.y, m.quat.z + QD.z, m.quat.w + QD.w).normalize();
     m.groundT += h;
     m.tumbleT -= h;
-    if (m.tumbleT <= 0 && m.groundT < 0.08 && m.vel.length() < 4.5) {
-      m.mode = Mode.Run;
-      m.upT = 0.3;
-      m.ang.set(0, 0, 0);
-      const e = new THREE.Euler().setFromQuaternion(m.quat, 'YXZ');
-      m.yaw = e.y;
-    } else if (m.tumbleT < -3) m.tumbleT = 0.5;
+    // up again: on the ground and slow against what it's lying on (a turntable, a belt, a sweeper
+    // shoving it along all count as still), or anyway once it's been down a while: never left
+    // rolling round and round on the floor
+    if (m.tumbleT <= 0 && m.groundT < 0.08) {
+      const rx = m.vel.x - m.groundVel.x, rz = m.vel.z - m.groundVel.z;
+      const rel = Math.hypot(rx, rz);
+      if (rel < 4.5 || m.tumbleT < -0.9) {
+        m.mode = Mode.Run;
+        m.upT = 0.25;
+        m.guardT = 1.1;
+        m.ang.set(0, 0, 0);
+        if (rel > 3) {
+          m.vel.x = m.groundVel.x + (rx / rel) * 3;
+          m.vel.z = m.groundVel.z + (rz / rel) * 3;
+        }
+        const e = new THREE.Euler().setFromQuaternion(m.quat, 'YXZ');
+        m.yaw = e.y;
+      }
+    }
   }
 
   private collide(m: Marble) {

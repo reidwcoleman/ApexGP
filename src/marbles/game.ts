@@ -128,6 +128,7 @@ export class MarbleGame {
   /** guest: the host's world clock minus performance.now() (s) */
   private worldOff = NaN;
   private sendAcc = 0;
+  private tilesAcc = 0;
   private shoveT = new Map<string, number>();
   private loadedBy = new Set<string>();
   /** the world time the gate opens */
@@ -704,7 +705,14 @@ export class MarbleGame {
     const c = this.course!;
     const w = c.b.world;
     if (c.team && this.teamPlay) {
-      if (this.state === 'play') this.teamPlay.paint();
+      if (this.state === 'play') {
+        this.teamPlay.paint();
+        // the paint bombs: solo or the host decides who set one off, and tells the guests
+        for (const e of this.teamPlay.bombsUpdate(w.time, c.state.go, this.roundKey(), !this.guest)) {
+          this.host?.broadcast({ t: 'splat', k: e.k, id: e.id });
+          this.bombFx();
+        }
+      }
       for (const r of this.racers) {
         if (!r.local) continue;
         if (!r.fell && r.m.pos.y < c.killY) {
@@ -1020,6 +1028,15 @@ export class MarbleGame {
     if (this.guest) return x.owner === this.guest.id;
     return true;
   }
+  /** a paint bomb went off: a burst of its team's colour */
+  private bombFx() {
+    const b = this.teamPlay?.lastBoom;
+    if (!b) return;
+    this.confetti.burst(b.pos.clone().add(new THREE.Vector3(0, 1, 0)), b.mine ? 160 : 70, 7, 3);
+    this.puffs.dust(b.pos, 14, 0.35, 3.2);
+    if (b.mine) this.ui.banner('SPLAT!', 'good', 'A paint bomb for your team', 900);
+  }
+
   private roundKey() {
     return this.showNo * 100 + this.roundIdx;
   }
@@ -1179,6 +1196,15 @@ export class MarbleGame {
       case 'shove':
         if (r?.local) this.applyShove(r, m.kind, m.v);
         break;
+      case 'tiles':
+        this.teamPlay?.arena.load(m.c);
+        break;
+      case 'splat':
+        if (this.teamPlay) {
+          this.teamPlay.collect(m.k, m.id);
+          this.bombFx();
+        }
+        break;
       case 'lobby':
         this.toMenu();
         this.showLobby();
@@ -1297,6 +1323,14 @@ export class MarbleGame {
       else {
         const r = this.racers.find((x) => x.m === sh.target);
         if (r && r.c.owner !== 'host') this.host?.send(r.c.owner, msg);
+      }
+    }
+    // the team round: the host's floor to everyone twice a second (so every screen shows the same paint)
+    if (this.host && this.teamPlay && (this.state === 'play' || this.state === 'over')) {
+      this.tilesAcc += dt;
+      if (this.tilesAcc > 0.5) {
+        this.tilesAcc = 0;
+        this.host.broadcast({ t: 'tiles', c: this.teamPlay.arena.save() });
       }
     }
     this.sendAcc += dt;

@@ -769,7 +769,9 @@ and bots; the contestants are original bean characters, not marbles.
   - **Survival**: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse,
     and the plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further).
   - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams paint tiles
-    their colour by standing on them; after 75 s the team with the least floor goes home. Paint
+    their colour by walking over them; after 75 s the team with the least floor goes home. Paint
+    bombs drop in every few seconds (the same spots in every browser): run into one and it splashes
+    your team's colour all round you. Online the host's floor is sent to everyone twice a second. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
     bar that speeds up: hop it).
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
@@ -800,7 +802,9 @@ and bots; the contestants are original bean characters, not marbles.
   lunge into a belly slide that bowls over whoever it hits) and grab (hold: the bean in front is
   slowed and dragged). A hammer, a sweeper, a bumper or a diving bean knocks you over: you become
   a rolling ball (I = 2/5·m·r², friction impulses at the contact) until you're slow enough on the
-  ground to get up. 240 Hz substeps.
+  ground to get up — slow measured against what it's lying on, so a turntable or a sweeper
+  shoving it doesn't count, and up anyway a second past its time — then a moment it can't be
+  knocked straight back over. 240 Hz substeps.
 - **Controls**, the usual party-game layout: WASD run, Space jump, Ctrl dive (or C), Shift grab
   (hold, or E), the mouse turns the camera (click to lock the pointer, ESC lets go) and tilts it;
   a pad: left stick, A jump, X/Square or B dive, RT grab, right stick camera.

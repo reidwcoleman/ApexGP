@@ -90,7 +90,7 @@ export const ZONES: Record<string, (k: string) => Zone> = {
   }),
   /** hammers swinging across from gantries, low padded rims */
   hammers: (k) => ({
-    cmds: [flat({ len: 8, w: 12, wall: 0.8, tag: k + 'pre' }), flat({ len: 48, w: 12, wall: 0.8, tag: k + 'z' })],
+    cmds: [flat({ len: 8, w: 12, wall: 1.3, tag: k + 'pre' }), flat({ len: 48, w: 12, wall: 1.3, tag: k + 'z' })],
     place: ({ b, path, t, n }) => {
       const [z0] = t(k + 'z');
       [8, 19, 30, 41].forEach((ds, q) => hammer(b, path, z0 + ds, { amp: 1.05, period: 2.5 + (q % 3) * 0.25, phase: q * 1.7 + n, color: col(n + q) }));
@@ -170,7 +170,7 @@ export const ZONES: Record<string, (k: string) => Zone> = {
     cmds: [flat({ len: 8, w: 10, wall: 1.2, tag: k + 'pre' }), flat({ len: 26, slope: -3, w: 10, wall: 1.2, deck: false, tag: k + 'z' }), flat({ len: 8, w: W, easeW: 3 })],
     place: ({ b, path, t, n, warn }) => {
       const [z0, z1] = t(k + 'z');
-      rollers(b, path, z0 - 0.3, z1 + 0.3, { speed: -4.5, colors: [col(n), PAINT.white] });
+      rollers(b, path, z0 - 0.3, z1 + 0.3, { speed: -4.5, r: 0.5, pitch: 0.56, colors: [col(n), PAINT.white] });
       floorBand(b, path, z0 - 1.3, 0.8, warn);
     },
     cps: ({ t }) => [t(k + 'pre')[0] + 1],
@@ -370,6 +370,11 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
     const make = ZONES[st];
     if (make) {
       const z = make(k);
+      // (into a walled or narrower zone: the floor narrows first, then the walls rise — never a
+      // wall's end standing across the way where the deck was wider)
+      const c0 = z.cmds[0];
+      const prevW = cmds[cmds.length - 1].w ?? W;
+      if ((c0.wall ?? 0) > 0.05 && (c0.w ?? W) < prevW - 0.5) cmds.push(flat({ len: 7, w: c0.w, easeW: 1.8 }));
       const s0 = sum();
       cmds.push(...z.cmds);
       zones.push({ z, k, n: i * 3 + spec.id.length, s0, s1: sum(), kind: st });

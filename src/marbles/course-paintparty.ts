@@ -44,6 +44,13 @@ export interface TeamArena {
   nearWall(x: number, z: number, m: number): boolean;
   /** where a team's beans start and come back after a fall */
   base(team: number): THREE.Vector3;
+  /** paints every tile within r of (x, z) for a team; how many changed */
+  splat(x: number, z: number, r: number, team: number): number;
+  /** the floor as a string (one digit a tile) and back: the host's floor sent to the guests */
+  save(): string;
+  load(s: string): void;
+  /** paint pickups lying on the floor now (for the bots) */
+  pickups: THREE.Vector3[];
 }
 
 /** 'square': the walled square with a turntable; 'ring': a round arena swept by a long bar (hop it) */
@@ -220,6 +227,38 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
       tex.needsUpdate = true;
       return true;
     },
+    splat(x, z, r, team) {
+      let n = 0;
+      for (let dz = -r; dz <= r + 1e-6; dz += CELL * 0.5)
+        for (let dx = -r; dx <= r + 1e-6; dx += CELL * 0.5) {
+          if (dx * dx + dz * dz > r * r) continue;
+          const i = cellAt(x + dx, z + dz);
+          if (i < 0 || cells[i] === team + 1) continue;
+          cells[i] = team + 1;
+          setTexel(i);
+          n++;
+        }
+      if (n) tex.needsUpdate = true;
+      return n;
+    },
+    save() {
+      let out = '';
+      for (let i = 0; i < cells.length; i++) out += cells[i];
+      return out;
+    },
+    load(str) {
+      if (str.length !== cells.length) return;
+      let any = false;
+      for (let i = 0; i < cells.length; i++) {
+        const v = str.charCodeAt(i) - 48;
+        if (v < 0 || v > 3 || cells[i] === v || !valid[i]) continue;
+        cells[i] = v;
+        setTexel(i);
+        any = true;
+      }
+      if (any) tex.needsUpdate = true;
+    },
+    pickups: [],
     centreOf(i, out) {
       return out.set(center.x - HALF + ((i % N) + 0.5) * CELL, center.y, center.z - HALF + (Math.floor(i / N) + 0.5) * CELL);
     },
