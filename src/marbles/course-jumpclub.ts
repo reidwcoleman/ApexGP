@@ -164,7 +164,7 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
   }
 
   // the sign, on two posts behind the plate, and bunting poles round it
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), 'Round 3 · Survival', PAINT.blue), roughness: 0.4, clearcoat: 0.8 }));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), 'Survival · Hop the low bar', PAINT.blue, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
   sign.position.set(center.x, center.y + 7.5, center.z - RAD - 3);
   b.group.add(sign);
   {

@@ -844,6 +844,10 @@ export const foamTheme = () => theme;
 export function setFoamTheme(id: string) {
   theme = FOAM_THEMES[id] ?? FOAM_THEMES.timber;
 }
+/** a palette of its own (a biome's) */
+export function useFoamTheme(t: FoamTheme) {
+  theme = t;
+}
 
 let blank: THREE.DataTexture | null = null;
 function blankZone() {

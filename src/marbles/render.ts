@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, EdgeDetectionMode, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
-import { environment, giants, lake, skyDome } from './env.ts';
+import { environment, giants, lake, paintLakeFor, paintSky, skyDome } from './env.ts';
+import { Scenery } from './env-biomes.ts';
+import { BIOMES, type Biome, type BiomeId } from './biome.ts';
 import { installAir } from './env-air.ts';
 import { Clouds } from './env-clouds.ts';
 import { Mirror } from './env-mirror.ts';
@@ -33,6 +35,12 @@ export class Stage {
   readonly clouds: Clouds;
   readonly mirror = new Mirror();
   readonly props = new Props();
+  readonly hemi: THREE.HemisphereLight;
+  private giantsG: THREE.Group;
+  private scenery = new Map<BiomeId, Scenery>();
+  private cur: Scenery | null = null;
+  biome: Biome = BIOMES.candy;
+  private ready = false;
   readonly aa: 'taa' | 'smaa';
   readonly taa: TAAPass | null = null;
   /** the beans (each one's body centre, which moves and turns with it) for the TAA */
@@ -58,13 +66,12 @@ export class Stage {
     r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.NoToneMapping;
     r.outputColorSpace = THREE.SRGBColorSpace;
-    scene.environment = environment(r, SUN);
     scene.environmentIntensity = 0.9;
     scene.add((this.sky = skyDome(SUN)));
     // (white: the air takes the sky's own colour; the density sets how far before it is all sky)
     scene.fog = new THREE.FogExp2(0xffffff, 1 / 1800);
     // sky light from above, the paint's pink-and-gold glow from below
-    scene.add(new THREE.HemisphereLight(0xc4dcff, 0xe0a49a, 0.6));
+    scene.add((this.hemi = new THREE.HemisphereLight(0xc4dcff, 0xe0a49a, 0.6)));
     const sun = (this.sun = makeSun(SUN, 0xfff0da, 3.2));
     scene.add(sun);
     this.lake = lake(0, this.mirror);
@@ -73,12 +80,12 @@ export class Stage {
     this.clouds = new Clouds(SUN);
     this.backdrop.add(this.clouds.mesh, this.props.group);
     this.backdrop.add(
-      giants(
+      (this.giantsG = giants(
         new THREE.Vector3(),
         0,
         (a, b) => paintMaterial({ a, b, pattern: Pattern.Stripes, scale: 1, wear: 0.02 }),
         (i) => beanStatue(OUTFITS[(i * 5 + 3) % OUTFITS.length]),
-      ),
+      )),
     );
 
     const c = (this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
@@ -106,6 +113,7 @@ export class Stage {
     const tm = new ToneMappingEffect({ mode: tmq === 'agx' ? ToneMappingMode.AGX : tmq === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
     c.addPass(new EffectPass(camera, bloom, tm, new GradeEffect(), new VignetteEffect({ darkness: 0.28, offset: 0.35 })));
     if (this.aa === 'smaa') c.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.ULTRA, edgeDetectionMode: EdgeDetectionMode.COLOR })));
+    this.setBiome(BIOMES.candy);
     const gfx = new URLSearchParams(location.search).get('gfx');
     if (gfx) {
       this.autoQuality = false;
@@ -118,9 +126,8 @@ export class Stage {
     q = THREE.MathUtils.clamp(Math.round(q), 0, 2);
     if (q === this.quality) return;
     this.quality = q;
-    this.mirror.enabled = q >= 2;
-    (this.lake.userData.u as { uReflOn: { value: number } }).uReflOn.value = q >= 2 ? 1 : 0;
     this.ao.enabled = q >= 1;
+    this.mirrorOn();
     const size = q >= 1 ? 2048 : 1024;
     const sh = this.sun.shadow;
     if (sh.mapSize.x !== size) {
@@ -152,6 +159,55 @@ export class Stage {
     return new URLSearchParams(location.search).get('aa') === 'smaa' ? 'smaa' : 'taa';
   }
 
+  private mirrorOn() {
+    const on = this.quality >= 2 && this.biome.lake.mirror;
+    this.mirror.enabled = on;
+    (this.lake.userData.u as { uReflOn: { value: number } }).uReflOn.value = on ? 1 : 0;
+  }
+
+  /** the world a round is in: the sky, the air, the light, the sea, the scenery */
+  setBiome(b: Biome) {
+    if (b === this.biome && this.ready) return;
+    this.ready = true;
+    this.biome = b;
+    paintSky(b, SUN);
+    const hor = new THREE.Color(b.sky.hor), band = new THREE.Color(b.sky.band);
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(hor.lerp(band, 0.19));
+    fog.density = b.fog;
+    this.hemi.color.set(b.hemi.sky);
+    this.hemi.groundColor.set(b.hemi.ground);
+    this.hemi.intensity = b.hemi.k;
+    this.sun.color.set(b.sun.color);
+    this.sun.intensity = b.sun.k;
+    const old = this.scene.environment;
+    this.scene.environment = environment(this.renderer, SUN, b);
+    old?.dispose();
+    this.scene.environmentIntensity = b.env;
+    paintLakeFor(this.lake, b);
+    this.mirrorOn();
+    this.clouds.mesh.visible = b.clouds.on;
+    this.clouds.uniforms.uLit.value.set(b.clouds.lit);
+    this.clouds.uniforms.uShade.value.set(b.clouds.shade);
+    // the toy box for the candy worlds; every other its own scenery
+    const toys = b.id === 'candy' || b.id === 'sunset';
+    this.giantsG.visible = toys;
+    this.props.group.visible = toys;
+    if (this.cur) this.cur.group.visible = false;
+    this.cur = null;
+    if (!toys) {
+      let sc = this.scenery.get(b.id);
+      if (!sc) {
+        sc = new Scenery(b.id);
+        this.scenery.set(b.id, sc);
+        this.backdrop.add(sc.group);
+      }
+      sc.group.visible = true;
+      this.cur = sc;
+    }
+    this.taa?.reset();
+  }
+
   /** a new course: the lake under it, the backdrop round it */
   setCourse(lakeY: number, center: THREE.Vector3) {
     this.taa?.reset();
@@ -177,12 +233,14 @@ export class Stage {
     }
     // (never close in, even round a small course: they are scenery, not set dressing)
     this.props.layout(THREE.MathUtils.clamp(reach, 150, 400));
+    this.cur?.layout(THREE.MathUtils.clamp(reach, 150, 400));
     // (where the pegs stand in the paint, for its swirls and menisci)
     const pegs = (this.lake.userData.u as { uPegs: { value: THREE.Vector3[] } }).uPegs.value;
     let k = 0;
-    this.backdrop.traverse((o) => {
-      if (o.userData.peg && k < pegs.length) pegs[k++].set(o.position.x + center.x, o.position.z + center.z, o.userData.peg as number);
+    this.backdrop.traverseVisible((o) => {
+      if (o.userData.peg && k < pegs.length && o.position.y < 5) pegs[k++].set(o.position.x + center.x, o.position.z + center.z, o.userData.peg as number);
     });
+    for (; k < pegs.length; k++) pegs[k].set(1e5, 1e5, 1);
   }
 
   setSize(w: number, h: number) {
@@ -197,6 +255,7 @@ export class Stage {
     (this.sky.userData.u as { uTime: { value: number } }).uTime.value = t;
     this.clouds.update(t, this.camera);
     this.props.update(t);
+    this.cur?.update(t);
     this.backdrop.traverse((o) => {
       if (o.userData.giant) o.rotation.y += dt * 0.05;
     });

@@ -191,7 +191,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     p.add(b.railWood, plank(9.4, 2.0, 0.3, 0.08, 'x'), mat(0, 7.5, -0.18));
     for (const sx of [-4.2, 4.2]) post(p, b, mat(sx, -6, -0.3), 14.6, { w: 0.42 });
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z - HALF - 4));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
     sign.position.set(center.x, center.y + 7.5, center.z - HALF - 4);
     b.group.add(sign);
   }

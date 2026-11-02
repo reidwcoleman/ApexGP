@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { CourseBuilder, Path } from './builder.ts';
 import { OUTFITS } from './bean.ts';
+import { biome, type BiomeId } from './biome.ts';
 
 /**
  * The show round a platform course: an inflatable arch over the way where each zone starts (in
@@ -149,6 +150,166 @@ const TOYS: Toy[] = [
   },
 ];
 
+// ------------------------------------------------------------------------ each world's own toys
+const rib = (n: number, a: number, b: number) => (x: number, _y: number, z: number) => (Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * n) % 2 ? a : b);
+const palmToy: Toy = (r) => {
+  const gs: THREE.BufferGeometry[] = [];
+  const lean = 0.5 + r() * 0.6;
+  let x = 0, y = 0;
+  for (let i = 0; i < 6; i++) {
+    gs.push(solid(new THREE.CylinderGeometry(0.28 - i * 0.02, 0.32 - i * 0.02, 1.25, 10), i % 2 ? 0xa8743e : 0x8f6232).translate(x, y + 0.62, 0));
+    x += lean * 0.12 * i;
+    y += 1.2;
+  }
+  for (let k = 0; k < 7; k++) {
+    const leaf = solid(new THREE.ConeGeometry(0.55, 3.4, 4, 1).scale(1, 1, 0.22), k % 2 ? 0x2fae4a : 0x45c860).translate(0, 1.7, 0);
+    leaf.rotateZ(1.75).rotateY((k / 7) * Math.PI * 2);
+    gs.push(leaf.translate(x, y, 0));
+  }
+  gs.push(solid(new THREE.SphereGeometry(0.32, 10, 8), 0x7a5228).translate(x + 0.3, y - 0.3, 0.2), solid(new THREE.SphereGeometry(0.32, 10, 8), 0x7a5228).translate(x - 0.25, y - 0.35, -0.2));
+  return { g: merge(gs), h: y + 1 };
+};
+const pumpkinToy = (face: boolean): Toy => () => {
+  const gs = [paint(new THREE.SphereGeometry(2.2, 32, 18).scale(1, 0.82, 1), rib(12, 0xff8a1a, 0xf27410)).translate(0, 1.8, 0), solid(new THREE.CylinderGeometry(0.22, 0.35, 0.9, 8).rotateZ(0.2), 0x4a7a2a).translate(0, 3.7, 0)];
+  if (face) {
+    const dark = 0x2a1206;
+    for (const s2 of [-1, 1]) gs.push(solid(new THREE.ConeGeometry(0.42, 0.6, 3).rotateX(Math.PI / 2).scale(1, 1, 0.3), dark).translate(s2 * 0.75, 2.35, 2.05));
+    gs.push(solid(new THREE.BoxGeometry(1.6, 0.35, 0.3), dark).translate(0, 1.35, 2.0));
+  }
+  return { g: merge(gs), h: 4 };
+};
+const crystalToy = (cs: number[]): Toy => (r) => {
+  const gs: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 6; i++) {
+    const h = 1.8 + r() * 3.2;
+    gs.push(solid(new THREE.ConeGeometry(0.45 + r() * 0.4, h, 6), pick(r, cs)).translate(0, h / 2, 0).rotateZ((r() - 0.5) * 0.9).rotateY(r() * 6).translate((r() - 0.5) * 1.6, 0, (r() - 0.5) * 1.6));
+  }
+  return { g: merge(gs), h: 4.5 };
+};
+const treeToy = (leaves: number[], trunk = 0x7a5232): Toy => (r) => {
+  const gs = [solid(new THREE.CylinderGeometry(0.3, 0.45, 3.4, 10), trunk).translate(0, 1.7, 0)];
+  for (let i = 0; i < 5; i++) gs.push(solid(new THREE.IcosahedronGeometry(1.1 + r() * 0.6, 1), pick(r, leaves)).translate((r() - 0.5) * 1.6, 3.6 + r() * 1.6, (r() - 0.5) * 1.6));
+  return { g: merge(gs), h: 6 };
+};
+const pineToy = (snow: boolean): Toy => () => {
+  const gs = [solid(new THREE.CylinderGeometry(0.25, 0.32, 1.4, 8), 0x6a4a30).translate(0, 0.7, 0)];
+  [[2.0, 1.2], [1.6, 2.6], [1.15, 3.9], [0.7, 5.0]].forEach(([R0, y]) => gs.push(paint(new THREE.ConeGeometry(R0, 2.0, 10), (_x, yy) => (snow && yy > 0.25 ? 0xffffff : 0x2a7a4a)).translate(0, y + 0.6, 0)));
+  return { g: merge(gs), h: 6.4 };
+};
+const BIOME_TOYS: Partial<Record<BiomeId, Toy[]>> = {
+  beach: [
+    palmToy,
+    TOYS[3],
+    // a beach umbrella and a towel
+    (r) => {
+      const a = pick(r, BRIGHT);
+      return { g: merge([paint(new THREE.ConeGeometry(2.6, 1.1, 16, 1, true), rib(8, a, 0xffffff)).translate(0, 4.1, 0), solid(new THREE.CylinderGeometry(0.09, 0.09, 4.2, 8), 0xffffff).translate(0, 2.0, 0), paint(new THREE.BoxGeometry(1.6, 0.08, 3.0), (x) => (Math.floor(x * 3 + 3) % 2 ? pick(r, BRIGHT) : 0xffffff)).translate(1.4, 0.05, 0)]), h: 4.8 };
+    },
+    // a sandcastle
+    () => {
+      const sand = 0xf0d08a;
+      const gs = [solid(new THREE.BoxGeometry(3.4, 1.6, 3.4), sand).translate(0, 0.8, 0)];
+      for (const [x, z] of [[-1.5, -1.5], [1.5, -1.5], [-1.5, 1.5], [1.5, 1.5]]) gs.push(solid(new THREE.CylinderGeometry(0.6, 0.7, 2.6, 12), sand).translate(x, 1.3, z), solid(new THREE.ConeGeometry(0.75, 0.9, 12), 0xe8b868).translate(x, 3.05, z));
+      gs.push(solid(new THREE.CylinderGeometry(0.9, 1.0, 3.4, 14), sand).translate(0, 2.3, 0), solid(new THREE.BoxGeometry(0.05, 0.6, 0.9), 0xff4f7a).translate(0, 4.6, 0.45), solid(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 6), 0xffffff).translate(0, 4.5, 0));
+      return { g: merge(gs), h: 5 };
+    },
+  ],
+  volcano: [
+    crystalToy([0x2a1c20, 0x3a2a2e, 0xff6a10]),
+    // a fire bowl
+    () => ({ g: merge([solid(new THREE.CylinderGeometry(1.6, 0.9, 1.2, 14), 0x3a2e30).translate(0, 1.6, 0), solid(new THREE.CylinderGeometry(0.4, 0.6, 1.2, 10), 0x2a2224).translate(0, 0.6, 0), solid(new THREE.ConeGeometry(1.2, 2.4, 8), 0xff8a20).translate(0, 3.2, 0), solid(new THREE.ConeGeometry(0.7, 1.8, 8), 0xffd040).translate(0.2, 3.1, 0.1)]), h: 4.4, bob: 0.04 }),
+    // a little volcano of its own
+    () => ({ g: merge([paint(new THREE.CylinderGeometry(0.9, 2.6, 3.2, 14, 3), (_x, y) => (y > 1.2 ? 0xff7a1a : 0x3a2c2a)).translate(0, 1.6, 0), solid(new THREE.SphereGeometry(0.8, 10, 8), 0xffc040).translate(0, 3.3, 0)]), h: 4 }),
+  ],
+  arctic: [
+    pineToy(true),
+    crystalToy([0xbfe8ff, 0x8fd0ff, 0xffffff, 0xc8b8ff]),
+    // a snowman with a scarf and a carrot
+    (r) => {
+      const sc = pick(r, BRIGHT);
+      const gs = [solid(new THREE.SphereGeometry(1.5, 24, 16), 0xffffff).translate(0, 1.4, 0), solid(new THREE.SphereGeometry(1.1, 24, 16), 0xffffff).translate(0, 3.4, 0), solid(new THREE.SphereGeometry(0.8, 20, 14), 0xffffff).translate(0, 4.9, 0)];
+      gs.push(solid(new THREE.TorusGeometry(0.72, 0.18, 8, 20).rotateX(Math.PI / 2), sc).translate(0, 4.3, 0), solid(new THREE.ConeGeometry(0.14, 0.8, 8).rotateX(Math.PI / 2), 0xff7a1a).translate(0, 4.9, 1.1));
+      for (const sx of [-0.28, 0.28]) gs.push(solid(new THREE.SphereGeometry(0.09, 8, 6), 0x1a1a22).translate(sx, 5.1, 0.72));
+      gs.push(solid(new THREE.CylinderGeometry(0.55, 0.55, 0.8, 16), 0x1a1a22).translate(0, 5.95, 0), solid(new THREE.CylinderGeometry(0.85, 0.85, 0.08, 16), 0x1a1a22).translate(0, 5.58, 0));
+      return { g: merge(gs), h: 6.4 };
+    },
+    // an igloo
+    () => ({ g: merge([paint(new THREE.SphereGeometry(2.2, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), (x, y, z) => (Math.floor(y * 2.2) % 2 === Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 12) % 2 ? 0xffffff : 0xe2f2ff)), solid(new THREE.CylinderGeometry(0.8, 0.8, 1.4, 16, 1, false, 0, Math.PI).rotateX(Math.PI / 2), 0xf0f8ff).translate(0, 0.4, 2.1)]), h: 2.4 }),
+  ],
+  jungle: [palmToy, treeToy([0x2f9a3a, 0x3cb04a, 0x58c040]), (r) => ({ g: merge([solid(new THREE.CylinderGeometry(0.45, 0.6, 2.6, 12), 0xf6ecd8).translate(0, 1.3, 0), paint(new THREE.SphereGeometry(2.0, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1), (x, _y, z) => (Math.sin(x * 2.6) * Math.sin(z * 2.6) > 0.55 ? 0xffffff : pick(r, [0xe03a3a, 0xff7a1a]))).translate(0, 2.5, 0)]), h: 3.8 }), crystalToy([0xff4f8f, 0xffc21f, 0x9a5bff])],
+  autumn: [treeToy([0xe8601a, 0xffa020, 0xc8302a, 0xf0c030]), treeToy([0xffb020, 0xe8501a, 0xd83a2a]), pumpkinToy(false), pineToy(false)],
+  space: [
+    // a little planet with a ring
+    (r) => {
+      const a = pick(r, BRIGHT), b2 = pick(r, BRIGHT);
+      return { g: merge([paint(new THREE.SphereGeometry(1.7, 28, 16), (_x, y) => (Math.floor(y * 1.8 + 4) % 2 ? a : b2)), paint(new THREE.RingGeometry(2.2, 3.2, 40, 2), (x, y) => (Math.floor(Math.hypot(x, y) * 3) % 2 ? 0xfff2c8 : 0xd8c0ff)).rotateX(-Math.PI / 2 + 0.4)]).translate(0, 3.0, 0), spin: 0.5, bob: 0.3, h: 5 };
+    },
+    // a rocket
+    (r) => {
+      const c2 = pick(r, BRIGHT);
+      const gs = [solid(new THREE.CylinderGeometry(0.8, 0.9, 4.2, 20), 0xf4f4f8).translate(0, 2.8, 0), solid(new THREE.ConeGeometry(0.8, 1.8, 20), c2).translate(0, 5.8, 0), solid(new THREE.TorusGeometry(0.42, 0.12, 8, 18), 0x3a3a48).translate(0, 3.6, 0.82), solid(new THREE.CircleGeometry(0.4, 18), 0x60d0ff).translate(0, 3.6, 0.86)];
+      for (let k = 0; k < 3; k++) gs.push(solid(new THREE.BoxGeometry(0.12, 1.6, 1.2), c2).translate(0, 1.2, 1.0).rotateY((k / 3) * Math.PI * 2));
+      return { g: merge(gs), h: 6.8, spin: 0.3 };
+    },
+    crystalToy([0xff60d0, 0x40e0ff, 0x9a7aff, 0xffffff]),
+  ],
+  spooky: [
+    pumpkinToy(true),
+    // a gravestone with a cross
+    () => ({ g: merge([solid(new RoundedBoxGeometry(2.0, 3.0, 0.6, 3, 0.3), 0x9a9aa8).translate(0, 1.5, 0), solid(new THREE.BoxGeometry(0.25, 1.2, 0.1), 0x5a5a68).translate(0, 2.1, 0.32), solid(new THREE.BoxGeometry(0.8, 0.25, 0.1), 0x5a5a68).translate(0, 2.3, 0.32)]), h: 3.2 }),
+    // a dead tree
+    (r) => {
+      const gs = [solid(new THREE.CylinderGeometry(0.2, 0.45, 4.5, 7), 0x3a2a3a).translate(0, 2.25, 0)];
+      for (let i = 0; i < 5; i++) gs.push(solid(new THREE.CylinderGeometry(0.06, 0.16, 2.2, 5), 0x3a2a3a).translate(0, 1.1, 0).rotateZ(0.6 + r() * 0.6).rotateY(r() * 6).translate(0, 2.4 + r() * 1.8, 0));
+      return { g: merge(gs), h: 5.5 };
+    },
+    // a witch's hat
+    () => ({ g: merge([solid(new THREE.CylinderGeometry(2.0, 2.0, 0.2, 24), 0x2a1a3a).translate(0, 0.1, 0), solid(new THREE.ConeGeometry(1.1, 3.6, 20), 0x2a1a3a).translate(0, 2.0, 0).rotateZ(0.12), solid(new THREE.CylinderGeometry(1.12, 1.12, 0.4, 20), 0x9a5bff).translate(0, 0.45, 0)]), h: 3.8, spin: 0.3 }),
+  ],
+  neon: [
+    () => ({ g: paint(new THREE.TorusGeometry(2.0, 0.3, 12, 40), rib(10, 0xff40c0, 0x30e0ff)).translate(0, 2.7, 0), spin: 0.8, bob: 0.25, h: 5 }),
+    () => ({ g: paint(new THREE.ConeGeometry(2.4, 3.2, 4), (_x, y) => (Math.floor(y * 3 + 6) % 2 ? 0x30e0ff : 0x1a1040)).translate(0, 1.6, 0), spin: 0.2, h: 3.4 }),
+    (r) => {
+      const gs: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 4; i++) gs.push(solid(new RoundedBoxGeometry(1.4, 1.4, 1.4, 2, 0.15), pick(r, [0xff40c0, 0x30e0ff, 0xffd040, 0x9a5bff])).rotateY(r() * 2).translate((r() - 0.5) * 1.4, 0.7 + i * 1.35, (r() - 0.5) * 1.4));
+      return { g: merge(gs), h: 5.6 };
+    },
+    palmToy,
+  ],
+  desert: [
+    // a cactus
+    () => {
+      const c3 = 0x3a9a4a;
+      const gs = [solid(new THREE.CapsuleGeometry(0.55, 4.2, 4, 12), c3).translate(0, 2.6, 0), solid(new THREE.CapsuleGeometry(0.38, 1.0, 4, 10).rotateZ(Math.PI / 2), c3).translate(0.9, 2.4, 0), solid(new THREE.CapsuleGeometry(0.38, 1.3, 4, 10), c3).translate(1.5, 3.1, 0), solid(new THREE.CapsuleGeometry(0.34, 0.8, 4, 10).rotateZ(Math.PI / 2), c3).translate(-0.8, 3.2, 0), solid(new THREE.CapsuleGeometry(0.34, 1.0, 4, 10), c3).translate(-1.3, 3.8, 0), solid(new THREE.SphereGeometry(0.28, 10, 8), 0xff5f8a).translate(0, 5.4, 0)];
+      return { g: merge(gs), h: 5.8 };
+    },
+    () => ({ g: paint(new THREE.ConeGeometry(2.6, 3.2, 4, 4), (_x, y) => (Math.floor(y * 2 + 6) % 2 ? 0xf0d098 : 0xe0bc80)).translate(0, 1.6, 0), h: 3.2 }),
+    // a mesa of stripes
+    () => ({ g: paint(new THREE.CylinderGeometry(1.8, 2.3, 3.6, 9, 4), (_x, y) => [0xd8743a, 0xf0b07a, 0xc8603a][Math.floor(y * 1.1 + 6) % 3]).translate(0, 1.8, 0), h: 3.6 }),
+  ],
+  royal: [
+    // a crown
+    (r) => {
+      const gs = [paint(new THREE.CylinderGeometry(1.8, 1.6, 1.4, 32, 1, true), () => 0xffc21f).translate(0, 0.9, 0)];
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        gs.push(solid(new THREE.ConeGeometry(0.42, 1.2, 8), 0xffc21f).translate(Math.cos(a) * 1.75, 2.15, Math.sin(a) * 1.75), solid(new THREE.SphereGeometry(0.2, 10, 8), pick(r, [0xff3a5a, 0x3a7aff, 0x2fbf5a])).translate(Math.cos(a) * 1.75, 2.85, Math.sin(a) * 1.75));
+      }
+      return { g: merge(gs).translate(0, 0.6, 0), spin: 0.4, bob: 0.25, h: 4 };
+    },
+    // a tower
+    (r) => {
+      const roof = pick(r, [0x3a5ad8, 0x7a4bdf, 0xd83a5a]);
+      const gs = [solid(new THREE.CylinderGeometry(1.0, 1.1, 4.4, 18), 0xfff6e8).translate(0, 2.2, 0), solid(new THREE.ConeGeometry(1.3, 2.4, 18), roof).translate(0, 5.6, 0), solid(new THREE.SphereGeometry(0.22, 10, 8), 0xffc21f).translate(0, 6.9, 0)];
+      for (let k = 0; k < 8; k++) gs.push(solid(new THREE.BoxGeometry(0.35, 0.4, 0.35), 0xfff6e8).translate(Math.cos((k / 8) * 6.28) * 1.0, 4.6, Math.sin((k / 8) * 6.28) * 1.0));
+      return { g: merge(gs), h: 7 };
+    },
+    TOYS[6],
+    TOYS[8],
+  ],
+};
+const toysOf = () => BIOME_TOYS[biome().id] ?? TOYS;
+
 /** a floating island: a puffy top, a striped rim, tiers tapering away underneath */
 function island(R: number, top: number, rim: number, under: number) {
   const prof = [[0.001, 0.0], [R - 0.5, 0.0], [R - 0.1, -0.12], [R, -0.5], [R, -0.9], [R - 0.15, -1.25], [R * 0.82, -1.5], [R * 0.72, -2.4], [R * 0.5, -2.8], [R * 0.4, -3.8], [R * 0.2, -4.3], [0.001, -5]].map(([x, y]) => new THREE.Vector2(x, y));
@@ -218,8 +379,6 @@ class Crowd {
 }
 
 
-const ISLE_TOP = [0x9ff0b8, 0xfff2c8, 0xffd6ea, 0xc8e8ff, 0xe6d6ff];
-
 /** the toy islands and grandstands, wherever they're put: still parts collected, spinners and fans animated */
 class Set_ {
   readonly stills: THREE.BufferGeometry[] = [];
@@ -232,10 +391,12 @@ class Set_ {
   /** a floating island of radius R at p (its top) with a giant toy on it */
   toyIsle(p: THREE.Vector3, R: number) {
     const rnd = this.rnd;
-    const ig = island(R, pick(rnd, ISLE_TOP), pick(rnd, BRIGHT), 0xa58ad8);
+    const bi = biome();
+    const ig = island(R, pick(rnd, bi.isle.top), pick(rnd, bi.deck.arch), bi.isle.under);
     ig.translate(p.x, p.y, p.z);
     this.stills.push(ig);
-    const toy = TOYS[Math.floor(rnd() * TOYS.length)](rnd);
+    const set = toysOf();
+    const toy = set[Math.floor(rnd() * set.length)](rnd);
     const sc = Math.min(1.25, (R * 0.95) / 2.4);
     toy.g.scale(sc, sc, sc);
     if (toy.spin || toy.bob) {
@@ -254,8 +415,9 @@ class Set_ {
   /** a grandstand at p (its floor) facing `yaw`: three tiers of cheering beans */
   stand(p: THREE.Vector3, yaw: number) {
     const rnd = this.rnd;
-    const parts = [island(7.2, 0xfff2c8, pick(rnd, BRIGHT), 0xa58ad8)];
-    const tierC = [0xff5f8a, 0x5fb0ff, 0xffcf3a];
+    const bi = biome();
+    const parts = [island(7.2, bi.isle.top[0], pick(rnd, bi.deck.arch), bi.isle.under)];
+    const tierC = [bi.deck.arch[0], bi.deck.arch[1 % bi.deck.arch.length], bi.deck.arch[2 % bi.deck.arch.length]];
     for (let t = 0; t < 3; t++) parts.push(solid(new RoundedBoxGeometry(11, 0.7 * (t + 1), 2.0, 2, 0.2), tierC[t]).translate(0, 0.35 * (t + 1), -1.0 - t * 2.0 + 2.2));
     // poles with balls at the back corners
     for (const x of [-5.6, 5.6]) parts.push(solid(new THREE.CylinderGeometry(0.12, 0.12, 5, 8), 0xffffff).translate(x, 2.5, -4.2), solid(new THREE.SphereGeometry(0.3, 10, 8), 0xffd23a).translate(x, 5.1, -4.2));

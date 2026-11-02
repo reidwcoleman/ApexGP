@@ -162,7 +162,7 @@ export function tiptop(info: { name: string; blurb: string }): Course {
     p.add(b.railWood, plank(9.4, 2.0, 0.3, 0.08, 'x'), mat(0, 8.5, -0.18));
     for (const sx of [-4.2, 4.2]) post(p, b, mat(sx, -6, -0.3), 15.6, { w: 0.42 });
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z - R - 5));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), 'Round 5 · Survival', PAINT.purple), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), 'Survival · Stay on the dish', PAINT.purple, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
     sign.position.set(center.x, center.y + 8.5, center.z - R - 5);
     b.group.add(sign);
   }

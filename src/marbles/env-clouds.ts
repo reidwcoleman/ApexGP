@@ -39,6 +39,8 @@ void main(){
 
 const F = (sun: THREE.Vector3) => /* glsl */ `
 uniform float uTime;
+uniform vec3 uLit;
+uniform vec3 uShade;
 varying vec2 vUv;
 varying vec3 vWp;
 varying float vSeed;
@@ -64,8 +66,8 @@ void main(){
   float diff = dot(Nw, CL_SUN) * 0.5 + 0.5;
   // (the higher in the heap, the more sky it sees)
   float hk = smoothstep(vBase, vBase + vSize * 2.2, vWp.y);
-  vec3 lit = vec3(1.0, 0.975, 0.94) * 1.32;
-  vec3 shade = vec3(0.60, 0.66, 0.90);
+  vec3 lit = uLit * 1.32;
+  vec3 shade = uShade;
   vec3 col = mix(shade, lit, clamp(diff * (0.5 + 0.55 * hk) + 0.12 * hk, 0.0, 1.0));
   // the silver lining: thin edges, brightest with the sun behind the cloud
   vec3 Vd = normalize(vWp - cameraPosition);
@@ -89,7 +91,7 @@ export class Clouds {
   private lastCam = new THREE.Vector3(1e9, 0, 0);
   private local = new THREE.Vector3();
   private inv = new THREE.Matrix4();
-  readonly uniforms: { uTime: { value: number } };
+  readonly uniforms: { uTime: { value: number }; uLit: { value: THREE.Color }; uShade: { value: THREE.Color } };
 
   constructor(sun: THREE.Vector3, seed = 3) {
     let s = seed;
@@ -143,7 +145,7 @@ export class Clouds {
     g.setAttribute('iSize', new THREE.InstancedBufferAttribute(this.size, 2).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('iSeed', new THREE.InstancedBufferAttribute(this.seed, 2).setUsage(THREE.DynamicDrawUsage));
     g.instanceCount = N;
-    this.uniforms = { uTime: { value: 0 } };
+    this.uniforms = { uTime: { value: 0 }, uLit: { value: new THREE.Color(1.0, 0.975, 0.94) }, uShade: { value: new THREE.Color(0.6, 0.66, 0.9) } };
     const m = new THREE.ShaderMaterial({
       vertexShader: V,
       fragmentShader: F(sun),
@@ -155,6 +157,8 @@ export class Clouds {
     });
     // (merge clones: keep our time uniform the live one)
     m.uniforms.uTime = this.uniforms.uTime;
+    m.uniforms.uLit = this.uniforms.uLit;
+    m.uniforms.uShade = this.uniforms.uShade;
     this.mesh = new THREE.Mesh(g, m);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 2;

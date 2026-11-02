@@ -61,6 +61,7 @@ export type CtlMsg =
   | { t: 'lobby' }
   /** the team round: the host's floor (one digit a tile), and a paint bomb set off */
   | { t: 'tiles'; c: string }
+  | { t: 'crumble'; k: number[]; at: number[] }
   | { t: 'splat'; k: number; id: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }

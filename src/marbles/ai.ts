@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
+import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
 import type { Course } from './courses.ts';
@@ -83,6 +84,7 @@ export class Bot {
   /** how long it's been waiting on purpose (a wait that never ends is a stall: go anyway) */
   private waitT = 0;
   private plate: PlateBrain | null = null;
+  private crumbleB: CrumbleBrain | null = null;
   private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
   private riding = false;
@@ -157,6 +159,11 @@ export class Bot {
       this.team ??= new TeamBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
       return this.team.update(dt, t, c, all);
+    }
+    if (c.crumble) {
+      this.crumbleB ??= new CrumbleBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react) return;
+      return this.crumbleB.update(dt, t, c, all);
     }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);

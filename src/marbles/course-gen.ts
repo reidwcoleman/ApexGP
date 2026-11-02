@@ -10,6 +10,8 @@ import { gates, puncher, rollDown } from './obs-new.ts';
 import { dressCourse, type DressTurn } from './course-dress.ts';
 import { checkpoints, endWall, finishDressing, lakeBelow, makeCrown, raceRecord, tag, turntableGap } from './course-kit.ts';
 import type { Course } from './courses.ts';
+import { biome, BIOMES } from './biome.ts';
+import { lake, paintLakeFor } from './env.ts';
 
 /**
  * Platform courses: wide padded decks floating in the sky with open edges (fall off and it's back
@@ -39,20 +41,6 @@ interface Zone {
 }
 
 const W = 14;
-/** each zone's arch (the deep shade of its tiles) */
-const ZONE_ARCH = [0xff4f8f, 0x22c08a, 0xffb81f, 0x2f8cff, 0x9a5bff, 0xff8a1f, 0xff5a4a, 0x7cc81f, 0x16c0c0];
-/** the zones' floor tiles: a colour and a lighter partner */
-const ZONE_TILES: [number, number][] = [
-  [0xff9cc8, 0xffc8e0],
-  [0x86e3bd, 0xb4f2d6],
-  [0xffe27a, 0xfff1b8],
-  [0x8ec8ff, 0xbfe0ff],
-  [0xc9a2ff, 0xe0caff],
-  [0xffbf7a, 0xffdcb2],
-  [0xff9e8e, 0xffc6bb],
-  [0xc6ef7e, 0xe0f8b4],
-  [0x7fe6e6, 0xb6f3f1],
-];
 /** every zone's floor is flat-banked; an open edge unless it says otherwise */
 const flat = (c: Cmd): Cmd => ({ bank: 0, slope: 0, wall: 0, ...c });
 
@@ -364,6 +352,8 @@ export interface GenSpec {
   heading: number;
   arch: number;
   final?: boolean;
+  /** Lava Rush: the lava floods up the course behind the field (it reaches the line after this many seconds) */
+  lava?: number;
 }
 
 export function genCourse(spec: GenSpec, info: { name: string; blurb: string }): Course {
@@ -402,7 +392,8 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
   const floorMat = zonedFloor(
     path.length,
     zones.flatMap(({ s0, s1 }, q) => {
-      const [a, bb] = ZONE_TILES[(q * 3 + spec.id.length) % ZONE_TILES.length];
+      const tiles = biome().deck.tiles;
+      const [a, bb] = tiles[(q * 3 + spec.id.length) % tiles.length];
       const pat = (q + spec.id.length) % 4;
       const th = foamTheme();
       return [
@@ -464,7 +455,7 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
     b.group.add(crown);
   }
   dressCourse(b, path, {
-    zones: zones.map(({ s0, s1 }, q) => ({ s0, s1, color: ZONE_ARCH[(q * 3 + spec.id.length) % ZONE_ARCH.length] })),
+    zones: zones.map(({ s0, s1 }, q) => ({ s0, s1, color: biome().deck.arch[(q * 3 + spec.id.length) % biome().deck.arch.length] })),
     turns,
     gateS,
     finishS: fs,
@@ -475,7 +466,35 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
   bunting(b, path, f0 - 10, c1);
   endWall(b, path, c1 - 0.5);
   b.finish();
+  let lavaOf: Course['lava'];
+  if (spec.lava) {
+    // the lava: a sea of it, risen to the deck's height where its front has got to along the course
+    // (the highest the course has been up to there, a hand under it), never going back down
+    const DELAY = 7;
+    const V = fs / spec.lava;
+    const hmax = new Float32Array(path.count);
+    let h = -Infinity;
+    for (let i = 0; i < path.count; i++) hmax[i] = h = Math.max(h, path.P[i].y);
+    const y0 = path.P[0].y - 14;
+    const sAt = (t: number) => (t < state.go + DELAY ? -60 : (t - state.go - DELAY) * V - 4);
+    const yAt = (t: number) => {
+      const sl = sAt(t);
+      if (sl <= 0) return y0 + Math.max(0, Math.min(1, (t - state.go) / DELAY)) * (path.P[0].y - 0.6 - y0) * (t > state.go ? 1 : 0);
+      return Math.max(path.P[0].y - 0.6, hmax[path.index(Math.min(sl, fs))] - 0.35);
+    };
+    const lm = lake(y0);
+    paintLakeFor(lm, BIOMES.volcano);
+    lm.receiveShadow = false;
+    b.group.add(lm);
+    const lu = lm.userData.u as { uTime: { value: number } };
+    b.animators.push((tt) => {
+      lu.uTime.value = tt;
+      lm.position.y = yAt(tt);
+    });
+    lavaOf = { y: yAt, s: sAt };
+  }
   return raceRecord(b, path, {
+    lava: lavaOf,
     id: spec.id,
     name: info.name,
     kind: spec.final ? 'final' : 'race',
@@ -501,5 +520,6 @@ export const GEN: Record<string, GenSpec> = {
   jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'gates', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
   crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'rolldown', 'L50', 'wreck', 'gates', 'sweep'] },
   punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'pins', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
+  lavarush: { id: 'lavarush', heading: 0.5, arch: PAINT.orange, lava: 118, steps: ['climb', 'up', 'rolldown', 'R50', 'gates', 'up', 'conveyor', 'up', 'hop', 'up', 'punch', 'L50', 'climb', 'up', 'rolldown'] },
   rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'pins', 'gates', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
 };

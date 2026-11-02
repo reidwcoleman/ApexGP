@@ -3,6 +3,7 @@ import { Bot } from './ai.ts';
 import { courseAI } from './ai-course.ts';
 import { level, LEVELS, roll, STYLES, type Level, type StyleId } from './ai-style.ts';
 import { Sound } from './audio.ts';
+import { biome } from './biome.ts';
 import { buildRound, dealShow, setShow, DEFAULT_SHOW, POOL, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
 import { TeamPlay } from './team.ts';
 import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
@@ -399,7 +400,7 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} on the plate go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : `First ${this.slots} of ${alive} qualify`;
+    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : `First ${this.slots} of ${alive} qualify`;
     this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : c.kind === 'team' ? 'TEAM GAME' : 'RACE', goal, blurb: info.blurb, team: this.teamPlay?.mine() });
     this.state = 'intro';
     this.stateT = 0;
@@ -431,6 +432,8 @@ export class MarbleGame {
     this.scene.add(c.b.group);
     this.splashes.y = c.lakeY;
     const ctr = c.path ? c.path.P[Math.floor(c.path.count / 2)] : c.plate!.center;
+    // (its world: buildRound chose it)
+    this.stage.setBiome(biome());
     this.stage.setCourse(c.lakeY, ctr);
     const field = menu ? this.menuField() : order0 ? order0.map((id) => this.roster.find((x) => x.id === id)!).filter(Boolean) : this.roster.filter((x) => !x.out);
     const grid = c.grid(field.length);
@@ -460,6 +463,7 @@ export class MarbleGame {
     });
     if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
     this.finCount = 0;
+    this.lavaWarned = false;
     this.playT = 0;
     this.confetti.clear();
     this.spectate = 0;
@@ -748,6 +752,17 @@ export class MarbleGame {
       return;
     }
     if (c.plate) {
+      // Cookie Crumble: a tile someone stands on starts to go (solo or the host: anyone's feet, as
+      // seen here, and it tells the guests when each drops; a guest: its own, until the host says)
+      if (c.crumble && (this.state === 'play' || this.state === 'over')) {
+        const A = c.crumble;
+        for (const r of this.racers) {
+          if (r.out || (this.guest && !r.local) || (r.local && r.m.groundT > 0.12)) continue;
+          A.touch(A.under(r.m.pos), w.time);
+        }
+        const fresh = A.fresh();
+        if (this.host && fresh.length) this.host.broadcast({ t: 'crumble', k: fresh, at: fresh.map((i) => A.drop[i]) });
+      }
       for (const r of this.racers) {
         if (r.out || r.m.pos.y >= c.killY) continue;
         if (!r.local) {
@@ -785,9 +800,20 @@ export class MarbleGame {
         } else if (r.fell && m.pos.y > c.killY + 3) r.fell = 0;
         continue;
       }
+      // Lava Rush: under the lava, or left behind its front, and out (a fall is into the lava too)
+      if (c.lava && this.state === 'play' && !r.fin && !r.pend && !r.fell && r.s < c.lava.s(w.time) - 2) {
+        this.lavaOut(r);
+        continue;
+      }
       // falling: into the paint (a splash), then back at the last checkpoint
       if (r.fell) {
-        if (w.time - r.fell > 1.1 && !r.fin) this.respawn(r);
+        if (w.time - r.fell > 1.1 && !r.fin) {
+          // (Lava Rush: back to the checkpoint only if the lava hasn't got there)
+          if (c.lava && this.state === 'play' && r.cp < c.lava.s(w.time) + 4) {
+            r.s = r.cp;
+            this.lavaOut(r);
+          } else this.respawn(r);
+        }
         continue;
       }
       if (r.hold > 0) {
@@ -827,6 +853,30 @@ export class MarbleGame {
     }
     // the clock
     if (!this.guest && this.state === 'play' && this.playT > RACE_T) this.endRound();
+    if (c.lava && this.state === 'play') {
+      if (!this.lavaWarned && w.time > c.state.go + 6.2) {
+        this.lavaWarned = true;
+        this.ui.banner('THE LAVA IS RISING!', 'bad', 'Climb! Fall in and you are out', 1800);
+      }
+      // (everyone through or melted: done)
+      if (!this.guest && this.racers.every((x) => x.fin || x.out)) this.endRound();
+    }
+  }
+  private lavaWarned = false;
+
+  /** Lava Rush: caught. Out (the host decides for its beans and the bots; a guest asks) */
+  private lavaOut(r: Racer) {
+    const m = r.m;
+    if (this.guest) {
+      r.pend = true;
+      this.guest.send({ t: 'out', id: r.c.id });
+      this.fellOff(r);
+    } else this.eliminate(r);
+    r.fell = 0;
+    m.frozen = true;
+    m.vel.set(0, 0, 0);
+    m.pos.y -= 0.7;
+    this.puffs.dust(m.pos.clone(), 14, 0.5, 2.5);
   }
 
   /** (the host, or solo) a bean across the line: its place */
@@ -877,13 +927,14 @@ export class MarbleGame {
 
   /** going over the edge of the plate, as everyone sees it */
   private fellOff(r: Racer) {
+    const c = this.course!;
     const m = r.m;
     this.drop(r);
     this.sound.voice('wah', m.id, m.pos.x, m.pos.y, m.pos.z, r.c.player);
     // (the crowd reacts to anyone going over near the camera)
     if (!r.c.player && m.pos.distanceTo(this.camera.position) < 25 && Math.random() < 0.6) this.sound.ooh();
     if (r.c.player && this.state === 'play') {
-      this.ui.banner('ELIMINATED', 'bad', 'Knocked off the plate');
+      this.ui.banner('ELIMINATED', 'bad', c.crumble ? 'Fell through the floors' : c.lava ? 'Caught by the lava' : 'Knocked off the plate');
       this.sound.eliminated();
     }
   }
@@ -898,7 +949,7 @@ export class MarbleGame {
       this.splashes.splash(x, z);
       this.sound.splash(x, c.lakeY, z);
     }, Math.min(1500, fallT * 1000 * 0.9));
-    if (r.c.player && !c.plate) this.ui.banner('SPLASH!', 'bad', 'Back to the checkpoint', 1200);
+    if (r.c.player && !c.plate && !c.lava) this.ui.banner('SPLASH!', 'bad', 'Back to the checkpoint', 1200);
   }
 
   private respawn(r: Racer) {
@@ -1218,6 +1269,11 @@ export class MarbleGame {
       case 'tiles':
         this.teamPlay?.arena.load(m.c);
         break;
+      case 'crumble': {
+        const A = this.course?.crumble;
+        if (A) m.k.forEach((k, i) => A.set(k, m.at[i]));
+        break;
+      }
       case 'splat':
         if (this.teamPlay) {
           this.teamPlay.collect(m.k, m.id);
@@ -1532,8 +1588,9 @@ export class MarbleGame {
     if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
     const yaw = this.camYaw + this.yawOff;
     const pt = this.pitchOff;
-    const dist = (c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
-    const hgt = (c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * 1.1);
+    // (Cookie Crumble: in close and low, under the floor above)
+    const dist = (c.crumble ? 7 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.crumble ? 3.4 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.6 : 1.1));
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     const pos = new THREE.Vector3(tgt.x - Math.sin(yaw) * dist, tgt.y + hgt, tgt.z - Math.cos(yaw) * dist);

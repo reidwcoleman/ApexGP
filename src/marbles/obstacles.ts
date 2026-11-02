@@ -427,7 +427,7 @@ export function arch(b: CourseBuilder, path: Path, s: number, text: string, o: {
   const board = new THREE.Mesh(woodAttr(roundBox(bw * 0.86, 1.7, 0.3, 0.14), 'x', 5), b.darkWood);
   board.position.set(0, H - 0.75, 0);
   grp.add(board);
-  const tex = signTexture(text, o.text2, o.color ?? PAINT.red);
+  const tex = signTexture(text, o.text2, o.color ?? PAINT.red, (bw * 0.86 - 0.3) / 1.45);
   const face = new THREE.Mesh(new THREE.PlaneGeometry(bw * 0.86 - 0.3, 1.45), new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.1 }));
   for (const side of [-1, 1]) {
     const f = face.clone();
@@ -454,33 +454,52 @@ export function arch(b: CourseBuilder, path: Path, s: number, text: string, o: {
   return grp;
 }
 
-export function signTexture(text: string, sub: string | undefined, color: number) {
+export function signTexture(text: string, sub: string | undefined, color: number, aspect = 5.33) {
+  // (drawn at the board's own shape, so the letters aren't stretched)
+  const H = 256;
+  const W = Math.min(4096, Math.round(H * aspect));
   const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 192;
+  c.width = W;
+  c.height = H;
   const x = c.getContext('2d')!;
   const col = '#' + color.toString(16).padStart(6, '0');
-  x.fillStyle = '#f4ecdc';
-  x.fillRect(0, 0, c.width, c.height);
-  // a checker border
-  for (let i = 0; i < 64; i++) {
-    x.fillStyle = i % 2 ? '#1d1b22' : '#f4ecdc';
-    x.fillRect(i * 16, 0, 16, 14);
-    x.fillStyle = i % 2 ? '#f4ecdc' : '#1d1b22';
-    x.fillRect(i * 16, c.height - 14, 16, 14);
+  x.fillStyle = '#fbf4e6';
+  x.fillRect(0, 0, W, H);
+  // a checker border, square cells
+  const cell = 18;
+  for (let i = 0; i * cell < W; i++) {
+    x.fillStyle = i % 2 ? '#1d1b22' : '#fbf4e6';
+    x.fillRect(i * cell, 0, cell, cell);
+    x.fillStyle = i % 2 ? '#fbf4e6' : '#1d1b22';
+    x.fillRect(i * cell, H - cell, cell, cell);
   }
-  x.fillStyle = col;
   x.textAlign = 'center';
-  x.textBaseline = 'middle';
-  x.font = `${sub ? 96 : 120}px "Lilita One", "Arial Black", sans-serif`;
-  x.lineWidth = 10;
+  x.textBaseline = 'alphabetic';
+  // the name: as big as fits, with a dark outline and a drop shadow
+  const fit = (font: (px: number) => string, txt: string, px: number, maxW: number) => {
+    let p = px;
+    x.font = font(p);
+    const w = x.measureText(txt).width;
+    if (w > maxW) p = Math.floor((p * maxW) / w);
+    x.font = font(p);
+    return p;
+  };
+  const display = (px: number) => `${px}px "Lilita One", "Arial Black", sans-serif`;
+  const body = (px: number) => `600 ${px}px "Fredoka", "Arial Rounded MT Bold", sans-serif`;
+  const big = fit(display, text, sub ? 118 : 150, W * 0.9);
+  const base = sub ? cell + 22 + big * 0.84 : H / 2 + big * 0.36;
+  x.lineJoin = 'round';
+  x.fillStyle = 'rgba(29,27,34,0.35)';
+  x.fillText(text, W / 2 + 4, base + 7);
+  x.lineWidth = Math.max(6, big * 0.1);
   x.strokeStyle = '#1d1b22';
-  x.strokeText(text, c.width / 2, sub ? 80 : c.height / 2 + 4);
-  x.fillText(text, c.width / 2, sub ? 80 : c.height / 2 + 4);
+  x.strokeText(text, W / 2, base);
+  x.fillStyle = col;
+  x.fillText(text, W / 2, base);
   if (sub) {
-    x.font = '44px "Fredoka", "Arial Rounded MT Bold", sans-serif';
+    fit(body, sub, 46, W * 0.88);
     x.fillStyle = '#1d1b22';
-    x.fillText(sub, c.width / 2, 148);
+    x.fillText(sub, W / 2, H - cell - 22);
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;

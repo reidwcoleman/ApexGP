@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { CourseBuilder, Path } from './builder.ts';
 import { Kin } from './physics.ts';
-import { setFoamTheme } from './shaders.ts';
+import { setFoamTheme, useFoamTheme } from './shaders.ts';
+import { ROUND_BIOME, setBiome } from './biome.ts';
 import { timber } from './course-timber.ts';
 import { paintmill } from './course-paintmill.ts';
 import { jumpclub } from './course-jumpclub.ts';
@@ -10,6 +11,7 @@ import { tiptop } from './course-tiptop.ts';
 import { summit } from './course-summit.ts';
 import { paintparty, type TeamArena } from './course-paintparty.ts';
 import { GEN, genCourse } from './course-gen.ts';
+import { crumble, type CrumbleArena } from './course-crumble.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -43,6 +45,10 @@ export interface Course {
    * away); bars[0] is the low bar to hop, bars[1] (if there is one) the high one never to hop into.
    */
   plate?: { center: THREE.Vector3; radius: number; bars: { angle: (t: number) => number; height: number; kin: Kin; on: (t: number) => boolean }[] };
+  /** Cookie Crumble's floors of tiles */
+  crumble?: CrumbleArena;
+  /** Lava Rush: the lava's height and how far along the course it has come, at a time */
+  lava?: { y(t: number): number; s(t: number): number };
   /** the team round's painted floor */
   team?: TeamArena;
   /** the crown on its pedestal (the final) */
@@ -51,8 +57,8 @@ export interface Course {
   intro: THREE.Vector3[];
 }
 
-export type GenId = 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | GenId;
+export type GenId = 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -69,6 +75,8 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   ridge: { id: 'ridge', name: 'Rickety Ridge', kind: 'race', blurb: 'Seesaws, boulders, sliding bridges, wrecking balls, a trampoline pit: nothing holds still', keep: 0.75 },
   jumpclub: { id: 'jumpclub', name: 'Bar Hop', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
   tiptop: { id: 'tiptop', name: 'Tilt-a-Dish', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
+  crumble: { id: 'crumble', name: 'Cookie Crumble', kind: 'survival', blurb: 'Four floors of cookies. Each one crumbles a moment after you step on it. Keep moving, last ones standing win.', keep: 0.6 },
+  lavarush: { id: 'lavarush', name: 'Lava Rush', kind: 'race', blurb: 'Climb! The lava rises up the course behind you. Get caught and you are out.', keep: 0.7 },
   paintparty: { id: 'paintparty', name: 'Paint Party', kind: 'team', blurb: 'Run over the tiles to paint them your team colour. Steal theirs. Least floor goes home.', keep: 0.67 },
   splatring: { id: 'splatring', name: 'Splat Ring', kind: 'team', blurb: 'Paint the ring your colour. A long bar sweeps round faster and faster: hop it.', keep: 0.67 },
   summit: { id: 'summit', name: 'Crown Summit', kind: 'final', blurb: 'Everything at once. First across the line takes the crown', keep: 0 },
@@ -90,17 +98,17 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** a new show: a race, a survival, a race, the team round, a race, the final (which races and which survival is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
-export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill'];
-export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'paintparty', 'splatring', 'crownpeak'];
+export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush'];
+export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'crumble', 'paintparty', 'splatring', 'crownpeak'];
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
   // (the platform courses; the old chutes are still there for the test links)
   const races = shuffle<RoundId>(RACE_POOL);
-  const surv = shuffle<RoundId>(['jumpclub', 'tiptop']);
+  const surv = shuffle<RoundId>(['jumpclub', 'tiptop', 'crumble']);
   const team: RoundId = rnd() < 0.5 ? 'paintparty' : 'splatring';
   setShow([races[0], surv[0], races[1], team, races[2], 'crownpeak']);
   return SHOW.map((x) => x.id);
@@ -111,6 +119,12 @@ export function setShow(ids: RoundId[]) {
 
 export function buildRound(id: RoundId): Course {
   setFoamTheme(id === 'jumpclub' || id === 'tiptop' || id === 'paintparty' ? 'arena' : id);
+  const bi = setBiome(ROUND_BIOME[id] ?? 'candy');
+  // (the platform courses take their world's colours: tiles, rails, posts)
+  if (id in GEN) {
+    const d = bi.deck;
+    useFoamTheme({ floorA: d.tiles[0][0], floorB: d.tiles[0][1], wall: d.wall, rail: d.rail, railB: d.railB, post: d.post, base: d.base });
+  }
   const info = ROUNDS[id];
   switch (id) {
     case 'timber':
@@ -129,6 +143,8 @@ export function buildRound(id: RoundId): Course {
       return paintparty(info, 'ring');
     case 'summit':
       return summit(info);
+    case 'crumble':
+      return crumble(info);
     default:
       return genCourse(GEN[id], info);
   }

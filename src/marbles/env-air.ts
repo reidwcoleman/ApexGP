@@ -14,25 +14,37 @@ import * as THREE from 'three';
 
 export const SKY_GLSL = (sun: THREE.Vector3) => /* glsl */ `
 const vec3 MM_SUN = normalize(vec3(${sun.x.toFixed(4)}, ${sun.y.toFixed(4)}, ${sun.z.toFixed(4)}));
+uniform vec3 uZen;
+uniform vec3 uMid;
+uniform vec3 uHor;
+uniform vec3 uBand;
+uniform vec3 uBelow;
+uniform vec3 uGlow;
+uniform vec3 uDiscDir;
 vec3 mmSky(vec3 d){
   float h = d.y;
   float hh = max(h, 0.0);
-  vec3 zen = vec3(0.045, 0.20, 0.78);
-  vec3 mid = vec3(0.20, 0.50, 1.0);
-  vec3 hor = vec3(0.50, 0.74, 1.0);
-  vec3 band = vec3(1.0, 0.86, 0.84);
-  vec3 c = mix(hor, mid, smoothstep(0.0, 0.22, hh));
-  c = mix(c, zen, smoothstep(0.18, 0.95, hh));
-  // (a thin peach band right on the horizon, as over the sea on a clear afternoon)
-  c = mix(c, band, exp(-abs(h) * 30.0) * 0.3);
-  // below the horizon: the haze lying on the paint
-  c = mix(c, vec3(0.70, 0.74, 0.98), smoothstep(0.0, -0.25, h));
-  float sd = max(dot(d, MM_SUN), 0.0);
-  c += vec3(1.0, 0.72, 0.42) * pow(sd, 5.0) * 0.22;
-  c += vec3(1.0, 0.88, 0.70) * pow(sd, 48.0) * 0.55;
+  vec3 c = mix(uHor, uMid, smoothstep(0.0, 0.22, hh));
+  c = mix(c, uZen, smoothstep(0.18, 0.95, hh));
+  // (a thin band right on the horizon)
+  c = mix(c, uBand, exp(-abs(h) * 30.0) * 0.3);
+  // below the horizon: the haze lying on the sea
+  c = mix(c, uBelow, smoothstep(0.0, -0.25, h));
+  float sd = max(dot(d, uDiscDir), 0.0);
+  c += uGlow * (pow(sd, 5.0) * 0.22 + pow(sd, 48.0) * 0.55);
   return c;
 }
 `;
+
+/** the sky's uniforms (shared by the dome and the image light's dome); set from a biome */
+export function skyUniforms() {
+  const v = () => ({ value: new THREE.Vector3() });
+  return {
+    uZen: v(), uMid: v(), uHor: v(), uBand: v(), uBelow: v(), uGlow: v(), uDisc: v(),
+    uDiscDir: { value: new THREE.Vector3(0, 1, 0) },
+    uDiscKind: { value: 0 }, uDiscSize: { value: 1 }, uStars: { value: 0 }, uAurora: { value: 0 }, uCirrus: { value: 1 },
+  };
+}
 
 /** metres of clear air before the haze starts */
 export const FOG_START = 120;
@@ -40,7 +52,7 @@ export const FOG_START = 120;
 /** replaces three's fog chunks (once): aerial perspective toward the sky colour of each view ray */
 export function installAir(sun: THREE.Vector3) {
   const C = THREE.ShaderChunk as unknown as Record<string, string>;
-  if (C.fog_fragment.includes('mmSky')) return;
+  if (C.fog_pars_fragment.includes('MM_FSUN')) return;
   C.fog_pars_vertex = /* glsl */ `
 #ifdef USE_FOG
   varying vec3 vFogRay;
@@ -62,7 +74,7 @@ export function installAir(sun: THREE.Vector3) {
     uniform float fogNear;
     uniform float fogFar;
   #endif
-  ${SKY_GLSL(sun)}
+  const vec3 MM_FSUN = normalize(vec3(${sun.x.toFixed(4)}, ${sun.y.toFixed(4)}, ${sun.z.toFixed(4)}));
 #endif
 `;
   C.fog_fragment = /* glsl */ `
@@ -75,8 +87,9 @@ export function installAir(sun: THREE.Vector3) {
     #else
       float fogFactor = smoothstep(fogNear, fogFar, fd);
     #endif
-    // (the colour of the sky just above the horizon that way; tinted by the scene's fog colour)
-    vec3 fc = mmSky(normalize(vec3(fdir.x, max(fdir.y, 0.0) * 0.4 + 0.015, fdir.z))) * fogColor;
+    // (the colour of the sky just above the horizon (the world's: the scene's fog colour), warmer
+    // toward the sun)
+    vec3 fc = fogColor * (1.0 + pow(max(dot(fdir, MM_FSUN), 0.0), 5.0) * 0.35);
     gl_FragColor.rgb = mix(gl_FragColor.rgb, fc, fogFactor);
   }
 #endif

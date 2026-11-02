@@ -421,6 +421,11 @@ export class World {
   /** what local beans did to puppets this frame */
   readonly shoves: Shove[] = [];
   statics = new StaticMesh();
+  /**
+   * Fixed upright pads that switch off (Cookie Crumble's tiles, hundreds of them): `near` lists the
+   * ones round a spot, solid while `on`. Cheaper than a Kin each: nothing to pose every substep.
+   */
+  pads: { shape: Shape; bound: number; mat: Mat; near(x: number, z: number, out: number[]): void; at(i: number, o: THREE.Vector3): void; on(i: number, t: number): boolean } | null = null;
   time = 0;
   /** the slowest the course allows before a fall counts (m below) */
   private h = SUB;
@@ -675,6 +680,27 @@ export class World {
 
   /** one of the bean's spheres (its centre `up` above the feet) against the course and the obstacles */
   private sphere(m: Marble, up: number, r: number) {
+    this.sphereMain(m, up, r);
+    const P = this.pads;
+    if (!P) return;
+    const p = SP.copy(m.pos);
+    p.y += up;
+    PADS.length = 0;
+    P.near(p.x, p.z, PADS);
+    for (const i of PADS) {
+      if (!P.on(i, this.time)) continue;
+      P.at(i, KO);
+      L.set(p.x - KO.x, p.y - KO.y, p.z - KO.z);
+      if (L.lengthSq() > (P.bound + r) * (P.bound + r)) continue;
+      const d = closestOnShape(P.shape, L, LP, LN);
+      if (d >= r) continue;
+      p.addScaledVector(LN, r - d);
+      N.copy(LN);
+      this.respond(m, N, r - d, null, P.mat, null, up === 0);
+    }
+  }
+
+  private sphereMain(m: Marble, up: number, r: number) {
     const T = this.statics.tris;
     const p = SP.copy(m.pos);
     p.y += up;
@@ -882,6 +908,7 @@ const KQ = new THREE.Quaternion();
 const KM = new THREE.Matrix4();
 const KL = new THREE.Vector3();
 const KO = new THREE.Vector3();
+const PADS: number[] = [];
 const KN = new THREE.Vector3();
 /** how far p is from a collider's surface at time t (its pose is a function of time: a look ahead) */
 export function kinDistanceAt(k: Kin, t: number, p: THREE.Vector3) {

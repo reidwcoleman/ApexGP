@@ -1,0 +1,273 @@
+import * as THREE from 'three';
+import { CourseBuilder } from './builder.ts';
+import { Mat } from './physics.ts';
+import { dressArena } from './course-dress.ts';
+import type { Course } from './courses.ts';
+
+/**
+ * Cookie Crumble: four floors of round cookie tiles stacked in the sky, each a little wider than
+ * the one above. Step on a tile and it shakes, flashes and drops a moment later; so keep moving,
+ * and when your floor runs out you land on the next one down. Fall past the bottom floor and you
+ * are out: the last ones standing go through. Who touched which tile is decided by the host (or
+ * solo, this browser) and sent to everyone as the time it drops.
+ */
+
+export const CRUMBLE = {
+  /** seconds from a touch to the drop */
+  delay: 0.55,
+  layers: 6,
+  gap: 6.5,
+  r0: 18,
+  dr: 1.7,
+  /** tile radius and spacing (hex-packed) */
+  tile: 0.98,
+  sp: 2.06,
+  hh: 0.3,
+};
+
+const UND: number[] = [];
+
+export interface CrumbleTile {
+  x: number;
+  y: number;
+  z: number;
+  L: number;
+}
+
+export class CrumbleArena {
+  readonly tiles: CrumbleTile[] = [];
+  /** world time each tile drops (Infinity: not touched yet) */
+  readonly drop: Float64Array;
+  /** per layer: its top's height, radius, and its tiles' index range */
+  readonly layers: { top: number; r: number; i0: number; i1: number }[] = [];
+  /** newly touched since the last call to `fresh` (the host sends these) */
+  private news: number[] = [];
+  constructor(readonly center: THREE.Vector3) {
+    const C = CRUMBLE;
+    const rowH = (C.sp * Math.sqrt(3)) / 2;
+    for (let L = 0; L < C.layers; L++) {
+      const y = center.y - L * C.gap;
+      const r = C.r0 + L * C.dr;
+      const i0 = this.tiles.length;
+      const nj = Math.ceil(r / rowH) + 1;
+      for (let j = -nj; j <= nj; j++) {
+        const ni = Math.ceil(r / C.sp) + 1;
+        for (let i = -ni; i <= ni; i++) {
+          const x = i * C.sp + (Math.abs(j) % 2 ? C.sp / 2 : 0);
+          const z = j * rowH;
+          if (Math.hypot(x, z) > r - C.tile * 0.4) continue;
+          this.tiles.push({ x: center.x + x, y, z: center.z + z, L });
+        }
+      }
+      this.layers.push({ top: y + C.hh, r, i0, i1: this.tiles.length });
+    }
+    this.drop = new Float64Array(this.tiles.length).fill(Infinity);
+    this.tiles.forEach((t, i) => {
+      const k = this.key(Math.floor(t.x / CRUMBLE.sp), Math.floor(t.z / CRUMBLE.sp));
+      let a = this.cells.get(k);
+      if (!a) this.cells.set(k, (a = []));
+      a.push(i);
+    });
+  }
+  /** the tiles by area (every layer in one grid) */
+  private cells = new Map<number, number[]>();
+  private key(ix: number, iz: number) {
+    return (ix + 4096) * 8192 + (iz + 4096);
+  }
+  /** the tiles (any layer) in the cells within `rad` of x, z */
+  around(x: number, z: number, rad: number, out: number[]) {
+    const sp = CRUMBLE.sp;
+    const n = Math.ceil(rad / sp);
+    const cx = Math.floor(x / sp), cz = Math.floor(z / sp);
+    for (let i = -n; i <= n; i++)
+      for (let j = -n; j <= n; j++) {
+        const a = this.cells.get(this.key(cx + i, cz + j));
+        if (a) for (const k of a) out.push(k);
+      }
+    return out;
+  }
+  /** the tile under a bean's feet (its feet sphere's centre), or -1 */
+  under(p: THREE.Vector3) {
+    const feet = p.y - 0.5;
+    let best = -1, bd = CRUMBLE.tile + 0.15;
+    UND.length = 0;
+    for (const i of this.around(p.x, p.z, 1, UND)) {
+      const t = this.tiles[i];
+      const dy = feet - (t.y + CRUMBLE.hh);
+      if (dy < -0.3 || dy > 0.45) continue;
+      const d = Math.hypot(p.x - t.x, p.z - t.z);
+      if (d < bd) (bd = d), (best = i);
+    }
+    return best;
+  }
+  /** still there (not shaking or gone) at t */
+  intact(i: number) {
+    return this.drop[i] === Infinity;
+  }
+  /** solid at t (shaking still counts) */
+  solid(i: number, t: number) {
+    return t < this.drop[i];
+  }
+  /** a touch at t: the tile drops after the delay (only the first touch counts) */
+  touch(i: number, t: number) {
+    if (i < 0 || this.drop[i] !== Infinity) return false;
+    this.drop[i] = t + CRUMBLE.delay;
+    this.news.push(i);
+    return true;
+  }
+  /** someone else's word (the host's): this one drops at `at` */
+  set(i: number, at: number) {
+    if (i >= 0 && i < this.drop.length && at < this.drop[i]) this.drop[i] = at;
+  }
+  fresh() {
+    const n = this.news;
+    this.news = [];
+    return n;
+  }
+  /** the layer a height is at or above (the one a bean stands on, or will land on) */
+  layerAt(y: number) {
+    for (let L = 0; L < this.layers.length; L++) if (y > this.layers[L].top - 1) return L;
+    return -1;
+  }
+  /** how many tiles are left on a layer */
+  left(L: number) {
+    let n = 0;
+    const ly = this.layers[L];
+    for (let i = ly.i0; i < ly.i1; i++) if (this.drop[i] === Infinity) n++;
+    return n;
+  }
+}
+
+/** a cookie: a fat rounded disc, a domed top of icing with a darker rim of baked dough */
+function cookieGeo() {
+  const C = CRUMBLE;
+  const R = C.tile, h = C.hh;
+  const pts: [number, number][] = [[0, -h], [R * 0.9, -h], [R, -h * 0.55], [R, h * 0.35], [R * 0.93, h * 0.85], [R * 0.82, h], [R * 0.4, h * 1.12], [0, h * 1.15]];
+  const g = new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(Math.max(0.001, x), y)), 18);
+  const p = g.getAttribute('position');
+  const col = new Float32Array(p.count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    // (the icing on top takes the tile's colour; the dough round the side stays warm)
+    if (p.getY(i) > h * 0.8) c.setRGB(1, 1, 1);
+    else c.set(0xf0c088);
+    c.toArray(col, i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+export function crumble(info: { name: string; blurb: string }): Course {
+  const b = new CourseBuilder();
+  const center = new THREE.Vector3(0, 140, 0);
+  const A = new CrumbleArena(center);
+  const C = CRUMBLE;
+  const bottom = center.y - (C.layers - 1) * C.gap;
+  b.lakeY = bottom - 34;
+  const state = { go: 1e9 };
+  // the tiles: a collider each (still until it drops, then falling and gone), drawn per layer
+  const G = 20;
+  const pos = (i: number, t: number, out: THREE.Vector3) => {
+    const tl = A.tiles[i];
+    const d = t - A.drop[i];
+    out.set(tl.x, tl.y, tl.z);
+    if (d > 0) out.y -= d > 1.5 ? 400 : 0.5 * G * d * d;
+    return out;
+  };
+  // (the tiles are pads: fixed until they drop, and then not there at all)
+  b.world.pads = {
+    shape: { type: 'cyl', r: C.tile, hh: C.hh },
+    bound: Math.hypot(C.tile, C.hh),
+    mat: Mat.Felt,
+    near: (x, z, out) => void A.around(x, z, 1, out),
+    at: (i, o) => o.set(A.tiles[i].x, A.tiles[i].y, A.tiles[i].z),
+    on: (i, t) => t < A.drop[i],
+  };
+  const LAYER_C = [0xff9cc8, 0xffc070, 0xc8a0ff, 0x8ae0c8, 0xfff08a, 0x9ad0ff];
+  const geo = cookieGeo();
+  const meshes = A.layers.map((ly, L) => {
+    const m = new THREE.InstancedMesh(geo, new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.3, sheen: 0.4, sheenColor: new THREE.Color(0xffffff) }), ly.i1 - ly.i0);
+    m.castShadow = m.receiveShadow = true;
+    m.frustumCulled = false;
+    b.group.add(m);
+    return m;
+  });
+  const base = A.layers.map((_, L) => new THREE.Color(LAYER_C[L % LAYER_C.length]));
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(1, 1, 1), Z = new THREE.Vector3(0, 0, 0);
+  const hot = new THREE.Color(0xff3a4a), white = new THREE.Color(0xffffff), col = new THREE.Color();
+  const shown = new Uint8Array(A.tiles.length);
+  const draw = (t: number, all: boolean) => {
+    A.layers.forEach((ly, L) => {
+      const m = meshes[L];
+      let dirty = false;
+      for (let i = ly.i0; i < ly.i1; i++) {
+        const d = t - A.drop[i];
+        const k = i - ly.i0;
+        if (!all && A.drop[i] === Infinity) continue;
+        if (d > 1.5) {
+          if (shown[i] !== 2) {
+            m.setMatrixAt(k, M.compose(V.set(0, -1000, 0), Q.identity(), Z));
+            shown[i] = 2;
+            dirty = true;
+          }
+          continue;
+        }
+        pos(i, t, V);
+        if (d < 0 && A.drop[i] !== Infinity) {
+          // the warning: a shiver, a flash, then red
+          const w = 1 + d / C.delay;
+          V.x += Math.sin(t * 61 + i) * 0.05 * w;
+          V.z += Math.cos(t * 53 + i) * 0.05 * w;
+          col.copy(base[L]).lerp(w < 0.5 ? white : hot, w < 0.5 ? Math.abs(Math.sin(t * 30)) * 0.8 : 0.85);
+          m.setColorAt(k, col);
+        } else if (d >= 0) {
+          Q.setFromEuler(new THREE.Euler(d * (1.5 + (i % 3)), 0, d * (1 + (i % 2))));
+          m.setColorAt(k, col.copy(base[L]).lerp(hot, 0.6));
+        } else m.setColorAt(k, base[L]);
+        m.setMatrixAt(k, M.compose(V, d >= 0 ? Q : Q.identity(), S));
+        Q.identity();
+        dirty = true;
+      }
+      if (dirty) {
+        m.instanceMatrix.needsUpdate = true;
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      }
+    });
+  };
+  draw(0, true);
+  b.animators.push((t) => draw(t, false));
+  dressArena(b, new THREE.Vector3(center.x, center.y - 2, center.z), C.r0 + (C.layers - 1) * C.dr + 6, 9);
+  b.finish();
+  // a rough cut for the bots' and the camera's sake
+  const plate = { center, radius: C.r0 + (C.layers - 1) * C.dr, bars: [] };
+  return {
+    id: 'crumble',
+    name: info.name,
+    kind: 'survival',
+    blurb: info.blurb,
+    b,
+    path: null,
+    finishS: 0,
+    gaps: [],
+    checkpoints: [],
+    killY: bottom - 6,
+    lakeY: b.lakeY,
+    state,
+    grid: (n) => {
+      const out: { pos: THREE.Vector3; yaw: number }[] = [];
+      for (let k = 0; k < n; k++) {
+        const ring = k < 6 ? 4.5 : k < 14 ? 9 : 13.5;
+        const inRing = k < 6 ? 6 : k < 14 ? 8 : Math.max(1, n - 14);
+        const kk = k < 6 ? k : k < 14 ? k - 6 : k - 14;
+        const a = (kk / inRing) * Math.PI * 2 + ring;
+        const p = new THREE.Vector3(center.x + Math.cos(a) * ring, center.y + C.hh + 0.55, center.z + Math.sin(a) * ring);
+        out.push({ pos: p, yaw: Math.atan2(center.x - p.x, center.z - p.z) });
+      }
+      return out;
+    },
+    plate,
+    crumble: A,
+    intro: [],
+  };
+}

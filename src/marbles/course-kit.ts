@@ -156,7 +156,7 @@ export function split(b: CourseBuilder, path: Path, s0: number, s1: number, o: {
     sp.add(b.brass, dome(0.16, 0.8, 10), mat(0, 3.4, 0));
     sp.toBatch(b, f.m);
     const fastLeft = o.fastLat < o.safeLat;
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 0.9), new THREE.MeshPhysicalMaterial({ map: signTexture(fastLeft ? '◀ SHORTCUT' : 'SHORTCUT ▶', undefined, PAINT.red), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 0.9), new THREE.MeshPhysicalMaterial({ map: signTexture(fastLeft ? '◀ SHORTCUT' : 'SHORTCUT ▶', undefined, PAINT.red, 4), roughness: 0.4, clearcoat: 0.8 }));
     const board = new THREE.Mesh(woodAttr(new THREE.BoxGeometry(3.8, 1.05, 0.12), 'x'), b.railWood);
     const sg = new THREE.Group();
     sg.add(board);
@@ -261,7 +261,7 @@ export function checkpoints(gateS: number, list: number[]) {
 }
 
 /** the common race record */
-export function raceRecord(b: CourseBuilder, path: Path, o: { id: string; name: string; kind: 'race' | 'final'; blurb: string; gateS: number; finishS: number; gaps: [number, number][]; checkpoints: number[]; state: { go: number }; crown?: THREE.Object3D }): Course {
+export function raceRecord(b: CourseBuilder, path: Path, o: { id: string; name: string; kind: 'race' | 'final'; blurb: string; gateS: number; finishS: number; gaps: [number, number][]; checkpoints: number[]; state: { go: number }; crown?: THREE.Object3D; lava?: Course['lava'] }): Course {
   return {
     id: o.id,
     name: o.name,
@@ -277,6 +277,7 @@ export function raceRecord(b: CourseBuilder, path: Path, o: { id: string; name: 
     state: o.state,
     grid: raceGrid(path, o.gateS),
     crown: o.crown,
+    lava: o.lava,
     intro: introOf(path),
   };
 }
