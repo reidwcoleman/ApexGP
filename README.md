@@ -746,13 +746,17 @@ on wooden obstacle courses, solo against bots or online with friends. Everything
 code (`src/marbles/`; no image, model or sound files). It took over Marble Mania's page, courses
 and bots; the contestants are original bean characters, not marbles.
 
-- **The show**, six rounds: Timber Tumble (race), Paint Mill (race), Bar Hop (survival: hop the
-  low bar, never into the high one; the bars speed up, reverse, and the plate's rings crumble),
-  Rickety Ridge (race), Tilt-a-Dish (survival on a dish that tips further and further, swept by a
-  bar, bumpers popping up) and Crown Summit (the final: first across the line takes the crown).
-  Each round keeps `SHOW[i].keep` of the field. Races run about 95–120 s for the leaders; survival
-  rounds cut the field at about 90–100 s (110 s at most). Out of the show, you can watch it to the
-  end (←/→ switches bean).
+- **The show**: six rounds dealt fresh every show (`dealShow` in `courses.ts`): a race to open, a
+  survival, the team round, another race, another survival, then the final. A wheel of round names
+  spins and lands on each one while it builds. Races: Timber Tumble, Paint Mill, Rickety Ridge.
+  Survival: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse, and the
+  plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further, swept by a bar,
+  bumpers popping up). Team: **Paint Party** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`):
+  the field is split into two or three teams on a walled tile floor; a bean on its feet paints the
+  tile under it its team's colour (over anyone else's), a turntable and bumpers knock beans about,
+  and after 75 s the team with the least floor goes home. Final: Crown Summit (first across the
+  line takes the crown). Out of the show, you can watch it to the end (←/→ switches bean). Test
+  links use a fixed order (`DEFAULT_SHOW`: 0–5 as before, 6 is Paint Party).
 - **The beans** (`bean.ts`): a lathe-turned jelly body under a clearcoat, googly eyes on springs,
   little arms and legs, 24 named outfits (a colour, one of 12 patterns painted on a canvas, one of
   12 hats) and random ones for the bots. Animated from the body: a waddling run timed to the speed
@@ -789,8 +793,10 @@ and bots; the contestants are original bean characters, not marbles.
   dive on the run-up. On the plates they time hops against both bars. Skill scales pace, nerve,
   timing error, lapses and dives; the menu's BOTS setting (Easy, Normal, Hard, Insane) and a style
   per bot (Racer, Bruiser, Daredevil, Steady, Closer) are in `ai-style.ts`.
-- **Looks**: lacquered wood with board-by-board grain, candy enamel with crisp patterns, foil
-  confetti and paint splash crowns. The stage (`render.ts`, `env*.ts`, `post-*.ts`): cascaded sun
+- **Looks**: padded play foam (`foamMaterial` in `shaders.ts`): puffed floor tiles in two tints
+  with soft grooves, padded walls in big stripes, fat candy-striped inflatable tubes along every
+  wall top, inflatable arches, candy-cane posts; each round has its own palette (`FOAM_THEMES`).
+  Obstacles are glossy toy plastic with a soft rim light; foil confetti and paint splash crowns. The stage (`render.ts`, `env*.ts`, `post-*.ts`): cascaded sun
   shadows, a stylised sky, billboard cumulus, a glossy marbled-paint sea with a planar mirror, toy
   pegs, floating block islands and balloons; temporal AA that follows each bean's body, N8AO,
   bloom, a grade. Quality steps down on its own (`?gfx=high|medium|low` pins it, `?aa=smaa`).

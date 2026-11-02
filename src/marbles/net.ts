@@ -43,7 +43,7 @@ export type CtlMsg =
   | { t: 'members'; members: Member[]; inShow: boolean }
   | { t: 'show'; roster: NetContestant[] }
   /** load round `idx`; `order`: the contestants' ids in grid order; `time`: the host's clock */
-  | { t: 'round'; idx: number; order: number[]; slots: number; out: number[]; key: number }
+  | { t: 'round'; idx: number; order: number[]; slots: number; out: number[]; key: number; lineup?: string[] }
   /** a guest has the round built */
   | { t: 'loaded' }
   /** the countdown: GO at host time `go` */

@@ -189,8 +189,8 @@ export class UI {
   }
 
   // ------------------------------------------------------------------ round card, countdown, banner
-  card(o: { n: number; total: number; name: string; kind: string; goal: string; blurb: string }) {
-    this.cardEl.innerHTML = `<div class="box">
+  card(o: { n: number; total: number; name: string; kind: string; goal: string; blurb: string; team?: { name: string; color: number } | null }) {
+    this.cardEl.innerHTML = `<div class="box">${o.team ? `<div class="team" style="--tc:${css(o.team.color)}">YOU'RE ON TEAM ${esc(o.team.name)}</div>` : ''}
       <div class="rn">${o.n === o.total ? 'The Final' : `Round ${o.n} of ${o.total}`}</div>
       <div class="nm">${esc(o.name)}</div>
       <div class="kind">${esc(o.kind)}</div>
@@ -199,6 +199,64 @@ export class UI {
       <div class="skip">SPACE / TAP TO SKIP</div></div>`;
     this.cardEl.classList.remove('mm-hide');
   }
+  /**
+   * The round wheel: a reel of every round spins and lands on the next one (resolves when it's
+   * settled). `quick`: no wheel.
+   */
+  reveal(pool: { name: string; kind: string }[], pick: { name: string; kind: string }, n: number, total: number, quick = false) {
+    if (quick) return Promise.resolve();
+    const el = this.revealEl ?? (this.revealEl = this.layer('mm-reveal mm-hide'));
+    const items: { name: string; kind: string }[] = [];
+    const others = pool.filter((x) => x.name !== pick.name && x.kind !== 'final');
+    for (let k = 0; k < 22; k++) items.push(others[(k * 7 + Math.floor(Math.random() * others.length)) % others.length]);
+    items.push(pick, others[0], others[1 % others.length]);
+    const final = pick.kind === 'final';
+    const label = (k: string) => (k === 'survival' ? 'SURVIVAL' : k === 'team' ? 'TEAM' : k === 'final' ? 'FINAL' : 'RACE');
+    el.innerHTML = `<div class="wrap">
+      <div class="hd">${final ? 'THE FINAL' : `ROUND ${n} OF ${total}`}</div>
+      <div class="win"><div class="reel">${items.map((x) => `<div class="it k-${x.kind}"><b>${esc(x.name)}</b><i>${label(x.kind)}</i></div>`).join('')}</div></div>
+    </div>`;
+    el.classList.remove('mm-hide', 'landed');
+    const reel = el.querySelector('.reel') as HTMLElement;
+    const ITEM = 92;
+    const target = (items.length - 4) * ITEM;
+    reel.style.transform = 'translateY(0)';
+    return new Promise<void>((done) => {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          reel.style.transition = 'transform 2.3s cubic-bezier(0.12, 0.72, 0.16, 1.02)';
+          reel.style.transform = `translateY(${-target}px)`;
+        }),
+      );
+      window.setTimeout(() => el.classList.add('landed'), 2350);
+      window.setTimeout(() => {
+        el.classList.add('mm-hide');
+        done();
+      }, 3300);
+    });
+  }
+  private revealEl: HTMLElement | null = null;
+
+  /** the team round's score bar (null hides it) */
+  teams(list: { name: string; color: number; share: number; mine: boolean }[] | null) {
+    const el = this.teamEl ?? (this.teamEl = this.hudEl.appendChild(h('div', 'mm-teams')));
+    el.classList.toggle('mm-hide', !list);
+    if (!list) return;
+    const key = list.map((t) => t.name).join();
+    if (el.dataset.k !== key) {
+      el.dataset.k = key;
+      el.innerHTML = list.map((t) => `<div class="tm${t.mine ? ' mine' : ''}" style="--tc:${css(t.color)}"><span class="nm">${t.name}</span><span class="bar"><i></i></span><span class="pc"></span></div>`).join('');
+    }
+    const rows = el.querySelectorAll('.tm');
+    const lead = Math.max(...list.map((t) => t.share));
+    list.forEach((t, k) => {
+      const r = rows[k] as HTMLElement;
+      (r.querySelector('i') as HTMLElement).style.width = `${Math.min(100, (t.share / Math.max(0.34, lead)) * 100)}%`;
+      (r.querySelector('.pc') as HTMLElement).textContent = `${Math.round(t.share * 100)}%`;
+    });
+  }
+  private teamEl: HTMLElement | null = null;
+
   hideCard() {
     this.cardEl.classList.add('mm-hide');
   }

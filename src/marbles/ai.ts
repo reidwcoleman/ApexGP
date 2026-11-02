@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
+import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
 import type { Course } from './courses.ts';
 import { GRAVITY, JUMP_V, RADIUS, type Marble } from './physics.ts';
@@ -82,6 +83,7 @@ export class Bot {
   /** how long it's been waiting on purpose (a wait that never ends is a stall: go anyway) */
   private waitT = 0;
   private plate: PlateBrain | null = null;
+  private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
   private riding = false;
   /** the lane it's chosen at each fork (lateral; NaN: not chosen yet) */
@@ -151,6 +153,11 @@ export class Bot {
     if (t < c.state.go) return;
     m.input.set(0, 0, 0);
     if (!m.active || m.frozen) return;
+    if (c.team) {
+      this.team ??= new TeamBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react) return;
+      return this.team.update(dt, t, c, all);
+    }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);
       return this.plate.update(dt, t, c, all);

@@ -45,12 +45,16 @@ export function peg(b: CourseBuilder, path: Path, s: number, lat: number, o: { r
 
 /** a pinball bumper: kicks a marble away with a ding and a flash */
 export function bumper(b: CourseBuilder, path: Path, s: number, lat: number, o: { r?: number; color?: number } = {}) {
+  return bumperAt(b, path.at(s, lat, 0), frameQuat(path, s), o);
+}
+
+/** a pinball bumper standing at `base` (turned by q) */
+export function bumperAt(b: CourseBuilder, at: THREE.Vector3, q: THREE.Quaternion, o: { r?: number; color?: number } = {}) {
   const r = o.r ?? 0.8, h = 0.9;
-  const q = frameQuat(path, s);
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
   const kin = new Kin({ type: 'cyl', r, hh: h / 2 }, Mat.Bumper);
   kin.kick = 7.5;
-  kin.pos.copy(path.at(s, lat, 0)).addScaledVector(up, h / 2);
+  kin.pos.copy(at).addScaledVector(up, h / 2);
   kin.quat.copy(q);
   const g = new THREE.Group();
   const color = o.color ?? PAINT.pink;
@@ -391,25 +395,43 @@ export function arch(b: CourseBuilder, path: Path, s: number, text: string, o: {
   const hw = sec.w / 2 + 0.9;
   const H = 6.2;
   const grp = new THREE.Group();
-  const pm = b.paint({ a: o.color ?? PAINT.red, b: PAINT.white, pattern: Pattern.Stripes, scale: 1.6 });
-  for (const side of [-1, 1]) {
-    const post = new THREE.Mesh(cyl(0.42, H, 24), pm);
-    post.position.set(side * hw, H / 2 - 0.4, 0);
-    grp.add(post);
-    const ball = new THREE.Mesh(cylAttr(new THREE.SphereGeometry(0.62, 24, 14)), b.paint({ a: PAINT.yellow, b: PAINT.yellow, pattern: Pattern.Solid }));
-    ball.position.set(side * hw, H, 0);
-    grp.add(ball);
+  const pm = b.paint({ a: o.color ?? PAINT.red, b: PAINT.white, pattern: Pattern.Stripes, scale: 1.1 });
+  // an inflatable arch: one fat candy-striped tube up, over and down
+  {
+    const pts = [
+      [-hw, -0.6], [-hw, H * 0.45], [-hw + 0.15, H - 0.9], [-hw * 0.55, H + 0.35], [0, H + 0.6], [hw * 0.55, H + 0.35], [hw - 0.15, H - 0.9], [hw, H * 0.45], [hw, -0.6],
+    ].map(([x, y]) => new THREE.Vector3(x, y, 0));
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+    const r = 0.62;
+    const tg = new THREE.TubeGeometry(curve, 96, r, 20, false);
+    const len = curve.getLength();
+    const uv = tg.getAttribute('uv'), n = uv.count;
+    const wd = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) {
+      wd[k * 3] = uv.getX(k) * len;
+      wd[k * 3 + 1] = uv.getY(k) * Math.PI * 2 * r;
+      wd[k * 3 + 2] = r;
+    }
+    tg.setAttribute('aWood', new THREE.BufferAttribute(wd, 3));
+    grp.add(new THREE.Mesh(tg, pm));
+    // fat feet where it's pegged down
+    for (const side of [-1, 1]) {
+      const foot = new THREE.Mesh(cylAttr(new THREE.SphereGeometry(0.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2)), b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }));
+      foot.scale.set(1, 0.55, 1);
+      foot.position.set(side * hw, -0.05, 0);
+      grp.add(foot);
+    }
   }
   // the banner board, its face a canvas sign
   const bw = hw * 2 - 0.2;
-  const board = new THREE.Mesh(woodAttr(roundBox(bw, 1.7, 0.3, 0.1), 'x', 5), b.railWood);
-  board.position.set(0, H - 0.6, 0);
+  const board = new THREE.Mesh(woodAttr(roundBox(bw * 0.86, 1.7, 0.3, 0.14), 'x', 5), b.darkWood);
+  board.position.set(0, H - 0.75, 0);
   grp.add(board);
   const tex = signTexture(text, o.text2, o.color ?? PAINT.red);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(bw - 0.3, 1.45), new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.1 }));
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(bw * 0.86 - 0.3, 1.45), new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.1 }));
   for (const side of [-1, 1]) {
     const f = face.clone();
-    f.position.set(0, H - 0.6, side * 0.16);
+    f.position.set(0, H - 0.75, side * 0.16);
     if (side < 0) f.rotation.y = Math.PI;
     grp.add(f);
   }
@@ -424,7 +446,7 @@ export function arch(b: CourseBuilder, path: Path, s: number, text: string, o: {
   b.group.add(grp);
   // (the posts are solid)
   for (const side of [-1, 1]) {
-    const k = new Kin({ type: 'cyl', r: 0.42, hh: H / 2 }, Mat.Paint);
+    const k = new Kin({ type: 'cyl', r: 0.6, hh: H / 2 }, Mat.Felt);
     k.pos.copy(path.at(s, side * hw, H / 2 - 0.4));
     k.quat.copy(q);
     b.world.addKin(k);

@@ -3,7 +3,9 @@ import { Bot } from './ai.ts';
 import { courseAI } from './ai-course.ts';
 import { level, LEVELS, roll, STYLES, type Level, type StyleId } from './ai-style.ts';
 import { Sound } from './audio.ts';
-import { buildRound, SHOW, type Course } from './courses.ts';
+import { buildRound, dealShow, setShow, DEFAULT_SHOW, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
+import { TeamPlay } from './team.ts';
+import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
 import { Confetti, Splashes } from './fx.ts';
 import { DASH_CD, Marble, Mode } from './physics.ts';
@@ -79,6 +81,9 @@ export class MarbleGame {
   /** the bots' difficulty (the menu's choice, remembered; ?diff= for tests) */
   private level: Level = level(readPref());
   private roundIdx = 0;
+  private teamPlay: TeamPlay | null = null;
+  /** test links: no round wheel */
+  private quick = false;
   private state: State = 'menu';
   private stateT = 0;
   private playT = 0;
@@ -153,7 +158,9 @@ export class MarbleGame {
     if (q.get('diff')) this.level = level(q.get('diff'));
     if (q.get('round')) {
       this.autopilot = q.get('auto') === '1';
+      this.quick = true;
       this.newShow();
+      setShow(DEFAULT_SHOW);
       this.roundIdx = Number(q.get('round'));
       for (const x of this.roster) x.out = x.id >= FIELD - Number(q.get('cut') ?? 0);
       await this.startRound();
@@ -327,18 +334,20 @@ export class MarbleGame {
       this.roster.push({ id: k, name: names[k % names.length], outfit: k < OUTFITS.length && Math.random() < 0.5 ? OUTFITS[(this.design + k) % OUTFITS.length] : randomOutfit(Math.random), skill, style, player: false, out: false, owner: '', human: false });
     }
     this.roundIdx = 0;
+    dealShow();
     void this.startRound();
   }
 
   private async startRound() {
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    this.slots = info.kind === 'final' ? 1 : Math.max(2, (info.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
+    this.slots = info.kind === 'final' ? 1 : info.kind === 'team' ? alive - Math.floor(alive / (alive >= 9 ? 3 : 2)) : Math.max(2, (info.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
     // (online: everyone builds the same round, with the field in the same places)
     const order = this.roster.filter((x) => !x.out).map((x) => x.id).sort(() => Math.random() - 0.5);
     this.loadedBy.clear();
-    this.host?.broadcast({ t: 'round', idx: this.roundIdx, order, slots: this.slots, out: this.roster.filter((x) => x.out).map((x) => x.id), key: this.roundKey() });
-    await this.loadRound(this.roundIdx, false, order);
+    this.host?.broadcast({ t: 'round', idx: this.roundIdx, order, slots: this.slots, out: this.roster.filter((x) => x.out).map((x) => x.id), key: this.roundKey(), lineup: SHOW.map((x) => x.id) });
+    // the wheel spins while the course builds
+    await Promise.all([this.ui.reveal(Object.values(ROUNDS), SHOW[this.roundIdx], this.roundIdx + 1, SHOW.length, this.quick), this.loadRound(this.roundIdx, false, order)]);
     this.introCard();
   }
 
@@ -347,8 +356,8 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} on the plate go through` : `First ${this.slots} of ${alive} qualify`;
-    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : 'RACE', goal, blurb: info.blurb });
+    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} on the plate go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : `First ${this.slots} of ${alive} qualify`;
+    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : c.kind === 'team' ? 'TEAM GAME' : 'RACE', goal, blurb: info.blurb, team: this.teamPlay?.mine() });
     this.state = 'intro';
     this.stateT = 0;
     this.ui.hud(false);
@@ -371,6 +380,8 @@ export class MarbleGame {
     this.menuMarbles = [];
     this.preview = null;
     this.ui.clearTags();
+    this.teamPlay?.dispose();
+    this.teamPlay = null;
     const c = (this.course = buildRound(SHOW[idx].id));
     if (c.path) courseAI(c);
     this.scene.add(c.b.group);
@@ -400,8 +411,10 @@ export class MarbleGame {
       const r: Racer = { c: x, m, rig, bot, hint, s: 0, cp: c.checkpoints[0] ?? 0, fin: 0, out: false, fell: 0, hold: 0, local, netPos: m.pos.clone(), netT: performance.now() / 1000, netEv: 0, ev: 0, pend: false };
       this.racers.push(r);
       if (menu && x.player) this.preview = r;
+      if (c.team && !menu) c.team.of.set(x.id, order[k] % c.team.teams);
       if (menu) this.menuMarbles.push(r);
     });
+    if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
     this.finCount = 0;
     this.playT = 0;
     this.confetti.clear();
@@ -663,6 +676,23 @@ export class MarbleGame {
   private rules(dt: number) {
     const c = this.course!;
     const w = c.b.world;
+    if (c.team && this.teamPlay) {
+      if (this.state === 'play') this.teamPlay.paint();
+      for (const r of this.racers) {
+        if (!r.local) continue;
+        if (!r.fell && r.m.pos.y < c.killY) {
+          r.fell = w.time;
+          this.drop(r);
+          this.sound.voice('wah', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, r.c.player);
+        } else if (r.fell && w.time - r.fell > 1.4) {
+          r.fell = 0;
+          this.teamPlay.respawn(r.m);
+          r.bot?.reset(0);
+        }
+      }
+      if (!this.guest && this.state === 'play' && this.playT > TEAM_T) this.endRound();
+      return;
+    }
     if (c.plate) {
       for (const r of this.racers) {
         if (r.out || r.m.pos.y >= c.killY) continue;
@@ -842,7 +872,8 @@ export class MarbleGame {
   private endRound() {
     const c = this.course!;
     if (this.state !== 'play') return;
-    const through = this.racers.filter((r) => (c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
+    const loser = this.teamPlay ? this.teamPlay.loser() : -1;
+    const through = this.racers.filter((r) => (c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
     this.host?.broadcast({ t: 'end', through, fins: this.racers.filter((r) => r.fin).map((r) => [r.c.id, r.fin] as [number, number]) });
     this.roundOver(new Set(through));
   }
@@ -861,7 +892,13 @@ export class MarbleGame {
     for (const x of this.roster) if (!through.has(x.id)) x.out = true;
     const p = this.player();
     if (p && p.out && !p.c.out) p.c.out = true;
-    if (p && c.plate && !p.out) {
+    if (p && c.team) {
+      const ok = through.has(p.c.id);
+      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
+      if (ok) this.sound.qualified();
+      else this.sound.eliminated();
+      this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
+    } else if (p && c.plate && !p.out) {
       this.ui.banner('SURVIVED!', 'good', 'You stayed on the plate');
       this.sound.qualified();
       this.sound.voice('yay', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
@@ -890,7 +927,7 @@ export class MarbleGame {
       state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out ? 'out' : 'q',
       me: r.c.player,
       style: r.c.human ? (r.c.player ? undefined : 'Player') : STYLES[r.c.style].name,
-      note: final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
+      note: final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
     }));
     const online = this.online();
     if (final) {
@@ -1067,7 +1104,8 @@ export class MarbleGame {
         this.worldOff = NaN;
         this.ui.hideResults();
         this.confetti.clear();
-        await this.loadRound(m.idx, false, m.order);
+        if (m.lineup) setShow(m.lineup as RoundId[]);
+        await Promise.all([this.ui.reveal(Object.values(ROUNDS), SHOW[m.idx], m.idx + 1, SHOW.length), this.loadRound(m.idx, false, m.order)]);
         g.send({ t: 'loaded' });
         this.introCard();
         if (!Number.isNaN(this.pendingGo)) this.toCountdown(this.pendingGo);
@@ -1143,6 +1181,7 @@ export class MarbleGame {
     this.showNo++;
     this.host.broadcast({ t: 'show', roster: this.roster.map(({ id, name, outfit, skill, style, owner, human }) => ({ id, name, outfit, skill, style, owner, human })) });
     this.roundIdx = 0;
+    dealShow();
     void this.startRound();
   }
 
@@ -1395,6 +1434,12 @@ export class MarbleGame {
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     const pos = new THREE.Vector3(tgt.x - Math.sin(yaw) * dist, tgt.y + hgt, tgt.z - Math.cos(yaw) * dist);
+    // (the team arena has walls: out past them, the camera climbs and looks down over them instead)
+    if (c.team) {
+      const A = c.team;
+      const ex = Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z)) - (A.half - 0.5);
+      if (ex > 0) pos.y += ex * 1.3;
+    }
     const look = tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
     if (c.plate) look.lerp(c.plate.center, 0.25);
     if (this.snapCam) {
@@ -1517,11 +1562,13 @@ export class MarbleGame {
     const ranked = this.ranked();
     let status = '';
     if (c.kind === 'final') status = this.finCount ? 'WINNER!' : 'FIRST WINS';
+    else if (c.team && this.teamPlay) status = this.teamPlay.mine() ? `TEAM ${this.teamPlay.mine()!.name}` : 'TEAM GAME';
     else if (race) status = `QUALIFIED ${Math.min(this.finCount, this.slots)} / ${this.slots}`;
     else status = `ALIVE ${alive} · TO ${this.slots}`;
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
-    if (c.plate && (this.state === 'play' || this.state === 'over')) {
+    if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
+    else if (c.plate && (this.state === 'play' || this.state === 'over')) {
       timer = clock(SURVIVE_T - this.playT);
     } else if (race && this.state === 'play' && this.playT > RACE_T - 30) timer = clock(RACE_T - this.playT);
     const spectating = p && p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch` : undefined;
@@ -1539,6 +1586,8 @@ export class MarbleGame {
       race,
       keys: this.roundIdx === 0 && this.playT < 12,
     });
+    this.ui.teams(c.team && this.teamPlay ? this.teamPlay.scores() : null);
+    this.teamPlay?.sync();
     if (race && c.path) {
       const L = c.finishS;
       this.ui.progress(this.racers.map((r) => ({ id: r.c.id, f: r.fin ? 1 : r.s / L, color: r.c.outfit.a, me: r.c.player, out: r.out && !r.fin })));
@@ -1556,6 +1605,7 @@ function lerpAngle(a: number, b: number, k: number) {
 /** the round clocks: a race's time limit, how long a survival round lasts, the intro flyover */
 const RACE_T = 180;
 const SURVIVE_T = 110;
+const TEAM_T = TEAM_ROUND_T;
 const INTRO_T = 8;
 
 function clock(sec: number) {

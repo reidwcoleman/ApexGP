@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { CourseBuilder, Path } from './builder.ts';
 import { Kin } from './physics.ts';
+import { setFoamTheme } from './shaders.ts';
 import { timber } from './course-timber.ts';
 import { paintmill } from './course-paintmill.ts';
 import { jumpclub } from './course-jumpclub.ts';
 import { ridge } from './course-ridge.ts';
 import { tiptop } from './course-tiptop.ts';
 import { summit } from './course-summit.ts';
+import { paintparty, type TeamArena } from './course-paintparty.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -16,7 +18,7 @@ export { makeCrown } from './course-kit.ts';
  * a race where only the first across the line counts.
  */
 
-export type RoundKind = 'race' | 'survival' | 'final';
+export type RoundKind = 'race' | 'survival' | 'team' | 'final';
 
 export interface Course {
   id: string;
@@ -40,28 +42,56 @@ export interface Course {
    * away); bars[0] is the low bar to hop, bars[1] (if there is one) the high one never to hop into.
    */
   plate?: { center: THREE.Vector3; radius: number; bars: { angle: (t: number) => number; height: number; kin: Kin; on: (t: number) => boolean }[] };
+  /** the team round's painted floor */
+  team?: TeamArena;
   /** the crown on its pedestal (the final) */
   crown?: THREE.Object3D;
   /** for the flyover */
   intro: THREE.Vector3[];
 }
 
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'summit';
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'summit';
+export interface RoundInfo {
+  id: RoundId;
+  name: string;
+  kind: RoundKind;
+  blurb: string;
+  /** the share of the field that goes through (a race: the first that many across the line;
+   * survival: the last that many standing; team: everyone but the losing team). The final keeps one. */
+  keep: number;
+}
+/** every round there is */
+export const ROUNDS: Record<RoundId, RoundInfo> = {
+  timber: { id: 'timber', name: 'Timber Tumble', kind: 'race', blurb: 'Pegs, rolling logs, the big jump, a shortcut beam and the great spiral', keep: 0.8 },
+  paintmill: { id: 'paintmill', name: 'Paint Mill', kind: 'race', blurb: 'Hammers, flippers, a conveyor running back at you, the spinners and the axes', keep: 0.75 },
+  ridge: { id: 'ridge', name: 'Rickety Ridge', kind: 'race', blurb: 'Seesaws, boulders, sliding bridges, wrecking balls, a trampoline pit: nothing holds still', keep: 0.75 },
+  jumpclub: { id: 'jumpclub', name: 'Bar Hop', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
+  tiptop: { id: 'tiptop', name: 'Tilt-a-Dish', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
+  paintparty: { id: 'paintparty', name: 'Paint Party', kind: 'team', blurb: 'Run over the tiles to paint them your team colour. Steal theirs. Least floor goes home.', keep: 0.67 },
+  summit: { id: 'summit', name: 'Crown Summit', kind: 'final', blurb: 'Everything at once. First across the line takes the crown', keep: 0 },
+};
 /**
- * The running order. `keep`: the share of the field that goes through (a race: the first that many
- * across the line; survival: the last that many standing). The final keeps one.
+ * The running order of this show (a live list: a new show deals a new one, a guest takes the
+ * host's). The default is every round once, for the test links (?round=N).
  */
-export const SHOW: { id: RoundId; name: string; kind: RoundKind; blurb: string; keep: number }[] = [
-  { id: 'timber', name: 'Timber Tumble', kind: 'race', blurb: 'Pegs, rolling logs, the big jump, a shortcut beam and the great spiral', keep: 0.8 },
-  { id: 'paintmill', name: 'Paint Mill', kind: 'race', blurb: 'Hammers, flippers, a conveyor running back at you, the spinners and the axes', keep: 0.75 },
-  { id: 'jumpclub', name: 'Bar Hop', kind: 'survival', blurb: 'Jump the low bar. Never jump into the high one. Mind the edge: it crumbles.', keep: 0.65 },
-  { id: 'ridge', name: 'Rickety Ridge', kind: 'race', blurb: 'Seesaws, boulders, sliding bridges, wrecking balls, a trampoline pit: nothing holds still', keep: 0.75 },
-  { id: 'tiptop', name: 'Tilt-a-Dish', kind: 'survival', blurb: 'The dish tips more and more. Hop the bar, dodge the bumpers, stay on.', keep: 0.65 },
-  { id: 'summit', name: 'Crown Summit', kind: 'final', blurb: 'Everything at once. First across the line takes the crown', keep: 0 },
-];
+// (the old running order keeps its indexes for the test tools; the team round is 6)
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty'];
+export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
+/** a new show: a race to open, then a survival, the team round, a race, a survival, the final (which races and survivals is the luck of the draw) */
+export function dealShow(rnd = Math.random) {
+  const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+  const races = shuffle<RoundId>(['timber', 'paintmill', 'ridge']);
+  const surv = shuffle<RoundId>(['jumpclub', 'tiptop']);
+  setShow([races[0], surv[0], 'paintparty', races[1], surv[1], 'summit']);
+  return SHOW.map((x) => x.id);
+}
+export function setShow(ids: RoundId[]) {
+  SHOW.splice(0, SHOW.length, ...ids.map((id) => ROUNDS[id]));
+}
 
 export function buildRound(id: RoundId): Course {
-  const info = SHOW.find((x) => x.id === id)!;
+  setFoamTheme(id === 'jumpclub' || id === 'tiptop' || id === 'paintparty' ? 'arena' : id);
+  const info = ROUNDS[id];
   switch (id) {
     case 'timber':
       return timber(info);
@@ -73,6 +103,8 @@ export function buildRound(id: RoundId): Course {
       return ridge(info);
     case 'tiptop':
       return tiptop(info);
+    case 'paintparty':
+      return paintparty(info);
     default:
       return summit(info);
   }

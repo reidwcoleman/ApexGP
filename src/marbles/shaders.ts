@@ -298,7 +298,8 @@ export function paintMaterial(p: PaintSpec, wood: WoodSpecies = SPECIES.pine) {
     uB: { value: lin(p.b) },
     uPat: { value: p.pattern as number },
     uScale: { value: p.scale ?? 1 },
-    uWear: { value: p.wear ?? 0.06 },
+    // toy plastic, never chipped (the wood underneath is gone)
+    uWear: { value: 0 * (p.wear ?? 0) },
     uFlash: { value: 0 },
   };
   m.userData.u = u;
@@ -338,9 +339,9 @@ export function paintMaterial(p: PaintSpec, wood: WoodSpecies = SPECIES.pine) {
       .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n#ifdef USE_CLEARCOAT\nclearcoatNormal = woodBump(-vViewPosition, clearcoatNormal, wH * (1.0 - chip) * 0.6, faceDirection);\n#endif')
       // the clearcoat shrugs off the bare wood of a chip
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\nmaterial.clearcoat *= 1.0 - 0.8 * chip;\n#endif\n' + SPEC_AA)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uFlash * 2.5;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uFlash * 2.5;\n' + RIM);
   };
-  m.customProgramCacheKey = () => 'mm-paint-2';
+  m.customProgramCacheKey = () => 'mm-paint-3';
   return m;
 }
 
@@ -800,4 +801,146 @@ export function woodAttr(g: THREE.BufferGeometry, axis: 'x' | 'y' | 'z' = 'x', s
   }
   g.setAttribute('aWood', new THREE.BufferAttribute(a, 3));
   return g;
+}
+
+// ---------------------------------------------------------------------------------------------
+// play foam: the courses are padded, inflated toy plastic (no wood)
+
+export interface FoamTheme {
+  /** floor tiles (two tints) and the padded walls' colour */
+  floorA: number;
+  floorB: number;
+  wall: number;
+  /** candy-stripe rails, posts and tubes: the colour and its partner */
+  rail: number;
+  railB: number;
+  post: number;
+  /** under-parts: hubs, bases, the chute's belly */
+  base: number;
+}
+
+export const FOAM_THEMES: Record<string, FoamTheme> = {
+  timber: { floorA: 0xffb1cf, floorB: 0xffc6dc, wall: 0x9b6bff, rail: 0x8a4bff, railB: 0xffffff, post: 0xff5fa8, base: 0x4b2f91 },
+  paintmill: { floorA: 0xc4b2ff, floorB: 0xd4c6ff, wall: 0xff8a1f, rail: 0xff8a1f, railB: 0xfff3d6, post: 0x8a4bff, base: 0x3c2a7a },
+  ridge: { floorA: 0x9eecc9, floorB: 0xb6f4d8, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0x1fc8c0, base: 0x2b4c86 },
+  summit: { floorA: 0xffde85, floorB: 0xffe9a8, wall: 0x2f74ff, rail: 0x2f74ff, railB: 0xffffff, post: 0xff5fa8, base: 0x2a3a8f },
+  arena: { floorA: 0xa9d8ff, floorB: 0xc0e3ff, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0xffcf2a, base: 0x3a2f8a },
+};
+let theme: FoamTheme = FOAM_THEMES.timber;
+export const foamTheme = () => theme;
+/** the palette the next CourseBuilder's foam takes */
+export function setFoamTheme(id: string) {
+  theme = FOAM_THEMES[id] ?? FOAM_THEMES.timber;
+}
+
+const FOAM = /* glsl */ `
+uniform vec3 uFA;
+uniform vec3 uFB;
+uniform vec3 uFW;
+uniform int uFK;
+uniform float uFT;
+float fSq(float v, float fw){
+  float sd = 0.25 - abs(fract(v) - 0.5);
+  return clamp(sd / max(fw, 1e-5) * 2.0, -1.0, 1.0) * (1.0 - smoothstep(0.3, 0.7, fw));
+}
+// w: (along, across, wall share) in metres. Colour out, roughness and a height (m) for the bump.
+vec3 foamAt(vec3 w, vec3 fw, out float rough, out float h){
+  float far = smoothstep(0.02, 0.09, max(fw.x, fw.y));
+  float micro = mix(mvn(w * 70.0), 0.5, smoothstep(0.004, 0.02, max(fw.x, fw.y)));
+  rough = 0.48 + 0.12 * micro;
+  h = micro * 0.00025;
+  vec3 c;
+  if (uFK == 0) {
+    // padded tiles: alternate tints, a soft groove at every seam, each tile a shallow pillow
+    vec2 t = w.xy / uFT;
+    vec2 f = fract(t) - 0.5;
+    vec2 ft = fw.xy / uFT;
+    float alt = 0.5 - 0.5 * fSq(t.x * 0.5, ft.x * 0.5) * fSq(t.y * 0.5, ft.y * 0.5);
+    c = mix(uFA, uFB, alt);
+    float d = 0.5 - max(abs(f.x), abs(f.y));
+    float fwt = max(ft.x, ft.y);
+    float groove = (1.0 - smoothstep(0.0, 0.03 + fwt, d)) * (1.0 - smoothstep(0.08, 0.3, fwt));
+    c *= 1.0 - 0.28 * groove;
+    float px = 1.0 - pow(abs(2.0 * f.x), 6.0), py = 1.0 - pow(abs(2.0 * f.y), 6.0);
+    h += px * py * 0.03 * uFT * (1.0 - smoothstep(0.05, 0.25, fwt));
+    // the padded walls in their own colour, big soft stripes
+    float wf = smoothstep(0.25, 0.75, w.z);
+    float st = 0.5 + 0.5 * fSq((w.x - w.y) * 0.4, length(fw.xy) * 0.4);
+    vec3 wc = mix(uFW, mix(uFW, vec3(1.0), 0.55), st);
+    c = mix(c, wc, wf);
+    rough = mix(rough, 0.42, wf);
+  } else if (uFK == 1 || uFK == 2) {
+    // candy stripes, each stripe its own puffed band
+    float sc = uFK == 1 ? 0.7 : 1.3;
+    float v = (w.x + w.y) * sc;
+    float fv = (fw.x + fw.y) * sc;
+    float band = 0.5 + 0.5 * fSq(v, fv);
+    c = mix(uFA, uFB, band);
+    float e = abs(fract(v * 2.0) - 0.5);
+    h += (1.0 - pow(2.0 * e, 4.0)) * 0.01 * (1.0 - smoothstep(0.1, 0.4, fv * 2.0));
+  } else {
+    c = uFA * (0.94 + 0.12 * micro);
+  }
+  return c;
+}
+vec3 foamBump(vec3 surf_pos, vec3 surf_norm, float h, float faceDirection){
+  vec3 sx = dFdx(surf_pos), sy = dFdy(surf_pos);
+  vec2 dh = vec2(dFdx(h), dFdy(h));
+  vec3 R1 = cross(sy, surf_norm), R2 = cross(surf_norm, sx);
+  float det = dot(sx, R1) * faceDirection;
+  vec3 g = sign(det) * (dh.x * R1 + dh.y * R2);
+  return normalize(abs(det) * surf_norm - g);
+}
+`;
+
+/** a soft rim: inflated plastic catches the sky round its edges */
+const RIM = /* glsl */ `
+{
+  float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+  totalEmissiveRadiance += diffuseColor.rgb * rimF * 0.22;
+}`;
+
+/** padded play foam: 'floor' (tiles, padded walls), 'rail' / 'post' (candy stripes), 'base' (solid) */
+export function foamMaterial(kind: 'floor' | 'rail' | 'post' | 'base', th: FoamTheme = theme) {
+  const m = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    roughness: 0.5,
+    metalness: 0,
+    clearcoat: kind === 'floor' ? 0.35 : 0.6,
+    clearcoatRoughness: kind === 'floor' ? 0.32 : 0.18,
+    specularIntensity: 0.55,
+    sheen: 0.5,
+    sheenRoughness: 0.5,
+    sheenColor: 0xffffff,
+  });
+  const K = { floor: 0, rail: 1, post: 2, base: 3 }[kind];
+  const a = kind === 'floor' ? th.floorA : kind === 'rail' ? th.rail : kind === 'post' ? th.post : th.base;
+  const bb = kind === 'floor' ? th.floorB : kind === 'base' ? th.base : th.railB;
+  const u = {
+    uFA: { value: lin(a) },
+    uFB: { value: lin(bb) },
+    uFW: { value: lin(th.wall) },
+    uFK: { value: K },
+    uFT: { value: 1.6 },
+  };
+  m.userData.u = u;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = VERT_WOOD(sh.vertexShader);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWood;\n' + NOISE + FOAM)
+      .replace(
+        '#include <map_fragment>',
+        `float fRough, fH;
+        vec3 ffw = fwidth(vWood);
+        diffuseColor.rgb = foamAt(vWood, ffw, fRough, fH);`,
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = fRough;')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = foamBump(-vViewPosition, normal, fH, faceDirection);')
+      .replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\n#ifdef USE_CLEARCOAT\nclearcoatNormal = foamBump(-vViewPosition, clearcoatNormal, fH * 0.8, faceDirection);\n#endif')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + SPEC_AA)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + RIM);
+  };
+  m.customProgramCacheKey = () => 'mm-foam-1';
+  return m;
 }

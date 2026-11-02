@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Kin, Mat, World, RADIUS, type Shape } from './physics.ts';
-import { paintMaterial, Pattern, SPECIES, woodAttr, woodMaterial, type PaintSpec, type WoodSpecies } from './shaders.ts';
+import { foamMaterial, foamTheme, paintMaterial, Pattern, woodAttr, type PaintSpec, type WoodSpecies } from './shaders.ts';
 
 /**
  * Builds a course: a path laid down like a turtle (straights and arcs, each with its slope, width,
@@ -247,6 +247,41 @@ export interface Obstacle {
   vis: THREE.Object3D;
 }
 
+/** a tube through rings of [centre, right, up, (s, -, -)] */
+function tubeGeo(rings: THREE.Vector3[][], r: number, seg: number) {
+  const pos: number[] = [], nor: number[] = [], wd: number[] = [], idx: number[] = [];
+  rings.forEach(([c, R, U, S], i) => {
+    for (let k = 0; k <= seg; k++) {
+      const a = (k / seg) * Math.PI * 2;
+      const nx = Math.cos(a), ny = Math.sin(a);
+      const n = R.clone().multiplyScalar(nx).addScaledVector(U, ny);
+      pos.push(c.x + n.x * r, c.y + n.y * r, c.z + n.z * r);
+      nor.push(n.x, n.y, n.z);
+      wd.push(S.x, (k / seg) * Math.PI * 2 * r, r);
+      if (i > 0 && k < seg) {
+        const a0 = (i - 1) * (seg + 1) + k, b0 = i * (seg + 1) + k;
+        idx.push(a0, b0, a0 + 1, a0 + 1, b0, b0 + 1);
+      }
+    }
+  });
+  // round caps at both ends
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('aWood', new THREE.Float32BufferAttribute(wd, 3));
+  g.setIndex(idx);
+  const parts = [g.toNonIndexed()];
+  for (const end of [rings[0], rings[rings.length - 1]]) {
+    const sp = new THREE.SphereGeometry(r, seg, 8);
+    sp.translate(end[0].x, end[0].y, end[0].z);
+    const n = sp.getAttribute('position').count;
+    sp.setAttribute('aWood', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(end[3].x), 3));
+    sp.deleteAttribute('uv');
+    parts.push(sp.toNonIndexed());
+  }
+  return mergeGeometries(parts, false)!;
+}
+
 export class CourseBuilder {
   readonly group = new THREE.Group();
   readonly world = new World();
@@ -256,10 +291,11 @@ export class CourseBuilder {
   /** the forks (path s range, and the laterals of the shortcut and the safe way) for the AI */
   readonly splits: { s0: number; s1: number; fast: number; safe: number }[] = [];
   readonly batch = new Batch();
-  readonly floorWood = woodMaterial(SPECIES.maple, 0.75);
-  readonly railWood = woodMaterial(SPECIES.walnut, 0.8);
-  readonly postWood = woodMaterial(SPECIES.pine, 0.2);
-  readonly darkWood = woodMaterial(SPECIES.cherry, 0.8);
+  // (the names are from when it was wood: now it's padded play foam in the round's colours)
+  readonly floorWood = foamMaterial('floor');
+  readonly railWood = foamMaterial('rail');
+  readonly postWood = foamMaterial('post');
+  readonly darkWood = foamMaterial('base');
   /** the hardware: brass bolts and caps, blued steel axles and chains */
   readonly brass = new THREE.MeshPhysicalMaterial({ color: 0xd9a441, metalness: 1, roughness: 0.3, clearcoat: 0.4, clearcoatRoughness: 0.2 });
   readonly steel = new THREE.MeshPhysicalMaterial({ color: 0x9aa3ad, metalness: 1, roughness: 0.38 });
@@ -342,7 +378,8 @@ export class CourseBuilder {
           for (const q of profs[i][k]) {
             pos.push(P.x + R.x * q[0] + U.x * q[1], P.y + R.y * q[0] + U.y * q[1], P.z + R.z * q[0] + U.z * q[1]);
             nor.push(R.x * q[2] + U.x * q[3], R.y * q[2] + U.y * q[3], R.z * q[2] + U.z * q[3]);
-            wood.push(s, q[4], k === 0 ? 0 : q[0] * 0.3);
+            // (the floor strip's third coordinate: 1 up the walls, 0 on the floor)
+            wood.push(s, q[4], k === 0 ? (q[3] < 0.5 ? 1 : 0) : q[0] * 0.3);
           }
         }
         // quads between rings a and b (b > a: the collision skips every other ring)
@@ -420,8 +457,40 @@ export class CourseBuilder {
       this.world.statics.addGeometry(g, Mat.Wood);
     }
     if (opts.trestles !== false) this.trestlePaths.push(path);
+    this.tubes(path, RAIL);
   }
   private trestlePaths: Path[] = [];
+
+  /** fat inflated tubes along the tops of the walls, candy-striped (for show: the wall is the collider) */
+  private tubes(path: Path, RAIL: number) {
+    const th = foamTheme();
+    const m = this.paint({ a: th.rail, b: th.railB, pattern: Pattern.Stripes, scale: 1.5 });
+    const R = 0.27, SEG = 14, STEP = 2;
+    for (const side of [-1, 1]) {
+      let ring: THREE.Vector3[][] = [];
+      const flush = () => {
+        if (ring.length >= 2) this.batch.add(m, tubeGeo(ring, R, SEG));
+        ring = [];
+      };
+      for (let i = 0; i < path.count; i += STEP) {
+        const sec = path.sec[i];
+        const wall = side < 0 ? sec.wallL : sec.wallR;
+        if (!sec.floor || wall < 0.35) {
+          flush();
+          continue;
+        }
+        const c = path.P[i].clone().addScaledVector(path.Rt[i], side * (sec.w / 2 + RAIL / 2)).addScaledVector(path.U[i], wall + 0.1);
+        ring.push([c, path.Rt[i].clone(), path.U[i].clone(), new THREE.Vector3(i * DS, 0, 0)]);
+        // (a long run is cut into lots so it culls)
+        if (ring.length > 120) {
+          const last = ring[ring.length - 1];
+          flush();
+          ring.push(last);
+        }
+      }
+      flush();
+    }
+  }
 
   /** the posts under the chute, down to the lake (none where another part of the course is below) */
   private trestles(path: Path) {
