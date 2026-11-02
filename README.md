@@ -746,17 +746,26 @@ on wooden obstacle courses, solo against bots or online with friends. Everything
 code (`src/marbles/`; no image, model or sound files). It took over Marble Mania's page, courses
 and bots; the contestants are original bean characters, not marbles.
 
-- **The show**: six rounds dealt fresh every show from 13 (`POOL` / `dealShow` in `courses.ts`):
+- **The show**: six rounds dealt fresh every show from 15 (`POOL` / `dealShow` in `courses.ts`):
   race, survival, race, team, race, the final. A wheel of round names spins and lands on each one
   while it builds.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
     paint, open edges (fall off and you're back at the last checkpoint), flat or climbing, joined
-    by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 20 (pins,
+    by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 23 (pins,
     sweeping bars, hammers, door walls, rolling logs, seesaws, sliding bridges, spinning floors, an
     uphill belt, wrecking balls, axes, a kicker jump, a bounce pit, rocking planks, windmills,
-    sliders, turnstiles, a bumper field with flippers, island hops, climbs). Hop Scotch, Bonk Bay,
-    Knock Knock, Whirligig, Bonk Alley, Wobble Walk, Sky Stairs, Jelly Junction; each has its own
-    palette. A new course is one line in `GEN`.
+    sliders, turnstiles, a bumper field with flippers, island hops, climbs, and in `obs-new.ts`
+    fists punching out across an open deck, balls dropped from hoppers rolling down a hill at you,
+    and padded gates swinging shut). Hop Scotch, Bonk Bay, Knock Knock, Whirligig, Bonk Alley,
+    Wobble Walk, Sky Stairs, Jelly Junction, Punch Line, Rumble Hill; each has its own palette, and
+    every zone its own floor (`zonedFloor` in `shaders.ts`: tile colours and a pattern — tiles,
+    stripes, spots or chevrons — looked up along the path, a striped band where it starts). A new
+    course is one line in `GEN`.
+  - **The dressing** (`course-dress.ts`, scenery only): an inflatable arch in each zone's colour
+    where it starts, big arrows on the outside of every turn, floating islands beside the course
+    with giant inflatable toys (gumdrops, lollipops, donuts, beach balls, cupcakes, dice, presents,
+    ice creams, stars; some turn and bob), and grandstands of instanced beans bouncing and waving.
+    The survival and team arenas are ringed with grandstands and toy islands too (`dressArena`).
   - **Survival**: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse,
     and the plate's rings crumble) and Tilt-a-Dish (a dish that tips further and further).
   - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams paint tiles
@@ -766,11 +775,15 @@ and bots; the contestants are original bean characters, not marbles.
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
-    order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring).
+    order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
+    18 Rumble Hill).
   - Out of the show, you can watch it to the end (←/→ switches bean).
 - **The beans** (`bean.ts`): tall soft jelly beans on short legs, big googly eyes on springs,
-  eyebrows (up in a fright, down and in on a dive or a grab), 24 named outfits (a colour, one of
-  12 patterns painted on a canvas, one of 12 hats) and random ones for the bots. The body wobbles
+  eyebrows (up in a fright, down and in on a dive or a grab), 44 named outfits (a colour, one of
+  20 patterns painted on a canvas — rainbow, camo, scales, a tuxedo front, overalls, gingham,
+  leopard and pinstripes among them — and one of 23 hats and costume pieces: bunny or cat ears,
+  dino spikes down the back, a shark fin, a chef's hat, a viking helmet, a halo, a unicorn horn,
+  a bandana, a mohawk, flying goggles…) and random ones for the bots. The body wobbles
   like jelly: a spring-driven shear in the vertex shader lags every change of speed and swings
   back, with the face and hat riding it; squash on landing, stretch on take-off, a waddling run
   timed to the speed over the ground. The arms and legs are simulated: each limb is three Verlet

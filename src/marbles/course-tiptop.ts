@@ -5,6 +5,7 @@ import { Kin, Mat } from './physics.ts';
 import { paintMaterial, Pattern, woodAttr } from './shaders.ts';
 import { Parts, band, bolt, boltRing, dome, mat, plank, post, rod } from './obs-kit.ts';
 import type { Course } from './courses.ts';
+import { dressArena } from './course-dress.ts';
 
 /**
  * Round 5, Tip Top: a great painted dish balanced on a brass ball joint. It tips — a little at
@@ -165,6 +166,7 @@ export function tiptop(info: { name: string; blurb: string }): Course {
     sign.position.set(center.x, center.y + 8.5, center.z - R - 5);
     b.group.add(sign);
   }
+  dressArena(b, center, R, 5);
   b.finish();
   return {
     id: 'tiptop',

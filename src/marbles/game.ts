@@ -1680,7 +1680,7 @@ function writePref(id: string) {
 }
 
 function hatName(o: Outfit) {
-  const hats: Record<string, string> = { none: 'No hat', beanie: 'Bobble hat', party: 'Party hat', propeller: 'Propeller cap', bow: 'Big bow', horns: 'Little horns', antenna: 'Antennae', flower: 'Flower', tophat: 'Top hat', headphones: 'Headphones', sprout: 'Sprout', cap: 'Baseball cap' };
+  const hats: Record<string, string> = { none: 'No hat', beanie: 'Bobble hat', party: 'Party hat', propeller: 'Propeller cap', bow: 'Big bow', horns: 'Little horns', antenna: 'Antennae', flower: 'Flower', tophat: 'Top hat', headphones: 'Headphones', sprout: 'Sprout', cap: 'Baseball cap', bunny: 'Bunny ears', cat: 'Cat ears', dino: 'Dino spikes', shark: 'Shark fin', chef: 'Chef hat', viking: 'Viking helmet', halo: 'Halo', unicorn: 'Unicorn horn', pirate: 'Bandana', mohawk: 'Mohawk', goggles: 'Flying goggles' };
   return `${o.pat === 'solid' ? 'Plain' : o.pat[0].toUpperCase() + o.pat.slice(1)} · ${hats[o.hat]}`;
 }
 

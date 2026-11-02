@@ -6,6 +6,7 @@ import { foamTheme, woodAttr } from './shaders.ts';
 import { roundBox } from './builder.ts';
 import { Parts, mat, plank, post } from './obs-kit.ts';
 import type { Course } from './courses.ts';
+import { dressArena } from './course-dress.ts';
 
 /**
  * The team round, Paint Party: a walled padded square split into tiles. The field is cut into
@@ -187,6 +188,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     sign.position.set(center.x, center.y + 7.5, center.z - HALF - 4);
     b.group.add(sign);
   }
+  dressArena(b, center, HALF + 2, 7);
   b.finish();
 
   const of = new Map<number, number>();

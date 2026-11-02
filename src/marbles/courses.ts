@@ -51,7 +51,7 @@ export interface Course {
   intro: THREE.Vector3[];
 }
 
-export type GenId = 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak';
+export type GenId = 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
 export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | GenId;
 export interface RoundInfo {
   id: RoundId;
@@ -81,6 +81,8 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   wobblewalk: { id: 'wobblewalk', name: 'Wobble Walk', kind: 'race', blurb: 'Seesaws, sliding bridges, rocking planks: nothing under you holds still', keep: 0.75 },
   skystairs: { id: 'skystairs', name: 'Sky Stairs', kind: 'race', blurb: 'Up, up and up: climbs, a belt running back at you, a big jump', keep: 0.75 },
   jellyjunction: { id: 'jellyjunction', name: 'Jelly Junction', kind: 'race', blurb: 'A bit of everything: logs, bars, doors, a spinner, seesaws', keep: 0.75 },
+  punchline: { id: 'punchline', name: 'Punch Line', kind: 'race', blurb: 'Fists punch out across open decks, gates swing shut, balls come rolling down at you', keep: 0.75 },
+  rumblehill: { id: 'rumblehill', name: 'Rumble Hill', kind: 'race', blurb: 'Two hills of balls rolling down, gates, a wrecking ball and the fists', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
 };
 /**
@@ -88,11 +90,11 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** a new show: a race, a survival, a race, the team round, a race, the final (which races and which survival is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
-export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction'];
+export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill'];
 export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'paintparty', 'splatring', 'crownpeak'];
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);

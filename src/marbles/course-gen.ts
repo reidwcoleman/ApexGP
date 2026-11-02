@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { CourseBuilder, Path, PAINT, cylAttr, type Cmd } from './builder.ts';
 import { arch, bumper, bunting, doorWall, frameQuat, hammer, kicker, peg, slider, startGate, sweeper } from './obstacles.ts';
-import { foamTheme, Pattern } from './shaders.ts';
+import { foamTheme, Pattern, zonedFloor } from './shaders.ts';
 import { flippers, rollers, turnstile, windmill } from './obs-spin.ts';
 import { logRoll, seesaw, slideBridge, trampoline, wobblePlank } from './obs-move.ts';
 import { axe, wreckingBall } from './obs-swing.ts';
 import { floorBand } from './obs-kit.ts';
+import { gates, puncher, rollDown } from './obs-new.ts';
+import { dressCourse, type DressTurn } from './course-dress.ts';
 import { checkpoints, endWall, finishDressing, lakeBelow, makeCrown, raceRecord, tag, turntableGap } from './course-kit.ts';
 import type { Course } from './courses.ts';
 
@@ -37,6 +39,20 @@ interface Zone {
 }
 
 const W = 14;
+/** each zone's arch (the deep shade of its tiles) */
+const ZONE_ARCH = [0xff4f8f, 0x22c08a, 0xffb81f, 0x2f8cff, 0x9a5bff, 0xff8a1f, 0xff5a4a, 0x7cc81f, 0x16c0c0];
+/** the zones' floor tiles: a colour and a lighter partner */
+const ZONE_TILES: [number, number][] = [
+  [0xff9cc8, 0xffc8e0],
+  [0x86e3bd, 0xb4f2d6],
+  [0xffe27a, 0xfff1b8],
+  [0x8ec8ff, 0xbfe0ff],
+  [0xc9a2ff, 0xe0caff],
+  [0xffbf7a, 0xffdcb2],
+  [0xff9e8e, 0xffc6bb],
+  [0xc6ef7e, 0xe0f8b4],
+  [0x7fe6e6, 0xb6f3f1],
+];
 /** every zone's floor is flat-banked; an open edge unless it says otherwise */
 const flat = (c: Cmd): Cmd => ({ bank: 0, slope: 0, wall: 0, ...c });
 
@@ -278,6 +294,38 @@ export const ZONES: Record<string, (k: string) => Zone> = {
     cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 4],
     gaps: ({ t }) => [t(k + 'g0'), t(k + 'g1'), t(k + 'g2')],
   }),
+  /** fists punching out across an open deck from boxes on both sides, in a wave down the line */
+  punch: (k) => ({
+    cmds: [flat({ len: 8, w: 13, tag: k + 'pre' }), flat({ len: 42, w: 13, tag: k + 'z' }), flat({ len: 6, w: 13, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      [5, 11, 17, 23, 29, 35].forEach((ds, q) => {
+        const side = q % 2 ? 1 : -1;
+        puncher(b, path, z0 + ds, side, { period: 2.6 + (q % 3) * 0.2, phase: q * 0.55 + n * 0.3, color: col(n + q) });
+        // (every third, one from the other side too, a beat later)
+        if (q % 3 === 2) puncher(b, path, z0 + ds + 0.01, -side, { period: 2.6, phase: q * 0.55 + n * 0.3 + 1.3, color: col(n + q + 1) });
+      });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** an uphill run with balls dropping out of hoppers at the top and rolling down at you */
+  rolldown: (k) => ({
+    cmds: [flat({ len: 8, w: 14, tag: k + 'pre' }), flat({ len: 40, slope: -7, w: 14, easeS: 3, tag: k + 'z' }), flat({ len: 8, w: 14, easeS: 2, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0, z1] = t(k + 'z');
+      rollDown(b, path, z0, z1, { lanes: [-4.2, 0, 4.2], period: 3.6 + (n % 3) * 0.3, phase: n, colors: [col(n), col(n + 2), col(n + 5)] });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 3],
+  }),
+  /** padded gates hinged on the walls, swinging shut across the way */
+  gates: (k) => ({
+    cmds: [flat({ len: 8, w: 14, wall: 1.0, tag: k + 'pre' }), flat({ len: 44, w: 14, wall: 1.0, tag: k + 'z' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      [8, 20, 32].forEach((ds, q) => gates(b, path, z0 + ds, { period: 3.2 + q * 0.3, phase: q * 1.4 + n, color: col(n + q * 2) }));
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1],
+  }),
   /** an uphill climb, pins to weave through */
   climb: (k) => ({
     cmds: [flat({ len: 6, w: 13, tag: k + 'pre' }), flat({ len: 30, slope: -8, w: 13, easeS: 3, tag: k + 'z' }), flat({ len: 8, w: W, easeS: 2, tag: k + 'post' })],
@@ -313,18 +361,23 @@ export interface GenSpec {
 export function genCourse(spec: GenSpec, info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
   const cmds: Cmd[] = [flat({ len: 26, w: 17, wall: 1.2, tag: 'start' }), flat({ len: 8, w: W, easeW: 5 })];
-  const zones: { z: Zone; k: string; n: number }[] = [];
+  const zones: { z: Zone; k: string; n: number; s0: number; s1: number; kind: string }[] = [];
   const linkGaps: string[] = [];
+  const turns: DressTurn[] = [];
+  const sum = () => cmds.reduce((a, c) => a + c.len, 0);
   spec.steps.forEach((st, i) => {
     const k = `${i}:`;
     const make = ZONES[st];
     if (make) {
       const z = make(k);
+      const s0 = sum();
       cmds.push(...z.cmds);
-      zones.push({ z, k, n: i * 3 + spec.id.length });
+      zones.push({ z, k, n: i * 3 + spec.id.length, s0, s1: sum(), kind: st });
     } else {
       const l = link(st, k);
+      const s0 = sum();
       cmds.push(...l.cmds);
+      if (st[0] === 'L' || st[0] === 'R') turns.push({ s0, s1: sum(), dir: st[0] === 'R' ? 1 : -1 });
       if (l.gaps) linkGaps.push(...l.gaps);
     }
   });
@@ -332,7 +385,20 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
   const path = new Path(new THREE.Vector3(0, 160, 0), spec.heading, cmds);
   // (high in the sky over the paint)
   b.lakeY = lakeBelow(path) - 25;
-  b.chute(path, { depth: 1.8, trestles: false });
+  // every zone its own floor: tile colours and a pattern of its own, a striped band where it starts
+  const floorMat = zonedFloor(
+    path.length,
+    zones.flatMap(({ s0, s1 }, q) => {
+      const [a, bb] = ZONE_TILES[(q * 3 + spec.id.length) % ZONE_TILES.length];
+      const pat = (q + spec.id.length) % 4;
+      const th = foamTheme();
+      return [
+        { s0, s1, a, b: bb, pat },
+        { s0, s1: s0 + 1.5, a: th.rail, b: 0xffffff, pat: 0, band: true },
+      ];
+    }),
+  );
+  b.chute(path, { depth: 1.8, trestles: false, floorMat });
   const state = { go: 1e9 };
   const [st0] = tag(path, 'start');
   const gateS = st0 + 18;
@@ -384,6 +450,13 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
     crown.position.copy(path.at(fs + 6, 0, 3.1));
     b.group.add(crown);
   }
+  dressCourse(b, path, {
+    zones: zones.map(({ s0, s1 }, q) => ({ s0, s1, color: ZONE_ARCH[(q * 3 + spec.id.length) % ZONE_ARCH.length] })),
+    turns,
+    gateS,
+    finishS: fs,
+    seed: spec.id.length * 7 + spec.steps.length,
+  });
   const [, c1] = t('catch');
   bunting(b, path, 0, 60);
   bunting(b, path, f0 - 10, c1);
@@ -409,9 +482,11 @@ export const GEN: Record<string, GenSpec> = {
   bonkbay: { id: 'bonkbay', heading: 0.6, arch: PAINT.teal, steps: ['bumpers', 'L60', 'wreck', 'S6', 'spinner', 'R80', 'hammers', 'gap', 'pins', 'L45', 'bounce', 'mills', 'R50', 'logs', 'sweep'] },
   knockknock: { id: 'knockknock', heading: -0.4, arch: PAINT.orange, steps: ['doors', 'R60', 'sliders', 'up', 'conveyor', 'L70', 'sweep', 'gap', 'doors', 'R45', 'logs', 'pins', 'L50', 'turnstiles'] },
   whirligig: { id: 'whirligig', heading: 1.2, arch: PAINT.purple, steps: ['turnstiles', 'L50', 'spinner', 'S8', 'mills', 'R70', 'sweep', 'hop', 'spinner', 'L60', 'bumpers', 'up', 'turnstiles'] },
-  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'logs', 'down', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'pins', 'jump', 'sliders', 'L45', 'mills'] },
+  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'logs', 'down', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'punch', 'jump', 'sliders', 'L45', 'mills'] },
   wobblewalk: { id: 'wobblewalk', heading: -1, arch: PAINT.green, steps: ['saws', 'L45', 'slides', 'R60', 'planks', 'hop', 'pins', 'L70', 'saws', 'gap', 'logs', 'R40', 'bounce', 'up', 'sweep'] },
   skystairs: { id: 'skystairs', heading: 0.9, arch: PAINT.blue, steps: ['climb', 'R50', 'conveyor', 'up', 'pins', 'L60', 'jump', 'climb', 'R70', 'sweep', 'up', 'hop', 'mills'] },
-  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'wreck', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
-  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'conveyor', 'L50', 'wreck', 'climb', 'sweep'] },
+  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'gates', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
+  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'rolldown', 'L50', 'wreck', 'gates', 'sweep'] },
+  punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'pins', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
+  rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'pins', 'gates', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
 };

@@ -19,8 +19,10 @@ const TOP_Y = 1.62;
 const FACE_Y = 1.2;
 const SHOULDER_Y = 0.98;
 
-export type Pat = 'solid' | 'belly' | 'stripes' | 'dots' | 'split' | 'zigzag' | 'stars' | 'hearts' | 'checker' | 'spots' | 'swirl' | 'fade';
-export type Hat = 'none' | 'beanie' | 'party' | 'propeller' | 'bow' | 'horns' | 'antenna' | 'flower' | 'tophat' | 'headphones' | 'sprout' | 'cap';
+export type Pat = 'solid' | 'belly' | 'stripes' | 'dots' | 'split' | 'zigzag' | 'stars' | 'hearts' | 'checker' | 'spots' | 'swirl' | 'fade' | 'rainbow' | 'camo' | 'scales' | 'suit' | 'overalls' | 'gingham' | 'leopard' | 'pinstripe';
+export type Hat = 'none' | 'beanie' | 'party' | 'propeller' | 'bow' | 'horns' | 'antenna' | 'flower' | 'tophat' | 'headphones' | 'sprout' | 'cap' | 'bunny' | 'cat' | 'dino' | 'shark' | 'chef' | 'viking' | 'halo' | 'unicorn' | 'pirate' | 'mohawk' | 'goggles';
+export const PATS: Pat[] = ['solid', 'belly', 'stripes', 'dots', 'split', 'zigzag', 'stars', 'hearts', 'checker', 'spots', 'swirl', 'fade', 'rainbow', 'camo', 'scales', 'suit', 'overalls', 'gingham', 'leopard', 'pinstripe'];
+export const HATS: Hat[] = ['none', 'beanie', 'party', 'propeller', 'bow', 'horns', 'antenna', 'flower', 'tophat', 'headphones', 'sprout', 'cap', 'bunny', 'cat', 'dino', 'shark', 'chef', 'viking', 'halo', 'unicorn', 'pirate', 'mohawk', 'goggles'];
 
 export interface Outfit {
   name: string;
@@ -60,14 +62,34 @@ export const OUTFITS: Outfit[] = [
   { name: 'Cloud', a: 0xf4f8ff, b: 0x9fd0ff, pat: 'fade', hat: 'propeller', h1: 0x2f9bff, h2: 0xffe04a },
   { name: 'Cocoa', a: 0x8a5232, b: 0xf2d6b0, pat: 'belly', hat: 'beanie', h1: 0xffe0f0, h2: 0xff6fa8 },
   { name: 'Hot Sauce', a: 0xff5a1f, b: 0xffd21f, pat: 'zigzag', hat: 'horns', h1: 0x2a2320 },
+  { name: 'Bunny Hop', a: 0xfff4f8, b: 0xffb8d4, pat: 'belly', hat: 'bunny', h1: 0xfff4f8, h2: 0xff9cc4 },
+  { name: 'Kitty', a: 0xffa64a, b: 0xfff0dc, pat: 'belly', hat: 'cat', h1: 0xffa64a, h2: 0xffc8d8 },
+  { name: 'Dino', a: 0x4cc860, b: 0x2f8a46, pat: 'scales', hat: 'dino', h1: 0xffd23a },
+  { name: 'Sharky', a: 0x6f8fb8, b: 0xf4f8ff, pat: 'belly', hat: 'shark', h1: 0x6f8fb8 },
+  { name: 'Head Chef', a: 0xffffff, b: 0xff3a4a, pat: 'gingham', hat: 'chef', h1: 0xffffff },
+  { name: 'Viking', a: 0xd9773a, b: 0x8a4a22, pat: 'overalls', hat: 'viking', h1: 0xb8c0cc, h2: 0xfff0d8 },
+  { name: 'Angel', a: 0xfffaf0, b: 0xffe7a0, pat: 'fade', hat: 'halo', h1: 0xffd23a },
+  { name: 'Unicorn', a: 0xf2e6ff, b: 0xffffff, pat: 'rainbow', hat: 'unicorn', h1: 0xffd23a, h2: 0xff7ac8 },
+  { name: 'Pirate', a: 0xfff4e4, b: 0x2a2a3a, pat: 'stripes', hat: 'pirate', h1: 0xe8202f, h2: 0xffffff },
+  { name: 'Punk Rock', a: 0x9a5bff, b: 0x1d1b22, pat: 'leopard', hat: 'mohawk', h1: 0xff3d8a, h2: 0x3dffd0 },
+  { name: 'Ace Pilot', a: 0xb07a4a, b: 0xf2dcc0, pat: 'belly', hat: 'goggles', h1: 0x5a3a24, h2: 0x9fe4ff },
+  { name: 'Commando', a: 0x7a9a4a, b: 0x3f5a2a, pat: 'camo', hat: 'cap', h1: 0x3f5a2a, h2: 0x7a9a4a },
+  { name: 'Black Tie', a: 0x24242e, b: 0xffffff, limb: 0x24242e, pat: 'suit', hat: 'tophat', h1: 0x18181e, h2: 0xe8202f },
+  { name: 'Farmhand', a: 0xffd8a8, b: 0x3a6fd8, pat: 'overalls', hat: 'sprout', h1: 0x38c24a },
+  { name: 'Leopard', a: 0xffc65a, b: 0x5a3414, pat: 'leopard', hat: 'bow', h1: 0x1d1b22 },
+  { name: 'Big Shot', a: 0x2a3a6a, b: 0xdfe6ff, pat: 'pinstripe', hat: 'cap', h1: 0xe8202f, h2: 0xffffff },
+  { name: 'Rainbow', a: 0xffffff, b: 0xffffff, pat: 'rainbow', hat: 'propeller', h1: 0xff3a4a, h2: 0x2f9bff },
+  { name: 'Chomper', a: 0x3fb8a8, b: 0xd8fff4, pat: 'scales', hat: 'shark', h1: 0x2f8a80 },
+  { name: 'Holy Toast', a: 0xe8b070, b: 0xb87a3a, pat: 'fade', hat: 'halo', h1: 0xffd23a },
+  { name: 'Snow Cat', a: 0xf4f8ff, b: 0xb8c8e0, pat: 'leopard', hat: 'cat', h1: 0xf4f8ff, h2: 0xffc8d8 },
 ];
 
 /** a random outfit for a bot: any colour, any pattern, any hat */
 export function randomOutfit(rnd: () => number): Outfit {
   const base = OUTFITS[Math.floor(rnd() * OUTFITS.length)];
   const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
-  const pats: Pat[] = ['solid', 'belly', 'stripes', 'dots', 'split', 'zigzag', 'stars', 'hearts', 'checker', 'spots', 'swirl', 'fade'];
-  const hats: Hat[] = ['none', 'none', 'beanie', 'party', 'propeller', 'bow', 'horns', 'antenna', 'flower', 'tophat', 'headphones', 'sprout', 'cap'];
+  const pats: Pat[] = PATS;
+  const hats: Hat[] = ['none', ...HATS];
   const other = OUTFITS[Math.floor(rnd() * OUTFITS.length)];
   return { name: base.name, a: base.a, b: rnd() < 0.5 ? base.b : other.a, pat: rnd() < 0.6 ? pick(pats) : base.pat, hat: rnd() < 0.5 ? pick(hats) : base.hat, h1: other.b, h2: base.b };
 }
@@ -162,9 +184,122 @@ function skin(o: Outfit): THREE.CanvasTexture {
       g.fillRect(0, 0, W, H);
       break;
     }
+    case 'rainbow': {
+      const bands = ['#ff4a5a', '#ff9a2a', '#ffd83a', '#4ad06a', '#3aa8ff', '#9a6aff'];
+      bands.forEach((c, k) => {
+        g.fillStyle = c;
+        g.fillRect(0, yOf(0.08 + (k + 1) * 0.085), W, H * 0.085 + 1);
+      });
+      break;
+    }
+    case 'camo': {
+      const dark = css(new THREE.Color(o.b).multiplyScalar(0.62).getHex());
+      for (const [cc, n, r] of [[B, 26, 26], [dark, 20, 18], [A, 10, 12]] as const) {
+        g.fillStyle = cc;
+        for (let k = 0; k < n; k++) {
+          const x = ((k * 0.618 + (r % 7) * 0.13) % 1) * W, y = ((k * 0.381 + (r % 5) * 0.21) % 1) * H;
+          g.beginPath();
+          for (let q = 0; q < 9; q++) {
+            const a = (q / 9) * Math.PI * 2, rr = r * (0.7 + 0.5 * Math.abs(Math.sin(q * 2.3 + k)));
+            g.lineTo(x + Math.cos(a) * rr * 1.5, y + Math.sin(a) * rr);
+          }
+          g.fill();
+        }
+      }
+      break;
+    }
+    case 'scales': {
+      g.lineWidth = 3.5;
+      for (let y = 0; y < 11; y++)
+        for (let x = 0; x < 21; x++) {
+          g.beginPath();
+          g.arc((x + (y % 2) * 0.5) * (W / 20), H - y * (H / 10) - 4, W / 40, Math.PI * 0.05, Math.PI * 0.95);
+          g.stroke();
+        }
+      // a pale belly under the scales
+      g.fillStyle = css(new THREE.Color(o.a).lerp(new THREE.Color(0xffffff), 0.55).getHex());
+      g.beginPath();
+      g.ellipse(W * 0.5, yOf(0.36), W * 0.12, H * 0.27, 0, 0, Math.PI * 2);
+      g.fill();
+      break;
+    }
+    case 'suit': {
+      // a white shirt front in a V, a bow tie, buttons
+      g.fillStyle = B;
+      g.beginPath();
+      g.moveTo(W * 0.5 - W * 0.07, yOf(0.62));
+      g.lineTo(W * 0.5 + W * 0.07, yOf(0.62));
+      g.lineTo(W * 0.5 + W * 0.035, yOf(0.12));
+      g.lineTo(W * 0.5 - W * 0.035, yOf(0.12));
+      g.fill();
+      g.fillStyle = '#e8202f';
+      g.beginPath();
+      g.moveTo(W * 0.5, yOf(0.585));
+      g.lineTo(W * 0.5 - 20, yOf(0.62));
+      g.lineTo(W * 0.5 - 20, yOf(0.55));
+      g.closePath();
+      g.moveTo(W * 0.5, yOf(0.585));
+      g.lineTo(W * 0.5 + 20, yOf(0.62));
+      g.lineTo(W * 0.5 + 20, yOf(0.55));
+      g.closePath();
+      g.fill();
+      g.fillStyle = '#26262e';
+      for (const v of [0.46, 0.36, 0.26]) {
+        g.beginPath();
+        g.arc(W * 0.5, yOf(v), 4, 0, Math.PI * 2);
+        g.fill();
+      }
+      break;
+    }
+    case 'overalls': {
+      g.fillStyle = B;
+      g.fillRect(0, yOf(0.4), W, H * 0.4);
+      // the bib and the straps over the shoulders, brass buttons
+      g.fillRect(W * 0.5 - W * 0.08, yOf(0.56), W * 0.16, H * 0.17);
+      g.fillRect(W * 0.5 - W * 0.075, yOf(0.8), W * 0.025, H * 0.26);
+      g.fillRect(W * 0.5 + W * 0.05, yOf(0.8), W * 0.025, H * 0.26);
+      g.fillRect(0, yOf(0.8), W * 0.03, H * 0.42);
+      g.fillRect(W * 0.97, yOf(0.8), W * 0.03, H * 0.42);
+      g.fillStyle = '#ffd23a';
+      for (const x of [-0.06, 0.06]) {
+        g.beginPath();
+        g.arc(W * (0.5 + x), yOf(0.54), 5, 0, Math.PI * 2);
+        g.fill();
+      }
+      break;
+    }
+    case 'gingham': {
+      g.globalAlpha = 0.55;
+      for (let x = 0; x < 24; x += 2) g.fillRect((x / 24) * W, 0, W / 24, H);
+      for (let y = 0; y < 12; y += 2) g.fillRect(0, (y / 12) * H, W, H / 12);
+      g.globalAlpha = 1;
+      break;
+    }
+    case 'leopard': {
+      g.lineWidth = 3.2;
+      g.lineCap = 'round';
+      for (let k = 0; k < 90; k++) {
+        const x = ((k * 0.618 + 0.11) % 1) * W, y = ((k * 0.437 + 0.07) % 1) * H;
+        g.fillStyle = css(new THREE.Color(o.a).multiplyScalar(0.8).getHex());
+        g.beginPath();
+        g.ellipse(x, y, 6, 4.5, k, 0, Math.PI * 2);
+        g.fill();
+        // (broken rosette rings in two or three bits)
+        for (let q = 0; q < 3; q++) {
+          const a0 = k + q * 2.1;
+          g.beginPath();
+          g.ellipse(x, y, 7.5, 6, k, a0, a0 + 1.3);
+          g.stroke();
+        }
+      }
+      break;
+    }
+    case 'pinstripe':
+      for (let x = 0; x < 40; x++) g.fillRect((x / 40) * W, 0, 2.5, H);
+      break;
   }
   // a clear patch for the face on the busy ones
-  if (['dots', 'stars', 'hearts', 'checker', 'spots', 'zigzag', 'swirl', 'stripes'].includes(o.pat)) {
+  if (['dots', 'stars', 'hearts', 'checker', 'spots', 'zigzag', 'swirl', 'stripes', 'camo', 'scales', 'gingham', 'leopard', 'pinstripe', 'rainbow'].includes(o.pat)) {
     g.fillStyle = A;
     g.beginPath();
     g.ellipse(W * 0.5, yOf(0.74), W * 0.105, H * 0.16, 0, 0, Math.PI * 2);
@@ -316,6 +451,138 @@ function hat(o: Outfit): THREE.Object3D | null {
       add(new THREE.SphereGeometry(0.31, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.62, 1), M(h1, 0.7), 0, top - 0.17, 0);
       add(new THREE.CylinderGeometry(0.22, 0.22, 0.02, 20, 1, false, -Math.PI / 2, Math.PI).scale(1, 1, 1.3), M(h2, 0.7), 0, top - 0.17, 0.2);
       add(new THREE.SphereGeometry(0.035, 8, 6), M(h2, 0.7), 0, top + 0.02, 0);
+      break;
+    }
+    case 'bunny': {
+      for (const s of [-1, 1]) {
+        const ear = new THREE.Group();
+        const outer = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.36, 6, 14).scale(1, 1, 0.5), M(h1, 0.6));
+        const inner = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.3, 6, 12).scale(1, 1, 0.4), M(h2, 0.7));
+        inner.position.z = 0.025;
+        outer.castShadow = true;
+        ear.add(outer, inner);
+        ear.position.set(s * 0.12, top + 0.18, 0);
+        // (one ear stands, the other flops over)
+        ear.rotation.set(s > 0 ? -0.5 : 0.05, 0, -s * 0.22);
+        if (s > 0) ear.position.y -= 0.04;
+        g.add(ear);
+      }
+      break;
+    }
+    case 'cat': {
+      for (const s of [-1, 1]) {
+        const e = add(new THREE.ConeGeometry(0.17, 0.32, 14).scale(1, 1, 0.5), M(h1, 0.6), s * 0.2, top + 0.02, -0.02);
+        e.rotation.z = -s * 0.36;
+        const i = add(new THREE.ConeGeometry(0.1, 0.2, 12).scale(1, 1, 0.3), M(h2, 0.7), s * 0.195, top + 0.0, 0.045);
+        i.rotation.z = -s * 0.36;
+      }
+      break;
+    }
+    case 'dino': {
+      // spikes down the back, smaller toward the tail
+      const m = M(h1, 0.5);
+      const at = [[1.2, 0.13, 0.3, 0.11], [1.09, 0.3, 0.75, 0.12], [0.95, 0.39, 1.05, 0.11], [0.78, 0.43, 1.3, 0.1], [0.6, 0.445, 1.5, 0.085], [0.42, 0.445, 1.57, 0.07]];
+      for (const [y, z, a, r] of at) {
+        const sp = add(new THREE.ConeGeometry(r, r * 2.1, 12).scale(0.55, 1, 1), m, 0, y + Math.cos(a) * r * 0.6, -z - Math.sin(a) * r * 0.6);
+        sp.rotation.x = -a;
+      }
+      break;
+    }
+    case 'shark': {
+      const sh = new THREE.Shape();
+      sh.moveTo(0, 0);
+      sh.quadraticCurveTo(0.1, 0.24, -0.12, 0.42);
+      sh.quadraticCurveTo(-0.16, 0.2, -0.36, 0);
+      sh.closePath();
+      const fin = new THREE.ExtrudeGeometry(sh, { depth: 0.05, bevelEnabled: true, bevelThickness: 0.025, bevelSize: 0.025, bevelSegments: 3 }).translate(0, 0, -0.025).rotateY(Math.PI / 2);
+      add(fin, M(h1, 0.4), 0, top - 0.1, 0.05);
+      break;
+    }
+    case 'chef': {
+      const m = M(h1, 0.85);
+      add(new THREE.CylinderGeometry(0.25, 0.23, 0.3, 24), m, 0, top + 0.02, 0);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        add(new THREE.SphereGeometry(0.16, 14, 10), m, Math.cos(a) * 0.15, top + 0.25, Math.sin(a) * 0.15);
+      }
+      add(new THREE.SphereGeometry(0.2, 16, 12), m, 0, top + 0.33, 0);
+      break;
+    }
+    case 'viking': {
+      add(new THREE.SphereGeometry(0.33, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.7, 1), new THREE.MeshStandardMaterial({ color: h1, roughness: 0.3, metalness: 0.6 }), 0, top - 0.17, 0);
+      add(new THREE.TorusGeometry(0.325, 0.035, 8, 28).rotateX(Math.PI / 2), M(0xd9a441, 0.35), 0, top - 0.15, 0);
+      add(new THREE.CylinderGeometry(0.03, 0.03, 0.62, 8).rotateZ(Math.PI / 2).rotateY(Math.PI / 2), M(0xd9a441, 0.35), 0, top + 0.02, 0);
+      for (const s of [-1, 1]) {
+        const horn = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(s * 0.2, 0.02, 0), new THREE.Vector3(s * 0.24, 0.26, 0)), 12, 0.05, 10);
+        // (tapered: shrink the tube's rings toward its tip)
+        const hp = horn.getAttribute('position');
+        const c = new THREE.Vector3();
+        for (let i = 0; i < hp.count; i++) {
+          const u = Math.floor(i / 11) / 12;
+          const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(s * 0.2, 0.02, 0), new THREE.Vector3(s * 0.24, 0.26, 0));
+          curve.getPoint(u, c);
+          const k = 1 - u * 0.85;
+          hp.setXYZ(i, c.x + (hp.getX(i) - c.x) * k, c.y + (hp.getY(i) - c.y) * k, c.z + (hp.getZ(i) - c.z) * k);
+        }
+        horn.computeVertexNormals();
+        add(horn, M(h2, 0.45), s * 0.27, top - 0.12, 0);
+      }
+      break;
+    }
+    case 'halo': {
+      const ring = add(new THREE.TorusGeometry(0.22, 0.035, 10, 36).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: h1, emissive: h1, emissiveIntensity: 0.9, roughness: 0.3 }), 0, top + 0.2, 0);
+      ring.castShadow = false;
+      ring.userData.halo = 1;
+      break;
+    }
+    case 'unicorn': {
+      const horn = new THREE.Group();
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.46, 18), M(h1, 0.35));
+      cone.castShadow = true;
+      const pts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 40; k++) {
+        const u = k / 40, r = 0.085 * (1 - u) + 0.006;
+        pts.push(new THREE.Vector3(Math.cos(u * 18) * r, -0.23 + u * 0.45, Math.sin(u * 18) * r));
+      }
+      horn.add(cone, new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 80, 0.014, 6), M(h2, 0.4)));
+      horn.position.set(0, top + 0.06, 0.2);
+      horn.rotation.x = 0.45;
+      g.add(horn);
+      // a little mane down the back
+      for (let k = 0; k < 4; k++) add(new THREE.SphereGeometry(0.07 - k * 0.008, 12, 8), M([0xff7ac8, 0x9a6aff, 0x5fd0ff, 0xffd23a][k], 0.6), 0, top - 0.05 - k * 0.11, -0.16 - k * 0.07);
+      break;
+    }
+    case 'pirate': {
+      const cap = new THREE.SphereGeometry(0.33, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.62, 1);
+      add(cap, M(h1, 0.75), 0, top - 0.17, 0);
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2;
+        add(new THREE.SphereGeometry(0.03, 8, 6), M(h2, 0.8), Math.cos(a) * 0.21, top - 0.03, Math.sin(a) * 0.21);
+      }
+      add(new THREE.SphereGeometry(0.07, 12, 8), M(h1, 0.75), 0, top - 0.12, -0.33);
+      for (const s of [-1, 1]) {
+        const tail = add(new THREE.CapsuleGeometry(0.035, 0.16, 4, 8).scale(1.5, 1, 0.5), M(h1, 0.75), s * 0.07, top - 0.24, -0.36);
+        tail.rotation.z = s * 0.4;
+      }
+      break;
+    }
+    case 'mohawk': {
+      for (let k = 0; k < 7; k++) {
+        const a = -0.95 + (k / 6) * 1.9;
+        const sp = add(new THREE.ConeGeometry(0.085, 0.38 - Math.abs(a) * 0.08, 10).scale(0.5, 1, 1), M(k % 2 ? h2 : h1, 0.5), 0, top - 0.1 + Math.cos(a) * 0.16, Math.sin(a) * 0.32);
+        sp.rotation.x = a;
+      }
+      break;
+    }
+    case 'goggles': {
+      const y = top - 0.18;
+      add(new THREE.TorusGeometry(0.39, 0.03, 8, 40).rotateX(Math.PI / 2), M(h1, 0.6), 0, y - 0.02, 0);
+      for (const s of [-1, 1]) {
+        const rim = add(new THREE.TorusGeometry(0.095, 0.03, 10, 24), M(0xd9a441, 0.3), s * 0.12, y, 0.33);
+        rim.rotation.y = s * 0.3;
+        const lens = add(new THREE.SphereGeometry(0.095, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(Math.PI / 2).scale(1, 1, 0.5), new THREE.MeshPhysicalMaterial({ color: h2, roughness: 0.05, clearcoat: 1, metalness: 0.2 }), s * 0.12, y, 0.335);
+        lens.rotation.y = s * 0.3;
+      }
       break;
     }
   }

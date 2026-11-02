@@ -834,6 +834,8 @@ export const FOAM_THEMES: Record<string, FoamTheme> = {
   skystairs: { floorA: 0xa8c8ff, floorB: 0xc0d8ff, wall: 0xffcf2a, rail: 0xffcf2a, railB: 0xffffff, post: 0x2f74ff, base: 0x26307a },
   jellyjunction: { floorA: 0xfff0a0, floorB: 0xfff6c2, wall: 0xff5fa8, rail: 0xff5fa8, railB: 0xffffff, post: 0x1fc8c0, base: 0x5a2f7a },
   splatring: { floorA: 0xc8b0ff, floorB: 0xd8c6ff, wall: 0x1fc8c0, rail: 0x1fc8c0, railB: 0xffffff, post: 0xff5fa8, base: 0x2a2a70 },
+  punchline: { floorA: 0xffc0b0, floorB: 0xffd6cb, wall: 0x2f74ff, rail: 0x2f74ff, railB: 0xffffff, post: 0xffcf2a, base: 0x3a2a7a },
+  rumblehill: { floorA: 0xa8f0e0, floorB: 0xc2f6ea, wall: 0xff8a1f, rail: 0xff8a1f, railB: 0xffffff, post: 0x8a4bff, base: 0x2a3a7a },
   crownpeak: { floorA: 0xffe08a, floorB: 0xffeab0, wall: 0x8a4bff, rail: 0x8a4bff, railB: 0xffd23a, post: 0xff5fa8, base: 0x3a2070 },
 };
 let theme: FoamTheme = FOAM_THEMES.timber;
@@ -843,12 +845,57 @@ export function setFoamTheme(id: string) {
   theme = FOAM_THEMES[id] ?? FOAM_THEMES.timber;
 }
 
+let blank: THREE.DataTexture | null = null;
+function blankZone() {
+  if (!blank) {
+    blank = new THREE.DataTexture(new Float32Array(8), 1, 2, THREE.RGBAFormat, THREE.FloatType);
+    blank.needsUpdate = true;
+  }
+  return blank;
+}
+
+/**
+ * A floor whose tiles change colour and pattern zone by zone down a course: `zones` are [s0, s1,
+ * colour A, colour B, pattern (0 tiles, 1 stripes, 2 spots, 3 chevrons), band] in metres along the
+ * path; anywhere else takes the theme's own tiles.
+ */
+export function zonedFloor(length: number, zones: { s0: number; s1: number; a: number; b: number; pat: number; band?: boolean }[], th: FoamTheme = theme) {
+  const m = foamMaterial('floor', th);
+  const N = Math.max(2, Math.ceil(length / 0.5) + 1);
+  const d = new Float32Array(N * 2 * 4);
+  const ca = new THREE.Color(th.floorA), cb = new THREE.Color(th.floorB);
+  for (let i = 0; i < N; i++) {
+    d.set([ca.r, ca.g, ca.b, 0], i * 4);
+    d.set([cb.r, cb.g, cb.b, 0], (N + i) * 4);
+  }
+  const A = new THREE.Color(), B = new THREE.Color();
+  for (const z of zones) {
+    A.set(z.a);
+    B.set(z.b);
+    for (let i = Math.max(0, Math.floor(z.s0 / 0.5)); i < Math.min(N, Math.ceil(z.s1 / 0.5)); i++) {
+      d.set([A.r, A.g, A.b, z.pat], i * 4);
+      d.set([B.r, B.g, B.b, z.band ? 1 : 0], (N + i) * 4);
+    }
+  }
+  const tex = new THREE.DataTexture(d, N, 2, THREE.RGBAFormat, THREE.FloatType);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  const u = m.userData.u as Record<string, { value: unknown }>;
+  u.uZone.value = tex;
+  u.uZoneOn.value = 1;
+  u.uZoneLen.value = N * 0.5;
+  return m;
+}
+
 const FOAM = /* glsl */ `
 uniform vec3 uFA;
 uniform vec3 uFB;
 uniform vec3 uFW;
 uniform int uFK;
 uniform float uFT;
+uniform sampler2D uZone;
+uniform float uZoneOn;
+uniform float uZoneLen;
 float fSq(float v, float fw){
   float sd = 0.25 - abs(fract(v) - 0.5);
   return clamp(sd / max(fw, 1e-5) * 2.0, -1.0, 1.0) * (1.0 - smoothstep(0.3, 0.7, fw));
@@ -866,7 +913,34 @@ vec3 foamAt(vec3 w, vec3 fw, out float rough, out float h){
     vec2 f = fract(t) - 0.5;
     vec2 ft = fw.xy / uFT;
     float alt = 0.5 - 0.5 * fSq(t.x * 0.5, ft.x * 0.5) * fSq(t.y * 0.5, ft.y * 0.5);
-    c = mix(uFA, uFB, alt);
+    vec3 zA = uFA, zB = uFB;
+    if (uZoneOn > 0.5 && w.z < 0.5) {
+      // the course's zones: each its own tile colours and pattern (row 0: A + pattern, row 1: B + band)
+      float zu = clamp(w.x / uZoneLen, 0.0, 1.0);
+      vec4 r0 = texture2D(uZone, vec2(zu, 0.25));
+      vec4 r1 = texture2D(uZone, vec2(zu, 0.75));
+      zA = r0.rgb;
+      zB = r1.rgb;
+      float pat = r0.a;
+      float ftt = max(ft.x, ft.y);
+      if (r1.a > 0.5) {
+        // a hazard band across the way: fat diagonal stripes
+        alt = 0.5 + 0.5 * fSq((w.x + w.y) * 0.45, (fw.x + fw.y) * 0.45);
+      } else if (pat > 2.5) {
+        // chevrons pointing on down the course
+        float v = (t.x - abs(t.y) * 0.8) * 0.5;
+        alt = 0.5 + 0.5 * fSq(v, ftt * 0.6);
+      } else if (pat > 1.5) {
+        // a round spot on every tile
+        float d = length(f);
+        alt = 1.0 - smoothstep(0.27 - ftt, 0.27 + ftt, d);
+        alt = mix(alt, 0.35, smoothstep(0.2, 0.5, ftt));
+      } else if (pat > 0.5) {
+        // diagonal stripes, two tiles to a stripe
+        alt = 0.5 + 0.5 * fSq((t.x + t.y) * 0.25, ftt * 0.35);
+      }
+    }
+    c = mix(zA, zB, alt);
     float d = 0.5 - max(abs(f.x), abs(f.y));
     float fwt = max(ft.x, ft.y);
     float groove = (1.0 - smoothstep(0.0, 0.03 + fwt, d)) * (1.0 - smoothstep(0.08, 0.3, fwt));
@@ -932,6 +1006,9 @@ export function foamMaterial(kind: 'floor' | 'rail' | 'post' | 'base', th: FoamT
     uFW: { value: lin(th.wall) },
     uFK: { value: K },
     uFT: { value: 1.6 },
+    uZone: { value: blankZone() as THREE.Texture },
+    uZoneOn: { value: 0 },
+    uZoneLen: { value: 1 },
   };
   m.userData.u = u;
   m.onBeforeCompile = (sh) => {

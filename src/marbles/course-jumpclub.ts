@@ -5,6 +5,7 @@ import { Kin, Mat } from './physics.ts';
 import { paintMaterial, Pattern, woodAttr } from './shaders.ts';
 import { Parts, band, boltRing, dome, mat, plank, post, rod } from './obs-kit.ts';
 import type { Course } from './courses.ts';
+import { dressArena } from './course-dress.ts';
 
 /**
  * Round 3, Jump Club: a painted plate with two bars turning over it. Hop the low one; never hop
@@ -184,6 +185,7 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
     }
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z));
   }
+  dressArena(b, center, RAD, 3);
   b.finish();
 
   // the plate's edge for the AI: it shrinks as the rings go
