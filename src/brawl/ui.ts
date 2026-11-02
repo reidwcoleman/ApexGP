@@ -71,8 +71,9 @@ export class Ui {
           <tr><td>Punch</td><td><kbd>J</kbd></td></tr>
           <tr><td>Grab (both hands)</td><td><kbd>K</kbd> or mouse buttons</td></tr>
           <tr><td>Lift / raise arms</td><td><kbd>I</kbd></td></tr>
-          <tr><td>Kick</td><td><kbd>L</kbd></td></tr></table>
-          <p class="pp-small">Second keyboard player: arrows, <kbd>.</kbd> punch, <kbd>,</kbd> grab, <kbd>;</kbd> lift, <kbd>'</kbd> kick, <kbd>/</kbd> jump.</p></div>
+          <tr><td>Kick</td><td><kbd>L</kbd></td></tr>
+          <tr><td>Headbutt</td><td><kbd>U</kbd></td></tr></table>
+          <p class="pp-small">Second keyboard player: arrows, <kbd>.</kbd> punch, <kbd>,</kbd> grab, <kbd>;</kbd> lift, <kbd>'</kbd> kick, <kbd>M</kbd> headbutt, <kbd>/</kbd> jump.</p></div>
         <div><h3>Controller</h3><table>
           <tr><td>Move</td><td>Left stick</td></tr>
           <tr><td>Run</td><td>L1 / LB or stick click</td></tr>
@@ -80,10 +81,12 @@ export class Ui {
           <tr><td>Punch</td><td>Square / X</td></tr>
           <tr><td>Grab left / right</td><td>L2 / R2</td></tr>
           <tr><td>Lift</td><td>Triangle / Y or R1</td></tr>
-          <tr><td>Kick</td><td>Circle / B</td></tr></table></div>
+          <tr><td>Kick</td><td>Circle / B</td></tr>
+          <tr><td>Headbutt</td><td>R1 / RB or right stick click</td></tr></table></div>
       </div>
       <ul class="pp-tips"><li>Punch heads to daze. Enough hits and they go limp: then grab, lift and throw.</li>
-      <li>Grab a ledge to hang on, jump to climb back up.</li><li>Grabbed? Mash any button to wriggle free.</li></ul>
+      <li>Kick in mid-air for a drop-kick: both feet, huge shove, and you land on your back.</li>
+      <li>Grab a ledge to hang on. Hold lift to haul yourself up and over, or jump to scramble.</li><li>Grabbed? Mash any button to wriggle free.</li></ul>
       <button class="pp-btn pp-primary" data-act="helpback">Got it</button></div>`;
     this.veil = this.div('pp-veil', root);
     root.addEventListener('click', (e) => {
@@ -414,6 +417,7 @@ export class Ui {
 
   roundIntro(round: number, def: ArenaDef) {
     this.lastCount = -1;
+    if (round === 1 && this.g.seats.some((s) => !s.cpu)) this.tipBar();
     this.banner.className = 'pp-banner';
     this.banner.innerHTML = `<small>Round ${round}</small><b>${def.name}</b>`;
     void this.banner.offsetWidth;
@@ -423,12 +427,30 @@ export class Ui {
     }, 2600);
   }
 
+  /** the moves, along the bottom for the first few seconds of a match */
+  private tipBar() {
+    this.hudEl.querySelector('.pp-tipbar')?.remove();
+    const pad = this.g.seats.some((s) => !s.cpu && s.dev?.startsWith('pad'));
+    const k = (kb: string, p: string) => `<kbd>${pad ? p : kb}</kbd>`;
+    const bar = this.div('pp-tipbar', this.hudEl);
+    bar.innerHTML = [
+      `${k('J', '□')} punch`,
+      `${k('U', 'R1')} headbutt`,
+      `${k('L', '○')} kick · in the air: <b>drop-kick</b>`,
+      `${k('K', 'L2/R2')} grab`,
+      `${k('I', '△')} lift · hanging: <b>climb</b>`,
+    ].map((t) => `<span>${t}</span>`).join('');
+    setTimeout(() => bar.classList.add('gone'), 9000);
+    setTimeout(() => bar.remove(), 9800);
+  }
+
   roundResult(seat: Seat | null, seats: Seat[], done: boolean) {
     const c = seat ? '#' + new THREE.Color(seat.color).getHexString() : '#ffffff';
     if (done && seat) {
       const order = seats.slice().sort((a, b) => b.wins - a.wins);
       this.banner.innerHTML = `<small>Champion</small><b style="--c:${c}">${seat.name} wins!</b>
-        <div class="pp-podium">${order.map((s, i) => `<div style="--c:#${new THREE.Color(s.color).getHexString()}"><em>${i + 1}</em>${s.name}<span>${s.wins}</span></div>`).join('')}</div>
+        <div class="pp-podium">${order.map((s, i) => `<div style="--c:#${new THREE.Color(s.color).getHexString()}"><em>${i + 1}</em>${s.name}<small>${s.kos ?? 0} KO · ${s.outs ?? 0} thrown out</small><span>${s.wins}</span></div>`).join('')}</div>
+        ${this.awards(seats)}
         <div class="pp-press">Press <b>Space</b> or <b>A</b> for the menu</div>`;
       this.banner.className = 'pp-banner result final';
     } else {
@@ -438,6 +460,19 @@ export class Ui {
         if (this.banner.classList.contains('result') && !this.banner.classList.contains('final')) this.banner.className = 'pp-banner';
       }, 3600);
     }
+  }
+
+  /** the end-of-match awards: most knockouts, most fighters thrown off */
+  private awards(seats: Seat[]) {
+    const best = (k: 'kos' | 'outs') => {
+      const top = seats.slice().sort((a, b) => (b[k] ?? 0) - (a[k] ?? 0))[0];
+      return top && (top[k] ?? 0) > 0 ? top : null;
+    };
+    const ko = best('kos'), out = best('outs');
+    const card = (title: string, s: Seat | null, n: number | undefined, unit: string) =>
+      s ? `<div style="--c:#${new THREE.Color(s.color).getHexString()}"><small>${title}</small><b>${s.name}</b><i>${n} ${unit}</i></div>` : '';
+    const html = card('Heavy hitter', ko, ko?.kos, (ko?.kos ?? 0) === 1 ? 'knockout' : 'knockouts') + card('Bouncer', out, out?.outs, 'thrown out');
+    return html ? `<div class="pp-awards">${html}</div>` : '';
   }
 
   loading(on: boolean, name = '') {

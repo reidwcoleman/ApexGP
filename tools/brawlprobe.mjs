@@ -14,14 +14,14 @@ const browser = await chromium.launch({ executablePath: CHROME, headless: true, 
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('console', (m) => { if (m.type() === 'error') console.log('[err]', m.text()); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
-await page.goto(`http://localhost:${port}/brawl.html?manual`, { waitUntil: 'load' });
+await page.goto(`http://localhost:${port}/brawl.html?manual${opt('q', '')}`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
 const out = await page.evaluate(async ({ scen, secs, arena }) => {
   const g = window.__brawl;
   if (g.arenaId !== arena) await g.loadArena(arena);
   const log = [];
   const seat = (i, cpu) => ({ id: i, dev: null, cpu, name: 'F' + i, color: [0xff5a6e, 0x3b9cff, 0xffc93a, 0x42c86a][i % 4], hat: 'party', level: 1, wins: 0 });
-  const n = { stand: 1, walk: 1, duel: 2, brawl: 4, jump: 1, grab: 2 }[scen] ?? 2;
+  const n = { stand: 1, walk: 1, duel: 2, brawl: 4, jump: 1, grab: 2, head: 2, drop: 2, climb: 1 }[scen] ?? 2;
   g.seats = Array.from({ length: n }, (_, i) => seat(i, scen === 'brawl' || (scen === 'duel' && i === 1)));
   g.state = 'free';
   g.attract = true;
@@ -35,6 +35,25 @@ const out = await page.evaluate(async ({ scen, secs, arena }) => {
   f0.feed = (I) => origFeed(Object.assign(I, script(g.time)));
   if (scen === 'walk') script = (t) => ({ mx: t < 2 ? 1 : t < 4 ? 0 : -1, mz: 0, run: t > 4 });
   if (scen === 'jump') script = (t) => ({ jump: Math.abs(t - 1) < 0.02 || Math.abs(t - 3) < 0.02 });
+  if (scen === 'climb') {
+    // hang F0 off an edge: ?climb=x,y,z,dx,dz puts the pelvis there facing the ledge
+    const [x, y, z, dx, dz] = (new URLSearchParams(location.search).get('climb') ?? window.__climb ?? '0,0,0,0,1').split(',').map(Number);
+    f0.teleport(x - f0.pos[0].x, y - f0.pos[0].y, z - f0.pos[0].z);
+    f0.yaw = Math.atan2(dx, dz);
+    script = (t) => ({ grabL: true, grabR: true, lift: t > 1.2, mx: 0, mz: 0 });
+  }
+  if (scen === 'head' || scen === 'drop') {
+    const f1 = g.fighters[1];
+    const p = f0.pos[0];
+    f1.teleport(p.x + 1.6 - f1.pos[0].x, 0, p.z - f1.pos[0].z);
+    g.brains.delete(f1);
+    script = (t) => {
+      const d = f1.pos[1].clone().sub(f0.pos[1]); d.y = 0; const l = d.length();
+      const tick = (a) => Math.floor(t / a) !== Math.floor((t - dt) / a);
+      if (scen === 'head') return { mx: l > 0.9 ? d.x / l : 0, mz: l > 0.9 ? d.z / l : 0, head: tick(1.2) };
+      return { mx: l > 2.2 ? d.x / l : 0, mz: l > 2.2 ? d.z / l : 0, jump: tick(2.5) && l < 2.6, kick: Math.floor((t - 0.15) / 2.5) !== Math.floor((t - 0.15 - dt) / 2.5) };
+    };
+  }
   if (scen === 'duel' || scen === 'grab') {
     const f1 = g.fighters[1];
     const p = f0.pos[0];
@@ -49,14 +68,14 @@ const out = await page.evaluate(async ({ scen, secs, arena }) => {
   const t0 = g.time;
   for (let k = 0; k < secs * 60; k++) {
     g.tick(dt);
-    if (k % 30 === 0) {
+    if (k % Number(new URLSearchParams(location.search).get('every') ?? 30) === 0) {
       log.push(g.fighters.map((f) => {
         const up = new f.rot[1].constructor(); // quaternion
         const cu = { x: 0, y: 1, z: 0 };
         const q = f.rot[1];
         // chest up.y
         const uy = 1 - 2 * (q.x * q.x + q.z * q.z);
-        return `${f.name} x=${f.pos[0].x.toFixed(2)} z=${f.pos[0].z.toFixed(2)} yaw=${f.yaw.toFixed(2)}${f.out ? ' OUT' : ''} t=${(g.time - t0).toFixed(1)} up=${uy.toFixed(2)} h=${f.pos[0].y.toFixed(2)} gr=${f.grounded ? 1 : 0} sp=${f.speed.toFixed(1)} daze=${f.daze.toFixed(0)} ko=${f.ko.toFixed(1)} hold=${f.holding() ? 1 : 0}`;
+        return `${f.name} x=${f.pos[0].x.toFixed(2)} z=${f.pos[0].z.toFixed(2)} yaw=${f.yaw.toFixed(2)}${f.out ? ' OUT' : ''} t=${(g.time - t0).toFixed(1)} up=${uy.toFixed(2)} h=${f.pos[0].y.toFixed(2)} gr=${f.grounded ? 1 : 0} sp=${f.speed.toFixed(1)} daze=${f.daze.toFixed(0)} ko=${f.ko.toFixed(1)} hold=${f.holding() ? 1 : 0}${f.hanging() ? ' HANG' : ''}${f.dropT > 0 ? ' DROP' : ''}${f.headT > 0 ? ' HEAD' : ''}`;
       }).join(' | '));
     }
   }

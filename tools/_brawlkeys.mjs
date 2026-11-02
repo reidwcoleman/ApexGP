@@ -1,0 +1,30 @@
+// real keys: pick an arena in the lobby, start, then headbutt, drop-kick and check they fired; prints fps per arena
+import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from './chrome.mjs';
+const idx = Number(process.argv[2] ?? 4);
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = [];
+page.on('pageerror', (e) => errs.push('[pageerror] ' + e.message));
+page.on('console', (m) => { if (m.type() === 'error') errs.push('[err] ' + m.text()); });
+await page.goto('http://localhost:5196/brawl.html', { waitUntil: 'load' });
+await page.waitForFunction(() => window.__ready === true, null, { timeout: 90000 });
+await page.waitForTimeout(500);
+await page.keyboard.press('Space');
+await page.waitForTimeout(600);
+for (let i = 0; i < idx; i++) { await page.keyboard.press('KeyE'); await page.waitForTimeout(120); }
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => window.__brawl.state === 'fight', null, { timeout: 30000 });
+const seen = { head: 0, drop: 0 };
+await page.evaluate(() => { const g = window.__brawl; window.__seen = { head: 0, drop: 0 }; const f = g.fighters[0]; const st = f.step.bind(f); f.step = (dt, t) => { st(dt, t); if (f.headT > 0) window.__seen.head++; if (f.dropT > 0) window.__seen.drop++; }; });
+await page.keyboard.press('KeyU');
+await page.waitForTimeout(900);
+await page.keyboard.press('Space');
+await page.waitForTimeout(120);
+await page.keyboard.press('KeyL');
+await page.waitForTimeout(800);
+const r = await page.evaluate(() => { const f = window.__brawl.fighters[0]; return { arena: window.__brawl.arenaId, seen: window.__seen, ko: f.ko, out: f.out, getup: f.getup, alive: f.alive, y: f.pos[0].y }; });
+const fps = await page.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
+console.log(JSON.stringify({ ...r, fps }));
+for (const e of errs.slice(0, 6)) console.log(e);
+await browser.close();

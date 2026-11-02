@@ -21,7 +21,8 @@ export class Brain {
   target: Fighter | null = null;
   private retarget = 0;
   private think = 0;
-  private plan: 'approach' | 'punch' | 'kick' | 'grab' | 'jump' | 'backoff' = 'approach';
+  private plan: 'approach' | 'punch' | 'kick' | 'grab' | 'jump' | 'head' | 'drop' | 'backoff' = 'approach';
+  private dropT = 0;
   private planT = 0;
   private punchT = 0;
   private holdT = 0;
@@ -35,7 +36,7 @@ export class Brain {
   update(dt: number, W: AiWorld, I: Intent) {
     const b = this.f;
     I.mx = I.mz = 0;
-    I.jump = I.punch = I.kick = I.mash = I.grabL = I.grabR = I.lift = I.run = false;
+    I.jump = I.punch = I.kick = I.head = I.mash = I.grabL = I.grabR = I.lift = I.run = false;
     if (!b.alive || b.out) return;
     const p = b.pos[PEL];
     const react = [0.5, 0.3, 0.16][this.level];
@@ -56,14 +57,16 @@ export class Brain {
     let mx = 0, mz = 0;
     const holding = b.hands.find((h) => h.heldFighter && h.heldFighter.alive);
 
+    if (!b.hanging()) this.edgeT = 0;
     if (b.hanging()) {
-      // hanging off a ledge: hold on, pull toward the middle, hop up
+      // hanging off a ledge: hold on and haul yourself up (and if that fails, hop)
       I.grabL = I.grabR = true;
       v.set(W.center.x - p.x, 0, W.center.z - p.z).normalize();
-      mx = v.x;
-      mz = v.z;
+      mx = v.x * 0.3;
+      mz = v.z * 0.3;
       this.edgeT += dt;
-      if (this.edgeT > 0.4) {
+      I.lift = this.edgeT > [0.6, 0.35, 0.2][this.level];
+      if (this.edgeT > 2.2) {
         I.jump = true;
         this.edgeT = 0;
       }
@@ -110,10 +113,13 @@ export class Brain {
           this.think = react * (0.7 + Math.random() * 0.8);
           const r = Math.random();
           if (tgt.ko > 0 || (tgt.daze > 55 && r < 0.6)) this.plan = 'grab';
-          else if (r < 0.64) this.plan = 'punch';
-          else if (r < 0.78) this.plan = 'kick';
-          else if (r < 0.92) this.plan = 'grab';
+          else if (r < 0.56) this.plan = 'punch';
+          else if (r < 0.67) this.plan = 'kick';
+          else if (r < 0.76) this.plan = 'head';
+          else if (r < 0.9) this.plan = 'grab';
+          else if (r < 0.95 && d > 1.1) this.plan = 'drop';
           else this.plan = 'jump';
+          this.dropT = 0;
           this.planT = 0.7 + Math.random() * 0.7;
         }
         this.planT -= dt;
@@ -126,6 +132,17 @@ export class Brain {
         } else if (this.plan === 'kick') {
           I.kick = true;
           this.plan = 'punch';
+        } else if (this.plan === 'head') {
+          I.head = true;
+          this.plan = 'punch';
+        } else if (this.plan === 'drop') {
+          // jump, then both feet at them on the way up
+          this.dropT += dt;
+          if (this.dropT < dt * 1.5) I.jump = true;
+          else if (this.dropT > 0.12) {
+            I.kick = true;
+            this.plan = 'punch';
+          }
         } else if (this.plan === 'jump') {
           I.jump = true;
           this.plan = 'punch';

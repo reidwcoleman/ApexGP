@@ -30,6 +30,9 @@ export interface Seat {
   hat: string;
   level: number;
   wins: number;
+  /** this match: knockouts dealt, fighters sent off the arena */
+  kos?: number;
+  outs?: number;
 }
 
 export const COLORS = [0xff5a6e, 0x3b9cff, 0xffc93a, 0x42c86a, 0xb070ff, 0xff8a2a, 0x2fd2c9, 0xf0f0f0, 0xff7fc4, 0x8a6a52];
@@ -219,11 +222,15 @@ export class Game {
       if (kind === 'slam') this.sound.thud(Math.min(1.2, dmg / 15));
       else this.sound.hit(Math.min(1.3, dmg / 14 + (part === HEAD ? 0.3 : 0)));
       if (dmg > 14) this.shake = Math.max(this.shake, Math.min(0.35, dmg / 60));
+      if (by && kind === 'dropkick' && this.state === 'fight') this.ui?.callout(`${by.name} drop-kicked ${who.name}`, by.color);
+      if (kind === 'dropkick' || kind === 'head') this.shake = Math.max(this.shake, 0.18);
       const dev = this.seatOf.get(who)?.dev;
       if (dev) this.input.get(dev)?.rumble(Math.min(1, dmg / 20), 0.4, 110);
     },
     ko: (f) => {
       this.sound.ko();
+      const by = f.lastHitBy && f.lastHitBy !== f && f.lastHitT < 1.5 ? this.seatOf.get(f.lastHitBy) : null;
+      if (by && this.state === 'fight') by.kos = (by.kos ?? 0) + 1;
       this.ui?.callout(`${f.name} is seeing stars`, f.color);
     },
     grab: () => this.sound.grab(),
@@ -288,7 +295,7 @@ export class Game {
 
   async startMatch(seats: Seat[], arenaPick: string, rounds: number) {
     this.attract = false;
-    this.seats = seats.map((s, i) => ({ ...s, id: i, wins: 0 }));
+    this.seats = seats.map((s, i) => ({ ...s, id: i, wins: 0, kos: 0, outs: 0 }));
     this.arenaPick = arenaPick;
     this.roundsToWin = rounds;
     this.round = 0;
@@ -392,10 +399,11 @@ export class Game {
           I.jump = d.pressed('jump');
           I.punch = d.pressed('punch');
           I.kick = d.pressed('kick');
+          I.head = d.pressed('head');
           I.grabL = d.held('grabL');
           I.grabR = d.held('grabR');
           I.lift = d.held('lift');
-          I.mash = d.pressed('punch') || d.pressed('kick') || d.pressed('jump') || d.pressed('grabL') || d.pressed('grabR');
+          I.mash = d.pressed('punch') || d.pressed('kick') || d.pressed('head') || d.pressed('jump') || d.pressed('grabL') || d.pressed('grabR');
         }
       }
       f.feed(I);
@@ -427,6 +435,11 @@ export class Game {
         this.outT.set(f, 0);
         this.sound.fall();
         const by = f.lastHitBy && f.lastHitBy !== f && f.lastHitT < 8 ? f.lastHitBy : null;
+        if (by && this.state === 'fight') {
+          by.throwsOut++;
+          const bs = this.seatOf.get(by);
+          if (bs) bs.outs = (bs.outs ?? 0) + 1;
+        }
         if (this.state !== 'menu') this.ui.callout(by ? `${by.name} sent ${f.name} packing` : `${f.name} is out`, f.color);
       }
       if (f.out) {
@@ -506,6 +519,11 @@ export class Game {
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(def.camPitch), Math.sin(def.camPitch), Math.cos(yaw) * Math.cos(def.camPitch));
     const tgt = c.clone().add(new THREE.Vector3(0, 0.3, 0));
     const pos = tgt.clone().addScaledVector(dir, dist);
+    if (def.camFixed) {
+      const F = def.camFixed;
+      tgt.set(...F.tgt).lerp(c, F.follow);
+      pos.set(...F.pos).add(new THREE.Vector3((c.x - F.tgt[0]) * F.follow * 0.6, 0, 0));
+    }
     const k = snap ? 1 : 1 - Math.exp(-dt * 2.6);
     this.camTgt.lerp(tgt, k);
     this.camPos.lerp(pos, k);

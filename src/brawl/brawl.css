@@ -72,7 +72,7 @@ kbd { font-family: var(--body); font-weight: 600; font-size: 0.85em; background:
 .pp-lrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 .pp-cpu { display: flex; gap: 8px; }
 .pp-arenas { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.pp-arena { position: relative; min-height: 120px; border: 0; border-radius: 20px; padding: 14px; text-align: left; color: #fff; background: #2a1630 var(--art) center / cover; cursor: pointer; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3); transition: transform 0.15s ease; }
+.pp-arena { position: relative; min-height: 104px; border: 0; border-radius: 20px; padding: 14px; text-align: left; color: #fff; background: #2a1630 var(--art) center / cover; cursor: pointer; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3); transition: transform 0.15s ease; }
 .pp-arena::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, rgba(20, 8, 30, 0.85)); }
 .pp-arena b, .pp-arena i { position: relative; }
 .pp-arena b { font-family: var(--display); font-weight: 400; font-size: 24px; }
@@ -110,8 +110,25 @@ kbd { font-family: var(--body); font-weight: 600; font-size: 0.85em; background:
 .pp-podium div { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 14px; padding: 8px 14px; font-weight: 600; font-size: 18px; box-shadow: inset 6px 0 0 var(--c); }
 .pp-podium em { font-style: normal; font-family: var(--display); font-size: 22px; width: 24px; }
 .pp-podium span { margin-left: auto; font-family: var(--display); font-size: 22px; }
+.pp-podium small { display: inline; font-family: inherit; font-size: 13px; font-weight: 600; color: inherit; text-shadow: none; opacity: 0.6; margin-left: 4px; }
+.pp-banner { z-index: 5; }
+.pp-banner.final b { font-size: clamp(44px, 6vw, 84px); }
+.pp-banner .pp-press b, .pp-banner .pp-press { display: inline; font-family: inherit; font-size: 16px; color: var(--cream); text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); line-height: 1.4; }
+.pp-banner .pp-press { display: block; margin-top: 16px; }
+.pp-banner .pp-press b { color: var(--yellow); }
+.pp-awards { display: flex; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.pp-awards div { background: var(--card); border-radius: 16px; padding: 10px 18px; min-width: 150px; box-shadow: inset 0 -5px 0 var(--c); }
+.pp-awards small { display: block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; font-family: inherit; text-shadow: none; color: inherit; }
+.pp-banner .pp-awards b { --c: inherit; display: block; font-size: 26px; font-family: var(--display); font-weight: 400; color: var(--c); text-shadow: none; line-height: 1.1; }
+.pp-awards i { font-style: normal; font-size: 13px; opacity: 0.8; }
 .pp-nametag { position: absolute; left: 0; top: 0; font-family: var(--display); font-size: 16px; color: #fff; padding: 2px 10px 3px; border-radius: 99px; background: var(--c); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); white-space: nowrap; transition: opacity 0.2s ease; }
 .pp-nametag::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -6px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #ffd23a calc(var(--d, 0) * 100%), rgba(255, 255, 255, 0.25) 0); }
 .pp-nametag.cpu { opacity: 0.9; }
 .pp-nametag.ko { background: #555; }
 .pp-veil { display: grid; place-items: center; background: rgba(20, 8, 30, 0.6); font-family: var(--display); font-size: 48px; color: var(--cream); }
+
+.pp-tipbar { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px); pointer-events: none; transition: opacity 0.6s ease; }
+.pp-tipbar span { background: rgba(20, 10, 30, 0.72); color: #fff; border-radius: 999px; padding: 7px 14px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.pp-tipbar kbd { display: inline-block; min-width: 22px; text-align: center; background: #fff; color: #2a1630; border-radius: 6px; padding: 1px 6px; margin-right: 6px; font: 700 13px/1.4 inherit; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+.pp-tipbar b { color: var(--yellow); font-weight: 700; }
+.pp-tipbar.gone { opacity: 0; }

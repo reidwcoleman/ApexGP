@@ -38,7 +38,14 @@ export const BODY = {
 };
 const MASS = [10, 14, 5, 1.6, 1.6, 1.6, 1.6, 3.4, 3, 3.4, 3];
 const STAND_H = 0.8;
-const KO_TIME = 4.2;
+const KO_TIME = 5;
+/** per strike: damage per m/s of closing speed, the cap, and how hard it shoves */
+const STRIKE = {
+  punch: { dmg: 1.6, max: 26, push: 1 },
+  kick: { dmg: 2.2, max: 26, push: 1.35 },
+  head: { dmg: 1.5, max: 24, push: 1.1 },
+  dropkick: { dmg: 2.4, max: 38, push: 2.2 },
+};
 
 export interface Intent {
   /** wanted direction on the ground, world space, length 0..1 */
@@ -48,23 +55,27 @@ export interface Intent {
   jump: boolean;
   punch: boolean;
   kick: boolean;
+  /** headbutt */
+  head: boolean;
   grabL: boolean;
   grabR: boolean;
   lift: boolean;
   /** any button mashed this frame (to wake up or wriggle free) */
   mash: boolean;
 }
-export const emptyIntent = (): Intent => ({ mx: 0, mz: 0, run: false, jump: false, punch: false, kick: false, grabL: false, grabR: false, lift: false, mash: false });
+export const emptyIntent = (): Intent => ({ mx: 0, mz: 0, run: false, jump: false, punch: false, kick: false, head: false, grabL: false, grabR: false, lift: false, mash: false });
 
 export interface FighterHooks {
   parts: Map<number, PartRef>;
-  hit(by: Fighter | null, who: Fighter, dmg: number, at: THREE.Vector3, part: number, kind: 'punch' | 'kick' | 'slam'): void;
+  hit(by: Fighter | null, who: Fighter, dmg: number, at: THREE.Vector3, part: number, kind: HitKind): void;
   ko(f: Fighter): void;
   grab(f: Fighter, other: Fighter | null): void;
   jump(f: Fighter): void;
   thrown(by: Fighter, who: Fighter): void;
   prop(by: Fighter, body: RAPIER.RigidBody, at: THREE.Vector3, speed: number): void;
 }
+
+export type HitKind = 'punch' | 'kick' | 'slam' | 'head' | 'dropkick';
 
 interface Joint {
   p: number;
@@ -124,7 +135,7 @@ export class Fighter {
   mass = 0;
 
   input: Intent = emptyIntent();
-  private pend = { jump: false, punch: false, kick: false, mash: 0 };
+  private pend = { jump: false, punch: false, kick: false, head: false, mash: 0 };
 
   alive = false;
   out = false;
@@ -148,6 +159,24 @@ export class Fighter {
   kickLeg = 0;
   kickHit = new Set<Fighter | RAPIER.RigidBody>();
   kickCd = 0;
+  /** headbutt: time left in the lunge, and the cooldown */
+  headT = 0;
+  headCd = 0;
+  headHit = new Set<Fighter | RAPIER.RigidBody>();
+  /** drop-kick: both feet out, flat on your back after */
+  dropT = 0;
+  dropHit = new Set<Fighter | RAPIER.RigidBody>();
+  /** pulling yourself up a ledge */
+  climbT = 0;
+  /** just vaulted a ledge: the hands don't grab again for a moment */
+  grabBlock = 0;
+  private popT = 0;
+  private popTop = 0;
+  private popDir = new THREE.Vector3();
+  private popFrom = new THREE.Vector3();
+  /** match stats */
+  koDealt = 0;
+  throwsOut = 0;
   nextHand = 0;
   struggle = 0;
   grabbedBy = new Set<Fighter>();
@@ -247,12 +276,12 @@ export class Fighter {
       const ired = (this.inert[p] * this.inert[c]) / (this.inert[p] + this.inert[c]);
       this.joints.push({ p, c, kp, kd, t: new THREE.Quaternion(), ired });
     };
-    joint(PEL, CHE, J.spine, 520, 42);
-    joint(CHE, HEAD, J.neck, 420, 32);
-    joint(CHE, UAL, J.shoulder, 160, 14);
-    joint(UAL, FAL, J.elbow, 160, 12);
-    joint(CHE, UAR, J.shoulder, 160, 14, true);
-    joint(UAR, FAR, J.elbow, 160, 12, true);
+    joint(PEL, CHE, J.spine, 430, 36);
+    joint(CHE, HEAD, J.neck, 320, 24);
+    joint(CHE, UAL, J.shoulder, 105, 10);
+    joint(UAL, FAL, J.elbow, 100, 8);
+    joint(CHE, UAR, J.shoulder, 105, 10, true);
+    joint(UAR, FAR, J.elbow, 100, 8, true);
     joint(PEL, THL, J.hip, 650, 46);
     joint(THL, SHL, J.knee, 650, 46);
     joint(PEL, THR, J.hip, 650, 46, true);
@@ -306,7 +335,7 @@ export class Fighter {
     return this.hands.some((h) => h.heldFighter);
   }
   hanging() {
-    return !this.grounded && this.hands.some((h) => h.joint && !h.heldFighter && h.held && h.held.isFixed());
+    return !this.grounded && this.hands.some((h) => h.joint && !h.heldFighter && h.held && !h.held.isDynamic());
   }
   center(out = new THREE.Vector3()) {
     return out.copy(this.pos[CHE]);
@@ -329,6 +358,7 @@ export class Fighter {
     if (i.jump) this.pend.jump = true;
     if (i.punch) this.pend.punch = true;
     if (i.kick) this.pend.kick = true;
+    if (i.head) this.pend.head = true;
     if (i.mash) this.pend.mash++;
   }
 
@@ -354,6 +384,8 @@ export class Fighter {
     this.sinceHit += dt;
     this.jumpCd -= dt;
     this.kickCd -= dt;
+    this.headCd -= dt;
+    this.grabBlock -= dt;
     this.noHover -= dt;
     this.stagger = Math.max(0, this.stagger - dt);
     if (this.sinceHit > 1.5) this.daze = Math.max(0, this.daze - 11 * dt);
@@ -384,7 +416,7 @@ export class Fighter {
       const dv = _a.copy(this.vel[i]).sub(this.prevV[i]);
       dv.y += GRAVITY * dt;
       const m = dv.length();
-      if (m > 8.5 && time > 0.5) this.takeDaze((m - 8.5) * 5, null, this.pos[i], i, 'slam');
+      if (m > 8.5 && time > 0.5 && this.sinceHit > 0.15 && this.popT < 0.6) this.takeDaze((m - 8.5) * 5, null, this.pos[i], i, 'slam');
     }
 
     const str = ko ? 0.03 : 1;
@@ -438,6 +470,13 @@ export class Fighter {
       J[6 + k * 2].t.copy(eq(swing, 0, 0));
       J[7 + k * 2].t.copy(eq(0.05, 0, 0));
     }
+    // drop-kick: both legs straight out in front
+    if (this.dropT > 0) {
+      J[6].t.copy(eq(-1.45, 0, 0.12));
+      J[7].t.copy(eq(0.08, 0, 0));
+      J[8].t.copy(eq(-1.45, 0, -0.12));
+      J[9].t.copy(eq(0.08, 0, 0));
+    }
     // arms hang and swing
     J[2].t.copy(eq(Math.sin(ph) * amp * 0.7, 0, 0.12));
     J[3].t.copy(eq(-0.35, 0, 0));
@@ -445,6 +484,8 @@ export class Fighter {
     J[5].t.copy(eq(-0.35, 0, 0));
     // head looks a little down when dazed
     if (this.daze > 40 && !ko) J[1].t.copy(eq(Math.sin(time * 5) * 0.2, 0, Math.cos(time * 4) * 0.25));
+    // headbutt: rear back, then snap the head forward
+    if (this.headT > 0) J[1].t.copy(eq(this.headT > 0.18 ? -0.45 : 0.95, 0, 0));
 
     // ---- joint springs
     for (const j of this.joints) {
@@ -458,11 +499,20 @@ export class Fighter {
 
     // ---- balance: chest and pelvis upright, facing yaw; leaning into a run or a punch
     if (!ko) {
-      const lean = (this.input.run ? 0.22 : 0.12) * stride + (this.hands.some((h) => h.punch > 0) ? 0.25 : 0);
-      const want = _q.setFromAxisAngle(UP, this.yaw).multiply(_q2.setFromAxisAngle(_c.set(1, 0, 0), lean));
-      const k = bal * (this.getup > 0 ? 1.6 : 1);
-      this.uprightTorque(CHE, want, 2400 * k, 70, dt);
-      this.uprightTorque(PEL, _q.setFromAxisAngle(UP, this.yaw), 2000 * k, 60, dt);
+      // a constant drunken sway: plush never quite stand still
+      const sw = 0.45 + stride * 0.8 + Math.min(1, this.daze / 60);
+      const sway = (Math.sin(time * 1.9 + this.slot * 1.7) * 0.05 + Math.sin(time * 3.3 + this.slot * 0.6) * 0.025) * sw;
+      const roll = (Math.sin(time * 2.4 + this.slot * 2.3) * 0.06 + Math.sin(time * 4.1 + this.slot) * 0.02) * sw;
+      let lean = (this.input.run ? 0.24 : 0.13) * stride + (this.hands.some((h) => h.punch > 0) ? 0.25 : 0) + sway;
+      if (this.headT > 0) lean += this.headT > 0.18 ? -0.3 : 0.8;
+      let k = bal * (this.getup > 0 ? 1.6 : 1);
+      if (this.dropT > 0) {
+        lean = -1.25;
+        k *= 0.3;
+      }
+      const want = _q.setFromAxisAngle(UP, this.yaw).multiply(_q2.setFromAxisAngle(_c.set(1, 0, 0), lean)).multiply(_q3.setFromAxisAngle(_d.set(0, 0, 1), roll));
+      this.uprightTorque(CHE, want, 2050 * k, 60, dt);
+      this.uprightTorque(PEL, _q.setFromAxisAngle(UP, this.yaw), 1750 * k, 52, dt);
     }
 
     // ---- support + walking
@@ -519,13 +569,106 @@ export class Fighter {
       }
     }
 
+    // ---- pulling up a ledge: hanging on, hold lift to haul yourself up for a moment, then pop
+    // up and over. The ledge's top is found by a ray just past the hands, so it works however
+    // the hands caught it (on top, on the side, or under the lip).
+    const hangNow = !ko && this.hanging();
+    if (hangNow && inp.lift) {
+      this.climbT += dt;
+      const hp = _a.set(0, 0, 0);
+      let nh = 0;
+      for (let i = 0; i < 2; i++) if (this.hands[i].joint && !this.hands[i].heldFighter) {
+        hp.add(this.handPos(i, _b));
+        nh++;
+      }
+      hp.multiplyScalar(1 / Math.max(1, nh));
+      const ch = this.pos[CHE];
+      const over = _c.set(hp.x - ch.x, 0, hp.z - ch.z);
+      if (over.length() < 0.1) over.copy(fwd);
+      over.normalize();
+      // the haul: straining upward
+      const up = M * (GRAVITY * 1.05 - this.vel[CHE].y * 4);
+      this.bodies[CHE].applyImpulse({ x: 0, y: up * 0.7 * dt, z: 0 }, true);
+      pel.applyImpulse({ x: 0, y: up * 0.3 * dt, z: 0 }, true);
+      if (this.climbT > 0.4) {
+        const ray = new R.Ray({ x: hp.x + over.x * 0.4, y: hp.y + 2.2, z: hp.z + over.z * 0.4 }, { x: 0, y: -1, z: 0 });
+        const hit = this.world.castRayAndGetNormal(ray, 3.4, true, undefined, this.queryGroups);
+        const top = hit && hit.normal.y > 0.5 ? hp.y + 2.2 - hit.timeOfImpact : null;
+        this.climbT = 0;
+        if (top !== null && top - hp.y < 1.6) {
+          for (const h of this.hands) if (h.joint && !h.heldFighter) this.release(h);
+          const rise = Math.max(0.4, top + STAND_H + 0.15 - this.pos[PEL].y);
+          const vy = Math.sqrt(2 * GRAVITY * rise);
+          for (let i = 0; i < NPART; i++) {
+            const b = this.bodies[i], v = b.linvel();
+            b.setLinvel({ x: v.x * 0.2, y: vy, z: v.z * 0.2 }, true);
+          }
+          this.popT = 0.7;
+          this.popTop = top;
+          this.popDir.copy(over);
+          this.popFrom.copy(this.pos[PEL]);
+          this.grabBlock = 0.5;
+          this.noHover = 0.1;
+          this.hooks.jump(this);
+        }
+      }
+    } else this.climbT = 0;
+    // after the pop: once clear of the lip, tip forward onto the ledge
+    if (this.popT > 0) {
+      this.popT -= dt;
+      if (this.pos[PEL].y > this.popTop + 0.15) {
+        const k = M * 18 * dt;
+        pel.applyImpulse({ x: this.popDir.x * k * 0.6, y: 0, z: this.popDir.z * k * 0.6 }, true);
+        this.bodies[CHE].applyImpulse({ x: this.popDir.x * k * 0.4, y: 0, z: this.popDir.z * k * 0.4 }, true);
+      }
+      const moved = (this.pos[PEL].x - this.popFrom.x) * this.popDir.x + (this.pos[PEL].z - this.popFrom.z) * this.popDir.z;
+      if (moved > 0.9) this.popT = 0;
+    }
+
     // ---- hands
     this.handsStep(dt, fwd, ko);
+
+    // ---- headbutt: rear back, then lunge head first
+    if (this.pend.head) {
+      this.pend.head = false;
+      if (!ko && this.headCd <= 0 && this.getup <= 0 && !this.hanging()) {
+        this.headT = 0.34;
+        this.headCd = 0.9;
+        this.headHit.clear();
+      }
+    }
+    if (this.headT > 0) {
+      const was = this.headT;
+      this.headT -= dt;
+      if (was > 0.18 && this.headT <= 0.18) {
+        this.bodies[CHE].applyImpulse(rv(_a.copy(fwd).multiplyScalar(M * 1.7)), true);
+        this.bodies[HEAD].applyImpulse(rv(_a.copy(fwd).multiplyScalar(MASS[HEAD] * 2.6)), true);
+        pel.applyImpulse(rv(_a.copy(fwd).multiplyScalar(M * 0.5)), true);
+      }
+      if (this.headT < 0.18 && this.headT > 0) {
+        const hp = _b.copy(this.pos[HEAD]).addScaledVector(fwd, 0.12);
+        if (this.strike(this.cols[HEAD], hp, this.headHit, _c.copy(fwd).setY(-0.05).normalize(), 'head', 0.33)) {
+          // it hurts you a little too
+          this.daze += 6;
+          this.sinceHit = 0;
+        }
+      }
+    }
 
     // ---- kick
     if (this.pend.kick) {
       this.pend.kick = false;
-      if (!ko && this.kickCd <= 0 && this.getup <= 0) {
+      if (!ko && this.kickCd <= 0 && this.getup <= 0 && !this.grounded && this.airT > 0.04 && !this.hanging() && this.dropT <= 0) {
+        // in the air: a drop-kick, both feet first
+        this.dropT = 0.6;
+        this.kickCd = 1.2;
+        this.dropHit.clear();
+        for (let i = 0; i < NPART; i++) {
+          const b = this.bodies[i], m = b.mass();
+          b.applyImpulse({ x: fwd.x * 3.4 * m, y: 1.4 * m, z: fwd.z * 3.4 * m }, true);
+        }
+        this.hooks.jump(this);
+      } else if (!ko && this.kickCd <= 0 && this.getup <= 0) {
         this.kickT = 0.3;
         this.kickCd = 0.6;
         this.kickLeg = 1 - this.kickLeg;
@@ -544,6 +687,13 @@ export class Fighter {
       sh.applyImpulseAtPoint(rv(f), rv(fp), true);
       this.bodies[PEL].applyImpulse(rv(f.multiplyScalar(-0.6)), true);
       this.strike(this.feet[s], fp, this.kickHit, fwd, 'kick');
+    }
+    if (this.dropT > 0) {
+      this.dropT -= dt;
+      for (let s = 0; s < 2; s++) this.strike(this.feet[s], this.footPos(s, _c), this.dropHit, fwd, 'dropkick', 0.22);
+      // you land on your back and have to get up again
+      if (this.dropT <= 0) this.stagger = Math.max(this.stagger, 0.7);
+      if (this.grounded && this.dropT < 0.4) this.dropT = Math.min(this.dropT, 0.08);
     }
     this.pend.punch = false;
 
@@ -669,6 +819,8 @@ export class Fighter {
         tgt = _c.copy(sh).addScaledVector(h.punchDir, 0.95);
         kp = 1400;
         fmax = 1500;
+      } else if (want && this.climbT > 0) {
+        tgt = null;
       } else if (want) {
         tgt = _c.copy(chest).addScaledVector(fwd, 0.52).addScaledVector(side, h.side * 0.17);
         if (lift) {
@@ -689,7 +841,7 @@ export class Fighter {
       }
       if (h.punch > 0) this.strike(h.col, hp, h.hitSet, h.punchDir, 'punch');
       // grabbing
-      if (want && !h.joint && h.punch <= 0) this.tryGrab(h, hp);
+      if (want && !h.joint && h.punch <= 0 && this.grabBlock <= 0) this.tryGrab(h, hp);
       if (!want && h.joint) {
         const thrown = h.heldFighter && this.liftT > 0.25;
         const victim = h.heldFighter;
@@ -775,11 +927,12 @@ export class Fighter {
 
   /** a punching hand or kicking foot sweeps through whatever it touches (bodies are only touched
    *  after the query: Rapier can't be changed from inside its own callback) */
-  private strike(col: RAPIER.Collider, at: THREE.Vector3, seen: Set<Fighter | RAPIER.RigidBody>, dir: THREE.Vector3, kind: 'punch' | 'kick') {
+  private strike(col: RAPIER.Collider, at: THREE.Vector3, seen: Set<Fighter | RAPIER.RigidBody>, dir: THREE.Vector3, kind: 'punch' | 'kick' | 'head' | 'dropkick', radius = 0) {
     const body = col.parent()!;
     const pv = vec(body.velocityAtPoint(rv(at)), new THREE.Vector3());
     const found: RAPIER.Collider[] = [];
-    this.world.intersectionsWithShape(rv(at), { x: 0, y: 0, z: 0, w: 1 }, new R.Ball(kind === 'punch' ? 0.17 : 0.18), (c) => {
+    let landed = false;
+    this.world.intersectionsWithShape(rv(at), { x: 0, y: 0, z: 0, w: 1 }, new R.Ball(radius || (kind === 'punch' ? 0.17 : 0.18)), (c) => {
       found.push(c);
       return true;
     }, undefined, this.queryGroups);
@@ -795,11 +948,21 @@ export class Fighter {
         seen.add(f);
         const part = ref.part ?? CHE;
         const mult = part === HEAD ? 1.55 : part === CHE || part === PEL ? 1 : 0.6;
-        const dmg = THREE.MathUtils.clamp((rel - 1) * (kind === 'kick' ? 2.2 : 1.6), 4, 26) * mult;
-        const push = Math.min(9, 2.6 + rel * 0.35) * (kind === 'kick' ? 1.35 : 1);
+        const K = STRIKE[kind];
+        const dmg = THREE.MathUtils.clamp((rel - 1) * K.dmg, 4, K.max) * mult;
+        const push = Math.min(9, 2.6 + rel * 0.35) * K.push;
         ob.applyImpulse(rv(_d.copy(dir).multiplyScalar(push * ob.mass() * 0.9)), true);
         f.bodies[CHE].applyImpulse(rv(_d.copy(dir).multiplyScalar(push * 4)), true);
         f.takeDaze(dmg, this, at, part, kind);
+        if (kind === 'dropkick') {
+          for (const fb of f.bodies) {
+            const m = fb.mass();
+            fb.applyImpulse({ x: dir.x * 4.2 * m, y: 1.6 * m, z: dir.z * 4.2 * m }, true);
+          }
+          f.noHover = 0.4;
+          f.stagger = Math.max(f.stagger, 0.9);
+        }
+        landed = true;
       } else if (ob.isDynamic() && !seen.has(ob)) {
         seen.add(ob);
         const rel = _c.copy(pv).sub(vec(ob.linvel(), _d)).length();
@@ -807,9 +970,10 @@ export class Fighter {
         this.hooks.prop(this, ob, at, rel);
       }
     }
+    return landed;
   }
 
-  takeDaze(dmg: number, by: Fighter | null, at: THREE.Vector3, part: number, kind: 'punch' | 'kick' | 'slam') {
+  takeDaze(dmg: number, by: Fighter | null, at: THREE.Vector3, part: number, kind: HitKind) {
     if (!this.alive || this.out) return;
     if (by) {
       this.lastHitBy = by;
@@ -827,6 +991,7 @@ export class Fighter {
       this.ko = KO_TIME;
       this.daze = 100;
       this.koCount++;
+      if (by && by !== this) by.koDealt++;
       this.releaseAll();
       this.hooks.ko(this);
     }

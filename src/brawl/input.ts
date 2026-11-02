@@ -3,8 +3,8 @@
  * gamepads) reads into the same named buttons, so the game never cares which one a player holds.
  */
 
-export type Btn = 'jump' | 'punch' | 'kick' | 'grabL' | 'grabR' | 'lift' | 'run' | 'confirm' | 'back' | 'start' | 'up' | 'down' | 'left' | 'right' | 'prev' | 'next' | 'any';
-const BTNS: Btn[] = ['jump', 'punch', 'kick', 'grabL', 'grabR', 'lift', 'run', 'confirm', 'back', 'start', 'up', 'down', 'left', 'right', 'prev', 'next', 'any'];
+export type Btn = 'jump' | 'punch' | 'kick' | 'head' | 'grabL' | 'grabR' | 'lift' | 'run' | 'confirm' | 'back' | 'start' | 'up' | 'down' | 'left' | 'right' | 'prev' | 'next' | 'any';
+const BTNS: Btn[] = ['jump', 'punch', 'kick', 'head', 'grabL', 'grabR', 'lift', 'run', 'confirm', 'back', 'start', 'up', 'down', 'left', 'right', 'prev', 'next', 'any'];
 type State = Record<Btn, boolean> & { lx: number; ly: number };
 const blank = (): State => {
   const s = { lx: 0, ly: 0 } as State;
@@ -18,6 +18,7 @@ interface Layout {
   jump: string[];
   punch: string[];
   kick: string[];
+  head: string[];
   grab: string[];
   lift: string[];
   run: string[];
@@ -32,13 +33,13 @@ const KB: Record<string, Layout> = {
   kb1: {
     label: 'Keyboard',
     move: { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD' },
-    jump: ['Space'], punch: ['KeyJ'], kick: ['KeyL'], grab: ['KeyK'], lift: ['KeyI'], run: ['ShiftLeft'],
+    jump: ['Space'], punch: ['KeyJ'], kick: ['KeyL'], head: ['KeyU'], grab: ['KeyK'], lift: ['KeyI'], run: ['ShiftLeft'],
     confirm: ['Space', 'Enter'], back: ['Escape', 'Backspace'], start: ['Enter', 'Escape'], prev: ['KeyQ'], next: ['KeyE'],
   },
   kb2: {
     label: 'Keyboard 2',
     move: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' },
-    jump: ['Numpad0', 'Slash'], punch: ['Numpad1', 'Period'], kick: ['Numpad3', 'Quote'], grab: ['Numpad2', 'Comma'], lift: ['Numpad5', 'Semicolon'], run: ['ShiftRight'],
+    jump: ['Numpad0', 'Slash'], punch: ['Numpad1', 'Period'], kick: ['Numpad3', 'Quote'], head: ['Numpad4', 'KeyM'], grab: ['Numpad2', 'Comma'], lift: ['Numpad5', 'Semicolon'], run: ['ShiftRight'],
     confirm: ['Numpad0', 'Slash'], back: ['NumpadDecimal', 'Backslash'], start: [], prev: [], next: [],
   },
 };
@@ -151,6 +152,7 @@ export class Input {
     s.jump = any(L.jump);
     s.punch = any(L.punch);
     s.kick = any(L.kick);
+    s.head = any(L.head);
     s.grabL = s.grabR = any(L.grab);
     s.lift = any(L.lift);
     s.run = any(L.run);
@@ -163,7 +165,7 @@ export class Input {
     s.down = k.has(L.move.down);
     s.left = k.has(L.move.left);
     s.right = k.has(L.move.right);
-    s.any = s.jump || s.punch || s.kick || s.grabL || s.lift || s.confirm;
+    s.any = s.jump || s.punch || s.kick || s.head || s.grabL || s.lift || s.confirm;
   }
 
   private readPad(d: Device, p: Gamepad) {
@@ -184,7 +186,8 @@ export class Input {
     s.jump = b(0);
     s.kick = b(1);
     s.punch = b(2);
-    s.lift = b(3) || b(5);
+    s.lift = b(3);
+    s.head = b(5) || b(11);
     s.run = b(4) || b(10);
     s.grabL = b(6);
     s.grabR = b(7);

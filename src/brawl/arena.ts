@@ -58,6 +58,8 @@ export interface ArenaDef {
   camYaw: number;
   camPitch: number;
   camMin: number;
+  /** a set camera instead of the framing one: sits at pos, looks at tgt, drifts toward the fighters by follow (0..1) */
+  camFixed?: { pos: [number, number, number]; tgt: [number, number, number]; follow: number };
   look: ArenaLook;
   /** called once after loading: wire the movers, hazards, effects */
   script(a: Arena, ctx: ArenaCtx): ArenaScript;
