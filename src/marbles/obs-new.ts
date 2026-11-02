@@ -25,7 +25,7 @@ export function puncher(b: CourseBuilder, path: Path, s: number, side: number, o
   // the fist's centre, across: home in its box, out to `reach` past the centre line
   const home = side * (hw + 1.55);
   const out = side * (hw - Math.min(hw + 0.8, o.reach ?? hw)) + side * 0.75;
-  const OUT = 0.7, HOLD = 0.4, BACK = 1.0;
+  const OUT = 0.5, HOLD = 0.35, BACK = 0.85;
   const ext = (t: number) => {
     const u = ((((t + ph) % P) + P) % P);
     if (u < OUT) return u / OUT;
