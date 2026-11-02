@@ -778,7 +778,9 @@ and bots; the contestants are original bean characters, not marbles.
     order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
     18 Rumble Hill).
   - Out of the show, you can watch it to the end (←/→ switches bean).
-- **The beans** (`bean.ts`): tall soft jelly beans on short legs, big googly eyes on springs,
+- **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
+  round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,
+  bottom-heavy jelly body sitting low on stubby boots, thick arms with round mitts, big googly eyes on springs,
   eyebrows (up in a fright, down and in on a dive or a grab), 44 named outfits (a colour, one of
   20 patterns painted on a canvas — rainbow, camo, scales, a tuxedo front, overalls, gingham,
   leopard and pinstripes among them — and one of 23 hats and costume pieces: bunny or cat ears,

@@ -12,12 +12,17 @@ import { Marble, Mode } from './physics.ts';
  * belly in a dive, limbs everywhere in a tumble, a struggle when someone has hold of it.
  */
 
-/** body proportions (m), from the ground under the feet */
-const HIP_Y = 0.36;
-const CORE_Y = 0.86;
-const TOP_Y = 1.62;
-const FACE_Y = 1.2;
-const SHOULDER_Y = 0.98;
+/**
+ * body proportions (m), from the ground under the feet: the party-game bean — a round, chunky,
+ * bottom-heavy body sitting low on its hips, stubby little legs, big arms set halfway up
+ */
+const HIP_Y = 0.24;
+const CORE_Y = 0.8;
+const TOP_Y = 1.6;
+const FACE_Y = 1.17;
+const SHOULDER_Y = 0.86;
+/** the body's radius where the arms come out */
+const SHOULDER_X = 0.47;
 
 export type Pat = 'solid' | 'belly' | 'stripes' | 'dots' | 'split' | 'zigzag' | 'stars' | 'hearts' | 'checker' | 'spots' | 'swirl' | 'fade' | 'rainbow' | 'camo' | 'scales' | 'suit' | 'overalls' | 'gingham' | 'leopard' | 'pinstripe';
 export type Hat = 'none' | 'beanie' | 'party' | 'propeller' | 'bow' | 'horns' | 'antenna' | 'flower' | 'tophat' | 'headphones' | 'sprout' | 'cap' | 'bunny' | 'cat' | 'dino' | 'shark' | 'chef' | 'viking' | 'halo' | 'unicorn' | 'pirate' | 'mohawk' | 'goggles';
@@ -431,9 +436,9 @@ function hat(o: Outfit): THREE.Object3D | null {
     }
     case 'headphones': {
       const m = M(h1, 0.35);
-      add(new THREE.TorusGeometry(0.4, 0.035, 8, 28, Math.PI), m, 0, top - 0.42, 0);
+      add(new THREE.TorusGeometry(0.44, 0.035, 8, 28, Math.PI), m, 0, top - 0.44, 0);
       for (const s of [-1, 1]) {
-        const cup = add(new THREE.CylinderGeometry(0.12, 0.12, 0.09, 20), M(h2, 0.4), s * 0.44, top - 0.42, 0);
+        const cup = add(new THREE.CylinderGeometry(0.12, 0.12, 0.09, 20), M(h2, 0.4), s * 0.48, top - 0.44, 0);
         cup.rotation.z = Math.PI / 2;
       }
       break;
@@ -481,7 +486,7 @@ function hat(o: Outfit): THREE.Object3D | null {
     case 'dino': {
       // spikes down the back, smaller toward the tail
       const m = M(h1, 0.5);
-      const at = [[1.2, 0.13, 0.3, 0.11], [1.09, 0.3, 0.75, 0.12], [0.95, 0.39, 1.05, 0.11], [0.78, 0.43, 1.3, 0.1], [0.6, 0.445, 1.5, 0.085], [0.42, 0.445, 1.57, 0.07]];
+      const at = [[1.3, 0.14, 0.3, 0.11], [1.19, 0.31, 0.75, 0.12], [1.05, 0.41, 1.05, 0.11], [0.88, 0.46, 1.3, 0.1], [0.7, 0.485, 1.5, 0.085], [0.5, 0.488, 1.57, 0.07]];
       for (const [y, z, a, r] of at) {
         const sp = add(new THREE.ConeGeometry(r, r * 2.1, 12).scale(0.55, 1, 1), m, 0, y + Math.cos(a) * r * 0.6, -z - Math.sin(a) * r * 0.6);
         sp.rotation.x = -a;
@@ -592,24 +597,27 @@ function hat(o: Outfit): THREE.Object3D | null {
 // ----------------------------------------------------------------------------------- shapes
 let G: ReturnType<typeof shapes> | null = null;
 /** limb sizes (m) */
-const ARM_A = 0.22, ARM_B = 0.2, ARM_R = 0.068, HAND_R = 0.105;
-const LEG_A = 0.15, LEG_B = 0.15, LEG_R = 0.088;
+const ARM_A = 0.2, ARM_B = 0.18, ARM_R = 0.094, HAND_R = 0.135;
+const LEG_A = 0.085, LEG_B = 0.085, LEG_R = 0.11;
 function shapes() {
-  // the body: a tall soft bean turned round (the seam at the back), straight-sided, a round dome on top
+  // the body: a round, chunky bean turned round (the seam at the back), fullest a third of the way
+  // up, tapering a little to a full round dome; low to the ground on its hips
   const prof = new THREE.SplineCurve(
     [
-      [0.001, 0.2],
-      [0.2, 0.215],
-      [0.34, 0.27],
-      [0.42, 0.4],
-      [0.445, 0.58],
-      [0.448, 0.86],
-      [0.44, 1.1],
-      [0.41, 1.3],
-      [0.34, 1.46],
-      [0.22, 1.565],
-      [0.1, 1.61],
-      [0.001, 1.62],
+      [0.001, 0.13],
+      [0.2, 0.14],
+      [0.34, 0.19],
+      [0.43, 0.29],
+      [0.475, 0.43],
+      [0.488, 0.6],
+      [0.485, 0.8],
+      [0.47, 1.0],
+      [0.44, 1.17],
+      [0.39, 1.32],
+      [0.31, 1.45],
+      [0.2, 1.54],
+      [0.09, 1.59],
+      [0.001, 1.6],
     ].map(([x, y]) => new THREE.Vector2(x, y)),
   );
   const body = new THREE.LatheGeometry(prof.getPoints(48), 56).rotateY(Math.PI);
@@ -636,7 +644,7 @@ function shapes() {
     bone(seg(arm ? ARM_R * 0.92 : LEG_R * 0.92, arm ? ARM_B : LEG_B), L * 3 + 1);
     // a round mitten; a chunky rounded boot pointing forward (+z)
     if (arm) bone(new THREE.SphereGeometry(HAND_R, 16, 12).scale(1, 1.08, 0.9), L * 3 + 2);
-    else bone(new THREE.SphereGeometry(1, 18, 12).scale(0.125, 0.085, 0.185).translate(0, -0.02, 0.06), L * 3 + 2);
+    else bone(new THREE.SphereGeometry(1, 18, 12).scale(0.15, 0.095, 0.2).translate(0, -0.02, 0.06), L * 3 + 2);
   }
   const limbs = mergeGeometries(parts)!;
   const eye = new THREE.SphereGeometry(0.135, 28, 18).scale(1, 1.14, 0.6);
@@ -868,7 +876,7 @@ export class BeanRig {
     const fy = FACE_Y - HIP_Y;
     for (const s of [-1, 1]) {
       const e = mesh(G.eye, S.eye, false);
-      e.position.set(s * 0.15, fy, 0.36);
+      e.position.set(s * 0.15, fy, 0.375);
       e.rotation.y = s * 0.3;
       this.eyes.add(e);
       const br = mesh(G.brow, S.brow, false);
@@ -879,18 +887,18 @@ export class BeanRig {
     }
     this.face.add(this.eyes);
     this.pupils = new THREE.Mesh(mergeGeometries([G.pupil.clone().translate(-0.15, 0, 0), G.pupil.clone().translate(0.15, 0, 0)]), S.pupil);
-    this.pupils.position.set(0, fy, 0.44);
+    this.pupils.position.set(0, fy, 0.455);
     this.face.add(this.pupils);
     this.smile = mesh(G.smile, S.mouth, false);
-    this.smile.position.set(0, fy - 0.19, 0.43);
+    this.smile.position.set(0, fy - 0.19, 0.455);
     this.smile.rotation.x = -0.22;
     this.ooh = mesh(G.ooh, S.mouth, false);
-    this.ooh.position.set(0, fy - 0.2, 0.43);
+    this.ooh.position.set(0, fy - 0.2, 0.455);
     this.ooh.visible = false;
     this.face.add(this.smile, this.ooh);
     for (const s of [-1, 1]) {
       const c = mesh(G.cheek, S.cheek, false);
-      c.position.set(s * 0.27, fy - 0.14, 0.355);
+      c.position.set(s * 0.28, fy - 0.14, 0.37);
       c.rotation.y = s * 0.62;
       this.face.add(c);
     }
@@ -907,7 +915,7 @@ export class BeanRig {
     this.limbMesh.receiveShadow = true;
     this.limbMesh.frustumCulled = false;
     this.root.add(this.limbMesh);
-    this.limbs = [new Limb(ARM_A, ARM_B, HAND_R), new Limb(ARM_A, ARM_B, HAND_R), new Limb(LEG_A, LEG_B, 0.08), new Limb(LEG_A, LEG_B, 0.08)];
+    this.limbs = [new Limb(ARM_A, ARM_B, HAND_R), new Limb(ARM_A, ARM_B, HAND_R), new Limb(LEG_A, LEG_B, 0.09), new Limb(LEG_A, LEG_B, 0.09)];
     const h = hat(outfit);
     if (h) {
       this.crownG.add(h);
@@ -1057,9 +1065,9 @@ export class BeanRig {
         bend = 0.1;
       }
       const sy = SHOULDER_Y - HIP_Y, j = jl(sy);
-      toW(sgn * 0.44 + J.x * j, sy, J.y * j, anchor);
+      toW(sgn * SHOULDER_X + J.x * j, sy, J.y * j, anchor);
       dir(rx, rz, V2);
-      const ls = new THREE.Vector3(sgn * 0.44 + J.x * j, sy, J.y * j).addScaledVector(V2, ARM_A);
+      const ls = new THREE.Vector3(sgn * SHOULDER_X + J.x * j, sy, J.y * j).addScaledVector(V2, ARM_A);
       toW(ls.x, ls.y, ls.z, mid);
       dir(rx - bend, rz, V2);
       ls.addScaledVector(V2, ARM_B + HAND_R * 0.6);
@@ -1076,12 +1084,12 @@ export class BeanRig {
       rx = THREE.MathUtils.lerp(rx, 1.3, this.dive);
       knee = THREE.MathUtils.lerp(knee, 0.2, this.dive);
       const hy = 0.0, j = jl(0.05);
-      toW(sgn * 0.17 + J.x * j, hy, J.y * j, anchor);
+      toW(sgn * 0.2 + J.x * j, hy, J.y * j, anchor);
       dir(rx, sgn * 0.05, V2);
-      const ls = new THREE.Vector3(sgn * 0.17, hy, 0).addScaledVector(V2, LEG_A);
+      const ls = new THREE.Vector3(sgn * 0.2, hy, 0).addScaledVector(V2, LEG_A);
       toW(ls.x, ls.y, ls.z, mid);
       dir(rx - knee, sgn * 0.05, V2);
-      ls.addScaledVector(V2, LEG_B + 0.04);
+      ls.addScaledVector(V2, LEG_B + 0.03);
       toW(ls.x, ls.y, ls.z, end);
       this.limbs[L].step(dt, anchor, mid, end, rate * 1.2, this.floorY);
     }

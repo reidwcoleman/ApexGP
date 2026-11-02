@@ -171,7 +171,7 @@ class Crowd {
   private v = new THREE.Vector3();
   private one = new THREE.Vector3(1, 1, 1);
   constructor(n: number) {
-    const prof = [[0.001, 0], [0.3, 0.02], [0.42, 0.16], [0.45, 0.5], [0.44, 0.9], [0.36, 1.2], [0.2, 1.36], [0.001, 1.4]].map(([x, y]) => new THREE.Vector2(x, y));
+    const prof = [[0.001, 0], [0.32, 0.03], [0.45, 0.18], [0.49, 0.45], [0.47, 0.85], [0.39, 1.15], [0.22, 1.32], [0.001, 1.37]].map(([x, y]) => new THREE.Vector2(x, y));
     const bg = merge([
       solid(new THREE.LatheGeometry(new THREE.SplineCurve(prof).getPoints(16), 20), 0xffffff),
       // arms up, cheering
