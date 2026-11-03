@@ -305,6 +305,9 @@ export class UI {
     else if (s.k === 'dep') h = this.depPanel(this.sim.s.deposits[s.id]);
     else if (s.k === 'quarry') h = this.quarryPanel();
     if (!h) { this.sel = null; w.innerHTML = ''; return; }
+    const acc = s.k === 'cart' ? MENU_BY[this.selCart()?.menu[0] ?? 'hotdog'].color : s.k === 'shop' ? SHOP_BY[this.selShop()?.type ?? 'cafe'].color : s.k === 'bld' ? (this.selFac() ? FAC_BY[this.selFac()!.type].color : this.sim.isMine(s.id) ? '#f2a91c' : '#8a8f99') : s.k === 'dep' ? GOODS[this.sim.s.deposits[s.id].ore].color : '#b5643c';
+    const ic = s.k === 'cart' ? 'cart' : s.k === 'shop' ? 'shop' : s.k === 'bld' ? (this.selFac() ? 'gear' : 'bld') : 'gem';
+    h = h.replace('<div class="ph">', `<div class="ph" style="--acc:${acc}"><span class="phi">${svg(ic)}</span>`);
     const scroll = w.querySelector('.pb')?.scrollTop ?? 0;
     const same = w.firstElementChild?.getAttribute('data-sel') === JSON.stringify(s);
     w.innerHTML = `<div class="panel glass" data-sel='${JSON.stringify(s)}' style="${same ? 'animation:none' : ''}">${h}</div>`;

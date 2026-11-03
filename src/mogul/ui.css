@@ -128,7 +128,13 @@
 /* ---------- side panel ---------- */
 .panel { position: absolute; right: 16px; top: 90px; bottom: 120px; width: 360px; display: flex; flex-direction: column; overflow: hidden; animation: pin 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.15); }
 @keyframes pin { from { transform: translateX(30px); opacity: 0; } }
-.panel .ph { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); position: relative; }
+.panel .ph { padding: 18px 18px 12px 74px; min-height: 76px; border-bottom: 1px solid var(--line); position: relative; background: linear-gradient(180deg, color-mix(in srgb, var(--acc, #ffc83d) 14%, transparent), transparent); }
+.panel .ph::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--acc, var(--gold)); }
+.panel .phi { position: absolute; left: 16px; top: 18px; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--acc, var(--gold)); color: #fff; box-shadow: 0 6px 14px color-mix(in srgb, var(--acc, #ffc83d) 45%, transparent); }
+.panel .phi svg { width: 24px; height: 24px; }
+.stat { transition: transform 0.15s; }
+.stat:hover { transform: translateY(-1px); }
+.up:active, .btn:active { transform: scale(0.96); }
 .panel .ph .x { position: absolute; right: 10px; top: 10px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--ink2); }
 .panel .ph .x:hover { background: var(--panel2); }
 .panel .ph h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.1; padding-right: 30px; }
