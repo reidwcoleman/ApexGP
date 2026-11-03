@@ -293,7 +293,7 @@ export class Props {
     for (const d of s.deposits) {
       const want = d.found && !d.claimed;
       const g = this.markers.get(d.id);
-      if (want && !g) { const m = makeMarker(GOODS[d.ore].color); m.position.set(d.x, 0, d.z); m.userData.dep = d.id; this.markers.set(d.id, m); this.root.add(m); }
+      if (want && !g) { const m = makeMarker(GOODS[d.ore].color); m.scale.setScalar(1.8); m.position.set(d.x, 0, d.z); m.userData.dep = d.id; this.markers.set(d.id, m); this.root.add(m); }
       if (!want && g) { this.root.remove(g); this.markers.delete(d.id); }
     }
   }

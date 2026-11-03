@@ -437,7 +437,8 @@ export class Sim {
     d.claimed = true;
     const q: Quarry = { id: this.s.ids++, dep: d.id, x: d.x, z: d.z, lv: 1, store: {}, autoSell: true, mined: 0 };
     this.s.quarries.push(q);
-    this.log(`${this.s.company} staked a ${ORE_BY[d.ore].name.toLowerCase()} quarry`, 'me');
+    const on = ORE_BY[d.ore].name.toLowerCase();
+    this.log(`${this.s.company} staked ${/^[aeiou]/.test(on) ? 'an' : 'a'} ${on} quarry`, 'me');
     this.checkQuests();
     this.onChange();
     return q;
