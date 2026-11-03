@@ -403,7 +403,7 @@ export class Sim {
     this.s.facs = this.s.facs.filter((x) => x.b !== b.id);
     const buildT = Math.max(2, Math.min(12, f.cost / 8000));
     this.s.facs.push({ b: b.id, type, lv: 1, build: 0, buildT, store: {}, autoSell: true, auto: true, made: 0 });
-    this.log(`${this.s.company} is building a ${f.name} at ${b.addr}`, 'me');
+    this.log(`${this.s.company} broke ground on a new ${f.name} at ${b.addr}`, 'me');
     this.checkQuests();
     this.onChange();
     return true;
@@ -681,7 +681,7 @@ export class Sim {
   private produce(hours: number) {
     for (const f of this.s.facs) {
       const t = FAC_BY[f.type];
-      if (f.build < 1) { f.build = Math.min(1, f.build + hours / f.buildT); if (f.build >= 1) { this.onToast(`${t.name} is open for business`, 'good'); this.log(`${this.s.company} opened a ${t.name}`, 'me'); this.onChange(); } continue; }
+      if (f.build < 1) { f.build = Math.min(1, f.build + hours / f.buildT); if (f.build >= 1) { this.onToast(`${t.name} is open for business`, 'good'); this.log(`${this.s.company}'s ${t.name} is open`, 'me'); this.onChange(); } continue; }
       if (!t.recipe) continue;
       const rate = this.facRate(f) * hours;
       let frac = 1;
@@ -863,6 +863,9 @@ export class Sim {
         this.s.mult[g] = Math.max(0.35, Math.min(3, m + (1 - m) * 0.04 + (Math.random() - 0.5) * GOODS[g].vol * 0.6));
         const h = this.s.hist[g]; h.push(this.s.mult[g]); if (h.length > 48) h.shift();
       }
+      const hr = hi % 24;
+      const rush: Record<number, string> = { 8: 'Morning rush: coffee lines incoming', 12: 'Lunch rush: hot dogs, tacos and burgers fly out', 18: 'Evening rush: the streets are packed', 22: 'Night owls out: tacos sell best now' };
+      if (rush[hr] && (this.myCarts().length || this.s.shops.length)) this.onToast(rush[hr], 'city');
       const per = 1 / (DAYS_PER_MONTH * 24);
       for (const r of this.s.rivals) r.nw += r.target * per * (0.5 + Math.random());
       this.checkQuests();

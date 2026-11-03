@@ -420,7 +420,7 @@ export class World {
     const elev = sunUp ? 0.12 + el * 0.95 : 0.6;
     this.sun.position.set(Math.cos(az) * R, Math.sin(elev) * R * 1.1, Math.sin(az) * R * 0.6 - R * 0.2);
     // night factor with dusk/dawn ramps
-    const n = h < 5 || h > 21 ? 1 : h < 7 ? 1 - (h - 5) / 2 : h > 19 ? (h - 19) / 2 : 0;
+    const n = (h < 4.5 || h > 22.5 ? 1 : h < 6.5 ? 1 - (h - 4.5) / 2 : h > 20 ? (h - 20) / 2.5 : 0) * 0.85;
     this.night = n;
     this.uni.uNight.value = n;
     const dusk = Math.max(0, 1 - Math.abs(h - 19.3) / 1.6) + Math.max(0, 1 - Math.abs(h - 6.4) / 1.3);
@@ -430,8 +430,8 @@ export class World {
     (this.scene.fog as THREE.Fog).color.copy(sky);
     this.sun.intensity = sunUp ? 1.0 + 2.2 * el : 0.25;
     this.sun.color.set(dusk > 0.3 ? 0xffc79a : 0xfff1dc).lerp(new THREE.Color(0x8fa6ff), n);
-    this.hemi.intensity = 1.45 - 0.7 * n;
-    this.hemi.color.set(0xe4ecf5).lerp(new THREE.Color(0x5a6db0), n);
+    this.hemi.intensity = 1.45 - 0.55 * n;
+    this.hemi.color.set(0xe4ecf5).lerp(new THREE.Color(0x7a8ccc), n);
     this.renderer.toneMappingExposure = 1.05 - 0.15 * n;
   }
 
