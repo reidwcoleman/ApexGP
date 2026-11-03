@@ -29,6 +29,10 @@ export class Peds {
   onServed: (sel: Seller, amount: number) => void = () => {};
   onLost: (sel: Seller) => void = () => {};
   extra = new Map<number, number>(); // edge → extra weight (apartments, festivals)
+  vip = -1;
+  vipT = 0;
+  crown: THREE.Group;
+  onVip: (sel: Seller, amount: number) => void = () => {};
 
   constructor(scene: THREE.Scene, city: City, sim: Sim, n = 1600) {
     this.city = city; this.sim = sim; this.N = n;
@@ -53,6 +57,19 @@ export class Peds {
     this.body.castShadow = true;
     this.body.frustumCulled = false; this.head.frustumCulled = false;
     scene.add(this.body, this.head);
+    // the VIP's marker: a spinning gold star with a halo
+    this.crown = new THREE.Group();
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.9), new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0xffa000, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.3 }));
+    star.position.y = 4.2;
+    star.name = 'star';
+    const halo = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.6, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd65a, transparent: true, opacity: 0.8, depthWrite: false }));
+    halo.position.y = 0.15;
+    halo.name = 'halo';
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6), new THREE.MeshBasicMaterial({ color: 0xffd65a, transparent: true, opacity: 0.6 }));
+    beam.position.y = 2.6;
+    this.crown.add(star, halo, beam);
+    this.crown.visible = false;
+    scene.add(this.crown);
   }
 
   reweight() {
@@ -143,6 +160,24 @@ export class Peds {
     this.seller[i] = -1;
   }
 
+  /** Send a VIP (a food critic, a big spender) walking past one of your sellers. */
+  spawnVip(): Seller | null {
+    const mine = this.sellers.filter((s) => s.mine);
+    if (!mine.length || this.vip >= 0) return null;
+    const s = mine[Math.floor(Math.random() * mine.length)];
+    let best = -1, bd = 1e9;
+    for (let i = 0; i < this.N; i++) {
+      if (!this.act[i] || this.st[i] !== St.Walk) continue;
+      const d = Math.hypot(this.x[i] - s.x, this.z[i] - s.z);
+      if (d > 30 && d < 140 && d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return null;
+    this.vip = best;
+    this.vipT = 70;
+    this.seen[best] = -1;
+    return s;
+  }
+
   /** Click-to-serve on a cart: the person at the front is served on the spot. */
   rush(key: string): boolean {
     const s = this.sellers.find((x) => x.key === key);
@@ -157,7 +192,8 @@ export class Peds {
     s.line = s.line.filter((k) => k !== i);
     s.inside = s.inside.filter((k) => k !== i);
     const amt = this.sim.serve(s.key);
-    if (s.mine && amt > 0) this.onServed(s, amt);
+    if (i === this.vip) { this.vip = -1; this.crown.visible = false; if (s.mine && amt > 0) this.onVip(s, amt); }
+    else if (s.mine && amt > 0) this.onServed(s, amt);
     this.release(i);
     this.seen[i] = this.sellers.indexOf(s);
   }
@@ -198,6 +234,8 @@ export class Peds {
           this.st[i] = St.Inside;
         }
       }
+      // whoever is nearest the counter goes first, so nobody waits on a straggler still walking over
+      if (s.line.length > 1) s.line.sort((a, b) => Math.hypot(this.x[a] - s.x, this.z[a] - s.z) - Math.hypot(this.x[b] - s.x, this.z[b] - s.z));
       s.line.forEach((i, k) => { const [qx, qz] = this.queueSpot(s, k); this.tx[i] = qx; this.tz[i] = qz; });
     }
     for (let i = 0; i < N; i++) {
@@ -240,7 +278,7 @@ export class Peds {
             const s = this.sellers[k];
             const d = Math.hypot(this.x[i] - s.x, this.z[i] - s.z);
             if (d > s.radius) { if (this.seen[i] === k && d > s.radius + 8) this.seen[i] = -1; continue; }
-            if (this.seen[i] === k) continue;
+            if (this.seen[i] === k && i !== this.vip) continue;
             const sc = s.p * Math.random() * (1 - d / (s.radius * 1.3));
             if (sc > bs) { bs = sc; best = k; }
           }
@@ -249,7 +287,9 @@ export class Peds {
             // roll once per pass, against everyone nearby
             for (let k = 0; k < this.sellers.length; k++) if (Math.hypot(this.x[i] - this.sellers[k].x, this.z[i] - this.sellers[k].z) <= this.sellers[k].radius) this.seen[i] = k;
             this.seen[i] = best;
-            if (Math.random() < s.p) {
+            const isVip = i === this.vip;
+            if (isVip && !s.mine) continue;
+            if (Math.random() < (isVip ? 0.97 : s.p)) {
               if (s.line.length >= s.cap) { if (s.mine) this.onLost(s); }
               else {
                 s.line.push(i);
@@ -265,7 +305,7 @@ export class Peds {
         const dx = this.tx[i] - this.x[i], dz = this.tz[i] - this.z[i];
         const d = Math.hypot(dx, dz);
         if (d > 0.05) {
-          const k = Math.min(d, this.sp[i] * sdt * 1.2);
+          const k = Math.min(d, this.sp[i] * sdt * (this.st[i] === St.Go ? 1.9 : 1.2));
           this.x[i] += (dx / d) * k; this.z[i] += (dz / d) * k;
           this.yaw[i] = Math.atan2(dx, dz);
         } else {
@@ -293,6 +333,18 @@ export class Peds {
   }
 
   private draw(dt: number) {
+    if (this.vip >= 0) {
+      this.vipT -= dt;
+      if (this.vipT <= 0 || !this.act[this.vip]) { this.vip = -1; }
+    }
+    this.crown.visible = this.vip >= 0 && this.st[this.vip] !== St.Inside;
+    if (this.crown.visible) {
+      this.crown.position.set(this.x[this.vip], 0, this.z[this.vip]);
+      const st = this.crown.getObjectByName('star')!;
+      st.rotation.y += dt * 4;
+      st.position.y = 4.2 + Math.sin(performance.now() / 200) * 0.3;
+      this.crown.getObjectByName('halo')!.scale.setScalar(1 + 0.25 * Math.sin(performance.now() / 160));
+    }
     for (let i = 0; i < this.N; i++) {
       const vis = this.act[i] && this.st[i] !== St.Inside;
       if (!vis) { this.m.makeScale(0, 0, 0); this.body.setMatrixAt(i, this.m); this.head.setMatrixAt(i, this.m); continue; }

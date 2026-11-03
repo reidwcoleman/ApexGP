@@ -31,6 +31,7 @@ export class World {
     uMine: { value: new THREE.Color('#ffc83d') },
   };
   night = 0;
+  onSky: (top: THREE.Color, hor: THREE.Color, sun: THREE.Vector3, sunC: THREE.Color, night: number) => void = () => {};
   private ray = new THREE.Raycaster();
   private keys = new Set<string>();
 
@@ -316,6 +317,11 @@ export class World {
             diffuseColor.rgb = mix(vec3(1.0, 0.62, 0.15), vec3(0.22, 0.2, 0.2), st * 0.8);
           }
           float wall = 1.0 - step(0.5, abs(vWN.y));
+          // roofs: gravel tone, a lighter parapet line where the roof meets the wall is faked by height noise
+          float roof = 1.0 - wall;
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.66, 0.64, 0.6), diffuseColor.rgb, 0.45) * (0.92 + 0.12 * h21(floor(vWP.xz * 0.7))), roof * (code > 0.5 ? 0.25 : 0.7));
+          // grounding: darker at the foot of every wall, a touch lighter up high
+          diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.0, 9.0, vWP.y)) * (1.0 + 0.07 * smoothstep(20.0, 160.0, vWP.y));
           vec3 tng = vec3(-vWN.z, 0.0, vWN.x); tng /= max(length(tng), 1e-3);
           float u = dot(vWP, tng);
           float fl = floor(vWP.y / 3.4);
@@ -324,7 +330,11 @@ export class World {
           float fw = clamp(1.6 - fwidth(u / 3.1) * 3.0, 0.0, 1.0);
           float win = wall * step(0.2, fc.x) * step(fc.x, 0.8) * step(0.28, fc.y) * step(fc.y, 0.82) * step(3.6, vWP.y);
           float lit = step(0.6, h21(cell + vId * 1.37));
-          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.42, 0.52, 0.62), vec3(0.62, 0.74, 0.84), h21(cell)), win * mix(0.18, 0.5, fw));
+          float fres = pow(1.0 - abs(dot(normalize(cameraPosition - vWP), vWN)), 2.0);
+          vec3 glass = mix(mix(vec3(0.36, 0.46, 0.58), vec3(0.6, 0.72, 0.84), h21(cell)), vec3(0.85, 0.92, 1.0), fres * 0.6 * (1.0 - uNight));
+          diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * mix(0.2, 0.62, fw));
+          // a pale band between floors reads as a ledge
+          diffuseColor.rgb *= 1.0 + wall * 0.06 * step(fc.y, 0.08) * fw * step(3.6, vWP.y);
           // ground-floor shopfront band
           float shop = wall * (1.0 - step(3.6, vWP.y)) * step(0.4, vWP.y);
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.8, shop * 0.6);
@@ -426,8 +436,11 @@ export class World {
     const dusk = Math.max(0, 1 - Math.abs(h - 19.3) / 1.6) + Math.max(0, 1 - Math.abs(h - 6.4) / 1.3);
     const dayC = new THREE.Color(0xbfdcf5), duskC = new THREE.Color(0xf4a678), nightC = new THREE.Color(0x0b1430);
     const sky = dayC.clone().lerp(duskC, Math.min(1, dusk) * 0.8).lerp(nightC, n);
-    this.scene.background = sky;
-    (this.scene.fog as THREE.Fog).color.copy(sky);
+    const top = new THREE.Color(0x5f9fe0).lerp(new THREE.Color(0x6a7fc0), Math.min(1, dusk) * 0.6).lerp(new THREE.Color(0x050a1c), n);
+    const hor = new THREE.Color(0xd6e6f2).lerp(new THREE.Color(0xffb88a), Math.min(1, dusk) * 0.85).lerp(new THREE.Color(0x1a2448), n);
+    this.scene.background = hor;
+    (this.scene.fog as THREE.Fog).color.copy(hor).lerp(sky, 0.3);
+    this.onSky(top, hor, this.sun.position.clone().normalize(), new THREE.Color(dusk > 0.3 ? 0xffa060 : 0xfff2d0), n);
     this.sun.intensity = sunUp ? 1.0 + 2.2 * el : 0.25;
     this.sun.color.set(dusk > 0.3 ? 0xffc79a : 0xfff1dc).lerp(new THREE.Color(0x8fa6ff), n);
     this.hemi.intensity = 1.45 - 0.55 * n;
@@ -471,6 +484,10 @@ export class World {
     const cx = Math.max(-c.W / 2 - 50, Math.min(c.W / 2 + 50, t.x)), cz = Math.max(-c.D / 2 - 50, Math.min(c.D / 2 + 50, t.z));
     if (cx !== t.x || cz !== t.z) { const d = new THREE.Vector3(cx - t.x, 0, cz - t.z); t.add(d); this.camera.position.add(d); }
     this.controls.update();
+    // never sink into a building: keep the camera above whatever roof it is over
+    const cp = this.camera.position;
+    const under = this.city.buildingAt(cp.x, cp.z);
+    if (under) { const top = under.h * this.stateData[under.id * 4 + 1] + 12; if (cp.y < top) { const d = top - cp.y; cp.y += d; } }
     // shadows follow the view a little so the near city stays crisp
     this.sun.target.position.set(t.x * 0.5, 0, t.z * 0.5);
     this.renderer.render(this.scene, this.camera);

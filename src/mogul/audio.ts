@@ -51,6 +51,18 @@ export class Sfx {
     [523, 659, 784, 1046].forEach((f, i) => this.tone(f, t + i * 0.09, 0.3, 'triangle', 0.13));
     this.tone(1568, t + 0.36, 0.5, 'sine', 0.08);
   }
+  frenzy() {
+    const c = this.ensure(); if (!c) return;
+    const t = c.currentTime;
+    [392, 494, 587, 784, 988, 1175, 1568].forEach((f, i) => { this.tone(f, t + i * 0.06, 0.22, 'square', 0.05); this.tone(f / 2, t + i * 0.06, 0.2, 'triangle', 0.08); });
+    this.tone(1568, t + 0.45, 0.8, 'sawtooth', 0.04, 2093);
+  }
+  cash() {
+    const c = this.ensure(); if (!c) return;
+    const t = c.currentTime;
+    for (let i = 0; i < 6; i++) this.tone(1200 + i * 180 + Math.random() * 80, t + i * 0.045, 0.12, 'square', 0.04);
+    this.tone(2093, t + 0.3, 0.4, 'triangle', 0.08);
+  }
   ping() { const c = this.ensure(); if (!c) return; const t = c.currentTime; this.tone(880, t, 0.9, 'sine', 0.14, 440); this.tone(1320, t + 0.15, 0.7, 'sine', 0.06, 660); }
   found() { const c = this.ensure(); if (!c) return; const t = c.currentTime; [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, t + i * 0.07, 0.25, 'square', 0.05)); }
 

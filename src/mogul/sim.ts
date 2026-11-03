@@ -17,6 +17,7 @@ export interface Quarry { id: number; dep: number; x: number; z: number; lv: num
 export interface Rival { name: string; color: string; nw: number; start: number; target: number; trophies: number[] }
 export interface Vehicle { id: number; own: boolean; path: number[]; seg: number; s: number; x: number; z: number; dir: number; good: GoodId | null; n: number; from: string; to: string; phase: 'idle' | 'pick' | 'drop' | 'leave'; wait: number; node: number; speed: number }
 export interface Tick { t: number; text: string; kind: 'me' | 'rival' | 'market' | 'city' }
+export interface Order { id: number; kind: 'serve' | 'earn' | 'deliver'; good?: GoodId; need: number; have: number; pay: number; until: number; title: string }
 export interface Event { kind: 'festival' | 'heat' | 'rain' | 'boom'; edge?: number; good?: GoodId; day: number; text: string }
 
 export interface SaveState {
@@ -26,6 +27,7 @@ export interface SaveState {
   rivals: Rival[]; rivalOwn: Record<string, number>; forSale: number[];
   quest: number; stats: { served: number; sales: number; sold: number; surveys: number; monthStart: number; bestRank: number; lastGrowth: number };
   trophies: number[]; ids: number; savedAt: number; events: Event[]; seed: number; propVal: number;
+  orders: Order[]; nwHist: number[]; orderIds: number;
 }
 
 const rnd = (seed: number) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
@@ -56,6 +58,7 @@ export class Sim {
     this.city = city;
     this.terminal = city.edgeNode();
     this.s = save ?? this.fresh(company);
+    this.s.orders ??= []; this.s.nwHist ??= []; this.s.orderIds ??= 1;
     if (!save) this.seedRivals();
     this.lastDay = Math.floor(this.s.t / 24);
     this.lastHourInt = Math.floor(this.s.t);
@@ -90,7 +93,7 @@ export class Sim {
       carts: [], shops: [], owned: [], facs: [], deposits, quarries: [], trucks: 0, mult, hist,
       rivals: [], rivalOwn: {}, forSale, quest: 0,
       stats: { served: 0, sales: 0, sold: 0, surveys: 0, monthStart: START_CASH, bestRank: 99, lastGrowth: 0 },
-      trophies: [], ids: 1, savedAt: Date.now(), events: [], seed, propVal: 1,
+      trophies: [], ids: 1, savedAt: Date.now(), events: [], seed, propVal: 1, orders: [], nwHist: [], orderIds: 1,
     };
   }
 
@@ -121,7 +124,7 @@ export class Sim {
   }
 
   private planRivals() {
-    const base = Math.max(this.month <= 1 ? 6000 : 15000, this.s.stats.lastGrowth * 1.15, this.netWorth() * 0.6);
+    const base = Math.max(this.month <= 1 ? 10000 : 15000, this.s.stats.lastGrowth * 1.15, this.netWorth() * 0.6);
     const R = rnd((this.s.seed + Math.floor(this.s.t)) >>> 0);
     for (const r of this.s.rivals) { r.start = r.nw; r.target = base * (0.25 + R() * 1.35); }
   }
@@ -173,7 +176,8 @@ export class Sim {
       for (const id of c.menu) { const m = MENU_BY[id]; best = Math.max(best, peakMul(m.peak, h) * this.priceF(c.prices[id], m.fair) * itemMul(m) * (this.hasStock(c.stock, m) || c.rival >= 0 ? 1 : 0)); }
       const variety = 1 + 0.22 * (c.menu.length - 1);
       const appeal = 1 + 0.25 * c.lv.style;
-      return { p: Math.min(0.9, 0.46 * best * variety * appeal * (c.rival >= 0 ? 0.85 : 1)), radius: 22 + 6 * c.lv.sign };
+      const fz = c.rival < 0 && this.frenzy > 0 ? 1.8 : 1;
+      return { p: Math.min(0.95, 0.46 * best * variety * appeal * fz * (c.rival >= 0 ? 0.85 : 1)), radius: (22 + 6 * c.lv.sign) * (fz > 1 ? 1.3 : 1) };
     }
     const sh = this.shop(+key.slice(2));
     if (!sh) return { p: 0, radius: 0 };
@@ -181,15 +185,17 @@ export class Sim {
     let best = 0;
     for (const m of t.items) best = Math.max(best, peakMul(m.peak, h) * this.priceF(sh.prices[m.id], m.fair) * itemMul(m) * (this.hasStock(sh.stock, m) ? 1 : 0));
     const office = 1 + Math.min(1.2, this.city.buildings[sh.b].floors / 25); // people working upstairs come down for it
-    return { p: Math.min(0.95, 0.6 * best * office * (1 + 0.1 * (t.items.length - 1)) * (1 + 0.25 * sh.lv.decor)), radius: 36 + 10 * sh.lv.ads };
+    const fz = this.frenzy > 0 ? 1.7 : 1;
+    return { p: Math.min(0.97, 0.6 * best * office * fz * (1 + 0.1 * (t.items.length - 1)) * (1 + 0.25 * sh.lv.decor)), radius: (36 + 10 * sh.lv.ads) * (fz > 1 ? 1.25 : 1) };
   }
   private hasStock(st: Store, m: MenuItem) { return (st[m.good] ?? 0) >= m.use; }
 
   serviceTime(key: string): { t: number; par: number; cap: number } {
-    if (key[0] === 'c') { const c = this.cart(+key.slice(2)); return { t: 2.6 / (1 + 0.45 * (c?.lv.speed ?? 0)), par: 1, cap: 6 }; }
+    const fz = this.frenzy > 0 ? 1.6 : 1;
+    if (key[0] === 'c') { const c = this.cart(+key.slice(2)); return { t: 2.0 / (1 + 0.45 * (c?.lv.speed ?? 0)) / (c && c.rival < 0 ? fz : 1), par: 1, cap: 6 }; }
     const sh = this.shop(+key.slice(2));
     const crew = sh?.lv.crew ?? 0;
-    return { t: 4.5 / (1 + 0.25 * crew), par: 2 + crew, cap: 5 + crew };
+    return { t: 4.5 / (1 + 0.25 * crew) / fz, par: 2 + crew, cap: 5 + crew };
   }
 
   /** A customer reached the counter: pick an item, take the money, use the stock. Returns the price paid (0 = walked off). */
@@ -222,12 +228,82 @@ export class Sim {
     this.s.stats.served++; this.s.stats.sales += earned;
     this.dayLedger.income += earned;
     this.incAcc += earned;
+    this.addHype(isCart ? 0.02 : 0.012);
+    if (this.order) for (const o of this.s.orders) { if (o.kind === 'serve') o.have++; if (o.kind === 'earn') o.have += earned; }
     this.onSale(key, earned);
     this.checkQuests();
     return earned;
   }
 
   trophyBonus() { return this.s.trophies.reduce((a, t) => a + (t === 1 ? 0.06 : t === 2 ? 0.04 : 0.02), 0); }
+
+  // ------------------------------------------------------------------ hype, frenzy, bonuses
+  hype = 0;
+  frenzy = 0; // real seconds left
+  readonly order = true;
+  onFrenzy: (on: boolean) => void = () => {};
+  onOrder: (o: Order, done: boolean) => void = () => {};
+  addHype(x: number) {
+    if (this.frenzy > 0) return;
+    this.hype = Math.min(1, this.hype + x);
+    if (this.hype >= 1) { this.hype = 0; this.frenzy = 25; this.onFrenzy(true); this.log(`${this.s.company} has the whole street buzzing: FRENZY!`, 'me'); }
+  }
+  /** A bonus worth about half a minute of income, never less than a few dollars. */
+  bonusSize(mul = 1) { return Math.round(Math.max(25, this.incomeRate * 35 + this.netWorth() * 0.0015) * mul); }
+  gift(amount: number) { this.s.cash += amount; this.dayLedger.income += amount; this.incAcc += amount; this.onChange(); }
+
+  /** City orders: short jobs that refresh all day. Serve N, earn $X, or deliver goods you make. */
+  private makeOrder(kind: Order['kind']): Order | null {
+    const h = 4 + Math.floor(Math.random() * 4);
+    const until = this.s.t + h;
+    const rate = Math.max(6, this.s.stats.served / Math.max(4, this.s.t - 9)); // customers per game hour so far
+    if (kind === 'serve') {
+      const need = Math.max(12, Math.round((rate * h * (1.1 + Math.random() * 0.4)) / 5) * 5);
+      return { id: this.s.orderIds++, kind, need, have: 0, pay: Math.round(need * 3.2 + 60), until, title: `Serve ${need} customers` };
+    }
+    if (kind === 'earn') {
+      const per = Math.max(30, this.s.stats.sales / Math.max(4, this.s.t - 9));
+      const need = Math.max(150, Math.round((per * h * (1.15 + Math.random() * 0.4)) / 50) * 50);
+      return { id: this.s.orderIds++, kind, need, have: 0, pay: Math.round(need * 0.35 + 50), until, title: `Make ${money(need)} in sales` };
+    }
+    const made = new Set<GoodId>();
+    for (const f of this.s.facs) { const r = FAC_BY[f.type].recipe; if (r && f.build >= 1) for (const g of Object.keys(r.out)) made.add(g as GoodId); }
+    for (const q of this.s.quarries) made.add(this.s.deposits[q.dep].ore);
+    if (!made.size) return null;
+    const list = [...made];
+    const g = list[Math.floor(Math.random() * list.length)];
+    const need = Math.max(10, Math.round((900 / Math.sqrt(GOODS[g].price) * (0.6 + Math.random())) / 10) * 10);
+    return { id: this.s.orderIds++, kind, good: g, need, have: 0, pay: Math.round(need * this.price(g) * (1.45 + Math.random() * 0.4)), until: this.s.t + 24, title: `Deliver ${need} ${GOODS[g].name}` };
+  }
+  private tickOrders() {
+    const o = this.s.orders;
+    for (const x of o) {
+      if (x.kind === 'deliver') x.have = Math.min(x.need, Math.floor(this.totalStock(x.good!)));
+      if (x.kind !== 'deliver' && x.have >= x.need) this.completeOrder(x);
+    }
+    const now = this.s.t;
+    for (const x of o.filter((x) => x.until < now)) { this.s.orders = this.s.orders.filter((y) => y !== x); this.onOrder(x, false); }
+    if (!this.myCarts().length && !this.s.shops.length) return;
+    const kinds = new Set(this.s.orders.map((x) => x.kind));
+    for (const k of ['serve', 'earn', 'deliver'] as const) {
+      if (kinds.has(k) || this.s.orders.length >= 3) continue;
+      if (k === 'earn' && this.s.stats.served < 10) continue;
+      const n = this.makeOrder(k);
+      if (n) { this.s.orders.push(n); this.onOrder(n, false); }
+    }
+  }
+  completeOrder(x: Order) {
+    if (!this.s.orders.includes(x)) return;
+    if (x.kind === 'deliver') {
+      if (this.totalStock(x.good!) < x.need) return;
+      this.takeStock(x.good!, x.need);
+    }
+    this.s.orders = this.s.orders.filter((y) => y !== x);
+    this.gift(x.pay);
+    this.addHype(0.2);
+    this.log(`${this.s.company} filled a city order: ${x.title}`, 'me');
+    this.onOrder(x, true);
+  }
 
   // ------------------------------------------------------------------ actions
   can(cost: number) { return this.s.cash >= cost - 1e-6; }
@@ -848,6 +924,8 @@ export class Sim {
 
   // ------------------------------------------------------------------ the clock
   step(dtReal: number, speed: number) {
+    if (this.frenzy > 0 && speed > 0) { this.frenzy -= dtReal; if (this.frenzy <= 0) { this.frenzy = 0; this.onFrenzy(false); } }
+    else if (speed > 0) this.hype = Math.max(0, this.hype - dtReal * 0.0015);
     const dt = dtReal * speed;
     const hours = dt / SEC_PER_HOUR;
     this.s.t += hours;
@@ -864,6 +942,8 @@ export class Sim {
         this.s.mult[g] = Math.max(0.35, Math.min(3, m + (1 - m) * 0.04 + (Math.random() - 0.5) * GOODS[g].vol * 0.6));
         const h = this.s.hist[g]; h.push(this.s.mult[g]); if (h.length > 48) h.shift();
       }
+      this.tickOrders();
+      this.s.nwHist.push(Math.round(this.netWorth())); if (this.s.nwHist.length > 96) this.s.nwHist.shift();
       const hr = hi % 24;
       const rush: Record<number, string> = { 8: 'Morning rush: coffee lines incoming', 12: 'Lunch rush: hot dogs, tacos and burgers fly out', 18: 'Evening rush: the streets are packed', 22: 'Night owls out: tacos sell best now' };
       if (rush[hr] && (this.myCarts().length || this.s.shops.length)) this.onToast(rush[hr], 'city');

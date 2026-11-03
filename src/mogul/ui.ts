@@ -116,8 +116,17 @@ export class UI {
   mount(sim: Sim, city: City) {
     this.sim = sim; this.city = city;
     this.root.insertAdjacentHTML('beforeend', `
-      <div class="co glass" data-r="co"><div class="av" data-r="av"></div><div><div class="nm" data-r="nm"></div><div class="tier" data-r="tier"></div><div class="cash num" data-r="cash"></div><div class="sub num"><span>Worth <b data-r="nw"></b></span><span class="g" data-r="rate"></span></div></div></div>
-      <div class="quest glass" data-r="quest"></div>
+      <div class="leftcol">
+        <div class="co glass" data-r="co">
+          <div class="cotop"><div class="av" data-r="av"></div><div class="coinfo"><div class="nm" data-r="nm"></div><div class="tier" data-r="tier"></div><div class="cash num" data-r="cash"></div><div class="sub num"><span>Worth <b data-r="nw"></b></span><span class="g" data-r="rate"></span></div></div><svg class="nwspark" data-r="spark" viewBox="0 0 70 40" preserveAspectRatio="none"></svg></div>
+          <div class="hype" data-r="hype"><div class="hl"><b>${svg('heat', 2.4)}HYPE</b><span data-r="hypet">Every sale fills it. Full = Frenzy</span></div><div class="hb"><i data-r="hypebar"></i></div></div>
+        </div>
+        <div class="quest glass" data-r="quest"></div>
+        <div class="orders" data-r="orders"></div>
+      </div>
+      <canvas class="mini glass" data-r="mini" width="400" height="400"></canvas>
+      <canvas class="confetti" data-r="confetti"></canvas>
+      <div class="banner" data-r="banner"></div>
       <div class="clock glass"><svg class="sun" viewBox="0 0 30 30" data-r="sun"></svg><div><div class="tm num" data-r="tm"></div><div class="dy" data-r="dy"></div></div>
         <div class="spd" data-r="spd">${[0, 1, 2, 3].map((s) => `<button data-spd="${s}">${s ? s + '×' : svg('pause', 2.4).replace('<svg', '<svg width="14" height="14"')}</button>`).join('')}</div>
         <div class="rank" data-act="ranks"><b class="num" data-r="rank"></b><span>this month</span></div>
@@ -125,15 +134,15 @@ export class UI {
         <button class="ic" data-act="mute" title="Sound (M)" data-r="mute">${svg('vol')}</button>
       </div>
       <div class="dock glass" data-r="dock">
-        <button data-tool="cart"><span class="k">C</span>${svg('cart')}Cart<span class="cost" data-r="cartcost"></span></button>
-        <button data-act="rent"><span class="k">R</span>${svg('shop')}Rent</button>
-        <button data-act="buyb"><span class="k">B</span>${svg('bld')}Property</button>
-        <button data-tool="survey"><span class="k">V</span>${svg('survey')}Survey<span class="cost" data-r="survcost"></span></button>
+        <button data-tool="cart" data-tip="Park a food cart on a busy sidewalk" style="--ic:#e5533d"><span class="k">C</span><span class="dic">${svg('cart')}</span>Cart<span class="cost" data-r="cartcost"></span></button>
+        <button data-act="rent" data-tip="Rent a ground-floor room and open a shop" style="--ic:#a8673a"><span class="k">R</span><span class="dic">${svg('shop')}</span>Rent</button>
+        <button data-act="buyb" data-tip="Buy whole buildings, collect rent, redevelop" style="--ic:#f2a91c"><span class="k">B</span><span class="dic">${svg('bld')}</span>Property</button>
+        <button data-tool="survey" data-tip="Scan for buried ore only you can see" style="--ic:#2bb3a3"><span class="k">V</span><span class="dic">${svg('survey')}</span>Survey<span class="cost" data-r="survcost"></span></button>
         <span class="sep"></span>
-        <button data-act="trucks"><span class="k">T</span>${svg('truck')}Trucks</button>
-        <button data-act="exchange"><span class="k">X</span>${svg('ex')}Exchange</button>
-        <button data-act="empire"><span class="k">E</span>${svg('emp')}Empire</button>
-        <button data-act="ranks"><span class="k">L</span>${svg('rank')}Ranks</button>
+        <button data-act="trucks" data-tip="Your self-routing delivery fleet" style="--ic:#ffb000"><span class="k">T</span><span class="dic">${svg('truck')}</span>Trucks</button>
+        <button data-act="exchange" data-tip="Buy and sell goods on the world market" style="--ic:#22b26b"><span class="k">X</span><span class="dic">${svg('ex')}</span>Exchange</button>
+        <button data-act="empire" data-tip="Everything you own, in one place" style="--ic:#3d7be5"><span class="k">⇧E</span><span class="dic">${svg('emp')}</span>Empire</button>
+        <button data-act="ranks" data-tip="This month's race against nine rivals" style="--ic:#8a6cff"><span class="k">L</span><span class="dic">${svg('rank')}</span>Ranks</button>
       </div>
       <div class="ticker"><div class="tl">Live</div><div class="tw"><div class="tr" data-r="tick"></div></div></div>
       <div data-r="pops" style="position:absolute;inset:0;pointer-events:none"></div>
@@ -170,6 +179,8 @@ export class UI {
     const t = e.target as HTMLElement;
     const a = (k: string) => t.closest(`[data-${k}]`) as HTMLElement | null;
     let n: HTMLElement | null;
+    if ((n = a('order'))) { const o = this.sim.s.orders.find((x) => x.id === +n!.dataset.order!); if (o) { this.sim.completeOrder(o); this.renderOrders(true); } return; }
+    if (t === this.el.mini) { const r = t.getBoundingClientRect(); this.onMini((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); return; }
     if ((n = a('spd'))) { this.setSpeed(+n.dataset.spd!); this.onSpeed(this.speed); this.onSfx('click'); return; }
     if ((n = a('tool'))) { const tl = n.dataset.tool as Tool; this.onTool(this.tool === tl ? 'select' : tl); this.onSfx('click'); return; }
     if ((n = a('act'))) { this.act(n.dataset.act!, n); return; }
@@ -458,6 +469,120 @@ export class UI {
   }
 
   lineOf: (key: string) => number = () => 0;
+  onMini: (u: number, v: number) => void = () => {};
+
+  // ---------------------------------------------------------------- per-frame: cash count-up, hype, confetti
+  private shownCash = -1;
+  tick(dt: number) {
+    const sim = this.sim;
+    if (!sim) return;
+    const c = sim.s.cash;
+    if (this.shownCash < 0) this.shownCash = c;
+    const d = c - this.shownCash;
+    this.shownCash = Math.abs(d) < 0.5 ? c : this.shownCash + d * Math.min(1, dt * 7);
+    const txt = money(this.shownCash);
+    if (this.el.cash.textContent !== txt) this.el.cash.textContent = txt;
+    // hype
+    const fz = sim.frenzy;
+    this.el.hype.classList.toggle('on', fz > 0);
+    (this.el.hypebar as HTMLElement).style.width = (fz > 0 ? (fz / 25) * 100 : sim.hype * 100) + '%';
+    const ht = fz > 0 ? `FRENZY ${Math.ceil(fz)}s · everyone wants in` : sim.hype > 0.8 ? 'Almost there…' : 'Every sale fills it. Full = Frenzy';
+    if (this.el.hypet.textContent !== ht) this.el.hypet.textContent = ht;
+    this.stepConfetti(dt);
+  }
+
+  // ---------------------------------------------------------------- confetti + banners
+  private bits: { x: number; y: number; vx: number; vy: number; r: number; vr: number; c: string; w: number; h: number; t: number }[] = [];
+  confetti(n = 120, x = innerWidth / 2, y = innerHeight * 0.3, spread = 1) {
+    const cols = ['#ffc83d', '#ff5f6d', '#3d7be5', '#22b26b', '#ff9ec4', '#8a6cff', '#ffffff'];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = (4 + Math.random() * 9) * spread;
+      this.bits.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 7, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: cols[i % cols.length], w: 6 + Math.random() * 6, h: 3 + Math.random() * 4, t: 0 });
+    }
+  }
+  private stepConfetti(dt: number) {
+    const cv = this.el.confetti as HTMLCanvasElement;
+    if (!this.bits.length) { if (cv.width) { cv.width = 0; } return; }
+    if (cv.width !== innerWidth) { cv.width = innerWidth; cv.height = innerHeight; }
+    const g = cv.getContext('2d')!;
+    g.clearRect(0, 0, cv.width, cv.height);
+    const k = dt * 60;
+    for (const b of this.bits) {
+      b.t += dt; b.vy += 0.32 * k; b.vx *= Math.pow(0.985, k); b.x += b.vx * k; b.y += b.vy * k * 0.6; b.r += b.vr * k;
+      g.save(); g.translate(b.x, b.y); g.rotate(b.r); g.globalAlpha = Math.max(0, 1 - b.t / 2.6);
+      g.fillStyle = b.c; g.fillRect(-b.w / 2, -b.h / 2 * Math.abs(Math.cos(b.t * 8)), b.w, b.h * Math.abs(Math.cos(b.t * 8)) + 1); g.restore();
+    }
+    this.bits = this.bits.filter((b) => b.t < 2.6 && b.y < innerHeight + 40);
+  }
+  private bannerT: ReturnType<typeof setTimeout> | null = null;
+  banner(title: string, sub: string, color = '#ffc83d') {
+    const b = this.el.banner;
+    b.innerHTML = `<b style="--bc:${color}">${esc(title)}</b><span>${esc(sub)}</span>`;
+    b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+    if (this.bannerT) clearTimeout(this.bannerT);
+    this.bannerT = setTimeout(() => b.classList.remove('show'), 2600);
+  }
+
+  // ---------------------------------------------------------------- city orders
+  private ordersKey = '';
+  renderOrders(force = false) {
+    const sim = this.sim;
+    const os = sim.s.orders;
+    const key = os.map((o) => o.id + ':' + (o.kind === 'deliver' ? (o.have >= o.need ? 1 : 0) : 0)).join(',');
+    const w = this.el.orders;
+    if (key !== this.ordersKey || force) {
+      this.ordersKey = key;
+      w.innerHTML = os.length ? `<div class="oh">City orders</div>` + os.map((o) => {
+        const ico = o.kind === 'serve' ? svg('cart') : o.kind === 'earn' ? svg('ex') : o.good ? '' : '';
+        const icon = o.kind === 'deliver' && o.good ? gIcon(o.good, 30) : `<span class="gico" style="width:30px;height:30px;background:${o.kind === 'serve' ? '#e5533d' : '#22b26b'};color:#fff">${ico}</span>`;
+        const btn = o.kind === 'deliver' ? `<button class="obtn ${o.have >= o.need ? '' : 'off'}" data-order="${o.id}">Deliver</button>` : '';
+        return `<div class="ord glass" data-oid="${o.id}">${icon}<div class="ot"><b>${esc(o.title)}</b><div class="bar"><i data-ob="${o.id}"></i></div><span data-ol="${o.id}"></span></div><div class="op">+${money(o.pay)}${btn}</div></div>`;
+      }).join('') : '';
+    }
+    for (const o of os) {
+      const bar = w.querySelector(`[data-ob="${o.id}"]`) as HTMLElement | null;
+      if (bar) bar.style.width = Math.min(100, (o.have / o.need) * 100) + '%';
+      const l = w.querySelector(`[data-ol="${o.id}"]`) as HTMLElement | null;
+      const left = Math.max(0, o.until - sim.s.t);
+      const prog = o.kind === 'earn' ? `${money(o.have)} / ${money(o.need)}` : `${Math.floor(o.have)} / ${o.need}`;
+      const txt = `${prog} · ${left >= 1 ? Math.floor(left) + 'h' : Math.round(left * 60) + 'min'} left`;
+      if (l && l.textContent !== txt) l.textContent = txt;
+    }
+  }
+
+  // ---------------------------------------------------------------- minimap
+  private miniBg: HTMLCanvasElement | null = null;
+  drawMini(cam: { x: number; z: number; fx: number; fz: number; d: number }, marks: { x: number; z: number; c: string; r: number }[]) {
+    const cv = this.el.mini as HTMLCanvasElement;
+    const g = cv.getContext('2d')!;
+    const c = this.city;
+    const S = cv.width, sc = S / Math.max(c.W, c.D) * 0.96;
+    const X = (x: number) => S / 2 + x * sc, Z = (z: number) => S / 2 + z * sc;
+    if (!this.miniBg) {
+      const bg = document.createElement('canvas');
+      bg.width = bg.height = S;
+      const b = bg.getContext('2d')!;
+      b.fillStyle = '#efe6d4'; b.fillRect(0, 0, S, S);
+      for (const p of c.parks) { b.fillStyle = p.kind === 1 ? '#8cc8ec' : '#a9d98f'; b.beginPath(); for (let i = 0; i < p.pts.length; i += 2) (i ? b.lineTo : b.moveTo).call(b, X(p.pts[i]), Z(p.pts[i + 1])); b.fill(); }
+      b.lineCap = 'round';
+      for (const e of c.edges) { b.strokeStyle = e.cls >= 5 ? '#e4d6bb' : '#ffffff'; b.lineWidth = Math.max(1.2, e.w * sc * 0.9); b.beginPath(); b.moveTo(X(c.nx[e.a]), Z(c.nz[e.a])); b.lineTo(X(c.nx[e.b]), Z(c.nz[e.b])); b.stroke(); }
+      b.fillStyle = '#d7c8ae';
+      for (const bd of c.buildings) { b.beginPath(); for (let i = 0; i < bd.pts.length; i += 2) (i ? b.lineTo : b.moveTo).call(b, X(bd.pts[i]), Z(bd.pts[i + 1])); b.fill(); }
+      this.miniBg = bg;
+    }
+    g.drawImage(this.miniBg, 0, 0);
+    // owned buildings in gold, rivals in their colours
+    const sim = this.sim;
+    for (const id of sim.s.owned) { const bd = c.buildings[id]; g.fillStyle = '#f2a91c'; g.beginPath(); for (let i = 0; i < bd.pts.length; i += 2) (i ? g.lineTo : g.moveTo).call(g, X(bd.pts[i]), Z(bd.pts[i + 1])); g.fill(); }
+    for (const m of marks) { g.fillStyle = m.c; g.beginPath(); g.arc(X(m.x), Z(m.z), m.r, 0, 6.283); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
+    // the view: a wedge from the camera toward where it looks
+    const vx = X(cam.x), vz = Z(cam.z);
+    const r = Math.max(14, cam.d * sc * 0.6);
+    const a = Math.atan2(cam.fz, cam.fx);
+    g.fillStyle = 'rgba(35,32,27,0.12)'; g.strokeStyle = 'rgba(35,32,27,0.7)'; g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(vx - Math.cos(a) * r * 0.5, vz - Math.sin(a) * r * 0.5); g.arc(vx - Math.cos(a) * r * 0.5, vz - Math.sin(a) * r * 0.5, r * 1.2, a - 0.55, a + 0.55); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = '#23201b'; g.beginPath(); g.arc(vx, vz, 4, 0, 6.283); g.fill();
+  }
 
   // ---------------------------------------------------------------- modals
   modal(kind: string, arg?: number) {
@@ -586,12 +711,16 @@ export class UI {
     e.av.style.setProperty('--ring', tier.color);
     e.nm.textContent = s.company;
     e.tier.textContent = tier.name;
-    const cashTxt = money(s.cash);
-    if (e.cash.textContent !== cashTxt) {
-      if (s.cash > this.lastCash + 0.5) { e.cash.classList.remove('up'); void e.cash.offsetWidth; e.cash.classList.add('up'); }
-      e.cash.textContent = cashTxt;
-      this.lastCash = s.cash;
+    if (s.cash > this.lastCash + 0.5) { e.cash.classList.remove('up'); void e.cash.offsetWidth; e.cash.classList.add('up'); }
+    this.lastCash = s.cash;
+    const hist = [...s.nwHist.slice(-40), nw];
+    if (hist.length > 2) {
+      const lo = Math.min(...hist), hi = Math.max(...hist);
+      const pts = hist.map((v, i) => `${((i / (hist.length - 1)) * 70).toFixed(1)},${(36 - ((v - lo) / (hi - lo || 1)) * 32).toFixed(1)}`).join(' ');
+      const up = hist[hist.length - 1] >= hist[0];
+      e.spark.innerHTML = `<polyline points="0,40 ${pts} 70,40" fill="${up ? 'rgba(34,178,107,0.14)' : 'rgba(229,83,61,0.12)'}" stroke="none"/><polyline points="${pts}" fill="none" stroke="${up ? '#22b26b' : '#e5533d'}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
     }
+    this.renderOrders();
     e.nw.textContent = money(nw);
     e.rate.textContent = sim.incomeRate > 0.05 ? `+${money(sim.incomeRate * 60)}/min` : '';
     const h = sim.hour;
@@ -674,16 +803,16 @@ export class UI {
     t.style.top = Math.min(y, innerHeight - 120) + 'px';
   }
   /** queue-length badges over my carts and shops */
-  lines(items: { x: number; y: number; n: number; full: boolean }[]) {
+  lines(items: { x: number; y: number; n: number; full: boolean; label?: string; color?: string }[]) {
     const w = this.el.lines;
     while (w.children.length < items.length) { const d = document.createElement('div'); d.className = 'line'; w.appendChild(d); }
     while (w.children.length > items.length) w.lastElementChild!.remove();
     items.forEach((it, i) => {
       const d = w.children[i] as HTMLElement;
-      d.style.left = it.x + 'px'; d.style.top = it.y + 'px';
+      d.style.transform = `translate(${it.x}px, ${it.y}px) translate(-50%, -100%)`;
       d.className = 'line' + (it.full ? ' full' : '');
-      const t = it.full ? `Line full · ${it.n}` : `${it.n} in line`;
-      if (d.textContent !== t) d.textContent = t;
+      const t = `<i style="background:${it.color ?? '#ffc83d'}"></i>${it.label ?? ''}${it.n ? `<em>${it.full ? 'FULL ' : ''}${it.n}<small>in line</small></em>` : ''}`;
+      if (d.innerHTML !== t) d.innerHTML = t;
     });
   }
 

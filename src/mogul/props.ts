@@ -179,6 +179,9 @@ export class Props {
   private smokeP: { x: number; y: number; z: number; t: number; s: number }[] = [];
   private terminal: THREE.Group;
   time = 0;
+  drops: { id: number; g: THREE.Group; x: number; z: number; amount: number; t: number; got: number }[] = [];
+  private dropId = 1;
+  sel: THREE.Group;
 
   constructor(scene: THREE.Scene, city: City, sim: Sim) {
     this.scene = scene; this.city = city; this.sim = sim;
@@ -198,6 +201,16 @@ export class Props {
     this.smoke = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 7, 5), new THREE.MeshStandardMaterial({ color: '#e8e8ec', transparent: true, opacity: 0.55, roughness: 1, depthWrite: false }), 260);
     this.smoke.frustumCulled = false;
     scene.add(this.smoke);
+    // the selection marker: a pulsing ring and a bouncing chevron
+    this.sel = new THREE.Group();
+    const sring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffc83d', transparent: true, opacity: 0.95, depthWrite: false }));
+    sring.position.y = 0.3;
+    sring.name = 'ring';
+    const chev = new THREE.Mesh(new THREE.ConeGeometry(1.4, 2.4, 4).rotateX(Math.PI), new THREE.MeshStandardMaterial({ color: '#ffc83d', emissive: '#ff9d00', emissiveIntensity: 0.6, roughness: 0.35 }));
+    chev.name = 'chev';
+    this.sel.add(sring, chev);
+    this.sel.visible = false;
+    scene.add(this.sel);
     // the freight terminal where couriers come from
     this.terminal = new THREE.Group();
     const n = sim.terminal;
@@ -219,6 +232,42 @@ export class Props {
     ring.scale.setScalar(radius);
     (ring.material as THREE.MeshBasicMaterial).color.set(ok ? color : '#ff5a5a');
   }
+
+  setSel(on: boolean, x = 0, z = 0, r = 6, h = 6) {
+    this.sel.visible = on;
+    if (!on) return;
+    this.sel.position.set(x, 0, z);
+    this.sel.userData = { r, h };
+  }
+
+  /** A pile of cash on the pavement: click it before it's gone. */
+  spawnDrop(x: number, z: number, amount: number) {
+    const g = new THREE.Group();
+    const coinG = new THREE.CylinderGeometry(0.7, 0.7, 0.22, 18);
+    const gold = new THREE.MeshStandardMaterial({ color: '#ffcc33', emissive: '#ff9d00', emissiveIntensity: 0.35, metalness: 0.7, roughness: 0.25 });
+    const n = 3 + Math.min(6, Math.floor(Math.log10(Math.max(10, amount)) * 1.5));
+    for (let k = 0; k < n; k++) { const c = new THREE.Mesh(coinG, gold); c.position.set((Math.random() - 0.5) * 0.25, 0.2 + k * 0.24, (Math.random() - 0.5) * 0.25); c.castShadow = true; g.add(c); }
+    const big = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.3, 24).rotateX(Math.PI / 2), gold);
+    big.position.y = 3.6;
+    big.name = 'big';
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.6, 14, 16, 1, true), new THREE.MeshBasicMaterial({ color: '#ffe27a', transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+    beam.position.y = 7;
+    beam.name = 'beam';
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffd65a', transparent: true, opacity: 0.8, depthWrite: false }));
+    ring.position.y = 0.2;
+    ring.name = 'ring';
+    g.add(big, beam, ring);
+    g.position.set(x, 0, z);
+    g.scale.setScalar(1.4);
+    this.scene.add(g);
+    const d = { id: this.dropId++, g, x, z, amount, t: 0, got: -1 };
+    this.drops.push(d);
+    return d;
+  }
+  dropAt(x: number, z: number, r = 6) {
+    return this.drops.find((d) => d.got < 0 && Math.hypot(d.x - x, d.z - z) < r) ?? null;
+  }
+  collect(d: { got: number }) { d.got = 0; }
 
   surveyPulse(x: number, z: number) {
     this.pulse.position.set(x, 0.3, z);
@@ -378,6 +427,31 @@ export class Props {
       (this.pulse.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - Math.max(0, this.pulseT - 1.2) / 0.8);
       if (this.pulseT > 2) { this.pulseT = -1; this.pulse.visible = false; }
     }
+    // selection marker
+    if (this.sel.visible) {
+      const { r, h } = this.sel.userData as { r: number; h: number };
+      const ring = this.sel.getObjectByName('ring')!;
+      ring.scale.setScalar(r * (1 + 0.08 * Math.sin(this.time * 6)));
+      const chev = this.sel.getObjectByName('chev')!;
+      chev.position.y = h + 2.2 + Math.abs(Math.sin(this.time * 3.2)) * 2;
+      chev.rotation.y += dt * 2;
+      chev.scale.setScalar(Math.max(1, r / 8));
+    }
+    // cash drops: spin, glint, fly up when collected, fade when ignored
+    for (const d of this.drops) {
+      d.t += dt;
+      const big = d.g.getObjectByName('big')!;
+      big.rotation.y += dt * 3;
+      big.position.y = 3.6 + Math.sin(d.t * 3) * 0.4;
+      (d.g.getObjectByName('ring') as THREE.Object3D).scale.setScalar(1 + (d.t % 1.2) * 0.5);
+      if (d.got >= 0) {
+        d.got += dt;
+        d.g.position.y = d.got * 30;
+        d.g.scale.setScalar(1.4 * (1 - Math.min(1, d.got / 0.6)));
+      } else if (d.t > 30) d.g.scale.setScalar(Math.max(0, 1.4 * (1 - (d.t - 30) / 1.5)));
+    }
+    for (const d of this.drops.filter((d) => (d.got >= 0 && d.got > 0.6) || d.t > 31.5)) this.scene.remove(d.g);
+    this.drops = this.drops.filter((d) => !((d.got >= 0 && d.got > 0.6) || d.t > 31.5));
     // cart umbrellas bob a little
     for (const g of this.carts.values()) g.children[4] && (g.children[4].rotation.y += dt * 0.2);
   }

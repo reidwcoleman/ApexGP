@@ -6,9 +6,10 @@ import { World, OWN } from './world.ts';
 import { Sim, money, type SaveState } from './sim.ts';
 import { Peds } from './peds.ts';
 import { Props } from './props.ts';
+import { Life } from './life.ts';
 import { Sfx } from './audio.ts';
 import { UI, type Tool } from './ui.ts';
-import { FAC_BY, RIVALS, SURVEY_COST } from './data.ts';
+import { FAC_BY, RIVALS, SURVEY_COST, MENU_BY, SHOP_BY, GOODS, tierOf } from './data.ts';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const loading = $('#loading');
@@ -53,9 +54,12 @@ async function boot() {
   step('Filling the sidewalks', 0.8);
   await new Promise((r) => setTimeout(r, 30));
   const props = new Props(world.scene, city, sim);
+  const life = new Life(world.scene, city, world.uni.uNight);
+  world.onSky = (top, hor, sun, sunC, n) => life.setSky(top, hor, sun, sunC, n);
   const peds = new Peds(world.scene, city, sim, Math.round(2600 * Math.min(1.3, def.crowd)));
   ui.mount(sim, city);
   ui.lineOf = (k) => peds.lineLength(k);
+  ui.onMini = (u, v) => { const S = Math.max(city.W, city.D) / 0.96; world.flyTo((u - 0.5) * S, (v - 0.5) * S); };
 
   // ---------------------------------------------------------------- building tints
   const paintBuildings = () => {
@@ -70,6 +74,7 @@ async function boot() {
     }
   };
   const extraFoot = () => {
+    life.hideRoofs(new Set(sim.s.facs.map((f) => f.b)));
     peds.extra.clear();
     for (const f of sim.s.facs) if (f.type === 'apartments' && f.build >= 1) { const b = city.buildings[f.b]; peds.extra.set(b.edge, (peds.extra.get(b.edge) ?? 0) + 0.4 * f.lv); }
     peds.reweight();
@@ -77,12 +82,32 @@ async function boot() {
 
   sim.onChange = () => { props.sync(); peds.setSellers(); paintBuildings(); extraFoot(); ui.refresh(); };
   sim.onToast = (t, k) => { ui.toast(t, k); if (k === 'bad') sfx.bad(); };
-  sim.onQuest = (i) => { ui.questDone(i); sfx.goal(); };
+  sim.onQuest = (i) => { ui.questDone(i); sfx.goal(); ui.confetti(70, 170, 200, 0.7); };
+  sim.onFrenzy = (on) => {
+    $('#ui').classList.toggle('frenzy', on);
+    if (on) { ui.banner('FRENZY!', 'Every customer wants in: double the crowd, faster service for 25 s', '#ff3d6e'); ui.confetti(180); sfx.frenzy(); }
+    else ui.toast('Frenzy over. Keep selling to fill the Hype meter again.');
+  };
+  sim.onOrder = (o, done) => {
+    if (done) { ui.toast(`Order filled: ${o.title} · +${money(o.pay)}`, 'good'); sfx.cash(); ui.confetti(60, 170, 330, 0.6); }
+    else if (o.until > sim.s.t) ui.toast(`New city order: ${o.title} for ${money(o.pay)}`, 'city');
+    ui.renderOrders(true);
+  };
+  let lastTier = tierOf(sim.netWorth()).name;
   sim.onMonth = (rank, rows) => { ui.monthEnd(rank, rows); sfx.goal(); };
   peds.onServed = (s, amt) => {
     const p = world.toScreen(s.x, 5, s.z);
-    if (p) ui.pop(p.x, p.y, '+' + money(amt, amt < 100), amt >= 100 ? 'big' : '');
+    if (p) ui.pop(p.x, p.y, '+' + money(amt, amt < 100), (amt >= 100 ? 'big' : '') + (sim.frenzy > 0 ? ' fz' : ''));
     sfx.coin(amt >= 100);
+  };
+  peds.onVip = (s, amt) => {
+    const tip = Math.round(Math.max(amt * 20, sim.bonusSize(1.5)));
+    sim.gift(tip);
+    sim.addHype(0.35);
+    const p = world.toScreen(s.x, 6, s.z);
+    if (p) { ui.pop(p.x, p.y - 10, '+' + money(tip), 'huge'); ui.confetti(90, p.x, p.y, 0.8); }
+    ui.banner('Critic loved it!', `A glowing review: +${money(tip)} tip and a big Hype boost`, '#f2a91c');
+    sfx.cash();
   };
   let lostT = 0;
   peds.onLost = (s) => {
@@ -157,8 +182,18 @@ async function boot() {
       if (sim.s.stats.surveys > before) { props.surveyPulse(g.x, g.z); sfx.ping(); if (found.length) setTimeout(() => sfx.found(), 700); ui.setTool('survey'); }
       return;
     }
-    // select: carts first (they're small), then ore, quarries, buildings
+    // cash on the pavement first, then carts (they're small), ore, quarries, buildings
     if (g) {
+      const d = props.dropAt(g.x, g.z, 8);
+      if (d) {
+        props.collect(d);
+        sim.gift(d.amount);
+        sim.addHype(0.08);
+        ui.pop(cx, cy - 10, '+' + money(d.amount), 'huge');
+        ui.confetti(40, cx, cy, 0.55);
+        sfx.cash();
+        return;
+      }
       const c = props.cartAt(g.x, g.z, 5);
       if (c) {
         if (c.rival < 0 && peds.rush('c:' + c.id)) {
@@ -209,6 +244,8 @@ async function boot() {
     props.ghost.children.forEach((o) => (o.visible = true));
     if (ui.modalOpen) return;
     const g = world.groundAt(cx, cy);
+    const dr = g ? props.dropAt(g.x, g.z, 8) : null;
+    if (dr) { canvas.style.cursor = 'pointer'; world.setHover(-1); ui.tip(cx, cy, `<b>${money(dr.amount)} on the pavement</b><div class="tg">Click to grab it before someone else does</div>`); return; }
     const c = g ? props.cartAt(g.x, g.z, 5) : null;
     if (c) {
       world.setHover(-1);
@@ -262,7 +299,7 @@ async function boot() {
 
   // ---------------------------------------------------------------- frame loop
   let last = performance.now();
-  let uiT = 0, pitchT = 0, paintT = 0;
+  let uiT = 0, pitchT = 0, paintT = 0, dropT = 8, vipT = 40;
   let lastDay = sim.day;
   step('Open for business', 1);
   setTimeout(() => loading.classList.add('done'), 150);
@@ -274,21 +311,68 @@ async function boot() {
     sim.step(dt, sp);
     peds.update(dt, sp);
     props.update(dt, sp || 0.0001);
+    life.update(dt, sp, sim.crowdMul(), world.camera.position);
     world.setHour(sim.hour);
     world.update(dt);
     sfx.setBed(sim.crowdMul());
     uiT += dt; pitchT += dt; paintT += dt;
+    ui.tick(dt);
+    if (sp > 0 && (sim.myCarts().length || sim.s.shops.length)) {
+      dropT -= dt;
+      if (dropT <= 0) {
+        dropT = 16 + Math.random() * 18;
+        // somewhere on a pavement near what you're looking at
+        const t = world.controls.target;
+        for (let k = 0; k < 12; k++) {
+          const sp2 = sim.sidewalk(t.x + (Math.random() - 0.5) * 300, t.z + (Math.random() - 0.5) * 300);
+          if (sp2.ok && Math.abs(sp2.x) < city.W / 2 && Math.abs(sp2.z) < city.D / 2) { props.spawnDrop(sp2.x, sp2.z, sim.bonusSize(Math.random() < 0.15 ? 4 : 1)); break; }
+        }
+      }
+      vipT -= dt;
+      if (vipT <= 0) {
+        vipT = 55 + Math.random() * 40;
+        const s = peds.spawnVip();
+        if (s) { const id = +s.key.slice(2); const nm = s.key[0] === 'c' ? sim.cart(id)?.name : 'your ' + SHOP_BY[sim.shop(id)?.type ?? 'cafe'].name; ui.toast(`A food critic is heading past ${nm}. Serve them for a huge tip!`, 'city'); sfx.found(); }
+      }
+    }
+    const sel = ui.sel;
+    if (sel?.k === 'cart') { const c = sim.cart(sel.id); if (c) props.setSel(true, c.x, c.z, 4.5, 5); else props.setSel(false); }
+    else if (sel?.k === 'shop') { const sh = sim.shop(sel.id); if (sh) { const b = city.buildings[sh.b]; props.setSel(true, b.door.x + b.door.nx * 2, b.door.z + b.door.nz * 2, 5, 6); } }
+    else if (sel?.k === 'quarry') { const q = sim.s.quarries.find((x) => x.id === sel.id); if (q) props.setSel(true, q.x, q.z, 13, 15); }
+    else if (sel?.k === 'dep') { const d = sim.s.deposits[sel.id]; props.setSel(true, d.x, d.z, 8, 14); }
+    else if (sel?.k === 'bld') { const b = city.buildings[sel.id]; const f = sim.fac(b.id); props.setSel(true, b.cx, b.cz, Math.sqrt(b.area) * 0.75, f ? FAC_BY[f.type].h + 4 : b.h); }
+    else props.setSel(false);
     if (uiT > 0.25) {
       uiT = 0;
       ui.refresh();
       // line badges over my own carts/shops when there's a line
-      const items: { x: number; y: number; n: number; full: boolean }[] = [];
+      const items: { x: number; y: number; n: number; full: boolean; label: string; color: string }[] = [];
+      const camD = world.camera.position.distanceTo(world.controls.target);
       for (const s of peds.sellers) {
-        if (!s.mine || s.line.length < 2) continue;
-        const p = world.toScreen(s.x, 6.5, s.z);
-        if (p) items.push({ x: p.x, y: p.y, n: s.line.length, full: s.line.length >= s.cap });
+        if (!s.mine) continue;
+        const id = +s.key.slice(2);
+        const o = s.key[0] === 'c' ? sim.cart(id) : sim.shop(id);
+        if (!o) continue;
+        if (camD > 700 && s.line.length < 2) continue;
+        const p = world.toScreen(s.x, s.key[0] === 'c' ? 6.5 : 7.5, s.z);
+        if (!p || p.x < 0 || p.y < 0 || p.x > innerWidth || p.y > innerHeight) continue;
+        const color = s.key[0] === 'c' ? MENU_BY[(o as any).menu[0]].color : SHOP_BY[(o as any).type].color;
+        items.push({ x: p.x, y: p.y, n: s.line.length >= 2 ? s.line.length : 0, full: s.line.length >= s.cap, label: money(o.today), color });
+        if (items.length > 40) break;
       }
       ui.lines(items);
+      // tier up?
+      const tier = tierOf(sim.netWorth()).name;
+      if (tier !== lastTier) { lastTier = tier; ui.banner(`You're a ${tier}!`, 'Your ring just changed colour. Bigger deals await.', tierOf(sim.netWorth()).color); ui.confetti(200); sfx.goal(); }
+      // the minimap
+      const fwd = world.controls.target.clone().sub(world.camera.position);
+      const marks: { x: number; z: number; c: string; r: number }[] = [];
+      for (const c of sim.myCarts()) marks.push({ x: c.x, z: c.z, c: '#e5533d', r: 4 });
+      for (const sh of sim.s.shops) { const b = city.buildings[sh.b]; marks.push({ x: b.door.x, z: b.door.z, c: '#a8673a', r: 4 }); }
+      for (const q of sim.s.quarries) marks.push({ x: q.x, z: q.z, c: GOODS[sim.s.deposits[q.dep].ore].color, r: 5 });
+      for (const d of props.drops) if (d.got < 0) marks.push({ x: d.x, z: d.z, c: '#ffd000', r: 6 });
+      if (peds.vip >= 0) marks.push({ x: peds.x[peds.vip], z: peds.z[peds.vip], c: '#ff9d00', r: 6 });
+      ui.drawMini({ x: world.camera.position.x, z: world.camera.position.z, fx: fwd.x, fz: fwd.z, d: camD }, marks);
     }
     if (pitchT > 1) { pitchT = 0; peds.refreshPitch(); }
     if (paintT > 0.5) {
@@ -300,7 +384,7 @@ async function boot() {
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
-  (window as any).__mogul = { sim, world, peds, props, ui, city, save: save_ };
+  (window as any).__mogul = { sim, world, peds, props, ui, city, life, save: save_ };
   (window as any).__ready = true;
 }
 
