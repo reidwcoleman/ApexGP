@@ -3,6 +3,8 @@
 // float texture the building shader reads, so ownership changes never rebuild geometry.
 import * as THREE from 'three';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
+import { EffectComposer, RenderPass, EffectPass, BloomEffect, ToneMappingEffect, ToneMappingMode, SMAAEffect, SMAAPreset, VignetteEffect, BrightnessContrastEffect, HueSaturationEffect } from 'postprocessing';
+import { N8AOPostPass } from 'n8ao';
 import { City, ROAD_W, type Building } from './city.ts';
 
 const TEXW = 1024;
@@ -29,6 +31,7 @@ export class World {
     uTime: { value: 0 },
     uRival: { value: [] as THREE.Color[] },
     uMine: { value: new THREE.Color('#ffc83d') },
+    uRoof: { value: new THREE.Color(0x8f8b85) },
   };
   night = 0;
   onSky: (top: THREE.Color, hor: THREE.Color, sun: THREE.Vector3, sunC: THREE.Color, night: number) => void = () => {};
@@ -40,7 +43,8 @@ export class World {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false; // refreshed every few frames in update(): the sun moves slowly
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.camera = new THREE.PerspectiveCamera(42, 1, 2, 9000);
@@ -68,6 +72,7 @@ export class World {
     this.sun.shadow.normalBias = 0.6;
     this.scene.fog = new THREE.Fog(0xdfe9f2, R * 0.75, R * 1.9);
 
+    this.setupPost();
     this.buildGround();
     this.buildOutskirts();
     this.buildRoads();
@@ -77,9 +82,55 @@ export class World {
     window.addEventListener('blur', () => this.keys.clear());
   }
 
+  // ---------------------------------------------------------------- post: AO, bloom, grade, SMAA
+  composer: EffectComposer | null = null;
+  private ao: N8AOPostPass | null = null;
+  bloom!: BloomEffect;
+  private frameN = 0;
+  quality = 2; // 0 low (no post), 1 medium (bloom + SMAA), 2 high (+ ambient occlusion)
+  private setupPost() {
+    const q = +(localStorage.getItem('mogul.gfx') ?? '2');
+    this.quality = isNaN(q) ? 2 : Math.max(0, Math.min(2, q));
+    const composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
+    composer.addPass(new RenderPass(this.scene, this.camera));
+    const ao = new N8AOPostPass(this.scene, this.camera, innerWidth, innerHeight);
+    ao.configuration.aoRadius = 7;
+    ao.configuration.distanceFalloff = 1.5;
+    ao.configuration.intensity = 2.6;
+    ao.configuration.gammaCorrection = false;
+    ao.configuration.halfRes = true;
+    ao.configuration.depthAwareUpsampling = true;
+    ao.configuration.color = new THREE.Color(0x1a1408);
+    ao.setQualityMode('Low');
+    composer.addPass(ao);
+    this.ao = ao;
+    this.bloom = new BloomEffect({ luminanceThreshold: 0.95, luminanceSmoothing: 0.25, intensity: 0.6, mipmapBlur: true, radius: 0.7 });
+    const tone = new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL });
+    const sat = new HueSaturationEffect({ saturation: 0.12 });
+    const bc = new BrightnessContrastEffect({ contrast: 0.06 });
+    const vig = new VignetteEffect({ offset: 0.32, darkness: 0.38 });
+    composer.addPass(new EffectPass(this.camera, this.bloom, tone, sat, bc, vig));
+    composer.addPass(new EffectPass(this.camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
+    this.composer = composer;
+    this.applyQuality();
+  }
+  applyQuality() {
+    const q = this.quality;
+    if (this.ao) this.ao.enabled = q >= 2;
+    this.renderer.toneMapping = q === 0 ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 2 ? 1.5 : q === 1 ? 1.5 : 2));
+    try { localStorage.setItem('mogul.gfx', String(q)); } catch {}
+    this.scene.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m) m.needsUpdate = true; });
+    this.frameN = 0;
+    this.renderer.shadowMap.needsUpdate = true;
+    this.resize();
+  }
+  setQuality(q: number) { this.quality = q; this.applyQuality(); }
+
   resize() {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false);
+    this.composer?.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -196,6 +247,23 @@ export class World {
       if (anyCar) { disc(walk, c.nx[i], c.nz[i], maxW[i] / 2 + 3, 0.061); disc(asph, c.nx[i], c.nz[i], maxW[i] / 2, 0.091); }
       else disc(paved, c.nx[i], c.nz[i], maxW[i] / 2, 0.071);
     }
+    // zebra crossings where real roads meet
+    for (let i = 0; i < c.nx.length; i++) {
+      const carE = c.adj[i].filter((k) => c.edges[k].car && c.edges[k].cls >= 1);
+      if (carE.length < 3) continue;
+      for (const k of carE) {
+        const e = c.edges[k];
+        if (e.len < maxW[i] + 10) continue;
+        const other = e.a === i ? e.b : e.a;
+        const ux = (c.nx[other] - c.nx[i]) / e.len, uz = (c.nz[other] - c.nz[i]) / e.len;
+        const d0 = maxW[i] / 2 + 2.2;
+        const cx = c.nx[i] + ux * d0, cz = c.nz[i] + uz * d0;
+        for (let o = -e.w / 2 + 0.6; o <= e.w / 2 - 0.5; o += 1.15) {
+          const px = cx - uz * o, pz = cz + ux * o;
+          ribbon(line, px - ux * 1.5, pz - uz * 1.5, px + ux * 1.5, pz + uz * 1.5, 0.55, 0.11);
+        }
+      }
+    }
     const mk = (arr: number[], color: number, rough = 0.95, offset = 0) => {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
@@ -223,7 +291,7 @@ export class World {
   // ---------------------------------------------------------------- buildings
   private buildBuildings() {
     const c = this.city;
-    const pos: number[] = [], nrm: number[] = [], col: number[] = [], ids: number[] = [];
+    const pos: number[] = [], nrm: number[] = [], col: number[] = [], ids: number[] = [], sty: number[] = [];
     const palette: Record<number, number[]> = {
       0: [0xf4ead6, 0xefdcc0, 0xf7efe2, 0xe8d6bb, 0xf1e4cf, 0xe9c9a8, 0xf3dcc8],
       1: [0xf7d7b5, 0xf2c39e, 0xfae3c8, 0xf0cfa8],
@@ -233,18 +301,40 @@ export class World {
       5: [0xd9cdb6, 0xcfc3ab],
       6: [0xf0d6e4, 0xe6cadc],
     };
+    // each city has its own building stock: brick London, limestone Paris, glass-and-brick New York,
+    // white-and-grey Tokyo, pastel San Francisco
+    const id = c.def.id;
+    const CITY: Record<string, { stone: number[]; brick: number[]; glass: number[]; mix: [number, number, number, number, number] }> = {
+      nyc: { stone: [0xefe4cf, 0xe6d6b8, 0xf2ead9, 0xdcc9a8, 0xe9dcc4], brick: [0xb86a4c, 0xa95c42, 0xc47d5c, 0x9d5a43, 0xc98e6e], glass: [0xb9cbd8, 0xa9bccb, 0xc6d4de, 0x9fb4c4], mix: [0.25, 0.2, 0.3, 0.25, 0] },
+      london: { stone: [0xefe7d8, 0xe6dccb, 0xf4efe6, 0xdcd0bb], brick: [0xb5654a, 0xa8573f, 0xc9805f, 0x9b5a45, 0xc2876a, 0xb98f6a], glass: [0xbccbd6, 0xaebfcc], mix: [0.25, 0.1, 0.45, 0.2, 0] },
+      paris: { stone: [0xeee2c6, 0xe8d9b9, 0xf2e8d2, 0xe3d3b0, 0xf0e4c8], brick: [0xd9c3a0, 0xcfb894], glass: [0xbccbd6], mix: [0.15, 0.05, 0.05, 0.75, 0] },
+      tokyo: { stone: [0xeef0f0, 0xe2e5e7, 0xd5d9dc, 0xf3f1ec, 0xe9e2d6], brick: [0xc9a68a, 0xb99a84], glass: [0xbfd0dc, 0xaec2d0, 0xd2dde5], mix: [0.35, 0.45, 0.1, 0.1, 0] },
+      sf: { stone: [0xf6e7d0, 0xe9d6e8, 0xd6e6ef, 0xf2d9c4, 0xe2ecd6, 0xf4efe4], brick: [0xc47d5c, 0xb3715a], glass: [0xbccdd9, 0xa9bccb], mix: [0.45, 0.25, 0.1, 0.2, 0] },
+    };
+    const P = CITY[id] ?? CITY.nyc;
+    this.uni.uRoof.value.set(({ nyc: 0x8f8b85, london: 0x8a847d, paris: 0x6c7682, tokyo: 0xa9abad, sf: 0xb3ab9e } as Record<string, number>)[id] ?? 0x8f8b85);
+    const hash = (n: number) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
     const tmpC = new THREE.Color();
     this.triStart = new Int32Array(c.buildings.length + 1);
     let tri = 0;
     for (const b of c.buildings) {
       this.triStart[b.id] = tri;
       b.tri0 = tri;
-      const pal = palette[b.kind] ?? palette[0];
-      tmpC.setHex(pal[(b.id * 7919) % pal.length]);
+      void palette;
+      // style: 0 punched windows, 1 ribbon windows, 2 glass curtain wall, 3 brick, 4 classic stone, 9 parapet (no windows)
+      const r = hash(b.id + 0.5);
+      let style: number;
+      if (b.h > 75) style = r < 0.7 ? 2 : 1;
+      else if (b.kind === 2 && b.h > 30) style = r < 0.5 ? 2 : 1;
+      else if (b.kind === 3 && (id === 'nyc' || id === 'london')) style = r < 0.75 ? 3 : 4;
+      else { let acc = 0, k = 0; const m = P.mix; for (; k < 4; k++) { acc += m[k]; if (r * 0.999 < acc) break; } style = [0, 1, 3, 4][Math.min(3, k)]; }
+      const pal = style === 2 ? P.glass : style === 3 ? P.brick : P.stone;
+      tmpC.setHex(pal[Math.floor(hash(b.id * 3.7 + 1) * pal.length)]);
       const n = b.pts.length / 2;
       const H = b.h;
+      let curStyle = style;
       const push = (x: number, y: number, z: number, nx: number, ny: number, nz: number, k = 1) => {
-        pos.push(x, y, z); nrm.push(nx, ny, nz); col.push(tmpC.r * k, tmpC.g * k, tmpC.b * k); ids.push(b.id);
+        pos.push(x, y, z); nrm.push(nx, ny, nz); col.push(tmpC.r * k, tmpC.g * k, tmpC.b * k); ids.push(b.id); sty.push(curStyle);
       };
       for (let i = 0; i < n; i++) {
         const x0 = b.pts[i * 2], z0 = b.pts[i * 2 + 1], x1 = b.pts[((i + 1) % n) * 2], z1 = b.pts[((i + 1) % n) * 2 + 1];
@@ -271,6 +361,29 @@ export class World {
         for (const p of tri3) push(p.x, H, p.y, 0, 1, 0, 0.86);
         tri++;
       }
+      // a parapet round the roof: outer lip, inner face and a lighter coping on top
+      if (b.area > 60 && H > 5) {
+        curStyle = 9;
+        const PH = style === 2 ? 0.6 : 1.1, T = 0.45;
+        const face = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, dx: number, dy: number, dz: number, nx: number, ny: number, nz: number, k: number) => {
+          const q = [[ax, ay, az], [bx, by, bz], [cx, cy, cz], [ax, ay, az], [cx, cy, cz], [dx, dy, dz]];
+          const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+          const crx = uy * vz - uz * vy, cry = uz * vx - ux * vz, crz = ux * vy - uy * vx;
+          const order = crx * nx + cry * ny + crz * nz < 0 ? [0, 2, 1, 3, 5, 4] : [0, 1, 2, 3, 4, 5];
+          for (const o of order) push(q[o][0], q[o][1], q[o][2], nx, ny, nz, k);
+          tri += 2;
+        };
+        for (let i = 0; i < n; i++) {
+          const x0 = b.pts[i * 2], z0 = b.pts[i * 2 + 1], x1 = b.pts[((i + 1) % n) * 2], z1 = b.pts[((i + 1) % n) * 2 + 1];
+          const l = Math.hypot(x1 - x0, z1 - z0) || 1;
+          if (l < 1.2) continue;
+          const ox = (z1 - z0) / l, oz = -(x1 - x0) / l;
+          const ix0 = x0 - ox * T, iz0 = z0 - oz * T, ix1 = x1 - ox * T, iz1 = z1 - oz * T;
+          face(x0, H, z0, x1, H, z1, x1, H + PH, z1, x0, H + PH, z0, ox, 0, oz, 1.0);
+          face(ix1, H, iz1, ix0, H, iz0, ix0, H + PH, iz0, ix1, H + PH, iz1, -ox, 0, -oz, 0.8);
+          face(x0, H + PH, z0, x1, H + PH, z1, ix1, H + PH, iz1, ix0, H + PH, iz0, 0, 1, 0, 1.12);
+        }
+      }
       this.triStart[b.id + 1] = tri;
       b.tri1 = tri;
     }
@@ -279,6 +392,7 @@ export class World {
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     geo.setAttribute('aId', new THREE.Float32BufferAttribute(ids, 1));
+    geo.setAttribute('aStyle', new THREE.Float32BufferAttribute(sty, 1));
     geo.computeBoundingSphere();
     const rows = Math.ceil((c.buildings.length + 1) / TEXW);
     this.stateData = new Float32Array(TEXW * rows * 4);
@@ -291,19 +405,20 @@ export class World {
       Object.assign(sh.uniforms, this.uni);
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', `#include <common>
-          attribute float aId; uniform sampler2D uState; varying vec4 vState; varying vec3 vWP; varying vec3 vWN; varying float vId; varying float vHgt;`)
+          attribute float aId; attribute float aStyle; uniform sampler2D uState; varying vec4 vState; varying vec3 vWP; varying vec3 vWN; varying float vId; varying float vHgt; varying float vStyle;`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>
           int iid = int(aId + 0.5);
           vState = texelFetch(uState, ivec2(iid % ${TEXW}, iid / ${TEXW}), 0);
           vId = aId;
+          vStyle = aStyle;
           vHgt = transformed.y;
           transformed.y *= vState.g;`)
         .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
           vWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-          uniform float uNight; uniform float uTime; uniform vec3 uRival[10]; uniform vec3 uMine;
-          varying vec4 vState; varying vec3 vWP; varying vec3 vWN; varying float vId; varying float vHgt;
+          uniform float uNight; uniform float uTime; uniform vec3 uRival[10]; uniform vec3 uMine; uniform vec3 uRoof;
+          varying vec4 vState; varying vec3 vWP; varying vec3 vWN; varying float vId; varying float vHgt; varying float vStyle;
           float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float code = vState.r;
@@ -319,20 +434,37 @@ export class World {
           float wall = 1.0 - step(0.5, abs(vWN.y));
           // roofs: gravel tone, a lighter parapet line where the roof meets the wall is faked by height noise
           float roof = 1.0 - wall;
-          diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.66, 0.64, 0.6), diffuseColor.rgb, 0.45) * (0.92 + 0.12 * h21(floor(vWP.xz * 0.7))), roof * (code > 0.5 ? 0.25 : 0.7));
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(uRoof, diffuseColor.rgb, 0.3) * (0.92 + 0.12 * h21(floor(vWP.xz * 0.7))), roof * (code > 0.5 ? 0.25 : 0.7));
           // grounding: darker at the foot of every wall, a touch lighter up high
           diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.0, 9.0, vWP.y)) * (1.0 + 0.07 * smoothstep(20.0, 160.0, vWP.y));
           vec3 tng = vec3(-vWN.z, 0.0, vWN.x); tng /= max(length(tng), 1e-3);
           float u = dot(vWP, tng);
+          float sty = floor(vStyle + 0.5);
+          float cw = sty > 2.5 && sty < 4.5 ? 2.6 : 3.1;
           float fl = floor(vWP.y / 3.4);
-          vec2 cell = vec2(floor(u / 3.1), fl);
-          vec2 fc = vec2(fract(u / 3.1), fract(vWP.y / 3.4));
-          float fw = clamp(1.6 - fwidth(u / 3.1) * 3.0, 0.0, 1.0);
-          float win = wall * step(0.2, fc.x) * step(fc.x, 0.8) * step(0.28, fc.y) * step(fc.y, 0.82) * step(3.6, vWP.y);
+          vec2 cell = vec2(floor(u / cw), fl);
+          vec2 fc = vec2(fract(u / cw), fract(vWP.y / 3.4));
+          float fw = clamp(1.6 - fwidth(u / cw) * 3.0, 0.0, 1.0);
+          float above = step(3.6, vWP.y) * (sty > 8.5 ? 0.0 : 1.0);
+          float win;
+          if (sty < 0.5) win = step(0.2, fc.x) * step(fc.x, 0.8) * step(0.28, fc.y) * step(fc.y, 0.82);
+          else if (sty < 1.5) win = step(0.3, fc.y) * step(fc.y, 0.8) * (1.0 - step(0.94, fract(u / 1.55)) * fw);
+          else if (sty < 2.5) win = (1.0 - step(fc.y, 0.07)) * (1.0 - step(0.96, fract(u / 1.6)) * fw * 0.6);
+          else win = step(0.3, fc.x) * step(fc.x, 0.7) * step(0.18, fc.y) * step(fc.y, 0.86);
+          win *= wall * above;
+          // brick courses and stone ledges
+          if (sty > 2.5 && sty < 3.5) {
+            vec2 bk = vec2(u / 0.42 + 0.5 * step(0.5, fract(vWP.y / 0.18)), vWP.y / 0.09);
+            float mortar = max(step(0.9, fract(bk.x)), step(0.85, fract(bk.y)));
+            diffuseColor.rgb *= 1.0 - wall * mortar * 0.12 * fw;
+            diffuseColor.rgb *= 0.94 + 0.12 * h21(floor(bk));
+          }
+          if (sty > 3.5 && sty < 4.5) diffuseColor.rgb *= 1.0 + wall * 0.09 * step(fc.y, 0.12) * fw;
           float lit = step(0.6, h21(cell + vId * 1.37));
           float fres = pow(1.0 - abs(dot(normalize(cameraPosition - vWP), vWN)), 2.0);
-          vec3 glass = mix(mix(vec3(0.36, 0.46, 0.58), vec3(0.6, 0.72, 0.84), h21(cell)), vec3(0.85, 0.92, 1.0), fres * 0.6 * (1.0 - uNight));
-          diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * mix(0.2, 0.62, fw));
+          vec3 glass = mix(mix(vec3(0.3, 0.4, 0.52), vec3(0.58, 0.7, 0.82), h21(cell)), vec3(0.88, 0.94, 1.0), fres * 0.7 * (1.0 - uNight));
+          if (sty > 1.5 && sty < 2.5) glass = mix(glass, diffuseColor.rgb * vec3(0.7, 0.85, 1.0), 0.35);
+          diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * mix(0.25, sty > 1.5 && sty < 2.5 ? 0.8 : 0.66, fw));
           // a pale band between floors reads as a ledge
           diffuseColor.rgb *= 1.0 + wall * 0.06 * step(fc.y, 0.08) * fw * step(3.6, vWP.y);
           // ground-floor shopfront band
@@ -490,7 +622,11 @@ export class World {
     if (under) { const top = under.h * this.stateData[under.id * 4 + 1] + 12; if (cp.y < top) { const d = top - cp.y; cp.y += d; } }
     // shadows follow the view a little so the near city stays crisp
     this.sun.target.position.set(t.x * 0.5, 0, t.z * 0.5);
-    this.renderer.render(this.scene, this.camera);
+    if (++this.frameN < 6 || this.frameN % 3 === 0) this.renderer.shadowMap.needsUpdate = true;
+    if (this.quality > 0 && this.composer) {
+      this.bloom.intensity = 0.35 + 1.1 * this.night;
+      this.composer.render(dt);
+    } else this.renderer.render(this.scene, this.camera);
   }
 }
 

@@ -28,8 +28,10 @@ export class Peds {
   private checkT = 0;
   onServed: (sel: Seller, amount: number) => void = () => {};
   onLost: (sel: Seller) => void = () => {};
+  private phaseAttr: THREE.InstancedBufferAttribute;
   extra = new Map<number, number>(); // edge → extra weight (apartments, festivals)
   vip = -1;
+  tour: Float32Array = new Float32Array(0);
   vipT = 0;
   crown: THREE.Group;
   onVip: (sel: Seller, amount: number) => void = () => {};
@@ -38,15 +40,51 @@ export class Peds {
     this.city = city; this.sim = sim; this.N = n;
     this.e = new Int32Array(n); this.dir = new Int8Array(n); this.s = new Float32Array(n); this.side = new Float32Array(n); this.sp = new Float32Array(n);
     this.st = new Uint8Array(n); this.x = new Float32Array(n); this.z = new Float32Array(n); this.yaw = new Float32Array(n); this.tx = new Float32Array(n); this.tz = new Float32Array(n);
-    this.seen = new Int32Array(n).fill(-1); this.phase = new Float32Array(n); this.seller = new Int32Array(n).fill(-1); this.act = new Uint8Array(n);
+    this.seen = new Int32Array(n).fill(-1);
+    this.tour = new Float32Array(n); this.phase = new Float32Array(n); this.seller = new Int32Array(n).fill(-1); this.act = new Uint8Array(n);
     this.weights = new Float32Array(city.edges.length);
     this.cum = new Float32Array(city.edges.length);
     this.reweight();
-    const bodyG = new THREE.CylinderGeometry(0.26, 0.2, 1.15, 7).translate(0, 0.62, 0);
-    const legs = new THREE.BoxGeometry(0.34, 0.5, 0.2).translate(0, 0.25, 0);
-    const bg = mergeGeos([bodyG, legs]);
-    const hg = new THREE.SphereGeometry(0.2, 8, 6).translate(0, 1.42, 0);
-    this.body = new THREE.InstancedMesh(bg, new THREE.MeshStandardMaterial({ roughness: 0.8 }), n);
+    // torso, two legs and two arms; the limbs swing in the vertex shader (aLimb: ±1 legs, ±2 arms)
+    const parts: [THREE.BufferGeometry, number][] = [
+      [new THREE.CylinderGeometry(0.25, 0.2, 0.62, 8).translate(0, 0.9, 0), 0],
+      [new THREE.BoxGeometry(0.14, 0.6, 0.16).translate(-0.1, 0.3, 0), 1],
+      [new THREE.BoxGeometry(0.14, 0.6, 0.16).translate(0.1, 0.3, 0), -1],
+      [new THREE.BoxGeometry(0.1, 0.52, 0.12).translate(-0.31, 0.92, 0), 2],
+      [new THREE.BoxGeometry(0.1, 0.52, 0.12).translate(0.31, 0.92, 0), -2],
+    ];
+    const bP: number[] = [], bN: number[] = [], bL: number[] = [];
+    for (const [g0, limb] of parts) {
+      const g = g0.toNonIndexed();
+      const P = g.getAttribute('position').array as Float32Array, Nn = g.getAttribute('normal').array as Float32Array;
+      for (let k = 0; k < P.length; k += 3) { bP.push(P[k], P[k + 1], P[k + 2]); bN.push(Nn[k], Nn[k + 1], Nn[k + 2]); bL.push(limb); }
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(bP, 3));
+    bg.setAttribute('normal', new THREE.Float32BufferAttribute(bN, 3));
+    bg.setAttribute('aLimb', new THREE.Float32BufferAttribute(bL, 1));
+    this.phaseAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    bg.setAttribute('aPhase', this.phaseAttr);
+    const bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
+    bodyMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aLimb; attribute float aPhase; varying float vLimb; varying float vPh;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vLimb = aLimb; vPh = fract(aPhase * 0.137);
+          if (abs(aLimb) > 0.5) {
+            float arm = step(1.5, abs(aLimb));
+            float ang = sin(aPhase) * (arm > 0.5 ? -0.5 : 0.62) * sign(aLimb);
+            float py = arm > 0.5 ? 1.16 : 0.6;
+            vec3 q = transformed - vec3(0.0, py, 0.0);
+            transformed = vec3(0.0, py, 0.0) + vec3(q.x, q.y * cos(ang) - q.z * sin(ang), q.y * sin(ang) + q.z * cos(ang));
+          }`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vLimb; varying float vPh;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          if (abs(vLimb) > 0.5 && abs(vLimb) < 1.5) diffuseColor.rgb = mix(vec3(0.16, 0.19, 0.28), vec3(0.62, 0.55, 0.42), step(0.7, fract(dot(diffuseColor.rgb, vec3(3.1, 5.7, 1.3)))));`);
+    };
+    const hg = new THREE.SphereGeometry(0.19, 10, 8).translate(0, 1.4, 0);
+    this.body = new THREE.InstancedMesh(bg, bodyMat, n);
     this.head = new THREE.InstancedMesh(hg, new THREE.MeshStandardMaterial({ roughness: 0.7 }), n);
     const c = new THREE.Color();
     for (let i = 0; i < n; i++) {
@@ -54,7 +92,6 @@ export class Peds {
       this.head.setColorAt(i, c.setHex(SKIN[(Math.random() * SKIN.length) | 0]));
       this.spawn(i, true);
     }
-    this.body.castShadow = true;
     this.body.frustumCulled = false; this.head.frustumCulled = false;
     scene.add(this.body, this.head);
     // the VIP's marker: a spinning gold star with a halo
@@ -158,6 +195,30 @@ export class Peds {
   private release(i: number) {
     this.st[i] = St.Back;
     this.seller[i] = -1;
+  }
+
+  /** A tour bus unloads: n eager tourists step onto the pavement around (x, z). */
+  burst(x: number, z: number, n: number) {
+    const q = this.city.nearestEdge(x, z, 60);
+    if (!q) return;
+    const e = this.city.edges[q.e];
+    const c = new THREE.Color();
+    let k = 0;
+    for (let i = 0; i < this.N && k < n; i++) {
+      if (this.act[i] && this.st[i] !== St.Walk) continue;
+      if (this.act[i] && Math.random() < 0.6) continue;
+      this.e[i] = q.e;
+      this.dir[i] = Math.random() < 0.5 ? 1 : -1;
+      const t = q.t * e.len + (Math.random() - 0.5) * 14;
+      this.s[i] = Math.max(0, Math.min(e.len, this.dir[i] > 0 ? t : e.len - t));
+      this.side[i] = e.cls >= 5 ? (Math.random() - 0.5) * (e.w - 1.2) : (Math.random() < 0.5 ? -1 : 1) * (e.w / 2 + 1.2 + Math.random() * 1.6);
+      this.st[i] = St.Walk; this.act[i] = 1; this.seen[i] = -1; this.tour[i] = 60;
+      this.sp[i] = 0.9 + Math.random() * 0.4;
+      this.body.setColorAt(i, c.setHSL(Math.random(), 0.85, 0.6));
+      this.place(i);
+      k++;
+    }
+    if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
   }
 
   /** Send a VIP (a food critic, a big spender) walking past one of your sellers. */
@@ -289,7 +350,7 @@ export class Peds {
             this.seen[i] = best;
             const isVip = i === this.vip;
             if (isVip && !s.mine) continue;
-            if (Math.random() < (isVip ? 0.97 : s.p)) {
+            if (Math.random() < (isVip ? 0.97 : this.tour[i] > 0 && s.mine ? Math.min(0.95, s.p * 2.4 + 0.2) : s.p)) {
               if (s.line.length >= s.cap) { if (s.mine) this.onLost(s); }
               else {
                 s.line.push(i);
@@ -333,6 +394,7 @@ export class Peds {
   }
 
   private draw(dt: number) {
+    for (let i = 0; i < this.N; i++) if (this.tour[i] > 0) this.tour[i] -= dt;
     if (this.vip >= 0) {
       this.vipT -= dt;
       if (this.vipT <= 0 || !this.act[this.vip]) { this.vip = -1; }
@@ -355,9 +417,11 @@ export class Peds {
       this.sc.set(1.3, 1.3, 1.3);
       this.m.compose(this.v.set(this.x[i], 0.08 + bob, this.z[i]), this.q, this.sc);
       this.body.setMatrixAt(i, this.m);
+      (this.phaseAttr.array as Float32Array)[i] = moving ? this.phase[i] : 0;
       this.head.setMatrixAt(i, this.m);
     }
     this.body.instanceMatrix.needsUpdate = true;
+    this.phaseAttr.needsUpdate = true;
     this.head.instanceMatrix.needsUpdate = true;
   }
 

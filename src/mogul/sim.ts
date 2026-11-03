@@ -341,7 +341,7 @@ export class Sim {
     const m = MENU_BY[item];
     const c: Cart = { id: this.s.ids++, x: sp.x, z: sp.z, menu: [item], prices: { [item]: m.fair }, lv: { speed: 0, sign: 0, style: 0 }, stock: { [m.good]: 4 }, served: 0, sales: 0, today: 0, rival: -1, name: `Cart #${n + 1}`, auto: true };
     this.s.carts.push(c);
-    this.log(`${this.s.company} opened a ${m.name.toLowerCase()} cart on ${this.streetAt(sp.x, sp.z)}`, 'me');
+    this.log(`${this.s.company} opened ${/^[aeiou]/i.test(m.name) ? 'an' : 'a'} ${m.name.toLowerCase()} cart on ${this.streetAt(sp.x, sp.z)}`, 'me');
     this.checkQuests();
     this.onChange();
     return c;
@@ -811,6 +811,21 @@ export class Sim {
     // property market drifts up
     s.propVal *= 1 + 0.004 + (Math.random() - 0.45) * 0.006;
     this.rollEvent();
+    // a rival muscles in on your best corner now and then
+    const best = this.myCarts().slice().sort((a, b) => b.sales - a.sales)[0];
+    if (best && Math.random() < 0.45 && this.s.carts.filter((c) => c.rival >= 0).length < 16) {
+      const ri = Math.floor(Math.random() * this.s.rivals.length);
+      const ang = Math.random() * Math.PI * 2;
+      const sp = this.sidewalk(best.x + Math.cos(ang) * 30, best.z + Math.sin(ang) * 30);
+      if (sp.ok && !this.s.carts.some((c) => Math.hypot(c.x - sp.x, c.z - sp.z) < 8)) {
+        const it = best.menu[0];
+        const m = MENU_BY[it];
+        this.s.carts.push({ id: this.s.ids++, x: sp.x, z: sp.z, menu: [it], prices: { [it]: Math.round(m.fair * (0.8 + Math.random() * 0.15) * 4) / 4 }, lv: { speed: 1, sign: 1, style: 0 }, stock: {}, served: 0, sales: 0, today: 0, rival: ri, name: this.s.rivals[ri].name, auto: true });
+        this.onToast(`${this.s.rivals[ri].name} parked a ${m.name.toLowerCase()} cart near your ${best.name}, undercutting you at ${money(this.s.carts[this.s.carts.length - 1].prices[it], true)}!`, 'bad');
+        this.log(`${this.s.rivals[ri].name} opened a ${m.name.toLowerCase()} cart next to ${this.s.company}'s ${best.name}`, 'rival');
+        this.onChange();
+      }
+    }
     // rivals act
     const R = Math.random;
     for (let i = 0; i < 2; i++) {

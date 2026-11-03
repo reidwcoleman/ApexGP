@@ -31,6 +31,8 @@ const I: Record<string, string> = {
   gem: '<path d="M6 4h12l3 5-9 11L3 9z"/><path d="M3 9h18M9 4l3 16 3-16"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   home: '<path d="M4 20V10l8-6 8 6v10"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>',
+  note: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
 };
 const svg = (k: string, sw = 2) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${I[k] ?? ''}</svg>`;
 export function gIcon(g: GoodId, size = 34): string {
@@ -57,6 +59,10 @@ export class UI {
   onSpeed: (s: number) => void = () => {};
   onHeat: (on: boolean) => void = () => {};
   onMute: (m: boolean) => void = () => {};
+  onHelp: () => void = () => {};
+  onMusic: (on: boolean) => void = () => {};
+  onGfx: () => void = () => {};
+  musicOn = true;
   onSfx: (k: 'click' | 'buy' | 'bad' | 'goal' | 'coin') => void = () => {};
   private el: Record<string, HTMLElement> = {};
   private binds: Record<string, () => string> = {};
@@ -130,6 +136,9 @@ export class UI {
       <div class="clock glass"><svg class="sun" viewBox="0 0 30 30" data-r="sun"></svg><div><div class="tm num" data-r="tm"></div><div class="dy" data-r="dy"></div></div>
         <div class="spd" data-r="spd">${[0, 1, 2, 3].map((s) => `<button data-spd="${s}">${s ? s + '×' : svg('pause', 2.4).replace('<svg', '<svg width="14" height="14"')}</button>`).join('')}</div>
         <div class="rank" data-act="ranks"><b class="num" data-r="rank"></b><span>this month</span></div>
+        <button class="ic" data-act="help" title="Tutorial">${svg('help')}</button>
+        <button class="ic" data-act="music" title="Music" data-r="music">${svg('note')}</button>
+        <button class="ic" data-act="gfx" title="Graphics quality" data-r="gfx"><b style="font-size:11px">HI</b></button>
         <button class="ic" data-act="heat" title="Foot traffic (H)">${svg('heat')}</button>
         <button class="ic" data-act="mute" title="Sound (M)" data-r="mute">${svg('vol')}</button>
       </div>
@@ -236,6 +245,9 @@ export class UI {
       case 'empire': this.modal('empire'); break;
       case 'ranks': this.modal('ranks'); break;
       case 'trucks': this.modal('trucks'); break;
+      case 'help': this.onHelp(); break;
+      case 'music': this.musicOn = !this.musicOn; n.classList.toggle('on', this.musicOn); this.onMusic(this.musicOn); break;
+      case 'gfx': this.onGfx(); break;
       case 'heat': this.heatOn = !this.heatOn; n.classList.toggle('on', this.heatOn); this.onHeat(this.heatOn); break;
       case 'mute': this.muted = !this.muted; n.innerHTML = svg(this.muted ? 'mute' : 'vol'); this.onMute(this.muted); break;
       case 'buytruck': s.buyTruck(); this.onSfx('buy'); this.renderModal(); break;

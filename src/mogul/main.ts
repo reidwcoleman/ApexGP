@@ -7,6 +7,8 @@ import { Sim, money, type SaveState } from './sim.ts';
 import { Peds } from './peds.ts';
 import { Props } from './props.ts';
 import { Life } from './life.ts';
+import { Tutorial } from './tutorial.ts';
+import { Music } from './music.ts';
 import { Sfx } from './audio.ts';
 import { UI, type Tool } from './ui.ts';
 import { FAC_BY, RIVALS, SURVEY_COST, MENU_BY, SHOP_BY, GOODS, tierOf } from './data.ts';
@@ -24,7 +26,9 @@ async function boot() {
   const ui = new UI($('#ui'));
   const sfx = new Sfx();
   ui.onSfx = (k) => (sfx as any)[k]?.();
-  window.addEventListener('pointerdown', () => sfx.unlock(), { once: true });
+  const music = new Music();
+  let musicWanted = localStorage.getItem('mogul.music') !== '0';
+  window.addEventListener('pointerdown', () => { sfx.unlock(); if (sfx.ctx) { music.attach(sfx.ctx, sfx.master); music.setOn(musicWanted); } }, { once: true });
   loading.classList.add('done');
 
   const q = new URLSearchParams(location.search);
@@ -145,6 +149,15 @@ async function boot() {
   ui.onSpeed = (s) => { speed = s; };
   ui.onHeat = (on) => { world.heat.visible = on || tool === 'cart'; };
   ui.onMute = (m) => sfx.setMuted(m);
+  ui.musicOn = musicWanted;
+  (document.querySelector('[data-act="music"]') as HTMLElement)?.classList.toggle('on', musicWanted);
+  ui.onMusic = (on) => { musicWanted = on; localStorage.setItem('mogul.music', on ? '1' : '0'); if (sfx.ctx) { music.attach(sfx.ctx, sfx.master); music.setOn(on); } };
+  const gfxBtn = document.querySelector('[data-act="gfx"]') as HTMLElement;
+  const gfxLabel = () => { gfxBtn.innerHTML = `<b style="font-size:11px">${['LO', 'MED', 'HI'][world.quality]}</b>`; };
+  gfxLabel();
+  ui.onGfx = () => { world.setQuality((world.quality + 2) % 3); gfxLabel(); ui.toast(`Graphics: ${['Low (fastest)', 'Medium (bloom + smoothing)', 'High (+ ambient occlusion)'][world.quality]}`); };
+  const tut = new Tutorial($('#ui'), sim, ui, world, props);
+  ui.onHelp = () => { ui.select(null); ui.closeModal(); tut.start(); };
   let speed = 1;
 
   const canvas = $('#gl');
@@ -187,6 +200,7 @@ async function boot() {
       const d = props.dropAt(g.x, g.z, 8);
       if (d) {
         props.collect(d);
+        tut.grabbed++;
         sim.gift(d.amount);
         sim.addHype(0.08);
         ui.pop(cx, cy - 10, '+' + money(d.amount), 'huge');
@@ -197,6 +211,7 @@ async function boot() {
       const c = props.cartAt(g.x, g.z, 5);
       if (c) {
         if (c.rival < 0 && peds.rush('c:' + c.id)) {
+          tut.rushes++;
           combo = performance.now() - comboT < 900 ? combo + 1 : 1;
           comboT = performance.now();
           if (combo >= 3) { const p = world.toScreen(c.x, 8, c.z); if (p) ui.pop(p.x, p.y - 26, `Rush x${combo}!`, 'big'); }
@@ -299,18 +314,52 @@ async function boot() {
 
   // ---------------------------------------------------------------- frame loop
   let last = performance.now();
-  let uiT = 0, pitchT = 0, paintT = 0, dropT = 8, vipT = 40;
+  const bootAt = performance.now();
+  let uiT = 0, pitchT = 0, paintT = 0, dropT = 8, vipT = 40, busT = 45, fpsAcc = 0, fpsN = 0, gfxStepped = false;
   let lastDay = sim.day;
   step('Open for business', 1);
   setTimeout(() => loading.classList.add('done'), 150);
-  if (!save) { world.flyTo(0, 0, 560); setTimeout(() => ui.onTool('cart'), 900); }
+  if (!save) {
+    world.flyTo(0, 0, 560);
+    if (localStorage.getItem('mogul.tutDone') && !new URLSearchParams(location.search).has('tut')) setTimeout(() => ui.onTool('cart'), 900);
+    else setTimeout(() => tut.start(), 900);
+  } else if (new URLSearchParams(location.search).has('tut')) setTimeout(() => tut.start(), 900);
   const frame = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     const sp = ui.modalKind === 'month' || ui.modalKind === 'away' ? 0 : speed;
     sim.step(dt, sp);
     peds.update(dt, sp);
+    props.night = world.night;
     props.update(dt, sp || 0.0001);
+    tut.update(dt);
+    music.hype = sim.frenzy > 0 ? 1 : sim.hype * 0.4;
+    // a frame-time watchdog: if High can't hold ~38 fps for a few seconds, step down once
+    fpsAcc += dt; fpsN++;
+    if (fpsAcc > 4) { const fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; if (fps < 36 && world.quality > 1 && !gfxStepped && performance.now() - bootAt > 12000 && sp > 0) { gfxStepped = true; world.setQuality(world.quality - 1); gfxLabel(); ui.toast('Graphics set to Medium to keep things smooth (change it with the HI/MED/LO button)'); } }
+    // tour buses: a crowd of eager tourists unloads by one of your businesses
+    if (sp > 0 && sim.hour > 8 && sim.hour < 21 && peds.sellers.some((x) => x.mine)) {
+      busT -= dt;
+      if (busT <= 0) {
+        busT = 70 + Math.random() * 50;
+        const mine = peds.sellers.filter((x) => x.mine);
+        const sel = mine[Math.floor(Math.random() * mine.length)];
+        const q = city.nearestEdge(sel.x, sel.z, 60);
+        if (q) {
+          const e = city.edges[q.e];
+          const ux = (city.nx[e.b] - city.nx[e.a]) / e.len, uz = (city.nz[e.b] - city.nz[e.a]) / e.len;
+          const off = e.cls >= 5 ? 0 : e.w / 2 - 1.6;
+          const sx = Math.sign((sel.x - q.px) * -uz + (sel.z - q.pz) * ux) || 1;
+          const bx = q.px - uz * off * sx + ux * 10, bz = q.pz + ux * off * sx + uz * 10;
+          props.parkBus(bx, bz, Math.atan2(ux, uz));
+          peds.burst(bx, bz, 26);
+          const id = +sel.key.slice(2);
+          const nm = sel.key[0] === 'c' ? sim.cart(id)?.name : 'your ' + SHOP_BY[sim.shop(id)?.type ?? 'cafe'].name;
+          ui.toast(`Tour bus! 26 hungry tourists just got off by ${nm}`, 'city');
+          sfx.horn();
+        }
+      }
+    }
     life.update(dt, sp, sim.crowdMul(), world.camera.position);
     world.setHour(sim.hour);
     world.update(dt);
@@ -384,7 +433,7 @@ async function boot() {
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
-  (window as any).__mogul = { sim, world, peds, props, ui, city, life, save: save_ };
+  (window as any).__mogul = { sim, world, peds, props, ui, city, life, tut, music, save: save_ };
   (window as any).__ready = true;
 }
 

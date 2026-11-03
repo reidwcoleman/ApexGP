@@ -63,6 +63,12 @@ export class Sfx {
     for (let i = 0; i < 6; i++) this.tone(1200 + i * 180 + Math.random() * 80, t + i * 0.045, 0.12, 'square', 0.04);
     this.tone(2093, t + 0.3, 0.4, 'triangle', 0.08);
   }
+  horn() {
+    const c = this.ensure(); if (!c) return;
+    const t = c.currentTime;
+    this.tone(330, t, 0.35, 'sawtooth', 0.05); this.tone(415, t, 0.35, 'sawtooth', 0.04);
+    this.tone(330, t + 0.45, 0.5, 'sawtooth', 0.05); this.tone(415, t + 0.45, 0.5, 'sawtooth', 0.04);
+  }
   ping() { const c = this.ensure(); if (!c) return; const t = c.currentTime; this.tone(880, t, 0.9, 'sine', 0.14, 440); this.tone(1320, t + 0.15, 0.7, 'sine', 0.06, 660); }
   found() { const c = this.ensure(); if (!c) return; const t = c.currentTime; [784, 988, 1175, 1568].forEach((f, i) => this.tone(f, t + i * 0.07, 0.25, 'square', 0.05)); }
 

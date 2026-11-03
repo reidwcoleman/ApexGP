@@ -107,7 +107,6 @@ export class Life {
     const mat = glowMat(night);
     [carG, vanG, busG].forEach((g, k) => {
       const im = new THREE.InstancedMesh(g, mat, counts[k]);
-      im.castShadow = true;
       im.frustumCulled = false;
       this.carMesh.push(im);
       scene.add(im);

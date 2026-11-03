@@ -7,7 +7,16 @@ import { MENU_BY, SHOP_BY, FAC_BY, GOODS, type GoodId } from './data.ts';
 
 const mat = (c: number | string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, ...o });
 
-export function makeCart(color: string, rival: string | null): THREE.Group {
+/** Materials that glow brighter at night (neon, bulbs); Props.update drives their intensity. */
+export const NIGHT_GLOW: { m: THREE.MeshStandardMaterial; day: number; night: number }[] = [];
+function glow(color: string, day: number, night: number) {
+  const m = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: day, roughness: 0.4 });
+  NIGHT_GLOW.push({ m, day, night });
+  return m;
+}
+const BULB = new THREE.SphereGeometry(0.09, 6, 4);
+
+export function makeCart(color: string, rival: string | null, lv = { speed: 0, sign: 0, style: 0 }): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 1.2), mat(rival ?? '#f4f1e8'));
   body.position.y = 0.95;
@@ -28,6 +37,29 @@ export function makeCart(color: string, rival: string | null): THREE.Group {
   top.position.y = 3.72;
   g.add(body, trim, counter, pole, umb, top);
   for (let k = 0; k < 5; k++) { const u = umb2.clone(); u.rotation.y = (k * Math.PI * 2) / 5; g.add(u); }
+  // upgrades show: a sign board that grows, string lights round the umbrella, a hot grill that smokes
+  if (lv.sign > 0) {
+    const w = 1.4 + lv.sign * 0.35;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.2 + lv.sign * 0.3, 0.08), mat('#555'));
+    post.position.set(1.35, 1.9 + lv.sign * 0.15, 0);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5 + lv.sign * 0.12, w), glow(color, 0.35, 1.6));
+    board.position.set(1.35, 2.5 + lv.sign * 0.3, 0);
+    g.add(post, board);
+  }
+  if (lv.style > 0) {
+    const bm = glow('#ffd88a', 0.4, 3.2);
+    const n = 10 + lv.style * 4;
+    for (let k = 0; k < n; k++) { const b = new THREE.Mesh(BULB, bm); const a = (k / n) * Math.PI * 2; b.position.set(Math.cos(a) * 1.85, 3.0 - 0.06 * Math.sin(a * 5), Math.sin(a) * 1.85); g.add(b); }
+    const trimG = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.05, 4, 24).rotateX(Math.PI / 2), mat(color));
+    trimG.position.y = 3.02;
+    g.add(trimG);
+  }
+  if (lv.speed > 1) {
+    const grill = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.7), glow('#ff6a2a', 0.5, 1.4));
+    grill.position.set(-0.5, 1.58, 0);
+    g.add(grill);
+    g.userData.grill = true;
+  }
   g.traverse((o) => { if (o instanceof THREE.Mesh) { o.castShadow = true; } });
   g.scale.setScalar(1.25);
   return g;
@@ -105,9 +137,14 @@ function makeAwning(color: string, w: number): THREE.Group {
   const stripes = new THREE.Mesh(new THREE.BoxGeometry(w + 0.02, 0.2, 0.5), mat('#ffffff'));
   stripes.position.set(0, 3.0, 2.05);
   stripes.rotation.x = 0.28;
-  const sign = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.8, 0.15), mat(color, { emissive: color, emissiveIntensity: 0.25 }));
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, 0.8, 0.15), glow(color, 0.3, 2.2));
   sign.position.set(0, 4.3, 0.12);
-  g.add(a, stripes, sign);
+  const neon = new THREE.Mesh(new THREE.BoxGeometry(w * 0.74, 0.08, 0.2), glow('#fff2c8', 0.2, 3.5));
+  neon.position.set(0, 4.74, 0.14);
+  const neon2 = neon.clone(); neon2.position.y = 3.86;
+  const win = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 2.4, 0.06), glow('#ffe2a8', 0.05, 1.3));
+  win.position.set(0, 1.5, 0.04);
+  g.add(a, stripes, sign, neon, neon2, win);
   g.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
   return g;
 }
@@ -283,10 +320,10 @@ export class Props {
       seen.add(c.id);
       let g = this.carts.get(c.id);
       const col = MENU_BY[c.menu[0]].color;
-      const key = c.menu.join(',') + c.rival;
+      const key = c.menu.join(',') + c.rival + ':' + c.lv.speed + c.lv.sign + c.lv.style;
       if (!g || g.userData.key !== key) {
         if (g) this.root.remove(g);
-        g = makeCart(col, c.rival >= 0 ? s.rivals[c.rival].color : null);
+        g = makeCart(col, c.rival >= 0 ? s.rivals[c.rival].color : null, c.lv);
         g.userData.key = key;
         g.userData.id = c.id;
         this.carts.set(c.id, g);
@@ -361,8 +398,42 @@ export class Props {
     return -1;
   }
 
+  night = 0;
+  private buses: { g: THREE.Group; t: number }[] = [];
+  /** A tour bus pulls up at the kerb for a while. */
+  parkBus(x: number, z: number, yaw: number, life = 22) {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3.1, 12), mat('#ff5f6d'));
+    body.position.y = 1.9;
+    const band = new THREE.Mesh(new THREE.BoxGeometry(2.64, 1.0, 10.6), mat('#1f2a3a', { roughness: 0.2, metalness: 0.3 }));
+    band.position.set(0, 2.5, -0.4);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.66, 0.35, 12.02), mat('#ffc83d'));
+    stripe.position.y = 1.2;
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.4, 7), mat('#ffffff'));
+    roof.position.set(0, 3.65, -1);
+    const wg = new THREE.CylinderGeometry(0.55, 0.55, 2.7, 12).rotateZ(Math.PI / 2);
+    for (const zz of [-3.8, 3.8]) { const w = new THREE.Mesh(wg, mat('#1f1f24')); w.position.set(0, 0.55, zz); g.add(w); }
+    g.add(body, band, stripe, roof);
+    g.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
+    g.position.set(x, 0, z);
+    g.rotation.y = yaw;
+    g.scale.setScalar(0.01);
+    this.root.add(g);
+    this.buses.push({ g, t: -life });
+  }
+
   update(dt: number, speed: number) {
     this.time += dt;
+    for (const n of NIGHT_GLOW) n.m.emissiveIntensity = n.day + (n.night - n.day) * this.night;
+    for (const b of this.buses) {
+      b.t += dt;
+      const appear = Math.min(1, (b.t + 1e9) > 0 ? 1 : 0);
+      void appear;
+      const s = b.t < 0 ? Math.min(1, b.g.scale.x + dt * 3) : Math.max(0, b.g.scale.x - dt * 2);
+      b.g.scale.setScalar(Math.max(0.01, s));
+    }
+    for (const b of this.buses.filter((b) => b.t > 0.6)) this.root.remove(b.g);
+    this.buses = this.buses.filter((b) => b.t <= 0.6);
     // vehicles
     const live = new Set<number>();
     for (const v of this.sim.vehicles) {
