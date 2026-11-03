@@ -60,10 +60,10 @@ export const MENU_BY: Record<string, MenuItem> = Object.fromEntries(MENU.map((m)
 export interface ShopType { id: string; name: string; color: string; fitout: number; items: MenuItem[] }
 const P = (id: string, name: string, fair: number, good: GoodId, use: number, peak: Peak, color: string): MenuItem => ({ id, name, fair, good, use, peak, color });
 export const SHOPS: ShopType[] = [
-  { id: 'cafe', name: 'Café', color: '#a8673a', fitout: 900, items: [P('latte', 'Lattes', 5, 'beans', 0.06, 'morning', '#a8673a'), P('croissant', 'Croissants', 4, 'bread', 0.15, 'morning', '#e0a050')] },
-  { id: 'bakery', name: 'Bakery', color: '#e0a050', fitout: 1100, items: [P('loaf', 'Loaves', 6, 'bread', 0.3, 'allday', '#c98a3c'), P('cake', 'Cakes', 9, 'flour', 0.3, 'afternoon', '#ff9ec4')] },
-  { id: 'grocer', name: 'Grocery', color: '#58b85a', fitout: 1400, items: [P('produce', 'Produce', 9, 'veg', 0.8, 'allday', '#58b85a'), P('fruitbox', 'Fruit', 8, 'fruit', 0.7, 'afternoon', '#ff7a59'), P('milkjug', 'Milk', 5, 'milk', 0.6, 'morning', '#cfe3f5')] },
-  { id: 'diner', name: 'Diner', color: '#e5533d', fitout: 2600, items: [P('burger', 'Burgers', 13, 'meat', 0.25, 'lunch', '#e5533d'), P('sandwich', 'Sandwiches', 10, 'bread', 0.25, 'lunch', '#e0a050')] },
+  { id: 'cafe', name: 'Café', color: '#a8673a', fitout: 900, items: [P('latte', 'Lattes', 6.5, 'beans', 0.06, 'morning', '#a8673a'), P('croissant', 'Croissants', 5, 'bread', 0.15, 'morning', '#e0a050')] },
+  { id: 'bakery', name: 'Bakery', color: '#e0a050', fitout: 1100, items: [P('loaf', 'Loaves', 8, 'bread', 0.3, 'allday', '#c98a3c'), P('cake', 'Cakes', 14, 'flour', 0.3, 'afternoon', '#ff9ec4')] },
+  { id: 'grocer', name: 'Grocery', color: '#58b85a', fitout: 1400, items: [P('produce', 'Produce', 14, 'veg', 0.8, 'allday', '#58b85a'), P('fruitbox', 'Fruit', 12, 'fruit', 0.7, 'afternoon', '#ff7a59'), P('milkjug', 'Milk', 7, 'milk', 0.6, 'morning', '#cfe3f5')] },
+  { id: 'diner', name: 'Diner', color: '#e5533d', fitout: 2600, items: [P('burger', 'Burgers', 17, 'meat', 0.25, 'lunch', '#e5533d'), P('sandwich', 'Sandwiches', 13, 'bread', 0.25, 'lunch', '#e0a050')] },
   { id: 'tech', name: 'Tech Store', color: '#4aa8ff', fitout: 9000, items: [P('phone', 'Gadgets', 240, 'electronics', 1.4, 'afternoon', '#4aa8ff')] },
   { id: 'jeweler', name: 'Jeweler', color: '#e86bd8', fitout: 16000, items: [P('ring', 'Rings', 700, 'jewelry', 1.6, 'evening', '#e86bd8')] },
   { id: 'hardware', name: 'Hardware', color: '#8fa3b8', fitout: 5000, items: [P('tools', 'Tools', 85, 'steel', 1.5, 'morning', '#8fa3b8'), P('brickpack', 'Building supplies', 30, 'bricks', 2.5, 'allday', '#c4553b')] },

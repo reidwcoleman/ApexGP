@@ -61,7 +61,7 @@ export class Peds {
     let acc = 0;
     for (let i = 0; i < c.edges.length; i++) {
       const e = c.edges[i];
-      let w = Math.pow(e.foot, 1.6) * e.len * (1 + (this.extra.get(i) ?? 0));
+      let w = e.foot * e.len * (1 + (this.extra.get(i) ?? 0));
       if (i === fest) w *= 12;
       this.weights[i] = e.foot * (1 + (this.extra.get(i) ?? 0)) * (i === fest ? 5 : 1);
       acc += w;

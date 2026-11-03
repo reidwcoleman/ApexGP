@@ -121,7 +121,7 @@ export class Sim {
   }
 
   private planRivals() {
-    const base = Math.max(15000, this.s.stats.lastGrowth * 1.15, this.netWorth() * 0.6);
+    const base = Math.max(this.month <= 1 ? 6000 : 15000, this.s.stats.lastGrowth * 1.15, this.netWorth() * 0.6);
     const R = rnd((this.s.seed + Math.floor(this.s.t)) >>> 0);
     for (const r of this.s.rivals) { r.start = r.nw; r.target = base * (0.25 + R() * 1.35); }
   }
@@ -173,14 +173,15 @@ export class Sim {
       for (const id of c.menu) { const m = MENU_BY[id]; best = Math.max(best, peakMul(m.peak, h) * this.priceF(c.prices[id], m.fair) * itemMul(m) * (this.hasStock(c.stock, m) || c.rival >= 0 ? 1 : 0)); }
       const variety = 1 + 0.22 * (c.menu.length - 1);
       const appeal = 1 + 0.25 * c.lv.style;
-      return { p: Math.min(0.9, 0.2 * best * variety * appeal * (c.rival >= 0 ? 0.85 : 1)), radius: 16 + 6 * c.lv.sign };
+      return { p: Math.min(0.9, 0.46 * best * variety * appeal * (c.rival >= 0 ? 0.85 : 1)), radius: 22 + 6 * c.lv.sign };
     }
     const sh = this.shop(+key.slice(2));
     if (!sh) return { p: 0, radius: 0 };
     const t = SHOP_BY[sh.type];
     let best = 0;
     for (const m of t.items) best = Math.max(best, peakMul(m.peak, h) * this.priceF(sh.prices[m.id], m.fair) * itemMul(m) * (this.hasStock(sh.stock, m) ? 1 : 0));
-    return { p: Math.min(0.92, 0.42 * best * (1 + 0.1 * (t.items.length - 1)) * (1 + 0.25 * sh.lv.decor)), radius: 30 + 10 * sh.lv.ads };
+    const office = 1 + Math.min(1.2, this.city.buildings[sh.b].floors / 25); // people working upstairs come down for it
+    return { p: Math.min(0.95, 0.6 * best * office * (1 + 0.1 * (t.items.length - 1)) * (1 + 0.25 * sh.lv.decor)), radius: 36 + 10 * sh.lv.ads };
   }
   private hasStock(st: Store, m: MenuItem) { return (st[m.good] ?? 0) >= m.use; }
 
@@ -208,9 +209,12 @@ export class Sim {
     let r = Math.random() * tot, i = 0;
     while (i < w.length - 1 && (r -= w[i]) > 0) i++;
     const m = items[i];
-    const price = prices[m.id];
+    // some people buy for friends too: 1–3 of the item, fewer when it's pricey
+    const r2 = Math.random() * this.priceF(prices[m.id], m.fair);
+    const qty = (r2 > 0.85 ? 3 : r2 > 0.45 ? 2 : 1) + (isCart ? 0 : Math.random() < 0.4 ? 1 : 0);
+    const price = prices[m.id] * qty;
     if (c && c.rival >= 0) { c.served++; return price; }
-    st[m.good] = Math.max(0, (st[m.good] ?? 0) - m.use);
+    st[m.good] = Math.max(0, (st[m.good] ?? 0) - m.use * qty);
     const bonus = 1 + this.trophyBonus();
     const earned = price * bonus;
     this.s.cash += earned;
@@ -240,11 +244,15 @@ export class Sim {
     if (!q) return { x, z, ok: false };
     const e = this.city.edges[q.e];
     const dx = x - q.px, dz = z - q.pz, d = Math.hypot(dx, dz);
-    const off = e.cls >= 5 ? Math.min(d, e.w / 2 - 0.8) : e.w / 2 + 1.6;
     const ux = d > 0.01 ? dx / d : -(this.city.nz[e.b] - this.city.nz[e.a]) / e.len, uz = d > 0.01 ? dz / d : (this.city.nx[e.b] - this.city.nx[e.a]) / e.len;
-    let px = q.px + ux * off, pz = q.pz + uz * off;
-    if (this.city.buildingAt(px, pz)) { px = q.px - ux * off; pz = q.pz - uz * off; } // the other kerb
-    return { x: px, z: pz, ok: !this.city.buildingAt(px, pz) };
+    // the kerb on the clicked side first, nearer the road if a building is in the way, then the other kerb
+    const offs = e.cls >= 5 ? [Math.min(d, e.w / 2 - 0.8), 0] : [e.w / 2 + 1.6, e.w / 2 + 0.8, e.w / 2 + 0.1];
+    for (const sd of [1, -1])
+      for (const off of offs) {
+        const px = q.px + ux * off * sd, pz = q.pz + uz * off * sd;
+        if (!this.city.buildingAt(px, pz)) return { x: px, z: pz, ok: true };
+      }
+    return { x: q.px + ux * offs[0], z: q.pz + uz * offs[0], ok: false };
   }
 
   placeCart(x: number, z: number, item = 'hotdog'): Cart | null {
@@ -294,7 +302,7 @@ export class Sim {
   }
   upgraded = false;
 
-  unitRent(b: Building) { return Math.max(30, Math.round((b.value * 0.0022) / b.units / 10) * 10); }
+  unitRent(b: Building) { return Math.max(30, Math.round((b.value * 0.0016) / b.units / 10) * 10); }
   shopsIn(b: number) { return this.s.shops.filter((s) => s.b === b); }
   openShop(b: Building, type: string): Shop | null {
     if (this.shopsIn(b.id).length >= b.units) { this.onToast('No rooms left in this building'); return null; }

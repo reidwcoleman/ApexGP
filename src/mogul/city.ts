@@ -167,7 +167,7 @@ export class City {
       b.traffic = e ? Math.round(e.foot * 160 * this.def.crowd) : 20;
       const per = Math.sqrt(area) * 4;
       b.units = Math.max(1, Math.min(6, Math.round(per / 26)));
-      b.value = Math.round((area * b.floors * 16 + area * 60) * land * (0.6 + Math.min(2.2, b.traffic / 90)) / 100) * 100;
+      b.value = Math.round((area * b.floors * 9 + area * 40) * land * (0.6 + Math.min(2.2, b.traffic / 90)) / 100) * 100;
       // grid
       let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
       for (let j = 0; j < n; j++) { x0 = Math.min(x0, pts[j * 2]); x1 = Math.max(x1, pts[j * 2]); z0 = Math.min(z0, pts[j * 2 + 1]); z1 = Math.max(z1, pts[j * 2 + 1]); }
