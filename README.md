@@ -748,17 +748,19 @@ and bots; the contestants are original bean characters, not marbles.
 
 - **Worlds** (`biome.ts`, `env-biomes.ts`): every round is in a world of its own: candy, a
   tropical beach, a volcano, the arctic (with an aurora), a jungle, autumn woods, outer space,
-  a haunted night under a big moon, neon synthwave, a desert, a candy sunset, and a royal sky of
-  castles. Each sets the sky (gradient, sun, moon, stars, aurora, a striped synthwave sun), the sea
+  a haunted night under a big moon, neon synthwave, a desert, a candy sunset, a royal sky of
+  castles, cherry blossom islands with tiered towers, a thunderstorm at sea (sea stacks, a
+  lighthouse, lightning flickering on the horizon), a coral reef lagoon (coral towers, giant shells,
+  sea arches) and a clockwork sunset (giant gears turning, brass towers). Each sets the sky (gradient, sun, moon, stars, aurora, a striped synthwave sun), the sea
   below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
   light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
   colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
-- **The show**: six rounds dealt fresh every show from 18 (`POOL` / `dealShow` in `courses.ts`):
+- **The show**: six rounds dealt fresh every show from 24 (`POOL` / `dealShow` in `courses.ts`):
   race, survival, race, team, race, the final. A wheel of round names spins and lands on each one
   while it builds.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
     paint, open edges (fall off and you're back at the last checkpoint), flat or climbing, joined
-    by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 23 (pins,
+    by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 34 (pins,
     sweeping bars, hammers, door walls, rolling logs, seesaws, sliding bridges, spinning floors, an
     uphill belt, wrecking balls, axes, a kicker jump, a bounce pit, rocking planks, windmills,
     sliders, turnstiles, a bumper field with flippers, island hops, climbs, and in `obs-new.ts`
@@ -766,10 +768,22 @@ and bots; the contestants are original bean characters, not marbles.
     and padded gates swinging shut). Hop Scotch, Bonk Bay, Knock Knock, Whirligig, Bonk Alley,
     Wobble Walk, Sky Stairs, Jelly Junction, Punch Line, Rumble Hill, Lava Rush (an uphill race
     with lava flooding up the course behind the field: caught by it, or falling with your
-    checkpoint already under it, and you're out; `GenSpec.lava`); each in its own world, and
+    checkpoint already under it, and you're out; `GenSpec.lava`), Petal Pass, Tick Tock, Moon Run
+    (low gravity all the way: `GenSpec.grav`) and Slip Rink (every floor is ice: `GenSpec.grip`);
+    each in its own world, and
     every zone its own floor (`zonedFloor` in `shaders.ts`: tile colours and a pattern — tiles,
     stripes, spots or chevrons — looked up along the path, a striped band where it starts). A new
     course is one line in `GEN`.
+  - **Each world's own obstacles** (`obs-world.ts`): ice rinks with crystal posts (arctic), fans
+    blowing across the deck in gusts with streaks or petals (beach, blossom), laser gates that bob
+    or rock and zap you over (neon), ghost platforms fading in and out over a drop (spooky), lava
+    geysers that bubble then blast you up (volcano), quicksand pits (desert), river rapids washing
+    you toward the open side (jungle), cannons firing balls across the deck (royal), pistons
+    slamming down from gantries (clockwork), jelly that bounces you and gaps you need it for
+    (candy, sunset), low-gravity islands with huge gaps (space), and the hill's rolling balls as
+    pumpkins, snowballs or boulders. They run on `World.fields` (`physics.ts`): patches with their
+    own gravity, grip, run speed and jump, or something that acts on whoever is in them; the bots
+    read gravity and jump height along the course from them (`CourseAI.gk`/`jk`).
   - **The dressing** (`course-dress.ts`, scenery only): an inflatable arch in each zone's colour
     where it starts, big arrows on the outside of every turn, floating islands beside the course
     with giant inflatable toys (gumdrops, lollipops, donuts, beach balls, cupcakes, dice, presents,
@@ -779,8 +793,12 @@ and bots; the contestants are original bean characters, not marbles.
     and the plate's rings crumble), Tilt-a-Dish (a dish that tips further and further), Cookie
     Crumble (`course-crumble.ts`, `ai-crumble.ts`: six floors of cookie tiles, each dropping a
     moment after it's stood on, so you fall floor to floor; the tiles are cheap `World.pads`, the
-    host sends the drop times) and Meltdown (one ice floe melting in from the edge with holes
-    opening in it, the same on every screen; push the others in).
+    host sends the drop times), Meltdown (one ice floe melting in from the edge with holes
+    opening in it, the same on every screen; push the others in), Storm Deck (`course-storm.ts`: a
+    raft in a thunderstorm; a ring of light marks each lightning strike before it blasts everyone
+    near it overboard, more and faster as it goes, from a seeded schedule every browser shares) and
+    High Tide (`course-tide.ts`: hexagonal coral columns a hop apart in height; the sea rises a step
+    at a time and takes whoever it reaches). Their bots are in `ai-arena.ts`.
   - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams on a big arena;
     every bean leaves a trail of its team's paint as it runs (a dive smears a wider stripe, a
     landing splats a blob), drawn from a fine paint map (25 cm texels, a channel per team) as glossy
@@ -794,7 +812,8 @@ and bots; the contestants are original bean characters, not marbles.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
     order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
-    18 Rumble Hill, 19 Cookie Crumble, 20 Lava Rush, 21 Meltdown).
+    18 Rumble Hill, 19 Cookie Crumble, 20 Lava Rush, 21 Meltdown, 22 Petal Pass, 23 Tick Tock,
+    24 Moon Run, 25 Slip Rink, 26 Storm Deck, 27 High Tide).
   - Out of the show, you can watch it to the end (←/→ switches bean).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,

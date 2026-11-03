@@ -12,6 +12,8 @@ import { summit } from './course-summit.ts';
 import { paintparty, type TeamArena } from './course-paintparty.ts';
 import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
+import { storm, type StormArena } from './course-storm.ts';
+import { tide, type TideArena } from './course-tide.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -47,6 +49,10 @@ export interface Course {
   plate?: { center: THREE.Vector3; radius: number; bars: { angle: (t: number) => number; height: number; kin: Kin; on: (t: number) => boolean }[] };
   /** Cookie Crumble's floors of tiles */
   crumble?: CrumbleArena;
+  /** Storm Deck's lightning */
+  storm?: StormArena;
+  /** High Tide's columns and its sea */
+  tide?: TideArena;
   /** Lava Rush: the lava's height and how far along the course it has come, at a time */
   lava?: { y(t: number): number; s(t: number): number };
   /** the team round's painted floor */
@@ -57,8 +63,8 @@ export interface Course {
   intro: THREE.Vector3[];
 }
 
-export type GenId = 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | GenId;
+export type GenId = 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -92,6 +98,12 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   jellyjunction: { id: 'jellyjunction', name: 'Jelly Junction', kind: 'race', blurb: 'A bit of everything: logs, bars, doors, a spinner, seesaws', keep: 0.75 },
   punchline: { id: 'punchline', name: 'Punch Line', kind: 'race', blurb: 'Fists punch out across open decks, gates swing shut, balls come rolling down at you', keep: 0.75 },
   rumblehill: { id: 'rumblehill', name: 'Rumble Hill', kind: 'race', blurb: 'Two hills of balls rolling down, gates, a wrecking ball and the fists', keep: 0.75 },
+  petalpass: { id: 'petalpass', name: 'Petal Pass', kind: 'race', blurb: 'Blossom islands. Big fans blow you sideways in gusts, jelly bounces you over the gaps.', keep: 0.75 },
+  ticktock: { id: 'ticktock', name: 'Tick Tock', kind: 'race', blurb: 'Inside the clockwork: pistons slam down on a beat, gears turn, belts run back at you.', keep: 0.75 },
+  moonrun: { id: 'moonrun', name: 'Moon Run', kind: 'race', blurb: 'Low gravity all the way: floaty jumps, huge gaps, laser gates. Mind where you land.', keep: 0.75 },
+  sliprink: { id: 'sliprink', name: 'Slip Rink', kind: 'race', blurb: 'Every floor is ice. Slide round the corners, dive to go faster, snowballs rolling down.', keep: 0.75 },
+  stormdeck: { id: 'stormdeck', name: 'Storm Deck', kind: 'survival', blurb: 'A raft in a thunderstorm. A ring of light marks where the lightning strikes next: get out of it, or get blasted overboard.', keep: 0.6 },
+  hightide: { id: 'hightide', name: 'High Tide', kind: 'survival', blurb: 'Coral columns in the sea. The tide rises a step at a time: climb higher, keep your spot, push the others in.', keep: 0.6 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
 };
 /**
@@ -99,17 +111,18 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** a new show: a race, a survival, a race, the team round, a race, the final (which races and which survival is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
-export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush'];
-export const POOL: RoundId[] = [...RACE_POOL, 'jumpclub', 'tiptop', 'crumble', 'meltdown', 'paintparty', 'splatring', 'crownpeak'];
+export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink'];
+export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide'];
+export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, 'paintparty', 'splatring', 'crownpeak'];
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
   // (the platform courses; the old chutes are still there for the test links)
   const races = shuffle<RoundId>(RACE_POOL);
-  const surv = shuffle<RoundId>(['jumpclub', 'tiptop', 'crumble', 'meltdown']);
+  const surv = shuffle<RoundId>(SURVIVAL_POOL);
   const team: RoundId = rnd() < 0.5 ? 'paintparty' : 'splatring';
   setShow([races[0], surv[0], races[1], team, races[2], 'crownpeak']);
   return SHOW.map((x) => x.id);
@@ -148,6 +161,10 @@ export function buildRound(id: RoundId): Course {
       return crumble(info);
     case 'meltdown':
       return crumble(info, 'melt');
+    case 'stormdeck':
+      return storm(info);
+    case 'hightide':
+      return tide(info);
     default:
       return genCourse(GEN[id], info);
   }

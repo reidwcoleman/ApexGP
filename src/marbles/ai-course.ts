@@ -132,6 +132,9 @@ export class CourseAI {
   readonly ride: Float32Array;
   /** sin of the slope (+: downhill) */
   readonly fall: Float32Array;
+  /** the course's fields along the way: gravity's scale and a jump's (low gravity, quicksand) */
+  readonly gk: Float32Array;
+  readonly jk: Float32Array;
   readonly hz: Hz[] = [];
   readonly plats: Hz[] = [];
   private hzB: Int32Array[] = [];
@@ -151,6 +154,20 @@ export class CourseAI {
     this.openL = new Uint8Array(n);
     this.openR = new Uint8Array(n);
     this.fall = new Float32Array(n);
+    this.gk = new Float32Array(n).fill(1);
+    this.jk = new Float32Array(n).fill(1);
+    const F = c.b.world.fields;
+    if (F.length) {
+      const q = new THREE.Vector3();
+      for (let i = 0; i < n; i++) {
+        q.copy(path.P[i]).addScaledVector(path.U[i], 0.6);
+        for (const f of F) {
+          if (q.x < f.min.x || q.x > f.max.x || q.y < f.min.y || q.y > f.max.y || q.z < f.min.z || q.z > f.max.z || (f.inside && !f.inside(q, 0))) continue;
+          if (f.g !== undefined) this.gk[i] *= f.g;
+          if (f.jump !== undefined) this.jk[i] *= f.jump;
+        }
+      }
+    }
     let lmax = 0;
     for (let i = 0; i < n; i++) {
       const sec = path.sec[i];
@@ -406,12 +423,13 @@ export class CourseAI {
     for (let v = 4; v < 40; v += 0.5) {
       const vel = new THREE.Vector3().copy(T).multiplyScalar(v);
       V.copy(U).lerp(W.set(0, 1, 0), 0.35).normalize();
-      vel.addScaledVector(V, JUMP_V);
+      vel.addScaledVector(V, JUMP_V * this.jk[i0]);
+      const G = GRAVITY * this.gk[i0];
       const p = new THREE.Vector3().copy(p0).addScaledVector(U, RADIUS);
       let ok = false;
       for (let t = 0; t < 3; t += 0.01) {
         p.addScaledVector(vel, 0.01);
-        vel.y -= GRAVITY * 0.01;
+        vel.y -= G * 0.01;
         const s = s0 + (p.x - p0.x) * th.x + (p.z - p0.z) * th.z;
         const fy = path.P[this.index(s)].y;
         if (s > s1 + 1) {

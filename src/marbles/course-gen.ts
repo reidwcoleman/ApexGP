@@ -11,6 +11,8 @@ import { dressCourse, type DressTurn } from './course-dress.ts';
 import { checkpoints, endWall, finishDressing, lakeBelow, makeCrown, raceRecord, tag, turntableGap } from './course-kit.ts';
 import type { Course } from './courses.ts';
 import { biome, BIOMES } from './biome.ts';
+import { ballLook, cannon, crystal, fanGust, floatRock, geysers, ghostPads, iceSheet, jellyCube, jellyDeck, laserGate, moonField, quicksand, rapids, stamper } from './obs-world.ts';
+import { gantry } from './obs-kit.ts';
 import { lake, paintLakeFor } from './env.ts';
 
 /**
@@ -45,6 +47,8 @@ interface Zone {
 }
 
 const W = 14;
+/** the course's own gravity (Moon Run's is low all over: a moon zone keeps to its own) */
+let GRAV = 1;
 /** every zone's floor is flat-banked; an open edge unless it says otherwise */
 const flat = (c: Cmd): Cmd => ({ bank: 0, slope: 0, wall: 0, ...c });
 
@@ -310,7 +314,8 @@ export const ZONES: Record<string, (k: string) => Zone> = {
     cmds: [flat({ len: 8, w: 14, tag: k + 'pre' }), flat({ len: 40, slope: -7, w: 14, easeS: 3, tag: k + 'z' }), flat({ len: 8, w: 14, easeS: 2, tag: k + 'post' })],
     place: ({ b, path, t, n }) => {
       const [z0, z1] = t(k + 'z');
-      rollDown(b, path, z0, z1, { lanes: [-4.8, -1.6, 1.6, 4.8], period: 3.0 + (n % 3) * 0.25, speed: 8.6, phase: n, colors: [col(n), col(n + 2), col(n + 5), col(n + 3)] });
+      const look = ({ autumn: 'pumpkin', arctic: 'snow', desert: 'rock', volcano: 'rock' } as const)[biome().id as 'autumn'];
+      rollDown(b, path, z0, z1, { lanes: [-4.8, -1.6, 1.6, 4.8], period: 3.0 + (n % 3) * 0.25, speed: 8.6, phase: n, colors: [col(n), col(n + 2), col(n + 5), col(n + 3)], ball: look ? (R, q) => ballLook(b, R, look, q) : undefined });
     },
     cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 3],
   }),
@@ -335,6 +340,152 @@ export const ZONES: Record<string, (k: string) => Zone> = {
     },
     cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 1],
   }),
+  // ---------------------------------------------------------------- the worlds' own (obs-world.ts)
+  /** arctic: an ice rink, a little downhill, crystals to slide round and a sweeper on the ice */
+  ice: (k) => ({
+    cmds: [flat({ len: 8, w: 13, wall: 0.8, tag: k + 'pre' }), flat({ len: 44, slope: 2.5, w: 13, wall: 0.8, easeS: 3, tag: k + 'z' }), flat({ len: 6, w: 13, wall: 0.8, easeS: 3, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0, z1] = t(k + 'z');
+      iceSheet(b, path, z0 - 1, z1 + 2);
+      [[6, -3], [6, 3], [12, 0], [12, -5], [12, 5], [30, -2.5], [30, 2.5], [36, 0], [36, -5], [36, 5]].forEach(([ds, lat]) => crystal(b, path, z0 + ds, lat));
+      const ss = z0 + 21;
+      sweeper(b, path.P[path.index(ss)].clone(), frameQuat(path, ss), { len: 12, angle: (tt) => (n % 2 ? -1 : 1) * 1.2 * tt + n, paint: { a: 0x7ac8ff, b: PAINT.white, pattern: Pattern.Rings, scale: 1.3 } });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** beach, blossom: fans off the open edges blowing across in gusts */
+  gusts: (k) => ({
+    cmds: [flat({ len: 8, w: 12, tag: k + 'pre' }), flat({ len: 42, w: 11.5, easeW: 2, tag: k + 'z' }), flat({ len: 6, w: 12, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      const petals = biome().id === 'blossom';
+      [7, 18, 29, 38].forEach((ds, q) => fanGust(b, path, z0 + ds, q % 2 ? -1 : 1, { phase: q * 1.7 + n, color: col(n + q * 2), petals, reach: q === 3 ? 2.6 : 3.8 }));
+      for (const [ds, lat] of [[12.5, -2.5], [12.5, 2.5], [23.5, 0], [33.5, -3], [33.5, 3]]) peg(b, path, z0 + ds, lat, { r: 0.42, paint: { a: col(n + 3), b: PAINT.white, pattern: Pattern.Stripes, scale: 2.4 } });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** neon: laser gates, bobbing and rocking: hop the low ones, run under the high */
+  lasers: (k) => ({
+    cmds: [flat({ len: 8, w: 13, wall: 1.0, tag: k + 'pre' }), flat({ len: 46, w: 13, wall: 1.0, tag: k + 'z' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      const cols = [0xff3aa0, 0x30e0ff, 0xffd040, 0x9a5bff, 0x40ff90];
+      [6, 14, 22, 30, 38].forEach((ds, q) => laserGate(b, path, z0 + ds, { kind: q % 2 ? 'rock' : 'bob', period: 3.6 + (q % 3) * 0.3, phase: q * 1.1 + n * 0.4, color: cols[(q + n) % cols.length] }));
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1],
+  }),
+  /** spooky: ghost platforms fading in and out over a drop */
+  ghosts: (k) => ({
+    cmds: [flat({ len: 8, w: 11, wall: 0.6, tag: k + 'pre' }), flat({ len: 23, w: 11, floor: false, tag: k + 'z' }), flat({ len: 8, w: W, easeW: 3, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0, z1] = t(k + 'z');
+      ghostPads(b, path, z0, z1, { phase: n * 0.7 });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 3],
+  }),
+  /** volcano: lava vents that blow */
+  geysers: (k) => ({
+    cmds: [flat({ len: 8, w: 13, wall: 0.8, tag: k + 'pre' }), flat({ len: 40, slope: -3, w: 13, wall: 0.8, easeS: 3, tag: k + 'z' }), flat({ len: 6, w: 13, wall: 0.8, easeS: 3, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      geysers(b, path, z0, z0 + 40, { phase: n, spots: [[5, -3.4], [5, 3.4], [11, 0], [17, -4.2], [17, 4.2], [17, 0], [24, -2], [24, 2.6], [31, -4.2], [31, 0.8], [36, 3.8], [36, -1.6]] });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** desert: quicksand pits between cacti */
+  quicksand: (k) => ({
+    cmds: [flat({ len: 8, w: 15, tag: k + 'pre' }), flat({ len: 40, w: 15, tag: k + 'z' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      quicksand(b, path, z0, [[5, -3.5, 2.6], [6, 3.8, 2.3], [13, 0, 2.8], [20, -4.4, 2.5], [21, 3.2, 2.7], [28, -0.6, 2.9], [35, 4.2, 2.4], [35.5, -4, 2.4]]);
+      for (const [ds, lat] of [[9.5, -0.2], [16.5, -4.6], [16.5, 4.6], [24.5, 1.6], [31.5, -3.2], [31.5, 4.5]]) peg(b, path, z0 + ds, lat, { r: 0.4, h: 1.9, paint: { a: 0x3a9a4a, b: 0x2a7a3a, pattern: Pattern.Stripes, scale: 3.4 } });
+      void n;
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1],
+  }),
+  /** jungle: streams rushing across toward the open side */
+  rapids: (k) => ({
+    cmds: [flat({ len: 8, w: 13, wall: 1.0, tag: k + 'pre' }), flat({ len: 36, w: 13, wallL: 1.2, wallR: 0, tag: k + 'z' }), flat({ len: 6, w: 13, wall: 1.0, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      rapids(b, path, z0 + 6, 4.2, { force: 28 + (n % 3) * 2 });
+      rapids(b, path, z0 + 17, 5.4, { force: 32 });
+      rapids(b, path, z0 + 29, 4.6, { force: 30 });
+      for (const [ds, lat] of [[11.5, -3], [11.5, 2.5], [23, 0], [23, -4.5]]) bumper(b, path, z0 + ds, lat, { color: col(n + Math.round(ds)) });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** royal: cannons each side firing balls across the deck */
+  cannons: (k) => ({
+    cmds: [flat({ len: 8, w: 13, tag: k + 'pre' }), flat({ len: 44, w: 13, tag: k + 'z' }), flat({ len: 6, w: 13, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      [5, 11.5, 18, 24.5, 31, 37.5].forEach((ds, q) => cannon(b, path, z0 + ds, q % 2 ? 1 : -1, { period: 2.8 + (q % 3) * 0.3, phase: q * 0.9 + n * 0.5, color: col(n + q) }));
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** clockwork: pistons slamming down from gantries */
+  stampers: (k) => ({
+    cmds: [flat({ len: 8, w: 13, wall: 1.0, tag: k + 'pre' }), flat({ len: 42, w: 13, wall: 1.0, tag: k + 'z' })],
+    place: ({ b, path, t, n }) => {
+      const [z0] = t(k + 'z');
+      [6, 16, 26, 36].forEach((ds, q) => {
+        gantry(b, path, z0 + ds, 6.2, { paint: b.paint({ a: col(n + q), b: PAINT.black, pattern: Pattern.Stripes, scale: 1.2 }) });
+        [-4.1, 0, 4.1].forEach((lat, l) => stamper(b, path, z0 + ds, lat, { period: 2.6 + (q % 2) * 0.3, phase: l * 0.85 + q * 0.4 + n, color: col(n + q + l) }));
+      });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1],
+  }),
+  /** candy, sunset: jelly decks that bounce you, with gaps you need the bounce for */
+  jelly: (k) => ({
+    cmds: [
+      flat({ len: 8, w: 12, tag: k + 'pre' }),
+      flat({ len: 9, w: 12, tag: k + 'j0' }),
+      flat({ len: 6.0, w: 12, floor: false, tag: k + 'g0' }),
+      flat({ len: 10, w: 12, tag: k + 'j1' }),
+      flat({ len: 6.0, w: 12, floor: false, tag: k + 'g1' }),
+      flat({ len: 9, w: 12, tag: k + 'j2' }),
+      flat({ len: 6, w: W, easeW: 2, tag: k + 'post' }),
+    ],
+    place: ({ b, path, t, n }) => {
+      const jc = biome().id === 'sunset' ? 0xffa060 : 0xff6ab0;
+      for (const j of ['j0', 'j1', 'j2']) {
+        const [a, c] = t(k + j);
+        jellyDeck(b, path, j === 'j0' ? a - 2 : a, c, { color: jc });
+      }
+      const [a1] = t(k + 'j1');
+      jellyCube(b, path, a1 + 5, -3.2, { color: col(n) });
+      jellyCube(b, path, a1 + 5, 3.2, { color: col(n + 2) });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'j1')[0] + 4, t(k + 'post')[0] + 3],
+    gaps: ({ t }) => [t(k + 'g0'), t(k + 'g1')],
+  }),
+  /** space: low gravity, islands with huge gaps between */
+  moon: (k) => ({
+    cmds: [
+      flat({ len: 8, w: 12, tag: k + 'pre' }),
+      flat({ len: 6, w: 12, tag: k + 'm0' }),
+      flat({ len: 9, w: 11, floor: false, tag: k + 'g0' }),
+      flat({ len: 13, w: 10 }),
+      flat({ len: 10, w: 10, floor: false, tag: k + 'g1' }),
+      flat({ len: 13, w: 10, tag: k + 'mid' }),
+      flat({ len: 10, w: 10, floor: false, tag: k + 'g2' }),
+      flat({ len: 8, w: W, easeW: 3, tag: k + 'post' }),
+    ],
+    place: ({ b, path, t, n }) => {
+      const [m0] = t(k + 'm0');
+      const [, p1] = t(k + 'post');
+      moonField(b, path, m0 - 2, p1 - 2, 0.42 / GRAV);
+      arch(b, path, m0 + 1, 'LOW GRAVITY', { color: 0x9a7aff, text2: 'Big jumps' });
+      for (const g of ['g0', 'g1', 'g2']) {
+        const [a, c] = t(k + g);
+        const m = (a + c) / 2;
+        for (const side of [-1, 1]) floatRock(b, path.at(m, side * (8 + (n % 3)), -2.5 + side), 1.6 + ((n + side) % 2) * 0.6, n + side * 3 + a);
+      }
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'mid')[0] + 3, t(k + 'post')[0] + 3],
+    gaps: ({ t }) => [t(k + 'g0'), t(k + 'g1'), t(k + 'g2')],
+  }),
 };
 
 /** the links between zones: a turn (L/R + degrees), a straight, a ramp up, a ramp down, a hop */
@@ -358,10 +509,16 @@ export interface GenSpec {
   final?: boolean;
   /** Lava Rush: the lava floods up the course behind the field (it reaches the line after this many seconds) */
   lava?: number;
+  /** the whole course: gravity's scale (Moon Run), the feet's grip (Slip Rink) */
+  grav?: number;
+  grip?: number;
+  /** under the name on the start arch */
+  tag?: string;
 }
 
 export function genCourse(spec: GenSpec, info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
+  GRAV = spec.grav ?? 1;
   const cmds: Cmd[] = [flat({ len: 26, w: 17, wall: 1.2, tag: 'start' }), flat({ len: 8, w: W, easeW: 5 })];
   const zones: { z: Zone; k: string; n: number; s0: number; s1: number; kind: string }[] = [];
   const linkGaps: string[] = [];
@@ -411,7 +568,27 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
   const [st0] = tag(path, 'start');
   const gateS = st0 + 18;
   startGate(b, path, gateS, state);
-  arch(b, path, gateS + 2.5, info.name.toUpperCase(), { color: spec.arch, text2: spec.final ? 'The Final · First takes the crown' : 'Race' });
+  arch(b, path, gateS + 2.5, info.name.toUpperCase(), { color: spec.arch, text2: spec.final ? 'The Final · First takes the crown' : spec.tag ?? 'Race' });
+  if (spec.grav || spec.grip) {
+    // the whole course's own rules: a box round all of it
+    const min = new THREE.Vector3(Infinity, Infinity, Infinity), max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    for (const p of path.P) min.min(p), max.max(p);
+    min.addScalar(-30);
+    max.addScalar(30);
+    b.world.fields.push({ min, max, g: spec.grav, grip: spec.grip });
+    // (Slip Rink: ice laid over every floor)
+    if (spec.grip) {
+      let a = -1;
+      for (let i = 0; i < path.count; i++) {
+        const on = path.sec[i].floor && i * 0.25 > gateS + 3;
+        if (on && a < 0) a = i;
+        if ((!on || i === path.count - 1) && a >= 0) {
+          if ((i - a) * 0.25 > 2) iceSheet(b, path, a * 0.25, (i - 1) * 0.25, { field: false });
+          a = -1;
+        }
+      }
+    }
+  }
   const warn = b.paint({ a: PAINT.yellow, b: PAINT.black, pattern: Pattern.Stripes, scale: 1.2 });
   const t = (name: string) => tag(path, name);
   const cps: number[] = [];
@@ -514,16 +691,21 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
 
 /** the platform courses */
 export const GEN: Record<string, GenSpec> = {
-  hopscotch: { id: 'hopscotch', heading: 0, arch: PAINT.pink, steps: ['pins', 'R50', 'hop', 'S8', 'sweep', 'L70', 'planks', 'gap', 'jump', 'R45', 'turnstiles', 'up', 'mills', 'L40', 'bumpers'] },
-  bonkbay: { id: 'bonkbay', heading: 0.6, arch: PAINT.teal, steps: ['bumpers', 'L60', 'wreck', 'S6', 'spinner', 'R80', 'hammers', 'gap', 'pins', 'L45', 'bounce', 'mills', 'R50', 'logs', 'sweep'] },
-  knockknock: { id: 'knockknock', heading: -0.4, arch: PAINT.orange, steps: ['doors', 'R60', 'sliders', 'up', 'conveyor', 'L70', 'sweep', 'gap', 'doors', 'R45', 'logs', 'pins', 'L50', 'turnstiles'] },
-  whirligig: { id: 'whirligig', heading: 1.2, arch: PAINT.purple, steps: ['turnstiles', 'L50', 'spinner', 'S8', 'mills', 'R70', 'sweep', 'hop', 'spinner', 'L60', 'bumpers', 'up', 'turnstiles'] },
-  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'logs', 'down', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'punch', 'jump', 'sliders', 'L45', 'mills'] },
-  wobblewalk: { id: 'wobblewalk', heading: -1, arch: PAINT.green, steps: ['saws', 'L45', 'slides', 'R60', 'planks', 'hop', 'pins', 'L70', 'saws', 'gap', 'logs', 'R40', 'bounce', 'up', 'sweep'] },
-  skystairs: { id: 'skystairs', heading: 0.9, arch: PAINT.blue, steps: ['climb', 'R50', 'conveyor', 'up', 'pins', 'L60', 'jump', 'climb', 'R70', 'sweep', 'up', 'hop', 'mills'] },
-  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'gates', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
-  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'rolldown', 'L50', 'wreck', 'gates', 'sweep'] },
-  punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'pins', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
-  lavarush: { id: 'lavarush', heading: 0.5, arch: PAINT.orange, lava: 118, steps: ['climb', 'up', 'rolldown', 'R50', 'gates', 'up', 'conveyor', 'up', 'hop', 'up', 'punch', 'L50', 'climb', 'up', 'rolldown'] },
-  rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'pins', 'gates', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
+  hopscotch: { id: 'hopscotch', heading: 0, arch: PAINT.pink, steps: ['pins', 'R50', 'hop', 'S8', 'sweep', 'L70', 'planks', 'gap', 'jump', 'R45', 'jelly', 'up', 'mills', 'L40', 'bumpers'] },
+  bonkbay: { id: 'bonkbay', heading: 0.6, arch: PAINT.teal, steps: ['bumpers', 'L60', 'wreck', 'S6', 'spinner', 'R80', 'hammers', 'gap', 'pins', 'L45', 'bounce', 'mills', 'R50', 'gusts', 'sweep'] },
+  knockknock: { id: 'knockknock', heading: -0.4, arch: PAINT.orange, steps: ['doors', 'R60', 'sliders', 'up', 'conveyor', 'L70', 'ghosts', 'doors', 'R45', 'logs', 'pins', 'L50', 'turnstiles'] },
+  whirligig: { id: 'whirligig', heading: 1.2, arch: PAINT.purple, steps: ['turnstiles', 'L50', 'spinner', 'S8', 'mills', 'R70', 'sweep', 'moon', 'spinner', 'L60', 'bumpers', 'up', 'turnstiles'] },
+  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'rolldown', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'punch', 'jump', 'sliders', 'L45', 'mills'] },
+  wobblewalk: { id: 'wobblewalk', heading: -1, arch: PAINT.green, steps: ['saws', 'L45', 'slides', 'R60', 'planks', 'hop', 'pins', 'L70', 'saws', 'gap', 'rapids', 'R40', 'bounce', 'up', 'sweep'] },
+  skystairs: { id: 'skystairs', heading: 0.9, arch: PAINT.blue, steps: ['climb', 'R50', 'conveyor', 'up', 'ice', 'L60', 'jump', 'climb', 'R70', 'sweep', 'up', 'hop', 'mills'] },
+  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'jelly', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
+  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'rolldown', 'L50', 'wreck', 'cannons', 'sweep'] },
+  punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'lasers', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
+  lavarush: { id: 'lavarush', heading: 0.5, arch: PAINT.orange, lava: 122, steps: ['climb', 'up', 'rolldown', 'R50', 'geysers', 'up', 'conveyor', 'up', 'hop', 'up', 'punch', 'L50', 'climb', 'up', 'rolldown'] },
+  rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'quicksand', 'gates', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
+  // the new worlds and the new modes
+  petalpass: { id: 'petalpass', heading: 0.4, arch: PAINT.pink, tag: 'Race · Mind the wind', steps: ['pins', 'L50', 'gusts', 'up', 'slides', 'R60', 'jelly', 'gap', 'gusts', 'L45', 'planks', 'hop', 'sweep'] },
+  ticktock: { id: 'ticktock', heading: -0.9, arch: PAINT.orange, tag: 'Race · Clockwork', steps: ['stampers', 'R50', 'conveyor', 'up', 'spinner', 'L60', 'sliders', 'gap', 'stampers', 'R45', 'gates', 'hop', 'turnstiles', 'L40', 'stampers'] },
+  moonrun: { id: 'moonrun', heading: 1.6, arch: PAINT.purple, grav: 0.62, tag: 'Race · Low gravity all the way', steps: ['moon', 'R45', 'turnstiles', 'lasers', 'L60', 'moon', 'up', 'spinner', 'R50', 'moon'] },
+  sliprink: { id: 'sliprink', heading: -1.3, arch: PAINT.blue, grip: 0.3, tag: 'Race · Everything is ice', steps: ['pins', 'R50', 'rolldown', 'L60', 'doors', 'up', 'mills', 'R45', 'turnstiles', 'S6', 'hammers'] },
 };

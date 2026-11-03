@@ -69,6 +69,10 @@ interface Piece {
   peg?: number;
   spin?: number;
   bob?: number;
+  /** turns about its own axle (a gear standing on edge), rad/s */
+  turn?: number;
+  /** flickers on now and then (lightning) */
+  flash?: boolean;
 }
 
 // --------------------------------------------------------------------------------- the pieces
@@ -374,6 +378,182 @@ function build(id: BiomeId): Piece[] {
       ring(6, () => ({ shiny: [col(new THREE.SphereGeometry(16, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), 0xffc21f), col(new THREE.ConeGeometry(2, 8, 12).translate(0, 19, 0), 0xffc21f)], body: [col(new THREE.CylinderGeometry(17, 17, 10, 32).translate(0, -5, 0), 0xfff6e8), col(new THREE.IcosahedronGeometry(24, 2).scale(1, 0.4, 1).translate(0, -12, 0), 0xffffff)], y: 40 + rnd() * 50, bob: 1 }), 120, 300);
       break;
     }
+    case 'blossom': {
+      const pinks = [0xffb8d4, 0xffc8e0, 0xff9ac0, 0xffd8e8, 0xffffff];
+      ring(15, () => {
+        const h = 40 + rnd() * 50;
+        const body: G[] = [col(new THREE.CylinderGeometry(h * 0.04, h * 0.08, h * 0.7, 9).translate(0, h * 0.35, 0), 0x5a3a34)];
+        for (let i = 0; i < 3; i++) {
+          const a = rnd() * 6, l = h * 0.3;
+          body.push(T(col(new THREE.CylinderGeometry(h * 0.02, h * 0.035, l, 6).translate(0, l / 2, 0), 0x5a3a34), 0, h * 0.5, 0, Math.cos(a) * 0.8, 0, Math.sin(a) * 0.8));
+        }
+        const n = 6 + Math.floor(rnd() * 4);
+        for (let i = 0; i < n; i++) {
+          const r = h * (0.16 + rnd() * 0.12), a = rnd() * Math.PI * 2, d = i === 0 ? 0 : h * (0.12 + rnd() * 0.16);
+          body.push(col(T(rough(new THREE.IcosahedronGeometry(r, 1), 0.15), Math.cos(a) * d, h * (0.66 + rnd() * 0.22), Math.sin(a) * d, 0, 0, 0, 1, 0.75, 1), pick(pinks)));
+        }
+        body.push(island(h * 0.3, 0x9ad88a, 0x8a7a5a, 0x6a5a48).translate(0, -1.6, 0));
+        return { body, peg: h * 0.3 };
+      }, 30, 320);
+      // tiered towers with curling roofs
+      ring(5, () => {
+        const body: G[] = [], glow: G[] = [];
+        const tiers = 4 + Math.floor(rnd() * 3);
+        let y = 0, w = 14;
+        for (let i = 0; i < tiers; i++) {
+          const hh = 8;
+          body.push(col(new THREE.CylinderGeometry(w * 0.55, w * 0.6, hh, 8).translate(0, y + hh / 2, 0), 0xf6ece0));
+          body.push(col(lathe([[0, 2.4], [w * 0.5, 2.2], [w * 0.95, 0.4], [w * 1.05, 0.9], [w * 1.0, 0]], 8).translate(0, y + hh, 0), 0xc83a3a));
+          glow.push(col(new THREE.CylinderGeometry(w * 0.56, w * 0.56, 1.4, 8, 1, true).translate(0, y + hh * 0.55, 0), 0xffe0a0, 1.6));
+          y += hh + 2;
+          w *= 0.82;
+        }
+        body.push(col(new THREE.ConeGeometry(1.2, 10, 8).translate(0, y + 5, 0), 0xffc21f));
+        body.push(island(22, 0x9ad88a, 0x8a7a5a, 0x6a5a48).translate(0, -1.4, 0));
+        return { body, glow, peg: 22 };
+      }, 80, 300);
+      // far hills dusted pink
+      ring(9, () => {
+        const R = 90 + rnd() * 80, H = 70 + rnd() * 70;
+        const g = rough(new THREE.SphereGeometry(R, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, H / R, 1), 0.06, 0.2);
+        return { body: [col(g, () => (rnd() < 0.3 ? 0xffb8d4 : rnd() < 0.5 ? 0x7ac87a : 0x8ad88a))], peg: R };
+      }, 380, 300);
+      break;
+    }
+    case 'storm': {
+      // sea stacks: tall broken pillars of rock
+      ring(18, () => {
+        const body: G[] = [];
+        const n = 1 + Math.floor(rnd() * 3);
+        for (let i = 0; i < n; i++) {
+          const h = 40 + rnd() * 90, r = 6 + rnd() * 9;
+          const g = rough(new THREE.CylinderGeometry(r * 0.7, r, h, 8, 6).translate((rnd() - 0.5) * 20, h / 2 - 6, (rnd() - 0.5) * 20), 0.14, 0.1);
+          body.push(col(g, (_x, y) => (y > h - 10 ? 0x6a7a6a : y < 4 ? 0x2a3034 : pick([0x4a5058, 0x545a62, 0x3e444c]))));
+        }
+        return { body, peg: 18 };
+      }, 30, 330);
+      // a black-and-white lighthouse, its lamp lit
+      {
+        const body = [col(new THREE.CylinderGeometry(4, 6.5, 50, 24, 8).translate(0, 25, 0), (_x, y) => (Math.floor(y / 8) % 2 ? 0xf0f0f0 : 0x22262c)), col(new THREE.ConeGeometry(5, 6, 24).translate(0, 58, 0), 0x22262c)];
+        const glow = [col(new THREE.CylinderGeometry(3.6, 3.6, 4.6, 16).translate(0, 53, 0), 0xfff0b0, 4)];
+        body.push(col(rough(lathe([[0, 3], [14, 2], [18, -1], [20, -6]], 16), 0.15), 0x3a4048));
+        P.push({ body, glow, a: 2.2, d: 110, peg: 20 });
+      }
+      // lightning, now and then
+      ring(7, () => {
+        const pts: THREE.Vector3[] = [];
+        let x = 0, z = 0;
+        for (let y = 260; y > -2; y -= 18 + rnd() * 16) {
+          pts.push(new THREE.Vector3(x, y, z));
+          x += (rnd() - 0.5) * 30;
+          z += (rnd() - 0.5) * 30;
+        }
+        const glow = [col(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0), 40, 1.1, 5), 0xe8f0ff, 5)];
+        for (let k = 0; k < 2; k++) {
+          const i0 = 2 + Math.floor(rnd() * (pts.length - 4));
+          const b0 = pts[i0];
+          const br = [b0, b0.clone().add(new THREE.Vector3((rnd() - 0.5) * 50, -40, (rnd() - 0.5) * 50)), b0.clone().add(new THREE.Vector3((rnd() - 0.5) * 70, -70, (rnd() - 0.5) * 70))];
+          glow.push(col(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(br, false, 'catmullrom', 0), 12, 0.6, 4), 0xe8f0ff, 4));
+        }
+        return { glow, flash: true };
+      }, 120, 350);
+      break;
+    }
+    case 'reef': {
+      const corals = [0xff6a8a, 0xffa040, 0xb06aff, 0xff5aa0, 0x40e0c0, 0xffd040];
+      ring(16, () => {
+        const body: G[] = [], shiny: G[] = [];
+        const n = 4 + Math.floor(rnd() * 5);
+        for (let i = 0; i < n; i++) {
+          const c = pick(corals);
+          const h = 14 + rnd() * 40, x = (rnd() - 0.5) * 26, z = (rnd() - 0.5) * 26;
+          if (rnd() < 0.5) {
+            // a branching coral: a trunk and arms with knobs
+            body.push(col(new THREE.CylinderGeometry(1.2, 2.2, h, 8).translate(x, h / 2 - 3, z), c));
+            for (let k = 0; k < 4; k++) {
+              const a = rnd() * 6, l = h * 0.45;
+              const arm = col(new THREE.CylinderGeometry(0.8, 1.2, l, 6).translate(0, l / 2, 0), c);
+              body.push(T(arm, x, h * (0.4 + rnd() * 0.4), z, Math.cos(a) * 0.7, 0, Math.sin(a) * 0.7));
+              shiny.push(col(new THREE.SphereGeometry(1.3, 10, 8).translate(x + Math.sin(a) * l * -0.65, h * 0.55 + l * 0.75, z + Math.cos(a) * l * 0.65), c));
+            }
+          } else {
+            // a fan or a brain coral
+            if (rnd() < 0.5) body.push(col(new THREE.CircleGeometry(h * 0.45, 20, 0, Math.PI).translate(x, h * 0.15, z).rotateY(rnd() * 3), c));
+            else shiny.push(col(rough(new THREE.SphereGeometry(h * 0.3, 18, 12), 0.08).scale(1, 0.7, 1).translate(x, 0, z), c));
+          }
+        }
+        body.push(col(lathe([[0, 1], [16, 1], [18, -1], [20, -5]], 20), 0xffe8c0));
+        return { body, shiny, peg: 20 };
+      }, 30, 320);
+      // giant spiral shells on sandbars
+      ring(6, () => {
+        const pts: [number, number][] = [];
+        for (let i = 0; i <= 14; i++) {
+          const u = i / 14;
+          pts.push([Math.max(0.2, 14 * (1 - u) * (0.6 + 0.4 * Math.abs(Math.sin(u * 14)))), u * 34]);
+        }
+        const shell = col(lathe(pts, 24), (_x, y) => (Math.floor(y / 3) % 2 ? 0xffd8c0 : 0xffa880));
+        return { shiny: [shell.rotateZ(0.5)], body: [col(lathe([[0, 1], [22, 1], [24, -3]], 20), 0xf8dca8)], peg: 24 };
+      }, 70, 260);
+      // sea arches
+      ring(4, () => {
+        const R = 30 + rnd() * 20;
+        return { body: [col(rough(new THREE.TorusGeometry(R, R * 0.22, 8, 20, Math.PI), 0.1), (_x, y) => (y > R * 0.9 ? 0x6ac06a : 0xc8a070))], peg: R };
+      }, 160, 300);
+      // a few palm islets
+      ring(6, () => {
+        const body: G[] = [col(lathe([[0, 2], [10, 1.8], [14, -0.5], [15, -3]], 24), 0xf8e0b0)];
+        const p = palm(12 + rnd() * 6, 1.5 + rnd());
+        for (const g of p.body) body.push(T(g, 0, 1.8, 0, 0, rnd() * 6, 0));
+        return { body, peg: 15 };
+      }, 40, 240);
+      break;
+    }
+    case 'clockwork': {
+      const gear = (R: number, teeth: number, depth: number, c: number) => {
+        const sh = new THREE.Shape();
+        for (let i = 0; i < teeth * 2; i++) {
+          const a0 = (i / (teeth * 2)) * Math.PI * 2, a1 = ((i + 1) / (teeth * 2)) * Math.PI * 2;
+          const r = i % 2 ? R : R * 1.12;
+          if (i === 0) sh.moveTo(Math.cos(a0) * r, Math.sin(a0) * r);
+          else sh.lineTo(Math.cos(a0) * r, Math.sin(a0) * r);
+          sh.lineTo(Math.cos(a1) * r, Math.sin(a1) * r);
+        }
+        const hole = new THREE.Path();
+        hole.absarc(0, 0, R * 0.28, 0, Math.PI * 2, true);
+        sh.holes.push(hole);
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2;
+          const w = new THREE.Path();
+          w.absarc(Math.cos(a) * R * 0.62, Math.sin(a) * R * 0.62, R * 0.18, 0, Math.PI * 2, true);
+          sh.holes.push(w);
+        }
+        return col(new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: true, bevelSize: depth * 0.15, bevelThickness: depth * 0.15, bevelSegments: 1, curveSegments: 6 }).translate(0, 0, -depth / 2), c);
+      };
+      // giant gears standing on edge, turning
+      ring(9, (k) => {
+        const R = 30 + rnd() * 50;
+        return { shiny: [gear(R, 14 + Math.floor(R / 6), 5, pick([0xd89a3a, 0xc07a3a, 0xa8a8b0]))], body: [col(new THREE.CylinderGeometry(R * 0.26, R * 0.26, 12, 20).rotateX(Math.PI / 2), 0x3a2a20)], y: R * 0.7, turn: (k % 2 ? 1 : -1) * (0.05 + rnd() * 0.08) };
+      }, 80, 360);
+      // brass towers with lit windows and chimneys
+      ring(14, () => {
+        const body: G[] = [], shiny: G[] = [], glow: G[] = [];
+        const h = 50 + rnd() * 110, r = 6 + rnd() * 6;
+        shiny.push(col(new THREE.CylinderGeometry(r, r * 1.1, h, 16).translate(0, h / 2, 0), 0xc89040));
+        for (let y = 10; y < h - 6; y += 12) {
+          shiny.push(col(new THREE.TorusGeometry(r * 1.06, 0.6, 6, 20).rotateX(Math.PI / 2).translate(0, y, 0), 0x8a5a2a));
+          for (let k = 0; k < 4; k++) {
+            const a = (k / 4) * Math.PI * 2 + y;
+            glow.push(col(new THREE.PlaneGeometry(1.6, 2.6).rotateY(-a + Math.PI / 2).translate(Math.cos(a) * r * 1.01, y + 4, Math.sin(a) * r * 1.01), 0xffc060, 2.2));
+          }
+        }
+        shiny.push(col(new THREE.SphereGeometry(r, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, h, 0), 0x4a8a8a));
+        body.push(col(new THREE.CylinderGeometry(1.4, 1.6, 14, 10).translate(r * 0.5, h + 7, 0), 0x3a2a20));
+        body.push(island(r * 2.2, 0x6a5a4a, 0x5a4a3a, 0x3a2e24).translate(0, -1.6, 0));
+        return { body, shiny, glow, peg: r * 2.2 };
+      }, 30, 320);
+      break;
+    }
     default:
       break;
   }
@@ -417,6 +597,13 @@ export class Scenery {
     for (const { o, p, y0 } of this.items) {
       if (p.spin) o.rotation.y += p.spin * 0.016;
       if (p.bob) o.position.y = y0 + Math.sin(t * 0.5 + p.a * 3) * p.bob;
+      if (p.turn) for (const c of o.children) c.rotation.z = t * p.turn;
+      if (p.flash) {
+        // (a strike: a flicker or two, now and then, each bolt on its own clock)
+        const k = Math.floor(t * 9 + p.a * 31);
+        const h = Math.sin(k * 12.9898 + p.a * 78.233) * 43758.5453;
+        o.visible = h - Math.floor(h) > 0.985 || (h - Math.floor(h) > 0.97 && Math.floor(t * 9 + p.a * 31) % 2 === 0);
+      }
     }
   }
 }

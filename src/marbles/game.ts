@@ -585,7 +585,7 @@ export class MarbleGame {
         // (out: it stops trying, and once it's in the paint it's gone)
         r.m.input.set(0, 0, 0);
         r.m.grab = false;
-        if (r.m.pos.y < c.lakeY - 2) r.m.active = false;
+        if (r.m.pos.y < c.lakeY - 2 || (c.tide && r.m.pos.y < c.killY - 0.25)) r.m.active = false;
       }
     }
     w.step(dt);
@@ -752,6 +752,17 @@ export class MarbleGame {
       return;
     }
     if (c.plate) {
+      // Storm Deck: a crack and a boom for every bolt (the blast itself is the course's field)
+      if (c.storm && this.state === 'play') {
+        const x = w.time - c.state.go;
+        for (const s of c.storm.between(x - dt, x, this.strikes)) {
+          const at = new THREE.Vector3(c.storm.center.x + s.x, c.storm.center.y, c.storm.center.z + s.z);
+          this.sound.boom(at.x, at.y, at.z);
+          this.puffs.dust(at, s.r > 3 ? 18 : 10, 0.3, s.r);
+          const me = this.racers.find((r) => r.c.player);
+          if (me && me.m.pos.distanceTo(at) < s.r + 0.4 && !me.out) this.ui.note('ZAP!', 700);
+        }
+      }
       // Cookie Crumble: a tile someone stands on starts to go (solo or the host: anyone's feet, as
       // seen here, and it tells the guests when each drops; a guest: its own, until the host says)
       if (c.crumble && (this.state === 'play' || this.state === 'over')) {
@@ -865,6 +876,7 @@ export class MarbleGame {
     }
   }
   private lavaWarned = false;
+  private strikes: import('./course-storm.ts').Strike[] = [];
 
   /** Lava Rush: caught. Out (the host decides for its beans and the bots; a guest asks) */
   private lavaOut(r: Racer) {
@@ -936,7 +948,7 @@ export class MarbleGame {
     // (the crowd reacts to anyone going over near the camera)
     if (!r.c.player && m.pos.distanceTo(this.camera.position) < 25 && Math.random() < 0.6) this.sound.ooh();
     if (r.c.player && this.state === 'play') {
-      this.ui.banner('ELIMINATED', 'bad', c.crumble ? (c.crumble.mode === 'melt' ? 'Into the icy water' : 'Fell through the floors') : c.lava ? 'Caught by the lava' : 'Knocked off the plate');
+      this.ui.banner('ELIMINATED', 'bad', c.crumble ? (c.crumble.mode === 'melt' ? 'Into the icy water' : 'Fell through the floors') : c.lava ? 'Caught by the lava' : c.storm ? 'Blasted overboard' : c.tide ? 'The tide got you' : 'Knocked off the plate');
       this.sound.eliminated();
     }
   }

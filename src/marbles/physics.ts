@@ -139,6 +139,11 @@ export class Marble {
   knocked = false;
   landed = 0;
   grabbed = false;
+  /** where it is now (the course's fields: low gravity, ice, quicksand): gravity, grip, run speed, jump */
+  gK = 1;
+  gripK = 1;
+  runK = 1;
+  jumpK = 1;
   constructor(readonly id: number) {}
   get grounded() {
     return this.groundT < 0.1;
@@ -163,6 +168,23 @@ export class Marble {
     this.holding = null;
     this.holdT = 0;
   }
+}
+
+/**
+ * A patch of the course with its own rules: low gravity, ice, quicksand, or something that acts on
+ * whoever is in it (a gust, a geyser, a lightning strike). `min`/`max` box it (world) for a cheap
+ * test; `inside` says exactly. Every browser applies them to its own beans, every frame; anything
+ * that moves is a pure function of time, so they agree.
+ */
+export interface Field {
+  min: THREE.Vector3;
+  max: THREE.Vector3;
+  inside?(p: THREE.Vector3, t: number): boolean;
+  g?: number;
+  grip?: number;
+  run?: number;
+  jump?: number;
+  act?(m: Marble, t: number, dt: number): void;
 }
 
 export type Shape = { type: 'box'; hx: number; hy: number; hz: number } | { type: 'cyl'; r: number; hh: number } | { type: 'sph'; r: number };
@@ -414,6 +436,8 @@ function closestOnShape(s: Shape, p: THREE.Vector3, out: THREE.Vector3, n: THREE
   return d;
 }
 
+const inBox = (f: Field, p: THREE.Vector3) => p.x >= f.min.x && p.x <= f.max.x && p.y >= f.min.y && p.y <= f.max.y && p.z >= f.min.z && p.z <= f.max.z;
+
 export class World {
   readonly marbles: Marble[] = [];
   readonly kins: Kin[] = [];
@@ -426,7 +450,26 @@ export class World {
    * ones round a spot, solid while `on`. Cheaper than a Kin each: nothing to pose every substep.
    */
   pads: { shape: Shape; bound: number; mat: Mat; near(x: number, z: number, out: number[]): void; at(i: number, o: THREE.Vector3): void; on(i: number, t: number): boolean } | null = null;
+  /** patches with their own rules (low gravity, ice, gusts...) */
+  readonly fields: Field[] = [];
   time = 0;
+  /** gravity's scale at a spot (for the AI's sums) */
+  gAt(p: THREE.Vector3) {
+    let g = 1;
+    for (const f of this.fields) if (f.g !== undefined && inBox(f, p) && (!f.inside || f.inside(p, this.time))) g *= f.g;
+    return g;
+  }
+  private applyFields(m: Marble, dt: number) {
+    m.gK = m.gripK = m.runK = m.jumpK = 1;
+    for (const f of this.fields) {
+      if (!inBox(f, m.pos) || (f.inside && !f.inside(m.pos, this.time))) continue;
+      if (f.g !== undefined) m.gK *= f.g;
+      if (f.grip !== undefined) m.gripK *= f.grip;
+      if (f.run !== undefined) m.runK *= f.run;
+      if (f.jump !== undefined) m.jumpK *= f.jump;
+      f.act?.(m, this.time, dt);
+    }
+  }
   /** the slowest the course allows before a fall counts (m below) */
   private h = SUB;
 
@@ -448,6 +491,9 @@ export class World {
       for (const kin of this.kins) {
         kin.prev.copy(kin.m);
         kin.set(this.time);
+        // (one that jumped (a ghost platform coming back, a ball back to its hopper) has no speed)
+        const a = kin.m.elements, b = kin.prev.elements;
+        if (Math.abs(a[12] - b[12]) + Math.abs(a[13] - b[13]) + Math.abs(a[14] - b[14]) > 8) kin.prev.copy(kin.m);
       }
       for (const m of this.marbles) if (m.active && !m.frozen) this.integrate(m, h);
       for (const m of this.marbles) if (m.active && !m.frozen && !m.puppet) this.collide(m);
@@ -461,6 +507,7 @@ export class World {
 
   /** per frame: the jump, the dive, the grab */
   private controlFrame(m: Marble, dt: number) {
+    if (this.fields.length && m.active && !m.frozen && !m.puppet) this.applyFields(m, dt);
     m.hopped = m.dashed = m.knocked = m.grabbed = false;
     m.landed = 0;
     if (!m.active || m.frozen || m.puppet) {
@@ -478,7 +525,7 @@ export class World {
     if (m.jumpBuf > 0 && ok && m.groundT < 0.14) {
       m.jumpBuf = 0;
       // (straight up, whatever the slope; a held bean struggles)
-      const v = m.heldT > 0 ? JUMP_V * 0.72 : JUMP_V;
+      const v = (m.heldT > 0 ? JUMP_V * 0.72 : JUMP_V) * m.jumpK;
       m.vel.y = Math.max(m.vel.y - m.groundVel.y, 0) * 0.3 + m.groundVel.y + v;
       m.groundT = 1;
       m.hopped = true;
@@ -570,7 +617,7 @@ export class World {
         // the belly slide: no steering, it scrubs off
         const rx = m.vel.x - m.groundVel.x, rz = m.vel.z - m.groundVel.z;
         const sp = Math.hypot(rx, rz);
-        const k = sp > 1e-4 ? Math.max(0, sp - 16 * h) / sp : 0;
+        const k = sp > 1e-4 ? Math.max(0, sp - 16 * m.gripK * h) / sp : 0;
         m.vel.x = m.groundVel.x + rx * k;
         m.vel.z = m.groundVel.z + rz * k;
         if (m.diveT > 0.42 && sp < 7) {
@@ -581,14 +628,14 @@ export class World {
     } else if (grounded) {
       // running: toward the input's velocity relative to the ground, faster downhill
       const n = m.groundN;
-      let run = RUN * (m.heldT > 0 ? 0.38 : m.holding ? 0.6 : 1);
+      let run = RUN * m.runK * (m.heldT > 0 ? 0.38 : m.holding ? 0.6 : 1);
       if (il > 0.02) run *= 1 + 3.2 * Math.max(0, (n.x * inp.x + n.z * inp.z) / il);
       if (m.upT > 0) run = 0;
       const tx = m.groundVel.x + inp.x * run, tz = m.groundVel.z + inp.z * run;
       let ax = (tx - m.vel.x) * RUN_K, az = (tz - m.vel.z) * RUN_K;
       const a = Math.hypot(ax, az);
       // (the grip goes on a tilt: past ~11 degrees the feet start to slip, past ~25 it's a slide)
-      const grip = RUN_ACC * THREE.MathUtils.clamp((n.y - 0.9) / (0.98 - 0.9), 0.1, 1);
+      const grip = RUN_ACC * m.gripK * THREE.MathUtils.clamp((n.y - 0.9) / (0.98 - 0.9), 0.1, 1);
       if (a > grip) (ax *= grip / a), (az *= grip / a);
       m.vel.x += ax * h;
       m.vel.z += az * h;
@@ -608,7 +655,7 @@ export class World {
       m.vel.x -= sx * k;
       m.vel.z -= sz * k;
     }
-    m.vel.y -= GRAVITY * h;
+    m.vel.y -= GRAVITY * m.gK * h;
     const sp = m.vel.length();
     if (sp > 0) m.vel.multiplyScalar(1 - Math.min(0.5, 0.0035 * sp * h));
     // facing: where it's running (or trying to)
@@ -636,14 +683,14 @@ export class World {
       TMP.copy(m.groundN).cross(inp).normalize();
       if (m.ang.dot(TMP) < ROLL_MAX * 0.3 * il) m.ang.addScaledVector(TMP, ROLL_ACC * 0.3 * il * h);
     }
-    m.vel.y -= GRAVITY * h;
+    m.vel.y -= GRAVITY * m.gK * h;
     const sp = m.vel.length();
     if (sp > 0) m.vel.multiplyScalar(1 - Math.min(0.5, 0.0035 * sp * h));
     if (m.groundT < 0.08) {
       m.ang.multiplyScalar(1 - 1.2 * h);
       // (a bean is no marble: it scrubs to a stop)
-      m.vel.x *= 1 - 1.4 * h;
-      m.vel.z *= 1 - 1.4 * h;
+      m.vel.x *= 1 - 1.4 * m.gripK * h;
+      m.vel.z *= 1 - 1.4 * m.gripK * h;
     }
     const wl = m.ang.length();
     if (wl > 40) m.ang.multiplyScalar(40 / wl);

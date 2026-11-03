@@ -75,7 +75,7 @@ export function puncher(b: CourseBuilder, path: Path, s: number, side: number, o
  * Balls rolling down a slope at you, s0 (the bottom) .. s1 (the top): each drops out of a hopper
  * over its lane at the top, rolls all the way down, and at the bottom swings out and off the side.
  */
-export function rollDown(b: CourseBuilder, path: Path, s0: number, s1: number, o: { lanes?: number[]; speed?: number; r?: number; period?: number; phase?: number; colors?: number[] } = {}) {
+export function rollDown(b: CourseBuilder, path: Path, s0: number, s1: number, o: { lanes?: number[]; speed?: number; r?: number; period?: number; phase?: number; colors?: number[]; ball?: (R: number, k: number) => Parts } = {}) {
   const R0 = o.r ?? 1.15;
   const v = o.speed ?? 7.5;
   const lanes = o.lanes ?? [-4, 0, 4];
@@ -135,12 +135,15 @@ export function rollDown(b: CourseBuilder, path: Path, s0: number, s1: number, o
       quat.setFromAxisAngle(AX, (-Math.max(0, tt - DROP) * v) / R0);
     });
     vk.enabled = false;
-    const p = new Parts();
-    const c = cols[k % cols.length];
-    const pm = b.paint({ a: c, b: PAINT.white, pattern: Pattern.Stripes, scale: 0.9 });
-    p.add(pm, dome(R0, 1, 40));
-    p.add(pm, dome(R0, 1, 40), mat(0, 0, 0, rotX(Math.PI)));
-    for (const e of [-1, 1]) p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), dome(0.3, 0.5, 16), mat(0, e * R0 * 0.985, 0, e < 0 ? rotX(Math.PI) : undefined));
+    let p = new Parts();
+    if (o.ball) p = o.ball(R0, k);
+    else {
+      const c = cols[k % cols.length];
+      const pm = b.paint({ a: c, b: PAINT.white, pattern: Pattern.Stripes, scale: 0.9 });
+      p.add(pm, dome(R0, 1, 40));
+      p.add(pm, dome(R0, 1, 40), mat(0, 0, 0, rotX(Math.PI)));
+      for (const e of [-1, 1]) p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), dome(0.3, 0.5, 16), mat(0, e * R0 * 0.985, 0, e < 0 ? rotX(Math.PI) : undefined));
+    }
     b.obstacle(vk, p.group(), false);
   });
   // the hoppers: a gantry over the top with a funnel over each lane

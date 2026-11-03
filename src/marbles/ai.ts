@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
+import { StormBrain, TideBrain } from './ai-arena.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
@@ -84,6 +85,8 @@ export class Bot {
   /** how long it's been waiting on purpose (a wait that never ends is a stall: go anyway) */
   private waitT = 0;
   private plate: PlateBrain | null = null;
+  private stormB: StormBrain | null = null;
+  private tideB: TideBrain | null = null;
   private crumbleB: CrumbleBrain | null = null;
   private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
@@ -165,6 +168,16 @@ export class Bot {
       if (t < c.state.go + this.react) return;
       return this.crumbleB.update(dt, t, c, all);
     }
+    if (c.storm) {
+      this.stormB ??= new StormBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react) return;
+      return this.stormB.update(dt, t, c, all);
+    }
+    if (c.tide) {
+      this.tideB ??= new TideBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react) return;
+      return this.tideB.update(dt, t, c, all);
+    }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);
       return this.plate.update(dt, t, c, all);
@@ -219,7 +232,8 @@ export class Bot {
     let jumping = false;
     if (J && s > J.s0 - 26 && s < J.s1) {
       jumping = true;
-      if (s < J.s0) vT = Math.max(vT, J.vNeed + 3);
+      // (off a springy floor: flat out anyway)
+      if (s < J.s0) vT = Math.max(vT, A.jk[A.index(J.s0 - 0.5)] > 1 ? 30 : J.vNeed + 3);
       const lead = vAlong * (1 / 60 + this.jErr) + 0.25;
       // (at the lip, or on a kicker that's bouncing me: the last touch may be this one)
       const lip = m.groundT < 0.12 && s + lead >= J.s0 && s < J.s0 + 1.2;
@@ -243,8 +257,11 @@ export class Bot {
       if (m.groundT < 0.12) m.jump = true;
       this.jumpAt = Infinity;
     }
+    // ---- in the air over a gap: committed, straight on (no braking, no drifting)
+    if (jumping && J && !m.grounded && s > J.s0 - 2.5 && s < J.s1) m.input.set(tx, 0, tz);
     // ---- over a gap: dive at the top of the jump to stretch it
-    if (jumping && J && !m.grounded && s > J.s0 - 1 && s < J.s1 - 1 && m.vel.y < 1.5 && m.dashCD <= 0) {
+    // (not in low gravity: the hop clears it, and a dive would slide on to the next lip)
+    if (jumping && J && !m.grounded && s > J.s0 - 1 && s < J.s1 - 1 && m.vel.y < 1.5 && m.dashCD <= 0 && A.gk[A.index(s)] > 0.8 && A.jk[A.index(J.s0 - 0.5)] <= 1) {
       m.input.set(tx, 0, tz);
       m.dash = true;
     }
@@ -411,6 +428,7 @@ export class Bot {
     const gap = this.nextJump(A, s0);
     const top = 14.5 * this.pace;
     let cost = 0, hit = 0, tau = 0;
+    let fellIn = false;
     const margin = this.margin;
     if (HMIN.length < A.hz.length) (HMIN = new Float32Array(A.hz.length * 2)), (HDISC = new Float32Array(A.hz.length * 2)), (HV = new Float32Array(A.hz.length * 2));
     TOUCHED.length = 0;
@@ -439,12 +457,12 @@ export class Bot {
       s += vs * dt;
       // a hop
       if (jd >= 0 && !jumped && tau >= jd && z <= 0) {
-        vz = JUMP_V;
+        vz = JUMP_V * A.jk[A.index(s)];
         jumped = true;
       }
       if (z > 0 || vz > 0) {
         z += vz * dt;
-        vz -= GRAVITY * dt;
+        vz -= GRAVITY * A.gk[A.index(s)] * dt;
         if (z <= 0) (z = 0), (vz = 0);
       }
       // the floor: off an open edge, or nothing underneath
@@ -453,6 +471,8 @@ export class Bot {
         const off = (lat < A.lo[j] - 0.75 && A.openL[j]) || (lat > A.hi[j] + 0.75 && A.openR[j]);
         if (off || !A.supported(s, lat, te + tau)) {
           cost += 5 * disc * this.style.edge;
+          // (a hole that's sometimes there: worth trying a wait for it)
+          if (!off && !(gap && s > gap.s0 - 1 && s < gap.s1 + 1)) fellIn = true;
           break;
         }
       }
@@ -493,7 +513,7 @@ export class Bot {
     // progress: how far this run got, and the speed it's left with
     cost -= (s - s0) / 13;
     cost += Math.max(0, Math.min(A.vcap[A.index(s)], 14) - vs) / 24;
-    this.rHit = hit;
+    this.rHit = hit + (fellIn ? 0.5 : 0);
     return cost;
   }
 }

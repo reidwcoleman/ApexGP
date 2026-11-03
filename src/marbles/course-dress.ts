@@ -197,6 +197,39 @@ const pineToy = (snow: boolean): Toy => () => {
   return { g: merge(gs), h: 6.4 };
 };
 const BIOME_TOYS: Partial<Record<BiomeId, Toy[]>> = {
+  blossom: [
+    treeToy([0xffb8d4, 0xffc8e0, 0xff9ac0, 0xffffff], 0x5a3a34),
+    treeToy([0xffc8e0, 0xffd8e8, 0xff9ac0], 0x5a3a34),
+    // a stone lantern
+    () => ({ g: merge([solid(new THREE.CylinderGeometry(0.7, 0.9, 0.4, 8), 0xb8b0a8).translate(0, 0.2, 0), solid(new THREE.CylinderGeometry(0.22, 0.3, 1.6, 8), 0xb8b0a8).translate(0, 1.2, 0), solid(new THREE.BoxGeometry(1.0, 0.8, 1.0), 0xfff0c0).translate(0, 2.4, 0), solid(new THREE.ConeGeometry(1.0, 0.7, 4).rotateY(Math.PI / 4), 0x8a8078).translate(0, 3.15, 0)]), h: 3.5 }),
+  ],
+  storm: [
+    // a striped buoy with a lamp
+    (r) => ({ g: merge([paint(new THREE.CylinderGeometry(0.9, 1.3, 2.6, 16), (_x, y) => (Math.floor(y * 1.5 + 4) % 2 ? 0xffcf2a : 0x1d1b22)).translate(0, 1.3, 0), solid(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), 0x3a3a40).translate(0, 3.3, 0), solid(new THREE.SphereGeometry(0.3, 10, 8), 0xffe090).translate(0, 4.1, 0)]), h: 4.4, bob: 0.2 + r() * 0.2 }),
+    // a weathered rock with a gull
+    (r) => ({ g: merge([solid(new THREE.DodecahedronGeometry(1.8 + r(), 0).scale(1, 0.7, 1), 0x5a6068).translate(0, 0.9, 0), solid(new THREE.SphereGeometry(0.28, 8, 6), 0xffffff).translate(0.2, 2.2, 0)]), h: 2.6 }),
+  ],
+  reef: [
+    palmToy,
+    crystalToy([0xff6a8a, 0xffa040, 0xb06aff, 0x40e0c0]),
+    // a giant clam
+    (r) => ({ g: merge([paint(new THREE.SphereGeometry(1.8, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.5, 1), rib(14, 0xb8a0ff, 0xd8c8ff)).translate(0, 0.3, 0), paint(new THREE.SphereGeometry(1.8, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.5, 1).rotateX(-2.2), rib(14, 0xb8a0ff, 0xd8c8ff)).translate(0, 0.5, -1.2), solid(new THREE.SphereGeometry(0.45, 14, 10), 0xffffff).translate(0, 0.7, 0.2)]), h: 2.4 }),
+  ],
+  clockwork: [
+    // a gear on a stand, turning
+    (r) => {
+      const gs = [solid(new THREE.CylinderGeometry(0.2, 0.3, 3, 8), 0x3a2a20).translate(0, 1.5, 0)];
+      const n = 12, R = 1.6;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        gs.push(solid(new THREE.BoxGeometry(0.45, 0.5, 0.4), 0xd89a3a).translate(Math.cos(a) * R, 3.4 + Math.sin(a) * R, 0).rotateZ(0));
+      }
+      gs.push(paint(new THREE.TorusGeometry(R * 0.85, 0.35, 8, 24), () => 0xd89a3a).translate(0, 3.4, 0), solid(new THREE.CylinderGeometry(0.4, 0.4, 0.6, 12).rotateX(Math.PI / 2), 0x8a5a2a).translate(0, 3.4, 0));
+      return { g: merge(gs), h: 5.4, spin: 0.4 + r() * 0.4 };
+    },
+    // a boiler with a chimney
+    () => ({ g: merge([solid(new THREE.CylinderGeometry(1.2, 1.2, 2.6, 16).rotateZ(Math.PI / 2), 0xc89040).translate(0, 1.3, 0), solid(new THREE.CylinderGeometry(0.35, 0.4, 2.4, 10), 0x3a2a20).translate(0.8, 3.0, 0), solid(new THREE.TorusGeometry(1.22, 0.1, 6, 20).rotateY(Math.PI / 2), 0x8a5a2a).translate(0.6, 1.3, 0), solid(new THREE.TorusGeometry(1.22, 0.1, 6, 20).rotateY(Math.PI / 2), 0x8a5a2a).translate(-0.6, 1.3, 0)]), h: 4.2 }),
+  ],
   beach: [
     palmToy,
     TOYS[3],
