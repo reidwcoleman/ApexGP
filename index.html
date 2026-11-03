@@ -210,6 +210,10 @@
           <span class="pk-art"></span>
           <span class="pk-txt"><span class="pk-k">5</span><b>Plush Panic</b><i>Ragdoll brawler · 1–8 players</i><em>Punch, headbutt, drop-kick and throw wobbly plushies off eight arenas: a spinning cake, a washing machine, a toy train set, hot-air balloons and more</em></span>
         </button>
+        <button class="pk-card" data-game="mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 50%; --acc: #ffc83d">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">6</span><b>Mogul</b><i>City tycoon</i><em>One food cart on a real street. Shops, whole buildings, quarries, factories and truck fleets. Out-earn nine rivals every month</em></span>
+        </button>
       </div>
       <div class="pk-foot">Only the game you pick is loaded</div>
     </div>
@@ -220,14 +224,14 @@
       #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
       #picker .pk-logo span { color: #ff2b3f; }
       #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
-      #picker .pk-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1.2vw; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1.1vw; }
       #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
       #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
       #picker .pk-art { position: absolute; inset: 0; background: var(--art) var(--pos, center) / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
       #picker .pk-card:hover .pk-art { transform: scale(1.1); }
       #picker .pk-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6, 7, 10, 0) 35%, rgba(6, 7, 10, 0.92) 88%); }
       #picker .pk-txt { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 4px; }
-      #picker .pk-txt b { font-size: clamp(26px, 2.8vw, 40px); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; }
+      #picker .pk-txt b { font-size: clamp(22px, 2.3vw, 36px); font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; }
       #picker .pk-txt i { font-style: normal; font-size: 13px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--acc); }
       #picker .pk-txt em { font-style: normal; font-size: 15px; line-height: 1.35; color: rgba(255, 255, 255, 0.72); margin-top: 4px; }
       #picker .pk-k { position: absolute; top: -34px; right: 20px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; font-weight: 700; background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.8); }
@@ -245,7 +249,7 @@
     </style>
     <script>
       // the game picker, before anything heavy: the racing game's loader, its pictures and its
-      // downloads only start once it's picked; Boostball, Miami, Wobble Mania and Plush Panic are pages of their own.
+      // downloads only start once it's picked; Boostball, Miami, Wobble Mania, Plush Panic and Mogul are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
       (function () {
         var go;
@@ -271,6 +275,7 @@
           else if (g === 'marbles') location.href = 'marbles.html';
           else if (g === 'boost') location.href = 'boost.html';
           else if (g === 'brawl') location.href = 'brawl.html';
+          else if (g === 'mogul') location.href = 'mogul.html';
           else start();
         };
         cards.forEach(function (c) {
@@ -280,7 +285,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'brawl' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'brawl', Digit6: 'mogul' }[e.code];
           if (n) pick(n);
         });
       })();
