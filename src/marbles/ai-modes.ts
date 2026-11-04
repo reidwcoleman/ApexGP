@@ -93,7 +93,7 @@ export class SpudBrain {
       if (o === m || !o.active) continue;
       const other = A.holders.has(o.id);
       const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, d = Math.hypot(dx, dz);
-      const far = d + (A.people.has(o.id) ? ease * 6 : 0);
+      const far = d + (A.people.has(o.id) ? ease * 2.5 : 0);
       if (hold && !other && far < nd) (nd = far), (nx = dx / (d || 1)), (nz = dz / (d || 1));
       if (!hold && other && d < 9) {
         const k = (9 - d) / 9;
