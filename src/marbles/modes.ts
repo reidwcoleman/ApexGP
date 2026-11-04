@@ -3,6 +3,7 @@ import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { GOLD, SPUD, type Coin } from './course-modes.ts';
 import { glowMat } from './obs-world.ts';
+import { KEEP } from './course-crown.ts';
 
 /**
  * The host's side of the two games that aren't a function of the clock: who has a spud, who has
@@ -85,7 +86,7 @@ export class SpudPlay {
     if (!A.holders.size) {
       if (x < this.nextFuse || all.length <= slots) return false;
       // (a fuse: fewer spuds than there are places left to lose)
-      const n = Math.max(1, Math.min(Math.ceil(all.length * 0.18), all.length - slots, this.spuds.length));
+      const n = Math.max(1, Math.min(Math.ceil(all.length * 0.13), all.length - slots, this.spuds.length));
       const pool = [...all].sort(() => Math.random() - 0.5).slice(0, n);
       for (const r of pool) {
         A.holders.add(r.m.id);
@@ -104,7 +105,9 @@ export class SpudPlay {
       if (!A.holders.has(h.m.id) || t - (this.since.get(h.m.id) ?? 0) < SPUD.wait) continue;
       for (const o of all) {
         if (A.holders.has(o.m.id) || !o.m.active) continue;
-        if (h.m.pos.distanceToSquared(o.m.pos) > SPUD.pass * SPUD.pass) continue;
+        // (a dive reaches further: it's how you tag a runner)
+        const reach = h.m.mode === Mode.Dive ? SPUD.dive : SPUD.pass;
+        if (h.m.pos.distanceToSquared(o.m.pos) > reach * reach) continue;
         A.holders.delete(h.m.id);
         A.holders.add(o.m.id);
         A.free.set(h.m.id, t + 1.1);
@@ -287,7 +290,7 @@ export class GoldPlay {
     for (const k of this.live) {
       if (n >= 240) break;
       const u = (x - k.t) / GOLD.fly;
-      const big = k.v > 1 ? 1.75 : 1;
+      const big = k.v >= GOLD.big ? 3 : k.v > 1 ? 1.75 : 1;
       if (u < 1) {
         const q = Math.max(0, u);
         V.set(A.center.x + (k.x - A.center.x) * q, A.center.y + 1.6 + 8 * q * (1 - q) * 2 - 1 * q, A.center.z + (k.z - A.center.z) * q);
@@ -302,5 +305,139 @@ export class GoldPlay {
     }
     this.mesh.count = n;
     this.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/** Crown Keeper: who has the crown and for how long. The host decides; a guest is told and shows it */
+export class KeepPlay {
+  readonly arena;
+  /** seconds each bean has held it */
+  readonly held = new Map<number, number>();
+  /** nobody picks it up again until then (it has to land) */
+  private looseT = 0;
+  private crown = new THREE.Group();
+  private beam: THREE.Mesh;
+  /** who just took it, this frame (id, how: 'took' off the floor, 'stole' it) */
+  taken: { id: number; how: 'took' | 'stole' } | null = null;
+
+  constructor(
+    course: Course,
+    private scene: THREE.Scene,
+    private who: () => Who[],
+  ) {
+    this.arena = course.keep!;
+    const A = this.arena;
+    A.holder = -1;
+    A.x = A.center.x;
+    A.z = A.center.z;
+    const gold = new THREE.MeshPhysicalMaterial({ color: 0xffc21f, roughness: 0.22, metalness: 0.75, emissive: 0xa06000, emissiveIntensity: 0.5 });
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.4, 0.3, 24, 1, true), gold);
+    gold.side = THREE.DoubleSide;
+    this.crown.add(band);
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.34, 8), gold);
+      tip.position.set(Math.cos(a) * 0.43, 0.3, Math.sin(a) * 0.43);
+      this.crown.add(tip);
+      const gem = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), glowMat(k % 2 ? 0xff3a6a : 0x3ac8ff, 2.5));
+      gem.position.set(Math.cos(a) * 0.45, 0.47, Math.sin(a) * 0.45);
+      this.crown.add(gem);
+    }
+    this.crown.traverse((o) => (o.castShadow = true));
+    scene.add(this.crown);
+    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 30, 16, 1, true).translate(0, 15, 0), new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, blending: THREE.AdditiveBlending }));
+    scene.add(this.beam);
+  }
+
+  dispose() {
+    this.scene.remove(this.crown, this.beam);
+  }
+
+  /** knocked out of someone's hands: it flies a few metres and lands on the floor */
+  private loosen(t: number, from: THREE.Vector3) {
+    const A = this.arena;
+    const a = Math.random() * Math.PI * 2, d = 2.5 + Math.random() * 2.5;
+    let x = from.x + Math.cos(a) * d, z = from.z + Math.sin(a) * d;
+    const px = x - A.center.x, pz = z - A.center.z, pr = Math.hypot(px, pz), lim = A.R - 2.5;
+    if (pr > lim) (x = A.center.x + (px / pr) * lim), (z = A.center.z + (pz / pr) * lim);
+    A.holder = -1;
+    A.x = x;
+    A.z = z;
+    this.looseT = t + 0.45;
+  }
+
+  /** (the host) the clock, the pick-ups and the steals; true when who has it changed */
+  tick(dt: number, t: number, go: boolean): boolean {
+    const A = this.arena;
+    this.taken = null;
+    if (!go) return false;
+    const all = this.who().filter((r) => !r.out);
+    const on = (r: Who) => r.m.active && r.m.pos.y > A.center.y - 1;
+    if (A.holder < 0) {
+      if (t < this.looseT) return false;
+      for (const r of all) {
+        if (!on(r) || r.m.mode === Mode.Tumble) continue;
+        if (Math.hypot(r.m.pos.x - A.x, r.m.pos.z - A.z) > KEEP.pick || r.m.pos.y > A.center.y + 3) continue;
+        A.holder = r.m.id;
+        this.safeT = t + KEEP.safe;
+        this.taken = { id: r.m.id, how: 'took' };
+        return true;
+      }
+      return false;
+    }
+    const h = all.find((r) => r.m.id === A.holder);
+    if (!h || !on(h) || h.m.mode === Mode.Tumble) {
+      this.loosen(t, h && on(h) ? h.m.pos : A.center);
+      return true;
+    }
+    this.held.set(h.m.id, (this.held.get(h.m.id) ?? 0) + dt);
+    if (t < this.safeT) return false;
+    for (const o of all) {
+      if (o === h || !on(o)) continue;
+      const d = o.m.pos.distanceTo(h.m.pos);
+      const hit = (o.m.mode === Mode.Dive && d < KEEP.steal) || (o.m.holding === h.m && d < KEEP.steal + 0.4);
+      if (!hit) continue;
+      // (it's yours if you're the one who hit them)
+      A.holder = o.m.id;
+      this.safeT = t + KEEP.safe;
+      this.taken = { id: o.m.id, how: 'stole' };
+      return true;
+    }
+    return false;
+  }
+  private safeT = 0;
+
+  /** how close the leader is, and who it is */
+  winner() {
+    for (const r of this.who()) if ((this.held.get(r.m.id) ?? 0) >= KEEP.hold) return r;
+    return null;
+  }
+  ranking() {
+    return [...this.who()].sort((a, b) => (this.held.get(b.m.id) ?? 0) - (this.held.get(a.m.id) ?? 0) || b.c.skill - a.c.skill);
+  }
+  board() {
+    const rank = this.ranking();
+    const me = rank.findIndex((r) => r.c.player);
+    const show = rank.slice(0, 3);
+    if (me >= 3) show.push(rank[me]);
+    return show.map((r) => {
+      const s = this.held.get(r.m.id) ?? 0;
+      return { name: `${r.m.id === this.arena.holder ? '♛ ' : ''}${r.c.name}`, color: r.c.outfit.a, share: s / KEEP.hold, mine: r.c.player, label: `${s.toFixed(1)}s` };
+    });
+  }
+
+  /** the crown on its bean's head, or spinning on the floor under a shaft of light */
+  sync(t: number) {
+    const A = this.arena;
+    const h = A.holder >= 0 ? this.who().find((r) => r.m.id === A.holder) : null;
+    this.beam.visible = !h;
+    if (h) {
+      this.crown.position.set(h.m.pos.x, h.m.pos.y + 1.42, h.m.pos.z);
+      this.crown.rotation.set(0, t * 2, 0);
+    } else {
+      this.crown.position.set(A.x, A.center.y + 1.1 + Math.sin(t * 3) * 0.14, A.z);
+      this.crown.rotation.set(0, t * 1.5, 0);
+      this.beam.position.set(A.x, A.center.y, A.z);
+    }
   }
 }

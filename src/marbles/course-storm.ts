@@ -13,7 +13,8 @@ import { signTexture } from './obstacles.ts';
  * Every strike is a pure function of the round's clock (seeded), so every browser sees the same storm.
  */
 
-export const STORM = { R: 15.5, warn: 1.45, r: 2.35, big: 4.4 };
+const UPV = new THREE.Vector3(0, 1, 0);
+export const STORM = { R: 15.5, warn: 1.45, r: 2.35, big: 4.4, waveAt: 9, waveEvery: 11, waveV: 8.5 };
 
 export interface Strike {
   /** seconds after the off */
@@ -28,16 +29,31 @@ export interface StormArena {
   R: number;
   /** strikes landing between t0 and t1 (seconds after the off), in order */
   between(t0: number, t1: number, out: Strike[]): Strike[];
+  /** the wave crossing the deck at x, if there is one: the way it's going, and how far along */
+  wave(x: number): { ux: number; uz: number; d: number } | null;
+}
+
+/** a big wave right across the deck, every so often, from a new side each time: hop it or ride it off */
+function waveAt(x: number, R: number) {
+  const n = Math.floor((x - STORM.waveAt) / STORM.waveEvery);
+  if (n < 0) return null;
+  const u = x - STORM.waveAt - n * STORM.waveEvery;
+  const d = -R - 5 + u * STORM.waveV;
+  if (d > R + 5) return null;
+  const a = n * 2.399963;
+  return { ux: Math.cos(a), uz: Math.sin(a), d };
 }
 
 function schedule(R: number) {
   const list: Strike[] = [];
   let sd = 90217;
   const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
-  let t = 3.2;
-  let nextBig = 12;
+  let t = 2.4;
+  let nextBig = 9;
+  // (a small seed's first numbers are all tiny: run it in)
+  for (let k = 0; k < 8; k++) rnd();
   while (t < 200) {
-    const iv = Math.max(0.4, 1.45 - 0.03 * t);
+    const iv = Math.max(0.36, 1.2 - 0.03 * t);
     const n = Math.min(6, 1 + Math.floor(t / 14));
     for (let j = 0; j < n; j++) {
       const a = rnd() * Math.PI * 2, r = (R - 0.6) * Math.sqrt(rnd());
@@ -276,6 +292,30 @@ export function storm(info: { name: string; blurb: string }): Course {
       rain.instanceMatrix.needsUpdate = true;
     });
   }
+  // the waves: a low wall of water, hop it (it's a Kin: it shoves what it meets along with it)
+  {
+    const hh = 0.42, hw = R + 5;
+    const kin = new Kin({ type: 'box', hx: 0.7, hy: hh, hz: hw }, Mat.Wood, (t, pos, quat) => {
+      const w = waveAt(t - state.go, R);
+      if (!w) {
+        pos.set(center.x, center.y - 60, center.z);
+        return void quat.identity();
+      }
+      pos.set(center.x + w.ux * w.d, center.y + hh, center.z + w.uz * w.d);
+      quat.setFromAxisAngle(UPV, Math.atan2(-w.uz, w.ux));
+    });
+    b.world.addKin(kin);
+    const crest = new THREE.Mesh(new THREE.BoxGeometry(1.4, hh * 2, hw * 2, 1, 1, 1), new THREE.MeshPhysicalMaterial({ color: 0xbfe8ff, roughness: 0.15, clearcoat: 1, transparent: true, opacity: 0.85 }));
+    crest.visible = false;
+    b.group.add(crest);
+    b.animators.push((t) => {
+      const w = waveAt(t - state.go, R);
+      crest.visible = !!w;
+      if (!w) return;
+      crest.position.set(center.x + w.ux * w.d, center.y + hh, center.z + w.uz * w.d);
+      crest.rotation.y = Math.atan2(-w.uz, w.ux);
+    });
+  }
   // the blast: everyone near a bolt as it lands is thrown away from it (each browser its own beans)
   const hitBy = new Map<number, number>();
   const now: Strike[] = [];
@@ -307,7 +347,7 @@ export function storm(info: { name: string; blurb: string }): Course {
   });
   dressArena(b, new THREE.Vector3(center.x, center.y - 2, center.z), R + 4, 13);
   b.finish();
-  const arena: StormArena = { center, R, between: (t0, t1, out) => between(t0, t1, out) };
+  const arena: StormArena = { center, R, between: (t0, t1, out) => between(t0, t1, out), wave: (x) => waveAt(x, R) };
   return {
     id: 'stormdeck',
     name: info.name,

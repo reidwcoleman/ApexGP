@@ -33,7 +33,9 @@ interface Pickup {
   born: number;
 }
 /** the k-th paint bomb drops at GO + FIRST + k·EVERY, and lies there until it's taken or LIFE runs out */
-const FIRST = 4, EVERY = 4.5, LIFE = 14, SPLAT_R = 3.6;
+const FIRST = 3, EVERY = 2.8, LIFE = 12, SPLAT_R = 4.4;
+/** the last stretch: bombs twice as big */
+export const PAINT_FRENZY = 18;
 
 export class TeamPlay {
   private rings = new Map<number, THREE.Mesh>();
@@ -152,13 +154,15 @@ export class TeamPlay {
     const q = this.bombs.findIndex((b) => b.k === k);
     if (q >= 0) this.boom(q, id);
   }
+  /** the last stretch of the round (bigger splats) */
+  frenzy = false;
   /** the last bomb that went off: where, and whose */
   lastBoom: { pos: THREE.Vector3; team: number; mine: boolean } | null = null;
   private boom(q: number, id: number) {
     const b = this.bombs[q];
     const team = this.teamOf(id);
     this.gone.add(b.k);
-    this.arena.splat(b.pos.x, b.pos.z, SPLAT_R, team);
+    this.arena.splat(b.pos.x, b.pos.z, SPLAT_R * (this.frenzy ? 1.5 : 1), team);
     const me = this.who().find((r) => r.c.player);
     this.lastBoom = { pos: b.pos.clone(), team, mine: !!me && this.teamOf(me.c.id) === team };
     this.sound.notes(this.lastBoom.mine ? [72, 76, 79, 84] : [60, 55], 0, 0.07, true);

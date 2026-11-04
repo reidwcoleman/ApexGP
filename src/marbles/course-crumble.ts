@@ -3,6 +3,7 @@ import { CourseBuilder } from './builder.ts';
 import { Mat } from './physics.ts';
 import { dressArena } from './course-dress.ts';
 import type { Course } from './courses.ts';
+import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
 
 /**
  * Cookie Crumble: four floors of round cookie tiles stacked in the sky, each a little wider than
@@ -27,7 +28,9 @@ export const CRUMBLE = {
 
 const UND: number[] = [];
 /** Meltdown: the floe's melt (m/s in from the edge, down to minR) and a hole every `hole` s */
-export const MELT = { r0: 15, rate: 0.12, minR: 3.2, hole: 1.5 };
+export const MELT = { r0: 15, rate: 0.2, minR: 3.2, hole: 1, grip: 0.6 };
+/** a spring cookie: one tile in this many, and how hard it throws you (enough to reach the floor above) */
+export const SPRING = { every: 16, up: 18.6 };
 
 export interface CrumbleTile {
   x: number;
@@ -49,6 +52,10 @@ export class CrumbleArena {
   readonly mode: 'step' | 'melt';
   /** Meltdown: how far out the floe still reaches */
   rNow = Infinity;
+  /** the spring cookies (not on the top floor: there's nowhere up to go) */
+  readonly springs = new Set<number>();
+  /** Meltdown's snowballs */
+  shots: Strikes | null = null;
   /** the camera's floor: the floors above it fade away so they don't block the view (set by the builder) */
   view: (L: number, dt: number) => void = () => undefined;
   private holeK = 0;
@@ -76,6 +83,7 @@ export class CrumbleArena {
       this.layers.push({ top: y + C.hh, r, i0, i1: this.tiles.length });
     }
     this.drop = new Float64Array(this.tiles.length).fill(Infinity);
+    if (this.mode === 'step') this.tiles.forEach((t, i) => t.L > 0 && Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1 < 1 / SPRING.every && this.springs.add(i));
     this.tiles.forEach((t, i) => {
       const k = this.key(Math.floor(t.x / CRUMBLE.sp), Math.floor(t.z / CRUMBLE.sp));
       let a = this.cells.get(k);
@@ -251,6 +259,7 @@ export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 
     });
   };
   const base = A.layers.map((_, L) => new THREE.Color(LAYER_C[L % LAYER_C.length]));
+  const springC = new THREE.Color(0x30ff90);
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(1, 1, 1), Z = new THREE.Vector3(0, 0, 0);
   const hot = new THREE.Color(0xff3a4a), white = new THREE.Color(0xffffff), col = new THREE.Color();
   const shown = new Uint8Array(A.tiles.length);
@@ -281,7 +290,7 @@ export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 
         } else if (d >= 0) {
           Q.setFromEuler(new THREE.Euler(d * (1.5 + (i % 3)), 0, d * (1 + (i % 2))));
           m.setColorAt(k, col.copy(base[L]).lerp(hot, 0.6));
-        } else m.setColorAt(k, base[L]);
+        } else m.setColorAt(k, A.springs.has(i) ? springC : base[L]);
         m.setMatrixAt(k, M.compose(V, d >= 0 ? Q : Q.identity(), S));
         Q.identity();
         dirty = true;
@@ -294,6 +303,21 @@ export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 
   };
   draw(0, true);
   b.animators.push((t) => draw(t, false));
+  // Meltdown: the floe is slippery, and snowballs come over from the shore
+  if (melt) {
+    const R = MELT.r0 + 2;
+    const box: [THREE.Vector3, THREE.Vector3] = [new THREE.Vector3(center.x - R, center.y - 2, center.z - R), new THREE.Vector3(center.x + R, center.y + 5, center.z + R)];
+    b.world.fields.push({ min: box[0], max: box[1], grip: MELT.grip });
+    let sd = 58211;
+    const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 8; k++) rnd();
+    const list: Hit3[] = [];
+    for (let t = 7; t < 120; t += Math.max(1.1, 3 - t * 0.03) * (0.8 + rnd() * 0.4)) {
+      const a = rnd() * Math.PI * 2, r = Math.max(MELT.minR, (MELT.r0 - 2 - t * MELT.rate * 0.8)) * Math.sqrt(rnd());
+      list.push({ t, x: center.x + Math.cos(a) * r, y: center.y + C.hh, z: center.z + Math.sin(a) * r, r: 2 });
+    }
+    A.shots = addStrikes(b, { list, warn: 1.5, state, ring: 0x60c8ff, ball: { color: 0xf4fbff, r: 0.8 }, box, out: 8, up: 6 });
+  }
   dressArena(b, new THREE.Vector3(center.x, center.y - 2, center.z), C.r0 + (C.layers - 1) * C.dr + 6, 9);
   b.finish();
   // a rough cut for the bots' and the camera's sake

@@ -65,6 +65,8 @@ export type CtlMsg =
   | { t: 'splat'; k: number; id: number }
   /** Hot Spud: who has one now, and when they go off */
   | { t: 'spud'; h: number[]; end: number }
+  /** Crown Keeper: who has it (-1: loose), where it lies, everyone's time */
+  | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole' }
   /** Gold Rush: a coin taken (k, by id, worth v), someone's gold set (id, n), coins spilt (add) */
   | { t: 'gold'; k?: number; id?: number; v?: number; n?: number; add?: [number, number, number, number][] }
   | { t: 'ping'; ts: number; ht: number; rtt: number }

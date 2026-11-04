@@ -9,6 +9,7 @@ import { jumpclub } from './course-jumpclub.ts';
 import { ridge } from './course-ridge.ts';
 import { tiptop } from './course-tiptop.ts';
 import { summit } from './course-summit.ts';
+import { crownKeep, type KeepArena } from './course-crown.ts';
 import { paintparty, type TeamArena } from './course-paintparty.ts';
 import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
@@ -59,6 +60,8 @@ export interface Course {
   spud?: SpudArena;
   gold?: GoldArena;
   belt?: BeltArena;
+  /** the Crown Keeper final */
+  keep?: KeepArena;
   /** Lava Rush: the lava's height and how far along the course it has come, at a time */
   lava?: { y(t: number): number; s(t: number): number };
   /** the team round's painted floor */
@@ -70,7 +73,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'goldrush' | 'beltrush' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'goldrush' | 'beltrush' | 'crownkeep' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -119,30 +122,69 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
   blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
+  crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'One crown. Hold it for 15 seconds and you win the show. Dive into whoever has it to knock it loose.', keep: 0 },
 };
 /**
  * The running order of this show (a live list: a new show deals a new one, a guest takes the
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'goldrush', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'goldrush', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
-/** a new show: a race, a survival, a race or a party game, a party game, a race, the final (which ones is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
 export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide', 'colourcall', 'beltrush'];
 /** the games that are neither: each show has at least one */
 export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'hotspud', 'goldrush'];
-export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak'];
+export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
+
+/**
+ * The kinds of game a show is dealt from. A show never plays the same one twice: each of its six
+ * rounds comes from a different family here, and the final differs from them all (a show with an
+ * obstacle race ends in Crown Keeper; one without it ends in the race up Crown Peak).
+ */
+export const MODES = {
+  race: RACE_POOL.filter((id) => id !== 'lavarush'),
+  chase: ['lavarush', 'beltrush', 'hightide'],
+  floor: ['crumble', 'meltdown', 'colourcall'],
+  dodge: ['jumpclub', 'tiptop', 'stormdeck'],
+  team: ['paintparty', 'splatring'],
+  grab: ['hotspud', 'goldrush'],
+} satisfies Record<string, RoundId[]>;
+export type ModeId = keyof typeof MODES;
+/** what the round card calls it */
+const MODE_NAME: Record<ModeId, string> = { race: 'OBSTACLE RACE', chase: 'OUTRUN IT', floor: 'VANISHING FLOOR', dodge: 'DODGE IT', team: 'TEAM GAME', grab: 'GRAB GAME' };
+export function modeOf(id: RoundId): ModeId | 'final' {
+  for (const k in MODES) if ((MODES[k as ModeId] as RoundId[]).includes(id)) return k as ModeId;
+  return 'final';
+}
+export function modeName(id: RoundId) {
+  if (id === 'crownkeep') return 'FINAL · CROWN KEEPER';
+  if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
+  if (id === 'hotspud') return 'TAG GAME';
+  if (id === 'goldrush') return 'GOLD GRAB';
+  const m = modeOf(id);
+  return m === 'final' ? 'RACE' : MODE_NAME[m];
+}
+
+/** the last show's rounds: the next one steers clear of them where it can */
+let lastShow: RoundId[] = [];
 export function dealShow(rnd = Math.random) {
-  const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
-  // (the platform courses; the old chutes are still there for the test links)
-  const races = shuffle<RoundId>(RACE_POOL);
-  const surv = shuffle<RoundId>(SURVIVAL_POOL);
-  const party = shuffle<RoundId>(PARTY_POOL);
-  // (the third round is as likely another game as a race)
-  setShow([races[0], surv[0], rnd() < 0.5 ? races[1] : party[1], party[0], races[2], 'crownpeak']);
-  return SHOW.map((x) => x.id);
+  const shuffle = <T,>(a: readonly T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+  const pick = (k: ModeId) => {
+    const all = shuffle<RoundId>(MODES[k]);
+    return all.find((id) => !lastShow.includes(id)) ?? all[0];
+  };
+  const others = shuffle<ModeId>(['chase', 'floor', 'dodge', 'team', 'grab']);
+  const withRace = rnd() < 0.6;
+  // (five families and a final that's none of them)
+  const fams: ModeId[] = shuffle<ModeId>(withRace ? ['race', ...others.slice(0, 4)] : others);
+  // (the team game needs a field to split: never the last round before the final)
+  if (fams[4] === 'team') [fams[4], fams[3]] = [fams[3], fams[4]];
+  const ids: RoundId[] = [...fams.map(pick), withRace ? 'crownkeep' : 'crownpeak'];
+  setShow(ids);
+  lastShow = ids;
+  return ids;
 }
 export function setShow(ids: RoundId[]) {
   SHOW.splice(0, SHOW.length, ...ids.map((id) => ROUNDS[id]));
@@ -190,6 +232,8 @@ export function buildRound(id: RoundId): Course {
       return goldRush(info);
     case 'beltrush':
       return beltRush(info);
+    case 'crownkeep':
+      return crownKeep(info);
     default:
       return genCourse(GEN[id], info);
   }

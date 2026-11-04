@@ -232,6 +232,9 @@
 .mm-teams.board .tm { grid-template-columns: minmax(0, 1fr) 40px; font-size: 14px; padding: 3px 10px; border-radius: 10px; }
 .mm-teams.board .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mm-teams.board .bar { display: none; }
+/* (a bean's colour can be anything: the name stays white, the colour goes on a stripe) */
+.mm-teams.board .tm { background: rgba(36, 20, 44, 0.78); border-left: 6px solid var(--tc); }
+.mm-teams.board .nm { color: #fff; }
 .mm-teams .tm.mine { box-shadow: 0 0 0 3px #fff; }
 .mm-teams .nm { color: var(--tc); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
 .mm-teams .bar { height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }

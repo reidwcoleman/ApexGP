@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain, TideBrain } from './ai-arena.ts';
-import { BeltBrain, CallBrain, GoldBrain, SpudBrain } from './ai-modes.ts';
+import { BeltBrain, CallBrain, GoldBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
 import type { GoldPlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -93,6 +93,7 @@ export class Bot {
   private spudB: SpudBrain | null = null;
   private goldB: GoldBrain | null = null;
   private beltB: BeltBrain | null = null;
+  private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
   /** Gold Rush: what's on the sand */
@@ -207,6 +208,12 @@ export class Bot {
       if (t < c.state.go + this.react || !this.gold) return;
       this.goldB.update(dt, t, c, all, this.gold.live, this.gold.taken, this.ease);
       return void m.input.multiplyScalar(1 - 0.14 * this.ease);
+    }
+    if (c.keep) {
+      this.keepB ??= new KeepBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react) return;
+      this.keepB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.16 * this.ease);
     }
     if (c.belt) {
       this.beltB ??= new BeltBrain(m, this.skill, this.rnd);

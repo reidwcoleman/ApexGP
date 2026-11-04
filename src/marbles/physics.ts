@@ -32,13 +32,13 @@ export const HEAD_UP = 0.62;
 const HEAD_R = 0.4;
 const BODY_R = 0.44;
 /** the dive: its launch speed, and the wait before the next */
-export const DIVE_V = 12.5;
-/** out of a jump it's a bigger throw: jump + dive is the quickest way to travel */
-const AIR_DIVE_V = 15.5;
-const DIVE_MAX = 16.5;
-export const DASH_CD = 1.05;
+export const DIVE_V = 10.8;
+/** out of a jump it's a slightly bigger throw: jump + dive is the quickest way to travel, but only just (tools/wobbledive.mjs) */
+const AIR_DIVE_V = 11.35;
+const DIVE_MAX = 12;
+export const DASH_CD = 1.25;
 /** the belly slide: how fast it scrubs off, and how fast you can steer it (rad/s) */
-const SLIDE_DRAG = 8;
+const SLIDE_DRAG = 15;
 const SLIDE_TURN = 2.4;
 const DIVE_AIR_TURN = 1.5;
 /** grabbing: reach, how long a hold lasts, the wait after */
@@ -153,6 +153,16 @@ export class Marble {
   gripK = 1;
   runK = 1;
   jumpK = 1;
+  /** goodie boxes: when each runs out (world time), and what's in force now */
+  zoomT = 0;
+  springT = 0;
+  bubbleT = 0;
+  boostK = 1;
+  hopK = 1;
+  /** a spring pad just threw it */
+  sprung = false;
+  /** this bean's dive just bowled someone over */
+  bonked = false;
   constructor(readonly id: number) {}
   get grounded() {
     return this.groundT < 0.1;
@@ -478,6 +488,8 @@ export class World {
       if (f.jump !== undefined) m.jumpK *= f.jump;
       f.act?.(m, this.time, dt);
     }
+    m.runK *= m.boostK;
+    m.jumpK *= m.hopK;
   }
   /** the slowest the course allows before a fall counts (m below) */
   private h = SUB;
@@ -531,12 +543,12 @@ export class World {
     m.grabCD = Math.max(0, m.grabCD - dt);
     m.heldT = Math.max(0, m.heldT - dt);
     const ok = m.mode === Mode.Run && m.upT <= 0;
-    // on your belly: jump pops you straight up out of the slide, keeping every bit of the speed
+    // on your belly: jump pops you up out of the slide, at about running speed
     if (m.jumpBuf > 0 && m.mode === Mode.Dive && m.groundT < 0.14 && m.diveT > 0.05) {
       m.jumpBuf = 0;
       m.mode = Mode.Run;
-      m.vel.x *= 0.93;
-      m.vel.z *= 0.93;
+      m.vel.x *= 0.86;
+      m.vel.z *= 0.86;
       m.vel.y = m.groundVel.y + JUMP_V * 0.92 * m.jumpK;
       m.groundT = 1;
       m.hopped = true;
@@ -565,7 +577,7 @@ export class World {
       const along = m.vel.x * L.x + m.vel.z * L.z;
       const air = !m.grounded;
       // (chained dives add up, but only so far)
-      const sp = Math.max((air ? AIR_DIVE_V : DIVE_V) * (m.heldT > 0 ? 0.6 : 1), Math.min(along + (air ? 3 : 2), DIVE_MAX), along);
+      const sp = Math.max((air ? AIR_DIVE_V : DIVE_V) * (m.heldT > 0 ? 0.6 : 1), Math.min(along + (air ? 1.6 : 1), DIVE_MAX), along);
       const up = air ? Math.max(m.vel.y, 3.2) : 4.2;
       m.vel.set(L.x * sp, up, L.z * sp);
       m.yaw = Math.atan2(L.x, L.z);
@@ -988,6 +1000,7 @@ export class World {
           const hitter = aFast ? a : b;
           const target = hitter === a ? b : a;
           if (hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
+            if (hitter.mode === Mode.Dive) hitter.bonked = true;
             if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * 0.75, vy: 4.5, vz: hitter.vel.z * 0.75 });
             else {
               // (bowled over: sent flying)

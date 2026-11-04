@@ -10,10 +10,11 @@ import { dressArena } from './course-dress.ts';
 /**
  * Round 5, Tip Top: a great painted dish balanced on a brass ball joint. It tips — a little at
  * first, then more, and the low side wanders round faster and faster — while a low bar turns over
- * it (hop it). At 40 s a ring of bumpers starts popping up out of the dish. Last half on it go through.
+ * it (hop it). At 15 s a ring of bumpers starts popping up out of the dish, and at 22 s a big ball
+ * rolls loose round it the other way. Last half on it go through.
  */
 
-export const TIP_TOP = { barSpeed: 0.62, popAt: 30, tiltMax: 0.44 };
+export const TIP_TOP = { barSpeed: 0.6, popAt: 15, ballAt: 22, tiltMax: 0.44 };
 
 export function tiptop(info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
@@ -22,8 +23,8 @@ export function tiptop(info: { name: string; blurb: string }): Course {
   b.lakeY = center.y - 36;
   const state = { go: 1e9 };
   const tau = (t: number) => Math.max(0, t - state.go);
-  // the tilt: grows to 9° by 30 s and on to the max (25°, where a bean's feet go) by about 95 s; the low side precesses round
-  const tilt = (x: number) => Math.min(TIP_TOP.tiltMax, 0.16 * THREE.MathUtils.smoothstep(x, 0, 30) + 0.005 * Math.max(0, x - 30));
+  // the tilt: grows to 9° by 24 s and on to the max (25°, where a bean's feet go) by about 70 s; the low side precesses round
+  const tilt = (x: number) => Math.min(TIP_TOP.tiltMax, 0.16 * THREE.MathUtils.smoothstep(x, 0, 24) + 0.0065 * Math.max(0, x - 24));
   const prec = (x: number) => 0.45 * x + 0.003 * x * x;
   const AX = new THREE.Vector3(), QT = new THREE.Quaternion(), QS = new THREE.Quaternion(), QR = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
   /** the dish's tilt at t (no spin) */
@@ -109,7 +110,23 @@ export function tiptop(info: { name: string; blurb: string }): Course {
     p.add(b.paint({ a: PAINT.white, b: PAINT.white, pattern: Pattern.Solid }), rod(0.62, 0.6, 24), mat(0, 0, 0));
     b.obstacle(bar, p.group());
   }
-  // the bumper ring: six posts that pop up out of the dish from 40 s, each on its own beat
+  // the big ball: it drops on from 22 s and rolls round the dish against the bar
+  {
+    const BR = 1.25, ORBIT = 8.9;
+    const L3 = new THREE.Vector3();
+    const rider = ride(L3, () => 0);
+    const ball = new Kin({ type: 'sph', r: BR }, Mat.Bumper, (t, pos, quat) => {
+      const x = tau(t) - TIP_TOP.ballAt;
+      const a = -0.75 * x;
+      L3.set(Math.cos(a) * ORBIT, x < 0 ? -30 : BR + Math.max(0, 1 - x) * 14, Math.sin(a) * ORBIT);
+      rider(t, pos, quat);
+    });
+    ball.kick = 8;
+    const p = new Parts();
+    p.add(b.paint({ a: PAINT.pink, b: PAINT.white, pattern: Pattern.Stripes, scale: 1.6 }), cylAttr(new THREE.SphereGeometry(BR, 28, 18)));
+    b.obstacle(ball, p.group());
+  }
+  // the bumper ring: six posts that pop up out of the dish from 15 s, each on its own beat
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * Math.PI * 2 + 0.26;
     const local = new THREE.Vector3(Math.cos(a) * 6.2, 0, Math.sin(a) * 6.2);

@@ -1,6 +1,7 @@
 import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { BELT, CALL, GOLD, type BeltRow, type Coin } from './course-modes.ts';
+import { BELT, CALL, GOLD, shownTiles, type BeltRow, type Coin } from './course-modes.ts';
+import { dodge } from './course-strikes.ts';
 
 /** The bots for the four party games (course-modes.ts). */
 
@@ -21,9 +22,12 @@ export class CallBrain {
     const m = this.m, A = c.call!;
     const x = t - c.state.go;
     const call = A.at(x);
-    if (call.i !== this.seen && x > call.t0 + this.react + ease * 0.55 + this.rnd() * 0.25) {
-      this.seen = call.i;
-      this.k = this.pick(call.safe, A.xz, all);
+    // (a switch is a new call: it can't know until it's made, and it's slow off the mark like anyone)
+    const swapped = call.fake >= 0 && x >= call.swap + this.react + ease * 0.4;
+    const key = call.i * 2 + (swapped ? 1 : 0);
+    if (key !== this.seen && x > call.t0 + this.react + ease * 0.55 + this.rnd() * 0.25) {
+      this.seen = key;
+      this.k = this.pick(shownTiles(call, swapped ? call.swap + 1e-3 : x), A.xz, all);
       // (a bean in a panic runs for the wrong colour now and then)
       if (this.rnd() < ease * (0.2 - 0.14 * this.skill)) this.k = Math.floor(this.rnd() * CALL.n * CALL.n);
     }
@@ -33,7 +37,7 @@ export class CallBrain {
       if (d > 4) m.input.set((A.center.x - m.pos.x) / d, 0, (A.center.z - m.pos.z) / d).multiplyScalar(0.6);
       return;
     }
-    if (call.i !== this.seen) return;
+    if (this.seen >> 1 !== call.i) return;
     const [tx, tz] = A.xz(this.k);
     const dx = tx - m.pos.x, dz = tz - m.pos.z;
     const d = Math.hypot(dx, dz);
@@ -168,13 +172,19 @@ export class GoldBrain {
         if (taken.has(k.k) || k.t + GOLD.fly - x > 0.3 - ease * 0.45) continue;
         const d = Math.hypot(k.x - m.pos.x, k.z - m.pos.z);
         const away = Math.hypot(k.x - A.center.x - this.hx, k.z - A.center.z - this.hz);
-        const sc = (k.v > 1 ? 2.5 : 1) / (d + 2.5) - away * 0.012 + this.rnd() * (0.12 - 0.09 * this.skill);
+        const sc = (k.v >= GOLD.big ? 7 : k.v > 1 ? 2.5 : 1) / (d + 2.5) - away * 0.012 + this.rnd() * (0.12 - 0.09 * this.skill);
         if (sc > bs) (bs = sc), (this.target = k);
       }
     }
     const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z, pr = Math.hypot(px, pz);
     if (pr > A.R - 1.2) {
       m.input.set(-px / pr, 0, -pz / pr);
+      return;
+    }
+    // (out from under a cannonball, if it's seen it)
+    const out = dodge(A.shots, m, x, 0.7 - 0.5 * this.skill + ease * 0.3);
+    if (out) {
+      m.input.set(out[0], 0, out[1]);
       return;
     }
     // a knock spills gold: a rough one goes for whoever is right next to it
@@ -204,6 +214,66 @@ export class GoldBrain {
       const side = tx * dx + tz * dz > 0 ? 1 : -1;
       m.input.set(tx * side + (px / cd) * 0.5, 0, tz * side + (pz / cd) * 0.5).normalize();
     }
+  }
+}
+
+/** Crown Keeper: with it, keep away from them all. Without it, get it */
+export class KeepBrain {
+  private next = 0;
+  constructor(
+    readonly m: Marble,
+    readonly skill: number,
+    private rnd: () => number,
+  ) {}
+  update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.keep!;
+    const x = t - c.state.go;
+    // the bar: a hop as it comes round
+    const a = A.bar(x + 0.22);
+    if (a !== null && m.grounded) {
+      const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z;
+      const side = Math.abs(px * Math.sin(a) + pz * Math.cos(a));
+      if (side < 1.1 && this.rnd() < 0.3 + 0.6 * this.skill) m.jump = true;
+    }
+    const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z, pr = Math.hypot(px, pz);
+    if (A.holder === m.id) {
+      // run from whoever's nearest, and away from the edge
+      let fx = 0, fz = 0;
+      for (const o of all) {
+        if (o === m || !o.active) continue;
+        const dx = m.pos.x - o.pos.x, dz = m.pos.z - o.pos.z, d = Math.hypot(dx, dz) || 1;
+        if (d < 11) (fx += (dx / d) * (11 - d)), (fz += (dz / d) * (11 - d));
+      }
+      if (pr > A.R - 5) {
+        const k = ((pr - (A.R - 5)) / 5) * 9;
+        fx -= (px / pr) * k;
+        fz -= (pz / pr) * k;
+      }
+      const l = Math.hypot(fx, fz);
+      if (l > 0.05) m.input.set(fx / l, 0, fz / l);
+      else if (pr > 1) m.input.set(-px / pr, 0, -pz / pr).multiplyScalar(0.5);
+      return;
+    }
+    let dx = A.x - m.pos.x, dz = A.z - m.pos.z;
+    let reach = false;
+    if (A.holder >= 0) {
+      const h = all.find((o) => o.id === A.holder);
+      if (h) {
+        // (it leads a runner, a better one by more)
+        const lead = 0.15 + 0.3 * this.skill;
+        dx = h.pos.x + h.vel.x * lead - m.pos.x;
+        dz = h.pos.z + h.vel.z * lead - m.pos.z;
+        reach = true;
+      }
+    }
+    if (pr > A.R - 1.4) {
+      m.input.set(-px / pr, 0, -pz / pr);
+      return;
+    }
+    const d = Math.hypot(dx, dz);
+    if (d > 0.1) m.input.set(dx / d, 0, dz / d);
+    if (t >= this.next) this.next = t + 0.3;
+    if (reach && d < 3.2 && d > 0.9 && m.grounded && this.rnd() < (0.05 + 0.1 * this.skill) * (1 - 0.6 * ease)) m.dash = true;
   }
 }
 

@@ -6,6 +6,7 @@ import type { Course } from './courses.ts';
 import { dressArena } from './course-dress.ts';
 import { signTexture } from './obstacles.ts';
 import { glowMat } from './obs-world.ts';
+import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
 
 /**
  * The four rounds that aren't races or plain survivals, each its own game:
@@ -33,13 +34,13 @@ const hash = (a: number, b: number) => {
 };
 const M = new THREE.Matrix4(), V = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(1, 1, 1), CL = new THREE.Color();
 
-function title(b: CourseBuilder, info: { name: string }, tag: string, color: number, at: THREE.Vector3) {
+export function title(b: CourseBuilder, info: { name: string }, tag: string, color: number, at: THREE.Vector3) {
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshBasicMaterial({ map: signTexture(info.name.toUpperCase(), tag, color, 9 / 1.7), transparent: true }));
   sign.position.copy(at);
   b.group.add(sign);
 }
 
-function ringGrid(center: THREE.Vector3, n: number, r0: number, dr: number, per: number) {
+export function ringGrid(center: THREE.Vector3, n: number, r0: number, dr: number, per: number) {
   const out: { pos: THREE.Vector3; yaw: number }[] = [];
   for (let k = 0; k < n; k++) {
     const ring = Math.floor(k / per), inRing = Math.min(per, n - ring * per), kk = k - ring * per;
@@ -51,7 +52,7 @@ function ringGrid(center: THREE.Vector3, n: number, r0: number, dr: number, per:
 }
 
 // ------------------------------------------------------------------------------------ Colour Call
-export const CALL = { n: 8, tile: 3.6, colors: [0xff3a8a, 0xffd21f, 0x2fe06a, 0x2fa8ff, 0xff8a1f, 0xb05aff], names: ['PINK', 'YELLOW', 'GREEN', 'BLUE', 'ORANGE', 'PURPLE'], gone: 1.6, rest: 0.9 };
+export const CALL = { n: 8, tile: 3.6, colors: [0xff3a8a, 0xffd21f, 0x2fe06a, 0x2fa8ff, 0xff8a1f, 0xb05aff], names: ['PINK', 'YELLOW', 'GREEN', 'BLUE', 'ORANGE', 'PURPLE'], gone: 1.6, rest: 0.8 };
 
 export interface Call {
   i: number;
@@ -59,18 +60,31 @@ export interface Call {
   t0: number;
   drop: number;
   back: number;
-  /** the colour called (an index into CALL.colors) */
+  /** the colour that's safe when the floor goes (an index into CALL.colors) */
   c: number;
+  /** a double call: a second safe colour (-1: none) */
+  c2: number;
+  /** a switch: the colour called first, and when the call changes to the real one (-1: no switch) */
+  fake: number;
+  swap: number;
   /** each tile's colour for this call */
   tiles: Uint8Array;
   safe: number[];
+  /** a switch: the tiles of the colour called first */
+  decoy: number[];
 }
+/** the colour showing at x (a switch shows its decoy until it changes) */
+export const shownColour = (c: Call, x: number) => (c.fake >= 0 && x < c.swap ? c.fake : c.c);
+/** the tiles worth running to at x */
+export const shownTiles = (c: Call, x: number) => (c.fake >= 0 && x < c.swap ? c.decoy : c.safe);
 export interface CallArena {
   center: THREE.Vector3;
   half: number;
   /** the call at x seconds after the off */
   at(x: number): Call;
   xz(k: number): [number, number];
+  /** a new order of calls (the same number gives the same calls in every browser) */
+  deal(seed: number): void;
 }
 
 /** a tile's top: a raised, rounded panel in a darker frame */
@@ -97,24 +111,57 @@ function tileTexture() {
   return t;
 }
 
-function callList() {
+/**
+ * The calls for one round. The colours come out of a shuffled bag, so all six get called before any
+ * comes round again and none is called twice running. Later on some calls are doubles (two colours
+ * are safe) and some are switches (the call changes at the last moment).
+ */
+function callList(seed: number) {
   const out: Call[] = [];
   const N = CALL.n * CALL.n;
-  let t = 2.5;
+  // (a small seed's first number is always tiny: that's how every call came out pink. Hash it, and warm it up)
+  const rnd = seeded(Math.floor(hash(seed, 7001) * 2147483000) + 1);
+  for (let k = 0; k < 8; k++) rnd();
+  const shuffled = (a: number[]) => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  let bag: number[] = [];
+  /** the next colour out of the bag that isn't one of `not` (a new shuffle goes in under what's left) */
+  const draw = (not: number[]) => {
+    if (!bag.some((x) => !not.includes(x))) bag = [...shuffled([0, 1, 2, 3, 4, 5]), ...bag];
+    for (let k = bag.length - 1; k >= 0; k--) if (!not.includes(bag[k])) return bag.splice(k, 1)[0];
+    return 0;
+  };
+  /** what the last call left safe: the next one never opens on it */
+  let prev: number[] = [];
+  let t = 2.2;
   for (let i = 0; i < 80; i++) {
-    const rnd = seeded(7001 + i * 131);
-    const warn = Math.max(1.7, 4.2 - 0.3 * i);
+    const warn = Math.max(1.9, 3.8 - 0.22 * i);
+    const c = draw(prev);
+    // (the third call on, every third is a switch; every fifth a double)
+    const fake = i >= 2 && i % 3 === 2 ? draw([...prev, c]) : -1;
+    const c2 = fake < 0 && i >= 4 && i % 5 === 4 ? draw([...prev, c]) : -1;
+    prev = c2 >= 0 ? [c, c2] : [c];
+    const swap = fake >= 0 ? t + warn - Math.max(1.5, warn * 0.5) : t;
     const kinds = Math.min(6, 3 + Math.floor(i / 2));
-    const c = Math.floor(rnd() * 6);
-    const others = [0, 1, 2, 3, 4, 5].filter((x) => x !== c).sort(() => rnd() - 0.5).slice(0, kinds - 1);
+    const others = [0, 1, 2, 3, 4, 5].filter((x) => x !== c && x !== c2 && x !== fake);
+    const rest = shuffled(others).slice(0, Math.max(1, kinds - 1));
     // (fewer safe tiles as it goes on, spread over the floor)
-    const nSafe = Math.max(2, 11 - i * 2);
-    const order = Array.from({ length: N }, (_, k) => k).sort(() => rnd() - 0.5);
+    const nSafe = Math.max(3, 17 - Math.floor(i * 1.5));
+    const order = shuffled(Array.from({ length: N }, (_, k) => k));
     const safe = order.slice(0, nSafe);
+    const decoy = fake >= 0 ? order.slice(nSafe, nSafe * 2 + 2) : [];
+    const also = c2 >= 0 ? order.slice(nSafe, nSafe * 2) : [];
     const tiles = new Uint8Array(N);
-    for (let k = 0; k < N; k++) tiles[k] = others[Math.floor(rnd() * others.length)];
+    for (let k = 0; k < N; k++) tiles[k] = rest[Math.floor(rnd() * rest.length)];
     for (const k of safe) tiles[k] = c;
-    out.push({ i, t0: t, drop: t + warn, back: t + warn + CALL.gone, c, tiles, safe });
+    for (const k of decoy) tiles[k] = fake;
+    for (const k of also) tiles[k] = c2;
+    out.push({ i, t0: t, drop: t + warn, back: t + warn + CALL.gone, c, c2, fake, swap, tiles, safe: c2 >= 0 ? [...safe, ...also] : safe, decoy });
     t += warn + CALL.gone + CALL.rest;
   }
   return out;
@@ -127,7 +174,7 @@ export function colourCall(info: { name: string; blurb: string }): Course {
   const { n, tile } = CALL;
   const half = (n * tile) / 2;
   b.lakeY = center.y - 16;
-  const list = callList();
+  let list = callList(1);
   const at = (x: number) => {
     let lo = 0, hi = list.length - 1;
     while (lo < hi) {
@@ -138,10 +185,11 @@ export function colourCall(info: { name: string; blurb: string }): Course {
     return list[lo];
   };
   const xz = (k: number): [number, number] => [center.x - half + ((k % n) + 0.5) * tile, center.z - half + (Math.floor(k / n) + 0.5) * tile];
+  const safeOn = (c: Call, k: number) => c.tiles[k] === c.c || c.tiles[k] === c.c2;
   // the tiles: solid until they drop (down out of the way, back when the call is over)
   const down = (k: number, x: number) => {
     const c = at(x);
-    return x >= c.drop && x < c.back && c.tiles[k] !== c.c;
+    return x >= c.drop && x < c.back && !safeOn(c, k);
   };
   const N = n * n;
   const hx = tile / 2 - 0.05;
@@ -179,7 +227,7 @@ export function colourCall(info: { name: string; blurb: string }): Course {
     x.fillRect(0, 0, 4, 64);
   }
   const pillarM = new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap: new THREE.CanvasTexture(fade), transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, blending: THREE.AdditiveBlending });
-  const pillars = new THREE.InstancedMesh(new THREE.CylinderGeometry(tile * 0.68, tile * 0.68, 7, 4, 1, true).rotateY(Math.PI / 4).translate(0, 3.5, 0), pillarM, 12);
+  const pillars = new THREE.InstancedMesh(new THREE.CylinderGeometry(tile * 0.68, tile * 0.68, 7, 4, 1, true).rotateY(Math.PI / 4).translate(0, 3.5, 0), pillarM, 24);
   pillars.frustumCulled = false;
   b.group.add(pillars);
   // the frame under it (so the floor has an edge), and the big cube overhead that shows the colour
@@ -211,7 +259,9 @@ export function colourCall(info: { name: string; blurb: string }): Course {
       const [px, pz] = xz(k);
       let y = center.y - 0.3;
       let dx = 0;
-      const safe = c.tiles[k] === c.c;
+      const safe = safeOn(c, k);
+      // (what you can see: before a switch the decoy looks like the safe colour)
+      const lit = x < c.swap ? c.tiles[k] === c.fake : safe;
       if (live && !safe) {
         const toDrop = c.drop - x;
         // (shaking as it's about to go, then down)
@@ -222,25 +272,28 @@ export function colourCall(info: { name: string; blurb: string }): Course {
       floor.setMatrixAt(k, M.compose(V.set(px + dx, y, pz), Q.identity(), S));
       CL.copy(pal[c.tiles[k]]);
       if (x < 0) CL.multiplyScalar(0.7);
-      else if (safe && x < c.drop) CL.lerp(pal[c.c].clone().addScalar(0.45), 0.35 + 0.35 * Math.sin(x * 9));
-      else if (!safe && x < c.drop) CL.multiplyScalar(0.55);
+      else if (lit && x < c.drop) CL.lerp(pal[c.tiles[k]].clone().addScalar(0.45), 0.35 + 0.35 * Math.sin(x * 9));
+      else if (!lit && x < c.drop) CL.multiplyScalar(0.55);
       floor.setColorAt(k, CL);
     }
     floor.instanceMatrix.needsUpdate = true;
     floor.instanceColor!.needsUpdate = true;
     // (the light columns, while there's still time)
     const shine = live && x < c.drop;
-    pillars.count = shine ? Math.min(12, c.safe.length) : 0;
+    const lights = shownTiles(c, x);
+    const now = shownColour(c, x);
+    pillars.count = shine ? Math.min(24, lights.length) : 0;
     if (shine) {
-      pillarM.color.copy(pal[c.c]);
+      pillarM.color.copy(pal[now]);
       pillarM.opacity = 0.2 + 0.08 * Math.sin(x * 9);
       for (let i = 0; i < pillars.count; i++) {
-        const [px, pz] = xz(c.safe[i]);
+        const [px, pz] = xz(lights[i]);
         pillars.setMatrixAt(i, M.compose(V.set(px, center.y, pz), Q.identity(), S));
       }
       pillars.instanceMatrix.needsUpdate = true;
     }
-    cubeM.color.copy(pal[c.c]).multiplyScalar(live && x < c.drop ? 1.25 + 0.5 * Math.sin(x * 10) : 0.5);
+    // (a double call flicks between its two colours)
+    cubeM.color.copy(pal[c.c2 >= 0 && Math.sin(x * 7) > 0 ? c.c2 : now]).multiplyScalar(live && x < c.drop ? 1.25 + 0.5 * Math.sin(x * 10) : 0.5);
     cube.rotation.y = t * 0.5;
     ball.rotation.y = t * 0.3;
     beams.forEach((m, k) => {
@@ -266,13 +319,13 @@ export function colourCall(info: { name: string; blurb: string }): Course {
     state,
     grid: (nn) => ringGrid(center, nn, 3.4, 3.6, 8),
     plate: { center, radius: half + 2, bars: [] },
-    call: { center, half, at, xz },
+    call: { center, half, at, xz, deal: (seed) => (list = callList(seed)) },
     intro: [],
   };
 }
 
 // ----------------------------------------------------------------------------------------- Hot Spud
-export const SPUD = { R: 17, fuse: 12.5, gap: 1.6, pass: 1.45, wait: 0.8 };
+export const SPUD = { R: 17, fuse: 10, gap: 1.2, pass: 1.45, dive: 2.6, wait: 0.8, blast: 5.5 };
 
 export interface SpudArena {
   center: THREE.Vector3;
@@ -410,6 +463,17 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
     act: (m: Marble, t: number) => {
       if (arena.holders.has(m.id)) m.runK *= 1.12;
       else if ((arena.free.get(m.id) ?? 0) > t) m.runK *= 1.3;
+      // (the drums are sprung: run into one and it throws you back out)
+      for (const p of arena.posts) {
+        const dx = m.pos.x - p.x, dz = m.pos.z - p.z, d = Math.hypot(dx, dz);
+        if (d > p.r + 0.62 || d < 0.05 || m.pos.y > center.y + 2.2) continue;
+        const out = m.vel.x * (dx / d) + m.vel.z * (dz / d);
+        if (out > 6) continue;
+        m.vel.x += (dx / d) * (11 - out);
+        m.vel.z += (dz / d) * (11 - out);
+        m.vel.y = Math.max(m.vel.y, 6);
+        m.groundT = 1;
+      }
     },
   });
   title(b, info, 'Survival · Pass it on', 0xe8283a, new THREE.Vector3(center.x, center.y + 7, center.z - R - 6));
@@ -436,7 +500,7 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
 }
 
 // ----------------------------------------------------------------------------------------- Gold Rush
-export const GOLD = { R: 15.5, T: 55, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 12 };
+export const GOLD = { R: 15.5, T: 55, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 12, treasure: 13, big: 20 };
 
 export interface Coin {
   k: number;
@@ -450,6 +514,8 @@ export interface GoldArena {
   R: number;
   /** the chest's coins, in the order they fly (seconds after the off) */
   coins: Coin[];
+  /** the cannons on the rim of the bay */
+  shots: Strikes;
 }
 
 export function goldRush(info: { name: string; blurb: string }): Course {
@@ -471,7 +537,24 @@ export function goldRush(info: { name: string; blurb: string }): Course {
       coins.push({ k: k++, t, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: k % (mad ? 4 : 11) === 0 ? 5 : 1 });
       t += Math.max(0.1, 0.2 - t * 0.0016) * (0.7 + rnd() * 0.6) * (mad ? 0.55 : 1);
     }
+    // (now and then a treasure bag, worth a fight)
+    for (let q = GOLD.treasure; q < GOLD.T - 3; q += GOLD.treasure) {
+      const a = rnd() * Math.PI * 2, r = GOLD.chest + 3 + (R - GOLD.chest - 6) * rnd();
+      coins.push({ k: k++, t: q, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: GOLD.big });
+    }
+    coins.sort((p, q) => p.t - q.t);
   }
+  // the cannons: a shot every couple of seconds, more near the end. A hit spills your gold
+  const shotList: Hit3[] = [];
+  {
+    const rnd = seeded(40917);
+    for (let k = 0; k < 8; k++) rnd();
+    for (let t = 5; t < GOLD.T + 1; t += Math.max(0.9, 2.3 - t * 0.024) * (0.8 + rnd() * 0.4)) {
+      const a = rnd() * Math.PI * 2, r = GOLD.chest + 2 + (R - GOLD.chest - 3) * Math.sqrt(rnd());
+      shotList.push({ t, x: center.x + Math.cos(a) * r, y: center.y, z: center.z + Math.sin(a) * r, r: 2.2 });
+    }
+  }
+  const shots = addStrikes(b, { list: shotList, warn: 1.5, state, ring: 0xff5030, ball: { color: 0x22222a, r: 0.7 }, box: [new THREE.Vector3(center.x - R - 3, center.y - 2, center.z - R - 3), new THREE.Vector3(center.x + R + 3, center.y + 5, center.z + R + 3)], out: 7.5, up: 7 });
   // the island: a sandy round with a rocky rim, no rail: the sea is right there
   {
     const top = new THREE.CircleGeometry(R, 96).rotateX(-Math.PI / 2).translate(center.x, center.y, center.z);
@@ -587,18 +670,18 @@ export function goldRush(info: { name: string; blurb: string }): Course {
     state,
     grid: (n) => ringGrid(center, n, 4.2, 3.2, 9),
     plate: { center, radius: R, bars: [] },
-    gold: { center, R, coins },
+    gold: { center, R, coins, shots },
     intro: [],
   };
 }
 
 // ----------------------------------------------------------------------------------------- Belt Rush
-export const BELT = { W: 18, near: 21, far: 25, lanes: 5, D: 8.2, v0: 3.6, a: 0.1, vMax: 8.2, tall: 0.8, low: 0.56 };
+export const BELT = { W: 18, near: 21, far: 25, lanes: 5, D: 8.2, v0: 3.8, a: 0.14, vMax: 8.2, tall: 0.8, low: 0.56, wall: 7, kick: 13 };
 
 export interface BeltRow {
   n: number;
   z: number;
-  /** a lane each: 0 free, 1 a low block (hop it), 2 a tall one */
+  /** a lane each: 0 free, 1 a low block (hop it), 2 a tall one, 3 a spring pad (flings you up the belt) */
   kinds: number[];
 }
 export interface BeltArena {
@@ -632,6 +715,11 @@ function rowKinds(n: number) {
   const hard = Math.min(1, n / 26);
   const free = hash(n, 1) < 0.55 - hard * 0.4 ? 2 : 1;
   const out = new Array<number>(lanes).fill(0);
+  // (every so often a wall right across, two lanes open; the lamps show which)
+  if (n > 4 && n % BELT.wall === 0) {
+    const g = Math.floor(hash(n, 4) * (lanes - 1));
+    return out.map((_, l) => (l === g || l === g + 1 ? 0 : 2));
+  }
   const gap = Math.floor(hash(n, 2) * lanes) % lanes;
   const open = new Set([gap]);
   if (free === 2) open.add((gap + 1 + Math.floor(hash(n, 3) * (lanes - 1))) % lanes);
@@ -642,6 +730,8 @@ function rowKinds(n: number) {
     if (r < 0.42 - hard * 0.36) continue;
     out[l] = hash(n, 20 + l) < 0.42 ? 1 : 2;
   }
+  // (and in some of the open lanes, a spring pad: a free ride back up the belt)
+  for (const l of open) if (n > 2 && hash(n, 30 + l) < 0.3) out[l] = 3;
   return out;
 }
 
@@ -743,7 +833,7 @@ export function beltRush(info: { name: string; blurb: string }): Course {
         const s = run(t - state.go);
         const n = slotRow(j, s);
         const k = n < 0 ? 0 : kindsOf(n)[l];
-        if (!k) pos.set(px, center.y - 60, zFar + 2);
+        if (!k || k === 3) pos.set(px, center.y - 60, zFar + 2);
         else pos.set(px, center.y + (k === 1 ? low - hy : hy), rowZ(n, s));
         quat.identity();
       });
@@ -773,9 +863,11 @@ export function beltRush(info: { name: string; blurb: string }): Course {
           for (const q of [0, 1]) studs.setMatrixAt(i * 2 + q, M);
           continue;
         }
-        const z = rowZ(n, s), y = center.y + (k === 1 ? low - hy : hy);
+        const z = rowZ(n, s), y = center.y + (k === 3 ? 0.12 - hy : k === 1 ? low - hy : hy);
         blocks.setMatrixAt(i, M.compose(V.set(laneX(l), y, z), Q.identity(), S));
-        CL.set(pal[Math.floor(hash(n, l) * pal.length) % pal.length]);
+        // (a spring pad is a green flash in the floor)
+        if (k === 3) CL.setHSL(0.36, 1, 0.55 + 0.18 * Math.sin(t * 10));
+        else CL.set(pal[Math.floor(hash(n, l) * pal.length) % pal.length]);
         blocks.setColorAt(i, CL);
         for (const q of [0, 1]) {
           studs.setMatrixAt(i * 2 + q, M.compose(V.set(laneX(l), y + hy + 0.08, z + (q ? 0.6 : -0.6)), Q, S));
@@ -810,7 +902,7 @@ export function beltRush(info: { name: string; blurb: string }): Course {
       const s = run(x);
       const n = Math.floor(s / D) + 1;
       const kk = kindsOf(n);
-      for (let l = 0; l < lanes; l++) strip.setColorAt(l, CL.set(kk[l] === 0 ? 0x30f070 : kk[l] === 1 ? 0xffc21f : 0xff4040));
+      for (let l = 0; l < lanes; l++) strip.setColorAt(l, CL.set(kk[l] === 0 || kk[l] === 3 ? 0x30f070 : kk[l] === 1 ? 0xffc21f : 0xff4040));
       strip.instanceColor!.needsUpdate = true;
       const gap = L / nB;
       for (let i = 0; i < nB; i++) {
@@ -830,7 +922,22 @@ export function beltRush(info: { name: string; blurb: string }): Course {
     min: new THREE.Vector3(center.x - W / 2 - 1, center.y - 1, zFar - 1),
     max: new THREE.Vector3(center.x + W / 2 + 1, center.y + 1.6, zBack),
     act: (m, t, dt) => {
-      if (m.groundT < 0.08) m.pos.z += speed(t - state.go) * dt;
+      if (m.groundT >= 0.08) return;
+      const x = t - state.go;
+      m.pos.z += speed(x) * dt;
+      // (a spring pad under you: up and away toward the far end)
+      const s = run(x);
+      const l = Math.floor((m.pos.x - (center.x - W / 2)) / lane);
+      if (l < 0 || l >= lanes) return;
+      for (let j = 0; j < K; j++) {
+        const n = slotRow(j, s);
+        if (n < 0 || kindsOf(n)[l] !== 3 || Math.abs(rowZ(n, s) - m.pos.z) > 1.3) continue;
+        m.vel.z = -BELT.kick;
+        m.vel.y = 8.5;
+        m.groundT = 1;
+        m.sprung = true;
+        break;
+      }
     },
   });
   title(b, info, 'Survival · Stay on the belt', 0x2fa8ff, new THREE.Vector3(center.x, center.y + 10, zFar - 2));

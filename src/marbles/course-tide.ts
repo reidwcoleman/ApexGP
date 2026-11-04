@@ -7,6 +7,7 @@ import { dressArena } from './course-dress.ts';
 import { signTexture } from './obstacles.ts';
 import { lake, paintLakeFor } from './env.ts';
 import { BIOMES } from './biome.ts';
+import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
 
 /**
  * High Tide: a reef of hexagonal coral columns standing out of the sea, every one a step (a hop)
@@ -14,7 +15,7 @@ import { BIOMES } from './biome.ts';
  * at a time; whoever it reaches is out. Climb, and keep your spot when everyone else wants it.
  */
 
-export const TIDE = { pitch: 3.3, rings: 4, step: 0.9, every: 9.5, rise: 2.4, wait: 7 };
+export const TIDE = { pitch: 3.3, rings: 4, step: 0.9, every: 7.2, rise: 2, wait: 4 };
 
 export interface TideArena {
   center: THREE.Vector3;
@@ -22,6 +23,8 @@ export interface TideArena {
   cols: { x: number; z: number; y: number }[];
   /** the sea's height at a time */
   level(t: number): number;
+  /** the blowholes: a column goes up like a whale's spout, and whoever's on it with it */
+  jets: Strikes;
 }
 
 export function tide(info: { name: string; blurb: string }): Course {
@@ -124,7 +127,19 @@ export function tide(info: { name: string; blurb: string }): Course {
   const reach = pitch * rings + 2;
   dressArena(b, new THREE.Vector3(center.x, center.y - 1, center.z), reach + 3, 21);
   b.finish();
-  const arena: TideArena = { center, cols, level };
+  // the blowholes: a column every few seconds, more as it goes on (seeded: the same in every browser)
+  const jetList: Hit3[] = [];
+  {
+    let js = 91733;
+    const jr = () => ((js = (js * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 8; k++) jr();
+    for (let t = 6; t < 120; t += Math.max(1.2, 3.2 - t * 0.03) * (0.8 + jr() * 0.4)) {
+      const k = cols[Math.floor(jr() * cols.length)];
+      jetList.push({ t, x: k.x, y: k.y, z: k.z, r: 1.6 });
+    }
+  }
+  const jets = addStrikes(b, { list: jetList, warn: 1.4, state, ring: 0x40e0ff, jet: 0xd8f6ff, box: [new THREE.Vector3(center.x - 20, center.y - 2, center.z - 20), new THREE.Vector3(center.x + 20, center.y + 12, center.z + 20)], out: 5, up: 12 });
+  const arena: TideArena = { center, cols, level, jets };
   const world = b.world;
   const outer = cols.filter((k) => Math.hypot(k.x - center.x, k.z - center.z) > pitch * (rings - 1.5)).sort((p, q) => Math.atan2(p.z - center.z, p.x - center.x) - Math.atan2(q.z - center.z, q.x - center.x));
   return {

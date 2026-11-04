@@ -1,6 +1,7 @@
 import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { CRUMBLE } from './course-crumble.ts';
+import { dodge } from './course-strikes.ts';
 
 /**
  * A bot on Cookie Crumble. Standing still is falling, so it always has a tile it is heading for:
@@ -30,6 +31,14 @@ export class CrumbleBrain {
     const A = c.crumble!;
     const L = A.layerAt(m.pos.y);
     if (L < 0) return;
+    // (Meltdown: out from under a snowball, if it's seen it)
+    if (A.shots) {
+      const out = dodge(A.shots, m, t - c.state.go, 0.75 - 0.55 * this.skill);
+      if (out) {
+        m.input.set(out[0], 0, out[1]).multiplyScalar(0.85);
+        return;
+      }
+    }
     const ly = A.layers[L];
     const tiles = A.tiles;
     const reached = this.target >= 0 && Math.hypot(tiles[this.target].x - m.pos.x, tiles[this.target].z - m.pos.z) < 0.9;

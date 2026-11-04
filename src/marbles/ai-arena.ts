@@ -2,6 +2,7 @@ import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { STORM, type Strike } from './course-storm.ts';
 import { TIDE } from './course-tide.ts';
+import { dodge } from './course-strikes.ts';
 
 /**
  * Bots for the two arena survivals.
@@ -38,6 +39,9 @@ export class StormBrain {
     // the strikes it has seen coming (its reaction time late) that land within a beat
     A.between(x, x + STORM.warn - this.react, LIVE);
     const px = m.pos.x - cx, pz = m.pos.z - cz;
+    // the wave: a hop as it gets here
+    const wv = A.wave(x + 0.2);
+    if (wv && m.grounded && Math.abs(px * wv.ux + pz * wv.uz - wv.d) < 1.5 && this.rnd() < 0.25 + 0.6 * this.skill) m.jump = true;
     let danger = 0, fx = 0, fz = 0;
     for (const s of LIVE) {
       const r = s.r + 0.9 + (s.r > 3 && this.rnd() < 0.002 ? -1.5 : 0);
@@ -109,6 +113,13 @@ export class TideBrain {
     const A = c.tide!;
     const L = A.level(t);
     this.pushCD -= dt;
+    // (off a column that's about to blow, if it's seen it)
+    const out = dodge(A.jets, m, t - c.state.go, 0.75 - 0.5 * this.skill);
+    if (out) {
+      m.input.set(out[0], 0, out[1]);
+      if (m.grounded) m.jump = true;
+      return;
+    }
     const here = this.colAt(c, m.pos.x, m.pos.z);
     if (t >= this.nextThink || this.target < 0 || A.cols[this.target].y < L + 0.5) {
       this.nextThink = t + 0.5 + (1 - this.skill) * 0.8 + this.rnd() * 0.5;
