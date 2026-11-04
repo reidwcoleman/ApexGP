@@ -139,7 +139,8 @@ export class Editor {
 
   private place() {
     if (!this.hover) return;
-    const p: Placed = { t: this.sel, x: this.hover[0], z: this.hover[1], l: this.level, r: this.rot };
+    // (a bank tilts about its middle, so its inside edge needs air under it)
+    const p: Placed = { t: this.sel, x: this.hover[0], z: this.hover[1], l: Math.max(this.level, PIECES[this.sel].minLevel ?? -99), r: this.rot };
     const key = JSON.stringify(p);
     if (key === this.lastPaint) return;
     this.lastPaint = key;

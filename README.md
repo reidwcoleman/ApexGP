@@ -1069,3 +1069,22 @@ Trees: Poly Haven's CC0 scanned / modelled trees — [Jacaranda Tree](https://po
 frames of each full-resolution tree, sprays of its real leaves (every leaf and twig of one k-means cell, seen
 face-on) for the near trees' leaf cards, and three near LODs (the scan's trunk and limbs decimated with
 meshoptimizer + one oriented leaf card per k-means cell of its leaves, with shared wind weights).
+
+## Tracksmith
+
+**▶ https://reidwcoleman.github.io/ApexGP/tracksmith.html**: a low-poly stunt time trial with a track
+editor (`src/tracksmith`). Original name, car, tracks and art.
+
+- **Handling** (`sim.ts`, `tools/tsfeel.mjs` prints it in numbers): 0-100 in about 2 s, 238 km/h flat
+  out. Space drifts: the nose swings in, the speed carries round, and letting go pays a boost.
+  At 170 km/h a 90 degree drift takes 0.64 s against 1.36 s on grip. Landing straight gives a kick.
+  In the air, steering yaws, brake lifts the nose, Space drops it.
+- **The look** is made in Blender: `tools/tsexport.mjs` writes each piece's centre line (the frames the
+  collision mesh is swept on), `blender/tracksmith/kit.py` models the pieces along them and bakes
+  ambient occlusion into the vertices (`public/tracksmith/kit.glb`), `sky.py` renders a 360 panorama per
+  theme in Cycles and `cards.py` renders the campaign cards. Re-run `tsexport`, then `kit.py` and
+  `cards.py`, after changing a piece or a built-in track.
+- **Tracks**: 16 in the campaign, with banked turns, rollers and a big kicker. Banks tilt about their
+  centre line, so they need a level of air (`minLevel`). New pieces go on the end of `PIECES`: share
+  codes store a piece by its index. `tools/tsbot.mjs --ghosts` times every track and writes the author
+  ghosts you race until you have a best of your own.

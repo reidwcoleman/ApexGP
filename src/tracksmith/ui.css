@@ -58,6 +58,10 @@
 
 .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 12px; }
 .tcard { position: relative; padding: 16px 16px 14px; border-radius: 16px; background: var(--ink2); box-shadow: inset 0 0 0 1px var(--line); text-align: left; min-height: 150px; display: flex; flex-direction: column; gap: 6px; transition: transform 0.15s, box-shadow 0.15s; overflow: hidden; }
+.tcard .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.5; transition: opacity 0.15s, transform 0.25s; pointer-events: none; }
+.tcard:hover .shot, .tcard:focus-visible .shot { opacity: 0.85; transform: scale(1.04); }
+.tcard > span, .tcard > div { position: relative; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); }
+.delta.style { color: #7df0ff; }
 .tcard::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--th, var(--coral)); }
 .tcard:hover, .tcard:focus-visible { transform: translateY(-4px); box-shadow: inset 0 0 0 2px var(--th, var(--coral)), 0 16px 34px rgba(0, 0, 0, 0.35); outline: none; }
 .tcard .no { font-family: var(--num); font-style: italic; font-weight: 800; font-size: 40px; line-height: 0.9; color: var(--th); }

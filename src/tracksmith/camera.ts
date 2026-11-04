@@ -9,6 +9,12 @@ export class ChaseCam {
   mode = 0; // 0 chase, 1 far chase, 2 hood
   private fov = 70;
   private init = false;
+  /** a jolt (a landing, a boost), dying away */
+  private jolt = 0;
+
+  kick(k: number) {
+    this.jolt = Math.max(this.jolt, k);
+  }
 
   reset() { this.init = false; }
 
@@ -39,7 +45,7 @@ export class ChaseCam {
       cam.up.copy(carUp);
     } else {
       const far = this.mode === 1;
-      const dist = (far ? 8.6 : 6.4) + Math.min(speed, 70) * 0.025;
+      const dist = (far ? 8.6 : 6.2) + Math.min(speed, 70) * 0.03;
       const height = far ? 3.4 : 2.3;
       const target = p.clone().addScaledVector(this.dir, -dist).addScaledVector(this.up, height);
       // keep the camera from dropping through the ground
@@ -49,8 +55,15 @@ export class ChaseCam {
       cam.up.copy(this.up);
     }
     cam.position.copy(this.pos);
+    if (this.jolt > 0.004) {
+      cam.position.y -= this.jolt * 0.7;
+      cam.position.x += (Math.random() - 0.5) * this.jolt * 0.5;
+      cam.position.z += (Math.random() - 0.5) * this.jolt * 0.5;
+      this.jolt *= Math.exp(-dt * 9);
+    }
     cam.lookAt(this.look);
-    const fovWant = 68 + Math.min(speed, 75) * 0.22;
+    // (the view opens up with speed: it's what makes 200 km/h feel like it)
+    const fovWant = 66 + Math.min(speed, 72) * 0.36;
     this.fov += (fovWant - this.fov) * (1 - Math.exp(-dt * 3));
     if (Math.abs(cam.fov - this.fov) > 0.01) {
       cam.fov = this.fov;

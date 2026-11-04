@@ -29,19 +29,31 @@ const C_COMP = 4000;
 const C_REB = 5000;
 const ANTI_ROLL = 9000;
 const MU = 2.2;
-const ENGINE_F = 15500;
-const POWER = 250000;
+const ENGINE_F = 17500;
+const POWER = 400000;
 const DRAG = 0.95;
 const DOWNFORCE = 7;
 const BRAKE_F = 24000;
 const REVERSE_MAX = 16;
+export const STEER_LOCK = 0.72;
+export const STEER_FADE = 30;
 const BOOST_A = 20;
 const BOOST_T = 0.9;
+/** a slide held through a corner pays out when you let go: how long it takes to fill, what it gives */
+const DRIFT_MIN = 0.3;
+const DRIFT_FULL = 1.2;
+const DRIFT_A = 13;
+/** how fast the nose swings, how fast the velocity follows it (rad/s), what the slide costs (share of the speed a second) */
+const DRIFT_YAW = 2.3;
+const DRIFT_TURN = 1.75;
+const DRIFT_COST = 0.11;
+/** landing square on all four wheels */
+const CLEAN_T = 0.4;
 
 export interface WheelState { hit: boolean; comp: number; spin: number; steer: number; slip: number }
 export interface CarState { p: Vec3; q: [number, number, number, number]; v: Vec3; w: Vec3 }
 
-type Ev = { type: 'check'; i: number; n: number; ticks: number } | { type: 'finish'; ticks: number } | { type: 'boost' } | { type: 'land'; speed: number } | { type: 'respawn' } | { type: 'start' };
+type Ev = { type: 'check'; i: number; n: number; ticks: number } | { type: 'finish'; ticks: number } | { type: 'boost' } | { type: 'land'; speed: number; clean: boolean } | { type: 'drift'; k: number } | { type: 'respawn' } | { type: 'start' };
 
 let ready: Promise<void> | null = null;
 export const initPhysics = () => (ready ??= RAPIER.init());
@@ -84,6 +96,11 @@ export class Sim {
   finishes: number[] = [];
   boosts: number[] = [];
   boostT = 0;
+  /** the slide being held (seconds), and the payout running */
+  driftT = 0;
+  driftBoost = 0;
+  private driftV = 0;
+  private wasHand = false;
   airT = 0;
   grounded = 0;
   speed = 0;
@@ -153,6 +170,8 @@ export class Sim {
     this.passed.clear();
     this.inGateNow.clear();
     this.boostT = 0;
+    this.driftT = this.driftBoost = this.driftV = 0;
+    this.wasHand = false;
     this.airT = 0;
     this.steerNow = 0;
     this.events.length = 0;
@@ -162,6 +181,7 @@ export class Sim {
   respawn() {
     this.setState(this.save);
     this.boostT = 0;
+    this.driftT = this.driftBoost = 0;
     this.steerNow = 0;
     this.events.push({ type: 'respawn' });
   }
@@ -248,9 +268,9 @@ export class Sim {
     this.speed = speed;
 
     // steering: smoothed, less lock at speed
-    const lock = 0.66 / (1 + Math.max(0, vFwd) / 26);
+    const lock = STEER_LOCK / (1 + Math.max(0, vFwd) / STEER_FADE);
     const target = inp.steer * lock;
-    const rate = (Math.abs(target) < Math.abs(this.steerNow) ? 9 : 5) * DT;
+    const rate = (Math.abs(target) < Math.abs(this.steerNow) ? 16 : 9.5) * DT;
     this.steerNow += Math.max(-rate, Math.min(rate, target - this.steerNow));
 
     // engine and brakes
@@ -260,6 +280,7 @@ export class Sim {
     if (reversing) drive = vFwd > -REVERSE_MAX ? -inp.brake * ENGINE_F * 0.5 : 0;
     const braking = inp.brake > 0 && !reversing ? inp.brake * BRAKE_F : 0;
 
+    const sliding = inp.hand && this.grounded >= 2 && vFwd > 9;
     const comps = [0, 0, 0, 0];
     const hits: (RAPIER.RayColliderIntersection | null)[] = [];
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: -up.x, y: -up.y, z: -up.z });
@@ -277,7 +298,13 @@ export class Sim {
       } else hits[i] = null;
     }
     // land event
-    if (grounded > 0 && this.grounded === 0 && this.airT > 0.35) this.events.push({ type: 'land', speed: Math.abs(dotv(vel, up)) });
+    if (grounded > 0 && this.grounded === 0 && this.airT > 0.35) {
+      // nose along the flight path and wheels down: it keeps the car flowing, with a kick
+      const hs = Math.hypot(vel.x, vel.z) || 1;
+      const clean = this.airT > 0.5 && up.y > 0.8 && (fwd.x * vel.x + fwd.z * vel.z) / (Math.hypot(fwd.x, fwd.z) * hs) > 0.985;
+      if (clean) this.boostT = Math.max(this.boostT, CLEAN_T);
+      this.events.push({ type: 'land', speed: Math.abs(dotv(vel, up)), clean });
+    }
     this.grounded = grounded;
     this.airT = grounded ? 0 : this.airT + DT;
 
@@ -318,15 +345,14 @@ export class Sim {
       const vLong = dotv(pv, wf);
       const vLat = dotv(pv, ws_);
       const rear = !W.front;
-      let mu = MU * (rear && inp.hand ? 0.42 : 1);
-      // lateral: kill sideways speed of this corner's share of the car
-      let fLat = (-vLat * (MASS / 4) * 0.55) / DT;
+      const mu = MU;
+      // lateral: kill sideways speed of this corner's share of the car (a drift steers the car itself, below)
+      let fLat = (-vLat * (MASS / 4) * 0.55) / DT * (sliding ? 0.12 : 1);
       let fLong = 0;
       const share = W.front ? 0.42 : 0.58;
-      if (!(rear && inp.hand)) fLong += (drive * share) / 2;
+      fLong += (drive * share) / 2;
       if (braking > 0) fLong -= Math.sign(vLong) * Math.min(braking / 4, (Math.abs(vLong) * MASS) / 4 / DT);
-      if (inp.hand && rear) fLong -= Math.sign(vLong) * Math.min(BRAKE_F * 0.25, (Math.abs(vLong) * MASS) / 4 / DT);
-      fLong -= vLong * 22; // rolling resistance
+      fLong -= vLong * 7; // rolling resistance
       if (inp.throttle === 0 && inp.brake === 0) fLong -= Math.sign(vLong) * Math.min(260, Math.abs(vLong) * 400); // engine braking / hold still
       const max = mu * N;
       const mag = Math.hypot(fLat, fLong);
@@ -358,6 +384,53 @@ export class Sim {
         b.applyTorqueImpulse({ x: up.x * tq * DT, y: up.y * tq * DT, z: up.z * tq * DT }, true);
       }
     }
+    // a drift: the nose swings in by the steering, the speed follows it round, and a little of it
+    // is paid for the angle. Tyres would scrub it all away, so here the car is steered directly
+    if (sliding && grounded >= 2) {
+      this.driftV = this.driftV > 0 ? this.driftV * (1 - DRIFT_COST * DT) : speed;
+      const Iy = (MASS / 12) * (1.9 ** 2 + 4.2 ** 2);
+      const tq = (-inp.steer * DRIFT_YAW - dotv(ang, up)) * 14 * Iy;
+      b.applyTorqueImpulse({ x: up.x * tq * DT, y: up.y * tq * DT, z: up.z * tq * DT }, true);
+      // the velocity turns toward the nose, on the plane of the road
+      const vUp = scale(up, dotv(vel, up));
+      const hv = subv(vel, vUp);
+      const hs = len(hv);
+      if (hs > 1) {
+        const f = normv(subv(fwd, scale(up, dotv(fwd, up))));
+        const d = scale(hv, 1 / hs);
+        const a = Math.atan2(dotv(crossv(d, f), up), dotv(d, f));
+        const turn = Math.max(-DRIFT_TURN * DT, Math.min(DRIFT_TURN * DT, a));
+        const s = Math.sin(turn), c = Math.cos(turn);
+        const nd = addv(scale(d, c), scale(crossv(up, d), s));
+        const want = addv(scale(nd, Math.max(this.driftV, 1)), vUp);
+        const dv = subv(want, vel);
+        b.applyImpulse({ x: dv.x * MASS, y: dv.y * MASS, z: dv.z * MASS }, true);
+      }
+    } else this.driftV = 0;
+    // the slide: held through a corner it fills up, let go and it pays out
+    if (sliding && grounded >= 2 && Math.abs(inp.steer) > 0.2) this.driftT = Math.min(DRIFT_FULL, this.driftT + DT);
+    if (!inp.hand && this.wasHand) {
+      // straightening up: the spin stops and the speed goes where the nose points, none of it lost
+      if (grounded >= 2 && speed > 9) {
+        const yaw = dotv(ang, up);
+        b.setAngvel({ x: ang.x - up.x * yaw * 0.8, y: ang.y - up.y * yaw * 0.8, z: ang.z - up.z * yaw * 0.8 }, true);
+        const vUp = scale(up, dotv(vel, up));
+        const hv = subv(vel, vUp);
+        const hs = len(hv);
+        const f = normv(subv(fwd, scale(up, dotv(fwd, up))));
+        const nd = normv(addv(scale(hv, 0.2 / (hs || 1)), scale(f, 0.8)));
+        const dv = subv(addv(scale(nd, hs), vUp), vel);
+        b.applyImpulse({ x: dv.x * MASS, y: dv.y * MASS, z: dv.z * MASS }, true);
+      }
+      if (this.driftT >= DRIFT_MIN) {
+        const k = this.driftT / DRIFT_FULL;
+        this.driftBoost = 0.25 + 0.65 * k;
+        this.events.push({ type: 'drift', k });
+      }
+      this.driftT = 0;
+    }
+    if (this.grounded === 0) this.driftT = Math.max(0, this.driftT - DT * 2);
+    this.wasHand = inp.hand;
     if (grounded > 0) {
       // aero downforce
       const df = DOWNFORCE * vFwd * vFwd * (grounded / 4);
@@ -371,7 +444,9 @@ export class Sim {
         const ax = crossv(fwd, vd);
         // only the pitch part (about the car's right axis)
         // spring toward the flight path plus pitch-rate damping (about 0.8 of critical), or it overshoots into a nose-dive
-        t = addv(t, scale(right, (dotv(ax, right) * 5 - dotv(ang, right) * 3.6) * I));
+        // (the brake lifts the nose, the handbrake pushes it down: the car lands where you put it)
+        const aim = inp.brake > 0 ? 0.32 : inp.hand ? -0.32 : 0;
+        t = addv(t, scale(right, ((dotv(ax, right) - aim) * 5 - dotv(ang, right) * 3.6) * I));
       }
       // level the wings: roll the car so its right side is horizontal (about its own forward axis)
       const rollErr = dotv(right, v3(0, 1, 0));
@@ -388,6 +463,10 @@ export class Sim {
     if (this.boostT > 0) {
       this.boostT -= DT;
       imp(scale(fwd, BOOST_A * MASS), com);
+    }
+    if (this.driftBoost > 0) {
+      this.driftBoost -= DT;
+      imp(scale(fwd, DRIFT_A * MASS), com);
     }
     this.world.step();
   }

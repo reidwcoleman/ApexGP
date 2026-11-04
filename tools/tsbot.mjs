@@ -5,6 +5,7 @@ import { initPhysics, Sim, DT } from '../src/tracksmith/sim.ts';
 import { builtinTracks, SPEC_LIST } from '../src/tracksmith/builtin.ts';
 import { buildDSL, routeLine } from '../src/tracksmith/track.ts';
 import { Autopilot } from '../src/tracksmith/autopilot.ts';
+import fs from 'node:fs';
 
 await initPhysics();
 const want = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null;
@@ -21,6 +22,7 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
   const ap = new Autopilot(line);
   let falls = 0, maxOff = 0, top = 0, stuck = 0, wasG = true, take = null;
   const jumps = [];
+  const ghost = [];
   const limit = 240 / DT;
   let t = 0;
   for (; t < limit && !sim.finished; t++) {
@@ -28,6 +30,8 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
     const inp = ap.drive(s.p, s.q, s.v, sim.grounded > 0);
     if (run > 0) { inp.steer = Math.max(-1, Math.min(1, inp.steer + (rnd() - 0.5) * 0.25)); if (rnd() < 0.01 * run) inp.throttle = 0; }
     sim.step(inp);
+    // (--ghosts: the clean run, kept at 20 Hz for the game to race against)
+    if (run === 0 && sim.started && !sim.finished && sim.ticks % 6 === 0) { const g = sim.getState(); ghost.push(...g.p, ...g.q); }
     const { d } = ap.locate(s.p);
     const g = sim.grounded > 0;
     if (wasG && !g) take = { p: s.p, kmh: sim.kmh };
@@ -43,6 +47,10 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
       ap.locate(sim.getState().p);
     }
     if (sim.started && sim.speed < 1) { if (++stuck > 600) break; } else stuck = 0;
+  }
+  if (process.argv.includes('--ghosts') && run === 0 && sim.finished && falls === 0) {
+    fs.mkdirSync('public/tracksmith/ghosts', { recursive: true });
+    fs.writeFileSync(`public/tracksmith/ghosts/${td.id}.bin`, Buffer.from(new Float32Array(ghost).buffer));
   }
   const time = sim.finished ? (sim.ticks * DT).toFixed(3) + 's' : 'DNF @' + (ap.progress() * 100).toFixed(0) + '%';
   if (process.argv.includes('--jumps') && jumps.length) console.log('   jumps: ' + jumps.join(' | '));

@@ -31,6 +31,8 @@ export interface PieceDef {
   path?: (t: number) => { p: Vec3; up: Vec3 };
   samples?: number;
   width?: number;
+  /** the lowest level it can stand at */
+  minLevel?: number;
   /** a solid box instead of a road: [minx, miny, minz, maxx, maxy, maxz] local */
   box?: [number, number, number, number, number, number];
 }
@@ -51,9 +53,8 @@ function straight(len: number, rise = 0, ease = smooth) {
 }
 
 /** a kicker: flat, then a circular lift ending at `angle` and `lift` metres up at the exit edge */
-function kicker(angle: number) {
-  const L = T;
-  const R = 13; // ramp radius
+function kicker(angle: number, L = T) {
+  const R = L > T ? 22 : 13; // ramp radius
   const arcLen = R * angle;
   const flat = L - R * Math.sin(angle);
   return (t: number) => {
@@ -79,6 +80,28 @@ function loop(side: number) {
     const th = ((s - lin) / circ) * 2 * Math.PI;
     const x = side * T * smooth(th / (2 * Math.PI));
     return { p: [x, R * (1 - Math.cos(th)), zc + R * Math.sin(th)] as Vec3, up: [0, Math.cos(th), -Math.sin(th)] as Vec3 };
+  };
+}
+
+/**
+ * A quarter turn leaning into itself, tilted about its centre line: the middle of the road stays
+ * level (lifting it makes a crest that throws the car off at speed), so the inside edge dips below
+ * the piece's level and a bank needs a level of air under it (minLevel).
+ */
+function banked(cx: number, cz: number, r: number, tilt = 0.42) {
+  return (t: number) => {
+    const a = (t * Math.PI) / 2;
+    const th = tilt * Math.sin(Math.PI * t) ** 2 * 1.0;
+    const s = Math.sin(th), c = Math.cos(th);
+    return { p: [cx - r * Math.cos(a), 0, cz + r * Math.sin(a)] as Vec3, up: [Math.cos(a) * s, c, -Math.sin(a) * s] as Vec3 };
+  };
+}
+
+/** a road of rollers: at speed they throw the car up and down */
+function wave(len: number, h: number, humps: number) {
+  return (t: number) => {
+    const y = h * Math.sin(Math.PI * humps * t) ** 2;
+    return { p: [0, y, -T / 2 + len * t] as Vec3, up: UP };
   };
 }
 
@@ -109,6 +132,11 @@ export const PIECES: PieceDef[] = [
   road('boost', 'Boost pad', 'boost'),
   { id: 'plate', name: 'Plate', group: 'block', cells: [[0, 0]], exit: { cell: [0, 0], dir: 0, dl: 0 }, feature: 'plate', box: [-T / 2, -SLAB, -T / 2, T / 2, 0, T / 2] },
   { id: 'block', name: 'Block', group: 'block', cells: [[0, 0]], exit: { cell: [0, 0], dir: 0, dl: 1 }, feature: 'block', box: [-T / 2, -ROAD_Y, -T / 2, T / 2, H, T / 2] },
+  // (new pieces go on the end: share codes store a piece by its place in this list)
+  { id: 'bank2', name: 'Banked turn', group: 'turn', cells: cells(2, 2), exit: { cell: [1, 1], dir: 1, dl: 0 }, feature: 'none', path: banked(1.5 * T, -T / 2, 1.5 * T, 0.4), samples: 30, minLevel: 1 },
+  { id: 'bank3', name: 'Wide banked turn', group: 'turn', cells: cells(3, 3), exit: { cell: [2, 2], dir: 1, dl: 0 }, feature: 'none', path: banked(2.5 * T, -T / 2, 2.5 * T, 0.42), samples: 44, minLevel: 1 },
+  { id: 'wave', name: 'Rollers', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 0 }, feature: 'none', path: wave(2 * T, 0.5, 2), samples: 40 },
+  { id: 'bigramp', name: 'Big kicker', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 0 }, feature: 'ramp', path: kicker(0.3, 2 * T), samples: 24 },
 ];
 
 export const PIECE_BY_ID = new Map(PIECES.map((p, i) => [p.id, i]));

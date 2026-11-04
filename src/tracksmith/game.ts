@@ -18,9 +18,14 @@ export interface RaceHooks {
   onRespawn?(): void;
   onSpeed?(kmh: number): void;
   onReset?(): void;
+  /** a drift paid out, a clean landing */
+  onStyle?(text: string, good: boolean): void;
 }
 
 const GHOST_EVERY = 2; // ticks per ghost frame (60 Hz)
+/** the author's ghosts (tools/tsbot.mjs --ghosts) are thinner: 20 Hz */
+const AUTHOR_EVERY = 6;
+const authorGhosts = new Map<string, Float32Array | null>();
 
 /** one track being driven: physics, views, ghost, timing */
 export class Race {
@@ -41,6 +46,7 @@ export class Race {
   private cur!: CarState;
   private rec: number[] = [];
   private ghost: Float32Array | null = null;
+  private ghostEvery = GHOST_EVERY;
   private splits: number[] = [];
   private time = 0;
   private lastInput: Input = { throttle: 0, brake: 0, steer: 0, hand: false };
@@ -79,6 +85,9 @@ export class Race {
     this.finishedAt = 0;
     this.view.resetGates();
     this.ghost = this.profile.ghost && !this.autopilot ? loadGhost(this.recId) : null;
+    this.ghostEvery = GHOST_EVERY;
+    // no best of your own yet: you race the author
+    if (!this.ghost && this.profile.ghost && !this.autopilot && this.track.route) this.authorGhost();
     this.ghostCar.root.visible = false;
     this.autopilot?.reset();
     this.cam.reset();
@@ -86,6 +95,22 @@ export class Race {
     this.fx.clear();
     this.hooks.onReset?.();
     this.hooks.onTime?.(0);
+  }
+
+  private authorGhost() {
+    const id = this.track.id;
+    const use = (g: Float32Array | null) => {
+      if (g && this.track.id === id && !this.ghost) {
+        this.ghost = g;
+        this.ghostEvery = AUTHOR_EVERY;
+      }
+    };
+    if (authorGhosts.has(id)) return use(authorGhosts.get(id)!);
+    fetch(`tracksmith/ghosts/${id}.bin`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
+      const g = b ? new Float32Array(b) : null;
+      authorGhosts.set(id, g);
+      use(g);
+    }).catch(() => authorGhosts.set(id, null));
   }
 
   respawn() {
@@ -125,12 +150,12 @@ export class Race {
     const q = new THREE.Quaternion(...this.prev.q).slerp(new THREE.Quaternion(...this.cur.q), a);
     this.car.pose(p, q, this.sim.wheels);
     this.car.brake.color.setHex(inp.brake > 0 ? 0xff2a35 : 0x7a0d12);
-    this.car.flame.visible = this.sim.boostT > 0;
+    this.car.flame.visible = this.sim.boostT > 0 || this.sim.driftBoost > 0;
     if (this.car.flame.visible) this.car.flame.scale.set(1, 1, 0.8 + Math.random() * 0.5);
 
     // ghost
     if (this.ghost && this.sim.started) {
-      const f = (this.sim.ticks + a) / GHOST_EVERY;
+      const f = (this.sim.ticks + a) / this.ghostEvery;
       const n = this.ghost.length / 7;
       const i = Math.min(n - 1, Math.floor(f)), j = Math.min(n - 1, i + 1), t = f - Math.floor(f);
       const g = this.ghost;
@@ -157,7 +182,22 @@ export class Race {
     for (const e of this.sim.events) {
       if (e.type === 'start') { this.hooks.onStart?.(); this.audio.go(); }
       if (e.type === 'boost') { this.audio.boost(); this.fx.burst(this.car.root.position, 0xffb347, 18); }
-      if (e.type === 'land') { if (e.speed > 4) this.audio.land(e.speed); this.fx.dust(this.car.root.position, Math.min(1, e.speed / 12)); }
+      if (e.type === 'land') {
+        if (e.speed > 4) this.audio.land(e.speed);
+        this.fx.dust(this.car.root.position, Math.min(1, e.speed / 12));
+        this.cam.kick(Math.min(0.5, e.speed * 0.04));
+        if (e.clean) {
+          this.audio.boost();
+          this.fx.burst(this.car.root.position, 0x7df0ff, 14);
+          this.hooks.onStyle?.('CLEAN LANDING', true);
+        }
+      }
+      if (e.type === 'drift') {
+        this.audio.boost();
+        this.fx.burst(this.car.root.position, e.k > 0.75 ? 0x6fc8ff : 0xffb347, 10 + Math.round(e.k * 14));
+        this.cam.kick(0.12);
+        this.hooks.onStyle?.(e.k > 0.75 ? 'BIG DRIFT BOOST' : 'DRIFT BOOST', true);
+      }
       if (e.type === 'check') {
         const ms = (e.ticks * 1000) / 120;
         this.splits.push(ms);

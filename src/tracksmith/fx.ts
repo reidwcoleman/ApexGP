@@ -12,6 +12,7 @@ export class Fx {
   private box = new THREE.BoxGeometry(0.35, 0.05, 0.2);
   private group = new THREE.Group();
   private skidT = 0;
+  private sparkT = 0;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.group);
@@ -85,6 +86,35 @@ export class Fx {
         p.life = 0; p.max = 0.7; p.grow = 2.4; p.fade = true;
         p.m.scale.setScalar(0.32);
       }
+    }
+    // a slide filling up: sparks off the rear wheels, orange, then blue when it's full
+    if (sim.driftT >= 0.3 && sim.grounded > 0) {
+      this.sparkT -= dt;
+      if (this.sparkT <= 0) {
+        this.sparkT = 0.025;
+        const full = sim.driftT > 0.9;
+        for (let i = 2; i < 4; i++) {
+          if (!sim.wheels[i].hit) continue;
+          const wp = car.wheels[i].getWorldPosition(new THREE.Vector3());
+          const p = this.spawn(this.geo, full ? 0x6fc8ff : 0xffa030, 1, false);
+          p.m.position.copy(wp).add(new THREE.Vector3(0, -0.28, 0));
+          p.v.set((Math.random() - 0.5) * 7, 1 + Math.random() * 3.5, (Math.random() - 0.5) * 7);
+          p.life = 0; p.max = 0.22 + Math.random() * 0.2; p.grow = -2; p.fade = true;
+          p.m.scale.setScalar(0.1);
+        }
+      }
+    }
+    // streaks rushing past at speed
+    if (sim.speed > 40 && Math.random() < (sim.speed - 40) * 0.03) {
+      const cp = car.root.position, v = sim.getState().v, sp = sim.speed;
+      const p = this.spawn(this.box, 0xffffff, 0.3, false);
+      const a = Math.random() * Math.PI * 2, r = 4 + Math.random() * 7;
+      p.m.position.set(cp.x + (v[0] / sp) * 30 + Math.cos(a) * r, cp.y + 1 + Math.sin(a) * r * 0.6, cp.z + (v[2] / sp) * 30 - Math.sin(a) * r * 0.5);
+      p.m.lookAt(p.m.position.x + v[0], p.m.position.y + v[1], p.m.position.z + v[2]);
+      p.m.scale.set(0.18, 0.5, 3 + sp * 0.12);
+      p.v.set(0, 0, 0);
+      p.life = 0; p.max = 0.32; p.grow = 0; p.fade = true;
+      p.spin.set(0, 0, 0);
     }
     for (let i = this.live.length - 1; i >= 0; i--) {
       const p = this.live[i];

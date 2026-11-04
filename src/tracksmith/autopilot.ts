@@ -1,5 +1,5 @@
 import type { Frame } from './pieces.ts';
-import type { Input } from './sim.ts';
+import { STEER_FADE, STEER_LOCK, type Input } from './sim.ts';
 
 /**
  * A pure-pursuit driver along a built-in track's centre line with curvature-based braking.
@@ -74,7 +74,7 @@ export class Autopilot {
     const slip = speed > 8 ? Math.atan2(vl, Math.max(1, vf)) : 0;
     const ang = Math.atan2(lx, Math.max(0.5, lz)) - slip * 0.8;
     // positive ang = target to the car's left -> steer left (negative)
-    const lock = 0.66 / (1 + Math.max(0, speed) / 26);
+    const lock = STEER_LOCK / (1 + Math.max(0, speed) / STEER_FADE);
     const delta = Math.atan2(2 * 2.55 * Math.sin(ang), Ld);
     const steer = Math.max(-1, Math.min(1, -delta / lock));
 

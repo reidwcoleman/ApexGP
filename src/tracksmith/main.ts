@@ -6,6 +6,7 @@ import '@fontsource/barlow-condensed/800-italic.css';
 import '@fontsource/barlow-condensed/700-italic.css';
 import './ui.css';
 import { initPhysics } from './sim.ts';
+import { loadKit } from './kit.ts';
 import { Stage } from './render.ts';
 import { Race } from './game.ts';
 import { Editor, PALETTE, pieceThumbs } from './editor.ts';
@@ -70,6 +71,12 @@ class App {
       onStart: () => { $('#h-go').style.display = 'none'; },
       onReset: () => this.resetHud(),
       onCheck: (n, total, ms, delta) => this.hudCheck(n, total, ms, delta),
+      onStyle: (text) => {
+        const d = $('#h-delta');
+        d.textContent = text;
+        d.className = 'delta show style';
+        this.deltaT = 1;
+      },
       onFinish: (ms, pb, rec) => { $('#h-time').textContent = fmt(ms); this.finish(ms, pb, rec); },
       onRespawn: () => {},
     };
@@ -119,7 +126,7 @@ class App {
         <div class="field"><label>Camera (C while driving)</label><div style="display:flex;gap:8px" id="st-cam"><button class="chip" data-cam="0">Chase</button><button class="chip" data-cam="1">Far chase</button><button class="chip" data-cam="2">Bonnet</button></div></div>
         <div class="field"><label>Ghost of your best run</label><div style="display:flex;gap:8px" id="st-ghost"><button class="chip" data-g="1">On</button><button class="chip" data-g="0">Off</button></div></div>
         <div class="field"><label>Keys</label><div class="keys">
-          <b>W / ↑</b><span>Accelerate</span><b>S / ↓</b><span>Brake, then reverse</span><b>A D / ← →</b><span>Steer</span><b>Space</b><span>Handbrake</span>
+          <b>W / ↑</b><span>Accelerate</span><b>S / ↓</b><span>Brake, then reverse</span><b>A D / ← →</b><span>Steer</span><b>Space</b><span>Drift: hold through a corner, let go for a boost</span><b>In the air</b><span>Steer to turn. Brake lifts the nose, Space drops it. Land straight for a speed kick</span>
           <b>R</b><span>Restart (instant)</span><b>Enter</b><span>Back to last checkpoint</span><b>C</b><span>Camera</span><b>Esc</b><span>Pause</span>
           <b>Pad</b><span>RT / LT, stick, Y restart, B checkpoint</span></div></div></div></div>
 
@@ -255,7 +262,7 @@ class App {
       const pb = this.profile.pbs[t.id];
       const md = medalOf(pb, t.medals);
       const th = THEMES[t.theme];
-      return `<button class="tcard" data-ti="${i}" style="--th:${hex(th.accent)}"><span class="no">${String(i + 1).padStart(2, '0')}</span><span class="nm">${esc(t.name)}</span><span class="thn">${th.name}</span>${medalDots(md)}<span class="tm ${pb === undefined ? 'none' : ''}">${pb === undefined ? 'Not driven yet' : fmt(pb)}</span></button>`;
+      return `<button class="tcard" data-ti="${i}" style="--th:${hex(th.accent)}"><img class="shot" alt="" loading="lazy" src="tracksmith/cards/${t.id}.webp"><span class="no">${String(i + 1).padStart(2, '0')}</span><span class="nm">${esc(t.name)}</span><span class="thn">${th.name}</span>${medalDots(md)}<span class="tm ${pb === undefined ? 'none' : ''}">${pb === undefined ? 'Not driven yet' : fmt(pb)}</span></button>`;
     }).join('');
     g.querySelectorAll<HTMLElement>('[data-ti]').forEach((b) => b.addEventListener('click', () => { this.audio.click(); this.play(this.builtins[+b.dataset.ti!]); }));
     const all = this.builtins.reduce((a, t) => a + medalOf(this.profile.pbs[t.id], t.medals), 0);
@@ -539,7 +546,7 @@ class App {
 async function boot() {
   const bar = document.querySelector('#loading .lbar b') as HTMLElement | null;
   if (bar) bar.style.width = '40%';
-  await initPhysics();
+  await Promise.all([initPhysics(), loadKit()]);
   if (bar) bar.style.width = '80%';
   const app = new App();
   (window as unknown as { __ts: App }).__ts = app;

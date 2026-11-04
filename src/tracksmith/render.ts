@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PIECES, T, H, ROAD_W, SLAB, levelY, footprint, toWorld, worldFrames, pieceMesh, Slot, type Placed, type MeshOut } from './pieces.ts';
 import { THEMES, type Theme } from './theme.ts';
+import { Batch, kitPart, kitReady, pieceMatrix } from './kit.ts';
 
 /** seeded random */
 export function rng(seed: number) {
@@ -48,6 +49,41 @@ export function meshGeometry(m: MeshOut, th: Theme): THREE.BufferGeometry {
 }
 
 // ---------------------------------------------------------------- sky
+
+/** the panorama rendered in Cycles for each theme (blender/tracksmith/sky.py) */
+const skyMaps = new Map<string, THREE.Texture>();
+function skyMap(i: number) {
+  const url = `tracksmith/sky/sky${i}.webp`;
+  let t = skyMaps.get(url);
+  if (!t) {
+    t = new THREE.TextureLoader().load(url);
+    t.colorSpace = THREE.SRGBColorSpace;
+    // (no mipmaps: they would draw a seam where the panorama wraps)
+    t.generateMipmaps = false;
+    t.minFilter = THREE.LinearFilter;
+    t.wrapS = THREE.RepeatWrapping;
+    skyMaps.set(url, t);
+  }
+  return t;
+}
+
+function panoramaMaterial(i: number) {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    uniforms: { map: { value: skyMap(i) } },
+    vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; }`,
+    fragmentShader: `
+      uniform sampler2D map; varying vec3 vDir;
+      void main(){
+        vec3 d = normalize(vDir);
+        vec2 uv = vec2(0.5 + atan(d.x, -d.z) / 6.2831853, 0.5 + asin(clamp(d.y, -1.0, 1.0)) / 3.1415927);
+        gl_FragColor = texture2D(map, uv);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
 
 function skyMaterial(th: Theme) {
   return new THREE.ShaderMaterial({
@@ -240,7 +276,7 @@ export class Stage {
     this.themeIndex = key;
     const th = (this.theme = THEMES[i % THEMES.length]);
     (this.sky.material as THREE.ShaderMaterial).dispose();
-    this.sky.material = skyMaterial(th);
+    this.sky.material = panoramaMaterial(i % THEMES.length);
     this.scene.fog = new THREE.Fog(th.fog, th.fogNear, th.fogFar);
     this.sun.color.setHex(th.sunColor);
     this.sun.intensity = th.sunIntensity;
@@ -435,8 +471,11 @@ export class TrackView {
 
   build(pieces: Placed[], th: Theme) {
     this.dispose();
-    const m = trackMesh(pieces);
-    const road = new THREE.Mesh(meshGeometry(m, th), this.mat(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0.0 })));
+    // the Blender kit, painted by the theme; the plain swept meshes if it didn't load
+    const kit = kitReady();
+    const batch = new Batch();
+    if (kit) for (const p of pieces) batch.add('p_' + PIECES[p.t].id, th, pieceMatrix(p));
+    const road = new THREE.Mesh(kit ? batch.geometry() : meshGeometry(trackMesh(pieces), th), this.mat(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !kit, roughness: 0.74, metalness: 0.0 })));
     road.castShadow = true;
     road.receiveShadow = true;
     this.group.add(road);
@@ -450,8 +489,9 @@ export class TrackView {
     }
 
     // pillars under raised road
-    const pillarGeo = new THREE.BoxGeometry(1.1, 1, 1.1);
-    const pillarMat = this.mat(new THREE.MeshStandardMaterial({ color: th.pillar, flatShading: true, roughness: 0.9 }));
+    const pillarGeo = kit ? (() => { const b = new Batch(); b.add('pylon', th, new THREE.Matrix4()); return b.geometry(); })() : new THREE.BoxGeometry(1.1, 1, 1.1);
+    const pillarMat = this.mat(new THREE.MeshStandardMaterial({ color: kit ? 0xffffff : th.pillar, vertexColors: kit, flatShading: true, roughness: 0.7 }));
+    const caps = new Batch();
     const mats: THREE.Matrix4[] = [];
     pieces.forEach((p) => {
       const def = PIECES[p.t];
@@ -470,7 +510,9 @@ export class TrackView {
         if (below < p.l) continue;
         for (const side of [-1, 1]) {
           const rx = f.f[2] * side * (ROAD_W / 2 - 1.4), rz = -f.f[0] * side * (ROAD_W / 2 - 1.4);
-          mats.push(new THREE.Matrix4().compose(new THREE.Vector3(f.p[0] + rx, bottom / 2, f.p[2] + rz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(f.f[0], f.f[2])), new THREE.Vector3(1, bottom, 1)));
+          const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(f.f[0], f.f[2]));
+          mats.push(new THREE.Matrix4().compose(new THREE.Vector3(f.p[0] + rx, kit ? 0 : bottom / 2, f.p[2] + rz), yaw, new THREE.Vector3(1, bottom, 1)));
+          if (kit) caps.add('cap', th, new THREE.Matrix4().compose(new THREE.Vector3(f.p[0] + rx, bottom - 0.12, f.p[2] + rz), yaw, new THREE.Vector3(1, 1, 1)));
         }
       }
       if (def.cells.length === 1) {
@@ -484,6 +526,11 @@ export class TrackView {
       im.castShadow = true;
       im.receiveShadow = true;
       this.group.add(im);
+    }
+    if (kit && caps.pos.length) {
+      const cm = new THREE.Mesh(caps.geometry(), pillarMat);
+      cm.castShadow = true;
+      this.group.add(cm);
     }
 
     // gates and boost glows
@@ -509,7 +556,40 @@ export class TrackView {
     return m;
   }
 
+  /** a gate from the kit: its body painted by the theme, its lamps a material of their own */
+  private kitGate(p: Placed, i: number, kind: 'start' | 'check' | 'finish', th: Theme) {
+    const g = new THREE.Group();
+    const name = 'gate_' + kind;
+    const b = new Batch();
+    b.add(name, th, new THREE.Matrix4(), 'light');
+    const body = new THREE.Mesh(b.geometry(), this.mat(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 })));
+    body.castShadow = true;
+    g.add(body);
+    const light = this.mat(new THREE.MeshBasicMaterial({ color: kind === 'start' ? 0x46e38a : kind === 'finish' ? 0xffd34d : 0x9aa0aa, fog: false }));
+    g.add(new THREE.Mesh(kitPart(name, 'light'), light));
+    if (kind !== 'check') {
+      // (the chequered flag across the banner, both faces)
+      const t = CHECKER!.clone();
+      t.wrapS = THREE.RepeatWrapping;
+      t.repeat.set(3, 1);
+      t.needsUpdate = true;
+      const fm = this.mat(new THREE.MeshStandardMaterial({ map: t, roughness: 0.5 }));
+      for (const s of [-1, 1]) {
+        const f = new THREE.Mesh(new THREE.PlaneGeometry(11, 0.96), fm);
+        f.position.set(0, 5.99, s * 0.485);
+        f.rotation.y = s < 0 ? Math.PI : 0;
+        g.add(f);
+      }
+    }
+    const c = toWorld(p, [0, 0, 0]);
+    g.position.set(c[0], c[1], c[2]);
+    g.rotation.y = (p.r * Math.PI) / 2;
+    this.group.add(g);
+    this.gates.push({ i, kind, mesh: g, light, passed: false });
+  }
+
   private gate(p: Placed, i: number, kind: 'start' | 'check' | 'finish', th: Theme) {
+    if (kitReady()) return this.kitGate(p, i, kind, th);
     const g = new THREE.Group();
     const span = ROAD_W + 1.6;
     const hgt = 6.2;
