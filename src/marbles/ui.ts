@@ -181,6 +181,18 @@ export class UI {
     this.lobbyEl.classList.add('mm-hide');
   }
   /** a short message at the top of the screen */
+  /** the colour called, out of the way at the top (null hides it) */
+  call(text: string | null, color = 0) {
+    const el = this.callEl ?? (this.callEl = this.layer('mm-call mm-hide'));
+    el.classList.toggle('mm-hide', !text);
+    if (text && el.dataset.k !== text) {
+      el.dataset.k = text;
+      el.innerHTML = `<b style="--cc:${css(color)}">${esc(text)}</b>`;
+    }
+    if (!text) el.dataset.k = '';
+  }
+  private callEl: HTMLElement | null = null;
+
   note(text: string, ms = 3500) {
     this.noteEl.innerHTML = `<div>${esc(text)}</div>`;
     this.noteEl.classList.remove('mm-hide');
@@ -218,7 +230,7 @@ export class UI {
     for (let k = 0; k < 22; k++) items.push(others[(k * 7 + Math.floor(Math.random() * others.length)) % others.length]);
     items.push(pick, others[0], others[1 % others.length]);
     const final = pick.kind === 'final';
-    const label = (k: string) => (k === 'survival' ? 'SURVIVAL' : k === 'team' ? 'TEAM' : k === 'final' ? 'FINAL' : 'RACE');
+    const label = (k: string) => (k === 'survival' ? 'SURVIVAL' : k === 'team' ? 'TEAM' : k === 'score' ? 'GOLD' : k === 'final' ? 'FINAL' : 'RACE');
     el.innerHTML = `<div class="wrap">
       <div class="hd">${final ? 'THE FINAL' : `ROUND ${n} OF ${total}`}</div>
       <div class="win"><div class="reel">${items.map((x) => `<div class="it k-${x.kind}"><b>${esc(x.name)}</b><i>${label(x.kind)}</i></div>`).join('')}</div></div>
@@ -231,24 +243,25 @@ export class UI {
     return new Promise<void>((done) => {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
-          reel.style.transition = 'transform 2.3s cubic-bezier(0.12, 0.72, 0.16, 1.02)';
+          reel.style.transition = 'transform 1.05s cubic-bezier(0.12, 0.72, 0.16, 1.02)';
           reel.style.transform = `translateY(${-target}px)`;
         }),
       );
-      window.setTimeout(() => el.classList.add('landed'), 2350);
+      window.setTimeout(() => el.classList.add('landed'), 1080);
       window.setTimeout(() => {
         el.classList.add('mm-hide');
         done();
-      }, 3300);
+      }, 1500);
     });
   }
   private revealEl: HTMLElement | null = null;
 
   /** the team round's score bar (null hides it) */
-  teams(list: { name: string; color: number; share: number; mine: boolean }[] | null) {
+  teams(list: { name: string; color: number; share: number; mine: boolean; label?: string }[] | null) {
     const el = this.teamEl ?? (this.teamEl = this.hudEl.appendChild(h('div', 'mm-teams')));
     el.classList.toggle('mm-hide', !list);
     if (!list) return;
+    el.classList.toggle('board', list.some((t) => t.label !== undefined));
     const key = list.map((t) => t.name).join();
     if (el.dataset.k !== key) {
       el.dataset.k = key;
@@ -259,7 +272,7 @@ export class UI {
     list.forEach((t, k) => {
       const r = rows[k] as HTMLElement;
       (r.querySelector('i') as HTMLElement).style.width = `${Math.min(100, (t.share / Math.max(0.34, lead)) * 100)}%`;
-      (r.querySelector('.pc') as HTMLElement).textContent = `${Math.round(t.share * 100)}%`;
+      (r.querySelector('.pc') as HTMLElement).textContent = t.label ?? `${Math.round(t.share * 100)}%`;
     });
   }
   private teamEl: HTMLElement | null = null;

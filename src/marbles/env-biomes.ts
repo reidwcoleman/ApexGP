@@ -554,6 +554,151 @@ function build(id: BiomeId): Piece[] {
       }, 30, 320);
       break;
     }
+    case 'disco': {
+      // mirror balls hanging in the night, turning
+      ring(9, (k) => {
+        const R = 10 + rnd() * 18;
+        const g = new THREE.IcosahedronGeometry(R, 2).toNonIndexed();
+        g.computeVertexNormals();
+        return { shiny: [col(g, () => pick([0xe8e8f8, 0xc8c8e0, 0xf8f0ff, 0xb8c0e0]))], y: 60 + rnd() * 90, spin: (k % 2 ? 1 : -1) * 0.2, bob: 2 };
+      }, 110, 300);
+      // towers of speakers and light, standing in the sea
+      ring(16, () => {
+        const body: G[] = [], glow: G[] = [];
+        const w = 14 + rnd() * 12, h = 50 + rnd() * 120, c = pick([0xff3a8a, 0x2fa8ff, 0xffd21f, 0xb05aff, 0x2fe06a]);
+        body.push(col(new THREE.BoxGeometry(w, h, w).translate(0, h / 2, 0), 0x18102a));
+        for (let y = 8; y < h - 4; y += 7) glow.push(col(new THREE.BoxGeometry(w + 0.5, 1.1, w + 0.5).translate(0, y, 0), c, 2.2));
+        for (let q = 0; q < 3; q++) body.push(col(new THREE.CylinderGeometry(w * 0.28, w * 0.28, 0.6, 20).rotateX(Math.PI / 2).translate(0, h * (0.25 + q * 0.25), w / 2 + 0.3), 0x3a3a50));
+        return { body, glow, peg: w };
+      }, 40, 320);
+      // records lying on the water, spinning
+      ring(7, (k) => {
+        const R = 40 + rnd() * 40;
+        const body = [col(new THREE.CylinderGeometry(R, R, 2.4, 40), (x, _y, z) => (Math.floor(Math.hypot(x, z) / 3) % 2 ? 0x141420 : 0x1e1e2e))];
+        const glow = [col(new THREE.CylinderGeometry(R * 0.3, R * 0.3, 2.6, 28), pick([0xff3a8a, 0x2fa8ff, 0xffd21f]), 1.6)];
+        return { body, glow, y: 1, peg: R, spin: (k % 2 ? 1 : -1) * 0.25 };
+      }, 200, 260);
+      break;
+    }
+    case 'circus': {
+      const tent = (R: number, h: number, a: number, b: number): G[] => {
+        const gs: G[] = [];
+        gs.push(col(new THREE.CylinderGeometry(R, R, h * 0.45, 24, 1, true).translate(0, h * 0.22, 0), (x, _y, z) => (Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 16) % 2 ? a : b)));
+        gs.push(col(new THREE.ConeGeometry(R * 1.12, h * 0.55, 24, 1, true).translate(0, h * 0.72, 0), (x, _y, z) => (Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 16) % 2 ? a : b)));
+        gs.push(col(new THREE.CylinderGeometry(R * 0.03, R * 0.03, h * 0.2, 6).translate(0, h * 1.08, 0), 0xffffff));
+        gs.push(T(col(new THREE.ConeGeometry(R * 0.07, R * 0.24, 3).rotateZ(-Math.PI / 2).scale(1, 1, 0.2), b === 0xffffff ? a : b), R * 0.12, h * 1.14, 0));
+        return gs;
+      };
+      // the big tents out on the grass
+      ring(11, () => {
+        const R = 24 + rnd() * 34, h = R * (1.1 + rnd() * 0.4);
+        const [a, b] = pick([[0xe8283a, 0xffffff], [0x2f6aff, 0xffffff], [0xffc21f, 0xe8283a], [0x37c25a, 0xfff0c0], [0xb05aff, 0xffc21f]]);
+        return { body: tent(R, h, a, b), peg: R };
+      }, 50, 320);
+      // a great wheel, turning
+      ring(2, (k) => {
+        const R = 60 + rnd() * 20;
+        const gs: G[] = [col(new THREE.TorusGeometry(R, 1.1, 8, 48), 0xffc21f), col(new THREE.TorusGeometry(R * 0.6, 0.7, 8, 36), 0xe8283a)];
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2;
+          gs.push(T(col(new THREE.CylinderGeometry(0.5, 0.5, R, 6).translate(0, R / 2, 0), 0xffffff), 0, 0, 0, 0, 0, a - Math.PI / 2));
+          gs.push(col(new THREE.BoxGeometry(6, 6, 6).translate(Math.cos(a) * R, Math.sin(a) * R, 0), pick([0xe8283a, 0x2f6aff, 0x37c25a, 0xff7a2a])));
+        }
+        return { shiny: gs, y: R + 10, turn: (k % 2 ? 1 : -1) * 0.1 };
+      }, 180, 120);
+      // balloons going up
+      ring(20, () => {
+        const R = 3 + rnd() * 4;
+        const g = lathe([[0, -R * 1.25], [R * 0.2, -R * 1.05], [R * 0.75, -R * 0.2], [R, R * 0.35], [R * 0.75, R * 0.95], [0, R * 1.25]], 16);
+        return { shiny: [col(g, pick([0xe8283a, 0xffc21f, 0x2f6aff, 0x37c25a, 0xff5ab0, 0xb05aff]))], y: 30 + rnd() * 120, bob: 3 };
+      }, 40, 240);
+      break;
+    }
+    case 'pirate': {
+      const ship = (s: number, sail: number): G[] => {
+        const gs: G[] = [];
+        const hull = new THREE.CylinderGeometry(9 * s, 5 * s, 9 * s, 12, 1).scale(0.55, 1, 2.5).translate(0, 4.5 * s, 0);
+        gs.push(col(hull, (_x, y) => (y > 6.8 * s ? 0xc89a40 : y > 4 * s ? 0x7a4a24 : 0x5a3418)));
+        gs.push(col(new THREE.BoxGeometry(9 * s, 5 * s, 8 * s).translate(0, 10 * s, -18 * s), 0x8a5a2e));
+        for (const [z, h] of [[-8, 34], [8, 30]] as const) {
+          gs.push(col(new THREE.CylinderGeometry(0.5 * s, 0.7 * s, h * s, 8).translate(0, 8 * s + (h * s) / 2, z * s), 0x4a2e18));
+          for (const [y, w] of [[0.45, 14], [0.75, 10]] as const) {
+            const sl = new THREE.PlaneGeometry(w * s, h * s * 0.27, 6, 3);
+            const p = sl.getAttribute('position');
+            for (let i = 0; i < p.count; i++) p.setZ(i, Math.cos((p.getX(i) / (w * s)) * Math.PI) * 2.4 * s);
+            gs.push(col(sl.translate(0, 8 * s + h * s * y, z * s + 1.2 * s), (x) => (Math.floor(x / (2.6 * s) + 20) % 2 ? sail : 0xfff4e0)));
+          }
+        }
+        return gs;
+      };
+      // ships at anchor
+      ring(7, () => {
+        const s = 1.2 + rnd() * 1.1;
+        const sail = pick([0xc83a3a, 0xfff4e0, 0x2a2a34, 0x2a6a9a]);
+        return { body: ship(s, sail), bob: 0.8, peg: 14 * s };
+      }, 90, 280);
+      // rocky islands with palms
+      ring(14, () => {
+        const R = 24 + rnd() * 34;
+        const body: G[] = [rough(col(new THREE.SphereGeometry(R, 12, 7, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.55 + rnd() * 0.5, 1), (_x, y) => (y < R * 0.1 ? 0xf0d8a0 : y < R * 0.3 ? 0x8a9a5a : 0x7a6a5a)), 0.1, 0.4)];
+        const n = 2 + Math.floor(rnd() * 3);
+        for (let i = 0; i < n; i++) {
+          const a = rnd() * 6.28;
+          for (const g of palm(16 + rnd() * 12, rnd() * 1.4).body) body.push(T(g, Math.cos(a) * R * 0.5, R * 0.3, Math.sin(a) * R * 0.5, 0, a));
+        }
+        return { body, peg: R };
+      }, 40, 340);
+      // a grinning rock (eyes in a cliff), far out
+      ring(2, () => {
+        const R = 70;
+        const body: G[] = [rough(col(new THREE.SphereGeometry(R, 16, 12).scale(1, 0.9, 0.9), 0xa8a090), 0.05, 0.5)];
+        for (const e of [-1, 1]) body.push(T(col(new THREE.SphereGeometry(R * 0.2, 12, 10), 0x201a18), e * R * 0.36, R * 0.2, R * 0.74));
+        for (let i = -2; i <= 2; i++) body.push(T(col(new THREE.BoxGeometry(R * 0.13, R * 0.2, R * 0.2), 0x201a18), i * R * 0.17, -R * 0.28, R * 0.74));
+        return { body, y: R * 0.35, peg: R };
+      }, 300, 120);
+      break;
+    }
+    case 'toybox': {
+      const bright = [0xff4f6a, 0xffc21f, 0x37c25a, 0x2fa8ff, 0x9a5bff, 0xff8a1f];
+      // towers of building blocks
+      ring(16, () => {
+        const gs: G[] = [];
+        let y = 0;
+        const n = 3 + Math.floor(rnd() * 5);
+        for (let i = 0; i < n; i++) {
+          const w = 18 + rnd() * 16, h = 12 + rnd() * 10, c = pick(bright);
+          const off = (rnd() - 0.5) * 6;
+          gs.push(T(col(new THREE.BoxGeometry(w, h, w), c), off, y + h / 2, off * 0.6, 0, rnd() * 0.6));
+          for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) gs.push(T(col(new THREE.CylinderGeometry(w * 0.13, w * 0.13, 2, 14), c), off + sx * w * 0.24, y + h + 1, off * 0.6 + sz * w * 0.24));
+          y += h;
+        }
+        return { shiny: gs, peg: 18 };
+      }, 40, 320);
+      // crayons stood on end
+      ring(12, () => {
+        const c = pick(bright), r = 5 + rnd() * 3, h = 70 + rnd() * 70;
+        return { shiny: [col(new THREE.CylinderGeometry(r, r, h, 12).translate(0, h / 2, 0), (_x, y) => (y > h * 0.1 && y < h * 0.86 && Math.floor(y / 9) % 3 === 0 ? 0x2a2a34 : c)), col(new THREE.ConeGeometry(r, r * 2.2, 12).translate(0, h + r * 1.1, 0), c)], peg: r * 2 };
+      }, 70, 320);
+      // stacking rings on a post
+      ring(6, () => {
+        const gs: G[] = [col(new THREE.CylinderGeometry(3, 3, 60, 12).translate(0, 30, 0), 0xfff0c8)];
+        let y = 3;
+        for (let i = 0; i < 6; i++) {
+          const R = 24 - i * 3.2;
+          gs.push(col(new THREE.TorusGeometry(R * 0.72, R * 0.3, 10, 26).rotateX(Math.PI / 2).translate(0, y, 0), bright[i]));
+          y += R * 0.5;
+        }
+        return { shiny: gs, peg: 26 };
+      }, 110, 280);
+      // ducks afloat
+      ring(9, () => {
+        const s = 6 + rnd() * 8;
+        const gs: G[] = [col(new THREE.SphereGeometry(s * 1.4, 18, 12).scale(1.3, 0.85, 1), 0xffd21f).translate(0, s, 0), col(new THREE.SphereGeometry(s * 0.85, 16, 12), 0xffd21f).translate(s * 1.25, s * 2.2, 0), col(new THREE.ConeGeometry(s * 0.34, s * 0.8, 10).rotateZ(-Math.PI / 2), 0xff7a1f).translate(s * 2.25, s * 2.1, 0)];
+        for (const e of [-1, 1]) gs.push(col(new THREE.SphereGeometry(s * 0.13, 8, 6), 0x20202a).translate(s * 1.85, s * 2.5, e * s * 0.42));
+        return { shiny: gs, bob: 1.2, peg: s * 1.6 };
+      }, 60, 300);
+      break;
+    }
     default:
       break;
   }

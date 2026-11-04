@@ -80,6 +80,8 @@
 .mm-lobby .mm-grid div em { opacity: 1; color: var(--mm-pink); }
 .mm-lobby .row { margin-top: 18px; display: flex; gap: 12px; justify-content: center; }
 .mm-note { display: flex; justify-content: center; align-items: flex-start; padding-top: 80px; }
+.mm-call { display: flex; justify-content: center; align-items: flex-start; padding-top: 72px; pointer-events: none; }
+.mm-call b { font-family: var(--mm-display); font-size: clamp(26px, 5vw, 44px); padding: 4px 26px; border-radius: 18px; color: #fff; background: var(--cc); box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3), 0 0 0 4px #fff; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); animation: mm-in 0.2s ease both; }
 .mm-note div { font-weight: 700; font-size: 17px; padding: 10px 18px; border-radius: 14px; background: rgba(36, 20, 44, 0.8); animation: mm-in 0.3s ease both; }
 .mm-pause .hint { font-weight: 600; opacity: 0.85; margin-bottom: 6px; }
 .mm-tbtn.g { bottom: 40px; right: 140px; width: 74px; height: 74px; font-size: 15px; background: var(--mm-sky); box-shadow: 0 5px 0 #1f6fa8; }
@@ -209,6 +211,7 @@
 .mm-reveal .k-survival { --kc: var(--mm-orange); }
 .mm-reveal .k-team { --kc: var(--mm-sky); }
 .mm-reveal .k-final { --kc: var(--mm-yellow); }
+.mm-reveal .k-score { --kc: var(--mm-yellow); }
 .mm-reveal.landed .win::after { animation: mm-landed 0.5s ease both; }
 .mm-reveal.landed .reel { filter: none; }
 .mm-reveal.landed .it:nth-last-child(3) { animation: mm-pop 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both; }
@@ -219,6 +222,10 @@
 .mm-card .team { display: inline-block; margin-bottom: 12px; font-family: var(--mm-display); font-size: 20px; letter-spacing: 0.04em; padding: 6px 16px 4px; border-radius: 12px; background: var(--tc); color: #fff; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); transform: rotate(-2deg); }
 .mm-teams { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); display: grid; gap: 6px; width: min(360px, 80vw); }
 .mm-teams .tm { display: grid; grid-template-columns: 56px 1fr 48px; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 12px; background: rgba(36, 20, 44, 0.5); font-family: var(--mm-display); font-size: 16px; }
+.mm-teams.board { top: 72px; left: 14px; transform: none; width: min(250px, 46vw); gap: 4px; }
+.mm-teams.board .tm { grid-template-columns: minmax(0, 1fr) 40px; font-size: 14px; padding: 3px 10px; border-radius: 10px; }
+.mm-teams.board .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-teams.board .bar { display: none; }
 .mm-teams .tm.mine { box-shadow: 0 0 0 3px #fff; }
 .mm-teams .nm { color: var(--tc); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
 .mm-teams .bar { height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.18); overflow: hidden; }
@@ -227,4 +234,5 @@
 .mm-show i.k-race { background: color-mix(in srgb, var(--mm-pink) 42%, transparent); }
 .mm-show i.k-survival { background: color-mix(in srgb, var(--mm-orange) 42%, transparent); }
 .mm-show i.k-team { background: color-mix(in srgb, var(--mm-sky) 42%, transparent); }
+.mm-show i.k-score { background: color-mix(in srgb, var(--mm-yellow) 42%, transparent); }
 .mm-show i.k-final { background: color-mix(in srgb, var(--mm-yellow) 42%, transparent); }

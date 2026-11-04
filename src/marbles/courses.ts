@@ -14,6 +14,7 @@ import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
 import { storm, type StormArena } from './course-storm.ts';
 import { tide, type TideArena } from './course-tide.ts';
+import { beltRush, colourCall, goldRush, hotSpud, type BeltArena, type CallArena, type GoldArena, type SpudArena } from './course-modes.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -23,7 +24,7 @@ export { makeCrown } from './course-kit.ts';
  * a race where only the first across the line counts.
  */
 
-export type RoundKind = 'race' | 'survival' | 'team' | 'final';
+export type RoundKind = 'race' | 'survival' | 'team' | 'score' | 'final';
 
 export interface Course {
   id: string;
@@ -53,6 +54,11 @@ export interface Course {
   storm?: StormArena;
   /** High Tide's columns and its sea */
   tide?: TideArena;
+  /** the party games (course-modes.ts) */
+  call?: CallArena;
+  spud?: SpudArena;
+  gold?: GoldArena;
+  belt?: BeltArena;
   /** Lava Rush: the lava's height and how far along the course it has come, at a time */
   lava?: { y(t: number): number; s(t: number): number };
   /** the team round's painted floor */
@@ -63,8 +69,8 @@ export interface Course {
   intro: THREE.Vector3[];
 }
 
-export type GenId = 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | GenId;
+export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'goldrush' | 'beltrush' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -104,6 +110,14 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   sliprink: { id: 'sliprink', name: 'Slip Rink', kind: 'race', blurb: 'Every floor is ice. Slide round the corners, dive to go faster, snowballs rolling down.', keep: 0.75 },
   stormdeck: { id: 'stormdeck', name: 'Storm Deck', kind: 'survival', blurb: 'A raft in a thunderstorm. A ring of light marks where the lightning strikes next: get out of it, or get blasted overboard.', keep: 0.6 },
   hightide: { id: 'hightide', name: 'High Tide', kind: 'survival', blurb: 'Coral columns in the sea. The tide rises a step at a time: climb higher, keep your spot, push the others in.', keep: 0.6 },
+  colourcall: { id: 'colourcall', name: 'Colour Call', kind: 'survival', blurb: 'A colour is called. Get on it: every other tile drops out from under you.', keep: 0.6 },
+  hotspud: { id: 'hotspud', name: 'Hot Spud', kind: 'survival', blurb: 'A few spuds with lit fuses. Touch someone to pass yours on. Whoever holds one when it blows is out.', keep: 0.6 },
+  goldrush: { id: 'goldrush', name: 'Gold Rush', kind: 'score', blurb: 'The chest is spitting gold. Grab it, knock it out of the others, stay out of the sea. Least gold goes home.', keep: 0.6 },
+  beltrush: { id: 'beltrush', name: 'Belt Rush', kind: 'survival', blurb: 'A giant belt brings toy blocks at you, faster and faster. Dodge, hop, keep running. Off the back and you are out.', keep: 0.6 },
+  discodash: { id: 'discodash', name: 'Disco Dash', kind: 'race', blurb: 'Down the dance floors: laser gates, spinning floors and sweeping bars, all on the beat.', keep: 0.75 },
+  bigtop: { id: 'bigtop', name: 'Big Top', kind: 'race', blurb: 'Under the tents: bounce pits, swinging hammers, seesaws and wrecking balls.', keep: 0.75 },
+  treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
+  blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
 };
 /**
@@ -111,20 +125,23 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'goldrush', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
-/** a new show: a race, a survival, a race, the team round, a race, the final (which races and which survival is the luck of the draw) */
+/** a new show: a race, a survival, a race or a party game, a party game, a race, the final (which ones is the luck of the draw) */
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
-export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink'];
-export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide'];
-export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, 'paintparty', 'splatring', 'crownpeak'];
+export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
+export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide', 'colourcall', 'beltrush'];
+/** the games that are neither: each show has at least one */
+export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'hotspud', 'goldrush'];
+export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak'];
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
   // (the platform courses; the old chutes are still there for the test links)
   const races = shuffle<RoundId>(RACE_POOL);
   const surv = shuffle<RoundId>(SURVIVAL_POOL);
-  const team: RoundId = rnd() < 0.5 ? 'paintparty' : 'splatring';
-  setShow([races[0], surv[0], races[1], team, races[2], 'crownpeak']);
+  const party = shuffle<RoundId>(PARTY_POOL);
+  // (the third round is as likely another game as a race)
+  setShow([races[0], surv[0], rnd() < 0.5 ? races[1] : party[1], party[0], races[2], 'crownpeak']);
   return SHOW.map((x) => x.id);
 }
 export function setShow(ids: RoundId[]) {
@@ -165,6 +182,14 @@ export function buildRound(id: RoundId): Course {
       return storm(info);
     case 'hightide':
       return tide(info);
+    case 'colourcall':
+      return colourCall(info);
+    case 'hotspud':
+      return hotSpud(info);
+    case 'goldrush':
+      return goldRush(info);
+    case 'beltrush':
+      return beltRush(info);
     default:
       return genCourse(GEN[id], info);
   }

@@ -230,6 +230,37 @@ const BIOME_TOYS: Partial<Record<BiomeId, Toy[]>> = {
     // a boiler with a chimney
     () => ({ g: merge([solid(new THREE.CylinderGeometry(1.2, 1.2, 2.6, 16).rotateZ(Math.PI / 2), 0xc89040).translate(0, 1.3, 0), solid(new THREE.CylinderGeometry(0.35, 0.4, 2.4, 10), 0x3a2a20).translate(0.8, 3.0, 0), solid(new THREE.TorusGeometry(1.22, 0.1, 6, 20).rotateY(Math.PI / 2), 0x8a5a2a).translate(0.6, 1.3, 0), solid(new THREE.TorusGeometry(1.22, 0.1, 6, 20).rotateY(Math.PI / 2), 0x8a5a2a).translate(-0.6, 1.3, 0)]), h: 4.2 }),
   ],
+  disco: [
+    // a speaker on a stand
+    (r) => ({ g: merge([solid(new THREE.BoxGeometry(1.8, 2.8, 1.5), 0x18102a).translate(0, 1.4, 0), solid(new THREE.CylinderGeometry(0.62, 0.62, 0.14, 18).rotateX(Math.PI / 2), pick(r, BRIGHT)).translate(0, 1.0, 0.78), solid(new THREE.CylinderGeometry(0.32, 0.32, 0.14, 16).rotateX(Math.PI / 2), pick(r, BRIGHT)).translate(0, 2.2, 0.78)]), h: 2.8 }),
+    // a mirror ball on a pole
+    (r) => ({ g: merge([solid(new THREE.CylinderGeometry(0.08, 0.14, 3.2, 8), 0xc8c8d8).translate(0, 1.6, 0), solid(new THREE.IcosahedronGeometry(1.0, 1), 0xe8e8f8).translate(0, 3.9, 0)]), h: 4.9, spin: 0.5 + r() * 0.4 }),
+  ],
+  circus: [
+    // a striped tent
+    (r) => {
+      const a = pick(r, [0xe8283a, 0x2f6aff, 0xffc21f, 0x37c25a]);
+      return { g: merge([paint(new THREE.CylinderGeometry(2.2, 2.2, 1.8, 16, 1, true), rib(12, a, 0xffffff)).translate(0, 0.9, 0), paint(new THREE.ConeGeometry(2.6, 2.2, 16, 1, true), rib(12, a, 0xffffff)).translate(0, 2.9, 0), solid(new THREE.SphereGeometry(0.2, 10, 8), 0xffc21f).translate(0, 4.1, 0)]), h: 4.3 };
+    },
+    // a drum with a ball on it
+    (r) => ({ g: merge([paint(new THREE.CylinderGeometry(1.3, 1.5, 1.4, 20), rib(10, 0xe8283a, 0xffc21f)).translate(0, 0.7, 0), solid(new THREE.SphereGeometry(0.9, 18, 12), pick(r, BRIGHT)).translate(0, 2.3, 0)]), h: 3.2, spin: 0.3 }),
+  ],
+  pirate: [
+    palmToy,
+    // a barrel
+    () => ({ g: merge([solid(new THREE.CylinderGeometry(0.95, 0.95, 2.0, 16), 0x8a5a2e).translate(0, 1.0, 0), solid(new THREE.TorusGeometry(1.0, 0.07, 6, 20).rotateX(Math.PI / 2), 0x3a2a20).translate(0, 0.5, 0), solid(new THREE.TorusGeometry(1.0, 0.07, 6, 20).rotateX(Math.PI / 2), 0x3a2a20).translate(0, 1.5, 0)]), h: 2.0 }),
+    // a chest of gold
+    () => ({ g: merge([solid(new THREE.BoxGeometry(2.0, 1.1, 1.4), 0x7a4a24).translate(0, 0.55, 0), solid(new THREE.SphereGeometry(0.9, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1.05, 0.5, 0.72), 0xffc830).translate(0, 1.1, 0)]), h: 1.6 }),
+  ],
+  toybox: [
+    // a stack of blocks
+    (r) => ({ g: merge([solid(new THREE.BoxGeometry(2.2, 1.3, 2.2), pick(r, BRIGHT)).translate(0, 0.65, 0), solid(new THREE.BoxGeometry(1.6, 1.2, 1.6).rotateY(0.5), pick(r, BRIGHT)).translate(0, 1.9, 0), solid(new THREE.ConeGeometry(0.9, 1.4, 4).rotateY(0.3), pick(r, BRIGHT)).translate(0, 3.2, 0)]), h: 3.9 }),
+    // a spinning top
+    (r) => {
+      const a = pick(r, BRIGHT);
+      return { g: merge([paint(new THREE.ConeGeometry(1.4, 1.6, 20).rotateX(Math.PI), rib(10, a, 0xffffff)).translate(0, 0.8, 0), paint(new THREE.CylinderGeometry(1.4, 1.4, 0.3, 20), rib(10, a, 0xffffff)).translate(0, 1.7, 0), solid(new THREE.CylinderGeometry(0.12, 0.12, 1.1, 8), 0xffffff).translate(0, 2.3, 0)]), h: 2.8, spin: 1.6 };
+    },
+  ],
   beach: [
     palmToy,
     TOYS[3],

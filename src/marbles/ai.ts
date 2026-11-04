@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain, TideBrain } from './ai-arena.ts';
+import { BeltBrain, CallBrain, GoldBrain, SpudBrain } from './ai-modes.ts';
+import type { GoldPlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
@@ -87,6 +89,12 @@ export class Bot {
   private plate: PlateBrain | null = null;
   private stormB: StormBrain | null = null;
   private tideB: TideBrain | null = null;
+  private callB: CallBrain | null = null;
+  private spudB: SpudBrain | null = null;
+  private goldB: GoldBrain | null = null;
+  private beltB: BeltBrain | null = null;
+  /** Gold Rush: what's on the sand */
+  gold: GoldPlay | null = null;
   private crumbleB: CrumbleBrain | null = null;
   private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
@@ -177,6 +185,25 @@ export class Bot {
       this.tideB ??= new TideBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
       return this.tideB.update(dt, t, c, all);
+    }
+    if (c.call) {
+      this.callB ??= new CallBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react) return;
+      return this.callB.update(dt, t, c, all);
+    }
+    if (c.spud) {
+      this.spudB ??= new SpudBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react) return;
+      return this.spudB.update(dt, t, c, all);
+    }
+    if (c.gold) {
+      this.goldB ??= new GoldBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react || !this.gold) return;
+      return this.goldB.update(dt, t, c, all, this.gold.live, this.gold.taken);
+    }
+    if (c.belt) {
+      this.beltB ??= new BeltBrain(m, this.skill, this.rnd);
+      return this.beltB.update(dt, t, c, all);
     }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);

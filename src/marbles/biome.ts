@@ -6,7 +6,7 @@
  * islands beside it hold (course-dress.ts). Colours here are sRGB hex.
  */
 
-export type BiomeId = 'candy' | 'beach' | 'volcano' | 'arctic' | 'jungle' | 'space' | 'spooky' | 'neon' | 'desert' | 'autumn' | 'sunset' | 'royal' | 'blossom' | 'storm' | 'reef' | 'clockwork';
+export type BiomeId = 'candy' | 'beach' | 'volcano' | 'arctic' | 'jungle' | 'space' | 'spooky' | 'neon' | 'desert' | 'autumn' | 'sunset' | 'royal' | 'blossom' | 'storm' | 'reef' | 'clockwork' | 'disco' | 'circus' | 'pirate' | 'toybox';
 
 export interface Biome {
   id: BiomeId;
@@ -313,6 +313,70 @@ export const BIOMES: Record<BiomeId, Biome> = {
     },
     isle: { top: [0x8a7a6a, 0xa08a70], under: 0x4a3a2e },
   },
+  disco: {
+    id: 'disco',
+    sky: { zen: 0x0a0420, mid: 0x2a0a50, hor: 0xc02a90, band: 0xff5ab0, below: 0x180830, glow: 0xff60c0, disc: 0xfff0ff, discKind: 2, discSize: 1.5, stars: 0.9, aurora: 0, cirrus: 0 },
+    sun: { color: 0xffd0f0, k: 2.2 },
+    hemi: { sky: 0xb080ff, ground: 0x401050, k: 0.85 },
+    env: 1.2,
+    fog: 1 / 1300,
+    lake: { pal: [0x1a0a3a, 0x30105a, 0xff3a9a, 0x2a0a4a, 0x20c0ff], mean: 0x2a1050, vein: 0xff60c0, veinK: 0.9, soft: 0.2, self: 0.4, emit: 0xff3aa0, emitK: 0.5, rough: 0.08, coat: 1, mirror: true, grid: 1, scale: 1.0 },
+    clouds: { on: false, lit: 0xffffff, shade: 0x8060a0 },
+    deck: {
+      tiles: [[0xff3a8a, 0xff7ab0], [0x2fa8ff, 0x7ac8ff], [0xffd21f, 0xffe880], [0xb05aff, 0xd0a0ff], [0x2fe06a, 0x88f0a8]],
+      arch: [0xff3a8a, 0x2fa8ff, 0xffd21f, 0xb05aff, 0x2fe06a],
+      wall: 0x1a1030, rail: 0xff3a8a, railB: 0x2fa8ff, post: 0xffd21f, base: 0x120a24,
+    },
+    isle: { top: [0x3a1a6a, 0x4a2080], under: 0x180a30 },
+  },
+  circus: {
+    id: 'circus',
+    sky: { zen: 0x3a8ae0, mid: 0x8ac8f0, hor: 0xffe8c0, band: 0xffd8a0, below: 0x7a90a8, glow: 0xffe0a0, disc: 0xfff8e0, discKind: 0, discSize: 1.2, stars: 0, aurora: 0, cirrus: 0.6 },
+    sun: { color: 0xfff0d0, k: 3.6 },
+    hemi: { sky: 0xd0e8ff, ground: 0x8a7a5a, k: 0.8 },
+    env: 1.1,
+    fog: 1 / 1500,
+    lake: { pal: [0x7ac86a, 0x9ad87a, 0x6ab85a, 0xb8e888, 0x8ad07a], mean: 0x8ad07a, vein: 0xd8f0a0, veinK: 0.3, soft: 1, self: 0.05, emit: 0x000000, emitK: 0, rough: 0.7, coat: 0.1, mirror: false, grid: 0, scale: 1.4 },
+    clouds: { on: true, lit: 0xffffff, shade: 0xc8d8f0 },
+    deck: {
+      tiles: [[0xe8283a, 0xffffff], [0xffc21f, 0xffe680], [0x2f6aff, 0xffffff], [0x37c25a, 0xb8f0c8], [0xff7a2a, 0xffd0a0]],
+      arch: [0xe8283a, 0xffc21f, 0x2f6aff, 0x37c25a, 0xff7a2a],
+      wall: 0xe8283a, rail: 0xffc21f, railB: 0xffffff, post: 0x2f6aff, base: 0x8a2a3a,
+    },
+    isle: { top: [0x8ad07a, 0xa8e090], under: 0x8a6a4a },
+  },
+  pirate: {
+    id: 'pirate',
+    sky: { zen: 0x1a70b0, mid: 0x60b8d8, hor: 0xffe0b0, band: 0xffc080, below: 0x206070, glow: 0xffd090, disc: 0xfff4d8, discKind: 0, discSize: 1.3, stars: 0, aurora: 0, cirrus: 0.5 },
+    sun: { color: 0xffe8c0, k: 3.5 },
+    hemi: { sky: 0xb8e8ff, ground: 0x7a7a5a, k: 0.75 },
+    env: 1.15,
+    fog: 1 / 1500,
+    lake: { pal: [0x0a7ab0, 0x10a8c0, 0x086a98, 0x30c0c8, 0x0a88b8], mean: 0x1098b8, vein: 0xffffff, veinK: 0.5, soft: 1, self: 0.1, emit: 0x000000, emitK: 0, rough: 0.04, coat: 1, mirror: true, grid: 0, scale: 1.1 },
+    clouds: { on: true, lit: 0xffffff, shade: 0xb8d8e8 },
+    deck: {
+      tiles: [[0xc89a60, 0xdcb478], [0x8a5a34, 0xa07444], [0xf0d8a0, 0xf8e8c0], [0x2a8a9a, 0x4ab0b8], [0xc84a3a, 0xe07a60]],
+      arch: [0xc84a3a, 0xffc21f, 0x2a8a9a, 0x8a5a34, 0xf0e0c0],
+      wall: 0x5a3a20, rail: 0xc89a60, railB: 0x3a2412, post: 0xffc21f, base: 0x3a2412,
+    },
+    isle: { top: [0xf0d8a0, 0xf8e4b4], under: 0x8a6a4a },
+  },
+  toybox: {
+    id: 'toybox',
+    sky: { zen: 0x8ad0ff, mid: 0xc0e8ff, hor: 0xfff4e0, band: 0xffe8f0, below: 0xa8c8e8, glow: 0xfff0d0, disc: 0xffffff, discKind: 0, discSize: 1.1, stars: 0, aurora: 0, cirrus: 0.2 },
+    sun: { color: 0xfff4e0, k: 3.4 },
+    hemi: { sky: 0xe0f0ff, ground: 0xc0a890, k: 0.95 },
+    env: 1.2,
+    fog: 1 / 1700,
+    lake: { pal: [0x8ad8f8, 0xa8e8ff, 0x70c8f0, 0xc8f0ff, 0x98e0ff], mean: 0x98dcf8, vein: 0xffffff, veinK: 0.6, soft: 1, self: 0.15, emit: 0x000000, emitK: 0, rough: 0.05, coat: 1, mirror: true, grid: 0, scale: 1.5 },
+    clouds: { on: true, lit: 0xffffff, shade: 0xd8e8f8 },
+    deck: {
+      tiles: [[0xff4f6a, 0xff8a9a], [0xffc21f, 0xffe070], [0x37c25a, 0x88e8a0], [0x2fa8ff, 0x88d0ff], [0x9a5bff, 0xc8a0ff], [0xff8a1f, 0xffb870]],
+      arch: [0xff4f6a, 0xffc21f, 0x37c25a, 0x2fa8ff, 0x9a5bff, 0xff8a1f],
+      wall: 0x2fa8ff, rail: 0xff4f6a, railB: 0xffc21f, post: 0x37c25a, base: 0x9a5bff,
+    },
+    isle: { top: [0xffe0a0, 0xffd090, 0xc8e8a0], under: 0xd89a6a },
+  },
 };
 
 /** which world each round is in */
@@ -341,6 +405,14 @@ export const ROUND_BIOME: Record<string, BiomeId> = {
   sliprink: 'arctic',
   stormdeck: 'storm',
   hightide: 'reef',
+  colourcall: 'disco',
+  hotspud: 'circus',
+  goldrush: 'pirate',
+  beltrush: 'toybox',
+  discodash: 'disco',
+  bigtop: 'circus',
+  treasuretrail: 'pirate',
+  blockparty: 'toybox',
 };
 
 let cur: Biome = BIOMES.candy;

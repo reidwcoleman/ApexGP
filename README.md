@@ -755,9 +755,22 @@ and bots; the contestants are original bean characters, not marbles.
   below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
   light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
   colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
-- **The show**: six rounds dealt fresh every show from 24 (`POOL` / `dealShow` in `courses.ts`):
-  race, survival, race, team, race, the final. A wheel of round names spins and lands on each one
-  while it builds.
+- **The show**: six rounds dealt fresh every show from 32 (`POOL` / `dealShow` in `courses.ts`):
+  race, survival, a race or a party game, a party game, a race, the final. A short wheel of round
+  names lands on each one. Rounds are built ahead (`buildAhead` in `game.ts`): the next course, its
+  bot paths and its shaders go up behind the results, and the first round of the next show behind
+  the menu, so nothing waits on a build. Disposing a course keeps its materials, so the shader
+  programs stay compiled for the next one.
+- **Nobody waits on bots**: once every person in a round is through or out it wraps up 1.4 s later
+  (`noWaiting` / `wrapUp`): the leaders take the places left, or the best of the standing survive.
+  Online that means every person, not just you. Watching a round with no people left in it, ENTER
+  skips it. SPACE or ENTER also skips the flyover and the results.
+  - **Party games** (`course-modes.ts`, `ai-modes.ts`, `modes.ts`), each in its own world:
+    **Colour Call** (disco: a colour is called, every other tile drops), **Hot Spud** (circus: tag
+    with lit fuses, whoever holds one when it blows is out), **Gold Rush** (pirate: a chest spits
+    gold, knocks spill it, falls lose a third, least gold goes home) and **Belt Rush** (toy box: a
+    giant belt brings blocks at you, faster and faster; off the back and you're out). Colour Call
+    and Belt Rush are pure functions of the round's clock; the spuds and the gold are the host's.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
     paint, open edges (fall off and you're back at the last checkpoint), flat or climbing, joined
     by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 34 (pins,
@@ -813,8 +826,10 @@ and bots; the contestants are original bean characters, not marbles.
     rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
     order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
     18 Rumble Hill, 19 Cookie Crumble, 20 Lava Rush, 21 Meltdown, 22 Petal Pass, 23 Tick Tock,
-    24 Moon Run, 25 Slip Rink, 26 Storm Deck, 27 High Tide).
-  - Out of the show, you can watch it to the end (←/→ switches bean).
+    24 Moon Run, 25 Slip Rink, 26 Storm Deck, 27 High Tide, 28 Colour Call, 29 Hot Spud,
+    30 Gold Rush, 31 Belt Rush, 32 Disco Dash, 33 Big Top, 34 Treasure Trail, 35 Block Party).
+    `?lineup=hotspud,goldrush` plays those rounds, in that order, as the show.
+  - Out of the show, start a new one or watch the rest (←/→ switches bean, ENTER skips the round).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,
   bottom-heavy jelly body sitting low on stubby boots, thick arms with round mitts, big googly eyes on springs,

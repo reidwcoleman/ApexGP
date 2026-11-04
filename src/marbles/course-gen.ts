@@ -707,5 +707,9 @@ export const GEN: Record<string, GenSpec> = {
   petalpass: { id: 'petalpass', heading: 0.4, arch: PAINT.pink, tag: 'Race · Mind the wind', steps: ['pins', 'L50', 'gusts', 'up', 'slides', 'R60', 'jelly', 'gap', 'gusts', 'L45', 'planks', 'hop', 'sweep'] },
   ticktock: { id: 'ticktock', heading: -0.9, arch: PAINT.orange, tag: 'Race · Clockwork', steps: ['stampers', 'R50', 'conveyor', 'up', 'spinner', 'L60', 'sliders', 'gap', 'stampers', 'R45', 'gates', 'hop', 'turnstiles', 'L40', 'stampers'] },
   moonrun: { id: 'moonrun', heading: 1.6, arch: PAINT.purple, grav: 0.62, tag: 'Race · Low gravity all the way', steps: ['moon', 'R45', 'turnstiles', 'lasers', 'L60', 'moon', 'up', 'spinner', 'R50', 'moon'] },
+  discodash: { id: 'discodash', heading: 0.2, arch: PAINT.pink, tag: 'Race · On the beat', steps: ['lasers', 'R50', 'spinner', 'S6', 'sweep', 'L60', 'turnstiles', 'up', 'lasers', 'R45', 'hop', 'mills'] },
+  bigtop: { id: 'bigtop', heading: -0.6, arch: PAINT.orange, tag: 'Race · Roll up, roll up', steps: ['bounce', 'L50', 'hammers', 'S6', 'planks', 'R60', 'wreck', 'gap', 'bumpers', 'L45', 'jelly', 'sweep'] },
+  treasuretrail: { id: 'treasuretrail', heading: 1.1, arch: PAINT.teal, tag: 'Race · Mind the cannons', steps: ['cannons', 'R50', 'planks', 'hop', 'rapids', 'L60', 'gusts', 'up', 'cannons', 'R45', 'sliders', 'gap'] },
+  blockparty: { id: 'blockparty', heading: -1.0, arch: PAINT.blue, tag: 'Race · Through the toy box', steps: ['stampers', 'L50', 'rolldown', 'R60', 'jelly', 'sliders', 'up', 'doors', 'L45', 'stampers', 'mills'] },
   sliprink: { id: 'sliprink', heading: -1.3, arch: PAINT.blue, grip: 0.3, tag: 'Race · Everything is ice', steps: ['pins', 'R50', 'rolldown', 'L60', 'doors', 'up', 'mills', 'R45', 'turnstiles', 'S6', 'hammers'] },
 };

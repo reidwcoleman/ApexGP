@@ -3,10 +3,12 @@ import { Bot } from './ai.ts';
 import { courseAI } from './ai-course.ts';
 import { level, LEVELS, roll, STYLES, type Level, type StyleId } from './ai-style.ts';
 import { Sound } from './audio.ts';
-import { biome } from './biome.ts';
+import { biome, type Biome } from './biome.ts';
 import { buildRound, dealShow, setShow, DEFAULT_SHOW, POOL, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
 import { TeamPlay } from './team.ts';
 import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
+import { CALL, GOLD } from './course-modes.ts';
+import { GoldPlay, SpudPlay } from './modes.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
 import { Confetti, Puffs, Splashes } from './fx.ts';
 import { DASH_CD, Marble, Mode } from './physics.ts';
@@ -319,6 +321,7 @@ export class MarbleGame {
     this.ui.clearTags();
     this.confetti.clear();
     if (!this.course || this.course.id !== 'hopscotch' || this.racers.length === 0 || this.menuMarbles.length === 0) void this.loadRound(0, true);
+    this.readyNextShow();
     this.ui.menu({
       design: OUTFITS[this.design].name,
       kind: hatName(OUTFITS[this.design]),
@@ -378,8 +381,57 @@ export class MarbleGame {
       this.roster.push({ id: k, name: names[k % names.length], outfit: k < OUTFITS.length && Math.random() < 0.5 ? OUTFITS[(this.design + k) % OUTFITS.length] : randomOutfit(Math.random), skill, style, player: false, out: false, owner: '', human: false });
     }
     this.roundIdx = 0;
-    dealShow();
+    this.deal();
     void this.startRound();
+  }
+
+  /** the show's running order: the one already dealt behind the menu, or a new one */
+  private deal() {
+    if (this.dealt) this.dealt = false;
+    else dealShow();
+    // (test hook: ?lineup=hotspud,goldrush plays those, in that order)
+    const q = new URLSearchParams(location.search).get('lineup');
+    if (q) setShow(q.split(',') as RoundId[]);
+  }
+  private dealt = false;
+
+  /**
+   * A round built before it's needed: while the results are up (or behind the menu) the next
+   * course, its bot paths and its shaders are made, so the wheel has nothing left to wait for.
+   */
+  private buildAhead(id: RoundId) {
+    if (this.ahead?.id === id) return;
+    this.dropAhead();
+    const c = buildRound(id);
+    if (c.path) courseAI(c);
+    this.ahead = { id, c, world: biome() };
+    void this.renderer.compileAsync(c.b.group, this.camera, this.scene).catch(() => undefined);
+  }
+  private dropAhead() {
+    if (this.ahead) disposeGroup(this.ahead.c.b.group);
+    this.ahead = null;
+  }
+  private spud: SpudPlay | null = null;
+  private gold: GoldPlay | null = null;
+  private callI = -1;
+  private ahead: { id: RoundId; c: Course; world: Biome } | null = null;
+  /** when the browser has a quiet moment */
+  private idle(f: () => void) {
+    const w = window as Window & { requestIdleCallback?: (f: () => void, o: { timeout: number }) => void };
+    if (w.requestIdleCallback) w.requestIdleCallback(f, { timeout: 900 });
+    else window.setTimeout(f, 200);
+  }
+  /** the next show dealt and its first round built while you look at the menu */
+  private readyNextShow() {
+    if (this.quick) return;
+    this.idle(() => {
+      if ((this.state !== 'menu' && this.state !== 'champion') || this.guest) return;
+      if (!this.dealt) {
+        dealShow();
+        this.dealt = true;
+      }
+      this.buildAhead(SHOW[0].id);
+    });
   }
 
   private async startRound() {
@@ -390,8 +442,9 @@ export class MarbleGame {
     const order = this.roster.filter((x) => !x.out).map((x) => x.id).sort(() => Math.random() - 0.5);
     this.loadedBy.clear();
     this.host?.broadcast({ t: 'round', idx: this.roundIdx, order, slots: this.slots, out: this.roster.filter((x) => x.out).map((x) => x.id), key: this.roundKey(), lineup: SHOW.map((x) => x.id) });
-    // the wheel spins while the course builds
-    await Promise.all([this.ui.reveal(POOL.map((id) => ROUNDS[id]), SHOW[this.roundIdx], this.roundIdx + 1, SHOW.length, this.quick), this.loadRound(this.roundIdx, false, order)]);
+    // the wheel spins while the course goes in
+    const wheel = this.ui.reveal(POOL.map((id) => ROUNDS[id]), SHOW[this.roundIdx], this.roundIdx + 1, SHOW.length, this.quick);
+    await Promise.all([wheel, this.loadRound(this.roundIdx, false, order)]);
     this.introCard();
   }
 
@@ -400,8 +453,8 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : `First ${this.slots} of ${alive} qualify`;
-    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : c.kind === 'team' ? 'TEAM GAME' : 'RACE', goal, blurb: info.blurb, team: this.teamPlay?.mine() });
+    const goal = c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : c.kind === 'score' ? `The richest ${this.slots} go through` : `First ${this.slots} of ${alive} qualify`;
+    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: c.kind === 'survival' ? 'SURVIVAL' : c.kind === 'final' ? 'FINAL · RACE' : c.kind === 'team' ? 'TEAM GAME' : c.kind === 'score' ? 'GOLD GRAB' : 'RACE', goal, blurb: info.blurb, team: this.teamPlay?.mine() });
     this.state = 'intro';
     this.stateT = 0;
     this.ui.hud(false);
@@ -426,14 +479,22 @@ export class MarbleGame {
     this.ui.clearTags();
     this.teamPlay?.dispose();
     this.teamPlay = null;
-    // (the menu stands on the first platform course)
-    const c = (this.course = buildRound(menu ? 'hopscotch' : SHOW[idx].id));
-    if (c.path) courseAI(c);
+    this.spud?.dispose();
+    this.spud = null;
+    this.gold?.dispose();
+    this.gold = null;
+    this.callI = -1;
+    // (the menu stands on the first platform course; a round may be built already)
+    const id: RoundId = menu ? 'hopscotch' : SHOW[idx].id;
+    const done = !menu && this.ahead?.id === id ? this.ahead : null;
+    if (done) this.ahead = null;
+    const c = (this.course = done ? done.c : buildRound(id));
+    if (!done && c.path) courseAI(c);
     this.scene.add(c.b.group);
     this.splashes.y = c.lakeY;
-    const ctr = c.path ? c.path.P[Math.floor(c.path.count / 2)] : c.plate!.center;
+    const ctr = c.path ? c.path.P[Math.floor(c.path.count / 2)] : (c.belt?.center ?? c.plate!.center);
     // (its world: buildRound chose it)
-    this.stage.setBiome(biome());
+    this.stage.setBiome(done ? done.world : biome());
     this.stage.setCourse(c.lakeY, ctr);
     const field = menu ? this.menuField() : order0 ? order0.map((id) => this.roster.find((x) => x.id === id)!).filter(Boolean) : this.roster.filter((x) => !x.out);
     const grid = c.grid(field.length);
@@ -462,7 +523,13 @@ export class MarbleGame {
       if (menu) this.menuMarbles.push(r);
     });
     if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
+    if (c.spud) this.spud = new SpudPlay(c, this.scene, () => this.racers);
+    if (c.gold) {
+      this.gold = new GoldPlay(c, this.scene, () => this.racers);
+      for (const r of this.racers) if (r.bot) r.bot.gold = this.gold;
+    }
     this.finCount = 0;
+    this.wrapAt = 0;
     this.lavaWarned = false;
     this.playT = 0;
     this.confetti.clear();
@@ -474,7 +541,7 @@ export class MarbleGame {
       this.camYaw = Math.atan2(c.path.T[i].x, c.path.T[i].z);
     }
     // the new materials' shaders compiled up front, not mid-race
-    await this.renderer.compileAsync(this.scene, this.camera).catch(() => undefined);
+    if (!done) await this.renderer.compileAsync(this.scene, this.camera).catch(() => undefined);
   }
 
   private menuField(): Contestant[] {
@@ -496,6 +563,7 @@ export class MarbleGame {
   }
 
   private ranked() {
+    if (this.gold) return this.gold.ranking() as Racer[];
     return [...this.racers].sort((a, b) => {
       if (a.fin && b.fin) return a.fin - b.fin;
       if (a.fin) return -1;
@@ -540,12 +608,12 @@ export class MarbleGame {
           if (skip) this.ui.hideCard();
         } else if (this.host) {
           const all = [...this.host.guests.keys()].every((id) => this.loadedBy.has(id) || !this.roster.some((x) => x.owner === id && !x.out));
-          if ((this.stateT > INTRO_T || (skip && this.stateT > 1.5)) && (all || this.stateT > 20)) this.toCountdown();
-        } else if (this.stateT > INTRO_T || skip) this.toCountdown();
+          if ((this.stateT > INTRO_T || (skip && this.stateT > 0.5)) && (all || this.stateT > 10)) this.toCountdown();
+        } else if (this.stateT > INTRO_T || (skip && this.stateT > 0.25)) this.toCountdown();
         break;
       }
       case 'countdown': {
-        const n = Math.ceil(this.goAt - c.b.world.time);
+        const n = Math.ceil((this.goAt - c.b.world.time) / COUNT_T);
         if (n !== this.lastCount && n <= 3) {
           this.lastCount = n;
           if (n > 0) {
@@ -560,11 +628,14 @@ export class MarbleGame {
       case 'over':
         this.playT += dt;
         this.rules(dt);
-        if (this.state === 'over' && this.stateT > 3.6 && !this.guest) this.toResults();
+        this.noWaiting();
+        if (this.state === 'over' && this.stateT > (c.kind === 'final' ? 3.6 : OVER_T) && !this.guest) this.toResults();
         break;
       case 'results':
       case 'champion':
         if (this.resultsNext) {
+          // (space or enter: on with it)
+          if (this.pressed.has('Space') || this.pressed.has('Enter')) this.resultsT = 0;
           this.resultsT -= dt;
           this.ui.autoCount(this.resultsT);
           if (this.resultsT <= 0) {
@@ -690,7 +761,7 @@ export class MarbleGame {
   /** the countdown to GO at world time `goAt` (online: the host's, sent to all) */
   private toCountdown(goAt?: number) {
     const c = this.course!;
-    this.goAt = goAt ?? c.b.world.time + 3;
+    this.goAt = goAt ?? c.b.world.time + 3 * COUNT_T;
     this.host?.broadcast({ t: 'count', go: this.goAt });
     this.ui.hideCard();
     this.state = 'countdown';
@@ -751,7 +822,12 @@ export class MarbleGame {
       if (!this.guest && this.state === 'play' && this.playT > TEAM_T) this.endRound();
       return;
     }
+    if (c.gold && this.gold) {
+      this.goldRules(dt);
+      return;
+    }
     if (c.plate) {
+      if (this.state === 'play') this.partyRules();
       // Storm Deck: a crack and a boom for every bolt (the blast itself is the course's field)
       if (c.storm && this.state === 'play') {
         const x = w.time - c.state.go;
@@ -875,6 +951,122 @@ export class MarbleGame {
       if (!this.guest && this.racers.every((x) => x.fin || x.out)) this.endRound();
     }
   }
+  /** Colour Call's calls, Hot Spud's fuses */
+  private partyRules() {
+    const c = this.course!;
+    const w = c.b.world;
+    const x = w.time - c.state.go;
+    if (c.call) {
+      const call = c.call.at(x);
+      if (call.i !== this.callI && x >= call.t0) {
+        this.callI = call.i;
+        this.sound.notes([72 + (call.i % 5) * 2, 79], 0.08, 0.4, true);
+      }
+      // (the call stays up, out of the way, until the floor has gone)
+      this.ui.call(x >= call.t0 && x < call.drop ? `${CALL.names[call.c]}!` : null, CALL.colors[call.c]);
+    }
+    if (c.spud && this.spud) {
+      const before = this.player() ? c.spud.holders.has(this.player()!.m.id) : false;
+      if (!this.guest && this.spud.tick(w.time, this.slots, x)) {
+        this.host?.broadcast({ t: 'spud', h: [...c.spud.holders], end: c.spud.end });
+        for (const id of this.spud.blown) {
+          const r = this.racers.find((q) => q.m.id === id);
+          if (r && !r.out) {
+            this.host?.broadcast({ t: 'out', id: r.c.id });
+            r.out = true;
+            this.spudBlast(r);
+          }
+        }
+        this.spudNote(before);
+      }
+    }
+  }
+
+  /** you got it, or you got rid of it */
+  private spudNote(before: boolean) {
+    const c = this.course!;
+    const p = this.player();
+    if (!p || p.out || !c.spud) return;
+    const has = c.spud.holders.has(p.m.id);
+    if (has && !before) {
+      this.ui.banner('YOU HAVE THE SPUD!', 'bad', 'Touch someone to pass it on', 1300);
+      this.sound.notes([55, 52], 0.08, 0.4);
+    } else if (!has && before && c.spud.holders.size) {
+      this.ui.banner('PASSED IT ON!', 'good', '', 900);
+      this.sound.notes([76, 84], 0.06, 0.3, true);
+    }
+  }
+
+  /** a spud going off: gone in a puff, and anyone next to it thrown over */
+  private spudBlast(r: Racer) {
+    const m = r.m;
+    this.sound.boom(m.pos.x, m.pos.y, m.pos.z);
+    this.puffs.dust(m.pos.clone(), 22, 0.5, 3.2);
+    for (const o of this.racers) {
+      if (o === r || o.out || !o.local) continue;
+      const dx = o.m.pos.x - m.pos.x, dz = o.m.pos.z - m.pos.z, d = Math.hypot(dx, dz);
+      if (d > 3.2 || d < 0.05) continue;
+      o.m.vel.x += (dx / d) * 9;
+      o.m.vel.z += (dz / d) * 9;
+      o.m.vel.y += 5;
+      o.m.knock(0.8);
+    }
+    m.active = false;
+    if (r.c.player && this.state === 'play') {
+      this.ui.banner('BOOM!', 'bad', 'It went off in your hands', 2200);
+      this.sound.eliminated();
+      this.sound.voice('wah', m.id, m.pos.x, m.pos.y, m.pos.z, true);
+    }
+  }
+
+  /** Gold Rush: the pick-ups and spills (the host's), falls and getting back on (each browser its own) */
+  private goldRules(_dt: number) {
+    const c = this.course!;
+    const w = c.b.world;
+    const G = this.gold!;
+    const x = w.time - c.state.go;
+    const on = this.state === 'play';
+    if (on) G.refresh(x);
+    if (on && !this.guest) {
+      for (const e of G.grabs(x)) {
+        this.host?.broadcast({ t: 'gold', k: e.k, id: e.id, v: e.v });
+        this.coinFx(e.id, e.v);
+      }
+      for (const e of G.knocks(x)) this.host?.broadcast({ t: 'gold', id: e.id, n: e.n, add: e.add });
+    }
+    for (const r of this.racers) {
+      if (!r.fell && r.m.pos.y < c.killY) {
+        r.fell = w.time;
+        if (r.local || !this.guest) {
+          this.drop(r);
+          this.sound.voice('wah', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, r.c.player);
+        }
+        if (!this.guest && on) {
+          const left = G.fell(r);
+          this.host?.broadcast({ t: 'gold', id: r.m.id, n: left });
+          if (r.c.player) this.ui.banner('SPLASH!', 'bad', 'A third of your gold is gone', 1400);
+        }
+      } else if (r.fell && r.local && w.time - r.fell > 1.2) {
+        r.fell = 0;
+        const a = Math.random() * Math.PI * 2, d = 5 + Math.random() * 6;
+        const A = c.gold!;
+        r.m.pos.set(A.center.x + Math.cos(a) * d, A.center.y + 2, A.center.z + Math.sin(a) * d);
+        r.m.vel.set(0, 0, 0);
+        r.m.ang.set(0, 0, 0);
+        r.m.mode = Mode.Run;
+        r.m.tumbleT = r.m.upT = r.m.heldT = 0;
+        r.m.release();
+      } else if (r.fell && !r.local && r.m.pos.y > c.killY + 3) r.fell = 0;
+    }
+    if (!this.guest && on && this.playT > GOLD.T) this.endRound();
+  }
+
+  /** a coin going into someone's pocket */
+  private coinFx(id: number, v: number) {
+    const p = this.player();
+    if (p?.m.id === id) this.sound.notes(v > 1 ? [79, 84, 88, 91] : [88 + Math.floor(Math.random() * 3)], 0.05, v > 1 ? 0.45 : 0.25, true);
+  }
+
   private lavaWarned = false;
   private strikes: import('./course-storm.ts').Strike[] = [];
 
@@ -994,12 +1186,56 @@ export class MarbleGame {
     r.s = s;
   }
 
+  /**
+   * (the host, or solo) Nobody waits on bots: once every person in the round is through or out,
+   * it wraps up a moment later and the rest is settled where they stand. A round with no people
+   * left in it (you're watching the rest of the show) skips on space or enter.
+   */
+  private noWaiting() {
+    const c = this.course!;
+    if (this.guest || this.state !== 'play' || this.autopilot) return;
+    const people = this.racers.filter((r) => r.c.human);
+    const skip = this.pressed.has('Enter') || this.pressed.has('Space');
+    const done = people.every((r) => r.out || r.fin > 0);
+    if (!done) {
+      this.wrapAt = 0;
+      return;
+    }
+    if (!people.length) {
+      if (skip) this.wrapUp();
+      return;
+    }
+    if (c.team) return;
+    if (!this.wrapAt) this.wrapAt = this.playT + WRAP_T;
+    if (this.playT >= this.wrapAt || skip) this.wrapUp();
+  }
+  private wrapAt = 0;
+
+  /** the round settled as it stands: the leaders take the places left, the best of the standing survive */
+  private wrapUp() {
+    const c = this.course!;
+    if (c.team || c.gold) {
+      this.endRound();
+      return;
+    }
+    if (c.plate) {
+      const still = this.racers.filter((r) => !r.out).map((r) => [r.c.skill + Math.random() * 0.6, r] as const);
+      still.sort((a, b) => b[0] - a[0]);
+      for (const [, r] of still.slice(this.slots)) r.out = true;
+    } else {
+      const left = this.racers.filter((r) => !r.fin && !r.out).sort((a, b) => b.s - a.s);
+      for (const r of left.slice(0, Math.max(0, this.slots - this.finCount))) r.fin = ++this.finCount;
+    }
+    this.endRound();
+  }
+
   /** (the host, or solo) time's up or the places are taken: who goes through */
   private endRound() {
     const c = this.course!;
     if (this.state !== 'play') return;
     const loser = this.teamPlay ? this.teamPlay.loser() : -1;
-    const through = this.racers.filter((r) => (c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
+    const rich = this.gold ? new Set(this.gold.ranking().slice(0, this.slots)) : null;
+    const through = this.racers.filter((r) => (rich ? rich.has(r) : c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
     this.host?.broadcast({ t: 'end', through, fins: this.racers.filter((r) => r.fin).map((r) => [r.c.id, r.fin] as [number, number]) });
     this.roundOver(new Set(through));
   }
@@ -1024,8 +1260,14 @@ export class MarbleGame {
       if (ok) this.sound.qualified();
       else this.sound.eliminated();
       this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
+    } else if (p && c.gold) {
+      const ok = through.has(p.c.id);
+      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', ok ? 'Enough gold to go through' : 'Not enough gold', 3200);
+      if (ok) this.sound.qualified();
+      else this.sound.eliminated();
+      this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
     } else if (p && c.plate && !p.out) {
-      this.ui.banner('SURVIVED!', 'good', 'You stayed on the plate');
+      this.ui.banner('SURVIVED!', 'good', c.spud ? 'You kept your hands clean' : c.call ? 'You kept your footing' : c.belt ? 'You stayed on the belt' : 'You stayed on the plate');
       this.sound.qualified();
       this.sound.voice('yay', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
     } else if (p && !c.plate && p.out && !p.fin) {
@@ -1046,6 +1288,7 @@ export class MarbleGame {
     this.state = final ? 'champion' : 'results';
     this.stateT = 0;
     this.ui.hideBanner();
+    this.ui.call(null);
     this.ui.hud(false);
     this.sound.setMusic('calm');
     const order = this.ranked();
@@ -1055,10 +1298,11 @@ export class MarbleGame {
       state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out ? 'out' : 'q',
       me: r.c.player,
       style: r.c.human ? (r.c.player ? undefined : 'Player') : STYLES[r.c.style].name,
-      note: final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
+      note: final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : this.gold ? `${this.gold.score.get(r.m.id) ?? 0} GOLD` : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
     }));
     const online = this.online();
     if (final) {
+      this.readyNextShow();
       const win = order.find((r) => r.fin === 1) ?? order[0];
       const me = win?.c.player;
       this.ui.results({
@@ -1085,21 +1329,26 @@ export class MarbleGame {
       void this.startRound();
     };
     this.ui.results({
-      title: playerIn ? 'YOU QUALIFIED!' : 'ROUND OVER',
+      title: playerIn ? 'YOU QUALIFIED!' : p ? 'YOU ARE OUT' : 'ROUND OVER',
       sub: `${left} beans go through to ${SHOW[this.roundIdx + 1]?.name ?? "the next round"}`,
       rows,
-      next: this.guest ? 'NEXT ROUND SOON' : playerIn || this.host ? 'NEXT ROUND' : 'WATCH THE SHOW',
+      next: this.guest ? 'NEXT ROUND SOON' : playerIn || this.host ? 'NEXT ROUND' : 'NEW SHOW',
       wait: !!this.guest,
       onNext: () => {
-        if (!this.guest) next();
+        if (this.guest) return;
+        if (playerIn || this.host) next();
+        else (this.ui.hideResults(), this.newShow());
       },
-      extra: online ? { label: 'LEAVE', on: () => this.leaveParty() } : playerIn ? undefined : { label: 'NEW SHOW', on: () => (this.ui.hideResults(), this.newShow()) },
-      auto: (playerIn || this.host) && !this.guest ? 8 : undefined,
+      extra: online ? { label: 'LEAVE', on: () => this.leaveParty() } : playerIn ? undefined : { label: 'WATCH THE REST', on: next },
+      auto: (playerIn || this.host) && !this.guest ? RESULTS_T : undefined,
     });
-    this.resultsT = 8;
+    this.resultsT = RESULTS_T;
     // (online the host moves the show on, whether it's still in or not)
     this.resultsNext = playerIn || this.host ? next : null;
     if (this.guest) this.resultsNext = null;
+    // (the next course goes up behind the results, not after them)
+    const up = SHOW[this.roundIdx + 1];
+    if (up) this.idle(() => this.state === 'results' && this.buildAhead(up.id));
   }
 
   // ------------------------------------------------------------------------------------- party play
@@ -1263,7 +1512,29 @@ export class MarbleGame {
       case 'out':
         if (r && !r.out) {
           r.out = true;
-          if (r.local && !r.pend) this.fellOff(r);
+          if (this.course?.spud) this.spudBlast(r);
+          else if (r.local && !r.pend) this.fellOff(r);
+        }
+        break;
+      case 'spud': {
+        const A = this.course?.spud;
+        if (A) {
+          const me = this.player();
+          const before = me ? A.holders.has(me.m.id) : false;
+          A.holders = new Set(m.h);
+          A.end = m.end;
+          this.spudNote(before);
+        }
+        break;
+      }
+      case 'gold':
+        if (this.gold) {
+          if (m.k !== undefined && m.id !== undefined) {
+            this.gold.take(m.k, m.id, m.v ?? 1);
+            this.coinFx(m.id, m.v ?? 1);
+          }
+          if (m.n !== undefined && m.id !== undefined) this.gold.set(m.id, m.n);
+          if (m.add) this.gold.add(m.add);
         }
         break;
       case 'end':
@@ -1302,14 +1573,15 @@ export class MarbleGame {
   }
 
   private showLobby(status?: string) {
-    const code = this.host ? (this.host.peer.open ? this.host.code : '') : (this.guest?.code ?? '');
+    // (the code is made here, so it's up at once; the broker catches up behind it)
+    const code = this.host ? this.host.code : (this.guest?.code ?? '');
     this.ui.hideMenu();
     this.ui.lobby({
       code,
       host: !!this.host,
       members: this.members.map((x) => ({ name: x.name, color: x.outfit.a, me: x.id === (this.host ? 'host' : this.guest?.id), host: x.id === 'host' })),
       max: MAX_PLAYERS,
-      status: this.host && !code ? 'Opening the party…' : status,
+      status: this.host && !this.host.peer.open ? 'Opening the party…' : status,
       onStart: () => this.startShow(),
       onLeave: () => this.leaveParty(),
     });
@@ -1332,7 +1604,7 @@ export class MarbleGame {
     this.showNo++;
     this.host.broadcast({ t: 'show', roster: this.roster.map(({ id, name, outfit, skill, style, owner, human }) => ({ id, name, outfit, skill, style, owner, human })) });
     this.roundIdx = 0;
-    dealShow();
+    this.deal();
     void this.startRound();
   }
 
@@ -1529,7 +1801,7 @@ export class MarbleGame {
     const cam = this.camera;
     for (const r of this.racers) {
       const root = r.rig.root;
-      root.visible = (r.m.active || r.m.pos.y > this.course!.lakeY) && r.m.pos.y > this.course!.lakeY - 1;
+      root.visible = (r.m.active || r.m.pos.y > this.course!.lakeY) && r.m.pos.y > this.course!.lakeY - 1 && !(r.out && this.course!.spud);
       if (root.visible) r.rig.update(r.m, dt, t);
     }
     // the glass: the camera in each marble's frame, and its rotation to the world
@@ -1660,8 +1932,9 @@ export class MarbleGame {
     if (c.plate) {
       const a = 0.6 + t * 2.4;
       const r = 32 - t * 10;
-      cam.position.set(c.plate.center.x + Math.cos(a) * r, c.plate.center.y + 16 - t * 6, c.plate.center.z + Math.sin(a) * r);
-      this.camLook.copy(c.plate.center);
+      const at = c.belt?.center ?? c.plate.center;
+      cam.position.set(at.x + Math.cos(a) * r, at.y + 16 - t * 6, at.z + Math.sin(a) * r);
+      this.camLook.copy(at);
       cam.lookAt(this.camLook);
       return;
     }
@@ -1754,14 +2027,19 @@ export class MarbleGame {
     if (c.kind === 'final') status = this.finCount ? 'WINNER!' : 'FIRST WINS';
     else if (c.team && this.teamPlay) status = this.teamPlay.mine() ? `TEAM ${this.teamPlay.mine()!.name}` : 'TEAM GAME';
     else if (race) status = `QUALIFIED ${Math.min(this.finCount, this.slots)} / ${this.slots}`;
+    else if (this.gold) status = `GOLD ${p ? (this.gold.score.get(p.m.id) ?? 0) : 0} · TOP ${this.slots} GO THROUGH`;
+    else if (c.spud && p && c.spud.holders.has(p.m.id) && !p.out) status = 'YOU HAVE THE SPUD!';
     else status = `ALIVE ${alive} · TO ${this.slots}`;
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
     if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
+    else if (this.gold && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, GOLD.T - this.playT));
+    else if (c.spud && (this.state === 'play' || this.state === 'over')) timer = clock(c.spud.holders.size ? Math.max(0, c.spud.end - c.b.world.time) : 0);
     else if (c.plate && (this.state === 'play' || this.state === 'over')) {
       timer = clock(SURVIVE_T - this.playT);
     } else if (race && this.state === 'play' && this.playT > RACE_T - 30) timer = clock(RACE_T - this.playT);
-    const spectating = p && p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch` : undefined;
+    const noPeople = !this.guest && this.racers.every((r) => !r.c.human);
+    const spectating = !p || p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch${noPeople ? ' · ENTER to skip' : ''}` : undefined;
     if (spectating && (this.pressed.has('ArrowLeft') || this.pressed.has('KeyA'))) this.spectate--;
     if (spectating && (this.pressed.has('ArrowRight') || this.pressed.has('KeyD'))) this.spectate++;
     this.ui.hudData({
@@ -1776,8 +2054,10 @@ export class MarbleGame {
       race,
       keys: this.roundIdx === 0 && this.playT < 12,
     });
-    this.ui.teams(c.team && this.teamPlay ? this.teamPlay.scores() : null);
+    this.ui.teams(c.team && this.teamPlay ? this.teamPlay.scores() : this.gold ? this.gold.board() : null);
     this.teamPlay?.sync();
+    this.spud?.sync(c.b.world.time);
+    if (this.gold && c.state.go < 1e8) this.gold.sync(c.b.world.time, c.b.world.time - c.state.go);
     if (race && c.path) {
       const L = c.finishS;
       this.ui.progress(this.racers.map((r) => ({ id: r.c.id, f: r.fin ? 1 : r.s / L, color: r.c.outfit.a, me: r.c.player, out: r.out && !r.fin })));
@@ -1797,7 +2077,14 @@ const V_FEET = new THREE.Vector3();
 const RACE_T = 180;
 const SURVIVE_T = 110;
 const TEAM_T = TEAM_ROUND_T;
-const INTRO_T = 8;
+const INTRO_T = 3.6;
+/** a beat of the 3, 2, 1 */
+const COUNT_T = 0.7;
+/** the round's end on screen, then the results (they move on by themselves) */
+const OVER_T = 2;
+const RESULTS_T = 4;
+/** from the last person being done to the round wrapping up */
+const WRAP_T = 1.4;
 
 function clock(sec: number) {
   const k = Math.max(0, Math.ceil(sec));
@@ -1864,8 +2151,7 @@ function disposeGroup(g: THREE.Object3D) {
     if (Array.isArray(mm)) mm.forEach((x) => mats.add(x));
     else if (mm) mats.add(mm);
   });
-  for (const m of mats) {
-    for (const v of Object.values(m)) if (v instanceof THREE.Texture) v.dispose();
-    m.dispose();
-  }
+  // (the textures go, the materials don't: disposing one lets its shader program go, and the next
+  // course would only compile the same program again)
+  for (const m of mats) for (const v of Object.values(m)) if (v instanceof THREE.Texture) v.dispose();
 }
