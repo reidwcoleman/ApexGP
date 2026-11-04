@@ -93,6 +93,8 @@ export class Bot {
   private spudB: SpudBrain | null = null;
   private goldB: GoldBrain | null = null;
   private beltB: BeltBrain | null = null;
+  /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
+  ease = 0;
   /** Gold Rush: what's on the sand */
   gold: GoldPlay | null = null;
   private crumbleB: CrumbleBrain | null = null;
@@ -179,31 +181,36 @@ export class Bot {
     if (c.storm) {
       this.stormB ??= new StormBrain(m, this.skill, this.rnd);
       if (t < c.state.go + this.react) return;
-      return this.stormB.update(dt, t, c, all);
+      this.stormB.update(dt, t, c, all);
+      return void m.input.multiplyScalar(1 - 0.15 * this.ease);
     }
     if (c.tide) {
       this.tideB ??= new TideBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
-      return this.tideB.update(dt, t, c, all);
+      this.tideB.update(dt, t, c, all);
+      return void m.input.multiplyScalar(1 - 0.15 * this.ease);
     }
     if (c.call) {
       this.callB ??= new CallBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
-      return this.callB.update(dt, t, c, all);
+      this.callB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
     if (c.spud) {
       this.spudB ??= new SpudBrain(m, this.skill, this.rnd);
       if (t < c.state.go + this.react) return;
-      return this.spudB.update(dt, t, c, all);
+      this.spudB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
     if (c.gold) {
       this.goldB ??= new GoldBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react || !this.gold) return;
-      return this.goldB.update(dt, t, c, all, this.gold.live, this.gold.taken);
+      this.goldB.update(dt, t, c, all, this.gold.live, this.gold.taken, this.ease);
+      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
     }
     if (c.belt) {
       this.beltB ??= new BeltBrain(m, this.skill, this.rnd);
-      return this.beltB.update(dt, t, c, all);
+      return this.beltB.update(dt, t, c, all, this.ease);
     }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);
@@ -277,7 +284,7 @@ export class Bot {
     let inLat = aLat / 13;
     if (Math.abs(inLat) > 1) inLat = Math.sign(inLat);
     if (fwd * fwd + inLat * inLat > 1) fwd = Math.sign(fwd) * Math.sqrt(Math.max(0, 1 - inLat * inLat));
-    const k = fwd > 0 ? this.pace : 1;
+    const k = fwd > 0 ? this.pace * (1 - 0.24 * this.ease) : 1;
     m.input.set((tx * fwd + rx * inLat) * k, 0, (tz * fwd + rz * inLat) * k);
     // ---- a planned hop (over a low arm, a roller, a fin)
     if (this.jumpAt <= t + dt * 0.5) {
@@ -304,7 +311,7 @@ export class Bot {
       const straight = Math.abs(A.kap[A.index(s + 4)]) < 0.035 && Math.abs(A.kap[A.index(s + 10)]) < 0.05;
       // (a dive is a belly flop at the end: never on the run-up to a jump, it can't take off from one)
       const clear = this.planHit < 0.05 && Math.min(room, this.nerve) > vAlong + 7 - 6 * this.skill && straight && !jumping;
-      if (aligned && (clear || (finish && room > vAlong + 4 && !jumping)) && this.rnd() < this.dashUse * hold * dt * (finish ? 6 : 1.2)) {
+      if (aligned && (clear || (finish && room > vAlong + 4 && !jumping)) && this.rnd() < this.dashUse * hold * dt * (finish ? 6 : 1.2) * (1 - this.ease)) {
         m.input.set(tx, 0, tz).addScaledVector(TMP.set(rx, 0, rz), THREE.MathUtils.clamp((latGoal - lat) * 0.15, -0.2, 0.2)).normalize();
         m.dash = true;
       } else if ((open || this.style.walls) && this.aggr * this.skill * this.style.shove > 0.3) this.barge(dt, A, i, lat, tx, tz, rx, rz, all, open > 0);

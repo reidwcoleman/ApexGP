@@ -10,7 +10,7 @@ import { glowMat } from './obs-world.ts';
  */
 
 interface Who {
-  c: { id: number; name: string; skill: number; player: boolean; outfit: { a: number } };
+  c: { id: number; name: string; skill: number; player: boolean; human: boolean; outfit: { a: number } };
   m: Marble;
   out: boolean;
 }
@@ -18,6 +18,8 @@ interface Who {
 /** Hot Spud: the fuses, the passing and the spuds on people's heads */
 export class SpudPlay {
   private spuds: THREE.Group[] = [];
+  /** a red ring on the floor round everyone holding one */
+  private marks: THREE.Mesh[] = [];
   private sparks: THREE.Mesh[] = [];
   private skin: THREE.MeshStandardMaterial;
   private since = new Map<number, number>();
@@ -25,6 +27,8 @@ export class SpudPlay {
   readonly arena;
   /** the ones it took this time round */
   blown: number[] = [];
+  /** who handed it to whom this frame */
+  passed: [number, number][] = [];
 
   constructor(
     course: Course,
@@ -36,6 +40,8 @@ export class SpudPlay {
     const fuseM = new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.8 });
     const body = new THREE.SphereGeometry(0.72, 22, 16).scale(1.2, 0.85, 0.9);
     const fuse = new THREE.CylinderGeometry(0.035, 0.05, 0.5, 6).translate(0, 0.25, 0).rotateZ(-0.4);
+    const ringG = new THREE.RingGeometry(0.95, 1.2, 36).rotateX(-Math.PI / 2);
+    const ringM = new THREE.MeshBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false });
     for (let k = 0; k < 8; k++) {
       const g = new THREE.Group();
       const b = new THREE.Mesh(body, skin);
@@ -49,11 +55,24 @@ export class SpudPlay {
       scene.add(g);
       this.spuds.push(g);
       this.sparks.push(s);
+      const r = new THREE.Mesh(ringG, ringM);
+      r.visible = false;
+      scene.add(r);
+      this.marks.push(r);
     }
   }
 
   dispose() {
-    for (const g of this.spuds) this.scene.remove(g);
+    for (const g of [...this.spuds, ...this.marks]) this.scene.remove(g);
+  }
+
+  /** the new list of holders: anyone who's just got rid of one gets a burst of speed */
+  setHolders(h: Iterable<number>, end: number, t: number) {
+    const A = this.arena;
+    const next = new Set(h);
+    if (next.size) for (const id of A.holders) if (!next.has(id)) A.free.set(id, t + 1.1);
+    A.holders = next;
+    A.end = end;
   }
 
   /** (the host) the fuses and the passing; true when the list of holders changed */
@@ -62,6 +81,7 @@ export class SpudPlay {
     const all = this.who().filter((r) => !r.out);
     let changed = false;
     this.blown.length = 0;
+    this.passed.length = 0;
     if (!A.holders.size) {
       if (x < this.nextFuse || all.length <= slots) return false;
       // (a fuse: fewer spuds than there are places left to lose)
@@ -87,7 +107,9 @@ export class SpudPlay {
         if (h.m.pos.distanceToSquared(o.m.pos) > SPUD.pass * SPUD.pass) continue;
         A.holders.delete(h.m.id);
         A.holders.add(o.m.id);
+        A.free.set(h.m.id, t + 1.1);
         this.since.set(o.m.id, t);
+        this.passed.push([h.m.id, o.m.id]);
         changed = true;
         break;
       }
@@ -110,9 +132,13 @@ export class SpudPlay {
       g.rotation.y = t * 2;
       g.visible = true;
       this.sparks[i].scale.setScalar(0.8 + 0.5 * Math.sin(t * (left < 3 ? 40 : 18)));
+      const k = this.marks[i];
+      k.position.set(r.m.pos.x, r.m.pos.y - 0.46, r.m.pos.z);
+      k.scale.setScalar(1 + 0.12 * Math.sin(t * (left < 3 ? 22 : 9)));
+      k.visible = true;
       i++;
     }
-    for (; i < this.spuds.length; i++) this.spuds[i].visible = false;
+    for (; i < this.spuds.length; i++) this.spuds[i].visible = this.marks[i].visible = false;
   }
 }
 
@@ -169,14 +195,15 @@ export class GoldPlay {
   grabs(x: number): { k: number; id: number; v: number }[] {
     const out: { k: number; id: number; v: number }[] = [];
     const all = this.who();
-    const R2 = GOLD.take * GOLD.take;
     for (const k of this.live) {
       if (this.taken.has(k.k) || k.t + GOLD.fly > x) continue;
       for (const r of all) {
         const m = r.m;
         if (!m.active || m.pos.y < this.arena.center.y - 0.5) continue;
         const dx = m.pos.x - k.x, dz = m.pos.z - k.z;
-        if (dx * dx + dz * dz > R2) continue;
+        // (people's hands reach a little further: no one's as exact as a bot)
+        const reach = r.c.human ? GOLD.take + 0.5 : GOLD.take;
+        if (dx * dx + dz * dz > reach * reach) continue;
         this.take(k.k, m.id, k.v);
         out.push({ k: k.k, id: m.id, v: k.v });
         break;

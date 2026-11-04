@@ -73,13 +73,37 @@ export interface CallArena {
   xz(k: number): [number, number];
 }
 
+/** a tile's top: a raised, rounded panel in a darker frame */
+function tileTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#8a8a96';
+  x.fillRect(0, 0, 128, 128);
+  x.fillStyle = '#ffffff';
+  x.beginPath();
+  x.roundRect(7, 7, 114, 114, 16);
+  x.fill();
+  const g = x.createRadialGradient(64, 64, 8, 64, 64, 84);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(120,120,140,0.3)');
+  x.fillStyle = g;
+  x.beginPath();
+  x.roundRect(7, 7, 114, 114, 16);
+  x.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
 function callList() {
   const out: Call[] = [];
   const N = CALL.n * CALL.n;
   let t = 2.5;
   for (let i = 0; i < 80; i++) {
     const rnd = seeded(7001 + i * 131);
-    const warn = Math.max(1.5, 4.1 - 0.34 * i);
+    const warn = Math.max(1.7, 4.2 - 0.3 * i);
     const kinds = Math.min(6, 3 + Math.floor(i / 2));
     const c = Math.floor(rnd() * 6);
     const others = [0, 1, 2, 3, 4, 5].filter((x) => x !== c).sort(() => rnd() - 0.5).slice(0, kinds - 1);
@@ -102,7 +126,7 @@ export function colourCall(info: { name: string; blurb: string }): Course {
   const state = { go: 1e9 };
   const { n, tile } = CALL;
   const half = (n * tile) / 2;
-  b.lakeY = center.y - 34;
+  b.lakeY = center.y - 16;
   const list = callList();
   const at = (x: number) => {
     let lo = 0, hi = list.length - 1;
@@ -131,7 +155,7 @@ export function colourCall(info: { name: string; blurb: string }): Course {
     b.world.addKin(kin);
   }
   // what you see: one instanced floor, lit from inside
-  const floorM = new THREE.MeshStandardMaterial({ roughness: 0.28, metalness: 0.1 });
+  const floorM = new THREE.MeshStandardMaterial({ roughness: 0.28, metalness: 0.1, map: tileTexture() });
   floorM.onBeforeCompile = (s) => {
     s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * 0.62;');
   };
@@ -142,6 +166,22 @@ export function colourCall(info: { name: string; blurb: string }): Course {
   for (let k = 0; k < N; k++) floor.setColorAt(k, CL.set(0xffffff));
   b.group.add(floor);
   const pal = CALL.colors.map((c) => new THREE.Color(c));
+  // the safe tiles throw a column of light up, so you can see them from anywhere on the floor
+  const fade = document.createElement('canvas');
+  fade.width = 4;
+  fade.height = 64;
+  {
+    const x = fade.getContext('2d')!;
+    const gr = x.createLinearGradient(0, 0, 0, 64);
+    gr.addColorStop(0, '#000');
+    gr.addColorStop(1, '#fff');
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 4, 64);
+  }
+  const pillarM = new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap: new THREE.CanvasTexture(fade), transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, blending: THREE.AdditiveBlending });
+  const pillars = new THREE.InstancedMesh(new THREE.CylinderGeometry(tile * 0.68, tile * 0.68, 7, 4, 1, true).rotateY(Math.PI / 4).translate(0, 3.5, 0), pillarM, 12);
+  pillars.frustumCulled = false;
+  b.group.add(pillars);
   // the frame under it (so the floor has an edge), and the big cube overhead that shows the colour
   {
     const fr = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 1.2, 0.5, half * 2 + 1.2).translate(center.x, center.y - 1.1, center.z), new THREE.MeshStandardMaterial({ color: 0x1a1030, roughness: 0.4, metalness: 0.6 }));
@@ -188,6 +228,18 @@ export function colourCall(info: { name: string; blurb: string }): Course {
     }
     floor.instanceMatrix.needsUpdate = true;
     floor.instanceColor!.needsUpdate = true;
+    // (the light columns, while there's still time)
+    const shine = live && x < c.drop;
+    pillars.count = shine ? Math.min(12, c.safe.length) : 0;
+    if (shine) {
+      pillarM.color.copy(pal[c.c]);
+      pillarM.opacity = 0.2 + 0.08 * Math.sin(x * 9);
+      for (let i = 0; i < pillars.count; i++) {
+        const [px, pz] = xz(c.safe[i]);
+        pillars.setMatrixAt(i, M.compose(V.set(px, center.y, pz), Q.identity(), S));
+      }
+      pillars.instanceMatrix.needsUpdate = true;
+    }
     cubeM.color.copy(pal[c.c]).multiplyScalar(live && x < c.drop ? 1.25 + 0.5 * Math.sin(x * 10) : 0.5);
     cube.rotation.y = t * 0.5;
     ball.rotation.y = t * 0.3;
@@ -230,6 +282,10 @@ export interface SpudArena {
   /** who has one now (bean ids), and the world time they go off */
   holders: Set<number>;
   end: number;
+  /** who just got rid of one, and until when they have a burst of speed */
+  free: Map<number, number>;
+  /** the beans with people behind them (a bot with a spud would rather tag another bot) */
+  people: Set<number>;
 }
 
 function ringTexture() {
@@ -274,8 +330,9 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
   const center = new THREE.Vector3(0, 110, 0);
   const R = SPUD.R;
   const state = { go: 1e9 };
-  b.lakeY = center.y - 26;
-  const arena: SpudArena = { center, R, posts: [], holders: new Set(), end: 0 };
+  // (the ring stands on the fairground, among the tents)
+  b.lakeY = center.y - 1.4;
+  const arena: SpudArena = { center, R, posts: [], holders: new Set(), end: 0, free: new Map(), people: new Set() };
   // the floor (a sawdust ring) and the padded kerb that keeps you in it
   {
     const top = new THREE.CircleGeometry(R, 96).rotateX(-Math.PI / 2).translate(center.x, center.y, center.z);
@@ -285,7 +342,8 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
     b.world.statics.addGeometry(top, Mat.Paint);
     const under = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.8, R * 0.6, 8, 48, 1).translate(center.x, center.y - 4.05, center.z), new THREE.MeshStandardMaterial({ color: 0x8a2a3a, roughness: 0.6 }));
     b.group.add(under);
-    const wall = new THREE.CylinderGeometry(R, R, 2.4, 72, 1, true).translate(center.x, center.y + 1.2, center.z);
+    // (taller than it looks: a blast never throws anyone out of the ring)
+    const wall = new THREE.CylinderGeometry(R, R, 9, 72, 1, true).translate(center.x, center.y + 4.5, center.z);
     b.world.statics.addGeometry(wall, Mat.Paint);
     // (what you see of it: red and white pads)
     const gs: THREE.BufferGeometry[] = [];
@@ -324,12 +382,12 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
     const cc = [0xe8283a, 0xffc21f, 0x2f8cff, 0x37c25a, 0xffffff];
     for (let s = 0; s < 8; s++) {
       const a = (s / 8) * Math.PI * 2;
-      const ex = center.x + Math.cos(a) * (R + 1), ez = center.z + Math.sin(a) * (R + 1);
-      for (let k = 1; k < 14; k++) {
-        const u = k / 14;
+      const ex = center.x + Math.cos(a) * (R + 14), ez = center.z + Math.sin(a) * (R + 14);
+      for (let k = 1; k < 20; k++) {
+        const u = k / 20;
         const fx = center.x + (ex - center.x) * u, fz = center.z + (ez - center.z) * u;
-        const fy = center.y + 15 - 8.5 * u + Math.sin(u * Math.PI) * -1.5;
-        const g = new THREE.ConeGeometry(0.34, 0.8, 3).rotateX(Math.PI).rotateY(a).scale(1, 1, 0.12).translate(fx, fy - 0.4, fz).toNonIndexed();
+        const fy = center.y + 16 - 6 * u + Math.sin(u * Math.PI) * -1.2;
+        const g = new THREE.ConeGeometry(0.42, 1, 3).rotateX(Math.PI).rotateY(a).scale(1, 1, 0.12).translate(fx, fy - 0.4, fz).toNonIndexed();
         const cols = new Float32Array(g.getAttribute('position').count * 3);
         CL.set(cc[(k + s) % cc.length]);
         for (let i = 0; i < cols.length; i += 3) CL.toArray(cols, i);
@@ -337,7 +395,7 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
         g.deleteAttribute('uv');
         flags.push(g);
       }
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 8, 10).translate(ex, center.y + 2.6, ez), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }));
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 12, 10).translate(ex, center.y + 4.6, ez), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }));
       b.group.add(post);
     }
     b.group.add(new THREE.Mesh(mergeGeometries(flags), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide })));
@@ -349,8 +407,9 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
   b.world.fields.push({
     min: new THREE.Vector3(center.x - R - 3, center.y - 2, center.z - R - 3),
     max: new THREE.Vector3(center.x + R + 3, center.y + 6, center.z + R + 3),
-    act: (m: Marble) => {
+    act: (m: Marble, t: number) => {
       if (arena.holders.has(m.id)) m.runK *= 1.12;
+      else if ((arena.free.get(m.id) ?? 0) > t) m.runK *= 1.3;
     },
   });
   title(b, info, 'Survival · Pass it on', 0xe8283a, new THREE.Vector3(center.x, center.y + 7, center.z - R - 6));
@@ -377,7 +436,7 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
 }
 
 // ----------------------------------------------------------------------------------------- Gold Rush
-export const GOLD = { R: 15.5, T: 55, fly: 0.85, life: 11, take: 1.3, chest: 1.9 };
+export const GOLD = { R: 15.5, T: 55, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 12 };
 
 export interface Coin {
   k: number;
@@ -398,7 +457,8 @@ export function goldRush(info: { name: string; blurb: string }): Course {
   const center = new THREE.Vector3(0, 116, 0);
   const R = GOLD.R;
   const state = { go: 1e9 };
-  b.lakeY = center.y - 24;
+  // (an island in the sea, not over it: fall in and you're in the surf)
+  b.lakeY = center.y - 2.6;
   // the coins: every one from the chest, seeded
   const coins: Coin[] = [];
   {
@@ -406,8 +466,10 @@ export function goldRush(info: { name: string; blurb: string }): Course {
     let t = 0.6, k = 0;
     while (t < GOLD.T + 2) {
       const a = rnd() * Math.PI * 2, r = GOLD.chest + 1 + (R - GOLD.chest - 2.2) * Math.sqrt(rnd());
-      coins.push({ k: k++, t, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: k % 11 === 0 ? 5 : 1 });
-      t += Math.max(0.1, 0.2 - t * 0.0016) * (0.7 + rnd() * 0.6);
+      // (the last stretch is a frenzy: twice the coins, far more big ones)
+      const mad = t > GOLD.T - GOLD.frenzy;
+      coins.push({ k: k++, t, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: k % (mad ? 4 : 11) === 0 ? 5 : 1 });
+      t += Math.max(0.1, 0.2 - t * 0.0016) * (0.7 + rnd() * 0.6) * (mad ? 0.55 : 1);
     }
   }
   // the island: a sandy round with a rocky rim, no rail: the sea is right there
@@ -459,10 +521,31 @@ export function goldRush(info: { name: string; blurb: string }): Course {
     b.group.add(m);
     for (const e of [-1, 1]) b.group.add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.36, c * 1.3).translate(center.x + e * c * 0.55, center.y + 0.65, center.z), iron));
     const lid = new THREE.Mesh(new THREE.CylinderGeometry(c * 0.62, c * 0.62, c * 1.72, 16, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).translate(center.x, center.y + 1.8, center.z - c * 0.72), wood);
-    lid.rotation.x = 0;
     b.group.add(lid);
     const heap = new THREE.Mesh(new THREE.SphereGeometry(c * 0.7, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1.15, 0.42, 0.8).translate(center.x, center.y + 1.28, center.z), new THREE.MeshStandardMaterial({ color: 0xffc830, roughness: 0.25, metalness: 0.9, emissive: 0x8a5a00, emissiveIntensity: 0.5 }));
     b.group.add(heap);
+    // (it rattles as it spits, harder in the frenzy)
+    b.animators.push((t) => {
+      const x = t - state.go;
+      const k = x < 0 || x > GOLD.T ? 0 : x > GOLD.T - GOLD.frenzy ? 1 : 0.4;
+      lid.position.y = Math.abs(Math.sin(t * 13)) * 0.16 * k;
+      lid.rotation.z = Math.sin(t * 21) * 0.006 * k;
+      heap.scale.y = 1 + 0.1 * k * Math.sin(t * 17);
+    });
+  }
+  // the surf round the island
+  {
+    const foam = new THREE.Mesh(new THREE.RingGeometry(R - 1.2, R + 3.2, 96, 1).rotateX(-Math.PI / 2).translate(center.x, b.lakeY + 0.06, center.z), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }));
+    const foam2 = new THREE.Mesh(new THREE.RingGeometry(R + 3.6, R + 4.3, 96, 1).rotateX(-Math.PI / 2).translate(center.x, b.lakeY + 0.06, center.z), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false }));
+    b.group.add(foam, foam2);
+    b.animators.push((t) => {
+      const s = 1 + 0.018 * Math.sin(t * 1.1);
+      foam.scale.set(s, 1, s);
+      foam.position.x = center.x * (1 - s);
+      foam.position.z = center.z * (1 - s);
+      foam2.scale.set(2 - s, 1, 2 - s);
+      (foam2.material as THREE.MeshBasicMaterial).opacity = 0.2 + 0.18 * Math.sin(t * 1.1 + 1);
+    });
   }
   // palms and barrels at the edge (you can use them to hide; a knock into the sea is still a knock)
   {
@@ -499,7 +582,7 @@ export function goldRush(info: { name: string; blurb: string }): Course {
     finishS: 0,
     gaps: [],
     checkpoints: [],
-    killY: center.y - 5,
+    killY: center.y - 2.2,
     lakeY: b.lakeY,
     state,
     grid: (n) => ringGrid(center, n, 4.2, 3.2, 9),
@@ -527,6 +610,20 @@ export interface BeltArena {
   /** the rows on the belt at x, nearest the front (the back edge) first */
   rows(x: number, out: BeltRow[]): BeltRow[];
   laneX(l: number): number;
+}
+
+function stripes() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 64;
+  const x = c.getContext('2d')!;
+  for (let i = 0; i < 8; i++) {
+    x.fillStyle = i % 2 ? '#1d1b22' : '#ffcf2a';
+    x.fillRect(0, i * 8, 128, 8);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 /** a row's blocks: more of them as the round goes on, always a way through */
@@ -689,6 +786,45 @@ export function beltRush(info: { name: string; blurb: string }): Course {
     blocks.instanceMatrix.needsUpdate = studs.instanceMatrix.needsUpdate = true;
     blocks.instanceColor!.needsUpdate = studs.instanceColor!.needsUpdate = true;
   });
+  // the row coming next, shown in lamps over the mouth: green is clear, amber you hop, red you can't
+  {
+    const lanesM = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false });
+    const strip = new THREE.InstancedMesh(new THREE.PlaneGeometry(lane - 0.7, 1.3), lanesM, lanes);
+    strip.frustumCulled = false;
+    for (let l = 0; l < lanes; l++) {
+      strip.setMatrixAt(l, M.compose(V.set(laneX(l), center.y + 3.3, zFar + 0.03), Q.identity(), S));
+      strip.setColorAt(l, CL.set(0xffffff));
+    }
+    b.group.add(strip);
+    // bulbs racing down both walls, as fast as the belt runs
+    const nB = 20;
+    const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.17, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), nB * 2);
+    bulbs.frustumCulled = false;
+    b.group.add(bulbs);
+    // the roller at the back edge, turning
+    const roller = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, W, 20, 1).rotateZ(Math.PI / 2).translate(0, 0, 0), new THREE.MeshPhysicalMaterial({ map: stripes(), roughness: 0.35, clearcoat: 0.6 }));
+    roller.position.set(center.x, center.y - 0.62, zBack + 0.1);
+    b.group.add(roller);
+    b.animators.push((t) => {
+      const x = t - state.go;
+      const s = run(x);
+      const n = Math.floor(s / D) + 1;
+      const kk = kindsOf(n);
+      for (let l = 0; l < lanes; l++) strip.setColorAt(l, CL.set(kk[l] === 0 ? 0x30f070 : kk[l] === 1 ? 0xffc21f : 0xff4040));
+      strip.instanceColor!.needsUpdate = true;
+      const gap = L / nB;
+      for (let i = 0; i < nB; i++) {
+        const z = zFar + ((((i * gap + s) % L) + L) % L);
+        for (const e of [0, 1]) {
+          bulbs.setMatrixAt(i * 2 + e, M.compose(V.set(center.x + (e ? 1 : -1) * (W / 2 - 0.02), center.y + 2.05, z), Q.identity(), S));
+          bulbs.setColorAt(i * 2 + e, CL.set(pal[(i + (e ? 3 : 0)) % pal.length]).multiplyScalar(1.6));
+        }
+      }
+      bulbs.instanceMatrix.needsUpdate = true;
+      bulbs.instanceColor!.needsUpdate = true;
+      roller.rotation.x = s / 0.62;
+    });
+  }
   // the belt carries whoever is standing on it (toward the back edge)
   b.world.fields.push({
     min: new THREE.Vector3(center.x - W / 2 - 1, center.y - 1, zFar - 1),

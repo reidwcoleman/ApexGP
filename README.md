@@ -765,10 +765,19 @@ and bots; the contestants are original bean characters, not marbles.
   (`noWaiting` / `wrapUp`): the leaders take the places left, or the best of the standing survive.
   Online that means every person, not just you. Watching a round with no people left in it, ENTER
   skips it. SPACE or ENTER also skips the flyover and the results.
+- **Moving fast** (`physics.ts`): a dive beats running and a dive out of a jump beats that (on the
+  flat: run 9.25 m/s, jump 9.17, dive 11.2, jump + dive 12.9). The slide ends at running speed, not
+  at a stop, and steers a little; jump pops you out of it with the speed kept (chained, about 15).
+  Landing on a head bounces you off; mashing jump gets you up sooner after a knock.
+- **Bots hold back for people** (`botEase` in `game.ts`, `ease` per difficulty in `ai-style.ts`): in
+  a race one that gets away from the leading person eases off and stops diving; in the arenas it
+  is a little slower, slower to react and makes mistakes. Insane has none of this.
+- **The air** (`env-ambient.ts`): each world has its own specks round the camera: petals, snow,
+  embers, bubbles, confetti, fireflies, sea spray.
   - **Party games** (`course-modes.ts`, `ai-modes.ts`, `modes.ts`), each in its own world:
     **Colour Call** (disco: a colour is called, every other tile drops), **Hot Spud** (circus: tag
     with lit fuses, whoever holds one when it blows is out), **Gold Rush** (pirate: a chest spits
-    gold, knocks spill it, falls lose a third, least gold goes home) and **Belt Rush** (toy box: a
+    gold, knocks spill it, falls lose a third, a frenzy at the end, least gold goes home) and **Belt Rush** (toy box: a
     giant belt brings blocks at you, faster and faster; off the back and you're out). Colour Call
     and Belt Rush are pure functions of the round's clock; the spuds and the gold are the host's.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the

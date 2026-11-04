@@ -17,13 +17,15 @@ export class CallBrain {
   ) {
     this.react = 0.75 - 0.6 * skill;
   }
-  update(_dt: number, t: number, c: Course, all: Marble[]) {
+  update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.call!;
     const x = t - c.state.go;
     const call = A.at(x);
-    if (call.i !== this.seen && x > call.t0 + this.react + this.rnd() * 0.25) {
+    if (call.i !== this.seen && x > call.t0 + this.react + ease * 0.55 + this.rnd() * 0.25) {
       this.seen = call.i;
       this.k = this.pick(call.safe, A.xz, all);
+      // (a bean in a panic runs for the wrong colour now and then)
+      if (this.rnd() < ease * (0.2 - 0.14 * this.skill)) this.k = Math.floor(this.rnd() * CALL.n * CALL.n);
     }
     if (this.k < 0) {
       // (between calls: back toward the middle)
@@ -82,7 +84,7 @@ export class SpudBrain {
     readonly skill: number,
     private rnd: () => number,
   ) {}
-  update(_dt: number, t: number, c: Course, all: Marble[]) {
+  update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.spud!;
     const hold = A.holders.has(m.id);
     let nx = 0, nz = 0, nd = Infinity;
@@ -91,7 +93,8 @@ export class SpudBrain {
       if (o === m || !o.active) continue;
       const other = A.holders.has(o.id);
       const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, d = Math.hypot(dx, dz);
-      if (hold && !other && d < nd) (nd = d), (nx = dx), (nz = dz);
+      const far = d + (A.people.has(o.id) ? ease * 6 : 0);
+      if (hold && !other && far < nd) (nd = far), (nx = dx / (d || 1)), (nz = dz / (d || 1));
       if (!hold && other && d < 9) {
         const k = (9 - d) / 9;
         fx -= (dx / (d || 1)) * k;
@@ -101,7 +104,7 @@ export class SpudBrain {
     if (hold) {
       if (nd === Infinity) return;
       // (it leads a runner a little)
-      m.input.set(nx / nd, 0, nz / nd);
+      m.input.set(nx, 0, nz);
       if (nd < 3.2 && nd > 1.2 && this.rnd() < 0.05 + 0.1 * this.skill) m.dash = true;
       return;
     }
@@ -121,7 +124,7 @@ export class SpudBrain {
     }
     const l = Math.hypot(fx, fz);
     if (l > 0.08) {
-      m.input.set(fx / l, 0, fz / l).multiplyScalar(0.72 + 0.28 * this.skill);
+      m.input.set(fx / l, 0, fz / l).multiplyScalar(0.7 + 0.25 * this.skill);
       return;
     }
     if (t >= this.next) {
@@ -153,16 +156,16 @@ export class GoldBrain {
     this.hx = Math.cos(a) * r;
     this.hz = Math.sin(a) * r;
   }
-  update(dt: number, t: number, c: Course, all: Marble[], live: Coin[], taken: Set<number>) {
+  update(dt: number, t: number, c: Course, all: Marble[], live: Coin[], taken: Set<number>, ease: number) {
     const m = this.m, A = c.gold!;
     this.shoveCD -= dt;
     const x = t - c.state.go;
     if (t >= this.next || !this.target || taken.has(this.target.k)) {
-      this.next = t + 0.25 + (1 - this.skill) * 0.5;
+      this.next = t + 0.25 + (1 - this.skill) * 0.5 + ease * 0.45;
       let bs = -Infinity;
       this.target = null;
       for (const k of live) {
-        if (taken.has(k.k) || k.t + GOLD.fly - x > 0.3) continue;
+        if (taken.has(k.k) || k.t + GOLD.fly - x > 0.3 - ease * 0.45) continue;
         const d = Math.hypot(k.x - m.pos.x, k.z - m.pos.z);
         const away = Math.hypot(k.x - A.center.x - this.hx, k.z - A.center.z - this.hz);
         const sc = (k.v > 1 ? 2.5 : 1) / (d + 2.5) - away * 0.012 + this.rnd() * (0.12 - 0.09 * this.skill);
@@ -214,13 +217,13 @@ export class BeltBrain {
     readonly skill: number,
     private rnd: () => number,
   ) {}
-  update(_dt: number, t: number, c: Course, _all: Marble[]) {
+  update(_dt: number, t: number, c: Course, _all: Marble[], ease: number) {
     const m = this.m, A = c.belt!;
     const x = t - c.state.go;
     A.rows(x, ROWS);
     // the next row coming at it (it's only as far-sighted as it is good)
     let row: BeltRow | null = null;
-    const sight = 5 + 8 * this.skill;
+    const sight = 4 + (8 - 3.5 * ease) * this.skill;
     for (const r of ROWS) {
       if (r.z > m.pos.z - 1.6) continue;
       if (m.pos.z - r.z < sight) row = r;
@@ -250,7 +253,8 @@ export class BeltBrain {
     m.input.set(ix, 0, iz);
     const l = Math.hypot(ix, iz);
     if (l > 1) m.input.multiplyScalar(1 / l);
-    if (row && row.kinds[mine] === 1 && m.grounded && m.pos.z - row.z < 2.9 + v * 0.1 && this.rnd() < 0.5 + 0.5 * this.skill) m.jump = true;
+    m.input.multiplyScalar(1 - 0.12 * ease);
+    if (row && row.kinds[mine] === 1 && m.grounded && m.pos.z - row.z < 2.9 + v * 0.1 && this.rnd() < (0.5 + 0.5 * this.skill) * (1 - 0.35 * ease)) m.jump = true;
     // (well down the belt with the edge coming: a dive forward)
     if (m.pos.z > A.center.z + 13 && m.grounded && this.rnd() < 0.05) m.dash = true;
   }

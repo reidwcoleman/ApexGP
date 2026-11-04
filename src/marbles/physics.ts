@@ -33,7 +33,14 @@ const HEAD_R = 0.4;
 const BODY_R = 0.44;
 /** the dive: its launch speed, and the wait before the next */
 export const DIVE_V = 12.5;
-export const DASH_CD = 1.2;
+/** out of a jump it's a bigger throw: jump + dive is the quickest way to travel */
+const AIR_DIVE_V = 15.5;
+const DIVE_MAX = 16.5;
+export const DASH_CD = 1.05;
+/** the belly slide: how fast it scrubs off, and how fast you can steer it (rad/s) */
+const SLIDE_DRAG = 8;
+const SLIDE_TURN = 2.4;
+const DIVE_AIR_TURN = 1.5;
 /** grabbing: reach, how long a hold lasts, the wait after */
 const GRAB_REACH = 1.45;
 const GRAB_T = 2.6;
@@ -133,6 +140,8 @@ export class Marble {
   heldT = 0;
   /** per-partner sound cooldowns */
   readonly quiet = new Map<unknown, number>();
+  /** this frame: bounced off someone's head */
+  bounced = false;
   /** this frame: jumped, dived, knocked over, landed (speed), grabbed someone */
   hopped = false;
   dashed = false;
@@ -508,7 +517,7 @@ export class World {
   /** per frame: the jump, the dive, the grab */
   private controlFrame(m: Marble, dt: number) {
     if (this.fields.length && m.active && !m.frozen && !m.puppet) this.applyFields(m, dt);
-    m.hopped = m.dashed = m.knocked = m.grabbed = false;
+    m.hopped = m.dashed = m.knocked = m.grabbed = m.bounced = false;
     m.landed = 0;
     if (!m.active || m.frozen || m.puppet) {
       m.jump = m.dash = false;
@@ -522,6 +531,21 @@ export class World {
     m.grabCD = Math.max(0, m.grabCD - dt);
     m.heldT = Math.max(0, m.heldT - dt);
     const ok = m.mode === Mode.Run && m.upT <= 0;
+    // on your belly: jump pops you straight up out of the slide, keeping every bit of the speed
+    if (m.jumpBuf > 0 && m.mode === Mode.Dive && m.groundT < 0.14 && m.diveT > 0.05) {
+      m.jumpBuf = 0;
+      m.mode = Mode.Run;
+      m.vel.x *= 0.93;
+      m.vel.z *= 0.93;
+      m.vel.y = m.groundVel.y + JUMP_V * 0.92 * m.jumpK;
+      m.groundT = 1;
+      m.hopped = true;
+    }
+    // knocked over: mashing jump gets you up sooner
+    if (m.jumpBuf > 0 && m.mode === Mode.Tumble && m.groundT < 0.14) {
+      m.jumpBuf = 0;
+      m.tumbleT -= 0.22;
+    }
     if (m.jumpBuf > 0 && ok && m.groundT < 0.14) {
       m.jumpBuf = 0;
       // (straight up, whatever the slope; a held bean struggles)
@@ -539,8 +563,10 @@ export class World {
       L.normalize();
       // a dive: thrown forward flat out, a little up off the ground
       const along = m.vel.x * L.x + m.vel.z * L.z;
-      const sp = Math.max(DIVE_V * (m.heldT > 0 ? 0.6 : 1), along + 2.5);
-      const up = m.grounded ? 4.2 : Math.max(m.vel.y, 2.6);
+      const air = !m.grounded;
+      // (chained dives add up, but only so far)
+      const sp = Math.max((air ? AIR_DIVE_V : DIVE_V) * (m.heldT > 0 ? 0.6 : 1), Math.min(along + (air ? 3 : 2), DIVE_MAX), along);
+      const up = air ? Math.max(m.vel.y, 3.2) : 4.2;
       m.vel.set(L.x * sp, up, L.z * sp);
       m.yaw = Math.atan2(L.x, L.z);
       m.mode = Mode.Dive;
@@ -615,16 +641,37 @@ export class World {
       m.diveT += h;
       if (grounded) {
         // the belly slide: no steering, it scrubs off
-        const rx = m.vel.x - m.groundVel.x, rz = m.vel.z - m.groundVel.z;
+        let rx = m.vel.x - m.groundVel.x, rz = m.vel.z - m.groundVel.z;
         const sp = Math.hypot(rx, rz);
-        const k = sp > 1e-4 ? Math.max(0, sp - 16 * m.gripK * h) / sp : 0;
+        if (il > 0.2 && sp > 1) {
+          // (you can lean it round a little)
+          let d = Math.atan2(inp.x, inp.z) - Math.atan2(rx, rz);
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          const a = THREE.MathUtils.clamp(d, -SLIDE_TURN * h, SLIDE_TURN * h);
+          const c = Math.cos(a), si = Math.sin(a);
+          const nx = rx * c + rz * si;
+          rz = -rx * si + rz * c;
+          rx = nx;
+          m.yaw += a;
+        }
+        const k = sp > 1e-4 ? Math.max(0, sp - SLIDE_DRAG * m.gripK * h) / sp : 0;
         m.vel.x = m.groundVel.x + rx * k;
         m.vel.z = m.groundVel.z + rz * k;
-        if (m.diveT > 0.42 && sp < 7) {
-          m.mode = Mode.Run;
-          m.upT = 0.16;
+        // up and running without losing a step: the slide ends at running speed, not at a stop
+        if (m.diveT > 0.3 && sp < RUN * m.runK + 0.4) m.mode = Mode.Run;
+      } else {
+        if (il > 0.2) {
+          let d = Math.atan2(inp.x, inp.z) - Math.atan2(m.vel.x, m.vel.z);
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          const a = THREE.MathUtils.clamp(d, -DIVE_AIR_TURN * h, DIVE_AIR_TURN * h);
+          const c = Math.cos(a), si = Math.sin(a);
+          const nx = m.vel.x * c + m.vel.z * si;
+          m.vel.z = -m.vel.x * si + m.vel.z * c;
+          m.vel.x = nx;
+          m.yaw += a;
         }
-      } else if (m.diveT > 2.5) m.mode = Mode.Run;
+        if (m.diveT > 2.5) m.mode = Mode.Run;
+      }
     } else if (grounded) {
       // running: toward the input's velocity relative to the ground, faster downhill
       const n = m.groundN;
@@ -707,7 +754,7 @@ export class World {
       const rel = Math.hypot(rx, rz);
       if (rel < 4.5 || m.tumbleT < -0.9) {
         m.mode = Mode.Run;
-        m.upT = 0.25;
+        m.upT = 0.1;
         m.guardT = 1.1;
         m.ang.set(0, 0, 0);
         if (rel > 3) {
@@ -828,7 +875,7 @@ export class World {
         kin.lastHit = this.time;
         kin.onHit?.(m, imp);
       }
-    } else if (!floor && imp > 9 && m.mode === Mode.Dive) m.knock(0.6);
+    } else if (!floor && imp > 12 && m.mode === Mode.Dive) m.knock(0.6);
     if (imp > 0.9) this.emit(m, kin ?? mat, 'surface', mat, imp, m.pos.x - n.x * RADIUS, m.pos.y - n.y * RADIUS, m.pos.z - n.z * RADIUS, n.y, undefined, kin ?? undefined);
   }
 
@@ -902,6 +949,20 @@ export class World {
         const wa = fa ? 0 : fb ? 1 : 0.5, wb = fb ? 0 : fa ? 1 : 0.5;
         a.pos.addScaledVector(N, -pen * wa);
         b.pos.addScaledVector(N, pen * wb);
+        // coming down on a head: boing. You bounce off to one side, they get squashed for a moment
+        {
+          const top = N.y < -0.6 ? a : N.y > 0.6 ? b : null;
+          if (top && !top.puppet && top.vel.y < -3 && top.mode === Mode.Run) {
+            const under = top === a ? b : a;
+            const dx = top.pos.x - under.pos.x, dz = top.pos.z - under.pos.z, dl = Math.hypot(dx, dz) || 1;
+            top.vel.y = 8.2;
+            top.vel.x += (dl > 0.02 ? dx / dl : Math.sin(this.time * 91)) * 2.2;
+            top.vel.z += (dl > 0.02 ? dz / dl : Math.cos(this.time * 91)) * 2.2;
+            top.groundT = 1;
+            top.bounced = true;
+            if (!under.puppet) under.heldT = Math.max(under.heldT, 0.35);
+          }
+        }
         // standing on a head: that's ground
         if (N.y < -0.6 && wa > 0) {
           a.groundT = 0;
@@ -927,9 +988,12 @@ export class World {
           const hitter = aFast ? a : b;
           const target = hitter === a ? b : a;
           if (hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
-            if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * 0.6, vy: 3, vz: hitter.vel.z * 0.6 });
+            if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * 0.75, vy: 4.5, vz: hitter.vel.z * 0.75 });
             else {
-              target.vel.y += 3;
+              // (bowled over: sent flying)
+              target.vel.x += hitter.vel.x * 0.3;
+              target.vel.z += hitter.vel.z * 0.3;
+              target.vel.y += 4.5;
               target.knock(0.8);
             }
           }

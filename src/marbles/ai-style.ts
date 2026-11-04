@@ -49,15 +49,17 @@ export interface Level {
   skill: [number, number];
   /** an edge on top of skill: quicker reactions, sharper timing, more nerve (0..1) */
   boost: number;
+  /** how much the bots ease off for a person: ahead of you in a race they slow (0 none, 1 a lot); in the arenas it's their speed, reactions and mistakes */
+  ease: number;
   /** how likely each style is */
   mix: Record<StyleId, number>;
 }
 
 export const LEVELS: Level[] = [
-  { id: 'easy', name: 'Easy', blurb: 'A gentle crowd. They wobble, wait and fall off.', skill: [0.25, 0.65], boost: 0, mix: { racer: 3, bruiser: 0.5, daredevil: 2, steady: 3, closer: 1 } },
-  { id: 'normal', name: 'Normal', blurb: 'A real race. A few of them are very good.', skill: [0.58, 0.97], boost: 0.15, mix: { racer: 3, bruiser: 2, daredevil: 2, steady: 2, closer: 2 } },
-  { id: 'hard', name: 'Hard', blurb: 'Sharp, fast and pushy. You will need the shortcuts.', skill: [0.78, 1], boost: 0.55, mix: { racer: 3, bruiser: 3, daredevil: 3, steady: 1, closer: 2 } },
-  { id: 'insane', name: 'Insane', blurb: 'Near-perfect lines, every dash spent, no mercy.', skill: [0.92, 1], boost: 1, mix: { racer: 2, bruiser: 4, daredevil: 3, steady: 0.5, closer: 2 } },
+  { id: 'easy', name: 'Easy', blurb: 'A gentle crowd. They wobble, wait and fall off.', skill: [0.25, 0.65], boost: 0, ease: 1, mix: { racer: 3, bruiser: 0.5, daredevil: 2, steady: 3, closer: 1 } },
+  { id: 'normal', name: 'Normal', blurb: 'A real race. You can win it, but not by falling off.', skill: [0.45, 0.88], boost: 0.05, ease: 0.75, mix: { racer: 3, bruiser: 2, daredevil: 2, steady: 2, closer: 2 } },
+  { id: 'hard', name: 'Hard', blurb: 'Sharp, fast and pushy. You will need the shortcuts.', skill: [0.72, 0.98], boost: 0.45, ease: 0.3, mix: { racer: 3, bruiser: 3, daredevil: 3, steady: 1, closer: 2 } },
+  { id: 'insane', name: 'Insane', blurb: 'Near-perfect lines, every dash spent, no mercy.', skill: [0.92, 1], boost: 1, ease: 0, mix: { racer: 2, bruiser: 4, daredevil: 3, steady: 0.5, closer: 2 } },
 ];
 
 export function level(id: string | null | undefined): Level {

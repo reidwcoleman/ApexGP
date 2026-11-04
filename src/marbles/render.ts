@@ -1,3 +1,4 @@
+import { Ambient } from './env-ambient.ts';
 import * as THREE from 'three';
 import { BloomEffect, EffectComposer, EffectPass, RenderPass, SMAAEffect, SMAAPreset, EdgeDetectionMode, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
@@ -35,6 +36,7 @@ export class Stage {
   readonly clouds: Clouds;
   readonly mirror = new Mirror();
   readonly props = new Props();
+  readonly ambient = new Ambient();
   readonly hemi: THREE.HemisphereLight;
   private giantsG: THREE.Group;
   private scenery = new Map<BiomeId, Scenery>();
@@ -113,6 +115,7 @@ export class Stage {
     const tm = new ToneMappingEffect({ mode: tmq === 'agx' ? ToneMappingMode.AGX : tmq === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
     c.addPass(new EffectPass(camera, bloom, tm, new GradeEffect(), new VignetteEffect({ darkness: 0.28, offset: 0.35 })));
     if (this.aa === 'smaa') c.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.ULTRA, edgeDetectionMode: EdgeDetectionMode.COLOR })));
+    this.scene.add(this.ambient.points);
     this.setBiome(BIOMES.candy);
     const gfx = new URLSearchParams(location.search).get('gfx');
     if (gfx) {
@@ -170,6 +173,7 @@ export class Stage {
     if (b === this.biome && this.ready) return;
     this.ready = true;
     this.biome = b;
+    this.ambient.set(b.id);
     paintSky(b, SUN);
     const hor = new THREE.Color(b.sky.hor), band = new THREE.Color(b.sky.band);
     const fog = this.scene.fog as THREE.FogExp2;
@@ -218,7 +222,7 @@ export class Stage {
     let reach = 60;
     const v = new THREE.Vector3();
     for (const o of this.scene.children) {
-      if (o === this.lake || o === this.backdrop || o === this.sky || o === this.sun) continue;
+      if (o === this.lake || o === this.backdrop || o === this.sky || o === this.sun || o === this.ambient.points) continue;
       o.updateMatrixWorld(true);
       o.traverse((m) => {
         const g = (m as THREE.Mesh).geometry;
@@ -254,6 +258,7 @@ export class Stage {
     (this.lake.userData.u as { uTime: { value: number } }).uTime.value = t;
     (this.sky.userData.u as { uTime: { value: number } }).uTime.value = t;
     this.clouds.update(t, this.camera);
+    this.ambient.update(t, this.camera, this.renderer.domElement.height);
     this.props.update(t);
     this.cur?.update(t);
     this.backdrop.traverse((o) => {

@@ -51,7 +51,7 @@ export class UI {
       <div class="mm-spec mm-hide"></div>
       <div class="mm-prog"><div class="flag"></div></div>
       <div class="mm-dash"><span>DIVE</span></div>
-      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>LEFT CLICK</b> / <b>SPACE</b> jump &nbsp; <b>RIGHT CLICK</b> / <b>CTRL</b> dive &nbsp; <b>SHIFT</b> grab (hold) &nbsp; <b>MOUSE</b> camera &nbsp; <b>ESC</b> pause</div>`;
+      <div class="mm-keys"><b>WASD</b> run &nbsp; <b>LEFT CLICK</b> / <b>SPACE</b> jump &nbsp; <b>RIGHT CLICK</b> / <b>CTRL</b> dive &nbsp; <b>SHIFT</b> grab (hold) &nbsp; <b>MOUSE</b> camera &nbsp; <b>ESC</b> pause<br><b>JUMP then DIVE</b> is the fastest way to move &nbsp; <b>JUMP</b> out of a slide to keep your speed</div>`;
     this.progEl = this.hudEl.querySelector('.mm-prog') as HTMLElement;
     this.cardEl = this.layer('mm-card mm-hide');
     this.countEl = this.layer('mm-count mm-hide');
@@ -181,6 +181,29 @@ export class UI {
     this.lobbyEl.classList.add('mm-hide');
   }
   /** a short message at the top of the screen */
+  /** a bar running down under the top of the screen (null hides it): the time left on a call, a fuse */
+  fuse(f: number | null, color = 0xffffff) {
+    const el = this.fuseEl ?? (this.fuseEl = this.hudEl.appendChild(h('div', 'mm-fuse')));
+    el.classList.toggle('mm-hide', f === null);
+    if (f === null) return;
+    el.innerHTML || (el.innerHTML = '<i></i>');
+    const b = el.firstChild as HTMLElement;
+    b.style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
+    b.style.background = css(color);
+  }
+  private fuseEl: HTMLElement | null = null;
+
+  /** a little number jumping up from the middle of the screen (+1 gold) */
+  pop(text: string, big = false) {
+    const el = this.popEl ?? (this.popEl = this.layer('mm-pops'));
+    const b = h('b', big ? 'big' : '');
+    b.textContent = text;
+    b.style.left = `${46 + Math.random() * 8}%`;
+    el.appendChild(b);
+    window.setTimeout(() => b.remove(), 800);
+  }
+  private popEl: HTMLElement | null = null;
+
   /** the colour called, out of the way at the top (null hides it) */
   call(text: string | null, color = 0) {
     const el = this.callEl ?? (this.callEl = this.layer('mm-call mm-hide'));

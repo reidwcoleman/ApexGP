@@ -334,6 +334,39 @@ export class Splashes {
  * Little soft puffs of dust where a bean lands hard, kicks off a dive or skids, and a burst of
  * spinning stars when one is knocked flat. One instanced mesh each, a fixed pool.
  */
+/** a ring of light racing out along the ground (a blast, a big landing) */
+export class Rings {
+  readonly group = new THREE.Group();
+  private R: { m: THREE.Mesh; t: number; max: number; r: number }[] = [];
+  private geo = new THREE.RingGeometry(0.86, 1, 48).rotateX(-Math.PI / 2);
+  ring(at: THREE.Vector3, r: number, color: number, life = 0.45) {
+    let o = this.R.find((x) => x.t <= 0);
+    if (!o) {
+      if (this.R.length >= 10) return;
+      const mat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      o = { m: new THREE.Mesh(this.geo, mat), t: 0, max: 1, r: 1 };
+      this.group.add(o.m);
+      this.R.push(o);
+    }
+    o.t = o.max = life;
+    o.r = r;
+    o.m.position.copy(at);
+    o.m.position.y += 0.08;
+    (o.m.material as THREE.MeshBasicMaterial).color.set(color);
+    o.m.visible = true;
+  }
+  update(dt: number) {
+    for (const o of this.R) {
+      if (o.t <= 0) continue;
+      o.t -= dt;
+      const k = 1 - Math.max(0, o.t) / o.max;
+      o.m.scale.setScalar(0.3 + o.r * (1 - (1 - k) * (1 - k)));
+      (o.m.material as THREE.MeshBasicMaterial).opacity = 1 - k;
+      if (o.t <= 0) o.m.visible = false;
+    }
+  }
+}
+
 export class Puffs {
   readonly group = new THREE.Group();
   private puff: THREE.InstancedMesh;
