@@ -15,7 +15,7 @@ import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
 import { storm, type StormArena } from './course-storm.ts';
 import { tide, type TideArena } from './course-tide.ts';
-import { beltRush, colourCall, hotSpud, type BeltArena, type CallArena, type SpudArena } from './course-modes.ts';
+import { colourCall, hotSpud, type CallArena, type SpudArena } from './course-modes.ts';
 import { bounceHouse, type BounceArena } from './course-bounce.ts';
 
 export { makeCrown } from './course-kit.ts';
@@ -60,7 +60,6 @@ export interface Course {
   call?: CallArena;
   spud?: SpudArena;
   bounce?: BounceArena;
-  belt?: BeltArena;
   /** the Crown Keeper final */
   keep?: KeepArena;
   /** Lava Rush: the lava's height and how far along the course it has come, at a time */
@@ -74,7 +73,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'bouncehouse' | 'beltrush' | 'crownkeep' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'bouncehouse' | 'crownkeep' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -117,7 +116,6 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   colourcall: { id: 'colourcall', name: 'Colour Call', kind: 'survival', blurb: 'A colour is called. Get on it: every other tile drops out from under you.', keep: 0.6 },
   hotspud: { id: 'hotspud', name: 'Hot Spud', kind: 'survival', blurb: 'A few spuds with lit fuses. Touch someone to pass yours on. Whoever holds one when it blows is out.', keep: 0.6 },
   bouncehouse: { id: 'bouncehouse', name: 'Bounce House', kind: 'score', blurb: 'The floor never stops bouncing. Pop balloons in the air, chain them for a combo, jump as you land to super bounce. Dodge the thunder ones.', keep: 0.6 },
-  beltrush: { id: 'beltrush', name: 'Belt Rush', kind: 'survival', blurb: 'A giant belt brings toy blocks at you, faster and faster. Dodge, hop, keep running. Off the back and you are out.', keep: 0.6 },
   discodash: { id: 'discodash', name: 'Disco Dash', kind: 'race', blurb: 'Down the dance floors: laser gates, spinning floors and sweeping bars, all on the beat.', keep: 0.75 },
   bigtop: { id: 'bigtop', name: 'Big Top', kind: 'race', blurb: 'Under the tents: bounce pits, swinging hammers, seesaws and wrecking balls.', keep: 0.75 },
   treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
@@ -130,11 +128,11 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'bouncehouse', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'bouncehouse', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
-export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide', 'colourcall', 'beltrush'];
+export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide', 'colourcall'];
 /** the games that are neither: each show has at least one */
 export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'hotspud', 'bouncehouse'];
 export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
@@ -146,7 +144,7 @@ export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, '
  */
 export const MODES = {
   race: RACE_POOL.filter((id) => id !== 'lavarush'),
-  chase: ['lavarush', 'beltrush', 'hightide'],
+  chase: ['lavarush', 'hightide'],
   floor: ['crumble', 'meltdown', 'colourcall'],
   dodge: ['jumpclub', 'tiptop', 'stormdeck'],
   team: ['paintparty', 'splatring'],
@@ -231,8 +229,6 @@ export function buildRound(id: RoundId): Course {
       return hotSpud(info);
     case 'bouncehouse':
       return bounceHouse(info);
-    case 'beltrush':
-      return beltRush(info);
     case 'crownkeep':
       return crownKeep(info);
     default:

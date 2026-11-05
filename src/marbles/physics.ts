@@ -22,6 +22,8 @@ export const JUMP_V = 8.6;
 const IR = 0.4 * RADIUS * RADIUS;
 /** running: top speed on the flat (m/s), how fast it gets there, and the push it has in the air */
 export const RUN = 9.4;
+/** off a boost strip */
+const ZOOM_K = 1.28;
 const RUN_K = 10.5;
 const RUN_ACC = 66;
 const AIR_ACC = 21;
@@ -160,12 +162,8 @@ export class Marble {
   gripK = 1;
   runK = 1;
   jumpK = 1;
-  /** goodie boxes: when each runs out (world time), and what's in force now */
+  /** a boost strip's sprint: when it runs out (world time) */
   zoomT = 0;
-  springT = 0;
-  bubbleT = 0;
-  boostK = 1;
-  hopK = 1;
   /** a spring pad just threw it */
   sprung = false;
   /** a boost strip just sent it off */
@@ -500,8 +498,7 @@ export class World {
       if (f.jump !== undefined) m.jumpK *= f.jump;
       f.act?.(m, this.time, dt);
     }
-    m.runK *= m.boostK;
-    m.jumpK *= m.hopK;
+    if (this.time < m.zoomT) m.runK *= ZOOM_K;
   }
   /** the slowest the course allows before a fall counts (m below) */
   private h = SUB;

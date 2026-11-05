@@ -126,7 +126,7 @@ export function bounceHouse(info: { name: string; blurb: string }): Course {
     tx.anisotropy = 8;
     const flat = new THREE.CircleGeometry(R + 0.4, 96).rotateX(-Math.PI / 2).translate(center.x, y0, center.z);
     b.world.statics.addGeometry(flat, Mat.Felt);
-    const m = new THREE.Mesh(new THREE.RingGeometry(0.01, R + 0.4, 128, 24).rotateX(-Math.PI / 2).translate(center.x, y0, center.z), new THREE.MeshPhysicalMaterial({ map: tx, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.2 }));
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.01, R + 0.4, 128, 24).rotateX(-Math.PI / 2).translate(center.x, y0, center.z), new THREE.MeshPhysicalMaterial({ map: tx, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.5 }));
     const uv = m.geometry.getAttribute('uv') as THREE.BufferAttribute, pos = m.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) uv.setXY(i, 0.5 + (pos.getX(i) - center.x) / (2 * (R + 0.4)), 0.5 - (pos.getZ(i) - center.z) / (2 * (R + 0.4)));
     const base = Float32Array.from({ length: pos.count }, (_, i) => Math.hypot(pos.getX(i) - center.x, pos.getZ(i) - center.z));

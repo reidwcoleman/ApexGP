@@ -1,7 +1,7 @@
 import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import * as THREE from 'three';
-import { BELT, CALL, shownTiles, type BeltRow } from './course-modes.ts';
+import { CALL, shownTiles } from './course-modes.ts';
 import { Pop, popValue, type Balloon } from './course-bounce.ts';
 import { dodge } from './course-strikes.ts';
 import { KEEP, type KeepArena } from './course-crown.ts';
@@ -355,58 +355,5 @@ export class KeepBrain {
     // the cannon rings: out of them, if it's seen them
     const away = dodge(A.blast, m, x, 1.3 - 0.9 * this.skill) ?? dodge(A.shots, m, x, 0.5 - 0.35 * this.skill);
     if (away) m.input.set(away[0], 0, away[1]);
-  }
-}
-
-const ROWS: BeltRow[] = [];
-/** Belt Rush: stay up the belt, in a lane that's free at the next row; hop the low ones */
-export class BeltBrain {
-  private lane = -1;
-  private look = -1;
-  constructor(
-    readonly m: Marble,
-    readonly skill: number,
-    private rnd: () => number,
-  ) {}
-  update(_dt: number, t: number, c: Course, _all: Marble[], ease: number) {
-    const m = this.m, A = c.belt!;
-    const x = t - c.state.go;
-    A.rows(x, ROWS);
-    // the next row coming at it (it's only as far-sighted as it is good)
-    let row: BeltRow | null = null;
-    const sight = 4 + (8 - 3.5 * ease) * this.skill;
-    for (const r of ROWS) {
-      if (r.z > m.pos.z - 1.6) continue;
-      if (m.pos.z - r.z < sight) row = r;
-      break;
-    }
-    const lx = (m.pos.x - A.laneX(0)) / A.lane;
-    const mine = Math.max(0, Math.min(BELT.lanes - 1, Math.round(lx)));
-    if (row && row.n !== this.look) {
-      this.look = row.n;
-      // the nearest lane it can get through; a low block is nearly as good
-      let bs = Infinity;
-      for (let l = 0; l < BELT.lanes; l++) {
-        const sc = Math.abs(l - lx) + (row.kinds[l] === 2 ? 50 : row.kinds[l] === 1 ? 1.2 : 0) + this.rnd() * (1.5 - this.skill);
-        if (sc < bs) (bs = sc), (this.lane = l);
-      }
-    }
-    const tgtX = this.lane >= 0 ? A.laneX(this.lane) : m.pos.x;
-    // hold a place about the middle of the belt, forward if pushed back
-    const wantZ = A.center.z - 2 - this.skill * 4;
-    const dz = wantZ - m.pos.z, dx = tgtX - m.pos.x;
-    const ix = Math.max(-1, Math.min(1, dx * 1.1));
-    // the belt runs at it: full ahead keeps it in place; a block dead ahead, wait to go round
-    const v = A.speed(x);
-    let iz = Math.max(-1, Math.min(1, (dz * 0.3 - v / 9.4)));
-    const blocked = row && row.kinds[mine] === 2 && m.pos.z - row.z < 3.4 && Math.abs(dx) > 0.5;
-    if (blocked) iz = Math.max(iz, -0.2);
-    m.input.set(ix, 0, iz);
-    const l = Math.hypot(ix, iz);
-    if (l > 1) m.input.multiplyScalar(1 / l);
-    m.input.multiplyScalar(1 - 0.12 * ease);
-    if (row && row.kinds[mine] === 1 && m.grounded && m.pos.z - row.z < 2.9 + v * 0.1 && this.rnd() < (0.5 + 0.5 * this.skill) * (1 - 0.35 * ease)) m.jump = true;
-    // (well down the belt with the edge coming: a dive forward)
-    if (m.pos.z > A.center.z + 13 && m.grounded && this.rnd() < 0.05) m.dash = true;
   }
 }

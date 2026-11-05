@@ -342,6 +342,8 @@ export function laserGate(b: CourseBuilder, path: Path, s: number, o: { kind?: '
 }
 
 // ------------------------------------------------------------------------------------- ghosts
+/** how fast the ghost pads' wave runs down the course (m/s): a shade under a bean's run */
+const WAVE_V = 8.6;
 /**
  * Ghost platforms over a drop, three lanes of them: each fades in, holds, flickers and is gone,
  * on its own beat, so there's always a way over if you watch. Solid while it shows.
@@ -357,7 +359,8 @@ export function ghostPads(b: CourseBuilder, path: Path, s0: number, s1: number, 
   for (let r = 0; r < rows; r++) {
     lanes.forEach((lat, l) => {
       const s = first + r * pitch;
-      const off = ph + (l * P) / lanes.length + r * 0.55;
+      // (each row comes on after the one before, at a runner's pace: ride the wave across)
+      const off = ph + (l * P) / lanes.length - (r * pitch) / WAVE_V;
       const on = (t: number) => cyc(t + off, P) < ON;
       const f = frameAt(path, s, lat, -0.25);
       const kin = new Kin({ type: 'cyl', r: R, hh: 0.25 }, Mat.Paint, (t, pos, quat) => {

@@ -242,13 +242,13 @@ export class UI {
   private shoutEl: HTMLElement | null = null;
   private shoutT = 0;
 
-  /** the stars you've got, and how near the next burst */
-  stars(n: number | null, part = 0) {
+  /** the stars you've got */
+  stars(n: number | null) {
     const el = this.starsEl ?? (this.starsEl = this.layer('mm-stars mm-hide'));
     el.classList.toggle('mm-hide', n === null);
     if (n === null || el.dataset.k === `${n}`) return;
     el.dataset.k = `${n}`;
-    el.innerHTML = `<b>★ ${n}</b><i style="--p:${(part * 100).toFixed(0)}%"></i>`;
+    el.innerHTML = `<b>★ ${n}</b>`;
     el.classList.remove('bump');
     void el.offsetWidth;
     el.classList.add('bump');

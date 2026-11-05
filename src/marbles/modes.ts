@@ -157,6 +157,9 @@ export class BouncePlay {
   private combo = new Map<number, { n: number; t: number }>();
   private body: THREE.InstancedMesh;
   private tail: THREE.InstancedMesh;
+  /** the same balloons, see-through: any that's between you and the camera */
+  private ghost: THREE.InstancedMesh;
+  private faded = new Set<number>();
   private M = new THREE.Matrix4();
   private V = new THREE.Vector3();
   private Q = new THREE.Quaternion();
@@ -183,16 +186,19 @@ export class BouncePlay {
     g.computeVertexNormals();
     this.body = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, emissive: 0x303030, emissiveIntensity: 0.35 }), N);
     this.tail = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 4).translate(0, -1.4, 0), new THREE.MeshBasicMaterial({ color: 0xfff6e0 }), N);
-    this.body.frustumCulled = this.tail.frustumCulled = false;
+    this.ghost = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ roughness: 0.16, transparent: true, opacity: 0.16, depthWrite: false }), 24);
+    this.body.frustumCulled = this.tail.frustumCulled = this.ghost.frustumCulled = false;
     this.body.castShadow = true;
     this.body.setColorAt(0, this.C.set(0xffffff));
-    scene.add(this.body, this.tail);
+    this.ghost.setColorAt(0, this.C);
+    scene.add(this.body, this.tail, this.ghost);
   }
 
   dispose() {
-    this.scene.remove(this.body, this.tail);
+    this.scene.remove(this.body, this.tail, this.ghost);
     this.body.dispose();
     this.tail.dispose();
+    this.ghost.dispose();
   }
 
   /** what's up there at x seconds after the off */
@@ -266,10 +272,26 @@ export class BouncePlay {
     return show.map((r) => ({ name: `${rank.indexOf(r) + 1}. ${r.c.name}`, color: r.c.outfit.a, share: (this.score.get(r.m.id) ?? 0) / best, mine: r.c.player, label: String(this.score.get(r.m.id) ?? 0) }));
   }
 
+  /** is this balloon on the line from the camera to your bean, or right on the lens? */
+  private inView(k: number, p: THREE.Vector3, size: number, cam: THREE.Vector3, me: THREE.Vector3 | null) {
+    const was = this.faded.has(k);
+    const clear = size * (was ? 1.75 : 1.35);
+    let hit = p.distanceTo(cam) < clear + 1.6;
+    if (!hit && me) {
+      SEG.subVectors(me, cam);
+      const len2 = SEG.lengthSq();
+      const u = len2 > 0.01 ? OFF.subVectors(p, cam).dot(SEG) / len2 : 1;
+      if (u > 0 && u < 0.95) hit = OFF.copy(cam).addScaledVector(SEG, u).distanceTo(p) < clear;
+    }
+    if (hit) this.faded.add(k);
+    else this.faded.delete(k);
+    return hit;
+  }
+
   /** the balloons: swelling up off the floor, bobbing, and away up into the sky when their time's out */
-  sync(t: number, x: number) {
+  sync(t: number, x: number, cam: THREE.Vector3, me: THREE.Vector3 | null) {
     const A = this.arena, { M, V, Q, S, C } = this;
-    let n = 0;
+    let n = 0, ng = 0;
     for (const q of this.live) {
       if (n >= 260) break;
       A.at(q, x, V);
@@ -277,20 +299,29 @@ export class BouncePlay {
       if (left < 1) V.y += (1 - left) ** 2 * 14;
       const s = (q.kind === Pop.Star ? 1.9 : q.kind === Pop.High ? 1.05 : q.kind === Pop.Thunder ? 0.95 : 0.9) * Math.min(1, u / 0.35 + 0.1);
       M.compose(V, Q.identity(), S.setScalar(s));
-      this.body.setMatrixAt(n, M);
-      this.tail.setMatrixAt(n, M);
       if (q.kind === Pop.Star) C.setHSL((t * 0.5) % 1, 1, 0.58);
       else if (q.kind === Pop.Thunder) C.set(Math.sin(t * 11 + q.ph) > 0.82 ? 0xfff27a : 0x2a1a48);
       else if (q.kind === Pop.High) C.set(BLOON_HIGH[q.k % 3]);
       else C.set(BLOON_LOW[q.k % 5]);
+      // (one that's in the way of the view goes see-through; a bit further out before it comes back, so it can't flicker)
+      if (this.inView(q.k, V, s, cam, me) && ng < 24) {
+        this.ghost.setMatrixAt(ng, M);
+        this.ghost.setColorAt(ng++, C);
+        continue;
+      }
+      this.body.setMatrixAt(n, M);
+      this.tail.setMatrixAt(n, M);
       this.body.setColorAt(n, C);
       n++;
     }
     this.body.count = this.tail.count = n;
-    this.body.instanceMatrix.needsUpdate = this.tail.instanceMatrix.needsUpdate = true;
+    this.ghost.count = ng;
+    this.body.instanceMatrix.needsUpdate = this.tail.instanceMatrix.needsUpdate = this.ghost.instanceMatrix.needsUpdate = true;
     if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
+    if (this.ghost.instanceColor) this.ghost.instanceColor.needsUpdate = true;
   }
 }
+const SEG = new THREE.Vector3(), OFF = new THREE.Vector3();
 const BLOON_LOW = [0xff4f7a, 0xffb02f, 0x37d07a, 0x2fa8ff, 0xff7ad0];
 /** the high ones are worth more: silver-bright so you can tell them */
 const BLOON_HIGH = [0xe8f4ff, 0xc8f0ff, 0xf4e8ff];

@@ -410,7 +410,6 @@ export const ROUND_BIOME: Record<string, BiomeId> = {
   colourcall: 'disco',
   hotspud: 'circus',
   bouncehouse: 'candy',
-  beltrush: 'toybox',
   discodash: 'disco',
   bigtop: 'circus',
   treasuretrail: 'pirate',

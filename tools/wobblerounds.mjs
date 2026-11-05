@@ -6,7 +6,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', '2,4,6,16,19,21,26,27,28,29,30,31,36').split(',').map(Number);
+const rounds = opt('rounds', '2,4,6,16,19,21,26,27,28,29,30,35').split(',').map(Number);
 const runs = Number(opt('runs', 2));
 const cut = opt('cut', '0');
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
@@ -23,10 +23,7 @@ async function one(round) {
     g.paused = true;
     const c = g.course;
     const start = g.racers.length;
-    let holders = new Set(), lastH = -2, changes = 0, sprung = 0, boxes = 0, bonk = 0;
-    const seen = {};
-    const fire = g.goodieFx?.bind(g);
-    if (fire) g.goodieFx = (r, w) => { boxes++; seen[w] = (seen[w] ?? 0) + 1; fire(r, w); };
+    let holders = new Set(), lastH = -2, changes = 0, sprung = 0, bonk = 0;
     const t0 = performance.now();
     let t = 0;
     for (; t < 260 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 0.25) {
@@ -41,7 +38,7 @@ async function one(round) {
       alive: g.racers.filter((r) => !r.out).length, slots: g.slots, fin: g.racers.filter((r) => r.fin).length,
       keep: c.keep ? { changes, holders: holders.size, top: g.keepP?.ranking().slice(0, 3).map((r) => +(g.keepP.held.get(r.m.id) ?? 0).toFixed(1)) } : undefined,
       pops: g.bounce ? g.bounce.ranking().slice(0, 3).map((r) => g.bounce.score.get(r.m.id) ?? 0) : undefined,
-      sprung, bonk, boxes, seen, wall: +((performance.now() - t0) / 1000).toFixed(1),
+      sprung, bonk, wall: +((performance.now() - t0) / 1000).toFixed(1),
     };
   });
   await page.close();
@@ -54,7 +51,7 @@ const out = [];
 await Promise.all([0, 1, 2].map(async () => { while (queue.length) { const n = queue.shift(); out.push([n, await one(n)]); } }));
 out.sort((a, b) => a[0] - b[0]);
 for (const [n, r] of out) {
-  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.pops && `pops ${r.pops}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`, r.boxes && `boxes ${r.boxes} ${JSON.stringify(r.seen)}`].filter(Boolean).join(' · ');
+  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.pops && `pops ${r.pops}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`].filter(Boolean).join(' · ');
   console.log(`${String(n).padStart(2)} ${r.id.padEnd(14)} ${String(r.playT).padStart(6)}s  left ${String(r.alive).padStart(2)}/${r.start} slots ${String(r.slots).padStart(2)} fin ${String(r.fin).padStart(2)} ${r.state.padEnd(8)} ${extra} ${r.errs.length ? 'ERR ' + r.errs.join(' | ') : ''}`);
 }
 await browser.close();

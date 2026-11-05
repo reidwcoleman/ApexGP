@@ -302,7 +302,7 @@ export class CourseBuilder {
   /** AI-only hazards (not in the world): places not to be at a time — beside a moving bridge, between two lanes */
   readonly ghosts: Kin[] = [];
   /** called every frame with the physics time (instanced parts, signs that turn) */
-  /** spots a star should hang: the arcs and lines the course wants you to take (goodies.ts) */
+  /** spots a star should hang: the arcs and lines the course wants you to take (stars.ts) */
   readonly starSpots: THREE.Vector3[] = [];
   readonly animators: ((t: number) => void)[] = [];
   private paints = new Map<string, THREE.MeshPhysicalMaterial>();

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain, TideBrain } from './ai-arena.ts';
-import { BeltBrain, BounceBrain, CallBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
+import { BounceBrain, CallBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -92,7 +92,6 @@ export class Bot {
   private callB: CallBrain | null = null;
   private spudB: SpudBrain | null = null;
   private bounceB: BounceBrain | null = null;
-  private beltB: BeltBrain | null = null;
   private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
@@ -214,10 +213,6 @@ export class Bot {
       if (t < c.state.go + this.react) return;
       this.keepB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.16 * this.ease);
-    }
-    if (c.belt) {
-      this.beltB ??= new BeltBrain(m, this.skill, this.rnd);
-      return this.beltB.update(dt, t, c, all, this.ease);
     }
     if (c.plate) {
       this.plate ??= new PlateBrain(m, this.skill, this.rnd, this.aggr, this.style, this.boost);
