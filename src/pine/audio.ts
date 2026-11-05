@@ -66,7 +66,7 @@ export class Chip {
   ctx: AudioContext | null = null; master!: GainNode; music!: GainNode; lead!: GainNode; fx!: GainNode;
   muted = false; private noise!: AudioBuffer; private pulse25!: PeriodicWave; private pulse12!: PeriodicWave;
   private cur: Compiled | null = null; private curName = ''; private step = 0; private nextT = 0; private li = 0; private gateUntil = 0;
-  private timer = 0; private last: Record<string, number> = {}; private pending = '';
+  rate = 1; private timer = 0; private last: Record<string, number> = {}; private pending = '';
 
   start() {
     if (this.ctx) { void this.ctx.resume(); return; }
@@ -104,7 +104,7 @@ export class Chip {
       this.backing(S, st, t);
       this.step++;
       if (this.step >= S.total) { this.step = 0; this.li = 0; }
-      this.nextT += S.stepT;
+      this.nextT += S.stepT / this.rate;
     }
   }
   private backing(S: Compiled, st: number, t: number) {
@@ -126,6 +126,10 @@ export class Chip {
       if (inBar === 0) this.thump(t);
     }
   }
+  /** one struck bell, for the trail: the melody is yours to play */
+  note(m: number) { const c = this.ctx; if (!c) return; const t = c.currentTime; this.voice('triangle', hz(m + 12), t, 0.36, 0.24, this.fx, 0.5); this.voice('sine', hz(m + 24), t, 0.22, 0.09, this.fx, 0.3); this.jingle(t, 0.03, this.fx); }
+  /** every swing climbs a little scale while the combo lives */
+  chime(n: number) { const c = this.ctx; if (!c) return; const now = c.currentTime; if (now - (this.last.chime ?? 0) < 0.06) return; this.last.chime = now; const S = [0, 2, 4, 7, 9], k = Math.min(19, n >> 1); this.voice('triangle', hz(72 + Math.floor(k / 5) * 12 + S[k % 5]), now, 0.09, 0.08, this.fx, 0.4); }
   private jingle(t: number, v: number, out: AudioNode = this.music) { for (const [f, d] of [[3136, 0], [3951, 0.012], [4699, 0.024]]) this.voice('square', f, t + d, 0.05, v * 0.5, out, 0.3); this.hit(t, 0.05, v * 1.1, 8500, out); }
   private voice(type: OscillatorType | PeriodicWave, f: number, t: number, d: number, v: number, out: AudioNode, sustain = 0.6) {
     const c = this.ctx!, o = c.createOscillator(), g = c.createGain();
@@ -167,6 +171,17 @@ export class Chip {
       case 'ram': this.thump(now, 0.4, this.fx); this.seq([84, 91], 0.05, 0.08, 0.14); break;
       case 'fanfare': this.seq([67, 72, 76, 79, 84, 79, 84, 88], 0.09, 0.16, 0.14); break;
       case 'month': this.tone(1046, 0, 0.05, 0.05); break;
+      case 'drop': this.tone(1320, 0, 0.05, 0.05); this.tone(990, 0.07, 0.05, 0.05); this.tone(1320, 0.14, 0.08, 0.05); break;
+      case 'gift': this.seq([72, 76, 79, 84, 88, 91], 0.045, 0.1, 0.12); this.hit(now, 0.08, 0.09, 6000, this.fx); break;
+      case 'coal': this.seq([60, 59, 58, 55], 0.16, 0.2, 0.13); break;
+      case 'orn': this.seq([84, 88, 91, 96, 91, 96, 100], 0.08, 0.26, 0.11); for (let i = 0; i < 5; i++) this.jingle(now + i * 0.1, 0.04, this.fx); break;
+      case 'combo': this.seq([79, 84, 88], 0.05, 0.1, 0.12); this.jingle(now, 0.05, this.fx); break;
+      case 'ready': this.seq([72, 79, 84, 91], 0.07, 0.16, 0.13); for (let i = 0; i < 4; i++) this.jingle(now + i * 0.09, 0.05, this.fx); break;
+      case 'frenzy': this.seq([60, 67, 72, 76, 79, 84, 88, 91, 96], 0.04, 0.16, 0.14); this.thump(now, 0.5, this.fx); for (let i = 0; i < 8; i++) this.jingle(now + i * 0.07, 0.06, this.fx); break;
+      case 'frenzyEnd': this.seq([84, 79, 76, 72], 0.07, 0.12, 0.1); break;
+      case 'trail': for (let i = 0; i < 6; i++) this.jingle(now + i * 0.09, 0.05, this.fx); break;
+      case 'trailDone': this.seq([72, 76, 79, 84, 79, 84, 88, 91], 0.07, 0.15, 0.14); break;
+      case 'trailFail': this.seq([76, 72, 69], 0.1, 0.14, 0.09); break;
       case 'sleigh': for (let i = 0; i < 12; i++) this.jingle(now + i * 0.14, 0.06 + (i % 4 === 0 ? 0.02 : 0), this.fx); break;
     }
   }

@@ -2,8 +2,8 @@
 // far is cached chunks, so a 30,000-tree farm costs no more than a small one.
 import { C, canvas, hash, mix, hex } from './pal';
 import { Sim, MW, MH, CH, CW, CHH, PS, PW, PH, T_WATER, T_WILD, T_GRASS, T_ROAD, T_BRIDGE, F_DEAD, F_GOLD, F_PEST, F_THIRST, F_STUMP, stageOf, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, type Block } from './sim.ts';
-import { SPECIES, BUILDINGS, VEHICLES, CREW, gradeOf, SIZE_MIN } from './data.ts';
-import { treeSprite, wildSprite, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, treeShadow, shadowBlob, mound, stump, snowman, candyCane, lampPost, giftPile, fence, glint, glow, santaSleigh, buildingLights, half, STAGE_PX, BLD_TOP, PX_AX, PX_AY, VEH_TINT, type Look } from './art';
+import { SPECIES, BUILDINGS, VEHICLES, CREW, gradeOf, SIZE_MIN, ELF_LINES, FAMILY_LINES } from './data.ts';
+import { treeSprite, wildSprite, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, treeShadow, shadowBlob, mound, stump, snowman, candyCane, lampPost, giftPile, fence, glint, glow, santaSleigh, buildingLights, half, giftBox, parachute, bellSprite, STAGE_PX, BLD_TOP, PX_AX, PX_AY, VEH_TINT, type Look } from './art';
 import { Ground, type GroundEnv } from './ground';
 import { text, center, rimmed, textW } from './font';
 
@@ -19,6 +19,7 @@ const SKINS = ['#f6cca4', '#d2a074', '#8e5c3e'];
 // the crew are elves, and nobody at the farm finds this strange
 const CREW_LOOKS: Look[] = Array.from({ length: 6 }, (_, i) => ({ hat: i % 2 ? C.red : C.leaf, coat: i % 2 ? C.leaf : C.red, skin: SKINS[i % 3], pants: i % 2 ? C.red : C.leaf, kind: 'elf' as const, trim: i % 3 === 2 ? C.gold : C.white }));
 const CREW_TINT = ['', C.teal, C.orange, C.purple];
+const CAROL: Look[] = [{ hat: C.red, coat: C.dusk, skin: SKINS[0], pants: C.ink, kind: 'beanie', scarf: C.gold }, { hat: C.leaf, coat: C.dred, skin: SKINS[2], pants: C.ink, kind: 'beanie', scarf: C.white }, { hat: C.gold, coat: C.teal, skin: SKINS[1], pants: C.ink, kind: 'beanie', scarf: C.red }];
 const CAR_COLS = [C.red, C.blue, C.gold, C.teal, C.white, C.purple, C.orange];
 const SNOW_BY_MONTH = [3, 3, 2, 2, 1, 1, 0, 0, 1, 1, 2, 3], FLURRY = [1, 1, 0.75, 0.5, 0.35, 0.22, 0.16, 0.16, 0.28, 0.5, 0.85, 1];
 const NIGHT = '#5a66d0', SUNSET = '#ffdfc8';
@@ -33,6 +34,8 @@ export class Renderer {
   ghost: { k: string; x: number; y: number; ok: boolean } | null = null; drag: { x0: number; y0: number; x1: number; y1: number } | null = null;
   pings: { x: number; y: number; t: number; col: string }[] = [];
   sleigh: { x: number; y: number; t: number } | null = null; sleighWait = 30; onSleigh: (() => void) | null = null;
+  tracks: { x: number; y: number; t: number; d: number; w: number }[] = []; private tx = 0; private ty = 0; private tn = 0;
+  says: { x: number; y: number; t: string; life: number }[] = []; private chatT = 5; private spray = 0; private carolT = 0;
   private lamps: { x: number; y: number }[] = []; private smokeT = 0; private nightMul = '';
   constructor(public sim: Sim) { this.ground = new Ground(sim); for (let i = 0; i < 240; i++) this.flakes.push({ x: Math.random(), y: Math.random(), s: 0.4 + Math.random() }); }
 
@@ -53,7 +56,7 @@ export class Renderer {
     const sim = this.sim; if (sim.terr[i] !== T_GRASS || sim.sp[i] || sim.bld[i] || sim.flag[i] & F_STUMP) return 0;
     const road = (j: number) => sim.terr[j] === T_ROAD;
     if (X > 0 && Y > 0 && X < MW - 1 && Y < MH - 1 && (road(i - 1) || road(i + 1) || road(i - MW) || road(i + MW))) return (X + Y) % 16 === 0 ? 2 : (X + Y) % 8 === 4 ? 1 : 0;
-    const h = hash(X, Y, 77); return h > 0.9962 ? 3 : h > 0.9925 ? 4 : 0;
+    const h = hash(X, Y, 77); return h > 0.9962 ? 3 : sim.secretAt(i) ? 4 : 0;
   }
   private propImg(k: number, X: number, Y: number, on: boolean) { return k === 1 ? candyCane() : k === 2 ? lampPost(on) : k === 3 ? snowman((hash(X, Y, 6) * 4) | 0) : giftPile((hash(X, Y, 7) * 4) | 0); }
 
@@ -145,6 +148,7 @@ export class Renderer {
     if (z === 16) this.drawNear(g, camX, camY, snowV);
     else { this.lamps.length = 0; this.drawFar(g, camX, camY); }
     this.drawOverlays(g, camX, camY);
+    this.drawLoot(g, camX, camY);
     this.drawFx(g, camX, camY, dt);
     this.drawEnv(g, camX, camY, dt);
   }
@@ -159,7 +163,9 @@ export class Renderer {
       if (sim.terr[i] === T_WATER) { if (!snowV) { const f = (t * 1.6 + hash(x, y) * 8) % 8; if (f < 2) { g.fillStyle = C.ice; g.fillRect(px + ((hash(x, y, 2) * 12) | 0), py + ((hash(x, y, 3) * 14) | 0), 3 - (f | 0), 1); } } continue; }
       if (sp) { const st = stageOf(sim.h[i]), sh = treeShadow(st); if (st < 4) g.drawImage(mound(), px + 2, py + 10); g.drawImage(sh, px + 8 - (sh.width >> 1) + 3 + jx(x, y), py + 15 - (sh.height >> 1) + jy(x, y)); }
     }
+    this.drawTracks(g, camX, camY);
     const ents: { y: number; f: () => void }[] = [];
+    this.carolers(ents, camX, camY);
     for (const b of s.blds) {
       const d = BUILDINGS[b.k]; if (b.x + d.w < x0 || b.x > x1 || b.y + d.h < y0 - 3 || b.y > y1) continue;
       ents.push({ y: b.y + d.h - 0.5, f: () => g.drawImage(buildingSprite(b.k, true, lit, ph), b.x * z - camX, b.y * z - camY - BLD_TOP) });
@@ -201,6 +207,55 @@ export class Renderer {
     // the player is always readable through a wall of firs
     const p = s.p, pi = sim.idx(Math.floor(p.x), Math.min(MH - 1, Math.floor(p.y) + 1));
     if (sim.sp[pi] && sim.h[pi] > 3) { g.globalAlpha = 0.45; this.drawPlayer(g, camX, camY, z); g.globalAlpha = 1; }
+  }
+  private drawTracks(g: CanvasRenderingContext2D, camX: number, camY: number) {
+    const W = this.W, H = this.H, now = this.t;
+    for (const q of this.tracks) {
+      const age = now - q.t; if (age > 34) continue; const x = Math.round(q.x * 16 - camX), y = Math.round(q.y * 16 - camY); if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
+      g.fillStyle = age < 20 ? 'rgba(112,124,206,.5)' : 'rgba(132,144,216,.28)';
+      if (q.w === 0) { const o = q.d ? 2 : -2; if (q.d < 2) g.fillRect(x + o, y, 2, 2); else g.fillRect(x, y + o, 2, 2); }
+      else { const hw = q.w; if (q.d === 1) { g.fillRect(x, y - hw, 7, 2); g.fillRect(x, y + hw - 2, 7, 2); } else { g.fillRect(x - hw, y, 2, 7); g.fillRect(x + hw - 2, y, 2, 7); } }
+    }
+  }
+  /** carolers outside the lot, all through the Rush */
+  private carolers(ents: { y: number; f: () => void }[], camX: number, camY: number) {
+    const s = this.sim.s, l = s.blds.find((b) => b.k === 'lot'); if (!l || (s.month !== 11 && !this.sim.julySale())) return;
+    const bx = l.x + 6.8, by = l.y + 4.2, sway = ((this.t * 2) | 0) % 2;
+    CAROL.forEach((look, i) => ents.push({ y: by + (i % 2) * 0.2, f: () => { const g = g2(this), x = Math.round((bx + i * 0.9) * 16 - camX), y = Math.round((by + (i % 2) * 0.2) * 16 - camY) - ((sway + i) % 2); g.drawImage(shadowBlob(12), x - 6, y - 1); g.drawImage(person(look, 2, 0), x - PX_AX, y - PX_AY); } }));
+    this.carolT -= 1 / 60; if (this.carolT <= 0 && this.z === 16) { this.carolT = 0.7; this.floats.push({ x: bx + Math.random() * 2.4, y: by - 1.5, t: '~', col: [C.gold, C.white, C.pink][(Math.random() * 3) | 0], life: 1.2 }); }
+  }
+  /** per-frame life that isn't sim: tracks, spray, elf chatter */
+  stepLife(dt: number) {
+    const s = this.sim.s, p = s.p, f = s.fun, v = VEHICLES[s.veh], d = Math.hypot(p.x - this.tx, p.y - this.ty);
+    if (d > (s.veh ? 0.42 : 0.55)) {
+      this.tx = p.x; this.ty = p.y; this.tn++;
+      if (!v.air) { const side = p.dir === 1 || p.dir === 3; if (this.tracks.length > 520) this.tracks.shift(); this.tracks.push({ x: p.x, y: p.y + 0.1, t: this.t, d: s.veh ? (side ? 1 : 0) : (side ? (this.tn % 2 ? 2 : 3) : this.tn % 2), w: s.veh ? [0, 6, 9, 13, 0][s.veh] : 0 }); }
+    }
+    this.spray -= dt;
+    if (this.spray <= 0 && p.moving && (s.veh > 0 || f.frenzy > 0 || f.boost > 0)) {
+      this.spray = 0.05; const hot = f.frenzy > 0, n = v.air ? 0 : 2;
+      for (let i = 0; i < n + (hot ? 2 : 0); i++) this.parts.push({ x: p.x + (Math.random() - 0.5) * (1 + v.w * 0.3), y: p.y + 0.2, vx: -p.vx * 0.2 + (Math.random() - 0.5) * 2, vy: -p.vy * 0.2 - Math.random() * 2, life: 0.35 + Math.random() * 0.3, max: 1, col: hot ? [C.gold, C.lemon, C.red, C.white][(Math.random() * 4) | 0] : Math.random() > 0.3 ? C.white : C.sn2, s: Math.random() > 0.5 ? 2 : 1, grav: 7 });
+    }
+    this.chatT -= dt;
+    if (this.chatT <= 0) { this.chatT = 4 + Math.random() * 6; const a = s.crew.filter((c) => c.mode === 'work' || c.moving), q = a[(Math.random() * a.length) | 0]; if (q && Math.abs(q.x - this.cx) * this.z < this.W / 2 && Math.abs(q.y - this.cy) * this.z < this.H / 2) this.say(q.x, q.y - (q.rank ? 2.8 : 1.8), ELF_LINES[(Math.random() * ELF_LINES.length) | 0]); }
+  }
+  say(x: number, y: number, t: string) { if (this.says.length < 6 && this.z >= 8) this.says.push({ x, y, t, life: 2.6 }); }
+  private drawLoot(g: CanvasRenderingContext2D, camX: number, camY: number) {
+    const sim = this.sim, f = sim.s.fun, z = this.z, t = this.t, near = z >= 8;
+    for (let i = 0; i < f.gifts.length; i++) {
+      const q = f.gifts[i], x = Math.round(q.x * z - camX), y = Math.round(q.y * z - camY), im = giftBox(i + ((q.x * 7) | 0));
+      if (q.fall > 0) { const up = Math.round(q.fall * 62), sw = Math.round(Math.sin(t * 4 + i) * 4); if (near) { g.drawImage(shadowBlob(12), x - 6, y - 2); g.drawImage(parachute(), x - 12 + sw, y - up - 28); } g.drawImage(im, x - 7 + sw, y - up - 13); continue; }
+      if (q.t < 6 && ((t * 8) | 0) % 2) continue;
+      const hop = Math.abs(Math.sin(t * 5 + i)) * 3 | 0; g.drawImage(shadowBlob(14), x - 7, y - 2); g.drawImage(im, x - 7, y - 14 - hop); if (((t * 3 + i) | 0) % 3 === 0) g.drawImage(glint(1 + (((t * 9) | 0) % 2)), x + 2, y - 18 - hop);
+    }
+    const tr = f.trail; if (!tr) return;
+    const n = tr.pts.length / 2;
+    for (let i = n - 1; i >= tr.i; i--) {
+      const x = Math.round(tr.pts[i * 2] * z - camX), y = Math.round(tr.pts[i * 2 + 1] * z - camY), next = i === tr.i, bob = Math.round(Math.sin(t * 4 + i * 0.7) * 2), im = bellSprite(((t * 5) | 0) + i);
+      if (i > tr.i + 7) { g.fillStyle = C.gold; g.fillRect(x - 1, y - 6, 2, 2); continue; }
+      g.drawImage(shadowBlob(10), x - 5, y - 1); g.drawImage(im, x - 6, y - 15 + bob);
+      if (next) { const r = 7 + ((t * 18) % 8 | 0); g.strokeStyle = C.lemon; g.lineWidth = 1; g.strokeRect(x - r + 0.5, y - 8 - r + 0.5, r * 2, r * 2); }
+    }
   }
   private bumps(x: number, y: number) { const p = this.sim.s.p; if (!p.moving) return 0; const d = Math.abs(p.x - x - 0.5) + Math.abs(p.y - y - 0.5); return d < 1.2 ? (((this.t * 22) | 0) % 2 ? 1 : -1) : 0; }
 
@@ -295,7 +350,7 @@ export class Renderer {
       g.strokeStyle = k.ok ? C.lime : C.red; g.lineWidth = 1; g.strokeRect(k.x * z - camX + 0.5, k.y * z - camY + 0.5, (d?.w ?? 1) * z - 1, (d?.h ?? 1) * z - 1);
     }
     // the tool's swath, the promise of what holding the button will do
-    const p = s.p, v = VEHICLES[s.veh], sw = sim.swathOf(p.x, p.y, v.w);
+    const p = s.p, sw = sim.swathOf(p.x, p.y, sim.playerW());
     const tc = [C.gold, C.lime, C.aqua, C.sky][p.tool];
     g.strokeStyle = tc; g.globalAlpha = p.acting ? 0.9 : 0.4; g.lineWidth = 1;
     g.strokeRect(sw.x0 * z - camX + 0.5, sw.y0 * z - camY + 0.5, (sw.x1 - sw.x0 + 1) * z - 1, (sw.y1 - sw.y0 + 1) * z - 1); g.globalAlpha = 1;
@@ -323,7 +378,13 @@ export class Renderer {
     }
     this.floats.length = w; w = 0;
     for (let i = 0; i < this.pings.length; i++) { const q = this.pings[i]; q.t -= dt * 0.8; if (q.t > 0) this.pings[w++] = q; }
-    this.pings.length = w;
+    this.pings.length = w; w = 0;
+    for (let i = 0; i < this.says.length; i++) {
+      const q = this.says[i]; q.life -= dt; if (q.life <= 0) continue; this.says[w++] = q;
+      const bw = textW(q.t) + 8, x = Math.round(q.x * z - camX - bw / 2), y = Math.round(q.y * z - camY) - 12;
+      g.fillStyle = C.ink; g.fillRect(x - 1, y, bw + 2, 12); g.fillRect(x, y - 1, bw, 14); g.fillStyle = C.white; g.fillRect(x, y, bw, 12); g.fillStyle = C.ink; g.fillRect(x + (bw >> 1) - 1, y + 13, 3, 1); g.fillRect(x + (bw >> 1), y + 14, 1, 2); g.fillStyle = C.white; g.fillRect(x + (bw >> 1), y + 12, 2, 1); text(g, q.t, x + 4, y + 2, C.ink);
+    }
+    this.says.length = w;
   }
 
   private drawEnv(g: CanvasRenderingContext2D, camX: number, camY: number, dt: number) {
@@ -334,7 +395,7 @@ export class Renderer {
       if (d > 0.22) this.lights(g, camX, camY, d);
     }
     // it is always snowing a little here; a blizzard is just the same thing with opinions
-    const bliz = s.blizzard > 0, amt = bliz ? 1 : FLURRY[s.month], n = Math.round(this.flakes.length * amt), wind = bliz ? 0.26 : 0.03;
+    const bliz = s.blizzard > 0, amt = bliz || sim.julySale() ? 1 : FLURRY[s.month], n = Math.round(this.flakes.length * amt), wind = bliz ? 0.26 : 0.03;
     for (let i = 0; i < n; i++) {
       const f = this.flakes[i], fast = bliz ? 2.2 : 1;
       f.y += dt * f.s * 0.2 * fast; f.x += dt * (wind + Math.sin(this.t * 0.8 + f.s * 9) * 0.018); if (f.y > 1) f.y -= 1; if (f.x > 1) f.x -= 1; if (f.x < 0) f.x += 1;
@@ -401,6 +462,7 @@ export class Renderer {
     this.burst(x + 0.5, y + 0.3, near ? 12 : 2, [S.ramp[1], S.ramp[2], S.ramp[3], C.tan, C.white, C.white, C.sn2], 4);
     if (near && this.falls.length < 40) this.falls.push({ x: x + 0.5, y: y + 1, img: treeSprite(sp, STAGE_PX[stageOf(h)], 1, this.treeSnow(this.snowVis()), 0, 0, 0), t: 0, dir: Math.random() > 0.5 ? 1 : -1 });
     if (mine) this.shake = Math.min(3, this.shake + 0.7);
+    if (mine && h >= 9 && this.floats.length < 12) this.float(x + 0.5, y - 1, 'TIMBER!', C.white);
   }
   float(x: number, y: number, t: string, col: string = C.gold, big = false) { if (this.floats.length < 40) this.floats.push({ x, y, t, col, life: 1.1, big }); }
   ping(x: number, y: number, col: string = C.red) { this.pings.push({ x, y, t: 1, col }); }
@@ -417,7 +479,7 @@ export class Renderer {
       if (c.st === 0) { c.x += v * 9 * dt; if ((v > 0 && c.x >= c.stop) || (v < 0 && c.x <= c.stop)) { c.st = 1; c.t = 0.2; c.px = c.x; c.py = c.y - 0.6; } }
       else if (c.st === 1) { c.t -= dt; if (c.t < 0) c.st = 2; }
       else if (c.st === 2) { const tx = l.x + 3, ty = l.y + 4.5, dx = tx - c.px, dy = ty - c.py, d = Math.hypot(dx, dy); if (d < 0.3) c.st = 3; else { c.px += dx / d * 4.5 * dt; c.py += dy / d * 4.5 * dt; } }
-      else if (c.st === 3) { const dx = c.x - c.px, dy = c.y - 0.6 - c.py, d = Math.hypot(dx, dy); if (d < 0.3) { c.st = 4; c.tree = true; } else { c.px += dx / d * 4 * dt; c.py += dy / d * 4 * dt; } }
+      else if (c.st === 3) { const dx = c.x - c.px, dy = c.y - 0.6 - c.py, d = Math.hypot(dx, dy); if (d < 0.3) { c.st = 4; c.tree = true; if (Math.random() < 0.6) this.say(c.px, c.py - 1.9, FAMILY_LINES[(Math.random() * FAMILY_LINES.length) | 0]); } else { c.px += dx / d * 4 * dt; c.py += dy / d * 4 * dt; } }
       else { c.x += v * 11 * dt; }
     }
     this.cars = this.cars.filter((c) => c.x > l.x - 40 && c.x < l.x + 50);

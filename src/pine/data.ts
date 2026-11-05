@@ -157,3 +157,42 @@ export const LETTERS: Record<string, string[]> = {
   buck2: ['Three of my buyers asked about you.', 'I do not enjoy that.', 'Name your price. Please.', '', '- Buck Hemlock'],
   buck3: ['Fine. You are bigger than us this year.', 'Mabel always said you would be trouble.', 'She meant it kindly. I do not.', 'Merry Christmas.', '- Buck'],
 };
+
+// ---- the fun layer: combos, gifts, the Advent Album ---------------------------------------------------------
+/** combo thresholds are for Boots; wider machines need more trees for the same word */
+export const COMBO_TIERS: [number, string, number][] = [[6, 'NICE', 10], [12, 'JOLLY!', 25], [24, 'MERRY!', 60], [45, 'FESTIVE!', 150], [80, 'YULETASTIC!', 400], [140, 'LEGEND OF THE NORTH', 1000]];
+/** the chorus of Jingle Bells, one note a bell */
+export const TRAIL_NOTES = [76, 76, 76, 76, 76, 76, 76, 79, 72, 74, 76, 77, 77, 77, 77, 77, 76, 76, 76, 79, 79, 77, 74, 72];
+export const JOLLY_SECS = 10;
+
+export interface Ornament { name: string; shape: 'ball' | 'bell' | 'star' | 'cane' | 'flake' | 'man' | 'sock' | 'drum'; col: string; hi: string; note: string }
+export const ORNAMENTS: Ornament[] = [
+  { name: 'Red Glass Ball', shape: 'ball', col: '#e0262f', hi: '#ff8f86', note: 'Older than the barn.' },
+  { name: 'Brass Bell', shape: 'bell', col: '#ffc92e', hi: '#fff09a', note: 'Rings if you sneeze.' },
+  { name: 'Tin Star', shape: 'star', col: '#c0c4d8', hi: '#fdfcf6', note: 'Cut from a coffee can, 1961.' },
+  { name: 'Peppermint Cane', shape: 'cane', col: '#e0262f', hi: '#fdfcf6', note: 'Do not lick. Someone did.' },
+  { name: 'Paper Snowflake', shape: 'flake', col: '#fdfcf6', hi: '#cfe9fb', note: 'No two alike. This one is lopsided.' },
+  { name: 'Gingerbread Gus', shape: 'man', col: '#a8683a', hi: '#e0b67a', note: 'He has seen things.' },
+  { name: 'Tiny Stocking', shape: 'sock', col: '#e0262f', hi: '#fdfcf6', note: 'Holds exactly one peanut.' },
+  { name: 'Toy Drum', shape: 'drum', col: '#2f7ae0', hi: '#ffc92e', note: 'Pa rum pum pum pum.' },
+  { name: 'Green Glass Ball', shape: 'ball', col: '#279050', hi: '#bfe254', note: 'Survived three cats.' },
+  { name: 'Silver Bell', shape: 'bell', col: '#c0c4d8', hi: '#fdfcf6', note: 'Soon it will be Christmas Day.' },
+  { name: 'Gold Star', shape: 'star', col: '#ffc92e', hi: '#fff09a', note: 'For the top. Mabel insists.' },
+  { name: 'Mint Cane', shape: 'cane', col: '#279050', hi: '#fdfcf6', note: 'The controversial flavor.' },
+  { name: 'Frost Flake', shape: 'flake', col: '#79bcf2', hi: '#fdfcf6', note: 'Melts if you are smug about it.' },
+  { name: 'Gingerbread Dot', shape: 'man', col: '#c88a56', hi: '#ff8f86', note: 'Runs the place, really.' },
+  { name: 'Knit Stocking', shape: 'sock', col: '#279050', hi: '#ffc92e', note: 'Mabel knit one. Only one.' },
+  { name: 'Red Drum', shape: 'drum', col: '#e0262f', hi: '#ffc92e', note: 'The elves banned it.' },
+  { name: 'Blue Glass Ball', shape: 'ball', col: '#2f7ae0', hi: '#a4dcff', note: 'You can see the whole farm in it.' },
+  { name: 'Sleigh Bell', shape: 'bell', col: '#e0309a', hi: '#ffa0d8', note: 'Fell off something fast.' },
+  { name: 'Northern Star', shape: 'star', col: '#58d2b8', hi: '#fdfcf6', note: 'Points to the good pie.' },
+  { name: 'Licorice Cane', shape: 'cane', col: '#44285e', hi: '#c0c4d8', note: 'Nobody asked for this.' },
+  { name: 'Golden Flake', shape: 'flake', col: '#ffc92e', hi: '#fff09a', note: 'Worth nothing. Priceless.' },
+  { name: 'Gingerbread Buck', shape: 'man', col: '#6a3d2a', hi: '#8f92ac', note: 'Tastes like corporate greed.' },
+  { name: 'Baby Stocking', shape: 'sock', col: '#ff8f86', hi: '#fdfcf6', note: 'Yours, from your first Christmas.' },
+  { name: "Mabel's Angel", shape: 'star', col: '#fff09a', hi: '#fdfcf6', note: 'She saved this one for you.' },
+];
+export const MABEL_NOTES = ['Mabel: Eat something. You look thin.', 'Mabel: The firs like it when you hum.', 'Mabel: Never trust a man with a lanyard.', 'Mabel: There is pie in the freezer. Do not ask how old.', 'Mabel: Rotate your crops. Rotate your socks.', 'Mabel: Buck Hemlock cried at my wedding. Not from joy.'];
+export const COAL_NOTES = ['A lump of coal, from Buck Hemlock.', 'Coal. The card says "Regards, MegaPine".', 'Coal, gift wrapped by a junior associate.'];
+export const ELF_LINES = ['Fir real!', 'Spruce it up!', 'Tree-mendous!', 'Yule love it!', 'Needle a hand?', 'Pine-tastic!', 'Snow way!', 'Happy holly days!', 'Oh, fir crying out loud', 'Have a holly jolly', 'Tinsel in my boots', 'Lookin sharp, boss', 'Union rep says hi', 'Wood you believe it', 'I wood not leaf', 'Bough down!'];
+export const FAMILY_LINES = ['This one!', 'Its so big!', 'It will fit. Probably.', 'Smells like Christmas', 'Can we keep the elf?', 'Dad, it wont fit', 'Best tree ever!', 'Merry Christmas!', 'Mom said smaller', 'I named it Doug'];

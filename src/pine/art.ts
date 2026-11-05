@@ -580,3 +580,41 @@ export function logoWord(mask: (x: number, y: number) => boolean, w: number, h: 
   for (let k = 5; k >= 1; k--) for (let y = 0; y < shadow.h; y++) for (let x = 0; x < shadow.w; x++) if (shadow.get(x, y) && o.in(x + (k >> 1), y + k)) o.d[(y + k) * o.w + x + (k >> 1)] = 0xff3c1014;
   o.blit(shadow, 0, 0); return o;
 }
+
+// ---- the fun layer --------------------------------------------------------------------------------------
+export function giftBox(v: number) {
+  return once(`gb${v}`, () => {
+    const P = [[C.red, C.gold], [C.leaf, C.red], ['#2f7ae0', C.white], [C.gold, C.red]][v % 4], b = new Buf(15, 15), c = P[0], r = P[1];
+    b.rect(2, 5, 11, 9, c); b.rect(10, 5, 3, 9, mix(c, C.ink, 0.3)); b.rect(2, 5, 11, 1, mix(c, C.white, 0.4)); b.rect(1, 4, 13, 3, c); b.rect(1, 4, 13, 1, mix(c, C.white, 0.4)); b.rect(11, 5, 3, 2, mix(c, C.ink, 0.3));
+    b.rect(6, 4, 3, 10, r); b.rect(1, 5, 13, 1, mix(r, C.ink, 0.15)); b.disc(5, 2, 2, 1.4, r); b.disc(9, 2, 2, 1.4, r); b.px(7, 3, mix(r, C.ink, 0.3)); b.px(5, 2, c); b.px(9, 2, c);
+    b.outline(RIM); return b.bake();
+  });
+}
+export function parachute() {
+  return once('chute', () => {
+    const b = new Buf(25, 17); for (let y = 0; y < 8; y++) { const w = Math.round(Math.sqrt(1 - ((7 - y) / 8) ** 2) * 11); for (let x = -w; x <= w; x++) b.px(12 + x, y, ((x + 40) / 4 | 0) % 2 ? C.red : C.white); }
+    b.rect(1, 7, 23, 1, C.dred); for (const x of [2, 12, 22]) b.line(x, 8, 12, 16, C.dbrown); b.outline(RIM); return b.bake();
+  });
+}
+export function bellSprite(k: number) {
+  return once(`bell${k}`, () => {
+    const b = new Buf(13, 14), s = k % 2 ? 1 : -1; b.rect(5 + (s > 0 ? 1 : 0), 1, 2, 1, C.gold); b.disc(6, 5, 3, 3, C.gold); b.rect(3, 5, 7, 4, C.gold); b.rect(2, 8, 9, 2, C.gold); b.rect(1, 10, 11, 1, '#e8a41c'); b.rect(3, 5, 2, 4, C.lemon); b.px(5, 3, C.white); b.rect(8, 5, 2, 5, '#e8a41c'); b.px(6 + s, 12, C.red); b.px(6, 11, C.red); b.outline(RIM); return b.bake();
+  });
+}
+export function ornament(i: number, o: { shape: string; col: string; hi: string }) {
+  return once(`orn${i}`, () => {
+    const b = new Buf(16, 18), c = o.col, h = o.hi, d = mix(c, C.ink, 0.35), cx = 8;
+    b.rect(cx - 1, 0, 2, 1, C.gold); b.rect(cx - 2, 1, 4, 2, C.lgrey);
+    switch (o.shape) {
+      case 'ball': b.disc(cx, 10, 6, 6, c); b.disc(cx + 1, 11, 5, 5, c); for (let y = 4; y < 17; y++) for (let x = 2; x < 15; x++) if (b.get(x, y) && x + y > 21) b.px(x, y, d); b.rect(cx - 3, 6, 2, 3, h); b.px(cx - 4, 8, h); b.rect(2, 10, 13, 1, h); break;
+      case 'bell': b.disc(cx, 8, 4, 4, c); b.rect(cx - 4, 8, 9, 5, c); b.rect(cx - 6, 12, 13, 2, c); b.rect(cx + 2, 7, 3, 7, d); b.rect(cx - 3, 7, 2, 5, h); b.disc(cx, 15, 1.4, 1.4, d); break;
+      case 'star': for (let y = -7; y <= 7; y++) for (let x = -7; x <= 7; x++) { const a = Math.atan2(y, x), r = Math.hypot(x, y), rr = 4 + 3.4 * Math.abs(Math.cos(a * 2.5 + 1.57 * 2.5 + 0.0)); if (r <= rr) b.px(cx + x, 10 + y, x + y > 2 ? d : c); } b.disc(cx - 1, 9, 1.4, 1.4, h); break;
+      case 'cane': for (let y = 7; y < 17; y++) b.rect(cx + 1, y, 3, 1, (y >> 1) & 1 ? c : h); [[1, 7], [1, 5], [0, 4], [-2, 3], [-4, 4], [-5, 6], [-5, 8]].forEach(([x, y], k) => b.rect(cx + x, y, 3, 2, k % 2 ? c : h)); break;
+      case 'flake': for (let k = 0; k < 6; k++) { const a = k * 1.047, ex = Math.cos(a) * 6.5, ey = Math.sin(a) * 6.5; b.line(cx, 10, cx + ex, 10 + ey, c); b.line(cx + ex * 0.6, 10 + ey * 0.6, cx + ex * 0.6 + Math.cos(a + 0.9) * 2.4, 10 + ey * 0.6 + Math.sin(a + 0.9) * 2.4, h); b.line(cx + ex * 0.6, 10 + ey * 0.6, cx + ex * 0.6 + Math.cos(a - 0.9) * 2.4, 10 + ey * 0.6 + Math.sin(a - 0.9) * 2.4, h); } b.px(cx, 10, h); break;
+      case 'man': b.disc(cx, 7, 3, 3, c); b.rect(cx - 3, 10, 7, 4, c); b.rect(cx - 6, 10, 13, 2, c); b.rect(cx - 3, 14, 3, 3, c); b.rect(cx + 1, 14, 3, 3, c); b.px(cx - 1, 6, C.ink); b.px(cx + 1, 6, C.ink); b.rect(cx - 1, 8, 3, 1, h); b.px(cx, 11, h); b.px(cx, 13, h); b.rect(cx - 6, 10, 1, 2, h); b.rect(cx + 6, 10, 1, 2, h); break;
+      case 'sock': b.rect(cx - 3, 4, 7, 3, h); b.rect(cx - 3, 7, 6, 6, c); b.rect(cx - 3, 12, 10, 4, c); b.rect(cx + 4, 13, 3, 3, h); b.rect(cx - 3, 12, 2, 4, h); b.rect(cx + 1, 7, 2, 5, d); break;
+      case 'drum': b.disc(cx, 6, 6, 2, h); b.rect(cx - 6, 7, 13, 8, c); b.disc(cx, 14, 6, 2, c); b.disc(cx, 6, 5, 1.2, C.white); for (let x = -5; x <= 5; x += 2) b.line(cx + x, 8, cx + x + 1, 14, h); b.rect(cx - 6, 8, 13, 1, h); break;
+    }
+    b.outline(RIM); return b.bake();
+  });
+}

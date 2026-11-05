@@ -1,19 +1,19 @@
 // Pine & Dandy: the cartridge. Owns the loop, the input, the HUD, every window and the year's ending.
 import { C, canvas, hash, bayer, mix, Buf } from './pal';
 import { Sim, money, short, MW, MH, PS, PW, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, F_DEAD, type Block, type Fx, type Ticket, type Report } from './sim.ts';
-import { SPECIES, NZ, SIZE_MIN, SIZE_NAME, VEHICLES, CREW, BUILDINGS, BUILD_ORDER, TIERS, GOALS, LETTERS, MONTHS, PERKS, type Perk } from './data.ts';
+import { SPECIES, NZ, SIZE_MIN, SIZE_NAME, VEHICLES, CREW, BUILDINGS, BUILD_ORDER, TIERS, GOALS, LETTERS, MONTHS, PERKS, ORNAMENTS, JOLLY_SECS, COMBO_TIERS, type Perk } from './data.ts';
 import { Renderer, PLAYER_LOOK } from './render';
 import { Chip } from './audio';
 import { UI } from './ui';
 import { Flyover } from './mode7';
-import { text, bold, center, right, textW, wrap, LINE } from './font';
-import { treeSprite, paintTree, buildingSprite, machine, person, icon, VEH_TINT, holly, snowman, giftPile, lampPost, santaSleigh, glint, glow, moonSprite, logoWord, shadowBlob } from './art';
+import { text, bold, center, right, rimmed, textW, wrap, LINE } from './font';
+import { treeSprite, paintTree, buildingSprite, machine, person, icon, VEH_TINT, holly, snowman, giftPile, lampPost, santaSleigh, glint, glow, moonSprite, logoWord, shadowBlob, ornament, giftBox, bellSprite } from './art';
 import { paintTreeBuf } from './trees';
 
-const SAVE = 'pine.save.v1', PREF = 'pine.prefs';
+const SAVE = 'pine.save.v1', PREF = 'pine.prefs', ORN = 'pine.orn';
 const ZOOMS = [16, 8, 4, 2];
 type Mode = 'title' | 'letter' | 'play' | 'fly' | 'report' | 'buck' | 'perk' | 'end';
-type Win = null | 'shop' | 'build' | 'crew' | 'ledger' | 'market' | 'bank' | 'help' | 'pause';
+type Win = null | 'shop' | 'build' | 'crew' | 'ledger' | 'market' | 'bank' | 'help' | 'pause' | 'album';
 type Act = 'drive' | 'block' | 'build' | 'land' | 'road';
 interface Toast { t: string; c: string; life: number }
 const CUT_OPTS = [0, 4, 5, 6, 7, 8, 9, 10, 12, 15];
@@ -43,8 +43,8 @@ export class App {
     addEventListener('keydown', (e) => { if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); this.chip.start(); if (!e.repeat) this.tapped.add(e.code); this.keys.add(e.code); });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.ui.down = false; });
-    try { const p = JSON.parse(localStorage.getItem(PREF) ?? '{}'); this.crt = p.crt ?? true; if (p.mute) this.chip.toggle(); this.hasSave = !!localStorage.getItem(SAVE); } catch { /* private mode: just no saves */ }
-    this.applyCrt(); this.buildTitle(); this.r.onSleigh = () => this.chip.sfx('sleigh');
+    try { const p = JSON.parse(localStorage.getItem(PREF) ?? '{}'); this.crt = p.crt ?? true; if (p.mute) this.chip.toggle(); this.hasSave = !!localStorage.getItem(SAVE); this.titleOrn = JSON.parse(localStorage.getItem(ORN) ?? '[]'); } catch { /* private mode: just no saves */ }
+    this.applyCrt(); this.buildTitle(); this.r.onSleigh = () => { this.chip.sfx('sleigh'); this.sim.santaDrop(); };
     this.chip.play('title');
     const q = new URLSearchParams(location.search);
     if (q.has('skip')) { this.sim.newGame(+(q.get('seed') ?? 7)); this.enterPlay(); }
@@ -61,7 +61,8 @@ export class App {
   }
   applyCrt() { document.getElementById('crt')?.classList.toggle('on', this.crt); }
   savePrefs() { try { localStorage.setItem(PREF, JSON.stringify({ crt: this.crt, mute: this.chip.muted })); } catch { /* */ } }
-  save() { try { localStorage.setItem(SAVE, this.sim.serialize()); this.hasSave = true; } catch { /* quota: keep playing */ } }
+  save() { try { localStorage.setItem(SAVE, this.sim.serialize()); localStorage.setItem(ORN, JSON.stringify(this.sim.s.fun.orn)); this.titleOrn = this.sim.s.fun.orn; this.hasSave = true; } catch { /* quota: keep playing */ } }
+  titleOrn: boolean[] = []; ornPop: { i: number; life: number } | null = null; comboPop = 0;
 
   frame(n: number) {
     requestAnimationFrame((m) => this.frame(m));
@@ -147,6 +148,7 @@ export class App {
       if (Math.sin(t * (1.2 + hash(i, 4) * 2) + i) < -0.3) continue;
       g.fillStyle = BC[i % 5]; g.fillRect(x | 0, y | 0, 2, 2); g.fillStyle = C.white; g.fillRect(x | 0, y | 0, 1, 1);
     }
+    this.titleOrn.forEach((on, i) => { if (!on) return; const v = 0.1 + hash(i, 21) * 0.82, y = T.y + v * T.h * 0.88, w = T.half * Math.pow(v, 0.9) * 0.95, x = T.x + (hash(i, 22) - 0.5) * 2 * w; g.drawImage(ornament(i, ORNAMENTS[i]), (x | 0) - 8, (y | 0) - 6); });
     const sx = T.x, sy = T.y - 3, pulse = Math.sin(t * 2.4) * 0.5 + 0.5; g.globalCompositeOperation = 'lighter'; g.drawImage(glow(32, '#ffd27a'), sx - 32, sy - 32); g.globalCompositeOperation = 'source-over';
     g.fillStyle = C.gold; g.fillRect(sx - 4, sy - 1, 9, 3); g.fillRect(sx - 1, sy - 4, 3, 9); g.fillRect(sx - 2, sy - 2, 5, 5); g.fillStyle = C.lemon; g.fillRect(sx - 1, sy - 1, 3, 3); g.drawImage(glint(1 + Math.round(pulse * 2)), sx - 3, sy - 3);
     this.smokeT -= dt; if (this.smokeT <= 0) { this.smokeT = 0.3; this.smoke.push({ x: h.x + 61, y: h.y + 4, l: 3 }); }
@@ -168,7 +170,7 @@ export class App {
     try { this.sim.deserialize(localStorage.getItem(SAVE)!); this.to(() => this.enterPlay()); } catch { this.hasSave = false; this.toast('That save would not load.', C.pink); }
   }
   enterPlay() { const p = this.sim.s.p; this.r.cx = p.x; this.r.cy = p.y; this.mode = 'play'; this.shownMoney = this.sim.s.money; this.pickMusic(); }
-  pickMusic() { const m = this.sim.s.month; this.chip.play(m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? 'summer' : m < 10 ? 'fall' : m === 10 ? 'harvest' : 'rush'); }
+  pickMusic() { const m = this.sim.s.month; this.chip.play(this.sim.julySale() ? 'harvest' : m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? 'summer' : m < 10 ? 'fall' : m === 10 ? 'harvest' : 'rush'); }
   drawLetter(dt: number) {
     const { g, W, H, ui } = this; g.drawImage(this.back.c, 0, 0); g.fillStyle = 'rgba(16,14,52,.5)'; g.fillRect(0, 0, W, H); this.snowfall(dt, 0.7);
     this.letterT += dt * 34; const w = 300, h = 170, x = (W - w) / 2, y = (H - h) / 2; ui.paper(x, y, w, h); g.drawImage(holly(), x - 7, y - 6); g.drawImage(holly(true), x + w - 12, y - 6);
@@ -198,6 +200,7 @@ export class App {
     this.hotkeys();
     this.drainFx(dt);
     r.stepCars(open ? 0 : dt * sim.speed);
+    if (!open && !this.paused) { r.stepLife(dt); if (s.fun.frenzy > 0) this.chip.work(true); }
     if (ui.wheel) this.zoomWheel();
     if (this.pan) { const z = r.z; r.free = true; r.cx = this.pan.cx - (ui.mx - this.pan.x) / z; r.cy = this.pan.cy - (ui.my - this.pan.y) / z; }
     this.mapInput();
@@ -224,9 +227,12 @@ export class App {
     if (this.tap('Tab')) { r.overlay = (r.overlay + 1) % 3; this.toast(['Overlay off', 'Overlay: tree height', 'Overlay: species'][r.overlay], C.ice); }
     if (this.tap('KeyF')) this.cycleSpeed();
     if (this.tap('KeyP')) this.paused = !this.paused;
+    if (this.tap('KeyJ')) this.jolly();
+    if (this.tap('KeyO')) this.win = 'album';
     if (this.tap('BracketLeft')) { if (s.p.tool === TOOL_SAW) this.cycleCut(-1); else this.cycleSpecies(-1); }
     if (this.tap('BracketRight')) { if (s.p.tool === TOOL_SAW) this.cycleCut(1); else this.cycleSpecies(1); }
   }
+  jolly() { if (!this.sim.goJolly()) this.chip.sfx('deny'); }
   cycleSpeed() { this.speedIdx = (this.speedIdx + 1) % 3; this.sim.speed = [1, 2.5, 5][this.speedIdx]; this.chip.sfx('click'); }
   cycleCut(d: number) { const p = this.sim.s.p, i = Math.max(0, SAW_OPTS.indexOf(p.cutAt)); p.cutAt = SAW_OPTS[Math.max(0, Math.min(SAW_OPTS.length - 1, i + d))]; this.chip.sfx('click'); }
   cycleSpecies(d: number) { const s = this.sim.s; let i = s.p.sel; for (let k = 0; k < SPECIES.length; k++) { i = (i + d + SPECIES.length) % SPECIES.length; if (s.unlocked[i]) break; } s.p.sel = i; this.chip.sfx('click'); }
@@ -272,7 +278,7 @@ export class App {
     const { r, chip, sim } = this; let cuts = 0;
     const visible = (x: number, y: number) => { const a = r.screenToTile(0, 0), b = r.screenToTile(this.W, this.H); return x >= a.x && y >= a.y && x <= b.x && y <= b.y; };
     for (const f of sim.fx as Fx[]) switch (f.k) {
-      case 'chop': if (f.mine || visible(f.x, f.y)) { r.chop(f.x, f.y, f.sp, f.h, f.mine); if (cuts++ < 3) chip.sfx('chop'); chip.work(f.mine); } break;
+      case 'chop': if (f.mine || visible(f.x, f.y)) { r.chop(f.x, f.y, f.sp, f.h, f.mine); if (cuts++ < 3) chip.sfx('chop'); chip.work(f.mine); if (f.mine) chip.chime(sim.s.fun.combo); } break;
       case 'plant': if (f.mine || visible(f.x, f.y)) { r.burst(f.x + 0.5, f.y + 0.7, 3, [C.bark, C.tan, C.lime], 2); chip.sfx('plant'); chip.work(f.mine); } break;
       case 'shear': if (f.mine || visible(f.x, f.y)) { r.burst(f.x + 0.5, f.y, 4, [C.lime, C.grass, C.leaf], 3); chip.sfx('shear'); chip.work(f.mine); } break;
       case 'spray': r.burst(f.x + 0.5, f.y + 0.3, 5, [C.sky, C.ice, C.white], 2); chip.sfx('spray'); break;
@@ -289,6 +295,19 @@ export class App {
       case 'alarm': this.toast(f.t, C.pink); chip.sfx('alarm'); r.ping(f.x, f.y); this.alert = { x: f.x, y: f.y, t: 12 }; break;
       case 'ram': r.float(f.x, f.y - 1, f.t, C.white, true); r.shake = 4; chip.sfx('ram'); break;
       case 'full': chip.sfx('full'); if (this.t - this.fullT > 1) { this.fullT = this.t; r.float(sim.s.p.x, sim.s.p.y - 2, 'FULL! BACK TO THE BARN', C.lemon); } break;
+      case 'combo': { this.comboPop = 1; chip.sfx('combo'); const p = sim.s.p; r.float(p.x, p.y - 2.2, '+' + money(f.cash), C.gold); r.burst(p.x, p.y - 0.5, 10 + f.tier * 4, [C.gold, C.red, C.white, C.lime], 5); if (f.tier >= 4) r.shake = Math.min(5, r.shake + 2); break; }
+      case 'comboEnd': r.float(sim.s.p.x, sim.s.p.y - 2.2, `${f.n} IN A ROW`, C.lemon); break;
+      case 'jollyReady': chip.sfx('ready'); if (f.first) this.big = { t: 'JOLLY MODE READY', s: 'Press J: faster, wider, no hauling, free seedlings', c: C.gold, life: 3.2 }; else this.toast('Jolly Mode is ready. Press J!', C.gold); break;
+      case 'frenzy': chip.sfx('frenzy'); chip.rate = 1.2; this.big = { t: 'JOLLY MODE!', s: 'The elves are hauling. Go, go, go', c: C.red, life: 0.9 }; r.shake = 5; { const p = sim.s.p; r.burst(p.x, p.y - 0.5, 40, [C.gold, C.red, C.white, C.lime, C.aqua], 8); } break;
+      case 'frenzyEnd': chip.sfx('frenzyEnd'); chip.rate = 1; break;
+      case 'haul': if (f.n > 0) { const p = sim.s.p; r.float(p.x, p.y - 1.4, `+${f.n} home`, C.lime); } break;
+      case 'drop': chip.sfx('drop'); break;
+      case 'gift': { chip.sfx(f.c === 'coal' ? 'coal' : 'gift'); r.burst(f.x, f.y - 0.4, 22, f.c === 'coal' ? [C.dgrey, C.ink, C.grey] : [C.gold, C.red, C.white, C.lime, C.aqua], 7); r.shake = Math.min(4, r.shake + 1.2); r.float(f.x, f.y - 1.4, f.t, f.c === 'coal' ? C.lgrey : C.gold, true); if (f.s) this.toast(f.s, f.c === 'coal' ? C.lgrey : C.lemon); break; }
+      case 'orn': chip.sfx('orn'); this.ornPop = { i: f.i, life: 4 }; this.save(); break;
+      case 'bellStart': chip.sfx('trail'); break;
+      case 'bell': chip.note(f.note); r.burst(f.x, f.y - 0.6, 8, [C.gold, C.lemon, C.white], 4); r.float(f.x, f.y - 1.5, `${f.i + 1}/${f.n}`, C.lemon); break;
+      case 'bellFail': chip.sfx('trailFail'); this.toast('The bells went quiet.', C.ice); break;
+      case 'bellDone': chip.sfx('trailDone'); r.shake = 4; r.burst(f.x, f.y, 40, [C.gold, C.red, C.white, C.lime], 8); r.float(f.x, f.y - 2.4, 'TRAIL COMPLETE +' + money(f.cash), C.gold, false); break;
       case 'month': chip.sfx('month'); this.pickMusic(); break;
       case 'season': break;
       case 'build': chip.sfx('build'); break; case 'buy': chip.sfx('buy'); break; case 'deny': chip.sfx('deny'); break;
@@ -334,9 +353,12 @@ export class App {
     this.goalLine();
     if (s.streak > 0 && (s.month >= 10)) {
       const lbl = `CHEER x${sim.cheer.toFixed(2)}`, cw = textW(lbl, 1), bx = W - 132 - cw;
-      ui.rect(C.ink, bx - 6, 28, cw + 12, 13); ui.rect(this.bump > 0 ? C.gold : C.red, bx - 5, 29, cw + 10, 11); text(g, lbl, bx, 30, this.bump > 0 ? C.ink : C.white);
+      const cy = bx - 8 < this.goalR ? 56 : 29; ui.rect(C.ink, bx - 6, cy - 1, cw + 12, 13); ui.rect(this.bump > 0 ? C.gold : C.red, bx - 5, cy, cw + 10, 11); text(g, lbl, bx, cy + 1, this.bump > 0 ? C.ink : C.white);
     }
     this.toolbar();
+    this.jollyBar();
+    this.lootArrows();
+    if (this.ornPop) this.ornCard(dt);
     // toasts sit just above the toolbar
     let ty = H - 46;
     for (let i = this.toasts.length - 1; i >= 0; i--) { const t = this.toasts[i], w = textW(t.t) + 14; g.globalAlpha = Math.min(1, t.life * 2); ui.rect(C.ink, 3, ty - 1, w + 2, 14); ui.rect('#123c3e', 4, ty, w, 12); ui.rect(C.red, 4, ty, 3, 12); ui.rect(C.gold, 7, ty, 1, 12); text(g, t.t, 11, ty + 2, t.c); g.globalAlpha = 1; ty -= 15; }
@@ -354,6 +376,58 @@ export class App {
     if (this.block) this.blockPanel(this.block);
   }
   xmasIn() { const s = this.sim.s; return s.month === 11 && s.day > 24 ? 0 : (11 - s.month) * 30 + 24 - s.day; }
+  /** the Jolly meter: a candy-cane gauge over the toolbar, and the combo word above it */
+  jollyBar() {
+    const { g, ui, W, H, sim, t } = this, f = sim.s.fun, w = 116, x = W - w - 6, y = H - 45, mid = x + (w >> 1);
+    const on = f.frenzy > 0, full = f.jolly >= 1 && !on, v = on ? f.frenzy / JOLLY_SECS : f.jolly;
+    ui.block(x, y, w, 11); ui.rect(C.ink, x - 1, y - 1, w + 2, 12); ui.rect('#123c3e', x, y, w, 10);
+    const fw = Math.round((w - 2) * v); if (fw > 0) { g.save(); g.beginPath(); g.rect(x + 1, y + 1, fw, 8); g.clip(); ui.candy(x + 1, y + 1, w, 8, t * (on ? 40 : full ? 16 : 6)); g.restore(); }
+    if (on) rimmed(g, 'JOLLY MODE', mid, y + 1, C.gold, C.ink); else if (full) { if (((t * 4) | 0) % 2) ui.rect('rgba(255,240,154,.45)', x, y, w, 10); rimmed(g, 'PRESS J', mid, y + 1, C.white, C.dred); } else rimmed(g, 'JOLLY', mid, y + 1, C.white, C.ink);
+    if (ui.inside(x, y, w, 11)) { ui.tip = full ? 'Jolly Mode (J)' : 'Work fast, open gifts and run bell trails to fill this'; ui.tipX = x; ui.tipY = y; if (ui.pressed && full) { ui.pressed = false; this.jolly(); } }
+    let lx = mid; if (f.boost > 0) { rimmed(g, `COCOA ${Math.ceil(f.boost)}`, lx, y - 12, C.orange, C.ink); lx -= 62; } if (f.free > 0) rimmed(g, `${f.free} free seedlings`, lx - (lx === mid ? 0 : 30), y - 12, C.lime, C.ink);
+    if (f.combo >= 3) {
+      this.comboPop = Math.max(0, this.comboPop - 1 / 30);
+      const sc = this.comboPop > 0 || f.tier >= 3 ? 2 : 1, word = f.tier ? COMBO_TIERS[f.tier - 1][1] : '', txt = `x${f.combo} ${word}`, col = [C.white, C.lemon, C.gold, C.orange, C.pink, C.aqua, C.lime][f.tier];
+      const cy = Math.round(H / 2 + 24 - this.comboPop * 3); rimmed(g, txt, W / 2, cy, col, C.ink, sc);
+      ui.meter(W / 2 - 24, cy + sc * 9 + 1, 48, 2, f.comboT / 3, col, C.ink);
+    }
+    // the screen itself goes Christmas while the mode lasts
+    if (on) { const n = Math.ceil(W / 12), cols = [C.red, C.gold, C.lime, C.white, '#46b0ff'], k = (t * 10) | 0; for (let i = 0; i < n; i++) { g.fillStyle = cols[(i + k) % 5]; g.fillRect(i * 12 + 4, 22, 3, 3); g.fillRect(i * 12 + 4, H - 35, 3, 3); } for (let j = 2; j < H / 12 - 3; j++) { g.fillStyle = cols[(j + k) % 5]; g.fillRect(1, j * 12, 3, 3); g.fillRect(W - 4, j * 12, 3, 3); } }
+  }
+  /** an arrow at the edge of the screen for anything worth driving to */
+  lootArrows() {
+    const { g, W, H, r, sim, t } = this, f = sim.s.fun, arrow = (wx: number, wy: number, im: HTMLCanvasElement) => {
+      const sx = wx * r.z - r.camX(), sy = wy * r.z - r.camY(), m = 16; if (sx > m && sy > 28 && sx < W - m && sy < H - 40) return;
+      const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy, k = Math.min((W / 2 - 22) / Math.abs(dx || 1), (dy > 0 ? H - cy - 62 : cy - 72) / Math.abs(dy || 1)), x = Math.round(cx + dx * k), y = Math.round(cy + dy * k), a = Math.atan2(dy, dx), b = Math.round(Math.sin(t * 7) * 2);
+      g.fillStyle = C.ink; g.fillRect(x - 10, y - 10, 21, 21); g.fillStyle = '#123c3e'; g.fillRect(x - 9, y - 9, 19, 19); g.drawImage(im, x - (im.width >> 1), y - (im.height >> 1));
+      g.fillStyle = C.gold; const px = x + Math.cos(a) * (14 + b), py = y + Math.sin(a) * (14 + b); g.fillRect(Math.round(px) - 2, Math.round(py) - 2, 5, 5); g.fillStyle = C.lemon; g.fillRect(Math.round(px + Math.cos(a) * 3) - 1, Math.round(py + Math.sin(a) * 3) - 1, 3, 3);
+    };
+    f.gifts.forEach((q, i) => { if (q.fall <= 0) arrow(q.x, q.y, giftBox(i)); });
+    if (f.trail) {
+      const q = f.trail, x = q.pts[q.i * 2], y = q.pts[q.i * 2 + 1]; arrow(x, y, bellSprite(((t * 5) | 0)));
+      const w = 90, bx = Math.round(W / 2 - w / 2), by = 62; this.ui.rect(C.ink, bx - 1, by - 1, w + 2, 6); this.ui.meter(bx, by, w, 4, q.t / Math.max(q.t, q.i ? 3.4 : 9, q.step / VEHICLES[sim.s.veh].speed * 3.4), q.t < 1.4 ? C.red : C.gold, '#123c3e'); rimmed(g, `BELL TRAIL ${q.i}/${q.pts.length / 2}`, W / 2, by + 7, C.lemon, C.ink);
+    }
+  }
+  ornCard(dt: number) {
+    const { g, ui, W, H } = this, p = this.ornPop!, o = ORNAMENTS[p.i], w = 190, h = 56, x = 8, y = 72; p.life -= dt; if (p.life <= 0) { this.ornPop = null; return; }
+    ui.paper(x, y, w, h); ui.ribbon(x, y, w, 12); center(g, 'NEW ORNAMENT', x + w / 2, y + 2, C.white); const im = ornament(p.i, o); g.drawImage(im, x + 8, y + 15, im.width * 2, im.height * 2);
+    const n = this.sim.s.fun.orn.filter(Boolean).length; bold(g, o.name, x + 46, y + 16, C.dred); let ly = y + 27; for (const l of wrap(o.note, w - 54).slice(0, 2)) { text(g, l, x + 46, ly, C.ink); ly += 10; } right(g, `${n} of 24`, x + w - 6, y + h - 10, C.brown);
+  }
+  albumWin() {
+    const { g, ui, sim } = this, f = sim.s.fun, w = 356, h = 244, { x, y, closed } = ui.window(w, h, 'ADVENT ALBUM'); if (closed) this.win = null;
+    const n = f.orn.filter(Boolean).length; right(g, `${n} of 24`, x + w - 22, y + 3, C.white);
+    const cw = 52, ch = 42, x0 = x + 14, y0 = y + 22; let tipI = -1;
+    for (let i = 0; i < 24; i++) {
+      const c = i % 6, r = (i / 6) | 0, dx = x0 + c * (cw + 3), dy = y0 + r * (ch + 3), on = f.orn[i], hov = ui.inside(dx, dy, cw, ch); if (hov) tipI = i;
+      ui.rect(C.ink, dx - 1, dy - 1, cw + 2, ch + 2); ui.rect(on ? '#fff6dc' : (i + r) % 2 ? C.pine : C.dred, dx, dy, cw, ch); ui.rect(C.gold, dx, dy, cw, 1);
+      if (on) { const im = ornament(i, ORNAMENTS[i]); g.drawImage(im, dx + (cw >> 1) - 8, dy + 6, 16, 18); g.drawImage(im, dx + (cw >> 1) - 8, dy + 7, 16, 18); center(g, String(i + 1), dx + (cw >> 1), dy + ch - 11, C.brown); }
+      else { center(g, String(i + 1), dx + (cw >> 1), dy + 12, C.gold, 2, C.ink); ui.rect(C.gold, dx + cw - 7, dy + (ch >> 1) - 1, 3, 3); }
+    }
+    for (let r = 0; r < 4; r++) if (f.rows[r]) g.drawImage(icon('star'), x0 + 6 * (cw + 3) - 2, y0 + r * (ch + 3) + 14);
+    const ty = y0 + 4 * (ch + 3) + 1;
+    if (tipI >= 0 && f.orn[tipI]) { bold(g, ORNAMENTS[tipI].name, x + 14, ty, C.dred); text(g, ORNAMENTS[tipI].note, x + 14, ty + 10, C.ink); }
+    else { text(g, 'Gifts hold ornaments, and hidden gift piles hold more.', x + 14, ty, C.bark); text(g, 'Finish a row for a free Almanac page.', x + 14, ty + 10, C.bark); text(g, `Best combo ${f.best}   Gifts opened ${f.opens}   Trails run ${f.trails}`, x + 14, ty + 20, C.brown); }
+  }
   hint(t: string) { const { ui, g, W } = this, w = textW(t) + 12; ui.rect(C.ink, W / 2 - w / 2 - 1, 49, w + 2, 15); ui.rect('#123c3e', W / 2 - w / 2, 50, w, 13); center(g, t, W / 2, 52, C.lemon); }
   landHud() {
     const { ui, g, r, sim } = this; if (ui.over) { this.hint('Click a gold parcel to buy it. Esc when done.'); return; }
@@ -363,11 +437,12 @@ export class App {
     ui.rect(C.ink, x - 1, y - 1, w + 2, 34); ui.rect(C.deep, x, y, w, 32); bold(g, money(c), x + 4, y + 3, sim.s.money >= c ? C.gold : C.pink);
     text(g, `Soil ${soil > 1.12 ? 'rich' : soil > 0.94 ? 'fair' : 'poor'} ${Math.round(soil * 100)}%`, x + 4, y + 12, soil > 1.12 ? C.lime : soil > 0.94 ? C.cream : C.tan); text(g, `Plantable ${Math.round(clear * 100)}%`, x + 4, y + 21, C.cream);
   }
+  goalR = 0;
   goalLine() {
     const { g, ui, sim } = this, s = sim.s; if (s.goal >= GOALS.length) return;
     const go = GOALS[s.goal], v = sim.metric(go.check), n = go.n ?? 1;
     const prog = go.check === 'rank' ? `rank #${-v > 8 ? '-' : -v}` : go.check === 'veh' || go.check === 'year' || go.check === 'species' ? '' : `${short(Math.max(0, v))}/${short(n)}`;
-    const line = `NEXT: ${go.text}`, w = Math.max(textW(line) + textW(prog) + 16, s.goal < 12 ? textW(go.hint) + 10 : 0), h = s.goal < 12 ? 24 : 13;
+    const line = `NEXT: ${go.text}`, w = Math.max(textW(line) + textW(prog) + 16, s.goal < 12 ? textW(go.hint) + 10 : 0), h = s.goal < 12 ? 24 : 13; this.goalR = w + 4;
     const y0 = 29; ui.rect(C.ink, 3, y0 - 1, w + 2, h + 2); ui.rect('#123c3e', 4, y0, w, h); ui.rect(C.gold, 4, y0, w, 1);
     if (this.goalFlash > 0) ui.rect(C.lime, 4, y0, w, 2);
     text(g, line, 8, y0 + 3, C.lemon); if (prog) right(g, prog, 4 + w - 4, y0 + 3, C.white);
@@ -437,6 +512,7 @@ export class App {
     btn('ledger', 'Ledger', 'T', false, () => { this.win = 'ledger'; });
     btn('market', 'Market', 'K', false, () => { this.win = 'market'; });
     btn('bank', 'Bank', 'N', false, () => { this.win = 'bank'; });
+    btn('gift', 'Advent Album', 'O', false, () => { this.win = 'album'; });
     // zoom stack on the far right
     const zx = W - 16;
     if (x + 14 < zx) { if (ui.button(zx, y + 3, 13, 12, '+', { dark: true, flat: true, tip: 'Zoom in (E)' })) this.zoom(-1); if (ui.button(zx, y + 16, 13, 12, '-', { dark: true, flat: true, tip: 'Zoom out (Q)' })) this.zoom(1); }
@@ -471,7 +547,7 @@ export class App {
   drawWin() {
     switch (this.win) {
       case 'shop': this.shopWin(); break; case 'build': this.buildWin(); break; case 'crew': this.crewWin(); break; case 'ledger': this.ledgerWin(); break;
-      case 'market': this.marketWin(); break; case 'bank': this.bankWin(); break; case 'help': this.helpWin(); break; case 'pause': this.pauseWin(); break;
+      case 'market': this.marketWin(); break; case 'bank': this.bankWin(); break; case 'help': this.helpWin(); break; case 'pause': this.pauseWin(); break; case 'album': this.albumWin(); break;
     }
   }
   shopWin() {
@@ -584,10 +660,10 @@ export class App {
     text(g, 'Trees take years.', x + 12, yy + 3, C.brown);
   }
   helpWin() {
-    const { g, ui } = this, w = 340, h = 232, { x, y, closed } = ui.window(w, h, 'HOW TO FARM'); if (closed) this.win = this.mode === 'title' ? null : 'pause';
-    const L: [string, string][] = [['WASD / arrows', 'Drive'], ['SPACE or hold mouse', 'Work (mouse also drives)'], ['1 2 3 4', 'Saw, Planter, Shears, Tank'], ['[ ]', 'Saw height, or seedling species'], ['B', 'Draw a block for crews'], ['G  L  R', 'Build, Land, Shop'], ['C  T  K  N', 'Crew, Ledger, Market, Bank'], ['Q  E or wheel', 'Zoom out and in'], ['Right drag', 'Look around'], ['TAB', 'Height and species overlays'], ['F  P', 'Game speed, pause'], ['M', 'Sound on or off']];
+    const { g, ui } = this, w = 340, h = 258, { x, y, closed } = ui.window(w, h, 'HOW TO FARM'); if (closed) this.win = this.mode === 'title' ? null : 'pause';
+    const L: [string, string][] = [['WASD / arrows', 'Drive'], ['SPACE or hold mouse', 'Work (mouse also drives)'], ['1 2 3 4', 'Saw, Planter, Shears, Tank'], ['[ ]', 'Saw height, or seedling species'], ['B', 'Draw a block for crews'], ['G  L  R', 'Build, Land, Shop'], ['C  T  K  N', 'Crew, Ledger, Market, Bank'], ['Q  E or wheel', 'Zoom out and in'], ['Right drag', 'Look around'], ['TAB', 'Height and species overlays'], ['F  P', 'Game speed, pause'], ['M', 'Sound on or off'], ['J', 'Jolly Mode, when the meter is full'], ['O', 'Advent Album']];
     let yy = y + 21; for (const [a, b] of L) { bold(g, a, x + 12, yy, C.dred); text(g, b, x + 126, yy, C.ink); yy += 11; }
-    yy += 4; for (const l of ['Spring: plant. Summer: shear. Mid October on: cut.', 'The lot opens late November. Fill orders on time to build Cheer.', 'Keep species mixed: pests race through one big field.', 'Unsold trees go to the wholesaler for peanuts at Christmas.']) { text(g, l, x + 12, yy, C.bark); yy += 10; }
+    yy += 4; for (const l of ['Spring: plant. Summer: shear. Mid October on: cut.', 'The lot opens late November. Fill orders on time to build Cheer.', 'Keep species mixed: pests race through one big field.', 'Unsold trees go to the wholesaler for peanuts at Christmas.', 'Keep working without stopping to build a combo. Chase gifts and bells.']) { text(g, l, x + 12, yy, C.bark); yy += 10; }
   }
   pauseWin() {
     const { ui, g } = this, w = 170, h = 128, { x, y, closed } = ui.window(w, h, 'PAUSED'); if (closed) this.win = null;
@@ -625,7 +701,7 @@ export class App {
     let yy = y + 26; const line = (l: string, v: number, c: string = C.ink, isN = false) => { text(g, l, x + 12, yy, C.bark); right(g, isN ? Math.round(v * k).toLocaleString('en-US') : money(v * k), x + 186, yy, c); yy += 11; };
     line('Trees sold', Y.sold, C.ink, true); yy += 3; line('Walk-in sales', Y.retail); line(`Orders (${Y.ordersN} of ${Y.ordersN + Y.missed})`, Y.orders); line('Wholesale', Y.wholesale); line('Bonuses', Y.bonus); ui.rect(C.tan, x + 12, yy, 174, 1); yy += 3; line('Revenue', Y.revenue, C.pine); yy += 3; line('Wages', -Y.wages, C.dred); line('Seedlings', -Y.seeds, C.dred); line('Land, buildings, gear', -Y.bills, C.dred); yy += 3;
     bold(g, 'Cash in hand', x + 12, yy, C.ink); right(g, money(R.net * k), x + 186, yy, R.net >= 0 ? C.pine : C.red); yy += 14;
-    text(g, `Best Cheer streak ${Y.bestStreak}`, x + 12, yy, C.bark); yy += 11; if (Y.lostSales) { text(g, `${Y.lostSales.toLocaleString('en-US')} families left with no tree`, x + 12, yy, C.dred); yy += 11; } if (Y.lost) text(g, `${Y.lost} trees lost to pests, deer and drought`, x + 12, yy, C.dred);
+    text(g, `Best Cheer streak ${Y.bestStreak}. Best combo ${this.sim.s.fun.best}`, x + 12, yy, C.bark); yy += 11; if (Y.lostSales) { text(g, `${Y.lostSales.toLocaleString('en-US')} families left with no tree`, x + 12, yy, C.dred); yy += 11; } if (Y.lost) text(g, `${Y.lost} trees lost to pests, deer and drought`, x + 12, yy, C.dred);
     const rx = x + 204, rw = w - 214; let ry = y + 26; bold(g, 'Top tree farms this year', rx, ry, C.dred); ry += 14;
     R.rivals.forEach((f, i) => { if (f.me) ui.rect(C.gold, rx - 3, ry - 2, rw + 6, 12); text(g, `${i + 1}.`, rx, ry, C.ink); text(g, f.name, rx + 14, ry, f.me ? C.ink : C.bark); right(g, f.sold.toLocaleString('en-US'), rx + rw, ry, C.ink); ry += 13; });
     ry += 8; const hist = this.sim.s.history.slice(-12), mx = Math.max(...hist.map((q) => q.sold), 1), bw = Math.floor(rw / Math.max(6, hist.length));

@@ -1,6 +1,6 @@
 // Pine & Dandy: the whole game state and its rules. No DOM, no drawing: the renderer and audio read
 // `fx` events, and tools/pinebot.mjs plays decades of it in Node to check the economy.
-import { SPECIES, NS, NZ, MONTHS, MONTH_SEC, XMAS_DAY, SIZE_PRICE, SIZE_MIN, SIZE_NAME, SIZE_DEMAND, MIN_CUT, sizeIdx, GRADES, gradeOf, VEHICLES, CREW, CREW_NAMES, BUILDINGS, TIERS, RIVALS, PERKS, BUYERS, HERO_BUYERS, GOALS } from './data.ts';
+import { SPECIES, NS, NZ, MONTHS, MONTH_SEC, XMAS_DAY, SIZE_PRICE, SIZE_MIN, SIZE_NAME, SIZE_DEMAND, MIN_CUT, sizeIdx, GRADES, gradeOf, VEHICLES, CREW, CREW_NAMES, BUILDINGS, TIERS, RIVALS, PERKS, BUYERS, HERO_BUYERS, GOALS, COMBO_TIERS, TRAIL_NOTES, JOLLY_SECS, ORNAMENTS, MABEL_NOTES, COAL_NOTES } from './data.ts';
 
 export const MW = 256, MH = 160, PS = 16, PW = MW / PS, PH = MH / PS, CH = 32;
 export const CW = MW / CH, CHH = MH / CH;
@@ -20,6 +20,12 @@ export interface Bld { k: string; x: number; y: number }
 export interface YearStats { sold: number; revenue: number; retail: number; retailN: number; orders: number; ordersN: number; wholesale: number; wholesaleN: number; missed: number; wages: number; seeds: number; bills: number; planted: number; lost: number; lostSales: number; bestStreak: number; bonus: number }
 export interface Report { year: number; y: YearStats; rivals: { name: string; sold: number; me?: boolean }[]; rank: number; letter: string; net: number; standing: number; tierUp: string | null }
 
+export interface Gift { x: number; y: number; t: number; fall: number }
+export interface Trail { pts: number[]; i: number; t: number; step: number }
+/** the arcade layer on top of the farm: all of it runs on real time, so game speed never eats it */
+export interface Fun { combo: number; comboT: number; tier: number; best: number; jolly: number; frenzy: number; boost: number; free: number; haul: number; gifts: Gift[]; giftT: number; trail: Trail | null; trailT: number; orn: boolean[]; rows: boolean[]; opened: number[]; opens: number; trails: number; jollies: number }
+export const newFun = (): Fun => ({ combo: 0, comboT: 0, tier: 0, best: 0, jolly: 0, frenzy: 0, boost: 0, free: 0, haul: 0, gifts: [], giftT: 22, trail: null, trailT: 34, orn: ORNAMENTS.map(() => false), rows: [false, false, false, false], opened: [], opens: 0, trails: 0, jollies: 0 });
+
 export interface State {
   v: number; seed: number; year: number; month: number; day: number; dayF: number;
   money: number; debt: number; lifeSold: number; rep: number; streak: number; shield: number;
@@ -28,7 +34,7 @@ export interface State {
   blds: Bld[]; blocks: Block[]; crew: Agent[]; nextId: number; critters: Critter[]; tickets: Ticket[]; priority: number;
   mkt: number[][]; perks: Record<string, number>; goal: number; goalsDone: number; stats: Record<string, number>;
   yr: YearStats; history: { year: number; sold: number; revenue: number; net: number }[]; rivals: number[];
-  drought: number; blizzard: number; tv: number; gold: number; goldDays: number; thieves: number; ticketT: number; phase: 'play' | 'eve' | 'report'; tut: boolean; seen: Record<string, boolean>; rushBest: number;
+  drought: number; blizzard: number; tv: number; gold: number; goldDays: number; thieves: number; ticketT: number; phase: 'play' | 'eve' | 'report'; tut: boolean; seen: Record<string, boolean>; rushBest: number; fun: Fun;
 }
 
 export type Fx =
@@ -44,6 +50,9 @@ export type Fx =
   | { k: 'goal'; t: string; cash: number }
   | { k: 'alarm'; t: string; x: number; y: number }
   | { k: 'ram'; x: number; y: number; t: string }
+  | { k: 'combo'; n: number; t: string; tier: number; cash: number } | { k: 'comboEnd'; n: number } | { k: 'jollyReady'; first: boolean } | { k: 'frenzy' } | { k: 'frenzyEnd' } | { k: 'haul'; n: number }
+  | { k: 'gift'; x: number; y: number; t: string; s: string; c: string } | { k: 'orn'; i: number } | { k: 'drop'; x: number; y: number }
+  | { k: 'bell'; x: number; y: number; i: number; n: number; note: number } | { k: 'bellStart' } | { k: 'bellFail' } | { k: 'bellDone'; x: number; y: number; cash: number }
   | { k: 'full' } | { k: 'month' } | { k: 'season' } | { k: 'build' } | { k: 'buy' } | { k: 'deny' } | { k: 'saved' };
 
 export const newHopper = (): Hopper => ({ n: 0, c: new Array(NS * NZ).fill(0), q: new Array(NS * NZ).fill(0) });
@@ -96,7 +105,7 @@ export class Sim {
       veh: 0, owned: new Array(PW * PH).fill(0), unlocked: SPECIES.map((s) => s.unlock === 0), stock: new Array(NS * NZ).fill(0), stockQ: new Array(NS * NZ).fill(0), stockN: 0,
       blds: [], blocks: [], crew: [], nextId: 1, critters: [], tickets: [], priority: -1, mkt, perks: {}, goal: 0, goalsDone: 0,
       stats: { cut: 0, unloaded: 0, tickets: 0, sold: 0, planted: 0, sheared: 0, outbreaks: 0 }, yr: yrZero(), history: [], rivals: RIVALS.map((r) => r.start),
-      drought: 0, blizzard: 0, tv: 0, gold: -1, goldDays: 0, thieves: 0, ticketT: 2, phase: 'play', tut: true, seen: {}, rushBest: 0,
+      drought: 0, blizzard: 0, tv: 0, gold: -1, goldDays: 0, thieves: 0, ticketT: 2, phase: 'play', tut: true, seen: {}, rushBest: 0, fun: newFun(),
     };
     for (let i = 0; i < NS; i++) this.extendMarket(i, 8);
     this.s.owned[4 * PW + 7] = 1; this.s.owned[4 * PW + 8] = 1;
@@ -188,6 +197,8 @@ export class Sim {
   net() { return this.s.money - this.s.debt; }
   loanLimit() { return Math.round((1500 + this.parcels * 900 + this.s.yr.revenue * 0.5 + this.s.lifeSold * 8) / 100) * 100; }
   harvestOpen() { const m = this.s.month; return m === 11 || m === 10 || (m === 9 && this.s.day >= 15); }
+  /** a one-month sale in the middle of the dead season: your saw works, and orders pay extra */
+  julySale() { const s = this.s; return s.month === 6 && s.year >= 2; }
   retailOpen() { const s = this.s; return s.month === 11 || (s.month === 10 && s.day >= 22); }
   season() { const m = this.s.month; return m === 11 || m < 2 ? 0 : m < 5 ? 1 : m < 8 ? 2 : 3; }
   daysToXmas() { const s = this.s; if (s.month === 11) return XMAS_DAY - s.day; if (s.month === 10) return 30 - s.day + XMAS_DAY; return -1; }
@@ -320,7 +331,7 @@ export class Sim {
       if (!sp) return false;
       if (fl & F_DEAD) { this.clearTree(i); this.emit({ k: 'clear', x, y, mine }); return true; }
       if (this.h[i] < (mine ? s.p.cutAt : MIN_CUT)) return false;
-      if (!this.harvestOpen()) { if (mine) this.once('early' + s.year, "Too early to cut. Customers want them fresh: wait for mid October."); return false; }
+      if (!this.harvestOpen() && !this.julySale()) { if (mine) this.once('early' + s.year, "Too early to cut. Customers want them fresh: wait for mid October."); return false; }
       if (hop.n >= cap) { if (mine) this.emit({ k: 'full' }); return false; }
       const h = this.h[i], z = sizeIdx(h);
       this.hopAdd(hop, sp - 1, z, this.shape[i]);
@@ -333,7 +344,7 @@ export class Sim {
       if (this.bld[i]) return false;
       if (tr !== T_GRASS && tr !== T_WILD) return false;
       if (sp && !(fl & F_DEAD)) return false;
-      const spc = b ? b.sp : s.p.sel, cost = this.seedPrice(spc) + (tr === T_WILD ? 2 : 0);
+      const spc = b ? b.sp : s.p.sel, f = s.fun, free = mine && (f.frenzy > 0 || f.free > 0), cost = free ? 0 : this.seedPrice(spc) + (tr === T_WILD ? 2 : 0); if (mine && f.frenzy <= 0 && f.free > 0) f.free--;
       if (s.money < cost) { if (mine) this.once('broke' + s.year + s.month, 'Out of money for seedlings.'); return false; }
       if (!s.unlocked[spc]) return false;
       s.money -= cost; s.yr.seeds += cost; if (tr === T_WILD) { this.terr[i] = T_GRASS; this.terrVer++; }
@@ -403,7 +414,7 @@ export class Sim {
     const len = Math.hypot(ix, iy); if (len > 1) { ix /= len; iy /= len; }
     const ti = this.inMap(p.x | 0, p.y | 0) ? this.idx(p.x | 0, p.y | 0) : 0;
     const onRoad = this.terr[ti] === T_ROAD || this.terr[ti] === T_BRIDGE;
-    let top = v.speed * (1 + 0.12 * this.pk('diesel')) * (onRoad && !v.air ? 1.3 : 1) * (s.blizzard > 0 ? 0.72 : 1);
+    let top = v.speed * (1 + 0.12 * this.pk('diesel')) * (onRoad && !v.air ? 1.3 : 1) * (s.blizzard > 0 ? 0.72 : 1) * (s.fun.frenzy > 0 ? 1.55 : 1) * (s.fun.boost > 0 ? 1.35 : 1);
     if (!v.air && this.sp[ti] && !act) top *= 0.82;
     const acc = v.air ? 5 : 14, k = Math.min(1, acc * dt);
     p.vx += (ix * top - p.vx) * k; p.vy += (iy * top - p.vy) * k;
@@ -415,22 +426,136 @@ export class Sim {
     if (len > 0.1) { if (Math.abs(ix) > Math.abs(iy)) p.dir = ix > 0 ? 1 : 3; else p.dir = iy > 0 ? 2 : 0; }
     p.acting = act; p.cd -= dt;
     if (act && p.cd <= 0) {
-      const sw = this.swathOf(p.x, p.y, v.w); let did = 0; const cap = this.hopCap();
+      const sw = this.swathOf(p.x, p.y, this.playerW()); let did = 0; const cap = s.fun.frenzy > 0 ? 1e9 : this.hopCap();
       for (let y = sw.y0; y <= sw.y1; y++) for (let x = sw.x0; x <= sw.x1; x++) if (this.apply(p.tool, x, y, true, p.hop, cap)) did++;
-      if (s.veh === 0) p.cd = did ? 0.09 : 0;
+      if (s.veh === 0) p.cd = did ? (s.fun.frenzy > 0 ? 0.04 : 0.09) : 0;
+      if (did) this.worked(did);
     }
     if (p.hop.n > 0 && this.nearUnload(p.x, p.y, !!v.air)) {
-      const n = this.stockHopper(p.hop); if (n) this.emit({ k: 'unload', x: p.x, y: p.y, n });
+      const n = this.stockHopper(p.hop); if (n) { this.emit({ k: 'unload', x: p.x, y: p.y, n }); s.fun.comboT = Math.max(s.fun.comboT, 3); this.addJolly(0.06 * Math.min(1, n / this.hopCap() + 0.2)); }
       else if (this.s.stockN >= this.capacity) this.once('barnfull' + s.year + s.month, 'The barn is full! Sell stock or build storage.');
     }
     // ramming things off the farm is half the job
     for (const c of s.critters) if (c.k !== 'dog' && Math.hypot(c.x - p.x, c.y - p.y) < Math.max(3.2, v.w * 0.6)) this.scare(c, true);
+    this.stepFun(dt);
+  }
+
+  // ---- the arcade layer -------------------------------------------------------------------------------
+  playerW() { return VEHICLES[this.s.veh].w + (this.s.fun.frenzy > 0 ? 2 : 0); }
+  addJolly(a: number) {
+    const f = this.s.fun; if (f.frenzy > 0 || f.jolly >= 1) return;
+    f.jolly = Math.min(1, f.jolly + a);
+    if (f.jolly >= 1) { this.emit({ k: 'jollyReady', first: !this.s.seen.jolly }); this.s.seen.jolly = true; }
+  }
+  /** spend a full meter */
+  goJolly() {
+    const f = this.s.fun; if (f.jolly < 1 || f.frenzy > 0 || this.s.phase !== 'play') return false;
+    f.jolly = 0; f.frenzy = JOLLY_SECS; f.jollies++; this.emit({ k: 'frenzy' }); return true;
+  }
+  /** one successful swing of any tool, by you */
+  private worked(did: number) {
+    const s = this.s, f = s.fun, v = VEHICLES[s.veh];
+    f.combo += did; f.comboT = 3; f.best = Math.max(f.best, f.combo);
+    // a meter is about three good loads, whatever you are driving
+    this.addJolly(did / this.hopCap() * 0.34 * (1 + Math.min(1, f.combo / 40)));
+    const scale = 1 + (v.w - 1) * 0.75; let t = f.tier;
+    while (t < COMBO_TIERS.length && f.combo >= COMBO_TIERS[t][0] * scale) t++;
+    if (t > f.tier) {
+      const c = COMBO_TIERS[t - 1], last = s.history[s.history.length - 1], cash = Math.round(c[2] * (1 + (last ? last.revenue : 0) / 25000));
+      f.tier = t; s.money += cash; s.yr.bonus += cash; this.emit({ k: 'combo', n: f.combo, t: c[1], tier: t, cash });
+    }
+  }
+  private spot(near: number, far: number) {
+    const s = this.s, p = s.p, air = !!VEHICLES[s.veh].air;
+    for (let k = 0; k < 30; k++) { const a = this.rnd() * 6.2832, d = near + this.rnd() * (far - near), x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d; if (x > 3 && y > 3 && x < MW - 3 && y < MH - 3 && (air || !this.solid(x, y))) return { x, y }; }
+    return { x: p.x + 3, y: p.y };
+  }
+  /** a gift on a parachute, somewhere you can get to */
+  dropGift(x?: number, y?: number) {
+    const f = this.s.fun, v = VEHICLES[this.s.veh], k = 1 + v.speed / 14, q = x === undefined ? this.spot(6 * k, 15 * k) : { x, y: y! };
+    f.gifts.push({ x: q.x, y: q.y, t: 26, fall: 1.6 }); this.emit({ k: 'drop', x: q.x, y: q.y });
+    this.once('giftHow', 'A gift on a parachute! Drive over it before it blows away.');
+  }
+  /** the sleigh goes over, and things fall out of it */
+  santaDrop() { if (this.s.phase !== 'play' || this.s.tut) return; for (let i = 0; i < 3; i++) this.dropGift(); this.toast('Santa dropped something!', 'gold'); }
+  secretAt(i: number) {
+    if (this.terr[i] !== T_GRASS || this.sp[i] || this.bld[i]) return false;
+    const x = i % MW, y = (i / MW) | 0, h = hash2(x, y, 77); if (h <= 0.9925 || h > 0.9945 || x < 1 || y < 1 || x >= MW - 1 || y >= MH - 1) return false;
+    if (this.terr[i - 1] === T_ROAD || this.terr[i + 1] === T_ROAD || this.terr[i - MW] === T_ROAD || this.terr[i + MW] === T_ROAD) return false;
+    return !this.s.fun.opened.includes(i);
+  }
+  private giftCash(mult: number) { const s = this.s, last = s.history[s.history.length - 1], base = Math.max(70, (last ? last.revenue : 0) * 0.012); return Math.round(base * (0.7 + this.rnd() * 0.8) * mult / 5) * 5; }
+  private openGift(x: number, y: number, secret: boolean) {
+    const s = this.s, f = s.fun, r = this.rnd(), left = f.orn.map((o, i) => (o ? -1 : i)).filter((i) => i >= 0);
+    f.opens++; this.addJolly(0.2); s.stats.gifts = (s.stats.gifts ?? 0) + 1;
+    const spring = s.month >= 1 && s.month <= 4;
+    if (left.length && r < (secret ? 0.55 : 0.26)) { this.giveOrnament(this.pick(left), x, y); return; }
+    const q = this.rnd();
+    if (q < 0.38) { const n = this.giftCash(secret ? 1.6 : 1); s.money += n; s.yr.bonus += n; this.emit({ k: 'gift', x, y, t: '+' + money(n), s: 'Cash in a Christmas card!', c: 'gold' }); }
+    else if (q < (spring ? 0.68 : 0.5)) { const n = 15 + s.veh * 15; f.free += n; this.emit({ k: 'gift', x, y, t: `${n} SEEDLINGS`, s: `${n} free seedlings. Press 2 and plant them.`, c: 'lime' }); }
+    else if (q < 0.74) { f.boost = 18; this.emit({ k: 'gift', x, y, t: 'HOT COCOA', s: 'You feel fast. 18 seconds of it.', c: 'orange' }); }
+    else if (q < 0.86) { this.addJolly(0.6); this.emit({ k: 'gift', x, y, t: 'JOLLY!', s: 'A big lift for your Jolly meter.', c: 'red' }); }
+    else if (q < 0.93) { const n = Math.max(5, Math.round(this.giftCash(0.05))); s.money += n; this.emit({ k: 'gift', x, y, t: 'COAL', s: this.pick(COAL_NOTES), c: 'coal' }); }
+    else { const n = this.giftCash(0.5); s.money += n; s.yr.bonus += n; this.emit({ k: 'gift', x, y, t: '+' + money(n), s: this.pick(MABEL_NOTES), c: 'cream' }); }
+  }
+  private giveOrnament(i: number, x: number, y: number) {
+    const s = this.s, f = s.fun; f.orn[i] = true; this.emit({ k: 'orn', i }); this.emit({ k: 'gift', x, y, t: 'ORNAMENT!', s: '', c: 'orn' });
+    const row = (i / 6) | 0;
+    if (!f.rows[row] && f.orn.slice(row * 6, row * 6 + 6).every(Boolean)) {
+      f.rows[row] = true; const pg = this.perkChoices()[0]; s.perks[pg.id] = (s.perks[pg.id] ?? 0) + 1;
+      this.emit({ k: 'big', t: 'ROW COMPLETE', s: `A free Almanac page: ${pg.name}. ${pg.text}`, c: 'gold' });
+    }
+    if (f.orn.every(Boolean)) { const n = this.giftCash(40); s.money += n; s.yr.bonus += n; this.emit({ k: 'big', t: 'THE WHOLE ALBUM', s: `Mabel would be proud. +${money(n)}`, c: 'gold' }); }
+  }
+  private startTrail() {
+    const s = this.s, p = s.p, v = VEHICLES[s.veh], step = Math.max(3.2, v.speed * 0.5), pts: number[] = [], air = !!v.air;
+    let a = this.rnd() * 6.2832, x = p.x, y = p.y;
+    for (let i = 0; i < 16; i++) {
+      let ok = false;
+      for (let k = 0; k < 8 && !ok; k++) {
+        const b = a + (k ? (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.8 : (this.rnd() - 0.5) * 1.3), nx = x + Math.cos(b) * step * (i ? 1 : 1.6), ny = y + Math.sin(b) * step * (i ? 1 : 1.6);
+        let clear = nx > 3 && ny > 3 && nx < MW - 3 && ny < MH - 3; if (clear && !air) for (let q = 1; q <= 6; q++) if (this.solid(x + (nx - x) * q / 6, y + (ny - y) * q / 6)) clear = false;
+        if (clear) { x = nx; y = ny; a = b; ok = true; }
+      }
+      if (!ok) break; pts.push(x, y);
+    }
+    if (pts.length < 16) return;
+    s.fun.trail = { pts, i: 0, t: 9, step }; this.emit({ k: 'bellStart' });
+    this.once('bellHow', 'Sleigh bells! Run the golden trail before it fades. Each bell plays a note.');
+  }
+  private stepFun(dt: number) {
+    const s = this.s, f = s.fun, p = s.p, v = VEHICLES[s.veh], reach = Math.max(1.7, this.playerW() * 0.5 + 0.5);
+    if (f.comboT > 0) { f.comboT -= dt; if (f.frenzy > 0) f.comboT = Math.max(f.comboT, 1); if (f.comboT <= 0) { if (f.tier >= 2) this.emit({ k: 'comboEnd', n: f.combo }); f.combo = 0; f.tier = 0; } }
+    if (f.boost > 0) f.boost -= dt;
+    if (f.frenzy > 0) {
+      f.frenzy -= dt; f.haul -= dt;
+      // elves run the load back for you, so nothing stops the mowing
+      if (f.haul <= 0) { f.haul = 0.45; if (p.hop.n > 0) { const n = this.stockHopper(p.hop); if (n) this.emit({ k: 'haul', n }); } }
+      if (f.frenzy <= 0) { f.frenzy = 0; this.emit({ k: 'frenzyEnd' }); }
+    }
+    for (const g of f.gifts) {
+      if (g.fall > 0) { g.fall -= dt; continue; }
+      g.t -= dt; if (Math.hypot(g.x - p.x, g.y - p.y) < reach) { g.t = -1; this.openGift(g.x, g.y, false); }
+    }
+    if (f.gifts.some((g) => g.t <= 0)) f.gifts = f.gifts.filter((g) => g.t > 0);
+    const R = Math.ceil(reach), cx = Math.floor(p.x), cy = Math.floor(p.y);
+    for (let y = Math.max(1, cy - R); y <= Math.min(MH - 2, cy + R); y++) for (let x = Math.max(1, cx - R); x <= Math.min(MW - 2, cx + R); x++) { const i = this.idx(x, y); if (this.secretAt(i)) { f.opened.push(i); this.touch(i); this.openGift(x + 0.5, y + 0.5, true); } }
+    if (s.tut) return;
+    f.giftT -= dt; if (f.giftT <= 0 && f.gifts.length < 3) { this.dropGift(); f.giftT = 24 + this.rnd() * 20; }
+    if (f.trail) {
+      const t = f.trail, x = t.pts[t.i * 2], y = t.pts[t.i * 2 + 1]; t.t -= dt;
+      if (Math.hypot(x - p.x, y - p.y) < reach) {
+        const n = t.pts.length / 2; this.emit({ k: 'bell', x, y, i: t.i, n, note: TRAIL_NOTES[t.i % TRAIL_NOTES.length] }); t.i++; this.addJolly(0.015);
+        if (t.i >= n) { const last = s.history[s.history.length - 1], cash = Math.round(60 * (1 + (last ? last.revenue : 0) / 12000)); s.money += cash; s.yr.bonus += cash; f.trails++; f.trail = null; f.trailT = 40 + this.rnd() * 30; this.addJolly(0.4); this.emit({ k: 'bellDone', x, y, cash }); this.dropGift(x, y); f.gifts[f.gifts.length - 1].fall = 0.35; }
+        else t.t = Math.max(2.6, t.step / (v.speed * (s.blizzard > 0 ? 0.72 : 1)) * 3.4);
+      } else if (t.t <= 0) { f.trail = null; f.trailT = 35 + this.rnd() * 30; this.emit({ k: 'bellFail' }); }
+    } else if (s.month < 10) { f.trailT -= dt; if (f.trailT <= 0) { f.trailT = 30; this.startTrail(); } }
   }
   private scare(c: Critter, byPlayer: boolean) {
     const s = this.s;
-    if (c.k === 'deer' && !c.flee) { c.flee = true; if (byPlayer) this.emit({ k: 'ram', x: c.x, y: c.y, t: 'SHOO!' }); }
+    if (c.k === 'deer' && !c.flee) { c.flee = true; if (byPlayer) { this.emit({ k: 'ram', x: c.x, y: c.y, t: 'SHOO!' }); this.addJolly(0.1); } }
     if (c.k === 'thief' && !c.flee && byPlayer) {
-      c.flee = true; c.t = 99;
+      c.flee = true; c.t = 99; this.addJolly(0.4); this.dropGift(c.x, c.y); s.fun.gifts[s.fun.gifts.length - 1].fall = 0.3;
       const bonus = Math.round(c.n * 45); s.money += bonus; s.yr.bonus += bonus;
       this.emit({ k: 'ram', x: c.x, y: c.y, t: 'GOTCHA!' }); this.emit({ k: 'cash', x: c.x, y: c.y, n: bonus });
       this.toast(`You caught Needles! ${c.n} trees' worth recovered.`, 'gold');
@@ -561,7 +686,7 @@ export class Sim {
   }
   private harvestRate() { const s = this.s; let r = 5 + VEHICLES[s.veh].w * 3; for (const c of s.crew) r += 2 + CREW[c.rank].w * 2; return r; }
   private spawnTicket() {
-    const s = this.s, daysLeft = this.daysToXmas(); if (daysLeft < 3) return;
+    const s = this.s, july = this.julySale(), daysLeft = july ? 28 - s.day : this.daysToXmas(); if (daysLeft < 3) return;
     const reserved = new Array(NS * NZ).fill(0);
     for (const t of s.tickets) for (let z = t.minZ; z < NZ; z++) if (t.sp >= 0) { reserved[t.sp * NZ + z] += t.qty - t.filled; break; }
     const pool: { b: number; n: number }[] = []; let tot = 0;
@@ -575,7 +700,7 @@ export class Sim {
     const days = Math.min(daysLeft, Math.max(6, Math.round((5 + qty / this.harvestRate() * 2.2 + this.rnd() * 5) * (1 + 0.25 * this.pk('early')))));
     let buyer = BUYERS[0][1][0]; for (const [m, l] of BUYERS) if (qty >= m) buyer = this.pick(l);
     if (hero) buyer = this.pick(HERO_BUYERS);
-    const mult = hero ? 4 + this.rnd() * 2 : 1.3 + this.rnd() * 0.45;
+    const mult = (hero ? 4 + this.rnd() * 2 : 1.3 + this.rnd() * 0.45) * (july ? 1.25 : 1);
     this.addTicket({ buyer, sp, minZ: z, qty, days, pay: this.priceOf(sp, z, 70) * mult, hero });
   }
   fillTickets() {
@@ -601,9 +726,9 @@ export class Sim {
       paid = t.pay * t.qty * this.cheer; s.streak++; s.yr.bestStreak = Math.max(s.yr.bestStreak, s.streak); s.rep = Math.min(100, s.rep + 1.5);
       s.stats.tickets++; s.yr.orders += paid; s.yr.ordersN++; s.yr.sold += t.qty; s.lifeSold += t.qty; s.stats.sold += t.qty; s.yr.revenue += paid; s.money += paid;
     } else {
-      s.yr.missed++; s.rep = Math.max(0, s.rep - 2.5);
+      if (s.month !== 6) { s.yr.missed++; s.rep = Math.max(0, s.rep - 2.5); }
       if (t.filled) { paid = t.pay * t.filled * 0.5; s.money += paid; s.yr.orders += paid; s.yr.sold += t.filled; s.lifeSold += t.filled; s.yr.revenue += paid; s.stats.sold += t.filled; }
-      if (s.shield > 0) s.shield--; else s.streak = 0;
+      if (s.month === 6) { /* July is for fun: a miss costs nothing but the order */ } else if (s.shield > 0) s.shield--; else s.streak = 0;
     }
     this.emit({ k: 'order', ok, t, paid });
   }
@@ -654,6 +779,8 @@ export class Sim {
       let best = -1, v = 1.12; for (let i = 0; i < NS; i++) if (s.unlocked[i] && this.market(i) > v) { v = this.market(i); best = i; }
       if (best >= 0) this.toast(`The magazines love ${SPECIES[best].name} this year: +${Math.round((v - 1) * 100)}%.`, 'gold');
     }
+    if (this.julySale()) { s.ticketT = 1; this.refreshCensus(); this.emit({ k: 'big', t: 'CHRISTMAS IN JULY', s: 'Your saw works this month. Orders pay extra', c: 'red' }); }
+    if (s.month === 7) s.tickets = [];
     if (s.month === 10) { s.ticketT = 1; this.refreshCensus(); this.emit({ k: 'big', t: 'HARVEST TIME', s: 'Orders are coming in', c: 'red' }); }
     if (s.month === 11) this.emit({ k: 'big', t: 'THE RUSH', s: '24 days to Christmas', c: 'red' });
     
@@ -667,11 +794,11 @@ export class Sim {
     if (s.blizzard > 0) s.blizzard--; if (s.tv > 0) s.tv--;
     if (s.gold >= 0 && --s.goldDays <= 0) { this.flag[s.gold] &= ~F_GOLD; this.touch(s.gold); s.gold = -1; this.toast('The golden tree lost its shine.'); }
     if (this.retailOpen()) this.retailDay();
-    if (m === 10 || m === 11) {
+    if (m === 10 || m === 11 || this.julySale()) {
       if (s.day % 6 === 0) this.refreshCensus();
       this.fillTickets();
       s.ticketT--;
-      if (s.ticketT <= 0 && s.tickets.length < Math.min(6, 2 + this.tier)) { this.spawnTicket(); s.ticketT = (m === 11 ? 2.2 : 3.2) + this.rnd() * 2; }
+      if (s.ticketT <= 0 && s.tickets.length < Math.min(m === 6 ? 3 : 6, 2 + this.tier)) { this.spawnTicket(); s.ticketT = (m === 11 ? 2.2 : 3.2) + this.rnd() * 2; }
       for (const t of s.tickets.slice()) { t.days--; t.age++; if (t.days <= 0) this.finishTicket(t, false); }
     }
     this.events();
@@ -902,7 +1029,7 @@ export class Sim {
   deserialize(j: string) {
     const d = JSON.parse(j), keys = [this.terr, this.sp, this.h, this.shape, this.flag, this.pest, this.fert, this.bld];
     d.a.forEach((b: string, k: number) => { const t = atob(b), u = new Uint8Array(keys[k].buffer); for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i); });
-    this.s = d.s; this.rs = d.rs; this.tierAtYearStart = d.tier0 ?? 0; this.rebuildWet(); this.recount(); this.refreshCensus(); this.touchAll(); this.terrVer++;
+    d.s.fun = { ...newFun(), ...(d.s.fun ?? {}) }; this.s = d.s; this.rs = d.rs; this.tierAtYearStart = d.tier0 ?? 0; this.rebuildWet(); this.recount(); this.refreshCensus(); this.touchAll(); this.terrVer++;
   }
 }
 void SIZE_NAME;
