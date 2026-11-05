@@ -28,8 +28,8 @@ export class CallBrain {
     if (key !== this.seen && x > call.t0 + this.react + ease * 0.55 + this.rnd() * 0.25) {
       this.seen = key;
       this.k = this.pick(shownTiles(call, swapped ? call.swap + 1e-3 : x), A.xz, all);
-      // (a bean in a panic runs for the wrong colour now and then)
-      if (this.rnd() < ease * (0.2 - 0.14 * this.skill)) this.k = Math.floor(this.rnd() * CALL.n * CALL.n);
+      // (a bean in a panic runs for the wrong colour now and then: more as the calls come faster)
+      if (this.rnd() < ease * (0.2 - 0.14 * this.skill) * Math.min(1, call.i / 24)) this.k = Math.floor(this.rnd() * CALL.n * CALL.n);
     }
     if (this.k < 0) {
       // (between calls: back toward the middle)
@@ -43,7 +43,7 @@ export class CallBrain {
     const d = Math.hypot(dx, dz);
     if (d < 0.5) {
       // on it, a good one might shove a neighbour off
-      if (this.aggr > 0.6 && x > call.drop - 1 && x < call.drop) {
+      if (this.aggr > 0.6 && call.i >= 6 && x > call.drop - 1 && x < call.drop) {
         for (const o of all) {
           if (o === m || !o.active) continue;
           const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z, od = Math.hypot(ox, oz);

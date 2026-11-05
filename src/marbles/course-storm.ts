@@ -14,7 +14,7 @@ import { signTexture } from './obstacles.ts';
  */
 
 const UPV = new THREE.Vector3(0, 1, 0);
-export const STORM = { R: 15.5, warn: 1.45, r: 2.35, big: 4.4, waveAt: 9, waveEvery: 11, waveV: 8.5 };
+export const STORM = { R: 15.5, warn: 1.45, r: 2.35, big: 4.4, waveAt: 16, waveEvery: 16, waveV: 8.5 };
 
 export interface Strike {
   /** seconds after the off */
@@ -49,12 +49,12 @@ function schedule(R: number) {
   let sd = 90217;
   const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
   let t = 2.4;
-  let nextBig = 9;
+  let nextBig = 18;
   // (a small seed's first numbers are all tiny: run it in)
   for (let k = 0; k < 8; k++) rnd();
   while (t < 200) {
-    const iv = Math.max(0.36, 1.2 - 0.03 * t);
-    const n = Math.min(6, 1 + Math.floor(t / 14));
+    const iv = Math.max(0.42, 1.3 - 0.014 * t);
+    const n = Math.min(6, 1 + Math.floor(t / 26));
     for (let j = 0; j < n; j++) {
       const a = rnd() * Math.PI * 2, r = (R - 0.6) * Math.sqrt(rnd());
       list.push({ t: t + j * 0.13, x: Math.cos(a) * r, z: Math.sin(a) * r, r: STORM.r });
@@ -62,7 +62,7 @@ function schedule(R: number) {
     if (t > nextBig) {
       const a = rnd() * Math.PI * 2, r = R * 0.55 * Math.sqrt(rnd());
       list.push({ t: t + 0.3, x: Math.cos(a) * r, z: Math.sin(a) * r, r: STORM.big });
-      nextBig += 8 + rnd() * 5;
+      nextBig += 12 + rnd() * 6;
     }
     t += iv * (0.8 + rnd() * 0.4);
   }

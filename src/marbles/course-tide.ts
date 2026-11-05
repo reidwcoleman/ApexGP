@@ -15,7 +15,7 @@ import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
  * at a time; whoever it reaches is out. Climb, and keep your spot when everyone else wants it.
  */
 
-export const TIDE = { pitch: 3.3, rings: 4, step: 0.9, every: 7.2, rise: 2, wait: 4 };
+export const TIDE = { pitch: 3.3, rings: 4, step: 0.9, every: 16, rise: 3, wait: 6 };
 
 export interface TideArena {
   center: THREE.Vector3;
@@ -133,7 +133,7 @@ export function tide(info: { name: string; blurb: string }): Course {
     let js = 91733;
     const jr = () => ((js = (js * 16807) % 2147483647) / 2147483647);
     for (let k = 0; k < 8; k++) jr();
-    for (let t = 6; t < 120; t += Math.max(1.2, 3.2 - t * 0.03) * (0.8 + jr() * 0.4)) {
+    for (let t = 8; t < 160; t += Math.max(1.6, 3.6 - t * 0.02) * (0.8 + jr() * 0.4)) {
       const k = cols[Math.floor(jr() * cols.length)];
       jetList.push({ t, x: k.x, y: k.y, z: k.z, r: 1.6 });
     }

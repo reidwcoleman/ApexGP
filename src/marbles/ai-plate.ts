@@ -128,7 +128,8 @@ export class PlateBrain {
     if (TMP.lengthSq() > 1) TMP.normalize();
     if (t < this.dazed) TMP.multiplyScalar(0.15);
     m.input.copy(TMP);
-    if (t > goT + 1) this.shove(t, c, all, rad, ux, uz);
+    // (no shoving in the opening stretch: a bunched-up field goes over like skittles)
+    if (t > goT + 12) this.shove(t, c, all, rad, ux, uz);
     void dt;
   }
 

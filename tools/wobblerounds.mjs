@@ -29,7 +29,7 @@ async function one(round) {
     if (fire) g.goodieFx = (r, w) => { boxes++; seen[w] = (seen[w] ?? 0) + 1; fire(r, w); };
     const t0 = performance.now();
     let t = 0;
-    for (; t < 200 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 0.25) {
+    for (; t < 260 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 0.25) {
       g.ff(0.25);
       if (c.keep) {
         if (c.keep.holder !== lastH) { lastH = c.keep.holder; changes++; if (lastH >= 0) holders.add(lastH); }

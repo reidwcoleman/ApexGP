@@ -86,7 +86,7 @@ export class SpudPlay {
     if (!A.holders.size) {
       if (x < this.nextFuse || all.length <= slots) return false;
       // (a fuse: fewer spuds than there are places left to lose)
-      const n = Math.max(1, Math.min(Math.ceil(all.length * 0.13), all.length - slots, this.spuds.length));
+      const n = Math.max(1, Math.min(Math.ceil(all.length * 0.08), all.length - slots, this.spuds.length));
       const pool = [...all].sort(() => Math.random() - 0.5).slice(0, n);
       for (const r of pool) {
         A.holders.add(r.m.id);

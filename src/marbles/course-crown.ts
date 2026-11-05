@@ -12,7 +12,7 @@ import { ringGrid, title } from './course-modes.ts';
  * loose, so does going over, and so does the edge. A low bar starts sweeping the floor part way in.
  * Who has it is the host's to say (modes.ts); the bar is a function of the clock.
  */
-export const KEEP = { R: 15, hold: 15, T: 75, pick: 1.5, steal: 1.8, safe: 1.7, barAt: 12, barV: 0.85 };
+export const KEEP = { R: 15, hold: 25, T: 130, pick: 1.5, steal: 1.8, safe: 1.7, barAt: 20, barV: 0.85 };
 
 export interface KeepArena {
   center: THREE.Vector3;
@@ -34,7 +34,7 @@ export function crownKeep(info: { name: string; blurb: string }): Course {
   const R = KEEP.R;
   const state = { go: 1e9 };
   b.lakeY = center.y - 30;
-  const bar = (x: number) => (x < KEEP.barAt ? null : (x - KEEP.barAt) * (KEEP.barV + 0.006 * (x - KEEP.barAt)));
+  const bar = (x: number) => (x < KEEP.barAt ? null : (x - KEEP.barAt) * (KEEP.barV + 0.003 * (x - KEEP.barAt)));
   const arena: KeepArena = { center, R, holder: -1, x: center.x, z: center.z, bar, posts: [] };
   // the floor: a checked royal round with a gold rim
   {

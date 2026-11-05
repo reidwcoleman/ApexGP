@@ -15,11 +15,11 @@ import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
 
 export const CRUMBLE = {
   /** seconds from a touch to the drop */
-  delay: 0.55,
-  layers: 6,
+  delay: 0.8,
+  layers: 9,
   gap: 6.5,
   r0: 18,
-  dr: 1.7,
+  dr: 1.05,
   /** tile radius and spacing (hex-packed) */
   tile: 0.98,
   sp: 2.06,
@@ -28,7 +28,7 @@ export const CRUMBLE = {
 
 const UND: number[] = [];
 /** Meltdown: the floe's melt (m/s in from the edge, down to minR) and a hole every `hole` s */
-export const MELT = { r0: 15, rate: 0.2, minR: 3.2, hole: 1, grip: 0.6 };
+export const MELT = { r0: 15, rate: 0.07, minR: 3.2, hole: 3.2, grip: 0.6 };
 /** a spring cookie: one tile in this many, and how hard it throws you (enough to reach the floor above) */
 export const SPRING = { every: 16, up: 18.6 };
 
@@ -312,7 +312,7 @@ export function crumble(info: { name: string; blurb: string }, kind: 'cookie' | 
     const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
     for (let k = 0; k < 8; k++) rnd();
     const list: Hit3[] = [];
-    for (let t = 7; t < 120; t += Math.max(1.1, 3 - t * 0.03) * (0.8 + rnd() * 0.4)) {
+    for (let t = 10; t < 160; t += Math.max(1.4, 3.6 - t * 0.02) * (0.8 + rnd() * 0.4)) {
       const a = rnd() * Math.PI * 2, r = Math.max(MELT.minR, (MELT.r0 - 2 - t * MELT.rate * 0.8)) * Math.sqrt(rnd());
       list.push({ t, x: center.x + Math.cos(a) * r, y: center.y + C.hh, z: center.z + Math.sin(a) * r, r: 2 });
     }

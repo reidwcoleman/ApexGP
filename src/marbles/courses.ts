@@ -122,7 +122,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
   blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
-  crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'One crown. Hold it for 15 seconds and you win the show. Dive into whoever has it to knock it loose.', keep: 0 },
+  crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'One crown. Hold it for 25 seconds and you win the show. Dive into whoever has it to knock it loose.', keep: 0 },
 };
 /**
  * The running order of this show (a live list: a new show deals a new one, a guest takes the

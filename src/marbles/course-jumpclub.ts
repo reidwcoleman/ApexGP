@@ -10,12 +10,12 @@ import { dressArena } from './course-dress.ts';
 /**
  * Round 3, Jump Club: a painted plate with two bars turning over it. Hop the low one; never hop
  * into the high one. It gets worse: the bars speed up all round, the high bar rises out of the
- * plate at 7 s, the outer ring of the plate flashes and crumbles away at 20 s, the bars stop and
- * turn back the other way at 30 s, the next ring goes at 42 s, and they turn again at 52 s.
+ * plate at 18 s, the outer ring of the plate flashes and crumbles away at 38 s, the bars stop and
+ * turn back the other way at 52 s, the next ring goes at 68 s, and they turn again at 82 s.
  */
 
 /** the schedule (seconds after GO) */
-export const JUMP_CLUB = { highAt: 7, ring1: 20, reverse1: 30, ring2: 42, reverse2: 52 };
+export const JUMP_CLUB = { highAt: 18, ring1: 38, reverse1: 52, ring2: 68, reverse2: 82 };
 
 export function jumpclub(info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
@@ -120,7 +120,7 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
     b.group.add(rmesh);
   }
 
-  // the bars' speed: ω = 0.8 + 0.011·τ, and from 26 s faster and faster; turning back at the two
+  // the bars' speed: ω = 0.68 + 0.007·τ, and from 50 s faster and faster; turning back at the two
   // reversals (smoothly, over 2 s)
   const N = 12000, DT = 0.025;
   const table = new Float32Array(N + 1);
@@ -133,7 +133,7 @@ export function jumpclub(info: { name: string; blurb: string }): Course {
     for (let i = 0; i <= N; i++) {
       table[i] = a;
       const x = i * DT;
-      a += dir(x) * (0.8 + 0.011 * x + 0.0009 * Math.max(0, x - 26) ** 2) * DT;
+      a += dir(x) * (0.68 + 0.007 * x + 0.0005 * Math.max(0, x - 50) ** 2) * DT;
     }
   }
   const spun = (x: number) => {

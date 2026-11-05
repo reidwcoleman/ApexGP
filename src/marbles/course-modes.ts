@@ -52,7 +52,7 @@ export function ringGrid(center: THREE.Vector3, n: number, r0: number, dr: numbe
 }
 
 // ------------------------------------------------------------------------------------ Colour Call
-export const CALL = { n: 8, tile: 3.6, colors: [0xff3a8a, 0xffd21f, 0x2fe06a, 0x2fa8ff, 0xff8a1f, 0xb05aff], names: ['PINK', 'YELLOW', 'GREEN', 'BLUE', 'ORANGE', 'PURPLE'], gone: 1.6, rest: 0.8 };
+export const CALL = { n: 8, tile: 3.6, colors: [0xff3a8a, 0xffd21f, 0x2fe06a, 0x2fa8ff, 0xff8a1f, 0xb05aff], names: ['PINK', 'YELLOW', 'GREEN', 'BLUE', 'ORANGE', 'PURPLE'], gone: 1.6, rest: 1.5 };
 
 export interface Call {
   i: number;
@@ -140,18 +140,18 @@ function callList(seed: number) {
   let prev: number[] = [];
   let t = 2.2;
   for (let i = 0; i < 80; i++) {
-    const warn = Math.max(1.9, 3.8 - 0.22 * i);
+    const warn = Math.max(2.3, 4 - 0.1 * i);
     const c = draw(prev);
-    // (the third call on, every third is a switch; every fifth a double)
-    const fake = i >= 2 && i % 3 === 2 ? draw([...prev, c]) : -1;
+    // (from the sixth call on, every third is a switch; from the fifth, every fifth a double)
+    const fake = i >= 5 && i % 3 === 2 ? draw([...prev, c]) : -1;
     const c2 = fake < 0 && i >= 4 && i % 5 === 4 ? draw([...prev, c]) : -1;
     prev = c2 >= 0 ? [c, c2] : [c];
-    const swap = fake >= 0 ? t + warn - Math.max(1.5, warn * 0.5) : t;
+    const swap = fake >= 0 ? t + warn - Math.max(1.8, warn * 0.6) : t;
     const kinds = Math.min(6, 3 + Math.floor(i / 2));
     const others = [0, 1, 2, 3, 4, 5].filter((x) => x !== c && x !== c2 && x !== fake);
     const rest = shuffled(others).slice(0, Math.max(1, kinds - 1));
     // (fewer safe tiles as it goes on, spread over the floor)
-    const nSafe = Math.max(3, 17 - Math.floor(i * 1.5));
+    const nSafe = Math.max(6, 20 - Math.floor(i * 0.8)) + (fake >= 0 ? 3 : 0);
     const order = shuffled(Array.from({ length: N }, (_, k) => k));
     const safe = order.slice(0, nSafe);
     const decoy = fake >= 0 ? order.slice(nSafe, nSafe * 2 + 2) : [];
@@ -325,7 +325,7 @@ export function colourCall(info: { name: string; blurb: string }): Course {
 }
 
 // ----------------------------------------------------------------------------------------- Hot Spud
-export const SPUD = { R: 17, fuse: 10, gap: 1.2, pass: 1.45, dive: 2.6, wait: 0.8, blast: 5.5 };
+export const SPUD = { R: 17, fuse: 15, gap: 1.2, pass: 1.45, dive: 2.6, wait: 0.8, blast: 5.5 };
 
 export interface SpudArena {
   center: THREE.Vector3;
@@ -500,7 +500,7 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
 }
 
 // ----------------------------------------------------------------------------------------- Gold Rush
-export const GOLD = { R: 15.5, T: 55, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 12, treasure: 13, big: 20 };
+export const GOLD = { R: 15.5, T: 90, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 15, treasure: 16, big: 20 };
 
 export interface Coin {
   k: number;
@@ -549,7 +549,7 @@ export function goldRush(info: { name: string; blurb: string }): Course {
   {
     const rnd = seeded(40917);
     for (let k = 0; k < 8; k++) rnd();
-    for (let t = 5; t < GOLD.T + 1; t += Math.max(0.9, 2.3 - t * 0.024) * (0.8 + rnd() * 0.4)) {
+    for (let t = 5; t < GOLD.T + 1; t += Math.max(0.9, 2.3 - t * 0.015) * (0.8 + rnd() * 0.4)) {
       const a = rnd() * Math.PI * 2, r = GOLD.chest + 2 + (R - GOLD.chest - 3) * Math.sqrt(rnd());
       shotList.push({ t, x: center.x + Math.cos(a) * r, y: center.y, z: center.z + Math.sin(a) * r, r: 2.2 });
     }
@@ -676,7 +676,7 @@ export function goldRush(info: { name: string; blurb: string }): Course {
 }
 
 // ----------------------------------------------------------------------------------------- Belt Rush
-export const BELT = { W: 18, near: 21, far: 25, lanes: 5, D: 8.2, v0: 3.8, a: 0.14, vMax: 8.2, tall: 0.8, low: 0.56, wall: 7, kick: 13 };
+export const BELT = { W: 18, near: 21, far: 25, lanes: 5, D: 8.2, v0: 3.6, a: 0.06, vMax: 8.2, tall: 0.8, low: 0.56, wall: 7, kick: 13 };
 
 export interface BeltRow {
   n: number;
@@ -712,7 +712,7 @@ function stripes() {
 /** a row's blocks: more of them as the round goes on, always a way through */
 function rowKinds(n: number) {
   const { lanes } = BELT;
-  const hard = Math.min(1, n / 26);
+  const hard = Math.min(1, n / 50);
   const free = hash(n, 1) < 0.55 - hard * 0.4 ? 2 : 1;
   const out = new Array<number>(lanes).fill(0);
   // (every so often a wall right across, two lanes open; the lamps show which)

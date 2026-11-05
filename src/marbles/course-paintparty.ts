@@ -19,7 +19,7 @@ import { dressArena } from './course-dress.ts';
 
 export const TEAM_COLORS = [0xff4f9a, 0x2f9bff, 0xffc21f];
 export const TEAM_NAMES = ['PINK', 'BLUE', 'GOLD'];
-export const TEAM_T = 75;
+export const TEAM_T = 100;
 
 export interface TeamArena {
   center: THREE.Vector3;

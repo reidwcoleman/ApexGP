@@ -940,6 +940,8 @@ export class MarbleGame {
         if (this.host && fresh.length) this.host.broadcast({ t: 'crumble', k: fresh, at: fresh.map((i) => A.drop[i]) });
       }
       for (const r of this.racers) {
+        // (once it's over, who went through is settled)
+        if (this.state === 'over') break;
         if (r.out || r.m.pos.y >= c.killY) continue;
         if (!r.local) {
           // (someone else's: just the splash; the host says when it's out)
@@ -959,6 +961,8 @@ export class MarbleGame {
           continue;
         }
         this.eliminate(r);
+        // (a whole level of beans can go in one tick: the round stops at the last place, not past it)
+        if (this.racers.filter((x) => !x.out).length <= this.slots) break;
       }
       const alive = this.racers.filter((r) => !r.out).length;
       if (!this.guest && this.state === 'play' && (alive <= this.slots || this.playT > SURVIVE_T)) this.endRound();
@@ -2417,7 +2421,7 @@ function lerpAngle(a: number, b: number, k: number) {
 /** the round clocks: a race's time limit, how long a survival round lasts, the intro flyover */
 const V_FEET = new THREE.Vector3();
 const RACE_T = 180;
-const SURVIVE_T = 110;
+const SURVIVE_T = 150;
 const TEAM_T = TEAM_ROUND_T;
 const INTRO_T = 3.6;
 /** a beat of the 3, 2, 1 */

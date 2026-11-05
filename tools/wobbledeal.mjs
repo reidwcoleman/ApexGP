@@ -42,7 +42,9 @@ const res = await page.evaluate(async () => {
     for (let k = 0; k < 24; k++) {
       const a = c.call.at(x);
       list.push(a);
-      x = a.back + 0.81;
+      // (on to the next call, however long the rest between them is)
+      x = a.back;
+      while (c.call.at(x).i === a.i) x += 0.05;
     }
     runs.push(list);
   }
