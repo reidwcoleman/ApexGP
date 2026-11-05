@@ -37,6 +37,8 @@ export function bold(g: CanvasRenderingContext2D, t: string, x: number, y: numbe
   // two passes would smear a 5x7 face shut, so weight comes from a hard drop shadow instead
   text(g, t, x + scale, y + scale, shadow ?? 'rgba(18,18,28,.55)', scale); text(g, t, x, y, col, scale);
 }
+/** a full 1px rim, for words that have to read over busy art */
+export function rimmed(g: CanvasRenderingContext2D, t: string, cx: number, y: number, col: string, rim: string, scale = 1) { const x = Math.round(cx - textW(t, scale) / 2), Y = Math.round(y); for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) text(g, t, x + dx, Y + dy, rim, scale); text(g, t, x, Y, col, scale); }
 export function center(g: CanvasRenderingContext2D, t: string, cx: number, y: number, col: string, scale = 1, shadow?: string) { text(g, t, cx - textW(t, scale) / 2, y, col, scale, shadow); }
 export function right(g: CanvasRenderingContext2D, t: string, rx: number, y: number, col: string, scale = 1, shadow?: string) { text(g, t, rx - textW(t, scale), y, col, scale, shadow); }
 export function wrap(t: string, w: number) {

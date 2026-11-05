@@ -118,12 +118,15 @@ export class Chip {
       const seq = arp === 'wave' ? [root, third, fifth, root + 12, fifth, third] : [root, fifth, third, root + 12];
       this.voice(this.pulse12, hz(60 + seq[(inBar / 2) % seq.length]), t, S.stepT * 1.6, soft ? 0.05 : 0.075, this.music, 0.7);
     }
+    // sleigh bells on every beat, all year round
+    if (!soft && inBar % 4 === 0) this.jingle(t, inBar === 0 ? 0.05 : 0.034);
     if (S.song.drum) {
       if (inBar % 4 === 2) this.hit(t, 0.03, 0.06, 7000);
       if (inBar % 8 === 4 || (beats === 3 && inBar === 8)) this.hit(t, 0.08, 0.11, 2200);
       if (inBar === 0) this.thump(t);
     }
   }
+  private jingle(t: number, v: number, out: AudioNode = this.music) { for (const [f, d] of [[3136, 0], [3951, 0.012], [4699, 0.024]]) this.voice('square', f, t + d, 0.05, v * 0.5, out, 0.3); this.hit(t, 0.05, v * 1.1, 8500, out); }
   private voice(type: OscillatorType | PeriodicWave, f: number, t: number, d: number, v: number, out: AudioNode, sustain = 0.6) {
     const c = this.ctx!, o = c.createOscillator(), g = c.createGain();
     if (type instanceof PeriodicWave) o.setPeriodicWave(type); else o.type = type;
@@ -164,6 +167,7 @@ export class Chip {
       case 'ram': this.thump(now, 0.4, this.fx); this.seq([84, 91], 0.05, 0.08, 0.14); break;
       case 'fanfare': this.seq([67, 72, 76, 79, 84, 79, 84, 88], 0.09, 0.16, 0.14); break;
       case 'month': this.tone(1046, 0, 0.05, 0.05); break;
+      case 'sleigh': for (let i = 0; i < 12; i++) this.jingle(now + i * 0.14, 0.06 + (i % 4 === 0 ? 0.02 : 0), this.fx); break;
     }
   }
 }

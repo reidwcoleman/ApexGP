@@ -1,69 +1,87 @@
 // World drawing. Four zoom levels from 16 px a tile to 2: near is live sprites with wind in the rows,
 // far is cached chunks, so a 30,000-tree farm costs no more than a small one.
-import { C, canvas, hash, mix } from './pal';
-import { Sim, MW, MH, CH, CW, CHH, PS, PW, PH, T_WATER, T_WILD, T_GRASS, F_DEAD, F_GOLD, F_PEST, F_THIRST, F_STUMP, stageOf, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, type Block } from './sim.ts';
+import { C, canvas, hash, mix, hex } from './pal';
+import { Sim, MW, MH, CH, CW, CHH, PS, PW, PH, T_WATER, T_WILD, T_GRASS, T_ROAD, T_BRIDGE, F_DEAD, F_GOLD, F_PEST, F_THIRST, F_STUMP, stageOf, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, type Block } from './sim.ts';
 import { SPECIES, BUILDINGS, VEHICLES, CREW, gradeOf, SIZE_MIN } from './data.ts';
-import { treeSprite, wildSprite, groundPal, groundTile, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, STAGE_PX, BLD_TOP, type GroundPal, type Look } from './art';
-import { text, center, textW } from './font';
+import { treeSprite, wildSprite, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, treeShadow, shadowBlob, mound, stump, snowman, candyCane, lampPost, giftPile, fence, glint, glow, santaSleigh, buildingLights, half, STAGE_PX, BLD_TOP, PX_AX, PX_AY, VEH_TINT, type Look } from './art';
+import { Ground, type GroundEnv } from './ground';
+import { text, center, rimmed, textW } from './font';
 
+interface Base { c: HTMLCanvasElement; g: CanvasRenderingContext2D; key: string; tv: number; snap: Uint8Array }
 interface Chunk { c: HTMLCanvasElement; g: CanvasRenderingContext2D; ver: number; key: string; terr: number }
 interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; col: string; s: number; grav: number; }
 interface Floater { x: number; y: number; t: string; col: string; life: number; big?: boolean }
 interface Fall { x: number; y: number; img: HTMLCanvasElement; t: number; dir: number }
 interface Car { x: number; y: number; st: number; t: number; col: string; tree: boolean; dir: number; stop: number; fam: number; px: number; py: number; look: Look }
 
-export const PLAYER_LOOK: Look = { hat: C.red, coat: C.pine, skin: '#f0c8a0', pants: C.dusk };
-const VEH_TINT = ['', C.blue, C.red, C.leaf, C.orange];
-const CREW_LOOKS: Look[] = [C.gold, C.blue, C.aqua, C.pink, C.white, C.orange].map((hat, i) => ({ hat, coat: [C.brown, C.dred, C.dusk, C.teal, C.purple, C.bark][i], skin: ['#f0c8a0', '#c8966a', '#8a5a3c'][i % 3], pants: C.dusk }));
+export const PLAYER_LOOK: Look = { hat: C.red, coat: '#1f7a4a', skin: '#f6cca4', pants: C.dusk, kind: 'santa', scarf: C.gold };
+const SKINS = ['#f6cca4', '#d2a074', '#8e5c3e'];
+// the crew are elves, and nobody at the farm finds this strange
+const CREW_LOOKS: Look[] = Array.from({ length: 6 }, (_, i) => ({ hat: i % 2 ? C.red : C.leaf, coat: i % 2 ? C.leaf : C.red, skin: SKINS[i % 3], pants: i % 2 ? C.red : C.leaf, kind: 'elf' as const, trim: i % 3 === 2 ? C.gold : C.white }));
 const CREW_TINT = ['', C.teal, C.orange, C.purple];
 const CAR_COLS = [C.red, C.blue, C.gold, C.teal, C.white, C.purple, C.orange];
+const SNOW_BY_MONTH = [3, 3, 2, 2, 1, 1, 0, 0, 1, 1, 2, 3], FLURRY = [1, 1, 0.75, 0.5, 0.35, 0.22, 0.16, 0.16, 0.28, 0.5, 0.85, 1];
+const NIGHT = '#5a66d0', SUNSET = '#ffdfc8';
+const LIGHT_COLS = [C.red, C.gold, '#46b0ff', '#ff6ac8', C.white, C.lime];
 
 export class Renderer {
   W = 480; H = 300; z = 16; cx = 125; cy = 72; free = false; shake = 0; t = 0;
-  private chunks = new Map<string, Chunk>();
+  private chunks = new Map<string, Chunk>(); private bases = new Map<number, Base>(); private ground: Ground;
   parts: Part[] = []; floats: Floater[] = []; falls: Fall[] = []; cars: Car[] = [];
   flakes: { x: number; y: number; s: number }[] = [];
   overlay = 0; ticketHi: { sp: number; minZ: number } | null = null; focusBlock: Block | null = null; landMode = false;
   ghost: { k: string; x: number; y: number; ok: boolean } | null = null; drag: { x0: number; y0: number; x1: number; y1: number } | null = null;
   pings: { x: number; y: number; t: number; col: string }[] = [];
-  constructor(public sim: Sim) { for (let i = 0; i < 160; i++) this.flakes.push({ x: Math.random(), y: Math.random(), s: 0.4 + Math.random() }); }
+  sleigh: { x: number; y: number; t: number } | null = null; sleighWait = 30; onSleigh: (() => void) | null = null;
+  private lamps: { x: number; y: number }[] = []; private smokeT = 0; private nightMul = '';
+  constructor(public sim: Sim) { this.ground = new Ground(sim); for (let i = 0; i < 240; i++) this.flakes.push({ x: Math.random(), y: Math.random(), s: 0.4 + Math.random() }); }
 
   screenToTile(sx: number, sy: number) { return { x: (sx + this.camX()) / this.z, y: (sy + this.camY()) / this.z }; }
   camX() { return Math.round(this.cx * this.z - this.W / 2); }
   camY() { return Math.round(this.cy * this.z - this.H / 2); }
   clampCam() { const hw = this.W / 2 / this.z, hh = this.H / 2 / this.z; this.cx = hw * 2 >= MW ? MW / 2 : Math.max(hw, Math.min(MW - hw, this.cx)); this.cy = hh * 2 >= MH ? MH / 2 : Math.max(hh, Math.min(MH - hh, this.cy)); }
 
-  envKey() { const s = this.sim; return `${s.season()}.${s.snowLevel()}.${s.s.drought > 0 ? 1 : 0}`; }
+  /** snow never quite leaves Mabel's farm */
+  snowVis() { return Math.max(SNOW_BY_MONTH[this.sim.s.month], this.sim.snowLevel()); }
+  treeSnow(v: number) { return v >= 3 ? 2 : v >= 1 ? 1 : 0; }
+  env(): GroundEnv { return { snow: this.snowVis(), dry: this.sim.s.drought > 0 }; }
+  envKey(e: GroundEnv = this.env()) { return `${e.snow}.${e.dry ? 1 : 0}`; }
+  /** slow evening light that comes round all year; December's own dusk rides on top of it */
+  light() { const c = Math.sin(this.t * Math.PI * 2 / 150 - 1.1), n = Math.max(0, Math.min(1, (c - 0.1) / 0.75)); return Math.max(this.sim.dusk(), n * n * (3 - 2 * n) * 0.62); }
 
-  private buildChunk(z: number, ci: number, ch: Chunk, pal: GroundPal, snow: number, season: number) {
-    const sim = this.sim, g = ch.g, x0 = (ci % CW) * CH, y0 = ((ci / CW) | 0) * CH, top = this.chunkTop(z);
-    const trees = z < 16, snowq = snow >= 3 ? 2 : snow >= 2 ? 1 : 0;
-    g.clearRect(0, 0, ch.c.width, ch.c.height);
-    const n = (x: number, y: number) => (dx: number, dy: number) => { const X = x + dx, Y = y + dy; return sim.inMap(X, Y) ? sim.terr[sim.idx(X, Y)] : 2; };
-    for (let y = 0; y < CH; y++) for (let x = 0; x < CH; x++) {
-      const X = x0 + x, Y = y0 + y, i = sim.idx(X, Y), t = sim.terr[i], px = x * z, py = y * z + top;
-      groundTile(g, pal, t === T_WILD ? 0 : t, X, Y, px, py, z, sim.sp[i] > 0, n(X, Y));
-      if (sim.flag[i] & F_STUMP && !sim.sp[i]) {
-        if (z >= 16) { g.fillStyle = C.bark; g.fillRect(px + 6, py + 9, 5, 4); g.fillStyle = C.tan; g.fillRect(px + 6, py + 9, 5, 2); g.fillStyle = C.brown; g.fillRect(px + 8, py + 9, 1, 1); }
-        else if (z >= 4) { g.fillStyle = C.tan; g.fillRect(px + (z >> 2), py + (z >> 1), Math.max(1, z >> 1), Math.max(1, z >> 2)); }
-        else { g.fillStyle = pal.soil; g.fillRect(px, py, z, z); }
-      }
-      if (!sim.ownedAt(X, Y) && t !== T_WATER) { g.fillStyle = 'rgba(18,18,40,.14)'; g.fillRect(px, py, z, z); }
-      else if (z >= 8 && t !== T_WATER) {
-        g.fillStyle = C.bark;
-        if (!sim.ownedAt(X, Y - 1)) { g.fillRect(px, py, z, 1); if (z >= 16) g.fillRect(px + 2, py - 3, 1, 4), g.fillRect(px + 10, py - 3, 1, 4); }
-        if (!sim.ownedAt(X, Y + 1)) g.fillRect(px, py + z - 1, z, 1);
-        if (!sim.ownedAt(X - 1, Y)) g.fillRect(px, py, 1, z);
-        if (!sim.ownedAt(X + 1, Y)) g.fillRect(px + z - 1, py, 1, z);
-      }
+  private propAt(X: number, Y: number, i: number) {
+    const sim = this.sim; if (sim.terr[i] !== T_GRASS || sim.sp[i] || sim.bld[i] || sim.flag[i] & F_STUMP) return 0;
+    const road = (j: number) => sim.terr[j] === T_ROAD;
+    if (X > 0 && Y > 0 && X < MW - 1 && Y < MH - 1 && (road(i - 1) || road(i + 1) || road(i - MW) || road(i + MW))) return (X + Y) % 16 === 0 ? 2 : (X + Y) % 8 === 4 ? 1 : 0;
+    const h = hash(X, Y, 77); return h > 0.9962 ? 3 : h > 0.9925 ? 4 : 0;
+  }
+  private propImg(k: number, X: number, Y: number, on: boolean) { return k === 1 ? candyCane() : k === 2 ? lampPost(on) : k === 3 ? snowman((hash(X, Y, 6) * 4) | 0) : giftPile((hash(X, Y, 7) * 4) | 0); }
+
+  private baseLayer(z: number, ci: number, budget: { n: number }, env: GroundEnv, key: string) {
+    const sim = this.sim, id = z * 1000 + ci, x0 = (ci % CW) * CH, y0 = ((ci / CW) | 0) * CH, P = 2, SW = CH + P * 2; let b = this.bases.get(id);
+    if (!b) { const r = canvas(CH * z, CH * z); b = { c: r.c, g: r.g, key: '', tv: -1, snap: new Uint8Array(SW * SW) }; this.bases.set(id, b); }
+    const sample = (i: number, j: number) => { const X = x0 + i - P, Y = y0 + j - P; if (X < 0 || Y < 0 || X >= MW || Y >= MH) return 255; return sim.terr[Y * MW + X] | (sim.ownedAt(X, Y) ? 8 : 0); };
+    if (b.key !== key) {
+      if (b.key && budget.n <= 0) return b; budget.n--;
+      this.ground.paint(b.g, x0, y0, 0, 0, CH, CH, z, env); b.key = key; b.tv = sim.terrVer;
+      for (let j = 0; j < SW; j++) for (let i = 0; i < SW; i++) b.snap[j * SW + i] = sample(i, j);
+    } else if (b.tv !== sim.terrVer) {
+      let a = 99, c = 99, d = -1, e = -1;
+      for (let j = 0; j < SW; j++) for (let i = 0; i < SW; i++) { const v = sample(i, j); if (v !== b.snap[j * SW + i]) { b.snap[j * SW + i] = v; a = Math.min(a, i); c = Math.min(c, j); d = Math.max(d, i); e = Math.max(e, j); } }
+      b.tv = sim.terrVer;
+      if (d >= 0) this.ground.paint(b.g, x0, y0, Math.max(0, a - P * 2), Math.max(0, c - P * 2), Math.min(CH, d + 1), Math.min(CH, e + 1), z, env);
     }
-    if (!trees) return;
-    // buildings first: tree rows in front of them sit on top
+    return b;
+  }
+
+  private buildChunk(z: number, ci: number, ch: Chunk, base: Base, snowV: number) {
+    const sim = this.sim, g = ch.g, x0 = (ci % CW) * CH, y0 = ((ci / CW) | 0) * CH, top = this.chunkTop(z), snowq = this.treeSnow(snowV), sc = z / 16;
+    g.clearRect(0, 0, ch.c.width, ch.c.height); g.drawImage(base.c, 0, top);
     const list: { y: number; f: () => void }[] = [];
     for (const b of sim.s.blds) {
       const d = BUILDINGS[b.k]; if (b.x + d.w <= x0 || b.x >= x0 + CH || b.y + d.h <= y0 || b.y >= y0 + CH) continue;
-      const img = buildingSprite(b.k, snow >= 2, false), sc = z / 16;
-      list.push({ y: b.y + d.h - 1, f: () => g.drawImage(img, (b.x - x0) * z, (b.y - y0) * z + top - BLD_TOP * sc, img.width * sc, img.height * sc) });
+      const big = buildingSprite(b.k, true, false), img = z < 16 ? half(big) : big, w = big.width * sc, h = big.height * sc;
+      list.push({ y: b.y + d.h - 1, f: () => g.drawImage(img, (b.x - x0) * z, (b.y - y0) * z + top - BLD_TOP * sc, w, h) });
     }
     list.sort((a, b) => a.y - b.y); let li = 0;
     for (let y = 0; y < CH; y++) {
@@ -71,34 +89,41 @@ export class Renderer {
       for (let x = 0; x < CH; x++) {
         const X = x0 + x, Y = y0 + y, i = sim.idx(X, Y), sp = sim.sp[i], px = x * z, py = y * z + top;
         if (sim.terr[i] === T_WILD) {
-          if (z <= 2) { g.fillStyle = season === 3 && hash(X, Y) > 0.7 ? C.orange : snow >= 2 ? '#7f9ab0' : C.forest; g.fillRect(px, py, z, z); }
-          else { const v = (hash(X, Y, 5) * 6) | 0, im = wildSprite(Math.max(4, ((30 + hash(X, Y, 8) * 9) * z / 16) | 0), season, snow, v); g.drawImage(im, px + z / 2 - (im.width >> 1), py + z - im.height); }
+          if (z <= 2) { const v = hash(X, Y); g.fillStyle = v > 0.66 ? '#dbe6f8' : v > 0.3 ? '#2f6e6c' : '#1c5056'; g.fillRect(px, py, z, z); }
+          else { const v = (hash(X, Y, 5) * 6) | 0, im = wildSprite(Math.max(4, ((32 + hash(X, Y, 8) * 9) * sc) | 0), snowV, v); g.drawImage(im, px + z / 2 - (im.width >> 1), py + z - im.height + 2); }
         } else if (sp) {
-          const fl = sim.flag[i], st = stageOf(sim.h[i]);
-          if (z <= 2) { const c = fl & F_DEAD ? C.brown : fl & F_PEST ? C.gold : SPECIES[sp - 1].ramp[st >= 5 ? 1 : st >= 3 ? 2 : 3]; g.fillStyle = snow >= 3 && st >= 3 && (X + Y) % 2 ? mix(c, C.white, 0.5) : c; g.fillRect(px, py + (st < 3 ? 0 : -1), z, st < 3 ? z : z + 1); }
-          else {
-            const px2 = Math.max(2, Math.round(STAGE_PX[st] * z / 16)), kind = fl & F_DEAD ? 1 : fl & F_GOLD ? 2 : fl & F_PEST ? 3 : 0;
-            const im = treeSprite(sp - 1, px2, Math.min(2, gradeOf(sim.shape[i])), snowq, 0, kind, (hash(X, Y) * 3) | 0);
-            g.drawImage(im, px + z / 2 - (im.width >> 1), py + z - im.height + 1);
+          const fl = sim.flag[i], st = stageOf(sim.h[i]), hh = sim.h[i], shape = Math.min(2, gradeOf(sim.shape[i]));
+          if (z <= 2) {
+            const r = SPECIES[sp - 1].ramp, v = hash(X, Y, 3); let c = fl & F_DEAD ? C.brown : fl & F_PEST ? C.gold : r[st >= 5 ? 1 : st >= 3 ? 2 : 3];
+            if (hh >= 6 && !(fl & F_DEAD) && v > 0.62) c = v > 0.88 ? C.red : v > 0.76 ? C.gold : C.white; else if (snowq && st >= 3 && (X + Y) % 2) c = mix(c, C.white, 0.55);
+            g.fillStyle = c; g.fillRect(px, py + (st < 3 ? 0 : -1), z, st < 3 ? z : z + 1);
+          } else {
+            if (z >= 8 && st >= 1) { const sh = treeShadow(st), w = sh.width * sc, h = sh.height * sc; g.drawImage(sh, px + z / 2 - w / 2 + 2 * sc, py + z - h * 0.7, w, h); }
+            const px2 = Math.max(2, Math.round(STAGE_PX[st] * sc)), kind = fl & F_DEAD ? 1 : fl & F_GOLD ? 2 : fl & F_PEST ? 3 : 0;
+            const deco = hh >= 8 ? 2 : hh >= 6 ? 1 : 0;
+            const im = treeSprite(sp - 1, px2, shape, snowq, 0, kind, (hash(X, Y) * 3) | 0, deco, z >= 8 && deco > 0 && shape === 2);
+            g.drawImage(im, px + z / 2 - (im.width >> 1) + (z >= 8 ? jx(X, Y) >> 1 : 0), py + z - im.height + 2 + (z >= 8 ? jy(X, Y) >> 1 : 0));
           }
-        }
+        } else if (sim.flag[i] & F_STUMP) { if (z >= 8) { const s2 = stump(snowq > 0); g.drawImage(s2, px, py + z - s2.height * sc, s2.width * sc, s2.height * sc); } }
+        else if (z >= 8) { const k = this.propAt(X, Y, i); if (k) { const im = half(this.propImg(k, X, Y, false)); g.drawImage(im, px + z / 2 - (im.width >> 1), py + z - im.height); } }
       }
     }
     while (li < list.length) list[li++].f();
   }
-  private chunkTop(z: number) { return z < 16 ? 4 * z : 4; }
+  private chunkTop(z: number) { return 4 * z; }
 
-  private chunk(z: number, ci: number, budget: { n: number }, pal: GroundPal, snow: number, season: number, env: string) {
-    const key = z * 1000 + ci; let ch = this.chunks.get(String(key));
-    const stale = !ch || ch.ver !== this.sim.ver[ci] || ch.key !== env || ch.terr !== this.sim.terrVer;
-    if (!ch) { const r = canvas(CH * z, CH * z + this.chunkTop(z)); ch = { c: r.c, g: r.g, ver: -1, key: '', terr: -1 }; this.chunks.set(String(key), ch); }
-    if (stale && (ch.ver < 0 || budget.n > 0)) { budget.n--; this.buildChunk(z, ci, ch, pal, snow, season); ch.ver = this.sim.ver[ci]; ch.key = env; ch.terr = this.sim.terrVer; }
+  private chunk(z: number, ci: number, budget: { n: number }, snowV: number, env: GroundEnv, key: string) {
+    const id = String(z * 1000 + ci); let ch = this.chunks.get(id);
+    const base = this.baseLayer(z, ci, budget, env, key);
+    const stale = !ch || ch.ver !== this.sim.ver[ci] || ch.key !== key || ch.terr !== this.sim.terrVer;
+    if (!ch) { const r = canvas(CH * z, CH * z + this.chunkTop(z)); ch = { c: r.c, g: r.g, ver: -1, key: '', terr: -1 }; this.chunks.set(id, ch); }
+    if (stale && (ch.ver < 0 || budget.n > 0)) { budget.n--; this.buildChunk(z, ci, ch, base, snowV); ch.ver = this.sim.ver[ci]; ch.key = key; ch.terr = this.sim.terrVer; }
     return ch;
   }
   /** the whole farm as an image, for the Christmas Eve flight */
   farmImage() {
-    const r = canvas(MW * 2, MH * 2), pal = groundPal(0, 3, false);
-    for (let ci = 0; ci < CW * CHH; ci++) { const ch = this.chunk(2, ci, { n: 1 }, pal, 3, 0, this.envKey()); r.g.drawImage(ch.c, (ci % CW) * CH * 2, ((ci / CW) | 0) * CH * 2 - this.chunkTop(2)); }
+    const r = canvas(MW * 2, MH * 2), env = { snow: 3, dry: false }, key = this.envKey(env);
+    for (let ci = 0; ci < CW * CHH; ci++) { const ch = this.chunk(2, ci, { n: 2 }, 3, env, key); r.g.drawImage(ch.c, (ci % CW) * CH * 2, ((ci / CW) | 0) * CH * 2 - this.chunkTop(2)); }
     return r;
   }
 
@@ -109,48 +134,70 @@ export class Renderer {
     this.clampCam();
     const sk = this.shake > 0.3 ? (Math.random() - 0.5) * this.shake : 0, sk2 = this.shake > 0.3 ? (Math.random() - 0.5) * this.shake : 0; this.shake *= Math.exp(-dt * 9);
     const camX = this.camX() + Math.round(sk), camY = this.camY() + Math.round(sk2);
-    const season = sim.season(), snow = sim.snowLevel(), dry = s.drought > 0, pal = groundPal(season, snow, dry), env = this.envKey();
-    g.fillStyle = season === 0 ? '#c8d8e4' : C.forest; g.fillRect(0, 0, W, H);
+    const snowV = this.snowVis(), env = this.env(), key = this.envKey(env);
+    g.fillStyle = C.sn3; g.fillRect(0, 0, W, H);
     const c0 = Math.max(0, Math.floor(camX / z / CH)), c1 = Math.min(CW - 1, Math.floor((camX + W) / z / CH)), r0 = Math.max(0, Math.floor(camY / z / CH)), r1 = Math.min(CHH - 1, Math.floor((camY + H + 64) / z / CH));
-    const budget = { n: 3 }, top = this.chunkTop(z);
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const ch = this.chunk(z, r * CW + c, budget, pal, snow, season, env); g.drawImage(ch.c, c * CH * z - camX, r * CH * z - camY - top); }
-    if (z === 16) this.drawNear(g, camX, camY, season, snow);
-    else this.drawFar(g, camX, camY);
+    const budget = { n: z === 16 ? 1 : 3 };
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      if (z === 16) { const b = this.baseLayer(z, r * CW + c, budget, env, key); g.drawImage(b.c, c * CH * z - camX, r * CH * z - camY); }
+      else { const ch = this.chunk(z, r * CW + c, budget, snowV, env, key); g.drawImage(ch.c, c * CH * z - camX, r * CH * z - camY - this.chunkTop(z)); }
+    }
+    if (z === 16) this.drawNear(g, camX, camY, snowV);
+    else { this.lamps.length = 0; this.drawFar(g, camX, camY); }
     this.drawOverlays(g, camX, camY);
     this.drawFx(g, camX, camY, dt);
-    this.drawEnv(g, camX, camY, dt, snow);
+    this.drawEnv(g, camX, camY, dt);
   }
 
-  private drawNear(g: CanvasRenderingContext2D, camX: number, camY: number, season: number, snow: number) {
-    const sim = this.sim, s = sim.s, W = this.W, H = this.H, z = 16, t = this.t, snowq = snow >= 3 ? 2 : snow >= 2 ? 1 : 0;
-    const x0 = Math.max(0, Math.floor(camX / z) - 1), x1 = Math.min(MW - 1, Math.ceil((camX + W) / z) + 1), y0 = Math.max(0, Math.floor(camY / z)), y1 = Math.min(MH - 1, Math.ceil((camY + H) / z) + 4);
-    // water sparkle
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (sim.terr[sim.idx(x, y)] === T_WATER) { const f = (t * 1.6 + hash(x, y) * 8) % 8; if (f < 2) { g.fillStyle = snow >= 2 ? C.white : C.ice; g.fillRect(x * z - camX + ((hash(x, y, 2) * 12) | 0), y * z - camY + ((hash(x, y, 3) * 14) | 0), 3 - (f | 0), 1); } }
+  private drawNear(g: CanvasRenderingContext2D, camX: number, camY: number, snowV: number) {
+    const sim = this.sim, s = sim.s, W = this.W, H = this.H, z = 16, t = this.t, snowq = this.treeSnow(snowV);
+    const x0 = Math.max(0, Math.floor(camX / z) - 2), x1 = Math.min(MW - 1, Math.ceil((camX + W) / z) + 2), y0 = Math.max(0, Math.floor(camY / z)), y1 = Math.min(MH - 1, Math.ceil((camY + H) / z) + 4);
+    const light = this.light(), lit = light > 0.3, ph = (t * 2.2) | 0;
+    // decals first: soil, stumps and the blue shadows on the snow
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = sim.idx(x, y), sp = sim.sp[i], px = x * z - camX, py = y * z - camY;
+      if (sim.terr[i] === T_WATER) { if (!snowV) { const f = (t * 1.6 + hash(x, y) * 8) % 8; if (f < 2) { g.fillStyle = C.ice; g.fillRect(px + ((hash(x, y, 2) * 12) | 0), py + ((hash(x, y, 3) * 14) | 0), 3 - (f | 0), 1); } } continue; }
+      if (sp) { const st = stageOf(sim.h[i]), sh = treeShadow(st); if (st < 4) g.drawImage(mound(), px + 2, py + 10); g.drawImage(sh, px + 8 - (sh.width >> 1) + 3 + jx(x, y), py + 15 - (sh.height >> 1) + jy(x, y)); }
+    }
     const ents: { y: number; f: () => void }[] = [];
-    const lit = sim.dusk() > 0.35;
     for (const b of s.blds) {
       const d = BUILDINGS[b.k]; if (b.x + d.w < x0 || b.x > x1 || b.y + d.h < y0 - 3 || b.y > y1) continue;
-      ents.push({ y: b.y + d.h - 0.5, f: () => g.drawImage(buildingSprite(b.k, snow >= 2, lit), b.x * z - camX, b.y * z - camY - BLD_TOP) });
+      ents.push({ y: b.y + d.h - 0.5, f: () => g.drawImage(buildingSprite(b.k, true, lit, ph), b.x * z - camX, b.y * z - camY - BLD_TOP) });
     }
-    for (const c of this.cars) ents.push({ y: c.y, f: () => { const im = carSprite(c.col, c.tree, c.dir); g.drawImage(im, Math.round(c.x * z - camX - 15), Math.round(c.y * z - camY - 14)); if (c.st === 2 || c.st === 3) { const im2 = person(c.look, c.st === 2 ? 0 : 2, ((this.t * 8) | 0) % 4, c.st === 3); g.drawImage(im2, Math.round(c.px * z - camX - 5), Math.round(c.py * z - camY - 14)); } } });
+    for (const c of this.cars) ents.push({ y: c.y, f: () => { const im = carSprite(c.col, c.tree, c.dir), x = Math.round(c.x * z - camX), y = Math.round(c.y * z - camY); g.drawImage(shadowBlob(32), x - 16, y + 2); g.drawImage(im, x - 18, y - 16); if (c.st === 2 || c.st === 3) { const im2 = person(c.look, c.st === 2 ? 0 : 2, ((this.t * 8) | 0) % 4, c.st === 3); g.drawImage(im2, Math.round(c.px * z - camX - PX_AX), Math.round(c.py * z - camY - PX_AY)); } } });
     this.entities(ents, camX, camY, z);
-    ents.sort((a, b) => a.y - b.y); let ei = 0;
+    ents.sort((a, b) => a.y - b.y); let ei = 0; this.lamps.length = 0;
     for (let y = y0; y <= y1; y++) {
       while (ei < ents.length && ents[ei].y < y) ents[ei++].f();
       for (let x = x0; x <= x1; x++) {
-        const i = sim.idx(x, y), sp = sim.sp[i], px = x * z - camX, py = y * z - camY;
-        if (sim.terr[i] === T_WILD) { const v = (hash(x, y, 5) * 6) | 0, im = wildSprite((30 + hash(x, y, 8) * 9) | 0, season, snow, v); g.drawImage(im, px + 8 - (im.width >> 1), py + 16 - im.height); continue; }
-        if (!sp) continue;
-        const fl = sim.flag[i], st = stageOf(sim.h[i]), kind = fl & F_DEAD ? 1 : fl & F_GOLD ? 2 : fl & F_PEST ? 3 : 0;
-        const wind = Math.sin(t * 1.7 + x * 0.42 + y * 0.31 + Math.sin(t * 0.3 + y * 0.1) * 2), sway = wind > 0.45 && !kind ? 1 : wind < -0.75 && !kind ? -1 : 0;
-        const im = treeSprite(sp - 1, STAGE_PX[st], Math.min(2, gradeOf(sim.shape[i])), snowq, sway, kind as 0, (hash(x, y) * 3) | 0);
+        const i = sim.idx(x, y), sp = sim.sp[i], px = x * z - camX, py = y * z - camY, tr = sim.terr[i];
+        if (((x & 15) === 0 || (x & 15) === 15 || (y & 15) === 0 || (y & 15) === 15) && sim.ownedAt(x, y) && tr !== T_WATER && tr !== T_ROAD && tr !== T_BRIDGE) {
+          const f0 = fence(0, ph), f1 = fence(1, ph);
+          if (!sim.ownedAt(x, y - 1)) g.drawImage(f0, px, py - 10);
+          if (!sim.ownedAt(x - 1, y) && !(y & 1)) g.drawImage(f1, px - 2, py - 3);
+          if (!sim.ownedAt(x + 1, y) && !(y & 1)) g.drawImage(f1, px + 14, py - 3);
+          if (!sim.ownedAt(x, y + 1)) g.drawImage(f0, px, py + 4);
+        }
+        if (tr === T_WILD) { const v = (hash(x, y, 5) * 6) | 0, im = wildSprite((32 + hash(x, y, 8) * 9) | 0, snowV, v); g.drawImage(im, px + 8 - (im.width >> 1), py + 18 - im.height); continue; }
+        if (!sp) {
+          if (sim.flag[i] & F_STUMP) { g.drawImage(stump(snowq > 0), px + 3, py + 7); continue; }
+          const k = this.propAt(x, y, i); if (k) { const im = this.propImg(k, x, y, lit); g.drawImage(shadowBlob(k === 2 ? 10 : im.width), px + 8 - (im.width >> 1) + 2, py + 13); g.drawImage(im, px + 8 - (im.width >> 1), py + 16 - im.height); if (k === 2) this.lamps.push({ x: px + 8, y: py + 16 - im.height + 5 }); }
+          continue;
+        }
+        const fl = sim.flag[i], st = stageOf(sim.h[i]), kind = fl & F_DEAD ? 1 : fl & F_GOLD ? 2 : fl & F_PEST ? 3 : 0, hh = sim.h[i], shape = Math.min(2, gradeOf(sim.shape[i]));
+        const wind = Math.sin(t * 1.7 + x * 0.42 + y * 0.31 + Math.sin(t * 0.3 + y * 0.1) * 2), sway = wind > 0.45 && !kind ? 1 : wind < -0.75 && !kind ? -1 : 0, deco = hh >= 8 ? 2 : hh >= 6 ? 1 : 0;
+        const im = treeSprite(sp - 1, STAGE_PX[st], shape, snowq, sway, kind as 0, (hash(x, y) * 3) | 0, deco, deco > 0 && shape === 2);
         const bump = this.bumps(x, y);
-        g.drawImage(im, px + 8 - (im.width >> 1) + bump, py + 17 - im.height);
+        g.drawImage(im, px + 8 - (im.width >> 1) + bump + jx(x, y), py + 18 - im.height + jy(x, y));
         if (fl & F_THIRST) { g.fillStyle = C.sky; g.fillRect(px + 8, py - 3 + (((t * 2) | 0) % 2), 2, 2); }
-        if (fl & F_GOLD) { const k = ((t * 6) | 0) % 4; g.fillStyle = C.white; g.fillRect(px + 2 + k * 3, py + 6 - STAGE_PX[st] + k * 5, 1, 3); g.fillRect(px + 1 + k * 3, py + 7 - STAGE_PX[st] + k * 5, 3, 1); }
+        if (fl & F_GOLD) { const k = ((t * 6) | 0) % 4; g.drawImage(glint(k), px + 1 + k * 3, py + 3 - STAGE_PX[st] + k * 5); }
+        else if (deco && hash(x, y, 2) > 0.8) { const q = (t * 1.5 + hash(x, y) * 9) % 9; if (q < 1) g.drawImage(glint(q < 0.33 || q > 0.66 ? 1 : 2), px + 4 + ((hash(x, y, 6) * 8) | 0) - 3, py + 12 - STAGE_PX[st] * (0.3 + hash(x, y, 7) * 0.5)); }
       }
     }
     while (ei < ents.length) ents[ei++].f();
+    // chimneys
+    this.smokeT -= 1 / 60;
+    if (this.smokeT <= 0) { this.smokeT = 0.22; for (const b of s.blds) if ((b.k === 'house' || b.k === 'santa') && b.x + 6 > x0 && b.x < x1 && b.y + 5 > y0 && b.y - 3 < y1) { const cx = b.k === 'house' ? b.x + 3.8 : b.x + 2.2, cy = b.y - 1.1 + (b.k === 'santa' ? 0.4 : 0); this.parts.push({ x: cx + (Math.random() - 0.5) * 0.2, y: cy, vx: 0.28 + Math.random() * 0.2, vy: -0.75 - Math.random() * 0.3, life: 2.2 + Math.random(), max: 3, col: Math.random() > 0.4 ? C.white : C.sn2, s: Math.random() > 0.5 ? 3 : 2, grav: -0.05 }); } }
     // the player is always readable through a wall of firs
     const p = s.p, pi = sim.idx(Math.floor(p.x), Math.min(MH - 1, Math.floor(p.y) + 1));
     if (sim.sp[pi] && sim.h[pi] > 3) { g.globalAlpha = 0.45; this.drawPlayer(g, camX, camY, z); g.globalAlpha = 1; }
@@ -162,16 +209,16 @@ export class Renderer {
     ents.push({ y: s.p.y, f: () => this.drawPlayer(g2(this), camX, camY, z) });
     for (const a of s.crew) ents.push({
       y: a.y, f: () => {
-        const g = g2(this);
-        if (a.rank === 0) { const im = person(CREW_LOOKS[a.id % CREW_LOOKS.length], a.dir, a.moving ? fr : 0, a.hop.n > 0); g.drawImage(im, Math.round(a.x * z - camX - 5), Math.round(a.y * z - camY - 14)); }
-        else { const load = Math.round(a.hop.n / CREW[a.rank].cap * 6), im = machine(a.rank, a.dir, a.moving ? fr % 2 : 0, CREW_TINT[a.rank], load); g.drawImage(im, Math.round(a.x * z - camX - im.width / 2), Math.round(a.y * z - camY - im.height + 4)); }
+        const g = g2(this), x = Math.round(a.x * z - camX), y = Math.round(a.y * z - camY);
+        if (a.rank === 0) { const im = person(CREW_LOOKS[a.id % CREW_LOOKS.length], a.dir, a.moving ? fr : 0, a.hop.n > 0); g.drawImage(shadowBlob(12), x - 6, y - 2); g.drawImage(im, x - PX_AX, y - PX_AY); }
+        else { const load = Math.round(a.hop.n / CREW[a.rank].cap * 6), im = machine(a.rank, a.dir, a.moving ? fr % 2 : 0, CREW_TINT[a.rank], load), sw = Math.round(im.width * 0.8); g.drawImage(shadowBlob(sw), x - (sw >> 1), y); g.drawImage(im, x - (im.width >> 1), y - im.height + 5); }
       },
     });
     for (const c of s.critters) ents.push({
       y: c.y, f: () => {
-        const g = g2(this), d = c.vx >= 0 ? 1 : 3, f2 = fr % 2;
+        const g = g2(this), d = c.vx >= 0 ? 1 : 3, f2 = fr % 2, x = Math.round(c.x * z - camX), y = Math.round(c.y * z - camY);
         const im = c.k === 'deer' ? deerSprite(d, f2) : c.k === 'dog' ? dogSprite(d, Math.hypot(c.vx, c.vy) > 0.5 ? f2 : 0) : thiefSprite(fr);
-        g.drawImage(im, Math.round(c.x * z - camX - im.width / 2), Math.round(c.y * z - camY - im.height + 2));
+        g.drawImage(shadowBlob(c.k === 'dog' ? 12 : 18), x - (c.k === 'dog' ? 6 : 9), y - 1); g.drawImage(im, x - (im.width >> 1), y - im.height + 2);
       },
     });
   }
@@ -181,11 +228,12 @@ export class Renderer {
 
   private drawPlayer(g: CanvasRenderingContext2D, camX: number, camY: number, z: number) {
     const s = this.sim.s, p = s.p, fr = ((this.t * 9) | 0) % 4, x = Math.round(p.x * z - camX), y = Math.round(p.y * z - camY);
-    if (s.veh === 0) { const im = person(PLAYER_LOOK, p.dir, p.moving ? fr : 0, p.hop.n > 0); g.drawImage(im, x - 5, y - 14); }
+    if (s.veh === 0) { const im = person(PLAYER_LOOK, p.dir, p.moving ? fr : 0, p.hop.n > 0); g.drawImage(shadowBlob(13), x - 6, y - 2); g.drawImage(im, x - PX_AX, y - PX_AY); }
     else {
       const load = Math.round(p.hop.n / this.sim.hopCap() * 8), air = VEHICLES[s.veh].air;
-      const im = machine(s.veh, p.dir, (p.moving || air ? fr % 2 : 0), VEH_TINT[s.veh], load);
-      if (air) { g.fillStyle = 'rgba(18,18,28,.28)'; g.fillRect(x - 28, y + 6, 56, 6); g.drawImage(im, x - (im.width >> 1), y - im.height - 8 + Math.sin(this.t * 3) * 2); }
+      const im = machine(s.veh, p.dir, (p.moving || air ? fr % 2 : 0), VEH_TINT[s.veh], load), sw = Math.round(im.width * 0.8);
+      g.drawImage(shadowBlob(sw), x - (sw >> 1), y + (air ? 8 : 0));
+      if (air) g.drawImage(im, x - (im.width >> 1), y - im.height - 8 + Math.sin(this.t * 3) * 2);
       else g.drawImage(im, x - (im.width >> 1), y - im.height + 5);
     }
   }
@@ -193,15 +241,15 @@ export class Renderer {
   private drawFar(g: CanvasRenderingContext2D, camX: number, camY: number) {
     const sim = this.sim, s = sim.s, z = this.z, fr = ((this.t * 8) | 0) % 4;
     if (z === 8) {
-      for (const c of this.cars) { const im = carSprite(c.col, c.tree, c.dir); g.drawImage(im, Math.round(c.x * z - camX - 8), Math.round(c.y * z - camY - 7), 15, 9); }
+      for (const c of this.cars) { const im = carSprite(c.col, c.tree, c.dir); g.drawImage(im, Math.round(c.x * z - camX - 9), Math.round(c.y * z - camY - 8), 18, 11); }
       for (const a of s.crew) {
         const x = Math.round(a.x * z - camX), y = Math.round(a.y * z - camY);
-        if (a.rank === 0) { const im = person(CREW_LOOKS[a.id % CREW_LOOKS.length], a.dir, a.moving ? fr : 0, false); g.drawImage(im, x - 3, y - 8, 6, 8); }
+        if (a.rank === 0) { const im = person(CREW_LOOKS[a.id % CREW_LOOKS.length], a.dir, a.moving ? fr : 0, false); g.drawImage(im, x - 4, y - 10, 9, 11); }
         else { const im = machine(a.rank, a.dir, fr % 2, CREW_TINT[a.rank], 0), w = im.width / 2, h = im.height / 2; g.drawImage(im, x - w / 2, y - h + 2, w, h); }
       }
       for (const c of s.critters) { const im = c.k === 'deer' ? deerSprite(c.vx >= 0 ? 1 : 3, fr % 2) : c.k === 'dog' ? dogSprite(c.vx >= 0 ? 1 : 3, fr % 2) : thiefSprite(fr); g.drawImage(im, Math.round(c.x * z - camX - im.width / 4), Math.round(c.y * z - camY - im.height / 2), im.width / 2, im.height / 2); }
       const p = s.p, x = Math.round(p.x * z - camX), y = Math.round(p.y * z - camY);
-      if (s.veh === 0) g.drawImage(person(PLAYER_LOOK, p.dir, p.moving ? fr : 0, false), x - 3, y - 8, 6, 8);
+      if (s.veh === 0) g.drawImage(person(PLAYER_LOOK, p.dir, p.moving ? fr : 0, false), x - 4, y - 10, 9, 11);
       else { const im = machine(s.veh, p.dir, fr % 2, VEH_TINT[s.veh], 0), w = im.width / 2, h = im.height / 2; g.drawImage(im, x - w / 2, y - h + 2, w, h); }
       return;
     }
@@ -243,7 +291,7 @@ export class Renderer {
     }
     if (this.ghost) {
       const k = this.ghost, d = BUILDINGS[k.k];
-      if (d) { g.globalAlpha = 0.7; const img = buildingSprite(k.k, false, false), sc = z / 16; g.drawImage(img, k.x * z - camX, k.y * z - camY - BLD_TOP * sc, img.width * sc, img.height * sc); g.globalAlpha = 1; }
+      if (d) { g.globalAlpha = 0.7; const img = buildingSprite(k.k, true, false), sc = z / 16; g.drawImage(img, k.x * z - camX, k.y * z - camY - BLD_TOP * sc, img.width * sc, img.height * sc); g.globalAlpha = 1; }
       g.strokeStyle = k.ok ? C.lime : C.red; g.lineWidth = 1; g.strokeRect(k.x * z - camX + 0.5, k.y * z - camY + 0.5, (d?.w ?? 1) * z - 1, (d?.h ?? 1) * z - 1);
     }
     // the tool's swath, the promise of what holding the button will do
@@ -271,60 +319,73 @@ export class Renderer {
     this.parts.length = w; w = 0;
     for (let i = 0; i < this.floats.length; i++) {
       const f = this.floats[i]; f.life -= dt; if (f.life <= 0) continue; this.floats[w++] = f; f.y -= dt * (22 / z);
-      center(g, f.t, f.x * z - camX, f.y * z - camY, f.col, f.big ? 2 : 1, C.ink);
+      rimmed(g, f.t, f.x * z - camX, f.y * z - camY, f.col, C.ink, f.big ? 2 : 1);
     }
     this.floats.length = w; w = 0;
     for (let i = 0; i < this.pings.length; i++) { const q = this.pings[i]; q.t -= dt * 0.8; if (q.t > 0) this.pings[w++] = q; }
     this.pings.length = w;
   }
 
-  private drawEnv(g: CanvasRenderingContext2D, camX: number, camY: number, dt: number, snow: number) {
-    const sim = this.sim, s = sim.s, W = this.W, H = this.H, z = this.z, d = sim.dusk();
+  private drawEnv(g: CanvasRenderingContext2D, camX: number, camY: number, dt: number) {
+    const sim = this.sim, s = sim.s, W = this.W, H = this.H, d = this.light();
     if (d > 0.02) {
-      g.globalCompositeOperation = 'multiply'; g.fillStyle = mix('#ffffff', '#2c3a9e', Math.min(1, d)); g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over';
-      if (d > 0.25) this.lights(g, camX, camY, d);
+      const tint = d < 0.28 ? mix('#ffffff', SUNSET, d / 0.28) : mix(SUNSET, NIGHT, Math.min(1, (d - 0.28) / 0.6));
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = tint; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over';
+      if (d > 0.22) this.lights(g, camX, camY, d);
     }
-    // blizzard, snowfall, summer haze
-    const falling = s.blizzard > 0 ? 2 : (s.month === 11 || s.month === 0 || s.month === 1) ? 1 : 0, rain = !falling && (s.month >= 2 && s.month <= 4) && Math.sin(s.month * 5 + s.day / 4) > 0.55;
-    if (falling) {
-      const wind = falling === 2 ? 2.2 : 0.3;
-      for (const f of this.flakes) {
-        f.y += dt * f.s * 0.26 * falling; f.x += dt * (wind * 0.1 + Math.sin(this.t + f.s * 9) * 0.02); if (f.y > 1) f.y -= 1; if (f.x > 1) f.x -= 1; if (f.x < 0) f.x += 1;
-        g.fillStyle = f.s > 1 ? C.white : C.ice; const sz = f.s > 1.1 ? 2 : 1; g.fillRect((f.x * W) | 0, (f.y * H) | 0, sz, sz);
-      }
-      if (falling === 2) { g.fillStyle = 'rgba(201,232,242,.2)'; g.fillRect(0, 0, W, H); }
-    } else if (rain) {
-      g.fillStyle = 'rgba(201,232,242,.55)';
-      for (const f of this.flakes) { f.y += dt * f.s * 1.5; if (f.y > 1) f.y -= 1; g.fillRect((f.x * W) | 0, (f.y * H) | 0, 1, 4); }
-    } else if (s.month === 8 || s.month === 9) {
-      for (let i = 0; i < 14; i++) { const f = this.flakes[i]; f.y += dt * 0.05 * f.s; f.x += dt * 0.04; if (f.y > 1) f.y -= 1; if (f.x > 1) f.x -= 1; g.fillStyle = i % 2 ? C.orange : C.gold; g.fillRect((f.x * W) | 0, (f.y * H) | 0, 2, 1); }
+    // it is always snowing a little here; a blizzard is just the same thing with opinions
+    const bliz = s.blizzard > 0, amt = bliz ? 1 : FLURRY[s.month], n = Math.round(this.flakes.length * amt), wind = bliz ? 0.26 : 0.03;
+    for (let i = 0; i < n; i++) {
+      const f = this.flakes[i], fast = bliz ? 2.2 : 1;
+      f.y += dt * f.s * 0.2 * fast; f.x += dt * (wind + Math.sin(this.t * 0.8 + f.s * 9) * 0.018); if (f.y > 1) f.y -= 1; if (f.x > 1) f.x -= 1; if (f.x < 0) f.x += 1;
+      const X = (f.x * W) | 0, Y = (f.y * H) | 0;
+      if (f.s > 1.25) { g.fillStyle = C.white; g.fillRect(X - 1, Y, 3, 1); g.fillRect(X, Y - 1, 1, 3); }
+      else if (f.s > 0.85) { g.fillStyle = C.white; g.fillRect(X, Y, 2, 2); }
+      else { g.fillStyle = C.ice; g.fillRect(X, Y, 1, 1); }
     }
-    void snow; void z;
+    if (bliz) { g.fillStyle = 'rgba(214,230,250,.24)'; g.fillRect(0, 0, W, H); }
+    // a certain sleigh, on December nights
+    this.sleighWait -= dt;
+    if (!this.sleigh && this.sleighWait < 0 && d > 0.26 && (s.month >= 10 || s.month === 0)) { this.sleigh = { x: -130, y: H * (0.14 + Math.random() * 0.28), t: 0 }; this.sleighWait = 70 + Math.random() * 50; this.onSleigh?.(); }
+    if (this.sleigh) {
+      const q = this.sleigh; q.t += dt; q.x += dt * 70;
+      const fr = ((q.t * 6) | 0) % 2, y = Math.round(q.y + Math.sin(q.t * 1.4) * 5);
+      g.drawImage(santaSleigh(fr), Math.round(q.x), y);
+      if (((q.t * 20) | 0) % 2 === 0) { g.fillStyle = C.lemon; g.fillRect(Math.round(q.x) - 3 - ((q.t * 13) % 18 | 0), y + 22, 1, 1); g.fillStyle = C.white; g.fillRect(Math.round(q.x) - 6 - ((q.t * 31) % 26 | 0), y + 28, 1, 1); }
+      if (q.x > W + 20) this.sleigh = null;
+    }
   }
   private lights(g: CanvasRenderingContext2D, camX: number, camY: number, d: number) {
     const sim = this.sim, z = this.z, W = this.W, H = this.H, t = this.t;
     const x0 = Math.max(0, Math.floor(camX / z)), x1 = Math.min(MW - 1, Math.ceil((camX + W) / z)), y0 = Math.max(0, Math.floor(camY / z)), y1 = Math.min(MH - 1, Math.ceil((camY + H) / z) + 2);
-    const cols = [C.red, C.gold, C.aqua, C.pink, C.white, C.lime], a = Math.min(1, (d - 0.25) * 2.2);
+    const a = Math.min(1, (d - 0.22) * 3);
     g.globalAlpha = a;
-    // the lot and the barn throw warm light on the snow
+    // windows, lamps and the lot throw warm light on the snow
     g.globalCompositeOperation = 'lighter';
     for (const b of sim.s.blds) {
-      const dd = BUILDINGS[b.k]; if (b.k !== 'lot' && b.k !== 'house' && b.k !== 'barn' && b.k !== 'cocoa' && b.k !== 'santa') continue;
-      const cx = (b.x + dd.w / 2) * z - camX, cy = (b.y + dd.h) * z - camY, r = dd.w * z * 0.9;
+      const dd = BUILDINGS[b.k]; if (b.k === 'sprinkler' || b.k === 'helipad' || b.k === 'kennel') continue;
+      const cx = (b.x + dd.w / 2) * z - camX, cy = (b.y + dd.h - 0.3) * z - camY, r = Math.round(dd.w * z * 0.74), im = glow(64, '#ffc860');
       if (cx < -r || cx > W + r || cy < -r || cy > H + r) continue;
-      const gr = g.createRadialGradient(cx, cy, 2, cx, cy, r); gr.addColorStop(0, 'rgba(244,197,66,.3)'); gr.addColorStop(1, 'rgba(244,197,66,0)'); g.fillStyle = gr; g.fillRect(cx - r, cy - r, r * 2, r * 2);
+      g.drawImage(im, cx - r, cy - r * 0.7, r * 2, r * 1.4);
     }
+    for (const l of this.lamps) { g.drawImage(glow(32, '#ffd27a'), l.x - 32, l.y - 22); }
     g.globalCompositeOperation = 'source-over';
-    const dens = z >= 8 ? 1 : z === 4 ? 0.6 : 0.3, s2 = z >= 16 ? 2 : 1;
+    if (z >= 8) { const ph = (t * 2.2) | 0, sc = z / 16; for (const b of sim.s.blds) { const dd = BUILDINGS[b.k]; if (b.x + dd.w < x0 - 1 || b.x > x1 + 1 || b.y + dd.h < y0 - 3 || b.y > y1) continue; const big = buildingLights(b.k, ph), im = z < 16 ? half(big) : big; g.drawImage(im, b.x * z - camX, b.y * z - camY - BLD_TOP * sc, big.width * sc, big.height * sc); } }
+    for (const l of this.lamps) { g.fillStyle = C.lemon; g.fillRect(l.x - 2, l.y - 3, 5, 6); g.fillStyle = C.white; g.fillRect(l.x - 2, l.y - 3, 2, 6); }
+    if (z <= 2) { // from the air the whole farm is one big string of lights
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = sim.idx(x, y); if (!sim.sp[i] || sim.h[i] < 3.5 || sim.flag[i] & F_DEAD) continue; const h1 = hash(x, y, 40); if (h1 > 0.45 || Math.sin(t * (1.4 + h1 * 2) + h1 * 40) < -0.2) continue; g.fillStyle = LIGHT_COLS[(h1 * 977 | 0) % 6]; g.fillRect(x * z - camX, y * z - camY - 1, 1, 1); }
+      g.globalAlpha = 1; return;
+    }
+    const s2 = z >= 16 ? 2 : 1, dens = z >= 8 ? 1 : 0.7;
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const i = sim.idx(x, y); if (!sim.sp[i] || sim.h[i] < 3.5 || sim.flag[i] & F_DEAD) continue;
-      const n = z >= 16 ? 4 : 1, st = STAGE_PX[stageOf(sim.h[i])] * z / 16;
+      const i = sim.idx(x, y); if (!sim.sp[i] || sim.h[i] < 3 || sim.flag[i] & F_DEAD) continue;
+      const st = STAGE_PX[stageOf(sim.h[i])] * z / 16, n = z >= 16 ? Math.min(8, 2 + (st / 6 | 0)) : z >= 8 ? 2 : 1;
       for (let k = 0; k < n; k++) {
         const h1 = hash(x, y, k + 40); if (h1 > dens) continue;
-        const on = Math.sin(t * (1.4 + h1 * 2) + h1 * 40) > -0.2; if (!on) continue;
-        const v = hash(x, y, k + 70), hw = st * 0.26 * v;
-        g.fillStyle = cols[(h1 * 977 | 0) % cols.length];
-        g.fillRect(Math.round((x + 0.5) * z - camX + (hash(x, y, k + 90) - 0.5) * 2 * hw), Math.round((y + 1) * z - camY - st * (1 - v * 0.92)), s2, s2);
+        if (Math.sin(t * (1.1 + h1 * 1.8) + h1 * 40) < -0.35) continue;
+        const v = (k + 0.5 + hash(x, y, k + 70) * 0.5) / n, hw = st * 0.31 * v, px = Math.round((x + 0.5) * z - camX + (hash(x, y, k + 90) - 0.5) * 2 * hw), py = Math.round((y + 1) * z - camY - st * (1 - v * 0.86));
+        g.fillStyle = LIGHT_COLS[(h1 * 977 | 0) % 6]; g.fillRect(px, py, s2, s2);
+        if (z >= 16) { g.fillStyle = C.white; g.fillRect(px, py, 1, 1); }
       }
     }
     g.globalAlpha = 1;
@@ -337,8 +398,8 @@ export class Renderer {
   }
   chop(x: number, y: number, sp: number, h: number, mine: boolean) {
     const S = SPECIES[sp]; const near = this.z >= 8;
-    this.burst(x + 0.5, y + 0.3, near ? 8 : 2, [S.ramp[1], S.ramp[2], S.ramp[3], C.tan], 4);
-    if (near && this.falls.length < 40) this.falls.push({ x: x + 0.5, y: y + 1, img: treeSprite(sp, STAGE_PX[stageOf(h)], 1, 0, 0, 0, 0), t: 0, dir: Math.random() > 0.5 ? 1 : -1 });
+    this.burst(x + 0.5, y + 0.3, near ? 12 : 2, [S.ramp[1], S.ramp[2], S.ramp[3], C.tan, C.white, C.white, C.sn2], 4);
+    if (near && this.falls.length < 40) this.falls.push({ x: x + 0.5, y: y + 1, img: treeSprite(sp, STAGE_PX[stageOf(h)], 1, this.treeSnow(this.snowVis()), 0, 0, 0), t: 0, dir: Math.random() > 0.5 ? 1 : -1 });
     if (mine) this.shake = Math.min(3, this.shake + 0.7);
   }
   float(x: number, y: number, t: string, col: string = C.gold, big = false) { if (this.floats.length < 40) this.floats.push({ x, y, t, col, life: 1.1, big }); }
@@ -346,8 +407,8 @@ export class Renderer {
   spawnFamily() {
     if (this.cars.length >= 12) return;
     const l = this.sim.s.blds.find((b) => b.k === 'lot')!, dir = Math.random() > 0.5 ? 1 : 3;
-    const hats = [C.red, C.blue, C.gold, C.white, C.pink], coats = [C.dusk, C.purple, C.teal, C.brown, C.dred], k = (Math.random() * 5) | 0;
-    this.cars.push({ x: dir === 1 ? l.x - 34 : l.x + 44, y: dir === 1 ? 79.9 : 78.9, st: 0, t: 0, col: CAR_COLS[(Math.random() * CAR_COLS.length) | 0], tree: false, dir, stop: l.x - 3 + Math.random() * 12, fam: 0, px: 0, py: 0, look: { hat: hats[k], coat: coats[(k + 2) % 5], skin: ['#f0c8a0', '#c8966a', '#8a5a3c'][k % 3], pants: C.ink } });
+    const hats = [C.red, C.blue, C.gold, C.leaf, C.pink], coats = [C.dusk, C.purple, C.teal, C.brown, C.dred], scarves = [C.gold, C.red, C.white, C.lime, C.aqua], k = (Math.random() * 5) | 0;
+    this.cars.push({ x: dir === 1 ? l.x - 34 : l.x + 44, y: dir === 1 ? 79.9 : 78.9, st: 0, t: 0, col: CAR_COLS[(Math.random() * CAR_COLS.length) | 0], tree: false, dir, stop: l.x - 3 + Math.random() * 12, fam: 0, px: 0, py: 0, look: { hat: hats[k], coat: coats[(k + 2) % 5], skin: SKINS[k % 3], pants: C.ink, kind: 'beanie', scarf: scarves[(k + 1) % 5] } });
   }
   stepCars(dt: number) {
     const l = this.sim.s.blds.find((b) => b.k === 'lot'); if (!l) return;
@@ -363,9 +424,10 @@ export class Renderer {
   }
 }
 function g2(r: Renderer) { return r.getG(); }
+const jx = (x: number, y: number) => ((hash(x, y, 31) * 5) | 0) - 2, jy = (x: number, y: number) => ((hash(x, y, 32) * 4) | 0) - 2;
 function dashRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, col: string, t: number, live: boolean) {
   g.fillStyle = col; const o = live ? ((t * 10) | 0) % 6 : 0;
   for (let i = -o; i < w; i += 6) { const a = Math.max(0, i), b = Math.min(w, i + 3); if (b > a) { g.fillRect(x + a, y, b - a, 1); g.fillRect(x + a, y + h - 1, b - a, 1); } }
   for (let i = -o; i < h; i += 6) { const a = Math.max(0, i), b = Math.min(h, i + 3); if (b > a) { g.fillRect(x, y + a, 1, b - a); g.fillRect(x + w - 1, y + a, 1, b - a); } }
 }
-void TOOL_SAW; void TOOL_PLANT; void TOOL_SHEAR; void TOOL_TANK; void T_GRASS;
+void hex; void TOOL_SAW; void TOOL_PLANT; void TOOL_SHEAR; void TOOL_TANK; void T_GRASS;

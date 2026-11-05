@@ -1,5 +1,5 @@
 // Pine & Dandy: the cartridge. Owns the loop, the input, the HUD, every window and the year's ending.
-import { C, canvas, hash, bayer, mix } from './pal';
+import { C, canvas, hash, bayer, mix, Buf } from './pal';
 import { Sim, money, short, MW, MH, PS, PW, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, F_DEAD, type Block, type Fx, type Ticket, type Report } from './sim.ts';
 import { SPECIES, NZ, SIZE_MIN, SIZE_NAME, VEHICLES, CREW, BUILDINGS, BUILD_ORDER, TIERS, GOALS, LETTERS, MONTHS, PERKS, type Perk } from './data.ts';
 import { Renderer, PLAYER_LOOK } from './render';
@@ -7,7 +7,8 @@ import { Chip } from './audio';
 import { UI } from './ui';
 import { Flyover } from './mode7';
 import { text, bold, center, right, textW, wrap, LINE } from './font';
-import { treeSprite, paintTree, buildingSprite, machine, person, icon } from './art';
+import { treeSprite, paintTree, buildingSprite, machine, person, icon, VEH_TINT, holly, snowman, giftPile, lampPost, santaSleigh, glint, glow, moonSprite, logoWord, shadowBlob } from './art';
+import { paintTreeBuf } from './trees';
 
 const SAVE = 'pine.save.v1', PREF = 'pine.prefs';
 const ZOOMS = [16, 8, 4, 2];
@@ -28,7 +29,7 @@ export class App {
   block: Block | null = null; drag0: { x: number; y: number } | null = null; pan: { x: number; y: number; cx: number; cy: number } | null = null;
   selTicket = -1; shownMoney = 0; alert: { x: number; y: number; t: number } | null = null;
   fly: Flyover | null = null; report: Report | null = null; perks: Perk[] = []; roll = 0; letterT = 0; scroll = 0; shopTab = 0; speedIdx = 0;
-  title = canvas(1, 1); wheelAcc = 0; hasSave = false; sawFirstEve = false; landZoom = 0; goalFlash = 0;
+  wheelAcc = 0; hasSave = false; sawFirstEve = false; landZoom = 0; goalFlash = 0;
 
   constructor() {
     this.resize(); addEventListener('resize', () => this.resize());
@@ -43,7 +44,7 @@ export class App {
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.ui.down = false; });
     try { const p = JSON.parse(localStorage.getItem(PREF) ?? '{}'); this.crt = p.crt ?? true; if (p.mute) this.chip.toggle(); this.hasSave = !!localStorage.getItem(SAVE); } catch { /* private mode: just no saves */ }
-    this.applyCrt(); this.buildTitle();
+    this.applyCrt(); this.buildTitle(); this.r.onSleigh = () => this.chip.sfx('sleigh');
     this.chip.play('title');
     const q = new URLSearchParams(location.search);
     if (q.has('skip')) { this.sim.newGame(+(q.get('seed') ?? 7)); this.enterPlay(); }
@@ -56,7 +57,7 @@ export class App {
     this.cv.width = this.W; this.cv.height = this.H; this.cv.style.width = this.W * this.S / dpr + 'px'; this.cv.style.height = this.H * this.S / dpr + 'px';
     this.g.imageSmoothingEnabled = false; this.r.W = this.W; this.r.H = this.H;
     const crt = document.getElementById('crt'); if (crt) crt.style.setProperty('--px', this.S / dpr + 'px');
-    if (this.title.c.width > 1) this.buildTitle();
+    if (this.back.c.width > 1) this.buildTitle();
   }
   applyCrt() { document.getElementById('crt')?.classList.toggle('on', this.crt); }
   savePrefs() { try { localStorage.setItem(PREF, JSON.stringify({ crt: this.crt, mute: this.chip.muted })); } catch { /* */ } }
@@ -86,46 +87,82 @@ export class App {
 
   // ---- title ------------------------------------------------------------------------------------------
   buildTitle() {
-    const { W, H } = this, r = canvas(W, H), g = r.g; this.title = r;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x += 1) { const k = y / (H * 0.8) + (bayer(x, y) - 0.5) * 0.09, b = Math.floor(Math.min(0.999, k) * 5); g.fillStyle = ['#0e1230', '#161c44', '#20295c', '#2f3a76', '#4a4e8e'][b]; g.fillRect(x, y, 1, 1); }
-    for (let i = 0; i < 110; i++) { g.fillStyle = i % 5 ? C.sky : C.white; g.fillRect(hash(i, 1) * W | 0, hash(i, 2) * H * 0.55 | 0, 1, 1); }
-    const mx = W * 0.8, my = H * 0.2; g.fillStyle = C.lemon; g.beginPath(); g.arc(mx, my, 20, 0, 7); g.fill(); g.fillStyle = '#ecd67a'; g.fillRect(mx - 8, my - 6, 6, 4); g.fillRect(mx + 4, my + 5, 7, 4); g.fillRect(mx - 3, my + 9, 3, 3);
-    const ridge = (base: number, amp: number, col: string, f: number) => { g.fillStyle = col; for (let x = 0; x < W; x++) { const h = base + Math.sin(x * f) * amp + Math.sin(x * f * 2.7 + 1) * amp * 0.4; g.fillRect(x, H - h, 1, h); } };
-    ridge(H * 0.42, 16, '#2a3468', 0.011); ridge(H * 0.34, 12, '#384684', 0.019);
-    for (let x = -8; x < W; x += 11) { const px = 24 + (hash(x, 3) * 14 | 0), base = H - H * 0.3 + Math.sin(x * 0.03) * 5; paintTree(g, x, base, { sp: 1, px, shape: 1, snow: 0.8, sway: 0, seed: x }); }
-    ridge(H * 0.25, 5, '#cfe0ee', 0.014); ridge(H * 0.2, 4, '#e8f0f4', 0.01);
-    const hs = buildingSprite('house', true, true), bs = buildingSprite('barn', true, true), gy = H - H * 0.2 - hs.height + 8;
-    g.drawImage(hs, W * 0.03, gy); g.drawImage(bs, W * 0.03 + 86, gy + 2);
-    g.globalCompositeOperation = 'lighter'; const gr = g.createRadialGradient(W * 0.03 + 40, gy + 56, 4, W * 0.03 + 40, gy + 56, 90); gr.addColorStop(0, 'rgba(244,197,66,.28)'); gr.addColorStop(1, 'rgba(244,197,66,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over';
-    for (let i = 0; i < 9; i++) { const x = W * 0.56 + i * 26 + (hash(i, 4) * 8), base = H - 22 + hash(i, 7) * 14, px = 43 + (i % 3) * 8; paintTree(g, x, base, { sp: [3, 1, 4, 5][i % 4], px, shape: 2, snow: 1, sway: 0, seed: i + 3 }); for (let k = 0; k < 9; k++) { g.fillStyle = [C.red, C.gold, C.aqua, C.pink][k % 4]; const v = hash(i, k, 2); g.fillRect(x + (hash(i, k) - 0.5) * px * 0.5 * v, base - px * (1 - v * 0.9), 2, 2); } }
-    for (let y = H - 22; y < H; y++) { g.globalAlpha = 0.3; g.fillStyle = '#e8f0f4'; g.fillRect(0, y, W, 1); g.globalAlpha = 1; }
+    const { W, H } = this, r = canvas(W, H), g = r.g; this.back = r;
+    const SKY = ['#0a0a30', '#10104a', '#181a64', '#23247e', '#352f96', '#5240a8', '#7c52b4'];
+    for (let y = 0; y < H * 0.72; y++) for (let x = 0; x < W; x++) { const k = Math.pow(y / (H * 0.72), 1.15) * (SKY.length - 1) + (bayer(x, y) - 0.5) * 0.5, b = Math.max(0, Math.min(SKY.length - 1, Math.round(k))); g.fillStyle = SKY[b]; g.fillRect(x, y, 1, 1); }
+    // the aurora: curtains of light, dithered so it stays pixels
+    for (const [yb, ph, col, amp] of [[0.3, 0, '#46e0a8', 0.09], [0.21, 2.1, '#58c8ff', 0.06], [0.37, 4.4, '#d060e0', 0.05]] as [number, number, string, number][]) {
+      g.fillStyle = col;
+      for (let x = 0; x < W; x++) {
+        const yc = H * (yb + Math.sin(x * 0.012 + ph) * amp + Math.sin(x * 0.031 + ph * 2) * amp * 0.4), L = H * (0.12 + 0.09 * Math.sin(x * 0.05 + ph) ** 2), st = 0.55 + 0.45 * Math.sin(x * 0.21 + ph);
+        for (let y = 0; y < L; y++) { const a = (1 - y / L) * st + (bayer(x, y) - 0.5) * 0.14; if (a < 0.1) continue; g.globalAlpha = a > 0.66 ? 0.26 : a > 0.4 ? 0.17 : a > 0.2 ? 0.1 : 0.05; g.fillRect(x, (yc - y) | 0, 1, 1); }
+      }
+    }
+    g.globalAlpha = 1;
+    for (let i = 0; i < 200; i++) { const x = hash(i, 1) * W | 0, y = hash(i, 2) * H * 0.6 | 0; g.fillStyle = i % 6 ? C.sky : C.white; g.fillRect(x, y, 1, 1); if (i % 37 === 0) g.drawImage(glint(2), x - 3, y - 3); }
+    const mx = W * 0.15, my = H * 0.17; g.globalCompositeOperation = 'lighter'; g.drawImage(glow(64, '#8080e0'), mx - 64, my - 64); g.globalCompositeOperation = 'source-over'; g.drawImage(moonSprite(24), mx - 25, my - 25);
+    const ridge = (base: number, amp: number, col: string, top: string, f: number, ph: number) => { for (let x = 0; x < W; x++) { const h = Math.round(H * base + Math.sin(x * f + ph) * amp + Math.sin(x * f * 2.7 + 1 + ph) * amp * 0.4); g.fillStyle = col; g.fillRect(x, H - h, 1, h); g.fillStyle = top; g.fillRect(x, H - h, 1, 2 + (hash(x >> 2, 1) * 3 | 0)); } };
+    ridge(0.47, 14, '#3c3a90', '#8a8ad8', 0.011, 0); ridge(0.41, 12, '#454aa8', '#b4bcec', 0.017, 2);
+    // the village on the far ridge
+    for (let i = 0; i < 16; i++) { const x = W * 0.3 + i * W * 0.03 + hash(i, 5) * 8, y = H * 0.6 + hash(i, 6) * 6 + Math.sin(x * 0.03) * 3; g.fillStyle = '#2a2a78'; g.fillRect(x, y - 6, 9, 7); g.fillRect(x + 2, y - 8, 5, 2); g.fillStyle = C.gold; g.fillRect(x + 2, y - 4, 2, 2); if (i % 3) g.fillRect(x + 6, y - 4, 1, 2); }
+    for (let x = -10; x < W + 10; x += 9) { const px = 26 + (hash(x, 3) * 18 | 0), base = H * 0.72 + Math.sin(x * 0.03) * 5 + hash(x, 9) * 5; paintTree(g, x, base, { sp: 1, ramp: x % 2 ? ['#0e1c52', '#142c6a', '#1e4480', '#4a78ae'] : ['#0a1848', '#102860', '#183c78', '#3e6aa4'], px, shape: 1, snow: 2, sway: 0, seed: x & 7 }); }
+    for (let y = Math.round(H * 0.7); y < H; y++) for (let x = 0; x < W; x++) { const u = (y - H * 0.7) / (H * 0.3), hgt = Math.sin(x * 0.02 + 1) * 5 + Math.sin(x * 0.007) * 7, yy = y - H * 0.7 - hgt; if (yy < 0) continue; const v = u + Math.sin(x * 0.05 + y * 0.09) * 0.1 + (bayer(x, y) - 0.5) * 0.14; g.fillStyle = v < 0.2 ? '#a6b6ee' : v < 0.5 ? '#c2d2f6' : v < 0.8 ? '#dae6fb' : '#eef5fe'; g.fillRect(x, y, 1, 1); }
+    const gy = Math.round(H * 0.8), hs = buildingSprite('house', true, true), bs = buildingSprite('barn', true, true), hx = Math.round(W * 0.03);
+    g.globalCompositeOperation = 'lighter'; g.drawImage(glow(64, '#ffb84a'), hx - 28, gy - 74, 240, 150); g.globalCompositeOperation = 'source-over';
+    g.drawImage(shadowBlob(84), hx, gy - 4); g.drawImage(shadowBlob(84), hx + 84, gy - 4); g.drawImage(hs, hx, gy - hs.height + 2); g.drawImage(bs, hx + 84, gy - bs.height + 2);
+    this.titleHouse = { x: hx, y: gy - hs.height + 2, bx: hx + 84, by: gy - bs.height + 2 };
+    // the big tree
+    const tx = Math.round(W - Math.min(78, W * 0.17)), tb = Math.round(H * 0.93), tp = Math.round(H * 0.74), tree = new Buf(Math.round(tp * 0.95), tp + 8), ccx = tree.w >> 1;
+    paintTreeBuf(tree, ccx, tp + 4, { sp: 1, px: tp, shape: 2, snow: 2, sway: 0, seed: 2, deco: 2 }); tree.outline(mix(C.sn5, C.ink, 0.5));
+    g.drawImage(shadowBlob(120), tx - 60, tb - 8); g.globalCompositeOperation = 'lighter'; g.drawImage(glow(64, '#ffb84a'), tx - 90, tb - tp * 0.72, 180, tp * 0.9); g.globalCompositeOperation = 'source-over'; g.drawImage(tree.bake(), tx - ccx, tb - tp - 4);
+    this.titleTree = { x: tx, y: tb - tp, h: tp, half: tp * 0.34 };
+    for (let i = 0; i < 5; i++) { const im = giftPile(i); g.drawImage(im, tx - 52 + i * 22 - (im.width >> 1) + 8, tb - 13 + (i % 2) * 7); }
+    const sm = snowman(1); g.drawImage(shadowBlob(18), W * 0.53, H * 0.88 + 19); g.drawImage(sm, W * 0.53, H * 0.88 - 3);
+    const lp = lampPost(true), lx = Math.round(W * 0.645); g.drawImage(lp, lx, H * 0.85 - 8); g.globalCompositeOperation = 'lighter'; g.drawImage(glow(32, '#ffd27a'), lx - 26, H * 0.85 - 36); g.globalCompositeOperation = 'source-over';
     // logo
-    const lw = Math.min(6, Math.floor(W / 66)), cx = W / 2, ly = Math.round(H * 0.11);
-    const logo = (t: string, y: number, sc: number, top: string, low: string, sh: string) => {
-      const w = textW(t, sc), x = Math.round(cx - w / 2);
-      const fat = Math.max(1, Math.round(sc / 3)), body = (col: string, ox: number, oy: number, gg: CanvasRenderingContext2D = g) => { for (let k = 0; k <= fat; k++) { text(gg, t, ox + k, oy, col, sc); text(gg, t, ox + k, oy + 1, col, sc); } };
-      for (let d = 1; d <= sc; d++) body(sh, x + (d >> 1), y + d + 1);
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) body(C.ink, x + dx, y + dy);
-      body(low, x, y);
-      const tmp = canvas(w + 8, 9 * sc); body(top, 0, 0, tmp.g); g.drawImage(tmp.c, 0, 0, w + 8, Math.round(3 * sc), x, y, w + 8, Math.round(3 * sc));
+    const L = canvas(W, H); this.logo = L;
+    const cell = Math.max(3, Math.min(6, Math.floor(W / 74))), word = (t: string, y: number, fill: 'candy' | 'gold' | 'green') => {
+      const w = textW(t), tmp = canvas(w + 2, 9); text(tmp.g, t, 0, 0, '#ffffff'); const d = tmp.g.getImageData(0, 0, w + 2, 9).data, im = logoWord((x, yy) => x >= 0 && yy >= 0 && x < w + 2 && yy < 9 && d[(yy * (w + 2) + x) * 4 + 3] > 128, w, 8, cell, fill);
+      L.g.drawImage(im.bake(), Math.round(W / 2 - im.w / 2), y); return im;
     };
-    logo('PINE &', ly, lw, C.lemon, C.gold, C.dred);
-    logo('DANDY', ly + lw * 8 + 3, lw, C.white, C.pink, C.dred);
-    center(g, 'A CHRISTMAS TREE FARM SIMULATOR', cx, ly + lw * 17 + 6, C.ice, 1, C.ink);
+    const ly = Math.round(H * 0.02), a = word('PINE', ly, 'candy');
+    const amp = word('&', ly + a.h - cell * 3 - 12, 'gold'); void amp;
+    word('DANDY', ly + a.h + cell * 2 - 3, 'green');
+    const sub = 'A CHRISTMAS TREE FARM SIMULATOR', sw = textW(sub) + 26, sx = Math.round(W / 2 - sw / 2), sy = ly + a.h * 2 + cell * 2 - 2;
+    L.g.fillStyle = C.ink; L.g.fillRect(sx - 1, sy - 1, sw + 2, 15); L.g.fillStyle = C.red; L.g.fillRect(sx, sy, sw, 13); L.g.fillStyle = C.pink; L.g.fillRect(sx, sy, sw, 1); L.g.fillStyle = C.dred; L.g.fillRect(sx, sy + 11, sw, 2); center(L.g, sub, W / 2, sy + 3, C.white); L.g.drawImage(holly(), sx - 9, sy - 2); L.g.drawImage(holly(true), sx + sw - 10, sy - 2);
+    this.titleBtnY = sy + 22;
   }
-  flakes = Array.from({ length: 90 }, (_, i) => ({ x: hash(i, 8), y: hash(i, 9), s: 0.5 + hash(i, 10) }));
+  back = canvas(1, 1); logo = canvas(1, 1); titleBtnY = 180; titleTree = { x: 0, y: 0, h: 1, half: 1 }; titleHouse = { x: 0, y: 0, bx: 0, by: 0 };
+  flakes = Array.from({ length: 150 }, (_, i) => ({ x: hash(i, 8), y: hash(i, 9), s: 0.4 + hash(i, 10) * 1.1 }));
+  snowfall(dt: number, k = 1) { const { g, W, H } = this; for (const f of this.flakes) { f.y += dt * f.s * 0.09 * k; f.x += Math.sin(this.t * 0.9 + f.s * 9) * dt * 0.012; if (f.y > 1) f.y -= 1; const X = (f.x * W) | 0, Y = (f.y * H) | 0; if (f.s > 1.25) { g.fillStyle = C.white; g.fillRect(X - 1, Y, 3, 1); g.fillRect(X, Y - 1, 1, 3); } else { g.fillStyle = f.s > 0.8 ? C.white : C.sky; const q = f.s > 0.8 ? 2 : 1; g.fillRect(X, Y, q, q); } } }
   drawTitle(dt: number) {
-    const { g, W, H, ui } = this; g.drawImage(this.title.c, 0, 0);
-    for (const f of this.flakes) { f.y += dt * f.s * 0.09; f.x += Math.sin(this.t + f.s * 9) * dt * 0.012; if (f.y > 1) f.y -= 1; g.fillStyle = C.white; g.fillRect((f.x * W) | 0, (f.y * H) | 0, f.s > 1.1 ? 2 : 1, f.s > 1.1 ? 2 : 1); }
-    const bw = 120, x = Math.round((W - bw) / 2 + 14); let y = Math.round(H * 0.6);
+    const { g, W, H, ui, t } = this; g.drawImage(this.back.c, 0, 0);
+    // santa crosses the moon now and then
+    const sc = (t * 26) % (W + 620) - 160; if (sc < W + 40) { const fr = ((t * 6) | 0) % 2; g.drawImage(santaSleigh(fr, true), Math.round(sc), Math.round(H * 0.13 + Math.sin(t * 1.2) * 4)); }
+    const h = this.titleHouse, ph = (t * 2.2) | 0; g.drawImage(buildingSprite('house', true, true, ph), h.x, h.y); g.drawImage(buildingSprite('barn', true, true, ph), h.bx, h.by);
+    // the big tree's lights
+    const T = this.titleTree, BC = [C.red, C.gold, '#46b0ff', '#ff6ac8', C.lime];
+    for (let i = 0; i < 90; i++) {
+      const v = (i + 0.5) / 90, y = T.y + 6 + v * T.h * 0.86, w = T.half * Math.pow(v, 0.9) * 1.05, x = T.x + (hash(i, 3) - 0.5) * 2 * w;
+      if (Math.sin(t * (1.2 + hash(i, 4) * 2) + i) < -0.3) continue;
+      g.fillStyle = BC[i % 5]; g.fillRect(x | 0, y | 0, 2, 2); g.fillStyle = C.white; g.fillRect(x | 0, y | 0, 1, 1);
+    }
+    const sx = T.x, sy = T.y - 3, pulse = Math.sin(t * 2.4) * 0.5 + 0.5; g.globalCompositeOperation = 'lighter'; g.drawImage(glow(32, '#ffd27a'), sx - 32, sy - 32); g.globalCompositeOperation = 'source-over';
+    g.fillStyle = C.gold; g.fillRect(sx - 4, sy - 1, 9, 3); g.fillRect(sx - 1, sy - 4, 3, 9); g.fillRect(sx - 2, sy - 2, 5, 5); g.fillStyle = C.lemon; g.fillRect(sx - 1, sy - 1, 3, 3); g.drawImage(glint(1 + Math.round(pulse * 2)), sx - 3, sy - 3);
+    this.smokeT -= dt; if (this.smokeT <= 0) { this.smokeT = 0.3; this.smoke.push({ x: h.x + 61, y: h.y + 4, l: 3 }); }
+    for (const q of this.smoke) { q.l -= dt; q.y -= dt * 9; q.x += dt * (5 + (3 - q.l) * 3); g.fillStyle = q.l > 1.5 ? C.lgrey : '#8a90c8'; const s2 = q.l > 2 ? 2 : 3; g.fillRect(q.x | 0, q.y | 0, s2, s2); } this.smoke = this.smoke.filter((q) => q.l > 0);
+    g.drawImage(this.logo.c, 0, 0);
+    this.snowfall(dt);
+    const bw = 120, x = Math.round((W - bw) / 2); let y = this.titleBtnY;
     if (this.hasSave) { if (ui.button(x, y, bw, 18, 'CONTINUE FARM', { primary: true }) || this.tap('Enter')) this.load(); y += 22; }
     if (ui.button(x, y, bw, 18, 'NEW FARM', { primary: !this.hasSave }) || (!this.hasSave && this.tap('Enter'))) this.newGame();
     y += 22;
     if (ui.button(x, y, bw, 14, 'HOW TO PLAY', {})) this.win = 'help';
     if (ui.button(4, H - 16, 72, 13, 'GAME PICKER', { dark: true })) location.href = 'index.html?pick';
-    if (((this.t * 1.6) | 0) % 2 === 0 && !this.win) center(g, 'PRESS ENTER', x + bw / 2, y + 20, C.gold, 1, C.ink);
+    if (((this.t * 1.6) | 0) % 2 === 0 && !this.win) center(g, 'PRESS ENTER', x + bw / 2, y + 19, C.lemon, 1, C.ink);
     if (this.win === 'help') this.helpWin();
   }
+  smoke: { x: number; y: number; l: number }[] = []; smokeT = 0;
   newGame() { this.to(() => { this.sim.newGame(); this.mode = 'letter'; this.letterT = 0; this.chip.play('winter'); }); }
   load() {
     try { this.sim.deserialize(localStorage.getItem(SAVE)!); this.to(() => this.enterPlay()); } catch { this.hasSave = false; this.toast('That save would not load.', C.pink); }
@@ -133,8 +170,8 @@ export class App {
   enterPlay() { const p = this.sim.s.p; this.r.cx = p.x; this.r.cy = p.y; this.mode = 'play'; this.shownMoney = this.sim.s.money; this.pickMusic(); }
   pickMusic() { const m = this.sim.s.month; this.chip.play(m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? 'summer' : m < 10 ? 'fall' : m === 10 ? 'harvest' : 'rush'); }
   drawLetter(dt: number) {
-    const { g, W, H, ui } = this; g.fillStyle = C.night; g.fillRect(0, 0, W, H);
-    this.letterT += dt * 34; const w = 300, h = 170, x = (W - w) / 2, y = (H - h) / 2; ui.paper(x, y, w, h);
+    const { g, W, H, ui } = this; g.drawImage(this.back.c, 0, 0); g.fillStyle = 'rgba(16,14,52,.5)'; g.fillRect(0, 0, W, H); this.snowfall(dt, 0.7);
+    this.letterT += dt * 34; const w = 300, h = 170, x = (W - w) / 2, y = (H - h) / 2; ui.paper(x, y, w, h); g.drawImage(holly(), x - 7, y - 6); g.drawImage(holly(true), x + w - 12, y - 6);
     const lines = ['Dear kiddo,', '', 'The farm is yours now. Barn, grove, the lot by the road,', 'all of it. The firs by the side road are ready to cut,', 'and folks will want them by Christmas.', '', 'Cut them. Haul them to the barn. Sell them. Plant more.', "Then do it again, bigger. Don't you sell to that Hemlock man.", '', 'Love, Mabel', '', 'P.S. Sing while you work. The trees like it.'];
     let left = this.letterT, yy = y + 10;
     for (const l of lines) { if (left <= 0) break; const n = Math.min(l.length, Math.floor(left)); text(g, l.slice(0, n), x + 12, yy, C.ink); left -= l.length; yy += LINE + 1; if (left > 0 && left < 2) this.chip.sfx('blip'); }
@@ -251,7 +288,7 @@ export class App {
       case 'goal': this.toast(`STAMP: ${f.t}${f.cash ? '  +' + money(f.cash) : ''}`, C.lime); chip.sfx('goal'); this.goalFlash = 1; break;
       case 'alarm': this.toast(f.t, C.pink); chip.sfx('alarm'); r.ping(f.x, f.y); this.alert = { x: f.x, y: f.y, t: 12 }; break;
       case 'ram': r.float(f.x, f.y - 1, f.t, C.white, true); r.shake = 4; chip.sfx('ram'); break;
-      case 'full': chip.sfx('full'); if (this.t - this.fullT > 1) { this.fullT = this.t; r.float(sim.s.p.x, sim.s.p.y - 2, 'FULL! BACK TO THE BARN', C.pink); } break;
+      case 'full': chip.sfx('full'); if (this.t - this.fullT > 1) { this.fullT = this.t; r.float(sim.s.p.x, sim.s.p.y - 2, 'FULL! BACK TO THE BARN', C.lemon); } break;
       case 'month': chip.sfx('month'); this.pickMusic(); break;
       case 'season': break;
       case 'build': chip.sfx('build'); break; case 'buy': chip.sfx('buy'); break; case 'deny': chip.sfx('deny'); break;
@@ -278,8 +315,8 @@ export class App {
   hud(dt: number) {
     const { g, W, H, ui, sim, r } = this, s = sim.s;
     // top bar: when it is, and how rich you are
-    ui.bar(0, 0, W, 21);
-    const season = ['WINTER', 'SPRING', 'SUMMER', 'FALL'][sim.season()], seasonCol = [C.ice, C.lime, C.gold, C.orange][sim.season()];
+    ui.bar(0, 0, W, 21); ui.topTrim(W, 19, (this.t * 1.5) | 0);
+    const season = ['WINTER', 'SPRING', 'SUMMER', 'FALL'][sim.season()], seasonCol = [C.ice, C.lime, C.lemon, C.orange][sim.season()];
     bold(g, sim.dateText(), 6, 6, C.white); let x = 8 + textW(sim.dateText()) + 6;
     text(g, `${season}  YEAR ${s.year}`, x, 6, seasonCol); x += textW(`${season}  YEAR ${s.year}`) + 8;
     const paused = this.paused;
@@ -290,25 +327,23 @@ export class App {
     const mtxt = money(this.shownMoney), mcol = s.money < 0 ? C.pink : C.gold;
     const mw = textW(mtxt, 2); text(g, mtxt, W - 6 - mw, 3, mcol, 2, C.ink); let rx = W - 14 - mw;
     const cap = sim.capacity, st = `${short(s.stockN)}/${short(cap)}`; right(g, st, rx, 6, s.stockN >= cap ? C.pink : C.cream); rx -= textW(st) + 14; g.drawImage(icon('tree'), rx, 4);
-    const dx = sim.daysToXmas();
-    if (dx >= 0) {
-      const lbl = `${dx} DAY${dx === 1 ? '' : 'S'} TO XMAS`, cw = textW(lbl), cx = Math.min(rx - cw - 8, Math.max(x + 4, W / 2 - cw / 2));
-      if (rx - x > cw + 16) text(g, lbl, cx, 6, ((this.t * 2) | 0) % 2 && dx < 6 ? C.pink : C.white);
-    }
+    const dx = this.xmasIn();
+    { const lbl = dx === 0 ? 'MERRY CHRISTMAS' : `${dx} DAY${dx === 1 ? '' : 'S'} TO CHRISTMAS`, cw = textW(lbl) + 18, cx = Math.round(Math.min(rx - cw - 8, Math.max(x + 4, W / 2 - cw / 2)));
+      if (rx - x > cw + 14) { ui.rect(C.ink, cx - 1, 3, cw + 2, 15); ui.rect(dx < 6 && ((this.t * 2) | 0) % 2 ? C.dred : C.red, cx, 4, cw, 13); ui.rect(C.pink, cx, 4, cw, 1); ui.rect(C.dred, cx, 15, cw, 2); g.drawImage(icon('wreath'), cx + 2, 4); text(g, lbl, cx + 16, 6, C.white); } }
     this.tickets();
     this.goalLine();
     if (s.streak > 0 && (s.month >= 10)) {
-      const lbl = `CHEER x${sim.cheer.toFixed(2)}`, cw = textW(lbl, 1), bx = W - 124 - cw;
-      ui.rect(C.dred, bx - 6, 23, cw + 12, 13); ui.rect(this.bump > 0 ? C.gold : C.red, bx - 5, 24, cw + 10, 11); text(g, lbl, bx, 25, this.bump > 0 ? C.ink : C.white);
+      const lbl = `CHEER x${sim.cheer.toFixed(2)}`, cw = textW(lbl, 1), bx = W - 132 - cw;
+      ui.rect(C.ink, bx - 6, 28, cw + 12, 13); ui.rect(this.bump > 0 ? C.gold : C.red, bx - 5, 29, cw + 10, 11); text(g, lbl, bx, 30, this.bump > 0 ? C.ink : C.white);
     }
     this.toolbar();
     // toasts sit just above the toolbar
-    let ty = H - 44;
-    for (let i = this.toasts.length - 1; i >= 0; i--) { const t = this.toasts[i], w = textW(t.t) + 8; g.globalAlpha = Math.min(1, t.life * 2); ui.rect('rgba(16,20,34,.86)', 4, ty, w, 12); text(g, t.t, 8, ty + 2, t.c); g.globalAlpha = 1; ty -= 13; }
+    let ty = H - 46;
+    for (let i = this.toasts.length - 1; i >= 0; i--) { const t = this.toasts[i], w = textW(t.t) + 14; g.globalAlpha = Math.min(1, t.life * 2); ui.rect(C.ink, 3, ty - 1, w + 2, 14); ui.rect('#123c3e', 4, ty, w, 12); ui.rect(C.red, 4, ty, 3, 12); ui.rect(C.gold, 7, ty, 1, 12); text(g, t.t, 11, ty + 2, t.c); g.globalAlpha = 1; ty -= 15; }
     if (this.alert) { const a = this.alert; if (ui.button(W / 2 - 40, H - 58, 80, 14, 'SHOW ME', { primary: true })) { r.free = true; r.cx = a.x; r.cy = a.y; r.z = Math.min(r.z, 8); this.alert = null; } }
     if (this.big) {
       const b = this.big, a = Math.min(1, b.life * 2.5, (2.6 - b.life) * 8), w = Math.max(textW(b.t, 3), textW(b.s)) + 30, y = H * 0.27;
-      g.globalAlpha = a; ui.rect(C.ink, W / 2 - w / 2 - 1, y - 1, w + 2, 46); ui.rect(b.c, W / 2 - w / 2, y, w, 2); ui.rect(b.c, W / 2 - w / 2, y + 41, w, 2); ui.rect(C.night, W / 2 - w / 2, y + 2, w, 39);
+      g.globalAlpha = a; ui.rect(C.ink, W / 2 - w / 2 - 2, y - 2, w + 4, 48); ui.rect(C.dred, W / 2 - w / 2, y, w, 44); ui.candy(W / 2 - w / 2, y, w, 3, this.t * 8); ui.candy(W / 2 - w / 2, y + 41, w, 3, -this.t * 8); g.drawImage(holly(), W / 2 - w / 2 - 8, y - 6); g.drawImage(holly(true), W / 2 + w / 2 - 12, y - 6);
       center(g, b.t, W / 2, y + 6, C.white, 3, b.c); center(g, b.s, W / 2, y + 30, C.cream); g.globalAlpha = 1;
     }
     if (this.paused && !this.win) { center(g, 'PAUSED', W / 2, H * 0.4, C.white, 3, C.ink); }
@@ -318,7 +353,8 @@ export class App {
     if (this.act === 'road') this.hint('Hold and drag to lay road ($6 a tile). Roads are faster and stop pests. Esc when done.');
     if (this.block) this.blockPanel(this.block);
   }
-  hint(t: string) { const { ui, g, W } = this, w = textW(t) + 12; ui.rect('rgba(16,20,34,.9)', W / 2 - w / 2, 52, w, 13); center(g, t, W / 2, 54, C.lemon); }
+  xmasIn() { const s = this.sim.s; return s.month === 11 && s.day > 24 ? 0 : (11 - s.month) * 30 + 24 - s.day; }
+  hint(t: string) { const { ui, g, W } = this, w = textW(t) + 12; ui.rect(C.ink, W / 2 - w / 2 - 1, 49, w + 2, 15); ui.rect('#123c3e', W / 2 - w / 2, 50, w, 13); center(g, t, W / 2, 52, C.lemon); }
   landHud() {
     const { ui, g, r, sim } = this; if (ui.over) { this.hint('Click a gold parcel to buy it. Esc when done.'); return; }
     const m = r.screenToTile(ui.mx, ui.my), px = Math.floor(m.x / PS), py = Math.floor(m.y / PS);
@@ -332,18 +368,18 @@ export class App {
     const go = GOALS[s.goal], v = sim.metric(go.check), n = go.n ?? 1;
     const prog = go.check === 'rank' ? `rank #${-v > 8 ? '-' : -v}` : go.check === 'veh' || go.check === 'year' || go.check === 'species' ? '' : `${short(Math.max(0, v))}/${short(n)}`;
     const line = `NEXT: ${go.text}`, w = Math.max(textW(line) + textW(prog) + 16, s.goal < 12 ? textW(go.hint) + 10 : 0), h = s.goal < 12 ? 24 : 13;
-    ui.rect('rgba(16,20,34,.82)', 4, 24, w, h);
-    if (this.goalFlash > 0) ui.rect(C.lime, 4, 24, w, 1);
-    text(g, line, 8, 26, C.lemon); if (prog) right(g, prog, 4 + w - 4, 26, C.white);
-    if (s.goal < 12) text(g, go.hint, 8, 37, C.ice);
+    const y0 = 29; ui.rect(C.ink, 3, y0 - 1, w + 2, h + 2); ui.rect('#123c3e', 4, y0, w, h); ui.rect(C.gold, 4, y0, w, 1);
+    if (this.goalFlash > 0) ui.rect(C.lime, 4, y0, w, 2);
+    text(g, line, 8, y0 + 3, C.lemon); if (prog) right(g, prog, 4 + w - 4, y0 + 3, C.white);
+    if (s.goal < 12) text(g, go.hint, 8, y0 + 13, C.ice);
   }
   tickets() {
     const { g, W, ui, sim, r } = this, s = sim.s; if (!s.tickets.length) return;
-    const w = 112, h = 33, x = W - w - 4; let y = 24;
+    const w = 120, h = 33, x = W - w - 4; let y = 30;
     const list = s.tickets.slice().sort((a, b) => a.days - b.days);
     for (const t of list.slice(0, 6)) {
       const hov = ui.inside(x, y, w, h), sel = this.selTicket === t.id, pri = s.priority === t.id; ui.block(x, y, w, h);
-      ui.rect(t.hero ? C.gold : sel ? C.white : C.ink, x - 1, y - 1, w + 2, h + 2); ui.rect(hov ? C.pine : C.forest, x, y, w, h);
+      ui.rect(t.hero ? C.gold : sel ? C.white : C.ink, x - 1, y - 1, w + 2, h + 2); ui.rect(hov ? '#1a5a4a' : '#123c3e', x, y, w, h); ui.rect(t.hero ? C.gold : C.red, x, y, w, 1); ui.rect(C.ink, x + 3, y + 2, 2, 2);
       if (t.sp >= 0) { const im = treeSprite(t.sp, 19, 2, 0, 0, 0, 0); g.drawImage(im, x + 11 - (im.width >> 1), y + 26 - im.height); }
       text(g, t.buyer, x + 22, y + 2, C.white);
       const left = t.qty - t.filled;
@@ -364,7 +400,7 @@ export class App {
     if (bi >= 0) { r.free = true; r.cx = bi % MW; r.cy = (bi / MW) | 0; } else this.toast("Nothing standing fits that order.", C.pink);
   }
   toolbar() {
-    const { g, W, H, ui, sim } = this, s = sim.s, y = H - 31; ui.bar(0, y, W, 31);
+    const { g, W, H, ui, sim } = this, s = sim.s, y = H - 31; ui.bar(0, y, W, 31); ui.bottomTrim(W, y - 3);
     const tools = [['saw', 'Saw', '1'], ['plant', 'Planter', '2'], ['shear', 'Shears', '3'], ['tank', 'Tank', '4']];
     let x = 3;
     tools.forEach(([ic, nm, k], i) => {
@@ -406,8 +442,8 @@ export class App {
     if (x + 14 < zx) { if (ui.button(zx, y + 3, 13, 12, '+', { dark: true, flat: true, tip: 'Zoom in (E)' })) this.zoom(-1); if (ui.button(zx, y + 16, 13, 12, '-', { dark: true, flat: true, tip: 'Zoom out (Q)' })) this.zoom(1); }
   }
   blockPanel(b: Block) {
-    const { g, ui, sim } = this, s = sim.s, w = 132, h = 138, x = 6, y = 54;
-    ui.paper(x, y, w, h); ui.rect(C.pine, x, y, w, 13); bold(g, b.name, x + 5, y + 3, C.white);
+    const { g, ui, sim } = this, s = sim.s, w = 132, h = 138, x = 6, y = 60;
+    ui.paper(x, y, w, h); ui.ribbon(x, y, w, 13, C.pine); bold(g, b.name, x + 5, y + 3, C.white);
     if (ui.button(x + w - 14, y + 1, 12, 11, 'X', { dark: true, flat: true })) { this.block = null; return; }
     let n = 0, sum = 0, ready = 0, val = 0;
     for (let j = 0; j < b.h; j++) for (let i = 0; i < b.w; i++) { const t = sim.idx(b.x + i, b.y + j); if (sim.sp[t] && !(sim.flag[t] & F_DEAD)) { n++; sum += sim.h[t]; if (b.cut && sim.h[t] >= b.cut) ready++; val += sim.treeValue(t); } }
@@ -445,7 +481,7 @@ export class App {
       if (i === 0) return;
       const own = s.veh >= i, can = sim.tier >= v.tier && i === s.veh + 1;
       ui.rect(own ? '#dcd8a6' : '#e8d9ae', x + 6, yy, w - 12, 44); ui.rect(C.tan, x + 6, yy + 43, w - 12, 1);
-      const im = machine(i, 1, 0, ['', C.blue, C.red, C.leaf, C.orange][i], 3), sc = i >= 3 ? 0.62 : 1; g.drawImage(im, x + 34 - im.width * sc / 2, yy + 40 - im.height * sc, im.width * sc, im.height * sc);
+      const im = machine(i, 1, 0, VEH_TINT[i], 3), sc = i >= 3 ? 0.62 : 1; g.drawImage(im, x + 34 - im.width * sc / 2, yy + 40 - im.height * sc, im.width * sc, im.height * sc);
       bold(g, v.name, x + 70, yy + 4, C.ink); text(g, v.blurb, x + 70, yy + 15, C.bark); text(g, `${v.w} rows wide  ${v.speed} mph  carries ${v.cap}`, x + 70, yy + 27, C.brown);
       if (own) { right(g, s.veh === i ? 'DRIVING' : 'OWNED', x + w - 12, yy + 16, C.pine); }
       else if (sim.tier < v.tier) { right(g, 'needs', x + w - 12, yy + 10, C.brown); right(g, TIERS[v.tier].name, x + w - 12, yy + 21, C.brown); }
@@ -460,12 +496,12 @@ export class App {
       const cx = x + 6 + (i % cols) * (cw + 4), cy = y + 20 + Math.floor(i / cols) * (rh + 2); i++;
       if (k === '_road') {
         if (ui.button(cx, cy, cw, rh, '', { disabled: false })) { this.win = null; this.setAct('road'); }
-        bold(g, 'Farm Road', cx + 44, cy + 4, C.ink); text(g, 'Faster driving, stops pests.', cx + 44, cy + 14, C.bark); text(g, '$6 a tile', cx + 44, cy + 23, C.dred); continue;
+        bold(g, 'Farm Road', cx + 44, cy + 4, C.ink); text(g, 'Faster, and stops pests.', cx + 44, cy + 14, C.bark); text(g, '$6 a tile', cx + 44, cy + 23, C.dred); continue;
       }
       const d = BUILDINGS[k], locked = sim.tier < d.tier, poor = s.money < d.price;
       if (ui.button(cx, cy, cw, rh, '', { disabled: locked || poor })) { this.buildKind = k; this.setAct('build'); this.win = null; }
-      const im = buildingSprite(k, false, false), sc = Math.min(1, 30 / im.width, 28 / im.height); g.drawImage(im, cx + 21 - im.width * sc / 2, cy + rh - 2 - im.height * sc, im.width * sc, im.height * sc);
-      bold(g, d.name, cx + 44, cy + 4, locked ? C.brown : C.ink); text(g, locked ? `Needs ${TIERS[d.tier].name}` : d.blurb, cx + 44, cy + 14, C.bark); text(g, `${money(d.price)}   have ${sim.bcount(k)}`, cx + 44, cy + 23, poor ? C.red : C.dred);
+      const im = buildingSprite(k, true, false), sc = Math.min(1, 30 / im.width, 28 / im.height); g.drawImage(im, cx + 21 - im.width * sc / 2, cy + rh - 2 - im.height * sc, im.width * sc, im.height * sc);
+      if (locked) text(g, d.name, cx + 44, cy + 4, C.bark); else bold(g, d.name, cx + 44, cy + 4, C.ink); text(g, locked ? `Needs ${TIERS[d.tier].name}` : d.blurb, cx + 44, cy + 14, C.bark); text(g, `${money(d.price)}   have ${sim.bcount(k)}`, cx + 44, cy + 23, poor ? C.red : C.dred);
     }
   }
   crewWin() {
@@ -578,14 +614,13 @@ export class App {
     if ((this.flyT > 1.2 && (ui.pressed || this.tap('Enter') || this.tap('Space'))) || this.flyT > 26) { ui.pressed = false; this.to(() => { this.report = this.sim.makeReport(); this.roll = 0; this.mode = 'report'; this.chip.play('winter'); this.fly = null; }); }
   }
   drawYearEnd(dt: number) {
-    const { g, W, H } = this; g.fillStyle = C.night; g.fillRect(0, 0, W, H);
-    for (const f of this.flakes) { f.y += dt * f.s * 0.05; if (f.y > 1) f.y -= 1; g.fillStyle = C.dusk; g.fillRect((f.x * W) | 0, (f.y * H) | 0, 2, 2); }
+    const { g, W, H } = this; g.drawImage(this.back.c, 0, 0); g.fillStyle = 'rgba(16,14,52,.6)'; g.fillRect(0, 0, W, H); this.snowfall(dt, 0.6);
     if (this.mode === 'report') this.reportWin(dt); else if (this.mode === 'buck') this.buckWin(); else if (this.mode === 'perk') this.perkWin();
   }
   reportWin(dt: number) {
     const { g, ui } = this, R = this.report!, Y = R.y, w = 400, h = 244, x = Math.round((this.W - w) / 2), y = Math.round((this.H - h) / 2);
     this.roll = Math.min(1, this.roll + dt * 0.7); const k = 1 - Math.pow(1 - this.roll, 3); if (this.roll < 1 && Math.random() < 0.4) this.chip.sfx('blip');
-    ui.paper(x, y, w, h); ui.rect(C.pine, x, y, w, 18); bold(g, `YEAR ${R.year}: THE BOOKS`, x + 8, y + 5, C.white, 1, C.forest);
+    ui.paper(x, y, w, h); ui.ribbon(x, y, w, 18); g.drawImage(holly(), x - 7, y - 6); bold(g, `YEAR ${R.year}: THE BOOKS`, x + 18, y + 5, C.white, 1, C.dred);
     right(g, R.tierUp ? `NOW A ${R.tierUp.toUpperCase()}!` : TIERS[this.sim.tier].name, x + w - 8, y + 5, C.lemon);
     let yy = y + 26; const line = (l: string, v: number, c: string = C.ink, isN = false) => { text(g, l, x + 12, yy, C.bark); right(g, isN ? Math.round(v * k).toLocaleString('en-US') : money(v * k), x + 186, yy, c); yy += 11; };
     line('Trees sold', Y.sold, C.ink, true); yy += 3; line('Walk-in sales', Y.retail); line(`Orders (${Y.ordersN} of ${Y.ordersN + Y.missed})`, Y.orders); line('Wholesale', Y.wholesale); line('Bonuses', Y.bonus); ui.rect(C.tan, x + 12, yy, 174, 1); yy += 3; line('Revenue', Y.revenue, C.pine); yy += 3; line('Wages', -Y.wages, C.dred); line('Seedlings', -Y.seeds, C.dred); line('Land, buildings, gear', -Y.bills, C.dred); yy += 3;
@@ -612,8 +647,8 @@ export class App {
     center(g, "MABEL'S ALMANAC", W / 2, y - 34, C.gold, 2, C.ink); center(g, `Pick one page for Year ${sim.s.year + 1}. They stack.`, W / 2, y - 12, C.cream);
     this.perks.forEach((p, i) => {
       const x = x0 + i * (cw + gap), hov = ui.inside(x, y, cw, 96); ui.paper(x, y + (hov ? -2 : 0), cw, 96);
-      const yy = y + (hov ? -2 : 0), lvl = sim.pk(p.id); ui.rect(hov ? C.red : C.pine, x, yy, cw, 16); center(g, p.name, x + cw / 2, yy + 4, C.white);
-      g.drawImage(icon(['tree', 'star', 'bell'][i]), x + cw / 2 - 6, yy + 24);
+      const yy = y + (hov ? -2 : 0), lvl = sim.pk(p.id); ui.ribbon(x, yy, cw, 16, hov ? C.red : C.pine); center(g, p.name, x + cw / 2, yy + 4, C.white);
+      g.drawImage(icon(['wreath', 'star', 'gift'][i]), x + cw / 2 - 6, yy + 24);
       let ly = yy + 44; for (const l of wrap(p.text, cw - 16)) { center(g, l, x + cw / 2, ly, C.ink); ly += 11; }
       if (lvl) center(g, `You have ${lvl}`, x + cw / 2, yy + 72, C.brown);
       if (hov && ui.pressed) { ui.pressed = false; this.chip.sfx('goal'); this.to(() => { sim.startNewYear(p.id); this.mode = 'play'; this.shownMoney = sim.s.money; this.pickMusic(); this.save(); }); }

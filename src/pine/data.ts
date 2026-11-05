@@ -56,7 +56,7 @@ export interface BuildingDef { name: string; blurb: string; w: number; h: number
 export const BUILDINGS: Record<string, BuildingDef> = {
   house: { name: 'Farmhouse', blurb: "Mabel's place.", w: 5, h: 4, price: 0, tier: 9, fixed: true },
   barn: { name: 'Big Barn', blurb: 'Stores 300. Unload here.', w: 5, h: 4, price: 5000, tier: 1, store: 300, unload: true },
-  depot: { name: 'Field Depot', blurb: 'Stores 80. Far-field unload.', w: 3, h: 2, price: 800, tier: 0, store: 80, unload: true },
+  depot: { name: 'Field Depot', blurb: 'Stores 80. Unload here.', w: 3, h: 2, price: 800, tier: 0, store: 80, unload: true },
   lot: { name: 'Tree Lot', blurb: 'Serves 22 families a day.', w: 6, h: 4, price: 1800, tier: 0, lot: 22 },
   cocoa: { name: 'Cocoa Stand', blurb: '+12% walk-ins.', w: 2, h: 2, price: 900, tier: 0, pull: 0.12 },
   santa: { name: "Santa's Cabin", blurb: '+25% walk-ins.', w: 3, h: 3, price: 6000, tier: 2, pull: 0.25 },

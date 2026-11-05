@@ -913,9 +913,10 @@ and bots; the contestants are original bean characters, not marbles.
 
 - **Sim** (`src/pine/sim.ts`, tables in `data.ts`): pure TS with no DOM, emits `fx` events for the renderer and audio. Plays in Node: `node --experimental-transform-types --no-warnings tools/pinebot.mjs [years] [seed]` prints a line per simulated year; run it after any economy change.
 - **Scale** is the design: the vehicle sets the tool's swath (1 to 15 rows), blocks turn trees into standing orders that a shared crew job board works through, orders are sized from what you have standing so December stays a rush at any size, and pests spread fastest through one species, so layout matters more as you grow.
-- **Render** (`render.ts`): four zooms (16/8/4/2 px a tile). Near is live sprites with wind; far is cached 32x32 chunks keyed on `sim.ver`, so tree count barely changes frame cost.
+- **Art** (`trees.ts`, `art.ts`, `ground.ts`): sprites are painted into a pixel buffer (`Buf` in `pal.ts`), then outlined and baked. Trees are stacked bough skirts with snow pillows; sale-size trees wear baubles and tinsel, and top-grade ones a star. The ground is shaded per pixel into a cached layer, with wobbled terrain edges and blue-violet snow shadows. Snow stays on the farm all year: the render reads `snowVis()`, not the sim's calendar.
+- **Render** (`render.ts`): four zooms (16/8/4/2 px a tile). Near is live sprites with wind; far is cached 32x32 chunks keyed on `sim.ver`, so tree count barely changes frame cost. A slow evening cycle runs all year, and December's dusk rides on top of it.
 - **Audio** (`audio.ts`): a chip with public-domain carols. Gated songs keep the lead line muted in time with the backing; `Chip.work()` opens it, so cutting a field plays the tune.
-- **Christmas Eve** (`mode7.ts`): a Mode 7 flight over your own farm image, standing trees twinkling.
+- **Christmas Eve** (`mode7.ts`): a Mode 7 flight over your own farm image from the back of Santa's sleigh, standing trees twinkling.
 
 Tools: `tools/pineshot.mjs out.png --q "?skip"`, `tools/pineflow.mjs <dir>` (real mouse and key input through a first session), `tools/_pinescene.mjs <dir> <stages>` (scripted scenes). `pine.html?skip&seed=7` skips the title. `window.__pine` is the app.
 

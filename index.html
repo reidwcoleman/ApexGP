@@ -196,39 +196,44 @@
         </button>
         <button class="pk-card" data-game="boost" style="--art: url(loading/boost_hero.webp); --pos: 32% 50%; --acc: #2f7bff">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">2</span><b>Boostball</b><i>Car soccer · online</i><em>Jump, flip and fly into the ball; play bots or a lobby with your friends</em></span>
+          <span class="pk-txt"><span class="pk-k">2</span><b>Boostball</b><i>Car soccer · online</i><em>Jump, flip and fly into the ball with bots or friends</em></span>
         </button>
         <button class="pk-card" data-game="miami" style="--art: url(loading/miami_rocket.webp); --acc: #ff4f9a">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">3</span><b>Miami</b><i>Open world</i><em>A crime story from Brickell to South Beach: sports cars, helicopters and the police on your tail</em></span>
+          <span class="pk-txt"><span class="pk-k">3</span><b>Miami</b><i>Open world</i><em>A crime story from Brickell to South Beach, the police on your tail</em></span>
         </button>
         <button class="pk-card" data-game="marbles" style="--art: url(loading/wobble_grid.webp); --pos: 50% 55%; --acc: #ffd23a">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">4</span><b>Wobble Mania</b><i>Party knockout · online</i><em>24 jelly beans, wild obstacle courses, play with friends, 1 crown</em></span>
+          <span class="pk-txt"><span class="pk-k">4</span><b>Wobble Mania</b><i>Party knockout · online</i><em>24 jelly beans, wild obstacle courses, 1 crown</em></span>
         </button>
-        <button class="pk-card" data-game="pine" style="--art: url(loading/pine_hero.webp); --pos: 50% 18%; --acc: #f4c542">
+        <button class="pk-card" data-game="pine" style="--art: url(loading/pine_hero.webp); --pos: 50% 62%; --acc: #f4c542">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">5</span><b>Pine &amp; Dandy</b><i>Tree farm tycoon</i><em>A 16-bit Christmas tree farm: start in Grandma's boots, end with a helicopter, and race every December Rush. Your harvest plays the carol</em></span>
+          <span class="pk-txt"><span class="pk-k">5</span><b>Pine &amp; Dandy</b><i>Tree farm tycoon</i><em>Grow a Christmas tree empire. Your harvest plays the carols</em></span>
         </button>
         <button class="pk-card" data-game="mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 50%; --acc: #ffc83d">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">6</span><b>Mogul</b><i>City tycoon</i><em>One food cart on a real street. Shops, whole buildings, quarries, factories and truck fleets. Out-earn nine rivals every month</em></span>
+          <span class="pk-txt"><span class="pk-k">6</span><b>Mogul</b><i>City tycoon</i><em>One food cart on a real street, then a whole city to out-earn</em></span>
         </button>
         <button class="pk-card" data-game="tracksmith" style="--art: url(loading/tracksmith_hero.webp); --pos: 50% 60%; --acc: #ff5a3c">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">7</span><b>Tracksmith</b><i>Stunt time trial</i><em>Low-poly stunt racing against the clock: loops, jumps and boost pads, then build your own tracks and share them as a link</em></span>
+          <span class="pk-txt"><span class="pk-k">7</span><b>Tracksmith</b><i>Stunt time trial</i><em>Loops, jumps and boost pads, then build and share your own tracks</em></span>
+        </button>
+        <button class="pk-card pk-any" data-game="any" style="--acc: #ffffff">
+          <span class="pk-art"></span>
+          <span class="pk-txt"><span class="pk-k">8</span><b>Surprise me</b><i>Random pick</i><em>Can't decide? Let the picker choose one for you</em></span>
         </button>
       </div>
       <div class="pk-foot">Only the game you pick is loaded</div>
     </div>
     <style>
-      #picker { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; justify-content: center; gap: 4vh; padding: 5vh 5vw; box-sizing: border-box; overflow: auto; background: radial-gradient(90% 70% at 50% 0%, #1a1d29 0%, #06070a 70%); color: #fff; font-family: "Barlow", "Titillium Web", Arial, sans-serif; }
+      #picker { --pw: min(100%, calc((100vh - 220px) * 1.333 * 2 + 3vw)); position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; justify-content: safe center; gap: 3vh; padding: 4vh 5vw; box-sizing: border-box; overflow: auto; background: radial-gradient(90% 70% at 50% 0%, #1a1d29 0%, #06070a 70%); color: #fff; font-family: "Barlow", "Titillium Web", Arial, sans-serif; }
       #picker[hidden] { display: none; }
+      #picker .pk-head, #picker .pk-cards, #picker .pk-foot { width: 100%; max-width: var(--pw); margin-inline: auto; }
       #picker .pk-head { display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap; }
       #picker .pk-logo { font-size: 44px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -0.04em; }
       #picker .pk-logo span { color: #ff2b3f; }
       #picker .pk-ask { font-size: 18px; font-weight: 600; color: rgba(255, 255, 255, 0.55); letter-spacing: 0.08em; text-transform: uppercase; }
-      #picker .pk-cards { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1vw; }
+      #picker .pk-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1vw; }
       #picker .pk-card { position: relative; aspect-ratio: 4 / 5; min-height: 260px; border: 0; padding: 0; border-radius: 18px; overflow: hidden; cursor: pointer; background: #111; color: inherit; font: inherit; text-align: left; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08); transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.25s; }
       #picker .pk-card:hover, #picker .pk-card:focus-visible { transform: translateY(-8px) scale(1.02); box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6), 0 0 0 3px var(--acc); outline: none; }
       #picker .pk-art { position: absolute; inset: 0; background: var(--art) var(--pos, center) / cover no-repeat; transform: scale(1.04); transition: transform 0.6s ease; }
@@ -241,13 +246,16 @@
       #picker .pk-k { position: absolute; top: -34px; right: 20px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; font-weight: 700; background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.8); }
       #picker .pk-last::before { content: "Last played"; position: absolute; top: 14px; left: 14px; z-index: 2; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: 8px; background: var(--acc); color: #06070a; }
       #picker .pk-foot { font-size: 13px; color: rgba(255, 255, 255, 0.35); letter-spacing: 0.04em; }
-      /* seven games: narrower cards on desktop, smaller type */
+      /* four across, two rows: landscape cards so the picture does the talking */
+      #picker .pk-any .pk-art { background: url(loading/yas_chase.webp) 0 0 / 50.5% 50.5% no-repeat, url(loading/miami_rocket.webp) 100% 0 / 50.5% 50.5% no-repeat, url(loading/pine_hero.webp) 0 100% / 50.5% 50.5% no-repeat, url(loading/tracksmith_hero.webp) 100% 100% / 50.5% 50.5% no-repeat; }
+      #picker .pk-card[data-game="pine"] .pk-art::after { background: linear-gradient(180deg, rgba(6, 7, 10, 0) 30%, rgba(6, 7, 10, 0.95) 76%); }
+      #picker .pk-any .pk-art::after { background: linear-gradient(180deg, rgba(6, 7, 10, 0.3) 0%, rgba(6, 7, 10, 0.92) 88%); }
       @media (min-width: 1101px) {
-        #picker .pk-card { min-height: 0; aspect-ratio: 3 / 4.6; }
-        #picker .pk-txt { padding: 16px 14px 18px; }
-        #picker .pk-txt b { font-size: clamp(19px, 1.75vw, 32px); }
+        #picker .pk-card { min-height: 0; aspect-ratio: 4 / 3; }
+        #picker .pk-txt { padding: 14px 16px 16px; }
+        #picker .pk-txt b { font-size: clamp(20px, 1.9vw, 34px); }
         #picker .pk-txt i { font-size: 11px; letter-spacing: 0.12em; }
-        #picker .pk-txt em { font-size: 13px; }
+        #picker .pk-txt em { font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
       }
       @media (max-width: 1100px) and (min-width: 761px) {
         #picker .pk-cards { grid-template-columns: repeat(2, 1fr); }
@@ -282,6 +290,7 @@
         try { last = localStorage.getItem('apexgp.pick'); } catch (e) {}
         var cards = pk.querySelectorAll('.pk-card');
         var pick = function (g) {
+          if (g === 'any') { var all = ['f1', 'boost', 'miami', 'marbles', 'pine', 'mogul', 'tracksmith'].filter(function (n) { return n !== last; }); g = all[Math.floor(Math.random() * all.length)]; }
           try { localStorage.setItem('apexgp.pick', g); } catch (e) {}
           if (g === 'miami') location.href = 'miami.html';
           else if (g === 'marbles') location.href = 'marbles.html';
@@ -298,7 +307,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'pine', Digit6: 'mogul', Digit7: 'tracksmith' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'pine', Digit6: 'mogul', Digit7: 'tracksmith', Digit8: 'any' }[e.code];
           if (n) pick(n);
         });
       })();

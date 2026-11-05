@@ -1,7 +1,7 @@
 // Immediate-mode pixel widgets. Two skins: the dark HUD and the cream almanac paper for windows.
 import { C } from './pal';
 import { text, bold, textW, center } from './font';
-import { icon } from './art';
+import { icon, holly, garland, snowEdge } from './art';
 import type { Chip } from './audio';
 
 type G = CanvasRenderingContext2D;
@@ -14,21 +14,34 @@ export class UI {
   inside(x: number, y: number, w: number, h: number) { return this.mx >= x && this.my >= y && this.mx < x + w && this.my < y + h; }
   block(x: number, y: number, w: number, h: number) { this.next.push([x, y, w, h]); }
   rect(c: string, x: number, y: number, w: number, h: number) { this.g.fillStyle = c; this.g.fillRect(x, y, w, h); }
-  /** bevelled dark bar */
+  /** the wooden shelf: a dark evergreen plank with a gold pinstripe */
   bar(x: number, y: number, w: number, h: number) {
-    this.block(x, y, w, h); this.rect(C.deep, x, y, w, h); this.rect(C.forest, x, y, w, 1); this.rect(C.ink, x, y + h - 1, w, 1);
+    this.block(x, y, w, h); this.rect('#10323a', x, y, w, h); this.rect(C.forest, x, y + 1, w, h - 2);
+    for (let i = 0; i < h; i += 3) this.rect(i % 2 ? '#124a42' : '#0e3f3c', x, y + i, w, 1);
+    this.rect(C.gold, x, y + 1, w, 1); this.rect('#a8701c', x, y + h - 2, w, 1); this.rect(C.ink, x, y + h - 1, w, 1);
   }
+  /** a candy-cane rule */
+  candy(x: number, y: number, w: number, h = 3, t = 0) { const o = Math.floor(t) % 8; for (let i = -8; i < w; i += 8) { const a = Math.max(0, i + o), b = Math.min(w, i + o + 4); if (b > a) this.rect(C.red, x + a, y, b - a, h); const c = Math.max(0, i + o + 4), d = Math.min(w, i + o + 8); if (d > c) this.rect(C.white, x + c, y, d - c, h); } }
+  /** the top shelf wears a rope of pine with bulbs; the snow piles on the bottom one */
+  topTrim(w: number, y: number, ph: number) { this.g.drawImage(garland(w, ph), 0, y); }
+  bottomTrim(w: number, y: number) { this.g.drawImage(snowEdge(w), 0, y); }
   paper(x: number, y: number, w: number, h: number) {
     this.block(x, y, w, h);
-    this.rect(C.ink, x - 1, y + 1, w + 2, h); this.rect(C.ink, x + 1, y - 1, w - 2, h + 2); this.rect(C.ink, x + 2, y + h + 1, w, 2);
+    this.rect(C.ink, x - 2, y, w + 4, h); this.rect(C.ink, x, y - 2, w, h + 4); this.rect(C.ink, x - 1, y - 1, w + 2, h + 2); this.rect('rgba(16,12,40,.45)', x, y + h + 2, w + 3, 3);
+    this.rect(C.gold, x - 1, y, w + 2, h); this.rect(C.gold, x, y - 1, w, h + 2);
     this.rect(C.cream, x, y, w, h); this.rect(C.white, x + 1, y + 1, w - 2, 1); this.rect(C.tan, x, y + h - 1, w, 1); this.rect(C.tan, x + w - 1, y, 1, h);
   }
+  /** a red ribbon header with gold edges */
+  ribbon(x: number, y: number, w: number, h: number, col: string = C.red) {
+    const dk = col === C.red ? C.dred : C.forest; this.rect(col, x, y, w, h); this.rect(dk, x, y + h - 2, w, 2); this.rect(col === C.red ? C.pink : C.grass, x, y, w, 1); this.rect(C.gold, x, y + h, w, 1);
+  }
   window(w: number, h: number, title: string, close = true) {
-    const x = Math.round((this.W - w) / 2), y = Math.max(20, Math.round((this.H - h) / 2) - 6), g = this.g;
-    g.fillStyle = 'rgba(16,20,34,.55)'; g.fillRect(0, 0, this.W, this.H); this.block(0, 0, this.W, this.H);
+    const x = Math.round((this.W - w) / 2), y = Math.max(22, Math.round((this.H - h) / 2) - 6), g = this.g;
+    g.fillStyle = 'rgba(16,14,52,.62)'; g.fillRect(0, 0, this.W, this.H); this.block(0, 0, this.W, this.H);
     this.paper(x, y, w, h);
-    this.rect(C.red, x, y, w, 15); this.rect(C.dred, x, y + 14, w, 1); this.rect(C.pink, x, y, w, 1);
-    bold(g, title, x + 6, y + 3, C.white, 1, C.dred);
+    this.ribbon(x, y, w, 15);
+    bold(g, title, x + 19, y + 3, C.white, 1, C.dred);
+    g.drawImage(holly(), x - 7, y - 6); g.drawImage(holly(true), x + w - (close ? 30 : 12), y - 6);
     let closed = false;
     if (close) closed = this.button(x + w - 15, y + 2, 12, 11, 'X', { dark: true, flat: true });
     return { x, y, closed };
@@ -38,12 +51,12 @@ export class UI {
     if (this.inside(x, y, w, h) && o.tip) { this.tip = o.tip; this.tipX = x; this.tipY = y; }
     if (hov) this.hoverKey = label + x + '.' + y;
     const dark = o.dark;
-    const bg = o.disabled ? (dark ? C.forest : C.tan) : o.primary ? (hov ? C.orange : C.red) : o.sel ? (dark ? C.pine : C.gold) : dark ? (hov ? C.pine : C.forest) : hov ? C.white : '#e6d5a6';
+    const bg = o.disabled ? (dark ? '#123a3a' : '#dcc698') : o.primary ? (hov ? '#f25048' : C.red) : o.sel ? (dark ? C.dred : C.gold) : dark ? (hov ? C.pine : '#0f4a42') : hov ? C.white : '#f2deb0';
     const fg = o.disabled ? (dark ? C.grey : C.brown) : o.primary ? C.white : o.sel ? (dark ? C.lemon : C.ink) : dark ? C.cream : C.ink;
     const oy = press ? 1 : 0;
-    this.rect(dark ? C.ink : C.bark, x, y + 1, w, h);
+    this.rect(dark ? C.ink : C.bark, x, y + 1, w, h); if (!o.flat && !dark) { this.rect(C.bark, x - 1, y + 1, w + 2, h - 2); }
     this.rect(bg, x, y + oy, w, h - oy);
-    if (!o.flat && !press) { this.rect(o.primary ? C.pink : dark ? C.leaf : C.white, x, y, w, 1); }
+    if (!o.flat && !press) { this.rect(o.primary ? C.pink : o.sel && dark ? C.red : dark ? C.leaf : C.white, x, y, w, 1); if (o.primary) this.rect(C.dred, x, y + h - 2, w, 1); }
     if (o.sel) { g.strokeStyle = dark ? C.gold : C.dred; g.lineWidth = 1; g.strokeRect(x + 0.5, y + oy + 0.5, w - 1, h - oy - 1); }
     if (o.icon) {
       const im = icon(o.icon, fg);
@@ -56,8 +69,8 @@ export class UI {
     return false;
   }
   private drawTip() {
-    if (!this.tip) return; const w = textW(this.tip) + 8, x = Math.max(2, Math.min(this.W - w - 2, this.tipX)), y = this.tipY - 13 < 2 ? this.tipY + 22 : this.tipY - 13;
-    this.rect(C.ink, x, y, w, 12); this.rect(C.lemon, x + 1, y + 1, w - 2, 10); text(this.g, this.tip, x + 4, y + 2, C.ink);
+    if (!this.tip) return; const w = textW(this.tip) + 10, x = Math.max(2, Math.min(this.W - w - 2, this.tipX)), y = this.tipY - 13 < 2 ? this.tipY + 22 : this.tipY - 13;
+    this.rect(C.ink, x, y, w, 12); this.rect(C.cream, x + 1, y + 1, w - 2, 10); this.rect(C.red, x + 1, y + 1, 2, 10); text(this.g, this.tip, x + 5, y + 2, C.ink);
   }
   meter(x: number, y: number, w: number, h: number, v: number, col: string, back: string = C.ink) { this.rect(back, x, y, w, h); this.rect(col, x, y, Math.round(w * Math.max(0, Math.min(1, v))), h); }
   centerText(t: string, y: number, col: string) { center(this.g, t, this.W / 2, y, col); }
