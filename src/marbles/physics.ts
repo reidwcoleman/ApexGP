@@ -46,6 +46,13 @@ const GRAB_REACH = 1.45;
 const GRAB_T = 2.6;
 const GRAB_CD = 1.0;
 
+/**
+ * Bean on bean. `e`: how lively a hard knock is. A dive that lands adds `add` of the diver's speed,
+ * lifts the target by `up` and puts it over for `down` seconds. `puppet` is the same hit sent to a
+ * bean someone else runs, whose browser never felt the collision: it's the whole of the push.
+ */
+export const BUMP = { e: 0.28, knockAt: 8.2, add: 0.08, up: 2.6, down: 0.5, puppet: 0.68 };
+
 export const enum Mat {
   Wood = 0,
   Paint = 1,
@@ -161,6 +168,11 @@ export class Marble {
   hopK = 1;
   /** a spring pad just threw it */
   sprung = false;
+  /** a boost strip just sent it off */
+  boosted = false;
+  /** the last bean to bowl it over, and when (for a KO) */
+  hitBy = -1;
+  hitT = -9;
   /** this bean's dive just bowled someone over */
   bonked = false;
   constructor(readonly id: number) {}
@@ -989,25 +1001,27 @@ export class World {
         const vn = VC.dot(N);
         if (vn >= 0) continue;
         const imp = -vn;
-        const e = imp > 3 ? 0.5 : 0.1;
+        const e = imp > 3 ? BUMP.e : 0.1;
         const jn = (1 + e) * imp;
         // (who hit whom: the faster one going in)
         const aFast = a.vel.lengthSq() > b.vel.lengthSq();
         a.vel.addScaledVector(N, -jn * wa);
         b.vel.addScaledVector(N, jn * wb);
         // a dive into someone (or a flying body) bowls them over
-        if (imp > 7.5) {
+        if (imp > BUMP.knockAt) {
           const hitter = aFast ? a : b;
           const target = hitter === a ? b : a;
           if (hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
             if (hitter.mode === Mode.Dive) hitter.bonked = true;
-            if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * 0.75, vy: 4.5, vz: hitter.vel.z * 0.75 });
+            target.hitBy = hitter.id;
+            target.hitT = this.time;
+            if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * BUMP.puppet, vy: BUMP.up, vz: hitter.vel.z * BUMP.puppet });
             else {
               // (bowled over: sent flying)
-              target.vel.x += hitter.vel.x * 0.3;
-              target.vel.z += hitter.vel.z * 0.3;
-              target.vel.y += 4.5;
-              target.knock(0.8);
+              target.vel.x += hitter.vel.x * BUMP.add;
+              target.vel.z += hitter.vel.z * BUMP.add;
+              target.vel.y += BUMP.up;
+              target.knock(BUMP.down);
             }
           }
         }

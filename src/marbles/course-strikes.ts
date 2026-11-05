@@ -5,7 +5,7 @@ import { glowMat } from './obs-world.ts';
 
 /**
  * Telegraphed hits from above or below: a ring closes in on a spot, then whatever's on it is thrown.
- * Gold Rush's cannonballs, Meltdown's snowballs and High Tide's geysers. Each is a pure function of
+ * Crown Keeper's cannonballs, Meltdown's snowballs and High Tide's geysers. Each is a pure function of
  * the round's clock, so every browser sees the same ones; each browser throws its own beans.
  */
 export interface Hit3 {

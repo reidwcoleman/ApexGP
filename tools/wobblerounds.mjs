@@ -40,7 +40,7 @@ async function one(round) {
       id: c.id, state: g.state, playT: +g.playT.toFixed(1), start,
       alive: g.racers.filter((r) => !r.out).length, slots: g.slots, fin: g.racers.filter((r) => r.fin).length,
       keep: c.keep ? { changes, holders: holders.size, top: g.keepP?.ranking().slice(0, 3).map((r) => +(g.keepP.held.get(r.m.id) ?? 0).toFixed(1)) } : undefined,
-      gold: g.gold ? g.gold.ranking().slice(0, 3).map((r) => g.gold.score.get(r.m.id) ?? 0) : undefined,
+      pops: g.bounce ? g.bounce.ranking().slice(0, 3).map((r) => g.bounce.score.get(r.m.id) ?? 0) : undefined,
       sprung, bonk, boxes, seen, wall: +((performance.now() - t0) / 1000).toFixed(1),
     };
   });
@@ -54,7 +54,7 @@ const out = [];
 await Promise.all([0, 1, 2].map(async () => { while (queue.length) { const n = queue.shift(); out.push([n, await one(n)]); } }));
 out.sort((a, b) => a[0] - b[0]);
 for (const [n, r] of out) {
-  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.gold && `gold ${r.gold}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`, r.boxes && `boxes ${r.boxes} ${JSON.stringify(r.seen)}`].filter(Boolean).join(' · ');
+  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.pops && `pops ${r.pops}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`, r.boxes && `boxes ${r.boxes} ${JSON.stringify(r.seen)}`].filter(Boolean).join(' · ');
   console.log(`${String(n).padStart(2)} ${r.id.padEnd(14)} ${String(r.playT).padStart(6)}s  left ${String(r.alive).padStart(2)}/${r.start} slots ${String(r.slots).padStart(2)} fin ${String(r.fin).padStart(2)} ${r.state.padEnd(8)} ${extra} ${r.errs.length ? 'ERR ' + r.errs.join(' | ') : ''}`);
 }
 await browser.close();

@@ -32,7 +32,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 `;
 
 export class GradeEffect extends Effect {
-  constructor({ vibrance = 0.28, contrast = 0.16, lift = 0.02 } = {}) {
+  constructor({ vibrance = 0.36, contrast = 0.24, lift = 0.012 } = {}) {
     super('GradeEffect', FRAG, {
       uniforms: new Map<string, THREE.Uniform>([
         ['vibrance', new THREE.Uniform(vibrance)],

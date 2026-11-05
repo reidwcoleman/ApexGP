@@ -15,7 +15,8 @@ import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
 import { storm, type StormArena } from './course-storm.ts';
 import { tide, type TideArena } from './course-tide.ts';
-import { beltRush, colourCall, goldRush, hotSpud, type BeltArena, type CallArena, type GoldArena, type SpudArena } from './course-modes.ts';
+import { beltRush, colourCall, hotSpud, type BeltArena, type CallArena, type SpudArena } from './course-modes.ts';
+import { bounceHouse, type BounceArena } from './course-bounce.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -58,7 +59,7 @@ export interface Course {
   /** the party games (course-modes.ts) */
   call?: CallArena;
   spud?: SpudArena;
-  gold?: GoldArena;
+  bounce?: BounceArena;
   belt?: BeltArena;
   /** the Crown Keeper final */
   keep?: KeepArena;
@@ -73,7 +74,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'goldrush' | 'beltrush' | 'crownkeep' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'hightide' | 'colourcall' | 'hotspud' | 'bouncehouse' | 'beltrush' | 'crownkeep' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -115,27 +116,27 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   hightide: { id: 'hightide', name: 'High Tide', kind: 'survival', blurb: 'Coral columns in the sea. The tide rises a step at a time: climb higher, keep your spot, push the others in.', keep: 0.6 },
   colourcall: { id: 'colourcall', name: 'Colour Call', kind: 'survival', blurb: 'A colour is called. Get on it: every other tile drops out from under you.', keep: 0.6 },
   hotspud: { id: 'hotspud', name: 'Hot Spud', kind: 'survival', blurb: 'A few spuds with lit fuses. Touch someone to pass yours on. Whoever holds one when it blows is out.', keep: 0.6 },
-  goldrush: { id: 'goldrush', name: 'Gold Rush', kind: 'score', blurb: 'The chest is spitting gold. Grab it, knock it out of the others, stay out of the sea. Least gold goes home.', keep: 0.6 },
+  bouncehouse: { id: 'bouncehouse', name: 'Bounce House', kind: 'score', blurb: 'The floor never stops bouncing. Pop balloons in the air, chain them for a combo, jump as you land to super bounce. Dodge the thunder ones.', keep: 0.6 },
   beltrush: { id: 'beltrush', name: 'Belt Rush', kind: 'survival', blurb: 'A giant belt brings toy blocks at you, faster and faster. Dodge, hop, keep running. Off the back and you are out.', keep: 0.6 },
   discodash: { id: 'discodash', name: 'Disco Dash', kind: 'race', blurb: 'Down the dance floors: laser gates, spinning floors and sweeping bars, all on the beat.', keep: 0.75 },
   bigtop: { id: 'bigtop', name: 'Big Top', kind: 'race', blurb: 'Under the tents: bounce pits, swinging hammers, seesaws and wrecking balls.', keep: 0.75 },
   treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
   blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
-  crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'One crown. Hold it for 25 seconds and you win the show. Dive into whoever has it to knock it loose.', keep: 0 },
+  crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'A castle in the sky and one crown. Hold it for 30 seconds to win. When the throne goes hot your clock runs double, until it blows.', keep: 0 },
 };
 /**
  * The running order of this show (a live list: a new show deals a new one, a guest takes the
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'goldrush', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'hightide', 'colourcall', 'hotspud', 'bouncehouse', 'beltrush', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
 export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'hightide', 'colourcall', 'beltrush'];
 /** the games that are neither: each show has at least one */
-export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'hotspud', 'goldrush'];
+export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'hotspud', 'bouncehouse'];
 export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
 
 /**
@@ -149,7 +150,7 @@ export const MODES = {
   floor: ['crumble', 'meltdown', 'colourcall'],
   dodge: ['jumpclub', 'tiptop', 'stormdeck'],
   team: ['paintparty', 'splatring'],
-  grab: ['hotspud', 'goldrush'],
+  grab: ['hotspud', 'bouncehouse'],
 } satisfies Record<string, RoundId[]>;
 export type ModeId = keyof typeof MODES;
 /** what the round card calls it */
@@ -162,7 +163,7 @@ export function modeName(id: RoundId) {
   if (id === 'crownkeep') return 'FINAL · CROWN KEEPER';
   if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
   if (id === 'hotspud') return 'TAG GAME';
-  if (id === 'goldrush') return 'GOLD GRAB';
+  if (id === 'bouncehouse') return 'BOUNCE GAME';
   const m = modeOf(id);
   return m === 'final' ? 'RACE' : MODE_NAME[m];
 }
@@ -228,8 +229,8 @@ export function buildRound(id: RoundId): Course {
       return colourCall(info);
     case 'hotspud':
       return hotSpud(info);
-    case 'goldrush':
-      return goldRush(info);
+    case 'bouncehouse':
+      return bounceHouse(info);
     case 'beltrush':
       return beltRush(info);
     case 'crownkeep':

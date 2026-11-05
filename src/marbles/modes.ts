@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { GOLD, SPUD, type Coin } from './course-modes.ts';
+import { SPUD } from './course-modes.ts';
+import { BOUNCE, Pop, popValue, type Balloon } from './course-bounce.ts';
 import { glowMat } from './obs-world.ts';
 import { KEEP } from './course-crown.ts';
+import { makeCrown } from './course-kit.ts';
 
 /**
  * The host's side of the two games that aren't a function of the clock: who has a spud, who has
- * how much gold. The host (or solo) decides; a guest is told and shows it.
+ * what's popped. The host (or solo) decides; a guest is told and shows it.
  */
 
 interface Who {
@@ -145,23 +147,22 @@ export class SpudPlay {
   }
 }
 
-/** Gold Rush: the coins in the air and on the sand, who has what */
-export class GoldPlay {
+/** Bounce House: what's in the air, who has popped what, and the combos */
+export class BouncePlay {
   readonly score = new Map<number, number>();
-  readonly taken = new Set<number>();
-  /** coins knocked out of someone (they stay a shorter while) */
-  private spilt: Coin[] = [];
-  private nextK = 100000;
-  /** the coins out there now: for the bots */
-  readonly live: Coin[] = [];
+  readonly popped = new Set<number>();
+  /** the balloons up now: for the bots */
+  readonly live: Balloon[] = [];
   private first = 0;
-  private mesh: THREE.InstancedMesh;
-  private tumbled = new Set<number>();
+  private combo = new Map<number, { n: number; t: number }>();
+  private body: THREE.InstancedMesh;
+  private tail: THREE.InstancedMesh;
   private M = new THREE.Matrix4();
   private V = new THREE.Vector3();
   private Q = new THREE.Quaternion();
   private S = new THREE.Vector3();
-  private E = new THREE.Euler();
+  private C = new THREE.Color();
+  private P = new THREE.Vector3();
   readonly arena;
 
   constructor(
@@ -169,106 +170,88 @@ export class GoldPlay {
     private scene: THREE.Scene,
     private who: () => Who[],
   ) {
-    this.arena = course.gold!;
-    const g = new THREE.CylinderGeometry(0.56, 0.56, 0.14, 22).rotateX(Math.PI / 2);
-    const m = new THREE.MeshStandardMaterial({ color: 0xffa800, roughness: 0.4, metalness: 0.45, emissive: 0xc06800, emissiveIntensity: 0.4 });
-    this.mesh = new THREE.InstancedMesh(g, m, 240);
-    this.mesh.frustumCulled = false;
-    this.mesh.castShadow = true;
-    scene.add(this.mesh);
+    this.arena = course.bounce!;
+    const N = 260;
+    // (a balloon: rounder at the top, drawn in to the knot)
+    const prof: THREE.Vector2[] = [];
+    for (let k = 0; k <= 16; k++) {
+      const a = (k / 16) * Math.PI;
+      const pull = 1 + 0.28 * Math.max(0, -Math.cos(a)) ** 3;
+      prof.push(new THREE.Vector2(Math.max(0.001, Math.sin(a) * 0.62), -Math.cos(a) * 0.72 * pull));
+    }
+    const g = new THREE.LatheGeometry(prof, 22);
+    g.computeVertexNormals();
+    this.body = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, emissive: 0x303030, emissiveIntensity: 0.35 }), N);
+    this.tail = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 4).translate(0, -1.4, 0), new THREE.MeshBasicMaterial({ color: 0xfff6e0 }), N);
+    this.body.frustumCulled = this.tail.frustumCulled = false;
+    this.body.castShadow = true;
+    this.body.setColorAt(0, this.C.set(0xffffff));
+    scene.add(this.body, this.tail);
   }
 
   dispose() {
-    this.scene.remove(this.mesh);
-    this.mesh.dispose();
+    this.scene.remove(this.body, this.tail);
+    this.body.dispose();
+    this.tail.dispose();
   }
 
-  /** what's out there at x seconds after the off */
+  /** what's up there at x seconds after the off */
   refresh(x: number) {
     const L = this.live;
     L.length = 0;
-    const list = this.arena.coins;
-    while (this.first < list.length && list[this.first].t + GOLD.life < x) this.first++;
-    for (let i = this.first; i < list.length && list[i].t <= x; i++) if (!this.taken.has(list[i].k)) L.push(list[i]);
-    this.spilt = this.spilt.filter((c) => c.t + 7 > x && !this.taken.has(c.k));
-    for (const c of this.spilt) L.push(c);
+    const list = this.arena.balloons;
+    while (this.first < list.length && list[this.first].t + BOUNCE.life < x) this.first++;
+    for (let i = this.first; i < list.length && list[i].t <= x; i++) if (!this.popped.has(list[i].k)) L.push(list[i]);
   }
 
-  /** (the host) anyone standing on a landed coin has it; returns the pick-ups */
-  grabs(x: number): { k: number; id: number; v: number }[] {
-    const out: { k: number; id: number; v: number }[] = [];
+  /** (the host) anyone in a balloon pops it */
+  pops(x: number, t: number): { k: number; id: number; v: number; n: number; combo: number }[] {
+    const out: { k: number; id: number; v: number; n: number; combo: number }[] = [];
     const all = this.who();
-    for (const k of this.live) {
-      if (this.taken.has(k.k) || k.t + GOLD.fly > x) continue;
+    for (const q of this.live) {
+      if (this.popped.has(q.k) || q.t + 0.3 > x) continue;
+      this.arena.at(q, x, this.P);
+      const big = q.kind === Pop.Star ? 1.7 : 1;
       for (const r of all) {
         const m = r.m;
-        if (!m.active || m.pos.y < this.arena.center.y - 0.5) continue;
-        const dx = m.pos.x - k.x, dz = m.pos.z - k.z;
+        if (!m.active || r.out) continue;
+        const dx = m.pos.x - this.P.x, dy = m.pos.y + 0.4 - this.P.y, dz = m.pos.z - this.P.z;
         // (people's hands reach a little further: no one's as exact as a bot)
-        const reach = r.c.human ? GOLD.take + 0.5 : GOLD.take;
-        if (dx * dx + dz * dz > reach * reach) continue;
-        this.take(k.k, m.id, k.v);
-        out.push({ k: k.k, id: m.id, v: k.v });
+        const reach = (r.c.human ? BOUNCE.reach + 0.35 : BOUNCE.reach) * big;
+        if (dx * dx + dz * dz > reach * reach || Math.abs(dy) > reach + 0.5) continue;
+        const e = this.popBy(q, m.id, t);
+        out.push(e);
         break;
       }
     }
     return out;
   }
 
-  take(k: number, id: number, v: number) {
-    this.taken.add(k);
-    this.score.set(id, (this.score.get(id) ?? 0) + v);
+  private popBy(q: Balloon, id: number, t: number) {
+    const base = popValue(q.kind);
+    const c = this.combo.get(id) ?? { n: 0, t: -9 };
+    let v = base;
+    if (base < 0) c.n = 0;
+    else {
+      c.n = t - c.t < BOUNCE.chain ? Math.min(BOUNCE.maxCombo, c.n + 1) : 1;
+      v = base * c.n;
+    }
+    c.t = t;
+    this.combo.set(id, c);
+    const n = Math.max(0, (this.score.get(id) ?? 0) + v);
+    this.take(q.k, id, n);
+    return { k: q.k, id, v, n, combo: c.n };
   }
-  set(id: number, n: number) {
+
+  take(k: number, id: number, n: number) {
+    this.popped.add(k);
     this.score.set(id, n);
   }
-  add(list: [number, number, number, number][]) {
-    for (const [k, x, z, t] of list) this.spilt.push({ k, x, z, t, v: 1 });
+  balloon(k: number) {
+    return this.arena.balloons.find((q) => q.k === k) ?? null;
   }
 
-  /** (the host) knocked over: some of its gold flies out round it. Returns the coins for the guests */
-  knocks(x: number): { id: number; n: number; add: [number, number, number, number][] }[] {
-    const out: { id: number; n: number; add: [number, number, number, number][] }[] = [];
-    for (const r of this.who()) {
-      const m = r.m;
-      const down = m.mode === Mode.Tumble;
-      if (!down) {
-        this.tumbled.delete(m.id);
-        continue;
-      }
-      if (this.tumbled.has(m.id)) continue;
-      this.tumbled.add(m.id);
-      out.push(...this.spill(r, Math.min(3, this.score.get(m.id) ?? 0), x));
-    }
-    return out;
-  }
-
-  /** (the host) into the sea: a third of it is gone */
-  fell(r: Who) {
-    const n = this.score.get(r.m.id) ?? 0;
-    const left = n - Math.ceil(n / 3);
-    this.score.set(r.m.id, left);
-    return left;
-  }
-
-  private spill(r: Who, n: number, x: number) {
-    if (n <= 0) return [];
-    const A = this.arena;
-    const id = r.m.id;
-    this.score.set(id, (this.score.get(id) ?? 0) - n);
-    const add: [number, number, number, number][] = [];
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, d = 1.8 + Math.random() * 1.8;
-      let cx = r.m.pos.x + Math.cos(a) * d, cz = r.m.pos.z + Math.sin(a) * d;
-      const pr = Math.hypot(cx - A.center.x, cz - A.center.z), lim = A.R - 1;
-      if (pr > lim) (cx = A.center.x + ((cx - A.center.x) / pr) * lim), (cz = A.center.z + ((cz - A.center.z) / pr) * lim);
-      add.push([this.nextK++, cx, cz, x - GOLD.fly + 0.35]);
-    }
-    this.add(add);
-    return [{ id, n: this.score.get(id) ?? 0, add }];
-  }
-
-  /** the field, most gold first (ties: the luck of the draw) */
+  /** the field, top score first (ties: the luck of the draw) */
   ranking() {
     return [...this.who()].sort((a, b) => (this.score.get(b.m.id) ?? 0) - (this.score.get(a.m.id) ?? 0) || b.c.skill - a.c.skill);
   }
@@ -283,42 +266,59 @@ export class GoldPlay {
     return show.map((r) => ({ name: `${rank.indexOf(r) + 1}. ${r.c.name}`, color: r.c.outfit.a, share: (this.score.get(r.m.id) ?? 0) / best, mine: r.c.player, label: String(this.score.get(r.m.id) ?? 0) }));
   }
 
-  /** the coins: flying out of the chest, then spinning on the sand */
+  /** the balloons: swelling up off the floor, bobbing, and away up into the sky when their time's out */
   sync(t: number, x: number) {
-    const A = this.arena, { M, V, Q, S, E } = this;
+    const A = this.arena, { M, V, Q, S, C } = this;
     let n = 0;
-    for (const k of this.live) {
-      if (n >= 240) break;
-      const u = (x - k.t) / GOLD.fly;
-      const big = k.v >= GOLD.big ? 3 : k.v > 1 ? 1.75 : 1;
-      if (u < 1) {
-        const q = Math.max(0, u);
-        V.set(A.center.x + (k.x - A.center.x) * q, A.center.y + 1.6 + 8 * q * (1 - q) * 2 - 1 * q, A.center.z + (k.z - A.center.z) * q);
-        if (k.k >= 100000) V.set(k.x, A.center.y + 0.6 + 2.4 * (1 - q) * q * 4, k.z);
-      } else V.set(k.x, A.center.y + 0.62 + 0.1 * Math.sin(t * 3 + k.k), k.z);
-      Q.setFromEuler(E.set(0, t * 3 + k.k, 0));
-      // (about to go: it blinks)
-      const left = (k.k >= 100000 ? 7 : GOLD.life) - (x - k.t);
-      const blink = left < 2 && Math.sin(t * 16) < 0;
-      M.compose(V, Q, S.setScalar(blink ? 0.001 : big));
-      this.mesh.setMatrixAt(n++, M);
+    for (const q of this.live) {
+      if (n >= 260) break;
+      A.at(q, x, V);
+      const u = x - q.t, left = BOUNCE.life - u;
+      if (left < 1) V.y += (1 - left) ** 2 * 14;
+      const s = (q.kind === Pop.Star ? 1.9 : q.kind === Pop.High ? 1.05 : q.kind === Pop.Thunder ? 0.95 : 0.9) * Math.min(1, u / 0.35 + 0.1);
+      M.compose(V, Q.identity(), S.setScalar(s));
+      this.body.setMatrixAt(n, M);
+      this.tail.setMatrixAt(n, M);
+      if (q.kind === Pop.Star) C.setHSL((t * 0.5) % 1, 1, 0.58);
+      else if (q.kind === Pop.Thunder) C.set(Math.sin(t * 11 + q.ph) > 0.82 ? 0xfff27a : 0x2a1a48);
+      else if (q.kind === Pop.High) C.set(BLOON_HIGH[q.k % 3]);
+      else C.set(BLOON_LOW[q.k % 5]);
+      this.body.setColorAt(n, C);
+      n++;
     }
-    this.mesh.count = n;
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this.body.count = this.tail.count = n;
+    this.body.instanceMatrix.needsUpdate = this.tail.instanceMatrix.needsUpdate = true;
+    if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
   }
 }
+const BLOON_LOW = [0xff4f7a, 0xffb02f, 0x37d07a, 0x2fa8ff, 0xff7ad0];
+/** the high ones are worth more: silver-bright so you can tell them */
+const BLOON_HIGH = [0xe8f4ff, 0xc8f0ff, 0xf4e8ff];
 
 /** Crown Keeper: who has the crown and for how long. The host decides; a guest is told and shows it */
 export class KeepPlay {
   readonly arena;
-  /** seconds each bean has held it */
+  /** seconds on each bean's clock */
   readonly held = new Map<number, number>();
-  /** nobody picks it up again until then (it has to land) */
+  /** nobody can catch it before then (it has only just left someone's head) */
   private looseT = 0;
-  private crown = new THREE.Group();
+  private crown: THREE.Object3D;
   private beam: THREE.Mesh;
-  /** who just took it, this frame (id, how: 'took' off the floor, 'stole' it) */
+  private shaft: THREE.Mesh;
+  /** the gold ring round whoever has it, and the mark where a thrown crown is going to land */
+  private halo: THREE.Mesh;
+  private mark: THREE.Mesh;
+  /** a crown in the air: where it left, when, how long for */
+  private fly: { x: number; y: number; z: number; t: number; dur: number; h: number } | null = null;
+  /** where the crown is drawn */
+  readonly at = new THREE.Vector3();
+  /** who just took it, this frame (id, how: 'took' off the floor or out of the air, 'stole' it) */
   taken: { id: number; how: 'took' | 'stole' } | null = null;
+  /** a dive just knocked it flying: who did it */
+  knocked = -1;
+  /** the crown went over the edge with someone: it's flying home */
+  homing = false;
+  private go: { go: number };
 
   constructor(
     course: Course,
@@ -326,91 +326,146 @@ export class KeepPlay {
     private who: () => Who[],
   ) {
     this.arena = course.keep!;
+    this.go = course.state;
     const A = this.arena;
     A.holder = -1;
     A.x = A.center.x;
     A.z = A.center.z;
-    const gold = new THREE.MeshPhysicalMaterial({ color: 0xffc21f, roughness: 0.22, metalness: 0.75, emissive: 0xa06000, emissiveIntensity: 0.5 });
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.4, 0.3, 24, 1, true), gold);
-    gold.side = THREE.DoubleSide;
-    this.crown.add(band);
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * Math.PI * 2;
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.34, 8), gold);
-      tip.position.set(Math.cos(a) * 0.43, 0.3, Math.sin(a) * 0.43);
-      this.crown.add(tip);
-      const gem = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), glowMat(k % 2 ? 0xff3a6a : 0x3ac8ff, 2.5));
-      gem.position.set(Math.cos(a) * 0.45, 0.47, Math.sin(a) * 0.45);
-      this.crown.add(gem);
-    }
-    this.crown.traverse((o) => (o.castShadow = true));
+    A.share = 0;
+    A.zoomT = 0;
+    this.crown = makeCrown();
+    this.crown.scale.setScalar(0.62);
     scene.add(this.crown);
-    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 30, 16, 1, true).translate(0, 15, 0), new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, blending: THREE.AdditiveBlending }));
-    scene.add(this.beam);
+    const add = (g: THREE.BufferGeometry, opacity: number) => {
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, blending: THREE.AdditiveBlending }));
+      scene.add(m);
+      return m;
+    };
+    this.beam = add(new THREE.CylinderGeometry(1.1, 1.1, 60, 20, 1, true).translate(0, 30, 0), 0.2);
+    this.shaft = add(new THREE.CylinderGeometry(0.34, 0.34, 40, 12, 1, true).translate(0, 20, 0), 0.26);
+    this.halo = add(new THREE.RingGeometry(0.72, 1.02, 40).rotateX(-Math.PI / 2), 0.9);
+    this.mark = add(new THREE.RingGeometry(1.1, 1.5, 40).rotateX(-Math.PI / 2), 0.8);
   }
 
   dispose() {
-    this.scene.remove(this.crown, this.beam);
+    this.scene.remove(this.crown, this.beam, this.shaft, this.halo, this.mark);
   }
 
-  /** knocked out of someone's hands: it flies a few metres and lands on the floor */
-  private loosen(t: number, from: THREE.Vector3) {
+  /** where it comes down: never out over a hole */
+  private landing(x: number, z: number, t: number): [number, number] {
     const A = this.arena;
-    const a = Math.random() * Math.PI * 2, d = 2.5 + Math.random() * 2.5;
-    let x = from.x + Math.cos(a) * d, z = from.z + Math.sin(a) * d;
-    const px = x - A.center.x, pz = z - A.center.z, pr = Math.hypot(px, pz), lim = A.R - 2.5;
-    if (pr > lim) (x = A.center.x + (px / pr) * lim), (z = A.center.z + (pz / pr) * lim);
+    let px = x - A.center.x, pz = z - A.center.z;
+    const pr = Math.hypot(px, pz), lim = KEEP.R - 2;
+    if (pr > lim) (px *= lim / pr), (pz *= lim / pr);
+    for (let k = 0; k < 12 && !A.onTop(new THREE.Vector3(A.center.x + px, A.center.y + KEEP.top, A.center.z + pz)) && !A.solid(A.center.x + px, A.center.z + pz, t + 4); k++) (px *= 0.88), (pz *= 0.88);
+    return [A.center.x + px, A.center.z + pz];
+  }
+
+  /** the crown leaves a head for a spot on the floor, in an arc (a guest starts its own from what it drew) */
+  throwFrom(from: THREE.Vector3, t: number, dur: number, h: number) {
+    this.fly = { x: from.x, y: from.y, z: from.z, t, dur, h };
+  }
+
+  /** knocked out of someone's hands: it flies `d` metres the way `dx, dz` says */
+  private loosen(t: number, from: THREE.Vector3, dx: number, dz: number, d: number) {
+    const A = this.arena;
+    const l = Math.hypot(dx, dz) || 1;
+    const [x, z] = this.landing(from.x + (dx / l) * d, from.z + (dz / l) * d, t);
     A.holder = -1;
     A.x = x;
     A.z = z;
-    this.looseT = t + 0.45;
+    this.looseT = t + 0.28;
+    this.throwFrom(this.at, t, 0.85, 3.4);
+  }
+
+  /** gone over the edge: the crown flies home to the throne */
+  private home(t: number) {
+    const A = this.arena;
+    A.holder = -1;
+    A.x = A.center.x;
+    A.z = A.center.z;
+    this.looseT = t + 0.9;
+    this.homing = true;
+    this.throwFrom(this.at, t, 1.3, 9);
+  }
+
+  private give(r: Who, how: 'took' | 'stole', t: number) {
+    this.arena.holder = r.m.id;
+    this.safeT = t + KEEP.safe;
+    this.arena.zoomT = t + KEEP.safe;
+    this.fly = null;
+    this.taken = { id: r.m.id, how };
   }
 
   /** (the host) the clock, the pick-ups and the steals; true when who has it changed */
   tick(dt: number, t: number, go: boolean): boolean {
     const A = this.arena;
     this.taken = null;
+    this.knocked = -1;
+    this.homing = false;
     if (!go) return false;
     const all = this.who().filter((r) => !r.out);
     const on = (r: Who) => r.m.active && r.m.pos.y > A.center.y - 1;
     if (A.holder < 0) {
       if (t < this.looseT) return false;
+      this.place(t);
+      // (lying somewhere nobody's getting to: home it goes)
+      if (t > this.looseT + KEEP.stale && Math.hypot(A.x - A.center.x, A.z - A.center.z) > 0.1) {
+        this.home(t);
+        return true;
+      }
       for (const r of all) {
         if (!on(r) || r.m.mode === Mode.Tumble) continue;
-        if (Math.hypot(r.m.pos.x - A.x, r.m.pos.z - A.z) > KEEP.pick || r.m.pos.y > A.center.y + 3) continue;
-        A.holder = r.m.id;
-        this.safeT = t + KEEP.safe;
-        this.taken = { id: r.m.id, how: 'took' };
+        // (it can be caught out of the air, if you get up to it)
+        if (Math.hypot(r.m.pos.x - this.at.x, r.m.pos.z - this.at.z) > KEEP.pick || Math.abs(r.m.pos.y + 0.3 - this.at.y) > 1.9) continue;
+        this.give(r, 'took', t);
         return true;
       }
       return false;
     }
     const h = all.find((r) => r.m.id === A.holder);
-    if (!h || !on(h) || h.m.mode === Mode.Tumble) {
-      this.loosen(t, h && on(h) ? h.m.pos : A.center);
+    if (!h || !on(h)) {
+      this.home(t);
       return true;
     }
-    this.held.set(h.m.id, (this.held.get(h.m.id) ?? 0) + dt);
+    this.held.set(h.m.id, (this.held.get(h.m.id) ?? 0) + dt * (A.onTop(h.m.pos) && A.hot(this.x(t)) ? KEEP.throne : 1));
     if (t < this.safeT) return false;
+    if (h.m.mode === Mode.Tumble) {
+      this.loosen(t, h.m.pos, h.m.vel.x || Math.random() - 0.5, h.m.vel.z || Math.random() - 0.5, 4.5 + Math.random() * 2.5);
+      return true;
+    }
     for (const o of all) {
       if (o === h || !on(o)) continue;
       const d = o.m.pos.distanceTo(h.m.pos);
-      const hit = (o.m.mode === Mode.Dive && d < KEEP.steal) || (o.m.holding === h.m && d < KEEP.steal + 0.4);
-      if (!hit) continue;
-      // (it's yours if you're the one who hit them)
-      A.holder = o.m.id;
-      this.safeT = t + KEEP.safe;
-      this.taken = { id: o.m.id, how: 'stole' };
-      return true;
+      if (o.m.holding === h.m && d < KEEP.steal + 0.4) {
+        // (a grab takes it clean)
+        this.give(o, 'stole', t);
+        return true;
+      }
+      if (o.m.mode === Mode.Dive && d < KEEP.steal) {
+        // (a dive sends it flying the way you were going: you're first to it, if you get up quick)
+        this.loosen(t, h.m.pos, o.m.vel.x, o.m.vel.z, 5 + Math.random() * 2.5);
+        this.knocked = o.m.id;
+        return true;
+      }
     }
     return false;
   }
   private safeT = 0;
 
+  private x(t: number) {
+    return t - this.go.go;
+  }
+
   /** how close the leader is, and who it is */
   winner() {
     for (const r of this.who()) if ((this.held.get(r.m.id) ?? 0) >= KEEP.hold) return r;
     return null;
+  }
+  /** past the clock with someone else holding it and still able to catch the leader? */
+  overtime() {
+    const A = this.arena;
+    return A.holder >= 0 && this.ranking()[0]?.m.id !== A.holder;
   }
   ranking() {
     return [...this.who()].sort((a, b) => (this.held.get(b.m.id) ?? 0) - (this.held.get(a.m.id) ?? 0) || b.c.skill - a.c.skill);
@@ -426,18 +481,49 @@ export class KeepPlay {
     });
   }
 
-  /** the crown on its bean's head, or spinning on the floor under a shaft of light */
+  /** where a loose crown is now: in the air on its arc, or hovering over its spot */
+  private place(t: number) {
+    const A = this.arena;
+    const gy = A.groundAt(A.x, A.z) + 1.05;
+    const f = this.fly;
+    if (f && t < f.t + f.dur) {
+      const k = (t - f.t) / f.dur;
+      this.at.set(f.x + (A.x - f.x) * k, f.y + (gy - f.y) * k + Math.sin(k * Math.PI) * f.h, f.z + (A.z - f.z) * k);
+      return true;
+    }
+    this.fly = null;
+    this.at.set(A.x, gy + Math.sin(t * 3) * 0.14, A.z);
+    return false;
+  }
+
+  /** the crown on its bean's head, or in the air, or spinning on the floor in a shaft of light */
   sync(t: number) {
     const A = this.arena;
     const h = A.holder >= 0 ? this.who().find((r) => r.m.id === A.holder) : null;
+    A.share = h ? Math.min(1, (this.held.get(h.m.id) ?? 0) / KEEP.hold) : 0;
     this.beam.visible = !h;
+    this.shaft.visible = this.halo.visible = !!h;
     if (h) {
-      this.crown.position.set(h.m.pos.x, h.m.pos.y + 1.42, h.m.pos.z);
+      this.at.set(h.m.pos.x, h.m.pos.y + 1.34, h.m.pos.z);
+      this.crown.position.copy(this.at);
       this.crown.rotation.set(0, t * 2, 0);
-    } else {
-      this.crown.position.set(A.x, A.center.y + 1.1 + Math.sin(t * 3) * 0.14, A.z);
-      this.crown.rotation.set(0, t * 1.5, 0);
-      this.beam.position.set(A.x, A.center.y, A.z);
+      this.crown.scale.setScalar(0.5 + 0.12 * A.share);
+      this.shaft.position.set(h.m.pos.x, h.m.pos.y, h.m.pos.z);
+      this.halo.position.set(h.m.pos.x, h.m.pos.y - 0.42, h.m.pos.z);
+      this.halo.scale.setScalar(1 + Math.sin(t * 6) * 0.08 + A.share * 0.5);
+      (this.shaft.material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.34 * A.share;
+      this.mark.visible = false;
+      return;
+    }
+    const flying = this.place(t);
+    this.crown.position.copy(this.at);
+    this.crown.rotation.set(flying ? t * 9 : 0, t * (flying ? 11 : 1.5), 0);
+    this.crown.scale.setScalar(0.86);
+    this.beam.position.set(this.at.x, A.groundAt(A.x, A.z), this.at.z);
+    this.mark.visible = flying;
+    if (flying) {
+      this.mark.position.set(A.x, A.groundAt(A.x, A.z) + 0.07, A.z);
+      this.mark.scale.setScalar(1 + Math.sin(t * 14) * 0.15);
     }
   }
 }

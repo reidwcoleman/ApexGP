@@ -14,6 +14,7 @@ import { biome, BIOMES } from './biome.ts';
 import { ballLook, cannon, crystal, fanGust, floatRock, geysers, ghostPads, iceSheet, jellyCube, jellyDeck, laserGate, moonField, quicksand, rapids, stamper } from './obs-world.ts';
 import { gantry } from './obs-kit.ts';
 import { lake, paintLakeFor } from './env.ts';
+import { boostStrip, castleGate, slickField, springStrip } from './obs-fun.ts';
 
 /**
  * Platform courses: wide padded decks floating in the sky with open edges (fall off and it's back
@@ -308,6 +309,41 @@ export const ZONES: Record<string, (k: string) => Zone> = {
       });
     },
     cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 2],
+  }),
+  /** the spring strip: the whole deck throws the field across a chasm, through the hoops */
+  launch: (k) => ({
+    cmds: [flat({ len: 12, w: 15, tag: k + 'pre' }), flat({ len: 7, w: 15, tag: k + 'pad' }), flat({ len: 2.5, w: 15 }), { len: 26, slope: 3, w: 15, bank: 0, wall: 0, floor: false, tag: k + 'gap' }, flat({ len: 22, w: 17, tag: k + 'land' })],
+    place: ({ b, path, t }) => {
+      const [p0, p1] = t(k + 'pad');
+      const [l0] = t(k + 'land');
+      springStrip(b, path, p0, p1, 15, { landS: l0 + 8, T: 1.6, grav: GRAV });
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'land')[0] + 12],
+    gaps: ({ t }) => [t(k + 'gap')],
+  }),
+  /** the big slide: slick and walled, a boost at the top, an S down the hill */
+  slide: (k) => ({
+    cmds: [flat({ len: 8, w: 12, wall: 1.5, tag: k + 'pre' }), flat({ len: 22, slope: 10, turn: 28, w: 12, wall: 1.7, easeS: 4, tag: k + 'a' }), flat({ len: 26, slope: 10, turn: -46, w: 12, wall: 1.7, tag: k + 'b' }), flat({ len: 12, slope: 7, turn: 18, w: 13, wall: 1.5, tag: k + 'c' }), flat({ len: 10, w: 14, wall: 0.8, easeS: 3, tag: k + 'post' })],
+    place: ({ b, path, t }) => {
+      const [p0] = t(k + 'pre');
+      const [a0] = t(k + 'a');
+      const [, c1] = t(k + 'c');
+      boostStrip(b, path, p0 + 1.5, 11);
+      slickField(b, path, a0, c1, { grip: 0.32, run: 1.32 });
+      // (stars down the racing line, swinging from wall to wall)
+      for (let s = a0 + 5, q = 0; s < c1 - 3; s += 3.4, q++) b.starSpots.push(path.at(s, Math.sin(q * 0.55) * 3.8, 1));
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 5],
+  }),
+  /** the last climb of the final: a great ramp up to the castle gate, gold balls rolling down it */
+  peak: (k) => ({
+    cmds: [flat({ len: 8, w: 18, tag: k + 'pre' }), flat({ len: 52, slope: -11, w: 18, wall: 1.3, easeS: 4, tag: k + 'z' }), flat({ len: 10, w: 18, wall: 1.3, easeS: 3, tag: k + 'post' })],
+    place: ({ b, path, t, n }) => {
+      const [z0, z1] = t(k + 'z');
+      rollDown(b, path, z0, z1, { lanes: [-6.8, -3.4, 0, 3.4, 6.8], period: 2.5, speed: 9.2, phase: n, colors: [PAINT.yellow, col(n), PAINT.yellow, col(n + 2), PAINT.yellow] });
+      boostStrip(b, path, t(k + 'pre')[0] + 1, 16);
+    },
+    cps: ({ t }) => [t(k + 'pre')[0] + 1, t(k + 'post')[0] + 3],
   }),
   /** an uphill run with balls dropping out of hoppers at the top and rolling down at you */
   rolldown: (k) => ({
@@ -629,11 +665,16 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
   const [f0] = t('finish');
   const fs = f0 + 14;
   finishDressing(b, path, fs);
+  // (a boost out of every other corner: the racing line pays)
+  turns.forEach((u, q) => {
+    if (q % 2 === 0 && path.sec[path.index(u.s1 + 3)].floor) boostStrip(b, path, u.s1 + 0.5, 7);
+  });
   let crown: THREE.Object3D | undefined;
   if (spec.final) {
     crown = makeCrown();
     crown.position.copy(path.at(fs + 6, 0, 3.1));
     b.group.add(crown);
+    castleGate(b, path, fs + 1.5, 15);
   }
   dressCourse(b, path, {
     zones: zones.map(({ s0, s1 }, q) => ({ s0, s1, color: biome().deck.arch[(q * 3 + spec.id.length) % biome().deck.arch.length] })),
@@ -691,25 +732,25 @@ export function genCourse(spec: GenSpec, info: { name: string; blurb: string }):
 
 /** the platform courses */
 export const GEN: Record<string, GenSpec> = {
-  hopscotch: { id: 'hopscotch', heading: 0, arch: PAINT.pink, steps: ['pins', 'R50', 'hop', 'S8', 'sweep', 'L70', 'planks', 'gap', 'jump', 'R45', 'jelly', 'up', 'mills', 'L40', 'bumpers'] },
-  bonkbay: { id: 'bonkbay', heading: 0.6, arch: PAINT.teal, steps: ['bumpers', 'L60', 'wreck', 'S6', 'spinner', 'R80', 'hammers', 'gap', 'pins', 'L45', 'bounce', 'mills', 'R50', 'gusts', 'sweep'] },
-  knockknock: { id: 'knockknock', heading: -0.4, arch: PAINT.orange, steps: ['doors', 'R60', 'sliders', 'up', 'conveyor', 'L70', 'ghosts', 'doors', 'R45', 'logs', 'pins', 'L50', 'turnstiles'] },
-  whirligig: { id: 'whirligig', heading: 1.2, arch: PAINT.purple, steps: ['turnstiles', 'L50', 'spinner', 'S8', 'mills', 'R70', 'sweep', 'moon', 'spinner', 'L60', 'bumpers', 'up', 'turnstiles'] },
-  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'rolldown', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'punch', 'jump', 'sliders', 'L45', 'mills'] },
-  wobblewalk: { id: 'wobblewalk', heading: -1, arch: PAINT.green, steps: ['saws', 'L45', 'slides', 'R60', 'planks', 'hop', 'pins', 'L70', 'saws', 'gap', 'rapids', 'R40', 'bounce', 'up', 'sweep'] },
-  skystairs: { id: 'skystairs', heading: 0.9, arch: PAINT.blue, steps: ['climb', 'R50', 'conveyor', 'up', 'ice', 'L60', 'jump', 'climb', 'R70', 'sweep', 'up', 'hop', 'mills'] },
-  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'spinner', 'S6', 'jelly', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
-  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'R45', 'hammers', 'gap', 'slides', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'hop', 'rolldown', 'L50', 'wreck', 'cannons', 'sweep'] },
-  punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'lasers', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
+  hopscotch: { id: 'hopscotch', heading: 0, arch: PAINT.pink, steps: ['pins', 'R50', 'hop', 'S8', 'sweep', 'L70', 'launch', 'planks', 'gap', 'jump', 'R45', 'jelly', 'up', 'mills', 'L40', 'bumpers'] },
+  bonkbay: { id: 'bonkbay', heading: 0.6, arch: PAINT.teal, steps: ['bumpers', 'L60', 'wreck', 'S6', 'spinner', 'R80', 'slide', 'hammers', 'gap', 'pins', 'L45', 'bounce', 'mills', 'R50', 'gusts', 'sweep'] },
+  knockknock: { id: 'knockknock', heading: -0.4, arch: PAINT.orange, steps: ['doors', 'R60', 'sliders', 'up', 'conveyor', 'launch', 'L70', 'ghosts', 'doors', 'R45', 'logs', 'pins', 'L50', 'turnstiles'] },
+  whirligig: { id: 'whirligig', heading: 1.2, arch: PAINT.purple, steps: ['turnstiles', 'L50', 'spinner', 'S8', 'slide', 'mills', 'R70', 'sweep', 'moon', 'spinner', 'L60', 'bumpers', 'up', 'turnstiles'] },
+  bonkalley: { id: 'bonkalley', heading: 0.2, arch: PAINT.red, steps: ['hammers', 'R60', 'rolldown', 'launch', 'axes', 'L60', 'bounce', 'gap', 'wreck', 'R50', 'punch', 'jump', 'sliders', 'L45', 'mills'] },
+  wobblewalk: { id: 'wobblewalk', heading: -1, arch: PAINT.green, steps: ['saws', 'L45', 'slides', 'R60', 'planks', 'hop', 'slide', 'pins', 'L70', 'saws', 'gap', 'rapids', 'R40', 'bounce', 'up', 'sweep'] },
+  skystairs: { id: 'skystairs', heading: 0.9, arch: PAINT.blue, steps: ['climb', 'R50', 'conveyor', 'up', 'ice', 'L60', 'launch', 'jump', 'climb', 'R70', 'sweep', 'up', 'hop', 'mills'] },
+  jellyjunction: { id: 'jellyjunction', heading: -0.7, arch: PAINT.yellow, steps: ['logs', 'R45', 'sweep', 'gap', 'doors', 'L70', 'launch', 'spinner', 'S6', 'jelly', 'R60', 'saws', 'up', 'bumpers', 'L50', 'hammers'] },
+  crownpeak: { id: 'crownpeak', heading: 0.3, arch: PAINT.yellow, final: true, steps: ['pins', 'up', 'R45', 'hammers', 'climb', 'launch', 'L60', 'punch', 'spinner', 'up', 'doors', 'R60', 'axes', 'rolldown', 'hop', 'up', 'L50', 'wreck', 'climb', 'cannons', 'launch', 'R45', 'sweep', 'peak'] },
+  punchline: { id: 'punchline', heading: -0.2, arch: PAINT.red, steps: ['punch', 'R50', 'gates', 'up', 'slide', 'lasers', 'L60', 'sweep', 'gap', 'punch', 'R45', 'spinner', 'hop', 'rolldown', 'L50', 'gates'] },
   lavarush: { id: 'lavarush', heading: 0.5, arch: PAINT.orange, lava: 122, steps: ['climb', 'up', 'rolldown', 'R50', 'geysers', 'up', 'conveyor', 'up', 'hop', 'up', 'punch', 'L50', 'climb', 'up', 'rolldown'] },
-  rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'quicksand', 'gates', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
+  rumblehill: { id: 'rumblehill', heading: 0.8, arch: PAINT.teal, steps: ['rolldown', 'L45', 'quicksand', 'gates', 'slide', 'R70', 'wreck', 'gap', 'rolldown', 'L50', 'punch', 'S6', 'bumpers', 'R45', 'mills'] },
   // the new worlds and the new modes
-  petalpass: { id: 'petalpass', heading: 0.4, arch: PAINT.pink, tag: 'Race · Mind the wind', steps: ['pins', 'L50', 'gusts', 'up', 'slides', 'R60', 'jelly', 'gap', 'gusts', 'L45', 'planks', 'hop', 'sweep'] },
-  ticktock: { id: 'ticktock', heading: -0.9, arch: PAINT.orange, tag: 'Race · Clockwork', steps: ['stampers', 'R50', 'conveyor', 'up', 'spinner', 'L60', 'sliders', 'gap', 'stampers', 'R45', 'gates', 'hop', 'turnstiles', 'L40', 'stampers'] },
-  moonrun: { id: 'moonrun', heading: 1.6, arch: PAINT.purple, grav: 0.62, tag: 'Race · Low gravity all the way', steps: ['moon', 'R45', 'turnstiles', 'lasers', 'L60', 'moon', 'up', 'spinner', 'R50', 'moon'] },
-  discodash: { id: 'discodash', heading: 0.2, arch: PAINT.pink, tag: 'Race · On the beat', steps: ['lasers', 'R50', 'spinner', 'S6', 'sweep', 'L60', 'turnstiles', 'up', 'lasers', 'R45', 'hop', 'mills'] },
-  bigtop: { id: 'bigtop', heading: -0.6, arch: PAINT.orange, tag: 'Race · Roll up, roll up', steps: ['bounce', 'L50', 'hammers', 'S6', 'planks', 'R60', 'wreck', 'gap', 'bumpers', 'L45', 'jelly', 'sweep'] },
-  treasuretrail: { id: 'treasuretrail', heading: 1.1, arch: PAINT.teal, tag: 'Race · Mind the cannons', steps: ['cannons', 'R50', 'planks', 'hop', 'rapids', 'L60', 'gusts', 'up', 'cannons', 'R45', 'sliders', 'gap'] },
-  blockparty: { id: 'blockparty', heading: -1.0, arch: PAINT.blue, tag: 'Race · Through the toy box', steps: ['stampers', 'L50', 'rolldown', 'R60', 'jelly', 'sliders', 'up', 'doors', 'L45', 'stampers', 'mills'] },
-  sliprink: { id: 'sliprink', heading: -1.3, arch: PAINT.blue, grip: 0.3, tag: 'Race · Everything is ice', steps: ['pins', 'R50', 'rolldown', 'L60', 'doors', 'up', 'mills', 'R45', 'turnstiles', 'S6', 'hammers'] },
+  petalpass: { id: 'petalpass', heading: 0.4, arch: PAINT.pink, tag: 'Race · Mind the wind', steps: ['pins', 'L50', 'gusts', 'up', 'slides', 'launch', 'R60', 'jelly', 'gap', 'gusts', 'L45', 'planks', 'hop', 'sweep'] },
+  ticktock: { id: 'ticktock', heading: -0.9, arch: PAINT.orange, tag: 'Race · Clockwork', steps: ['stampers', 'R50', 'conveyor', 'up', 'launch', 'spinner', 'L60', 'sliders', 'gap', 'stampers', 'R45', 'gates', 'hop', 'turnstiles', 'L40', 'stampers'] },
+  moonrun: { id: 'moonrun', heading: 1.6, arch: PAINT.purple, grav: 0.62, tag: 'Race · Low gravity all the way', steps: ['moon', 'R45', 'turnstiles', 'lasers', 'launch', 'L60', 'moon', 'up', 'spinner', 'R50', 'moon'] },
+  discodash: { id: 'discodash', heading: 0.2, arch: PAINT.pink, tag: 'Race · On the beat', steps: ['lasers', 'R50', 'spinner', 'S6', 'slide', 'sweep', 'L60', 'turnstiles', 'up', 'lasers', 'R45', 'hop', 'mills'] },
+  bigtop: { id: 'bigtop', heading: -0.6, arch: PAINT.orange, tag: 'Race · Roll up, roll up', steps: ['bounce', 'L50', 'hammers', 'S6', 'launch', 'planks', 'R60', 'wreck', 'gap', 'bumpers', 'L45', 'jelly', 'sweep'] },
+  treasuretrail: { id: 'treasuretrail', heading: 1.1, arch: PAINT.teal, tag: 'Race · Mind the cannons', steps: ['cannons', 'R50', 'planks', 'hop', 'launch', 'rapids', 'L60', 'gusts', 'up', 'cannons', 'R45', 'sliders', 'gap'] },
+  blockparty: { id: 'blockparty', heading: -1.0, arch: PAINT.blue, tag: 'Race · Through the toy box', steps: ['stampers', 'L50', 'rolldown', 'R60', 'slide', 'jelly', 'sliders', 'up', 'doors', 'L45', 'stampers', 'mills'] },
+  sliprink: { id: 'sliprink', heading: -1.3, arch: PAINT.blue, grip: 0.3, tag: 'Race · Everything is ice', steps: ['pins', 'R50', 'rolldown', 'L60', 'launch', 'doors', 'up', 'mills', 'R45', 'turnstiles', 'S6', 'hammers'] },
 };

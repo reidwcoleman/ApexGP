@@ -9,18 +9,16 @@ import { glowMat } from './obs-world.ts';
 import { addStrikes, type Hit3, type Strikes } from './course-strikes.ts';
 
 /**
- * The four rounds that aren't races or plain survivals, each its own game:
+ * The rounds that aren't races or plain survivals, each its own game:
  *
  *  Colour Call (disco): a dance floor of colour. A colour is called, every other tile drops.
  *  Hot Spud (circus): a ring, a few spuds with a lit fuse. Touch someone to pass yours on; whoever
  *    holds one when it goes off is out.
- *  Gold Rush (pirate): a chest on an island spits gold. Grab it, knock it out of the others, keep
- *    out of the sea. The ones with the least go home.
  *  Belt Rush (toybox): a huge belt carrying toy blocks at you, faster and faster. Dodge them, hop
  *    the low ones and stay on: off the back and you're out.
  *
  * What happens in Colour Call and Belt Rush is a pure function of the round's clock (seeded), so
- * every browser sees the same thing; the spuds and the gold are the host's (modes.ts).
+ * every browser sees the same thing; the spuds are the host's (modes.ts).
  */
 
 const seeded = (s: number) => {
@@ -495,182 +493,6 @@ export function hotSpud(info: { name: string; blurb: string }): Course {
     grid: (n) => ringGrid(center, n, 5, 3.4, 9),
     plate: { center, radius: R, bars: [] },
     spud: arena,
-    intro: [],
-  };
-}
-
-// ----------------------------------------------------------------------------------------- Gold Rush
-export const GOLD = { R: 15.5, T: 90, fly: 0.85, life: 11, take: 1.25, chest: 1.9, frenzy: 15, treasure: 16, big: 20 };
-
-export interface Coin {
-  k: number;
-  t: number;
-  x: number;
-  z: number;
-  v: number;
-}
-export interface GoldArena {
-  center: THREE.Vector3;
-  R: number;
-  /** the chest's coins, in the order they fly (seconds after the off) */
-  coins: Coin[];
-  /** the cannons on the rim of the bay */
-  shots: Strikes;
-}
-
-export function goldRush(info: { name: string; blurb: string }): Course {
-  const b = new CourseBuilder();
-  const center = new THREE.Vector3(0, 116, 0);
-  const R = GOLD.R;
-  const state = { go: 1e9 };
-  // (an island in the sea, not over it: fall in and you're in the surf)
-  b.lakeY = center.y - 2.6;
-  // the coins: every one from the chest, seeded
-  const coins: Coin[] = [];
-  {
-    const rnd = seeded(2207);
-    let t = 0.6, k = 0;
-    while (t < GOLD.T + 2) {
-      const a = rnd() * Math.PI * 2, r = GOLD.chest + 1 + (R - GOLD.chest - 2.2) * Math.sqrt(rnd());
-      // (the last stretch is a frenzy: twice the coins, far more big ones)
-      const mad = t > GOLD.T - GOLD.frenzy;
-      coins.push({ k: k++, t, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: k % (mad ? 4 : 11) === 0 ? 5 : 1 });
-      t += Math.max(0.1, 0.2 - t * 0.0016) * (0.7 + rnd() * 0.6) * (mad ? 0.55 : 1);
-    }
-    // (now and then a treasure bag, worth a fight)
-    for (let q = GOLD.treasure; q < GOLD.T - 3; q += GOLD.treasure) {
-      const a = rnd() * Math.PI * 2, r = GOLD.chest + 3 + (R - GOLD.chest - 6) * rnd();
-      coins.push({ k: k++, t: q, x: center.x + Math.cos(a) * r, z: center.z + Math.sin(a) * r, v: GOLD.big });
-    }
-    coins.sort((p, q) => p.t - q.t);
-  }
-  // the cannons: a shot every couple of seconds, more near the end. A hit spills your gold
-  const shotList: Hit3[] = [];
-  {
-    const rnd = seeded(40917);
-    for (let k = 0; k < 8; k++) rnd();
-    for (let t = 5; t < GOLD.T + 1; t += Math.max(0.9, 2.3 - t * 0.015) * (0.8 + rnd() * 0.4)) {
-      const a = rnd() * Math.PI * 2, r = GOLD.chest + 2 + (R - GOLD.chest - 3) * Math.sqrt(rnd());
-      shotList.push({ t, x: center.x + Math.cos(a) * r, y: center.y, z: center.z + Math.sin(a) * r, r: 2.2 });
-    }
-  }
-  const shots = addStrikes(b, { list: shotList, warn: 1.5, state, ring: 0xff5030, ball: { color: 0x22222a, r: 0.7 }, box: [new THREE.Vector3(center.x - R - 3, center.y - 2, center.z - R - 3), new THREE.Vector3(center.x + R + 3, center.y + 5, center.z + R + 3)], out: 7.5, up: 7 });
-  // the island: a sandy round with a rocky rim, no rail: the sea is right there
-  {
-    const top = new THREE.CircleGeometry(R, 96).rotateX(-Math.PI / 2).translate(center.x, center.y, center.z);
-    b.world.statics.addGeometry(top, Mat.Paint);
-    const sand = document.createElement('canvas');
-    sand.width = sand.height = 512;
-    const x = sand.getContext('2d')!;
-    const gr = x.createRadialGradient(256, 256, 40, 256, 256, 256);
-    gr.addColorStop(0, '#f6dca0');
-    gr.addColorStop(0.82, '#f0cc88');
-    gr.addColorStop(0.93, '#e0b070');
-    gr.addColorStop(1, '#6ad0c8');
-    x.fillStyle = gr;
-    x.fillRect(0, 0, 512, 512);
-    const rnd = seeded(77);
-    for (let k = 0; k < 2600; k++) {
-      x.fillStyle = `rgba(${rnd() < 0.5 ? '120,80,40' : '255,240,200'},${0.05 + rnd() * 0.15})`;
-      x.fillRect(rnd() * 512, rnd() * 512, 2, 2);
-    }
-    // an X marks the spot
-    x.strokeStyle = 'rgba(190,50,40,0.75)';
-    x.lineWidth = 11;
-    x.lineCap = 'round';
-    for (const [a, c] of [[120, 392], [392, 120]]) {
-      x.beginPath();
-      x.moveTo(a, 120);
-      x.lineTo(c, 392);
-      x.stroke();
-    }
-    const tx = new THREE.CanvasTexture(sand);
-    tx.colorSpace = THREE.SRGBColorSpace;
-    const tm = new THREE.Mesh(top, new THREE.MeshStandardMaterial({ map: tx, roughness: 0.92 }));
-    tm.receiveShadow = true;
-    b.group.add(tm);
-    const under = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.2, R * 0.55, 14, 28, 2).translate(center.x, center.y - 7.04, center.z), new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.95, flatShading: true }));
-    b.group.add(under);
-  }
-  // the chest in the middle (solid: you run round it), its lid thrown back and gold heaped inside
-  {
-    const c = GOLD.chest;
-    const body = new THREE.BoxGeometry(c * 1.7, 1.3, c * 1.25).translate(center.x, center.y + 0.65, center.z);
-    b.world.statics.addGeometry(body, Mat.Paint);
-    const wood = new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.7 });
-    const iron = new THREE.MeshStandardMaterial({ color: 0xd8a830, roughness: 0.3, metalness: 0.8 });
-    const m = new THREE.Mesh(body, wood);
-    m.castShadow = m.receiveShadow = true;
-    b.group.add(m);
-    for (const e of [-1, 1]) b.group.add(new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.36, c * 1.3).translate(center.x + e * c * 0.55, center.y + 0.65, center.z), iron));
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(c * 0.62, c * 0.62, c * 1.72, 16, 1, false, 0, Math.PI).rotateZ(Math.PI / 2).translate(center.x, center.y + 1.8, center.z - c * 0.72), wood);
-    b.group.add(lid);
-    const heap = new THREE.Mesh(new THREE.SphereGeometry(c * 0.7, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(1.15, 0.42, 0.8).translate(center.x, center.y + 1.28, center.z), new THREE.MeshStandardMaterial({ color: 0xffc830, roughness: 0.25, metalness: 0.9, emissive: 0x8a5a00, emissiveIntensity: 0.5 }));
-    b.group.add(heap);
-    // (it rattles as it spits, harder in the frenzy)
-    b.animators.push((t) => {
-      const x = t - state.go;
-      const k = x < 0 || x > GOLD.T ? 0 : x > GOLD.T - GOLD.frenzy ? 1 : 0.4;
-      lid.position.y = Math.abs(Math.sin(t * 13)) * 0.16 * k;
-      lid.rotation.z = Math.sin(t * 21) * 0.006 * k;
-      heap.scale.y = 1 + 0.1 * k * Math.sin(t * 17);
-    });
-  }
-  // the surf round the island
-  {
-    const foam = new THREE.Mesh(new THREE.RingGeometry(R - 1.2, R + 3.2, 96, 1).rotateX(-Math.PI / 2).translate(center.x, b.lakeY + 0.06, center.z), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }));
-    const foam2 = new THREE.Mesh(new THREE.RingGeometry(R + 3.6, R + 4.3, 96, 1).rotateX(-Math.PI / 2).translate(center.x, b.lakeY + 0.06, center.z), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false }));
-    b.group.add(foam, foam2);
-    b.animators.push((t) => {
-      const s = 1 + 0.018 * Math.sin(t * 1.1);
-      foam.scale.set(s, 1, s);
-      foam.position.x = center.x * (1 - s);
-      foam.position.z = center.z * (1 - s);
-      foam2.scale.set(2 - s, 1, 2 - s);
-      (foam2.material as THREE.MeshBasicMaterial).opacity = 0.2 + 0.18 * Math.sin(t * 1.1 + 1);
-    });
-  }
-  // palms and barrels at the edge (you can use them to hide; a knock into the sea is still a knock)
-  {
-    const trunk = new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 0.8 });
-    const leaf = new THREE.MeshStandardMaterial({ color: 0x2fa84a, roughness: 0.7, side: THREE.DoubleSide });
-    for (let k = 0; k < 3; k++) {
-      const a = 0.5 + (k / 3) * Math.PI * 2, r = R - 3.6;
-      const x = center.x + Math.cos(a) * r, z = center.z + Math.sin(a) * r;
-      const g = new THREE.CylinderGeometry(0.3, 0.46, 7, 10).translate(x, center.y + 3.5, z);
-      b.world.statics.addGeometry(new THREE.CylinderGeometry(0.46, 0.46, 3, 10).translate(x, center.y + 1.5, z), Mat.Paint);
-      const m = new THREE.Mesh(g, trunk);
-      m.castShadow = true;
-      b.group.add(m);
-      for (let q = 0; q < 7; q++) {
-        const fa = (q / 7) * Math.PI * 2;
-        const l = new THREE.Mesh(new THREE.ConeGeometry(0.75, 3.8, 4).scale(1, 1, 0.2).translate(0, 1.9, 0), leaf);
-        l.position.set(x, center.y + 7, z);
-        l.rotation.set(0, -fa, 1.95);
-        l.castShadow = true;
-        b.group.add(l);
-      }
-    }
-  }
-  title(b, info, 'Most gold wins · Least goes home', 0xffb020, new THREE.Vector3(center.x, center.y + 8, center.z - R - 6));
-  dressArena(b, new THREE.Vector3(center.x, center.y - 2, center.z), R + 6, 41);
-  b.finish();
-  return {
-    id: 'goldrush',
-    name: info.name,
-    kind: 'score',
-    blurb: info.blurb,
-    b,
-    path: null,
-    finishS: 0,
-    gaps: [],
-    checkpoints: [],
-    killY: center.y - 2.2,
-    lakeY: b.lakeY,
-    state,
-    grid: (n) => ringGrid(center, n, 4.2, 3.2, 9),
-    plate: { center, radius: R, bars: [] },
-    gold: { center, R, coins, shots },
     intro: [],
   };
 }

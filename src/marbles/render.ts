@@ -110,7 +110,7 @@ export class Stage {
     // anti-aliasing: temporal by default (?aa=smaa for the edge filter instead)
     this.aa = this.aaMode();
     if (this.aa === 'taa') c.addPass((this.taa = new TAAPass()));
-    const bloom = new BloomEffect({ mipmapBlur: true, levels: 5, luminanceThreshold: 1.0, luminanceSmoothing: 0.35, intensity: 0.6, radius: 0.65 });
+    const bloom = new BloomEffect({ mipmapBlur: true, levels: 5, luminanceThreshold: 1.0, luminanceSmoothing: 0.35, intensity: 0.72, radius: 0.68 });
     const tmq = new URLSearchParams(location.search).get('tm');
     const tm = new ToneMappingEffect({ mode: tmq === 'agx' ? ToneMappingMode.AGX : tmq === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
     c.addPass(new EffectPass(camera, bloom, tm, new GradeEffect(), new VignetteEffect({ darkness: 0.28, offset: 0.35 })));
@@ -181,9 +181,10 @@ export class Stage {
     fog.density = b.fog;
     this.hemi.color.set(b.hemi.sky);
     this.hemi.groundColor.set(b.hemi.ground);
-    this.hemi.intensity = b.hemi.k;
+    // (a little less fill and a little more sun than the worlds ask for: everything reads as solid)
+    this.hemi.intensity = b.hemi.k * 0.86;
     this.sun.color.set(b.sun.color);
-    this.sun.intensity = b.sun.k;
+    this.sun.intensity = b.sun.k * 1.1;
     const old = this.scene.environment;
     this.scene.environment = environment(this.renderer, SUN, b);
     old?.dispose();

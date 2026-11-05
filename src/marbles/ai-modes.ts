@@ -1,7 +1,10 @@
 import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { BELT, CALL, GOLD, shownTiles, type BeltRow, type Coin } from './course-modes.ts';
+import * as THREE from 'three';
+import { BELT, CALL, shownTiles, type BeltRow } from './course-modes.ts';
+import { Pop, popValue, type Balloon } from './course-bounce.ts';
 import { dodge } from './course-strikes.ts';
+import { KEEP, type KeepArena } from './course-crown.ts';
 
 /** The bots for the four party games (course-modes.ts). */
 
@@ -142,138 +145,216 @@ export class SpudBrain {
   }
 }
 
-/** Gold Rush: the best coin for the running (a big one's worth a detour), and clear of the edge */
-export class GoldBrain {
-  private target: Coin | null = null;
+/**
+ * Bounce House: it picks the balloon that's worth the steering, keeps clear of the thunder ones, and
+ * times a super bounce for a high one (how often it gets that right is how good it is).
+ */
+export class BounceBrain {
+  private target: Balloon | null = null;
   private next = 0;
-  private shoveCD = 0;
-  /** its own patch of the beach (a pack of bots after one coin is no game) */
   private hx: number;
   private hz: number;
   constructor(
     readonly m: Marble,
     readonly skill: number,
     private rnd: () => number,
-    private aggr: number,
   ) {
-    const a = rnd() * Math.PI * 2, r = 4 + rnd() * 8;
+    const a = rnd() * Math.PI * 2, r = 3 + rnd() * 9;
     this.hx = Math.cos(a) * r;
     this.hz = Math.sin(a) * r;
   }
-  update(dt: number, t: number, c: Course, all: Marble[], live: Coin[], taken: Set<number>, ease: number) {
-    const m = this.m, A = c.gold!;
-    this.shoveCD -= dt;
+  update(_dt: number, t: number, c: Course, live: Balloon[], popped: Set<number>, ease: number) {
+    const m = this.m, A = c.bounce!;
     const x = t - c.state.go;
-    if (t >= this.next || !this.target || taken.has(this.target.k)) {
-      this.next = t + 0.25 + (1 - this.skill) * 0.5 + ease * 0.45;
+    if (t >= this.next || !this.target || popped.has(this.target.k)) {
+      this.next = t + 0.3 + (1 - this.skill) * 0.5 + ease * 0.5;
       let bs = -Infinity;
       this.target = null;
-      for (const k of live) {
-        if (taken.has(k.k) || k.t + GOLD.fly - x > 0.3 - ease * 0.45) continue;
-        const d = Math.hypot(k.x - m.pos.x, k.z - m.pos.z);
-        const away = Math.hypot(k.x - A.center.x - this.hx, k.z - A.center.z - this.hz);
-        const sc = (k.v >= GOLD.big ? 7 : k.v > 1 ? 2.5 : 1) / (d + 2.5) - away * 0.012 + this.rnd() * (0.12 - 0.09 * this.skill);
-        if (sc > bs) (bs = sc), (this.target = k);
+      for (const q of live) {
+        if (q.kind === Pop.Thunder || popped.has(q.k) || q.t + 0.5 > x) continue;
+        A.at(q, x, BP);
+        const d = Math.hypot(BP.x - m.pos.x, BP.z - m.pos.z);
+        const sc = popValue(q.kind) ** 0.6 / (d + 2.5) + this.rnd() * (0.14 - 0.1 * this.skill);
+        if (sc > bs) (bs = sc), (this.target = q);
       }
     }
-    const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z, pr = Math.hypot(px, pz);
-    if (pr > A.R - 1.2) {
-      m.input.set(-px / pr, 0, -pz / pr);
-      return;
+    let gx = A.center.x + this.hx, gz = A.center.z + this.hz, high = false;
+    if (this.target) {
+      A.at(this.target, x, BP);
+      gx = BP.x;
+      gz = BP.z;
+      high = this.target.h > 3.3;
     }
-    // (out from under a cannonball, if it's seen it)
-    const out = dodge(A.shots, m, x, 0.7 - 0.5 * this.skill + ease * 0.3);
-    if (out) {
-      m.input.set(out[0], 0, out[1]);
-      return;
-    }
-    // a knock spills gold: a rough one goes for whoever is right next to it
-    if (this.aggr > 0.45 && this.shoveCD <= 0 && m.grounded) {
-      for (const o of all) {
-        if (o === m || !o.active) continue;
-        const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z, od = Math.hypot(ox, oz);
-        if (od < 2.2 && od > 0.3 && this.rnd() < 0.03 * this.aggr) {
-          m.input.set(ox / od, 0, oz / od);
-          m.dash = true;
-          this.shoveCD = 2.5 + this.rnd() * 2;
-          return;
-        }
+    let dx = gx - m.pos.x, dz = gz - m.pos.z;
+    // (round a thunder balloon in the way)
+    for (const q of live) {
+      if (q.kind !== Pop.Thunder || popped.has(q.k)) continue;
+      A.at(q, x, BP);
+      const ox = m.pos.x - BP.x, oz = m.pos.z - BP.z, od = Math.hypot(ox, oz);
+      if (od < 2.6 && Math.abs(m.pos.y - BP.y) < 2.4 && this.rnd() < 0.4 + 0.6 * this.skill) {
+        dx += (ox / (od + 0.1)) * 5;
+        dz += (oz / (od + 0.1)) * 5;
       }
     }
-    if (!this.target) {
-      const hx = A.center.x + this.hx - m.pos.x, hz = A.center.z + this.hz - m.pos.z, hd = Math.hypot(hx, hz);
-      if (hd > 1) m.input.set(hx / hd, 0, hz / hd).multiplyScalar(0.7);
-      return;
-    }
-    const dx = this.target.x - m.pos.x, dz = this.target.z - m.pos.z, d = Math.hypot(dx, dz);
-    if (d > 0.15) m.input.set(dx / d, 0, dz / d);
-    // (round the chest, not into it)
-    const cd = Math.hypot(px, pz);
-    if (cd < GOLD.chest + 1.2 && cd > 0.1) {
-      const tx = -pz / cd, tz = px / cd;
-      const side = tx * dx + tz * dz > 0 ? 1 : -1;
-      m.input.set(tx * side + (px / cd) * 0.5, 0, tz * side + (pz / cd) * 0.5).normalize();
-    }
+    const d = Math.hypot(dx, dz);
+    if (d > 0.2) m.input.set(dx / d, 0, dz / d).multiplyScalar(Math.min(1, d / 2 + 0.2));
+    // the super bounce: pressed on the way down, as it nears the floor
+    if (high && m.vel.y < -6 && m.pos.y - A.center.y < 2.2 && this.rnd() < (0.1 + 0.3 * this.skill) * (1 - 0.5 * ease)) m.jump = true;
   }
 }
+const BP = new THREE.Vector3();
 
-/** Crown Keeper: with it, keep away from them all. Without it, get it */
+/**
+ * Crown Keeper. With it: get up to the throne if the way's clear (its clock runs double), else keep
+ * away from them all. Without it: go and get it, by the way that's actually there: a carpet from
+ * the outer courtyard, a hop pad from the inner one. Everyone watches the bars, the cannon rings and
+ * the flagstones about to go.
+ */
 export class KeepBrain {
-  private next = 0;
+  private wander = 0;
+  private wx = 0;
+  private wz = 0;
   constructor(
     readonly m: Marble,
     readonly skill: number,
     private rnd: () => number,
   ) {}
+  /** which carpet a spot is on (its angle), if any */
+  private carpet(A: KeepArena, x: number, z: number) {
+    const px = x - A.center.x, pz = z - A.center.z;
+    for (const a of A.ramps) {
+      const along = px * Math.cos(a) + pz * Math.sin(a), side = Math.abs(-px * Math.sin(a) + pz * Math.cos(a));
+      if (side <= KEEP.rampW / 2 + 0.2 && along >= KEEP.keepR - 0.4 && along <= KEEP.foot + 0.3) return a;
+    }
+    return null;
+  }
+  /** run for (x, z, y) by a way that's there: a carpet from its foot, a hop pad from the inner courtyard */
+  private go(A: KeepArena, x: number, y: number, z: number) {
+    const m = this.m, c = A.center;
+    const px = m.pos.x - c.x, pz = m.pos.z - c.z, pr = Math.hypot(px, pz);
+    // (beside a carpet isn't on it: its sides are walls)
+    const on = m.pos.y > A.groundAt(m.pos.x, m.pos.z) + 0.25 && m.pos.y > c.y + 0.7;
+    const mine = on ? this.carpet(A, m.pos.x, m.pos.z) : null, theirs = this.carpet(A, x, z);
+    const top = A.onTop(m.pos);
+    let gx = x, gz = z;
+    if (theirs !== null && theirs !== mine && !top) {
+      // (it's on a carpet: in by the foot, the sides are walls)
+      gx = c.x + Math.cos(theirs) * (KEEP.foot + 0.8);
+      gz = c.z + Math.sin(theirs) * (KEEP.foot + 0.8);
+      if (pr < KEEP.foot - 0.4 && y > c.y + 1.2) {
+        // (or from above, if we're nearer a hop)
+        ({ gx, gz } = this.hop(A, gx, gz));
+      }
+    } else if (y > c.y + 1.6 && !top && mine === null) {
+      if (pr > KEEP.foot - 0.4) {
+        let best = Infinity;
+        for (const a of A.ramps) {
+          const fx = c.x + Math.cos(a) * (KEEP.foot + 0.6), fz = c.z + Math.sin(a) * (KEEP.foot + 0.6);
+          const d = Math.hypot(fx - m.pos.x, fz - m.pos.z);
+          if (d < best) {
+            best = d;
+            gx = d < 1.6 ? c.x : fx;
+            gz = d < 1.6 ? c.z : fz;
+          }
+        }
+      } else ({ gx, gz } = this.hop(A, gx, gz));
+    } else if (y > c.y + 1.6 && mine !== null && !top) {
+      // (on a carpet already: straight up it)
+      gx = c.x;
+      gz = c.z;
+    }
+    const dx = gx - m.pos.x, dz = gz - m.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.1) m.input.set(dx / d, 0, dz / d);
+  }
+  private hop(A: KeepArena, gx: number, gz: number) {
+    const m = this.m;
+    let best = Infinity;
+    for (const p of A.pads) {
+      if (p.kind !== 'hop') continue;
+      const d = Math.hypot(p.x - m.pos.x, p.z - m.pos.z);
+      if (d < best) {
+        best = d;
+        gx = p.x;
+        gz = p.z;
+      }
+    }
+    return { gx, gz };
+  }
   update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.keep!;
     const x = t - c.state.go;
-    // the bar: a hop as it comes round
+    const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z, pr = Math.hypot(px, pz);
+    // the bars: a hop as one comes round (they only reach the outer courtyard)
     const a = A.bar(x + 0.22);
-    if (a !== null && m.grounded) {
-      const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z;
+    if (a !== null && m.grounded && pr > KEEP.foot - 0.5) {
       const side = Math.abs(px * Math.sin(a) + pz * Math.cos(a));
       if (side < 1.1 && this.rnd() < 0.3 + 0.6 * this.skill) m.jump = true;
     }
-    const px = m.pos.x - A.center.x, pz = m.pos.z - A.center.z, pr = Math.hypot(px, pz);
-    if (A.holder === m.id) {
-      // run from whoever's nearest, and away from the edge
-      let fx = 0, fz = 0;
+    const mine = A.holder === m.id;
+    if (mine) {
+      // run from whoever's near; with nobody near, up to the throne
+      let fx = 0, fz = 0, closest = Infinity;
       for (const o of all) {
         if (o === m || !o.active) continue;
         const dx = m.pos.x - o.pos.x, dz = m.pos.z - o.pos.z, d = Math.hypot(dx, dz) || 1;
-        if (d < 11) (fx += (dx / d) * (11 - d)), (fz += (dz / d) * (11 - d));
+        closest = Math.min(closest, d);
+        if (d < 9) (fx += (dx / d) * (9 - d)), (fz += (dz / d) * (9 - d));
       }
-      if (pr > A.R - 5) {
-        const k = ((pr - (A.R - 5)) / 5) * 9;
-        fx -= (px / pr) * k;
-        fz -= (pz / pr) * k;
+      const lim = A.onTop(m.pos) ? KEEP.keepR - 1.4 : KEEP.rim - 1;
+      // (the throne's only worth it while it's hot, or about to be)
+      const hot = A.hot(x + 2.2);
+      if (hot && A.onTop(m.pos) && closest > 3.2) {
+        // (sitting pretty: stay near the middle and let the clock run)
+        if (pr > 1.5) m.input.set(-px / pr, 0, -pz / pr).multiplyScalar(0.6);
+      } else if (hot && closest > 5.5 - 2 * ease) this.go(A, A.center.x, A.center.y + KEEP.top, A.center.z);
+      else {
+        if (pr > lim) {
+          const k = (pr - lim) * 3;
+          fx -= (px / pr) * k;
+          fz -= (pz / pr) * k;
+        }
+        const l = Math.hypot(fx, fz);
+        if (l > 0.05) m.input.set(fx / l, 0, fz / l);
+        // (nobody near: a lap of the inner courtyard, so it isn't a sitting duck)
+        else if (pr > 0.5) m.input.set(-pz / pr, 0, px / pr).multiplyScalar(0.7);
       }
-      const l = Math.hypot(fx, fz);
-      if (l > 0.05) m.input.set(fx / l, 0, fz / l);
-      else if (pr > 1) m.input.set(-px / pr, 0, -pz / pr).multiplyScalar(0.5);
-      return;
-    }
-    let dx = A.x - m.pos.x, dz = A.z - m.pos.z;
-    let reach = false;
-    if (A.holder >= 0) {
-      const h = all.find((o) => o.id === A.holder);
+    } else {
+      let tx = A.x, tz = A.z, ty = A.groundAt(A.x, A.z);
+      const h = A.holder >= 0 ? all.find((o) => o.id === A.holder) : null;
       if (h) {
         // (it leads a runner, a better one by more)
         const lead = 0.15 + 0.3 * this.skill;
-        dx = h.pos.x + h.vel.x * lead - m.pos.x;
-        dz = h.pos.z + h.vel.z * lead - m.pos.z;
-        reach = true;
+        tx = h.pos.x + h.vel.x * lead;
+        tz = h.pos.z + h.vel.z * lead;
+        ty = h.pos.y;
       }
+      // (not everyone piles straight in: some come round the side, so a scrum has somewhere to go)
+      if (t > this.wander) {
+        this.wander = t + 1.4 + this.rnd() * 1.6;
+        const q = this.rnd() * Math.PI * 2, w = this.rnd() < 0.5 ? 0 : 1.5 + 3 * ease;
+        this.wx = Math.cos(q) * w;
+        this.wz = Math.sin(q) * w;
+      }
+      const d0 = Math.hypot(tx - m.pos.x, tz - m.pos.z);
+      if (d0 > 5) (tx += this.wx), (tz += this.wz);
+      this.go(A, tx, ty, tz);
+      if (h && d0 < 3.6 && d0 > 0.9 && m.grounded && this.rnd() < (0.09 + 0.16 * this.skill) * (1 - 0.6 * ease)) m.dash = true;
+      // (a crown in the air: a hop as it goes over)
+      if (!h && d0 < 2 && m.grounded && this.rnd() < 0.1) m.jump = true;
     }
-    if (pr > A.R - 1.4) {
+    // the floor: in from the edge and off anything about to go
+    const ahead = 1.2 + 1.4 * this.skill;
+    if (!A.onTop(m.pos) && m.pos.y < A.center.y + 1 && pr > KEEP.rim - 1 && !A.solid(m.pos.x + m.input.x * 2.2, m.pos.z + m.input.z * 2.2, t + ahead)) {
       m.input.set(-px / pr, 0, -pz / pr);
       return;
     }
-    const d = Math.hypot(dx, dz);
-    if (d > 0.1) m.input.set(dx / d, 0, dz / d);
-    if (t >= this.next) this.next = t + 0.3;
-    if (reach && d < 3.2 && d > 0.9 && m.grounded && this.rnd() < (0.05 + 0.1 * this.skill) * (1 - 0.6 * ease)) m.dash = true;
+    if (pr > KEEP.R - 1.4 && pr > 0) {
+      m.input.set(-px / pr, 0, -pz / pr);
+      return;
+    }
+    // the cannon rings: out of them, if it's seen them
+    const away = dodge(A.blast, m, x, 1.3 - 0.9 * this.skill) ?? dodge(A.shots, m, x, 0.5 - 0.35 * this.skill);
+    if (away) m.input.set(away[0], 0, away[1]);
   }
 }
 

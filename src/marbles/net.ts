@@ -66,9 +66,9 @@ export type CtlMsg =
   /** Hot Spud: who has one now, and when they go off */
   | { t: 'spud'; h: number[]; end: number }
   /** Crown Keeper: who has it (-1: loose), where it lies, everyone's time */
-  | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole' }
-  /** Gold Rush: a coin taken (k, by id, worth v), someone's gold set (id, n), coins spilt (add) */
-  | { t: 'gold'; k?: number; id?: number; v?: number; n?: number; add?: [number, number, number, number][] }
+  | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
+  /** Bounce House: a balloon popped (k) by id, worth v at combo c, leaving them on n */
+  | { t: 'pop'; k: number; id: number; v: number; n: number; c: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }
   | { t: 'kick'; why: string };

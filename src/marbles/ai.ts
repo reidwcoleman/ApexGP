@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain, TideBrain } from './ai-arena.ts';
-import { BeltBrain, CallBrain, GoldBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
-import type { GoldPlay } from './modes.ts';
+import { BeltBrain, BounceBrain, CallBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
+import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
@@ -91,13 +91,13 @@ export class Bot {
   private tideB: TideBrain | null = null;
   private callB: CallBrain | null = null;
   private spudB: SpudBrain | null = null;
-  private goldB: GoldBrain | null = null;
+  private bounceB: BounceBrain | null = null;
   private beltB: BeltBrain | null = null;
   private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
-  /** Gold Rush: what's on the sand */
-  gold: GoldPlay | null = null;
+  /** Bounce House: what's in the air */
+  bounce: BouncePlay | null = null;
   private crumbleB: CrumbleBrain | null = null;
   private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
@@ -203,10 +203,10 @@ export class Bot {
       this.spudB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
-    if (c.gold) {
-      this.goldB ??= new GoldBrain(m, this.skill, this.rnd, this.aggr);
-      if (t < c.state.go + this.react || !this.gold) return;
-      this.goldB.update(dt, t, c, all, this.gold.live, this.gold.taken, this.ease);
+    if (c.bounce) {
+      this.bounceB ??= new BounceBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react || !this.bounce) return;
+      this.bounceB.update(dt, t, c, this.bounce.live, this.bounce.popped, this.ease);
       return void m.input.multiplyScalar(1 - 0.14 * this.ease);
     }
     if (c.keep) {

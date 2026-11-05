@@ -447,3 +447,129 @@ export class Puffs {
     this.P.length = 0;
   }
 }
+
+/**
+ * Fireworks: shells that climb, burst into a shell of sparks and fade as they fall. One draw for all
+ * of them; the sparks are brighter than white so the bloom catches them.
+ */
+export class Fireworks {
+  readonly points: THREE.Points;
+  private readonly N = 1800;
+  private p: Float32Array;
+  private c: Float32Array;
+  private v: Float32Array;
+  private rgb: Float32Array;
+  private life: Float32Array;
+  private max: Float32Array;
+  private head = 0;
+  private shells: { x: number; y: number; z: number; vy: number; top: number; wait: number; color: number; big: number }[] = [];
+  /** a shell has just burst: the game plays the boom */
+  onBurst: (x: number, y: number, z: number) => void = () => {};
+  constructor() {
+    const n = this.N;
+    this.p = new Float32Array(n * 3).fill(1e6);
+    this.c = new Float32Array(n * 3);
+    this.v = new Float32Array(n * 3);
+    this.rgb = new Float32Array(n * 3);
+    this.life = new Float32Array(n);
+    this.max = new Float32Array(n).fill(1);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.p, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.c, 3));
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const x = cv.getContext('2d')!;
+    const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.25, 'rgba(255,255,255,0.7)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 64, 64);
+    this.points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.9, map: new THREE.CanvasTexture(cv), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false }));
+    this.points.frustumCulled = false;
+    this.points.visible = false;
+  }
+  private spark(x: number, y: number, z: number, vx: number, vy: number, vz: number, col: THREE.Color, life: number) {
+    const i = this.head;
+    this.head = (this.head + 1) % this.N;
+    this.p.set([x, y, z], i * 3);
+    this.v.set([vx, vy, vz], i * 3);
+    this.rgb.set([col.r, col.g, col.b], i * 3);
+    this.life[i] = this.max[i] = life;
+  }
+  private burst(x: number, y: number, z: number, color: number, big: number) {
+    const c = new THREE.Color(color), w = new THREE.Color(0xffffff);
+    const n = Math.round(110 * big), sp = 15 * big;
+    for (let k = 0; k < n; k++) {
+      // (evenly over a sphere, in two shells so it reads as a flower)
+      const u = (k + 0.5) / n, ph = Math.acos(1 - 2 * u), th = k * 2.39996;
+      const r = sp * (k % 3 === 0 ? 0.62 : 1) * (0.92 + Math.random() * 0.16);
+      this.spark(x, y, z, Math.sin(ph) * Math.cos(th) * r, Math.cos(ph) * r, Math.sin(ph) * Math.sin(th) * r, k % 3 === 0 ? w : c, 1.1 + Math.random() * 0.7);
+    }
+    this.onBurst(x, y, z);
+  }
+  /** `n` shells from below `at`, spread over `spread` metres, a beat apart */
+  show(at: THREE.Vector3, n = 5, spread = 40, height = 34, gap = 0.28) {
+    const pal = [0xffc21f, 0xff3a6a, 0x3ac8ff, 0x7a5aff, 0x37e07a, 0xffffff];
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2, d = spread * (0.35 + Math.random() * 0.65);
+      const top = at.y + height * (0.8 + Math.random() * 0.5);
+      this.shells.push({ x: at.x + Math.cos(a) * d, y: at.y - 6, z: at.z + Math.sin(a) * d, vy: 38, top, wait: k * gap + Math.random() * 0.1, color: pal[(Math.random() * pal.length) | 0], big: 0.9 + Math.random() * 0.6 });
+    }
+    this.points.visible = true;
+  }
+  update(dt: number) {
+    const gold = FW_GOLD;
+    for (let i = this.shells.length - 1; i >= 0; i--) {
+      const s = this.shells[i];
+      if (s.wait > 0) {
+        s.wait -= dt;
+        continue;
+      }
+      s.y += s.vy * dt;
+      this.spark(s.x, s.y, s.z, (Math.random() - 0.5) * 2, -3, (Math.random() - 0.5) * 2, gold, 0.4);
+      if (s.y >= s.top) {
+        this.burst(s.x, s.y, s.z, s.color, s.big);
+        this.shells.splice(i, 1);
+      }
+    }
+    if (!this.points.visible) return;
+    let live = this.shells.length;
+    const drag = Math.exp(-dt * 1.7);
+    for (let i = 0; i < this.N; i++) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt;
+      const j = i * 3;
+      if (this.life[i] <= 0) {
+        this.p[j] = 1e6;
+        this.c[j] = this.c[j + 1] = this.c[j + 2] = 0;
+        continue;
+      }
+      live++;
+      this.v[j] *= drag;
+      this.v[j + 1] = this.v[j + 1] * drag - 7 * dt;
+      this.v[j + 2] *= drag;
+      this.p[j] += this.v[j] * dt;
+      this.p[j + 1] += this.v[j + 1] * dt;
+      this.p[j + 2] += this.v[j + 2] * dt;
+      // (it twinkles as it dies)
+      const k = this.life[i] / this.max[i];
+      const b = 3.4 * k * k * (k < 0.4 ? 0.55 + 0.45 * Math.sin(this.life[i] * 40 + i) : 1);
+      this.c[j] = this.rgb[j] * b;
+      this.c[j + 1] = this.rgb[j + 1] * b;
+      this.c[j + 2] = this.rgb[j + 2] * b;
+    }
+    const g = this.points.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.color.needsUpdate = true;
+    if (!live) this.points.visible = false;
+  }
+  clear() {
+    this.shells.length = 0;
+    this.life.fill(0);
+    this.p.fill(1e6);
+    this.c.fill(0);
+    this.points.visible = false;
+  }
+}
+const FW_GOLD = new THREE.Color(0xffc860);

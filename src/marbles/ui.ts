@@ -193,7 +193,7 @@ export class UI {
   }
   private fuseEl: HTMLElement | null = null;
 
-  /** a little number jumping up from the middle of the screen (+1 gold) */
+  /** a little number jumping up from the middle of the screen (+3) */
   pop(text: string, big = false) {
     const el = this.popEl ?? (this.popEl = this.layer('mm-pops'));
     const b = h('b', big ? 'big' : '');
@@ -215,6 +215,55 @@ export class UI {
     if (!text) el.dataset.k = '';
   }
   private callEl: HTMLElement | null = null;
+
+  /** an arrow at the screen's edge pointing at something off it (null hides it) */
+  arrow(o: { x: number; y: number; a: number; text: string; color: number } | null) {
+    const el = this.arrowEl ?? (this.arrowEl = this.layer('mm-arrow mm-hide'));
+    el.classList.toggle('mm-hide', !o);
+    if (!o) return;
+    el.style.transform = `translate(${o.x.toFixed(0)}px, ${o.y.toFixed(0)}px)`;
+    if (el.dataset.k !== o.text) {
+      el.dataset.k = o.text;
+      el.innerHTML = `<i></i><b>${esc(o.text)}</b>`;
+      el.style.setProperty('--ac', css(o.color));
+    }
+    (el.firstElementChild as HTMLElement).style.transform = `rotate(${o.a.toFixed(2)}rad)`;
+  }
+  private arrowEl: HTMLElement | null = null;
+
+  /** a call from the announcer: big enough to read, up out of the way of the action */
+  shout(text: string, sub = '', ms = 1700) {
+    const el = this.shoutEl ?? (this.shoutEl = this.layer('mm-shout mm-hide'));
+    el.innerHTML = `<div><b>${esc(text)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+    el.classList.remove('mm-hide');
+    clearTimeout(this.shoutT);
+    this.shoutT = window.setTimeout(() => el.classList.add('mm-hide'), ms);
+  }
+  private shoutEl: HTMLElement | null = null;
+  private shoutT = 0;
+
+  /** the stars you've got, and how near the next burst */
+  stars(n: number | null, part = 0) {
+    const el = this.starsEl ?? (this.starsEl = this.layer('mm-stars mm-hide'));
+    el.classList.toggle('mm-hide', n === null);
+    if (n === null || el.dataset.k === `${n}`) return;
+    el.dataset.k = `${n}`;
+    el.innerHTML = `<b>★ ${n}</b><i style="--p:${(part * 100).toFixed(0)}%"></i>`;
+    el.classList.remove('bump');
+    void el.offsetWidth;
+    el.classList.add('bump');
+  }
+  private starsEl: HTMLElement | null = null;
+
+  /** speed lines round the edge of the screen (0: none) */
+  speed(k: number) {
+    const el = this.speedEl ?? (this.speedEl = this.layer('mm-speed'));
+    if (Math.abs(k - this.speedK) < 0.02) return;
+    this.speedK = k;
+    el.style.opacity = k.toFixed(2);
+  }
+  private speedEl: HTMLElement | null = null;
+  private speedK = -1;
 
   note(text: string, ms = 3500) {
     this.noteEl.innerHTML = `<div>${esc(text)}</div>`;
@@ -253,7 +302,7 @@ export class UI {
     for (let k = 0; k < 22; k++) items.push(others[(k * 7 + Math.floor(Math.random() * others.length)) % others.length]);
     items.push(pick, others[0], others[1 % others.length]);
     const final = pick.kind === 'final';
-    const label = (k: string) => (k === 'survival' ? 'SURVIVAL' : k === 'team' ? 'TEAM' : k === 'score' ? 'GOLD' : k === 'final' ? 'FINAL' : 'RACE');
+    const label = (k: string) => (k === 'survival' ? 'SURVIVAL' : k === 'team' ? 'TEAM' : k === 'score' ? 'SCORE' : k === 'final' ? 'FINAL' : 'RACE');
     el.innerHTML = `<div class="wrap">
       <div class="hd">${final ? 'THE FINAL' : `ROUND ${n} OF ${total}`}</div>
       <div class="win"><div class="reel">${items.map((x) => `<div class="it k-${x.kind}"><b>${esc(x.name)}</b><i>${label(x.kind)}</i></div>`).join('')}</div></div>
