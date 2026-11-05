@@ -1,150 +1,20 @@
 import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { SPUD } from './course-modes.ts';
 import { BOUNCE, Pop, popValue, type Balloon } from './course-bounce.ts';
 import { glowMat } from './obs-world.ts';
 import { KEEP } from './course-crown.ts';
 import { makeCrown } from './course-kit.ts';
 
 /**
- * The host's side of the two games that aren't a function of the clock: who has a spud, who has
- * what's popped. The host (or solo) decides; a guest is told and shows it.
+ * The host's side of the games that aren't a function of the clock: who has popped what, who has
+ * the crown, who has how many points. The host (or solo) decides; a guest is told and shows it.
  */
 
 interface Who {
   c: { id: number; name: string; skill: number; player: boolean; human: boolean; outfit: { a: number } };
   m: Marble;
   out: boolean;
-}
-
-/** Hot Spud: the fuses, the passing and the spuds on people's heads */
-export class SpudPlay {
-  private spuds: THREE.Group[] = [];
-  /** a red ring on the floor round everyone holding one */
-  private marks: THREE.Mesh[] = [];
-  private sparks: THREE.Mesh[] = [];
-  private skin: THREE.MeshStandardMaterial;
-  private since = new Map<number, number>();
-  private nextFuse = 2;
-  readonly arena;
-  /** the ones it took this time round */
-  blown: number[] = [];
-  /** who handed it to whom this frame */
-  passed: [number, number][] = [];
-
-  constructor(
-    course: Course,
-    private scene: THREE.Scene,
-    private who: () => Who[],
-  ) {
-    this.arena = course.spud!;
-    const skin = (this.skin = new THREE.MeshStandardMaterial({ color: 0xd8904a, roughness: 0.6, emissive: 0xff3010, emissiveIntensity: 0.25 }));
-    const fuseM = new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.8 });
-    const body = new THREE.SphereGeometry(0.72, 22, 16).scale(1.2, 0.85, 0.9);
-    const fuse = new THREE.CylinderGeometry(0.035, 0.05, 0.5, 6).translate(0, 0.25, 0).rotateZ(-0.4);
-    const ringG = new THREE.RingGeometry(0.95, 1.2, 36).rotateX(-Math.PI / 2);
-    const ringM = new THREE.MeshBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85, toneMapped: false, depthWrite: false });
-    for (let k = 0; k < 8; k++) {
-      const g = new THREE.Group();
-      const b = new THREE.Mesh(body, skin);
-      b.castShadow = true;
-      const f = new THREE.Mesh(fuse, fuseM);
-      f.position.y = 0.55;
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), glowMat(0xffa030, 4));
-      s.position.set(0.2, 1.02, 0);
-      g.add(b, f, s);
-      g.visible = false;
-      scene.add(g);
-      this.spuds.push(g);
-      this.sparks.push(s);
-      const r = new THREE.Mesh(ringG, ringM);
-      r.visible = false;
-      scene.add(r);
-      this.marks.push(r);
-    }
-  }
-
-  dispose() {
-    for (const g of [...this.spuds, ...this.marks]) this.scene.remove(g);
-  }
-
-  /** the new list of holders: anyone who's just got rid of one gets a burst of speed */
-  setHolders(h: Iterable<number>, end: number, t: number) {
-    const A = this.arena;
-    const next = new Set(h);
-    if (next.size) for (const id of A.holders) if (!next.has(id)) A.free.set(id, t + 1.1);
-    A.holders = next;
-    A.end = end;
-  }
-
-  /** (the host) the fuses and the passing; true when the list of holders changed */
-  tick(t: number, slots: number, x: number): boolean {
-    const A = this.arena;
-    const all = this.who().filter((r) => !r.out);
-    let changed = false;
-    this.blown.length = 0;
-    this.passed.length = 0;
-    if (!A.holders.size) {
-      if (x < this.nextFuse || all.length <= slots) return false;
-      // (a fuse: fewer spuds than there are places left to lose)
-      const n = Math.max(1, Math.min(Math.ceil(all.length * 0.08), all.length - slots, this.spuds.length));
-      const pool = [...all].sort(() => Math.random() - 0.5).slice(0, n);
-      for (const r of pool) {
-        A.holders.add(r.m.id);
-        this.since.set(r.m.id, t);
-      }
-      A.end = t + SPUD.fuse;
-      return true;
-    }
-    if (t >= A.end) {
-      this.blown = [...A.holders];
-      A.holders.clear();
-      this.nextFuse = x + SPUD.gap;
-      return true;
-    }
-    for (const h of all) {
-      if (!A.holders.has(h.m.id) || t - (this.since.get(h.m.id) ?? 0) < SPUD.wait) continue;
-      for (const o of all) {
-        if (A.holders.has(o.m.id) || !o.m.active) continue;
-        // (a dive reaches further: it's how you tag a runner)
-        const reach = h.m.mode === Mode.Dive ? SPUD.dive : SPUD.pass;
-        if (h.m.pos.distanceToSquared(o.m.pos) > reach * reach) continue;
-        A.holders.delete(h.m.id);
-        A.holders.add(o.m.id);
-        A.free.set(h.m.id, t + 1.1);
-        this.since.set(o.m.id, t);
-        this.passed.push([h.m.id, o.m.id]);
-        changed = true;
-        break;
-      }
-    }
-    return changed;
-  }
-
-  /** the spuds on their heads, shaking harder as the fuse runs down */
-  sync(t: number) {
-    const A = this.arena;
-    const left = Math.max(0, A.end - t);
-    // (it glows hotter and pulses faster as the fuse runs down)
-    this.skin.emissiveIntensity = 0.25 + (1 - Math.min(1, left / SPUD.fuse)) * 1.4 * (0.6 + 0.4 * Math.sin(t * (left < 3 ? 22 : 8)));
-    let i = 0;
-    for (const r of this.who()) {
-      if (!A.holders.has(r.m.id) || r.out || i >= this.spuds.length) continue;
-      const g = this.spuds[i];
-      const shake = left < 3 ? (3 - left) * 0.03 : 0;
-      g.position.set(r.m.pos.x + Math.sin(t * 50) * shake, r.m.pos.y + 1.75, r.m.pos.z + Math.cos(t * 43) * shake);
-      g.rotation.y = t * 2;
-      g.visible = true;
-      this.sparks[i].scale.setScalar(0.8 + 0.5 * Math.sin(t * (left < 3 ? 40 : 18)));
-      const k = this.marks[i];
-      k.position.set(r.m.pos.x, r.m.pos.y - 0.46, r.m.pos.z);
-      k.scale.setScalar(1 + 0.12 * Math.sin(t * (left < 3 ? 22 : 9)));
-      k.visible = true;
-      i++;
-    }
-    for (; i < this.spuds.length; i++) this.spuds[i].visible = this.marks[i].visible = false;
-  }
 }
 
 /** Bounce House: what's in the air, who has popped what, and the combos */

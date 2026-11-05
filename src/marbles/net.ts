@@ -63,8 +63,10 @@ export type CtlMsg =
   | { t: 'tiles'; c: string }
   | { t: 'crumble'; k: number[]; at: number[] }
   | { t: 'splat'; k: number; id: number }
-  /** Hot Spud: who has one now, and when they go off */
-  | { t: 'spud'; h: number[]; end: number }
+  /** a points game: a guest's bean scored (to the host), and then the score for everyone (n: their total, w: what for) */
+  | { t: 'pts'; id: number; v: number; n?: number; w: number }
+  /** Big Shot: a volley's scores */
+  | { t: 'volley'; n: number; s: [number, number, number][] }
   /** Crown Keeper: who has it (-1: loose), where it lies, everyone's time */
   | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
   /** Bounce House: a balloon popped (k) by id, worth v at combo c, leaving them on n */

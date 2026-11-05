@@ -142,6 +142,8 @@ export class Marble {
   /** just back on its feet: a moment it can't be knocked straight over again (so a sweeper or a
    * spinner pushing it can't keep it on the floor) */
   guardT = 0;
+  /** the jump button, held (the jetpacks) */
+  jet = false;
   /** the bean it holds, and how long it has; being held (seconds left, refreshed by the holder) */
   holding: Marble | null = null;
   holdT = 0;

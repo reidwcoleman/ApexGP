@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
-import { StormBrain, TideBrain } from './ai-arena.ts';
-import { BounceBrain, CallBrain, KeepBrain, SpudBrain } from './ai-modes.ts';
+import { StormBrain } from './ai-arena.ts';
+import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
+import { PinBrain, RocketBrain, ShotBrain } from './ai-play.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -88,10 +89,11 @@ export class Bot {
   private waitT = 0;
   private plate: PlateBrain | null = null;
   private stormB: StormBrain | null = null;
-  private tideB: TideBrain | null = null;
   private callB: CallBrain | null = null;
-  private spudB: SpudBrain | null = null;
   private bounceB: BounceBrain | null = null;
+  private pinB: PinBrain | null = null;
+  private shotB: ShotBrain | null = null;
+  private rocketB: RocketBrain | null = null;
   private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
@@ -184,23 +186,29 @@ export class Bot {
       this.stormB.update(dt, t, c, all);
       return void m.input.multiplyScalar(1 - 0.15 * this.ease);
     }
-    if (c.tide) {
-      this.tideB ??= new TideBrain(m, this.skill, this.rnd, this.aggr);
-      if (t < c.state.go + this.react) return;
-      this.tideB.update(dt, t, c, all);
-      return void m.input.multiplyScalar(1 - 0.15 * this.ease);
-    }
     if (c.call) {
       this.callB ??= new CallBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
       this.callB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
-    if (c.spud) {
-      this.spudB ??= new SpudBrain(m, this.skill, this.rnd);
+    if (c.pin) {
+      this.pinB ??= new PinBrain(m, this.skill, this.rnd);
       if (t < c.state.go + this.react) return;
-      this.spudB.update(dt, t, c, all, this.ease);
-      return void m.input.multiplyScalar(1 - 0.2 * this.ease);
+      this.pinB.update(dt, t, c, this.ease);
+      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
+    }
+    if (c.shot) {
+      this.shotB ??= new ShotBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react) return;
+      this.shotB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
+    }
+    if (c.rocket) {
+      this.rocketB ??= new RocketBrain(m, this.skill, this.rnd, this.aggr);
+      if (t < c.state.go + this.react) return;
+      this.rocketB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.12 * this.ease);
     }
     if (c.bounce) {
       this.bounceB ??= new BounceBrain(m, this.skill, this.rnd);

@@ -1,19 +1,14 @@
 import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { STORM, type Strike } from './course-storm.ts';
-import { TIDE } from './course-tide.ts';
 import { dodge } from './course-strikes.ts';
 
 /**
- * Bots for the two arena survivals.
+ * The bot for Storm Deck.
  *
  * Storm Deck: it keeps a spot of its own (in from the edge, away from the others) and watches the
  * rings: any strike due soon whose blast would reach it, it runs out of (the shortest way, never
  * toward the edge). A weaker bot sees a ring later and misjudges a big one now and then.
- *
- * High Tide: it climbs. It picks the highest column it can get to that isn't crowded (a little
- * lower if it's much nearer), runs at it and hops each step on the way; on top it holds the
- * middle and, if it's an aggressive one, shoves a neighbour toward the edge now and then.
  */
 
 const LIVE: Strike[] = [];
@@ -94,114 +89,5 @@ export class StormBrain {
       const sc = -crowd * 2 - far * 0.12 - Math.max(0, r - (A.R - 6)) * 1.5 + this.rnd();
       if (sc > best) (best = sc), (this.tx = x), (this.tz = z);
     }
-  }
-}
-
-export class TideBrain {
-  private target = -1;
-  private nextThink = 0;
-  private pushCD = 0;
-  constructor(
-    readonly m: Marble,
-    readonly skill: number,
-    private rnd: () => number,
-    private aggr: number,
-  ) {}
-
-  update(dt: number, t: number, c: Course, all: Marble[]) {
-    const m = this.m;
-    const A = c.tide!;
-    const L = A.level(t);
-    this.pushCD -= dt;
-    // (off a column that's about to blow, if it's seen it)
-    const out = dodge(A.jets, m, t - c.state.go, 0.75 - 0.5 * this.skill);
-    if (out) {
-      m.input.set(out[0], 0, out[1]);
-      if (m.grounded) m.jump = true;
-      return;
-    }
-    const here = this.colAt(c, m.pos.x, m.pos.z);
-    if (t >= this.nextThink || this.target < 0 || A.cols[this.target].y < L + 0.5) {
-      this.nextThink = t + 0.5 + (1 - this.skill) * 0.8 + this.rnd() * 0.5;
-      this.target = this.pick(c, all, L);
-    }
-    if (this.target < 0) return;
-    const tg = A.cols[this.target];
-    let dx = tg.x - m.pos.x, dz = tg.z - m.pos.z;
-    const d = Math.hypot(dx, dz);
-    // on it: hold the middle (and an aggressive one shoves a neighbour off)
-    if (d < 1.0 && here === this.target) {
-      if (this.aggr > 0.5 && this.pushCD <= 0) {
-        for (const o of all) {
-          if (o === m || !o.active || Math.abs(o.pos.y - m.pos.y) > 0.8) continue;
-          const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z, od = Math.hypot(ox, oz);
-          if (od < 1.6 && od > 0.2 && this.rnd() < 0.02 * this.aggr) {
-            m.input.set(ox / od, 0, oz / od);
-            m.dash = true;
-            this.pushCD = 3 + this.rnd() * 3;
-            return;
-          }
-        }
-      }
-      m.input.set(dx, 0, dz).multiplyScalar(d > 0.25 ? 0.6 / d : 0);
-      return;
-    }
-    // the way there, a column at a time: the neighbour no more than a step up that gets nearest
-    let wx = tg.x, wz = tg.z;
-    if (here >= 0 && here !== this.target) {
-      const hy = A.cols[here].y;
-      let bw = Infinity;
-      for (let i = 0; i < A.cols.length; i++) {
-        const k = A.cols[i];
-        if (i === here || Math.hypot(k.x - A.cols[here].x, k.z - A.cols[here].z) > TIDE.pitch * 1.15) continue;
-        if (k.y > hy + TIDE.step + 0.05 || k.y < L + 0.3) continue;
-        const sc = Math.hypot(tg.x - k.x, tg.z - k.z) - (k.y - hy) * 0.8;
-        if (sc < bw) (bw = sc), (wx = k.x), (wz = k.z);
-      }
-      // (nowhere better than here: stay)
-      if (bw >= Math.hypot(tg.x - A.cols[here].x, tg.z - A.cols[here].z)) (wx = A.cols[here].x), (wz = A.cols[here].z);
-    }
-    dx = wx - m.pos.x;
-    dz = wz - m.pos.z;
-    const dw = Math.hypot(dx, dz) || 1;
-    dx /= dw;
-    dz /= dw;
-    m.input.set(dx, 0, dz).multiplyScalar(dw < 0.4 ? 0 : 0.75 + 0.25 * this.skill);
-    // the next column on the way: a step up, hop it
-    if (m.grounded) {
-      const hereY = here >= 0 ? A.cols[here].y : m.pos.y - 0.5;
-      const ahead = this.colAt(c, m.pos.x + dx * 1.8, m.pos.z + dz * 1.8);
-      if (ahead >= 0 && ahead !== here && A.cols[ahead].y > hereY + 0.3 && this.rnd() < 0.35 + 0.6 * this.skill) m.jump = true;
-    }
-  }
-
-  private colAt(c: Course, x: number, z: number) {
-    const A = c.tide!;
-    let best = -1, bd = TIDE.pitch * 0.58;
-    for (let i = 0; i < A.cols.length; i++) {
-      const d = Math.hypot(A.cols[i].x - x, A.cols[i].z - z);
-      if (d < bd) (bd = d), (best = i);
-    }
-    return best;
-  }
-
-  private pick(c: Course, all: Marble[], L: number) {
-    const A = c.tide!;
-    const m = this.m;
-    let best = -1, bs = -1e9;
-    for (let i = 0; i < A.cols.length; i++) {
-      const k = A.cols[i];
-      if (k.y < L + 0.6) continue;
-      const d = Math.hypot(k.x - m.pos.x, k.z - m.pos.z);
-      let crowd = 0;
-      for (const o of all) {
-        if (o === m || !o.active) continue;
-        const od = Math.hypot(o.pos.x - k.x, o.pos.z - k.z);
-        if (od < 1.8 && Math.abs(o.pos.y - 0.5 - k.y) < 1) crowd++;
-      }
-      const sc = (k.y - L) * (1.3 + this.skill) - d * 0.35 - crowd * (1.6 - this.aggr * 0.8) + this.rnd() * (1.6 - this.skill);
-      if (sc > bs) (bs = sc), (best = i);
-    }
-    return best;
   }
 }

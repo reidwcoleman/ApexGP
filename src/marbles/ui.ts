@@ -40,7 +40,7 @@ export class UI {
   private progEl: HTMLElement;
   private dots = new Map<number, HTMLElement>();
   private bannerT = 0;
-  touch: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean } | null = null;
+  touch: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean; hold: boolean } | null = null;
 
   constructor(private root: HTMLElement) {
     this.tagsEl = this.layer('mm-tags');
@@ -472,7 +472,7 @@ export class UI {
 
   // ------------------------------------------------------------------ touch
   private touchControls() {
-    const t: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean } = { x: 0, y: 0, jump: false, dash: false, grab: false };
+    const t: { x: number; y: number; jump: boolean; dash: boolean; grab: boolean; hold: boolean } = { x: 0, y: 0, jump: false, dash: false, grab: false, hold: false };
     this.touch = t;
     const layer = this.layer('mm-touch');
     const stick = h('div', 'mm-stick');
@@ -508,7 +508,10 @@ export class UI {
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         t[k] = true;
+        if (k === 'jump') t.hold = true;
       });
+      // (the jump button held: the jetpacks)
+      if (k === 'jump') for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => (t.hold = false));
       // (grab is held)
       if (k === 'grab') for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => (t.grab = false));
       layer.appendChild(b);
