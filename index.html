@@ -206,9 +206,9 @@
           <span class="pk-art"></span>
           <span class="pk-txt"><span class="pk-k">4</span><b>Wobble Mania</b><i>Party knockout · online</i><em>24 jelly beans, wild obstacle courses, play with friends, 1 crown</em></span>
         </button>
-        <button class="pk-card" data-game="brawl" style="--art: url(loading/brawl_hero.webp); --pos: 50% 30%; --acc: #ff5a8c">
+        <button class="pk-card" data-game="pine" style="--art: url(loading/pine_hero.webp); --pos: 50% 18%; --acc: #f4c542">
           <span class="pk-art"></span>
-          <span class="pk-txt"><span class="pk-k">5</span><b>Plush Panic</b><i>Ragdoll brawler · 1–8 players</i><em>Punch, headbutt, drop-kick and throw wobbly plushies off eight arenas: a spinning cake, a washing machine, a toy train set, hot-air balloons and more</em></span>
+          <span class="pk-txt"><span class="pk-k">5</span><b>Pine &amp; Dandy</b><i>Tree farm tycoon</i><em>A 16-bit Christmas tree farm: start in Grandma's boots, end with a helicopter, and race every December Rush. Your harvest plays the carol</em></span>
         </button>
         <button class="pk-card" data-game="mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 50%; --acc: #ffc83d">
           <span class="pk-art"></span>
@@ -261,7 +261,7 @@
     </style>
     <script>
       // the game picker, before anything heavy: the racing game's loader, its pictures and its
-      // downloads only start once it's picked; Boostball, Miami, Wobble Mania, Plush Panic, Mogul and Tracksmith are pages of their own.
+      // downloads only start once it's picked; Boostball, Miami, Wobble Mania, Pine & Dandy, Mogul and Tracksmith are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
       (function () {
         var go;
@@ -286,7 +286,7 @@
           if (g === 'miami') location.href = 'miami.html';
           else if (g === 'marbles') location.href = 'marbles.html';
           else if (g === 'boost') location.href = 'boost.html';
-          else if (g === 'brawl') location.href = 'brawl.html';
+          else if (g === 'pine') location.href = 'pine.html';
           else if (g === 'mogul') location.href = 'mogul.html';
           else if (g === 'tracksmith') location.href = 'tracksmith.html';
           else start();
@@ -298,7 +298,7 @@
         (pk.querySelector('.pk-last') || cards[0]).focus();
         window.addEventListener('keydown', function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'brawl', Digit6: 'mogul', Digit7: 'tracksmith' }[e.code];
+          var n = { Digit1: 'f1', Digit2: 'boost', Digit3: 'miami', Digit4: 'marbles', Digit5: 'pine', Digit6: 'mogul', Digit7: 'tracksmith' }[e.code];
           if (n) pick(n);
         });
       })();

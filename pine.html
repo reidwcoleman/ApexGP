@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Pine &amp; Dandy</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; background: #12121c; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+      #gl { position: fixed; left: 0; top: 0; display: block; image-rendering: pixelated; cursor: crosshair; }
+      /* the CRT: scanlines one game pixel tall and a soft vignette, off with a menu switch */
+      #crt { position: fixed; inset: 0; pointer-events: none; display: none; --px: 3px; }
+      #crt.on { display: block; background: linear-gradient(rgba(10, 10, 20, 0.13) 50%, rgba(10, 10, 20, 0) 50%) 0 0 / 100% var(--px), radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, 0.32) 100%); }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #f4c542; font: bold 22px monospace; background: #12121c; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="crt"></div>
+    <div id="loading">PINE &amp; DANDY</div>
+    <script type="module" src="/src/pine/main.ts"></script>
+  </body>
+</html>

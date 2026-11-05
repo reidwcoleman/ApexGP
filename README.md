@@ -907,20 +907,17 @@ and bots; the contestants are original bean characters, not marbles.
   difficulty) and reports times, falls, skill ordering and AI cost. For party play, open two
   browser windows, HOST PARTY in one and JOIN with its code in the other.
 
-## Plush Panic
+## Pine & Dandy
 
-`brawl.html` (card 5 on the picker): a wobbly ragdoll party brawler for 1–8 players (keyboard, a second keyboard layout, any number of controllers, CPUs to fill). Plush toys punch, kick, grab, lift and throw each other off the arena; last one standing wins the round, first to 1/3/5 wins the match. Original characters, arenas and rules.
+`pine.html` (card 5 on the picker): a 16-bit Christmas tree farm tycoon. Canvas 2D at a low internal resolution (about 480x300, integer-scaled), every sprite painted in code at boot, no asset files.
 
-- **Fighters** (`src/brawl/fighter.ts`): an active ragdoll of 11 Rapier bodies. Every joint is a spring-damper torque toward a pose that pushes back on its parent; chest and pelvis are held upright by an implicit (stable at any gain) balance torque; a spring under the pelvis, fed by five down-rays, carries the weight, so the legs only walk for show and to kick. Hands are steered by forces that push back on the chest; a grab is a spherical joint made where the hand touches something (a fighter, a prop, a ledge: hang, then jump to climb). Hits build a daze meter that ends in a limp knockout; mash to wake or to wriggle free.
-- **Look** (`src/brawl/look.ts`): `public/brawl/fighter.glb` is a skinned plush built in Blender (metaball limbs, button eyes, stitched smile, belly patch, 11 bones that match the 11 bodies one to one); bones are set straight from the bodies every frame. Felt shader, per-fighter dye, 13 hats from `hats.glb`.
-- **Arenas** are Blender scenes read by naming convention (`src/brawl/arena.ts`): `col_box_*` / `col_hull_*` / `col_mesh_*` collision, `mov_*` kinematic movers the arena script animates, `dyn_*` loose props, `spawn_*`. Scripts in `src/brawl/arenas/`:
-  - **Tilt**: a pinball table tilted 6°, flippers on a timer, pop bumpers and slingshots that kick, a chrome ball that rolls down and gets shot back up the lane, the drain between the flippers.
-  - **Tick Tock**: gears turning at different heights round a copper hub (spoked ones have holes), a pendulum sweeping through the middle.
-  - **Sushi Spin**: a conveyor belt (surface velocity) round the chef's island, plates riding it, maki rolls to throw, a chef's knife that chops where the red ring shows.
-  - **Splash Tub**: a clawfoot bathtub; the rim, a bath caddy and floating toys (buoyancy in the script: duck, slippery soap, sponge, boat); the water is out.
-- **CPUs** (`src/brawl/ai.ts`) press the same buttons as players, check the ground ahead with ray casts (and the arena's `safe()`), drag dazed victims to the nearest drop and throw them.
+- **Sim** (`src/pine/sim.ts`, tables in `data.ts`): pure TS with no DOM, emits `fx` events for the renderer and audio. Plays in Node: `node --experimental-transform-types --no-warnings tools/pinebot.mjs [years] [seed]` prints a line per simulated year; run it after any economy change.
+- **Scale** is the design: the vehicle sets the tool's swath (1 to 15 rows), blocks turn trees into standing orders that a shared crew job board works through, orders are sized from what you have standing so December stays a rush at any size, and pests spread fastest through one species, so layout matters more as you grow.
+- **Render** (`render.ts`): four zooms (16/8/4/2 px a tile). Near is live sprites with wind; far is cached 32x32 chunks keyed on `sim.ver`, so tree count barely changes frame cost.
+- **Audio** (`audio.ts`): a chip with public-domain carols. Gated songs keep the lead line muted in time with the backing; `Chip.work()` opens it, so cutting a field plays the tune.
+- **Christmas Eve** (`mode7.ts`): a Mode 7 flight over your own farm image, standing trees twinkling.
 
-Blender: `blender -b --python blender/brawl/<fighter|hats|tilt|clock|sushi|bath>.py` writes `public/brawl/<name>.glb` (occlusion baked into vertex colours); `blender/brawl/preview.py -- <name> out.png` renders one. Tools: `tools/brawlprobe.mjs <stand|walk|jump|duel|grab|brawl> [--arena id]` (physics log), `tools/brawlshot.mjs <arena> out.png` (CPU match screenshot), `tools/brawlflow.mjs <dir>` (title → lobby → fight with real key presses). Test hooks: `brawl.html?manual` stops the loop, `window.__brawl.tick(dt)` / `.draw(dt)` run it.
+Tools: `tools/pineshot.mjs out.png --q "?skip"`, `tools/pineflow.mjs <dir>` (real mouse and key input through a first session), `tools/_pinescene.mjs <dir> <stages>` (scripted scenes). `pine.html?skip&seed=7` skips the title. `window.__pine` is the app.
 
 ## Controls
 
