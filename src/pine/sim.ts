@@ -1,6 +1,6 @@
 // Pine & Dandy: the whole game state and its rules. No DOM, no drawing: the renderer and audio read
 // `fx` events, and tools/pinebot.mjs plays decades of it in Node to check the economy.
-import { SPECIES, NS, NZ, MONTHS, MONTH_SEC, XMAS_DAY, SIZE_PRICE, SIZE_MIN, SIZE_NAME, SIZE_DEMAND, MIN_CUT, sizeIdx, GRADES, gradeOf, VEHICLES, CREW, CREW_NAMES, BUILDINGS, TIERS, RIVALS, PERKS, BUYERS, HERO_BUYERS, GOALS, COMBO_TIERS, TRAIL_NOTES, JOLLY_SECS, ORNAMENTS, MABEL_NOTES, COAL_NOTES } from './data.ts';
+import { SPECIES, NS, NZ, MONTHS, MONTH_SEC, XMAS_DAY, SIZE_PRICE, SIZE_MIN, SIZE_NAME, SIZE_DEMAND, MIN_CUT, sizeIdx, GRADES, gradeOf, DUEL_GATES, BUCK_DARE, BUCK_WINS, BUCK_LOSES, VEHICLES, CREW, CREW_NAMES, BUILDINGS, TIERS, RIVALS, PERKS, BUYERS, HERO_BUYERS, GOALS, COMBO_TIERS, TRAIL_NOTES, JOLLY_SECS, ORNAMENTS, MABEL_NOTES, COAL_NOTES } from './data.ts';
 
 export const MW = 256, MH = 160, PS = 16, PW = MW / PS, PH = MH / PS, CH = 32;
 export const CW = MW / CH, CHH = MH / CH;
@@ -22,9 +22,11 @@ export interface Report { year: number; y: YearStats; rivals: { name: string; so
 
 export interface Gift { x: number; y: number; t: number; fall: number }
 export interface Trail { pts: number[]; i: number; t: number; step: number }
+/** Buck Hemlock's truck against you, gate to gate; on: false while he waits at the start arch */
+export interface Duel { on: boolean; x: number; y: number; t: number; pts: number[]; i: number; bi: number; bx: number; by: number; dir: number; pot: number }
 /** the arcade layer on top of the farm: all of it runs on real time, so game speed never eats it */
-export interface Fun { combo: number; comboT: number; tier: number; best: number; jolly: number; frenzy: number; boost: number; free: number; haul: number; gifts: Gift[]; giftT: number; trail: Trail | null; trailT: number; orn: boolean[]; rows: boolean[]; opened: number[]; opens: number; trails: number; jollies: number }
-export const newFun = (): Fun => ({ combo: 0, comboT: 0, tier: 0, best: 0, jolly: 0, frenzy: 0, boost: 0, free: 0, haul: 0, gifts: [], giftT: 22, trail: null, trailT: 34, orn: ORNAMENTS.map(() => false), rows: [false, false, false, false], opened: [], opens: 0, trails: 0, jollies: 0 });
+export interface Fun { duel: Duel | null; duelT: number; buckW: number; buckL: number; eveBest: number; eveStars: number; combo: number; comboT: number; tier: number; best: number; jolly: number; frenzy: number; boost: number; free: number; haul: number; gifts: Gift[]; giftT: number; trail: Trail | null; trailT: number; orn: boolean[]; rows: boolean[]; opened: number[]; opens: number; trails: number; jollies: number }
+export const newFun = (): Fun => ({ duel: null, duelT: 14, buckW: 0, buckL: 0, eveBest: 0, eveStars: 0, combo: 0, comboT: 0, tier: 0, best: 0, jolly: 0, frenzy: 0, boost: 0, free: 0, haul: 0, gifts: [], giftT: 22, trail: null, trailT: 34, orn: ORNAMENTS.map(() => false), rows: [false, false, false, false], opened: [], opens: 0, trails: 0, jollies: 0 });
 
 export interface State {
   v: number; seed: number; year: number; month: number; day: number; dayF: number;
@@ -53,6 +55,7 @@ export type Fx =
   | { k: 'combo'; n: number; t: string; tier: number; cash: number } | { k: 'comboEnd'; n: number } | { k: 'jollyReady'; first: boolean } | { k: 'frenzy' } | { k: 'frenzyEnd' } | { k: 'haul'; n: number }
   | { k: 'gift'; x: number; y: number; t: string; s: string; c: string } | { k: 'orn'; i: number } | { k: 'drop'; x: number; y: number }
   | { k: 'bell'; x: number; y: number; i: number; n: number; note: number } | { k: 'bellStart' } | { k: 'bellFail' } | { k: 'bellDone'; x: number; y: number; cash: number }
+  | { k: 'duelOffer'; x: number; y: number; t: string } | { k: 'duelGo' } | { k: 'duelGate'; x: number; y: number; i: number; n: number } | { k: 'duelSkip' } | { k: 'duelWin'; x: number; y: number; cash: number; t: string; share: number } | { k: 'duelLose'; x: number; y: number; t: string }
   | { k: 'full' } | { k: 'month' } | { k: 'season' } | { k: 'build' } | { k: 'buy' } | { k: 'deny' } | { k: 'saved' };
 
 export const newHopper = (): Hopper => ({ n: 0, c: new Array(NS * NZ).fill(0), q: new Array(NS * NZ).fill(0) });
@@ -507,10 +510,11 @@ export class Sim {
     }
     if (f.orn.every(Boolean)) { const n = this.giftCash(40); s.money += n; s.yr.bonus += n; this.emit({ k: 'big', t: 'THE WHOLE ALBUM', s: `Mabel would be proud. +${money(n)}`, c: 'gold' }); }
   }
-  private startTrail() {
-    const s = this.s, p = s.p, v = VEHICLES[s.veh], step = Math.max(3.2, v.speed * 0.5), pts: number[] = [], air = !!v.air;
-    let a = this.rnd() * 6.2832, x = p.x, y = p.y;
-    for (let i = 0; i < 16; i++) {
+  /** a wandering line of points with nothing solid across any leg of it */
+  private pathFrom(x: number, y: number, n: number, step: number) {
+    const pts: number[] = [], air = !!VEHICLES[this.s.veh].air;
+    let a = this.rnd() * 6.2832;
+    for (let i = 0; i < n; i++) {
       let ok = false;
       for (let k = 0; k < 8 && !ok; k++) {
         const b = a + (k ? (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.8 : (this.rnd() - 0.5) * 1.3), nx = x + Math.cos(b) * step * (i ? 1 : 1.6), ny = y + Math.sin(b) * step * (i ? 1 : 1.6);
@@ -519,9 +523,45 @@ export class Sim {
       }
       if (!ok) break; pts.push(x, y);
     }
+    return pts;
+  }
+  private startTrail() {
+    const s = this.s, p = s.p, v = VEHICLES[s.veh], step = Math.max(3.2, v.speed * 0.5), pts = this.pathFrom(p.x, p.y, 16, step);
     if (pts.length < 16) return;
     s.fun.trail = { pts, i: 0, t: 9, step }; this.emit({ k: 'bellStart' });
     this.once('bellHow', 'Sleigh bells! Run the golden trail before it fades. Each bell plays a note.');
+  }
+  /** Buck rolls up to a start arch near you and waits, loudly */
+  private offerDuel() {
+    const s = this.s, f = s.fun, v = VEHICLES[s.veh], k = 1 + v.speed / 14, q = this.spot(7 * k, 12 * k), step = Math.max(8, v.speed * 1.05), pts = this.pathFrom(q.x, q.y, DUEL_GATES, step);
+    if (pts.length < DUEL_GATES * 2) { f.duelT = 8; return; }
+    const last = s.history[s.history.length - 1], pot = Math.round(120 * (1 + (last ? last.revenue : 0) / 7000) / 5) * 5;
+    f.duel = { on: false, x: q.x, y: q.y, t: 24, pts, i: 0, bi: 0, bx: q.x + 1.6, by: q.y + 0.6, dir: 1, pot };
+    this.emit({ k: 'duelOffer', x: q.x, y: q.y, t: this.pick(BUCK_DARE) });
+  }
+  private stepDuel(dt: number, reach: number) {
+    const s = this.s, f = s.fun, d = f.duel!, p = s.p, v = VEHICLES[s.veh], n = d.pts.length / 2;
+    if (!d.on) {
+      d.t -= dt;
+      if (Math.hypot(d.x - p.x, d.y - p.y) < Math.max(2.4, reach)) { d.on = true; this.emit({ k: 'duelGo' }); }
+      else if (d.t <= 0) { f.duel = null; f.duelT = 70 + this.rnd() * 40; this.emit({ k: 'duelSkip' }); }
+      return;
+    }
+    const gx = d.pts[d.i * 2], gy = d.pts[d.i * 2 + 1];
+    if (Math.hypot(gx - p.x, gy - p.y) < Math.max(2.6, reach + 0.6)) {
+      d.i++; this.addJolly(0.02); this.emit({ k: 'duelGate', x: gx, y: gy, i: d.i, n });
+      if (d.i >= n) {
+        const cash = d.pot, share = 0.06; s.money += cash; s.yr.bonus += cash; f.buckW++; const b = s.rivals.length - 1; s.rivals[b] = Math.round(s.rivals[b] * (1 - share));
+        this.addJolly(0.5); this.emit({ k: 'duelWin', x: p.x, y: p.y, cash, t: this.pick(BUCK_LOSES), share }); this.dropGift(p.x + 1.5, p.y); f.gifts[f.gifts.length - 1].fall = 0.5;
+        f.duel = null; f.duelT = 80 + this.rnd() * 40; return;
+      }
+    }
+    // he gets better every time you beat him, and he leans on the pedal when you pull clear
+    const gap = d.i - d.bi, band = gap >= 2 ? 1.14 : gap <= -2 ? 0.8 : 1, speed = v.speed * Math.min(1.12, 0.84 + 0.04 * f.buckW) * band * (s.blizzard > 0 ? 0.72 : 1);
+    const tx = d.pts[d.bi * 2], ty = d.pts[d.bi * 2 + 1], dx = tx - d.bx, dy = ty - d.by, l = Math.hypot(dx, dy);
+    d.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0);
+    if (l <= speed * dt) { d.bx = tx; d.by = ty; d.bi++; if (d.bi >= n) { f.buckL++; this.emit({ k: 'duelLose', x: d.bx, y: d.by, t: this.pick(BUCK_WINS) }); f.duel = null; f.duelT = 80 + this.rnd() * 40; } }
+    else { d.bx += dx / l * speed * dt; d.by += dy / l * speed * dt; }
   }
   private stepFun(dt: number) {
     const s = this.s, f = s.fun, p = s.p, v = VEHICLES[s.veh], reach = Math.max(1.7, this.playerW() * 0.5 + 0.5);
@@ -541,6 +581,8 @@ export class Sim {
     const R = Math.ceil(reach), cx = Math.floor(p.x), cy = Math.floor(p.y);
     for (let y = Math.max(1, cy - R); y <= Math.min(MH - 2, cy + R); y++) for (let x = Math.max(1, cx - R); x <= Math.min(MW - 2, cx + R); x++) { const i = this.idx(x, y); if (this.secretAt(i)) { f.opened.push(i); this.touch(i); this.openGift(x + 0.5, y + 0.5, true); } }
     if (s.tut) return;
+    if (f.duel) this.stepDuel(dt, reach);
+    else if (s.year >= 2 && s.month >= 2 && s.month <= 8 && !f.trail && !this.julySale()) { f.duelT -= dt; if (f.duelT <= 0) this.offerDuel(); }
     f.giftT -= dt; if (f.giftT <= 0 && f.gifts.length < 3) { this.dropGift(); f.giftT = 24 + this.rnd() * 20; }
     if (f.trail) {
       const t = f.trail, x = t.pts[t.i * 2], y = t.pts[t.i * 2 + 1]; t.t -= dt;
@@ -549,7 +591,7 @@ export class Sim {
         if (t.i >= n) { const last = s.history[s.history.length - 1], cash = Math.round(60 * (1 + (last ? last.revenue : 0) / 12000)); s.money += cash; s.yr.bonus += cash; f.trails++; f.trail = null; f.trailT = 40 + this.rnd() * 30; this.addJolly(0.4); this.emit({ k: 'bellDone', x, y, cash }); this.dropGift(x, y); f.gifts[f.gifts.length - 1].fall = 0.35; }
         else t.t = Math.max(2.6, t.step / (v.speed * (s.blizzard > 0 ? 0.72 : 1)) * 3.4);
       } else if (t.t <= 0) { f.trail = null; f.trailT = 35 + this.rnd() * 30; this.emit({ k: 'bellFail' }); }
-    } else if (s.month < 10) { f.trailT -= dt; if (f.trailT <= 0) { f.trailT = 30; this.startTrail(); } }
+    } else if (s.month < 10 && !f.duel) { f.trailT -= dt; if (f.trailT <= 0) { f.trailT = 30; this.startTrail(); } }
   }
   private scare(c: Critter, byPlayer: boolean) {
     const s = this.s;
@@ -781,6 +823,7 @@ export class Sim {
     }
     if (this.julySale()) { s.ticketT = 1; this.refreshCensus(); this.emit({ k: 'big', t: 'CHRISTMAS IN JULY', s: 'Your saw works this month. Orders pay extra', c: 'red' }); }
     if (s.month === 7) s.tickets = [];
+    if (s.month === 9 && s.fun.duel) s.fun.duel = null;
     if (s.month === 10) { s.ticketT = 1; this.refreshCensus(); this.emit({ k: 'big', t: 'HARVEST TIME', s: 'Orders are coming in', c: 'red' }); }
     if (s.month === 11) this.emit({ k: 'big', t: 'THE RUSH', s: '24 days to Christmas', c: 'red' });
     
@@ -990,6 +1033,15 @@ export class Sim {
     for (const t of s.tickets.slice()) this.finishTicket(t, false);
     s.phase = 'eve';
   }
+  /** the sleigh run's takings; stars are the only thing that hands out an ornament */
+  finishEve(score: number, pct: number, stars: number, delivered: number) {
+    const s = this.s, f = s.fun, base = Math.max(120, s.yr.revenue * 0.06), cash = stars ? Math.round(base * (0.4 + pct) / 5) * 5 : 0, seedlings = delivered * 3;
+    s.money += cash; s.yr.bonus += cash; f.free += seedlings; f.eveStars += stars; const best = score > f.eveBest; if (best) f.eveBest = score;
+    if (stars >= 2) s.rep = Math.min(100, s.rep + stars * 1.5);
+    let orn = -1; if (stars >= 3) { const left = f.orn.map((o, i) => (o ? -1 : i)).filter((i) => i >= 0); if (left.length) { orn = this.pick(left); this.giveOrnament(orn, s.p.x, s.p.y); this.fx = this.fx.filter((q) => q.k !== 'orn' && q.k !== 'gift'); } }
+    this.lastEve = { stars, delivered, cash }; return { cash, seedlings, orn, best };
+  }
+  lastEve: { stars: number; delivered: number; cash: number } | null = null;
   lastReport: Report | null = null;
   makeReport(): Report {
     const s = this.s;

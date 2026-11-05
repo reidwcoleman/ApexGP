@@ -13,7 +13,7 @@ await page.keyboard.down('Space'); await page.keyboard.down('KeyD');
 await page.waitForFunction(() => __pine.mode === 'fly', null, { timeout: 40000 }); await page.keyboard.up('Space'); await page.keyboard.up('KeyD');
 console.log('reached flight ', JSON.stringify(await st()));
 await page.waitForTimeout(1800); await page.screenshot({ path: `${dir}/y_fly.png` });
-await page.mouse.click(700, 450); await page.waitForFunction(() => __pine.mode === 'report', null, { timeout: 8000 }); await page.waitForTimeout(1900); console.log('books          ', JSON.stringify(await st())); await page.screenshot({ path: `${dir}/y_books.png` });
+await page.keyboard.press('Escape'); await page.waitForFunction(() => !!__pine.evePrize, null, { timeout: 8000 }); await page.waitForTimeout(1100); await page.keyboard.press('Enter'); await page.waitForFunction(() => __pine.mode === 'report', null, { timeout: 8000 }); await page.waitForTimeout(1900); console.log('books          ', JSON.stringify(await st())); await page.screenshot({ path: `${dir}/y_books.png` });
 await page.keyboard.press('Enter'); await page.waitForTimeout(350);
 console.log('after next    ', (await st()).mode);
 if ((await st()).mode === 'buck') { await page.screenshot({ path: `${dir}/y_buck.png` }); await page.keyboard.press('Enter'); await page.waitForTimeout(250); }

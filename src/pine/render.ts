@@ -3,7 +3,7 @@
 import { C, canvas, hash, mix, hex } from './pal';
 import { Sim, MW, MH, CH, CW, CHH, PS, PW, PH, T_WATER, T_WILD, T_GRASS, T_ROAD, T_BRIDGE, F_DEAD, F_GOLD, F_PEST, F_THIRST, F_STUMP, stageOf, TOOL_SAW, TOOL_PLANT, TOOL_SHEAR, TOOL_TANK, type Block } from './sim.ts';
 import { SPECIES, BUILDINGS, VEHICLES, CREW, gradeOf, SIZE_MIN, ELF_LINES, FAMILY_LINES } from './data.ts';
-import { treeSprite, wildSprite, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, treeShadow, shadowBlob, mound, stump, snowman, candyCane, lampPost, giftPile, fence, glint, glow, santaSleigh, buildingLights, half, giftBox, parachute, bellSprite, STAGE_PX, BLD_TOP, PX_AX, PX_AY, VEH_TINT, type Look } from './art';
+import { treeSprite, wildSprite, buildingSprite, person, machine, deerSprite, dogSprite, carSprite, thiefSprite, treeShadow, shadowBlob, mound, stump, snowman, candyCane, lampPost, giftPile, fence, glint, glow, santaSleigh, buildingLights, half, giftBox, parachute, bellSprite, STAGE_PX, BLD_TOP, PX_AX, PX_AY, VEH_TINT, type Look, gateArch } from './art';
 import { Ground, type GroundEnv } from './ground';
 import { text, center, rimmed, textW } from './font';
 
@@ -124,9 +124,9 @@ export class Renderer {
     return ch;
   }
   /** the whole farm as an image, for the Christmas Eve flight */
-  farmImage() {
-    const r = canvas(MW * 2, MH * 2), env = { snow: 3, dry: false }, key = this.envKey(env);
-    for (let ci = 0; ci < CW * CHH; ci++) { const ch = this.chunk(2, ci, { n: 2 }, 3, env, key); r.g.drawImage(ch.c, (ci % CW) * CH * 2, ((ci / CW) | 0) * CH * 2 - this.chunkTop(2)); }
+  farmImage(z = 2) {
+    const r = canvas(MW * z, MH * z), env = { snow: 3, dry: false }, key = this.envKey(env);
+    for (let ci = 0; ci < CW * CHH; ci++) { const ch = this.chunk(z, ci, { n: 2 }, 3, env, key); r.g.drawImage(ch.c, (ci % CW) * CH * z, ((ci / CW) | 0) * CH * z - this.chunkTop(z)); }
     return r;
   }
 
@@ -247,6 +247,15 @@ export class Renderer {
       if (q.fall > 0) { const up = Math.round(q.fall * 62), sw = Math.round(Math.sin(t * 4 + i) * 4); if (near) { g.drawImage(shadowBlob(12), x - 6, y - 2); g.drawImage(parachute(), x - 12 + sw, y - up - 28); } g.drawImage(im, x - 7 + sw, y - up - 13); continue; }
       if (q.t < 6 && ((t * 8) | 0) % 2) continue;
       const hop = Math.abs(Math.sin(t * 5 + i)) * 3 | 0; g.drawImage(shadowBlob(14), x - 7, y - 2); g.drawImage(im, x - 7, y - 14 - hop); if (((t * 3 + i) | 0) % 3 === 0) g.drawImage(glint(1 + (((t * 9) | 0) % 2)), x + 2, y - 18 - hop);
+    }
+    const du = f.duel;
+    if (du) {
+      const n = du.pts.length / 2, big = z >= 8, fr = ((t * 8) | 0) % 2, arch = (wx: number, wy: number, hot: boolean, last: boolean) => { const x = Math.round(wx * z - camX), y = Math.round(wy * z - camY); if (big) { const im = gateArch(hot, last), k = z >= 16 ? 1 : 0.7, w = Math.round(im.width * k), h = Math.round(im.height * k); g.drawImage(im, x - (w >> 1), y - h + 3, w, h); } else { g.fillStyle = hot ? C.gold : C.red; g.fillRect(x - 2, y - 2, 4, 4); } };
+      if (!du.on) arch(du.x, du.y, ((t * 3) | 0) % 2 === 0, false);
+      else for (let i = n - 1; i >= du.i; i--) { if (i > du.i + 2 && i !== n - 1) continue; arch(du.pts[i * 2], du.pts[i * 2 + 1], i === du.i, i === n - 1); }
+      const bx = Math.round(du.bx * z - camX), by = Math.round(du.by * z - camY);
+      if (big) { const im = carSprite('#23202e', false, du.dir === 3 ? 3 : 1), k = z >= 16 ? 1 : 0.6, w = Math.round(im.width * k), h = Math.round(im.height * k); g.drawImage(shadowBlob(w), bx - (w >> 1), by - 2); g.drawImage(im, bx - (w >> 1), by - h + 3 - (du.on ? fr : 0), w, h); g.fillStyle = C.red; g.fillRect(bx - 1, by - h - 2, 3, 3); }
+      else { g.fillStyle = C.ink; g.fillRect(bx - 2, by - 2, 5, 5); g.fillStyle = C.red; g.fillRect(bx - 1, by - 1, 3, 3); }
     }
     const tr = f.trail; if (!tr) return;
     const n = tr.pts.length / 2;

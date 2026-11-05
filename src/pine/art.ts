@@ -618,3 +618,53 @@ export function ornament(i: number, o: { shape: string; col: string; hi: string 
     b.outline(RIM); return b.bake();
   });
 }
+
+// ---- christmas eve ------------------------------------------------------------------------------------
+/** a candy-cane hoop to fly through; the next one up burns gold */
+export function eveRing(hot: boolean) {
+  return once(`er${hot}`, () => {
+    const R = 32, b = new Buf(R * 2 + 2, R * 2 + 2), c = R + 1;
+    for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
+      const d = Math.hypot(x - c, y - c); if (d > R || d < R - 6) continue;
+      const a = Math.atan2(y - c, x - c), band = Math.floor((a / 6.2832 + 1) * 14) % 2, rim = d > R - 1.5 ? 1 : d < R - 4.5 ? -1 : 0;
+      const base = hot ? (band ? C.gold : C.white) : (band ? C.red : C.white);
+      b.px(x, y, rim > 0 ? mix(base, C.white, 0.5) : rim < 0 ? mix(base, C.ink, 0.35) : base);
+    }
+    for (let k = 0; k < 4; k++) { const a = k * 1.5708 + 0.785, x = c + Math.cos(a) * (R - 3), y = c + Math.sin(a) * (R - 3); b.rect(x - 1, y - 3, 3, 7, C.lemon); b.rect(x - 3, y - 1, 7, 3, C.lemon); b.px(x, y, C.white); }
+    return b.bake();
+  });
+}
+/** a storm cloud, with the odd flicker inside */
+export function eveCloud(v: number, flash: boolean) {
+  return once(`ec${v}${flash}`, () => {
+    const b = new Buf(56, 40), c0 = flash ? '#7a6ad8' : '#3a3478', c1 = flash ? '#a89af0' : '#524a9c', c2 = flash ? '#e0d8ff' : '#7a70c0';
+    for (let i = 0; i < 7; i++) { const x = 8 + i * 6.6, y = 21 + Math.sin(i * 2.1 + v * 3) * 4, r = 8 + hash(i, 3, v * 9 | 0) * 6; b.disc(x, y, r, r * 0.84, c0); }
+    for (let i = 0; i < 6; i++) { const x = 11 + i * 6.6, y = 17 + Math.sin(i * 2.1 + v * 3) * 3, r = 5 + hash(i, 4, v * 9 | 0) * 4; b.disc(x, y, r, r * 0.8, c1); }
+    for (let i = 0; i < 5; i++) { const x = 14 + i * 7, y = 13 + Math.sin(i * 1.7 + v * 5) * 2; b.disc(x, y, 2.6, 1.6, c2); }
+    if (flash) { b.line(30, 24, 25, 33, C.lemon); b.line(25, 33, 30, 33, C.lemon); b.line(30, 33, 24, 40, C.white); }
+    b.outline('#1a1640'); return b.bake();
+  });
+}
+/** the trees standing up out of the Mode 7 floor, moonlit */
+export function eveTree(v: number, lights: boolean) {
+  return once(`et${v}${lights}`, () => {
+    const src = wildSprite(40, 2, v), r = canvas(src.width, src.height); r.g.drawImage(src, 0, 0);
+    r.g.globalCompositeOperation = 'source-atop'; r.g.fillStyle = 'rgba(16,22,92,.5)'; r.g.fillRect(0, 0, src.width, src.height); r.g.globalCompositeOperation = 'source-over';
+    if (lights) for (let i = 0; i < 12; i++) { const y = 8 + hash(i, v, 7) * (src.height - 14), hw = (y / src.height) * src.width * 0.34, x = src.width / 2 + (hash(i, v, 8) - 0.5) * 2 * hw; r.g.fillStyle = [C.red, C.gold, '#46b0ff', '#ff6ac8', C.lime][i % 5]; r.g.fillRect(x | 0, y | 0, 2, 2); }
+    return r.c;
+  });
+}
+
+/** a race gate: two candy poles and a banner; the last one is the chequered flag */
+export function gateArch(hot: boolean, last: boolean) {
+  return once(`ga${hot}${last}`, () => {
+    const W = 46, H = 40, b = new Buf(W, H);
+    for (const x of [3, W - 7]) for (let y = 4; y < H; y++) { const c = ((y >> 2) % 2) ? C.red : C.white; b.rect(x, y, 4, 1, c); b.px(x + 3, y, mix(c, C.ink, 0.3)); }
+    for (const x of [5, W - 5]) { b.disc(x, 4, 3, 3, hot ? C.gold : C.lgrey); b.px(x - 1, 3, C.white); }
+    for (let y = 6; y < 17; y++) for (let x = 7; x < W - 7; x++) {
+      const k = last ? (((x >> 2) + (y >> 2)) % 2 ? C.ink : C.white) : y < 7 || y > 15 ? C.gold : hot ? C.dred : C.dgrey; b.px(x, y, k);
+    }
+    if (!last) for (const [x, y] of [[20, 9], [22, 9], [24, 9], [21, 11], [23, 11], [22, 13]] as number[][]) b.rect(x, y, 2, 2, hot ? C.lemon : C.lgrey);
+    b.outline(RIM); return b.bake();
+  });
+}

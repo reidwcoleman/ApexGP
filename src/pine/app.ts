@@ -6,6 +6,7 @@ import { Renderer, PLAYER_LOOK } from './render';
 import { Chip } from './audio';
 import { UI } from './ui';
 import { Flyover } from './mode7';
+import { EveRun, EVE_U, EVE_LOW, EVE_HIGH } from './eve';
 import { text, bold, center, right, rimmed, textW, wrap, LINE } from './font';
 import { treeSprite, paintTree, buildingSprite, machine, person, icon, VEH_TINT, holly, snowman, giftPile, lampPost, santaSleigh, glint, glow, moonSprite, logoWord, shadowBlob, ornament, giftBox, bellSprite } from './art';
 import { paintTreeBuf } from './trees';
@@ -308,6 +309,12 @@ export class App {
       case 'bell': chip.note(f.note); r.burst(f.x, f.y - 0.6, 8, [C.gold, C.lemon, C.white], 4); r.float(f.x, f.y - 1.5, `${f.i + 1}/${f.n}`, C.lemon); break;
       case 'bellFail': chip.sfx('trailFail'); this.toast('The bells went quiet.', C.ice); break;
       case 'bellDone': chip.sfx('trailDone'); r.shake = 4; r.burst(f.x, f.y, 40, [C.gold, C.red, C.white, C.lime], 8); r.float(f.x, f.y - 2.4, 'TRAIL COMPLETE +' + money(f.cash), C.gold, false); break;
+      case 'duelOffer': { chip.sfx('alarm'); this.big = { t: 'BUCK HEMLOCK', s: 'He wants a race. Drive to the start arch', c: C.red, life: 2.6 }; r.say(f.x, f.y - 2.4, f.t); r.ping(f.x, f.y); break; }
+      case 'duelGo': { chip.sfx('frenzy'); r.shake = 4; this.big = { t: 'GO!', s: 'Beat Buck to the chequered flag', c: C.gold, life: 1 }; break; }
+      case 'duelGate': { chip.note(60 + Math.min(f.i, 12) * 2); r.burst(f.x, f.y - 0.6, 14, [C.gold, C.red, C.white], 5); r.float(f.x, f.y - 2, `${f.i}/${f.n}`, C.lemon); break; }
+      case 'duelSkip': this.toast('Buck drove off, clucking like a chicken.', C.ice); chip.sfx('trailFail'); break;
+      case 'duelWin': { chip.sfx('trailDone'); r.shake = 6; r.burst(f.x, f.y, 50, [C.gold, C.red, C.white, C.lime], 9); this.big = { t: 'YOU BEAT BUCK!', s: `+${money(f.cash)} and ${Math.round(f.share * 100)}% of his customers`, c: C.gold, life: 2.6 }; r.say(sim.s.p.x, sim.s.p.y - 3, f.t); break; }
+      case 'duelLose': { chip.sfx('trailFail'); this.big = { t: 'BUCK WINS', s: f.t, c: C.ice, life: 2.2 }; break; }
       case 'month': chip.sfx('month'); this.pickMusic(); break;
       case 'season': break;
       case 'build': chip.sfx('build'); break; case 'buy': chip.sfx('buy'); break; case 'deny': chip.sfx('deny'); break;
@@ -403,6 +410,15 @@ export class App {
       g.fillStyle = C.gold; const px = x + Math.cos(a) * (14 + b), py = y + Math.sin(a) * (14 + b); g.fillRect(Math.round(px) - 2, Math.round(py) - 2, 5, 5); g.fillStyle = C.lemon; g.fillRect(Math.round(px + Math.cos(a) * 3) - 1, Math.round(py + Math.sin(a) * 3) - 1, 3, 3);
     };
     f.gifts.forEach((q, i) => { if (q.fall <= 0) arrow(q.x, q.y, giftBox(i)); });
+    if (f.duel) {
+      const d = f.duel, n = d.pts.length / 2, by = 62, w = 150, bx = Math.round(W / 2 - w / 2), ui = this.ui;
+      if (!d.on) { arrow(d.x, d.y, bellSprite(((t * 5) | 0))); rimmed(g, `BUCK WAITS ${Math.ceil(d.t)}  PRIZE ${money(d.pot)}`, W / 2, by, C.pink, C.ink); }
+      else {
+        arrow(d.pts[d.i * 2], d.pts[d.i * 2 + 1], bellSprite(((t * 5) | 0)));
+        ui.rect(C.ink, bx - 1, by - 1, w + 2, 12); ui.rect('#123c3e', bx, by, w, 10); ui.rect(C.gold, bx, by, Math.round(w * d.i / n), 5); ui.rect(C.red, bx, by + 5, Math.round(w * d.bi / n), 5);
+        rimmed(g, 'YOU', bx - 14, by + 1, C.gold, C.ink); rimmed(g, 'BUCK', bx + w + 17, by + 1, C.pink, C.ink);
+      }
+    }
     if (f.trail) {
       const q = f.trail, x = q.pts[q.i * 2], y = q.pts[q.i * 2 + 1]; arrow(x, y, bellSprite(((t * 5) | 0)));
       const w = 90, bx = Math.round(W / 2 - w / 2), by = 62; this.ui.rect(C.ink, bx - 1, by - 1, w + 2, 6); this.ui.meter(bx, by, w, 4, q.t / Math.max(q.t, q.i ? 3.4 : 9, q.step / VEHICLES[sim.s.veh].speed * 3.4), q.t < 1.4 ? C.red : C.gold, '#123c3e'); rimmed(g, `BELL TRAIL ${q.i}/${q.pts.length / 2}`, W / 2, by + 7, C.lemon, C.ink);
@@ -678,16 +694,66 @@ export class App {
   // ---- christmas eve and the year-end books -----------------------------------------------------------
   startEve() {
     this.selTicket = -1; this.block = null; this.setAct('drive');
-    this.to(() => { this.fly = new Flyover(this.r.farmImage().c, this.sim); this.mode = 'fly'; this.chip.play('eve'); this.flyT = 0; });
+    this.to(() => { const s = this.sim.s; this.fly = new Flyover(this.r.farmImage(4).c, this.sim); this.run = new EveRun(s.seed, s.year, s.yr.sold); this.mode = 'fly'; this.chip.play('eve'); this.flyT = 0; this.evePrize = null; this.eveMouse = false; this.eveMx = -1; });
   }
-  flyT = 0;
+  flyT = 0; run: EveRun | null = null; evePrize: { cash: number; seedlings: number; orn: number; best: boolean } | null = null; eveCardT = 0; eveMouse = false; eveMx = -1; eveMy = -1;
   drawFly(dt: number) {
-    const { g, W, H, sim, ui } = this; this.fly!.draw(g, W, H, dt); this.flyT += dt;
-    const a = Math.min(1, this.flyT / 1.5);
-    g.globalAlpha = a; center(g, `CHRISTMAS EVE, YEAR ${sim.s.year}`, W / 2, H * 0.08, C.white, 2, C.ink);
-    center(g, `${sim.standing.toLocaleString('en-US')} trees still growing. ${sim.s.yr.sold.toLocaleString('en-US')} in living rooms tonight.`, W / 2, H * 0.08 + 22, C.lemon, 1, C.ink); g.globalAlpha = 1;
-    if (this.flyT > 1.2 && ((this.t * 1.6) | 0) % 2 === 0) center(g, 'CLICK TO OPEN THE BOOKS', W / 2, H - 16, C.ice, 1, C.ink);
-    if ((this.flyT > 1.2 && (ui.pressed || this.tap('Enter') || this.tap('Space'))) || this.flyT > 26) { ui.pressed = false; this.to(() => { this.report = this.sim.makeReport(); this.roll = 0; this.mode = 'report'; this.chip.play('winter'); this.fly = null; }); }
+    const { g, W, H, sim, ui, chip } = this, run = this.run!; this.flyT += dt;
+    // keys, or the pointer if that's what moved last
+    let ix = (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
+    let iy = (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0);
+    if (ix || iy) this.eveMouse = false; else if (ui.mx !== this.eveMx || ui.my !== this.eveMy) { if (this.eveMx >= 0) this.eveMouse = true; this.eveMx = ui.mx; this.eveMy = ui.my; }
+    if (this.eveMouse) { const tu = (ui.mx / W - 0.5) * 2.4 * EVE_U, ta = EVE_HIGH - (ui.my / H) * (EVE_HIGH - EVE_LOW) * 1.15; ix = Math.max(-1, Math.min(1, (tu - run.u) / 10)); iy = Math.max(-1, Math.min(1, (run.a - ta) / 10)); }
+    const toss = this.keys.has('Space') || ui.down;
+    run.step(dt, ix, iy, toss && run.phase === 'run');
+    this.fly!.draw(g, W, H, dt, run);
+    for (const f of run.fx) {
+      this.fly!.react(f);
+      if (f.k === 'ring') chip.chime(f.chain * 3);
+      else if (f.k === 'home') { chip.sfx(f.perfect ? 'gift' : 'cash'); if (f.perfect) chip.sfx('order'); }
+      else if (f.k === 'thud') chip.sfx('coal');
+      else if (f.k === 'toss') chip.sfx('blip');
+      else if (f.k === 'snowbank') chip.sfx('plant');
+      else if (f.k === 'lost') chip.sfx('full');
+      else if (f.k === 'mult') { chip.sfx('combo'); this.comboPop = 1; }
+    }
+    run.fx.length = 0; this.comboPop = Math.max(0, this.comboPop - dt * 3);
+    if (run.phase === 'done' && !this.evePrize) { this.evePrize = sim.finishEve(run.score, run.pct, run.stars, run.delivered); this.eveCardT = 0; }
+    if (this.evePrize) return this.eveCard(dt);
+    if (run.phase === 'climb') { const a = Math.min(1, (run.a - 60) / 40); g.globalAlpha = a; center(g, 'MERRY CHRISTMAS', W / 2, H * 0.14, C.white, 3, C.red); g.globalAlpha = 1; return; }
+    // the run's HUD: score, chain, how far to go
+    ui.rect(C.ink, 0, 0, W, 17); ui.rect('#14184a', 0, 0, W, 16); ui.candy(0, 15, W, 2, this.t * 6);
+    bold(g, run.score.toLocaleString('en-US'), 6, 4, C.gold); const m = run.mult;
+    if (m > 1) { const lbl = `x${m}`; text(g, lbl, 74, 4 - Math.round(this.comboPop * 2), m >= 6 ? C.red : m >= 3 ? C.lemon : C.white, 1, C.ink); }
+    right(g, `HOMES ${run.delivered}/${run.homes}`, W - 6, 4, C.lime);
+    const bw = Math.min(170, W - 240), bx = Math.round(W / 2 - bw / 2), k = Math.min(1, run.s / run.end); ui.rect(C.ink, bx, 6, bw, 4); ui.rect(C.sn4, bx + 1, 7, bw - 2, 2); ui.rect(C.gold, bx + 1, 7, Math.round((bw - 2) * k), 2); ui.rect(C.white, bx + Math.round((bw - 2) * k) - 1, 5, 3, 6);
+    for (let i = 1; i <= 3; i++) { const on = run.stars >= i, ix2 = bx + bw + 8 + i * 9; g.fillStyle = on ? C.gold : '#3a3a78'; g.fillRect(ix2 - 2, 7, 5, 3); g.fillRect(ix2, 5, 1, 7); }
+    if (this.flyT < 7) {
+      const a = Math.min(1, this.flyT * 1.5, (7 - this.flyT) * 1.5); g.globalAlpha = a;
+      center(g, `CHRISTMAS EVE, YEAR ${sim.s.year}`, W / 2, H * 0.1, C.white, 2, C.ink);
+      center(g, `${sim.s.yr.sold.toLocaleString('en-US')} trees in living rooms tonight. ${run.homes} chimneys on your round.`, W / 2, H * 0.1 + 20, C.lemon, 1, C.ink);
+      center(g, 'STEER WITH WASD OR THE MOUSE. PUT THE RED NOSE IN THE GOLD HOOP.', W / 2, H * 0.1 + 33, C.cream, 1, C.ink);
+      center(g, 'SPACE OR CLICK TOSSES A GIFT AT THE RED CROSS. HIT THE CHIMNEYS.', W / 2, H * 0.1 + 44, C.cream, 1, C.ink); g.globalAlpha = 1;
+    }
+    if (this.tap('Escape')) { run.score = 0; run.delivered = 0; run.phase = 'done'; }
+  }
+  /** the score card, flown past the moon */
+  eveCard(dt: number) {
+    const { g, W, H, ui, chip } = this, run = this.run!, P = this.evePrize!, w = 300, h = 164, x = Math.round((W - w) / 2), y = Math.round((H - h) / 2) + 6;
+    const was = this.eveCardT; this.eveCardT += dt; const t = this.eveCardT;
+    ui.paper(x, y, w, h); ui.ribbon(x, y, w, 18); g.drawImage(holly(), x - 7, y - 6); g.drawImage(holly(true), x + w - 12, y - 6); center(g, 'THE ROUND IS DONE', x + w / 2, y + 5, C.white, 1, C.dred);
+    const star = icon('star');
+    for (let i = 0; i < 3; i++) {
+      const at = 0.5 + i * 0.45, on = run.stars > i && t >= at, sx = x + w / 2 - 54 + i * 40, sy = y + 24, pop = on ? Math.max(0, 1 - (t - at) * 5) : 0, sz = 28 + Math.round(pop * 10);
+      if (run.stars > i && was < at && t >= at) chip.sfx('goal');
+      g.globalAlpha = on ? 1 : 0.18; g.drawImage(star, sx + 14 - sz / 2, sy + 14 - sz / 2, sz, sz); g.globalAlpha = 1;
+    }
+    let yy = y + 60; const row = (l: string, v: string, c: string = C.ink) => { text(g, l, x + 20, yy, C.bark); right(g, v, x + w - 20, yy, c); yy += 11; };
+    row('Score', run.score.toLocaleString('en-US') + (P.best ? '  NEW BEST' : ''), C.pine); row('Chimneys', `${run.delivered} of ${run.homes}, ${run.perfect} bullseye`); row('Hoops', `${run.ringsHit} of ${run.rings}`); row('Longest chain', String(run.bestChain));
+    row('Eve bonus', '+' + money(P.cash), C.pine); if (P.seedlings) row('Thank-you seedlings', String(P.seedlings), C.pine);
+    if (P.orn >= 0) { g.drawImage(ornament(P.orn, ORNAMENTS[P.orn]), x + 20, y + h - 24); text(g, `New ornament: ${ORNAMENTS[P.orn].name}`, x + 40, y + h - 16, C.dred); if (was < 1.9 && t >= 1.9) chip.sfx('orn'); }
+    else if (run.stars < 3) text(g, 'Three stars hangs a new ornament.', x + 20, y + h - 16, C.brown);
+    if (t > 0.9 && (ui.button(x + w - 106, y + h - 21, 98, 15, 'OPEN THE BOOKS', { primary: true }) || this.tap('Enter'))) this.to(() => { this.report = this.sim.makeReport(); this.roll = 0; this.mode = 'report'; this.chip.play('winter'); this.fly = null; this.run = null; this.evePrize = null; });
   }
   drawYearEnd(dt: number) {
     const { g, W, H } = this; g.drawImage(this.back.c, 0, 0); g.fillStyle = 'rgba(16,14,52,.6)'; g.fillRect(0, 0, W, H); this.snowfall(dt, 0.6);
@@ -701,7 +767,7 @@ export class App {
     let yy = y + 26; const line = (l: string, v: number, c: string = C.ink, isN = false) => { text(g, l, x + 12, yy, C.bark); right(g, isN ? Math.round(v * k).toLocaleString('en-US') : money(v * k), x + 186, yy, c); yy += 11; };
     line('Trees sold', Y.sold, C.ink, true); yy += 3; line('Walk-in sales', Y.retail); line(`Orders (${Y.ordersN} of ${Y.ordersN + Y.missed})`, Y.orders); line('Wholesale', Y.wholesale); line('Bonuses', Y.bonus); ui.rect(C.tan, x + 12, yy, 174, 1); yy += 3; line('Revenue', Y.revenue, C.pine); yy += 3; line('Wages', -Y.wages, C.dred); line('Seedlings', -Y.seeds, C.dred); line('Land, buildings, gear', -Y.bills, C.dred); yy += 3;
     bold(g, 'Cash in hand', x + 12, yy, C.ink); right(g, money(R.net * k), x + 186, yy, R.net >= 0 ? C.pine : C.red); yy += 14;
-    text(g, `Best Cheer streak ${Y.bestStreak}. Best combo ${this.sim.s.fun.best}`, x + 12, yy, C.bark); yy += 11; if (Y.lostSales) { text(g, `${Y.lostSales.toLocaleString('en-US')} families left with no tree`, x + 12, yy, C.dred); yy += 11; } if (Y.lost) text(g, `${Y.lost} trees lost to pests, deer and drought`, x + 12, yy, C.dred);
+    text(g, `Best Cheer streak ${Y.bestStreak}. Best combo ${this.sim.s.fun.best}`, x + 12, yy, C.bark); yy += 11; { const e = this.sim.lastEve; if (e) { text(g, `Eve round: ${e.stars} star${e.stars === 1 ? '' : 's'}, ${e.delivered} chimneys`, x + 12, yy, C.bark); yy += 11; } } if (Y.lostSales) { text(g, `${Y.lostSales.toLocaleString('en-US')} families left with no tree`, x + 12, yy, C.dred); yy += 11; } if (Y.lost) text(g, `${Y.lost} trees lost to pests, deer and drought`, x + 12, yy, C.dred);
     const rx = x + 204, rw = w - 214; let ry = y + 26; bold(g, 'Top tree farms this year', rx, ry, C.dred); ry += 14;
     R.rivals.forEach((f, i) => { if (f.me) ui.rect(C.gold, rx - 3, ry - 2, rw + 6, 12); text(g, `${i + 1}.`, rx, ry, C.ink); text(g, f.name, rx + 14, ry, f.me ? C.ink : C.bark); right(g, f.sold.toLocaleString('en-US'), rx + rw, ry, C.ink); ry += 13; });
     ry += 8; const hist = this.sim.s.history.slice(-12), mx = Math.max(...hist.map((q) => q.sold), 1), bw = Math.floor(rw / Math.max(6, hist.length));

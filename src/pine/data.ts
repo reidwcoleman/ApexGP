@@ -196,3 +196,9 @@ export const MABEL_NOTES = ['Mabel: Eat something. You look thin.', 'Mabel: The 
 export const COAL_NOTES = ['A lump of coal, from Buck Hemlock.', 'Coal. The card says "Regards, MegaPine".', 'Coal, gift wrapped by a junior associate.'];
 export const ELF_LINES = ['Fir real!', 'Spruce it up!', 'Tree-mendous!', 'Yule love it!', 'Needle a hand?', 'Pine-tastic!', 'Snow way!', 'Happy holly days!', 'Oh, fir crying out loud', 'Have a holly jolly', 'Tinsel in my boots', 'Lookin sharp, boss', 'Union rep says hi', 'Wood you believe it', 'I wood not leaf', 'Bough down!'];
 export const FAMILY_LINES = ['This one!', 'Its so big!', 'It will fit. Probably.', 'Smells like Christmas', 'Can we keep the elf?', 'Dad, it wont fit', 'Best tree ever!', 'Merry Christmas!', 'Mom said smaller', 'I named it Doug'];
+
+// Buck Hemlock turns up in person when the farm is quiet
+export const DUEL_GATES = 9;
+export const BUCK_DARE = ['Think you can keep up, kiddo?', 'My accountant drives faster than you.', 'First to the flag. Unless you are scared.', 'Your grandma raced better. In boots.', 'Race me. Shareholders love a blowout.'];
+export const BUCK_WINS = ['MegaPine always delivers.', 'Try a bicycle.', 'That was my slow truck.', 'I will send you a brochure.'];
+export const BUCK_LOSES = ['My tires were cold.', 'I let you win. Legal made me.', 'This changes nothing. Probably.', 'Who taught you to drive?!'];
