@@ -6,6 +6,8 @@ import { Sound } from './audio.ts';
 import { biome, type Biome } from './biome.ts';
 import { buildRound, dealShow, modeName, setShow, DEFAULT_SHOW, POOL, ROUNDS, SHOW, type Course, type RoundId } from './courses.ts';
 import { TeamPlay } from './team.ts';
+import { CupPlay, type CupEvent } from './soccer.ts';
+import { CUP, CUP_COLORS, CUP_NAMES } from './course-soccer.ts';
 import { TEAM_T as TEAM_ROUND_T } from './course-paintparty.ts';
 import { CALL, shownColour } from './course-modes.ts';
 import { BOUNCE, Pop } from './course-bounce.ts';
@@ -23,7 +25,7 @@ import { Fireworks } from './fx.ts';
 import { Stars } from './stars.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
 import { Confetti, Puffs, Splashes, Rings } from './fx.ts';
-import { BUMP, DASH_CD, Marble, Mode } from './physics.ts';
+import { BUMP, DASH_CD, GRAVITY, Marble, Mat, Mode } from './physics.ts';
 import { Stage } from './render.ts';
 import { ordinal, UI, type Row } from './ui.ts';
 import { F, MAX_PLAYERS, PartyGuest, PartyHost, STRIDE, type CtlMsg, type Member, type NetContestant } from './net.ts';
@@ -438,6 +440,10 @@ export class MarbleGame {
   private pinP: PinPlay | null = null;
   private shotP: ShotPlay | null = null;
   private rocketP: RocketPlay | null = null;
+  private cupP: CupPlay | null = null;
+  private cupSent = 0;
+  private cupOT = false;
+  private cupTwo = false;
   /** the two new points games' book */
   private get book() {
     return this.pinP ?? this.shotP;
@@ -486,7 +492,7 @@ export class MarbleGame {
   private async startRound() {
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    this.slots = info.kind === 'final' ? 1 : info.kind === 'team' ? alive - Math.floor(alive / (alive >= 9 ? 3 : 2)) : Math.max(2, (info.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
+    this.slots = info.kind === 'final' ? 1 : info.id === 'beancup' ? Math.ceil(alive / 2) : info.kind === 'team' ? alive - Math.floor(alive / (alive >= 9 ? 3 : 2)) : Math.max(2, (info.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
     // (online: everyone builds the same round, with the field in the same places)
     const order = this.roster.filter((x) => !x.out).map((x) => x.id).sort(() => Math.random() - 0.5);
     this.loadedBy.clear();
@@ -502,8 +508,8 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : c.kind === 'score' ? `The top ${this.slots} poppers go through` : `First ${this.slots} of ${alive} qualify`;
-    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: modeName(info.id), goal, blurb: info.blurb, team: this.teamPlay?.mine() });
+    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? 'The team with the most goals stays in the show' : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : c.kind === 'score' ? `The top ${this.slots} poppers go through` : `First ${this.slots} of ${alive} qualify`;
+    this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: modeName(info.id), goal, blurb: info.blurb, team: this.teamPlay?.mine() ?? this.cupP?.mine() ?? undefined });
     this.state = 'intro';
     this.stateT = 0;
     this.ui.hud(false);
@@ -535,6 +541,9 @@ export class MarbleGame {
     this.shotP = null;
     this.rocketP?.dispose();
     this.rocketP = null;
+    this.cupP?.dispose();
+    this.cupP = null;
+    this.cupOT = this.cupTwo = false;
     this.jackOn = false;
     this.flipSeen = 0;
     this.shotN = -1;
@@ -594,9 +603,11 @@ export class MarbleGame {
       this.racers.push(r);
       if (menu && x.player) this.preview = r;
       if (c.team && !menu) c.team.of.set(x.id, order[k] % c.team.teams);
+      if (c.cup && !menu) c.cup.of.set(x.id, order[k] % 2);
       if (menu) this.menuMarbles.push(r);
     });
     if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
+    if (c.cup && !menu) this.cupP = new CupPlay(c, this.scene, () => this.racers);
     if (c.path && !menu) this.starsP = new Stars(c, this.scene);
     this.lastLeft = Infinity;
     this.climbCalled = false;
@@ -610,6 +621,7 @@ export class MarbleGame {
     if (c.pin && !menu) {
       this.pinP = new PinPlay(() => this.racers);
       c.pin.onHit = (m, w) => this.pinHit(m, w);
+      c.pin.setLamps(this.player()?.m.id ?? -1);
     }
     if (c.shot && !menu) {
       this.shotP = new ShotPlay(c, this.scene, () => this.racers);
@@ -949,6 +961,10 @@ export class MarbleGame {
       if (!this.guest && this.state === 'play' && this.playT > TEAM_T) this.endRound();
       return;
     }
+    if (c.cup && this.cupP) {
+      this.cupRules(dt);
+      return;
+    }
     if (c.bounce && this.bounce) {
       this.bounceRules(dt);
       return;
@@ -1111,6 +1127,8 @@ export class MarbleGame {
       if (!this.guest && this.racers.every((x) => x.fin || x.out)) this.endRound();
     }
   }
+  private fuelBeep = 0;
+  private rocketAim = false;
   /** Colour Call's calls */
   private partyRules() {
     const c = this.course!;
@@ -1122,12 +1140,21 @@ export class MarbleGame {
       if (p && !p.out) {
         const f = (A.fuel.get(p.m.id) ?? ROCKET.fuel) / ROCKET.fuel;
         this.ui.fuse(f, f < 0.25 ? 0xff3020 : f < 0.5 ? 0xffa030 : 0x4af0ff);
+        this.sound.jet(A.burning.has(p.m.id));
+        // (nearly dry in the air: the alarm, and which way to go)
+        const air = p.m.groundT > 0.1;
+        if (f < 0.3 && air && w.time > this.fuelBeep) {
+          this.fuelBeep = w.time + 0.32;
+          this.sound.notes([88], 0, 0.22, true);
+        }
+        this.rocketAim = f < 0.45 && air;
         if (this.rocketP.refilled(p.m.id)) {
           this.ui.pop('FUEL!', true);
           this.sound.notes([79, 86], 0.04, 0.35, true);
           this.rings.ring(p.m.pos.clone(), 3, 0x4af0ff, 0.3);
         }
       }
+      if (!p || p.out) this.sound.jet(false);
       if (x < 5) this.ui.call(x > 0.5 ? 'HOLD JUMP TO FLY' : null, 0xffb02f);
       else if (x < 5.2) this.ui.call(null);
       const going = A.pads.filter((q) => x > q.out - ROCKET.warn).length;
@@ -1170,6 +1197,110 @@ export class MarbleGame {
     }
   }
 
+  /** Bean Cup: the ball (the host's), the goals, the second ball, golden goal */
+  private cupRules(dt: number) {
+    const c = this.course!;
+    const w = c.b.world;
+    const G = this.cupP!;
+    const A = c.cup!;
+    const x = w.time - c.state.go;
+    const on = this.state === 'play';
+    if (on) {
+      if (x < 5) this.ui.call(x > 0.4 ? 'RUN INTO THE BALL · DIVE TO SHOOT' : null, 0x37c25a);
+      else if (x < 5.3) this.ui.call(null);
+      if (!this.guest) {
+        if (!A.balls[0].live && !A.balls[0].backAt && !G.second) G.start();
+        for (const e of G.tick(dt, w.time, x)) this.cupEvent(e);
+        if (this.host && w.time > this.cupSent) {
+          this.cupSent = w.time + 1 / 15;
+          this.host.broadcast({ t: 'cup', s: G.packet(), a: G.score[0], b: G.score[1] });
+        }
+      } else G.follow(dt);
+      if (!this.cupTwo && x > CUP.T - CUP.second) {
+        this.cupTwo = true;
+        this.ui.shout('SECOND BALL!', 'Two to play for', 1800);
+        this.sound.notes([72, 79, 84], 0.07, 0.45, true);
+      }
+      if (!this.cupOT && x >= CUP.T && G.score[0] === G.score[1]) {
+        this.cupOT = G.overtime = true;
+        this.ui.shout('GOLDEN GOAL!', 'Next one wins it', 2200);
+        this.sound.notes([67, 72, 76, 79], 0.1, 0.5, true);
+        this.shake = Math.max(this.shake, 0.25);
+      }
+      if (!this.guest && G.done(x)) this.endRound();
+    } else if (this.guest) G.follow(dt);
+    for (const r of this.racers) {
+      if (r.local && r.m.pos.y < c.killY) {
+        const s = G.teamOf(r.c.id) === 0 ? -1 : 1;
+        r.m.pos.set(A.center.x + (Math.random() - 0.5) * 16, A.center.y + 2, A.center.z + s * 12);
+        r.m.vel.set(0, 0, 0);
+        r.m.ang.set(0, 0, 0);
+        r.m.mode = Mode.Run;
+        r.m.tumbleT = r.m.upT = 0;
+      }
+    }
+  }
+
+  /** what the ball did this frame (the host's: a guest only hears about the goals) */
+  private cupEvent(e: CupEvent) {
+    const G = this.cupP!;
+    if (e.k === 'goal') {
+      this.host?.broadcast({ t: 'goal', team: e.team, by: e.by, own: e.own, ball: e.ball, a: e.a, b: e.b });
+      this.cupGoal(e.team, e.by, e.own, e.ball);
+    } else if (e.k === 'hit') {
+      const r = this.racers.find((o) => o.c.id === e.id);
+      if (!r) return;
+      if (r.local) {
+        r.m.vel.set(e.vx, e.vy, e.vz);
+        r.m.knock(0.6);
+      } else if (r.c.owner !== 'host') this.host?.send(r.c.owner, { t: 'shove', id: e.id, kind: 'knock', v: [e.vx, e.vy, e.vz] });
+      this.sound.voice('wah', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, r.c.player);
+      if (r.c.player) this.ui.pop('BONK!', true);
+    } else if (e.k === 'kick') {
+      const b = G.arena.balls[e.ball];
+      this.sound.hop(b.pos.x, b.pos.y, b.pos.z, Mat.Bumper);
+      if (e.shot) {
+        this.puffs.dust(b.pos.clone(), 6, 0.35, 2);
+        const me = this.player();
+        if (me?.m.id === e.id) {
+          this.shake = Math.max(this.shake, 0.14);
+          this.ui.pop('SHOT!', true);
+        }
+      }
+    } else if (e.k === 'bang') {
+      const b = G.arena.balls[e.ball];
+      this.sound.hop(b.pos.x, b.pos.y, b.pos.z, Mat.Bumper);
+    }
+  }
+
+  /** the net bulges and the place goes up */
+  private cupGoal(team: number, by: number, own: boolean, ball: number) {
+    const G = this.cupP;
+    if (!G) return;
+    const c = this.course!;
+    const w = c.b.world;
+    const b = G.arena.balls[ball];
+    G.arena.shake(team === 0 ? 1 : 0, w.time);
+    const who = this.racers.find((r) => r.m.id === by);
+    const you = !!who?.c.player;
+    const mine = this.player() && G.teamOf(this.player()!.c.id) === team;
+    const name = CUP_NAMES[team];
+    this.ui.shout(own ? 'OWN GOAL!' : you ? 'YOU SCORED!' : 'GOAL!', `${who ? `${who.c.name} · ` : ''}${CUP_NAMES[0]} ${G.score[0]} - ${G.score[1]} ${CUP_NAMES[1]}`, 2400);
+    this.confetti.burst(b.pos, 160, 11);
+    this.fireworks.show(b.pos, 5, 14, 14, 0.14);
+    this.rings.ring(b.pos.clone(), 8, CUP_COLORS[team], 0.5);
+    this.sound.boom(b.pos.x, b.pos.y, b.pos.z);
+    this.sound.cheer(2);
+    this.sound.notes(mine ? [72, 76, 79, 84, 88] : [60, 57, 53], 0.08, 0.5, true);
+    this.shake = Math.max(this.shake, 0.4);
+    this.fovKick = Math.max(this.fovKick, 5);
+    if (!this.host && !this.guest) {
+      this.timeScale = 0.45;
+      this.slowUntil = performance.now() + 900;
+    }
+    void name;
+  }
+
   /** Pinball Panic: the drain and the plunger (each browser its own balls), the calls */
   private pinRules() {
     const c = this.course!;
@@ -1179,6 +1310,8 @@ export class MarbleGame {
     const x = w.time - c.state.go;
     const on = this.state === 'play';
     if (on) {
+      if (x < 6) this.ui.call(x > 0.4 ? 'A / D STEER · JUMP FLIPS · DIVE NUDGES' : null, 0xff2fa0);
+      else if (x < 6.3) this.ui.call(null);
       const lit = A.jackLit(x);
       if (lit && !this.jackOn) {
         this.ui.shout('JACKPOT LIT!', `${PIN.jackpot} up the middle`, 1500);
@@ -1201,7 +1334,9 @@ export class MarbleGame {
       const m = r.m;
       const at = G.lane.get(m.id);
       if (at !== undefined) {
-        if (w.time >= at) {
+        // (JUMP sends you on your way; if you don't, the plunger goes by itself)
+        if (w.time >= at || (r.c.player && this.shotFire && w.time >= at - 0.7)) {
+          this.shotFire = false;
           G.lane.delete(m.id);
           A.fire(m);
           if (r.c.player) this.sound.notes([55, 67], 0.05, 0.35);
@@ -1221,6 +1356,7 @@ export class MarbleGame {
         this.shake = Math.max(this.shake, 0.2);
       }
     }
+    this.shotFire = false;
     if (!this.guest && on && this.playT > PIN.T) this.endRound();
   }
 
@@ -1237,14 +1373,18 @@ export class MarbleGame {
       this.host?.broadcast({ t: 'pts', id: m.id, v: e.v, n, w: what });
     }
     if (!r.c.player) return;
-    const big = what === PinHit.Jackpot;
+    const big = what === PinHit.Jackpot || what === PinHit.Lanes || what === PinHit.Bank;
     this.ui.pop(`+${e.v}`, big || e.v >= 50);
+    if (what === PinHit.Lanes) this.ui.shout('ALL LANES LIT!', `+${e.v}`, 1200);
+    if (what === PinHit.Bank) this.ui.shout('BANK DOWN!', `+${e.v}`, 1200);
+    if (what === PinHit.Target) this.rings.ring(m.pos.clone(), 2, 0xfff0a0, 0.25);
+    if (what < PinHit.Sling) this.rings.ring(m.pos.clone(), 2.2, 0x38e8ff, 0.25);
     this.sound.notes([what === PinHit.Lane ? 84 : what === PinHit.Hole ? 79 : 72 + e.k * 2 + Math.floor(Math.random() * 3)], 0, 0.28, true);
     if (e.up) {
       this.ui.shout(`x${e.k} MULTIPLIER`, 'Stay out of the drain', 1000);
       this.sound.notes([76, 83], 0.05, 0.4, true);
     }
-    if (big) {
+    if (what === PinHit.Jackpot) {
       this.ui.shout('JACKPOT!', `+${e.v}`, 1400);
       this.confetti.burst(m.pos, 90, 8);
       this.fireworks.show(m.pos, 3, 14, 10, 0.15);
@@ -1264,17 +1404,41 @@ export class MarbleGame {
       G.tick(dt, x, this.shotFire, this.aimX, this.autopilot);
       this.shotFire = false;
       for (const r of G.fired) this.shotBang(r as Racer);
+      const n = Math.floor(x / SHOT.V), u = x - n * SHOT.V;
       if (G.meter !== null) {
         const near = Math.abs(G.meter - 1) < 0.07;
-        // (after the volley's shout has cleared: they sit in the same place)
-        const u0 = x % SHOT.V;
-        this.ui.call(u0 < 1.5 ? null : near ? 'FIRE!' : 'A / D AIM · JUMP FIRE', near ? 0x37e07a : 0xffd23a);
-        this.ui.fuse((G.meter - 1 + SHOT.swing) / (SHOT.swing * 2), near ? 0x37e07a : 0xffa030);
-      } else if (this.shotN >= 0) {
-        this.ui.call(null);
+        this.ui.call(near ? 'FIRE!' : 'A / D AIM · JUMP FIRE', near ? 0x37e07a : 0xffd23a);
+        this.ui.meter((G.meter - 1 + SHOT.swing) / (SHOT.swing * 2), near);
         this.ui.fuse(null);
+      } else {
+        this.ui.call(null);
+        this.ui.meter(null);
+        // (the clock to the bell, and a tick for each of the last three seconds)
+        this.ui.fuse(n < SHOT.volleys ? (SHOT.V - u) / SHOT.V : null, SHOT.V - u < 3 ? 0xff5040 : 0xffd23a);
+        const left = Math.ceil(SHOT.V - u - 0.35);
+        if (left <= 3 && left > 0 && left !== this.bellTick && n < SHOT.volleys) {
+          this.bellTick = left;
+          this.sound.notes([76], 0, 0.3, true);
+        }
       }
-      const n = Math.floor(x / SHOT.V), u = x - n * SHOT.V;
+      if (G.perfect) {
+        G.perfect = false;
+        const p = this.player();
+        if (p) {
+          this.ui.pop(`PERFECT SHOT! +${SHOT.perfect}`, true);
+          this.sound.notes([84, 88, 91], 0.04, 0.4, true);
+          if (this.guest) this.guest.send({ t: 'pts', id: p.m.id, v: SHOT.perfect, w: PinHit.Drain });
+          else {
+            const tot = G.add(p.m.id, SHOT.perfect);
+            this.host?.broadcast({ t: 'pts', id: p.m.id, v: SHOT.perfect, n: tot, w: PinHit.Drain });
+          }
+        }
+      }
+      if (G.again) {
+        G.again = false;
+        this.ui.pop('ONE MORE GO!', true);
+        this.sound.notes([67, 74], 0.06, 0.35, true);
+      }
       if (n !== this.shotN && n < SHOT.volleys) {
         this.shotN = n;
         const last = n === SHOT.volleys - 1;
@@ -1284,6 +1448,8 @@ export class MarbleGame {
       }
       if (u >= SHOT.V - 0.35 && G.bell < n && n < SHOT.volleys) {
         G.bell = n;
+        this.bellTick = 0;
+        this.rings.ring(c.shot!.bull(n, new THREE.Vector3()), SHOT.rings[2], 0xffe080, 0.5);
         if (!this.guest) {
           const s = G.ring(n);
           this.host?.broadcast({ t: 'volley', n, s });
@@ -1304,10 +1470,12 @@ export class MarbleGame {
     }
   }
 
+  private bellTick = 0;
   private shotBang(r: Racer) {
     const m = r.m;
     this.sound.boom(m.pos.x, m.pos.y, m.pos.z);
-    this.puffs.dust(m.pos.clone(), 10, 0.4, 2.2);
+    this.puffs.dust(m.pos.clone(), 14, 0.5, 3);
+    this.rings.ring(m.pos.clone(), 2.4, 0xfff0c0, 0.3);
     if (r.c.player) {
       this.shake = Math.max(this.shake, 0.3);
       this.fovKick = Math.max(this.fovKick, 5);
@@ -1547,7 +1715,7 @@ export class MarbleGame {
   /** the announcer, every round: spots running out, the field thinning, the last climb */
   private roundCalls() {
     const c = this.course!;
-    if (this.state !== 'play' || c.keep || c.team || c.bounce || this.book) return;
+    if (this.state !== 'play' || c.keep || c.team || c.cup || c.bounce || this.book) return;
     if (c.path) {
       const left = this.slots - this.racers.filter((r) => r.fin).length;
       if (c.kind !== 'final' && left < this.lastLeft && left > 0 && left <= 3) {
@@ -1561,7 +1729,7 @@ export class MarbleGame {
         this.sound.notes([60, 67, 72, 79], 0.07, 0.5);
         this.fireworks.show(c.path.P[c.path.index(c.finishS)], 6, 30, 22);
       }
-    } else if (c.plate) {
+    } else if (c.plate && !c.cup) {
       const left = this.racers.filter((r) => !r.out).length - this.slots;
       if (left < this.lastLeft && left > 0 && left <= 3 && this.lastLeft !== Infinity) {
         this.ui.shout(left === 1 ? 'ONE MORE TO GO!' : `${left} MORE TO GO!`, '', 1300);
@@ -1774,7 +1942,7 @@ export class MarbleGame {
       if (skip) this.wrapUp();
       return;
     }
-    if (c.team) return;
+    if (c.team || c.cup) return;
     if (!this.wrapAt) this.wrapAt = this.playT + WRAP_T;
     if (this.playT >= this.wrapAt || skip) this.wrapUp();
   }
@@ -1783,7 +1951,7 @@ export class MarbleGame {
   /** the round settled as it stands: the leaders take the places left, the best of the standing survive */
   private wrapUp() {
     const c = this.course!;
-    if (c.team || c.bounce || c.keep || this.book) {
+    if (c.team || c.cup || c.bounce || c.keep || this.book) {
       this.endRound();
       return;
     }
@@ -1802,14 +1970,14 @@ export class MarbleGame {
   private endRound() {
     const c = this.course!;
     if (this.state !== 'play') return;
-    const loser = this.teamPlay ? this.teamPlay.loser() : -1;
+    const loser = this.teamPlay ? this.teamPlay.loser() : this.cupP ? this.cupP.loser() : -1;
     // (Crown Keeper: the one who got to the time, or who has held it longest)
     if (this.keepP) {
       const w = this.keepP.ranking()[0] as Racer | undefined;
       if (w) w.fin = 1;
     }
     const rich = this.bounce ? new Set(this.bounce.ranking().slice(0, this.slots)) : this.book ? new Set(this.book.ranking().slice(0, this.slots) as Racer[]) : this.keepP ? new Set(this.keepP.ranking().slice(0, 1)) : null;
-    const through = this.racers.filter((r) => (rich ? rich.has(r) : c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
+    const through = this.racers.filter((r) => (rich ? rich.has(r) : c.cup ? this.cupP!.teamOf(r.m.id) !== loser : c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
     this.host?.broadcast({ t: 'end', through, fins: this.racers.filter((r) => r.fin).map((r) => [r.c.id, r.fin] as [number, number]) });
     this.roundOver(new Set(through));
   }
@@ -1821,7 +1989,9 @@ export class MarbleGame {
     this.state = 'over';
     this.stateT = 0;
     this.ui.fuse(null);
+    this.ui.meter(null);
     this.ui.call(null);
+    this.sound.jet(false);
     for (const r of this.racers) {
       const ok = through.has(r.c.id);
       if (!ok && !r.out) r.out = true;
@@ -1830,9 +2000,9 @@ export class MarbleGame {
     for (const x of this.roster) if (!through.has(x.id)) x.out = true;
     const p = this.player();
     if (p && p.out && !p.c.out) p.c.out = true;
-    if (p && c.team) {
+    if (p && (c.team || c.cup)) {
       const ok = through.has(p.c.id);
-      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
+      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.cup ? `${CUP_NAMES[0]} ${this.cupP!.score[0]} - ${this.cupP!.score[1]} ${CUP_NAMES[1]}` : ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
       if (ok) this.sound.qualified();
       else this.sound.eliminated();
       this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
@@ -1886,7 +2056,7 @@ export class MarbleGame {
       state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out ? 'out' : 'q',
       me: r.c.player,
       style: r.c.human ? (r.c.player ? undefined : 'Player') : STYLES[r.c.style].name,
-      note: this.keepP ? (r.fin === 1 ? 'CROWN' : `${(this.keepP.held.get(r.m.id) ?? 0).toFixed(1)}s`) : final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : this.bounce ? `${this.bounce.score.get(r.m.id) ?? 0} PTS` : this.book ? `${this.book.of(r.m.id)} PTS` : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
+      note: this.keepP ? (r.fin === 1 ? 'CROWN' : `${(this.keepP.held.get(r.m.id) ?? 0).toFixed(1)}s`) : final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : this.bounce ? `${this.bounce.score.get(r.m.id) ?? 0} PTS` : this.book ? `${this.book.of(r.m.id)} PTS` : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : this.cupP ? this.cupP.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
     }));
     const online = this.online();
     if (final) {
@@ -2115,6 +2285,16 @@ export class MarbleGame {
         if (this.book && m.n !== undefined) {
           this.book.score.set(m.id, m.n);
           if (m.w < PinHit.Sling) this.pinFlash(m.w);
+        }
+        break;
+      case 'cup':
+        this.cupP?.heard(m.s, m.a, m.b);
+        break;
+      case 'goal':
+        if (this.cupP) {
+          this.cupP.score[0] = m.a;
+          this.cupP.score[1] = m.b;
+          this.cupGoal(m.team, m.by, m.own, m.ball);
         }
         break;
       case 'volley':
@@ -2498,6 +2678,13 @@ export class MarbleGame {
         freeK = Math.max(0, fwd) * Math.min(1, (hs - 2.2) / 4);
         want = vy - this.yawOff;
       }
+    } else if (c.cup && this.cupP) {
+      // (the ball in view; right on top of it, the goal you're shooting at)
+      const ball = this.cupP.ballNear(m.pos);
+      const t = this.camTmp.set(0, 0, 0);
+      if (ball) t.subVectors(ball.pos, m.pos);
+      if (!ball || Math.hypot(t.x, t.z) < 5) c.cup.goal(this.cupP.teamOf(f.c.id), t).sub(m.pos);
+      want = Math.atan2(t.x, t.z);
     } else if (c.pin) {
       // (looking up the table, always: up is up)
       want = Math.PI;
@@ -2534,8 +2721,8 @@ export class MarbleGame {
     // (Cookie Crumble: the floors above the one you're on fade away, and the camera looks down on yours)
     if (c.crumble) c.crumble.view(Math.max(0, c.crumble.layerAt(m.pos.y + (f.fell ? 0 : 0.3))), dt);
     const aiming = !!c.shot && m.frozen;
-    const dist = (c.pin ? 15 : aiming ? 8.5 : c.shot ? 11 : c.rocket ? 9.6 : c.crumble ? 7 : c.team ? 7.2 : c.call ? 9.8 : c.bounce ? 8.8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
-    const hgt = (c.pin ? 13 : aiming ? 7.2 : c.shot ? 7 : c.rocket ? 4.6 : c.crumble ? 4.6 : c.team ? 4.2 : c.call ? 7.6 : c.bounce ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
+    const dist = (c.cup ? 10.5 : c.pin ? 15 : aiming ? 8.5 : c.shot ? 11 : c.rocket ? 11.5 : c.crumble ? 7 : c.team ? 7.2 : c.call ? 9.8 : c.bounce ? 8.8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.cup ? 6.4 : c.pin ? 13 : aiming ? 7.2 : c.shot ? 7 : c.rocket ? 7.4 : c.crumble ? 4.6 : c.team ? 4.2 : c.call ? 7.6 : c.bounce ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     // (Bounce House: the view rides a steady height, or you'd be seasick in a minute)
@@ -2546,6 +2733,17 @@ export class MarbleGame {
       const A = c.team;
       const ex = (A.round ? Math.hypot(pos.x - A.center.x, pos.z - A.center.z) : Math.max(Math.abs(pos.x - A.center.x), Math.abs(pos.z - A.center.z))) - (A.half - 0.5);
       if (ex > 0) pos.y += ex * 1.3;
+    }
+    // (the pitch: inside the glass, always)
+    if (c.cup) {
+      const ctr = c.cup.center, lx = CUP.HW - 1.2, lz = CUP.HL + 2;
+      const ox = Math.abs(pos.x - ctr.x) - lx, oz = Math.abs(pos.z - ctr.z) - lz;
+      if (ox > 0) pos.x = ctr.x + Math.sign(pos.x - ctr.x) * lx;
+      if (oz > 0) pos.z = ctr.z + Math.sign(pos.z - ctr.z) * lz;
+      pos.y += Math.max(0, ox, oz) * 0.45;
+      // (over the top of the bar, never level with it)
+      if (Math.abs(pos.z - ctr.z) > CUP.HL - 3 && Math.abs(pos.x - ctr.x) < CUP.goalHalf + 3) pos.y = Math.max(pos.y, ctr.y + CUP.goalH + 3.2);
+      c.cup.view(pos);
     }
     // (Bounce House: always inside the castle, never out behind its walls)
     if (c.bounce) {
@@ -2558,7 +2756,7 @@ export class MarbleGame {
     }
     // (the free arenas: a few metres out in front of you, at your feet's height)
     const look = free ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.2, 0.5, Math.cos(yaw) * 3.2)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
-    if (c.plate && !free) look.lerp(c.plate.center, aiming ? 0.6 : 0.25);
+    if (c.plate && !free && !c.cup) look.lerp(c.plate.center, aiming ? 0.6 : 0.25);
     if (this.snapCam) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
@@ -2596,9 +2794,9 @@ export class MarbleGame {
     if (c.plate) {
       const a = 0.6 + t * 2.4;
       const big = c.keep ? 1.75 : 1;
-      const r = (32 - t * 10) * big;
+      const r = (c.cup ? 52 - t * 12 : (32 - t * 10) * big);
       const at = c.plate.center;
-      cam.position.set(at.x + Math.cos(a) * r, at.y + (16 - t * 6) * big, at.z + Math.sin(a) * r);
+      cam.position.set(at.x + Math.cos(a) * r, at.y + (c.cup ? 26 - t * 8 : (16 - t * 6) * big), at.z + Math.sin(a) * r);
       this.camLook.copy(at);
       cam.lookAt(this.camLook);
       return;
@@ -2672,8 +2870,36 @@ export class MarbleGame {
   /** where the crown is, when it's off the screen */
   private crownArrow() {
     const K = this.keepP, p = this.player();
+    const ball = this.cupP && p && this.state === 'play' ? this.cupP.ballNear(p.m.pos) : null;
+    if (ball) return this.pointAt(ball.pos, 'BALL', 0xffffff);
+    const c = this.course;
+    if (c?.rocket && !K) {
+      if (!p || p.out || this.state !== 'play' || !this.rocketAim) return this.ui.arrow(null);
+      const A = c.rocket, x = c.b.world.time - c.state.go;
+      let bd = Infinity;
+      const at = this.tmpAim, q = this.camTmp;
+      for (const pad of A.pads) {
+        const y = A.padY(pad, x);
+        if (y === null || x > pad.out - 1) continue;
+        q.set(A.center.x + pad.x, y, A.center.z + pad.z);
+        const d = q.distanceTo(p.m.pos);
+        if (d < bd) (bd = d), at.copy(q);
+      }
+      for (let i = 0; i < A.rings.length; i++) {
+        if (x >= A.rings[i].out) continue;
+        A.ringAt(i, x, q);
+        const d = q.distanceTo(p.m.pos) * 0.8;
+        if (d < bd) (bd = d), at.copy(q);
+      }
+      if (bd === Infinity) return this.ui.arrow(null);
+      return this.pointAt(at, 'FUEL', 0x4af0ff);
+    }
     if (!K || this.state !== 'play' || !p || K.arena.holder === p.m.id) return this.ui.arrow(null);
-    const v = this.tmpArrow.copy(K.at).project(this.camera);
+    this.pointAt(K.at, 'CROWN', 0xffd23a);
+  }
+  /** an arrow at the edge of the screen, for something that's off it */
+  private pointAt(at: THREE.Vector3, text: string, color: number) {
+    const v = this.tmpArrow.copy(at).project(this.camera);
     const behind = v.z > 1;
     if (!behind && Math.abs(v.x) < 0.92 && Math.abs(v.y) < 0.88) return this.ui.arrow(null);
     const W = window.innerWidth, H = window.innerHeight;
@@ -2681,9 +2907,11 @@ export class MarbleGame {
     const l = Math.max(Math.abs(ax) / 0.86, Math.abs(ay) / 0.78, 1e-3);
     ax /= l;
     ay /= l;
-    this.ui.arrow({ x: ((ax + 1) / 2) * W, y: ((1 - ay) / 2) * H, a: Math.atan2(ax, ay), text: 'CROWN', color: 0xffd23a });
+    this.ui.arrow({ x: ((ax + 1) / 2) * W, y: ((1 - ay) / 2) * H, a: Math.atan2(ax, ay), text, color });
   }
   private tmpArrow = new THREE.Vector3();
+  private camTmp = new THREE.Vector3();
+  private tmpAim = new THREE.Vector3();
 
   // ------------------------------------------------------------------------------------- HUD
   private hud() {
@@ -2698,7 +2926,7 @@ export class MarbleGame {
       const me = r.c.player;
       v.copy(r.m.pos).add(new THREE.Vector3(0, 1.4, 0)).project(cam);
       const dist = r.m.pos.distanceTo(cam.position);
-      const show = !r.out && !r.fell && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && (me || dist < 22) && r.m.active;
+      const show = !r.out && !r.fell && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && (me || dist < (c.plate ? 15 : 22)) && r.m.active;
       this.ui.tag(r.c.id, me ? 'YOU' : r.c.name, ((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H, show || (r.c.human && !r.out && !r.fell && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && dist < 60), me, r.c.human && !me);
     }
     const alive = this.racers.filter((r) => !r.out).length;
@@ -2707,7 +2935,10 @@ export class MarbleGame {
     let status = '';
     if (c.keep && this.keepP) status = p && c.keep.holder === p.m.id ? `YOU HAVE IT! ${(KEEP.hold - (this.keepP.held.get(p.m.id) ?? 0)).toFixed(1)}s TO GO` : c.keep.holder < 0 ? 'THE CROWN IS LOOSE!' : `${this.racers.find((r) => r.m.id === c.keep!.holder)?.c.name.toUpperCase() ?? 'SOMEONE'} HAS THE CROWN!`;
     else if (c.kind === 'final') status = this.finCount ? 'WINNER!' : 'FIRST WINS';
-    else if (c.team && this.teamPlay) status = this.teamPlay.mine() ? `TEAM ${this.teamPlay.mine()!.name}` : 'TEAM GAME';
+    else if (this.cupP) {
+      const mineT = this.cupP.mine();
+      status = `${CUP_NAMES[0]} ${this.cupP.score[0]} - ${this.cupP.score[1]} ${CUP_NAMES[1]}${mineT ? ` · YOU'RE ${mineT.name}` : ''}`;
+    } else if (c.team && this.teamPlay) status = this.teamPlay.mine() ? `TEAM ${this.teamPlay.mine()!.name}` : 'TEAM GAME';
     else if (race) status = `QUALIFIED ${Math.min(this.finCount, this.slots)} / ${this.slots}`;
     else if (this.bounce) {
       const place = p ? ranked.indexOf(p) + 1 : 0;
@@ -2721,6 +2952,7 @@ export class MarbleGame {
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
     if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
+    else if (this.cupP && (this.state === 'play' || this.state === 'over')) timer = this.playT > CUP.T ? 'GOLDEN GOAL' : clock(Math.max(0, CUP.T - this.playT));
     else if (this.bounce && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, BOUNCE.T - this.playT));
     else if (this.pinP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, PIN.T - this.playT));
     else if (this.shotP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, SHOT_T - this.playT));
@@ -2744,7 +2976,7 @@ export class MarbleGame {
       race,
       keys: this.roundIdx === 0 && this.playT < 12,
     });
-    this.ui.teams(c.team && this.teamPlay ? this.teamPlay.scores() : this.bounce ? this.bounce.board() : this.book ? this.book.board() : this.keepP ? this.keepP.board() : null);
+    this.ui.teams(this.cupP ? this.cupP.board() : c.team && this.teamPlay ? this.teamPlay.scores() : this.bounce ? this.bounce.board() : this.book ? this.book.board() : this.keepP ? this.keepP.board() : null);
     this.keepP?.sync(c.b.world.time);
     this.crownArrow();
     this.starsP?.sync(c.b.world.time);
@@ -2753,9 +2985,13 @@ export class MarbleGame {
     const fast = p && !p.out && this.state === 'play' ? Math.hypot(p.m.vel.x, p.m.vel.z) : 0;
     this.ui.speed(THREE.MathUtils.clamp((fast - 12.5) / 9, 0, 0.75));
     this.teamPlay?.sync();
+    this.cupP?.sync();
     this.shotP?.sync();
     this.rocketP?.sync(c.b.world.time);
-    if (this.bounce && c.state.go < 1e8) this.bounce.sync(c.b.world.time, c.b.world.time - c.state.go, this.camera.position, f?.m.pos ?? null);
+    if (this.bounce && c.state.go < 1e8) {
+      this.bounce.sync(c.b.world.time, c.b.world.time - c.state.go, this.camera.position, f?.m.pos ?? null);
+      this.bounce.landing(p && !p.out && this.state === 'play' ? p.m : null, GRAVITY);
+    }
     if (race && c.path) {
       const L = c.finishS;
       this.ui.progress(this.racers.map((r) => ({ id: r.c.id, f: r.fin ? 1 : r.s / L, color: r.c.outfit.a, me: r.c.player, out: r.out && !r.fin })));

@@ -34,8 +34,9 @@ export const SHOT = {
   /** the slam, and how far it reaches */
   slam: 31,
   blast: 6,
-  /** a hoop in the air */
+  /** a hoop in the air, and a shot stopped dead on the mark */
   hoop: 15,
+  perfect: 5,
   /** from which volley each thing comes in */
   bumpersAt: 1,
   moveAt: 2,
@@ -50,8 +51,10 @@ export interface ShotArena {
   bull(n: number, o: THREE.Vector3): THREE.Vector3;
   /** muzzle of cannon k */
   muzzle(k: number, o: THREE.Vector3): THREE.Vector3;
-  /** the speed that puts you `d` metres away, level with the target */
-  speed(d: number): number;
+  /** the speed that puts you `d` metres away, from `h` above the target */
+  speed(d: number, h?: number): number;
+  /** where a bean sits in barrel k, with the barrel turned to `yaw` */
+  seat(k: number, yaw: number, o: THREE.Vector3): THREE.Vector3;
   /** what a bean standing here scores in this volley */
   worth(n: number, p: THREE.Vector3): number;
   on(p: THREE.Vector3): boolean;
@@ -60,7 +63,7 @@ export interface ShotArena {
   /** a bean came down in a slam (the game does the blast); flew through a hoop */
   onSlam: (m: Marble) => void;
   onHoop: (m: Marble) => void;
-  guns: { barrel: THREE.Group; ring: THREE.Mesh }[];
+  guns: { barrel: THREE.Group; tilt: THREE.Group; ring: THREE.Mesh; kick: number }[];
   /** the bar over the floor, for the bots: its angle, and is it out? */
   barOn(x: number): boolean;
   barAngle(x: number): number;
@@ -142,10 +145,10 @@ export function bigShot(info: { name: string; blurb: string }): Course {
     return n === SHOT.volleys - 1 ? v * 2 : v;
   };
   // how fast, to land d metres off (level with the muzzle less its height)
-  const speed = (d: number) => {
+  const speed = (d: number, h = gunH) => {
     const c = Math.cos(SHOT.pitch), s = Math.sin(SHOT.pitch), g = 24;
     // y = d·tan − g·d²/(2v²c²) = −h
-    return Math.sqrt((g * d * d) / (2 * c * c * (d * (s / c) + gunH)));
+    return Math.sqrt((g * d * d) / (2 * c * c * (d * (s / c) + h)));
   };
 
   // ---- the target
@@ -228,7 +231,7 @@ export function bigShot(info: { name: string; blurb: string }): Course {
       ring.position.set(p.x, p.y - 1.5, p.z);
       ring.visible = false;
       b.group.add(ring);
-      guns.push({ barrel, ring });
+      guns.push({ barrel, tilt, ring, kick: 0 });
     }
   }
 
@@ -358,7 +361,16 @@ export function bigShot(info: { name: string; blurb: string }): Course {
     },
   });
 
-  const arena: ShotArena = { center, bull, muzzle, speed, worth, on, hoops, onSlam: () => {}, onHoop: () => {}, guns, barOn, barAngle };
+  // (the bean rides in the mouth of the barrel, head and shoulders out)
+  const seat = (k: number, yaw: number, o: THREE.Vector3) => {
+    muzzle(k, o);
+    const c = Math.cos(SHOT.pitch), L = 3.2;
+    o.y += -1.4 + Math.sin(SHOT.pitch) * L - 0.1;
+    o.x += Math.sin(yaw) * c * L;
+    o.z += Math.cos(yaw) * c * L;
+    return o;
+  };
+  const arena: ShotArena = { center, bull, muzzle, speed, seat, worth, on, hoops, onSlam: () => {}, onHoop: () => {}, guns, barOn, barAngle };
 
   title(b, info, 'Last one on the bull wins it', 0xff4f7a, new THREE.Vector3(center.x, y0 + 10, center.z - gunR - 8));
   dressArena(b, new THREE.Vector3(center.x, y0 - 2, center.z), gunR + 4, 37);

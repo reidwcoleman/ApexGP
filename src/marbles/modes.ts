@@ -29,6 +29,8 @@ export class BouncePlay {
   private tail: THREE.InstancedMesh;
   /** the same balloons, see-through: any that's between you and the camera */
   private ghost: THREE.InstancedMesh;
+  private bolt: THREE.InstancedMesh;
+  private land: THREE.Mesh;
   private faded = new Set<number>();
   private M = new THREE.Matrix4();
   private V = new THREE.Vector3();
@@ -57,6 +59,16 @@ export class BouncePlay {
     this.body = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08, emissive: 0x303030, emissiveIntensity: 0.35 }), N);
     this.tail = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.012, 0.012, 1.1, 4).translate(0, -1.4, 0), new THREE.MeshBasicMaterial({ color: 0xfff6e0 }), N);
     this.ghost = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ roughness: 0.16, transparent: true, opacity: 0.16, depthWrite: false }), 24);
+    // the bolt on a thunder balloon (you need to read it from across the castle), turned to the camera
+    const sh = new THREE.Shape();
+    [[0.12, 0.62], [-0.3, -0.02], [-0.03, -0.02], [-0.16, -0.62], [0.32, 0.12], [0.04, 0.12], [0.26, 0.62]].forEach(([x, y], i) => (i ? sh.lineTo(x, y) : sh.moveTo(x, y)));
+    this.bolt = new THREE.InstancedMesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({ color: 0xffe94a, toneMapped: false, side: THREE.DoubleSide, depthTest: false, transparent: true }), 40);
+    this.bolt.frustumCulled = false;
+    this.bolt.renderOrder = 3;
+    // the ring that closes on the spot you'll land: green is when JUMP makes it a super bounce
+    this.land = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 44).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+    this.land.visible = false;
+    scene.add(this.bolt, this.land);
     this.body.frustumCulled = this.tail.frustumCulled = this.ghost.frustumCulled = false;
     this.body.castShadow = true;
     this.body.setColorAt(0, this.C.set(0xffffff));
@@ -65,7 +77,8 @@ export class BouncePlay {
   }
 
   dispose() {
-    this.scene.remove(this.body, this.tail, this.ghost);
+    this.scene.remove(this.body, this.tail, this.ghost, this.bolt, this.land);
+    this.bolt.dispose();
     this.body.dispose();
     this.tail.dispose();
     this.ghost.dispose();
@@ -142,6 +155,21 @@ export class BouncePlay {
     return show.map((r) => ({ name: `${rank.indexOf(r) + 1}. ${r.c.name}`, color: r.c.outfit.a, share: (this.score.get(r.m.id) ?? 0) / best, mine: r.c.player, label: String(this.score.get(r.m.id) ?? 0) }));
   }
 
+  /** the landing ring: where you'll come down, closing as you do, green in the super bounce window */
+  landing(m: Marble | null, g: number) {
+    const L = this.land, y0 = this.arena.center.y;
+    if (!m || !m.active) return void (L.visible = false);
+    const h = m.pos.y - 0.5 - y0;
+    // (seconds to the floor)
+    const v = m.vel.y, tt = (v + Math.sqrt(Math.max(0, v * v + 2 * g * Math.max(0, h)))) / g;
+    L.visible = v < 3 && h > 0.2;
+    if (!L.visible) return;
+    const on = tt < BOUNCE.press;
+    L.position.set(m.pos.x + m.vel.x * tt, y0 + 0.12, m.pos.z + m.vel.z * tt);
+    L.scale.setScalar(0.85 + Math.min(1, tt / 0.8) * 1.9);
+    (L.material as THREE.MeshBasicMaterial).color.set(on ? 0x4aff7a : 0xffffff);
+  }
+
   /** is this balloon on the line from the camera to your bean, or right on the lens? */
   private inView(k: number, p: THREE.Vector3, size: number, cam: THREE.Vector3, me: THREE.Vector3 | null) {
     const was = this.faded.has(k);
@@ -161,16 +189,21 @@ export class BouncePlay {
   /** the balloons: swelling up off the floor, bobbing, and away up into the sky when their time's out */
   sync(t: number, x: number, cam: THREE.Vector3, me: THREE.Vector3 | null) {
     const A = this.arena, { M, V, Q, S, C } = this;
-    let n = 0, ng = 0;
+    let n = 0, ng = 0, nb = 0;
+    Q2.setFromRotationMatrix(M.lookAt(cam, A.center, UPV));
     for (const q of this.live) {
       if (n >= 260) break;
       A.at(q, x, V);
       const u = x - q.t, left = BOUNCE.life - u;
       if (left < 1) V.y += (1 - left) ** 2 * 14;
       const s = (q.kind === Pop.Star ? 1.9 : q.kind === Pop.High ? 1.05 : q.kind === Pop.Thunder ? 0.95 : 0.9) * Math.min(1, u / 0.35 + 0.1);
+      if (q.kind === Pop.Thunder && nb < 40) {
+        M.compose(V, Q2, S.setScalar(s * 1.05));
+        this.bolt.setMatrixAt(nb++, M);
+      }
       M.compose(V, Q.identity(), S.setScalar(s));
       if (q.kind === Pop.Star) C.setHSL((t * 0.5) % 1, 1, 0.58);
-      else if (q.kind === Pop.Thunder) C.set(Math.sin(t * 11 + q.ph) > 0.82 ? 0xfff27a : 0x2a1a48);
+      else if (q.kind === Pop.Thunder) C.set(Math.sin(t * 11 + q.ph) > 0.82 ? 0xfff27a : 0x6a3ad0);
       else if (q.kind === Pop.High) C.set(BLOON_HIGH[q.k % 3]);
       else C.set(BLOON_LOW[q.k % 5]);
       // (one that's in the way of the view goes see-through; a bit further out before it comes back, so it can't flicker)
@@ -186,12 +219,15 @@ export class BouncePlay {
     }
     this.body.count = this.tail.count = n;
     this.ghost.count = ng;
+    this.bolt.count = nb;
+    this.bolt.instanceMatrix.needsUpdate = true;
     this.body.instanceMatrix.needsUpdate = this.tail.instanceMatrix.needsUpdate = this.ghost.instanceMatrix.needsUpdate = true;
     if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true;
     if (this.ghost.instanceColor) this.ghost.instanceColor.needsUpdate = true;
   }
 }
-const SEG = new THREE.Vector3(), OFF = new THREE.Vector3();
+const SEG = new THREE.Vector3(), OFF = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
+const Q2 = new THREE.Quaternion();
 const BLOON_LOW = [0xff4f7a, 0xffb02f, 0x37d07a, 0x2fa8ff, 0xff7ad0];
 /** the high ones are worth more: silver-bright so you can tell them */
 const BLOON_HIGH = [0xe8f4ff, 0xc8f0ff, 0xf4e8ff];

@@ -226,8 +226,13 @@ export function colourCall(info: { name: string; blurb: string }): Course {
   b.group.add(pillars);
   // the frame under it (so the floor has an edge), and the big cube overhead that shows the colour
   {
-    const fr = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 1.2, 0.5, half * 2 + 1.2).translate(center.x, center.y - 1.1, center.z), new THREE.MeshStandardMaterial({ color: 0x1a1030, roughness: 0.4, metalness: 0.6 }));
-    b.group.add(fr);
+    // (a rim, not a slab: where the tiles have dropped you look straight down into the disco below)
+    const rim = glowMat(0xff4fd0, 1.8);
+    for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const w = sx ? 0.5 : half * 2 + 1.2, d = sz ? 0.5 : half * 2 + 1.2;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, d).translate(center.x + sx * (half + 0.35), center.y - 0.6, center.z + sz * (half + 0.35)), rim);
+      b.group.add(bar);
+    }
   }
   const cubeM = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
   const cube = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), cubeM);

@@ -4,6 +4,7 @@ import type { Course } from './courses.ts';
 import { PIN } from './course-pinball.ts';
 import { SHOT } from './course-bigshot.ts';
 import { ROCKET } from './course-rocket.ts';
+import { CUP } from './course-soccer.ts';
 
 /** The bots for Pinball Panic, Big Shot and Rocket Rumble. */
 
@@ -41,7 +42,9 @@ export class PinBrain {
       gv = v + 2;
     }
     const dx = gu - u, dz = gv - v, d = Math.hypot(dx, dz);
-    if (d > 0.3) m.input.set(dx / d, 0, dz / d);
+    // (a person's steering is sharper than a bot's)
+    const lean = 0.2 + 0.2 * this.skill - ease * 0.08;
+    if (d > 0.3) m.input.set((dx / d) * lean, 0, (dz / d) * lean);
     // a flip: on a flipper, on the way down, and quick enough for what it is
     for (const f of A.flippers) {
       const low = f.v > 15;
@@ -49,12 +52,12 @@ export class PinBrain {
       const du = Math.abs(u - tipU), dv = f.v + 0.6 - v;
       if (du < (low ? 3 : 2.2) && dv > -1.2 && dv < 1.5 && t > this.flipAt) {
         this.flipAt = t + 0.5 + (1 - this.skill) * 0.6 + ease * 0.5 + this.rnd() * 0.3;
-        if (this.rnd() < 0.5 + 0.5 * this.skill) A.flip(t, true);
+        if (this.rnd() < 0.5 + 0.5 * this.skill) A.bat(m, t, f);
       }
     }
     // the last-moment nudge away from the drain
     if (v > 22 && Math.abs(u - PIN.mid) < 1.6 && this.rnd() < 0.08 * this.skill) {
-      m.input.set(u < PIN.mid ? -1 : 1, 0, -0.4).normalize();
+      m.input.set(u < PIN.mid ? -1 : 1, 0, -0.4).normalize().multiplyScalar(0.6);
       m.dash = true;
     }
   }
@@ -211,6 +214,100 @@ export class RocketBrain {
         }
         break;
       }
+    }
+  }
+}
+
+const G = new THREE.Vector3(), W = new THREE.Vector3();
+
+/**
+ * Bean Cup: a team that plays like one. The two or three nearest the ball go for it, coming round
+ * behind it so it goes the right way; the rest hold a shape that slides with the ball, and one
+ * stays home in goal. Near enough, it dives through the ball for a shot, or to clear it.
+ */
+export class CupBrain {
+  private think = 0;
+  private chase = false;
+  private keeper = false;
+  private slot = 0;
+  private n = 1;
+  private shotT = 0;
+  constructor(
+    readonly m: Marble,
+    readonly skill: number,
+    private rnd: () => number,
+  ) {}
+  update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!;
+    const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
+    const y0 = A.center.y;
+    let ball = null, bd = Infinity;
+    for (const b of A.balls) {
+      if (!b.live) continue;
+      const d = b.pos.distanceToSquared(m.pos);
+      if (d < bd) (bd = d), (ball = b);
+    }
+    if (t > this.think) {
+      this.think = t + 0.18 + (1 - this.skill) * 0.25 + ease * 0.2 + this.rnd() * 0.1;
+      const mates = all.filter((o) => o.active && (A.of.get(o.id) ?? 0) === team).sort((p, q) => p.id - q.id);
+      this.n = mates.length;
+      this.slot = mates.indexOf(m);
+      this.keeper = this.n >= 4 && this.slot === 0;
+      if (ball) {
+        const mine = bd;
+        let closer = 0;
+        for (const o of mates) if (o !== m && o.pos.distanceToSquared(ball.pos) < mine) closer++;
+        this.chase = closer < (this.n >= 9 ? 3 : this.n >= 5 ? 2 : 1);
+      }
+    }
+    A.goal(team, G);
+    const own = A.center.z - dir * CUP.HL;
+    if (!ball) {
+      // (a goal's just gone in: back to the middle)
+      W.set(A.center.x + (this.slot - this.n / 2) * 4, y0, A.center.z - dir * 10);
+    } else if (this.keeper) {
+      const x = THREE.MathUtils.clamp(ball.pos.x - A.center.x, -CUP.goalHalf + 1.5, CUP.goalHalf - 1.5) * 0.7;
+      W.set(A.center.x + x, y0, own + dir * 3);
+    }
+    const near = !!ball && this.keeper && Math.abs(ball.pos.z - own) < 13 && Math.abs(ball.pos.x - A.center.x) < 13;
+    if (!ball || (this.keeper && !near)) {
+      // (set above)
+    } else if (this.chase || near) {
+      // the spot behind the ball, on the line from the goal through it
+      W.subVectors(ball.pos, G).setY(0);
+      const l = W.length() || 1;
+      W.multiplyScalar((CUP.R + 1.1) / l).add(ball.pos);
+      // (on the wrong side of it: round, not through)
+      const wrong = (ball.pos.z - m.pos.z) * dir < -0.5;
+      if (wrong) W.x += (m.pos.x > ball.pos.x ? 1 : -1) * 3.2;
+      const dW = Math.hypot(W.x - m.pos.x, W.z - m.pos.z);
+      // (lined up: straight through it at the goal)
+      if (dW < 1.5 && !wrong) W.copy(G);
+    } else {
+      // the shape: spread across the pitch, sliding up and down behind the ball
+      const lanes = Math.max(1, this.n - 1);
+      const lane = ((this.slot + 0.5) / lanes - 0.5) * (CUP.HW * 1.6);
+      const back = this.slot % 2 ? 6 : 15;
+      const z = THREE.MathUtils.clamp(ball.pos.z - dir * back, A.center.z - CUP.HL + 5, A.center.z + CUP.HL - 5);
+      W.set(A.center.x + lane + (ball.pos.x - A.center.x) * 0.35, y0, z);
+    }
+    const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+    const go = this.chase || this.keeper ? 1 : Math.min(1, d / 3);
+    if (d > 0.5) m.input.set(dx / d, 0, dz / d).multiplyScalar(go);
+    else m.input.set(0, 0, 0);
+    if (!ball || m.mode !== Mode.Run) return;
+    const bx = ball.pos.x - m.pos.x, bz = ball.pos.z - m.pos.z, bdist = Math.hypot(bx, bz);
+    const height = ball.pos.y - y0 - CUP.R;
+    if (bdist < 3.4 && height > 1.4 && height < 4.5 && this.rnd() < 0.2 * this.skill) m.jump = true;
+    if (t < this.shotT || bdist > 3 || height > 1.6) return;
+    // a shot or a clearance: heading at the ball, the ball's between it and somewhere useful
+    const toGoal = Math.hypot(G.x - ball.pos.x, G.z - ball.pos.z);
+    const lined = (bz * dir > 0.2 && Math.abs(bx) < 2.4 + 1.2 * this.skill);
+    const panic = Math.abs(ball.pos.z - own) < 16;
+    if (lined && (toGoal < 26 || panic) && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
+      this.shotT = t + 1.6 + this.rnd() * 1.4;
+      m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
+      m.dash = true;
     }
   }
 }

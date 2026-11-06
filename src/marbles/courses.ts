@@ -11,6 +11,7 @@ import { tiptop } from './course-tiptop.ts';
 import { summit } from './course-summit.ts';
 import { crownKeep, type KeepArena } from './course-crown.ts';
 import { paintparty, type TeamArena } from './course-paintparty.ts';
+import { beanCup, type CupArena } from './course-soccer.ts';
 import { GEN, genCourse } from './course-gen.ts';
 import { crumble, type CrumbleArena } from './course-crumble.ts';
 import { storm, type StormArena } from './course-storm.ts';
@@ -69,6 +70,8 @@ export interface Course {
   lava?: { y(t: number): number; s(t: number): number };
   /** the team round's painted floor */
   team?: TeamArena;
+  /** Bean Cup's pitch */
+  cup?: CupArena;
   /** the crown on its pedestal (the final) */
   crown?: THREE.Object3D;
   /** for the flyover */
@@ -76,7 +79,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'pinball' | 'bigshot' | 'bouncehouse' | 'crownkeep' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'pinball' | 'bigshot' | 'bouncehouse' | 'beancup' | 'crownkeep' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -98,6 +101,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   lavarush: { id: 'lavarush', name: 'Lava Rush', kind: 'race', blurb: 'Climb! The lava rises up the course behind you. Get caught and you are out.', keep: 0.7 },
   paintparty: { id: 'paintparty', name: 'Paint Party', kind: 'team', blurb: 'Run over the tiles to paint them your team colour. Steal theirs. Least floor goes home.', keep: 0.67 },
   splatring: { id: 'splatring', name: 'Splat Ring', kind: 'team', blurb: 'Paint the ring your colour. A long bar sweeps round faster and faster: hop it.', keep: 0.67 },
+  beancup: { id: 'beancup', name: 'Bean Cup', kind: 'team', blurb: 'Two teams, one big ball. Run into it to dribble, dive through it to shoot, jump for a header. Losers go home.', keep: 0.5 },
   summit: { id: 'summit', name: 'Crown Summit', kind: 'final', blurb: 'Everything at once. First across the line takes the crown', keep: 0 },
   // the platform courses (course-gen.ts): open decks in the sky
   hopscotch: { id: 'hopscotch', name: 'Hop Scotch', kind: 'race', blurb: 'Pins, island hops, sweeping bars and rocking planks. Mind the edges.', keep: 0.75 },
@@ -132,13 +136,13 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'pinball', 'bouncehouse', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'bigshot'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'pinball', 'bouncehouse', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'bigshot', 'beancup'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
 export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'rocketrumble', 'colourcall'];
 /** the games that are neither: each show has at least one */
-export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'pinball', 'bigshot', 'bouncehouse'];
+export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'beancup', 'pinball', 'bigshot', 'bouncehouse'];
 export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
 
 /**
@@ -151,7 +155,7 @@ export const MODES = {
   chase: ['lavarush', 'rocketrumble', 'bigshot'],
   floor: ['crumble', 'meltdown', 'colourcall'],
   dodge: ['jumpclub', 'tiptop', 'stormdeck'],
-  team: ['paintparty', 'splatring'],
+  team: ['paintparty', 'splatring', 'beancup'],
   grab: ['pinball', 'bouncehouse'],
 } satisfies Record<string, RoundId[]>;
 export type ModeId = keyof typeof MODES;
@@ -164,6 +168,7 @@ export function modeOf(id: RoundId): ModeId | 'final' {
 export function modeName(id: RoundId) {
   if (id === 'crownkeep') return 'FINAL · CROWN KEEPER';
   if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
+  if (id === 'beancup') return 'TEAM SOCCER';
   if (id === 'pinball') return 'PINBALL';
   if (id === 'bigshot') return 'CANNON GAME';
   if (id === 'rocketrumble') return 'JETPACK BATTLE';
@@ -219,6 +224,8 @@ export function buildRound(id: RoundId): Course {
       return paintparty(info);
     case 'splatring':
       return paintparty(info, 'ring');
+    case 'beancup':
+      return beanCup(info);
     case 'summit':
       return summit(info);
     case 'crumble':

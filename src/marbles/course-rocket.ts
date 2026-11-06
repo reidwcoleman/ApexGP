@@ -31,6 +31,10 @@ export const ROCKET = {
   padAt: 20,
   every: 8,
   warn: 3.5,
+  /** warm air up from the sea, late on, once the pads are getting scarce: ride it and you hang there */
+  ventsAt: 58,
+  ventR: 3.4,
+  ventUp: 7.5,
   /** the rings go out one by one from here, and the big pad goes last of all */
   ringsOut: 62,
   lastPad: 104,
@@ -64,6 +68,8 @@ export interface RocketArena {
   filled: Map<number, number>;
   /** who's thrusting this frame */
   burning: Set<number>;
+  /** the columns of warm air: where, and from when */
+  vents: { x: number; z: number; at: number }[];
 }
 
 const PAD_COLS = [0xff4f7a, 0xffb02f, 0x37d07a, 0x2fa8ff, 0xb05aff];
@@ -92,6 +98,19 @@ export function rocketRumble(info: { name: string; blurb: string }): Course {
     const shake = u > -R.warn && u < 0 ? Math.sin(x * 40) * 0.09 : 0;
     return y0 + p.y + bob + shake - (u > 0 ? u * u * 14 : 0);
   };
+  // (soft at the tip: a hard-edged cone of light looks like cut paper)
+  const jetTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 8;
+    c.height = 128;
+    const x = c.getContext('2d')!;
+    const g = x.createLinearGradient(0, 0, 0, 128);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(255,255,255,0.75)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 8, 128);
+    return new THREE.CanvasTexture(c);
+  })();
   pads.forEach((p, i) => {
     const hh = 0.5;
     const kin = new Kin({ type: 'cyl', r: p.r, hh }, Mat.Paint, (t, pos, q) => {
@@ -103,11 +122,12 @@ export function rocketRumble(info: { name: string; blurb: string }): Course {
     const g = new THREE.Group();
     const col = PAD_COLS[i % PAD_COLS.length];
     const top = new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r * 0.92, hh * 2, 40), new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.32, clearcoat: 1 }));
-    const under = new THREE.Mesh(new THREE.ConeGeometry(p.r * 0.86, p.r * 0.9, 32).rotateX(Math.PI).translate(0, -hh - p.r * 0.45, 0), new THREE.MeshPhysicalMaterial({ color: 0x2e2a44, metalness: 0.5, roughness: 0.4 }));
+    const under = new THREE.Mesh(new THREE.ConeGeometry(p.r * 0.86, p.r * 0.9, 32).rotateX(Math.PI).translate(0, -hh - p.r * 0.45, 0), new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.5, clearcoat: 0.5, emissive: col, emissiveIntensity: 0.12 }));
+    under.material.color.multiplyScalar(0.62);
     const lamp = glowMat(0xfff0a0, 2.4);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(p.r - 0.28, 0.1, 8, 44).rotateX(Math.PI / 2).translate(0, hh + 0.02, 0), lamp);
     const pad = new THREE.Mesh(new THREE.CircleGeometry(p.r * 0.5, 6).rotateX(-Math.PI / 2).translate(0, hh + 0.02, 0), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32 }));
-    const jet = new THREE.Mesh(new THREE.ConeGeometry(p.r * 0.34, 3.2, 14, 1, true).rotateX(Math.PI).translate(0, -hh - p.r * 0.9 - 1.5, 0), new THREE.MeshBasicMaterial({ color: 0x8ae8ff, transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    const jet = new THREE.Mesh(new THREE.ConeGeometry(p.r * 0.3, 3.4, 16, 1, true).rotateX(Math.PI).translate(0, -hh - p.r * 0.9 - 1.5, 0), new THREE.MeshBasicMaterial({ map: jetTex, color: 0xbff4ff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.DoubleSide }));
     g.add(top, under, rim, pad, jet);
     b.obstacle(kin, g, false);
     b.animators.push((t) => {
@@ -187,6 +207,43 @@ export function rocketRumble(info: { name: string; blurb: string }): Course {
     mines.push(kin);
   }
 
+  // ---- the vents: columns of warm air, on from `ventsAt`
+  const vents = [[-20, 7], [19, -11], [3, 22], [-7, -21]].map(([vx, vz], i) => ({ x: center.x + vx, z: center.z + vz, at: R.ventsAt + i * 8 }));
+  {
+    const tex = (() => {
+      const c = document.createElement('canvas');
+      c.width = 8;
+      c.height = 128;
+      const x = c.getContext('2d')!;
+      const g = x.createLinearGradient(0, 0, 0, 128);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.55, 'rgba(255,255,255,0.3)');
+      g.addColorStop(1, 'rgba(255,255,255,0.6)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 8, 128);
+      return new THREE.CanvasTexture(c);
+    })();
+    for (const v of vents) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(R.ventR, R.ventR * 0.7, 54, 28, 1, true).translate(v.x, y0 - 8, v.z), new THREE.MeshBasicMaterial({ map: tex, color: 0x7aff9a, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false }));
+      const rings = [0, 1, 2, 3].map(() => {
+        const o = new THREE.Mesh(new THREE.TorusGeometry(R.ventR * 0.85, 0.09, 8, 36).rotateX(Math.PI / 2), glowMat(0xaaffc0, 2));
+        o.position.set(v.x, y0, v.z);
+        b.group.add(o);
+        return o;
+      });
+      b.group.add(col);
+      b.animators.push((t) => {
+        const x = state.go < 1e8 ? t - state.go : 0;
+        const on = x > v.at;
+        col.visible = on;
+        rings.forEach((o, i) => {
+          o.visible = on;
+          o.position.y = y0 - 14 + ((t * 7 + i * 9) % 36);
+        });
+      });
+    }
+  }
+
   // ---- the jetpacks
   const fuel = new Map<number, number>();
   const filled = new Map<number, number>();
@@ -222,6 +279,12 @@ export function rocketRumble(info: { name: string; blurb: string }): Course {
         m.groundT = Math.max(m.groundT, 0.2);
         burning.add(m.id);
       }
+      for (const v of vents)
+        if (x > v.at && Math.hypot(m.pos.x - v.x, m.pos.z - v.z) < R.ventR && m.pos.y < y0 + 14) {
+          if (m.vel.y < R.ventUp) m.vel.y = Math.min(R.ventUp, m.vel.y + 46 * dt);
+          f = Math.min(R.fuel, f + 0.3 * dt);
+          m.groundT = Math.max(m.groundT, 0.2);
+        }
       if (m.pos.y > y0 + R.ceil && m.vel.y > 0) m.vel.y *= 1 - Math.min(1, 9 * dt);
       for (let i = 0; i < rings.length; i++) {
         if (x >= rings[i].out) continue;
@@ -242,7 +305,7 @@ export function rocketRumble(info: { name: string; blurb: string }): Course {
   title(b, info, 'Hold JUMP to fly · Last ones up', 0xffb02f, new THREE.Vector3(center.x, y0 + 11, center.z - 26));
   dressArena(b, new THREE.Vector3(center.x, y0 - 8, center.z), 26, 83);
   b.finish();
-  const arena: RocketArena = { center, pads, padY, rings, ringAt, mines, fuel, filled, burning };
+  const arena: RocketArena = { center, pads, padY, rings, ringAt, mines, fuel, filled, burning, vents };
   return {
     id: 'rocketrumble',
     name: info.name,

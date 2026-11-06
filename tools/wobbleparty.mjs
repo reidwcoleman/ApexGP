@@ -7,7 +7,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', 'pinball,bigshot,rocketrumble').split(',');
+const rounds = opt('rounds', 'pinball,bigshot,rocketrumble,beancup').split(',');
 const secs = Number(opt('secs', 40));
 const base = `http://localhost:${port}/marbles.html`;
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
@@ -23,6 +23,7 @@ const snap = () => {
   const me = g.racers.find((r) => r.c.player);
   return {
     state: g.state, t: g.playT, id: g.course?.id,
+    cup: g.cupP ? { s: [...g.cupP.score], ball: g.cupP.arena.balls[0].pos.toArray(), live: g.cupP.arena.balls[0].live } : null,
     scores: b ? Object.fromEntries(g.racers.map((r) => [r.c.id, b.of(r.m.id)])) : null,
     alive: g.racers.filter((r) => !r.out).length,
     me: me ? { id: me.c.id, y: me.m.pos.y, x: me.m.pos.x, z: me.m.pos.z, s: b ? b.of(me.m.id) : 0, puppet: me.m.puppet } : null,
@@ -55,7 +56,8 @@ async function party(id) {
     if (a.scores) for (const k in a.scores) { n++; if (Math.abs(a.scores[k] - b.scores[k]) <= 30) same++; }
     let gap = 0;
     for (const k in a.pos) if (b.pos[k]) gap = Math.max(gap, Math.hypot(a.pos[k][0] - b.pos[k][0], a.pos[k][2] - b.pos[k][2]));
-    rows.push({ same, n, alive: [a.alive, b.alive], gap });
+    const ballGap = a.cup && a.cup.live && b.cup.live ? Math.hypot(a.cup.ball[0] - b.cup.ball[0], a.cup.ball[2] - b.cup.ball[2]) : 0;
+    rows.push({ same, n, alive: [a.alive, b.alive], gap, ballGap, cup: a.cup ? a.cup.s.join('-') === b.cup.s.join('-') : true });
   }
   const [a, b] = last;
   const mine = b.me;
@@ -64,7 +66,7 @@ async function party(id) {
   await A.context().close();
   await B.context().close();
   const agree = rows.filter((r) => r.n ? r.same >= r.n - 1 : Math.abs(r.alive[0] - r.alive[1]) <= 1).length;
-  return { id, samples: rows.length, agree, id2: a.id === id && b.id === id, guestScore: mine.s, hostSawGuest: hostView, alive: [a.alive, b.alive], guestRan: !mine.puppet, errs: errs.slice(0, 3) };
+  return { id, ballGap: +Math.max(...rows.map((r) => r.ballGap)).toFixed(1), goalsAgree: rows.every((r) => r.cup), samples: rows.length, agree, id2: a.id === id && b.id === id, guestScore: mine.s, hostSawGuest: hostView, alive: [a.alive, b.alive], guestRan: !mine.puppet, errs: errs.slice(0, 3) };
 }
 const res = await Promise.all(rounds.map(party));
 let bad = 0;

@@ -71,6 +71,9 @@ export type CtlMsg =
   | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
   /** Bounce House: a balloon popped (k) by id, worth v at combo c, leaving them on n */
   | { t: 'pop'; k: number; id: number; v: number; n: number; c: number }
+  /** Bean Cup: where the balls are, and the goals; a goal going in */
+  | { t: 'cup'; s: number[]; a: number; b: number }
+  | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }
   | { t: 'kick'; why: string };

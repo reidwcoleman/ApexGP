@@ -193,21 +193,38 @@ export class UI {
   }
   private fuseEl: HTMLElement | null = null;
 
+  /** the cannon's power: a needle swinging over a bar, the middle of it green (null hides it) */
+  meter(f: number | null, hot = false) {
+    const el = this.meterEl ?? (this.meterEl = this.hudEl.appendChild(h('div', 'mm-meter', '<u></u><i></i><b>POWER</b>')));
+    el.classList.toggle('mm-hide', f === null);
+    if (f === null) return;
+    el.classList.toggle('hot', hot);
+    (el.children[1] as HTMLElement).style.left = `${Math.max(0, Math.min(1, f)) * 100}%`;
+  }
+  private meterEl: HTMLElement | null = null;
+
   /** a little number jumping up from the middle of the screen (+3) */
   pop(text: string, big = false) {
     const el = this.popEl ?? (this.popEl = this.layer('mm-pops'));
     const b = h('b', big ? 'big' : '');
     b.textContent = text;
-    b.style.left = `${46 + Math.random() * 8}%`;
+    // (each in its own place, so a run of them reads as a run and not as a smudge)
+    const k = this.popK++ % 5;
+    b.style.left = `${[50, 39, 61, 44, 56][k]}%`;
+    b.style.top = `${[46, 50, 50, 41, 41][k]}%`;
+    while (el.childElementCount >= 5) el.firstElementChild!.remove();
     el.appendChild(b);
     window.setTimeout(() => b.remove(), 800);
   }
   private popEl: HTMLElement | null = null;
+  private popK = 0;
 
   /** the colour called, out of the way at the top (null hides it) */
   call(text: string | null, color = 0) {
     const el = this.callEl ?? (this.callEl = this.layer('mm-call mm-hide'));
     el.classList.toggle('mm-hide', !text);
+    // (the announcer's shouts make room under it)
+    document.body.classList.toggle('mm-has-call', !!text);
     if (text && el.dataset.k !== text) {
       el.dataset.k = text;
       el.innerHTML = `<b style="--cc:${css(color)}">${esc(text)}</b>`;

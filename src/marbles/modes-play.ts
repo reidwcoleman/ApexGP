@@ -57,7 +57,7 @@ export class PinPlay extends Scores {
   value(id: number, what: number, x: number) {
     const before = this.mult(id);
     this.hits.set(id, (this.hits.get(id) ?? 0) + 1);
-    const base = what === PinHit.Sling ? PIN.sling : what === PinHit.Lane ? PIN.rollover : what === PinHit.Hole ? PIN.hole : what === PinHit.Jackpot ? PIN.jackpot : PIN.bumper;
+    const base = what === PinHit.Sling ? PIN.sling : what === PinHit.Lane ? PIN.rollover : what === PinHit.Hole ? PIN.hole : what === PinHit.Jackpot ? PIN.jackpot : what === PinHit.Lanes ? PIN.lanesDone : what === PinHit.Target ? PIN.target : what === PinHit.Bank ? PIN.bankDone : PIN.bumper;
     const k = this.mult(id);
     return { v: base * k * (x > PIN.T - PIN.multi ? 2 : 1), k, up: k > before };
   }
@@ -75,6 +75,8 @@ interface Aim {
   off: number;
   ph: number;
   power: number;
+  /** the latest it can stay in the barrel, on a second go */
+  late: number;
   /** a bot: when it fires, how good the shot */
   at: number;
   want: number;
@@ -97,6 +99,10 @@ export class ShotPlay extends Scores {
   readonly fired: Who[] = [];
   /** the power on your meter, while you're aiming (null: you're not) */
   meter: number | null = null;
+  /** you fired dead on the mark */
+  perfect = false;
+  /** you're back in the barrel for another go */
+  again = false;
 
   constructor(
     course: Course,
@@ -123,7 +129,7 @@ export class ShotPlay extends Scores {
 
   private load(r: Who, n: number) {
     const m = r.m;
-    const s: Aim = { n, fired: false, off: 0, ph: Math.random() * 6.28, power: 1, at: 1.2 + Math.random() * (SHOT.aim - 1.6), want: 1 };
+    const s: Aim = { n, fired: false, off: 0, ph: Math.random() * 6.28, power: 1, late: 0, at: 1.2 + Math.random() * (SHOT.aim - 1.6), want: 1 };
     // (how good a bot's shot is: a good one is close, a poor one all over the place)
     const miss = (1.25 - r.c.skill) * 0.55;
     s.want = 1 + (Math.random() - 0.5) * 2 * miss;
@@ -153,26 +159,38 @@ export class ShotPlay extends Scores {
       const m = r.m;
       let s = this.st.get(m.id);
       if (!s || s.n !== n) s = this.load(r, n);
+      // (in the sea with time on the clock: back in the barrel, not stuck watching till the next volley)
+      if (s.fired && r.fell && u < SHOT.V - 2.4) {
+        const was = s.ph;
+        s = this.load(r, n);
+        s.ph = was;
+        s.at = u + 0.6 + Math.random() * 0.8;
+        s.late = u + 2;
+        if (r.c.player) this.again = true;
+      }
       if (s.fired) continue;
       const k = this.gun.get(m.id) ?? 0;
-      A.muzzle(k, m.pos);
       m.vel.set(0, 0, 0);
       m.frozen = true;
       const you = r.c.player && !auto;
       if (you) s.off = THREE.MathUtils.clamp(s.off - aimX * dt * 0.55, -0.6, 0.6);
+      A.muzzle(k, m.pos);
       m.yaw = Math.atan2(this.B.x - m.pos.x, this.B.z - m.pos.z) + s.off;
+      A.seat(k, m.yaw, m.pos);
       s.power = you ? 1 + SHOT.swing * Math.sin(s.ph + u * 3.3) : s.want;
       if (you) {
         this.meter = s.power;
         this.preview(m.pos, m.yaw, s.power);
       }
-      if ((you ? fire && u > 0.25 : u >= s.at) || u >= SHOT.aim) {
+      if ((you ? fire && u > 0.25 : u >= s.at) || u >= Math.max(SHOT.aim, s.late)) {
         s.fired = true;
+        if (you && Math.abs(s.power - 1) < 0.07) this.perfect = true;
         const d = Math.hypot(this.B.x - m.pos.x, this.B.z - m.pos.z);
-        const v = A.speed(d) * Math.sqrt(s.power), c = Math.cos(SHOT.pitch);
+        const v = A.speed(d, m.pos.y - A.center.y) * Math.sqrt(s.power), c = Math.cos(SHOT.pitch);
         m.frozen = false;
         m.vel.set(Math.sin(m.yaw) * c * v, Math.sin(SHOT.pitch) * v, Math.cos(m.yaw) * c * v);
         m.groundT = 1;
+        A.guns[k].kick = 1;
         this.fired.push(r);
       }
     }
@@ -182,7 +200,7 @@ export class ShotPlay extends Scores {
   private preview(from: THREE.Vector3, yaw: number, power: number) {
     const A = this.arena, { M, P, V } = this;
     const d = Math.hypot(this.B.x - from.x, this.B.z - from.z);
-    const v = A.speed(d) * Math.sqrt(power), c = Math.cos(SHOT.pitch);
+    const v = A.speed(d, from.y - A.center.y) * Math.sqrt(power), c = Math.cos(SHOT.pitch);
     P.copy(from);
     V.set(Math.sin(yaw) * c * v, Math.sin(SHOT.pitch) * v, Math.cos(yaw) * c * v);
     let i = 0;
@@ -219,8 +237,28 @@ export class ShotPlay extends Scores {
       const g = this.arena.guns[k];
       if (r.m.frozen || r.m.vel.lengthSq() < 0.01) g.barrel.rotation.y = r.m.yaw;
       g.ring.visible = r.c.player;
+      // (the kick back up the barrel, and it settles)
+      g.kick *= 0.9;
+      g.tilt.position.z = -g.kick * 0.8;
+      g.tilt.position.y = -g.kick * 0.5;
     }
   }
+}
+
+/** a rocket's flame, white at the nozzle out to nothing at the tip */
+function flameArt() {
+  const c = document.createElement('canvas');
+  c.width = 8;
+  c.height = 128;
+  const x = c.getContext('2d')!;
+  const g = x.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0, 'rgba(255,240,190,0)');
+  g.addColorStop(0.3, 'rgba(255,120,30,0.5)');
+  g.addColorStop(0.72, 'rgba(255,190,60,0.95)');
+  g.addColorStop(1, 'rgba(255,255,235,1)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 8, 128);
+  return new THREE.CanvasTexture(c);
 }
 
 /** Rocket Rumble: the packs on their backs and the flames under them */
@@ -234,22 +272,29 @@ export class RocketPlay {
   private P = new THREE.Vector3();
   /** where your tank was last frame */
   private lastFill = 0;
+  private spot: THREE.Mesh;
   readonly arena;
+  private go: () => number;
   constructor(
     course: Course,
     private scene: THREE.Scene,
     private who: () => Who[],
   ) {
     this.arena = course.rocket!;
-    const g = new THREE.CapsuleGeometry(0.2, 0.5, 4, 12);
-    this.pack = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ color: 0xd8dde8, metalness: 0.8, roughness: 0.3 }), 24);
-    this.flame = new THREE.InstancedMesh(new THREE.ConeGeometry(0.26, 1.5, 10, 1, true).rotateX(Math.PI).translate(0, -0.75, 0), new THREE.MeshBasicMaterial({ color: 0xffb030, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }), 24);
+    this.go = () => course.state.go;
+    const g = new THREE.CapsuleGeometry(0.17, 0.5, 6, 14);
+    this.pack = new THREE.InstancedMesh(g, new THREE.MeshPhysicalMaterial({ color: 0xff5a3a, roughness: 0.3, clearcoat: 1 }), 48);
+    const fg = new THREE.ConeGeometry(0.2, 1.7, 12, 6, true).rotateX(Math.PI).translate(0, -0.85, 0);
+    this.flame = new THREE.InstancedMesh(fg, new THREE.MeshBasicMaterial({ map: flameArt(), transparent: true, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }), 48);
     this.pack.frustumCulled = this.flame.frustumCulled = false;
     this.pack.castShadow = true;
-    scene.add(this.pack, this.flame);
+    // the ring on whatever's under you: green if there's something to land on, red if there's only the sea
+    this.spot = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5aff8a, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+    this.spot.visible = false;
+    scene.add(this.pack, this.flame, this.spot);
   }
   dispose() {
-    this.scene.remove(this.pack, this.flame);
+    this.scene.remove(this.pack, this.flame, this.spot);
     this.pack.dispose();
     this.flame.dispose();
   }
@@ -269,16 +314,39 @@ export class RocketPlay {
     for (const r of this.who()) {
       const m = r.m;
       if (r.out || !m.active || n >= 24) continue;
+      if (n >= 47) break;
       E.set(0, m.yaw, 0);
       Q.setFromEuler(E);
-      P.set(-Math.sin(m.yaw) * 0.46, 0.45, -Math.cos(m.yaw) * 0.46).add(m.pos);
-      this.pack.setMatrixAt(n++, M.compose(P, Q, S.setScalar(1)));
       // (someone else's bean: it's on the way up with nothing under it, so it must be burning)
       const on = r.local ? A.burning.has(m.id) : m.groundT > 0.15 && m.vel.y > 0.5;
-      if (on) {
-        P.y -= 0.42;
-        this.flame.setMatrixAt(f++, M.compose(P, Q, S.set(1, 0.8 + Math.sin(t * 50 + m.id) * 0.3, 1)));
+      const sx = Math.cos(m.yaw), sz = -Math.sin(m.yaw);
+      for (const side of [-1, 1]) {
+        // (two tanks on its back, clear of the body)
+        P.set(-Math.sin(m.yaw) * 0.68 + sx * side * 0.24, 0.72, -Math.cos(m.yaw) * 0.68 + sz * side * 0.24).add(m.pos);
+        this.pack.setMatrixAt(n++, M.compose(P, Q, S.setScalar(1)));
+        if (on) {
+          P.y -= 0.42;
+          this.flame.setMatrixAt(f++, M.compose(P, Q, S.set(1, 0.85 + Math.sin(t * 50 + m.id + side) * 0.3, 1)));
+        }
       }
+    }
+    // the ring under you
+    const me = this.who().find((r) => r.c.player);
+    this.spot.visible = false;
+    if (me && !me.out && me.m.active && me.m.groundT > 0.12) {
+      const x = Math.max(0, t - this.go()), mx = me.m.pos.x, mz = me.m.pos.z;
+      let top = -Infinity;
+      for (const q of A.pads) {
+        const y = A.padY(q, x);
+        if (y === null || y > me.m.pos.y) continue;
+        if (Math.hypot(A.center.x + q.x - mx, A.center.z + q.z - mz) < q.r && y > top) top = y;
+      }
+      const mat = this.spot.material as THREE.MeshBasicMaterial;
+      const low = top === -Infinity;
+      mat.color.set(low ? 0xff4030 : 0x5aff8a);
+      this.spot.position.set(mx, low ? A.center.y - 2 : top + 0.06, mz);
+      this.spot.scale.setScalar(low ? 1.5 + Math.sin(t * 9) * 0.25 : 1.2);
+      this.spot.visible = true;
     }
     this.pack.count = n;
     this.flame.count = f;

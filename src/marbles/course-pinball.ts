@@ -39,11 +39,24 @@ export const PIN = {
   jackFor: 7,
   /** the last seconds: multiball */
   multi: 22,
-  nudge: 8,
+  nudge: 11,
+  /** steering, straight onto the ball: across, down the table, and up it (less than the slope pulls:
+   * you can hang on a little longer, but only a flipper takes you back up) */
+  steerU: 26,
+  steerDown: 12,
+  steerUp: 4.2,
+  /** the fastest steering alone will take you */
+  steerMax: 15,
+  /** every lane across the top lit, and the bank of drop targets flat */
+  lanesDone: 300,
+  target: 30,
+  bankDone: 250,
+  /** a flat bank stands up again after this */
+  bankBack: 5,
 };
 
 /** what scored: a bumper's number, or one of these */
-export const PinHit = { Sling: 100, Lane: 200, Hole: 300, Jackpot: 400, Drain: 500 } as const;
+export const PinHit = { Sling: 100, Lane: 200, Hole: 300, Jackpot: 400, Drain: 500, Lanes: 600, Target: 700, Bank: 800 } as const;
 
 export interface PinArena {
   center: THREE.Vector3;
@@ -54,8 +67,11 @@ export interface PinArena {
   bumpers: { u: number; v: number; kin: Kin }[];
   /** where the flippers' pivots are, for the bots */
   flippers: { u: number; v: number; dir: number }[];
-  /** flip them all (a bot's press counts for less) */
-  flip(t: number, bot: boolean): void;
+  /** the flippers go up for a person: `hold` keeps them up while the button's down */
+  flip(t: number, hold?: boolean): void;
+  /** a bot's flip: its ball goes back up the table, and the bat only looks as if it swung, so nobody
+   * else's flippers ever move on a person who's timing their own */
+  bat(m: Marble, t: number, f: { u: number; v: number; dir: number }): void;
   /** when they last went for a person */
   lastFlip: number;
   /** is the jackpot lit, x seconds after the off? */
@@ -64,12 +80,37 @@ export interface PinArena {
   holes: { u: number; v: number }[];
   /** the game's hook: this bean scored */
   onHit: (m: Marble, what: number) => void;
+  /** whose lit lanes the lamps show */
+  setLamps(id: number): void;
   /** back in the plunger lane; true while it's waiting to be fired */
   load(m: Marble): void;
   fire(m: Marble): void;
 }
 
 const LANE_LIT = 0xffe04a;
+
+/** bright mirror steel that doesn't need a sky to look like steel */
+function chrome() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const x = c.getContext('2d')!;
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.42, '#c8d8ff');
+  g.addColorStop(0.5, '#5a6aa0');
+  g.addColorStop(0.58, '#ff7ad0');
+  g.addColorStop(1, '#f0f4ff');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 256, 256);
+  const r = x.createRadialGradient(92, 78, 4, 92, 78, 74);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = r;
+  x.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshMatcapMaterial({ matcap: t });
+}
 
 function fieldArt(W: number, L: number) {
   const c = document.createElement('canvas');
@@ -184,7 +225,7 @@ export function pinball(info: { name: string; blurb: string }): Course {
   }
 
   // ---- the rails
-  const railM = new THREE.MeshPhysicalMaterial({ color: 0xd8e4ff, metalness: 0.9, roughness: 0.22 });
+  const railM = new THREE.MeshPhysicalMaterial({ color: 0x8a6cff, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.15 });
   const neon = [0xff2fa0, 0x38e8ff, 0xffe04a, 0x7aff5a];
   const strips: THREE.MeshBasicMaterial[] = [];
   const wall = (u0: number, v0: number, u1: number, v1: number, o: { h?: number; th?: number; mat?: Mat; glow?: number } = {}) => {
@@ -301,14 +342,19 @@ export function pinball(info: { name: string; blurb: string }): Course {
   }
 
   // ---- flippers
-  const flip = { at: -9, bot: -9 };
+  // (how far up they are, 0 to 1, moved on by the clock: a press in the middle of a swing carries on from
+  // where the bat is, so it never jumps)
+  const flip = { until: -9, a: 0, t: 0 };
   const swing = (t: number) => {
-    const u = t - flip.at;
-    if (u < 0) return 0;
-    if (u < 0.15) return u / 0.15;
-    if (u < 0.32) return 1;
-    return Math.max(0, 1 - (u - 0.32) / 0.2);
+    const dt = t - flip.t;
+    if (dt > 0) {
+      flip.t = t;
+      flip.a = t < flip.until ? Math.min(1, flip.a + dt / 0.075) : Math.max(0, flip.a - dt / 0.16);
+    }
+    return flip.a;
   };
+  /** the swing a bat seems to make for a bot's ball, by side: looks only */
+  const ghost = [-9, -9];
   const flippers: PinArena['flippers'] = [];
   const flipper = (u: number, v: number, dir: number, len: number, rest: number, up: number, ci: number) => {
     flippers.push({ u, v, dir });
@@ -324,10 +370,22 @@ export function pinball(info: { name: string; blurb: string }): Course {
       p.copy(pv).add(D);
     });
     const g = new THREE.Group();
-    const bat = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, len - 0.5, 8, 18).rotateZ(Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: 0xfff4f4, roughness: 0.25, clearcoat: 1 }));
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(len - 0.4, 0.2, 0.88), glowMat(neon[ci], 2.2));
-    g.add(bat, stripe);
+    // (hung from its pivot, so a bot's flip can swing the look of it without moving the real thing)
+    const hinge = new THREE.Group();
+    hinge.position.x = -len / 2;
+    const bat = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, len - 0.5, 8, 18).rotateZ(Math.PI / 2).translate(len / 2, 0, 0), new THREE.MeshPhysicalMaterial({ color: 0xfff4f4, roughness: 0.25, clearcoat: 1 }));
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(len - 0.4, 0.2, 0.88).translate(len / 2, 0, 0), glowMat(neon[ci], 2.2));
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 1.5, 20), railM);
+    hinge.add(bat, stripe, pin);
+    g.add(hinge);
     b.obstacle(k, g, false);
+    const side = dir > 0 ? 0 : 1;
+    b.animators.push((t) => {
+      const u = t - ghost[side];
+      const f = u < 0 || u > 0.3 ? 0 : u < 0.08 ? u / 0.08 : 1 - (u - 0.08) / 0.22;
+      // (only while the real bat's down)
+      hinge.rotation.y = f * (1 - flip.a) * 0.75;
+    });
   };
   flipper(fl.u, fl.v, 1, 4.6, 0.42, 0.45, 0);
   flipper(fr.u, fr.v, -1, 4.6, 0.42, 0.45, 1);
@@ -353,8 +411,12 @@ export function pinball(info: { name: string; blurb: string }): Course {
     const d = new THREE.Mesh(new THREE.CircleGeometry(1.05, 28).rotateX(-Math.PI / 2), m);
     d.position.set(u, 0.04, -25.2);
     table.add(d);
-    return { u, m, t: -9 };
+    return { u, m, t: -9, on: false };
   });
+  /** which lanes each bean has lit (all five is a bonus) */
+  const laneMask = new Map<number, number>();
+  /** the ball the lamps show (yours) */
+  let lampFor = -1;
 
   // ---- kick-out holes and the jackpot
   const holes = [{ u: mid - 10.4, v: -8 }, { u: mid + 10.4, v: -8 }];
@@ -377,6 +439,7 @@ export function pinball(info: { name: string; blurb: string }): Course {
   // ---- the steel balls: multiball. Each a function of the clock, loose on the table until the end
   {
     const n = 5;
+    const steel = chrome();
     for (let i = 0; i < n; i++) {
       const R = 1.5;
       const P = new THREE.Vector3();
@@ -395,10 +458,50 @@ export function pinball(info: { name: string; blurb: string }): Course {
       });
       k.kick = 7;
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(R, 32, 22), new THREE.MeshPhysicalMaterial({ color: 0xe8eefc, metalness: 1, roughness: 0.14 })));
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(R, 32, 22), steel));
       b.obstacle(k, g, false);
     }
   }
+
+  // ---- the drop targets: a bank across the table. Knock them flat, the last one pays the bonus
+  const bank: { k: Kin; down: boolean; up: number }[] = [];
+  let bankDownT = -1;
+  for (let i = 0; i < 4; i++) {
+    const u = mid - 5.4 + i * 3.6, v = 8.2;
+    const P = at(u, v, 0.8, new THREE.Vector3()), low = at(u, v, -1.4, new THREE.Vector3());
+    const e = { k: null as unknown as Kin, down: false, up: 0 };
+    const k = new Kin({ type: 'box', hx: 1.15, hy: 0.8, hz: 0.34 }, Mat.Bumper, (_t, p, q) => {
+      p.copy(e.down ? low : P);
+      q.copy(Qt);
+    });
+    k.kick = 5;
+    e.k = k;
+    k.onHit = (m) => {
+      const t = b.world.time;
+      if (e.down || t < state.go) return;
+      e.down = true;
+      e.up = t;
+      hook.on(m, PinHit.Target);
+      if (bank.every((o) => o.down)) {
+        bankDownT = t;
+        hook.on(m, PinHit.Bank);
+      }
+    };
+    const g = new THREE.Group();
+    const lit = glowMat(neon[(i + 1) % 4], 2);
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.6, 0.68), new THREE.MeshPhysicalMaterial({ color: 0xfff4f4, roughness: 0.3, clearcoat: 1 })));
+    const face = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 0.72), lit);
+    face.position.y = 0.2;
+    g.add(face);
+    b.obstacle(k, g, false);
+    bank.push(e);
+  }
+  b.animators.push((t) => {
+    if (bankDownT > 0 && t - bankDownT > PIN.bankBack) {
+      bankDownT = -1;
+      for (const e of bank) e.down = false;
+    }
+  });
 
   // ---- the plunger
   const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 3, 16).rotateX(Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: 0xff2fa0, metalness: 0.5, roughness: 0.3 }));
@@ -411,7 +514,7 @@ export function pinball(info: { name: string; blurb: string }): Course {
     back.position.set(0, 5, -L - 0.8);
     back.castShadow = true;
     table.add(back);
-    const legM = new THREE.MeshPhysicalMaterial({ color: 0xc8d4f0, metalness: 0.9, roughness: 0.3 });
+    const legM = new THREE.MeshPhysicalMaterial({ color: 0x6a4cc8, roughness: 0.35, clearcoat: 0.8 });
     for (const [u, v] of [[-W + 1, -L + 2], [W - 1, -L + 2], [-W + 1, BOT - 1], [W - 1, BOT - 1]]) {
       const P = at(u, v, -1, new THREE.Vector3());
       const h = P.y - b.lakeY;
@@ -439,9 +542,9 @@ export function pinball(info: { name: string; blurb: string }): Course {
       }
       m.tumbleT = 30;
       if (m.jump) {
-        arena.flip(t, false);
+        arena.flip(t);
         m.jump = false;
-      }
+      } else if (m.jet) arena.flip(t, true);
       if (m.dash) {
         m.dash = false;
         if (m.dashCD <= 0) {
@@ -452,9 +555,14 @@ export function pinball(info: { name: string; blurb: string }): Course {
           m.vel.y += 1.5;
         }
       }
-      // (you can lean on a ball, but only a flipper takes it back up the table)
-      m.input.x *= 0.6;
-      m.input.z *= m.input.z < 0 ? 0.06 : 0.6;
+      // steering. A rolling bean's own steering only spins it, which on this slope does next to
+      // nothing: here the push goes straight onto the ball, and it's strong enough to feel
+      {
+        const ix = THREE.MathUtils.clamp(m.input.x, -1, 1), iz = THREE.MathUtils.clamp(m.input.z, -1, 1);
+        if (ix * m.vel.x < PIN.steerMax * Math.abs(ix)) m.vel.x += ix * PIN.steerU * dt;
+        if (iz > 0 ? m.vel.z < PIN.steerMax : m.vel.z > -6) m.vel.z += iz * (iz > 0 ? PIN.steerDown : PIN.steerUp) * dt;
+        m.input.set(0, 0, 0);
+      }
       // (nothing in pinball goes through the glass)
       const sp = m.vel.length();
       if (sp > 34) m.vel.multiplyScalar(34 / sp);
@@ -474,13 +582,18 @@ export function pinball(info: { name: string; blurb: string }): Course {
         const down = m.vel.z * Math.cos(tilt) - m.vel.y * Math.sin(tilt);
         if (down > 0.5) arena.fire(m);
       }
-      // the rollovers
+      // the rollovers: each one's worth something, and all five lit is a bonus
       if (v > -26.4 && v < -24) {
-        for (const l of laneLamp)
-          if (Math.abs(u - l.u) < 1.5 && once(m, PinHit.Lane + lanes.indexOf(l.u), t, 2.5)) {
-            l.t = t;
-            hook.on(m, PinHit.Lane);
-          }
+        laneLamp.forEach((l, i) => {
+          if (Math.abs(u - l.u) >= 1.5 || !once(m, PinHit.Lane + i, t, 2.5)) return;
+          l.t = t;
+          hook.on(m, PinHit.Lane);
+          const mask = (laneMask.get(m.id) ?? 0) | (1 << i);
+          if (mask === 31) {
+            laneMask.set(m.id, 0);
+            hook.on(m, PinHit.Lanes);
+          } else laneMask.set(m.id, mask);
+        });
       }
       // the holes: a moment's pause, and it spits you back up the table
       for (let i = 0; i < holes.length; i++) {
@@ -500,6 +613,7 @@ export function pinball(info: { name: string; blurb: string }): Course {
     },
   });
 
+  const BV = new THREE.Vector3();
   const arena: PinArena = {
     center,
     at,
@@ -511,13 +625,21 @@ export function pinball(info: { name: string; blurb: string }): Course {
     jackLit,
     onHit: () => {},
     lastFlip: 0,
-    flip(t, bot) {
-      if (t - flip.at < 0.3) return;
-      if (bot && t - flip.bot < 0.55) return;
-      if (t - flip.at < 0.52 && swing(t) > 0.2) return;
-      flip.at = t;
-      if (bot) flip.bot = t;
-      else this.lastFlip = t;
+    flip(t, hold) {
+      swing(t);
+      flip.until = Math.max(flip.until, t + (hold ? 0.06 : 0.16));
+      if (!hold) this.lastFlip = t;
+    },
+    bat(m, t, f) {
+      ghost[f.dir > 0 ? 0 : 1] = t;
+      // (up the table, wide of where it came from, from whichever side of the bat it's on)
+      const a = -f.dir * (0.06 + Math.random() * 0.34) + (Math.random() - 0.5) * 0.3;
+      const s = 21 + Math.random() * 6;
+      BV.set(Math.sin(a) * s, 1.2, -Math.cos(a) * s).applyQuaternion(Qt);
+      m.vel.copy(BV);
+    },
+    setLamps(id) {
+      lampFor = id;
     },
     load(m) {
       const k = 21 + Math.random() * 7.5;
@@ -541,7 +663,8 @@ export function pinball(info: { name: string; blurb: string }): Course {
     beam.visible = lit;
     jackM.color.set(0xffd23a).multiplyScalar(lit ? 2.2 + Math.sin(t * 14) * 1.4 : 0.35);
     jackRing.scale.setScalar(lit ? 1 + Math.sin(t * 9) * 0.08 : 1);
-    for (const l of laneLamp) l.m.color.set(LANE_LIT).multiplyScalar(0.45 + Math.max(0, 1 - (t - l.t) * 0.8) * 3);
+    const mask = laneMask.get(lampFor) ?? 0;
+    laneLamp.forEach((l, i) => l.m.color.set(LANE_LIT).multiplyScalar((mask & (1 << i) ? 1.7 : 0.4) + Math.max(0, 1 - (t - l.t) * 0.8) * 3));
     const wild = state.go < 1e8 && x > PIN.T - PIN.multi;
     strips.forEach((m, i) => {
       const c = neon[(i + (wild ? Math.floor(t * 8) : Math.floor(t * 1.5))) % 4];

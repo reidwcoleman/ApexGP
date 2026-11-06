@@ -700,6 +700,26 @@ export class Sound {
     }
   }
 
+  /** a jetpack burning, while it's on */
+  jet(on: boolean) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!this.jetG) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.windB;
+      src.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 1500;
+      this.jetG = ctx.createGain();
+      this.jetG.gain.value = 0;
+      src.connect(f).connect(this.jetG).connect(ctx.destination);
+      src.start();
+    }
+    this.jetG.gain.setTargetAtTime(on ? 0.22 : 0, ctx.currentTime, on ? 0.03 : 0.09);
+  }
+  private jetG: GainNode | null = null;
+
   /** air past the camera at speed */
   windAt(speed: number) {
     const ctx = this.ctx;

@@ -3,7 +3,7 @@ import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain } from './ai-arena.ts';
 import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
-import { PinBrain, RocketBrain, ShotBrain } from './ai-play.ts';
+import { CupBrain, PinBrain, RocketBrain, ShotBrain } from './ai-play.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -94,6 +94,7 @@ export class Bot {
   private pinB: PinBrain | null = null;
   private shotB: ShotBrain | null = null;
   private rocketB: RocketBrain | null = null;
+  private cupB: CupBrain | null = null;
   private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
@@ -170,6 +171,12 @@ export class Bot {
     if (t < c.state.go) return;
     m.input.set(0, 0, 0);
     if (!m.active || m.frozen) return;
+    if (c.cup) {
+      this.cupB ??= new CupBrain(m, this.skill, this.rnd);
+      if (t < c.state.go + this.react) return;
+      this.cupB.update(dt, t, c, all, this.ease);
+      return void m.input.multiplyScalar(1 - 0.16 * this.ease);
+    }
     if (c.team) {
       this.team ??= new TeamBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
