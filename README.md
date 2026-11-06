@@ -4,10 +4,9 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
-The site opens on a console-style game picker (one row of tiles, the selected game's art filling the screen) — **Apex GP** (this racing game), **Boostball** (car soccer),
-**Miami** (the open world) and **Wobble Mania** (a jelly-bean knockout party, online with friends) — and only the game you pick is loaded: the racing game's loader, pictures and bundle
-wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it; `?pick`
-forces it.
+The site opens like a console: logo, the lit stage, press any button, who's playing, then a home screen with one row of tiles, the selected game's art filling the screen and activity cards under it. It's measured off real PS5 footage at 1280x720 (`--u` in `index.html`). The games are **Apex GP** (this racing game), **Boostball** (car soccer),
+**Miami** (the open world), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
+wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it. Coming back in the same tab goes straight home, `?pick` does too, and `?pick&boot` forces the startup. Settings can turn the startup off. `tools/pickertest.mjs <dir>` walks it with real keys.
 
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
@@ -906,22 +905,6 @@ and bots; the contestants are original bean characters, not marbles.
   captures camera views; `tools/marblebench.mjs` runs every round headless (`--diff` for the
   difficulty) and reports times, falls, skill ordering and AI cost. For party play, open two
   browser windows, HOST PARTY in one and JOIN with its code in the other.
-
-## Pine & Dandy
-
-`pine.html` (card 5 on the picker): a 16-bit Christmas tree farm tycoon. Canvas 2D at a low internal resolution (about 480x300, integer-scaled), every sprite painted in code at boot, no asset files.
-
-Christmas Eve is playable: a 60 to 80 second sleigh run (`eve.ts` rules, `mode7.ts` drawing). The play is a straight corridor of hoops, storm clouds and chimneys; the real farm sweeps underneath on a wide loop with your trees standing up as sprites. Stars pay cash, seedlings and, at three, an ornament. `tools/pineeve.mjs` flies it at four skill levels. Buck Hemlock turns up in person from Year 2 to race you gate to gate (`stepDuel` in `sim.ts`, `tools/pinerun.mjs`).
-
-- **Sim** (`src/pine/sim.ts`, tables in `data.ts`): pure TS with no DOM, emits `fx` events for the renderer and audio. Plays in Node: `node --experimental-transform-types --no-warnings tools/pinebot.mjs [years] [seed]` prints a line per simulated year; run it after any economy change.
-- **Scale** is the design: the vehicle sets the tool's swath (1 to 15 rows), blocks turn trees into standing orders that a shared crew job board works through, orders are sized from what you have standing so December stays a rush at any size, and pests spread fastest through one species, so layout matters more as you grow.
-- **Art** (`trees.ts`, `art.ts`, `ground.ts`): sprites are painted into a pixel buffer (`Buf` in `pal.ts`), then outlined and baked. Trees are stacked bough skirts with snow pillows; sale-size trees wear baubles and tinsel, and top-grade ones a star. The ground is shaded per pixel into a cached layer, with wobbled terrain edges and blue-violet snow shadows. Snow stays on the farm all year: the render reads `snowVis()`, not the sim's calendar.
-- **Render** (`render.ts`): four zooms (16/8/4/2 px a tile). Near is live sprites with wind; far is cached 32x32 chunks keyed on `sim.ver`, so tree count barely changes frame cost. A slow evening cycle runs all year, and December's dusk rides on top of it.
-- **Arcade layer** (`Fun` in `sim.ts`, on real time so game speed never eats it): chained work builds a combo that pays cash at each word and fills the Jolly meter; `J` spends it on 10 s of speed, a wider swath, no hopper limit and free seedlings. Gifts parachute in all year, hidden piles sit around the map, Bell Trails play Jingle Bells a note at a time, and ornaments fill a 24-door Advent Album (`O`) that also hangs on the title tree. Christmas in July opens the saw for one paid month from Year 2. `tools/pinefun.mjs <dir>` drives all of it with real keys.
-- **Audio** (`audio.ts`): a chip with public-domain carols. Gated songs keep the lead line muted in time with the backing; `Chip.work()` opens it, so cutting a field plays the tune.
-- **Christmas Eve** (`mode7.ts`): a Mode 7 flight over your own farm image from the back of Santa's sleigh, standing trees twinkling.
-
-Tools: `tools/pineshot.mjs out.png --q "?skip"`, `tools/pineflow.mjs <dir>` (real mouse and key input through a first session), `tools/_pinescene.mjs <dir> <stages>` (scripted scenes). `pine.html?skip&seed=7` skips the title. `window.__pine` is the app.
 
 ## Controls
 

@@ -36,7 +36,7 @@ export default defineConfig(({ command }) => ({
     target: 'es2022',
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
-      input: { main: resolve(__dirname, 'index.html'), miami: resolve(__dirname, 'miami.html'), marbles: resolve(__dirname, 'marbles.html'), boost: resolve(__dirname, 'boost.html'), pine: resolve(__dirname, 'pine.html'), mogul: resolve(__dirname, 'mogul.html'), tracksmith: resolve(__dirname, 'tracksmith.html') },
+      input: { main: resolve(__dirname, 'index.html'), miami: resolve(__dirname, 'miami.html'), marbles: resolve(__dirname, 'marbles.html'), boost: resolve(__dirname, 'boost.html'), mogul: resolve(__dirname, 'mogul.html'), tracksmith: resolve(__dirname, 'tracksmith.html') },
     },
   },
 }));

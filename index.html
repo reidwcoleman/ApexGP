@@ -188,32 +188,80 @@
       };
     </script>
     <div id="picker" hidden>
-      <div class="pk-bg"><i></i><i></i></div>
-      <div class="pk-shade"></div>
-      <div class="pk-top">
-        <div class="pk-tabs"><span class="pk-logo">Apex <u>GP</u></span><b>Games</b></div>
-        <div class="pk-status"><button id="pk-snd" aria-label="Sound on" aria-pressed="true"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9.5v5h3.6L12 18.6V5.4L7.6 9.5H4z" fill="currentColor"/><path class="pk-wave" d="M15.2 8.8a4.5 4.5 0 0 1 0 6.4M17.6 6.4a8 8 0 0 1 0 11.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button><span id="pk-clock"></span></div>
+      <div class="pk-room"></div>
+      <div class="pk-orb"></div>
+      <canvas class="pk-dust"></canvas>
+
+      <div class="pk-boot"><span class="pk-mark">Apex <u>GP</u></span><p class="pk-warn">PHOTOSENSITIVE EPILEPSY: IF YOU HAVE A HISTORY OF EPILEPSY OR SEIZURES, CONSULT A DOCTOR BEFORE USE. CERTAIN PATTERNS MAY TRIGGER SEIZURES WITH NO PRIOR HISTORY.</p></div>
+
+      <div class="pk-press"><p>Press any button to continue.</p><span class="pk-ring"><i></i><b>GP</b></span></div>
+
+      <div class="pk-login">
+        <span class="pk-time pk-loginclock"></span>
+        <h1>Welcome Back to Apex GP</h1>
+        <p class="pk-who">Who's using this controller?</p>
+        <div class="pk-users"></div>
+        <button class="pk-power" aria-label="Power"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.6 6.8a8 8 0 1 0 10.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <span class="pk-hint"><kbd>Enter</kbd>Select</span>
       </div>
-      <div class="pk-rowbox"><div class="pk-row">
-        <button class="pk-tile" data-game="f1" aria-label="Apex GP" style="--art: url(loading/monza_rain.webp); --pos: 50% 60%; --hpos: 50% 62%"><span class="pk-face"></span><span class="pk-label">Apex GP</span></button>
-        <button class="pk-tile" data-game="boost" aria-label="Boostball" style="--art: url(loading/boost_hero.webp); --pos: 34% 50%; --hpos: 50% 42%"><span class="pk-face"></span><span class="pk-label">Boostball</span></button>
-        <button class="pk-tile" data-game="miami" aria-label="Miami" style="--art: url(loading/miami_rocket.webp); --pos: 58% 50%; --hpos: 60% 50%"><span class="pk-face"></span><span class="pk-label">Miami</span></button>
-        <button class="pk-tile" data-game="marbles" aria-label="Wobble Mania" style="--art: url(loading/wobble_grid.webp); --pos: 46% 62%; --hpos: 50% 58%"><span class="pk-face"></span><span class="pk-label">Wobble Mania</span></button>
-        <button class="pk-tile" data-game="pine" aria-label="Pine &amp; Dandy" style="--art: url(loading/pine_hero.webp); --pos: 76% 60%; --hpos: 50% 72%"><span class="pk-face"></span><span class="pk-label">Pine &amp; Dandy</span></button>
-        <button class="pk-tile" data-game="mogul" aria-label="Mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 40%; --hpos: 50% 30%"><span class="pk-face"></span><span class="pk-label">Mogul</span></button>
-        <button class="pk-tile" data-game="tracksmith" aria-label="Tracksmith" style="--art: url(loading/tracksmith_hero.webp); --pos: 62% 50%; --hpos: 50% 62%"><span class="pk-face"></span><span class="pk-label">Tracksmith</span></button>
-        <button class="pk-tile pk-any" data-game="any" aria-label="Surprise me"><span class="pk-face"><svg viewBox="0 0 24 24" width="46%" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="9" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/><circle cx="15" cy="15" r="1.5" fill="currentColor"/></svg></span><span class="pk-label">Surprise me</span></button>
-      </div></div>
-      <div class="pk-stage">
-        <div class="pk-show" data-for="f1"><span class="pk-wm wm-f1">Apex <u>GP</u></span><p><b>Formula racing</b><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">Career, grand prix weekends and time trials on real circuits</p></div>
-        <div class="pk-show" data-for="boost"><span class="pk-wm wm-boost">Boostball</span><p><b>Car soccer</b><span class="pk-chip">Online</span><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">Jump, flip and fly into the ball with bots or friends</p></div>
-        <div class="pk-show" data-for="miami"><span class="pk-wm wm-miami">Miami</span><p><b>Open world</b><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">A crime story from Brickell to South Beach, the police on your tail</p></div>
-        <div class="pk-show" data-for="marbles"><span class="pk-wm wm-wobble"><span>W</span><span>o</span><span>b</span><span>b</span><span>l</span><span>e</span> <span>M</span><span>a</span><span>n</span><span>i</span><span>a</span></span><p><b>Party knockout</b><span class="pk-chip">Online</span><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">24 jelly beans, wild obstacle courses, 1 crown</p></div>
-        <div class="pk-show" data-for="pine"><img class="pk-wm wm-pine" src="loading/pine_logo.png" alt="Pine &amp; Dandy"><p><b>Tree farm tycoon</b><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">Grow a Christmas tree empire, then fly the sleigh over it on Christmas Eve</p></div>
-        <div class="pk-show" data-for="mogul"><span class="pk-wm wm-mogul">Mogul</span><p><b>City tycoon</b><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">One food cart on a real street, then a whole city to out-earn</p></div>
-        <div class="pk-show" data-for="tracksmith"><span class="pk-wm wm-ts">Tracksmith</span><p><b>Stunt time trial</b><span class="pk-chip pk-lastchip">Last played</span></p><p class="pk-blurb">Loops, jumps and boost pads, then build and share your own tracks</p></div>
-        <div class="pk-show" data-for="any"><span class="pk-wm wm-any">Surprise me</span><p><b>Random pick</b></p><p class="pk-blurb">Can't decide? Spin the row and let it choose a game for you</p></div>
-        <button id="pk-play">Play game</button>
+
+      <div class="pk-home">
+        <div class="pk-bg"><i></i><i></i></div>
+        <div class="pk-shade"></div>
+        <div class="pk-scroll">
+          <div class="pk-top">
+            <div class="pk-tabs"><button class="pk-tab on" data-tab="games">Games</button><button class="pk-tab" data-tab="media">Media</button></div>
+            <div class="pk-status">
+              <button class="pk-ico" id="pk-find" aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button>
+              <button class="pk-ico" id="pk-gear" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M10.3 2h3.4l.5 2.7 1.6.7 2.3-1.6 2.4 2.4-1.6 2.3.7 1.6 2.7.5v3.4l-2.7.5-.7 1.6 1.6 2.3-2.4 2.4-2.3-1.6-1.6.7-.5 2.7h-3.4l-.5-2.7-1.6-.7-2.3 1.6-2.4-2.4 1.6-2.3-.7-1.6L1.7 13.7v-3.4l2.7-.5.7-1.6-1.6-2.3 2.4-2.4 2.3 1.6 1.6-.7.5-2.7zM12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6z"/></svg></button>
+              <button class="pk-me" id="pk-me" aria-label="Switch user"><i></i></button>
+              <span class="pk-time pk-homeclock"></span>
+            </div>
+          </div>
+          <div class="pk-rowbox">
+            <div class="pk-row" data-row="games">
+              <button class="pk-tile" data-game="f1" aria-label="Apex GP" style="--art: url(loading/monza_rain.webp); --pos: 50% 60%; --hpos: 50% 62%"><span class="pk-face"><span class="pk-wm wm-f1">Apex <u>GP</u></span></span></button>
+              <button class="pk-tile" data-game="boost" aria-label="Boostball" style="--art: url(loading/boost_hero.webp); --pos: 34% 50%; --hpos: 50% 42%"><span class="pk-face"><span class="pk-wm wm-boost">Boost<br>ball</span></span></button>
+              <button class="pk-tile" data-game="miami" aria-label="Miami" style="--art: url(loading/miami_rocket.webp); --pos: 58% 50%; --hpos: 60% 50%"><span class="pk-face"><span class="pk-wm wm-miami">Miami</span></span></button>
+              <button class="pk-tile" data-game="marbles" aria-label="Wobble Mania" style="--art: url(loading/wobble_grid.webp); --pos: 46% 62%; --hpos: 50% 58%"><span class="pk-face"><span class="pk-wm wm-wobble">Wobble<br>Mania</span></span></button>
+              <button class="pk-tile" data-game="mogul" aria-label="Mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 40%; --hpos: 50% 30%"><span class="pk-face"><span class="pk-wm wm-mogul">Mogul</span></span></button>
+              <button class="pk-tile" data-game="tracksmith" aria-label="Tracksmith" style="--art: url(loading/tracksmith_hero.webp); --pos: 62% 50%; --hpos: 50% 62%"><span class="pk-face"><span class="pk-wm wm-ts">Track<br>smith</span></span></button>
+              <button class="pk-tile pk-libtile" data-game="lib" aria-label="Game Library"><span class="pk-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 3h4v4H3zM9 3h4v4H9zM15 3h4v4h-4zM3 9h4v4H3zM9 9h4v4H9zM3 15h4v4H3z"/><path fill="currentColor" d="M12.6 12.4h6.6c1.3 0 2.2.8 2.5 2l.9 4.4c.3 1.6-1.6 2.5-2.7 1.3l-1.6-1.8h-4.8l-1.6 1.8c-1.1 1.2-3 .3-2.7-1.3l.9-4.4c.3-1.2 1.2-2 2.5-2z"/></svg></span></button>
+            </div>
+            <div class="pk-row" data-row="media" hidden></div>
+            <div class="pk-name"><em>AGP</em><span></span></div>
+          </div>
+          <div class="pk-stage">
+            <div class="pk-show" data-for="f1"><span class="pk-tag">Single Player</span><span class="pk-wm wm-f1">Apex <u>GP</u></span><h2>Continue where you left off</h2><p>Career, grand prix weekends and time trials on real circuits</p></div>
+            <div class="pk-show" data-for="boost"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-boost">Boostball</span><h2>Continue where you left off</h2><p>Jump, flip and fly into the ball with friends</p></div>
+            <div class="pk-show" data-for="miami"><span class="pk-tag">Single Player</span><span class="pk-wm wm-miami">Miami</span><h2>Continue where you left off</h2><p>A crime story from Brickell to South Beach, the police on your tail</p></div>
+            <div class="pk-show" data-for="marbles"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-wobble"><span>W</span><span>o</span><span>b</span><span>b</span><span>l</span><span>e</span> <span>M</span><span>a</span><span>n</span><span>i</span><span>a</span></span><h2>Continue where you left off</h2><p>A jelly-bean knockout party, online with friends</p></div>
+            <div class="pk-show" data-for="mogul"><span class="pk-tag">Single Player</span><span class="pk-wm wm-mogul">Mogul</span><h2>Continue where you left off</h2><p>One food cart on a real street, then a whole city to out-earn</p></div>
+            <div class="pk-show" data-for="tracksmith"><span class="pk-tag">Single Player</span><span class="pk-wm wm-ts">Tracksmith</span><h2>Continue where you left off</h2><p>Loops, jumps and boost pads, then build and share your own tracks</p></div>
+            <div class="pk-show pk-plain" data-for="lib"><h2>Game Library</h2><p>All your games in one place</p></div>
+            <div class="pk-show pk-plain" data-for="photo"><h2 id="pk-photo"></h2><p>Photo mode</p></div>
+            <div class="pk-acts"><button id="pk-play">Play Game</button><button id="pk-more" aria-label="More options"><i></i><i></i><i></i></button></div>
+          </div>
+          <div class="pk-cards"></div>
+        </div>
+        <div class="pk-menu" hidden><button data-act="spin">Surprise Me</button><button data-act="lib">Game Library</button></div>
+      </div>
+
+      <div class="pk-page" data-page="lib">
+        <h1>Game Library</h1>
+        <div class="pk-subtabs"><b>Your Collection</b></div>
+        <div class="pk-grid"></div>
+      </div>
+      <div class="pk-page" data-page="find">
+        <input id="pk-q" type="text" placeholder="Search for games" autocomplete="off" spellcheck="false" aria-label="Search for games" />
+        <div class="pk-results"></div>
+      </div>
+      <div class="pk-page" data-page="set">
+        <h1>Settings</h1>
+        <div class="pk-list">
+          <button data-set="sound"><span>Sound</span><i class="pk-switch"></i></button>
+          <button data-set="startup"><span>Show Startup Screen</span><i class="pk-switch"></i></button>
+        </div>
       </div>
       <div class="pk-black"></div>
     </div>
@@ -221,83 +269,234 @@
       @font-face { font-family: "Barlow"; font-weight: 500; font-display: swap; src: url(fonts/barlow-500.woff2) format("woff2"); }
       @font-face { font-family: "Barlow"; font-weight: 700; font-display: swap; src: url(fonts/barlow-700.woff2) format("woff2"); }
       @font-face { font-family: "Barlow Condensed"; font-weight: 800; font-style: italic; font-display: swap; src: url(fonts/barlowc-800i.woff2) format("woff2"); }
+      @font-face { font-family: "PK UI"; font-weight: 300 800; font-display: block; src: url(fonts/pk-ui.woff2) format("woff2"); }
       @font-face { font-family: "PK Bungee"; font-display: block; src: url(fonts/pk-bungee.woff2) format("woff2"); }
       @font-face { font-family: "PK Script"; font-display: block; src: url(fonts/pk-script.woff2) format("woff2"); }
       @font-face { font-family: "PK Lilita"; font-display: block; src: url(fonts/pk-lilita.woff2) format("woff2"); }
       @font-face { font-family: "PK Abril"; font-display: block; src: url(fonts/pk-abril.woff2) format("woff2"); }
       @font-face { font-family: "PK Racing"; font-display: block; src: url(fonts/pk-racing.woff2) format("woff2"); }
-      /* a console home screen: the selected game fills the room, one row of tiles along the top */
-      #picker { --pad: clamp(20px, 4.4vw, 72px); --tile: clamp(66px, 11.4vh, 112px); --big: calc(var(--tile) * 1.42); --gap: clamp(10px, 1.5vh, 16px); --ease: cubic-bezier(0.2, 0.8, 0.2, 1); position: fixed; inset: 0; z-index: 40; overflow: hidden; background: #05060a; color: #fff; font-family: "Barlow", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+      /* The console, measured off real footage at 1280x720: every size below is those pixels times --u, so it holds at any window.
+         Startup logo, then the lit stage, press any button, who's playing, home. */
+      #picker { --u: min(calc(100vh / 720), calc(100vw / 1280)); --col: calc(115 * var(--u)); --out: cubic-bezier(0.2, 0.8, 0.2, 1); position: fixed; inset: 0; z-index: 40; overflow: hidden; background: #000; color: #fff; font-family: "PK UI", "Segoe UI", Arial, sans-serif; font-weight: 300; -webkit-font-smoothing: antialiased; user-select: none; }
       #picker[hidden] { display: none; }
-      #picker .pk-bg, #picker .pk-bg i, #picker .pk-shade, #picker .pk-black { position: absolute; inset: 0; }
-      #picker .pk-bg i { background: center / cover no-repeat; opacity: 0; transform: scale(1.05); transition: opacity 0.55s ease, transform 1.6s var(--ease); }
-      #picker .pk-bg i.show { opacity: 1; transform: scale(1); }
-      #picker .pk-bg i.px { image-rendering: pixelated; }
-      #picker .pk-shade { background: radial-gradient(62% 72% at 0% 100%, rgba(5, 6, 10, 0.78) 0%, rgba(5, 6, 10, 0) 100%), linear-gradient(180deg, rgba(5, 6, 10, 0.72) 0%, rgba(5, 6, 10, 0.2) 34%, rgba(5, 6, 10, 0) 50%), linear-gradient(0deg, rgba(5, 6, 10, 0.86) 0%, rgba(5, 6, 10, 0.3) 34%, rgba(5, 6, 10, 0) 56%), linear-gradient(90deg, rgba(5, 6, 10, 0.5) 0%, rgba(5, 6, 10, 0) 52%); }
-      #picker .pk-top { position: absolute; top: clamp(14px, 3vh, 30px); left: var(--pad); right: var(--pad); display: flex; align-items: center; justify-content: space-between; animation: pk-in 0.7s 0.1s var(--ease) both; }
-      #picker .pk-tabs { display: flex; align-items: baseline; gap: clamp(20px, 2.6vw, 36px); }
-      #picker .pk-logo { font: italic 800 clamp(22px, 3.4vh, 30px) / 1 "Barlow Condensed", Arial, sans-serif; text-transform: uppercase; }
-      #picker .pk-logo u { text-decoration: none; color: #ff2b3f; }
-      #picker .pk-tabs b { font-size: clamp(17px, 2.6vh, 22px); font-weight: 500; }
-      #picker .pk-status { display: flex; align-items: center; gap: 20px; font-size: clamp(16px, 2.4vh, 20px); font-weight: 500; font-variant-numeric: tabular-nums; }
-      #picker #pk-snd { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: #fff; cursor: pointer; }
-      #picker #pk-snd:hover, #picker #pk-snd:focus-visible { background: rgba(255, 255, 255, 0.18); outline: none; }
-      #picker #pk-snd[aria-pressed="false"] .pk-wave { display: none; }
-      #picker .pk-rowbox { position: absolute; left: 0; right: 0; top: clamp(62px, 11vh, 104px); height: calc(var(--big) + 16px); padding: 8px 0 8px var(--pad); box-sizing: border-box; overflow: hidden; animation: pk-in 0.8s 0.18s var(--ease) both; }
-      #picker .pk-row { display: flex; align-items: flex-start; gap: var(--gap); height: 100%; width: max-content; transform: translateX(var(--shift, 0)); transition: transform 0.36s var(--ease); }
-      #picker .pk-tile { flex: none; display: flex; align-items: flex-start; gap: 18px; padding: 0; border: 0; background: none; color: #fff; font: inherit; text-align: left; cursor: pointer; outline: none; }
-      #picker .pk-face { flex: none; display: grid; place-items: center; width: var(--tile); height: var(--tile); border-radius: 12%; background: var(--art, #2a2d38) var(--pos, center) / cover no-repeat; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); transition: width 0.3s var(--ease), height 0.3s var(--ease), box-shadow 0.25s, filter 0.2s; filter: brightness(0.86); }
-      #picker .pk-tile:hover .pk-face { filter: none; }
-      #picker .pk-tile.on .pk-face { width: var(--big); height: var(--big); filter: none; box-shadow: 0 0 0 3px rgba(5, 6, 10, 0.75), 0 0 0 6px #fff, 0 10px 34px rgba(0, 0, 0, 0.55), 0 0 26px rgba(255, 255, 255, 0.28); }
-      #picker .pk-tile.on:not(:focus) .pk-face { box-shadow: 0 0 0 3px rgba(5, 6, 10, 0.75), 0 0 0 5px rgba(255, 255, 255, 0.55), 0 10px 34px rgba(0, 0, 0, 0.55); }
-      #picker .pk-label { display: block; max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; font-size: clamp(18px, 2.9vh, 25px); font-weight: 500; line-height: var(--tile); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); margin-left: -18px; transition: max-width 0.32s var(--ease), opacity 0.22s, margin 0.32s var(--ease); }
-      #picker .pk-tile.on .pk-label { max-width: 280px; opacity: 1; margin-left: 0; margin-right: 10px; }
-      #picker .pk-any .pk-face { background: rgba(255, 255, 255, 0.16); color: #fff; backdrop-filter: blur(10px); }
-      #picker .pk-stage { position: absolute; left: var(--pad); right: var(--pad); bottom: clamp(22px, 7vh, 72px); min-height: clamp(150px, 32vh, 300px); display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; animation: pk-in 0.8s 0.26s var(--ease) both; }
-      #picker .pk-show { position: absolute; left: 0; right: 0; bottom: clamp(66px, 10vh, 82px); max-width: 720px; opacity: 0; transform: translateY(10px); transition: opacity 0.22s, transform 0.4s var(--ease); pointer-events: none; }
-      #picker .pk-show.on { opacity: 1; transform: none; }
-      #picker .pk-show p { margin: 10px 0 0; display: flex; align-items: center; gap: 10px; font-size: clamp(15px, 2.2vh, 18px); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); }
-      #picker .pk-show p b { font-weight: 700; }
-      #picker .pk-show .pk-blurb { margin-top: 6px; font-weight: 500; color: rgba(255, 255, 255, 0.88); }
-      #picker .pk-chip { padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(255, 255, 255, 0.2); text-shadow: none; }
-      #picker .pk-lastchip { display: none; }
-      #picker.was-last .pk-show.on .pk-lastchip { display: inline-block; }
-      #picker .pk-wm { --wm: clamp(46px, min(8.4vh, 8vw), 92px); display: block; line-height: 1; text-shadow: 0 3px 22px rgba(0, 0, 0, 0.55); }
+      #picker button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; outline: none; }
+      #picker h1, #picker h2, #picker p { margin: 0; font-weight: 300; }
+      #picker .pk-room, #picker .pk-orb, #picker .pk-dust, #picker .pk-boot, #picker .pk-press, #picker .pk-login, #picker .pk-home, #picker .pk-page, #picker .pk-black, #picker .pk-bg, #picker .pk-bg i, #picker .pk-shade { position: absolute; inset: 0; }
+      #picker .pk-dust { width: 100%; height: 100%; opacity: 0; transition: opacity 1.2s; }
+      /* the stage: warm light falling from the top left, cold on the right, a band of mist along the floor */
+      #picker .pk-room { opacity: 0; transition: opacity 1.4s; background:
+        radial-gradient(ellipse 15% 30% at 16% -6%, rgba(226, 196, 186, 0.72) 0%, rgba(190, 160, 152, 0.3) 52%, rgba(150, 125, 122, 0) 100%),
+        linear-gradient(90deg, rgba(120, 100, 98, 0) 0%, rgba(160, 134, 130, 0.13) 11%, rgba(160, 134, 130, 0.13) 20%, rgba(120, 100, 98, 0) 31%),
+        radial-gradient(ellipse 66% 18% at 24% 87%, rgba(122, 128, 136, 0.52) 0%, rgba(110, 114, 122, 0) 100%),
+        radial-gradient(ellipse 72% 92% at 14% 24%, rgba(92, 80, 84, 0.86) 0%, rgba(70, 62, 68, 0.56) 48%, rgba(40, 38, 48, 0) 100%),
+        linear-gradient(90deg, #2f2c33 0%, #27262f 50%, #15161f 100%); }
+      #picker .pk-room::before { content: ""; position: absolute; inset: 0; filter: blur(calc(13 * var(--u))); background: conic-gradient(from 138deg at 11% -30%, rgba(235, 208, 198, 0) 0deg, rgba(235, 208, 198, 0.13) 9deg, rgba(235, 208, 198, 0.08) 15deg, rgba(235, 208, 198, 0.24) 22deg, rgba(235, 208, 198, 0.13) 29deg, rgba(235, 208, 198, 0.26) 36deg, rgba(235, 208, 198, 0.16) 44deg, rgba(235, 208, 198, 0.14) 52deg, rgba(235, 208, 198, 0) 66deg, rgba(235, 208, 198, 0) 360deg); -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.55) 26%, rgba(0, 0, 0, 0) 62%); mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.55) 26%, rgba(0, 0, 0, 0) 62%); }
+      /* just after the logo: a great teal disc in the dark, before the stage lights come up */
+      #picker .pk-orb { opacity: 0; transition: opacity 1s; background: radial-gradient(circle at 72% 54%, #103a44 0%, #0d3240 62%, rgba(10, 34, 44, 0.8) 71%, rgba(4, 12, 18, 0) 76%); }
+      #picker.st-orb .pk-orb { opacity: 1; transition-duration: 1.8s; }
+      #picker.st-orb .pk-dust, #picker.st-room .pk-dust { opacity: 1; }
+      #picker.st-room .pk-room { opacity: 1; }
+      #picker.gone-room .pk-room, #picker.gone-room .pk-dust { transition-duration: 0.5s; opacity: 0; }
+      /* logo, then the warning */
+      #picker .pk-boot { display: grid; place-items: center; pointer-events: none; }
+      #picker .pk-mark { grid-area: 1 / 1; font: italic 800 calc(64 * var(--u)) / 1 "Barlow Condensed", Arial, sans-serif; text-transform: uppercase; color: #fff; opacity: 0; transition: opacity 0.42s; }
+      #picker .pk-mark u { text-decoration: none; }
+      #picker .pk-warn { grid-area: 1 / 1; width: calc(700 * var(--u)); font-size: calc(9.4 * var(--u)); line-height: 1.5; letter-spacing: 0.02em; color: #8d8d92; opacity: 0; transition: opacity 0.4s; }
+      #picker.st-logo .pk-mark { opacity: 1; }
+      #picker.st-warn .pk-warn { opacity: 1; }
+      /* press any button */
+      #picker .pk-press { opacity: 0; pointer-events: none; transition: opacity 0.6s; }
+      #picker.st-press .pk-press { opacity: 1; pointer-events: auto; cursor: pointer; }
+      #picker .pk-press p { position: absolute; top: calc(50% - 205 * var(--u)); left: 0; right: 0; text-align: center; font-size: calc(19.5 * var(--u)); font-weight: 400; }
+      #picker .pk-ring { position: absolute; left: 50%; top: calc(50% + 16 * var(--u)); width: calc(56 * var(--u)); height: calc(56 * var(--u)); margin: calc(-28 * var(--u)) 0 0 calc(-28 * var(--u)); display: grid; place-items: center; border-radius: 50%; background: #fff; color: #1d1c24; }
+      #picker .pk-ring b { font: italic 800 calc(29 * var(--u)) / 1 "Barlow Condensed", Arial, sans-serif; }
+      #picker .pk-ring i { position: absolute; inset: calc(-28 * var(--u)); border-radius: 50%; border: calc(7 * var(--u)) solid #fff; box-shadow: 0 0 calc(18 * var(--u)) rgba(255, 255, 255, 0.5); animation: pk-ring 2.6s ease-out infinite; }
+      @keyframes pk-ring { 0% { opacity: 0; transform: scale(0.72); } 26% { opacity: 1; transform: scale(1); } 62% { opacity: 0.3; border-width: calc(1.5 * var(--u)); transform: scale(1); } 100% { opacity: 0; border-width: calc(1 * var(--u)); transform: scale(1); } }
+      /* who's playing */
+      #picker .pk-login { opacity: 0; pointer-events: none; transition: opacity 0.5s; text-align: center; }
+      #picker.st-login .pk-login { opacity: 1; pointer-events: auto; }
+      #picker .pk-time { font-size: calc(22 * var(--u)); font-weight: 300; font-variant-numeric: tabular-nums; }
+      #picker .pk-loginclock { position: absolute; top: calc(30 * var(--u)); right: calc(55 * var(--u)); font-size: calc(17 * var(--u)); font-weight: 400; }
+      #picker .pk-login h1 { position: absolute; top: calc(50% - 262 * var(--u)); left: 0; right: 0; font-size: calc(30 * var(--u)); line-height: 1.3; }
+      #picker .pk-who { position: absolute; top: calc(50% - 211 * var(--u)); left: 0; right: 0; font-size: calc(16 * var(--u)); font-weight: 400; color: rgba(255, 255, 255, 0.72); }
+      #picker .pk-users { position: absolute; left: 50%; top: calc(50% - 6 * var(--u)); width: 0; height: 0; transform: translateX(calc(var(--ux, 0) * var(--u))); transition: transform 0.28s var(--out); }
+      #picker .pk-user { position: absolute; top: 0; left: calc(var(--x) * var(--u)); width: 0; height: 0; display: block; }
+      #picker .pk-av { position: absolute; left: calc(-70 * var(--u)); top: calc(-70 * var(--u)); width: calc(140 * var(--u)); height: calc(140 * var(--u)); border-radius: 50%; display: grid; place-items: center; background: var(--art, rgba(255, 255, 255, 0.1)) var(--pos, center) / cover no-repeat; transition: transform 0.22s var(--out), box-shadow 0.22s; }
+      #picker .pk-add .pk-av { font-size: calc(58 * var(--u)); font-weight: 400; line-height: 1; }
+      #picker .pk-user:focus .pk-av { transform: scale(1.36); box-shadow: 0 0 0 calc(1.6 * var(--u)) rgba(20, 20, 26, 0.5), 0 0 0 calc(3 * var(--u)) #fff, 0 0 calc(22 * var(--u)) rgba(255, 255, 255, 0.3); }
+      #picker .pk-un { position: absolute; left: calc(-150 * var(--u)); width: calc(300 * var(--u)); top: calc(115 * var(--u)); font-size: calc(16.5 * var(--u)); font-weight: 400; color: rgba(255, 255, 255, 0.86); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #picker .pk-pad { position: absolute; left: calc(-16 * var(--u)); top: calc(-138 * var(--u)); width: calc(32 * var(--u)); opacity: 0; transition: opacity 0.2s; }
+      #picker .pk-pad svg { display: block; width: 100%; }
+      #picker .pk-pad small { display: block; font-size: calc(10 * var(--u)); font-weight: 700; margin-bottom: calc(-3 * var(--u)); }
+      #picker .pk-user:focus .pk-pad { opacity: 1; }
+      #picker .pk-opt { position: absolute; left: calc(-60 * var(--u)); width: calc(120 * var(--u)); top: calc(148 * var(--u)); font-size: calc(12.5 * var(--u)); font-weight: 600; opacity: 0; transition: opacity 0.2s; }
+      #picker .pk-user:focus .pk-opt { opacity: 1; }
+      #picker .pk-opt kbd { font: inherit; padding: calc(1 * var(--u)) calc(6 * var(--u)); margin-right: calc(6 * var(--u)); border-radius: calc(4 * var(--u)); background: rgba(255, 255, 255, 0.82); color: #1b1b22; }
+      #picker .pk-namebox { position: absolute; left: calc(-120 * var(--u)); top: calc(110 * var(--u)); width: calc(240 * var(--u)); height: calc(34 * var(--u)); box-sizing: border-box; border: calc(1.5 * var(--u)) solid #fff; border-radius: calc(6 * var(--u)); background: rgba(0, 0, 0, 0.45); color: #fff; font: 400 calc(16 * var(--u)) "PK UI", Arial, sans-serif; text-align: center; outline: none; }
+      #picker .pk-power { position: absolute; left: 50%; top: calc(100% - 68 * var(--u)); width: calc(48 * var(--u)); height: calc(48 * var(--u)); margin-left: calc(-24 * var(--u)); display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, 0.13); transition: background 0.15s, color 0.15s, box-shadow 0.15s; }
+      #picker .pk-power svg { width: 56%; }
+      #picker .pk-power:hover { background: rgba(255, 255, 255, 0.26); }
+      #picker .pk-power:focus { background: #fff; color: #17171f; box-shadow: 0 0 calc(20 * var(--u)) rgba(255, 255, 255, 0.4); }
+      #picker .pk-hint { position: absolute; right: calc(30 * var(--u)); bottom: calc(24 * var(--u)); font-size: calc(12.5 * var(--u)); font-weight: 600; }
+      #picker .pk-hint kbd { font: inherit; padding: calc(2 * var(--u)) calc(7 * var(--u)); margin-right: calc(7 * var(--u)); border-radius: calc(5 * var(--u)); background: rgba(255, 255, 255, 0.82); color: #1b1b22; }
+      /* home */
+      #picker .pk-home { opacity: 0; pointer-events: none; transition: opacity 0.7s; }
+      #picker.st-home .pk-home { opacity: 1; pointer-events: auto; }
+      #picker.paged .pk-home { opacity: 0; pointer-events: none; transition-duration: 0.2s; }
+      #picker .pk-bg { background: #05060a; transition: filter 0.3s; }
+      #picker .pk-bg i { background: center / cover no-repeat; opacity: 0; transition: opacity 0.42s ease; }
+      #picker .pk-bg i.show { opacity: 1; }
+      #picker .pk-shade { background: linear-gradient(180deg, rgba(4, 6, 12, 0.62) 0%, rgba(4, 6, 12, 0.34) 18%, rgba(4, 6, 12, 0) 36%), linear-gradient(90deg, rgba(4, 7, 14, 0.86) 0%, rgba(4, 7, 14, 0.64) 30%, rgba(4, 7, 14, 0) 64%), linear-gradient(0deg, rgba(4, 6, 12, 0.5) 0%, rgba(4, 6, 12, 0) 26%); transition: opacity 0.3s, background-color 0.3s; }
+      #picker .pk-home.down .pk-bg { filter: blur(calc(14 * var(--u))) brightness(0.55); }
+      #picker .pk-scroll { position: absolute; inset: 0; transition: transform 0.32s var(--out); }
+      #picker .pk-home.down .pk-scroll { transform: translateY(calc(-336 * var(--u))); }
+      #picker .pk-top { position: absolute; top: calc(22 * var(--u)); left: calc(62 * var(--u)); right: calc(57 * var(--u)); height: calc(40 * var(--u)); display: flex; align-items: center; justify-content: space-between; }
+      #picker .pk-tabs { display: flex; gap: calc(26 * var(--u)); }
+      #picker .pk-tab { position: relative; font-size: calc(23 * var(--u)) !important; line-height: calc(40 * var(--u)) !important; color: rgba(255, 255, 255, 0.6) !important; font-weight: 300 !important; transition: color 0.15s; }
+      #picker .pk-tab.on { color: #fff !important; font-weight: 600 !important; }
+      #picker .pk-tab:hover { color: #fff !important; }
+      #picker .pk-tab:focus::after { content: ""; position: absolute; left: calc(-10 * var(--u)); right: calc(-10 * var(--u)); top: 0; bottom: 0; border-radius: calc(8 * var(--u)); box-shadow: 0 0 0 calc(2 * var(--u)) #fff; }
+      #picker .pk-status { display: flex; align-items: center; }
+      #picker .pk-ico { width: calc(40 * var(--u)); height: calc(40 * var(--u)); display: grid; place-items: center; border-radius: 50%; transition: background 0.15s, color 0.15s; }
+      #picker .pk-ico svg { width: 56%; }
+      #picker #pk-find { margin-right: calc(30 * var(--u)); }
+      #picker #pk-gear { margin-right: calc(30 * var(--u)); }
+      #picker .pk-ico:hover { background: rgba(255, 255, 255, 0.18); }
+      #picker .pk-ico:focus { background: #fff; color: #10121a; }
+      #picker .pk-me { position: relative; width: calc(32 * var(--u)); height: calc(32 * var(--u)); margin-right: calc(75 * var(--u)); border-radius: 50%; background: var(--art, #555) var(--pos, center) / cover no-repeat; }
+      #picker .pk-me i { position: absolute; right: calc(-1 * var(--u)); bottom: calc(-1 * var(--u)); width: calc(9 * var(--u)); height: calc(9 * var(--u)); border-radius: 50%; background: #2fd35c; box-shadow: 0 0 0 calc(1.5 * var(--u)) rgba(4, 6, 12, 0.8); }
+      #picker .pk-me:hover, #picker .pk-me:focus { box-shadow: 0 0 0 calc(2 * var(--u)) rgba(4, 6, 12, 0.8), 0 0 0 calc(4 * var(--u)) #fff; }
+      #picker .pk-rowbox { position: absolute; left: 0; right: 0; top: calc(83 * var(--u)); height: calc(116 * var(--u)); }
+      #picker .pk-row { position: absolute; left: var(--col); top: 0; display: flex; align-items: flex-start; gap: calc(6.5 * var(--u)); transform: translateX(calc(var(--s, 0) * var(--u) * -1)); transition: transform 0.2s var(--out); }
+      #picker .pk-row[hidden] { display: none; }
+      #picker .pk-tile { flex: none; display: block; transition: margin 0.2s var(--out); }
+      #picker .pk-tile.on:not(:first-child) { margin-left: calc(5.5 * var(--u)); }
+      #picker .pk-tile.on { margin-right: calc(2.5 * var(--u)); }
+      #picker .pk-face { position: relative; display: grid; place-items: center; overflow: hidden; width: calc(70 * var(--u)); height: calc(70 * var(--u)); border-radius: calc(10 * var(--u)); background: var(--art, #101a28) var(--pos, center) / cover no-repeat; color: #fff; transition: width 0.2s var(--out), height 0.2s var(--out), border-radius 0.2s var(--out), box-shadow 0.2s; }
+      #picker .pk-face::before { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.14); }
+      #picker .pk-face > * { position: relative; }
+      #picker .pk-tile.on .pk-face { width: calc(114 * var(--u)); height: calc(114 * var(--u)); border-radius: calc(16 * var(--u)); box-shadow: 0 0 0 calc(1.5 * var(--u)) rgba(10, 14, 22, 0.55), 0 0 0 calc(2.6 * var(--u)) rgba(255, 255, 255, 0.55); }
+      #picker .pk-tile.on:focus .pk-face { box-shadow: 0 0 0 calc(2 * var(--u)) rgba(10, 14, 22, 0.6), 0 0 0 calc(3.6 * var(--u)) #fff, 0 0 calc(18 * var(--u)) rgba(255, 255, 255, 0.34); }
+      #picker .pk-face .pk-wm { --wm: calc(16 * var(--u)); text-align: center; text-shadow: 0 calc(1 * var(--u)) calc(4 * var(--u)) rgba(0, 0, 0, 0.7); transition: font-size 0.2s var(--out); }
+      #picker .pk-tile.on .pk-face .pk-wm { --wm: calc(26 * var(--u)); }
+      #picker .pk-libtile .pk-face { background: #0d1a2c; }
+      #picker .pk-libtile .pk-face svg { width: 56%; }
+      #picker .pk-name { position: absolute; left: calc(var(--col) + 123 * var(--u)); top: calc(81 * var(--u)); height: calc(24 * var(--u)); display: flex; align-items: center; gap: calc(7 * var(--u)); font-size: calc(18.5 * var(--u)); font-weight: 300; white-space: nowrap; text-shadow: 0 calc(1 * var(--u)) calc(6 * var(--u)) rgba(0, 0, 0, 0.5); }
+      #picker .pk-name em { flex: none; padding: 0 calc(11 * var(--u)); height: calc(22 * var(--u)); border-radius: calc(3 * var(--u)); background: #fff; color: #0b0d14; font: italic 800 calc(14 * var(--u)) / calc(22 * var(--u)) "Barlow Condensed", Arial, sans-serif; letter-spacing: 0.06em; text-shadow: none; }
+      #picker .pk-name.bare em { display: none; }
+      #picker .pk-stage { position: absolute; left: var(--col); right: var(--col); bottom: calc(108 * var(--u)); }
+      #picker .pk-show { position: absolute; left: 0; bottom: calc(82 * var(--u)); width: min(100%, calc(620 * var(--u))); opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+      #picker .pk-show.on { opacity: 1; }
+      #picker.was-last .pk-show { bottom: calc(146 * var(--u)); }
+      #picker .pk-show h2 { display: none; font-size: calc(32 * var(--u)); line-height: 1.25; letter-spacing: 0.005em; text-shadow: 0 calc(1 * var(--u)) calc(10 * var(--u)) rgba(0, 0, 0, 0.6); }
+      #picker .pk-show p { margin-top: calc(10 * var(--u)); font-size: calc(17.5 * var(--u)); font-weight: 400; line-height: 1.3; text-shadow: 0 calc(1 * var(--u)) calc(8 * var(--u)) rgba(0, 0, 0, 0.75), 0 0 calc(2 * var(--u)) rgba(0, 0, 0, 0.5); }
+      #picker .pk-tag { display: none; width: fit-content; margin-bottom: calc(20 * var(--u)); padding: calc(3 * var(--u)) calc(6 * var(--u)); border: calc(1 * var(--u)) solid rgba(255, 255, 255, 0.9); font-size: calc(11.5 * var(--u)); font-weight: 400; }
+      #picker .pk-plain h2 { display: block; }
+      /* the game you were last in reads like the console's: pick up where you stopped */
+      #picker.was-last .pk-show.on h2, #picker.was-last .pk-show.on .pk-tag { display: block; }
+      #picker.was-last .pk-show.on .pk-wm { display: none; }
+      #picker .pk-wm { --wm: calc(70 * var(--u)); display: block; line-height: 1; text-shadow: 0 calc(3 * var(--u)) calc(22 * var(--u)) rgba(0, 0, 0, 0.55); }
       #picker .wm-f1 { font: italic 800 calc(var(--wm) * 1.2) / 0.95 "Barlow Condensed", Arial, sans-serif; text-transform: uppercase; }
       #picker .wm-f1 u { text-decoration: none; color: #ff2b3f; }
-      #picker .wm-boost { font: 400 calc(var(--wm) * 0.84) / 1 "PK Bungee", Impact, sans-serif; text-transform: uppercase; text-shadow: 0 4px 0 #1d4fd8, 0 8px 20px rgba(0, 0, 0, 0.6); }
-      #picker .wm-miami { font: 400 calc(var(--wm) * 1.5) / 1 "PK Script", cursive; padding-right: 10px; text-shadow: 0 0 8px #ff4f9a, 0 0 22px #ff4f9a, 0 0 50px rgba(255, 79, 154, 0.7); }
-      #picker .wm-wobble { font: 400 var(--wm) / 1 "PK Lilita", Impact, sans-serif; text-transform: uppercase; color: #ffd23a; text-shadow: 0 4px 0 #7a2bd0, 0 8px 18px rgba(0, 0, 0, 0.55); }
+      #picker .wm-boost { font: 400 calc(var(--wm) * 0.84) / 1 "PK Bungee", Impact, sans-serif; text-transform: uppercase; text-shadow: 0 0.06em 0 #1d4fd8, 0 0.12em 0.3em rgba(0, 0, 0, 0.6); }
+      #picker .wm-miami { font: 400 calc(var(--wm) * 1.5) / 1 "PK Script", cursive; padding-right: 0.1em; text-shadow: 0 0 0.1em #ff4f9a, 0 0 0.3em #ff4f9a, 0 0 0.7em rgba(255, 79, 154, 0.7); }
+      #picker .wm-wobble { font: 400 var(--wm) / 1 "PK Lilita", Impact, sans-serif; text-transform: uppercase; color: #ffd23a; text-shadow: 0 0.06em 0 #7a2bd0, 0 0.12em 0.3em rgba(0, 0, 0, 0.55); }
       #picker .wm-wobble span { display: inline-block; transform: rotate(var(--w, -3deg)); }
       #picker .wm-wobble span:nth-child(even) { --w: 3deg; }
       #picker .wm-wobble span:nth-child(3n) { --w: -5deg; }
-      #picker .wm-pine { width: calc(var(--wm) * 3.3); height: auto; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6)); }
       #picker .wm-mogul { font: 400 calc(var(--wm) * 1.2) / 1 "PK Abril", Georgia, serif; color: #ffe0a3; }
       #picker .wm-ts { font: italic 400 calc(var(--wm) * 0.92) / 1 "PK Racing", Impact, sans-serif; text-transform: uppercase; }
-      #picker .wm-any { font: italic 800 calc(var(--wm) * 1.16) / 0.95 "Barlow Condensed", Arial, sans-serif; text-transform: uppercase; }
-      #picker #pk-play { height: clamp(44px, 6.6vh, 56px); min-width: clamp(190px, 22vw, 280px); padding: 0 34px; border: 0; border-radius: 999px; background: #fff; color: #0b0d14; font: 700 clamp(16px, 2.4vh, 20px) / 1 "Barlow", Arial, sans-serif; cursor: pointer; outline: none; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4); transition: transform 0.16s var(--ease), box-shadow 0.2s; }
-      #picker #pk-play:hover { transform: scale(1.03); }
-      #picker #pk-play:focus { box-shadow: 0 0 0 3px rgba(5, 6, 10, 0.75), 0 0 0 6px #fff, 0 0 30px rgba(255, 255, 255, 0.4); }
-      #picker #pk-play:active { transform: scale(0.97); }
-      #picker .pk-black { background: #05060a; opacity: 0; pointer-events: none; transition: opacity 0.26s 0.2s; }
-      #picker.spinning .pk-row { transition-duration: 0.1s; }
-      #picker.spinning .pk-face, #picker.spinning .pk-label { transition-duration: 0.08s; }
-      #picker.going .pk-rowbox, #picker.going .pk-top { opacity: 0; transform: translateY(-14px); transition: opacity 0.2s, transform 0.3s; animation: none; }
-      #picker.going .pk-stage { opacity: 0; transform: translateY(14px); transition: opacity 0.2s, transform 0.3s; animation: none; }
-      #picker.going .pk-bg i.show { transform: scale(1.09); transition: transform 0.5s ease-in; }
-      #picker.going .pk-black { opacity: 1; }
-      @keyframes pk-in { from { opacity: 0; transform: translateY(12px); } }
-      @media (max-width: 640px) { #picker .pk-label { display: none; } #picker .pk-show { max-width: none; } #picker #pk-play { width: 100%; } }
+      #picker .pk-face .wm-boost, #picker .pk-face .wm-ts, #picker .pk-face .wm-wobble { font-size: calc(var(--wm) * 0.72); line-height: 1.02; }
+      #picker .pk-acts { position: absolute; left: 0; bottom: 0; display: flex; gap: calc(11 * var(--u)); }
+      #picker #pk-play { width: calc(222 * var(--u)); height: calc(48 * var(--u)); border-radius: calc(24 * var(--u)); background: rgba(255, 255, 255, 0.1); font-size: calc(18 * var(--u)); font-weight: 600; transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
+      #picker #pk-more { display: flex; align-items: center; justify-content: center; gap: calc(3.5 * var(--u)); width: calc(48 * var(--u)); height: calc(48 * var(--u)); border-radius: 50%; background: rgba(255, 255, 255, 0.1); transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
+      #picker #pk-more i { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); border-radius: 50%; background: currentColor; }
+      #picker #pk-play:hover, #picker #pk-more:hover { background: rgba(255, 255, 255, 0.24); }
+      #picker #pk-play:focus, #picker #pk-more:focus { background: #fff; color: #0b0d14; box-shadow: 0 0 calc(22 * var(--u)) rgba(255, 255, 255, 0.34); }
+      #picker .pk-cards { position: absolute; left: 0; right: 0; top: calc(100% - 72 * var(--u)); display: flex; gap: calc(21 * var(--u)); padding: calc(8 * var(--u)) var(--col); box-sizing: border-box; overflow-x: auto; scrollbar-width: none; transition: opacity 0.2s; }
+      #picker .pk-cards::-webkit-scrollbar { display: none; }
+      #picker .pk-card { position: relative; flex: none; width: calc(336 * var(--u)); height: calc(240 * var(--u)); border-radius: calc(10 * var(--u)); overflow: hidden; text-align: left; background: rgba(255, 255, 255, 0.1); }
+      #picker .pk-card i { position: absolute; inset: 0; background: var(--art) var(--pos, center) / cover no-repeat; opacity: 0; transition: opacity 0.25s; }
+      #picker .pk-home.down .pk-card i { opacity: 1; }
+      #picker .pk-card i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0) 56%); }
+      #picker .pk-card span { position: absolute; left: calc(16 * var(--u)); right: calc(16 * var(--u)); bottom: calc(14 * var(--u)); opacity: 0; transition: opacity 0.25s; }
+      #picker .pk-home.down .pk-card span { opacity: 1; }
+      #picker .pk-card small { display: block; font-size: calc(12.5 * var(--u)); font-weight: 400; color: rgba(255, 255, 255, 0.78); }
+      #picker .pk-card b { display: block; margin-top: calc(2 * var(--u)); font-size: calc(18 * var(--u)); font-weight: 600; }
+      #picker .pk-card:focus { box-shadow: 0 0 0 calc(2 * var(--u)) #0a0c12, 0 0 0 calc(4 * var(--u)) #fff; }
+      #picker .pk-menu { position: absolute; left: calc(var(--col) + 292 * var(--u)); bottom: calc(108 * var(--u)); width: calc(250 * var(--u)); padding: calc(6 * var(--u)) 0; border-radius: calc(8 * var(--u)); background: rgba(24, 26, 34, 0.96); box-shadow: 0 calc(10 * var(--u)) calc(34 * var(--u)) rgba(0, 0, 0, 0.5); }
+      #picker .pk-menu[hidden] { display: none; }
+      #picker .pk-menu button { display: block; width: 100%; height: calc(40 * var(--u)); padding: 0 calc(16 * var(--u)); text-align: left; font-size: calc(15 * var(--u)); font-weight: 400; }
+      #picker .pk-menu button:hover, #picker .pk-menu button:focus { background: #fff; color: #0b0d14; }
+      #picker.photo .pk-scroll, #picker.photo .pk-shade { opacity: 0; pointer-events: none; }
+      #picker .pk-scroll { transition: transform 0.32s var(--out), opacity 0.2s; }
+      #picker.media .pk-cards { opacity: 0; pointer-events: none; }
+      #picker.media .pk-name em { display: none; }
+      /* pages on the stage */
+      #picker .pk-page { display: none; padding: calc(30 * var(--u)) var(--col) 0; box-sizing: border-box; overflow: hidden; }
+      #picker.paged-lib .pk-page[data-page="lib"], #picker.paged-find .pk-page[data-page="find"], #picker.paged-set .pk-page[data-page="set"] { display: block; animation: pk-fade 0.22s ease-out both; }
+      #picker .pk-page h1 { font-size: calc(24 * var(--u)); }
+      #picker .pk-subtabs { margin-top: calc(18 * var(--u)); font-size: calc(16 * var(--u)); }
+      #picker .pk-subtabs b { font-weight: 600; }
+      #picker .pk-grid { margin-top: calc(26 * var(--u)); display: grid; grid-template-columns: repeat(auto-fill, calc(170 * var(--u))); gap: calc(26 * var(--u)) calc(22 * var(--u)); }
+      #picker .pk-lg { display: block; text-align: left; }
+      #picker .pk-lg i { display: block; width: calc(170 * var(--u)); height: calc(170 * var(--u)); border-radius: calc(12 * var(--u)); background: var(--art) var(--pos, center) / cover no-repeat; transition: box-shadow 0.14s; }
+      #picker .pk-lg:hover i, #picker .pk-lg:focus i { box-shadow: 0 0 0 calc(2 * var(--u)) #17181f, 0 0 0 calc(4 * var(--u)) #fff; }
+      #picker .pk-lg span { display: block; margin-top: calc(10 * var(--u)); font-size: calc(15 * var(--u)); font-weight: 400; }
+      #picker #pk-q { display: block; width: 100%; height: calc(52 * var(--u)); padding: 0 calc(20 * var(--u)); box-sizing: border-box; border: calc(1.5 * var(--u)) solid rgba(255, 255, 255, 0.85); border-radius: calc(26 * var(--u)); background: rgba(0, 0, 0, 0.32); color: #fff; font: 300 calc(20 * var(--u)) "PK UI", Arial, sans-serif; outline: none; }
+      #picker #pk-q::placeholder { color: rgba(255, 255, 255, 0.6); }
+      #picker .pk-results { margin-top: calc(22 * var(--u)); }
+      #picker .pk-hit { display: flex; align-items: center; gap: calc(16 * var(--u)); width: 100%; height: calc(72 * var(--u)); padding: 0 calc(10 * var(--u)); box-sizing: border-box; border-radius: calc(8 * var(--u)); text-align: left; }
+      #picker .pk-hit i { flex: none; width: calc(56 * var(--u)); height: calc(56 * var(--u)); border-radius: calc(8 * var(--u)); background: var(--art) var(--pos, center) / cover no-repeat; }
+      #picker .pk-hit span { font-size: calc(17 * var(--u)); font-weight: 400; }
+      #picker .pk-hit:hover, #picker .pk-hit:focus { background: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 calc(1.5 * var(--u)) #fff; }
+      #picker .pk-none { padding: calc(14 * var(--u)) calc(10 * var(--u)); font-size: calc(16 * var(--u)); color: rgba(255, 255, 255, 0.7); }
+      #picker .pk-list { margin-top: calc(34 * var(--u)); width: min(100%, calc(640 * var(--u))); }
+      #picker .pk-list button { display: flex; align-items: center; justify-content: space-between; width: 100%; height: calc(52 * var(--u)); padding: 0 calc(16 * var(--u)); box-sizing: border-box; border-radius: calc(6 * var(--u)); font-size: calc(17 * var(--u)); font-weight: 300; }
+      #picker .pk-list button:hover, #picker .pk-list button:focus { box-shadow: inset 0 0 0 calc(1.5 * var(--u)) #fff; background: rgba(255, 255, 255, 0.08); }
+      #picker .pk-switch { position: relative; width: calc(38 * var(--u)); height: calc(20 * var(--u)); border-radius: calc(10 * var(--u)); background: rgba(255, 255, 255, 0.24); transition: background 0.14s; }
+      #picker .pk-switch::after { content: ""; position: absolute; left: calc(2 * var(--u)); top: calc(2 * var(--u)); width: calc(16 * var(--u)); height: calc(16 * var(--u)); border-radius: 50%; background: #fff; transition: transform 0.14s; }
+      #picker button[aria-checked="true"] .pk-switch { background: #2f7bf6; }
+      #picker button[aria-checked="true"] .pk-switch::after { transform: translateX(calc(18 * var(--u))); }
+      #picker .pk-black { background: #000; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+      #picker.rest .pk-black { opacity: 1; pointer-events: auto; transition-duration: 0.8s; }
+      /* launching: everything leaves, the game's art stands alone a moment, then the dark */
+      #picker.going .pk-scroll, #picker.going .pk-shade { opacity: 0; transition: opacity 0.22s; }
+      #picker.going .pk-home.down .pk-bg { filter: none; }
+      #picker.going .pk-black { opacity: 1; transition: opacity 0.34s 0.46s; }
+      #picker.spinning .pk-row { transition-duration: 0.09s; }
+      #picker.spinning .pk-face, #picker.spinning .pk-tile { transition-duration: 0.07s; }
+      @keyframes pk-fade { from { opacity: 0; } }
+      /* a phone held upright: the same screen, sized off the width */
+      @media (max-aspect-ratio: 1/1) {
+        #picker { --u: calc(100vw / 640); --col: calc(32 * var(--u)); }
+        #picker .pk-top { left: var(--col); right: var(--col); }
+        #picker .pk-me { margin-right: calc(18 * var(--u)); }
+        #picker #pk-find, #picker #pk-gear { margin-right: calc(8 * var(--u)); }
+        #picker .pk-card { width: calc(420 * var(--u)); height: calc(300 * var(--u)); }
+        #picker .pk-menu { left: var(--col); bottom: calc(166 * var(--u)); }
+        #picker .pk-name { font-size: calc(24 * var(--u)); }
+        #picker .pk-show p { font-size: calc(23 * var(--u)); }
+        #picker .pk-show h2 { font-size: calc(38 * var(--u)); }
+        #picker .pk-tag { font-size: calc(15 * var(--u)); }
+        #picker #pk-play { font-size: calc(23 * var(--u)); width: calc(320 * var(--u)); height: calc(64 * var(--u)); border-radius: calc(32 * var(--u)); }
+        #picker #pk-more { width: calc(64 * var(--u)); height: calc(64 * var(--u)); }
+        #picker .pk-show { bottom: calc(100 * var(--u)); }
+        #picker .pk-login h1 { font-size: calc(36 * var(--u)); }
+        #picker .pk-who, #picker .pk-un { font-size: calc(22 * var(--u)); }
+        #picker .pk-press p { font-size: calc(24 * var(--u)); }
+      }
       @media (prefers-reduced-motion: reduce) {
-        #picker .pk-top, #picker .pk-rowbox, #picker .pk-stage { animation: none; }
-        #picker .pk-row, #picker .pk-face, #picker .pk-label, #picker .pk-show { transition-duration: 0.01s; }
-        #picker .pk-bg i { transform: none; transition: opacity 0.2s; }
+        #picker .pk-ring i { animation: none; opacity: 0.5; }
+        #picker .pk-row, #picker .pk-face, #picker .pk-tile, #picker .pk-scroll, #picker .pk-users, #picker .pk-av { transition-duration: 0.01s; }
       }
     </style>
     <script>
-      // the game picker, before anything heavy: the racing game's loader, its pictures and its
-      // downloads only start once it's picked; Boostball, Miami, Wobble Mania, Pine & Dandy, Mogul and Tracksmith are pages of their own.
+      // The game picker, before anything heavy: the racing game's loader, its pictures and its downloads only start
+      // once it's picked; Boostball, Miami, Wobble Mania, Mogul and Tracksmith are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
+      // A cold start runs logo, stage, press any button, who's playing, home. Coming back from a game in the same
+      // tab is the console waking from rest: straight home. ?pick goes straight home too, ?pick&boot forces the startup.
       (function () {
         var go;
         window.__apexPick = new Promise(function (r) { go = r; });
@@ -313,123 +512,420 @@
         if (skip) return start();
         var pk = document.getElementById('picker');
         pk.hidden = false;
-        var last = null, quiet = false;
-        try { last = localStorage.getItem('apexgp.pick'); quiet = localStorage.getItem('apexgp.quiet') === '1'; } catch (e) {}
-        var tiles = [].slice.call(pk.querySelectorAll('.pk-tile'));
-        var games = tiles.filter(function (c) { return c.getAttribute('data-game') !== 'any'; });
-        var shows = [].slice.call(pk.querySelectorAll('.pk-show'));
-        var row = pk.querySelector('.pk-row'), play = document.getElementById('pk-play'), snd = document.getElementById('pk-snd'), clock = document.getElementById('pk-clock');
+        var $ = function (s) { return pk.querySelector(s); }, $$ = function (s) { return [].slice.call(pk.querySelectorAll(s)); };
+        var store = function (k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; };
+        var last = store('apexgp.pick'), quiet = store('apexgp.quiet') === '1', noBoot = store('apexgp.noboot') === '1';
+        var awake = false; try { awake = sessionStorage.getItem('apexgp.awake') === '1'; } catch (e) {}
         var calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
-        var bg = pk.querySelectorAll('.pk-bg i'), bgOn = 0;
-        var cur = null, busy = false, shuffle = 0;
-        // soft ticks, once the browser allows sound
-        var ac = null;
-        var wake = function () { if (ac) return; try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} };
+        var put = function (el) { if (el) el.focus({ preventScroll: true }); };
+
+        // ---- sound: soft ticks and a low pad under the stage, once the browser allows it ----
+        var ac = null, pad = null;
+        var wake = function () { if (ac) { if (ac.state === 'suspended') ac.resume(); return; } try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} };
         var blip = function (hz, len, vol, type) {
           if (quiet || !ac || ac.state !== 'running') return;
           var t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
           o.type = type || 'sine'; o.frequency.setValueAtTime(hz, t); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
           o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + len);
         };
-        window.addEventListener('pointerdown', wake); window.addEventListener('keydown', wake);
-        var showSnd = function () { snd.setAttribute('aria-pressed', String(!quiet)); snd.setAttribute('aria-label', quiet ? 'Sound off' : 'Sound on'); };
-        snd.addEventListener('click', function () { quiet = !quiet; try { localStorage.setItem('apexgp.quiet', quiet ? '1' : '0'); } catch (e) {} showSnd(); blip(880, 0.08, 0.05); });
-        showSnd();
-        var tick = function () { clock.textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
-        tick(); setInterval(tick, 15000);
+        var tickS = function () { blip(1480, 0.035, 0.022); }, okS = function () { blip(660, 0.12, 0.04); setTimeout(function () { blip(990, 0.22, 0.04); }, 70); }, backS = function () { blip(520, 0.08, 0.03); };
+        var padOn = function () {
+          if (pad || quiet || !ac) return;
+          var g = ac.createGain(); g.gain.value = 0; g.connect(ac.destination);
+          var os = [110, 164.81, 220, 329.63].map(function (hz, i) { var o = ac.createOscillator(); o.frequency.value = hz; o.detune.value = i * 3 - 4; var v = ac.createGain(); v.gain.value = 1 / (i + 2); o.connect(v); v.connect(g); o.start(); return o; });
+          g.gain.linearRampToValueAtTime(0.035, ac.currentTime + 2.4);
+          pad = { g: g, os: os };
+        };
+        var padOff = function () {
+          if (!pad) return; var p = pad; pad = null; var t = ac.currentTime;
+          p.g.gain.cancelScheduledValues(t); p.g.gain.setValueAtTime(p.g.gain.value, t); p.g.gain.linearRampToValueAtTime(0, t + 0.8);
+          p.os.forEach(function (o) { o.stop(t + 0.9); });
+        };
+
+        // ---- the clock ----
+        var clocks = $$('.pk-time');
+        var tell = function () { var s = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); clocks.forEach(function (c) { c.textContent = s; }); };
+        tell(); setInterval(tell, 10000);
+
+        // ---- gold dust drifting through the light ----
+        var dust = $('.pk-dust'), dx = dust.getContext('2d'), specks = [], dustOn = false, tones = ['#f2c98a', '#ffe0ab', '#d8a877', '#fff1d6'];
+        var sprite = function (col, soft) {
+          var c = document.createElement('canvas'); c.width = c.height = 64;
+          var g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+          r.addColorStop(0, col); r.addColorStop(soft, col); r.addColorStop(1, 'rgba(0,0,0,0)');
+          g.fillStyle = r; g.fillRect(0, 0, 64, 64); return c;
+        };
+        var discs = tones.map(function (c) { return sprite(c, 0.72); }), sparks = sprite('#ffffff', 0.25), teal = sprite('#7fb7bd', 0.86);
+        var size = function () { var d = Math.min(devicePixelRatio || 1, 2); dust.width = pk.clientWidth * d; dust.height = pk.clientHeight * d; };
+        for (var n = 0; n < 190; n++) {
+          // a loose band that rises from the lower left to the middle right, plus stray motes everywhere
+          var band = n < 120, x = Math.random(), big = Math.random();
+          specks.push({ x: x, y: band ? 0.86 - x * 0.3 + (Math.random() + Math.random() - 1) * 0.2 : Math.random(), r: band && big > 0.5 ? 1.2 + big * big * 6.5 : 0.5 + Math.random() * 1.1, img: band && big > 0.5 ? Math.floor(Math.random() * 4) : -1, a: 0.12 + Math.random() * 0.42, ph: Math.random() * 6.28, vx: 0.003 + Math.random() * 0.007, vy: -0.002 - Math.random() * 0.004 });
+        }
+        var motes = [[0.5, 0.2, 58], [0.59, 0.34, 34], [0.66, 0.74, 46], [0.8, 0.24, 26], [0.92, 0.6, 38]];
+        var lastT = 0;
+        var drawDust = function (t) {
+          if (!dustOn) return;
+          requestAnimationFrame(drawDust);
+          var dt = Math.min(0.05, (t - lastT) / 1000) || 0; lastT = t;
+          var W = dust.width, H = dust.height, k = H / 720; dx.clearRect(0, 0, W, H);
+          if (pk.classList.contains('st-orb') && !pk.classList.contains('st-room')) { dx.globalAlpha = 0.2; motes.forEach(function (m) { var s = m[2] * k * 2; dx.drawImage(teal, m[0] * W - s / 2, m[1] * H - s / 2, s, s); }); }
+          for (var i = 0; i < specks.length; i++) {
+            var p = specks[i]; if (!calm) { p.x += p.vx * dt; p.y += p.vy * dt; if (p.x > 1.02) p.x = -0.02; if (p.y < -0.02) p.y = 1.02; }
+            dx.globalAlpha = p.a * (0.62 + 0.38 * Math.sin(t / 900 + p.ph));
+            var s2 = p.r * k * 2 * (p.img < 0 ? 2.4 : 1.3);
+            dx.drawImage(p.img < 0 ? sparks : discs[p.img], p.x * W - s2 / 2, p.y * H - s2 / 2, s2, s2);
+          }
+          dx.globalAlpha = 1;
+        };
+        var dustGo = function (on) { if (on === dustOn) return; dustOn = on; if (on) { size(); requestAnimationFrame(drawDust); } };
+        window.addEventListener('resize', function () { if (dustOn) size(); });
+
+        // ---- the phases ----
+        var phase = 'boot', timers = [], over = null;
+        var later = function (f, ms) { timers.push(setTimeout(f, ms)); };
+        var clearT = function () { timers.forEach(clearTimeout); timers = []; };
+        var mark = function (on) { ['st-logo', 'st-warn', 'st-orb', 'st-room', 'st-press', 'st-login', 'st-home', 'gone-room', 'rest'].forEach(function (c) { pk.classList.toggle(c, on.indexOf(c) >= 0); }); };
+        var boot = function () {
+          phase = 'boot'; clearT(); dustGo(false); mark([]);
+          if (calm) return press();
+          later(function () { mark(['st-logo']); }, 260);
+          later(function () { mark([]); }, 1650);
+          later(function () { mark(['st-warn']); }, 2100);
+          later(function () { dustGo(true); mark(['st-warn', 'st-orb']); }, 2900);
+          later(function () { mark(['st-orb']); }, 4300);
+          later(function () { mark(['st-orb', 'st-room']); }, 5000);
+          later(press, 6500);
+        };
+        var press = function () { clearT(); phase = 'press'; dustGo(true); mark(['st-room', 'st-press']); };
+        var login = function () { clearT(); phase = 'login'; dustGo(true); mark(['st-room', 'st-login']); padOn(); okS(); drawUsers(); };
+        var home = function (fast) {
+          clearT(); phase = 'home'; padOff();
+          try { sessionStorage.setItem('apexgp.awake', '1'); } catch (e) {}
+          if (fast) { dustGo(false); mark(['st-home']); }
+          else { okS(); mark(['st-room', 'gone-room']); later(function () { dustGo(false); mark(['st-home']); }, 520); }
+          if (cur) { hero(cur); put(cur); }
+        };
+        var rest = function () { clearT(); phase = 'rest'; backS(); padOff(); mark(['rest']); later(function () { dustGo(false); }, 900); };
+
+        // ---- who's playing ----
+        var users = []; try { users = JSON.parse(store('apexgp.users') || '[]'); } catch (e) {}
+        if (!Array.isArray(users) || !users.length) users = ['Player 1'];
+        var me = Math.max(0, Math.min(users.length - 1, parseInt(store('apexgp.me') || '0', 10) || 0));
+        var faces = ['monza_rain', 'suzuka_dusk', 'miami_oceandrive', 'sakhir_night', 'bergsee_valley'];
+        var artOf = function (i) { return 'url(loading/' + faces[i % faces.length] + '.webp)'; };
+        var box = $('.pk-users'), slots = [], naming = false;
+        var ctrl = '<span class="pk-pad"><small>1</small><svg viewBox="0 0 24 16" aria-hidden="true"><path fill="currentColor" d="M7 1h10c2.2 0 3.7 1.3 4.3 3.4l1.5 7c.6 2.8-2.7 4.4-4.5 2.4L15.6 11H8.4l-2.7 2.8c-1.8 2-5.1.4-4.5-2.4l1.5-7C3.3 2.3 4.8 1 7 1z"/></svg></span>';
+        var showMe = function () { var m = $('#pk-me'); m.style.setProperty('--art', artOf(me)); m.setAttribute('aria-label', 'Switch user, ' + users[me]); };
+        var saveUsers = function () { store('apexgp.users', JSON.stringify(users)); store('apexgp.me', String(me)); showMe(); };
+        var aim = function (i) { box.style.setProperty('--ux', String(-Math.max(1, i) * 235)); };
+        var drawUsers = function () {
+          box.textContent = ''; slots = [];
+          var add = document.createElement('button');
+          add.className = 'pk-user pk-add'; add.style.setProperty('--x', '0'); add.setAttribute('aria-label', 'Add User');
+          add.innerHTML = '<span class="pk-av">+</span><span class="pk-un">Add User</span>';
+          add.addEventListener('click', function () { nameIt(add, '', function (v) { users.push(v); me = users.length - 1; saveUsers(); drawUsers(); }); });
+          box.appendChild(add); slots.push(add);
+          users.forEach(function (u, i) {
+            var b = document.createElement('button');
+            b.className = 'pk-user'; b.style.setProperty('--x', String((i + 1) * 235)); b.setAttribute('aria-label', u);
+            b.innerHTML = ctrl + '<span class="pk-av" style="--art:' + artOf(i) + '"></span><span class="pk-un"></span><span class="pk-opt"><kbd>O</kbd>Options</span>';
+            b.querySelector('.pk-un').textContent = u;
+            b.addEventListener('click', function (e) { if (e.target.closest('.pk-opt')) return renameIt(b, i); me = i; saveUsers(); home(); });
+            box.appendChild(b); slots.push(b);
+          });
+          slots.forEach(function (s, i) { s.addEventListener('focus', function () { aim(i); if (phase === 'login') tickS(); }); });
+          put(slots[me + 1]); aim(me + 1);
+        };
+        var renameIt = function (b, i) { nameIt(b, users[i], function (v) { users[i] = v; me = i; saveUsers(); drawUsers(); }); };
+        var nameIt = function (slot, was, done) {
+          if (naming) return; naming = true;
+          var f = document.createElement('input'); f.className = 'pk-namebox'; f.maxLength = 20; f.value = was; f.placeholder = 'Name'; f.setAttribute('aria-label', 'Name');
+          var un = slot.querySelector('.pk-un'); un.style.visibility = 'hidden'; slot.parentNode.appendChild(f);
+          f.style.left = 'calc(' + (parseFloat(slot.style.getPropertyValue('--x')) - 120) + ' * var(--u))';
+          var end = function (keep) { if (!naming) return; naming = false; var v = f.value.trim(); f.remove(); un.style.visibility = ''; if (keep && v) done(v); else put(slot); };
+          f.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') end(true); if (e.key === 'Escape') end(false); });
+          f.addEventListener('blur', function () { end(true); });
+          put(f); f.select();
+        };
+
+        // ---- home ----
+        var gameRow = $('.pk-row[data-row="games"]'), mediaRow = $('.pk-row[data-row="media"]');
+        var tabs = $$('.pk-tab'), findB = $('#pk-find'), gearB = $('#pk-gear'), meB = $('#pk-me'), play = $('#pk-play'), more = $('#pk-more'), menu = $('.pk-menu');
+        var homeEl = $('.pk-home'), cardBox = $('.pk-cards'), nameEl = $('.pk-name'), nameTx = $('.pk-name span');
+        var bg = $$('.pk-bg i'), bgOn = 0, shows = $$('.pk-show');
+        var gameTiles = [].slice.call(gameRow.children), games = gameTiles.filter(function (c) { return c.getAttribute('data-game') !== 'lib'; });
+        var tiles = gameTiles, row = gameRow, tab = 'games', cur = null, curGame = null, busy = false, photo = false;
+        var shots = [['monza_sunset', 'Monza'], ['suzuka_dusk', 'Suzuka'], ['spa_rain', 'Spa'], ['sakhir_night', 'Sakhir'], ['zandvoort_sunset', 'Zandvoort'], ['miami_oceandrive', 'Ocean Drive'], ['miami_causeway', 'The Causeway'], ['bergsee_valley', 'Bergsee'], ['redmesa_golden', 'Red Mesa']];
+        shots.forEach(function (s) {
+          var b = document.createElement('button'); b.className = 'pk-tile'; b.setAttribute('data-shot', s[1]); b.setAttribute('aria-label', s[1]);
+          b.style.setProperty('--art', 'url(loading/' + s[0] + '.webp)'); b.style.setProperty('--pos', '50% 50%'); b.style.setProperty('--hpos', '50% 50%');
+          b.innerHTML = '<span class="pk-face"></span>'; mediaRow.appendChild(b);
+        });
+        var mediaTiles = [].slice.call(mediaRow.children);
+        var cardsOf = {
+          f1: [['monza_sunset', 'Game mode', 'Career'], ['silverstone_drizzle', 'Game mode', 'Grand Prix Weekend'], ['suzuka_onboard', 'Game mode', 'Online']],
+          boost: [['boost_hero', 'Online', 'Play With Friends', '20% 50%'], ['boost_hero', 'Game help', 'Jump, Flip and Fly', '80% 50%']],
+          miami: [['miami_brickell', 'Explore', 'Brickell'], ['miami_causeway', 'Explore', 'The Causeway'], ['miami_oceandrive', 'Explore', 'Ocean Drive']],
+          marbles: [['wobble_grid', 'Round', 'Pinball Panic', '20% 50%'], ['wobble_grid', 'Round', 'Big Shot', '50% 50%'], ['wobble_grid', 'Round', 'Rocket Rumble', '80% 50%']],
+          mogul: [['mogul_hero', 'Start small', 'One Food Cart', '30% 40%'], ['mogul_hero', 'Think big', 'Out-Earn the City', '70% 30%']],
+          tracksmith: [['tracksmith_hero', 'Game mode', 'Time Trial', '30% 50%'], ['tracksmith_hero', 'Game mode', 'Track Editor', '70% 50%']],
+        };
+        var cards = [];
+        var fillCards = function (g) {
+          cardBox.textContent = ''; cards = []; cardBox.scrollLeft = 0;
+          (cardsOf[g] || []).forEach(function (c) {
+            var b = document.createElement('button'); b.className = 'pk-card'; b.setAttribute('aria-label', c[2]);
+            b.innerHTML = '<i style="--art:url(loading/' + c[0] + '.webp);--pos:' + (c[3] || 'center') + '"></i><span><small></small><b></b></span>';
+            b.querySelector('small').textContent = c[1]; b.querySelector('b').textContent = c[2];
+            b.addEventListener('click', function () { if (cur) choose(cur); });
+            b.addEventListener('focus', function () { cardBox.scrollLeft = Math.max(0, b.offsetLeft - cardBox.clientWidth / 2 + b.offsetWidth / 2); });
+            cardBox.appendChild(b); cards.push(b);
+          });
+        };
         var hero = function (c) {
-          var next = bg[1 - bgOn];
-          next.style.backgroundImage = c.style.getPropertyValue('--art'); next.style.backgroundPosition = c.style.getPropertyValue('--hpos');
-          next.classList.toggle('px', c.getAttribute('data-game') === 'pine');
-          next.classList.add('show'); bg[bgOn].classList.remove('show'); bgOn = 1 - bgOn;
+          var next = bg[1 - bgOn], art = c.style.getPropertyValue('--art');
+          if (!art) { bg[bgOn].classList.remove('show'); return; }
+          if (next.style.backgroundImage !== art || !bg[bgOn].classList.contains('show')) { next.style.backgroundImage = art; next.style.backgroundPosition = c.style.getPropertyValue('--hpos'); next.classList.add('show'); bg[bgOn].classList.remove('show'); bgOn = 1 - bgOn; }
         };
         var light = function (c, q) {
           if (c === cur) return;
           if (cur) cur.classList.remove('on');
           cur = c; c.classList.add('on');
-          var g = c.getAttribute('data-game'), i = tiles.indexOf(c);
-          // the chosen tile rides in the second slot, so the one before it stays in reach
-          var step = c.offsetWidth ? tiles[tiles.length > 1 && i === 0 ? 1 : 0].querySelector('.pk-face').offsetWidth : 0, gap = parseFloat(getComputedStyle(row).columnGap) || 0;
-          row.style.setProperty('--shift', -Math.max(0, i - 1) * (step + gap) + 'px');
-          shows.forEach(function (s) { s.classList.toggle('on', s.getAttribute('data-for') === g); });
+          var i = tiles.indexOf(c), g = c.getAttribute('data-game'), shot = c.getAttribute('data-shot');
+          row.style.setProperty('--s', String(i * 76.5 + (i ? 5.5 : 0)));
+          nameTx.textContent = c.getAttribute('aria-label');
+          nameEl.classList.toggle('bare', g === 'lib' || !!shot);
+          var key = shot ? 'photo' : g;
+          shows.forEach(function (s) { s.classList.toggle('on', s.getAttribute('data-for') === key); });
+          if (shot) $('#pk-photo').textContent = shot;
           pk.classList.toggle('was-last', g === last);
-          play.textContent = g === 'any' ? 'Spin' : 'Play game';
-          clearInterval(shuffle);
-          if (g === 'any') { var k = Math.floor(Math.random() * games.length); hero(games[k]); if (!busy) shuffle = setInterval(function () { k = (k + 1) % games.length; hero(games[k]); }, 1700); }
-          else hero(c);
-          if (!q) blip(1180, 0.05, 0.03);
+          play.textContent = shot ? 'View' : g === 'lib' ? 'Open' : 'Play Game';
+          more.hidden = !!shot || g === 'lib'; more.style.display = more.hidden ? 'none' : '';
+          if (g && g !== 'lib' && g !== curGame) { curGame = g; fillCards(g); } else if (g === 'lib') { curGame = null; fillCards(''); }
+          hero(c);
+          if (!q) tickS();
+        };
+        var setTab = function (t) {
+          if (t === tab) return; tab = t; okS();
+          tabs.forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === t); });
+          pk.classList.toggle('media', t === 'media');
+          gameRow.hidden = t === 'media'; mediaRow.hidden = t !== 'media';
+          row = t === 'media' ? mediaRow : gameRow; tiles = t === 'media' ? mediaTiles : gameTiles;
+          var c = tiles[0]; if (cur) cur.classList.remove('on'); cur = null; light(c, true); put(c);
         };
         var pick = function (g) {
-          try { localStorage.setItem('apexgp.pick', g); } catch (e) {}
+          store('apexgp.pick', g);
           if (g === 'miami') location.href = 'miami.html';
           else if (g === 'marbles') location.href = 'marbles.html';
           else if (g === 'boost') location.href = 'boost.html';
-          else if (g === 'pine') location.href = 'pine.html';
           else if (g === 'mogul') location.href = 'mogul.html';
           else if (g === 'tracksmith') location.href = 'tracksmith.html';
           else start();
         };
-        // the picture pushes in and the room goes dark, then the game takes over
         var launch = function (c) {
-          busy = true; clearInterval(shuffle); pk.classList.remove('spinning');
+          busy = true; pk.classList.remove('spinning');
           var g = c.getAttribute('data-game');
           if (calm) return pick(g);
-          blip(520, 0.14, 0.05); setTimeout(function () { blip(780, 0.3, 0.05); }, 90);
-          pk.classList.add('going');
-          setTimeout(function () { pick(g); }, 520);
+          okS(); pk.classList.add('going');
+          setTimeout(function () { pick(g); }, 860);
         };
-        // Surprise me: the selection runs along the row and slows down onto a game
         var spin = function () {
+          closeMenu(); if (tab !== 'games') setTab('games'); down(false);
           var pool = games.filter(function (c) { return c.getAttribute('data-game') !== last; });
           var win = pool[Math.floor(Math.random() * pool.length)];
           if (calm) return launch(win);
-          busy = true; clearInterval(shuffle); pk.classList.add('spinning');
+          busy = true; pk.classList.add('spinning');
           var n = games.length * 2 + games.indexOf(win), k = 0;
           var step = function () {
-            light(games[k % games.length], true); blip(560 + k * 30, 0.05, 0.04, 'triangle');
+            light(games[k % games.length], true); blip(560 + k * 30, 0.05, 0.03, 'triangle');
             if (k >= n) { blip(1040, 0.2, 0.05); return setTimeout(function () { launch(win); }, 620); }
             k++; setTimeout(step, 46 + Math.pow(k / n, 3) * 240);
           };
           step();
         };
-        var choose = function (c) { if (busy) return; light(c, true); if (c.getAttribute('data-game') === 'any') spin(); else launch(c); };
-        tiles.forEach(function (c) {
-          // like a console: the first press selects, pressing the selected one plays
-          c.addEventListener('click', function () { if (busy) return; if (c === cur) choose(c); else { light(c); c.focus({ preventScroll: true }); } });
+        var choose = function (c) {
+          if (busy) return;
+          if (c.getAttribute('data-shot')) return viewPhoto(true);
+          if (c.getAttribute('data-game') === 'lib') return page('lib');
+          light(c, true); launch(c);
+        };
+        var viewPhoto = function (on) { photo = on; pk.classList.toggle('photo', on); if (on) okS(); else { backS(); put(cur); } };
+        gameTiles.concat(mediaTiles).forEach(function (c) {
+          // the first press selects, pressing the selected one plays
+          c.addEventListener('click', function () { if (busy) return; down(false); if (c === cur) choose(c); else { light(c); put(c); } });
         });
+        tabs.forEach(function (b) { b.addEventListener('click', function () { setTab(b.getAttribute('data-tab')); }); });
         play.addEventListener('click', function () { if (cur) choose(cur); });
-        pk.querySelectorAll('.wm-wobble span').forEach(function (e, n) { e.style.setProperty('--n', n); });
-        var move = function (d) { if (busy) return; var c = tiles[Math.max(0, Math.min(tiles.length - 1, tiles.indexOf(cur) + d))]; light(c); c.focus({ preventScroll: true }); };
-        var first = tiles.filter(function (c) { return c.getAttribute('data-game') === last; })[0] || tiles[0];
-        light(first, true); first.focus({ preventScroll: true });
+        more.addEventListener('click', function () { if (menu.hidden) openMenu(); else closeMenu(); });
+        var openMenu = function () { menu.hidden = false; over = 'menu'; put(menu.firstElementChild); okS(); };
+        var closeMenu = function () { if (menu.hidden) return; menu.hidden = true; over = null; put(more); };
+        $$('.pk-menu button').forEach(function (b) { b.addEventListener('click', function () { var a = b.getAttribute('data-act'); closeMenu(); if (a === 'spin') spin(); else page('lib'); }); });
+        var down = function (on) { homeEl.classList.toggle('down', on); };
+        findB.addEventListener('click', function () { page('find'); });
+        gearB.addEventListener('click', function () { page('set'); });
+        var switching = false;
+        meB.addEventListener('click', function () { switching = true; login(); });
+        $('.pk-power').addEventListener('click', rest);
+        $('.pk-press').addEventListener('click', function () { if (phase === 'press') login(); });
+        $('.pk-black').addEventListener('click', function () { if (phase === 'rest') press(); });
+        pk.addEventListener('click', function () { if (photo) viewPhoto(false); }, true);
+
+        // ---- pages on the stage ----
+        var lgs = [], hits = [], sets = $$('.pk-list button'), field = $('#pk-q'), resBox = $('.pk-results');
+        games.forEach(function (c) {
+          var b = document.createElement('button'); b.className = 'pk-lg';
+          b.innerHTML = '<i style="--art:' + c.style.getPropertyValue('--art') + ';--pos:' + c.style.getPropertyValue('--pos') + '"></i><span></span>';
+          b.querySelector('span').textContent = c.getAttribute('aria-label');
+          b.addEventListener('click', function () { shut(); light(c, true); launch(c); });
+          $('.pk-grid').appendChild(b); lgs.push(b);
+        });
+        var results = function () {
+          var s = field.value.trim().toLowerCase(); resBox.textContent = ''; hits = [];
+          games.filter(function (c) { return !s || c.getAttribute('aria-label').toLowerCase().indexOf(s) >= 0; }).forEach(function (c) {
+            var b = document.createElement('button'); b.className = 'pk-hit';
+            b.innerHTML = '<i style="--art:' + c.style.getPropertyValue('--art') + ';--pos:' + c.style.getPropertyValue('--pos') + '"></i><span></span>';
+            b.querySelector('span').textContent = c.getAttribute('aria-label');
+            b.addEventListener('click', function () { shut(); if (tab !== 'games') setTab('games'); light(c, true); launch(c); });
+            resBox.appendChild(b); hits.push(b);
+          });
+          if (!hits.length) { var e = document.createElement('p'); e.className = 'pk-none'; e.textContent = 'No games match "' + field.value.trim() + '"'; resBox.appendChild(e); }
+        };
+        field.addEventListener('input', results);
+        field.addEventListener('keydown', function (e) {
+          e.stopPropagation();
+          if (e.key === 'Enter' && hits[0]) hits[0].click();
+          if (e.key === 'ArrowDown' && hits[0]) { e.preventDefault(); put(hits[0]); }
+          if (e.key === 'Escape') shut();
+        });
+        var showSets = function () { sets[0].setAttribute('aria-checked', String(!quiet)); sets[1].setAttribute('aria-checked', String(!noBoot)); };
+        sets.forEach(function (b) { b.setAttribute('role', 'switch'); });
+        sets[0].addEventListener('click', function () { quiet = !quiet; store('apexgp.quiet', quiet ? '1' : '0'); showSets(); tickS(); });
+        sets[1].addEventListener('click', function () { noBoot = !noBoot; store('apexgp.noboot', noBoot ? '1' : '0'); showSets(); tickS(); });
+        showSets();
+        var page = function (p) {
+          closeMenu(); over = p; dustGo(true); down(false);
+          pk.classList.add('paged', 'paged-' + p, 'st-room'); pk.classList.remove('gone-room');
+          okS();
+          if (p === 'lib') put(lgs[0]);
+          if (p === 'set') put(sets[0]);
+          if (p === 'find') { field.value = ''; results(); put(field); }
+        };
+        var shut = function () {
+          if (!over || over === 'menu') return;
+          pk.classList.remove('paged', 'paged-' + over, 'st-room'); var was = over; over = null; dustGo(false); backS();
+          put(was === 'set' ? gearB : was === 'find' ? findB : cur);
+        };
+
+        // ---- one set of directions for keys, stick and pad ----
+        var flat = function (list, d) { var i = list.indexOf(document.activeElement); return list[Math.max(0, Math.min(list.length - 1, (i < 0 ? 0 : i) + d))]; };
+        var nav = function (d) {
+          if (busy) return;
+          if (phase === 'login') {
+            var pw = $('.pk-power');
+            if (document.activeElement === pw) { if (d === 'U') { put(slots[me + 1]); tickS(); } return; }
+            if (d === 'L' || d === 'R') put(flat(slots, d === 'L' ? -1 : 1));
+            if (d === 'D') { put(pw); tickS(); }
+            return;
+          }
+          if (phase !== 'home' || photo) return;
+          var a = document.activeElement;
+          if (over === 'menu') { var mb = $$('.pk-menu button'); if (d === 'U' || d === 'D') { put(flat(mb, d === 'U' ? -1 : 1)); tickS(); } return; }
+          if (over === 'lib') { var cols = Math.max(1, Math.round($('.pk-grid').clientWidth / lgs[0].offsetWidth - 0.4)); put(flat(lgs, d === 'L' ? -1 : d === 'R' ? 1 : d === 'U' ? -cols : cols)); tickS(); return; }
+          if (over === 'set') { if (d === 'U' || d === 'D') { put(flat(sets, d === 'U' ? -1 : 1)); tickS(); } return; }
+          if (over === 'find') { if (d === 'U' || d === 'D') { if (d === 'U' && a === hits[0]) put(field); else if (hits.length) put(flat(hits, d === 'U' ? -1 : 1)); tickS(); } return; }
+          var tops = [tabs[0], tabs[1], findB, gearB, meB], ti = tops.indexOf(a);
+          if (ti >= 0) {
+            if (d === 'L' || d === 'R') { put(flat(tops, d === 'L' ? -1 : 1)); tickS(); }
+            if (d === 'D') { put(cur); tickS(); }
+            return;
+          }
+          if (a === play || a === more) {
+            if (d === 'L' && a === more) put(play);
+            if (d === 'R' && a === play && !more.hidden) put(more);
+            if (d === 'U') put(cur);
+            if (d === 'D' && cards.length) { down(true); put(cards[0]); }
+            tickS(); return;
+          }
+          if (cards.indexOf(a) >= 0) {
+            if (d === 'L' || d === 'R') put(flat(cards, d === 'L' ? -1 : 1));
+            if (d === 'U') { down(false); put(play); }
+            tickS(); return;
+          }
+          if (d === 'L' || d === 'R') { var c = tiles[Math.max(0, Math.min(tiles.length - 1, tiles.indexOf(cur) + (d === 'L' ? -1 : 1)))]; light(c); put(c); }
+          if (d === 'U') { put(tabs[tab === 'games' ? 0 : 1]); tickS(); }
+          if (d === 'D') { put(play); tickS(); }
+        };
+        var back = function () {
+          if (phase === 'login') { if (switching) { switching = false; home(true); } return; }
+          if (photo) return viewPhoto(false);
+          if (over === 'menu') return closeMenu();
+          if (over) return shut();
+          if (homeEl.classList.contains('down')) { down(false); return put(play); }
+        };
+        // any button at all moves the startup on
+        var anyKey = function () {
+          if (phase === 'boot') { press(); return true; }
+          if (phase === 'press') { login(); return true; }
+          if (phase === 'rest') { press(); return true; }
+          return false;
+        };
         var keys = function k(e) {
           if (!document.getElementById('picker')) return window.removeEventListener('keydown', k);
-          if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') { e.preventDefault(); return move(e.code === 'ArrowLeft' ? -1 : 1); }
-          if (e.code === 'ArrowDown') { e.preventDefault(); if (!busy) { play.focus({ preventScroll: true }); blip(980, 0.05, 0.03); } return; }
-          if (e.code === 'ArrowUp') { e.preventDefault(); if (!busy && cur) { cur.focus({ preventScroll: true }); blip(980, 0.05, 0.03); } return; }
-          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6, Digit8: 7 }[e.code];
-          if (n !== undefined) choose(tiles[n]);
+          wake();
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          if (e.repeat && phase !== 'home') return e.preventDefault();
+          if (anyKey()) return e.preventDefault();
+          if (photo) { e.preventDefault(); return viewPhoto(false); }
+          var d = { ArrowLeft: 'L', ArrowRight: 'R', ArrowUp: 'U', ArrowDown: 'D' }[e.code];
+          if (d) { e.preventDefault(); return nav(d); }
+          if (e.code === 'Escape' || e.code === 'Backspace') { e.preventDefault(); return back(); }
+          if (phase === 'login' && e.code === 'KeyO') { var i = slots.indexOf(document.activeElement) - 1; if (i >= 0) { e.preventDefault(); renameIt(document.activeElement, i); } return; }
+          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5 }[e.code];
+          if (n !== undefined && phase === 'home' && !over) { if (tab !== 'games') setTab('games'); choose(games[n]); }
         };
         window.addEventListener('keydown', keys);
-        var wheel = 0;
-        window.addEventListener('wheel', function (e) { if (!document.getElementById('picker')) return; wheel += e.deltaY + e.deltaX; if (Math.abs(wheel) > 70) { move(wheel > 0 ? 1 : -1); wheel = 0; } }, { passive: true });
-        // a pad on the couch: stick or d-pad along the row, the bottom face button to play
-        var pad = false, held = 0, wait = 0;
+        window.addEventListener('pointerdown', wake, true);
+        window.addEventListener('click', function (e) { if (phase === 'boot') { e.stopPropagation(); press(); } }, true);
+        var wheel = 0, wheelT = 0;
+        window.addEventListener('wheel', function (e) {
+          if (!document.getElementById('picker') || phase !== 'home' || over) return;
+          var now = performance.now(); if (now - wheelT < 170) return;
+          var side = Math.abs(e.deltaX) > Math.abs(e.deltaY); wheel += side ? e.deltaX : e.deltaY;
+          if (Math.abs(wheel) < 50) return; wheelT = now;
+          if (side) nav(wheel > 0 ? 'R' : 'L');
+          else if (wheel > 0 && !homeEl.classList.contains('down') && cards.length) { down(true); put(cards[0]); }
+          else if (wheel < 0 && homeEl.classList.contains('down')) { down(false); put(cur); }
+          wheel = 0;
+        }, { passive: true });
+        // a pad on the couch: stick or d-pad to move, bottom face button to confirm, right one to go back
+        var padOnline = false, held = '', wait = 0, was0 = true, was1 = true;
         var poll = function () {
           if (!document.getElementById('picker')) return;
           requestAnimationFrame(poll);
           var p = [].slice.call(navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean)[0]; if (!p) return;
-          var b = function (i) { return p.buttons[i] && p.buttons[i].pressed; }, ax = p.axes[0] || 0;
-          var d = b(15) || ax > 0.6 ? 1 : b(14) || ax < -0.6 ? -1 : 0;
+          var b = function (i) { return p.buttons[i] && p.buttons[i].pressed; }, ax = p.axes[0] || 0, ay = p.axes[1] || 0;
+          var d = b(15) || ax > 0.6 ? 'R' : b(14) || ax < -0.6 ? 'L' : b(12) || ay < -0.6 ? 'U' : b(13) || ay > 0.6 ? 'D' : '';
           if (d !== held) { held = d; wait = 0; }
-          if (d && --wait <= 0) { move(d); wait = 16; }
-          if (b(0) && !busy && cur) choose(cur);
+          if (d && --wait <= 0) { if (!anyKey()) { if (photo) viewPhoto(false); else nav(d); } wait = 16; }
+          var x = b(0), o = b(1);
+          if (x && !was0 && !anyKey() && document.activeElement && document.activeElement.click) document.activeElement.click();
+          if (o && !was1 && !anyKey()) back();
+          was0 = x; was1 = o;
         };
-        window.addEventListener('gamepadconnected', function () { wake(); if (!pad) { pad = true; poll(); } });
-        // coming back with the browser's back button restores this page as it was left: mid-launch
+        window.addEventListener('gamepadconnected', function () { wake(); if (!padOnline) { padOnline = true; poll(); } });
+
+        // ---- away we go ----
+        var first = gameTiles.filter(function (c) { return c.getAttribute('data-game') === last; })[0] || gameTiles[0];
+        light(first, true); showMe();
+        if (q.indexOf('boot') >= 0) boot();
+        else if (awake || noBoot || q.indexOf('pick') >= 0) home(true);
+        else boot();
+        // back from a game with the browser's back button restores this page as it was left: mid-launch
         window.addEventListener('pageshow', function (e) {
           if (!e.persisted) return;
           busy = false; pk.classList.remove('going', 'spinning');
+          if (phase === 'home') put(cur);
         });
       })();
     </script>
