@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { PIECES, inGate, onBoost, spawnPose, worldFrames, type Frame, type Placed, type Vec3 } from './pieces.ts';
-import { trackMesh, type TrackData } from './track.ts';
+import { trackMesh, wallMesh, type TrackData } from './track.ts';
 
 /**
  * The race: a Rapier rigid body for the car with hand-made raycast wheels (suspension, tyres, engine,
@@ -49,11 +49,24 @@ const DRIFT_TURN = 1.75;
 const DRIFT_COST = 0.11;
 /** landing square on all four wheels */
 const CLEAN_T = 0.4;
+/** collision groups: the wheels only feel the road, the body feels the barriers too */
+const WHEEL_GROUPS = 0x00010001;
+const WALL_GROUPS = 0x0002ffff;
+/** a barrier: what scraping it costs (share of the speed a second), how hard it eases you off, how fast the nose comes round (rad/s) */
+const SCRAPE_COST = 0.22;
+const WALL_PUSH = 1.3;
+const WALL_ALIGN = 7;
+const WALL_SETTLE = 0.16;
+/** up to this share of the speed going into a barrier (about 40 degrees) it's a glance, not a crash */
+const WALL_GLANCE = 0.64;
+/** how long you can sit off the road, or stuck, before the car goes back to the last checkpoint */
+const OFF_T = 0.45;
+const STUCK_T = 1.3;
 
 export interface WheelState { hit: boolean; comp: number; spin: number; steer: number; slip: number }
 export interface CarState { p: Vec3; q: [number, number, number, number]; v: Vec3; w: Vec3 }
 
-type Ev = { type: 'check'; i: number; n: number; ticks: number } | { type: 'finish'; ticks: number } | { type: 'boost' } | { type: 'land'; speed: number; clean: boolean } | { type: 'drift'; k: number } | { type: 'respawn' } | { type: 'start' };
+type Ev = { type: 'check'; i: number; n: number; ticks: number } | { type: 'finish'; ticks: number } | { type: 'boost' } | { type: 'land'; speed: number; clean: boolean } | { type: 'drift'; k: number } | { type: 'wall'; speed: number } | { type: 'respawn' } | { type: 'start' };
 
 let ready: Promise<void> | null = null;
 export const initPhysics = () => (ready ??= RAPIER.init());
@@ -104,6 +117,18 @@ export class Sim {
   airT = 0;
   grounded = 0;
   speed = 0;
+  /** times the car has been put back */
+  falls = 0;
+  /** touching a barrier: which way it faces, where, how long since the last hit was called out */
+  wallN: V | null = null;
+  wallP: V = v3();
+  private wallCool = 0;
+  private wallT = 0;
+  private wallAlong: V = v3(0, 0, 1);
+  private walls: RAPIER.Collider | null = null;
+  private groundH = -1;
+  private offT = 0;
+  private stuckT = 0;
   events: Ev[] = [];
   private spawn!: CarState;
   private save!: CarState;
@@ -120,7 +145,7 @@ export class Sim {
 
     // ground
     const g = w.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    w.createCollider(RAPIER.ColliderDesc.cuboid(4000, 1, 4000).setTranslation(0, -1, 0).setFriction(0.8), g);
+    this.groundH = w.createCollider(RAPIER.ColliderDesc.cuboid(4000, 1, 4000).setTranslation(0, -1, 0).setFriction(0.8), g).handle;
 
     // track
     const m = trackMesh(track.pieces);
@@ -128,6 +153,12 @@ export class Sim {
       const tb = w.createRigidBody(RAPIER.RigidBodyDesc.fixed());
       const desc = RAPIER.ColliderDesc.trimesh(new Float32Array(m.pos), new Uint32Array(m.idx), RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES).setFriction(0.35);
       w.createCollider(desc, tb);
+      const wm = wallMesh(track.pieces);
+      if (wm.idx.length) {
+        const wd = RAPIER.ColliderDesc.trimesh(new Float32Array(wm.pos), new Uint32Array(wm.idx), RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES)
+          .setFriction(0).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min).setRestitution(0.12).setCollisionGroups(WALL_GROUPS);
+        this.walls = w.createCollider(wd, tb);
+      }
     }
 
     // car
@@ -174,6 +205,9 @@ export class Sim {
     this.wasHand = false;
     this.airT = 0;
     this.steerNow = 0;
+    this.offT = this.stuckT = this.wallCool = this.wallT = 0;
+    this.wallN = null;
+    this.falls = 0;
     this.events.length = 0;
   }
 
@@ -183,6 +217,9 @@ export class Sim {
     this.boostT = 0;
     this.driftT = this.driftBoost = 0;
     this.steerNow = 0;
+    this.offT = this.stuckT = this.wallT = this.airT = 0;
+    this.wallN = null;
+    this.falls++;
     this.events.push({ type: 'respawn' });
   }
 
@@ -203,7 +240,7 @@ export class Sim {
   /** one 120 Hz tick */
   step(inp: Input) {
     if (this.finished) {
-      this.physics({ throttle: 0, brake: 0.4, steer: 0, hand: false });
+      this.physics({ throttle: 0, brake: 0.9, steer: 0, hand: false });
       return;
     }
     if (!this.started) {
@@ -217,6 +254,16 @@ export class Sim {
     this.triggers();
   }
 
+  /** where a respawn puts you: straight, in the middle of the road, at the speed you crossed it (never the skid you were in) */
+  private checkpointState(pl: Placed): CarState {
+    const { p, f } = spawnPose(pl, 0);
+    const v = this.body.linvel();
+    const s = v.x * f[0] + v.y * f[1] + v.z * f[2] < 0 ? -1 : 1;
+    const d: Vec3 = [f[0] * s, f[1] * s, f[2] * s];
+    const sp = Math.hypot(v.x, v.y, v.z);
+    return { p, q: quatFromBasis(d), v: [d[0] * sp, d[1] * sp, d[2] * sp], w: [0, 0, 0] };
+  }
+
   private triggers() {
     const t = this.body.translation();
     const p: Vec3 = [t.x, t.y, t.z];
@@ -226,7 +273,7 @@ export class Sim {
       if (inside && !this.inGateNow.has(i)) {
         if (!this.passed.has(i)) {
           this.passed.add(i);
-          this.save = this.getState();
+          this.save = this.checkpointState(pieces[i]);
           this.events.push({ type: 'check', i, n: this.passed.size, ticks: this.ticks });
         }
       }
@@ -248,7 +295,8 @@ export class Sim {
         this.boostT = BOOST_T;
       }
     }
-    if (t.y < -40) this.respawn();
+    // off the road (the ground is out of bounds), or stopped on its roof or on top of a barrier
+    if (this.offT > OFF_T || this.stuckT > STUCK_T || t.y < -40) this.respawn();
   }
 
   private physics(inp: Input) {
@@ -285,18 +333,21 @@ export class Sim {
     const hits: (RAPIER.RayColliderIntersection | null)[] = [];
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: -up.x, y: -up.y, z: -up.z });
     const maxLen = REST + WHEEL_R;
-    let grounded = 0;
+    let grounded = 0, onLand = 0;
     for (let i = 0; i < 4; i++) {
       const W = WHEELS[i];
       const mount = addv(com, rotate(q, v3(W.x, MOUNT_Y, W.z)));
       ray.origin = { x: mount.x, y: mount.y, z: mount.z };
-      const h = this.world.castRayAndGetNormal(ray, maxLen, true, undefined, undefined, undefined, b);
+      const h = this.world.castRayAndGetNormal(ray, maxLen, true, undefined, WHEEL_GROUPS, undefined, b);
       hits.push(h);
       if (h && h.normal.x * up.x + h.normal.y * up.y + h.normal.z * up.z > 0.35) {
         comps[i] = maxLen - h.timeOfImpact;
         grounded++;
+        if (h.collider.handle === this.groundH) onLand++;
       } else hits[i] = null;
     }
+    this.offT = grounded > 0 && onLand === grounded ? this.offT + DT : 0;
+    this.stuckT = grounded === 0 && speed < 3 ? this.stuckT + DT : 0;
     // land event
     if (grounded > 0 && this.grounded === 0 && this.airT > 0.35) {
       // nose along the flight path and wheels down: it keeps the car flowing, with a kick
@@ -347,7 +398,7 @@ export class Sim {
       const rear = !W.front;
       const mu = MU;
       // lateral: kill sideways speed of this corner's share of the car (a drift steers the car itself, below)
-      let fLat = (-vLat * (MASS / 4) * 0.55) / DT * (sliding ? 0.12 : 1);
+      let fLat = (-vLat * (MASS / 4) * 0.55) / DT * (sliding ? 0.12 : this.wallT > 0 ? 0.2 : 1);
       let fLong = 0;
       const share = W.front ? 0.42 : 0.58;
       fLong += (drive * share) / 2;
@@ -371,6 +422,7 @@ export class Sim {
     }
 
     if (grounded >= 2) this.loopGuide(com, fwd, up, ang);
+    if (this.wallN) this.scrape(this.wallN, vel);
     // stability assist: pull the slip angle back (no assist on the handbrake, so drifts still work)
     if (grounded >= 3 && !inp.hand && speed > 8) {
       const left = scale(right, -1);
@@ -469,6 +521,74 @@ export class Sim {
       imp(scale(fwd, DRIFT_A * MASS), com);
     }
     this.world.step();
+    this.touch(vel);
+  }
+
+  /** after the step: is the body against a barrier? (the normal points back at the car) */
+  private touch(before: V) {
+    this.wallCool -= DT;
+    this.wallN = null;
+    if (!this.walls) return;
+    this.settle();
+    let nx = 0, ny = 0, nz = 0, c = 0;
+    this.world.contactPair(this.chassis, this.walls, (m, flipped) => {
+      let on = false;
+      for (let i = 0; i < m.numContacts(); i++) if (m.contactDist(i) < 0.04) on = true;
+      if (!on) return;
+      const n = m.normal(), s = flipped ? 1 : -1;
+      nx += n.x * s; ny += n.y * s; nz += n.z * s;
+      c++;
+    });
+    if (!c) return;
+    const n = normv(v3(nx, ny, nz));
+    this.wallN = n;
+    const t = this.body.translation();
+    this.wallP = addv(v3(t.x, t.y + 0.35, t.z), scale(n, -0.95));
+    const hit = -dotv(before, n);
+    if (hit > 2.2 && this.wallCool <= 0) {
+      this.wallCool = 0.22;
+      this.events.push({ type: 'wall', speed: hit });
+    }
+    // a glancing hit: the solver would spin the car off its front corner and throw it across the road.
+    // It goes on along the barrier instead, paying for the part of its speed that went into it
+    const sp = len(before);
+    if (hit > 0.5 && sp > 8 && hit / sp < WALL_GLANCE) {
+      const along = subv(before, scale(n, dotv(before, n)));
+      const keep = 1 - 0.8 * (hit / sp) ** 2;
+      const v = addv(scale(along, keep), scale(n, WALL_PUSH));
+      this.body.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
+    }
+    // the nose comes round to follow it (head on there's nothing to follow: you stop, and reverse out)
+    const fwd = rotate(this.body.rotation(), v3(0, 0, 1));
+    const nf = dotv(fwd, n);
+    if (sp > 4 && Math.abs(nf) < 0.8) {
+      this.wallAlong = normv(subv(fwd, scale(n, nf)));
+      this.wallT = WALL_SETTLE;
+    }
+  }
+
+  /** for a moment after a hit the car turns to the line of the barrier, whether it's still touching or not */
+  private settle() {
+    if (this.wallT <= 0) return;
+    this.wallT -= DT;
+    const r = this.body.rotation();
+    const up = rotate(r, v3(0, 1, 0)), fwd = rotate(r, v3(0, 0, 1));
+    const err = dotv(crossv(fwd, this.wallAlong), up);
+    const w = this.body.angvel();
+    const yaw = w.x * up.x + w.y * up.y + w.z * up.z;
+    const want = Math.max(-WALL_ALIGN, Math.min(WALL_ALIGN, err * 20)) - yaw;
+    this.body.setAngvel({ x: w.x + up.x * want, y: w.y + up.y * want, z: w.z + up.z * want }, true);
+  }
+
+  /** a barrier turns the car along itself: a glancing hit costs a little speed, not the run */
+  private scrape(n: V, vel: V) {
+    const b = this.body;
+    const speed = len(vel);
+    if (speed < 4) return;
+    const lose = SCRAPE_COST * DT * MASS;
+    const out = Math.max(0, WALL_PUSH - dotv(vel, n)) * MASS;
+    b.applyImpulse({ x: -vel.x * lose + n.x * out, y: -vel.y * lose + n.y * out, z: -vel.z * lose + n.z * out }, true);
+    this.driftV *= 1 - SCRAPE_COST * DT;
   }
 
   /** on a loop, turn the car about its own up axis to follow the road's sideways drift */
@@ -486,6 +606,17 @@ export class Sim {
     const Iy = (MASS / 12) * (1.9 ** 2 + 4.2 ** 2);
     const tq = (err * 40 - yawRate * 6) * Iy;
     this.body.applyTorqueImpulse({ x: up.x * tq * DT, y: up.y * tq * DT, z: up.z * tq * DT }, true);
+    // rolled over, gravity pulls sideways across the road: a hand on the car keeps it off the barrier
+    const u = v3(best.u[0], best.u[1], best.u[2]);
+    // and it rolls with the road, which at speed turns faster than the springs can follow
+    const Ix = (MASS / 12) * (0.9 ** 2 + 4.2 ** 2);
+    const rq = (dotv(crossv(up, u), fwd) * 70 - dotv(ang, fwd) * 7) * Ix;
+    this.body.applyTorqueImpulse({ x: fwd.x * rq * DT, y: fwd.y * rq * DT, z: fwd.z * rq * DT }, true);
+    const side = crossv(tf, u);
+    const lat = dotv(subv(com, v3(best.p[0], best.p[1], best.p[2])), side);
+    const lv = this.body.linvel();
+    const a = (-lat * 5 - dotv(v3(lv.x, lv.y, lv.z), side) * 2.5) * MASS * DT;
+    this.body.applyImpulse({ x: side.x * a, y: side.y * a, z: side.z * a }, true);
   }
 
   /** km/h along the car */

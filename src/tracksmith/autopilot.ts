@@ -38,6 +38,15 @@ export class Autopilot {
 
   reset() { this.idx = 0; }
 
+  /** after a respawn: find the car anywhere on the line */
+  relocate(p: number[]) {
+    let bd = Infinity;
+    this.line.forEach((f, i) => {
+      const d = (f.p[0] - p[0]) ** 2 + (f.p[1] - p[1]) ** 2 + (f.p[2] - p[2]) ** 2;
+      if (d < bd) { bd = d; this.idx = i; }
+    });
+  }
+
   private at(s: number) {
     let i = this.idx;
     while (i < this.line.length - 1 && this.cum[i + 1] < s) i++;
@@ -47,7 +56,7 @@ export class Autopilot {
   /** horizontal curvature at index i */
   private curv(i: number) {
     const a = this.line[Math.max(0, i - 1)], b = this.line[Math.min(this.line.length - 1, i + 1)];
-    if (Math.abs(a.u[1]) < 0.9 || Math.abs(b.u[1]) < 0.9) return 0; // loops: vertical
+    if (a.roll || b.roll) return 0; // loops: vertical
     const ha = Math.atan2(a.f[0], a.f[2]), hb = Math.atan2(b.f[0], b.f[2]);
     let dh = hb - ha;
     while (dh > Math.PI) dh -= 2 * Math.PI;
@@ -84,7 +93,9 @@ export class Autopilot {
     for (let j = i; j < this.line.length && this.cum[j] - this.cum[i] < look; j++) {
       const k = this.curv(j);
       if (k < 1e-3) continue;
-      const vmax = Math.sqrt(this.aLat / Math.max(1e-3, k - 0.012));
+      // (a bank carries you round: the steeper, the more it takes)
+      const lean = Math.sqrt(Math.max(0, 1 - Math.min(1, this.line[j].u[1]) ** 2));
+      const vmax = Math.sqrt((this.aLat + 30 * lean) / Math.max(1e-3, k - 0.012));
       const dist = this.cum[j] - this.cum[i];
       if (speed > vmax && speed * speed - vmax * vmax > 2 * this.aBrake * Math.max(0, dist - 2)) { brake = true; break; }
     }

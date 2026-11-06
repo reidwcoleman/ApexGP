@@ -52,6 +52,7 @@ export class Race {
   private lastInput: Input = { throttle: 0, brake: 0, steer: 0, hand: false };
   finishedAt = 0;
   paused = false;
+  private seenFalls = 0;
 
   constructor(stage: Stage, private audio: Audio, private controls: Controls, private profile: Profile) {
     this.stage = stage;
@@ -90,6 +91,7 @@ export class Race {
     if (!this.ghost && this.profile.ghost && !this.autopilot && this.track.route) this.authorGhost();
     this.ghostCar.root.visible = false;
     this.autopilot?.reset();
+    this.seenFalls = 0;
     this.cam.reset();
     this.car.flame.visible = false;
     this.fx.clear();
@@ -116,10 +118,7 @@ export class Race {
   respawn() {
     if (!this.sim.started || this.sim.finished) return;
     this.sim.respawn();
-    this.prev = this.cur = this.sim.getState();
-    this.cam.reset();
-    this.audio.respawn();
-    this.hooks.onRespawn?.();
+    this.events();
   }
 
   get ms() { return (this.sim.ticks * 1000) / 120; }
@@ -137,6 +136,8 @@ export class Race {
         if (this.sim.finished || (this.sim.started && this.sim.ticks > 120 * 200)) { this.restart(); return; }
         const { d } = this.autopilot.locate(s.p);
         if (this.sim.started && this.sim.grounded > 0 && d > 7) this.sim.respawn();
+        if (this.sim.falls > this.seenFalls) this.autopilot.relocate(this.sim.getState().p);
+        this.seenFalls = this.sim.falls;
       }
       this.lastInput = inp;
       this.prev = this.cur;
@@ -181,6 +182,19 @@ export class Race {
   private events() {
     for (const e of this.sim.events) {
       if (e.type === 'start') { this.hooks.onStart?.(); this.audio.go(); }
+      if (e.type === 'respawn') {
+        // (the sim puts the car back by itself when it leaves the road)
+        this.prev = this.cur = this.sim.getState();
+        this.cam.reset();
+        this.audio.respawn();
+        this.hooks.onRespawn?.();
+      }
+      if (e.type === 'wall') {
+        this.audio.wall(e.speed);
+        const w = this.sim.wallP;
+        this.fx.sparks(new THREE.Vector3(w.x, w.y, w.z), this.sim.wallN ?? { x: 0, z: 0 }, 10 + Math.min(22, Math.round(e.speed * 1.5)));
+        this.cam.kick(Math.min(0.4, e.speed * 0.03));
+      }
       if (e.type === 'boost') { this.audio.boost(); this.fx.burst(this.car.root.position, 0xffb347, 18); }
       if (e.type === 'land') {
         if (e.speed > 4) this.audio.land(e.speed);

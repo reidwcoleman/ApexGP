@@ -1,4 +1,4 @@
-import { PIECES, DIRS, rot2, pieceIndex, footprint, pieceMesh, worldFrames, type Placed, type MeshOut, type Frame } from './pieces.ts';
+import { PIECES, DIRS, rot2, pieceIndex, volume, pieceMesh, pieceWalls, worldFrames, type Placed, type MeshOut, type Frame } from './pieces.ts';
 
 /** a track: what the editor saves and the share code carries */
 export interface TrackData {
@@ -18,16 +18,18 @@ export interface TrackData {
 // A turtle walks the grid laying pieces: S straight, B boost, C checkpoint, F finish (start is laid first
 // automatically), L1-3 / R1-3 turns (tight / normal / wide), U / D one-level slope, U2 / D2 long slope,
 // UU / DD two-level climb, J kicker, G<n> gap, O / OR loop shifting left / right, ^ / v change level
-// without a piece. A number after S, B, G repeats it.
+// without a piece. A number after S, B, G repeats it. Then: L4 L5 R4 R5 sweepers, KL / KR 2, 3, 5 banks,
+// XL / XR 3, 5 steep banks, HL / HR helix up (DHL / DHR down), CL / CR corkscrew, SL / SR lane shift,
+// Q crest, UP / DN four-level drop, T tunnel.
 
 interface Turtle { x: number; z: number; l: number; d: number }
 
-export function buildDSL(spec: string): { pieces: Placed[]; route: { i: number; rev: boolean }[]; overlaps: string[] } {
+export function buildDSL(spec: string, base = 0): { pieces: Placed[]; route: { i: number; rev: boolean }[]; overlaps: string[] } {
   const pieces: Placed[] = [];
   const route: { i: number; rev: boolean }[] = [];
   const occ = new Map<string, number>();
   const overlaps: string[] = [];
-  const T: Turtle = { x: 0, z: 0, l: 0, d: 0 };
+  const T: Turtle = { x: 0, z: 0, l: base, d: 0 };
 
   const lay = (id: string, rev = false) => {
     const t = pieceIndex(id);
@@ -51,16 +53,15 @@ export function buildDSL(spec: string): { pieces: Placed[]; route: { i: number; 
       T.l = pl.l;
       T.d = dw;
     }
-    const top = pl.l + Math.max(0, def.exit.dl);
-    for (const [cx, cz] of footprint(pl)) {
-      // a piece needs two clear levels above and below it (a slab and a car)
-      for (let l = pl.l - 1; l <= top + 1; l++) {
-        const k = `${cx},${cz},${l}`;
-        const o = occ.get(k);
-        if (o !== undefined && o !== pieces.length) overlaps.push(`${id}#${pieces.length} at ${k} hits #${o}`);
+    const vol = volume(pl);
+    for (const [cx, cz, cl] of vol) {
+      // a piece needs a clear level above and below it (a slab and a car)
+      for (let l = cl - 1; l <= cl + 1; l++) {
+        const o = occ.get(`${cx},${cz},${l}`);
+        if (o !== undefined && o !== pieces.length && o !== pieces.length - 1) overlaps.push(`${id}#${pieces.length} at ${cx},${cz},${l} hits #${o}`);
       }
     }
-    for (const [cx, cz] of footprint(pl)) for (let l = pl.l; l <= top; l++) occ.set(`${cx},${cz},${l}`, pieces.length);
+    for (const [cx, cz, cl] of vol) occ.set(`${cx},${cz},${cl}`, pieces.length);
     route.push({ i: pieces.length, rev });
     pieces.push(pl);
   };
@@ -76,8 +77,8 @@ export function buildDSL(spec: string): { pieces: Placed[]; route: { i: number; 
       case 'B': for (let i = 0; i < n; i++) lay('boost'); break;
       case 'C': lay('check'); break;
       case 'F': lay('finish'); break;
-      case 'L': lay(['turn1', 'turn2', 'turn3'][n - 1]); break;
-      case 'R': lay(['turn1', 'turn2', 'turn3'][n - 1], true); break;
+      case 'L': lay(['turn1', 'turn2', 'turn3', 'turn4', 'turn5'][n - 1]); break;
+      case 'R': lay(['turn1', 'turn2', 'turn3', 'turn4', 'turn5'][n - 1], true); break;
       case 'U': lay(n === 2 ? 'slope2' : 'slope'); break;
       case 'D': lay(n === 2 ? 'slope2' : 'slope', true); break;
       case 'UU': lay('climb'); break;
@@ -85,8 +86,22 @@ export function buildDSL(spec: string): { pieces: Placed[]; route: { i: number; 
       case 'J': lay('ramp'); break;
       case 'JJ': lay('bigramp'); break;
       case 'W': for (let i = 0; i < n; i++) lay('wave'); break;
-      case 'KL': lay(n === 3 ? 'bank3' : 'bank2'); break;
-      case 'KR': lay(n === 3 ? 'bank3' : 'bank2', true); break;
+      case 'KL': lay(n === 5 ? 'bank5' : n === 3 ? 'bank3' : 'bank2'); break;
+      case 'KR': lay(n === 5 ? 'bank5' : n === 3 ? 'bank3' : 'bank2', true); break;
+      case 'XL': lay(n === 5 ? 'steep5' : 'steep3'); break;
+      case 'XR': lay(n === 5 ? 'steep5' : 'steep3', true); break;
+      case 'HL': lay('helixL'); break;
+      case 'HR': lay('helixR'); break;
+      case 'DHL': lay('helixR', true); break;
+      case 'DHR': lay('helixL', true); break;
+      case 'CL': lay('corkL'); break;
+      case 'CR': lay('corkR'); break;
+      case 'SL': lay('shiftL'); break;
+      case 'SR': lay('shiftR'); break;
+      case 'Q': for (let i = 0; i < n; i++) lay('hill'); break;
+      case 'UP': lay('drop'); break;
+      case 'DN': lay('drop', true); break;
+      case 'T': for (let i = 0; i < n; i++) lay('tunnel'); break;
       case 'O': lay('loop'); break;
       case 'OR': lay('loopR'); break;
       case 'G': T.x += DIRS[T.d][0] * n; T.z += DIRS[T.d][1] * n; break;
@@ -106,6 +121,12 @@ export function trackMesh(pieces: Placed[]): MeshOut {
   return m;
 }
 
+export function wallMesh(pieces: Placed[]): MeshOut {
+  const m: MeshOut = { pos: [], slot: [], idx: [] };
+  for (const p of pieces) pieceWalls(p, m);
+  return m;
+}
+
 /** the centre line a driver follows, from the route (built-ins) */
 export function routeLine(td: TrackData): Frame[] {
   const out: Frame[] = [];
@@ -113,8 +134,9 @@ export function routeLine(td: TrackData): Frame[] {
   for (const { i, rev } of td.route) {
     const pl = td.pieces[i];
     if (PIECES[pl.t].box) continue;
-    let F = worldFrames(pl);
-    if (rev) F = F.slice().reverse().map((f) => ({ p: f.p, f: [-f.f[0], -f.f[1], -f.f[2]], u: f.u }));
+    const roll = PIECES[pl.t].feature === 'loop';
+    let F: Frame[] = worldFrames(pl).map((f) => ({ ...f, roll }));
+    if (rev) F = F.slice().reverse().map((f) => ({ ...f, f: [-f.f[0], -f.f[1], -f.f[2]] }));
     for (const f of F) {
       const last = out[out.length - 1];
       if (last && Math.hypot(last.p[0] - f.p[0], last.p[1] - f.p[1], last.p[2] - f.p[2]) < 0.05) continue;

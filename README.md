@@ -1068,7 +1068,17 @@ editor (`src/tracksmith`). Original name, car, tracks and art.
   ambient occlusion into the vertices (`public/tracksmith/kit.glb`), `sky.py` renders a 360 panorama per
   theme in Cycles and `cards.py` renders the campaign cards. Re-run `tsexport`, then `kit.py` and
   `cards.py`, after changing a piece or a built-in track.
-- **Tracks**: 16 in the campaign, with banked turns, rollers and a big kicker. Banks tilt about their
+- **Barriers**: every road has a wall down both sides and the start has one behind it (`pieceWalls`).
+  They are a collision mesh of their own in a group the wheel rays skip, so the car can't climb them.
+  A hit under about 40 degrees sends the car on along the wall (`touch`, `settle`, `scrape` in sim.ts):
+  a 15 degree scrape at 200 km/h keeps 191 km/h, 30 degrees keeps 157. `tools/tswall.mjs` prints these
+  and drives each special piece. The ground is out of bounds: 0.45 s on it, or 1.3 s stuck on the roof
+  or a wall, puts you back at the last checkpoint, straight and mid-road at the speed you crossed it.
+- **Stunts**: helix (a full climbing circle, six levels), corkscrew, steep banks, sweepers, lane shifts,
+  crests, big drops, tunnels. `volume()` gives the cells a road really passes through, so other road
+  can run through a helix's box. On loops and corkscrews `loopGuide` also rolls the car with the road
+  and holds it off the walls. A climb throws the car at speed: leave a flat run before the next turn.
+- **Tracks**: 18 in the campaign (`base` starts one up in the air). Banks tilt about their
   centre line, so they need a level of air (`minLevel`). New pieces go on the end of `PIECES`: share
-  codes store a piece by its index. `tools/tsbot.mjs --ghosts` times every track and writes the author
+  codes store a piece by its index. The kit is packed for the game (see `KIT` in common.py). `tools/tsbot.mjs --ghosts` times every track and writes the author
   ghosts you race until you have a best of your own.

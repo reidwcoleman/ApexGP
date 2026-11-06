@@ -5,32 +5,34 @@ import { buildDSL, type TrackData } from './track.ts';
  * (tools/tsbot.mjs prints the author times the medals come from).
  */
 /** author = the autopilot's time less 2% (tools/tsbot.mjs); the other medals scale from it */
-interface Spec { id: string; name: string; theme: number; dsl: string; author: number }
+interface Spec { id: string; name: string; theme: number; dsl: string; author: number; base?: number }
 
 export const THEMES = ['Mesa', 'Pinewood', 'Lagoon', 'Dusk'] as const;
 
 const SPECS: Spec[] = [
-  { id: 'ts01', name: 'First Gear', theme: 0, author: 7070, dsl: 'S3 R2 S2 C S2 L2 S3 F' },
-  { id: 'ts02', name: 'Switchback', theme: 1, author: 8780, dsl: 'S2 R1 L1 S2 C R2 S3 R2 S B S2 F' },
-  { id: 'ts11', name: 'Rollercoast', theme: 2, author: 9610, dsl: 'S2 W U2 S KR2 S W C S KL2 B S2 W S D2 S2 F' },
-  { id: 'ts03', name: 'Hilltop', theme: 0, author: 10920, dsl: 'S2 U S2 U2 S C R2 S3 D2 S2 D S4 L3 S2 B S F' },
-  { id: 'ts04', name: 'Long Jump', theme: 2, author: 10930, dsl: 'S2 B S2 J G3 S10 C S3 L3 S3 J G2 S8 F' },
-  { id: 'ts12', name: 'Sidewinder', theme: 1, author: 17410, dsl: 'S2 U2 S4 KR3 S3 KL3 S3 C S2 KR2 S4 KL2 S3 B S3 KL3 S3 D2 S3 F' },
-  { id: 'ts05', name: 'Loopback', theme: 3, author: 12990, dsl: 'S2 B S O S4 C R2 S2 R2 S B OR S4 F' },
-  { id: 'ts13', name: 'Big Air', theme: 0, author: 17290, dsl: 'S3 B S JJ G6 S15 C S2 L2 S3 B S JJ G6 S15 S2 R2 S2 F' },
-  { id: 'ts06', name: 'Canyon Run', theme: 0, author: 19000, dsl: 'S3 L3 S2 R1 S R1 L2 S2 C U2 S3 J G2 S9 R3 S C D2 S3 L1 R1 S2 B S2 F' },
-  { id: 'ts14', name: 'Paper Lanterns', theme: 3, author: 22960, dsl: 'S W U2 S3 KR2 S2 O S5 C KL3 S2 W S2 KR2 S3 D2 S2 JJ G6 S15 C S L2 S2 F' },
-  { id: 'ts07', name: 'Overpass', theme: 1, author: 15880, dsl: 'S2 U U2 S2 C R2 S R2 B S7 R2 S DD S4 R3 C S3 L2 S2 F' },
-  { id: 'ts08', name: 'Island Hop', theme: 2, author: 20930, dsl: 'S B S J G3 S11 C R2 S2 B S J G3 S11 R2 S3 J G2 S9 C L3 S2 B S J G3 S10 F' },
-  { id: 'ts15', name: 'Tailwind', theme: 2, author: 22910, dsl: 'S2 U2 S3 KR3 S2 W S5 KL3 S2 C S2 D2 S2 J G3 S13 R2 S3 U2 S3 KL2 S3 D2 S3 C B S2 W S3 F' },
-  { id: 'ts09', name: 'Night Shift', theme: 3, author: 19980, dsl: 'S2 R1 R1 L1 L1 S2 C B S O S3 R3 S C L1 S R1 S2 B S OR S2 C R2 S2 F' },
-  { id: 'ts16', name: 'Foundry', theme: 3, author: 24540, dsl: 'S2 UU S4 KR2 S3 C D S3 W S2 KL3 S3 D S2 JJ G6 S15 C S R3 B S O S5 L2 S2 B S3 F' },
-  { id: 'ts10', name: 'Grand Tour', theme: 1, author: 26240, dsl: 'S3 B S4 R3 S2 U2 S C L2 S3 J G2 S9 R2 S3 C B S2 O S3 R2 S2 D2 S3 C R1 L1 S2 B S3 L3 S3 F' },
+  { id: 'ts01', name: 'First Gear', theme: 0, author: 7070, dsl: 'S3 R2 S2 C S2 L2 S3 F S3' },
+  { id: 'ts02', name: 'Switchback', theme: 1, author: 8780, dsl: 'S2 R1 L1 S2 C R2 S3 R2 S B S2 F S3' },
+  { id: 'ts11', name: 'Rollercoast', theme: 2, author: 9520, dsl: 'S2 W U2 S KR2 S W C S KL2 B S2 W S D2 S2 F S3' },
+  { id: 'ts04', name: 'Long Jump', theme: 2, author: 10930, dsl: 'S2 B S2 J G3 S10 C S3 L3 S3 J G2 S8 F S3' },
+  { id: 'ts05', name: 'Loopback', theme: 3, author: 12930, dsl: 'S2 B S O S4 C R2 S2 R2 S B OR S4 F S3' },
+  { id: 'ts13', name: 'Big Air', theme: 0, author: 17290, dsl: 'S3 B S JJ G6 S15 C S2 L2 S3 B S JJ G6 S15 S2 R2 S2 F S3' },
+  { id: 'ts21', name: 'Sky Ribbon', theme: 2, base: 4, author: 19580, dsl: 'S4 KL5 S2 KR5 S3 C Q S4 XR3 S6 SL S4 XL3 S3 B S4 C KR5 S2 KL5 S4 F S3' },
+  { id: 'ts22', name: 'Hairpin Hollow', theme: 1, base: 3, author: 22190, dsl: 'S3 R1 L1 S2 L2 R2 S2 C R1 S R1 S2 L1 S L1 S3 B S2 C L2 S R2 S2 L1 R1 S3 R2 S2 F S3' },
+  { id: 'ts23', name: 'Slalom Ridge', theme: 0, base: 6, author: 25100, dsl: 'S4 B S2 XL3 S2 XR3 S2 XR3 S2 XL3 S3 C Q S3 XL5 S2 XR5 S3 SL S3 C KR3 S2 KL3 S2 KL3 S2 KR3 S4 F S3' },
+  { id: 'ts24', name: 'Corkscrew Bay', theme: 2, base: 3, author: 23720, dsl: 'S6 CL S5 KR3 S4 C Q S3 KL3 S6 CR S5 C XR5 S4 J G3 S11 KL5 S4 F S3' },
+  { id: 'ts25', name: 'Knot Garden', theme: 1, base: 4, author: 24170, dsl: 'S3 KL3 S2 KL3 S2 KL3 S9 UP S6 C XR3 S3 XR3 UU S7 XR3 S14 DN S6 C B S3 F S3' },
+  { id: 'ts26', name: 'Foundry Line', theme: 3, base: 4, author: 25420, dsl: 'S3 T5 S2 KR3 S4 T3 SL T3 C S3 XL3 S6 CR S4 KR5 T6 C S2 JJ G6 S15 KL3 S3 F S3' },
+  { id: 'ts27', name: 'Stepping Stones', theme: 2, base: 12, author: 24280, dsl: 'S3 B S3 J G3 v2 S11 C S2 KR3 S3 B S2 J G3 v2 S11 S2 KL3 S3 C B S3 J G3 v2 S11 KR5 S3 B S2 JJ G6 v2 S15 C S3 F S3' },
+  { id: 'ts28', name: 'The Spiral', theme: 1, base: 2, author: 27820, dsl: 'S4 HL S8 C KR5 S5 DN S8 XL3 S3 C B S3 HR S6 XR5 S6 DN S8 C S3 F S3' },
+  { id: 'ts29', name: 'Double Back', theme: 3, base: 3, author: 26720, dsl: 'S3 B S4 O S4 R3 S3 UP S7 C XL5 S4 SR S3 XR3 S5 CL S5 C KL5 S3 DN S7 B S3 F S3' },
+  { id: 'ts30', name: 'Afterburner', theme: 0, base: 5, author: 21700, dsl: 'S6 B2 S6 KL5 S4 B S8 KR5 S3 C S4 Q S8 XL5 S6 B S8 C XR5 S4 Q S8 B2 S8 F S4' },
+  { id: 'ts31', name: 'Long Way Down', theme: 3, base: 20, author: 26240, dsl: 'S4 B S3 DN S6 KL5 S3 DN S6 XR5 S3 C DN S5 Q S3 KR3 S4 J G3 S11 C KL5 S3 DHR S6 F S3' },
+  { id: 'ts32', name: 'Grand Circuit', theme: 1, base: 4, author: 39930, dsl: 'S4 B S4 KL5 S3 Q S3 XL3 S4 C CL S4 KR5 S2 HR S7 C XR5 S5 DN S7 J G3 S11 KL3 S3 O S4 C DN S6 XL5 S3 B S5 KR3 S3 F S3' },
 ];
 
 export function builtinTracks(): TrackData[] {
   return SPECS.map((s) => {
-    const { pieces, route } = buildDSL(s.dsl);
+    const { pieces, route } = buildDSL(s.dsl, s.base);
     const a = s.author;
     return {
       id: s.id,

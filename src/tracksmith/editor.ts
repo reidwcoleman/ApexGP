@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PIECES, T, H, footprint, levelY, pieceMesh, type Placed, type MeshOut } from './pieces.ts';
+import { PIECES, T, H, footprint, levelY, pieceMesh, pieceWalls, volume, type Placed, type MeshOut } from './pieces.ts';
 import { Stage, TrackView, meshGeometry } from './render.ts';
 import { THEMES } from './theme.ts';
 import type { TrackData } from './track.ts';
@@ -14,7 +14,7 @@ export interface EditorHooks {
 }
 
 /** the order pieces appear in the palette (and their number keys) */
-export const PALETTE = ['road', 'turn1', 'turn2', 'turn3', 'slope', 'slope2', 'climb', 'ramp', 'boost', 'check', 'start', 'finish', 'loop', 'loopR', 'plate', 'block'].map((id) => PIECES.findIndex((p) => p.id === id));
+export const PALETTE = ['road', 'turn1', 'turn2', 'turn3', 'slope', 'slope2', 'climb', 'ramp', 'boost', 'check', 'start', 'finish', 'turn4', 'turn5', 'bank2', 'bank3', 'bank5', 'steep3', 'steep5', 'shiftL', 'shiftR', 'wave', 'hill', 'drop', 'bigramp', 'tunnel', 'loop', 'loopR', 'corkL', 'corkR', 'helixL', 'helixR', 'plate', 'block'].map((id) => PIECES.findIndex((p) => p.id === id));
 
 export class Editor {
   td!: TrackData;
@@ -124,15 +124,10 @@ export class Editor {
 
   /** pieces sharing a cell and a level band with p */
   private conflicts(p: Placed): number[] {
-    const def = PIECES[p.t];
-    const top = p.l + Math.max(0, def.exit.dl);
-    const cells = new Set(footprint(p).map(([x, z]) => x + ',' + z));
+    const cells = new Set(volume(p).map(([x, z, l]) => `${x},${z},${l}`));
     const out: number[] = [];
     this.td.pieces.forEach((q, i) => {
-      const dq = PIECES[q.t];
-      const qt = q.l + Math.max(0, dq.exit.dl);
-      if (qt < p.l - 0 || q.l > top) return;
-      if (footprint(q).some(([x, z]) => cells.has(x + ',' + z))) out.push(i);
+      if (volume(q).some(([x, z, l]) => cells.has(`${x},${z},${l}`))) out.push(i);
     });
     return out;
   }
@@ -307,13 +302,14 @@ export class Editor {
 
     // preview of the selected piece under the cursor
     if (this.hover) {
-      const p: Placed = { t: this.sel, x: this.hover[0], z: this.hover[1], l: this.level, r: this.rot };
+      const p: Placed = { t: this.sel, x: this.hover[0], z: this.hover[1], l: Math.max(this.level, PIECES[this.sel].minLevel ?? -99), r: this.rot };
       const key = JSON.stringify(p);
       if (key !== this.previewKey) {
         this.previewKey = key;
         if (this.preview) { this.stage.scene.remove(this.preview); this.preview.geometry.dispose(); }
         const m: MeshOut = { pos: [], slot: [], idx: [] };
         pieceMesh(p, m);
+        pieceWalls(p, m);
         const g = meshGeometry(m, this.stage.theme);
         this.preview = new THREE.Mesh(g, this.previewMat);
         this.preview.position.y = 0.04;
@@ -359,6 +355,7 @@ export function pieceThumbs(stage: Stage, size = 112): string[] {
   for (let i = 0; i < PIECES.length; i++) {
     const m: MeshOut = { pos: [], slot: [], idx: [] };
     pieceMesh({ t: i, x: 0, z: 0, l: 0, r: 0 }, m);
+    pieceWalls({ t: i, x: 0, z: 0, l: 0, r: 0 }, m);
     const mesh = new THREE.Mesh(meshGeometry(m, th), new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.8 }));
     scene.add(mesh);
     const box = new THREE.Box3().setFromObject(mesh);

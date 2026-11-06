@@ -139,6 +139,7 @@ export class Audio {
   }
   boost() { this.burst(0.7, 400, 0.35, 'bandpass', 6); this.tone(220, 0.5, 'sawtooth', 0.05, 0, 2.2); }
   land(v: number) { this.tone(70, 0.25, 'sine', Math.min(0.5, v / 18), 0, 0.5); this.burst(0.15, 300, Math.min(0.25, v / 30), 'lowpass'); }
+  wall(v: number) { this.burst(0.14, 1700, Math.min(0.3, 0.06 + v / 45), 'bandpass', 2); this.tone(85, 0.14, 'square', Math.min(0.16, v / 70), 0, 0.6); }
   respawn() { this.tone(660, 0.12, 'square', 0.06); this.tone(440, 0.18, 'square', 0.06, 0.07); }
   click() { this.tone(1200, 0.05, 'square', 0.04); }
   place() { this.tone(300, 0.08, 'triangle', 0.15, 0, 1.6); this.burst(0.06, 2000, 0.06); }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PIECES, T, H, ROAD_W, SLAB, levelY, footprint, toWorld, worldFrames, pieceMesh, Slot, type Placed, type MeshOut } from './pieces.ts';
+import { PIECES, T, H, ROAD_W, SLAB, levelY, footprint, toWorld, worldFrames, pieceMesh, pieceWalls, volume, wallEnds, Slot, type Placed, type MeshOut } from './pieces.ts';
 import { THEMES, type Theme } from './theme.ts';
 import { Batch, kitPart, kitReady, pieceMatrix } from './kit.ts';
 
@@ -474,18 +474,32 @@ export class TrackView {
     // the Blender kit, painted by the theme; the plain swept meshes if it didn't load
     const kit = kitReady();
     const batch = new Batch();
-    if (kit) for (const p of pieces) batch.add('p_' + PIECES[p.t].id, th, pieceMatrix(p));
+    if (kit) {
+      for (const p of pieces) batch.add('p_' + PIECES[p.t].id, th, pieceMatrix(p));
+      for (const e of wallEnds(pieces)) batch.add('wend', th, new THREE.Matrix4().fromArray(e));
+    }
     const road = new THREE.Mesh(kit ? batch.geometry() : meshGeometry(trackMesh(pieces), th), this.mat(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: !kit, roughness: 0.74, metalness: 0.0 })));
     road.castShadow = true;
     road.receiveShadow = true;
     this.group.add(road);
+    // tunnel roofs let the sun through: a shadow that long would black out the road under them
+    const tunnels = pieces.filter((p) => PIECES[p.t].roof);
+    if (kit && tunnels.length) {
+      const shell = new Batch(), lamps = new Batch();
+      for (const p of tunnels) {
+        shell.add('roof', th, pieceMatrix(p), 'light');
+        lamps.add('roof', th, pieceMatrix(p), undefined, 'light');
+      }
+      this.group.add(new THREE.Mesh(shell.geometry(), this.mat(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, emissive: th.accent, emissiveIntensity: 0.1 }))));
+      this.group.add(new THREE.Mesh(lamps.geometry(), this.mat(new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }))));
+    }
 
     CHECKER ??= checkerTexture('#111318', '#f4f4f4');
     CHEVRON ??= chevronTexture();
-    const occupiedBelow = new Map<string, number>();
-    for (const p of pieces) for (const [cx, cz] of footprint(p)) {
+    const lowest = new Map<string, number>();
+    for (const p of pieces) for (const [cx, cz, l] of volume(p)) {
       const k = cx + ',' + cz;
-      occupiedBelow.set(k, Math.min(occupiedBelow.get(k) ?? 99, p.l));
+      lowest.set(k, Math.min(lowest.get(k) ?? 99, l));
     }
 
     // pillars under raised road
@@ -503,16 +517,18 @@ export class TrackView {
       for (let k = 0; k < F.length; k++) {
         if (F.length > 1 && (k === 0 || k === F.length - 1) && def.cells.length === 1) continue;
         const f = F[k];
-        const bottom = f.p[1] - SLAB;
-        if (bottom < 1.2) continue;
+        // (no pylon through road lower down; on a bank each side stops at its own height)
         const kx = Math.round(f.p[0] / T), kz = Math.round(f.p[2] / T);
-        const below = occupiedBelow.get(kx + ',' + kz) ?? 99;
-        if (below < p.l) continue;
+        if ((lowest.get(kx + ',' + kz) ?? 99) < Math.round((f.p[1] - levelY(0)) / H) - 1) continue;
+        const rt = [f.f[1] * f.u[2] - f.f[2] * f.u[1], f.f[2] * f.u[0] - f.f[0] * f.u[2], f.f[0] * f.u[1] - f.f[1] * f.u[0]];
         for (const side of [-1, 1]) {
-          const rx = f.f[2] * side * (ROAD_W / 2 - 1.4), rz = -f.f[0] * side * (ROAD_W / 2 - 1.4);
+          const off = side * (ROAD_W / 2 - 1.4);
+          const px = f.p[0] + rt[0] * off, pz = f.p[2] + rt[2] * off;
+          const bottom = f.p[1] + rt[1] * off - SLAB;
+          if (bottom < 1.2) continue;
           const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(f.f[0], f.f[2]));
-          mats.push(new THREE.Matrix4().compose(new THREE.Vector3(f.p[0] + rx, kit ? 0 : bottom / 2, f.p[2] + rz), yaw, new THREE.Vector3(1, bottom, 1)));
-          if (kit) caps.add('cap', th, new THREE.Matrix4().compose(new THREE.Vector3(f.p[0] + rx, bottom - 0.12, f.p[2] + rz), yaw, new THREE.Vector3(1, 1, 1)));
+          mats.push(new THREE.Matrix4().compose(new THREE.Vector3(px, kit ? 0 : bottom / 2, pz), yaw, new THREE.Vector3(1, bottom, 1)));
+          if (kit) caps.add('cap', th, new THREE.Matrix4().compose(new THREE.Vector3(px, bottom - 0.12, pz), yaw, new THREE.Vector3(1, 1, 1)));
         }
       }
       if (def.cells.length === 1) {
@@ -664,7 +680,10 @@ export class TrackView {
 
 function trackMesh(pieces: Placed[]): MeshOut {
   const m: MeshOut = { pos: [], slot: [], idx: [] };
-  for (const p of pieces) pieceMesh(p, m);
+  for (const p of pieces) {
+    pieceMesh(p, m);
+    pieceWalls(p, m);
+  }
   return m;
 }
 

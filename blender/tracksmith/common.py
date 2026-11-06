@@ -8,7 +8,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(ROOT, 'public', 'tracksmith')
 DATA = json.load(open(os.path.join(HERE, 'data.json')))
-KIT = os.path.join(OUT, 'kit.glb')
+# (the game loads a packed copy: npx @gltf-transform/cli meshopt blender/tracksmith/kit.raw.glb public/tracksmith/kit.glb)
+KIT = os.path.join(HERE, 'kit.raw.glb')
 
 
 def G(x, y, z):

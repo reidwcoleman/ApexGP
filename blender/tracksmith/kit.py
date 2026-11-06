@@ -3,14 +3,15 @@
 # deck with raised kerbs, painted lines, a chamfered side and a ribbed underside; then the gates,
 # pylons, plates and blocks. Ambient occlusion is baked into the vertex colours with Cycles; the
 # materials are only names ('road', 'edge', ...), and the game paints them from the theme.
-#   blender -b --python blender/tracksmith/kit.py
+#   blender -b --python blender/tracksmith/kit.py, then pack it for the game (see KIT in common.py)
 import sys
 sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__)))
 from common import *
 
 sc = reset()
 SLAB = DATA['SLAB']
-SLOTS = ['road', 'line', 'edge', 'edgeAlt', 'side', 'under', 'boost', 'block', 'blockSide', 'steel', 'dark', 'light', 'banner', 'accent']
+WALL_H, WALL_T = DATA['WALL_H'], DATA['WALL_T']
+SLOTS = ['road', 'line', 'edge', 'edgeAlt', 'side', 'under', 'boost', 'block', 'blockSide', 'steel', 'dark', 'light', 'banner', 'accent', 'wall', 'rail']
 MATS = {}
 for i, n in enumerate(SLOTS):
     m = bpy.data.materials.new(n)
@@ -136,6 +137,82 @@ def road(M, frames, width, feature):
         dist += seg
 
 
+def walls(M, frames, width, turning):
+    """the barrier down each side: a panel, a painted rail, a chamfered cap, seams every 5 m. On a
+    corner the rail is striped, so you can read the bend from a long way off"""
+    hw = width / 2
+    WH, WT = WALL_H, WALL_T
+    prof = [(hw, 0.0, 'wall'), (hw + 0.03, WH - 0.34, 'rail'), (hw + 0.03, WH - 0.08, 'cap'), (hw + 0.1, WH, 'edge'), (hw + WT - 0.06, WH, 'edge'), (hw + WT, WH - 0.06, 'side'), (hw + WT, -SLAB + 0.2, 'under'), (hw + 0.14, -SLAB + 0.16, None)]
+    dist = 0.0
+    for A, B in zip(frames, frames[1:]):
+        seg = math.dist(A['p'], B['p'])
+        ra, rb = cross(A['f'], A['u']), cross(B['f'], B['u'])
+        at = dist + seg / 2
+        stripe = 'edgeAlt' if int(at / 2.5) % 2 == 0 else 'edge'
+        for s in (1, -1):
+            P = lambda F, r, x, y: v_add(v_add(F['p'], r, s * x), F['u'], y)
+            inward = (-ra[0] * s, -ra[1] * s, -ra[2] * s)
+            for (x0, y0, mat), (x1, y1, _) in zip(prof, prof[1:]):
+                if mat == 'rail':
+                    mat = stripe if turning else 'rail'
+                if mat == 'cap':
+                    mat = 'edge'
+                out = inward if x1 < hw + 0.05 and x0 < hw + 0.05 else (A['u'] if y0 >= WH - 0.09 and y1 >= WH - 0.09 else (ra[0] * s, ra[1] * s, ra[2] * s))
+                M.quad(P(A, ra, x0, y0), P(A, ra, x1, y1), P(B, rb, x1, y1), P(B, rb, x0, y0), mat, out=out)
+            if int(dist / 5) != int((dist + seg) / 5):
+                # a seam, standing just proud of the panel
+                M.quad(P(A, ra, hw + 0.005, 0.02), P(A, ra, hw + 0.03 - 0.01, WH - 0.36), v_add(P(A, ra, hw + 0.02, WH - 0.36), A['f'], 0.1), v_add(P(A, ra, hw - 0.004, 0.02), A['f'], 0.1), 'dark', out=inward)
+        dist += seg
+
+
+def tunnel(M, frames, width):
+    """a shell over the road: a chamfered section, with a rib at each end and a light down the roof"""
+    hw = width / 2 + WALL_T
+    sec = [(hw, WALL_H - 0.02), (hw, 4.2), (hw - 1.5, 5.7), (-hw + 1.5, 5.7), (-hw, 4.2), (-hw, WALL_H - 0.02)]
+    A, B = frames[0], frames[-1]
+    r = cross(A['f'], A['u'])
+    P = lambda F, x, y, k=0.0: v_add(v_add(F['p'], r, x), F['u'], y)
+    mid = v_add(v_add(A['p'], A['f'], 5), A['u'], 3.0)
+    for i in range(len(sec) - 1):
+        (x0, y0), (x1, y1) = sec[i], sec[i + 1]
+        # inside face, then the outside standing off it
+        M.quad(P(A, x0, y0), P(A, x1, y1), P(B, x1, y1), P(B, x0, y0), 'blockSide', out=(mid[0] - (A['p'][0] + B['p'][0]) / 2 - r[0] * (x0 + x1) / 2, 2.0 - (y0 + y1) / 2, mid[2] - (A['p'][2] + B['p'][2]) / 2 - r[2] * (x0 + x1) / 2))
+        k = 1.08
+        M.quad(P(A, x0 * k, y0 * 1.05), P(A, x1 * k, y1 * 1.05), P(B, x1 * k, y1 * 1.05), P(B, x0 * k, y0 * 1.05), 'block', inside=mid)
+    for F, s in ((A, -1), (B, 1)):
+        back = (F['f'][0] * s, F['f'][1] * s, F['f'][2] * s)
+        for i in range(len(sec) - 1):
+            (x0, y0), (x1, y1) = sec[i], sec[i + 1]
+            M.quad(P(F, x0, y0), P(F, x1, y1), P(F, x1 * 1.08, y1 * 1.05), P(F, x0 * 1.08, y0 * 1.05), 'rail', out=back)
+    # lights: down the roof, and a strip along each wall
+    c = 0.55
+    M.quad(P(A, c, 5.68), P(A, -c, 5.68), P(B, -c, 5.68), P(B, c, 5.68), 'light', out=(-A['u'][0], -A['u'][1], -A['u'][2]))
+    for s in (1, -1):
+        x = s * (hw - 0.02)
+        M.quad(P(A, x, 2.5), P(A, x, 2.85), P(B, x, 2.85), P(B, x, 2.5), 'light', out=(-r[0] * s, -r[1] * s, -r[2] * s))
+
+
+def backstop(M, width):
+    """the barrier behind the start line"""
+    hw = width / 2 + WALL_T
+    z = -DATA['T'] / 2
+    M.box(-hw, -0.1, z - WALL_T, hw, WALL_H, z, 'wall', bev=0.06, top='edge')
+    M.box(-hw + 0.3, WALL_H - 0.34, z - 0.02, hw - 0.3, WALL_H - 0.08, z + 0.02, 'rail')
+
+
+def wallend(M):
+    """the nose on a barrier that just stops: it runs down to the road, so nothing catches on it"""
+    t = WALL_T / 2
+    L = 1.6
+    tip = (0, 0.04, L)
+    a, b, c, d = (-t, WALL_H, 0), (t, WALL_H, 0), (t, -SLAB + 0.2, 0), (-t, -SLAB + 0.2, 0)
+    M.quad(a, b, (t * 0.5, 0.05, L), (-t * 0.5, 0.05, L), 'edgeAlt', out=(0, 1, 0.6))
+    M.quad(b, c, (t * 0.5, -0.1, L), (t * 0.5, 0.05, L), 'side', out=(1, 0, 0))
+    M.quad(a, (-t * 0.5, 0.05, L), (-t * 0.5, -0.1, L), d, 'side', out=(-1, 0, 0))
+    M.quad((-t * 0.5, 0.05, L), (t * 0.5, 0.05, L), (t * 0.5, -0.1, L), (-t * 0.5, -0.1, L), 'dark', out=(0, 0, 1))
+    M.quad(d, c, (t * 0.5, -0.1, L), (-t * 0.5, -0.1, L), 'under', out=(0, -1, 0))
+
+
 def wedge(M, frames, width):
     """a kicker is solid: walls from the lifted deck down to the base"""
     hw = width / 2
@@ -145,13 +222,13 @@ def wedge(M, frames, width):
             continue
         ra, rb = cross(A['f'], A['u']), cross(B['f'], B['u'])
         for s in (1, -1):
-            a = v_add(v_add(A['p'], ra, s * (hw + 0.14)), A['u'], -SLAB + 0.16)
-            b = v_add(v_add(B['p'], rb, s * (hw + 0.14)), B['u'], -SLAB + 0.16)
+            a = v_add(v_add(A['p'], ra, s * (hw + WALL_T)), A['u'], -SLAB + 0.16)
+            b = v_add(v_add(B['p'], rb, s * (hw + WALL_T)), B['u'], -SLAB + 0.16)
             M.quad(a, b, (b[0], base, b[2]), (a[0], base, a[2]), 'side', out=(ra[0] * s, ra[1] * s, ra[2] * s))
     L = frames[-1]
     r = cross(L['f'], L['u'])
-    t1 = v_add(v_add(L['p'], r, hw + 0.14), L['u'], -0.14)
-    t2 = v_add(v_add(L['p'], r, -hw - 0.14), L['u'], -0.14)
+    t1 = v_add(v_add(L['p'], r, hw + WALL_T), L['u'], -0.14)
+    t2 = v_add(v_add(L['p'], r, -hw - WALL_T), L['u'], -0.14)
     M.quad(t1, t2, (t2[0], base, t2[2]), (t1[0], base, t1[2]), 'dark', out=L['f'])
     # chevrons down the lip so you can read it at speed
     for k in range(3):
@@ -202,6 +279,7 @@ def cap(M):
 
 
 objs = []
+roofs = []
 for d in DATA['pieces']:
     M = Mesh()
     if d['box']:
@@ -216,13 +294,24 @@ for d in DATA['pieces']:
                     M.quad((a, y, zz), (c, y, zz), (c, y + 0.08, zz), (a, y + 0.08, zz), 'dark', out=(0, 0, -1 if b == z0 else 1))
     else:
         road(M, d['frames'], d['width'], d['feature'])
+        walls(M, d['frames'], d['width'], d['turning'])
         if d['feature'] == 'ramp':
             wedge(M, d['frames'], d['width'])
+        if d['feature'] == 'start':
+            backstop(M, d['width'])
+        if d['roof']:
+            R = Mesh()
+            tunnel(R, d['frames'], d['width'])
+            roofs.append(R)
     objs.append(M.obj('p_' + d['id']))
 for kind in ('start', 'check', 'finish'):
     M = Mesh()
     gate(M, kind)
     objs.append(M.obj('gate_' + kind))
+objs.append(roofs[0].obj('roof'))
+M = Mesh()
+wallend(M)
+objs.append(M.obj('wend'))
 M = Mesh()
 pylon(M)
 objs.append(M.obj('pylon'))
@@ -246,7 +335,7 @@ for o in objs:
     bm = bmesh.new()
     bm.from_mesh(o.data)
     for _ in range(4):
-        long = [e for e in bm.edges if e.calc_length() > 1.7]
+        long = [e for e in bm.edges if e.calc_length() > 3.2]
         if not long:
             break
         bmesh.ops.subdivide_edges(bm, edges=long, cuts=1, use_grid_fill=True)
@@ -261,7 +350,7 @@ for o in objs:
     bpy.ops.object.bake(type='AO', target='VERTEX_COLORS')
     # (the bake replaces the attribute's storage: the old reference reads zeros)
     for c in o.data.color_attributes['Col'].data:
-        a = 0.42 + 0.58 * c.color[0]
+        a = (0.42 + 0.58 * c.color[0]) if o.name != 'roof' else 0.9
         c.color = (a, a, a, 1)
     print('baked', o.name, len(o.data.polygons))
 

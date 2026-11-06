@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { Slot, T, levelY, type Placed } from './pieces.ts';
 import type { Theme } from './theme.ts';
 
@@ -17,7 +18,7 @@ let loading: Promise<void> | null = null;
 export const kitReady = () => parts.size > 0;
 
 export function loadKit(url = 'tracksmith/kit.glb') {
-  return (loading ??= new GLTFLoader().loadAsync(url).then((g) => {
+  return (loading ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url).then((g) => {
     g.scene.updateMatrixWorld(true);
     g.scene.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -25,11 +26,17 @@ export function loadKit(url = 'tracksmith/kit.glb') {
       // (an object with several materials comes in as a group of meshes)
       const name = (m.parent && m.parent !== g.scene ? m.parent.name : m.name).replace(/_\d+$/, '');
       const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+      // (the file is packed: integers with a scale on the node, so read through the attribute and the matrix)
       const p = geo.getAttribute('position'), n = geo.getAttribute('normal'), c = geo.getAttribute('color');
-      const ao = new Float32Array(p.count);
-      for (let i = 0; i < p.count; i++) ao[i] = c ? c.getX(i) : 1;
+      const pos = new Float32Array(p.count * 3), nor = new Float32Array(p.count * 3), ao = new Float32Array(p.count);
+      const v = new THREE.Vector3(), nm = new THREE.Matrix3().getNormalMatrix(m.matrixWorld);
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p as THREE.BufferAttribute, i).applyMatrix4(m.matrixWorld).toArray(pos, i * 3);
+        v.fromBufferAttribute(n as THREE.BufferAttribute, i).applyMatrix3(nm).normalize().toArray(nor, i * 3);
+        ao[i] = c ? c.getX(i) : 1;
+      }
       const list = parts.get(name) ?? [];
-      list.push({ pos: new Float32Array(p.array as ArrayLike<number>), nor: new Float32Array(n.array as ArrayLike<number>), ao, mat: (m.material as THREE.Material).name });
+      list.push({ pos, nor, ao, mat: (m.material as THREE.Material).name });
       parts.set(name, list);
     });
   }).catch((e) => {
@@ -53,6 +60,8 @@ function paint(th: Theme, mat: string) {
     case 'dark': return th.under;
     case 'banner': return th.accent;
     case 'accent': return th.accent;
+    case 'rail': return th.accent;
+    case 'wall': return th.blockSide;
     default: return th.edge;
   }
 }
@@ -64,13 +73,13 @@ export class Batch {
   nor: number[] = [];
   colr: number[] = [];
 
-  /** a kit object placed by a matrix; `only` keeps (or `skip` drops) some of its materials */
-  add(name: string, th: Theme, m: THREE.Matrix4, skip?: string) {
+  /** a kit object placed by a matrix; `skip` drops one of its materials, `only` keeps just one */
+  add(name: string, th: Theme, m: THREE.Matrix4, skip?: string, only?: string) {
     const list = parts.get(name);
     if (!list) return;
     const v = new THREE.Vector3(), nm = new THREE.Matrix3().getNormalMatrix(m);
     for (const p of list) {
-      if (p.mat === skip) continue;
+      if (p.mat === skip || (only && p.mat !== only)) continue;
       col.setHex(paint(th, p.mat));
       const dark = p.mat === 'dark' ? 0.55 : 1;
       for (let i = 0; i < p.ao.length; i++) {

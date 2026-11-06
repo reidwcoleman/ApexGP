@@ -13,6 +13,7 @@ export class Fx {
   private group = new THREE.Group();
   private skidT = 0;
   private sparkT = 0;
+  private scrapeT = 0;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.group);
@@ -46,6 +47,17 @@ export class Fx {
       p.life = 0; p.max = 0.5 + Math.random() * 0.4; p.grow = -1.2; p.fade = true;
       p.m.scale.setScalar(0.3 + Math.random() * 0.3);
       p.spin.set(Math.random() * 6, Math.random() * 6, 0);
+    }
+  }
+
+  /** a hit on a barrier: small, fast, gone in a moment */
+  sparks(at: THREE.Vector3, away: { x: number; z: number }, n: number) {
+    for (let i = 0; i < n; i++) {
+      const p = this.spawn(this.geo, i % 3 ? 0xffb050 : 0xfff0c0, 1, false);
+      p.m.position.copy(at);
+      p.v.set(away.x * 7 + (Math.random() - 0.5) * 9, 1 + Math.random() * 6, away.z * 7 + (Math.random() - 0.5) * 9);
+      p.life = 0; p.max = 0.2 + Math.random() * 0.25; p.grow = -2; p.fade = true;
+      p.m.scale.setScalar(0.1);
     }
   }
 
@@ -101,6 +113,21 @@ export class Fx {
           p.v.set((Math.random() - 0.5) * 7, 1 + Math.random() * 3.5, (Math.random() - 0.5) * 7);
           p.life = 0; p.max = 0.22 + Math.random() * 0.2; p.grow = -2; p.fade = true;
           p.m.scale.setScalar(0.1);
+        }
+      }
+    }
+    // scraping a barrier
+    if (sim.wallN && sim.speed > 8) {
+      this.scrapeT -= dt;
+      if (this.scrapeT <= 0) {
+        this.scrapeT = 0.02;
+        const n = sim.wallN, w = sim.wallP, st = sim.getState().v;
+        for (let i = 0; i < 3; i++) {
+          const p = this.spawn(this.geo, i ? 0xffb050 : 0xfff0c0, 1, false);
+          p.m.position.set(w.x, w.y + (Math.random() - 0.5) * 0.4, w.z);
+          p.v.set(st[0] * 0.55 + n.x * 3 + (Math.random() - 0.5) * 4, 1.5 + Math.random() * 3.5, st[2] * 0.55 + n.z * 3 + (Math.random() - 0.5) * 4);
+          p.life = 0; p.max = 0.18 + Math.random() * 0.22; p.grow = -2; p.fade = true;
+          p.m.scale.setScalar(0.09);
         }
       }
     }

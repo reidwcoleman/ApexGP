@@ -16,11 +16,11 @@ const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
   if (want && td.id !== want) continue;
   const spec = SPEC_LIST.find((s) => s.id === td.id);
-  const { overlaps } = buildDSL(spec.dsl);
+  const { overlaps } = buildDSL(spec.dsl, spec.base);
   const sim = new Sim(td);
   const line = routeLine(td);
   const ap = new Autopilot(line);
-  let falls = 0, maxOff = 0, top = 0, stuck = 0, wasG = true, take = null;
+  let falls = 0, hits = 0, maxOff = 0, top = 0, stuck = 0, wasG = true, take = null;
   const jumps = [];
   const ghost = [];
   const limit = 240 / DT;
@@ -30,6 +30,8 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
     const inp = ap.drive(s.p, s.q, s.v, sim.grounded > 0);
     if (run > 0) { inp.steer = Math.max(-1, Math.min(1, inp.steer + (rnd() - 0.5) * 0.25)); if (rnd() < 0.01 * run) inp.throttle = 0; }
     sim.step(inp);
+    for (const e of sim.events) if (e.type === 'wall') hits++;
+    sim.events.length = 0;
     // (--ghosts: the clean run, kept at 20 Hz for the game to race against)
     if (run === 0 && sim.started && !sim.finished && sim.ticks % 6 === 0) { const g = sim.getState(); ghost.push(...g.p, ...g.q); }
     const { d } = ap.locate(s.p);
@@ -40,11 +42,10 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
     maxOff = Math.max(maxOff, d);
     top = Math.max(top, sim.kmh);
     if (trace && t % (process.argv.includes('--fine') ? 12 : 60) === 0) console.log(`  t=${(t * DT).toFixed(1)} p=${s.p.map((x) => x.toFixed(1)).join(',')} kmh=${sim.kmh.toFixed(0)} off=${d.toFixed(1)} prog=${(ap.progress() * 100).toFixed(0)}% g=${sim.grounded}`);
-    if (sim.started && ((sim.grounded > 0 && d > 7) || sim.airT > 5)) {
-      falls++;
-      sim.respawn();
-      ap.reset();
-      ap.locate(sim.getState().p);
+    if (sim.started && ((sim.grounded > 0 && d > 7) || sim.airT > 5)) sim.respawn();
+    if (sim.falls > falls) {
+      falls = sim.falls;
+      ap.relocate(sim.getState().p);
     }
     if (sim.started && sim.speed < 1) { if (++stuck > 600) break; } else stuck = 0;
   }
@@ -54,6 +55,6 @@ for (const td of builtinTracks()) for (let run = 0; run < runs; run++) {
   }
   const time = sim.finished ? (sim.ticks * DT).toFixed(3) + 's' : 'DNF @' + (ap.progress() * 100).toFixed(0) + '%';
   if (process.argv.includes('--jumps') && jumps.length) console.log('   jumps: ' + jumps.join(' | '));
-  console.log(`${td.id}${runs > 1 ? '#' + run : ''} ${td.name.padEnd(12)} ${time.padEnd(10)} cps ${sim.passed.size}/${sim.checks.length} falls ${falls} maxOff ${maxOff.toFixed(1)} top ${top.toFixed(0)} km/h pieces ${td.pieces.length}${overlaps.length ? ' OVERLAPS ' + overlaps.join('; ') : ''}`);
+  console.log(`${td.id}${runs > 1 ? '#' + run : ''} ${td.name.padEnd(12)} ${time.padEnd(10)} cps ${sim.passed.size}/${sim.checks.length} falls ${falls} walls ${hits} maxOff ${maxOff.toFixed(1)} top ${top.toFixed(0)} km/h pieces ${td.pieces.length}${overlaps.length ? ' OVERLAPS ' + overlaps.join('; ') : ''}`);
   sim.free();
 }

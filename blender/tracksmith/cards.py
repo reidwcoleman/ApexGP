@@ -7,7 +7,7 @@ from common import *
 
 want = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else None
 T, H, ROAD_Y = DATA['T'], DATA['H'], DATA['ROAD_Y']
-PAINT = {'road': 'road', 'line': 'roadLine', 'edge': 'edge', 'edgeAlt': 'edgeAlt', 'side': 'side', 'under': 'under', 'boost': 'boost', 'block': 'block', 'blockSide': 'blockSide', 'steel': 'pillar', 'dark': 'under', 'banner': 'accent', 'accent': 'accent', 'light': 'accent'}
+PAINT = {'road': 'road', 'line': 'roadLine', 'edge': 'edge', 'edgeAlt': 'edgeAlt', 'side': 'side', 'under': 'under', 'boost': 'boost', 'block': 'block', 'blockSide': 'blockSide', 'steel': 'pillar', 'dark': 'under', 'banner': 'accent', 'accent': 'accent', 'light': 'accent', 'wall': 'blockSide', 'rail': 'accent'}
 
 
 def render(td):
@@ -61,7 +61,7 @@ def render(td):
         for c in range(3):
             lo[c] = min(lo[c], o.location[c])
             hi[c] = max(hi[c], o.location[c])
-        for gk, g in (('start', 'gate_start'), ('check', 'gate_check'), ('finish', 'gate_finish')):
+        for gk, g in (('start', 'gate_start'), ('check', 'gate_check'), ('finish', 'gate_finish'), ('tunnel', 'roof')):
             if p['id'] == gk and g in kit:
                 q = bpy.data.objects.new('g', kit[g].data)
                 sc.collection.objects.link(q)

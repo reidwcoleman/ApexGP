@@ -12,9 +12,12 @@ export const H = 2.5;
 export const ROAD_W = 9;
 export const ROAD_Y = 0.12; // level 0 road surface sits just above the ground
 export const SLAB = 0.7; // road thickness under the surface
+export const WALL_H = 1.25; // the barrier down both sides of every road
+export const WALL_T = 0.42;
 
 export type Vec3 = [number, number, number];
-export interface Frame { p: Vec3; f: Vec3; u: Vec3 }
+/** a point on a centre line; `roll` marks a loop or a corkscrew, which the autopilot doesn't brake for */
+export interface Frame { p: Vec3; f: Vec3; u: Vec3; roll?: boolean }
 
 export type Feature = 'start' | 'finish' | 'check' | 'boost' | 'ramp' | 'loop' | 'block' | 'plate' | 'none';
 
@@ -35,6 +38,8 @@ export interface PieceDef {
   minLevel?: number;
   /** a solid box instead of a road: [minx, miny, minz, maxx, maxy, maxz] local */
   box?: [number, number, number, number, number, number];
+  /** arches over the road (looks only: the kit models them) */
+  roof?: boolean;
 }
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -105,6 +110,30 @@ function wave(len: number, h: number, humps: number) {
   };
 }
 
+/** a full climbing circle that comes back over its own entry, leaning in (side +1 toward +x) */
+function helix(side: number, r: number, rise: number, tilt: number) {
+  return (t: number) => {
+    const a = 2 * Math.PI * t;
+    const th = tilt * smooth(Math.min(1, t / 0.16)) * smooth(Math.min(1, (1 - t) / 0.16));
+    const s = Math.sin(th), c = Math.cos(th);
+    const y = rise * (t - Math.sin(a) / (2 * Math.PI));
+    return { p: [side * r * (1 - Math.cos(a)), y, -T / 2 + r * Math.sin(a)] as Vec3, up: [side * Math.cos(a) * s, c, -Math.sin(a) * s] as Vec3 };
+  };
+}
+
+/** a barrel roll: the road twists once round an axis along the way, and comes back to its own line */
+function cork(side: number, len: number, R: number) {
+  return (t: number) => {
+    const a = 2 * Math.PI * smooth(t);
+    return { p: [side * R * Math.sin(a), R * (1 - Math.cos(a)), -T / 2 + len * t] as Vec3, up: [-side * Math.sin(a), Math.cos(a), 0] as Vec3 };
+  };
+}
+
+/** moves over one tile without turning */
+function shift(side: number, len: number) {
+  return (t: number) => ({ p: [side * T * smooth(t), 0, -T / 2 + len * t] as Vec3, up: UP });
+}
+
 const cells = (w: number, l: number, sx = 1) => {
   const out: [number, number][] = [];
   for (let x = 0; x < w; x++) for (let z = 0; z < l; z++) out.push([x * sx, z]);
@@ -115,6 +144,19 @@ const road = (id: string, name: string, feature: Feature = 'none'): PieceDef => 
   id, name, group: feature === 'none' ? 'road' : 'special', cells: [[0, 0]], exit: { cell: [0, 0], dir: 0, dl: 0 }, feature, path: straight(T), samples: 4,
 });
 
+/** a quarter turn n tiles across, leaning in if it has a tilt */
+function sweep(id: string, name: string, n: number, tilt = 0, minLevel?: number): PieceDef {
+  const r = (n - 0.5) * T;
+  return { id, name, group: 'turn', cells: cells(n, n), exit: { cell: [n - 1, n - 1], dir: 1, dl: 0 }, feature: 'none', path: tilt ? banked(r, -T / 2, r, tilt) : arc(r, -T / 2, r), samples: 12 + n * 10, minLevel };
+}
+
+/** a helix: 6 tiles across, six levels up, ending over the road it came in on */
+function coil(id: string, name: string, side: number): PieceDef {
+  const out: [number, number][] = [];
+  for (let x = 0; x < 6; x++) for (let z = -3; z < 3; z++) out.push([x * side, z]);
+  return { id, name, group: 'special', cells: out, exit: { cell: [0, -1], dir: 0, dl: 6 }, feature: 'none', path: helix(side, 2.5 * T, 6 * H, 0.42), samples: 110, minLevel: 1 };
+}
+
 export const PIECES: PieceDef[] = [
   road('road', 'Straight'),
   { id: 'turn1', name: 'Tight turn', group: 'turn', cells: [[0, 0]], exit: { cell: [0, 0], dir: 1, dl: 0 }, feature: 'none', path: arc(T / 2, -T / 2, T / 2), samples: 12 },
@@ -124,8 +166,8 @@ export const PIECES: PieceDef[] = [
   { id: 'slope2', name: 'Long slope', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 1 }, feature: 'none', path: straight(2 * T, H), samples: 20 },
   { id: 'climb', name: 'Climb', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 2 }, feature: 'none', path: straight(2 * T, 2 * H), samples: 22 },
   { id: 'ramp', name: 'Kicker', group: 'height', cells: [[0, 0]], exit: { cell: [0, 0], dir: 0, dl: 0 }, feature: 'ramp', path: kicker(0.25), samples: 16 },
-  { id: 'loop', name: 'Loop (left)', group: 'special', cells: cells(2, 2), exit: { cell: [1, 1], dir: 0, dl: 0 }, feature: 'loop', path: loop(1), samples: 72, width: 8 },
-  { id: 'loopR', name: 'Loop (right)', group: 'special', cells: cells(2, 2, -1), exit: { cell: [-1, 1], dir: 0, dl: 0 }, feature: 'loop', path: loop(-1), samples: 72, width: 8 },
+  { id: 'loop', name: 'Loop (left)', group: 'special', cells: cells(2, 2), exit: { cell: [1, 1], dir: 0, dl: 0 }, feature: 'loop', path: loop(1), samples: 72 },
+  { id: 'loopR', name: 'Loop (right)', group: 'special', cells: cells(2, 2, -1), exit: { cell: [-1, 1], dir: 0, dl: 0 }, feature: 'loop', path: loop(-1), samples: 72 },
   road('start', 'Start', 'start'),
   road('check', 'Checkpoint', 'check'),
   road('finish', 'Finish', 'finish'),
@@ -137,6 +179,17 @@ export const PIECES: PieceDef[] = [
   { id: 'bank3', name: 'Wide banked turn', group: 'turn', cells: cells(3, 3), exit: { cell: [2, 2], dir: 1, dl: 0 }, feature: 'none', path: banked(2.5 * T, -T / 2, 2.5 * T, 0.42), samples: 44, minLevel: 1 },
   { id: 'wave', name: 'Rollers', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 0 }, feature: 'none', path: wave(2 * T, 0.5, 2), samples: 40 },
   { id: 'bigramp', name: 'Big kicker', group: 'height', cells: cells(1, 2), exit: { cell: [0, 1], dir: 0, dl: 0 }, feature: 'ramp', path: kicker(0.3, 2 * T), samples: 24 },
+  sweep('turn4', 'Sweeper', 4), sweep('turn5', 'Long sweeper', 5),
+  sweep('bank5', 'Banked sweeper', 5, 0.46, 1),
+  sweep('steep3', 'Steep bank', 3, 0.85, 2), sweep('steep5', 'Steep sweeper', 5, 0.85, 2),
+  coil('helixL', 'Helix (left)', 1), coil('helixR', 'Helix (right)', -1),
+  { id: 'corkL', name: 'Corkscrew (left)', group: 'special', cells: cells(3, 6).map(([x, z]) => [x - 1, z]), exit: { cell: [0, 5], dir: 0, dl: 0 }, feature: 'loop', path: cork(1, 6 * T, 8), samples: 96 },
+  { id: 'corkR', name: 'Corkscrew (right)', group: 'special', cells: cells(3, 6).map(([x, z]) => [x - 1, z]), exit: { cell: [0, 5], dir: 0, dl: 0 }, feature: 'loop', path: cork(-1, 6 * T, 8), samples: 96 },
+  { id: 'shiftL', name: 'Lane shift (left)', group: 'turn', cells: cells(2, 4), exit: { cell: [1, 3], dir: 0, dl: 0 }, feature: 'none', path: shift(1, 4 * T), samples: 28 },
+  { id: 'shiftR', name: 'Lane shift (right)', group: 'turn', cells: cells(2, 4, -1), exit: { cell: [-1, 3], dir: 0, dl: 0 }, feature: 'none', path: shift(-1, 4 * T), samples: 28 },
+  { id: 'hill', name: 'Crest', group: 'height', cells: cells(1, 3), exit: { cell: [0, 2], dir: 0, dl: 0 }, feature: 'none', path: wave(3 * T, 1.25, 1), samples: 30 },
+  { id: 'drop', name: 'Big drop', group: 'height', cells: cells(1, 4), exit: { cell: [0, 3], dir: 0, dl: 4 }, feature: 'none', path: straight(4 * T, 4 * H), samples: 36 },
+  { id: 'tunnel', name: 'Tunnel', group: 'special', cells: [[0, 0]], exit: { cell: [0, 0], dir: 0, dl: 0 }, feature: 'none', path: straight(T), samples: 4, roof: true },
 ];
 
 export const PIECE_BY_ID = new Map(PIECES.map((p, i) => [p.id, i]));
@@ -170,6 +223,33 @@ export function footprint(pl: Placed): [number, number][] {
     const [x, z] = rot2(cx, cz, pl.r);
     return [pl.x + x, pl.z + z];
   });
+}
+
+/**
+ * The cells and levels a piece's road really passes through: a helix or a corkscrew fills only a
+ * little of the box round it, so other road can run through the rest.
+ */
+export function volume(pl: Placed): [number, number, number][] {
+  const def = PIECES[pl.t];
+  const seen = new Map<string, [number, number, number]>();
+  const put = (x: number, z: number, l: number) => seen.set(`${x},${z},${l}`, [x, z, l]);
+  if (!def.path) {
+    for (const [x, z] of footprint(pl)) for (let l = pl.l; l <= pl.l + Math.max(0, def.exit.dl); l++) put(x, z, l);
+    return [...seen.values()];
+  }
+  const hw = (def.width ?? ROAD_W) / 2;
+  const n = Math.max(8, (def.samples ?? 8) * 2);
+  const F = frames(def, n);
+  for (let i = 0; i <= n; i++) {
+    const f = F[i], r = cross(f.f, f.u);
+    // (pulled in from the ends, which lie exactly on the edge of the next cell)
+    const q = add(f.p, f.f, i === 0 ? 0.1 : i === n ? -0.1 : 0);
+    for (const k of [-hw, 0, hw]) {
+      const w = toWorld(pl, add(q, r, k * 0.98));
+      put(Math.round(w[0] / T), Math.round(w[2] / T), Math.round((w[1] - ROAD_Y) / H));
+    }
+  }
+  return [...seen.values()];
 }
 
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -312,6 +392,62 @@ export function pieceMesh(pl: Placed, m: MeshOut) {
     capEnd(m, F[0], w, -1);
     capEnd(m, F[F.length - 1], w, 1);
   }
+}
+
+/**
+ * The barriers: down both sides of every road, and across the back of the start. They go in a
+ * collision mesh of their own, so the wheels never climb them, and the fallback renderer draws them.
+ */
+export function pieceWalls(pl: Placed, m: MeshOut) {
+  const def = PIECES[pl.t];
+  if (def.box) return;
+  const F = worldFrames(pl);
+  const hw = (def.width ?? ROAD_W) / 2;
+  for (let i = 0; i < F.length - 1; i++) {
+    const A = F[i], B = F[i + 1];
+    const ra = cross(A.f, A.u), rb = cross(B.f, B.u);
+    for (const s of [1, -1]) {
+      const P = (Fr: Frame, r: Vec3, x: number, y: number): Vec3 => add(add(Fr.p, r, s * x), Fr.u, y);
+      const inside = add(add(lerp3(A.p, B.p, 0.5), lerp3(ra, rb, 0.5), s * (hw + WALL_T / 2)), lerp3(A.u, B.u, 0.5), WALL_H / 2);
+      quad(m, P(A, ra, hw, -0.1), P(A, ra, hw, WALL_H), P(B, rb, hw, WALL_H), P(B, rb, hw, -0.1), Slot.Side, inside);
+      quad(m, P(A, ra, hw, WALL_H), P(A, ra, hw + WALL_T, WALL_H), P(B, rb, hw + WALL_T, WALL_H), P(B, rb, hw, WALL_H), Slot.EdgeAlt, inside);
+      quad(m, P(A, ra, hw + WALL_T, WALL_H), P(A, ra, hw + WALL_T, -SLAB), P(B, rb, hw + WALL_T, -SLAB), P(B, rb, hw + WALL_T, WALL_H), Slot.Side, inside);
+    }
+  }
+  if (def.feature === 'start') {
+    boxMesh(m, [-hw - WALL_T, -0.1, -T / 2 - WALL_T, hw + WALL_T, WALL_H, -T / 2], (v) => toWorld(pl, v), Slot.EdgeAlt, Slot.Side);
+  }
+}
+
+/**
+ * Where a barrier just stops, because nothing joins on (a kicker's lip, the far side of a gap, the
+ * end of the road): a matrix (column-major) for the nose that finishes each one off.
+ */
+export function wallEnds(pieces: Placed[]): number[][] {
+  const ends: { F: Frame; out: Vec3; hw: number; key: string; pi: number; start: boolean }[] = [];
+  const count = new Map<string, number>();
+  pieces.forEach((pl, pi) => {
+    const def = PIECES[pl.t];
+    if (def.box) return;
+    const F = worldFrames(pl);
+    const hw = (def.width ?? ROAD_W) / 2;
+    for (const [fr, s, first] of [[F[0], -1, true], [F[F.length - 1], 1, false]] as [Frame, number, boolean][]) {
+      const key = fr.p.map((v) => Math.round(v * 2)).join(',');
+      count.set(key, (count.get(key) ?? 0) + 1);
+      ends.push({ F: fr, out: [fr.f[0] * s, fr.f[1] * s, fr.f[2] * s], hw, key, pi, start: first && def.feature === 'start' });
+    }
+  });
+  const out: number[][] = [];
+  for (const e of ends) {
+    if (count.get(e.key)! > 1 || e.start) continue;
+    const y = e.F.u, z = e.out, x = cross(y, z);
+    const r = cross(e.F.f, e.F.u);
+    for (const s of [1, -1]) {
+      const p = add(e.F.p, r, s * (e.hw + WALL_T / 2));
+      out.push([x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, p[0], p[1], p[2], 1]);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- triggers
