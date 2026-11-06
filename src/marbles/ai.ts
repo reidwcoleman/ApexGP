@@ -3,7 +3,8 @@ import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain } from './ai-arena.ts';
 import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
-import { CupBrain, PinBrain, RocketBrain, ShotBrain } from './ai-play.ts';
+import { CupBrain, RocketBrain } from './ai-play.ts';
+import { BumpBrain, StompBrain } from './ai-bash.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -91,8 +92,8 @@ export class Bot {
   private stormB: StormBrain | null = null;
   private callB: CallBrain | null = null;
   private bounceB: BounceBrain | null = null;
-  private pinB: PinBrain | null = null;
-  private shotB: ShotBrain | null = null;
+  private bumpB: BumpBrain | null = null;
+  private stompB: StompBrain | null = null;
   private rocketB: RocketBrain | null = null;
   private cupB: CupBrain | null = null;
   private keepB: KeepBrain | null = null;
@@ -199,17 +200,17 @@ export class Bot {
       this.callB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
-    if (c.pin) {
-      this.pinB ??= new PinBrain(m, this.skill, this.rnd);
+    if (c.bump) {
+      this.bumpB ??= new BumpBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
-      this.pinB.update(dt, t, c, this.ease);
-      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
+      this.bumpB.update(dt, t, c, all, this.ease);
+      return;
     }
-    if (c.shot) {
-      this.shotB ??= new ShotBrain(m, this.skill, this.rnd, this.aggr);
+    if (c.stomp) {
+      this.stompB ??= new StompBrain(m, this.skill, this.rnd);
       if (t < c.state.go + this.react) return;
-      this.shotB.update(dt, t, c, all, this.ease);
-      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
+      this.stompB.update(dt, t, c, all, this.ease);
+      return;
     }
     if (c.rocket) {
       this.rocketB ??= new RocketBrain(m, this.skill, this.rnd, this.aggr);

@@ -39,7 +39,7 @@ async function one(round) {
       keep: c.keep ? { changes, holders: holders.size, top: g.keepP?.ranking().slice(0, 3).map((r) => +(g.keepP.held.get(r.m.id) ?? 0).toFixed(1)) } : undefined,
       pops: g.bounce ? g.bounce.ranking().slice(0, 3).map((r) => g.bounce.score.get(r.m.id) ?? 0) : undefined,
       cup: g.cupP ? g.cupP.score.join('-') : undefined,
-      book: (g.pinP ?? g.shotP) ? (g.pinP ?? g.shotP).ranking().map((r) => (g.pinP ?? g.shotP).of(r.m.id)).filter((_, i, l) => i < 3 || i === l.length - 1) : undefined,
+      book: (g.bumpP ?? g.stompP) ? (g.bumpP ?? g.stompP).ranking().map((r) => (g.bumpP ?? g.stompP).of(r.m.id)).filter((_, i, l) => i < 3 || i === l.length - 1) : undefined,
       sprung, bonk, wall: +((performance.now() - t0) / 1000).toFixed(1),
     };
   });

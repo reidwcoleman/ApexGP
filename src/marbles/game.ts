@@ -17,9 +17,10 @@ import { SPRING } from './course-crumble.ts';
 import { STORM } from './course-storm.ts';
 import { PAINT_FRENZY } from './team.ts';
 import { BouncePlay, KeepPlay } from './modes.ts';
-import { PinPlay, RocketPlay, ShotPlay } from './modes-play.ts';
-import { PIN, PinHit } from './course-pinball.ts';
-import { SHOT, SHOT_T } from './course-bigshot.ts';
+import { RocketPlay } from './modes-play.ts';
+import { BumpPlay, StompPlay } from './modes-bash.ts';
+import { CAR } from './course-bumper.ts';
+import { STOMP } from './course-stomp.ts';
 import { ROCKET } from './course-rocket.ts';
 import { Fireworks } from './fx.ts';
 import { Stars } from './stars.ts';
@@ -437,8 +438,16 @@ export class MarbleGame {
     this.ahead = null;
   }
   private bounce: BouncePlay | null = null;
-  private pinP: PinPlay | null = null;
-  private shotP: ShotPlay | null = null;
+  private bumpWarned = -1;
+  private popT = 0;
+  private tally = { n: 0, v: 0, t: 0 };
+  private crash = { n: 0, v: 0, t: 0 };
+  private bellTick = 0;
+  private syncT = 0;
+  private stompNext = -1;
+  private bangAt = new THREE.Vector3();
+  private bumpP: BumpPlay | null = null;
+  private stompP: StompPlay | null = null;
   private rocketP: RocketPlay | null = null;
   private cupP: CupPlay | null = null;
   private cupSent = 0;
@@ -446,13 +455,8 @@ export class MarbleGame {
   private cupTwo = false;
   /** the two new points games' book */
   private get book() {
-    return this.pinP ?? this.shotP;
+    return this.bumpP ?? this.stompP;
   }
-  private jackOn = false;
-  private flipSeen = 0;
-  private shotN = -1;
-  private shotFire = false;
-  private aimX = 0;
   private padsGone = 0;
   private bounceSuper = 0;
   private starN = 0;
@@ -508,7 +512,7 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? 'The team with the most goals stays in the show' : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : c.kind === 'score' ? `The top ${this.slots} poppers go through` : `First ${this.slots} of ${alive} qualify`;
+    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? 'The team with the most goals stays in the show' : c.kind === 'team' ? `${c.team!.teams} teams. The team with the least floor goes home` : c.bump ? `The top ${this.slots} on points go through` : c.stomp ? `The top ${this.slots} stompers go through` : c.kind === 'score' ? `The top ${this.slots} poppers go through` : `First ${this.slots} of ${alive} qualify`;
     this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: modeName(info.id), goal, blurb: info.blurb, team: this.teamPlay?.mine() ?? this.cupP?.mine() ?? undefined });
     this.state = 'intro';
     this.stateT = 0;
@@ -536,17 +540,17 @@ export class MarbleGame {
     this.teamPlay = null;
     this.bounce?.dispose();
     this.bounce = null;
-    this.pinP = null;
-    this.shotP?.dispose();
-    this.shotP = null;
+    this.bumpP?.dispose();
+    this.bumpP = null;
+    this.stompP?.dispose();
+    this.stompP = null;
+    this.ui.meter(null);
+    this.bumpWarned = this.stompNext = -1;
     this.rocketP?.dispose();
     this.rocketP = null;
     this.cupP?.dispose();
     this.cupP = null;
     this.cupOT = this.cupTwo = false;
-    this.jackOn = false;
-    this.flipSeen = 0;
-    this.shotN = -1;
     this.padsGone = 0;
     this.starN = 0;
     this.bounceSuper = 0;
@@ -566,6 +570,7 @@ export class MarbleGame {
     this.tickAt = 0;
     this.frenzy = false;
     this.ui.fuse(null);
+    this.ui.meter(null);
     this.ui.call(null);
     // (the menu stands on the first platform course; a round may be built already)
     const id: RoundId = menu ? 'hopscotch' : SHOW[idx].id;
@@ -618,16 +623,8 @@ export class MarbleGame {
       this.bounce = new BouncePlay(c, this.scene, () => this.racers);
       for (const r of this.racers) if (r.bot) r.bot.bounce = this.bounce;
     }
-    if (c.pin && !menu) {
-      this.pinP = new PinPlay(() => this.racers);
-      c.pin.onHit = (m, w) => this.pinHit(m, w);
-      c.pin.setLamps(this.player()?.m.id ?? -1);
-    }
-    if (c.shot && !menu) {
-      this.shotP = new ShotPlay(c, this.scene, () => this.racers);
-      c.shot.onSlam = (m) => this.shotSlam(m);
-      c.shot.onHoop = (m) => this.shotHoop(m);
-    }
+    if (c.bump && !menu) this.bumpP = new BumpPlay(c, this.scene, () => this.racers);
+    if (c.stomp && !menu) this.stompP = new StompPlay(c, this.scene, () => this.racers, this.roundKey());
     if (c.rocket && !menu) this.rocketP = new RocketPlay(c, this.scene, () => this.racers);
     this.finCount = 0;
     this.wrapAt = 0;
@@ -839,7 +836,6 @@ export class MarbleGame {
       fx = pad.x;
       fy = pad.y;
     }
-    this.aimX = fx;
     const yaw = this.camYaw + this.yawOff;
     const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const right = new THREE.Vector3().crossVectors(fwd, UP);
@@ -859,10 +855,7 @@ export class MarbleGame {
       grab ||= pad.grab;
     }
     if (t) t.jump = t.dash = false;
-    if (live && jump) {
-      p.m.jump = true;
-      this.shotFire = true;
-    }
+    if (live && jump) p.m.jump = true;
     // (the jump button, held: the jetpacks)
     p.m.jet = live && (k.has('Space') || k.has('MouseLeft') || !!t?.hold || !!pad?.jump);
     if (live && dash) p.m.dash = true;
@@ -969,12 +962,12 @@ export class MarbleGame {
       this.bounceRules(dt);
       return;
     }
-    if (c.pin && this.pinP) {
-      this.pinRules();
+    if (c.bump && this.bumpP) {
+      this.bumpRules();
       return;
     }
-    if (c.shot && this.shotP) {
-      this.shotRules(dt);
+    if (c.stomp && this.stompP) {
+      this.stompRules(dt);
       return;
     }
     if (c.keep && this.keepP) {
@@ -1301,246 +1294,305 @@ export class MarbleGame {
     void name;
   }
 
-  /** Pinball Panic: the drain and the plunger (each browser its own balls), the calls */
-  private pinRules() {
+  /** Bumper Bash: the bangs (each browser its own cars), the rink coming apart, knockouts (the host's book) */
+  private bumpRules() {
     const c = this.course!;
     const w = c.b.world;
-    const G = this.pinP!;
-    const A = c.pin!;
+    const G = this.bumpP!;
+    const A = c.bump!;
     const x = w.time - c.state.go;
+    if (x < 0) return;
     const on = this.state === 'play';
-    if (on) {
-      if (x < 6) this.ui.call(x > 0.4 ? 'A / D STEER · JUMP FLIPS · DIVE NUDGES' : null, 0xff2fa0);
-      else if (x < 6.3) this.ui.call(null);
-      const lit = A.jackLit(x);
-      if (lit && !this.jackOn) {
-        this.ui.shout('JACKPOT LIT!', `${PIN.jackpot} up the middle`, 1500);
-        this.sound.notes([79, 84, 88], 0.06, 0.4, true);
-      }
-      this.jackOn = lit;
-      if (!this.frenzy && this.playT > PIN.T - PIN.multi) {
-        this.frenzy = true;
-        this.ui.shout('MULTIBALL!', 'Everything counts double', 2000);
-        this.sound.notes([72, 76, 79, 84, 88, 91], 0.06, 0.5, true);
-        this.shake = Math.max(this.shake, 0.35);
-      }
-      if (A.lastFlip > this.flipSeen) {
-        this.flipSeen = A.lastFlip;
-        this.sound.chip();
-      }
-    }
-    for (const r of this.racers) {
-      if (!r.local || r.out) continue;
-      const m = r.m;
-      const at = G.lane.get(m.id);
-      if (at !== undefined) {
-        // (JUMP sends you on your way; if you don't, the plunger goes by itself)
-        if (w.time >= at || (r.c.player && this.shotFire && w.time >= at - 0.7)) {
-          this.shotFire = false;
-          G.lane.delete(m.id);
-          A.fire(m);
-          if (r.c.player) this.sound.notes([55, 67], 0.05, 0.35);
-        }
-        continue;
-      }
-      if (!on) continue;
-      const [u, v] = A.uv(m.pos);
-      if (m.pos.y > c.killY && !(v > 28.4 && u < PIN.lane)) continue;
-      // (rolling back down the plunger lane is no drain: it just goes round again)
-      const was = u < PIN.lane ? G.drain(m.id) : 0;
-      A.load(m);
-      G.lane.set(m.id, w.time + 0.85);
-      if (r.c.player && was) {
-        this.ui.pop(was > 1 ? `DRAIN! x${was} LOST` : 'DRAIN!', true);
-        this.sound.notes([55, 50, 45], 0.07, 0.4);
-        this.shake = Math.max(this.shake, 0.2);
-      }
-    }
-    this.shotFire = false;
-    if (!this.guest && on && this.playT > PIN.T) this.endRound();
-  }
-
-  /** a bean of this browser's hit something: what it's worth, and into the book */
-  private pinHit(m: Marble, what: number) {
-    const G = this.pinP;
-    const r = this.racers.find((o) => o.m === m);
-    if (!G || !r || !r.local || this.state !== 'play') return;
-    const x = this.course!.b.world.time - this.course!.state.go;
-    const e = G.value(m.id, what, x);
-    if (this.guest) this.guest.send({ t: 'pts', id: m.id, v: e.v, w: what });
-    else {
-      const n = G.add(m.id, e.v);
-      this.host?.broadcast({ t: 'pts', id: m.id, v: e.v, n, w: what });
-    }
-    if (!r.c.player) return;
-    const big = what === PinHit.Jackpot || what === PinHit.Lanes || what === PinHit.Bank;
-    this.ui.pop(`+${e.v}`, big || e.v >= 50);
-    if (what === PinHit.Lanes) this.ui.shout('ALL LANES LIT!', `+${e.v}`, 1200);
-    if (what === PinHit.Bank) this.ui.shout('BANK DOWN!', `+${e.v}`, 1200);
-    if (what === PinHit.Target) this.rings.ring(m.pos.clone(), 2, 0xfff0a0, 0.25);
-    if (what < PinHit.Sling) this.rings.ring(m.pos.clone(), 2.2, 0x38e8ff, 0.25);
-    this.sound.notes([what === PinHit.Lane ? 84 : what === PinHit.Hole ? 79 : 72 + e.k * 2 + Math.floor(Math.random() * 3)], 0, 0.28, true);
-    if (e.up) {
-      this.ui.shout(`x${e.k} MULTIPLIER`, 'Stay out of the drain', 1000);
-      this.sound.notes([76, 83], 0.05, 0.4, true);
-    }
-    if (what === PinHit.Jackpot) {
-      this.ui.shout('JACKPOT!', `+${e.v}`, 1400);
-      this.confetti.burst(m.pos, 90, 8);
-      this.fireworks.show(m.pos, 3, 14, 10, 0.15);
-      this.fovKick = Math.max(this.fovKick, 4);
-    }
-    if (what < PinHit.Sling) this.shake = Math.max(this.shake, 0.08);
-  }
-
-  /** Big Shot: firing (each browser its own), the bell (the host's), falls */
-  private shotRules(dt: number) {
-    const c = this.course!;
-    const w = c.b.world;
-    const G = this.shotP!;
-    const x = w.time - c.state.go;
-    const on = this.state === 'play';
-    if (on) {
-      G.tick(dt, x, this.shotFire, this.aimX, this.autopilot);
-      this.shotFire = false;
-      for (const r of G.fired) this.shotBang(r as Racer);
-      const n = Math.floor(x / SHOT.V), u = x - n * SHOT.V;
-      if (G.meter !== null) {
-        const near = Math.abs(G.meter - 1) < 0.07;
-        this.ui.call(near ? 'FIRE!' : 'A / D AIM · JUMP FIRE', near ? 0x37e07a : 0xffd23a);
-        this.ui.meter((G.meter - 1 + SHOT.swing) / (SHOT.swing * 2), near);
-        this.ui.fuse(null);
-      } else {
-        this.ui.call(null);
-        this.ui.meter(null);
-        // (the clock to the bell, and a tick for each of the last three seconds)
-        this.ui.fuse(n < SHOT.volleys ? (SHOT.V - u) / SHOT.V : null, SHOT.V - u < 3 ? 0xff5040 : 0xffd23a);
-        const left = Math.ceil(SHOT.V - u - 0.35);
-        if (left <= 3 && left > 0 && left !== this.bellTick && n < SHOT.volleys) {
-          this.bellTick = left;
-          this.sound.notes([76], 0, 0.3, true);
-        }
-      }
-      if (G.perfect) {
-        G.perfect = false;
-        const p = this.player();
-        if (p) {
-          this.ui.pop(`PERFECT SHOT! +${SHOT.perfect}`, true);
-          this.sound.notes([84, 88, 91], 0.04, 0.4, true);
-          if (this.guest) this.guest.send({ t: 'pts', id: p.m.id, v: SHOT.perfect, w: PinHit.Drain });
-          else {
-            const tot = G.add(p.m.id, SHOT.perfect);
-            this.host?.broadcast({ t: 'pts', id: p.m.id, v: SHOT.perfect, n: tot, w: PinHit.Drain });
-          }
-        }
-      }
-      if (G.again) {
-        G.again = false;
-        this.ui.pop('ONE MORE GO!', true);
-        this.sound.notes([67, 74], 0.06, 0.35, true);
-      }
-      if (n !== this.shotN && n < SHOT.volleys) {
-        this.shotN = n;
-        const last = n === SHOT.volleys - 1;
-        const what = last ? 'Everything counts double' : n === SHOT.bumpersAt ? 'Bumpers on the target' : n === SHOT.barAt ? 'Hop the bar!' : n === SHOT.spinAt ? 'The floor is turning' : n >= SHOT.moveAt ? 'The bullseye has moved!' : 'Land it, stay on it';
-        this.ui.shout(last ? 'LAST SHOT!' : `SHOT ${n + 1} OF ${SHOT.volleys}`, what, 1400);
-        this.sound.notes([67, 72], 0.08, 0.35, true);
-      }
-      if (u >= SHOT.V - 0.35 && G.bell < n && n < SHOT.volleys) {
-        G.bell = n;
-        this.bellTick = 0;
-        this.rings.ring(c.shot!.bull(n, new THREE.Vector3()), SHOT.rings[2], 0xffe080, 0.5);
-        if (!this.guest) {
-          const s = G.ring(n);
-          this.host?.broadcast({ t: 'volley', n, s });
-          this.shotBell(s);
-        }
-      }
-      if (!this.guest && x >= SHOT_T + 0.3) this.endRound();
-    }
-    for (const r of this.racers) {
-      if (!r.fell && r.m.pos.y < c.killY) {
-        r.fell = w.time;
-        if (r.local || !this.guest) {
-          this.drop(r);
-          this.sound.voice('wah', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, r.c.player);
-        }
-        if (r.c.player) this.ui.pop('OFF THE EDGE!', true);
-      }
-    }
-  }
-
-  private bellTick = 0;
-  private shotBang(r: Racer) {
-    const m = r.m;
-    this.sound.boom(m.pos.x, m.pos.y, m.pos.z);
-    this.puffs.dust(m.pos.clone(), 14, 0.5, 3);
-    this.rings.ring(m.pos.clone(), 2.4, 0xfff0c0, 0.3);
-    if (r.c.player) {
-      this.shake = Math.max(this.shake, 0.3);
-      this.fovKick = Math.max(this.fovKick, 5);
-      this.sound.voice('hyah', m.id, m.pos.x, m.pos.y, m.pos.z, true);
-    }
-  }
-
-  /** a bean hit the ice in a slam: everyone near goes flying, wherever they're run from */
-  private shotSlam(m: Marble) {
-    const w = this.course!.b.world;
-    const at = m.pos.clone();
-    at.y -= 0.45;
-    this.rings.ring(at, SHOT.blast + 1, 0xffe080, 0.42);
-    this.puffs.stars(m.pos);
-    this.sound.boom(m.pos.x, m.pos.y, m.pos.z);
-    if (at.distanceTo(this.camera.position) < 26) this.shake = Math.max(this.shake, 0.32);
-    let hit = 0;
-    for (const o of this.racers) {
-      if (o.m === m || o.out || !o.m.active || o.m.frozen) continue;
-      const dx = o.m.pos.x - m.pos.x, dz = o.m.pos.z - m.pos.z, d = Math.hypot(dx, dz);
-      if (d > SHOT.blast || d < 0.05 || Math.abs(o.m.pos.y - m.pos.y) > 2.2) continue;
-      const k = 11 + 11 * (1 - d / SHOT.blast);
-      hit++;
-      if (o.local) {
-        o.m.vel.x += (dx / d) * k;
-        o.m.vel.z += (dz / d) * k;
-        o.m.vel.y += 5;
-        o.m.knock(0.7);
-      } else w.shoves.push({ target: o.m, kind: 'knock', vx: (dx / d) * k, vy: 5, vz: (dz / d) * k });
-    }
-    if (this.player()?.m === m) this.ui.pop(hit ? `SLAM! ${hit} BLASTED` : 'SLAM!', hit > 0);
-  }
-
-  private shotHoop(m: Marble) {
-    const G = this.shotP;
-    const r = this.racers.find((o) => o.m === m);
-    if (!G || !r || !r.local || this.state !== 'play') return;
-    if (this.guest) this.guest.send({ t: 'pts', id: m.id, v: SHOT.hoop, w: PinHit.Drain });
-    else {
-      const n = G.add(m.id, SHOT.hoop);
-      this.host?.broadcast({ t: 'pts', id: m.id, v: SHOT.hoop, n, w: PinHit.Drain });
-    }
-    if (r.c.player) {
-      this.ui.pop(`HOOP! +${SHOT.hoop}`, true);
-      this.sound.notes([84, 91], 0.05, 0.35, true);
-    }
-  }
-
-  /** the bell: what you got, for everyone */
-  private shotBell(s: [number, number, number][]) {
-    this.sound.notes([88, 84], 0.1, 0.4, true);
+    G.tick(w.time, x);
     const p = this.player();
-    if (!p || p.out) return;
-    const mine = s.find((e) => e[0] === p.m.id);
-    if (!mine) this.ui.pop('NOTHING!', true);
-    else if (mine[2] >= SHOT.pts[0]) {
-      this.ui.shout('BULLSEYE!', `+${mine[2]}`, 1100);
-      this.confetti.burst(p.m.pos, 60, 7);
-    } else this.ui.pop(`+${mine[2]}`, mine[2] >= SHOT.pts[1]);
+    const me = p && !p.out ? p.m : null;
+    if (on) {
+      if (x < 6) this.ui.call(x > 0.4 ? 'DIVE BOOSTS · JUMP HOPS · RAM THEM OFF' : null, 0xff3f9e);
+      else if (x < 6.3) this.ui.call(null);
+      const nx = A.next(x);
+      if (nx && nx.at - x < CAR.warn) {
+        if (this.bumpWarned !== nx.ring) {
+          this.bumpWarned = nx.ring;
+          this.ui.shout(`${nx.ring === 2 ? 'OUTER' : 'MIDDLE'} RING DROPPING!`, 'Get to the middle', 1800);
+          this.sound.notes([67, 62, 67, 62], 0.12, 0.45);
+        }
+        const left = Math.ceil(nx.at - x);
+        if (left <= 3 && left !== this.bellTick) {
+          this.bellTick = left;
+          this.sound.notes([76], 0, 0.4, true);
+        }
+      } else if (this.bumpWarned >= 0) {
+        // (it's gone)
+        this.bumpWarned = -1;
+        this.sound.boom(A.center.x, A.center.y, A.center.z);
+        this.shake = Math.max(this.shake, 0.55);
+      }
+      if (!this.frenzy && A.frenzy(x)) {
+        this.frenzy = true;
+        this.ui.shout('DOUBLE POINTS!', 'Boost faster, hit harder', 2000);
+        this.sound.notes([72, 76, 79, 84, 88], 0.07, 0.5, true);
+      }
+    }
+    for (const h of G.hits) {
+      const mine = !!me && (h.a === me.id || h.b === me.id);
+      const at = this.bangAt.set(h.x, h.y, h.z);
+      if (!mine && at.distanceToSquared(this.camera.position) > 2800) continue;
+      const am = this.racers.find((r) => r.m.id === h.a)?.m;
+      this.sound.hits([{ kind: h.b < 0 ? 'surface' : 'glass', mat: h.b < 0 ? Mat.Bumper : Mat.Felt, speed: h.power, x: h.x, y: h.y, z: h.z, ny: 0, a: am!, b: this.racers.find((r) => r.m.id === h.b)?.m }], me);
+      this.rings.ring(at.clone(), 1.1 + Math.min(2.4, h.power * 0.09), h.power > 16 ? 0xffd23a : 0xffffff, 0.22);
+      if (h.power > 9) this.puffs.stars(at.clone());
+      if (h.power > 16) this.sound.boom(h.x, h.y, h.z);
+      if (mine) {
+        this.shake = Math.max(this.shake, Math.min(0.6, h.power * 0.028));
+        if (h.power > 8) this.fovKick = Math.max(this.fovKick, Math.min(6, h.power * 0.2));
+        if (h.by === me!.id && h.b >= 0 && h.power > 13 && w.time > this.popT) {
+          this.popT = w.time + 0.4;
+          this.ui.pop(h.power > 24 ? 'WHAM!' : 'BAM!', h.power > 24);
+        }
+      }
+    }
+    if (me) {
+      const car = A.car(me.id);
+      if (car.fired) {
+        car.fired = false;
+        this.sound.dash(me.pos.x, me.pos.y, me.pos.z);
+        this.sound.notes([55, 67], 0.03, 0.22);
+        this.fovKick = Math.max(this.fovKick, 5);
+      }
+      const cd = x > CAR.T - CAR.frenzy ? CAR.cdFrenzy : CAR.cd;
+      this.ui.meter(on ? 1 - car.cd / cd : null, car.cd <= 0 ? 'BOOST READY' : 'BOOST', car.cd <= 0);
+    } else this.ui.meter(null);
+    for (const r of G.fallen) {
+      const m = r.m;
+      const by = w.time - m.hitT < CAR.credit && m.hitBy >= 0 && m.hitBy !== m.id ? m.hitBy : -1;
+      A.respawn(m, w.time);
+      if (!on) continue;
+      if (this.guest) this.guest.send({ t: 'ko', id: m.id, by });
+      else this.bumpKO(m.id, by);
+    }
+    if (!this.guest && on && this.playT > CAR.T) this.endRound();
   }
 
-  /** someone else's ball lit a bumper */
-  private pinFlash(i: number) {
-    const k = this.course?.pin?.bumpers[i]?.kin;
-    if (k) k.lastHit = this.course!.b.world.time;
+  /** (the host) a car's off: the book, and out to everyone */
+  private bumpKO(id: number, by: number) {
+    const G = this.bumpP;
+    if (!G) return;
+    const w = this.course!.b.world;
+    const e = G.ko(id, by, w.time - this.course!.state.go, w.time);
+    this.host?.broadcast({ t: 'ko', id, by, v: e.v, n: e.n, o: e.o, chain: e.chain, crown: e.crown });
+    this.koFx(id, by, e.v, e.chain, e.crown);
+  }
+
+  /** a knockout, as you see it */
+  private koFx(id: number, by: number, v: number, chain: boolean, crown: boolean) {
+    const c = this.course!;
+    const w = c.b.world;
+    const A = c.bump;
+    if (!A) return;
+    A.car(id).ghost = Math.max(A.car(id).ghost, w.time + CAR.ghost);
+    const p = this.player();
+    const who = this.racers.find((r) => r.m.id === id);
+    if (who) this.sound.voice('wah', id, who.m.pos.x, who.m.pos.y, who.m.pos.z, who === p);
+    if (p && by === p.m.id) {
+      this.ui.shout(crown ? 'CROWN KO!' : chain ? 'DOUBLE KO!' : 'KNOCKOUT!', `${who?.c.name ?? ''}  +${v}`, 1300);
+      this.sound.notes(chain || crown ? [76, 79, 84, 88] : [76, 84], 0.05, 0.45, true);
+      this.confetti.burst(p.m.pos, crown ? 110 : 50, 7);
+      this.shake = Math.max(this.shake, 0.3);
+    } else if (p && id === p.m.id) {
+      const k = this.racers.find((r) => r.m.id === by);
+      this.ui.pop(k ? `KO BY ${k.c.name.toUpperCase()}` : 'OFF THE EDGE!', true);
+      this.sound.notes([55, 50, 45], 0.08, 0.4);
+    } else if (who && who.m.pos.distanceTo(this.camera.position) < 30 && Math.random() < 0.5) this.sound.ooh();
+  }
+
+  /** Stomp Town: who's big, the landings, who's flat, what's down, and the waves */
+  private stompRules(dt: number) {
+    const c = this.course!;
+    const w = c.b.world;
+    const G = this.stompP!;
+    const A = c.stomp!;
+    const x = w.time - c.state.go;
+    if (x < 0) return;
+    const on = this.state === 'play';
+    G.tick(dt, w.time, x);
+    if (G.n < 0) {
+      // (the head start)
+      if (this.state === 'play') this.ui.call(`RUN! GIANTS IN ${Math.max(1, Math.ceil(STOMP.lead - x))}`, 0xff5a3a);
+      this.ui.meter(null);
+      return;
+    }
+    const p = this.player();
+    const me = p && !p.out ? p.m : null;
+    const big = !!me && A.isGiant(me.id, x);
+    const dbl = this.stompDbl();
+    if (G.waved) {
+      G.waved = false;
+      this.ui.call(null);
+      if (on) this.stompWave(big);
+    }
+    if (on) {
+      const u = A.into(x);
+      this.ui.fuse(u < A.W ? 1 - u / A.W : null, big ? 0xff5a3a : 0x4af0ff);
+      const next = A.turns[G.n + 1];
+      if (me && next?.includes(me.id) && u > A.W - 3.6 && this.stompNext !== G.n) {
+        this.stompNext = G.n;
+        this.ui.shout('YOU ARE NEXT!', 'Get ready to grow', 1700);
+        this.sound.notes([72, 79, 72, 79], 0.1, 0.4, true);
+      }
+      if (big) this.ui.meter(1 - me!.dashCD / STOMP.flopCD, me!.dashCD <= 0 ? 'BELLY FLOP READY' : 'BELLY FLOP', me!.dashCD <= 0);
+      else this.ui.meter(null);
+    }
+    // the ground shakes: footsteps near you, and anything coming down
+    const eye = this.focus()?.m.pos ?? this.camera.position;
+    for (const r of this.racers) {
+      if (!r.rig.step || r.out || !A.isGiant(r.m.id, x)) continue;
+      const d = r.m.pos.distanceTo(eye);
+      if (d > 36) continue;
+      this.shake = Math.max(this.shake, 0.2 * (1 - d / 36));
+      this.puffs.dust(r.m.pos.clone().setY(A.center.y + 0.1), 3, 0.5, 2);
+      if (d < 22) this.sound.step(r.m.pos.x, r.m.pos.y, r.m.pos.z, r.m === me, Mat.Wood);
+    }
+    for (const e of G.lands) {
+      const at = new THREE.Vector3(e.x, A.center.y + 0.15, e.z);
+      const d = at.distanceTo(eye);
+      this.rings.ring(at, e.flop ? STOMP.flopBlast : STOMP.blast, e.flop ? 0xffa030 : 0xffffff, 0.42);
+      this.puffs.dust(at, e.flop ? 30 : 20, 0.75, e.flop ? 7 : 5);
+      this.sound.boom(e.x, e.y, e.z);
+      this.shake = Math.max(this.shake, (e.flop ? 1 : 0.75) * Math.max(0, 1 - d / 45));
+      if (e.id === me?.id) this.fovKick = Math.max(this.fovKick, e.flop ? 7 : 4);
+    }
+    for (const e of G.squashes) {
+      if (this.guest) this.guest.send({ t: 'stomp', id: e.id, by: e.by });
+      else this.stompHit(e.id, e.by, dbl);
+    }
+    for (const e of G.smashes) {
+      if (A.houses[e.k].gone) continue;
+      const m = this.racers.find((r) => r.m.id === e.id)?.m ?? null;
+      A.fell(e.k);
+      G.rubble(e.k, m);
+      this.houseFx(e.k, e.id, STOMP.house * dbl);
+      if (this.guest) this.guest.send({ t: 'smash', k: e.k, id: e.id, w: G.n });
+      else {
+        const n = G.add(e.id, STOMP.house * dbl);
+        this.host?.broadcast({ t: 'smash', k: e.k, id: e.id, w: G.n, n });
+      }
+    }
+    // (a run of squashes reads as one big number, not a smudge of them)
+    if (this.tally.n && w.time > this.tally.t) {
+      this.ui.pop(`${this.tally.n > 1 ? `${this.tally.n}X SQUASH` : 'SQUASH'}! +${this.tally.v}`, true);
+      this.tally.n = this.tally.v = 0;
+    }
+    if (this.crash.n && w.time > this.crash.t) {
+      this.ui.pop(`${this.crash.n > 1 ? `${this.crash.n} HOUSES` : 'CRASH'}! +${this.crash.v}`);
+      this.crash.n = this.crash.v = 0;
+    }
+    for (const r of this.racers) {
+      if (r.local && r.m.pos.y < c.killY) {
+        r.m.pos.set(A.center.x, A.center.y + 3, A.center.z);
+        r.m.vel.set(0, 0, 0);
+        r.m.mode = Mode.Run;
+      }
+    }
+    if (!this.guest && on && x > A.end) {
+      // (the last lot through it)
+      for (const r of this.racers) if (!r.out && !A.turns[G.n]?.includes(r.m.id) && !G.hurt.has(r.m.id)) G.add(r.m.id, STOMP.survive * 2);
+      this.host?.broadcast({ t: 'book', s: [...G.score] });
+      this.endRound();
+    }
+  }
+
+  /** the last wave counts double */
+  private stompDbl() {
+    const A = this.course?.stomp;
+    return A && this.stompP && this.stompP.n === A.turns.length - 1 ? 2 : 1;
+  }
+
+  /** a new wave of giants, as you see it (the host pays out the last one) */
+  private stompWave(big: boolean) {
+    const c = this.course!;
+    const G = this.stompP!;
+    const A = c.stomp!;
+    const p = this.player();
+    const was = G.n - 1;
+    if (was >= 0) {
+      if (!this.guest) {
+        for (const id of G.endedOK) G.add(id, STOMP.survive);
+        this.host?.broadcast({ t: 'book', s: [...G.score] });
+      }
+      if (p && G.endedOK.includes(p.m.id)) {
+        this.ui.pop(`SURVIVED! +${STOMP.survive}`, true);
+        this.sound.notes([79, 84], 0.06, 0.35, true);
+      }
+    }
+    const last = G.n === A.turns.length - 1 && A.turns.length > 1;
+    if (big) {
+      this.ui.shout('YOU ARE THE GIANT!', last ? 'Last wave: everything counts double' : 'JUMP to slam · DIVE to belly flop', 2400);
+      this.sound.notes([48, 55, 60, 67, 72], 0.08, 0.6);
+      this.fovKick = Math.max(this.fovKick, 8);
+      this.shake = Math.max(this.shake, 0.5);
+    } else {
+      const names = A.turns[G.n].map((id) => this.racers.find((r) => r.m.id === id)?.c.name).filter(Boolean);
+      this.ui.shout(last ? 'LAST WAVE!' : `WAVE ${G.n + 1} OF ${A.turns.length}`, last ? 'Everything counts double. RUN!' : `${names.slice(0, 3).join(', ')}${names.length > 3 ? ' and more' : ''} ${names.length > 1 ? 'are' : 'is'} huge. RUN!`, 2000);
+      this.sound.notes([55, 62, 55, 62], 0.14, 0.45);
+    }
+  }
+
+  /** (the host) someone was stepped on */
+  private stompHit(id: number, by: number, dbl: number) {
+    const G = this.stompP;
+    if (!G) return;
+    const v = STOMP.squash * dbl;
+    const n = G.add(by, v), o = G.add(id, -STOMP.squashed);
+    this.host?.broadcast({ t: 'stomp', id, by, n, o });
+    this.stompFx(id, by, v);
+  }
+
+  /** someone flattened, as you see it */
+  private stompFx(id: number, by: number, v: number) {
+    const c = this.course!;
+    const A = c.stomp;
+    const G = this.stompP;
+    if (!A || !G) return;
+    const r = this.racers.find((q) => q.m.id === id);
+    if (!r) return;
+    const t = c.b.world.time;
+    G.hurt.add(id);
+    if (!r.local) A.flat.set(id, t + STOMP.flat);
+    const p = this.player();
+    const near = r.m.pos.distanceTo(this.camera.position) < 40;
+    if (near) {
+      this.puffs.stars(r.m.pos.clone());
+      this.sound.voice('oof', id, r.m.pos.x, r.m.pos.y, r.m.pos.z, r === p);
+    }
+    if (p && by === p.m.id) {
+      this.tally.n++;
+      this.tally.v += v;
+      this.tally.t = t + 0.18;
+      this.sound.notes([67 + Math.floor(Math.random() * 5), 79], 0.04, 0.4, true);
+      this.confetti.burst(r.m.pos, 24, 6);
+    } else if (r === p) {
+      this.ui.pop('SQUASHED!', true);
+      this.sound.notes([60, 52, 45], 0.07, 0.45);
+      this.shake = Math.max(this.shake, 0.55);
+    }
+  }
+
+  /** a house down, as you see it */
+  private houseFx(k: number, id: number, v: number) {
+    const A = this.course!.stomp!;
+    const q = A.houses[k];
+    const at = new THREE.Vector3(q.x, A.center.y + q.h * 0.5, q.z);
+    if (at.distanceTo(this.camera.position) < 60) {
+      this.sound.boom(q.x, at.y, q.z);
+      this.puffs.dust(at, 16, 0.7, 4);
+    }
+    const p = this.player();
+    if (p && id === p.m.id) {
+      this.crash.n++;
+      this.crash.v += v;
+      this.crash.t = this.course!.b.world.time + 0.3;
+      this.shake = Math.max(this.shake, 0.3);
+    }
   }
 
   /** Bounce House: the pops (the host's), the calls, and anyone who somehow got out of the castle */
@@ -1666,6 +1718,9 @@ export class MarbleGame {
     const p = this.player();
     if (!p) return;
     const w = this.course!.b.world;
+    const c = this.course!;
+    // (a giant's flop and a dodgem's ram have their own noise)
+    if (c.stomp || c.bump) p.m.bonked = false;
     if (p.m.bonked) {
       p.m.bonked = false;
       this.bonks++;
@@ -1690,7 +1745,7 @@ export class MarbleGame {
     }
     // a bean you bowled over that's gone over the edge
     for (const r of this.racers) {
-      if (r === p || r.m.hitBy !== p.m.id) continue;
+      if (c.bump || r === p || r.m.hitBy !== p.m.id) continue;
       if (w.time - r.m.hitT > 4) {
         r.m.hitBy = -1;
         continue;
@@ -2008,7 +2063,7 @@ export class MarbleGame {
       this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
     } else if (p && (c.bounce || this.book)) {
       const ok = through.has(p.c.id);
-      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.pin ? (ok ? 'What a table!' : 'Not enough on the board') : c.shot ? (ok ? 'Sharp shooting' : 'Too many misses') : ok ? 'You popped your way through' : 'Not enough pops', 3200);
+      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.bump ? (ok ? 'Last car rolling' : 'Not enough knockouts') : c.stomp ? (ok ? 'The terror of the town' : 'Not enough stomping') : ok ? 'You popped your way through' : 'Not enough pops', 3200);
       if (ok) this.sound.qualified();
       else this.sound.eliminated();
       this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
@@ -2196,14 +2251,22 @@ export class MarbleGame {
       case 'fin':
         if (r && r.c.owner === from) this.finish(r);
         break;
-      case 'pts':
-        // (a guest's bean scored: into the book, and out to everyone)
-        if (this.book) {
-          const n = this.book.add(m.id, m.v);
-          this.host?.broadcast({ t: 'pts', id: m.id, v: m.v, n, w: m.w });
-          if (m.w < PinHit.Sling) this.pinFlash(m.w);
-        }
+      case 'ko':
+        if (r && r.c.owner === from) this.bumpKO(m.id, m.by);
         break;
+      case 'stomp':
+        if (r && r.c.owner === from && this.stompP) this.stompHit(m.id, m.by, this.stompDbl());
+        break;
+      case 'smash': {
+        const G = this.stompP, A = this.course?.stomp;
+        if (!G || !A || m.w !== G.n || !A.houses[m.k] || A.houses[m.k].gone) break;
+        const v = STOMP.house * this.stompDbl();
+        A.fell(m.k);
+        G.rubble(m.k, null);
+        this.houseFx(m.k, m.id, v);
+        this.host?.broadcast({ t: 'smash', k: m.k, id: m.id, w: m.w, n: G.add(m.id, v) });
+        break;
+      }
       case 'out':
         if (r && r.c.owner === from && this.state === 'play') this.eliminate(r);
         break;
@@ -2281,12 +2344,6 @@ export class MarbleGame {
           if (r.local && !r.pend) this.fellOff(r);
         }
         break;
-      case 'pts':
-        if (this.book && m.n !== undefined) {
-          this.book.score.set(m.id, m.n);
-          if (m.w < PinHit.Sling) this.pinFlash(m.w);
-        }
-        break;
       case 'cup':
         this.cupP?.heard(m.s, m.a, m.b);
         break;
@@ -2297,12 +2354,33 @@ export class MarbleGame {
           this.cupGoal(m.team, m.by, m.own, m.ball);
         }
         break;
-      case 'volley':
-        if (this.shotP) {
-          this.shotP.bell = m.n;
-          for (const e of m.s) this.shotP.score.set(e[0], e[1]);
-          this.shotBell(m.s);
+      case 'ko':
+        if (this.bumpP && m.v !== undefined) {
+          if (m.by >= 0 && m.n !== undefined) this.bumpP.score.set(m.by, m.n);
+          if (m.o !== undefined) this.bumpP.score.set(m.id, m.o);
+          this.koFx(m.id, m.by, m.v, !!m.chain, !!m.crown);
         }
+        break;
+      case 'stomp':
+        if (this.stompP) {
+          if (m.n !== undefined) this.stompP.score.set(m.by, m.n);
+          if (m.o !== undefined) this.stompP.score.set(m.id, m.o);
+          this.stompFx(m.id, m.by, STOMP.squash * this.stompDbl());
+        }
+        break;
+      case 'smash': {
+        const G = this.stompP, A = this.course?.stomp;
+        if (!G || !A) break;
+        if (m.n !== undefined) G.score.set(m.id, m.n);
+        if (m.w === G.n && A.houses[m.k] && !A.houses[m.k].gone) {
+          A.fell(m.k);
+          G.rubble(m.k, null);
+          this.houseFx(m.k, m.id, STOMP.house * this.stompDbl());
+        }
+        break;
+      }
+      case 'book':
+        if (this.book) for (const [id, n] of m.s) this.book.score.set(id, n);
         break;
       case 'keep':
         if (this.keepP) {
@@ -2529,7 +2607,7 @@ export class MarbleGame {
       m.holding = f & F.HOLD ? m : null;
       m.heldT = f & F.HELD ? 0.3 : 0;
       m.quat.set(buf[o + 9], buf[o + 10], buf[o + 11], buf[o + 12]);
-      if (this.course.path) r.s = buf[o + 13];
+      if (this.course.path || this.course.bump) r.s = buf[o + 13];
       r.netEv |= f & (F.HOP | F.DIVE | F.KNOCK | F.GRAB);
       // (a host relays the guests' events on)
       if (this.host) r.ev |= f & (F.HOP | F.DIVE | F.KNOCK | F.GRAB);
@@ -2668,7 +2746,7 @@ export class MarbleGame {
     let want = this.camYaw;
     // the free arenas (Cookie Crumble, Meltdown, the paint rounds): behind you, turning with the way
     // you run (only as much as you're running forward, so a sidestep doesn't spin it round)
-    const free = !!(c.crumble || c.team || c.rocket);
+    const free = !!(c.crumble || c.team || c.rocket || c.stomp);
     let freeK = 0;
     if (free) {
       const hs = Math.hypot(m.vel.x, m.vel.z);
@@ -2685,16 +2763,9 @@ export class MarbleGame {
       if (ball) t.subVectors(ball.pos, m.pos);
       if (!ball || Math.hypot(t.x, t.z) < 5) c.cup.goal(this.cupP.teamOf(f.c.id), t).sub(m.pos);
       want = Math.atan2(t.x, t.z);
-    } else if (c.pin) {
-      // (looking up the table, always: up is up)
-      want = Math.PI;
-    } else if (c.shot) {
-      // (down the barrel while you aim, and on the bullseye after)
-      if (m.frozen) want = m.yaw;
-      else {
-        const d = c.shot.bull(Math.floor((c.b.world.time - c.state.go) / SHOT.V), new THREE.Vector3()).sub(m.pos);
-        if (Math.hypot(d.x, d.z) > 2) want = Math.atan2(d.x, d.z);
-      }
+    } else if (c.bump) {
+      // (behind the car: it goes where the nose goes)
+      want = m.yaw;
     } else if (c.plate) {
       const d = m.pos.clone().sub(c.plate.center);
       d.y = 0;
@@ -2711,18 +2782,14 @@ export class MarbleGame {
     // (the player's camera holds still; otherwise it swings round behind the way ahead)
     if (free) {
       if (!this.dragging) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * 2.2 * freeK));
-    } else if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.plate ? 1.5 : 3)));
-    if (c.pin || c.shot) {
-      this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.pin ? 8 : 4)));
-      this.yawOff = 0;
-    }
+    } else if (!this.manualCam || this.snapCam) this.camYaw = lerpAngle(this.camYaw, want, this.snapCam ? 1 : Math.min(1, dt * (c.bump ? 3.4 : c.plate ? 1.5 : 3)));
     const yaw = this.camYaw + this.yawOff;
     const pt = this.pitchOff;
     // (Cookie Crumble: the floors above the one you're on fade away, and the camera looks down on yours)
     if (c.crumble) c.crumble.view(Math.max(0, c.crumble.layerAt(m.pos.y + (f.fell ? 0 : 0.3))), dt);
-    const aiming = !!c.shot && m.frozen;
-    const dist = (c.cup ? 10.5 : c.pin ? 15 : aiming ? 8.5 : c.shot ? 11 : c.rocket ? 11.5 : c.crumble ? 7 : c.team ? 7.2 : c.call ? 9.8 : c.bounce ? 8.8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
-    const hgt = (c.cup ? 6.4 : c.pin ? 13 : aiming ? 7.2 : c.shot ? 7 : c.rocket ? 7.4 : c.crumble ? 4.6 : c.team ? 4.2 : c.call ? 7.6 : c.bounce ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
+    const giant = !!c.stomp && c.stomp.isGiant(m.id, c.b.world.time - c.state.go);
+    const dist = (c.cup ? 10.5 : c.bump ? 12 : giant ? 20 : c.stomp ? 9.6 : c.rocket ? 11.5 : c.crumble ? 7 : c.team ? 7.2 : c.call ? 9.8 : c.bounce ? 8.8 : c.plate ? 8.6 : 5.8 + Math.min(speed, 20) * 0.06) * (1 + Math.max(0, pt) * 0.25 - Math.min(0, pt) * 0.1);
+    const hgt = (c.cup ? 6.4 : c.bump ? 7 : giant ? 14 : c.stomp ? 7.8 : c.rocket ? 7.4 : c.crumble ? 4.6 : c.team ? 4.2 : c.call ? 7.6 : c.bounce ? 6 : c.plate ? 4.9 : 2.75 + Math.min(speed, 20) * 0.035) * (1 + pt * (c.crumble ? 0.7 : 1.1));
     const tgt = m.pos.clone();
     if (f.fell) tgt.y = Math.max(tgt.y, c.lakeY + 6);
     // (Bounce House: the view rides a steady height, or you'd be seasick in a minute)
@@ -2745,6 +2812,14 @@ export class MarbleGame {
       if (Math.abs(pos.z - ctr.z) > CUP.HL - 3 && Math.abs(pos.x - ctr.x) < CUP.goalHalf + 3) pos.y = Math.max(pos.y, ctr.y + CUP.goalH + 3.2);
       c.cup.view(pos);
     }
+    // (the town: the lens stays inside the hedges, and climbs if you're up against them)
+    if (c.stomp) {
+      const A = c.stomp, lim = A.H - 0.5;
+      const ox = Math.abs(pos.x - A.center.x) - lim, oz = Math.abs(pos.z - A.center.z) - lim;
+      if (ox > 0) pos.x = A.center.x + Math.sign(pos.x - A.center.x) * lim;
+      if (oz > 0) pos.z = A.center.z + Math.sign(pos.z - A.center.z) * lim;
+      pos.y += Math.max(0, ox, oz) * 0.6;
+    }
     // (Bounce House: always inside the castle, never out behind its walls)
     if (c.bounce) {
       const A = c.bounce, ex = pos.x - A.center.x, ez = pos.z - A.center.z, er = Math.hypot(ex, ez), lim = A.R - 1.2;
@@ -2755,8 +2830,9 @@ export class MarbleGame {
       }
     }
     // (the free arenas: a few metres out in front of you, at your feet's height)
-    const look = free ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.2, 0.5, Math.cos(yaw) * 3.2)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
-    if (c.plate && !free && !c.cup) look.lerp(c.plate.center, aiming ? 0.6 : 0.25);
+    const look = free || c.bump ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.2, 0.5, Math.cos(yaw) * 3.2)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
+    if (giant) look.y += 2;
+    if (c.plate && !free && !c.cup && !c.bump) look.lerp(c.plate.center, 0.25);
     if (this.snapCam) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
@@ -2771,6 +2847,7 @@ export class MarbleGame {
     }
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
+    c.stomp?.view(cam.position, tgt, dt);
     // (speed opens the view up; a jolt shakes it)
     if (this.shake > 0.002) {
       const s = this.shake;
@@ -2924,7 +3001,9 @@ export class MarbleGame {
     const v = new THREE.Vector3();
     for (const r of this.racers) {
       const me = r.c.player;
-      v.copy(r.m.pos).add(new THREE.Vector3(0, 1.4, 0)).project(cam);
+      // (over a giant's head, not in its belly)
+      const tall = c.stomp?.isGiant(r.m.id, c.b.world.time - c.state.go) ? 7.6 : c.bump ? 2 : 1.4;
+      v.copy(r.m.pos).add(new THREE.Vector3(0, tall, 0)).project(cam);
       const dist = r.m.pos.distanceTo(cam.position);
       const show = !r.out && !r.fell && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && (me || dist < (c.plate ? 15 : 22)) && r.m.active;
       this.ui.tag(r.c.id, me ? 'YOU' : r.c.name, ((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H, show || (r.c.human && !r.out && !r.fell && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && dist < 60), me, r.c.human && !me);
@@ -2946,16 +3025,16 @@ export class MarbleGame {
     }
     else if (this.book) {
       const place = p ? ranked.indexOf(p) + 1 : 0;
-      const k = this.pinP && p ? this.pinP.mult(p.m.id) : 1;
-      status = `${p ? this.book.of(p.m.id) : 0} PTS${k > 1 ? ` x${k}` : ''} · ${place}${ordinal(place).toUpperCase()} · ${place <= this.slots ? 'IN' : `TOP ${this.slots} GO THROUGH`}`;
+      const dmg = c.bump && p ? ` · DAMAGE ${Math.round(c.bump.car(p.m.id).dmg * 100)}%` : '';
+      status = `${p ? this.book.of(p.m.id) : 0} PTS${dmg} · ${place}${ordinal(place).toUpperCase()} · ${place <= this.slots ? 'IN' : `TOP ${this.slots} GO THROUGH`}`;
     } else status = `ALIVE ${alive} · TO ${this.slots}`;
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
     if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
     else if (this.cupP && (this.state === 'play' || this.state === 'over')) timer = this.playT > CUP.T ? 'GOLDEN GOAL' : clock(Math.max(0, CUP.T - this.playT));
     else if (this.bounce && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, BOUNCE.T - this.playT));
-    else if (this.pinP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, PIN.T - this.playT));
-    else if (this.shotP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, SHOT_T - this.playT));
+    else if (this.bumpP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, CAR.T - this.playT));
+    else if (this.stompP && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, c.stomp!.end - this.playT));
     else if (c.keep && (this.state === 'play' || this.state === 'over')) timer = this.playT > KEEP.T ? 'OVERTIME' : clock(Math.max(0, KEEP.T - this.playT));
     else if (c.plate && (this.state === 'play' || this.state === 'over')) {
       timer = clock(SURVIVE_T - this.playT);
@@ -2986,7 +3065,10 @@ export class MarbleGame {
     this.ui.speed(THREE.MathUtils.clamp((fast - 12.5) / 9, 0, 0.75));
     this.teamPlay?.sync();
     this.cupP?.sync();
-    this.shotP?.sync();
+    const sdt = THREE.MathUtils.clamp(c.b.world.time - this.syncT, 0, 0.05);
+    this.syncT = c.b.world.time;
+    this.bumpP?.sync(c.b.world.time, sdt);
+    this.stompP?.sync(c.b.world.time, sdt, c.b.world.time - c.state.go);
     this.rocketP?.sync(c.b.world.time);
     if (this.bounce && c.state.go < 1e8) {
       this.bounce.sync(c.b.world.time, c.b.world.time - c.state.go, this.camera.position, f?.m.pos ?? null);

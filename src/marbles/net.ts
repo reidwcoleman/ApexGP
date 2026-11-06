@@ -63,10 +63,12 @@ export type CtlMsg =
   | { t: 'tiles'; c: string }
   | { t: 'crumble'; k: number[]; at: number[] }
   | { t: 'splat'; k: number; id: number }
-  /** a points game: a guest's bean scored (to the host), and then the score for everyone (n: their total, w: what for) */
-  | { t: 'pts'; id: number; v: number; n?: number; w: number }
-  /** Big Shot: a volley's scores */
-  | { t: 'volley'; n: number; s: [number, number, number][] }
+  /** Bumper Bash: a car went off (a guest to the host, then the host's word for everyone: v points to `by`, n and o their totals) */
+  | { t: 'ko'; id: number; by: number; v?: number; n?: number; o?: number; chain?: boolean; crown?: boolean }
+  /** Stomp Town: a bean stepped on, a house down (the same way round), and the score for everyone at the end of a wave */
+  | { t: 'stomp'; id: number; by: number; n?: number; o?: number }
+  | { t: 'smash'; k: number; id: number; w: number; n?: number }
+  | { t: 'book'; s: [number, number][] }
   /** Crown Keeper: who has it (-1: loose), where it lies, everyone's time */
   | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
   /** Bounce House: a balloon popped (k) by id, worth v at combo c, leaving them on n */

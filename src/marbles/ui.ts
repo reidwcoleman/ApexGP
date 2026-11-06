@@ -193,13 +193,15 @@ export class UI {
   }
   private fuseEl: HTMLElement | null = null;
 
-  /** the cannon's power: a needle swinging over a bar, the middle of it green (null hides it) */
-  meter(f: number | null, hot = false) {
-    const el = this.meterEl ?? (this.meterEl = this.hudEl.appendChild(h('div', 'mm-meter', '<u></u><i></i><b>POWER</b>')));
+  /** a bar that fills as something charges: your boost, a giant's belly flop (null hides it) */
+  meter(f: number | null, label = '', ready = false) {
+    const el = this.meterEl ?? (this.meterEl = this.hudEl.appendChild(h('div', 'mm-meter', '<i></i><b></b>')));
     el.classList.toggle('mm-hide', f === null);
     if (f === null) return;
-    el.classList.toggle('hot', hot);
-    (el.children[1] as HTMLElement).style.left = `${Math.max(0, Math.min(1, f)) * 100}%`;
+    el.classList.toggle('hot', ready);
+    (el.children[0] as HTMLElement).style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
+    const b = el.children[1] as HTMLElement;
+    if (b.textContent !== label) b.textContent = label;
   }
   private meterEl: HTMLElement | null = null;
 

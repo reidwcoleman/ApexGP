@@ -144,6 +144,8 @@ export class Marble {
   guardT = 0;
   /** the jump button, held (the jetpacks) */
   jet = false;
+  /** the course turns this one itself (a dodgem can point one way and slide another) */
+  noFace = false;
   /** the bean it holds, and how long it has; being held (seconds left, refreshed by the holder) */
   holding: Marble | null = null;
   holdT = 0;
@@ -729,7 +731,7 @@ export class World {
     const sp = m.vel.length();
     if (sp > 0) m.vel.multiplyScalar(1 - Math.min(0.5, 0.0035 * sp * h));
     // facing: where it's running (or trying to)
-    if (m.mode === Mode.Run) {
+    if (m.mode === Mode.Run && !m.noFace) {
       const rx = m.vel.x - (grounded ? m.groundVel.x : 0), rz = m.vel.z - (grounded ? m.groundVel.z : 0);
       let want = NaN;
       if (il > 0.2) want = Math.atan2(inp.x, inp.z);
