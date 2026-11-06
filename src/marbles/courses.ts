@@ -17,7 +17,7 @@ import { crumble, type CrumbleArena } from './course-crumble.ts';
 import { storm, type StormArena } from './course-storm.ts';
 import { rocketRumble, type RocketArena } from './course-rocket.ts';
 import { bumperBash, type BumpArena } from './course-bumper.ts';
-import { stompTown, type StompArena } from './course-stomp.ts';
+import { stickyPicnic, type PicnicArena } from './course-picnic.ts';
 import { colourCall, type CallArena } from './course-modes.ts';
 import { bounceHouse, type BounceArena } from './course-bounce.ts';
 
@@ -59,9 +59,9 @@ export interface Course {
   storm?: StormArena;
   /** the party games (course-modes.ts) */
   call?: CallArena;
-  /** the ones that change how you move: the dodgems, the giants, the jetpacks */
+  /** the ones that change how you move: the dodgems, the sticky balls, the jetpacks */
   bump?: BumpArena;
-  stomp?: StompArena;
+  picnic?: PicnicArena;
   rocket?: RocketArena;
   bounce?: BounceArena;
   /** the Crown Keeper final */
@@ -79,7 +79,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'bumperbash' | 'stomptown' | 'bouncehouse' | 'beancup' | 'crownkeep' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'crumble' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'bumperbash' | 'stickypicnic' | 'bouncehouse' | 'beancup' | 'crownkeep' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -122,7 +122,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   rocketrumble: { id: 'rocketrumble', name: 'Rocket Rumble', kind: 'survival', blurb: 'Everyone has a jetpack. Hold jump to fly, dive to ram, fly through the rings to refuel. The platforms are going. The sea is not your friend.', keep: 0.6 },
   colourcall: { id: 'colourcall', name: 'Colour Call', kind: 'survival', blurb: 'A colour is called. Get on it: every other tile drops out from under you.', keep: 0.6 },
   bumperbash: { id: 'bumperbash', name: 'Bumper Bash', kind: 'score', blurb: 'Dodgems on a rink with no sides. DIVE boosts, JUMP hops. Ram everyone off for points. Every hit makes you fly further, and the rink keeps falling away.', keep: 0.6 },
-  stomptown: { id: 'stomptown', name: 'Stomp Town', kind: 'score', blurb: 'Everyone gets a turn as a giant. Flatten the small beans and smash the town: JUMP lands with a shockwave, DIVE is a belly flop. When you are small, run!', keep: 0.6 },
+  stickypicnic: { id: 'stickypicnic', name: 'Sticky Picnic', kind: 'score', blurb: 'Roll a ball of jam across a giant picnic. Anything smaller than you sticks and you grow, so what blocks you now is lunch later. Big balls pick up small ones: DIVE into them to knock bits off instead.', keep: 0.6 },
   bouncehouse: { id: 'bouncehouse', name: 'Bounce House', kind: 'score', blurb: 'The floor never stops bouncing. Pop balloons in the air, chain them for a combo, jump as you land to super bounce. Dodge the thunder ones.', keep: 0.6 },
   discodash: { id: 'discodash', name: 'Disco Dash', kind: 'race', blurb: 'Down the dance floors: laser gates, spinning floors and sweeping bars, all on the beat.', keep: 0.75 },
   bigtop: { id: 'bigtop', name: 'Big Top', kind: 'race', blurb: 'Under the tents: bounce pits, swinging hammers, seesaws and wrecking balls.', keep: 0.75 },
@@ -136,13 +136,13 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'bumperbash', 'bouncehouse', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'stomptown', 'beancup'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'crumble', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'bumperbash', 'bouncehouse', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'stickypicnic', 'beancup'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
 export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'crumble', 'meltdown', 'stormdeck', 'rocketrumble', 'colourcall'];
 /** the games that are neither: each show has at least one */
-export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'beancup', 'bumperbash', 'stomptown', 'bouncehouse'];
+export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'beancup', 'bumperbash', 'stickypicnic', 'bouncehouse'];
 export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
 
 /**
@@ -152,7 +152,7 @@ export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, '
  */
 export const MODES = {
   race: RACE_POOL.filter((id) => id !== 'lavarush'),
-  chase: ['lavarush', 'rocketrumble', 'stomptown'],
+  chase: ['lavarush', 'rocketrumble', 'stickypicnic'],
   floor: ['crumble', 'meltdown', 'colourcall'],
   dodge: ['jumpclub', 'tiptop', 'stormdeck'],
   team: ['paintparty', 'splatring', 'beancup'],
@@ -170,7 +170,7 @@ export function modeName(id: RoundId) {
   if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
   if (id === 'beancup') return 'TEAM SOCCER';
   if (id === 'bumperbash') return 'BUMPER CARS';
-  if (id === 'stomptown') return 'GIANT GAME';
+  if (id === 'stickypicnic') return 'GROW GAME';
   if (id === 'rocketrumble') return 'JETPACK BATTLE';
   if (id === 'bouncehouse') return 'BOUNCE GAME';
   const m = modeOf(id);
@@ -240,8 +240,8 @@ export function buildRound(id: RoundId): Course {
       return colourCall(info);
     case 'bumperbash':
       return bumperBash(info);
-    case 'stomptown':
-      return stompTown(info);
+    case 'stickypicnic':
+      return stickyPicnic(info);
     case 'bouncehouse':
       return bounceHouse(info);
     case 'crownkeep':

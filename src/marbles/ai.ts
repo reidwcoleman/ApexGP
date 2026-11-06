@@ -4,7 +4,8 @@ import { PlateBrain } from './ai-plate.ts';
 import { StormBrain } from './ai-arena.ts';
 import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
 import { CupBrain, RocketBrain } from './ai-play.ts';
-import { BumpBrain, StompBrain } from './ai-bash.ts';
+import { BumpBrain } from './ai-bash.ts';
+import { PicnicBrain } from './ai-picnic.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -93,7 +94,7 @@ export class Bot {
   private callB: CallBrain | null = null;
   private bounceB: BounceBrain | null = null;
   private bumpB: BumpBrain | null = null;
-  private stompB: StompBrain | null = null;
+  private picnicB: PicnicBrain | null = null;
   private rocketB: RocketBrain | null = null;
   private cupB: CupBrain | null = null;
   private keepB: KeepBrain | null = null;
@@ -206,10 +207,10 @@ export class Bot {
       this.bumpB.update(dt, t, c, all, this.ease);
       return;
     }
-    if (c.stomp) {
-      this.stompB ??= new StompBrain(m, this.skill, this.rnd);
+    if (c.picnic) {
+      this.picnicB ??= new PicnicBrain(m, this.skill, this.rnd, this.aggr);
       if (t < c.state.go + this.react) return;
-      this.stompB.update(dt, t, c, all, this.ease);
+      this.picnicB.update(dt, t, c, all, this.ease);
       return;
     }
     if (c.rocket) {
