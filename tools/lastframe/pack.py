@@ -51,5 +51,8 @@ if '--tex' in sys.argv:
             s = f'{SRC}/{t}_{suf}.jpg'
             if os.path.exists(s):
                 subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '4', s, '-o', f'{DST}/tex/{t}_{n}.webp'], check=True)
+            elif n == 'a':
+                # some scans ship no packed map: flat AO 1, roughness 0.85
+                Image.new('RGB', (4, 4), (255, 217, 0)).save(f'{DST}/tex/{t}_a.webp', lossless=True)
 sz = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DST) for f in fs)
 print('public/lastframe', sz // 1024 // 1024, 'MB')
