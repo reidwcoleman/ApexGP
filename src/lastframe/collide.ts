@@ -1,0 +1,178 @@
+/** The world as axis-aligned boxes: what stops you and what stops a bullet. */
+export interface Box {
+  min: [number, number, number];
+  max: [number, number, number];
+  /** a bullet goes through (drywall, doors, cartons) */
+  pen: boolean;
+  tag: string;
+  mat: string;
+  /** a door or pane can switch itself off */
+  off?: boolean;
+  id?: number;
+}
+
+export interface Hit {
+  t: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  box: Box;
+}
+
+const CELL = 3;
+
+export class World {
+  boxes: Box[] = [];
+  private grid = new Map<number, Box[]>();
+  /** moving things (doors) */
+  dyn: Box[] = [];
+
+  add(b: Box) {
+    this.boxes.push(b);
+    const x0 = Math.floor(b.min[0] / CELL), x1 = Math.floor(b.max[0] / CELL), z0 = Math.floor(b.min[2] / CELL), z1 = Math.floor(b.max[2] / CELL);
+    for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
+      const k = i * 4096 + j;
+      let c = this.grid.get(k);
+      if (!c) this.grid.set(k, (c = []));
+      c.push(b);
+    }
+  }
+
+  /** would a body of half-width r from foot y to y+h at (x,z) touch anything */
+  blocked(x: number, y: number, z: number, r: number, h: number): boolean {
+    const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL), z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
+    for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
+      const c = this.grid.get(i * 4096 + j);
+      if (c) for (const b of c) if (hitsBody(b, x, y, z, r, h)) return true;
+    }
+    for (const b of this.dyn) if (hitsBody(b, x, y, z, r, h)) return true;
+    return false;
+  }
+
+  /** the highest surface at or under y+reach beneath (x,z) */
+  floorAt(x: number, y: number, z: number, r: number, reach = 0.05): number {
+    let best = -1e9;
+    const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL), z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
+    for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
+      const c = this.grid.get(i * 4096 + j);
+      if (!c) continue;
+      for (const b of c) {
+        if (b.off || x + r <= b.min[0] || x - r >= b.max[0] || z + r <= b.min[2] || z - r >= b.max[2]) continue;
+        const top = b.max[1];
+        if (top <= y + reach && top > best) best = top;
+      }
+    }
+    return best;
+  }
+
+  /** nearest hit along a ray; `skipPen` sees through what a bullet would */
+  ray(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number, skipPen = false): Hit | null {
+    let best: Hit | null = null, bt = max;
+    const ix = 1 / (dx || 1e-9), iy = 1 / (dy || 1e-9), iz = 1 / (dz || 1e-9);
+    const test = (b: Box) => {
+      if (b.off || (skipPen && b.pen)) return;
+      let t0 = (b.min[0] - ox) * ix, t1 = (b.max[0] - ox) * ix, ax = 0;
+      if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
+      let tn = t0, tf = t1;
+      let u0 = (b.min[1] - oy) * iy, u1 = (b.max[1] - oy) * iy;
+      if (u0 > u1) { const s = u0; u0 = u1; u1 = s; }
+      if (u0 > tn) { tn = u0; ax = 1; }
+      if (u1 < tf) tf = u1;
+      let v0 = (b.min[2] - oz) * iz, v1 = (b.max[2] - oz) * iz;
+      if (v0 > v1) { const s = v0; v0 = v1; v1 = s; }
+      if (v0 > tn) { tn = v0; ax = 2; }
+      if (v1 < tf) tf = v1;
+      if (tn > tf || tf < 0 || tn < 0 || tn >= bt) return;
+      bt = tn;
+      best = { t: tn, nx: ax === 0 ? -Math.sign(dx) : 0, ny: ax === 1 ? -Math.sign(dy) : 0, nz: ax === 2 ? -Math.sign(dz) : 0, box: b };
+    };
+    for (const b of this.boxes) test(b);
+    for (const b of this.dyn) test(b);
+    return best;
+  }
+
+  /** clear line between two points */
+  sees(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): boolean {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    return !this.ray(a.x, a.y, a.z, dx / d, dy / d, dz / d, d - 0.05);
+  }
+}
+
+function hitsBody(b: Box, x: number, y: number, z: number, r: number, h: number): boolean {
+  return !b.off && x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && y + h > b.min[1] && y < b.max[1];
+}
+
+/** one body walking: slides along walls, climbs steps, falls */
+export interface Mover {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  grounded: boolean;
+  height: number;
+  /** eased stair lift for the eye */
+  stepEase: number;
+}
+
+const R = 0.27, STEP = 0.46;
+
+export function move(w: World, m: Mover, dt: number) {
+  const n = Math.max(1, Math.ceil(Math.hypot(m.vx, m.vz) * dt / 0.15));
+  const h = dt / n;
+  for (let i = 0; i < n; i++) {
+    stepAxis(w, m, m.vx * h, 0);
+    stepAxis(w, m, 0, m.vz * h);
+  }
+  m.vy -= 15 * dt;
+  const ny = m.y + m.vy * dt;
+  if (m.vy <= 0) {
+    const f = w.floorAt(m.x, m.y, m.z, R - 0.02);
+    if (ny <= f) {
+      m.y = f;
+      m.vy = 0;
+      m.grounded = true;
+    } else {
+      // stick to stairs going down
+      if (m.grounded && m.y - f < STEP + 0.02 && f > -50) {
+        m.stepEase += m.y - f;
+        m.y = f;
+        m.vy = 0;
+      } else {
+        m.y = ny;
+        m.grounded = false;
+      }
+    }
+  } else if (w.blocked(m.x, ny, m.z, R - 0.02, m.height)) {
+    m.vy = 0;
+  } else {
+    m.y = ny;
+    m.grounded = false;
+  }
+  m.stepEase *= Math.exp(-dt * 11);
+}
+
+function stepAxis(w: World, m: Mover, dx: number, dz: number) {
+  if (!dx && !dz) return;
+  const nx = m.x + dx, nz = m.z + dz;
+  if (!w.blocked(nx, m.y + 0.02, nz, R, m.height - 0.04)) {
+    m.x = nx;
+    m.z = nz;
+    return;
+  }
+  // a step
+  if (m.grounded && !w.blocked(nx, m.y + STEP, nz, R, m.height - 0.04)) {
+    const f = w.floorAt(nx, m.y + STEP, nz, R - 0.02);
+    if (f > m.y && f - m.y <= STEP && !w.blocked(nx, f + 0.01, nz, R, m.height - 0.04)) {
+      m.stepEase -= f - m.y;
+      m.y = f;
+      m.x = nx;
+      m.z = nz;
+      return;
+    }
+  }
+  if (dx) m.vx *= 0.3;
+  if (dz) m.vz *= 0.3;
+}

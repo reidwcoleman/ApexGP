@@ -222,6 +222,7 @@
             <div class="pk-row" data-row="games">
               <button class="pk-tile" data-game="f1" aria-label="Apex GP" style="--art: url(loading/monza_rain.webp); --pos: 50% 60%; --hpos: 50% 62%"><span class="pk-face"><span class="pk-wm wm-f1">Apex <u>GP</u></span></span></button>
               <button class="pk-tile" data-game="boost" aria-label="Boostball" style="--art: url(loading/boost_hero.webp); --pos: 34% 50%; --hpos: 50% 42%"><span class="pk-face"><span class="pk-wm wm-boost">Boost<br>ball</span></span></button>
+              <button class="pk-tile" data-game="lastframe" aria-label="Last Frame" style="--art: url(loading/lastframe_hero.webp); --pos: 50% 50%; --hpos: 50% 50%"><span class="pk-face"><span class="pk-wm wm-lf">Last<br>Frame</span></span></button>
               <button class="pk-tile" data-game="miami" aria-label="Miami" style="--art: url(loading/miami_rocket.webp); --pos: 58% 50%; --hpos: 60% 50%"><span class="pk-face"><span class="pk-wm wm-miami">Miami</span></span></button>
               <button class="pk-tile" data-game="marbles" aria-label="Wobble Mania" style="--art: url(loading/wobble_grid.webp); --pos: 46% 62%; --hpos: 50% 58%"><span class="pk-face"><span class="pk-wm wm-wobble">Wobble<br>Mania</span></span></button>
               <button class="pk-tile" data-game="mogul" aria-label="Mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 40%; --hpos: 50% 30%"><span class="pk-face"><span class="pk-wm wm-mogul">Mogul</span></span></button>
@@ -234,6 +235,7 @@
           <div class="pk-stage">
             <div class="pk-show" data-for="f1"><span class="pk-tag">Single Player</span><span class="pk-wm wm-f1">Apex <u>GP</u></span><h2>Continue where you left off</h2><p>Career, grand prix weekends and time trials on real circuits</p></div>
             <div class="pk-show" data-for="boost"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-boost">Boostball</span><h2>Continue where you left off</h2><p>Jump, flip and fly into the ball with friends</p></div>
+            <div class="pk-show" data-for="lastframe"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-lf">Last Frame</span><h2>Continue where you left off</h2><p>A body camera, a dark block and one magazine. Against friends or bots</p></div>
             <div class="pk-show" data-for="miami"><span class="pk-tag">Single Player</span><span class="pk-wm wm-miami">Miami</span><h2>Continue where you left off</h2><p>A crime story from Brickell to South Beach, the police on your tail</p></div>
             <div class="pk-show" data-for="marbles"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-wobble"><span>W</span><span>o</span><span>b</span><span>b</span><span>l</span><span>e</span> <span>M</span><span>a</span><span>n</span><span>i</span><span>a</span></span><h2>Continue where you left off</h2><p>A jelly-bean knockout party, online with friends</p></div>
             <div class="pk-show" data-for="mogul"><span class="pk-tag">Single Player</span><span class="pk-wm wm-mogul">Mogul</span><h2>Continue where you left off</h2><p>One food cart on a real street, then a whole city to out-earn</p></div>
@@ -405,8 +407,9 @@
       #picker .wm-wobble span:nth-child(even) { --w: 3deg; }
       #picker .wm-wobble span:nth-child(3n) { --w: -5deg; }
       #picker .wm-mogul { font: 400 calc(var(--wm) * 1.2) / 1 "PK Abril", Georgia, serif; color: #ffe0a3; }
+      #picker .wm-lf { font: 700 calc(var(--wm) * 0.8) / 1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: -0.04em; color: #e9e6df; text-shadow: 0 0.04em 0.3em rgba(0, 0, 0, 0.7); }
       #picker .wm-ts { font: italic 400 calc(var(--wm) * 0.92) / 1 "PK Racing", Impact, sans-serif; text-transform: uppercase; }
-      #picker .pk-face .wm-boost, #picker .pk-face .wm-ts, #picker .pk-face .wm-wobble { font-size: calc(var(--wm) * 0.72); line-height: 1.02; }
+      #picker .pk-face .wm-boost, #picker .pk-face .wm-ts, #picker .pk-face .wm-wobble, #picker .pk-face .wm-lf { font-size: calc(var(--wm) * 0.72); line-height: 1.02; }
       #picker .pk-acts { position: absolute; left: 0; bottom: 0; display: flex; gap: calc(11 * var(--u)); }
       #picker #pk-play { width: calc(222 * var(--u)); height: calc(48 * var(--u)); border-radius: calc(24 * var(--u)); background: rgba(255, 255, 255, 0.1); font-size: calc(18 * var(--u)); font-weight: 600; transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
       #picker #pk-more { display: flex; align-items: center; justify-content: center; gap: calc(3.5 * var(--u)); width: calc(48 * var(--u)); height: calc(48 * var(--u)); border-radius: 50%; background: rgba(255, 255, 255, 0.1); transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
@@ -493,7 +496,7 @@
     </style>
     <script>
       // The game picker, before anything heavy: the racing game's loader, its pictures and its downloads only start
-      // once it's picked; Boostball, Miami, Wobble Mania, Mogul and Tracksmith are pages of their own.
+      // once it's picked; Boostball, Last Frame, Miami, Wobble Mania, Mogul and Tracksmith are pages of their own.
       // (Skipped for the desktop build, the test tools and any link with parameters: straight to the race game.)
       // A cold start runs logo, stage, press any button, who's playing, home. Coming back from a game in the same
       // tab is the console waking from rest: straight home. ?pick goes straight home too, ?pick&boot forces the startup.
@@ -666,6 +669,7 @@
         var cardsOf = {
           f1: [['monza_sunset', 'Game mode', 'Career'], ['silverstone_drizzle', 'Game mode', 'Grand Prix Weekend'], ['suzuka_onboard', 'Game mode', 'Online']],
           boost: [['boost_hero', 'Online', 'Play With Friends', '20% 50%'], ['boost_hero', 'Game help', 'Jump, Flip and Fly', '80% 50%']],
+          lastframe: [['lastframe_hero', 'Online', 'Host a Room', '25% 50%'], ['lastframe_hero', 'Game mode', 'Last Team Standing', '60% 50%'], ['lastframe_hero', 'Game mode', 'Against Bots', '85% 50%']],
           miami: [['miami_brickell', 'Explore', 'Brickell'], ['miami_causeway', 'Explore', 'The Causeway'], ['miami_oceandrive', 'Explore', 'Ocean Drive']],
           marbles: [['wobble_grid', 'Round', 'Bumper Bash', '20% 50%'], ['wobble_grid', 'Round', 'Stomp Town', '50% 50%'], ['wobble_grid', 'Round', 'Rocket Rumble', '80% 50%']],
           mogul: [['mogul_hero', 'Start small', 'One Food Cart', '30% 40%'], ['mogul_hero', 'Think big', 'Out-Earn the City', '70% 30%']],
@@ -721,6 +725,7 @@
           else if (g === 'boost') location.href = 'boost.html';
           else if (g === 'mogul') location.href = 'mogul.html';
           else if (g === 'tracksmith') location.href = 'tracksmith.html';
+          else if (g === 'lastframe') location.href = 'lastframe.html';
           else start();
         };
         var launch = function (c) {
@@ -881,7 +886,7 @@
           if (d) { e.preventDefault(); return nav(d); }
           if (e.code === 'Escape' || e.code === 'Backspace') { e.preventDefault(); return back(); }
           if (phase === 'login' && e.code === 'KeyO') { var i = slots.indexOf(document.activeElement) - 1; if (i >= 0) { e.preventDefault(); renameIt(document.activeElement, i); } return; }
-          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5 }[e.code];
+          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6 }[e.code];
           if (n !== undefined && phase === 'home' && !over) { if (tab !== 'games') setTab('games'); choose(games[n]); }
         };
         window.addEventListener('keydown', keys);

@@ -1,0 +1,451 @@
+import type { World } from './collide.ts';
+import type { Door, MapData, Pane } from './world.ts';
+import { Nav, type Node } from './nav.ts';
+import { Bot, botName } from './bots.ts';
+import { trace, type Tracer } from './ballistics.ts';
+import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { stepNade, type NadeSim } from './nade.ts';
+import type { Body } from './hitbox.ts';
+
+export interface BodyState extends Body {
+  pitch: number;
+  flags: number;
+  w: number;
+}
+
+/** The match itself: runs in the host's browser (or alone, for solo play). */
+export class Match {
+  players: PlayerInfo[] = [];
+  bodies: BodyState[] = [];
+  bots = new Map<number, Bot>();
+  phase: Phase = 'warmup';
+  clock = 5;
+  round = 1;
+  score: [number, number] = [0, 0];
+  holdZone = 0;
+  holdOwner = -1;
+  holdProg = 0;
+  private respawn = new Map<number, number>();
+  private nades: (NadeSim & { id: number; s: number; kind: NadeKind; fuse: number })[] = [];
+  private nadeId = 1;
+  private holdTick = 0;
+  private goals: Node[] = [];
+  readonly nav: Nav;
+  private doorCool: number[] = [];
+
+  constructor(
+    readonly cfg: MatchConfig,
+    readonly world: World,
+    readonly map: MapData,
+    readonly doors: Door[],
+    readonly panes: Pane[],
+    nav: Nav,
+    readonly emit: (e: Ev) => void,
+  ) {
+    this.nav = nav;
+    this.goals = nav.nodes.filter((_, i) => i % 11 === 0);
+    this.doorCool = doors.map(() => 0);
+  }
+
+  addHuman(id: string, name: string, team: number, primary: WeaponId): PlayerInfo {
+    const slot = this.freeSlot();
+    const p: PlayerInfo = { slot, id, name, team: this.cfg.mode === 'ffa' ? 2 : team, bot: false, primary, kills: 0, deaths: 0, score: 0, ping: 0, hp: 100, alive: false };
+    this.players.push(p);
+    this.bodies[slot] = { x: 0, y: -50, z: 0, yaw: 0, pitch: 0, lean: 0, crouch: false, flags: 0, w: 0 };
+    return p;
+  }
+
+  private freeSlot() {
+    for (let i = 0; i < 16; i++) if (!this.players.some((p) => p.slot === i)) return i;
+    return 15;
+  }
+
+  removeHuman(id: string) {
+    const i = this.players.findIndex((p) => p.id === id);
+    if (i >= 0) {
+      this.players.splice(i, 1);
+      this.fillBots();
+      this.emit({ t: 'roster', players: this.players });
+    }
+  }
+
+  /** a person takes a bot's place */
+  dropBot(team: number) {
+    const i = this.players.findIndex((p) => p.bot && (p.team === team || p.team === 2));
+    if (i < 0) return;
+    const p = this.players[i];
+    this.players.splice(i, 1);
+    this.bots.delete(p.slot);
+    this.respawn.delete(p.slot);
+  }
+
+  joinNow(p: PlayerInfo) {
+    if (this.players.includes(p) && !p.alive && this.phase !== 'over') this.spawn(p, false);
+  }
+
+  /** bots make up the numbers: `cfg.bots` per side beyond the humans */
+  fillBots() {
+    const ffa = this.cfg.mode === 'ffa';
+    const want = this.cfg.bots;
+    const teamsize = [0, 1].map((t) => this.players.filter((p) => p.team === t).length);
+    for (let t = 0; t < (ffa ? 1 : 2); t++) {
+      let have = ffa ? this.players.length : teamsize[t];
+      while (have < want && this.players.length < 16) {
+        const slot = this.freeSlot();
+        const primary = rollPrimary();
+        this.players.push({ slot, id: `bot-${slot}`, name: botName(slot + this.cfg.seed), team: ffa ? 2 : t, bot: true, primary, kills: 0, deaths: 0, score: 0, ping: 0, hp: 100, alive: false });
+        this.bodies[slot] = { x: 0, y: -50, z: 0, yaw: 0, pitch: 0, lean: 0, crouch: false, flags: 0, w: 0 };
+        const skill = Math.min(1, Math.max(0, this.cfg.skill + (Math.random() - 0.5) * 0.2));
+        this.bots.set(slot, new Bot(this, slot, skill));
+        have++;
+      }
+    }
+  }
+
+  start() {
+    this.fillBots();
+    this.emit({ t: 'roster', players: this.players });
+    this.newRound(true);
+  }
+
+  private newRound(first: boolean) {
+    const rounds = this.cfg.mode === 'rounds';
+    this.phase = 'warmup';
+    this.clock = first ? 5 : 4;
+    this.respawn.clear();
+    for (const d of this.doors) this.setDoor(d.id, 0, 1);
+    this.emit({ t: 'phase', phase: this.phase, round: this.round, clock: this.clock, score: this.score, hold: this.holdZone });
+    for (const p of this.players) this.spawn(p, rounds);
+  }
+
+  private clockFor() {
+    return this.cfg.mode === 'rounds' ? 110 : this.cfg.time * 60;
+  }
+
+  update(dt: number) {
+    const live = this.phase === 'live';
+    this.clock -= dt;
+    if (this.phase === 'warmup' && this.clock <= 0) {
+      this.phase = 'live';
+      this.clock = this.clockFor();
+      this.emit({ t: 'phase', phase: 'live', round: this.round, clock: this.clock, score: this.score, hold: this.holdZone });
+    } else if (this.phase === 'live' && this.clock <= 0) {
+      this.timeUp();
+    } else if (this.phase === 'between' && this.clock <= 0) {
+      this.round++;
+      this.newRound(false);
+    }
+    for (const b of this.bots.values()) {
+      const p = this.players.find((q) => q.slot === b.slot);
+      if (!p?.alive) continue;
+      b.update(dt, live);
+      const s = this.bodies[b.slot];
+      s.x = b.m.x;
+      s.y = b.m.y;
+      s.z = b.m.z;
+      s.yaw = b.yaw;
+      s.pitch = b.pitch;
+      s.crouch = b.crouch;
+      s.lean = b.lean;
+      s.w = WEAPON_LIST.indexOf(b.weapon);
+      s.flags = F.alive | (b.crouch ? F.crouch : 0) | (b.ads ? F.ads : 0) | (b.light ? F.light : 0) | (b.reload > 0 ? F.reload : 0) | (Math.hypot(b.m.vx, b.m.vz) > 0.3 ? F.moving : 0) | (Math.hypot(b.m.vx, b.m.vz) > 4.2 ? F.sprint : 0);
+    }
+    const now = performance.now() / 1000;
+    for (const [slot, at] of this.respawn) {
+      if (now >= at && this.phase !== 'over' && this.cfg.mode !== 'rounds') {
+        this.respawn.delete(slot);
+        const p = this.players.find((q) => q.slot === slot);
+        if (p) this.spawn(p, false);
+      }
+    }
+    for (let i = this.nades.length - 1; i >= 0; i--) {
+      const n = this.nades[i];
+      stepNade(this.world, n, dt);
+      n.fuse -= dt;
+      if (n.fuse <= 0) {
+        this.nades.splice(i, 1);
+        this.blast(n);
+      }
+    }
+    for (let i = 0; i < this.doorCool.length; i++) this.doorCool[i] -= dt;
+    if (live && this.cfg.mode === 'hold') this.holdUpdate(dt);
+  }
+
+  private blast(n: { id: number; s: number; kind: NadeKind; x: number; y: number; z: number }) {
+    this.emit({ t: 'boom', id: n.id, kind: n.kind, p: [n.x, n.y, n.z] });
+    this.noise({ x: n.x, y: n.y, z: n.z }, 90);
+    if (n.kind !== 'frag') return;
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      const b = this.bodies[p.slot];
+      const d = Math.hypot(b.x - n.x, b.y + 1 - n.y, b.z - n.z);
+      if (d > 9) continue;
+      if (!this.world.sees({ x: n.x, y: n.y + 0.15, z: n.z }, { x: b.x, y: b.y + 1, z: b.z })) continue;
+      const dmg = Math.round(170 * Math.max(0, 1 - d / 8) ** 1.4);
+      if (dmg > 0) this.damage(n.s, p.slot, dmg, ZONE.blast, -1, [b.x - n.x, 0.2, b.z - n.z], d);
+    }
+  }
+
+  private holdUpdate(dt: number) {
+    const c = this.map.hold[this.holdZone];
+    const n = [0, 0];
+    for (const p of this.players) {
+      if (!p.alive || p.team > 1) continue;
+      const b = this.bodies[p.slot];
+      if (Math.hypot(b.x - c[0], b.z - c[2]) < 6 && Math.abs(b.y - c[1]) < 4.5) n[p.team]++;
+    }
+    const lead = n[0] > n[1] ? 0 : n[1] > n[0] ? 1 : -1;
+    if (lead >= 0 && !(n[0] && n[1])) {
+      if (this.holdOwner !== lead) {
+        this.holdProg += dt / 6;
+        if (this.holdProg >= 1) {
+          this.holdOwner = lead;
+          this.holdProg = 0;
+        }
+      } else this.holdProg = Math.max(0, this.holdProg - dt);
+    }
+    this.holdTick += dt;
+    if (this.holdTick >= 1) {
+      this.holdTick -= 1;
+      if (this.holdOwner >= 0) this.score[this.holdOwner] += 1;
+      this.emit({ t: 'hold', zone: this.holdZone, owner: this.holdOwner, prog: this.holdProg, score: this.score });
+      if (this.score[0] >= this.cfg.limit || this.score[1] >= this.cfg.limit) this.finish(this.score[0] > this.score[1] ? 0 : 1);
+      // the fight moves on every minute and a half
+      const elapsed = Math.floor(this.clockFor() - this.clock);
+      const z = Math.floor(elapsed / 90) % this.map.hold.length;
+      if (z !== this.holdZone) {
+        this.holdZone = z;
+        this.holdOwner = -1;
+        this.holdProg = 0;
+      }
+    }
+  }
+
+  private timeUp() {
+    if (this.cfg.mode === 'rounds') {
+      const a = this.players.filter((p) => p.team === 0 && p.alive).length, b = this.players.filter((p) => p.team === 1 && p.alive).length;
+      this.endRound(a === b ? -1 : a > b ? 0 : 1, 'Time');
+    } else if (this.cfg.mode === 'ffa') {
+      const top = [...this.players].sort((p, q) => q.kills - p.kills)[0];
+      this.finish(top?.slot ?? -1);
+    } else this.finish(this.score[0] === this.score[1] ? -1 : this.score[0] > this.score[1] ? 0 : 1);
+  }
+
+  private endRound(winner: number, why: string) {
+    if (winner >= 0) this.score[winner]++;
+    if (this.score[0] >= this.cfg.limit || this.score[1] >= this.cfg.limit) return this.finish(winner);
+    this.phase = 'between';
+    this.clock = 5;
+    this.emit({ t: 'phase', phase: 'between', round: this.round, clock: 5, score: this.score, msg: why, winner });
+  }
+
+  private finish(winner: number) {
+    this.phase = 'over';
+    this.clock = 14;
+    this.emit({ t: 'phase', phase: 'over', round: this.round, clock: 14, score: this.score, winner });
+    this.emit({ t: 'roster', players: this.players });
+  }
+
+  foes(a: number, b: number) {
+    if (this.cfg.mode === 'ffa') return a !== b;
+    const p = this.teamOf(a), q = this.teamOf(b);
+    return p !== q;
+  }
+
+  teamOf(s: number) {
+    return this.players.find((p) => p.slot === s)?.team ?? 2;
+  }
+
+  /** a place worth walking to */
+  objective(slot: number): Node | null {
+    if (this.cfg.mode === 'hold') {
+      const c = this.map.hold[this.holdZone];
+      const n = this.nav.nearest(c[0] + (Math.random() - 0.5) * 8, c[1], c[2] + (Math.random() - 0.5) * 8);
+      if (n) return n;
+    }
+    // drift toward where the enemy was last, some of the time
+    if (Math.random() < 0.45) {
+      const foes = this.players.filter((p) => p.alive && this.foes(slot, p.slot));
+      if (foes.length) {
+        const b = this.bodies[foes[Math.floor(Math.random() * foes.length)].slot];
+        const n = this.nav.nearest(b.x + (Math.random() - 0.5) * 16, b.y, b.z + (Math.random() - 0.5) * 16);
+        if (n) return n;
+      }
+    }
+    return this.goals[Math.floor(Math.random() * this.goals.length)] ?? null;
+  }
+
+  openDoorsNear(x: number, y: number, z: number, dx: number, dz: number) {
+    for (const d of this.doors) {
+      if (d.want > 0 || this.doorCool[d.id] > 0) continue;
+      const c = d.centre;
+      if (Math.abs(c.y - 1 - y) > 1.5) continue;
+      const ex = c.x - x, ez = c.z - z;
+      const dist = Math.hypot(ex, ez);
+      if (dist < 1.5 && (ex * dx + ez * dz >= 0 || !dx)) this.useDoor(d.id, [x, y, z]);
+    }
+  }
+
+  private setDoor(i: number, open: number, dir: number) {
+    this.emit({ t: 'door', i, open, dir });
+  }
+
+  useDoor(i: number, from: [number, number, number]) {
+    const d = this.doors[i];
+    if (!d || this.doorCool[i] > 0) return;
+    this.doorCool[i] = 0.55;
+    const a = (d as unknown as { d: { axis: string } }).d.axis === 'x';
+    const side = a ? Math.sign(from[2] - d.centre.z) : Math.sign(from[0] - d.centre.x);
+    const dir = -(side || 1);
+    this.setDoor(i, d.want > 0 ? 0 : 1, dir);
+  }
+
+  private spawn(p: PlayerInfo, fixed: boolean) {
+    const list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : p.team === 0 ? this.map.spawns.a : this.map.spawns.b;
+    const others = this.players.filter((q) => q.alive && this.foes(p.slot, q.slot));
+    let best = list[0], bs = -1e9;
+    for (let k = 0; k < 10; k++) {
+      const c = list[Math.floor(Math.random() * list.length)];
+      let s = Math.random() * 3;
+      for (const q of others) {
+        const b = this.bodies[q.slot];
+        const d = Math.hypot(b.x - c[0], b.z - c[2]);
+        s += Math.min(d, 28) * 0.1;
+        if (d < 12) s -= 8;
+        if (this.world.sees({ x: c[0], y: c[1] + 1.5, z: c[2] }, { x: b.x, y: b.y + 1.5, z: b.z })) s -= 12;
+      }
+      for (const q of this.players) if (q !== p && q.alive && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 1) s -= 20;
+      if (s > bs) {
+        bs = s;
+        best = c;
+      }
+    }
+    const jx = (Math.random() - 0.5) * 2.4, jz = (Math.random() - 0.5) * 2.4;
+    let x = best[0] + jx, z = best[2] + jz;
+    if (this.world.blocked(x, best[1] + 0.1, z, 0.3, 1.7)) {
+      x = best[0];
+      z = best[2];
+    }
+    const y = Math.max(this.world.floorAt(x, best[1] + 0.5, z, 0.2), best[1]);
+    // face the middle of the block
+    const yaw = Math.atan2(-(46 - x), -(-30 - z));
+    p.hp = 100;
+    p.alive = true;
+    const b = this.bodies[p.slot];
+    b.x = x;
+    b.y = y;
+    b.z = z;
+    b.yaw = yaw;
+    b.flags = F.alive;
+    const bot = this.bots.get(p.slot);
+    if (bot) {
+      p.primary = rollPrimary(p.primary);
+      bot.reset(x, y, z, yaw, p.primary);
+    }
+    this.emit({ t: 'spawn', s: p.slot, p: [x, y, z], yaw, primary: p.primary });
+  }
+
+  /** a request from a player in the game */
+  handle(slot: number, r: Req) {
+    const me = this.players.find((p) => p.slot === slot);
+    if (!me) return;
+    switch (r.t) {
+      case 'shot':
+        this.emit({ t: 'shot', s: slot, w: r.w, o: r.o, e: r.e, surf: r.surf });
+        this.noise({ x: r.o[0], y: r.o[1], z: r.o[2] }, WEAPONS[WEAPON_LIST[r.w]].loud);
+        break;
+      case 'hit':
+        if (me.alive && this.foes(slot, r.to)) this.damage(slot, r.to, r.dmg, r.zone, r.w, r.dir, r.dist);
+        break;
+      case 'door':
+        this.useDoor(r.i, r.from);
+        break;
+      case 'pane':
+        this.emit({ t: 'pane', i: r.i });
+        break;
+      case 'nade': {
+        const id = this.nadeId++;
+        this.nades.push({ id, s: slot, kind: r.kind, x: r.o[0], y: r.o[1], z: r.o[2], vx: r.v[0], vy: r.v[1], vz: r.v[2], fuse: r.fuse, rest: false });
+        this.emit({ t: 'nade', s: slot, kind: r.kind, o: r.o, v: r.v, fuse: r.fuse, id });
+        break;
+      }
+      case 'chat':
+        this.emit({ t: 'chat', from: me.name, text: String(r.text).slice(0, 120) });
+        break;
+      case 'me':
+        if (r.primary && PRIMARIES.includes(r.primary)) me.primary = r.primary;
+        break;
+    }
+  }
+
+  botFire(b: Bot, w: number) {
+    const id = WEAPON_LIST[w];
+    const spec = WEAPONS[id];
+    const m = b.m;
+    const ox = m.x, oy = m.y + (b.crouch ? 1.05 : 1.5), oz = m.z;
+    const out: Tracer = { e: [], surf: [], hits: [], panes: [] };
+    const bodies: [number, BodyState][] = this.players.filter((p) => p.alive).map((p) => [p.slot, this.bodies[p.slot]]);
+    for (let i = 0; i < spec.pellets; i++) {
+      const sp = ((spec.pellets > 1 ? spec.hip : 0.4 + (1 - b.skill) * 0.9) * Math.PI) / 180;
+      const yaw = b.yaw + gauss() * sp, pitch = b.pitch + gauss() * sp;
+      const cp = Math.cos(pitch);
+      trace(this.world, bodies, ox, oy, oz, -Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp, spec, b.slot, out);
+    }
+    for (const i of out.panes) this.emit({ t: 'pane', i });
+    this.emit({ t: 'shot', s: b.slot, w, o: [ox, oy, oz], e: out.e, surf: out.surf });
+    this.noise({ x: ox, y: oy, z: oz }, spec.loud);
+    for (const h of out.hits) {
+      if (!this.foes(b.slot, h.slot)) continue;
+      const dmg = Math.round(spec.dmg * h.k * (h.zone === 0 ? spec.headX : h.zone === 2 ? 0.72 : 1));
+      this.damage(b.slot, h.slot, dmg, h.zone, w, [h.at[0] - ox, h.at[1] - oy, h.at[2] - oz], h.dist);
+    }
+  }
+
+  noise(p: { x: number; y: number; z: number }, loud: number) {
+    for (const b of this.bots.values()) b.hear(p, loud);
+  }
+
+  damage(by: number, to: number, dmg: number, zone: number, w: number, dir: [number, number, number], dist: number) {
+    const p = this.players.find((q) => q.slot === to);
+    if (!p?.alive || this.phase === 'over' || this.phase === 'between') return;
+    p.hp = Math.max(0, p.hp - dmg);
+    const n = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+    const d: [number, number, number] = [dir[0] / n, dir[1] / n, dir[2] / n];
+    const atk = this.bodies[by];
+    this.bots.get(to)?.hurt(atk ?? this.bodies[to]);
+    if (p.hp > 0) {
+      this.emit({ t: 'hit', s: to, by, dmg, hp: p.hp, zone, dir: d });
+      return;
+    }
+    p.alive = false;
+    p.deaths++;
+    this.bodies[to].flags &= ~F.alive;
+    const killer = this.players.find((q) => q.slot === by);
+    if (killer && killer !== p) {
+      killer.kills++;
+      killer.score += zone === 0 ? 150 : 100;
+    }
+    this.emit({ t: 'die', s: to, by, zone, w, dir: d, dist });
+    const mode = this.cfg.mode;
+    if (mode === 'tdm' && killer && killer !== p && killer.team < 2) {
+      this.score[killer.team]++;
+      this.emit({ t: 'phase', phase: this.phase, round: this.round, clock: this.clock, score: this.score });
+      if (this.score[killer.team] >= this.cfg.limit) this.finish(killer.team);
+    }
+    if (mode === 'ffa' && killer && killer.kills >= this.cfg.limit) this.finish(killer.slot);
+    if (mode === 'rounds') {
+      const a = this.players.some((q) => q.team === 0 && q.alive), b = this.players.some((q) => q.team === 1 && q.alive);
+      if (this.phase === 'live' && (!a || !b)) this.endRound(a ? 0 : 1, 'Eliminated');
+    } else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 5.5));
+    this.emit({ t: 'roster', players: this.players });
+  }
+}
+
+function rollPrimary(prev?: WeaponId): WeaponId {
+  const r = Math.random();
+  return prev && r < 0.7 ? prev : r < 0.62 ? 'carbine' : r < 0.86 ? 'shotgun' : 'rifle';
+}
+
+function gauss() {
+  return (Math.random() + Math.random() + Math.random() - 1.5) * 0.8;
+}

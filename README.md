@@ -5,7 +5,7 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
 The site opens like a console: logo, the lit stage, press any button, who's playing, then a home screen with one row of tiles, the selected game's art filling the screen and activity cards under it. It's measured off real PS5 footage at 1280x720 (`--u` in `index.html`). The games are **Apex GP** (this racing game), **Boostball** (car soccer),
-**Miami** (the open world), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
+**Last Frame** (a bodycam shooter, online with friends or against bots), **Miami** (the open world), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it. Coming back in the same tab goes straight home, `?pick` does too, and `?pick&boot` forces the startup. Settings can turn the startup off. `tools/pickertest.mjs <dir>` walks it with real keys.
 
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
@@ -1053,6 +1053,20 @@ Trees: Poly Haven's CC0 scanned / modelled trees — [Jacaranda Tree](https://po
 frames of each full-resolution tree, sprays of its real leaves (every leaf and twig of one k-means cell, seen
 face-on) for the near trees' leaf cards, and three near LODs (the scan's trunk and limbs decimated with
 meshoptimizer + one oriented leaf card per k-means cell of its leaves, with shared wind weights).
+
+## Last Frame
+
+`lastframe.html`, code in `src/lastframe/`. An original first-person shooter seen through a chest camera: a fisheye lens, slow auto exposure, grain and compression, no crosshair, the gun moving on its own in front of you. Kessler Block is one map, a wet city block at dusk: a tenement, a warehouse, an alley with a bridge across it, yards and a street. Four modes (Team Fight, Last Team Standing, Hold Ground, Free For All), four weapons, frags and flashbangs, doors, breakable glass, bullets through thin walls, bots to fill any side, rooms by 4-letter code or invite link.
+
+How the look is made:
+- The map is data (`tools/lastframe/layout.py`): boxes with a material per face, props, lights, doors, spawns.
+- `tools/lastframe/bake.py` builds it in Blender and bakes its light with Cycles into one 4K lightmap, `denoise.py` cleans that with Open Image Denoise, `pack.py` writes `public/lastframe/`, and `volume.mjs` captures a grid of ambient cubes from the baked world so props and people are lit by the room they stand in.
+- Every surface and prop is a Poly Haven scan (CC0; `fetch.py` downloads the sources into the git-ignored `assets-src/lf`). The pistol and the bolt rifle are scans too; the carbine and the pump gun are built and wear-baked in `guns.py`.
+- `src/lastframe/lighting.ts` splices that light into three's physical material. `post.ts` is the camera, and also renders the mirror pass for the wet ground.
+
+Rebuild: `python3 tools/lastframe/fetch.py`, `cd tools/lastframe && python3 means.py`, then `blender -b --python tools/lastframe/bake.py -- --size 4096 --samples 160 --out /tmp/lf_final --props`, `blender -b --python tools/lastframe/denoise.py -- /tmp/lf_final`, `python3 tools/lastframe/pack.py /tmp/lf_final --tex`, and with `npx vite --config vite.stable.config.mjs --port 5281` running, `node tools/lastframe/volume.mjs 5281`.
+
+Netcode (`net.ts`, `match.ts`, `game.ts`): the host's browser runs the match and the bots over PeerJS. Everyone moves themselves and calls their own hits (shooter's advantage); the host keeps health, scores and doors. Tests: `tools/lastframe/net.mjs` (two browsers), `play.mjs` (`AUTO=1` plays a match), `realinput.mjs` (real clicks and pointer lock), `scene.mjs`, `perf.mjs`.
 
 ## Tracksmith
 
