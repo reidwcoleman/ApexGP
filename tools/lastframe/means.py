@@ -6,6 +6,6 @@ R = os.path.join(os.path.dirname(__file__), '..', '..', 'assets-src', 'lf', 'tex
 o = {}
 for k, v in MATS.items():
     im = Image.open(f"{R}/{v['tex']}_diff.jpg").convert('RGB').resize((1, 1), Image.BOX).getpixel((0, 0))
-    lin = [((c / 255) ** 2.2) * t for c, t in zip(im, v['tint'])]
+    lin = list(v['tint']) if v.get('mono') else [((c / 255) ** 2.2) * t for c, t in zip(im, v['tint'])]
     o[k] = lin
 json.dump(o, open(os.path.join(os.path.dirname(__file__), 'means.json'), 'w'))

@@ -4,6 +4,8 @@ import type { WeaponSpec } from './shared.ts';
 
 export function surfOf(b: Box): string {
   if (b.tag === 'glass') return 'glass';
+  if (b.tag === 'terrain') return 'soil';
+  if (/^render/.test(b.mat)) return 'render';
   if (b.tag === 'door' || b.tag === 'counter' || /planks|pallet|wood/.test(b.mat)) return 'wood';
   if (/steel|tin|cont_|rack|dumpster|grate/.test(b.mat) || b.tag === 'post' || b.tag === 'container') return 'metal';
   if (b.pen) return 'plaster';
@@ -11,7 +13,7 @@ export function surfOf(b: Box): string {
 }
 
 /** how much a metre of each thing takes out of a round, before the weapon's own punch */
-const STOP: Record<string, number> = { wood: 3.2, plaster: 3.2, metal: 15, glass: 0.4, card: 1.1, stone: 60 };
+const STOP: Record<string, number> = { wood: 3.2, plaster: 3.2, metal: 15, glass: 0.4, card: 1.1, stone: 60, soil: 60, render: 60 };
 
 export interface Tracer {
   /** x y z nx ny nz per impact */

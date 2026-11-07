@@ -23,7 +23,7 @@ def log(*a): print(f'[{time.time()-t0:6.1f}s]', *a, flush=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 COVE = opt('map', 'block') == 'cove'
 if COVE:
-    import cove_layout, coveland
+    import cove_layout, coveland, cove_kit
     m = cove_layout.build()
 else:
     m = layout.build()
@@ -134,7 +134,8 @@ for q in getattr(m, 'quads', ()):
     w_ = np.linalg.norm(e1); h_ = np.linalg.norm(e2)
     u_ = e1 / max(1e-9, w_); b_ = np.cross(n, u_)
     sc = MATS[q['mat']]['scale']
-    uv = [(float(np.dot(p - v[0], u_) / sc), float(np.dot(p - v[0], b_) / sc)) for p in v]
+    # anchored to the world, not the quad: a wall cut round its windows has to read as one wall
+    uv = [(float(np.dot(p, u_) / sc), float(np.dot(p, b_) / sc)) for p in v]
     faces.append(dict(mat=q['mat'], v=[list(map(float, p)) for p in v], n=[float(c) for c in n], uv=uv, w=float(w_), h=float(h_), dens=q['dens'], tag='quad', tri=q.get('tri', False)))
 log('faces', len(faces))
 
@@ -283,6 +284,11 @@ units = {}
 def unit_obj(kit, parts, far):
     key = (kit, tuple(parts), far)
     if key in units: return units[key]
+    if kit == 'cove':
+        o = cove_kit.make(parts[0])
+        o.name = 'UF|cove|' + parts[0]
+        units[key] = o
+        return o
     d = kit_of(kit)
     origin = d[parts[0]].matrix_world.translation.copy()
     objs = []
@@ -330,6 +336,7 @@ units_out = []
 for u in m.units:
     o0 = unit_obj(u['kit'], u['parts'], u['far'])
     e = dict(id=o0.name, pos=u['pos'], rot=u['rot'], sc=u['sc'], tint=u['tint'])
+    if u.get('float'): e['float'] = 1
     if not u['far']:
         i = len(placed)
         if i >= PER * PER: raise Exception('out of tiles')
@@ -416,6 +423,42 @@ nt = w.node_tree
 SKY = getattr(m, 'sky', dict(hdri='rooftop_night', strength=opt('sky', 2.6), tint=(0.36, 0.62, 1.05)))
 env = nt.nodes.new('ShaderNodeTexEnvironment'); env.image = bpy.data.images.load(f"{ROOT}/hdri/{SKY['hdri']}.hdr")
 bg = nt.nodes['Background']; bg.inputs['Strength'].default_value = SKY['strength']
+sun_obj = None
+sun_out = None
+if 'sun_az' in SKY:
+    # the sun comes out of the sky and becomes a lamp: turned to where the map wants it, clipped out of the picture, and
+    # the bake then holds only the sky and the bounce. The game draws the direct light itself, so the normal maps answer to it
+    src = env.image; W_, H_ = src.size
+    px = np.empty(W_ * H_ * 4, np.float32); src.pixels.foreach_get(px); px = px.reshape(H_, W_, 4)[..., :3].copy()
+    lum = px @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    up = lum[H_ // 2:]
+    r, c = np.unravel_index(int(np.argmax(up)), up.shape); r += H_ // 2
+    elev = (r + 0.5) / H_ * math.pi - math.pi / 2
+    want = 0.5 - math.atan2(SKY['sun_az'][1], SKY['sun_az'][0]) / (2 * math.pi)
+    sh = int(round((want - (c + 0.5) / W_) * W_))
+    px = np.roll(px, sh, axis=1); lum = np.roll(lum, sh, axis=1)
+    med = float(np.median(up))
+    cap = med * SKY['clamp']
+    k_ = np.minimum(1.0, cap / np.maximum(lum, 1e-5))[..., None]
+    px = px * k_
+    rows = (np.arange(H_) + 0.5) / H_ * math.pi - math.pi / 2
+    dom = np.cos(rows) * (2 * math.pi / W_) * (math.pi / H_)
+    lum2 = px @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    e_up = float(((lum2 * (np.sin(np.maximum(rows, 0)) * dom)[:, None])[H_ // 2:]).sum() / math.pi)
+    kk = SKY['sky_e'] / e_up
+    img_s = bpy.data.images.new('skyproc', W_, H_, alpha=False, float_buffer=True)
+    rgba = np.ones((H_, W_, 4), np.float32); rgba[..., :3] = px
+    img_s.pixels.foreach_set(rgba.ravel()); img_s.update(); img_s.pack()
+    env.image = img_s
+    bg.inputs['Strength'].default_value = kk
+    az = math.atan2(SKY['sun_az'][1], SKY['sun_az'][0])
+    sd = Vector((math.cos(elev) * math.cos(az), math.cos(elev) * math.sin(az), math.sin(elev)))
+    S = SKY['sun_k'] * math.pi * SKY['sky_e']
+    ld = bpy.data.lights.new('sun', 'SUN'); ld.energy = S; ld.angle = math.radians(1.0); ld.color = SKY['tone']
+    sun_obj = bpy.data.objects.new('sun', ld); scene.collection.objects.link(sun_obj)
+    sun_obj.rotation_mode = 'QUATERNION'; sun_obj.rotation_quaternion = (-sd).to_track_quat('-Z', 'Y')
+    sun_out = dict(dir=[sd.x, sd.z, -sd.y], power=S, color=list(SKY['tone']), sky=kk)
+    log('sun', [round(v, 3) for v in sd], 'elev', round(math.degrees(elev), 1), 'sky strength', round(kk, 4), 'median', round(med, 3), 'E', round(e_up, 3), 'S', round(S, 2))
 mixc = nt.nodes.new('ShaderNodeMix'); mixc.data_type = 'RGBA'; mixc.blend_type = 'MULTIPLY'; mixc.inputs['Factor'].default_value = 1.0
 mixc.inputs['B'].default_value = (*SKY['tint'], 1)    # the block pulls its sunset down to blue hour
 nt.links.new(env.outputs['Color'], mixc.inputs['A'])
@@ -443,6 +486,8 @@ for b in m.boxes:
         colliders.append(dict(a=b.a, b=b.b, pen=b.pen, tag=b.tag, mat=b.mat))
 for a, b, pen in m.solid:
     colliders.append(dict(a=a, b=b, pen=pen, tag='inv', mat=''))
+for h_ in getattr(m, 'hards', ()):
+    colliders.append(dict(a=h_['a'], b=h_['b'], pen=h_['pen'], tag='inv', mat=h_['mat']))
 props_out = []
 for p in m.props:
     k = (p['name'], p['part'])
@@ -460,12 +505,15 @@ for p in m.props:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
 json.dump(dict(veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
-               density=dens, size=SIZE), open(f'{OUT}/map_raw.json', 'w'))
+               density=dens, size=SIZE, sun=sun_out), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop
-sky = env.image; sky.scale(1024, 512)
-sp = np.empty(1024 * 512 * 4, np.float32); sky.pixels.foreach_get(sp)
-np.save(f'{OUT}/sky.npy', sp.reshape(512, 1024, 4)[..., :3].astype(np.float16))
+sky = env.image
+SW, SH = (4096, 2048) if sun_obj else (1024, 512)
+if sky.size[0] != SW:
+    sky = sky.copy(); sky.scale(SW, SH)
+sp = np.empty(SW * SH * 4, np.float32); sky.pixels.foreach_get(sp)
+np.save(f'{OUT}/sky.npy', sp.reshape(SH, SW, 4)[..., :3].astype(np.float16))
 if '--props' in argv:
     col = bpy.data.collections.new('export'); scene.collection.children.link(col)
     # planting never goes in the bake: it only needs to be in the file
@@ -484,7 +532,7 @@ if '--props' in argv:
         elif key[0].startswith(('fern', 'nettle')): budget = 420
         elif key[0].startswith('shrub'): budget = 900
         elif key[0].startswith('tree'): budget = 3000
-        elif key[0].startswith(('coast', 'rock')): budget = 1800
+        elif key[0].startswith(('coast', 'rock')): budget = 1500
         if tris > budget:
             d = o.modifiers.new('d', 'DECIMATE'); d.ratio = budget / tris
             bpy.ops.object.select_all(action='DESELECT'); bpy.context.view_layer.objects.active = o; o.select_set(True)
@@ -537,7 +585,23 @@ for mat in mesh.materials:
 bpy.ops.object.select_all(action='DESELECT')
 world.select_set(True); bpy.context.view_layer.objects.active = world
 log('baking', SIZE, SAMPLES)
-bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=2, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+def bake_light(image, margin):
+    """with a sun in the sky, two goes: all the bounce with the lamp on, then the direct sky with it off. The lamp's direct light stays out"""
+    if sun_obj is None:
+        bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=margin, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+        return
+    keep = sun_obj.data.energy
+    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'INDIRECT'}, margin=margin, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    n = image.size[0] * image.size[1] * 4
+    a = np.empty(n, np.float32); image.pixels.foreach_get(a)
+    sun_obj.data.energy = 0
+    mb = scene.cycles.max_bounces; scene.cycles.max_bounces = 0
+    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT'}, margin=margin, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    b_ = np.empty(n, np.float32); image.pixels.foreach_get(b_)
+    sun_obj.data.energy = keep; scene.cycles.max_bounces = mb
+    image.pixels.foreach_set(a + b_)
+    image.update()
+bake_light(img, 2)
 log('baked')
 px = np.empty(SIZE * SIZE * 4, np.float32); img.pixels.foreach_get(px)
 np.save(f'{OUT}/lightmap.npy', px.reshape(SIZE, SIZE, 4)[..., :3].astype(np.float16))
@@ -558,7 +622,7 @@ if placed:
     for o in placed: o.select_set(True)
     bpy.context.view_layer.objects.active = placed[0]
     log('baking kit', len(placed))
-    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=2, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    bake_light(img2, 2)
     log('baked kit')
 img2.filepath_raw = f'{OUT}/lightmap2.exr'; img2.file_format = 'OPEN_EXR'; img2.save()
 if land is not None:
@@ -569,6 +633,6 @@ if land is not None:
     land.select_set(True); bpy.context.view_layer.objects.active = land
     lmesh.uv_layers.active = lu
     log('baking land')
-    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=4, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    bake_light(img3, 4)
     log('baked land')
     img3.filepath_raw = f'{OUT}/lightmap3.exr'; img3.file_format = 'OPEN_EXR'; img3.save()

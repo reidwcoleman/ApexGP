@@ -32,6 +32,12 @@ MODELS += '''coast_rocks_01 coast_rocks_02 coast_rocks_03 coast_rocks_05 coast_l
 rock_moss_set_01 rock_moss_set_02 shrub_01 shrub_02 shrub_03 shrub_04 fern_02 grass_medium_01 grass_medium_02 nettle_plant pine_tree_01 tree_small_02
 ocean_buoy lifebuoy modular_wooden_pier painted_wooden_bench wooden_barrels_01 street_lamp_01 planter_box_01'''.split()
 
+# the cove in sunlight: render, real slate, dry stone, sea rock, a boat worth looking at
+TEX += '''white_plaster_rough_01 painted_plaster_wall worn_plaster_wall roof_slates_02 roof_slates_03 stacked_stone_wall rustic_stone_wall
+seaside_rock lichen_rock rock_wall_10 worn_asphalt clean_pebbles blue_painted_planks green_rough_planks'''.split()
+MODELS += '''wooden_bucket_01 planter_pot_clay wooden_ladder_02 stone_01 dandelion_01 shrub_sorrel_01 flower_gazania wooden_lantern_01 fishermans_hat'''.split()
+HDRI += ['kloofendal_48d_partly_cloudy_puresky']
+
 def get(url, path):
     if os.path.exists(path) and os.path.getsize(path) > 0: return
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -45,7 +51,8 @@ def files(a):
 # what fills the screen most comes at 2k, colour and normals; pack.py prefers these
 HERO = '''asphalt_02 clean_asphalt concrete_pavement_02 factory_brick dark_brick_wall brick_wall_001 gravel_concrete hangar_concrete_floor
 concrete_floor_worn_001 blue_plaster_weathered decrepit_wallpaper damaged_plaster grey_plaster corrugated_iron_02 concrete_wall_008
-cliff_side coast_land_rocks_01 coast_sand_rocks_02 damp_beach_sand leafy_grass grey_roof_tiles clay_plaster castle_wall_slates cobblestone_floor_04'''.split()
+cliff_side coast_land_rocks_01 coast_sand_rocks_02 damp_beach_sand leafy_grass grey_roof_tiles clay_plaster castle_wall_slates cobblestone_floor_04
+white_plaster_rough_01 roof_slates_02 roof_slates_03 stacked_stone_wall seaside_rock worn_asphalt clean_pebbles'''.split()
 
 def tex(a):
     d = files(a)
@@ -67,7 +74,7 @@ def model(a):
     return a, 'ok'
 
 def hdri(a):
-    d = files(a); get(d['hdri']['2k']['hdr']['url'], f'{ROOT}/hdri/{a}.hdr'); return a, 'ok'
+    d = files(a); get(d['hdri']['4k' if 'partly' in a else '2k']['hdr']['url'], f'{ROOT}/hdri/{a}.hdr'); return a, 'ok'
 
 jobs = [(tex, a) for a in TEX] + [(model, a) for a in MODELS] + [(hdri, a) for a in HDRI]
 bad = 0

@@ -201,7 +201,8 @@ vec3 histAt( vec2 uv ) {
 void main() {
   vec2 uv = vUv;
   float z = lin( texture2D( tDepth, uv ).r );
-  float ao = z < 0.85 ? 1.0 : texture2D( tAO, uv ).r;
+  // depth runs out of steps far away and the occlusion turns into contour lines: it's a near effect anyway
+  float ao = z < 0.85 ? 1.0 : mix( texture2D( tAO, uv ).r, 1.0, smoothstep( 28.0, 70.0, z ) );
   vec4 fog = z < 1.2 ? vec4( 0.0, 0.0, 0.0, 1.0 ) : texture2D( tFog, uv );
   vec4 air = texture2D( tAir, uv );
   float A = ao * fog.a * ( 1.0 - air.a );
@@ -332,6 +333,9 @@ uniform float glitch;
 uniform float feedCut;
 uniform float grainK;
 uniform float lensWet;
+uniform vec3 flare;
+uniform float caK;
+uniform float satK;
 
 float hash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
 
@@ -391,7 +395,7 @@ void main() {
   float rd = sqrt( aspect * aspect + 1.0 );
   float edge = rho / rd;
 
-  float ca = 0.0005 + 0.014 * edge * edge * edge;
+  float ca = 0.0005 + caK * edge * edge * edge;
   vec2 cr = lens( p, rho, 1.0 + ca, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
   vec2 cg = lens( p, rho, 1.0, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
   vec2 cb = lens( p, rho, 1.0 - ca, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
@@ -403,6 +407,24 @@ void main() {
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   vec3 hdr = c + bloom * 0.085 + whiteout * 9.0;
+  if ( flare.z > 0.003 ) {
+    // the sun in a cheap plastic lens: a veil across the frame, the iris's star, and ghosts strung along the line through the centre
+    vec2 A = vec2( aspect, 1.0 );
+    vec2 dv = ( cg - flare.xy ) * A;
+    float r = length( dv );
+    vec3 fl = vec3( 1.0, 0.93, 0.8 ) * ( 0.0028 / ( 0.012 + r * r ) + 0.05 * exp( -r * 1.5 ) );
+    float an = atan( dv.y, dv.x );
+    fl += vec3( 1.0, 0.95, 0.86 ) * pow( abs( cos( an * 3.0 + 0.4 ) ), 160.0 ) * exp( -r * 6.0 ) * 0.22;
+    vec2 ax = vec2( 0.5 ) - flare.xy;
+    for ( int i = 0; i < 5; i++ ) {
+      float t = i == 0 ? 0.55 : i == 1 ? 1.22 : i == 2 ? 1.6 : i == 3 ? 1.86 : 2.3;
+      float rad = i == 0 ? 0.03 : i == 1 ? 0.075 : i == 2 ? 0.045 : i == 3 ? 0.13 : 0.2;
+      vec3 tint = i == 0 ? vec3( 0.5, 0.75, 0.6 ) : i == 1 ? vec3( 0.75, 0.55, 0.3 ) : i == 2 ? vec3( 0.35, 0.6, 0.8 ) : i == 3 ? vec3( 0.5, 0.4, 0.65 ) : vec3( 0.3, 0.42, 0.34 );
+      float d = length( ( cg - ( flare.xy + ax * t ) ) * A );
+      fl += tint * smoothstep( rad, rad * 0.82, d ) * ( 0.35 + 0.65 * smoothstep( 0.0, rad, d ) ) * 0.05;
+    }
+    hdr += fl * flare.z * 1.5;
+  }
   // macroblocks: the dark parts of a stream fall apart first
   vec2 blk = ( floor( cg * res / 10.0 ) + 0.5 ) * 10.0 / res;
   vec3 bl = texture2D( tBlock, blk ).rgb;
@@ -419,7 +441,7 @@ void main() {
   // a night sky through a small sensor goes grey-green, never violet: anything with green missing gets it back
   float vio = max( min( col.r, col.b ) - col.g, 0.0 );
   col.rb -= vio * 0.8;
-  col = mix( vec3( l ), col, 0.82 );
+  col = mix( vec3( l ), col, satK );
   col *= mix( vec3( 0.95, 1.0, 0.99 ), vec3( 1.03, 1.0, 0.95 ), smoothstep( 0.0, 0.5, l ) );
   // crushed blacks, hot highlights
   col = pow( col, vec3( 1.14 ) ) * 1.05;
@@ -503,7 +525,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();

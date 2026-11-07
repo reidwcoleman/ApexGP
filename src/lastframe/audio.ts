@@ -130,6 +130,7 @@ export class Sound {
     const c = this.ctx;
     if (!c) return;
     const l = c.listener, p = cam.position;
+    this.ear.copy(p);
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion), u = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     if (l.positionX) {
       const t = c.currentTime;
@@ -152,8 +153,113 @@ export class Sound {
     this.roomG.gain.setTargetAtTime(kind === 'small' ? 1 : 0, t, 0.12);
     this.hallG.gain.setTargetAtTime(kind === 'hall' ? 1 : 0, t, 0.12);
     this.streetG.gain.setTargetAtTime(kind === 'street' ? 0.9 : 0, t, 0.12);
-    this.rainG.gain.setTargetAtTime(kind === 'street' ? 0.075 : 0.016, t, 0.3);
+    this.rainG.gain.setTargetAtTime(this.coast ? 0 : kind === 'street' ? 0.075 : 0.016, t, 0.3);
     this.humG.gain.setTargetAtTime(kind === 'small' ? 0.006 : 0, t, 0.3);
+  }
+
+  /** a map by the sea: no rain, surf and wind instead */
+  coast = false;
+  private surfLo: GainNode | null = null;
+  private surfHi!: GainNode;
+  private airG!: GainNode;
+  private airF!: BiquadFilterNode;
+  private seaLvl = 0;
+  private nextSet = 0;
+  private nextGull = 4;
+  private gust = 0;
+  private lastP = new THREE.Vector3();
+  private ear = new THREE.Vector3();
+
+  private coastUp() {
+    const c = this.ctx!;
+    const loop = (type: BiquadFilterType, f: number, q: number) => {
+      const s = c.createBufferSource();
+      s.buffer = this.noise;
+      s.loop = true;
+      s.playbackRate.value = 0.7 + Math.random() * 0.3;
+      const b = c.createBiquadFilter();
+      b.type = type;
+      b.frequency.value = f;
+      b.Q.value = q;
+      const g = c.createGain();
+      g.gain.value = 0;
+      s.connect(b).connect(g).connect(this.dry);
+      s.start();
+      return [g, b] as const;
+    };
+    this.surfLo = loop('lowpass', 380, 0.4)[0];
+    this.surfHi = loop('bandpass', 2300, 0.45)[0];
+    [this.airG, this.airF] = loop('bandpass', 420, 0.8);
+  }
+
+  /** d: metres to the water. Sets of waves come in and drag back; the higher you are the more it's wind */
+  shore(d: number, inside: boolean, height: number, dt: number) {
+    const c = this.ctx;
+    if (!c) return;
+    if (!this.surfLo) this.coastUp();
+    const t = c.currentTime;
+    const near = (inside ? 0.28 : 1) / (1 + d / 45);
+    this.seaLvl = near;
+    if (t > this.nextSet) {
+      // a wave breaking: up fast, and the long hiss of it running back down the shingle
+      const k = 0.65 + Math.random() * 0.7;
+      this.nextSet = t + 5.5 + Math.random() * 4.5;
+      const lo = this.surfLo!.gain, hi = this.surfHi.gain;
+      lo.cancelScheduledValues(t);
+      hi.cancelScheduledValues(t);
+      lo.setTargetAtTime(0.2 * k * near + 0.012, t, 0.7);
+      lo.setTargetAtTime(0.06 * near + 0.008, t + 1.8, 1.6);
+      hi.setTargetAtTime(0.012 * near, t, 0.5);
+      hi.setTargetAtTime(0.07 * k * near, t + 1.4, 0.35);
+      hi.setTargetAtTime(0.008 * near, t + 2.4, 1.3);
+    }
+    this.gust += dt;
+    const wind = (inside ? 0.12 : 1) * (0.02 + Math.min(0.05, height * 0.0011)) * (0.75 + 0.45 * Math.sin(this.gust * 0.31) * Math.sin(this.gust * 0.13 + 1));
+    this.airG.gain.setTargetAtTime(wind, t, 0.8);
+    this.airF.frequency.setTargetAtTime(340 + 220 * (0.5 + 0.5 * Math.sin(this.gust * 0.21)), t, 1.2);
+    this.nextGull -= dt;
+    if (this.nextGull < 0 && !inside) {
+      this.nextGull = 7 + Math.random() * 16;
+      const a = Math.random() * 6.28, r = 25 + Math.random() * 60;
+      this.lastP.set(Math.cos(a) * r, 14 + Math.random() * 18, Math.sin(a) * r).add(this.ear);
+      this.gull(this.lastP);
+    }
+  }
+
+  /** a herring gull: a run of falling cries, each a rise then a long slide down */
+  private gull(p: THREE.Vector3) {
+    const c = this.ctx!;
+    const out = this.src(p, 0.7 + Math.random() * 0.4, false);
+    const n = 2 + Math.floor(Math.random() * 5);
+    const base = 1250 + Math.random() * 500;
+    let t = c.currentTime + 0.02;
+    for (let i = 0; i < n; i++) {
+      const o = c.createOscillator(), o2 = c.createOscillator(), g = c.createGain(), f = c.createBiquadFilter();
+      o.type = 'sawtooth';
+      o2.type = 'triangle';
+      f.type = 'bandpass';
+      f.frequency.value = 2100;
+      f.Q.value = 1.4;
+      const dur = (i === 0 ? 0.42 : 0.24) + Math.random() * 0.1;
+      const top = base * (i === 0 ? 1.28 : 1.08);
+      for (const q of [o.frequency, o2.frequency]) {
+        q.setValueAtTime(base * 0.8, t);
+        q.exponentialRampToValueAtTime(top, t + dur * 0.28);
+        q.exponentialRampToValueAtTime(base * 0.62, t + dur);
+      }
+      o2.detune.value = 18;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.03);
+      g.gain.setTargetAtTime(0.0001, t + dur * 0.62, dur * 0.2);
+      o.connect(f);
+      o2.connect(f);
+      f.connect(g).connect(out);
+      o.start(t);
+      o2.start(t);
+      o.stop(t + dur + 0.2);
+      o2.stop(t + dur + 0.2);
+      t += dur + 0.06 + Math.random() * 0.12;
+    }
   }
 
   private src(p: THREE.Vector3 | null, gain: number, muffled: boolean) {
@@ -265,6 +371,15 @@ export class Sound {
     } else if (surf === 'grit') {
       this.burst(d, 0.11, 0.9, 1400, 7200);
       this.thump(d, 120, 70, 0.05, 0.5);
+    } else if (surf === 'turf') {
+      // a boot through long grass: a soft fall, and the swish after it
+      this.thump(d, 95, 55, 0.07, 0.55);
+      this.burst(d, 0.13, 0.42, 900, 3600, 0.015);
+      this.burst(d, 0.08, 0.2, 2400, 6400, 0.06);
+    } else if (surf === 'shingle') {
+      // pebbles shifting under the heel
+      for (let i = 0; i < 4; i++) this.burst(d, 0.022, 0.75, 1800, 8200, i * 0.024 + Math.random() * 0.016);
+      this.thump(d, 130, 74, 0.05, 0.42);
     } else {
       this.thump(d, 120, 62, 0.06, 0.9);
       this.burst(d, 0.03, 0.34, 700, 3400);
@@ -304,6 +419,16 @@ export class Sound {
   impact(p: THREE.Vector3, surf: string) {
     if (!this.ctx) return;
     const d = this.src(p, 0.3, false);
+    if (surf === 'water') {
+      this.burst(d, 0.09, 0.5, 700, 3800);
+      this.burst(d, 0.16, 0.22, 2500, 7000, 0.05);
+      return;
+    }
+    if (surf === 'soil') {
+      this.thump(d, 150, 70, 0.06, 0.7);
+      this.burst(d, 0.05, 0.4, 300, 2300);
+      return;
+    }
     if (surf === 'metal') this.thump(d, 1900 + Math.random() * 1300, 900, 0.09, 0.5, 0, 'triangle');
     else if (surf === 'glass') {
       for (let i = 0; i < 9; i++) this.burst(d, 0.05, 0.6, 3000, 11000, i * 0.022 + Math.random() * 0.03);

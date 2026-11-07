@@ -237,6 +237,9 @@ const SURF: Record<string, { dust: [number, number, number]; n: number; puff: nu
   plaster: { dust: [0.6, 0.58, 0.53], n: 8, puff: 1.15, chip: [0.6, 0.58, 0.52], chips: 9, sparks: 0, cell: 1, size: 0.13 },
   wood: { dust: [0.36, 0.25, 0.15], n: 6, puff: 0.8, chip: [0.34, 0.22, 0.12], chips: 11, sparks: 0, cell: 2, size: 0.1 },
   metal: { dust: [0.12, 0.12, 0.12], n: 3, puff: 0.45, chip: [0.16, 0.16, 0.17], chips: 2, sparks: 14, cell: 3, size: 0.07 },
+  render: { dust: [0.72, 0.71, 0.67], n: 9, puff: 1.2, chip: [0.74, 0.73, 0.7], chips: 10, sparks: 0, cell: 1, size: 0.13 },
+  soil: { dust: [0.2, 0.16, 0.1], n: 9, puff: 1.3, chip: [0.1, 0.13, 0.05], chips: 9, sparks: 0, cell: 0, size: 0.11 },
+  water: { dust: [0.72, 0.76, 0.76], n: 0, puff: 1, chip: [0, 0, 0], chips: 0, sparks: 0, cell: 0, size: 0 },
   glass: { dust: [0.5, 0.52, 0.55], n: 3, puff: 0.5, chip: [0.45, 0.5, 0.52], chips: 0, sparks: 0, cell: 7, size: 0.2 },
   flesh: { dust: [0.16, 0.012, 0.01], n: 7, puff: 0.5, chip: [0.1, 0.01, 0.01], chips: 0, sparks: 0, cell: 4, size: 0.42 },
   card: { dust: [0.5, 0.42, 0.3], n: 7, puff: 1.2, chip: [0.45, 0.36, 0.24], chips: 8, sparks: 0, cell: 1, size: 0 },
@@ -584,6 +587,18 @@ export class Fx {
   impact(x: number, y: number, z: number, nx: number, ny: number, nz: number, surf: string, far = false) {
     const c = SURF[surf] ?? SURF.stone;
     const [dr, dg, db] = c.dust;
+    if (surf === 'water') {
+      // a thin spout that stands up and falls back, and a ring of spray at its foot
+      for (let i = 0; i < 16; i++) {
+        const up = 2.6 + Math.random() * 3.6, spread = 0.1 + Math.random() * 0.34;
+        this.soft.emit(x + rnd(0.05), y + 0.02, z + rnd(0.05), rnd(spread), up, rnd(spread), 0.03 + Math.random() * 0.05, 0.14, 0.35 + Math.random() * 0.45, dr, dg, db, 0.42, 7.5, 1.1);
+      }
+      for (let i = 0; i < 10; i++) {
+        const a = Math.random() * 6.283, sp = 0.7 + Math.random() * 1.6;
+        this.soft.emit(x, y + 0.03, z, Math.cos(a) * sp, 0.5 + Math.random(), Math.sin(a) * sp, 0.05 + Math.random() * 0.06, 0.3, 0.3 + Math.random() * 0.3, dr, dg, db, 0.28, 1.2, 1.4);
+      }
+      return;
+    }
     const n = far ? Math.ceil(c.n / 2) : c.n;
     const flesh = surf === 'flesh';
     for (let i = 0; i < n; i++) {

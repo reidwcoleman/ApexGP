@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MOVER } from './sun.ts';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../people/Humans.ts';
 import { applyLF } from './lighting.ts';
@@ -252,6 +253,7 @@ export class Soldier {
     };
     bm.customProgramCacheKey = () => key + 'fp2';
     this.person.play('idle');
+    this.root.traverse((o) => o.layers.enable(MOVER));
   }
 
   setFirstPerson(on: boolean) {

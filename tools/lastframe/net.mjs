@@ -3,6 +3,8 @@
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from '../chrome.mjs';
 const port = process.argv[2] ?? '5281';
+const map = process.argv[3] ?? '';
+const [ax, az, bz] = map === 'cove' ? [22, -44, -52] : [40, -40, -52];
 const base = `http://localhost:${port}/lastframe.html`;
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--autoplay-policy=no-user-gesture-required'] });
 const ctx = () => b.newContext({ viewport: { width: 960, height: 540 } });
@@ -13,7 +15,7 @@ for (const [n, p] of [['host', A], ['guest', B]]) {
 }
 const t0 = Date.now();
 const log = (...a) => console.log(((Date.now() - t0) / 1000).toFixed(1) + 's', ...a);
-await A.goto(base + '?dev=1');
+await A.goto(base + '?dev=1' + (map ? '&map=' + map : ''));
 await A.waitForFunction(() => window.__lf, null, { timeout: 180000 });
 log('host loaded');
 await A.evaluate(() => { const h = __lf.g.hud; h.name = 'Hosty'; h.mode = 'tdm'; h.bots = 2; h.skill = 1; h.openRoom(); });
@@ -26,15 +28,21 @@ log('guest loaded');
 await A.waitForFunction(() => __lf.g.hud.lobbyPlayers.length === 2, null, { timeout: 40000 });
 log('guest in lobby', await A.evaluate(() => __lf.g.hud.lobbyPlayers.map((p) => [p.name, p.team])));
 await A.evaluate(() => __lf.g.hud.startHosted());
-await B.waitForFunction(() => __lf.g.inMatch && __lf.g.mySlot >= 0, null, { timeout: 20000 });
+if (map) {
+  // the guest was on the other map: it has to change over and come back in
+  await B.waitForFunction((m) => location.search.includes('map=' + m), map, { timeout: 40000 }).catch(() => log('guest URL never changed', B.url()));
+  await B.waitForFunction(() => window.__lf, null, { timeout: 180000 });
+  log('guest on', await B.evaluate(() => location.search));
+}
+await B.waitForFunction(() => __lf.g.inMatch && __lf.g.mySlot >= 0, null, { timeout: map ? 60000 : 20000 });
 log('both in match');
 await A.waitForFunction(() => __lf.g.me.alive, null, { timeout: 20000 });
 await B.waitForFunction(() => __lf.g.me.alive, null, { timeout: 20000 });
 await A.waitForTimeout(6500);
 // stop the bots shooting, stand them face to face
 await A.evaluate(() => { const g = __lf.g; for (const [s, bt] of g.match.bots) { bt.update = () => {}; } });
-const pos = await A.evaluate(() => { const g = __lf.g; Object.assign(g.me.m, { x: 40, y: 0, z: -40, vx: 0, vz: 0 }); g.me.yaw = 0; return g.mySlot; });
-await B.evaluate(() => { const g = __lf.g; Object.assign(g.me.m, { x: 40, y: 0, z: -52, vx: 0, vz: 0 }); g.me.yaw = Math.PI; });
+const pos = await A.evaluate((c) => { const g = __lf.g; const [x, z] = c; Object.assign(g.me.m, { x, y: g.L.world.floorAt(x, 60, z, 0.2, 0), z, vx: 0, vz: 0 }); g.me.yaw = 0; return g.mySlot; }, [ax, az]);
+await B.evaluate((c) => { const g = __lf.g; const [x, z] = c; Object.assign(g.me.m, { x, y: g.L.world.floorAt(x, 60, z, 0.2, 0), z, vx: 0, vz: 0 }); g.me.yaw = Math.PI; }, [ax, bz]);
 await A.waitForTimeout(1200);
 const seen = await B.evaluate((s) => { const a = __lf.g.actors.get(s); return [a.x, a.y, a.z].map((v) => +v.toFixed(2)); }, pos);
 const seenB = await A.evaluate(() => { const g = __lf.g; const b = [...g.actors.values()].find((a) => !a.info.bot && a.info.slot !== g.mySlot); return [b.x, b.y, b.z].map((v) => +v.toFixed(2)); });

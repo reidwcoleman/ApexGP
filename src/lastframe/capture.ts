@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Loaded } from './world.ts';
+import { LF } from './lighting.ts';
 
 /**
  * Build tool (tools/lastframe/volume.mjs): renders the baked world from a grid of points and writes
@@ -27,7 +28,7 @@ export async function capture(r: THREE.WebGLRenderer, scene: THREE.Scene, L: Loa
   // only the architecture and the sky: props take their light from these cells
   const hidden: THREE.Object3D[] = [];
   L.group.traverse((o) => {
-    if ((o as THREE.InstancedMesh).isInstancedMesh || o.parent === L.group && !(o as THREE.Mesh).isMesh) {
+    if ((o as THREE.InstancedMesh).isInstancedMesh || (o.parent === L.group && !(o as THREE.Mesh).isMesh && o.name !== 'land') || o.name === 'sea') {
       if (o.visible) hidden.push(o);
       o.visible = false;
     }
@@ -46,6 +47,7 @@ export async function capture(r: THREE.WebGLRenderer, scene: THREE.Scene, L: Loa
   const buf = new Float32Array(rt.width * rt.height * 4);
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), w = new THREE.Vector3();
   r.autoClear = false;
+  LF.disc.value = 0;
   const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)];
   for (let b0 = 0; b0 < n; b0 += batch) {
     const b1 = Math.min(n, b0 + batch);
@@ -137,6 +139,7 @@ export async function capture(r: THREE.WebGLRenderer, scene: THREE.Scene, L: Loa
     }
   }
   r.autoClear = true;
+  LF.disc.value = 1;
   for (const o of hidden) o.visible = true;
   for (const d of L.doors) d.pivot.visible = true;
   for (const p of L.panes) p.mesh.visible = true;

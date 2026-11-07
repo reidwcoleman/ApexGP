@@ -70,7 +70,64 @@ export const LF = {
   noise: { value: noiseTile() },
   /** 1 under open sky */
   rain: { value: 1 },
+  /** a map in daylight: the sun is drawn live and the bake holds only the sky and the bounce (see sun.ts) */
+  sunOn: new URLSearchParams(location.search).get('map') === 'cove',
+  sunDir: { value: new THREE.Vector3(0, 1, 0) },
+  sunC: { value: new THREE.Vector3() },
+  sunVP: { value: new THREE.Matrix4() },
+  dynVP: { value: new THREE.Matrix4() },
+  sunMap: { value: null as THREE.Texture | null },
+  dynMap: { value: null as THREE.Texture | null },
+  cloud: { value: new THREE.Vector2() },
+  /** the sky as a picture, for anything that mirrors it */
+  sky: { value: null as THREE.Texture | null },
+  skyK: { value: 1 },
+  /** 0 while the light volume is captured: the cubes mustn't hold the sun twice */
+  disc: { value: 1 },
 };
+
+/** the sky in a direction: an equirect picture on the lightmap's log curve */
+export const SKY_GLSL = /* glsl */ `
+vec3 lfSky( sampler2D t, vec2 k, vec3 n ) {
+  float u = atan( n.z, n.x ) / 6.2831853 + 0.5, v = asin( clamp( n.y, -1.0, 1.0 ) ) / 3.14159265 + 0.5;
+  return ( exp2( texture2D( t, vec2( u, v ) ).rgb * k.x ) - 1.0 ) / k.y;
+}`;
+
+/** how much sun reaches a point, for anything with a world position */
+export const SUN_GLSL = /* glsl */ `
+uniform vec3 lfSunDir;
+uniform vec3 lfSunC;
+uniform mat4 lfSunVP;
+uniform mat4 lfDynVP;
+uniform highp sampler2D lfSunMap;
+uniform highp sampler2D lfDynMap;
+uniform vec2 lfCloud;
+float lfIGN( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) ); }
+float lfCloudAt( sampler2D n, vec2 p ) {
+  float c = texture2D( n, p * 0.00022 + lfCloud ).r + 0.5 * ( texture2D( n, p * 0.0009 + lfCloud * 3.0 ).r - 0.5 );
+  return mix( 0.28, 1.0, smoothstep( 0.385, 0.455, c ) );
+}
+float lfMapVis( highp sampler2D m, vec3 s, float r, float a, float bias ) {
+  vec2 d = vec2( cos( a ), sin( a ) ) * r, e = vec2( -d.y, d.x ) * 0.6;
+  float z = s.z - bias, v = 0.0;
+  v += step( z, texture2D( m, s.xy + d ).r );
+  v += step( z, texture2D( m, s.xy - d ).r );
+  v += step( z, texture2D( m, s.xy + e ).r );
+  v += step( z, texture2D( m, s.xy - e ).r );
+  return v * 0.25;
+}
+float lfInMap( vec3 s ) { return step( 0.002, min( min( s.x, s.y ), 1.0 - max( s.x, s.y ) ) ) * step( s.z, 1.0 ); }
+/** the two shadow maps; noise turns the taps a little every pixel and the temporal pass averages them */
+float lfSunVis( vec3 P, vec3 N, float a ) {
+  vec3 q = P + N * 0.09 + lfSunDir * 0.05;
+  vec3 s = ( lfSunVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
+  float v = 1.0;
+  if ( lfInMap( s ) > 0.5 ) v = lfMapVis( lfSunMap, s, 1.5 / 4096.0, a, 0.00004 );
+  vec3 t = ( lfDynVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
+  if ( lfInMap( t ) > 0.5 ) v *= lfMapVis( lfDynMap, t, 1.4 / 1024.0, a + 1.3, 0.0002 );
+  return v;
+}
+`;
 
 const VERT_PARS = /* glsl */ `
 varying vec3 vLfW;
@@ -115,6 +172,9 @@ uniform float lfTime;
 uniform float lfWorldLight;
 uniform vec4 lfLampP[6];
 uniform vec3 lfLampC[6];
+#ifdef LF_SUN
+${SUN_GLSL}
+#endif
 #ifdef LF_LM
 varying vec2 vLfLM;
 uniform sampler2D lfLM;
@@ -249,11 +309,28 @@ const FRAG_LIGHT = /* glsl */ `
     vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );
     radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfWorldLight * LF_SPEC / RECIPROCAL_PI * 0.32;
   #endif
+  #ifdef LF_SUN
+  {
+    float lfA = lfIGN( gl_FragCoord.xy + fract( lfTime * 7.13 ) * 67.0 ) * 6.2831853;
+    float lfVis = lfSunVis( vLfW, normalize( vLfN ), lfA ) * lfCloudAt( lfNoiseT, vLfW.xz );
+    if ( lfVis > 0.003 ) {
+      IncidentLight lfDi;
+      lfDi.direction = normalize( ( viewMatrix * vec4( lfSunDir, 0.0 ) ).xyz );
+      lfDi.color = lfSunC * lfVis * lfWorldLight;
+      lfDi.visible = true;
+      RE_Direct( lfDi, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+      #ifdef LF_LEAF
+      // leaves let the sun through: lit from behind they glow
+      reflectedLight.directDiffuse += diffuseColor.rgb * lfSunC * lfVis * 0.11 * ( 0.35 + pow( clamp( dot( -lfVw, lfSunDir ), 0.0, 1.0 ), 2.0 ) ) * clamp( -dot( lfNw, lfSunDir ) + 0.4, 0.0, 1.0 );
+      #endif
+    }
+  }
+  #endif
 }
 `;
 
 const FRAG_GRIME = /* glsl */ `
-#ifdef LF_LM
+#if defined( LF_LM ) && !defined( LF_LAND )
 {
   // no wall is one colour. Big soft patches break the tile; damp climbs the foot of a wall; what the rain
   // washes off the ledges runs down in streaks
@@ -261,9 +338,24 @@ const FRAG_GRIME = /* glsl */ `
   vec2 lfQ = lfUpN > 0.5 ? vLfW.xz : vec2( vLfW.x + vLfW.z, vLfW.y );
   float macro = lfFbm( lfQ * 0.17 + 3.0 );
   float fine = lfFbm( lfQ * 0.9 + 11.0 );
+  #ifdef LF_OUT
+  float tone = 0.86 + macro * 0.28;
+  #else
   float tone = 0.74 + macro * 0.52;
+  #endif
   diffuseColor.rgb *= mix( vec3( tone ), vec3( tone ) * vec3( 1.05, 0.98, 0.9 ), fine );
-  #ifdef LF_WET
+  #ifdef LF_OUT
+  if ( lfUpN < 0.5 ) {
+    // salt and weather: rain runs down from under the eaves and the sills in long faint streaks
+    float run = lfFbm( vec2( ( vLfW.x + vLfW.z ) * 2.7, vLfW.y * 0.11 ) );
+    diffuseColor.rgb *= 1.0 - 0.2 * smoothstep( 0.47, 0.68, run );
+    diffuseColor.rgb *= mix( vec3( 1.0 ), vec3( 0.86, 0.9, 0.78 ), smoothstep( 0.5, 0.72, lfFbm( lfQ * 0.4 + 21.0 ) ) );
+  } else if ( vLfN.y > 0.3 ) {
+    // lichen on the slates, in rounds of pale gold
+    float li = smoothstep( 0.58, 0.66, lfFbm( lfQ * 3.7 + 31.0 ) ) * smoothstep( 0.44, 0.62, lfFbm( lfQ * 0.3 ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.36, 0.32, 0.12 ), li * 0.4 );
+  }
+  #elif defined( LF_WET )
   if ( lfUpN < 0.5 ) {
     float foot = 1.0 - smoothstep( 0.05, 1.3 + macro * 1.1, vLfW.y );
     float run = lfFbm( vec2( ( vLfW.x + vLfW.z ) * 3.1, vLfW.y * 0.16 ) );
@@ -313,7 +405,8 @@ const FRAG_WET = /* glsl */ `
  */
 export function roomGlass() {
   return new THREE.ShaderMaterial({
-    uniforms: { lfVol: LF.vol, lfVolMin: LF.volMin, lfVolInv: LF.volInv, lfVolDim: LF.volDim, lfK: LF.lmK, lit: { value: 1 } },
+    defines: LF.sunOn ? { DAY: 1 } : {},
+    uniforms: { lfVol: LF.vol, lfVolMin: LF.volMin, lfVolInv: LF.volInv, lfVolDim: LF.volDim, lfK: LF.lmK, lit: { value: 1 }, tSky: LF.sky, skyK: LF.skyK },
     vertexShader: /* glsl */ `
       varying vec3 vW; varying vec3 vN;
       void main() {
@@ -331,6 +424,8 @@ export function roomGlass() {
     fragmentShader: /* glsl */ `
       varying vec3 vW; varying vec3 vN;
       uniform highp sampler3D lfVol; uniform vec3 lfVolMin; uniform vec3 lfVolInv; uniform vec3 lfVolDim; uniform vec2 lfK;
+      uniform sampler2D tSky; uniform float skyK;
+      ${SKY_GLSL}
       float h1( vec2 p ) { return fract( sin( dot( p, vec2( 41.3, 289.1 ) ) ) * 43758.5453 ); }
       vec3 skyAt( vec3 p, vec3 d ) {
         vec3 uvw = ( p - lfVolMin ) * lfVolInv;
@@ -371,8 +466,20 @@ export function roomGlass() {
         float bh = 3.0 - blind * blind * 1.7;
         if ( o.y > bh ) room = mix( vec3( 0.3, 0.27, 0.22 ), lamp, 0.3 ) * ( 0.012 + on * 0.34 ) * ( 0.9 + 0.1 * sin( o.y * 90.0 ) );
         float fres = 0.05 + 0.95 * pow( 1.0 - clamp( dot( -v, n ), 0.0, 1.0 ), 4.0 );
+        #ifdef DAY
+        // by day a window is the sky it faces, old glass bending it a little, with a dim room behind
+        vec3 rd = reflect( v, normalize( n + 0.012 * vec3( sin( vW.y * 9.0 + along * 3.0 ), 0.0, sin( along * 7.0 ) ) ) );
+        rd.y = abs( rd.y ) * 0.9 + 0.02;
+        float fd = 0.09 + 0.91 * pow( 1.0 - clamp( dot( -v, n ), 0.0, 1.0 ), 4.0 );
+        vec3 sk = lfSky( tSky, lfK, normalize( rd ) ) * skyK;
+        vec3 dim = c * ( 0.05 + 0.08 * h1( cell + 5.0 ) ) * vec3( 1.0, 0.94, 0.86 );
+        // net curtains in the lower half of some
+        if ( h1( cell + 2.0 ) > 0.45 && o.y < 1.7 ) dim = mix( dim, vec3( 0.34, 0.33, 0.3 ), 0.72 );
+        gl_FragColor = vec4( mix( dim, sk, fd ), 1.0 );
+        #else
         vec3 refl = skyAt( vW + n * 0.5, reflect( v, n ) );
         gl_FragColor = vec4( mix( room, refl * 1.1, fres ), 1.0 );
+        #endif
       }`,
   });
 }
@@ -388,6 +495,10 @@ export interface LfOpts {
   tile?: boolean;
   /** what's held up to the lens: a little light off the wearer's own chest, so a dark gun isn't a hole in the picture */
   view?: number;
+  /** out in the weather rather than in a room */
+  outdoor?: boolean;
+  /** lets the sun through from behind */
+  leaf?: boolean;
 }
 
 export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = {}): T {
@@ -397,6 +508,10 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   m.defines.LF_SPEC = (o.spec ?? 1).toFixed(2);
   if (o.view) m.defines.LF_VIEW = 1;
   if (o.tile) m.defines.LF_TILE = 1;
+  if (o.outdoor) m.defines.LF_OUT = 1;
+  if (o.terrain) m.defines.LF_LAND = 1;
+  if (o.leaf) m.defines.LF_LEAF = 1;
+  if (LF.sunOn) m.defines.LF_SUN = 1;
   const wet = { value: o.wet ?? 0 };
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.() ?? '';
@@ -418,9 +533,23 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfPlanar = LF.planar;
     s.uniforms.lfPlanarVP = LF.planarVP;
     s.uniforms.lfPlanarK = LF.planarK;
+    if (LF.sunOn) {
+      s.uniforms.lfSunDir = LF.sunDir;
+      s.uniforms.lfSunC = LF.sunC;
+      s.uniforms.lfSunVP = LF.sunVP;
+      s.uniforms.lfDynVP = LF.dynVP;
+      s.uniforms.lfSunMap = LF.sunMap;
+      s.uniforms.lfDynMap = LF.dynMap;
+      s.uniforms.lfCloud = LF.cloud;
+    }
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\n' + VERT_PARS);
     s.vertexShader = s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n' + VERT_MAIN);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS);
+    s.fragmentShader = s.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+#if defined( LF_MONO ) && defined( USE_MAP )
+diffuseColor.rgb = diffuse * mix( 1.0, dot( sampledDiffuseColor.rgb, vec3( 0.3, 0.6, 0.1 ) ) / LF_MONO, 0.55 );
+#endif
+`);
     s.fragmentShader = s.fragmentShader.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nfloat lfPuddle = 0.0;\nfloat lfPuddleK = 0.0;\n' + FRAG_GRIME + FRAG_WET);
     s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 #ifdef LF_WET
@@ -433,6 +562,6 @@ if ( lfPuddle > 0.02 && lfRain > 0.0 ) {
 `);
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + FRAG_LIGHT);
   };
-  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}${o.tile ? 1 : 0}`;
+  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}${o.tile ? 1 : 0}${o.outdoor ? 1 : 0}${o.leaf ? 1 : 0}${LF.sunOn ? 1 : 0}`;
   return m;
 }

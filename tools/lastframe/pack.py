@@ -24,7 +24,7 @@ Image.fromarray((enc(lm) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm.webp', q
 lm2 = np.load(f'{OUT}/lightmap2.npy').astype(np.float32)[::-1]
 Image.fromarray((enc(lm2) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm2.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
 sky = np.load(f'{OUT}/sky.npy').astype(np.float32)[::-1]
-Image.fromarray((enc(sky) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/sky.webp', quality=88, method=4)
+Image.fromarray((enc(sky) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/sky.webp', quality=90, method=4)
 
 raw = json.load(open(f'{OUT}/map_raw.json'))
 def yp(p): return [round(p[0], 4), round(p[2], 4), round(-p[1], 4)]
@@ -33,7 +33,7 @@ cols = []
 for c in raw['colliders']:
     a, b = ybox(c['a'], c['b'])
     cols.append([*[round(v, 3) for v in a], *[round(v, 3) for v in b], 1 if c['pen'] else 0, c['tag'], c['mat']])
-tex = sorted({v['tex'] for k, v in MATS.items() if not v['emit']})
+tex = sorted({v['tex'] for k, v in MATS.items() if not v['emit']} | set('leafy_grass cliff_side seaside_rock lichen_rock coast_sand_rocks_02 clean_pebbles grass_path_2 worn_asphalt'.split()))
 # a map only loads what it's built from, and the doors' two
 used = {e['mat'] for e in raw['mats']}
 load = sorted({MATS[k]['tex'] for k in used if not MATS[k]['emit']} | {'distressed_painted_planks', 'green_metal_rust'})
@@ -44,7 +44,7 @@ for d in raw['doors']:
 glass = []
 for g in raw['glass']:
     glass.append(dict(axis=g['axis'], c=g['c'], a=g['a'], b=g['b'], z0=g['z0'], z1=g['z1']))
-out = dict(mats=raw['mats'], materials=mats, textures=load, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {})) for u in raw['units']],
+out = dict(mats=raw['mats'], materials=mats, textures=load, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {}), **({'float': 1} if u.get('float') else {})) for u in raw['units']],
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
            lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power']) for l in raw['lights']],
@@ -58,10 +58,23 @@ if COVE:
     H.astype(np.float32).tofile(f'{DST}/height.bin')
     lm3 = np.load(f'{OUT}/lightmap3.npy').astype(np.float32)[::-1]
     Image.fromarray((enc(lm3) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm3.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
-    sp = CV.splat(H, X, Y, gm.ways)[::-1]
+    sp = CV.splat(H, X, Y, gm.ways, gm.rects)[::-1]
     Image.fromarray((np.clip(sp, 0, 1) * 255 + 0.5).astype(np.uint8), 'RGBA').save(f'{DST}/splat.webp', quality=92, method=4, exact=True)
+    # where the sea meets something: land, the big rocks, the pier. Foam gathers round all of it
+    from PIL import ImageDraw, ImageFilter
+    mk = Image.fromarray(((H > -0.25)[::-1] * 255).astype(np.uint8))
+    dr = ImageDraw.Draw(mk)
+    px_ = lambda x, y: (x - CL.X0, CL.Y1 - y)
+    for v in raw['veg']:
+        if 'rock' in v['id'] and v['pos'][2] < 2.5:
+            a, b = px_(v['pos'][0], v['pos'][1]); r_ = v['s'] * 0.42
+            dr.ellipse((a - r_, b - r_, a + r_, b + r_), fill=255)
+    for bx in ((-18, 7, 6, 12), (-18, 12, -12.5, 36)):
+        a, b = px_(bx[0], bx[3]); c_, d_ = px_(bx[2], bx[1])
+        dr.rectangle((a, b, c_, d_), fill=255)
+    mk.filter(ImageFilter.GaussianBlur(2.6)).save(f'{DST}/near.webp', quality=80, method=4)
     out['terrain'] = dict(x0=CL.X0, y0=CL.Y0, step=CL.STEP, nx=H.shape[1], ny=H.shape[0], inner=list(CV.INNER), limit=list(CV.LIMIT))
-    out['weather'] = CV.WEATHER
+    out['weather'] = {**CV.WEATHER, 'sun': raw['sun'], 'sky': [raw['sun']['sky']] * 3}
     out['volume'] = CV.VOLUME
     out['centre'] = raw['centre']
     out['attract'] = raw['attract']
@@ -82,9 +95,10 @@ if '--tex' in sys.argv:
             if os.path.exists(s2):
                 s = s2
                 q = 66 if n == 'c' else 72
+            if os.path.exists(f'{TEXD}/tex/{t}_{n}.webp') and '--retex' not in sys.argv: continue
             if os.path.exists(s):
                 subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '6', s, '-o', f'{TEXD}/tex/{t}_{n}.webp'], check=True)
-            elif n == 'a':
+            elif n == 'a' and not os.path.exists(f'{TEXD}/tex/{t}_{n}.webp'):
                 # some scans ship no packed map: flat AO 1, roughness 0.85
                 Image.new('RGB', (4, 4), (255, 217, 0)).save(f'{TEXD}/tex/{t}_a.webp', lossless=True)
 sz = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DST) for f in fs)

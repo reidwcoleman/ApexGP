@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Sun, MOVER } from './sun.ts';
 import type { PeopleKit } from '../people/Humans.ts';
 import { Planar, Post } from './post.ts';
 import { loadVolume, loadWorld, type Door, type Loaded, type MapData } from './world.ts';
@@ -132,6 +133,45 @@ export class Game {
     this.scene.add(this.flashPoint);
   }
 
+  sun: Sun | null = null;
+  private rideM = new THREE.Matrix4();
+  private rideQ = new THREE.Quaternion();
+  private rideE = new THREE.Euler();
+  private rideV = new THREE.Vector3();
+  private rideS = new THREE.Vector3(1, 1, 1);
+  /** boats on their moorings: up with the swell, leaning into it, and nodding round the buoy */
+  private ride(t: number) {
+    for (const f of this.L.floats) {
+      f.base.forEach((b, i) => {
+        const x = f.x[i], z = f.z[i], k = x * 0.07 + z * 0.05;
+        const lift = Math.sin(t * 0.95 + k) * 0.13 + Math.sin(t * 1.7 + k * 2) * 0.05;
+        this.rideE.set(Math.sin(t * 0.8 + k) * 0.05, f.yaw[i] + Math.sin(t * 0.13 + k) * 0.1, Math.sin(t * 1.1 + k * 1.3) * 0.075, 'YXZ');
+        this.rideQ.setFromEuler(this.rideE);
+        this.rideV.setFromMatrixPosition(b);
+        this.rideV.y += lift;
+        this.rideM.compose(this.rideV, this.rideQ, this.rideS);
+        f.mesh.setMatrixAt(i, this.rideM);
+      });
+      f.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  private flareK = 0;
+  private flareV = new THREE.Vector3();
+  /** where the sun falls on the frame, and whether anything stands in front of it */
+  private lensFlare(dt: number) {
+    const u = this.post.mFinal.uniforms.flare.value as THREE.Vector3;
+    const d = LF.sunDir.value, p = this.cam.position, v = this.flareV;
+    v.copy(p).addScaledVector(d, 60).project(this.cam);
+    let want = 0;
+    if (v.z < 1 && Math.abs(v.x) < 1.3 && Math.abs(v.y) < 1.3) {
+      const clear = !this.L.world.ray(p.x, p.y, p.z, d.x, d.y, d.z, 320);
+      want = clear ? 1 - Math.max(0, Math.max(Math.abs(v.x), Math.abs(v.y)) - 0.9) / 0.4 : 0;
+    }
+    this.flareK += (want - this.flareK) * Math.min(1, dt * 9);
+    u.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, this.flareK);
+  }
+
   /** test tools: hold the camera somewhere else for a look */
   camHold: number[] | null = null;
   /** test tools drive the game without pointer lock */
@@ -152,6 +192,16 @@ export class Game {
         m.receiveShadow = true;
       }
     });
+    const sunInfo = L.map.weather?.sun;
+    if (sunInfo) {
+      const sun = (this.sun = new Sun(this.r, this.scene, sunInfo));
+      const doorParts = new Set<THREE.Object3D>();
+      for (const d of L.doors) d.pivot.traverse((o) => { o.layers.enable(MOVER); doorParts.add(o); });
+      const glass = new Set<THREE.Object3D>(L.panes.map((p) => p.mesh));
+      const lim = L.map.terrain!.limit;
+      const c = new THREE.Vector3((lim[0] + lim[2]) / 2, 14, (lim[1] + lim[3]) / 2);
+      sun.bake(c, Math.hypot(lim[2] - lim[0], lim[3] - lim[1]) / 2 + 26, (o) => o.name === 'sky' || o.name === 'sea' || o.name === 'grass' || doorParts.has(o) || glass.has(o) || (o as THREE.Light).isLight === true, (o) => o.name === 'veg');
+    }
     // what keeps the rain off; a tunnel under open ground doesn't
     const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > 0).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
     this.fx = new Fx(roofs, phys, L.glassMat);
@@ -159,6 +209,11 @@ export class Game {
     if (wb) (this.post.mFinal.uniforms.wb.value as THREE.Vector3).set(wb[0], wb[1], wb[2]);
     this.fx.rainOn = L.map.weather?.rain ?? 1;
     if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
+    if (sunInfo) {
+      this.post.mFinal.uniforms.caK.value = 0.0085;
+      this.post.mFinal.uniforms.satK.value = 0.97;
+      this.sound.coast = true;
+    }
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
@@ -252,6 +307,7 @@ export class Game {
 
   surfaceAt(x: number, y: number, z: number): string {
     const k = this.zone(x, y + 1, z);
+    if (this.L.grass && k === 'street') return y < 0.02 ? 'wet' : Math.abs(y - this.L.world.ground(x, z)) > 0.12 ? 'hard' : this.L.grass.surface(x, z);
     if (y > 2.6 && y < 3.4 && (k === 'hall' || k === 'street')) return 'metal';
     if (k === 'street') return y < -0.05 ? 'wet' : 'grit';
     return k === 'small' ? (Math.floor((x + z) * 0.11) % 2 ? 'wood' : 'hard') : 'hard';
@@ -668,6 +724,12 @@ export class Game {
       }
       // the far side of a wall: the normal runs with the round
       const out = i > 0 && e.surf[i - 1] === s && Math.abs(e.e[o - 6] - x) + Math.abs(e.e[o - 4] - z) < 1.8 && nx * e.e[o - 3] + ny * e.e[o - 2] + nz * e.e[o - 1] < -0.1;
+      if (this.sun && surf === 'soil' && y < 0.06) {
+        // the bed is under water: what shows is the surface
+        this.fx.impact(x, 0.04, z, 0, 1, 0, 'water');
+        this.sound.impact(this.tmp.set(x, 0, z), 'water');
+        continue;
+      }
       this.fx.impact(x, y, z, nx, ny, nz, surf, out);
       if (surf === 'flesh') this.fx.blood(x, y, z, -nx, -ny, -nz);
       if (i === e.surf.length - 1 || sounds) this.sound.impact(this.tmp.set(x, y, z), surf);
@@ -898,6 +960,10 @@ export class Game {
       this.sendState();
     }
     this.sound.listen(this.cam, this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z));
+    if (this.sun) {
+      const c = this.cam.position, shore = -46 + 70 * Math.exp(-(((c.x - 12) / 42) ** 2));
+      this.sound.shore(Math.max(0, -c.z - shore), this.zone(c.x, c.y, c.z) !== 'street', c.y, dt);
+    }
     // ---- post values
     const u = this.post.mFinal.uniforms;
     this.whiteout = Math.max(0, this.whiteout - dt * 0.75);
@@ -929,6 +995,14 @@ export class Game {
     if (!this.frozen) {
       const out = !this.L.map.terrain && !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
       this.planar.render(this.scene, this.cam, this.planarHide(), out);
+      if (this.sun) {
+        this.sun.update(this.cam.position, this.time);
+        this.L.grass?.update(this.cam);
+        const cp = this.cam.position;
+        for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach;
+        this.ride(this.time);
+        this.lensFlare(dt);
+      }
       this.post.render(this.scene, this.cam, dt, this.time);
     }
   }

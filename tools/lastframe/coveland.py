@@ -70,7 +70,7 @@ def land(x, y):
     h = climb + ridge * up
     # the sea takes the land back: steep where the ground is high, a beach in the middle of the cove
     cove = np.exp(-(((x - 12) / 34) ** 2))
-    cliff_w = 7 + 9 * cove + 3 * fbm(x, y, 0.04, 3, 31)
+    cliff_w = 3.5 + 12 * cove + 2.2 * fbm(x, y, 0.04, 3, 31)
     edge = smooth(0, cliff_w, s)
     h = h * edge ** (0.55 + 1.3 * cove)
     # the beach: shingle, flat enough to walk, and a gentle climb to the village
@@ -86,7 +86,7 @@ def land(x, y):
     gx, gy = np.gradient(h, STEP)
     steep = smooth(0.7, 1.4, np.hypot(gx, gy))
     coast = smooth(70, 10, np.abs(s)) * smooth(-30, 2, s)
-    h = h + strata * 0.55 * steep * coast + fbm(x, y, 0.11, 4, 51) * (0.4 + 1.5 * steep * coast)
+    h = h + strata * 1.1 * steep * coast + fbm(x, y, 0.11, 4, 51) * (0.4 + 2.4 * steep * coast)
     # rock skerries off the two points
     sk = np.maximum(fbm(x, y, 0.032, 4, 61) - 0.2, 0) * 26 * smooth(-44, -6, s) * smooth(2, -4, s) * (1 - cove * 0.95)
     h = h + sk

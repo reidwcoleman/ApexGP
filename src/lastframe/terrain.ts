@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Terrain } from './collide.ts';
 import { LF, applyLF } from './lighting.ts';
+import { buildSea } from './water.ts';
 
 export interface TerrainInfo {
   x0: number;
@@ -46,55 +47,99 @@ function landGeometry(t: Terrain, inner: number[]) {
   return g;
 }
 
+/** pasture in June, as colour: shared with the blades that stand on it so that the two meet at a distance */
+export const PASTURE = /* glsl */ `
+float lfTile( sampler2D n, vec2 p ) { return texture2D( n, p * 0.03125 ).r; }
+vec3 lfPasture( sampler2D n, vec2 p ) {
+  float a = lfTile( n, p * 0.05 ), b = lfTile( n, p * 0.19 + 5.0 ), c = lfTile( n, p * 0.83 + 9.0 );
+  vec3 col = mix( vec3( 0.062, 0.118, 0.026 ), vec3( 0.105, 0.155, 0.036 ), smoothstep( 0.4, 0.6, a ) );
+  col = mix( col, vec3( 0.2, 0.205, 0.07 ), smoothstep( 0.5, 0.68, b ) * 0.62 );
+  return col * ( 0.82 + 0.36 * c );
+}`;
+
 function landMaterial(tex: (n: string) => THREE.Texture | null, splat: THREE.Texture) {
   const m = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   const u = {
-    tGrass: { value: tex('leafy_grass_c') }, tRock: { value: tex('cliff_side_c') }, tSand: { value: tex('coast_sand_rocks_02_c') }, tDirt: { value: tex('grass_path_2_c') },
-    tGrassN: { value: tex('leafy_grass_n') }, tRockN: { value: tex('cliff_side_n') }, tSplat: { value: splat },
+    tGrass: { value: tex('leafy_grass_c') }, tRock: { value: tex('seaside_rock_c') }, tRock2: { value: tex('lichen_rock_c') }, tSand: { value: tex('coast_sand_rocks_02_c') }, tPeb: { value: tex('clean_pebbles_c') },
+    tRoad: { value: tex('worn_asphalt_c') }, tGrassN: { value: tex('leafy_grass_n') }, tRockN: { value: tex('seaside_rock_n') }, tSplat: { value: splat },
   };
   m.onBeforeCompile = (s) => {
     Object.assign(s.uniforms, u);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
-uniform sampler2D tGrass, tRock, tSand, tDirt, tGrassN, tRockN, tSplat;
-float lfH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
-float lfN( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( lfH( i ), lfH( i + vec2( 1, 0 ) ), f.x ), mix( lfH( i + vec2( 0, 1 ) ), lfH( i + vec2( 1, 1 ) ), f.x ), f.y ); }
-float lfF( vec2 p ) { return lfN( p ) * 0.55 + lfN( p * 2.3 + 4.1 ) * 0.3 + lfN( p * 5.1 + 9.7 ) * 0.15; }
+uniform sampler2D tGrass, tRock, tRock2, tSand, tPeb, tRoad, tGrassN, tRockN, tSplat;
+${PASTURE}
 vec2 lfRockUv( vec3 p, vec3 n ) {
   // cliffs take the scan from the side, or it would smear down them
-  return abs( n.y ) > 0.6 ? p.xz : abs( n.x ) > abs( n.z ) ? vec2( p.z, p.y * 1.4 ) : vec2( p.x, p.y * 1.4 );
+  return abs( n.y ) > 0.6 ? p.xz : abs( n.x ) > abs( n.z ) ? vec2( p.z, p.y * 1.3 ) : vec2( p.x, p.y * 1.3 );
 }
 `);
     s.fragmentShader = s.fragmentShader.replace('#include <map_fragment>', `
 vec4 sp = texture2D( tSplat, vLfLM );
 sp /= max( dot( sp, vec4( 1.0 ) ), 0.001 );
 vec3 wN = normalize( vLfN );
-vec2 uG = vLfW.xz / 3.4, uR = lfRockUv( vLfW, wN ) / 9.0;
-// two scales of each, so nothing reads as a repeating tile from the hill
-vec3 cG = mix( texture2D( tGrass, uG ).rgb, texture2D( tGrass, uG * 0.17 + 0.31 ).rgb, 0.55 );
-vec3 cR = mix( texture2D( tRock, uR ).rgb, texture2D( tRock, uR * 0.31 + 0.13 ).rgb, 0.45 );
-// pasture: wet Atlantic green, paler where it's grazed short
-float pat = lfF( vLfW.xz * 0.021 );
-vec3 lush = cG * vec3( 0.56, 1.12, 0.36 ) * 1.3, pale = cG * vec3( 0.86, 1.14, 0.46 ) * 1.5;
-cG = mix( lush, pale, smoothstep( 0.42, 0.66, pat ) );
-// dead bracken, in rust-red drifts on the rough ground above the cliffs
-float rough = smoothstep( 0.97, 0.86, wN.y );
-float brk = smoothstep( 0.57, 0.66, lfF( vLfW.xz * 0.034 + 7.0 ) + rough * 0.1 ) * smoothstep( 15.0, 22.0, vLfW.y );
-// the frond texture comes from the grass scan itself, so a drift isn't a flat wash of colour
-vec3 rust = vec3( 0.42, 0.15, 0.07 ) * ( 0.3 + 2.6 * dot( cG, vec3( 0.3, 0.5, 0.2 ) ) ) * ( 0.7 + 0.8 * lfF( vLfW.xz * 1.7 ) );
-cG = mix( cG, rust, brk );
-// gorse and scrub darken the steep ground between
-cG *= 1.0 - 0.45 * rough * smoothstep( 0.44, 0.6, lfF( vLfW.xz * 0.09 + 3.0 ) );
-cR *= vec3( 0.86, 0.87, 0.9 );
-cR = mix( cR, cR * vec3( 0.72, 0.8, 0.5 ), smoothstep( 0.5, 0.66, lfF( vLfW.xz * 0.11 ) ) * smoothstep( 2.0, 8.0, vLfW.y ) );
-vec3 cS = texture2D( tSand, vLfW.xz / 4.5 ).rgb * vec3( 0.84, 0.84, 0.86 );
-vec3 cD = texture2D( tDirt, vLfW.xz / 3.0 ).rgb;
+vec2 lfP = vLfW.xz;
+float lfY = vLfW.y;
+vec2 uG = lfP / 2.8;
+// ---- turf: the scan only brings its light and dark, the colour is the pasture's
+vec3 tg = mix( texture2D( tGrass, uG ).rgb, texture2D( tGrass, uG * 0.17 + 0.31 ).rgb, 0.5 );
+float gl = dot( tg, vec3( 0.3, 0.6, 0.1 ) ) / 0.23;
+vec3 cG = lfPasture( lfNoiseT, lfP ) * clamp( 0.32 + 0.68 * gl, 0.25, 1.6 );
+// tussocks: from a distance this is what a field is, thousands of small dark and light clumps
+cG *= 0.66 + 0.68 * lfTile( lfNoiseT, lfP * 2.9 + 13.0 );
+// rough ground: bracken and blackthorn darken the banks, gorse in flower in it, thrift along the cliff tops
+float rough = smoothstep( 0.965, 0.82, wN.y );
+float bush = smoothstep( 0.47, 0.6, lfTile( lfNoiseT, lfP * 0.1 + 3.0 ) );
+cG = mix( cG, cG * vec3( 0.55, 0.78, 0.5 ), clamp( rough * 1.3, 0.0, 1.0 ) * bush );
+float thrift = smoothstep( 0.6, 0.68, lfTile( lfNoiseT, lfP * 1.3 + 17.0 ) ) * clamp( sp.g * 3.0, 0.0, 1.0 ) * smoothstep( 7.0, 12.0, lfY );
+cG = mix( cG, vec3( 0.56, 0.3, 0.38 ), thrift * 0.26 );
+// ---- rock: blended from the sides, a second scan over it at a bigger size so no two faces match
+vec3 w3 = wN * wN; w3 *= w3; w3 /= w3.x + w3.y + w3.z;
+vec3 cR = texture2D( tRock, vec2( vLfW.z, lfY * 1.3 ) / 6.5 ).rgb * w3.x + texture2D( tRock, lfP / 6.5 ).rgb * w3.y + texture2D( tRock, vec2( vLfW.x, lfY * 1.3 ) / 6.5 ).rgb * w3.z;
+vec3 cR2 = texture2D( tRock2, ( abs( wN.x ) > abs( wN.z ) ? vec2( vLfW.z, lfY ) : vec2( vLfW.x, lfY ) ) / 17.0 ).rgb;
+cR = mix( cR, cR * cR2 * 3.2, 0.55 );
+// tilted beds of slate, then the zones a sea cliff really has: black at the tide line, orange lichen above the spray, grey above that
+float bed = lfTile( lfNoiseT, vec2( ( vLfW.x + vLfW.z ) * 0.035, ( lfY + vLfW.x * 0.11 ) * 1.1 ) );
+cR *= 0.62 + 0.76 * bed;
+float nz = lfTile( lfNoiseT, lfP * 0.3 ) - 0.5;
+float tar = smoothstep( 2.9, 1.0, lfY + nz * 3.0 );
+cR = mix( cR, vec3( 0.016, 0.018, 0.017 ), tar * 0.9 );
+float orange = smoothstep( 0.5, 0.62, lfTile( lfNoiseT, vec2( ( vLfW.x + vLfW.z ) * 0.45, lfY * 0.5 ) ) ) * smoothstep( 2.0, 4.5, lfY ) * smoothstep( 15.0, 7.0, lfY );
+cR = mix( cR, vec3( 0.48, 0.27, 0.05 ), orange * 0.72 );
+float grey = smoothstep( 0.46, 0.6, lfTile( lfNoiseT, lfP * 0.5 + 41.0 ) ) * smoothstep( 8.0, 16.0, lfY );
+cR = mix( cR, cR * vec3( 1.3, 1.35, 1.2 ), grey * 0.5 );
+// ---- the beach: shingle over sand, dark and shining where the last wave reached
+vec3 cS = mix( texture2D( tSand, lfP / 4.5 ).rgb * vec3( 0.46, 0.44, 0.42 ), texture2D( tPeb, lfP / 1.9 ).rgb * vec3( 0.4, 0.4, 0.42 ), smoothstep( 0.42, 0.58, lfTile( lfNoiseT, lfP * 0.16 ) + smoothstep( 1.2, 3.0, lfY ) * 0.3 ) );
+float lap = sin( lfTime * 0.52 + vLfW.x * 0.012 ) * 0.1 + sin( lfTime * 0.21 ) * 0.06;
+float damp = smoothstep( 0.95, 0.12, lfY - lap + nz * 0.5 );
+cS *= mix( 1.0, 0.46, damp );
+// ---- the lanes: old tarmac, moss creeping in from the edges
+vec3 cD = texture2D( tRoad, lfP / 4.6 ).rgb * vec3( 0.6, 0.6, 0.6 );
+float moss = smoothstep( 0.5, 0.2, sp.a + ( lfTile( lfNoiseT, lfP * 0.8 ) - 0.5 ) * 0.6 );
+cD = mix( cD, cG * 0.55, moss );
 diffuseColor.rgb = cG * sp.r + cR * sp.g + cS * sp.b + cD * sp.a;
+// under the water the light still moves
+if ( lfY < 0.1 ) {
+  vec2 q = lfP * 0.7;
+  float ca = lfTile( lfNoiseT, q * 2.0 + vec2( lfTime * 0.09, lfTime * 0.05 ) ) + lfTile( lfNoiseT, q * 2.6 - vec2( lfTime * 0.07, -lfTime * 0.06 ) );
+  diffuseColor.rgb *= 0.78 + 1.2 * smoothstep( 0.82, 1.06, 1.94 - abs( ca - 1.0 ) * 4.0 - 0.0 ) * smoothstep( -8.0, 0.0, lfY );
+}
+`);
+    s.fragmentShader = s.fragmentShader.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix( roughnessFactor, 0.2, damp * sp.b * 0.9 );
+roughnessFactor = mix( roughnessFactor, 0.34, tar * sp.g * 0.8 );
 `);
     s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 {
+  vec2 uR = lfRockUv( vLfW, wN ) / 6.5;
   vec3 nR = texture2D( tRockN, uR ).xyz * 2.0 - 1.0, nG = texture2D( tGrassN, uG ).xyz * 2.0 - 1.0;
-  vec2 tn = nR.xy * ( sp.g + sp.b * 0.5 ) * 1.3 + nG.xy * ( sp.r + sp.a ) * 0.8;
+  vec2 tn = nR.xy * ( sp.g * 1.7 + sp.b * 0.5 ) + nG.xy * ( sp.r * 1.1 + sp.a * 0.5 );
+  // the lie of the ground below what the heights can draw: hummocks and sheep tracks, so low sun has something to catch
+  const float E = 0.4;
+  float e0 = lfTile( lfNoiseT, ( lfP + vec2( E, 0.0 ) ) * 0.55 ) - lfTile( lfNoiseT, ( lfP - vec2( E, 0.0 ) ) * 0.55 );
+  float e1 = lfTile( lfNoiseT, ( lfP + vec2( 0.0, E ) ) * 0.55 ) - lfTile( lfNoiseT, ( lfP - vec2( 0.0, E ) ) * 0.55 );
+  float e2 = lfTile( lfNoiseT, ( lfP + vec2( E, 0.0 ) ) * 0.14 ) - lfTile( lfNoiseT, ( lfP - vec2( E, 0.0 ) ) * 0.14 );
+  float e3 = lfTile( lfNoiseT, ( lfP + vec2( 0.0, E ) ) * 0.14 ) - lfTile( lfNoiseT, ( lfP - vec2( 0.0, E ) ) * 0.14 );
+  tn += ( vec2( e0, e1 ) * 2.6 + vec2( e2, e3 ) * 7.0 ) * sp.r;
   vec3 tT = normalize( cross( wN, vec3( 0.0, 0.0, 1.0 ) ) ), tB = cross( wN, tT );
   normal = normalize( ( viewMatrix * vec4( normalize( wN + tT * tn.x + tB * tn.y ), 0.0 ) ).xyz );
 }
@@ -102,72 +147,6 @@ diffuseColor.rgb = cG * sp.r + cR * sp.g + cS * sp.b + cD * sp.a;
   };
   m.customProgramCacheKey = () => 'lf-land';
   return applyLF(m, { lightmap: true, terrain: true });
-}
-
-/** the sea: depth from the heights, the colour of a Cornish cove, swell and foam */
-function sea(t: Terrain) {
-  const n = t.nx * t.ny;
-  const d = new Uint8Array(n);
-  for (let i = 0; i < n; i++) d[i] = Math.max(0, Math.min(255, -t.h[i] * 14 + 8));
-  const depth = new THREE.DataTexture(d, t.nx, t.ny, THREE.RedFormat, THREE.UnsignedByteType);
-  depth.minFilter = depth.magFilter = THREE.LinearFilter;
-  depth.needsUpdate = true;
-  const W = (t.nx - 1) * t.step, H = (t.ny - 1) * t.step;
-  const mat = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: true,
-    uniforms: { tD: { value: depth }, time: LF.time, area: { value: new THREE.Vector4(t.x0, t.y0, W, H) }, cam: { value: new THREE.Vector3() }, light: { value: 1 } },
-    vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4( position, 1.0 ); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `
-varying vec3 vW;
-uniform sampler2D tD; uniform float time, light; uniform vec4 area; uniform vec3 cam;
-float h21( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
-float vn( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( h21( i ), h21( i + vec2( 1, 0 ) ), f.x ), mix( h21( i + vec2( 0, 1 ) ), h21( i + vec2( 1, 1 ) ), f.x ), f.y ); }
-float fb( vec2 p ) { return vn( p ) * 0.5 + vn( p * 2.1 + 3.1 ) * 0.28 + vn( p * 4.3 + 7.7 ) * 0.14; }
-float surf( vec2 p ) {
-  float s = sin( dot( p, vec2( 0.21, 0.32 ) ) + time * 0.9 ) * 0.4 + sin( dot( p, vec2( -0.34, 0.27 ) ) + time * 1.3 ) * 0.25;
-  s += sin( dot( p, vec2( 0.81, 0.53 ) ) + time * 2.1 ) * 0.1;
-  return s + fb( p * 0.55 + time * 0.14 ) * 1.1 + fb( p * 1.9 - time * 0.21 ) * 0.34;
-}
-void main() {
-  vec2 uv = vec2( ( vW.x - area.x ) / area.z, ( -vW.z - area.y ) / area.w );
-  float e = texture2D( tD, uv ).r * 255.0;
-  float depth = ( e - 8.0 ) / 14.0;
-  if ( depth < -0.12 ) discard;
-  depth = max( depth, 0.0 );
-  vec2 p = vW.xz;
-  float a = surf( p ), bx = surf( p + vec2( 0.25, 0.0 ) ), bz = surf( p + vec2( 0.0, 0.25 ) );
-  // the far water calms down, or the fine waves alias into lines at a grazing angle
-  float calm = 0.55 / ( 1.0 + distance( cam, vW ) / 32.0 );
-  vec3 n = normalize( vec3( ( a - bx ) * calm, 1.0, ( a - bz ) * calm ) );
-  vec3 v = normalize( cam - vW );
-  float fr = 0.03 + 0.97 * pow( 1.0 - max( dot( n, v ), 0.0 ), 5.0 );
-  vec3 r = reflect( -v, n );
-  vec3 sky = mix( vec3( 0.66, 0.68, 0.66 ), vec3( 0.86, 0.87, 0.85 ), clamp( r.y * 1.6, 0.0, 1.0 ) );
-  float k = 1.0 - exp( -depth * 0.32 );
-  vec3 body = mix( vec3( 0.2, 0.47, 0.4 ), vec3( 0.022, 0.13, 0.16 ), k );
-  // weed and rock showing through the shallows
-  body *= 0.82 + 0.3 * fb( p * 0.22 );
-  // sets of swell stand up as the bottom shelves, and break on the rocks
-  float set = sin( depth * 2.6 + time * 0.95 + fb( p * 0.09 ) * 5.0 );
-  float lip = smoothstep( 0.6, 1.0, set ) * smoothstep( 3.2, 0.4, depth );
-  float lace = fb( p * 1.4 + vec2( time * 0.12, -time * 0.08 ) );
-  float foam = smoothstep( 0.42, 0.72, lace + lip * 0.5 + smoothstep( 0.55, 0.0, depth ) * 0.42 ) * smoothstep( 4.0, 0.0, depth );
-  foam = max( foam, smoothstep( 0.66, 0.8, fb( p * 0.8 + time * 0.05 ) ) * 0.16 );
-  vec3 c = mix( body, sky, fr );
-  c = mix( c, vec3( 0.92, 0.95, 0.93 ), foam );
-  float alpha = max( mix( 0.5, 1.0, 1.0 - exp( -depth * 0.9 ) ), foam ) * smoothstep( -0.12, 0.05, depth + foam * 0.1 + ( a - 1.0 ) * 0.08 );
-  gl_FragColor = vec4( c * light, alpha );
-}`,
-  });
-  const g = new THREE.PlaneGeometry(1400, 1400, 1, 1);
-  g.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(g, mat);
-  m.position.set(0, 0.0, 0);
-  m.frustumCulled = false;
-  m.renderOrder = 1;
-  m.onBeforeRender = (_r, _s, cam) => (mat.uniforms.cam.value as THREE.Vector3).setFromMatrixPosition(cam.matrixWorld);
-  return m;
 }
 
 /** a wind through anything rooted to the ground */
@@ -190,11 +169,12 @@ export function sway(m: THREE.MeshStandardMaterial, k: number) {
   m.customProgramCacheKey = () => key + 'sway';
 }
 
-export function buildLand(t: Terrain, info: TerrainInfo, tex: (n: string) => THREE.Texture | null, splat: THREE.Texture) {
+export function buildLand(t: Terrain, info: TerrainInfo, tex: (n: string) => THREE.Texture | null, splat: THREE.Texture, hTex: THREE.Texture, near: THREE.Texture | null) {
   const g = new THREE.Group();
+  g.name = 'land';
   const land = new THREE.Mesh(landGeometry(t, info.inner), landMaterial(tex, splat));
   land.frustumCulled = false;
-  land.name = 'land';
-  g.add(land, sea(t));
+  land.name = 'ground';
+  g.add(land, buildSea(t, hTex, near));
   return g;
 }

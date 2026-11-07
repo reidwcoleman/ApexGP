@@ -1,16 +1,25 @@
 """Surfaces of the world: which scan, how big one tile is in metres, a tint, and how wet it gets."""
-def M(tex, scale, tint=(1, 1, 1), rough=1.0, wet=0.0, metal=0.0, nrm=1.0, emit=None):
-    return dict(tex=tex, scale=scale, tint=list(tint), rough=rough, wet=wet, metal=metal, nrm=nrm, emit=emit)
+def M(tex, scale, tint=(1, 1, 1), rough=1.0, wet=0.0, metal=0.0, nrm=1.0, emit=None, mono=0.0):
+    """mono: the scan only brings its light and dark (mean luminance given); tint is then the true albedo"""
+    return dict(tex=tex, scale=scale, tint=list(tint), rough=rough, wet=wet, metal=metal, nrm=nrm, emit=emit, mono=mono)
 
 MATS = {
     # the cove
-    'render': M('grey_plaster', 3.0, (1.62, 1.68, 1.78)),
-    'render_b': M('grey_plaster', 3.0, (1.6, 1.58, 1.5)),
-    'stonewall': M('castle_wall_slates', 2.6, (0.9, 0.9, 0.88)),
-    'hedge': M('mossy_stone_wall', 2.8),
-    'slate': M('grey_roof_tiles', 2.6, (0.72, 0.74, 0.78), rough=0.7),
-    'cobble': M('cobblestone_floor_04', 2.6, (0.8, 0.8, 0.78)),
-    'slip': M('concrete_wall_008', 3.0, (0.5, 0.5, 0.49)),
+    'render_w': M('white_plaster_rough_01', 2.6, (0.79, 0.79, 0.76), mono=0.17, nrm=1.3),
+    'render_c': M('white_plaster_rough_01', 2.6, (0.8, 0.72, 0.56), mono=0.17, nrm=1.3),
+    'render_p': M('white_plaster_rough_01', 2.6, (0.8, 0.63, 0.57), mono=0.17, nrm=1.3),
+    'render_g': M('white_plaster_rough_01', 2.6, (0.58, 0.65, 0.68), mono=0.17, nrm=1.3),
+    'paint_w': M('painted_plaster_wall', 1.4, (0.84, 0.84, 0.82), rough=0.55, mono=0.3, nrm=0.4),
+    'tar': M('concrete_wall_008', 2.0, (0.028, 0.03, 0.033), rough=0.42),
+    'stonewall': M('castle_wall_slates', 2.6, (0.66, 0.7, 0.76)),
+    'drystone': M('stacked_stone_wall', 2.4, (0.56, 0.6, 0.66)),
+    'copestone': M('rustic_stone_wall', 1.8, (0.5, 0.54, 0.54)),
+    'hedge': M('mossy_stone_wall', 2.8, (0.72, 0.78, 0.7)),
+    'slate': M('roof_slates_02', 2.3, (0.44, 0.47, 0.54), rough=0.62, nrm=1.3),
+    'slate_b': M('roof_slates_03', 2.3, (0.4, 0.42, 0.46), rough=0.62, nrm=1.3),
+    'ridge': M('concrete_wall_008', 1.2, (0.2, 0.17, 0.16), rough=0.7),
+    'cobble': M('cobblestone_floor_04', 2.2, (0.56, 0.58, 0.6)),
+    'slip': M('cobblestone_floor_04', 2.0, (0.42, 0.46, 0.44)),
     'hullw': M('distressed_painted_planks', 1.6, (0.82, 0.84, 0.82)),
     'hullb': M('distressed_painted_planks', 1.6, (0.2, 0.36, 0.46)),
     'hullr': M('distressed_painted_planks', 1.6, (0.56, 0.2, 0.16)),
