@@ -774,11 +774,8 @@ and bots; the contestants are original bean characters, not marbles.
 - **The air** (`env-ambient.ts`): each world has its own specks round the camera: petals, snow,
   embers, bubbles, confetti, fireflies, sea spray.
   - **Party games** (`course-modes.ts`, `ai-modes.ts`, `modes.ts`), each in its own world:
-    **Colour Call** (disco: a colour is called, every other tile drops), **Hot Spud** (circus: tag
-    with lit fuses, whoever holds one when it blows is out), **Gold Rush** (pirate: a chest spits
-    gold, knocks spill it, falls lose a third, a frenzy at the end, least gold goes home) and **Belt Rush** (toy box: a
-    giant belt brings blocks at you, faster and faster; off the back and you're out). Colour Call
-    and Belt Rush are pure functions of the round's clock; the spuds and the gold are the host's.
+    **Colour Call** (disco: a colour is called, every other tile drops), a pure function of the
+    round's clock.
   - **Races** are platform courses (`course-gen.ts`): wide padded decks floating high over the
     paint, open edges (fall off and you're back at the last checkpoint), flat or climbing, joined
     by turns, ramps and short hops. Each course is a list of obstacle zones from a kit of 34 (pins,
@@ -817,9 +814,8 @@ and bots; the contestants are original bean characters, not marbles.
     host sends the drop times), Meltdown (one ice floe melting in from the edge with holes
     opening in it, the same on every screen; push the others in), Storm Deck (`course-storm.ts`: a
     raft in a thunderstorm; a ring of light marks each lightning strike before it blasts everyone
-    near it overboard, more and faster as it goes, from a seeded schedule every browser shares) and
-    High Tide (`course-tide.ts`: hexagonal coral columns a hop apart in height; the sea rises a step
-    at a time and takes whoever it reaches). Their bots are in `ai-arena.ts`.
+    near it overboard, more and faster as it goes, from a seeded schedule every browser shares).
+    Their bots are in `ai-arena.ts`.
   - **Team** (`course-paintparty.ts`, `team.ts`, `ai-team.ts`): two or three teams on a big arena;
     every bean leaves a trail of its team's paint as it runs (a dive smears a wider stripe, a
     landing splats a blob), drawn from a fine paint map (25 cm texels, a channel per team) as glossy
@@ -831,12 +827,8 @@ and bots; the contestants are original bean characters, not marbles.
     bar that speeds up: hop it).
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
-    rotation but still built for the test links: `?round=N` uses `DEFAULT_SHOW` (0–5 the old
-    order, 6 Paint Party, 7–14 the platform races, 15 Crown Peak, 16 Splat Ring, 17 Punch Line,
-    18 Rumble Hill, 19 Cookie Crumble, 20 Lava Rush, 21 Meltdown, 22 Petal Pass, 23 Tick Tock,
-    24 Moon Run, 25 Slip Rink, 26 Storm Deck, 27 High Tide, 28 Colour Call, 29 Hot Spud,
-    30 Gold Rush, 31 Belt Rush, 32 Disco Dash, 33 Big Top, 34 Treasure Trail, 35 Block Party).
-    `?lineup=hotspud,goldrush` plays those rounds, in that order, as the show.
+    rotation but still built for the test links: `?round=N` indexes `DEFAULT_SHOW` in `courses.ts`.
+    `?lineup=colourcall,bumperbash` plays those rounds, in that order, as the show.
   - Out of the show, start a new one or watch the rest (←/→ switches bean, ENTER skips the round).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,

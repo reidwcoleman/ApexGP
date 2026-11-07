@@ -415,7 +415,7 @@ export class MarbleGame {
   private deal() {
     if (this.dealt) this.dealt = false;
     else dealShow();
-    // (test hook: ?lineup=pinball,bouncehouse plays those, in that order)
+    // (test hook: ?lineup=bumperbash,bouncehouse plays those, in that order)
     const q = new URLSearchParams(location.search).get('lineup');
     if (q) setShow(q.split(',') as RoundId[]);
   }

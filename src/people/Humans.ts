@@ -164,7 +164,7 @@ let CORE = [...new Set([ROSTER.suit, ROSTER.crew, ROSTER.crewF, ROSTER.shirt, RO
 export function setPeopleCore(names: string[]) {
   CORE = names;
 }
-/** a game that wants only its CORE avatars (Apex Lawn: one gardener) can skip fetching the fans behind them */
+/** a game that wants only its CORE avatars can skip fetching the fans behind them */
 let LOAD_REST = true;
 export function setPeopleRest(on: boolean) {
   LOAD_REST = on;
