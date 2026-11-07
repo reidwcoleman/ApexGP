@@ -155,6 +155,10 @@ export class Game {
     // what keeps the rain off; a tunnel under open ground doesn't
     const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > 0).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
     this.fx = new Fx(roofs, phys, L.glassMat);
+    const wb = L.map.weather?.wb;
+    if (wb) (this.post.mFinal.uniforms.wb.value as THREE.Vector3).set(wb[0], wb[1], wb[2]);
+    this.fx.rainOn = L.map.weather?.rain ?? 1;
+    if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
@@ -174,6 +178,10 @@ export class Game {
   private buildPhysics() {
     const { L, phys } = this;
     phys.addMap(L.map);
+    if (L.world.terrain) {
+      const q = L.map.terrain!.inner;
+      phys.addTerrain(L.world.terrain, q[0], q[1], q[2], q[3]);
+    }
     for (const d of L.doors) {
       phys.addDoor(d);
       d.onThud = (door, v) => this.sound.impact(door.leafCentre, v > 2 ? 'wood' : 'wood');
@@ -900,9 +908,11 @@ export class Game {
     u.fish.value = THREE.MathUtils.lerp(0.85, 0.3, me.alive ? me.adsK : 0);
     const outside = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street';
     this.wet += ((outside ? 1 : 0) - this.wet) * Math.min(1, dt * (outside ? 0.5 : 0.8));
-    u.lensWet.value = this.wet;
-    LF.rain.value = outside ? 1 : 0.6;
-    this.post.density += ((outside ? 0.0065 : 0.0095) - this.post.density) * Math.min(1, dt * 2);
+    const wx = this.L.map.weather;
+    u.lensWet.value = this.wet * (wx?.wet ?? 1);
+    LF.rain.value = (outside ? 1 : 0.6) * (wx?.rain ?? 1);
+    const fog = wx?.fog ?? 1;
+    this.post.density += ((outside ? 0.0065 : 0.0095) * fog - this.post.density) * Math.min(1, dt * 2);
     if (this.dead >= 0) {
       u.glitch.value = this.dead > 2.0 ? Math.min(1, (this.dead - 2.0) * 1.8) : 0;
     } else u.glitch.value = 0;
@@ -917,7 +927,7 @@ export class Game {
       this.cam.updateMatrixWorld();
     }
     if (!this.frozen) {
-      const out = !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
+      const out = !this.L.map.terrain && !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
       this.planar.render(this.scene, this.cam, this.planarHide(), out);
       this.post.render(this.scene, this.cam, dt, this.time);
     }
@@ -1114,7 +1124,8 @@ export class Game {
   private attractCam(dt: number) {
     this.attract += dt * 0.022;
     const t = this.attract % 1;
-    const a = new THREE.Vector3(36, 1.55, -6.2), b = new THREE.Vector3(58, 1.6, -7.4);
+    const pts = this.L.map.attract;
+    const a = pts ? new THREE.Vector3(...(pts[0] as [number, number, number])) : new THREE.Vector3(36, 1.55, -6.2), b = pts ? new THREE.Vector3(...(pts[1] as [number, number, number])) : new THREE.Vector3(58, 1.6, -7.4);
     this.cam.position.lerpVectors(a, b, 0.5 - 0.5 * Math.cos(t * Math.PI * 2));
     this.cam.position.y += Math.sin(this.time * 1.7) * 0.012;
     this.cam.rotation.set(0.02 + Math.sin(this.time * 0.6) * 0.012, -1.32 + Math.sin(this.time * 0.23) * 0.1, Math.sin(this.time * 0.9) * 0.006, 'YXZ');

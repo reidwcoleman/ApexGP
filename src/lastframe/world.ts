@@ -1,3 +1,4 @@
+import { buildLand, sway, type TerrainInfo } from './terrain.ts';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LF, applyLF, roomGlass } from './lighting.ts';
@@ -6,6 +7,10 @@ import { World, type Box } from './collide.ts';
 import { dress } from './dress.ts';
 
 export const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'lastframe/';
+/** which map this page is on: picking another reloads the page, so nothing has to be torn down */
+export const MAP_ID = new URLSearchParams(location.search).get('map') === 'cove' ? 'cove' : 'block';
+/** the map's own files; textures, guns and gear are shared */
+export const MB = BASE + (MAP_ID === 'cove' ? 'cove/' : '');
 
 export interface MapData {
   mats: { mat: string; verts: number; tris: number; pos: number; nor: number; uv: number; lm: number; idx: number }[];
@@ -23,6 +28,16 @@ export interface MapData {
   lm: { logr: number; k: number; size: number };
   /** facade modules: id, where, and which tile of the second lightmap (none: a far building) */
   units: { id: string; pos: number[]; rot: number; sc: number[]; tint: number[]; tile?: number[] }[];
+  /** a map on real ground */
+  terrain?: TerrainInfo;
+  /** planted things: no collision, no lightmap */
+  veg?: { id: string; pos: number[]; rot: number; s: number }[];
+  /** the volume capture's grid, where it isn't the block's */
+  volume?: { step: number[]; min: number[]; dim: number[] };
+  weather?: { key?: number; rain: number; wet: number; fog: number; sky: number[]; wb: number[] };
+  /** what spawns face, and the shot behind the menu */
+  centre?: number[];
+  attract?: number[][];
 }
 
 export class Door {
@@ -236,15 +251,15 @@ export interface Loaded {
   indoors: THREE.Object3D[];
 }
 
-function makeSky(tex: THREE.Texture, lm: MapData['lm']) {
+function makeSky(tex: THREE.Texture, lm: MapData['lm'], tint = [0.62 * 0.36, 0.62 * 0.62, 0.62 * 1.05]) {
   const geo = new THREE.SphereGeometry(400, 32, 20);
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { t: { value: tex }, k: LF.lmK, gain: { value: 0.62 } },
+    uniforms: { t: { value: tex }, k: LF.lmK, tint: { value: new THREE.Vector3(tint[0], tint[1], tint[2]) } },
     vertexShader: 'varying vec3 d; void main(){ d = position; vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position,1.); gl_Position = p.xyww; }',
-    fragmentShader: `varying vec3 d; uniform sampler2D t; uniform vec2 k; uniform float gain;
+    fragmentShader: `varying vec3 d; uniform sampler2D t; uniform vec2 k; uniform vec3 tint;
       void main(){ vec3 n = normalize(d); float u = atan(n.z, n.x) / 6.2831853 + 0.5; float v = asin(clamp(n.y,-1.,1.)) / 3.14159265 + 0.5;
-      vec3 e = texture2D(t, vec2(u, v)).rgb; vec3 c = (exp2(e*k.x)-1.)/k.y; gl_FragColor = vec4(min(c*gain*vec3(.36,.62,1.05), vec3(1.6)),1.); }`,
+      vec3 e = texture2D(t, vec2(u, v)).rgb; vec3 c = (exp2(e*k.x)-1.)/k.y; gl_FragColor = vec4(min(c*tint, vec3(6.)),1.); }`,
   });
   const s = new THREE.Mesh(geo, m);
   s.frustumCulled = false;
@@ -253,18 +268,23 @@ function makeSky(tex: THREE.Texture, lm: MapData['lm']) {
 }
 
 export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, what: string) => void): Promise<Loaded> {
-  const map: MapData = await (await fetch(BASE + 'map.json')).json();
+  const map: MapData = await (await fetch(MB + 'map.json')).json();
   LF.lmK.value.set(map.lm.logr, map.lm.k);
-  const bin = await (await fetch(BASE + 'world.bin')).arrayBuffer();
+  const bin = await (await fetch(MB + 'world.bin')).arrayBuffer();
   const tl = new THREE.TextureLoader();
   const aniso = Math.min(4, r.capabilities.getMaxAnisotropy());
   const texs = new Map<string, THREE.Texture>();
   const need: [string, boolean][] = [];
   for (const t of map.textures) need.push([`tex/${t}_c.webp`, true], [`tex/${t}_n.webp`, false], [`tex/${t}_a.webp`, false]);
   need.push(['lm.webp', false], ['lm2.webp', false], ['sky.webp', false]);
+  if (map.terrain) {
+    need.push(['lm3.webp', false], ['splat.webp', false]);
+    for (const n of ['leafy_grass', 'cliff_side']) need.push([`tex/${n}_c.webp`, true], [`tex/${n}_n.webp`, false]);
+    for (const n of ['coast_sand_rocks_02', 'grass_path_2']) need.push([`tex/${n}_c.webp`, true]);
+  }
   let done = 0;
   await Promise.all(need.map(async ([f, srgb]) => {
-    const t = await tl.loadAsync(BASE + f).catch(() => null);
+    const t = await tl.loadAsync((f.startsWith('tex/') ? BASE : MB) + f).catch(() => null);
     done++;
     progress(0.1 + 0.6 * (done / need.length), 'Textures');
     if (!t) return;
@@ -297,7 +317,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   skyT.wrapS = THREE.RepeatWrapping;
 
   const group = new THREE.Group();
-  group.add(makeSky(skyT, map.lm));
+  group.add(makeSky(skyT, map.lm, map.weather?.sky));
   const mats = new Map<string, THREE.Material>();
   const makeMat = (name: string) => {
     let m = mats.get(name);
@@ -331,7 +351,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     group.add(mesh);
   }
   progress(0.72, 'Props');
-  const gl = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(BASE + 'props.glb');
+  const gl = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(MB + 'props.glb');
   // compression moves each mesh into a quantised box and puts the way back on its node: nothing here may drop a node's matrix
   gl.scene.updateMatrixWorld(true);
   const byId = new Map<string, THREE.Object3D>();
@@ -461,6 +481,45 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       });
     }
   }
+  // what's planted: blocks of the map, each drawn only when it's in view, swaying
+  {
+    const swayed = new Set<THREE.Material>();
+    const byPlant = new Map<string, NonNullable<MapData['veg']>>();
+    for (const p of map.veg ?? []) {
+      const k = `${p.id}@${Math.floor(p.pos[0] / 24)},${Math.floor(p.pos[2] / 24)}`;
+      const c = byPlant.get(k);
+      if (c) c.push(p);
+      else byPlant.set(k, [p]);
+    }
+    for (const [key, list] of byPlant) {
+      const id = key.split('@')[0];
+      const src = byId.get(id) ?? byId.get(id.replace(/[.\s]/g, '_'));
+      if (!src) continue;
+      src.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        if (!swayed.has(mat) && !/rock|boulder/.test(id)) {
+          swayed.add(mat);
+          sway(mat, /tree/.test(id) ? 0.0016 : 0.03);
+        }
+        prep(mat, id);
+        const local = mesh.matrixWorld.clone();
+        // scanned rock comes at whatever size it was captured: for these, s is metres across
+        mesh.geometry.computeBoundingSphere();
+        const unit = /rock/.test(id) ? 0.5 / (mesh.geometry.boundingSphere!.radius * local.getMaxScaleOnAxis()) : 1;
+        const inst = new THREE.InstancedMesh(mesh.geometry, mat, list.length);
+        list.forEach((p, i) => {
+          q.setFromAxisAngle(UP, p.rot);
+          mtx.compose(v.set(p.pos[0], p.pos[1], p.pos[2]), q, sc.setScalar(p.s * unit)).multiply(local);
+          inst.setMatrixAt(i, mtx);
+        });
+        inst.computeBoundingSphere();
+        inst.name = 'veg';
+        group.add(inst);
+      });
+    }
+  }
   for (const p of map.props) {
     if (!p.loose) continue;
     const src = byId.get(p.id) ?? byId.get(p.id.replace(/[.\s]/g, '_'));
@@ -482,6 +541,22 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   }
   progress(0.85, 'Collision');
   const world = new World();
+  if (map.terrain) {
+    const T = map.terrain;
+    const h = new Float32Array(await (await fetch(MB + 'height.bin')).arrayBuffer());
+    world.terrain = { x0: T.x0, y0: T.y0, step: T.step, nx: T.nx, ny: T.ny, h };
+    world.limit = T.limit as [number, number, number, number];
+    const lm3 = texs.get('lm3.webp')!, splat = texs.get('splat.webp')!;
+    for (const t of [lm3, splat]) {
+      t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+      t.generateMipmaps = false;
+      t.minFilter = THREE.LinearFilter;
+      t.flipY = true;
+      t.needsUpdate = true;
+    }
+    LF.lm3.value = lm3;
+    group.add(buildLand(world.terrain, T, (n) => texs.get(`tex/${n}.webp`) ?? null, splat));
+  }
   for (const c of map.colliders) world.add({ min: [c[0], c[1], c[2]], max: [c[3], c[4], c[5]], pen: !!c[6], tag: c[7], mat: c[8] });
 
   const doorMat = {
@@ -533,7 +608,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   }
   const deco = new THREE.Group();
   group.add(deco);
-  dress(deco);
+  if (!map.terrain) dress(deco);
   progress(0.92, 'Light');
   return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors };
 }
@@ -543,11 +618,11 @@ export async function loadVolume(): Promise<void> {
   let dim = [2, 2, 2], min = [0, 0, 0], max = [1, 1, 1];
   let data: Uint8Array | null = null;
   try {
-    const meta = await (await fetch(BASE + 'volume.json')).json();
+    const meta = await (await fetch(MB + 'volume.json')).json();
     dim = meta.dim;
     min = meta.min;
     max = meta.max;
-    data = new Uint8Array(await (await fetch(BASE + 'volume.bin')).arrayBuffer());
+    data = new Uint8Array(await (await fetch(MB + 'volume.bin')).arrayBuffer());
   } catch {
     /* no capture yet */
   }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Person } from '../people/Humans.ts';
+import type { Terrain } from './collide.ts';
 import type { Door, MapData } from './world.ts';
 
 /**
@@ -116,7 +117,20 @@ export class Phys {
       this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(c[0] + hx, c[1] + hy, c[2] + hz).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
     }
     // the street sits lower than the kerb, and the cloth of a bag shouldn't fall through a seam
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(300, 1, 300).setTranslation(46, -1.6, -30).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
+    if (!map.terrain) this.world.createCollider(RAPIER.ColliderDesc.cuboid(300, 1, 300).setTranslation(46, -1.6, -30).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
+  }
+
+  /** the ground, for what's thrown about on it: a coarser copy of the heights round the playable area */
+  addTerrain(t: Terrain, x0: number, y0: number, x1: number, y1: number) {
+    const st = 2;
+    const nx = Math.floor((x1 - x0) / st), ny = Math.floor((y1 - y0) / st);
+    const hs = new Float32Array((nx + 1) * (ny + 1));
+    const at = (x: number, y: number) => t.h[Math.round((y - t.y0) / t.step) * t.nx + Math.round((x - t.x0) / t.step)];
+    // column-major: rows run along z, columns along x
+    for (let c = 0; c <= nx; c++) for (let r = 0; r <= ny; r++) hs[c * (ny + 1) + r] = at(x0 + c * st, y1 - r * st);
+    const d = RAPIER.ColliderDesc.heightfield(ny, nx, hs, { x: nx * st, y: 1, z: ny * st });
+    d.setTranslation(x0 + (nx * st) / 2, 0, -(y1 + y0) / 2).setFriction(0.75).setCollisionGroups(GRP.world);
+    this.world.createCollider(d, this.fixed);
   }
 
   addDoor(d: Door) {

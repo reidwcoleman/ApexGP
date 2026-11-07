@@ -1,7 +1,8 @@
 """Blender: builds Kessler Block from layout.py, bakes its light, writes the runtime geometry.
   blender -b --python tools/lastframe/bake.py -- --size 2048 --samples 32 [--nobake] [--out DIR]
 """
-import bpy, bmesh, sys, os, json, math, struct, time
+import bpy, bmesh, sys, os, json, math, struct, time, faulthandler
+faulthandler.enable()
 import numpy as np
 from mathutils import Vector, Matrix
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +21,12 @@ t0 = time.time()
 def log(*a): print(f'[{time.time()-t0:6.1f}s]', *a, flush=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
-m = layout.build()
+COVE = opt('map', 'block') == 'cove'
+if COVE:
+    import cove_layout, coveland
+    m = cove_layout.build()
+else:
+    m = layout.build()
 
 # ------------------------------------------------------------------ faces
 class Grid:
@@ -118,6 +124,18 @@ for b in m.boxes:
         for i in range(nu):
             for j in range(nv):
                 emit(b, f, mat, u0 + (u1 - u0) * i / nu, u0 + (u1 - u0) * (i + 1) / nu, v0 + (v1 - v0) * j / nv, v0 + (v1 - v0) * (j + 1) / nv)
+# roofs and hulls: quads that aren't on any box
+for q in getattr(m, 'quads', ()):
+    v = np.array(q['v'], float)
+    e1, e2 = v[1] - v[0], v[3] - v[0]
+    n = np.cross(e1, e2)
+    if q.get('tri'): n = np.cross(v[1] - v[0], v[2] - v[0])
+    n = n / max(1e-9, np.linalg.norm(n))
+    w_ = np.linalg.norm(e1); h_ = np.linalg.norm(e2)
+    u_ = e1 / max(1e-9, w_); b_ = np.cross(n, u_)
+    sc = MATS[q['mat']]['scale']
+    uv = [(float(np.dot(p - v[0], u_) / sc), float(np.dot(p - v[0], b_) / sc)) for p in v]
+    faces.append(dict(mat=q['mat'], v=[list(map(float, p)) for p in v], n=[float(c) for c in n], uv=uv, w=float(w_), h=float(h_), dens=q['dens'], tag='quad', tri=q.get('tri', False)))
 log('faces', len(faces))
 
 # ------------------------------------------------------------------ atlas
@@ -150,6 +168,9 @@ log(f'atlas {SIZE} density {dens:.1f} texels/m')
 for i, f in enumerate(lit):
     x, y, w, h = rects[i]
     x0, y0, x1, y1 = x + PAD, y + PAD, x + w - PAD, y + h - PAD
+    if f.get('tri'):
+        f['lm'] = [(x0 / SIZE, y0 / SIZE), (x1 / SIZE, y0 / SIZE), ((x0 + x1) / 2 / SIZE, y1 / SIZE), ((x0 + x1) / 2 / SIZE, y1 / SIZE)]
+        continue
     # corners by the face's own (u,v) order
     v = np.array(f['v'], float)
     e = [v[1] - v[0], v[3] - v[0]]
@@ -278,7 +299,7 @@ def unit_obj(kit, parts, far):
     if len(objs) > 1: bpy.ops.object.join()
     o = bpy.context.view_layer.objects.active
     tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
-    cap = 700 if far else 1700
+    cap = 420 if far else 800
     if tris > cap:
         dm = o.modifiers.new('d', 'DECIMATE'); dm.ratio = cap / tris
         bpy.ops.object.modifier_apply(modifier='d')
@@ -337,6 +358,44 @@ if len(placed) > 1:
     placed = [bpy.context.view_layer.objects.active]
     placed[0].data.uv_layers.active = placed[0].data.uv_layers['lm']
 
+# ------------------------------------------------------------------ the ground, with a top-down lightmap of its own
+land = None
+if COVE:
+    GX, GY, GH = m.ground
+    nyg, nxg = GH.shape
+    i0, j0 = int(cove_layout.INNER[0] - coveland.X0), int(cove_layout.INNER[1] - coveland.Y0)
+    i1, j1 = int(cove_layout.INNER[2] - coveland.X0), int(cove_layout.INNER[3] - coveland.Y0)
+    vs, fs_, seen_v = [], [], {}
+    def vid(i, j):
+        k = j * nxg + i
+        r = seen_v.get(k)
+        if r is None:
+            r = seen_v[k] = len(vs)
+            vs.append((float(GX[j, i]), float(GY[j, i]), float(GH[j, i])))
+        return r
+    for j in range(j0, j1):
+        for i in range(i0, i1):
+            fs_.append((vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)))
+    st = 4
+    for j in range(0, nyg - st, st):
+        for i in range(0, nxg - st, st):
+            if i + st > i0 and i < i1 and j + st > j0 and j < j1: continue
+            fs_.append((vid(i, j), vid(i + st, j), vid(i + st, j + st), vid(i, j + st)))
+    lmesh = bpy.data.meshes.new('land')
+    lmesh.from_pydata(vs, [], fs_)
+    lmat = bpy.data.materials.new('land'); lmat.use_nodes = True
+    lb = lmat.node_tree.nodes.get('Principled BSDF'); lb.inputs['Base Color'].default_value = (0.2, 0.24, 0.13, 1); lb.inputs['Roughness'].default_value = 0.9
+    lmesh.materials.append(lmat)
+    lu = lmesh.uv_layers.new(name='lm')
+    co = np.array(vs, np.float32)
+    uvv = np.stack([(co[:, 0] - coveland.X0) / (coveland.X1 - coveland.X0), (co[:, 1] - coveland.Y0) / (coveland.Y1 - coveland.Y0)], 1)
+    vi = np.empty(len(lmesh.loops), np.int32); lmesh.loops.foreach_get('vertex_index', vi)
+    lu.data.foreach_set('uv', uvv[vi].ravel())
+    lmesh.update()
+    land = bpy.data.objects.new('land', lmesh)
+    scene.collection.objects.link(land)
+    log('land', len(vs), 'verts')
+
 # ------------------------------------------------------------------ light
 def add_light(L):
     kind = L['kind']
@@ -354,10 +413,11 @@ def add_light(L):
 for L in m.lights: add_light(L)
 w = bpy.data.worlds.new('sky'); scene.world = w; w.use_nodes = True
 nt = w.node_tree
-env = nt.nodes.new('ShaderNodeTexEnvironment'); env.image = bpy.data.images.load(f'{ROOT}/hdri/rooftop_night.hdr')
-bg = nt.nodes['Background']; bg.inputs['Strength'].default_value = opt('sky', 2.6)
+SKY = getattr(m, 'sky', dict(hdri='rooftop_night', strength=opt('sky', 2.6), tint=(0.36, 0.62, 1.05)))
+env = nt.nodes.new('ShaderNodeTexEnvironment'); env.image = bpy.data.images.load(f"{ROOT}/hdri/{SKY['hdri']}.hdr")
+bg = nt.nodes['Background']; bg.inputs['Strength'].default_value = SKY['strength']
 mixc = nt.nodes.new('ShaderNodeMix'); mixc.data_type = 'RGBA'; mixc.blend_type = 'MULTIPLY'; mixc.inputs['Factor'].default_value = 1.0
-mixc.inputs['B'].default_value = (0.36, 0.62, 1.05, 1)    # pull the sunset down to blue hour
+mixc.inputs['B'].default_value = (*SKY['tint'], 1)    # the block pulls its sunset down to blue hour
 nt.links.new(env.outputs['Color'], mixc.inputs['A'])
 nt.links.new(mixc.outputs['Result'], bg.inputs['Color'])
 
@@ -399,7 +459,7 @@ for p in m.props:
     if p['loose']:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
-json.dump(dict(mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
+json.dump(dict(veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
                density=dens, size=SIZE), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop
@@ -408,6 +468,10 @@ sp = np.empty(1024 * 512 * 4, np.float32); sky.pixels.foreach_get(sp)
 np.save(f'{OUT}/sky.npy', sp.reshape(512, 1024, 4)[..., :3].astype(np.float16))
 if '--props' in argv:
     col = bpy.data.collections.new('export'); scene.collection.children.link(col)
+    # planting never goes in the bake: it only needs to be in the file
+    for vid_ in sorted({v_['id'] for v_ in getattr(m, 'veg', ())}):
+        a_, b_ = vid_.split('|')
+        load_part(a_, None if b_ == 'all' else b_)
     keep_out = []
     seen_img = {}
     for key, src in cache.items():
@@ -416,6 +480,11 @@ if '--props' in argv:
         tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
         size = 2 * max(bbox[key])
         budget = 340 if key[0] == 'cardboard_box_01' else (900 if size < 0.4 else 2200 if size < 1.3 else 5000)
+        if key[0].startswith('grass'): budget = 240
+        elif key[0].startswith(('fern', 'nettle')): budget = 420
+        elif key[0].startswith('shrub'): budget = 900
+        elif key[0].startswith('tree'): budget = 3000
+        elif key[0].startswith(('coast', 'rock')): budget = 1800
         if tris > budget:
             d = o.modifiers.new('d', 'DECIMATE'); d.ratio = budget / tris
             bpy.ops.object.select_all(action='DESELECT'); bpy.context.view_layer.objects.active = o; o.select_set(True)
@@ -446,7 +515,8 @@ if '--props' in argv:
     bpy.ops.export_scene.gltf(filepath=f'{OUT}/props.glb', export_format='GLB', use_selection=True, export_image_format='JPEG', export_image_quality=70, export_apply=False,
                               export_animations=False, export_cameras=False, export_lights=False, export_yup=True, export_tangents=False)
     log('props.glb', os.path.getsize(f'{OUT}/props.glb') // 1024, 'KB')
-bpy.ops.wm.save_as_mainfile(filepath=f'{OUT}/scene.blend')
+# 350 MB of debugging aid: only on request
+if '--blend' in argv: bpy.ops.wm.save_as_mainfile(filepath=f'{OUT}/scene.blend')
 if NOBAKE: sys.exit(0)
 
 # ------------------------------------------------------------------ bake
@@ -483,10 +553,22 @@ for o in placed:
         seen.add(mt.name)
         nd = mt.node_tree.nodes.new('ShaderNodeTexImage'); nd.image = img2; nd.select = True
         mt.node_tree.nodes.active = nd
-bpy.ops.object.select_all(action='DESELECT')
-for o in placed: o.select_set(True)
-bpy.context.view_layer.objects.active = placed[0]
-log('baking kit', len(placed))
-bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=2, margin_type='EXTEND', use_clear=True, uv_layer='lm')
-log('baked kit')
+if placed:
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in placed: o.select_set(True)
+    bpy.context.view_layer.objects.active = placed[0]
+    log('baking kit', len(placed))
+    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=2, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    log('baked kit')
 img2.filepath_raw = f'{OUT}/lightmap2.exr'; img2.file_format = 'OPEN_EXR'; img2.save()
+if land is not None:
+    img3 = bpy.data.images.new('lightmap3', SIZE, SIZE, alpha=False, float_buffer=True)
+    nd = lmat.node_tree.nodes.new('ShaderNodeTexImage'); nd.image = img3; nd.select = True
+    lmat.node_tree.nodes.active = nd
+    bpy.ops.object.select_all(action='DESELECT')
+    land.select_set(True); bpy.context.view_layer.objects.active = land
+    lmesh.uv_layers.active = lu
+    log('baking land')
+    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=4, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+    log('baked land')
+    img3.filepath_raw = f'{OUT}/lightmap3.exr'; img3.file_format = 'OPEN_EXR'; img3.save()

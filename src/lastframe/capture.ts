@@ -6,9 +6,8 @@ import type { Loaded } from './world.ts';
  * each cell's light as six cosine-weighted colours. Runs on the real renderer, so it sees exactly
  * the lightmap, the sky and the lamps the game shows.
  */
-const STEP = [2, 1.15, 2];  // z runs from behind the far yard to the shops across the street
-const MIN = [-4, -3.7, -66];
-const DIM = [53, 12, 40];
+// z runs from behind the far yard to the shops across the street; the cove brings its own in map.json
+const BLOCK = { step: [2, 1.15, 2], min: [-4, -3.7, -66], dim: [53, 12, 40] };
 const T = 8;
 const DIRS: [THREE.Vector3, THREE.Vector3][] = [
   [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)], [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)],
@@ -17,6 +16,7 @@ const DIRS: [THREE.Vector3, THREE.Vector3][] = [
 ];
 
 export async function capture(r: THREE.WebGLRenderer, scene: THREE.Scene, L: Loaded, onProgress: (f: number) => void) {
+  const { step: STEP, min: MIN, dim: DIM } = L.map.volume ?? BLOCK;
   const [dx, dy, dz] = DIM;
   const n = dx * dy * dz;
   const perRow = Math.floor(2048 / (T * 6));

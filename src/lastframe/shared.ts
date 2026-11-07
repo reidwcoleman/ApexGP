@@ -90,6 +90,8 @@ export interface PlayerInfo {
 }
 
 export interface MatchConfig {
+  /** the location; a room's guests move to it when they join */
+  map?: 'block' | 'cove';
   mode: Mode;
   bots: number;
   skill: number;

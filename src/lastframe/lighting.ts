@@ -51,6 +51,7 @@ export const LF = {
   lm: { value: null as THREE.Texture | null },
   /** the kit's own atlas */
   lm2: { value: null as THREE.Texture | null },
+  lm3: { value: null as THREE.Texture | null },
   vol: { value: null as THREE.Data3DTexture | null },
   /** the six faces averaged: what a mote of dust in that cell is lit by */
   volAvg: { value: null as THREE.Data3DTexture | null },
@@ -378,6 +379,8 @@ export function roomGlass() {
 
 export interface LfOpts {
   lightmap?: boolean;
+  /** the ground's own lightmap */
+  terrain?: boolean;
   wet?: number;
   /** held objects sit in shadow the coarse cubes can't see: scale what they mirror */
   spec?: number;
@@ -399,7 +402,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   const prevKey = m.customProgramCacheKey?.() ?? '';
   m.onBeforeCompile = (s, r) => {
     prev?.call(m, s, r);
-    s.uniforms.lfLM = o.tile ? LF.lm2 : LF.lm;
+    s.uniforms.lfLM = o.terrain ? LF.lm3 : o.tile ? LF.lm2 : LF.lm;
     s.uniforms.lfVol = LF.vol;
     s.uniforms.lfVolMin = LF.volMin;
     s.uniforms.lfVolInv = LF.volInv;

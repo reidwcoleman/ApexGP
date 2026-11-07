@@ -371,7 +371,8 @@ export class Match {
     }
     const y = Math.max(this.world.floorAt(x, best[1] + 0.5, z, 0.2), best[1]);
     // face the middle of the block
-    const yaw = Math.atan2(-(46 - x), -(-30 - z));
+    const [cx, cz] = this.map.centre ?? [46, -30];
+    const yaw = Math.atan2(-(cx - x), -(cz - z));
     p.hp = 100;
     p.alive = true;
     this.bleed.delete(p.slot);

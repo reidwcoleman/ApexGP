@@ -269,6 +269,7 @@ uniform sampler2D tSrc;
 uniform sampler2D tPrev;
 uniform float dt;
 uniform float cut;
+uniform float key;
 void main() {
   float acc = 0.0, wsum = 0.0;
   for ( int j = 0; j < 7; j++ ) for ( int i = 0; i < 9; i++ ) {
@@ -281,7 +282,7 @@ void main() {
   }
   float avg = exp2( acc / wsum );
   // a small sensor: it opens slowly into the dark and shuts faster on the light
-  float want = clamp( 0.115 / max( avg, 1e-4 ), 0.4, 8.5 );
+  float want = clamp( key / max( avg, 1e-4 ), 0.4, 8.5 );
   float prev = texture2D( tPrev, vec2( 0.5 ) ).r;
   float rate = want < prev ? 2.6 : 0.9;
   float e = cut > 0.5 ? want : exp( mix( log( prev ), log( want ), 1.0 - exp( -dt * rate ) ) );
@@ -324,6 +325,7 @@ uniform vec2 res;
 uniform float time;
 uniform float tanHalf;
 uniform float fish;
+uniform vec3 wb;
 uniform float whiteout;
 uniform float hurt;
 uniform float glitch;
@@ -409,7 +411,7 @@ void main() {
   hdr = mix( hdr, bl, 0.18 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
   hdr *= expo;
   // white balance: night through a cheap sensor is grey, with sodium in it, not blue
-  hdr *= vec3( 1.03, 1.0, 0.88 );
+  hdr *= wb;
 
   vec3 col = film( hdr * 0.92 );
   // a cheap sensor's colour: thin, cold shadows
@@ -484,7 +486,11 @@ export class Post {
   private qs = new THREE.Scene();
   private mDown = pass(DOWN, { tSrc: { value: null }, px: { value: new THREE.Vector2() }, first: { value: 0 } });
   private mUp = pass(UP, { tSrc: { value: null }, tAdd: { value: null }, px: { value: new THREE.Vector2() }, k: { value: 1 } });
-  private mExp = pass(EXPO, { tSrc: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 } });
+  private mExp = pass(EXPO, { tSrc: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 }, key: { value: 0.115 } });
+  /** how bright the camera wants the scene: a night street and an overcast noon aren't metered alike */
+  set exposureKey(k: number) {
+    this.mExp.uniforms.key.value = k;
+  }
   private common = { tDepth: AIR.tDepth, nf: AIR.nf, pInv: { value: new THREE.Vector2() } };
   private camW = { value: new THREE.Matrix4() };
   private mAO = pass(AO, { ...this.common, px: { value: new THREE.Vector2() }, frame: { value: 0 }, camW: this.camW, capA: { value: this.capA }, capB: { value: this.capB }, capN: { value: 0 } });
@@ -497,7 +503,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();

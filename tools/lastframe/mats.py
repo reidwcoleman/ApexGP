@@ -3,6 +3,21 @@ def M(tex, scale, tint=(1, 1, 1), rough=1.0, wet=0.0, metal=0.0, nrm=1.0, emit=N
     return dict(tex=tex, scale=scale, tint=list(tint), rough=rough, wet=wet, metal=metal, nrm=nrm, emit=emit)
 
 MATS = {
+    # the cove
+    'render': M('grey_plaster', 3.0, (1.62, 1.68, 1.78)),
+    'render_b': M('grey_plaster', 3.0, (1.6, 1.58, 1.5)),
+    'stonewall': M('castle_wall_slates', 2.6, (0.9, 0.9, 0.88)),
+    'hedge': M('mossy_stone_wall', 2.8),
+    'slate': M('grey_roof_tiles', 2.6, (0.72, 0.74, 0.78), rough=0.7),
+    'cobble': M('cobblestone_floor_04', 2.6, (0.8, 0.8, 0.78)),
+    'slip': M('concrete_wall_008', 3.0, (0.5, 0.5, 0.49)),
+    'hullw': M('distressed_painted_planks', 1.6, (0.82, 0.84, 0.82)),
+    'hullb': M('distressed_painted_planks', 1.6, (0.2, 0.36, 0.46)),
+    'hullr': M('distressed_painted_planks', 1.6, (0.56, 0.2, 0.16)),
+    'ter_rock': M('cliff_side', 8.0),
+    'ter_grass': M('leafy_grass', 3.4),
+    'ter_sand': M('coast_sand_rocks_02', 4.5),
+    'ter_dirt': M('grass_path_2', 3.0),
     'asphalt': M('asphalt_02', 4.2, (0.8, 0.8, 0.82), wet=1.0),
     'sidewalk': M('concrete_pavement_02', 3.0, (0.8, 0.8, 0.8), wet=0.8),
     'curb': M('concrete_wall_008', 2.0, (0.75, 0.75, 0.73), wet=0.6),

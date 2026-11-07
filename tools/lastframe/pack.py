@@ -6,9 +6,12 @@ from PIL import Image
 from mats import MATS, UNLIT
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/lf_out'
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
-DST = os.path.join(ROOT, 'public', 'lastframe')
+COVE = '--cove' in sys.argv
+TEXD = os.path.join(ROOT, 'public', 'lastframe')
+DST = os.path.join(TEXD, 'cove') if COVE else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
-os.makedirs(DST + '/tex', exist_ok=True)
+os.makedirs(TEXD + '/tex', exist_ok=True)
+os.makedirs(DST, exist_ok=True)
 LOGR = 11.0          # log2 range of the encoding
 K = 64.0             # lm = (2^(e*LOGR) - 1) / K
 
@@ -31,6 +34,9 @@ for c in raw['colliders']:
     a, b = ybox(c['a'], c['b'])
     cols.append([*[round(v, 3) for v in a], *[round(v, 3) for v in b], 1 if c['pen'] else 0, c['tag'], c['mat']])
 tex = sorted({v['tex'] for k, v in MATS.items() if not v['emit']})
+# a map only loads what it's built from, and the doors' two
+used = {e['mat'] for e in raw['mats']}
+load = sorted({MATS[k]['tex'] for k in used if not MATS[k]['emit']} | {'distressed_painted_planks', 'green_metal_rust'})
 mats = {k: v for k, v in MATS.items()}
 doors = []
 for d in raw['doors']:
@@ -38,12 +44,28 @@ for d in raw['doors']:
 glass = []
 for g in raw['glass']:
     glass.append(dict(axis=g['axis'], c=g['c'], a=g['a'], b=g['b'], z0=g['z0'], z1=g['z1']))
-out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {})) for u in raw['units']],
+out = dict(mats=raw['mats'], materials=mats, textures=load, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {})) for u in raw['units']],
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
            lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power']) for l in raw['lights']],
            rooms=[dict(name=r['name'], a=ybox(r['a'], r['b'])[0], b=ybox(r['a'], r['b'])[1]) for r in raw['rooms']],
            lm=dict(logr=LOGR, k=K, size=raw['size']))
+if COVE:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import coveland as CL, cove_layout as CV
+    gm = CV.build()
+    X, Y, H = gm.ground
+    H.astype(np.float32).tofile(f'{DST}/height.bin')
+    lm3 = np.load(f'{OUT}/lightmap3.npy').astype(np.float32)[::-1]
+    Image.fromarray((enc(lm3) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm3.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
+    sp = CV.splat(H, X, Y, gm.ways)[::-1]
+    Image.fromarray((np.clip(sp, 0, 1) * 255 + 0.5).astype(np.uint8), 'RGBA').save(f'{DST}/splat.webp', quality=92, method=4, exact=True)
+    out['terrain'] = dict(x0=CL.X0, y0=CL.Y0, step=CL.STEP, nx=H.shape[1], ny=H.shape[0], inner=list(CV.INNER), limit=list(CV.LIMIT))
+    out['weather'] = CV.WEATHER
+    out['volume'] = CV.VOLUME
+    out['centre'] = raw['centre']
+    out['attract'] = raw['attract']
+    out['veg'] = [dict(id=v['id'], pos=yp(v['pos']), rot=round(v['rot'], 3), s=round(v['s'], 3)) for v in raw['veg']]
 json.dump(out, open(f'{DST}/map.json', 'w'), separators=(',', ':'))
 shutil.copy(f'{OUT}/world.bin', f'{DST}/world.bin')
 if os.path.exists(f'{OUT}/props.glb'):
@@ -61,9 +83,9 @@ if '--tex' in sys.argv:
                 s = s2
                 q = 66 if n == 'c' else 72
             if os.path.exists(s):
-                subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '6', s, '-o', f'{DST}/tex/{t}_{n}.webp'], check=True)
+                subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '6', s, '-o', f'{TEXD}/tex/{t}_{n}.webp'], check=True)
             elif n == 'a':
                 # some scans ship no packed map: flat AO 1, roughness 0.85
-                Image.new('RGB', (4, 4), (255, 217, 0)).save(f'{DST}/tex/{t}_a.webp', lossless=True)
+                Image.new('RGB', (4, 4), (255, 217, 0)).save(f'{TEXD}/tex/{t}_a.webp', lossless=True)
 sz = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DST) for f in fs)
 print('public/lastframe', sz // 1024 // 1024, 'MB')

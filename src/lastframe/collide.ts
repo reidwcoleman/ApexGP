@@ -25,7 +25,23 @@ export interface Hit {
 
 const CELL = 3;
 
+/** ground that isn't boxes: heights on a grid. z runs north-negative, so rows go with -z */
+export interface Terrain {
+  x0: number;
+  y0: number;
+  step: number;
+  nx: number;
+  ny: number;
+  h: Float32Array;
+}
+
+const TERRAIN_BOX: Box = { min: [-1e5, -1e5, -1e5], max: [1e5, 1e5, 1e5], pen: false, tag: 'terrain', mat: 'ter_rock' };
+
 export class World {
+  terrain: Terrain | null = null;
+  /** how far a body may go: [x0, z0, x1, z1], and water deeper than this stops it */
+  limit: [number, number, number, number] | null = null;
+  deep = -1.05;
   boxes: Box[] = [];
   private grid = new Map<number, Box[]>();
   /** moving things (doors) */
@@ -44,6 +60,30 @@ export class World {
     }
   }
 
+  /** the ground's height under (x, z), or -1e9 with no terrain */
+  ground(x: number, z: number): number {
+    const t = this.terrain;
+    if (!t) return -1e9;
+    const u = (x - t.x0) / t.step, v = (-z - t.y0) / t.step;
+    const i = Math.floor(u), j = Math.floor(v);
+    if (i < 0 || j < 0 || i >= t.nx - 1 || j >= t.ny - 1) return -1e9;
+    const fu = u - i, fv = v - j, a = j * t.nx + i;
+    const h = t.h;
+    return (h[a] * (1 - fu) + h[a + 1] * fu) * (1 - fv) + (h[a + t.nx] * (1 - fu) + h[a + t.nx + 1] * fu) * fv;
+  }
+
+  /** too steep to climb, walking this way, or past the edge of the map */
+  barred(x: number, z: number, dx: number, dz: number): boolean {
+    const l = this.limit;
+    if (l && (x < l[0] || z < l[1] || x > l[2] || z > l[3])) return true;
+    if (!this.terrain) return false;
+    const g = this.ground(x, z);
+    if (g < this.deep) return true;
+    const d = Math.hypot(dx, dz) || 1;
+    const rise = this.ground(x + (dx / d) * 0.5, z + (dz / d) * 0.5) - g;
+    return rise > 0.62;
+  }
+
   /** would a body of half-width r from foot y to y+h at (x,z) touch anything */
   blocked(x: number, y: number, z: number, r: number, h: number): boolean {
     const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL), z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
@@ -52,7 +92,7 @@ export class World {
       if (c) for (const b of c) if (hitsBody(b, x, y, z, r, h)) return true;
     }
     for (const b of this.dyn) if (hitsBody(b, x, y, z, r, h)) return true;
-    return false;
+    return this.ground(x, z) > y + 0.01;
   }
 
   /** the same, without what moves */
@@ -78,6 +118,8 @@ export class World {
         if (top <= y + reach && top > best) best = top;
       }
     }
+    const g = this.ground(x, z);
+    if (g <= y + reach && g > best) best = g;
     return best;
   }
 
@@ -135,6 +177,31 @@ export class World {
       }
     }
     for (const b of this.dyn) test(b);
+    if (this.terrain) {
+      // march over the heights, and pin the crossing down by halves
+      const lim = bt;
+      let t0 = 0, above = oy - this.ground(ox, oz) >= 0;
+      if (above) for (let t = 0.6; t0 < lim; t += 0.6) {
+        const tt = Math.min(t, lim);
+        const py = oy + dy * tt, g = this.ground(ox + dx * tt, oz + dz * tt);
+        if (py < g) {
+          let a = t0, b = tt;
+          for (let k = 0; k < 6; k++) {
+            const m = (a + b) / 2;
+            if (oy + dy * m < this.ground(ox + dx * m, oz + dz * m)) b = m;
+            else a = m;
+          }
+          const hx = ox + dx * b, hz = oz + dz * b, e = 0.5;
+          const gx = this.ground(hx + e, hz) - this.ground(hx - e, hz), gz = this.ground(hx, hz + e) - this.ground(hx, hz - e);
+          const l = Math.hypot(gx, 2 * e, gz);
+          bt = b;
+          best = { t: b, nx: -gx / l, ny: (2 * e) / l, nz: -gz / l, box: TERRAIN_BOX };
+          break;
+        }
+        t0 = tt;
+        if (tt >= lim) break;
+      }
+    }
     return best;
   }
 
@@ -261,6 +328,11 @@ export function move(w: World, m: Mover, dt: number) {
 function stepAxis(w: World, m: Mover, dx: number, dz: number) {
   if (!dx && !dz) return;
   const nx = m.x + dx, nz = m.z + dz;
+  if ((w.terrain || w.limit) && w.barred(nx, nz, dx, dz)) {
+    if (dx) m.vx *= 0.3;
+    if (dz) m.vz *= 0.3;
+    return;
+  }
   if (!w.blocked(nx, m.y + 0.02, nz, R, m.height - 0.04)) {
     m.x = nx;
     m.z = nz;

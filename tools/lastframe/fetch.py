@@ -24,7 +24,13 @@ metal_tool_chest metal_toolbox drill_press_01 old_drill_press bench_vice_01 port
 old_military_crate old_military_compressor compost_bags industrial_pastic_container plastic_container wooden_ladder portable_searchlight tire_pump planter_box_01 planter_box_02 tree_small_02 dead_tree_trunk shrub_01
 weed_plant_02 moss_01 street_rat tree_stump_01 wooden_picnic_table outdoor_table_chair_set_01 garden_hose_wall_mounted_01 classic_laptop desk_lamp_arm_01 clipboard binder_notebook office_notepads medical_box wheelchair_01
 projector_screen standing_chalkboard_01 boombox vintage_suitcase'''.split()
-HDRI = ['dresden_station_night', 'modern_buildings_night', 'rooftop_night', 'cobblestone_street_night']
+HDRI = ['dresden_station_night', 'modern_buildings_night', 'rooftop_night', 'cobblestone_street_night', 'kloofendal_overcast_puresky']
+# the cove: a Cornish fishing village
+TEX += '''cliff_side coast_land_rocks_01 coast_sand_rocks_02 coast_sand_01 damp_beach_sand low_tide_rocks dark_rock mossy_rock leafy_grass grass_path_2
+grey_roof_tiles castle_wall_slates mossy_stone_wall cobblestone_floor_04 clay_plaster large_pebbles'''.split()
+MODELS += '''coast_rocks_01 coast_rocks_02 coast_rocks_03 coast_rocks_05 coast_land_rocks_02 coast_land_rocks_03 coast_land_rocks_04 rock_face_01 rock_face_02
+rock_moss_set_01 rock_moss_set_02 shrub_01 shrub_02 shrub_03 shrub_04 fern_02 grass_medium_01 grass_medium_02 nettle_plant pine_tree_01 tree_small_02
+ocean_buoy lifebuoy modular_wooden_pier painted_wooden_bench wooden_barrels_01 street_lamp_01 planter_box_01'''.split()
 
 def get(url, path):
     if os.path.exists(path) and os.path.getsize(path) > 0: return
@@ -38,7 +44,8 @@ def files(a):
 
 # what fills the screen most comes at 2k, colour and normals; pack.py prefers these
 HERO = '''asphalt_02 clean_asphalt concrete_pavement_02 factory_brick dark_brick_wall brick_wall_001 gravel_concrete hangar_concrete_floor
-concrete_floor_worn_001 blue_plaster_weathered decrepit_wallpaper damaged_plaster grey_plaster corrugated_iron_02 concrete_wall_008'''.split()
+concrete_floor_worn_001 blue_plaster_weathered decrepit_wallpaper damaged_plaster grey_plaster corrugated_iron_02 concrete_wall_008
+cliff_side coast_land_rocks_01 coast_sand_rocks_02 damp_beach_sand leafy_grass grey_roof_tiles clay_plaster castle_wall_slates cobblestone_floor_04'''.split()
 
 def tex(a):
     d = files(a)

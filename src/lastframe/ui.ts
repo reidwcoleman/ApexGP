@@ -3,6 +3,7 @@ import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
 import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import type * as THREE from 'three';
+import { MAP_ID } from './world.ts';
 
 const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
   { id: 'tdm', name: 'Team Fight', note: 'First side to 40 kills. Respawns on.', limit: 40 },
@@ -140,6 +141,8 @@ export class Hud {
   ready() {
     const j = new URLSearchParams(location.search).get('join');
     this.home();
+    const again = new URLSearchParams(location.search).get('setup');
+    if (again === 'solo' || again === 'host') this.setup(again);
     if (j) this.joinFlow(j.toUpperCase());
   }
 
@@ -227,6 +230,7 @@ export class Hud {
         if (id === 'skill') this.skill = Number(v);
         if (id === 'team') this.team = Number(v);
         if (id === 'primary') this.primary = v as WeaponId;
+        if (id === 'map') return;
         store.set(id, v);
         after();
       });
@@ -235,7 +239,7 @@ export class Hud {
 
   private config(): MatchConfig {
     const m = MODES.find((x) => x.id === this.mode)!;
-    return { mode: this.mode, bots: this.mode === 'ffa' ? this.bots * 2 : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
+    return { map: MAP_ID, mode: this.mode, bots: this.mode === 'ffa' ? this.bots * 2 : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
   }
 
   private setup(kind: 'solo' | 'host') {
@@ -245,11 +249,23 @@ export class Hud {
       <div class="mast"><i class="dot"></i>REC<span class="sp">Case ${this.caseId}</span></div>
       <button class="plain" id="s-back">Back</button>
       <h2>${kind === 'solo' ? 'New case' : 'Open a room'}</h2>
+      <div class="group"><div class="lab">Location</div>${this.seg('map', [['block', 'Kessler Block'], ['cove', 'Porthenys Cove']], MAP_ID)}</div>
       ${this.pickers(kind)}
       ${this.loadout()}
       <div class="acts push"><button class="primary" id="s-go">${kind === 'solo' ? 'Start recording' : 'Open the room'}</button></div>
     </div>${this.viewer()}`;
     (m.querySelector('.viewer') as HTMLElement).style.left = '560px';
+    m.querySelector('[data-seg="map"]')!.addEventListener('click', (e) => {
+      const v = (e.target as HTMLElement).closest('button')?.dataset.v;
+      if (v && v !== MAP_ID) {
+        // each location is its own load: the page comes back on it, at this same screen
+        const u = new URL(location.href);
+        if (v === 'cove') u.searchParams.set('map', 'cove');
+        else u.searchParams.delete('map');
+        u.searchParams.set('setup', kind);
+        location.href = u.toString();
+      }
+    });
     this.bind(m, () => {
       // a team-size label depends on the mode
       const lab = m.querySelector('.two .lab');
@@ -360,6 +376,15 @@ export class Hud {
     };
     guest.onDown = (m: Down) => {
       if (m.t === 'welcome') {
+        if ((m.cfg.map ?? 'block') !== MAP_ID) {
+          // the host is on the other location: come back on it and join again
+          const u = new URL(location.href);
+          if (m.cfg.map === 'cove') u.searchParams.set('map', 'cove');
+          else u.searchParams.delete('map');
+          u.searchParams.set('join', code);
+          location.href = u.toString();
+          return;
+        }
         this.code = code;
         this.menu.innerHTML = `<div class="rail"><button class="plain" id="j-back">Leave</button><div class="group"><div class="lab">Room code</div><div class="code">${esc(code)}</div></div><p class="note">You're in. The host starts the match.</p><label class="field"><span>Callsign</span><input id="j-name" maxlength="14" spellcheck="false" autocomplete="off" value="${esc(this.name)}"></label>${this.loadout()}</div>${this.viewer()}`;
         this.bind(this.menu, () => guest.send({ t: 'me', primary: this.primary }));

@@ -54,7 +54,7 @@ export class Nav {
         for (let h = 1; h <= hops && ok; h++) {
           const px = n.x + (dx * STEP * h) / hops, pz = n.z + (dz * STEP * h) / hops;
           const f = w.floorAt(px, y + 0.46, pz, 0.22, 0);
-          if (f < -50 || y - f > 0.7 || f - y > 0.46) ok = false;
+          if (f < -50 || y - f > 0.7 || f - y > 0.46 || ((w.terrain || w.limit) && w.barred(px, pz, dx, dz))) ok = false;
           // clear from the shins up: a body steps over a stair nosing or a kerb, the walk code does the same
           else if (w.blocked(px, f + 0.3, pz, 0.26, 1.35)) ok = false;
           else y = f;

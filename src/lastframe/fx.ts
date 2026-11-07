@@ -395,6 +395,8 @@ export class Fx {
   private chipList: Chip[] = [];
   private cI = 0;
   private CM = 220;
+  /** how much rain this map has */
+  rainOn = 1;
   private rain: THREE.LineSegments;
   private rainU = { cam: { value: new THREE.Vector3() }, time: { value: 0 }, roofs: { value: [] as THREE.Vector4[] }, k: { value: 1 }, tDepth: AIR.tDepth, inv: AIR.inv, nf: AIR.nf, lfVolAvg: LF.volAvg, lfVolMin: LF.volMin, lfVolInv: LF.volInv, lfK: LF.lmK, spark: AIR.spark, beamP: AIR.beamP, beamD: AIR.beamD };
   private m = new THREE.Matrix4();
@@ -838,7 +840,7 @@ export class Fx {
     if (cu) this.chips.instanceMatrix.needsUpdate = true;
     this.rainU.cam.value.copy(cam.position);
     this.rainU.time.value = time;
-    this.rainU.k.value = indoors ? 0.45 : 1;
+    this.rainU.k.value = (indoors ? 0.45 : 1) * this.rainOn;
   }
 }
 
