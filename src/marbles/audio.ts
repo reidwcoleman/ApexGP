@@ -700,6 +700,11 @@ export class Sound {
     }
   }
 
+  /** where other things plug in */
+  get bus() {
+    return this.sfx;
+  }
+
   /** a jetpack burning, while it's on */
   jet(on: boolean) {
     const ctx = this.ctx;

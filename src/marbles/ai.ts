@@ -5,7 +5,7 @@ import { StormBrain } from './ai-arena.ts';
 import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
 import { CupBrain, RocketBrain } from './ai-play.ts';
 import { BumpBrain } from './ai-bash.ts';
-import { PicnicBrain } from './ai-picnic.ts';
+import { KartBrain } from './ai-kart.ts';
 import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
@@ -94,7 +94,7 @@ export class Bot {
   private callB: CallBrain | null = null;
   private bounceB: BounceBrain | null = null;
   private bumpB: BumpBrain | null = null;
-  private picnicB: PicnicBrain | null = null;
+  private kartB: KartBrain | null = null;
   private rocketB: RocketBrain | null = null;
   private cupB: CupBrain | null = null;
   private keepB: KeepBrain | null = null;
@@ -207,10 +207,13 @@ export class Bot {
       this.bumpB.update(dt, t, c, all, this.ease);
       return;
     }
-    if (c.picnic) {
-      this.picnicB ??= new PicnicBrain(m, this.skill, this.rnd, this.aggr);
-      if (t < c.state.go + this.react) return;
-      this.picnicB.update(dt, t, c, all, this.ease);
+    if (c.kart) {
+      const A = c.kart, me = A.racer(m.id);
+      if (!me) return;
+      // (seeded fresh every race: no two races are driven the same)
+      this.kartB ??= new KartBrain(me, A.track, this.skill, Math.floor(Math.random() * 1e8), this.aggr, this.boost);
+      if (t < c.state.go + this.react * 0.5) return;
+      me.input = this.kartB.drive(dt, t, A.all(), this.ease);
       return;
     }
     if (c.rocket) {

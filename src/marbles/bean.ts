@@ -847,6 +847,10 @@ export class BeanRig {
   pose: 'win' | 'sad' | 'wave' | null = null;
   /** a foot hit the ground this frame (for the patter) */
   step = false;
+  /** at the wheel of a kart: where the seat is, how it's tilted, and the steering (-1..1) */
+  seat: THREE.Vector3 | null = null;
+  tilt: THREE.Quaternion | null = null;
+  steer: number | null = null;
 
   constructor(outfit: Outfit) {
     this.outfit = outfit;
@@ -967,6 +971,11 @@ export class BeanRig {
       this.yaw += d * Math.min(1, dt * 16);
     }
     this.root.rotation.y = this.yaw;
+    if (this.seat && this.tilt) {
+      this.root.position.copy(this.seat);
+      this.root.quaternion.copy(this.tilt);
+      this.floorY = -1e9;
+    }
     this.tumbler.quaternion.copy(this.tq);
     this.tumbler.position.y = THREE.MathUtils.lerp(CORE_Y, 0.5, this.tBlend);
 
@@ -1006,7 +1015,8 @@ export class BeanRig {
     this.flop = tumbling ? 1 : ease(0, this.flop, 2.5);
 
     // the run: the stride from the speed over the ground
-    const run = grounded && !tumbling && !diving ? Math.min(1, speed / 7) : 0;
+    const seated = this.steer !== null;
+    const run = grounded && !tumbling && !diving && !seated ? Math.min(1, speed / 7) : 0;
     const prev = Math.sin(this.phase);
     this.phase += dt * (speed * 1.6 + (run > 0.05 ? 3 : 0));
     this.step = run > 0.2 && Math.sign(Math.sin(this.phase)) !== Math.sign(prev);
@@ -1051,6 +1061,13 @@ export class BeanRig {
       rx = THREE.MathUtils.lerp(rx, -2.9, this.dive);
       rz = THREE.MathUtils.lerp(rz, sgn * 0.3, this.dive);
       bend = THREE.MathUtils.lerp(bend, 0, this.dive);
+      // (at the wheel: hands at ten to two, turning with it)
+      if (seated && this.pose === null && this.air < 0.5) {
+        const w = this.steer! * 0.34;
+        rx = -1.22 + sgn * w * 0.8;
+        rz = sgn * 0.3 + w * 0.32;
+        bend = 0.62;
+      }
       if (this.pose === 'win') {
         rx = -0.2;
         rz = sgn * (2.6 + Math.sin(t * 9 + sgn) * 0.35);
@@ -1083,6 +1100,11 @@ export class BeanRig {
       knee = THREE.MathUtils.lerp(knee, 0.7, this.air);
       rx = THREE.MathUtils.lerp(rx, 1.3, this.dive);
       knee = THREE.MathUtils.lerp(knee, 0.2, this.dive);
+      // (feet out in front on the pedals)
+      if (seated) {
+        rx = -1.42;
+        knee = -0.32;
+      }
       const hy = 0.0, j = jl(0.05);
       toW(sgn * 0.2 + J.x * j, hy, J.y * j, anchor);
       dir(rx, sgn * 0.05, V2);

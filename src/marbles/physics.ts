@@ -146,6 +146,8 @@ export class Marble {
   jet = false;
   /** the course turns this one itself (a dodgem can point one way and slide another) */
   noFace = false;
+  /** in a go-kart: the kart's own physics moves it (kart-sim.ts), this world only carries it */
+  kart = false;
   /** the bean it holds, and how long it has; being held (seconds left, refreshed by the holder) */
   holding: Marble | null = null;
   holdT = 0;
@@ -529,8 +531,8 @@ export class World {
         const a = kin.m.elements, b = kin.prev.elements;
         if (Math.abs(a[12] - b[12]) + Math.abs(a[13] - b[13]) + Math.abs(a[14] - b[14]) > 8) kin.prev.copy(kin.m);
       }
-      for (const m of this.marbles) if (m.active && !m.frozen) this.integrate(m, h);
-      for (const m of this.marbles) if (m.active && !m.frozen && !m.puppet) this.collide(m);
+      for (const m of this.marbles) if (m.active && !m.frozen && (!m.kart || m.puppet)) this.integrate(m, h);
+      for (const m of this.marbles) if (m.active && !m.frozen && !m.puppet && !m.kart) this.collide(m);
       this.pairs();
       this.holds(h);
     }
@@ -951,7 +953,7 @@ export class World {
     const D = 2 * BODY_R;
     for (let i = 0; i < ms.length; i++) {
       const a = ms[i];
-      if (!a.active) continue;
+      if (!a.active || a.kart) continue;
       const ah = a.mode === Mode.Run ? HEAD_UP : 0;
       for (let j = i + 1; j < ms.length; j++) {
         const b = ms[j];

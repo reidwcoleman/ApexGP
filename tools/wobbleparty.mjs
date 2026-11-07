@@ -1,13 +1,13 @@
 // Wobble Mania online: a host and a guest in two browsers, over the real broker, play a round each
 // of the given games side by side. Checks the two agree on the scores or the field, that the
 // guest's own bean gets somewhere, and that nothing throws.
-//   node tools/wobbleparty.mjs [--port 5197] [--rounds bumperbash,stickypicnic,rocketrumble] [--secs 40]
+//   node tools/wobbleparty.mjs [--port 5197] [--rounds bumperbash,beanbaygp,rocketrumble] [--secs 40]
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', 'bumperbash,stickypicnic,rocketrumble,beancup').split(',');
+const rounds = opt('rounds', 'bumperbash,beanbaygp,rocketrumble,beancup').split(',');
 const secs = Number(opt('secs', 40));
 const base = `http://localhost:${port}/marbles.html`;
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
@@ -19,7 +19,7 @@ const page = async (name, errs) => {
 };
 const snap = () => {
   const g = window.__marbles;
-  const b = g.bumpP ?? g.picnicP;
+  const b = g.bumpP;
   const me = g.racers.find((r) => r.c.player);
   return {
     state: g.state, t: g.playT, id: g.course?.id,
