@@ -311,6 +311,15 @@ export class Sound {
     this.burst(d, 0.03, 0.6, surf === 'flesh' ? 200 : 700, surf === 'flesh' ? 1200 : 5200);
   }
 
+  /** a round going off at an angle, tumbling */
+  ricochet(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.26, false);
+    const f = 1500 + Math.random() * 1300;
+    this.thump(d, f, f * 0.42, 0.34 + Math.random() * 0.2, 0.42, 0, 'sine');
+    this.burst(d, 0.03, 0.5, 1800, 9000);
+  }
+
   /** a bullet passing close */
   snap(p: THREE.Vector3) {
     if (!this.ctx) return;

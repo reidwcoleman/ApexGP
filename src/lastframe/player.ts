@@ -7,6 +7,21 @@ import type { Sound } from './audio.ts';
 import type { Fx } from './fx.ts';
 import type { Body } from './hitbox.ts';
 import type { Door } from './world.ts';
+import type { Phys } from './physics.ts';
+
+/** a weight on a spring: what a gun in two hands does */
+class Sp {
+  x = 0;
+  v = 0;
+  step(dt: number, to: number, k: number, c: number) {
+    this.v += (k * (to - this.x) - c * this.v) * dt;
+    this.x += this.v * dt;
+    return this.x;
+  }
+  reset() {
+    this.x = this.v = 0;
+  }
+}
 
 export class Input {
   keys = new Set<string>();
@@ -66,11 +81,13 @@ export interface PlayerCtx {
   doors: Door[];
   bodies(): Iterable<[number, Body]>;
   surfaceAt(x: number, y: number, z: number): string;
+  phys: Phys;
+  scene: THREE.Object3D;
   send: {
     shot(w: number, o: [number, number, number], e: number[], surf: string[]): void;
     hit(to: number, dmg: number, zone: number, w: number, dir: [number, number, number], dist: number): void;
     door(i: number, from: [number, number, number]): void;
-    pane(i: number): void;
+    pane(i: number, at?: [number, number, number]): void;
     nade(kind: NadeKind, o: [number, number, number], v: [number, number, number], fuse: number): void;
   };
   muzzleLight(p: THREE.Vector3): void;
@@ -110,8 +127,33 @@ export class LocalPlayer {
   private punchP = 0;
   private punchY = 0;
   private punchR = 0;
-  private lagY = 0;
-  private lagP = 0;
+  private swayY = new Sp();
+  private swayP = new Sp();
+  private inX = new Sp();
+  private inY = new Sp();
+  private inZ = new Sp();
+  private rkZ = new Sp();
+  private rkP = new Sp();
+  private rkY = new Sp();
+  private rkR = new Sp();
+  private camP = new Sp();
+  private camR = new Sp();
+  private pvx = 0;
+  private pvz = 0;
+  /** muzzle climb still owed back to the aim */
+  private climb = 0;
+  private climbY = 0;
+  private sinceShot = 9;
+  private trauma = 0;
+  private coyote = 0;
+  private jumpBuf = 0;
+  private slideT = 0;
+  private slideX = 0;
+  private slideZ = 0;
+  private stun = 0;
+  private mantle: { t: number; len: number; x0: number; y0: number; z0: number; x1: number; y1: number; z1: number } | null = null;
+  mantleK = 0;
+  private magGone = false;
   private bob = 0;
   private bobK = 0;
   private stepAcc = 0;
@@ -155,6 +197,14 @@ export class LocalPlayer {
     this.reloadT = this.switchT = this.cycleT = 0;
     this.crouch = false;
     this.hurtK = 0;
+    this.mantle = null;
+    this.slideT = this.stun = this.climb = this.climbY = this.trauma = 0;
+    for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR]) q.reset();
+  }
+
+  /** a blast nearby: k from 0 to 1 */
+  shake(k: number) {
+    this.trauma = Math.min(1, this.trauma + k);
   }
 
   flags() {
@@ -173,14 +223,23 @@ export class LocalPlayer {
     const f = (i.keys.has('KeyW') ? 1 : 0) - (i.keys.has('KeyS') ? 1 : 0);
     const s = (i.keys.has('KeyD') ? 1 : 0) - (i.keys.has('KeyA') ? 1 : 0);
     const crouchHeld = i.keys.has('KeyC') || i.keys.has('ControlLeft');
+    const was = Math.hypot(m.vx, m.vz);
+    // a dive into a crouch from a run carries you
+    if (crouchHeld && !this.crouch && this.sprintK > 0.5 && was > 4.2 && m.grounded && !freeze && this.slideT <= 0) {
+      this.slideT = 0.72;
+      this.slideX = m.vx / was;
+      this.slideZ = m.vz / was;
+      c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 6, 1.1);
+    }
     if (crouchHeld) this.crouch = true;
     else if (this.crouch && !c.world.blocked(m.x, m.y + 0.1, m.z, 0.25, 1.7)) this.crouch = false;
     const wantRun = i.keys.has('ShiftLeft') && f > 0 && !this.crouch && !i.ads && this.stamina > 0.04 && !i.fire;
     const run = wantRun && !freeze;
     this.stamina = Math.min(1, Math.max(0, this.stamina + (run ? -dt / 7 : dt / 5)));
     let top = this.crouch ? CROUCH : run ? RUN : WALK;
-    top *= spec.speed * (1 - this.adsK * 0.42);
+    top *= spec.speed * (1 - this.adsK * 0.42) * (1 - this.stun * 0.55);
     if (freeze) top = 0;
+    this.stun = Math.max(0, this.stun - dt * 2.6);
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
     let wx = -sy * f + cy * s, wz = -cy * f - sy * s;
     const wl = Math.hypot(wx, wz);
@@ -188,21 +247,60 @@ export class LocalPlayer {
       wx /= wl;
       wz /= wl;
     }
-    const acc = m.grounded ? 13 : 2.5;
-    const k = 1 - Math.exp(-acc * dt);
-    m.vx += (wx * top - m.vx) * k;
-    m.vz += (wz * top - m.vz) * k;
-    if (i.take('Space') && m.grounded && !freeze && !this.crouch) {
-      m.vy = 4.05;
+    if (this.slideT > 0) {
+      // friction only, a little steering
+      this.slideT -= dt;
+      const sp = Math.max(0, was - 5.2 * dt);
+      const steer = 1 - Math.exp(-2.4 * dt);
+      const tx = this.slideX + (wx - this.slideX) * steer, tz = this.slideZ + (wz - this.slideZ) * steer;
+      const tl = Math.hypot(tx, tz) || 1;
+      this.slideX = tx / tl;
+      this.slideZ = tz / tl;
+      m.vx = this.slideX * sp;
+      m.vz = this.slideZ * sp;
+      if (sp < 1.6 || !m.grounded) this.slideT = 0;
+    } else {
+      // a body has mass: it takes a moment to get going, longer to reverse, and very little to do in the air
+      const tx = wx * top, tz = wz * top;
+      const ex = tx - m.vx, ez = tz - m.vz, el = Math.hypot(ex, ez);
+      const pressing = wl > 0.01;
+      const against = m.vx * tx + m.vz * tz < 0;
+      const A = !m.grounded ? 3.4 : !pressing ? 15 : against ? 26 : run ? 13.5 : 19;
+      const dv = Math.min(el, A * dt);
+      if (el > 1e-5) {
+        m.vx += (ex / el) * dv;
+        m.vz += (ez / el) * dv;
+      }
+    }
+    // ---- jump, with a little forgiveness either side of the ledge, or a climb onto what's in front
+    this.coyote = m.grounded ? 0.1 : Math.max(0, this.coyote - dt);
+    this.jumpBuf = i.take('Space') ? 0.12 : Math.max(0, this.jumpBuf - dt);
+    if (!this.mantle && this.jumpBuf > 0 && !freeze && f > 0) this.tryMantle(c);
+    if (this.jumpBuf > 0 && this.coyote > 0 && !freeze && !this.crouch && !this.mantle) {
+      m.vy = 4.15;
       m.grounded = false;
+      this.coyote = this.jumpBuf = 0;
+      this.slideT = 0;
+      this.stamina = Math.max(0, this.stamina - 0.07);
+      this.inY.v -= 0.25;
     }
     m.height = this.crouch ? 1.22 : 1.78;
     this.airV = m.vy;
     const wasAir = !m.grounded;
-    move(c.world, m, dt);
+    if (this.mantle) this.climbing(dt, c);
+    else move(c.world, m, dt);
+    this.mantleK += ((this.mantle ? 1 : 0) - this.mantleK) * Math.min(1, dt * 12);
     if (wasAir && m.grounded) {
-      this.landK = Math.min(1, -this.airV / 6);
-      c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 5, 1.2);
+      const hit = -this.airV;
+      this.landK = Math.min(1, hit / 6);
+      c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 5, 0.7 + Math.min(1, hit / 6));
+      this.inY.v -= hit * 0.09;
+      this.camP.v -= hit * 0.09;
+      if (hit > 5.5) {
+        this.stun = Math.min(1, (hit - 5.5) / 3 + 0.5);
+        m.vx *= 0.55;
+        m.vz *= 0.55;
+      }
     }
     const speed = Math.hypot(m.vx, m.vz);
     // ---- steps
@@ -226,7 +324,7 @@ export class LocalPlayer {
     this.lean = lt;
     this.leanK += (lt - this.leanK) * Math.min(1, dt * 10);
     // ---- the head
-    const eyeH = 1.63 - this.crouchK * 0.56;
+    const eyeH = 1.63 - this.crouchK * 0.56 - (this.slideT > 0 ? 0.12 : 0);
     const bobY = Math.abs(Math.sin(this.bob)) * 0.03 * this.bobK * (1 - this.adsK * 0.6);
     const bobX = Math.cos(this.bob) * 0.016 * this.bobK * (1 - this.adsK * 0.7);
     this.breath += dt;
@@ -249,11 +347,45 @@ export class LocalPlayer {
     this.punchP *= ps;
     this.punchY *= ps;
     this.punchR *= ps;
+    // the gun's own weight: springs for the turn, the stride, the shot
+    const a = this.adsK;
+    const rY = dt > 0 ? dYaw / dt : 0, rP = dt > 0 ? dPitch / dt : 0;
+    this.swayY.step(dt, THREE.MathUtils.clamp(rY * 0.017, -0.085, 0.085), 110, 13);
+    this.swayP.step(dt, THREE.MathUtils.clamp(rP * 0.017, -0.075, 0.075), 110, 13);
+    const axW = dt > 0 ? (m.vx - this.pvx) / dt : 0, azW = dt > 0 ? (m.vz - this.pvz) / dt : 0;
+    this.pvx = m.vx;
+    this.pvz = m.vz;
+    // into the camera's frame: forward and right
+    const aF = -sy * axW - cy * azW, aR = cy * axW - sy * azW;
+    this.inX.step(dt, THREE.MathUtils.clamp(-aR * 0.0014, -0.03, 0.03), 90, 12);
+    this.inZ.step(dt, THREE.MathUtils.clamp(-aF * 0.0016, -0.03, 0.03), 90, 12);
+    this.inY.step(dt, 0, 120, 13);
+    this.rkZ.step(dt, 0, 420, 30);
+    this.rkP.step(dt, 0, 300, 25);
+    this.rkY.step(dt, 0, 300, 25);
+    this.rkR.step(dt, 0, 260, 22);
+    this.camP.step(dt, 0, 170, 19);
+    this.camR.step(dt, 0, 170, 19);
+    // climb is paid back once the trigger is let go
+    this.sinceShot += dt;
+    if (this.sinceShot > 0.13 && (this.climb || this.climbY)) {
+      const k = 1 - Math.exp(-dt * 8);
+      const back = this.climb * k, backY = this.climbY * k;
+      this.pitch -= back;
+      this.yaw -= backY;
+      this.climb -= back;
+      this.climbY -= backY;
+      if (Math.abs(this.climb) < 1e-4) this.climb = 0;
+      if (Math.abs(this.climbY) < 1e-4) this.climbY = 0;
+    }
+    this.trauma = Math.max(0, this.trauma - dt * 1.3);
+    const tr = this.trauma * this.trauma, tt = this.breath * 31;
+    const shP = tr * 0.05 * (Math.sin(tt) + Math.sin(tt * 1.73 + 1)) * 0.5, shY = tr * 0.05 * Math.sin(tt * 1.31 + 2), shR = tr * 0.06 * Math.sin(tt * 0.87 + 4);
     const camK = 0.45;
     const swayP = Math.sin(this.breath * 1.3) * 0.0035 + Math.sin(this.bob * 2) * 0.0035 * this.bobK;
     const swayY = Math.sin(this.breath * 0.9) * 0.003 + Math.cos(this.bob) * 0.0045 * this.bobK;
-    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.008 * this.bobK + this.punchR - s * 0.012 * (speed / WALK);
-    this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75), this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75), roll, 'YXZ');
+    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.008 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
+    this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
     cam.position.copy(eye);
     cam.quaternion.setFromEuler(this.e);
     const fov = THREE.MathUtils.lerp(84, spec.adsFov, this.adsK) + this.sprintK * 3;
@@ -263,30 +395,26 @@ export class LocalPlayer {
     }
     cam.updateMatrixWorld();
     // ---- the gun, in camera space
-    const lagK = Math.exp(-dt * (this.adsK > 0.5 ? 22 : 13));
-    this.lagY = this.lagY * lagK + dYaw * 0.65;
-    this.lagP = this.lagP * lagK + dPitch * 0.65;
-    this.lagY = THREE.MathUtils.clamp(this.lagY, -0.1, 0.1);
-    this.lagP = THREE.MathUtils.clamp(this.lagP, -0.1, 0.1);
     // too close to a wall: bring it in and up
     const fw = this.v.set(0, 0, -1).applyQuaternion(cam.quaternion);
     const wall = c.world.ray(eye.x, eye.y, eye.z, fw.x, fw.y, fw.z, spec.muzzle[2] + 0.42);
     const want = wall ? THREE.MathUtils.clamp(1 - (wall.t - 0.32) / (spec.muzzle[2] + 0.1), 0, 1) : 0;
     this.retract += (want - this.retract) * Math.min(1, dt * 10);
     const hp = spec.hipPos, ap = spec.adsPos;
-    const a = this.adsK;
     let gx = THREE.MathUtils.lerp(hp[0], ap[0], a), gy = THREE.MathUtils.lerp(hp[1], ap[1], a), gz = THREE.MathUtils.lerp(hp[2], ap[2], a);
-    gx += Math.cos(this.bob) * 0.012 * this.bobK * (1 - a * 0.85) - this.lagY * 0.28 * (1 - a * 0.7);
-    gy += -Math.abs(Math.sin(this.bob)) * 0.014 * this.bobK * (1 - a * 0.85) + this.lagP * 0.28 * (1 - a * 0.7) - lk * 0.03;
-    gz -= (this.recP * 0.22 + this.cool * 0.0) * (1 - a * 0.5);
+    const free = 1 - a * 0.72;
+    const sy2 = this.swayY.x, sp2 = this.swayP.x;
+    gx += Math.cos(this.bob) * 0.012 * this.bobK * (1 - a * 0.85) - sy2 * 0.28 * free + this.inX.x * free;
+    gy += -Math.abs(Math.sin(this.bob)) * 0.014 * this.bobK * (1 - a * 0.85) + sp2 * 0.28 * free - lk * 0.03 + this.inY.x * free;
+    gz += this.inZ.x * free - this.rkZ.x * (1 - a * 0.45) - this.recP * 0.12;
     // sprint: muzzle low across the body
     gx -= this.sprintK * 0.05;
-    gy -= this.sprintK * 0.09;
+    gy -= this.sprintK * 0.09 + this.mantleK * 0.14;
     gz -= this.retract * 0.22;
     gy -= this.retract * 0.03;
-    let pitchG = this.recP * 1.1 - this.lagP * 1.3 - this.sprintK * 0.72 + this.retract * 0.95;
-    let yawG = this.recY * 1.1 - this.lagY * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 22);
-    let rollG = this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - this.lagY * 0.6;
+    let pitchG = this.recP * 0.7 + this.rkP.x - sp2 * 1.3 - this.sprintK * 0.72 + this.retract * 0.95 - this.mantleK * 0.6;
+    let yawG = this.recY * 0.7 + this.rkY.x - sy2 * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 22) + this.mantleK * 0.5;
+    let rollG = this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
     // reload and bolt movements
     let reloadK = 0;
     if (this.reloadT > 0) {
@@ -327,6 +455,23 @@ export class LocalPlayer {
         gun.mag.position.copy(gun.magRest);
         gun.mag.position.y -= drop * 0.3;
         gun.mag.visible = !out || drop < 0.98;
+        if (t > 0.22 && !this.magGone) {
+          // the empty one goes where gravity sends it
+          this.magGone = true;
+          const holder = new THREE.Group();
+          const m2 = gun.mag.clone();
+          m2.position.copy(gun.magRest);
+          m2.visible = true;
+          holder.add(m2);
+          const bb = new THREE.Box3().setFromObject(m2);
+          const mid = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+          c.scene.add(holder);
+          const p0 = new THREE.Vector3(0, -0.04, 0).applyQuaternion(this.gunQuat).add(this.gunPos);
+          const fall = new THREE.Vector3(0, -1.3, 0).applyQuaternion(this.gunQuat);
+          fall.x += m.vx;
+          fall.z += m.vz;
+          c.phys.drop(holder, [sz.x, sz.y, sz.z], mid, p0, this.gunQuat, fall, 7, 0.35, 16);
+        }
       } else if (gun.mag) {
         gun.mag.position.copy(gun.magRest);
         gun.mag.visible = true;
@@ -337,7 +482,8 @@ export class LocalPlayer {
         sol.magHand = gun.mag ? Math.min(1, Math.min(t / 0.16, (1 - t) / 0.2)) : 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
       } else sol.magHand *= Math.exp(-dt * 12);
     }
-    this.lightPos.set(0.04, 0.043, 0.45).applyQuaternion(this.gunQuat).add(this.gunPos);
+    // ahead of the muzzle: a torch on the rail lights the room, not the gun it's clamped to
+    this.lightPos.set(0.04, 0.043, spec.muzzle[2] + 0.03).applyQuaternion(this.gunQuat).add(this.gunPos);
     if (freeze) return;
     this.actions(dt, i, c, cam, sol);
   }
@@ -375,6 +521,7 @@ export class LocalPlayer {
         const n = spec.mag;
         if (Math.floor(before * n) !== Math.floor(after * n)) c.sound.clack(null, 'shell');
       } else {
+        if (before < 0.02) this.magGone = false;
         if (before < 0.18 && after >= 0.18) c.sound.clack(null, 'mag_out');
         if (before < 0.68 && after >= 0.68) c.sound.clack(null, 'mag_in');
         if (before < 0.88 && after >= 0.88) c.sound.clack(null, 'bolt');
@@ -424,7 +571,7 @@ export class LocalPlayer {
     c.prompt(near ? (near.want > 0 ? 'F  Close' : 'F  Open') : '');
     if (near && i.take('KeyF')) c.send.door(near.id, [this.m.x, this.m.y, this.m.z]);
     // ---- the trigger
-    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72) return;
+    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5) return;
     const trig = spec.auto ? i.fire : i.firePressed;
     if (!trig || this.cool > 0 || this.cycleT > 0) return;
     if (am.mag <= 0) {
@@ -446,7 +593,56 @@ export class LocalPlayer {
     const e = this.spec.eject;
     const p = this.v.set(-e[0], e[1], e[2]).applyQuaternion(this.gunQuat).add(this.gunPos);
     const right = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.gunQuat);
-    c.fx.shell(p, right.x * 2.6 + this.m.vx, 1.8 + Math.random(), right.z * 2.6 + this.m.vz);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.gunQuat);
+    const back = new THREE.Vector3(0, 0, -1).applyQuaternion(this.gunQuat);
+    const v = right.multiplyScalar(2.3 + Math.random() * 1.1).addScaledVector(up, 1.4 + Math.random() * 0.9).addScaledVector(back, Math.random() * 0.7);
+    v.x += this.m.vx;
+    v.z += this.m.vz;
+    c.fx.shell(p, v, this.gunQuat, this.spec.brass);
+  }
+
+  /** a ledge in front at hand height: get a knee on it */
+  private tryMantle(c: PlayerCtx) {
+    const m = this.m;
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    if (this.crouch) return;
+    // something to climb, not open air
+    if (!c.world.blocked(m.x + fx * 0.42, m.y + 0.5, m.z + fz * 0.42, 0.12, 0.7) && !c.world.blocked(m.x + fx * 0.42, m.y + 1.0, m.z + fz * 0.42, 0.12, 0.3)) return;
+    for (const d of [0.62, 0.86, 1.1]) {
+      const px = m.x + fx * d, pz = m.z + fz * d;
+      const top = c.world.floorAt(px, m.y + 1.5, pz, 0.14, 0);
+      const h = top - m.y;
+      if (h < 0.42 || h > 1.48) continue;
+      if (c.world.blocked(px, top + 0.03, pz, 0.25, 1.72)) continue;
+      if (c.world.blocked(m.x, top + 0.03, m.z, 0.2, 1.72)) continue;
+      this.mantle = { t: 0, len: 0.24 + h * 0.26, x0: m.x, y0: m.y, z0: m.z, x1: px, y1: top, z1: pz };
+      this.jumpBuf = 0;
+      this.slideT = 0;
+      c.sound.step(null, 'hard', 4, 0.9);
+      this.camP.v -= 0.5;
+      return;
+    }
+  }
+
+  private climbing(dt: number, c: PlayerCtx) {
+    const q = this.mantle!, m = this.m;
+    q.t += dt;
+    const t = Math.min(1, q.t / q.len);
+    // up first, then over
+    const up = 1 - (1 - Math.min(1, t * 1.5)) ** 2;
+    const over = THREE.MathUtils.smoothstep(t, 0.35, 1);
+    m.x = q.x0 + (q.x1 - q.x0) * over;
+    m.y = q.y0 + (q.y1 - q.y0) * up;
+    m.z = q.z0 + (q.z1 - q.z0) * over;
+    m.vx = m.vz = m.vy = 0;
+    if (t >= 1) {
+      this.mantle = null;
+      m.grounded = true;
+      m.vx = -Math.sin(this.yaw) * 1.6;
+      m.vz = -Math.cos(this.yaw) * 1.6;
+      c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 3.4, 0.8);
+      this.camP.v -= 0.35;
+    }
   }
 
   private fire(c: PlayerCtx, sol: Soldier, cam: THREE.PerspectiveCamera) {
@@ -472,7 +668,7 @@ export class LocalPlayer {
       dir.addScaledVector(up, Math.sin(a) * r).addScaledVector(rt, Math.cos(a) * r).normalize();
       trace(c.world, bodies, o.x, o.y, o.z, dir.x, dir.y, dir.z, spec, this.slot, out);
     }
-    for (const i of out.panes) c.send.pane(i);
+    out.panes.forEach((i, n) => c.send.pane(i, out.paneAt?.[n]));
     c.send.shot(wi, [muz.x, muz.y, muz.z], out.e, out.surf);
     // sum the pellets on each body
     const per = new Map<number, { dmg: number; zone: number; dist: number; at: [number, number, number] }>();
@@ -487,12 +683,23 @@ export class LocalPlayer {
     for (const [to2, h] of per) c.send.hit(to2, Math.round(h.dmg), h.zone, wi, [h.at[0] - o.x, h.at[1] - o.y, h.at[2] - o.z], h.dist);
     // ---- kick
     const k = spec.kick * (Math.PI / 180) * (1 - this.adsK * 0.42) * crouchK;
-    this.recP += k;
-    this.recY += (Math.random() - 0.5) * 2 * spec.wander * (Math.PI / 180);
-    this.pitch += k * 0.32;
-    this.yaw += (Math.random() - 0.5) * spec.wander * (Math.PI / 180) * 0.5;
-    this.punchR += (Math.random() - 0.5) * 0.02 * spec.kick;
-    this.punchP += k * 0.2;
+    const side = (Math.random() - 0.5) * 2 * spec.wander * (Math.PI / 180);
+    this.recP += k * 0.6;
+    this.recY += side * 0.6;
+    const up = k * 0.34, drift = side * 0.3;
+    this.pitch += up;
+    this.yaw += drift;
+    this.climb += up * 0.72;
+    this.climbY += drift * 0.72;
+    this.sinceShot = 0;
+    // the shot goes back through the wrists into the shoulder
+    const hard = spec.kick * (1 - this.adsK * 0.35) * crouchK;
+    this.rkZ.v += 0.42 * Math.sqrt(hard);
+    this.rkP.v += hard * 0.22;
+    this.rkY.v += side * 16;
+    this.rkR.v += (Math.random() - 0.5) * hard * 0.5;
+    this.camP.v += hard * 0.045;
+    this.camR.v += (Math.random() - 0.5) * hard * 0.09;
     sol.kick = 1;
     c.sound.shot(wi, null);
     c.fx.muzzle(muz, this.barrel, this.weapon === 'shotgun' || this.weapon === 'rifle' ? 1.5 : this.weapon === 'pistol' ? 0.7 : 1);
@@ -513,6 +720,10 @@ export class LocalPlayer {
     this.punchY += (Math.random() - 0.5) * 0.09;
     this.punchR += (Math.random() - 0.5) * 0.09;
     this.hurtK = 1;
-    void dir;
+    // a hit shoves: some of the round's push reaches your feet
+    this.m.vx += dir[0] * 0.8;
+    this.m.vz += dir[2] * 0.8;
+    this.stun = Math.max(this.stun, 0.5);
+    this.inY.v -= 0.4;
   }
 }

@@ -18,6 +18,7 @@ async function boot() {
   Object.assign(window, {
     __lf: { scene: g.scene, cam: g.cam, post: g.post, L: g.L, r: g.r, g },
     __capture: async () => {
+      g.hideLoose();
       const x = await capture(g.r, g.scene, g.L, (f) => console.log('cap', f));
       let t = '';
       for (let i = 0; i < x.bytes.length; i += 8192) t += String.fromCharCode(...x.bytes.subarray(i, i + 8192));

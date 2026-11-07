@@ -26,7 +26,7 @@ export interface WeaponSpec {
   /** a bullet's reach before it falls off, and the share left beyond */
   range: number;
   falloff: number;
-  /** goes through thin walls */
+  /** punch: 1 leaves a carbine's worth after a thin wall; 0 stops at anything */
   pen: number;
   /** view: grip position from the hip, aimed; aimed field of view */
   hipPos: [number, number, number];
@@ -39,24 +39,27 @@ export interface WeaponSpec {
   /** how loud it reads to bots, metres */
   loud: number;
   speed: number;
+  /** push on what it hits, newton-seconds, and the size of its brass */
+  shove: number;
+  brass: number;
 }
 
 export const WEAPONS: Record<WeaponId, WeaponSpec> = {
   carbine: {
     name: 'Carbine', cycle: 0.083, auto: true, dmg: 34, pellets: 1, headX: 3.2, mag: 30, reserve: 90, reload: 2.5, hip: 1.5, ads: 0.1, move: 0.35, kick: 0.62, wander: 0.34, settle: 11,
-    range: 70, falloff: 0.7, pen: 0.55, hipPos: [0.07, -0.165, 0.2], adsPos: [0, -0.112, 0.14], adsFov: 58, muzzle: [0, 0.043, 0.695], support: [0, 0.012, 0.29], eject: [0.02, 0.05, 0.02], loud: 70, speed: 1,
+    range: 70, falloff: 0.7, pen: 1, hipPos: [0.1, -0.2, 0.32], adsPos: [0, -0.112, 0.14], adsFov: 58, muzzle: [0, 0.043, 0.695], support: [0, 0.012, 0.29], eject: [0.02, 0.05, 0.02], loud: 70, speed: 1, shove: 7, brass: 1,
   },
   shotgun: {
     name: 'Pump gun', cycle: 0.92, auto: false, dmg: 15, pellets: 9, headX: 1.8, mag: 6, reserve: 24, reload: 3.6, hip: 2.6, ads: 2.1, move: 0.15, kick: 3.6, wander: 0.5, settle: 7,
-    range: 13, falloff: 0.28, pen: 0.1, hipPos: [0.07, -0.16, 0.18], adsPos: [0, -0.056, 0.13], adsFov: 66, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1,
+    range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.1, -0.2, 0.3], adsPos: [0, -0.056, 0.13], adsFov: 66, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
   },
   rifle: {
     name: 'Bolt rifle', cycle: 1.3, auto: false, dmg: 92, pellets: 1, headX: 3.5, mag: 5, reserve: 20, reload: 3.4, hip: 3.2, ads: 0.02, move: 0.6, kick: 3.0, wander: 0.4, settle: 6,
-    range: 120, falloff: 0.85, pen: 0.8, hipPos: [0.07, -0.15, 0.17], adsPos: [0, -0.104, 0.09], adsFov: 19, muzzle: [0, 0.075, 0.93], support: [0, 0.02, 0.3], eject: [0.02, 0.07, 0.03], loud: 100, speed: 0.94,
+    range: 120, falloff: 0.85, pen: 2.1, hipPos: [0.1, -0.19, 0.3], adsPos: [0, -0.104, 0.09], adsFov: 19, muzzle: [0, 0.075, 0.93], support: [0, 0.02, 0.3], eject: [0.02, 0.07, 0.03], loud: 100, speed: 0.94, shove: 15, brass: 1.5,
   },
   pistol: {
     name: 'Service pistol', cycle: 0.14, auto: false, dmg: 29, pellets: 1, headX: 3.0, mag: 15, reserve: 45, reload: 1.9, hip: 1.1, ads: 0.25, move: 0.3, kick: 1.5, wander: 0.5, settle: 12,
-    range: 35, falloff: 0.6, pen: 0.2, hipPos: [0.09, -0.15, 0.33], adsPos: [0, -0.078, 0.34], adsFov: 68, muzzle: [0, 0.058, 0.19], support: [0, -0.02, 0.0], eject: [0.02, 0.07, 0.05], loud: 55, speed: 1.06,
+    range: 35, falloff: 0.6, pen: 0.56, hipPos: [0.1, -0.17, 0.42], adsPos: [0, -0.078, 0.34], adsFov: 68, muzzle: [0, 0.058, 0.19], support: [0, -0.02, 0.0], eject: [0.02, 0.07, 0.05], loud: 55, speed: 1.06, shove: 4, brass: 0.7,
   },
 };
 
@@ -102,8 +105,8 @@ export type Ev =
   | { t: 'shot'; s: number; w: number; o: [number, number, number]; e: number[]; surf: string[]; }
   | { t: 'hit'; s: number; by: number; dmg: number; hp: number; zone: number; dir: [number, number, number] }
   | { t: 'die'; s: number; by: number; zone: number; w: number; dir: [number, number, number]; dist: number }
-  | { t: 'door'; i: number; open: number; dir: number }
-  | { t: 'pane'; i: number }
+  | { t: 'door'; i: number; open: number; dir: number; blast?: number }
+  | { t: 'pane'; i: number; at?: [number, number, number] }
   | { t: 'nade'; s: number; kind: NadeKind; o: [number, number, number]; v: [number, number, number]; fuse: number; id: number }
   | { t: 'boom'; id: number; kind: NadeKind; p: [number, number, number] }
   | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number }
@@ -119,7 +122,7 @@ export type Req =
   | { t: 'shot'; w: number; o: [number, number, number]; e: number[]; surf: string[] }
   | { t: 'hit'; to: number; dmg: number; zone: number; w: number; dir: [number, number, number]; dist: number }
   | { t: 'door'; i: number; from: [number, number, number] }
-  | { t: 'pane'; i: number }
+  | { t: 'pane'; i: number; at?: [number, number, number] }
   | { t: 'nade'; kind: NadeKind; o: [number, number, number]; v: [number, number, number]; fuse: number }
   | { t: 'chat'; text: string }
   | { t: 'respawn' };

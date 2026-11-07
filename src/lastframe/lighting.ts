@@ -7,9 +7,54 @@ import * as THREE from 'three';
  * Reflections read the same cubes, and spot lights (flashlights) stay three's own.
  */
 
+/** tiling fractal noise, 32 cells across */
+function noiseTile() {
+  const S = 256, C = 32;
+  const lat = (n: number, seed: number) => {
+    const a = new Float32Array(n * n);
+    let h = seed;
+    for (let i = 0; i < a.length; i++) {
+      h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+      a[i] = h / 4294967296;
+    }
+    return a;
+  };
+  const oct = [[C, 0.55], [C * 2, 0.3], [C * 4, 0.15]] as const;
+  const grids = oct.map(([n], i) => lat(n, 91 + i * 17));
+  const d = new Uint8Array(S * S * 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let v = 0;
+    oct.forEach(([n, w], i) => {
+      const fx = (x / S) * n, fy = (y / S) * n;
+      const ix = Math.floor(fx), iy = Math.floor(fy);
+      let tx = fx - ix, ty = fy - iy;
+      tx = tx * tx * (3 - 2 * tx);
+      ty = ty * ty * (3 - 2 * ty);
+      const g = grids[i];
+      const at = (a: number, b: number) => g[(b % n) * n + (a % n)];
+      v += w * (at(ix, iy) * (1 - tx) * (1 - ty) + at(ix + 1, iy) * tx * (1 - ty) + at(ix, iy + 1) * (1 - tx) * ty + at(ix + 1, iy + 1) * tx * ty);
+    });
+    const o = (y * S + x) * 4;
+    d[o] = d[o + 1] = d[o + 2] = v * 255;
+    d[o + 3] = 255;
+  }
+  const t = new THREE.DataTexture(d, S, S);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
 export const LF = {
   lm: { value: null as THREE.Texture | null },
   vol: { value: null as THREE.Data3DTexture | null },
+  /** the six faces averaged: what a mote of dust in that cell is lit by */
+  volAvg: { value: null as THREE.Data3DTexture | null },
+  /** the lamps nearest the camera: xyz, radius / rgb. The bake holds their light, not their glint */
+  lampP: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, -99, 0, 0)) },
+  lampC: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) },
   volMin: { value: new THREE.Vector3() },
   volInv: { value: new THREE.Vector3(1, 1, 1) },
   volDim: { value: new THREE.Vector3(1, 1, 1) },
@@ -19,6 +64,9 @@ export const LF = {
   planar: { value: null as THREE.Texture | null },
   planarVP: { value: new THREE.Matrix4() },
   planarK: { value: 0 },
+  noise: { value: noiseTile() },
+  /** 1 under open sky */
+  rain: { value: 1 },
 };
 
 const VERT_PARS = /* glsl */ `
@@ -54,6 +102,8 @@ uniform vec3 lfVolDim;
 uniform vec2 lfK;
 uniform float lfTime;
 uniform float lfWorldLight;
+uniform vec4 lfLampP[6];
+uniform vec3 lfLampC[6];
 #ifdef LF_LM
 varying vec2 vLfLM;
 uniform sampler2D lfLM;
@@ -63,6 +113,7 @@ uniform float lfWet;
 uniform sampler2D lfPlanar;
 uniform mat4 lfPlanarVP;
 uniform float lfPlanarK;
+uniform float lfRain;
 #endif
 vec3 lfDecode( vec3 e ) { return ( exp2( e * lfK.x ) - 1.0 ) / lfK.y; }
 vec3 lfFace( vec3 uvw, float f ) {
@@ -81,12 +132,52 @@ vec3 lfCube( vec3 p, vec3 n ) {
   return c;
 }
 float lfHash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
-float lfNoise( vec2 p ) {
-  vec2 i = floor( p ), f = fract( p );
-  f = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( lfHash( i ), lfHash( i + vec2( 1, 0 ) ), f.x ), mix( lfHash( i + vec2( 0, 1 ) ), lfHash( i + vec2( 1, 1 ) ), f.x ), f.y );
+uniform sampler2D lfNoiseT;
+/** a tile of fractal noise: one lookup where it used to be a dozen sines */
+float lfFbm( vec2 p ) { return texture2D( lfNoiseT, p * 0.03125 ).r; }
+/** the glint of a lamp: the bake has its light, only the specular is missing */
+vec3 lfGlint( vec3 P, vec3 N, vec3 V, float rough, vec3 f0 ) {
+  vec3 o = vec3( 0.0 );
+  float a = max( rough * rough, 0.035 );
+  float a2 = a * a;
+  float nv = clamp( dot( N, V ), 0.02, 1.0 );
+  for ( int i = 0; i < 4; i++ ) {
+    vec3 l = lfLampP[i].xyz - P;
+    float d2 = dot( l, l );
+    float reach = lfLampP[i].w;
+    if ( d2 > reach * reach ) continue;
+    l *= inversesqrt( d2 );
+    vec3 h = normalize( l + V );
+    float nl = clamp( dot( N, l ), 0.0, 1.0 ), nh = clamp( dot( N, h ), 0.0, 1.0 ), vh = clamp( dot( V, h ), 0.0, 1.0 );
+    float dd = nh * nh * ( a2 - 1.0 ) + 1.0;
+    float D = a2 / ( 3.14159 * dd * dd );
+    vec3 F = f0 + ( 1.0 - f0 ) * pow( 1.0 - vh, 5.0 );
+    float G = 0.25 / max( 0.05, mix( nl * nv * 4.0, 1.0, a ) );
+    float fall = 1.0 - smoothstep( 0.2, 1.0, sqrt( d2 ) / reach );
+    o += lfLampC[i] * ( D * G * nl * fall / ( d2 + 1.0 ) ) * F;
+  }
+  return min( o, vec3( 12.0 ) );
 }
-float lfFbm( vec2 p ) { return lfNoise( p ) * 0.55 + lfNoise( p * 2.3 + 7.1 ) * 0.3 + lfNoise( p * 5.1 + 3.3 ) * 0.15; }
+/** rain on standing water: rings that open and fade, a few to a cell, in two sizes */
+vec2 lfRipple( vec2 p, float t ) {
+  vec2 acc = vec2( 0.0 );
+  for ( int k = 0; k < 2; k++ ) {
+    float sc = k == 0 ? 2.1 : 3.7;
+    vec2 g = p * sc + float( k ) * 5.3;
+    vec2 id = floor( g );
+    for ( int j = 0; j <= 1; j++ ) for ( int i = 0; i <= 1; i++ ) {
+      vec2 c = id + vec2( float( i ), float( j ) ) - 0.5 * 0.0;
+      float h = lfHash( c + 2.3 );
+      float ph = fract( t * ( 0.8 + h * 0.5 ) + h * 7.0 );
+      vec2 ctr = c + 0.5 * vec2( lfHash( c ), lfHash( c + 9.1 ) ) + 0.25 - 0.5;
+      vec2 d = g - ctr;
+      float r = length( d );
+      float ring = sin( ( r - ph * 0.85 ) * 34.0 ) * smoothstep( 0.07, 0.0, abs( r - ph * 0.85 ) ) * ( 1.0 - ph ) * ( 1.0 - ph );
+      acc += d / ( r + 1e-3 ) * ring;
+    }
+  }
+  return acc;
+}
 `;
 
 /** the world-space normal in the fragment shader (normal is in view space) */
@@ -97,14 +188,26 @@ const FRAG_LIGHT = /* glsl */ `
   vec3 lfR = reflect( - lfVw, lfNw );
   #ifdef LF_LM
     vec3 lfBaked = max( lfDecode( texture2D( lfLM, vLfLM ).rgb ), vec3( 0.0055, 0.0065, 0.0095 ) );
-    // the lightmap has no idea about the normal map: lean it on the scan's relief
-    float lfRelief = clamp( 1.0 + dot( lfNw - normalize( vLfN ), vec3( 0.55, 0.9, 0.35 ) ) * 0.8, 0.45, 1.5 );
+    // the lightmap has no idea about the normal map. The cubes know where this spot's light comes from:
+    // ask them how much more or less a bump tilted this way sees, and lean the bake on that
+    vec3 lfGn = normalize( vLfN );
+    vec3 lfUvw = ( vLfW + lfGn * 0.35 - lfVolMin ) * lfVolInv;
+    vec3 lfX0 = lfFace( lfUvw, 0.0 ), lfX1 = lfFace( lfUvw, 1.0 ), lfY0 = lfFace( lfUvw, 2.0 ), lfY1 = lfFace( lfUvw, 3.0 ), lfZ0 = lfFace( lfUvw, 4.0 ), lfZ1 = lfFace( lfUvw, 5.0 );
+    #define LF_PICK( n ) ( ( n ).x * ( n ).x * ( ( n ).x > 0.0 ? lfX0 : lfX1 ) + ( n ).y * ( n ).y * ( ( n ).y > 0.0 ? lfY0 : lfY1 ) + ( n ).z * ( n ).z * ( ( n ).z > 0.0 ? lfZ0 : lfZ1 ) )
+    vec3 lfCa = LF_PICK( lfNw ) + 0.004, lfCb = LF_PICK( lfGn ) + 0.004;
+    float lfRelief = clamp( dot( lfCa, vec3( 0.3, 0.6, 0.1 ) ) / dot( lfCb, vec3( 0.3, 0.6, 0.1 ) ), 0.35, 1.8 );
+    lfRelief = mix( lfRelief, 1.0, 0.15 );
     irradiance += lfBaked * PI * lfRelief * lfWorldLight;
     float lfLum = dot( lfBaked, vec3( 0.3, 0.6, 0.1 ) );
-    vec3 lfSpec = lfCube( vLfW + lfNw * 0.25, normalize( mix( lfR, lfNw, roughnessFactor * roughnessFactor ) ) );
+    vec3 lfRn = normalize( mix( lfR, lfNw, roughnessFactor * roughnessFactor ) );
+    vec3 lfSpec = LF_PICK( lfRn );
     // the lightmap knows the shadows the cubes are too coarse to hold
     float lfOcc = clamp( lfLum / max( 1e-3, dot( lfSpec, vec3( 0.3, 0.6, 0.1 ) ) ), 0.2, 1.0 );
     vec3 lfRad = lfSpec * lfOcc;
+    // a lamp shows in whatever it actually reaches: the bake says what that is
+    float lfReach = smoothstep( 0.002, 0.05, lfLum );
+    vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );
+    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfReach * lfWorldLight / RECIPROCAL_PI * 0.32;
     #ifdef LF_WET
     {
       // the street's mirror: last pass of the world seen from under the plane, stirred by the surface
@@ -123,8 +226,52 @@ const FRAG_LIGHT = /* glsl */ `
   #else
     irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight;
     radiance += lfCube( vLfW + lfNw * 0.36, lfR ) * lfWorldLight * LF_SPEC;
+    #ifdef LF_VIEW
+    {
+      // the room as seen from the gun: average light, picked up by anything turned toward the wearer
+      vec3 lfAmb = lfCube( vLfW, normalize( lfVw + vec3( 0.0, 0.6, 0.0 ) ) );
+      float lfFace = pow( clamp( dot( lfNw, lfVw ) * 0.6 + 0.4, 0.0, 1.0 ), 1.5 );
+      irradiance += lfAmb * PI * lfFace * 0.4 + vec3( 0.006, 0.0065, 0.0075 ) * PI;
+      radiance += lfAmb * 0.08 * ( 1.0 - roughnessFactor * 0.6 );
+    }
+    #endif
+    vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );
+    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfWorldLight * LF_SPEC / RECIPROCAL_PI * 0.32;
   #endif
 }
+`;
+
+const FRAG_GRIME = /* glsl */ `
+#ifdef LF_LM
+{
+  // no wall is one colour. Big soft patches break the tile; damp climbs the foot of a wall; what the rain
+  // washes off the ledges runs down in streaks
+  float lfUpN = abs( vLfN.y );
+  vec2 lfQ = lfUpN > 0.5 ? vLfW.xz : vec2( vLfW.x + vLfW.z, vLfW.y );
+  float macro = lfFbm( lfQ * 0.17 + 3.0 );
+  float fine = lfFbm( lfQ * 0.9 + 11.0 );
+  float tone = 0.74 + macro * 0.52;
+  diffuseColor.rgb *= mix( vec3( tone ), vec3( tone ) * vec3( 1.05, 0.98, 0.9 ), fine );
+  #ifdef LF_WET
+  if ( lfUpN < 0.5 ) {
+    float foot = 1.0 - smoothstep( 0.05, 1.3 + macro * 1.1, vLfW.y );
+    float run = lfFbm( vec2( ( vLfW.x + vLfW.z ) * 3.1, vLfW.y * 0.16 ) );
+    float streak = smoothstep( 0.48, 0.7, run ) * smoothstep( 1.0, 3.2, vLfW.y );
+    diffuseColor.rgb *= 1.0 - clamp( foot * 0.5 + streak * 0.34, 0.0, 0.7 );
+  } else {
+    // oil and tyre tracks on anything you can stand on
+    diffuseColor.rgb *= 0.86 + 0.14 * smoothstep( 0.25, 0.6, lfFbm( lfQ * vec2( 0.3, 1.6 ) + 5.0 ) );
+  }
+  #else
+  if ( lfUpN < 0.5 ) {
+    // the wear a room gets from people: scuffed at hip height, dark where the wall meets the floor
+    float h = fract( vLfW.y / 3.2 ) * 3.2;
+    float foot = 1.0 - smoothstep( 0.0, 0.55, h );
+    diffuseColor.rgb *= 1.0 - foot * 0.3 * ( 0.5 + macro );
+  }
+  #endif
+}
+#endif
 `;
 
 const FRAG_WET = /* glsl */ `
@@ -153,6 +300,8 @@ export interface LfOpts {
   wet?: number;
   /** held objects sit in shadow the coarse cubes can't see: scale what they mirror */
   spec?: number;
+  /** what's held up to the lens: a little light off the wearer's own chest, so a dark gun isn't a hole in the picture */
+  view?: number;
 }
 
 export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = {}): T {
@@ -160,6 +309,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   if (o.lightmap) m.defines.LF_LM = 1;
   if (o.wet) m.defines.LF_WET = 1;
   m.defines.LF_SPEC = (o.spec ?? 1).toFixed(2);
+  if (o.view) m.defines.LF_VIEW = 1;
   const wet = { value: o.wet ?? 0 };
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.() ?? '';
@@ -173,6 +323,10 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfK = LF.lmK;
     s.uniforms.lfTime = LF.time;
     s.uniforms.lfWorldLight = LF.worldLight;
+    s.uniforms.lfLampP = LF.lampP;
+    s.uniforms.lfLampC = LF.lampC;
+    s.uniforms.lfRain = LF.rain;
+    s.uniforms.lfNoiseT = LF.noise;
     s.uniforms.lfWet = wet;
     s.uniforms.lfPlanar = LF.planar;
     s.uniforms.lfPlanarVP = LF.planarVP;
@@ -180,10 +334,18 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\n' + VERT_PARS);
     s.vertexShader = s.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n' + VERT_MAIN);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\n' + FRAG_PARS);
-    s.fragmentShader = s.fragmentShader.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nfloat lfPuddle = 0.0;\nfloat lfPuddleK = 0.0;\n' + FRAG_WET);
-    s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#ifdef LF_WET\nnormal = normalize( mix( normal, nonPerturbedNormal, lfPuddle ) );\n#endif\n');
+    s.fragmentShader = s.fragmentShader.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nfloat lfPuddle = 0.0;\nfloat lfPuddleK = 0.0;\n' + FRAG_GRIME + FRAG_WET);
+    s.fragmentShader = s.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+#ifdef LF_WET
+normal = normalize( mix( normal, nonPerturbedNormal, lfPuddle ) );
+if ( lfPuddle > 0.02 && lfRain > 0.0 ) {
+  vec2 rp = lfRipple( vLfW.xz, lfTime ) * 0.5 * lfPuddle * lfRain;
+  normal = normalize( normal + ( viewMatrix * vec4( rp.x, 0.0, rp.y, 0.0 ) ).xyz );
+}
+#endif
+`);
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + FRAG_LIGHT);
   };
-  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}`;
+  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}`;
   return m;
 }

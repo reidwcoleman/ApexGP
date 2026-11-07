@@ -148,6 +148,20 @@ export class Match {
       s.crouch = b.crouch;
       s.lean = b.lean;
       s.w = WEAPON_LIST.indexOf(b.weapon);
+      // people have shoulders: nobody stands inside anybody
+      for (const p2 of this.players) {
+        if (p2.slot === b.slot || !p2.alive) continue;
+        const o = this.bodies[p2.slot];
+        const ex = b.m.x - o.x, ez = b.m.z - o.z, d2 = ex * ex + ez * ez;
+        if (d2 < 0.3 && d2 > 1e-5 && Math.abs(b.m.y - o.y) < 1.4) {
+          const d = Math.sqrt(d2), push = (0.55 - d) * Math.min(1, dt * 9);
+          const nx = b.m.x + (ex / d) * push, nz = b.m.z + (ez / d) * push;
+          if (!this.world.blocked(nx, b.m.y + 0.02, nz, 0.27, 1.7)) {
+            b.m.x = nx;
+            b.m.z = nz;
+          }
+        }
+      }
       s.flags = F.alive | (b.crouch ? F.crouch : 0) | (b.ads ? F.ads : 0) | (b.light ? F.light : 0) | (b.reload > 0 ? F.reload : 0) | (Math.hypot(b.m.vx, b.m.vz) > 0.3 ? F.moving : 0) | (Math.hypot(b.m.vx, b.m.vz) > 4.2 ? F.sprint : 0);
     }
     const now = performance.now() / 1000;
@@ -174,6 +188,20 @@ export class Match {
   private blast(n: { id: number; s: number; kind: NadeKind; x: number; y: number; z: number }) {
     this.emit({ t: 'boom', id: n.id, kind: n.kind, p: [n.x, n.y, n.z] });
     this.noise({ x: n.x, y: n.y, z: n.z }, 90);
+    // the shock takes out nearby glass and throws doors open, flash or frag
+    const reach = n.kind === 'frag' ? 7.5 : 3.5;
+    this.panes.forEach((p, i) => {
+      if (p.broken) return;
+      const c = p.mesh.position;
+      if (Math.hypot(c.x - n.x, c.y - n.y, c.z - n.z) < reach) this.emit({ t: 'pane', i, at: [n.x, n.y, n.z] });
+    });
+    if (n.kind === 'frag') for (const d of this.doors) {
+      const c = d.centre;
+      const dist = Math.hypot(c.x - n.x, c.y - n.y, c.z - n.z);
+      if (dist > 5.2) continue;
+      const side = d.alongX ? Math.sign(c.z - n.z) : Math.sign(c.x - n.x);
+      this.emit({ t: 'door', i: d.id, open: 1, dir: side || 1, blast: 1 - dist / 5.2 });
+    }
     if (n.kind !== 'frag') return;
     for (const p of this.players) {
       if (!p.alive) continue;
@@ -294,8 +322,7 @@ export class Match {
     const d = this.doors[i];
     if (!d || this.doorCool[i] > 0) return;
     this.doorCool[i] = 0.55;
-    const a = (d as unknown as { d: { axis: string } }).d.axis === 'x';
-    const side = a ? Math.sign(from[2] - d.centre.z) : Math.sign(from[0] - d.centre.x);
+    const side = d.alongX ? Math.sign(from[2] - d.centre.z) : Math.sign(from[0] - d.centre.x);
     const dir = -(side || 1);
     this.setDoor(i, d.want > 0 ? 0 : 1, dir);
   }
@@ -361,7 +388,7 @@ export class Match {
         this.useDoor(r.i, r.from);
         break;
       case 'pane':
-        this.emit({ t: 'pane', i: r.i });
+        this.emit({ t: 'pane', i: r.i, at: r.at });
         break;
       case 'nade': {
         const id = this.nadeId++;
@@ -391,7 +418,7 @@ export class Match {
       const cp = Math.cos(pitch);
       trace(this.world, bodies, ox, oy, oz, -Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp, spec, b.slot, out);
     }
-    for (const i of out.panes) this.emit({ t: 'pane', i });
+    out.panes.forEach((i, n) => this.emit({ t: 'pane', i, at: out.paneAt?.[n] }));
     this.emit({ t: 'shot', s: b.slot, w, o: [ox, oy, oz], e: out.e, surf: out.surf });
     this.noise({ x: ox, y: oy, z: oz }, spec.loud);
     for (const h of out.hits) {

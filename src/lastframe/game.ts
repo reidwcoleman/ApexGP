@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import type { PeopleKit } from '../people/Humans.ts';
 import { Planar, Post } from './post.ts';
-import { loadVolume, loadWorld, type Loaded } from './world.ts';
-import { LF } from './lighting.ts';
-import { Fx } from './fx.ts';
+import { loadVolume, loadWorld, type Door, type Loaded, type MapData } from './world.ts';
+import { slabGap } from './collide.ts';
+import { Phys } from './physics.ts';
+import { LF, applyLF } from './lighting.ts';
+import { AIR, Fx } from './fx.ts';
 import { Sound } from './audio.ts';
 import { Nav } from './nav.ts';
 import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
-import { Soldier, angleDiff, loadGuns, preparePeople, ragWorld } from './soldier.ts';
+import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { F, STRIDE, WEAPONS, WEAPON_LIST, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
@@ -51,6 +53,7 @@ export class Game {
   L!: Loaded;
   kit!: PeopleKit;
   fx!: Fx;
+  phys!: Phys;
   nav!: Nav;
   input: Input;
   me = new LocalPlayer();
@@ -82,8 +85,8 @@ export class Game {
   private whiteout = 0;
   private hurt = 0;
   private nades: (NadeSim & { id: number; kind: NadeKind; mesh: THREE.Mesh; left: number })[] = [];
-  private nadeGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.1, 10);
-  private nadeMat = new THREE.MeshStandardMaterial({ color: 0x2a3026, roughness: 0.6 });
+  private nadeGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.1, 12);
+  private nadeMat = applyLF(new THREE.MeshStandardMaterial({ color: 0x3a4036, roughness: 0.5, metalness: 0.4 }));
   private attract = 0;
   private scale = 1;
   private fpsAcc = 0;
@@ -94,6 +97,11 @@ export class Game {
   private spectT = 0;
   private pending: { p: [number, number, number]; yaw: number; primary: WeaponId } | null = null;
   private lastPos = new Map<number, THREE.Vector3>();
+  looseGroup: THREE.Group | null = null;
+  private doorHoles: THREE.Object3D[] = [];
+  private lampT = 0;
+  private liteK = 0;
+  private wet = 1;
   quality = 1;
   holdZone = 0;
 
@@ -124,14 +132,17 @@ export class Game {
     this.scene.add(this.flashPoint);
   }
 
+  /** test tools: hold the camera somewhere else for a look */
+  camHold: number[] | null = null;
   /** test tools drive the game without pointer lock */
   autoInput = false;
 
   async load(progress: (f: number, what: string) => void) {
     await loadVolume();
-    const [L, kit] = await Promise.all([loadWorld(this.r, progress), preparePeople(), loadGuns()]);
+    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear()]);
     this.L = L;
-    ragWorld.w = L.world;
+    this.phys = phys;
+    this.buildPhysics();
     this.kit = kit as PeopleKit;
     this.scene.add(L.group);
     L.group.traverse((o) => {
@@ -142,10 +153,12 @@ export class Game {
       }
     });
     const roofs: THREE.Vector4[] = L.map.zones.map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
-    this.fx = new Fx(roofs);
+    this.fx = new Fx(roofs, phys, L.glassMat);
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
-    this.fx.onShellTink = (x, y, z) => this.sound.tink(this.tmp.set(x, y, z));
+    this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
+    this.post.airScene = this.fx.air;
+    this.post.airScale = (s) => this.fx.setScale(s);
     progress(0.95, 'Paths');
     const seeds = [...L.map.spawns.a, ...L.map.spawns.b, ...L.map.spawns.ffa];
     this.nav = new Nav(L.world, seeds, (x, y, z) => this.zone(x, y, z) !== 'street');
@@ -155,6 +168,36 @@ export class Game {
     progress(1, 'Ready');
     this.attract = 0.001;
     requestAnimationFrame(this.loop);
+  }
+
+  private buildPhysics() {
+    const { L, phys } = this;
+    phys.addMap(L.map);
+    for (const d of L.doors) {
+      phys.addDoor(d);
+      d.onThud = (door, v) => this.sound.impact(door.leafCentre, v > 2 ? 'wood' : 'wood');
+    }
+    for (const p of L.panes) phys.addPane(p.id, p.box.min, p.box.max);
+    const group = new THREE.Group();
+    this.scene.add(group);
+    this.looseGroup = group;
+    for (const q of L.loose) {
+      group.add(q.obj);
+      phys.addLoose(q.obj, q.def, q.x, q.y, q.z, q.rot);
+    }
+    phys.onKnock = (x, y, z, surf, v) => {
+      const p = this.tmp.set(x, y, z);
+      if (p.distanceToSquared(this.cam.position) > 900) return;
+      if (surf === 'brass' || surf === 'shard') this.sound.tink(p);
+      else this.sound.impact(p, surf === 'metal' ? 'metal' : surf === 'flesh' ? 'flesh' : 'wood');
+      void v;
+    };
+  }
+
+  /** the light capture only wants the architecture */
+  hideLoose() {
+    if (this.looseGroup) this.looseGroup.visible = false;
+    this.fx.group.visible = false;
   }
 
   /** first-use shaders stall a frame for seconds: pay for them behind the loader */
@@ -181,7 +224,6 @@ export class Game {
     const w = innerWidth, h = innerHeight;
     const dpr = Math.min(devicePixelRatio || 1, 1.5);
     const k = Math.min(1, 1600 / (w * dpr)) * dpr * this.scale * this.quality;
-    this.post.msaa = this.scale >= 0.95 ? 2 : 0;
     this.r.setSize(w, h, false);
     this.r.domElement.style.width = '100%';
     this.r.domElement.style.height = '100%';
@@ -304,7 +346,10 @@ export class Game {
       p.broken = false;
       p.box.off = false;
       p.mesh.visible = true;
+      p.mend();
     }
+    this.phys.resetPanes();
+    this.phys.resetLoose();
     if (this.role !== 'guest') {
       this.match = new Match(cfg, this.L.world, this.L.map, this.L.doors, this.L.panes, this.nav, (e) => {
         this.onEv(e);
@@ -452,6 +497,7 @@ export class Game {
       case 'hit': {
         const a = this.actors.get(e.s);
         if (a) a.info.hp = e.hp;
+        if (a?.soldier && e.s !== this.mySlot) a.soldier.flinch(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]));
         if (e.s === this.mySlot) {
           this.hurt = Math.min(1, this.hurt + 0.42 + e.dmg / 90);
           this.me.hurt(e.dir);
@@ -469,8 +515,20 @@ export class Game {
         const d = new THREE.Vector3(...e.dir);
         const s = a.soldier;
         if (s) {
-          s.kill(d);
-          this.fx.blood(a.x, a.y + 1.2, a.z, d.x, d.y, d.z);
+          // the body keeps what it was doing, plus what the round brought
+          const running = new THREE.Vector3(-Math.sin(a.moveYaw), 0, -Math.cos(a.moveYaw)).multiplyScalar(a.speed);
+          if (e.s === this.mySlot) running.set(this.me.m.vx, this.me.m.vy, this.me.m.vz);
+          const spec = e.w >= 0 ? WEAPONS[WEAPON_LIST[e.w]] : null;
+          const shove = spec ? spec.shove * (spec.pellets > 1 ? 9 : 1) * (e.dist < 6 ? 1.5 : 1) * 3 : 60;
+          s.kill(this.phys, running, e.zone, d, shove);
+          const y = e.zone === 0 ? 1.62 : e.zone === 2 ? 0.7 : 1.2;
+          // what the round carries past lands on whatever is behind them
+          const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2);
+          this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined);
+          window.setTimeout(() => {
+            if (a.deadAt < 0 || !s.head) return;
+            this.fx.pool(s.head.x, this.L.world.floorAt(s.head.x, s.head.y + 0.4, s.head.z, 0.1), s.head.z);
+          }, 1800);
         }
         const by = this.actors.get(e.by);
         this.hud.feed(by?.info.name ?? '?', a.info.name, e.w, e.zone, by?.info.team ?? 2, a.info.team, e.by === this.mySlot || e.s === this.mySlot);
@@ -493,7 +551,8 @@ export class Game {
         const d = this.L.doors[e.i];
         if (d) {
           const was = d.want > 0;
-          d.toggle(null, e.open ? e.dir : 0);
+          if (e.blast !== undefined) d.blown(e.dir, e.blast);
+          else d.toggle(null, e.open ? e.dir : 0);
           if (was !== e.open > 0) this.sound.door(d.centre, e.open > 0);
         }
         break;
@@ -504,8 +563,14 @@ export class Game {
           p.broken = true;
           p.box.off = true;
           p.mesh.visible = false;
+          p.breakTeeth(this.L.glassMat);
+          this.phys.breakPane(p.id);
           const c = p.mesh.position;
-          this.fx.impact(c.x, c.y, c.z, 0, 0, 0, 'glass');
+          const at = e.at ? new THREE.Vector3(...e.at) : c.clone();
+          // it goes the way the round or the blast was going
+          const push = at.clone().sub(this.cam.position).setY(0).normalize();
+          if (e.at && at.distanceTo(c) > 1.6) push.copy(c).sub(at).setY(0).normalize().multiplyScalar(2.4);
+          this.fx.shatter(p.mesh, at, push);
           this.sound.impact(c, 'glass');
         }
         break;
@@ -523,10 +588,14 @@ export class Game {
           this.nades.splice(i, 1);
         }
         const p = new THREE.Vector3(...e.p);
-        this.fx.burst(p, e.kind);
+        const inside = this.zone(p.x, p.y, p.z) !== 'street';
+        this.fx.burst(p, e.kind, inside);
         this.sound.boom(p, e.kind === 'flash');
         this.muzzleLight(p, 30);
         const d = this.cam.position.distanceTo(p);
+        const sees = (x: number, y: number, z: number) => this.L.world.sees({ x: p.x, y: p.y + 0.15, z: p.z }, { x, y, z });
+        this.phys.blast(p, e.kind === 'frag' ? 120 : 18, e.kind === 'frag' ? 9 : 4, sees);
+        if (this.me.alive) this.me.shake(THREE.MathUtils.clamp((e.kind === 'frag' ? 1.2 : 0.5) * (1 - d / 26), 0, 1));
         if (this.me.alive) {
           const sees = this.L.world.sees(this.cam.position, p.clone().setY(p.y + 0.2));
           if (e.kind === 'flash' && d < 22 && sees) {
@@ -557,14 +626,62 @@ export class Game {
   }
 
   private landShots(e: Extract<Ev, { t: 'shot' }>, sounds: boolean) {
+    const spec = WEAPONS[WEAPON_LIST[e.w]];
+    const shove = spec.shove;
     for (let i = 0; i < e.surf.length; i++) {
       const o = i * 6;
       const s = e.surf[i];
       if (!s) continue;
-      this.fx.impact(e.e[o], e.e[o + 1], e.e[o + 2], e.e[o + 3], e.e[o + 4], e.e[o + 5], s);
-      if (s === 'flesh') this.fx.blood(e.e[o], e.e[o + 1], e.e[o + 2], -e.e[o + 3], -e.e[o + 4], -e.e[o + 5]);
-      if (i === e.surf.length - 1 || sounds) this.sound.impact(this.tmp.set(e.e[o], e.e[o + 1], e.e[o + 2]), s);
+      const x = e.e[o], y = e.e[o + 1], z = e.e[o + 2], nx = e.e[o + 3], ny = e.e[o + 4], nz = e.e[o + 5];
+      // ~ is a skip: sparks, a whine, and the next point is where it went
+      const skip = s[0] === '~';
+      const surf = skip ? s.slice(1) : s;
+      if (skip) {
+        this.fx.skip(x, y, z, nx, ny, nz);
+        this.fx.tracerLine(this.tmp.set(x, y, z), e.e[o + 6], e.e[o + 7], e.e[o + 8]);
+        this.sound.ricochet(this.tmp.set(x, y, z));
+      }
+      // the far side of a wall: the normal runs with the round
+      const out = i > 0 && e.surf[i - 1] === s && Math.abs(e.e[o - 6] - x) + Math.abs(e.e[o - 4] - z) < 1.8 && nx * e.e[o - 3] + ny * e.e[o - 2] + nz * e.e[o - 1] < -0.1;
+      this.fx.impact(x, y, z, nx, ny, nz, surf, out);
+      if (surf === 'flesh') this.fx.blood(x, y, z, -nx, -ny, -nz);
+      if (i === e.surf.length - 1 || sounds) this.sound.impact(this.tmp.set(x, y, z), surf);
+      if (surf === 'wood') this.doorHit(x, y, z, nx, nz, shove);
     }
+    // whatever isn't bolted down and lies along the line gets the round's push
+    const O = e.o;
+    for (let i = 0; i < e.surf.length; i++) {
+      const o = i * 6;
+      const dx = e.e[o] - O[0], dy = e.e[o + 1] - O[1], dz = e.e[o + 2] - O[2], d = Math.hypot(dx, dy, dz) || 1;
+      if (d > 120) continue;
+      const hit = this.phys.shot(O[0], O[1], O[2], dx / d, dy / d, dz / d, d, shove * 2.2);
+      if (hit) {
+        this.fx.impact(hit.x, hit.y, hit.z, -dx / d, -dy / d, -dz / d, hit.surf === 'flesh' ? 'flesh' : hit.surf);
+        this.sound.impact(this.tmp.set(hit.x, hit.y, hit.z), hit.surf === 'metal' ? 'metal' : hit.surf === 'flesh' ? 'flesh' : 'wood');
+        if (hit.surf === 'flesh') this.fx.blood(hit.x, hit.y, hit.z, dx / d, dy / d, dz / d);
+      }
+    }
+  }
+
+  /** a hole in a door stays in the door */
+  private doorHit(x: number, y: number, z: number, nx: number, nz: number, shove: number) {
+    for (const d of this.L.doors) {
+      const b = d.box;
+      if (x < b.min[0] - 0.1 || x > b.max[0] + 0.1 || z < b.min[2] - 0.1 || z > b.max[2] + 0.1 || y < b.min[1] || y > b.max[1]) continue;
+      if (Math.abs(slabGap(b, x, z).d) > 0.05) continue;
+      d.shot(-nx, -nz, shove * 0.09);
+      this.holeIn(d, x, y, z, nx, nz);
+      return;
+    }
+  }
+
+  private holeIn(d: Door, x: number, y: number, z: number, nx: number, nz: number) {
+    const m = this.fx.holeMesh('wood');
+    m.position.set(x + nx * 0.008, y, z + nz * 0.008);
+    m.lookAt(x + nx, y, z + nz);
+    d.pivot.attach(m);
+    this.doorHoles.push(m);
+    if (this.doorHoles.length > 40) this.doorHoles.shift()!.removeFromParent();
   }
 
   muzzleLight(p: THREE.Vector3, k = 7) {
@@ -615,14 +732,14 @@ export class Game {
   }
 
   private ctx: PlayerCtx = {
-    world: null as never, sound: this.sound, fx: null as never, doors: [],
+    world: null as never, sound: this.sound, fx: null as never, doors: [], phys: null as never, scene: this.scene,
     bodies: () => this.bodies(),
     surfaceAt: (x, y, z) => this.surfaceAt(x, y, z),
     send: {
       shot: (w, o, e, surf) => this.req({ t: 'shot', w, o, e, surf }),
       hit: (to, dmg, zone, w, dir, dist) => this.req({ t: 'hit', to, dmg, zone, w, dir, dist }),
       door: (i, from) => this.req({ t: 'door', i, from }),
-      pane: (i) => this.req({ t: 'pane', i }),
+      pane: (i, at) => this.req({ t: 'pane', i, at }),
       nade: (kind, o, v, fuse) => this.req({ t: 'nade', kind, o, v, fuse }),
     },
     muzzleLight: (p) => this.muzzleLight(p),
@@ -658,6 +775,10 @@ export class Game {
     const was = this.scale;
     if (fps < 50) this.scale = Math.max(0.55, this.scale * Math.max(0.82, Math.sqrt(fps / 58)));
     else if (fps > 59 && this.scale < 1) this.scale = Math.min(1, this.scale * 1.05);
+    // down to the floor and still behind: the air and the occlusion go, the reflections with them
+    if (this.scale <= 0.56 && fps < 44) this.liteK++;
+    else if (fps > 56 && this.liteK > 0) this.liteK--;
+    this.post.lite = this.liteK >= 2 || this.quality < 0.75;
     if (Math.abs(was - this.scale) > 0.02) this.resize();
   }
 
@@ -666,6 +787,7 @@ export class Game {
     this.ctx.world = L.world;
     this.ctx.fx = this.fx;
     this.ctx.doors = L.doors;
+    this.ctx.phys = this.phys;
     LF.time.value = this.time;
     this.clock -= dt;
     for (const d of L.doors) d.update(dt);
@@ -706,6 +828,40 @@ export class Game {
       }
       this.moveActor(a, s, dt, now);
     }
+    // people have shoulders, and the things they walk through are moved by them
+    if (this.inMatch && me.alive) for (const [s, a] of this.actors) {
+      if (s === this.mySlot || !a.info.alive) continue;
+      const dx = me.m.x - a.x, dz = me.m.z - a.z, d2 = dx * dx + dz * dz;
+      if (d2 < 0.3 && d2 > 1e-5 && Math.abs(me.m.y - a.y) < 1.5) {
+        const d = Math.sqrt(d2), push = (0.55 - d) * Math.min(1, dt * 14);
+        const nx = me.m.x + (dx / d) * push, nz = me.m.z + (dz / d) * push;
+        if (!L.world.blocked(nx, me.m.y + 0.02, nz, 0.26, 1.7)) {
+          me.m.x = nx;
+          me.m.z = nz;
+        }
+      }
+    }
+    let cap = 0;
+    const post = this.post;
+    for (const [s, a] of this.actors) {
+      const body = s === this.mySlot && me.alive ? me.m : a;
+      const alive = a.info.alive;
+      if (a.y > -20) this.phys.setActor(s, body.x, body.y, body.z, 1.7, alive);
+      if (cap >= post.capA.length || !a.soldier?.root.visible) continue;
+      const crouch = (a.flags & F.crouch) !== 0;
+      const dead = !alive && a.soldier.dead >= 0;
+      if (dead) {
+        const h = a.soldier.head;
+        const y = L.world.floorAt(h.x, h.y + 0.3, h.z, 0.1);
+        post.capA[cap].set(h.x, y + 0.14, h.z, 0.26);
+        post.capB[cap++].set(h.x, y + 0.2, h.z, 0);
+      } else if (alive) {
+        post.capA[cap].set(body.x, body.y + 0.14, body.z, 0.19);
+        post.capB[cap++].set(body.x, body.y + (crouch ? 1.1 : 1.58), body.z, 0);
+      }
+    }
+    post.capN = cap;
+    this.phys.step(dt);
     this.lights(dt);
     this.fxNades(dt);
     this.fx.update(dt, this.time, this.cam, this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) !== 'street');
@@ -723,15 +879,40 @@ export class Game {
     u.whiteout.value = Math.min(1.4, this.whiteout);
     u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 : 0.35));
     u.fish.value = THREE.MathUtils.lerp(0.85, 0.3, me.alive ? me.adsK : 0);
+    const outside = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street';
+    this.wet += ((outside ? 1 : 0) - this.wet) * Math.min(1, dt * (outside ? 0.5 : 0.8));
+    u.lensWet.value = this.wet;
+    LF.rain.value = outside ? 1 : 0.6;
+    this.post.density += ((outside ? 0.0065 : 0.0095) - this.post.density) * Math.min(1, dt * 2);
     if (this.dead >= 0) {
       u.glitch.value = this.dead > 2.0 ? Math.min(1, (this.dead - 2.0) * 1.8) : 0;
     } else u.glitch.value = 0;
     this.hud.update(dt);
+    if (this.camHold) {
+      this.cam.position.set(this.camHold[0], this.camHold[1], this.camHold[2]);
+      this.cam.rotation.set(this.camHold[4], this.camHold[3], 0, 'YXZ');
+      if (this.cam.fov !== 50) {
+        this.cam.fov = 50;
+        this.cam.updateProjectionMatrix();
+      }
+      this.cam.updateMatrixWorld();
+    }
     if (!this.frozen) {
-      const out = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
-      this.planar.render(this.scene, this.cam, this.mySoldier ? [this.fx.group, this.mySoldier.root] : [this.fx.group], out);
+      const out = !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
+      this.planar.render(this.scene, this.cam, this.planarHide(), out);
       this.post.render(this.scene, this.cam, dt, this.time);
     }
+  }
+
+  private hideList: THREE.Object3D[] = [];
+  /** the street can't see indoors, and the wearer's own arms don't reflect */
+  private planarHide() {
+    const h = this.hideList;
+    h.length = 0;
+    h.push(this.fx.group);
+    if (this.mySoldier) h.push(this.mySoldier.root);
+    for (const o of this.L.indoors) h.push(o);
+    return h;
   }
 
   private moveActor(a: Actor, s: number, dt: number, now: number) {
@@ -783,9 +964,42 @@ export class Game {
     }
   }
 
+  /** the bake has no glints: the nearest lamps the camera can see lend theirs to the shader */
+  private lamps(dt: number) {
+    this.lampT -= dt;
+    if (this.lampT > 0) return;
+    this.lampT = 0.2;
+    const c = this.cam.position;
+    const near: [number, MapData['lights'][number]][] = [];
+    for (const l of this.L.map.lights) {
+      const d = Math.hypot(l.pos[0] - c.x, l.pos[1] - c.y, l.pos[2] - c.z);
+      if (d < 48) near.push([d, l]);
+    }
+    near.sort((a, b) => a[0] - b[0]);
+    let n = 0;
+    for (const [d, l] of near) {
+      if (n >= 6) break;
+      if (d > 3 && !this.L.world.sees(c, { x: l.pos[0], y: l.pos[1] - 0.25, z: l.pos[2] })) continue;
+      const big = l.kind === 'spot';
+      LF.lampP.value[n].set(l.pos[0], l.pos[1], l.pos[2], big ? 26 : 11);
+      const p = (big ? Math.min(l.power, 800) / 800 * 90 : l.power * 1.1) ;
+      LF.lampC.value[n].set(l.color[0] * p, l.color[1] * p, l.color[2] * p);
+      n++;
+    }
+    for (; n < 6; n++) LF.lampP.value[n].w = 0;
+  }
+
   private lights(dt: number) {
     const me = this.me;
     const s = this.spot;
+    this.lamps(dt);
+    // the air sees the same flashlight and the same flash
+    if (me.alive && me.light) {
+      AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.09);
+      AIR.beamD.value.copy(me.barrel);
+    } else AIR.beamP.value.w = 0;
+    const fp = this.flashPoint.position;
+    AIR.spark.value.set(fp.x, fp.y, fp.z, this.flashK * 0.022);
     if (me.alive && me.light) {
       const hit = this.L.world.ray(me.lightPos.x, me.lightPos.y, me.lightPos.z, me.barrel.x, me.barrel.y, me.barrel.z, 7);
       const wantI = 30 * Math.min(1, Math.pow((hit ? hit.t : 7) / 5, 1.25) + 0.05);
@@ -812,7 +1026,7 @@ export class Game {
       o.position.set(a.x + f.x * 0.5, a.y + ((a.flags & F.crouch) ? 0.95 : 1.42), a.z + f.z * 0.5);
       o.target.position.copy(o.position).addScaledVector(f, 5);
     });
-    this.flashPoint.intensity = this.flashK * 12;
+    this.flashPoint.intensity = this.flashK * 6;
     this.flashK = Math.max(0, this.flashK - dt * 110);
   }
 
@@ -820,8 +1034,13 @@ export class Game {
     for (const n of this.nades) {
       const v = stepNade(this.L.world, n, dt);
       if (v > 1.1) this.sound.tink(this.tmp.set(n.x, n.y, n.z));
-      n.mesh.position.set(n.x, n.y, n.z);
-      n.mesh.rotation.x += dt * 9 * (n.rest ? 0 : 1);
+      n.mesh.position.set(n.x, n.y + 0.012, n.z);
+      // it spins as fast as it travels, and lies on its side when it stops
+      const sp = Math.hypot(n.vx, n.vz);
+      if (!n.rest) {
+        n.mesh.rotation.x += dt * (6 + sp * 3);
+        n.mesh.rotation.y = Math.atan2(n.vx, n.vz);
+      } else n.mesh.rotation.x += (Math.PI / 2 - (n.mesh.rotation.x % Math.PI)) * Math.min(1, dt * 14);
       n.left -= dt;
     }
   }

@@ -1,15 +1,216 @@
 import * as THREE from 'three';
 import { LF } from './lighting.ts';
+import { AIR } from './fx.ts';
 
 /**
- * The camera on the vest: a wide cheap lens on a small sensor. HDR scene -> shutter blur -> bloom ->
- * slow auto exposure -> one composite that bends the picture through a fisheye, fringes its edges,
- * grades it hard, then adds what a recording does to it: sharpening, grain, compression.
+ * The camera on the vest: a wide cheap lens on a small sensor.
+ *
+ * The scene is drawn once, with a sub-pixel jitter. Three small layers come from its depth: occlusion at
+ * half size (the corners the bake is too coarse for, and the ground under a person's feet), the air at
+ * quarter size (a short march through the light volume, so fog lights up round a lamp and the flashlight
+ * has a beam) and smoke, dust and rain at half size. One resolve puts those on the picture and blends it
+ * with the last frames, which is the anti-aliasing. Then shutter blur, bloom, slow auto exposure, and a
+ * composite that bends it through a fisheye, fringes the edges, grades it hard, and adds what a recording
+ * does: sharpening, grain, compression, and in the rain, water on the lens.
  */
 
 const VS = /* glsl */ `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }
+`;
+
+const DEPTH = /* glsl */ `
+uniform sampler2D tDepth;
+uniform vec2 nf;
+uniform vec2 pInv;
+float lin( float d ) { return nf.x * nf.y / ( nf.y - d * ( nf.y - nf.x ) ); }
+vec3 viewAt( vec2 uv ) {
+  float z = lin( texture2D( tDepth, uv ).r );
+  return vec3( ( uv * 2.0 - 1.0 ) * pInv * z, -z );
+}
+float ign( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) ); }
+`;
+
+/** ambient occlusion in the depth, and the soft dark under each body, which is no part of any bake */
+const AO_MAX = 14;
+const AO = /* glsl */ `
+varying vec2 vUv;
+${DEPTH}
+uniform vec2 px;
+uniform float frame;
+uniform mat4 camW;
+uniform vec4 capA[${AO_MAX}];
+uniform vec4 capB[${AO_MAX}];
+uniform int capN;
+void main() {
+  float d0 = texture2D( tDepth, vUv ).r;
+  vec3 P = viewAt( vUv );
+  float z = -P.z;
+  if ( d0 >= 1.0 || z < 0.85 ) { gl_FragColor = vec4( 1.0 ); return; }
+  vec3 l = viewAt( vUv - vec2( px.x, 0.0 ) ), r = viewAt( vUv + vec2( px.x, 0.0 ) ), b = viewAt( vUv - vec2( 0.0, px.y ) ), t = viewAt( vUv + vec2( 0.0, px.y ) );
+  vec3 dx = abs( l.z - P.z ) < abs( r.z - P.z ) ? P - l : r - P;
+  vec3 dy = abs( b.z - P.z ) < abs( t.z - P.z ) ? P - b : t - P;
+  vec3 N = normalize( cross( dx, dy ) );
+  float R = 0.62;
+  float rad = min( 0.12, R / ( z * pInv.y * 2.0 ) );
+  float n = ign( gl_FragCoord.xy + frame * 5.588238 ) * 6.2832;
+  float occ = 0.0;
+  for ( int i = 0; i < 8; i++ ) {
+    float fi = ( float( i ) + 0.5 ) / 8.0;
+    float a = n + fi * 15.5;
+    vec2 o = vec2( cos( a ), sin( a ) ) * rad * sqrt( fi );
+    o.x *= pInv.y / pInv.x;
+    vec3 v = viewAt( vUv + o ) - P;
+    float d2 = dot( v, v );
+    float w = 1.0 - smoothstep( 0.2 * R * R, R * R * 1.4, d2 );
+    occ += max( 0.0, dot( N, v ) * inversesqrt( d2 + 1e-4 ) - 0.1 ) * w;
+  }
+  float ao = 1.0 - clamp( occ / 8.0 * 2.5, 0.0, 0.85 );
+  // bodies
+  vec3 W = ( camW * vec4( P, 1.0 ) ).xyz;
+  vec3 Nw = normalize( mat3( camW ) * N );
+  for ( int i = 0; i < ${AO_MAX}; i++ ) {
+    if ( i >= capN ) break;
+    vec3 A = capA[i].xyz, B = capB[i].xyz;
+    float rr = capA[i].w;
+    vec3 ab = B - A;
+    float h = clamp( dot( W - A, ab ) / dot( ab, ab ), 0.0, 1.0 );
+    vec3 q = W - ( A + ab * h );
+    float dist = length( q );
+    if ( dist < 0.02 + rr * 0.8 && Nw.y < 0.5 ) continue;
+    float o = clamp( ( rr * rr * 2.0 ) / ( dist * dist + 1e-3 ), 0.0, 1.0 ) * ( 0.55 - 0.45 * dot( Nw, q / ( dist + 1e-4 ) ) );
+    // from above: the patch of ground it keeps the lamp off
+    float flat2 = length( ( W - A ).xz );
+    float up = clamp( Nw.y, 0.0, 1.0 ) * smoothstep( rr * 3.8, rr * 0.7, flat2 ) * smoothstep( 1.3, 0.0, abs( W.y - A.y ) );
+    ao *= 1.0 - clamp( max( o * 0.75, up * 0.72 ), 0.0, 0.85 );
+  }
+  gl_FragColor = vec4( ao, ao, ao, 1.0 );
+}
+`;
+
+/** a small blur that stops at edges */
+const AOBLUR = /* glsl */ `
+varying vec2 vUv;
+${DEPTH}
+uniform sampler2D tAO;
+uniform vec2 px;
+void main() {
+  float z0 = lin( texture2D( tDepth, vUv ).r );
+  float s = 0.0, w = 0.0;
+  for ( int j = -1; j <= 1; j++ ) for ( int i = -1; i <= 1; i++ ) {
+    vec2 uv = vUv + vec2( float( i ), float( j ) ) * px * 1.5;
+    float k = exp( -abs( lin( texture2D( tDepth, uv ).r ) - z0 ) * 7.0 / ( 0.3 + z0 * 0.06 ) ) + 1e-4;
+    s += texture2D( tAO, uv ).r * k;
+    w += k;
+  }
+  gl_FragColor = vec4( vec3( s / w ), 1.0 );
+}
+`;
+
+/** the air: in-scattered light on the way to each pixel, and how much of the pixel still gets through */
+const FOG = /* glsl */ `
+varying vec2 vUv;
+${DEPTH}
+uniform highp sampler3D tVol;
+uniform vec3 volMin;
+uniform vec3 volInv;
+uniform vec2 lmK;
+uniform mat4 camW;
+uniform float frame;
+uniform float time;
+uniform float density;
+uniform vec4 spark;
+uniform vec4 beamP;
+uniform vec3 beamD;
+void main() {
+  vec3 P = viewAt( vUv );
+  float dist = length( P );
+  vec3 o = camW[3].xyz;
+  vec3 dir = mat3( camW ) * ( P / dist );
+  // the gun is on the lens's side of all this: march on past it, so its outline doesn't stamp the fog
+  float maxT = min( dist < 1.2 ? 6.0 : dist, 60.0 );
+  float jit = ign( gl_FragCoord.xy );
+  vec3 acc = vec3( 0.0 );
+  float T = 1.0;
+  float prev = 0.0;
+  for ( int i = 0; i < 10; i++ ) {
+    float f = ( float( i ) + jit ) / 10.0;
+    float t = f * f * maxT;
+    float ds = t - prev;
+    prev = t;
+    vec3 p = o + dir * t;
+    vec3 e = texture( tVol, ( p - volMin ) * volInv ).rgb;
+    vec3 L = ( exp2( e * lmK.x ) - 1.0 ) / lmK.y;
+    float wisp = 0.72 + 0.28 * sin( p.x * 0.31 + time * 0.13 ) * sin( p.z * 0.27 - time * 0.09 + p.y * 0.4 );
+    float rho = density * wisp * ( 0.45 + 0.55 * exp( -max( p.y, 0.0 ) * 0.16 ) );
+    // the beam and any flash
+    vec3 b = p - beamP.xyz;
+    float bl = length( b ) + 1e-3;
+    float cone = smoothstep( 0.82, 0.93, dot( b / bl, beamD ) );
+    L += vec3( 1.0, 0.93, 0.82 ) * beamP.w * cone / ( bl * bl + 2.0 ) * 0.14;
+    vec3 sd = p - spark.xyz;
+    L += vec3( 1.0, 0.68, 0.38 ) * spark.w / ( dot( sd, sd ) + 0.6 );
+    acc += T * L * rho * ds;
+    T *= exp( -rho * ds );
+  }
+  gl_FragColor = vec4( acc * 1.3, T );
+}
+`;
+
+const FOGBLUR = /* glsl */ `
+varying vec2 vUv;
+uniform sampler2D tSrc;
+uniform vec2 px;
+void main() {
+  vec4 s = vec4( 0.0 );
+  for ( int j = -1; j <= 2; j++ ) for ( int i = -1; i <= 2; i++ ) s += texture2D( tSrc, vUv + ( vec2( float( i ), float( j ) ) - 0.5 ) * px );
+  gl_FragColor = s / 16.0;
+}
+`;
+
+/** everything onto the picture, blended with what this pixel was last frame */
+const RESOLVE = /* glsl */ `
+varying vec2 vUv;
+${DEPTH}
+uniform sampler2D tSrc;
+uniform sampler2D tHist;
+uniform sampler2D tAO;
+uniform sampler2D tFog;
+uniform sampler2D tAir;
+uniform mat4 reproj;
+uniform vec2 px;
+uniform float cut;
+uniform vec2 jit;
+void main() {
+  vec2 uv = vUv;
+  float z = lin( texture2D( tDepth, uv ).r );
+  float ao = z < 0.85 ? 1.0 : texture2D( tAO, uv ).r;
+  vec4 fog = z < 1.2 ? vec4( 0.0, 0.0, 0.0, 1.0 ) : texture2D( tFog, uv );
+  vec4 air = texture2D( tAir, uv );
+  float A = ao * fog.a * ( 1.0 - air.a );
+  vec3 B = fog.rgb * ( 1.0 - air.a ) + air.rgb;
+  vec2 uc = uv + jit;
+  vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 40.0 ) );
+  vec3 n = min( texture2D( tSrc, uc + vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) ), s = min( texture2D( tSrc, uc - vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) );
+  vec3 e = min( texture2D( tSrc, uc + vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) ), w = min( texture2D( tSrc, uc - vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) );
+  vec3 cur = c * A + B;
+  vec3 mn = min( c, min( min( n, s ), min( e, w ) ) ) * A + B;
+  vec3 mx = max( c, max( max( n, s ), max( e, w ) ) ) * A + B;
+  // the mean and spread are a tighter box than min and max: fewer ghosts behind a moving body
+  vec3 mean = ( c + n + s + e + w ) * 0.2 * A + B;
+  vec3 prev = uv.xyy;
+  vec2 pu = uv;
+  if ( z > 1.1 ) {
+    vec4 q = reproj * vec4( uv * 2.0 - 1.0, texture2D( tDepth, uv ).r * 2.0 - 1.0, 1.0 );
+    pu = q.xy / q.w * 0.5 + 0.5;
+  }
+  vec3 h = texture2D( tHist, pu ).rgb;
+  vec3 box = ( mx - mn ) * 0.5 + 0.002;
+  h = clamp( h, max( mn, mean - box * 1.2 ), min( mx, mean + box * 1.2 ) );
+  float out_ = step( 0.0, pu.x ) * step( pu.x, 1.0 ) * step( 0.0, pu.y ) * step( pu.y, 1.0 );
+  float k = cut > 0.5 ? 1.0 : mix( 1.0, z < 1.1 ? 0.3 : 0.11, out_ );
+  gl_FragColor = vec4( mix( h, cur, k ), 1.0 );
+}
 `;
 
 const DOWN = /* glsl */ `
@@ -63,7 +264,7 @@ void main() {
   }
   float avg = exp2( acc / wsum );
   // a small sensor: it opens slowly into the dark and shuts faster on the light
-  float want = clamp( 0.105 / max( avg, 1e-4 ), 0.4, 5.5 );
+  float want = clamp( 0.115 / max( avg, 1e-4 ), 0.4, 8.5 );
   float prev = texture2D( tPrev, vec2( 0.5 ) ).r;
   float rate = want < prev ? 2.6 : 0.9;
   float e = cut > 0.5 ? want : exp( mix( log( prev ), log( want ), 1.0 - exp( -dt * rate ) ) );
@@ -111,6 +312,7 @@ uniform float hurt;
 uniform float glitch;
 uniform float feedCut;
 uniform float grainK;
+uniform float lensWet;
 
 float hash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
 
@@ -130,9 +332,35 @@ vec3 film( vec3 x ) {
   return clamp( ( x * ( a * x + b ) ) / ( x * ( c * x + d ) + e ), 0.0, 1.0 );
 }
 
+/** beads of water on the housing's glass: a few cells hold one, and it bends what's behind it */
+vec3 droplet( vec2 p, float scale, float t ) {
+  vec2 g = p * scale;
+  vec2 id = floor( g ), f = fract( g ) - 0.5;
+  float r = hash( id );
+  // each bead lands, sits and runs off in its own time
+  float life = fract( t * ( 0.05 + r * 0.06 ) + r * 13.0 );
+  float live = step( 0.86, hash( id + floor( t * ( 0.05 + r * 0.06 ) + r * 13.0 ) * 1.7 ) );
+  vec2 c = ( vec2( hash( id + 3.1 ), hash( id + 7.7 ) ) - 0.5 ) * 0.5;
+  c.y -= smoothstep( 0.72, 1.0, life ) * 0.9;
+  float rad = 0.07 + r * 0.14;
+  vec2 d = f - c;
+  d.y *= 0.84 + r * 0.26;
+  float m = smoothstep( rad, rad * 0.55, length( d ) ) * live * smoothstep( 0.0, 0.03, life );
+  return vec3( d / rad, m );
+}
+
 void main() {
   float aspect = res.x / res.y;
   vec2 uv = vUv;
+  float wetEdge = 0.0;
+  if ( lensWet > 0.0 ) {
+    vec2 q = vec2( uv.x * aspect, uv.y );
+    vec3 a = droplet( q, 9.0, time ), b = droplet( q + 3.7, 19.0, time * 1.3 );
+    float m = max( a.z, b.z * 0.8 ) * lensWet * ( 0.45 + 0.55 * smoothstep( 0.1, 0.62, length( vUv - 0.5 ) ) );
+    vec2 bend = ( a.z > b.z ? a.xy : b.xy ) * m;
+    uv -= bend * vec2( 0.028 / aspect, 0.028 );
+    wetEdge = m;
+  }
   // a torn feed
   if ( glitch > 0.0 ) {
     float band = floor( uv.y * 24.0 + time * 13.0 );
@@ -144,7 +372,7 @@ void main() {
   float rd = sqrt( aspect * aspect + 1.0 );
   float edge = rho / rd;
 
-  float ca = 0.0016 + 0.016 * edge * edge * edge;
+  float ca = 0.0005 + 0.014 * edge * edge * edge;
   vec2 cr = lens( p, rho, 1.0 + ca, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
   vec2 cg = lens( p, rho, 1.0, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
   vec2 cb = lens( p, rho, 1.0 - ca, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
@@ -155,13 +383,13 @@ void main() {
   c = max( c + ( c - soft ) * 0.3, vec3( 0.0 ) );
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
-  vec3 hdr = c + bloom * 0.075 + whiteout * 9.0;
+  vec3 hdr = c + bloom * 0.085 + whiteout * 9.0;
   // macroblocks: the dark parts of a stream fall apart first
   vec2 blk = ( floor( cg * res / 10.0 ) + 0.5 ) * 10.0 / res;
   vec3 bl = texture2D( tBlock, blk ).rgb;
   float lum0 = dot( hdr * expo, vec3( 0.3, 0.6, 0.1 ) );
   float blum = dot( bl * expo, vec3( 0.3, 0.6, 0.1 ) );
-  hdr = mix( hdr, bl, 0.3 * smoothstep( 0.14, 0.0, lum0 ) * smoothstep( 0.2, 0.05, blum ) );
+  hdr = mix( hdr, bl, 0.18 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
   hdr *= expo;
 
   vec3 col = film( hdr * 0.92 );
@@ -176,7 +404,7 @@ void main() {
   vec2 q = abs( p ) / vec2( aspect, 1.0 );
   float corner = length( max( q - vec2( 0.86, 0.8 ), 0.0 ) / vec2( 0.14, 0.2 ) );
   float rim = smoothstep( 0.86, 1.06, corner );
-  col = mix( col, col * vec3( 1.3, 0.92, 0.72 ) + vec3( 0.05, 0.015, 0.0 ) * smoothstep( 0.6, 1.0, corner ), smoothstep( 0.6, 1.0, corner ) * 0.5 );
+  col = mix( col, col * vec3( 1.12, 0.96, 0.86 ), smoothstep( 0.6, 1.0, corner ) * 0.5 );
   col *= 1.0 - rim;
   // hurt: the world drains and the lens darkens
   float hl = dot( col, vec3( 0.3, 0.59, 0.11 ) );
@@ -186,7 +414,7 @@ void main() {
   vec2 gp = floor( gl_FragCoord.xy / 1.5 );
   float g = hash( gp + fract( time ) * 91.7 ) - 0.5;
   float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
-  float gk = mix( 0.038, 0.013, smoothstep( 0.0, 0.42, l ) ) * grainK;
+  float gk = mix( 0.021, 0.011, smoothstep( 0.0, 0.42, l ) ) * grainK;
   col += vec3( g + g2 * 0.15, g, g - g2 * 0.15 ) * gk;
   col = mix( col, vec3( 0.0 ), feedCut );
   col = pow( max( col, 0.0 ), vec3( 1.0 / 2.2 ) );
@@ -206,6 +434,24 @@ export class Post {
   scale = 1;
   scene!: THREE.WebGLRenderTarget;
   private blur!: THREE.WebGLRenderTarget;
+  private hist: THREE.WebGLRenderTarget[] = [];
+  private hi = 0;
+  private aoA!: THREE.WebGLRenderTarget;
+  private aoB!: THREE.WebGLRenderTarget;
+  private fogT!: THREE.WebGLRenderTarget;
+  private fogB!: THREE.WebGLRenderTarget;
+  private airT!: THREE.WebGLRenderTarget;
+  private frame = 0;
+  private liteDone = false;
+  /** fog thickness, per metre */
+  density = 0.007;
+  /** x y z r per end of each body's capsule, written by the game */
+  capA = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
+  capB = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
+  capN = 0;
+  /** what floats: drawn by Fx */
+  airScene: THREE.Scene | null = null;
+  airScale: (s: number) => void = () => {};
   private down: THREE.WebGLRenderTarget[] = [];
   private up: THREE.WebGLRenderTarget[] = [];
   private exp = [target(1, 1, THREE.FloatType, THREE.NearestFilter), target(1, 1, THREE.FloatType, THREE.NearestFilter)];
@@ -216,18 +462,28 @@ export class Post {
   private mDown = pass(DOWN, { tSrc: { value: null }, px: { value: new THREE.Vector2() }, first: { value: 0 } });
   private mUp = pass(UP, { tSrc: { value: null }, tAdd: { value: null }, px: { value: new THREE.Vector2() }, k: { value: 1 } });
   private mExp = pass(EXPO, { tSrc: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 } });
+  private common = { tDepth: AIR.tDepth, nf: AIR.nf, pInv: { value: new THREE.Vector2() } };
+  private camW = { value: new THREE.Matrix4() };
+  private mAO = pass(AO, { ...this.common, px: { value: new THREE.Vector2() }, frame: { value: 0 }, camW: this.camW, capA: { value: this.capA }, capB: { value: this.capB }, capN: { value: 0 } });
+  private mAOBlur = pass(AOBLUR, { ...this.common, tAO: { value: null }, px: { value: new THREE.Vector2() } });
+  private mFog = pass(FOG, {
+    ...this.common, tVol: LF.volAvg, volMin: LF.volMin, volInv: LF.volInv, lmK: LF.lmK, camW: this.camW, frame: { value: 0 }, time: { value: 0 }, density: { value: 0.02 }, spark: AIR.spark, beamP: AIR.beamP, beamD: AIR.beamD,
+  });
+  private mFogBlur = pass(FOGBLUR, { tSrc: { value: null }, px: { value: new THREE.Vector2() } });
+  private mResolve = pass(RESOLVE, { ...this.common, tSrc: { value: null }, tHist: { value: null }, tAO: { value: null }, tFog: { value: null }, tAir: { value: null }, reproj: { value: new THREE.Matrix4() }, px: { value: new THREE.Vector2() }, cut: { value: 1 }, jit: { value: new THREE.Vector2() } });
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();
   private hadPrev = false;
-  /** next frame jumps straight to the right exposure */
+  /** a machine that can't keep up: no occlusion, no air, no shutter blur */
+  lite = false;
+  /** next frame jumps straight to the right exposure and forgets what it saw */
   cutExposure = true;
   motionBlur = true;
-  msaa = 2;
 
   constructor(private r: THREE.WebGLRenderer) {
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mFinal);
@@ -236,11 +492,22 @@ export class Post {
   }
 
   resize(w: number, h: number) {
-    for (const t of [this.scene, this.blur, ...this.down, ...this.up]) t?.dispose();
+    for (const t of [this.scene, this.blur, this.aoA, this.aoB, this.fogT, this.fogB, this.airT, ...this.hist, ...this.down, ...this.up]) t?.dispose();
     const W = Math.round(w), H = Math.round(h);
-    this.scene = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: this.msaa, depthBuffer: true, depthTexture: new THREE.DepthTexture(W, H, THREE.UnsignedIntType) });
+    const depth = new THREE.DepthTexture(W, H, THREE.UnsignedIntType);
+    depth.minFilter = depth.magFilter = THREE.NearestFilter;
+    this.scene = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: true, depthTexture: depth });
     this.scene.texture.minFilter = this.scene.texture.magFilter = THREE.LinearFilter;
+    AIR.tDepth.value = depth;
     this.blur = target(W, H);
+    this.hist = [target(W, H), target(W, H)];
+    const hw = Math.ceil(W / 2), hh = Math.ceil(H / 2);
+    this.aoA = target(hw, hh, THREE.UnsignedByteType);
+    this.aoB = target(hw, hh, THREE.UnsignedByteType);
+    this.fogT = target(Math.ceil(W / 4), Math.ceil(H / 4));
+    this.fogB = target(Math.ceil(W / 4), Math.ceil(H / 4));
+    this.airT = target(hw, hh);
+    AIR.inv.value.set(1 / hw, 1 / hh);
     this.down = [];
     this.up = [];
     let a = W, b = H;
@@ -252,6 +519,7 @@ export class Post {
     }
     this.mFinal.uniforms.res.value.set(W, H);
     this.cutExposure = true;
+    this.liteDone = false;
   }
 
   private draw(m: THREE.ShaderMaterial, to: THREE.WebGLRenderTarget | null) {
@@ -262,17 +530,87 @@ export class Post {
 
   render(scene: THREE.Scene, cam: THREE.PerspectiveCamera, dt: number, time: number) {
     const r = this.r;
+    const W = this.scene.width, H = this.scene.height;
+    this.frame = (this.frame + 1) & 1023;
+    const P = cam.projectionMatrix;
+    // ---- the scene, nudged a fraction of a pixel, a different fraction each frame
+    const jx = (halton(this.frame % 8 + 1, 2) - 0.5), jy = (halton(this.frame % 8 + 1, 3) - 0.5);
+    const e8 = P.elements[8], e9 = P.elements[9];
+    P.elements[8] += (jx * 2) / W;
+    P.elements[9] += (jy * 2) / H;
     r.setRenderTarget(this.scene);
     r.clear();
     r.render(scene, cam);
+    P.elements[8] = e8;
+    P.elements[9] = e9;
     let src = this.scene.texture;
-    // ---- shutter blur from the camera's own motion
     this.curVP.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-    if (this.motionBlur && this.hadPrev) {
+    // ---- what the depth knows
+    AIR.nf.value.set(cam.near, cam.far);
+    this.common.pInv.value.set(1 / P.elements[0], 1 / P.elements[5]);
+    this.camW.value.copy(cam.matrixWorld);
+    const hw = this.aoA.width, hh = this.aoA.height;
+    const uA = this.mAO.uniforms;
+    uA.px.value.set(1 / hw, 1 / hh);
+    uA.frame.value = this.frame;
+    uA.capN.value = this.capN;
+    if (!this.lite || !this.liteDone) {
+      // in lite mode these run once, with nothing in them, and stay as they are
+      this.liteDone = this.lite;
+      uA.capN.value = this.lite ? 0 : this.capN;
+      if (this.lite) {
+        r.setRenderTarget(this.aoB);
+        r.setClearColor(0xffffff, 1);
+        r.clear();
+        r.setRenderTarget(this.fogB);
+        r.setClearColor(0x000000, 1);
+        r.clear();
+      } else {
+        this.draw(this.mAO, this.aoA);
+        const uB = this.mAOBlur.uniforms;
+        uB.tAO.value = this.aoA.texture;
+        uB.px.value.set(1 / hw, 1 / hh);
+        this.draw(this.mAOBlur, this.aoB);
+        const uF = this.mFog.uniforms;
+        uF.frame.value = this.frame;
+        uF.time.value = time;
+        uF.density.value = this.density;
+        this.draw(this.mFog, this.fogT);
+        this.mFogBlur.uniforms.tSrc.value = this.fogT.texture;
+        this.mFogBlur.uniforms.px.value.set(1 / this.fogT.width, 1 / this.fogT.height);
+        this.draw(this.mFogBlur, this.fogB);
+      }
+    }
+    // ---- what floats
+    if (this.airScene) {
+      this.airScale((hh * 0.9) / Math.tan(THREE.MathUtils.degToRad(cam.fov / 2)));
+      r.setClearAlpha(0);
+      r.setRenderTarget(this.airT);
+      r.clear();
+      r.render(this.airScene, cam);
+      r.setClearAlpha(1);
+    }
+    // ---- one resolve: all of it, onto the last frames
+    const uR = this.mResolve.uniforms;
+    const h0 = this.hist[this.hi], h1 = this.hist[1 - this.hi];
+    uR.tSrc.value = src;
+    uR.tHist.value = h0.texture;
+    uR.tAO.value = this.aoB.texture;
+    uR.tFog.value = this.fogB.texture;
+    uR.tAir.value = this.airT.texture;
+    uR.px.value.set(1 / W, 1 / H);
+    uR.cut.value = this.cutExposure || !this.hadPrev ? 1 : 0;
+    uR.jit.value.set(jx / W, jy / H);
+    uR.reproj.value.copy(this.curVP).invert().premultiply(this.prevVP);
+    this.draw(this.mResolve, h1);
+    this.hi = 1 - this.hi;
+    src = h1.texture;
+    // ---- shutter blur from the camera's own motion
+    if (this.motionBlur && !this.lite && this.hadPrev) {
       const u = this.mBlur.uniforms;
       u.tSrc.value = src;
       u.tDepth.value = this.scene.depthTexture;
-      u.reproj.value.copy(this.curVP).invert().premultiply(this.prevVP);
+      u.reproj.value.copy(uR.reproj.value);
       u.amount.value = Math.min(1, (1 / 90) / Math.max(dt, 1e-3));
       this.draw(this.mBlur, this.blur);
       src = this.blur.texture;
@@ -319,6 +657,16 @@ export class Post {
     f.tanHalf.value = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     this.draw(this.mFinal, null);
   }
+}
+
+function halton(i: number, b: number) {
+  let f = 1, r = 0;
+  while (i > 0) {
+    f /= b;
+    r += f * (i % b);
+    i = Math.floor(i / b);
+  }
+  return r;
 }
 
 /** the wet ground's reflection: the world drawn again from below the street, at half size */

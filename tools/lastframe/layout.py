@@ -114,9 +114,41 @@ class Map:
     def room(s, name, x0, y0, x1, y1, z, h, wall, floor, ceil='ceil', base='trim'):
         s.rooms.append(dict(name=name, a=(x0, y0, z), b=(x1, y1, z + h), wall=wall, floor=floor, ceil=ceil, base=base))
 
-    def prop(s, name, x, y, z=0.0, rot=0.0, scale=1.0, part=None, collide=None, hard=True):
+    def prop(s, name, x, y, z=0.0, rot=0.0, scale=1.0, part=None, collide=None, hard=True, tilt=0.0):
         """collide: None = the prop's bounding box, False = none, or (hx, hy, hz) half sizes"""
-        s.props.append(dict(name=name, part=part, pos=[x, y, z], rot=rot, scale=scale, collide=collide, hard=hard))
+        s.props.append(dict(name=name, part=part, pos=[x, y, z], rot=rot, scale=scale, collide=collide, hard=hard, tilt=tilt, loose=None))
+
+    def loose(s, name, x, y, z=0.0, rot=0.0, scale=1.0, part=None, kg=4.0, surf='wood', shape='box'):
+        """a thing nobody bolted down: left out of the bake, simulated in the game"""
+        s.props.append(dict(name=name, part=part, pos=[x, y, z], rot=rot, scale=scale, collide=False, hard=False, tilt=0.0, loose=dict(kg=kg, surf=surf, shape=shape)))
+
+    def hpipe(s, x0, x1, y, z, part='modular_industrial_pipes_01_pipe02', run='x'):
+        """scanned pipe laid on its side, section after section"""
+        L = 1.93
+        n = max(1, int(abs(x1 - x0) / L))
+        sg = 1 if x1 > x0 else -1
+        for i in range(n):
+            p = x0 + sg * i * L
+            if run == 'x':
+                s.prop('modular_industrial_pipes_01', p, y, z=z, rot=sg * math.pi / 2, part=part, collide=False, tilt=math.pi / 2)
+            else:
+                s.prop('modular_industrial_pipes_01', y, p, z=z, rot=0 if sg > 0 else math.pi, part=part, collide=False, tilt=-math.pi / 2)
+
+    def downpipe(s, x, y, z1):
+        """a rainwater pipe down a wall"""
+        z = 0.0
+        while z < z1 - 0.3:
+            s.prop('modular_industrial_pipes_01', x, y, z=z, part='modular_industrial_pipes_01_pipe02', collide=False, scale=0.62)
+            z += 1.2
+
+    def facade_window(s, x, y, z, lit=None, w=1.25, h=1.7):
+        """a window on a wall that faces +y and can't be reached"""
+        s.box((x - w / 2, y, z), (x + w / 2, y + 0.02, z + h), lit or 'darkwin', collide=False, density=0.02)
+        s.box((x - w / 2 - 0.1, y, z - 0.12), (x + w / 2 + 0.1, y + 0.13, z - 0.02), 'stone', collide=False, density=0.1)
+        s.box((x - w / 2 - 0.12, y, z + h), (x + w / 2 + 0.12, y + 0.1, z + h + 0.2), 'stone', collide=False, density=0.1)
+        s.box((x - w / 2 - 0.05, y, z), (x - w / 2, y + 0.07, z + h), 'trim', collide=False, density=0.06)
+        s.box((x + w / 2, y, z), (x + w / 2 + 0.05, y + 0.07, z + h), 'trim', collide=False, density=0.06)
+        s.box((x - 0.025, y, z), (x + 0.025, y + 0.05, z + h), 'trim', collide=False, density=0.06)
 
     def light(s, kind, pos, color, power, **k):
         d = dict(kind=kind, pos=list(pos), color=list(color), power=power)
@@ -310,67 +342,67 @@ def build():
         prop('steel_frame_shelves_03', 9.5, y, rot=0, part='steel_frame_shelves_03')
         prop('steel_frame_shelves_03', 13.0, y, rot=0, part='steel_frame_shelves_03')
     box((7.0, 20.0, 0), (9.0, 21.5, 1.0), 'planks', pen=True, tag='counter', density=0.5)
-    prop('cardboard_box_01', 7.6, 20.4, z=1.0, rot=0.4, collide=False)
-    prop('cardboard_box_01', 15.5, 20.5, rot=1.1)
-    prop('cardboard_box_01', 15.9, 20.8, z=0.34, rot=0.2, collide=False)
-    prop('WetFloorSign_01', 14.6, 21.2, rot=0.7, collide=False)
+    m.loose('cardboard_box_01', 7.6, 20.4, z=1.0, rot=0.4, kg=3, surf='card')
+    m.loose('cardboard_box_01', 15.5, 20.5, rot=1.1, kg=5, surf='card')
+    m.loose('cardboard_box_01', 15.7, 20.6, z=0.35, rot=0.9, kg=3, surf='card')
+    m.loose('WetFloorSign_01', 14.6, 21.2, rot=0.7, kg=1.2, surf='plastic')
     # the lobby
     prop('drawer_cabinet', 18.0, 13.6, rot=0, part='drawer_cabinet')
     prop('wooden_table_02', 24.2, 15.2, rot=1.2)
-    prop('painted_wooden_chair_01', 23.2, 15.6, rot=2.4, collide=False)
-    prop('korean_fire_extinguisher_01', 17.3, 21.6, rot=0, collide=False)
+    m.loose('painted_wooden_chair_01', 23.2, 15.6, rot=2.4, kg=5)
+    m.loose('korean_fire_extinguisher_01', 17.3, 21.6, rot=0, kg=6, surf='metal', shape='cyl')
     prop('fire_alarm', 18.5, 21.9, z=1.4, rot=math.pi, collide=False)
     # the bar: a long counter, stools
     box((27.0, 19.4, 0), (33.2, 20.0, 1.08), 'planks', pen=True, tag='counter', density=0.5)
     box((26.9, 19.34, 1.08), (33.3, 20.06, 1.13), 'wood_top', collide=False, density=0.4)
     prop('metal_office_desk', 30.0, 15.4, rot=0.1, part='metal_office_desk')
-    prop('plastic_monobloc_chair_01', 28.1, 16.4, rot=0.9, collide=False)
-    prop('television_02', 33.0, 20.5, z=0, rot=-2.2, collide=False)
+    m.loose('plastic_monobloc_chair_01', 28.1, 16.4, rot=0.9, kg=2.5, surf='plastic')
+    m.loose('television_02', 33.0, 20.5, z=0, rot=-2.2, kg=11, surf='plastic')
     # kitchen
     prop('vintage_cabinet_01', 7.1, 31.5, rot=math.pi / 2, part='vintage_cabinet_01_body')
     prop('wooden_table_02', 10.5, 28.2, rot=0.2)
-    prop('painted_wooden_chair_01', 11.4, 27.5, rot=-0.6, collide=False)
-    prop('painted_wooden_chair_01', 9.2, 28.6, rot=2.0, collide=False)
+    m.loose('painted_wooden_chair_01', 11.4, 27.5, rot=-0.6, kg=5)
+    m.loose('painted_wooden_chair_01', 9.2, 28.6, rot=2.0, kg=5)
     # store room
     for (x, y, r) in ((15.2, 31.8, 0.0), (18.0, 31.8, 0.0), (20.8, 31.8, 0.0)):
         prop('worn_metal_rack', x, y, rot=r)
     prop('wooden_crate_02', 16.0, 27.0, rot=1.3, part=None)
     prop('wooden_crate_01', 19.5, 26.0, rot=0.5, part=None)
-    prop('cement_bag', 20.3, 27.8, rot=1.1, collide=False)
+    m.loose('cement_bag', 20.3, 27.8, rot=1.1, kg=25, surf='bag')
     # boiler room
     prop('portable_generator', 32.5, 31.6, rot=2.8)
-    prop('propane_tank', 27.0, 32.1, collide=False)
-    prop('propane_tank', 27.4, 31.8, rot=1, collide=False)
+    m.loose('propane_tank', 27.0, 32.1, kg=14, surf='metal', shape='cyl')
+    m.loose('propane_tank', 27.5, 31.7, rot=1, kg=14, surf='metal', shape='cyl')
     prop('tool_cart', 32.4, 26.0, rot=1.5)
-    prop('metal_jerrycan', 28.2, 25.1, rot=2.0, collide=False)
+    m.loose('metal_jerrycan', 28.2, 25.1, rot=2.0, kg=8, surf='metal')
     # upstairs: squatted flats
     prop('sofa_03', 8.6, 21.2, z=F2, rot=math.pi)
-    prop('television_02', 8.6, 14.0, z=F2, rot=0, collide=False)
+    m.loose('television_02', 8.6, 14.0, z=F2, rot=0, kg=11, surf='plastic')
     prop('old_bed_frame', 16.0, 15.2, z=F2, rot=0)
     prop('old_bed_frame', 19.5, 15.2, z=F2, rot=0.05)
-    prop('cardboard_box_01', 24.4, 21.0, z=F2, rot=0.7)
+    m.loose('cardboard_box_01', 24.4, 21.0, z=F2, rot=0.7, kg=4, surf='card')
     prop('wooden_table_02', 24.0, 15.2, z=F2, rot=0.3)
     prop('drawer_cabinet', 33.2, 16.2, z=F2, rot=-math.pi / 2, part='drawer_cabinet')
     prop('sofa_03', 30.2, 21.1, z=F2, rot=math.pi)
     prop('old_bed_frame', 7.5, 30.8, z=F2, rot=math.pi / 2)
     prop('metal_office_desk', 11.0, 25.6, z=F2, rot=0, part='metal_office_desk')
     prop('wooden_crate_02', 17.5, 25.5, z=F2, rot=0.1)
-    prop('cardboard_box_01', 20.3, 31.4, z=F2, rot=0.9)
-    prop('plastic_crate_01', 19.2, 31.8, z=F2, rot=0.2, collide=False)
+    m.loose('cardboard_box_01', 20.3, 31.4, z=F2, rot=0.9, kg=4, surf='card')
+    m.loose('plastic_crate_01', 19.2, 31.8, z=F2, rot=0.2, kg=1.5, surf='plastic')
     prop('old_bed_frame', 31.5, 31.0, z=F2, rot=math.pi / 2)
     prop('wooden_table_02', 28.0, 26.0, z=F2, rot=0.5)
-    prop('trashbag', 29.5, 22.8, z=F2, collide=False)
-    prop('trashbag', 12.3, 23.6, rot=1, collide=False)
-    prop('WetFloorSign_01', 17.0, 23.4, rot=2.0, collide=False)
+    m.loose('trashbag', 29.5, 22.8, z=F2, kg=7, surf='bag')
+    m.loose('trashbag', 12.3, 23.6, rot=1, kg=7, surf='bag')
+    m.loose('WetFloorSign_01', 17.0, 23.4, rot=2.0, kg=1.2, surf='plastic')
 
     # ---- tenement lights: tubes in the corridors, a few live rooms, the rest dark
     TUBE = (0.82, 0.92, 1.0)
     WARM = (1.0, 0.72, 0.42)
     for x, p in ((10.0, 26), (20.0, 12), (30.0, 22)):
-        light('area', (x, 23.1, 2.94), TUBE, p, size=(1.2, 0.14))
+        light('area', (x, 23.1, 2.94), TUBE, p * 1.8, size=(1.2, 0.14))
         prop('mounted_fluorescent_lights', x, 23.1, z=2.97, rot=math.pi / 2, part='mounted_fluorescent_lights_a', collide=False)
     for x, p in ((12.0, 24), (28.0, 9)):
-        light('area', (x, 23.1, 6.14), TUBE, p, size=(1.2, 0.14))
+        light('area', (x, 23.1, 6.14), TUBE, p * 1.8, size=(1.2, 0.14))
         prop('mounted_fluorescent_lights', x, 23.1, z=6.17, rot=math.pi / 2, part='mounted_fluorescent_lights_a', collide=False)
     light('area', (11.5, 16.9, 2.94), TUBE, 42, size=(1.4, 0.2))
     light('point', (21.5, 18.0, 2.7), WARM, 24, radius=0.08)
@@ -425,10 +457,10 @@ def build():
     room('office2', 80, WY0, WX1, OY1, 0, 3, 'wall_dmg', 'lino')
     prop('metal_office_desk', 76.0, 15.0, rot=0, part='metal_office_desk')
     prop('drawer_cabinet', 79.2, 22.3, rot=math.pi, part='drawer_cabinet')
-    prop('plastic_monobloc_chair_01', 75.0, 16.6, rot=2.5, collide=False)
+    m.loose('plastic_monobloc_chair_01', 75.0, 16.6, rot=2.5, kg=2.5, surf='plastic')
     prop('metal_office_desk', 83.5, 20.5, rot=math.pi, part='metal_office_desk')
-    prop('cardboard_box_01', 84.8, 14.1, rot=0.3)
-    prop('cardboard_box_01', 84.4, 14.7, z=0.34, rot=1.0, collide=False)
+    m.loose('cardboard_box_01', 84.8, 14.1, rot=0.3, kg=5, surf='card')
+    m.loose('cardboard_box_01', 84.6, 14.3, z=0.35, rot=1.0, kg=3, surf='card')
     light('area', (76.0, 18.0, 2.94), TUBE, 16, size=(1.2, 0.3))
 
     # mezzanine: west side and north side, a steel deck on posts
@@ -476,11 +508,11 @@ def build():
     racks(23.0, 58.2, 69.0)
     # floor clutter
     prop('wooden_military_crate', 60.5, 18.0, rot=0.3)
-    prop('wooden_military_crate', 60.2, 18.2, z=0.46, rot=0.1, collide=False)
-    prop('barrel_03', 69.0, 16.0)
-    prop('barrel_03', 69.7, 16.5, rot=1)
-    prop('barrel_03', 69.2, 17.0, rot=2)
-    prop('hand_truck', 68.0, 25.0, rot=2.2, collide=False)
+    m.loose('wooden_military_crate', 60.45, 18.05, z=0.46, rot=0.4, kg=18)
+    m.loose('barrel_03', 69.0, 16.0, kg=16, surf='metal', shape='cyl')
+    m.loose('barrel_03', 69.75, 16.5, rot=1, kg=16, surf='metal', shape='cyl')
+    m.loose('barrel_03', 69.2, 17.05, rot=2, kg=16, surf='metal', shape='cyl')
+    m.loose('hand_truck', 68.0, 25.0, rot=2.2, kg=11, surf='metal')
     prop('tool_cart', 52.0, 15.5, rot=math.pi / 2)
     prop('steel_frame_shelves_03', 53.0, 42.5, rot=0, part='steel_frame_shelves_03')
     prop('steel_frame_shelves_03', 56.2, 43.5, rot=0, part='steel_frame_shelves_03')
@@ -496,12 +528,12 @@ def build():
     prop('wooden_crate_02', 84.3, 30.0, z=MZ, rot=0.1)
 
     # hanging lamps, warm pools with dark between
-    for (x, y, p) in ((62, 19, 70), (75, 29, 60), (63, 40, 26), (53, 22, 18)):
+    for (x, y, p) in ((62, 19, 80), (75, 29, 70), (63, 40, 46), (53, 22, 30), (67, 26, 60), (53, 36, 36), (80, 36, 50), (70, 16.5, 44)):
         prop('hanging_industrial_lamp', x, y, z=6.8, collide=False)
         light('spot', (x, y, 6.72), (1.0, 0.78, 0.5), p * 12, spot=2.0, blend=0.75, radius=0.1, aim=(0, 0, -1))
     # dusk through the open door and high skylights
     for x, y in ((64, 32), (74, 20), (70, 41)):
-        light('point', (x, y, 5.2), (0.62, 0.72, 1.0), 40, radius=0.5)
+        light('point', (x, y, 5.2), (0.62, 0.72, 1.0), 150, radius=0.5)
     for x in (58, 70, 80):
         box((x, 28.4, WH - 0.01), (x + 3.0, 29.6, WH + 0.02), 'skylight', collide=False, density=0.1)
 
@@ -522,16 +554,16 @@ def build():
     dumpster(35.0, 15.5, True)
     dumpster(47.4, 27.0, True)
     dumpster(35.0, 37.0, True)
-    prop('trashbag', 37.0, 16.2, rot=0.4, collide=False)
-    prop('trashbag', 37.4, 15.6, rot=2.4, collide=False)
-    prop('trashbag', 46.8, 26.6, rot=2.4, collide=False)
-    prop('trashbag', 36.8, 36.2, rot=1.4, collide=False)
-    prop('metal_trash_can', 49.0, 15.5, part='metal_trash_can', collide=(0.3, 0.3, 0.45))
-    prop('barrel_03', 49.0, 20.6)
+    m.loose('trashbag', 37.0, 16.2, rot=0.4, kg=7, surf='bag')
+    m.loose('trashbag', 37.5, 15.5, rot=2.4, kg=7, surf='bag')
+    m.loose('trashbag', 46.8, 26.6, rot=2.4, kg=7, surf='bag')
+    m.loose('trashbag', 36.8, 36.2, rot=1.4, kg=7, surf='bag')
+    m.loose('metal_trash_can', 49.0, 15.5, part='metal_trash_can', kg=6, surf='metal', shape='cyl')
+    m.loose('barrel_03', 49.0, 20.6, kg=16, surf='metal', shape='cyl')
     prop('wooden_crate_01', 34.8, 30.2, rot=0.3)
     prop('wooden_crate_02', 42.5, 30.5, rot=1.0)
-    prop('wooden_crate_02', 42.4, 30.5, z=0.46, rot=1.2, collide=False)
-    prop('old_tyre', 44.0, 19.5, rot=0.2, collide=False)
+    m.loose('wooden_crate_02', 42.5, 30.45, z=0.5, rot=1.2, kg=16)
+    m.loose('old_tyre', 44.0, 19.5, rot=0.2, kg=9, surf='rubber', shape='cyl')
     prop('exterior_aircon_unit', 34.5, 26.0, z=2.0, rot=-math.pi / 2, part='exterior_aircon_unit', collide=False)
     prop('utility_box_02', 49.5, 40.0, rot=math.pi / 2)
     prop('power_box_01', 34.3, 18.8, z=1.6, rot=-math.pi / 2, part='power_box_01_box', collide=False)
@@ -554,7 +586,7 @@ def build():
     prop('wooden_crate_01', 15.6, 38.7, rot=1.5)
     prop('concrete_road_barrier', 9.5, 37.0, rot=0.1)
     prop('concrete_road_barrier', 29.5, 46.0, rot=1.4)
-    prop('old_tyre', 18.2, 45.0, rot=1.2, collide=False)
+    m.loose('old_tyre', 18.2, 45.0, rot=1.2, kg=9, surf='rubber', shape='cyl')
     prop('portable_generator', 12.2, 48.0, rot=0.5)
     # fire escape up to the tenement's north door
     FE_X = 28.5
@@ -575,9 +607,9 @@ def build():
     prop('concrete_road_barrier', 72.0, 56.0, rot=0.5)
     prop('concrete_road_barrier', 44.0, 54.0, rot=1.2)
     prop('concrete_road_barrier', 42.0, 46.0, rot=1.57)
-    prop('barrel_03', 59.0, 56.0)
-    prop('barrel_03', 59.6, 56.5, rot=1)
-    prop('propane_tank', 74.0, 46.5, collide=False)
+    m.loose('barrel_03', 59.0, 56.0, kg=16, surf='metal', shape='cyl')
+    m.loose('barrel_03', 59.7, 56.5, rot=1, kg=16, surf='metal', shape='cyl')
+    m.loose('propane_tank', 74.0, 46.5, kg=14, surf='metal', shape='cyl')
     light('spot', (70.0, 45.5, 4.2), (1.0, 0.72, 0.42), 340, spot=2.4, blend=0.8, radius=0.1, aim=(0, 0.7, -0.7))
     prop('security_light', 70.0, 45.3, z=4.3, rot=0, part='security_light', collide=False)
 
@@ -599,9 +631,9 @@ def build():
     prop('fire_hydrant', 25.5, 11.0, rot=0, part='fire_hydrant', collide=(0.2, 0.2, 0.4))
     for x, y in ((12.0, 5.5), (50.0, 3.3), (70.0, 6.0)):
         prop('water_manhole_cover', x, y, z=-0.12, part='water_manhole_cover', collide=False)
-    prop('metal_trash_can', 16.5, 11.8, part='metal_trash_can', collide=(0.3, 0.3, 0.45))
-    prop('trashbag', 17.2, 11.6, collide=False)
-    prop('trashbag', 40.8, 12.2, rot=1.2, collide=False)
+    m.loose('metal_trash_can', 16.5, 11.8, part='metal_trash_can', kg=6, surf='metal', shape='cyl')
+    m.loose('trashbag', 17.2, 11.6, kg=7, surf='bag')
+    m.loose('trashbag', 40.8, 12.2, rot=1.2, kg=7, surf='bag')
     prop('utility_box_01', 55.0, 12.3, rot=math.pi)
     prop('utility_box_02', 3.0, 12.0, rot=math.pi)
     for x in (8.0, 38.0, 68.0, 94.0):
@@ -653,6 +685,98 @@ def build():
     for x in (-0.4, 96.4):
         box((x - 0.05, -3.2, 0), (x + 0.05, 12.8, 2.4), 'hoarding', collide=False, density=0.25)
     m.invisible((-1, -4, 6), (97, 63, 7))
+
+
+    # ================= the things that make it a place =================
+    # the long wall across the street: floors of windows, courses, a cornice
+    for z, top in ((3.08, 3.3), (6.65, 6.74), (10.05, 10.14)):
+        box((-44, SY, z), (140, SY + 0.11, top), 'stone', collide=False, density=0.06)
+    box((-44, SY, 14.45), (140, SY + 0.32, 15.0), 'stone', collide=False, density=0.05)
+    box((-44, SY, 0), (140, SY + 0.06, 0.42), 'plinth', collide=False, density=0.1)
+    for i, x in enumerate(range(-2, 100, 4)):
+        for k, z in enumerate((4.3, 7.7, 11.1)):
+            r = m.rng.random()
+            m.facade_window(x + 2, SY, z, lit=(m.rng.choice(('litwin_a', 'litwin_a', 'litwin_b', 'litwin_c')) if r < 0.12 else None))
+    for x in (10.0, 34.0, 58.0, 82.0):
+        m.downpipe(x, SY + 0.12, 14.0)
+    # the tenement: a stone course per floor, a plinth, downpipes
+    for z in (F2 - 0.1,):
+        box((X0 - 0.06, Y0 - 0.26, z), (X1 + 0.06, Y0 - 0.16, z + 0.16), 'stone', collide=False, density=0.1)
+        box((X0 - 0.26, Y0 - 0.06, z), (X0 - 0.16, Y1 + 0.06, z + 0.16), 'stone', collide=False, density=0.1)
+        box((X1 + 0.16, Y0 - 0.06, z), (X1 + 0.26, Y1 + 0.06, z + 0.16), 'stone', collide=False, density=0.1)
+        box((X0 - 0.06, Y1 + 0.16, z), (X1 + 0.06, Y1 + 0.26, z + 0.16), 'stone', collide=False, density=0.1)
+    box((X0 - 0.3, Y0 - 0.3, TOP - 0.02), (X1 + 0.3, Y0 - 0.16, TOP + 0.3), 'stone', collide=False, density=0.1)
+    for a, b in (((16.5, Y0 - 0.2), (21.3, Y0 - 0.16)), ((22.8, Y0 - 0.2), (X1, Y0 - 0.16))):
+        box((a[0], a[1], 0), (b[0], b[1], 0.5), 'plinth', collide=False, density=0.15)
+    m.downpipe(X0 + 0.25, Y0 - 0.26, TOP)
+    m.downpipe(X1 - 0.25, Y0 - 0.26, TOP)
+    m.downpipe(X1 + 0.26, 26.0, TOP)
+    m.downpipe(X0 - 0.26, 20.2, TOP)
+    # the warehouse: piers on the outside, trusses and purlins under the roof, ducts, pipes
+    for x in range(53, 86, 6):
+        box((x - 0.14, WY0 - 0.28, 0), (x + 0.14, WY0 - 0.16, WH), 'ruststeel', collide=False, density=0.1)
+    for y in range(16, 45, 6):
+        box((WX0 - 0.28, y - 0.14, 0), (WX0 - 0.16, y + 0.14, WH), 'ruststeel', collide=False, density=0.1)
+    for x in range(53, 85, 6):
+        box((x - 0.07, WY0 + 0.2, WH - 1.05), (x + 0.07, WY1 - 0.2, WH - 0.9), 'steel', collide=False, density=0.1)
+        box((x - 0.07, WY0 + 0.2, WH - 0.2), (x + 0.07, WY1 - 0.2, WH - 0.08), 'steel', collide=False, density=0.1)
+        for y in range(15, 44, 3):
+            box((x - 0.035, y - 0.035, WH - 0.9), (x + 0.035, y + 0.035, WH - 0.2), 'steel', collide=False, density=0.08)
+    for y in range(16, 44, 5):
+        box((WX0 + 0.2, y - 0.05, WH - 0.08), (WX1 - 0.2, y + 0.05, WH - 0.01), 'steel', collide=False, density=0.08)
+    y = 14.2
+    while y < 44.4:
+        prop('modular_airduct_rectangular_01', 58.0, y, z=6.15, part='modular_airduct_rectangular_01_single_01', collide=False)
+        y += 0.595
+    m.hpipe(50.4, 85.6, WY1 - 0.26, 2.9)
+    m.hpipe(50.4, 85.6, WY1 - 0.26, 3.2)
+    m.hpipe(50.4, 71.0, WY0 + 0.3, 3.0)
+    m.hpipe(26.3, 33.6, Y1 - 0.3, 2.45)
+    m.hpipe(26.3, 33.6, Y1 - 0.3, 2.15)
+    for x in (27.0, 31.0):
+        for z in (0.0, 1.0):
+            prop('modular_industrial_pipes_01', x, Y1 - 0.3, z=z, part='modular_industrial_pipes_01_pipe02', collide=False, scale=0.55)
+    for x in (58, 70, 80):
+        light('area', (x + 1.5, 29.0, WH - 0.05), (0.58, 0.68, 1.0), 170, size=(3.0, 1.2))
+    # fire escapes on the alley side and the west side, reachable from the windows
+    for (x, y, r) in ((X1 + 0.82, 17.5, -math.pi / 2), (X0 - 0.82, 17.0, math.pi / 2)):
+        prop('modular_fire_escape', x, y, z=F2 - 0.68, rot=r, part='modular_fire_escape_platform_middle', collide=False)
+        prop('modular_fire_escape', x, y, z=F2 + 0.02, rot=r, part='modular_fire_escape_railing_middle', collide=False)
+        s = 1 if x > X1 else -1
+        m.invisible((min(x - 0.68 * s, x + 0.68 * s), y - 2.4, F2 - 0.1), (max(x - 0.68 * s, x + 0.68 * s), y + 2.4, F2))
+    # chain-link across the yards: you can see and shoot through it, not walk
+    for (x, y, r, n) in ((22.5, 47.2, 0.0, 4), (80.4, 45.8, math.pi / 2, 0), (37.0, 58.0, 0.0, 3)):
+        for i in range(n):
+            prop('modular_chainlink_fence', x + i * 1.91, y, rot=r, part='modular_chainlink_fence_double', collide=False)
+            prop('modular_chainlink_fence', x + i * 1.91 - 0.955, y, part='modular_chainlink_fence_post', collide=False)
+        if n:
+            prop('modular_chainlink_fence', x + n * 1.91 - 0.955, y, part='modular_chainlink_fence_post', collide=False)
+            m.invisible((x - 0.95, y - 0.04, 0), (x + n * 1.91 - 0.95, y + 0.04, 2.4), pen=True)
+    # the street's paint: lane dashes, bay lines, two crossings
+    RZ = -0.114
+    for x in range(1, 95, 5):
+        box((x, 4.93, -0.2), (x + 2.4, 5.07, RZ), 'paint', collide=False, density=0.08)
+    for x0, x1 in ((14.0, 24.0), (40.0, 49.0), (66.0, 78.0)):
+        box((x0, 8.0, -0.2), (x1, 8.1, RZ), 'paint', collide=False, density=0.08)
+        box((x0, 1.9, -0.2), (x1, 2.0, RZ), 'paint_y', collide=False, density=0.08)
+    for cx in (30.0, 63.0):
+        for k in range(9):
+            y0 = 0.5 + k * 1.02
+            box((cx - 1.6, y0, -0.2), (cx + 1.6, y0 + 0.52, RZ), 'paint', collide=False, density=0.1)
+    for x in (0.5, 95.0):
+        box((x, 0.2, -0.2), (x + 0.3, 9.8, RZ), 'paint', collide=False, density=0.1)
+    # clutter that moves
+    for (x, y, z, r, n, kg, sf) in (
+        (31.6, 23.6, 0, 0.4, 'cardboard_box_01', 5, 'card'), (16.2, 23.7, 0, 1.0, 'cardboard_box_01', 5, 'card'), (24.6, 16.8, 0, 1.3, 'SchoolChair_01', 6, 'wood'),
+        (29.8, 17.4, 0, 0.3, 'SchoolChair_01', 6, 'wood'), (32.2, 15.2, 0, 2.2, 'SchoolChair_01', 6, 'wood'), (12.8, 26.2, 0, 0.5, 'multi_cleaner_5_litre', 2.5, 'plastic'),
+        (13.1, 26.6, 0, 1.4, 'multi_cleaner_5_litre', 2.5, 'plastic'), (20.4, 25.2, 0, 2.0, 'multi_cleaner_5_litre', 2.5, 'plastic'), (16.3, 19.8, 0, 0.0, 'plastic_crate_01', 1.5, 'plastic'),
+        (39.2, 31.5, 0, 0.5, 'cardboard_box_01', 4, 'card'), (39.8, 31.2, 0, 1.4, 'cardboard_box_01', 4, 'card'), (39.5, 31.4, 0.35, 0.9, 'cardboard_box_01', 3, 'card'), (46.2, 41.0, 0, 0.8, 'plastic_crate_01', 1.5, 'plastic'),
+        (46.8, 41.3, 0, 0.1, 'plastic_crate_01', 1.5, 'plastic'), (46.5, 41.2, 0.32, 0.4, 'plastic_crate_01', 1.5, 'plastic'), (55.5, 16.0, 0, 0.6, 'plastic_crate_01', 1.5, 'plastic'), (66.0, 18.0, 0, 1.1, 'metal_jerrycan', 8, 'metal'),
+        (66.5, 18.3, 0, 2.1, 'metal_jerrycan', 8, 'metal'), (71.0, 37.0, 0, 1.0, 'cardboard_box_01', 5, 'card'), (71.6, 37.2, 0, 0.3, 'cardboard_box_01', 5, 'card'), (55.0, 36.5, F2, 0.5, 'cardboard_box_01', 4, 'card'),
+        (12.0, 41.0, 0, 0.8, 'plastic_crate_01', 1.5, 'plastic'), (13.0, 40.2, 0, 2.2, 'metal_jerrycan', 8, 'metal'), (3.0, 26.0, 0, 1.0, 'WetFloorSign_01', 1.2, 'plastic'), (62.0, 11.8, 0, 0.4, 'cardboard_box_01', 4, 'card'),
+        (90.0, 26.0, 0, 0.4, 'plastic_crate_01', 1.5, 'plastic'), (89.5, 25.4, 0, 1.0, 'metal_jerrycan', 8, 'metal'), (9.8, 15.5, F2, 0.8, 'SchoolChair_01', 6, 'wood'), (28.5, 19.5, F2, 1.8, 'SchoolChair_01', 6, 'wood'),
+    ):
+        m.loose(n, x, y, z=z, rot=r, kg=kg, surf=sf)
 
     # spawns
     m.spawns['a'] = [[2.5, 4, 0], [4, 7.5, 0], [2.2, 11, 0], [3, 16, 0], [3, 22, 0], [3, 29, 0], [2.5, 36, 0], [10, 35.5, 0]]

@@ -26,14 +26,20 @@ def get(url, path):
 def files(a):
     return json.load(urllib.request.urlopen(urllib.request.Request('https://api.polyhaven.com/files/' + a, headers=UA), timeout=60))
 
+# what fills the screen most comes at 2k, colour and normals; pack.py prefers these
+HERO = '''asphalt_02 clean_asphalt concrete_pavement_02 factory_brick dark_brick_wall brick_wall_001 gravel_concrete hangar_concrete_floor
+concrete_floor_worn_001 blue_plaster_weathered decrepit_wallpaper damaged_plaster grey_plaster corrugated_iron_02 concrete_wall_008'''.split()
+
 def tex(a):
-    d = files(a); res = '1k'
+    d = files(a)
     out = []
-    for k, n in (('Diffuse', 'diff'), ('nor_gl', 'nor'), ('arm', 'arm')):
-        if k in d and res in d[k]:
-            fm = d[k][res]
-            f = fm.get('jpg') or fm.get('png')
-            get(f['url'], f'{ROOT}/tex/{a}_{n}.jpg'); out.append(n)
+    for res, dst, keys in (('1k', 'tex', (('Diffuse', 'diff'), ('nor_gl', 'nor'), ('arm', 'arm'))), ('2k', 'tex2k', (('Diffuse', 'diff'), ('nor_gl', 'nor')))):
+        if dst == 'tex2k' and a not in HERO: continue
+        for k, n in keys:
+            if k in d and res in d[k]:
+                fm = d[k][res]
+                f = fm.get('jpg') or fm.get('png')
+                get(f['url'], f'{ROOT}/{dst}/{a}_{n}.jpg'); out.append(n)
     return a, out
 
 def model(a):

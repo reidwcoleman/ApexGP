@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LF, applyLF } from './lighting.ts';
 import { World, type Box } from './collide.ts';
+import { dress } from './dress.ts';
 
 export const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'lastframe/';
 
@@ -10,7 +11,7 @@ export interface MapData {
   materials: Record<string, { tex: string; scale: number; tint: number[]; rough: number; wet: number; metal: number; nrm: number; emit: number[] | null }>;
   textures: string[];
   colliders: [number, number, number, number, number, number, number, string, string][];
-  props: { id: string; pos: number[]; rot: number; s: number }[];
+  props: { id: string; pos: number[]; rot: number; s: number; tilt?: number; loose?: { kg: number; surf: string; shape: string; half: number[] } }[];
   doors: { axis: string; hinge: number[]; w: number; h: number; sign: number; swing: number; kind: string; t: number }[];
   glass: { axis: string; c: number; a: number; b: number; z0: number; z1: number }[];
   spawns: { a: number[][]; b: number[][]; ffa: number[][] };
@@ -22,23 +23,39 @@ export interface MapData {
 }
 
 export class Door {
-  open = 0;
   want = 0;
   dir = 1;
+  /** radians off the frame, and how fast */
+  ang = 0;
+  w = 0;
+  moving = true;
   readonly pivot = new THREE.Group();
   readonly box: Box;
-  private closedBox: { min: [number, number, number]; max: [number, number, number] };
   readonly centre = new THREE.Vector3();
+  readonly width: number;
+  readonly height: number;
+  readonly alongX: boolean;
+  readonly leafCentre = new THREE.Vector3();
+  readonly leafQuat = new THREE.Quaternion();
+  /** it hit its frame or its stop */
+  onThud: ((d: Door, v: number) => void) | null = null;
+  private axisRot: number;
+  private sign: number;
+  private up = new THREE.Vector3(0, 1, 0);
   constructor(readonly id: number, private d: MapData['doors'][number], mat: THREE.Material, handle: THREE.Material) {
     const [hx, hy, hz] = d.hinge;
+    this.width = d.w;
+    this.height = d.h;
+    this.sign = d.sign;
+    this.alongX = d.axis === 'x';
     this.pivot.position.set(hx, hy, hz);
     const g = new THREE.BoxGeometry(d.w - 0.02, d.h - 0.02, d.t);
     g.translate((d.w / 2) * d.sign, d.h / 2, 0);
     // along x in the map runs along +x in the world; along y (north) runs along -z
-    const axisRot = d.axis === 'x' ? 0 : Math.PI / 2;
+    this.axisRot = this.alongX ? 0 : Math.PI / 2;
     const leaf = new THREE.Mesh(g, mat);
     const inner = new THREE.Group();
-    inner.rotation.y = axisRot;
+    inner.rotation.y = this.axisRot;
     inner.add(leaf);
     for (const s of [-1, 1]) {
       const k = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10), handle);
@@ -49,14 +66,31 @@ export class Door {
       inner.add(k, l);
     }
     this.pivot.add(inner);
-    const a = d.axis === 'x';
-    const p0 = d.sign > 0 ? 0 : -d.w, p1 = d.sign > 0 ? d.w : 0;
-    const t = d.t / 2 + 0.02;
-    this.closedBox = a
-      ? { min: [hx + p0, hy, hz - t], max: [hx + p1, hy + d.h, hz + t] }
-      : { min: [hx - t, hy, hz - p1], max: [hx + t, hy + d.h, hz - p0] };
-    this.box = { min: [...this.closedBox.min], max: [...this.closedBox.max], pen: true, tag: 'door', mat: 'door', id };
-    this.centre.set((this.closedBox.min[0] + this.closedBox.max[0]) / 2, hy + 1, (this.closedBox.min[2] + this.closedBox.max[2]) / 2);
+    this.box = { min: [hx, hy, hz], max: [hx, hy + d.h, hz], pen: true, tag: 'door', mat: 'door', id, slab: { x: hx, z: hz, ux: 1, uz: 0, len: d.w, t: 0.045 }, bump: (px, pz, vx, vz) => this.bump(px, pz, vx, vz) };
+    this.place();
+    const s = this.box.slab!;
+    this.centre.set(hx + s.ux * d.w * 0.5, hy + 1, hz + s.uz * d.w * 0.5);
+  }
+
+  /** the leaf's own frame and bounds, from the angle */
+  private place() {
+    const phi = this.axisRot + this.ang;
+    const ux = Math.cos(phi) * this.sign, uz = -Math.sin(phi) * this.sign;
+    const b = this.box, s = b.slab!;
+    s.ux = ux;
+    s.uz = uz;
+    const [hx, hy, hz] = this.d.hinge;
+    const ex = hx + ux * this.width, ez = hz + uz * this.width, t = s.t + 0.01;
+    b.min = [Math.min(hx, ex) - t, hy, Math.min(hz, ez) - t];
+    b.max = [Math.max(hx, ex) + t, hy + this.height, Math.max(hz, ez) + t];
+    this.leafCentre.set(hx + ux * this.width * 0.5, hy + this.height * 0.5, hz + uz * this.width * 0.5);
+    this.leafQuat.setFromAxisAngle(this.up, phi);
+    this.pivot.rotation.y = this.ang;
+  }
+
+  /** where the leaf wants to be: -dir*sign means dir>0 swings toward +z (or +x) */
+  private target() {
+    return this.want > 0 ? -this.dir * this.sign * 1.72 : 0;
   }
 
   /** swing away from whoever opened it */
@@ -72,47 +106,117 @@ export class Door {
     }
     this.want = 1;
     if (from) {
-      const a = this.d.axis === 'x';
-      const side = a ? Math.sign(from.z - this.centre.z) : Math.sign(from.x - this.centre.x);
+      const side = this.alongX ? Math.sign(from.z - this.centre.z) : Math.sign(from.x - this.centre.x);
       this.dir = -(side || 1);
     }
   }
 
+  /** a force at the leaf, as a change of swing speed */
+  kick(dw: number) {
+    this.w += dw;
+    this.moving = true;
+  }
+
+  /** how a push along (vx, vz), a fraction of the way along the leaf, turns it */
+  private turn(vx: number, vz: number) {
+    const phi = this.axisRot + this.ang;
+    return this.sign * (-Math.sin(phi) * vx - Math.cos(phi) * vz);
+  }
+
+  /** a round through the leaf */
+  shot(dx: number, dz: number, k: number) {
+    if (this.ang === 0 && this.want === 0) return;
+    this.kick(this.turn(dx, dz) * k);
+  }
+
+  private bump(_px: number, _pz: number, vx: number, vz: number) {
+    if (this.ang === 0 && this.want === 0) return;
+    this.kick(this.turn(vx, vz) * 0.14);
+  }
+
+  blown(dir: number, k: number) {
+    this.want = 1;
+    this.dir = dir;
+    this.kick(-dir * this.sign * (5 + k * 9));
+  }
+
   update(dt: number) {
-    const to = this.want;
-    const before = this.open;
-    this.open += Math.sign(to - this.open) * Math.min(Math.abs(to - this.open), dt * 2.6);
-    if (before === this.open) return;
-    const e = this.open * this.open * (3 - 2 * this.open);
-    const a = this.d.axis === 'x';
-    // the leaf turns about the hinge toward dir (world z for a wall along x, world x for a wall along y)
-    const s = this.d.sign;
-    const ang = (a ? -this.dir * s : this.dir * s) * e * 1.72;
-    this.pivot.rotation.y = a ? -ang * -1 : ang;
-    this.pivot.rotation.y = ang;
-    const b = this.box;
-    if (this.open > 0.5) {
-      const [hx, hy, hz] = this.d.hinge;
-      const w = this.d.w, t = 0.05;
-      if (a) {
-        const z0 = this.dir > 0 ? hz : hz - w, z1 = this.dir > 0 ? hz + w : hz;
-        b.min = [hx - t, hy, z0];
-        b.max = [hx + t, hy + this.d.h, z1];
-      } else {
-        const x0 = this.dir > 0 ? hx : hx - w, x1 = this.dir > 0 ? hx + w : hx;
-        b.min = [x0, hy, hz - t];
-        b.max = [x1, hy + this.d.h, hz + t];
+    const to = this.target();
+    if (!this.moving && to === this.ang) return;
+    // a door closer more than a motor: quick to get there, a little overshoot on the stop
+    const k = this.want > 0 ? 24 : 15, c = this.want > 0 ? 7 : 5.4;
+    const n = 2, h = dt / n;
+    for (let i = 0; i < n; i++) {
+      this.w += (k * (to - this.ang) - c * this.w) * h;
+      const before = this.ang;
+      this.ang += this.w * h;
+      // the latch: coming back through the frame it stops dead
+      if (this.want === 0 && before * this.ang <= 0 && before !== 0) {
+        if (Math.abs(this.w) > 0.9) this.onThud?.(this, Math.abs(this.w));
+        this.ang = 0;
+        this.w = 0;
       }
-    } else {
-      b.min = [...this.closedBox.min];
-      b.max = [...this.closedBox.max];
+      const stop = 1.98;
+      if (Math.abs(this.ang) > stop) {
+        if (Math.abs(this.w) > 1.5) this.onThud?.(this, Math.abs(this.w) * 0.6);
+        this.ang = Math.sign(this.ang) * stop;
+        this.w *= -0.3;
+      }
     }
+    if (Math.abs(this.w) < 0.004 && Math.abs(to - this.ang) < 0.002) {
+      this.ang = to;
+      this.w = 0;
+      this.moving = false;
+    } else this.moving = true;
+    this.place();
   }
 }
 
 export class Pane {
   broken = false;
-  constructor(readonly id: number, readonly mesh: THREE.Mesh, readonly box: Box) {}
+  /** what stays in the frame */
+  teeth: THREE.Mesh | null = null;
+  constructor(readonly id: number, readonly mesh: THREE.Mesh, readonly box: Box, readonly along: 'x' | 'y') {}
+
+  /** jagged glass left in the putty, on all four sides */
+  breakTeeth(mat: THREE.Material) {
+    const g = this.mesh.geometry as THREE.BoxGeometry;
+    const p = g.parameters;
+    const w = this.along === 'x' ? p.width : p.depth, h = p.height;
+    const pos: number[] = [];
+    const edge = (ax: number, ay: number, bx: number, by: number, nx: number, ny: number) => {
+      const L = Math.hypot(bx - ax, by - ay);
+      let t = 0;
+      while (t < L) {
+        const s = 0.06 + Math.random() * 0.26;
+        const e = Math.min(L, t + s);
+        const tip = (t + e) / 2 + (Math.random() - 0.5) * s;
+        const d = Math.random() < 0.3 ? 0.012 : 0.03 + Math.random() ** 2 * 0.3;
+        const ux = (bx - ax) / L, uy = (by - ay) / L;
+        pos.push(ax + ux * t, ay + uy * t, 0, ax + ux * e, ay + uy * e, 0, ax + ux * tip + nx * d, ay + uy * tip + ny * d, 0);
+        t = e;
+      }
+    };
+    edge(-w / 2, -h / 2, w / 2, -h / 2, 0, 1);
+    edge(w / 2, h / 2, -w / 2, h / 2, 0, -1);
+    edge(-w / 2, h / 2, -w / 2, -h / 2, 1, 0);
+    edge(w / 2, -h / 2, w / 2, h / 2, -1, 0);
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    bg.computeVertexNormals();
+    const m = new THREE.Mesh(bg, mat);
+    m.position.copy(this.mesh.position);
+    if (this.along === 'y') m.rotation.y = Math.PI / 2;
+    m.renderOrder = 4;
+    this.mesh.parent?.add(m);
+    this.teeth = m;
+  }
+
+  mend() {
+    this.teeth?.removeFromParent();
+    this.teeth?.geometry.dispose();
+    this.teeth = null;
+  }
 }
 
 export interface Loaded {
@@ -122,6 +226,11 @@ export interface Loaded {
   doors: Door[];
   panes: Pane[];
   sky: THREE.Texture;
+  /** the props nobody bolted down, ready to be given bodies */
+  loose: { obj: THREE.Object3D; def: NonNullable<MapData['props'][number]['loose']>; x: number; y: number; z: number; rot: number }[];
+  glassMat: THREE.Material;
+  /** what the street's reflection never needs to draw */
+  indoors: THREE.Object3D[];
 }
 
 function makeSky(tex: THREE.Texture, lm: MapData['lm']) {
@@ -181,7 +290,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     let m = mats.get(name);
     if (m) return m;
     const d = map.materials[name];
-    if (d.emit) m = new THREE.MeshBasicMaterial({ color: new THREE.Color(d.emit[0], d.emit[1], d.emit[2]) });
+    if (d.emit) m = new THREE.MeshBasicMaterial({ color: new THREE.Color(d.emit[0], d.emit[1], d.emit[2]).multiplyScalar(0.5) });
     else {
       const st = new THREE.MeshStandardMaterial({
         map: texs.get(`tex/${d.tex}_c.webp`) ?? null, normalMap: texs.get(`tex/${d.tex}_n.webp`) ?? null, roughnessMap: texs.get(`tex/${d.tex}_a.webp`) ?? null, aoMap: texs.get(`tex/${d.tex}_a.webp`) ?? null,
@@ -213,13 +322,31 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const byId = new Map<string, THREE.Object3D>();
   for (const c of gl.scene.children) byId.set(c.name, c);
   const placed = new Map<string, MapData['props']>();
+  const loose: Loaded['loose'] = [];
   for (const p of map.props) {
+    if (p.loose) continue;
     const l = placed.get(p.id);
     if (l) l.push(p);
     else placed.set(p.id, [p]);
   }
-  const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), RIGHT = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const indoors: THREE.Object3D[] = [];
+  const insideZone = (p: number[]) => map.zones.some((z) => p[0] > z.a[0] && p[0] < z.b[0] && p[2] > z.a[2] && p[2] < z.b[2]);
   const prepared = new Set<THREE.Material>();
+  const prep = (mat: THREE.MeshStandardMaterial, id = '') => {
+    if (prepared.has(mat)) return;
+    prepared.add(mat);
+    // the cubes are coarser than the corners these stand in: pale things would glow
+    mat.color.multiplyScalar(/cardboard|rollershutter/.test(id) ? 0.5 : /crate|shelves|barrier/.test(id) ? 0.72 : 0.85);
+    applyLF(mat, {});
+    for (const t of [mat.map, mat.normalMap, mat.roughnessMap]) if (t) t.anisotropy = 4;
+    // scans with holes in them (chain link, grates): cut, don't blend
+    if (mat.transparent || mat.alphaTest > 0) {
+      mat.transparent = false;
+      mat.alphaTest = 0.5;
+      mat.side = THREE.DoubleSide;
+    }
+  };
   for (const [id, list] of placed) {
     const src = byId.get(id) ?? byId.get(id.replace(/[.\s]/g, '_'));
     if (!src) {
@@ -230,21 +357,48 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       const mesh = o as THREE.Mesh;
       if (!mesh.isMesh) return;
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      if (!prepared.has(mat)) {
-        prepared.add(mat);
-        applyLF(mat, {});
-        for (const t of [mat.map, mat.normalMap, mat.roughnessMap]) if (t) t.anisotropy = 4;
+      prep(mat, id);
+      // a block of the map each, so what's behind the camera or across the block isn't drawn three times over
+      const cells = new Map<string, MapData['props']>();
+      for (const p of list) {
+        const k = `${Math.floor(p.pos[0] / 18)},${Math.floor(p.pos[2] / 18)},${insideZone(p.pos) ? 1 : 0}`;
+        const c = cells.get(k);
+        if (c) c.push(p);
+        else cells.set(k, [p]);
       }
-      const inst = new THREE.InstancedMesh(mesh.geometry, mat, list.length);
       const local = mesh.matrixWorld.clone();
-      list.forEach((p, i) => {
-        q.setFromAxisAngle(UP, p.rot);
-        mtx.compose(v.set(p.pos[0], p.pos[1], p.pos[2]), q, sc.setScalar(p.s)).multiply(local);
-        inst.setMatrixAt(i, mtx);
-      });
-      inst.frustumCulled = false;
-      group.add(inst);
+      for (const part of cells.values()) {
+        const inst = new THREE.InstancedMesh(mesh.geometry, mat, part.length);
+        part.forEach((p, i) => {
+          q.setFromAxisAngle(UP, p.rot);
+          if (p.tilt) q.multiply(q2.setFromAxisAngle(RIGHT, p.tilt));
+          mtx.compose(v.set(p.pos[0], p.pos[1], p.pos[2]), q, sc.setScalar(p.s)).multiply(local);
+          inst.setMatrixAt(i, mtx);
+        });
+        inst.computeBoundingSphere();
+        group.add(inst);
+        if (insideZone(part[0].pos)) indoors.push(inst);
+      }
     });
+  }
+  for (const p of map.props) {
+    if (!p.loose) continue;
+    const src = byId.get(p.id) ?? byId.get(p.id.replace(/[.\s]/g, '_'));
+    if (!src) continue;
+    // a pivot at the middle of its box: the model hangs below it
+    const obj = new THREE.Group();
+    const inner = src.clone();
+    inner.position.set(0, -p.loose.half[2], 0);
+    inner.rotation.set(0, 0, 0);
+    inner.scale.setScalar(p.s);
+    inner.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      prep(m.material as THREE.MeshStandardMaterial, p.id);
+      m.castShadow = true;
+    });
+    obj.add(inner);
+    loose.push({ obj, def: p.loose, x: p.pos[0], y: p.pos[1], z: p.pos[2], rot: p.rot });
   }
   progress(0.85, 'Collision');
   const world = new World();
@@ -276,7 +430,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       max: g.axis === 'x' ? [g.b, g.z1, -g.c + 0.03] : [g.c + 0.03, g.z1, -g.a], pen: true, tag: 'glass', mat: 'glass', id: i,
     };
     world.dyn.push(box);
-    return new Pane(i, mesh, box);
+    return new Pane(i, mesh, box, g.axis as 'x' | 'y');
   });
   // what glows: tube covers and bulbs, so the bloom has something to hold on to
   const tube = new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 8, 9) });
@@ -297,8 +451,11 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     }
     group.add(mesh);
   }
+  const deco = new THREE.Group();
+  group.add(deco);
+  dress(deco);
   progress(0.92, 'Light');
-  return { group, world, map, doors, panes, sky: skyT };
+  return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors };
 }
 
 /** the ambient cubes; flat until a capture has been shipped */
@@ -331,6 +488,29 @@ export async function loadVolume(): Promise<void> {
   t.unpackAlignment = 1;
   t.needsUpdate = true;
   LF.vol.value = t;
+  // the mean of the six faces, for the air: decoded, averaged, encoded again
+  const [dx, dy, dz] = dim;
+  const cells = dx * dy * dz;
+  const avg = new Uint8Array(cells * 4);
+  const R = LF.lmK.value.x, K = LF.lmK.value.y;
+  const dec = (e: number) => (2 ** ((e / 255) * R) - 1) / K;
+  const enc = (v: number) => (Math.log2(1 + v * K) / R) * 255;
+  for (let i = 0; i < cells; i++) {
+    for (let c = 0; c < 3; c++) {
+      let s = 0;
+      for (let f = 0; f < 6; f++) s += dec(data[(f * cells + i) * 4 + c]);
+      avg[i * 4 + c] = Math.min(255, enc(s / 6) + 0.5);
+    }
+    avg[i * 4 + 3] = 255;
+  }
+  const a = new THREE.Data3DTexture(avg, dx, dy, dz);
+  a.format = THREE.RGBAFormat;
+  a.type = THREE.UnsignedByteType;
+  a.minFilter = a.magFilter = THREE.LinearFilter;
+  a.wrapS = a.wrapT = a.wrapR = THREE.ClampToEdgeWrapping;
+  a.unpackAlignment = 1;
+  a.needsUpdate = true;
+  LF.volAvg.value = a;
   LF.volMin.value.set(min[0], min[1], min[2]);
   LF.volInv.value.set(1 / (max[0] - min[0]), 1 / (max[1] - min[1]), 1 / (max[2] - min[2]));
   LF.volDim.value.set(dim[0], dim[1], dim[2]);

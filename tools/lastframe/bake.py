@@ -237,9 +237,11 @@ def load_part(name, part):
     return o
 for p in m.props:
     src = load_part(p['name'], p['part'])
+    if p['loose']:      # it will move: no baked shadow to leave behind
+        continue
     o = src.copy()      # linked data
     scene.collection.objects.link(o)
-    o.location = p['pos']; o.rotation_euler = (0, 0, p['rot']); o.scale = (p['scale'],) * 3
+    o.location = p['pos']; o.rotation_euler = (p['tilt'], 0, p['rot']); o.scale = (p['scale'],) * 3
 log('props', len(m.props), 'unique', len(cache))
 
 # ------------------------------------------------------------------ light
@@ -260,7 +262,7 @@ for L in m.lights: add_light(L)
 w = bpy.data.worlds.new('sky'); scene.world = w; w.use_nodes = True
 nt = w.node_tree
 env = nt.nodes.new('ShaderNodeTexEnvironment'); env.image = bpy.data.images.load(f'{ROOT}/hdri/rooftop_night.hdr')
-bg = nt.nodes['Background']; bg.inputs['Strength'].default_value = opt('sky', 2.0)
+bg = nt.nodes['Background']; bg.inputs['Strength'].default_value = opt('sky', 2.6)
 mixc = nt.nodes.new('ShaderNodeMix'); mixc.data_type = 'RGBA'; mixc.blend_type = 'MULTIPLY'; mixc.inputs['Factor'].default_value = 1.0
 mixc.inputs['B'].default_value = (0.36, 0.62, 1.05, 1)    # pull the sunset down to blue hour
 nt.links.new(env.outputs['Color'], mixc.inputs['A'])
@@ -293,13 +295,17 @@ for p in m.props:
     k = (p['name'], p['part'])
     h = np.array(bbox[k]) * p['scale']
     c = p['collide']
-    if c is not False:
+    if c is not False and not p['loose']:
         hx, hy, hz = c if c else h
         cs, sn = abs(math.cos(p['rot'])), abs(math.sin(p['rot']))
         ex, ey = hx * cs + hy * sn, hx * sn + hy * cs
         x, y, z = p['pos']
         colliders.append(dict(a=(x - ex, y - ey, z), b=(x + ex, y + ey, z + hz * 2), pen=not p['hard'], tag='prop', mat=''))
-    props_out.append(dict(id=f"{p['name']}|{p['part'] or 'all'}", pos=p['pos'], rot=p['rot'], s=p['scale']))
+    e = dict(id=f"{p['name']}|{p['part'] or 'all'}", pos=p['pos'], rot=p['rot'], s=p['scale'])
+    if p['tilt']: e['tilt'] = p['tilt']
+    if p['loose']:
+        e['loose'] = dict(p['loose'], half=[float(v) for v in h])
+    props_out.append(e)
 json.dump(dict(mats=meta, colliders=colliders, props=props_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
                density=dens, size=SIZE), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')

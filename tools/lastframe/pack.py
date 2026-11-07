@@ -17,7 +17,7 @@ def enc(a):
 
 lm = np.load(f'{OUT}/lightmap.npy').astype(np.float32)[::-1]    # blender rows run bottom-up
 print('lightmap', lm.shape, 'mean', lm.mean(), 'p99', np.percentile(lm, 99), 'max', lm.max())
-Image.fromarray((enc(lm) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm.webp', quality=int(os.environ.get('LMQ', 90)), method=4)
+Image.fromarray((enc(lm) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
 sky = np.load(f'{OUT}/sky.npy').astype(np.float32)[::-1]
 Image.fromarray((enc(sky) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/sky.webp', quality=88, method=4)
 
@@ -36,7 +36,7 @@ for d in raw['doors']:
 glass = []
 for g in raw['glass']:
     glass.append(dict(axis=g['axis'], c=g['c'], a=g['a'], b=g['b'], z0=g['z0'], z1=g['z1']))
-out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props=[dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']) for p in raw['props']], doors=doors, glass=glass,
+out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass,
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
            lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power']) for l in raw['lights']],
@@ -49,8 +49,12 @@ if '--tex' in sys.argv:
     for t in tex:
         for suf, n, q in (('diff', 'c', 80), ('nor', 'n', 86), ('arm', 'a', 70)):
             s = f'{SRC}/{t}_{suf}.jpg'
+            s2 = f'{SRC}2k/{t}_{suf}.jpg'
+            if os.path.exists(s2):
+                s = s2
+                q = 66 if n == 'c' else 72
             if os.path.exists(s):
-                subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '4', s, '-o', f'{DST}/tex/{t}_{n}.webp'], check=True)
+                subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '6', s, '-o', f'{DST}/tex/{t}_{n}.webp'], check=True)
             elif n == 'a':
                 # some scans ship no packed map: flat AO 1, roughness 0.85
                 Image.new('RGB', (4, 4), (255, 217, 0)).save(f'{DST}/tex/{t}_a.webp', lossless=True)
