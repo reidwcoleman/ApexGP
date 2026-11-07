@@ -995,11 +995,12 @@ export class Game {
     if (!this.frozen) {
       const out = !this.L.map.terrain && !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
       this.planar.render(this.scene, this.cam, this.planarHide(), out);
+      // after the mirror, which puts back whatever it hid
+      const cp = this.cam.position;
+      for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach;
       if (this.sun) {
         this.sun.update(this.cam.position, this.time);
         this.L.grass?.update(this.cam);
-        const cp = this.cam.position;
-        for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach;
         this.ride(this.time);
         this.lensFlare(dt);
       }

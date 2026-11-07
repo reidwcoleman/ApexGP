@@ -204,7 +204,7 @@ export function buildSea(t: Terrain, hTex: THREE.Texture, foamNear: THREE.Textur
         lace += ( texture2D( tN, p * 0.09 + flow * 2.0 ).r - 0.5 ) * 0.5;
         float foam = smoothstep( 0.84 - want, 1.2 - want, lace ) * clamp( want * 3.0, 0.0, 1.0 );
         // old foam, drifting in long fading streaks beyond the break
-        float drift = smoothstep( 0.6, 0.76, texture2D( tFoam, p * 0.05 + vec2( flow * 0.5, flow ) ).r ) * smoothstep( 16.0, 2.0, d ) * smoothstep( 0.4, 0.6, wob ) * 0.3;
+        float drift = smoothstep( 0.52, 0.64, texture2D( tN, vec2( p.x * 0.05 + p.y * 0.012, p.y * 0.016 ) + flow * 0.6 ).r ) * smoothstep( 0.46, 0.6, texture2D( tN, p * 0.17 - flow ).r ) * smoothstep( 16.0, 2.0, d ) * smoothstep( 0.4, 0.6, wob ) * 0.34;
         foam = max( foam, drift * near );
         vec3 white = vec3( 0.8, 0.84, 0.84 ) * ( amb * 1.1 + lfSunC * lfSunDir.y * vis * 0.26 );
         c = mix( c, white, foam );

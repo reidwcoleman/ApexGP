@@ -121,7 +121,7 @@ export class Grass {
           float tuft = texture2D( tN, root * 0.11 ).r;
           // grazed short where it's flat, long and rank on the banks, and in tussocks everywhere
           float ground = texture2D( tH, uv ).r;
-          float H = ( 0.1 + 0.24 * aRnd.y * aRnd.y + 0.34 * smoothstep( 0.5, 0.72, tuft ) * aRnd.y ) * ( 0.75 + 0.9 * smoothstep( 0.42, 0.62, clump ) );
+          float H = ( 0.13 + 0.24 * aRnd.y * aRnd.y + 0.34 * smoothstep( 0.5, 0.72, tuft ) * aRnd.y ) * ( 0.75 + 0.9 * smoothstep( 0.42, 0.62, clump ) );
           H *= smoothstep( 0.3, 0.72, gr ) * fade;
           if ( H < 0.015 || ground < 0.4 ) { gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); vC = vec3( 0.0 ); return; }
           float t = position.y;

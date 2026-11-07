@@ -393,6 +393,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), RIGHT = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
   const indoors: THREE.Object3D[] = [];
   const insideZone = (p: number[]) => map.zones.some((z) => p[0] > z.a[0] && p[0] < z.b[0] && p[2] > z.a[2] && p[2] < z.b[2]);
+  const vegCells: Loaded['vegCells'] = [];
   const prepared = new Set<THREE.Material>();
   const prep = (mat: THREE.MeshStandardMaterial, id = '') => {
     if (prepared.has(mat)) return;
@@ -438,12 +439,18 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         });
         inst.computeBoundingSphere();
         group.add(inst);
-        if (insideZone(part[0].pos)) indoors.push(inst);
+        const inside = insideZone(part[0].pos);
+        if (inside) indoors.push(inst);
+        // a thing the size of a tin can is nothing from across the street, and nothing indoors shows from far off at all
+        mesh.geometry.computeBoundingSphere();
+        const size = mesh.geometry.boundingSphere!.radius * local.getMaxScaleOnAxis() * part[0].s;
+        const reach = size < 0.22 ? 30 : size < 0.6 ? 55 : size < 1.5 ? 105 : 1e4;
+        const bs = inst.boundingSphere!;
+        vegCells.push({ mesh: inst, x: bs.center.x, z: bs.center.z, reach: (inside ? Math.min(reach, 34) : reach) + bs.radius });
       }
     });
   }
   const floats: Loaded['floats'] = [];
-  const vegCells: Loaded['vegCells'] = [];
   // ---- the kit: instanced by module, in blocks of the map, each instance on its own lightmap tile
   {
     const glass = roomGlass();
