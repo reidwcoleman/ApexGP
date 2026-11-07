@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CourseBuilder } from './builder.ts';
 import type { Course } from './courses.ts';
 import { KartTrack, KERB } from './kart-track.ts';
-import { BEAN_BAY } from './kart-layout.ts';
+import { BEAN_BAY, BEAN_PADS } from './kart-layout.ts';
 import { RACE, type Racer } from './kart-race.ts';
 import { dressScenery, type Land } from './kart-scenery.ts';
 
@@ -24,6 +24,8 @@ export interface KartArena {
   bind(all: Racer[]): void;
   /** the gantry: this many reds on (0..5), or the green */
   lights(n: number, green: boolean): void;
+  /** the land's height at a spot */
+  land: Land;
 }
 
 const V = new THREE.Vector3();
@@ -204,7 +206,7 @@ export function beanBayGP(info: { name: string; blurb: string }): Course {
   const b = new CourseBuilder();
   const y0 = 40, center = new THREE.Vector3(-10, y0, 0);
   b.lakeY = y0 - 13;
-  const tr = new KartTrack(BEAN_BAY, new THREE.Vector3(0, y0, 0));
+  const tr = new KartTrack(BEAN_BAY, new THREE.Vector3(0, y0, 0), BEAN_PADS);
   const n = tr.n;
   const state = { go: 1e9 };
   const time = { value: 0 };
@@ -303,6 +305,40 @@ diffuseColor.rgb *= 0.74 + 0.5 * texture2D(map, vMapUv * 0.11).g + 0.3 * (textur
     mesh.frustumCulled = false;
     b.group.add(mesh);
   }
+  // ---- the boost pads: chevrons running up the road
+  {
+    const m = new THREE.ShaderMaterial({
+      uniforms: { uT: time },
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+      toneMapped: false,
+      vertexShader: `varying vec2 vP;
+void main() { vP = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `varying vec2 vP;
+uniform float uT;
+void main() {
+  // vP.x across (-1..1), vP.y along (0..1)
+  float c = fract((vP.y * 3.2 - abs(vP.x) * 0.62) - uT * 1.5);
+  float arrow = smoothstep(0.0, 0.05, c) * (1.0 - smoothstep(0.42, 0.47, c));
+  float edge = smoothstep(0.86, 0.9, abs(vP.x)) + smoothstep(0.93, 0.97, abs(vP.y * 2.0 - 1.0));
+  vec3 lit = mix(vec3(0.05, 0.95, 0.72), vec3(1.0, 1.0, 0.75), arrow);
+  float glow = 0.5 + 0.5 * sin(uT * 7.0);
+  gl_FragColor = vec4(lit * (1.15 + 0.3 * glow), 0.58 + 0.42 * max(arrow, min(edge, 1.0)));
+}`,
+    });
+    for (const p of tr.pads) {
+      const g = sweep(tr, p.s, p.s + p.len, 0.5, () => [[p.lat + p.w, 0.03], [p.lat, 0.03], [p.lat - p.w, 0.03]], (_i, k, s) => [1 - k, (s - p.s) / p.len]);
+      g.index!.array.reverse();
+      g.computeVertexNormals();
+      const mesh = new THREE.Mesh(g, m);
+      mesh.renderOrder = 3;
+      mesh.frustumCulled = false;
+      b.group.add(mesh);
+    }
+  }
   // ---- the island
   const land = island(b, tr, y0, b.lakeY, turf);
   // ---- the barriers
@@ -351,6 +387,7 @@ diffuseColor.rgb *= 0.74 + 0.5 * texture2D(map, vMapUv * 0.11).g + 0.3 * (textur
         for (const r of all) byId.set(r.id, r);
       },
       lights: gantry.lights,
+      land,
     },
     intro: [],
   };
@@ -452,7 +489,8 @@ function island(b: CourseBuilder, tr: KartTrack, y0: number, sea: number, turf: 
 
 /** Armco on the straights, tyre walls on the outside of the bends, concrete on the banking */
 function barriers(b: CourseBuilder, tr: KartTrack) {
-  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ced6, metalness: 0.85, roughness: 0.36 });
+  // (two-sided: a barrier you can only see from behind is an invisible wall to everyone driving at it)
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ced6, metalness: 0.55, roughness: 0.42, side: THREE.DoubleSide });
   const conc = new THREE.MeshStandardMaterial({ color: 0xf1ede4, roughness: 0.78 });
   const n = tr.n;
   const post: THREE.Matrix4[] = [], tyres: { m: THREE.Matrix4; c: number }[] = [], fence: [number, number][] = [];
@@ -462,7 +500,8 @@ function barriers(b: CourseBuilder, tr: KartTrack) {
     const offset = (i: number) => side * (wall[i] + 0.12);
     // the two steel rails, all the way round (the tunnel has its own walls)
     for (const up of [0.42, 0.78]) {
-      const g = sweep(tr, 0, n, 1, (i) => [[offset(i), up - 0.17], [offset(i), up], [offset(i), up + 0.17]]);
+      // (a W-beam: pressed in along the middle, so it catches the light in two lines)
+      const g = sweep(tr, 0, n, 1, (i) => [[offset(i) - side * 0.04, up - 0.17], [offset(i) + side * 0.03, up - 0.05], [offset(i) + side * 0.03, up + 0.05], [offset(i) - side * 0.04, up + 0.17]]);
       if (side > 0) g.index!.array.reverse();
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, steel);
@@ -506,7 +545,8 @@ function barriers(b: CourseBuilder, tr: KartTrack) {
       if (!outside || Math.abs(tr.curve[i]) < 0.016 || tr.tunnel[i] || tr.raised[i]) continue;
       colour++;
       for (let row = 0; row < 3; row++) {
-        tr.point(s, side * (wall[i] - 0.34), 0.13 + row * 0.27, V);
+        // (their faces where the kart actually stops, so nothing drives into them)
+        tr.point(s, side * (wall[i] + 0.4), 0.13 + row * 0.27, V);
         M.makeTranslation(V.x, V.y, V.z);
         tyres.push({ m: M.clone(), c: Math.floor(colour / 5) % 2 });
       }
@@ -518,14 +558,14 @@ function barriers(b: CourseBuilder, tr: KartTrack) {
   pm.castShadow = true;
   pm.frustumCulled = false;
   b.group.add(pm);
-  const tg = new THREE.TorusGeometry(0.34, 0.13, 6, 12).rotateX(Math.PI / 2);
+  const tg = new THREE.TorusGeometry(0.34, 0.13, 5, 10).rotateX(Math.PI / 2);
   const tm = new THREE.InstancedMesh(tg, new THREE.MeshStandardMaterial({ roughness: 0.62 }), tyres.length);
   const C = new THREE.Color();
   tyres.forEach((t, i) => {
     tm.setMatrixAt(i, t.m);
     tm.setColorAt(i, C.set(t.c ? 0xf0efe8 : 0xd8302f));
   });
-  tm.castShadow = true;
+  // (no shadow: every one of these is drawn again for each shadow cascade, and they're low and hug the rail)
   tm.frustumCulled = false;
   b.group.add(tm);
   // the catch fence on top of the concrete

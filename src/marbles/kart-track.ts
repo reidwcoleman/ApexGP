@@ -34,6 +34,14 @@ export const SURF = [
 
 export const KERB = 1.15;
 
+/** a boost pad: from `s` for `len` metres, centred `lat` from the middle, `w` either side */
+export interface Pad {
+  s: number;
+  len: number;
+  lat: number;
+  w: number;
+}
+
 /** what `at` answers with */
 export interface Probe {
   /** nearest sample, and where along and across */
@@ -77,7 +85,7 @@ export class KartTrack {
   /** the fastest line: offset from the middle at each sample (+ left) */
   readonly line: Float32Array;
 
-  constructor(pts: TrackPoint[], origin: THREE.Vector3) {
+  constructor(pts: TrackPoint[], origin: THREE.Vector3, readonly pads: Pad[] = []) {
     // ---- the spline: dense, then resampled by arc length
     const m = pts.length;
     const dense: { x: number; y: number; z: number; k: number }[] = [];

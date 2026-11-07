@@ -95,12 +95,43 @@ export const KART = {
   driftAngle: [0.26, 0.5],
   driftP: 1.1,
   driftD: 0.14,
+  /**
+   * what a keyboard can't feel for: how hard a drift pulls into the bend (m/s²) with the hands out,
+   * neutral and full in. Full in is past what the tyres do on grip, so a held drift goes round
+   * tighter than driving it, and that's what makes it worth doing. The most the pull can add (N),
+   * how quickly the nose chases its angle (per second), how hard it's held there, and the limit (Nm)
+   */
+  driftA: [6, 12, 18],
+  driftF: 2300,
+  driftB: 5,
+  driftR: 12,
+  driftT: 2800,
+  unwindT: 0.28,
   kick: 300,
   kickT: 0.12,
-  charge: [0.75, 1.6],
-  boostT: [0.55, 1.05],
+  /** the little bounce a drift starts with (m/s up) */
+  hop: 1.15,
+  /** how long a drift must be held for each level of boost, and how long each level lasts */
+  charge: [0.6, 1.25, 2.1],
+  boostT: [0.55, 0.95, 1.4],
+  /** a boost: extra torque, and a shove down the kart's nose that fades out by this speed */
   boostK: 1.5,
+  boostF: 1500,
+  boostTop: 47,
+  /** boost pads, a trick off a jump, a perfect start, a slingshot out of a wake */
+  padT: 0.85,
+  trickT: 0.44,
+  trickBoost: 0.8,
+  launchT: 1.05,
+  /** the last red light's this long: the gas down inside it is a perfect start */
+  launchWin: 0.62,
+  bogT: 0.7,
+  settleT: 0.34,
+  slingT: 0.75,
 };
+
+/** what set off the last boost (the game's calls and the flame's colour) */
+export const Boost = { None: 0, Drift1: 1, Drift2: 2, Drift3: 3, Pad: 4, Trick: 5, Start: 6, Sling: 7 } as const;
 
 export interface KartInput {
   /** -1 left .. 1 right */
@@ -181,11 +212,25 @@ export class Kart {
   drifting = false;
   level = 0;
   boost = 0;
+  /** the boost running now (for its colour): a Boost */
+  boostKind = 0;
+  /** seconds left of settling after a landing */
+  private settle = 0;
+  /** a flick of DRIFT in the air: how far round the spin is (0..1, 0: none), and which way */
+  trick = 0;
+  trickDir = 1;
+  private tricked = false;
+  /** the launch fluffed: this long with the clutch slipping */
+  bog = 0;
+  /** seconds in the air on the last jump */
+  jump = 0;
   private kick = 0;
   private held = false;
   private betaLast = 0;
   private betaRate = 0;
   private driftDir = 0;
+  /** just out of a drift: the nose is brought back in line with where it's going */
+  private unwind = 0;
   /** the driver's right foot and left: eased off when the tyres start to go */
   private tc = 1;
   private abs = 1;
@@ -233,7 +278,9 @@ export class Kart {
     this.ang.set(0, 0, 0);
     this.rearGrip = 1;
     this.drifting = false;
-    this.driftT = this.level = this.boost = this.kick = 0;
+    this.driftDir = this.unwind = 0;
+    this.driftT = this.level = this.boost = this.kick = this.boostKind = this.trick = this.bog = this.settle = 0;
+    this.tricked = false;
     this.gear = 1;
     this.rpm = KART.idle;
     for (const w of this.wheels) {
@@ -246,6 +293,13 @@ export class Kart {
     tr.at(this.pos.x, this.pos.y, this.pos.z, i, this.q);
   }
 
+  /** a boost, whatever gave it */
+  give(t: number, kind: number) {
+    this.boost = Math.max(this.boost, t);
+    this.boostKind = kind;
+    this.fired = kind;
+  }
+
   /** a hit at a point (world): impulse (j) on a body with this inertia */
   impulse(px: number, py: number, pz: number, jx: number, jy: number, jz: number) {
     const K = KART, p = this.pos;
@@ -255,6 +309,14 @@ export class Kart {
     const rx = px - p.x, ry = py - p.y, rz = pz - p.z;
     const tx = ry * jz - rz * jy, ty = rz * jx - rx * jz, tz = rx * jy - ry * jx;
     this.spinBy(tx, ty, tz);
+  }
+  /** a bump from another kart: flat along the road, with only part of its leverage going into a spin */
+  shove(px: number, pz: number, jx: number, jz: number, twist: number) {
+    const K = KART, p = this.pos;
+    this.vel.x += jx / K.mass;
+    this.vel.z += jz / K.mass;
+    const ty = (pz - p.z) * jx - (px - p.x) * jz;
+    this.spinBy(0, ty * twist, 0);
   }
   /** an angular impulse through the inverse inertia, which lives in the kart's frame */
   private spinBy(tx: number, ty: number, tz: number) {
@@ -271,6 +333,12 @@ export class Kart {
     const cx = ry * nz - rz * ny, cy = rz * nx - rx * nz, cz = rx * ny - ry * nx;
     const a = cx * ax.x + cy * ax.y + cz * ax.z, b = cx * ay.x + cy * ay.y + cz * ay.z, c = cx * az.x + cy * az.y + cz * az.z;
     return 1 / K.mass + (a * a) / K.Ip + (b * b) / K.Iy + (c * c) / K.Ir;
+  }
+
+  /** the angle a drift's holding: the hands set it, wider held in, gentler let out */
+  private driftAim() {
+    const K = KART, inward = THREE.MathUtils.clamp(this.hands * this.driftDir, -1, 1);
+    return this.driftDir * (K.driftAngle[0] + (K.driftAngle[1] - K.driftAngle[0]) * Math.max(0, inward)) * (inward < -0.3 ? 0.55 : 1);
   }
 
   /** the frame from the orientation (for a kart the network moved) */
@@ -332,18 +400,21 @@ export class Kart {
     // castor: left alone the fronts swing toward the way the kart's actually going
     const trail = v > 5 ? THREE.MathUtils.clamp(this.beta, -0.7, 0.7) * K.castor * Math.min(1, (v - 5) / 4) : 0;
     let want = THREE.MathUtils.clamp(-this.hands * lock + (this.vf > 0 ? trail : 0), -K.lock - 0.1, K.lock + 0.1);
+    // (the fronts castor straight in the air, and come back in as the kart settles on landing: a
+    // full lock arriving on the road at speed would throw it straight round)
+    if (!inp.drift) {
+      if (this.air > 0.05) want = 0;
+      else if (this.settle > 0) want *= 1 - 0.8 * Math.min(1, this.settle / K.settleT);
+    }
     // a keyboard can't catch a slide by feel, so in a drift the hands set the ANGLE you want and the
     // fronts are worked to hold it: countersteer toward the slide, damped by how fast it's changing
     const db = (this.beta - this.betaLast) / h;
     this.betaLast = this.beta;
     this.betaRate += (db - this.betaRate) * Math.min(1, h * 30);
-    if (this.rearGrip < 0.965 && v > 5 && this.vf > 0) {
-      if (!this.driftDir) this.driftDir = Math.sign(this.hands || this.beta) || 1;
-      const inward = THREE.MathUtils.clamp(this.hands * this.driftDir, -1, 1);
-      const target = this.driftDir * (K.driftAngle[0] + (K.driftAngle[1] - K.driftAngle[0]) * Math.max(0, inward)) * (inward < -0.3 ? 0.4 : 1);
-      want = this.beta * 0.92 + (this.beta - target) * K.driftP + this.betaRate * K.driftD;
+    if (this.driftDir && v > 5 && this.vf > 0) {
+      want = this.beta * 0.92 + (this.beta - this.driftAim()) * K.driftP + this.betaRate * K.driftD;
       want = THREE.MathUtils.clamp(want, -K.lock - 0.15, K.lock + 0.15);
-    } else this.driftDir = 0;
+    }
     this.delta += (want - this.delta) * Math.min(1, h * 30);
     // Ackermann: the inside front turns tighter than the outside one
     const L = K.a + K.b, tn = Math.tan(this.delta), half = (K.trackF / 2) * tn;
@@ -364,25 +435,47 @@ export class Kart {
     if (!inp.drift) thr *= this.tc;
     brk *= this.abs;
     const start = inp.drift && !this.held && v > 7 && !!(W[2].on || W[3].on);
-    if (start) this.kick = K.kickT;
+    if (start) {
+      this.kick = K.kickT;
+      // (the hop: it unloads the rears just as they're asked to let go)
+      vel.x += ay.x * K.hop;
+      vel.y += ay.y * K.hop;
+      vel.z += ay.z * K.hop;
+    }
+    // a flick of the same key off a jump is a trick: a spin in the air, and a boost if it lands
+    if (inp.drift && !this.held && this.air > 0.05 && !this.trick && !this.tricked) {
+      this.trick = 1e-4;
+      this.trickDir = this.hands < 0 ? -1 : 1;
+    }
+    if (this.trick > 0) {
+      this.trick += h / K.trickT;
+      if (this.trick >= 1) {
+        this.trick = 0;
+        this.tricked = true;
+      }
+    }
     const wasDrift = this.drifting;
-    if (inp.drift && v > 6) this.drifting = true;
-    if (!inp.drift || v < 4) this.drifting = false;
+    // (the key's a hop on its own; the drift starts when the wheel says which way)
+    if (inp.drift && v > 6 && !this.driftDir && Math.abs(this.hands) > 0.25 && (W[2].on || W[3].on || this.kick > 0)) this.driftDir = Math.sign(this.hands);
+    if (!inp.drift || v < 4) this.driftDir = 0;
+    this.drifting = this.driftDir !== 0;
+    if (wasDrift && !this.drifting) this.unwind = K.unwindT;
     this.held = inp.drift;
     this.kick = Math.max(0, this.kick - h);
     this.rearGrip += ((this.drifting ? K.driftGrip : 1) - this.rearGrip) * Math.min(1, h * (this.drifting ? 11 : 5));
     if (this.drifting && Math.abs(this.beta) > 0.14 && this.air < 0.1) {
       this.driftT += h;
-      this.level = this.driftT > K.charge[1] ? 2 : this.driftT > K.charge[0] ? 1 : 0;
+      this.level = this.driftT > K.charge[2] ? 3 : this.driftT > K.charge[1] ? 2 : this.driftT > K.charge[0] ? 1 : 0;
     } else if (!this.drifting) {
       if (wasDrift && this.level > 0) {
-        this.boost = K.boostT[this.level - 1];
-        this.fired = this.level;
+        this.give(K.boostT[this.level - 1], this.level);
       }
       this.driftT = 0;
       this.level = 0;
     }
     this.boost = Math.max(0, this.boost - h);
+    if (!this.boost) this.boostKind = 0;
+    this.bog = Math.max(0, this.bog - h);
     // ---- the gearbox and the reverse: the brake held at a standstill backs you up
     this.gearbox(h);
     let rev = false;
@@ -497,7 +590,7 @@ export class Kart {
     const Te0 = curve(this.rpm), we = (this.rpm * Math.PI) / 30;
     const cut = this.shift > 0 ? 0.1 : 1;
     const lim = this.rpm > K.limit ? 0 : 1;
-    const boost = this.boost > 0 ? K.boostK : 1;
+    const boost = this.boost > 0 ? K.boostK : this.bog > 0 ? 0.3 : 1;
     const Te = Te0 * thr * cut * lim * boost - (1 - thr) * (1.2 + this.rpm / 2200);
     const wa = axle * ratio;
     // the clutch bites as the revs rise and on a held gear stays shut
@@ -527,10 +620,20 @@ export class Kart {
     }
     this.clutchSlip = lockDrive ? 0 : Math.abs(dwc);
     this.rpm = THREE.MathUtils.clamp(this.rpm, K.idle, K.limit + 400);
+    // (in the air the driver comes off the power and the axle settles to road speed: a tyre that
+    // touches down spinning has no side grip left, and every landing would throw the kart round)
+    if (airborne && this.air > 0.03) wAxle += (Math.max(0, this.vf) / W[2].r - wAxle) * Math.min(1, h * 14);
     W[2].w = W[3].w = wAxle;
     for (const w of W) w.spin += w.w * h;
-    // ---- air, and anti-roll
+    // ---- a boost's shove: down the nose, so coming out of a drift it fires you where you're pointing
     const sp = vel.length();
+    if (this.boost > 0 && !airborne) {
+      const f = K.boostF * Math.min(1, this.boost * 7) * Math.max(0, 1 - Math.max(0, this.vf) / K.boostTop);
+      this.fxs += az.x * f;
+      this.fys += az.y * f;
+      this.fzs += az.z * f;
+    }
+    // ---- air, and anti-roll
     const dragK = K.drag * (1 - 0.42 * this.draft);
     if (sp > 0.1) {
       this.fxs -= vel.x * sp * dragK;
@@ -548,6 +651,31 @@ export class Kart {
       const nx = l.q.nx, ny = l.q.ny, nz = l.q.nz;
       this.force(l.cx, l.cy, l.cz, nx * F, ny * F, nz * F);
       this.force(r.cx, r.cy, r.cz, -nx * F, -ny * F, -nz * F);
+    }
+    // ---- the drift: pulling into the bend, and the nose held at its angle (see KART.driftA)
+    this.unwind = Math.max(0, this.unwind - h);
+    if (!airborne && sp > 5 && (this.driftDir || this.unwind > 0)) {
+      const n = this.q, ix = vel.x / sp, iy = vel.y / sp, iz = vel.z / sp;
+      let pull = 0;
+      if (this.driftDir) {
+        const inward = THREE.MathUtils.clamp(this.hands * this.driftDir, -1, 1), A = K.driftA;
+        const g = SURF[n.mat].mu * Math.min(1, (1 - this.rearGrip) / (1 - K.driftGrip) + 0.3);
+        pull = g * (inward >= 0 ? A[1] + (A[2] - A[1]) * inward : A[1] + (A[0] - A[1]) * -inward);
+        // (across the road, toward the inside: left of the way it's going is n x v, and a positive drift is to the right)
+        const s = -this.driftDir, cx = (n.ny * iz - n.nz * iy) * s, cy = (n.nz * ix - n.nx * iz) * s, cz = (n.nx * iy - n.ny * ix) * s;
+        const now = (this.fxs * cx + this.fys * cy + this.fzs * cz) / K.mass;
+        const f = THREE.MathUtils.clamp((pull - now) * K.mass, 0, K.driftF);
+        this.fxs += cx * f;
+        this.fys += cy * f;
+        this.fzs += cz * f;
+      }
+      const yaw = ang.dot(ay), turn = pull / Math.max(sp, 8);
+      const rate = -this.driftDir * turn - K.driftB * ((this.driftDir ? this.driftAim() : 0) - this.beta);
+      const hold = this.driftDir ? 1 : 0.55 * (this.unwind / K.unwindT);
+      const tq = THREE.MathUtils.clamp((rate - yaw) * K.Iy * K.driftR, -K.driftT, K.driftT) * hold;
+      this.txs += ay.x * tq;
+      this.tys += ay.y * tq;
+      this.tzs += ay.z * tq;
     }
     // ---- a drift held too far: the driver gathers it (this is the one helping hand, past 45 degrees)
     if (this.drifting && !airborne) {
@@ -586,7 +714,24 @@ export class Kart {
     const q = this.quat, sx = ang.x * h * 0.5, sy = ang.y * h * 0.5, sz = ang.z * h * 0.5;
     Qd.set(sx, sy, sz, 0).multiply(q);
     q.set(q.x + Qd.x, q.y + Qd.y, q.z + Qd.z, q.w + Qd.w).normalize();
+    // (coming down: the air it had, and the boost if the trick got round)
+    if (!airborne && this.air > 0.12) {
+      this.jump = this.air;
+      this.settle = K.settleT;
+      if (this.tricked || this.trick > 0.55) this.give(K.trickBoost, Boost.Trick);
+      this.tricked = false;
+    } else if (!airborne) this.tricked = false;
     this.air = airborne ? this.air + h : 0;
+    // (touching down the tyres take a moment to bite: a hand on the yaw while they do)
+    if (this.settle > 0) {
+      this.settle -= h;
+      if (!inp.drift) {
+        const yaw = ang.dot(ay), damp = yaw * Math.min(1, h * 16);
+        ang.x -= ay.x * damp;
+        ang.y -= ay.y * damp;
+        ang.z -= ay.z * damp;
+      }
+    }
     // (stopped, with nothing pressed: tyres don't creep)
     if (v < 0.35 && thr < 0.02 && brk < 0.02 && !airborne) {
       vel.multiplyScalar(1 - Math.min(1, h * 12));

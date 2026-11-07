@@ -1,4 +1,4 @@
-import { Kart, type KartInput } from './kart-sim.ts';
+import { Boost, KART, Kart, type KartInput } from './kart-sim.ts';
 import type { KartTrack } from './kart-track.ts';
 
 /**
@@ -12,18 +12,22 @@ export const RACE = {
   /** where the line is, and the grid behind it */
   start: 64,
   row: 4.4,
-  /** a body in plan: two circles, nose and tail */
-  r: 0.74,
-  nose: 0.72,
-  tail: -0.62,
-  /** how lively karts are on each other */
+  /** a body in plan: two circles, as wide as the rear tyres and reaching the bumpers */
+  r: 0.92,
+  nose: 0.84,
+  tail: -0.65,
+  /** how lively karts are on each other, and how much of a hit goes into turning them (tyres on the road resist that) */
   e: 0.3,
+  twist: 0.4,
   /** seconds on its side or back before the marshals right it, and how long it can't be touched after */
   flipT: 1.3,
   ghost: 2.2,
   /** the wake: how far back, how wide */
   wake: 22,
   wakeW: 2.2,
+  /** this long tucked in charges the slingshot; pull out within this long and it fires */
+  towT: 1.1,
+  towKeep: 1.3,
   sub: 1 / 240,
   /** stopped this long with the wheels turning: it's beached */
   stuckT: 7,
@@ -53,6 +57,13 @@ export class Racer {
   private stuck = 0;
   /** going the wrong way for this long */
   wrong = 0;
+  /** its race is run: it cruises round out of everyone's way */
+  cool = false;
+  /** how long it's sat in a wake, and the slingshot it's charged (seconds left to use it) */
+  tow = 0;
+  sling = 0;
+  /** where it last hit a pad (so one pad's one boost) */
+  padAt = -1;
   /** when it crossed the line each lap (seconds after the off) */
   readonly laps: number[] = [];
   bestLap = 0;
@@ -121,7 +132,7 @@ export class Racer {
 export function collide(a: Racer, b: Racer, t: number, hit: (h: KartHit) => void) {
   const A = a.kart, B = b.kart;
   const dx = B.pos.x - A.pos.x, dy = B.pos.y - A.pos.y, dz = B.pos.z - A.pos.z;
-  if (dx * dx + dz * dz > 16 || Math.abs(dy) > 1.5 || a.ghost > t || b.ghost > t) return;
+  if (dx * dx + dz * dz > 16 || Math.abs(dy) > 1.5 || a.ghost > t || b.ghost > t || a.cool || b.cool) return;
   const D = RACE.r * 2;
   for (let i = 0; i < 2; i++) {
     const za = i ? RACE.tail : RACE.nose;
@@ -137,30 +148,34 @@ export function collide(a: Racer, b: Racer, t: number, hit: (h: KartHit) => void
       A.pos.z -= nz * pen * wa;
       B.pos.x += nx * pen * wb;
       B.pos.z += nz * pen * wb;
-      const px = ax + nx * RACE.r, pz = az + nz * RACE.r, py = A.pos.y + 0.05;
+      const px = ax + nx * RACE.r, pz = az + nz * RACE.r;
       const rax = px - A.pos.x, raz = pz - A.pos.z, rbx = px - B.pos.x, rbz = pz - B.pos.z;
       const vax = A.vel.x - A.ang.y * -raz, vaz = A.vel.z - A.ang.y * rax;
       const vbx = B.vel.x - B.ang.y * -rbz, vbz = B.vel.z - B.ang.y * rbx;
       const vn = (vax - vbx) * nx + (vaz - vbz) * nz;
       if (vn <= 0) continue;
-      const ia = A.invMass(px, py, pz, nx, 0, nz), ib = B.invMass(px, py, pz, nx, 0, nz);
+      // (each at its own height: bumpers meet level. A contact point shared across a bank's slope
+      // would be a lever under one of them, and that's how karts got tipped on their sides)
+      const ia = A.invMass(px, A.pos.y, pz, nx, 0, nz), ib = B.invMass(px, B.pos.y, pz, nx, 0, nz);
       const J = ((1 + RACE.e) * vn) / (ia + ib);
-      if (a.local) A.impulse(px, py, pz, -nx * J, 0, -nz * J);
-      if (b.local) B.impulse(px, py, pz, nx * J, 0, nz * J);
-      if (vn > 1.5) hit({ x: px, y: py + 0.2, z: pz, power: vn, a: a.id, b: b.id });
+      if (a.local) A.shove(px, pz, -nx * J, -nz * J, RACE.twist);
+      if (b.local) B.shove(px, pz, nx * J, nz * J, RACE.twist);
+      if (vn > 1.5) hit({ x: px, y: (A.pos.y + B.pos.y) / 2 + 0.2, z: pz, power: vn, a: a.id, b: b.id });
     }
   }
 }
 
-/** the wake: drag falls when another kart is punching the air just ahead */
-export function slipstream(all: Racer[]) {
+/** the wake: drag falls when another kart is punching the air just ahead; sit in it long enough and pulling out slings you past */
+export function slipstream(all: Racer[], dt: number) {
+  const ease = 1 - Math.exp(-dt * 5);
   for (const a of all) {
+    if (!a.local) continue;
     const k = a.kart;
     let d = 0;
     const sp = k.vel.length();
-    if (sp > 12) {
+    if (sp > 12 && !a.cool) {
       for (const b of all) {
-        if (a === b) continue;
+        if (a === b || b.cool) continue;
         const o = b.kart, dx = o.pos.x - k.pos.x, dy = o.pos.y - k.pos.y, dz = o.pos.z - k.pos.z;
         const ahead = (dx * k.vel.x + dz * k.vel.z) / sp;
         if (ahead < 1.5 || ahead > RACE.wake || Math.abs(dy) > 2) continue;
@@ -169,7 +184,39 @@ export function slipstream(all: Racer[]) {
         d = Math.max(d, (1 - ahead / RACE.wake) * (1 - side / RACE.wakeW));
       }
     }
-    k.draft += (Math.min(1, d * 1.6) - k.draft) * 0.08;
+    k.draft += (Math.min(1, d * 1.6) - k.draft) * ease;
+    if (k.draft > 0.42) {
+      a.tow += dt;
+      if (a.tow > RACE.towT) a.sling = RACE.towKeep;
+    } else {
+      a.tow = Math.max(0, a.tow - dt * 2);
+      if (a.sling > 0) {
+        a.sling -= dt;
+        if (k.draft < 0.16) {
+          a.sling = a.tow = 0;
+          k.give(KART.slingT, Boost.Sling);
+        }
+      }
+    }
+  }
+}
+
+/** the pads on the road: over one at speed and you're away */
+function pads(all: Racer[], tr: KartTrack) {
+  for (const r of all) {
+    if (!r.local || r.held || r.cool) continue;
+    const k = r.kart;
+    if (k.air > 0.05) continue;
+    for (let i = 0; i < tr.pads.length; i++) {
+      const p = tr.pads[i];
+      if (k.q.s < p.s || k.q.s > p.s + p.len || Math.abs(k.q.lat - p.lat) > p.w + 0.35) {
+        if (r.padAt === i && Math.abs(k.q.s - p.s) > p.len + 4) r.padAt = -1;
+        continue;
+      }
+      if (r.padAt === i) continue;
+      r.padAt = i;
+      k.give(KART.padT, Boost.Pad);
+    }
   }
 }
 
@@ -187,5 +234,6 @@ export function stepRace(all: Racer[], dt: number, tr: KartTrack, t: number, hit
       }
     }
   }
-  slipstream(all);
+  slipstream(all, dt);
+  pads(all, tr);
 }

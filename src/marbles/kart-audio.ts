@@ -22,6 +22,7 @@ export class KartAudio {
   private squeal: { g: GainNode; f: BiquadFilterNode; o: OscillatorNode } | null = null;
   private rumble: { g: GainNode; f: BiquadFilterNode } | null = null;
   private crashB: AudioBuffer | null = null;
+  private noiseB: AudioBuffer | null = null;
   private out: GainNode | null = null;
   private srcs: AudioScheduledSourceNode[] = [];
   constructor(private sound: Sound) {}
@@ -35,6 +36,7 @@ export class KartAudio {
     const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const d = noise.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    this.noiseB = noise;
     for (let k = 0; k < 4; k++) {
       const a = ctx.createOscillator(), b = ctx.createOscillator(), c = ctx.createOscillator();
       a.type = 'sawtooth';
@@ -144,6 +146,61 @@ export class KartAudio {
     p.pan.value = pan;
     s.connect(g).connect(p).connect(this.out);
     s.start();
+  }
+  /** a boost going off: a rush of air sweeping up, and a thump under it. `k` is how big (0..1) */
+  whoosh(k: number) {
+    const ctx = this.up();
+    if (!ctx || !this.noiseB || !this.out || !this.sound.sfxOn) return;
+    const t = ctx.currentTime, len = 0.45 + k * 0.5;
+    const s = ctx.createBufferSource();
+    s.buffer = this.noiseB;
+    s.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.4;
+    f.frequency.setValueAtTime(420, t);
+    f.frequency.exponentialRampToValueAtTime(2600 + k * 2200, t + len * 0.55);
+    f.frequency.exponentialRampToValueAtTime(700, t + len);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.18 + k * 0.14, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    s.connect(f).connect(g).connect(this.out);
+    s.start(t);
+    s.stop(t + len + 0.05);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(46, t + 0.2);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.24, t);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    o.connect(og).connect(this.out);
+    o.start(t);
+    o.stop(t + 0.26);
+  }
+  /** coming down off a jump */
+  thump(k: number) {
+    const ctx = this.up();
+    if (!ctx || !this.out || !this.sound.sfxOn) return;
+    const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(92, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.16);
+    g.gain.setValueAtTime(Math.min(0.5, 0.14 + k * 0.08), t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g).connect(this.out);
+    o.start(t);
+    o.stop(t + 0.22);
+  }
+  /** everything down, for the results */
+  hush() {
+    const ctx = this.sound.ctx;
+    if (!ctx || !this.out) return;
+    const t = ctx.currentTime;
+    for (const v of this.voices) v.g.gain.setTargetAtTime(0, t, 0.08);
+    this.squeal?.g.gain.setTargetAtTime(0, t, 0.05);
+    this.rumble?.g.gain.setTargetAtTime(0, t, 0.05);
   }
   /** a pop out of the exhaust: a gear, a lift */
   pop(vol: number) {

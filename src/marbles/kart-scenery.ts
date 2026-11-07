@@ -117,6 +117,7 @@ export function dressScenery(b: CourseBuilder, tr: KartTrack, land: Land, y0: nu
   }
   // ---- grandstands
   const crowd: THREE.Matrix4[] = [], shirts: THREE.Color[] = [];
+  let backs = 1;
   const stand = (s: number, side: number, len: number, tiers: number, roof: number) => {
     const i = tr.idx(Math.round(s)), wall = side > 0 ? tr.wl[i] : tr.wr[i];
     const f = frame(tr, s, side * (wall + 3.4), 0), g = new THREE.Group();
@@ -140,6 +141,14 @@ export function dressScenery(b: CourseBuilder, tr: KartTrack, land: Land, y0: nu
     const body = new THREE.Mesh(mergeGeometries(parts)!, conc);
     body.castShadow = body.receiveShadow = true;
     g.add(body);
+    // (the back of it faces the rest of the circuit: a big painted wall beats a blank one)
+    {
+      const h = 0.8 + (tiers - 1) * 0.72, ad = HOARDINGS[backs++ % HOARDINGS.length];
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(len, h), new THREE.MeshStandardMaterial({ map: board(ad[0], ad[1], ad[2], ad[3], 2048, Math.round((2048 * h) / len)), roughness: 0.6 }));
+      back.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      back.position.set(side * (0.5 + (tiers - 1) * 1.05 + 0.57), h / 2, 0);
+      g.add(back);
+    }
     g.add(new THREE.Mesh(mergeGeometries(seatG)!, seats));
     if (roof) {
       const w = tiers * 1.05 + 1.5, top = 0.8 + tiers * 0.72 + 3.2;
@@ -221,6 +230,134 @@ transformed.y += max(0.0, sin(uT * (3.0 + fract(ph) * 2.0) + ph)) * 0.2;`);
     p.rotateY(Math.PI);
     b.group.add(p);
   }
+  // ---- arches over the road: the big moments of the lap, called out from a long way off
+  const arch = (s: number, text: string, bg: string, fg: string, pole: number) => {
+    const i = tr.idx(Math.round(s)), a = tr.wl[i] + 0.9, c = tr.wr[i] + 0.9, f = frame(tr, s, (a - c) / 2, 0), half = (a + c) / 2, g = new THREE.Group();
+    g.position.copy(f.p);
+    g.quaternion.copy(f.q);
+    const puff = new THREE.MeshPhysicalMaterial({ color: pole, roughness: 0.34, clearcoat: 0.8 });
+    const H = 7.4;
+    for (const x of [half, -half]) {
+      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, H - 0.6, 6, 14).translate(x, H / 2, 0), puff);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+    const beam = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, half * 2, 6, 14).rotateZ(Math.PI / 2).translate(0, H, 0), puff);
+    beam.castShadow = true;
+    g.add(beam);
+    const w = Math.min(half * 1.5, 15), plate = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 6), new THREE.MeshBasicMaterial({ map: board(text, '', bg, fg, 1024, 171), side: THREE.DoubleSide }));
+    plate.rotation.y = Math.PI;
+    plate.position.set(0, H - 0.1, -0.68);
+    g.add(plate);
+    b.group.add(g);
+  };
+  arch(1116, 'BIG AIR!', '#ffc21f', '#17182a', 0xff4f8f);
+  arch(806, 'THE HUMP', '#e6332f', '#ffffff', 0xffc21f);
+  arch(566, 'BIG BOWL', '#22c08a', '#10242a', 0x2f6ad8);
+  arch(136, 'DRIFT ZONE', '#ff4f8f', '#ffffff', 0x2fb8ff);
+  // ---- chevron boards round the outside of the tight bends
+  {
+    const c = document.createElement('canvas');
+    c.width = 128;
+    c.height = 128;
+    const x = c.getContext('2d')!;
+    x.fillStyle = '#f6f6f2';
+    x.fillRect(0, 0, 128, 128);
+    x.fillStyle = '#e6332f';
+    x.beginPath();
+    x.moveTo(26, 8);
+    x.lineTo(70, 8);
+    x.lineTo(112, 64);
+    x.lineTo(70, 120);
+    x.lineTo(26, 120);
+    x.lineTo(68, 64);
+    x.closePath();
+    x.fill();
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    const mats = [new THREE.MeshBasicMaterial({ map: t }), new THREE.MeshBasicMaterial({ map: t.clone() })];
+    mats[1].map!.center.set(0.5, 0.5);
+    mats[1].map!.repeat.x = -1;
+    mats[1].map!.wrapS = THREE.RepeatWrapping;
+    mats[1].map!.needsUpdate = true;
+    const list: [THREE.Matrix4[], THREE.Matrix4[]] = [[], []];
+    const M = new THREE.Matrix4();
+    for (let s = 0; s < tr.n; s += 7) {
+      const i = tr.idx(s), bend = tr.curve[i];
+      if (Math.abs(bend) < 0.03 || tr.tunnel[i] || tr.raised[i] || Math.abs(tr.bank[i]) > 0.1) continue;
+      // (on the outside, looking back down the road at whoever's arriving, and pointing round the bend)
+      const side = bend > 0 ? -1 : 1, wall = side > 0 ? tr.wl[i] : tr.wr[i];
+      const f = frame(tr, s, side * (wall + 0.5), 1.4);
+      const q = f.q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI + side * 0.62));
+      list[side > 0 ? 0 : 1].push(M.compose(f.p, q, new THREE.Vector3(1, 1, 1)).clone());
+    }
+    list.forEach((l, k) => {
+      const im = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.5, 1.5), mats[k], l.length);
+      l.forEach((m, n) => im.setMatrixAt(n, m));
+      im.frustumCulled = false;
+      b.group.add(im);
+    });
+  }
+  // ---- flags down the start straight and round the hairpin, in the sea breeze
+  {
+    const cloth = new THREE.PlaneGeometry(1.5, 1, 8, 2).translate(0.78, 0, 0);
+    const m = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.7 });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uT = time;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uT;').replace('#include <begin_vertex>', `#include <begin_vertex>
+float ph = float(gl_InstanceID) * 1.7, u = position.x / 1.56;
+transformed.z += sin(uT * 6.0 + ph + position.x * 3.2) * 0.2 * u;
+transformed.y += sin(uT * 4.0 + ph + position.x * 2.1) * 0.06 * u;`);
+    };
+    const poles: THREE.Matrix4[] = [], flags: THREE.Matrix4[] = [], cols: number[] = [];
+    const M = new THREE.Matrix4(), palette = [0xff4f8f, 0xffc21f, 0x2fb8ff, 0x22c08a, 0xff6a3d, 0xa36bff];
+    const put = (s: number, side: number, k: number) => {
+      const i = tr.idx(s), wall = side > 0 ? tr.wl[i] : tr.wr[i], f = frame(tr, s, side * (wall + 1.1), 0);
+      poles.push(M.compose(f.p, f.q, new THREE.Vector3(1, 1, 1)).clone());
+      flags.push(M.compose(f.p.clone().add(new THREE.Vector3(0, 5.6, 0)), f.q, new THREE.Vector3(1, 1, 1)).clone());
+      cols.push(palette[k % palette.length]);
+    };
+    let k = 0;
+    for (let s = 74; s < 136; s += 9) put(s, 1, k++);
+    for (let s = 1078; s < 1112; s += 9) put(s, k % 2 ? 1 : -1, k++);
+    for (let s = 150; s < 212; s += 10) put(s, 1, k++);
+    for (let s = 600; s < 690; s += 12) put(s, -1, k++);
+    const pm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.05, 0.07, 6.2, 6).translate(0, 3.1, 0), new THREE.MeshStandardMaterial({ color: 0xd8dde6, metalness: 0.6, roughness: 0.4 }), poles.length);
+    const fm = new THREE.InstancedMesh(cloth, m, flags.length);
+    const C = new THREE.Color();
+    poles.forEach((p, n) => {
+      pm.setMatrixAt(n, p);
+      fm.setMatrixAt(n, flags[n]);
+      fm.setColorAt(n, C.set(cols[n]));
+    });
+    pm.frustumCulled = fm.frustumCulled = false;
+    b.group.add(pm, fm);
+  }
+  // ---- gulls, wheeling over the shore
+  {
+    const wing = new THREE.BufferGeometry();
+    wing.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0.32, 0, 0, -0.32, 1, 0, -0.1, 0, 0, 0.32, 0, 0, -0.32, -1, 0, -0.1], 3));
+    wing.computeVertexNormals();
+    const m = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, side: THREE.DoubleSide, roughness: 0.8 });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uT = time;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uT;').replace('#include <begin_vertex>', `#include <begin_vertex>
+transformed.y += abs(position.x) * sin(uT * 7.0 + float(gl_InstanceID) * 2.3) * 0.5;`);
+    };
+    const N = 14, im = new THREE.InstancedMesh(wing, m, N), M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), one = new THREE.Vector3(1.2, 1.2, 1.2), Y = new THREE.Vector3(0, 1, 0);
+    im.frustumCulled = false;
+    b.group.add(im);
+    b.animators.push((t) => {
+      for (let k = 0; k < N; k++) {
+        const a = t * (0.11 + (k % 3) * 0.03) + k * 0.9, rad = 40 + (k % 5) * 26, cx = k % 2 ? -60 : 70, cz = k % 3 ? -40 : 60;
+        P.set(cx + Math.cos(a) * rad, y0 + 22 + (k % 4) * 6 + Math.sin(t * 0.3 + k) * 3, cz + Math.sin(a) * rad);
+        Q.setFromAxisAngle(Y, -a);
+        im.setMatrixAt(k, M.compose(P, Q, one));
+      }
+      im.instanceMatrix.needsUpdate = true;
+    });
+  }
   // ---- palms, bushes and rocks
   {
     const trunk = new THREE.CylinderGeometry(0.14, 0.3, 7.5, 7, 5, false).translate(0, 3.75, 0);
@@ -295,7 +432,7 @@ transformed.y += max(0.0, sin(uT * (3.0 + fract(ph) * 2.0) + ph)) * 0.2;`);
       bm.setMatrixAt(i, m);
       bm.setColorAt(i, C.setHSL(0.24 + r() * 0.1, 0.5, 0.24 + r() * 0.12));
     });
-    bm.castShadow = true;
+    bm.castShadow = false;
     bm.frustumCulled = false;
     b.group.add(bm);
   }

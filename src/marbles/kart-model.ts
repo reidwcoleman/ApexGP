@@ -143,7 +143,10 @@ diffuseColor *= sampledDiffuseColor;`);
     this.rims = new THREE.InstancedMesh(w.rim, new THREE.MeshStandardMaterial({ metalness: 0.75, roughness: 0.3 }), n * 4);
     this.wheelH = this.rims;
     // exhaust flame on a boost, and the brake light
-    this.flame = new THREE.InstancedMesh(new THREE.ConeGeometry(0.11, 0.9, 10).rotateX(-Math.PI / 2).translate(-0.74, H + 0.42, -1.72), new THREE.MeshBasicMaterial({ color: 0xff9030, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }), n);
+    // (the can's own flame, and its twin from the other side of the tail, so it reads from behind)
+    // (drawn from the tail back, so it stretches out of the pipe and never slides away from it)
+    const cone = (x: number) => new THREE.ConeGeometry(0.12, 1, 10).rotateX(-Math.PI / 2).translate(x, H + 0.4, -0.5).toNonIndexed();
+    this.flame = new THREE.InstancedMesh(mergeGeometries([cone(-0.74), cone(0.74)])!, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }), n);
     this.brake = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.05, 0.02).translate(0, H + 0.3, -1.58), new THREE.MeshBasicMaterial({ color: 0xff2010, toneMapped: false }), n);
     this.parts = [this.frame, this.body, this.trim, this.dark, this.plate, this.hoop, this.tyres, this.rims, this.brake];
     for (const q of this.parts) {
@@ -181,7 +184,7 @@ diffuseColor *= sampledDiffuseColor;`);
   }
 
   /** one kart's matrices: `w` is [spin, steer, drop] per wheel */
-  put(k: number, pos: THREE.Vector3, quat: THREE.Quaternion, hands: number, wheels: { x: number; y: number; z: number; r: number; spin: number; steer: number; comp: number }[], hide: boolean, flame: number, brake: boolean) {
+  put(k: number, pos: THREE.Vector3, quat: THREE.Quaternion, hands: number, wheels: { x: number; y: number; z: number; r: number; spin: number; steer: number; comp: number }[], hide: boolean, flame: number, brake: boolean, hue = 0xff9030) {
     const { M, W, Q, P, S, one } = this;
     S.setScalar(hide ? 0.0001 : 1);
     M.compose(pos, quat, S);
@@ -204,8 +207,10 @@ diffuseColor *= sampledDiffuseColor;`);
     });
     S.set(1, 1, 1);
     if (flame > 0 && !hide) {
-      S.set(1 + flame * 0.5, 1 + flame * 0.5, 0.7 + Math.random() * 0.7 + flame);
-      this.flame.setMatrixAt(this.flames++, W.compose(pos, quat, S));
+      S.set(1, 1, flame * (0.7 + Math.random() * 0.8));
+      this.flame.setColorAt(this.flames, FC.set(hue));
+      W.compose(P.set(0, 0, -1.42), Q.identity(), S).premultiply(M);
+      this.flame.setMatrixAt(this.flames++, W);
     }
     if (brake && !hide) this.brake.setMatrixAt(this.brakes++, M);
   }
@@ -214,9 +219,11 @@ diffuseColor *= sampledDiffuseColor;`);
     this.flame.count = this.flames;
     this.brake.count = this.brakes;
     this.flame.instanceMatrix.needsUpdate = true;
+    if (this.flame.instanceColor) this.flame.instanceColor.needsUpdate = true;
     this.brake.instanceMatrix.needsUpdate = true;
     for (const q of [this.frame, this.body, this.trim, this.dark, this.plate, this.hoop, this.tyres, this.rims]) q.instanceMatrix.needsUpdate = true;
   }
 }
 const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
 const Q2 = new THREE.Quaternion();
+const FC = new THREE.Color();

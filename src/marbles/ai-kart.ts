@@ -128,6 +128,15 @@ export class KartBrain {
       const m = tr.hw[i] - 1.2;
       line[i] = THREE.MathUtils.clamp(base + push[i] + a1 * Math.sin(i * f1 + p1) + a2 * Math.sin(i * f2 + p2), -m, m);
     }
+    // the boost pads it fancies this lap: it bends its line over them, if the road allows
+    for (const p of tr.pads) {
+      if (rnd() > 0.3 + this.skill * 0.45) continue;
+      const mid = p.s + p.len / 2;
+      for (let k = -34; k <= 34; k++) {
+        const i = tr.idx(Math.round(mid) + k), w = Math.min(1, 1.5 * (0.5 + 0.5 * Math.cos((k / 34) * Math.PI)));
+        line[i] += (p.lat - line[i]) * w;
+      }
+    }
     // (a little smoothing, so no choice makes a kink it can't drive)
     const B = new Float32Array(n);
     for (let p = 0; p < 2; p++) {
@@ -162,7 +171,7 @@ export class KartBrain {
     const { tr, me } = this;
     let want = 0, blocked = 1e9;
     for (const o of all) {
-      if (o === me || o.held) continue;
+      if (o === me || o.held || o.cool) continue;
       const q = o.kart.q;
       let ds = q.s - s;
       if (ds > tr.n / 2) ds -= tr.n;
@@ -226,7 +235,8 @@ export class KartBrain {
     const look = Math.max(4.5, v * 0.42);
     const j = tr.idx(Math.round(s + look));
     const m = tr.hw[j] - 1.1;
-    const aim = THREE.MathUtils.clamp(this.line[j] + this.shift, -m, m);
+    // (cruising home: tucked in at the edge of the road)
+    const aim = me.cool ? (me.id % 2 ? m - 0.5 : 0.5 - m) : THREE.MathUtils.clamp(this.line[j] + this.shift, -m, m);
     tr.point(j, aim, 0, P);
     const dx = P.x - k.pos.x, dz = P.z - k.pos.z;
     const ang = Math.atan2(dx * k.ax.x + dz * k.ax.z, dx * k.az.x + dz * k.az.z);
@@ -245,6 +255,8 @@ export class KartBrain {
     }
     if (t < this.lapse) vp *= 0.95;
     if (this.driftOn) vp *= 0.9;
+    // (the flag's out: a gentle lap, out of everyone's way)
+    if (me.cool) vp = Math.min(vp * 0.7, 19);
     // (not into the back of anyone)
     if (this.blocked < 1e8 && Math.abs(this.shift) < 1.4) vp = Math.min(vp, this.blocked + 0.4);
     // off the road, it's not going to hold the speed it planned
@@ -252,7 +264,8 @@ export class KartBrain {
     if (edge > 1.2) vp = Math.min(vp, 13);
     const e = vp - v;
     out.throttle = e > 0 ? Math.min(1, 0.35 + e * 0.5) : 0;
-    out.brake = e < -0.7 ? Math.min(1, -e * 0.55) : 0;
+    // (on the grass it's gentle on the brakes, or a locked rear swaps ends)
+    out.brake = e < -0.7 ? Math.min(edge > 1.2 ? 0.3 : 1, -e * 0.55) : 0;
     // a slide it didn't ask for: off the power till the rear comes back
     if (Math.abs(k.beta) > 0.34 && !this.driftOn) out.throttle *= 0.3;
     // ---- the tight bends, for the ones who like that sort of thing
@@ -262,11 +275,17 @@ export class KartBrain {
       const d = tr.idx(Math.round(s) - this.bends[b].apex + 12);
       if (d < 18) sideways = v > 10;
     }
-    if (sideways && !this.driftOn && Math.abs(out.steer) > 0.3) this.driftOn = true;
+    if (sideways && !this.driftOn && Math.abs(out.steer) > 0.3 && !me.cool) this.driftOn = true;
     else if (this.driftOn && !sideways) this.driftOn = false;
     out.drift = this.driftOn;
+    // ---- off a jump: a flick for the show, if it's got the nerve
+    if (k.air > 0.07 && !this.flicked) {
+      this.flicked = true;
+      if (this.rnd() < 0.2 + this.skill * 0.5 && !me.cool) out.drift = true;
+    } else if (k.air === 0) this.flicked = false;
     return out;
   }
+  private flicked = false;
   private blocked = 1e9;
 }
 const P = new THREE.Vector3();

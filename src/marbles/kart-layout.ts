@@ -1,4 +1,4 @@
-import type { TrackPoint } from './kart-track.ts';
+import type { Pad, TrackPoint } from './kart-track.ts';
 
 /**
  * Bean Bay Circuit, a figure of eight. The start straight, a tight hairpin, the esses down past the
@@ -55,12 +55,27 @@ const RAW: TrackPoint[] = [
   { x: -150, z: -44, y: 1, hw: 6.5, l: 1, r: 1, tunnel: true },
   { x: -147, z: -64, y: 0.9, hw: 6.6, l: 1, r: 1, tunnel: true },
   // the Kink, and home
-  { x: -148, z: -76, y: 0.8, hw: 6.8, l: 6, r: 5 },
-  { x: -158, z: -92, y: 0.6, hw: 7, l: 8, r: 3 },
-  { x: -152, z: -107.5, y: 0.4, hw: 7.2, l: 9, r: 2 },
-  { x: -136, z: -114, y: 0.2, hw: 7.5, l: 9, r: 3 },
+  { x: -148, z: -76, y: 0.8, hw: 6.8, l: 6, r: 5, bank: 0 },
+  { x: -158, z: -92, y: 0.6, hw: 7, l: 8, r: 3, bank: 0 },
+  { x: -152, z: -107.5, y: 0.4, hw: 7.2, l: 9, r: 2, bank: 0 },
+  { x: -136, z: -114, y: 0.2, hw: 7.5, l: 9, r: 3, bank: 0 },
   { x: -112, z: -113, y: 0.1, hw: 7.5, l: 6, r: 8, bank: 0 },
+  // the Kicker: a crest in front of the stands, so every lap ends in the air
+  { x: -95, z: -112.6, y: 0.2, hw: 7.5, l: 6, r: 8, bank: 0 },
+  { x: -84, z: -112.4, y: 1, hw: 7.5, l: 6, r: 8, bank: 0 },
+  { x: -76, z: -112.3, y: 2.1, hw: 7.5, l: 6, r: 8, bank: 0 },
+  { x: -69, z: -112.2, y: 0.9, hw: 7.5, l: 6, r: 8, bank: 0 },
 ];
 
 /** (laid out on paper a little big: this is the size that makes two laps about a minute and a half) */
 export const BEAN_BAY: TrackPoint[] = RAW.map((p) => ({ ...p, x: p.x * 0.92, z: p.z * 0.92 }));
+
+/** the boost pads: the exit of the hairpin, under the bridge, high on the Bowl, the run up to the Hump, the tunnel's inside, onto the Kicker */
+export const BEAN_PADS: Pad[] = [
+  { s: 216, len: 7, lat: -2.4, w: 1.7 },
+  { s: 420, len: 7, lat: 2.6, w: 1.7 },
+  { s: 636, len: 7, lat: -4.6, w: 1.8 },
+  { s: 752, len: 7, lat: 0, w: 1.7 },
+  { s: 936, len: 7, lat: -2.8, w: 1.6 },
+  { s: 1092, len: 7, lat: 2.2, w: 1.7 },
+];
