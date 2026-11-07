@@ -18,6 +18,8 @@ def enc(a):
 lm = np.load(f'{OUT}/lightmap.npy').astype(np.float32)[::-1]    # blender rows run bottom-up
 print('lightmap', lm.shape, 'mean', lm.mean(), 'p99', np.percentile(lm, 99), 'max', lm.max())
 Image.fromarray((enc(lm) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
+lm2 = np.load(f'{OUT}/lightmap2.npy').astype(np.float32)[::-1]
+Image.fromarray((enc(lm2) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/lm2.webp', quality=int(os.environ.get('LMQ', 96)), method=4)
 sky = np.load(f'{OUT}/sky.npy').astype(np.float32)[::-1]
 Image.fromarray((enc(sky) * 255 + 0.5).astype(np.uint8)).save(f'{DST}/sky.webp', quality=88, method=4)
 
@@ -36,7 +38,7 @@ for d in raw['doors']:
 glass = []
 for g in raw['glass']:
     glass.append(dict(axis=g['axis'], c=g['c'], a=g['a'], b=g['b'], z0=g['z0'], z1=g['z1']))
-out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass,
+out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {})) for u in raw['units']],
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
            lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power']) for l in raw['lights']],
@@ -44,7 +46,12 @@ out = dict(mats=raw['mats'], materials=mats, textures=tex, colliders=cols, props
            lm=dict(logr=LOGR, k=K, size=raw['size']))
 json.dump(out, open(f'{DST}/map.json', 'w'), separators=(',', ':'))
 shutil.copy(f'{OUT}/world.bin', f'{DST}/world.bin')
-if os.path.exists(f'{OUT}/props.glb'): shutil.copy(f'{OUT}/props.glb', f'{DST}/props.glb')
+if os.path.exists(f'{OUT}/props.glb'):
+    # webp textures and meshopt geometry: 52 MB of props comes down to about 15
+    import subprocess
+    tmp = f'{OUT}/props_webp.glb'
+    subprocess.run(['npx', '--yes', '@gltf-transform/cli', 'webp', f'{OUT}/props.glb', tmp, '--quality', '72'], check=True, cwd=ROOT)
+    subprocess.run(['npx', '--yes', '@gltf-transform/cli', 'meshopt', tmp, f'{DST}/props.glb', '--level', 'medium'], check=True, cwd=ROOT)
 if '--tex' in sys.argv:
     for t in tex:
         for suf, n, q in (('diff', 'c', 80), ('nor', 'n', 86), ('arm', 'a', 70)):

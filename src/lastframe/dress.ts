@@ -167,27 +167,29 @@ export function dress(group: THREE.Group) {
     q.renderOrder = kind === 'glow' ? 6 : 2;
     group.add(q);
   };
-  // the shops across the street: their fascias, facing north
-  const fascia: [string, string, string, boolean?][] = [
-    ['HARLOW HARDWARE', '#1e3028', '#d8c890'], ['LAUNDERETTE', '#d8d0b8', '#253a60'], ['NEW MOON', '#5a1a18', '#e8c060', true], ['PAWN  &  LOAN', '#14141a', '#d0a030'],
-    ['BETTING', '#20306a', '#e8e0d0'], ['TYRES  EXHAUSTS', '#c8a020', '#141414'], ['OFF LICENCE', '#301c14', '#e0c8a0', true], ['KEYS CUT', '#3a3a40', '#e8e4d8'],
+  // the shops across the street: fascias facing north, the two you can walk into stand a little proud
+  const fascia: [number, number, string, string, string, boolean?][] = [
+    [7, 2.86, 'HARLOW HARDWARE', '#1e3028', '#d8c890'], [19, 2.86, 'LAUNDERETTE', '#d8d0b8', '#253a60'], [37, 3.08, 'LUCKY DINER', '#5a1a18', '#e8c060', true],
+    [52, 2.86, 'PAWN  &  LOAN', '#14141a', '#d0a030'], [70, 3.08, 'CLOSE SHAVE BARBERS', '#20306a', '#e8e0d0'], [85, 2.86, 'OFF LICENCE', '#301c14', '#e0c8a0', true],
   ];
-  fascia.forEach(([t, bg, fg, serif], i) => add(sign(t, bg, fg, serif), 4 + i * 12, 2.75, 3.262, Math.PI, 4.5, 0.56, 'lit', 1.1));
+  fascia.forEach(([x, z, t, bg, fg, serif]) => add(sign(t, bg, fg, serif), x, 2.75, z, Math.PI, 5.6, 0.7, 'lit', 1.1));
   // neon in two windows: light that isn't in any bake
   add(neon('BAR', '#ff2a3a'), 30.2, 1.95, -12.8, Math.PI, 1.1, 0.42, 'glow', 9);
   add(neon('OPEN', '#2ad0ff'), 12.0, 1.6, -12.9, Math.PI, 1.0, 0.38, 'glow', 7);
   add(neon('ROOMS', '#ffb030'), 22.0, 2.42, -12.8, Math.PI, 0.9, 0.32, 'glow', 6);
+  add(neon('EAT', '#ff5a2a'), 34.2, 1.72, 3.22, Math.PI, 1.0, 0.38, 'glow', 7);
+  add(neon('CUTS', '#2a9dff'), 66.6, 1.72, 3.22, Math.PI, 1.0, 0.38, 'glow', 7);
   // bills pasted up
   const walls: [number, number, number, number][] = [
     [36.4, 1.45, -12.84, Math.PI], [36.9, 1.5, -12.84, Math.PI], [47.5, 1.4, -12.84, Math.PI], [47.0, 1.5, -12.84, Math.PI], [2.2, 1.55, -12.84, Math.PI], [90.8, 1.5, -12.84, Math.PI],
-    [34.17, 1.5, -20.5, Math.PI / 2], [34.17, 1.45, -21.1, Math.PI / 2], [49.83, 1.5, -18.0, -Math.PI / 2], [49.83, 1.4, -24.8, -Math.PI / 2],
+    [34.17, 1.5, -20.5, Math.PI / 2], [34.17, 1.45, -21.1, Math.PI / 2], [49.78, 1.5, -18.0, -Math.PI / 2], [49.78, 1.4, -24.8, -Math.PI / 2],
     [-0.34, 1.3, -3.0, Math.PI / 2], [-0.34, 1.38, -5.2, Math.PI / 2], [96.34, 1.4, -4.0, -Math.PI / 2], [96.34, 1.3, -6.5, -Math.PI / 2],
   ];
   walls.forEach(([x, y, z, ry], i) => add(poster(i), x, y, z, ry, 0.56 + (i % 3) * 0.06, 0.84 + (i % 3) * 0.09, 'lit', 1));
   // paint
   const tags: [number, number, number, number, number][] = [
-    [4.2, 1.5, -12.84, Math.PI, 2.2], [36.0, 1.1, -12.84, Math.PI, 1.8], [48.0, 0.95, -12.84, Math.PI, 2.0], [55.5, 1.15, -12.84, Math.PI, 2.6], [70.0, 1.2, -12.84, Math.PI, 2.4], [91.0, 1.1, -12.84, Math.PI, 1.9],
-    [34.17, 1.1, -30.0, Math.PI / 2, 2.4], [49.83, 1.1, -30.0, -Math.PI / 2, 2.8], [49.83, 1.0, -38.5, -Math.PI / 2, 2.2], [34.17, 1.05, -16.0, Math.PI / 2, 1.8],
+    [4.2, 1.5, -12.84, Math.PI, 2.2], [36.0, 1.1, -12.84, Math.PI, 1.8], [48.0, 0.95, -12.84, Math.PI, 2.0], [55.5, 1.15, -12.78, Math.PI, 2.6], [70.0, 1.2, -12.78, Math.PI, 2.4], [91.0, 1.1, -12.84, Math.PI, 1.9],
+    [34.17, 1.1, -30.0, Math.PI / 2, 2.4], [49.78, 1.1, -30.0, -Math.PI / 2, 2.8], [49.78, 1.0, -38.5, -Math.PI / 2, 2.2], [34.17, 1.05, -16.0, Math.PI / 2, 1.8],
   ];
   tags.forEach(([x, y, z, ry, w], i) => add(tag(i), x, y, z, ry, w, w / 2, 'mult'));
   // overhead wires, street to tenement, along the far wall

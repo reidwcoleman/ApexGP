@@ -326,6 +326,37 @@ export class Sound {
     this.burst(this.src(p, 0.7, false), 0.022, 0.9, 2400, 11000);
   }
 
+  /** the wearer's own chest: one in and one out, harder the worse it's going */
+  breath(k: number) {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.16 + k * 0.2, false);
+    this.burst(d, 0.42, 0.34, 500, 2300);
+    this.burst(d, 0.52, 0.42, 340, 1500, 0.62 - k * 0.2);
+  }
+
+  heart(k: number) {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.34 + k * 0.4, false);
+    this.thump(d, 62, 40, 0.13, 0.9);
+    this.thump(d, 54, 36, 0.11, 0.62, 0.21);
+  }
+
+  /** cloth and tape */
+  cloth() {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.3, false);
+    this.burst(d, 0.14, 0.5, 900, 5200);
+    this.burst(d, 0.1, 0.34, 1600, 7000, 0.11);
+  }
+
+  /** a boot meeting something */
+  boot(hit: boolean) {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.6, false);
+    this.burst(d, 0.1, 0.25, 500, 2400);
+    if (hit) this.thump(d, 130, 52, 0.15, 1.1, 0.02);
+  }
+
   hurt() {
     if (!this.ctx) return;
     const d = this.src(null, 0.5, false);

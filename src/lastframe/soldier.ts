@@ -288,24 +288,28 @@ export class Soldier {
     if (this.dead >= 0) return;
     this.dead = 0;
     this.rag = ph.ragdoll(this.person, v, zone, dir, power);
+    this.letGo(ph, v, dir);
+  }
+
+  /** the hands open: it goes its own way, and stays there for whoever wants it */
+  letGo(ph: Phys, v: THREE.Vector3, dir: THREE.Vector3) {
     const g = this.gun;
-    if (g) {
-      // the hands open: it goes its own way
-      g.group.updateMatrixWorld(true);
-      const held = new THREE.Group();
-      const c = g.group.clone();
-      c.position.set(0, 0, 0);
-      c.quaternion.identity();
-      held.add(c);
-      c.updateMatrixWorld(true);
-      const bb = new THREE.Box3().setFromObject(c);
-      const mid = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
-      sz.x = Math.max(0.02, Math.min(sz.x, 0.05));
-      this.root.parent?.add(held);
-      const p = g.group.getWorldPosition(new THREE.Vector3()), q = g.group.getWorldQuaternion(new THREE.Quaternion());
-      ph.drop(held, [sz.x, Math.max(0.03, sz.y * 0.7), sz.z], mid, p, q, v.clone().addScaledVector(dir, 0.7).add(new THREE.Vector3(0, 0.6, 0)), 5, 3.2, 14);
-      g.group.visible = false;
-    }
+    if (!g) return;
+    g.group.updateMatrixWorld(true);
+    const held = new THREE.Group();
+    const c = g.group.clone();
+    c.position.set(0, 0, 0);
+    c.quaternion.identity();
+    c.visible = true;
+    held.add(c);
+    c.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(c);
+    const mid = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    sz.x = Math.max(0.02, Math.min(sz.x, 0.05));
+    this.root.parent?.add(held);
+    const p = g.group.getWorldPosition(new THREE.Vector3()), q = g.group.getWorldQuaternion(new THREE.Quaternion());
+    ph.drop(held, [sz.x, Math.max(0.03, sz.y * 0.7), sz.z], mid, p, q, v.clone().addScaledVector(dir, 0.7).add(new THREE.Vector3(0, 0.6, 0)), 5, 3.2, 45, 'metal', this.weapon ?? undefined);
+    g.group.visible = false;
   }
 
   /** hit but standing: the body gives, and comes back */

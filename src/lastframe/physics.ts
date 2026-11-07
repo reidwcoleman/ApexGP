@@ -52,6 +52,8 @@ interface Drop {
   life: number;
   speed: number;
   surf: string;
+  /** a gun on the ground can be picked up */
+  gun?: string;
 }
 
 export interface Shard {
@@ -206,11 +208,35 @@ export class Phys {
   }
 
   /** a magazine, a gun: any object with a box round it */
-  drop(obj: THREE.Object3D, half: [number, number, number], off: THREE.Vector3, p: THREE.Vector3, q: THREE.Quaternion, v: THREE.Vector3, spin: number, kg: number, life: number, surf = 'metal') {
+  drop(obj: THREE.Object3D, half: [number, number, number], off: THREE.Vector3, p: THREE.Vector3, q: THREE.Quaternion, v: THREE.Vector3, spin: number, kg: number, life: number, surf = 'metal', gun?: string) {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x, p.y, p.z).setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }).setLinvel(v.x, v.y, v.z)
       .setAngvel({ x: (Math.random() - 0.5) * spin, y: (Math.random() - 0.5) * spin, z: (Math.random() - 0.5) * spin }).setAngularDamping(0.5).setLinearDamping(0.05));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(half[0], half[1], half[2]).setTranslation(off.x, off.y, off.z).setMass(kg).setFriction(0.55).setRestitution(0.2).setCollisionGroups(GRP.debris), body);
-    this.drops.push({ body, obj, life, speed: 0, surf });
+    this.drops.push({ body, obj, life, speed: 0, surf, gun });
+  }
+
+  /** the nearest gun lying within reach, and how far along the look it is */
+  gunNear(x: number, y: number, z: number, fx: number, fy: number, fz: number, reach: number) {
+    let best: { i: number; gun: string } | null = null, bs = 0.55;
+    this.drops.forEach((d, i) => {
+      if (!d.gun) return;
+      const t = d.body.translation();
+      const dx = t.x - x, dy = t.y - y, dz = t.z - z, l = Math.hypot(dx, dy, dz);
+      if (l > reach) return;
+      const s = (dx * fx + dy * fy + dz * fz) / (l || 1);
+      if (s > bs) {
+        bs = s;
+        best = { i, gun: d.gun };
+      }
+    });
+    return best as { i: number; gun: string } | null;
+  }
+
+  takeGun(i: number) {
+    const d = this.drops[i];
+    if (!d) return;
+    this.dropGone(d);
+    this.drops.splice(i, 1);
   }
 
   private dropGone(d: Drop) {
@@ -505,7 +531,7 @@ export class Ragdoll {
       }
     });
     // shot: the zone takes it
-    const part = zone === 0 ? 3 : zone === 2 ? (Math.random() < 0.5 ? 9 : 11) : zone === 3 ? 0 : 2;
+    const part = zone === 0 ? 3 : zone === 2 || zone === 4 ? (Math.random() < 0.5 ? 9 : 11) : zone === 3 ? 0 : 2;
     const b = this.parts[part].body;
     const t = b.translation();
     b.applyImpulseAtPoint({ x: dir.x * power, y: dir.y * power + power * 0.08, z: dir.z * power }, { x: t.x + (Math.random() - 0.5) * 0.08, y: t.y + 0.06, z: t.z + (Math.random() - 0.5) * 0.08 }, true);

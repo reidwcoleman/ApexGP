@@ -85,9 +85,9 @@ for b in m.boxes:
         if b.tag == 'far' and f == '-z':
             continue
         # buried or never seen
-        if f == '-z' and b.a[2] <= 0.02:
+        if f == '-z' and b.a[2] <= 0.02 and b.tag != 'under':
             continue
-        if b.b[2] <= 0.0 and ax != 2 and not (b.b[2] > -0.2):
+        if b.b[2] <= 0.0 and ax != 2 and not (b.b[2] > -0.2) and b.tag not in ('under', 'step'):
             continue
         cu, cv = (u0 + u1) / 2, (v0 + v1) / 2
         hidden = True
@@ -209,7 +209,7 @@ def load_part(name, part):
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=f'{ROOT}/models/{name}/{name}.gltf')
     new = [o for o in bpy.data.objects if o not in before]
-    keep = [o for o in new if o.type == 'MESH' and (part is None or o.name.startswith(part))]
+    keep = [o for o in new if o.type == 'MESH' and (part is None or o.name.startswith(part)) and not any(f'LOD{i}' in o.name for i in (1, 2, 3, 4))]
     if part is not None:
         exact = [o for o in keep if o.name == part or o.name.split('.')[0] == part]
         keep = exact or keep
@@ -219,6 +219,7 @@ def load_part(name, part):
     bpy.ops.object.select_all(action='DESELECT')
     for o in keep:
         mw = o.matrix_world.copy(); o.parent = None; o.matrix_world = mw
+        o.data = o.data.copy()
         o.select_set(True)
     bpy.context.view_layer.objects.active = keep[0]
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -243,6 +244,98 @@ for p in m.props:
     scene.collection.objects.link(o)
     o.location = p['pos']; o.rotation_euler = (p['tilt'], 0, p['rot']); o.scale = (p['scale'],) * 3
 log('props', len(m.props), 'unique', len(cache))
+
+# ------------------------------------------------------------------ the kit: facades with a lightmap of their own
+kits = {}
+def kit_of(name):
+    if name in kits: return kits[name]
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=f'{ROOT}/models/{name}/{name}.gltf')
+    new = [o for o in bpy.data.objects if o not in before]
+    d = {}
+    for o in new:
+        if o.type == 'MESH': d[o.name.split('.')[0]] = o
+        for c in list(o.users_collection): c.objects.unlink(o)
+    kits[name] = d
+    return d
+units = {}
+def unit_obj(kit, parts, far):
+    key = (kit, tuple(parts), far)
+    if key in units: return units[key]
+    d = kit_of(kit)
+    origin = d[parts[0]].matrix_world.translation.copy()
+    objs = []
+    for pn in parts:
+        src = d[pn]
+        o = src.copy(); o.data = src.data.copy(); o.parent = None
+        o.matrix_world = Matrix.Translation(-origin) @ src.matrix_world
+        scene.collection.objects.link(o)
+        objs.append(o)
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objs: o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if len(objs) > 1: bpy.ops.object.join()
+    o = bpy.context.view_layer.objects.active
+    tris = sum(len(p.vertices) - 2 for p in o.data.polygons)
+    cap = 700 if far else 1700
+    if tris > cap:
+        dm = o.modifiers.new('d', 'DECIMATE'); dm.ratio = cap / tris
+        bpy.ops.object.modifier_apply(modifier='d')
+    if not far:
+        # flat from the front. A module is a thin slice of wall, so one projection gives it smooth light; an automatic
+        # unwrap of modelled brick shatters into islands smaller than a texel, and those bake to black
+        me = o.data
+        lmuv = me.uv_layers.new(name='lm')
+        nv = len(me.vertices); co = np.empty(nv * 3, np.float32); me.vertices.foreach_get('co', co); co = co.reshape(-1, 3)
+        nl = len(me.loops); vi = np.empty(nl, np.int32); me.loops.foreach_get('vertex_index', vi)
+        npoly = len(me.polygons); ls = np.empty(npoly, np.int32); me.polygons.foreach_get('loop_start', ls)
+        lt = np.empty(npoly, np.int32); me.polygons.foreach_get('loop_total', lt)
+        pn = np.empty(npoly * 3, np.float32); me.polygons.foreach_get('normal', pn); pn = pn.reshape(-1, 3)
+        lo, hi = co.min(0), co.max(0); sp = np.maximum(hi - lo, 1e-3)
+        uv = np.stack([(co[vi, 0] - lo[0]) / sp[0], (co[vi, 2] - lo[2]) / sp[2]], 1) * 0.96 + 0.02
+        # what faces away from the street goes to one corner, or it would bake over the front
+        back = np.repeat(pn[:, 1] > 0.5, lt)
+        uv[back] = 0.004
+        lmuv.data.foreach_set('uv', uv.ravel().astype(np.float32))
+    o.name = ('UF|' if far else 'U|') + kit + '|' + '+'.join(parts)
+    scene.collection.objects.unlink(o)
+    units[key] = o
+    return o
+TILE = 128
+PER = SIZE // TILE
+placed = []
+units_out = []
+for u in m.units:
+    o0 = unit_obj(u['kit'], u['parts'], u['far'])
+    e = dict(id=o0.name, pos=u['pos'], rot=u['rot'], sc=u['sc'], tint=u['tint'])
+    if not u['far']:
+        i = len(placed)
+        if i >= PER * PER: raise Exception('out of tiles')
+        cx, cy = i % PER, i // PER
+        tile = [(cx * TILE + 3) / SIZE, (cy * TILE + 3) / SIZE, (TILE - 6) / SIZE, (TILE - 6) / SIZE]
+        e['tile'] = tile
+        o = o0.copy(); o.data = o0.data.copy(); o.name = f'inst{i}'
+        la = o.data.uv_layers['lm']
+        a = np.empty(len(la.data) * 2, np.float32); la.data.foreach_get('uv', a); a = a.reshape(-1, 2)
+        a = a * np.array(tile[2:], np.float32) + np.array(tile[:2], np.float32)
+        la.data.foreach_set('uv', a.ravel())
+        o.data.uv_layers.active = la
+        # imported kit objects rotate by quaternion, and rotation_euler would be silently ignored
+        o.rotation_mode = 'XYZ'
+        o.location = u['pos']; o.rotation_euler = (0, 0, u['rot']); o.scale = u['sc']
+        scene.collection.objects.link(o)
+        placed.append(o)
+    units_out.append(e)
+log('units', len(m.units), 'kinds', len(units), 'tiled', len(placed))
+# one mesh: a bake restarts the renderer for every selected object, which is an hour at this count
+if len(placed) > 1:
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in placed: o.select_set(True)
+    bpy.context.view_layer.objects.active = placed[0]
+    bpy.ops.object.join()
+    placed = [bpy.context.view_layer.objects.active]
+    placed[0].data.uv_layers.active = placed[0].data.uv_layers['lm']
 
 # ------------------------------------------------------------------ light
 def add_light(L):
@@ -306,7 +399,7 @@ for p in m.props:
     if p['loose']:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
-json.dump(dict(mats=meta, colliders=colliders, props=props_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
+json.dump(dict(mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
                density=dens, size=SIZE), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop
@@ -336,6 +429,18 @@ if '--props' in argv:
                     im = nd.image
                     if im.size[0] > px and seen_img.get(im.name, 0) < px:
                         im.scale(px, px); seen_img[im.name] = px
+    for key, src in units.items():
+        # the source gives up its name, or the export gets a .001 on it and the game can't find the module
+        name = src.name; src.name = name + '~'
+        o = src.copy(); o.data = src.data.copy(); o.name = name
+        col.objects.link(o)
+    for kit in kits.values():
+        for mo in kit.values():
+            for ms in mo.material_slots:
+                if not ms.material or not ms.material.use_nodes: continue
+                for nd in ms.material.node_tree.nodes:
+                    if nd.type == 'TEX_IMAGE' and nd.image and nd.image.size[0] > 1024 and seen_img.get(nd.image.name, 0) < 1024:
+                        nd.image.scale(1024, 1024); seen_img[nd.image.name] = 1024
     bpy.ops.object.select_all(action='DESELECT')
     for o in col.objects: o.select_set(True)
     bpy.ops.export_scene.gltf(filepath=f'{OUT}/props.glb', export_format='GLB', use_selection=True, export_image_format='JPEG', export_image_quality=70, export_apply=False,
@@ -368,3 +473,20 @@ px = np.empty(SIZE * SIZE * 4, np.float32); img.pixels.foreach_get(px)
 np.save(f'{OUT}/lightmap.npy', px.reshape(SIZE, SIZE, 4)[..., :3].astype(np.float16))
 img.filepath_raw = f'{OUT}/lightmap.exr'; img.file_format = 'OPEN_EXR'; img.save()
 log('saved', float(px.mean()), float(np.percentile(px, 99)))
+# the same again for the kit, into its own atlas
+img2 = bpy.data.images.new('lightmap2', SIZE, SIZE, alpha=False, float_buffer=True)
+seen = set()
+for o in placed:
+    for ms in o.material_slots:
+        mt = ms.material
+        if mt is None or mt.name in seen: continue
+        seen.add(mt.name)
+        nd = mt.node_tree.nodes.new('ShaderNodeTexImage'); nd.image = img2; nd.select = True
+        mt.node_tree.nodes.active = nd
+bpy.ops.object.select_all(action='DESELECT')
+for o in placed: o.select_set(True)
+bpy.context.view_layer.objects.active = placed[0]
+log('baking kit', len(placed))
+bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT', 'INDIRECT'}, margin=2, margin_type='EXTEND', use_clear=True, uv_layer='lm')
+log('baked kit')
+img2.filepath_raw = f'{OUT}/lightmap2.exr'; img2.file_format = 'OPEN_EXR'; img2.save()

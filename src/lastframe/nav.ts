@@ -55,7 +55,8 @@ export class Nav {
           const px = n.x + (dx * STEP * h) / hops, pz = n.z + (dz * STEP * h) / hops;
           const f = w.floorAt(px, y + 0.46, pz, 0.22, 0);
           if (f < -50 || y - f > 0.7 || f - y > 0.46) ok = false;
-          else if (w.blocked(px, f + 0.05, pz, 0.26, 1.6)) ok = false;
+          // clear from the shins up: a body steps over a stair nosing or a kerb, the walk code does the same
+          else if (w.blocked(px, f + 0.3, pz, 0.26, 1.35)) ok = false;
           else y = f;
         }
         if (!ok) continue;
@@ -104,7 +105,7 @@ export class Nav {
     const open: [number, number][] = [[0, from.i]];
     g[from.i] = 0;
     const h = (n: Node) => Math.hypot(n.x - to.x, n.z - to.z) + Math.abs(n.y - to.y) * 2;
-    let budget = 9000;
+    let budget = 40000;
     while (open.length && budget-- > 0) {
       // binary heap by hand
       const [, cur] = pop(open);

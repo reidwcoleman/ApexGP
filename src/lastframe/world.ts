@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LF, applyLF } from './lighting.ts';
+import { LF, applyLF, roomGlass } from './lighting.ts';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { World, type Box } from './collide.ts';
 import { dress } from './dress.ts';
 
@@ -20,6 +21,8 @@ export interface MapData {
   lights: { kind: string; pos: number[]; color: number[]; power: number }[];
   rooms: { name: string; a: number[]; b: number[] }[];
   lm: { logr: number; k: number; size: number };
+  /** facade modules: id, where, and which tile of the second lightmap (none: a far building) */
+  units: { id: string; pos: number[]; rot: number; sc: number[]; tint: number[]; tile?: number[] }[];
 }
 
 export class Door {
@@ -258,7 +261,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const texs = new Map<string, THREE.Texture>();
   const need: [string, boolean][] = [];
   for (const t of map.textures) need.push([`tex/${t}_c.webp`, true], [`tex/${t}_n.webp`, false], [`tex/${t}_a.webp`, false]);
-  need.push(['lm.webp', false], ['sky.webp', false]);
+  need.push(['lm.webp', false], ['lm2.webp', false], ['sky.webp', false]);
   let done = 0;
   await Promise.all(need.map(async ([f, srgb]) => {
     const t = await tl.loadAsync(BASE + f).catch(() => null);
@@ -278,6 +281,16 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   lm.flipY = true;
   lm.needsUpdate = true;
   LF.lm.value = lm;
+  const lm2 = texs.get('lm2.webp');
+  if (lm2) {
+    lm2.wrapS = lm2.wrapT = THREE.ClampToEdgeWrapping;
+    lm2.generateMipmaps = false;
+    lm2.minFilter = THREE.LinearFilter;
+    lm2.anisotropy = 1;
+    lm2.flipY = true;
+    lm2.needsUpdate = true;
+    LF.lm2.value = lm2;
+  }
   const skyT = texs.get('sky.webp')!;
   skyT.generateMipmaps = false;
   skyT.minFilter = THREE.LinearFilter;
@@ -318,9 +331,13 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     group.add(mesh);
   }
   progress(0.72, 'Props');
-  const gl = await new GLTFLoader().loadAsync(BASE + 'props.glb');
+  const gl = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(BASE + 'props.glb');
+  // compression moves each mesh into a quantised box and puts the way back on its node: nothing here may drop a node's matrix
+  gl.scene.updateMatrixWorld(true);
   const byId = new Map<string, THREE.Object3D>();
-  for (const c of gl.scene.children) byId.set(c.name, c);
+  for (const c of gl.scene.children) {
+    byId.set(c.name, c);
+  }
   const placed = new Map<string, MapData['props']>();
   const loose: Loaded['loose'] = [];
   for (const p of map.props) {
@@ -381,15 +398,78 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       }
     });
   }
+  // ---- the kit: instanced by module, in blocks of the map, each instance on its own lightmap tile
+  {
+    const glass = roomGlass();
+    const near = new Map<THREE.Material, THREE.Material>(), far = new Map<THREE.Material, THREE.Material>();
+    const matFor = (m0: THREE.MeshStandardMaterial, tiled: boolean) => {
+      if (/glass/i.test(m0.name)) return glass;
+      const table = tiled ? near : far;
+      let m = table.get(m0);
+      if (!m) {
+        const c = m0.clone();
+        c.transparent = false;
+        c.alphaTest = 0;
+        c.side = THREE.FrontSide;
+        for (const t of [c.map, c.normalMap, c.roughnessMap]) if (t) t.anisotropy = 4;
+        // plaster takes more light than the scans round it
+        c.color.multiplyScalar(tiled ? 0.74 : 0.8);
+        m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : {});
+        table.set(m0, m);
+      }
+      return m;
+    };
+    const byCell = new Map<string, MapData['units']>();
+    for (const u of map.units ?? []) {
+      const k = `${u.id}@${Math.floor(u.pos[0] / 24)},${Math.floor(u.pos[2] / 24)}`;
+      const c = byCell.get(k);
+      if (c) c.push(u);
+      else byCell.set(k, [u]);
+    }
+    const col = new THREE.Color();
+    for (const [key, list] of byCell) {
+      const id = key.split('@')[0];
+      const src = byId.get(id) ?? byId.get(id.replace(/[.\s|+]/g, '_')) ?? byId.get(id.replace(/[.\s|+]/g, ''));
+      if (!src) {
+        console.warn('[lastframe] no unit', id);
+        continue;
+      }
+      const tiled = !!list[0].tile;
+      src.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const m0 = mesh.material as THREE.MeshStandardMaterial;
+        const local = mesh.matrixWorld.clone();
+        const geo = new THREE.BufferGeometry();
+        geo.index = mesh.geometry.index;
+        for (const [n, a] of Object.entries(mesh.geometry.attributes)) geo.setAttribute(n, a);
+        if (tiled && mesh.geometry.getAttribute('uv1')) geo.setAttribute('uvLM', mesh.geometry.getAttribute('uv1'));
+        const tiles = new Float32Array(list.length * 4);
+        const inst = new THREE.InstancedMesh(geo, matFor(m0, tiled), list.length);
+        inst.name = id;
+        list.forEach((u, i) => {
+          q.setFromAxisAngle(UP, u.rot);
+          // sc is along the module, out of it, up it
+          mtx.compose(v.set(u.pos[0], u.pos[1], u.pos[2]), q, sc.set(u.sc[0], u.sc[2], u.sc[1])).multiply(local);
+          inst.setMatrixAt(i, mtx);
+          inst.setColorAt(i, col.setRGB(u.tint[0], u.tint[1], u.tint[2]));
+          if (u.tile) tiles.set(u.tile, i * 4);
+        });
+        if (tiled) geo.setAttribute('aTile', new THREE.InstancedBufferAttribute(tiles, 4));
+        inst.computeBoundingSphere();
+        group.add(inst);
+      });
+    }
+  }
   for (const p of map.props) {
     if (!p.loose) continue;
     const src = byId.get(p.id) ?? byId.get(p.id.replace(/[.\s]/g, '_'));
     if (!src) continue;
     // a pivot at the middle of its box: the model hangs below it
     const obj = new THREE.Group();
-    const inner = src.clone();
+    const inner = new THREE.Group();
+    inner.add(src.clone());
     inner.position.set(0, -p.loose.half[2], 0);
-    inner.rotation.set(0, 0, 0);
     inner.scale.setScalar(p.s);
     inner.traverse((o) => {
       const m = o as THREE.Mesh;

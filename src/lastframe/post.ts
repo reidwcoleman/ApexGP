@@ -181,6 +181,23 @@ uniform mat4 reproj;
 uniform vec2 px;
 uniform float cut;
 uniform vec2 jit;
+// five taps of a Catmull-Rom filter: history resampled every frame stays sharp instead of melting
+vec3 histAt( vec2 uv ) {
+  vec2 pos = uv / px, c = floor( pos - 0.5 ) + 0.5, f = pos - c;
+  vec2 w0 = f * ( -0.5 + f * ( 1.0 - 0.5 * f ) );
+  vec2 w1 = 1.0 + f * f * ( -2.5 + 1.5 * f );
+  vec2 w2 = f * ( 0.5 + f * ( 2.0 - 1.5 * f ) );
+  vec2 w3 = f * f * ( -0.5 + 0.5 * f );
+  vec2 w12 = w1 + w2, o = w2 / w12;
+  vec2 t0 = ( c - 1.0 ) * px, t3 = ( c + 2.0 ) * px, t12 = ( c + o ) * px;
+  vec3 r = texture2D( tHist, vec2( t12.x, t0.y ) ).rgb * ( w12.x * w0.y );
+  r += texture2D( tHist, vec2( t0.x, t12.y ) ).rgb * ( w0.x * w12.y );
+  r += texture2D( tHist, t12 ).rgb * ( w12.x * w12.y );
+  r += texture2D( tHist, vec2( t3.x, t12.y ) ).rgb * ( w3.x * w12.y );
+  r += texture2D( tHist, vec2( t12.x, t3.y ) ).rgb * ( w12.x * w3.y );
+  float ws = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  return max( r / ws, vec3( 0.0 ) );
+}
 void main() {
   vec2 uv = vUv;
   float z = lin( texture2D( tDepth, uv ).r );
@@ -204,11 +221,11 @@ void main() {
     vec4 q = reproj * vec4( uv * 2.0 - 1.0, texture2D( tDepth, uv ).r * 2.0 - 1.0, 1.0 );
     pu = q.xy / q.w * 0.5 + 0.5;
   }
-  vec3 h = texture2D( tHist, pu ).rgb;
+  vec3 h = histAt( pu );
   vec3 box = ( mx - mn ) * 0.5 + 0.002;
   h = clamp( h, max( mn, mean - box * 1.2 ), min( mx, mean + box * 1.2 ) );
   float out_ = step( 0.0, pu.x ) * step( pu.x, 1.0 ) * step( 0.0, pu.y ) * step( pu.y, 1.0 );
-  float k = cut > 0.5 ? 1.0 : mix( 1.0, z < 1.1 ? 0.3 : 0.11, out_ );
+  float k = cut > 0.5 ? 1.0 : mix( 1.0, z < 1.1 ? 0.3 : 0.13, out_ );
   gl_FragColor = vec4( mix( h, cur, k ), 1.0 );
 }
 `;
@@ -380,7 +397,7 @@ void main() {
   vec3 c = vec3( texture2D( tSrc, cr ).r, texture2D( tSrc, cg ).g, texture2D( tSrc, cb ).b );
   // unsharp mask, as the camera's own processing does it
   vec3 soft = texture2D( tHalf, cg ).rgb;
-  c = max( c + ( c - soft ) * 0.3, vec3( 0.0 ) );
+  c = max( c + ( c - soft ) * 0.55, vec3( 0.0 ) );
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   vec3 hdr = c + bloom * 0.085 + whiteout * 9.0;
@@ -391,13 +408,19 @@ void main() {
   float blum = dot( bl * expo, vec3( 0.3, 0.6, 0.1 ) );
   hdr = mix( hdr, bl, 0.18 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
   hdr *= expo;
+  // white balance: night through a cheap sensor is grey, with sodium in it, not blue
+  hdr *= vec3( 1.03, 1.0, 0.88 );
 
   vec3 col = film( hdr * 0.92 );
   // a cheap sensor's colour: thin, cold shadows
   float l = dot( col, vec3( 0.3, 0.59, 0.11 ) );
-  col = mix( vec3( l ), col, 0.8 );
-  col *= mix( vec3( 0.93, 1.0, 1.05 ), vec3( 1.02, 1.0, 0.97 ), smoothstep( 0.0, 0.5, l ) );
-  col = pow( col, vec3( 1.1 ) );
+  // a night sky through a small sensor goes grey-green, never violet: anything with green missing gets it back
+  float vio = max( min( col.r, col.b ) - col.g, 0.0 );
+  col.rb -= vio * 0.8;
+  col = mix( vec3( l ), col, 0.82 );
+  col *= mix( vec3( 0.95, 1.0, 0.99 ), vec3( 1.03, 1.0, 0.95 ), smoothstep( 0.0, 0.5, l ) );
+  // crushed blacks, hot highlights
+  col = pow( col, vec3( 1.14 ) ) * 1.05;
   // lens falloff and the housing's rounded corners, with a coloured rim
   float vig = 1.0 - smoothstep( 0.5, 1.1, edge ) * 0.5;
   col *= vig;
@@ -410,14 +433,14 @@ void main() {
   float hl = dot( col, vec3( 0.3, 0.59, 0.11 ) );
   col = mix( col, vec3( hl ) * vec3( 1.05, 0.9, 0.88 ), hurt * 0.75 );
   col *= 1.0 - hurt * 0.3 * smoothstep( 0.2, 0.9, edge );
-  // sensor noise, heavier in the dark
-  vec2 gp = floor( gl_FragCoord.xy / 1.5 );
-  float g = hash( gp + fract( time ) * 91.7 ) - 0.5;
-  float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
-  float gk = mix( 0.021, 0.011, smoothstep( 0.0, 0.42, l ) ) * grainK;
-  col += vec3( g + g2 * 0.15, g, g - g2 * 0.15 ) * gk;
   col = mix( col, vec3( 0.0 ), feedCut );
   col = pow( max( col, 0.0 ), vec3( 1.0 / 2.2 ) );
+  // sensor noise, in display space so the blacks don't turn to gravel
+  vec2 gp = gl_FragCoord.xy;
+  float g = hash( gp + fract( time ) * 91.7 ) - 0.5;
+  float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
+  float gk = mix( 0.03, 0.016, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut );
+  col += vec3( g + g2 * 0.2, g, g - g2 * 0.2 ) * gk;
   gl_FragColor = vec4( col, 1.0 );
 }
 `;

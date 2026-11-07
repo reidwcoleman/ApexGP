@@ -12,7 +12,7 @@ export function bodyHeight(crouch: boolean) {
   return crouch ? 1.22 : 1.78;
 }
 
-/** nearest hit of a ray on a body within t; zone 0 head, 1 torso, 2 limb */
+/** nearest hit of a ray on a body within t; zone 0 head, 1 torso, 2 arm, 4 leg */
 export function hitBody(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, b: Body, maxT: number): { t: number; zone: number } | null {
   const h = bodyHeight(b.crouch);
   const lx = Math.cos(b.yaw) * b.lean * 0.3, lz = -Math.sin(b.yaw) * b.lean * 0.3;
@@ -28,7 +28,10 @@ export function hitBody(ox: number, oy: number, oz: number, dx: number, dy: numb
     const k = i / 4;
     sph(b.x + lx * k, b.y + mid + (top - mid) * k, b.z + lz * k, 0.215, 1);
   }
-  for (let i = 0; i <= 4; i++) sph(b.x, b.y + 0.1 + (mid - 0.14) * (i / 4), b.z, 0.17, 2);
+  for (let i = 0; i <= 4; i++) sph(b.x, b.y + 0.1 + (mid - 0.14) * (i / 4), b.z, 0.17, 4);
+  // the arms hang outside the chest: shoulders to the elbows, along the body's right
+  const ax = Math.cos(b.yaw), az = -Math.sin(b.yaw);
+  for (const sd of [-1, 1]) for (let i = 0; i <= 2; i++) sph(b.x + lx + ax * sd * 0.29, b.y + top - 0.04 - i * 0.17, b.z + lz + az * sd * 0.29, 0.075, 2);
   return best;
 }
 

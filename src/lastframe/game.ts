@@ -12,7 +12,7 @@ import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import type { Body } from './hitbox.ts';
@@ -152,7 +152,8 @@ export class Game {
         m.receiveShadow = true;
       }
     });
-    const roofs: THREE.Vector4[] = L.map.zones.map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
+    // what keeps the rain off; a tunnel under open ground doesn't
+    const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > 0).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
     this.fx = new Fx(roofs, phys, L.glassMat);
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
@@ -487,7 +488,11 @@ export class Game {
           // a round past the ear
           const ab = new THREE.Vector3(e.e[0], e.e[1], e.e[2]).sub(muz);
           const t = THREE.MathUtils.clamp(this.cam.position.clone().sub(muz).dot(ab) / ab.lengthSq(), 0, 1);
-          if (muz.clone().addScaledVector(ab, t).distanceTo(this.cam.position) < 1.1 && t > 0.05 && t < 0.98) this.sound.snap(this.cam.position.clone().add(new THREE.Vector3(0.4, 0, 0)));
+          const miss = muz.clone().addScaledVector(ab, t).distanceTo(this.cam.position);
+          if (miss < 2.2 && t > 0.05 && t < 0.98 && this.me.alive && this.foe(e.s)) {
+            if (miss < 1.1) this.sound.snap(this.cam.position.clone().add(new THREE.Vector3(0.4, 0, 0)));
+            this.me.suppress(1 - miss / 2.2);
+          }
         }
         const muffled = !this.L.world.sees(this.cam.position, muz);
         this.sound.shot(e.w, muz, muffled);
@@ -497,13 +502,25 @@ export class Game {
       case 'hit': {
         const a = this.actors.get(e.s);
         if (a) a.info.hp = e.hp;
+        if (e.s === this.mySlot) this.me.hp = e.hp;
         if (a?.soldier && e.s !== this.mySlot) a.soldier.flinch(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]));
         if (e.s === this.mySlot) {
           this.hurt = Math.min(1, this.hurt + 0.42 + e.dmg / 90);
-          this.me.hurt(e.dir);
+          this.me.hurt(e.dir, e.zone, e.dmg, e.bleed ?? 0);
           this.sound.hurt();
           this.hud.damage(e.dir, this.cam, e.hp);
+          this.hud.wound(e.zone);
         } else if (e.by === this.mySlot) this.hud.hitTick(false);
+        break;
+      }
+      case 'hp': {
+        const a = this.actors.get(e.s);
+        if (a) a.info.hp = e.hp;
+        if (e.s === this.mySlot) {
+          this.me.hp = e.hp;
+          this.me.bleed = e.bleed;
+          if (e.healed) this.me.healed();
+        }
         break;
       }
       case 'die': {
@@ -521,7 +538,7 @@ export class Game {
           const spec = e.w >= 0 ? WEAPONS[WEAPON_LIST[e.w]] : null;
           const shove = spec ? spec.shove * (spec.pellets > 1 ? 9 : 1) * (e.dist < 6 ? 1.5 : 1) * 3 : 60;
           s.kill(this.phys, running, e.zone, d, shove);
-          const y = e.zone === 0 ? 1.62 : e.zone === 2 ? 0.7 : 1.2;
+          const y = e.zone === 0 ? 1.62 : e.zone === 4 ? 0.7 : 1.2;
           // what the round carries past lands on whatever is behind them
           const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2);
           this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined);
@@ -739,6 +756,8 @@ export class Game {
       shot: (w, o, e, surf) => this.req({ t: 'shot', w, o, e, surf }),
       hit: (to, dmg, zone, w, dir, dist) => this.req({ t: 'hit', to, dmg, zone, w, dir, dist }),
       door: (i, from) => this.req({ t: 'door', i, from }),
+      kick: (i, from) => this.req({ t: 'kick', i, from }),
+      heal: () => this.req({ t: 'heal' }),
       pane: (i, at) => this.req({ t: 'pane', i, at }),
       nade: (kind, o, v, fuse) => this.req({ t: 'nade', kind, o, v, fuse }),
     },
@@ -877,7 +896,7 @@ export class Game {
     this.hurt = Math.max(0, this.hurt - dt * 0.34);
     const hp = mine?.info.hp ?? 100;
     u.whiteout.value = Math.min(1.4, this.whiteout);
-    u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 : 0.35));
+    u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 + me.supK * 0.3 : 0.35));
     u.fish.value = THREE.MathUtils.lerp(0.85, 0.3, me.alive ? me.adsK : 0);
     const outside = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street';
     this.wet += ((outside ? 1 : 0) - this.wet) * Math.min(1, dt * (outside ? 0.5 : 0.8));
@@ -1058,8 +1077,8 @@ export class Game {
     // the lens ends up turned toward whoever did it
     const face = mine.yaw + angleDiff(this.killYaw, mine.yaw) * e;
     this.cam.rotation.set(THREE.MathUtils.lerp(mine.pitch, 0.1, e), face, roll, 'YXZ');
-    if (this.cam.fov !== 84) {
-      this.cam.fov = 84;
+    if (this.cam.fov !== 92) {
+      this.cam.fov = 92;
       this.cam.updateProjectionMatrix();
     }
     this.cam.updateMatrixWorld();
@@ -1143,8 +1162,13 @@ export class Game {
   player(slot: number) {
     return this.actors.get(slot)?.info;
   }
+  /** on the other side from me */
+  private foe(slot: number) {
+    const a = this.actors.get(slot)?.info, b = this.actors.get(this.mySlot)?.info;
+    return !!a && !!b && (a.team === 2 || a.team !== b.team);
+  }
   weaponName(w: number) {
-    return w >= 0 ? WEAPONS[WEAPON_LIST[w]].name : 'Blast';
+    return w >= 0 ? WEAPONS[WEAPON_LIST[w]].name : w === W_BOOT ? 'Boot' : 'Blast';
   }
   bodiesFor(s: number): BodyState | undefined {
     return this.match?.bodies[s];

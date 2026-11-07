@@ -6,9 +6,9 @@ import type { Loaded } from './world.ts';
  * each cell's light as six cosine-weighted colours. Runs on the real renderer, so it sees exactly
  * the lightmap, the sky and the lamps the game shows.
  */
-const STEP = [2, 1.15, 2];
-const MIN = [-4, -0.25, -66];
-const DIM = [53, 9, 37];
+const STEP = [2, 1.15, 2];  // z runs from behind the far yard to the shops across the street
+const MIN = [-4, -3.7, -66];
+const DIM = [53, 12, 40];
 const T = 8;
 const DIRS: [THREE.Vector3, THREE.Vector3][] = [
   [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)], [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)],

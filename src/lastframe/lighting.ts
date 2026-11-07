@@ -49,6 +49,8 @@ function noiseTile() {
 
 export const LF = {
   lm: { value: null as THREE.Texture | null },
+  /** the kit's own atlas */
+  lm2: { value: null as THREE.Texture | null },
   vol: { value: null as THREE.Data3DTexture | null },
   /** the six faces averaged: what a mote of dust in that cell is lit by */
   volAvg: { value: null as THREE.Data3DTexture | null },
@@ -76,6 +78,9 @@ varying vec3 vLfN;
 attribute vec2 uvLM;
 varying vec2 vLfLM;
 #endif
+#ifdef LF_TILE
+attribute vec4 aTile;
+#endif
 `;
 const VERT_MAIN = /* glsl */ `
 {
@@ -88,7 +93,12 @@ const VERT_MAIN = /* glsl */ `
   vLfW = ( modelMatrix * lfP ).xyz;
   vLfN = normalize( mat3( modelMatrix ) * lfNo );
   #ifdef LF_LM
+    #ifdef LF_TILE
+    // a kit module: its unwrap lands on this instance's own tile of the atlas (glTF stores v flipped)
+    vLfLM = vec2( uvLM.x, 1.0 - uvLM.y ) * aTile.zw + aTile.xy;
+    #else
     vLfLM = uvLM;
+    #endif
   #endif
 }
 `;
@@ -295,11 +305,84 @@ const FRAG_WET = /* glsl */ `
 #endif
 `;
 
+/**
+ * Window glass with a room behind it. No geometry: the view ray is walked into a box the size of a
+ * room, and whichever wall it lands on is painted. Each window gets its own room from a hash of where it
+ * is: most dark, some with a lamp on, some with the blind half down. The street's reflection goes on top.
+ */
+export function roomGlass() {
+  return new THREE.ShaderMaterial({
+    uniforms: { lfVol: LF.vol, lfVolMin: LF.volMin, lfVolInv: LF.volInv, lfVolDim: LF.volDim, lfK: LF.lmK, lit: { value: 1 } },
+    vertexShader: /* glsl */ `
+      varying vec3 vW; varying vec3 vN;
+      void main() {
+        vec4 p = vec4( position, 1.0 );
+        vec3 n = normal;
+        #ifdef USE_INSTANCING
+          p = instanceMatrix * p;
+          n = mat3( instanceMatrix ) * n;
+        #endif
+        vec4 w = modelMatrix * p;
+        vW = w.xyz;
+        vN = normalize( mat3( modelMatrix ) * n );
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec3 vW; varying vec3 vN;
+      uniform highp sampler3D lfVol; uniform vec3 lfVolMin; uniform vec3 lfVolInv; uniform vec3 lfVolDim; uniform vec2 lfK;
+      float h1( vec2 p ) { return fract( sin( dot( p, vec2( 41.3, 289.1 ) ) ) * 43758.5453 ); }
+      vec3 skyAt( vec3 p, vec3 d ) {
+        vec3 uvw = ( p - lfVolMin ) * lfVolInv;
+        float face = d.y > 0.0 ? 2.0 : 3.0;
+        float dz = lfVolDim.z;
+        float z = clamp( uvw.z * dz, 0.5, dz - 0.5 ) + face * dz;
+        vec3 e = texture( lfVol, vec3( uvw.xy, z / ( dz * 6.0 ) ) ).rgb;
+        return ( exp2( e * lfK.x ) - 1.0 ) / lfK.y;
+      }
+      void main() {
+        vec3 n = normalize( vN );
+        // the wall's own frame: glass always faces along an axis of the block
+        vec3 r = abs( n.x ) > abs( n.z ) ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
+        vec3 v = normalize( vW - cameraPosition );
+        float along = dot( vW, r );
+        vec2 cell = vec2( floor( along / 3.0 ), floor( vW.y / 3.0 ) );
+        vec2 f = vec2( fract( along / 3.0 ), fract( vW.y / 3.0 ) );
+        float seed = h1( cell + floor( dot( vW, n ) * 0.2 ) );
+        vec3 d = vec3( dot( v, r ), v.y, -dot( v, n ) );
+        d.z = max( d.z, 0.05 );
+        vec3 size = vec3( 3.0, 3.0, 3.2 + seed * 2.0 );
+        vec3 o = vec3( f * 3.0, 0.0 );
+        float tx = ( d.x > 0.0 ? size.x - o.x : -o.x ) / ( abs( d.x ) < 1e-4 ? 1e-4 : d.x );
+        float ty = ( d.y > 0.0 ? size.y - o.y : -o.y ) / ( abs( d.y ) < 1e-4 ? 1e-4 : d.y );
+        float tz = size.z / d.z;
+        float t = min( tx, min( ty, tz ) );
+        vec3 hit = o + d * t;
+        // what it's made of: wallpaper, a floor, a ceiling
+        vec3 wallC = mix( vec3( 0.34, 0.3, 0.25 ), vec3( 0.2, 0.24, 0.26 ), h1( cell + 3.0 ) );
+        vec3 c = t == ty ? ( d.y > 0.0 ? vec3( 0.42, 0.4, 0.36 ) : vec3( 0.16, 0.11, 0.08 ) ) : wallC;
+        if ( t == tz && abs( hit.x - 1.5 ) < 0.8 && hit.y < 1.4 ) c *= 0.5;      // furniture against the back wall
+        float on = step( 0.8, seed );
+        vec3 lamp = mix( vec3( 1.0, 0.72, 0.42 ), vec3( 0.85, 0.92, 1.0 ), step( 0.93, seed ) );
+        float glow = 1.6 / ( 1.0 + dot( hit - vec3( 1.5, 2.4, size.z * 0.5 ), hit - vec3( 1.5, 2.4, size.z * 0.5 ) ) * 0.16 );
+        vec3 room = c * mix( vec3( 0.006, 0.007, 0.009 ), lamp * glow * 1.4, on );
+        // a blind, down some of the way, and curtains drawn in from the sides
+        float blind = h1( cell + 9.0 );
+        float bh = 3.0 - blind * blind * 1.7;
+        if ( o.y > bh ) room = mix( vec3( 0.3, 0.27, 0.22 ), lamp, 0.3 ) * ( 0.012 + on * 0.34 ) * ( 0.9 + 0.1 * sin( o.y * 90.0 ) );
+        float fres = 0.05 + 0.95 * pow( 1.0 - clamp( dot( -v, n ), 0.0, 1.0 ), 4.0 );
+        vec3 refl = skyAt( vW + n * 0.5, reflect( v, n ) );
+        gl_FragColor = vec4( mix( room, refl * 1.1, fres ), 1.0 );
+      }`,
+  });
+}
+
 export interface LfOpts {
   lightmap?: boolean;
   wet?: number;
   /** held objects sit in shadow the coarse cubes can't see: scale what they mirror */
   spec?: number;
+  /** a kit module: instanced, with a tile of the second atlas */
+  tile?: boolean;
   /** what's held up to the lens: a little light off the wearer's own chest, so a dark gun isn't a hole in the picture */
   view?: number;
 }
@@ -310,12 +393,13 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   if (o.wet) m.defines.LF_WET = 1;
   m.defines.LF_SPEC = (o.spec ?? 1).toFixed(2);
   if (o.view) m.defines.LF_VIEW = 1;
+  if (o.tile) m.defines.LF_TILE = 1;
   const wet = { value: o.wet ?? 0 };
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.() ?? '';
   m.onBeforeCompile = (s, r) => {
     prev?.call(m, s, r);
-    s.uniforms.lfLM = LF.lm;
+    s.uniforms.lfLM = o.tile ? LF.lm2 : LF.lm;
     s.uniforms.lfVol = LF.vol;
     s.uniforms.lfVolMin = LF.volMin;
     s.uniforms.lfVolInv = LF.volInv;
@@ -346,6 +430,6 @@ if ( lfPuddle > 0.02 && lfRain > 0.0 ) {
 `);
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + FRAG_LIGHT);
   };
-  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}`;
+  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}${o.tile ? 1 : 0}`;
   return m;
 }

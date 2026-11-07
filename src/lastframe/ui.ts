@@ -5,11 +5,13 @@ import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, type Ev, type Match
 import type * as THREE from 'three';
 
 const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
-  { id: 'tdm', name: 'Team Fight', note: 'First team to 40 kills. Respawns on.', limit: 40 },
+  { id: 'tdm', name: 'Team Fight', note: 'First side to 40 kills. Respawns on.', limit: 40 },
   { id: 'rounds', name: 'Last Team Standing', note: 'One life a round. First to 5.', limit: 5 },
   { id: 'hold', name: 'Hold Ground', note: 'Keep the zone. First to 150. It moves.', limit: 150 },
   { id: 'ffa', name: 'Free For All', note: 'Everyone against everyone. First to 20.', limit: 20 },
 ];
+const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Z', 'Kick'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
+interface Case { id: string; at: number; mode: Mode; won: number; line: string; k: number; d: number; len: number; marks: [number, number][] }
 const SKILL = [['Rookie', 0.2], ['Regular', 0.5], ['Veteran', 0.85]] as const;
 
 const store = {
@@ -35,6 +37,9 @@ const el = <K extends keyof HTMLElementTagNameMap>(t: K, c = '', h = '') => {
   if (h) e.innerHTML = h;
   return e;
 };
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const stampNow = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+const scrub = (marks: [number, number][], len: number) => `<div class="scrub"><i></i>${marks.map(([t, k]) => `<u class="${k ? '' : 'dn'}" style="left:${((t / Math.max(1, len)) * 100).toFixed(2)}%"></u>`).join('')}</div>`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export class Hud {
@@ -45,7 +50,11 @@ export class Hud {
   private center = el('div', 'center');
   private promptEl = el('div', 'prompt');
   private ammo = el('div', 'ammo');
+  private ammoT = 0;
   private hp = el('div', 'hp', '<i></i>');
+  private wounds = el('div', 'wounds');
+  private vitals = el('div', 'vitals');
+  private healBar = el('div', 'heal', '<i></i>');
   private top = el('div', 'topline');
   private boardEl = el('div', 'board');
   private lostEl = el('div', 'lost');
@@ -54,7 +63,7 @@ export class Hud {
   private menu = el('div', 'menu');
   private pauseEl = el('div', 'pause');
   private toastEl = el('div', 'toast');
-  private hint = el('div', 'hint', '<b>WASD</b> move <b>Shift</b> run <b>C</b> crouch <b>Q E</b> lean <b>RMB</b> aim <b>R</b> reload <b>T</b> light <b>F</b> door <b>G</b> frag <b>V</b> flash <b>1 2</b> swap <b>Tab</b> score');
+  private hint = el('div', 'hint', KEYS.map(([k, a]) => `<div><b>${k}</b>${a}</div>`).join(''));
   private tick = el('div', 'tick');
   private roster: PlayerInfo[] = [];
   private unit = String(1000 + Math.floor(Math.random() * 8999));
@@ -77,10 +86,24 @@ export class Hud {
   private host: Host | null = null;
   private guest: Guest_ | null = null;
   private lobbyPlayers: { id: string; name: string; team: number; primary: WeaponId }[] = [];
-  private mySlotInLobby = 0;
+  private caseId = '';
+  /** the report for this case is filed */
+  private closed = false;
+  private startedAt = 0;
+  private marks: [number, number][] = [];
+  private heads = 0;
+  private far = 0;
+  private sheet = el('div', 'sheet');
+  private shTop = el('div', 'sh-top');
+  private report = el('div', 'report');
+  private tables = el('div', 'sh-tables');
+  private shActs = el('div', 'sh-acts');
 
   constructor(private g: Game) {
-    this.hudEl.append(this.tagBox, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.ammo, this.hp, this.tick, this.dmgEl, this.scope, this.hint);
+    this.vitals.append(this.wounds, this.hp);
+    this.hudEl.append(this.tagBox, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
+    this.sheet.append(this.shTop, this.report, this.tables, this.shActs);
+    this.boardEl.append(this.sheet);
     this.root.append(this.hudEl, this.boardEl, this.lostEl, this.pauseEl, this.menu, this.toastEl);
     this.hudEl.style.display = 'none';
     addEventListener('keydown', (e) => {
@@ -93,6 +116,25 @@ export class Hud {
     g.r.domElement.addEventListener('click', () => {
       if (g.inMatch && !document.pointerLockElement) g.lock();
     });
+    window.setInterval(() => {
+      const e = this.menu.querySelector('[data-now]');
+      if (e) e.textContent = stampNow();
+    }, 1000);
+  }
+
+  private cases(): Case[] {
+    try {
+      return JSON.parse(store.get('cases', '[]')) as Case[];
+    } catch {
+      return [];
+    }
+  }
+
+  private nextCase() {
+    const n = Number(store.get('caseno', '411')) + 1;
+    store.set('caseno', String(n));
+    this.caseId = `${String(new Date().getFullYear()).slice(2)}-${String(n).padStart(4, '0')}`;
+    this.closed = false;
   }
 
   ready() {
@@ -102,22 +144,30 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- menus
+  /** the live picture beside the rail, stamped like the camera, on a transport from the last case */
+  private viewer() {
+    const last = this.cases()[0];
+    return `<div class="viewer">
+      <div class="stamp"><span data-now>${stampNow()}</span><br>LF-CAM ${this.unit} &nbsp;<span class="rec">REC</span></div>
+      <div class="transport"><span>${last ? `CASE ${last.id}` : 'NO FOOTAGE'}</span>${scrub(last?.marks ?? [], last?.len ?? 1)}<span>${last ? fmtClock(last.len) : '0:00'}</span></div>
+    </div>`;
+  }
+
   private home() {
     const m = this.menu;
     m.className = 'menu on';
-    m.innerHTML = `
-      <div class="m-left">
-        <div class="brand"><span class="dot"></span><span>REC</span></div>
-        <h1>Last<br>Frame</h1>
-        <p class="tag">Everything you see is what the camera saw.</p>
+    const log = this.cases().slice(0, 3);
+    m.innerHTML = `<div class="rail">
+        <div class="mast"><i class="dot"></i>REC<span class="sp">Evidence console</span></div>
+        <div><h1>Last<br>Frame</h1><p class="tag">Everything you see is what the camera saw.</p></div>
         <label class="field"><span>Callsign</span><input id="m-name" maxlength="14" spellcheck="false" autocomplete="off" placeholder="Your name" value="${esc(this.name)}"></label>
         <div class="acts">
-          <button class="primary" id="m-solo">Play against bots</button>
-          <button id="m-host">Host a room</button>
-          <div class="join"><input id="m-code" maxlength="4" placeholder="CODE" spellcheck="false" autocomplete="off"><button id="m-join">Join</button></div>
+          <button class="primary" id="m-solo">Start a case<kbd>vs bots</kbd></button>
+          <button id="m-host">Open a room</button>
+          <div class="join"><input id="m-code" maxlength="4" placeholder="CODE" aria-label="Room code" spellcheck="false" autocomplete="off"><button id="m-join">Join</button></div>
         </div>
-        <p class="fine">Mouse and keyboard. Headphones help: you will hear them first.</p>
-      </div>`;
+        <div class="group log push"><div class="lab">Case log</div>${log.length ? log.map((c) => `<div class="r"><b>${esc(c.line)}</b><span class="num">${c.k} / ${c.d}</span><small>${c.id}</small><span class="num">${MODES.find((x) => x.id === c.mode)?.name ?? ''}</span></div>`).join('') : '<div class="none">Nothing on file. Your matches land here.</div>'}</div>
+      </div>${this.viewer()}`;
     const name = m.querySelector('#m-name') as HTMLInputElement;
     const remember = () => {
       this.name = name.value.trim().slice(0, 14) || 'Officer';
@@ -142,23 +192,30 @@ export class Hud {
     code.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   }
 
+  private seg(id: string, items: [string, string][], cur: string) {
+    return `<div class="seg" data-seg="${id}">${items.map(([v, l]) => `<button data-v="${v}" class="${v === cur ? 'sel' : ''}">${l}</button>`).join('')}</div>`;
+  }
+
   private pickers(kind: 'solo' | 'host') {
-    const seg = (id: string, items: [string, string][], cur: string) => `<div class="seg" data-seg="${id}">${items.map(([v, l]) => `<button data-v="${v}" class="${v === cur ? 'sel' : ''}">${l}</button>`).join('')}</div>`;
-    const mode = MODES.find((x) => x.id === this.mode) ?? MODES[0];
     return `
-      <label class="row"><span>Mode</span>${seg('mode', MODES.map((x) => [x.id, x.name]), this.mode)}</label>
-      <p class="note" id="s-note">${mode.note}</p>
-      <label class="row"><span>${this.mode === 'ffa' ? 'Players' : 'Team size'}</span>${seg('bots', [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6']], String(this.bots))}</label>
-      <label class="row"><span>Bots</span>${seg('skill', SKILL.map(([l], i) => [String(i), l]), String(this.skill))}</label>
-      ${kind === 'solo' ? `<label class="row"><span>Side</span>${seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</label>` : ''}`;
+      <div class="group"><div class="lab">Mode</div><div class="list" data-seg="mode">${MODES.map((x) => `<button data-v="${x.id}" class="${x.id === this.mode ? 'sel' : ''}"><b>${x.name}</b><span>${x.note}</span></button>`).join('')}</div></div>
+      <div class="two">
+        <div class="group"><div class="lab">${this.mode === 'ffa' ? 'Players' : 'Team size'}</div>${this.seg('bots', [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6']], String(this.bots))}</div>
+        <div class="group"><div class="lab">Bots</div>${this.seg('skill', SKILL.map(([l], i) => [String(i), l]), String(this.skill))}</div>
+      </div>
+      ${kind === 'solo' ? `<div class="group"><div class="lab">Side</div>${this.seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</div>` : ''}`;
   }
 
   private loadout() {
-    return `<label class="row"><span>Weapon</span><div class="seg" data-seg="primary">${PRIMARIES.map((w) => `<button data-v="${w}" class="${w === this.primary ? 'sel' : ''}">${WEAPONS[w].name}</button>`).join('')}</div></label>`;
+    const stat = (w: WeaponId) => {
+      const q = WEAPONS[w];
+      return `${q.pellets > 1 ? `${q.dmg}x${q.pellets}` : q.dmg} dmg &nbsp;${Math.round(60 / q.cycle)} rpm &nbsp;${q.mag} rounds`;
+    };
+    return `<div class="group"><div class="lab">Weapon</div><div class="list" data-seg="primary">${PRIMARIES.map((w) => `<button data-v="${w}" class="${w === this.primary ? 'sel' : ''}"><b>${WEAPONS[w].name}</b><span class="num">${stat(w)}</span></button>`).join('')}</div></div>`;
   }
 
   private bind(root: HTMLElement, after: () => void = () => {}) {
-    root.querySelectorAll<HTMLElement>('.seg').forEach((s) => {
+    root.querySelectorAll<HTMLElement>('[data-seg]').forEach((s) => {
       s.addEventListener('click', (e) => {
         const b = (e.target as HTMLElement).closest('button');
         if (!b) return;
@@ -171,8 +228,6 @@ export class Hud {
         if (id === 'team') this.team = Number(v);
         if (id === 'primary') this.primary = v as WeaponId;
         store.set(id, v);
-        const note = root.querySelector('#s-note');
-        if (note) note.textContent = MODES.find((x) => x.id === this.mode)!.note;
         after();
       });
     });
@@ -185,14 +240,21 @@ export class Hud {
 
   private setup(kind: 'solo' | 'host') {
     const m = this.menu;
-    m.innerHTML = `<div class="m-left wide">
-      <button class="back" id="s-back">Back</button>
-      <h2>${kind === 'solo' ? 'Against bots' : 'Host a room'}</h2>
+    this.nextCase();
+    m.innerHTML = `<div class="rail wide">
+      <div class="mast"><i class="dot"></i>REC<span class="sp">Case ${this.caseId}</span></div>
+      <button class="plain" id="s-back">Back</button>
+      <h2>${kind === 'solo' ? 'New case' : 'Open a room'}</h2>
       ${this.pickers(kind)}
       ${this.loadout()}
-      <div class="acts"><button class="primary" id="s-go">${kind === 'solo' ? 'Deploy' : 'Open the room'}</button></div>
-    </div>`;
-    this.bind(m);
+      <div class="acts push"><button class="primary" id="s-go">${kind === 'solo' ? 'Start recording' : 'Open the room'}</button></div>
+    </div>${this.viewer()}`;
+    (m.querySelector('.viewer') as HTMLElement).style.left = '560px';
+    this.bind(m, () => {
+      // a team-size label depends on the mode
+      const lab = m.querySelector('.two .lab');
+      if (lab) lab.textContent = this.mode === 'ffa' ? 'Players' : 'Team size';
+    });
     m.querySelector('#s-back')!.addEventListener('click', () => this.home());
     m.querySelector('#s-go')!.addEventListener('click', () => {
       if (kind === 'solo') {
@@ -233,7 +295,7 @@ export class Hud {
       this.lobbyPlayers = this.lobbyPlayers.filter((p) => p.id !== id);
       this.lobby();
     };
-    this.menu.innerHTML = '<div class="m-left"><h2>Opening the room</h2><p class="note">Reaching the room server</p></div>';
+    this.menu.innerHTML = '<div class="rail"><h2>Opening the room</h2><p class="note">Reaching the room server.</p></div>';
   }
 
   private lobby() {
@@ -242,16 +304,18 @@ export class Hud {
     const m = this.menu;
     const link = `${location.origin}${location.pathname}?join=${this.code}`;
     const list = (t: number) => this.lobbyPlayers.filter((p) => this.mode === 'ffa' || p.team === t).map((p) => `<li>${esc(p.name)}<em>${WEAPONS[p.primary].name}</em></li>`).join('') || '<li class="none">Bots fill this side</li>';
-    m.innerHTML = `<div class="m-left wide">
-      <button class="back" id="l-back">Close room</button>
-      <h2>Room <span class="code">${this.code}</span></h2>
-      <div class="invite"><input readonly value="${link}"><button id="l-copy">Copy link</button></div>
+    m.innerHTML = `<div class="rail wide">
+      <div class="mast"><i class="dot"></i>REC<span class="sp">Room open</span></div>
+      <button class="plain" id="l-back">Close room</button>
+      <div class="group"><div class="lab">Room code</div><div class="code">${this.code}</div></div>
+      <div class="invite"><input readonly aria-label="Invite link" value="${link}"><button id="l-copy">Copy link</button></div>
       <div class="teams"><div><h3>${this.mode === 'ffa' ? 'Players' : TEAM_NAME[0]}</h3><ul>${list(0)}</ul></div>${this.mode === 'ffa' ? '' : `<div><h3>${TEAM_NAME[1]}</h3><ul>${list(1)}</ul></div>`}</div>
       ${this.pickers('host')}
-      <label class="row"><span>Your side</span><div class="seg" data-seg="team"><button data-v="0" class="${this.team === 0 ? 'sel' : ''}">${TEAM_NAME[0]}</button><button data-v="1" class="${this.team === 1 ? 'sel' : ''}">${TEAM_NAME[1]}</button></div></label>
+      <div class="group"><div class="lab">Your side</div>${this.seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</div>
       ${this.loadout()}
-      <div class="acts"><button class="primary" id="l-go">Start the match</button></div>
-    </div>`;
+      <div class="acts push"><button class="primary" id="l-go">Start recording</button></div>
+    </div>${this.viewer()}`;
+    (m.querySelector('.viewer') as HTMLElement).style.left = '560px';
     this.bind(m, () => {
       const me = this.lobbyPlayers[0];
       me.team = this.team;
@@ -280,7 +344,7 @@ export class Hud {
 
   private joinFlow(code: string) {
     this.menu.className = 'menu on';
-    this.menu.innerHTML = `<div class="m-left"><h2>Joining ${esc(code)}</h2><p class="note">Reaching the host</p><button class="back" id="j-back">Cancel</button></div>`;
+    this.menu.innerHTML = `<div class="rail"><button class="plain" id="j-back">Cancel</button><div class="group"><div class="lab">Joining room</div><div class="code">${esc(code)}</div></div><p class="note">Reaching the host.</p></div>`;
     const hello: Req = { t: 'hello', name: this.name || 'Guest', primary: this.primary, team: 0 };
     const guest = (this.guest = new Guest_(code, hello));
     const back = () => {
@@ -297,7 +361,7 @@ export class Hud {
     guest.onDown = (m: Down) => {
       if (m.t === 'welcome') {
         this.code = code;
-        this.menu.innerHTML = `<div class="m-left wide"><button class="back" id="j-back">Leave</button><h2>Room <span class="code">${esc(code)}</span></h2><p class="note">In the room. The host starts the match.</p><label class="field"><span>Callsign</span><input id="j-name" maxlength="14" spellcheck="false" autocomplete="off" value="${esc(this.name)}"></label>${this.loadout()}</div>`;
+        this.menu.innerHTML = `<div class="rail"><button class="plain" id="j-back">Leave</button><div class="group"><div class="lab">Room code</div><div class="code">${esc(code)}</div></div><p class="note">You're in. The host starts the match.</p><label class="field"><span>Callsign</span><input id="j-name" maxlength="14" spellcheck="false" autocomplete="off" value="${esc(this.name)}"></label>${this.loadout()}</div>${this.viewer()}`;
         this.bind(this.menu, () => guest.send({ t: 'me', primary: this.primary }));
         (this.menu.querySelector('#j-name') as HTMLInputElement).addEventListener('change', (e) => {
           this.name = (e.target as HTMLInputElement).value.trim().slice(0, 14);
@@ -319,13 +383,17 @@ export class Hud {
     const p = this.pauseEl;
     p.className = 'pause on';
     const q = this.g;
-    p.innerHTML = `<div class="m-left">
-      <h2>${q.me.alive || q.phase !== 'warmup' ? 'Paused' : 'Ready'}</h2>
-      <p class="note">${q.role === 'solo' ? 'The match keeps running.' : 'The room keeps playing without you.'}</p>
-      <label class="row"><span>Mouse</span><input id="p-sens" type="range" min="0.0006" max="0.005" step="0.0001" value="${q.me.sens}"></label>
-      <label class="row"><span>Volume</span><input id="p-vol" type="range" min="0" max="1" step="0.02" value="${q.sound.volume}"></label>
-      <label class="row"><span>Resolution</span><div class="seg" data-seg="q">${[['0.7', 'Low'], ['0.85', 'Medium'], ['1', 'High']].map(([v, l]) => `<button data-v="${v}" class="${Number(v) === q.quality ? 'sel' : ''}">${l}</button>`).join('')}</div></label>
-      <div class="acts"><button class="primary" id="p-go">Back in</button><button id="p-leave">Leave the match</button></div>
+    p.innerHTML = `<div class="rail">
+      <div class="mast"><i class="dot"></i>${q.role === 'solo' ? 'Still recording' : 'Room still live'}<span class="sp">Case ${this.caseId || '--'}</span></div>
+      <h2>Paused</h2>
+      <div class="group">
+        <label class="line"><span>Mouse</span><input id="p-sens" type="range" min="0.0006" max="0.005" step="0.0001" value="${q.me.sens}"></label>
+        <label class="line"><span>Volume</span><input id="p-vol" type="range" min="0" max="1" step="0.02" value="${q.sound.volume}"></label>
+        <div class="line"><span>Resolution</span>${this.seg('q', [['0.7', 'Low'], ['0.85', 'Medium'], ['1', 'High']], ['0.7', '0.85', '1'].find((v) => Number(v) === q.quality) ?? '1')}</div>
+        <div class="line"><span>Free aim</span>${this.seg('fa', [['1', 'On'], ['0', 'Off']], q.me.freeAim ? '1' : '0')}</div>
+      </div>
+      <div class="group"><div class="lab">Controls</div><div class="keys">${KEYS.map(([k, a]) => `<div><span>${a}</span><b>${k}</b></div>`).join('')}</div></div>
+      <div class="acts push"><button class="primary" id="p-go">Back in<kbd>Esc</kbd></button><button class="danger" id="p-leave">Leave the match</button></div>
     </div>`;
     p.querySelector('#p-go')!.addEventListener('click', () => this.resume());
     p.querySelector('#p-leave')!.addEventListener('click', () => q.leave());
@@ -337,20 +405,26 @@ export class Hud {
       q.sound.setVolume(Number((e.target as HTMLInputElement).value));
       store.set('vol', String(q.sound.volume));
     });
-    p.querySelector('.seg')!.addEventListener('click', (e) => {
+    p.querySelectorAll<HTMLElement>('.seg').forEach((sg) => sg.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest('button');
       if (!b) return;
+      sg.querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b));
+      if (sg.dataset.seg === 'fa') {
+        q.me.freeAim = b.dataset.v === '1';
+        store.set('freeaim', b.dataset.v!);
+        return;
+      }
       q.quality = Number(b.dataset.v);
       store.set('quality', b.dataset.v!);
-      p.querySelectorAll('.seg button').forEach((x) => x.classList.toggle('sel', x === b));
       q.resize();
-    });
+    }));
   }
 
   applyPrefs() {
     this.g.me.sens = Number(store.get('sens', String(this.g.me.sens)));
     this.g.sound.volume = Number(store.get('vol', '0.8'));
     this.g.quality = Number(store.get('quality', '1'));
+    this.g.me.freeAim = store.get('freeaim', '1') === '1';
   }
 
   private resume() {
@@ -364,10 +438,17 @@ export class Hud {
     this.hudEl.style.display = '';
     this.pauseEl.classList.remove('on');
     this.lostEl.className = 'lost';
-    this.hintT = 22;
-    this.hint.classList.add('on');
+    // the first few matches get the keys on screen; after that the pause screen has them
+    const n = Number(store.get('played', '0'));
+    store.set('played', String(n + 1));
+    this.hintT = n < 4 ? 20 : 0;
+    this.hint.classList.toggle('on', n < 4);
     this.feedEl.innerHTML = '';
     this.boardEl.classList.remove('on', 'final');
+    if (!this.caseId || this.closed) this.nextCase();
+    this.startedAt = performance.now();
+    this.marks = [];
+    this.heads = this.far = 0;
   }
 
   leave() {
@@ -399,24 +480,28 @@ export class Hud {
 
   private renderBoard() {
     const g = this.g;
-    const row = (p: PlayerInfo) => `<tr class="${p.slot === g.mySlot ? 'me' : ''}${p.alive ? '' : ' down'}"><td>${esc(p.name)}${p.bot ? ' <i>bot</i>' : ''}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${p.score}</td></tr>`;
+    const row = (p: PlayerInfo) => `<tr class="${p.slot === g.mySlot ? 'me' : ''}${p.alive ? '' : ' down'}"><td>${esc(p.name)}${p.bot ? '<i>bot</i>' : ''}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${p.score}</td></tr>`;
     const head = '<tr><th></th><th>K</th><th>D</th><th>Score</th></tr>';
     const by = (t: number) => this.roster.filter((p) => p.team === t).sort((a, b) => b.score - a.score || b.kills - a.kills);
     const ffa = g.cfg?.mode === 'ffa';
-    this.boardEl.innerHTML = ffa
+    this.shTop.innerHTML = `<span>CASE ${this.caseId}</span><span>${MODES.find((x) => x.id === g.cfg?.mode)?.name ?? ''}${g.phase === 'live' ? ' &nbsp;' + fmtClock(g.timer()) : ''}</span>`;
+    this.tables.className = 'sh-tables' + (ffa ? ' one' : '');
+    this.tables.innerHTML = ffa
       ? `<div><h3>Free For All</h3><table>${head}${[...this.roster].sort((a, b) => b.kills - a.kills).map(row).join('')}</table></div>`
       : `<div><h3>${TEAM_NAME[0]} <b>${g.score[0]}</b></h3><table>${head}${by(0).map(row).join('')}</table></div><div><h3>${TEAM_NAME[1]} <b>${g.score[1]}</b></h3><table>${head}${by(1).map(row).join('')}</table></div>`;
   }
 
   scoreboard(on: boolean) {
     if (this.boardEl.classList.contains('final')) return;
+    if (on && !this.boardEl.classList.contains('on')) this.renderBoard();
     this.boardEl.classList.toggle('on', on);
   }
 
   feed(a: string, b: string, w: number, zone: number, ta: number, tb: number, mine: boolean) {
     const row = el('div', mine ? 'mine' : '');
     const how = zone === 3 ? 'blast' : `${this.g.weaponName(w)}${zone === 0 ? ', head' : ''}`;
-    row.innerHTML = `<b class="t${ta}">${esc(a)}</b> <span>${how}</span> <b class="t${tb}">${esc(b)}</b>`;
+    const t = new Date().toTimeString().slice(0, 8);
+    row.innerHTML = `<time>${t}</time><b class="t${ta}">${esc(a)}</b><span>${how}</span><b class="t${tb}">${esc(b)}</b>`;
     this.feedEl.prepend(row);
     while (this.feedEl.children.length > 5) this.feedEl.lastChild!.remove();
     window.setTimeout(() => row.classList.add('out'), 6000);
@@ -430,7 +515,21 @@ export class Hud {
   }
 
   killed(name: string, zone: number, dist: number) {
-    this.say(`<small>${zone === 0 ? 'Headshot' : 'Down'}</small>${esc(name)}<small>${Math.round(dist)} m</small>`, 1.6, 'kill');
+    this.say(`${esc(name)}<small>${zone === 0 ? 'Head' : 'Down'}, ${Math.round(dist)} m</small>`, 1.6, 'kill');
+    this.mark(1);
+    if (zone === 0) this.heads++;
+    this.far = Math.max(this.far, dist);
+  }
+
+  /** a tick on the case timeline: 1 a kill, 0 a death */
+  private mark(k: number) {
+    this.marks.push([(performance.now() - this.startedAt) / 1000, k]);
+  }
+
+  /** where a round landed, for the wound list */
+  /** a round landed: the camera shows what is left */
+  wound(zone: number) {
+    if (zone !== 3) this.ammoT = 0;
   }
 
   hitTick(kill: boolean) {
@@ -456,7 +555,8 @@ export class Hud {
   down(killer: string, zone: string, dist: number, w: number, rounds: boolean) {
     const weapon = this.g.weaponName(w);
     const now = new Date();
-    this.lostEl.innerHTML = `<div class="l-in"><small>Last frame ${now.toTimeString().slice(0, 8)}</small><h2>${esc(killer)}</h2><p>${weapon}, ${zone}, ${Math.round(dist)} m</p><em>${rounds ? 'Out until the next round' : 'Back on the feed shortly'}</em></div>`;
+    this.mark(0);
+    this.lostEl.innerHTML = `<div class="l-in"><small>LAST FRAME ${now.toTimeString().slice(0, 8)}.${String(Math.floor(now.getMilliseconds() / 40)).padStart(2, '0')}</small><h2>${esc(killer)}</h2><p>${weapon}, ${zone}, ${Math.round(dist)} m</p>${rounds ? '<em>Out until the next round</em>' : '<em>Next camera</em><div class="l-bar"><i></i></div>'}</div>`;
     this.lostEl.className = 'lost pre';
   }
 
@@ -466,7 +566,7 @@ export class Hud {
 
   spectating(name: string) {
     this.lostEl.className = 'lost spec';
-    this.lostEl.innerHTML = `<div class="l-in"><small>Feed</small><p>${esc(name)}'s camera</p><em>Click for the next</em></div>`;
+    this.lostEl.innerHTML = `<div class="l-in"><small>WATCHING</small><p>${esc(name)}</p><em>Click for the next camera</em></div>`;
   }
 
   phase(e: Extract<Ev, { t: 'phase' }>) {
@@ -474,10 +574,10 @@ export class Hud {
     const myTeam = g.player(g.mySlot)?.team ?? 0;
     if (e.phase === 'warmup') {
       const m = MODES.find((x) => x.id === g.cfg?.mode);
-      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>${m?.note ?? ''}</small>`, 3.8);
+      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}</small>`, 3.8);
       this.boardEl.classList.remove('on', 'final');
     } else if (e.phase === 'live') {
-      this.say('Go', 0.8, 'go');
+      this.say('Recording', 0.8, 'go');
       g.sound.beep(true);
     } else if (e.phase === 'between') {
       const win = e.winner === myTeam;
@@ -486,19 +586,33 @@ export class Hud {
       const ffa = g.cfg?.mode === 'ffa';
       const won = ffa ? e.winner === g.mySlot : e.winner === myTeam;
       const who = ffa ? (g.player(e.winner ?? -1)?.name ?? 'Nobody') : e.winner === -1 ? 'Draw' : TEAM_NAME[e.winner ?? 0];
+      const me = g.player(g.mySlot);
+      const len = (performance.now() - this.startedAt) / 1000;
+      const title = e.winner === -1 ? 'Draw' : won ? 'Case closed. You won.' : `${esc(who)} won`;
+      const line = ffa ? `${esc(who)} first to ${g.cfg?.limit}` : `${TEAM_NAME[0]} ${g.score[0]}, ${TEAM_NAME[1]} ${g.score[1]}`;
+      const parts = [`${me?.kills ?? 0} down`, `${me?.deaths ?? 0} lost`];
+      if (this.heads) parts.push(`${this.heads} to the head`);
+      if (this.far >= 1) parts.push(`longest ${Math.round(this.far)} m`);
+      this.report.innerHTML = `<h2>${title}</h2><p>${line}. ${parts.join(', ')}.</p>
+        <div class="tl">${scrub(this.marks, len)}<div class="legend"><span>0:00</span><span>Up: your kills. Down, red: your deaths.</span><span>${fmtClock(len)}</span></div></div>`;
       this.renderBoard();
       this.boardEl.classList.add('on', 'final');
-      this.boardEl.insertAdjacentHTML('afterbegin', `<h2>${e.winner === -1 ? 'Draw' : won ? 'Victory' : esc(who) + ' wins'}</h2>`);
-      const acts = el('div', 'end-acts');
+      this.shActs.innerHTML = '';
       if (g.role !== 'guest') {
-        const again = el('button', 'primary', 'Play again');
-        again.addEventListener('click', () => g.rematch());
-        acts.append(again);
-      } else acts.append(el('p', 'note', 'The host can start another.'));
+        const again = el('button', 'primary', 'Run it back');
+        again.addEventListener('click', () => {
+          this.nextCase();
+          g.rematch();
+        });
+        this.shActs.append(again);
+      } else this.shActs.append(el('p', 'note', 'The host can start another.'));
       const btn = el('button', '', 'Leave the match');
       btn.addEventListener('click', () => g.leave());
-      acts.append(btn);
-      this.boardEl.append(acts);
+      this.shActs.append(btn);
+      const log = [{ id: this.caseId, at: Date.now(), mode: g.cfg?.mode ?? 'tdm', won: won ? 1 : 0, line: `${won ? 'Won' : e.winner === -1 ? 'Draw' : 'Lost'}, ${ffa ? `${me?.kills ?? 0} kills` : `${g.score[0]} to ${g.score[1]}`}`, k: me?.kills ?? 0, d: me?.deaths ?? 0, len, marks: this.marks } satisfies Case, ...this.cases()].slice(0, 12);
+      store.set('cases', JSON.stringify(log));
+      this.closed = true;
+      this.lostEl.className = 'lost';
       if (document.pointerLockElement) document.exitPointerLock();
     }
   }
@@ -529,9 +643,7 @@ export class Hud {
       if (this.hintT <= 0) this.hint.classList.remove('on');
     }
     const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    const stamp = `${ts}<br>LF-CAM ${this.unit} &nbsp;<span class="rec${d.getSeconds() % 2 ? '' : ' off'}">REC</span>`;
+    const stamp = `${stampNow(d)}<br>LF-CAM ${this.unit} &nbsp;<span class="rec${d.getSeconds() % 2 ? '' : ' off'}">REC</span>`;
     if (this.stamp.dataset.s !== stamp) {
       this.stamp.dataset.s = stamp;
       this.stamp.innerHTML = stamp;
@@ -541,7 +653,7 @@ export class Hud {
     const mode = g.cfg?.mode;
     const score = mode === 'ffa' ? `${info?.kills ?? 0}/${g.cfg?.limit}` : `${g.score[0]} : ${g.score[1]}`;
     const clock = g.phase === 'live' || g.phase === 'warmup' ? fmtClock(g.timer()) : '';
-    const line = `<b>${score}</b>${clock ? ' &nbsp;' + clock : ''}${mode === 'hold' && this.holdInfo ? ' &nbsp;' + esc(this.holdInfo) : ''}`;
+    const line = `<b>${score}</b>${clock ? `<span>${clock}</span>` : ''}${mode === 'hold' && this.holdInfo ? `<span>${esc(this.holdInfo)}</span>` : ''}`;
     if (this.top.dataset.s !== line) {
       this.top.dataset.s = line;
       this.top.innerHTML = line;
@@ -561,14 +673,30 @@ export class Hud {
     });
     if (me.alive) {
       const a = me.ammo.get(me.weapon);
-      const txt = a ? `${me.reloadT > 0 ? 'Reloading' : `${a.mag}<small>/${a.res}</small>`}<em>${WEAPONS[me.weapon].name}${me.nades.frag ? ' &nbsp;Frag' : ''}${me.nades.flash ? ' &nbsp;Flash' : ''}</em>` : '';
+      const txt = a ? `${me.reloadT > 0 ? 'Reloading' : `${a.mag}<small> / ${a.res}</small>`}<em>${WEAPONS[me.weapon].name}${me.nades.frag ? ' &nbsp;Frag' : ''}${me.nades.flash ? ' &nbsp;Flash' : ''}</em>` : '';
       if (this.ammo.dataset.s !== txt) {
         this.ammo.dataset.s = txt;
         this.ammo.innerHTML = txt;
+        this.ammoT = 2.6;
       }
+      // the camera has no ammo counter: it shows up when you've just used it, or when it matters
+      this.ammoT -= dt;
+      const low = !!a && a.mag <= Math.ceil(WEAPONS[me.weapon].mag * 0.25);
+      this.ammo.classList.toggle('on', this.ammoT > 0 || low || me.reloadT > 0);
       const hp = info?.hp ?? 100;
       (this.hp.firstChild as HTMLElement).style.transform = `scaleX(${hp / 100})`;
       this.hp.classList.toggle('low', hp < 40);
+      const ws: string[] = [];
+      if (me.bleed > 0) ws.push('BLEEDING');
+      if (me.limp > 0.2) ws.push('LEG');
+      if (me.arm > 0.2) ws.push('ARM');
+      const wtxt = ws.length ? `${ws.map((w) => `<b>${w}</b>`).join('')}<br><span>H bandage ${me.wraps ? `x${me.wraps}` : 'none left'}</span>` : hp < 70 && me.wraps ? `<span>H bandage x${me.wraps}</span>` : '';
+      if (this.wounds.dataset.s !== wtxt) {
+        this.wounds.dataset.s = wtxt;
+        this.wounds.innerHTML = wtxt;
+      }
+      this.healBar.classList.toggle('on', me.healT > 0);
+      if (me.healT > 0) (this.healBar.firstChild as HTMLElement).style.transform = `scaleX(${Math.min(1, me.healT / 3.2)})`;
       const scoped = me.weapon === 'rifle' && me.adsK > 0.86;
       this.scope.classList.toggle('on', scoped);
       if (g.actors.get(g.mySlot)?.soldier?.gun) g.actors.get(g.mySlot)!.soldier!.gun!.group.visible = !scoped;

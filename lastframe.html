@@ -8,18 +8,19 @@
     <style>
       html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
       #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-      #loading { position: fixed; inset: 0; z-index: 50; background: #000; color: #e9e6df; font: 13px ui-monospace, Menlo, monospace; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 12vh 8vw; transition: opacity .6s; }
+      #loading { position: fixed; inset: 0; z-index: 50; background: #0b0c0d; color: #e7e7e2; font: 12px ui-monospace, Menlo, monospace; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 32px 32px; box-sizing: border-box; transition: opacity .5s; }
       #loading.done { opacity: 0; pointer-events: none; }
-      #loading h1 { font: 700 54px ui-monospace, Menlo, monospace; letter-spacing: -.04em; margin: 0 0 16px; }
-      #loading .lb { width: min(320px, 70vw); height: 2px; background: rgba(233,230,223,.18); }
-      #lbar { height: 100%; background: #e9e6df; transform: scaleX(0); transform-origin: left; transition: transform .2s; }
-      #lstep { margin-top: 10px; color: rgba(233,230,223,.58); }
+      #loading .top { position: absolute; left: 32px; top: 32px; color: rgba(231,231,226,.64); display: flex; align-items: center; gap: 8px; }
+      #loading .top i { width: 8px; height: 8px; border-radius: 50%; background: #e5392c; }
+      #loading .lb { height: 2px; background: rgba(231,231,226,.16); }
+      #lbar { height: 100%; background: #e7e7e2; transform: scaleX(0); transform-origin: left; transition: transform .2s; }
+      #lstep { margin-bottom: 8px; color: rgba(231,231,226,.64); }
     </style>
   </head>
   <body>
     <canvas id="gl"></canvas>
     <div id="ui"></div>
-    <div id="loading"><h1>Last Frame</h1><div class="lb"><div id="lbar"></div></div><div id="lstep">Loading</div></div>
+    <div id="loading"><div class="top"><i></i>LAST FRAME</div><div id="lstep">Loading</div><div class="lb"><div id="lbar"></div></div></div>
     <script type="module" src="/src/lastframe/main.ts"></script>
   </body>
 </html>

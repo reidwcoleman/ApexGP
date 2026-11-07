@@ -3,7 +3,7 @@ import type { Door, MapData, Pane } from './world.ts';
 import { Nav, type Node } from './nav.ts';
 import { Bot, botName } from './bots.ts';
 import { trace, type Tracer } from './ballistics.ts';
-import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, zoneK, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import type { Body } from './hitbox.ts';
 
@@ -32,6 +32,10 @@ export class Match {
   private goals: Node[] = [];
   readonly nav: Nav;
   private doorCool: number[] = [];
+  /** per slot: hp a second still leaving, and bandages left */
+  private bleed = new Map<number, number>();
+  private wraps = new Map<number, number>();
+  private bleedTick = 0;
 
   constructor(
     readonly cfg: MatchConfig,
@@ -182,6 +186,18 @@ export class Match {
       }
     }
     for (let i = 0; i < this.doorCool.length; i++) this.doorCool[i] -= dt;
+    this.bleedTick += dt;
+    if (this.bleedTick >= 1) {
+      this.bleedTick -= 1;
+      for (const [slot, rate] of this.bleed) {
+        const p = this.players.find((q) => q.slot === slot);
+        if (!p?.alive || !rate) continue;
+        // a wound slows you down and ends a fight, it doesn't finish one on its own
+        p.hp = Math.max(Math.min(p.hp, 8), p.hp - rate);
+        if (!p.bot) this.emit({ t: 'hp', s: slot, hp: p.hp, bleed: rate });
+        if (p.hp <= 8) this.bleed.delete(slot);
+      }
+    }
     if (live && this.cfg.mode === 'hold') this.holdUpdate(dt);
   }
 
@@ -267,7 +283,7 @@ export class Match {
     this.emit({ t: 'phase', phase: 'between', round: this.round, clock: 5, score: this.score, msg: why, winner });
   }
 
-  private finish(winner: number) {
+  finish(winner: number) {
     this.phase = 'over';
     this.clock = 14;
     this.emit({ t: 'phase', phase: 'over', round: this.round, clock: 14, score: this.score, winner });
@@ -358,6 +374,8 @@ export class Match {
     const yaw = Math.atan2(-(46 - x), -(-30 - z));
     p.hp = 100;
     p.alive = true;
+    this.bleed.delete(p.slot);
+    this.wraps.set(p.slot, 2);
     const b = this.bodies[p.slot];
     b.x = x;
     b.y = y;
@@ -387,6 +405,24 @@ export class Match {
       case 'door':
         this.useDoor(r.i, r.from);
         break;
+      case 'kick': {
+        const d = this.doors[r.i];
+        if (!d || this.doorCool[r.i] > 0) break;
+        this.doorCool[r.i] = 0.8;
+        const side = d.alongX ? Math.sign(r.from[2] - d.centre.z) : Math.sign(r.from[0] - d.centre.x);
+        this.emit({ t: 'door', i: r.i, open: 1, dir: -(side || 1), blast: 0.55 });
+        this.noise({ x: d.centre.x, y: d.centre.y, z: d.centre.z }, 40);
+        break;
+      }
+      case 'heal': {
+        const left = this.wraps.get(slot) ?? 2;
+        if (!me.alive || left <= 0) break;
+        this.wraps.set(slot, left - 1);
+        me.hp = Math.min(100, me.hp + 35);
+        this.bleed.delete(slot);
+        this.emit({ t: 'hp', s: slot, hp: me.hp, bleed: 0, healed: true });
+        break;
+      }
       case 'pane':
         this.emit({ t: 'pane', i: r.i, at: r.at });
         break;
@@ -423,7 +459,8 @@ export class Match {
     this.noise({ x: ox, y: oy, z: oz }, spec.loud);
     for (const h of out.hits) {
       if (!this.foes(b.slot, h.slot)) continue;
-      const dmg = Math.round(spec.dmg * h.k * (h.zone === 0 ? spec.headX : h.zone === 2 ? 0.72 : 1));
+      // bots hit a little softer than people: they don't flinch, tire or miss on purpose
+      const dmg = Math.round(spec.dmg * h.k * (h.zone === 0 ? spec.headX : zoneK(h.zone)) * (0.72 + b.skill * 0.2));
       this.damage(b.slot, h.slot, dmg, h.zone, w, [h.at[0] - ox, h.at[1] - oy, h.at[2] - oz], h.dist);
     }
   }
@@ -436,16 +473,18 @@ export class Match {
     const p = this.players.find((q) => q.slot === to);
     if (!p?.alive || this.phase === 'over' || this.phase === 'between') return;
     p.hp = Math.max(0, p.hp - dmg);
+    if (p.hp > 0 && dmg >= 18 && zone !== ZONE.blast) this.bleed.set(to, Math.min(3, (this.bleed.get(to) ?? 0) + 1));
     const n = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     const d: [number, number, number] = [dir[0] / n, dir[1] / n, dir[2] / n];
     const atk = this.bodies[by];
     this.bots.get(to)?.hurt(atk ?? this.bodies[to]);
     if (p.hp > 0) {
-      this.emit({ t: 'hit', s: to, by, dmg, hp: p.hp, zone, dir: d });
+      this.emit({ t: 'hit', s: to, by, dmg, hp: p.hp, zone, dir: d, bleed: this.bleed.get(to) ?? 0 });
       return;
     }
     p.alive = false;
     p.deaths++;
+    this.bleed.delete(to);
     this.bodies[to].flags &= ~F.alive;
     const killer = this.players.find((q) => q.slot === by);
     if (killer && killer !== p) {

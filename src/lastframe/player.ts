@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { move, type Mover, type World } from './collide.ts';
-import { F, WEAPONS, WEAPON_LIST, ZONE, type NadeKind, type WeaponId } from './shared.ts';
+import { F, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, zoneK, type NadeKind, type WeaponId } from './shared.ts';
 import { trace, type Tracer } from './ballistics.ts';
 import type { Soldier } from './soldier.ts';
 import type { Sound } from './audio.ts';
@@ -40,7 +40,10 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.clear());
-    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    // no menu on a right click anywhere while there's a match on screen
+    addEventListener('contextmenu', (e) => {
+      if (this.locked() || e.target === el) e.preventDefault();
+    });
     addEventListener('mousemove', (e) => {
       if (!this.locked()) return;
       this.dx += e.movementX;
@@ -48,15 +51,15 @@ export class Input {
     });
     addEventListener('mousedown', (e) => {
       if (!this.locked()) return;
-      if (e.button === 0) {
+      // a Mac turns control-click into a right click: holding crouch must not change what the left button does
+      if (e.button === 0 || (e.button === 2 && e.ctrlKey)) {
         this.fire = true;
         this.firePressed = true;
-      }
-      if (e.button === 2) this.ads = true;
+      } else if (e.button === 2) this.ads = true;
     });
     addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.fire = false;
-      if (e.button === 2) this.ads = false;
+      if (e.button === 0 || (e.button === 2 && e.ctrlKey)) this.fire = false;
+      else if (e.button === 2) this.ads = false;
     });
   }
   clear() {
@@ -87,6 +90,8 @@ export interface PlayerCtx {
     shot(w: number, o: [number, number, number], e: number[], surf: string[]): void;
     hit(to: number, dmg: number, zone: number, w: number, dir: [number, number, number], dist: number): void;
     door(i: number, from: [number, number, number]): void;
+    kick(i: number, from: [number, number, number]): void;
+    heal(): void;
     pane(i: number, at?: [number, number, number]): void;
     nade(kind: NadeKind, o: [number, number, number], v: [number, number, number], fuse: number): void;
   };
@@ -97,6 +102,9 @@ export interface PlayerCtx {
 
 const Q180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 const WALK = 3.05, RUN = 5.3, CROUCH = 1.65;
+/** a head-mounted lens sees wide */
+const FOV = 92;
+const BANDAGE = 3.2;
 
 export class LocalPlayer {
   m: Mover = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: true, height: 1.78, stepEase: 0 };
@@ -173,6 +181,25 @@ export class LocalPlayer {
   private q = new THREE.Quaternion();
   private e = new THREE.Euler(0, 0, 0, 'YXZ');
   hurtK = 0;
+  /** the gun swings inside the frame before the head follows */
+  freeAim = true;
+  private aimX = 0;
+  private aimY = 0;
+  /** wounds: a leg drags, an arm shakes, and blood leaves until it's wrapped */
+  limp = 0;
+  arm = 0;
+  bleed = 0;
+  hp = 100;
+  wraps = 2;
+  healT = 0;
+  /** rounds going past */
+  supK = 0;
+  private kickT = 0;
+  private kickCool = 0;
+  private kicked = false;
+  private breathT = 0;
+  private heartT = 0;
+  private chambered = false;
 
   get weapon() {
     return this.slots[this.cur];
@@ -197,6 +224,10 @@ export class LocalPlayer {
     this.reloadT = this.switchT = this.cycleT = 0;
     this.crouch = false;
     this.hurtK = 0;
+    this.aimX = this.aimY = this.limp = this.arm = this.bleed = this.supK = this.healT = this.kickT = 0;
+    this.hp = 100;
+    this.wraps = 2;
+    this.stamina = 1;
     this.mantle = null;
     this.slideT = this.stun = this.climb = this.climbY = this.trauma = 0;
     for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR]) q.reset();
@@ -215,8 +246,15 @@ export class LocalPlayer {
     const m = this.m;
     const spec = this.spec;
     // ---- look
-    const sensK = this.sens * (1 - this.adsK * (1 - spec.adsFov / 84) * 0.9);
-    const dYaw = -i.dx * sensK, dPitch = -i.dy * sensK;
+    const sensK = this.sens * (1 - this.adsK * (1 - spec.adsFov / FOV) * 0.9);
+    const rawYaw = -i.dx * sensK, rawPitch = -i.dy * sensK;
+    // the arms move first, inside a small box; past its edge the head turns too. Raising the sights
+    // shrinks the box, so the frame slides onto wherever the gun was already pointing.
+    const box = this.freeAim ? (1 - this.adsK) * (1 - this.sprintK) : 0;
+    const ax = this.aimX + rawYaw, ay = this.aimY + rawPitch;
+    this.aimX = THREE.MathUtils.clamp(ax, -0.1 * box, 0.1 * box);
+    this.aimY = THREE.MathUtils.clamp(ay, -0.07 * box, 0.07 * box);
+    const dYaw = ax - this.aimX, dPitch = ay - this.aimY;
     this.yaw += dYaw;
     this.pitch = THREE.MathUtils.clamp(this.pitch + dPitch, -1.45, 1.45);
     // ---- move
@@ -233,11 +271,11 @@ export class LocalPlayer {
     }
     if (crouchHeld) this.crouch = true;
     else if (this.crouch && !c.world.blocked(m.x, m.y + 0.1, m.z, 0.25, 1.7)) this.crouch = false;
-    const wantRun = i.keys.has('ShiftLeft') && f > 0 && !this.crouch && !i.ads && this.stamina > 0.04 && !i.fire;
+    const wantRun = i.keys.has('ShiftLeft') && f > 0 && !this.crouch && !i.ads && this.stamina > 0.04 && !i.fire && this.healT <= 0 && this.limp < 0.8;
     const run = wantRun && !freeze;
     this.stamina = Math.min(1, Math.max(0, this.stamina + (run ? -dt / 7 : dt / 5)));
     let top = this.crouch ? CROUCH : run ? RUN : WALK;
-    top *= spec.speed * (1 - this.adsK * 0.42) * (1 - this.stun * 0.55);
+    top *= spec.speed * (1 - this.adsK * 0.42) * (1 - this.stun * 0.55) * (1 - this.limp * 0.36) * (this.healT > 0 ? 0.5 : 1) * (1 - this.supK * 0.12);
     if (freeze) top = 0;
     this.stun = Math.max(0, this.stun - dt * 2.6);
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
@@ -325,8 +363,9 @@ export class LocalPlayer {
     this.leanK += (lt - this.leanK) * Math.min(1, dt * 10);
     // ---- the head
     const eyeH = 1.63 - this.crouchK * 0.56 - (this.slideT > 0 ? 0.12 : 0);
-    const bobY = Math.abs(Math.sin(this.bob)) * 0.03 * this.bobK * (1 - this.adsK * 0.6);
-    const bobX = Math.cos(this.bob) * 0.016 * this.bobK * (1 - this.adsK * 0.7);
+    // a camera on a head: every footfall lands in the picture, and a bad leg lands harder on one side
+    const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
+    const bobX = Math.cos(this.bob) * 0.027 * this.bobK * (1 - this.adsK * 0.7);
     this.breath += dt;
     this.landK = Math.max(0, this.landK - dt * 3.2);
     const lk = Math.sin(this.landK * Math.PI) * this.landK;
@@ -349,7 +388,7 @@ export class LocalPlayer {
     this.punchR *= ps;
     // the gun's own weight: springs for the turn, the stride, the shot
     const a = this.adsK;
-    const rY = dt > 0 ? dYaw / dt : 0, rP = dt > 0 ? dPitch / dt : 0;
+    const rY = dt > 0 ? rawYaw / dt : 0, rP = dt > 0 ? rawPitch / dt : 0;
     this.swayY.step(dt, THREE.MathUtils.clamp(rY * 0.017, -0.085, 0.085), 110, 13);
     this.swayP.step(dt, THREE.MathUtils.clamp(rP * 0.017, -0.075, 0.075), 110, 13);
     const axW = dt > 0 ? (m.vx - this.pvx) / dt : 0, azW = dt > 0 ? (m.vz - this.pvz) / dt : 0;
@@ -365,7 +404,8 @@ export class LocalPlayer {
     this.rkY.step(dt, 0, 300, 25);
     this.rkR.step(dt, 0, 260, 22);
     this.camP.step(dt, 0, 170, 19);
-    this.camR.step(dt, 0, 170, 19);
+    // the head rolls into a fast turn, then catches up
+    this.camR.step(dt, THREE.MathUtils.clamp(-(dt > 0 ? dYaw / dt : 0) * 0.0075, -0.03, 0.03), 170, 19);
     // climb is paid back once the trigger is let go
     this.sinceShot += dt;
     if (this.sinceShot > 0.13 && (this.climb || this.climbY)) {
@@ -382,13 +422,15 @@ export class LocalPlayer {
     const tr = this.trauma * this.trauma, tt = this.breath * 31;
     const shP = tr * 0.05 * (Math.sin(tt) + Math.sin(tt * 1.73 + 1)) * 0.5, shY = tr * 0.05 * Math.sin(tt * 1.31 + 2), shR = tr * 0.06 * Math.sin(tt * 0.87 + 4);
     const camK = 0.45;
-    const swayP = Math.sin(this.breath * 1.3) * 0.0035 + Math.sin(this.bob * 2) * 0.0035 * this.bobK;
-    const swayY = Math.sin(this.breath * 0.9) * 0.003 + Math.cos(this.bob) * 0.0045 * this.bobK;
-    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.008 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
+    // tired, hurt, or under fire: nothing holds still
+    const shaky = 1 + (1 - this.stamina) * 1.7 + this.arm * 1.8 + this.supK * 2.2;
+    const swayP = (Math.sin(this.breath * 1.3) * 0.0042 + Math.sin(this.breath * 2.7 + 1) * 0.0016) * shaky + Math.sin(this.bob * 2) * 0.0058 * this.bobK;
+    const swayY = (Math.sin(this.breath * 0.9) * 0.0036 + Math.sin(this.breath * 2.1) * 0.0014) * shaky + Math.cos(this.bob) * 0.0075 * this.bobK;
+    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.016 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
     this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
     cam.position.copy(eye);
     cam.quaternion.setFromEuler(this.e);
-    const fov = THREE.MathUtils.lerp(84, spec.adsFov, this.adsK) + this.sprintK * 3;
+    const fov = THREE.MathUtils.lerp(FOV, spec.adsFov, this.adsK) + this.sprintK * 3;
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov = fov;
       cam.updateProjectionMatrix();
@@ -412,9 +454,18 @@ export class LocalPlayer {
     gy -= this.sprintK * 0.09 + this.mantleK * 0.14;
     gz -= this.retract * 0.22;
     gy -= this.retract * 0.03;
-    let pitchG = this.recP * 0.7 + this.rkP.x - sp2 * 1.3 - this.sprintK * 0.72 + this.retract * 0.95 - this.mantleK * 0.6;
-    let yawG = this.recY * 0.7 + this.rkY.x - sy2 * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 22) + this.mantleK * 0.5;
-    let rollG = this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
+    gx -= this.aimX * 0.32;
+    gy += this.aimY * 0.3;
+    // hands busy: the gun comes down for a bandage, swings aside for a kick
+    const healK = this.healT > 0 ? Math.min(1, this.healT * 4) : 0;
+    const kickK = this.kickT > 0 ? Math.sin(Math.min(1, this.kickT / 0.55) * Math.PI) : 0;
+    gy -= healK * 0.2 + kickK * 0.05;
+    gx += kickK * 0.06;
+    let pitchG = this.aimY + this.recP * 0.7 + this.rkP.x - sp2 * 1.3 - this.sprintK * 0.72 + this.retract * 0.95 - this.mantleK * 0.6;
+    let yawG = this.aimX + this.recY * 0.7 + this.rkY.x - sy2 * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 22) + this.mantleK * 0.5;
+    pitchG -= healK * 0.7;
+    yawG -= kickK * 0.4;
+    let rollG = (1 - a) * 0.09 + this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
     // reload and bolt movements
     let reloadK = 0;
     if (this.reloadT > 0) {
@@ -484,8 +535,27 @@ export class LocalPlayer {
     }
     // ahead of the muzzle: a torch on the rail lights the room, not the gun it's clamped to
     this.lightPos.set(0.04, 0.043, spec.muzzle[2] + 0.03).applyQuaternion(this.gunQuat).add(this.gunPos);
+    this.body(dt, c);
     if (freeze) return;
     this.actions(dt, i, c, cam, sol);
+  }
+
+  /** what the wearer's own chest is doing */
+  private body(dt: number, c: PlayerCtx) {
+    this.limp = Math.max(0, this.limp - dt / 80);
+    this.arm = Math.max(0, this.arm - dt / 80);
+    this.supK = Math.max(0, this.supK - dt * 0.42);
+    const hard = Math.max(0.92 - this.stamina * 1.5, this.supK * 0.8, this.hp < 45 ? 0.45 : 0);
+    this.breathT -= dt;
+    if (hard > 0.12 && this.breathT <= 0) {
+      c.sound.breath(hard);
+      this.breathT = 2 - hard * 0.95;
+    }
+    this.heartT -= dt;
+    if ((this.hp < 50 || this.supK > 0.55) && this.heartT <= 0) {
+      c.sound.heart(Math.max(1 - this.hp / 50, this.supK * 0.6));
+      this.heartT = 0.55 + Math.max(this.hp, 12) / 110;
+    }
   }
 
   private actions(dt: number, i: Input, c: PlayerCtx, cam: THREE.PerspectiveCamera, sol: Soldier) {
@@ -527,7 +597,8 @@ export class LocalPlayer {
         if (before < 0.88 && after >= 0.88) c.sound.clack(null, 'bolt');
       }
       if (this.reloadT <= 0) {
-        const need = spec.mag - am.mag;
+        // one still in the pipe stays there
+        const need = spec.mag + (this.chambered ? 1 : 0) - am.mag;
         const got = Math.min(need, am.res);
         am.mag += got;
         am.res -= got;
@@ -540,8 +611,12 @@ export class LocalPlayer {
         this.reloadT = 0;
       }
     }
-    if (i.take('KeyR') && !this.busy && am.mag < spec.mag && am.res > 0) {
-      this.reloadLen = w === 'shotgun' ? 0.55 * (spec.mag - am.mag) + 0.3 : w === 'rifle' ? 0.6 * (spec.mag - am.mag) + 0.4 : spec.reload;
+    if (i.take('KeyR') && !this.busy && this.healT <= 0 && am.mag < spec.mag && am.res > 0) {
+      const dry = am.mag === 0;
+      const single = w === 'shotgun' || w === 'rifle';
+      this.chambered = !single && !dry;
+      // from empty there's a bolt to send home as well; a shot arm fumbles it
+      this.reloadLen = (w === 'shotgun' ? 0.55 * (spec.mag - am.mag) + 0.3 : w === 'rifle' ? 0.6 * (spec.mag - am.mag) + 0.4 : spec.reload * (dry ? 1.24 : 1)) * (1 + this.arm * 0.35);
       this.reloadT = this.reloadLen;
     }
     if ((i.take('Digit1') && this.cur !== 0) || (i.take('Digit2') && this.cur !== 1) || i.take('KeyX')) {
@@ -557,6 +632,19 @@ export class LocalPlayer {
     }
     if (i.take('KeyG') && this.nades.frag > 0) this.throwNade('frag', c, cam);
     if (i.take('KeyV') && this.nades.flash > 0) this.throwNade('flash', c, cam);
+    // ---- a bandage: both hands, and you can walk but not much else
+    const hurtNow = this.hp < 100 || this.bleed > 0 || this.limp > 0.05 || this.arm > 0.05;
+    if (i.keys.has('KeyH') && this.wraps > 0 && hurtNow && !this.busy && this.kickT <= 0) {
+      if (this.healT <= 0) c.sound.cloth();
+      const b = this.healT;
+      this.healT += dt;
+      if (Math.floor(b / 0.8) !== Math.floor(this.healT / 0.8)) c.sound.cloth();
+      if (this.healT >= BANDAGE) {
+        this.healT = 0;
+        this.wraps--;
+        c.send.heal();
+      }
+    } else this.healT = 0;
     // ---- doors
     let near: Door | null = null, nd = 2.3;
     const fw = this.v.set(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -568,10 +656,31 @@ export class LocalPlayer {
         near = d;
       }
     }
-    c.prompt(near ? (near.want > 0 ? 'F  Close' : 'F  Open') : '');
+    // ---- a gun on the ground
+    const lying = c.phys.gunNear(this.eye.x, this.eye.y, this.eye.z, fw.x, fw.y, fw.z, 2.1);
+    const gunId = lying?.gun as WeaponId | undefined;
+    const closer = lying && !near;
+    c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : '');
+    if (closer && i.take('KeyF') && !this.busy) this.takeGun(lying.i, gunId!, c, sol, fw);
     if (near && i.take('KeyF')) c.send.door(near.id, [this.m.x, this.m.y, this.m.z]);
+    // ---- a boot: through a door, into a chest
+    this.kickT = Math.max(0, this.kickT - dt);
+    this.kickCool = Math.max(0, this.kickCool - dt);
+    if (i.take('KeyZ') && this.kickCool <= 0 && !this.busy && !this.mantle && this.healT <= 0) {
+      this.kickT = 0.55;
+      this.kickCool = 1.05;
+      this.kicked = false;
+      this.stamina = Math.max(0, this.stamina - 0.1);
+      this.camP.v -= 0.5;
+      this.m.vx *= 0.4;
+      this.m.vz *= 0.4;
+    }
+    if (this.kickT > 0 && this.kickT < 0.36 && !this.kicked) {
+      this.kicked = true;
+      this.boot(c, near, fw);
+    }
     // ---- the trigger
-    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5) return;
+    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5 || this.healT > 0 || this.kickT > 0) return;
     const trig = spec.auto ? i.fire : i.firePressed;
     if (!trig || this.cool > 0 || this.cycleT > 0) return;
     if (am.mag <= 0) {
@@ -587,6 +696,51 @@ export class LocalPlayer {
       this.cool = am.mag > 0 ? spec.cycle : 0.2;
     } else this.ejectShell(c);
     this.fire(c, sol, cam);
+  }
+
+  private takeGun(i: number, id: WeaponId, c: PlayerCtx, sol: Soldier, fw: THREE.Vector3) {
+    const had = this.slots[0];
+    c.phys.takeGun(i);
+    c.sound.clack(null, 'draw');
+    if (id === had || id === 'pistol') {
+      // same round: take what's in it
+      const a = this.ammo.get(id);
+      if (a) a.res += Math.ceil(WEAPONS[id].mag * 0.8);
+      return;
+    }
+    if (this.cur === 0) {
+      sol.letGo(c.phys, this.v.set(this.m.vx, 0, this.m.vz).clone(), fw);
+      sol.gun!.group.visible = true;
+    }
+    this.ammo.delete(had);
+    this.slots[0] = id;
+    this.cur = 0;
+    this.ammo.set(id, { mag: Math.ceil(WEAPONS[id].mag * 0.8), res: Math.floor(WEAPONS[id].reserve * 0.4) });
+    this.reloadT = this.cycleT = 0;
+    this.switchT = 0;
+    sol.setWeapon(id);
+  }
+
+  private boot(c: PlayerCtx, door: Door | null, fw: THREE.Vector3) {
+    const m = this.m;
+    let hit = false;
+    if (door) {
+      c.send.kick(door.id, [m.x, m.y, m.z]);
+      hit = true;
+    }
+    for (const [slot, b] of c.bodies()) {
+      if (slot === this.slot) continue;
+      const dx = b.x - m.x, dy = b.y - m.y, dz = b.z - m.z, l = Math.hypot(dx, dz);
+      if (l > 1.75 || Math.abs(dy) > 1.3 || (dx * fw.x + dz * fw.z) / (l || 1) < 0.5) continue;
+      c.send.hit(slot, 55, ZONE.torso, W_BOOT, [dx, 0.1, dz], l);
+      hit = true;
+      break;
+    }
+    const at = new THREE.Vector3(m.x + fw.x * 1, m.y + 0.5, m.z + fw.z * 1);
+    c.phys.blast(at, 26, 1.1, () => true);
+    c.sound.boot(hit);
+    this.camP.v += hit ? 0.9 : 0.4;
+    this.trauma = Math.min(1, this.trauma + (hit ? 0.28 : 0.1));
   }
 
   private ejectShell(c: PlayerCtx) {
@@ -649,7 +803,7 @@ export class LocalPlayer {
     const spec = this.spec;
     const wi = WEAPON_LIST.indexOf(this.weapon);
     const speed = Math.hypot(this.m.vx, this.m.vz);
-    const base = THREE.MathUtils.lerp(spec.hip, spec.ads, this.adsK) + speed * spec.move * (1 - this.adsK * 0.6) + (this.m.grounded ? 0 : 3);
+    const base = (THREE.MathUtils.lerp(spec.hip, spec.ads, this.adsK) + speed * spec.move * (1 - this.adsK * 0.6) + (this.m.grounded ? 0 : 3) + this.arm * 0.9 * (1 - this.adsK * 0.7)) * (1 + this.supK * 0.7);
     const crouchK = this.crouch ? 0.72 : 1;
     const muz = this.v.set(...spec.muzzle).applyQuaternion(this.gunQuat).add(this.gunPos).clone();
     // shots come from the barrel unless the barrel is through a wall
@@ -673,7 +827,7 @@ export class LocalPlayer {
     // sum the pellets on each body
     const per = new Map<number, { dmg: number; zone: number; dist: number; at: [number, number, number] }>();
     for (const h of out.hits) {
-      const d = spec.dmg * h.k * (h.zone === ZONE.head ? spec.headX : h.zone === ZONE.limb ? 0.72 : 1);
+      const d = spec.dmg * h.k * (h.zone === ZONE.head ? spec.headX : zoneK(h.zone));
       const e = per.get(h.slot);
       if (e) {
         e.dmg += d;
@@ -692,6 +846,9 @@ export class LocalPlayer {
     this.climb += up * 0.72;
     this.climbY += drift * 0.72;
     this.sinceShot = 0;
+    // from the hip the arms take it, and the muzzle walks inside the frame
+    this.aimY += k * 0.5 * (1 - this.adsK);
+    this.aimX += side * 1.3 * (1 - this.adsK);
     // the shot goes back through the wrists into the shoulder
     const hard = spec.kick * (1 - this.adsK * 0.35) * crouchK;
     this.rkZ.v += 0.42 * Math.sqrt(hard);
@@ -715,7 +872,26 @@ export class LocalPlayer {
     c.send.nade(kind, [o.x, o.y, o.z], [f.x * speed + this.m.vx * 0.6, f.y * speed + 2.8, f.z * speed + this.m.vz * 0.6], kind === 'frag' ? 2.4 : 1.7);
   }
 
-  hurt(dir: [number, number, number]) {
+  /** rounds close enough to hear: k from 0 to 1 */
+  suppress(k: number) {
+    this.supK = Math.min(1, this.supK + k * 0.34);
+    this.trauma = Math.min(1, this.trauma + k * 0.14);
+  }
+
+  healed() {
+    this.bleed = 0;
+    this.limp *= 0.35;
+    this.arm *= 0.35;
+    this.supK = 0;
+  }
+
+  hurt(dir: [number, number, number], zone: number, dmg: number, bleed: number) {
+    this.bleed = bleed;
+    if (zone === ZONE.leg) {
+      this.limp = Math.min(1, this.limp + 0.3 + dmg / 90);
+      this.stamina = Math.max(0, this.stamina - 0.3);
+    }
+    if (zone === ZONE.limb) this.arm = Math.min(1, this.arm + 0.3 + dmg / 90);
     this.punchP += 0.05 + Math.random() * 0.04;
     this.punchY += (Math.random() - 0.5) * 0.09;
     this.punchR += (Math.random() - 0.5) * 0.09;
