@@ -143,9 +143,9 @@ export interface PlayerCtx {
 }
 
 const Q180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-const WALK = 3.05, RUN = 5.3, CROUCH = 1.65;
+const WALK = 2.75, RUN = 5.1, CROUCH = 1.55;
 /** a head-mounted lens sees wide */
-const FOV = 92;
+const FOV = 100;
 const BANDAGE = 3.2;
 
 export class LocalPlayer {
@@ -347,7 +347,7 @@ export class LocalPlayer {
       const ex = tx - m.vx, ez = tz - m.vz, el = Math.hypot(ex, ez);
       const pressing = wl > 0.01;
       const against = m.vx * tx + m.vz * tz < 0;
-      const A = !m.grounded ? 3.4 : !pressing ? 15 : against ? 26 : run ? 13.5 : 19;
+      const A = !m.grounded ? 3.4 : !pressing ? 9.5 : against ? 15 : run ? 7.5 : 10.5;
       const dv = Math.min(el, A * dt);
       if (el > 1e-5) {
         m.vx += (ex / el) * dv;
@@ -409,8 +409,8 @@ export class LocalPlayer {
     // the camera's on the vest, a hand below the eyes: the world sits a little higher in the picture
     const eyeH = 1.5 - this.crouchK * 0.52 - (this.slideT > 0 ? 0.12 : 0);
     // a camera on a head: every footfall lands in the picture, and a bad leg lands harder on one side
-    const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
-    const bobX = Math.cos(this.bob) * 0.027 * this.bobK * (1 - this.adsK * 0.7);
+    const bobY = (Math.abs(Math.sin(this.bob)) * 0.062 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
+    const bobX = Math.cos(this.bob) * 0.036 * this.bobK * (1 - this.adsK * 0.7);
     this.breath += dt;
     this.landK = Math.max(0, this.landK - dt * 3.2);
     const lk = Math.sin(this.landK * Math.PI) * this.landK;
@@ -471,7 +471,7 @@ export class LocalPlayer {
     const shaky = 1 + (1 - this.stamina) * 1.7 + this.arm * 1.8 + this.supK * 2.2;
     const swayP = (Math.sin(this.breath * 1.3) * 0.0042 + Math.sin(this.breath * 2.7 + 1) * 0.0016) * shaky + Math.sin(this.bob * 2) * 0.0058 * this.bobK;
     const swayY = (Math.sin(this.breath * 0.9) * 0.0036 + Math.sin(this.breath * 2.1) * 0.0014) * shaky + Math.cos(this.bob) * 0.0075 * this.bobK;
-    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.016 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
+    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.026 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
     this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
     cam.position.copy(eye);
     cam.quaternion.setFromEuler(this.e);
@@ -507,10 +507,10 @@ export class LocalPlayer {
     gy -= healK * 0.2 + kickK * 0.05;
     gx += kickK * 0.06;
     let pitchG = this.aimY + this.recP * 0.7 + this.rkP.x - sp2 * 1.3 - this.sprintK * 0.72 + this.retract * 0.95 - this.mantleK * 0.6;
-    let yawG = this.aimX + this.recY * 0.7 + this.rkY.x - sy2 * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 22) + this.mantleK * 0.5;
+    let yawG = this.aimX + this.recY * 0.7 + this.rkY.x - sy2 * 1.3 + this.sprintK * 0.95 + (1 - a) * Math.atan2(gx, 12) + this.mantleK * 0.5;
     pitchG -= healK * 0.7;
     yawG -= kickK * 0.4;
-    let rollG = (1 - a) * 0.09 + this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
+    let rollG = (1 - a) * 0.2 + this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
     // reload and bolt movements
     if (this.reloadT > 0) {
       const t = 1 - this.reloadT / this.reloadLen;

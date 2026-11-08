@@ -47,19 +47,19 @@ export interface WeaponSpec {
 export const WEAPONS: Record<WeaponId, WeaponSpec> = {
   carbine: {
     name: 'Carbine', cycle: 0.083, auto: true, dmg: 46, pellets: 1, headX: 3.2, mag: 30, reserve: 90, reload: 2.5, hip: 1.5, ads: 0.1, move: 0.35, kick: 0.62, wander: 0.34, settle: 11,
-    range: 70, falloff: 0.7, pen: 1, hipPos: [0.1, -0.2, 0.32], adsPos: [0, -0.112, 0.14], adsFov: 58, muzzle: [0, 0.043, 0.695], support: [0, 0.012, 0.29], eject: [0.02, 0.05, 0.02], loud: 70, speed: 1, shove: 7, brass: 1,
+    range: 70, falloff: 0.7, pen: 1, hipPos: [0.13, -0.105, 0.3], adsPos: [0, -0.112, 0.14], adsFov: 72, muzzle: [0, 0.043, 0.695], support: [0, 0.012, 0.29], eject: [0.02, 0.05, 0.02], loud: 70, speed: 1, shove: 7, brass: 1,
   },
   shotgun: {
     name: 'Pump gun', cycle: 0.92, auto: false, dmg: 17, pellets: 9, headX: 1.8, mag: 6, reserve: 24, reload: 3.6, hip: 2.6, ads: 2.1, move: 0.15, kick: 3.6, wander: 0.5, settle: 7,
-    range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.1, -0.2, 0.3], adsPos: [0, -0.086, 0.27], adsFov: 66, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
+    range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.13, -0.105, 0.29], adsPos: [0, -0.086, 0.27], adsFov: 76, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
   },
   rifle: {
     name: 'Bolt rifle', cycle: 1.3, auto: false, dmg: 110, pellets: 1, headX: 3.5, mag: 5, reserve: 20, reload: 3.4, hip: 3.2, ads: 0.02, move: 0.6, kick: 3.0, wander: 0.4, settle: 6,
-    range: 120, falloff: 0.85, pen: 2.1, hipPos: [0.1, -0.19, 0.3], adsPos: [0, -0.104, 0.09], adsFov: 19, muzzle: [0, 0.075, 0.93], support: [0, 0.02, 0.3], eject: [0.02, 0.07, 0.03], loud: 100, speed: 0.94, shove: 15, brass: 1.5,
+    range: 120, falloff: 0.85, pen: 2.1, hipPos: [0.13, -0.1, 0.29], adsPos: [0, -0.104, 0.09], adsFov: 19, muzzle: [0, 0.075, 0.93], support: [0, 0.02, 0.3], eject: [0.02, 0.07, 0.03], loud: 100, speed: 0.94, shove: 15, brass: 1.5,
   },
   pistol: {
     name: 'Service pistol', cycle: 0.14, auto: false, dmg: 38, pellets: 1, headX: 3.0, mag: 15, reserve: 45, reload: 1.9, hip: 1.1, ads: 0.25, move: 0.3, kick: 1.5, wander: 0.5, settle: 12,
-    range: 35, falloff: 0.6, pen: 0.56, hipPos: [0.1, -0.17, 0.42], adsPos: [0, -0.078, 0.34], adsFov: 68, muzzle: [0, 0.058, 0.19], support: [0, -0.02, 0.0], eject: [0.02, 0.07, 0.05], loud: 55, speed: 1.06, shove: 4, brass: 0.7,
+    range: 35, falloff: 0.6, pen: 0.56, hipPos: [0.1, -0.17, 0.42], adsPos: [0, -0.078, 0.34], adsFov: 78, muzzle: [0, 0.058, 0.19], support: [0, -0.02, 0.0], eject: [0.02, 0.07, 0.05], loud: 55, speed: 1.06, shove: 4, brass: 0.7,
   },
 };
 

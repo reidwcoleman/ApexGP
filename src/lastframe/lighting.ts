@@ -388,6 +388,16 @@ const FRAG_GRIME = /* glsl */ `
     float h = fract( vLfW.y / 3.2 ) * 3.2;
     float foot = 1.0 - smoothstep( 0.0, 0.55, h );
     diffuseColor.rgb *= 1.0 - foot * 0.3 * ( 0.5 + macro );
+    // a building left to itself: water from above runs brown down the walls, mould comes up from the floor
+    float run = lfFbm( vec2( ( vLfW.x + vLfW.z ) * 2.3, vLfW.y * 0.12 ) + 7.0 );
+    float leak = smoothstep( 0.55, 0.72, run ) * smoothstep( 0.48, 0.72, lfFbm( lfQ * 0.25 + 41.0 ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.6, 0.48, 0.34 ), leak * 0.75 );
+    float mould = smoothstep( 0.58, 0.74, lfFbm( lfQ * 1.6 + 51.0 ) ) * ( 1.0 - smoothstep( 0.15, 1.3, h ) ) * smoothstep( 0.4, 0.6, macro );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.045, 0.05, 0.035 ), mould * 0.6 );
+  } else if ( vLfN.y > 0.5 ) {
+    // floors: dust where nobody walks, grime in drifts
+    float dirt = smoothstep( 0.42, 0.7, lfFbm( lfQ * 0.5 + 61.0 ) );
+    diffuseColor.rgb *= 1.0 - dirt * 0.32;
   }
   #endif
 }
