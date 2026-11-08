@@ -1067,6 +1067,8 @@ The weapon is held the way a chest camera sees it: at the hip it sits level with
 
 The camera behaves more like a body camera's: in the dark the sensor gains up, so the grain comes up with it and then blotches of colour a few pixels across (`gain` in the final pass, from the exposure), and the microphone saturates: everything goes through a soft clipper after the compressor, so a shot close by crunches.
 
+Walls lose their plaster in places (`plaster` in `ward_kit.py`: a ragged lip round a patch of brick and mortar), about half the windows have venetian blinds with slats bent, missing or come down at one end (`blinds`), and every door has hinges, a kick plate and either raised panels (wood) or a wired window (steel), built onto the leaf in `world.ts`. The health bar, like the ammo count, only shows when you've just been hit or while it matters: a body camera has neither.
+
 Rooms on every map get skirting boards and a cornice from `clutter.trim()`: real boards stood off each wall's face, broken at doorways, baked with the rest.
 
 All the maps get a last pass from `tools/lastframe/clutter.py` after their own layout: what people leave behind. It goes round every room putting things against the walls (boxes, bins, bags, chairs, bottles, radiators; a share of it loose, so it can be kicked and shot about), things on the walls (notice boards, conduit and switches, clocks, pictures), litter, plaster and broken glass on the floor, cables and tiles hanging from the ceiling, and along the yards' walls and fences crates, pallets, tyres and cans. It keeps off doorways, spawns, stairs and whatever was already there. The pieces that aren't Poly Haven scans are modelled in `ward_kit.py`.

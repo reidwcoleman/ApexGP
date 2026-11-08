@@ -64,6 +64,8 @@ export class Hud {
   private menu = el('div', 'menu');
   private pauseEl = el('div', 'pause');
   private toastEl = el('div', 'toast');
+  private hpT = 0;
+  private lastHp = 100;
   private hint = el('div', 'hint', KEYS.map(([k, a]) => `<div><b>${k}</b>${a}</div>`).join(''));
   private tick = el('div', 'tick');
   private roster: PlayerInfo[] = [];
@@ -711,6 +713,13 @@ export class Hud {
       this.ammo.classList.toggle('on', this.ammoT > 0 || low || me.reloadT > 0);
       const hp = info?.hp ?? 100;
       (this.hp.firstChild as HTMLElement).style.transform = `scaleX(${hp / 100})`;
+      // nor a health bar: it comes up when you're hit, and stays while it matters
+      if (hp !== this.lastHp) {
+        this.lastHp = hp;
+        this.hpT = 3.5;
+      }
+      this.hpT -= dt;
+      this.vitals.classList.toggle('on', this.hpT > 0 || hp < 45 || me.bleed > 0 || me.limp > 0.2 || me.arm > 0.2 || me.healT > 0);
       this.hp.classList.toggle('low', hp < 40);
       const ws: string[] = [];
       if (me.bleed > 0) ws.push('BLEEDING');

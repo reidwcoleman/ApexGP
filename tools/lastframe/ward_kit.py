@@ -335,7 +335,66 @@ def conduit(b, rng):
         obox(b, (-0.3, -0.025, 0.3), (0.1, 0.04, 0.08), 0, PAINTR())
 
 
-KINDS = dict(hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
+BRICK = lambda: mat('lfbrick', (0.34, 0.15, 0.09), 0.85)
+BRICK2 = lambda: mat('lfbrick2', (0.26, 0.12, 0.08), 0.85)
+MORTAR = lambda: mat('lfmortar', (0.42, 0.4, 0.36), 0.95)
+SLAT = lambda: mat('lfslat', (0.58, 0.56, 0.5), 0.5)
+
+
+def plaster(b, rng):
+    """plaster come away from a wall: a ragged lip round a patch of brick and mortar; origin on the wall's face at the
+    patch's middle, looking along -y"""
+    rx, rz = rng.uniform(0.3, 0.6), rng.uniform(0.22, 0.45)
+    n = 22
+    rad = [rng.uniform(0.75, 1.0) for _ in range(n)]
+    def edge(k, f):
+        a = k / n * 6.2832
+        return (math.cos(a) * rx * rad[k % n] * f, math.sin(a) * rz * rad[k % n] * f)
+    # the lip: plaster standing proud round the hole
+    i = b.idx(PLASTER())
+    for k in range(n):
+        (ax, az), (bx, bz) = edge(k, 1.0), edge(k + 1, 1.0)
+        (cx, cz), (dx, dz) = edge(k + 1, 0.86), edge(k, 0.86)
+        v = [b.bm.verts.new(p) for p in ((ax, -0.004, az), (bx, -0.004, bz), (cx, -0.016, cz), (dx, -0.016, dz))]
+        b.bm.faces.new(v).material_index = i
+        w = [b.bm.verts.new(p) for p in ((dx, -0.016, dz), (cx, -0.016, cz), (cx, -0.002, cz), (dx, -0.002, dz))]
+        b.bm.faces.new(w).material_index = i
+    # mortar behind, then the bricks in courses
+    j = b.idx(MORTAR())
+    c = b.bm.verts.new((0, -0.001, 0))
+    ring = [b.bm.verts.new((edge(k, 0.88)[0], -0.001, edge(k, 0.88)[1])) for k in range(n)]
+    for k in range(n):
+        b.bm.faces.new((c, ring[(k + 1) % n], ring[k])).material_index = j
+    for row in range(-8, 9):
+        z = row * 0.075
+        off = 0.11 if row % 2 else 0.0
+        for col in range(-6, 7):
+            x = col * 0.225 + off
+            if max(((x + e) / (rx * 0.78)) ** 2 + ((z + f) / (rz * 0.78)) ** 2 for e in (-0.108, 0.108) for f in (-0.033, 0.033)) > 1:
+                continue
+            obox(b, (x, -0.006, z), (0.215, 0.012, 0.065), 0, BRICK() if rng.random() < 0.7 else BRICK2())
+
+
+def blinds(b, rng):
+    """venetian blinds in a window, some slats bent, some gone, one end come down; origin at the sill, inside face"""
+    W, H = 1.2, 1.35
+    obox(b, (0, -0.02, H), (W + 0.04, 0.04, 0.035), 0, SLAT())
+    drop = rng.random() < 0.5
+    for k in range(int(H / 0.045)):
+        z = H - 0.05 - k * 0.045
+        if rng.random() < 0.12:
+            continue
+        tilt = rng.uniform(-0.3, 0.3) if rng.random() < 0.2 else 0.5
+        sag = 0.0
+        if drop:
+            # the left cord gone: the slats hang from the right, steeper toward the bottom
+            sag = (k / (H / 0.045)) * 0.5
+        obox(b, (0, -0.03, z - sag * 0.5), (W, 0.038, 0.0025), 0, SLAT(), tilt=(tilt, sag * 0.9))
+    for x in (-W * 0.3, W * 0.3):
+        rod(b, (x, -0.03, H), (x, -0.03, 0.05), 0.0015, CABLE(), 4)
+
+
+KINDS = dict(plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)
 
 

@@ -30,9 +30,9 @@ COAST_OUT = [('L', 'wooden_crate_02', 0.4, (20, 'wood', 'box')), ('L', 'plastic_
              ('L', 'plastic_jerrycan', 0.2, (3, 'plastic', 'box')), ('K', 'pallet', 0.75, None, (0.55, 0.65, 0.14)), ('L', 'trashbag', 0.3, (7, 'bag', 'box')),
              ('L', 'metal_jerrycan', 0.2, (8, 'metal', 'box'))]
 # on the wall: (name or kit, height, half width)
-HOSP_HUNG = [('K:board', 0.0, 0.62), ('K:conduit', 0.0, 0.5), ('D:wall_clock', 2.3, 0.2), ('D:fire_alarm', 1.4, 0.1), ('K:conduit', 0.0, 0.5)]
-FLAT_HUNG = [('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_02', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:wall_clock', 2.0, 0.2), ('K:conduit', 0.0, 0.5)]
-COTTAGE_HUNG = [('D:hanging_picture_frame_01', 1.55, 0.3), ('D:hanging_picture_frame_03', 1.55, 0.3), ('D:wall_clock', 1.9, 0.2)]
+HOSP_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('K:board', 0.0, 0.62), ('K:conduit', 0.0, 0.5), ('D:wall_clock', 2.3, 0.2), ('D:fire_alarm', 1.4, 0.1), ('K:conduit', 0.0, 0.5)]
+FLAT_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_02', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:wall_clock', 2.0, 0.2), ('K:conduit', 0.0, 0.5)]
+COTTAGE_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.55, 0.3), ('D:hanging_picture_frame_03', 1.55, 0.3), ('D:wall_clock', 1.9, 0.2)]
 STYLES = {
     'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.35),
     'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=1.3),
@@ -105,7 +105,7 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
 
     def unit(kind, x, y, z, rot, solid=None):
         """kit pieces look along -y at rot 0, props along +y: callers give the prop's rot"""
-        m.unit('ward', [f'{kind}_{rng.randint(1, 9)}' if kind in ('litter', 'debris', 'bottles', 'shards', 'cables', 'tile', 'conduit', 'board', 'radiator') else kind],
+        m.unit('ward', [f'{kind}_{rng.randint(1, 9)}' if kind in ('litter', 'debris', 'bottles', 'shards', 'cables', 'tile', 'conduit', 'board', 'radiator', 'plaster', 'blinds') else kind],
                x, y, z, rot=rot, far=True)
         if solid:
             hx, hy, h = solid
@@ -208,6 +208,16 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
                 while f < 0.4 and solid_at(ex + nx * f, ey + ny * f, z0 + 1.2):
                     f += 0.01
                 m.stains.append((ex + nx * (f + 0.005), ey + ny * (f + 0.005), z0 + rng.uniform(0.7, 1.5), nx, ny, 0, rng.uniform(0.9, 1.6)))
+        # blinds in about half the windows, on the room's side
+        for g in m.glass:
+            if not (z0 - 0.1 < g['z0'] < z0 + 1.6) or not (0.9 < g['b'] - g['a'] < 1.7) or rng.random() > 0.5:
+                continue
+            mid = (g['a'] + g['b']) / 2
+            for (ax, ay), (bx, by), (nx, ny) in edges:
+                if g['axis'] == 'x' and ny != 0 and abs(g['c'] - ay) < 0.3 and x0 < mid < x1:
+                    unit('blinds', mid, g['c'] + ny * 0.2, g['z0'] + 0.03, math.atan2(-nx, ny) + math.pi)
+                elif g['axis'] == 'y' and nx != 0 and abs(g['c'] - ax) < 0.3 and y0 < mid < y1:
+                    unit('blinds', g['c'] + nx * 0.2, mid, g['z0'] + 0.03, math.atan2(-nx, ny) + math.pi)
         # glass under the broken windows
         for g in m.glass:
             if rng.random() < 0.35 and z0 - 0.1 < g['z0'] < z0 + 1.5:

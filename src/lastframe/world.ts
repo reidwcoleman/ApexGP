@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LF, applyLF, roomGlass } from './lighting.ts';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { World, type Box } from './collide.ts';
 import { dress } from './dress.ts';
 import { Grass } from './grass.ts';
@@ -58,6 +59,9 @@ export interface Flicker {
   off: number;
 }
 
+/** a steel door's little window: wired glass gone grey with dirt */
+const DOOR_GLASS = applyLF(new THREE.MeshStandardMaterial({ color: 0x1c2224, roughness: 0.15, metalness: 0.2 }));
+
 export class Door {
   want = 0;
   dir = 1;
@@ -100,6 +104,45 @@ export class Door {
       const l = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.02, 0.02), handle);
       l.position.set((d.w - 0.16) * d.sign, 1.02, s * (d.t / 2 + 0.09));
       inner.add(k, l);
+    }
+    // what a used door has: hinges, a kick plate scuffed by boots, raised panels on a wooden one, a wired window in a steel one
+    const metal: THREE.BufferGeometry[] = [], wood: THREE.BufferGeometry[] = [];
+    const part = (list: THREE.BufferGeometry[], w: number, h: number, t: number, x: number, y: number, z: number) => {
+      const b = new THREE.BoxGeometry(w, h, t);
+      b.translate(x * d.sign, y, z);
+      list.push(b);
+    };
+    for (const y of [0.24, d.h * 0.5, d.h - 0.24]) {
+      const c = new THREE.CylinderGeometry(0.011, 0.011, 0.1, 8);
+      c.translate(0.004 * d.sign, y, 0);
+      metal.push(c);
+    }
+    const steel = d.kind === 'steel';
+    for (const s of [-1, 1]) {
+      const z = s * (d.t / 2 + 0.002);
+      part(metal, d.w - 0.12, 0.22, 0.004, d.w / 2, 0.14, z);
+      if (!steel) {
+        // two panels, each a frame of mouldings standing proud of the leaf
+        for (const [y0, y1] of [[0.38, 0.95], [1.15, d.h - 0.14]] as const) {
+          const zz = s * (d.t / 2 + 0.005);
+          part(wood, d.w - 0.24, 0.035, 0.01, d.w / 2, y0, zz);
+          part(wood, d.w - 0.24, 0.035, 0.01, d.w / 2, y1, zz);
+          part(wood, 0.035, y1 - y0, 0.01, 0.12, (y0 + y1) / 2, zz);
+          part(wood, 0.035, y1 - y0, 0.01, d.w - 0.12, (y0 + y1) / 2, zz);
+        }
+      } else {
+        part(metal, 0.26, 0.04, 0.012, d.w / 2, 1.18, z);
+        part(metal, 0.26, 0.04, 0.012, d.w / 2, 1.74, z);
+        part(metal, 0.04, 0.6, 0.012, d.w / 2 - 0.13, 1.46, z);
+        part(metal, 0.04, 0.6, 0.012, d.w / 2 + 0.13, 1.46, z);
+      }
+    }
+    inner.add(new THREE.Mesh(mergeGeometries(metal), handle));
+    if (wood.length) inner.add(new THREE.Mesh(mergeGeometries(wood), mat));
+    if (steel) {
+      const pane = new THREE.BoxGeometry(0.22, 0.52, d.t + 0.004);
+      pane.translate((d.w / 2) * d.sign, 1.46, 0);
+      inner.add(new THREE.Mesh(pane, DOOR_GLASS));
     }
     this.pivot.add(inner);
     this.box = { min: [hx, hy, hz], max: [hx, hy + d.h, hz], pen: true, tag: 'door', mat: 'door', id, slab: { x: hx, z: hz, ux: 1, uz: 0, len: d.w, t: 0.045 }, bump: (px, pz, vx, vz) => this.bump(px, pz, vx, vz) };
