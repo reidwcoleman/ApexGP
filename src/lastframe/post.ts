@@ -501,8 +501,13 @@ void main() {
   vec2 gp = gl_FragCoord.xy;
   float g = hash( gp + fract( time ) * 91.7 ) - 0.5;
   float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
-  float gk = mix( 0.03, 0.016, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut );
+  // the sensor gains up in the dark, and its noise comes up with it: finer grain, then blotches of colour a few pixels across
+  float gain = clamp( expo / 1.1, 1.0, 3.2 );
+  float gk = mix( 0.03, 0.016, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut ) * ( 0.7 + 0.42 * gain );
   col += vec3( g + g2 * 0.2, g, g - g2 * 0.2 ) * gk;
+  vec2 cbk = floor( gp / 3.0 );
+  float c1 = hash( cbk + fract( time * 0.97 ) * 53.0 ) - 0.5, c2 = hash( cbk * 1.3 + fract( time * 1.13 ) * 17.0 ) - 0.5;
+  col += vec3( c1, -0.5 * ( c1 + c2 ), c2 ) * 0.014 * ( gain - 1.0 ) * ( 1.0 - smoothstep( 0.08, 0.5, l ) ) * ( 1.0 - feedCut );
   gl_FragColor = vec4( col, 1.0 );
 }
 `;

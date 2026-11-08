@@ -37,7 +37,16 @@ export class Sound {
     comp.attack.value = 0.002;
     comp.release.value = 0.18;
     this.duck = c.createGain();
-    this.duck.connect(comp).connect(this.master).connect(c.destination);
+    // a body camera's microphone: what's loud saturates, and a shot up close crunches
+    const clip = c.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < 1024; i++) {
+      const x = (i / 1023) * 2 - 1;
+      curve[i] = Math.tanh(x * 2.2) / Math.tanh(2.2);
+    }
+    clip.curve = curve;
+    clip.oversample = '2x';
+    this.duck.connect(comp).connect(clip).connect(this.master).connect(c.destination);
     this.dry = c.createGain();
     this.dry.connect(this.duck);
     const n = c.sampleRate * 2;

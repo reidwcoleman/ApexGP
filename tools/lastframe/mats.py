@@ -87,6 +87,7 @@ MATS = {
     'hosp_dado': M('peeling_painted_wall', 2.4, (0.17, 0.27, 0.24), rough=0.5, mono=0.182, nrm=1.2),
     'hosp_dado2': M('peeling_painted_wall', 2.4, (0.36, 0.29, 0.22), rough=0.5, mono=0.182, nrm=1.2),
     'ceil_tile': M('lf_ceiling_tiles', 4.8, (0.74, 0.74, 0.71)),
+    'fence': M('green_rough_planks', 2.0, (0.5, 0.46, 0.4), wet=0.4),
     'hbrick': M('factory_brick', 1.45, (0.78, 0.7, 0.66), wet=0.3),
     'hbrick_c': M('brick_wall_001', 1.25, (0.68, 0.62, 0.58), wet=0.3),
     'hosp_wall2': M('peeling_painted_wall', 2.4, (0.6, 0.58, 0.5), mono=0.182, nrm=1.2),

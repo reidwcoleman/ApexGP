@@ -8,8 +8,9 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/lf_out'
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 COVE = '--cove' in sys.argv
 WARD = '--ward' in sys.argv
+MOTEL = '--motel' in sys.argv
 TEXD = os.path.join(ROOT, 'public', 'lastframe')
-DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else TEXD
+DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
 os.makedirs(TEXD + '/tex', exist_ok=True)
 os.makedirs(DST, exist_ok=True)
@@ -91,7 +92,15 @@ if WARD:
     out['night'] = 1
     # old blood: where, which way the surface faces, how big (game axes)
     out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in wm.stains]
-if not COVE and not WARD:
+if MOTEL:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import motel_layout as ML
+    out['weather'] = ML.WEATHER
+    out['volume'] = ML.VOLUME
+    out['centre'] = raw['centre']
+    out['attract'] = raw['attract']
+    out['night'] = 1
+elif not COVE and not WARD:
     import layout as BL
     out['weather'] = BL.WEATHER
     out['night'] = 1
