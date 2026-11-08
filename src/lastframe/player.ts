@@ -406,7 +406,8 @@ export class LocalPlayer {
     this.lean = lt;
     this.leanK += (lt - this.leanK) * Math.min(1, dt * 10);
     // ---- the head
-    const eyeH = 1.63 - this.crouchK * 0.56 - (this.slideT > 0 ? 0.12 : 0);
+    // the camera's on the vest, a hand below the eyes: the world sits a little higher in the picture
+    const eyeH = 1.5 - this.crouchK * 0.52 - (this.slideT > 0 ? 0.12 : 0);
     // a camera on a head: every footfall lands in the picture, and a bad leg lands harder on one side
     const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
     const bobX = Math.cos(this.bob) * 0.027 * this.bobK * (1 - this.adsK * 0.7);

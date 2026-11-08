@@ -321,6 +321,9 @@ def build():
     m.attract = [[-40, 15, 6], [-10, 17, -2]]
     plant(m, H, X, Y, houses, ways)
     print('houses', len(houses), 'boxes', len(m.boxes), 'quads', len(m.quads), 'units', len(m.units), 'veg', len(m.veg), 'spawns', {k: len(v) for k, v in m.spawns.items()})
+    # what's left about the cottages
+    import clutter
+    clutter.dress(m, 'cottage', random.Random(41))
     return m
 
 

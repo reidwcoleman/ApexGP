@@ -968,7 +968,8 @@ export class Game {
         mine.flags = me.flags();
         const v = Math.hypot(me.m.vx, me.m.vz);
         sol.setWeapon(me.weapon);
-        sol.update(dt, me.m.x, me.m.y, me.m.z, me.yaw, me.pitch, me.leanK, mine.flags, v, Math.atan2(-me.m.vx, -me.m.vz));
+        // the camera rides on the vest, 13 cm under the eyes: the body I see goes down with it, or the shoulders loom over the lens
+        sol.update(dt, me.m.x, me.m.y - 0.13, me.m.z, me.yaw, me.pitch, me.leanK, mine.flags, v, Math.atan2(-me.m.vx, -me.m.vz));
         const b = this.match?.bodies[this.mySlot];
         if (b) Object.assign(b, { x: me.m.x, y: me.m.y, z: me.m.z, yaw: me.yaw, pitch: me.pitch, lean: me.leanK, crouch: me.crouch, flags: mine.flags, w: WEAPON_LIST.indexOf(me.weapon) });
       } else if (this.dead >= 0) this.deadCam(dt, mine);

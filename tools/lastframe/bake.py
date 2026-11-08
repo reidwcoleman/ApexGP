@@ -9,6 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import layout
 from mats import MATS, UNLIT
+import ward_kit
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def opt(k, d):
@@ -27,7 +28,7 @@ if COVE:
     import cove_layout, coveland, cove_kit
     m = cove_layout.build()
 elif WARD:
-    import ward_layout, ward_kit
+    import ward_layout
     m = ward_layout.build()
 else:
     m = layout.build()

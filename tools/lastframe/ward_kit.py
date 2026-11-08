@@ -206,7 +206,137 @@ def sign(b, rng):
     obox(b, (0.12, -0.021, -0.43), (0.56, 0.003, 0.07), 0, SIGNW())
 
 
-KINDS = dict(hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign)
+RUST = lambda: mat('lfrust', (0.3, 0.17, 0.1), 0.8, 0.3)
+PAINTR = lambda: mat('lfradpaint', (0.62, 0.6, 0.55), 0.55)
+CORK = lambda: mat('lfcork', (0.42, 0.3, 0.18), 0.9)
+PLASTER = lambda: mat('lfplaster', (0.6, 0.58, 0.54), 0.95)
+DUST = lambda: mat('lfdust', (0.36, 0.34, 0.31), 1.0)
+GLASSG = lambda: mat('lfbottle', (0.06, 0.12, 0.06), 0.1)
+GLASSB = lambda: mat('lfbottleb', (0.16, 0.08, 0.03), 0.1)
+CANM = lambda: mat('lfcan', (0.5, 0.48, 0.45), 0.35, 1.0)
+CABLE = lambda: mat('lfcable', (0.02, 0.02, 0.02), 0.5)
+WOOD = lambda: mat('lfpallet', (0.42, 0.33, 0.22), 0.85)
+SHARD = lambda: mat('lfshard', (0.5, 0.55, 0.55), 0.04)
+
+
+def radiator(b, rng):
+    """a cast-iron column radiator on its feet, its pipe into the floor; front looks along -y"""
+    n = rng.randint(8, 14)
+    W = n * 0.06
+    for k in range(n):
+        x = -W / 2 + 0.03 + k * 0.06
+        obox(b, (x, 0.1, 0.42), (0.045, 0.1, 0.62), 0, PAINTR())
+    rod(b, (-W / 2, 0.1, 0.15), (W / 2, 0.1, 0.15), 0.018, PAINTR())
+    rod(b, (-W / 2, 0.1, 0.7), (W / 2, 0.1, 0.7), 0.018, PAINTR())
+    for x in (-W / 2 + 0.03, W / 2 - 0.03):
+        rod(b, (x, 0.1, 0.0), (x, 0.1, 0.12), 0.02, PAINTR())
+    rod(b, (W / 2 + 0.05, 0.12, 0.0), (W / 2 + 0.05, 0.12, 0.16), 0.014, RUST())
+    rod(b, (W / 2, 0.12, 0.16), (W / 2 + 0.05, 0.12, 0.16), 0.014, RUST())
+
+
+def board(b, rng):
+    """a notice board: cork in a frame, papers pinned crooked, one hanging by a pin; origin at its foot on the wall"""
+    obox(b, (0, 0.012, 1.45), (1.2, 0.024, 0.85), 0, CORK())
+    for (x, z, w, h) in ((0, 1.03, 1.24, 0.03), (0, 1.87, 1.24, 0.03)):
+        obox(b, (x, 0.012, z), (w, 0.03, h), 0, WOOD())
+    for k in range(rng.randint(6, 10)):
+        x, z = rng.uniform(-0.48, 0.48), rng.uniform(1.15, 1.75)
+        w, h = (0.21, 0.297) if rng.random() < 0.7 else (0.15, 0.1)
+        m = PAPER() if rng.random() < 0.7 else PAPER2()
+        a = rng.uniform(-0.12, 0.12)
+        c, sn = math.cos(a), math.sin(a)
+        y = -0.002 - k * 0.0015
+        pts = [(x + c * dx - sn * dz, y, z + sn * dx + c * dz) for (dx, dz) in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2))]
+        quad(b, pts, m, two=False)
+
+
+def debris(b, rng):
+    """plaster down off a wall or ceiling: chunks, crumbs and a fan of dust"""
+    i = b.idx(DUST())
+    n = 14
+    cv = b.bm.verts.new((0, 0, 0.012))
+    ring = [b.bm.verts.new((math.cos(k * 6.283 / n) * rng.uniform(0.5, 0.9), math.sin(k * 6.283 / n) * rng.uniform(0.4, 0.7), 0.004)) for k in range(n)]
+    for k in range(n):
+        b.bm.faces.new((cv, ring[k], ring[(k + 1) % n])).material_index = i
+    for k in range(rng.randint(10, 18)):
+        r = rng.uniform(0.02, 0.12)
+        obox(b, (rng.uniform(-0.6, 0.6), rng.uniform(-0.45, 0.45), r * 0.3), (r * rng.uniform(1, 2.2), r * rng.uniform(0.8, 1.8), r * rng.uniform(0.3, 0.7)), rng.uniform(0, 3),
+             PLASTER(), tilt=(rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4)))
+
+
+def bottles(b, rng):
+    """what someone drank and left: bottles stood and fallen, cans, one crushed"""
+    for k in range(rng.randint(3, 6)):
+        x, y = rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4)
+        m = GLASSG() if rng.random() < 0.6 else GLASSB()
+        if rng.random() < 0.5:
+            rod(b, (x, y, 0), (x, y, 0.2), 0.035, m, 10)
+            rod(b, (x, y, 0.2), (x, y, 0.28), 0.013, m, 8)
+        else:
+            a = rng.uniform(0, 6.28)
+            dx, dy = math.cos(a), math.sin(a)
+            rod(b, (x, y, 0.035), (x + dx * 0.2, y + dy * 0.2, 0.035), 0.035, m, 10)
+            rod(b, (x + dx * 0.2, y + dy * 0.2, 0.035), (x + dx * 0.28, y + dy * 0.28, 0.035), 0.013, m, 8)
+    for k in range(rng.randint(2, 5)):
+        x, y = rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)
+        if rng.random() < 0.5:
+            rod(b, (x, y, 0), (x, y, 0.115), 0.033, CANM(), 10)
+        else:
+            a = rng.uniform(0, 6.28)
+            rod(b, (x, y, 0.033), (x + math.cos(a) * 0.115, y + math.sin(a) * 0.115, 0.033), 0.033, CANM(), 10)
+
+
+def shards(b, rng):
+    """glass on the floor under a window, a metre of it"""
+    i = b.idx(SHARD())
+    for k in range(rng.randint(18, 30)):
+        x, y = rng.uniform(-0.6, 0.6), rng.uniform(-0.35, 0.35)
+        r = rng.uniform(0.015, 0.08)
+        a = rng.uniform(0, 6.28)
+        v = [b.bm.verts.new((x + math.cos(a + t) * r * rng.uniform(0.5, 1.2), y + math.sin(a + t) * r * rng.uniform(0.5, 1.2), 0.003 + k * 0.0003)) for t in (0, 2.1, 4.0)]
+        b.bm.faces.new(v).material_index = i
+
+
+def cables(b, rng):
+    """cables come down out of the ceiling, sagging; origin at the ceiling"""
+    for k in range(rng.randint(2, 4)):
+        x0, y0 = rng.uniform(-0.6, 0.6), rng.uniform(-0.3, 0.3)
+        x1, y1 = x0 + rng.uniform(-0.8, 0.8), y0 + rng.uniform(-0.3, 0.3)
+        drop = rng.uniform(0.3, 1.1)
+        prev = None
+        for j in range(9):
+            t = j / 8
+            p = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, -drop * 4 * t * (1 - t) - 0.02)
+            if prev: rod(b, prev, p, 0.007, CABLE(), 5)
+            prev = p
+        if rng.random() < 0.6:
+            rod(b, (x1, y1, -0.02), (x1 + rng.uniform(-0.1, 0.1), y1, -rng.uniform(0.6, 1.4)), 0.007, CABLE(), 5)
+
+
+def pallet(b, rng):
+    for x in (-0.5, 0.0, 0.5):
+        obox(b, (x, 0, 0.05), (0.1, 1.2, 0.1), 0, WOOD())
+    for k in range(7):
+        y = -0.55 + k * 0.1833
+        obox(b, (0, y, 0.115), (1.0, 0.1, 0.025), 0, WOOD(), tilt=(0, rng.uniform(-0.02, 0.02)))
+    for y in (-0.55, 0.0, 0.55):
+        obox(b, (0, y, 0.0125), (1.0, 0.1, 0.025), 0, WOOD())
+
+
+def conduit(b, rng):
+    """a run of conduit on the wall, a switch box and a socket; origin at the floor on the wall's face"""
+    L = rng.uniform(1.2, 2.2)
+    rod(b, (-L / 2, -0.02, 2.4), (L / 2, -0.02, 2.4), 0.012, PAINTR(), 6)
+    rod(b, (0.2, -0.02, 2.4), (0.2, -0.02, 1.25), 0.012, PAINTR(), 6)
+    obox(b, (0.2, -0.025, 1.2), (0.08, 0.04, 0.08), 0, PAINTR())
+    obox(b, (0.2, -0.046, 1.2), (0.025, 0.006, 0.035), 0, CABLE())
+    if rng.random() < 0.7:
+        rod(b, (-0.3, -0.02, 2.4), (-0.3, -0.02, 0.35), 0.012, PAINTR(), 6)
+        obox(b, (-0.3, -0.025, 0.3), (0.1, 0.04, 0.08), 0, PAINTR())
+
+
+KINDS = dict(hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
+             radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)
 
 
 def make(name):
