@@ -9,6 +9,7 @@ import { LF, applyLF } from './lighting.ts';
 import { AIR, Fx } from './fx.ts';
 import { Sound } from './audio.ts';
 import { Nav } from './nav.ts';
+import { Bot } from './bots.ts';
 import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
@@ -36,6 +37,10 @@ class Actor {
   step = 0;
   /** corpse stays where it fell */
   deadAt = -1;
+  /** a trail behind the wounded */
+  dripD = 0;
+  lx = 0;
+  lz = 0;
   constructor(public info: PlayerInfo) {}
 }
 
@@ -74,6 +79,9 @@ export class Game {
   private spot: THREE.SpotLight;
   private others: THREE.SpotLight[] = [];
   private flashPoint: THREE.PointLight;
+  /** where my beam lands, lighting the room back: a soft fill with no shadow */
+  private bounce = new THREE.PointLight(0xf2ead8, 0, 8, 2);
+  private bounceK = 0;
   private flashK = 0;
   private time = 0;
   private last = performance.now();
@@ -85,6 +93,15 @@ export class Game {
   private frozen = false;
   private whiteout = 0;
   private hurt = 0;
+  private lensBlood = 0;
+  /** how fast the camera is turning, for the rolling shutter */
+  private lastYaw = 0;
+  private lastPitch = 0;
+  private turnRate = new THREE.Vector2();
+  /** the storm and the building at night */
+  private thunderT = 12;
+  private flashes: number[] = [];
+  private creakT = 9;
   private nades: (NadeSim & { id: number; kind: NadeKind; mesh: THREE.Mesh; left: number })[] = [];
   private nadeGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.1, 12);
   private nadeMat = applyLF(new THREE.MeshStandardMaterial({ color: 0x3a4036, roughness: 0.5, metalness: 0.4 }));
@@ -116,7 +133,9 @@ export class Game {
     this.hud = new Hud(this);
     this.input = new Input(canvas, () => document.pointerLockElement === canvas || this.autoInput);
     // the flashlight: the one light in the map that casts a live shadow
-    const s = (this.spot = new THREE.SpotLight(0xfff0dc, 0, 36, 0.66, 1, 1.6));
+    const s = (this.spot = new THREE.SpotLight(0xfff0dc, 0, 36, 0.8, 0.2, 1.6));
+    // the cookie costs a texture unit, and the daylight shaders have none to spare (the sun's maps)
+    if (!LF.sunOn) s.map = beamCookie();
     s.castShadow = true;
     s.shadow.mapSize.set(1024, 1024);
     s.shadow.camera.near = 0.25;
@@ -130,7 +149,7 @@ export class Game {
       this.scene.add(o, o.target);
     }
     this.flashPoint = new THREE.PointLight(0xffc08a, 0, 13, 1.8);
-    this.scene.add(this.flashPoint);
+    this.scene.add(this.flashPoint, this.bounce);
   }
 
   sun: Sun | null = null;
@@ -209,12 +228,25 @@ export class Game {
     if (wb) (this.post.mFinal.uniforms.wb.value as THREE.Vector3).set(wb[0], wb[1], wb[2]);
     this.fx.rainOn = L.map.weather?.rain ?? 1;
     if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
+    if (L.map.night) {
+      Bot.night = true;
+      this.post.exposureMax = 3.2;
+      this.post.mFinal.uniforms.satK.value = 0.74;
+      this.post.mFinal.uniforms.grainK.value = 1.5;
+    }
     if (sunInfo) {
       this.post.mFinal.uniforms.caK.value = 0.0085;
       this.post.mFinal.uniforms.satK.value = 0.97;
       this.sound.coast = true;
     }
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
+    this.fx.rayAt = (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far, true);
+    this.fx.lensHit = (k) => {
+      this.lensBlood = Math.min(1.2, this.lensBlood + k);
+      this.post.splat();
+    };
+    // old blood, where the map says
+    for (const s of L.map.stains ?? []) this.fx.stain(s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
     this.post.airScene = this.fx.air;
@@ -277,6 +309,7 @@ export class Game {
     this.spot.intensity = 0.01;
     this.others[0].intensity = 0.01;
     this.flashPoint.intensity = 0.01;
+    this.bounce.intensity = 0.01;
     this.r.compile(this.scene, this.cam);
     this.post.render(this.scene, this.cam, 0.016, 0);
     await new Promise((r) => setTimeout(r));
@@ -523,6 +556,8 @@ export class Game {
         if (e.s === this.mySlot) {
           this.me.slot = e.s;
           this.me.spawn(e.p[0], e.p[1], e.p[2], e.yaw, e.primary);
+          if (this.L.map.night) this.me.light = true;
+          this.lensBlood = 0;
           this.dead = -1;
           this.frozen = false;
           this.spect = -1;
@@ -605,7 +640,7 @@ export class Game {
           const y = e.zone === 0 ? 1.62 : e.zone === 4 ? 0.7 : 1.2;
           // what the round carries past lands on whatever is behind them
           const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2);
-          this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined);
+          this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined, e.zone === 0 ? 2.2 : 1.6);
           window.setTimeout(() => {
             if (a.deadAt < 0 || !s.head) return;
             this.fx.pool(s.head.x, this.L.world.floorAt(s.head.x, s.head.y + 0.4, s.head.z, 0.1), s.head.z);
@@ -703,6 +738,40 @@ export class Game {
       case 'chat':
         this.hud.chat(e.from, e.text);
         break;
+    }
+  }
+
+  /** lightning, thunder, and the noises an empty building makes */
+  private night(dt: number, outside: boolean) {
+    this.sound.dread(this.cam.position, this.cam.position.y < -1, dt, this.inMatch && !outside);
+    this.thunderT -= dt;
+    if (this.thunderT <= 0) {
+      this.thunderT = 22 + Math.random() * 40;
+      const near = Math.random();
+      const n = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) this.flashes.push(this.time + i * (0.09 + Math.random() * 0.25), 0.05 + Math.random() * 0.08, (3 + near * 9) * (i === 0 ? 1 : 0.6));
+      this.sound.thunder(0.4 + (1 - near) * 3.2, near);
+    }
+    let f = 0;
+    for (let i = 0; i < this.flashes.length; i += 3) {
+      const t0 = this.flashes[i], len = this.flashes[i + 1], k = this.flashes[i + 2];
+      if (this.time >= t0 && this.time < t0 + len) f = Math.max(f, k * (1 - (this.time - t0) / len));
+    }
+    if (this.flashes.length && this.time > this.flashes[this.flashes.length - 3] + 1) this.flashes.length = 0;
+    LF.skyFlash.value = f;
+    if (f > 0 && outside) this.whiteout = Math.max(this.whiteout, f * 0.006);
+    this.creakT -= dt;
+    if (this.creakT <= 0 && this.inMatch) {
+      this.creakT = 14 + Math.random() * 26;
+      // somewhere off in the dark, not where anyone is
+      const c = this.cam.position;
+      const a = Math.random() * 6.283, d = 14 + Math.random() * 18;
+      const p = new THREE.Vector3(c.x + Math.cos(a) * d, c.y + (Math.random() - 0.4) * 3, c.z + Math.sin(a) * d);
+      const r = Math.random();
+      if (r < 0.15) this.sound.groan(p);
+      else if (r < 0.5) this.sound.creak(p);
+      else if (r < 0.8) this.sound.impact(p, Math.random() < 0.5 ? 'metal' : 'wood');
+      else this.sound.door(p, Math.random() < 0.5);
     }
   }
 
@@ -935,6 +1004,19 @@ export class Game {
     for (const [s, a] of this.actors) {
       const body = s === this.mySlot && me.alive ? me.m : a;
       const alive = a.info.alive;
+      if (alive) {
+        const md = Math.hypot(body.x - a.lx, body.z - a.lz);
+        a.lx = body.x;
+        a.lz = body.z;
+        const bleeding = s === this.mySlot ? me.bleed > 0 : a.info.hp < 55;
+        if (bleeding && md < 2) {
+          a.dripD += md + dt * 0.12;
+          if (a.dripD > 0.85) {
+            a.dripD = 0;
+            this.fx.drip(body.x, body.y + 0.9, body.z);
+          }
+        }
+      }
       if (a.y > -20) this.phys.setActor(s, body.x, body.y, body.z, 1.7, alive);
       if (cap >= post.capA.length || !a.soldier?.root.visible) continue;
       const crouch = (a.flags & F.crouch) !== 0;
@@ -976,12 +1058,27 @@ export class Game {
     this.wet += ((outside ? 1 : 0) - this.wet) * Math.min(1, dt * (outside ? 0.5 : 0.8));
     const wx = this.L.map.weather;
     u.lensWet.value = this.wet * (wx?.wet ?? 1);
+    // blood on the lens dries slowly; rain washes it faster
+    this.lensBlood = Math.max(0, this.lensBlood - dt * (0.035 + this.wet * 0.08));
+    u.lensBlood.value = this.lensBlood;
+    (u.bloodSeed.value as THREE.Vector3).z += dt;
     LF.rain.value = (outside ? 1 : 0.6) * (wx?.rain ?? 1);
     const fog = wx?.fog ?? 1;
     this.post.density += ((outside ? 0.0065 : 0.0095) * fog - this.post.density) * Math.min(1, dt * 2);
     if (this.dead >= 0) {
       u.glitch.value = this.dead > 2.0 ? Math.min(1, (this.dead - 2.0) * 1.8) : 0;
     } else u.glitch.value = 0;
+    if (this.L.map.night) this.night(dt, outside);
+    {
+      const e = new THREE.Euler().setFromQuaternion(this.cam.quaternion, 'YXZ');
+      const dy = Math.atan2(Math.sin(e.y - this.lastYaw), Math.cos(e.y - this.lastYaw)), dp = e.x - this.lastPitch;
+      this.lastYaw = e.y;
+      this.lastPitch = e.x;
+      const k = dt > 1e-4 ? 1 / dt : 0;
+      this.turnRate.x += (THREE.MathUtils.clamp(dy * k, -9, 9) - this.turnRate.x) * Math.min(1, dt * 20);
+      this.turnRate.y += (THREE.MathUtils.clamp(dp * k, -9, 9) - this.turnRate.y) * Math.min(1, dt * 20);
+      (u.shutter.value as THREE.Vector2).set(this.turnRate.x * 0.0042, -this.turnRate.y * 0.0042);
+    }
     this.hud.update(dt);
     if (this.camHold) {
       this.cam.position.set(this.camHold[0], this.camHold[1], this.camHold[2]);
@@ -1069,7 +1166,52 @@ export class Game {
   }
 
   /** the bake has no glints: the nearest lamps the camera can see lend theirs to the shader */
+  /** tubes on their last legs and candles in a draught: each frame, the nearest four */
+  private flicker(dt: number) {
+    const fl = this.L.flicks;
+    if (!fl.length) return;
+    const c = this.cam.position;
+    for (const f of fl) {
+      const a = f.l.flicker ?? 0;
+      f.t -= dt;
+      if (a > 0.3) {
+        // a tube: on, then a stutter, then dark for a while, then it catches again
+        if (f.t <= 0) {
+          if (f.off > 0) {
+            f.off = 0;
+            f.t = 0.6 + Math.random() * (7 - a * 4);
+          } else {
+            f.off = Math.random() < a * 0.5 ? 0.4 + Math.random() * 2.2 * a : 0.05 + Math.random() * 0.25;
+            f.t = f.off;
+          }
+        }
+        const stutter = f.off > 0 ? (Math.sin(performance.now() * 0.09 + f.base.r * 10) > 0.6 - (f.off > 0.4 ? 1 : 0) ? 0.15 : 1) : Math.random() < 0.01 * a ? 0.6 : 0;
+        f.k = Math.min(1, stutter) * Math.min(1, a + 0.2);
+      } else {
+        // a flame: never out, never still
+        const n = Math.sin(performance.now() * 0.011 + f.base.g * 31) * 0.5 + Math.sin(performance.now() * 0.027 + f.base.b * 17) * 0.5;
+        f.k = Math.max(0, n * a * 1.6 + (Math.random() - 0.5) * a * 0.6);
+      }
+      f.mat.color.copy(f.base).multiplyScalar(1 - f.k * 0.94);
+    }
+    const near = fl.map((f) => [Math.hypot(f.l.pos[0] - c.x, f.l.pos[1] - c.y, f.l.pos[2] - c.z), f] as [number, typeof fl[number]]).sort((p, q) => p[0] - q[0]);
+    for (let i = 0; i < 4; i++) {
+      const e = near[i];
+      const P = LF.flickP.value[i];
+      if (!e || e[0] > 40) {
+        P.w = 0;
+        continue;
+      }
+      const l = e[1].l;
+      // how far the lamp's own light reaches in the bake, roughly
+      const reach = l.kind === 'spot' ? 7 : l.kind === 'area' ? 5.5 : Math.max(1.6, Math.sqrt(l.power) * 1.6);
+      P.set(l.pos[0], l.pos[1] - (l.kind === 'spot' ? 1.4 : 0.4), l.pos[2], reach);
+      LF.flickA.value[i] = e[1].k;
+    }
+  }
+
   private lamps(dt: number) {
+    this.flicker(dt);
     this.lampT -= dt;
     if (this.lampT > 0) return;
     this.lampT = 0.2;
@@ -1086,7 +1228,8 @@ export class Game {
       if (d > 3 && !this.L.world.sees(c, { x: l.pos[0], y: l.pos[1] - 0.25, z: l.pos[2] })) continue;
       const big = l.kind === 'spot';
       LF.lampP.value[n].set(l.pos[0], l.pos[1], l.pos[2], big ? 26 : 11);
-      const p = (big ? Math.min(l.power, 800) / 800 * 90 : l.power * 1.1) ;
+      const fk = l.flicker ? (this.L.flicks.find((f) => f.l === l)?.k ?? 0) : 0;
+      const p = (big ? Math.min(l.power, 800) / 800 * 90 : l.power * 1.1) * (1 - fk);
       LF.lampC.value[n].set(l.color[0] * p, l.color[1] * p, l.color[2] * p);
       n++;
     }
@@ -1105,12 +1248,31 @@ export class Game {
     const fp = this.flashPoint.position;
     AIR.spark.value.set(fp.x, fp.y, fp.z, this.flashK * 0.022);
     if (me.alive && me.light) {
-      const hit = this.L.world.ray(me.lightPos.x, me.lightPos.y, me.lightPos.z, me.barrel.x, me.barrel.y, me.barrel.z, 7);
-      const wantI = 30 * Math.min(1, Math.pow((hit ? hit.t : 7) / 5, 1.25) + 0.05);
+      const hit = this.L.world.ray(me.lightPos.x, me.lightPos.y, me.lightPos.z, me.barrel.x, me.barrel.y, me.barrel.z, 16);
+      const t = hit ? hit.t : 16;
+      const wantI = 52 * Math.min(1, Math.pow(Math.min(t, 7) / 5, 1.25) + 0.05);
       s.intensity += (wantI - s.intensity) * Math.min(1, dt * 9);
       s.position.copy(me.lightPos);
       s.target.position.copy(me.lightPos).addScaledVector(me.barrel, 5);
-    } else s.intensity = 0;
+      // the beam's flux is the same at any range; what comes back off the wall is a fraction of it, spread over the room.
+      // Stood off the wall on the near side, so the light it gives is all on this side of it
+      const b = this.bounce;
+      if (hit) {
+        const p = this.tmp.copy(me.lightPos).addScaledVector(me.barrel, t);
+        p.x += hit.nx * 0.7;
+        p.y += hit.ny * 0.7;
+        p.z += hit.nz * 0.7;
+        if (this.bounceK < 0.01) b.position.copy(p);
+        else b.position.lerp(p, Math.min(1, dt * 14));
+      }
+      const want = hit ? 1.5 * Math.min(1, t / 1.2) : 0;
+      this.bounceK += (want - this.bounceK) * Math.min(1, dt * 10);
+      b.intensity = this.bounceK * (s.intensity / 52);
+    } else {
+      s.intensity = 0;
+      this.bounceK = 0;
+      this.bounce.intensity = 0;
+    }
     // other people's lights: the nearest three
     const lit: [number, Actor][] = [];
     for (const [k, a] of this.actors) {
@@ -1259,4 +1421,39 @@ export class Game {
   bodiesFor(s: number): BodyState | undefined {
     return this.match?.bodies[s];
   }
+}
+
+/** what a weapon light throws: a hot core, the reflector's ring round it, and a wide dim spill */
+function beamCookie(): THREE.Texture {
+  const N = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = (x + 0.5) / N - 0.5, dy = (y + 0.5) / N - 0.5;
+      const r = Math.hypot(dx, dy);
+      const a = Math.atan2(dy, dx);
+      let v = Math.exp(-((r / 0.075) ** 2)) * 1.0 + Math.exp(-((r / 0.17) ** 2)) * 0.32;
+      v += Math.exp(-(((r - 0.19) / 0.025) ** 2)) * 0.07;
+      v += 0.085 * (1 - smooth(0.3, 0.5, r));
+      // the reflector isn't perfect
+      v *= 1 + 0.06 * Math.sin(a * 7 + r * 40) * smooth(0.05, 0.2, r);
+      const k = Math.min(255, Math.round(Math.max(0, v) / 1.33 * 255));
+      const i = (y * N + x) * 4;
+      img.data[i] = k;
+      img.data[i + 1] = Math.round(k * 0.97);
+      img.data[i + 2] = Math.round(k * 0.9);
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
+}
+function smooth(a: number, b: number, x: number) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
 }

@@ -89,7 +89,10 @@ export class Sun {
     });
     for (const o of rest) o.visible = false;
     for (const o of cut) o.visible = true;
+    // their materials read the sun's map, which is what's being drawn: give them the small one for this pass
+    LF.sunMap.value = this.small.depthTexture;
     r.render(scene, cam);
+    LF.sunMap.value = this.big.depthTexture;
     for (const o of rest) o.visible = true;
     r.autoClear = auto2;
     r.setRenderTarget(keep);

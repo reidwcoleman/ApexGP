@@ -11,6 +11,8 @@ export const botName = (i: number) => NAMES[i % NAMES.length];
 
 /** One computer player. Thinks ten times a second, walks and aims every frame, sees what a person would. */
 export class Bot {
+  /** the map is dark: lights stay on */
+  static night = false;
   m: Mover = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, grounded: true, height: 1.78, stepEase: 0 };
   yaw = 0;
   pitch = 0;
@@ -153,9 +155,19 @@ export class Bot {
       const head = { x: b.x, y: b.y + (crouch ? 1.1 : 1.6), z: b.z };
       const chest = { x: b.x, y: b.y + (crouch ? 0.7 : 1.15), z: b.z };
       if (!M.world.sees(eye, head) && !M.world.sees(eye, chest)) continue;
-      // the dark hides a still figure at range unless their light gives them away
       const lit = (b.flags & F.light) !== 0;
-      if (!lit && d > 26 && Math.random() < 0.5) continue;
+      if (Bot.night) {
+        // in the dark a figure is a shape at arm's length, unless something lights it: their own light, mine on them,
+        // a lamp they're standing under. Moving gives them away further off than standing still, crouched least of all
+        if (!lit) {
+          const moving = (b.flags & F.moving) !== 0;
+          let reach = crouch ? (moving ? 4.5 : 3) : (b.flags & F.sprint) ? 11 : moving ? 7.5 : 5;
+          if (this.light && a < 0.42) reach = Math.max(reach, 24);
+          if (M.litAt(b.x, b.y, b.z)) reach = Math.max(reach, 34);
+          if (p.slot === this.target && this.t - this.seenAt < 1.5) reach *= 1.6;
+          if (d > reach) continue;
+        }
+      } else if (!lit && d > 26 && Math.random() < 0.5) continue;
       if (d < bd) {
         bd = d;
         best = p.slot;
@@ -199,7 +211,8 @@ export class Bot {
     if (this.ammo <= 0 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
     else if (this.target < 0 && this.ammo < WEAPONS[this.weapon].mag * 0.4 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
     const node = M.nav.nearest(m.x, m.y, m.z);
-    this.light = this.likesLight && !!node?.indoors && this.target < 0;
+    // in the dark map everyone needs one; in a fight half of them still keep it on
+    this.light = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
     if (this.t < this.goalAt || this.pending) return;
     if (!node) return;
     let goal: Node | null = null;

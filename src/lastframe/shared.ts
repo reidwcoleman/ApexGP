@@ -51,7 +51,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
   },
   shotgun: {
     name: 'Pump gun', cycle: 0.92, auto: false, dmg: 17, pellets: 9, headX: 1.8, mag: 6, reserve: 24, reload: 3.6, hip: 2.6, ads: 2.1, move: 0.15, kick: 3.6, wander: 0.5, settle: 7,
-    range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.1, -0.2, 0.3], adsPos: [0, -0.052, 0.3], adsFov: 66, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
+    range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.1, -0.2, 0.3], adsPos: [0, -0.086, 0.27], adsFov: 66, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
   },
   rifle: {
     name: 'Bolt rifle', cycle: 1.3, auto: false, dmg: 110, pellets: 1, headX: 3.5, mag: 5, reserve: 20, reload: 3.4, hip: 3.2, ads: 0.02, move: 0.6, kick: 3.0, wander: 0.4, settle: 6,
@@ -91,7 +91,7 @@ export interface PlayerInfo {
 
 export interface MatchConfig {
   /** the location; a room's guests move to it when they join */
-  map?: 'block' | 'cove';
+  map?: 'block' | 'cove' | 'ward';
   mode: Mode;
   bots: number;
   skill: number;

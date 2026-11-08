@@ -326,6 +326,135 @@ export class Sound {
     o.stop(t + dur + 0.02);
   }
 
+  /** thunder: a crack if it's close, then the roll going on and on */
+  thunder(delay: number, near: number) {
+    const c = this.ctx;
+    if (!c) return;
+    const out = c.createGain();
+    out.gain.value = 1;
+    out.connect(this.dry);
+    out.connect(this.streetG);
+    if (near > 0.5) this.burst(out, 0.35, 0.5 * near, 600, 5000, delay);
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    s.loop = true;
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 160 + near * 220;
+    const g = c.createGain();
+    const t = c.currentTime + delay;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.9 * (0.5 + near * 0.5), t + 0.12 + (1 - near) * 0.5);
+    g.gain.setTargetAtTime(0.35, t + 0.6, 0.6);
+    g.gain.setTargetAtTime(0.0, t + 1.8, 1.4);
+    s.connect(lp).connect(g).connect(out);
+    s.start(t, Math.random());
+    s.stop(t + 9);
+  }
+
+  /** an empty building at night: a low draught through it that swells and falls, water dripping (more of it underground),
+   * and once in a while a long groan from the structure. ear: where I am; under: below ground */
+  private dreadG: GainNode | null = null;
+  private dreadF!: BiquadFilterNode;
+  private dreadT = 0;
+  private dripT = 1;
+  dread(ear: THREE.Vector3, under: boolean, dt: number, on: boolean) {
+    const c = this.ctx;
+    if (!c) return;
+    if (!this.dreadG) {
+      const s = c.createBufferSource();
+      s.buffer = this.noise;
+      s.loop = true;
+      s.playbackRate.value = 0.5;
+      this.dreadF = c.createBiquadFilter();
+      this.dreadF.type = 'lowpass';
+      this.dreadF.frequency.value = 140;
+      this.dreadF.Q.value = 2.5;
+      this.dreadG = c.createGain();
+      this.dreadG.gain.value = 0;
+      s.connect(this.dreadF).connect(this.dreadG).connect(this.dry);
+      s.start();
+    }
+    const t = c.currentTime;
+    this.dreadT += dt;
+    const swell = 0.5 + 0.5 * Math.sin(this.dreadT * 0.21) * Math.sin(this.dreadT * 0.077 + 1);
+    this.dreadG.gain.setTargetAtTime(on ? (under ? 0.11 : 0.07) * (0.45 + swell * 0.8) : 0, t, 0.5);
+    if (!on) return;
+    this.dreadF.frequency.setTargetAtTime(90 + swell * 120, t, 0.8);
+    this.dripT -= dt;
+    if (this.dripT <= 0) {
+      this.dripT = (under ? 0.5 : 2.2) + Math.random() * (under ? 1.6 : 5);
+      const a = Math.random() * 6.283, d = 1.5 + Math.random() * 7;
+      this.drip(new THREE.Vector3(ear.x + Math.cos(a) * d, ear.y + 0.5 - Math.random() * 1.6, ear.z + Math.sin(a) * d));
+    }
+  }
+
+  /** one drop into a puddle: a short falling tone and a tick */
+  drip(p: THREE.Vector3) {
+    const c = this.ctx;
+    if (!c) return;
+    const t = c.currentTime;
+    const o = c.createOscillator();
+    o.type = 'sine';
+    const f = 900 + Math.random() * 1400;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 1.9, t + 0.05);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    o.connect(g).connect(this.src(p, 0.9, false));
+    o.start(t);
+    o.stop(t + 0.1);
+  }
+
+  /** the structure itself: a deep slow groan, far off */
+  groan(p: THREE.Vector3) {
+    const c = this.ctx;
+    if (!c) return;
+    const t = c.currentTime;
+    const o = c.createOscillator();
+    o.type = 'sawtooth';
+    const f0 = 38 + Math.random() * 20;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.linearRampToValueAtTime(f0 * 0.82, t + 2.6);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 260;
+    lp.Q.value = 8;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.9);
+    g.gain.linearRampToValueAtTime(0, t + 2.8);
+    o.connect(lp).connect(g).connect(this.src(p, 1.6, true));
+    o.start(t);
+    o.stop(t + 3);
+  }
+
+  /** somewhere in the building, something gives: a long creak of metal or wood */
+  creak(p: THREE.Vector3) {
+    const c = this.ctx;
+    if (!c) return;
+    const o = c.createOscillator();
+    o.type = 'sawtooth';
+    const t = c.currentTime;
+    const f0 = 70 + Math.random() * 90;
+    o.frequency.setValueAtTime(f0, t);
+    for (let i = 1; i < 8; i++) o.frequency.linearRampToValueAtTime(f0 * (0.85 + Math.random() * 0.4), t + i * 0.16);
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 600 + Math.random() * 700;
+    bp.Q.value = 6;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.15);
+    g.gain.setValueAtTime(0.4, t + 0.9);
+    g.gain.linearRampToValueAtTime(0, t + 1.3);
+    o.connect(bp).connect(g).connect(this.src(p, 1.4, true));
+    o.start(t);
+    o.stop(t + 1.4);
+  }
+
   shot(w: number, p: THREE.Vector3 | null, muffled = false) {
     if (!this.ctx) return;
     const id: WeaponId = WEAPON_LIST[w];

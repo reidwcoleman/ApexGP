@@ -1,0 +1,48 @@
+// Blood: shots into someone standing in front of a wall, a kill, the pool, a kill up close.  node tools/lastframe/gore.mjs PORT OUT [map]
+import { chromium } from 'playwright-core';
+import { CHROME, ANGLE } from '../chrome.mjs';
+import fs from 'node:fs';
+const [port, out, map = 'ward'] = process.argv.slice(2);
+fs.mkdirSync(out, { recursive: true });
+const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--autoplay-policy=no-user-gesture-required'] });
+const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+p.on('pageerror', (e) => console.log('pageerror', e.message, (e.stack ?? '').slice(0, 300)));
+p.on('console', (m) => m.type() === 'error' && !/GPU stall/.test(m.text()) && console.log('err', m.text().slice(0, 300)));
+await p.goto(`http://localhost:${port}/lastframe.html?dev=1&map=${map}`);
+await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
+await p.evaluate(() => { const g = __lf.g; g.startSolo({ mode: 'ffa', bots: 2, skill: 0.5, time: 8, limit: 40, seed: 3 }, 'Tester', 0, 'carbine'); for (const b of g.match.bots.values()) b.update = () => {}; });
+await p.waitForTimeout(3000);
+const shot = (n) => p.screenshot({ path: `${out}/${n}.png` });
+const put = (me, bot) => p.evaluate(([me, bot]) => {
+  const g = __lf.g;
+  Object.assign(g.me.m, { x: me[0], y: me[1], z: me[2], vx: 0, vz: 0 });
+  g.me.yaw = me[3]; g.me.pitch = me[4]; g.me.light = true; g.post.cutExposure = true;
+  const [s, bt] = [...g.match.bots.entries()][0];
+  Object.assign(bt.m, { x: bot[0], y: bot[1], z: bot[2] }); bt.yaw = bot[3];
+  for (const [, b2] of [...g.match.bots.entries()].slice(1)) Object.assign(b2.m, { x: -9, y: 0, z: -50 });
+}, [me, bot]);
+await put([16, 0, -14.6, 0, -0.04], [16, 0, -19.2, Math.PI]);
+await p.waitForTimeout(1500);
+await shot('g0_before');
+await p.evaluate(() => { const g = __lf.g; g.input.fire = true; setTimeout(() => (g.input.fire = false), 130); });
+await p.waitForTimeout(90);
+await shot('g1_hit');
+await p.waitForTimeout(700);
+await shot('g2_after');
+await p.evaluate(() => { const g = __lf.g; g.input.fire = true; setTimeout(() => (g.input.fire = false), 500); });
+await p.waitForTimeout(1600);
+await shot('g3_dead');
+await p.waitForTimeout(7000);
+await shot('g4_pool');
+// up close
+await p.evaluate(() => { const g = __lf.g; for (const b of g.match.bots.values()) b.update = () => {}; });
+await put([30, 0, -36.4, -1.5708, -0.05], [31.4, 0, -36.6, 1.5708]);
+await p.waitForTimeout(4500);
+await put([30, 0, -36.4, -1.5708, -0.05], [31.4, 0, -36.6, 1.5708]);
+await p.waitForTimeout(800);
+await p.evaluate(() => { const g = __lf.g; g.input.fire = true; setTimeout(() => (g.input.fire = false), 400); });
+await p.waitForTimeout(700);
+await shot('g5_close');
+await p.waitForTimeout(3000);
+await shot('g6_close_later');
+await b.close();

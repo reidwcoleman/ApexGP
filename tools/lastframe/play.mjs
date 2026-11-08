@@ -9,7 +9,7 @@ const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } }))
 let errs = 0;
 p.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { if (!/GPU stall|GL Driver|THREE.Clock|AudioContext/.test(m.text())) { if (errs++ < 12) console.log(m.type(), m.text().slice(0, 500)); } } });
 p.on('pageerror', (e) => { if (errs++ < 12) console.log('pageerror', e.message, (e.stack ?? '').slice(0, 400)); });
-await p.goto(`http://localhost:${port}/lastframe.html?dev=1`);
+await p.goto(`http://localhost:${port}/lastframe.html?dev=1${process.env.MAP ? "&map=" + process.env.MAP : ""}`);
 await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
 console.log('loaded', await p.evaluate(() => { const g = __lf.g; return { nav: g.nav.nodes.length, tris: __lf.r.info.render.triangles, calls: __lf.r.info.render.calls }; }));
 await p.screenshot({ path: `${out}/menu.png` });

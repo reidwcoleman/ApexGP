@@ -23,6 +23,48 @@ class Sp {
   }
 }
 
+/** reloads as poses on a timeline: t, then pitch, yaw, roll (radians) and x, y, toward-the-chest (metres), added to the gun */
+const RELOAD_MAG: number[][] = [
+  [0.0, 0, 0, 0, 0, 0, 0],
+  [0.1, 0.1, 0.18, 0.5, -0.018, -0.028, 0.012],
+  [0.2, 0.16, 0.24, 0.62, -0.024, -0.012, 0.018],
+  [0.4, 0.21, 0.27, 0.69, -0.03, -0.042, 0.026],
+  [0.6, 0.25, 0.3, 0.73, -0.032, -0.05, 0.03],
+  [0.69, 0.11, 0.27, 0.6, -0.028, -0.014, 0.026],
+  [0.8, 0.13, 0.16, 0.36, -0.02, -0.03, 0.016],
+  [0.9, 0.04, 0.06, 0.12, -0.006, -0.012, 0.004],
+  [1.0, 0, 0, 0, 0, 0, 0],
+];
+const RELOAD_PISTOL: number[][] = [
+  [0.0, 0, 0, 0, 0, 0, 0],
+  [0.12, 0.3, 0.12, 0.25, -0.01, -0.03, 0.05],
+  [0.22, 0.38, 0.14, 0.3, -0.012, -0.015, 0.06],
+  [0.6, 0.42, 0.16, 0.32, -0.014, -0.04, 0.07],
+  [0.69, 0.28, 0.14, 0.26, -0.012, -0.01, 0.06],
+  [0.86, 0.2, 0.06, 0.12, -0.006, -0.02, 0.04],
+  [1.0, 0, 0, 0, 0, 0, 0],
+];
+const RELOAD_SINGLE: number[][] = [
+  [0.0, 0, 0, 0, 0, 0, 0],
+  [0.07, 0.15, 0.16, 0.6, -0.02, -0.045, 0.02],
+  [0.5, 0.17, 0.17, 0.64, -0.022, -0.05, 0.022],
+  [0.93, 0.15, 0.16, 0.6, -0.02, -0.045, 0.02],
+  [1.0, 0, 0, 0, 0, 0, 0],
+];
+/** Catmull-Rom through the keys */
+function sampleKeys(keys: number[][], t: number, out: number[]): number[] {
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+  const a = keys[Math.max(0, i - 1)], b = keys[i], c = keys[i + 1], d = keys[Math.min(keys.length - 1, i + 2)];
+  const u = THREE.MathUtils.clamp((t - b[0]) / Math.max(1e-4, c[0] - b[0]), 0, 1);
+  const u2 = u * u, u3 = u2 * u;
+  for (let k = 1; k < b.length; k++) {
+    const p0 = a[k], p1 = b[k], p2 = c[k], p3 = d[k];
+    out[k - 1] = 0.5 * (2 * p1 + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3);
+  }
+  return out;
+}
+
 export class Input {
   keys = new Set<string>();
   dx = 0;
@@ -126,6 +168,8 @@ export class LocalPlayer {
   nades: Record<NadeKind, number> = { frag: 1, flash: 1 };
   private cool = 0;
   reloadT = 0;
+  private reloadPose = [0, 0, 0, 0, 0, 0];
+  private heat = 0;
   private reloadLen = 0;
   private switchT = 0;
   private cycleT = 0;
@@ -467,15 +511,16 @@ export class LocalPlayer {
     yawG -= kickK * 0.4;
     let rollG = (1 - a) * 0.09 + this.sprintK * 0.35 + this.leanK * 0.1 * (1 - a) - sy2 * 0.6 + this.rkR.x - this.inX.x * 3 * free + (this.slideT > 0 ? 0.3 : 0);
     // reload and bolt movements
-    let reloadK = 0;
     if (this.reloadT > 0) {
       const t = 1 - this.reloadT / this.reloadLen;
-      reloadK = Math.sin(Math.min(1, t * 1.15) * Math.PI) ** 0.6;
-      pitchG += reloadK * 0.34;
-      yawG += reloadK * 0.3;
-      rollG += reloadK * 0.75;
-      gy -= reloadK * 0.05;
-      gx -= reloadK * 0.03;
+      const single = this.weapon === 'shotgun' || this.weapon === 'rifle';
+      const k = sampleKeys(single ? RELOAD_SINGLE : this.weapon === 'pistol' ? RELOAD_PISTOL : RELOAD_MAG, t, this.reloadPose);
+      pitchG += k[0];
+      yawG += k[1];
+      rollG += k[2];
+      gx += k[3];
+      gy += k[4];
+      gz -= k[5];
     }
     if (this.switchT > 0) {
       const t = this.switchT / 0.55;
@@ -494,7 +539,12 @@ export class LocalPlayer {
       gun.group.position.copy(this.gunPos);
       gun.group.quaternion.copy(this.gunQuat);
       if (gun.action) {
-        const back = this.weapon === 'pistol' ? Math.max(0, this.cool / spec.cycle) * 0.03 : cyc * (this.weapon === 'rifle' ? 0.09 : 0.1);
+        let back = this.weapon === 'pistol' ? Math.max(0, this.cool / spec.cycle) * 0.03 : cyc * (this.weapon === 'rifle' ? 0.09 : 0.1);
+        if (this.reloadT > 0 && this.weapon === 'rifle') {
+          // the bolt stays open while the rounds go in
+          const t = 1 - this.reloadT / this.reloadLen;
+          back = 0.09 * Math.min(1, t / 0.06, (1 - t) / 0.06);
+        }
         const dirZ = this.weapon === 'shotgun' ? 1 : 1;
         gun.action.position.copy(gun.actionRest);
         gun.action.position.z -= back * dirZ;
@@ -532,6 +582,11 @@ export class LocalPlayer {
         const t = 1 - this.reloadT / this.reloadLen;
         sol.magHand = gun.mag ? Math.min(1, Math.min(t / 0.16, (1 - t) / 0.2)) : 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
       } else sol.magHand *= Math.exp(-dt * 12);
+    }
+    // a hot barrel smokes after a string of shots
+    this.heat = Math.max(0, this.heat - dt * 0.2);
+    if (this.heat > 0.22 && this.sinceShot > 0.1 && Math.random() < dt * 26 * this.heat) {
+      c.fx.wisp(this.v.set(spec.muzzle[0], spec.muzzle[1], spec.muzzle[2] - 0.02).applyQuaternion(this.gunQuat).add(this.gunPos), this.heat);
     }
     // ahead of the muzzle: a torch on the rail lights the room, not the gun it's clamped to
     this.lightPos.set(0.04, 0.043, spec.muzzle[2] + 0.03).applyQuaternion(this.gunQuat).add(this.gunPos);
@@ -587,14 +642,31 @@ export class LocalPlayer {
       this.reloadT -= dt;
       const after = 1 - this.reloadT / this.reloadLen;
       if (w === 'shotgun' || w === 'rifle') {
-        // one at a time
+        // one at a time, each one pushed home with the thumb
         const n = spec.mag;
-        if (Math.floor(before * n) !== Math.floor(after * n)) c.sound.clack(null, 'shell');
+        if (Math.floor(before * n) !== Math.floor(after * n)) {
+          c.sound.clack(null, 'shell');
+          this.rkZ.v -= 0.5;
+          this.rkR.v += 0.8;
+        }
       } else {
         if (before < 0.02) this.magGone = false;
-        if (before < 0.18 && after >= 0.18) c.sound.clack(null, 'mag_out');
-        if (before < 0.68 && after >= 0.68) c.sound.clack(null, 'mag_in');
-        if (before < 0.88 && after >= 0.88) c.sound.clack(null, 'bolt');
+        if (before < 0.18 && after >= 0.18) {
+          c.sound.clack(null, 'mag_out');
+          this.rkP.v -= 0.9;
+        }
+        if (before < 0.68 && after >= 0.68) {
+          // seated with the heel of the hand: the whole gun jumps
+          c.sound.clack(null, 'mag_in');
+          this.rkP.v -= 3.2;
+          this.inY.v += 0.35;
+          this.rkR.v -= 1.2;
+        }
+        if (before < 0.88 && after >= 0.88) {
+          c.sound.clack(null, 'bolt');
+          this.rkZ.v += 0.9;
+          this.rkY.v -= 1.4;
+        }
       }
       if (this.reloadT <= 0) {
         // one still in the pipe stays there
@@ -846,6 +918,7 @@ export class LocalPlayer {
     this.climb += up * 0.72;
     this.climbY += drift * 0.72;
     this.sinceShot = 0;
+    this.heat = Math.min(1, this.heat + (this.weapon === 'shotgun' ? 0.3 : this.weapon === 'rifle' ? 0.25 : 0.09));
     // from the hip the arms take it, and the muzzle walks inside the frame
     this.aimY += k * 0.5 * (1 - this.adsK);
     this.aimX += side * 1.3 * (1 - this.adsK);

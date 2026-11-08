@@ -7,8 +7,9 @@ from mats import MATS, UNLIT
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/lf_out'
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 COVE = '--cove' in sys.argv
+WARD = '--ward' in sys.argv
 TEXD = os.path.join(ROOT, 'public', 'lastframe')
-DST = os.path.join(TEXD, 'cove') if COVE else TEXD
+DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
 os.makedirs(TEXD + '/tex', exist_ok=True)
 os.makedirs(DST, exist_ok=True)
@@ -47,7 +48,7 @@ for g in raw['glass']:
 out = dict(mats=raw['mats'], materials=mats, textures=load, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {}), **({'float': 1} if u.get('float') else {})) for u in raw['units']],
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
-           lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power']) for l in raw['lights']],
+           lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power'], **({'flicker': l['flicker']} if l.get('flicker') else {})) for l in raw['lights']],
            rooms=[dict(name=r['name'], a=ybox(r['a'], r['b'])[0], b=ybox(r['a'], r['b'])[1]) for r in raw['rooms']],
            lm=dict(logr=LOGR, k=K, size=raw['size']))
 if COVE:
@@ -79,6 +80,17 @@ if COVE:
     out['centre'] = raw['centre']
     out['attract'] = raw['attract']
     out['veg'] = [dict(id=v['id'], pos=yp(v['pos']), rot=round(v['rot'], 3), s=round(v['s'], 3)) for v in raw['veg']]
+if WARD:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import ward_layout as WL
+    wm = WL.build()
+    out['weather'] = WL.WEATHER
+    out['volume'] = WL.VOLUME
+    out['centre'] = wm.centre
+    out['attract'] = wm.attract
+    out['night'] = 1
+    # old blood: where, which way the surface faces, how big (game axes)
+    out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in wm.stains]
 json.dump(out, open(f'{DST}/map.json', 'w'), separators=(',', ':'))
 shutil.copy(f'{OUT}/world.bin', f'{DST}/world.bin')
 if os.path.exists(f'{OUT}/props.glb'):

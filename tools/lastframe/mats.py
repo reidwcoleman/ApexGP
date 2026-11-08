@@ -82,5 +82,23 @@ MATS = {
     'litwin_a': M('metal_plate', 2.0, emit=(1.1, 0.72, 0.4)),
     'litwin_b': M('metal_plate', 2.0, emit=(0.5, 0.66, 0.8)),
     'litwin_c': M('metal_plate', 2.0, emit=(1.0, 0.45, 0.2)),
+    # the ward
+    'hosp_wall': M('peeling_painted_wall', 2.4, (0.4, 0.54, 0.48), mono=0.182, nrm=1.2),
+    'hosp_dado': M('peeling_painted_wall', 2.4, (0.17, 0.27, 0.24), rough=0.5, mono=0.182, nrm=1.2),
+    'hosp_dado2': M('peeling_painted_wall', 2.4, (0.36, 0.29, 0.22), rough=0.5, mono=0.182, nrm=1.2),
+    'ceil_tile': M('lf_ceiling_tiles', 4.8, (0.74, 0.74, 0.71)),
+    'hbrick': M('factory_brick', 1.45, (0.78, 0.7, 0.66), wet=0.3),
+    'hbrick_c': M('brick_wall_001', 1.25, (0.68, 0.62, 0.58), wet=0.3),
+    'hosp_wall2': M('peeling_painted_wall', 2.4, (0.6, 0.58, 0.5), mono=0.182, nrm=1.2),
+    'wtile': M('long_white_tiles', 1.2, (0.74, 0.8, 0.76), rough=0.3),
+    'mtile': M('worn_tile_floor', 1.6, (2.4, 2.4, 2.5), rough=0.45),
+    'hlino': M('old_linoleum_flooring_01', 1.8, (0.3, 0.33, 0.3), mono=0.272, rough=0.4),
+    'dconc': M('dirty_concrete', 3.0, (0.75, 0.75, 0.73)),
+    'emerg': M('metal_plate', 1.0, emit=(1.8, 0.1, 0.05)),
+    'candle': M('metal_plate', 1.0, emit=(2.2, 1.2, 0.55)),
+    'sheet': M('white_plaster_rough_01', 1.2, (0.6, 0.6, 0.58), mono=0.17, nrm=0.5),
+    'conc_wet': M('concrete_floor_worn_001', 3.0, (0.42, 0.42, 0.42), rough=0.25, wet=1.0),
+    'ambulance': M('metal_plate', 2.0, (0.72, 0.72, 0.7), rough=0.45, metal=0.3, wet=0.4),
+    'paint_r': M('metal_plate', 2.0, (0.5, 0.05, 0.035), rough=0.5),
 }
 UNLIT = {k for k, v in MATS.items() if v['emit']}

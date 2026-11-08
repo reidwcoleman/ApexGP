@@ -22,9 +22,13 @@ def log(*a): print(f'[{time.time()-t0:6.1f}s]', *a, flush=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 COVE = opt('map', 'block') == 'cove'
+WARD = opt('map', 'block') == 'ward'
 if COVE:
     import cove_layout, coveland, cove_kit
     m = cove_layout.build()
+elif WARD:
+    import ward_layout, ward_kit
+    m = ward_layout.build()
 else:
     m = layout.build()
 
@@ -82,6 +86,41 @@ def emit(b, f, mat, u0, u1, v0, v1):
     faces.append(dict(mat=mat, v=pts, n=n, uv=uv, w=abs(u1 - u0), h=abs(v1 - v0), dens=b.density, tag=b.tag))
 
 CHUNK = 28.0
+
+
+def put(b, f, ax, sg, u, v, w, u0, u1, v0, v1):
+    cu, cv = (u0 + u1) / 2, (v0 + v1) / 2
+    mat = b.faces.get(f, b.mat)
+    # interiors take the room's finish
+    p = [0, 0, 0]; p[ax] = w + sg * 0.06; p[u] = cu; p[v] = cv
+    r = room_of(p)
+    if r is not None and b.tag not in ('step', 'post', 'cargo', 'counter', 'container') and b.mat not in ('trim', 'shopframe', 'planks', 'grate', 'steel', 'wood_top'):
+        if ax == 2:
+            if f == '+z' and b.tag == 'floor':
+                mat = r['floor']
+            elif f == '-z':
+                mat = r['ceil']
+        elif b.tag in ('int', 'ext', 'wall'):
+            mat = r['wall']
+            # a skirting board along the foot of the wall
+            if abs(b.a[2] - r['a'][2]) < 0.02:
+                pass
+    # a two-tone wall: the lower part in harder paint, the line at the same height all round the room
+    bands = [(v0, v1, mat)]
+    if r is not None and r.get('dado') and ax != 2 and mat == r['wall']:
+        dz = r['a'][2] + r['dado'][1]
+        if v0 < dz - 0.01 and v1 > dz + 0.01:
+            bands = [(v0, dz, r['dado'][0]), (dz, v1, mat)]
+        elif v1 <= dz + 0.01:
+            bands = [(v0, v1, r['dado'][0])]
+    # split long faces so the atlas packs
+    for (bv0, bv1, bm) in bands:
+        nu = max(1, math.ceil((u1 - u0) / CHUNK)); nv = max(1, math.ceil((bv1 - bv0) / CHUNK))
+        for i in range(nu):
+            for j in range(nv):
+                emit(b, f, bm, u0 + (u1 - u0) * i / nu, u0 + (u1 - u0) * (i + 1) / nu, bv0 + (bv1 - bv0) * j / nv, bv0 + (bv1 - bv0) * (j + 1) / nv)
+
+
 for b in m.boxes:
     for f in layout.FACES:
         ax, sg, u, v, w = face_quad(b, f)
@@ -104,26 +143,18 @@ for b in m.boxes:
                 break
         if hidden and b.mat not in UNLIT:
             continue
-        mat = b.faces.get(f, b.mat)
-        # interiors take the room's finish
-        p = [0, 0, 0]; p[ax] = w + sg * 0.06; p[u] = cu; p[v] = cv
-        r = room_of(p)
-        if r is not None and b.tag not in ('step', 'post', 'cargo', 'counter', 'container') and b.mat not in ('trim', 'shopframe', 'planks', 'grate', 'steel', 'wood_top'):
-            if ax == 2:
-                if f == '+z' and b.tag == 'floor':
-                    mat = r['floor']
-                elif f == '-z':
-                    mat = r['ceil']
-            elif b.tag in ('int', 'ext', 'wall'):
-                mat = r['wall']
-                # a skirting board along the foot of the wall
-                if abs(b.a[2] - r['a'][2]) < 0.02:
-                    pass
-        # split long faces so the atlas packs
-        nu = max(1, math.ceil((u1 - u0) / CHUNK)); nv = max(1, math.ceil((v1 - v0) / CHUNK))
-        for i in range(nu):
-            for j in range(nv):
-                emit(b, f, mat, u0 + (u1 - u0) * i / nu, u0 + (u1 - u0) * (i + 1) / nu, v0 + (v1 - v0) * j / nv, v0 + (v1 - v0) * (j + 1) / nv)
+        # a slab under several rooms takes each room's floor and ceiling: cut it on their edges
+        cells = [(u0, u1, v0, v1)]
+        if ax == 2 and b.tag == 'floor':
+            zz = w + sg * 0.06
+            rs = [r for r in m.rooms if r['a'][2] - 0.02 <= zz <= r['b'][2] + 0.25]
+            us = sorted({u0, u1, *[e for r in rs for e in (r['a'][u], r['b'][u]) if u0 < e < u1]})
+            vs_ = sorted({v0, v1, *[e for r in rs for e in (r['a'][v], r['b'][v]) if v0 < e < v1]})
+            cells = [(us[i], us[i + 1], vs_[j], vs_[j + 1]) for i in range(len(us) - 1) for j in range(len(vs_) - 1)]
+        for (cu0, cu1, cv0, cv1) in cells:
+            put(b, f, ax, sg, u, v, w, cu0, cu1, cv0, cv1)
+
+
 # roofs and hulls: quads that aren't on any box
 for q in getattr(m, 'quads', ()):
     v = np.array(q['v'], float)
@@ -284,9 +315,9 @@ units = {}
 def unit_obj(kit, parts, far):
     key = (kit, tuple(parts), far)
     if key in units: return units[key]
-    if kit == 'cove':
-        o = cove_kit.make(parts[0])
-        o.name = 'UF|cove|' + parts[0]
+    if kit in ('cove', 'ward'):
+        o = (cove_kit if kit == 'cove' else ward_kit).make(parts[0])
+        o.name = f'UF|{kit}|' + parts[0]
         units[key] = o
         return o
     d = kit_of(kit)

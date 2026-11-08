@@ -3,7 +3,7 @@ import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
 import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import type * as THREE from 'three';
-import { MAP_ID } from './world.ts';
+import { DEFAULT_MAP, MAP_ID } from './world.ts';
 
 const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
   { id: 'tdm', name: 'Team Fight', note: 'First side to 40 kills. Respawns on.', limit: 40 },
@@ -249,7 +249,7 @@ export class Hud {
       <div class="mast"><i class="dot"></i>REC<span class="sp">Case ${this.caseId}</span></div>
       <button class="plain" id="s-back">Back</button>
       <h2>${kind === 'solo' ? 'New case' : 'Open a room'}</h2>
-      <div class="group"><div class="lab">Location</div>${this.seg('map', [['block', 'Kessler Block'], ['cove', 'Porthenys Cove']], MAP_ID)}</div>
+      <div class="group"><div class="lab">Location</div>${this.seg('map', [['ward', 'Ashgrove Ward'], ['block', 'Kessler Block'], ['cove', 'Porthenys Cove']], MAP_ID)}</div>
       ${this.pickers(kind)}
       ${this.loadout()}
       <div class="acts push"><button class="primary" id="s-go">${kind === 'solo' ? 'Start recording' : 'Open the room'}</button></div>
@@ -260,7 +260,7 @@ export class Hud {
       if (v && v !== MAP_ID) {
         // each location is its own load: the page comes back on it, at this same screen
         const u = new URL(location.href);
-        if (v === 'cove') u.searchParams.set('map', 'cove');
+        if (v !== DEFAULT_MAP) u.searchParams.set('map', v);
         else u.searchParams.delete('map');
         u.searchParams.set('setup', kind);
         location.href = u.toString();
@@ -379,7 +379,8 @@ export class Hud {
         if ((m.cfg.map ?? 'block') !== MAP_ID) {
           // the host is on the other location: come back on it and join again
           const u = new URL(location.href);
-          if (m.cfg.map === 'cove') u.searchParams.set('map', 'cove');
+          const want = m.cfg.map ?? 'block';
+          if (want !== DEFAULT_MAP) u.searchParams.set('map', want);
           else u.searchParams.delete('map');
           u.searchParams.set('join', code);
           location.href = u.toString();
@@ -599,7 +600,7 @@ export class Hud {
     const myTeam = g.player(g.mySlot)?.team ?? 0;
     if (e.phase === 'warmup') {
       const m = MODES.find((x) => x.id === g.cfg?.mode);
-      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}</small>`, 3.8);
+      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}${MAP_ID === 'ward' && e.round <= 1 ? '<br>In the dark your light is what they see. T turns it off.' : ''}</small>`, MAP_ID === 'ward' && e.round <= 1 ? 5.5 : 3.8);
       this.boardEl.classList.remove('on', 'final');
     } else if (e.phase === 'live') {
       this.say('Recording', 0.8, 'go');

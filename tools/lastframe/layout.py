@@ -112,8 +112,9 @@ class Map:
             s.glass.append(dict(axis=axis, c=c, a=a, b=b, z0=z + sill, z1=z + sill + h))
         return (a, b, z + sill, z + sill + h)
 
-    def room(s, name, x0, y0, x1, y1, z, h, wall, floor, ceil='ceil', base='trim'):
-        s.rooms.append(dict(name=name, a=(x0, y0, z), b=(x1, y1, z + h), wall=wall, floor=floor, ceil=ceil, base=base))
+    def room(s, name, x0, y0, x1, y1, z, h, wall, floor, ceil='ceil', base='trim', dado=None):
+        """dado: (material, height) for the lower part of the walls"""
+        s.rooms.append(dict(name=name, a=(x0, y0, z), b=(x1, y1, z + h), wall=wall, floor=floor, ceil=ceil, base=base, dado=dado))
 
     def prop(s, name, x, y, z=0.0, rot=0.0, scale=1.0, part=None, collide=None, hard=True, tilt=0.0):
         """collide: None = the prop's bounding box, False = none, or (hx, hy, hz) half sizes"""

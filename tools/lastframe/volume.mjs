@@ -4,7 +4,7 @@ import { CHROME, ANGLE } from '../chrome.mjs';
 import fs from 'node:fs';
 const port = process.argv[2] ?? '5281';
 const map = process.argv[3] ?? '';
-const dir = map ? `public/lastframe/${map}` : 'public/lastframe';
+const dir = map && map !== 'block' ? `public/lastframe/${map}` : 'public/lastframe';
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle'] });
 const p = await (await b.newContext({ viewport: { width: 640, height: 360 } })).newPage();
 p.on('pageerror', (e) => console.log('pageerror', e.message));

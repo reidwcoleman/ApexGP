@@ -117,7 +117,7 @@ export class Phys {
       this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(c[0] + hx, c[1] + hy, c[2] + hz).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
     }
     // the street sits lower than the kerb, and the cloth of a bag shouldn't fall through a seam
-    if (!map.terrain) this.world.createCollider(RAPIER.ColliderDesc.cuboid(300, 1, 300).setTranslation(46, -1.6, -30).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
+    if (!map.terrain && !map.night) this.world.createCollider(RAPIER.ColliderDesc.cuboid(300, 1, 300).setTranslation(46, -1.6, -30).setFriction(0.7).setCollisionGroups(GRP.world), this.fixed);
   }
 
   /** the ground, for what's thrown about on it: a coarser copy of the heights round the playable area */

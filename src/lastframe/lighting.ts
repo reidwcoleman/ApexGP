@@ -58,6 +58,11 @@ export const LF = {
   /** the lamps nearest the camera: xyz, radius / rgb. The bake holds their light, not their glint */
   lampP: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, -99, 0, 0)) },
   lampC: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) },
+  /** lamps that can't make up their minds: xyz, reach / how far down they are this frame. Their light is in the bake, so it's taken away */
+  flickP: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, -99, 0, 0)) },
+  flickA: { value: [0, 0, 0, 0] },
+  /** lightning in the sky: how bright, this frame */
+  skyFlash: { value: 0 },
   volMin: { value: new THREE.Vector3() },
   volInv: { value: new THREE.Vector3(1, 1, 1) },
   volDim: { value: new THREE.Vector3(1, 1, 1) },
@@ -172,6 +177,18 @@ uniform float lfTime;
 uniform float lfWorldLight;
 uniform vec4 lfLampP[6];
 uniform vec3 lfLampC[6];
+uniform vec4 lfFlickP[4];
+uniform float lfFlickA[4];
+float lfFlickDim( vec3 p ) {
+  float k = 1.0;
+  for ( int i = 0; i < 4; i++ ) {
+    float r = lfFlickP[i].w;
+    if ( r <= 0.0 ) continue;
+    float d = distance( p, lfFlickP[i].xyz );
+    k *= 1.0 - lfFlickA[i] * ( 1.0 - smoothstep( r * 0.3, r, d ) );
+  }
+  return k;
+}
 #ifdef LF_SUN
 ${SUN_GLSL}
 #endif
@@ -258,7 +275,7 @@ const FRAG_LIGHT = /* glsl */ `
   vec3 lfVw = normalize( ( vec4( geometryViewDir, 0.0 ) * viewMatrix ).xyz );
   vec3 lfR = reflect( - lfVw, lfNw );
   #ifdef LF_LM
-    vec3 lfBaked = max( lfDecode( texture2D( lfLM, vLfLM ).rgb ), vec3( 0.0055, 0.0065, 0.0095 ) );
+    vec3 lfBaked = max( lfDecode( texture2D( lfLM, vLfLM ).rgb ), vec3( 0.0055, 0.0065, 0.0095 ) ) * lfFlickDim( vLfW );
     // the lightmap has no idea about the normal map. The cubes know where this spot's light comes from:
     // ask them how much more or less a bump tilted this way sees, and lean the bake on that
     vec3 lfGn = normalize( vLfN );
@@ -295,7 +312,7 @@ const FRAG_LIGHT = /* glsl */ `
     #endif
     radiance += lfRad * lfWorldLight;
   #else
-    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight;
+    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight * lfFlickDim( vLfW );
     radiance += lfCube( vLfW + lfNw * 0.36, lfR ) * lfWorldLight * LF_SPEC;
     #ifdef LF_VIEW
     {
@@ -527,6 +544,8 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfWorldLight = LF.worldLight;
     s.uniforms.lfLampP = LF.lampP;
     s.uniforms.lfLampC = LF.lampC;
+    s.uniforms.lfFlickP = LF.flickP;
+    s.uniforms.lfFlickA = LF.flickA;
     s.uniforms.lfRain = LF.rain;
     s.uniforms.lfNoiseT = LF.noise;
     s.uniforms.lfWet = wet;

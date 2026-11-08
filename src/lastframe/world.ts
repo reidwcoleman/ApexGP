@@ -10,9 +10,12 @@ import type { SunInfo } from './sun.ts';
 
 export const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'lastframe/';
 /** which map this page is on: picking another reloads the page, so nothing has to be torn down */
-export const MAP_ID = new URLSearchParams(location.search).get('map') === 'cove' ? 'cove' : 'block';
+const MAP_Q = new URLSearchParams(location.search).get('map');
+/** the hospital opens the game; the others are a pick away */
+export const DEFAULT_MAP = 'ward';
+export const MAP_ID: 'block' | 'cove' | 'ward' = MAP_Q === 'cove' ? 'cove' : MAP_Q === 'block' ? 'block' : 'ward';
 /** the map's own files; textures, guns and gear are shared */
-export const MB = BASE + (MAP_ID === 'cove' ? 'cove/' : '');
+export const MB = BASE + (MAP_ID === 'block' ? '' : MAP_ID + '/');
 
 export interface MapData {
   mats: { mat: string; verts: number; tris: number; pos: number; nor: number; uv: number; lm: number; idx: number }[];
@@ -25,7 +28,7 @@ export interface MapData {
   spawns: { a: number[][]; b: number[][]; ffa: number[][] };
   hold: number[][];
   zones: { a: number[]; b: number[]; kind: string }[];
-  lights: { kind: string; pos: number[]; color: number[]; power: number }[];
+  lights: { kind: string; pos: number[]; color: number[]; power: number; flicker?: number }[];
   rooms: { name: string; a: number[]; b: number[] }[];
   lm: { logr: number; k: number; size: number };
   /** facade modules: id, where, and which tile of the second lightmap (none: a far building) */
@@ -36,10 +39,23 @@ export interface MapData {
   veg?: { id: string; pos: number[]; rot: number; s: number }[];
   /** the volume capture's grid, where it isn't the block's */
   volume?: { step: number[]; min: number[]; dim: number[] };
+  /** a map in the dark: lights start on, old blood on the walls */
+  night?: number;
+  stains?: number[][];
   weather?: { key?: number; rain: number; wet: number; fog: number; sky: number[]; wb: number[]; sun?: SunInfo };
   /** what spawns face, and the shot behind the menu */
   centre?: number[];
   attract?: number[][];
+}
+
+/** a lamp that comes and goes: how far down it is now (k), and when it next changes its mind */
+export interface Flicker {
+  l: MapData['lights'][number];
+  mat: THREE.MeshBasicMaterial;
+  base: THREE.Color;
+  k: number;
+  t: number;
+  off: number;
 }
 
 export class Door {
@@ -256,6 +272,8 @@ export interface Loaded {
   floats: { mesh: THREE.InstancedMesh; base: THREE.Matrix4[]; x: number[]; z: number[]; yaw: number[] }[];
   /** planted blocks, and how far off each is still worth drawing */
   vegCells: { mesh: THREE.InstancedMesh; x: number; z: number; reach: number }[];
+  /** lamps that flicker */
+  flicks: Flicker[];
 }
 
 function makeSky(tex: THREE.Texture, lm: MapData['lm'], tint = [0.62 * 0.36, 0.62 * 0.62, 0.62 * 1.05]) {
@@ -263,9 +281,9 @@ function makeSky(tex: THREE.Texture, lm: MapData['lm'], tint = [0.62 * 0.36, 0.6
   const m = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
     defines: LF.sunOn ? { DAY: 1 } : {},
-    uniforms: { t: { value: tex }, k: LF.lmK, tint: { value: new THREE.Vector3(tint[0], tint[1], tint[2]) }, sunD: LF.sunDir, sunC: LF.sunC, disc: LF.disc },
+    uniforms: { t: { value: tex }, k: LF.lmK, tint: { value: new THREE.Vector3(tint[0], tint[1], tint[2]) }, sunD: LF.sunDir, sunC: LF.sunC, disc: LF.disc, flash: LF.skyFlash },
     vertexShader: 'varying vec3 d; void main(){ d = position; vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position,1.); gl_Position = p.xyww; }',
-    fragmentShader: `varying vec3 d; uniform sampler2D t; uniform vec2 k; uniform vec3 tint, sunD, sunC; uniform float disc;
+    fragmentShader: `varying vec3 d; uniform sampler2D t; uniform vec2 k; uniform vec3 tint, sunD, sunC; uniform float disc, flash;
       void main(){ vec3 n = normalize(d);
       #ifdef DAY
       vec3 s = n; s.y = max(s.y, 0.004); s = normalize(s);
@@ -279,6 +297,7 @@ function makeSky(tex: THREE.Texture, lm: MapData['lm'], tint = [0.62 * 0.36, 0.6
       // the disc itself and the glare round it: the picture had them clipped out for the bake
       c += sunC * disc * (smoothstep(0.99991, 0.99996, a) * 24.0 + pow(max(a, 0.0), 900.0) * 1.1 + pow(max(a, 0.0), 60.0) * 0.1);
       #endif
+      c += vec3(0.62, 0.68, 0.85) * flash * (0.35 + 0.65 * clamp(n.y * 1.5, 0., 1.)) * (0.6 + 0.4 * e.g * 4.);
       gl_FragColor = vec4(c,1.); }`,
   });
   const s = new THREE.Mesh(geo, m);
@@ -651,6 +670,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const tube = new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 8, 9) });
   const bulb = new THREE.MeshBasicMaterial({ color: new THREE.Color(14, 9, 5) });
   const sodium = new THREE.MeshBasicMaterial({ color: new THREE.Color(46, 26, 9) });
+  const flicks: Flicker[] = [];
   for (const l of map.lights) {
     let mesh: THREE.Mesh;
     if (l.kind === 'area') {
@@ -664,13 +684,20 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       mesh = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), bulb);
       mesh.position.set(l.pos[0], l.pos[1], l.pos[2]);
     }
-    group.add(mesh);
+    if (l.flicker) {
+      // its own glow, so it can go out on its own
+      const mat = (mesh.material as THREE.MeshBasicMaterial).clone();
+      mesh.material = mat;
+      if (l.kind !== 'area') mesh.scale.setScalar(l.power < 3 ? 0.5 : 1);
+      flicks.push({ l, mat, base: mat.color.clone(), k: 0, t: Math.random() * 4, off: 0 });
+    }
+    if (l.power > 0.01) group.add(mesh);
   }
   const deco = new THREE.Group();
   group.add(deco);
-  if (!map.terrain) dress(deco);
+  if (MAP_ID === 'block') dress(deco);
   progress(0.92, 'Light');
-  return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors, grass, floats, vegCells };
+  return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors, grass, floats, vegCells, flicks };
 }
 
 /** the ambient cubes; flat until a capture has been shipped */

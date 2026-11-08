@@ -206,10 +206,15 @@ export class Soldier {
   dead = -1;
   private clip = '';
   private legYaw = 0;
+  /** where the feet point, standing: they stay planted until the turn gets too far, then shuffle round */
+  private feetYaw = 0;
+  private turning = false;
+  private turnPh = 0;
+  private sprintK = 0;
   private rag: Ragdoll | null = null;
   private spin = 0;
   private gq = new THREE.Quaternion();
-  private v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  private v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
   readonly head = new THREE.Vector3();
   private hitK = 0;
   private hitZone = 1;
@@ -348,7 +353,21 @@ export class Soldier {
       back = -1;
       rel = angleDiff(rel + Math.PI, 0);
     }
-    this.legYaw += (THREE.MathUtils.clamp(rel, -1.2, 1.2) - this.legYaw) * Math.min(1, dt * 9);
+    if (moving || this.firstPerson) {
+      this.legYaw += (THREE.MathUtils.clamp(rel, -1.2, 1.2) - this.legYaw) * Math.min(1, dt * 9);
+      this.feetYaw = face + this.legYaw;
+      this.turning = false;
+    } else {
+      const off = angleDiff(this.feetYaw, face);
+      if (Math.abs(off) > 0.8) this.turning = true;
+      if (this.turning) {
+        this.feetYaw = face + off * Math.exp(-dt * 7);
+        this.turnPh += dt * 13;
+        if (Math.abs(off) < 0.06) this.turning = false;
+      }
+      this.legYaw = THREE.MathUtils.clamp(angleDiff(this.feetYaw, face), -1.2, 1.2);
+    }
+    this.sprintK += (((flags & F.sprint) ? 1 : 0) - this.sprintK) * Math.min(1, dt * 7);
     if (crouched) {
       clip = moving ? 'walk' : 'crouch';
       rate = Math.max(0.6, speed / 1.2) * back;
@@ -384,6 +403,15 @@ export class Soldier {
       P.rotateWorld('Bip01_R_Thigh', right, 0.95 * k);
       P.rotateWorld('Bip01_L_Calf', right, -1.3 * k);
       P.rotateWorld('Bip01_R_Calf', right, -1.3 * k);
+    }
+    if (this.turning && !this.firstPerson) {
+      // a step round: one foot lifts and comes down, then the other
+      const l = Math.max(0, Math.sin(this.turnPh)), r = Math.max(0, -Math.sin(this.turnPh));
+      const fr = this.v[6].set(-Math.cos(face + this.legYaw), 0, Math.sin(face + this.legYaw));
+      P.rotateWorld('Bip01_L_Thigh', fr, 0.32 * l);
+      P.rotateWorld('Bip01_L_Calf', fr, -0.55 * l);
+      P.rotateWorld('Bip01_R_Thigh', fr, 0.32 * r);
+      P.rotateWorld('Bip01_R_Calf', fr, -0.55 * r);
     }
     this.pose(face, pitch);
     P.root.updateMatrixWorld(true);
@@ -424,8 +452,8 @@ export class Soldier {
     if (!this.firstPerson) {
       // aim direction
       dir.copy(fwd).multiplyScalar(Math.cos(pitch)).addScaledVector(UP, Math.sin(pitch)).normalize();
-      const lowK = 1 - Math.min(1, this.aim + 0.55);
-      dir.addScaledVector(UP, -0.35 * lowK).normalize();
+      const lowK = Math.max(1 - Math.min(1, this.aim + 0.55), this.sprintK);
+      dir.addScaledVector(UP, -0.35 * lowK - 0.3 * this.sprintK).addScaledVector(right, -0.55 * this.sprintK).normalize();
       const sR = P.worldOf('Bip01_R_UpperArm', this.v[4]);
       const sL = P.worldOf('Bip01_L_UpperArm', this.v[5]);
       const grip = tmp;

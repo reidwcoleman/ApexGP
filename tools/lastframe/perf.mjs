@@ -4,7 +4,7 @@ import { CHROME, ANGLE } from '../chrome.mjs';
 const [port, w = '1920', h = '1080'] = process.argv.slice(2);
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--autoplay-policy=no-user-gesture-required'] });
 const p = await (await b.newContext({ viewport: { width: +w, height: +h } })).newPage();
-await p.goto(`http://localhost:${port}/lastframe.html?dev=1`);
+await p.goto(`http://localhost:${port}/lastframe.html?dev=1${process.env.MAP ? "&map=" + process.env.MAP : ""}`);
 await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
 await p.evaluate(() => { const g = __lf.g; g.startSolo({ mode: 'tdm', bots: 5, skill: 0.5, time: 8, limit: 40, seed: 3 }, 'Tester', 0, 'carbine'); g.me.light = true; });
 await p.waitForTimeout(6000);

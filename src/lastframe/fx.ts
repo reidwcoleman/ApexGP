@@ -366,6 +366,187 @@ function marks() {
     }
     p = cellAt(7);
     hole(p[0], p[1], R * 0.4, 'rgba(120,130,135,0.3)', 14, 'rgba(90,100,105,0.8)');
+    bloodCells(c, h, cellAt);
+  });
+}
+
+/** blood, in the atlas's second half. Multiplied onto the surface, so what's drawn is how much of the wall's colour survives */
+function bloodCells(c: CanvasRenderingContext2D, h: number, cellAt: (k: number) => [number, number]) {
+  const red = (a: number, k = 1) => `rgba(${Math.round((58 + Math.random() * 40) * k)},${Math.round((3 + Math.random() * 6) * k)},${Math.round((5 + Math.random() * 6) * k)},${a})`;
+  const clip = (k: number, f: () => void) => {
+    const [cx, cy] = cellAt(k);
+    c.save();
+    c.beginPath();
+    c.rect(cx - h / 2 + 2, cy - h / 2 + 2, h - 4, h - 4);
+    c.clip();
+    f();
+    c.restore();
+  };
+  const blob = (x: number, y: number, r: number, col: string, wob = 0.25) => {
+    c.fillStyle = col;
+    c.beginPath();
+    const n = 14 + Math.floor(r);
+    const ph = Math.random() * 6;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * 6.2832, rr = r * (1 + wob * (Math.sin(a * 3 + ph) * 0.5 + Math.sin(a * 5 + ph * 2) * 0.3 + (Math.random() - 0.5) * 0.4));
+      c[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    c.fill();
+  };
+  // a droplet that hit at an angle: round head, a tail thrown on past it
+  const drop = (x: number, y: number, r: number, ang: number, stretch: number, col: string) => {
+    c.fillStyle = col;
+    c.beginPath();
+    c.ellipse(x, y, r * stretch, r, ang, 0, 6.2832);
+    c.fill();
+    if (stretch > 1.6) {
+      c.beginPath();
+      c.ellipse(x + Math.cos(ang) * r * stretch * 1.7, y + Math.sin(ang) * r * stretch * 1.7, r * 0.45, r * 0.35, ang, 0, 6.2832);
+      c.fill();
+    }
+  };
+  // a run down a wall: thin, thickening to a bead where it stopped
+  const drip = (x: number, y: number, len: number, w: number, col: string) => {
+    c.strokeStyle = col;
+    c.fillStyle = col;
+    c.lineCap = 'round';
+    let px = x, py = y;
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      const nx = px + (Math.random() - 0.5) * 1.6, ny = py + len / n;
+      c.lineWidth = w * (0.7 + 0.5 * (i / n));
+      c.beginPath();
+      c.moveTo(px, py);
+      c.lineTo(nx, ny);
+      c.stroke();
+      px = nx;
+      py = ny;
+    }
+    c.beginPath();
+    c.ellipse(px, py, w * 0.95, w * 1.3, 0, 0, 6.2832);
+    c.fill();
+  };
+  // 8: a burst on a wall behind someone: a wet core, a spray thrown outward, runs down from the heavy part
+  const spray = (k: number, dirBias: number) => {
+    clip(k, () => {
+      const [cx, cy] = cellAt(k);
+      for (let i = 0; i < 5; i++) blob(cx + (Math.random() - 0.5) * h * 0.08, cy + (Math.random() - 0.5) * h * 0.08, h * (0.035 + Math.random() * 0.04), red(0.9, 0.85));
+      for (let i = 0; i < 260; i++) {
+        let a = Math.random() * 6.2832;
+        if (dirBias && Math.random() < dirBias) a = (Math.random() - 0.5) * 1.3;
+        const r = Math.pow(Math.random(), 1.5) * h * 0.46;
+        const sz = Math.max(0.6, (1 - r / (h * 0.5)) * (Math.random() ** 2.2) * 9 + 0.5);
+        drop(cx + Math.cos(a) * r, cy + Math.sin(a) * r, sz, a, 1 + (r / h) * 5 * Math.random(), red(0.55 + Math.random() * 0.4));
+      }
+      for (let i = 0; i < 7; i++) {
+        const x = cx + (Math.random() - 0.5) * h * 0.22, y = cy + (Math.random() - 0.1) * h * 0.08;
+        drip(x, y, h * (0.12 + Math.random() * 0.3), 1.6 + Math.random() * 2.4, red(0.8, 0.9));
+      }
+    });
+  };
+  spray(8, 0);
+  spray(9, 0.55);
+  // 10: a smear, something pressed and drawn along, runs from its lower edge
+  clip(10, () => {
+    const [cx, cy] = cellAt(10);
+    for (let i = 0; i < 26; i++) {
+      const t = i / 25;
+      const x = cx - h * 0.36 + t * h * 0.72, y = cy - h * 0.05 + Math.sin(t * 3) * h * 0.04;
+      blob(x, y, h * (0.07 - t * 0.03) * (0.8 + Math.random() * 0.4), red(0.35 + (1 - t) * 0.4, 0.9), 0.35);
+    }
+    c.strokeStyle = 'rgba(40,2,4,0.35)';
+    for (let i = 0; i < 30; i++) {
+      c.lineWidth = 0.5 + Math.random() * 1.5;
+      const y = cy - h * 0.09 + Math.random() * h * 0.1;
+      c.beginPath();
+      c.moveTo(cx - h * 0.38, y);
+      c.lineTo(cx + h * (0.1 + Math.random() * 0.3), y + (Math.random() - 0.5) * 6);
+      c.stroke();
+    }
+    for (let i = 0; i < 9; i++) drip(cx - h * 0.33 + Math.random() * h * 0.55, cy + h * 0.0, h * (0.1 + Math.random() * 0.32), 1.5 + Math.random() * 2.6, red(0.75, 0.9));
+  });
+  // 11: a pool: dark, thick, an edge that isn't quite round, a lighter rim where it thins
+  clip(11, () => {
+    const [cx, cy] = cellAt(11);
+    blob(cx, cy, h * 0.4, 'rgba(110,22,20,0.55)', 0.22);
+    blob(cx + 4, cy - 3, h * 0.37, 'rgb(52,4,6)', 0.2);
+    blob(cx - h * 0.05, cy + h * 0.04, h * 0.25, 'rgb(34,2,4)', 0.25);
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * 6.28, r = h * (0.38 + Math.random() * 0.08);
+      blob(cx + Math.cos(a) * r, cy + Math.sin(a) * r, h * (0.02 + Math.random() * 0.04), 'rgb(56,5,7)', 0.3);
+    }
+  });
+  // 12: drops off a wound, onto the floor: round, crowned
+  clip(12, () => {
+    const [cx, cy] = cellAt(12);
+    for (let i = 0; i < 9; i++) {
+      const x = cx + (Math.random() - 0.5) * h * 0.5, y = cy + (Math.random() - 0.5) * h * 0.5, r = h * (0.025 + Math.random() * 0.05);
+      blob(x, y, r, red(0.92, 0.8), 0.18);
+      for (let k = 0; k < 7; k++) {
+        const a = Math.random() * 6.28;
+        drop(x + Math.cos(a) * r * 1.4, y + Math.sin(a) * r * 1.4, r * 0.18, a, 1.8, red(0.8));
+      }
+    }
+  });
+  // 13: dragged: a long broken streak with a heavier start
+  clip(13, () => {
+    const [cx, cy] = cellAt(13);
+    for (let i = 0; i < 60; i++) {
+      const t = i / 59;
+      if (Math.random() < 0.18) continue;
+      blob(cx - h * 0.44 + t * h * 0.88, cy + Math.sin(t * 5) * h * 0.03, h * (0.09 - t * 0.05) * (0.6 + Math.random() * 0.5), red(0.25 + (1 - t) * 0.45, 0.85), 0.5);
+    }
+  });
+  // 14: old and dried: brown, the edge darker than the middle, flaking
+  clip(14, () => {
+    const [cx, cy] = cellAt(14);
+    blob(cx, cy, h * 0.4, 'rgba(70,38,26,0.55)', 0.3);
+    blob(cx + 6, cy - 4, h * 0.33, 'rgba(120,80,60,0.45)', 0.3);
+    c.strokeStyle = 'rgba(50,22,14,0.6)';
+    c.lineWidth = 3;
+    c.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const a = (i / 40) * 6.2832, rr = h * (0.36 + 0.05 * Math.sin(a * 4) + Math.random() * 0.012);
+      c[i ? 'lineTo' : 'moveTo'](cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    c.stroke();
+    for (let i = 0; i < 40; i++) {
+      c.fillStyle = 'rgba(255,255,255,0.5)';
+      c.fillRect(cx + (Math.random() - 0.5) * h * 0.6, cy + (Math.random() - 0.5) * h * 0.6, 1 + Math.random() * 3, 1 + Math.random() * 2);
+    }
+  });
+  // 15: a hand, slid down the wall
+  clip(15, () => {
+    const [cx, cy] = cellAt(15);
+    const top = cy - h * 0.34;
+    blob(cx, top + h * 0.2, h * 0.09, red(0.85, 0.8), 0.2);
+    for (let f = 0; f < 4; f++) {
+      const fx = cx - h * 0.075 + f * h * 0.05;
+      const fy = top + h * (f === 0 || f === 3 ? 0.04 : 0.0);
+      c.strokeStyle = red(0.8, 0.8);
+      c.lineCap = 'round';
+      c.lineWidth = h * 0.032;
+      c.beginPath();
+      c.moveTo(fx, fy);
+      c.lineTo(fx, top + h * 0.17);
+      c.stroke();
+    }
+    c.lineWidth = h * 0.03;
+    c.beginPath();
+    c.moveTo(cx + h * 0.11, top + h * 0.22);
+    c.lineTo(cx + h * 0.16, top + h * 0.15);
+    c.stroke();
+    // the slide: the print smeared down into streaks
+    for (let f = 0; f < 5; f++) {
+      const fx = cx - h * 0.08 + f * h * 0.042;
+      c.strokeStyle = red(0.22 + Math.random() * 0.2, 0.8);
+      c.lineWidth = h * (0.02 + Math.random() * 0.02);
+      c.beginPath();
+      c.moveTo(fx, top + h * 0.25);
+      c.lineTo(fx + (Math.random() - 0.5) * 6, top + h * (0.5 + Math.random() * 0.2));
+      c.stroke();
+    }
+    for (let i = 0; i < 3; i++) drip(cx - h * 0.06 + Math.random() * h * 0.12, top + h * 0.28, h * (0.2 + Math.random() * 0.2), 2, red(0.7, 0.85));
   });
 }
 
@@ -631,20 +812,54 @@ export class Fx {
     }
   }
 
-  decal(x: number, y: number, z: number, nx: number, ny: number, nz: number, cell: number, size: number) {
+  /** spin: 'down' turns the mark so whatever runs in it runs down the wall; otherwise random */
+  decal(x: number, y: number, z: number, nx: number, ny: number, nz: number, cell: number, size: number, spin?: 'down' | number) {
     const i = this.dI;
     this.dI = (this.dI + 1) % this.DM;
     this.decals.count = Math.max(this.decals.count, i + 1);
     this.v.set(nx, ny, nz).normalize();
     this.q.setFromUnitVectors(this.z, this.v);
-    this.q.multiply(new THREE.Quaternion().setFromAxisAngle(this.z, Math.random() * 6.28));
+    let ang = typeof spin === 'number' ? spin : Math.random() * 6.28;
+    if (spin === 'down' && Math.abs(this.v.y) < 0.9) {
+      // where the texture's down lands now, and where down is on this face
+      const a = new THREE.Vector3(0, -1, 0).applyQuaternion(this.q);
+      const b = new THREE.Vector3(this.v.x * this.v.y, -1 + this.v.y * this.v.y, this.v.z * this.v.y).normalize();
+      ang = Math.atan2(this.v.dot(new THREE.Vector3().crossVectors(a, b)), a.dot(b)) + (Math.random() - 0.5) * 0.25;
+    }
+    this.q.multiply(new THREE.Quaternion().setFromAxisAngle(this.z, ang));
     this.m.compose(this.s.set(x + nx * 0.006, y + ny * 0.006, z + nz * 0.006), this.q, new THREE.Vector3(size, size, size));
     this.decals.setMatrixAt(i, this.m);
     this.decals.instanceMatrix.needsUpdate = true;
     const a = this.decals.geometry.getAttribute('aCell') as THREE.InstancedBufferAttribute;
     a.setX(i, cell);
     a.needsUpdate = true;
+    return i;
   }
+
+  /** a mark that spreads: grows to size over secs */
+  private grow: { i: number; x: number; y: number; z: number; q: THREE.Quaternion; s: number; to: number; k: number; secs: number }[] = [];
+  private spread(x: number, y: number, z: number, cell: number, from: number, to: number, secs: number) {
+    const i = this.decal(x, y, z, 0, 1, 0, cell, from);
+    this.decals.getMatrixAt(i, this.m);
+    const q = new THREE.Quaternion();
+    this.m.decompose(this.v, q, this.s);
+    this.grow = this.grow.filter((g) => g.i !== i);
+    this.grow.push({ i, x: this.v.x, y: this.v.y, z: this.v.z, q, s: from, to, k: 0, secs });
+  }
+
+  /** blood in flight: each drop lands where it lands and leaves its mark */
+  private drops: { x: number; y: number; z: number; vx: number; vy: number; vz: number; floor: number; life: number; s: number }[] = [];
+  private fling(x: number, y: number, z: number, vx: number, vy: number, vz: number, s: number) {
+    if (this.drops.length > 120) return;
+    this.drops.push({ x, y, z, vx, vy, vz, floor: this.groundAt(x, y + 0.05, z), life: 2.5, s });
+  }
+
+  /** where something of yours sees the world from: blood on the lens */
+  lensHit: (k: number) => void = () => {};
+  /** the camera, for the lens */
+  private eye = new THREE.Vector3();
+  /** what's behind a wound: casts for the wall the round carries it to */
+  rayAt: (x: number, y: number, z: number, dx: number, dy: number, dz: number, far: number) => { t: number; nx: number; ny: number; nz: number } | null = () => null;
 
   /** a mark that belongs to something that moves */
   holeMesh(surf: string): THREE.Mesh {
@@ -662,17 +877,68 @@ export class Fx {
     return mesh;
   }
 
-  blood(x: number, y: number, z: number, dx: number, dy: number, dz: number, wall?: { x: number; y: number; z: number; nx: number; ny: number; nz: number }) {
-    for (let i = 0; i < 14; i++) {
-      const sp = 1 + Math.random() * 3.6;
-      this.soft.emit(x, y, z, dx * sp + rnd(0.9), dy * sp + rnd(0.9) + 0.4, dz * sp + rnd(0.9), 0.03 + Math.random() * 0.05, 0.16, 0.22 + Math.random() * 0.3, 0.2, 0.012, 0.012, 0.7, 7, 1.5);
+  /** a round through someone: k is how much (a kill is more), d the way it was going */
+  blood(x: number, y: number, z: number, dx: number, dy: number, dz: number, wall?: { x: number; y: number; z: number; nx: number; ny: number; nz: number }, k = 1) {
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    dx /= dl; dy /= dl; dz /= dl;
+    // the mist that hangs a moment where the round came out
+    for (let i = 0; i < 16 * k; i++) {
+      const sp = 0.6 + Math.random() * 3.2;
+      this.soft.emit(x + dx * 0.08, y + dy * 0.08, z + dz * 0.08, dx * sp + rnd(0.8), dy * sp + rnd(0.8) + 0.25, dz * sp + rnd(0.8), 0.035 + Math.random() * 0.06, 0.55, 0.25 + Math.random() * 0.4, 0.17, 0.008, 0.01, 0.62, 1.2, 3.2);
     }
-    if (wall) this.decal(wall.x, wall.y, wall.z, wall.nx, wall.ny, wall.nz, 4, 0.5 + Math.random() * 0.5);
+    // the thick of it, a little way back the way it came
+    for (let i = 0; i < 6 * k; i++) {
+      const sp = 0.5 + Math.random() * 1.4;
+      this.soft.emit(x, y, z, -dx * sp + rnd(0.5), rnd(0.4) + 0.3, -dz * sp + rnd(0.5), 0.02 + Math.random() * 0.03, 0.2, 0.2 + Math.random() * 0.25, 0.14, 0.006, 0.008, 0.85, 6, 1.2);
+    }
+    // drops thrown on ahead: they fall and land
+    for (let i = 0; i < 10 * k; i++) {
+      const sp = 1.5 + Math.random() * 4.5;
+      this.fling(x, y, z, dx * sp + rnd(1.2), dy * sp + rnd(0.8) + Math.random() * 1.2, dz * sp + rnd(1.2), 0.035 + Math.random() * 0.06);
+    }
+    // the spray reaches whatever is behind them
+    const w = wall ?? (() => {
+      const h = this.rayAt(x, y, z, dx, dy - 0.06, dz, 2.6);
+      return h ? { x: x + dx * h.t, y: y + (dy - 0.06) * h.t, z: z + dz * h.t, nx: h.nx, ny: h.ny, nz: h.nz, t: h.t } : undefined;
+    })();
+    if (w) {
+      const t = Math.hypot(w.x - x, w.y - y, w.z - z);
+      // close to the wall it's a dense patch, further off a wider, thinner spray
+      const sz = (0.45 + t * 0.28) * (0.8 + Math.random() * 0.4) * (k > 1 ? 1.35 : 1);
+      const wallish = Math.abs(w.ny) < 0.6;
+      this.decal(w.x, w.y, w.z, w.nx, w.ny, w.nz, Math.random() < 0.5 ? 8 : 9, sz, wallish ? 'down' : undefined);
+      if (k > 1 && wallish && Math.random() < 0.5) this.decal(w.x + rnd(0.15), w.y - 0.2, w.z + rnd(0.15), w.nx, w.ny, w.nz, 10, sz * 0.8, 'down');
+    }
+    // close enough to the camera and some of it lands on the lens
+    const ed = Math.hypot(x - this.eye.x, y - this.eye.y, z - this.eye.z);
+    if (ed < 2.6) {
+      const facing = -((x - this.eye.x) * dx + (y - this.eye.y) * dy + (z - this.eye.z) * dz) / (ed || 1);
+      this.lensHit(Math.min(1, (2.6 - ed) / 2) * (0.35 + Math.max(0, facing) * 0.9) * k);
+    }
   }
 
-  /** where someone came to rest */
+  /** where someone came to rest: it spreads out from under them */
   pool(x: number, y: number, z: number) {
-    this.decal(x, y + 0.006, z, 0, 1, 0, 5, 0.9 + Math.random() * 0.5);
+    this.spread(x, y + 0.006, z, 11, 0.15, 1.1 + Math.random() * 0.6, 9 + Math.random() * 5);
+  }
+
+  /** smoke off a hot barrel: thin, slow, rising */
+  wisp(p: THREE.Vector3, k: number) {
+    this.soft.emit(p.x + rnd(0.01), p.y, p.z + rnd(0.01), rnd(0.06), 0.18 + Math.random() * 0.2, rnd(0.06), 0.012, 0.32, 0.9 + Math.random() * 0.9, 0.62, 0.62, 0.64, 0.1 + 0.14 * k, -0.08, 1.6);
+  }
+
+  /** a wound on the move: a few drops on the floor */
+  drip(x: number, y: number, z: number) {
+    const f = this.groundAt(x, y, z);
+    this.decal(x + rnd(0.1), f + 0.004, z + rnd(0.1), 0, 1, 0, 12, 0.12 + Math.random() * 0.12);
+  }
+
+  /** blood that was here before anyone came: old, set in */
+  stain(x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number) {
+    const floor = ny > 0.7;
+    const r = Math.random();
+    if (floor) this.decal(x, y + 0.005, z, nx, ny, nz, r < 0.5 ? 14 : r < 0.8 ? 11 : 13, size);
+    else this.decal(x, y, z, nx, ny, nz, r < 0.35 ? 15 : r < 0.7 ? 10 : r < 0.85 ? 8 : 14, size, 'down');
   }
 
   tracerLine(a: THREE.Vector3, bx: number, by: number, bz: number) {
@@ -751,6 +1017,41 @@ export class Fx {
   }
 
   update(dt: number, time: number, cam: THREE.Camera, indoors: boolean) {
+    this.eye.copy(cam.position);
+    // drops land
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      d.life -= dt;
+      d.vy -= 9.8 * dt;
+      const ox = d.x, oz = d.z;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.z += d.vz * dt;
+      const len = Math.hypot(d.x - ox, d.z - oz);
+      const h = len > 1e-4 ? this.rayAt(ox, d.y, oz, (d.x - ox) / len, 0, (d.z - oz) / len, len + 0.02) : null;
+      if (h && Math.abs(h.ny) < 0.5) {
+        // into a wall: it runs
+        this.decal(ox + (d.x - ox) / len * h.t, d.y, oz + (d.z - oz) / len * h.t, h.nx, h.ny, h.nz, Math.random() < 0.6 ? 12 : 8, d.s * 2.2, 'down');
+        this.drops.splice(i, 1);
+        continue;
+      }
+      if (d.y <= d.floor || d.life <= 0) {
+        if (d.life > 0) this.decal(d.x, d.floor + 0.004, d.z, 0, 1, 0, 12, d.s * (1.6 + Math.random() * 1.6) + Math.hypot(d.vx, d.vz) * 0.015);
+        this.drops.splice(i, 1);
+      }
+    }
+    if (this.grow.length) {
+      for (let i = this.grow.length - 1; i >= 0; i--) {
+        const g = this.grow[i];
+        g.k = Math.min(1, g.k + dt / g.secs);
+        const e = 1 - (1 - g.k) * (1 - g.k);
+        const s = g.s + (g.to - g.s) * e;
+        this.m.compose(this.v.set(g.x, g.y, g.z), g.q, this.s.set(s, s, s));
+        this.decals.setMatrixAt(g.i, this.m);
+        if (g.k >= 1) this.grow.splice(i, 1);
+      }
+      this.decals.instanceMatrix.needsUpdate = true;
+    }
     this.flashT -= dt;
     if (this.flashT <= 0) for (const f of this.flash) f.visible = false;
     // rain landing round the camera

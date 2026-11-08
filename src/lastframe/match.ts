@@ -37,6 +37,17 @@ export class Match {
   private wraps = new Map<number, number>();
   private bleedTick = 0;
 
+  /** where the map's own lamps leave a pool someone can be seen in: x, y, z, reach */
+  readonly pools: number[][] = [];
+  /** is a body at this spot standing in light (a lamp's pool), not in the dark? */
+  litAt(x: number, y: number, z: number) {
+    for (const [lx, ly, lz, r] of this.pools) {
+      const dx = x - lx, dz = z - lz, dy = y + 1 - ly;
+      if (dx * dx + dz * dz < r * r && dy > -3.2 && dy < 0.6) return true;
+    }
+    return false;
+  }
+
   constructor(
     readonly cfg: MatchConfig,
     readonly world: World,
@@ -49,6 +60,7 @@ export class Match {
     this.nav = nav;
     this.goals = nav.nodes.filter((_, i) => i % 11 === 0);
     this.doorCool = doors.map(() => 0);
+    if (map.night) for (const l of map.lights) if (l.power > 2) this.pools.push([l.pos[0], l.pos[1], l.pos[2], Math.min(7, Math.max(1.6, Math.sqrt(l.power) * 0.9))]);
   }
 
   addHuman(id: string, name: string, team: number, primary: WeaponId): PlayerInfo {
@@ -201,7 +213,7 @@ export class Match {
     if (live && this.cfg.mode === 'hold') this.holdUpdate(dt);
   }
 
-  private blast(n: { id: number; s: number; kind: NadeKind; x: number; y: number; z: number }) {
+  private blast(n: { id: number; s: number; kind: NadeKind; x: number; y: number; z: number }, k = 1) {
     this.emit({ t: 'boom', id: n.id, kind: n.kind, p: [n.x, n.y, n.z] });
     this.noise({ x: n.x, y: n.y, z: n.z }, 90);
     // the shock takes out nearby glass and throws doors open, flash or frag
@@ -225,7 +237,7 @@ export class Match {
       const d = Math.hypot(b.x - n.x, b.y + 1 - n.y, b.z - n.z);
       if (d > 9) continue;
       if (!this.world.sees({ x: n.x, y: n.y + 0.15, z: n.z }, { x: b.x, y: b.y + 1, z: b.z })) continue;
-      const dmg = Math.round(170 * Math.max(0, 1 - d / 8) ** 1.4);
+      const dmg = Math.round(170 * k * Math.max(0, 1 - d / 8) ** 1.4);
       if (dmg > 0) this.damage(n.s, p.slot, dmg, ZONE.blast, -1, [b.x - n.x, 0.2, b.z - n.z], d);
     }
   }

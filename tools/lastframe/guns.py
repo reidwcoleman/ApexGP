@@ -130,8 +130,21 @@ def carbine():
     bm.to_mesh(me); bm.free()
     mag = bpy.data.objects.new('mag', me); scene.collection.objects.link(mag)
     mag.data.materials.append(M_POLY)
+    # the floorplate and the ribs moulded down the sides of the body
+    mb = B()
+    ang = math.radians(19); L = 0.205
+    yb = -0.052 + L * math.sin(ang) * -0.95; zb = -0.012 - L * math.cos(ang)
+    mb.box((0, yb, zb - 0.004), (0.027, 0.074, 0.009), M_POLY, 0.002)
+    for k in range(5):
+        tt = 0.25 + k * 0.13
+        a2 = math.radians(4 + 15 * tt); L2 = 0.205 * tt
+        yy = -0.052 + L2 * math.sin(a2) * -0.95; zz = -0.012 - L2 * math.cos(a2)
+        for sx in (-1, 1):
+            mb.box((sx * 0.0118, yy, zz), (0.0014, 0.05, 0.004), M_POLY, 0.0005)
+    mb.parts.insert(0, mag)
     bpy.context.view_layer.objects.active = mag
     d = mag.modifiers.new('b', 'BEVEL'); d.width = 0.0016; d.segments = 2; d.limit_method = 'ANGLE'; d.angle_limit = math.radians(35)
+    mag = mb.join('mag')
     # trigger guard, trigger, grip
     b.box((0, -0.002, -0.05), (0.012, 0.075, 0.0035), M_METAL, 0.0008)
     b.box((0, -0.008, -0.02), (0.006, 0.006, 0.03), M_STEEL, 0.0008)
@@ -161,23 +174,69 @@ def carbine():
     return o, mag, l
 
 # ---------------------------------------------------------------- pump gun
+def pin(b, x0, x1, y, z, r, mat=None):
+    """a cross pin: a short cylinder along x"""
+    bpy.ops.mesh.primitive_cylinder_add(vertices=14, radius=r, depth=abs(x1 - x0), location=((x0 + x1) / 2, y, z), rotation=(0, math.pi / 2, 0))
+    o = bpy.context.active_object
+    bpy.ops.object.transform_apply(rotation=True)
+    return b.add(o, mat or M_STEEL)
+
 def shotgun():
     b = B()
-    b.poly([(0.09, 0.026), (0.09, 0.05), (-0.135, 0.05), (-0.135, -0.012), (0.04, -0.012), (0.09, 0.026)], 0.027, mat=M_METAL, bevel=0.002)
-    b.cyl(-0.135, -0.68, 0.0115, z=0.036, mat=M_STEEL)
-    b.cyl(-0.135, -0.59, 0.0125, z=0.008, mat=M_METAL)
-    b.cyl(-0.59, -0.6, 0.014, z=0.008, mat=M_STEEL, n=14)
-    b.box((0, -0.455, 0.022), (0.009, 0.012, 0.024), M_METAL, 0.0008)
-    b.box((0, -0.672, 0.05), (0.0035, 0.008, 0.008), M_STEEL, 0.0006)
-    b.box((0, -0.008, -0.03), (0.012, 0.075, 0.0035), M_METAL, 0.0008)
-    b.box((0, -0.008, -0.006), (0.006, 0.006, 0.03), M_STEEL, 0.0008)
-    # pistol-grip stock in one
-    b.poly([(0.09, 0.05), (0.13, 0.042), (0.4, 0.03), (0.4, -0.1), (0.37, -0.11), (0.2, -0.05), (0.15, -0.05), (0.13, -0.12), (0.082, -0.125), (0.075, -0.012)], 0.036, mat=M_POLY, bevel=0.005)
+    W = 0.0275
+    # the receiver: a milled block, the top rounded off, the front squared to take the barrel
+    b.poly([(0.09, 0.02), (0.087, 0.036), (0.078, 0.046), (0.062, 0.0505), (-0.128, 0.0505), (-0.135, 0.046), (-0.135, -0.008), (-0.13, -0.012),
+            (0.035, -0.012), (0.058, -0.002), (0.09, 0.02)], W, mat=M_METAL, bevel=0.0028)
+    # ejection port on the right, the bolt face showing in it
+    b.box((-W / 2 - 0.0004, -0.056, 0.027), (0.0016, 0.068, 0.026), M_LENS, 0.0006)
+    b.box((-W / 2 + 0.0012, -0.05, 0.027), (0.0016, 0.05, 0.016), M_STEEL, 0.0008)
+    # loading port underneath and the shell lifter in it
+    b.box((0, -0.06, -0.0128), (0.021, 0.084, 0.0016), M_LENS, 0.0004)
+    b.box((0, -0.058, -0.0112), (0.016, 0.07, 0.0016), M_STEEL, 0.0006)
+    # pins through the receiver, a cross-bolt safety behind the trigger
+    for (y, z) in ((-0.02, -0.004), (0.028, -0.004)):
+        pin(b, -W / 2 - 0.0006, W / 2 + 0.0006, y, z, 0.0022)
+    pin(b, -0.016, 0.016, 0.044, -0.004, 0.0031)
+    # the rail of grooves along the top the eye runs down
+    for k in range(22):
+        b.box((0, 0.05 - k * 0.0082, 0.0512), (0.008, 0.0012, 0.0012), M_STEEL, 0)
+    # barrel with its rib and bead
+    b.cyl(-0.135, -0.68, 0.0115, z=0.036, mat=M_STEEL, n=24)
+    b.cyl(-0.135, -0.16, 0.0135, z=0.036, mat=M_STEEL, n=24)
+    b.box((0, -0.41, 0.036 + 0.0128), (0.0062, 0.53, 0.0026), M_METAL, 0.0004)
+    for k in range(40):
+        b.box((0, -0.15 - k * 0.0131, 0.036 + 0.0142), (0.0062, 0.0014, 0.0008), M_STEEL, 0)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=8, radius=0.0024, location=(0, -0.672, 0.036 + 0.0158))
+    b.add(bpy.context.active_object, M_STEEL)
+    b.cyl(-0.665, -0.68, 0.0122, z=0.036, mat=M_STEEL, n=24)
+    # magazine tube under it, the barrel ring, the cap with its knurling
+    b.cyl(-0.135, -0.59, 0.0125, z=0.008, mat=M_METAL, n=22)
+    b.box((0, -0.583, 0.022), (0.014, 0.022, 0.034), M_METAL, 0.0016)
+    b.cyl(-0.59, -0.618, 0.0141, z=0.008, mat=M_STEEL, n=22)
+    for k in range(6):
+        b.cyl(-0.593 - k * 0.0042, -0.5948 - k * 0.0042, 0.0146, z=0.008, mat=M_STEEL, n=22, bevel=0)
+    b.cyl(-0.618, -0.622, 0.0105, z=0.008, mat=M_STEEL, n=16)
+    # action bars running back from the pump into the receiver
+    for sx in (-1, 1):
+        b.box((sx * 0.0118, -0.215, 0.0055), (0.0018, 0.16, 0.0062), M_STEEL, 0.0004)
+    # trigger guard as a loop, the trigger inside it
+    b.poly([(0.06, -0.012), (0.066, -0.03), (0.05, -0.042), (-0.02, -0.042), (-0.032, -0.03), (-0.03, -0.012), (-0.024, -0.012), (-0.025, -0.028),
+            (-0.017, -0.036), (0.046, -0.036), (0.058, -0.028), (0.053, -0.012)], 0.011, mat=M_METAL, bevel=0.0008)
+    b.poly([(0.008, -0.012), (0.012, -0.022), (0.009, -0.033), (0.003, -0.033), (0.005, -0.022), (0.002, -0.012)], 0.006, mat=M_STEEL, bevel=0.0006)
+    # stock: pistol grip and butt in one piece of polymer, a rubber pad on the end, a sling stud
+    b.poly([(0.09, 0.05), (0.13, 0.043), (0.39, 0.03), (0.39, -0.1), (0.36, -0.11), (0.2, -0.052), (0.15, -0.052), (0.14, -0.078), (0.13, -0.122),
+            (0.1, -0.128), (0.08, -0.124), (0.072, -0.06), (0.075, -0.012)], 0.037, mat=M_POLY, bevel=0.006)
+    for k in range(9):
+        b.box((0, 0.084 + k * 0.0036 * 1.2 + k * 0.0016, -0.08 + k * 0.0014), (0.0385, 0.0014, 0.06), M_POLY, 0.0004)
+    b.poly([(0.39, 0.03), (0.415, 0.031), (0.418, -0.1), (0.39, -0.1)], 0.039, mat=M_LENS, bevel=0.004)
+    pin(b, -0.004, 0.004, 0.3, -0.083, 0.004)
     o = b.join('shotgun')
     p = B()
-    for k in range(9):
-        p.cyl(-0.3 - k * 0.0135, -0.3 - k * 0.0135 - 0.0095, 0.0245, z=0.012, mat=M_POLY, n=18, bevel=0.0015)
-    p.cyl(-0.29, -0.42, 0.0215, z=0.012, mat=M_POLY, n=18)
+    # the fore-end: grooved polymer on a steel sleeve
+    for k in range(11):
+        p.cyl(-0.29 - k * 0.0125, -0.29 - k * 0.0125 - 0.0088, 0.0248, z=0.012, mat=M_POLY, n=22, bevel=0.0016)
+    p.cyl(-0.285, -0.43, 0.0222, z=0.012, mat=M_POLY, n=22)
+    p.cyl(-0.28, -0.29, 0.0205, z=0.012, mat=M_STEEL, n=22)
     pump = p.join('shotgun_pump')
     return o, pump
 

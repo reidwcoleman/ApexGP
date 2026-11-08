@@ -7,7 +7,7 @@ fs.mkdirSync(out, { recursive: true });
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--autoplay-policy=no-user-gesture-required'] });
 const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 p.on('pageerror', (e) => console.log('pageerror', e.message, (e.stack ?? '').slice(0, 300)));
-await p.goto(`http://localhost:${port}/lastframe.html?dev=1`);
+await p.goto(`http://localhost:${port}/lastframe.html?dev=1&map=block`);
 await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
 await p.evaluate(() => { const g = __lf.g; g.startSolo({ mode: 'tdm', bots: 0, skill: 0.5, time: 8, limit: 40, seed: 3 }, 'Tester', 0, 'carbine'); g.match.bots.clear(); });
 await p.waitForTimeout(1300);

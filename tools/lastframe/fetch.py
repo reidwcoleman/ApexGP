@@ -38,6 +38,10 @@ seaside_rock lichen_rock rock_wall_10 worn_asphalt clean_pebbles blue_painted_pl
 MODELS += '''wooden_bucket_01 planter_pot_clay wooden_ladder_02 stone_01 dandelion_01 shrub_sorrel_01 flower_gazania wooden_lantern_01 fishermans_hat'''.split()
 HDRI += ['kloofendal_48d_partly_cloudy_puresky']
 
+
+# the ward
+TEX += '''square_tiled_wall long_white_tiles peeling_painted_wall old_linoleum_flooring_01 worn_tile_floor dirty_concrete'''.split()
+
 def get(url, path):
     if os.path.exists(path) and os.path.getsize(path) > 0: return
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -52,7 +56,8 @@ def files(a):
 HERO = '''asphalt_02 clean_asphalt concrete_pavement_02 factory_brick dark_brick_wall brick_wall_001 gravel_concrete hangar_concrete_floor
 concrete_floor_worn_001 blue_plaster_weathered decrepit_wallpaper damaged_plaster grey_plaster corrugated_iron_02 concrete_wall_008
 cliff_side coast_land_rocks_01 coast_sand_rocks_02 damp_beach_sand leafy_grass grey_roof_tiles clay_plaster castle_wall_slates cobblestone_floor_04
-white_plaster_rough_01 roof_slates_02 roof_slates_03 stacked_stone_wall seaside_rock worn_asphalt clean_pebbles'''.split()
+white_plaster_rough_01 roof_slates_02 roof_slates_03 stacked_stone_wall seaside_rock worn_asphalt clean_pebbles
+square_tiled_wall long_white_tiles peeling_painted_wall old_linoleum_flooring_01 worn_tile_floor'''.split()
 
 def tex(a):
     d = files(a)
