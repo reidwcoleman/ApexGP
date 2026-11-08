@@ -30,7 +30,7 @@ MATS = {
     'asphalt': M('asphalt_02', 4.2, (0.8, 0.8, 0.82), wet=1.0),
     'sidewalk': M('concrete_pavement_02', 3.0, (0.8, 0.8, 0.8), wet=0.8),
     'curb': M('concrete_wall_008', 2.0, (0.75, 0.75, 0.73), wet=0.6),
-    'yard': M('gravel_concrete', 3.6, (0.72, 0.72, 0.7), wet=0.8),
+    'yard': M('gravel_concrete', 3.6, (0.33, 0.33, 0.32), wet=0.8),
     'alley': M('clean_asphalt', 3.8, (0.75, 0.75, 0.76), wet=1.0),
     'slab': M('concrete_wall_006', 3.0),
     'roof': M('clean_asphalt', 3.0),
