@@ -73,8 +73,8 @@ export class BattleView {
     // used only by metal-bearing materials (soldiers, standards); the ground keeps its painted light
     pm.dispose();
     this.scene.fog = new THREE.FogExp2(this.B.fog, this.sim.terrain.geo ? 0.00042 : 0.0011);
-    const hemi = new THREE.HemisphereLight('#d5e3f5', '#6b5e40', 1.15);
-    const sun = new THREE.DirectionalLight('#fff0d6', 3.0);
+    const hemi = new THREE.HemisphereLight('#cfdcf0', '#5a4e36', 0.8);
+    const sun = new THREE.DirectionalLight('#fff0d6', 3.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(high() ? 4096 : 2048, high() ? 4096 : 2048);
     sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.04;
@@ -115,7 +115,7 @@ export class BattleView {
       sh.uniforms.uDecal = this.decalU;
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vW;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-varying vec3 vW; uniform vec3 uDirt; uniform sampler2D uDecal;
+varying vec3 vW; uniform vec3 uDirt; uniform sampler2D uDecal; vec3 vBump;
 float h2(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }`)
         .replace('#include <color_fragment>', `#include <color_fragment>
@@ -125,11 +125,16 @@ float dry = smoothstep(0.45, 0.75, vn(vW.xz * 0.006 + 11.0));
 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.05, 0.72), dry * 0.6);
 float dp = smoothstep(0.62, 0.8, vn(vW.xz * 0.018 + 3.7));
 diffuseColor.rgb = mix(diffuseColor.rgb, uDirt * (0.85 + 0.3 * n), dp * 0.55);
+float e = 0.35;
+float bx = vn((vW.xz + vec2(e, 0.0)) * 0.45) - vn((vW.xz - vec2(e, 0.0)) * 0.45) + 0.5 * (vn((vW.xz + vec2(e, 0.0)) * 1.9) - vn((vW.xz - vec2(e, 0.0)) * 1.9));
+float bz = vn((vW.xz + vec2(0.0, e)) * 0.45) - vn((vW.xz - vec2(0.0, e)) * 0.45) + 0.5 * (vn((vW.xz + vec2(0.0, e)) * 1.9) - vn((vW.xz - vec2(0.0, e)) * 1.9));
+vBump = vec3(-bx, 0.0, -bz) * 0.9;
 vec2 duv = (vW.xz + ${(FIELD + 60).toFixed(1)}) / ${(2 * (FIELD + 60)).toFixed(1)};
 if (duv.x > 0.0 && duv.x < 1.0 && duv.y > 0.0 && duv.y < 1.0) {
   vec4 dc = texture2D(uDecal, vec2(duv.x, 1.0 - duv.y));
   diffuseColor.rgb = mix(diffuseColor.rgb, dc.rgb, dc.a * (0.75 + 0.25 * n));
 }`);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(vBump, 0.0)).xyz * smoothstep(400.0, 40.0, length(vViewPosition)));');
     };
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
@@ -182,6 +187,50 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
     }
     im.receiveShadow = true;
     this.scene.add(im);
+    this.buildNearGrass(blade);
+  }
+
+  // a dense meadow that travels with the camera: a 90 m tile of tufts anchored to world
+  // positions (they never swim), heights read from the terrain on the GPU, faded at the edge
+  buildNearGrass(blade) {
+    const T = this.sim.terrain;
+    if (T.biome === 'desert') return;
+    const n = high() ? 60000 : 24000, TILE = 90;
+    const g = new THREE.InstancedBufferGeometry();
+    g.index = blade.index; for (const k in blade.attributes) g.setAttribute(k, blade.attributes[k]);
+    const off = new Float32Array(n * 4), rng = mulberry32(this.sim.cfg.seed + 29);
+    for (let i = 0; i < n; i++) { off[i * 4] = (rng() - 0.5) * TILE; off[i * 4 + 1] = (rng() - 0.5) * TILE; off[i * 4 + 2] = rng() * 6.28; off[i * 4 + 3] = 0.4 + rng() * 0.5; }
+    g.setAttribute('aOff', new THREE.InstancedBufferAttribute(off, 4));
+    g.instanceCount = n;
+    const ht = new THREE.DataTexture(T.h, T.N, T.N, THREE.RedFormat, THREE.FloatType); ht.needsUpdate = true;
+    this.grassU = { uCenter: { value: new THREE.Vector2() }, uH: { value: ht } };
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+    const sea = T.sea ? T.sea.level + 0.6 : -1e9;
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uWind = this.windU; sh.uniforms.uCenter = this.grassU.uCenter; sh.uniforms.uH = this.grassU.uH;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
+uniform float uWind; uniform vec2 uCenter; uniform sampler2D uH; attribute vec4 aOff; varying float vTint;
+float hAt(vec2 w) {
+  vec2 f = clamp((w + ${TERRAIN.toFixed(1)}) / ${T.step.toFixed(4)}, vec2(0.0), vec2(${(T.N - 1.001).toFixed(3)}));
+  ivec2 i = ivec2(f); vec2 t = f - vec2(i);
+  float a = texelFetch(uH, i, 0).r, b = texelFetch(uH, i + ivec2(1, 0), 0).r, c = texelFetch(uH, i + ivec2(0, 1), 0).r, d = texelFetch(uH, i + ivec2(1, 1), 0).r;
+  return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}`).replace('#include <begin_vertex>', `
+vec2 wxz = uCenter + mod(aOff.xy - uCenter + ${TILE / 2}.0, ${TILE}.0) - ${TILE / 2}.0;
+float dc = length(wxz - uCenter);
+float h = hAt(wxz);
+float sc = aOff.w * smoothstep(${TILE / 2}.0, ${TILE / 2 - 14}.0, dc) * step(${sea.toFixed(2)}, h);
+float cr = cos(aOff.z), sr = sin(aOff.z);
+vec3 transformed = vec3(cr * position.x - sr * position.z, position.y * (0.6 + 0.45 * fract(aOff.z * 7.3)), sr * position.x + cr * position.z) * sc;
+float wv = sin(uWind * 1.7 + wxz.x * 0.08 + wxz.y * 0.05) * 0.2 + sin(uWind * 3.3 + wxz.x * 0.4 + wxz.y * 0.2) * 0.07;
+transformed.x += wv * transformed.y; transformed.z += wv * 0.6 * transformed.y;
+transformed += vec3(wxz.x, h - 0.02, wxz.y);
+vTint = fract(sin(dot(floor(wxz * 0.35), vec2(12.9, 78.2))) * 437.5);`);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vTint;').replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix(vec3(0.82, 0.9, 0.78), vec3(1.12, 1.06, 0.82), vTint);');
+    };
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.frustumCulled = false; mesh.receiveShadow = true;
+    this.scene.add(mesh);
   }
 
   buildTrees() {
@@ -298,7 +347,7 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
       byType.get(t).push(i);
     }
     const { mat, depth } = soldierMaterial();
-    mat.envMap = this.envRT.texture; mat.envMapIntensity = 0.35;
+    mat.envMap = this.envRT.texture; mat.envMapIntensity = 0.28;
     this.soldierMat = mat;
     this.meshes = [];
     this.sIdx = new Int32Array(sim.N); this.sMesh = new Int16Array(sim.N);
@@ -935,6 +984,7 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
   render(dt, selected, hovered) {
     this.time += dt;
     if (this.waterU) this.waterU.value = this.time;
+    if (this.grassU) this.grassU.uCenter.value.set(this.cam.x, this.cam.z);
     this.windU.value = this.time;
     this.updateCamera(dt);
     this.updateSoldiers();
