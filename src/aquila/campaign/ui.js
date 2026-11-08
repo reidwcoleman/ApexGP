@@ -9,6 +9,8 @@ import {
 import { aiTurn } from './ai.js';
 import { TIERS, RESOURCES, tierOf, resourceOf, orderLabel, goodsOf, growthRate } from './city.js';
 import { CityScreen } from './cityscreen.js';
+import { battleGeo } from '../map/geo.js';
+import { Tutorial } from './tutorial.js';
 import { CampaignView } from './view.js';
 import { ICONS, unitIcon, unitArt, BLD_ICON, RES_ICON } from '../ui/icons.js';
 import { audio } from '../audio.js';
@@ -39,6 +41,8 @@ export class CampaignController {
     this.view.focus(rome.x, rome.z, 7);
     this.refresh();
     audio.setMode('campaign');
+    if (!this.s.tut && this.s.turn > 1) this.s.tut = { step: 99, off: true }; // older saves skip the tutorial
+    this.tut = new Tutorial(this);
   }
 
   // ---------------------------------------------------------------- HUD
@@ -300,7 +304,7 @@ export class CampaignController {
         <div class="p-sec"><div class="stats"><div><small>Men</small><b>${fmt(men)}</b></div><div><small>Units</small><b>${a.units.length}/${MAX_UNITS + 1}</b></div><div><small>Strength</small><b>${fmt(armyPower(a) / 100)}</b></div><div><small>March</small><b>${mine ? a.mp : '—'}</b></div></div></div>
         <div class="p-sec"><h4>Units <span>${mine ? 'hover a unit to disband it' : ''}</span></h4>${this.chips(a.units, a.owner, mine)}</div>`;
       if (mine) {
-        body += `<div class="p-sec">${a.mp > 0 ? '<div class="hint">Right-click a province to march. Glowing red provinces can be attacked.</div>' : '<div class="hint">This army has marched this year.</div>'}
+        body += `<div class="p-sec">${a.mp > 0 ? `<div class="hint"><b style="color:var(--gold2)">Click a glowing province to march.</b> Gold = march there · red = attack. ${a.mp} march${a.mp > 1 ? 'es' : ''} left this year.</div>` : '<div class="hint">This legion has marched this year. It can move again after you end the turn.</div>'}
           <div class="p-actions" style="margin-top:8px">${others.length ? '<button class="btn small" data-p="merge">Merge armies here</button>' : ''}<button class="btn small ghost" data-p="province">View ${w.provinces[a.prov].name}</button></div></div>`;
       }
       html = this.panelFor(body, FACTIONS[a.owner].color, ICONS.eagle, mine ? 'Legio ' + roman(a.id) : `${FACTIONS[a.owner].adj} Army`, `${FACTIONS[a.owner].name} · ${w.provinces[a.prov].name}`);
@@ -492,8 +496,8 @@ export class CampaignController {
         const a = this.s.armies.find((q) => q.id === this.sel.id);
         const mine = armyPower(a), theirs = defencePower(this.s, pid);
         const odds = mine / (mine + theirs);
-        this.showTip(x, y, `<b>${r.kind === 'war' ? 'Declare war and attack' : 'Attack'} ${p.name}</b><div class="tt">${FACTIONS[pr.owner].name} · odds ${odds > 0.65 ? 'favourable' : odds > 0.45 ? 'even' : 'poor'} (${Math.round(odds * 100)}%)</div>`);
-      } else this.showTip(x, y, `<b>March to ${p.name}</b>`);
+        this.showTip(x, y, `<b>${r.kind === 'war' ? 'Declare war and attack' : 'Attack'} ${p.name}</b><div class="tt">${FACTIONS[pr.owner].name} · odds ${odds > 0.65 ? 'favourable' : odds > 0.45 ? 'even' : 'poor'} (${Math.round(odds * 100)}%)</div><div class="tt">Click to attack</div>`);
+      } else this.showTip(x, y, `<b>March to ${p.name}</b><div class="tt">Click to march</div>`);
       return;
     }
     if (this.reach) this.view.showPath(null);
@@ -505,6 +509,13 @@ export class CampaignController {
 
   clickAt(x, y) {
     if (this.busy) return;
+    // with one of our legions selected, clicking a glowing province marches (or attacks) there
+    if (this.sel && this.sel.kind === 'army' && this.reach) {
+      const a = this.s.armies.find((q) => q.id === this.sel.id);
+      const hit = this.view.armyAt(x, y);
+      const pid = hit && hit.owner !== this.s.player ? hit.prov : this.view.provinceAt(this.view.rayGround(x, y));
+      if (a && a.owner === this.s.player && this.reach.has(pid) && !(hit && hit.owner === this.s.player)) { this.rightClick(x, y, pid); return; }
+    }
     const army = this.view.armyAt(x, y);
     if (army) { audio.sfx('click'); this.select({ kind: 'army', id: army.id }); return; }
     const pid = this.view.provinceAt(this.view.rayGround(x, y));
@@ -515,11 +526,11 @@ export class CampaignController {
     } else this.select(null);
   }
 
-  async rightClick(x, y) {
+  async rightClick(x, y, forced) {
     if (this.busy || !this.sel || this.sel.kind !== 'army' || !this.reach) return;
     const a = this.s.armies.find((q) => q.id === this.sel.id);
     if (!a || a.owner !== this.s.player) return;
-    const pid = this.view.provinceAt(this.view.rayGround(x, y));
+    const pid = forced ?? this.view.provinceAt(this.view.rayGround(x, y));
     const r = this.reach.get(pid);
     if (!r) return;
     this.hideTip();
@@ -565,7 +576,7 @@ export class CampaignController {
           { owner: army.owner, culture: FACTIONS[army.owner].culture, name: FACTIONS[army.owner].name, color: FACTIONS[army.owner].color, player: army.owner === s.player, units: army.units.map((u) => ({ ...u })), gen: army.gen },
           { owner: sides.defender.owner, culture: FACTIONS[sides.defender.owner].culture, name: FACTIONS[sides.defender.owner].name, color: FACTIONS[sides.defender.owner].color, player: sides.defender.owner === s.player, units: field.map((u) => ({ ...u })), gen: sides.defender.armies[0]?.gen ?? { name: `Garrison of ${p.name}`, stars: 0 } },
         ],
-        biome: p.biome, seed: (s.turn * 7919 + prov * 104729) % 100000, attacker: 0, walls: sides.defender.walls, town: { style },
+        biome: p.biome, seed: (s.turn * 7919 + prov * 104729) % 100000, attacker: 0, walls: sides.defender.walls, town: { style }, geo: battleGeo(w, prov),
       };
       this.disabled = true;
       this.root.style.display = 'none';
@@ -729,24 +740,25 @@ export class CampaignController {
       <div class="help-grid">
         <h3>The Campaign</h3>
         <div><b>Select</b> — left-click a province or army. Drag to pan, wheel to zoom.</div>
-        <div><b>March</b> — with an army selected, right-click a highlighted province. Armies march 2 provinces a year; sea crossings take the whole year.</div>
-        <div><b>Attack</b> — red glowing provinces can be assaulted. Choose to fight the battle yourself or auto-resolve.</div>
+        <div><b>March</b> — select a legion, then click a gold glowing province. Legions march 2 provinces a year; sea crossings take the whole year (1 march with a Port).</div>
+        <div><b>Attack</b> — click a red glowing province. Fight the battle yourself or auto-resolve.</div>
         <div><b>Cities</b> — double-click a city (or Manage City) to enter it. Build, upgrade, set taxes and hold games. Cities grow from Village to Metropolis, opening more slots and grander buildings.</div>
         <div><b>Trade goods</b> — every province has one. Each different good you hold adds 3% to all tax; metals need a Mine, luxuries sell through the Forum and Port.</div>
         <div><b>Order</b> — newly conquered and foreign provinces are restless. Garrison an army there or build temples, or they may revolt.</div>
         <div><b>Rank</b> — more provinces raise your title and unlock Legionaries (Testudo) and the Praetorians.</div>
         <div><b>Win</b> — hold ${VICTORY_PROVINCES} provinces or destroy every rival power.</div>
         <div><b>Keys</b> — Enter ends the turn · Tab cycles armies · Esc deselects.</div>
+        <div><b>Tutorial</b> — <button class="btn small" data-c="tutorial">Replay the tutorial</button></div>
         <h3>Battles</h3>
-        <div><b>Select</b> — click units or their cards, drag a box, Ctrl+A for all, 1–9 hotkeys.</div>
-        <div><b>Move</b> — right-click ground. Right-drag to draw a battle line: its length sets the frontage.</div>
-        <div><b>Attack</b> — right-click an enemy unit. Double-click to charge at the run.</div>
+        <div><b>Select</b> — click units or their cards, drag a box, Ctrl+A for all, 1–9 hotkeys. Esc deselects.</div>
+        <div><b>Move</b> — with troops selected, click the ground (or right-click). Right-drag draws a battle line: its length sets the frontage.</div>
+        <div><b>Attack</b> — click an enemy unit. Double-click to charge at the run.</div>
         <div><b>Flank</b> — hits from the side and rear land far more often and break morale fast. Cavalry charging into a rear is decisive.</div>
         <div><b>Pila</b> — Roman infantry hurl a volley of pila just before contact.</div>
         <div><b>Testudo / Shield wall</b> — T. Testudo shrugs off arrows; spears in a shield wall stop cavalry cold.</div>
         <div><b>Morale</b> — losses, flanking and a dead general make units waver, then rout. Rally them with your general (G).</div>
         <div><b>Speed</b> — Space pauses; you can give orders while paused.</div>
-      </div><div class="m-actions"><button class="btn gold" data-c="ok">To War</button></div>`, 'wide');
+      </div><div class="m-actions"><button class="btn gold" data-c="ok">To War</button></div>`, 'wide').then((c) => { if (c === 'tutorial') this.tut.restart(); });
   }
 
   async menu() {
@@ -939,6 +951,7 @@ export class CampaignController {
     removeEventListener('keydown', this.onKey);
     removeEventListener('keyup', this.onKey);
     this.root.remove();
+    this.tut?.destroy();
     this.disabled = true;
   }
 }

@@ -72,7 +72,7 @@ export function startBattle({ renderer, uiRoot, labelsRoot, cfg, title }) {
         <button class="sb ${cinematic ? 'on' : ''}" data-act="cine" title="Cinematic slow-motion on big moments">${ICONS.laurel}</button>
       </div>
     </div>
-    <div class="bt-help"><kbd>WASD</kbd> pan <kbd>Q</kbd><kbd>E</kbd> rotate <kbd>wheel</kbd> zoom <kbd>Space</kbd> pause <kbd>R</kbd> run <kbd>H</kbd> halt <kbd>Z X C V</kbd> abilities <kbd>Ctrl+A</kbd> all</div>
+    <div class="bt-help"><b>Click</b> your troops, then <b>click</b> the ground to move or an enemy to attack · <b>double-click</b> to run · <kbd>Esc</kbd> deselect · drag a box to select many · <kbd>WASD</kbd> pan <kbd>Q</kbd><kbd>E</kbd> rotate <kbd>wheel</kbd> zoom <kbd>Space</kbd> pause <kbd>R</kbd> run <kbd>H</kbd> halt <kbd>Z X C V</kbd> abilities <kbd>Ctrl+A</kbd> all</div>
     <div class="bt-box"></div>
     <div class="bt-tip"></div>
     <div class="bt-slow"></div>`;
@@ -404,12 +404,21 @@ export function startBattle({ renderer, uiRoot, labelsRoot, cfg, title }) {
         }
         boxEl.style.display = 'none';
       } else if (e.target === canvas) {
-        const { unit } = view.unitAt(e.clientX, e.clientY);
+        // trackpad-friendly: with troops selected, a left click on an enemy attacks and on open ground moves
+        const { unit, ground } = view.unitAt(e.clientX, e.clientY);
+        const now = performance.now(), dblL = now - (onUp.lastL || 0) < 320; onUp.lastL = now;
+        const us = selUnits();
         if (unit >= 0 && sim.units[unit].side === ps) {
           if (!add) selected.clear();
           if (add && selected.has(unit)) selected.delete(unit); else selected.add(unit);
           audio.sfx('click');
-        } else if (!add) selected.clear();
+        } else if (unit >= 0 && us.length && sim.phase === 'battle') {
+          const T = sim.units[unit];
+          for (const u of us) { sim.orderAttack(u.id, unit, dblL || u.run); view.orderArrow(u.cx, u.cz, T.cx, T.cz, '#ff6a4a'); }
+          audio.sfx('click');
+          const el = plates.get(unit); el.classList.add('targeted'); setTimeout(() => el.classList.remove('targeted'), 800);
+        } else if (ground && us.length && !add) moveSelectedTo(ground.x, ground.z, dblL);
+        else if (!add) selected.clear();
       }
       lDown = null;
       refreshAll();

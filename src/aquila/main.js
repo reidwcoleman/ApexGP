@@ -1,6 +1,6 @@
 import './style.css';
 import { createRenderer } from './engine/renderer.js';
-import { buildWorld } from './map/geo.js';
+import { buildWorld, battleGeo } from './map/geo.js';
 import { CampaignView } from './campaign/view.js';
 import { CampaignController } from './campaign/ui.js';
 import { newGame, migrate } from './campaign/state.js';
@@ -174,7 +174,8 @@ async function quickBattle(foe) {
     units: [{ t: GENERAL_UNIT[FACTIONS[owner].culture], n: UNITS[GENERAL_UNIT[FACTIONS[owner].culture]].men, xp: 1 }, ...types.map((t) => ({ t, n: UNITS[t].men, xp: 0 }))],
     gen: { name: generalName(FACTIONS[owner].culture), stars: 2 },
   });
-  const cfg = { sides: [mkSide('rome', rome, true), mkSide(foe, pick(cul, 10), false)], biome: BIOME_OF[foe] || 'temperate', seed: Math.floor(Math.random() * 99999), attacker: 0, walls: 0 };
+  const capId = world.provinces.findIndex((p) => p.name === FACTIONS[foe].capital);
+  const cfg = { sides: [mkSide('rome', rome, true), mkSide(foe, pick(cul, 10), false)], biome: capId >= 0 ? world.provinces[capId].biome : BIOME_OF[foe] || 'temperate', seed: Math.floor(Math.random() * 99999), attacker: 0, walls: 0, geo: capId >= 0 ? battleGeo(world, capId) : null };
   mapView.labelsEl.style.display = 'none';
   await fight(cfg, `A field battle against ${FACTIONS[foe].name}`);
   showMenu();

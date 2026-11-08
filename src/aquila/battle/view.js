@@ -5,12 +5,12 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { FIELD, TERRAIN, isCav } from './sim.js';
 import { buildModel, soldierMaterial } from './models.js';
 import { createComposer } from '../engine/renderer.js';
-import { mulberry32 } from '../util/noise.js';
+import { mulberry32, noise2 } from '../util/noise.js';
 import { high } from '../engine/quality.js';
 
 const BIOME = {
-  temperate: { g1: '#5b7434', g2: '#7c8a45', dirt: '#806a48', rock: '#7d786e', fog: '#c3cfd4', grass: ['#4a6428', '#9aa654'], trees: 'oak', sun: 32 },
-  med: { g1: '#76833f', g2: '#8f9450', dirt: '#987d55', rock: '#9a907f', fog: '#d6d6c8', grass: ['#6e7a36', '#a7a560'], trees: 'cypress', sun: 40 },
+  temperate: { g1: '#536a33', g2: '#6f7c42', dirt: '#806a48', rock: '#7d786e', fog: '#c3cfd4', grass: ['#4a6428', '#9aa654'], trees: 'oak', sun: 32 },
+  med: { g1: '#6c7640', g2: '#8a8a52', dirt: '#987d55', rock: '#9a907f', fog: '#d6d6c8', grass: ['#6e7a36', '#a7a560'], trees: 'cypress', sun: 40 },
   arid: { g1: '#a08c55', g2: '#b29b62', dirt: '#a7855a', rock: '#a08a70', fog: '#e0d4b8', grass: ['#8d7f45', '#bfae6e'], trees: 'palm', sun: 45 },
   desert: { g1: '#d0ac74', g2: '#c79c62', dirt: '#b88d58', rock: '#a98a66', fog: '#ead9b8', grass: ['#9a8a50', '#c7b177'], trees: 'palm', sun: 50 },
   steppe: { g1: '#94944f', g2: '#a8a35c', dirt: '#8f7c52', rock: '#8a8270', fog: '#d3d3c2', grass: ['#7e8040', '#b5ad62'], trees: 'oak', sun: 30 },
@@ -35,6 +35,8 @@ export class BattleView {
     this.buildTerrain();
     this.buildGrass();
     this.buildTrees();
+    this.buildWater();
+    this.buildHorizon();
     this.buildTown();
     this.buildSoldiers();
     this.buildMissiles();
@@ -70,7 +72,7 @@ export class BattleView {
     this.envRT = pm.fromScene(envScene, 0.02, 1, 6000);
     // used only by metal-bearing materials (soldiers, standards); the ground keeps its painted light
     pm.dispose();
-    this.scene.fog = new THREE.FogExp2(this.B.fog, 0.0011);
+    this.scene.fog = new THREE.FogExp2(this.B.fog, this.sim.terrain.geo ? 0.00042 : 0.0011);
     const hemi = new THREE.HemisphereLight('#d5e3f5', '#6b5e40', 1.15);
     const sun = new THREE.DirectionalLight('#fff0d6', 3.0);
     sun.castShadow = true;
@@ -175,6 +177,7 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
       q.setFromAxisAngle(up, rng() * 6.28);
       const sc = 0.6 + rng() * 1.1;
       s.set(sc, sc * (0.7 + rng() * 0.8), sc);
+      if (this.sim.terrain.wet(x, z)) s.set(0, 0, 0);
       m4.compose(p, q, s); im.setMatrixAt(i, m4);
     }
     im.receiveShadow = true;
@@ -208,16 +211,19 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
     parts.push(tint(trunk, '#4b3826'), ...canopy);
     const merged = mergeAll(parts);
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
-    const count = 2600;
+    const count = 4200;
     const im = new THREE.InstancedMesh(merged, mat, count);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
     const groves = Array.from({ length: 6 }, () => ({ x: (rng() < 0.5 ? -1 : 1) * (FIELD * 0.55 + rng() * FIELD * 0.4), z: (rng() - 0.5) * 220, r: 25 + rng() * 30 }));
     let n = 0;
-    for (let tries = 0; tries < 20000 && n < count; tries++) {
+    for (let tries = 0; tries < 60000 && n < count; tries++) {
       let x, z;
       if (rng() < 0.18) { const g = groves[Math.floor(rng() * groves.length)]; const a = rng() * 6.28, r = Math.sqrt(rng()) * g.r; x = g.x + Math.cos(a) * r; z = g.z + Math.sin(a) * r; }
       else { x = (rng() - 0.5) * 2 * (TERRAIN * 0.85); z = (rng() - 0.5) * 2 * (TERRAIN * 0.85); if (Math.max(Math.abs(x), Math.abs(z)) < FIELD + 25) continue; }
       if (kind === 'palm' && rng() < 0.6) continue;
+      if (this.sim.terrain.wet(x, z)) continue;
+      // real woods: dense stands with open country between them
+      if (noise2(x / 210, z / 210, this.sim.cfg.seed % 97) + noise2(x / 60, z / 60, 5) * 0.25 < 0.12 && rng() < 0.93) continue;
       p.set(x, this.sim.terrain.at(x, z) - 0.2, z);
       q.setFromAxisAngle(up, rng() * 6.28);
       const sc = 0.7 + rng() * 0.7; s.set(sc, sc * (0.85 + rng() * 0.4), sc);
@@ -498,6 +504,82 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
   }
 
   // ---------------------------------------------------------------- sky clouds
+  // ---------------------------------------------------------------- the real place: sea, river, distant mountains
+  buildWater() {
+    const T = this.sim.terrain;
+    if (!T.sea && !T.river) return;
+    const wm = new THREE.MeshStandardMaterial({ color: '#1f5568', roughness: 0.14, metalness: 0.1, transparent: true, opacity: 0.92, envMap: this.envRT.texture, envMapIntensity: 0.65 });
+    this.waterU = { value: 0 };
+    wm.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = this.waterU;
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vW2;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvW2 = (modelMatrix * vec4(transformed,1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uTime; varying vec3 vW2;').replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        float fade = clamp(1.0 - length(vViewPosition) / 700.0, 0.0, 1.0);
+        float w1 = sin(vW2.x * 0.11 + uTime * 1.1) + sin(vW2.z * 0.15 - uTime * 0.9) + (sin((vW2.x + vW2.z) * 0.37 + uTime * 1.7) * 0.5 + sin(vW2.x * 0.9 - vW2.z * 0.7 + uTime * 2.6) * 0.25) * fade;
+        float w2 = cos(vW2.x * 0.13 - uTime * 0.8) + cos(vW2.z * 0.12 + uTime * 1.2) + cos(vW2.z * 0.8 + vW2.x * 0.6 - uTime * 2.2) * 0.25 * fade;
+        normal = normalize(normal + vec3(w1, 0.0, w2) * 0.05 * (0.06 + 0.94 * fade));`);
+    };
+    if (T.sea) {
+      const sea = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000), wm);
+      sea.rotation.x = -Math.PI / 2; sea.position.y = T.sea.level;
+      this.scene.add(sea);
+    }
+    if (T.river) {
+      const pts = [], N = 220, W = 13;
+      const verts = [], idx = [];
+      for (let k = 0; k <= N; k++) {
+        const z = -TERRAIN + (k / N) * TERRAIN * 2, x = T.river.x(z), x2 = T.river.x(z + 1);
+        const nx = 1, nz = -(x2 - x); const L = Math.hypot(nx, nz);
+        const y = Math.min(T.at(x - W, z), T.at(x + W, z)) - 0.9;
+        verts.push(x - (W * nx) / L, y, z - (W * nz) / L, x + (W * nx) / L, y, z + (W * nz) / L);
+        if (k < N) { const a = k * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3)); g.setIndex(idx); g.computeVertexNormals();
+      const m = wm.clone(); m.color.set('#3a6f74'); m.onBeforeCompile = wm.onBeforeCompile;
+      const river = new THREE.Mesh(g, m);
+      this.scene.add(river);
+    }
+  }
+
+  buildHorizon() {
+    const geo = this.sim.terrain.geo;
+    if (!geo || !geo.hz) return;
+    const { AZ, R, h } = geo.hz;
+    // real kilometres squeezed into a ring 1.1–4.4 km out; heights at a gentle exaggeration
+    const RG = [1050, 1400, 1800, 2300, 2900, 3600, 4300];
+    const VS = 0.19, base = this.sim.terrain.amp * 3;
+    const verts = [], cols = [], idx = [];
+    const B = this.B, c = new THREE.Color(), g1 = new THREE.Color(B.g1), rock = new THREE.Color(B.rock).multiplyScalar(0.9), snow = new THREE.Color('#f2f4f6'), fogC = new THREE.Color(B.fog);
+    const snowLine = 2700 + (45 - geo.lat) * 60;
+    const nr = R.length + 1;
+    for (let k = 0; k <= AZ; k++) {
+      const a = ((k % AZ) / AZ) * Math.PI * 2, sx = Math.sin(a), sz = -Math.cos(a);
+      for (let r = 0; r < nr; r++) {
+        let rr, e;
+        if (r === 0) { rr = TERRAIN * 0.97; e = this.sim.terrain.at(sx * rr, sz * rr); }
+        else {
+          rr = RG[r - 1];
+          const m = h[(k % AZ) * R.length + r - 1];
+          const n = noise2(a * 9 + r, r * 3.1, 77) * 0.5 + noise2(a * 31, r * 7.7, 78) * 0.25;
+          e = m < -10 ? (this.sim.terrain.sea ? this.sim.terrain.sea.level - 20 : -20) : base + Math.max(0, m - geo.e0) * VS * (1 + n * 0.35) + 12 * (n + 0.5) * (r / nr);
+          if (m >= -10) { c.copy(g1).lerp(rock, Math.min(1, (m - 600) / 1400)); if (m > snowLine + n * 300) c.copy(snow); }
+          else c.copy(g1);
+        }
+        if (r === 0) c.copy(g1);
+        c.lerp(fogC, Math.min(0.55, r * 0.07));
+        verts.push(sx * rr, e, sz * rr); cols.push(c.r, c.g, c.b);
+      }
+    }
+    for (let k = 0; k < AZ; k++) for (let r = 0; r < nr - 1; r++) { const a = k * nr + r, b = (k + 1) * nr + r; idx.push(a, a + 1, b, b, a + 1, b + 1); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    g.setIndex(idx); g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide, flatShading: false }));
+    this.scene.add(mesh);
+  }
+
   buildClouds() {
     this.cloudU = { uTime: { value: 0 }, uSun: { value: this.sunDir } };
     const mat = new THREE.ShaderMaterial({
@@ -852,6 +934,7 @@ transformed.x += wv * position.y; transformed.z += wv * 0.6 * position.y;`);
 
   render(dt, selected, hovered) {
     this.time += dt;
+    if (this.waterU) this.waterU.value = this.time;
     this.windU.value = this.time;
     this.updateCamera(dt);
     this.updateSoldiers();

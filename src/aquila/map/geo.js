@@ -2,7 +2,7 @@
 // (grown over land from each city), adjacency, heights and the painted terrain.
 import { feature } from 'topojson-client';
 import landTopo from 'world-atlas/land-50m.json';
-import { CITIES, RIDGES, RIVERS, SEA_LANES } from '../data/cities.js';
+import { CITIES, RIVERS, SEA_LANES } from '../data/cities.js';
 import { noise2, fbm, ridged, smooth, clamp, lerp } from '../util/noise.js';
 
 export const LON0 = -12, LON1 = 76, LAT0 = 13, LAT1 = 62;
@@ -110,7 +110,7 @@ export function sampleHeight(heights, lon, lat) {
 // Aridity / biome fields, all smooth so the painted map blends naturally
 const RIVER_SEGS = [];
 for (const r of RIVERS) for (let i = 0; i < r.length - 1; i++) RIVER_SEGS.push([r[i][0] * KX, r[i][1], r[i + 1][0] * KX, r[i + 1][1]]);
-function riverDist(lon, lat) {
+export function riverDist(lon, lat) {
   let m = 9;
   const px = lon * KX;
   for (const s of RIVER_SEGS) {
@@ -145,12 +145,23 @@ export function climate(lon, lat, coast, rdist) {
 function hex(c) { return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; }
 const C = {
   sand: hex('#d6b277'), sand2: hex('#c79a5c'), dune: hex('#e0be82'), rockDesert: hex('#a98a64'),
-  steppe: hex('#a8a15a'), steppe2: hex('#b7aa66'), med: hex('#8b9550'), med2: hex('#a09a5c'),
-  temperate: hex('#6a8d3d'), temperate2: hex('#7c9a46'), forest: hex('#3e6530'), boreal: hex('#3b5a39'),
+  steppe: hex('#a59c66'), steppe2: hex('#b3a673'), med: hex('#878a55'), med2: hex('#9b9466'),
+  temperate: hex('#64803f'), temperate2: hex('#738a4a'), forest: hex('#3c5a2c'), boreal: hex('#3d5238'),
   rock: hex('#8a7e6e'), rock2: hex('#6e665c'), snow: hex('#eef1f4'), beach: hex('#dccb9b'),
   shallow: hex('#b9a77c'), deep: hex('#3b4f57'), river: hex('#3c7391'),
 };
 const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+// real elevation in metres, bilinear; grid 881 x 491 at 0.1°, row 0 = 62°N, col 0 = 12°W
+async function loadElevation() {
+  const buf = await (await fetch(new URL('../data/elevation.bin', import.meta.url))).arrayBuffer();
+  const E = new Int16Array(buf), W = 881, H = 491;
+  return (lon, lat) => {
+    const fx = clamp((lon + 12) * 10, 0, W - 1.001), fy = clamp((62 - lat) * 10, 0, H - 1.001);
+    const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, k = y0 * W + x0;
+    return (E[k] * (1 - tx) + E[k + 1] * tx) * (1 - ty) + (E[k + W] * (1 - tx) + E[k + W + 1] * tx) * ty;
+  };
+}
 
 export async function buildWorld(progress = () => {}) {
   progress(0.02, 'Charting the coasts');
@@ -165,33 +176,9 @@ export async function buildWorld(progress = () => {}) {
 
   progress(0.2, 'Raising the mountains');
   await tick();
-  // ---- heights on the mesh grid ----
+  // ---- heights on the mesh grid: real ETOPO1 elevation (0.1°, NOAA), exaggerated for the map ----
   const heights = new Float32Array(HW * HH);
-  const ridgeH = new Float32Array(HW * HH);
-  for (const r of RIDGES) {
-    const pts = r.p.map(([lo, la]) => [lo * KX, la]);
-    let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
-    for (const [x, y] of pts) { mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
-    const pad = r.w * 3;
-    const j0 = Math.max(0, Math.floor(((LAT1 - (mxy + pad)) / (LAT1 - LAT0)) * (HH - 1)));
-    const j1 = Math.min(HH - 1, Math.ceil(((LAT1 - (mny - pad)) / (LAT1 - LAT0)) * (HH - 1)));
-    const i0 = Math.max(0, Math.floor((((mnx - pad) / KX - LON0) / (LON1 - LON0)) * (HW - 1)));
-    const i1 = Math.min(HW - 1, Math.ceil((((mxx + pad) / KX - LON0) / (LON1 - LON0)) * (HW - 1)));
-    for (let j = j0; j <= j1; j++) {
-      const lat = LAT1 - (j / (HH - 1)) * (LAT1 - LAT0);
-      for (let i = i0; i <= i1; i++) {
-        const lon = LON0 + (i / (HW - 1)) * (LON1 - LON0);
-        const px = lon * KX;
-        let m = 1e9;
-        if (pts.length === 1) m = Math.hypot(px - pts[0][0], lat - pts[0][1]);
-        for (let k = 0; k < pts.length - 1; k++) m = Math.min(m, segDist(px, lat, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1]));
-        const wob = 1 + 0.35 * noise2(lon * 1.3, lat * 1.3, 7);
-        const v = r.h * Math.exp(-((m / (r.w * wob)) ** 2));
-        const idx = j * HW + i;
-        ridgeH[idx] = Math.max(ridgeH[idx], v) + v * 0.15;
-      }
-    }
-  }
+  const elev = await loadElevation();
   for (let j = 0; j < HH; j++) {
     const lat = LAT1 - (j / (HH - 1)) * (LAT1 - LAT0);
     const gy = (j / (HH - 1)) * GH;
@@ -199,21 +186,21 @@ export async function buildWorld(progress = () => {}) {
       const lon = LON0 + (i / (HW - 1)) * (LON1 - LON0);
       const gx = (i / (HW - 1)) * GW;
       const d = sampleGrid(sdist, gx, gy) / PX_PER_DEG; // degrees, + on land
-      const idx = j * HW + i;
+      const m = elev(lon, lat);
       let e;
       if (d > 0) {
-        const inland = smooth(0, 1.6, d);
-        const hills = Math.pow(fbm(lon * 0.8, lat * 0.8, 4, 3) * 0.5 + 0.5, 2.2) * 0.13 * smooth(0, 0.5, d);
-        const rg = ridgeH[idx];
-        const crag = rg > 0.02 ? rg * (0.45 + 0.75 * ridged(lon * 2.2, lat * 2.2, 5, 11)) : 0;
-        e = Math.min(d * 0.12, 0.012) + inland * 0.035 + hills + crag * smooth(-0.05, 0.3, d);
+        const ee = Math.pow(Math.max(0, m) / 4500, 0.7) * 0.6;
+        const crag = ee > 0.05 ? ee * 0.22 * (ridged(lon * 3.1, lat * 3.1, 4, 11) - 0.45) : 0;
+        const hills = (fbm(lon * 1.6, lat * 1.6, 3, 3) * 0.5 + 0.5) * 0.012;
+        e = Math.min(d * 0.12, 0.012) + 0.006 + ee + crag + hills * smooth(0, 0.3, d);
       } else {
-        const dd = -d;
-        e = Math.max(d * 0.25, -0.03 - 0.24 * smooth(0.05, 1.8, dd)) + fbm(lon * 0.6, lat * 0.6, 3, 5) * 0.02 * smooth(0.2, 1, dd);
+        const depth = Math.max(0, -m);
+        e = Math.max(d * 0.25, -0.02 - 0.25 * smooth(20, 3000, depth)) + fbm(lon * 0.6, lat * 0.6, 3, 5) * 0.006;
       }
-      heights[idx] = e;
+      heights[idx(i, j)] = e;
     }
   }
+  function idx(i, j) { return j * HW + i; }
 
   progress(0.38, 'Founding the provinces');
   await tick();
@@ -391,12 +378,16 @@ export async function buildWorld(progress = () => {}) {
         const des = mix3(mix3(C.sand, C.sand2, smooth(-0.6, 0.6, n1)), C.dune, smooth(0.2, 0.7, n2) * 0.6);
         c = mix3(c, mix3(des, C.rockDesert, smooth(0.08, 0.25, h)), smooth(0.15, 0.75, k.arid));
         if (coast < 0.05 && (k.arid > 0.25 || n2 > 0.35)) c = mix3(c, C.beach, 0.7);
-        const rockT = smooth(0.17, 0.36, h + n2 * 0.04);
+        const slope = Math.abs(sampleHeight(heights, lon + 0.09, lat) - sampleHeight(heights, lon - 0.09, lat)) + Math.abs(sampleHeight(heights, lon, lat + 0.09) - sampleHeight(heights, lon, lat - 0.09));
+        const rockT = Math.max(smooth(0.3, 0.46, h + n2 * 0.04), smooth(0.05, 0.13, slope + n2 * 0.015) * smooth(0.06, 0.16, h));
         c = mix3(c, mix3(C.rock, C.rock2, smooth(-0.3, 0.5, n3)), rockT);
         const snowLine = 0.43 + (45 - lat) * 0.006;
         c = mix3(c, C.snow, smooth(snowLine, snowLine + 0.08, h + n3 * 0.05));
         if (rdist < 0.032 + 0.018 * smooth(30, 20, lat)) c = mix3(c, C.river, 0.85);
-        const v = 1 + n3 * 0.05;
+        // hillshade from the real relief, lit from the north-west
+        const hxs = sampleHeight(heights, lon + 0.09, lat) - sampleHeight(heights, lon - 0.09, lat);
+        const hys = sampleHeight(heights, lon, lat + 0.09) - sampleHeight(heights, lon, lat - 0.09);
+        const v = (1 + n3 * 0.05) * (1 + clamp((hxs - hys) * 2.4, -0.32, 0.26));
         c = [c[0] * v, c[1] * v, c[2] * v];
       } else {
         const dd = -sdist[i] / PX_PER_DEG;
@@ -420,5 +411,37 @@ export async function buildWorld(progress = () => {}) {
 
   progress(0.95, 'Raising the standards');
   await tick();
-  return { land, own, sdist, heights, forest, colorCanvas: cv, provinces, bdist, other };
+  return { land, own, sdist, heights, forest, colorCanvas: cv, provinces, bdist, other, elev };
+}
+
+// The real place a battle is fought: how rugged it is, where the sea and rivers lie,
+// and the horizon seen from the field (sampled from ETOPO out to 60 km).
+export function battleGeo(world, id) {
+  const p = world.provinces[id], E = world.elev;
+  if (!E) return null;
+  const kmLon = 111 * Math.cos((p.lat * Math.PI) / 180), kmLat = 111;
+  const at = (dxKm, dyKm) => E(p.lon + dxKm / kmLon, p.lat + dyKm / kmLat);
+  const e0 = Math.max(0, at(0, 0));
+  let s1 = 0, s2 = 0, n = 0;
+  for (let dx = -15; dx <= 15; dx += 5) for (let dy = -15; dy <= 15; dy += 5) { const v = Math.max(0, at(dx, dy)); s1 += v; s2 += v * v; n++; }
+  const rough = Math.sqrt(Math.max(0, s2 / n - (s1 / n) ** 2));
+  const isSea = (lon, lat) => { const { gx, gy } = lonLatToGrid(lon, lat); const x = Math.round(gx), y = Math.round(gy); if (x < 0 || y < 0 || x >= GW || y >= GH) return true; return !world.land[y * GW + x]; };
+  let sea = null;
+  for (let k = 0; k < 32; k++) {
+    const a = (k / 32) * Math.PI * 2;
+    for (let d = 1; d <= 24; d += 1) {
+      if (isSea(p.lon + (Math.sin(a) * d) / kmLon, p.lat + (Math.cos(a) * d) / kmLat)) { if (!sea || d < sea.dist) sea = { az: a, dist: d }; break; }
+    }
+  }
+  const rd = riverDist(p.lon, p.lat);
+  const AZ = 128, R = [4, 8, 14, 22, 34, 50, 70];
+  const h = new Float32Array(AZ * R.length);
+  for (let k = 0; k < AZ; k++) {
+    const a = (k / AZ) * Math.PI * 2;
+    for (let r = 0; r < R.length; r++) {
+      const lon = p.lon + (Math.sin(a) * R[r]) / kmLon, lat = p.lat + (Math.cos(a) * R[r]) / kmLat;
+      h[k * R.length + r] = isSea(lon, lat) ? -50 : Math.max(0, E(lon, lat));
+    }
+  }
+  return { rough, e0, sea, river: rd < 0.14, lat: p.lat, hz: { AZ, R, h } };
 }

@@ -29,8 +29,17 @@ export const ABIL = {
 
 export function isCav(t) { return t.cls === 'cav' || t.cls === 'harcher' || t.cls === 'elephant'; }
 
-export function makeTerrain(seed, biome) {
-  const amp = { temperate: 9, med: 11, arid: 7, desert: 8, steppe: 4, boreal: 12 }[biome] ?? 8;
+export function makeTerrain(seed, biome, geo = null) {
+  let amp = { temperate: 9, med: 11, arid: 7, desert: 8, steppe: 4, boreal: 12 }[biome] ?? 8;
+  // the real province: plains stay flat, mountain valleys get steep
+  if (geo) amp *= Math.max(0.3, Math.min(2.4, 0.35 + geo.rough / 220));
+  const seaOn = geo && geo.sea && geo.sea.dist <= 14;
+  const sx = seaOn ? Math.sin(geo.sea.az) : 0, sz = seaOn ? -Math.cos(geo.sea.az) : 0;
+  const coastAt = seaOn ? FIELD + 40 + Math.min(420, geo.sea.dist * 34) : 0;
+  const seaLevel = -amp * 1.3 - 2;
+  const riverSide = seed % 2 ? 1 : -1;
+  const riverX = (z) => riverSide * (255 + 28 * Math.sin(z / 95) + 14 * Math.sin(z / 37 + 1.3));
+  const riverOn = !!(geo && geo.river);
   const N = 301, step = (TERRAIN * 2) / (N - 1);
   const h = new Float32Array(N * N);
   const rng = mulberry32(seed);
@@ -42,14 +51,19 @@ export function makeTerrain(seed, biome) {
     if (biome === 'desert') v += Math.abs(noise2(x / 90 + z / 300, z / 140, sd + 3)) * amp * 0.5;
     for (const hl of hills) { const d = Math.hypot(x - hl.x, z - hl.z); v += hl.a * Math.exp(-((d / hl.r) ** 2)); }
     const edge = Math.max(Math.abs(x), Math.abs(z));
-    v += smooth(FIELD + 60, TERRAIN, edge) * amp * 4 * (0.6 + 0.4 * fbm(x / 120, z / 120, 3, sd + 5));
+    const along = seaOn ? x * sx + z * sz + fbm(x / 160, z / 160, 3, sd + 8) * 70 : -1e9;
+    const seaM = seaOn ? smooth(coastAt - 40, coastAt + 50, along) : 0;
+    v += smooth(FIELD + 60, TERRAIN, edge) * amp * 4 * (0.6 + 0.4 * fbm(x / 120, z / 120, 3, sd + 5)) * (1 - smooth(coastAt - 260, coastAt, along));
     // keep the deployment zones fairly even
     const dz = Math.min(Math.abs(z - 170), Math.abs(z + 170));
     v *= 0.55 + 0.45 * smooth(20, 90, dz);
+    if (seaOn) { v += smooth(coastAt - 90, coastAt, along) * 1.5; v = v * (1 - seaM) + (seaLevel - 6 - amp) * seaM; }
+    if (riverOn) { const d = Math.abs(x - riverX(z)); v -= 3.4 * smooth(15, 5, d) + 0.8 * smooth(40, 12, d); }
     h[j * N + i] = v;
   }
   return {
-    N, step, h, biome, amp,
+    N, step, h, biome, amp, geo, sea: seaOn ? { level: seaLevel } : null, river: riverOn ? { x: riverX } : null,
+    wet(x, z) { return (seaOn && this.at(x, z) < seaLevel + 0.6) || (riverOn && Math.abs(x - riverX(z)) < 10); },
     at(x, z) {
       let fx = (x + TERRAIN) / step, fz = (z + TERRAIN) / step;
       fx = Math.max(0, Math.min(N - 1.001, fx)); fz = Math.max(0, Math.min(N - 1.001, fz));
@@ -64,7 +78,7 @@ export class BattleSim {
   constructor(cfg) {
     this.cfg = cfg;
     this.rng = mulberry32(cfg.seed || 7);
-    this.terrain = makeTerrain(cfg.seed || 7, cfg.biome || 'temperate');
+    this.terrain = makeTerrain(cfg.seed || 7, cfg.biome || 'temperate', cfg.geo || null);
     this.time = 0;
     this.phase = 'deploy';
     this.winner = -1;
