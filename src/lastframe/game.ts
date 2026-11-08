@@ -82,6 +82,10 @@ export class Game {
   /** where my beam lands, lighting the room back: a soft fill with no shadow */
   private bounce = new THREE.PointLight(0xf2ead8, 0, 8, 2);
   private bounceK = 0;
+  /** the arms and the gun lit a little from the front, as a lens sees them in any light */
+  private fill = new THREE.PointLight(0xdfe3ea, 0, 1.4, 2);
+  /** someone's light pointed straight at the lens */
+  private glares: THREE.Sprite[] = [];
   private flashK = 0;
   private time = 0;
   private last = performance.now();
@@ -149,7 +153,14 @@ export class Game {
       this.scene.add(o, o.target);
     }
     this.flashPoint = new THREE.PointLight(0xffc08a, 0, 13, 1.8);
-    this.scene.add(this.flashPoint, this.bounce);
+    this.scene.add(this.flashPoint, this.bounce, this.fill);
+    const gt = glareTex();
+    for (let i = 0; i < 2; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(9, 8.4, 7.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+      sp.visible = false;
+      this.glares.push(sp);
+      this.scene.add(sp);
+    }
   }
 
   sun: Sun | null = null;
@@ -324,6 +335,7 @@ export class Game {
     this.others[0].intensity = 0.01;
     this.flashPoint.intensity = 0.01;
     this.bounce.intensity = 0.01;
+    this.fill.intensity = 0.01;
     this.r.compile(this.scene, this.cam);
     this.post.render(this.scene, this.cam, 0.016, 0);
     await new Promise((r) => setTimeout(r));
@@ -334,7 +346,7 @@ export class Game {
   resize() {
     const w = innerWidth, h = innerHeight;
     const dpr = Math.min(devicePixelRatio || 1, 1.5);
-    const k = Math.min(1, 1600 / (w * dpr)) * dpr * this.scale * this.quality;
+    const k = Math.min(1, 1920 / (w * dpr)) * dpr * this.scale * this.quality;
     this.r.setSize(w, h, false);
     this.r.domElement.style.width = '100%';
     this.r.domElement.style.height = '100%';
@@ -945,11 +957,13 @@ export class Game {
     this.hud.fps(fps);
     if (this.autoInput) return;
     const was = this.scale;
-    if (fps < 50) this.scale = Math.max(0.55, this.scale * Math.max(0.82, Math.sqrt(fps / 58)));
-    else if (fps > 59 && this.scale < 1) this.scale = Math.min(1, this.scale * 1.05);
-    // down to the floor and still behind: the air and the occlusion go, the reflections with them
-    if (this.scale <= 0.56 && fps < 44) this.liteK++;
-    else if (fps > 56 && this.liteK > 0) this.liteK--;
+    // a soft picture is worse than a missing effect: the resolution only gives a little, then the air, the
+    // occlusion and the reflections go, and only then does it come down further
+    const floor = this.liteK >= 2 ? 0.62 : 0.8;
+    if (fps < 42) this.scale = Math.max(floor, this.scale * Math.max(0.88, Math.sqrt(fps / 50)));
+    else if (fps > 55 && this.scale < 1) this.scale = Math.min(1, this.scale * 1.05);
+    if (this.scale <= 0.81 && fps < 40) this.liteK++;
+    else if (fps > 55 && this.liteK > 0) this.liteK--;
     this.post.lite = this.liteK >= 2 || this.quality < 0.75;
     if (Math.abs(was - this.scale) > 0.02) this.resize();
   }
@@ -1307,8 +1321,31 @@ export class Game {
       o.position.set(a.x + f.x * 0.5, a.y + ((a.flags & F.crouch) ? 0.95 : 1.42), a.z + f.z * 0.5);
       o.target.position.copy(o.position).addScaledVector(f, 5);
     });
-    this.flashPoint.intensity = this.flashK * 6;
+    this.flashPoint.intensity = this.flashK * 14;
     this.flashK = Math.max(0, this.flashK - dt * 110);
+    // the fill rides just below and ahead of the lens
+    const cf = this.tmp.set(0, -0.22, -0.3).applyQuaternion(this.cam.quaternion);
+    this.fill.position.copy(this.cam.position).add(cf);
+    this.fill.intensity = me.alive ? 0.05 : 0;
+    // a light aimed at the lens blooms across it, if nothing's between
+    this.others.forEach((o, i) => {
+      const g = this.glares[i];
+      if (!g) return;
+      if (o.intensity <= 0.01) { g.visible = false; return; }
+      const to = this.tmp.copy(this.cam.position).sub(o.position);
+      const d = to.length();
+      to.divideScalar(d || 1);
+      const fx = o.target.position.x - o.position.x, fy = o.target.position.y - o.position.y, fz = o.target.position.z - o.position.z;
+      const fl = Math.hypot(fx, fy, fz) || 1;
+      const al = (to.x * fx + to.y * fy + to.z * fz) / fl;
+      const k = THREE.MathUtils.smoothstep(al, 0.86, 0.995);
+      const blocked = k > 0 && !!this.L.world.ray(this.cam.position.x, this.cam.position.y, this.cam.position.z, -to.x, -to.y, -to.z, Math.max(0, d - 0.4), true);
+      g.visible = k > 0 && !blocked;
+      if (!g.visible) return;
+      g.position.copy(o.position);
+      g.material.opacity = k;
+      g.scale.setScalar((0.25 + k * 1.15) * Math.min(1, d / 3 + 0.4));
+    });
   }
 
   private fxNades(dt: number) {
@@ -1439,6 +1476,25 @@ export class Game {
 }
 
 /** what a weapon light throws: a hot core, the reflector's ring round it, and a wide dim spill */
+/** a soft round glow with a hot centre and short streaks, for a light seen head-on */
+function glareTex(): THREE.Texture {
+  const N = 128, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d')!;
+  const r = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(0.08, 'rgba(255,250,240,0.85)');
+  r.addColorStop(0.3, 'rgba(255,240,220,0.18)');
+  r.addColorStop(1, 'rgba(255,240,220,0)');
+  g.fillStyle = r;
+  g.fillRect(0, 0, N, N);
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = 'rgba(255,250,240,0.35)';
+  g.fillRect(0, N / 2 - 1, N, 2);
+  g.fillRect(N / 2 - 1, 0, 2, N);
+  return new THREE.CanvasTexture(c);
+}
+
 function beamCookie(): THREE.Texture {
   const N = 256;
   const c = document.createElement('canvas');

@@ -24,7 +24,7 @@ PX0, PY0, PX1, PY1 = 34.0, 8.0, 48.0, 20.0     # the pool
 PZ = -1.9
 
 SKY = dict(hdri='rooftop_night', strength=0.9, tint=(0.3, 0.4, 0.55))
-WEATHER = dict(key=0.13, rain=1, wet=1, fog=2.4, sky=[0.1, 0.12, 0.17], wb=[0.97, 1.0, 1.04])
+WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.4, sky=[0.1, 0.12, 0.17], wb=[0.97, 1.0, 1.04])
 VOLUME = dict(step=[2, 1.15, 2], min=[-24, -3, -62], dim=[54, 10, 42])
 
 WARM = (1.0, 0.68, 0.38)

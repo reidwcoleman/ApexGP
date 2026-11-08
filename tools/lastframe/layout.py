@@ -6,7 +6,7 @@ yards to the north, the street along the south.
 import math, random
 
 # the block at night under rain: a low sky with the city's glow on it, and no more light than that
-WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.5, sky=[0.14, 0.17, 0.26], wb=[0.97, 1.0, 1.03])
+WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.05, sky=[0.14, 0.17, 0.26], wb=[0.97, 1.0, 1.03])
 
 FACES = ('-x', '+x', '-y', '+y', '-z', '+z')
 FL = 0.0          # ground floor

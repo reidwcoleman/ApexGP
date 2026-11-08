@@ -25,7 +25,7 @@ BC = -0.55                 # tunnel ceiling (pipes under it)
 
 # a night with the storm on it: the city's glow low on the clouds, cold and green-grey
 SKY = dict(hdri='rooftop_night', strength=1.15, tint=(0.34, 0.46, 0.7))
-WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.55, sky=[0.3, 0.33, 0.4], wb=[0.95, 1.0, 1.03])
+WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.15, sky=[0.3, 0.33, 0.4], wb=[0.95, 1.0, 1.03])
 VOLUME = dict(step=[2, 1.15, 2], min=[-10, -4.6, -56], dim=[48, 12, 34])
 
 TUBE = (0.8, 0.94, 1.0)

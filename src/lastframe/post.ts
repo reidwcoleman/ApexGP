@@ -436,7 +436,7 @@ void main() {
   vec3 c = vec3( texture2D( tSrc, cr ).r, texture2D( tSrc, cg ).g, texture2D( tSrc, cb ).b );
   // unsharp mask, as the camera's own processing does it
   vec3 soft = texture2D( tHalf, cg ).rgb;
-  c = max( c + ( c - soft ) * 0.55, vec3( 0.0 ) );
+  c = max( c + ( c - soft ) * 0.75, vec3( 0.0 ) );
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   vec3 hdr = c + bloom * 0.085 + whiteout * 9.0;

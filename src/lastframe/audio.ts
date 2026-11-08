@@ -592,7 +592,7 @@ export class Sound {
   /** the wearer's own chest: one in and one out, harder the worse it's going */
   breath(k: number) {
     if (!this.ctx) return;
-    const d = this.src(null, 0.16 + k * 0.2, false);
+    const d = this.src(null, 0.2 + k * 0.32, false);
     this.burst(d, 0.42, 0.34, 500, 2300);
     this.burst(d, 0.52, 0.42, 340, 1500, 0.62 - k * 0.2);
   }

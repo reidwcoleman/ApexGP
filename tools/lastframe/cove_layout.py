@@ -10,7 +10,7 @@ import cove_house as CH
 # a June afternoon: the sun over the west headland, cumulus coming in off the Atlantic
 SKY = dict(hdri='kloofendal_48d_partly_cloudy_puresky', strength=1.0, tint=(1, 1, 1), sun_az=(-0.5, -0.86), sky_e=0.62, sun_k=3.4, clamp=7.0, tone=(1.0, 0.95, 0.86))
 # a sea fret rolled in at the end of the day: the sun gone behind it, the village a few doors deep, then grey
-WEATHER = dict(key=0.2, rain=0, wet=0, fog=7.0, sky=[1.0, 1.0, 1.0], wb=[0.97, 1.0, 1.03], dim=0.3, sunK=0.03, skyTint=[0.08, 0.085, 0.095], expMax=1.15, sat=0.5)
+WEATHER = dict(key=0.2, rain=0, wet=0, fog=2.6, sky=[1.0, 1.0, 1.0], wb=[0.97, 1.0, 1.03], dim=0.3, sunK=0.03, skyTint=[0.08, 0.085, 0.095], expMax=1.15, sat=0.5)
 INNER = (-180, -80, 200, 250)
 LIMIT = (-140, -216, 165, 12)         # x0, z0, x1, z1 in game axes
 VOLUME = dict(step=[6, 3.2, 6], min=[-160, -3, -240], dim=[56, 18, 44])

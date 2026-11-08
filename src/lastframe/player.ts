@@ -392,7 +392,7 @@ export class LocalPlayer {
       this.bob += (speed * dt) / stride * Math.PI;
       if (this.stepAcc >= stride) {
         this.stepAcc = 0;
-        c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), speed, this.crouch ? 0.32 : 0.75);
+        c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), speed, this.crouch ? 0.45 : 1.05);
       }
     }
     this.bobK += ((speed > 0.3 && m.grounded ? Math.min(1.25, speed / WALK) : 0) - this.bobK) * Math.min(1, dt * 9);
@@ -601,11 +601,12 @@ export class LocalPlayer {
     this.limp = Math.max(0, this.limp - dt / 80);
     this.arm = Math.max(0, this.arm - dt / 80);
     this.supK = Math.max(0, this.supK - dt * 0.42);
-    const hard = Math.max(0.92 - this.stamina * 1.5, this.supK * 0.8, this.hp < 45 ? 0.45 : 0);
+    // the chest mic hears every breath: quiet at rest, ragged when spent, hurt or under fire
+    const hard = Math.max(0.92 - this.stamina * 1.5, this.supK * 0.8, this.hp < 45 ? 0.45 : 0, Math.hypot(this.m.vx, this.m.vz) > 0.5 ? 0.12 : 0.04);
     this.breathT -= dt;
-    if (hard > 0.12 && this.breathT <= 0) {
+    if (this.breathT <= 0) {
       c.sound.breath(hard);
-      this.breathT = 2 - hard * 0.95;
+      this.breathT = (hard < 0.1 ? 3.4 : 2) - hard * 0.95 + Math.random() * 0.4;
     }
     this.heartT -= dt;
     if ((this.hp < 50 || this.supK > 0.55) && this.heartT <= 0) {
