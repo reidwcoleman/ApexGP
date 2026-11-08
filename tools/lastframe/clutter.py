@@ -34,14 +34,16 @@ HOSP_HUNG = [('K:board', 0.0, 0.62), ('K:conduit', 0.0, 0.5), ('D:wall_clock', 2
 FLAT_HUNG = [('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_02', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:wall_clock', 2.0, 0.2), ('K:conduit', 0.0, 0.5)]
 COTTAGE_HUNG = [('D:hanging_picture_frame_01', 1.55, 0.3), ('D:hanging_picture_frame_03', 1.55, 0.3), ('D:wall_clock', 1.9, 0.2)]
 STYLES = {
-    'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.0),
-    'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=0.9),
-    'cottage': dict(wall=COTTAGE_WALL, hung=COTTAGE_HUNG, flat=['litter'], ceil=[], dense=0.6),
+    'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.35),
+    'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=1.3),
+    'cottage': dict(wall=COTTAGE_WALL, hung=COTTAGE_HUNG, flat=['litter'], ceil=[], dense=1.1),
 }
 
 
-def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40):
+def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None, blood=0.4):
     st = STYLES[style]
+    if not hasattr(m, 'stains'):
+        m.stains = []
     solids = [b for b in m.boxes if b.collide] + [type('S', (), dict(a=a, b=b, collide=True, tag='inv'))() for (a, b, _) in m.solid]
     doors = []
     for d in m.doors:
@@ -193,6 +195,19 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40):
             for _ in range(1 + int(W * D / 40)):
                 x, y = rng.uniform(x0 + 0.8, x1 - 0.8), rng.uniform(y0 + 0.8, y1 - 0.8)
                 unit(rng.choice(st['ceil']), x, y, z1, rng.uniform(0, 6.28))
+        # old blood: a pool on the floor, a smear down a wall
+        if rng.random() < blood:
+            x, y = rng.uniform(x0 + 0.8, x1 - 0.8), rng.uniform(y0 + 0.8, y1 - 0.8)
+            m.stains.append((x, y, z0, 0, 0, 1, rng.uniform(0.8, 1.9)))
+        if rng.random() < blood * 0.8:
+            (ax, ay), (bx, by), (nx, ny) = edges[rng.randrange(4)]
+            t = rng.uniform(0.2, 0.8)
+            ex, ey = ax + (bx - ax) * t, ay + (by - ay) * t
+            if solid_at(ex, ey, z0 + 1.2):
+                f = 0.0
+                while f < 0.4 and solid_at(ex + nx * f, ey + ny * f, z0 + 1.2):
+                    f += 0.01
+                m.stains.append((ex + nx * (f + 0.005), ey + ny * (f + 0.005), z0 + rng.uniform(0.7, 1.5), nx, ny, 0, rng.uniform(0.9, 1.6)))
         # glass under the broken windows
         for g in m.glass:
             if rng.random() < 0.35 and z0 - 0.1 < g['z0'] < z0 + 1.5:
@@ -209,6 +224,11 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40):
             tries += 1
             x0, y0, x1, y1, z = rng.choice(outside)
             x, y = rng.uniform(x0, x1), rng.uniform(y0, y1)
+            if zf:
+                # on the ground as it lies: above the tide, not on a slope
+                z = zf(x, y)
+                if z < 0.5 or abs(zf(x + 0.6, y) - z) + abs(zf(x, y + 0.6) - z) > 0.3:
+                    continue
             item = rng.choice(items)
             r = item[2]
             # against something tall: a step out from a wall in one of four directions
@@ -226,6 +246,8 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40):
             rot = math.atan2(-near[0], near[1]) + rng.uniform(-0.6, 0.6) if near else rng.uniform(0, 6.28)
             put(item, x, y, z, rot)
             n += 1
-            if rng.random() < 0.3:
+            if rng.random() < blood * 0.25:
+                m.stains.append((x + rng.uniform(-1, 1), y + rng.uniform(-1, 1), z, 0, 0, 1, rng.uniform(0.8, 1.6)))
+            if rng.random() < 0.3 and not zf:
                 unit(rng.choice(['litter', 'bottles']), x + rng.uniform(-1, 1), y + rng.uniform(-1, 1), z + 0.002, rng.uniform(0, 6.28))
     return placed

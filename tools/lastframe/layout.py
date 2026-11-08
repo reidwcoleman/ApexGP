@@ -5,6 +5,9 @@ yards to the north, the street along the south.
 """
 import math, random
 
+# the block at night under rain: a low sky with the city's glow on it, and no more light than that
+WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.5, sky=[0.14, 0.17, 0.26], wb=[0.97, 1.0, 1.03])
+
 FACES = ('-x', '+x', '-y', '+y', '-z', '+z')
 FL = 0.0          # ground floor
 F2 = 3.2          # upper floor
@@ -1163,7 +1166,7 @@ def build():
     m.hold = [[42, 23, 0], [66, 32, 0], [18, 23, 0]]
     # and what everyone left behind
     import clutter
-    clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=40)
+    clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=80)
     return m
 
 

@@ -91,6 +91,14 @@ if WARD:
     out['night'] = 1
     # old blood: where, which way the surface faces, how big (game axes)
     out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in wm.stains]
+if not COVE and not WARD:
+    import layout as BL
+    out['weather'] = BL.WEATHER
+    out['night'] = 1
+if COVE:
+    out['night'] = 1
+if 'stains' not in out and raw.get('stains'):
+    out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in raw['stains']]
 json.dump(out, open(f'{DST}/map.json', 'w'), separators=(',', ':'))
 shutil.copy(f'{OUT}/world.bin', f'{DST}/world.bin')
 if os.path.exists(f'{OUT}/props.glb'):

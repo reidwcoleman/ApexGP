@@ -99,14 +99,14 @@ export class Grass {
     this.mat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
       uniforms: {
-        tH: { value: hTex }, tS: { value: splat }, tL: { value: lm3 }, tN: LF.noise, area: { value: new THREE.Vector4(t.x0, t.y0, W, H) }, time: LF.time as { value: number }, lfK: LF.lmK,
+        tH: { value: hTex }, tS: { value: splat }, tL: { value: lm3 }, tN: LF.noise, area: { value: new THREE.Vector4(t.x0, t.y0, W, H) }, time: LF.time as { value: number }, lfK: LF.lmK, lfWorld: LF.worldLight,
         eye: { value: new THREE.Vector3() }, reach: { value: 58 }, step: { value: new THREE.Vector2(1 / t.nx, 1 / t.ny) },
         lfSunDir: LF.sunDir, lfSunC: LF.sunC, lfSunVP: LF.sunVP, lfDynVP: LF.dynVP, lfSunMap: LF.sunMap, lfDynMap: LF.dynMap, lfCloud: LF.cloud,
       },
       vertexShader: /* glsl */ `
         precision highp float;
         attribute float aSide; attribute vec4 aRnd; attribute vec2 aOrigin;
-        uniform sampler2D tH, tS, tL, tN; uniform vec4 area; uniform float time, reach; uniform vec3 eye; uniform vec2 lfK;
+        uniform sampler2D tH, tS, tL, tN; uniform vec4 area; uniform float time, reach, lfWorld; uniform vec3 eye; uniform vec2 lfK;
         varying vec3 vC;
         ${SUN_GLSL}
         ${PASTURE}
@@ -152,7 +152,7 @@ export class Grass {
           // dry tips, and a dark thatch at the root where the light doesn't get
           alb = mix( alb, vec3( 0.34, 0.31, 0.15 ), t * t * 0.32 * aRnd.y );
           float ao = mix( 0.34, 1.0, smoothstep( 0.0, 0.7, t ) );
-          vec3 sky = ( exp2( texture2D( tL, uv ).rgb * lfK.x ) - 1.0 ) / lfK.y;
+          vec3 sky = ( exp2( texture2D( tL, uv ).rgb * lfK.x ) - 1.0 ) / lfK.y * lfWorld;
           float vis = lfSunVis( vec3( root.x, ground + t * H, root.y ), vec3( 0.0, 1.0, 0.0 ), aRnd.x * 6.28 ) * lfCloudAt( tN, root );
           vec3 v = normalize( eye - P );
           vec3 bn = normalize( vec3( dir.x * ( 0.25 + t * lean ), 1.0, dir.y * ( 0.25 + t * lean ) ) );

@@ -536,7 +536,7 @@ for p in m.props:
     if p['loose']:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
-json.dump(dict(veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
+json.dump(dict(stains=getattr(m, 'stains', []), veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
                density=dens, size=SIZE, sun=sun_out), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop

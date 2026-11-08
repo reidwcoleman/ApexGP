@@ -239,6 +239,20 @@ export class Game {
       this.post.mFinal.uniforms.satK.value = 0.97;
       this.sound.coast = true;
     }
+    // the map's mood on top of its bake: light taken down, the sun gone behind cloud, a duller sky, a camera that
+    // can only open so far, colour drained
+    const wx = L.map.weather;
+    if (wx?.dim !== undefined) {
+      LF.worldLight.value = wx.dim;
+      LF.skyK.value *= wx.dim;
+    }
+    if (wx?.sunK !== undefined) {
+      LF.sunC.value.multiplyScalar(wx.sunK);
+      LF.disc.value = 0;
+    }
+    if (wx?.skyTint) this.scene.traverse((o) => { const u = (o as THREE.Mesh).material && ((o as THREE.Mesh).material as THREE.ShaderMaterial).uniforms; if (u?.tint && u.disc) (u.tint.value as THREE.Vector3).set(wx.skyTint![0], wx.skyTint![1], wx.skyTint![2]); });
+    if (wx?.expMax) this.post.exposureMax = wx.expMax;
+    if (wx?.sat) this.post.mFinal.uniforms.satK.value = wx.sat;
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
     this.fx.rayAt = (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far, true);
     this.fx.lensHit = (k) => {
@@ -745,7 +759,7 @@ export class Game {
   private night(dt: number, outside: boolean) {
     this.sound.dread(this.cam.position, this.cam.position.y < -1, dt, this.inMatch && !outside);
     this.thunderT -= dt;
-    if (this.thunderT <= 0) {
+    if (this.thunderT <= 0 && (this.L.map.weather?.rain ?? 1) > 0) {
       this.thunderT = 22 + Math.random() * 40;
       const near = Math.random();
       const n = 1 + Math.floor(Math.random() * 3);
