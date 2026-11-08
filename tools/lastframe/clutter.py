@@ -251,3 +251,56 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
             if rng.random() < 0.3 and not zf:
                 unit(rng.choice(['litter', 'bottles']), x + rng.uniform(-1, 1), y + rng.uniform(-1, 1), z + 0.002, rng.uniform(0, 6.28))
     return placed
+
+
+def trim(m, skip=()):
+    """Skirting along the foot of every wall in every room, and a cornice where wall meets ceiling: real boards,
+    stood off each wall's face, broken at the doorways. Call before dress()."""
+    out = 0
+    for room in m.rooms:
+        if room['name'] in skip or 'stair' in room['name']:
+            continue
+        (x0, y0, z0), (x1, y1, z1) = room['a'], room['b']
+        if z1 - z0 < 2.2 or x1 - x0 < 1.2 or y1 - y0 < 1.2:
+            continue
+        near = [b for b in m.boxes if b.collide and b.a[0] <= x1 + 0.5 and b.b[0] >= x0 - 0.5 and b.a[1] <= y1 + 0.5 and b.b[1] >= y0 + -0.5 and b.b[2] > z0 and b.a[2] < z1]
+
+        def solid(x, y, z):
+            for b in near:
+                if b.a[0] - 1e-3 <= x <= b.b[0] + 1e-3 and b.a[1] - 1e-3 <= y <= b.b[1] + 1e-3 and b.a[2] <= z <= b.b[2]:
+                    return True
+            return False
+
+        for (ax, ay), (bx, by), (nx, ny) in (((x0, y0), (x1, y0), (0, 1)), ((x0, y1), (x1, y1), (0, -1)), ((x0, y0), (x0, y1), (1, 0)), ((x1, y0), (x1, y1), (-1, 0))):
+            L = math.hypot(bx - ax, by - ay)
+            for (zs, h, d, mat) in ((z0 + 0.05, 0.12, 0.018, room.get('base') or 'trim'), (z1 - 0.06, 0.07, 0.035, 'trim')):
+                run = None
+                n = max(2, int(L / 0.15))
+                for k in range(n + 1):
+                    t = k / n
+                    ex, ey = ax + (bx - ax) * t, ay + (by - ay) * t
+                    f = None
+                    if solid(ex, ey, zs):
+                        f = 0.0
+                        while f < 0.4 and solid(ex + nx * f, ey + ny * f, zs):
+                            f += 0.01
+                    ok = f is not None and f < 0.4
+                    if ok and run is None:
+                        run = [t, t, f]
+                    elif ok and abs(f - run[2]) < 0.025:
+                        run[1] = t
+                    if run is not None and (not ok or abs(f - run[2]) >= 0.025 or k == n):
+                        t0, t1, ff = run
+                        if (t1 - t0) * L > 0.25:
+                            p0 = (ax + (bx - ax) * t0, ay + (by - ay) * t0)
+                            p1 = (ax + (bx - ax) * t1, ay + (by - ay) * t1)
+                            za = z0 if zs < z0 + 1 else z1 - h
+                            if nx == 0:
+                                ya, yb = ay + ny * ff, ay + ny * (ff + d)
+                                m.box((min(p0[0], p1[0]), min(ya, yb), za), (max(p0[0], p1[0]), max(ya, yb), za + h), mat, collide=False, tag='trim', density=0.25)
+                            else:
+                                xa, xb = ax + nx * ff, ax + nx * (ff + d)
+                                m.box((min(xa, xb), min(p0[1], p1[1]), za), (max(xa, xb), max(p0[1], p1[1]), za + h), mat, collide=False, tag='trim', density=0.25)
+                            out += 1
+                        run = [t, t, f] if ok and run is not None and abs(f - run[2]) >= 0.025 else None
+    return out

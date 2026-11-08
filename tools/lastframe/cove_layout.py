@@ -333,6 +333,7 @@ def build():
             return -9.0
         u, v = fx - i, fy - j
         return float(GH[j, i] * (1 - u) * (1 - v) + GH[j, i + 1] * u * (1 - v) + GH[j + 1, i] * (1 - u) * v + GH[j + 1, i + 1] * u * v)
+    clutter.trim(m)
     clutter.dress(m, 'cottage', random.Random(41), outside=[(-20.0, 15.0, 130.0, 175.0, 0.0)], out_items=clutter.COAST_OUT, out_n=70, zf=zf, blood=0.5)
     return m
 

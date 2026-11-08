@@ -1166,6 +1166,7 @@ def build():
     m.hold = [[42, 23, 0], [66, 32, 0], [18, 23, 0]]
     # and what everyone left behind
     import clutter
+    clutter.trim(m)
     clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=80)
     return m
 

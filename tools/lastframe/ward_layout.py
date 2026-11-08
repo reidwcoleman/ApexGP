@@ -840,6 +840,7 @@ def build():
     m.attract = [[7.0, 1.5, -21.2], [22.0, 1.5, -21.0]]    # game axes: a slow walk down the south corridor
     # and what everyone left behind
     import clutter
+    clutter.trim(m)
     clutter.dress(m, 'hospital', random.Random(41), outside=[(-13.0, -9.0, 85.0, 13.0, 0.0), (-13.0, 14.0, 3.5, 57.0, 0.0), (68.5, 14.0, 85.0, 57.0, 0.0), (4.0, 44.5, 68.0, 57.0, 0.0), (CX0, SY1, CX1, NY0, 0.0)], out_n=90)
     return m
 

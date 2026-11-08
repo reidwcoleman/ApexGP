@@ -276,6 +276,7 @@ def build():
     m.centre = [30.0, -24.0]
     m.attract = [[56.5, 1.6, -26.0], [30.0, 4.6, -35.0]]    # game axes: up the east stair onto the balcony
     import clutter
+    clutter.trim(m)
     clutter.dress(m, 'flat', random.Random(43), outside=[(-22.0, -9.0, 33.0, 33.0, 0.0), (49.0, -9.0, 82.0, 33.0, 0.0), (33.0, -9.0, 49.0, 7.0, 0.0), (33.0, 21.0, 49.0, 33.0, 0.0), (-22.0, 33.0, -3.0, 58.0, 0.0), (55.0, 33.0, 82.0, 58.0, 0.0), (-2.0, 45.0, 55.0, 58.0, 0.0)], out_n=80, blood=0.55)
     return m
 
