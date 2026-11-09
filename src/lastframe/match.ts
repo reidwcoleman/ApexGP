@@ -416,7 +416,10 @@ export class Match {
         best = c;
       }
     }
-    const jx = (Math.random() - 0.5) * 2.4, jz = (Math.random() - 0.5) * 2.4;
+    // spawns sit on the walkable graph: a bed or a counter isn't somewhere to stand
+    const nn = this.nav.nearest(best[0], best[1], best[2]);
+    if (nn && Math.hypot(nn.x - best[0], nn.z - best[2]) < 3 && Math.abs(nn.y - best[1]) < 1) best = [nn.x, nn.y, nn.z];
+    const jx = (Math.random() - 0.5) * 1.2, jz = (Math.random() - 0.5) * 1.2;
     let x = best[0] + jx, z = best[2] + jz;
     if (this.world.blocked(x, best[1] + 0.1, z, 0.3, 1.7)) {
       x = best[0];

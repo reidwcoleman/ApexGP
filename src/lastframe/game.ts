@@ -669,7 +669,10 @@ export class Game {
           this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined, e.zone === 0 ? 2.2 : 1.6);
           window.setTimeout(() => {
             if (a.deadAt < 0 || !s.head) return;
-            this.fx.pool(s.head.x, this.L.world.floorAt(s.head.x, s.head.y + 0.4, s.head.z, 0.1), s.head.z);
+            // the floor right under them: searched from just above the head, so a table or a bed beside them doesn't catch it
+            let fy = this.L.world.floorAt(s.head.x, s.head.y + 0.15, s.head.z, 0.05);
+            if (!(fy > s.head.y - 0.6)) fy = s.head.y - 0.12;
+            this.fx.pool(s.head.x, fy, s.head.z);
           }, 1800);
         }
         const by = this.actors.get(e.by);

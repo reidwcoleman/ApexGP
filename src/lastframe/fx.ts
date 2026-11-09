@@ -851,7 +851,7 @@ export class Fx {
   private drops: { x: number; y: number; z: number; vx: number; vy: number; vz: number; floor: number; life: number; s: number }[] = [];
   private fling(x: number, y: number, z: number, vx: number, vy: number, vz: number, s: number) {
     if (this.drops.length > 120) return;
-    this.drops.push({ x, y, z, vx, vy, vz, floor: this.groundAt(x, y + 0.05, z), life: 2.5, s });
+    this.drops.push({ x, y, z, vx, vy, vz, floor: this.groundAt(x, y + 0.05, z), life: 4, s });
   }
 
   /** where something of yours sees the world from: blood on the lens */
@@ -881,19 +881,19 @@ export class Fx {
   blood(x: number, y: number, z: number, dx: number, dy: number, dz: number, wall?: { x: number; y: number; z: number; nx: number; ny: number; nz: number }, k = 1) {
     const dl = Math.hypot(dx, dy, dz) || 1;
     dx /= dl; dy /= dl; dz /= dl;
-    // the mist that hangs a moment where the round came out
-    for (let i = 0; i < 16 * k; i++) {
-      const sp = 0.6 + Math.random() * 3.2;
-      this.soft.emit(x + dx * 0.08, y + dy * 0.08, z + dz * 0.08, dx * sp + rnd(0.8), dy * sp + rnd(0.8) + 0.25, dz * sp + rnd(0.8), 0.035 + Math.random() * 0.06, 0.55, 0.25 + Math.random() * 0.4, 0.17, 0.008, 0.01, 0.62, 1.2, 3.2);
+    // a quick puff where the round came out: gone in a blink, the rest of it falls
+    for (let i = 0; i < 5 * k; i++) {
+      const sp = 0.6 + Math.random() * 2.4;
+      this.soft.emit(x + dx * 0.08, y + dy * 0.08, z + dz * 0.08, dx * sp + rnd(0.6), dy * sp + rnd(0.5), dz * sp + rnd(0.6), 0.02 + Math.random() * 0.03, 0.22, 0.06 + Math.random() * 0.1, 0.17, 0.008, 0.01, 0.45, 5, 3.2);
     }
     // the thick of it, a little way back the way it came
-    for (let i = 0; i < 6 * k; i++) {
+    for (let i = 0; i < 3 * k; i++) {
       const sp = 0.5 + Math.random() * 1.4;
-      this.soft.emit(x, y, z, -dx * sp + rnd(0.5), rnd(0.4) + 0.3, -dz * sp + rnd(0.5), 0.02 + Math.random() * 0.03, 0.2, 0.2 + Math.random() * 0.25, 0.14, 0.006, 0.008, 0.85, 6, 1.2);
+      this.soft.emit(x, y, z, -dx * sp + rnd(0.5), rnd(0.4) + 0.3, -dz * sp + rnd(0.5), 0.02 + Math.random() * 0.03, 0.2, 0.12 + Math.random() * 0.15, 0.14, 0.006, 0.008, 0.85, 6, 1.2);
     }
     // drops thrown on ahead: they fall and land
-    for (let i = 0; i < 10 * k; i++) {
-      const sp = 1.5 + Math.random() * 4.5;
+    for (let i = 0; i < 20 * k; i++) {
+      const sp = 1.2 + Math.random() * 4;
       this.fling(x, y, z, dx * sp + rnd(1.2), dy * sp + rnd(0.8) + Math.random() * 1.2, dz * sp + rnd(1.2), 0.035 + Math.random() * 0.06);
     }
     // the spray reaches whatever is behind them
@@ -911,9 +911,10 @@ export class Fx {
     }
     // close enough to the camera and some of it lands on the lens
     const ed = Math.hypot(x - this.eye.x, y - this.eye.y, z - this.eye.z);
-    if (ed < 2.6) {
+    if (ed < 1.3) {
+      // only right up close, and only some of it: the blood belongs on the floor, not hanging on the glass
       const facing = -((x - this.eye.x) * dx + (y - this.eye.y) * dy + (z - this.eye.z) * dz) / (ed || 1);
-      this.lensHit(Math.min(1, (2.6 - ed) / 2) * (0.35 + Math.max(0, facing) * 0.9) * k);
+      this.lensHit(Math.min(1, (1.3 - ed) / 1.0) * (0.15 + Math.max(0, facing) * 0.4) * k);
     }
   }
 
@@ -1035,8 +1036,10 @@ export class Fx {
         this.drops.splice(i, 1);
         continue;
       }
+      // the floor under where it is now, not where it started: off a balcony it falls to the ground
+      if (d.vy < 0) d.floor = this.groundAt(d.x, d.y + 0.05, d.z);
       if (d.y <= d.floor || d.life <= 0) {
-        if (d.life > 0) this.decal(d.x, d.floor + 0.004, d.z, 0, 1, 0, 12, d.s * (1.6 + Math.random() * 1.6) + Math.hypot(d.vx, d.vz) * 0.015);
+        if (d.y <= d.floor) this.decal(d.x, d.floor + 0.004, d.z, 0, 1, 0, 12, d.s * (1.6 + Math.random() * 1.6) + Math.hypot(d.vx, d.vz) * 0.015);
         this.drops.splice(i, 1);
       }
     }
