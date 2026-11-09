@@ -101,5 +101,18 @@ MATS = {
     'conc_wet': M('concrete_floor_worn_001', 3.0, (0.42, 0.42, 0.42), rough=0.25, wet=1.0),
     'ambulance': M('metal_plate', 2.0, (0.72, 0.72, 0.7), rough=0.45, metal=0.3, wet=0.4),
     'paint_r': M('metal_plate', 2.0, (0.5, 0.05, 0.035), rough=0.5),
+    # the mansion
+    'parquet': M('herringbone_parquet', 2.0, (0.72, 0.62, 0.52), rough=0.5),
+    'oldwood': M('old_wood_floor', 2.4, (0.85, 0.8, 0.74), rough=0.65),
+    'marble': M('marble_tiles', 2.2, (0.82, 0.8, 0.76), rough=0.28),
+    'mwall': M('patterned_plaster_wall', 2.4, (0.62, 0.36, 0.32), rough=0.7),
+    'mwall2': M('patterned_plaster_wall', 2.4, (0.42, 0.5, 0.44), rough=0.7),
+    'mplaster': M('worn_cracked_plaster', 2.8, (0.86, 0.82, 0.74)),
+    'mbroken': M('rough_plaster_broken', 2.6, (0.86, 0.82, 0.76)),
+    'mred': M('red_plaster_weathered', 2.6, (0.8, 0.7, 0.66)),
+    'cellar': M('stone_tiles_02', 2.2, (0.7, 0.68, 0.64), rough=0.8),
+    'cbrick': M('castle_brick_07', 2.6, (0.78, 0.74, 0.7), wet=0.3),
+    'panel': M('wood_plank_wall', 1.8, (1.25, 1.05, 0.9), rough=0.55),
+    'dplanks': M('dark_wooden_planks', 2.0, (0.8, 0.75, 0.7), rough=0.6),
 }
 UNLIT = {k for k, v in MATS.items() if v['emit']}

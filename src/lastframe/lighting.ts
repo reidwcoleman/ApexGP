@@ -69,6 +69,8 @@ export const LF = {
   lmK: { value: new THREE.Vector2(11, 64) },
   time: { value: 0 },
   worldLight: { value: 1 },
+  /** lightning through the windows: a cold lift over everything for a blink */
+  flash: { value: new THREE.Vector3() },
   planar: { value: null as THREE.Texture | null },
   planarVP: { value: new THREE.Matrix4() },
   planarK: { value: 0 },
@@ -176,6 +178,7 @@ uniform vec3 lfVolDim;
 uniform vec2 lfK;
 uniform float lfTime;
 uniform float lfWorldLight;
+uniform vec3 lfFlash;
 uniform vec4 lfLampP[6];
 uniform vec3 lfLampC[6];
 uniform vec4 lfFlickP[4];
@@ -286,7 +289,7 @@ const FRAG_LIGHT = /* glsl */ `
     vec3 lfCa = LF_PICK( lfNw ) + 0.004, lfCb = LF_PICK( lfGn ) + 0.004;
     float lfRelief = clamp( dot( lfCa, vec3( 0.3, 0.6, 0.1 ) ) / dot( lfCb, vec3( 0.3, 0.6, 0.1 ) ), 0.35, 1.8 );
     lfRelief = mix( lfRelief, 1.0, 0.15 );
-    irradiance += lfBaked * PI * lfRelief * lfWorldLight;
+    irradiance += lfBaked * PI * lfRelief * lfWorldLight + lfFlash * PI * lfRelief;
     float lfLum = dot( lfBaked, vec3( 0.3, 0.6, 0.1 ) );
     vec3 lfRn = normalize( mix( lfR, lfNw, roughnessFactor * roughnessFactor ) );
     vec3 lfSpec = LF_PICK( lfRn );
@@ -313,7 +316,7 @@ const FRAG_LIGHT = /* glsl */ `
     #endif
     radiance += lfRad * lfWorldLight;
   #else
-    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight * lfFlickDim( vLfW );
+    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight * lfFlickDim( vLfW ) + lfFlash * PI;
     radiance += lfCube( vLfW + lfNw * 0.36, lfR ) * lfWorldLight * LF_SPEC;
     #ifdef LF_VIEW
     {
@@ -553,6 +556,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfK = LF.lmK;
     s.uniforms.lfTime = LF.time;
     s.uniforms.lfWorldLight = LF.worldLight;
+    s.uniforms.lfFlash = LF.flash;
     s.uniforms.lfLampP = LF.lampP;
     s.uniforms.lfLampC = LF.lampC;
     s.uniforms.lfFlickP = LF.flickP;

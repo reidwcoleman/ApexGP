@@ -251,7 +251,7 @@ export class Hud {
       <div class="mast"><i class="dot"></i>REC<span class="sp">Case ${this.caseId}</span></div>
       <button class="plain" id="s-back">Back</button>
       <h2>${kind === 'solo' ? 'New case' : 'Open a room'}</h2>
-      <div class="group"><div class="lab">Location</div>${this.seg('map', [['ward', 'Ashgrove Ward'], ['motel', 'Pinewood Motor Inn'], ['block', 'Kessler Block']], MAP_ID)}</div>
+      <div class="group"><div class="lab">Location</div>${this.seg('map', [['ward', 'Ashgrove Ward'], ['mansion', 'Harrowgate House'], ['motel', 'Pinewood Motor Inn'], ['block', 'Kessler Block']], MAP_ID)}</div>
       ${this.pickers(kind)}
       ${this.loadout()}
       <div class="acts push"><button class="primary" id="s-go">${kind === 'solo' ? 'Start recording' : 'Open the room'}</button></div>

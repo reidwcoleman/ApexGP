@@ -59,6 +59,15 @@ cliff_side coast_land_rocks_01 coast_sand_rocks_02 damp_beach_sand leafy_grass g
 white_plaster_rough_01 roof_slates_02 roof_slates_03 stacked_stone_wall seaside_rock worn_asphalt clean_pebbles
 square_tiled_wall long_white_tiles peeling_painted_wall old_linoleum_flooring_01 worn_tile_floor'''.split()
 
+
+# the mansion
+TEX += """herringbone_parquet old_wood_floor marble_tiles patterned_plaster_wall worn_cracked_plaster rough_plaster_broken red_plaster_weathered
+stone_tiles_02 castle_brick_07 dark_wooden_planks wood_plank_wall""".split()
+HERO += """herringbone_parquet marble_tiles patterned_plaster_wall""".split()
+MODELS += """Chandelier_01 Chandelier_02 GothicBed_01 GothicCabinet_01 GothicCommode_01 Rockingchair_01 ClassicConsole_01 vintage_grandfather_clock_01
+Ottoman_01 fancy_picture_frame_02 vintage_wooden_drawer_01 antique_ceramic_vase_01 brass_candleholders gothic_coffee_table vintage_day_bed wooden_candlestick
+painted_wooden_sofa side_table_tall_01""".split()
+
 def tex(a):
     d = files(a)
     out = []

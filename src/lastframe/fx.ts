@@ -550,6 +550,281 @@ function bloodCells(c: CanvasRenderingContext2D, h: number, cellAt: (k: number) 
   });
 }
 
+/**
+ * Blood, its own sheet: 4 x 4 cells at 512 px, on a clear ground, drawn as wet paint (a thin translucent edge, a
+ * darker body, clots in the middle of a pool, droplets thrown on with tails pointing the way they flew). It is lit
+ * like any surface and glossy, so a pool shines under a flashlight. Two of each kind:
+ *   0 a burst on a wall, 1 a burst thrown one way, 2 a smear, 3 a pool, 4 drops, 5 a drag, 6 old and dried, 7 a hand
+ */
+function bloodAtlas() {
+  return canvasTex(2048, (c, S) => {
+    c.clearRect(0, 0, S, S);
+    const h = S / 4;
+    const R = Math.random;
+    const fresh = (a: number, k = 1) => `rgba(${Math.round((60 + R() * 30) * k)},${Math.round((1 + R() * 3) * k)},${Math.round((4 + R() * 4) * k)},${a})`;
+    const core = (a: number) => `rgba(${Math.round(48 + R() * 16)},${Math.round(1 + R() * 3)},${Math.round(4 + R() * 3)},${a})`;
+    const thin = (a: number) => `rgba(${Math.round(110 + R() * 25)},${Math.round(6 + R() * 6)},${Math.round(10 + R() * 6)},${a})`;
+    const blob = (x: number, y: number, r: number, col: string, wob = 0.25) => {
+      c.fillStyle = col;
+      c.beginPath();
+      const n = 24 + Math.floor(r / 2);
+      const ph = R() * 6, ph2 = R() * 6;
+      for (let i = 0; i <= n; i++) {
+        const a = (i / n) * 6.2832, rr = r * (1 + wob * (Math.sin(a * 3 + ph) * 0.45 + Math.sin(a * 7 + ph2) * 0.25 + (R() - 0.5) * 0.25));
+        c[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      }
+      c.fill();
+    };
+    // an outline that isn't round: lobes, a wobble, never the same twice
+    const shape = (p: Path2D, x: number, y: number, r: number, wob: number) => {
+      const n = 32 + Math.floor(r / 2);
+      const ph = R() * 6, ph2 = R() * 6, k3 = 2 + Math.floor(R() * 3);
+      for (let i = 0; i <= n; i++) {
+        const a = (i / n) * 6.2832, rr = r * (1 + wob * (Math.sin(a * k3 + ph) * 0.5 + Math.sin(a * 7 + ph2) * 0.22 + (R() - 0.5) * 0.12));
+        if (i) p.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+        else p.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+      }
+      p.closePath();
+    };
+    // wet blood: one body, dark where it's deep and redder where it thins, a thin translucent rim where it ran out
+    const pour = (p: Path2D, x: number, y: number, r: number, deep: string, edge: string, rim: string, rimW: number) => {
+      // the body on its own layer first, so the outlines of the lobes inside it never show; the rim only round the outside
+      const L = document.createElement('canvas');
+      L.width = L.height = Math.ceil(h);
+      const lc = L.getContext('2d')!;
+      const ox = Math.floor(x / h) * h, oy = Math.floor(y / h) * h;
+      lc.translate(-ox, -oy);
+      const g = lc.createRadialGradient(x, y, r * 0.05, x, y, r * 1.15);
+      g.addColorStop(0, deep);
+      g.addColorStop(0.65, deep);
+      g.addColorStop(1, edge);
+      lc.strokeStyle = rim;
+      lc.lineWidth = rimW;
+      lc.lineJoin = 'round';
+      lc.stroke(p);
+      lc.globalCompositeOperation = 'destination-out';
+      lc.fill(p);
+      lc.globalCompositeOperation = 'source-over';
+      lc.fillStyle = g;
+      lc.fill(p);
+      c.drawImage(L, ox, oy);
+    };
+    const wet = (x: number, y: number, r: number, wob = 0.25) => {
+      const p = new Path2D();
+      shape(p, x, y, r, wob);
+      pour(p, x, y, r, 'rgba(36,0,3,0.97)', 'rgba(76,3,7,0.95)', thin(0.35), Math.max(1.5, r * 0.08));
+    };
+    // a droplet that flew at an angle: round where it hit, a tail and a satellite past it in the way it was going
+    const drop = (x: number, y: number, r: number, ang: number, stretch: number) => {
+      c.fillStyle = fresh(0.92);
+      c.beginPath();
+      c.ellipse(x, y, r * stretch, r, ang, 0, 6.2832);
+      c.fill();
+      if (stretch > 1.4) {
+        c.strokeStyle = fresh(0.8);
+        c.lineWidth = r * 0.5;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.moveTo(x + Math.cos(ang) * r * stretch, y + Math.sin(ang) * r * stretch);
+        c.lineTo(x + Math.cos(ang) * r * stretch * 2.2, y + Math.sin(ang) * r * stretch * 2.2);
+        c.stroke();
+        c.beginPath();
+        c.arc(x + Math.cos(ang) * r * stretch * 2.6, y + Math.sin(ang) * r * stretch * 2.6, r * 0.35, 0, 6.2832);
+        c.fill();
+      }
+    };
+    // a run down: thin, wandering a little, thickening to a bead where it stopped
+    const drip = (x: number, y: number, len: number, w: number) => {
+      c.strokeStyle = fresh(0.9);
+      c.fillStyle = fresh(0.95);
+      c.lineCap = 'round';
+      let px = x, py = y;
+      const n = 14;
+      for (let i = 0; i < n; i++) {
+        const nx = px + (R() - 0.5) * 2.2, ny = py + len / n;
+        c.lineWidth = w * (0.6 + 0.6 * (i / n));
+        c.beginPath();
+        c.moveTo(px, py);
+        c.lineTo(nx, ny);
+        c.stroke();
+        px = nx;
+        py = ny;
+      }
+      c.beginPath();
+      c.ellipse(px, py, w * 1.1, w * 1.5, 0, 0, 6.2832);
+      c.fill();
+    };
+    const cell = (k: number, f: (cx: number, cy: number) => void) => {
+      const cx = (k % 4) * h + h / 2, cy = Math.floor(k / 4) * h + h / 2;
+      c.save();
+      c.beginPath();
+      c.rect(cx - h / 2 + 3, cy - h / 2 + 3, h - 6, h - 6);
+      c.clip();
+      f(cx, cy);
+      c.restore();
+    };
+    for (let v = 0; v < 2; v++) {
+      // bursts: a wet core where it hit, hundreds of droplets thrown out with their tails pointing away, runs below
+      for (const kind of [0, 1]) {
+        cell(kind * 2 + v, (cx, cy) => {
+          const bias = kind === 1 ? 0.6 : 0;
+          const dir = R() * 0.6 - 0.3;
+          for (let i = 0; i < 6; i++) wet(cx + (R() - 0.5) * h * 0.1, cy + (R() - 0.5) * h * 0.1, h * (0.03 + R() * 0.045), 0.4);
+          for (let i = 0; i < 520; i++) {
+            let a = R() * 6.2832;
+            if (bias && R() < bias) a = dir + (R() - 0.5) * 1.1;
+            const r = Math.pow(R(), 1.35) * h * 0.47;
+            const sz = Math.max(0.8, (1 - r / (h * 0.5)) * (R() ** 2.4) * 15 + 0.6);
+            drop(cx + Math.cos(a) * r, cy + Math.sin(a) * r, sz, a, 1 + (r / h) * 6 * R());
+          }
+          for (let i = 0; i < 9; i++) drip(cx + (R() - 0.5) * h * 0.26, cy + (R() - 0.2) * h * 0.08, h * (0.12 + R() * 0.32), 2.5 + R() * 3.5);
+        });
+      }
+      // a smear: pressed and drawn along, the streaks of what did it, runs off its lower edge
+      cell(4 + v, (cx, cy) => {
+        for (let i = 0; i < 40; i++) {
+          const t = i / 39;
+          blob(cx - h * 0.38 + t * h * 0.76, cy - h * 0.04 + Math.sin(t * 3 + v) * h * 0.04, h * (0.085 - t * 0.04) * (0.8 + R() * 0.4), fresh(0.3 + (1 - t) * 0.5), 0.3);
+        }
+        c.globalCompositeOperation = 'destination-out';
+        for (let i = 0; i < 26; i++) {
+          c.strokeStyle = `rgba(0,0,0,${0.08 + R() * 0.18})`;
+          c.lineWidth = 1 + R() * 3;
+          const y = cy - h * 0.11 + R() * h * 0.14;
+          c.beginPath();
+          c.moveTo(cx - h * 0.4, y);
+          c.lineTo(cx + h * (0.1 + R() * 0.3), y + (R() - 0.5) * 10);
+          c.stroke();
+        }
+        c.globalCompositeOperation = 'source-over';
+        for (let i = 0; i < 10; i++) drip(cx - h * 0.33 + R() * h * 0.55, cy + h * 0.02, h * (0.1 + R() * 0.34), 2.5 + R() * 3);
+      });
+      // a pool: one body with lobes where it found a low spot, deep and near black in the middle, a red rim where it
+      // thins, a translucent film past that, a few clots, the odd drop beside it
+      cell(6 + v, (cx, cy) => {
+        const p = new Path2D();
+        shape(p, cx, cy, h * 0.33, 0.18);
+        for (let i = 0; i < 4; i++) {
+          const a = R() * 6.28, d = h * (0.2 + R() * 0.08);
+          shape(p, cx + Math.cos(a) * d, cy + Math.sin(a) * d, h * (0.08 + R() * 0.08), 0.25);
+        }
+        pour(p, cx, cy, h * 0.42, 'rgba(22,0,2,0.98)', 'rgba(70,3,6,0.96)', thin(0.28), h * 0.03);
+        for (let i = 0; i < 26; i++) {
+          const a = R() * 6.28, r = R() * h * 0.22;
+          c.fillStyle = `rgba(${18 + R() * 14},0,2,${0.25 + R() * 0.35})`;
+          c.beginPath();
+          c.ellipse(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 2 + R() * 9, 2 + R() * 6, R() * 3, 0, 6.28);
+          c.fill();
+        }
+        for (let i = 0; i < 8; i++) {
+          const a = R() * 6.28, r = h * (0.4 + R() * 0.06);
+          wet(cx + Math.cos(a) * r, cy + Math.sin(a) * r, h * (0.006 + R() * 0.014), 0.2);
+        }
+      });
+      // drops off a wound onto the floor: round, crowned, the odd one stepped in
+      cell(8 + v, (cx, cy) => {
+        for (let i = 0; i < 14; i++) {
+          const x = cx + (R() - 0.5) * h * 0.6, y = cy + (R() - 0.5) * h * 0.6, r = h * (0.015 + R() * 0.04);
+          wet(x, y, r, 0.12);
+          for (let k = 0; k < 4; k++) {
+            if (R() < 0.4) continue;
+            const a = R() * 6.28;
+            drop(x + Math.cos(a) * r * (1.15 + R() * 0.4), y + Math.sin(a) * r * (1.15 + R() * 0.4), r * (0.06 + R() * 0.08), a, 1.3);
+          }
+        }
+      });
+      // dragged: a heavy start, then a broken streak with the drag lines through it
+      cell(10 + v, (cx, cy) => {
+        for (let i = 0; i < 90; i++) {
+          const t = i / 89;
+          if (R() < 0.12) continue;
+          blob(cx - h * 0.45 + t * h * 0.9, cy + Math.sin(t * 4 + v) * h * 0.035, h * (0.1 - t * 0.055) * (0.6 + R() * 0.5), fresh(0.25 + (1 - t) * 0.6), 0.45);
+        }
+        c.globalCompositeOperation = 'destination-out';
+        for (let i = 0; i < 40; i++) {
+          c.strokeStyle = `rgba(0,0,0,${0.08 + R() * 0.2})`;
+          c.lineWidth = 0.8 + R() * 2.5;
+          const y = cy - h * 0.09 + R() * h * 0.18;
+          c.beginPath();
+          c.moveTo(cx - h * 0.46, y);
+          c.lineTo(cx + h * 0.46, y + (R() - 0.5) * 14);
+          c.stroke();
+        }
+        c.globalCompositeOperation = 'source-over';
+      });
+      // old and dried: gone near black and brown, darker at the edge where it dried first, cracked, flaking
+      cell(12 + v, (cx, cy) => {
+        const p = new Path2D();
+        shape(p, cx, cy, h * 0.34, 0.22);
+        for (let i = 0; i < 3; i++) {
+          const a = R() * 6.28;
+          shape(p, cx + Math.cos(a) * h * 0.2, cy + Math.sin(a) * h * 0.2, h * (0.08 + R() * 0.06), 0.3);
+        }
+        pour(p, cx, cy, h * 0.4, 'rgba(40,12,7,0.86)', 'rgba(30,7,4,0.94)', 'rgba(16,3,2,0.9)', h * 0.022);
+        c.globalCompositeOperation = 'destination-out';
+        c.strokeStyle = 'rgba(0,0,0,0.35)';
+        for (let i = 0; i < 22; i++) {
+          let x = cx + (R() - 0.5) * h * 0.5, y = cy + (R() - 0.5) * h * 0.5, a = R() * 6.28;
+          c.lineWidth = 0.6 + R() * 1.2;
+          c.beginPath();
+          c.moveTo(x, y);
+          for (let k = 0; k < 5; k++) {
+            a += (R() - 0.5) * 1.4;
+            x += Math.cos(a) * h * 0.035;
+            y += Math.sin(a) * h * 0.035;
+            c.lineTo(x, y);
+          }
+          c.stroke();
+        }
+        for (let i = 0; i < 30; i++) {
+          c.fillStyle = `rgba(0,0,0,${0.2 + R() * 0.5})`;
+          c.fillRect(cx + (R() - 0.5) * h * 0.6, cy + (R() - 0.5) * h * 0.6, 1 + R() * 5, 1 + R() * 4);
+        }
+        c.globalCompositeOperation = 'source-over';
+      });
+      // a hand: the palm and fingers, slid down the wall into streaks
+      cell(14 + v, (cx, cy) => {
+        const top = cy - h * 0.34;
+        c.save();
+        c.translate(cx, top + h * 0.2);
+        c.rotate((R() - 0.5) * 0.4);
+        blob(0, 0, h * 0.085, fresh(0.9), 0.15);
+        blob(0, h * 0.03, h * 0.07, core(0.6), 0.2);
+        c.lineCap = 'round';
+        for (let f = 0; f < 4; f++) {
+          const fx = -h * 0.075 + f * h * 0.05;
+          c.strokeStyle = fresh(0.88);
+          c.lineWidth = h * 0.03;
+          c.beginPath();
+          c.moveTo(fx, -h * 0.05);
+          c.lineTo(fx * 1.1, -h * (f === 0 || f === 3 ? 0.17 : 0.21));
+          c.stroke();
+        }
+        c.lineWidth = h * 0.03;
+        c.beginPath();
+        c.moveTo(h * 0.08, 0);
+        c.lineTo(h * 0.15, -h * 0.07);
+        c.stroke();
+        c.restore();
+        for (let f = 0; f < 6; f++) {
+          const fx = cx - h * 0.08 + f * h * 0.034, y1 = top + h * (0.5 + R() * 0.25);
+          const g = c.createLinearGradient(0, top + h * 0.26, 0, y1);
+          g.addColorStop(0, fresh(0.55));
+          g.addColorStop(1, fresh(0));
+          c.strokeStyle = g;
+          c.lineWidth = h * (0.012 + R() * 0.016);
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(fx, top + h * 0.26);
+          c.lineTo(fx + (R() - 0.5) * 8, y1);
+          c.stroke();
+        }
+        for (let i = 0; i < 3; i++) drip(cx - h * 0.06 + R() * h * 0.12, top + h * 0.3, h * (0.2 + R() * 0.25), 3);
+      });
+    }
+  });
+}
+
 const CELLS_V = 4;
 
 interface Chip { x: number; y: number; z: number; vx: number; vy: number; vz: number; rx: number; ry: number; wx: number; wy: number; life: number; floor: number; s: number; bounced: boolean; long: boolean }
@@ -568,6 +843,11 @@ export class Fx {
   /** the first `fixed` marks are the map's own (old blood): gunfire wraps round after them, never over them */
   private fixed = 0;
   private markMat: THREE.MeshBasicMaterial;
+  /** blood is its own layer, lit and glossy */
+  private gore: THREE.InstancedMesh;
+  private bI = 0;
+  private BM = 1400;
+  private bFixed = 0;
   private tracer: THREE.LineSegments;
   private tPos = new Float32Array(48 * 6);
   private tl: Line[] = [];
@@ -618,6 +898,21 @@ export class Fx {
     this.decals.frustumCulled = false;
     this.decals.renderOrder = 3;
     this.group.add(this.decals);
+    const bg = new THREE.PlaneGeometry(1, 1);
+    bg.setAttribute('aCell', new THREE.InstancedBufferAttribute(new Float32Array(this.BM), 1));
+    const bm = new THREE.MeshStandardMaterial({
+      map: bloodAtlas(), transparent: true, depthWrite: false, roughness: 0.32, metalness: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    bm.onBeforeCompile = (s) => {
+      s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute float aCell;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvMapUv = vec2( ( uv.x + mod( aCell, 4.0 ) ) * 0.25, ( uv.y + 3.0 - floor( aCell / 4.0 ) ) * 0.25 );');
+    };
+    bm.customProgramCacheKey = () => 'lfblood';
+    applyLF(bm, { spec: 1 });
+    this.gore = new THREE.InstancedMesh(bg, bm, this.BM);
+    this.gore.count = 0;
+    this.gore.frustumCulled = false;
+    this.gore.renderOrder = 3;
+    this.group.add(this.gore);
     // ---- tracers
     const tg = new THREE.BufferGeometry();
     tg.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3).setUsage(THREE.DynamicDrawUsage));
@@ -817,14 +1112,26 @@ export class Fx {
   /** spin: 'down' turns the mark so whatever runs in it runs down the wall; otherwise random */
   decal(x: number, y: number, z: number, nx: number, ny: number, nz: number, cell: number, size: number, spin?: 'down' | number, keep = false) {
     let i: number;
-    if (keep && this.fixed < this.DM - 300) {
+    // blood goes to its own layer: cells 8-15 are its kinds, each drawn twice
+    const bl = cell >= 8;
+    const mesh = bl ? this.gore : this.decals;
+    if (bl) {
+      cell = (cell - 8) * 2 + (Math.random() < 0.5 ? 0 : 1);
+      if (keep && this.bFixed < this.BM - 300) {
+        i = this.bFixed++;
+        this.bI = Math.max(this.bI, this.bFixed);
+      } else {
+        i = this.bI;
+        this.bI = this.bI + 1 >= this.BM ? this.bFixed : this.bI + 1;
+      }
+    } else if (keep && this.fixed < this.DM - 300) {
       i = this.fixed++;
       this.dI = Math.max(this.dI, this.fixed);
     } else {
       i = this.dI;
       this.dI = this.dI + 1 >= this.DM ? this.fixed : this.dI + 1;
     }
-    this.decals.count = Math.max(this.decals.count, i + 1);
+    mesh.count = Math.max(mesh.count, i + 1);
     this.v.set(nx, ny, nz).normalize();
     this.q.setFromUnitVectors(this.z, this.v);
     let ang = typeof spin === 'number' ? spin : Math.random() * 6.28;
@@ -836,9 +1143,9 @@ export class Fx {
     }
     this.q.multiply(new THREE.Quaternion().setFromAxisAngle(this.z, ang));
     this.m.compose(this.s.set(x + nx * 0.006, y + ny * 0.006, z + nz * 0.006), this.q, new THREE.Vector3(size, size, size));
-    this.decals.setMatrixAt(i, this.m);
-    this.decals.instanceMatrix.needsUpdate = true;
-    const a = this.decals.geometry.getAttribute('aCell') as THREE.InstancedBufferAttribute;
+    mesh.setMatrixAt(i, this.m);
+    mesh.instanceMatrix.needsUpdate = true;
+    const a = mesh.geometry.getAttribute('aCell') as THREE.InstancedBufferAttribute;
     a.setX(i, cell);
     a.needsUpdate = true;
     return i;
@@ -848,7 +1155,7 @@ export class Fx {
   private grow: { i: number; x: number; y: number; z: number; q: THREE.Quaternion; s: number; to: number; k: number; secs: number }[] = [];
   private spread(x: number, y: number, z: number, cell: number, from: number, to: number, secs: number) {
     const i = this.decal(x, y, z, 0, 1, 0, cell, from);
-    this.decals.getMatrixAt(i, this.m);
+    this.gore.getMatrixAt(i, this.m);
     const q = new THREE.Quaternion();
     this.m.decompose(this.v, q, this.s);
     this.grow = this.grow.filter((g) => g.i !== i);
@@ -1082,10 +1389,10 @@ export class Fx {
         const e = 1 - (1 - g.k) * (1 - g.k);
         const s = g.s + (g.to - g.s) * e;
         this.m.compose(this.v.set(g.x, g.y, g.z), g.q, this.s.set(s, s, s));
-        this.decals.setMatrixAt(g.i, this.m);
+        this.gore.setMatrixAt(g.i, this.m);
         if (g.k >= 1) this.grow.splice(i, 1);
       }
-      this.decals.instanceMatrix.needsUpdate = true;
+      this.gore.instanceMatrix.needsUpdate = true;
     }
     this.flashT -= dt;
     if (this.flashT <= 0) for (const f of this.flash) f.visible = false;

@@ -21,7 +21,7 @@ import { Shafts } from './shafts.ts';
 import { Graffiti, markUp } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
-const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, cove: 0.6 };
+const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -281,10 +281,10 @@ export class Game {
     // what people wrote on the walls, and the rooms where it went worst
     if (!LF.sunOn) {
       const gr = new Graffiti();
-      this.scene.add(gr.mesh);
+      this.scene.add(gr.group);
       const seed = [...MAP_ID].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7);
       const out = markUp(L.map.rooms as never, L.world, this.fx, gr, seed);
-      if (location.search.includes('dev=1')) console.log('[lf] graffiti', out.pieces, 'soaked rooms', out.soaked, out.soakedRooms.join(' '));
+      if (location.search.includes('dev=1')) console.log('[lf] graffiti', out.pieces, 'posters', out.posters, 'papers', out.papers, 'soaked rooms', out.soaked, out.soakedRooms.join(' '));
       (this as unknown as { graffiti: Graffiti }).graffiti = gr;
     }
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
@@ -809,6 +809,10 @@ export class Game {
     }
     if (this.flashes.length && this.time > this.flashes[this.flashes.length - 3] + 1) this.flashes.length = 0;
     LF.skyFlash.value = f;
+    // indoors too: the rooms jump out of the dark for a blink, and the windows throw beams across the floor
+    const sf = Math.min(1.2, f / 8);
+    LF.flash.value.set(0.55, 0.62, 0.9).multiplyScalar(sf * 0.03);
+    if (this.shafts) this.shafts.bolt = sf;
     if (f > 0 && outside) this.whiteout = Math.max(this.whiteout, f * 0.006);
     this.creakT -= dt;
     if (this.creakT <= 0 && this.inMatch) {

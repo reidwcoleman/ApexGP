@@ -16,7 +16,7 @@ const MAP_Q = new URLSearchParams(location.search).get('map');
 export const DEFAULT_MAP = 'ward';
 /** every location is played indoors for now: the cove (out in the open) is kept but not offered, and ?map=cove opens the hospital */
 export const OUTDOOR = false;
-export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' = MAP_Q === 'cove' && OUTDOOR ? 'cove' : MAP_Q === 'block' ? 'block' : MAP_Q === 'motel' ? 'motel' : 'ward';
+export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' = MAP_Q === 'cove' && OUTDOOR ? 'cove' : MAP_Q === 'block' ? 'block' : MAP_Q === 'motel' ? 'motel' : MAP_Q === 'mansion' ? 'mansion' : 'ward';
 /** the map's own files; textures, guns and gear are shared */
 export const MB = BASE + (MAP_ID === 'block' ? '' : MAP_ID + '/');
 

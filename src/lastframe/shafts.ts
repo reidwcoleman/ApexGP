@@ -86,7 +86,9 @@ export class Shafts {
   private time = { value: 0 };
   private fwd = { value: new THREE.Vector3() };
   /** each shaft, the lamp it hangs on if that flickers, and the door it comes through if any */
-  private all: { m: THREE.ShaderMaterial; mesh: THREE.Mesh; base: number; l?: Light; door: { ang: number } | null }[] = [];
+  private all: { m: THREE.ShaderMaterial; mesh: THREE.Mesh; base: number; l?: Light; door: { ang: number } | null; sky: boolean }[] = [];
+  /** lightning, 0..1: the shafts that come from the sky blaze for a blink */
+  bolt = 0;
 
   constructor(map: { glass: Glass[]; doors?: DoorD[]; lights: Light[]; rooms: Room[]; units?: Unit[]; weather?: { sky?: number[]; sun?: { dir: number[]; power: number; color: number[] } } }, ray: Ray, gain = 1, doors: { ang: number }[] = []) {
     const roomAt = (x: number, y: number, z: number) => map.rooms.find((r) => x > r.a[0] && x < r.b[0] && y > r.a[1] - 0.2 && y < r.b[1] && z > r.a[2] && z < r.b[2]);
@@ -149,7 +151,7 @@ export class Shafts {
       mesh.renderOrder = -1;
       this.group.add(mesh);
       this.mats.push(mat);
-      this.all.push({ m: mat, mesh, base: k, l: best.l?.flicker ? best.l : undefined, door });
+      this.all.push({ m: mat, mesh, base: k, l: best.l?.flicker ? best.l : undefined, door, sky: !best.l });
     };
     for (const g of map.glass) {
       const w = g.b - g.a, h = g.z1 - g.z0;
@@ -190,10 +192,10 @@ export class Shafts {
     this.time.value = time;
     cam.getWorldDirection(this.fwd.value);
     for (const h of this.all) {
-      if (!h.l && !h.door) continue;
+      if (!h.l && !h.door && !h.sky) continue;
       // a door lets it through as it opens
       const open = h.door ? THREE.MathUtils.smoothstep(Math.abs(h.door.ang), 0.05, 1.0) : 1;
-      h.m.uniforms.k.value = h.base * open * (h.l && lamp ? lamp(h.l) : 1);
+      h.m.uniforms.k.value = h.base * open * (h.l && lamp ? lamp(h.l) : 1) * (h.sky ? 1 + this.bolt * 28 : 1);
       h.mesh.visible = open > 0.01;
     }
   }

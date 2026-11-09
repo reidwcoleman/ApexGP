@@ -33,7 +33,14 @@ COAST_OUT = [('L', 'wooden_crate_02', 0.4, (20, 'wood', 'box')), ('L', 'plastic_
 HOSP_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('K:board', 0.0, 0.62), ('K:conduit', 0.0, 0.5), ('D:wall_clock', 2.3, 0.2), ('D:fire_alarm', 1.4, 0.1), ('K:conduit', 0.0, 0.5)]
 FLAT_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_02', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:wall_clock', 2.0, 0.2), ('K:conduit', 0.0, 0.5)]
 COTTAGE_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.55, 0.3), ('D:hanging_picture_frame_03', 1.55, 0.3), ('D:wall_clock', 1.9, 0.2)]
+MANOR_WALL = [('L', 'vintage_suitcase', 0.35, (6, 'bag', 'box')), ('L', 'cardboard_box_01', 0.3, (4, 'card', 'box')), ('L', 'painted_wooden_chair_01', 0.35, (5, 'wood', 'box')),
+              ('L', 'WoodenChair_01', 0.35, (5, 'wood', 'box')), ('L', 'wine_bottles_01', 0.15, (1, 'glass', 'box')), ('D', 'antique_ceramic_vase_01', 0.15),
+              ('D', 'wooden_candlestick', 0.1), ('L', 'pot_enamel_01', 0.15, (1, 'metal', 'cyl')), ('D', 'street_rat', 0.12), ('K', 'radiator', 0.02, None, (0.5, 0.12, 0.8)),
+              ('L', 'trashbag', 0.3, (7, 'bag', 'box'))]
+MANOR_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.6, 0.62), ('D:fancy_picture_frame_01', 1.7, 0.4), ('D:fancy_picture_frame_02', 1.7, 0.4),
+              ('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:ornate_mirror_01', 1.3, 0.4), ('D:wall_clock', 2.1, 0.2)]
 STYLES = {
+    'manor': dict(wall=MANOR_WALL, hung=MANOR_HUNG, flat=['litter', 'debris', 'bottles', 'litter'], ceil=['cables'], dense=1.6, bags=0.12, candles=0.12),
     'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.9, bags=0.22, candles=0.06),
     'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=1.8, bags=0.1, candles=0.06),
     'cottage': dict(wall=COTTAGE_WALL, hung=COTTAGE_HUNG, flat=['litter'], ceil=[], dense=1.1),

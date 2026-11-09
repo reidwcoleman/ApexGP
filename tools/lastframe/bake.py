@@ -25,12 +25,16 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 COVE = opt('map', 'block') == 'cove'
 WARD = opt('map', 'block') == 'ward'
 MOTEL = opt('map', 'block') == 'motel'
+MANSION = opt('map', 'block') == 'mansion'
 if COVE:
     import cove_layout, coveland, cove_kit
     m = cove_layout.build()
 elif MOTEL:
     import motel_layout
     m = motel_layout.build()
+elif MANSION:
+    import mansion_layout
+    m = mansion_layout.build()
 elif WARD:
     import ward_layout
     m = ward_layout.build()

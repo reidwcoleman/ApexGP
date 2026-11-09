@@ -9,8 +9,9 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 COVE = '--cove' in sys.argv
 WARD = '--ward' in sys.argv
 MOTEL = '--motel' in sys.argv
+MANSION = '--mansion' in sys.argv
 TEXD = os.path.join(ROOT, 'public', 'lastframe')
-DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else TEXD
+DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else os.path.join(TEXD, 'mansion') if MANSION else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
 os.makedirs(TEXD + '/tex', exist_ok=True)
 os.makedirs(DST, exist_ok=True)
@@ -97,6 +98,14 @@ if MOTEL:
     import motel_layout as ML
     out['weather'] = ML.WEATHER
     out['volume'] = ML.VOLUME
+    out['centre'] = raw['centre']
+    out['attract'] = raw['attract']
+    out['night'] = 1
+elif MANSION:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mansion_layout as NL
+    out['weather'] = NL.WEATHER
+    out['volume'] = NL.VOLUME
     out['centre'] = raw['centre']
     out['attract'] = raw['attract']
     out['night'] = 1
