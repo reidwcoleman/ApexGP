@@ -227,6 +227,7 @@
               <button class="pk-tile" data-game="marbles" aria-label="Wobble Mania" style="--art: url(loading/wobble_grid.webp); --pos: 46% 62%; --hpos: 50% 58%"><span class="pk-face"><span class="pk-wm wm-wobble">Wobble<br>Mania</span></span></button>
               <button class="pk-tile" data-game="mogul" aria-label="Mogul" style="--art: url(loading/mogul_hero.webp); --pos: 50% 40%; --hpos: 50% 30%"><span class="pk-face"><span class="pk-wm wm-mogul">Mogul</span></span></button>
               <button class="pk-tile" data-game="tracksmith" aria-label="Tracksmith" style="--art: url(loading/tracksmith_hero.webp); --pos: 62% 50%; --hpos: 50% 62%"><span class="pk-face"><span class="pk-wm wm-ts">Track<br>smith</span></span></button>
+              <button class="pk-tile" data-game="bluebird" aria-label="Bluebird Peak" style="--art: url(loading/bluebird_hero.webp); --pos: 50% 45%; --hpos: 50% 40%"><span class="pk-face"><span class="pk-wm wm-bb">Bluebird<br>Peak</span></span></button>
               <button class="pk-tile pk-libtile" data-game="lib" aria-label="Game Library"><span class="pk-face"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 3h4v4H3zM9 3h4v4H9zM15 3h4v4h-4zM3 9h4v4H3zM9 9h4v4H9zM3 15h4v4H3z"/><path fill="currentColor" d="M12.6 12.4h6.6c1.3 0 2.2.8 2.5 2l.9 4.4c.3 1.6-1.6 2.5-2.7 1.3l-1.6-1.8h-4.8l-1.6 1.8c-1.1 1.2-3 .3-2.7-1.3l.9-4.4c.3-1.2 1.2-2 2.5-2z"/></svg></span></button>
             </div>
             <div class="pk-row" data-row="media" hidden></div>
@@ -240,6 +241,7 @@
             <div class="pk-show" data-for="marbles"><span class="pk-tag">Online Multiplayer</span><span class="pk-wm wm-wobble"><span>W</span><span>o</span><span>b</span><span>b</span><span>l</span><span>e</span> <span>M</span><span>a</span><span>n</span><span>i</span><span>a</span></span><h2>Continue where you left off</h2><p>A jelly-bean knockout party, online with friends</p></div>
             <div class="pk-show" data-for="mogul"><span class="pk-tag">Single Player</span><span class="pk-wm wm-mogul">Mogul</span><h2>Continue where you left off</h2><p>One food cart on a real street, then a whole city to out-earn</p></div>
             <div class="pk-show" data-for="tracksmith"><span class="pk-tag">Single Player</span><span class="pk-wm wm-ts">Tracksmith</span><h2>Continue where you left off</h2><p>Loops, jumps and boost pads, then build and share your own tracks</p></div>
+            <div class="pk-show" data-for="bluebird"><span class="pk-tag">Single Player</span><span class="pk-wm wm-bb">Bluebird Peak</span><h2>Continue where you left off</h2><p>Run a ski resort, groom it at night, then ski it yourself</p></div>
             <div class="pk-show pk-plain" data-for="lib"><h2>Game Library</h2><p>All your games in one place</p></div>
             <div class="pk-show pk-plain" data-for="photo"><h2 id="pk-photo"></h2><p>Photo mode</p></div>
             <div class="pk-acts"><button id="pk-play">Play Game</button><button id="pk-more" aria-label="More options"><i></i><i></i><i></i></button></div>
@@ -409,7 +411,8 @@
       #picker .wm-mogul { font: 400 calc(var(--wm) * 1.2) / 1 "PK Abril", Georgia, serif; color: #ffe0a3; }
       #picker .wm-lf { font: 700 calc(var(--wm) * 0.8) / 1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: -0.04em; color: #e9e6df; text-shadow: 0 0.04em 0.3em rgba(0, 0, 0, 0.7); }
       #picker .wm-ts { font: italic 400 calc(var(--wm) * 0.92) / 1 "PK Racing", Impact, sans-serif; text-transform: uppercase; }
-      #picker .pk-face .wm-boost, #picker .pk-face .wm-ts, #picker .pk-face .wm-wobble, #picker .pk-face .wm-lf { font-size: calc(var(--wm) * 0.72); line-height: 1.02; }
+      #picker .wm-bb { font: italic 800 calc(var(--wm) * 0.95) / 0.95 "Barlow Condensed", Arial, sans-serif; text-transform: uppercase; color: #fff; text-shadow: 0 calc(3 * var(--u)) 0 #1f3a5f; }
+      #picker .pk-face .wm-boost, #picker .pk-face .wm-ts, #picker .pk-face .wm-wobble, #picker .pk-face .wm-lf, #picker .pk-face .wm-bb { font-size: calc(var(--wm) * 0.72); line-height: 1.02; }
       #picker .pk-acts { position: absolute; left: 0; bottom: 0; display: flex; gap: calc(11 * var(--u)); }
       #picker #pk-play { width: calc(222 * var(--u)); height: calc(48 * var(--u)); border-radius: calc(24 * var(--u)); background: rgba(255, 255, 255, 0.1); font-size: calc(18 * var(--u)); font-weight: 600; transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
       #picker #pk-more { display: flex; align-items: center; justify-content: center; gap: calc(3.5 * var(--u)); width: calc(48 * var(--u)); height: calc(48 * var(--u)); border-radius: 50%; background: rgba(255, 255, 255, 0.1); transition: background 0.14s, color 0.14s, box-shadow 0.14s; backdrop-filter: blur(calc(10 * var(--u))); }
@@ -674,6 +677,7 @@
           marbles: [['wobble_grid', 'Round', 'Bumper Bash', '20% 50%'], ['wobble_grid', 'Round', 'Bean Bay GP', '50% 50%'], ['wobble_grid', 'Round', 'Rocket Rumble', '80% 50%']],
           mogul: [['mogul_hero', 'Start small', 'One Food Cart', '30% 40%'], ['mogul_hero', 'Think big', 'Out-Earn the City', '70% 30%']],
           tracksmith: [['tracksmith_hero', 'Game mode', 'Time Trial', '30% 50%'], ['tracksmith_hero', 'Game mode', 'Track Editor', '70% 50%']],
+          bluebird: [['bluebird_hero', 'Manage', 'Build the Resort', '30% 40%'], ['bluebird_hero', 'Your job', 'Groom, Patrol, Fix', '75% 70%'], ['bluebird_hero', 'Play', 'Ski It Yourself', '60% 20%']],
         };
         var cards = [];
         var fillCards = function (g) {
@@ -725,6 +729,7 @@
           else if (g === 'boost') location.href = 'boost.html';
           else if (g === 'mogul') location.href = 'mogul.html';
           else if (g === 'tracksmith') location.href = 'tracksmith.html';
+          else if (g === 'bluebird') location.href = 'bluebird.html';
           else if (g === 'lastframe') location.href = 'lastframe.html';
           else start();
         };
@@ -886,7 +891,7 @@
           if (d) { e.preventDefault(); return nav(d); }
           if (e.code === 'Escape' || e.code === 'Backspace') { e.preventDefault(); return back(); }
           if (phase === 'login' && e.code === 'KeyO') { var i = slots.indexOf(document.activeElement) - 1; if (i >= 0) { e.preventDefault(); renameIt(document.activeElement, i); } return; }
-          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6 }[e.code];
+          var n = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6, Digit8: 7 }[e.code];
           if (n !== undefined && phase === 'home' && !over) { if (tab !== 'games') setTab('games'); choose(games[n]); }
         };
         window.addEventListener('keydown', keys);

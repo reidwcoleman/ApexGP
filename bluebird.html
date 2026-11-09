@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Bluebird Peak</title>
+    <link rel="icon" href="data:," />
+    <style>
+      @font-face { font-family: "Barlow"; font-weight: 500; font-display: swap; src: url(fonts/barlow-500.woff2) format("woff2"); }
+      @font-face { font-family: "Barlow"; font-weight: 600 800; font-display: swap; src: url(fonts/barlow-700.woff2) format("woff2"); }
+      @font-face { font-family: "Barlow Condensed"; font-weight: 800; font-style: italic; font-display: swap; src: url(fonts/barlowc-800i.woff2) format("woff2"); }
+      html, body { margin: 0; height: 100%; background: #bcd6f0; overflow: hidden; touch-action: none; }
+      #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      #loading { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; color: #1d2433; font-family: "Barlow", system-ui, sans-serif; transition: opacity 0.7s ease;
+        background: linear-gradient(180deg, #2d6fd0 0%, #8ab8ea 55%, #eef4fb 56%, #ffffff 100%); }
+      #loading.done { opacity: 0; pointer-events: none; }
+      #loading .lwrap { text-align: center; width: min(560px, 86vw); }
+      #loading .peak { width: 220px; height: 120px; margin: 0 auto -8px; display: block; }
+      #loading .logo { font: italic 800 clamp(56px, 10vw, 112px) / 0.9 "Barlow Condensed", "Barlow", sans-serif; letter-spacing: -0.01em; color: #fff; text-shadow: 0 6px 0 #1f3a5f, 0 14px 40px rgba(0, 0, 0, 0.25); text-transform: uppercase; }
+      #loading .tag { margin-top: 18px; font-weight: 600; font-size: 16px; color: #1f3a5f; letter-spacing: 0.08em; text-transform: uppercase; }
+      #loading .lbar { margin: 18px auto 0; width: 60%; height: 8px; background: rgba(31, 58, 95, 0.12); border-radius: 4px; overflow: hidden; }
+      #loading .lbar b { display: block; height: 100%; width: 0; background: #f2b33d; transition: width 0.3s ease; }
+      #loading .lstep { margin-top: 10px; font-size: 14px; color: rgba(31, 58, 95, 0.7); font-weight: 600; }
+      #loading .lerr { margin-top: 12px; color: #a3301e; font: 12px/1.4 monospace; white-space: pre-wrap; max-height: 40vh; overflow: auto; text-align: left; }
+      #back { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; color: #1f3a5f; font: 600 14px "Barlow", sans-serif; text-decoration: none; opacity: 0.7; }
+      #loading.done + #back { display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="ui"></div>
+    <div id="loading">
+      <div class="lwrap">
+        <svg class="peak" viewBox="0 0 220 120"><path d="M10 115 L80 30 L105 58 L130 18 L210 115 Z" fill="#fff" stroke="#1f3a5f" stroke-width="5" stroke-linejoin="round"/><path d="M80 30 L95 48 L85 52 L72 44 Z M130 18 L148 42 L135 47 L118 36 Z" fill="#cfe0f2"/><path d="M60 115 C 80 95, 100 100, 115 80 S 150 70, 170 115" fill="none" stroke="#2f7fe0" stroke-width="5" stroke-dasharray="2 9" stroke-linecap="round"/></svg>
+        <div class="logo">Bluebird Peak</div>
+        <div class="tag">Run the mountain. Then ski it.</div>
+        <div class="lbar"><b></b></div>
+        <div class="lstep">Loading</div>
+        <div class="lerr"></div>
+      </div>
+    </div>
+    <a id="back" href="./?pick">← All games</a>
+    <script type="module" src="/src/bluebird/main.ts"></script>
+  </body>
+</html>
