@@ -189,6 +189,8 @@ export class Mountain {
   runOf: Record<string, RunPath> = {};
   /** snow-state cell -> run index + 1 (0 = off piste) */
   runCell = new Uint8Array(SN * SN);
+  /** nearest run (index + 1) for every cell within 30 m of one, 0 elsewhere */
+  nearRun = new Uint8Array(SN * SN);
   /** cells per run, for averages */
   cellsOf: Uint32Array[] = [];
   kickers: Kicker[] = [];
@@ -299,7 +301,7 @@ export class Mountain {
             const px = (ci + 0.5) * SC - HALF, pz = (cj + 0.5) * SC - HALF;
             const d = Math.hypot(px - p.x[i], pz - p.z[i]) - half;
             const k = cj * SN + ci;
-            if (d < this.edge[k]) { this.edge[k] = d; if (d <= 0) this.runCell[k] = ri + 1; }
+            if (d < this.edge[k]) { this.edge[k] = d; this.nearRun[k] = ri + 1; if (d <= 0) this.runCell[k] = ri + 1; }
           }
       }
     });

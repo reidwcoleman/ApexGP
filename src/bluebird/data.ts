@@ -2,7 +2,7 @@
 // level (10, 25, 50, 100) doubles what it does. The resort runs itself; your job is to spend well.
 import { LIFTS, RUNS, LIFT_BY, RUN_BY } from './mountain.ts';
 
-export type Cat = 'lifts' | 'trails' | 'village' | 'snow' | 'crew';
+export type Cat = 'lifts' | 'trails' | 'village' | 'fun' | 'snow' | 'crew';
 
 export const MILESTONES = [10, 25, 50, 100, 150, 200];
 export const mult = (lv: number) => { let m = 1; for (const s of MILESTONES) if (lv >= s) m *= 2; return m; };
@@ -56,6 +56,11 @@ ITEMS.push(
   { id: 'school', cat: 'village', name: 'Ski school', icon: 'school', max: 200, build: 15000, base: 3000, growth: 1.2, needLv: 5, unit: 'more visitors', color: '#e0a63a' },
   { id: 'hotel', cat: 'village', name: 'Slopeside hotel', icon: 'hotel', max: 200, build: 500000, base: 40000, growth: 1.2, needLv: 9, unit: 'a night', color: '#3d4f66' },
   { id: 'lights', cat: 'village', name: 'Night skiing', icon: 'lamp', max: 1, build: 80000, base: 0, growth: 1, needLv: 7, needs: 'lift.meadow', unit: '', color: '#f2b33d' },
+  { id: 'tubing', cat: 'fun', name: 'Tubing hill', icon: 'tube', max: 200, build: 120000, base: 16000, growth: 1.19, needLv: 6, unit: 'per guest', color: '#e0457b' },
+  { id: 'rink', cat: 'fun', name: 'Ice rink', icon: 'skate', max: 200, build: 300000, base: 32000, growth: 1.19, needLv: 7, unit: 'per guest', color: '#3fb7c9' },
+  { id: 'summithut', cat: 'fun', name: 'Summit restaurant', icon: 'cup', max: 200, build: 900000, base: 90000, growth: 1.2, needLv: 9, needs: 'lift.summit', unit: 'per guest', color: '#8a5a3b' },
+  { id: 'spa', cat: 'fun', name: 'Hot springs spa', icon: 'spa', max: 200, build: 4000000, base: 380000, growth: 1.2, needLv: 11, needs: 'hotel', unit: 'per guest', color: '#6a4cc2' },
+  { id: 'heli', cat: 'fun', name: 'Heli-skiing', icon: 'heli', max: 200, build: 15000000, base: 1400000, growth: 1.21, needLv: 13, unit: 'flights a day', color: '#23262b' },
   { id: 'fleet', cat: 'snow', name: 'Snowcat fleet', icon: 'cat', max: 8, build: 0, base: 4000, growth: 4, unit: 'snowcats', color: '#d2453a' },
   { id: 'catpower', cat: 'snow', name: 'Grooming crews', icon: 'cat', max: 200, build: 0, base: 200, growth: 1.18, unit: 'groomed a night', color: '#d2453a' },
   { id: 'snowmaking', cat: 'snow', name: 'Snowmaking', icon: 'gun', max: 40, build: 3000, base: 2000, growth: 1.25, needLv: 3, unit: 'snow guns', color: '#3fb7c9' },
@@ -96,6 +101,12 @@ export const catRate = (lv: number) => 7000 * (1 + 0.08 * Math.max(0, lv - 1)) *
 export const gunsOf = (lv: number) => lv * 2;
 export const breakChance = (mech: number) => 0.035 * Math.pow(0.94, mech);
 export const fixMinutes = (mech: number) => Math.max(6, 60 * Math.pow(0.93, mech));
+/** attractions: extra spend per visit, and the share of guests who go */
+export const FUN_SPEND: Record<string, [number, number]> = { tubing: [6, 0.9], rink: [7, 1.0], summithut: [12, 1.6], spa: [22, 2.6] };
+export const FUN_SHARE: Record<string, number> = { tubing: 0.3, rink: 0.35, summithut: 0.45, spa: 0.2 };
+export const funSpend = (id: string, lv: number) => (lv <= 0 ? 0 : (FUN_SPEND[id][0] + FUN_SPEND[id][1] * (lv - 1)) * mult(lv));
+export const heliFlights = (lv: number) => (lv <= 0 ? 0 : Math.round((6 + 2 * (lv - 1)) * mult(lv)));
+export const HELI_FARE = 1400;
 
 export function itemEffect(it: Item, lv: number): string {
   const id = it.id;
@@ -115,6 +126,8 @@ export function itemEffect(it: Item, lv: number): string {
     case 'mechanic': return `fixes in ${Math.round(fixMinutes(lv))} min`;
     case 'marketing': return `+${Math.round(marketingBoost(lv) * 100)}% visitors`;
     case 'service': return `+${serviceStars(lv).toFixed(2)} stars`;
+    case 'tubing': case 'rink': case 'summithut': case 'spa': return `$${n(funSpend(id, lv))} a visit`;
+    case 'heli': return `${heliFlights(lv)} flights a day`;
   }
   return '';
 }
@@ -126,7 +139,7 @@ export const levelReward = (lv: number) => 150 * lv;
 
 // ------------------------------------------------------------------ goals
 export interface Goal { id: string; text: string; reward: number; check: (g: GoalCtx) => number /* progress 0..1 */ }
-export interface GoalCtx { lv: (id: string) => number; day: number; best: number; stars: number; resortLv: number; cash: number; runs: number; lifts: number; lifetime: number }
+export interface GoalCtx { lv: (id: string) => number; day: number; best: number; stars: number; resortLv: number; cash: number; runs: number; lifts: number; lifetime: number; events: number; bestIncome: number; minRunLv: number }
 const lvGoal = (id: string, n: number, reward: number, text?: string): Goal => ({ id: `${id}@${n}`, text: text ?? `${ITEM_BY[id].name} to level ${n}`, reward, check: (g) => g.lv(id) / n });
 const build = (id: string, reward: number): Goal => ({ id: 'build:' + id, text: `Build ${ITEM_BY[id].name}`, reward, check: (g) => (g.lv(id) > 0 ? 1 : 0) });
 export const GOALS: Goal[] = [
@@ -160,6 +173,40 @@ export const GOALS: Goal[] = [
   lvGoal('lift.gondola', 50, 2500000),
   { id: 'best@15000', text: 'Host 15,000 skiers in a day', reward: 6000000, check: (g) => g.best / 15000 },
 ];
+GOALS.splice(9, 0, { id: 'ev@1', text: 'Host your first event', reward: 1500, check: (g) => g.events });
+GOALS.splice(18, 0, build('tubing', 20000));
+GOALS.splice(23, 0, build('rink', 40000), { id: 'ev@10', text: 'Host 10 events', reward: 60000, check: (g) => g.events / 10 });
+GOALS.splice(29, 0, build('summithut', 120000));
+GOALS.push(build('spa', 900000), build('heli', 3000000));
+
+// ------------------------------------------------------------------ events you can host
+export interface EventDef {
+  id: string; name: string; icon: string; blurb: string;
+  needLv: number; needs?: string;
+  /** entry fee and prize, in seconds of current income (with a floor for the fee) */
+  costSec: number; rewardSec: number; floor: number;
+  guestMul: number; buzz: number; cooldown: number;
+  /** how it shows on the mountain */
+  fx: 'banner' | 'jam' | 'race' | 'torch' | 'fireworks';
+  run?: string; night?: boolean;
+}
+export const EVENTS: EventDef[] = [
+  { id: 'retro', name: 'Retro Ski Day', icon: 'ski', blurb: 'Neon onesies and 80s music. The locals love it.', needLv: 2, costSec: 50, rewardSec: 170, floor: 300, guestMul: 1.3, buzz: 0.03, cooldown: 2, fx: 'banner' },
+  { id: 'railjam', name: 'Rail Jam', icon: 'park', blurb: 'Riders battle on Kicker Alley in front of a crowd.', needLv: 5, needs: 'run.park', costSec: 90, rewardSec: 330, floor: 2500, guestMul: 1.35, buzz: 0.08, cooldown: 3, fx: 'jam', run: 'park' },
+  { id: 'slalom', name: 'Slalom Cup', icon: 'flag', blurb: 'Gates down Widowmaker, racers from three states.', needLv: 6, needs: 'run.widow', costSec: 140, rewardSec: 520, floor: 6000, guestMul: 1.4, buzz: 0.1, cooldown: 3, fx: 'race', run: 'widow' },
+  { id: 'torch', name: 'Torchlight Parade', icon: 'flame', blurb: 'Instructors ski Meadowlark at dusk with flares.', needLv: 7, needs: 'lights', costSec: 130, rewardSec: 480, floor: 9000, guestMul: 1.5, buzz: 0.1, cooldown: 3, fx: 'torch', run: 'meadowlark', night: true },
+  { id: 'fireworks', name: 'Fireworks Night', icon: 'spark', blurb: 'A show over the village after the lifts close.', needLv: 8, costSec: 200, rewardSec: 700, floor: 15000, guestMul: 1.45, buzz: 0.15, cooldown: 4, fx: 'fireworks', night: true },
+  { id: 'freeride', name: 'Freeride Tour', icon: 'double', blurb: 'The pros drop into Eagle Chutes, live on TV.', needLv: 10, needs: 'run.chutes', costSec: 320, rewardSec: 1300, floor: 120000, guestMul: 1.55, buzz: 0.2, cooldown: 5, fx: 'race', run: 'chutes' },
+  { id: 'festival', name: 'Winter Festival', icon: 'spark', blurb: 'Bands on the plaza, food trucks, fireworks at night.', needLv: 11, needs: 'hotel', costSec: 500, rewardSec: 2100, floor: 400000, guestMul: 1.8, buzz: 0.2, cooldown: 6, fx: 'fireworks', night: true },
+  { id: 'worldcup', name: 'World Cup Downhill', icon: 'trophy', blurb: 'The world tour comes to Long Haul. TV rights pay big.', needLv: 14, needs: 'lift.gondola', costSec: 1000, rewardSec: 4600, floor: 3000000, guestMul: 2.2, buzz: 0.3, cooldown: 7, fx: 'race', run: 'longhaul' },
+];
+export const EVENT_BY: Record<string, EventDef> = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
+
+// ------------------------------------------------------------------ Legend: start a new season with a permanent boost
+/** Legend stars earned by everything this resort has made */
+export const legendFor = (earned: number) => Math.floor(Math.sqrt(Math.max(0, earned) / 4e6));
+export const legendMul = (stars: number) => 1 + 0.25 * stars;
+export const LEGEND_LV = 12;
 
 export type Weather = 'bluebird' | 'cloudy' | 'flurries' | 'snow' | 'storm' | 'warm';
 export const WEATHER: Record<Weather, { name: string; icon: string; snow: number; demand: number; temp: [number, number]; cloud: number; wind: number }> = {

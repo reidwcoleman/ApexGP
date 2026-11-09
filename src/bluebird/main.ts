@@ -11,7 +11,8 @@ import { Snowcat } from './actors.ts';
 import { Fx } from './fx.ts';
 import { Audio } from './audio.ts';
 import { UI, icon, num, type Label } from './ui.ts';
-import { WEATHER, ITEM_BY, ITEMS, tierOf, CHAIR_TIERS, GONDOLA_TIERS, CARPET_TIERS } from './data.ts';
+import { Attractions, SPOTS } from './attractions.ts';
+import { WEATHER, ITEM_BY, ITEMS, EVENT_BY, tierOf, legendMul } from './data.ts';
 
 const SAVE_KEY = 'bluebird.v2';
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -42,6 +43,7 @@ async function boot() {
   const crowd = new Crowd(world, m, sim, lifts);
   const fx = new Fx(world.scene);
   const audio = new Audio();
+  const attractions = new Attractions(world, m, village, fx);
   const ui = new UI($('#ui'), sim, m);
   step('Starting the lifts', 0.9);
   await frame();
@@ -56,6 +58,7 @@ async function boot() {
   // ------------------------------------------------------------------ the snowcat fleet
   const [shx, shz] = BUILD_SPOTS.shed;
   const cats: Snowcat[] = [];
+  const catLanes: { run: number; lane: number; s: number }[] = [];
   const catFor = (i: number) => {
     while (cats.length <= i) { const c = new Snowcat(world, m, sim); c.place(shx - 10 + cats.length * 7, shz - 32, Math.PI); cats.push(c); }
     return cats[i];
@@ -67,7 +70,9 @@ async function boot() {
     }
     const fleet = Math.max(1, sim.lv('fleet'));
     for (let i = 0; i < fleet; i++) catFor(i).setLevel(Math.min(4, 1 + Math.floor(sim.lv('catpower') / 25)));
+    cats.forEach((c, i) => (c.group.visible = i < fleet));
     village.update(sim);
+    attractions.update(sim);
   }
   syncLevels();
 
@@ -97,7 +102,15 @@ async function boot() {
   });
   canvas.addEventListener('wheel', (e) => { flyTo = null; idleT = 0; if (tour) setTour(false); orbit.dist = Math.min(1500, Math.max(30, orbit.dist * Math.exp(e.deltaY * 0.0012))); e.preventDefault(); }, { passive: false });
   const keys = new Set<string>();
-  addEventListener('keydown', (e) => { if ((e.target as HTMLElement)?.tagName === 'INPUT') return; keys.add(e.code); idleT = 0; if (e.code === 'Space') { e.preventDefault(); ui.onSpeed(0); } });
+  addEventListener('keydown', (e) => {
+    if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    keys.add(e.code); idleT = 0;
+    if (e.code === 'Space') { e.preventDefault(); ui.onSpeed(0); }
+    else if (e.code === 'KeyM') ui.setView(ui.view === 1 ? 0 : 1);
+    else if (/^Digit[1-4]$/.test(e.code)) ui.setView(+e.code.slice(5) - 1);
+    else if (e.code === 'KeyR') ui.report ? ui.closeModal() : ui.openReport('overview');
+    else if (e.code === 'Escape') ui.closeModal();
+  });
   addEventListener('keyup', (e) => keys.delete(e.code));
   addEventListener('blur', () => keys.clear());
 
@@ -146,18 +159,42 @@ async function boot() {
     cam.updateProjectionMatrix();
     world.focus.copy(orbit.target);
   }
-  ui.onFocus = (x, z) => { flyTo = { target: new THREE.Vector3(x, m.at(x, z), z), dist: Math.min(orbit.dist, 380) }; };
+  const PLACES: Record<string, [number, number]> = { ...BUILD_SPOTS, ...SPOTS };
   const focusItem = (id: string) => {
-    if (id.startsWith('lift.')) { const l = lifts.by[id.slice(5)]; const p = l.towers[Math.floor(l.towers.length / 2)]; flyTo = { target: p.clone(), dist: 260 }; }
-    else if (id.startsWith('run.')) { const p = m.runOf[id.slice(4)]; const i = Math.floor(p.x.length / 2); flyTo = { target: new THREE.Vector3(p.x[i], p.h[i], p.z[i]), dist: 260 }; }
+    if (tour) setTour(false);
+    if (id.startsWith('lift.')) { const l = lifts.by[id.slice(5)]; const p = l.towers[Math.floor(l.towers.length / 2)]; flyTo = { target: p.clone(), dist: 300 }; }
+    else if (id.startsWith('run.')) { const p = m.runOf[id.slice(4)]; const i = Math.floor(p.x.length / 2); flyTo = { target: new THREE.Vector3(p.x[i], p.h[i], p.z[i]), dist: Math.max(240, p.len * 0.55) }; }
+    else if (PLACES[id]) { const [x, z] = PLACES[id]; flyTo = { target: new THREE.Vector3(x, m.at(x, z), z), dist: 150 }; }
   };
+  ui.onFocusItem = focusItem;
+  ui.onView = (n) => { world.setView(n); if (n && orbit.dist < 600 && !tour) flyTo = { target: new THREE.Vector3(0, 200, 0), dist: 1250 }; if (n) orbit.pitch = Math.max(orbit.pitch, 0.62); };
 
   // ------------------------------------------------------------------ buying, claiming, speed
   ui.onBuy = (id, n) => {
     const before = sim.lv(id);
     if (!sim.buy(id, n)) { audio.bad(); return; }
     audio.buy();
-    if (before === 0 && (id.startsWith('lift.') || id.startsWith('run.'))) { focusItem(id); ui.toast(`${ITEM_BY[id].name} is open!`, 'good'); }
+    if (before === 0 && (id.startsWith('lift.') || id.startsWith('run.') || SPOTS[id as keyof typeof SPOTS])) { focusItem(id); ui.toast(`${ITEM_BY[id].name} is open!`, 'good'); }
+  };
+  ui.onHost = (id) => {
+    const e = EVENT_BY[id];
+    if (!sim.hostEvent(id)) { audio.bad(); return; }
+    audio.buy();
+    const ev = sim.s.event!;
+    ui.toast(ev.state === 'live' ? `${e.name} is on! Crowds are heading up the mountain` : `${e.name} is booked for ${ev.day === sim.day ? 'today' : 'tomorrow'}`, 'good');
+    if (e.run) focusItem('run.' + e.run); else flyTo = { target: new THREE.Vector3(SPOTS.banner[0], 0, SPOTS.banner[1]), dist: 200 };
+  };
+  ui.onSeason = () => {
+    if (!sim.newSeason()) return;
+    for (const d of [...drops]) { world.scene.remove(d.mesh); }
+    drops.length = 0;
+    sim.dirty = true;
+    syncLevels();
+    ui.setView(0);
+    flyTo = { target: new THREE.Vector3(30, 0, 400), dist: 470 };
+    ui.celebrate(`Season ${sim.s.seasons + 1}`, `Legend ×${legendMul(sim.s.legend).toFixed(2)} on everything you earn`, 'level');
+    audio.trick(3000);
+    persist();
   };
   ui.onClaim = (id, x, y) => { const r = sim.claim(id); if (r) { audio.cash(); audio.buy(); ui.coins(x, y, 22); ui.floatCash(x, y - 20, r, true); } };
   ui.onSpeed = (n) => { audio.click(); if (n === 0) sim.paused = !sim.paused; else { sim.paused = false; sim.speed = n; } };
@@ -226,7 +263,8 @@ async function boot() {
   }
   function labels() {
     const out: Label[] = [];
-    const far = orbit.dist > 1000;
+    const v = ui.view;
+    const near = orbit.dist < 720;
     for (const l of lifts.list) {
       const id = l.def.id;
       const lv = sim.lv('lift.' + id);
@@ -234,12 +272,14 @@ async function boot() {
       const s = project(p.x, p.y + 9, p.z);
       if (!s) continue;
       const br = sim.broken[id] !== undefined;
-      const tierName = l.def.kind === 'gondola' ? GONDOLA_TIERS : l.def.kind === 'carpet' ? CARPET_TIERS : CHAIR_TIERS;
       const lock = sim.lockReason('lift.' + id);
+      const load = sim.liftLoad[id] ?? 0;
+      const lc = load > 0.9 ? '#e5302f' : load > 0.6 ? '#f9b72e' : '#3fe07a';
+      const busy = lv && sim.isOpen && !br ? `<span class="ld" title="How busy"><b style="width:${Math.min(100, load * 100).toFixed(0)}%;background:${lc}"></b></span>` : '';
       const html = br
         ? `${icon('wrench', 13)} ${l.def.name} <small>fixing, ${Math.ceil(sim.fixLeft(id))} min</small>`
-        : lv ? `${icon(l.def.kind === 'chair' ? 'chair' : l.def.kind, 14)} ${l.def.name} <span class="lv">${lv}</span>` : `${icon('lock', 13)} ${l.def.name} <small>${lock ? lock : money(ITEM_BY['lift.' + id].build)}</small>`;
-      out.push({ id: 'l' + id, x: s.x, y: s.y, cls: br ? 'bad' : lv ? '' : 'dim', html, click: () => { ui.openItem('lift.' + id); }, hidden: (!lv && (far || !!lock)) || tour });
+        : lv ? `${icon(l.def.kind === 'chair' ? 'chair' : l.def.kind, 14)} ${l.def.name} <span class="lv">${lv}</span>${busy}` : `${icon('lock', 13)} ${l.def.name} <small>${lock ? lock : money(ITEM_BY['lift.' + id].build)}</small>`;
+      out.push({ id: 'l' + id, x: s.x, y: s.y, cls: br ? 'bad' : lv ? '' : 'dim', html, click: () => ui.openItem('lift.' + id), hidden: tour || (lv ? !near && v === 0 && !br : (!!lock || v !== 1 && !near)) });
     }
     for (const r of RUNS) {
       const p = m.runOf[r.id];
@@ -249,9 +289,26 @@ async function boot() {
       const lv = sim.lv('run.' + r.id);
       const built = sim.runBuilt(r.id);
       const q = sim.runQ[r.id] ?? 0;
-      const thin = built && !sim.runOpen(r.id) && sim.isOpen;
+      const dark = sim.phase === 'evening' && !r.lit;
+      const thin = built && !sim.runOpen(r.id) && sim.isOpen && !dark;
       const lock = sim.lockReason('run.' + r.id);
-      out.push({ id: 'r' + r.id, x: s.x, y: s.y, cls: built ? (thin ? 'bad' : '') : 'dim', html: `${icon(r.diff, 13)} ${r.name} ${built ? `<span class="lv">${lv}</span><small>${thin ? 'closed' : Math.round(q * 100) + '%'}</small>` : `<small>${lock ?? money(ITEM_BY['run.' + r.id].build)}</small>`}`, click: () => { ui.openItem('run.' + r.id); }, hidden: (!built && (far || !!lock || !sim.liftBuilt(r.needs))) || tour });
+      const metric = v === 3 ? `${num(sim.onRun[r.id] ?? 0)} skiing` : thin ? 'closed: thin snow' : dark ? 'closed for the night' : Math.round(q * 100) + '% snow';
+      const html = `${icon(r.diff, 13)} ${r.name} ${built ? `<span class="lv">${lv}</span><small>${metric}</small>` : `<small>${lock ?? money(ITEM_BY['run.' + r.id].build)}</small>`}`;
+      out.push({ id: 'r' + r.id, x: s.x, y: s.y, cls: (built ? (thin ? 'bad' : '') : 'dim') + (v ? ' big' : ''), html, click: () => ui.openItem('run.' + r.id), hidden: tour || (built ? !near && v === 0 && !thin : (!!lock || !sim.liftBuilt(r.needs) || (v !== 1 && !near))) });
+    }
+    for (const id of ['tubing', 'rink', 'summithut', 'spa', 'heli'] as const) {
+      if (!sim.lv(id)) continue;
+      const [x, z] = SPOTS[id];
+      const s = project(x, m.at(x, z) + 16, z);
+      if (!s) continue;
+      out.push({ id: 'a' + id, x: s.x, y: s.y, cls: 'place', html: `${icon(ITEM_BY[id].icon, 13)} ${ITEM_BY[id].name} <small>${sim.lv(id)}</small>`, click: () => ui.openItem(id), hidden: tour || orbit.dist > 520 || v !== 0 });
+    }
+    const ev = sim.eventToday;
+    if (ev) {
+      const p = ev.run ? m.runOf[ev.run] : null;
+      const [x, z] = p ? [p.x[Math.floor(p.x.length * 0.55)], p.z[Math.floor(p.z.length * 0.55)]] : SPOTS.banner;
+      const s = project(x, m.at(x, z) + 14, z);
+      if (s) out.push({ id: 'ev', x: s.x, y: s.y, cls: 'ev big', html: `${icon(ev.icon, 15)} ${ev.name} <small style="color:#fff">${sim.s.event?.state === 'live' ? 'live now' : 'today'}</small>`, click: () => ui.openReport('events'), hidden: tour });
     }
     for (const d of drops) {
       const s = project(d.mesh.position.x, d.mesh.position.y + 12, d.mesh.position.z);
@@ -269,9 +326,9 @@ async function boot() {
     const s = sim.s;
     tipT += dt;
     const msgs = [
-      `Welcome to Bluebird Peak! It runs itself: skiers come, snowcats groom at night, money rolls in. Your job is to spend it well. Start by upgrading <b>Sprout Slope</b> below.`,
-      `<b>Guests a day</b> on the left shows what holds you back: the red bar. Hit <b>Fix</b> to jump to the upgrade that helps most.`,
-      `Golden crates parachute onto the trails now and then: click them for bonus cash. Save up for the <b>Meadow Chair</b> to open the real mountain!`,
+      `Welcome to Bluebird Peak! It runs itself: skiers come, snowcats groom at night, money rolls in. Your job is to spend it well. Start by upgrading <b>Sprout Slope</b> in the shop on the right.`,
+      `<b>Your business</b> on the left shows what holds you back: the red bar. Hit <b>Fix</b> to jump to the upgrade that helps most.`,
+      `Golden crates parachute onto the trails now and then: click them for bonus cash. Press <b>M</b> for the trail map. Save up for the <b>Meadow Chair</b> to open the real mountain!`,
     ];
     if (s.tut === 0 && sim.lv('run.bunny') >= 3) { s.tut = 1; tipT = 0; }
     if (s.tut === 1 && (tipT > 16 || sim.lv('parking') >= 3)) { s.tut = 2; tipT = 0; }
@@ -283,7 +340,7 @@ async function boot() {
   let last = performance.now();
   let saveT = 0, tSec = 0, lodgeCashT = 3;
   if (offlineEarned > 0) ui.welcome(offlineEarned);
-  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, drops, spawnDrop, setTour };
+  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, drops, spawnDrop, setTour, attractions, syncLevels };
 
   function loop() {
     requestAnimationFrame(loop);
@@ -304,6 +361,10 @@ async function boot() {
         const unlocked = ITEMS.filter((it) => it.needLv === e.lv).map((it) => it.name);
         ui.celebrate(`Level ${e.lv}`, `+${money(e.reward)}${unlocked.length ? ' · Unlocked: ' + unlocked.join(', ') : ''}`, 'level');
         audio.trick(2000);
+      } else if (e.k === 'event') {
+        const ev = EVENT_BY[e.id];
+        if (e.phase === 'live') { ui.toast(`${ev.name} is on today: ${Math.round((ev.guestMul - 1) * 100)}% more guests`, 'good', 5000); audio.good(); }
+        else { ui.celebrate(ev.name, `Prize +${money(e.payout ?? 0)}`, 'event'); audio.trick(1500); }
       } else if (e.k === 'bought') {
         syncLevels();
         if (e.milestone) { ui.celebrate(`${ITEM_BY[e.id].name}`, `Level ${e.lv}: ×2 bonus`, 'milestone'); audio.trick(900); }
@@ -314,19 +375,39 @@ async function boot() {
     const liftsOn = sim.isOpen || sim.onMountain > 1;
     for (const l of lifts.list) l.update(gameDt, sim.liftRunning(l.def.id) && (liftsOn || l.riders.some((c) => c.some(Boolean))));
     crowd.update(gameDt);
+    attractions.frame(dt, tSec, sim, world.night, gameDt);
+    if (attractions.boom) { attractions.boom = false; if (Math.random() < 0.6) audio.land(4 + Math.random() * 6); }
     village.setCars(sim.onMountain / Math.max(1, sim.plan.visitors || 1) + 0.1);
 
-    // snowcats: out on the trails at night, parked by the shed by day
+    // snowcats: out on the trails at night driving lanes up and down (the sim grooms in bulk; these are the
+    // trucks you watch), parked by the shed by day
     const fleet = Math.max(1, sim.lv('fleet'));
+    const out = sim.grooming && sim.cats.some((c) => c.on);
     for (let i = 0; i < fleet; i++) {
       const c = catFor(i);
-      const st = sim.cats[i];
-      if (st && st.on && sim.grooming && (st.x || st.z)) {
-        const wob = Math.sin(tSec * 0.8 + i) * 3;
-        c.pose(st.x + Math.cos(st.yaw) * wob, st.z - Math.sin(st.yaw) * wob, dt, tSec, true);
-        c.setLights(world.night > 0.2 ? 90 : 0);
+      const lane = catLanes[i] ?? (catLanes[i] = { run: -1, lane: 0, s: 0 });
+      if (out) {
+        if (lane.run < 0 || !sim.runBuilt(RUNS[lane.run].id)) {
+          const taken = new Set(catLanes.map((l) => l?.run));
+          const want = sim.cats[i]?.run ?? -1;
+          const free = RUNS.map((r, ri) => ri).filter((ri) => sim.runBuilt(RUNS[ri].id) && !taken.has(ri));
+          lane.run = want >= 0 && !taken.has(want) ? want : free.length ? free[(Math.random() * free.length) | 0] : RUNS.findIndex((r) => sim.runBuilt(r.id));
+          lane.lane = 0; lane.s = 0;
+        }
+        const p = m.runOf[RUNS[lane.run].id];
+        const w = 7 * (c.lv >= 3 ? 1.4 : 1);
+        const lanes = Math.max(1, Math.floor(p.def.w / w));
+        lane.s += dt * (9 + 3 * Math.min(4, sim.speed)) * (sim.paused ? 0 : 1);
+        if (lane.s > p.len - 4) { lane.s = 0; lane.lane++; if (lane.lane >= lanes) { lane.run = -1; continue; } }
+        const down = lane.lane % 2 === 0;
+        const k = m.idxAt(p, down ? lane.s + 2 : p.len - 2 - lane.s);
+        const lat = -p.def.w / 2 + (lane.lane + 0.5) * (p.def.w / lanes);
+        const tx = p.x[k] - p.tz[k] * lat, tz = p.z[k] + p.tx[k] * lat;
+        c.pose(tx, tz, dt, tSec, true);
+        c.setLights(world.night > 0.15 ? 90 : 0);
         if (Math.random() < 0.5) fx.emit(c.p.x - Math.sin(c.yaw) * 6, c.p.y + 0.4, c.p.z - Math.cos(c.yaw) * 6, 0, 0.8, 0, 1.5, 1, 0.8, 90);
       } else {
+        lane.run = -1;
         c.pose(shx - 14 + i * 8, shz - 34, dt, tSec, false);
         c.setLights(0);
       }
@@ -360,7 +441,7 @@ async function boot() {
     world.setTime(sim.hour, w.cloud, snowing, w.wind, dt, tSec);
     world.syncSnow(sim);
 
-    ui.markers = [...sim.cats.filter((c) => c.on && sim.grooming).map((c) => ({ x: c.x, z: c.z, kind: 'cat' })), ...drops.map((d) => ({ x: d.x, z: d.z, kind: 'drop' }))];
+    world.syncTrails(sim, dt, cats.map((c) => ({ x: c.p.x, z: c.p.z, yaw: c.yaw, on: c.lightsOn && c.group.visible })));
     updateCamera(dt);
     labels();
     tips(dt);

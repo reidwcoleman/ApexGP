@@ -13,10 +13,10 @@ abstract class Vehicle {
   vy = 0;
   air = false;
   n = new THREE.Vector3(0, 1, 0);
-  lights: THREE.SpotLight[] = [];
+  lightsOn = false;
   constructor(protected w: World, protected m: Mountain, protected sim: Sim) { w.scene.add(this.group); }
   place(x: number, z: number, yaw: number) { this.p.set(x, this.m.ground(x, z), z); this.yaw = yaw; this.speed = 0; this.vy = 0; this.air = false; }
-  setLights(on: number) { for (const l of this.lights) l.intensity = on; }
+  setLights(on: number) { this.lightsOn = on > 0; }
   /** keep the body on the snow, pitched and rolled with it */
   protected settle(dt: number, len: number, wid: number) {
     const m = this.m;
@@ -96,18 +96,7 @@ export class Snowcat extends Vehicle {
     til.add(drum, comb);
     til.position.set(0, 0.5, -3.3);
     g.add(til);
-    // headlights
-    for (const s of [-0.6, 0.6]) {
-      const sp = new THREE.SpotLight(0xfff4e0, 0, 90, 0.62, 0.5, 1.2);
-      sp.position.set(s, 3.0, 1.6);
-      sp.target.position.set(s * 2, 0, 22);
-      g.add(sp, sp.target);
-      this.lights.push(sp);
-    }
-    const rear = new THREE.SpotLight(0xffe6c4, 0, 30, 0.9, 0.6, 1.4);
-    rear.position.set(0, 3.0, -0.5); rear.target.position.set(0, 0, -10);
-    g.add(rear, rear.target);
-    this.lights.push(rear);
+    // headlights are faked on the snow by the terrain shader (see World.syncTrails)
     g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
   }
 

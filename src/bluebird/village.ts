@@ -109,7 +109,7 @@ export class Village {
     return g;
   }
 
-  private sign(text: string, sub: string, w: number, bg?: string) {
+  sign(text: string, sub: string, w: number, bg?: string) {
     const mat = new THREE.MeshStandardMaterial({ map: signTexture(text, sub, bg), roughness: 0.7, emissive: 0xffffff, emissiveMap: null as any, emissiveIntensity: 0 });
     const s = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), mat);
     const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, w / 4 + 0.3, 0.2), M(0x3b2a1e));

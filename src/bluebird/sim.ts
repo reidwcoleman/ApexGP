@@ -5,11 +5,18 @@ import { Mountain, RUNS, LIFTS, SN, SC, HALF, RUN_BY, LIFT_BY } from './mountain
 import {
   ITEM_BY, ITEMS, priceOf, bulk, WEATHER, type Weather, OPEN, CLOSE, NIGHT_CLOSE, DAY_NAMES, liftCap, runAppeal, lodgeSpend, lodgeSeats, parkingCap,
   rentalSpend, schoolBoost, hotelRooms, marketingBoost, serviceStars, catRate, gunsOf, breakChance, fixMinutes, tierOf, levelFromXp, levelReward, xpFor, GOALS, type GoalCtx,
+  FUN_SHARE, funSpend, heliFlights, HELI_FARE, EVENTS, EVENT_BY, type EventDef, legendFor, legendMul, LEGEND_LV,
 } from './data.ts';
 
 export interface Gun { id: string; run: string; k: number; x: number; z: number; dx: number; dz: number }
-export interface DayStats { visitors: number; night: number; tickets: number; lodge: number; rental: number; school: number; hotel: number; bonus: number; starsStart: number }
-const emptyDay = (stars: number): DayStats => ({ visitors: 0, night: 0, tickets: 0, lodge: 0, rental: 0, school: 0, hotel: 0, bonus: 0, starsStart: stars });
+export interface DayStats { visitors: number; night: number; tickets: number; lodge: number; rental: number; school: number; hotel: number; fun: number; heli: number; events: number; bonus: number; starsStart: number }
+const emptyDay = (stars: number): DayStats => ({ visitors: 0, night: 0, tickets: 0, lodge: 0, rental: 0, school: 0, hotel: 0, fun: 0, heli: 0, events: 0, bonus: 0, starsStart: stars });
+export const INCOME_KEYS: [keyof DayStats, string, string][] = [
+  ['tickets', 'Lift tickets', '#2f7fe0'], ['lodge', 'Food & drink', '#e0a63a'], ['rental', 'Rentals', '#9a3f32'], ['school', 'Ski school', '#f2b33d'],
+  ['hotel', 'Hotel', '#3d4f66'], ['fun', 'Attractions', '#e0457b'], ['heli', 'Heli-skiing', '#23262b'], ['events', 'Events', '#6a4cc2'], ['bonus', 'Bonuses', '#2fb65a'],
+];
+export interface GenGoal { id: string; kind: 'income' | 'guests' | 'runs' | 'events' | 'stars'; target: number; text: string }
+export interface LiveEvent { id: string; day: number; state: 'booked' | 'live'; cost: number }
 
 export interface SaveState {
   v: 2;
@@ -25,7 +32,7 @@ export interface SaveState {
   powderDay: boolean;
   snow: string;
   offDepth: number;
-  history: { day: number; visitors: number; income: number; stars: number }[];
+  history: { day: number; visitors: number; income: number; stars: number; parts?: Record<string, number> }[];
   today: DayStats;
   lastSeen: number;
   tut: number;
@@ -35,7 +42,16 @@ export interface SaveState {
   claimed: string[];
   best: number;
   rate: number; // smoothed income per real second (offline earnings, ETAs)
+  event: LiveEvent | null;
+  evReady: Record<string, number>; // day an event can run again
+  evCount: number;
+  legend: number;
+  seasons: number;
+  gen: GenGoal[];
+  genN: number;
+  bestIncome: number;
 }
+const FRESH_EXTRA = { event: null, evReady: {}, evCount: 0, legend: 0, seasons: 0, gen: [], genN: 0, bestIncome: 0 };
 
 export const money = (n: number, cents = false) => {
   const s = n < 0 ? '-' : '';
@@ -67,7 +83,8 @@ export type SimEvent =
   | { k: 'dayend'; day: number; visitors: number; income: number; stars: number; best: boolean }
   | { k: 'levelup'; lv: number; reward: number }
   | { k: 'bought'; id: string; lv: number; milestone: boolean }
-  | { k: 'broken'; lift: string };
+  | { k: 'broken'; lift: string }
+  | { k: 'event'; id: string; phase: 'live' | 'done'; payout?: number };
 
 /** a snowcat out on the snow at night */
 export interface CatState { run: number; ptr: number; x: number; z: number; yaw: number; on: boolean }
@@ -93,6 +110,8 @@ export class Sim {
   onMountain = 0;
   events: SimEvent[] = [];
   plan = { demand: 0, visitors: 0, parking: 0, lifts: 0, night: 0, price: 0, fair: 0, perGuest: 0, limit: 'demand' as 'demand' | 'parking' | 'lifts' };
+  /** how busy each lift is: wanted rides / capacity */
+  liftLoad: Record<string, number> = {};
   starParts = { base: 0.6, snow: 0, lifts: 0, food: 0, variety: 0, service: 0 };
   starTarget = 2.5;
   cats: CatState[] = [];
@@ -108,20 +127,25 @@ export class Sim {
     this.buildGuns();
     this.buildOrder();
     if (save && save.v === 2) {
-      this.s = save;
+      this.s = { ...FRESH_EXTRA, ...save, today: { ...emptyDay(save.stars), ...save.today } };
       this.unpackSnow(save.snow);
     } else {
-      this.s = {
-        v: 2, name: 'Bluebird Peak', cash: 1500, t: 7.8, stars: 2.6, buzz: 0, price: 30, autoPrice: true,
-        lv: { 'lift.carpet': 1, 'run.bunny': 1, lodge: 1, parking: 1, fleet: 1, catpower: 1 },
-        weather: ['bluebird', 'bluebird', 'cloudy', 'bluebird'], powderDay: false, snow: '', offDepth: 80,
-        history: [], today: emptyDay(2.6), lastSeen: Date.now(), tut: 0, lifetime: 0, earned: 0, resortLv: 1, claimed: [], best: 0, rate: 0,
-      };
+      this.s = Sim.freshState(0, 0);
       this.freshSnow();
     }
     this.measureRuns();
     this.planDay();
     if (this.grooming) this.startNight();
+  }
+
+  static freshState(legend: number, seasons: number): SaveState {
+    return {
+      v: 2, name: 'Bluebird Peak', cash: 1500 * (1 + legend), t: 7.8, stars: 2.6, buzz: 0, price: 30, autoPrice: true,
+      lv: { 'lift.carpet': 1, 'run.bunny': 1, lodge: 1, parking: 1, fleet: 1, catpower: 1 },
+      weather: ['bluebird', 'bluebird', 'cloudy', 'bluebird'], powderDay: false, snow: '', offDepth: 80,
+      history: [], today: emptyDay(2.6), lastSeen: Date.now(), tut: seasons ? 9 : 0, lifetime: 0, earned: 0, resortLv: 1, claimed: [], best: 0, rate: 0,
+      ...FRESH_EXTRA, legend, seasons,
+    };
   }
 
   // ------------------------------------------------------------------ basics
@@ -160,8 +184,10 @@ export class Sim {
   }
   liftRunning(id: string) { return this.liftBuilt(id) && this.broken[id] === undefined; }
 
+  get legendMul() { return legendMul(this.s.legend); }
   earn(n: number, what: keyof DayStats) {
     if (!(n > 0)) return;
+    if (what !== 'bonus' && what !== 'events') n *= this.legendMul;
     this.s.cash += n; this.s.earned += n; (this.s.today as any)[what] += n;
     this.secEarn += n;
   }
@@ -219,14 +245,17 @@ export class Sim {
     const priceMul = price <= fair ? Math.min(1.45, Math.pow(fair / price, 1.1)) : Math.pow(fair / price, 4);
     const weekday = this.dow >= 5 ? 1.4 : this.dow === 4 ? 1.15 : 1;
     const w = WEATHER[this.weather];
-    const demand = appeal * (0.45 + 0.22 * s.stars) * (1 + marketingBoost(this.lv('marketing')) + schoolBoost(this.lv('school'))) * w.demand * weekday * (s.powderDay ? 1.45 : 1) * (1 + s.buzz) * priceMul;
+    for (const id of Object.keys(FUN_SHARE)) if (this.lv(id)) appeal += 20 + this.lv(id) * 0.6;
+    if (this.lv('heli')) appeal += 60 + this.lv('heli') * 1.5;
+    const ev = this.eventToday;
+    const demand = appeal * (0.45 + 0.22 * s.stars) * (1 + marketingBoost(this.lv('marketing')) + schoolBoost(this.lv('school'))) * w.demand * weekday * (s.powderDay ? 1.45 : 1) * (1 + s.buzz) * priceMul * (ev ? ev.guestMul : 1);
     const parking = parkingCap(this.lv('parking')) + hotelRooms(this.lv('hotel')) * 1.6;
     let liftH = 0;
     for (const l of LIFTS) liftH += liftCap(l.id, this.lv('lift.' + l.id));
     const lifts = (liftH * 6.5) / 4;
     const visitors = Math.max(0, Math.min(demand, parking, lifts));
     const limit: 'demand' | 'parking' | 'lifts' = visitors >= demand - 0.5 ? 'demand' : parking <= lifts ? 'parking' : 'lifts';
-    const perGuest = lodgeSpend(this.lv('lodge')) * Math.min(1, (lodgeSeats(this.lv('lodge')) * 4) / Math.max(1, visitors)) * 0.62 + rentalSpend(this.lv('rental')) * 0.35 + (this.lv('school') ? 6 * 0.12 : 0);
+    const perGuest = lodgeSpend(this.lv('lodge')) * Math.min(1, (lodgeSeats(this.lv('lodge')) * 4) / Math.max(1, visitors)) * 0.62 + rentalSpend(this.lv('rental')) * 0.35 + (this.lv('school') ? 6 * 0.12 : 0) + this.funPerGuest;
     return { demand, parking, lifts, visitors, fair, perGuest, limit };
   }
   planDay(keepToday = false) {
@@ -248,6 +277,9 @@ export class Sim {
     this.forecastV = f.visitors + night;
   }
   forecastV = 0;
+  get funPerGuest() { let v = 0; for (const [id, sh] of Object.entries(FUN_SHARE)) v += funSpend(id, this.lv(id)) * sh; return v; }
+  /** the event running (or booked) for today */
+  get eventToday(): EventDef | null { const e = this.s.event; return e && e.day === this.day ? EVENT_BY[e.id] : null; }
   previewPrice(p: number) { return this.forecast(p); }
 
   // ------------------------------------------------------------------ the clock
@@ -291,6 +323,8 @@ export class Sim {
     if (crossed(this.closeHour)) { this.endDay(); this.startNight(); }
     if (crossed(NIGHT_CLOSE)) this.hotelNight();
     if (crossed(7)) { this.cats.forEach((c) => (c.on = false)); this.gunOn.clear(); }
+    if (crossed(OPEN) && this.s.event?.day === this.day && this.s.event.state === 'booked') { this.s.event.state = 'live'; this.events.push({ k: 'event', id: this.s.event.id, phase: 'live' }); }
+    if (this.s.event && this.s.event.day === this.day && crossed(this.eventEnd(EVENT_BY[this.s.event.id]))) this.finishEvent();
 
     const h = this.hour;
     const P = this.plan;
@@ -301,6 +335,8 @@ export class Sim {
       this.earn(n * P.price, 'tickets');
       this.earn(n * rentalSpend(this.lv('rental')) * 0.35, 'rental');
       if (this.lv('school')) this.earn(n * 0.12 * 6, 'school');
+      this.earn(n * this.funPerGuest, 'fun');
+      if (this.lv('heli')) this.earn(heliFlights(this.lv('heli')) * dA * HELI_FARE * (0.6 + this.s.stars * 0.1), 'heli');
     }
     let on = P.visitors * Math.max(0, this.arrived(h) - this.left(h));
     if (P.night) {
@@ -344,10 +380,18 @@ export class Sim {
   }
   addBuzz(n: number) { this.s.buzz = Math.min(0.8, this.s.buzz + n); }
   lunchBoost(hours: number) { this.lunchRush = hours; }
+  get lunchRushLeft() { return this.lunchRush; }
 
   // ------------------------------------------------------------------ lifts break; mechanics fix them
   private liftTick(dh: number, on: number) {
     const mech = this.lv('mechanic');
+    for (const l of LIFTS) {
+      const cap = this.liftRunning(l.id) ? liftCap(l.id, this.lv('lift.' + l.id)) : 0;
+      let ride = 0;
+      for (const r of RUNS) if (r.from === l.to) ride += (this.onRun[r.id] ?? 0) * 3;
+      if (l.id === 'gondola' || l.id === 'summit') ride *= 0.5;
+      this.liftLoad[l.id] = cap ? ride / cap : 0;
+    }
     if (this.isOpen) {
       for (const l of LIFTS) {
         if (!this.liftBuilt(l.id) || this.broken[l.id] !== undefined || l.kind === 'carpet') continue;
@@ -418,8 +462,14 @@ export class Sim {
       while (budget > 0) {
         if (c.ptr >= o.cells.length) {
           busy.delete(c.run);
-          const next = this.pickRun(busy);
-          if (next < 0) { c.on = false; break; }
+          let next = this.pickRun(busy);
+          if (next < 0) {
+            // everything is groomed: keep polishing a trail nobody else is on until morning
+            const free = RUNS.map((r, ri) => ri).filter((ri) => this.runBuilt(RUNS[ri].id) && !busy.has(ri));
+            if (!free.length) { c.on = false; break; }
+            next = free[(Math.random() * free.length) | 0];
+            budget = Math.min(budget, 1);
+          }
           c.run = next; c.ptr = 0; busy.add(next);
           continue;
         }
@@ -609,6 +659,14 @@ export class Sim {
     s.weather.shift();
     while (s.weather.length < 4) s.weather.push(rollWeather(this.day + s.weather.length, s.weather[s.weather.length - 1] ?? prevW));
     s.powderDay = (prevW === 'snow' || prevW === 'storm') && s.weather[0] !== 'storm';
+    // the hotel and evening events pay after the lifts close: fold them into yesterday's record
+    const last = s.history[s.history.length - 1];
+    if (last && last.day === this.day - 1) {
+      last.income = this.todayIncome;
+      for (const [k] of INCOME_KEYS) (last.parts ??= {})[k] = Math.round(s.today[k] as number);
+      s.bestIncome = Math.max(s.bestIncome, last.income);
+    }
+    if (s.event && s.event.day < this.day) s.event = null;
     s.today = emptyDay(s.stars);
     this.broken = {};
     this.planDay();
@@ -617,11 +675,14 @@ export class Sim {
   }
   private endDay() {
     const t = this.s.today;
-    const income = t.tickets + t.lodge + t.rental + t.school + t.hotel + t.bonus;
+    const income = this.todayIncome;
     const visitors = Math.round(t.visitors + t.night);
     const best = visitors > this.s.best;
     if (best) this.s.best = visitors;
-    this.s.history.push({ day: this.day, visitors, income, stars: this.s.stars });
+    this.s.bestIncome = Math.max(this.s.bestIncome, income);
+    const parts: Record<string, number> = {};
+    for (const [k] of INCOME_KEYS) parts[k] = Math.round(t[k] as number);
+    this.s.history.push({ day: this.day, visitors, income, stars: this.s.stars, parts });
     if (this.s.history.length > 30) this.s.history.shift();
     this.events.push({ k: 'dayend', day: this.day, visitors, income, stars: this.s.stars, best });
   }
@@ -632,25 +693,129 @@ export class Sim {
 
   // ------------------------------------------------------------------ goals
   goalCtx(): GoalCtx {
-    return { lv: (id) => this.lv(id), day: this.day, best: Math.max(this.s.best, Math.round(this.s.today.visitors + this.s.today.night)), stars: this.s.stars, resortLv: this.s.resortLv, cash: this.s.cash, runs: RUNS.filter((r) => this.runBuilt(r.id)).length, lifts: LIFTS.filter((l) => this.liftBuilt(l.id)).length, lifetime: this.s.lifetime };
+    const built = RUNS.filter((r) => this.runBuilt(r.id));
+    return {
+      lv: (id) => this.lv(id), day: this.day, best: Math.max(this.s.best, Math.round(this.s.today.visitors + this.s.today.night)), stars: this.s.stars, resortLv: this.s.resortLv, cash: this.s.cash,
+      runs: built.length, lifts: LIFTS.filter((l) => this.liftBuilt(l.id)).length, lifetime: this.s.lifetime, events: this.s.evCount, bestIncome: Math.max(this.s.bestIncome, this.todayIncome),
+      minRunLv: built.length ? Math.min(...built.map((r) => this.lv('run.' + r.id))) : 0,
+    };
+  }
+  get todayIncome() { const t = this.s.today; return t.tickets + t.lodge + t.rental + t.school + t.hotel + t.fun + t.heli + t.events + t.bonus; }
+  private genCheck(g: GenGoal, c: GoalCtx) {
+    switch (g.kind) {
+      case 'income': return c.bestIncome / g.target;
+      case 'guests': return c.best / g.target;
+      case 'runs': return c.runs >= RUNS.length ? c.minRunLv / g.target : 0;
+      case 'events': return c.events / g.target;
+      case 'stars': return c.stars / g.target;
+    }
+  }
+  /** once the hand-made goals run out, new ones keep coming, each a step past your records */
+  private makeGoal(): GenGoal {
+    const s = this.s, c = this.goalCtx();
+    const nice = (v: number) => { const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, v)))); return Math.ceil(v / p / 0.5) * 0.5 * p; };
+    const kinds: GenGoal['kind'][] = ['income', 'guests', 'runs', 'events', 'income', 'guests'];
+    let kind = kinds[s.genN % kinds.length];
+    if (kind === 'runs' && c.runs < RUNS.length) kind = 'events';
+    const id = 'gen:' + s.genN++;
+    if (kind === 'income') { const t = nice(Math.max(c.bestIncome, 1000) * 1.6); return { id, kind, target: t, text: `Earn ${money(t)} in one day` }; }
+    if (kind === 'guests') { const t = nice(Math.max(c.best, 100) * 1.4); return { id, kind, target: t, text: `Host ${t.toLocaleString()} skiers in a day` }; }
+    if (kind === 'runs') { const t = Math.ceil((c.minRunLv + 1) / 25) * 25; return { id, kind, target: t, text: `Every trail to level ${t}` }; }
+    const t = c.events + 3; return { id, kind: 'events', target: t, text: `Host ${t} events in total` };
   }
   activeGoals(n = 3) {
-    const out: { g: (typeof GOALS)[number]; p: number }[] = [];
+    const out: { g: { id: string; text: string; reward: number }; p: number }[] = [];
     const ctx = this.goalCtx();
-    for (const g of GOALS) { if (this.s.claimed.includes(g.id)) continue; out.push({ g, p: Math.max(0, Math.min(1, g.check(ctx))) }); if (out.length >= n) break; }
+    for (const g of GOALS) { if (this.s.claimed.includes(g.id)) continue; out.push({ g, p: Math.max(0, Math.min(1, g.check(ctx))) }); if (out.length >= n) return out; }
+    while (this.s.gen.length < n - out.length) this.s.gen.push(this.makeGoal());
+    for (const g of this.s.gen) { if (out.length >= n) break; out.push({ g: { id: g.id, text: g.text, reward: 0 }, p: Math.max(0, Math.min(1, this.genCheck(g, ctx))) }); }
     return out;
   }
   claim(id: string) {
+    const ctx = this.goalCtx();
+    let r = 0;
     const g = GOALS.find((q) => q.id === id);
-    if (!g || this.s.claimed.includes(id) || g.check(this.goalCtx()) < 1) return 0;
-    this.s.claimed.push(id);
-    const r = this.goalReward(g.reward);
+    if (g) {
+      if (this.s.claimed.includes(id) || g.check(ctx) < 1) return 0;
+      this.s.claimed.push(id);
+      r = this.goalReward(g.reward);
+    } else {
+      const gg = this.s.gen.find((q) => q.id === id);
+      if (!gg || this.genCheck(gg, ctx) < 1) return 0;
+      this.s.gen = this.s.gen.filter((q) => q !== gg);
+      r = this.goalReward(0, 150);
+    }
     this.s.cash += r; this.s.earned += r;
     return r;
   }
   /** goals pay at least a minute and a bit of current income */
-  goalReward(base: number) { return Math.round(Math.max(base, this.s.rate * 75)); }
+  goalReward(base: number, sec = 75) { return Math.round(Math.max(base, this.s.rate * sec, base ? 0 : 1000)); }
 
+
+  // ------------------------------------------------------------------ events
+  eventLock(e: EventDef): string | null {
+    if (this.s.resortLv < e.needLv) return `Resort level ${e.needLv}`;
+    if (e.needs && !this.lv(e.needs)) return `Needs ${ITEM_BY[e.needs].name}`;
+    if (this.s.event) return this.s.event.id === e.id ? (this.s.event.state === 'live' ? 'On now' : 'Booked') : 'One event at a time';
+    const ready = this.s.evReady[e.id] ?? 0;
+    if (this.day < ready) return `Ready on day ${ready}`;
+    return null;
+  }
+  private incomeSec() { return Math.max(this.s.rate, this.perMinute / 60, 1); }
+  eventCost(e: EventDef) { return Math.round(Math.max(e.floor, this.incomeSec() * e.costSec)); }
+  eventPrize(e: EventDef) { return Math.round(Math.max(e.floor * 3.4, this.incomeSec() * e.rewardSec)); }
+  eventEnd(e: EventDef) { return e.night ? Math.max(this.closeHour, 19.5) : this.closeHour; }
+  /** today if there's still time, otherwise tomorrow */
+  eventDay(e: EventDef) { return this.hour < Math.min(13, this.eventEnd(e) - 2) ? this.day : this.day + 1; }
+  hostEvent(id: string) {
+    const e = EVENT_BY[id];
+    if (!e || this.eventLock(e)) return false;
+    const cost = this.eventCost(e);
+    if (this.s.cash < cost) return false;
+    this.s.cash -= cost;
+    const day = this.eventDay(e);
+    const live = day === this.day && this.hour >= OPEN;
+    this.s.event = { id, day, state: live ? 'live' : 'booked', cost };
+    if (live) {
+      // the crowd shows up for the rest of today
+      const keep = this.plan.visitors;
+      this.planDay(false);
+      this.plan.visitors = Math.max(keep, this.plan.visitors);
+      this.events.push({ k: 'event', id, phase: 'live' });
+    } else this.planDay(true);
+    return true;
+  }
+  private finishEvent() {
+    const ev = this.s.event!;
+    const e = EVENT_BY[ev.id];
+    this.s.event = null;
+    if (ev.state !== 'live') return;
+    const prize = this.eventPrize(e);
+    this.earn(prize, 'events');
+    this.addBuzz(e.buzz);
+    this.s.evCount++;
+    this.s.evReady[e.id] = this.day + e.cooldown;
+    this.events.push({ k: 'event', id: e.id, phase: 'done', payout: prize });
+    this.planDay(true);
+  }
+
+  // ------------------------------------------------------------------ Legend
+  get legendGain() { return Math.max(0, legendFor(this.s.earned) - 0); }
+  get legendReady() { return this.s.resortLv >= LEGEND_LV && this.legendGain > 0; }
+  /** start a new season: everything resets but Legend stars multiply all income for good */
+  newSeason() {
+    if (!this.legendReady) return false;
+    const legend = this.s.legend + this.legendGain;
+    const name = this.s.name;
+    this.s = Sim.freshState(legend, this.s.seasons + 1);
+    this.s.name = name;
+    this.broken = {}; this.cats = []; this.gunOn.clear(); this.incomeLog = [];
+    this.freshSnow();
+    this.measureRuns();
+    this.computeStars();
+    this.planDay();
+    return true;
+  }
 
   offline(): number {
     const away = (Date.now() - (this.s.lastSeen || Date.now())) / 1000;

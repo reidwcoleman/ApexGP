@@ -3,7 +3,7 @@
 // distant ranges, the forest and the falling snow.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Mountain, SIZE, HALF, GN, GS, SN, SC, LIFTS, RUNS, BASE, kickerProfile, rawHeight } from './mountain.ts';
+import { Mountain, SIZE, HALF, GN, GS, SN, SC, LIFTS, RUNS, BASE, DIFF_COLOR, kickerProfile, rawHeight } from './mountain.ts';
 import type { Sim } from './sim.ts';
 
 export const NOISE_N = 256;
@@ -57,7 +57,18 @@ export class World {
     uTime: { value: 0 },
     uLamps: { value: 0 },
     uHaze: { value: new THREE.Color(0xcfe0f2) },
+    uIds: { value: null as THREE.Texture | null },
+    uRunCol: { value: RUNS.map((r) => new THREE.Color(DIFF_COLOR[r.diff] === '#1d1d22' ? '#15161c' : DIFF_COLOR[r.diff])) as THREE.Color[] },
+    uRunOn: { value: RUNS.map(() => 0) as number[] },
+    uRunVal: { value: RUNS.map(() => 0) as number[] },
+    /** how strongly each map view shows: x trail map, y snow, z crowds */
+    uView: { value: new THREE.Vector3() },
+    uCats: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+    uCatN: { value: 0 },
   };
+  idTex: THREE.DataTexture;
+  view = 0;
+  private viewW = new THREE.Vector3();
   stateTex: THREE.DataTexture;
   dirTex: THREE.DataTexture;
   maskTex: THREE.DataTexture;
@@ -65,7 +76,7 @@ export class World {
   private dirBuf = new Uint8Array(SN * SN * 4);
   private maskBuf = new Uint8Array(SN * SN * 4);
   sky!: THREE.Mesh;
-  skyU = { uTop: { value: new THREE.Color() }, uHor: { value: new THREE.Color() }, uSun: { value: new THREE.Vector3() }, uSunC: { value: new THREE.Color() }, uNight: { value: 0 }, uCloud: { value: 0 }, uTime: { value: 0 } };
+  skyU = { uNoise: { value: null as THREE.Texture | null }, uTop: { value: new THREE.Color() }, uHor: { value: new THREE.Color() }, uSun: { value: new THREE.Vector3() }, uSunC: { value: new THREE.Color() }, uNight: { value: 0 }, uCloud: { value: 0 }, uTime: { value: 0 } };
   trees: TreeGrid = { x: new Float32Array(0), z: new Float32Array(0), r: new Float32Array(0), cells: new Map() };
   terrainMat!: THREE.MeshStandardMaterial;
   snowFall!: THREE.Points;
@@ -99,6 +110,12 @@ export class World {
     this.dirTex = new THREE.DataTexture(this.dirBuf, SN, SN, THREE.RGBAFormat);
     this.maskTex = new THREE.DataTexture(this.maskBuf, SN, SN, THREE.RGBAFormat);
     for (const t of [this.stateTex, this.dirTex, this.maskTex]) { t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.needsUpdate = true; }
+    const ids = new Uint8Array(SN * SN * 4);
+    for (let k = 0; k < SN * SN; k++) ids[k * 4] = m.nearRun[k];
+    this.idTex = new THREE.DataTexture(ids, SN, SN, THREE.RGBAFormat);
+    this.idTex.magFilter = this.idTex.minFilter = THREE.NearestFilter;
+    this.idTex.needsUpdate = true;
+    this.uni.uIds.value = this.idTex;
     this.uni.uState.value = this.stateTex;
     this.uni.uDir.value = this.dirTex;
     this.uni.uMask.value = this.maskTex;
@@ -128,7 +145,8 @@ export class World {
       const e = m.edge[k];
       b[k * 4] = Math.round(255 * Math.min(1, Math.max(0, (2.5 - e) / 4)));
       b[k * 4 + 1] = 0;
-      b[k * 4 + 2] = m.runCell[k];
+      // metres from the nearest trail edge (negative inside), for the rope lines and map views
+      b[k * 4 + 2] = Math.round(255 * Math.min(1, Math.max(0, (e + 16) / 32)));
       // the trampled village plaza
       const ci = k % SN, cj = (k / SN) | 0;
       const x = (ci + 0.5) * SC - HALF, z = (cj + 0.5) * SC - HALF;
@@ -187,13 +205,15 @@ export class World {
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * normal);');
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;\nattribute float ao;\nvarying float vAo;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * normal);\nvAo = ao;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-varying vec3 vWPos; varying vec3 vWNrm;
+varying vec3 vWPos; varying vec3 vWNrm; varying float vAo;
 uniform sampler2D uState; uniform sampler2D uDir; uniform sampler2D uMask; uniform sampler2D uNoise;
 uniform float uNight; uniform float uDay; uniform vec3 uSunDir; uniform float uLamps;
+uniform sampler2D uIds; uniform vec3 uRunCol[${RUNS.length}]; uniform float uRunOn[${RUNS.length}]; uniform float uRunVal[${RUNS.length}];
+uniform vec3 uView; uniform vec4 uCats[8]; uniform float uCatN;
 float gBump = 0.0; float gSpark = 0.0;`)
         .replace('#include <color_fragment>', `#include <color_fragment>
 {
@@ -217,12 +237,12 @@ float gBump = 0.0; float gSpark = 0.0;`)
   float n4 = texture2D(uNoise, vWPos.xz * 0.9).g;
   float chop = (1.0 - max(groom, min(1.0, powder * 1.3))) * smoothstep(0.1, 0.6, onRun);
   float slope = 1.0 - vWNrm.y;
-  vec3 snow = mix(vec3(0.80, 0.84, 0.90), vec3(0.86, 0.88, 0.92), n1);
+  vec3 snow = mix(vec3(0.88, 0.91, 0.96), vec3(0.94, 0.95, 0.98), n1);
   float camD = length(cameraPosition - vWPos);
   float nearK = smoothstep(260.0, 40.0, camD);
   vec3 col = snow;
   // groomed: slightly greyer and stripy
-  col = mix(col, vec3(0.84, 0.865, 0.91), groom * (1.0 - powder) * 0.35);
+  col = mix(col, vec3(0.95, 0.965, 0.99), groom * (1.0 - powder) * 0.45);
   col *= 1.0 - cordK * (0.03 + 0.028 * cord);
   col *= 1.0 - groom * smoothstep(0.03, 0.0, pass - 0.47) * smoothstep(0.3, 0.06, fw) * 0.05;
   // skied off: mottled with ruts and moguls
@@ -242,6 +262,42 @@ float gBump = 0.0; float gSpark = 0.0;`)
   float plaza = mk.a * (1.0 - onRun);
   float trod = smoothstep(0.35, 0.75, texture2D(uNoise, vWPos.xz * 0.05 + 0.7).r);
   col = mix(col, vec3(0.74, 0.74, 0.76) * (0.92 + 0.12 * n4), plaza * (0.35 + 0.45 * trod));
+  // baked sky occlusion: gullies, tree-line hollows and the foot of cliffs sit in cooler shade
+  col *= mix(vec3(0.68, 0.74, 0.86), vec3(1.0), smoothstep(0.0, 1.0, vAo));
+  // ---- trails you can read: a rope line in the trail's colour, plus the map views
+  {
+    vec2 cuv = (floor(suv * ${SN.toFixed(1)}) + 0.5) / ${SN.toFixed(1)};
+    int rid = int(texture2D(uIds, cuv).r * 255.0 + 0.5) - 1;
+    float eD = mk.b * 32.0 - 16.0;
+    float anyView = max(uView.x, max(uView.y, uView.z));
+    float inside = 1.0 - smoothstep(-0.6, 0.6, eD);
+    float built = 0.0;
+    if (rid >= 0) {
+      vec3 rc = uRunCol[rid];
+      built = uRunOn[rid];
+      float few = max(fwidth(eD), 0.04);
+      float lw = max(0.5, few * 0.9) * (1.0 + anyView * 1.2);
+      float line = 1.0 - smoothstep(lw, lw + few * 1.5, abs(eD + 0.9));
+      col = mix(col, rc, line * built * mix(0.5, 0.95, anyView) * (1.0 - uNight * 0.4));
+      // planned trails: a dashed outline on the map views
+      float dash = step(0.5, fract((vWPos.x + vWPos.z) * 0.05));
+      col = mix(col, rc, line * (1.0 - built) * dash * anyView * 0.6);
+      // trail map: the whole trail in its colour
+      col = mix(col, mix(rc, vec3(1.0), 0.35), inside * built * uView.x * 0.55);
+      // snow: condition heat
+      float q = smoothstep(12.0, 45.0, depth) * (0.28 + 0.72 * max(groom, min(1.0, powder * 1.05)));
+      float qq = smoothstep(0.25, 0.85, q);
+      vec3 heat = qq < 0.5 ? mix(vec3(0.8, 0.08, 0.06), vec3(0.98, 0.62, 0.04), qq * 2.0) : mix(vec3(0.98, 0.62, 0.04), vec3(0.04, 0.62, 0.22), qq * 2.0 - 1.0);
+      col = mix(col, heat, inside * built * uView.y * 0.8);
+      // crowds: skiers per hectare on each trail
+      float v = uRunVal[rid];
+      vec3 crowd = v < 0.5 ? mix(vec3(0.3, 0.6, 0.98), vec3(0.98, 0.78, 0.2), v * 2.0) : mix(vec3(0.98, 0.78, 0.2), vec3(0.9, 0.18, 0.2), v * 2.0 - 1.0);
+      col = mix(col, crowd, inside * built * uView.z * 0.72);
+    }
+    // the map views grey out everything that isn't an open trail
+    float lum = dot(col, vec3(0.3, 0.5, 0.2));
+    col = mix(col, vec3(lum) * vec3(0.9, 0.93, 0.98), (1.0 - inside * built) * anyView * 0.55);
+  }
   diffuseColor.rgb = col;
   gBump = cordK * cord * 0.012 + nearK * (chop * mog * 0.035 + powder * (1.0 - groom) * n3 * 0.018);
   float hash = texture2D(uNoise, vWPos.xz * 1.9).b;
@@ -267,6 +323,19 @@ float gBump = 0.0; float gSpark = 0.0;`)
   vec3 R = reflect(-V, normalize(vWNrm));
   float sp = pow(max(dot(R, normalize(uSunDir)), 0.0), 18.0);
   totalEmissiveRadiance += vec3(1.0) * gSpark * sp * uDay * 1.6 + vec3(0.8, 0.9, 1.0) * gSpark * 0.05 * uNight * (0.3 + lamp * 3.0);
+  // snowcat headlights, faked on the snow (real spotlights cost every pixel on the mountain)
+  vec3 catL = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    if (float(i) >= uCatN) break;
+    vec4 c = uCats[i];
+    vec2 d = vWPos.xz - c.xy;
+    float fw = dot(d, c.zw);
+    float lat = abs(dot(d, vec2(-c.w, c.z)));
+    float cone = smoothstep(75.0, 10.0, fw) * smoothstep(2.0, 6.0, fw) * (1.0 - smoothstep(fw * 0.38 + 1.0, fw * 0.58 + 3.5, lat));
+    float rear = smoothstep(15.0, 3.0, length(d + c.zw * 5.0));
+    catL += vec3(1.0, 0.92, 0.78) * (cone * 1.3 + rear * 0.6);
+  }
+  totalEmissiveRadiance += diffuseColor.rgb * catL * uNight * 0.85;
 }`);
     };
     mat.customProgramCacheKey = () => 'bb-terrain';
@@ -289,10 +358,12 @@ float gBump = 0.0; float gSpark = 0.0;`)
       out[0] = nx / L; out[1] = ny / L; out[2] = nz / L;
     };
     const tmp = [0, 0, 0];
+    const AO = this.bakeAo();
     for (let cj = 0; cj < nC; cj++)
       for (let ci = 0; ci < nC; ci++) {
         const pos = new Float32Array((C + 1) * (C + 1) * 3);
         const nor = new Float32Array((C + 1) * (C + 1) * 3);
+        const aoA = new Float32Array((C + 1) * (C + 1));
         let p = 0;
         for (let j = 0; j <= C; j++)
           for (let i = 0; i <= C; i++) {
@@ -300,11 +371,13 @@ float gBump = 0.0; float gSpark = 0.0;`)
             pos[p] = gi * GS - HALF; pos[p + 1] = H[gj * GN + gi]; pos[p + 2] = gj * GS - HALF;
             nrm(gi, gj, tmp);
             nor[p] = tmp[0]; nor[p + 1] = tmp[1]; nor[p + 2] = tmp[2];
+            aoA[p / 3] = AO[gj * GN + gi];
             p += 3;
           }
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+        g.setAttribute('ao', new THREE.BufferAttribute(aoA, 1));
         g.setIndex(index);
         g.computeBoundingSphere();
         g.computeBoundingBox();
@@ -315,6 +388,30 @@ float gBump = 0.0; float gSpark = 0.0;`)
         this.scene.add(mesh);
         this.chunks.push({ mesh, cx: (ci + 0.5) * C * GS - HALF, cz: (cj + 0.5) * C * GS - HALF, lod: 0 });
       }
+  }
+  /** how much open sky each height-grid point sees (1 = all of it), from 8 directions at 3 ranges */
+  private bakeAo() {
+    const H = this.m.H;
+    const out = new Float32Array(GN * GN);
+    const dirs: [number, number][] = [];
+    for (let k = 0; k < 8; k++) dirs.push([Math.cos((k * Math.PI) / 4), Math.sin((k * Math.PI) / 4)]);
+    const R = [4, 12, 30]; // grid steps (8, 24, 60 m)
+    for (let j = 0; j < GN; j++)
+      for (let i = 0; i < GN; i++) {
+        const h0 = H[j * GN + i];
+        let occ = 0;
+        for (const [dx, dz] of dirs) {
+          let best = 0;
+          for (const r of R) {
+            const ii = Math.min(GN - 1, Math.max(0, Math.round(i + dx * r))), jj = Math.min(GN - 1, Math.max(0, Math.round(j + dz * r)));
+            const t = (H[jj * GN + ii] - h0) / (r * GS);
+            if (t > best) best = t;
+          }
+          occ += Math.min(1, best * 1.3);
+        }
+        out[j * GN + i] = 1 - occ / 8;
+      }
+    return out;
   }
   terrainLods: THREE.BufferAttribute[] = [];
   chunks: { mesh: THREE.Mesh; cx: number; cz: number; lod: number }[] = [];
@@ -531,6 +628,7 @@ float gBump = 0.0; float gSpark = 0.0;`)
         for (let b = 0; b < nv; b++) { const i0 = a * (nv + 1) + b, i1 = i0 + 1, i2 = i0 + nv + 1, i3 = i2 + 1; idx.push(i0, i1, i2, i1, i3, i2); }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('ao', new THREE.Float32BufferAttribute(new Float32Array(pos.length / 3).fill(1), 1));
       g.setIndex(idx);
       g.computeVertexNormals();
       // make the winding face up
@@ -564,7 +662,7 @@ float gBump = 0.0; float gSpark = 0.0;`)
       fog: false,
       vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; }`,
       fragmentShader: `
-        uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uSun; uniform vec3 uSunC; uniform float uNight; uniform float uCloud; uniform float uTime;
+        uniform vec3 uTop; uniform vec3 uHor; uniform vec3 uSun; uniform vec3 uSunC; uniform float uNight; uniform float uCloud; uniform float uTime; uniform sampler2D uNoise;
         varying vec3 vDir;
         float h3(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
         void main(){
@@ -582,12 +680,23 @@ float gBump = 0.0; float gSpark = 0.0;`)
           float s = h3(q);
           float tw = 0.6 + 0.4 * sin(uTime * 2.0 + s * 40.0);
           c += vec3(0.85, 0.9, 1.0) * step(0.9985, s) * smoothstep(0.0, 0.25, y) * uNight * (1.0 - uCloud) * tw * 1.2;
+          // soft drifting clouds
+          if (d.y > 0.0) {
+            vec2 cu = d.xz / (d.y + 0.12) * 0.11 + vec2(uTime * 0.0016, uTime * 0.0006);
+            float cn = texture2D(uNoise, cu).r * 0.62 + texture2D(uNoise, cu * 2.7 + 0.3).r * 0.28 + texture2D(uNoise, cu * 7.0).g * 0.1;
+            float cov = smoothstep(0.62 - uCloud * 0.32, 0.86 - uCloud * 0.2, cn) * smoothstep(0.0, 0.18, d.y);
+            vec3 cc = mix(vec3(1.0, 0.99, 0.97), uSunC, 0.25) * (1.0 - uNight * 0.86);
+            cc = mix(cc, uHor * 0.9, 0.25 + uCloud * 0.35);
+            cc *= 0.82 + 0.18 * smoothstep(0.4, 0.9, cn) + pow(sd, 6.0) * 0.4;
+            c = mix(c, cc, cov * 0.85);
+          }
           c = mix(c, uHor * 0.75, smoothstep(0.0, -0.2, d.y));
           gl_FragColor = vec4(c, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
     });
+    this.skyU.uNoise.value = this.uni.uNoise.value;
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(8000, 32, 16), mat);
     this.sky.frustumCulled = false;
     this.sky.renderOrder = -10;
@@ -638,7 +747,7 @@ float gBump = 0.0; float gSpark = 0.0;`)
     this.night = night;
     const gold = Math.min(1, Math.max(0, 1 - (sunDir.y - 0.02) / 0.3)) * day;
 
-    const topDay = new THREE.Color(0x2d6fd0), horDay = new THREE.Color(0xbcd6f0);
+    const topDay = new THREE.Color(0x1f63d6), horDay = new THREE.Color(0xa9cdf2);
     const topGold = new THREE.Color(0x3a5c9e), horGold = new THREE.Color(0xf6b57e);
     const topNight = new THREE.Color(0x050a18), horNight = new THREE.Color(0x14203a);
     const gray = new THREE.Color(0x9aa5b2), grayH = new THREE.Color(0xc4cbd3);
@@ -667,19 +776,19 @@ float gBump = 0.0; float gSpark = 0.0;`)
     this.sun.position.z = Math.round(this.sun.position.z / texel) * texel;
     this.sun.target.position.x = Math.round(f.x / texel) * texel;
     this.sun.target.position.z = Math.round(f.z / texel) * texel;
-    const sunI = day * (2.6 - cloud * 1.9) * (1 - gold * 0.3);
+    const sunI = day * (3.1 - cloud * 2.2) * (1 - gold * 0.3);
     const moonI = night * 0.32 * (1 - cloud * 0.6);
     this.sun.intensity = Math.max(sunI, moonI);
     this.sun.color.setRGB(1, 0.93 - gold * 0.25, 0.85 - gold * 0.42).lerp(new THREE.Color(0.62, 0.72, 1.0), night);
     this.sun.castShadow = this.sun.intensity > 0.08;
-    this.hemi.intensity = 0.35 + day * (0.95 + cloud * 0.4);
-    this.hemi.color.copy(top).lerp(new THREE.Color(0xd4e3ff), 0.6 * day).lerp(new THREE.Color(0xffe2c8), gold * 0.35);
+    this.hemi.intensity = 0.35 + day * (1.05 + cloud * 0.5);
+    this.hemi.color.copy(top).lerp(new THREE.Color(0xc4dcff), 0.45 * day).lerp(new THREE.Color(0xffe2c8), gold * 0.35);
     this.hemi.groundColor.setRGB(0.55, 0.57, 0.62).multiplyScalar(0.3 + day * 0.7);
     if (night > 0.5) { this.hemi.color.setRGB(0.18, 0.24, 0.42); this.hemi.groundColor.setRGB(0.07, 0.08, 0.12); this.hemi.intensity = 0.55; }
-    this.renderer.toneMappingExposure = 0.8 + night * 0.4;
+    this.renderer.toneMappingExposure = 0.92 + night * 0.4 - cloud * 0.06;
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(hor).lerp(new THREE.Color(0xdde4ec), cloud * 0.5 * day);
-    fog.density = 0.0003 + cloud * 0.00035 + snowRate * 0.0009 + night * 0.00004;
+    fog.density = 0.00017 + cloud * 0.0003 + snowRate * 0.0009 + night * 0.00004;
     this.uni.uHaze.value.copy(fog.color);
     this.uni.uNight.value = night;
     this.uni.uDay.value = day * (1 - cloud * 0.8);
@@ -693,6 +802,28 @@ float gBump = 0.0; float gSpark = 0.0;`)
     this.snowU.uNight.value = night * 0.6;
     this.snowFall.visible = snowRate > 0.02;
     this.sky.position.copy(this.camera.position);
+  }
+
+  /** 0 resort, 1 trail map, 2 snow condition, 3 crowds */
+  setView(v: number) { this.view = v; }
+  /** per-frame trail data for the shader: which are open, how crowded, where the cats are */
+  syncTrails(sim: Sim, dt: number, cats: { x: number; z: number; yaw: number; on: boolean }[]) {
+    const on = this.uni.uRunOn.value, val = this.uni.uRunVal.value;
+    // skiers per hectare, against the resort's average: the busiest trails go red
+    const dens = RUNS.map((r, i) => (sim.onRun[r.id] ?? 0) / Math.max(0.1, (this.m.cellsOf[i].length * SC * SC) / 10000));
+    const open = dens.filter((d, i) => d > 0 && sim.runBuilt(RUNS[i].id));
+    const mean = open.length ? open.reduce((a, b) => a + b, 0) / open.length : 1;
+    RUNS.forEach((r, i) => {
+      on[i] = sim.runBuilt(r.id) ? 1 : 0;
+      const want = dens[i] > 0 ? Math.min(1, Math.max(0.02, 0.5 * Math.pow(dens[i] / mean, 1.5) * Math.min(1, mean / 15))) : 0;
+      val[i] += (want - val[i]) * Math.min(1, dt * 2);
+    });
+    const tgt = new THREE.Vector3(this.view === 1 ? 1 : 0, this.view === 2 ? 1 : 0, this.view === 3 ? 1 : 0);
+    this.viewW.lerp(tgt, Math.min(1, dt * 6));
+    this.uni.uView.value.copy(this.viewW);
+    let n = 0;
+    for (const c of cats) { if (!c.on || n >= 8) continue; this.uni.uCats.value[n++].set(c.x, c.z, Math.sin(c.yaw), Math.cos(c.yaw)); }
+    this.uni.uCatN.value = n;
   }
 
   /** register a material that glows at night */
