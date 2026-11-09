@@ -1,165 +1,165 @@
-// Bluebird: every upgrade, its price curve and what it does.
+// Bluebird Peak: everything you can buy. Every item levels up with a growing price; hitting a milestone
+// level (10, 25, 50, 100) doubles what it does. The resort runs itself; your job is to spend well.
 import { LIFTS, RUNS, LIFT_BY, RUN_BY } from './mountain.ts';
 
-export type Cat = 'lifts' | 'runs' | 'base' | 'fleet' | 'staff';
+export type Cat = 'lifts' | 'trails' | 'village' | 'snow' | 'crew';
 
-export interface Upgrade {
+export const MILESTONES = [10, 25, 50, 100, 150, 200];
+export const mult = (lv: number) => { let m = 1; for (const s of MILESTONES) if (lv >= s) m *= 2; return m; };
+export const nextMilestone = (lv: number) => MILESTONES.find((s) => s > lv) ?? 0;
+export const prevMilestone = (lv: number) => [...MILESTONES].reverse().find((s) => s <= lv) ?? 0;
+
+export interface Item {
   id: string;
   cat: Cat;
   name: string;
-  max: number; // highest level
-  /** price to go from lv to lv + 1 */
-  cost: (lv: number) => number;
-  /** what the next level does (or what it does now when maxed) */
-  blurb: (lv: number) => string;
-  /** names of each level, index = level */
-  levels?: string[];
-  needs?: (lv: (id: string) => number) => string | null; // reason it's locked
   icon: string;
+  max: number;
+  build: number; // price of level 1 (0 = you own it from the start)
+  base: number; // price of level 2
+  growth: number;
+  /** resort level needed to build */
+  needLv?: number;
+  /** another item that must exist first */
+  needs?: string;
+  /** one line: what a level gives */
+  unit: string;
+  color: string;
 }
 
-export interface ChairSpec { seats: number; speed: number; spacing: number; name: string }
+export const CHAIR_TIERS = ['', 'Fixed double', 'Fixed triple', 'Fixed quad', 'Detachable quad', 'High-speed six'];
+export const GONDOLA_TIERS = ['', '8-seat cabins', 'Faster haul rope', '10-seat cabins'];
+export const CARPET_TIERS = ['', 'Rubber belt', 'Covered carpet', 'Twin carpet'];
+/** visual tier from a level: 1 below 10, 2 from 10, 3 from 25, 4 from 50, 5 from 100 */
+export const tierOf = (lv: number, max = 5) => (lv <= 0 ? 0 : Math.min(max, 1 + MILESTONES.filter((m) => m <= lv).length));
 
-/** chairlift levels (1 = bought) */
-export const CHAIR: ChairSpec[] = [
-  { seats: 0, speed: 0, spacing: 14, name: 'Not built' },
-  { seats: 2, speed: 2.2, spacing: 14, name: 'Fixed double' },
-  { seats: 3, speed: 2.4, spacing: 14, name: 'Fixed triple' },
-  { seats: 4, speed: 2.6, spacing: 14, name: 'Fixed quad' },
-  { seats: 4, speed: 4.6, spacing: 16, name: 'Detachable quad' },
-  { seats: 6, speed: 5.0, spacing: 17, name: 'High-speed six' },
-];
-export const GONDOLA: ChairSpec[] = [
-  { seats: 0, speed: 0, spacing: 40, name: 'Not built' },
-  { seats: 8, speed: 5.0, spacing: 44, name: '8-seat cabins' },
-  { seats: 8, speed: 6.0, spacing: 38, name: 'Faster haul rope' },
-  { seats: 10, speed: 6.0, spacing: 34, name: '10-seat cabins' },
-];
-export const CARPET: ChairSpec[] = [
-  { seats: 0, speed: 0, spacing: 3, name: 'Not built' },
-  { seats: 1, speed: 0.9, spacing: 3.2, name: 'Rubber belt' },
-  { seats: 1, speed: 1.2, spacing: 2.6, name: 'Covered carpet' },
-  { seats: 2, speed: 1.4, spacing: 2.6, name: 'Twin carpet' },
-];
-export const liftSpecs = (kind: string) => (kind === 'gondola' ? GONDOLA : kind === 'carpet' ? CARPET : CHAIR);
+const LIFT_CAP: Record<string, number> = { carpet: 500, meadow: 900, summit: 1300, ridge: 1300, gondola: 2600 };
+const LIFT_LV: Record<string, number> = { carpet: 1, meadow: 2, summit: 5, ridge: 10, gondola: 14 };
+const LIFT_BUILD: Record<string, number> = { carpet: 0, meadow: 2500, summit: 60000, ridge: 1500000, gondola: 12000000 };
+const RUN_APPEAL: Record<string, number> = { green: 30, blue: 48, black: 44, double: 52, park: 62 };
+const RUN_BUILD: Record<string, number> = { bunny: 0, meadowlark: 1500, fox: 4000, park: 40000, bowl: 80000, widow: 150000, longhaul: 400000, glade: 2000000, chutes: 3000000 };
+const RUN_LV: Record<string, number> = { fox: 3, park: 6, widow: 6, longhaul: 8, glade: 10, chutes: 11 };
 
-/** visual/time compression for the lifts: they run this many times faster than their real speed */
-export const LIFT_RUSH = 3;
-
-export function liftCapacity(kind: string, lv: number) {
-  const s = liftSpecs(kind)[lv];
-  if (!s || !s.seats) return 0;
-  return (s.seats * s.speed * 3600) / s.spacing; // skiers per hour (real speed)
-}
-
-const k = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)));
-
-export const PARKING = [0, 140, 380, 860, 1800, 3800];
-export const LODGE_SEATS = [0, 60, 180, 420, 900, 1800];
-export const HOTEL_ROOMS = [0, 40, 120, 300];
-export const SNOWCAT = [
-  { w: 0, speed: 0, name: '' },
-  { w: 6.5, speed: 9, name: 'Second-hand groomer' },
-  { w: 8, speed: 11, name: 'Winch-cat' },
-  { w: 9.5, speed: 13, name: 'Twin-tiller' },
-  { w: 11.5, speed: 15, name: 'Alpine flagship' },
-];
-export const SLED = [{ speed: 0, name: '' }, { speed: 21, name: 'Trail sled' }, { speed: 27, name: 'Mountain sled' }, { speed: 33, name: 'Race sled' }];
-export const GUNS_PER_LV = 3;
-
-export const UPGRADES: Upgrade[] = [];
-const add = (u: Upgrade) => UPGRADES.push(u);
-
+export const ITEMS: Item[] = [];
 for (const l of LIFTS) {
-  const specs = liftSpecs(l.kind);
-  const max = specs.length - 1;
-  add({
-    id: 'lift.' + l.id, cat: 'lifts', name: l.name, max, icon: l.kind,
-    levels: specs.map((s) => s.name),
-    cost: (lv) => (lv === 0 ? l.cost : Math.round((l.cost || 6000) * [0, 0.7, 1.4, 2.6, 4.6][lv])),
-    blurb: (lv) => {
-      const nxt = specs[Math.min(max, lv + 1)];
-      const cap = Math.round(liftCapacity(l.kind, Math.min(max, lv + 1)));
-      return lv === 0 ? `Build it: ${nxt.name}, ${cap.toLocaleString()} riders an hour` : lv >= max ? `${specs[lv].name}, ${Math.round(liftCapacity(l.kind, lv)).toLocaleString()} riders an hour` : `${nxt.name}: ${cap.toLocaleString()} riders an hour (now ${Math.round(liftCapacity(l.kind, lv)).toLocaleString()})`;
-    },
-    needs: (lv) => {
-      if (l.id === 'summit' && !lv('lift.meadow')) return 'Build Meadow Chair first';
-      if (l.id === 'ridge' && !lv('lift.summit')) return 'Build Summit Express first';
-      if (l.id === 'gondola' && !lv('lift.summit')) return 'Build Summit Express first';
-      return null;
-    },
-  });
-}
-
-for (const r of RUNS) {
-  if (r.cost === 0) continue;
-  add({
-    id: 'run.' + r.id, cat: 'runs', name: r.name, max: 1, icon: r.diff,
-    cost: () => r.cost,
-    blurb: () => `Cut and open a ${r.diff === 'park' ? 'terrain park with five tabletops' : r.diff === 'double' ? 'double-black chute line' : r.diff + ' trail'}${r.glade ? ' through the trees' : ''}`,
-    needs: (lv) => (lv('lift.' + r.needs) ? null : `Needs ${LIFT_BY[r.needs].name}`),
-  });
+  const b = LIFT_BUILD[l.id];
+  ITEMS.push({ id: 'lift.' + l.id, cat: 'lifts', name: l.name, icon: l.kind === 'chair' ? 'chair' : l.kind, max: 200, build: b, base: Math.max(300, b * 0.15), growth: 1.17, needLv: LIFT_LV[l.id], needs: l.id === 'summit' ? 'lift.meadow' : l.id === 'ridge' || l.id === 'gondola' ? 'lift.summit' : undefined, unit: 'riders an hour', color: { carpet: '#2f7fe0', meadow: '#2f7fe0', summit: '#d2453a', ridge: '#e0a63a', gondola: '#2fb65a' }[l.id]! });
 }
 for (const r of RUNS) {
-  add({
-    id: 'guns.' + r.id, cat: 'runs', name: `${r.name} snow guns`, max: 3, icon: 'gun',
-    cost: (lv) => Math.round((3500 + r.w * 60) * [1, 2.2, 4.5][lv]),
-    blurb: (lv) => `${(Math.min(3, lv + 1)) * GUNS_PER_LV} fan guns along the trail (now ${lv * GUNS_PER_LV})`,
-    needs: (lv) => (r.cost === 0 || lv('run.' + r.id) ? null : `Open ${r.name} first`),
-  });
+  const b = RUN_BUILD[r.id];
+  ITEMS.push({ id: 'run.' + r.id, cat: 'trails', name: r.name, icon: r.diff, max: 200, build: b, base: Math.max(150, b * 0.15), growth: 1.17, needLv: RUN_LV[r.id], needs: 'lift.' + r.needs, unit: 'appeal', color: { green: '#2fb65a', blue: '#2f7fe0', black: '#1d1d22', double: '#1d1d22', park: '#f08a24' }[r.diff] });
+}
+ITEMS.push(
+  { id: 'lodge', cat: 'village', name: 'Base lodge', icon: 'lodge', max: 200, build: 0, base: 250, growth: 1.17, unit: 'spent per visitor', color: '#8a5a3b' },
+  { id: 'parking', cat: 'village', name: 'Parking', icon: 'car', max: 200, build: 0, base: 200, growth: 1.17, unit: 'visitors a day', color: '#55606e' },
+  { id: 'rental', cat: 'village', name: 'Rental shop', icon: 'ski', max: 200, build: 1200, base: 400, growth: 1.18, needLv: 2, unit: 'per visitor', color: '#9a3f32' },
+  { id: 'school', cat: 'village', name: 'Ski school', icon: 'school', max: 200, build: 15000, base: 3000, growth: 1.2, needLv: 5, unit: 'more visitors', color: '#e0a63a' },
+  { id: 'hotel', cat: 'village', name: 'Slopeside hotel', icon: 'hotel', max: 200, build: 500000, base: 40000, growth: 1.2, needLv: 9, unit: 'a night', color: '#3d4f66' },
+  { id: 'lights', cat: 'village', name: 'Night skiing', icon: 'lamp', max: 1, build: 80000, base: 0, growth: 1, needLv: 7, needs: 'lift.meadow', unit: '', color: '#f2b33d' },
+  { id: 'fleet', cat: 'snow', name: 'Snowcat fleet', icon: 'cat', max: 8, build: 0, base: 4000, growth: 4, unit: 'snowcats', color: '#d2453a' },
+  { id: 'catpower', cat: 'snow', name: 'Grooming crews', icon: 'cat', max: 200, build: 0, base: 200, growth: 1.18, unit: 'groomed a night', color: '#d2453a' },
+  { id: 'snowmaking', cat: 'snow', name: 'Snowmaking', icon: 'gun', max: 40, build: 3000, base: 2000, growth: 1.25, needLv: 3, unit: 'snow guns', color: '#3fb7c9' },
+  { id: 'mechanic', cat: 'crew', name: 'Lift mechanics', icon: 'wrench', max: 200, build: 800, base: 600, growth: 1.2, needLv: 2, unit: 'breakdowns', color: '#55606e' },
+  { id: 'marketing', cat: 'crew', name: 'Marketing', icon: 'mega', max: 200, build: 2500, base: 1500, growth: 1.2, needLv: 3, unit: 'more visitors', color: '#8b2f56' },
+  { id: 'service', cat: 'crew', name: 'Guest services', icon: 'star', max: 200, build: 8000, base: 5000, growth: 1.25, needLv: 5, unit: 'rating', color: '#f2b33d' },
+);
+export const ITEM_BY: Record<string, Item> = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
+
+/** price of the level after `lv` */
+export function priceOf(it: Item, lv: number) {
+  if (lv === 0) return it.build;
+  return Math.round(it.base * Math.pow(it.growth, lv - 1));
+}
+/** total price and count for buying `want` levels (or as many as cash allows when want = Infinity) */
+export function bulk(it: Item, lv: number, want: number, cash: number) {
+  let n = 0, total = 0;
+  while (n < want && lv + n < it.max) {
+    const p = priceOf(it, lv + n);
+    if (want === Infinity && total + p > cash) break;
+    total += p; n++;
+  }
+  return { n, total };
 }
 
-add({ id: 'lodge', cat: 'base', name: 'Base lodge', max: 5, icon: 'lodge',
-  levels: ['None', 'Warming hut', 'Cafeteria', 'Timber lodge', 'Grand lodge', 'Alpine hall'],
-  cost: (lv) => [0, 14000, 55000, 180000, 640000][lv] ?? 0,
-  blurb: (lv) => `${LODGE_SEATS[Math.min(5, lv + 1)]} seats for lunch, hot cocoa and chili (now ${LODGE_SEATS[lv]})` });
-add({ id: 'parking', cat: 'base', name: 'Parking', max: 5, icon: 'car',
-  levels: ['', 'Gravel lot', 'Paved lot', 'Second lot', 'Parking deck', 'Shuttle network'],
-  cost: (lv) => [0, 9000, 32000, 120000, 420000][lv] ?? 0,
-  blurb: (lv) => `Room for ${PARKING[Math.min(5, lv + 1)].toLocaleString()} visitors a day (now ${PARKING[lv].toLocaleString()})` });
-add({ id: 'rental', cat: 'base', name: 'Rental shop', max: 4, icon: 'ski',
-  cost: (lv) => [8000, 26000, 90000, 300000][lv] ?? 0,
-  blurb: (lv) => `${[0, 18, 26, 34, 42][Math.min(4, lv + 1)]}% of visitors rent skis at $${[0, 28, 34, 42, 52][Math.min(4, lv + 1)]}` });
-add({ id: 'school', cat: 'base', name: 'Ski school', max: 3, icon: 'school',
-  cost: (lv) => [16000, 70000, 260000][lv] ?? 0,
-  blurb: (lv) => `Lessons for ${[0, 8, 13, 18][Math.min(3, lv + 1)]}% of visitors and more beginners come back` ,
-  needs: (lv) => (lv('lodge') ? null : 'Build a lodge first') });
-add({ id: 'hotel', cat: 'base', name: 'Slopeside hotel', max: 3, icon: 'hotel',
-  cost: (lv) => [240000, 700000, 2000000][lv] ?? 0,
-  blurb: (lv) => `${HOTEL_ROOMS[Math.min(3, lv + 1)]} rooms: guests every night, skip the parking` ,
-  needs: (lv) => (lv('lodge') >= 3 ? null : 'Needs a Timber lodge') });
-add({ id: 'lights', cat: 'base', name: 'Night lighting', max: 1, icon: 'lamp',
-  cost: () => 45000,
-  blurb: () => 'Floodlights on the lower mountain: open 4 pm to 9 pm for night skiing',
-  needs: (lv) => (lv('lift.meadow') ? null : 'Build Meadow Chair first') });
+// ------------------------------------------------------------------ what each item does
+export function liftCap(id: string, lv: number) { return lv <= 0 ? 0 : Math.round(LIFT_CAP[id] * (1 + 0.1 * (lv - 1)) * mult(lv)); }
+export function runAppeal(id: string, lv: number) { return lv <= 0 ? 0 : RUN_APPEAL[RUN_BY[id].diff] * (1 + 0.1 * (lv - 1)) * mult(lv); }
+export const lodgeSpend = (lv: number) => 3 + 0.45 * lv;
+export const lodgeSeats = (lv: number) => (30 + 18 * lv) * mult(lv);
+export const parkingCap = (lv: number) => Math.round((70 + 30 * (lv - 1)) * mult(lv));
+export const rentalSpend = (lv: number) => (lv <= 0 ? 0 : 4 + 0.6 * lv);
+export const schoolBoost = (lv: number) => (lv <= 0 ? 0 : 0.05 + 0.025 * lv);
+export const hotelRooms = (lv: number) => (lv <= 0 ? 0 : Math.round(10 * lv * mult(lv)));
+export const marketingBoost = (lv: number) => (lv <= 0 ? 0 : 0.04 * lv);
+export const serviceStars = (lv: number) => (lv <= 0 ? 0 : Math.min(0.6, 0.04 * lv));
+export const catRate = (lv: number) => 7000 * (1 + 0.08 * Math.max(0, lv - 1)) * mult(Math.max(1, lv)); // m² an hour per cat
+export const gunsOf = (lv: number) => lv * 2;
+export const breakChance = (mech: number) => 0.035 * Math.pow(0.94, mech);
+export const fixMinutes = (mech: number) => Math.max(6, 60 * Math.pow(0.93, mech));
 
-add({ id: 'snowcat', cat: 'fleet', name: 'Snowcat', max: 4, icon: 'cat',
-  levels: SNOWCAT.map((s) => s.name),
-  cost: (lv) => [0, 30000, 110000, 340000][lv] ?? 0,
-  blurb: (lv) => { const s = SNOWCAT[Math.min(4, lv + 1)]; return `${s.name}: ${s.w} m tiller, ${Math.round(s.speed * 3.6)} km/h`; } });
-add({ id: 'sled', cat: 'fleet', name: 'Snowmobile', max: 3, icon: 'sled',
-  levels: SLED.map((s) => s.name),
-  cost: (lv) => [0, 12000, 48000][lv] ?? 0,
-  blurb: (lv) => { const s = SLED[Math.min(3, lv + 1)]; return `${s.name}: ${Math.round(s.speed * 3.6)} km/h top speed`; } });
+export function itemEffect(it: Item, lv: number): string {
+  const id = it.id;
+  const n = (v: number) => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : Math.round(v).toLocaleString());
+  if (id.startsWith('lift.')) return `${n(liftCap(id.slice(5), lv))} riders/h`;
+  if (id.startsWith('run.')) return `${n(runAppeal(id.slice(4), lv))} appeal`;
+  switch (id) {
+    case 'lodge': return `$${lodgeSpend(lv).toFixed(1)} per guest · ${n(lodgeSeats(lv))} seats`;
+    case 'parking': return `${n(parkingCap(lv))} cars a day`;
+    case 'rental': return `$${rentalSpend(lv).toFixed(1)} per guest`;
+    case 'school': return `+${Math.round(schoolBoost(lv) * 100)}% visitors`;
+    case 'hotel': return `${n(hotelRooms(lv))} rooms`;
+    case 'lights': return lv ? 'Open until 9 pm' : 'Open until 9 pm (+30% guests)';
+    case 'fleet': return `${Math.max(1, lv)} snowcat${Math.max(1, lv) > 1 ? 's' : ''}`;
+    case 'catpower': return `${n(catRate(lv) / 1000)}k m²/h per cat`;
+    case 'snowmaking': return `${gunsOf(lv)} snow guns`;
+    case 'mechanic': return `fixes in ${Math.round(fixMinutes(lv))} min`;
+    case 'marketing': return `+${Math.round(marketingBoost(lv) * 100)}% visitors`;
+    case 'service': return `+${serviceStars(lv).toFixed(2)} stars`;
+  }
+  return '';
+}
 
-add({ id: 'groomers', cat: 'staff', name: 'Night groomers', max: 4, icon: 'cat',
-  cost: (lv) => [12000, 40000, 120000, 360000][lv] ?? 0,
-  blurb: (lv) => `${Math.min(4, lv + 1)} driver${lv ? 's' : ''} groom the worst trail${lv ? 's' : ''} every night ($${(lv + 1) * 220}/day)` });
-add({ id: 'mechanic', cat: 'staff', name: 'Lift mechanics', max: 3, icon: 'wrench',
-  cost: (lv) => [9000, 36000, 110000][lv] ?? 0,
-  blurb: (lv) => `Broken lifts fixed in ${[0, 50, 30, 15][Math.min(3, lv + 1)]} minutes without you, fewer breakdowns` });
-add({ id: 'patrol', cat: 'staff', name: 'Ski patrol', max: 3, icon: 'cross',
-  cost: (lv) => [8000, 30000, 95000][lv] ?? 0,
-  blurb: (lv) => `Patrollers reach hurt skiers in ${[0, 45, 25, 12][Math.min(3, lv + 1)]} minutes when you can't` });
-add({ id: 'snowmakers', cat: 'staff', name: 'Snowmaking crew', max: 1, icon: 'gun',
-  cost: () => 26000,
-  blurb: () => 'Every gun switches itself on when a night is cold enough' });
-add({ id: 'marketing', cat: 'staff', name: 'Marketing', max: 3, icon: 'mega',
-  cost: (lv) => [15000, 60000, 220000][lv] ?? 0,
-  blurb: (lv) => `+${(Math.min(3, lv + 1)) * 12}% more visitors every day` });
+// ------------------------------------------------------------------ resort levels (from lifetime guests)
+export const xpFor = (lv: number) => Math.round((80 * (Math.pow(1.38, lv - 1) - 1)) / 0.38);
+export function levelFromXp(xp: number) { let lv = 1; while (xpFor(lv + 1) <= xp) lv++; return lv; }
+export const levelReward = (lv: number) => 150 * lv;
 
-export const UP_BY: Record<string, Upgrade> = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
-export { k as short };
+// ------------------------------------------------------------------ goals
+export interface Goal { id: string; text: string; reward: number; check: (g: GoalCtx) => number /* progress 0..1 */ }
+export interface GoalCtx { lv: (id: string) => number; day: number; best: number; stars: number; resortLv: number; cash: number; runs: number; lifts: number; lifetime: number }
+const lvGoal = (id: string, n: number, reward: number, text?: string): Goal => ({ id: `${id}@${n}`, text: text ?? `${ITEM_BY[id].name} to level ${n}`, reward, check: (g) => g.lv(id) / n });
+const build = (id: string, reward: number): Goal => ({ id: 'build:' + id, text: `Build ${ITEM_BY[id].name}`, reward, check: (g) => (g.lv(id) > 0 ? 1 : 0) });
+export const GOALS: Goal[] = [
+  lvGoal('run.bunny', 5, 150, 'Polish Sprout Slope to level 5'),
+  lvGoal('parking', 5, 200),
+  build('lift.meadow', 500),
+  lvGoal('lodge', 10, 600, 'Lodge level 10 (doubles spending)'),
+  { id: 'best@150', text: 'Host 150 skiers in a day', reward: 800, check: (g) => g.best / 150 },
+  build('rental', 600),
+  lvGoal('run.meadowlark', 10, 900),
+  build('run.fox', 1000),
+  { id: 'stars@3', text: 'Reach a 3-star rating', reward: 1200, check: (g) => g.stars / 3 },
+  build('snowmaking', 1500),
+  build('fleet', 2500),
+  build('lift.summit', 6000),
+  build('run.bowl', 8000),
+  lvGoal('lift.meadow', 25, 8000, 'Meadow Chair to 25 (quad chair)'),
+  { id: 'best@600', text: 'Host 600 skiers in a day', reward: 10000, check: (g) => g.best / 600 },
+  build('lights', 12000),
+  build('school', 12000),
+  build('run.park', 15000),
+  { id: 'stars@4', text: 'Reach a 4-star rating', reward: 25000, check: (g) => g.stars / 4 },
+  build('run.longhaul', 40000),
+  build('hotel', 60000),
+  { id: 'best@1500', text: 'Host 1,500 skiers in a day', reward: 80000, check: (g) => g.best / 1500 },
+  build('lift.ridge', 150000),
+  lvGoal('lodge', 50, 150000, 'Lodge level 50'),
+  build('lift.gondola', 600000),
+  { id: 'stars@4.8', text: 'Reach a 4.8-star rating', reward: 800000, check: (g) => g.stars / 4.8 },
+  { id: 'best@5000', text: 'Host 5,000 skiers in a day', reward: 1000000, check: (g) => g.best / 5000 },
+  lvGoal('lift.gondola', 50, 2500000),
+  { id: 'best@15000', text: 'Host 15,000 skiers in a day', reward: 6000000, check: (g) => g.best / 15000 },
+];
 
 export type Weather = 'bluebird' | 'cloudy' | 'flurries' | 'snow' | 'storm' | 'warm';
 export const WEATHER: Record<Weather, { name: string; icon: string; snow: number; demand: number; temp: [number, number]; cloud: number; wind: number }> = {
@@ -167,11 +167,38 @@ export const WEATHER: Record<Weather, { name: string; icon: string; snow: number
   cloudy: { name: 'Overcast', icon: 'cloud', snow: 0, demand: 1, temp: [-7, -3], cloud: 0.8, wind: 0.25 },
   flurries: { name: 'Flurries', icon: 'flake', snow: 1.2, demand: 0.95, temp: [-9, -5], cloud: 0.75, wind: 0.3 },
   snow: { name: 'Snowing', icon: 'snow', snow: 3.2, demand: 0.85, temp: [-10, -6], cloud: 0.95, wind: 0.45 },
-  storm: { name: 'Storm', icon: 'storm', snow: 6, demand: 0, temp: [-14, -9], cloud: 1, wind: 1 },
+  storm: { name: 'Storm', icon: 'storm', snow: 6, demand: 0.45, temp: [-14, -9], cloud: 1, wind: 1 },
   warm: { name: 'Spring sun', icon: 'sun', snow: 0, demand: 1.15, temp: [-2, 6], cloud: 0.1, wind: 0.05 },
 };
 
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const OPEN = 8.5, CLOSE = 16, NIGHT_CLOSE = 21;
+
+/** chairlift visuals still used by the 3D lifts */
+export interface ChairSpec { seats: number; speed: number; spacing: number; name: string }
+export const CHAIR: ChairSpec[] = [
+  { seats: 0, speed: 0, spacing: 14, name: '' },
+  { seats: 2, speed: 2.2, spacing: 14, name: 'Fixed double' },
+  { seats: 3, speed: 2.4, spacing: 14, name: 'Fixed triple' },
+  { seats: 4, speed: 2.6, spacing: 14, name: 'Fixed quad' },
+  { seats: 4, speed: 4.6, spacing: 16, name: 'Detachable quad' },
+  { seats: 6, speed: 5.0, spacing: 17, name: 'High-speed six' },
+];
+export const GONDOLA: ChairSpec[] = [
+  { seats: 0, speed: 0, spacing: 40, name: '' },
+  { seats: 8, speed: 5.0, spacing: 44, name: '8-seat cabins' },
+  { seats: 8, speed: 6.0, spacing: 38, name: 'Faster haul rope' },
+  { seats: 10, speed: 6.0, spacing: 34, name: '10-seat cabins' },
+];
+export const CARPET: ChairSpec[] = [
+  { seats: 0, speed: 0, spacing: 3, name: '' },
+  { seats: 1, speed: 0.9, spacing: 3.2, name: 'Rubber belt' },
+  { seats: 1, speed: 1.2, spacing: 2.6, name: 'Covered carpet' },
+  { seats: 2, speed: 1.4, spacing: 2.6, name: 'Twin carpet' },
+];
+export const liftSpecs = (kind: string) => (kind === 'gondola' ? GONDOLA : kind === 'carpet' ? CARPET : CHAIR);
+export const LIFT_RUSH = 3;
+export const PARKING = [0, 140, 380, 860, 1800, 3800];
+export const SNOWCAT_LOOK = [{ w: 0 }, { w: 6.5 }, { w: 8 }, { w: 9.5 }, { w: 11.5 }];
 
 export { RUN_BY, LIFT_BY };

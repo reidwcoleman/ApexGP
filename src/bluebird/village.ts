@@ -52,9 +52,9 @@ export class Village {
   }
 
   update(sim: Sim) {
-    const key = ['lodge', 'rental', 'school', 'hotel', 'parking'].map((k) => sim.lv(k)).join(',');
+    const key = ['lodge', 'rental', 'school', 'hotel', 'parking'].map((k) => sim.vis(k)).join(',');
     if (key !== this.built) { this.built = key; this.rebuild(sim); }
-    const gk = RUNS.map((r) => (sim.runBuilt(r.id) ? sim.lv('guns.' + r.id) : 0)).join(',');
+    const gk = sim.lv('snowmaking') + ':' + RUNS.map((r) => (sim.runBuilt(r.id) ? 1 : 0)).join('');
     if (gk !== this.gunsBuilt) { this.gunsBuilt = gk; this.rebuildGuns(sim); }
     const lk = sim.lv('lights') ? RUNS.filter((r) => r.lit && sim.runBuilt(r.id)).length : 0;
     if (lk !== this.lampsBuilt) { this.lampsBuilt = lk; this.rebuildLamps(sim); }
@@ -123,7 +123,7 @@ export class Village {
     for (const c of [...this.group.children]) this.group.remove(c);
     const S = BUILD_SPOTS;
     // lodge
-    const L = sim.lv('lodge');
+    const L = sim.vis('lodge');
     if (L) {
       const spec = [null, [10, 8, 4.5, 1], [16, 12, 6, 1], [24, 16, 9, 2], [34, 20, 12, 3], [46, 24, 15, 3]][L]!;
       const lodge = this.chalet(spec[0], spec[1], spec[2], 0x8a5a3b, { floors: spec[3], trim: 0x4a2f1f });
@@ -162,7 +162,7 @@ export class Village {
       this.place(b, S.tickets[0], S.tickets[1], 0);
     }
     // rental
-    const R = sim.lv('rental');
+    const R = sim.vis('rental', 4);
     if (R) {
       const b = this.chalet(8 + R * 3, 8, 4 + R, 0x9a3f32, { trim: 0x5a231c });
       const sg = this.sign('RENTALS', ['', 'SKIS & BOOTS', 'DEMO CENTER', 'PRO SHOP', 'FLAGSHIP'][R], 6, '#2f5f3b');
@@ -177,7 +177,7 @@ export class Village {
       this.place(b, S.rental[0], S.rental[1], 0.15);
     }
     // ski school
-    const SC = sim.lv('school');
+    const SC = sim.vis('school', 3);
     if (SC) {
       const b = this.chalet(7 + SC * 2, 6, 3.5, 0xe0a63a, { trim: 0x7a4a18 });
       const sg = this.sign('SKI SCHOOL', '', 5, '#2f7fe0');
@@ -223,7 +223,7 @@ export class Village {
       this.place(b, S.shed[0], S.shed[1], Math.PI - 0.15);
     }
     // hotel
-    const HT = sim.lv('hotel');
+    const HT = sim.vis('hotel', 3);
     if (HT) {
       const floors = [0, 3, 5, 7][HT];
       const b = this.chalet(24 + HT * 6, 14, floors * 3.2, 0xd9cbb4, { floors, trim: 0x3d4f66, roof: 8 });
@@ -233,7 +233,7 @@ export class Village {
       this.place(b, S.hotel[0], S.hotel[1], 0.08);
     }
     // parking
-    const P = sim.lv('parking');
+    const P = sim.vis('parking');
     if (P) {
       const [px, pz] = S.parking;
       const lotW = 40 + P * 22, lotD = 26 + P * 6;
