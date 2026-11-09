@@ -3,7 +3,7 @@ import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
 import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import type * as THREE from 'three';
-import { DEFAULT_MAP, MAP_ID } from './world.ts';
+import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
 const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
   { id: 'tdm', name: 'Team Fight', note: 'First side to 40 kills. Respawns on.', limit: 40 },
@@ -11,6 +11,14 @@ const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
   { id: 'hold', name: 'Hold Ground', note: 'Keep the zone. First to 150. It moves.', limit: 150 },
   { id: 'ffa', name: 'Free For All', note: 'Everyone against everyone. First to 20.', limit: 20 },
 ];
+const MAPS: { id: string; name: string; note: string }[] = [
+  { id: 'ward', name: 'Ashgrove Ward', note: 'Condemned hospital. Long wards, tight halls.' },
+  { id: 'mansion', name: 'Harrowgate House', note: 'Abandoned manor. Ballroom, cellars, two floors.' },
+  { id: 'motel', name: 'Pinewood Motor Inn', note: 'Shut motel. Galleries, a pool hall, the diner.' },
+  { id: 'block', name: 'Kessler Block', note: 'Tenements. Stairwells, flats, a freight hall.' },
+];
+const HERE = MAPS.find((x) => x.id === MAP_ID) ?? MAPS[0];
+const thumb = (id: string) => `${BASE}thumbs/${id}.webp`;
 const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Z', 'Kick'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
 interface Case { id: string; at: number; mode: Mode; won: number; line: string; k: number; d: number; len: number; marks: [number, number][] }
 const SKILL = [['Rookie', 0.2], ['Regular', 0.5], ['Veteran', 0.85]] as const;
@@ -39,7 +47,12 @@ const el = <K extends keyof HTMLElementTagNameMap>(t: K, c = '', h = '') => {
   return e;
 };
 const pad2 = (n: number) => String(n).padStart(2, '0');
-const stampNow = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+/** the way body cameras burn the time in: date, T, local time, the offset from UTC */
+const tz = (d: Date) => {
+  const o = -d.getTimezoneOffset();
+  return `${o < 0 ? '-' : '+'}${pad2(Math.floor(Math.abs(o) / 60))}${pad2(Math.abs(o) % 60)}`;
+};
+const stampNow = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} ${tz(d)}`;
 const scrub = (marks: [number, number][], len: number) => `<div class="scrub"><i></i>${marks.map(([t, k]) => `<u class="${k ? '' : 'dn'}" style="left:${((t / Math.max(1, len)) * 100).toFixed(2)}%"></u>`).join('')}</div>`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
@@ -148,12 +161,41 @@ export class Hud {
     if (j) this.joinFlow(j.toUpperCase());
   }
 
+  /** the location loading behind the menu: every load line on screen follows it */
+  loading(f: number, what: string) {
+    const done = f >= 1;
+    this.menu.querySelectorAll<HTMLElement>('.viewer').forEach((v) => v.classList.toggle('live', done));
+    this.menu.querySelectorAll<HTMLElement>('[data-load]').forEach((e) => {
+      (e.querySelector('[data-pct]') as HTMLElement).textContent = `${Math.round(f * 100)}%`;
+      (e.querySelector('i') as HTMLElement).style.transform = `scaleX(${f})`;
+      e.title = what;
+    });
+    this.menu.querySelectorAll<HTMLElement>('button.waiting').forEach((b) => {
+      b.style.setProperty('--f', String(f));
+    });
+  }
+
+  /** a start that has to wait for the location: the button says so and fills, and goes when it can */
+  private whenLoaded(b: HTMLButtonElement, go: () => void) {
+    if (this.g.loaded) return go();
+    if (b.classList.contains('waiting')) return;
+    b.classList.add('waiting');
+    b.style.setProperty('--f', String(this.g.loadF));
+    b.innerHTML = `<span>Loading the location</span><kbd>starts when ready</kbd>`;
+    void this.g.whenReady.then(() => {
+      if (b.isConnected) go();
+    });
+  }
+
   // ---------------------------------------------------------------- menus
   /** the live picture beside the rail, stamped like the camera, on a transport from the last case */
   private viewer() {
     const last = this.cases()[0];
-    return `<div class="viewer">
-      <div class="stamp"><span data-now>${stampNow()}</span><br>LF-CAM ${this.unit} &nbsp;<span class="rec">REC</span></div>
+    const live = this.g.loaded;
+    return `<div class="viewer${live ? ' live' : ''}">
+      <div class="still" style="background-image:url('${thumb(MAP_ID)}')"></div>
+      <div class="ldg" data-load><span>Loading ${esc(HERE.name)}</span><b class="num" data-pct>${Math.round(this.g.loadF * 100)}%</b><i style="transform:scaleX(${this.g.loadF})"></i></div>
+      <div class="stamp"><span data-now>${stampNow()}</span><br>LF BODY 4 &nbsp;X${this.unit}0${this.unit.slice(-3)} &nbsp;<span class="rec">REC</span></div>
       <div class="transport"><span>${last ? `CASE ${last.id}` : 'NO FOOTAGE'}</span>${scrub(last?.marks ?? [], last?.len ?? 1)}<span>${last ? fmtClock(last.len) : '0:00'}</span></div>
     </div>`;
   }
@@ -165,6 +207,7 @@ export class Hud {
     m.innerHTML = `<div class="rail">
         <div class="mast"><i class="dot"></i>REC<span class="sp">Evidence console</span></div>
         <div><h1>Last<br>Frame</h1><p class="tag">Everything you see is what the camera saw.</p></div>
+        <button class="loc" id="m-loc" aria-label="Change location"><img src="${thumb(MAP_ID)}" alt=""><span class="loc-t"><small>Location</small><b>${esc(HERE.name)}</b><em>${esc(HERE.note)}</em></span><span class="loc-c">Change</span></button>
         <label class="field"><span>Callsign</span><input id="m-name" maxlength="14" spellcheck="false" autocomplete="off" placeholder="Your name" value="${esc(this.name)}"></label>
         <div class="acts">
           <button class="primary" id="m-solo">Start a case<kbd>vs bots</kbd></button>
@@ -179,6 +222,10 @@ export class Hud {
       store.set('name', name.value.trim());
     };
     m.querySelector('#m-solo')!.addEventListener('click', () => {
+      remember();
+      this.setup('solo');
+    });
+    m.querySelector('#m-loc')!.addEventListener('click', () => {
       remember();
       this.setup('solo');
     });
@@ -251,7 +298,7 @@ export class Hud {
       <div class="mast"><i class="dot"></i>REC<span class="sp">Case ${this.caseId}</span></div>
       <button class="plain" id="s-back">Back</button>
       <h2>${kind === 'solo' ? 'New case' : 'Open a room'}</h2>
-      <div class="group"><div class="lab">Location</div>${this.seg('map', [['ward', 'Ashgrove Ward'], ['mansion', 'Harrowgate House'], ['motel', 'Pinewood Motor Inn'], ['block', 'Kessler Block']], MAP_ID)}</div>
+      <div class="group"><div class="lab">Location</div><div class="maps" data-seg="map">${MAPS.map((x) => `<button data-v="${x.id}" class="${x.id === MAP_ID ? 'sel' : ''}"><img src="${thumb(x.id)}" alt=""><b>${esc(x.name)}</b><span>${esc(x.note)}</span></button>`).join('')}</div></div>
       ${this.pickers(kind)}
       ${this.loadout()}
       <div class="acts push"><button class="primary" id="s-go">${kind === 'solo' ? 'Start recording' : 'Open the room'}</button></div>
@@ -274,12 +321,15 @@ export class Hud {
       if (lab) lab.textContent = this.mode === 'ffa' ? 'Players' : 'Team size';
     });
     m.querySelector('#s-back')!.addEventListener('click', () => this.home());
-    m.querySelector('#s-go')!.addEventListener('click', () => {
-      if (kind === 'solo') {
-        this.menu.className = 'menu';
-        this.g.startSolo(this.config(), this.name || 'Officer', this.team, this.primary);
-      } else this.openRoom();
-    });
+    const go = m.querySelector('#s-go') as HTMLButtonElement;
+    go.addEventListener('click', () =>
+      this.whenLoaded(go, () => {
+        if (kind === 'solo') {
+          this.menu.className = 'menu';
+          this.g.startSolo(this.config(), this.name || 'Officer', this.team, this.primary);
+        } else this.openRoom();
+      }),
+    );
   }
 
   private openRoom() {
@@ -349,7 +399,8 @@ export class Hud {
       this.host = null;
       this.home();
     });
-    m.querySelector('#l-go')!.addEventListener('click', () => this.startHosted());
+    const go = m.querySelector('#l-go') as HTMLButtonElement;
+    go.addEventListener('click', () => this.whenLoaded(go, () => this.startHosted()));
   }
 
   startHosted() {
@@ -399,9 +450,11 @@ export class Hud {
         this.menu.querySelector('#j-back')!.addEventListener('click', back);
       } else if (m.t === 'start') {
         const me = m.players.find((p) => p.id === guest.peer.id);
-        this.menu.className = 'menu';
-        this.g.startGuest(guest, m.cfg, m.players, me?.slot ?? 0);
         this.guest = null;
+        void this.g.whenReady.then(() => {
+          this.menu.className = 'menu';
+          this.g.startGuest(guest, m.cfg, m.players, me?.slot ?? 0);
+        });
       }
     };
   }
@@ -469,7 +522,7 @@ export class Hud {
     // the first few matches get the keys on screen; after that the pause screen has them
     const n = Number(store.get('played', '0'));
     store.set('played', String(n + 1));
-    this.hintT = n < 4 ? 20 : 0;
+    this.hintT = n < 4 ? 12 : 0;
     this.hint.classList.toggle('on', n < 4);
     this.feedEl.innerHTML = '';
     this.boardEl.classList.remove('on', 'final');
@@ -671,7 +724,7 @@ export class Hud {
       if (this.hintT <= 0) this.hint.classList.remove('on');
     }
     const d = new Date();
-    const stamp = `${stampNow(d)}<br>LF-CAM ${this.unit} &nbsp;<span class="rec${d.getSeconds() % 2 ? '' : ' off'}">REC</span>`;
+    const stamp = `${stampNow(d)}<br>LF BODY 4 &nbsp;X${this.unit}0${this.unit.slice(-3)} &nbsp;<span class="rec${d.getSeconds() % 2 ? '' : ' off'}">REC</span>`;
     if (this.stamp.dataset.s !== stamp) {
       this.stamp.dataset.s = stamp;
       this.stamp.innerHTML = stamp;

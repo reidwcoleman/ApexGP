@@ -213,9 +213,20 @@ export class Game {
   /** test tools drive the game without pointer lock */
   autoInput = false;
 
-  async load(progress: (f: number, what: string) => void) {
-    await loadVolume();
-    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear()]);
+  /** the map loads behind the menu: what's done, and a promise for the rest */
+  loaded = false;
+  loadF = 0;
+  loadWhat = 'Loading';
+  private readyRes!: () => void;
+  readonly whenReady = new Promise<void>((r) => (this.readyRes = r));
+
+  async load(progress0: (f: number, what: string) => void) {
+    const progress = (f: number, what: string) => {
+      this.loadF = Math.max(this.loadF, f);
+      this.loadWhat = what;
+      progress0(this.loadF, what);
+    };
+    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume()]);
     this.L = L;
     this.phys = phys;
     this.buildPhysics();
@@ -302,6 +313,8 @@ export class Game {
     await this.warm();
     progress(1, 'Ready');
     this.attract = 0.001;
+    this.loaded = true;
+    this.readyRes();
     requestAnimationFrame(this.loop);
   }
 
@@ -354,7 +367,8 @@ export class Game {
     this.flashPoint.intensity = 0.01;
     this.bounce.intensity = 0.01;
     this.fill.intensity = 0.01;
-    this.r.compile(this.scene, this.cam);
+    // the shaders build on the driver's own threads while the page stays live, instead of one blocking link after another
+    await this.r.compileAsync(this.scene, this.cam).catch(() => this.r.compile(this.scene, this.cam));
     this.post.render(this.scene, this.cam, 0.016, 0);
     await new Promise((r) => setTimeout(r));
     s.dispose();

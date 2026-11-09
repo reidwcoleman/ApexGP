@@ -130,9 +130,10 @@ if '--tex' in sys.argv:
         for suf, n, q in (('diff', 'c', 80), ('nor', 'n', 86), ('arm', 'a', 70)):
             s = f'{SRC}/{t}_{suf}.jpg'
             s2 = f'{SRC}2k/{t}_{suf}.jpg'
-            if os.path.exists(s2):
+            # 2k for colour only: a 2k normal map is a megabyte each and nothing through this lens shows the difference
+            if os.path.exists(s2) and n == 'c':
                 s = s2
-                q = 66 if n == 'c' else 72
+                q = 66
             if os.path.exists(f'{TEXD}/tex/{t}_{n}.webp') and '--retex' not in sys.argv: continue
             if os.path.exists(s):
                 subprocess.run(['cwebp', '-quiet', '-q', str(q), '-m', '6', s, '-o', f'{TEXD}/tex/{t}_{n}.webp'], check=True)

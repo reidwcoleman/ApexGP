@@ -42,13 +42,67 @@ export async function loadGuns() {
       for (const mat of (Array.isArray(m.material) ? m.material : [m.material]) as THREE.MeshStandardMaterial[]) {
         if (seen.has(mat)) continue;
         seen.add(mat);
-        applyLF(mat, { spec: 0.42, view: 1 });
-        mat.metalness *= 0.7;
+        // the made-up guns are baked without any surface: give them the fine grain of real finish (stippled
+        // polymer, bead-blasted and parkerised steel), and the dull sheen of it rather than a plastic gloss
+        const made = !mat.normalMap;
+        applyLF(mat, { spec: made ? 0.3 : 0.38, view: 1 });
+        mat.metalness *= made ? 0.5 : 0.7;
+        mat.roughness *= made ? 1.6 : 1.1;
+        if (made) mat.color.multiplyScalar(1.18);
+        if (made) {
+          mat.normalMap = grain();
+          mat.normalScale.set(0.16, 0.16);
+        }
         if (mat.map) mat.map.anisotropy = 8;
       }
     }
   });
   for (const c of g.scene.children) template.set(c.name, c);
+}
+
+/** a tiling height field of fine grain, as a normal map: a few octaves of value noise, wrapped */
+let grainTex: THREE.Texture | null = null;
+function grain() {
+  if (grainTex) return grainTex;
+  const N = 256;
+  const h = new Float32Array(N * N);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (const [cells, amp] of [[64, 0.55], [128, 0.35], [32, 0.25], [16, 0.12]] as const) {
+    const g = new Float32Array(cells * cells).map(() => rnd());
+    const k = N / cells;
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const fx = x / k, fy = y / k;
+        const x0 = Math.floor(fx), y0 = Math.floor(fy);
+        const tx = fx - x0, ty = fy - y0;
+        const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+        const at = (i: number, j: number) => g[((j % cells) * cells + (i % cells))];
+        const v = (at(x0, y0) * (1 - sx) + at(x0 + 1, y0) * sx) * (1 - sy) + (at(x0, y0 + 1) * (1 - sx) + at(x0 + 1, y0 + 1) * sx) * sy;
+        h[y * N + x] += v * amp;
+      }
+  }
+  const d = new Uint8Array(N * N * 4);
+  const H = (x: number, y: number) => h[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const nx = (H(x - 1, y) - H(x + 1, y)) * 2.2, ny = (H(x, y - 1) - H(x, y + 1)) * 2.2;
+      const l = Math.hypot(nx, ny, 1);
+      const i = (y * N + x) * 4;
+      d[i] = (nx / l * 0.5 + 0.5) * 255;
+      d[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+      d[i + 2] = (1 / l * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
+    }
+  const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(5, 5);
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return (grainTex = t);
 }
 
 export function buildGun(id: WeaponId): Gun {

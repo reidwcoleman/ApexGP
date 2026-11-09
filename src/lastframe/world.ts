@@ -353,11 +353,25 @@ function makeSky(tex: THREE.Texture, lm: MapData['lm'], tint = [0.62 * 0.36, 0.6
 }
 
 export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, what: string) => void): Promise<Loaded> {
+  // everything at once: the geometry and the props start down the wire while the textures do
+  const binP = fetch(MB + 'world.bin').then((r) => r.arrayBuffer());
+  const propsP = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(MB + 'props.glb');
   const map: MapData = await (await fetch(MB + 'map.json')).json();
   LF.lmK.value.set(map.lm.logr, map.lm.k);
   if (map.weather?.sun) LF.skyK.value = map.weather.sun.sky;
-  const bin = await (await fetch(MB + 'world.bin')).arrayBuffer();
+  const bin = await binP;
+  // decoded off the main thread, already the right way up: an <img> is decoded on the spot when it's uploaded, which
+  // was most of the load
+  const bmp = typeof createImageBitmap === 'function' ? new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }) : null;
   const tl = new THREE.TextureLoader();
+  const loadTex = async (url: string): Promise<THREE.Texture> => {
+    if (!bmp) return tl.loadAsync(url);
+    const b = await bmp.loadAsync(url);
+    const t = new THREE.Texture(b as unknown as HTMLImageElement);
+    t.flipY = false;
+    t.needsUpdate = true;
+    return t;
+  };
   const aniso = Math.min(4, r.capabilities.getMaxAnisotropy());
   const texs = new Map<string, THREE.Texture>();
   const need: [string, boolean][] = [];
@@ -370,7 +384,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   }
   let done = 0;
   await Promise.all(need.map(async ([f, srgb]) => {
-    const t = await tl.loadAsync((f.startsWith('tex/') ? BASE : MB) + f).catch(() => null);
+    const t = await loadTex((f.startsWith('tex/') ? BASE : MB) + f).catch(() => null);
     done++;
     progress(0.1 + 0.6 * (done / need.length), 'Textures');
     if (!t) return;
@@ -384,7 +398,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   lm.generateMipmaps = false;
   lm.minFilter = THREE.LinearFilter;
   lm.anisotropy = 1;
-  lm.flipY = true;
+  lm.flipY = !bmp;
   lm.needsUpdate = true;
   LF.lm.value = lm;
   const lm2 = texs.get('lm2.webp');
@@ -393,7 +407,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     lm2.generateMipmaps = false;
     lm2.minFilter = THREE.LinearFilter;
     lm2.anisotropy = 1;
-    lm2.flipY = true;
+    lm2.flipY = !bmp;
     lm2.needsUpdate = true;
     LF.lm2.value = lm2;
   }
@@ -439,9 +453,19 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     group.add(mesh);
   }
   progress(0.72, 'Props');
-  const gl = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(MB + 'props.glb');
+  const gl = await propsP;
   // compression moves each mesh into a quantised box and puts the way back on its node: nothing here may drop a node's matrix
   gl.scene.updateMatrixWorld(true);
+  // glass that refracts makes three draw the whole scene twice a frame: plain see-through glass instead
+  gl.scene.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
+    if (m && 'transmission' in m && m.transmission > 0) {
+      m.transmission = 0;
+      m.transparent = true;
+      m.opacity = 0.32;
+      m.depthWrite = false;
+    }
+  });
   const byId = new Map<string, THREE.Object3D>();
   for (const c of gl.scene.children) {
     byId.set(c.name, c);
@@ -658,7 +682,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
       t.generateMipmaps = false;
       t.minFilter = THREE.LinearFilter;
-      t.flipY = true;
+      t.flipY = !bmp;
       t.needsUpdate = true;
     }
     LF.lm3.value = lm3;
@@ -667,7 +691,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       near.wrapS = near.wrapT = THREE.ClampToEdgeWrapping;
       near.generateMipmaps = false;
       near.minFilter = THREE.LinearFilter;
-      near.flipY = true;
+      near.flipY = !bmp;
       near.needsUpdate = true;
     }
     // the heights as a texture: the sea and the grass read them on the GPU

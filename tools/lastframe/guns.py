@@ -396,4 +396,8 @@ for name, grp, dz in (('A', ('carbine', 'carbine_mag', 'carbine_lens'), 0), ('B'
         if o.type == 'MESH': o.hide_render = o.name not in grp
     scene.render.filepath = f'{OUT}/gun_{name}.png'
     bpy.ops.render.render(write_still=True)
+# webp: the first-person guns were the second biggest download
+import subprocess, shutil
+shutil.move(f'{OUT}/guns.glb', f'{OUT}/guns_jpeg.glb')
+subprocess.run(['npx', '--yes', '@gltf-transform/cli', 'webp', f'{OUT}/guns_jpeg.glb', f'{OUT}/guns.glb', '--quality', '84'], check=True, cwd=os.path.join(HERE, '..', '..') if 'HERE' in dir() else None)
 print('GUNS DONE', os.path.getsize(f'{OUT}/guns.glb') // 1024, 'KB')

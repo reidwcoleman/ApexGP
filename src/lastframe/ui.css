@@ -114,7 +114,7 @@
 #ui button:hover { background: var(--hover); }
 #ui button:active { background: var(--press); transform: scale(.985); }
 #ui button:focus-visible, #ui input[type=range]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-#ui button.primary { background: var(--ink); color: #0d0e0f; border-color: var(--ink); font-weight: 600; height: 52px; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
+#ui button.primary { background: var(--ink); color: #0d0e0f; border-color: var(--ink); font-weight: 600; height: 56px; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 #ui button.primary:hover { background: #fff; }
 #ui button.primary kbd { font: 400 12px var(--mono); opacity: .62; }
 #ui button.plain { background: transparent; border-color: transparent; padding: 0; height: 32px; color: var(--dim); align-self: flex-start; }
@@ -215,3 +215,40 @@
 
 @media (max-width: 900px) { .viewer { display: none; } .rail, .rail.wide { width: 100%; border: 0; } .sh-tables { grid-template-columns: 1fr; } .feed { width: 60vw; } }
 @media (max-height: 760px) { .rail { padding: 24px; gap: 16px; } .rail h1 { font-size: 64px; } .acts.push { bottom: -24px; margin-bottom: -24px; padding-bottom: 24px; } #ui .list button { min-height: 44px; padding-top: 4px; padding-bottom: 4px; } }
+
+/* ---- the location: a still of it until the live picture is up, and the load under it */
+.viewer .still { position: absolute; inset: 0; background: #000 center / cover no-repeat; opacity: .55; filter: grayscale(.25) contrast(1.05); transition: opacity .9s; }
+.viewer .still::after { content: ''; position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 45%, transparent 40%, rgba(0,0,0,.75)); }
+.viewer.live .still { opacity: 0; }
+.ldg { position: absolute; left: 24px; right: 24px; bottom: 52px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font: 400 12px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .06em; text-shadow: var(--shadow); transition: opacity .5s; }
+.ldg b { color: var(--ink); font-weight: 400; }
+.ldg i { position: absolute; left: 0; right: 0; bottom: -8px; height: 2px; background: var(--ink); transform-origin: left; transition: transform .25s; }
+.ldg::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 2px; background: rgba(255,255,255,.16); }
+.viewer.live .ldg { opacity: 0; }
+
+/* the location on the front page: its picture, its name, a way to change it */
+#ui button.loc { position: relative; height: 148px; padding: 0; overflow: hidden; border-color: var(--hair); display: block; width: 100%; background: #000; }
+#ui button.loc img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .82; transition: opacity .2s, transform .4s; }
+#ui button.loc:hover img { opacity: 1; transform: scale(1.02); }
+#ui button.loc:active { transform: scale(.99); }
+.loc-t { position: absolute; left: 0; right: 0; bottom: 0; padding: 32px 16px 12px; display: flex; flex-direction: column; gap: 2px; background: linear-gradient(0deg, rgba(0,0,0,.88), rgba(0,0,0,.5) 60%, transparent); }
+.loc-t small { font: 400 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.loc-t b { font: 600 24px/1.05 var(--cond); }
+.loc-t em { font-style: normal; font-size: 13px; color: var(--dim); }
+.loc-c { position: absolute; top: 12px; right: 12px; font: 400 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; background: rgba(0,0,0,.62); padding: 4px 8px; border-radius: 3px; color: var(--ink); }
+
+/* the location cards in setup */
+.maps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#ui .maps button { height: auto; padding: 0 0 12px; display: flex; flex-direction: column; gap: 2px; background: transparent; border: 1px solid var(--hair); overflow: hidden; transform: none; }
+#ui .maps button:hover { background: var(--raise); }
+#ui .maps button img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; margin-bottom: 8px; opacity: .7; filter: grayscale(.35); transition: opacity .15s, filter .15s; }
+#ui .maps button:hover img { opacity: .95; filter: none; }
+#ui .maps button.sel { border-color: var(--ink); background: var(--raise); }
+#ui .maps button.sel img { opacity: 1; filter: none; }
+.maps b { font: 600 18px/1.1 var(--cond); padding: 0 12px; }
+.maps span { font-size: 12px; color: var(--dim); padding: 0 12px; line-height: 1.35; }
+
+/* a start that waits on the location fills as it loads */
+#ui button.primary.waiting { background: var(--hover); color: var(--ink); border-color: var(--edge); position: relative; overflow: hidden; cursor: progress; }
+#ui button.primary.waiting::before { content: ''; position: absolute; inset: 0; background: rgba(231,231,226,.14); transform-origin: left; transform: scaleX(var(--f, 0)); transition: transform .25s; }
+#ui button.primary.waiting > * { position: relative; }
