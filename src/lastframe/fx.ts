@@ -564,7 +564,9 @@ export class Fx {
   private glow: Pool;
   private decals: THREE.InstancedMesh;
   private dI = 0;
-  private DM = 700;
+  private DM = 1400;
+  /** the first `fixed` marks are the map's own (old blood): gunfire wraps round after them, never over them */
+  private fixed = 0;
   private markMat: THREE.MeshBasicMaterial;
   private tracer: THREE.LineSegments;
   private tPos = new Float32Array(48 * 6);
@@ -813,9 +815,15 @@ export class Fx {
   }
 
   /** spin: 'down' turns the mark so whatever runs in it runs down the wall; otherwise random */
-  decal(x: number, y: number, z: number, nx: number, ny: number, nz: number, cell: number, size: number, spin?: 'down' | number) {
-    const i = this.dI;
-    this.dI = (this.dI + 1) % this.DM;
+  decal(x: number, y: number, z: number, nx: number, ny: number, nz: number, cell: number, size: number, spin?: 'down' | number, keep = false) {
+    let i: number;
+    if (keep && this.fixed < this.DM - 300) {
+      i = this.fixed++;
+      this.dI = Math.max(this.dI, this.fixed);
+    } else {
+      i = this.dI;
+      this.dI = this.dI + 1 >= this.DM ? this.fixed : this.dI + 1;
+    }
     this.decals.count = Math.max(this.decals.count, i + 1);
     this.v.set(nx, ny, nz).normalize();
     this.q.setFromUnitVectors(this.z, this.v);
@@ -918,6 +926,12 @@ export class Fx {
     }
   }
 
+  /** someone just down: for a few seconds blood runs out of them and falls to the floor (at() is where, as the body settles) */
+  private bleeders: { at: () => THREE.Vector3 | null; t: number; secs: number; acc: number }[] = [];
+  bleed(at: () => THREE.Vector3 | null, secs = 3.2) {
+    this.bleeders.push({ at, t: secs, secs, acc: 0 });
+  }
+
   /** where someone came to rest: it spreads out from under them */
   pool(x: number, y: number, z: number) {
     this.spread(x, y + 0.006, z, 11, 0.15, 1.1 + Math.random() * 0.6, 9 + Math.random() * 5);
@@ -935,11 +949,12 @@ export class Fx {
   }
 
   /** blood that was here before anyone came: old, set in */
-  stain(x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number) {
+  /** old blood the map was built with: kept for the whole match */
+  stain(x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number, cell?: number) {
     const floor = ny > 0.7;
     const r = Math.random();
-    if (floor) this.decal(x, y + 0.005, z, nx, ny, nz, r < 0.5 ? 14 : r < 0.8 ? 11 : 13, size);
-    else this.decal(x, y, z, nx, ny, nz, r < 0.35 ? 15 : r < 0.7 ? 10 : r < 0.85 ? 8 : 14, size, 'down');
+    if (floor) this.decal(x, y + 0.005, z, nx, ny, nz, cell ?? (r < 0.5 ? 14 : r < 0.8 ? 11 : 13), size, undefined, true);
+    else this.decal(x, y, z, nx, ny, nz, cell ?? (r < 0.35 ? 15 : r < 0.7 ? 10 : r < 0.85 ? 8 : 14), size, 'down', true);
   }
 
   tracerLine(a: THREE.Vector3, bx: number, by: number, bz: number) {
@@ -1019,9 +1034,26 @@ export class Fx {
 
   update(dt: number, time: number, cam: THREE.Camera, indoors: boolean) {
     this.eye.copy(cam.position);
+    // the bleeding: heavy at first, then a trickle
+    for (let i = this.bleeders.length - 1; i >= 0; i--) {
+      const b = this.bleeders[i];
+      b.t -= dt;
+      const p = b.at();
+      if (b.t <= 0 || !p) {
+        this.bleeders.splice(i, 1);
+        continue;
+      }
+      b.acc += dt * 26 * (b.t / b.secs) ** 1.5;
+      while (b.acc > 1) {
+        b.acc -= 1;
+        this.fling(p.x + rnd(0.12), p.y - 0.05, p.z + rnd(0.12), rnd(0.35), -0.3 - Math.random() * 0.6, rnd(0.35), 0.02 + Math.random() * 0.035);
+      }
+    }
     // drops land
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
+      // seen falling: a short dark streak behind each one, gone in a blink
+      this.soft.emit(d.x, d.y, d.z, d.vx * 0.15, d.vy * 0.15, d.vz * 0.15, d.s * 0.55, 0.0, 0.05, 0.17, 0.008, 0.01, 0.85, 0, 0);
       d.life -= dt;
       d.vy -= 9.8 * dt;
       const ox = d.x, oz = d.z;

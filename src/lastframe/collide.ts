@@ -106,7 +106,8 @@ export class World {
   }
 
   /** the highest surface at or under y+reach beneath (x,z) */
-  floorAt(x: number, y: number, z: number, r: number, reach = 0.05): number {
+  /** real: only what you can see (no invisible blockers, no bounding boxes round props), for blood and marks */
+  floorAt(x: number, y: number, z: number, r: number, reach = 0.05, real = false): number {
     let best = -1e9;
     const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL), z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
     for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
@@ -114,6 +115,7 @@ export class World {
       if (!c) continue;
       for (const b of c) {
         if (b.off || x + r <= b.min[0] || x - r >= b.max[0] || z + r <= b.min[2] || z - r >= b.max[2]) continue;
+        if (real && (b.tag === 'inv' || b.tag === 'prop')) continue;
         const top = b.max[1];
         if (top <= y + reach && top > best) best = top;
       }
@@ -124,11 +126,11 @@ export class World {
   }
 
   /** nearest hit along a ray; `skipPen` sees through what a bullet would */
-  ray(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number, skipPen = false): Hit | null {
+  ray(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, max: number, skipPen = false, real = false): Hit | null {
     let best: Hit | null = null, bt = max;
     const ix = 1 / (dx || 1e-9), iy = 1 / (dy || 1e-9), iz = 1 / (dz || 1e-9);
     const test = (b: Box) => {
-      if (b.off || (skipPen && b.pen)) return;
+      if (b.off || (skipPen && b.pen) || (real && (b.tag === 'inv' || b.tag === 'prop'))) return;
       if (b.slab) {
         const h = raySlab(b, ox, oy, oz, dx, dy, dz, bt);
         if (h) {
@@ -176,7 +178,7 @@ export class World {
         tz += tdz;
       }
     }
-    for (const b of this.dyn) test(b);
+    if (!real) for (const b of this.dyn) test(b);
     if (this.terrain) {
       // march over the heights, and pin the crossing down by halves
       const lim = bt;

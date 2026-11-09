@@ -18,6 +18,7 @@ import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type Match
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
+import { Graffiti, markUp } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
 const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, cove: 0.6 };
@@ -269,14 +270,23 @@ export class Game {
     if (wx?.skyTint) this.scene.traverse((o) => { const u = (o as THREE.Mesh).material && ((o as THREE.Mesh).material as THREE.ShaderMaterial).uniforms; if (u?.tint && u.disc) (u.tint.value as THREE.Vector3).set(wx.skyTint![0], wx.skyTint![1], wx.skyTint![2]); });
     if (wx?.expMax) this.post.exposureMax = wx.expMax;
     if (wx?.sat) this.post.mFinal.uniforms.satK.value = wx.sat;
-    this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01);
-    this.fx.rayAt = (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far, true);
+    this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01, 0.05, true);
+    this.fx.rayAt = (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far, true, true);
     this.fx.lensHit = (k) => {
       this.lensBlood = Math.min(1.2, this.lensBlood + k);
       this.post.splat();
     };
     // old blood, where the map says
     for (const s of L.map.stains ?? []) this.fx.stain(s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
+    // what people wrote on the walls, and the rooms where it went worst
+    if (!LF.sunOn) {
+      const gr = new Graffiti();
+      this.scene.add(gr.mesh);
+      const seed = [...MAP_ID].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7);
+      const out = markUp(L.map.rooms as never, L.world, this.fx, gr, seed);
+      if (location.search.includes('dev=1')) console.log('[lf] graffiti', out.pieces, 'soaked rooms', out.soaked, out.soakedRooms.join(' '));
+      (this as unknown as { graffiti: Graffiti }).graffiti = gr;
+    }
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
     this.post.airScene = this.fx.air;
@@ -673,15 +683,18 @@ export class Game {
           s.kill(this.phys, running, e.zone, d, shove);
           const y = e.zone === 0 ? 1.62 : e.zone === 4 ? 0.7 : 1.2;
           // what the round carries past lands on whatever is behind them
-          const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2);
+          const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2, true, true);
           this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined, e.zone === 0 ? 2.2 : 1.6);
+          // it runs out of them onto the floor, then pools
+          const died = a.deadAt;
+          this.fx.bleed(() => (a.deadAt === died ? s.head : null));
           window.setTimeout(() => {
             if (a.deadAt < 0 || !s.head) return;
             // the floor right under them: searched from just above the head, so a table or a bed beside them doesn't catch it
-            let fy = this.L.world.floorAt(s.head.x, s.head.y + 0.15, s.head.z, 0.05);
+            let fy = this.L.world.floorAt(s.head.x, s.head.y + 0.15, s.head.z, 0.05, 0.05, true);
             if (!(fy > s.head.y - 0.6)) fy = s.head.y - 0.12;
             this.fx.pool(s.head.x, fy, s.head.z);
-          }, 1800);
+          }, 900);
         }
         const by = this.actors.get(e.by);
         this.hud.feed(by?.info.name ?? '?', a.info.name, e.w, e.zone, by?.info.team ?? 2, a.info.team, e.by === this.mySlot || e.s === this.mySlot);
