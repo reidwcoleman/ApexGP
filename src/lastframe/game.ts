@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Sun, MOVER } from './sun.ts';
 import type { PeopleKit } from '../people/Humans.ts';
 import { Planar, Post } from './post.ts';
-import { loadVolume, loadWorld, type Door, type Loaded, type MapData } from './world.ts';
+import { MAP_ID, loadVolume, loadWorld, type Door, type Loaded, type MapData } from './world.ts';
 import { slabGap } from './collide.ts';
 import { Phys } from './physics.ts';
 import { LF, applyLF } from './lighting.ts';
@@ -17,6 +17,10 @@ import { stepNade, type NadeSim } from './nade.ts';
 import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
+import { Shafts } from './shafts.ts';
+
+/** how thick the air is with dust, by location */
+const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, cove: 0.6 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -69,6 +73,7 @@ export class Game {
   host: Host | null = null;
   guest: Guest_ | null = null;
   actors = new Map<number, Actor>();
+  private shafts: Shafts | null = null;
   phase: Phase = 'warmup';
   clock = 0;
   score: [number, number] = [0, 0];
@@ -275,6 +280,9 @@ export class Game {
     this.fx.outside = (x, z) => this.zone(x, 1, z) === 'street';
     this.scene.add(this.fx.group);
     this.post.airScene = this.fx.air;
+    // light through the windows, into the dust
+    this.shafts = new Shafts(L.map as never, (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far), SHAFT_GAIN[MAP_ID]);
+    this.fx.air.add(this.shafts.group);
     this.post.airScale = (s) => this.fx.setScale(s);
     progress(0.95, 'Paths');
     const seeds = [...L.map.spawns.a, ...L.map.spawns.b, ...L.map.spawns.ffa];
@@ -1277,6 +1285,7 @@ export class Game {
       AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.09);
       AIR.beamD.value.copy(me.barrel);
     } else AIR.beamP.value.w = 0;
+    this.shafts?.update(this.time, this.cam, (l) => 1 - (this.L.flicks.find((f) => f.l === l)?.k ?? 0) * 0.94);
     const fp = this.flashPoint.position;
     AIR.spark.value.set(fp.x, fp.y, fp.z, this.flashK * 0.022);
     if (me.alive && me.light) {
