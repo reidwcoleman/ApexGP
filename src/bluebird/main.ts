@@ -601,7 +601,7 @@ async function boot() {
         if (!sim.gunOn.has(g.id)) continue;
         if (Math.hypot(g.x - cam.position.x, g.z - cam.position.z) > 700) continue;
         village.gunNozzle(g, tmp);
-        fx.emit(tmp.x, tmp.y, tmp.z, g.dx * 13, 5, g.dz * 13, 3.2, 3, 2.4, 260);
+        fx.emit(tmp.x, tmp.y, tmp.z, g.dx * 17, 4.5, g.dz * 17, 2.6, 5, 2.6, 120);
       }
     }
     fx.update(dt, world.night, innerHeight * world.renderer.getPixelRatio(), cam.fov);

@@ -237,9 +237,13 @@ export class Village {
     if (P) {
       const [px, pz] = S.parking;
       const lotW = 40 + P * 22, lotD = 26 + P * 6;
-      const lot = new THREE.Mesh(new THREE.PlaneGeometry(lotW, lotD), M(P >= 2 ? 0x3c4046 : 0x8a8276, 0.95));
-      lot.rotation.x = -Math.PI / 2;
-      lot.position.set(px, this.m.at(px, pz) + 0.08, pz);
+      const lg = new THREE.PlaneGeometry(lotW, lotD, Math.ceil(lotW / 4), Math.ceil(lotD / 4));
+      lg.rotateX(-Math.PI / 2);
+      const lp = lg.getAttribute('position');
+      for (let i = 0; i < lp.count; i++) lp.setY(i, this.m.at(px + lp.getX(i), pz + lp.getZ(i)) + 0.07);
+      lg.computeVertexNormals();
+      const lot = new THREE.Mesh(lg, M(P >= 2 ? 0x55595f : 0x9a9284, 0.95));
+      lot.position.set(px, 0, pz);
       lot.receiveShadow = true;
       this.group.add(lot);
       const cars = Math.min(260, Math.round(PARKING[P] / 5));
@@ -275,6 +279,55 @@ export class Village {
       const l2 = l1.clone(); l2.position.x = 3;
       b.add(board, legs, l1, l2);
       this.place(b, -40, 474, 0.2);
+    }
+    // village spruces, ski racks and benches
+    {
+      const tree = (x: number, z: number, s: number) => {
+        const t = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 2, 5), M(0x4a2f1f));
+        trunk.position.y = 1;
+        t.add(trunk);
+        [[2.4, 3.6, 1.6], [1.8, 3.2, 3.4], [1.1, 2.6, 5.2]].forEach(([r, h, y]) => {
+          const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7), M(0x1d3a2b, 0.9, { flatShading: true }));
+          c.position.y = y + h / 2 - 0.3;
+          const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.75, h * 0.45, 7), M(0xf2f5fa, 0.8, { flatShading: true }));
+          cap.position.y = y + h * 0.78;
+          t.add(c, cap);
+        });
+        t.scale.setScalar(s);
+        this.place(t, x, z);
+      };
+      const spots: [number, number][] = [[-250, 470], [-232, 520], [-262, 560], [-170, 590], [-30, 600], [60, 590], [250, 500], [300, 590], [96, 548], [-150, 540], [196, 514], [-96, 470]];
+      spots.forEach(([x, z], i) => tree(x, z, 0.8 + ((i * 37) % 10) / 20));
+      const benchM = M(0x7a5236);
+      for (const [x, z, r] of [[-22, 498, 0], [8, 500, 0], [64, 492, 0.3], [-118, 508, -0.4]] as [number, number, number][]) {
+        const bnch = new THREE.Group();
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.12, 0.5), benchM); seat.position.y = 0.5;
+        const back = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 0.1), benchM); back.position.set(0, 0.8, -0.22);
+        const legs = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 0.4), M(0x2b3036)); legs.position.y = 0.25;
+        bnch.add(seat, back, legs);
+        this.place(bnch, x, z, r);
+      }
+      const rackM = M(0x3a434b, 0.6);
+      for (const [x, z] of [[-6, 482], [84, 470], [-128, 462]] as [number, number][]) {
+        const rack = new THREE.Group();
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(6, 0.1, 0.1), rackM); bar.position.y = 1.2;
+        rack.add(bar);
+        for (let i = 0; i < 9; i++) {
+          const ski = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.7, 0.03), M([0xd2453a, 0x2f7fe0, 0xf2c46d, 0x2fb65a, 0xe8e8ea][i % 5], 0.5));
+          ski.position.set(-2.8 + i * 0.7, 0.85, 0.08); ski.rotation.z = 0.12;
+          rack.add(ski);
+        }
+        this.place(rack, x, z);
+      }
+      // a snowman by the ski school
+      const sm = new THREE.Group();
+      const snowM = M(0xf4f7fb, 0.8);
+      [[0.9, 0.9], [0.65, 2.15], [0.45, 3.0]].forEach(([r, y]) => { const b = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), snowM); b.position.y = y; sm.add(b); });
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.4, 6), M(0xf08a24)); nose.rotation.x = Math.PI / 2; nose.position.set(0, 3.0, 0.5);
+      const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.4, 10), M(0xd2453a)); hat.position.y = 3.5;
+      sm.add(nose, hat);
+      this.place(sm, -176, 524, 0.4);
     }
     // a few fire pits / benches for life
     for (const [x, z] of [[-10, 506], [70, 500]] as [number, number][]) {

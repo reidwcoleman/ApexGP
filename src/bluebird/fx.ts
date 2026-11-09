@@ -26,7 +26,7 @@ export class Fx {
       depthWrite: false,
       vertexShader: `attribute float aSize; attribute float aAlpha; varying float vA; uniform float uScale;
         void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vA = aAlpha; gl_PointSize = min(220.0, aSize * uScale / 140.0 / -mv.z); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `uniform float uNight; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA; if (a < 0.01) discard; gl_FragColor = vec4(vec3(0.97, 0.98, 1.0) * (1.0 - uNight * 0.55), a); }`,
+      fragmentShader: `uniform float uNight; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d) * vA; if (a < 0.01) discard; gl_FragColor = vec4(vec3(0.97, 0.98, 1.0) * (1.0 - uNight * 0.35), a); }`,
     });
     this.points = new THREE.Points(g, mat);
     this.points.frustumCulled = false;
@@ -54,8 +54,8 @@ export class Fx {
       const d = Math.exp(-dt * 2.2);
       this.vel[i * 3] *= d; this.vel[i * 3 + 1] *= d; this.vel[i * 3 + 2] *= d;
       this.pos[i * 3] += this.vel[i * 3] * dt; this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt; this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      this.alpha[i] = Math.max(0, t) * 0.75;
-      this.size[i] *= 1 + dt * 1.2;
+      this.alpha[i] = Math.max(0, t) * Math.min(1, (1 - t) * 6) * 0.6;
+      this.size[i] *= 1 + dt * 0.55;
     }
     const g = this.points.geometry;
     g.getAttribute('position').needsUpdate = true;

@@ -208,8 +208,8 @@ export class Lift {
       const g = new THREE.Group();
       const big = kind === 'gondola';
       const hw = OFF + 1.8;
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 4, 0.6, big ? 16 : 10), M(0x8a8e93, 0.95, 0));
-      pad.position.y = 0.3;
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 4, 0.5, big ? 16 : 9), M(0x8a8e93, 0.95, 0));
+      pad.position.set(0, 0.0, end === 0 ? 4 : -4);
       const legs = new THREE.Mesh(new THREE.BoxGeometry(1.4, p.y - gy - 0.5, 1.4), steel);
       legs.position.set(0, (p.y - gy) / 2, end === 0 ? -3.5 : 3.5);
       const house = new THREE.Mesh(big ? new THREE.BoxGeometry(hw * 2 + 1, 4.5, 12) : new THREE.CylinderGeometry(hw + 0.3, hw + 0.3, 1.4, 20), big ? accent : dark);

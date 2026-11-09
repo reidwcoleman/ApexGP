@@ -3,7 +3,7 @@
 // distant ranges, the forest and the falling snow.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Mountain, SIZE, HALF, GN, GS, SN, SC, LIFTS, RUNS, kickerProfile, rawHeight } from './mountain.ts';
+import { Mountain, SIZE, HALF, GN, GS, SN, SC, LIFTS, RUNS, BASE, kickerProfile, rawHeight } from './mountain.ts';
 import type { Sim } from './sim.ts';
 
 export const NOISE_N = 256;
@@ -129,7 +129,12 @@ export class World {
       b[k * 4] = Math.round(255 * Math.min(1, Math.max(0, (2.5 - e) / 4)));
       b[k * 4 + 1] = 0;
       b[k * 4 + 2] = m.runCell[k];
-      b[k * 4 + 3] = 255;
+      // the trampled village plaza
+      const ci = k % SN, cj = (k / SN) | 0;
+      const x = (ci + 0.5) * SC - HALF, z = (cj + 0.5) * SC - HALF;
+      const sm = (a: number, c: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (c - a))); return t * t * (3 - 2 * t); };
+      const plaza = sm(BASE.z0 + 30, BASE.z0 + 70, z) * sm(BASE.x0 + 20, BASE.x0 + 70, x) * sm(BASE.x1 - 10, BASE.x1 - 60, x) * sm(BASE.z1 + 20, BASE.z1 - 20, z);
+      b[k * 4 + 3] = Math.round(255 * plaza);
     }
     this.maskTex.needsUpdate = true;
   }
@@ -233,7 +238,10 @@ float gBump = 0.0; float gSpark = 0.0;`)
   rock *= smoothstep(0.38, 0.62, texture2D(uNoise, vWPos.xz * 0.045 + 0.2).r + slope * 0.4);
   vec3 rockC = mix(vec3(0.30, 0.31, 0.34), vec3(0.45, 0.45, 0.47), n3) * (0.8 + 0.4 * n4);
   col = mix(col, rockC, rock);
-  // lamp pools
+  // the packed, trampled plaza between the buildings
+  float plaza = mk.a * (1.0 - onRun);
+  float trod = smoothstep(0.35, 0.75, texture2D(uNoise, vWPos.xz * 0.05 + 0.7).r);
+  col = mix(col, vec3(0.74, 0.74, 0.76) * (0.92 + 0.12 * n4), plaza * (0.35 + 0.45 * trod));
   diffuseColor.rgb = col;
   gBump = cordK * cord * 0.012 + nearK * (chop * mog * 0.035 + powder * (1.0 - groom) * n3 * 0.018);
   float hash = texture2D(uNoise, vWPos.xz * 1.9).b;
@@ -664,11 +672,11 @@ float gBump = 0.0; float gSpark = 0.0;`)
     this.sun.intensity = Math.max(sunI, moonI);
     this.sun.color.setRGB(1, 0.93 - gold * 0.25, 0.85 - gold * 0.42).lerp(new THREE.Color(0.62, 0.72, 1.0), night);
     this.sun.castShadow = this.sun.intensity > 0.08;
-    this.hemi.intensity = 0.3 + day * (0.62 + cloud * 0.45);
-    this.hemi.color.copy(top).lerp(new THREE.Color(0xd4e3ff), 0.6 * day);
+    this.hemi.intensity = 0.35 + day * (0.95 + cloud * 0.4);
+    this.hemi.color.copy(top).lerp(new THREE.Color(0xd4e3ff), 0.6 * day).lerp(new THREE.Color(0xffe2c8), gold * 0.35);
     this.hemi.groundColor.setRGB(0.55, 0.57, 0.62).multiplyScalar(0.3 + day * 0.7);
     if (night > 0.5) { this.hemi.color.setRGB(0.18, 0.24, 0.42); this.hemi.groundColor.setRGB(0.07, 0.08, 0.12); this.hemi.intensity = 0.55; }
-    this.renderer.toneMappingExposure = 0.78 + night * 0.4;
+    this.renderer.toneMappingExposure = 0.8 + night * 0.4;
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(hor).lerp(new THREE.Color(0xdde4ec), cloud * 0.5 * day);
     fog.density = 0.0003 + cloud * 0.00035 + snowRate * 0.0009 + night * 0.00004;

@@ -564,6 +564,8 @@ export class Sled extends Vehicle {
     vl += (-gx * fz + gz * fx) * dt * 0.5;
     vl *= Math.exp(-dt * 6);
     vf -= Math.sign(vf) * Math.min(Math.abs(vf), (0.6 + Math.abs(vf) * 0.04 + (c ? 0 : 3)) * dt);
+    // off the throttle and slow: the track holds it on a slope
+    if (thr === 0 && Math.abs(vf) < 4) { vf *= Math.exp(-dt * 4); vl *= Math.exp(-dt * 4); }
     this.yaw -= steer * (1.6 * Math.min(1, Math.abs(vf) / 4) + 0.15) * dt * Math.sign(vf || 1) / (1 + Math.abs(vf) * 0.02);
     const nfx = Math.sin(this.yaw), nfz = Math.cos(this.yaw);
     this.vel.set(nfx * vf - nfz * vl, nfz * vf + nfx * vl);
