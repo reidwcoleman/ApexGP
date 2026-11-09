@@ -281,7 +281,7 @@ export class Game {
     this.scene.add(this.fx.group);
     this.post.airScene = this.fx.air;
     // light through the windows, into the dust
-    this.shafts = new Shafts(L.map as never, (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far), SHAFT_GAIN[MAP_ID]);
+    this.shafts = new Shafts(L.map as never, (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far), SHAFT_GAIN[MAP_ID], L.doors);
     this.fx.air.add(this.shafts.group);
     this.post.airScale = (s) => this.fx.setScale(s);
     progress(0.95, 'Paths');

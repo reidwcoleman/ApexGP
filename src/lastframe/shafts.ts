@@ -12,6 +12,7 @@ import { AIR } from './fx.ts';
 type Glass = { axis: string; c: number; a: number; b: number; z0: number; z1: number };
 type Light = { kind: string; pos: number[]; color: number[]; power: number; flicker?: number };
 type Room = { name: string; a: number[]; b: number[] };
+type DoorD = { axis: string; hinge: number[]; w: number; h: number; sign: number };
 type Unit = { id: string; pos: number[] };
 type Ray = (x: number, y: number, z: number, dx: number, dy: number, dz: number, far: number) => { t: number } | null;
 
@@ -84,78 +85,60 @@ export class Shafts {
   private mats: THREE.ShaderMaterial[] = [];
   private time = { value: 0 };
   private fwd = { value: new THREE.Vector3() };
-  /** each shaft that hangs on a flickering lamp, and which lamp */
-  private hung: { m: THREE.ShaderMaterial; base: number; l: Light }[] = [];
+  /** each shaft, the lamp it hangs on if that flickers, and the door it comes through if any */
+  private all: { m: THREE.ShaderMaterial; mesh: THREE.Mesh; base: number; l?: Light; door: { ang: number } | null }[] = [];
 
-  constructor(map: { glass: Glass[]; lights: Light[]; rooms: Room[]; units?: Unit[]; weather?: { sky?: number[]; sun?: { dir: number[]; power: number; color: number[] } } }, ray: Ray, gain = 1) {
-    const inRoom = (x: number, y: number, z: number) => map.rooms.some((r) => x > r.a[0] && x < r.b[0] && y > r.a[1] - 0.2 && y < r.b[1] && z > r.a[2] && z < r.b[2]);
+  constructor(map: { glass: Glass[]; doors?: DoorD[]; lights: Light[]; rooms: Room[]; units?: Unit[]; weather?: { sky?: number[]; sun?: { dir: number[]; power: number; color: number[] } } }, ray: Ray, gain = 1, doors: { ang: number }[] = []) {
     const roomAt = (x: number, y: number, z: number) => map.rooms.find((r) => x > r.a[0] && x < r.b[0] && y > r.a[1] - 0.2 && y < r.b[1] && z > r.a[2] && z < r.b[2]);
     const blinds = (map.units ?? []).filter((u) => u.id.includes('|blinds'));
     const sun = map.weather?.sun;
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0.5, 0.5, 0.5);
-    for (const g of map.glass) {
-      const w = g.b - g.a, h = g.z1 - g.z0;
-      if (w < 0.3 || h < 0.3) continue;
-      // the pane in game space: centre, along it, and its two faces
-      const cx = g.axis === 'x' ? (g.a + g.b) / 2 : g.c, cz = g.axis === 'x' ? -g.c : -(g.a + g.b) / 2, cy = (g.z0 + g.z1) / 2;
-      const along = g.axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, -1);
-      const nrm = g.axis === 'x' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-      let best: { d: THREE.Vector3; c: THREE.Vector3; e: number; side: number; l?: Light } | null = null;
-      for (const side of [1, -1]) {
-        // the shaft goes into the room on this side, from a light on the other
-        const ins = roomAt(cx + nrm.x * side * 0.5, cy, cz + nrm.z * side * 0.5);
-        if (!ins) continue;
-        const outdoors = !inRoom(cx - nrm.x * side * 0.5, cy, cz - nrm.z * side * 0.5);
-        for (const l of map.lights) {
-          if (l.power < 2) continue;
-          const v = new THREE.Vector3(l.pos[0] - cx, l.pos[1] - cy, l.pos[2] - cz);
-          const dist = v.length();
-          if (dist > 30 || dist < 0.8) continue;
-          v.divideScalar(dist);
-          const facing = -(v.x * nrm.x + v.z * nrm.z) * side;
-          if (facing < 0.25) continue;
-          const e = (l.power / (dist * dist)) * facing;
-          if (best && e <= best.e) continue;
-          // can it see the window: from just outside the glass to just short of the lamp
-          const sx = cx - nrm.x * side * 0.08, sz = cz - nrm.z * side * 0.08;
-          const hit = ray(sx, cy, sz, v.x, v.y, v.z, Math.max(0.1, dist - 0.35));
-          if (hit) continue;
-          best = { d: v.clone().negate(), c: new THREE.Vector3(...l.color), e, side, l };
-        }
-        if (outdoors && sun) {
-          const v = new THREE.Vector3(...sun.dir);
-          const facing = -(v.x * nrm.x + v.z * nrm.z) * side;
-          const e = sun.power * 0.6 * facing;
-          if (facing > 0.2 && v.y > 0.05 && (!best || e > best.e) && !ray(cx - nrm.x * side * 0.08, cy, cz - nrm.z * side * 0.08, v.x, v.y, v.z, 40)) {
-            best = { d: v.clone().negate(), c: new THREE.Vector3(...sun.color), e, side };
-          }
-        } else if (outdoors && !best && map.weather?.sky) {
-          // only the night outside: a faint grey fall of it through the glass
-          const v = new THREE.Vector3(-nrm.x * side * 0.75, 0.62, -nrm.z * side * 0.75).add(along.clone().multiplyScalar(0.2)).normalize();
-          best = { d: v.clone().negate(), c: new THREE.Vector3(...map.weather.sky).multiplyScalar(0.9), e: 0.8, side };
-        }
+    type Best = { d: THREE.Vector3; c: THREE.Vector3; e: number; l?: Light };
+    /** the strongest light reaching an opening from the far side of side: what would come through into side */
+    const incoming = (cx: number, cy: number, cz: number, nrm: THREE.Vector3, along: THREE.Vector3, side: number, sky: boolean, minD: number): Best | null => {
+      let best: Best | null = null;
+      for (const l of map.lights) {
+        if (l.power < 2) continue;
+        const v = new THREE.Vector3(l.pos[0] - cx, l.pos[1] - cy, l.pos[2] - cz);
+        const dist = v.length();
+        if (dist > 30 || dist < minD) continue;
+        v.divideScalar(dist);
+        const facing = -(v.x * nrm.x + v.z * nrm.z) * side;
+        if (facing < 0.25) continue;
+        const e = (l.power / (dist * dist)) * facing;
+        if (best && e <= best.e) continue;
+        // can it see the opening: from just beyond it to just short of the lamp
+        if (ray(cx - nrm.x * side * 0.08, cy, cz - nrm.z * side * 0.08, v.x, v.y, v.z, Math.max(0.1, dist - 0.35))) continue;
+        best = { d: v.clone().negate(), c: new THREE.Vector3(...l.color), e, l };
       }
-      if (!best || best.e < 0.25) continue;
-      const side = best.side;
-      const room = roomAt(cx + nrm.x * side * 0.5, cy, cz + nrm.z * side * 0.5)!;
+      const outdoors = !roomAt(cx - nrm.x * side * 0.5, cy, cz - nrm.z * side * 0.5);
+      if (sky && outdoors && sun) {
+        const v = new THREE.Vector3(...sun.dir);
+        const facing = -(v.x * nrm.x + v.z * nrm.z) * side;
+        const e = sun.power * 0.6 * facing;
+        if (facing > 0.2 && v.y > 0.05 && (!best || e > best.e) && !ray(cx - nrm.x * side * 0.08, cy, cz - nrm.z * side * 0.08, v.x, v.y, v.z, 40)) best = { d: v.clone().negate(), c: new THREE.Vector3(...sun.color), e };
+      } else if (sky && outdoors && !best && map.weather?.sky) {
+        // only the night outside: a faint grey fall of it through the glass
+        const v = new THREE.Vector3(-nrm.x * side * 0.75, 0.62, -nrm.z * side * 0.75).add(along.clone().multiplyScalar(0.2)).normalize();
+        best = { d: v.clone().negate(), c: new THREE.Vector3(...map.weather.sky).multiplyScalar(0.9), e: 0.8 };
+      }
+      return best;
+    };
+    const add = (cx: number, cy: number, cz: number, along: THREE.Vector3, nrm: THREE.Vector3, w: number, h: number, side: number, best: Best, slats: boolean, door: { ang: number } | null) => {
+      const room = roomAt(cx + nrm.x * side * 0.5, cy, cz + nrm.z * side * 0.5);
+      if (!room) return;
       const d = best.d;
-      // into the room enough to read as coming through the window, not skimming the wall
-      const inward = d.x * nrm.x * side + d.z * nrm.z * side;
-      if (inward < 0.25) continue;
-      const floor = room.a[1];
-      const len = d.y < -0.05 ? Math.min(7, (g.z1 - floor) / -d.y) : 5;
-      const o = new THREE.Vector3(cx, cy, cz).addScaledVector(along, -w / 2).add(new THREE.Vector3(0, -h / 2, 0)).addScaledVector(nrm, side * 0.02);
-      const U = along.clone().multiplyScalar(w), V = new THREE.Vector3(0, h, 0), D = d.clone().multiplyScalar(len);
-      const M = new THREE.Matrix4().makeBasis(U, V, D).setPosition(o);
-      const toBox = M.clone().invert();
-      const bl = blinds.some((u) => Math.hypot(u.pos[0] - cx, u.pos[2] - cz) < 0.5 && Math.abs(u.pos[1] - g.z0) < 0.4);
-      // what reaches the glass, as light in the air: a lamp falls off with distance, the sky and sun don't
-      // it saturates: a lamp right outside is a bright slab, not a white-out
+      // into the room enough to read as coming through, not skimming the wall
+      if (d.x * nrm.x * side + d.z * nrm.z * side < 0.25) return;
+      const len = d.y < -0.05 ? Math.min(7, (cy + h / 2 - room.a[1]) / -d.y) : 5;
+      const o = new THREE.Vector3(cx, cy - h / 2, cz).addScaledVector(along, -w / 2).addScaledVector(nrm, side * 0.02);
+      const M = new THREE.Matrix4().makeBasis(along.clone().multiplyScalar(w), new THREE.Vector3(0, h, 0), d.clone().multiplyScalar(len)).setPosition(o);
+      // what reaches the opening, as light in the air; it saturates, so a lamp right outside is a bright slab and not a white-out
       const k = 0.1 * (1 - Math.exp(-(best.e * 0.045) / 0.1)) * gain;
       const mat = new THREE.ShaderMaterial({
         vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, depthTest: false, side: THREE.BackSide, ...BLEND,
         uniforms: {
-          tDepth: AIR.tDepth, nf: AIR.nf, inv: AIR.inv, toBox: { value: toBox }, fwd: this.fwd, col: { value: best.c }, slats: { value: bl ? h / 0.09 : 0 }, time: this.time, k: { value: k },
+          tDepth: AIR.tDepth, nf: AIR.nf, inv: AIR.inv, toBox: { value: M.clone().invert() }, fwd: this.fwd, col: { value: best.c }, slats: { value: slats ? h / 0.09 : 0 }, time: this.time, k: { value: k },
         },
       });
       const mesh = new THREE.Mesh(geo, mat);
@@ -166,8 +149,38 @@ export class Shafts {
       mesh.renderOrder = -1;
       this.group.add(mesh);
       this.mats.push(mat);
-      if (best.l?.flicker) this.hung.push({ m: mat, base: k, l: best.l });
+      this.all.push({ m: mat, mesh, base: k, l: best.l?.flicker ? best.l : undefined, door });
+    };
+    for (const g of map.glass) {
+      const w = g.b - g.a, h = g.z1 - g.z0;
+      if (w < 0.3 || h < 0.3) continue;
+      // the pane in game space: centre, along it, and its two faces
+      const cx = g.axis === 'x' ? (g.a + g.b) / 2 : g.c, cz = g.axis === 'x' ? -g.c : -(g.a + g.b) / 2, cy = (g.z0 + g.z1) / 2;
+      const along = g.axis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, -1);
+      const nrm = g.axis === 'x' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      let pick: [number, Best] | null = null;
+      for (const side of [1, -1]) {
+        if (!roomAt(cx + nrm.x * side * 0.5, cy, cz + nrm.z * side * 0.5)) continue;
+        const b = incoming(cx, cy, cz, nrm, along, side, true, 0.8);
+        if (b && (!pick || b.e > pick[1].e)) pick = [side, b];
+      }
+      if (!pick || pick[1].e < 0.25) continue;
+      const bl = blinds.some((u) => Math.hypot(u.pos[0] - cx, u.pos[2] - cz) < 0.5 && Math.abs(u.pos[1] - g.z0) < 0.4);
+      add(cx, cy, cz, along, nrm, w, h, pick[0], pick[1], bl, null);
     }
+    // a lit room through an open door into a dark one: only where one side is much brighter than the other
+    (map.doors ?? []).forEach((dd, i) => {
+      const x = dd.axis === 'x';
+      const along = x ? new THREE.Vector3(dd.sign, 0, 0) : new THREE.Vector3(0, 0, -dd.sign);
+      const nrm = x ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      const cx = dd.hinge[0] + along.x * dd.w / 2, cz = dd.hinge[2] + along.z * dd.w / 2, cy = dd.hinge[1] + dd.h / 2;
+      const into = [1, -1].map((side) => incoming(cx, cy, cz, nrm, along, side, false, 1.2));
+      for (const [j, side] of [[0, 1], [1, -1]] as const) {
+        const b = into[j], back = into[1 - j];
+        if (!b || b.e < 0.6 || (back && back.e * 2.5 > b.e)) continue;
+        add(cx, cy, cz, along.clone().multiplyScalar(Math.sign(along.x + along.z)), nrm, dd.w, dd.h, side, b, false, doors[i] ?? null);
+      }
+    });
   }
 
   get count() { return this.mats.length; }
@@ -176,6 +189,12 @@ export class Shafts {
   update(time: number, cam: THREE.Camera, lamp?: (l: Light) => number) {
     this.time.value = time;
     cam.getWorldDirection(this.fwd.value);
-    if (lamp) for (const h of this.hung) h.m.uniforms.k.value = h.base * lamp(h.l);
+    for (const h of this.all) {
+      if (!h.l && !h.door) continue;
+      // a door lets it through as it opens
+      const open = h.door ? THREE.MathUtils.smoothstep(Math.abs(h.door.ang), 0.05, 1.0) : 1;
+      h.m.uniforms.k.value = h.base * open * (h.l && lamp ? lamp(h.l) : 1);
+      h.mesh.visible = open > 0.01;
+    }
   }
 }
