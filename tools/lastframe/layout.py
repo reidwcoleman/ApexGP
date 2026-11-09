@@ -37,6 +37,9 @@ class Map:
         s.windows = []   # every window opening, glazed or not
         s.solid = []     # invisible colliders
         s.units = []     # facade modules from the scanned kits, each with its own lightmap tile
+        s.walls = []     # every wall() call, with the boxes it made, so a pass can open it up after
+        s.cas = {}       # id(door or window record) -> the frame boxes round it (and the glass)
+        s.openings = []  # doorways with no door in them: (x, y, z, width, axis)
         s.rng = random.Random(7)
 
     def box(s, a, b, mat, **k):
@@ -56,6 +59,9 @@ class Map:
             if hs[i][1] > hs[i + 1][0] + 1e-3 and hs[i][2] < hs[i + 1][3] and hs[i + 1][2] < hs[i][3]:
                 print(f'  ! holes overlap in wall {axis}={c}: {hs[i][:2]} and {hs[i + 1][:2]}')
 
+        made = []
+        s.walls.append(dict(axis=axis, c=c, p0=p0, p1=p1, z0=z0, z1=z1, t=t, mat=mat, neg=neg, pos=pos, holes=list(hs), pen=pen, tag=tag, density=density, boxes=made))
+
         def seg(a, b, h0, h1):
             if b - a < 1e-3 or h1 - h0 < 1e-3:
                 return
@@ -65,7 +71,7 @@ class Map:
             else:
                 A, B = (c - t / 2, a, h0), (c + t / 2, b, h1)
                 f = {'-x': neg or mat, '+x': pos or mat}
-            s.box(A, B, mat, faces=f, pen=pen, tag=tag, density=density)
+            made.append(s.box(A, B, mat, faces=f, pen=pen, tag=tag, density=density))
 
         for (a, b, h0, h1) in hs:
             seg(cur, a, z0, z1)
@@ -81,8 +87,9 @@ class Map:
         a, b = p - w / 2, p + w / 2
         hinge_p = a if hinge == 0 else b
         hx, hy = (hinge_p, c) if axis == 'x' else (c, hinge_p)
-        s.doors.append(dict(axis=axis, hinge=[hx, hy, z], w=w, h=h, sign=1 if hinge == 0 else -1, swing=swing, kind=kind, t=t))
-        s.casing(axis, c, a, b, z, z + h)
+        d = dict(axis=axis, hinge=[hx, hy, z], w=w, h=h, sign=1 if hinge == 0 else -1, swing=swing, kind=kind, t=t)
+        s.doors.append(d)
+        s.cas[id(d)] = s.casing(axis, c, a, b, z, z + h)
         return (a, b, z, z + h)
 
     def casing(s, axis, c, a, b, z0, z1, wt=0.2, mat='trim', sill=False):
@@ -91,15 +98,19 @@ class Map:
         parts = [((a - k, z0), (a, z1)), ((b, z0), (b + k, z1)), ((a - k, z1), (b + k, z1 + k))]
         if sill:
             parts.append(((a - k, z0 - k), (b + k, z0)))
+        out = []
         for (p0, h0), (p1, h1) in parts:
             if axis == 'x':
-                s.box((p0, c - d, h0), (p1, c + d, h1), mat, collide=False, density=0.4)
+                out.append(s.box((p0, c - d, h0), (p1, c + d, h1), mat, collide=False, density=0.4))
             else:
-                s.box((c - d, p0, h0), (c + d, p1, h1), mat, collide=False, density=0.4)
+                out.append(s.box((c - d, p0, h0), (c + d, p1, h1), mat, collide=False, density=0.4))
+        return out
 
     def window(s, axis, c, p, z, w=1.2, h=1.45, sill=0.9, wt=EXT_T, boards=False, glass=True):
         a, b = p - w / 2, p + w / 2
-        s.windows.append(dict(axis=axis, c=c, a=a, b=b, z0=z + sill, z1=z + sill + h))
+        rec = dict(axis=axis, c=c, a=a, b=b, z0=z + sill, z1=z + sill + h)
+        s.windows.append(rec)
+        n0 = len(s.boxes)
         s.casing(axis, c, a, b, z + sill, z + sill + h, wt, 'trim', sill=True)
         # mullion and transom
         d = 0.025
@@ -120,6 +131,7 @@ class Map:
                     s.box((c - 0.19, a - 0.1, zz), (c - 0.165, b + 0.1, zz + 0.16), 'planks', collide=False, density=0.3)
         elif glass:
             s.glass.append(dict(axis=axis, c=c, a=a, b=b, z0=z + sill, z1=z + sill + h))
+        s.cas[id(rec)] = s.boxes[n0:]
         return (a, b, z + sill, z + sill + h)
 
     def room(s, name, x0, y0, x1, y1, z, h, wall, floor, ceil='ceil', base='trim', dado=None):
@@ -1202,11 +1214,13 @@ def build():
     # the shed's roller door is down now
     box((59.4, WY0 - 0.14, 0.0), (64.6, WY0 - 0.02, 2.74), 'ruststeel', tag='wall', density=0.3)
     print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
+    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(64), gut=0.62))
     # and what everyone left behind
     import clutter
     clutter.trim(m)
     clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=60, blood=0.75)
     print('  cleared from the halls:', indoor.clear_halls(m))
+    print('  cleared from the ways through:', indoor.clear_ways(m))
     return m
 
 

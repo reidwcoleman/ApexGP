@@ -852,9 +852,11 @@ def build():
     # and what everyone left behind
     import clutter
     print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
+    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(61), gut=0.62))
     clutter.trim(m)
     clutter.dress(m, 'hospital', random.Random(41), outside=[(-13.0, -9.0, 85.0, 13.0, 0.0), (-13.0, 14.0, 3.5, 57.0, 0.0), (68.5, 14.0, 85.0, 57.0, 0.0), (4.0, 44.5, 68.0, 57.0, 0.0)], out_n=60, blood=0.75)
     print('  cleared from the halls:', indoor.clear_halls(m))
+    print('  cleared from the ways through:', indoor.clear_ways(m))
     return m
 
 

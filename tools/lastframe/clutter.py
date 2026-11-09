@@ -59,6 +59,8 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
             doors.append((hx + d['sign'] * d['w'] / 2, hy, hz))
         else:
             doors.append((hx, hy + d['sign'] * d['w'] / 2, hz))
+    # doorways with no door: the middle of each, and its half width over the 1.25 a door gets
+    ways = [(x, y, z, max(0.0, w / 2 - 0.4)) for (x, y, z, w, axis) in getattr(m, 'openings', [])]
     taken = [(p['pos'][0], p['pos'][1], p['pos'][2], 0.55) for p in m.props]
     taken += [(u['pos'][0], u['pos'][1], u['pos'][2], 1.1 if u['parts'][0].startswith('hbed') else 0.6) for u in m.units if u['kit'] == 'ward']
     spawns = [tuple(s) + (0,) * (3 - len(s)) for k in ('a', 'b', 'ffa') for s in m.spawns[k]]
@@ -73,6 +75,9 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
     def free(x, y, z, r, flat=False):
         for (dx, dy, dz) in doors:
             if abs(dz - z) < 1.2 and math.hypot(dx - x, dy - y) < 1.25 + r:
+                return False
+        for (dx, dy, dz, extra) in ways:
+            if abs(dz - z) < 1.2 and math.hypot(dx - x, dy - y) < 1.5 + extra + r:
                 return False
         for (sx, sy, sz) in spawns:
             if abs(sz - z) < 1.2 and math.hypot(sx - x, sy - y) < 1.0 + r:

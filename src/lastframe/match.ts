@@ -26,6 +26,8 @@ export class Match {
   holdOwner = -1;
   holdProg = 0;
   private respawn = new Map<number, number>();
+  /** where each side starts this round: picked fresh every round, a long way apart */
+  private anchors: { x: number; y: number; z: number }[] = [];
   private nades: (NadeSim & { id: number; s: number; kind: NadeKind; fuse: number })[] = [];
   private nadeId = 1;
   private holdTick = 0;
@@ -133,6 +135,7 @@ export class Match {
     this.respawn.clear();
     for (const d of this.doors) this.setDoor(d.id, 0, 1);
     this.emit({ t: 'phase', phase: this.phase, round: this.round, clock: this.clock, score: this.score, hold: this.holdZone });
+    this.pickAnchors();
     for (const p of this.players) this.spawn(p, rounds);
   }
 
@@ -378,9 +381,52 @@ export class Match {
     this.setDoor(i, d.want > 0 ? 0 : 1, dir);
   }
 
+  /** somewhere a whole side can stand: indoors, with room round it, and the other side's somewhere far from it */
+  private pickAnchors() {
+    const N = this.nav.nodes.filter((n) => n.indoors !== false && n.next.length >= 3);
+    this.anchors = [];
+    if (N.length < 20) return;
+    const roomy = (c: { x: number; y: number; z: number }) => {
+      let k = 0;
+      for (let i = 0; i < N.length && k < 14; i++) if (Math.hypot(N[i].x - c.x, N[i].z - c.z, (N[i].y - c.y) * 3) < 8) k++;
+      return k >= 14;
+    };
+    let a = N[Math.floor(Math.random() * N.length)];
+    for (let t = 0; t < 30 && !roomy(a); t++) a = N[Math.floor(Math.random() * N.length)];
+    let b = a, bs = -1;
+    for (let k = 0; k < 90; k++) {
+      const c = N[Math.floor(Math.random() * N.length)];
+      const d = Math.hypot(c.x - a.x, c.z - a.z, (c.y - a.y) * 3);
+      // far, but not always the very farthest corner: the pairings vary
+      const sc = d * (0.7 + Math.random() * 0.6) * (roomy(c) ? 1 : 0.4);
+      if (sc > bs) {
+        bs = sc;
+        b = c;
+      }
+    }
+    this.anchors = Math.random() < 0.5 ? [a, b] : [b, a];
+  }
+
   private spawn(p: PlayerInfo, fixed: boolean, near = false) {
     void fixed;
     let list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : p.team === 0 ? this.map.spawns.a : this.map.spawns.b;
+    if (!near && this.nav.nodes.length) {
+      if (this.cfg.mode === 'ffa') {
+        // everyone somewhere different, and somewhere different every time
+        const pool: number[][] = [];
+        for (let k = 0; k < 40; k++) {
+          const n = this.nav.nodes[Math.floor(Math.random() * this.nav.nodes.length)];
+          if (n && n.indoors !== false && n.next.length >= 2) pool.push([n.x, n.y, n.z]);
+        }
+        if (pool.length > 8) list = pool;
+      } else {
+        const a = this.anchors[p.team];
+        if (a) {
+          const pool = this.nav.nodes.filter((n) => n.indoors !== false && n.next.length >= 2 && Math.hypot(n.x - a.x, n.z - a.z, (n.y - a.y) * 3) < 9).map((n) => [n.x, n.y, n.z]);
+          if (pool.length >= 4) list = pool;
+        }
+      }
+    }
     if (near && this.cfg.mode !== 'rounds' && this.nav.nodes.length) {
       // back in near the fight: anywhere on the map, scored below by who's about
       const extra: number[][] = [];
@@ -418,7 +464,7 @@ export class Match {
         for (const q of this.players) if (q !== p && q.alive) anyone = Math.min(anyone, Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2], (this.bodies[q.slot].y - c[1]) * 3));
         s += Math.min(anyone, 30) * 0.7;
       }
-      for (const q of this.players) if (q !== p && q.alive && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 1) s -= 20;
+      for (const q of this.players) if (q !== p && q.alive && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 1.6 && Math.abs(this.bodies[q.slot].y - c[1]) < 1.5) s -= 20;
       if (s > bs) {
         bs = s;
         best = c;
@@ -435,7 +481,8 @@ export class Match {
     }
     const y = Math.max(this.world.floorAt(x, best[1] + 0.5, z, 0.2), best[1]);
     // face the middle of the block
-    const [cx, cz] = this.map.centre ?? [46, -30];
+    const foe = this.cfg.mode !== 'ffa' ? this.anchors[1 - p.team] : undefined;
+    const [cx, cz] = foe ? [foe.x, foe.z] : (this.map.centre ?? [46, -30]);
     const yaw = Math.atan2(-(cx - x), -(cz - z));
     p.hp = 100;
     p.alive = true;

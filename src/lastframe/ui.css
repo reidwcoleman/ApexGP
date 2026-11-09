@@ -252,3 +252,9 @@
 #ui button.primary.waiting { background: var(--hover); color: var(--ink); border-color: var(--edge); position: relative; overflow: hidden; cursor: progress; }
 #ui button.primary.waiting::before { content: ''; position: absolute; inset: 0; background: rgba(231,231,226,.14); transform-origin: left; transform: scaleX(var(--f, 0)); transition: transform .25s; }
 #ui button.primary.waiting > * { position: relative; }
+
+/* the hand styles the graffiti is drawn in (graffiti.ts) */
+@font-face { font-family: 'LF Piece'; src: url('../../node_modules/@fontsource/sedgwick-ave-display/files/sedgwick-ave-display-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'LF Tag'; src: url('../../node_modules/@fontsource/sedgwick-ave/files/sedgwick-ave-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'LF Marker'; src: url('../../node_modules/@fontsource/permanent-marker/files/permanent-marker-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'LF Block'; src: url('../../node_modules/@fontsource/bungee/files/bungee-latin-400-normal.woff2') format('woff2'); font-display: block; }

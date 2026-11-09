@@ -18,7 +18,7 @@ import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type Match
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
-import { Graffiti, markUp } from './graffiti.ts';
+import { Graffiti, graffitiFonts, markUp } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
 const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6 };
@@ -226,7 +226,7 @@ export class Game {
       this.loadWhat = what;
       progress0(this.loadF, what);
     };
-    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume()]);
+    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume(), graffitiFonts()]);
     this.L = L;
     this.phys = phys;
     this.buildPhysics();

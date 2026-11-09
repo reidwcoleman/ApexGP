@@ -371,9 +371,11 @@ def build():
     import clutter
     import indoor
     print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
+    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(62), gut=0.62))
     clutter.trim(m)
     clutter.dress(m, 'flat', random.Random(43), outside=[(-22.0, -9.0, 33.0, 33.0, 0.0), (49.0, -9.0, 82.0, 33.0, 0.0), (33.0, -9.0, 49.0, 7.0, 0.0), (33.0, 21.0, 49.0, 33.0, 0.0), (-22.0, 33.0, -3.0, 58.0, 0.0), (55.0, 33.0, 82.0, 58.0, 0.0), (-2.0, 45.0, 55.0, 58.0, 0.0)], out_n=60, blood=0.8)
     print('  cleared from the halls:', indoor.clear_halls(m))
+    print('  cleared from the ways through:', indoor.clear_ways(m))
     return m
 
 
