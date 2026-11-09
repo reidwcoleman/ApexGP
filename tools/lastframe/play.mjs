@@ -13,10 +13,10 @@ await p.goto(`http://localhost:${port}/lastframe.html?dev=1${process.env.MAP ? "
 await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
 console.log('loaded', await p.evaluate(() => { const g = __lf.g; return { nav: g.nav.nodes.length, tris: __lf.r.info.render.triangles, calls: __lf.r.info.render.calls }; }));
 await p.screenshot({ path: `${out}/menu.png` });
-await p.evaluate((mode) => {
+await p.evaluate(([mode, bots]) => {
   const g = __lf.g;
-  g.startSolo({ mode, bots: 4, skill: 0.5, time: 8, limit: 40, seed: 3 }, 'Tester', 0, 'carbine');
-}, mode);
+  g.startSolo({ mode, bots, skill: 0.5, time: 8, limit: 40, seed: 3 }, 'Tester', 0, 'carbine');
+}, [mode, +(process.env.BOTS ?? 8)]);
 await p.waitForTimeout(1500);
 await p.screenshot({ path: `${out}/spawn.png` });
 if (process.env.AUTO) await p.evaluate(() => {

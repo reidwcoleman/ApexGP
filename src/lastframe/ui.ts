@@ -83,7 +83,7 @@ export class Hud {
   private primary = store.get('primary', 'carbine') as WeaponId;
   private team = Number(store.get('team', '0'));
   private mode = (store.get('mode', 'tdm') as Mode);
-  private bots = Number(store.get('bots', '4'));
+  private bots = Number(store.get('teamsize', '8'));
   private skill = Number(store.get('skill', '1'));
   private code = '';
   private host: Host | null = null;
@@ -205,7 +205,7 @@ export class Hud {
     return `
       <div class="group"><div class="lab">Mode</div><div class="list" data-seg="mode">${MODES.map((x) => `<button data-v="${x.id}" class="${x.id === this.mode ? 'sel' : ''}"><b>${x.name}</b><span>${x.note}</span></button>`).join('')}</div></div>
       <div class="two">
-        <div class="group"><div class="lab">${this.mode === 'ffa' ? 'Players' : 'Team size'}</div>${this.seg('bots', [['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'], ['6', '6']], String(this.bots))}</div>
+        <div class="group"><div class="lab">${this.mode === 'ffa' ? 'Players' : 'Team size'}</div>${this.seg('bots', [['4', '4'], ['5', '5'], ['6', '6'], ['7', '7'], ['8', '8']], String(this.bots))}</div>
         <div class="group"><div class="lab">Bots</div>${this.seg('skill', SKILL.map(([l], i) => [String(i), l]), String(this.skill))}</div>
       </div>
       ${kind === 'solo' ? `<div class="group"><div class="lab">Side</div>${this.seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</div>` : ''}`;
@@ -233,7 +233,7 @@ export class Hud {
         if (id === 'team') this.team = Number(v);
         if (id === 'primary') this.primary = v as WeaponId;
         if (id === 'map') return;
-        store.set(id, v);
+        store.set(id === 'bots' ? 'teamsize' : id, v);
         after();
       });
     });
@@ -241,7 +241,7 @@ export class Hud {
 
   private config(): MatchConfig {
     const m = MODES.find((x) => x.id === this.mode)!;
-    return { map: MAP_ID, mode: this.mode, bots: this.mode === 'ffa' ? this.bots * 2 : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
+    return { map: MAP_ID, mode: this.mode, bots: this.mode === 'ffa' ? Math.min(16, this.bots * 2) : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
   }
 
   private setup(kind: 'solo' | 'host') {

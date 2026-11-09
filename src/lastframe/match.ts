@@ -30,6 +30,8 @@ export class Match {
   private nadeId = 1;
   private holdTick = 0;
   private goals: Node[] = [];
+  /** where each bot is headed when it isn't hunting: the others steer clear of it */
+  private claimed = new Map<number, Node>();
   readonly nav: Nav;
   private doorCool: number[] = [];
   /** per slot: hp a second still leaving, and bandages left */
@@ -305,9 +307,9 @@ export class Match {
       const n = this.nav.nearest(c[0] + (Math.random() - 0.5) * 8, c[1], c[2] + (Math.random() - 0.5) * 8);
       if (n) return n;
     }
-    // hunt: most of the time toward a foe, usually the nearest, often the people playing (the fight comes to them)
+    // hunt: some of the time toward a foe, usually the nearest, often the people playing
     const foes = this.players.filter((p) => p.alive && this.foes(slot, p.slot));
-    if (foes.length && Math.random() < 0.8) {
+    if (foes.length && Math.random() < 0.38) {
       const me = this.bodies[slot];
       const humans = foes.filter((p) => !p.bot);
       let pick = foes[0];
@@ -323,12 +325,33 @@ export class Match {
     // else where the shooting was lately
     const now = performance.now() / 1000;
     const hot = this.hot.filter((h) => now - h[3] < 25);
-    if (hot.length && Math.random() < 0.7) {
+    if (hot.length && Math.random() < 0.3) {
       const h = hot[Math.floor(Math.random() * hot.length)];
       const n = this.nav.nearest(h[0] + (Math.random() - 0.5) * 8, h[1], h[2] + (Math.random() - 0.5) * 8);
+      if (n) this.claimed.set(slot, n);
       if (n) return n;
     }
-    return this.goals[Math.floor(Math.random() * this.goals.length)] ?? null;
+    // else work a part of the map nobody on the side is in or heading for: the team spreads through the building
+    const mates = this.players.filter((p) => p.alive && p.slot !== slot && !this.foes(slot, p.slot));
+    let best: Node | null = null, bs = -1;
+    for (let k = 0; k < 10; k++) {
+      const g = this.goals[Math.floor(Math.random() * this.goals.length)];
+      if (!g) continue;
+      let d = 60;
+      for (const q of mates) {
+        const b = this.bodies[q.slot];
+        d = Math.min(d, Math.hypot(b.x - g.x, b.z - g.z, (b.y - g.y) * 3));
+        const c = this.claimed.get(q.slot);
+        if (c) d = Math.min(d, Math.hypot(c.x - g.x, c.z - g.z, (c.y - g.y) * 3));
+      }
+      const s = d + Math.random() * 6;
+      if (s > bs) {
+        bs = s;
+        best = g;
+      }
+    }
+    if (best) this.claimed.set(slot, best);
+    return best;
   }
 
   openDoorsNear(x: number, y: number, z: number, dx: number, dz: number) {
@@ -388,13 +411,12 @@ export class Match {
         if (this.world.sees({ x: c[0], y: c[1] + 1.5, z: c[2] }, { x: b.x, y: b.y + 1.5, z: b.z })) s -= near ? 40 : 12;
       }
       if (near && others.length) {
-        // a short run from the nearest of them: close enough to find a fight, not close enough to be in one
-        s += closest > 18 && closest < 42 ? 20 : closest >= 42 ? 20 - (closest - 42) * 0.6 : 0;
-        if (this.cfg.mode !== 'ffa') {
-          let mates = 0;
-          for (const q of this.players) if (q !== p && q.alive && !this.foes(p.slot, q.slot) && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 24) mates++;
-          s += Math.min(3, mates) * 3;
-        }
+        // not on top of a fight, not across the world from one
+        s += closest > 18 && closest < 60 ? 14 : closest >= 60 ? 14 - (closest - 60) * 0.4 : 0;
+        // and somewhere nobody else is: a crowd doesn't come back in one corner
+        let anyone = 60;
+        for (const q of this.players) if (q !== p && q.alive) anyone = Math.min(anyone, Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2], (this.bodies[q.slot].y - c[1]) * 3));
+        s += Math.min(anyone, 30) * 0.7;
       }
       for (const q of this.players) if (q !== p && q.alive && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 1) s -= 20;
       if (s > bs) {
