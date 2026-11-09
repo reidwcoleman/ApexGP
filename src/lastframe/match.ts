@@ -96,7 +96,7 @@ export class Match {
   }
 
   joinNow(p: PlayerInfo) {
-    if (this.players.includes(p) && !p.alive && this.phase !== 'over') this.spawn(p, false);
+    if (this.players.includes(p) && !p.alive && this.phase !== 'over') this.spawn(p, false, this.phase === 'live');
   }
 
   /** bots make up the numbers: `cfg.bots` per side beyond the humans */
@@ -185,7 +185,7 @@ export class Match {
       if (now >= at && this.phase !== 'over' && this.cfg.mode !== 'rounds') {
         this.respawn.delete(slot);
         const p = this.players.find((q) => q.slot === slot);
-        if (p) this.spawn(p, false);
+        if (p) this.spawn(p, false, true);
       }
     }
     for (let i = this.nades.length - 1; i >= 0; i--) {
@@ -319,14 +319,28 @@ export class Match {
       const n = this.nav.nearest(c[0] + (Math.random() - 0.5) * 8, c[1], c[2] + (Math.random() - 0.5) * 8);
       if (n) return n;
     }
-    // drift toward where the enemy was last, some of the time
-    if (Math.random() < 0.45) {
-      const foes = this.players.filter((p) => p.alive && this.foes(slot, p.slot));
-      if (foes.length) {
-        const b = this.bodies[foes[Math.floor(Math.random() * foes.length)].slot];
-        const n = this.nav.nearest(b.x + (Math.random() - 0.5) * 16, b.y, b.z + (Math.random() - 0.5) * 16);
-        if (n) return n;
+    // hunt: most of the time toward a foe, usually the nearest, often the people playing (the fight comes to them)
+    const foes = this.players.filter((p) => p.alive && this.foes(slot, p.slot));
+    if (foes.length && Math.random() < 0.8) {
+      const me = this.bodies[slot];
+      const humans = foes.filter((p) => !p.bot);
+      let pick = foes[0];
+      if (humans.length && Math.random() < 0.7) pick = humans[Math.floor(Math.random() * humans.length)];
+      else {
+        const by = foes.map((p) => [Math.hypot(this.bodies[p.slot].x - me.x, this.bodies[p.slot].z - me.z), p] as const).sort((a, b) => a[0] - b[0]);
+        pick = by[Math.random() < 0.7 ? 0 : Math.min(1, by.length - 1)][1];
       }
+      const b = this.bodies[pick.slot];
+      const n = this.nav.nearest(b.x + (Math.random() - 0.5) * 9, b.y, b.z + (Math.random() - 0.5) * 9);
+      if (n) return n;
+    }
+    // else where the shooting was lately
+    const now = performance.now() / 1000;
+    const hot = this.hot.filter((h) => now - h[3] < 25);
+    if (hot.length && Math.random() < 0.7) {
+      const h = hot[Math.floor(Math.random() * hot.length)];
+      const n = this.nav.nearest(h[0] + (Math.random() - 0.5) * 8, h[1], h[2] + (Math.random() - 0.5) * 8);
+      if (n) return n;
     }
     return this.goals[Math.floor(Math.random() * this.goals.length)] ?? null;
   }
@@ -355,19 +369,46 @@ export class Match {
     this.setDoor(i, d.want > 0 ? 0 : 1, dir);
   }
 
-  private spawn(p: PlayerInfo, fixed: boolean) {
-    const list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : p.team === 0 ? this.map.spawns.a : this.map.spawns.b;
+  private spawn(p: PlayerInfo, fixed: boolean, near = false) {
+    void fixed;
+    let list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : p.team === 0 ? this.map.spawns.a : this.map.spawns.b;
+    if (near && this.cfg.mode !== 'rounds' && this.nav.nodes.length) {
+      // back in near the fight: anywhere on the map, scored below by who's about
+      const extra: number[][] = [];
+      for (let k = 0; k < 40; k++) {
+        const n = this.nav.nodes[Math.floor(Math.random() * this.nav.nodes.length)];
+        if (n) extra.push([n.x, n.y, n.z]);
+      }
+      list = [...list, ...extra];
+    }
     const others = this.players.filter((q) => q.alive && this.foes(p.slot, q.slot));
     let best = list[0], bs = -1e9;
-    for (let k = 0; k < 10; k++) {
-      const c = list[Math.floor(Math.random() * list.length)];
+    for (let k = 0; k < (near ? 46 : 10); k++) {
+      const c = near ? list[k % list.length] : list[Math.floor(Math.random() * list.length)];
       let s = Math.random() * 3;
+      let closest = 1e9;
+      // a bot comes back within reach of the people playing, if it's against any of them
+      const people = p.bot ? others.filter((q) => !q.bot) : [];
+      const ref = people.length ? people : others;
+      for (const q of ref) {
+        const b = this.bodies[q.slot];
+        closest = Math.min(closest, Math.hypot(b.x - c[0], b.z - c[2], (b.y - c[1]) * 2));
+      }
       for (const q of others) {
         const b = this.bodies[q.slot];
-        const d = Math.hypot(b.x - c[0], b.z - c[2]);
-        s += Math.min(d, 28) * 0.1;
-        if (d < 12) s -= 8;
-        if (this.world.sees({ x: c[0], y: c[1] + 1.5, z: c[2] }, { x: b.x, y: b.y + 1.5, z: b.z })) s -= 12;
+        const d = Math.hypot(b.x - c[0], b.z - c[2], (b.y - c[1]) * 2);
+        if (!near) s += Math.min(d, 28) * 0.1;
+        if (d < 14) s -= near ? 24 : 8;
+        if (this.world.sees({ x: c[0], y: c[1] + 1.5, z: c[2] }, { x: b.x, y: b.y + 1.5, z: b.z })) s -= near ? 40 : 12;
+      }
+      if (near && others.length) {
+        // a short run from the nearest of them: close enough to find a fight, not close enough to be in one
+        s += closest > 18 && closest < 42 ? 20 : closest >= 42 ? 20 - (closest - 42) * 0.6 : 0;
+        if (this.cfg.mode !== 'ffa') {
+          let mates = 0;
+          for (const q of this.players) if (q !== p && q.alive && !this.foes(p.slot, q.slot) && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 24) mates++;
+          s += Math.min(3, mates) * 3;
+        }
       }
       for (const q of this.players) if (q !== p && q.alive && Math.hypot(this.bodies[q.slot].x - c[0], this.bodies[q.slot].z - c[2]) < 1) s -= 20;
       if (s > bs) {
@@ -480,6 +521,22 @@ export class Match {
 
   noise(p: { x: number; y: number; z: number }, loud: number) {
     for (const b of this.bots.values()) b.hear(p, loud);
+    if (loud >= 50) {
+      this.hot.push([p.x, p.y, p.z, performance.now() / 1000]);
+      if (this.hot.length > 24) this.hot.shift();
+    }
+  }
+
+  /** where the shooting has been: x, y, z, when */
+  private hot: number[][] = [];
+
+  /** a bot that's seen someone tells its side; the ones near enough with nothing better to do come */
+  callout(slot: number, p: { x: number; y: number; z: number }) {
+    for (const b of this.bots.values()) {
+      if (b.slot === slot || this.foes(slot, b.slot)) continue;
+      const o = this.bodies[b.slot];
+      if (Math.hypot(o.x - p.x, o.z - p.z) < 50) b.hear(p, 1e9);
+    }
   }
 
   damage(by: number, to: number, dmg: number, zone: number, w: number, dir: [number, number, number], dist: number) {

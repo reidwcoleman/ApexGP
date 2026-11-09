@@ -43,6 +43,7 @@ export class Bot {
   private lastX = 0;
   private lastZ = 0;
   private heardAt = -9;
+  private calledAt = -9;
   private heard: Vec = { x: 0, y: 0, z: 0 };
   private coverT = 0;
   private likesLight = Math.random() < 0.55;
@@ -109,7 +110,11 @@ export class Bot {
       if (this.path.length && this.pi < this.path.length && (!engaged || this.t < this.coverT || this.weapon === 'shotgun')) {
         const n = this.path[this.pi];
         const dx = n.x - m.x, dz = n.z - m.z, d = Math.hypot(dx, dz);
-        if (d < 0.55 && Math.abs(n.y - m.y) < 1.2) this.pi++;
+        if (d < 0.55 && Math.abs(n.y - m.y) < 1.2) {
+          this.pi++;
+          // there: think again now, not when the clock says
+          if (this.pi >= this.path.length) this.goalAt = 0;
+        }
         else {
           wx = dx / (d || 1);
           wz = dz / (d || 1);
@@ -175,6 +180,11 @@ export class Bot {
     }
     if (best >= 0) {
       if (best !== this.target) {
+        if (this.t - this.calledAt > 2) {
+          this.calledAt = this.t;
+          const b = M.bodies[best];
+          M.callout(this.slot, { x: b.x, y: b.y, z: b.z });
+        }
         this.react = 0.68 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
         this.errYaw = (Math.random() - 0.5) * 2;
