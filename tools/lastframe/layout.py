@@ -34,6 +34,7 @@ class Map:
         s.hold = []
         s.zones = []     # indoor reverb zones
         s.glass = []
+        s.windows = []   # every window opening, glazed or not
         s.solid = []     # invisible colliders
         s.units = []     # facade modules from the scanned kits, each with its own lightmap tile
         s.rng = random.Random(7)
@@ -51,6 +52,9 @@ class Map:
         """axis 'x': runs along x at y=c. neg/pos: material of the -normal/+normal face."""
         hs = sorted(holes)
         cur = p0
+        for i in range(len(hs) - 1):
+            if hs[i][1] > hs[i + 1][0] + 1e-3 and hs[i][2] < hs[i + 1][3] and hs[i + 1][2] < hs[i][3]:
+                print(f'  ! holes overlap in wall {axis}={c}: {hs[i][:2]} and {hs[i + 1][:2]}')
 
         def seg(a, b, h0, h1):
             if b - a < 1e-3 or h1 - h0 < 1e-3:
@@ -71,7 +75,9 @@ class Map:
         seg(cur, p1, z0, z1)
 
     def door(s, axis, c, p, z, w=0.92, h=2.08, kind='wood', hinge=0, swing=1, t=0.05, frame='trim'):
-        """A hinged door centred at p along the wall. Returns the hole to pass to wall()."""
+        """A hinged door centred at p along the wall. Returns the hole to pass to wall().
+        Never narrower than 1.1 m: two people pass each other in it, and nobody catches on the leaf."""
+        w = max(w, 1.1)
         a, b = p - w / 2, p + w / 2
         hinge_p = a if hinge == 0 else b
         hx, hy = (hinge_p, c) if axis == 'x' else (c, hinge_p)
@@ -93,6 +99,7 @@ class Map:
 
     def window(s, axis, c, p, z, w=1.2, h=1.45, sill=0.9, wt=EXT_T, boards=False, glass=True):
         a, b = p - w / 2, p + w / 2
+        s.windows.append(dict(axis=axis, c=c, a=a, b=b, z0=z + sill, z1=z + sill + h))
         s.casing(axis, c, a, b, z + sill, z + sill + h, wt, 'trim', sill=True)
         # mullion and transom
         d = 0.025
@@ -640,7 +647,7 @@ def build():
     m.loose('wooden_crate_02', 42.5, 30.45, z=0.5, rot=1.2, kg=16)
     m.loose('old_tyre', 44.0, 19.5, rot=0.2, kg=9, surf='rubber', shape='cyl')
     prop('exterior_aircon_unit', 34.5, 26.0, z=2.0, rot=-math.pi / 2, part='exterior_aircon_unit', collide=False)
-    prop('utility_box_02', 49.5, 40.0, rot=math.pi / 2)
+    prop('utility_box_02', 49.4, 39.2, rot=math.pi / 2)
     prop('power_box_01', 34.3, 18.8, z=1.6, rot=-math.pi / 2, part='power_box_01_box', collide=False)
     prop('security_light', 49.6, 33.0, z=3.5, rot=-math.pi / 2, part='security_light', collide=False)
     light('spot', (49.2, 33.0, 3.5), (1.0, 0.92, 0.72), 340, spot=2.2, blend=0.8, radius=0.1, aim=(-0.6, 0, -0.7))
@@ -1163,12 +1170,43 @@ def build():
     # each side starts inside, in its own end of the building
     m.spawns['a'] = [[9.0, 16.0, 0], [14.0, 20.0, 0], [20.0, 16.0, 0], [24.0, 20.0, 0], [8.0, 27.0, 0], [12.0, 31.0, 0], [16.0, 27.0, 0], [20.0, 31.0, 0]]
     m.spawns['b'] = [[73.5, 15.0, 0], [78.5, 15.0, 0], [73.5, 20.5, 0], [78.5, 21.0, 0], [76.0, 18.0, 0], [81.5, 15.0, 0], [84.5, 20.0, 0], [82.0, 21.5, 0]]
-    m.spawns['ffa'] = m.spawns['a'] + m.spawns['b'] + [[47, 59, 0], [31, 59, 0], [70, 59.5, 0], [12, 60, 0], [40, 42, 0], [58, 17, 0], [11, 23, 0], [31, 28, 0], [83, 35, 0]]
+    m.spawns['ffa'] = m.spawns['a'] + m.spawns['b'] + [[42, 30, 0], [38, 18, 0], [60, 40, 0], [30, 28, F2], [44, 23.1, F2], [58, 17, 0], [11, 23, 0], [31, 28, 0], [83, 35, 0]]
     m.hold = [[42, 23, 0], [66, 32, 0], [18, 23, 0]]
+    # ================= all of it indoors =================
+    # the alley between the two buildings under a roof, walled off at the street and the yard: a loading hall,
+    # the bridge across it, the dumpsters still in it
+    import indoor
+    AH = TOP
+    indoor.roof(m, X1 + 0.3, 12.7, WX0 - EXT_T / 2 - 0.02, 40.3, AH)
+    wall('x', 13.0 - EXT_T / 2, X1 + EXT_T / 2, WX0 - EXT_T / 2, 0, AH, EXT_T, 'brick_b', tag='ext')
+    box((37.0, 13.0 - EXT_T - 0.06, 0), (42.0, 13.0 - EXT_T, 3.2), 'ruststeel', collide=False, density=0.3)
+    wall('x', 40.0, X1 - EXT_T / 2, WX0 - EXT_T / 2, 0, AH, EXT_T, 'brick_b', tag='ext')
+    wall('y', X1, Y1, 40.0, 0, AH, EXT_T, 'brick_b', tag='ext')
+    room('alleyhall', X1 + EXT_T / 2, 13.0, WX0 - EXT_T / 2, 40.0 - EXT_T / 2, 0, AH, 'brick_a', 'alley', ceil='ceil')
+    m.zones.append(dict(a=(X1, 13.0, -0.3), b=(WX0, 40.0, AH), kind='hall'))
+    for (x, y, p, fl) in ((41.0, 18.0, 6, 0.3), (42.0, 34.0, 0, 0.0)):
+        prop('caged_hanging_light', x, y, z=AH - 1.0, collide=False)
+        if p:
+            light('point', (x, y, AH - 1.2), WARM, p, radius=0.05, flicker=fl)
+    # freight nobody came for: a car under a sheet, pallets, crates stacked against the walls
+    prop('covered_car', 42.0, 35.6, rot=math.pi / 2 + 0.05, part=None, collide=(2.3, 1.0, 0.75))
+    for (x, y, h) in ((48.6, 19.0, 3), (48.6, 21.0, 1), (35.6, 33.5, 2)):
+        for k in range(h):
+            m.unit('ward', [f'pallet_{k + 1}'], x, y, k * 0.15, rot=math.pi / 2 + k * 0.1, far=True)
+        m.invisible((x - 0.65, y - 0.55, 0), (x + 0.65, y + 0.55, h * 0.15), pen=True)
+    for (x, y, r, n) in ((48.9, 31.0, 0.1, 'wooden_crate_01'), (48.7, 32.6, 0.3, 'wooden_crate_02'), (48.8, 31.8, 0.0, 'wooden_crate_02')):
+        prop(n, x, y, rot=r)
+    if not hasattr(m, 'stains'):
+        m.stains = []
+    m.stains.extend([(40.0, 26.0, 0.0, 0, 0, 1, 2.0), (34.33, 29.0, 1.2, 1, 0, 0, 1.4)])
+    # the shed's roller door is down now
+    box((59.4, WY0 - 0.14, 0.0), (64.6, WY0 - 0.02, 2.74), 'ruststeel', tag='wall', density=0.3)
+    print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
     # and what everyone left behind
     import clutter
     clutter.trim(m)
-    clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=80)
+    clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=60, blood=0.75)
+    print('  cleared from the halls:', indoor.clear_halls(m))
     return m
 
 

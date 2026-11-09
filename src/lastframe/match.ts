@@ -164,20 +164,6 @@ export class Match {
       s.crouch = b.crouch;
       s.lean = b.lean;
       s.w = WEAPON_LIST.indexOf(b.weapon);
-      // people have shoulders: nobody stands inside anybody
-      for (const p2 of this.players) {
-        if (p2.slot === b.slot || !p2.alive) continue;
-        const o = this.bodies[p2.slot];
-        const ex = b.m.x - o.x, ez = b.m.z - o.z, d2 = ex * ex + ez * ez;
-        if (d2 < 0.3 && d2 > 1e-5 && Math.abs(b.m.y - o.y) < 1.4) {
-          const d = Math.sqrt(d2), push = (0.55 - d) * Math.min(1, dt * 9);
-          const nx = b.m.x + (ex / d) * push, nz = b.m.z + (ez / d) * push;
-          if (!this.world.blocked(nx, b.m.y + 0.02, nz, 0.27, 1.7)) {
-            b.m.x = nx;
-            b.m.z = nz;
-          }
-        }
-      }
       s.flags = F.alive | (b.crouch ? F.crouch : 0) | (b.ads ? F.ads : 0) | (b.light ? F.light : 0) | (b.reload > 0 ? F.reload : 0) | (Math.hypot(b.m.vx, b.m.vz) > 0.3 ? F.moving : 0) | (Math.hypot(b.m.vx, b.m.vz) > 4.2 ? F.sprint : 0);
     }
     const now = performance.now() / 1000;

@@ -394,7 +394,58 @@ def blinds(b, rng):
         rod(b, (x, -0.03, H), (x, -0.03, 0.05), 0.0015, CABLE(), 4)
 
 
-KINDS = dict(plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
+BAGB = lambda: mat('lfbodybag', (0.025, 0.028, 0.03), 0.32)
+WAX = lambda: mat('lfwax', (0.62, 0.57, 0.44), 0.55)
+SOOT = lambda: mat('lfsoot', (0.02, 0.018, 0.016), 0.9)
+
+
+def bodybag(b, rng):
+    """a body bag on the floor: black plastic over the shape of someone, a zip down the middle; origin at its centre"""
+    i = b.idx(BAGB())
+    L = 1.85
+    # (along, half width, height) from the feet to the head: feet, shins, knees, thighs, hips, waist, chest, shoulders, neck, head
+    prof = [(0.0, 0.1, 0.08), (0.08, 0.2, 0.13), (0.3, 0.2, 0.14), (0.5, 0.22, 0.16), (0.78, 0.25, 0.2), (0.95, 0.26, 0.21), (1.2, 0.27, 0.24),
+            (1.38, 0.28, 0.23), (1.48, 0.2, 0.16), (1.6, 0.13, 0.17), (1.75, 0.13, 0.17), (1.85, 0.09, 0.1)]
+    n = 12
+    sag = rng.uniform(-0.12, 0.12)
+    rings = []
+    for (t, hw, h) in prof:
+        y = t - L / 2
+        ring = []
+        for k in range(n + 1):
+            a = math.pi * k / n          # 0..pi over the top; the bottom is the floor
+            x = math.cos(a) * hw * (1.0 + 0.12 * math.sin(a))
+            z = math.sin(a) * h * (0.92 + 0.08 * rng.random())
+            ring.append(b.bm.verts.new((x + sag * (t / L - 0.5) ** 2, y, max(0.004, z))))
+        rings.append(ring)
+    for r0, r1 in zip(rings, rings[1:]):
+        for k in range(n):
+            b.bm.faces.new((r0[k], r1[k], r1[k + 1], r0[k + 1])).material_index = i
+    b.bm.faces.new(list(rings[0])).material_index = i
+    b.bm.faces.new(list(reversed(rings[-1]))).material_index = i
+    # the zip, and a tag on a string at the feet
+    pts = [(sag * (t / L - 0.5) ** 2, t - L / 2, h * 0.98 + 0.004) for (t, hw, h) in prof[1:-1]]
+    for p0, p1 in zip(pts, pts[1:]):
+        rod(b, p0, p1, 0.006, STEEL(), 5)
+    quad(b, [(0.05, -L / 2 - 0.12, 0.003), (0.13, -L / 2 - 0.12, 0.003), (0.13, -L / 2 - 0.02, 0.003), (0.05, -L / 2 - 0.02, 0.003)], PAPER())
+
+
+def candles(b, rng):
+    """candles burnt down on the floor in a ring, wax run together, soot on the floor; origin at the middle"""
+    W, S = WAX(), SOOT()
+    quad(b, [(-0.5, -0.5, 0.002), (0.5, -0.5, 0.002), (0.5, 0.5, 0.002), (-0.5, 0.5, 0.002)], S, two=False)
+    k = rng.randint(7, 11)
+    for j in range(k):
+        a = j / k * 2 * math.pi + rng.uniform(-0.2, 0.2)
+        r = rng.uniform(0.28, 0.42)
+        x, y = math.cos(a) * r, math.sin(a) * r
+        h = rng.uniform(0.04, 0.22)
+        rod(b, (x, y, 0.0), (x, y, h), rng.uniform(0.018, 0.03), W, 8)
+        obox(b, (x, y, 0.004), (0.09, 0.09, 0.008), a, W)
+        rod(b, (x, y, h), (x, y, h + 0.012), 0.0015, S, 4)
+
+
+KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)
 
 

@@ -338,8 +338,9 @@ function stepAxis(w: World, m: Mover, dx: number, dz: number) {
     m.z = nz;
     return;
   }
-  // a step
-  if (m.grounded && !w.blocked(nx, m.y + STEP, nz, R, m.height - 0.04)) {
+  // a step: the headroom is checked from the step's top, not from a full step up, or a low sill under a door head
+  // (a 12 cm threshold under a 2.08 m lintel) stops you dead
+  if (m.grounded) {
     const f = w.floorAt(nx, m.y + STEP, nz, R - 0.02);
     if (f > m.y && f - m.y <= STEP && !w.blocked(nx, f + 0.01, nz, R, m.height - 0.04)) {
       m.stepEase -= f - m.y;

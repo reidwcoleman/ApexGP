@@ -34,8 +34,8 @@ HOSP_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('K:board', 0.0
 FLAT_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.6, 0.3), ('D:hanging_picture_frame_02', 1.6, 0.3), ('D:hanging_picture_frame_03', 1.6, 0.3), ('D:wall_clock', 2.0, 0.2), ('K:conduit', 0.0, 0.5)]
 COTTAGE_HUNG = [('K:plaster', 0.7, 0.62), ('K:plaster', 1.5, 0.62), ('D:hanging_picture_frame_01', 1.55, 0.3), ('D:hanging_picture_frame_03', 1.55, 0.3), ('D:wall_clock', 1.9, 0.2)]
 STYLES = {
-    'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.35),
-    'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=1.3),
+    'hospital': dict(wall=HOSP_WALL, hung=HOSP_HUNG, flat=['litter', 'debris', 'litter', 'bottles'], ceil=['cables', 'tile'], dense=1.9, bags=0.22, candles=0.06),
+    'flat': dict(wall=FLAT_WALL, hung=FLAT_HUNG, flat=['litter', 'bottles', 'debris'], ceil=['cables'], dense=1.8, bags=0.1, candles=0.06),
     'cottage': dict(wall=COTTAGE_WALL, hung=COTTAGE_HUNG, flat=['litter'], ceil=[], dense=1.1),
 }
 
@@ -105,7 +105,7 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
 
     def unit(kind, x, y, z, rot, solid=None):
         """kit pieces look along -y at rot 0, props along +y: callers give the prop's rot"""
-        m.unit('ward', [f'{kind}_{rng.randint(1, 9)}' if kind in ('litter', 'debris', 'bottles', 'shards', 'cables', 'tile', 'conduit', 'board', 'radiator', 'plaster', 'blinds') else kind],
+        m.unit('ward', [f'{kind}_{rng.randint(1, 9)}' if kind in ('litter', 'debris', 'bottles', 'shards', 'cables', 'tile', 'conduit', 'board', 'radiator', 'plaster', 'blinds', 'bodybag', 'candles') else kind],
                x, y, z, rot=rot, far=True)
         if solid:
             hx, hy, h = solid
@@ -157,7 +157,7 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
             put(item, x, y, z0, rot + rng.uniform(-0.5, 0.5) if item[0] != 'K' else rot)
             n += 1
         # things on the walls
-        want = max(1, int(per / 9 * k))
+        want = max(1, int(per / 7 * k))
         tries = 0
         n = 0
         while n < want and tries < want * 10:
@@ -190,9 +190,27 @@ def dress(m, style, rng, outside=(), skip=(), out_items=None, out_n=40, zf=None,
                 continue
             unit(rng.choice(st['flat']), x, y, z0 + 0.002, rng.uniform(0, 6.28))
             want -= 1
+        # the worst of it: someone left on the floor in a bag; a ring of candles burnt down by somebody still here
+        if not corridor and rng.random() < st.get('bags', 0):
+            for _ in range(12):
+                x, y = rng.uniform(x0 + 1.0, x1 - 1.0), rng.uniform(y0 + 1.0, y1 - 1.0)
+                if free(x, y, z0, 1.0):
+                    rot = rng.uniform(0, 6.28)
+                    unit('bodybag', x, y, z0, rot, (0.3, 0.95, 0.25))
+                    taken.append((x, y, z0, 1.0))
+                    m.stains.append((x + rng.uniform(-0.4, 0.4), y + rng.uniform(-0.4, 0.4), z0, 0, 0, 1, rng.uniform(1.2, 2.0)))
+                    break
+        if not corridor and rng.random() < st.get('candles', 0):
+            for _ in range(12):
+                x, y = rng.uniform(x0 + 0.9, x1 - 0.9), rng.uniform(y0 + 0.9, y1 - 0.9)
+                if free(x, y, z0, 0.6):
+                    unit('candles', x, y, z0 + 0.001, rng.uniform(0, 6.28))
+                    taken.append((x, y, z0, 0.6))
+                    m.light('point', (x, y, z0 + 0.3), (1.0, 0.52, 0.22), 1.6, radius=0.04, flicker=0.14)
+                    break
         # what hangs from the ceiling
-        if st['ceil'] and rng.random() < 0.7:
-            for _ in range(1 + int(W * D / 40)):
+        if st['ceil'] and rng.random() < 0.85:
+            for _ in range(1 + int(W * D / 28)):
                 x, y = rng.uniform(x0 + 0.8, x1 - 0.8), rng.uniform(y0 + 0.8, y1 - 0.8)
                 unit(rng.choice(st['ceil']), x, y, z1, rng.uniform(0, 6.28))
         # old blood: a pool on the floor, a smear down a wall

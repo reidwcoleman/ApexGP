@@ -76,7 +76,8 @@ export const LF = {
   /** 1 under open sky */
   rain: { value: 1 },
   /** a map in daylight: the sun is drawn live and the bake holds only the sky and the bounce (see sun.ts) */
-  sunOn: new URLSearchParams(location.search).get('map') === 'cove',
+  // the cove is the only sunlit location, and it's out of the rotation while every map is indoors (world.ts OUTDOOR)
+  sunOn: false as boolean,
   sunDir: { value: new THREE.Vector3(0, 1, 0) },
   sunC: { value: new THREE.Vector3() },
   sunVP: { value: new THREE.Matrix4() },

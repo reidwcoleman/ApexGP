@@ -22,6 +22,10 @@ RW = 4.0                       # one room
 DX0, DY0, DX1, DY1 = 60.0, 0.0, 76.0, 14.0     # the diner
 PX0, PY0, PX1, PY1 = 34.0, 8.0, 48.0, 20.0     # the pool
 PZ = -1.9
+# all of it indoors now: the walkway is a corridor, the pool has a hall over it, a service hall and a passage to the diner
+HX0, HY0 = 26.0, 5.5            # the pool hall, from here to the corridor
+SX0, SX1, SY0 = 54.0, 58.4, 3.0  # the service hall and the east stair
+TW0, TW1, TY0 = -6.0, -2.0, 24.6  # the west stair
 
 SKY = dict(hdri='rooftop_night', strength=0.9, tint=(0.3, 0.4, 0.55))
 WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.4, sky=[0.1, 0.12, 0.17], wb=[0.97, 1.0, 1.04])
@@ -61,7 +65,7 @@ def build():
             light('area', (x, y, z - 0.06), TUBE, p, size=(1.2, 0.14) if along == 'x' else (0.14, 1.2), flicker=flick)
 
     # ================= the ground: the lot, the road, the pool cut into it =================
-    holes = [(PX0, PY0, PX1, PY1), (WX0, WY0, WX1, WY1), (DX0, DY0, DX1, DY1)]
+    holes = [(PX0, PY0, PX1, PY1), (WX0, WY0, WX1, WY1), (DX0, DY0, DX1, DY1), (HX0, HY0, SX0, BAL), (SX0, SY0, SX1, WY0), (TW0, TY0, TW1, BAL), (SX1, 3.6, DX0, 6.4)]
     for r in rects_minus(-24, -16, 84, 60, holes):
         box((r[0], r[1], -1), (r[2], r[3], 0), 'asphalt', tag='ground', density=0.45)
     # the road along the south, its lines, the verge
@@ -69,7 +73,12 @@ def build():
         box((x, -12.1, -0.2), (x + 3, -11.95, 0.004), 'paint', collide=False, density=0.06)
     for x in range(-2, 32, 3):
         box((x, 22.0, -0.2), (x + 0.1, 28.0, 0.004), 'paint', collide=False, density=0.06)
-    box((WX0, BAL, -0.2), (WX1 + 4, WY0, 0.12), 'conc', tag='step', density=0.4)
+    box((TW0, BAL, -0.2), (WX1 + 4, WY0, 0.12), 'conc', tag='floor', density=0.4)
+    # the floors that were lot
+    for r in rects_minus(HX0, HY0, SX0, BAL, [(PX0 - 0.3, PY0 - 0.3, PX1 + 0.3, PY1 + 0.3)]):
+        box((r[0], r[1], -0.3), (r[2], r[3], 0.0), 'slab', tag='floor')
+    for (a, b) in (((SX0, SY0), (SX1, BAL)), ((TW0, TY0), (TW1, BAL)), ((SX1, 3.6), (DX0, 6.4))):
+        box((a[0], a[1], -0.3), (b[0], b[1], 0.0), 'slab', tag='floor')
     # the pool: tiled, empty, rain standing at the bottom
     box((PX0, PY0, PZ - 0.3), (PX1, PY1, PZ), 'conc_wet', tag='under', density=0.5)
     for a, b in (((PX0 - 0.3, PY0 - 0.3), (PX1 + 0.3, PY0)), ((PX0 - 0.3, PY1), (PX1 + 0.3, PY1 + 0.3)), ((PX0 - 0.3, PY0), (PX0, PY1)), ((PX1, PY0), (PX1 + 0.3, PY1))):
@@ -95,7 +104,6 @@ def build():
     box((WX0 - 0.3, BAL - 0.3, TOP), (WX1 + 0.3, WY1 + 0.3, TOP + 0.3), 'roof', density=0.1)
     box((WX0 - 0.3, BAL - 0.6, TOP + 0.3), (WX1 + 0.3, BAL - 0.3, TOP + 0.9), 'planks', density=0.15)
     # the balcony: its edge, a rail, posts down to the walkway
-    m.rail('x', BAL + 0.05, WX0, WX1 + 4.0, F2)
     for x in range(int(WX0), int(WX1) + 5, 4):
         box((x - 0.08, BAL + 0.05, 0.0), (x + 0.08, BAL + 0.21, F2 - SLAB), 'steel', density=0.2)
     # stairs up at both ends, outside the rooms
@@ -176,11 +184,90 @@ def build():
             prop('Sofa_01', WX0 + 3.0, 43.4, z=z, rot=math.pi)
             D('television_02', WX0 + 3.0, 36.8, z=z, r=0)
             L('boombox', WX0 + 1.0, 37.0, z=z, kg=3, sf='plastic')
-    # the walkway under the balcony: an ice machine and a vending machine, both dead
-    box((24.6, 34.7, 0), (25.6, 35.7, 1.6), 'steel', density=0.3)
-    box((44.6, 34.6, 0), (45.6, 35.7, 1.9), 'paint_r', density=0.3)
-    box((44.62, 34.58, 0.5), (45.58, 34.6, 1.7), 'litwin_c', collide=False, density=0.05)
-    light('point', (45.1, 34.3, 1.2), (1.0, 0.45, 0.2), 2.0, radius=0.1, flicker=0.7)
+    # an ice machine and a vending machine, both dead, against the pool hall's back wall
+    FW = BAL - EXT_T
+    box((27.0, FW - 1.0, 0), (28.0, FW, 1.6), 'steel', density=0.3)
+    box((44.6, FW - 1.1, 0), (45.6, FW, 1.9), 'paint_r', density=0.3)
+    box((44.62, FW - 1.12, 0.5), (45.58, FW - 1.1, 1.7), 'litwin_c', collide=False, density=0.05)
+    light('point', (45.1, FW - 1.4, 1.2), (1.0, 0.45, 0.2), 2.0, radius=0.1, flicker=0.7)
+
+    # ================= the corridor: the walkway and the balcony walled in =================
+    CW = BAL - EXT_T / 2
+    holes = []
+    for x in (2.0, 8.0, 14.0, 20.0):
+        holes.append(window('x', CW, x, 0.0, w=1.6, h=1.3, sill=0.9, boards=R.random() < 0.3, glass=R.random() < 0.8))
+    for x in (31.0, 40.0, 50.0):
+        holes.append(door('x', CW, x, 0.0, w=1.4, kind='steel' if x != 40.0 else 'wood', swing=-1))
+    for x in (35.5, 45.0):
+        holes.append(window('x', CW, x, 0.0, w=1.8, h=1.3, sill=0.9, glass=R.random() < 0.6))
+    wall('x', CW, TW1, SX0, 0.0, F2, EXT_T, 'render_c', tag='ext', holes=holes)
+    holes = [window('x', CW, x, F2, w=1.6, h=1.3, sill=0.9, boards=R.random() < 0.2, glass=R.random() < 0.7) for x in range(2, 54, 6)]
+    wall('x', CW, TW1, SX0, F2, TOP, EXT_T, 'render_c', tag='ext', holes=holes)
+    room('gallery0', TW1, BAL, SX0, WY0, 0.0, F2 - SLAB, 'wall_beige', 'carpet', ceil='ceil_tile', dado=('hosp_dado2', 0.9))
+    room('gallery1', TW1, BAL, SX0, WY0, F2, TOP - F2, 'wall_beige', 'carpet', ceil='ceil_tile', dado=('hosp_dado2', 0.9))
+    for x, z, p, fl in ((4.0, 0.0, 3.0, 0.7), (22.0, 0.0, 0.0, 0.0), (38.0, 0.0, 4.0, 0.3), (12.0, F2, 3.0, 0.9), (34.0, F2, 0.0, 0.0), (48.0, F2, 3.5, 0.5)):
+        tube(x, 35.0, z + (F2 - SLAB if z == 0 else TOP - F2), p * 4, flick=fl)
+
+    # ================= the west stair, walled in =================
+    wall('y', TW0, TY0, WY0, 0.0, TOP, EXT_T, 'render_c', tag='ext', holes=[window('y', TW0, 29.0, 0.0, w=1.0, h=1.2, sill=1.2), window('y', TW0, 29.0, F2, w=1.0, h=1.2, sill=1.0)])
+    wall('x', TY0, TW0, TW1, 0.0, TOP, EXT_T, 'render_c', tag='ext')
+    wall('y', TW1, TY0, BAL, 0.0, TOP, EXT_T, 'render_c', tag='ext')
+    wall('x', WY0, TW0, TW1, 0.0, TOP, EXT_T, 'render_c', tag='ext')
+    box((TW0 - 0.3, TY0 - 0.3, TOP), (TW1 - 0.3, WY0 + 0.3, TOP + 0.3), 'roof', faces={'-z': 'ceil'}, density=0.1)
+    room('stair_w', TW0, TY0, TW1, BAL, 0.0, TOP, 'wall_conc', 'conc')
+    prop('caged_hanging_light', -3.0, 28.0, z=TOP - 0.8, collide=False)
+    light('point', (-3.0, 28.0, TOP - 1.0), WARM, 4, radius=0.05, flicker=0.4)
+
+    # ================= the pool hall =================
+    holes = [window('x', HY0, x, 0.0, w=2.0, h=1.8, sill=0.8, glass=R.random() < 0.7) for x in (29.0, 33.0, 38.0, 43.0, 48.0)]
+    wall('x', HY0, HX0, SX0, 0.0, TOP, EXT_T, 'render_w', tag='ext', holes=holes)
+    holes = [window('y', HX0, y, 0.0, w=2.0, h=1.8, sill=0.8, glass=R.random() < 0.7) for y in (9.0, 14.0, 19.0, 24.0, 29.0)]
+    wall('y', HX0, HY0, BAL, 0.0, TOP, EXT_T, 'render_w', tag='ext', holes=holes)
+    box((HX0 - 0.3, HY0 - 0.3, TOP), (SX0, BAL - 0.3, TOP + 0.3), 'roof', faces={'-z': 'ceil'}, density=0.1)
+    room('poolhall', HX0, HY0, SX0, BAL, 0.0, TOP, 'render_w', 'mtile', ceil='ceil', dado=('wtile', 1.4))
+    for (x, y, p, fl) in ((32.0, 24.0, 40, 0.9), (46.0, 12.0, 0, 0.0), (46.0, 28.0, 28, 0.4)):
+        tube(x, y, TOP, p, flick=fl)
+    # what holds the roof up, and what was left round the pool: loungers, a lifeguard's chair, stacked chairs, a cleaning cart
+    for (x, y) in ((31.0, 12.0), (31.0, 26.0), (51.0, 12.0), (51.0, 26.0)):
+        box((x - 0.25, y - 0.25, 0.0), (x + 0.25, y + 0.25, TOP), 'render_w', tag='post', density=0.3)
+    for i, (x, y, r) in enumerate(((36.0, 23.2, 0.05), (38.4, 23.4, -0.1), (40.8, 23.1, 0.2), (44.0, 23.6, 0.0), (36.0, 6.6, 3.1), (39.5, 6.6, 3.2), (49.6, 9.0, 1.6), (49.8, 17.5, 1.5))):
+        c, sn = math.cos(r), math.sin(r)
+        box((x - 0.33, y - 0.95, 0.25), (x + 0.33, y + 0.95, 0.33), 'planks', pen=True, tag='counter', density=0.3)
+        box((x - 0.33, y + 0.6, 0.33), (x + 0.33, y + 0.95, 0.85), 'planks', collide=False, density=0.2)
+        for (dx, dy) in ((-0.3, -0.9), (0.3, -0.9), (-0.3, 0.9), (0.3, 0.9)):
+            box((x + dx - 0.02, y + dy - 0.02, 0.0), (x + dx + 0.02, y + dy + 0.02, 0.25), 'steel', collide=False, density=0.05)
+    box((PX0 - 1.4, 13.6, 0.0), (PX0 - 0.6, 14.4, 1.8), 'steel', pen=True, tag='post', density=0.2)
+    box((PX0 - 1.5, 13.5, 1.8), (PX0 - 0.5, 14.5, 1.9), 'paint_w', collide=False, density=0.2)
+    for (x, y) in ((28.2, 32.6), (28.9, 32.7), (52.6, 7.4)):
+        for k in range(4):
+            prop('plastic_monobloc_chair_01', x, y, z=k * 0.12, rot=0.2 + k * 0.05, collide=None if k == 0 else False)
+    prop('industrial_storage_cart', 47.5, 21.6, rot=0.4)
+    for (x, y, r) in ((33.5, 9.5, 0.7), (46.0, 25.0, 2.1), (29.5, 20.0, 4.0), (52.0, 30.0, 1.0)):
+        L('plastic_monobloc_chair_01', x, y, r=r, kg=2.5, sf='plastic')
+    m.stains.extend([(42.0, 22.8, 0.0, 0, 0, 1, 1.9), (PX1 + 0.31, 12.0, -0.6, 1, 0, 0, 1.3), (31.26, 26.0, 1.1, 1, 0, 0, 1.2)])
+    prop('caged_hanging_light', 41.0, 22.5, z=TOP - 1.6, collide=False)
+    light('point', (41.0, 22.5, TOP - 1.8), WARM, 6, radius=0.05, flicker=0.25)
+    for x in (HX0 + 0.2, SX0 - 0.2):
+        box((x - 0.04, 20.0, 2.6), (x + 0.04, 21.6, 3.0), 'emerg', collide=False, density=0.05)
+    light('point', (SX0 - 0.6, 20.8, 2.8), (1.0, 0.07, 0.035), 3, radius=0.05)
+
+    # ================= the service hall and the east stair; the passage to the diner =================
+    wall('y', SX0, SY0, BAL, 0.0, TOP, EXT_T, 'wall_conc', tag='ext', holes=[door('y', SX0, 12.0, 0.0, w=1.3, kind='steel'), door('y', SX0, 26.0, 0.0, w=1.3, kind='steel', swing=-1)])
+    wall('y', SX1, SY0, WY0, 0.0, TOP, EXT_T, 'render_c', tag='ext', holes=[(3.6, 6.4, 0.0, 2.6), window('y', SX1, 18.0, 0.0, w=1.2, h=1.0, sill=1.4)])
+    wall('x', SY0, SX0, SX1, 0.0, TOP, EXT_T, 'render_c', tag='ext')
+    wall('x', WY0, SX0, SX1, 0.0, TOP, EXT_T, 'render_c', tag='ext')
+    box((SX0, SY0 - 0.3, TOP), (SX1 + 0.3, BAL - 0.3, TOP + 0.3), 'roof', faces={'-z': 'ceil'}, density=0.1)
+    box((WX1 + 0.3, BAL - 0.3, TOP), (SX1 + 0.3, WY0 + 0.3, TOP + 0.3), 'roof', faces={'-z': 'ceil'}, density=0.1)
+    room('service', SX0, SY0, SX1, TY0, 0.0, TOP, 'wall_conc', 'conc')
+    room('stair_e', SX0, TY0, SX1, WY0, 0.0, TOP, 'wall_conc', 'conc')
+    for y, p in ((8.0, 5), (20.0, 0)):
+        prop('caged_hanging_light', 56.2, y, z=TOP - 1.0, collide=False)
+        if p:
+            light('point', (56.2, y, TOP - 1.2), (0.72, 0.84, 1.0), p, radius=0.05, flicker=0.6)
+    wall('x', 3.6, SX1, DX0, 0.0, 3.0, INT_T, 'wall_conc', tag='int')
+    wall('x', 6.4, SX1, DX0, 0.0, 3.0, INT_T, 'wall_conc', tag='int')
+    box((SX1, 3.4, 3.0), (DX0, 6.6, 3.3), 'roof', faces={'-z': 'ceil'}, density=0.1)
+    room('passage', SX1, 3.6, DX0, 6.4, 0.0, 3.0, 'wall_conc', 'conc')
 
     # ================= the diner =================
     box((DX0, DY0, -0.3), (DX1, DY1, 0.0), 'slab', tag='floor')
@@ -191,7 +278,7 @@ def build():
         holes.append(window('x', DY0, x, 0.0, w=1.6, h=1.5, sill=0.9, glass=R.random() < 0.7))
     wall('x', DY0, DX0, DX1, 0, DH, EXT_T, 'render_p', tag='ext', holes=holes)
     wall('x', DY1, DX0, DX1, 0, DH, EXT_T, 'render_p', tag='ext', holes=[door('x', DY1, 74.0, 0.0, kind='steel', swing=-1), window('x', DY1, 63.0, 0.0, w=1.0, h=0.8, sill=1.3)])
-    wall('y', DX0, DY0, DY1, 0, DH, EXT_T, 'render_p', tag='ext', holes=[window('y', DX0, 3.5, 0.0, w=1.6, h=1.5, sill=0.9), window('y', DX0, 7.0, 0.0, w=1.6, h=1.5, sill=0.9)])
+    wall('y', DX0, DY0, DY1, 0, DH, EXT_T, 'render_p', tag='ext', holes=[door('y', DX0, 5.0, 0.0, w=1.3, kind='steel', swing=-1), window('y', DX0, 8.3, 0.0, w=1.4, h=1.5, sill=0.9)])
     wall('y', DX1, DY0, DY1, 0, DH, EXT_T, 'render_p', tag='ext', holes=[door('y', DX1, 5.0, 0.0, kind='steel', swing=-1)])
     wall('x', 9.5, DX0, DX1, 0, DH, INT_T, 'wtile', tag='int', holes=[(70.0, 71.2, 0, 2.1), (63.0, 67.0, 1.1, 2.0)], pen=True)
     room('diner', DX0, DY0, DX1, 9.5, 0.0, DH, 'wall_beige', 'mtile', ceil='ceil_tile', dado=('paint_r', 1.0))
@@ -218,9 +305,9 @@ def build():
     m.stains.extend([(65.0, 4.5, 0.0, 0, 0, 1, 1.8), (67.0, 9.4, 1.2, 0, -1, 0, 1.4), (72.0, 12.0, 0.0, 0, 0, 1, 1.5)])
 
     # ================= the lot, the road, the sign =================
-    for (x, y, r) in ((8.0, 24.0, 0.1), (14.0, 25.0, -0.2), (24.0, 23.5, 3.0), (52.0, 26.0, 1.6)):
+    for (x, y, r) in ((8.0, 24.0, 0.1), (14.0, 25.0, -0.2), (22.0, 23.5, 3.0), (61.5, 28.0, 1.6)):
         prop('covered_car', x, y, rot=r)
-    for (x, y, on, fl) in ((4.0, 18.0, True, 0.0), (30.0, 4.0, True, 0.5), (54.0, 20.0, False, 0.0), (18.0, -6.0, True, 0.2)):
+    for (x, y, on, fl) in ((4.0, 18.0, True, 0.0), (30.0, 4.0, True, 0.5), (62.0, 22.0, False, 0.0), (18.0, -6.0, True, 0.2)):
         prop('street_lamp_01', x, y, rot=0.0)
         if on:
             light('spot', (x, y + 0.5, 6.1), SODIUM, 700, spot=2.3, blend=0.85, radius=0.15, aim=(0.15, 0.05, -1), flicker=fl)
@@ -260,25 +347,33 @@ def build():
             continue
         prop('dead_tree_trunk', x, y, rot=R.uniform(0, 6), scale=R.uniform(1.2, 2.2), collide=False)
 
-    # zones: the rooms are small; the lot is outside
+    # zones: the rooms and corridors are small, the pool hall echoes; the lot is outside, seen through the glass
     for fl, z in ((0, 0.0), (1, F2)):
         m.zones.append(dict(a=(WX0, WY0, z - 0.3), b=(WX1, WY1, z + 2.9), kind='small'))
+        m.zones.append(dict(a=(TW1, BAL, z - 0.3), b=(SX0, WY0, z + 2.9), kind='small'))
     m.zones.append(dict(a=(DX0, DY0, -0.3), b=(DX1, DY1, 3.4), kind='small'))
+    m.zones.append(dict(a=(HX0, HY0, PZ - 0.3), b=(SX0, BAL, TOP), kind='hall'))
+    m.zones.append(dict(a=(SX0, SY0, -0.3), b=(SX1, WY0, TOP), kind='small'))
+    m.zones.append(dict(a=(TW0, TY0, -0.3), b=(TW1, WY0, TOP), kind='small'))
+    m.zones.append(dict(a=(SX1, 3.6, -0.3), b=(DX0, 6.4, 3.0), kind='small'))
 
     # spawns: A in the trees to the west, B behind the diner to the east
     # each side starts inside, in its own end of the building
     m.spawns['a'] = [[0.0, 41.5, 0], [3.5, 42.5, 0], [0.0, 41.5, 3.0], [3.5, 42.5, 3.0], [7.0, 37.5, 0], [7.0, 37.5, 3.0], [11.0, 37.5, 0], [11.0, 37.5, 3.0]]
     m.spawns['b'] = [[63.0, 3.5, 0], [70.5, 4.5, 0], [74.5, 8.6, 0], [62.0, 8.8, 0], [70.0, 12.2, 0], [73.5, 11.6, 0], [66.0, 2.0, 0], [72.0, 8.6, 0]]
-    m.spawns['ffa'] = m.spawns['a'][:4] + m.spawns['b'][:4] + [[30.0, 0.0, 0], [41.0, 14.0, PZ], [20.0, 39.0, 0], [40.0, 39.0, F2], [12.0, 39.0, F2], [66.0, 4.0, 0],
-                                                               [10.0, 30.0, 0], [50.0, 30.0, 0], [2.0, 40.0, 0], [30.0, 50.0, 0]]
+    m.spawns['ffa'] = m.spawns['a'][:4] + m.spawns['b'][:4] + [[30.0, 8.0, 0], [41.0, 14.0, PZ], [20.0, 39.0, 0], [40.0, 39.0, F2], [12.0, 39.0, F2], [66.0, 4.0, 0],
+                                                               [10.0, 35.0, 0], [50.0, 30.0, 0], [2.0, 40.0, 0], [56.2, 12.0, 0]]
     m.hold = [[41.0, 14.0, PZ], [30.0, 35.0, F2], [66.0, 4.5, 0]]
     m.sky = SKY
     m.weather = WEATHER
     m.centre = [30.0, -24.0]
     m.attract = [[56.5, 1.6, -26.0], [30.0, 4.6, -35.0]]    # game axes: up the east stair onto the balcony
     import clutter
+    import indoor
+    print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
     clutter.trim(m)
-    clutter.dress(m, 'flat', random.Random(43), outside=[(-22.0, -9.0, 33.0, 33.0, 0.0), (49.0, -9.0, 82.0, 33.0, 0.0), (33.0, -9.0, 49.0, 7.0, 0.0), (33.0, 21.0, 49.0, 33.0, 0.0), (-22.0, 33.0, -3.0, 58.0, 0.0), (55.0, 33.0, 82.0, 58.0, 0.0), (-2.0, 45.0, 55.0, 58.0, 0.0)], out_n=80, blood=0.55)
+    clutter.dress(m, 'flat', random.Random(43), outside=[(-22.0, -9.0, 33.0, 33.0, 0.0), (49.0, -9.0, 82.0, 33.0, 0.0), (33.0, -9.0, 49.0, 7.0, 0.0), (33.0, 21.0, 49.0, 33.0, 0.0), (-22.0, 33.0, -3.0, 58.0, 0.0), (55.0, 33.0, 82.0, 58.0, 0.0), (-2.0, 45.0, 55.0, 58.0, 0.0)], out_n=60, blood=0.8)
+    print('  cleared from the halls:', indoor.clear_halls(m))
     return m
 
 

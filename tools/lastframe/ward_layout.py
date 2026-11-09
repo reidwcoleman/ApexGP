@@ -821,7 +821,17 @@ def build():
         if r['wall'] in ('hosp_wall', 'hosp_wall2', 'wall_paper', 'wall_beige') and r['a'][2] > BZ + 0.1 and r['name'] != 'lobby':
             r['ceil'] = 'ceil_tile'
 
-    # zones: the lobby echoes; the rest are rooms; the courtyard and grounds are outside
+    # ================= all of it indoors =================
+    # the courtyard under a roof: an atrium, what grew in it dead, a couple of lamps on chains
+    import indoor
+    indoor.roof(m, CX0 + 0.3, SY1 + 0.3, CX1 - 0.3, NY0 - 0.3, TOP)
+    room('atrium', CX0 + 0.12, SY1 + 0.12, CX1 - 0.12, NY0 - 0.12, 0.0, TOP, 'hbrick', 'yard', ceil='ceil')
+    for (x, y, p, fl) in ((32.0, 27.0, 7, 0.5), (40.5, 31.5, 5, 0.0)):
+        prop('caged_hanging_light', x, y, z=TOP - 1.4, collide=False)
+        light('point', (x, y, TOP - 1.6), WARM, p, radius=0.05, flicker=fl)
+    m.zones.append(dict(a=(CX0, SY1, -0.3), b=(CX1, NY0, TOP), kind='hall'))
+
+    # zones: the lobby echoes; the rest are rooms; the grounds are outside, seen through boarded glass
     m.zones.insert(0, dict(a=(LX0, Y0, 0), b=(LX1, SY0, TOP), kind='hall'))
     m.zones.append(dict(a=(X0, Y0, -0.3), b=(CX0, Y1, TOP), kind='small'))
     m.zones.append(dict(a=(CX1, Y0, -0.3), b=(X1, Y1, TOP), kind='small'))
@@ -832,8 +842,8 @@ def build():
     # each side starts inside, in its own end of the building
     m.spawns['a'] = [[7.0, 25.0, 0], [11.5, 27.5, 0], [7.0, 31.5, 0], [11.5, 33.5, 0], [7.0, 41.0, 0], [12.5, 41.5, 0], [13.0, 17.5, 0], [19.0, 18.5, 0]]
     m.spawns['b'] = [[60.5, 25.0, 0], [65.5, 27.0, 0], [60.5, 31.5, 0], [65.5, 33.5, 0], [60.5, 41.0, 0], [65.5, 41.5, 0], [53.0, 18.5, 0], [59.0, 17.5, 0]]
-    m.spawns['ffa'] = m.spawns['a'][:4] + m.spawns['b'][:4] + [[36.0, 2.0, 0], [10.0, 21.2, 0], [62.0, 37.0, 0], [36.0, 31.5, 0], [9.0, 32.0, 0], [49.0, 32.0, 0],
-                                                               [12.0, 17.0, F2], [60.0, 17.0, F2], [20.0, 29.0, F2], [36.0, 40.0, F2], [28.0, 17.0, BZ], [56.0, 21.2, BZ], [36.0, 50.0, 0], [16.0, 40.0, 0]]
+    m.spawns['ffa'] = m.spawns['a'][:4] + m.spawns['b'][:4] + [[33.0, 26.0, 0], [10.0, 21.2, 0], [62.0, 37.0, 0], [36.0, 31.5, 0], [9.0, 32.0, 0], [49.0, 32.0, 0],
+                                                               [12.0, 17.0, F2], [60.0, 17.0, F2], [20.0, 29.0, F2], [36.0, 40.0, F2], [28.0, 17.0, BZ], [56.0, 21.2, BZ], [40.0, 32.5, 0], [16.0, 40.0, 0]]
     m.hold = [[36.0, 17.8, 0], [36.0, 31.0, 0], [40.0, 21.2, BZ]]
     m.sky = SKY
     m.weather = WEATHER
@@ -841,8 +851,10 @@ def build():
     m.attract = [[7.0, 1.5, -21.2], [22.0, 1.5, -21.0]]    # game axes: a slow walk down the south corridor
     # and what everyone left behind
     import clutter
+    print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
     clutter.trim(m)
-    clutter.dress(m, 'hospital', random.Random(41), outside=[(-13.0, -9.0, 85.0, 13.0, 0.0), (-13.0, 14.0, 3.5, 57.0, 0.0), (68.5, 14.0, 85.0, 57.0, 0.0), (4.0, 44.5, 68.0, 57.0, 0.0), (CX0, SY1, CX1, NY0, 0.0)], out_n=90)
+    clutter.dress(m, 'hospital', random.Random(41), outside=[(-13.0, -9.0, 85.0, 13.0, 0.0), (-13.0, 14.0, 3.5, 57.0, 0.0), (68.5, 14.0, 85.0, 57.0, 0.0), (4.0, 44.5, 68.0, 57.0, 0.0)], out_n=60, blood=0.75)
+    print('  cleared from the halls:', indoor.clear_halls(m))
     return m
 
 

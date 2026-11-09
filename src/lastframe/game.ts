@@ -1026,19 +1026,7 @@ export class Game {
       }
       this.moveActor(a, s, dt, now);
     }
-    // people have shoulders, and the things they walk through are moved by them
-    if (this.inMatch && me.alive) for (const [s, a] of this.actors) {
-      if (s === this.mySlot || !a.info.alive) continue;
-      const dx = me.m.x - a.x, dz = me.m.z - a.z, d2 = dx * dx + dz * dz;
-      if (d2 < 0.3 && d2 > 1e-5 && Math.abs(me.m.y - a.y) < 1.5) {
-        const d = Math.sqrt(d2), push = (0.55 - d) * Math.min(1, dt * 14);
-        const nx = me.m.x + (dx / d) * push, nz = me.m.z + (dz / d) * push;
-        if (!L.world.blocked(nx, me.m.y + 0.02, nz, 0.26, 1.7)) {
-          me.m.x = nx;
-          me.m.z = nz;
-        }
-      }
-    }
+    // people don't block each other: you walk through a friend (or a foe) in a doorway rather than stick
     let cap = 0;
     const post = this.post;
     for (const [s, a] of this.actors) {
