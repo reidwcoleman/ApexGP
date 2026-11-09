@@ -14,14 +14,14 @@ import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
 import { Graffiti, graffitiFonts, markUp } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
-const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6 };
+const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6, trenches: 0 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -92,6 +92,16 @@ export class Game {
   private fill = new THREE.PointLight(0xdfe3ea, 0, 1.4, 2);
   /** someone's light pointed straight at the lens */
   private glares: THREE.Sprite[] = [];
+  /** other people's beams, seen in the dust from the side */
+  private beams: THREE.Mesh[] = [];
+  /** how much of each glare's lens can be seen: eased, so a stray hit doesn't make it blink */
+  private glareVis = [0, 0];
+  /** star shells: lights and the burning magnesium you see, and the clock they run off */
+  private flareLights: THREE.PointLight[] = [];
+  private flareSprites: THREE.Sprite[] = [];
+  private flareNow: FlareNow[] = [];
+  private flareSeen = new Set<number>();
+  private matchT = 0;
   private flashK = 0;
   private time = 0;
   private last = performance.now();
@@ -143,9 +153,11 @@ export class Game {
     this.hud = new Hud(this);
     this.input = new Input(canvas, () => document.pointerLockElement === canvas || this.autoInput);
     // the flashlight: the one light in the map that casts a live shadow
-    const s = (this.spot = new THREE.SpotLight(0xfff0dc, 0, 36, 0.8, 0.2, 1.6));
+    // a weapon light is an LED: cold white, a hard hot spot, the reflector's ring, a wide dim spill
+    const s = (this.spot = new THREE.SpotLight(0xeef1ff, 0, 38, 0.85, 0.18, 1.7));
     // the cookie costs a texture unit, and the daylight shaders have none to spare (the sun's maps)
-    if (!LF.sunOn) s.map = beamCookie();
+    const cookie = LF.sunOn ? null : beamCookie();
+    if (cookie) s.map = cookie;
     s.castShadow = true;
     s.shadow.mapSize.set(1024, 1024);
     s.shadow.camera.near = 0.25;
@@ -154,18 +166,42 @@ export class Game {
     s.shadow.normalBias = 0.02;
     this.scene.add(s, s.target);
     for (let i = 0; i < 2; i++) {
-      const o = new THREE.SpotLight(0xfff0dc, 0, 24, 0.6, 1, 1.6);
+      // theirs are the same lights as mine: the same pattern on the wall, and the nearest one throws shadows
+      const o = new THREE.SpotLight(0xeef1ff, 0, 30, 0.8, 0.22, 1.7);
+      if (cookie) o.map = cookie;
+      if (i === 0 && cookie) {
+        o.castShadow = true;
+        o.shadow.mapSize.set(512, 512);
+        o.shadow.camera.near = 0.3;
+        o.shadow.camera.far = 28;
+        o.shadow.bias = -0.0008;
+        o.shadow.normalBias = 0.03;
+      }
       this.others.push(o);
       this.scene.add(o, o.target);
+      const beam = new THREE.Mesh(beamGeo(), beamMat());
+      beam.visible = false;
+      beam.frustumCulled = false;
+      beam.renderOrder = 5;
+      this.beams.push(beam);
+      this.scene.add(beam);
     }
     this.flashPoint = new THREE.PointLight(0xffc08a, 0, 13, 1.8);
     this.scene.add(this.flashPoint, this.bounce, this.fill);
     const gt = glareTex();
     for (let i = 0; i < 2; i++) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(9, 8.4, 7.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(8.2, 8.7, 9.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
       sp.visible = false;
       this.glares.push(sp);
       this.scene.add(sp);
+    }
+    // star shells: in the scene from the start (at nothing), so one going up never recompiles a shader
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xfff1de, 0, 130, 1.15);
+      this.flareLights.push(l);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(14, 12.5, 10.5), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+      sp.visible = false;
+      this.flareSprites.push(sp);
     }
   }
 
@@ -232,6 +268,8 @@ export class Game {
     this.buildPhysics();
     this.kit = kit as PeopleKit;
     this.scene.add(L.group);
+    // only a field with star shells pays for their lights in every shader
+    if (L.map.flares) this.scene.add(...this.flareLights, ...this.flareSprites);
     L.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh && !(m.material as THREE.Material).transparent) {
@@ -250,7 +288,9 @@ export class Game {
       sun.bake(c, Math.hypot(lim[2] - lim[0], lim[3] - lim[1]) / 2 + 26, (o) => o.name === 'sky' || o.name === 'sea' || o.name === 'grass' || doorParts.has(o) || glass.has(o) || (o as THREE.Light).isLight === true, (o) => o.name === 'veg');
     }
     // what keeps the rain off; a tunnel under open ground doesn't
-    const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > 0).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
+    // what has a roof keeps the rain off: buildings, and dug-in rooms with their roof at the ground (a dugout's top is below 0)
+    const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > -1).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
+    if (!roofs.length) roofs.push(new THREE.Vector4(1e6, 1e6, 1e6 + 1, 1e6 + 1));
     this.fx = new Fx(roofs, phys, L.glassMat);
     const wb = L.map.weather?.wb;
     if (wb) (this.post.mFinal.uniforms.wb.value as THREE.Vector3).set(wb[0], wb[1], wb[2]);
@@ -290,7 +330,7 @@ export class Game {
     // old blood, where the map says
     for (const s of L.map.stains ?? []) this.fx.stain(s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
     // what people wrote on the walls, and the rooms where it went worst
-    if (!LF.sunOn) {
+    if (!LF.sunOn && MAP_ID !== 'trenches') {
       const gr = new Graffiti();
       this.scene.add(gr.group);
       const seed = [...MAP_ID].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7);
@@ -488,6 +528,8 @@ export class Game {
 
   private begin(cfg: MatchConfig) {
     this.cfg = cfg;
+    this.matchT = 0;
+    this.flareSeen.clear();
     this.inMatch = true;
     this.attract = 0;
     this.score = [0, 0];
@@ -1269,6 +1311,40 @@ export class Game {
     }
   }
 
+  /** star shells over the field: each a hard white light swinging under its parachute, flickering as it burns */
+  private flares(dt: number) {
+    const spec = this.L.map.flares;
+    if (this.inMatch) this.matchT += dt;
+    const now = spec ? flaresAt(this.inMatch ? this.matchT : this.time, spec, this.flareNow) : this.flareNow;
+    let glow = 0;
+    this.flareLights.forEach((l, i) => {
+      const f = now[i];
+      const sp = this.flareSprites[i];
+      if (!f) {
+        l.intensity = 0;
+        sp.visible = false;
+        return;
+      }
+      const sway = Math.sin(this.time * 1.7 + f.id) * 0.9;
+      const fl = 0.86 + 0.1 * Math.sin(this.time * 23 + f.id * 3) + 0.06 * Math.sin(this.time * 41 + f.id);
+      l.position.set(f.x + sway, f.y, f.z + Math.cos(this.time * 1.3 + f.id) * 0.6);
+      l.intensity = 160 * f.k * fl;
+      sp.visible = f.k > 0.01;
+      sp.position.copy(l.position);
+      sp.material.opacity = Math.min(1, f.k * 1.4);
+      sp.scale.setScalar(2.2 + f.k * 1.8);
+      glow = Math.max(glow, f.k * Math.min(1, f.y / 20));
+      // the thump of the pistol that fired it, from the line it came from
+      if (!this.flareSeen.has(f.id) && f.k < 0.13 && f.y < spec!.h * 0.3) {
+        this.flareSeen.add(f.id);
+        const d = Math.hypot(f.x - this.cam.position.x, f.z - this.cam.position.z);
+        this.sound.thunder(0.05 + d / 340, Math.max(0, 1 - d / 60) * 0.25);
+      }
+    });
+    // the low cloud takes some of it
+    if (glow > 0) LF.skyFlash.value = Math.max(LF.skyFlash.value, glow * 1.6);
+  }
+
   private lamps(dt: number) {
     this.flicker(dt);
     this.lampT -= dt;
@@ -1299,6 +1375,7 @@ export class Game {
     const me = this.me;
     const s = this.spot;
     this.lamps(dt);
+    this.flares(dt);
     // the air sees the same flashlight and the same flash
     if (me.alive && me.light) {
       AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.09);
@@ -1346,11 +1423,28 @@ export class Game {
         o.intensity = 0;
         return;
       }
-      o.intensity = 26;
+      o.intensity = 40;
       const yaw = a.yaw, cp = Math.cos(a.pitch);
       const f = this.tmp.set(-Math.sin(yaw) * cp, Math.sin(a.pitch), -Math.cos(yaw) * cp);
-      o.position.set(a.x + f.x * 0.5, a.y + ((a.flags & F.crouch) ? 0.95 : 1.42), a.z + f.z * 0.5);
+      // the light is on the gun: forward of the chest, a little to the right, a little low
+      const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+      o.position.set(a.x + f.x * 0.62 + rx * 0.12, a.y + ((a.flags & F.crouch) ? 0.92 : 1.36) + f.y * 0.62, a.z + f.z * 0.62 + rz * 0.12);
       o.target.position.copy(o.position).addScaledVector(f, 5);
+    });
+    // their beams in the air: as far as the first wall, brighter near the lens
+    this.beams.forEach((bm, i) => {
+      const o = this.others[i];
+      if (!o || o.intensity <= 0.01) { bm.visible = false; return; }
+      const dx = o.target.position.x - o.position.x, dy = o.target.position.y - o.position.y, dz = o.target.position.z - o.position.z;
+      const dl = Math.hypot(dx, dy, dz) || 1;
+      const hit = this.L.world.ray(o.position.x, o.position.y, o.position.z, dx / dl, dy / dl, dz / dl, BEAM_L, true);
+      bm.visible = true;
+      bm.position.copy(o.position);
+      bm.lookAt(o.target.position);
+      bm.scale.setScalar(Math.max(0.3, hit ? hit.t : BEAM_L) / BEAM_L);
+      const u = (bm.material as THREE.ShaderMaterial).uniforms;
+      u.time.value = this.time;
+      u.axis.value.set(dx / dl, dy / dl, dz / dl);
     });
     this.flashPoint.intensity = this.flashK * 14;
     this.flashK = Math.max(0, this.flashK - dt * 110);
@@ -1369,13 +1463,16 @@ export class Game {
       const fx = o.target.position.x - o.position.x, fy = o.target.position.y - o.position.y, fz = o.target.position.z - o.position.z;
       const fl = Math.hypot(fx, fy, fz) || 1;
       const al = (to.x * fx + to.y * fy + to.z * fz) / fl;
+      // the lens itself glints from anywhere in front of it; looking down the beam, it whites the picture out
       const k = THREE.MathUtils.smoothstep(al, 0.86, 0.995);
-      const blocked = k > 0 && !!this.L.world.ray(this.cam.position.x, this.cam.position.y, this.cam.position.z, -to.x, -to.y, -to.z, Math.max(0, d - 0.4), true);
-      g.visible = k > 0 && !blocked;
+      const kw = Math.pow(THREE.MathUtils.smoothstep(al, -0.15, 1.0), 3);
+      const blocked = kw > 0 && !!this.L.world.ray(this.cam.position.x, this.cam.position.y, this.cam.position.z, -to.x, -to.y, -to.z, Math.max(0, d - 0.6), true);
+      this.glareVis[i] += ((blocked ? 0 : 1) - this.glareVis[i]) * Math.min(1, dt * 10);
+      g.visible = kw > 0.003 && this.glareVis[i] > 0.01;
       if (!g.visible) return;
       g.position.copy(o.position);
-      g.material.opacity = k;
-      g.scale.setScalar((0.25 + k * 1.15) * Math.min(1, d / 3 + 0.4));
+      g.material.opacity = Math.min(1, kw * 0.75 + k) * this.glareVis[i];
+      g.scale.setScalar((0.1 + kw * 0.32 + k * 1.6) * Math.min(1.2, d / 3 + 0.45));
     });
   }
 
@@ -1508,21 +1605,91 @@ export class Game {
 
 /** what a weapon light throws: a hot core, the reflector's ring round it, and a wide dim spill */
 /** a soft round glow with a hot centre and short streaks, for a light seen head-on */
+const BEAM_L = 14;
+/** a cone from the lens forward, BEAM_L long, opening as the light does */
+function beamGeo() {
+  const r = Math.tan(0.2) * BEAM_L;
+  const g = new THREE.ConeGeometry(r, BEAM_L, 28, 8, true);
+  g.translate(0, -BEAM_L / 2, 0);
+  g.rotateX(-Math.PI / 2);
+  return g;
+}
+/** light in dusty air: brightest down the middle and near the lens, gone at the cone's edge, drifting motes in it */
+function beamMat() {
+  return new THREE.ShaderMaterial({
+    uniforms: { time: { value: 0 }, col: { value: new THREE.Color(0.9, 0.93, 1.0) }, axis: { value: new THREE.Vector3(0, 0, 1) } },
+    vertexShader: `varying float vA; varying vec3 vN; varying vec3 vV; varying vec3 vW;
+      void main() {
+        vec4 w = modelMatrix * vec4( position, 1.0 );
+        vW = w.xyz;
+        vA = position.z / ${BEAM_L.toFixed(1)};
+        vN = normalize( mat3( modelMatrix ) * normal );
+        vV = normalize( cameraPosition - w.xyz );
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: `uniform float time; uniform vec3 col; uniform vec3 axis; varying float vA; varying vec3 vN; varying vec3 vV; varying vec3 vW;
+      float h( vec3 p ) { return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
+      float n3( vec3 p ) { vec3 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
+        return mix( mix( mix( h( i ), h( i + vec3( 1, 0, 0 ) ), f.x ), mix( h( i + vec3( 0, 1, 0 ) ), h( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+                    mix( mix( h( i + vec3( 0, 0, 1 ) ), h( i + vec3( 1, 0, 1 ) ), f.x ), mix( h( i + vec3( 0, 1, 1 ) ), h( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z ); }
+      void main() {
+        float c = abs( dot( normalize( vN ), normalize( vV ) ) );
+        float core = pow( c, 3.0 );
+        float along = clamp( vA, 0.0, 1.0 );
+        float fall = smoothstep( 0.0, 0.05, along ) * pow( 1.0 - along, 2.2 ) / ( 0.25 + along * 3.0 );
+        float dust = 0.65 + 0.7 * n3( vW * 2.2 + vec3( 0.0, time * 0.12, time * 0.05 ) );
+        // seen end-on it's the glare's job, and right at the lens it's nothing: no fog wall in the face
+        float endOn = 1.0 - pow( abs( dot( normalize( vV ), axis ) ), 3.0 );
+        float near = smoothstep( 0.4, 2.2, distance( cameraPosition, vW ) );
+        float a = core * fall * dust * endOn * near * 0.2;
+        gl_FragColor = vec4( col * a, 1.0 );
+      }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  });
+}
+
 function glareTex(): THREE.Texture {
-  const N = 128, c = document.createElement('canvas');
+  // an LED straight into a small lens: a white-hot core, a soft halo, the aperture's starburst, a streak across
+  const N = 256, c = document.createElement('canvas');
   c.width = c.height = N;
   const g = c.getContext('2d')!;
-  const r = g.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
-  r.addColorStop(0, 'rgba(255,255,255,1)');
-  r.addColorStop(0.08, 'rgba(255,250,240,0.85)');
-  r.addColorStop(0.3, 'rgba(255,240,220,0.18)');
-  r.addColorStop(1, 'rgba(255,240,220,0)');
-  g.fillStyle = r;
-  g.fillRect(0, 0, N, N);
+  const h = N / 2;
+  // exponential, not stepped: under a night exposure any kink in the falloff shows as the edge of a disc
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const r = Math.hypot(x + 0.5 - h, y + 0.5 - h) / h;
+      const v = Math.exp(-((r / 0.025) ** 2)) + 0.22 * Math.exp(-r / 0.045) + 0.035 * Math.exp(-r / 0.16);
+      const e = v * (1 - smooth(0.7, 1.0, r));
+      const i = (y * N + x) * 4;
+      img.data[i] = 255;
+      img.data[i + 1] = 255;
+      img.data[i + 2] = 255;
+      img.data[i + 3] = Math.min(255, Math.round(e * 255));
+    }
+  g.putImageData(img, 0, 0);
   g.globalCompositeOperation = 'lighter';
-  g.fillStyle = 'rgba(255,250,240,0.35)';
-  g.fillRect(0, N / 2 - 1, N, 2);
-  g.fillRect(N / 2 - 1, 0, 2, N);
+  g.translate(h, h);
+  for (let i = 0; i < 6; i++) {
+    g.save();
+    g.rotate((i / 6) * Math.PI * 2 + 0.26);
+    const sp = g.createLinearGradient(0, 0, h, 0);
+    sp.addColorStop(0, 'rgba(255,255,255,0.14)');
+    sp.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = sp;
+    g.beginPath();
+    g.moveTo(0, -2.2);
+    g.lineTo(h, 0);
+    g.lineTo(0, 2.2);
+    g.fill();
+    g.restore();
+  }
+  const st = g.createLinearGradient(-h, 0, h, 0);
+  st.addColorStop(0, 'rgba(200,215,255,0)');
+  st.addColorStop(0.5, 'rgba(225,235,255,0.12)');
+  st.addColorStop(1, 'rgba(200,215,255,0)');
+  g.fillStyle = st;
+  g.fillRect(-h, -1.5, N, 3);
   return new THREE.CanvasTexture(c);
 }
 
@@ -1537,9 +1704,10 @@ function beamCookie(): THREE.Texture {
       const dx = (x + 0.5) / N - 0.5, dy = (y + 0.5) / N - 0.5;
       const r = Math.hypot(dx, dy);
       const a = Math.atan2(dy, dx);
-      let v = Math.exp(-((r / 0.075) ** 2)) * 1.0 + Math.exp(-((r / 0.17) ** 2)) * 0.32;
-      v += Math.exp(-(((r - 0.19) / 0.025) ** 2)) * 0.07;
-      v += 0.085 * (1 - smooth(0.3, 0.5, r));
+      // the hot spot, its corona, the reflector's bright ring at the corona's edge, then a wide flat spill
+      let v = Math.exp(-((r / 0.06) ** 2)) * 1.1 + Math.exp(-((r / 0.15) ** 2)) * 0.3;
+      v += Math.exp(-(((r - 0.175) / 0.018) ** 2)) * 0.1;
+      v += 0.11 * (1 - smooth(0.32, 0.5, r));
       // the reflector isn't perfect
       v *= 1 + 0.06 * Math.sin(a * 7 + r * 40) * smooth(0.05, 0.2, r);
       const k = Math.min(255, Math.round(Math.max(0, v) / 1.33 * 255));

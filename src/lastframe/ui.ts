@@ -16,6 +16,7 @@ const MAPS: { id: string; name: string; note: string }[] = [
   { id: 'mansion', name: 'Harrowgate House', note: 'Abandoned manor. Ballroom, cellars, two floors.' },
   { id: 'motel', name: 'Pinewood Motor Inn', note: 'Shut motel. Galleries, a pool hall, the diner.' },
   { id: 'block', name: 'Kessler Block', note: 'Tenements. Stairwells, flats, a freight hall.' },
+  { id: 'trenches', name: 'The Trenches', note: 'Two lines, the wire, star shells over no man\'s land.' },
 ];
 const HERE = MAPS.find((x) => x.id === MAP_ID) ?? MAPS[0];
 const thumb = (id: string) => `${BASE}thumbs/${id}.webp`;
@@ -754,7 +755,7 @@ export class Hud {
     });
     if (me.alive) {
       const a = me.ammo.get(me.weapon);
-      const txt = a ? `${me.reloadT > 0 ? 'Reloading' : `${a.mag}<small> / ${a.res}</small>`}<em>${WEAPONS[me.weapon].name}${me.nades.frag ? ' &nbsp;Frag' : ''}${me.nades.flash ? ' &nbsp;Flash' : ''}</em>` : '';
+      const txt = a ? `${me.reloadT > 0 ? 'Reloading' : `${a.mag}<small> / &infin;</small>`}<em>${WEAPONS[me.weapon].name}${me.nades.frag ? ' &nbsp;Frag' : ''}${me.nades.flash ? ' &nbsp;Flash' : ''}</em>` : '';
       if (this.ammo.dataset.s !== txt) {
         this.ammo.dataset.s = txt;
         this.ammo.innerHTML = txt;

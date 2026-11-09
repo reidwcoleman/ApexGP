@@ -114,5 +114,15 @@ MATS = {
     'cbrick': M('castle_brick_07', 2.6, (0.78, 0.74, 0.7), wet=0.3),
     'panel': M('wood_plank_wall', 1.8, (1.25, 1.05, 0.9), rough=0.55),
     'dplanks': M('dark_wooden_planks', 2.0, (0.8, 0.75, 0.7), rough=0.6),
+    # the trenches
+    'mud': M('brown_mud_02', 3.2, (0.78, 0.72, 0.66), wet=1.0),
+    'mudleaf': M('brown_mud_leaves_01', 3.0, (0.7, 0.66, 0.6), wet=0.8),
+    'trenchw': M('excavated_soil_wall', 2.6, (0.78, 0.7, 0.62), wet=0.6),
+    'nomans': M('burned_ground_01', 4.0, (0.5, 0.48, 0.45), wet=0.7),
+    'tracks': M('muddy_tracks', 3.4, (0.7, 0.66, 0.6), wet=1.0),
+    'duck': M('wood_planks_dirt', 1.6, (0.72, 0.64, 0.56), wet=0.6),
+    'revet': M('weathered_planks', 1.8, (0.66, 0.6, 0.54), wet=0.4),
+    'riron': M('rusty_corrugated_iron', 2.0, (0.8, 0.74, 0.7), wet=0.3),
+    'rmetal': M('rusty_metal_02', 1.6, (0.7, 0.66, 0.62), wet=0.2),
 }
 UNLIT = {k for k, v in MATS.items() if v['emit']}

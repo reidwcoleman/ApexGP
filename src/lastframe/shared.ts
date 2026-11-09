@@ -71,6 +71,39 @@ export const TEAM_NAME = ['Unit', 'Crew'];
 export const F = { crouch: 1, ads: 2, sprint: 4, light: 8, reload: 16, alive: 32, moving: 64, cook: 128 };
 
 export const STRIDE = 10;
+
+/** where star shells are fired over a field: its x and z span in game axes, and how high they go */
+export interface FlareSpec { x0: number; x1: number; z0: number; z1: number; h: number }
+export interface FlareNow { x: number; y: number; z: number; k: number; id: number }
+/**
+ * The star shells over the field at match time t: one every 11 s or so (some don't go up), fired from one line or the
+ * other out over the wire, up in two and a half seconds, then down slowly under a parachute for twenty, drifting. The
+ * same for everyone who has the same clock: the host's bots see by them and every screen lights by them.
+ */
+export function flaresAt(t: number, f: FlareSpec, out: FlareNow[] = []) {
+  out.length = 0;
+  const P = 11, LIFE = 24, UP = 2.4;
+  const i0 = Math.max(0, Math.floor((t - LIFE - 6) / P)), i1 = Math.floor(t / P);
+  for (let i = i0; i <= i1; i++) {
+    const h = (n: number) => {
+      const s = Math.sin(i * 127.1 + n * 311.7) * 43758.5453;
+      return s - Math.floor(s);
+    };
+    if (h(1) > 0.85) continue;
+    const age = t - (i * P + h(2) * 6);
+    if (age < 0 || age > LIFE) continue;
+    const west = h(3) < 0.5;
+    const sx = west ? f.x0 + h(4) * 4 : f.x1 - h(4) * 4;
+    const sz = f.z0 + (f.z1 - f.z0) * (0.12 + 0.76 * h(5));
+    const up = Math.min(1, age / UP), ease = 1 - (1 - up) * (1 - up);
+    const x = sx + (west ? 1 : -1) * (12 + h(6) * 24) * ease + Math.max(0, age - UP) * 0.5 * (h(7) - 0.35);
+    const z = sz + (h(8) - 0.5) * 10 * ease;
+    const y = age < UP ? f.h * ease : Math.max(1.5, f.h - (age - UP) * 1.6);
+    const k = age < UP ? 0.12 * up : Math.min(1, (age - UP) / 0.7) * Math.min(1, (LIFE - age) / 2.5) * (y > 2 ? 1 : 0.3);
+    out.push({ x, y, z, k, id: i });
+  }
+  return out;
+}
 /** one actor's slice: slot, x, y, z, yaw, pitch, lean, flags, weapon index, spare */
 export const WEAPON_LIST: WeaponId[] = ['carbine', 'shotgun', 'rifle', 'pistol'];
 
@@ -91,7 +124,7 @@ export interface PlayerInfo {
 
 export interface MatchConfig {
   /** the location; a room's guests move to it when they join */
-  map?: 'block' | 'cove' | 'ward' | 'motel' | 'mansion';
+  map?: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' | 'trenches';
   mode: Mode;
   bots: number;
   skill: number;

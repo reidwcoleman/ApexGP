@@ -445,6 +445,201 @@ def candles(b, rng):
         rod(b, (x, y, h), (x, y, h + 0.012), 0.0015, S, 4)
 
 
+# ---------------------------------------------------------------------------------------------------------- the trenches
+BURLAP = lambda: mat('lfburlap', (0.3, 0.25, 0.16), 0.95)
+BURLAP2 = lambda: mat('lfburlap2', (0.24, 0.2, 0.13), 0.95)
+WIRE = lambda: mat('lfwire', (0.09, 0.07, 0.055), 0.55, 0.6)
+PICKET = lambda: mat('lfpicket', (0.12, 0.1, 0.08), 0.6, 0.5)
+MUDK = lambda: mat('lfmud', (0.16, 0.12, 0.085), 0.55)
+MUDK2 = lambda: mat('lfmud2', (0.12, 0.095, 0.07), 0.45)
+RUST = lambda: mat('lfrust', (0.19, 0.11, 0.065), 0.75, 0.35)
+RUST2 = lambda: mat('lfrust2', (0.13, 0.085, 0.06), 0.8, 0.3)
+
+
+def pillow(b, c, size, yaw, m, rng):
+    """a filled sack: an ellipsoid with its underside pressed flat by the weight on it"""
+    i = b.idx(m)
+    sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
+    R = Matrix.Rotation(yaw, 3, 'Z') @ Matrix.Rotation(rng.uniform(-0.05, 0.05), 3, 'X')
+    C = Vector(c)
+    nu, nv = 10, 6
+    rows = []
+    for j in range(nv + 1):
+        v = -math.pi / 2 + math.pi * j / nv
+        row = []
+        for k in range(nu):
+            u = 2 * math.pi * k / nu
+            # squarer than an egg: sacks fill to their corners
+            cu, su, cv, sv = math.cos(u), math.sin(u), math.cos(v), math.sin(v)
+            x = math.copysign(abs(cu) ** 0.6, cu) * abs(cv) ** 0.7 * sx
+            y = math.copysign(abs(su) ** 0.6, su) * abs(cv) ** 0.7 * sy
+            z = max(math.copysign(abs(sv) ** 0.8, sv) * sz, -sz * 0.75)
+            row.append(b.bm.verts.new(C + R @ Vector((x, y, z))))
+        rows.append(row)
+    for j in range(nv):
+        for k in range(nu):
+            b.bm.faces.new((rows[j][k], rows[j][(k + 1) % nu], rows[j + 1][(k + 1) % nu], rows[j + 1][k])).material_index = i
+
+
+def sandbags(b, rng, courses):
+    """a run of sandbag wall 2 m long along x, two bags deep, laid in a stretcher bond; origin at the foot of its middle"""
+    L, bl, bw, bh = 2.0, 0.52, 0.28, 0.14
+    z = bh * 0.45
+    for c in range(courses):
+        off = (c % 2) * bl / 2
+        for row in (-1, 1):
+            x = -L / 2 + off + bl / 2 - (bl / 2 if off else 0)
+            while x < L / 2 + 0.01:
+                if x - bl / 2 >= -L / 2 - 0.02 and x + bl / 2 <= L / 2 + 0.02:
+                    pillow(b, (x + rng.uniform(-0.02, 0.02), row * bw / 2 * 1.02, z), (bl * rng.uniform(0.94, 1.02), bw * rng.uniform(0.95, 1.05), bh * rng.uniform(0.9, 1.1)),
+                           rng.uniform(-0.06, 0.06), BURLAP() if rng.random() < 0.6 else BURLAP2(), rng)
+                x += bl
+        z += bh * 0.82
+
+
+def sandbag2(b, rng): sandbags(b, rng, 2)
+def sandbag3(b, rng): sandbags(b, rng, 3)
+def sandbag5(b, rng): sandbags(b, rng, 5)
+
+
+def wire(b, rng):
+    """a 3 m bay of entanglement along x: screw pickets, strands strung between them with barbs on, and a coil of concertina
+    along the foot; origin on the ground at its middle"""
+    W = WIRE()
+    xs = [-1.5, -0.5, 0.5, 1.5]
+    tops = []
+    for x in xs:
+        lean = rng.uniform(-0.12, 0.12)
+        h = rng.uniform(0.95, 1.2)
+        rod(b, (x, 0, 0), (x + lean * 0.3, lean, h), 0.014, PICKET(), 6)
+        tops.append((x + lean * 0.3, lean, h))
+    def strand(p0, p1, sag):
+        n = 8
+        pts = []
+        for k in range(n + 1):
+            t = k / n
+            pts.append(Vector(p0).lerp(Vector(p1), t) - Vector((0, 0, sag * 4 * t * (1 - t))))
+        for q0, q1 in zip(pts, pts[1:]):
+            rod(b, q0, q1, 0.0035, W, 4)
+            # barbs
+            m = (q0 + q1) / 2
+            rod(b, m + Vector((0, -0.025, -0.02)), m + Vector((0, 0.025, 0.02)), 0.0025, W, 3)
+    for (a, c) in zip(tops, tops[1:]):
+        for f in (0.3, 0.6, 1.0):
+            strand((a[0], a[1], a[2] * f), (c[0], c[1], c[2] * f), rng.uniform(0.04, 0.12))
+        strand((a[0], a[1], a[2]), (c[0], c[1], 0.1), 0.05)
+    # the concertina coil
+    loops, seg = 11, 12
+    R0 = 0.42
+    prev = None
+    for k in range(loops * seg + 1):
+        t = k / (loops * seg)
+        u = t * loops * 2 * math.pi
+        r = R0 * rng.uniform(0.92, 1.05)
+        p = Vector((-1.5 + 3.0 * t + 0.05 * math.sin(u), 0.55 + math.cos(u) * r, R0 + math.sin(u) * r * 0.95))
+        if prev is not None:
+            rod(b, prev, p, 0.003, W, 3)
+        prev = p
+
+
+def crater(b, rng, ri, dep):
+    """a shell hole: a bowl dug into the ground, its spoil thrown up round it in a rim; origin at ground level at its
+    middle. ri: radius where the bowl meets the ground, dep: depth at the middle"""
+    i, j2 = b.idx(MUDK()), b.idx(MUDK2())
+    nu, nr = 36, 16
+    R = ri * 1.45
+    ph = [rng.uniform(0, 6.28) for _ in range(3)]
+    def zf(r, u):
+        w = 1 + 0.08 * math.sin(3 * u + ph[0]) + 0.05 * math.sin(5 * u + ph[1])
+        q = r / (ri * w)
+        if q < 1:
+            return -dep * math.cos(math.pi / 2 * q) ** 1.2 + 0.03 * math.sin(7 * u + q * 9 + ph[2])
+        t = (r - ri * w) / (R - ri * w)
+        return 0.42 * ri / 3.5 * math.sin(math.pi * min(1.0, t)) ** 1.4 * (1 - 0.3 * t) * w
+    ring = [[b.bm.verts.new((0, 0, -dep))]]
+    for k in range(1, nr + 1):
+        r = R * (k / nr) ** 0.85
+        ring.append([b.bm.verts.new((math.cos(2 * math.pi * u / nu) * r, math.sin(2 * math.pi * u / nu) * r, zf(r, 2 * math.pi * u / nu))) for u in range(nu)])
+    for u in range(nu):
+        b.bm.faces.new((ring[0][0], ring[1][u], ring[1][(u + 1) % nu])).material_index = j2
+    for k in range(1, nr):
+        for u in range(nu):
+            b.bm.faces.new((ring[k][u], ring[k + 1][u], ring[k + 1][(u + 1) % nu], ring[k][(u + 1) % nu])).material_index = j2 if k < nr * 0.55 else i
+    # the outer edge tucked a hand under the ground, so no light comes through the seam
+    out = [b.bm.verts.new((v.co.x * 1.01, v.co.y * 1.01, -0.08)) for v in ring[nr]]
+    for u in range(nu):
+        b.bm.faces.new((ring[nr][u], out[u], out[(u + 1) % nu], ring[nr][(u + 1) % nu])).material_index = i
+
+
+def crater_dish(b, rng, seed):
+    ri = seed / 10.0
+    crater(b, rng, ri, min(2.3, ri * 0.42))
+
+
+def tank(b, rng):
+    """a wrecked rhomboid tank of the first war: the tracks run right round the hull, a gun in a sponson each side, the
+    cab on top; burnt, holed, nose down. Origin on the ground at its middle, 8 m along x"""
+    Rm, R2 = RUST(), RUST2()
+    prof = [(-4.0, 1.5), (-3.1, 2.55), (2.4, 2.55), (4.1, 1.0), (3.1, 0.0), (-2.6, 0.0)]
+    for side in (-1, 1):
+        y0, y1 = side * 1.45, side * 2.05
+        i = b.idx(Rm)
+        top = [b.bm.verts.new((x, y0, z)) for (x, z) in prof]
+        bot = [b.bm.verts.new((x, y1, z)) for (x, z) in prof]
+        b.bm.faces.new(top if side < 0 else list(reversed(top))).material_index = i
+        b.bm.faces.new(list(reversed(bot)) if side < 0 else bot).material_index = i
+        n = len(prof)
+        for k in range(n):
+            b.bm.faces.new((top[k], top[(k + 1) % n], bot[(k + 1) % n], bot[k])).material_index = b.idx(R2)
+        # track plates
+        for k in range(n):
+            (xa, za), (xb, zb) = prof[k], prof[(k + 1) % n]
+            L = math.hypot(xb - xa, zb - za)
+            m = max(2, int(L / 0.35))
+            for q in range(m):
+                t = (q + 0.5) / m
+                x, z = xa + (xb - xa) * t, za + (zb - za) * t
+                obox(b, (x, (y0 + y1) / 2, z), (0.26, abs(y1 - y0) + 0.04, 0.05), 0, R2, tilt=(0, -math.atan2(zb - za, xb - xa)))
+        # the sponson and its gun
+        obox(b, (0.2, side * 2.45, 1.2), (1.6, 0.8, 1.1), 0, Rm)
+        rod(b, (0.6, side * 2.6, 1.25), (1.9, side * 2.75, 1.32), 0.06, R2, 8)
+    obox(b, (-0.2, 0, 1.3), (5.2, 2.9, 2.2), 0, Rm)
+    obox(b, (1.6, 0, 2.75), (1.4, 1.6, 0.6), 0, Rm)
+    obox(b, (-2.6, 0, 2.7), (0.9, 1.2, 0.35), 0.1, R2, tilt=(0.3, 0.2))
+    # rivet lines
+    for x in range(-2, 3):
+        for side in (-1, 1):
+            obox(b, (x * 1.0, side * 1.46, 2.0), (0.04, 0.03, 0.04), 0, R2)
+
+
+def fieldgun(b, rng):
+    """a field gun of the first war: two spoked wheels, the shield, the barrel on its cradle, the trail down behind; origin
+    on the ground under the axle, the muzzle along +y"""
+    G, G2, Wd = mat('lfgungreen', (0.11, 0.12, 0.09), 0.6, 0.4), RUST2(), mat('lfgunwood', (0.22, 0.15, 0.09), 0.8)
+    rw = 0.68
+    for side in (-1, 1):
+        x = side * 0.78
+        n = 18
+        rim = [(x, math.cos(2 * math.pi * k / n) * rw, rw + math.sin(2 * math.pi * k / n) * rw) for k in range(n)]
+        for k in range(n):
+            rod(b, rim[k], rim[(k + 1) % n], 0.035, Wd, 6)
+            if k % 2 == 0:
+                rod(b, (x, 0, rw), rim[k], 0.018, Wd, 5)
+        rod(b, (x - 0.08, 0, rw), (x + 0.08, 0, rw), 0.09, G2, 10)
+    rod(b, (-0.8, 0, rw), (0.8, 0, rw), 0.05, G2, 8)
+    # the shield, the cradle and the barrel, a little cocked up
+    obox(b, (0, 0.15, rw + 0.45), (1.3, 0.04, 1.1), 0, G, tilt=(-0.12, 0))
+    obox(b, (0, 0.25, rw + 0.32), (0.3, 1.3, 0.22), 0, G, tilt=(0.08, 0))
+    rod(b, (0, -0.4, rw + 0.38), (0, 1.9, rw + 0.62), 0.065, G, 12)
+    rod(b, (0, 1.75, rw + 0.6), (0, 1.95, rw + 0.62), 0.08, G2, 12)
+    # the trail, its spade in the mud
+    rod(b, (-0.25, -0.1, rw - 0.05), (-0.05, -2.6, 0.12), 0.06, G, 8)
+    rod(b, (0.25, -0.1, rw - 0.05), (0.05, -2.6, 0.12), 0.06, G, 8)
+    obox(b, (0, -2.65, 0.12), (0.5, 0.12, 0.3), 0, G2, tilt=(0.4, 0))
+
+
+KINDS_EXTRA = dict(fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
+
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)
 
@@ -453,5 +648,10 @@ def make(name):
     """name is kind or kind_N (a seed, for the pieces that vary)"""
     kind, _, seed = name.partition('_')
     b = B('w_' + name)
-    KINDS[kind](b, random.Random(sum(map(ord, name)) if not seed else int(seed)))
+    if kind == 'crater':
+        crater_dish(b, random.Random(int(seed) * 7), int(seed))
+    elif kind in KINDS_EXTRA:
+        KINDS_EXTRA[kind](b, random.Random(sum(map(ord, name)) if not seed else int(seed)))
+    else:
+        KINDS[kind](b, random.Random(sum(map(ord, name)) if not seed else int(seed)))
     return b.done()

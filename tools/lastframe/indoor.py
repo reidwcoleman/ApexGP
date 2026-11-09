@@ -287,24 +287,56 @@ def open_up(m, inside, rng, gut=0.6, keep=lambda w: False, never=lambda w: False
             holes = []
             for (a, b, h0, h1) in w['holes']:
                 if h0 > w['z0'] + 0.1:
-                    holes.append([a, b, h0, h1, False])
+                    holes.append([a, b, h0, h1, False, (a, b, h0, h1)])
                     continue
                 c = (a + b) / 2
-                wd = min(max(b - a, 2.4), L - 0.5)
+                wd = min(max(b - a, 3.0), L - 0.5)
                 c = min(max(c, w['p0'] + 0.25 + wd / 2), w['p1'] - 0.25 - wd / 2)
-                holes.append([c - wd / 2, c + wd / 2, h0, max(h1, min(w['z1'] - 0.2, w['z0'] + 2.7)), True])
+                holes.append([c - wd / 2, c + wd / 2, h0, max(h1, min(w['z1'] - 0.2, w['z0'] + 2.7)), True, (a, b, h0, h1)])
+            # no way through comes out onto a flight of stairs: slide it along the wall to where it doesn't
+            steps = [q for q in m.boxes if q.tag == 'step' and id(q) not in dead]
+
+            def on_stairs(a, b):
+                for q in steps:
+                    if q.b[2] <= w['z0'] + 0.25 or q.a[2] >= w['z0'] + 2.0:
+                        continue
+                    if w['axis'] == 'x':
+                        if q.a[0] < b and q.b[0] > a and q.a[1] < w['c'] + 1.2 and q.b[1] > w['c'] - 1.2:
+                            return True
+                    elif q.a[1] < b and q.b[1] > a and q.a[0] < w['c'] + 1.2 and q.b[0] > w['c'] - 1.2:
+                        return True
+                return False
+            for h in holes:
+                if not h[4] or not on_stairs(h[0], h[1]):
+                    continue
+                wd = h[1] - h[0]
+                moved = False
+                for k in range(1, 25):
+                    for sg in (1, -1):
+                        a2 = h[0] + sg * k * 0.5
+                        if a2 < w['p0'] + 0.25 or a2 + wd > w['p1'] - 0.25 or on_stairs(a2, a2 + wd):
+                            continue
+                        if any(o is not h and a2 - 0.3 < o[1] and o[0] < a2 + wd + 0.3 for o in holes):
+                            continue
+                        h[0], h[1] = a2, a2 + wd
+                        moved = True
+                        break
+                    if moved:
+                        break
+                if not moved:
+                    h[4] = None
+            holes = [h for h in holes if h[4] is not None]
             # a wider doorway can't run into a window beside it: that one keeps its width
             fixed = [h for h in holes if not h[4]]
-            for i, (a, b, h0, h1, door) in enumerate(holes):
+            for i, (a, b, h0, h1, door, o) in enumerate(holes):
                 if door and any(a - 0.15 < f[1] and f[0] < b + 0.15 for f in fixed):
-                    o = w['holes'][i]
-                    holes[i] = [o[0], o[1], o[2], max(o[3], min(w['z1'] - 0.2, w['z0'] + 2.5)), True]
+                    holes[i] = [o[0], o[1], o[2], max(o[3], min(w['z1'] - 0.2, w['z0'] + 2.5)), True, o]
             if L >= 7 and not stair:
                 for _ in range(12):
-                    wd = 3.2
+                    wd = 4.0
                     c = rng.uniform(w['p0'] + 0.6 + wd / 2, w['p1'] - 0.6 - wd / 2)
-                    if all(c + wd / 2 + 0.6 < h[0] or c - wd / 2 - 0.6 > h[1] for h in holes):
-                        holes.append([c - wd / 2, c + wd / 2, w['z0'], min(w['z1'] - 0.25, w['z0'] + 2.9), True])
+                    if all(c + wd / 2 + 0.6 < h[0] or c - wd / 2 - 0.6 > h[1] for h in holes) and not on_stairs(c - wd / 2, c + wd / 2):
+                        holes.append([c - wd / 2, c + wd / 2, w['z0'], min(w['z1'] - 0.25, w['z0'] + 2.9), True, None])
                         break
             holes.sort()
             merged = []
@@ -316,7 +348,7 @@ def open_up(m, inside, rng, gut=0.6, keep=lambda w: False, never=lambda w: False
                     merged.append(h)
             m.wall(w['axis'], w['c'], w['p0'], w['p1'], w['z0'], w['z1'], w['t'], w['mat'], neg=w['neg'], pos=w['pos'],
                    holes=[tuple(h[:4]) for h in merged], pen=w['pen'], tag=w['tag'], density=w['density'])
-            for (a, b, h0, h1, door) in merged:
+            for (a, b, h0, h1, door, _o) in merged:
                 if not door:
                     continue
                 m.casing(w['axis'], w['c'], a, b, h0, h1, wt=w['t'] + 0.04)

@@ -68,6 +68,11 @@ MODELS += """Chandelier_01 Chandelier_02 GothicBed_01 GothicCabinet_01 GothicCom
 Ottoman_01 fancy_picture_frame_02 vintage_wooden_drawer_01 antique_ceramic_vase_01 brass_candleholders gothic_coffee_table vintage_day_bed wooden_candlestick
 painted_wooden_sofa side_table_tall_01""".split()
 
+# the trenches
+TEX += """brown_mud_02 brown_mud_leaves_01 excavated_soil_wall burned_ground_01 muddy_tracks wood_planks_dirt weathered_planks rusty_corrugated_iron rusty_metal_02""".split()
+HERO += """brown_mud_02 excavated_soil_wall burned_ground_01""".split()
+MODELS += """barrel_stove Lantern_01 vintage_radio_transceiver dead_tree_trunk_02 tree_stump_02 Barrel_01 wooden_bucket_02 folding_wooden_stool wooden_ladder_02""".split()
+
 def tex(a):
     d = files(a)
     out = []

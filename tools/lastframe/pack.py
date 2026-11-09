@@ -10,8 +10,9 @@ COVE = '--cove' in sys.argv
 WARD = '--ward' in sys.argv
 MOTEL = '--motel' in sys.argv
 MANSION = '--mansion' in sys.argv
+TRENCH = '--trenches' in sys.argv
 TEXD = os.path.join(ROOT, 'public', 'lastframe')
-DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else os.path.join(TEXD, 'mansion') if MANSION else TEXD
+DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else os.path.join(TEXD, 'mansion') if MANSION else os.path.join(TEXD, 'trenches') if TRENCH else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
 os.makedirs(TEXD + '/tex', exist_ok=True)
 os.makedirs(DST, exist_ok=True)
@@ -109,6 +110,17 @@ elif MANSION:
     out['centre'] = raw['centre']
     out['attract'] = raw['attract']
     out['night'] = 1
+elif TRENCH:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import trench_layout as TL
+    out['weather'] = TL.WEATHER
+    out['volume'] = TL.VOLUME
+    out['centre'] = raw['centre']
+    out['attract'] = raw['attract']
+    out['night'] = 1
+    fl = raw.get('flares')
+    out['flares'] = dict(x0=fl['x0'], x1=fl['x1'], z0=-fl['y1'], z1=-fl['y0'], h=fl['h']) if fl else None
+    out['sides'] = 1
 elif not COVE and not WARD:
     import layout as BL
     out['weather'] = BL.WEATHER

@@ -1214,10 +1214,11 @@ def build():
     # the shed's roller door is down now
     box((59.4, WY0 - 0.14, 0.0), (64.6, WY0 - 0.02, 2.74), 'ruststeel', tag='wall', density=0.3)
     print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
-    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(64), gut=0.62))
+    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(64), gut=0.75))
     # and what everyone left behind
     import clutter
     clutter.trim(m)
+    print('  furnished:', clutter.furnish(m, 'flat', random.Random(71)))
     clutter.dress(m, 'flat', random.Random(41), outside=[(0.0, 13.0, 34.0, 62.0, 0.0), (50.0, 45.0, 96.0, 62.0, 0.0)], out_n=60, blood=0.75)
     print('  cleared from the halls:', indoor.clear_halls(m))
     print('  cleared from the ways through:', indoor.clear_ways(m))

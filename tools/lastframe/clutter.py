@@ -344,3 +344,280 @@ def trim(m, skip=()):
                             out += 1
                         run = [t, t, f] if ok and run is not None and abs(f - run[2]) >= 0.025 else None
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# furnishing: what a room was for, still standing in the middle of it. Groups (a table and its chairs, a sofa round
+# a coffee table, a bed and its nightstand, a ward bed and its drip, a pair of shelves back to back) picked by the
+# room's name and the map's style, stood clear of every doorway, opening, spawn and each other.
+import json as _json
+import os as _os
+_MODELS = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'assets-src', 'lf', 'models')
+_dims = {}
+
+
+def dims(name):
+    """a model's (width x, depth y, height) in layout axes, from its glTF bounds"""
+    if name in _dims:
+        return _dims[name]
+    d = (0.8, 0.8, 0.8)
+    try:
+        g = _json.load(open(_os.path.join(_MODELS, name, name + '.gltf')))
+        lo, hi = [1e9] * 3, [-1e9] * 3
+
+        def visit(ni, S, T):
+            n = g['nodes'][ni]
+            s, t = n.get('scale', [1, 1, 1]), n.get('translation', [0, 0, 0])
+            if 'matrix' in n:
+                M = n['matrix']
+                s = [math.sqrt(M[0] ** 2 + M[1] ** 2 + M[2] ** 2), math.sqrt(M[4] ** 2 + M[5] ** 2 + M[6] ** 2), math.sqrt(M[8] ** 2 + M[9] ** 2 + M[10] ** 2)]
+                t = M[12:15]
+            T2 = [T[i] + t[i] * S[i] for i in range(3)]
+            S2 = [S[i] * s[i] for i in range(3)]
+            if 'mesh' in n:
+                for pr in g['meshes'][n['mesh']]['primitives']:
+                    a = g['accessors'][pr['attributes']['POSITION']]
+                    for i in range(3):
+                        for v in (a['min'][i] * S2[i] + T2[i], a['max'][i] * S2[i] + T2[i]):
+                            lo[i], hi[i] = min(lo[i], v), max(hi[i], v)
+            for c in n.get('children', []):
+                visit(c, S2, T2)
+        for ni in g['scenes'][g.get('scene', 0)]['nodes']:
+            visit(ni, [1, 1, 1], [0, 0, 0])
+        if hi[0] > lo[0]:
+            d = (hi[0] - lo[0], hi[2] - lo[2], hi[1] - lo[1])
+    except Exception:
+        pass
+    _dims[name] = d
+    return d
+
+
+def _table(table, chair, deco=None):
+    def g(rng):
+        w, d, h = dims(table)
+        cw, cd, _ = dims(chair)
+        out = [(('P', table), 0, 0, 0, 0)]
+        n = max(1, min(3, int(w / 0.7)))
+        for i in range(n):
+            x = (i - (n - 1) / 2) * (w / n)
+            for side in (-1, 1):
+                if rng.random() < 0.18:
+                    continue
+                if rng.random() < 0.3:
+                    # pushed back, or knocked over, when they left
+                    out.append((('L', chair), x + rng.uniform(-0.3, 0.3), side * (d / 2 + cd / 2 + rng.uniform(0.2, 0.6)), rng.uniform(0, 6.28), 0))
+                else:
+                    out.append((('P', chair), x, side * (d / 2 + cd / 2 - 0.08), 0 if side < 0 else math.pi, 0))
+        if deco and rng.random() < 0.7:
+            out.append((('D', deco), rng.uniform(-w / 4, w / 4), 0, rng.uniform(0, 6.28), h))
+        return out, (w / 2 + 0.1, d / 2 + cd)
+    return g
+
+
+def _sofa(sofa, table, chair, tv=None):
+    def g(rng):
+        sw, sd, _ = dims(sofa)
+        tw, td, _ = dims(table)
+        cw, cd, _ = dims(chair)
+        y0 = -(td / 2 + 0.45 + sd / 2)
+        out = [(('P', sofa), 0, y0, 0, 0), (('P', table), 0, 0, 0, 0)]
+        if rng.random() < 0.8:
+            out.append((('P', chair), sw / 2 + cd / 2 + 0.25, 0, math.pi / 2, 0))
+        y1 = td / 2 + 0.9
+        if tv:
+            vw, vd, _ = dims(tv)
+            out.append((('P', tv), 0, y1 + vd / 2, math.pi, 0))
+        return out, (sw / 2 + cd + 0.3, (abs(y0) + sd / 2 + y1 + 0.4) / 2)
+    return g
+
+
+def _bed(bed, side=None):
+    def g(rng):
+        bw, bd, _ = dims(bed)
+        out = [(('P', bed), 0, 0, 0, 0)]
+        if side:
+            nw, nd, _ = dims(side)
+            out.append((('P', side), bw / 2 + nw / 2 + 0.06, -bd / 2 + nd / 2 + 0.05, 0, 0))
+            w = bw / 2 + nw + 0.1
+        else:
+            w = bw / 2
+        return out, (w, bd / 2)
+    return g
+
+
+def _shelves(shelf):
+    def g(rng):
+        w, d, _ = dims(shelf)
+        return [(('P', shelf), 0, d / 2 + 0.02, 0, 0), (('P', shelf), 0, -d / 2 - 0.02, math.pi, 0)], (w / 2, d + 0.05)
+    return g
+
+
+def _one(name):
+    def g(rng):
+        w, d, _ = dims(name)
+        return [(('P', name), 0, 0, 0, 0)], (w / 2, d / 2)
+    return g
+
+
+def _ward_bed(rng):
+    out = [(('K', f'hbed_{rng.randint(1, 99)}', (0.48, 1.04, 0.7)), 0, 0, 0, 0)]
+    if rng.random() < 0.7:
+        out.append((('K', 'iv', (0.25, 0.25, 1.9)), 0.8, -0.7, rng.uniform(0, 6), 0))
+    if rng.random() < 0.35:
+        out.append((('K', 'screen', (0.95, 0.3, 1.7)), -1.25, 0.2, math.pi / 2 + rng.uniform(-0.3, 0.3), 0))
+    return out, (1.3, 1.1)
+
+
+def _rows(bench, n=3):
+    """benches in rows, an aisle down the side"""
+    def g(rng):
+        w, d, _ = dims(bench)
+        out = [(('P', bench), 0, (i - (n - 1) / 2) * (d + 0.75), 0, 0) for i in range(n)]
+        return out, (w / 2, (n * (d + 0.75)) / 2)
+    return g
+
+
+def _crates(rng):
+    names = ['wooden_crate_01', 'wooden_crate_02', 'old_military_crate', 'wooden_military_crate', 'cardboard_box_01']
+    out = []
+    for i in range(rng.randint(2, 4)):
+        out.append((('P', rng.choice(names)), rng.uniform(-0.6, 0.6), rng.uniform(-0.6, 0.6), rng.uniform(0, 6.28), 0))
+    return out, (0.95, 0.95)
+
+
+SETS = {
+    'manor': {
+        'bed|master|nursery|maids|bed_': [(4, _bed('GothicBed_01', 'ClassicNightstand_01')), (1, _bed('old_bed_frame')), (1, _one('GothicCommode_01')), (1, _one('Ottoman_01')), (1, _one('Rockingchair_01'))],
+        'library|study': [(3, _shelves('wooden_bookshelf_worn')), (2, _table('WoodenTable_01', 'painted_wooden_chair_01', 'wooden_candlestick')), (1, _one('ArmChair_01'))],
+        'kitchen|pantry': [(3, _table('wooden_table_02', 'WoodenChair_01', 'pot_enamel_01')), (2, _shelves('painted_wooden_shelves')), (1, _one('electric_stove'))],
+        'dining': [(4, _table('dining_table', 'dining_chair_02', 'brass_candleholders'))],
+        'wine|tunnel|boiler|cellar': [(3, _one('barrel_03')), (3, _crates), (1, _one('portable_generator'))],
+        'gunroom': [(2, _crates), (1, _table('WoodenTable_01', 'painted_wooden_chair_01'))],
+        '': [(3, _sofa('Sofa_01', 'gothic_coffee_table', 'ArmChair_01')), (2, _sofa('painted_wooden_sofa', 'CoffeeTable_01', 'Rockingchair_01')),
+             (2, _table('dining_table', 'dining_chair_02', 'brass_candleholders')), (1, _table('WoodenTable_01', 'painted_wooden_chair_01', 'wooden_candlestick')),
+             (1, _one('vintage_day_bed')), (1, _one('GothicCabinet_01')), (1, _one('ClassicConsole_01')), (1, _one('vintage_grandfather_clock_01'))],
+    },
+    'hospital': {
+        'canteen': [(4, _table('dining_table', 'plastic_monobloc_chair_01')), (1, _one('CoffeeCart_01'))],
+        'chapel': [(4, _rows('painted_wooden_bench'))],
+        'dayroom|lobby': [(3, _sofa('sofa_03', 'CoffeeTable_01', 'ArmChair_01', 'Television_01')), (2, _rows('painted_wooden_bench', 2)), (1, _one('wheelchair_01'))],
+        'records|nurse|staff|pharm|office': [(3, _table('metal_office_desk', 'SchoolChair_01', 'classic_laptop')), (2, _shelves('steel_frame_shelves_02')), (2, _one('drawer_cabinet'))],
+        'store|laundry|plant|boiler|cold|service|flood': [(3, _shelves('steel_frame_shelves_02')), (2, _crates), (1, _one('industrial_storage_cart')), (1, _one('tool_cart'))],
+        '': [(5, _ward_bed), (1, _table('metal_office_desk', 'SchoolChair_01', 'clipboard')), (1, _one('wheelchair_01')), (1, _one('industrial_storage_cart')), (1, _one('drawer_cabinet'))],
+    },
+    'dugout': {
+        'hq': [(3, _table('WoodenTable_01', 'folding_wooden_stool', 'vintage_radio_transceiver')), (1, _one('wooden_military_crate')), (1, _bed('old_bed_frame'))],
+        '': [(3, _bed('old_bed_frame')), (2, _table('wooden_table_02', 'folding_wooden_stool', 'Lantern_01')), (2, _crates), (1, _one('Barrel_01'))],
+    },
+    'flat': {
+        'diner|bar|canteen': [(4, _table('wooden_table_02', 'bar_chair_round_01')), (1, _one('CashRegister_01'))],
+        'kitchen': [(2, _shelves('painted_wooden_shelves')), (2, _one('electric_stove')), (1, _table('wooden_table_02', 'WoodenChair_01'))],
+        'office|manager|records': [(3, _table('metal_office_desk', 'SchoolChair_01', 'office_notepads')), (2, _one('drawer_cabinet')), (1, _shelves('steel_frame_shelves_02'))],
+        'shop|store': [(4, _shelves('steel_frame_shelves_03')), (1, _crates)],
+        'barber': [(3, _one('BarberShopChair_01')), (1, _sofa('sofa_03', 'CoffeeTable_01', 'ArmChair_01'))],
+        'pool': [(3, _table('outdoor_table_chair_set_01', 'plastic_monobloc_chair_01')), (2, _one('wooden_picnic_table')), (1, _one('WetFloorSign_01'))],
+        'alley|hall|boiler|service|ware': [(3, _crates), (2, _shelves('worn_metal_rack')), (1, _one('portable_generator')), (1, _one('hand_truck')), (1, _one('metal_tool_chest'))],
+        '': [(3, _bed('old_bed_frame', 'drawer_cabinet')), (3, _sofa('Sofa_01', 'CoffeeTable_01', 'ArmChair_01', 'television_02')), (2, _table('wooden_table_02', 'WoodenChair_01')),
+             (1, _one('modern_wooden_cabinet')), (1, _one('Shelf_01'))],
+    },
+}
+
+
+def furnish(m, style, rng, skip=()):
+    """returns how many groups went in"""
+    import re
+    sets = SETS.get(style)
+    if not sets:
+        return 0
+    solids = [b for b in m.boxes if b.collide and b.tag not in ('floor', 'roof', 'ground')] + \
+             [type('S', (), dict(a=a, b=b))() for (a, b, _) in m.solid]
+    ways = []
+    for d in m.doors:
+        hx, hy, hz = d['hinge']
+        ways.append(((hx + d['sign'] * d['w'] / 2, hy) if d['axis'] == 'x' else (hx, hy + d['sign'] * d['w'] / 2), hz, d['w']))
+    for (x, y, z, w, a) in m.openings:
+        ways.append(((x, y), z, w))
+    steps = [b for b in m.boxes if b.tag == 'step']
+    spawns = [tuple(s) + (0,) * (3 - len(s)) for k in ('a', 'b', 'ffa') for s in m.spawns[k]]
+    taken = [(p['pos'][0], p['pos'][1], p['pos'][2], 0.45) for p in m.props if p.get('collide') is not False or p.get('loose')]
+    taken += [(u['pos'][0], u['pos'][1], u['pos'][2], 1.0) for u in m.units if u['kit'] == 'ward' and u['parts'][0].split('_')[0] in ('hbed', 'screen', 'iv')]
+
+    def clear(x, y, z, hx, hy, rot, gap):
+        c, s = abs(math.cos(rot)), abs(math.sin(rot))
+        ex, ey = c * hx + s * hy, s * hx + c * hy
+        R = math.hypot(ex, ey)
+        for (p, wz, w) in ways:
+            if abs(wz - z) < 1.2 and math.hypot(p[0] - x, p[1] - y) < R + w / 2 + 1.3:
+                return False
+        for (sx, sy, sz) in spawns:
+            if abs(sz - z) < 1.2 and math.hypot(sx - x, sy - y) < R + 0.8:
+                return False
+        for (px, py, pz, pr) in taken:
+            if abs(pz - z) < 1.2 and math.hypot(px - x, py - y) < R + pr + gap:
+                return False
+        for b in steps:
+            if b.b[2] > z - 0.1 and b.a[2] < z + 2.2 and b.a[0] - 1.2 < x + ex and b.b[0] + 1.2 > x - ex and b.a[1] - 1.2 < y + ey and b.b[1] + 1.2 > y - ey:
+                return False
+        for b in solids:
+            if b.b[2] < z + 0.1 or b.a[2] > z + 1.6:
+                continue
+            if b.a[0] - gap * 0.5 < x + ex and b.b[0] + gap * 0.5 > x - ex and b.a[1] - gap * 0.5 < y + ey and b.b[1] + gap * 0.5 > y - ey:
+                return False
+        return True
+
+    def emit(items, x, y, z, rot):
+        c, s = math.cos(rot), math.sin(rot)
+        for (spec, dx, dy, dr, dz) in items:
+            px, py = x + dx * c - dy * s, y + dx * s + dy * c
+            k = spec[0]
+            if k == 'P':
+                m.prop(spec[1], px, py, z=z + dz, rot=rot + dr)
+            elif k == 'D':
+                m.prop(spec[1], px, py, z=z + dz, rot=rot + dr, collide=False)
+            elif k == 'L':
+                m.loose(spec[1], px, py, z=z + dz, rot=rot + dr, kg=5, surf='wood', shape='box')
+            else:
+                hx, hy, h = spec[2]
+                m.unit('ward', [spec[1]], px, py, z + dz, rot=rot + dr + math.pi, far=True)
+                cc, ss = abs(math.cos(rot + dr)), abs(math.sin(rot + dr))
+                m.invisible((px - cc * hx - ss * hy, py - ss * hx - cc * hy, z), (px + cc * hx + ss * hy, py + ss * hx + cc * hy, z + h), pen=True)
+
+    n_all = 0
+    for room in m.rooms:
+        name = room['name']
+        if name in skip or re.search(r'stair|well|passage|gallery|^hall|cor|tunnel$|^b\d', name):
+            continue
+        (x0, y0, z0), (x1, y1, z1) = room['a'], room['b']
+        W, D = x1 - x0, y1 - y0
+        if z1 - z0 < 2.2 or min(W, D) < 3.0 or (max(W, D) > 3.5 * min(W, D) and min(W, D) < 5):
+            continue
+        pool = next((v for k, v in sets.items() if k and re.search(k, name)), sets[''])
+        A = W * D
+        want = max(1, min(9, round(A / 15)))
+        have = sum(1 for (px, py, pz, _) in taken if x0 < px < x1 and y0 < py < y1 and abs(pz - z0) < 1.0)
+        want = max(0 if have >= 3 else 1, want - have // 3)
+        gap = 0.9 if min(W, D) > 5 else 0.5
+        got = 0
+        for _ in range(want * 16):
+            if got >= want:
+                break
+            tot = sum(w for w, _ in pool)
+            q = rng.uniform(0, tot)
+            for w, gfn in pool:
+                q -= w
+                if q <= 0:
+                    break
+            items, (hx, hy) = gfn(rng)
+            rot = rng.choice((0.0, math.pi / 2, math.pi, -math.pi / 2)) + rng.uniform(-0.12, 0.12)
+            c, s = abs(math.cos(rot)), abs(math.sin(rot))
+            ex, ey = c * hx + s * hy, s * hx + c * hy
+            if W < 2 * ex + 0.5 or D < 2 * ey + 0.5:
+                continue
+            x, y = rng.uniform(x0 + ex + 0.25, x1 - ex - 0.25), rng.uniform(y0 + ey + 0.25, y1 - ey - 0.25)
+            if not clear(x, y, z0, hx, hy, rot, gap):
+                continue
+            emit(items, x, y, z0, rot)
+            taken.append((x, y, z0, math.hypot(ex, ey)))
+            got += 1
+        n_all += got
+    return n_all

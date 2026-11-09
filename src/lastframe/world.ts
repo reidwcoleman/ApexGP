@@ -1,3 +1,4 @@
+import type { FlareSpec } from './shared.ts';
 import { buildLand, sway, type TerrainInfo } from './terrain.ts';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -16,7 +17,7 @@ const MAP_Q = new URLSearchParams(location.search).get('map');
 export const DEFAULT_MAP = 'ward';
 /** every location is played indoors for now: the cove (out in the open) is kept but not offered, and ?map=cove opens the hospital */
 export const OUTDOOR = false;
-export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' = MAP_Q === 'cove' && OUTDOOR ? 'cove' : MAP_Q === 'block' ? 'block' : MAP_Q === 'motel' ? 'motel' : MAP_Q === 'mansion' ? 'mansion' : 'ward';
+export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' | 'trenches' = MAP_Q === 'cove' && OUTDOOR ? 'cove' : MAP_Q === 'block' ? 'block' : MAP_Q === 'motel' ? 'motel' : MAP_Q === 'mansion' ? 'mansion' : MAP_Q === 'trenches' ? 'trenches' : 'ward';
 /** the map's own files; textures, guns and gear are shared */
 export const MB = BASE + (MAP_ID === 'block' ? '' : MAP_ID + '/');
 
@@ -49,6 +50,10 @@ export interface MapData {
   /** what spawns face, and the shot behind the menu */
   centre?: number[];
   attract?: number[][];
+  /** star shells over an open field */
+  flares?: FlareSpec | null;
+  /** each side has its own ground: spawns stay on it, and the sides swap round now and then */
+  sides?: number;
 }
 
 /** a lamp that comes and goes: how far down it is now (k), and when it next changes its mind */

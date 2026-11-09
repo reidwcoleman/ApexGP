@@ -407,10 +407,10 @@ export class LocalPlayer {
     this.leanK += (lt - this.leanK) * Math.min(1, dt * 10);
     // ---- the head
     // the camera's on the vest, a hand below the eyes: the world sits a little higher in the picture
-    const eyeH = 1.5 - this.crouchK * 0.52 - (this.slideT > 0 ? 0.12 : 0);
+    const eyeH = 1.4 - this.crouchK * 0.5 - (this.slideT > 0 ? 0.12 : 0);
     // a camera on a head: every footfall lands in the picture, and a bad leg lands harder on one side
-    const bobY = (Math.abs(Math.sin(this.bob)) * 0.062 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
-    const bobX = Math.cos(this.bob) * 0.036 * this.bobK * (1 - this.adsK * 0.7);
+    const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
+    const bobX = Math.cos(this.bob) * 0.046 * this.bobK * (1 - this.adsK * 0.7);
     this.breath += dt;
     this.landK = Math.max(0, this.landK - dt * 3.2);
     const lk = Math.sin(this.landK * Math.PI) * this.landK;
@@ -422,7 +422,8 @@ export class LocalPlayer {
       const h = c.world.ray(m.x, m.y + eyeH, m.z, rx * sgn, 0, rz * sgn, 0.6);
       if (h) lean = sgn * Math.min(Math.abs(lean), Math.max(0, h.t - 0.2));
     }
-    const eye = this.eye.set(m.x + rx * (lean + bobX), m.y + eyeH + m.stepEase + bobY - lk * 0.1, m.z + rz * (lean + bobX));
+    // a vest rises and falls with the breath under it
+    const eye = this.eye.set(m.x + rx * (lean + bobX), m.y + eyeH + m.stepEase + bobY - lk * 0.1 + Math.sin(this.breath * 1.55) * 0.006, m.z + rz * (lean + bobX));
     // recoil settles; the camera takes some of it
     const rs = Math.exp(-dt * spec.settle);
     this.recP *= rs;
@@ -450,7 +451,7 @@ export class LocalPlayer {
     this.rkR.step(dt, 0, 260, 22);
     this.camP.step(dt, 0, 170, 19);
     // the head rolls into a fast turn, then catches up
-    this.camR.step(dt, THREE.MathUtils.clamp(-(dt > 0 ? dYaw / dt : 0) * 0.0075, -0.03, 0.03), 170, 19);
+    this.camR.step(dt, THREE.MathUtils.clamp(-(dt > 0 ? dYaw / dt : 0) * 0.011, -0.05, 0.05), 150, 17);
     // climb is paid back once the trigger is let go
     this.sinceShot += dt;
     if (this.sinceShot > 0.13 && (this.climb || this.climbY)) {
@@ -471,7 +472,7 @@ export class LocalPlayer {
     const shaky = 1 + (1 - this.stamina) * 1.7 + this.arm * 1.8 + this.supK * 2.2;
     const swayP = (Math.sin(this.breath * 1.3) * 0.0042 + Math.sin(this.breath * 2.7 + 1) * 0.0016) * shaky + Math.sin(this.bob * 2) * 0.0058 * this.bobK;
     const swayY = (Math.sin(this.breath * 0.9) * 0.0036 + Math.sin(this.breath * 2.1) * 0.0014) * shaky + Math.cos(this.bob) * 0.0075 * this.bobK;
-    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.026 * this.bobK + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
+    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.042 * this.bobK + Math.sin(this.breath * 1.55) * 0.004 + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
     this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
     cam.position.copy(eye);
     cam.quaternion.setFromEuler(this.e);
@@ -673,15 +674,12 @@ export class LocalPlayer {
       if (this.reloadT <= 0) {
         // one still in the pipe stays there
         const need = spec.mag + (this.chambered ? 1 : 0) - am.mag;
-        const got = Math.min(need, am.res);
-        am.mag += got;
-        am.res -= got;
+        // the reserve never runs out: every reload is a full one
+        am.mag += need;
       }
       if (i.firePressed && (w === 'shotgun' || w === 'rifle') && after > 0.15) {
         // interrupt with what's loaded so far
-        const got = Math.min(Math.floor(after * spec.mag), am.res, spec.mag - am.mag);
-        am.mag += got;
-        am.res -= got;
+        am.mag += Math.min(Math.floor(after * spec.mag), spec.mag - am.mag);
         this.reloadT = 0;
       }
     }

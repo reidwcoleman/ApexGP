@@ -342,6 +342,11 @@ uniform float caK;
 uniform float satK;
 
 float hash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
+float vnoise( vec2 p ) {
+  vec2 i = floor( p ), f = fract( p );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( hash( i ), hash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( hash( i + vec2( 0.0, 1.0 ) ), hash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+}
 
 vec2 lens( vec2 p, float rho, float k, float aspect ) {
   float rd = sqrt( aspect * aspect + 1.0 );
@@ -436,10 +441,13 @@ void main() {
   vec3 c = vec3( texture2D( tSrc, cr ).r, texture2D( tSrc, cg ).g, texture2D( tSrc, cb ).b );
   // unsharp mask, as the camera's own processing does it
   vec3 soft = texture2D( tHalf, cg ).rgb;
-  c = max( c + ( c - soft ) * 0.75, vec3( 0.0 ) );
+  c = max( c + ( c - soft ) * 1.05, vec3( 0.0 ) );
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
-  vec3 hdr = c + bloom * 0.085 + whiteout * 9.0;
+  // grease and dust on the housing's window: nothing in the dark, a smeared glow round anything bright
+  vec2 dq = vUv * vec2( aspect, 1.0 );
+  float dirt = smoothstep( 0.42, 0.95, vnoise( dq * 3.1 + 7.0 ) * 0.65 + vnoise( dq * 7.3 ) * 0.35 ) + step( 0.9965, hash( floor( dq * 140.0 ) ) ) * 0.6;
+  vec3 hdr = c + bloom * ( 0.085 + dirt * 0.32 ) + whiteout * 9.0;
   if ( flare.z > 0.003 ) {
     // the sun in a cheap plastic lens: a veil across the frame, the iris's star, and ghosts strung along the line through the centre
     vec2 A = vec2( aspect, 1.0 );

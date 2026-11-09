@@ -352,7 +352,7 @@ def build():
     m.zones.append(dict(a=(BX0, CY1, -0.3), b=(BX1, Y1, TOP), kind='hall'))
     m.zones.append(dict(a=(0.0, 0.0, BZ - 0.3), b=(X1, Y1, TOP), kind='small'))
     print('  sealed doors, windows:', indoor.seal(m, indoor.inside_fn(m)))
-    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(63), gut=0.62))
+    print('  opened up (gutted, widened):', indoor.open_up(m, indoor.inside_fn(m), random.Random(63), gut=0.75))
 
     # spawns: A in the west rooms, B in the east
     m.spawns['a'] = [[5.0, 5.0, 0], [5.0, 14.0, 0], [15.0, 7.0, 0], [15.0, 14.0, 0], [4.0, 19.5, 0], [7.0, 31.0, 0], [5.0, 13.0, F2], [15.0, 12.0, F2]]
@@ -366,6 +366,7 @@ def build():
     m.attract = [[28.0, 1.6, -2.0], [28.0, 5.8, -15.0]]   # game axes: in at the door, up to the gallery
     import clutter
     clutter.trim(m)
+    print('  furnished:', clutter.furnish(m, 'manor', random.Random(71)))
     clutter.dress(m, 'manor', random.Random(47), blood=0.7)
     print('  cleared from the halls:', indoor.clear_halls(m))
     print('  cleared from the ways through:', indoor.clear_ways(m))

@@ -26,6 +26,7 @@ COVE = opt('map', 'block') == 'cove'
 WARD = opt('map', 'block') == 'ward'
 MOTEL = opt('map', 'block') == 'motel'
 MANSION = opt('map', 'block') == 'mansion'
+TRENCH = opt('map', 'block') == 'trenches'
 if COVE:
     import cove_layout, coveland, cove_kit
     m = cove_layout.build()
@@ -35,6 +36,9 @@ elif MOTEL:
 elif MANSION:
     import mansion_layout
     m = mansion_layout.build()
+elif TRENCH:
+    import trench_layout
+    m = trench_layout.build()
 elif WARD:
     import ward_layout
     m = ward_layout.build()
@@ -544,7 +548,7 @@ for p in m.props:
     if p['loose']:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
-json.dump(dict(stains=getattr(m, 'stains', []), veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
+json.dump(dict(stains=getattr(m, 'stains', []), veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), flares=getattr(m, 'flares', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
                density=dens, size=SIZE, sun=sun_out), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop

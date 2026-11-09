@@ -3,7 +3,7 @@ import type { Door, MapData, Pane } from './world.ts';
 import { Nav, type Node } from './nav.ts';
 import { Bot, botName } from './bots.ts';
 import { trace, type Tracer } from './ballistics.ts';
-import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, zoneK, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, zoneK, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import type { Body } from './hitbox.ts';
 
@@ -28,6 +28,11 @@ export class Match {
   private respawn = new Map<number, number>();
   /** where each side starts this round: picked fresh every round, a long way apart */
   private anchors: { x: number; y: number; z: number }[] = [];
+  /** on a map with sides: the teams have swapped ends this round */
+  private swapped = false;
+  /** seconds since the match began: the star shells run off it */
+  elapsed = 0;
+  private flareNow: FlareNow[] = [];
   private nades: (NadeSim & { id: number; s: number; kind: NadeKind; fuse: number })[] = [];
   private nadeId = 1;
   private holdTick = 0;
@@ -45,6 +50,12 @@ export class Match {
   readonly pools: number[][] = [];
   /** is a body at this spot standing in light (a lamp's pool), not in the dark? */
   litAt(x: number, y: number, z: number) {
+    // under a star shell the whole field is lit, except down in a trench
+    for (const f of this.flareNow) {
+      if (f.k < 0.3) continue;
+      const d = Math.hypot(x - f.x, z - f.z);
+      if (d < 14 + f.y * 0.9 && y > -1.0) return true;
+    }
     for (const [lx, ly, lz, r] of this.pools) {
       const dx = x - lx, dz = z - lz, dy = y + 1 - ly;
       if (dx * dx + dz * dz < r * r && dy > -3.2 && dy < 0.6) return true;
@@ -144,6 +155,8 @@ export class Match {
   }
 
   update(dt: number) {
+    this.elapsed += dt;
+    if (this.map.flares) flaresAt(this.elapsed, this.map.flares, this.flareNow);
     const live = this.phase === 'live';
     this.clock -= dt;
     if (this.phase === 'warmup' && this.clock <= 0) {
@@ -383,6 +396,16 @@ export class Match {
 
   /** somewhere a whole side can stand: indoors, with room round it, and the other side's somewhere far from it */
   private pickAnchors() {
+    if (this.map.sides) {
+      // each side in its own trenches, a different stretch of them each round, and now and then the other end
+      this.swapped = Math.random() < 0.5;
+      const pick = (l: number[][]) => {
+        const c = l[Math.floor(Math.random() * l.length)];
+        return { x: c[0], y: c[1], z: c[2] };
+      };
+      this.anchors = this.swapped ? [pick(this.map.spawns.b), pick(this.map.spawns.a)] : [pick(this.map.spawns.a), pick(this.map.spawns.b)];
+      return;
+    }
     const N = this.nav.nodes.filter((n) => n.indoors !== false && n.next.length >= 3);
     this.anchors = [];
     if (N.length < 20) return;
@@ -409,8 +432,16 @@ export class Match {
 
   private spawn(p: PlayerInfo, fixed: boolean, near = false) {
     void fixed;
-    let list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : p.team === 0 ? this.map.spawns.a : this.map.spawns.b;
-    if (!near && this.nav.nodes.length) {
+    let list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : (p.team === 0) !== this.swapped ? this.map.spawns.a : this.map.spawns.b;
+    if (this.map.sides && this.cfg.mode !== 'ffa') {
+      // on a field with two lines you start, and come back, in your own trenches: near your side's stretch at first
+      const a = this.anchors[p.team];
+      if (a && !near) {
+        const pool = list.filter((c) => Math.hypot(c[0] - a.x, c[2] - a.z) < 16);
+        if (pool.length >= 3) list = pool;
+      }
+      near = false;
+    } else if (!near && this.nav.nodes.length) {
       if (this.cfg.mode === 'ffa') {
         // everyone somewhere different, and somewhere different every time
         const pool: number[][] = [];

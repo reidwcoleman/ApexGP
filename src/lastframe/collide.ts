@@ -343,8 +343,12 @@ function stepAxis(w: World, m: Mover, dx: number, dz: number) {
   // a step: the headroom is checked from the step's top, not from a full step up, or a low sill under a door head
   // (a 12 cm threshold under a 2.08 m lintel) stops you dead
   if (m.grounded) {
-    const f = w.floorAt(nx, m.y + STEP, nz, R - 0.02);
-    if (f > m.y && f - m.y <= STEP && !w.blocked(nx, f + 0.01, nz, R, m.height - 0.04)) {
+    // the floor under the whole of what bumped: probed a hair wider than the body, or a riser it touches is no floor
+    const f = w.floorAt(nx, m.y + STEP, nz, R + 0.01);
+    // the headroom from knee height up: on a flight the next riser is already under the body's front edge (treads
+    // are shallower than a body is wide), and only what's higher than half a step stops you
+    const knee = STEP * 0.6;
+    if (f > m.y && f - m.y <= STEP && !w.blocked(nx, f + knee, nz, R, m.height - knee - 0.04)) {
       m.stepEase -= f - m.y;
       m.y = f;
       m.x = nx;
