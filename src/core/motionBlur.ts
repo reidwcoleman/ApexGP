@@ -107,7 +107,7 @@ void main() {
     }
     if (l.y < boxMin.y + 0.25 && l.y > -0.35) {
       float dxz = length(max(abs(l.xz - bc.xz) - bh.xz, 0.0));
-      float w = (1.0 - smoothstep(0.0, 0.7, dxz)) * 0.85;
+      float w = 1.0 - smoothstep(0.0, 0.7, dxz);
       if (w > uw) {
         uw = w;
         under = (carPrev[i] * vec4(l, 1.0)).xyz;
@@ -146,7 +146,7 @@ void main() {
   vec2 best = vec2(0.0);
   float bl = -1.0;
   float zmin = 1e6;
-  for (int i = 0; i < 64; i++) {
+  for (int i = 0; i < 128; i++) {
     if (float(i) >= tile) break;
     vec2 p = o * (vec2(1.0) - axis) + axis * (start + float(i) + 0.5);
     vec3 t = texture2D(tIn, p / inSize).xyz;
@@ -184,29 +184,43 @@ void main() {
 }
 `;
 
-const GATHER_FRAG = /* glsl */ `
+/**
+ * The neighbourhood's longest streak, read smoothly (the tiles' vectors are bilinearly filtered: a
+ * per-pixel random tile offset used to hide the tiles' edges, and with no temporal filter after this
+ * pass its noise stayed in the picture as stipple wherever "blurred or not" flipped from pixel to
+ * pixel), and the nearest moving surface among the four tiles the filter spans.
+ */
+const NEIGHBOR_GLSL = /* glsl */ `
 uniform sampler2D tVel;
 uniform sampler2D tNeighbor;
 uniform float maxTaps;
-uniform vec2 tileUv;
-
-float mbCone(float d, float v) { return clamp(1.0 - d / v, 0.0, 1.0); }
-float mbCyl(float d, float v) { return 1.0 - smoothstep(0.95 * v, 1.05 * v, d); }
-// 1 when a is not behind b (within a soft margin that grows with distance)
-float mbFront(float za, float zb) { return clamp(1.0 - (za - zb) / (0.04 * min(za, zb) + 0.06), 0.0, 1.0); }
+vec3 mbNeighbor(vec2 uv) {
+  vec2 ts = vec2(textureSize(tNeighbor, 0));
+  ivec2 hi = ivec2(ts) - 1;
+  ivec2 i0 = ivec2(floor(uv * ts - 0.5));
+  float z = texelFetch(tNeighbor, clamp(i0, ivec2(0), hi), 0).z;
+  z = min(z, texelFetch(tNeighbor, clamp(i0 + ivec2(1, 0), ivec2(0), hi), 0).z);
+  z = min(z, texelFetch(tNeighbor, clamp(i0 + ivec2(0, 1), ivec2(0), hi), 0).z);
+  z = min(z, texelFetch(tNeighbor, clamp(i0 + ivec2(1, 1), ivec2(0), hi), 0).z);
+  return vec3(texture2D(tNeighbor, uv).xy, z);
+}
 // the gather runs before the composite's NaN/Inf scrub: one bad pixel (a degenerate normal, a half-float
 // overflow on a sun glint) smeared along a streak and was then blacked out as a whole block. Scrub each tap.
 vec3 mbSafe(vec3 c) {
   bool bad = c.r != c.r || c.g != c.g || c.b != c.b || max(max(abs(c.r), abs(c.g)), abs(c.b)) > 6e4;
   return bad ? vec3(0.0) : clamp(c, 0.0, 200.0);
 }
+`;
+
+const GATHER_FRAG = /* glsl */ `
+${NEIGHBOR_GLSL}
+float mbCone(float d, float v) { return clamp(1.0 - d / v, 0.0, 1.0); }
+float mbCyl(float d, float v) { return 1.0 - smoothstep(0.95 * v, 1.05 * v, d); }
+// 1 when a is not behind b (within a soft margin that grows with distance)
+float mbFront(float za, float zb) { return clamp(1.0 - (za - zb) / (0.04 * min(za, zb) + 0.06), 0.0, 1.0); }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  // (the neighbourhood is looked up a little off this pixel's own tile — a per-pixel random offset
-  // of up to half a tile — so the tiles' edges dissolve into noise instead of drawing blocks where
-  // the longest streak changes from one tile to the next)
-  vec2 tj = vec2(fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453), fract(sin(dot(gl_FragCoord.xy, vec2(39.3468, 11.135))) * 24634.6345)) - 0.5;
-  vec3 nb = texture2D(tNeighbor, uv + tj * tileUv * 0.5).xyz;
+  vec3 nb = mbNeighbor(uv);
   vec2 vmax = nb.xy;
   float lmax = length(vmax * resolution);
   if (lmax < 0.6) { outputColor = inputColor; return; }
@@ -222,10 +236,15 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float n = clamp(floor(lmax * 0.8), 4.0, maxTaps);
   vec2 dirOwn = lx > 1.5 ? vx : vmax;
   float lOwn = lx > 1.5 ? lx : lmax;
-  // interleaved gradient noise: the tap positions shift per pixel, so the steps read as grain
+  // interleaved gradient noise: the tap positions shift per pixel (the smoothing pass that follows
+  // averages along the streak over one tap spacing, which turns that grain back into a clean streak)
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
   float w = 1.0 / lx;
   vec3 acc = mbSafe(inputColor.rgb) * w;
+  // a sharp tracked car is smeared over only by what is clearly between it and the lens (a fence
+  // post, another car). The road it stands on is at its own distance, inside the soft depth margin:
+  // its streak ran up into the tyres' contact patches and the low wings and stippled them
+  float carGuard = cx.w > 0.5 ? 0.5 + 0.03 * zx : -1.0;
   for (int i = 0; i < 32; i++) {
     if (float(i) >= n) break;
     float t = mix(-1.0, 1.0, (float(i) + 0.5 + jit) / n);
@@ -236,18 +255,75 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     float ly = max(length(cy.xy * resolution), 0.5);
     float d = abs(t) * (own ? lOwn : lmax);
     float f = mbFront(cy.z, zx);
+    bool roadOnCar = carGuard > 0.0 && cy.w < 0.5 && cy.z > zx - carGuard;
+    if (roadOnCar) f = 0.0;
     // (b: what is behind X shows through X's own streak — right for a moving object over its
     // background, wrong for the road just in front of a sharp tracked car: the road's streak runs up
     // into the car, which is no more "behind" it than the next metre of road, and the car's colour
     // was pulled down onto the tarmac as a ghost trail under the rear wing)
     float b = mbFront(zx, cy.z) * (cy.w > 0.5 && cx.w < 0.5 ? 0.0 : 1.0);
-    float a = f * mbCone(d, ly) + b * mbCone(d, lx) + mbCyl(d, ly) * mbCyl(d, lx) * 2.0;
+    float a = f * mbCone(d, ly) + b * mbCone(d, lx) + (roadOnCar ? 0.0 : mbCyl(d, ly) * mbCyl(d, lx) * 2.0);
     acc += mbSafe(texture2D(inputBuffer, su).rgb) * a;
     w += a;
   }
   outputColor = vec4(acc / w, inputColor.a);
 }
 `;
+
+/**
+ * The second half of the blur: an average along the streak over one tap spacing of the gather. The
+ * gather steps a streak of up to a fifth of the frame in 20–32 jittered taps (a tap every ~8 px at
+ * 1080p), and no temporal filter follows it: the jitter stayed in the picture as hatching in the
+ * grass and beaded edges on every board. Five more taps across that one gap are worth five times the
+ * gather's own (the two convolve: 100+ effective taps), at a fraction of their cost.
+ */
+const SMOOTH_FRAG = /* glsl */ `
+${NEIGHBOR_GLSL}
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  vec3 nb = mbNeighbor(uv);
+  vec2 vmax = nb.xy;
+  float lmax = length(vmax * resolution);
+  if (lmax < 2.5) { outputColor = inputColor; return; }
+  vec4 cx = texture2D(tVel, uv);
+  float zx = cx.z;
+  float lx = length(cx.xy * resolution);
+  bool covered = zx > nb.z * 1.03 + 0.05;
+  if (lx < 0.75 && !covered) { outputColor = inputColor; return; }
+  float n = clamp(floor(lmax * 0.8), 4.0, maxTaps);
+  // (a still pixel under something's smear: along that smear, eased in with how far behind it lies)
+  vec2 dir = lx > 1.5 ? cx.xy : vmax * clamp((zx - nb.z * 1.03 - 0.05) / (0.25 * nb.z + 0.5), 0.0, 1.0);
+  vec2 gap = dir * (2.0 / n);
+  if (length(gap * resolution) < 1.2) { outputColor = inputColor; return; }
+  vec3 acc = mbSafe(inputColor.rgb);
+  float w = 1.0;
+  for (int i = 0; i < 4; i++) {
+    float t = (float(i) < 1.5 ? float(i) - 2.0 : float(i) - 1.0) * 0.2;
+    vec2 su = uv + gap * t;
+    if (su.x < 0.0 || su.y < 0.0 || su.x > 1.0 || su.y > 1.0) continue;
+    vec4 cy = texture2D(tVel, su);
+    float ly = length(cy.xy * resolution);
+    // a sharp thing in front (a tracked car, the halo, the cockpit rim) is not pulled into the streak
+    if (ly < 0.75 && cy.z < zx - (0.03 * zx + 0.05)) continue;
+    if (cy.w > 0.5 && cx.w < 0.5 && ly < 1.5) continue;
+    acc += mbSafe(texture2D(inputBuffer, su).rgb);
+    w += 1.0;
+  }
+  outputColor = vec4(acc / w, inputColor.a);
+}
+`;
+
+export class MotionSmoothEffect extends Effect {
+  constructor() {
+    super('MotionSmoothEffect', SMOOTH_FRAG, {
+      attributes: EffectAttribute.CONVOLUTION,
+      uniforms: new Map<string, THREE.Uniform>([
+        ['tVel', new THREE.Uniform(null)],
+        ['tNeighbor', new THREE.Uniform(null)],
+        ['maxTaps', new THREE.Uniform(16)],
+      ]),
+    });
+  }
+}
 
 export class MotionBlurEffect extends Effect {
   private depth: THREE.Texture | null = null;
@@ -272,14 +348,14 @@ export class MotionBlurEffect extends Effect {
         ['tVel', new THREE.Uniform(null)],
         ['tNeighbor', new THREE.Uniform(null)],
         ['maxTaps', new THREE.Uniform(16)],
-        ['tileUv', new THREE.Uniform(new THREE.Vector2())],
       ]),
     });
     const opts = { type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
     this.rtVel = new THREE.WebGLRenderTarget(4, 4, opts);
     this.rtTileH = new THREE.WebGLRenderTarget(4, 4, opts);
     this.rtTile = new THREE.WebGLRenderTarget(4, 4, opts);
-    this.rtNeighbor = new THREE.WebGLRenderTarget(4, 4, opts);
+    // (the neighbourhood's vectors are read bilinearly: mbNeighbor)
+    this.rtNeighbor = new THREE.WebGLRenderTarget(4, 4, { ...opts, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
     this.velMat = new THREE.ShaderMaterial({
       vertexShader: FS_VERT,
       fragmentShader: VELOCITY_FRAG,
@@ -324,11 +400,32 @@ export class MotionBlurEffect extends Effect {
     this.quad.frustumCulled = false;
     this.uniforms.get('tVel')!.value = this.rtVel.texture;
     this.uniforms.get('tNeighbor')!.value = this.rtNeighbor.texture;
+    this.smooth.uniforms.get('tVel')!.value = this.rtVel.texture;
+    this.smooth.uniforms.get('tNeighbor')!.value = this.rtNeighbor.texture;
   }
+
+  /** the smoothing pass that follows the gather in the chain (MotionSmoothEffect: shares these buffers) */
+  readonly smooth = new MotionSmoothEffect();
 
   /** most taps per pixel (quality: 16 on High/Ultra, fewer below) */
   set maxTaps(n: number) {
     this.uniforms.get('maxTaps')!.value = n;
+    this.smooth.uniforms.get('maxTaps')!.value = n;
+  }
+
+  /**
+   * The velocity buffer's share of the frame's resolution: 1 = every pixel knows whether it is a
+   * tracked car or the world going by (at half, a car's outline against the streaks was cut in
+   * 2-pixel stairs), 0.5 = a quarter of the pixels (Low/Medium).
+   */
+  private vScale = 1;
+  get velScale() {
+    return this.vScale;
+  }
+  set velScale(k: number) {
+    if (k === this.vScale) return;
+    this.vScale = k;
+    this.setSize(this.w, this.h);
   }
 
   override setDepthTexture(depthTexture: THREE.Texture) {
@@ -338,13 +435,11 @@ export class MotionBlurEffect extends Effect {
   override setSize(width: number, height: number) {
     this.w = Math.max(4, width);
     this.h = Math.max(4, height);
-    // the velocity buffer is half the frame's resolution (a quarter of the pixels: the streaks are
-    // smooth, and the gather's depth compare only needs to know who is in front)
-    const vw = Math.max(2, Math.ceil(this.w / 2));
-    const vh = Math.max(2, Math.ceil(this.h / 2));
-    // tiles ~1/17 of the frame height: the neighbour max (±2 tiles, plus the half-tile jitter) then
-    // reaches ~15 % of the height, the longest half streak (maxLen / 2 = 15 %)
-    this.tile = Math.max(4, Math.min(64, Math.round(vh / 17)));
+    const vw = Math.max(2, Math.ceil(this.w * this.vScale));
+    const vh = Math.max(2, Math.ceil(this.h * this.vScale));
+    // tiles ~1/17 of the frame height: the neighbour max (±2 tiles) then reaches ~12 % of the
+    // height, past the longest half streak (maxLen / 2)
+    this.tile = Math.max(4, Math.min(128, Math.round(vh / 17)));
     const tw = Math.ceil(vw / this.tile);
     const th = Math.ceil(vh / this.tile);
     this.rtVel.setSize(vw, vh);
@@ -355,7 +450,6 @@ export class MotionBlurEffect extends Effect {
     (this.nbMat.uniforms.tiles.value as THREE.Vector2).set(tw, th);
     (this.nbMat.uniforms.frame.value as THREE.Vector2).set(this.w, this.h);
     (this.tileMat.uniforms.frame.value as THREE.Vector2).set(this.w, this.h);
-    (this.uniforms.get('tileUv')!.value as THREE.Vector2).set(tw > 0 ? 1 / tw : 0, th > 0 ? 1 / th : 0);
   }
 
   override update(renderer: THREE.WebGLRenderer) {

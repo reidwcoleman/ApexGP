@@ -1111,6 +1111,7 @@ export class Renderer {
   private readonly radialPass: EffectPass;
   private readonly motion: MotionBlurEffect;
   private readonly motionPass: EffectPass;
+  private readonly motionSmoothPass: EffectPass;
   private readonly onboard: OnboardEffect;
   private readonly onboardPass: EffectPass;
   private readonly caPass: EffectPass;
@@ -1202,6 +1203,10 @@ export class Renderer {
     this.motionPass = new EffectPass(camera, this.motion);
     this.motionPass.enabled = false;
     this.composer.addPass(this.motionPass);
+    // (the gather's second half: motionBlur.ts MotionSmoothEffect; on whenever the gather is)
+    this.motionSmoothPass = new EffectPass(camera, this.motion.smooth);
+    this.motionSmoothPass.enabled = false;
+    this.composer.addPass(this.motionSmoothPass);
 
     this.onboard = new OnboardEffect();
     this.onboardPass = new EffectPass(camera, this.onboard);
@@ -1408,7 +1413,7 @@ export class Renderer {
     const was = [this.radialPass.enabled, this.dofPass.enabled, this.lensPass.enabled, this.caPass.enabled, this.motionPass.enabled, this.onboardPass.enabled];
     const dofTarget = this.dof.target;
     const strength = this.radial.strength;
-    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = this.motionPass.enabled = this.onboardPass.enabled = true;
+    this.radialPass.enabled = this.dofPass.enabled = this.lensPass.enabled = this.caPass.enabled = this.motionPass.enabled = this.motionSmoothPass.enabled = this.onboardPass.enabled = true;
     this.radial.strength = 0.01;
     this.composer.render(0.016);
     this.radial.strength = strength;
@@ -1416,7 +1421,7 @@ export class Renderer {
     this.dofPass.enabled = was[1];
     this.lensPass.enabled = was[2];
     this.caPass.enabled = was[3];
-    this.motionPass.enabled = was[4];
+    this.motionPass.enabled = this.motionSmoothPass.enabled = was[4];
     this.onboardPass.enabled = was[5];
     this.dof.target = dofTarget;
     // (and the sun shafts' / lens flare's inner passes, which run only with the sun in view)
@@ -1436,7 +1441,7 @@ export class Renderer {
   compilePasses(all = false): Promise<unknown> {
     const r = this.renderer;
     const queued: Promise<unknown>[] = [];
-    const occasional = [this.radialPass, this.dofPass, this.lensPass, this.caPass, this.motionPass, this.onboardPass];
+    const occasional = [this.radialPass, this.dofPass, this.lensPass, this.caPass, this.motionPass, this.motionSmoothPass, this.onboardPass];
     const was = occasional.map((p) => p.enabled);
     const main = this.renderPass.enabled;
     const draw = r.render;
@@ -1524,6 +1529,7 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
     this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 12 : q === 'high' ? 20 : q === 'ultra' ? 26 : 32;
+    this.motion.velScale = q === 'low' || q === 'medium' ? 0.5 : 1;
     this.onboard.twoSided = q === 'high' || ultraUp(q);
     this.dynamicScale = 1;
     this.resize();
@@ -1975,6 +1981,7 @@ export class Renderer {
       if (w) (u.wheelInv.value as THREE.Matrix4).copy(w.matrixWorld).invert();
     }
     this.motionPass.enabled = ok;
+    this.motionSmoothPass.enabled = ok && this.qualityLevel !== 'low';
     // (from here on the TAA's wheel history is the frame before the next)
     this.prevWheelFrame = frame;
     for (const o of this.motionCars) {

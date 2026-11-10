@@ -29,7 +29,8 @@ import { keepData, loadData, pixelKey } from '../../core/pixelCache.ts';
  */
 export const ASPHALT_TILE = 2.0;
 export { ASPHALT_ALB_MAX };
-export const GRAVEL_TILE = 1.6;
+/** the photographed bed (public/textures/gravel_c.webp) is ~0.9 m of 10–20 mm chippings */
+export const GRAVEL_TILE = 0.9;
 /** the grass scan's tile (ambientCG Grass 001 is 1.4 m; the procedural fallback was drawn for 1.5) */
 export const GRASS_TILE = 1.4;
 
@@ -39,8 +40,8 @@ export interface GroundTextures {
   asphaltMean: THREE.Vector2;
   macro: THREE.DataTexture;
   macroN: THREE.DataTexture;
-  gravelAlbedo: THREE.DataTexture;
-  gravelNormal: THREE.DataTexture;
+  gravelAlbedo: THREE.Texture;
+  gravelNormal: THREE.Texture;
   grassAlbedo: THREE.Texture;
   grassNormal: THREE.Texture;
   fence: THREE.DataTexture;
@@ -71,6 +72,8 @@ const pre: GroundPixels = { asphalt: null, macro: null, macroN: null, gravel: nu
 let scanDone = false;
 let scanP: Promise<void> | null = null;
 let grassBmp: { c: ImageBitmap; n: ImageBitmap } | null = null;
+/** the photographed gravel bed (tools/build_gravel.py: RGB albedo + A height, and its normals) */
+let gravelBmp: { c: ImageBitmap; n: ImageBitmap } | null = null;
 
 const fetchBitmap = async (file: string) => {
   const r = await fetch(`${import.meta.env.BASE_URL}textures/${file}`);
@@ -259,6 +262,15 @@ export function loadAsphaltScan(): Promise<void> {
         console.warn('grass scan failed to load, drawing the procedural grass', e);
       }
     })(),
+    (async () => {
+      try {
+        const [c, n] = await Promise.all([fetchBitmap('gravel_c.webp'), fetchBitmap('gravel_n.webp')]);
+        gravelBmp = { c, n };
+        performance.mark('apex:gravel');
+      } catch (e) {
+        console.warn('gravel photo failed to load, drawing the procedural gravel', e);
+      }
+    })(),
   ]).then(() => undefined));
 }
 
@@ -281,7 +293,7 @@ export function makeGroundTextures(aniso: number): GroundTextures {
   // (no scan — it failed, or loadAsphaltScan never ran / hasn't finished — draws the procedural surface)
   const a = (scanDone ? pre.asphalt : null) ?? asphaltData(1024);
   // low-frequency data needs no anisotropic filtering (it is 4 fetches per road pixel: keep them cheap)
-  const g = pre.gravel ?? gravelData(512);
+  const g = gravelBmp ? { albedo: new Uint8Array(0), normal: new Uint8Array(0) } : (pre.gravel ?? gravelData(512));
   let grassAlbedo: THREE.Texture, grassNormal: THREE.Texture;
   if (grassBmp) {
     grassAlbedo = bitmapTex(grassBmp.c, true, Math.min(aniso, 8));
@@ -296,8 +308,8 @@ export function makeGroundTextures(aniso: number): GroundTextures {
     asphaltMean: new THREE.Vector2(a.meanA, a.meanH),
     macro: dataTex(pre.macro ?? macroData(1024), 1024, 1024, false, 1),
     macroN: dataTex(pre.macroN ?? macroNData(512), 512, 512, false, 1),
-    gravelAlbedo: dataTex(g.albedo, 512, 512, true, Math.min(aniso, 8)),
-    gravelNormal: dataTex(g.normal, 512, 512, false, Math.min(aniso, 8)),
+    gravelAlbedo: gravelBmp ? bitmapTex(gravelBmp.c, true, Math.min(aniso, 8)) : dataTex(g.albedo, 512, 512, true, Math.min(aniso, 8)),
+    gravelNormal: gravelBmp ? bitmapTex(gravelBmp.n, false, Math.min(aniso, 8)) : dataTex(g.normal, 512, 512, false, Math.min(aniso, 8)),
     grassAlbedo,
     grassNormal,
     fence: dataTex(pre.fence ?? fenceData(), 256, 1024, true, aniso),

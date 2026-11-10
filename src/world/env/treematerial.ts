@@ -368,7 +368,9 @@ float ignF( vec2 p ) { return ign( p + 5.588238 * mod( uFrame, 64.0 ) ); }
 
 /** RE_Direct wrapper: thin-leaf transmission + crown self-shadowing */
 const LEAF_LIGHT = /* glsl */ `
-const vec3 FOLIAGE_TINT = vec3( 1.04, 1.12, 0.84 );
+// (2026-11-10: was (1.04, 1.12, 0.84) with a 0.62 yellow transmission — back-lit crowns came out a
+// neon lime no camera records. Still a full summer green, but a leaf's own: deeper, less yellow)
+const vec3 FOLIAGE_TINT = vec3( 0.9, 0.98, 0.84 );
 varying float vLeafL;
 varying float vAOL;
 varying float vSunOcc;
@@ -376,7 +378,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
   IncidentLight dl = directLight;
   // (sun on the outside of a crown is strong — the bright, warm tops the footage shows — and the
   // inside sits in its own shade)
-  dl.color *= mix( 1.0, mix( 0.5, 1.35, vAOL ), vLeafL );
+  dl.color *= mix( 1.0, mix( 0.5, 1.18, vAOL ), vLeafL );
   // (the sun the woods upwind take, where the shadow maps have no casters: TREE_CANOPY_GLSL)
   dl.color *= 1.0 - 0.85 * vSunOcc;
   RE_Direct_Physical( dl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
@@ -390,7 +392,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
     // light through a leaf comes out a saturated yellow-green (albedo squared, renormalised)
     vec3 dc = material.diffuseColor;
     vec3 tc = dc * dc / max( max( dc.r, dc.g ), 1e-3 );
-    reflectedLight.directDiffuse += dl.color * tc * vec3( 1.0, 1.0, 0.5 ) * through * 0.62;
+    reflectedLight.directDiffuse += dl.color * tc * vec3( 0.92, 1.0, 0.62 ) * through * 0.36;
     // soft wrap on the lit side: a leafy mass never shows a hard N·L terminator
     float wrapL = saturate( ( dot( geometryNormal, directLight.direction ) + 0.35 ) / 1.35 ) - saturate( dot( geometryNormal, directLight.direction ) );
     reflectedLight.directDiffuse += dl.color * dc * wrapL * 0.25 * RECIPROCAL_PI;
@@ -512,7 +514,7 @@ ${GET_TANGENT_FRAME}`,
 // (a leaf's place in its spray: 1 at the front face, 0 at the back — the leaves behind sit in the
 // front ones' shade: leaf_n alpha)
 float gLeafS = 1.0;
-${LEAF_LIGHT.replace('mix( 0.5, 1.35, vAOL )', 'mix( 0.5, 1.35, vAOL ) * mix( 0.7, 1.0, gLeafS )')}`,
+${LEAF_LIGHT.replace('mix( 0.5, 1.18, vAOL )', 'mix( 0.5, 1.18, vAOL ) * mix( 0.7, 1.0, gLeafS )')}`,
       )
       .replace(
         '#include <lights_physical_fragment>',
@@ -558,6 +560,8 @@ if ( leafK > 0.5 ) {
   // foliage as a sim shows it on a summer race day: full, living, sunlit green (Assetto Corsa's Monza
   // park), a touch warmer than the scans; FOLIAGE_TINT is shared with the impostors so near and far match
   vec3 lc = lt.rgb * FOLIAGE_TINT;
+  // (a leaf's own saturation: the scans', a shade under — in full sun they ran to a lime no camera sees)
+  lc = mix( vec3( dot( lc, vec3( 0.25, 0.6, 0.15 ) ) ), lc, 0.84 );
   diffuseColor.rgb *= lc;
   // snow laden on the sprays: the paler, upper leaves carry it, the shaded inner ones stay dark
   if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.73, 0.78 ), uSnowCover * mix( 0.3, 0.72, smoothstep( 0.04, 0.2, lt.g ) ) );
@@ -867,7 +871,7 @@ varying vec2 vISph;
 varying vec2 vIFade;
 ${GET_TANGENT_FRAME}`,
       )
-      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.5, 1.35, vAOL )', 'mix( 0.5, 1.35, gImpAO ) * 0.86')}`)
+      .replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${LEAF_LIGHT.replace('varying float vLeafL;\nvarying float vAOL;', 'varying float vLeafL;\nvarying float vAOL;\nfloat gImpAO = 1.0;').replace('mix( 0.5, 1.18, vAOL )', 'mix( 0.5, 1.18, gImpAO ) * 0.86')}`)
       .replace(
         '#include <map_fragment>',
         `
@@ -887,6 +891,7 @@ vec4 ia = mix( ia0, ia1, vIW );
 diffuseColor.rgb = ia.rgb * vITint;
 // (the same foliage tint as the 3D trees, so near and far match)
 diffuseColor.rgb *= FOLIAGE_TINT;
+diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.25, 0.6, 0.15 ) ) ), diffuseColor.rgb, 0.84 );
 // (the far woods under snow: grey-white crowns, as the 3D trees' sprays)
 if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.66, 0.69, 0.75 ), uSnowCover * 0.5 * smoothstep( 0.02, 0.12, ia.g ) );
 `,

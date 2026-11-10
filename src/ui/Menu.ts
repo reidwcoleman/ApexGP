@@ -169,7 +169,7 @@ function forecastStrip(w: WeatherChoice, t: TimeChoice, laps: number, km: number
 }
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'];
-const SETTINGS_V = 3;
+const SETTINGS_V = 4;
 const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
 const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
 
@@ -403,14 +403,17 @@ export class Menu {
     if (!TIMES.includes(this.setup.time)) this.setup.time = 'random';
     if (typeof this.setup.assists !== 'object' || this.setup.assists === null) this.setup.assists = { ...DEFAULT_ASSISTS };
     else this.setup.assists = { ...DEFAULT_ASSISTS, ...this.setup.assists };
-    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'high', camera: 'chase', volume: 0.8, music: 0.35, autoQuality: true });
+    // (2026-11-10, Reid: the best picture the game can draw, whatever it costs — Ultra, and the governor
+    // no longer steps the level down on its own; the resolution still adapts. Settings › Graphics has
+    // the cheaper levels and "auto")
+    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'ultra', camera: 'chase', volume: 0.8, music: 0.35, autoQuality: false });
     // (driving cameras only: a save from before may hold the helicopter, the tactical map or the TV director)
     this.settings.camera = driveCamera(this.settings.camera);
     if (typeof this.settings.music !== 'number') this.settings.music = 0.35;
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
-    // older saves may have been stepped down by the automatic quality: start again from High
+    // older saves start again from Ultra, held (see above)
     if ((this.settings.v ?? 0) < SETTINGS_V) {
-      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'ultra' || this.settings.quality === 'tuned' ? this.settings.quality : 'high', autoQuality: true };
+      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'tuned' ? 'tuned' : 'ultra', autoQuality: false };
       save('apexgp.settings', this.settings);
     }
     for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'controls', 'pause', 'results'] as ScreenId[]) {

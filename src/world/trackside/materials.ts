@@ -1171,11 +1171,12 @@ float gRake = 0.0;
   {
     float far = smoothstep(0.03, 0.2, px);
     vec4 mD = texture2D(uMacro, vTrk * (1.0 / 2.3) + vec2(0.27, 0.61));
-    col *= 1.0 + far * (0.46 * (mD.g - 0.5) + 0.3 * (mC.g - 0.5));
+    // (halved with the photographed bed: at a low angle the 2 m clumps read as giant cobbles)
+    col *= 1.0 + far * (0.2 * (mD.g - 0.5) + 0.22 * (mC.g - 0.5));
     col *= 1.0 - far * 0.24 * smoothstep(0.5, 0.85, mB.g);
     // and the bed is never one stone: grey limestone in one load, brown river gravel in the next
     col = mix(col, col * vec3(0.86, 0.9, 0.98), smoothstep(0.4, 0.75, mA.g) * 0.6);
-    col = mix(col, col * vec3(1.08, 0.96, 0.82), smoothstep(0.55, 0.25, mA.g) * 0.5);
+    col = mix(col, col * vec3(1.08, 0.96, 0.82), smoothstep(0.55, 0.25, mA.g) * 0.25);
   }
   // (a grey-beige river gravel, not a sand-yellow: a shade deeper and greyer than it was — under the
   // richer grade a trap read as a pale beige plane, where the sims' (and the TV's) gravel is a
@@ -1199,7 +1200,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-10', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
+  patchGround(m, 'apex-ts-gravel-12', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
