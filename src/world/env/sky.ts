@@ -99,7 +99,10 @@ vec3 skyBg( vec3 d ) {
   // a sunny day's sky as a camera sees it (the visible dome only): the deep blue of the clear-air model
   // is only straight up — from ~40° down it pales through a soft, slightly milky blue to near white at
   // the horizon (aerosol in the boundary layer, which the single-layer model under-does)
-  if ( uEnv < 0.5 && uViewMilk > 0.001 ) c = mix( c, uViewMilkCol, uViewMilk * ( 0.12 + 0.88 * pow( h, 2.5 ) ) );
+  // (and the last ten degrees over the land much paler still, whatever the haze higher up: the deep
+  // blue ran all the way down to the treeline, which no photographed sky does — a long path through
+  // the boundary layer is near white on the clearest day)
+  if ( uEnv < 0.5 && uViewMilk > 0.001 ) c = mix( c, uViewMilkCol, min( 0.88, uViewMilk * ( 0.12 + 0.88 * pow( h, 2.5 ) ) + min( uViewMilk * 2.6, 0.55 ) * pow( h, 8.0 ) ) );
   return c;
 }
 

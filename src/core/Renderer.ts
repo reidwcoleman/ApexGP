@@ -1528,7 +1528,7 @@ export class Renderer {
     this.smaaPass.enabled = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
-    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 12 : q === 'high' ? 20 : q === 'ultra' ? 26 : 32;
+    this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 12 : q === 'high' ? 20 : 32;
     this.motion.velScale = q === 'low' || q === 'medium' ? 0.5 : 1;
     this.onboard.twoSided = q === 'high' || ultraUp(q);
     this.dynamicScale = 1;
