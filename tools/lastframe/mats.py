@@ -115,7 +115,8 @@ MATS = {
     'panel': M('wood_plank_wall', 1.8, (1.25, 1.05, 0.9), rough=0.55),
     'dplanks': M('dark_wooden_planks', 2.0, (0.8, 0.75, 0.7), rough=0.6),
     # the trenches
-    'mud': M('brown_mud_02', 3.2, (0.78, 0.72, 0.66), wet=1.0),
+    'mud': M('brown_mud_02', 3.2, (0.62, 0.56, 0.5), wet=1.0),
+    'mudwall': M('brown_mud_02', 2.2, (0.5, 0.44, 0.38), wet=0.6),
     'mudleaf': M('brown_mud_leaves_01', 3.0, (0.7, 0.66, 0.6), wet=0.8),
     'trenchw': M('excavated_soil_wall', 2.6, (0.78, 0.7, 0.62), wet=0.6),
     'nomans': M('burned_ground_01', 4.0, (0.5, 0.48, 0.45), wet=0.7),

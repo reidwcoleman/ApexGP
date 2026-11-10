@@ -121,6 +121,8 @@ elif TRENCH:
     fl = raw.get('flares')
     out['flares'] = dict(x0=fl['x0'], x1=fl['x1'], z0=-fl['y1'], z1=-fl['y0'], h=fl['h']) if fl else None
     out['sides'] = 1
+    # boards on the trench walls: where, which way they face, which board, how wide (game axes)
+    out['signs'] = [[round(g[0], 3), round(g[2], 3), round(-g[1], 3), g[3], -g[4], g[5], g[6]] for g in raw.get('signs') or []]
 elif not COVE and not WARD:
     import layout as BL
     out['weather'] = BL.WEATHER

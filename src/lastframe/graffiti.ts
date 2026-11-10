@@ -930,6 +930,119 @@ function paperAtlas(): THREE.CanvasTexture {
 type Room = { name: string; a: number[]; b: number[] };
 
 /** everything this file lays down */
+// ------------------------------------------------------------------ trench boards
+
+const SIGNS = ['PICCADILLY', 'BOND ST', 'REGENT ST', 'FRONT LINE \u2192', 'BN. H.Q.', 'SAP 4 \u2014 KEEP LOW', 'SNIPER!|KEEP YOUR HEAD DOWN', '\u2190 TO FRONT LINE',
+  'KAISERSTRASSE', 'LINDENWEG', 'BERLINER GASSE', 'VORDERER GRABEN \u2192', 'BTL. GEF. STAND', 'SAPPE 7 \u2014 B\u00dcCKEN!', 'ACHTUNG!|SCHARFSCH\u00dcTZE', '\u2190 ZUM VORDEREN GRABEN'];
+
+/** boards nailed up in a trench: two or three planks, weathered, the name painted on by hand, and the warnings */
+export function signAtlas(): THREE.CanvasTexture {
+  const COLS = 4, ROWS = 4, W = 2048, H = 2048, cw = W / COLS, ch = H / ROWS / 2;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H / 2;
+  const c = cv.getContext('2d')!;
+  const r = mulberry(1916);
+  SIGNS.forEach((t, i) => {
+    const x0 = (i % COLS) * cw, y0 = Math.floor(i / COLS) * ch;
+    c.save();
+    c.translate(x0, y0);
+    const n = 2 + Math.floor(r() * 2);
+    const mx = 10, my = 14;
+    const bh = (ch - my * 2) / n;
+    for (let k = 0; k < n; k++) {
+      const y = my + k * bh;
+      const base = 48 + Math.floor(r() * 26);
+      c.fillStyle = `rgb(${base + 22},${base + 8},${base - 10})`;
+      c.beginPath();
+      c.moveTo(mx + rnd(r, 0, 12), y + 2);
+      c.lineTo(cw - mx - rnd(r, 0, 12), y + rnd(r, 0, 4));
+      c.lineTo(cw - mx - rnd(r, 0, 8), y + bh - 3);
+      c.lineTo(mx + rnd(r, 0, 8), y + bh - rnd(r, 2, 6));
+      c.closePath();
+      c.fill();
+      // the grain, and the dark of the gaps between boards
+      c.save();
+      c.clip();
+      for (let g = 0; g < 26; g++) {
+        c.strokeStyle = `rgba(${r() < 0.5 ? '20,12,6' : '120,100,80'},${rnd(r, 0.08, 0.22)})`;
+        c.lineWidth = rnd(r, 1, 3);
+        const gy = y + rnd(r, 0, bh);
+        c.beginPath();
+        c.moveTo(0, gy);
+        c.bezierCurveTo(cw * 0.3, gy + rnd(r, -6, 6), cw * 0.6, gy + rnd(r, -6, 6), cw, gy + rnd(r, -4, 4));
+        c.stroke();
+      }
+      c.fillStyle = 'rgba(10,8,6,0.5)';
+      c.fillRect(0, y + bh - 4, cw, 4);
+      c.restore();
+      // the nails, a streak of rust under each
+      for (const nx of [mx + 22, cw - mx - 22]) {
+        c.fillStyle = '#2a1c12';
+        c.beginPath();
+        c.arc(nx, y + bh / 2, 4, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = 'rgba(90,40,15,0.35)';
+        c.fillRect(nx - 2, y + bh / 2, 4, rnd(r, 10, 30));
+      }
+    }
+    // the words, painted by somebody with a brush and not much time
+    const lines = t.split('|');
+    const paint = i % 8 === 6 ? '#b02618' : r() < 0.75 ? '#e6e1d4' : '#151210';
+    c.fillStyle = paint;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const fam = i % 2 ? '"LF Marker", "Marker Felt", sans-serif' : '"LF Block", Impact, sans-serif';
+    lines.forEach((ln, k) => {
+      let size = lines.length > 1 ? 64 : 92;
+      c.font = `${size}px ${fam}`;
+      while (c.measureText(ln).width > cw - 70 && size > 20) {
+        size -= 4;
+        c.font = `${size}px ${fam}`;
+      }
+      const ty = ch / 2 + (k - (lines.length - 1) / 2) * size * 1.05;
+      c.save();
+      c.translate(cw / 2, ty);
+      c.rotate(rnd(r, -0.025, 0.025));
+      c.globalAlpha = 0.92;
+      c.fillText(ln, 0, 0);
+      // the brush ran out here and there
+      c.globalCompositeOperation = 'destination-out';
+      for (let q = 0; q < 40; q++) {
+        c.globalAlpha = rnd(r, 0.1, 0.5);
+        c.fillRect(rnd(r, -cw / 2, cw / 2), rnd(r, -size / 2, size / 2), rnd(r, 4, 30), rnd(r, 1, 3));
+      }
+      c.restore();
+      if (r() < 0.6) {
+        c.save();
+        c.fillStyle = paint;
+        c.globalAlpha = 0.85;
+        for (let q = 0; q < 3; q++) c.fillRect(rnd(r, cw * 0.2, cw * 0.8), ty + size * 0.35, 3, rnd(r, 8, 40));
+        c.restore();
+      }
+    });
+    // mud splashed up from the duckboards
+    for (let q = 0; q < 60; q++) {
+      c.fillStyle = `rgba(40,28,16,${rnd(r, 0.15, 0.5)})`;
+      c.beginPath();
+      c.arc(rnd(r, 0, cw), ch - rnd(r, 0, ch * 0.35) ** 1.2, rnd(r, 1, 6), 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** the boards on a map's trench walls */
+export function trenchSigns(list: number[][]): THREE.Mesh {
+  const sheet = new Sheet(signAtlas(), 4, 4, 2, Math.max(1, list.length), 0.85, 'lfsign', 3);
+  for (const g of list) sheet.add(g[0], g[1], g[2], new THREE.Vector3(g[3], 0, g[4]), g[6], g[5], 0, 0.012);
+  return sheet.mesh;
+}
+
 export class Graffiti {
   readonly group = new THREE.Group();
   readonly paint = new Sheet(graffitiAtlas(), G_COLS, G_ROWS, 2, 640, 0.7, 'lfgraffiti', 2);

@@ -18,7 +18,7 @@ import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type Match
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
-import { Graffiti, graffitiFonts, markUp } from './graffiti.ts';
+import { Graffiti, graffitiFonts, markUp, trenchSigns } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
 const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6, trenches: 0 };
@@ -197,7 +197,7 @@ export class Game {
     }
     // star shells: in the scene from the start (at nothing), so one going up never recompiles a shader
     for (let i = 0; i < 3; i++) {
-      const l = new THREE.PointLight(0xfff1de, 0, 130, 1.15);
+      const l = new THREE.PointLight(0xfff1de, 0, 140, 1.0);
       this.flareLights.push(l);
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(14, 12.5, 10.5), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
       sp.visible = false;
@@ -330,6 +330,8 @@ export class Game {
     // old blood, where the map says
     for (const s of L.map.stains ?? []) this.fx.stain(s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
     // what people wrote on the walls, and the rooms where it went worst
+    const signs = (L.map as unknown as { signs?: number[][] }).signs;
+    if (signs?.length) this.scene.add(trenchSigns(signs));
     if (!LF.sunOn && MAP_ID !== 'trenches') {
       const gr = new Graffiti();
       this.scene.add(gr.group);
@@ -1328,7 +1330,7 @@ export class Game {
       const sway = Math.sin(this.time * 1.7 + f.id) * 0.9;
       const fl = 0.86 + 0.1 * Math.sin(this.time * 23 + f.id * 3) + 0.06 * Math.sin(this.time * 41 + f.id);
       l.position.set(f.x + sway, f.y, f.z + Math.cos(this.time * 1.3 + f.id) * 0.6);
-      l.intensity = 160 * f.k * fl;
+      l.intensity = 50 * f.k * fl;
       sp.visible = f.k > 0.01;
       sp.position.copy(l.position);
       sp.material.opacity = Math.min(1, f.k * 1.4);

@@ -26,7 +26,7 @@ ROOF = -0.4        # underside of a dugout or tunnel roof
 UB = -6.0          # the bottom of the ground
 
 SKY = dict(hdri='rooftop_night', strength=0.75, tint=(0.36, 0.4, 0.52))
-WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.55, sky=[0.1, 0.11, 0.14], wb=[1.0, 1.0, 1.02])
+WEATHER = dict(key=0.13, rain=1, wet=1, fog=1.85, sky=[0.1, 0.11, 0.14], wb=[1.0, 1.0, 1.02])
 VOLUME = dict(step=[2, 1.15, 2], min=[-4, -4.6, -84], dim=[64, 12, 44])
 
 WARM = (1.0, 0.62, 0.32)
@@ -54,8 +54,8 @@ def build():
     m.stains = []
     m.flares = dict(x0=22.0, x1=98.0, y0=6.0, y1=74.0, h=42.0)
 
-    def K(kind, x, y, z=0.0, r=0.0):
-        m.unit('ward', [kind], x, y, z, rot=r, far=True)
+    def K(kind, x, y, z=0.0, r=0.0, sc=(1, 1, 1)):
+        m.unit('ward', [kind], x, y, z, rot=r, sc=sc, far=True)
 
     # ---------------------------------------------------------------------------------------------------- one side
     # trenches as polylines (lane centres), then everything else in rectangles
@@ -98,9 +98,43 @@ def build():
     # (x, y, radius where the bowl meets the ground): one side's, turned round for the other, and the mine crater
     craters_one = [(36.5, 27.0, 2.4), (42.5, 60.5, 2.8), (47.5, 36.5, 2.3), (33.5, 70.5, 2.1), (51.0, 13.0, 2.6), (50.5, 66.5, 2.0), (40.0, 6.5, 2.2)]
     craters = craters_one + [(*mirror(c[0], c[1]), c[2]) for c in craters_one] + [(60.0, 40.0, 6.5)]
+    # and the shelling: the ground between the wire is holes on holes
+    avoid = lanes + [o[:4] for o in outs_all] + [r for t in tun_all for r in t] + [d[0] for d in dug_all] + [(51.5, 3.5, 68.5, 15.5), (54.0, 64.5, 66.0, 73.5)]
+    wires = [39.0, 44.5, XW - 39.0, XW - 44.5]
+
+    def free_for(x, y, r, gap=1.0):
+        if not (3 + r < x < XW - 3 - r and 3 + r < y < YW - 3 - r):
+            return False
+        for q in avoid:
+            if q[0] - r - gap < x < q[2] + r + gap and q[1] - r - gap < y < q[3] + r + gap:
+                return False
+        for wx in wires:
+            if abs(x - wx) < r * 1.45 + 0.9:
+                return False
+        for c in craters:
+            if math.hypot(x - c[0], y - c[1]) < (r + c[2]) * 1.1 + 0.3:
+                return False
+        return True
+    for _ in range(900):
+        if len(craters) >= 31 + 2 * 26:
+            break
+        r = R.uniform(1.2, 2.4) if R.random() < 0.8 else R.uniform(2.4, 3.2)
+        x, y = R.uniform(28.0, 59.0), R.uniform(4.0, 76.0)
+        mx, my = mirror(x, y)
+        if free_for(x, y, r) and math.hypot(x - mx, y - my) > 2 * r * 1.2 + 1:
+            craters.append((x, y, r))
+            if free_for(mx, my, r):
+                craters.append((mx, my, r))
+    # a few behind the lines too: the other side's guns reach there
+    for _ in range(200):
+        r = R.uniform(1.1, 1.8)
+        x, y = R.uniform(2.0, 21.0), R.uniform(4.0, 76.0)
+        if free_for(x, y, r, 1.4) and free_for(*mirror(x, y), r, 1.4) and sum(1 for c in craters if c[0] < 21.5) < 8:
+            craters.append((x, y, r))
+            craters.append((*mirror(x, y), r))
 
     def crater_sq(c):
-        h = c[2] * 0.7
+        h = c[2]
         return (c[0] - h, c[1] - h, c[0] + h, c[1] + h)
 
     # ------------------------------------------------------------------------------------------------ the ground
@@ -108,24 +142,24 @@ def build():
     holes_u = lanes + [o[:4] for o in outs_all] + [d[0] for d in dug_all] + [r for t in tun_all for r in t] + [crater_sq(c) for c in craters]
     # the play area, then the field beyond it all round (cheaper in the bake, never walked)
     for r in rects_minus(-1.0, -1.0, XW + 1.0, YW + 1.0, holes_u):
-        box((r[0], r[1], F), (r[2], r[3], 0.0), 'nomans', faces={'+z': 'nomans', '-x': 'trenchw', '+x': 'trenchw', '-y': 'trenchw', '+y': 'trenchw'}, tag='ground', density=0.32)
+        box((r[0], r[1], F), (r[2], r[3], 0.0), 'mud', faces={'+z': 'mud', '-x': 'mudwall', '+x': 'mudwall', '-y': 'mudwall', '+y': 'mudwall'}, tag='ground', density=0.32)
     for r in rects_minus(-70, -60, XW + 70, YW + 60, [(-1.0, -1.0, XW + 1.0, YW + 1.0)]):
-        box((r[0], r[1], -1.0), (r[2], r[3], 0.0), 'nomans', tag='ground', density=0.05)
+        box((r[0], r[1], -1.0), (r[2], r[3], 0.0), 'mud', tag='ground', density=0.05)
     # lower layer: under the trench floor, cut for the dugouts and the covered way (whose floors are lower) and the mine crater
     deep = [c for c in craters if min(2.3, c[2] * 0.42) > -F - 0.05]
     holes_l = [d[0] for d in dug_all] + [r for t in tun_all for r in t] + [crater_sq(c) for c in deep]
     for r in rects_minus(-1.0, -1.0, XW + 1.0, YW + 1.0, holes_l):
-        box((r[0], r[1], UB), (r[2], r[3], F), 'mud', faces={'+z': 'mud', '-x': 'trenchw', '+x': 'trenchw', '-y': 'trenchw', '+y': 'trenchw'}, tag='under', density=0.5)
+        box((r[0], r[1], UB), (r[2], r[3], F), 'mud', faces={'+z': 'mud', '-x': 'mudwall', '+x': 'mudwall', '-y': 'mudwall', '+y': 'mudwall'}, tag='under', density=0.5)
     for d in dug_all:
         x0, y0, x1, y1 = d[0]
         box((x0, y0, UB), (x1, y1, TF), 'duck', tag='floor', density=0.6)
         # the roof: timber under a metre of earth
-        box((x0, y0, ROOF), (x1, y1, 0.0), 'nomans', faces={'-z': 'revet', '+z': 'nomans', '-x': 'revet', '+x': 'revet', '-y': 'revet', '+y': 'revet'}, tag='under', density=0.3)
+        box((x0, y0, ROOF), (x1, y1, 0.0), 'mud', faces={'-z': 'revet', '+z': 'mud', '-x': 'revet', '+x': 'revet', '-y': 'revet', '+y': 'revet'}, tag='under', density=0.3)
     for t in tun_all:
         for r in t:
             box((r[0], r[1], UB), (r[2], r[3], TF), 'mud', tag='floor', density=0.5)
         run = t[1]
-        box((run[0], run[1] - 0.3, ROOF), (run[2], run[3] + 0.3, 0.0), 'nomans', faces={'-z': 'revet', '+z': 'nomans', '-x': 'revet', '+x': 'revet', '-y': 'revet', '+y': 'revet'}, tag='under', density=0.3)
+        box((run[0], run[1] - 0.3, ROOF), (run[2], run[3] + 0.3, 0.0), 'mud', faces={'-z': 'revet', '+z': 'mud', '-x': 'revet', '+x': 'revet', '-y': 'revet', '+y': 'revet'}, tag='under', density=0.3)
     for c in deep:
         x0, y0, x1, y1 = crater_sq(c)
         box((x0, y0, UB), (x1, y1, -2.6), 'mud', tag='floor', density=0.3)
@@ -134,8 +168,11 @@ def build():
     for c in craters:
         cx, cy, ri = c
         dep = min(2.3, ri * 0.42)
-        h = ri * 0.7
+        h = ri
         K(f'crater_{int(round(ri * 10))}', cx, cy, 0.0, R.uniform(0, 6.28))
+        # rain lies in most of them: a sheet of black water at the bottom, its shore wherever the bowl comes up through it
+        if R.random() < 0.62:
+            K(f'pool_{R.randint(1, 4)}', cx, cy, -dep * 0.62, R.uniform(0, 6.28), (0.75 * ri, 0.75 * ri, 1))
         zf = lambda r: -dep * max(0.0, math.cos(math.pi / 2 * min(1.0, r / ri))) ** 1.2
         n = max(3, int(math.ceil(dep / 0.36)) + 1)
         for k in range(n):
@@ -191,35 +228,76 @@ def build():
     for r in lanes:
         for (ax, x0, y0, x1, y1) in lane_runs([r]):
             L = (y1 - y0) if ax == 'y' else (x1 - x0)
-            # duckboards down the middle: two rails and the slats over them
-            if ax == 'y':
-                cx = (x0 + x1) / 2
-                for dx in (-0.26, 0.0, 0.26):
-                    box((cx + dx - 0.11, y0 + 0.3, F), (cx + dx + 0.11, y1 - 0.3, F + 0.05), 'duck', collide=False, density=0.2)
-            else:
-                cy = (y0 + y1) / 2
-                for dy in (-0.26, 0.0, 0.26):
-                    box((x0 + 0.3, cy + dy - 0.11, F), (x1 - 0.3, cy + dy + 0.11, F + 0.05), 'duck', collide=False, density=0.2)
-            # revetment on both walls: planks or corrugated iron held by posts, bay by bay
+            # duckboards down the middle on their legs, and the water they're there for
+            k = 0
+            t = 1.0
+            while t < L - 1.0:
+                if ax == 'y':
+                    x, y, rot = (x0 + x1) / 2 + R.uniform(-0.05, 0.05), y0 + t, R.uniform(-0.03, 0.03)
+                else:
+                    x, y, rot = x0 + t, (y0 + y1) / 2 + R.uniform(-0.05, 0.05), math.pi / 2 + R.uniform(-0.03, 0.03)
+                if not blocked_at(x, y, 0.2):
+                    K(f'duck_{R.randint(1, 6)}', x, y, F, rot)
+                    if R.random() < 0.38:
+                        K(f'pool_{R.randint(1, 4)}', x + R.uniform(-0.15, 0.15), y + R.uniform(-0.4, 0.4), F + 0.03, rot + R.uniform(-0.2, 0.2))
+                t += 2.0
+                k += 1
+            # revetment on both walls, a few metres of one kind then another (never across a way through the wall)
+            def opening(px, py):
+                for q in holes_u:
+                    if q is r:
+                        continue
+                    if q[0] < px < q[2] and q[1] < py < q[3]:
+                        return True
+                return False
+
+            def wall_clear(a_, b_, side_):
+                for t_ in (a_ + 0.05, (a_ + b_) / 2, b_ - 0.05):
+                    if ax == 'y':
+                        if opening((x1 if side_ > 0 else x0) + side_ * 0.3, t_):
+                            return False
+                    elif opening(t_, (y1 if side_ > 0 else y0) + side_ * 0.3):
+                        return False
+                return True
+            # kinds: sandbags, woven hurdles, corrugated iron, planks, all held back by posts
             for side in (-1, 1):
                 p = 0.0
-                while p < L - 0.5:
-                    run = min(R.uniform(2.6, 4.2), L - p)
-                    mat = 'revet' if R.random() < 0.6 else 'riron'
-                    top = R.uniform(-0.45, -0.15)
+                while p < L - 0.6:
+                    kind = R.choices(['sb', 'wattle', 'iron', 'planks'], [0.36, 0.3, 0.2, 0.14])[0]
+                    run = min(2.0 * R.randint(1, 3), L - p)
                     if ax == 'y':
                         wx = x1 if side > 0 else x0
-                        a, b = y0 + p, y0 + p + run
-                        box((wx - side * 0.05 - 0.02, a, F), (wx - side * 0.05 + 0.02, b, top), mat, collide=False, density=0.3)
-                        for q in (a + 0.1, b - 0.1):
-                            box((wx - side * 0.11 - 0.05, q - 0.05, F), (wx - side * 0.11 + 0.05, q + 0.05, top + 0.12), 'revet', collide=False, density=0.25)
+                        face_rot = -math.pi / 2 if side > 0 else math.pi / 2
                     else:
                         wy = y1 if side > 0 else y0
-                        a, b = x0 + p, x0 + p + run
-                        box((a, wy - side * 0.05 - 0.02, F), (b, wy - side * 0.05 + 0.02, top), mat, collide=False, density=0.3)
-                        for q in (a + 0.1, b - 0.1):
-                            box((q - 0.05, wy - side * 0.11 - 0.05, F), (q + 0.05, wy - side * 0.11 + 0.05, top + 0.12), 'revet', collide=False, density=0.25)
-                    p += run + R.uniform(0.0, 0.8)
+                        face_rot = 0.0 if side > 0 else math.pi
+                    if kind in ('sb', 'wattle') and run >= 1.9:
+                        q = p + 1.0
+                        while q <= p + run - 0.95:
+                            lo_ = (y0 if ax == 'y' else x0) + q - 1.0
+                            if not wall_clear(lo_, lo_ + 2.0, side):
+                                q += 2.0
+                                continue
+                            if ax == 'y':
+                                ux, uy = wx - side * 0.02, y0 + q
+                            else:
+                                ux, uy = x0 + q, wy - side * 0.02
+                            K(f'{"sbwall" if kind == "sb" else "wattle"}_{R.randint(1, 5)}', ux, uy, F, face_rot)
+                            q += 2.0
+                    elif wall_clear((y0 if ax == 'y' else x0) + p, (y0 if ax == 'y' else x0) + p + run, side):
+                        mat = 'riron' if kind == 'iron' else 'revet'
+                        top = R.uniform(-0.45, -0.15)
+                        if ax == 'y':
+                            a, b = y0 + p, y0 + p + run
+                            box((wx - side * 0.05 - 0.02, a, F), (wx - side * 0.05 + 0.02, b, top), mat, collide=False, density=0.3)
+                            for q in (a + 0.1, b - 0.1):
+                                box((wx - side * 0.11 - 0.05, q - 0.05, F), (wx - side * 0.11 + 0.05, q + 0.05, top + 0.12), 'revet', collide=False, density=0.25)
+                        else:
+                            a, b = x0 + p, x0 + p + run
+                            box((a, wy - side * 0.05 - 0.02, F), (b, wy - side * 0.05 + 0.02, top), mat, collide=False, density=0.3)
+                            for q in (a + 0.1, b - 0.1):
+                                box((q - 0.05, wy - side * 0.11 - 0.05, F), (q + 0.05, wy - side * 0.11 + 0.05, top + 0.12), 'revet', collide=False, density=0.25)
+                    p += run
 
     # the fire step and the parapet along every run of the fire trenches that faces the other side
     for r in fronts_all:
@@ -231,7 +309,8 @@ def build():
             y = y0 + 1.6
             while y < y1 - 1.6:
                 y2 = min(y + 2.0, y1 - 1.6)
-                if not blocked_at(wall - sd * 0.5, (y + y2) / 2, 1.2) and y2 - y > 0.9:
+                beyond = any(q is not r and q[0] < wall + sd * 0.3 < q[2] and q[1] - 1.0 < yy_ < q[3] + 1.0 for q in holes_u for yy_ in (y, (y + y2) / 2, y2))
+                if not beyond and not blocked_at(wall - sd * 0.5, (y + y2) / 2, 1.2) and y2 - y > 0.9:
                     # two treads: you stand on the top one to see over, step down to be under it
                     a1, a2 = sorted((wall - sd * 0.9, wall - sd * 0.45))
                     b1, b2 = sorted((wall - sd * 0.45, wall))
@@ -241,6 +320,14 @@ def build():
                     sx = wall + sd * 0.4
                     K(f'sandbag2_{R.randint(1, 6)}', sx, (y + y2) / 2, 0.0, math.pi / 2)
                     m.invisible((min(sx - 0.3, sx + 0.3), y, 0.0), (max(sx - 0.3, sx + 0.3), y2, 0.24))
+                    # now and then a steel loophole plate set in the bags, for a sniper
+                    if R.random() < 0.28:
+                        ym = (y + y2) / 2 + R.uniform(-0.4, 0.4)
+                        px0 = sx - sd * 0.2
+                        box((px0 - 0.025, ym - 0.3, 0.0), (px0 + 0.025, ym - 0.04, 0.55), 'rmetal', tag='counter', density=0.4)
+                        box((px0 - 0.025, ym + 0.04, 0.0), (px0 + 0.025, ym + 0.3, 0.55), 'rmetal', tag='counter', density=0.4)
+                        box((px0 - 0.025, ym - 0.04, 0.0), (px0 + 0.025, ym + 0.04, 0.3), 'rmetal', tag='counter', density=0.4)
+                        box((px0 - 0.025, ym - 0.04, 0.4), (px0 + 0.025, ym + 0.04, 0.55), 'rmetal', tag='counter', density=0.4)
                     # and higher on the back lip (the parados)
                     px = (x0 if sd > 0 else x1) - sd * 0.4
                     if R.random() < 0.7:
@@ -423,6 +510,85 @@ def build():
         for k in range(4):
             prop('ammo_box', gx + R.uniform(-1.2, 1.2), gy + (1.6 if rot == 0 else -1.6) + R.uniform(-0.3, 0.3), rot=R.uniform(0, 6.28), collide=False)
 
+    # ------------------------------------------------------------------------------------------------ what the shelling left
+    def ground_free(x, y, r=1.2):
+        if not free_for(x, y, 0.2, r):
+            return False
+        return True
+    # heaps of thrown-up earth to get behind
+    n = 0
+    for _ in range(400):
+        if n >= 12:
+            break
+        x, y = R.uniform(28.0, 58.0), R.uniform(5.0, 75.0)
+        if not (ground_free(x, y, 2.4) and ground_free(*mirror(x, y), 2.4)):
+            continue
+        a = R.uniform(0, 6.28)
+        for (px, py, rr) in ((x, y, a), (*mirror(x, y), a + math.pi)):
+            K(f'spoil_{R.randint(1, 5)}', px, py, 0.0, rr)
+            m.invisible((px - 1.3, py - 1.3, 0.0), (px + 1.3, py + 1.3, 0.16))
+            m.invisible((px - 0.7, py - 0.7, 0.16), (px + 0.7, py + 0.7, 0.32))
+        avoid.append((x - 2.0, y - 2.0, x + 2.0, y + 2.0))
+        avoid.append((*[v - 2.0 for v in mirror(x, y)], *[v + 2.0 for v in mirror(x, y)]))
+        n += 1
+    # what was dropped: helmets, rifles, a stretcher, broken pickets and wire, boxes, boards, sheets of iron
+    junk = ['helmet'] * 6 + ['rifle'] * 3 + ['picket'] * 4 + ['ammo'] * 2 + ['plank'] * 3 + ['iron'] * 2 + ['stretcher', 'can']
+    n = 0
+    for _ in range(1600):
+        if n >= 48:
+            break
+        x, y = R.uniform(4.0, 58.0), R.uniform(3.0, 77.0)
+        if not (ground_free(x, y, 0.6) and ground_free(*mirror(x, y), 0.6)):
+            continue
+        j = R.choice(junk)
+        a = R.uniform(0, 6.28)
+        for (px, py, rr) in ((x, y, a), (*mirror(x, y), a + math.pi)):
+            if j == 'helmet':
+                K(f'helmet_{R.randint(1, 8)}', px, py, 0.0, rr)
+            elif j == 'rifle':
+                prop('bolt_action_rifle_7_62', px, py, z=0.04, rot=rr, collide=False, tilt=math.pi / 2)
+            elif j == 'picket':
+                K(f'picket_{R.randint(1, 5)}', px, py, 0.0, rr)
+            elif j == 'stretcher':
+                K('stretcher', px, py, 0.0, rr)
+            elif j == 'ammo':
+                prop('ammo_box', px, py, rot=rr, collide=False)
+            elif j == 'can':
+                prop(R.choice(['metal_jerrycan', 'wooden_bucket_02']), px, py, rot=rr, collide=False)
+            elif j == 'plank':
+                L_ = R.uniform(1.2, 2.6)
+                box((px - L_ / 2, py - 0.1, 0.0), (px + L_ / 2, py + 0.1, 0.04), 'revet', collide=False, density=0.2)
+            else:
+                box((px - 0.9, py - 0.5, 0.0), (px + 0.9, py + 0.5, 0.025), 'riron', collide=False, density=0.2)
+        n += 1
+    # scaling ladders against the front wall of the fire bays, for going over the top
+    for r in fronts_all:
+        for (ax, x0, y0, x1, y1) in lane_runs([r]):
+            if ax != 'y' or y1 - y0 < 6:
+                continue
+            sd = front_side(r)
+            wall = x1 if sd > 0 else x0
+            y = R.uniform(y0 + 2.0, y1 - 2.0)
+            if not blocked_at(wall, y, 1.3):
+                prop('wooden_ladder_02', wall - sd * 0.75, y, z=FS2, rot=(math.pi / 2 if sd > 0 else -math.pi / 2), collide=False, tilt=-0.28)
+    # the boards that name the trenches and warn you: one side's in English, the other's in German
+    m.signs = []
+    for k, pts in enumerate(comms):
+        (ax_, ay_), (bx_, by_) = pts[0], pts[1]
+        m.signs.append((ax_ + 2.4, ay_ + W / 2 - 0.02, F + 1.35, 0.0, -1.0, k, 0.95))
+        ex, ey = pts[-1]
+        m.signs.append((ex - 2.2, ey - W / 2 + 0.02, F + 1.35, 0.0, 1.0, 3, 0.95))
+    hq = dugouts[2][0]
+    m.signs.append((hq[0] + 0.02, hq[1] - 0.2, F + 1.0, -1.0, 0.0, 4, 0.8))
+    m.signs.append((28.2 + 0.02, TY + 1.0 + 0.2, F + 1.4, -1.0, 0.0, 5, 0.85))
+    for (x, y) in ((22.8 + 0.02, 44.0), (22.8 + 0.02, 8.0), (25.8 + 0.02, 15.0)):
+        m.signs.append((x, y, F + 1.45, 1.0, 0.0, 6, 0.9))
+    m.signs.append((11.0 - W / 2 + 0.02, 44.0, F + 1.3, 1.0, 0.0, 7, 0.8))
+    one = list(m.signs)
+    for (x, y, z, nx, ny, cell, w) in one:
+        mx_, my_ = mirror(x, y)
+        m.signs.append((mx_, my_, z, -nx, -ny, cell + 8, w))
+
     # ------------------------------------------------------------------------------------------------ the edges
     for (a, b) in (((-1.5, -1.5), (XW + 1.5, -1.0)), ((-1.5, YW + 1.0), (XW + 1.5, YW + 1.5)), ((-1.5, -1.0), (-1.0, YW + 1.0)), ((XW + 1.0, -1.0), (XW + 1.5, YW + 1.0))):
         m.invisible((a[0], a[1], UB), (b[0], b[1], 8.0))
@@ -433,6 +599,31 @@ def build():
     for x in range(0, int(XW), 3):
         for y in (-2.2, YW + 2.2):
             K(f'wire_{R.randint(1, 6)}', x + 1.5, y, 0.0, 0.0)
+    # a wood the shelling went through: what's left of it stands among one end of each side's trenches, trunks
+    # snapped off at all heights, some down across the ground; behind it, the wood that's still a wood
+    n = 0
+    for _ in range(1500):
+        if n >= 34:
+            break
+        x, y = R.uniform(2.0, 34.0), R.uniform(62.0, 78.0)
+        if not (free_for(x, y, 0.4, 0.9) and free_for(*mirror(x, y), 0.4, 0.9)):
+            continue
+        k = R.random()
+        a = R.uniform(0, 6.28)
+        for (px, py, rr) in ((x, y, a), (*mirror(x, y), a + math.pi)):
+            if k < 0.62:
+                prop(R.choice(['dead_tree_trunk', 'dead_tree_trunk_02']), px, py, rot=rr, scale=R.uniform(1.6, 3.0), collide=(0.28, 0.28, 3.0), tilt=R.uniform(-0.18, 0.18))
+            elif k < 0.8:
+                prop(R.choice(['dead_tree_trunk', 'dead_tree_trunk_02']), px, py, z=0.25, rot=rr, scale=R.uniform(1.2, 2.0), collide=False, tilt=R.choice([-1.35, 1.35]))
+            else:
+                prop(R.choice(['tree_stump_01', 'tree_stump_02']), px, py, rot=rr, scale=R.uniform(1.0, 1.6))
+        avoid.append((x - 0.6, y - 0.6, x + 0.6, y + 0.6))
+        n += 1
+    for k in range(40):
+        x, y = R.uniform(-30.0, 40.0), R.uniform(84.0, 104.0)
+        for (px, py) in ((x, y), mirror(x, y)):
+            prop('pine_tree_01', px, py, rot=R.uniform(0, 6.28), scale=R.uniform(0.9, 1.3), collide=False)
+
     # the horizon: shattered woods and a village gone to stumps of wall
     for k in range(70):
         a = k / 70 * 2 * math.pi + R.uniform(-0.04, 0.04)

@@ -565,6 +565,8 @@ def crater(b, rng, ri, dep):
     for k in range(1, nr):
         for u in range(nu):
             b.bm.faces.new((ring[k][u], ring[k + 1][u], ring[k + 1][(u + 1) % nu], ring[k][(u + 1) % nu])).material_index = j2 if k < nr * 0.55 else i
+    for f in b.bm.faces:
+        f.smooth = True
     # the outer edge tucked a hand under the ground, so no light comes through the seam
     out = [b.bm.verts.new((v.co.x * 1.01, v.co.y * 1.01, -0.08)) for v in ring[nr]]
     for u in range(nu):
@@ -638,7 +640,153 @@ def fieldgun(b, rng):
     obox(b, (0, -2.65, 0.12), (0.5, 0.12, 0.3), 0, G2, tilt=(0.4, 0))
 
 
-KINDS_EXTRA = dict(fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
+WATTLE = lambda: mat('lfwattle', (0.17, 0.12, 0.075), 0.9)
+STAKE = lambda: mat('lfstake', (0.2, 0.15, 0.1), 0.85)
+DUCKW = lambda: mat('lfduck', (0.2, 0.15, 0.1), 0.75)
+WATER = lambda: mat('lfpool', (0.018, 0.016, 0.012), 0.16)
+STEELH = lambda: mat('lfhelmet', (0.13, 0.14, 0.1), 0.55, 0.5)
+CANVAS = lambda: mat('lfcanvas', (0.26, 0.24, 0.17), 0.95)
+
+
+def sbwall(b, rng):
+    """sandbags laid up a trench wall as its revetment: one skin of bags 2 m along x, from the floor to near the top,
+    leaning back into the earth a little; origin at the foot of the face, the face looking along -y"""
+    bl, bh = 0.5, 0.15
+    courses = rng.randint(9, 12)
+    for c in range(courses):
+        z = bh * 0.45 + c * bh * 0.84
+        back = c * 0.022
+        off = (c % 2) * bl / 2
+        x = -1.0 + off - (bl / 2 if off else 0) + bl / 2
+        while x < 1.0:
+            if x - bl / 2 > -1.03 and x + bl / 2 < 1.03 and not (c == courses - 1 and rng.random() < 0.3):
+                pillow(b, (x + rng.uniform(-0.02, 0.02), 0.13 + back, z), (bl * rng.uniform(0.93, 1.02), 0.26, bh * rng.uniform(0.9, 1.1)),
+                       rng.uniform(-0.07, 0.07), BURLAP() if rng.random() < 0.55 else BURLAP2(), rng)
+            x += bl
+
+
+def wattle(b, rng):
+    """a hurdle of woven brushwood held to the trench wall by stakes: 2 m along x, 1.6 m high; origin at the foot of
+    the face, the face looking along -y"""
+    stakes = [-0.95 + k * 0.38 for k in range(6)]
+    for x in stakes:
+        rod(b, (x, 0.06, -0.05), (x + rng.uniform(-0.02, 0.02), 0.08, rng.uniform(1.55, 1.75)), 0.025, STAKE(), 6)
+    z = 0.06
+    k = 0
+    while z < 1.55:
+        ph = k % 2
+        prev = None
+        for i in range(14):
+            x = -1.0 + i / 13 * 2.0
+            # in front of one stake, behind the next
+            y = 0.07 + 0.03 * math.cos((x - stakes[0]) / 0.38 * math.pi + ph * math.pi)
+            p = Vector((x, y, z + 0.01 * math.sin(i * 0.7 + k)))
+            if prev is not None:
+                rod(b, prev, p, 0.016, WATTLE(), 4)
+            prev = p
+        z += rng.uniform(0.04, 0.05)
+        k += 1
+
+
+def duck(b, rng):
+    """a duckboard: two runners on short legs, slats across with gaps between, 2 m along y; origin on the trench floor"""
+    W_ = DUCKW()
+    h = rng.uniform(0.1, 0.16)
+    for x in (-0.28, 0.28):
+        obox(b, (x, 0, h - 0.04), (0.07, 2.0, 0.07), 0, W_)
+        for y in (-0.8, 0.0, 0.8):
+            obox(b, (x, y, (h - 0.075) / 2), (0.06, 0.06, h - 0.075), 0, W_)
+    for k in range(12):
+        y = -0.95 + k * 0.172
+        if rng.random() < 0.06:
+            continue
+        obox(b, (rng.uniform(-0.02, 0.02), y, h + 0.012), (0.72, 0.11, 0.025), rng.uniform(-0.04, 0.04), W_, tilt=(0, rng.uniform(-0.04, 0.04)))
+
+
+def pool(b, rng):
+    """standing water: a flat irregular sheet of it, about 1.6 x 2.4 m, a few cm deep; origin at its middle"""
+    i = b.idx(WATER())
+    n = 20
+    c = b.bm.verts.new((0, 0, 0.0))
+    ring = []
+    ph = [rng.uniform(0, 6.28) for _ in range(3)]
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        r = 1.0 + 0.18 * math.sin(2 * a + ph[0]) + 0.1 * math.sin(3 * a + ph[1]) + 0.06 * math.sin(5 * a + ph[2])
+        ring.append(b.bm.verts.new((math.cos(a) * r * 0.8, math.sin(a) * r * 1.2, 0.0)))
+    for k in range(n):
+        b.bm.faces.new((c, ring[k], ring[(k + 1) % n])).material_index = i
+
+
+def spoil(b, rng):
+    """a heap of thrown-up earth, lumpy: about 4 x 3 m and up to 0.45 m high; origin on the ground at its middle"""
+    i, j = b.idx(MUDK()), b.idx(MUDK2())
+    nu, nr = 24, 8
+    hgt = rng.uniform(0.3, 0.45)
+    ph = [rng.uniform(0, 6.28) for _ in range(4)]
+    ring = [[b.bm.verts.new((0, 0, hgt))]]
+    for k in range(1, nr + 1):
+        t = k / nr
+        row = []
+        for u in range(nu):
+            a = 2 * math.pi * u / nu
+            r = t * (1 + 0.15 * math.sin(3 * a + ph[0]) + 0.08 * math.sin(5 * a + ph[1]))
+            z = hgt * (1 - t * t) * (1 + 0.12 * math.sin(7 * a + ph[2] + t * 5)) - (0.05 if k == nr else 0)
+            row.append(b.bm.verts.new((math.cos(a) * r * 2.0, math.sin(a) * r * 1.5, z)))
+        ring.append(row)
+    for u in range(nu):
+        b.bm.faces.new((ring[0][0], ring[1][u], ring[1][(u + 1) % nu])).material_index = j
+    for k in range(1, nr):
+        for u in range(nu):
+            b.bm.faces.new((ring[k][u], ring[k + 1][u], ring[k + 1][(u + 1) % nu], ring[k][(u + 1) % nu])).material_index = i if (k + u) % 3 else j
+    for f in b.bm.faces:
+        f.smooth = True
+
+
+def helmet(b, rng):
+    """a steel helmet lying in the mud, shallow bowl and wide brim (the British one) or deep with a flared skirt (the
+    German), on its side or upturned; origin on the ground"""
+    i = b.idx(STEELH())
+    brit = rng.random() < 0.55
+    n, m_ = 16, 6
+    rows = []
+    for j in range(m_ + 1):
+        t = j / m_
+        if brit:
+            r, z = (0.17 * math.sin(t * math.pi / 2) if j < m_ else 0.2), (0.1 * math.cos(t * math.pi / 2) if j < m_ else 0.0)
+        else:
+            r, z = 0.15 * math.sin(t * math.pi / 2) + (0.03 * (t - 0.8) / 0.2 if t > 0.8 else 0), 0.17 * math.cos(t * math.pi / 2) - (0.04 if t > 0.8 else 0)
+        rows.append([Vector((math.cos(2 * math.pi * k / n) * r, math.sin(2 * math.pi * k / n) * r * (1.12 if not brit else 1.0), z)) for k in range(n)])
+    tilt = Matrix.Rotation(rng.choice([0.0, 0.9, math.pi]), 3, 'X')
+    lift = Vector((0, 0, 0.08 if True else 0))
+    vs = [[b.bm.verts.new(tilt @ p + lift) for p in row] for row in rows]
+    for j in range(m_):
+        for k in range(n):
+            b.bm.faces.new((vs[j][k], vs[j][(k + 1) % n], vs[j + 1][(k + 1) % n], vs[j + 1][k])).material_index = i
+
+
+def stretcher(b, rng):
+    """a canvas stretcher left on the ground: two poles, the canvas sagging between; origin on the ground"""
+    for x in (-0.28, 0.28):
+        rod(b, (x, -1.15, 0.06), (x, 1.15, 0.06), 0.022, STAKE(), 6)
+    quad(b, [(-0.27, -0.9, 0.05), (0.27, -0.9, 0.05), (0.27, 0.9, 0.04), (-0.27, 0.9, 0.04)], CANVAS())
+
+
+def picket(b, rng):
+    """a screw picket and the wire still on it, knocked askew, a coil of loose wire by it; origin on the ground"""
+    lean = rng.uniform(0.2, 0.6)
+    rod(b, (0, 0, 0), (lean * 0.6, 0.1, 1.0 - lean * 0.3), 0.014, PICKET(), 6)
+    prev = None
+    for k in range(60):
+        t = k / 59
+        a = t * 6 * 2 * math.pi
+        p = Vector((0.5 + t * 0.9 + math.sin(a) * 0.05, math.cos(a) * 0.3, 0.3 + math.sin(a) * 0.28))
+        if prev is not None:
+            rod(b, prev, p, 0.003, WIRE(), 3)
+        prev = p
+
+
+KINDS_EXTRA = dict(sbwall=sbwall, wattle=wattle, duck=duck, pool=pool, spoil=spoil, helmet=helmet, stretcher=stretcher, picket=picket, fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
 
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)

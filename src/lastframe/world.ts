@@ -21,6 +21,54 @@ export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' | 'trenches
 /** the map's own files; textures, guns and gear are shared */
 export const MB = BASE + (MAP_ID === 'block' ? '' : MAP_ID + '/');
 
+/** kit material -> [scan, metres per tile, tint, roughness] for the world-space projection */
+const TRIPLANAR: Record<string, [string, number, number[], number]> = {
+  lfmud: ['brown_mud_02', 3.2, [0.6, 0.54, 0.48], 0.6],
+  lfmud2: ['brown_mud_02', 2.6, [0.46, 0.41, 0.36], 0.35],
+  lfrust: ['rusty_metal_02', 1.6, [0.42, 0.34, 0.29], 0.75],
+  lfrust2: ['rusty_metal_02', 1.2, [0.3, 0.25, 0.22], 0.8],
+  // sacking, caked with the mud it's full of
+  lfburlap: ['brown_mud_02', 0.9, [0.62, 0.52, 0.36], 0.95],
+  lfburlap2: ['brown_mud_02', 0.8, [0.5, 0.42, 0.3], 0.95],
+  lfduck: ['wood_planks_dirt', 1.4, [0.62, 0.55, 0.48], 0.75],
+  lfstake: ['wood_planks_dirt', 1.2, [0.5, 0.44, 0.38], 0.8],
+  lfwattle: ['wood_planks_dirt', 0.6, [0.42, 0.34, 0.26], 0.9],
+};
+
+/** a map sampled from world position, blended over the three axes by the surface's facing */
+function triplanar(m: THREE.MeshStandardMaterial, scale: number) {
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    prev.call(m, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTriP;\nvarying vec3 vTriN;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        vec4 triP = vec4( transformed, 1.0 );
+        vec3 triN = objectNormal;
+        #ifdef USE_INSTANCING
+          triP = instanceMatrix * triP;
+          triN = mat3( instanceMatrix ) * triN;
+        #endif
+        vTriP = ( modelMatrix * triP ).xyz;
+        vTriN = mat3( modelMatrix ) * triN;`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTriP;\nvarying vec3 vTriN;')
+      .replace(
+        '#include <map_fragment>',
+        `vec3 triW = pow( abs( normalize( vTriN ) ), vec3( 4.0 ) );
+        triW /= triW.x + triW.y + triW.z + 1e-5;
+        vec3 tq = vTriP / ${scale.toFixed(2)};
+        vec4 triC = texture2D( map, tq.zy ) * triW.x + texture2D( map, tq.xz ) * triW.y + texture2D( map, tq.xy ) * triW.z;
+        diffuseColor *= triC;`,
+      );
+  };
+  const key = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => key() + '|tri' + scale;
+}
+
 export interface MapData {
   mats: { mat: string; verts: number; tris: number; pos: number; nor: number; uv: number; lm: number; idx: number }[];
   materials: Record<string, { tex: string; scale: number; tint: number[]; rough: number; wet: number; metal: number; nrm: number; emit: number[] | null; mono?: number }>;
@@ -560,7 +608,24 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         for (const t of [c.map, c.normalMap, c.roughnessMap]) if (t) t.anisotropy = 4;
         // plaster takes more light than the scans round it
         if (!map.terrain) c.color.multiplyScalar(tiled ? 0.74 : 0.8);
-        m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : {});
+        // the modelled earth, rust and timber have no UVs: give them the scans the world is made of, projected from the
+        // three axes in world space, so a crater's bowl is the same mud as the ground round it
+        const tri = TRIPLANAR[m0.name];
+        const tt = tri && texs.get(`tex/${tri[0]}_c.webp`);
+        if (tri && tt) {
+          c.map = tt;
+          c.color.setRGB(tri[2][0], tri[2][1], tri[2][2]);
+          c.roughness = tri[3];
+        }
+        // standing water: black, and what it reflects blurred by the rain on it
+        if (m0.name === 'lfpool') {
+          c.color.setRGB(0.006, 0.0055, 0.005);
+          c.roughness = 0.3;
+          c.metalness = 0;
+        }
+        // the volume's light is from all round: in black water only a little of the sky should show
+        m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : m0.name === 'lfpool' ? { spec: 0.22 } : {});
+        if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1]);
         table.set(m0, m);
       }
       return m;
