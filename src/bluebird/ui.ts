@@ -87,7 +87,8 @@ export const VIEWS: { name: string; icon: string; tip: string }[] = [
   { name: 'Snow', icon: 'flake', tip: 'Snow condition: green is perfect, red is worn out' },
   { name: 'Crowds', icon: 'people', tip: 'Where the skiers are' },
 ];
-type ReportTab = 'overview' | 'trails' | 'lifts' | 'events' | 'legend';
+type ReportTab = 'overview' | 'league' | 'trails' | 'lifts' | 'events' | 'legend';
+export interface Thought { text: string; good: boolean; who: string }
 
 export class UI {
   root: HTMLElement;
@@ -105,6 +106,9 @@ export class UI {
   onHost: (id: string) => void = () => {};
   onSeason: () => void = () => {};
   onFocusItem: (id: string) => void = () => {};
+  onDeal: (accept: boolean) => void = () => {};
+  /** the latest things guests have said, newest first */
+  voices: Thought[] = [];
   private el: Record<string, HTMLElement> = {};
   private labelNodes = new Map<string, HTMLElement>();
   private refreshT = 0;
@@ -125,6 +129,7 @@ export class UI {
         <div class="clock glass" id="u-clock"></div>
       </div>
       <div class="side">
+        <div class="glass league" id="u-league"></div>
         <div class="glass goals" id="u-goals"></div>
         <div class="glass biz" id="u-biz"></div>
         <div class="glass evcard" id="u-ev"></div>
@@ -150,7 +155,7 @@ export class UI {
       <div class="modal" id="u-modal"></div>
       <div class="radio glass" id="u-radio"></div>
     `;
-    for (const id of ['labels', 'badge', 'cash', 'chips', 'clock', 'goals', 'biz', 'ev', 'shop', 'shoptab', 'tabs', 'buyn', 'rows', 'fold', 'viewbar', 'legendk', 'toasts', 'celebrate', 'modal', 'radio', 'tour', 'sound']) this.el[id] = root.querySelector('#u-' + id)!;
+    for (const id of ['league', 'labels', 'badge', 'cash', 'chips', 'clock', 'goals', 'biz', 'ev', 'shop', 'shoptab', 'tabs', 'buyn', 'rows', 'fold', 'viewbar', 'legendk', 'toasts', 'celebrate', 'modal', 'radio', 'tour', 'sound']) this.el[id] = root.querySelector('#u-' + id)!;
     const on = (id: string, ev: string, f: (e: Event) => void) => this.el[id].addEventListener(ev, f);
     const closest = (e: Event, sel: string) => (e.target as HTMLElement).closest(sel) as HTMLElement | null;
     on('tabs', 'click', (e) => { const b = closest(e, 'button'); if (b) { this.tab = b.dataset.tab as Cat; this.renderShop(true); this.el.rows.scrollTop = 0; } });
@@ -170,7 +175,9 @@ export class UI {
       const r = closest(e, '[data-report]'); if (r) this.openReport(r.dataset.report as ReportTab);
     });
     on('biz', 'input', (e) => { const t = e.target as HTMLInputElement; if (t.id === 'u-price') { this.sim.s.autoPrice = false; this.sim.s.price = +t.value; this.sim.planDay(true); this.renderBiz(false); } });
+    on('league', 'click', () => this.openReport('league'));
     on('ev', 'click', (e) => {
+      const d = closest(e, '[data-deal]'); if (d) { this.onDeal(d.dataset.deal === '1'); this.renderEvents(); return; }
       const h = closest(e, '[data-host]'); if (h && !h.classList.contains('no')) { this.onHost(h.dataset.host!); this.renderEvents(); return; }
       const r = closest(e, '[data-report]'); if (r) this.openReport('events');
     });
@@ -237,6 +244,7 @@ export class UI {
     this.renderBadge();
     this.renderChips();
     this.renderClock();
+    this.renderLeague();
     this.renderGoals();
     this.renderBiz(false);
     this.renderEvents();
@@ -274,6 +282,18 @@ export class UI {
     setHtml(this.el.clock, `<div class="crow"><b>${sim.dayName} · Day ${sim.day}</b><span class="time">${fmtHour(sim.hour)}</span></div>
       <div class="crow small"><span class="st ${sim.isOpen ? 'live' : ''}">${status}</span><span class="wx">${icon(w.icon, 14)} ${w.name} ${Math.round(sim.temp)}°</span></div>
       <div class="crow small"><span class="speed">${([[0, ''], [1, '1×'], [2, '2×'], [4, '4×']] as [number, string][]).map(([n, l]) => `<button data-sp="${n}" class="${sp === n ? 'on' : ''}">${n === 0 ? icon('pause', 12) : l}</button>`).join('')}</span><span class="fc">${fc}</span></div>`);
+  }
+
+  private renderLeague() {
+    const sim = this.sim;
+    const st = sim.standings();
+    const rank = st.findIndex((r) => r.you) + 1;
+    const next = rank > 1 ? st[rank - 2] : null;
+    const me = sim.leagueScore;
+    const p = next ? Math.min(1, me / Math.max(1, next.guests)) : 1;
+    setHtml(this.el.league, `<div class="rk"><small>League</small><b>#${rank}</b></div>
+      <div class="lgm">${next ? `<span>Next: <b>${esc(next.name)}</b></span><span class="gap">${num(Math.max(0, next.guests - me))} guests/day to pass</span>` : `<span><b>Top of the league!</b></span><span class="gap">Best resort in the region</span>`}
+      <div class="gbar"><i style="width:${(p * 100).toFixed(1)}%"></i></div></div><span class="more">${icon('right', 14)}</span>`);
   }
 
   private renderGoals() {
@@ -323,7 +343,14 @@ export class UI {
   private renderEvents() {
     const sim = this.sim;
     const cur = sim.s.event;
-    let html = `<h4>${icon('flag', 13)} Events <button class="link" data-report="events">All ${icon('right', 12)}</button></h4>`;
+    let html = `<h4>${icon('flag', 13)} Events &amp; sponsors <button class="link" data-report="events">All ${icon('right', 12)}</button></h4>`;
+    const d = sim.s.deal;
+    if (d) {
+      const p = Math.min(1, sim.dealProgress());
+      html += d.state === 'offer'
+        ? `<div class="deal offer"><div class="dh"><span class="sp">${esc(d.sponsor)}</span><b>${money(d.reward)}</b></div><p>${esc(d.text)}</p><div class="dacts"><button data-deal="1">Accept</button><button data-deal="0" class="ghost">Not now</button></div></div>`
+        : `<div class="deal"><div class="dh"><span class="sp">${esc(d.sponsor)} contract</span><b>${money(d.reward)}</b></div><p>${esc(d.text)}</p><div class="gbar"><i style="width:${(p * 100).toFixed(0)}%"></i></div></div>`;
+    }
     if (cur) {
       const e = EVENTS.find((q) => q.id === cur.id)!;
       const end = sim.eventEnd(e);
@@ -421,8 +448,8 @@ export class UI {
   closeModal() { this.report = null; this.el.modal.classList.remove('on', 'wide'); }
   private renderReport() {
     const tab = this.report!;
-    const tabs: [ReportTab, string, string][] = [['overview', 'Overview', 'chart'], ['trails', 'Trails', 'ski'], ['lifts', 'Lifts', 'chair'], ['events', 'Events', 'flag'], ['legend', 'Legend', 'crown']];
-    const body = tab === 'overview' ? this.repOverview() : tab === 'trails' ? this.repTrails() : tab === 'lifts' ? this.repLifts() : tab === 'events' ? this.repEvents() : this.repLegend();
+    const tabs: [ReportTab, string, string][] = [['overview', 'Overview', 'chart'], ['league', 'League', 'trophy'], ['trails', 'Trails', 'ski'], ['lifts', 'Lifts', 'chair'], ['events', 'Events', 'flag'], ['legend', 'Legend', 'crown']];
+    const body = tab === 'overview' ? this.repOverview() : tab === 'league' ? this.repLeague() : tab === 'trails' ? this.repTrails() : tab === 'lifts' ? this.repLifts() : tab === 'events' ? this.repEvents() : this.repLegend();
     const html = `<div class="sheet report"><div class="rhead"><h2>${esc(this.sim.s.name)}</h2><div class="rtabs">${tabs.map(([k, n, ic]) => `<button data-rtab="${k}" class="${k === tab ? 'on' : ''}">${icon(ic, 15)} ${n}${k === 'legend' && this.sim.legendReady ? '<i class="dot"></i>' : ''}</button>`).join('')}</div><button class="x" data-close="1">${icon('x', 18)}</button></div><div class="rbody">${body}</div></div>`;
     const m = this.el.modal;
     if (m.dataset.h !== html) { const sc = m.querySelector('.rbody')?.scrollTop ?? 0; m.dataset.h = html; m.innerHTML = html; const rb = m.querySelector('.rbody'); if (rb) rb.scrollTop = sc; }
@@ -441,11 +468,19 @@ export class UI {
       <section><h3>Income, last two weeks</h3><div class="chart">${chart}</div><div class="ilegend wrap">${INCOME_KEYS.map(([, n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join('')}</div></section>
       <section><h3>Today so far <b class="g">${money(sim.todayIncome)}</b></h3>${src}</section>
       <section><h3>Rating <b>${sim.starTarget.toFixed(1)}</b> ${stars(sim.starTarget, 14)}</h3>${rr.map(([n, v, mx, ic, up]) => `<div class="rr ${v / mx < 0.5 ? 'low' : ''}">${icon(ic, 13)}<span>${n}</span><i><b style="width:${Math.min(100, (v / mx) * 100)}%"></b></i>${v / mx < 0.85 && up && ITEM_BY[up] && !this.sim.lockReason(up) ? `<button data-up="${up}">Improve</button>` : '<em></em>'}</div>`).join('')}</section>
+      <section class="voices"><h3>What guests are saying</h3>${this.voices.length ? this.voices.slice(0, 7).map((v) => `<div class="voice ${v.good ? 'good' : 'bad'}"><i>${esc(v.who)}</i><span>“${esc(v.text)}”</span></div>`).join('') : '<p class="note">Open the gates and listen in.</p>'}</section>
       <section><h3>Records</h3><div class="recs">
         <div><small>Best day</small><b>${num(s.best)} guests</b></div><div><small>Best takings</small><b>${money(s.bestIncome)}</b></div>
         <div><small>Guests all time</small><b>${num(s.lifetime)}</b></div><div><small>Earned this season</small><b>${money(s.earned)}</b></div>
-        <div><small>Events hosted</small><b>${s.evCount}</b></div><div><small>Ticket price</small><b>$${s.price}</b></div>
+        <div><small>Events hosted</small><b>${s.evCount}</b></div><div><small>Sponsor deals won</small><b>${s.deals}</b></div>
       </div></section></div>`;
+  }
+  private repLeague() {
+    const sim = this.sim;
+    const st = sim.standings();
+    const max = Math.max(...st.map((r) => r.guests), 1);
+    return `<div class="league-t">${st.map((r, i) => `<div class="lrow ${r.you ? 'you' : ''}"><b class="pos">${i + 1}</b><span class="nm"><i style="background:${r.color}"></i>${esc(r.name)}${r.you ? ' <em>you</em>' : ''}</span><div class="lbar"><i style="width:${((r.guests / max) * 100).toFixed(1)}%;background:${r.you ? 'linear-gradient(90deg,#db951c,#f6bd47)' : r.color}"></i></div><span class="gv">${num(r.guests)} <small>a day</small></span></div>`).join('')}</div>
+      <p class="note">Your score is your best day of the last three. Pass a rival and the league pays a bonus and gets people talking. Rivals grow a little every day too.</p>`;
   }
   private repTrails() {
     const sim = this.sim;
@@ -584,9 +619,9 @@ export class UI {
   dayEnd(day: number, visitors: number, income: number, starsN: number, best: boolean) {
     this.toast(`<div class="de"><small>Day ${day} wrap-up${best ? ' · <b class="rec">New record!</b>' : ''}</small><div><span>${icon('people', 14)} ${num(visitors)} guests</span><span>${icon('ticket', 14)} +${money(income)}</span><span>${icon('star', 14)} ${starsN.toFixed(1)}</span></div></div>`, best ? 'gold' : 'info', 6000);
   }
-  celebrate(title: string, sub: string, kind: 'level' | 'milestone' | 'event' = 'level') {
+  celebrate(title: string, sub: string, kind: 'level' | 'milestone' | 'event' | 'league' = 'level') {
     const c = this.el.celebrate;
-    c.innerHTML = `<div class="cb ${kind}"><small>${kind === 'level' ? 'Resort level up' : kind === 'event' ? 'Event wrapped up' : 'Milestone'}</small><b>${esc(title)}</b><span>${sub}</span></div>`;
+    c.innerHTML = `<div class="cb ${kind}"><small>${kind === 'level' ? 'Resort level up' : kind === 'event' ? 'Event wrapped up' : kind === 'league' ? 'League climb' : 'Milestone'}</small><b>${esc(title)}</b><span>${sub}</span></div>`;
     for (let i = 0; i < (kind === 'milestone' ? 30 : 70); i++) {
       const p = document.createElement('i');
       p.className = 'conf';

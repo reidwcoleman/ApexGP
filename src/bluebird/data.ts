@@ -202,6 +202,22 @@ export const EVENTS: EventDef[] = [
 ];
 export const EVENT_BY: Record<string, EventDef> = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
 
+// ------------------------------------------------------------------ the league: rival resorts you climb past
+export interface Rival { name: string; g: number; color: string }
+export const RIVALS: Rival[] = [
+  { name: 'Pine Hollow', g: 55, color: '#2fb65a' }, { name: 'Frostbite Hill', g: 140, color: '#3fb7c9' }, { name: 'Elk Ridge', g: 330, color: '#8a5a3b' },
+  { name: 'Silver Saddle', g: 700, color: '#9aa5b2' }, { name: 'Thunder Basin', g: 1400, color: '#6a4cc2' }, { name: 'Glacier Crown', g: 2700, color: '#2f7fe0' },
+  { name: 'Polar Peak', g: 5000, color: '#e0457b' }, { name: 'Avalanche Valley', g: 9000, color: '#d2453a' }, { name: 'Grand Summit', g: 16000, color: '#e0a63a' },
+  { name: 'Mount Majestic', g: 28000, color: '#f2b33d' },
+];
+/** rivals grow a little every day too */
+export const rivalGuests = (r: Rival, day: number) => Math.round(r.g * (1 + 0.01 * Math.min(200, day)));
+
+// ------------------------------------------------------------------ sponsor contracts
+export type ContractKind = 'guests' | 'snow' | 'food' | 'nobreak' | 'stars';
+export interface Contract { sponsor: string; kind: ContractKind; text: string; target: number; run?: string; day: number; until: number; reward: number; state: 'offer' | 'active' }
+export const SPONSORS = ['Glide Wax Co.', 'Summit Cola', 'Polar Optics', 'Fjord Outerwear', 'Peak Energy Bars', 'Snowline Radio', 'Alpine Bank', 'Hearth Cocoa'];
+
 // ------------------------------------------------------------------ Legend: start a new season with a permanent boost
 /** Legend stars earned by everything this resort has made */
 export const legendFor = (earned: number) => Math.floor(Math.sqrt(Math.max(0, earned) / 4e6));

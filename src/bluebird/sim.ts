@@ -6,6 +6,7 @@ import {
   ITEM_BY, ITEMS, priceOf, bulk, WEATHER, type Weather, OPEN, CLOSE, NIGHT_CLOSE, DAY_NAMES, liftCap, runAppeal, lodgeSpend, lodgeSeats, parkingCap,
   rentalSpend, schoolBoost, hotelRooms, marketingBoost, serviceStars, catRate, gunsOf, breakChance, fixMinutes, tierOf, levelFromXp, levelReward, xpFor, GOALS, type GoalCtx,
   FUN_SHARE, funSpend, heliFlights, HELI_FARE, EVENTS, EVENT_BY, type EventDef, legendFor, legendMul, LEGEND_LV,
+  RIVALS, rivalGuests, SPONSORS, type Contract,
 } from './data.ts';
 
 export interface Gun { id: string; run: string; k: number; x: number; z: number; dx: number; dz: number }
@@ -50,8 +51,11 @@ export interface SaveState {
   gen: GenGoal[];
   genN: number;
   bestIncome: number;
+  passed: number; // rivals overtaken in the league
+  deal: Contract | null; // a sponsor offer or a contract being worked on
+  deals: number; // contracts completed
 }
-const FRESH_EXTRA = { event: null, evReady: {}, evCount: 0, legend: 0, seasons: 0, gen: [], genN: 0, bestIncome: 0 };
+const FRESH_EXTRA = { event: null, evReady: {}, evCount: 0, legend: 0, seasons: 0, gen: [], genN: 0, bestIncome: 0, passed: 0, deal: null, deals: 0 };
 
 export const money = (n: number, cents = false) => {
   const s = n < 0 ? '-' : '';
@@ -84,7 +88,9 @@ export type SimEvent =
   | { k: 'levelup'; lv: number; reward: number }
   | { k: 'bought'; id: string; lv: number; milestone: boolean }
   | { k: 'broken'; lift: string }
-  | { k: 'event'; id: string; phase: 'live' | 'done'; payout?: number };
+  | { k: 'event'; id: string; phase: 'live' | 'done'; payout?: number }
+  | { k: 'league'; rival: string; rank: number; reward: number }
+  | { k: 'deal'; phase: 'offer' | 'won' | 'lost'; text: string; reward: number };
 
 /** a snowcat out on the snow at night */
 export interface CatState { run: number; ptr: number; x: number; z: number; yaw: number; on: boolean }
@@ -189,7 +195,8 @@ export class Sim {
     if (!(n > 0)) return;
     if (what !== 'bonus' && what !== 'events') n *= this.legendMul;
     this.s.cash += n; this.s.earned += n; (this.s.today as any)[what] += n;
-    this.secEarn += n;
+    // one-off windfalls don't count toward the income rate (rewards scale off it)
+    if (what !== 'bonus' && what !== 'events') this.secEarn += n;
   }
 
   // ------------------------------------------------------------------ the shop
@@ -273,7 +280,9 @@ export class Sim {
     const night = this.lv('lights') ? f.visitors * 0.3 : 0;
     // once the gates are open the crowd is what it is (a price change today only shows in the forecast)
     const keepV = keepToday && this.hour >= OPEN && this.hour < this.closeHour;
-    this.plan = { demand: f.demand, visitors: keepV ? this.plan.visitors : f.visitors, parking: f.parking, lifts: f.lifts, night: keepV ? this.plan.night : night, price: s.price, fair: f.fair, perGuest: f.perGuest, limit: f.limit };
+    // once the gates are open, an upgrade can still pull a bigger crowd for the rest of the day
+    const grow = keepV && s.price === this.plan.price ? Math.max(this.plan.visitors, f.visitors) : keepV ? this.plan.visitors : f.visitors;
+    this.plan = { demand: f.demand, visitors: grow, parking: f.parking, lifts: f.lifts, night: keepV ? this.plan.night : night, price: s.price, fair: f.fair, perGuest: f.perGuest, limit: f.limit };
     this.forecastV = f.visitors + night;
   }
   forecastV = 0;
@@ -325,6 +334,8 @@ export class Sim {
     if (crossed(7)) { this.cats.forEach((c) => (c.on = false)); this.gunOn.clear(); }
     if (crossed(OPEN) && this.s.event?.day === this.day && this.s.event.state === 'booked') { this.s.event.state = 'live'; this.events.push({ k: 'event', id: this.s.event.id, phase: 'live' }); }
     if (this.s.event && this.s.event.day === this.day && crossed(this.eventEnd(EVENT_BY[this.s.event.id]))) this.finishEvent();
+    if (crossed(7.5)) this.offerDeal();
+    if (Math.floor(h0 * 4) !== Math.floor(h1 * 4)) { this.checkDeal(false); this.checkLeague(); }
 
     const h = this.hour;
     const P = this.plan;
@@ -398,6 +409,7 @@ export class Sim {
         if (Math.random() < dh * breakChance(mech) * (0.5 + Math.min(1, on / 500))) {
           this.broken[l.id] = this.s.t;
           this.events.push({ k: 'broken', lift: l.id });
+          if (this.s.deal?.state === 'active' && this.s.deal.kind === 'nobreak') this.dealDone(false);
         }
       }
     }
@@ -797,6 +809,100 @@ export class Sim {
     this.s.evReady[e.id] = this.day + e.cooldown;
     this.events.push({ k: 'event', id: e.id, phase: 'done', payout: prize });
     this.planDay(true);
+  }
+
+  // ------------------------------------------------------------------ the league
+  /** your league score: the best day in the last three, or today if it's already better */
+  get leagueScore() {
+    const recent = this.s.history.slice(-3).map((h) => h.visitors);
+    return Math.max(Math.round(this.s.today.visitors + this.s.today.night), ...recent, 0);
+  }
+  standings() {
+    const rows = RIVALS.map((r) => ({ name: r.name, guests: rivalGuests(r, this.day), you: false, color: r.color }));
+    rows.push({ name: this.s.name, guests: this.leagueScore, you: true, color: '#f6bd47' });
+    return rows.sort((a, b) => b.guests - a.guests);
+  }
+  get rank() { return this.standings().findIndex((r) => r.you) + 1; }
+  /** the next rival above you */
+  get nextRival() { const st = this.standings(); const i = st.findIndex((r) => r.you); return i > 0 ? st[i - 1] : null; }
+  leagueReward(k: number) { return Math.round(Math.max(250 * (k + 1) * (k + 1), this.s.rate * 120)); }
+  private checkLeague() {
+    const score = this.leagueScore;
+    while (this.s.passed < RIVALS.length && score > rivalGuests(RIVALS[this.s.passed], this.day)) {
+      const r = RIVALS[this.s.passed];
+      const reward = this.leagueReward(this.s.passed);
+      this.s.passed++;
+      this.earn(reward, 'bonus');
+      this.addBuzz(0.05);
+      this.events.push({ k: 'league', rival: r.name, rank: this.rank, reward });
+    }
+  }
+
+  // ------------------------------------------------------------------ sponsor contracts
+  private offerDeal() {
+    const s = this.s;
+    if (s.deal && s.deal.day >= this.day) return;
+    s.deal = null;
+    if (this.s.resortLv < 2) return;
+    const built = RUNS.filter((r) => this.runBuilt(r.id));
+    const kinds: Contract['kind'][] = ['guests', 'food', 'snow', 'nobreak', 'stars'].filter((k) => k !== 'nobreak' || LIFTS.some((l) => l.kind !== 'carpet' && this.liftBuilt(l.id))) as Contract['kind'][];
+    const kind = kinds[(Math.random() * kinds.length) | 0];
+    const sponsor = SPONSORS[(Math.random() * SPONSORS.length) | 0];
+    const pay = (sec: number, floor: number) => Math.round(Math.max(floor, Math.max(this.s.rate, this.perMinute / 60) * sec));
+    const nice = (v: number) => { const p = Math.pow(10, Math.max(0, Math.floor(Math.log10(Math.max(1, v))) - 1)); return Math.ceil(v / p) * p; };
+    let d: Contract;
+    if (kind === 'guests') {
+      const t = nice(Math.max(20, this.forecastV * 1.12));
+      d = { sponsor, kind, text: `Host ${t.toLocaleString()} guests today`, target: t, day: this.day, until: this.closeHour, reward: pay(200, 600), state: 'offer' };
+    } else if (kind === 'food') {
+      const exp = this.plan.visitors * lodgeSpend(this.lv('lodge')) * 0.62 * Math.min(1, (lodgeSeats(this.lv('lodge')) * 4) / Math.max(1, this.plan.visitors));
+      const t = nice(Math.max(100, exp * 1.2));
+      d = { sponsor, kind, text: `Sell ${money(t)} of food and drink today`, target: t, day: this.day, until: this.closeHour, reward: pay(180, 500), state: 'offer' };
+    } else if (kind === 'snow' && built.length) {
+      const r = built.sort((a, b) => (this.runQ[a.id] ?? 0) - (this.runQ[b.id] ?? 0))[Math.min(built.length - 1, 1)];
+      const t = Math.min(0.85, Math.max(0.5, Math.round(((this.runQ[r.id] ?? 0.6) - 0.08) * 20) / 20));
+      d = { sponsor, kind, text: `Keep ${r.name} above ${Math.round(t * 100)}% snow until 3 pm`, target: t, run: r.id, day: this.day, until: 15, reward: pay(170, 500), state: 'offer' };
+    } else if (kind === 'stars') {
+      const t = Math.min(5, Math.round((this.s.stars + 0.15) * 10) / 10);
+      d = { sponsor, kind, text: `Finish the day at ${t.toFixed(1)} stars or better`, target: t, day: this.day, until: this.closeHour, reward: pay(220, 700), state: 'offer' };
+    } else {
+      d = { sponsor, kind: 'nobreak', text: 'No lift breakdowns today', target: 0, day: this.day, until: this.closeHour, reward: pay(160, 500), state: 'offer' };
+    }
+    s.deal = d;
+    this.events.push({ k: 'deal', phase: 'offer', text: `${d.sponsor} has a deal for you: ${d.text}`, reward: d.reward });
+  }
+  acceptDeal() { const d = this.s.deal; if (!d || d.state !== 'offer' || d.day !== this.day || this.hour >= Math.min(13, d.until - 1)) return false; d.state = 'active'; this.checkDeal(false); return true; }
+  declineDeal() { if (this.s.deal?.state === 'offer') this.s.deal = null; }
+  /** how far along the active contract is, 0..1 */
+  dealProgress(): number {
+    const d = this.s.deal, t = this.s.today;
+    if (!d) return 0;
+    switch (d.kind) {
+      case 'guests': return (t.visitors + t.night) / d.target;
+      case 'food': return t.lodge / d.target;
+      case 'snow': return Math.min(1, Math.max(0, (this.hour - OPEN) / (d.until - OPEN)));
+      case 'stars': return this.s.stars / d.target;
+      case 'nobreak': return Math.min(1, Math.max(0, (this.hour - OPEN) / (d.until - OPEN)));
+    }
+  }
+  private checkDeal(_force: boolean) {
+    const d = this.s.deal;
+    if (!d) return;
+    if (d.state === 'offer') { if (d.day < this.day || this.hour >= 13) this.s.deal = null; return; }
+    const t = this.s.today;
+    const over = d.day < this.day || this.hour >= d.until;
+    if (d.kind === 'guests' && t.visitors + t.night >= d.target) return this.dealDone(true);
+    if (d.kind === 'food' && t.lodge >= d.target) return this.dealDone(true);
+    if (d.kind === 'snow' && this.isOpen && (this.runQ[d.run!] ?? 0) < d.target) return this.dealDone(false);
+    if (!over) return;
+    if (d.kind === 'stars') return this.dealDone(this.s.stars >= d.target);
+    this.dealDone(d.kind === 'snow' || d.kind === 'nobreak');
+  }
+  private dealDone(won: boolean) {
+    const d = this.s.deal!;
+    this.s.deal = null;
+    if (won) { this.earn(d.reward, 'bonus'); this.s.deals++; this.addBuzz(0.03); }
+    this.events.push({ k: 'deal', phase: won ? 'won' : 'lost', text: `${d.sponsor}: ${d.text}`, reward: won ? d.reward : 0 });
   }
 
   // ------------------------------------------------------------------ Legend

@@ -3,6 +3,32 @@
 // distant ranges, the forest and the falling snow.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+
+/** the final look: a touch of contrast and saturation, cool shadows / warm highlights, a soft vignette */
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, uNight: { value: 0 }, uWarm: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uNight; uniform float uWarm; varying vec2 vUv;
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 col = c.rgb;
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, 1.12 + uNight * 0.1);
+      col = (col - 0.5) * 1.07 + 0.5;
+      // split tone: blue in the shadows, a little gold in the highlights
+      col += vec3(-0.012, 0.0, 0.03) * (1.0 - smoothstep(0.0, 0.5, l));
+      col += vec3(0.02, 0.008, -0.018) * smoothstep(0.55, 1.0, l) * (0.4 + uWarm);
+      vec2 d = vUv - 0.5;
+      float v = smoothstep(0.85, 0.28, length(d * vec2(1.0, 0.85)));
+      col *= mix(0.78 - uNight * 0.08, 1.0, v);
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), c.a);
+    }`,
+};
 import { Mountain, SIZE, HALF, GN, GS, SN, SC, LIFTS, RUNS, BASE, DIFF_COLOR, kickerProfile, rawHeight } from './mountain.ts';
 import type { Sim } from './sim.ts';
 
@@ -88,6 +114,12 @@ export class World {
   glowMats: { m: THREE.MeshStandardMaterial; k: number }[] = [];
   lampLights: THREE.Group = new THREE.Group();
 
+  composer!: EffectComposer;
+  bloom!: UnrealBloomPass;
+  grade!: ShaderPass;
+  /** how far the camera is from what it looks at: shadows cover more when you zoom out */
+  viewDist = 470;
+
   constructor(canvas: HTMLCanvasElement, m: Mountain) {
     this.m = m;
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
@@ -128,11 +160,21 @@ export class World {
     this.buildKickers();
     this.buildSnowfall();
     this.scene.add(this.lampLights);
+    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+    this.composer = new EffectComposer(this.renderer, rt);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.3, 0.55, 3.5);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
+    this.grade = new ShaderPass(GradeShader);
+    this.composer.addPass(this.grade);
   }
 
   resize() {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(w, h, false);
+    this.composer?.setPixelRatio(this.renderer.getPixelRatio());
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -257,13 +299,18 @@ float gBump = 0.0; float gSpark = 0.0;`)
   float rock = smoothstep(0.36, 0.44, slope + (n2 - 0.5) * 0.25) * (1.0 - onRun);
   rock *= smoothstep(0.38, 0.62, texture2D(uNoise, vWPos.xz * 0.045 + 0.2).r + slope * 0.4);
   vec3 rockC = mix(vec3(0.30, 0.31, 0.34), vec3(0.45, 0.45, 0.47), n3) * (0.8 + 0.4 * n4);
-  col = mix(col, rockC, rock);
+  // cliffs: dark rock broken by snow-filled ledges and gullies
+  float ledge = smoothstep(0.5, 0.68, texture2D(uNoise, vec2(vWPos.x * 0.045 + vWPos.z * 0.02, vWPos.y * 0.16)).r);
+  float gully = smoothstep(0.62, 0.8, texture2D(uNoise, vWPos.xz * 0.02 + 0.13).g);
+  rockC = mix(rockC, snow * 0.92, max(ledge * 0.75, gully * 0.6));
+  col = mix(col, rockC, rock * 0.92);
   // the packed, trampled plaza between the buildings
   float plaza = mk.a * (1.0 - onRun);
   float trod = smoothstep(0.35, 0.75, texture2D(uNoise, vWPos.xz * 0.05 + 0.7).r);
-  col = mix(col, vec3(0.74, 0.74, 0.76) * (0.92 + 0.12 * n4), plaza * (0.35 + 0.45 * trod));
+  col = mix(col, vec3(0.78, 0.76, 0.74) * (0.9 + 0.14 * n4), plaza * (0.45 + 0.45 * trod));
+  col *= 1.0 - plaza * smoothstep(0.55, 0.9, texture2D(uNoise, vWPos.xz * 0.35).g) * 0.06;
   // baked sky occlusion: gullies, tree-line hollows and the foot of cliffs sit in cooler shade
-  col *= mix(vec3(0.68, 0.74, 0.86), vec3(1.0), smoothstep(0.0, 1.0, vAo));
+  col *= mix(vec3(0.76, 0.8, 0.9), vec3(1.0), smoothstep(0.0, 1.0, vAo));
   // ---- trails you can read: a rope line in the trail's colour, plus the map views
   {
     vec2 cuv = (floor(suv * ${SN.toFixed(1)}) + 0.5) / ${SN.toFixed(1)};
@@ -568,12 +615,14 @@ float gBump = 0.0; float gSpark = 0.0;`)
     const T = 200, nT = SIZE / T;
     const buckets: number[][] = Array.from({ length: nT * nT }, () => []);
     xs.forEach((x, i) => { const ti = Math.min(nT - 1, Math.floor((x + HALF) / T)), tj = Math.min(nT - 1, Math.floor((zs[i] + HALF) / T)); buckets[tj * nT + ti].push(i); });
-    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), tint = new THREE.Color();
     for (const b of buckets) {
       if (!b.length) continue;
       const im = new THREE.InstancedMesh(geo, mat, b.length);
       const far = new THREE.InstancedMesh(farGeo, mat, b.length);
       far.instanceMatrix = im.instanceMatrix;
+      im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(b.length * 3), 3);
+      far.instanceColor = im.instanceColor;
       far.castShadow = false; far.receiveShadow = false; far.name = 'treesFar';
       const tiIdx = buckets.indexOf(b);
       this.treeTiles.push({ near: im, far, cx: ((tiIdx % nT) + 0.5) * T - HALF, cz: (Math.floor(tiIdx / nT) + 0.5) * T - HALF });
@@ -584,6 +633,9 @@ float gBump = 0.0; float gSpark = 0.0;`)
         P.set(xs[ti], m.at(xs[ti], zs[ti]) - 0.3, zs[ti]);
         M.compose(P, Q, S);
         im.setMatrixAt(n, M);
+        const h = ((ti * 2654435761) >>> 0) / 4294967296;
+        const k = 0.84 + h * 0.28; tint.setRGB(k * 0.97, k, k * (0.96 + ((ti * 7) % 10) * 0.008));
+        im.setColorAt(n, tint);
       });
       im.castShadow = true;
       im.receiveShadow = true;
@@ -769,23 +821,25 @@ float gBump = 0.0; float gSpark = 0.0;`)
     const f = this.focus;
     this.sun.position.set(f.x + L.x * 600, f.y + L.y * 600, f.z + L.z * 600);
     this.sun.target.position.copy(f);
-    // snap the shadow camera to texels so shadows don't crawl
+    // shadows reach further when you zoom out; snap the shadow camera to texels so they don't crawl
     const sc = this.sun.shadow.camera as THREE.OrthographicCamera;
+    const ext = Math.round(Math.min(700, Math.max(150, this.viewDist * 0.62)) / 25) * 25;
+    if (sc.right !== ext) { sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.updateProjectionMatrix(); this.sun.shadow.normalBias = 0.6 * (ext / 150); }
     const texel = (sc.right - sc.left) / this.sun.shadow.mapSize.x;
     this.sun.position.x = Math.round(this.sun.position.x / texel) * texel;
     this.sun.position.z = Math.round(this.sun.position.z / texel) * texel;
     this.sun.target.position.x = Math.round(f.x / texel) * texel;
     this.sun.target.position.z = Math.round(f.z / texel) * texel;
-    const sunI = day * (3.1 - cloud * 2.2) * (1 - gold * 0.3);
+    const sunI = day * (3.5 - cloud * 2.5) * (1 - gold * 0.3);
     const moonI = night * 0.32 * (1 - cloud * 0.6);
     this.sun.intensity = Math.max(sunI, moonI);
     this.sun.color.setRGB(1, 0.93 - gold * 0.25, 0.85 - gold * 0.42).lerp(new THREE.Color(0.62, 0.72, 1.0), night);
     this.sun.castShadow = this.sun.intensity > 0.08;
-    this.hemi.intensity = 0.35 + day * (1.05 + cloud * 0.5);
+    this.hemi.intensity = 0.32 + day * (0.84 + cloud * 0.65);
     this.hemi.color.copy(top).lerp(new THREE.Color(0xc4dcff), 0.45 * day).lerp(new THREE.Color(0xffe2c8), gold * 0.35);
     this.hemi.groundColor.setRGB(0.55, 0.57, 0.62).multiplyScalar(0.3 + day * 0.7);
     if (night > 0.5) { this.hemi.color.setRGB(0.18, 0.24, 0.42); this.hemi.groundColor.setRGB(0.07, 0.08, 0.12); this.hemi.intensity = 0.55; }
-    this.renderer.toneMappingExposure = 0.92 + night * 0.4 - cloud * 0.06;
+    this.renderer.toneMappingExposure = 0.9 + night * 0.4 - cloud * 0.04;
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(hor).lerp(new THREE.Color(0xdde4ec), cloud * 0.5 * day);
     fog.density = 0.00017 + cloud * 0.0003 + snowRate * 0.0009 + night * 0.00004;
@@ -795,6 +849,12 @@ float gBump = 0.0; float gSpark = 0.0;`)
     this.uni.uSunDir.value.copy(sunDir);
     this.uni.uTime.value = tSec;
     for (const g of this.glowMats) g.m.emissiveIntensity = g.k * (0.15 + night * 1.6 + cloud * 0.25 * day);
+    // by day only sun glints bloom; at night every lamp, window and firework does
+    this.bloom.threshold = 3.2 - night * 2.6;
+    this.bloom.strength = 0.22 + night * 0.65;
+    this.bloom.radius = 0.5 + night * 0.25;
+    this.grade.uniforms.uNight.value = night;
+    this.grade.uniforms.uWarm.value = gold;
     this.snowU.uTime.value = tSec;
     this.snowU.uCam.value.copy(this.camera.position);
     this.snowU.uRate.value = Math.min(1, snowRate / 4.5);
@@ -829,7 +889,7 @@ float gBump = 0.0; float gSpark = 0.0;`)
   /** register a material that glows at night */
   glow(m: THREE.MeshStandardMaterial, k = 1) { this.glowMats.push({ m, k }); return m; }
 
-  render() { this.updateLods(); this.renderer.render(this.scene, this.camera); }
+  render() { this.updateLods(); this.composer.render(); }
 }
 
 /** merge every plain mesh under root into one mesh per material (fewer draw calls) */

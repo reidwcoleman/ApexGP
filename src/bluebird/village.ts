@@ -39,6 +39,8 @@ export class Village {
   lamps = new THREE.Group();
   gunMesh = new Map<string, THREE.Object3D>();
   lampPts: [number, number][] = [];
+  /** top of the lodge chimney (smoke comes out here) */
+  chimney = new THREE.Vector3(30, 20, 520);
   private built = '';
   private gunsBuilt = '';
   private lampsBuilt = -1;
@@ -150,6 +152,7 @@ export class Village {
       // chimney + smoke spot
       const ch = new THREE.Mesh(new THREE.BoxGeometry(1.2, 4, 1.2), M(0x6f6a64));
       ch.position.set(spec[0] * 0.25, spec[2] + spec[0] * 0.3, -spec[1] * 0.2);
+      this.chimney.set(S.lodge[0] + spec[0] * 0.25, this.m.at(S.lodge[0], S.lodge[1]) + spec[2] + spec[0] * 0.3 + 2.2, S.lodge[1] - spec[1] * 0.2);
       lodge.add(ch);
       this.place(lodge, S.lodge[0], S.lodge[1], 0);
     }

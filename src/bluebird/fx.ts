@@ -12,6 +12,7 @@ export class Fx {
   private max = new Float32Array(N);
   private size = new Float32Array(N);
   private alpha = new Float32Array(N);
+  private grav = new Float32Array(N).fill(4.5);
   private head = 0;
   private uni = { uNight: { value: 0 }, uScale: { value: 1 } };
 
@@ -33,13 +34,14 @@ export class Fx {
     scene.add(this.points);
   }
 
-  emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, spread: number, n: number, life = 0.9, size = 60) {
+  emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, spread: number, n: number, life = 0.9, size = 60, grav = 4.5) {
     for (let k = 0; k < n; k++) {
       const i = this.head; this.head = (this.head + 1) % N;
       this.pos[i * 3] = x + (Math.random() - 0.5) * 0.4; this.pos[i * 3 + 1] = y + Math.random() * 0.2; this.pos[i * 3 + 2] = z + (Math.random() - 0.5) * 0.4;
       this.vel[i * 3] = vx + (Math.random() - 0.5) * spread; this.vel[i * 3 + 1] = vy + Math.random() * spread * 0.6; this.vel[i * 3 + 2] = vz + (Math.random() - 0.5) * spread;
       this.max[i] = this.life[i] = life * (0.6 + Math.random() * 0.6);
       this.size[i] = size * (0.5 + Math.random());
+      this.grav[i] = grav;
     }
   }
 
@@ -50,7 +52,7 @@ export class Fx {
       if (this.life[i] <= 0) { this.alpha[i] = 0; continue; }
       this.life[i] -= dt;
       const t = this.life[i] / this.max[i];
-      this.vel[i * 3 + 1] -= 4.5 * dt;
+      this.vel[i * 3 + 1] -= this.grav[i] * dt;
       const d = Math.exp(-dt * 2.2);
       this.vel[i * 3] *= d; this.vel[i * 3 + 1] *= d; this.vel[i * 3 + 2] *= d;
       this.pos[i * 3] += this.vel[i * 3] * dt; this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt; this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;

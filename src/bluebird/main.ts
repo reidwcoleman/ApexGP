@@ -12,6 +12,8 @@ import { Fx } from './fx.ts';
 import { Audio } from './audio.ts';
 import { UI, icon, num, type Label } from './ui.ts';
 import { Attractions, SPOTS } from './attractions.ts';
+import { Dressing } from './dressing.ts';
+import type { Thought } from './ui.ts';
 import { WEATHER, ITEM_BY, ITEMS, EVENT_BY, tierOf, legendMul } from './data.ts';
 
 const SAVE_KEY = 'bluebird.v2';
@@ -44,6 +46,7 @@ async function boot() {
   const fx = new Fx(world.scene);
   const audio = new Audio();
   const attractions = new Attractions(world, m, village, fx);
+  const dressing = new Dressing(world, m, village, fx);
   const ui = new UI($('#ui'), sim, m);
   step('Starting the lifts', 0.9);
   await frame();
@@ -73,6 +76,7 @@ async function boot() {
     cats.forEach((c, i) => (c.group.visible = i < fleet));
     village.update(sim);
     attractions.update(sim);
+    dressing.update(sim);
   }
   syncLevels();
 
@@ -158,6 +162,7 @@ async function boot() {
     cam.near = 1;
     cam.updateProjectionMatrix();
     world.focus.copy(orbit.target);
+    world.viewDist = orbit.dist;
   }
   const PLACES: Record<string, [number, number]> = { ...BUILD_SPOTS, ...SPOTS };
   const focusItem = (id: string) => {
@@ -183,6 +188,10 @@ async function boot() {
     const ev = sim.s.event!;
     ui.toast(ev.state === 'live' ? `${e.name} is on! Crowds are heading up the mountain` : `${e.name} is booked for ${ev.day === sim.day ? 'today' : 'tomorrow'}`, 'good');
     if (e.run) focusItem('run.' + e.run); else flyTo = { target: new THREE.Vector3(SPOTS.banner[0], 0, SPOTS.banner[1]), dist: 200 };
+  };
+  ui.onDeal = (yes) => {
+    if (yes) { if (sim.acceptDeal()) { audio.buy(); ui.toast(`Deal signed with ${sim.s.deal!.sponsor}. Make it happen!`, 'good'); } else audio.bad(); }
+    else sim.declineDeal();
   };
   ui.onSeason = () => {
     if (!sim.newSeason()) return;
@@ -254,6 +263,77 @@ async function boot() {
     }
   }
 
+  // ------------------------------------------------------------------ guests: what they think, and the odd VIP
+  const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lucia', 'Sam', 'Ines', 'Kofi', 'Hana', 'Leo', 'Ava', 'Mateo', 'Zoe', 'Finn', 'Omar', 'Elsa', 'Ravi', 'Nora'];
+  function thoughtFor(a: { run: { def: { id: string } } | null; st: string }): Thought {
+    const pool: [string, boolean, number][] = [];
+    const run = a.run ? RUN_BY[a.run.def.id] : null;
+    const P = sim.plan, s = sim.s;
+    if (run) {
+      const q = sim.runQ[run.id] ?? 0.6;
+      if (q < 0.45) pool.push([`${run.name} is scraped down to ice`, false, 3]);
+      if (q > 0.85) pool.push([`The corduroy on ${run.name} is perfect`, true, 2]);
+      if (run.diff === 'black' || run.diff === 'double') pool.push([`${run.name} nearly killed me. Again!`, true, 1.2]);
+      if (run.diff === 'park') pool.push(['Landed my first 360!', true, 1.2]);
+    }
+    for (const l of LIFTS) if ((sim.liftLoad[l.id] ?? 0) > 0.95 && sim.liftBuilt(l.id)) pool.push([`The line for ${l.name} is taking forever`, false, 2.5]);
+    for (const id of Object.keys(sim.broken)) pool.push([`${LIFT_BY[id].name} broke down. Seriously?`, false, 3]);
+    if (s.price > P.fair * (s.autoPrice ? 1.8 : 1.25)) pool.push([`$${s.price} for a lift ticket? Ouch.`, false, 2]);
+    if (s.price < P.fair * 0.8) pool.push(['Cannot believe how cheap the tickets are', true, 1.2]);
+    if (sim.starParts.food < 0.35) pool.push(['Not one free seat in the lodge', false, 2]);
+    if (P.limit === 'parking') pool.push(['Took forever to find a parking spot', false, 1.4]);
+    if (P.limit === 'demand' && RUNS.filter((r) => sim.runBuilt(r.id)).length < 3) pool.push(['Wish there were more trails to explore', false, 1.4]);
+    if (s.powderDay) pool.push(['POWDER DAY! I am never going back to work', true, 3]);
+    if (sim.weather === 'storm') pool.push(['I cannot see my own skis', false, 1.2]);
+    if (sim.weather === 'bluebird') pool.push(['Not a cloud in the sky. Bluebird!', true, 1]);
+    const ev = sim.eventToday;
+    if (ev && s.event?.state === 'live') pool.push([`${ev.name} is the best thing all winter`, true, 3]);
+    if (sim.lv('rink')) pool.push(['Ice skating after skiing? Yes please', true, 0.8]);
+    if (sim.lv('tubing')) pool.push(['The kids will not leave the tubing hill', true, 0.8]);
+    if (sim.lv('heli')) pool.push(['Saving up for a heli-ski day', true, 0.6]);
+    if (sim.lv('summithut')) pool.push(['Lunch at the summit, what a view', true, 0.8]);
+    if (s.stars >= 4.5) pool.push(['Best resort in the state, easily', true, 1.2]);
+    if (s.stars < 2.5) pool.push(['Kind of a sad little hill, honestly', false, 1.2]);
+    if (a.st === 'queue') pool.push(['Come on, move the line', false, 1]);
+    pool.push(['One more run, then cocoa', true, 0.7], ['Best day of my winter', true, 0.6], ['My boots are killing me', false, 0.3], ['First time skiing and I only fell twice', true, 0.5]);
+    let tot = 0; for (const p of pool) tot += p[2];
+    let r = Math.random() * tot;
+    for (const p of pool) { r -= p[2]; if (r <= 0) return { text: p[0], good: p[1], who: NAMES[(Math.random() * NAMES.length) | 0] }; }
+    return { text: pool[0][0], good: pool[0][1], who: 'Sam' };
+  }
+  const bubbles: { id: number; agent: any; t: number; th: Thought }[] = [];
+  let bubbleT = 3, bubbleId = 1, vip: { agent: any; t: number; sp: number } | null = null, vipT = 50;
+  function guests(dt: number) {
+    const open = sim.isOpen && !tour && !ui.modalOpen;
+    bubbleT -= dt;
+    if (open && bubbleT < 0 && bubbles.length < 2 && orbit.dist < 800) {
+      bubbleT = 2.6 + Math.random() * 2;
+      const cand = crowd.agents.filter((a: any) => (a.st === 'ski' || a.st === 'queue' || a.st === 'walk') && project(a.x, a.y + 3, a.z));
+      if (cand.length) { const a = cand[(Math.random() * cand.length) | 0]; const th = thoughtFor(a as any); bubbles.push({ id: bubbleId++, agent: a, t: 0, th }); ui.voices.unshift(th); ui.voices.length = Math.min(ui.voices.length, 12); }
+    }
+    for (const b of [...bubbles]) { b.t += dt; if (b.t > 4.2 || !crowd.agents.includes(b.agent)) bubbles.splice(bubbles.indexOf(b), 1); }
+    // a VIP: a pro or a celebrity out on the trails; click them for a big tip and some buzz
+    vipT -= dt * (open ? 1 : 0);
+    if (!vip && vipT <= 0) {
+      const cand = crowd.agents.filter((a: any) => a.st === 'ski');
+      if (cand.length) {
+        vip = { agent: cand[(Math.random() * cand.length) | 0], t: 0, sp: 0 };
+        vipName = VIPS[(Math.random() * VIPS.length) | 0];
+        const run = vip.agent.run ? RUN_BY[vip.agent.run.def.id]?.name : null;
+        ui.toast(`A ${vipName.toLowerCase()} is skiing${run ? ' ' + run : ' at Bluebird'}! Find the gold label and say hi`, 'gold', 5000);
+      }
+      vipT = 70 + Math.random() * 70;
+    }
+    if (vip) {
+      vip.t += dt;
+      const a = vip.agent;
+      if (vip.t > 45 || !crowd.agents.includes(a) || !sim.isOpen) vip = null;
+      else if ((vip.sp -= dt) < 0) { vip.sp = 0.08; fx.emit(a.x, a.y + 1.5, a.z, 0, 2, 0, 2.5, 1, 0.6, 40); }
+    }
+  }
+  const VIPS = ['Olympic champion', 'Pro freerider', 'Movie star', 'Famous YouTuber', 'Pop star', 'Ski magazine editor'];
+  let vipName = VIPS[0];
+
   // ------------------------------------------------------------------ labels
   const V = new THREE.Vector3();
   function project(x: number, y: number, z: number) {
@@ -310,6 +390,15 @@ async function boot() {
       const s = project(x, m.at(x, z) + 14, z);
       if (s) out.push({ id: 'ev', x: s.x, y: s.y, cls: 'ev big', html: `${icon(ev.icon, 15)} ${ev.name} <small style="color:#fff">${sim.s.event?.state === 'live' ? 'live now' : 'today'}</small>`, click: () => ui.openReport('events'), hidden: tour });
     }
+    for (const b of bubbles) {
+      const s = project(b.agent.x, b.agent.y + 3.2, b.agent.z);
+      if (s) out.push({ id: 't' + b.id, x: s.x, y: s.y, cls: 'thought ' + (b.th.good ? 'good' : 'bad'), html: `<em>${b.th.who}:</em> ${b.th.text}`, hidden: tour });
+    }
+    if (vip) {
+      const a = vip.agent;
+      const s = project(a.x, a.y + 4, a.z);
+      if (s) out.push({ id: 'vip', x: s.x, y: s.y, cls: 'drop vip', html: `${icon('star', 16)} ${vipName} on the slopes! · tap`, click: () => { const amt = sim.bonus(75); sim.addBuzz(0.06); sim.planDay(true); audio.cash(); audio.trick(900); ui.coins(s.x, s.y, 24); ui.floatCash(s.x, s.y - 30, amt, true); ui.toast(`The ${vipName.toLowerCase()} posted a selfie from Bluebird Peak: +6% buzz`, 'good'); vip = null; } });
+    }
     for (const d of drops) {
       const s = project(d.mesh.position.x, d.mesh.position.y + 12, d.mesh.position.z);
       if (!s) continue;
@@ -340,7 +429,7 @@ async function boot() {
   let last = performance.now();
   let saveT = 0, tSec = 0, lodgeCashT = 3;
   if (offlineEarned > 0) ui.welcome(offlineEarned);
-  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, drops, spawnDrop, setTour, attractions, syncLevels };
+  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, drops, spawnDrop, setTour, attractions, syncLevels, dressing, forceVip: () => { vipT = 0; } };
 
   function loop() {
     requestAnimationFrame(loop);
@@ -365,6 +454,13 @@ async function boot() {
         const ev = EVENT_BY[e.id];
         if (e.phase === 'live') { ui.toast(`${ev.name} is on today: ${Math.round((ev.guestMul - 1) * 100)}% more guests`, 'good', 5000); audio.good(); }
         else { ui.celebrate(ev.name, `Prize +${money(e.payout ?? 0)}`, 'event'); audio.trick(1500); }
+      } else if (e.k === 'league') {
+        ui.celebrate(`#${e.rank} in the league`, `Passed ${e.rival} · +${money(e.reward)}`, 'league');
+        audio.trick(2500);
+      } else if (e.k === 'deal') {
+        if (e.phase === 'offer') { ui.toast(`<b>Sponsor offer</b> · ${e.text} · ${money(e.reward)}`, 'gold', 6500); audio.good(); }
+        else if (e.phase === 'won') { ui.toast(`Contract done! ${e.text} · +${money(e.reward)}`, 'good', 5500); audio.cash(); audio.trick(1200); }
+        else { ui.toast(`Contract missed: ${e.text}`, 'bad', 5000); audio.bad(); }
       } else if (e.k === 'bought') {
         syncLevels();
         if (e.milestone) { ui.celebrate(`${ITEM_BY[e.id].name}`, `Level ${e.lv}: ×2 bonus`, 'milestone'); audio.trick(900); }
@@ -376,6 +472,8 @@ async function boot() {
     for (const l of lifts.list) l.update(gameDt, sim.liftRunning(l.def.id) && (liftsOn || l.riders.some((c) => c.some(Boolean))));
     crowd.update(gameDt);
     attractions.frame(dt, tSec, sim, world.night, gameDt);
+    dressing.frame(dt, tSec, sim, WEATHER[sim.weather].wind, world.night);
+    guests(dt);
     if (attractions.boom) { attractions.boom = false; if (Math.random() < 0.6) audio.land(4 + Math.random() * 6); }
     village.setCars(sim.onMountain / Math.max(1, sim.plan.visitors || 1) + 0.1);
 
