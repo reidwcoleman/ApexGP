@@ -84,6 +84,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
       if (m <= 0.0) continue;
       float near = 1.0 - smoothstep(25.0, 90.0, t);
       float heat = m * (1.0 - s * 0.7) * near;
+      // (seen end-on — the chase camera, straight up the plume of the car it follows — the shimmer
+      // sat over that car's whole tail for the whole race and read as melting bodywork: a trace there,
+      // full strength from the side)
+      heat *= 1.0 - 0.8 * smoothstep(0.7, 0.96, abs(b) / sqrt(L2));
       vec2 q = uv * vec2(160.0, 120.0) / max(t * 0.08, 1.0) + vec2(0.0, -time * 7.0);
       off += vec2(hzNoise(q + float(i) * 13.1), hzNoise(q * 1.3 + 4.7 + float(i))) * heat * exhaustK * 0.006 / max(t * 0.12, 1.0);
     }
