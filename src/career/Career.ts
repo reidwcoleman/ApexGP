@@ -249,7 +249,7 @@ export function medalFor(best: number | undefined): Medal {
 /** stars a medal is worth on the World Tour */
 export const STARS: Record<Exclude<Medal, null>, number> = { gold: 3, silver: 2, bronze: 1 };
 /** the World Tour starts with these three open; every other calendar circuit is opened with a Tour pass */
-export const START_OPEN = ['monza', 'spa', 'silverstone'];
+export const START_OPEN = ['monza'];
 /** a first medal at a circuit pays for opening it, as well as a pass */
 export const MEDAL_BONUS: Record<Exclude<Medal, null>, number> = { bronze: 6000, silver: 12000, gold: 25000 };
 /** what a race looked like, for the challenges */

@@ -107,7 +107,7 @@ void main() {
     }
     if (l.y < boxMin.y + 0.25 && l.y > -0.35) {
       float dxz = length(max(abs(l.xz - bc.xz) - bh.xz, 0.0));
-      float w = 1.0 - smoothstep(0.0, 0.7, dxz);
+      float w = 1.0 - smoothstep(0.0, 0.4, dxz);
       if (w > uw) {
         uw = w;
         under = (carPrev[i] * vec4(l, 1.0)).xyz;

@@ -14,9 +14,11 @@ import { noiseTexture, detailNormalTexture } from '../world/env/textures.ts';
 import { sponsorTexture, teamBoardTexture } from '../world/env/signage.ts';
 import { setEvent, EVENT } from '../world/event.ts';
 const EVENT_GP = () => EVENT.gp;
-import { tracksideBuilder, type Trackside } from '../world/TrackMesh.ts';
+import type { Trackside } from '../world/TrackMesh.ts';
+import { monzaTracksideBuilder as tracksideBuilder } from '../world/monza/trackside.ts';
+import { monzaSceneryBuilder as sceneryBuilder } from '../world/monza/scenery.ts';
+import { monzaAssets, monzaAssetsReady } from '../world/monza/assets.ts';
 import { createEnvironment, type Environment, type Scenery } from '../world/Environment.ts';
-import { sceneryBuilder } from '../world/env/scenery.ts';
 import { ScenePrep, frameClock, type LightMode } from '../world/prepare.ts';
 import { DriverCareer, teamIndex as careerTeamIndex, teamColor as careerTeamColor, type Contract, type RoundSummary } from '../career/DriverCareer.ts';
 import { applyGrid, currentSeries, type PlayerDriver } from '../career/Series.ts';
@@ -727,7 +729,9 @@ export class Game {
     // (the baked trees download behind the garage — main.ts — and the woods must be built with the
     // landscape: a kit landing later was added on whatever frame its download finished, after the
     // landscape's shader compile below, and its programs were then built synchronously in a frame)
-    await loadTreeKit();
+    // (the new Monza's own pictures: asked for now, in before the park is built)
+    monzaAssets(this.gfx.maxAnisotropy);
+    await monzaAssetsReady();
     if (gen !== this.worldGen) return;
     const it = sceneryBuilder(this.track, this.gfx);
     let partial: THREE.Group | null = null;

@@ -102,8 +102,8 @@
         <div class="lbar"><b></b></div>
         <div class="lerr"></div>
         <div class="lradio"><b>Radio</b><div class="lwave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="ltips">
-          <span>A first top 5 at any circuit earns a Tour pass. Open whichever circuit you want next.</span>
-          <span>Every circuit has a bonus challenge, worth a fourth star and a 15,000 purse.</span>
+          <span>Monza, the Temple of Speed: rebuilt from the ground up. Top 5 earns your first star.</span>
+          <span>The bonus challenge is worth a fourth star and a 15,000 purse.</span>
           <span>Weather's automatic, but you can call any sky and time of day on the race screen.</span>
           <span>Drag in the garage to walk round the car. Scroll to step in.</span>
           <span>Research upgrades the car. The rivals are developing too, so keep pushing.</span>
@@ -117,7 +117,7 @@
       // different picture every visit, a new one every 5 s, each fading out over the next (keep in step with src/ui/loadingArt.ts BOOT_ART)
       // (run once the racing game is picked: the picker below decides)
       window.__apexArt = function () {
-        var L = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa_rain', 'interlagos_rain', 'suzuka_dusk', 'hungaroring_golden', 'melbourne_golden', 'silverstone_drizzle', 'mexico_golden', 'monza_sunset', 'monza_rain'];
+        var L = ['monza_sunset', 'monza_rain'];
         var i = 0;
         try {
           i = (Number(localStorage.getItem('apexgp.loadart') || -1) + 1) % L.length;
@@ -618,7 +618,7 @@
         var users = []; try { users = JSON.parse(store('apexgp.users') || '[]'); } catch (e) {}
         if (!Array.isArray(users) || !users.length) users = ['Player 1'];
         var me = Math.max(0, Math.min(users.length - 1, parseInt(store('apexgp.me') || '0', 10) || 0));
-        var faces = ['monza_rain', 'suzuka_dusk', 'miami_oceandrive', 'sakhir_night', 'bergsee_valley'];
+        var faces = ['monza_rain', 'monza_sunset', 'miami_oceandrive', 'miami_causeway', 'miami_brickell'];
         var artOf = function (i) { return 'url(loading/' + faces[i % faces.length] + '.webp)'; };
         var box = $('.pk-users'), slots = [], naming = false;
         var ctrl = '<span class="pk-pad"><small>1</small><svg viewBox="0 0 24 16" aria-hidden="true"><path fill="currentColor" d="M7 1h10c2.2 0 3.7 1.3 4.3 3.4l1.5 7c.6 2.8-2.7 4.4-4.5 2.4L15.6 11H8.4l-2.7 2.8c-1.8 2-5.1.4-4.5-2.4l1.5-7C3.3 2.3 4.8 1 7 1z"/></svg></span>';
@@ -662,7 +662,7 @@
         var bg = $$('.pk-bg i'), bgOn = 0, shows = $$('.pk-show');
         var gameTiles = [].slice.call(gameRow.children), games = gameTiles.filter(function (c) { return c.getAttribute('data-game') !== 'lib'; });
         var tiles = gameTiles, row = gameRow, tab = 'games', cur = null, curGame = null, busy = false, photo = false;
-        var shots = [['monza_sunset', 'Monza'], ['suzuka_dusk', 'Suzuka'], ['spa_rain', 'Spa'], ['sakhir_night', 'Sakhir'], ['zandvoort_sunset', 'Zandvoort'], ['miami_oceandrive', 'Ocean Drive'], ['miami_causeway', 'The Causeway'], ['bergsee_valley', 'Bergsee'], ['redmesa_golden', 'Red Mesa']];
+        var shots = [['monza_sunset', 'Monza'], ['monza_rain', 'Monza · Rain'], ['miami_oceandrive', 'Ocean Drive'], ['miami_causeway', 'The Causeway'], ['miami_brickell', 'Brickell']];
         shots.forEach(function (s) {
           var b = document.createElement('button'); b.className = 'pk-tile'; b.setAttribute('data-shot', s[1]); b.setAttribute('aria-label', s[1]);
           b.style.setProperty('--art', 'url(loading/' + s[0] + '.webp)'); b.style.setProperty('--pos', '50% 50%'); b.style.setProperty('--hpos', '50% 50%');
@@ -670,7 +670,7 @@
         });
         var mediaTiles = [].slice.call(mediaRow.children);
         var cardsOf = {
-          f1: [['monza_sunset', 'Game mode', 'Career'], ['silverstone_drizzle', 'Game mode', 'Grand Prix Weekend'], ['suzuka_onboard', 'Game mode', 'Online']],
+          f1: [['monza_sunset', 'Game mode', 'Career'], ['monza_rain', 'Game mode', 'Grand Prix Weekend'], ['monza_sunset', 'Game mode', 'Online']],
           boost: [['boost_hero', 'Online', 'Play With Friends', '20% 50%'], ['boost_hero', 'Game help', 'Jump, Flip and Fly', '80% 50%']],
           lastframe: [['lastframe_hero', 'Online', 'Host a Room', '25% 50%'], ['lastframe_hero', 'Game mode', 'Last Team Standing', '60% 50%'], ['lastframe_hero', 'Game mode', 'Against Bots', '85% 50%']],
           miami: [['miami_brickell', 'Explore', 'Brickell'], ['miami_causeway', 'Explore', 'The Causeway'], ['miami_oceandrive', 'Explore', 'Ocean Drive']],

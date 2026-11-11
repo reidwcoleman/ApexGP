@@ -3,24 +3,10 @@
  * from in-game frames): 1920×1080, the wordmark baked in at the left. The boot loader (index.html)
  * rotates through BOOT_ART; a circuit switch shows the destination's own picture.
  */
-export const BOOT_ART = ['yas_chase', 'suzuka_onboard', 'zandvoort_sunset', 'spa_rain', 'interlagos_rain', 'suzuka_dusk', 'hungaroring_golden', 'melbourne_golden', 'silverstone_drizzle', 'mexico_golden', 'monza_sunset', 'monza_rain'];
+export const BOOT_ART = ['monza_sunset', 'monza_rain'];
 
 const BY_TRACK: Record<string, string[]> = {
-  yasmarina: ['yas_chase'],
-  suzuka: ['suzuka_dusk', 'suzuka_onboard'],
-  zandvoort: ['zandvoort_sunset'],
-  spa: ['spa_rain'],
-  interlagos: ['interlagos_rain'],
-  hungaroring: ['hungaroring_golden'],
-  melbourne: ['melbourne_golden'],
-  silverstone: ['silverstone_drizzle'],
-  mexico: ['mexico_golden'],
   monza: ['monza_sunset', 'monza_rain'],
-  sakhir: ['sakhir_night'],
-  montreal: ['montreal_sunset'],
-  serena: ['serena_golden'],
-  bergsee: ['bergsee_valley'],
-  redmesa: ['redmesa_golden'],
 };
 
 /** one fixed key art per circuit (the tour's card: the same picture every time it's picked) */
