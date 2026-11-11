@@ -3,12 +3,19 @@
 // flags snapping in the wind, smoke from the lodge chimney.
 import * as THREE from 'three';
 import { Mountain, RUNS, DIFF_COLOR, type RunDef } from './mountain.ts';
-import type { World } from './world.ts';
+import { bake, type World } from './world.ts';
 import type { Sim } from './sim.ts';
 import type { Village } from './village.ts';
 import type { Fx } from './fx.ts';
 
-const M = (c: number, r = 0.8, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra });
+const MC = new Map<string, THREE.MeshStandardMaterial>();
+/** shared materials: the same colour and finish is one material, so baking can merge everything that uses it */
+const M = (c: number, r = 0.8, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
+  const k = c + '|' + r + '|' + JSON.stringify(extra);
+  let m = MC.get(k);
+  if (!m) MC.set(k, (m = new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra })));
+  return m;
+};
 
 function trailSign(r: RunDef) {
   const c = document.createElement('canvas');
@@ -146,7 +153,7 @@ export class Dressing {
         g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
         this.trails.add(g);
       });
-    }
+    }    bake(this.trails);
   }
 
   // ------------------------------------------------------------------ the plaza
@@ -226,6 +233,7 @@ export class Dressing {
       P.add(pole, flag);
       this.flags.push(flag);
     });
+    bake(P, (m) => this.flags.includes(m));
   }
 
   frame(dt: number, t: number, sim: Sim, wind: number, night: number) {

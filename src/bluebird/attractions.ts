@@ -3,14 +3,21 @@
 // (a banner over the base, race gates and a finish arch, a torchlight parade, fireworks).
 import * as THREE from 'three';
 import { Mountain, RUNS } from './mountain.ts';
-import type { World } from './world.ts';
+import { bake, type World } from './world.ts';
 import type { Sim } from './sim.ts';
 import type { Village } from './village.ts';
 import type { Fx } from './fx.ts';
 import { skierGeo, JACKETS } from './people.ts';
 import { EVENT_BY, tierOf } from './data.ts';
 
-const M = (c: number, r = 0.8, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra });
+const MC = new Map<string, THREE.MeshStandardMaterial>();
+/** shared materials: the same colour and finish is one material, so baking can merge everything that uses it */
+const M = (c: number, r = 0.8, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
+  const k = c + '|' + r + '|' + JSON.stringify(extra);
+  let m = MC.get(k);
+  if (!m) MC.set(k, (m = new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra })));
+  return m;
+};
 
 export const SPOTS = {
   rink: [-22, 590] as [number, number],
@@ -19,6 +26,11 @@ export const SPOTS = {
   spa: [-218, 584] as [number, number],
   heli: [302, 482] as [number, number],
   banner: [22, 462] as [number, number],
+  giftshop: [168, 520] as [number, number],
+  foodtrucks: [-126, 528] as [number, number],
+  apres: [-30, 548] as [number, number],
+  shuttle: [140, 612] as [number, number],
+  daycare: [-226, 478] as [number, number],
 };
 const HELI_DROP = new THREE.Vector3(-170, 0, -610);
 
@@ -132,7 +144,7 @@ export class Attractions {
   }
 
   update(sim: Sim) {
-    const key = ['tubing', 'rink', 'summithut', 'spa', 'heli'].map((k) => tierOf(sim.lv(k), 4)).join(',');
+    const key = ['tubing', 'rink', 'summithut', 'spa', 'heli', 'giftshop', 'foodtrucks', 'apres', 'shuttle', 'daycare'].map((k) => tierOf(sim.lv(k), 4)).join(',');
     if (key !== this.key) { this.key = key; this.rebuild(sim); }
   }
 
@@ -272,6 +284,90 @@ export class Attractions {
       (this.spaPool as any).w = pw; (this.spaPool as any).d = pd;
     }
 
+    // ---------------------------------------------------------------- shops and services round the plaza
+    const G = vis('giftshop');
+    if (G) {
+      const b = this.village.chalet(7 + G * 2, 6, 3.6, 0xe0457b, { trim: 0x7a1f3f });
+      const sg = this.village.sign('GIFTS', 'BLUEBIRD GEAR', 5, '#7a1f3f');
+      sg.position.set(0, 4.4, 3.2);
+      b.add(sg);
+      this.put(b, SPOTS.giftshop[0], SPOTS.giftshop[1], -0.2);
+    }
+    const F = vis('foodtrucks');
+    if (F) {
+      const g = new THREE.Group();
+      const cols = [0xf08a24, 0x2f7fe0, 0xd2453a, 0x2fb65a, 0xf2c46d, 0x8b2f56];
+      const n = 1 + F;
+      for (let i = 0; i < n; i++) {
+        const t = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.8, 6), M(cols[i % cols.length], 0.5, { metalness: 0.2 }));
+        body.position.y = 1.9;
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.8, 1.8), M(0xe8e8ea, 0.5));
+        cab.position.set(0, 1.4, 3.8);
+        const hatch = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 3.6), this.glowM);
+        hatch.position.set(1.32, 2.2, 0);
+        const awning = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 4), M(0xffffff, 0.6));
+        awning.position.set(1.9, 3.1, 0); awning.rotation.z = -0.25;
+        for (const z of [-2, 2]) for (const x of [-1.1, 1.1]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.3, 10), M(0x1d1d22)); w.rotation.z = Math.PI / 2; w.position.set(x, 0.45, z); t.add(w); }
+        t.add(body, cab, hatch, awning);
+        t.position.set(i * 6.5 - (n - 1) * 3.25, 0, 0);
+        g.add(t);
+      }
+      this.put(g, SPOTS.foodtrucks[0], SPOTS.foodtrucks[1], Math.PI / 2);
+    }
+    const A = vis('apres');
+    if (A) {
+      const b = this.village.chalet(12 + A * 3, 9, 4.5, 0x5b3a26, { trim: 0x2b1a10 });
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(14 + A * 3, 0.5, 6), M(0x9b7350));
+      deck.position.set(0, 0.9, 7.5);
+      b.add(deck);
+      for (let i = 0; i < 3 + A; i++) {
+        const h = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3.4, 5), M(0x2b3036));
+        const x = -6 - A + i * ((12 + A * 2) / (2 + A));
+        h.position.set(x, 2.6, 10);
+        const lamp = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.7, 8), this.glowM);
+        lamp.position.set(x, 4.5, 10);
+        b.add(h, lamp);
+      }
+      const sg = this.village.sign('APRÈS', 'BAR · MUSIC · FIRE', 7, '#2b1a10');
+      sg.position.set(0, 5.6, 4.7);
+      b.add(sg);
+      this.put(b, SPOTS.apres[0], SPOTS.apres[1], 0);
+    }
+    const B = vis('shuttle');
+    if (B) {
+      const g = new THREE.Group();
+      for (let i = 0; i < 1 + B; i++) {
+        const bus = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3.2, 11), M(0x2f7fe0, 0.4, { metalness: 0.3 }));
+        body.position.y = 2.1;
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.64, 0.5, 11.04), M(0xf2c46d, 0.5));
+        stripe.position.y = 1.4;
+        const win = new THREE.Mesh(new THREE.BoxGeometry(2.66, 1.0, 9.6), M(0x1b2833, 0.1, { metalness: 0.6, emissive: 0xffd09a, emissiveIntensity: 0.15 }));
+        win.position.y = 2.9;
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.25, 10.6), M(0xf4f7fb, 0.7));
+        roof.position.y = 3.8;
+        bus.add(body, stripe, win, roof);
+        bus.position.set(i * 4.2, 0, 0);
+        g.add(bus);
+      }
+      this.put(g, SPOTS.shuttle[0], SPOTS.shuttle[1], Math.PI / 2);
+    }
+    const D = vis('daycare');
+    if (D) {
+      const b = this.village.chalet(8 + D * 2, 7, 3.4, 0x2fb65a, { trim: 0x1a6b35 });
+      const sg = this.village.sign('KIDS CLUB', 'DAYCARE', 5, '#1a6b35');
+      sg.position.set(0, 4.2, 3.7);
+      b.add(sg);
+      // a little play yard: colourful snow forts
+      for (let i = 0; i < 3 + D; i++) {
+        const fort = new THREE.Mesh(new THREE.SphereGeometry(0.9 + (i % 2) * 0.4, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), M([0xf2c46d, 0xff6f91, 0x3fb7c9, 0xf08a24][i % 4], 0.7));
+        fort.position.set(-5 + i * 2.6, 0, 7 + (i % 2) * 2);
+        b.add(fort);
+      }
+      this.put(b, SPOTS.daycare[0], SPOTS.daycare[1], 0.3);
+    }
+
     // ---------------------------------------------------------------- heli pad + helicopter
     const Hh = vis('heli');
     if (Hh) {
@@ -305,6 +401,9 @@ export class Attractions {
       this.heli = heli; this.rotor = rotor;
       this.heliT = 0;
     }
+    // merge every static piece into one mesh per material (the helicopter and the instanced crowds stay live)
+    const heliRoot = this.heli;
+    bake(this.group, (m) => { let o: THREE.Object3D | null = m; while (o) { if (o === heliRoot) return true; o = o.parent; } return false; });
   }
 
   // ------------------------------------------------------------------ event visuals

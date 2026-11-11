@@ -1,4 +1,4 @@
-// Bluebird Peak: boot, the orbit camera (and a cinematic tour), the night snowcat fleet, bonus drops
+// Bluebird Peak: boot, the orbit camera (and a cinematic tour), the night snowcat fleet, VIP guests
 // you can click, labels over lifts and trails, celebrations, Marta's first tips, saving, the frame loop.
 import * as THREE from 'three';
 import { Mountain, RUNS, LIFTS, RUN_BY, LIFT_BY, BUILD_SPOTS, HALF } from './mountain.ts';
@@ -189,14 +189,19 @@ async function boot() {
     ui.toast(ev.state === 'live' ? `${e.name} is on! Crowds are heading up the mountain` : `${e.name} is booked for ${ev.day === sim.day ? 'today' : 'tomorrow'}`, 'good');
     if (e.run) focusItem('run.' + e.run); else flyTo = { target: new THREE.Vector3(SPOTS.banner[0], 0, SPOTS.banner[1]), dist: 200 };
   };
+  ui.onBoost = (id) => {
+    const msg = sim.useBoost(id);
+    if (!msg) { audio.bad(); return; }
+    audio.buy(); audio.trick(700);
+    ui.toast(msg, 'good');
+    if (id === 'blitz') sim.dirty = true;
+  };
   ui.onDeal = (yes) => {
     if (yes) { if (sim.acceptDeal()) { audio.buy(); ui.toast(`Deal signed with ${sim.s.deal!.sponsor}. Make it happen!`, 'good'); } else audio.bad(); }
     else sim.declineDeal();
   };
   ui.onSeason = () => {
     if (!sim.newSeason()) return;
-    for (const d of [...drops]) { world.scene.remove(d.mesh); }
-    drops.length = 0;
     sim.dirty = true;
     syncLevels();
     ui.setView(0);
@@ -208,60 +213,6 @@ async function boot() {
   ui.onClaim = (id, x, y) => { const r = sim.claim(id); if (r) { audio.cash(); audio.buy(); ui.coins(x, y, 22); ui.floatCash(x, y - 20, r, true); } };
   ui.onSpeed = (n) => { audio.click(); if (n === 0) sim.paused = !sim.paused; else { sim.paused = false; sim.speed = n; } };
   ui.onSound = () => { soundOn = !soundOn; localStorage.setItem('bluebird.sound', soundOn ? '1' : '0'); ui.setSound(soundOn); audio.start(); audio.setMusic(soundOn); audio.setSfx(soundOn); };
-
-  // ------------------------------------------------------------------ bonus drops
-  type DropKind = 'cash' | 'film' | 'cocoa';
-  interface Drop { id: number; kind: DropKind; x: number; z: number; y: number; ground: number; t: number; mesh: THREE.Group }
-  const drops: Drop[] = [];
-  let dropT = 25, dropId = 1;
-  const crateM = new THREE.MeshStandardMaterial({ color: 0xc8873e, roughness: 0.7 });
-  const chuteMs: Record<DropKind, THREE.MeshStandardMaterial> = {
-    cash: new THREE.MeshStandardMaterial({ color: 0xf2b33d, roughness: 0.5, side: THREE.DoubleSide }),
-    film: new THREE.MeshStandardMaterial({ color: 0x8f7bff, roughness: 0.5, side: THREE.DoubleSide }),
-    cocoa: new THREE.MeshStandardMaterial({ color: 0xd2453a, roughness: 0.5, side: THREE.DoubleSide }),
-  };
-  function spawnDrop() {
-    const built = RUNS.filter((r) => sim.runBuilt(r.id));
-    const r = built[(Math.random() * built.length) | 0];
-    const p = m.runOf[r.id];
-    const i = Math.floor(p.x.length * (0.15 + Math.random() * 0.7));
-    const kind: DropKind = sim.isOpen && Math.random() < 0.2 ? 'film' : sim.isOpen && sim.hour < 14 && Math.random() < 0.2 ? 'cocoa' : 'cash';
-    const g = new THREE.Group();
-    const crate = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), crateM);
-    const chute = new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), chuteMs[kind]);
-    chute.position.y = 8;
-    const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 1, 0), new THREE.Vector3(-4, 8, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(4, 8, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 8, 4), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 8, -4)]), new THREE.LineBasicMaterial({ color: 0x333333 }));
-    g.add(crate, chute, lines);
-    g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
-    const ground = m.ground(p.x[i], p.z[i]);
-    const d: Drop = { id: dropId++, kind, x: p.x[i], z: p.z[i], y: ground + 70, ground, t: 0, mesh: g };
-    g.position.set(d.x, d.y, d.z);
-    world.scene.add(g);
-    drops.push(d);
-  }
-  function collect(d: Drop, sx: number, sy: number) {
-    world.scene.remove(d.mesh);
-    drops.splice(drops.indexOf(d), 1);
-    audio.cash();
-    ui.coins(sx, sy, 16);
-    fx.emit(d.x, d.ground + 1, d.z, 0, 4, 0, 5, 40, 1.2, 160);
-    if (d.kind === 'cash') { const amt = sim.bonus(45); ui.floatCash(sx, sy - 30, amt, true); }
-    else if (d.kind === 'film') { sim.addBuzz(0.12); sim.planDay(true); ui.toast('A ski film crew posted your mountain: +12% skiers for a while', 'good'); }
-    else { sim.lunchBoost(2); ui.toast('Hot cocoa rush: lodge sales doubled for two hours', 'good'); }
-  }
-  function updateDrops(dt: number) {
-    if (!ui.modalOpen) dropT -= dt;
-    if (dropT <= 0 && drops.length < 2) { spawnDrop(); dropT = 35 + Math.random() * 45; }
-    for (const d of [...drops]) {
-      d.t += dt;
-      d.y = Math.max(d.ground + 1.1, d.y - dt * 3.2);
-      d.mesh.position.set(d.x + Math.sin(d.t * 0.8) * 2 * Math.min(1, (d.y - d.ground) / 10), d.y, d.z);
-      d.mesh.rotation.y = Math.sin(d.t * 0.6) * 0.3;
-      const chute = d.mesh.children[1];
-      chute.visible = d.y > d.ground + 1.2;
-      if (d.t > 34) { world.scene.remove(d.mesh); drops.splice(drops.indexOf(d), 1); }
-    }
-  }
 
   // ------------------------------------------------------------------ guests: what they think, and the odd VIP
   const NAMES = ['Maya', 'Theo', 'Priya', 'Jonas', 'Lucia', 'Sam', 'Ines', 'Kofi', 'Hana', 'Leo', 'Ava', 'Mateo', 'Zoe', 'Finn', 'Omar', 'Elsa', 'Ravi', 'Nora'];
@@ -376,7 +327,7 @@ async function boot() {
       const html = `${icon(r.diff, 13)} ${r.name} ${built ? `<span class="lv">${lv}</span><small>${metric}</small>` : `<small>${lock ?? money(ITEM_BY['run.' + r.id].build)}</small>`}`;
       out.push({ id: 'r' + r.id, x: s.x, y: s.y, cls: (built ? (thin ? 'bad' : '') : 'dim') + (v ? ' big' : ''), html, click: () => ui.openItem('run.' + r.id), hidden: tour || (built ? !near && v === 0 && !thin : (!!lock || !sim.liftBuilt(r.needs) || (v !== 1 && !near))) });
     }
-    for (const id of ['tubing', 'rink', 'summithut', 'spa', 'heli'] as const) {
+    for (const id of ['tubing', 'rink', 'summithut', 'spa', 'heli', 'giftshop', 'foodtrucks', 'apres', 'shuttle', 'daycare'] as const) {
       if (!sim.lv(id)) continue;
       const [x, z] = SPOTS[id];
       const s = project(x, m.at(x, z) + 16, z);
@@ -397,14 +348,7 @@ async function boot() {
     if (vip) {
       const a = vip.agent;
       const s = project(a.x, a.y + 4, a.z);
-      if (s) out.push({ id: 'vip', x: s.x, y: s.y, cls: 'drop vip', html: `${icon('star', 16)} ${vipName} on the slopes! · tap`, click: () => { const amt = sim.bonus(75); sim.addBuzz(0.06); sim.planDay(true); audio.cash(); audio.trick(900); ui.coins(s.x, s.y, 24); ui.floatCash(s.x, s.y - 30, amt, true); ui.toast(`The ${vipName.toLowerCase()} posted a selfie from Bluebird Peak: +6% buzz`, 'good'); vip = null; } });
-    }
-    for (const d of drops) {
-      const s = project(d.mesh.position.x, d.mesh.position.y + 12, d.mesh.position.z);
-      if (!s) continue;
-      const amt = Math.max(80 + sim.s.resortLv * 60, (sim.perMinute / 60) * 45, sim.s.rate * 45);
-      const html = d.kind === 'cash' ? `${icon('gift', 16)} Supply drop · +${money(amt)}` : d.kind === 'film' ? `${icon('camera', 16)} Film crew · +buzz` : `${icon('cup', 16)} Cocoa rush · lodge ×2`;
-      out.push({ id: 'd' + d.id, x: s.x, y: s.y, cls: 'drop ' + d.kind, html, click: () => collect(d, s.x, s.y) });
+      if (s) out.push({ id: 'vip', x: s.x, y: s.y, cls: 'drop vip', html: `${icon('star', 16)} ${vipName} on the slopes! · tap`, click: () => { const amt = sim.bonus(75); sim.addBuzz(0.06); sim.s.vips++; sim.planDay(true); audio.cash(); audio.trick(900); ui.coins(s.x, s.y, 24); ui.floatCash(s.x, s.y - 30, amt, true); ui.toast(`The ${vipName.toLowerCase()} posted a selfie from Bluebird Peak: +6% buzz`, 'good'); vip = null; } });
     }
     ui.labels(out);
   }
@@ -417,7 +361,7 @@ async function boot() {
     const msgs = [
       `Welcome to Bluebird Peak! It runs itself: skiers come, snowcats groom at night, money rolls in. Your job is to spend it well. Start by upgrading <b>Sprout Slope</b> in the shop on the right.`,
       `<b>Your business</b> on the left shows what holds you back: the red bar. Hit <b>Fix</b> to jump to the upgrade that helps most.`,
-      `Golden crates parachute onto the trails now and then: click them for bonus cash. Press <b>M</b> for the trail map. Save up for the <b>Meadow Chair</b> to open the real mountain!`,
+      `The <b>boost buttons</b> at the bottom run a flash sale, a happy hour or a grooming blitz: use them, then wait for them to recharge. Press <b>M</b> for the trail map. Save up for the <b>Meadow Chair</b> to open the real mountain!`,
     ];
     if (s.tut === 0 && sim.lv('run.bunny') >= 3) { s.tut = 1; tipT = 0; }
     if (s.tut === 1 && (tipT > 16 || sim.lv('parking') >= 3)) { s.tut = 2; tipT = 0; }
@@ -429,7 +373,7 @@ async function boot() {
   let last = performance.now();
   let saveT = 0, tSec = 0, lodgeCashT = 3;
   if (offlineEarned > 0) ui.welcome(offlineEarned);
-  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, drops, spawnDrop, setTour, attractions, syncLevels, dressing, forceVip: () => { vipT = 0; } };
+  (window as any).__bb = { sim, world, m, lifts, crowd, cats, ui, orbit, village, fx, setTour, attractions, syncLevels, dressing, forceVip: () => { vipT = 0; } };
 
   function loop() {
     requestAnimationFrame(loop);
@@ -454,6 +398,9 @@ async function boot() {
         const ev = EVENT_BY[e.id];
         if (e.phase === 'live') { ui.toast(`${ev.name} is on today: ${Math.round((ev.guestMul - 1) * 100)}% more guests`, 'good', 5000); audio.good(); }
         else { ui.celebrate(ev.name, `Prize +${money(e.payout ?? 0)}`, 'event'); audio.trick(1500); }
+      } else if (e.k === 'trophy') {
+        ui.toast(`<b>Trophy unlocked: ${e.name}</b> · +${money(e.reward)}`, 'gold', 5000);
+        audio.trick(1600);
       } else if (e.k === 'league') {
         ui.celebrate(`#${e.rank} in the league`, `Passed ${e.rival} · +${money(e.reward)}`, 'league');
         audio.trick(2500);
@@ -522,7 +469,6 @@ async function boot() {
       }
     }
     fx.update(dt, world.night, innerHeight * world.renderer.getPixelRatio(), cam.fov);
-    updateDrops(dt);
 
     // floating money over the ticket booth and lodge while the crowd is in
     lodgeCashT -= dt;

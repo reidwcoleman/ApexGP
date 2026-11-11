@@ -3,7 +3,7 @@
 // (income, trails, lifts, events, Legend); labels, drops and celebrations over the 3D view.
 import './ui.css';
 import { RUNS, LIFTS, LIFT_BY, RUN_BY, DIFF_COLOR, DIFF_NAME, type Mountain } from './mountain.ts';
-import { ITEMS, ITEM_BY, WEATHER, EVENTS, type Cat, itemEffect, nextMilestone, prevMilestone, priceOf, OPEN, liftCap, runAppeal, legendMul, LEGEND_LV, tierOf, CHAIR_TIERS, GONDOLA_TIERS, CARPET_TIERS } from './data.ts';
+import { ITEMS, ITEM_BY, WEATHER, EVENTS, BOOSTS, TROPHIES, type Cat, itemEffect, nextMilestone, prevMilestone, priceOf, OPEN, liftCap, runAppeal, legendMul, LEGEND_LV, tierOf, CHAIR_TIERS, GONDOLA_TIERS, CARPET_TIERS } from './data.ts';
 import { money, INCOME_KEYS, type Sim, type DayStats } from './sim.ts';
 
 export interface Label { id: string; x: number; y: number; html: string; cls?: string; click?: () => void; hidden?: boolean }
@@ -52,6 +52,10 @@ const I: Record<string, string> = {
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />',
   crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5zM5 21h14" />',
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  truck: '<path d="M2 7h12v9H2zM14 10h4l3 3v3h-7M5 19a2 2 0 1 0 0-.1M17 19a2 2 0 1 0 0-.1" />',
+  bus: '<rect x="4" y="3" width="16" height="15" rx="3"/><path d="M4 11h16M8 21v-3M16 21v-3M8 15h.1M16 15h.1" />',
+  cross: '<path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z" />',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z" />',
   green: '<circle cx="12" cy="12" r="7" fill="#2fb65a" stroke="none"/>',
   blue: '<rect x="5" y="5" width="14" height="14" fill="#2f7fe0" stroke="none"/>',
   black: '<path d="M12 3l9 9-9 9-9-9z" fill="#15161c" stroke="#fff" stroke-width="1.2"/>',
@@ -71,7 +75,9 @@ function stars(n: number, size = 15) {
   for (let i = 0; i < 5; i++) { const f = Math.max(0, Math.min(1, n - i)); s += `<i style="--f:${(f * 100).toFixed(0)}%;width:${size}px;height:${size}px">${icon('star', size)}</i>`; }
   return `<span class="stars">${s}</span>`;
 }
-const setHtml = (el: HTMLElement, html: string) => { if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; return true; } return false; };
+/** true while a mouse button / finger is down on the HUD: nothing re-renders under it, so clicks always land */
+let pressing = false;
+const setHtml = (el: HTMLElement, html: string) => { if (pressing) return false; if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; return true; } return false; };
 
 const CATS: { id: Cat; name: string; icon: string }[] = [
   { id: 'lifts', name: 'Lifts', icon: 'chair' },
@@ -87,7 +93,7 @@ export const VIEWS: { name: string; icon: string; tip: string }[] = [
   { name: 'Snow', icon: 'flake', tip: 'Snow condition: green is perfect, red is worn out' },
   { name: 'Crowds', icon: 'people', tip: 'Where the skiers are' },
 ];
-type ReportTab = 'overview' | 'league' | 'trails' | 'lifts' | 'events' | 'legend';
+type ReportTab = 'overview' | 'league' | 'trophies' | 'trails' | 'lifts' | 'events' | 'legend';
 export interface Thought { text: string; good: boolean; who: string }
 
 export class UI {
@@ -107,6 +113,7 @@ export class UI {
   onSeason: () => void = () => {};
   onFocusItem: (id: string) => void = () => {};
   onDeal: (accept: boolean) => void = () => {};
+  onBoost: (id: string) => void = () => {};
   /** the latest things guests have said, newest first */
   voices: Thought[] = [];
   private el: Record<string, HTMLElement> = {};
@@ -115,8 +122,11 @@ export class UI {
   private rowsKey = '';
   private cashShown = 0;
   private flashId = '';
+  private flashUntil: Record<string, number> = {};
   private celT = 0;
   private seasonArm = false;
+  private downOnBackdrop = false;
+  private reportT = 0;
 
   constructor(root: HTMLElement, private sim: Sim, private m: Mountain) {
     this.root = root;
@@ -143,6 +153,8 @@ export class UI {
       </div>
       <button class="shoptab glass" id="u-shoptab">${icon('up', 16)} Shop<i class="dot"></i></button>
       <div class="viewbar glass" id="u-viewbar">
+        <div class="boosts" id="u-boosts">${BOOSTS.map((b) => `<button data-boost="${b.id}" title="${b.name}: ${b.tip}"><i class="cd"></i>${icon(b.icon, 17)}<span>${b.name}</span></button>`).join('')}</div>
+        <i class="sep"></i>
         ${VIEWS.map((v, i) => `<button data-view="${i}" title="${v.tip}">${icon(v.icon, 15)}<span>${v.name}</span></button>`).join('')}
         <i class="sep"></i>
         <button data-report="overview" title="Business report (R)">${icon('chart', 15)}<span>Report</span></button>
@@ -184,14 +196,20 @@ export class UI {
     on('clock', 'click', (e) => { const b = closest(e, 'button'); if (b?.dataset.sp) this.onSpeed(+b.dataset.sp); });
     on('viewbar', 'click', (e) => {
       const b = closest(e, 'button'); if (!b) return;
+      if (b.dataset.boost) { this.onBoost(b.dataset.boost); this.renderBoosts(); return; }
       if (b.dataset.view) this.setView(+b.dataset.view);
       else if (b.dataset.report) this.openReport('overview');
     });
     on('tour', 'click', (e) => { e.stopPropagation(); this.onTour(); });
     on('sound', 'click', (e) => { e.stopPropagation(); this.onSound(); });
+    root.addEventListener('pointerdown', (e) => { pressing = true; this.downOnBackdrop = e.target === this.el.modal; }, true);
+    const release = () => { pressing = false; };
+    addEventListener('pointerup', release, true);
+    addEventListener('pointercancel', release, true);
+    addEventListener('blur', release);
     on('modal', 'click', (e) => {
-      if (closest(e, '[data-close]') || e.target === this.el.modal) { this.closeModal(); return; }
-      const t = closest(e, '[data-rtab]'); if (t) { this.report = t.dataset.rtab as ReportTab; this.seasonArm = false; this.renderReport(); return; }
+      if (closest(e, '[data-close]') || (e.target === this.el.modal && this.downOnBackdrop)) { this.closeModal(); return; }
+      const t = closest(e, '[data-rtab]'); if (t) { this.openReport(t.dataset.rtab as ReportTab); return; }
       const h = closest(e, '[data-host]'); if (h && !h.classList.contains('no')) { this.onHost(h.dataset.host!); this.renderReport(); return; }
       const f = closest(e, '[data-look]'); if (f) { this.closeModal(); this.onFocusItem(f.dataset.look!); return; }
       const u = closest(e, '[data-up]'); if (u) { this.closeModal(); this.openItem(u.dataset.up!); return; }
@@ -245,11 +263,14 @@ export class UI {
     this.renderChips();
     this.renderClock();
     this.renderLeague();
+    this.renderBoosts();
     this.renderGoals();
     this.renderBiz(false);
     this.renderEvents();
     this.renderShop(false);
-    if (this.report) this.renderReport();
+    // the report refreshes once a second (live numbers), never mid-click
+    this.reportT -= 0.25;
+    if (this.report && this.reportT <= 0) { this.reportT = 1; this.renderReport(); }
   }
 
   private renderBadge() {
@@ -282,6 +303,20 @@ export class UI {
     setHtml(this.el.clock, `<div class="crow"><b>${sim.dayName} · Day ${sim.day}</b><span class="time">${fmtHour(sim.hour)}</span></div>
       <div class="crow small"><span class="st ${sim.isOpen ? 'live' : ''}">${status}</span><span class="wx">${icon(w.icon, 14)} ${w.name} ${Math.round(sim.temp)}°</span></div>
       <div class="crow small"><span class="speed">${([[0, ''], [1, '1×'], [2, '2×'], [4, '4×']] as [number, string][]).map(([n, l]) => `<button data-sp="${n}" class="${sp === n ? 'on' : ''}">${n === 0 ? icon('pause', 12) : l}</button>`).join('')}</span><span class="fc">${fc}</span></div>`);
+  }
+
+  /** each boost button: a ring that fills as it recharges, bright when ready */
+  renderBoosts() {
+    for (const b of this.el.viewbar.querySelectorAll('[data-boost]')) {
+      const el = b as HTMLElement, id = el.dataset.boost!;
+      const left = this.sim.boostLeft(id), max = this.sim.boostMax(id);
+      const ready = left <= 0 && !(id === 'promo' && this.sim.s.promoDay >= this.sim.day && this.sim.hour < this.sim.closeHour) && !(id === 'happy' && this.sim.happy);
+      el.classList.toggle('ready', ready);
+      el.style.setProperty('--p', ready ? '100%' : `${(100 * (1 - left / max)).toFixed(1)}%`);
+      const sp = el.querySelector('span')!;
+      const txt = ready ? BOOSTS.find((q) => q.id === id)!.name : left > 0 ? `${Math.ceil(left)}s` : 'Active';
+      if (sp.textContent !== txt) sp.textContent = txt;
+    }
   }
 
   private renderLeague() {
@@ -385,13 +420,27 @@ export class UI {
     }
     (this.el.shoptab.querySelector('.dot') as HTMLElement).style.display = anyAll ? '' : 'none';
     for (const b of this.el.buyn.querySelectorAll('button')) b.classList.toggle('on', +(b as HTMLElement).dataset.n! === this.buyN);
-    const html = ITEMS.filter((it) => it.cat === this.tab).map((it) => this.row(it.id)).join('');
-    if (!force && html === this.rowsKey) return;
-    this.rowsKey = html;
-    const st = this.el.rows.scrollTop;
-    this.el.rows.innerHTML = html;
-    this.el.rows.scrollTop = st;
-    if (this.flashId) { const c = this.el.rows.querySelector(`[data-row="${CSS.escape(this.flashId)}"]`); c?.classList.add('flash'); this.flashId = ''; }
+    if (pressing && !force) return;
+    const items = ITEMS.filter((it) => it.cat === this.tab);
+    const listKey = this.tab + ':' + items.length;
+    const box = this.el.rows;
+    if (force || this.rowsKey !== listKey) {
+      // a new tab: rebuild the list
+      this.rowsKey = listKey;
+      box.innerHTML = items.map((it) => `<div class="irow" data-row="${it.id}"></div>`).join('');
+    }
+    // then patch only the rows whose content changed
+    for (const it of items) {
+      const holder = box.querySelector(`[data-row="${CSS.escape(it.id)}"]`) as HTMLElement | null;
+      if (!holder) continue;
+      const html = this.row(it.id);
+      const [cls, inner] = html.split('\u0001');
+      if (holder.className !== cls) holder.className = cls;
+      const style = '--c:' + ITEM_BY[it.id].color;
+      if (holder.getAttribute('style') !== style) holder.setAttribute('style', style);
+      if (holder.dataset.h !== inner) { holder.dataset.h = inner; holder.innerHTML = inner; }
+    }
+    if (this.flashId) { this.flashUntil[this.flashId] = performance.now() + 1600; this.flashId = ''; this.renderShop(false); }
   }
 
   private row(id: string) {
@@ -415,15 +464,15 @@ export class UI {
     else if (maxed) btn = `<div class="maxed">${it.max === 1 ? 'Built' : 'Maxed'}</div>`;
     else btn = `<button class="buy ${can ? '' : 'no'}" data-buy="${id}"><span>${lv === 0 ? 'Build' : q.n > 1 ? '×' + q.n : 'Upgrade'}</span><b>${money(q.total)}</b>${can ? '' : `<small>${eta((q.total - sim.s.cash) / rate)}</small>`}</button>`;
     const fresh = lv === 0 && !lock && can;
-    return `<div class="irow ${lock ? 'is-lock' : ''} ${fresh ? 'glow' : ''} ${can && !lock && !maxed ? 'can' : ''}" data-row="${id}" style="--c:${it.color}">
+    const flash = this.flashUntil[id] && performance.now() < this.flashUntil[id] ? ' flash' : '';
+    return `irow${lock ? ' is-lock' : ''}${fresh ? ' glow' : ''}${can && !lock && !maxed ? ' can' : ''}${flash}\u0001
       <span class="ci">${icon(it.icon, 19)}</span>
       <div class="im">
         <div class="in"><b>${esc(it.name)}</b>${lv ? `<span class="lvb">${lv}</span>` : ''}${look}</div>
         <div class="ie">${lv ? `${esc(eff)}${status ? ' · ' + status : ''}` : esc(this.blurb(id))}${!maxed && !lock && lv ? ` <span class="nx">→ ${esc(nextEff)}</span>` : ''}</div>
         ${ms}
       </div>
-      ${btn}
-    </div>`;
+      ${btn}`;
   }
   private rowStatus(id: string) {
     const sim = this.sim;
@@ -438,21 +487,42 @@ export class UI {
       rental: 'Guests rent skis and boots', school: 'Lessons bring families', hotel: 'Guests stay over; rooms skip the parking limit', lights: 'Floodlit lower trails: open until 9 pm',
       snowmaking: 'Guns fire on cold nights to keep thin trails open', mechanic: 'Fewer breakdowns, faster fixes', marketing: 'Ads, influencers and ski magazines', service: 'Friendly staff: a straight rating boost',
       fleet: 'More snowcats groom more trails each night', catpower: 'Faster cats, wider tillers',
+      giftshop: 'Hoodies, mugs and pins with your logo', foodtrucks: 'Tacos and waffles on the plaza', apres: 'Live music and a fire pit after the lifts close',
+      shuttle: 'Buses from town: guests who skip the parking lot', daycare: 'Parents ski while the kids build snow forts',
+      snowfarm: 'Stockpiled snow under insulation: trails melt slower', avalanche: 'Blasting crews keep the mountain open on stormy days',
+      patrol: 'Safety and first aid: guests feel looked after', social: 'Clips and posts keep people talking every day', promo: 'Your boost buttons recharge faster',
       tubing: 'A snow ramp with tubing lanes for the whole family', rink: 'Skating under string lights on the plaza', summithut: 'Lunch with the best view in the state',
       spa: 'Steaming pools next to the hotel', heli: 'A helicopter flies experts to untouched backcountry peaks',
     } as Record<string, string>)[id] ?? '';
   }
 
   // ------------------------------------------------------------------ the report
-  openReport(tab: ReportTab) { this.report = tab; this.seasonArm = false; this.el.modal.classList.add('on', 'wide'); this.el.modal.dataset.h = ''; this.renderReport(); }
+  openReport(tab: ReportTab) {
+    const m = this.el.modal;
+    if (!this.report || !m.querySelector('.sheet.report')) {
+      m.innerHTML = `<div class="sheet report"><div class="rhead"><h2></h2><div class="rtabs"></div><button class="x" data-close="1">${icon('x', 18)}</button></div><div class="rbody"></div></div>`;
+      m.dataset.h = '';
+    }
+    this.report = tab;
+    this.seasonArm = false;
+    m.classList.add('on', 'wide');
+    const rb = m.querySelector('.rbody') as HTMLElement;
+    rb.dataset.h = '';
+    rb.scrollTop = 0;
+    this.renderReport();
+  }
   closeModal() { this.report = null; this.el.modal.classList.remove('on', 'wide'); }
   private renderReport() {
     const tab = this.report!;
-    const tabs: [ReportTab, string, string][] = [['overview', 'Overview', 'chart'], ['league', 'League', 'trophy'], ['trails', 'Trails', 'ski'], ['lifts', 'Lifts', 'chair'], ['events', 'Events', 'flag'], ['legend', 'Legend', 'crown']];
-    const body = tab === 'overview' ? this.repOverview() : tab === 'league' ? this.repLeague() : tab === 'trails' ? this.repTrails() : tab === 'lifts' ? this.repLifts() : tab === 'events' ? this.repEvents() : this.repLegend();
-    const html = `<div class="sheet report"><div class="rhead"><h2>${esc(this.sim.s.name)}</h2><div class="rtabs">${tabs.map(([k, n, ic]) => `<button data-rtab="${k}" class="${k === tab ? 'on' : ''}">${icon(ic, 15)} ${n}${k === 'legend' && this.sim.legendReady ? '<i class="dot"></i>' : ''}</button>`).join('')}</div><button class="x" data-close="1">${icon('x', 18)}</button></div><div class="rbody">${body}</div></div>`;
+    const tabs: [ReportTab, string, string][] = [['overview', 'Overview', 'chart'], ['league', 'League', 'trophy'], ['trophies', 'Trophies', 'star'], ['trails', 'Trails', 'ski'], ['lifts', 'Lifts', 'chair'], ['events', 'Events', 'flag'], ['legend', 'Legend', 'crown']];
+    const body = tab === 'overview' ? this.repOverview() : tab === 'league' ? this.repLeague() : tab === 'trophies' ? this.repTrophies() : tab === 'trails' ? this.repTrails() : tab === 'lifts' ? this.repLifts() : tab === 'events' ? this.repEvents() : this.repLegend();
     const m = this.el.modal;
-    if (m.dataset.h !== html) { const sc = m.querySelector('.rbody')?.scrollTop ?? 0; m.dataset.h = html; m.innerHTML = html; const rb = m.querySelector('.rbody'); if (rb) rb.scrollTop = sc; }
+    const h2 = m.querySelector('.rhead h2') as HTMLElement | null, tb = m.querySelector('.rtabs') as HTMLElement | null, rb = m.querySelector('.rbody') as HTMLElement | null;
+    if (!h2 || !tb || !rb) return;
+    setHtml(h2, esc(this.sim.s.name));
+    setHtml(tb, tabs.map(([k, n, ic]) => `<button data-rtab="${k}" class="${k === tab ? 'on' : ''}">${icon(ic, 15)} ${n}${k === 'legend' && this.sim.legendReady ? '<i class="dot"></i>' : ''}</button>`).join(''));
+    const sc = rb.scrollTop;
+    if (setHtml(rb, body)) rb.scrollTop = sc;
   }
   private repOverview() {
     const sim = this.sim, s = sim.s, t = s.today;
@@ -463,7 +533,7 @@ export class UI {
     const total = sim.todayIncome || 1;
     const src = INCOME_KEYS.map(([k, n, c]) => `<div class="srcr"><i style="background:${c}"></i><span>${n}</span><b>${money(t[k as keyof DayStats] as number)}</b><em>${Math.round(((t[k] as number) / total) * 100)}%</em></div>`).join('');
     const p = sim.starParts;
-    const rr: [string, number, number, string, string][] = [['Snow', p.snow, 1.7, 'flake', 'catpower'], ['Lifts', p.lifts, 1, 'chair', this.cheapest('lift.')], ['Food', p.food, 0.6, 'cup', 'lodge'], ['Variety', p.variety, 0.55, 'ski', this.cheapest('run.')], ['Service', p.service, 0.6, 'star', 'service']];
+    const rr: [string, number, number, string, string][] = [['Snow', p.snow, 1.7, 'flake', 'catpower'], ['Lifts', p.lifts, 1, 'chair', this.cheapest('lift.')], ['Food', p.food, 0.6, 'cup', 'lodge'], ['Variety', p.variety, 0.55, 'ski', this.cheapest('run.')], ['Service', p.service, 1.0, 'star', 'patrol']];
     return `<div class="rgrid2">
       <section><h3>Income, last two weeks</h3><div class="chart">${chart}</div><div class="ilegend wrap">${INCOME_KEYS.map(([, n, c]) => `<span><i style="background:${c}"></i>${n}</span>`).join('')}</div></section>
       <section><h3>Today so far <b class="g">${money(sim.todayIncome)}</b></h3>${src}</section>
@@ -474,6 +544,11 @@ export class UI {
         <div><small>Guests all time</small><b>${num(s.lifetime)}</b></div><div><small>Earned this season</small><b>${money(s.earned)}</b></div>
         <div><small>Events hosted</small><b>${s.evCount}</b></div><div><small>Sponsor deals won</small><b>${s.deals}</b></div>
       </div></section></div>`;
+  }
+  private repTrophies() {
+    const got = new Set(this.sim.s.trophies);
+    return `<p class="note" style="margin:0 0 12px">${got.size} of ${TROPHIES.length} won. Every trophy pays out, and they stay yours through new seasons.</p>
+      <div class="trophies">${TROPHIES.map((t) => `<div class="tro ${got.has(t.id) ? 'got' : ''}"><span class="ti">${icon(got.has(t.id) ? t.icon : 'lock', 20)}</span><div><b>${esc(t.name)}</b><small>${esc(t.text)}</small></div></div>`).join('')}</div>`;
   }
   private repLeague() {
     const sim = this.sim;
@@ -619,7 +694,22 @@ export class UI {
   dayEnd(day: number, visitors: number, income: number, starsN: number, best: boolean) {
     this.toast(`<div class="de"><small>Day ${day} wrap-up${best ? ' · <b class="rec">New record!</b>' : ''}</small><div><span>${icon('people', 14)} ${num(visitors)} guests</span><span>${icon('ticket', 14)} +${money(income)}</span><span>${icon('star', 14)} ${starsN.toFixed(1)}</span></div></div>`, best ? 'gold' : 'info', 6000);
   }
+  private celQueue: [string, string, 'level' | 'milestone' | 'event' | 'league'][] = [];
+  private celBusy = false;
+  /** big moments play one after another, never on top of each other */
   celebrate(title: string, sub: string, kind: 'level' | 'milestone' | 'event' | 'league' = 'level') {
+    // a burst of level-ups collapses into the latest one
+    if (kind === 'level') this.celQueue = this.celQueue.filter((q) => q[2] !== 'level');
+    this.celQueue.push([title, sub, kind]);
+    if (this.celQueue.length > 4) this.celQueue.splice(0, this.celQueue.length - 4);
+    if (!this.celBusy) this.nextCelebration();
+  }
+  private nextCelebration() {
+    const q = this.celQueue.shift();
+    if (!q) { this.celBusy = false; this.root.classList.remove('celebrating'); return; }
+    this.celBusy = true;
+    this.root.classList.add('celebrating');
+    const [title, sub, kind] = q;
     const c = this.el.celebrate;
     c.innerHTML = `<div class="cb ${kind}"><small>${kind === 'level' ? 'Resort level up' : kind === 'event' ? 'Event wrapped up' : kind === 'league' ? 'League climb' : 'Milestone'}</small><b>${esc(title)}</b><span>${sub}</span></div>`;
     for (let i = 0; i < (kind === 'milestone' ? 30 : 70); i++) {
@@ -635,7 +725,7 @@ export class UI {
     }
     c.classList.remove('on'); void c.offsetWidth; c.classList.add('on');
     clearTimeout(this.celT);
-    this.celT = window.setTimeout(() => { c.classList.remove('on'); c.innerHTML = ''; }, kind === 'milestone' ? 2200 : 3400);
+    this.celT = window.setTimeout(() => { c.classList.remove('on'); c.innerHTML = ''; window.setTimeout(() => this.nextCelebration(), 250); }, kind === 'milestone' ? 2200 : 3400);
   }
   radio(html: string | null) {
     const r = this.el.radio;

@@ -55,8 +55,8 @@
 #ui .crow .time { margin-left: auto; font: italic 800 24px/1 "Barlow Condensed", sans-serif; font-variant-numeric: tabular-nums; }
 #ui .crow.small { margin-top: 6px; font-size: 13px; color: var(--ink2); }
 #ui .crow .st { font-weight: 700; color: var(--ink); }
-#ui .crow .st.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fe07a; margin-right: 6px; box-shadow: 0 0 0 3px rgba(63, 224, 122, 0.22); animation: bb-blink 1.6s infinite; }
-@keyframes bb-blink { 50% { box-shadow: 0 0 0 6px rgba(63, 224, 122, 0); } }
+#ui .crow .st.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fe07a; margin-right: 6px; box-shadow: 0 0 0 3px rgba(63, 224, 122, 0.22); animation: bb-blink 1.6s infinite; will-change: opacity; }
+@keyframes bb-blink { 50% { opacity: 0.45; } }
 #ui .crow .wx { margin-left: auto; font-weight: 600; }
 #ui .speed { display: flex; gap: 3px; }
 #ui .speed button { height: 24px; min-width: 30px; padding: 0 6px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); font-weight: 800; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
@@ -120,7 +120,7 @@
 #ui .gbar i { display: block; height: 100%; background: var(--blue); border-radius: 3px; transition: width 0.4s; }
 #ui .goal.done .gbar i { background: #3fe07a; }
 #ui .rw { font-size: 12.5px; font-weight: 800; color: var(--gold); white-space: nowrap; }
-#ui .claim { padding: 5px 10px; border-radius: 10px; background: linear-gradient(180deg, #ffd25e, var(--gold2)); color: #4a2e00; font-size: 11px; font-weight: 800; line-height: 1.1; text-align: center; box-shadow: 0 3px 0 #a86f0e, 0 6px 16px rgba(242, 179, 61, 0.45); animation: bb-pop 1.2s ease-in-out infinite; }
+#ui .claim { padding: 5px 10px; border-radius: 10px; background: linear-gradient(180deg, #ffd25e, var(--gold2)); color: #4a2e00; font-size: 11px; font-weight: 800; line-height: 1.1; text-align: center; box-shadow: 0 3px 0 #a86f0e, 0 6px 16px rgba(242, 179, 61, 0.45); animation: bb-pop 1.2s ease-in-out infinite; will-change: transform; }
 #ui .claim b { font-size: 13px; }
 @keyframes bb-pop { 50% { transform: scale(1.07); } }
 
@@ -180,7 +180,7 @@
 #ui .buyn button { flex: 1; padding: 5px 0; border-radius: 7px; color: var(--ink2); font-weight: 800; font-size: 12.5px; }
 #ui .buyn button.on { background: var(--gold); color: #3d2600; }
 #ui .fold { width: 32px; height: 32px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); color: var(--ink2); display: grid; place-items: center; }
-#ui .rows { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+#ui .rows { position: relative; flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
 #ui .irow { --c: #3d8bff; display: grid; grid-template-columns: 38px 1fr auto; gap: 10px; align-items: center; padding: 9px 8px; border-radius: 13px; position: relative; }
 #ui .irow + .irow { margin-top: 2px; }
 #ui .irow:hover { background: var(--glass2); }
@@ -217,6 +217,19 @@
 #ui .viewbar button { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 11px; font-weight: 700; font-size: 13.5px; color: var(--ink2); white-space: nowrap; }
 #ui .viewbar button:hover { background: var(--glass2); color: #fff; }
 #ui .viewbar button.on { background: #fff; color: #13203a; }
+#ui .boosts { display: flex; gap: 3px; }
+#ui .boosts button { --p: 100%; position: relative; overflow: hidden; color: var(--ink3); }
+#ui .boosts button .cd { position: absolute; left: 0; bottom: 0; height: 3px; width: var(--p); background: rgba(246, 189, 71, 0.55); border-radius: 2px; transition: width 0.25s linear; }
+#ui .boosts button.ready { color: #3d2600; background: linear-gradient(180deg, #ffd25e, var(--gold2)); box-shadow: 0 2px 0 #a86f0e; box-shadow: 0 2px 0 #a86f0e, 0 0 14px rgba(246, 189, 71, 0.45); }
+#ui .boosts button.ready .cd { display: none; }
+#ui .boosts button.ready:hover { color: #3d2600; background: linear-gradient(180deg, #ffe08a, #e8a12a); }
+#ui .trophies { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+#ui .tro { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; background: var(--glass2); opacity: 0.55; }
+#ui .tro.got { opacity: 1; background: rgba(246, 189, 71, 0.12); box-shadow: inset 0 0 0 1px rgba(246, 189, 71, 0.4); }
+#ui .tro .ti { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.08); color: var(--ink3); flex: none; }
+#ui .tro.got .ti { background: linear-gradient(160deg, #f6bd47, #b8740f); color: #2e1b00; }
+#ui .tro b { display: block; font-size: 14px; }
+#ui .tro small { font-size: 12px; color: var(--ink2); }
 #ui .viewbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
 #ui #u-tour.on { background: var(--gold); color: #3d2600; }
 #ui #u-sound.off { opacity: 0.4; }
@@ -228,7 +241,7 @@
 
 /* labels over the mountain */
 #ui .labels { position: absolute; inset: 0; overflow: hidden; }
-#ui .lbl { position: absolute; left: 0; top: 0; padding: 4px 9px 4px 6px; border-radius: 10px; background: rgba(13, 21, 38, 0.82); color: #fff; font-size: 12.5px; font-weight: 700; white-space: nowrap; display: flex; gap: 5px; align-items: center; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); pointer-events: none; }
+#ui .lbl { will-change: transform; position: absolute; left: 0; top: 0; padding: 4px 9px 4px 6px; border-radius: 10px; background: rgba(13, 21, 38, 0.82); color: #fff; font-size: 12.5px; font-weight: 700; white-space: nowrap; display: flex; gap: 5px; align-items: center; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); pointer-events: none; }
 #ui .lbl.clk { pointer-events: auto; cursor: pointer; }
 #ui .lbl.clk:hover { background: rgba(28, 44, 78, 0.95); }
 #ui .lbl small { font-weight: 700; color: var(--ink2); }
@@ -241,7 +254,7 @@
 #ui .lbl.big { font-size: 13.5px; padding: 6px 11px 6px 8px; }
 #ui .lbl::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-bottom: 0; border-top-color: rgba(13, 21, 38, 0.82); }
 #ui .lbl.bad::after { border-top-color: var(--red); }
-#ui .lbl.drop { padding: 7px 12px 7px 8px; background: linear-gradient(180deg, #ffd25e, var(--gold2)); color: #4a2e00; font-size: 13.5px; font-weight: 800; box-shadow: 0 6px 20px rgba(242, 179, 61, 0.6); animation: bb-pop 0.9s ease-in-out infinite; }
+#ui .lbl.drop { padding: 7px 12px 7px 8px; background: linear-gradient(180deg, #ffd25e, var(--gold2)); color: #4a2e00; font-size: 13.5px; font-weight: 800; box-shadow: 0 6px 20px rgba(242, 179, 61, 0.6); animation: bb-pop 0.9s ease-in-out infinite; will-change: transform; }
 #ui .lbl.drop::after { border-top-color: var(--gold2); }
 #ui .lbl.drop.film { background: linear-gradient(180deg, #8f7bff, #6a4cc2); color: #fff; box-shadow: 0 6px 20px rgba(106, 76, 194, 0.6); }
 #ui .lbl.drop.film::after { border-top-color: #6a4cc2; }
@@ -253,6 +266,8 @@
 #ui .lbl.place small { color: #47536b; }
 #ui .lbl.place::after { border-top-color: rgba(255, 255, 255, 0.92); }
 #ui.touring .lbl:not(.drop) { opacity: 0; }
+#ui.celebrating .lbl:not(.drop) { opacity: 0.25; }
+#ui.celebrating .lbl.thought { opacity: 0; }
 
 /* money fx */
 #ui .fcash { position: absolute; transform: translate(-50%, -50%); color: #4ff08d; font: italic 800 20px/1 "Barlow Condensed", sans-serif; text-shadow: 0 2px 0 #0d2a1a, 0 0 10px rgba(0, 0, 0, 0.35); animation: bb-float 1.6s ease-out forwards; pointer-events: none; white-space: nowrap; }

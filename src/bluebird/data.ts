@@ -55,6 +55,11 @@ ITEMS.push(
   { id: 'rental', cat: 'village', name: 'Rental shop', icon: 'ski', max: 200, build: 1200, base: 400, growth: 1.18, needLv: 2, unit: 'per visitor', color: '#9a3f32' },
   { id: 'school', cat: 'village', name: 'Ski school', icon: 'school', max: 200, build: 15000, base: 3000, growth: 1.2, needLv: 5, unit: 'more visitors', color: '#e0a63a' },
   { id: 'hotel', cat: 'village', name: 'Slopeside hotel', icon: 'hotel', max: 200, build: 500000, base: 40000, growth: 1.2, needLv: 9, unit: 'a night', color: '#3d4f66' },
+  { id: 'giftshop', cat: 'village', name: 'Gift shop', icon: 'gift', max: 200, build: 3500, base: 900, growth: 1.18, needLv: 3, unit: 'per guest', color: '#e0457b' },
+  { id: 'foodtrucks', cat: 'village', name: 'Food trucks', icon: 'truck', max: 200, build: 6000, base: 1500, growth: 1.18, needLv: 4, unit: 'per guest', color: '#f08a24' },
+  { id: 'shuttle', cat: 'village', name: 'Shuttle buses', icon: 'bus', max: 200, build: 60000, base: 9000, growth: 1.19, needLv: 6, unit: 'guests a day', color: '#2f7fe0' },
+  { id: 'daycare', cat: 'village', name: 'Kids\' daycare', icon: 'people', max: 200, build: 150000, base: 18000, growth: 1.2, needLv: 7, unit: 'more visitors', color: '#2fb65a' },
+  { id: 'apres', cat: 'village', name: 'Après-ski bar', icon: 'cup', max: 200, build: 250000, base: 25000, growth: 1.19, needLv: 8, unit: 'per guest', color: '#b8740f' },
   { id: 'lights', cat: 'village', name: 'Night skiing', icon: 'lamp', max: 1, build: 80000, base: 0, growth: 1, needLv: 7, needs: 'lift.meadow', unit: '', color: '#f2b33d' },
   { id: 'tubing', cat: 'fun', name: 'Tubing hill', icon: 'tube', max: 200, build: 120000, base: 16000, growth: 1.19, needLv: 6, unit: 'per guest', color: '#e0457b' },
   { id: 'rink', cat: 'fun', name: 'Ice rink', icon: 'skate', max: 200, build: 300000, base: 32000, growth: 1.19, needLv: 7, unit: 'per guest', color: '#3fb7c9' },
@@ -64,6 +69,11 @@ ITEMS.push(
   { id: 'fleet', cat: 'snow', name: 'Snowcat fleet', icon: 'cat', max: 8, build: 0, base: 4000, growth: 4, unit: 'snowcats', color: '#d2453a' },
   { id: 'catpower', cat: 'snow', name: 'Grooming crews', icon: 'cat', max: 200, build: 0, base: 200, growth: 1.18, unit: 'groomed a night', color: '#d2453a' },
   { id: 'snowmaking', cat: 'snow', name: 'Snowmaking', icon: 'gun', max: 40, build: 3000, base: 2000, growth: 1.25, needLv: 3, unit: 'snow guns', color: '#3fb7c9' },
+  { id: 'snowfarm', cat: 'snow', name: 'Snow farming', icon: 'snow', max: 200, build: 400000, base: 40000, growth: 1.2, needLv: 9, unit: 'less melt', color: '#3fb7c9' },
+  { id: 'avalanche', cat: 'snow', name: 'Avalanche control', icon: 'storm', max: 200, build: 600000, base: 60000, growth: 1.2, needLv: 10, unit: 'storm-day guests', color: '#d2453a' },
+  { id: 'patrol', cat: 'crew', name: 'Ski patrol', icon: 'cross', max: 200, build: 5000, base: 2000, growth: 1.2, needLv: 4, unit: 'rating', color: '#d2453a' },
+  { id: 'social', cat: 'crew', name: 'Social media team', icon: 'camera', max: 200, build: 40000, base: 6000, growth: 1.2, needLv: 6, unit: 'buzz', color: '#8f7bff' },
+  { id: 'promo', cat: 'crew', name: 'Promo team', icon: 'bolt', max: 60, build: 20000, base: 5000, growth: 1.22, needLv: 5, unit: 'boost recharge', color: '#f6bd47' },
   { id: 'mechanic', cat: 'crew', name: 'Lift mechanics', icon: 'wrench', max: 200, build: 800, base: 600, growth: 1.2, needLv: 2, unit: 'breakdowns', color: '#55606e' },
   { id: 'marketing', cat: 'crew', name: 'Marketing', icon: 'mega', max: 200, build: 2500, base: 1500, growth: 1.2, needLv: 3, unit: 'more visitors', color: '#8b2f56' },
   { id: 'service', cat: 'crew', name: 'Guest services', icon: 'star', max: 200, build: 8000, base: 5000, growth: 1.25, needLv: 5, unit: 'rating', color: '#f2b33d' },
@@ -102,8 +112,55 @@ export const gunsOf = (lv: number) => lv * 2;
 export const breakChance = (mech: number) => 0.035 * Math.pow(0.94, mech);
 export const fixMinutes = (mech: number) => Math.max(6, 60 * Math.pow(0.93, mech));
 /** attractions: extra spend per visit, and the share of guests who go */
-export const FUN_SPEND: Record<string, [number, number]> = { tubing: [6, 0.9], rink: [7, 1.0], summithut: [12, 1.6], spa: [22, 2.6] };
-export const FUN_SHARE: Record<string, number> = { tubing: 0.3, rink: 0.35, summithut: 0.45, spa: 0.2 };
+export const FUN_SPEND: Record<string, [number, number]> = { tubing: [6, 0.9], rink: [7, 1.0], summithut: [12, 1.6], spa: [22, 2.6], giftshop: [3, 0.45], foodtrucks: [2.5, 0.5], apres: [10, 1.4] };
+export const FUN_SHARE: Record<string, number> = { tubing: 0.3, rink: 0.35, summithut: 0.45, spa: 0.2, giftshop: 0.25, foodtrucks: 0.4, apres: 0.35 };
+export const shuttleCap = (lv: number) => (lv <= 0 ? 0 : Math.round(60 * lv * mult(lv)));
+export const daycareBoost = (lv: number) => (lv <= 0 ? 0 : 0.03 * lv);
+export const meltK = (lv: number) => Math.max(0.3, Math.pow(0.97, lv));
+export const avalancheBoost = (lv: number) => (lv <= 0 ? 0 : 0.05 * lv);
+export const patrolStars = (lv: number) => (lv <= 0 ? 0 : Math.min(0.4, 0.025 * lv));
+export const socialBuzz = (lv: number) => (lv <= 0 ? 0 : Math.min(0.3, 0.006 * lv));
+export const promoK = (lv: number) => Math.max(0.35, Math.pow(0.975, lv));
+
+// ------------------------------------------------------------------ boosts you fire by hand, then wait for them to recharge
+export interface BoostDef { id: string; name: string; icon: string; tip: string; cooldown: number /* real seconds */ }
+export const BOOSTS: BoostDef[] = [
+  { id: 'promo', name: 'Radio promo', icon: 'mega', tip: 'Ads on every station: +35% guests for the rest of today', cooldown: 150 },
+  { id: 'happy', name: 'Happy hour', icon: 'cup', tip: 'Food, drinks and shops sell double for 2 hours', cooldown: 100 },
+  { id: 'blitz', name: 'Grooming blitz', icon: 'cat', tip: 'Cats regroom the three worst trails right now', cooldown: 80 },
+];
+
+// ------------------------------------------------------------------ trophies
+export interface TrophyCtx extends GoalCtx { allRuns: boolean; allLifts: boolean; rank: number; deals: number; vips: number; boosts: number; seasons: number; powder: boolean; maxLv: number; earned: number }
+export interface Trophy { id: string; name: string; text: string; icon: string; check: (c: TrophyCtx) => boolean }
+export const TROPHIES: Trophy[] = [
+  { id: 'open', name: 'Open for business', text: 'Make it to day 2', icon: 'ticket', check: (c) => c.day >= 2 },
+  { id: 'lv10', name: 'Double digits', text: 'Any upgrade to level 10', icon: 'up', check: (c) => c.maxLv >= 10 },
+  { id: 'lv50', name: 'Half a hundred', text: 'Any upgrade to level 50', icon: 'up', check: (c) => c.maxLv >= 50 },
+  { id: 'lv100', name: 'Centurion', text: 'Any upgrade to level 100', icon: 'crown', check: (c) => c.maxLv >= 100 },
+  { id: 'g100', name: 'Busy Saturday', text: '100 guests in a day', icon: 'people', check: (c) => c.best >= 100 },
+  { id: 'g1000', name: 'Packed house', text: '1,000 guests in a day', icon: 'people', check: (c) => c.best >= 1000 },
+  { id: 'g10000', name: 'Mega resort', text: '10,000 guests in a day', icon: 'people', check: (c) => c.best >= 10000 },
+  { id: 's3', name: 'Three stars', text: 'Reach a 3-star rating', icon: 'star', check: (c) => c.stars >= 3 },
+  { id: 's4', name: 'Four stars', text: 'Reach a 4-star rating', icon: 'star', check: (c) => c.stars >= 4 },
+  { id: 's49', name: 'Five-star resort', text: 'Reach 4.9 stars', icon: 'star', check: (c) => c.stars >= 4.9 },
+  { id: 'runs', name: 'The whole mountain', text: 'Build every trail', icon: 'map', check: (c) => c.allRuns },
+  { id: 'lifts', name: 'Lift king', text: 'Build every lift', icon: 'chair', check: (c) => c.allLifts },
+  { id: 'night', name: 'Night owl', text: 'Turn on night skiing', icon: 'lamp', check: (c) => c.lv('lights') > 0 },
+  { id: 'fleet', name: 'Full fleet', text: 'Own 8 snowcats', icon: 'cat', check: (c) => c.lv('fleet') >= 8 },
+  { id: 'm1', name: 'Millionaire', text: 'Earn $1M in a season', icon: 'ticket', check: (c) => c.earned >= 1e6 },
+  { id: 'b1', name: 'Billionaire', text: 'Earn $1B in a season', icon: 'crown', check: (c) => c.earned >= 1e9 },
+  { id: 'ev5', name: 'Party host', text: 'Host 5 events', icon: 'flag', check: (c) => c.events >= 5 },
+  { id: 'ev25', name: 'Festival king', text: 'Host 25 events', icon: 'spark', check: (c) => c.events >= 25 },
+  { id: 'deal5', name: 'Deal maker', text: 'Win 5 sponsor contracts', icon: 'trophy', check: (c) => c.deals >= 5 },
+  { id: 'top3', name: 'Podium', text: 'Reach the top 3 of the league', icon: 'trophy', check: (c) => c.rank <= 3 },
+  { id: 'champ', name: 'Champions', text: 'Top of the league', icon: 'crown', check: (c) => c.rank === 1 },
+  { id: 'vip5', name: 'Star spotter', text: 'Greet 5 VIPs', icon: 'camera', check: (c) => c.vips >= 5 },
+  { id: 'boost25', name: 'Hustler', text: 'Fire 25 boosts', icon: 'bolt', check: (c) => c.boosts >= 25 },
+  { id: 'powder', name: 'Powder hound', text: 'Open on a powder day', icon: 'flake', check: (c) => c.powder },
+  { id: 'heli', name: 'Up and away', text: 'Launch heli-skiing', icon: 'heli', check: (c) => c.lv('heli') > 0 },
+  { id: 'legend', name: 'Legend', text: 'Start a new season', icon: 'crown', check: (c) => c.seasons >= 1 },
+];
 export const funSpend = (id: string, lv: number) => (lv <= 0 ? 0 : (FUN_SPEND[id][0] + FUN_SPEND[id][1] * (lv - 1)) * mult(lv));
 export const heliFlights = (lv: number) => (lv <= 0 ? 0 : Math.round((6 + 2 * (lv - 1)) * mult(lv)));
 export const HELI_FARE = 1400;
@@ -128,6 +185,14 @@ export function itemEffect(it: Item, lv: number): string {
     case 'service': return `+${serviceStars(lv).toFixed(2)} stars`;
     case 'tubing': case 'rink': case 'summithut': case 'spa': return `$${n(funSpend(id, lv))} a visit`;
     case 'heli': return `${heliFlights(lv)} flights a day`;
+    case 'giftshop': case 'foodtrucks': case 'apres': return `$${n(funSpend(id, lv))} a visit`;
+    case 'shuttle': return `+${n(shuttleCap(lv))} guests a day`;
+    case 'daycare': return `+${Math.round(daycareBoost(lv) * 100)}% visitors`;
+    case 'snowfarm': return `${Math.round((1 - meltK(lv)) * 100)}% less melt`;
+    case 'avalanche': return `+${Math.round(avalancheBoost(lv) * 100)}% on snowy days`;
+    case 'patrol': return `+${patrolStars(lv).toFixed(2)} stars`;
+    case 'social': return `+${Math.round(socialBuzz(lv) * 100)}% buzz, always`;
+    case 'promo': return `boosts recharge ${Math.round((1 - promoK(lv)) * 100)}% faster`;
   }
   return '';
 }

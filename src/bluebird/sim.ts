@@ -7,6 +7,7 @@ import {
   rentalSpend, schoolBoost, hotelRooms, marketingBoost, serviceStars, catRate, gunsOf, breakChance, fixMinutes, tierOf, levelFromXp, levelReward, xpFor, GOALS, type GoalCtx,
   FUN_SHARE, funSpend, heliFlights, HELI_FARE, EVENTS, EVENT_BY, type EventDef, legendFor, legendMul, LEGEND_LV,
   RIVALS, rivalGuests, SPONSORS, type Contract,
+  shuttleCap, daycareBoost, meltK, avalancheBoost, patrolStars, socialBuzz, promoK, BOOSTS, TROPHIES, type TrophyCtx,
 } from './data.ts';
 
 export interface Gun { id: string; run: string; k: number; x: number; z: number; dx: number; dz: number }
@@ -14,7 +15,7 @@ export interface DayStats { visitors: number; night: number; tickets: number; lo
 const emptyDay = (stars: number): DayStats => ({ visitors: 0, night: 0, tickets: 0, lodge: 0, rental: 0, school: 0, hotel: 0, fun: 0, heli: 0, events: 0, bonus: 0, starsStart: stars });
 export const INCOME_KEYS: [keyof DayStats, string, string][] = [
   ['tickets', 'Lift tickets', '#2f7fe0'], ['lodge', 'Food & drink', '#e0a63a'], ['rental', 'Rentals', '#9a3f32'], ['school', 'Ski school', '#f2b33d'],
-  ['hotel', 'Hotel', '#3d4f66'], ['fun', 'Attractions', '#e0457b'], ['heli', 'Heli-skiing', '#23262b'], ['events', 'Events', '#6a4cc2'], ['bonus', 'Bonuses', '#2fb65a'],
+  ['hotel', 'Hotel', '#3d4f66'], ['fun', 'Shops & attractions', '#e0457b'], ['heli', 'Heli-skiing', '#23262b'], ['events', 'Events', '#6a4cc2'], ['bonus', 'Bonuses', '#2fb65a'],
 ];
 export interface GenGoal { id: string; kind: 'income' | 'guests' | 'runs' | 'events' | 'stars'; target: number; text: string }
 export interface LiveEvent { id: string; day: number; state: 'booked' | 'live'; cost: number }
@@ -54,8 +55,15 @@ export interface SaveState {
   passed: number; // rivals overtaken in the league
   deal: Contract | null; // a sponsor offer or a contract being worked on
   deals: number; // contracts completed
+  trophies: string[];
+  vips: number;
+  boostsUsed: number;
+  boostCd: Record<string, number>; // real seconds until each boost is ready again
+  promoDay: number; // the day the radio promo runs
+  happyUntil: number; // game time the happy hour ends
+  sawPowder: boolean;
 }
-const FRESH_EXTRA = { event: null, evReady: {}, evCount: 0, legend: 0, seasons: 0, gen: [], genN: 0, bestIncome: 0, passed: 0, deal: null, deals: 0 };
+const FRESH_EXTRA = { event: null, evReady: {}, evCount: 0, legend: 0, seasons: 0, gen: [], genN: 0, bestIncome: 0, passed: 0, deal: null, deals: 0, trophies: [] as string[], vips: 0, boostsUsed: 0, boostCd: {} as Record<string, number>, promoDay: 0, happyUntil: 0, sawPowder: false };
 
 export const money = (n: number, cents = false) => {
   const s = n < 0 ? '-' : '';
@@ -90,7 +98,8 @@ export type SimEvent =
   | { k: 'broken'; lift: string }
   | { k: 'event'; id: string; phase: 'live' | 'done'; payout?: number }
   | { k: 'league'; rival: string; rank: number; reward: number }
-  | { k: 'deal'; phase: 'offer' | 'won' | 'lost'; text: string; reward: number };
+  | { k: 'deal'; phase: 'offer' | 'won' | 'lost'; text: string; reward: number }
+  | { k: 'trophy'; id: string; name: string; reward: number };
 
 /** a snowcat out on the snow at night */
 export interface CatState { run: number; ptr: number; x: number; z: number; yaw: number; on: boolean }
@@ -255,8 +264,8 @@ export class Sim {
     for (const id of Object.keys(FUN_SHARE)) if (this.lv(id)) appeal += 20 + this.lv(id) * 0.6;
     if (this.lv('heli')) appeal += 60 + this.lv('heli') * 1.5;
     const ev = this.eventToday;
-    const demand = appeal * (0.45 + 0.22 * s.stars) * (1 + marketingBoost(this.lv('marketing')) + schoolBoost(this.lv('school'))) * w.demand * weekday * (s.powderDay ? 1.45 : 1) * (1 + s.buzz) * priceMul * (ev ? ev.guestMul : 1);
-    const parking = parkingCap(this.lv('parking')) + hotelRooms(this.lv('hotel')) * 1.6;
+    const demand = appeal * (0.45 + 0.22 * s.stars) * (1 + marketingBoost(this.lv('marketing')) + schoolBoost(this.lv('school')) + daycareBoost(this.lv('daycare'))) * w.demand * weekday * (s.powderDay ? 1.45 : 1) * (1 + s.buzz + socialBuzz(this.lv('social'))) * priceMul * (s.promoDay === this.day ? 1.35 : 1) * (w.snow > 0 ? 1 + avalancheBoost(this.lv('avalanche')) : 1) * (ev ? ev.guestMul : 1);
+    const parking = parkingCap(this.lv('parking')) + hotelRooms(this.lv('hotel')) * 1.6 + shuttleCap(this.lv('shuttle'));
     let liftH = 0;
     for (const l of LIFTS) liftH += liftCap(l.id, this.lv('lift.' + l.id));
     const lifts = (liftH * 6.5) / 4;
@@ -301,6 +310,9 @@ export class Sim {
       const avg = this.incomeLog.reduce((a, b) => a + b, 0) / this.incomeLog.length;
       if (this.incomeLog.length > 20) this.s.rate = this.s.rate ? this.s.rate * 0.99 + avg * 0.01 : avg;
     }
+    for (const k of Object.keys(this.s.boostCd)) this.s.boostCd[k] = Math.max(0, this.s.boostCd[k] - dtReal);
+    this.trophyT -= dtReal;
+    if (this.trophyT <= 0) { this.trophyT = 1; this.checkTrophies(); }
     if (this.paused) return;
     let left = dtReal * this.speed;
     let guard = 0;
@@ -346,7 +358,7 @@ export class Sim {
       this.earn(n * P.price, 'tickets');
       this.earn(n * rentalSpend(this.lv('rental')) * 0.35, 'rental');
       if (this.lv('school')) this.earn(n * 0.12 * 6, 'school');
-      this.earn(n * this.funPerGuest, 'fun');
+      this.earn(n * this.funPerGuest * (this.happy ? 2 : 1), 'fun');
       if (this.lv('heli')) this.earn(heliFlights(this.lv('heli')) * dA * HELI_FARE * (0.6 + this.s.stars * 0.1), 'heli');
     }
     let on = P.visitors * Math.max(0, this.arrived(h) - this.left(h));
@@ -359,7 +371,7 @@ export class Sim {
     if (on > 0) {
       const lunch = Math.exp(-(((h - 12.4) / 1.3) ** 2));
       const seatK = Math.min(1, (lodgeSeats(this.lv('lodge')) * 4) / Math.max(1, P.visitors));
-      this.earn(on * lodgeSpend(this.lv('lodge')) * seatK * (0.12 + 0.55 * lunch) * dh * (this.lunchRush > 0 ? 2 : 1), 'lodge');
+      this.earn(on * lodgeSpend(this.lv('lodge')) * seatK * (0.12 + 0.55 * lunch) * dh * (this.lunchRush > 0 || this.happy ? 2 : 1), 'lodge');
     }
     this.lunchRush = Math.max(0, this.lunchRush - dh);
     s.buzz = Math.max(0, s.buzz - dh * 0.01);
@@ -599,7 +611,7 @@ export class Sim {
     const w = WEATHER[this.weather];
     const T = this.temp;
     const fall = w.snow * dt * (0.6 + 0.4 * Math.sin(this.s.t * 1.3) ** 2);
-    const melt = T > 0 ? T * 0.45 * dt * (0.4 + 0.6 * smooth(7, 9, this.hour) * (1 - smooth(16, 18, this.hour))) : 0;
+    const melt = T > 0 ? meltK(this.lv('snowfarm')) * T * 0.45 * dt * (0.4 + 0.6 * smooth(7, 9, this.hour) * (1 - smooth(16, 18, this.hour))) : 0;
     const open = RUNS.filter((r) => this.runOpen(r.id));
     const wsum = open.reduce((a, r) => a + r.w * 0.1 + 1, 0) || 1;
     for (const r of RUNS) this.onRun[r.id] = 0;
@@ -659,7 +671,7 @@ export class Sim {
     const wantRides = Math.max(1, (Math.max(this.forecastV, P.visitors) / 6.5) * 4 * 0.9);
     const liftScore = Math.min(1, cap / wantRides);
     const food = Math.min(1, (lodgeSeats(this.lv('lodge')) * 4) / Math.max(1, Math.max(this.forecastV, P.visitors)));
-    const parts = { base: 0.6, snow: 1.7 * q, lifts: 1.0 * liftScore, food: 0.6 * food, variety: 0.55 * Math.min(1, (kinds.size + built.length / 4) / 6), service: serviceStars(this.lv('service')) };
+    const parts = { base: 0.6, snow: 1.7 * q, lifts: 1.0 * liftScore, food: 0.6 * food, variety: 0.55 * Math.min(1, (kinds.size + built.length / 4) / 6), service: serviceStars(this.lv('service')) + patrolStars(this.lv('patrol')) };
     this.starParts = parts;
     this.starTarget = Math.max(0.5, Math.min(5, parts.base + parts.snow + parts.lifts + parts.food + parts.variety + parts.service - Object.keys(this.broken).length * 0.2));
   }
@@ -811,6 +823,60 @@ export class Sim {
     this.planDay(true);
   }
 
+  // ------------------------------------------------------------------ boosts
+  get happy() { return this.s.happyUntil > this.s.t; }
+  boostLeft(id: string) { return this.s.boostCd[id] ?? 0; }
+  boostMax(id: string) { return (BOOSTS.find((b) => b.id === id)?.cooldown ?? 60) * promoK(this.lv('promo')); }
+  /** fire a boost; returns a line for the toast, or null if it isn't ready */
+  useBoost(id: string): string | null {
+    if (this.boostLeft(id) > 0) return null;
+    const s = this.s;
+    if (id === 'promo') {
+      if (s.promoDay >= this.day && this.hour < this.closeHour) return null;
+      s.promoDay = this.hour < this.closeHour - 1 ? this.day : this.day + 1;
+      this.planDay(true);
+    } else if (id === 'happy') {
+      s.happyUntil = s.t + 2;
+    } else if (id === 'blitz') {
+      const built = RUNS.map((r, ri) => ({ r, ri })).filter(({ r }) => this.runBuilt(r.id)).sort((a, b) => (this.runQ[a.r.id] ?? 0) - (this.runQ[b.r.id] ?? 0)).slice(0, 3);
+      if (!built.length) return null;
+      for (const { r, ri } of built) {
+        const o = this.order[ri];
+        o.cells.forEach((k, j) => { this.groom[k] = 1; this.powder[k] = 0; this.dirA[k] = o.a[j]; this.dirB[k] = o.b[j]; this.depth[k] = Math.max(this.depth[k], 45); });
+        void r;
+      }
+      this.dirty = true;
+      this.measureRuns();
+      this.computeStars();
+      s.boostCd[id] = this.boostMax(id); s.boostsUsed++;
+      return `Fresh corduroy on ${built.map((b) => b.r.name).join(', ')}`;
+    } else return null;
+    s.boostCd[id] = this.boostMax(id);
+    s.boostsUsed++;
+    return id === 'promo' ? (s.promoDay === this.day ? 'Radio promo is on air: +35% guests today' : 'Radio promo booked for tomorrow') : 'Happy hour! Food, drinks and shops sell double for two hours';
+  }
+
+  // ------------------------------------------------------------------ trophies
+  private trophyT = 1;
+  trophyCtx(): TrophyCtx {
+    const c = this.goalCtx();
+    return {
+      ...c, allRuns: RUNS.every((r) => this.runBuilt(r.id)), allLifts: LIFTS.every((l) => this.liftBuilt(l.id)), rank: this.rank, deals: this.s.deals, vips: this.s.vips,
+      boosts: this.s.boostsUsed, seasons: this.s.seasons, powder: this.s.sawPowder, maxLv: Math.max(0, ...Object.values(this.s.lv)), earned: this.s.earned,
+    };
+  }
+  private checkTrophies() {
+    if (this.s.powderDay && this.isOpen) this.s.sawPowder = true;
+    const c = this.trophyCtx();
+    TROPHIES.forEach((t, i) => {
+      if (this.s.trophies.includes(t.id) || !t.check(c)) return;
+      this.s.trophies.push(t.id);
+      const reward = Math.round(Math.max(300 * (i + 1), this.s.rate * 90));
+      this.earn(reward, 'bonus');
+      this.events.push({ k: 'trophy', id: t.id, name: t.name, reward });
+    });
+  }
+
   // ------------------------------------------------------------------ the league
   /** your league score: the best day in the last three, or today if it's already better */
   get leagueScore() {
@@ -913,7 +979,9 @@ export class Sim {
     if (!this.legendReady) return false;
     const legend = this.s.legend + this.legendGain;
     const name = this.s.name;
+    const keep = { trophies: this.s.trophies, vips: this.s.vips, boostsUsed: this.s.boostsUsed, deals: this.s.deals };
     this.s = Sim.freshState(legend, this.s.seasons + 1);
+    Object.assign(this.s, keep);
     this.s.name = name;
     this.broken = {}; this.cats = []; this.gunOn.clear(); this.incomeLog = [];
     this.freshSnow();

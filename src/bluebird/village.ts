@@ -6,7 +6,14 @@ import type { Sim, Gun } from './sim.ts';
 import { bake, type World } from './world.ts';
 import { PARKING } from './data.ts';
 
-const M = (c: number, r = 0.85, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra });
+const MC = new Map<string, THREE.MeshStandardMaterial>();
+/** shared materials: the same colour and finish is one material, so baking can merge everything that uses it */
+const M = (c: number, r = 0.85, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
+  const k = c + '|' + r + '|' + JSON.stringify(extra);
+  let m = MC.get(k);
+  if (!m) MC.set(k, (m = new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra })));
+  return m;
+};
 
 function prism(w: number, h: number, d: number) {
   // triangle cross-section in x/y, extruded along z
@@ -377,7 +384,7 @@ export class Village {
     for (const c of [...this.guns.children]) this.guns.remove(c);
     this.gunMesh.clear();
     const poleM = M(0x9aa3ab, 0.5, { metalness: 0.5 });
-    const fanM = M(0xf2c46d, 0.55);
+    const fanM = M(0xf2c46d, 0.55, { side: THREE.DoubleSide });
     const ringM = M(0x2a2f36, 0.6);
     for (const g of sim.builtGuns()) {
       const o = new THREE.Group();
@@ -385,7 +392,6 @@ export class Village {
       pole.position.y = 2.1;
       const head = new THREE.Group();
       const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.8, 1.6, 12, 1, true), fanM);
-      fan.material.side = THREE.DoubleSide;
       fan.rotation.x = Math.PI / 2;
       const back = new THREE.Mesh(new THREE.CircleGeometry(0.85, 12), ringM);
       back.position.z = -0.8;
