@@ -8,7 +8,9 @@ from PIL import Image, ImageFilter
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 SRC = os.path.join(ROOT, 'assets-src', 'generated', 'monza')
-OUT = os.path.join(ROOT, 'public', 'monza')
+# (git-ignored: the game no longer loads these directly; tools/build_monza_surface.py packs the asphalt
+# and the grass from here into public/textures for the trackside shaders)
+OUT = os.path.join(ROOT, 'assets-src', 'generated', 'monza', 'built')
 os.makedirs(OUT, exist_ok=True)
 W3 = np.array([0.2126, 0.7152, 0.0722])
 

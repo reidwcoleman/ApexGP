@@ -382,11 +382,13 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // ================================================= racing asphalt: freshly laid, high-grade surface
     // A deep, even charcoal binder-rich stone-mastic surface: the chips are small and coated,
     // so they barely read in colour (±8 %); only a faint, large-scale evenness variation.
-    float even = 1.0 + 0.05 * (m96.r - 0.5) + 0.035 * (m24.b - 0.5) + 0.03 * (m3.b - 0.5);
+    float even = 1.0 + 0.16 * (m96.r - 0.5) + 0.09 * (m24.b - 0.5) + 0.05 * (m3.b - 0.5);
     // (a race-worn mid grey, a shade deeper than TV footage's (0.2): against the richer grade and the lush
     // verges it reads as asphalt, not concrete, and the lines and kerbs pop as in a sim; the fine chips
     // give a tight ±25 % grain up close)
-    col = vec3(0.158, 0.156, 0.152) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
+    // (2026-11-11: deeper again — Monza's 2024 surface is near-black, and against it the line, the
+    // kerbs and the rubber read the way they do on an onboard; 0.158 was a pale, even concrete grey)
+    col = vec3(0.112, 0.111, 0.11) * (1.0 + albDev * mix(1.25, 0.9, farK)) * even;
     // the odd pale chip (quartz, limestone) among the dark ones, resolved only up close
     col += vec3(0.05, 0.049, 0.046) * smoothstep(0.2, 0.32, albDev) * (1.0 - smoothstep(0.003, 0.012, pxA));
     // satin: coated chips polished smooth, binder slightly rougher; micro-texture normal kept tight
@@ -463,14 +465,14 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     float rub = vA0.y * (0.6 * exp(-dd * dd / 3.2) + 0.45 * exp(-qA * qA) * trkW);
     // (every lap of every session before this one has laid some down: the dark line the TV pictures
     // show the whole way round, two tyre tracks inside a darker band, not only in the corners)
-    rub = max(rub, 0.5 * exp(-dd * dd / 2.6) + 0.3 * exp(-qB * qB));
+    rub = max(rub, 0.62 * exp(-dd * dd / 2.6) + 0.4 * exp(-qB * qB));
     // (laid by thousands of tyres on slightly different lines: long streaks along the lap, not a smooth band)
     float rStreak = texture2D(uMacro, vec2(lat * 1.9, sv * 0.007) + vec2(0.43, 0.12)).b;
     rub *= 0.7 + 0.6 * smoothstep(0.25, 0.75, rStreak);
     rub = clamp(rub, 0.0, 1.0) * (zone < 0.5 ? 1.0 : 0.0) * mix(0.8, 1.0, uRaceRubber);
     tsRub = rub;
     // rubber on new asphalt: darker and a little more matte-satin (it fills the micro-texture)
-    col = mix(col, vec3(0.05, 0.05, 0.051), rub * 0.8);
+    col = mix(col, vec3(0.026, 0.026, 0.028), rub * 0.85);
     rough = mix(rough, 0.52, rub * 0.5);
     tsDetail *= 1.0 - rub * 0.4;
     // ...and buffed by thousands of tyres: in long streaks down the line it is polished to a satin sheen
@@ -481,7 +483,7 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     // off the line the surface sees no rubber: dust and fines settle, a lighter, greyer road
     if (zone < 0.5) {
       float offLine = smoothstep(2.6, 5.0, abs(d)) * (0.55 + 0.45 * m24.b);
-      col = mix(col, col * 1.13 + vec3(0.0035, 0.0034, 0.003), offLine * 0.45);
+      col = mix(col, col * 1.2 + vec3(0.0035, 0.0034, 0.003), offLine * 0.5);
       rough = mix(rough, rough + 0.05, offLine);
       // (unswept: the chips stand proud and open, a coarser grain)
       tsDetail *= 1.0 + 0.15 * offLine;
@@ -1068,7 +1070,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-17', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-18', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
