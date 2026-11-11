@@ -3,7 +3,7 @@ import type { Door, MapData, Pane } from './world.ts';
 import { Nav, type Node } from './nav.ts';
 import { Bot, botName } from './bots.ts';
 import { trace, type Tracer } from './ballistics.ts';
-import { F, PRIMARIES, WEAPONS, WEAPON_LIST, ZONE, zoneK, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
+import { F, GUN_LADDER, PRIMARIES, W_BOOT, WEAPONS, WEAPON_LIST, ZONE, solo, zoneK, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import type { Body } from './hitbox.ts';
 
@@ -48,6 +48,11 @@ export class Match {
 
   /** where the map's own lamps leave a pool someone can be seen in: x, y, z, reach */
   readonly pools: number[][] = [];
+  /** a lamp shot out lights nobody: i is its place in the map's list */
+  lampOut(i: number) {
+    const k = this.pools.findIndex((p) => p[4] === i);
+    if (k >= 0) this.pools.splice(k, 1);
+  }
   /** is a body at this spot standing in light (a lamp's pool), not in the dark? */
   litAt(x: number, y: number, z: number) {
     // under a star shell the whole field is lit, except down in a trench
@@ -75,12 +80,12 @@ export class Match {
     this.nav = nav;
     this.goals = nav.nodes.filter((_, i) => i % 11 === 0);
     this.doorCool = doors.map(() => 0);
-    if (map.night) for (const l of map.lights) if (l.power > 2) this.pools.push([l.pos[0], l.pos[1], l.pos[2], Math.min(7, Math.max(1.6, Math.sqrt(l.power) * 0.9))]);
+    if (map.night) map.lights.forEach((l, i) => { if (l.power > 2) this.pools.push([l.pos[0], l.pos[1], l.pos[2], Math.min(7, Math.max(1.6, Math.sqrt(l.power) * 0.9)), i]); });
   }
 
   addHuman(id: string, name: string, team: number, primary: WeaponId): PlayerInfo {
     const slot = this.freeSlot();
-    const p: PlayerInfo = { slot, id, name, team: this.cfg.mode === 'ffa' ? 2 : team, bot: false, primary, kills: 0, deaths: 0, score: 0, ping: 0, hp: 100, alive: false };
+    const p: PlayerInfo = { slot, id, name, team: solo(this.cfg.mode) ? 2 : team, bot: false, primary: this.cfg.mode === 'gun' ? GUN_LADDER[0] : primary, kills: 0, deaths: 0, score: 0, ping: 0, hp: 100, alive: false };
     this.players.push(p);
     this.bodies[slot] = { x: 0, y: -50, z: 0, yaw: 0, pitch: 0, lean: 0, crouch: false, flags: 0, w: 0 };
     return p;
@@ -116,14 +121,14 @@ export class Match {
 
   /** bots make up the numbers: `cfg.bots` per side beyond the humans */
   fillBots() {
-    const ffa = this.cfg.mode === 'ffa';
+    const ffa = solo(this.cfg.mode);
     const want = this.cfg.bots;
     const teamsize = [0, 1].map((t) => this.players.filter((p) => p.team === t).length);
     for (let t = 0; t < (ffa ? 1 : 2); t++) {
       let have = ffa ? this.players.length : teamsize[t];
       while (have < want && this.players.length < 16) {
         const slot = this.freeSlot();
-        const primary = rollPrimary();
+        const primary = this.cfg.mode === 'gun' ? GUN_LADDER[0] : rollPrimary();
         this.players.push({ slot, id: `bot-${slot}`, name: botName(slot + this.cfg.seed), team: ffa ? 2 : t, bot: true, primary, kills: 0, deaths: 0, score: 0, ping: 0, hp: 100, alive: false });
         this.bodies[slot] = { x: 0, y: -50, z: 0, yaw: 0, pitch: 0, lean: 0, crouch: false, flags: 0, w: 0 };
         const skill = Math.min(1, Math.max(0, this.cfg.skill + (Math.random() - 0.5) * 0.2));
@@ -285,7 +290,7 @@ export class Match {
     if (this.cfg.mode === 'rounds') {
       const a = this.players.filter((p) => p.team === 0 && p.alive).length, b = this.players.filter((p) => p.team === 1 && p.alive).length;
       this.endRound(a === b ? -1 : a > b ? 0 : 1, 'Time');
-    } else if (this.cfg.mode === 'ffa') {
+    } else if (solo(this.cfg.mode)) {
       const top = [...this.players].sort((p, q) => q.kills - p.kills)[0];
       this.finish(top?.slot ?? -1);
     } else this.finish(this.score[0] === this.score[1] ? -1 : this.score[0] > this.score[1] ? 0 : 1);
@@ -307,7 +312,7 @@ export class Match {
   }
 
   foes(a: number, b: number) {
-    if (this.cfg.mode === 'ffa') return a !== b;
+    if (solo(this.cfg.mode)) return a !== b;
     const p = this.teamOf(a), q = this.teamOf(b);
     return p !== q;
   }
@@ -432,8 +437,8 @@ export class Match {
 
   private spawn(p: PlayerInfo, fixed: boolean, near = false) {
     void fixed;
-    let list = this.cfg.mode === 'ffa' ? this.map.spawns.ffa : (p.team === 0) !== this.swapped ? this.map.spawns.a : this.map.spawns.b;
-    if (this.map.sides && this.cfg.mode !== 'ffa') {
+    let list = solo(this.cfg.mode) ? this.map.spawns.ffa : (p.team === 0) !== this.swapped ? this.map.spawns.a : this.map.spawns.b;
+    if (this.map.sides && !solo(this.cfg.mode)) {
       // on a field with two lines you start, and come back, in your own trenches: near your side's stretch at first
       const a = this.anchors[p.team];
       if (a && !near) {
@@ -442,7 +447,7 @@ export class Match {
       }
       near = false;
     } else if (!near && this.nav.nodes.length) {
-      if (this.cfg.mode === 'ffa') {
+      if (solo(this.cfg.mode)) {
         // everyone somewhere different, and somewhere different every time
         const pool: number[][] = [];
         for (let k = 0; k < 40; k++) {
@@ -512,7 +517,7 @@ export class Match {
     }
     const y = Math.max(this.world.floorAt(x, best[1] + 0.5, z, 0.2), best[1]);
     // face the middle of the block
-    const foe = this.cfg.mode !== 'ffa' ? this.anchors[1 - p.team] : undefined;
+    const foe = !solo(this.cfg.mode) ? this.anchors[1 - p.team] : undefined;
     const [cx, cz] = foe ? [foe.x, foe.z] : (this.map.centre ?? [46, -30]);
     const yaw = Math.atan2(-(cx - x), -(cz - z));
     p.hp = 100;
@@ -526,10 +531,9 @@ export class Match {
     b.yaw = yaw;
     b.flags = F.alive;
     const bot = this.bots.get(p.slot);
-    if (bot) {
-      p.primary = rollPrimary(p.primary);
-      bot.reset(x, y, z, yaw, p.primary);
-    }
+    if (this.cfg.mode === 'gun') p.primary = GUN_LADDER[Math.min(p.kills, GUN_LADDER.length - 1)];
+    else if (bot) p.primary = rollPrimary(p.primary);
+    bot?.reset(x, y, z, yaw, p.primary);
     this.emit({ t: 'spawn', s: p.slot, p: [x, y, z], yaw, primary: p.primary });
   }
 
@@ -579,7 +583,7 @@ export class Match {
         this.emit({ t: 'chat', from: me.name, text: String(r.text).slice(0, 120) });
         break;
       case 'me':
-        if (r.primary && PRIMARIES.includes(r.primary)) me.primary = r.primary;
+        if (r.primary && PRIMARIES.includes(r.primary) && this.cfg.mode !== 'gun') me.primary = r.primary;
         break;
     }
   }
@@ -657,7 +661,17 @@ export class Match {
       this.emit({ t: 'phase', phase: this.phase, round: this.round, clock: this.clock, score: this.score });
       if (this.score[killer.team] >= this.cfg.limit) this.finish(killer.team);
     }
-    if (mode === 'ffa' && killer && killer.kills >= this.cfg.limit) this.finish(killer.slot);
+    if (mode === 'gun' && killer && killer !== p) {
+      // a boot costs whoever it lands on a gun
+      if (w === W_BOOT && p.kills > 0) p.kills = Math.max(0, p.kills - 2);
+      const next = GUN_LADDER[Math.min(killer.kills, GUN_LADDER.length - 1)];
+      if (killer.kills < this.cfg.limit && next !== killer.primary) {
+        killer.primary = next;
+        this.bots.get(killer.slot)?.rearm(next);
+        this.emit({ t: 'arm', s: killer.slot, primary: next, step: killer.kills });
+      }
+    }
+    if (solo(mode) && killer && killer.kills >= this.cfg.limit) this.finish(killer.slot);
     if (mode === 'rounds') {
       const a = this.players.some((q) => q.team === 0 && q.alive), b = this.players.some((q) => q.team === 1 && q.alive);
       if (this.phase === 'live' && (!a || !b)) this.endRound(a ? 0 : 1, 'Eliminated');

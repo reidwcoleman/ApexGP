@@ -49,8 +49,17 @@ export class Bot {
   private likesLight = Math.random() < 0.55;
   private t = 0;
   private pending = false;
+  /** rounds still to put through the corner someone just went behind */
+  private supp = 0;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
+
+  /** a new gun in the hands, loaded */
+  rearm(w: WeaponId) {
+    this.weapon = w;
+    this.ammo = WEAPONS[w].mag;
+    this.reload = 0;
+  }
 
   reset(x: number, y: number, z: number, yaw: number, primary: WeaponId) {
     Object.assign(this.m, { x, y, z, vx: 0, vy: 0, vz: 0, grounded: true, height: 1.78 });
@@ -146,6 +155,7 @@ export class Bot {
 
   private sense() {
     const M = this.match, m = this.m;
+    const spec0 = WEAPONS[this.weapon];
     let best = -1, bd = 1e9;
     const eye = { x: m.x, y: m.y + (this.crouch ? 1.05 : 1.6), z: m.z };
     for (const p of M.players) {
@@ -191,6 +201,8 @@ export class Bot {
         this.errPitch = (Math.random() - 0.5) * 2;
         this.headShot = Math.random() < 0.08 + this.skill * 0.3;
         this.burst = 0;
+        // some of them will shoot the wall you went behind, the way people do
+        this.supp = spec0.auto && Math.random() < 0.3 + this.skill * 0.35 ? 3 + Math.floor(Math.random() * 5) : this.weapon === 'pistol' && Math.random() < 0.3 ? 2 : 0;
       }
       this.target = best;
       this.seenAt = this.t;
@@ -264,8 +276,12 @@ export class Bot {
       ty = Math.atan2(-dx, -dz) + this.errYaw * e;
       tp = Math.atan2(aimY - eyeY, d) + this.errPitch * e * 0.7;
     } else if (speed > 0.1) {
-      ty = Math.atan2(-wx, -wz);
-      tp = 0;
+      // eyes on where the way leads: the doorway two steps on, not the floor in front
+      const far = this.path[Math.min(this.path.length - 1, this.pi + 2)];
+      const fx = far ? far.x - m.x : 0, fz = far ? far.z - m.z : 0;
+      const ahead = far && Math.hypot(fx, fz) > 1.2 && fx * wx + fz * wz > 0;
+      ty = ahead ? Math.atan2(-fx, -fz) : Math.atan2(-wx, -wz);
+      tp = far && ahead ? clamp(Math.atan2(far.y - m.y, Math.hypot(fx, fz)), -0.5, 0.5) : 0;
     } else if (this.t - this.heardAt < 4) {
       ty = Math.atan2(-(this.heard.x - m.x), -(this.heard.z - m.z));
     }
@@ -274,7 +290,20 @@ export class Bot {
     this.yaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
     this.pitch += (tp - this.pitch) * Math.min(1, dt * rate * 1.3);
     this.ads = engaged;
-    if (!engaged) return;
+    if (!engaged) {
+      // lost them a moment ago: a few rounds at where they were. Thin walls don't stop those
+      const since = this.t - this.seenAt;
+      if (this.target >= 0 && this.supp > 0 && since > 0.8 && since < 2.4 && this.cool <= 0 && this.reload <= 0 && this.ammo > 2 && Math.abs(dy) < 0.12) {
+        const d = Math.hypot(this.seenPos.x - m.x, this.seenPos.z - m.z);
+        if (d > 3 && d < 40) {
+          this.supp--;
+          this.ammo--;
+          this.cool = spec.cycle * (spec.auto ? 1.6 : 2.2);
+          M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
+        } else this.supp = 0;
+      }
+      return;
+    }
     this.react -= dt;
     if (this.react > 0 || this.reload > 0 || this.cool > 0 || this.ammo <= 0) return;
     if (Math.abs(dy) > 0.09) return;
@@ -290,4 +319,8 @@ export class Bot {
     }
     M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
   }
+}
+
+function clamp(v: number, a: number, b: number) {
+  return Math.min(b, Math.max(a, v));
 }

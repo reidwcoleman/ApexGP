@@ -1,7 +1,7 @@
 import './ui.css';
 import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
-import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
 import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
@@ -10,9 +10,10 @@ const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
   { id: 'rounds', name: 'Last Team Standing', note: 'One life a round. First to 5.', limit: 5 },
   { id: 'hold', name: 'Hold Ground', note: 'Keep the zone. First to 150. It moves.', limit: 150 },
   { id: 'ffa', name: 'Free For All', note: 'Everyone against everyone. First to 20.', limit: 20 },
+  { id: 'gun', name: 'Gun Game', note: 'A new gun every two kills. A boot sets them back. First through all four.', limit: 8 },
 ];
 const MAPS: { id: string; name: string; note: string }[] = [
-  { id: 'ward', name: 'Ashgrove Ward', note: 'Condemned hospital. Long wards, tight halls.' },
+  { id: 'ward', name: 'Ashgrove Ward', note: 'Condemned hospital. An atrium, wards, the tunnels under it.' },
   { id: 'mansion', name: 'Harrowgate House', note: 'Abandoned manor. Ballroom, cellars, two floors.' },
   { id: 'motel', name: 'Pinewood Motor Inn', note: 'Shut motel. Galleries, a pool hall, the diner.' },
   { id: 'block', name: 'Kessler Block', note: 'Tenements. Stairwells, flats, a freight hall.' },
@@ -253,7 +254,7 @@ export class Hud {
     return `
       <div class="group"><div class="lab">Mode</div><div class="list" data-seg="mode">${MODES.map((x) => `<button data-v="${x.id}" class="${x.id === this.mode ? 'sel' : ''}"><b>${x.name}</b><span>${x.note}</span></button>`).join('')}</div></div>
       <div class="two">
-        <div class="group"><div class="lab">${this.mode === 'ffa' ? 'Players' : 'Team size'}</div>${this.seg('bots', [['4', '4'], ['5', '5'], ['6', '6'], ['7', '7'], ['8', '8']], String(this.bots))}</div>
+        <div class="group"><div class="lab">${solo(this.mode) ? 'Players' : 'Team size'}</div>${this.seg('bots', [['4', '4'], ['5', '5'], ['6', '6'], ['7', '7'], ['8', '8']], String(this.bots))}</div>
         <div class="group"><div class="lab">Bots</div>${this.seg('skill', SKILL.map(([l], i) => [String(i), l]), String(this.skill))}</div>
       </div>
       ${kind === 'solo' ? `<div class="group"><div class="lab">Side</div>${this.seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</div>` : ''}`;
@@ -289,7 +290,7 @@ export class Hud {
 
   private config(): MatchConfig {
     const m = MODES.find((x) => x.id === this.mode)!;
-    return { map: MAP_ID, mode: this.mode, bots: this.mode === 'ffa' ? Math.min(16, this.bots * 2) : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
+    return { map: MAP_ID, mode: this.mode, bots: solo(this.mode) ? Math.min(16, this.bots * 2) : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
   }
 
   private setup(kind: 'solo' | 'host') {
@@ -319,7 +320,7 @@ export class Hud {
     this.bind(m, () => {
       // a team-size label depends on the mode
       const lab = m.querySelector('.two .lab');
-      if (lab) lab.textContent = this.mode === 'ffa' ? 'Players' : 'Team size';
+      if (lab) lab.textContent = solo(this.mode) ? 'Players' : 'Team size';
     });
     m.querySelector('#s-back')!.addEventListener('click', () => this.home());
     const go = m.querySelector('#s-go') as HTMLButtonElement;
@@ -372,13 +373,13 @@ export class Hud {
     if (!host) return;
     const m = this.menu;
     const link = `${location.origin}${location.pathname}?join=${this.code}`;
-    const list = (t: number) => this.lobbyPlayers.filter((p) => this.mode === 'ffa' || p.team === t).map((p) => `<li>${esc(p.name)}<em>${WEAPONS[p.primary].name}</em></li>`).join('') || '<li class="none">Bots fill this side</li>';
+    const list = (t: number) => this.lobbyPlayers.filter((p) => solo(this.mode) || p.team === t).map((p) => `<li>${esc(p.name)}<em>${WEAPONS[p.primary].name}</em></li>`).join('') || '<li class="none">Bots fill this side</li>';
     m.innerHTML = `<div class="rail wide">
       <div class="mast"><i class="dot"></i>REC<span class="sp">Room open</span></div>
       <button class="plain" id="l-back">Close room</button>
       <div class="group"><div class="lab">Room code</div><div class="code">${this.code}</div></div>
       <div class="invite"><input readonly aria-label="Invite link" value="${link}"><button id="l-copy">Copy link</button></div>
-      <div class="teams"><div><h3>${this.mode === 'ffa' ? 'Players' : TEAM_NAME[0]}</h3><ul>${list(0)}</ul></div>${this.mode === 'ffa' ? '' : `<div><h3>${TEAM_NAME[1]}</h3><ul>${list(1)}</ul></div>`}</div>
+      <div class="teams"><div><h3>${solo(this.mode) ? 'Players' : TEAM_NAME[0]}</h3><ul>${list(0)}</ul></div>${solo(this.mode) ? '' : `<div><h3>${TEAM_NAME[1]}</h3><ul>${list(1)}</ul></div>`}</div>
       ${this.pickers('host')}
       <div class="group"><div class="lab">Your side</div>${this.seg('team', [['0', TEAM_NAME[0]], ['1', TEAM_NAME[1]]], String(this.team))}</div>
       ${this.loadout()}
@@ -565,7 +566,7 @@ export class Hud {
     const row = (p: PlayerInfo) => `<tr class="${p.slot === g.mySlot ? 'me' : ''}${p.alive ? '' : ' down'}"><td>${esc(p.name)}${p.bot ? '<i>bot</i>' : ''}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${p.score}</td></tr>`;
     const head = '<tr><th></th><th>K</th><th>D</th><th>Score</th></tr>';
     const by = (t: number) => this.roster.filter((p) => p.team === t).sort((a, b) => b.score - a.score || b.kills - a.kills);
-    const ffa = g.cfg?.mode === 'ffa';
+    const ffa = solo(g.cfg?.mode);
     this.shTop.innerHTML = `<span>CASE ${this.caseId}</span><span>${MODES.find((x) => x.id === g.cfg?.mode)?.name ?? ''}${g.phase === 'live' ? ' &nbsp;' + fmtClock(g.timer()) : ''}</span>`;
     this.tables.className = 'sh-tables' + (ffa ? ' one' : '');
     this.tables.innerHTML = ffa
@@ -588,6 +589,11 @@ export class Hud {
     while (this.feedEl.children.length > 5) this.feedEl.lastChild!.remove();
     window.setTimeout(() => row.classList.add('out'), 6000);
     window.setTimeout(() => row.remove(), 6500);
+  }
+
+  /** Gun Game: the next one is in your hands */
+  gun(id: WeaponId, step: number) {
+    this.say(`${WEAPONS[id].name}<small>Gun ${Math.floor(step / 2) + 1} of 4</small>`, 1.5, 'kill');
   }
 
   private say(s: string, sec: number, cls = '') {
@@ -656,7 +662,7 @@ export class Hud {
     const myTeam = g.player(g.mySlot)?.team ?? 0;
     if (e.phase === 'warmup') {
       const m = MODES.find((x) => x.id === g.cfg?.mode);
-      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}${e.round <= 1 ? '<br>In the dark your light is what they see. T turns it off.' : ''}</small>`, e.round <= 1 ? 5.5 : 3.8);
+      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}${e.round <= 1 ? '<br>In the dark your light is what they see. T turns it off. Lamps can be shot out.' : ''}</small>`, e.round <= 1 ? 5.5 : 3.8);
       this.boardEl.classList.remove('on', 'final');
     } else if (e.phase === 'live') {
       this.say('Recording', 0.8, 'go');
@@ -665,7 +671,7 @@ export class Hud {
       const win = e.winner === myTeam;
       this.say(`${e.winner === -1 ? 'Draw' : win ? 'Round won' : 'Round lost'}<small>${e.msg ?? ''}. ${TEAM_NAME[0]} ${e.score[0]}, ${TEAM_NAME[1]} ${e.score[1]}</small>`, 4.6);
     } else if (e.phase === 'over') {
-      const ffa = g.cfg?.mode === 'ffa';
+      const ffa = solo(g.cfg?.mode);
       const won = ffa ? e.winner === g.mySlot : e.winner === myTeam;
       const who = ffa ? (g.player(e.winner ?? -1)?.name ?? 'Nobody') : e.winner === -1 ? 'Draw' : TEAM_NAME[e.winner ?? 0];
       const me = g.player(g.mySlot);
@@ -733,7 +739,7 @@ export class Hud {
     const me = g.me;
     const info = g.player(g.mySlot);
     const mode = g.cfg?.mode;
-    const score = mode === 'ffa' ? `${info?.kills ?? 0}/${g.cfg?.limit}` : `${g.score[0]} : ${g.score[1]}`;
+    const score = solo(mode) ? `${info?.kills ?? 0}/${g.cfg?.limit}` : `${g.score[0]} : ${g.score[1]}`;
     const clock = g.phase === 'live' || g.phase === 'warmup' ? fmtClock(g.timer()) : '';
     const line = `<b>${score}</b>${clock ? `<span>${clock}</span>` : ''}${mode === 'hold' && this.holdInfo ? `<span>${esc(this.holdInfo)}</span>` : ''}`;
     if (this.top.dataset.s !== line) {

@@ -51,7 +51,8 @@ for g in raw['glass']:
 out = dict(mats=raw['mats'], materials=mats, textures=load, colliders=cols, props=[{**dict(id=p['id'], pos=yp(p['pos']), rot=p['rot'], s=p['s']), **({'tilt': p['tilt']} if 'tilt' in p else {}), **({'loose': p['loose']} if 'loose' in p else {})} for p in raw['props']], doors=doors, glass=glass, units=[dict(id=u['id'], pos=yp(u['pos']), rot=u['rot'], sc=u['sc'], tint=u['tint'], **({'tile': u['tile']} if 'tile' in u else {}), **({'float': 1} if u.get('float') else {})) for u in raw['units']],
            spawns={k: [yp(s) for s in v] for k, v in raw['spawns'].items()}, hold=[yp(p) for p in raw['hold']],
            zones=[dict(a=ybox(z['a'], z['b'])[0], b=ybox(z['a'], z['b'])[1], kind=z['kind']) for z in raw['zones']],
-           lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power'], **({'flicker': l['flicker']} if l.get('flicker') else {})) for l in raw['lights']],
+           lights=[dict(kind=l['kind'], pos=yp(l['pos']), color=l['color'], power=l['power'], **({'flicker': l['flicker']} if l.get('flicker') else {}), **({'size': list(l['size'])} if l.get('size') else {}), **({'reach': l['reach']} if l.get('reach') else {}),
+                        **({'aim': yp(l['aim'])} if l.get('aim') else {})) for l in raw['lights']],
            rooms=[dict(name=r['name'], a=ybox(r['a'], r['b'])[0], b=ybox(r['a'], r['b'])[1]) for r in raw['rooms']],
            lm=dict(logr=LOGR, k=K, size=raw['size']))
 if COVE:

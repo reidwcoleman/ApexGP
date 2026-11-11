@@ -14,7 +14,7 @@ import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
@@ -89,7 +89,7 @@ export class Game {
   private bounce = new THREE.PointLight(0xf2ead8, 0, 8, 2);
   private bounceK = 0;
   /** the arms and the gun lit a little from the front, as a lens sees them in any light */
-  private fill = new THREE.PointLight(0xdfe3ea, 0, 1.4, 2);
+  private fill = new THREE.PointLight(0xdfe3ea, 0, 2.1, 2);
   /** someone's light pointed straight at the lens */
   private glares: THREE.Sprite[] = [];
   /** other people's beams, seen in the dust from the side */
@@ -264,6 +264,7 @@ export class Game {
     };
     const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume(), graffitiFonts()]);
     this.L = L;
+    for (const f of L.flicks) this.flickOf.set(f.l, f);
     this.phys = phys;
     this.buildPhysics();
     this.kit = kit as PeopleKit;
@@ -550,6 +551,14 @@ export class Game {
     }
     this.phys.resetPanes();
     this.phys.resetLoose();
+    // every lamp back on
+    for (const f of this.L.flicks) {
+      f.dead = false;
+      f.dying = 0;
+      f.k = 0;
+      f.mesh.visible = true;
+      f.mat.color.copy(f.base);
+    }
     if (this.role !== 'guest') {
       this.match = new Match(cfg, this.L.world, this.L.map, this.L.doors, this.L.panes, this.nav, (e) => {
         this.onEv(e);
@@ -839,6 +848,16 @@ export class Game {
         if (e.hold !== undefined) this.holdZone = e.hold;
         this.hud.phase(e);
         break;
+      case 'arm': {
+        const a = this.actors.get(e.s);
+        if (!a) break;
+        a.info.primary = e.primary;
+        if (e.s === this.mySlot) {
+          if (this.me.alive && this.mySoldier) this.me.rearm(e.primary, this.mySoldier, this.sound);
+          this.hud.gun(e.primary, e.step);
+        } else if (a.info.alive) a.soldier?.setWeapon(e.primary);
+        break;
+      }
       case 'hold':
         this.score = [e.score[0], e.score[1]];
         this.hud.hold(e);
@@ -888,6 +907,7 @@ export class Game {
   }
 
   private landShots(e: Extract<Ev, { t: 'shot' }>, sounds: boolean) {
+    this.lampShots(e);
     const spec = WEAPONS[WEAPON_LIST[e.w]];
     const shove = spec.shove;
     for (let i = 0; i < e.surf.length; i++) {
@@ -1268,6 +1288,51 @@ export class Game {
     }
   }
 
+  private flickOf = new Map<MapData['lights'][number], Loaded['flicks'][number]>();
+  /** a round through a lamp puts it out: every screen works it out from the same shot, so it's dark for everyone */
+  private lampShots(e: Extract<Ev, { t: 'shot' }>) {
+    const fl = this.L.flicks;
+    for (let i = 0; i < e.surf.length; i++) {
+      const o = i * 6;
+      // every point is somewhere along a round's way from the muzzle (pellets each have their own), except the one after
+      // a skip, which starts where the round glanced off
+      const skipped = i > 0 && e.surf[i - 1]?.[0] === '~';
+      const ax = skipped ? e.e[o - 6] : e.o[0], ay = skipped ? e.e[o - 5] : e.o[1], az = skipped ? e.e[o - 4] : e.o[2];
+      const bx = e.e[o], by = e.e[o + 1], bz = e.e[o + 2];
+      const dx = bx - ax, dy = by - ay, dz = bz - az, len2 = dx * dx + dy * dy + dz * dz;
+      if (len2 > 1e-6 && len2 < 160 * 160) {
+        for (let k = 0; k < fl.length; k++) {
+          const f = fl[k];
+          if (f.dead) continue;
+          const p = f.l.pos;
+          // nearest the round came to the lamp, and for a tube nearest to anywhere along it
+          const t = THREE.MathUtils.clamp(((p[0] - ax) * dx + (p[1] - ay) * dy + (p[2] - az) * dz) / len2, 0, 1);
+          const qx = ax + dx * t - p[0], qy = ay + dy * t - p[1], qz = az + dz * t - p[2];
+          const ex = Math.max(0, Math.abs(qx) - f.half[0]), ez = Math.max(0, Math.abs(qz) - f.half[1]);
+          const r = f.l.kind === 'spot' ? 0.24 : f.l.kind === 'area' ? 0.14 : 0.17;
+          if (ex * ex + qy * qy + ez * ez > r * r) continue;
+          this.lampOut(k, true);
+        }
+      }
+    }
+  }
+
+  lampOut(k: number, fx: boolean) {
+    const f = this.L.flicks[k];
+    if (!f || f.dead) return;
+    f.dead = true;
+    f.dying = 0.5;
+    this.match?.lampOut(this.L.map.lights.indexOf(f.l));
+    if (!fx) return;
+    const p = this.tmp.set(f.l.pos[0], f.l.pos[1], f.l.pos[2]).clone();
+    this.fx.impact(p.x, p.y, p.z, 0, -1, 0, 'metal');
+    this.fx.impact(p.x, p.y - 0.03, p.z, 0, -1, 0, 'glass');
+    this.fx.skip(p.x, p.y, p.z, 0, -1, 0);
+    this.sound.impact(p, 'glass');
+    this.sound.tink(p);
+    if (p.distanceTo(this.cam.position) < 30) this.muzzleLight(p, 5);
+  }
+
   /** the bake has no glints: the nearest lamps the camera can see lend theirs to the shader */
   /** tubes on their last legs and candles in a draught: each frame, the nearest four */
   private flicker(dt: number) {
@@ -1277,7 +1342,14 @@ export class Game {
     for (const f of fl) {
       const a = f.l.flicker ?? 0;
       f.t -= dt;
-      if (a > 0.3) {
+      if (f.dead) {
+        // the filament's last word: a couple of blinks, then nothing
+        f.dying = Math.max(0, f.dying - dt);
+        f.k = f.dying > 0 && Math.sin(f.dying * 95) > 0.55 ? 0.35 : 1;
+        f.mesh.visible = f.k < 1;
+      } else if (a <= 0) {
+        continue;
+      } else if (a > 0.3) {
         // a tube: on, then a stutter, then dark for a while, then it catches again
         if (f.t <= 0) {
           if (f.off > 0) {
@@ -1297,8 +1369,9 @@ export class Game {
       }
       f.mat.color.copy(f.base).multiplyScalar(1 - f.k * 0.94);
     }
-    const near = fl.map((f) => [Math.hypot(f.l.pos[0] - c.x, f.l.pos[1] - c.y, f.l.pos[2] - c.z), f] as [number, typeof fl[number]]).sort((p, q) => p[0] - q[0]);
-    for (let i = 0; i < 4; i++) {
+    // eight places in the shaders: the nearest lamps that are down at all, or could be at any moment
+    const near = fl.filter((f) => f.dead || f.l.flicker).map((f) => [Math.hypot(f.l.pos[0] - c.x, f.l.pos[1] - c.y, f.l.pos[2] - c.z), f] as [number, typeof fl[number]]).sort((p, q) => p[0] - q[0]);
+    for (let i = 0; i < 8; i++) {
       const e = near[i];
       const P = LF.flickP.value[i];
       if (!e || e[0] > 40) {
@@ -1307,8 +1380,12 @@ export class Game {
       }
       const l = e[1].l;
       // how far the lamp's own light reaches in the bake, roughly
-      const reach = l.kind === 'spot' ? 7 : l.kind === 'area' ? 5.5 : Math.max(1.6, Math.sqrt(l.power) * 1.6);
-      P.set(l.pos[0], l.pos[1] - (l.kind === 'spot' ? 1.4 : 0.4), l.pos[2], reach);
+      // a lamp that's out for good takes more of the room with it than one that only stutters
+      const reach = (l.reach ?? (l.kind === 'spot' ? 7 : l.kind === 'area' ? 5.5 : Math.max(1.6, Math.sqrt(l.power) * 1.6))) * (e[1].dead ? 1.55 : 1);
+      // a spot's light is out in front of it, where it points
+      const ax = l.aim ? l.aim[0] : 0, ay = l.aim ? l.aim[1] : -1, az = l.aim ? l.aim[2] : 0, al = Math.hypot(ax, ay, az) || 1;
+      const push = l.kind === 'spot' ? Math.min(2.6, reach * 0.3) : 0.4;
+      P.set(l.pos[0] + (l.kind === 'spot' ? (ax / al) * push : 0), l.pos[1] + (l.kind === 'spot' ? (ay / al) * push : -0.4), l.pos[2] + (l.kind === 'spot' ? (az / al) * push : 0), reach);
       LF.flickA.value[i] = e[1].k;
     }
   }
@@ -1365,7 +1442,7 @@ export class Game {
       if (d > 3 && !this.L.world.sees(c, { x: l.pos[0], y: l.pos[1] - 0.25, z: l.pos[2] })) continue;
       const big = l.kind === 'spot';
       LF.lampP.value[n].set(l.pos[0], l.pos[1], l.pos[2], big ? 26 : 11);
-      const fk = l.flicker ? (this.L.flicks.find((f) => f.l === l)?.k ?? 0) : 0;
+      const fk = this.flickOf.get(l)?.k ?? 0;
       const p = (big ? Math.min(l.power, 800) / 800 * 90 : l.power * 1.1) * (1 - fk);
       LF.lampC.value[n].set(l.color[0] * p, l.color[1] * p, l.color[2] * p);
       n++;
@@ -1383,7 +1460,7 @@ export class Game {
       AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.09);
       AIR.beamD.value.copy(me.barrel);
     } else AIR.beamP.value.w = 0;
-    this.shafts?.update(this.time, this.cam, (l) => 1 - (this.L.flicks.find((f) => f.l === l)?.k ?? 0) * 0.94);
+    this.shafts?.update(this.time, this.cam, (l) => { const f = this.flickOf.get(l as never); return f ? (f.dead ? 1 - f.k : 1 - f.k * 0.94) : 1; });
     const fp = this.flashPoint.position;
     AIR.spark.value.set(fp.x, fp.y, fp.z, this.flashK * 0.022);
     if (me.alive && me.light) {
@@ -1450,10 +1527,11 @@ export class Game {
     });
     this.flashPoint.intensity = this.flashK * 14;
     this.flashK = Math.max(0, this.flashK - dt * 110);
-    // the fill rides just below and ahead of the lens
-    const cf = this.tmp.set(0, -0.22, -0.3).applyQuaternion(this.cam.quaternion);
+    // the fill stands behind and above the lens: from there the near arm and the far hand get much the same of it,
+    // where a light among the arms burnt whatever passed closest white
+    const cf = this.tmp.set(0.05, 0.22, 0.7).applyQuaternion(this.cam.quaternion);
     this.fill.position.copy(this.cam.position).add(cf);
-    this.fill.intensity = me.alive ? 0.05 : 0;
+    this.fill.intensity = me.alive ? 0.11 : 0;
     // a light aimed at the lens blooms across it, if nothing's between
     this.others.forEach((o, i) => {
       const g = this.glares[i];
@@ -1555,7 +1633,7 @@ export class Game {
   mates(out: { x: number; y: number; name: string }[]) {
     out.length = 0;
     const my = this.actors.get(this.mySlot);
-    if (!my || !this.me.alive || this.cfg?.mode === 'ffa') return;
+    if (!my || !this.me.alive || solo(this.cfg?.mode)) return;
     const v = this.tmp;
     const aspect = this.cam.aspect;
     const T = Math.tan(THREE.MathUtils.degToRad(this.cam.fov / 2));

@@ -277,6 +277,20 @@ export class LocalPlayer {
     for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR]) q.reset();
   }
 
+  /** Gun Game hands you the next one: whatever you held is gone, this is loaded */
+  rearm(id: WeaponId, sol: Soldier, sound: Sound) {
+    this.slots = [id, 'pistol'];
+    this.cur = 0;
+    this.ammo.clear();
+    for (const w of this.slots) this.ammo.set(w, { mag: WEAPONS[w].mag, res: WEAPONS[w].reserve });
+    this.reloadT = this.cycleT = this.cool = 0;
+    this.switchT = 0;
+    this.rkP.v -= 2.4;
+    this.inY.v -= 0.5;
+    sol.setWeapon(id);
+    sound.clack(null, 'draw');
+  }
+
   /** a blast nearby: k from 0 to 1 */
   shake(k: number) {
     this.trauma = Math.min(1, this.trauma + k);

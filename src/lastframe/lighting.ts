@@ -59,8 +59,8 @@ export const LF = {
   lampP: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, -99, 0, 0)) },
   lampC: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) },
   /** lamps that can't make up their minds: xyz, reach / how far down they are this frame. Their light is in the bake, so it's taken away */
-  flickP: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, -99, 0, 0)) },
-  flickA: { value: [0, 0, 0, 0] },
+  flickP: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, -99, 0, 0)) },
+  flickA: { value: [0, 0, 0, 0, 0, 0, 0, 0] },
   /** lightning in the sky: how bright, this frame */
   skyFlash: { value: 0 },
   volMin: { value: new THREE.Vector3() },
@@ -181,11 +181,11 @@ uniform float lfWorldLight;
 uniform vec3 lfFlash;
 uniform vec4 lfLampP[6];
 uniform vec3 lfLampC[6];
-uniform vec4 lfFlickP[4];
-uniform float lfFlickA[4];
+uniform vec4 lfFlickP[8];
+uniform float lfFlickA[8];
 float lfFlickDim( vec3 p ) {
   float k = 1.0;
-  for ( int i = 0; i < 4; i++ ) {
+  for ( int i = 0; i < 8; i++ ) {
     float r = lfFlickP[i].w;
     if ( r <= 0.0 ) continue;
     float d = distance( p, lfFlickP[i].xyz );

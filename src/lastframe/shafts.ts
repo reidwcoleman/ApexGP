@@ -151,7 +151,7 @@ export class Shafts {
       mesh.renderOrder = -1;
       this.group.add(mesh);
       this.mats.push(mat);
-      this.all.push({ m: mat, mesh, base: k, l: best.l?.flicker ? best.l : undefined, door, sky: !best.l });
+      this.all.push({ m: mat, mesh, base: k, l: best.l, door, sky: !best.l });
     };
     for (const g of map.glass) {
       const w = g.b - g.a, h = g.z1 - g.z0;

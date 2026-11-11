@@ -786,10 +786,152 @@ def picket(b, rng):
         prev = p
 
 
+
+# ---------------------------------------------------------------------------------------------------------------
+# what the people who came after brought in, and what the building did on its own
+YELLOW = lambda: mat('lfyellow', (0.55, 0.4, 0.04), 0.5)
+BLACKM = lambda: mat('lfblackm', (0.03, 0.03, 0.035), 0.45, 0.4)
+CONC = lambda: mat('lfconc', (0.3, 0.29, 0.27), 0.95)
+CONC2 = lambda: mat('lfconc2', (0.22, 0.21, 0.2), 0.95)
+LOCKER = lambda: mat('lflocker', (0.2, 0.27, 0.26), 0.5, 0.3)
+LENS = lambda: mat('lflens', (0.7, 0.7, 0.66), 0.08)
+
+
+def worklight(b, rng):
+    """a site light: a tripod, a mast, two halogen heads on a bar, the cable trailing off; it looks along -y.
+    The lamp itself is a light in the layout, at head height (1.72)"""
+    S = BLACKM()
+    for k in range(3):
+        a = k * 2 * math.pi / 3 + 0.5
+        rod(b, (0, 0, 0.62), (math.cos(a) * 0.55, math.sin(a) * 0.55, 0.02), 0.014, S)
+        rod(b, (0, 0, 0.3), (math.cos(a) * 0.27, math.sin(a) * 0.27, 0.32), 0.008, S, 5)
+    rod(b, (0, 0, 0.3), (0, 0, 1.2), 0.02, S)
+    rod(b, (0, 0, 1.1), (0, 0, 1.66), 0.014, YELLOW())
+    rod(b, (-0.3, 0, 1.66), (0.3, 0, 1.66), 0.012, S)
+    for x in (-0.22, 0.22):
+        tilt = rng.uniform(-0.15, 0.1)
+        obox(b, (x, -0.03, 1.76), (0.26, 0.11, 0.2), 0, YELLOW(), tilt=(tilt, 0))
+        obox(b, (x, -0.09, 1.76), (0.22, 0.012, 0.16), 0, LENS(), tilt=(tilt, 0))
+        for dx in (-0.1, 0.1):
+            rod(b, (x + dx, -0.1, 1.67), (x + dx, -0.1, 1.85), 0.004, S, 4)
+        rod(b, (x, 0.02, 1.86), (x, 0.06, 1.9), 0.012, S, 6)
+    # the cable, off along the floor
+    prev = (0.0, 0.04, 1.1)
+    pts = [(0.05, 0.1, 0.5), (0.12, 0.2, 0.02)]
+    a = rng.uniform(0, 6.28)
+    x, y = 0.12, 0.2
+    for k in range(7):
+        a += rng.uniform(-0.7, 0.7)
+        x += math.cos(a) * 0.45; y += abs(math.sin(a)) * 0.45 + 0.1
+        pts.append((x, y, 0.012))
+    for p in pts:
+        rod(b, prev, p, 0.009, CABLE(), 5)
+        prev = p
+
+
+def gurney(b, rng):
+    """a trolley: a tube frame on castors, a thin mattress, one side rail up, a strap hanging"""
+    W, L, H = 0.66, 1.92, 0.82
+    x, y = W / 2, L / 2
+    S = CHROME()
+    for (cx, cy) in ((-x + 0.05, -y + 0.16), (x - 0.05, -y + 0.16), (-x + 0.05, y - 0.16), (x - 0.05, y - 0.16)):
+        rod(b, (cx - 0.03, cy, 0.06), (cx + 0.03, cy, 0.06), 0.06, RUBBER(), 10)
+        rod(b, (cx, cy, 0.12), (cx, cy, H - 0.05), 0.016, S)
+    for z in (0.3, H - 0.05):
+        for (p0, p1) in (((-x, -y, z), (x, -y, z)), ((-x, y, z), (x, y, z)), ((-x, -y, z), (-x, y, z)), ((x, -y, z), (x, y, z))):
+            rod(b, (p0[0] * 0.92, p0[1] * (0.84 if z < 0.5 else 1), z), (p1[0] * 0.92, p1[1] * (0.84 if z < 0.5 else 1), z), 0.014, S)
+    obox(b, (0, 0, 0.31), (W - 0.12, L * 0.8, 0.012), 0, STEEL())
+    obox(b, (0, -0.05, H + 0.02), (W - 0.04, L - 0.2, 0.07), 0, MATT())
+    ang = rng.uniform(0.0, 0.5)
+    obox(b, (0, y - 0.32 + 0.0, H + 0.03 + 0.2 * math.sin(ang)), (W - 0.04, 0.5, 0.07), 0, MATT(), tilt=(ang, 0))
+    xx = (x + 0.02) * (1 if rng.random() < 0.5 else -1)
+    for yy in (-0.5, 0.4):
+        rod(b, (xx, yy, H - 0.05), (xx, yy, H + 0.3), 0.01, S)
+    rod(b, (xx, -0.56, H + 0.3), (xx, 0.46, H + 0.3), 0.01, S)
+    # a strap undone, and what was under the sheet
+    quad(b, [(-x, -0.2, H + 0.06), (-x, -0.14, H + 0.06), (-x - 0.03, -0.12, H - 0.42), (-x - 0.03, -0.18, H - 0.44)], RUBBER())
+    if rng.random() < 0.6:
+        quad(b, [(-x + 0.02, -0.8, H + 0.062), (x - 0.02, -0.8, H + 0.062), (x - 0.02, 0.2, H + 0.062), (-x + 0.02, 0.2, H + 0.062)], SHEET(), two=False)
+        s = 1 if rng.random() < 0.5 else -1
+        quad(b, [(s * x, -0.75, H + 0.06), (s * x, 0.15, H + 0.06), (s * (x + 0.05), 0.2, H - 0.3), (s * (x + 0.08), -0.6, H - 0.38)], SHEET())
+
+
+def rubble(b, rng):
+    """what a floor is once it has come down: slabs, lumps, crumbs, bent bar sticking out. About 2.6 x 2 m, half a metre high"""
+    i = b.idx(DUST())
+    n = 16
+    cv = b.bm.verts.new((0, 0, 0.02))
+    ring = [b.bm.verts.new((math.cos(k * 6.283 / n) * rng.uniform(1.2, 1.7), math.sin(k * 6.283 / n) * rng.uniform(0.9, 1.3), 0.004)) for k in range(n)]
+    for k in range(n):
+        b.bm.faces.new((cv, ring[k], ring[(k + 1) % n])).material_index = i
+    for k in range(rng.randint(5, 8)):
+        w, d = rng.uniform(0.5, 1.2), rng.uniform(0.4, 0.9)
+        r = math.sqrt(rng.random())
+        a = rng.uniform(0, 6.28)
+        obox(b, (math.cos(a) * r * 0.8, math.sin(a) * r * 0.6, rng.uniform(0.08, 0.32)), (w, d, rng.uniform(0.1, 0.18)), rng.uniform(0, 3.1),
+             CONC() if rng.random() < 0.6 else CONC2(), tilt=(rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)))
+    for k in range(rng.randint(26, 40)):
+        r = rng.uniform(0.05, 0.2)
+        d = math.sqrt(rng.random())
+        a = rng.uniform(0, 6.28)
+        obox(b, (math.cos(a) * d * 1.3, math.sin(a) * d * 1.0, r * 0.4 + max(0.0, 0.3 - d * 0.3) * rng.random()), (r * rng.uniform(1, 2), r * rng.uniform(0.8, 1.6), r * rng.uniform(0.5, 1)), rng.uniform(0, 3),
+             rng.choice((CONC, CONC2, PLASTER, BRICK))(), tilt=(rng.uniform(-0.6, 0.6), rng.uniform(-0.6, 0.6)))
+    for k in range(rng.randint(3, 6)):
+        x, y = rng.uniform(-0.8, 0.8), rng.uniform(-0.6, 0.6)
+        a = rng.uniform(0, 6.28)
+        l = rng.uniform(0.5, 1.1)
+        mid = (x + math.cos(a) * l * 0.5, y + math.sin(a) * l * 0.5, rng.uniform(0.3, 0.7))
+        rod(b, (x, y, 0.1), mid, 0.008, RUST(), 5)
+        rod(b, mid, (mid[0] + math.cos(a + 0.6) * l * 0.5, mid[1] + math.sin(a + 0.6) * l * 0.5, mid[2] + rng.uniform(-0.25, 0.2)), 0.008, RUST(), 5)
+
+
+def oplamp(b, rng):
+    """the lamp over an operating table: a stem from the ceiling, a jointed arm, a wide dish with its glass. Origin at the ceiling"""
+    S = CREAM()
+    rod(b, (0, 0, 0), (0, 0, -0.5), 0.035, S)
+    rod(b, (0, 0, -0.5), (0.55, 0.1, -0.62), 0.028, S)
+    rod(b, (0.55, 0.1, -0.62), (0.3, -0.2, -1.0), 0.024, S)
+    c = (0.3, -0.2, -1.06)
+    n = 18
+    i = b.idx(S)
+    j = b.idx(LENS())
+    top = [b.bm.verts.new((c[0] + math.cos(k * 6.283 / n) * 0.18, c[1] + math.sin(k * 6.283 / n) * 0.18, c[2] + 0.07)) for k in range(n)]
+    rim = [b.bm.verts.new((c[0] + math.cos(k * 6.283 / n) * 0.42, c[1] + math.sin(k * 6.283 / n) * 0.42, c[2] - 0.05)) for k in range(n)]
+    for k in range(n):
+        b.bm.faces.new((top[k], top[(k + 1) % n], rim[(k + 1) % n], rim[k])).material_index = i
+    b.bm.faces.new(list(reversed(top))).material_index = i
+    b.bm.faces.new(rim).material_index = j
+    rod(b, (c[0] + 0.42, c[1], c[2] - 0.02), (c[0] + 0.56, c[1], c[2] - 0.02), 0.012, CHROME(), 6)
+
+
+def lockers(b, rng):
+    """a bank of four steel lockers, 1.2 wide: doors with vents, one hanging open, one gone; they look along -y"""
+    W, D, H = 0.3, 0.45, 1.8
+    M = LOCKER()
+    for k in range(4):
+        x = -0.6 + k * W + W / 2
+        obox(b, (x, D / 2, H / 2 + 0.08), (W - 0.004, D, H), 0, M)
+        state = rng.random()
+        if state < 0.2:
+            # the door's gone: a dark inside
+            obox(b, (x, 0.012, H / 2 + 0.08), (W - 0.05, 0.03, H - 0.06), 0, SOOT())
+            continue
+        ang = rng.uniform(0.5, 1.6) if state < 0.45 else 0.0
+        hx = x - W / 2 + 0.01
+        c, sn = math.cos(ang), math.sin(ang)
+        obox(b, (hx + c * (W / 2 - 0.01), -0.012 - sn * (W / 2 - 0.01), H / 2 + 0.08), (W - 0.03, 0.014, H - 0.05), -ang, M)
+        if ang == 0.0:
+            for z in (1.55, 1.6, 1.65):
+                obox(b, (x, -0.021, z), (W * 0.5, 0.004, 0.012), 0, SOOT())
+            obox(b, (x + W * 0.3, -0.026, 1.0), (0.02, 0.014, 0.09), 0, CHROME())
+    obox(b, (0, D / 2, 0.04), (1.2, D - 0.04, 0.08), 0, SOOT())
+
+
 KINDS_EXTRA = dict(sbwall=sbwall, wattle=wattle, duck=duck, pool=pool, spoil=spoil, helmet=helmet, stretcher=stretcher, picket=picket, fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
 
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
-             radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit)
+             radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit,
+             worklight=worklight, gurney=gurney, rubble=rubble, oplamp=oplamp, lockers=lockers)
 
 
 def make(name):

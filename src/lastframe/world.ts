@@ -80,7 +80,7 @@ export interface MapData {
   spawns: { a: number[][]; b: number[][]; ffa: number[][] };
   hold: number[][];
   zones: { a: number[]; b: number[]; kind: string }[];
-  lights: { kind: string; pos: number[]; color: number[]; power: number; flicker?: number }[];
+  lights: { kind: string; pos: number[]; color: number[]; power: number; flicker?: number; size?: number[]; reach?: number; aim?: number[] }[];
   rooms: { name: string; a: number[]; b: number[] }[];
   lm: { logr: number; k: number; size: number };
   /** facade modules: id, where, and which tile of the second lightmap (none: a far building) */
@@ -112,6 +112,13 @@ export interface Flicker {
   k: number;
   t: number;
   off: number;
+  /** the thing that glows */
+  mesh: THREE.Mesh;
+  /** shot out: dark until the next match. dying is the last sputter on the way */
+  dead: boolean;
+  dying: number;
+  /** a tube lies along x or z: half its length each way, for whoever is aiming at it */
+  half: [number, number];
 }
 
 /** a steel door's little window: wired glass gone grey with dirt */
@@ -814,7 +821,8 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     let mesh: THREE.Mesh;
     if (l.kind === 'area') {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.02, 0.08), tube);
-      mesh.rotation.y = 0;
+      // layout y runs north, which is the game's -z
+      mesh.rotation.y = l.size && l.size[1] > l.size[0] ? Math.PI / 2 : 0;
       mesh.position.set(l.pos[0], l.pos[1] - 0.03, l.pos[2]);
     } else if (l.kind === 'spot') {
       mesh = new THREE.Mesh(new THREE.SphereGeometry(l.pos[1] > 6.3 ? 0.14 : 0.07, 10, 8), l.pos[1] > 6.3 ? sodium : bulb);
@@ -823,14 +831,15 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       mesh = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), bulb);
       mesh.position.set(l.pos[0], l.pos[1], l.pos[2]);
     }
-    if (l.flicker) {
-      // its own glow, so it can go out on its own
+    if (l.power > 0.01) {
+      // its own glow, so it can go out on its own: a tube on its last legs, or any lamp someone puts a round through
       const mat = (mesh.material as THREE.MeshBasicMaterial).clone();
       mesh.material = mat;
-      if (l.kind !== 'area') mesh.scale.setScalar(l.power < 3 ? 0.5 : 1);
-      flicks.push({ l, mat, base: mat.color.clone(), k: 0, t: Math.random() * 4, off: 0 });
+      if (l.flicker && l.kind !== 'area') mesh.scale.setScalar(l.power < 3 ? 0.5 : 1);
+      const alongZ = l.kind === 'area' && !!l.size && l.size[1] > l.size[0];
+      flicks.push({ l, mat, base: mat.color.clone(), k: 0, t: Math.random() * 4, off: 0, mesh, dead: false, dying: 0, half: l.kind === 'area' ? (alongZ ? [0, 0.6] : [0.6, 0]) : [0, 0] });
+      group.add(mesh);
     }
-    if (l.power > 0.01) group.add(mesh);
   }
   const deco = new THREE.Group();
   group.add(deco);

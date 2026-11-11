@@ -1,6 +1,8 @@
 /** What both ends of a match agree on: weapons, teams, messages. */
 
-export type Mode = 'tdm' | 'ffa' | 'rounds' | 'hold';
+export type Mode = 'tdm' | 'ffa' | 'rounds' | 'hold' | 'gun';
+/** everyone for themselves */
+export const solo = (m?: Mode) => m === 'ffa' || m === 'gun';
 export type WeaponId = 'carbine' | 'shotgun' | 'rifle' | 'pistol';
 export type NadeKind = 'frag' | 'flash';
 
@@ -64,6 +66,8 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
 };
 
 export const PRIMARIES: WeaponId[] = ['carbine', 'shotgun', 'rifle'];
+/** Gun Game: the gun you hold by how many you've killed. One more kill with the last of them wins */
+export const GUN_LADDER: WeaponId[] = ['carbine', 'carbine', 'shotgun', 'shotgun', 'rifle', 'rifle', 'pistol', 'pistol'];
 
 export const TEAM_NAME = ['Unit', 'Crew'];
 
@@ -148,6 +152,8 @@ export type Ev =
   | { t: 'boom'; id: number; kind: NadeKind; p: [number, number, number] }
   | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number }
   | { t: 'hold'; zone: number; owner: number; prog: number; score: [number, number] }
+  /** Gun Game: this one's next gun, and how far up the ladder that is */
+  | { t: 'arm'; s: number; primary: WeaponId; step: number }
   | { t: 'chat'; from: string; text: string };
 
 export type Phase = 'warmup' | 'live' | 'between' | 'over';

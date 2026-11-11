@@ -122,6 +122,17 @@ uniform float density;
 uniform vec4 spark;
 uniform vec4 beamP;
 uniform vec3 beamD;
+uniform vec4 lfFlickP[8];
+uniform float lfFlickA[8];
+float flickDim( vec3 p ) {
+  float k = 1.0;
+  for ( int i = 0; i < 8; i++ ) {
+    float r = lfFlickP[i].w;
+    if ( r <= 0.0 ) continue;
+    k *= 1.0 - lfFlickA[i] * ( 1.0 - smoothstep( r * 0.3, r, distance( p, lfFlickP[i].xyz ) ) );
+  }
+  return k;
+}
 void main() {
   vec3 P = viewAt( vUv );
   float dist = length( P );
@@ -140,7 +151,7 @@ void main() {
     prev = t;
     vec3 p = o + dir * t;
     vec3 e = texture( tVol, ( p - volMin ) * volInv ).rgb;
-    vec3 L = ( exp2( e * lmK.x ) - 1.0 ) / lmK.y;
+    vec3 L = ( exp2( e * lmK.x ) - 1.0 ) / lmK.y * flickDim( p );
     float wisp = 0.72 + 0.28 * sin( p.x * 0.31 + time * 0.13 ) * sin( p.z * 0.27 - time * 0.09 + p.y * 0.4 );
     float rho = density * wisp * ( 0.45 + 0.55 * exp( -max( p.y, 0.0 ) * 0.16 ) );
     // the beam and any flash
@@ -267,11 +278,13 @@ void main() {
 const EXPO = /* glsl */ `
 varying vec2 vUv;
 uniform sampler2D tSrc;
+uniform sampler2D tFine;
 uniform sampler2D tPrev;
 uniform float dt;
 uniform float cut;
 uniform float key;
 uniform float maxE;
+uniform float hiKey;
 void main() {
   float acc = 0.0, wsum = 0.0;
   for ( int j = 0; j < 7; j++ ) for ( int i = 0; i < 9; i++ ) {
@@ -283,10 +296,22 @@ void main() {
     wsum += w;
   }
   float avg = exp2( acc / wsum );
-  // a small sensor: it opens slowly into the dark and shuts faster on the light
-  float want = clamp( key / max( avg, 1e-4 ), 0.4, maxE );
+  // what a body camera's meter really does: it protects whatever is bright. A pool of torchlight on a wall is
+  // exposed for itself and the room round it goes black; a bare bulb is too small to count (each sample is capped)
+  float hi = 0.0, hw = 0.0;
+  for ( int j = 0; j < 9; j++ ) for ( int i = 0; i < 16; i++ ) {
+    vec2 uv = ( vec2( float( i ), float( j ) ) + 0.5 ) / vec2( 16.0, 9.0 );
+    vec2 c = uv - 0.5;
+    float w = exp( -dot( c, c ) * 3.2 );
+    float l = min( dot( texture2D( tFine, uv ).rgb, vec3( 0.3, 0.59, 0.11 ) ), 20.0 );
+    hi += l * l * w;
+    hw += w;
+  }
+  float rms = sqrt( hi / hw );
+  // a small sensor: it opens slowly into the dark and shuts fast on the light
+  float want = clamp( min( key / max( avg, 1e-4 ), hiKey / max( rms, 1e-4 ) ), 0.05, maxE );
   float prev = texture2D( tPrev, vec2( 0.5 ) ).r;
-  float rate = want < prev ? 2.6 : 0.9;
+  float rate = want < prev ? 5.5 : 1.25;
   float e = cut > 0.5 ? want : exp( mix( log( prev ), log( want ), 1.0 - exp( -dt * rate ) ) );
   gl_FragColor = vec4( e, avg, 0.0, 1.0 );
 }
@@ -323,6 +348,8 @@ uniform sampler2D tBloom;
 uniform sampler2D tHalf;
 uniform sampler2D tBlock;
 uniform sampler2D tExp;
+uniform sampler2D tDepthF;
+uniform vec2 nfF;
 uniform vec2 res;
 uniform float time;
 uniform float tanHalf;
@@ -441,7 +468,15 @@ void main() {
   vec3 c = vec3( texture2D( tSrc, cr ).r, texture2D( tSrc, cg ).g, texture2D( tSrc, cb ).b );
   // unsharp mask, as the camera's own processing does it
   vec3 soft = texture2D( tHalf, cg ).rgb;
-  c = max( c + ( c - soft ) * 1.05, vec3( 0.0 ) );
+  // a cheap wide lens is only sharp in the middle, and what's a hand's length from it (the wearer's own arms) is never in focus
+  float zF = nfF.x * nfF.y / ( nfF.y - texture2D( tDepthF, cg ).r * ( nfF.y - nfF.x ) );
+  float nearK = smoothstep( 0.5, 0.16, zF );
+  float softK = clamp( smoothstep( 0.5, 1.0, edge ) * 0.8 + nearK * 0.85, 0.0, 1.0 );
+  vec3 softer = texture2D( tBlock, cg ).rgb;
+  // a glint a hand from the lens must not swell into a ball of light: the blur can't hold much more than the sharp picture did
+  softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
+  c = max( c + ( c - soft ) * 1.05 * ( 1.0 - softK ), vec3( 0.0 ) );
+  c = mix( c, mix( soft, softer, nearK * 0.5 ), softK );
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   // grease and dust on the housing's window: nothing in the dark, a smeared glow round anything bright
@@ -559,7 +594,7 @@ export class Post {
   private qs = new THREE.Scene();
   private mDown = pass(DOWN, { tSrc: { value: null }, px: { value: new THREE.Vector2() }, first: { value: 0 } });
   private mUp = pass(UP, { tSrc: { value: null }, tAdd: { value: null }, px: { value: new THREE.Vector2() }, k: { value: 1 } });
-  private mExp = pass(EXPO, { tSrc: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 }, key: { value: 0.115 }, maxE: { value: 8.5 } });
+  private mExp = pass(EXPO, { tSrc: { value: null }, tFine: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 }, key: { value: 0.115 }, maxE: { value: 8.5 }, hiKey: { value: 0.75 } });
   /** how bright the camera wants the scene: a night street and an overcast noon aren't metered alike */
   set exposureKey(k: number) {
     this.mExp.uniforms.key.value = k;
@@ -578,13 +613,13 @@ export class Post {
   private mAO = pass(AO, { ...this.common, px: { value: new THREE.Vector2() }, frame: { value: 0 }, camW: this.camW, capA: { value: this.capA }, capB: { value: this.capB }, capN: { value: 0 } });
   private mAOBlur = pass(AOBLUR, { ...this.common, tAO: { value: null }, px: { value: new THREE.Vector2() } });
   private mFog = pass(FOG, {
-    ...this.common, tVol: LF.volAvg, volMin: LF.volMin, volInv: LF.volInv, lmK: LF.lmK, camW: this.camW, frame: { value: 0 }, time: { value: 0 }, density: { value: 0.02 }, spark: AIR.spark, beamP: AIR.beamP, beamD: AIR.beamD,
+    ...this.common, tVol: LF.volAvg, volMin: LF.volMin, volInv: LF.volInv, lmK: LF.lmK, camW: this.camW, frame: { value: 0 }, time: { value: 0 }, density: { value: 0.02 }, spark: AIR.spark, beamP: AIR.beamP, beamD: AIR.beamD, lfFlickP: LF.flickP, lfFlickA: LF.flickA,
   });
   private mFogBlur = pass(FOGBLUR, { tSrc: { value: null }, px: { value: new THREE.Vector2() } });
   private mResolve = pass(RESOLVE, { ...this.common, tSrc: { value: null }, tHist: { value: null }, tAO: { value: null }, tFog: { value: null }, tAir: { value: null }, reproj: { value: new THREE.Matrix4() }, px: { value: new THREE.Vector2() }, cut: { value: 1 }, jit: { value: new THREE.Vector2() } });
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
-    tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, res: { value: new THREE.Vector2() }, time: { value: 0 },
+    tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
     tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
@@ -741,6 +776,7 @@ export class Post {
     // ---- exposure
     const e0 = this.exp[this.ei], e1 = this.exp[1 - this.ei];
     this.mExp.uniforms.tSrc.value = this.down[this.down.length - 1].texture;
+    this.mExp.uniforms.tFine.value = this.down[3].texture;
     this.mExp.uniforms.tPrev.value = e0.texture;
     this.mExp.uniforms.dt.value = dt;
     this.mExp.uniforms.cut.value = this.cutExposure ? 1 : 0;
