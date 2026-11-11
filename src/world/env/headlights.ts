@@ -18,7 +18,7 @@ import * as THREE from 'three';
 /** cars whose beams light the world (the nearest to the camera) */
 export const HL_MAX = 8;
 /** how far the beam carries (m): far enough to see the next braking board on a dark circuit */
-const HL_RANGE = 95;
+const HL_RANGE = 150;
 /** beam half-angles: wide across the road, flat vertically (below the axis; above it the cut-off is sharper) */
 const TAN_H = Math.tan(THREE.MathUtils.degToRad(28));
 const TAN_V = Math.tan(THREE.MathUtils.degToRad(6));
@@ -34,7 +34,8 @@ export const headlightUniforms = {
   dir,
   /** x lights in use, y 1 / tan(horizontal half-angle), z 1 / tan(vertical half-angle), w range (m) */
   info: { x: 0, y: 1 / TAN_H, z: 1 / TAN_V, w: HL_RANGE },
-  color: { r: 1.0, g: 0.975, b: 0.94 },
+  // (LED projectors: a cool 6000 K white, not a filament's cream)
+  color: { r: 0.9, g: 0.955, b: 1.0 },
 };
 
 export const HEADLIGHT_PARS = /* glsl */ `
@@ -73,26 +74,47 @@ if ( hlInfo.x > 0.5 ) {
     if ( along < 0.5 ) continue;
     vec3 lf = normalize( vec3( fw.z, 0.0, -fw.x ) + vec3( 1e-5 ) );
     vec3 lu = cross( fw, lf );
-    float ex = dot( ld, lf ) / along * hlInfo.y;
-    float ey = dot( ld, lu ) / along * hlInfo.z;
-    // a real lamp's cut-off: the light stops a degree or so above the axis (no dazzle for the car
-    // ahead, whose lower rear catches it), and spreads softly below it onto the road
-    ey *= ey > 0.0 ? 3.2 : 1.0;
-    float e = ex * ex + ey * ey;
-    if ( e >= 1.0 ) continue;
-    // a hot centre, soft edges fading out across the road
-    float cone = ( 1.0 - smoothstep( 0.1, 1.0, e ) ) * ( 1.0 - 0.45 * smoothstep( 0.0, 0.6, ex * ex ) );
+    // the fragment's direction from the lamp, as tangents: across the beam (+ left) and above its axis
+    float lat = dot( ld, lf );
+    float ty = dot( ld, lu ) / along;
+    if ( ty > 0.5 || abs( lat ) > along * 1.6 + 2.0 ) continue;
+    // a projector low beam, as it falls on a wall: a sharp horizontal cut-off with the kerb-side
+    // elbow rising 15 degrees, the hot spot tucked just under it (the throw down the road), a broad
+    // flat spread below that lights the road's whole width close to the car, and a little stray
+    // light above the line, by which signs, fences and the trees ahead are faintly seen
+    float pat = 0.0, fringe = 0.0;
+    for ( int q = 0; q < 2; q ++ ) {
+      // (two lamps a hand apart: one pattern far away, two overlapping pools on the road at the nose)
+      float tx = ( lat + ( q == 0 ? 0.104 : -0.104 ) ) / along;
+      float cut = 0.028 + min( 0.035, max( 0.0, -tx ) * 0.27 );
+      float over = ty - cut;
+      float mask = 1.0 - smoothstep( -0.004, 0.005, over );
+      float hot = exp( -( tx + 0.02 ) * ( tx + 0.02 ) / 0.016 - ( over + 0.011 ) * ( over + 0.011 ) / 0.00028 );
+      float mid = exp( -tx * tx / 0.07 - ( over + 0.03 ) * ( over + 0.03 ) / 0.0022 );
+      // (the wide spread is the foreground only — well under the line; far down the road the beam is
+      // the narrow throw, so the pool tapers ahead of the car instead of lighting the whole width to its range)
+      float spread = exp( -tx * tx / 0.34 ) * exp( min( 0.0, over ) * 5.5 ) * smoothstep( 0.008, 0.05, -over );
+      float stray = 0.03 * exp( -tx * tx / 0.5 ) * exp( -max( 0.0, over ) * 9.0 );
+      // the lens's facets: faint vertical striations across the pool
+      float stri = 1.0 + 0.07 * sin( tx * 95.0 ) * sin( tx * 37.0 + 1.3 ) + 0.04 * sin( ty * 160.0 + tx * 11.0 );
+      pat += ( ( hot * 2.2 + mid * 0.8 + spread * 1.0 ) * mask * stri + stray ) * 0.5;
+      // (a projector's cut-off is edged in blue-violet: the lens splits the light right at the line)
+      fringe += exp( -over * over / 0.00003 ) * exp( -tx * tx / 0.2 ) * 0.5;
+    }
+    if ( pat < 0.0015 ) continue;
+    float cone = pat;
     float d = sqrt( d2 );
-    float fall = 1.0 - smoothstep( hlInfo.w * 0.45, hlInfo.w, d );
+    float fall = 1.0 - smoothstep( hlInfo.w * 0.55, hlInfo.w, d );
     vec3 hL = toL / max( d, 1e-3 );
     // the road: lit a little flatter than the grazing angle it really meets it at (the beam is
     // aimed down at it), but a pool that dies away with distance, not an even glow to the horizon
-    float hBoost = min( 10.0, max( 1.0, 0.35 * hUpK / max( dot( hNw, hL ), 0.02 ) ) );
-    float atten = 1.0 / ( ( d + 2.5 ) * ( 1.0 + d / 35.0 ) );
+    float hBoost = min( 6.0, max( 1.0, 0.35 * hUpK / max( dot( hNw, hL ), 0.02 ) ) );
+    // (the road right under the nose is not floodlit: the lamps look ahead, past the front wing)
+    float atten = smoothstep( 1.5, 7.0, along ) / ( ( d + 2.0 ) * ( 1.0 + d / 30.0 ) );
     IncidentLight hl;
     hl.visible = true;
     hl.direction = normalize( mat3( viewMatrix ) * hL );
-    hl.color = hlColor * ( hP.w * cone * fall * hBoost * atten );
+    hl.color = hlColor * mix( vec3( 1.0 ), vec3( 0.55, 0.75, 1.7 ), min( 1.0, fringe * 0.7 ) ) * ( hP.w * cone * fall * hBoost * atten );
     RE_Direct( hl, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   }
 }
@@ -118,7 +140,7 @@ const LAMPS: [number, number, number][] = [
 const SOURCE: [number, number, number] = [0, 0.95, 2.45];
 const AIM = new THREE.Vector3(0, -0.038, 1).normalize();
 /** light intensity of one car's beam at full night: a pool on the road ~10–40 m ahead that is gone by ~90 m */
-const BEAM_I = 46;
+const BEAM_I = 105;
 /** beam volume: length and end radius (m) */
 const BEAM_LEN = 34;
 const BEAM_R = 5.5;
@@ -164,7 +186,12 @@ void main() {
   float halo = exp( -r * 5.5 ) * ( 0.3 + 0.6 * uHaze );
   // a thin horizontal streak (the anamorphic flare of a TV lens), slightly blue
   float streak = exp( -abs( vQ.y ) * 55.0 ) * ( 1.0 - abs( vQ.x ) ) * 0.9;
-  vec3 c = uColor * ( core + halo ) + uColor * vec3( 0.75, 0.88, 1.15 ) * streak;
+  // the star a bright point throws through a camera's iris: six thin spikes, turning with the lamp
+  float ang = atan( q.y, q.x );
+  float spikes = pow( abs( cos( ang * 3.0 + 0.4 ) ), 90.0 ) * exp( -r * 3.2 ) * 1.6 + pow( abs( cos( ang * 3.0 + 0.92 ) ), 240.0 ) * exp( -r * 5.0 ) * 0.7;
+  // and a faint ring ghost round the hot core
+  float ring = exp( -( r - 0.2 ) * ( r - 0.2 ) * 900.0 ) * 0.05;
+  vec3 c = uColor * ( core + halo + spikes ) + uColor * vec3( 0.75, 0.88, 1.15 ) * ( streak + ring );
   float edge = 1.0 - smoothstep( 0.8, 1.0, max( abs( vQ.x ), abs( vQ.y ) ) );
   gl_FragColor = vec4( c * vA * edge, 0.0 );
 }
@@ -307,7 +334,7 @@ export class Headlights {
     this.aOnB.setUsage(THREE.DynamicDrawUsage);
     cone.setAttribute('aOn', this.aOnB);
     this.beamU = {
-      uColor: { value: new THREE.Color(1.0, 0.96, 0.88) },
+      uColor: { value: new THREE.Color(0.88, 0.94, 1.0) },
       uStrength: { value: 0 },
       uFogD: { value: 0 },
     };
@@ -361,8 +388,8 @@ export class Headlights {
     this.glareU.uPix.value = cam.isPerspectiveCamera ? (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) / h : 0.001;
     this.glareU.uHaze.value = this.haze;
     this.glareU.uFogD.value = this.fogD;
-    (this.glareU.uColor.value as THREE.Color).setRGB(1.0, 0.97, 0.9).multiplyScalar(2.0 * k);
-    this.beamU.uStrength.value = k * (0.02 + 0.14 * this.haze);
+    (this.glareU.uColor.value as THREE.Color).setRGB(0.9, 0.955, 1.0).multiplyScalar(2.2 * k);
+    this.beamU.uStrength.value = k * (0.012 + 0.16 * this.haze);
     this.beamU.uFogD.value = this.fogD;
 
     const n = Math.min(cars.length, this.max);
