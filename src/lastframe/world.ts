@@ -624,6 +624,13 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
           c.color.setRGB(tri[2][0], tri[2][1], tri[2][2]);
           c.roughness = tri[3];
         }
+        // polished tube a finger thick is a string of white sparks through this lens, one for every pixel it crosses:
+        // what's been standing here for years is dull anyway
+        if (c.metalness > 0.5 && m0.name !== 'lfpool') {
+          c.roughness = Math.max(c.roughness, 0.62);
+          c.metalness = 0.55;
+          c.color.multiplyScalar(0.7);
+        }
         // standing water: black, and what it reflects blurred by the rain on it
         if (m0.name === 'lfpool') {
           c.color.setRGB(0.006, 0.0055, 0.005);

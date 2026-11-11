@@ -156,7 +156,7 @@ export class Match {
   }
 
   private clockFor() {
-    return this.cfg.mode === 'rounds' ? 110 : this.cfg.time * 60;
+    return this.cfg.mode === 'rounds' ? 240 : this.cfg.time * 60;
   }
 
   update(dt: number) {
@@ -761,7 +761,7 @@ export class Match {
     if (mode === 'rounds') {
       const a = this.players.some((q) => q.team === 0 && q.alive), b = this.players.some((q) => q.team === 1 && q.alive);
       if (this.phase === 'live' && (!a || !b)) this.endRound(a ? 0 : 1, 'Eliminated');
-    } else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 5.5));
+    } else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 7.4));
     this.emit({ t: 'roster', players: this.players });
   }
 }

@@ -6,10 +6,10 @@ import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
 const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
-  { id: 'tdm', name: 'Team Fight', note: 'First side to 40 kills. Respawns on.', limit: 40 },
-  { id: 'rounds', name: 'Last Team Standing', note: 'One life a round. First to 5.', limit: 5 },
-  { id: 'hold', name: 'Hold Ground', note: 'Keep the zone. First to 150. It moves.', limit: 150 },
-  { id: 'ffa', name: 'Free For All', note: 'Everyone against everyone. First to 20.', limit: 20 },
+  { id: 'tdm', name: 'Team Fight', note: 'First side to 100 kills. Respawns on.', limit: 100 },
+  { id: 'rounds', name: 'Last Team Standing', note: 'One life a round, four minutes each. First to 8.', limit: 8 },
+  { id: 'hold', name: 'Hold Ground', note: 'Keep the zone. First to 400. It moves.', limit: 400 },
+  { id: 'ffa', name: 'Free For All', note: 'Everyone against everyone. First to 50.', limit: 50 },
   { id: 'gun', name: 'Gun Game', note: 'A new gun every two kills. A boot sets them back. First through all four.', limit: 8 },
 ];
 const MAPS: { id: string; name: string; note: string }[] = [
@@ -87,6 +87,8 @@ export class Hud {
   private unit = String(1000 + Math.floor(Math.random() * 8999));
   private msgT = 0;
   private hintT = 0;
+  /** when this camera started recording: the match's start */
+  private recAt = performance.now();
   private tickT = 0;
   private dmgT = 0;
   private tagBox = el('div', 'mates');
@@ -290,7 +292,7 @@ export class Hud {
 
   private config(): MatchConfig {
     const m = MODES.find((x) => x.id === this.mode)!;
-    return { map: MAP_ID, mode: this.mode, bots: solo(this.mode) ? Math.min(16, this.bots * 2) : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 9 : 8, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
+    return { map: MAP_ID, mode: this.mode, bots: solo(this.mode) ? Math.min(16, this.bots * 2) : this.bots, skill: SKILL[this.skill]?.[1] ?? 0.5, time: this.mode === 'hold' ? 22 : 20, limit: m.limit, seed: Math.floor(Math.random() * 1000) };
   }
 
   private setup(kind: 'solo' | 'host') {
@@ -525,6 +527,7 @@ export class Hud {
     const n = Number(store.get('played', '0'));
     store.set('played', String(n + 1));
     this.hintT = n < 4 ? 12 : 0;
+    this.recAt = performance.now();
     this.hint.classList.toggle('on', n < 4);
     this.feedEl.innerHTML = '';
     this.boardEl.classList.remove('on', 'final');
@@ -644,7 +647,10 @@ export class Hud {
     const weapon = this.g.weaponName(w);
     const now = new Date();
     this.mark(0);
-    this.lostEl.innerHTML = `<div class="l-in"><small>LAST FRAME ${now.toTimeString().slice(0, 8)}.${String(Math.floor(now.getMilliseconds() / 40)).padStart(2, '0')}</small><h2>${esc(killer)}</h2><p>${weapon}, ${zone}, ${Math.round(dist)} m</p>${rounds ? '<em>Out until the next round</em>' : '<em>Next camera</em><div class="l-bar"><i></i></div>'}</div>`;
+    const secs = Math.max(0, Math.floor((performance.now() - this.recAt) / 1000));
+    const dur = `${pad2(Math.floor(secs / 3600))}:${pad2(Math.floor(secs / 60) % 60)}:${pad2(secs % 60)}`;
+    const file = `BC4_${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}.MP4`;
+    this.lostEl.innerHTML = `<div class="l-top"><i></i>RECORDING ENDED<span>SIGNAL LOST</span></div><div class="l-in"><small>LF BODY 4 &nbsp;X${this.unit}0${this.unit.slice(-3)} &nbsp;&middot;&nbsp; ${file}</small><small>LAST FRAME ${now.toTimeString().slice(0, 8)}.${String(Math.floor(now.getMilliseconds() / 40)).padStart(2, '0')} &nbsp;&middot;&nbsp; DURATION ${dur}</small><h2>${esc(killer)}</h2><p>${weapon}, ${zone}, ${Math.round(dist)} m</p>${rounds ? '<em>Out until the next round</em>' : '<em>Next camera</em><div class="l-bar"><i></i></div>'}</div>`;
     this.lostEl.className = 'lost pre';
   }
 
@@ -711,10 +717,13 @@ export class Hud {
     this.holdInfo = `${names[e.zone] ?? ''}: ${e.owner < 0 ? 'open' : TEAM_NAME[e.owner]}`;
   }
 
-  chat(from: string, text: string) {
-    const row = el('div', '', `<b>${esc(from)}</b> <span>${esc(text)}</span>`);
+  chat(from: string, text: string, radio = false) {
+    const row = el('div', radio ? 'radio' : '', radio ? `<i>RADIO</i><b>${esc(from)}</b> <span>${esc(text)}</span>` : `<b>${esc(from)}</b> <span>${esc(text)}</span>`);
     this.feedEl.prepend(row);
+    // a line fades out before it goes, and the feed never grows past what can be read at a glance
+    window.setTimeout(() => row.classList.add('out'), 6200);
     window.setTimeout(() => row.remove(), 7000);
+    while (this.feedEl.children.length > 7) this.feedEl.lastElementChild?.remove();
   }
 
   update(dt: number) {
@@ -771,6 +780,7 @@ export class Hud {
       this.ammoT -= dt;
       const low = !!a && a.mag <= Math.ceil(WEAPONS[me.weapon].mag * 0.25);
       this.ammo.classList.toggle('on', this.ammoT > 0 || low || me.reloadT > 0);
+      this.ammo.classList.toggle('low', low && me.reloadT <= 0);
       const hp = info?.hp ?? 100;
       (this.hp.firstChild as HTMLElement).style.transform = `scaleX(${hp / 100})`;
       // nor a health bar: it comes up when you're hit, and stays while it matters

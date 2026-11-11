@@ -1116,19 +1116,35 @@ def sink(b, rng):
     rod(b, (0.42, -0.18, 0.42), (0.42, -0.18, 0.44), 0.16, WHITEP(), 12)
 
 
+REDPIPE = lambda: mat('lfredpipe', (0.68, 0.06, 0.045), 0.35)
+
+
 def sprinkler(b, rng):
-    """three metres of sprinkler main under a ceiling, along x from the origin: the red pipe on its hangers, a coupling,
-    one head on a short drop. Origin at the ceiling"""
-    z = -0.13
-    rod(b, (0, 0, z), (3.0, 0, z), 0.027, REDP(), 8)
+    """three metres of sprinkler main under a ceiling, along x from the origin: the red pipe hung well clear of the tiles
+    on its hangers, a coupling, a head on a short drop at each third. Origin at the ceiling"""
+    z = -0.26
+    P = REDPIPE()
+    rod(b, (0, 0, z), (3.0, 0, z), 0.042, P, 10)
     for x in (0.4, 2.2):
-        rod(b, (x, 0, 0), (x, 0, z + 0.03), 0.004, STEEL(), 4)
-        obox(b, (x, 0, z), (0.03, 0.07, 0.07), 0, STEEL())
-    rod(b, (1.46, 0, z), (1.54, 0, z), 0.034, REDP(), 8)
-    hx = rng.uniform(1.0, 2.0)
-    rod(b, (hx, 0, z), (hx, 0, z - 0.11), 0.012, REDP(), 6)
-    rod(b, (hx, 0, z - 0.11), (hx, 0, z - 0.15), 0.008, CHROME(), 6)
-    obox(b, (hx, 0, z - 0.155), (0.045, 0.045, 0.004), 0, CHROME())
+        rod(b, (x, 0, 0), (x, 0, z + 0.04), 0.006, STEEL(), 4)
+        obox(b, (x, 0, z), (0.035, 0.11, 0.11), 0, STEEL())
+    rod(b, (1.45, 0, z), (1.55, 0, z), 0.052, P, 10)
+    for hx in (0.75, 2.25):
+        rod(b, (hx, 0, z), (hx, 0, z - 0.13), 0.016, P, 6)
+        rod(b, (hx, 0, z - 0.13), (hx, 0, z - 0.18), 0.011, CHROME(), 6)
+        obox(b, (hx, 0, z - 0.185), (0.06, 0.06, 0.005), 0, CHROME())
+
+
+def wetfloor(b, rng):
+    """the yellow sign someone stood up the last time the floor was mopped; some have gone over"""
+    Y = YELLOWP()
+    if rng.random() < 0.35:
+        obox(b, (0, 0, 0.02), (0.3, 0.62, 0.03), rng.uniform(0, 3), Y)
+        return
+    for sgn in (-1, 1):
+        obox(b, (0, sgn * 0.11, 0.3), (0.3, 0.02, 0.62), 0, Y, tilt=(sgn * 0.33, 0))
+        obox(b, (0, sgn * 0.125, 0.36), (0.16, 0.004, 0.2), 0, BLACKM(), tilt=(sgn * 0.33, 0))
+    obox(b, (0, 0, 0.6), (0.3, 0.05, 0.03), 0, Y)
 
 
 def doorplate(b, rng):
@@ -1178,7 +1194,7 @@ KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, h
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit,
              worklight=worklight, gurney=gurney, rubble=rubble, oplamp=oplamp, lockers=lockers,
              extinguisher=extinguisher, sanitiser=sanitiser, notice=notice, wallphone=wallphone, seats=seats, vending=vending, monitor=monitor,
-             cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint)
+             cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint, wetfloor=wetfloor)
 
 
 def make(name):

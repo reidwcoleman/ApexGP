@@ -54,7 +54,8 @@ void main() {
   float z = lin( texture2D( tDepth, gl_FragCoord.xy * inv ).r );
   b = min( b, z / max( dot( d, fwd ), 1e-3 ) );
   if ( b <= a ) discard;
-  float j = ign( gl_FragCoord.xy + time * 61.0 );
+  // the same grain every frame: one that changed each frame was a field of sparks wherever a shaft crossed the picture
+  float j = ign( gl_FragCoord.xy );
   float acc = 0.0;
   for ( int i = 0; i < 8; i++ ) {
     float t = mix( a, b, ( float( i ) + j ) / 8.0 );
@@ -65,7 +66,7 @@ void main() {
     float s = 1.0;
     if ( slats > 0.0 ) {
       float f = fract( q.y * slats );
-      s = 0.12 + 0.88 * smoothstep( 0.18, 0.32, f ) * smoothstep( 0.8, 0.66, f );
+      s = 0.55 + 0.45 * smoothstep( 0.1, 0.4, f ) * smoothstep( 0.9, 0.6, f );
     }
     vec3 p = o + d * t;
     float dust = 0.7 + 0.3 * sin( p.x * 3.1 + time * 0.21 ) * sin( p.y * 2.3 - time * 0.17 ) * sin( p.z * 2.7 + time * 0.13 );
@@ -74,7 +75,8 @@ void main() {
   }
   // a long look down one fills up, it doesn't keep getting brighter
   float len = b - a;
-  gl_FragColor = vec4( col * k * acc / 8.0 * 2.6 * ( 1.0 - exp( -len * 0.38 ) ), 0.0 );
+  // dust in a beam is a faint veil: it never outshines the window it came through
+  gl_FragColor = vec4( min( col * k * acc / 8.0 * 2.6 * ( 1.0 - exp( -len * 0.38 ) ), vec3( 0.06 ) ), 0.0 );
 }
 `;
 

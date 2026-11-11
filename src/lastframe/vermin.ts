@@ -29,7 +29,11 @@ export class Rats {
   private rats: Rat[] = [];
   private scare = 0;
 
-  constructor(private nodes: Node[], n = 5) {
+  /** a rat has just bolted from here */
+  onBolt: (p: THREE.Vector3) => void = () => {};
+  private v = new THREE.Vector3();
+
+  constructor(private nodes: Node[], n = 10) {
     const inside = nodes.filter((q) => q.indoors && q.cover);
     if (inside.length < 20) return;
     const body = new THREE.SphereGeometry(1, 10, 7);
@@ -52,11 +56,22 @@ export class Rats {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     geo.setIndex(idx);
-    const mat = applyLF(new THREE.MeshStandardMaterial({ color: 0x17130f, roughness: 0.92 }));
+    const mat = applyLF(new THREE.MeshStandardMaterial({ color: 0x3a3028, roughness: 0.85 }));
+    // eyes that give the torch back
+    const eyeG = new THREE.SphereGeometry(0.0045, 6, 4);
+    // (lit like anything else, and glossy: they catch a torch and are nothing in the dark. Self-lit, the camera's gain
+    // turned every pair into two lamps)
+    const eyeM = applyLF(new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 0.12, metalness: 0.4 }));
     for (let i = 0; i < n; i++) {
       const at = inside[Math.floor(Math.random() * inside.length)];
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = false;
+      mesh.scale.setScalar(1.55 + Math.random() * 0.5);
+      for (const sx of [-1, 1]) {
+        const e = new THREE.Mesh(eyeG, eyeM);
+        e.position.set(sx * 0.013, 0.04, -0.118);
+        mesh.add(e);
+      }
       this.group.add(mesh);
       this.rats.push({ mesh, at, to: null, x: at.x, y: at.y, z: at.z, yaw: Math.random() * 6.28, wait: Math.random() * 4, legs: 0, speed: 0, side: Math.random() < 0.5 ? -1 : 1, ph: Math.random() * 6 });
     }
@@ -72,24 +87,25 @@ export class Rats {
     const N = this.nodes;
     for (const r of this.rats) {
       const dx = r.x - cam.x, dz = r.z - cam.z, d = Math.hypot(dx, dz, r.y - cam.y);
-      if (d > 34) {
+      if (d > 26) {
         // left behind: it turns up again somewhere ahead, out of the way
         for (let k = 0; k < 6; k++) {
           const q = N[Math.floor(Math.random() * N.length)];
           const qd = Math.hypot(q.x - cam.x, q.z - cam.z, (q.y - cam.y) * 2);
-          if (q.indoors && q.cover && qd > 12 && qd < 24) {
+          if (q.indoors && q.cover && qd > 7 && qd < 18) {
             Object.assign(r, { at: q, to: null, x: q.x, y: q.y, z: q.z, wait: 1 + Math.random() * 3, legs: 0 });
             break;
           }
         }
         continue;
       }
-      const flee = d < 4.2 || (this.scare > 0 && d < 22);
+      const flee = d < 3.4 || (this.scare > 0 && d < 22);
       if (!r.to) {
         r.wait -= dt;
         if (flee || r.wait <= 0) {
           r.legs = flee ? 5 + Math.floor(Math.random() * 5) : 2 + Math.floor(Math.random() * 5);
           r.speed = flee ? 5.2 : 2.6 + Math.random();
+          if (flee && d < 9 && Math.random() < 0.6) this.onBolt(this.v.set(r.x, r.y, r.z));
         }
         if (r.legs > 0) {
           // the next step: along the wall, and when frightened, whichever way is furthest from the boots

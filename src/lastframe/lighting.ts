@@ -299,7 +299,7 @@ const FRAG_LIGHT = /* glsl */ `
     // a lamp shows in whatever it actually reaches: the bake says what that is
     float lfReach = smoothstep( 0.002, 0.05, lfLum );
     vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );
-    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfReach * lfWorldLight / RECIPROCAL_PI * 0.32;
+    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfReach * lfWorldLight / RECIPROCAL_PI * 0.11;
     #ifdef LF_WET
     {
       // the street's mirror: last pass of the world seen from under the plane, stirred by the surface
@@ -328,7 +328,7 @@ const FRAG_LIGHT = /* glsl */ `
     }
     #endif
     vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );
-    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfWorldLight * LF_SPEC / RECIPROCAL_PI * 0.32;
+    radiance += lfGlint( vLfW, lfNw, lfVw, roughnessFactor, lfF0 ) * lfWorldLight * LF_SPEC / RECIPROCAL_PI * 0.11;
   #endif
   #ifdef LF_SUN
   {

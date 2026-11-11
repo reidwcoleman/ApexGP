@@ -293,6 +293,13 @@ function gearMaterial(team: number, wounds: { value: THREE.Vector4[] }) {
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGearP;\nuniform vec4 lfWound[ 4 ];\nfloat gSoak;' + GEAR_NOISE)
       .replace('#include <map_fragment>', `#include <map_fragment>
+{
+  // nylon that has been worn for weeks: no bright new panels, the weave uneven, dust rubbed into it, darker in the seams
+  float gn = gearN( vGearP * 16.0 ) * 0.55 + gearN( vGearP * 70.0 ) * 0.45;
+  diffuseColor.rgb = min( diffuseColor.rgb, vec3( 0.13 ) ) * ( 0.6 + 0.6 * gn );
+  float dust = smoothstep( 0.5, 0.85, gearN( vGearP * 8.0 + 4.0 ) ) * 0.4 + smoothstep( 0.6, 0.9, gearN( vGearP * 31.0 ) ) * 0.2;
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.16, 0.148, 0.128 ) * ( 0.7 + 0.5 * gn ), dust );
+}
 gSoak = 0.0;
 for ( int wi = 0; wi < 4; wi++ ) {
   vec4 w = lfWound[ wi ];
@@ -312,7 +319,7 @@ for ( int wi = 0; wi < 4; wi++ ) {
 }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
   };
-  m.customProgramCacheKey = () => 'lfgear';
+  m.customProgramCacheKey = () => 'lfgear2';
   return applyLF(m);
 }
 

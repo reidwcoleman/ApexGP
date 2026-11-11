@@ -1144,10 +1144,10 @@ def build():
     K('sink_2', 35.0, Y0 + EXT_T / 2 + 0.003, 0.0, r=math.pi)
     # the sprinkler main under both corridors' ceilings on both floors, and a plate and a switch beside every door on them
     for (z, top) in ((0.0, H1), (F2, F2 + H2)):
-        for y in (SY0 + 0.42, NY1 - 0.42):
+        for y in (SY0 + 0.5, NY1 - 0.5):
             x = X0 + 0.5
             while x + 3.0 < X1 - 0.3:
-                K(f'sprinkler_{int(x) % 5 + 1}', x, y, top - 0.01)
+                K('sprinkler_1', x, y, top - 0.01)
                 x += 3.0
         for (c, side) in ((SY0, 1), (SY1, -1), (NY0, 1), (NY1, -1)):
             for (a, b) in spans('x', c, z):
@@ -1155,19 +1155,27 @@ def build():
                     continue
                 mount(f'doorplate_{int(a * 3) % 7 + 1}', 'x', c, b + 0.3 if side > 0 else a - 0.3, z, side)
     # ---- the lines on the floor that led people to departments, worn through where the trolleys turned
-    def floor_line(y, x0, x1, z, mat, w=0.07):
+    def floor_line(y, x0, x1, z, mat, w=0.12):
         x = x0
         while x < x1:
-            ln = R.uniform(1.4, 4.5)
-            if R.random() < 0.85:
-                box((x, y - w / 2, z), (min(x1, x + ln), y + w / 2, z + 0.003), mat, collide=False, density=0.2)
-            x += ln + R.uniform(0.03, 0.5)
+            ln = R.uniform(2.5, 7.0)
+            if R.random() < 0.92:
+                box((x, y - w / 2, z), (min(x1, x + ln), y + w / 2, z + 0.004), mat, collide=False, density=0.25)
+            x += ln + R.uniform(0.03, 0.3)
     for z in (0.0, F2):
-        floor_line(SY0 + 0.55, X0 + 0.4, X1 - 0.4, z, 'paint_r')
-        floor_line(SY0 + 0.68, X0 + 0.4, X1 - 0.4, z, 'paint_y')
-        floor_line(NY1 - 0.55, X0 + 0.4, X1 - 0.4, z, 'paint_b')
+        floor_line(SY0 + 0.85, X0 + 0.4, X1 - 0.4, z, 'line_r')
+        floor_line(SY0 + 1.05, X0 + 0.4, X1 - 0.4, z, 'paint_y')
+        floor_line(NY1 - 0.85, X0 + 0.4, X1 - 0.4, z, 'paint_b')
         if z == 0:
-            floor_line(NY1 - 0.68, X0 + 0.4, 32.0, z, 'paint_g')
+            floor_line(NY1 - 1.05, X0 + 0.4, 32.0, z, 'paint_g')
+    # the signs over the corridors upstairs too, dead fittings between the live ones, and the yellow boards from the last mopping
+    for x in (9.0, 43.0):
+        K('sign', x, (SY0 + SY1) / 2, z=F2 + H2, r=math.pi / 2)
+        K('sign', x + 2.0, (NY0 + NY1) / 2, z=F2 + H2, r=-math.pi / 2)
+    for (x, y) in ((16.5, SY0 + 1.6), (33.0, SY0 + 0.9), (7.0, NY1 - 1.5), (38.0, NY1 - 1.0), (46.0, SY0 + 1.3)):
+        K(f'wetfloor_{int(x)}', x, y, 0.0, r=R.uniform(0, 6.28))
+    K('wetfloor_3', 12.0, NY1 - 1.2, F2, r=R.uniform(0, 6.28))
+    K('wetfloor_4', 40.0, SY0 + 1.2, F2, r=R.uniform(0, 6.28))
     # the fall dressed: heaps of what it was made of along both edges and across the treads, bar sticking out of it
     for i in range(9):
         f = (i + 0.5) / 9

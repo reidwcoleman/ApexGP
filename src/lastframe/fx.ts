@@ -1370,6 +1370,7 @@ vGore = vec3( aLife, step( 15.5, aCell ) * step( aCell, 17.5 ) );`);
    */
   tread(who: number, x: number, y: number, z: number, yaw: number) {
     let s = this.soles.get(who);
+    if (!this.outside(x, z)) this.scuff(x, y, z, 3);
     for (const w of this.wetAt) {
       if (this.now - w.t > 150 || Math.abs(w.y - y) > 0.5) continue;
       const grown = Math.min(1, (this.now - w.t) / 8);
@@ -1580,8 +1581,39 @@ vGore = vec3( aLife, step( 15.5, aCell ) * step( aCell, 17.5 ) );`);
   }
 
   /** something small in the air for a frame or two: a moth, a falling drop. Called every frame it's there */
-  mote(x: number, y: number, z: number, size: number, r: number, g: number, b: number, a: number) {
-    this.soft.emit(x, y, z, 0, 0, 0, size, 0, 0.05, r, g, b, a, 0, 0);
+  mote(x: number, y: number, z: number, size: number, r: number, g: number, b: number, a: number, lit = false) {
+    (lit ? this.glow : this.soft).emit(x, y, z, 0, 0, 0, size, 0, 0.05, r, g, b, a, 0, 0);
+  }
+
+  /** water under pressure out of a broken pipe at p: one frame's worth of it, k from a jet (1) down to a dribble */
+  jet(x: number, y: number, z: number, k: number, dt: number) {
+    const n = Math.ceil(dt * 300 * k);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.28, out = 1.2 + Math.random() * 4.2 * k;
+      // lit by whatever light there is, like anything else: in the dark it is only heard
+      this.soft.emit(x, y, z, Math.cos(a) * out, -1.5 - Math.random() * 4 * k, Math.sin(a) * out, 0.012 + Math.random() * 0.01, 0, 0.5 + Math.random() * 0.45, 0.62, 0.66, 0.7, 0.5, 9.8, 0.5);
+    }
+    // the mist that hangs round it
+    if (Math.random() < dt * 22 * k) this.soft.emit(x + rnd(0.5), y - 0.4 - Math.random() * 1.2, z + rnd(0.5), rnd(0.8), -0.3, rnd(0.8), 0.25, 0.7, 1.4 + Math.random(), 0.55, 0.58, 0.62, 0.07, 0.3, 1.2);
+  }
+
+  /** a breath let out where it's cold enough to see it: from p, the way d faces */
+  breath(x: number, y: number, z: number, dx: number, dz: number, k = 1) {
+    for (let i = 0; i < 5; i++) this.soft.emit(x + dx * 0.12, y, z + dz * 0.12, dx * (0.35 + Math.random() * 0.3) + rnd(0.08), 0.06 + Math.random() * 0.08, dz * (0.35 + Math.random() * 0.3) + rnd(0.08), 0.05, 0.3, 0.9 + Math.random() * 0.6, 0.62, 0.64, 0.66, 0.05 * k, -0.05, 1.6);
+  }
+
+  /** a boot comes down on a floor nobody has swept in years */
+  scuff(x: number, y: number, z: number, speed: number) {
+    const n = speed > 4 ? 3 : 1;
+    for (let i = 0; i < n; i++) this.soft.emit(x + rnd(0.1), y + 0.03, z + rnd(0.1), rnd(0.25), 0.1 + Math.random() * 0.12, rnd(0.25), 0.07, 0.35, 1.2 + Math.random() * 0.8, 0.4, 0.38, 0.35, 0.035 + Math.min(0.05, speed * 0.008), 0.05, 1.5);
+  }
+
+  /** water hitting a floor indoors: thrown up and gone, seen only where there is light on it */
+  spatter(x: number, y: number, z: number, k: number) {
+    for (let i = 0; i < 4 * k; i++) {
+      const a = Math.random() * 6.28, sp = 0.5 + Math.random() * 1.1;
+      this.soft.emit(x, y + 0.03, z, Math.cos(a) * sp, 1 + Math.random() * 1.6, Math.sin(a) * sp, 0.012, 0, 0.16 + Math.random() * 0.18, 0.6, 0.64, 0.68, 0.5, 9, 0.6);
+    }
   }
 
   /** a boot in a puddle */

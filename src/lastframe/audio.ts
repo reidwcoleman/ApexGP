@@ -605,6 +605,23 @@ export class Sound {
   }
 
   /** cloth and tape */
+  /** a rat, put up */
+  squeak(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.3, false);
+    this.burst(d, 0.035, 0.32, 5200, 9500);
+    this.burst(d, 0.03, 0.26, 6000, 10000, 0.07);
+  }
+
+  /** a pipe lets go: the bang of the coupling, then water under pressure for as long as it lasts */
+  spray(p: THREE.Vector3, secs: number) {
+    if (!this.ctx) return;
+    const d = this.src(p, 1.1, false);
+    this.burst(d, 0.09, 1.0, 300, 3800);
+    this.burst(d, secs, 0.5, 1400, 9000, 0.05);
+    this.burst(d, secs * 0.8, 0.3, 300, 1200, 0.1);
+  }
+
   /** someone keys their radio: the squelch in your earpiece */
   radio() {
     if (!this.ctx) return;

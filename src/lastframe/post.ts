@@ -289,11 +289,12 @@ void main() {
     B += rf * 0.25 * ssrK * fog.a * ( 1.0 - air.a );
   }
   vec2 uc = uv + jit;
-  vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 24.0 ) );
+  vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 7.0 ) );
   vec3 n = min( texture2D( tSrc, uc + vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) ), s = min( texture2D( tSrc, uc - vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) );
   vec3 e = min( texture2D( tSrc, uc + vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) ), w = min( texture2D( tSrc, uc - vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) );
   // a glint one pixel wide on chrome is brighter than the lamp it came from: hold it to a few times what's round it
-  c = min( c, ( n + s + e + w ) * 0.8 + 0.6 );
+  // (and a bright line one pixel wide is the same thing along a rod: it has to be bright both ways to be a lamp)
+  c = min( c, min( ( n + s + e + w ) * 0.8, min( n + s, e + w ) * 2.0 ) + 0.25 );
   vec3 cur = c * A + B;
   vec3 mn = min( c, min( min( n, s ), min( e, w ) ) ) * A + B;
   vec3 mx = max( c, max( max( n, s ), max( e, w ) ) ) * A + B;
@@ -383,7 +384,7 @@ void main() {
   // a small sensor: it opens slowly into the dark and shuts fast on the light
   float want = clamp( min( key / max( avg, 1e-4 ), hiKey / max( rms, 1e-4 ) ), 0.05, maxE );
   float prev = texture2D( tPrev, vec2( 0.5 ) ).r;
-  float rate = want < prev ? 5.5 : 1.25;
+  float rate = want < prev ? 2.2 : 0.8;
   float e = cut > 0.5 ? want : exp( mix( log( prev ), log( want ), 1.0 - exp( -dt * rate ) ) );
   gl_FragColor = vec4( e, avg, 0.0, 1.0 );
 }
@@ -524,11 +525,20 @@ void main() {
   // a rolling shutter: the sensor reads top to bottom, so a fast turn leans everything upright
   uv.x += ( uv.y - 0.5 ) * shutter.x;
   uv.y += ( uv.x - 0.5 ) * shutter.y * 0.3;
-  // a torn feed
+  // a digital feed dying: blocks of the picture stop where they were, slide off, and whole bands of it shift sideways
+  float gBlk = 0.0;
   if ( glitch > 0.0 ) {
-    float band = floor( uv.y * 24.0 + time * 13.0 );
-    float r = hash( vec2( band, floor( time * 22.0 ) ) );
-    uv.x += ( r - 0.5 ) * glitch * step( 0.62, r ) * 0.14;
+    vec2 bq = vec2( 26.0 * aspect, 26.0 );
+    vec2 bid = floor( uv * bq );
+    float tick = floor( time * 9.0 );
+    float r = hash( bid + tick * 17.0 ), r2 = hash( bid.yx * 1.7 + tick );
+    if ( r < glitch * 0.7 ) {
+      gBlk = 1.0;
+      uv = ( bid + 0.5 + ( vec2( r2, hash( bid + 3.1 + tick ) ) - 0.5 ) * 5.0 * glitch ) / bq + ( r2 > 0.45 ? ( fract( uv * bq ) - 0.5 ) / bq : vec2( 0.0 ) );
+    }
+    float band = floor( uv.y * 7.0 + tick * 0.37 );
+    if ( hash( vec2( band, tick ) ) < glitch * 0.28 ) uv.x += ( hash( vec2( tick, band ) ) - 0.5 ) * 0.22 * glitch;
+    uv = clamp( uv, 0.0, 1.0 );
   }
   vec2 p = ( uv - 0.5 ) * 2.0 * vec2( aspect, 1.0 );
   float rho = length( p );
@@ -558,16 +568,16 @@ void main() {
     if ( i >= faceN ) break;
     vec4 f = faces[ i ];
     vec2 fd = ( cg - f.xy ) * vec2( aspect, 1.15 ) / f.z;
-    float fm = smoothstep( 1.0, 0.72, length( fd ) ) * f.w;
+    float fm = smoothstep( 1.0, 0.8, length( fd ) ) * f.w;
     if ( fm > 0.001 ) {
       vec3 fb = texture2D( tBlock, cg ).rgb * 2.0;
       float fa = hash( floor( gl_FragCoord.xy * 0.5 ) ) * 6.2831853;
-      for ( int k = 0; k < 8; k++ ) {
-        float an = fa + float( k ) * 0.7853982;
-        float rr = f.z * ( k - k / 2 * 2 == 0 ? 0.62 : 0.3 );
+      for ( int k = 0; k < 12; k++ ) {
+        float an = fa + float( k ) * 0.5235988 * 2.4;
+        float rr = f.z * ( 0.28 + 0.34 * float( k - k / 3 * 3 ) );
         fb += texture2D( tBlock, cg + vec2( cos( an ), sin( an ) ) * rr / vec2( aspect, 1.0 ) ).rgb;
       }
-      c = mix( c, fb * 0.1, fm );
+      c = mix( c, fb / 14.0, fm );
     }
   }
   vec3 bloom = texture2D( tBloom, cg ).rgb;
@@ -622,6 +632,8 @@ void main() {
   float rim = smoothstep( 0.86, 1.06, corner );
   col = mix( col, col * vec3( 1.12, 0.96, 0.86 ), smoothstep( 0.6, 1.0, corner ) * 0.5 );
   col *= 1.0 - rim;
+  // what a starved encoder leaves: flat blocks in too few colours, the chroma gone wrong
+  if ( gBlk > 0.0 ) col = mix( col, floor( col * 4.0 + 0.5 ) / 4.0 * vec3( 0.86, 1.06, 0.9 ), 0.85 );
   if ( lensBlood > 0.0 ) {
     float bm = splatter( vec2( vUv.x * aspect, vUv.y ), aspect ) * clamp( lensBlood * 1.3, 0.0, 1.0 );
     // seen through: what's behind goes dark red, and a lamp still shines through it

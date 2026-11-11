@@ -71,6 +71,7 @@ export class Bot {
   private watch = 0;
   private watchT = 0;
   private greeted = false;
+  private lightAt = 0;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
 
@@ -297,7 +298,12 @@ export class Bot {
     } else if (this.target < 0 && this.ammo < WEAPONS[this.weapon].mag * 0.4 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
     const node = M.nav.nearest(m.x, m.y, m.z);
     // in the dark map everyone needs one; in a fight half of them still keep it on
-    this.light = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
+    // a torch stays as it is for a good while: one going on and off in a fight is a strobe in everyone's lens
+    const wantLight = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
+    if (wantLight !== this.light && this.t > this.lightAt) {
+      this.light = wantLight;
+      this.lightAt = this.t + 9 + Math.random() * 6;
+    }
     // standing in a pool of light with nobody in sight: some of them shoot the lamp out, as people do
     if (Bot.night && this.target < 0 && !this.lamp && this.t > this.lampAt && this.ammo > 8) {
       this.lampAt = this.t + 14 + Math.random() * 30;

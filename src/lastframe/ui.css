@@ -28,30 +28,36 @@
 .topline b { font-weight: 700; }
 .topline span { color: var(--dim); margin-left: 16px; }
 .feed { position: absolute; top: 20px; left: 24px; width: 460px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; text-shadow: var(--shadow); }
-.feed div { transition: opacity .5s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed div { transition: opacity .6s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: lfin .32s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes lfin { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
 .feed div.out { opacity: 0; }
 .feed time { color: var(--faint); margin-right: 8px; }
 .feed span { color: var(--dim); margin: 0 4px; }
+.feed .radio { color: var(--a); padding-left: 8px; border-left: 2px solid var(--a); }
+.feed .radio i { font-style: normal; font-size: 10px; letter-spacing: .1em; color: var(--faint); margin-right: 8px; }
+.feed .radio span { color: var(--ink); }
 .feed b { font-weight: 400; }
 .feed .mine b { font-weight: 700; }
 .feed .t0 { color: var(--a); } .feed .t1 { color: var(--b); } .feed .t2 { color: var(--ink); }
-.center { position: absolute; top: 27%; left: 0; right: 0; text-align: center; font: 600 34px/1.1 var(--cond); letter-spacing: .01em; opacity: 0; transition: opacity .2s; text-shadow: 0 0 8px #000; }
-.center.on { opacity: 1; }
+.center { position: absolute; top: 27%; left: 0; right: 0; text-align: center; font: 600 34px/1.1 var(--cond); letter-spacing: .01em; opacity: 0; transform: translateY(8px) scale(.985); transition: opacity .45s ease, transform .45s cubic-bezier(.2,.7,.2,1); text-shadow: 0 0 8px #000; }
+.center.on { opacity: 1; transform: none; transition: opacity .28s ease, transform .4s cubic-bezier(.2,.7,.2,1); }
 .center small { display: block; font: 400 13px/1.4 var(--mono); color: var(--dim); margin-top: 8px; letter-spacing: 0; }
 .center.kill { font-size: 20px; top: 61%; }
 .center.kill small { margin: 2px 0 0; font-size: 12px; }
-.prompt { position: absolute; left: 50%; top: 57%; transform: translateX(-50%); font: 400 12px var(--mono); color: var(--ink); text-shadow: var(--shadow); opacity: .85; }
+.prompt { position: absolute; left: 50%; top: 57%; transform: translateX(-50%); transition: opacity .2s ease; font: 400 12px var(--mono); color: var(--ink); text-shadow: var(--shadow); opacity: .85; }
 .heal { position: absolute; left: 50%; top: calc(57% + 22px); width: 120px; margin-left: -60px; height: 2px; background: rgba(255,255,255,.18); opacity: 0; }
 .heal.on { opacity: 1; }
 .heal i { display: block; height: 100%; background: var(--ink); transform-origin: left; transform: scaleX(0); }
 .ammo { position: absolute; right: 24px; bottom: 22px; text-align: right; font-size: 28px; font-weight: 700; line-height: 1.1; text-shadow: var(--shadow); opacity: 0; transition: opacity .5s; }
-.ammo.on { opacity: .9; transition: opacity .08s; }
+.ammo.on { opacity: .9; transition: opacity .12s ease; }
+.ammo { transition: opacity .7s ease, color .3s ease; }
+.ammo.low { color: var(--red); }
 .ammo small { font-size: 13px; font-weight: 400; color: var(--dim); }
 .ammo em { display: block; font: 400 12px var(--mono); color: var(--dim); margin-top: 2px; }
 .vitals { position: absolute; left: 24px; bottom: 24px; width: 180px; opacity: 0; transition: opacity .8s; }
 .vitals.on { opacity: 1; transition: opacity .1s; }
 .hp { height: 3px; background: rgba(255,255,255,.16); }
-.hp i { display: block; height: 100%; background: var(--ink); transform-origin: left; transition: transform .18s; box-shadow: 0 0 3px #000; }
+.hp i { display: block; height: 100%; background: var(--ink); transform-origin: left; transition: transform .4s cubic-bezier(.2,.7,.2,1), background .4s ease; box-shadow: 0 0 3px #000; }
 .hp.low i { background: var(--red); }
 .wounds { font-size: 12px; line-height: 1.5; text-shadow: var(--shadow); margin-bottom: 6px; }
 .wounds b { color: var(--red); font-weight: 700; margin-right: 10px; }
@@ -59,13 +65,15 @@
 .tick { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px; opacity: 0; }
 .tick::before, .tick::after { content: ''; position: absolute; left: 6px; top: -3px; width: 2px; height: 20px; background: #fff; }
 .tick::before { transform: rotate(45deg); } .tick::after { transform: rotate(-45deg); }
-.tick.on { opacity: .75; } .tick.kill::before, .tick.kill::after { background: var(--red); }
-.dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity .5s; }
+.tick { transition: opacity .28s ease, transform .28s cubic-bezier(.2,.7,.2,1); transform: scale(1.5) rotate(0deg); }
+.tick.on { opacity: .8; transform: scale(1); transition: opacity .04s, transform .09s cubic-bezier(.2,.7,.2,1); } .tick.kill::before, .tick.kill::after { background: var(--red); }
+.dmg { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity .8s ease; }
 .dmg::before { content: ''; position: absolute; left: -130px; top: -320px; width: 260px; height: 80px; background: radial-gradient(50% 50% at 50% 50%, rgba(200,30,20,.55), transparent); }
 .dmg.on { opacity: 1; transition: none; }
 .scope { position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 50%, transparent 0, transparent 37vh, #000 38vh); }
 .scope::before { content: ''; position: absolute; left: 50%; top: 13vh; bottom: 13vh; width: 1px; background: rgba(0,0,0,.85); }
 .scope::after { content: ''; position: absolute; top: 50%; left: calc(50% - 37vh); width: 74vh; height: 1px; background: rgba(0,0,0,.85); }
+.scope { transition: opacity .12s ease; }
 .scope.on { opacity: 1; }
 .hint { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: grid; grid-auto-flow: column; grid-template-rows: 1fr 1fr; gap: 3px 20px; font: 400 11px var(--mono); color: var(--dim); opacity: 0; transition: opacity .6s; white-space: nowrap; text-shadow: var(--shadow); }
 .hint.on { opacity: 1; }
@@ -76,15 +84,21 @@
 
 /* ---- the feed is lost */
 .lost { position: absolute; inset: 0; display: none; align-items: flex-end; padding: 0 0 72px 24px; }
-.lost.on { display: flex; background: linear-gradient(0deg, rgba(0,0,0,.84) 0, rgba(0,0,0,.3) 36%, transparent 60%); }
+.lost.on { display: flex; animation: lfcut 1s cubic-bezier(.3,.6,.2,1) both; }
+@keyframes lfcut { 0%, 22% { background: rgba(0,0,0,0); backdrop-filter: grayscale(0) contrast(1); } 40% { background: rgba(0,0,0,.25); backdrop-filter: grayscale(1) contrast(1.3); } 100% { background: rgba(5,6,7,.94); backdrop-filter: grayscale(1) contrast(1.3); } }
+.l-top { position: absolute; top: 60px; left: 24px; display: flex; align-items: center; gap: 10px; color: var(--red); font: 700 13px var(--mono); letter-spacing: .08em; animation: lfrise .4s .1s cubic-bezier(.2,.7,.2,1) both; }
+.l-top i { width: 9px; height: 9px; background: var(--red); }
+.l-top span { color: var(--dim); font-weight: 400; margin-left: 12px; }
+.lost.on .l-in > * { animation: lfrise .5s cubic-bezier(.2,.7,.2,1) both; }
+.lost.on .l-in > :nth-child(1) { animation-delay: .5s; } .lost.on .l-in > :nth-child(2) { animation-delay: .58s; } .lost.on .l-in > :nth-child(3) { animation-delay: .72s; } .lost.on .l-in > :nth-child(4) { animation-delay: .82s; } .lost.on .l-in > :nth-child(n+5) { animation-delay: .95s; }
+@keyframes lfrise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .lost.spec { display: flex; align-items: flex-start; padding: 104px 0 0 24px; }
-.lost.on::before { content: 'NO SIGNAL'; position: absolute; top: 60px; right: 24px; color: var(--red); font: 700 13px var(--mono); }
 .l-in small { display: block; color: var(--dim); font: 400 12px var(--mono); }
 .l-in h2 { margin: 8px 0 4px; font: 600 48px/1 var(--cond); }
 .l-in p { font: 400 13px var(--mono); }
 .l-in em { display: block; font: 400 12px var(--mono); color: var(--faint); margin-top: 16px; }
 .l-bar { width: 240px; height: 2px; background: rgba(255,255,255,.14); margin-top: 8px; overflow: hidden; }
-.l-bar i { display: block; height: 100%; background: var(--ink); transform-origin: left; animation: lffill 5.5s linear both; }
+.l-bar i { display: block; height: 100%; background: var(--ink); transform-origin: left; animation: lffill 2.9s .3s linear both; }
 @keyframes lffill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 /* ---- the console */
@@ -110,7 +124,7 @@
 #ui input:not([type=range]) { background: var(--raise); border: 1px solid var(--edge); padding: 0 12px; height: 44px; box-sizing: border-box; outline: none; color: var(--ink); font-size: 16px; pointer-events: auto; border-radius: 3px; user-select: text; width: 100%; }
 #ui input::placeholder { color: var(--faint); }
 #ui input:focus { border-color: var(--ink); }
-#ui button { background: var(--raise); border: 1px solid var(--edge); height: 44px; padding: 0 16px; cursor: pointer; text-align: left; border-radius: 3px; pointer-events: auto; transition: background .1s, transform .1s; }
+#ui button { background: var(--raise); border: 1px solid var(--edge); height: 44px; padding: 0 16px; cursor: pointer; text-align: left; border-radius: 3px; pointer-events: auto; transition: background .2s ease, border-color .2s ease, color .2s ease, transform .2s cubic-bezier(.2,.7,.2,1), opacity .2s ease; }
 #ui button:hover { background: var(--hover); }
 #ui button:active { background: var(--press); transform: scale(.985); }
 #ui button:focus-visible, #ui input[type=range]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -258,3 +272,8 @@
 @font-face { font-family: 'LF Tag'; src: url('../../node_modules/@fontsource/sedgwick-ave/files/sedgwick-ave-latin-400-normal.woff2') format('woff2'); font-display: block; }
 @font-face { font-family: 'LF Marker'; src: url('../../node_modules/@fontsource/permanent-marker/files/permanent-marker-latin-400-normal.woff2') format('woff2'); font-display: block; }
 @font-face { font-family: 'LF Block'; src: url('../../node_modules/@fontsource/bungee/files/bungee-latin-400-normal.woff2') format('woff2'); font-display: block; }
+
+/* ---- everything on the picture comes and goes softly */
+.ammo, .vitals, .hint, .heal, .tick, .stamp, .topline { will-change: opacity; }
+.menu, .pause, .board { transition: opacity .28s ease; }
+@media (prefers-reduced-motion: reduce) { .feed div, .lost.on, .lost.on .l-in > *, .l-top { animation: none !important; } .lost.on { background: rgba(5,6,7,.94); } }

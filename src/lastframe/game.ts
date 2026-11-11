@@ -22,7 +22,7 @@ import { Shafts } from './shafts.ts';
 import { Graffiti, graffitiFonts, markUp, trenchSigns } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
-const SHAFT_GAIN: Record<string, number> = { ward: 0.55, motel: 0.65, block: 0.65, mansion: 0.7, cove: 0.5, trenches: 0 };
+const SHAFT_GAIN: Record<string, number> = { ward: 0.3, motel: 0.4, block: 0.4, mansion: 0.45, cove: 0.35, trenches: 0 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -117,6 +117,7 @@ export class Game {
   private soaked = new Set<string>();
   private drips: { x: number; y: number; z: number; vy: number; floor: number }[] = [];
   private dripAcc = 0;
+  private breathT = 2;
   private caBase = 0.014;
   private whiteout = 0;
   private hurt = 0;
@@ -297,7 +298,11 @@ export class Game {
     }
     // what keeps the rain off; a tunnel under open ground doesn't
     // what has a roof keeps the rain off: buildings, and dug-in rooms with their roof at the ground (a dugout's top is below 0)
-    const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > -1).map((z) => new THREE.Vector4(z.a[0], z.a[2], z.b[0], z.b[2]));
+    const roofs: THREE.Vector4[] = L.map.zones.filter((z) => z.b[1] > -1).map((z) => {
+      // (a little over, so no rain comes down the thickness of the wall between one room and the next)
+      const x0 = Math.min(z.a[0], z.b[0]) - 0.4, x1 = Math.max(z.a[0], z.b[0]) + 0.4, z0 = Math.min(z.a[2], z.b[2]) - 0.4, z1 = Math.max(z.a[2], z.b[2]) + 0.4;
+      return new THREE.Vector4(x0, z0, x1, z1);
+    });
     if (!roofs.length) roofs.push(new THREE.Vector4(1e6, 1e6, 1e6 + 1, 1e6 + 1));
     this.fx = new Fx(roofs, phys, L.glassMat);
     const wb = L.map.weather?.wb;
@@ -365,6 +370,7 @@ export class Game {
     this.nav = new Nav(L.world, seeds, (x, y, z) => this.zone(x, y, z) !== 'street');
     if (L.map.night && this.L.map.rooms?.length) {
       this.rats = new Rats(this.nav.nodes);
+      this.rats.onBolt = (p) => this.sound.squeak(p);
       this.scene.add(this.rats.group);
     }
     addEventListener('resize', () => this.resize());
@@ -843,7 +849,7 @@ export class Game {
         const inside = this.zone(p.x, p.y, p.z) !== 'street';
         this.fx.burst(p, e.kind, inside);
         this.sound.boom(p, e.kind === 'flash');
-        this.muzzleLight(p, 30);
+        this.muzzleLight(p, 12);
         const d = this.cam.position.distanceTo(p);
         const sees = (x: number, y: number, z: number) => this.L.world.sees({ x: p.x, y: p.y + 0.15, z: p.z }, { x, y, z });
         this.phys.blast(p, e.kind === 'frag' ? 120 : 18, e.kind === 'frag' ? 9 : 4, sees);
@@ -883,7 +889,7 @@ export class Game {
         break;
       case 'chat':
         if (e.team !== undefined && e.team !== this.actors.get(this.mySlot)?.info.team) break;
-        this.hud.chat(e.from, e.text);
+        this.hud.chat(e.from, e.text, e.team !== undefined);
         if (e.team !== undefined) this.sound.radio();
         break;
     }
@@ -895,34 +901,46 @@ export class Game {
    */
   private stirring(dt: number) {
     if (!this.L.map.night) return;
-    const c = this.cam.position, v = this.tmp, t = this.time;
+    const c = this.cam.position, v = this.tmp, t = this.time, me = this.me;
     let n = 0;
     for (const f of this.L.flicks) {
       if (f.dead || f.l.power <= 0 || (f.l.kind !== 'area' && f.l.kind !== 'point')) continue;
       f.mesh.getWorldPosition(v);
       const d = Math.hypot(v.x - c.x, v.y - c.y, v.z - c.z);
-      if (d > 11 || d < 0.4) continue;
+      // too near and the lens turns each one into a ball of light
+      if (d > 14 || d < 2.4) continue;
       const seed = v.x * 12.9 + v.z * 78.2;
-      const many = 1 + (Math.floor(Math.abs(seed)) % 3);
+      const many = 3 + (Math.floor(Math.abs(seed)) % 4);
       for (let k = 0; k < many; k++) {
         // round and round, never the same way twice, now and then straight into the glass
         const a = t * (2.6 + k * 0.9) + seed + k * 2.1 + Math.sin(t * 1.7 + k * 5 + seed) * 1.4;
-        const r = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.3 + k * 3.3 + seed)) + 0.05 * Math.sin(t * 11 + k);
-        this.fx.mote(v.x + Math.cos(a) * r, v.y - 0.1 + Math.sin(t * 3.1 + k * 1.9) * 0.09, v.z + Math.sin(a) * r, 0.012, 0.5, 0.46, 0.38, 0.85);
+        const r = 0.12 + 0.24 * (0.5 + 0.5 * Math.sin(t * 2.3 + k * 3.3 + seed)) + 0.06 * Math.sin(t * 11 + k);
+        this.fx.mote(v.x + Math.cos(a) * r, v.y - 0.14 + Math.sin(t * 3.1 + k * 1.9) * 0.13, v.z + Math.sin(a) * r, 0.013, 0.6, 0.56, 0.46, 0.9);
       }
-      if (++n >= 5) break;
+      if (++n >= 8) break;
     }
-    // drips
-    this.dripAcc += dt * 2.2;
+    // and into the beam of your own torch: two or three always find it
+    if (me.alive && me.light) {
+      for (let k = 0; k < 3; k++) {
+        const ph = t * (3.1 + k * 0.8) + k * 2.4 + Math.sin(t * 1.3 + k * 4) * 1.6;
+        const out = 1.9 + k * 0.8 + Math.sin(t * 0.7 + k) * 0.35, r = 0.07 + 0.05 * out + 0.04 * Math.sin(t * 9 + k);
+        v.copy(me.lightPos).addScaledVector(me.barrel, out);
+        this.fx.mote(v.x + Math.cos(ph) * r, v.y + Math.sin(ph * 1.3) * r, v.z + Math.sin(ph) * r, 0.007, 0.5, 0.47, 0.4, 0.9);
+      }
+    }
+    // drips: everywhere a little, in the rooms the rain has got into a lot
+    this.dripAcc += dt * 9;
     while (this.dripAcc > 1) {
       this.dripAcc -= 1;
-      const a = Math.random() * 6.28, r = 1 + Math.random() * 7;
+      const a = Math.random() * 6.28, r = 0.8 + Math.random() * 8;
       const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
       const room = this.zone(x, c.y, z);
-      if (room === 'street' || !(this.soaked.has(room) || /flood|tunnel|branch|boiler|cold|scrub|kitchen|plant/.test(room))) continue;
+      if (room === 'street') continue;
+      const wet = this.soaked.has(room) || /flood|tunnel|branch|boiler|cold|scrub|kitchen|plant|cor|atrium/.test(room);
+      if (!wet && Math.random() > 0.25) continue;
       const floor = this.L.world.floorAt(x, c.y + 0.3, z, 0.05);
       const up = this.L.world.ray(x, floor + 1.2, z, 0, 1, 0, 6);
-      if (!up || floor < c.y - 3 || this.drips.length > 24) continue;
+      if (!up || floor < c.y - 3 || this.drips.length > 60) continue;
       this.drips.push({ x, y: floor + 1.2 + up.t - 0.02, z, vy: 0, floor });
     }
     for (let i = this.drips.length - 1; i >= 0; i--) {
@@ -930,10 +948,70 @@ export class Game {
       d.vy -= 9.8 * dt;
       d.y += d.vy * dt;
       if (d.y <= d.floor) {
-        this.fx.splash(d.x, d.floor, d.z, 0.5);
+        this.fx.spatter(d.x, d.floor, d.z, 1);
+        if (Math.hypot(d.x - c.x, d.z - c.z) < 5 && Math.random() < 0.5) this.sound.drip(v.set(d.x, d.floor, d.z));
         this.drips.splice(i, 1);
-      } else this.fx.mote(d.x, d.y, d.z, 0.009, 0.5, 0.56, 0.62, 0.7);
+      } else {
+        this.fx.mote(d.x, d.y, d.z, 0.012, 0.62, 0.66, 0.7, 0.8);
+        this.fx.mote(d.x, d.y - d.vy * 0.012, d.z, 0.009, 0.62, 0.66, 0.7, 0.5);
+      }
     }
+    this.pipes(dt);
+    // breath shows in the cold rooms, in the cellars and out in the rain: everyone's, yours from just under the lens
+    this.breathT -= dt;
+    if (this.breathT <= 0) {
+      this.breathT = 2.6 + Math.random() * 0.8;
+      for (const [s, a] of this.actors) {
+        if (!a.info.alive) continue;
+        const mine = s === this.mySlot;
+        const x = mine ? c.x : a.x, y = mine ? c.y - 0.02 : a.y + ((a.flags & F.crouch) ? 1.05 : 1.6), z = mine ? c.z : a.z;
+        if (Math.hypot(x - c.x, z - c.z) > 16) continue;
+        const room = this.zone(x, y, z);
+        if (!(room === 'street' || y < -1 || /cold|morgue|plant|flood|tunnel|branch|boiler/.test(room))) continue;
+        const yaw = mine ? me.yaw : a.yaw;
+        this.fx.breath(x, y, z, -Math.sin(yaw), -Math.cos(yaw), mine ? 0.7 : 1);
+      }
+    }
+  }
+
+  /**
+   * The sprinkler main under the corridor ceilings has been holding pressure for years. Every couple of minutes a
+   * coupling somewhere along it lets go: a bang, and water comes down hard for a quarter of a minute, then less, then drips.
+   * It happens down the corridor from whoever is watching, never on top of them, and the bots go to see what the noise was
+   */
+  private pipe = { at: 55 + Math.random() * 50, t: 0, x: 0, y: 0, z: 0, floor: 0 };
+  private pipes(dt: number) {
+    const P = this.pipe, c = this.cam.position;
+    if (!this.L.map.rooms?.some((r) => r.name === 'scor')) return;
+    if (P.t <= 0) {
+      if (!this.inMatch || this.time < P.at) return;
+      P.at = this.time + 80 + Math.random() * 90;
+      const fy = c.y > 2.6 ? 3.6 : 0;
+      if (c.y < -1.5) return;
+      const z = Math.abs(c.z + 6.5) < Math.abs(c.z + 25.5) ? -6.5 : -25.5;
+      const heads: number[] = [];
+      for (let x = 0.5; x + 3 < 51.7; x += 3) for (const h of [0.75, 2.25]) if (Math.abs(x + h - c.x) > 5 && Math.abs(x + h - c.x) < 15) heads.push(x + h);
+      if (!heads.length) return;
+      const x = heads[Math.floor(Math.random() * heads.length)];
+      const up = this.L.world.ray(x, fy + 1.4, z, 0, 1, 0, 4);
+      if (!up) return;
+      Object.assign(P, { t: 34, x, y: fy + 1.4 + up.t - 0.46, z, floor: this.L.world.floorAt(x, fy + 1, z, 0.05) });
+      this.sound.spray(this.tmp.set(P.x, P.y, P.z), 15);
+      this.match?.noise({ x: P.x, y: fy, z: P.z }, 32);
+      this.rats?.startle();
+      return;
+    }
+    P.t -= dt;
+    // full bore for fourteen seconds, then the pressure goes
+    const k = P.t > 20 ? 1 : P.t > 14 ? (P.t - 14) / 6 * 0.85 + 0.15 : 0.12 * (P.t / 14);
+    this.fx.jet(P.x, P.y, P.z, k, dt);
+    const hits = Math.ceil(dt * 60 * k);
+    for (let i = 0; i < hits; i++) {
+      const a = Math.random() * 6.28, r = Math.sqrt(Math.random()) * (0.4 + 2.2 * k);
+      this.fx.spatter(P.x + Math.cos(a) * r, P.floor, P.z + Math.sin(a) * r, 1);
+    }
+    // stand under it and the lens is running with water
+    if (Math.hypot(P.x - c.x, P.z - c.z) < 2.4 && Math.abs(c.y - P.floor) < 2.5) this.wet = Math.max(this.wet, 0.9 * k);
   }
 
   /** every head the camera can see, followed the way redaction software follows one: a beat behind, and generous */
@@ -953,7 +1031,7 @@ export class Game {
         if (v.z < 1 && dist > 0.25 && dist < 60 && Math.abs(v.x) < 1.25 && Math.abs(v.y) < 1.25) {
           x = v.x * 0.5 + 0.5;
           y = v.y * 0.5 + 0.5;
-          r = 0.19 / (2 * dist * tan);
+          r = 0.31 / (2 * dist * tan);
           seen = this.L.world.sees(cam.position, { x: h.x, y: h.y + 0.05, z: h.z });
         }
       }
@@ -989,7 +1067,6 @@ export class Game {
       // now and then, one sheet of it a long way off: not a strobe
       this.thunderT = 70 + Math.random() * 110;
       const near = Math.random() * 0.6;
-      this.flashes.push(this.time, 0.35 + Math.random() * 0.25, 1.6 + near * 3);
       this.sound.thunder(0.4 + (1 - near) * 3.2, near);
     }
     let f = 0;
@@ -1085,7 +1162,7 @@ export class Game {
     if (this.doorHoles.length > 40) this.doorHoles.shift()!.removeFromParent();
   }
 
-  muzzleLight(p: THREE.Vector3, k = 7) {
+  muzzleLight(p: THREE.Vector3, k = 3) {
     this.flashPoint.position.copy(p);
     this.flashK = k;
   }
@@ -1308,7 +1385,7 @@ export class Game {
     if (this.dead >= 0) {
       // the feed tears at every knock, stutters now and then, and breaks up for good at the end
       const d = this.dead, j = this.dc.jolt;
-      u.glitch.value = Math.min(1, j * j * 0.75 + (d > 3.75 ? (d - 3.75) * 1.9 : 0) + (Math.sin(d * 9.1) * Math.sin(d * 3.3) > 0.88 ? 0.3 : 0));
+      u.glitch.value = Math.min(1, j * j * j * 0.5 + (d > 3.2 ? ((d - 3.2) / 1.1) ** 2 : 0) + (d > 1.2 && Math.sin(d * 7.3) * Math.sin(d * 2.9) > 0.9 ? 0.22 : 0));
       u.caK.value = this.caBase + j * 0.05 + Math.min(0.03, d * 0.007);
     } else {
       u.glitch.value = 0;
@@ -1454,7 +1531,7 @@ export class Game {
     this.fx.skip(p.x, p.y, p.z, 0, -1, 0);
     this.sound.impact(p, 'glass');
     this.sound.tink(p);
-    if (p.distanceTo(this.cam.position) < 30) this.muzzleLight(p, 5);
+    if (p.distanceTo(this.cam.position) < 30) this.muzzleLight(p, 2.2);
   }
 
   /** the bake has no glints: the nearest lamps the camera can see lend theirs to the shader */
@@ -1469,7 +1546,7 @@ export class Game {
       if (f.dead) {
         // the filament's last word: a couple of blinks, then nothing
         f.dying = Math.max(0, f.dying - dt);
-        f.k = f.dying > 0 && Math.sin(f.dying * 95) > 0.55 ? 0.35 : 1;
+        f.k = 1;
         f.mesh.visible = f.k < 1;
       } else if (a <= 0) {
         continue;
@@ -1479,8 +1556,8 @@ export class Game {
         f.k = Math.max(0, 0.035 + 0.035 * Math.sin(performance.now() * 0.0011 + f.base.r * 40) + 0.02 * Math.sin(performance.now() * 0.0047 + f.base.g * 23)) * Math.min(1, a);
       } else {
         // a flame: never out, never still
-        const n = Math.sin(performance.now() * 0.011 + f.base.g * 31) * 0.5 + Math.sin(performance.now() * 0.027 + f.base.b * 17) * 0.5;
-        f.k = Math.max(0, n * a * 0.8 + 0.12 * a);
+        const n = Math.sin(performance.now() * 0.0031 + f.base.g * 31) * 0.5 + Math.sin(performance.now() * 0.0073 + f.base.b * 17) * 0.5;
+        f.k = Math.max(0, n * a * 0.22 + 0.1 * a);
       }
       f.mat.color.copy(f.base).multiplyScalar(1 - f.k * 0.94);
     }
@@ -1662,12 +1739,13 @@ export class Game {
       const k = THREE.MathUtils.smoothstep(al, 0.86, 0.995);
       const kw = Math.pow(THREE.MathUtils.smoothstep(al, -0.15, 1.0), 3);
       const blocked = kw > 0 && !!this.L.world.ray(this.cam.position.x, this.cam.position.y, this.cam.position.z, -to.x, -to.y, -to.z, Math.max(0, d - 0.6), true);
-      this.glareVis[i] += ((blocked ? 0 : 1) - this.glareVis[i]) * Math.min(1, dt * 10);
+      this.glareVis[i] += ((blocked ? 0 : 1) - this.glareVis[i]) * Math.min(1, dt * 3.5);
       g.visible = kw > 0.003 && this.glareVis[i] > 0.01;
       if (!g.visible) return;
       g.position.copy(o.position);
-      g.material.opacity = Math.min(1, kw * 0.75 + k) * this.glareVis[i];
-      g.scale.setScalar((0.1 + kw * 0.3 + k * 0.85) * Math.min(1.2, d / 3 + 0.45));
+      // a torch in the lens is a soft bloom, not a searchlight: it must never take the picture
+      g.material.opacity = Math.min(0.5, kw * 0.3 + k * 0.4) * this.glareVis[i];
+      g.scale.setScalar((0.08 + kw * 0.16 + k * 0.36) * Math.min(1.2, d / 3 + 0.45));
     });
   }
 
@@ -1692,7 +1770,7 @@ export class Game {
    * knocks it off its clip: it bounces, skids and comes to rest on its side on the floor, looking back along the
    * boards at the man who was wearing it. It records for another four seconds, tearing at each knock, and then it stops.
    */
-  private dc = { loose: false, will: false, hit: false, jolt: 0, side: 1, lt: 0, beat: 0, yaw: null as number | null, p: new THREE.Vector3(), v: new THREE.Vector3(), last: new THREE.Vector3() };
+  private dc = { loose: false, will: false, hit: false, jolt: 0, side: 1, lt: 0, beat: 0, yaw: null as number | null, w: new THREE.Vector3(), ground: 0, p: new THREE.Vector3(), v: new THREE.Vector3(), last: new THREE.Vector3() };
   private deadCam(dt: number, mine: Actor) {
     const was = this.dead;
     this.dead += dt;
@@ -1705,7 +1783,6 @@ export class Game {
       dc.v.set(Math.sin(this.killYaw), 0, Math.cos(this.killYaw));
       this.lensBlood = Math.min(1.2, this.lensBlood + 0.4);
       this.post.splat();
-      this.whiteout = Math.max(this.whiteout, 0.035);
     }
     dc.jolt = Math.max(0, dc.jolt - dt * 2.4);
     const P = sol?.person;
@@ -1740,6 +1817,9 @@ export class Game {
           dc.p.copy(cam.position);
           dc.v.copy(vel).multiplyScalar(0.5).addScaledVector(front, 1.1 + Math.random() * 0.9).addScaledVector(x, (Math.random() - 0.5) * 1.6);
           dc.v.y = 1.5 + Math.random();
+          // it leaves spinning
+          dc.w.set(Math.random() - 0.5, (Math.random() - 0.5) * 0.6, Math.random() - 0.5).normalize().multiplyScalar(7 + Math.random() * 6);
+          dc.ground = 0;
           this.sound.clack(null, 'mag_out');
         }
       }
@@ -1752,9 +1832,15 @@ export class Game {
         // a wall stops it dead
         const h = W.ray(p.x, p.y + 0.03, p.z, v.x / hs, 0, v.z / hs, hs * dt + 0.08);
         if (h) {
-          v.x *= -0.25;
-          v.z *= -0.25;
+          // off the wall: it keeps a third of its speed along it and comes back off it with less
+          const into = v.x * h.nx + v.z * h.nz;
+          v.x -= h.nx * into * 1.35;
+          v.z -= h.nz * into * 1.35;
+          v.x *= 0.6;
+          v.z *= 0.6;
+          dc.w.multiplyScalar(0.6).add(this.tmp.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(5));
           dc.jolt = Math.max(dc.jolt, 0.6);
+          this.sound.clack(null, 'mag_in');
         }
       }
       p.addScaledVector(v, dt);
@@ -1762,14 +1848,25 @@ export class Game {
       if (p.y < floor) {
         p.y = floor;
         if (v.y < -0.9) {
-          v.y *= -0.34;
-          dc.jolt = Math.max(dc.jolt, 0.75);
+          // a bounce: each one lower, each one knocking the spin somewhere new
+          const hit = -v.y;
+          v.y *= -0.36;
+          dc.w.multiplyScalar(0.5).add(this.tmp.set(Math.random() - 0.5, (Math.random() - 0.5) * 0.4, Math.random() - 0.5).multiplyScalar(hit * 2.6));
+          dc.jolt = Math.max(dc.jolt, Math.min(1, hit * 0.3));
           this.sound.clack(null, 'mag_in');
-        } else v.y = 0;
-        const f = Math.exp(-dt * 5);
+        } else {
+          v.y = 0;
+          dc.ground += dt;
+        }
+        // a plastic box on a hard floor: it slides, and the floor takes the spin out of it
+        const f = Math.exp(-dt * 3.2);
         v.x *= f;
         v.z *= f;
+        dc.w.multiplyScalar(Math.exp(-dt * 5));
       }
+      // turning over as a thing in the air does: about whatever axis it left with
+      const wl = dc.w.length();
+      if (wl > 0.05) cam.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(this.tmp.copy(dc.w).divideScalar(wl), wl * dt));
       cam.position.copy(p);
       // end over end while it flies, then on its side, lens back toward the body
       const body = sol ? sol.head : this.deadFrom;
@@ -1789,9 +1886,10 @@ export class Game {
         dc.yaw = best;
       }
       const yaw = dc.yaw ?? Math.atan2(-(body.x - p.x), -(body.z - p.z));
-      const amp = Math.exp(-dc.lt * 2.4) * 1.3;
-      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.1 + Math.sin(dc.lt * 15) * amp, yaw + Math.sin(dc.lt * 9 + 1) * amp * 0.8, dc.side * 1.34 + Math.cos(dc.lt * 12) * amp * 1.6, 'YXZ'));
-      cam.quaternion.slerp(rest, Math.min(1, dt * (4 + dc.lt * 8)));
+      // once it has stopped bouncing it rocks over onto its flat side and stays there
+      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.1, yaw, dc.side * 1.34, 'YXZ'));
+      const settle = Math.min(1, dc.ground / 0.45);
+      cam.quaternion.slerp(rest, Math.min(1, dt * 9 * settle * settle));
     } else if (sol) cam.position.lerp(this.tmp.copy(sol.head).setY(Math.max(sol.head.y, mine.y + 0.1)), Math.min(1, dt * 24));
     // every knock shakes the housing
     if (dc.jolt > 0.02) {
