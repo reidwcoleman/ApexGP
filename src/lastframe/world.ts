@@ -13,13 +13,13 @@ import type { SunInfo } from './sun.ts';
 export const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'lastframe/';
 /** which map this page is on: picking another reloads the page, so nothing has to be torn down */
 const MAP_Q = new URLSearchParams(location.search).get('map');
-/** the hospital opens the game; the others are a pick away */
+/** the hospital opens the game; the supermarket is a pick away */
 export const DEFAULT_MAP = 'ward';
 /** every location is played indoors for now: the cove (out in the open) is kept but not offered, and ?map=cove opens the hospital */
 export const OUTDOOR = false;
-export const MAP_ID: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' | 'trenches' = MAP_Q === 'cove' && OUTDOOR ? 'cove' : MAP_Q === 'block' ? 'block' : MAP_Q === 'motel' ? 'motel' : MAP_Q === 'mansion' ? 'mansion' : MAP_Q === 'trenches' ? 'trenches' : 'ward';
+export const MAP_ID: 'ward' | 'store' = MAP_Q === 'store' ? 'store' : 'ward';
 /** the map's own files; textures, guns and gear are shared */
-export const MB = BASE + (MAP_ID === 'block' ? '' : MAP_ID + '/');
+export const MB = BASE + MAP_ID + '/';
 
 /** kit material -> [scan, metres per tile, tint, roughness] for the world-space projection */
 const TRIPLANAR: Record<string, [string, number, number[], number]> = {
@@ -850,7 +850,6 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   }
   const deco = new THREE.Group();
   group.add(deco);
-  if (MAP_ID === 'block') dress(deco);
   progress(0.92, 'Light');
   return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors, grass, floats, vegCells, flicks };
 }

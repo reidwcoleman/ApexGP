@@ -1188,13 +1188,452 @@ def liftdoor(b, rng):
 
 
 
+# ---- a supermarket, shut and picked over. Floor pieces stand on the origin; a 3 m module runs along x, centred
+SHELFM = lambda: mat('lfshelf', (0.36, 0.36, 0.34), 0.55, 0.2)
+SHELFD = lambda: mat('lfshelfd', (0.12, 0.13, 0.14), 0.6, 0.3)
+CARDB = lambda: mat('lfcardb', (0.24, 0.17, 0.1), 0.9)
+CARDB2 = lambda: mat('lfcardb2', (0.3, 0.23, 0.14), 0.9)
+TIN = lambda: mat('lftin', (0.3, 0.3, 0.3), 0.5, 0.5)
+LABEL_R = lambda: mat('lflabr', (0.2, 0.045, 0.04), 0.8)
+LABEL_B = lambda: mat('lflabb', (0.05, 0.085, 0.16), 0.6)
+LABEL_G = lambda: mat('lflabg', (0.06, 0.13, 0.07), 0.6)
+LABEL_Y = lambda: mat('lflaby', (0.27, 0.22, 0.07), 0.6)
+LABEL_W = lambda: mat('lflabw', (0.36, 0.35, 0.32), 0.6)
+ROT = lambda: mat('lfrot', (0.07, 0.055, 0.03), 0.95)
+ROT2 = lambda: mat('lfrot2', (0.13, 0.1, 0.045), 0.9)
+MOULD = lambda: mat('lfmould', (0.16, 0.2, 0.14), 1.0)
+ORANGE = lambda: mat('lforange', (0.55, 0.2, 0.04), 0.5)
+BLUES = lambda: mat('lfbluesteel', (0.07, 0.13, 0.26), 0.5, 0.3)
+BELT = lambda: mat('lfbelt', (0.025, 0.025, 0.028), 0.75)
+STRIPP = lambda: mat('lfstrip', (0.4, 0.4, 0.3), 0.3)
+WRAP = lambda: mat('lfwrap', (0.4, 0.37, 0.33), 0.35)
+WRAPD = lambda: mat('lfwrapd', (0.22, 0.1, 0.08), 0.5)
+LABELS = (LABEL_R, LABEL_B, LABEL_G, LABEL_Y, LABEL_W, TIN, CARDB, CARDB2)
+
+
+def _stock(b, rng, x0, x1, y, z, depth, h, fill):
+    """what's left on a length of shelf: a few boxes and tins pushed about, most of it gone"""
+    x = x0 + rng.uniform(0.02, 0.3)
+    while x < x1 - 0.12:
+        if rng.random() > fill:
+            x += rng.uniform(0.2, 0.9)
+            continue
+        kind = rng.random()
+        M = rng.choice(LABELS)()
+        n = rng.randint(1, 4)
+        if kind < 0.45:
+            w, hh = rng.uniform(0.1, 0.22), min(h - 0.04, rng.uniform(0.14, 0.3))
+            for k in range(n):
+                if x + w > x1:
+                    break
+                fallen = rng.random() < 0.15
+                obox(b, (x + w / 2, y + rng.uniform(-0.05, 0.03) * depth, z + (w if fallen else hh) / 2), (w - 0.012, depth * rng.uniform(0.4, 0.75), w - 0.012 if fallen else hh), rng.uniform(-0.25, 0.25) if rng.random() < 0.3 else 0, M)
+                x += w
+        else:
+            r, hh = rng.uniform(0.034, 0.055), rng.uniform(0.09, 0.17)
+            for k in range(n + 1):
+                if x + 2 * r > x1:
+                    break
+                if rng.random() < 0.12:
+                    rod(b, (x, y - depth * 0.2, z + r), (x + hh, y + rng.uniform(-0.1, 0.1), z + r), r, M, 8)
+                    x += hh + 0.02
+                else:
+                    rod(b, (x + r, y + rng.uniform(-0.1, 0.06), z), (x + r, y + rng.uniform(-0.1, 0.06), z + hh), r, M, 8)
+                    x += 2 * r + 0.006
+        x += rng.uniform(0.03, 0.5)
+
+
+def gondola(b, rng):
+    """three metres of supermarket shelving, both sides: uprights, a back panel, five shelves a side with their price
+    strips, what little stock is left, a shelf or two let go at one end"""
+    L, D, H = 3.0, 1.0, 1.95
+    obox(b, (0, 0, H / 2 + 0.12), (L, 0.03, H - 0.24), 0, SHELFM())
+    obox(b, (0, 0, 0.08), (L, D, 0.16), 0, SHELFD())
+    for x in (-L / 2 + 0.02, 0, L / 2 - 0.02):
+        obox(b, (x, 0, H / 2), (0.04, 0.09, H), 0, SHELFD())
+    fill = rng.uniform(0.12, 0.5)
+    for sgn in (-1, 1):
+        for k in range(5):
+            z = 0.17 + k * 0.38
+            d = 0.46 - k * 0.025
+            yc = sgn * (0.015 + d / 2)
+            sag = rng.random() < 0.07 and k > 0
+            if sag:
+                # let go at one end
+                e = rng.choice((-1, 1))
+                obox(b, (0, yc, z - 0.16), (L - 0.06, d, 0.022), 0, SHELFM(), tilt=(0, e * 0.11))
+                continue
+            obox(b, (0, yc, z), (L - 0.06, d, 0.022), 0, SHELFM())
+            obox(b, (0, sgn * (0.015 + d + 0.004), z - 0.008), (L - 0.06, 0.008, 0.036), 0, LABEL_W() if rng.random() < 0.8 else LABEL_Y())
+            _stock(b, rng, -L / 2 + 0.05, L / 2 - 0.05, yc, z + 0.011, d, 0.34, fill * (1.3 if k == 0 else 1))
+    # what came off, on the floor against the kick board
+    for k in range(rng.randint(0, 5)):
+        sgn = rng.choice((-1, 1))
+        if rng.random() < 0.5:
+            r = rng.uniform(0.034, 0.05)
+            a = rng.uniform(0, 3.1)
+            x, y = rng.uniform(-1.3, 1.3), sgn * rng.uniform(0.6, 0.95)
+            rod(b, (x, y, r), (x + math.cos(a) * 0.12, y + math.sin(a) * 0.12, r), r, rng.choice(LABELS)(), 8)
+        else:
+            w = rng.uniform(0.1, 0.2)
+            obox(b, (rng.uniform(-1.3, 1.3), sgn * rng.uniform(0.6, 0.95), w * 0.35), (w, w * 1.5, w * 0.7), rng.uniform(0, 3), rng.choice(LABELS)())
+
+
+def gondolax(b, rng):
+    """a run of shelving that went over: on its side across the aisle, the shelves sprung, everything it held in a heap"""
+    L, H = 3.0, 1.95
+    obox(b, (0, 0.45, 0.52), (L, H, 0.03), 0, SHELFM(), tilt=(0.28, 0))
+    obox(b, (0, -0.48, 0.14), (L, 0.16, 0.28), 0, SHELFD())
+    for x in (-L / 2 + 0.02, 0, L / 2 - 0.02):
+        obox(b, (x, 0.45, 0.56), (0.04, H, 0.09), 0, SHELFD(), tilt=(0.28, 0))
+    for k in range(5):
+        y = -0.3 + k * 0.38
+        obox(b, (rng.uniform(-0.1, 0.1), y, 0.4 + k * 0.1 + rng.uniform(0, 0.2)), (L - 0.06, 0.022, 0.44), rng.uniform(-0.06, 0.06), SHELFM(), tilt=(0.28 + rng.uniform(-0.5, 0.3), rng.uniform(-0.1, 0.1)))
+    for k in range(rng.randint(14, 24)):
+        x, y = rng.uniform(-1.4, 1.4), rng.uniform(-1.3, -0.3)
+        if rng.random() < 0.5:
+            r = rng.uniform(0.034, 0.05)
+            a = rng.uniform(0, 3.1)
+            rod(b, (x, y, r), (x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, r), r, rng.choice(LABELS)(), 8)
+        else:
+            w = rng.uniform(0.1, 0.22)
+            obox(b, (x, y, w * 0.4), (w, w * 1.4, w * 0.8), rng.uniform(0, 3), rng.choice(LABELS)(), tilt=(rng.uniform(-0.3, 0.3), 0))
+
+
+def endcap(b, rng):
+    """the display on the end of an aisle: a metre of shelving facing out, a promotion's card still on top"""
+    W, H = 1.0, 1.7
+    obox(b, (0, 0.02, H / 2), (W, 0.03, H), 0, SHELFM())
+    obox(b, (0, -0.2, 0.08), (W, 0.46, 0.16), 0, SHELFD())
+    for k in range(4):
+        z = 0.17 + k * 0.4
+        obox(b, (0, -0.2, z), (W - 0.04, 0.42, 0.022), 0, SHELFM())
+        _stock(b, rng, -W / 2 + 0.04, W / 2 - 0.04, -0.2, z + 0.011, 0.42, 0.36, rng.uniform(0.1, 0.6))
+    obox(b, (0, -0.01, H + 0.16), (W * 0.8, 0.012, 0.3), 0, rng.choice((LABEL_R, LABEL_Y))(), tilt=(rng.uniform(-0.1, 0.1), rng.uniform(-0.12, 0.12)))
+
+
+def checkout(b, rng):
+    """a till lane, 2.6 long along y, the customer walking +y to -y on its -x side: the belt, the scanner well, the
+    bagging shelf, the screen on its pole, the card reader, the divider rail, the lane's number on a post"""
+    obox(b, (0, 0.5, 0.44), (0.62, 1.5, 0.88), 0, SHELFD())
+    obox(b, (0, 0.5, 0.885), (0.5, 1.4, 0.012), 0, BELT())
+    obox(b, (0, -0.55, 0.44), (0.62, 0.6, 0.88), 0, SHELFM())
+    obox(b, (0, -0.55, 0.884), (0.34, 0.34, 0.01), 0, GLASSD())
+    obox(b, (0, -1.1, 0.34), (0.62, 0.5, 0.68), 0, SHELFD())
+    obox(b, (0.36, -0.2, 0.44), (0.1, 1.1, 0.88), 0, SHELFD())
+    rod(b, (0.34, -0.5, 0.88), (0.34, -0.5, 1.32), 0.016, SHELFD(), 6)
+    tw = rng.uniform(-0.5, 0.5)
+    obox(b, (0.34, -0.5, 1.42), (0.34, 0.05, 0.26), tw, SHELFD())
+    obox(b, (0.34 - 0.026 * math.sin(tw), -0.5 - 0.026 * math.cos(tw), 1.42), (0.3, 0.004, 0.22), tw, GLASSD())
+    obox(b, (-0.22, -0.3, 0.95), (0.09, 0.14, 0.05), 0.3, GREYP(), tilt=(0.4, 0))
+    rod(b, (-0.3, 1.24, 0.9), (-0.3, 1.24, 1.12), 0.012, CHROME(), 6)
+    rod(b, (-0.3, 1.24, 1.12), (-0.3, 0.2, 1.12), 0.012, CHROME(), 6)
+    rod(b, (-0.3, 0.2, 1.12), (-0.3, 0.2, 0.9), 0.012, CHROME(), 6)
+    rod(b, (0.3, 1.2, 0.88), (0.3, 1.2, 2.3), 0.02, SHELFD(), 6)
+    obox(b, (0.3, 1.2, 2.42), (0.4, 0.12, 0.3), 0, SHELFD())
+    # a drawer left open, and what was under the counter
+    if rng.random() < 0.6:
+        obox(b, (0.5, -0.55, 0.72), (0.4, 0.36, 0.09), 0, SHELFD())
+    for k in range(rng.randint(0, 3)):
+        w = rng.uniform(0.12, 0.2)
+        obox(b, (rng.uniform(-0.2, 0.2), rng.uniform(0.0, 1.0), 0.9 + w * 0.3), (w, w * 1.3, w * 0.6), rng.uniform(0, 3), rng.choice(LABELS)())
+
+
+def cart(b, rng):
+    """a shopping trolley: wire basket on a tube frame, a child seat, four castors; a few of them over on their sides"""
+    S = CHROME()
+    over = rng.random() < 0.3
+    R = Matrix.Rotation(math.pi / 2 * rng.choice((-1, 1)), 3, 'Y') if over else Matrix.Identity(3)
+    off = Vector((0, 0, 0.3)) if over else Vector((0, 0, 0))
+
+    def P(x, y, z):
+        return tuple(R @ Vector((x, y, z - (0.5 if over else 0))) + off + (Vector((0, 0, 0.0)) if not over else Vector((0, 0, 0))))
+    x0, x1 = -0.27, 0.27
+    # the basket: narrower at the front (-y), a grid of wire
+    for (y, w, zb) in ((-0.45, 0.2, 0.52), (0.42, 0.27, 0.45)):
+        rod(b, P(-w, y, zb), P(w, y, zb), 0.006, S, 4)
+        rod(b, P(-w, y, 0.98), P(w, y, 0.98), 0.009, S, 5)
+        for k in range(5):
+            x = -w + 2 * w * k / 4
+            rod(b, P(x, y, zb), P(x, y, 0.98), 0.004, S, 4)
+    for sgn in (-1, 1):
+        rod(b, P(sgn * 0.2, -0.45, 0.98), P(sgn * 0.27, 0.42, 0.98), 0.009, S, 5)
+        rod(b, P(sgn * 0.2, -0.45, 0.52), P(sgn * 0.27, 0.42, 0.45), 0.006, S, 4)
+        for k in range(1, 7):
+            t = k / 7
+            rod(b, P(sgn * (0.2 + 0.07 * t), -0.45 + 0.87 * t, 0.52 - 0.07 * t), P(sgn * (0.2 + 0.07 * t), -0.45 + 0.87 * t, 0.98), 0.004, S, 4)
+        for z in (0.68, 0.83):
+            rod(b, P(sgn * 0.2, -0.45, z), P(sgn * 0.27, 0.42, z - 0.02), 0.004, S, 4)
+        # frame and wheels
+        rod(b, P(sgn * 0.27, 0.42, 0.45), P(sgn * 0.25, 0.5, 0.12), 0.012, S, 5)
+        rod(b, P(sgn * 0.25, 0.5, 0.12), P(sgn * 0.2, -0.4, 0.12), 0.012, S, 5)
+        rod(b, P(sgn * 0.2, -0.4, 0.12), P(sgn * 0.2, -0.45, 0.52), 0.012, S, 5)
+        rod(b, P(sgn * 0.27, 0.42, 0.98), P(sgn * 0.27, 0.56, 1.04), 0.011, S, 5)
+        for y in (-0.38, 0.46):
+            rod(b, P(sgn * 0.22 - 0.015, y, 0.05), P(sgn * 0.22 + 0.015, y, 0.05), 0.05, RUBBER(), 8)
+    for k in range(4):
+        y = -0.45 + 0.87 * (k + 0.5) / 4
+        rod(b, P(-0.21 - 0.05 * k / 4, y, 0.5 - 0.05 * k / 4), P(0.21 + 0.05 * k / 4, y, 0.5 - 0.05 * k / 4), 0.004, S, 4)
+    rod(b, P(-0.27, 0.56, 1.04), P(0.27, 0.56, 1.04), 0.016, LABEL_R(), 6)
+    if rng.random() < 0.45 and not over:
+        for k in range(rng.randint(1, 4)):
+            w = rng.uniform(0.1, 0.2)
+            obox(b, (rng.uniform(-0.1, 0.1), rng.uniform(-0.3, 0.3), 0.52 + w * 0.4 + k * 0.05), (w, w * 1.3, w * 0.8), rng.uniform(0, 3), rng.choice(LABELS)())
+
+
+def freezer(b, rng):
+    """a bank of upright freezers, three metres, four glass doors: one standing open, one with its glass gone, the
+    shelves inside, what was in them long since run out under the doors. Faces -y. Its light is a box in the layout"""
+    L, D, H = 3.0, 0.8, 2.05
+    W = WHITEP()
+    obox(b, (0, D / 2 - 0.02, H / 2), (L, 0.04, H), 0, W)
+    obox(b, (0, 0, 0.09), (L, D, 0.18), 0, SHELFD())
+    obox(b, (0, 0, H - 0.09), (L, D, 0.18), 0, W)
+    for x in (-L / 2 + 0.02, L / 2 - 0.02):
+        obox(b, (x, 0, H / 2), (0.04, D, H), 0, W)
+    dw = (L - 0.08) / 4
+    for k in range(4):
+        x = -L / 2 + 0.04 + dw * (k + 0.5)
+        obox(b, (x - dw / 2, -0.02, H / 2), (0.03, D - 0.1, H - 0.36), 0, W)
+        for z in (0.5, 0.86, 1.22, 1.58):
+            obox(b, (x, 0.02, z), (dw - 0.04, D - 0.16, 0.016), 0, STEEL())
+            if rng.random() < 0.5:
+                _stock(b, rng, x - dw / 2 + 0.04, x + dw / 2 - 0.04, 0.05, z + 0.008, 0.5, 0.3, 0.5)
+        state = rng.random()
+        ang = rng.uniform(0.7, 1.7) if state < 0.22 else 0.0
+        hx = x - dw / 2 + 0.02
+        c, sn = math.cos(ang), math.sin(ang)
+        cx, cy = hx + c * (dw / 2 - 0.02), -D / 2 + 0.02 - sn * (dw / 2 - 0.02)
+        for (ox, w2, h2, oz) in ((0, dw - 0.03, 0.05, 0.2), (0, dw - 0.03, 0.05, H - 0.2)):
+            obox(b, (cx, cy, oz), (w2, 0.03, h2), -ang, SHELFD())
+        for e in (-1, 1):
+            obox(b, (cx + e * c * (dw / 2 - 0.035), cy - e * sn * (dw / 2 - 0.035), H / 2), (0.04, 0.03, H - 0.4), -ang, SHELFD())
+        if state > 0.36 or state < 0.22:
+            obox(b, (cx, cy, H / 2), (dw - 0.1, 0.008, H - 0.44), -ang, GLASSD())
+        obox(b, (cx + c * (dw / 2 - 0.09), cy - sn * (dw / 2 - 0.09) - 0.03, 1.1), (0.025, 0.03, 0.4), -ang, CHROME())
+    # the puddle it left, dried black at the edge
+    n = 12
+    i = b.idx(ROT())
+    cv = b.bm.verts.new((rng.uniform(-0.8, 0.8), -0.7, 0.004))
+    ring = [b.bm.verts.new((cv.co.x + math.cos(k * 6.283 / n) * rng.uniform(0.5, 1.2), -0.75 + math.sin(k * 6.283 / n) * rng.uniform(0.25, 0.5), 0.003)) for k in range(n)]
+    for k in range(n):
+        b.bm.faces.new((cv, ring[k], ring[(k + 1) % n])).material_index = i
+
+
+def coffin(b, rng):
+    """a chest freezer island, 2.4 x 1: the tub, sliding lids (one off and on the floor), a black soup in the bottom"""
+    L, D, H = 2.4, 1.0, 0.88
+    W = WHITEP()
+    for (cx, cy, sx, sy) in ((0, -D / 2 + 0.03, L, 0.06), (0, D / 2 - 0.03, L, 0.06), (-L / 2 + 0.03, 0, 0.06, D), (L / 2 - 0.03, 0, 0.06, D)):
+        obox(b, (cx, cy, H / 2), (sx, sy, H), 0, W)
+    obox(b, (0, 0, 0.3), (L - 0.1, D - 0.1, 0.02), 0, ROT())
+    obox(b, (0, 0, 0.06), (L - 0.06, D - 0.06, 0.12), 0, SHELFD())
+    for k in range(rng.randint(3, 9)):
+        w = rng.uniform(0.12, 0.26)
+        obox(b, (rng.uniform(-1.0, 1.0), rng.uniform(-0.35, 0.35), 0.31 + w * 0.2), (w, w * 1.4, w * 0.4), rng.uniform(0, 3), rng.choice((ROT2, MOULD, CARDB, LABEL_W))(), tilt=(rng.uniform(-0.2, 0.2), 0))
+    for k in range(3):
+        x = -L / 2 + 0.42 + k * 0.78
+        if rng.random() < 0.3:
+            obox(b, (x + rng.uniform(-0.3, 0.3), -D / 2 - 0.35, 0.02), (0.76, 0.5, 0.012), rng.uniform(-0.6, 0.6), GLASSD())
+            continue
+        obox(b, (x + rng.uniform(-0.2, 0.2), 0, H + 0.006), (0.76, D - 0.08, 0.008), 0, GLASSD())
+    obox(b, (0, 0, H + 0.02), (L, 0.03, 0.02), 0, CHROME())
+    obox(b, (0, -D / 2 - 0.004, H - 0.12), (L - 0.2, 0.008, 0.09), 0, LABEL_B())
+
+
+def producebin(b, rng):
+    """a produce stand, two metres: a sloped bed in a timber surround, crates on it, what was in them gone to black
+    and green, more of it on the floor, the scale still hanging at one end"""
+    L, D = 2.0, 1.0
+    obox(b, (0, 0.1, 0.35), (L, D - 0.2, 0.7), 0, BOARD())
+    obox(b, (0, 0, 0.82), (L, D, 0.04), 0, BOARD(), tilt=(0.24, 0))
+    obox(b, (0, -D / 2 + 0.02, 0.76), (L, 0.04, 0.16), 0, BOARD())
+    for k in range(4):
+        x = -L / 2 + 0.26 + k * 0.5
+        y = rng.uniform(-0.12, 0.12)
+        z = 0.87 + 0.24 * (y + 0.1)
+        for (dx, dy, sx, sy) in ((0, -0.17, 0.44, 0.02), (0, 0.17, 0.44, 0.02), (-0.21, 0, 0.02, 0.34), (0.21, 0, 0.02, 0.34)):
+            obox(b, (x + dx, y + dy, z + 0.06), (sx, sy, 0.14), 0, rng.choice((LABEL_G, SHELFD, CARDB))(), tilt=(0.24, 0))
+        for j in range(rng.randint(2, 9)):
+            r = rng.uniform(0.035, 0.07)
+            px, py = x + rng.uniform(-0.15, 0.15), y + rng.uniform(-0.12, 0.12)
+            obox(b, (px, py, z + 0.04 + r * 0.5 + 0.24 * (py - y)), (r * 2, r * 2, r * rng.uniform(0.6, 1.4)), rng.uniform(0, 3), rng.choice((ROT, ROT, ROT2, MOULD))(), tilt=(rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)))
+    for j in range(rng.randint(4, 10)):
+        r = rng.uniform(0.03, 0.06)
+        obox(b, (rng.uniform(-1.0, 1.0), -D / 2 - rng.uniform(0.05, 0.6), r * 0.4), (r * 2, r * 2, r * 0.8), rng.uniform(0, 3), rng.choice((ROT, ROT2, MOULD))())
+    rod(b, (L / 2 - 0.1, 0.3, 0.9), (L / 2 - 0.1, 0.3, 1.9), 0.014, CHROME(), 6)
+    rod(b, (L / 2 - 0.1, 0.3, 1.9), (L / 2 - 0.1, -0.05, 1.9), 0.012, CHROME(), 6)
+    rod(b, (L / 2 - 0.1, -0.05, 1.9), (L / 2 - 0.1, -0.05, 1.6), 0.003, CHROME(), 4)
+    rod(b, (L / 2 - 0.1, -0.05, 1.6), (L / 2 - 0.1, -0.05, 1.52), 0.11, CREAM(), 12)
+    obox(b, (L / 2 - 0.1, -0.05, 1.42), (0.3, 0.3, 0.03), 0, TIN(), tilt=(rng.uniform(-0.3, 0.3), 0))
+
+
+def rack(b, rng):
+    """a bay of pallet racking, 2.8 wide and 4.6 high: blue frames, orange beams at three levels, pallets on some of
+    them shrink-wrapped, some torn open, some gone and the boxes with them"""
+    W, D, H = 2.8, 1.1, 4.6
+    for sx in (-W / 2, W / 2):
+        for sy in (-D / 2 + 0.04, D / 2 - 0.04):
+            obox(b, (sx, sy, H / 2), (0.09, 0.07, H), 0, BLUES())
+        for k in range(6):
+            z0, z1 = 0.3 + k * 0.7, 0.3 + (k + 1) * 0.7
+            rod(b, (sx, -D / 2 + 0.04, z0 if k % 2 else z1), (sx, D / 2 - 0.04, z1 if k % 2 else z0), 0.012, BLUES(), 4)
+    for z in (0.0, 1.55, 3.1):
+        if z > 0:
+            for sy in (-D / 2 + 0.04, D / 2 - 0.04):
+                obox(b, (0, sy, z), (W, 0.05, 0.12), 0, ORANGE())
+        for k in range(2):
+            x = -0.68 + k * 1.36
+            r = rng.random()
+            if r < 0.3:
+                continue
+            zz = z + (0.06 if z > 0 else 0.0)
+            for y in (-0.4, 0, 0.4):
+                obox(b, (x, y, zz + 0.05), (1.15, 0.1, 0.09), 0, BOARD())
+            obox(b, (x, 0, zz + 0.11), (1.15, 1.0, 0.022), 0, BOARD())
+            if r < 0.45:
+                continue
+            hh = rng.uniform(0.5, 1.25)
+            if r < 0.75:
+                obox(b, (x, 0, zz + 0.13 + hh / 2), (1.06, 0.92, hh), rng.uniform(-0.04, 0.04), WRAP())
+                obox(b, (x, -0.465, zz + 0.13 + hh * 0.6), (0.3, 0.004, 0.2), 0, LABEL_W())
+            else:
+                for j in range(rng.randint(3, 8)):
+                    w = rng.uniform(0.3, 0.5)
+                    obox(b, (x + rng.uniform(-0.3, 0.3), rng.uniform(-0.25, 0.25), zz + 0.13 + w * 0.35 + (j // 3) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.4, 0.4), rng.choice((CARDB, CARDB2))())
+
+
+def strips(b, rng):
+    """a plastic strip curtain across a doorway 1.8 wide and 2.3 high (origin at the floor, in the wall's plane): heavy
+    yellowed strips, a few torn short, a few gone, one or two stuck to the next"""
+    W, H = 1.8, 2.3
+    n = 11
+    obox(b, (0, 0, H + 0.03), (W + 0.1, 0.04, 0.06), 0, STEEL())
+    for k in range(n):
+        if rng.random() < 0.14:
+            continue
+        x = -W / 2 + (k + 0.5) * W / n
+        ln = H - 0.03 if rng.random() < 0.8 else rng.uniform(0.6, 1.8)
+        lean = rng.uniform(-0.05, 0.05)
+        quad(b, [(x - 0.095, 0.0, H), (x + 0.095, 0.0, H), (x + 0.095 + lean, rng.uniform(-0.04, 0.04), H - ln), (x - 0.095 + lean, rng.uniform(-0.04, 0.04), H - ln)], STRIPP())
+    for k in range(rng.randint(1, 3)):
+        x = rng.uniform(-0.6, 0.6)
+        quad(b, [(x - 0.1, 0.01, 1.5), (x + 0.1, 0.01, 1.5), (x + 0.12, 0.012, 0.9), (x - 0.06, 0.012, 1.0)], WRAPD())
+
+
+def hooks(b, rng):
+    """a meat rail under a cold room's ceiling, three metres, origin at the ceiling: the rail on its hangers, steel
+    hooks, and on some of them what was hung there, wrapped in sheet and taped, long and heavy and the wrong shape"""
+    z = -0.3
+    rod(b, (-1.5, 0, z), (1.5, 0, z), 0.022, STEEL(), 8)
+    for x in (-1.2, 0, 1.2):
+        rod(b, (x, 0, 0), (x, 0, z), 0.008, STEEL(), 4)
+    for k in range(6):
+        x = -1.25 + k * 0.5 + rng.uniform(-0.08, 0.08)
+        rod(b, (x, 0, z), (x, 0, z - 0.16), 0.006, CHROME(), 4)
+        rod(b, (x, 0, z - 0.16), (x, 0.05, z - 0.22), 0.006, CHROME(), 4)
+        r = rng.random()
+        if r < 0.45:
+            continue
+        ln = rng.uniform(1.1, 1.75)
+        top = z - 0.22
+        sw = rng.uniform(-0.06, 0.06)
+        # shoulders wide, tapering to where the feet would be: seven rings of it
+        prev = None
+        i = b.idx(WRAP() if r < 0.85 else SHEET())
+        nseg = 8
+        for j in range(7):
+            t = j / 6
+            w = (0.05 + 0.2 * math.sin(min(1, t * 2.4) * math.pi / 2)) * (1 - 0.45 * max(0, t - 0.35))
+            d = w * 0.62
+            zc = top - 0.05 - ln * t
+            ring = [b.bm.verts.new((x + sw * t + math.cos(q * 6.283 / nseg) * w, 0.05 + math.sin(q * 6.283 / nseg) * d, zc)) for q in range(nseg)]
+            if prev:
+                for q in range(nseg):
+                    b.bm.faces.new((prev[q], prev[(q + 1) % nseg], ring[(q + 1) % nseg], ring[q])).material_index = i
+            else:
+                b.bm.faces.new(ring).material_index = i
+            prev = ring
+        b.bm.faces.new(list(reversed(prev))).material_index = i
+        for t in (0.18, 0.5, 0.8):
+            zc = top - 0.05 - ln * t
+            w = (0.05 + 0.2 * math.sin(min(1, t * 2.4) * math.pi / 2)) * (1 - 0.45 * max(0, t - 0.35)) + 0.006
+            for q in range(nseg):
+                a0, a1 = q * 6.283 / nseg, (q + 1) * 6.283 / nseg
+                rod(b, (x + sw * t + math.cos(a0) * w, 0.05 + math.sin(a0) * w * 0.62, zc), (x + sw * t + math.cos(a1) * w, 0.05 + math.sin(a1) * w * 0.62, zc), 0.006, RUBBER(), 4)
+        if rng.random() < 0.6:
+            # it has been dripping
+            quad(b, [(x - 0.07, -0.02, top - ln * 0.55), (x + 0.07, -0.02, top - ln * 0.55), (x + 0.04, -0.03, top - ln - 0.02), (x - 0.03, -0.03, top - ln - 0.02)], WRAPD())
+
+
+def aislesign(b, rng):
+    """the board over an aisle, hung on two chains from the ceiling (origin there, 2.6 above it): the number, and what
+    was down there, one chain let go on a few so the board hangs by a corner"""
+    drop = 2.4
+    gone = rng.random() < 0.18
+    for sx in (-0.55, 0.55):
+        if gone and sx > 0:
+            rod(b, (sx, 0, 0), (sx, 0, -0.9), 0.004, STEEL(), 4)
+            continue
+        rod(b, (sx, 0, 0), (sx, 0, -drop + (0.0 if not gone else 0.3)), 0.004, STEEL(), 4)
+    tl = (0, 0.9) if gone else (0, rng.uniform(-0.04, 0.04))
+    cz = -drop - 0.22 - (0.35 if gone else 0)
+    cx = -0.25 if gone else 0
+    obox(b, (cx, 0, cz), (1.3, 0.03, 0.46), 0, BLUEP(), tilt=tl)
+    for sy in (-0.018, 0.018):
+        obox(b, (cx, sy, cz + 0.02), (0.26, 0.004, 0.28), 0, WHITEP(), tilt=tl)
+        for k in range(3):
+            obox(b, (cx, sy, cz - 0.1 + k * 0.0), (1.1, 0.003, 0.02), 0, WHITEP(), tilt=tl) if k == 0 else None
+
+
+def trussbay(b, rng):
+    """the roof steel over the sales floor, a 3 m length along x, origin at the underside of the deck: top and bottom
+    chords, the web between them, a purlin, a run of cable tray and a dead fitting or the chains where one hung"""
+    S = RUST()
+    rod(b, (0, 0, -0.06), (3.0, 0, -0.06), 0.035, S, 6)
+    rod(b, (0, 0, -0.7), (3.0, 0, -0.7), 0.035, S, 6)
+    for k in range(4):
+        x0, x1 = k * 0.75, (k + 1) * 0.75
+        rod(b, (x0, 0, -0.7 if k % 2 else -0.06), (x1, 0, -0.06 if k % 2 else -0.7), 0.018, S, 5)
+    obox(b, (1.5, 0.35, -0.82), (3.0, 0.22, 0.05), 0, STEEL())
+    for k in range(rng.randint(1, 3)):
+        x = rng.uniform(0.3, 2.7)
+        prev = (x, 0.35, -0.84)
+        for j in range(1, 6):
+            p = (x + rng.uniform(-0.08, 0.08), 0.35 + rng.uniform(-0.05, 0.05), -0.84 - j * rng.uniform(0.12, 0.3))
+            rod(b, prev, p, 0.006, CABLE(), 4)
+            prev = p
+
+
+def cardstack(b, rng):
+    """flattened boxes, a roll cage with what never got put out, a stack of crates: the back-of-house heap, 1.6 x 1.2"""
+    for k in range(rng.randint(4, 9)):
+        obox(b, (rng.uniform(-0.5, 0.0), rng.uniform(-0.3, 0.3), 0.012 + k * 0.022), (rng.uniform(0.7, 1.1), rng.uniform(0.5, 0.9), 0.02), rng.uniform(-0.3, 0.3), rng.choice((CARDB, CARDB2))())
+    x = 0.5
+    for (dx, dy) in ((-0.3, -0.35), (0.3, -0.35), (-0.3, 0.35), (0.3, 0.35)):
+        rod(b, (x + dx, dy, 0.1), (x + dx, dy, 1.7), 0.012, CHROME(), 5)
+        rod(b, (x + dx - 0.015, dy, 0.05), (x + dx + 0.015, dy, 0.05), 0.05, RUBBER(), 8)
+    for z in (0.12, 0.9, 1.7):
+        for (p0, p1) in (((-0.3, -0.35), (0.3, -0.35)), ((-0.3, 0.35), (0.3, 0.35)), ((-0.3, -0.35), (-0.3, 0.35))):
+            rod(b, (x + p0[0], p0[1], z), (x + p1[0], p1[1], z), 0.008, CHROME(), 4)
+    for k in range(6):
+        rod(b, (x - 0.3, -0.35 + k * 0.14, 0.12), (x - 0.3, -0.35 + k * 0.14, 1.7), 0.004, CHROME(), 4)
+    obox(b, (x, 0, 0.13), (0.6, 0.7, 0.02), 0, STEEL())
+    for k in range(rng.randint(2, 6)):
+        w = rng.uniform(0.25, 0.4)
+        obox(b, (x + rng.uniform(-0.1, 0.1), rng.uniform(-0.15, 0.15), 0.15 + w * 0.35 + (k // 2) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.3, 0.3), rng.choice((CARDB, CARDB2))())
+
+
+
 KINDS_EXTRA = dict(sbwall=sbwall, wattle=wattle, duck=duck, pool=pool, spoil=spoil, helmet=helmet, stretcher=stretcher, picket=picket, fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
 
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit,
              worklight=worklight, gurney=gurney, rubble=rubble, oplamp=oplamp, lockers=lockers,
              extinguisher=extinguisher, sanitiser=sanitiser, notice=notice, wallphone=wallphone, seats=seats, vending=vending, monitor=monitor,
-             cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint, wetfloor=wetfloor)
+             cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint, wetfloor=wetfloor,
+             gondola=gondola, gondolax=gondolax, endcap=endcap, checkout=checkout, cart=cart, freezer=freezer, coffin=coffin, producebin=producebin,
+             rack=rack, strips=strips, hooks=hooks, aislesign=aislesign, trussbay=trussbay, cardstack=cardstack)
 
 
 def make(name):

@@ -7,12 +7,13 @@ from mats import MATS, UNLIT
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/lf_out'
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 COVE = '--cove' in sys.argv
-WARD = '--ward' in sys.argv
+WARD = '--ward' in sys.argv or '--store' in sys.argv
+STORE = '--store' in sys.argv
 MOTEL = '--motel' in sys.argv
 MANSION = '--mansion' in sys.argv
 TRENCH = '--trenches' in sys.argv
 TEXD = os.path.join(ROOT, 'public', 'lastframe')
-DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else os.path.join(TEXD, 'mansion') if MANSION else os.path.join(TEXD, 'trenches') if TRENCH else TEXD
+DST = os.path.join(TEXD, 'cove') if COVE else os.path.join(TEXD, 'store') if STORE else os.path.join(TEXD, 'ward') if WARD else os.path.join(TEXD, 'motel') if MOTEL else os.path.join(TEXD, 'mansion') if MANSION else os.path.join(TEXD, 'trenches') if TRENCH else TEXD
 SRC = os.path.join(ROOT, 'assets-src', 'lf', 'tex')
 os.makedirs(TEXD + '/tex', exist_ok=True)
 os.makedirs(DST, exist_ok=True)
@@ -86,7 +87,7 @@ if COVE:
     out['veg'] = [dict(id=v['id'], pos=yp(v['pos']), rot=round(v['rot'], 3), s=round(v['s'], 3)) for v in raw['veg']]
 if WARD:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import ward_layout as WL
+    WL = __import__('store_layout' if STORE else 'ward_layout')
     wm = WL.build()
     out['weather'] = WL.WEATHER
     out['volume'] = WL.VOLUME

@@ -128,7 +128,7 @@ export interface PlayerInfo {
 
 export interface MatchConfig {
   /** the location; a room's guests move to it when they join */
-  map?: 'block' | 'cove' | 'ward' | 'motel' | 'mansion' | 'trenches';
+  map?: 'ward' | 'store';
   mode: Mode;
   bots: number;
   skill: number;

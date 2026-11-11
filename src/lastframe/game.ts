@@ -22,7 +22,7 @@ import { Shafts } from './shafts.ts';
 import { Graffiti, graffitiFonts, markUp, trenchSigns } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
-const SHAFT_GAIN: Record<string, number> = { ward: 0.3, motel: 0.4, block: 0.4, mansion: 0.45, cove: 0.35, trenches: 0 };
+const SHAFT_GAIN: Record<string, number> = { ward: 0.3, store: 0.3 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -349,7 +349,7 @@ export class Game {
     // what people wrote on the walls, and the rooms where it went worst
     const signs = (L.map as unknown as { signs?: number[][] }).signs;
     if (signs?.length) this.scene.add(trenchSigns(signs));
-    if (!LF.sunOn && MAP_ID !== 'trenches') {
+    if (!LF.sunOn) {
       const gr = new Graffiti();
       this.scene.add(gr.group);
       const seed = [...MAP_ID].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7);
@@ -936,7 +936,7 @@ export class Game {
       const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
       const room = this.zone(x, c.y, z);
       if (room === 'street') continue;
-      const wet = this.soaked.has(room) || /flood|tunnel|branch|boiler|cold|scrub|kitchen|plant|cor|atrium/.test(room);
+      const wet = this.soaked.has(room) || /flood|tunnel|branch|boiler|cold|scrub|kitchen|plant|cor|atrium|sales|stock|loft/.test(room);
       if (!wet && Math.random() > 0.25) continue;
       const floor = this.L.world.floorAt(x, c.y + 0.3, z, 0.05);
       const up = this.L.world.ray(x, floor + 1.2, z, 0, 1, 0, 6);
@@ -967,7 +967,7 @@ export class Game {
         const x = mine ? c.x : a.x, y = mine ? c.y - 0.02 : a.y + ((a.flags & F.crouch) ? 1.05 : 1.6), z = mine ? c.z : a.z;
         if (Math.hypot(x - c.x, z - c.z) > 16) continue;
         const room = this.zone(x, y, z);
-        if (!(room === 'street' || y < -1 || /cold|morgue|plant|flood|tunnel|branch|boiler/.test(room))) continue;
+        if (!(room === 'street' || y < -1 || /cold|morgue|plant|flood|tunnel|branch|boiler|stock/.test(room))) continue;
         const yaw = mine ? me.yaw : a.yaw;
         this.fx.breath(x, y, z, -Math.sin(yaw), -Math.cos(yaw), mine ? 0.7 : 1);
       }
@@ -982,15 +982,17 @@ export class Game {
   private pipe = { at: 55 + Math.random() * 50, t: 0, x: 0, y: 0, z: 0, floor: 0 };
   private pipes(dt: number) {
     const P = this.pipe, c = this.cam.position;
-    if (!this.L.map.rooms?.some((r) => r.name === 'scor')) return;
+    const shop = !!this.L.map.rooms?.some((r) => r.name === 'backcor');
+    if (!shop && !this.L.map.rooms?.some((r) => r.name === 'scor')) return;
     if (P.t <= 0) {
       if (!this.inMatch || this.time < P.at) return;
       P.at = this.time + 80 + Math.random() * 90;
-      const fy = c.y > 2.6 ? 3.6 : 0;
-      if (c.y < -1.5) return;
-      const z = Math.abs(c.z + 6.5) < Math.abs(c.z + 25.5) ? -6.5 : -25.5;
+      const fy = c.y > 2.6 && !shop ? 3.6 : 0;
+      if (c.y < -1.5 || (shop && c.y > 2.6)) return;
+      // the hospital has a main down each corridor on both floors; the shop has one, under the back corridor's ceiling
+      const z = shop ? -30.5 : Math.abs(c.z + 6.5) < Math.abs(c.z + 25.5) ? -6.5 : -25.5;
       const heads: number[] = [];
-      for (let x = 0.5; x + 3 < 51.7; x += 3) for (const h of [0.75, 2.25]) if (Math.abs(x + h - c.x) > 5 && Math.abs(x + h - c.x) < 15) heads.push(x + h);
+      for (let x = shop ? 0 : 0.5; x + 3 < (shop ? 30.1 : 51.7); x += 3) for (const h of [0.75, 2.25]) if (Math.abs(x + h - c.x) > 5 && Math.abs(x + h - c.x) < 15) heads.push(x + h);
       if (!heads.length) return;
       const x = heads[Math.floor(Math.random() * heads.length)];
       const up = this.L.world.ray(x, fy + 1.4, z, 0, 1, 0, 4);

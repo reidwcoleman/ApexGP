@@ -27,6 +27,7 @@ WARD = opt('map', 'block') == 'ward'
 MOTEL = opt('map', 'block') == 'motel'
 MANSION = opt('map', 'block') == 'mansion'
 TRENCH = opt('map', 'block') == 'trenches'
+STORE = opt('map', 'block') == 'store'
 if COVE:
     import cove_layout, coveland, cove_kit
     m = cove_layout.build()
@@ -42,6 +43,9 @@ elif TRENCH:
 elif WARD:
     import ward_layout
     m = ward_layout.build()
+elif STORE:
+    import store_layout
+    m = store_layout.build()
 else:
     m = layout.build()
 

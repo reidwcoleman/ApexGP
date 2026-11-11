@@ -14,10 +14,7 @@ const MODES: { id: Mode; name: string; note: string; limit: number }[] = [
 ];
 const MAPS: { id: string; name: string; note: string }[] = [
   { id: 'ward', name: 'Ashgrove Ward', note: 'Condemned hospital. An atrium, wards, the tunnels under it.' },
-  { id: 'mansion', name: 'Harrowgate House', note: 'Abandoned manor. Ballroom, cellars, two floors.' },
-  { id: 'motel', name: 'Pinewood Motor Inn', note: 'Shut motel. Galleries, a pool hall, the diner.' },
-  { id: 'block', name: 'Kessler Block', note: 'Tenements. Stairwells, flats, a freight hall.' },
-  { id: 'trenches', name: 'The Trenches', note: 'Two lines, the wire, star shells over no man\'s land.' },
+  { id: 'store', name: "Halden's Hypermarket", note: 'Shut supermarket. Aisles, cold rooms, the stockroom, a loft.' },
 ];
 const HERE = MAPS.find((x) => x.id === MAP_ID) ?? MAPS[0];
 const thumb = (id: string) => `${BASE}thumbs/${id}.webp`;
@@ -433,10 +430,10 @@ export class Hud {
     };
     guest.onDown = (m: Down) => {
       if (m.t === 'welcome') {
-        if ((m.cfg.map ?? 'block') !== MAP_ID) {
+        if ((m.cfg.map ?? 'ward') !== MAP_ID) {
           // the host is on the other location: come back on it and join again
           const u = new URL(location.href);
-          const want = m.cfg.map ?? 'block';
+          const want = m.cfg.map ?? 'ward';
           if (want !== DEFAULT_MAP) u.searchParams.set('map', want);
           else u.searchParams.delete('map');
           u.searchParams.set('join', code);
