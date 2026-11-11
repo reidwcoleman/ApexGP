@@ -12,7 +12,9 @@ ROOT = os.path.join(os.path.dirname(__file__), '..')
 SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'assets-src', 'generated', 'monza', 'grass2.png')
 SIZE = int(sys.argv[2]) if len(sys.argv) > 2 else 1024
 OUT = os.path.join(ROOT, 'public', 'textures')
-MEAN = np.array([0.0499, 0.0841, 0.0209])
+# (the old scan's mean, half as bright again and a touch yellower: at the old level a verge in the
+# trees' shade went to a black-green carpet; September turf at Monza is a lighter, sun-dried green)
+MEAN = np.array([0.0499, 0.0841, 0.0209]) * np.array([1.6, 1.5, 1.35])
 W = np.array([0.2126, 0.7152, 0.0722])
 
 def to_lin(c):
