@@ -62,7 +62,7 @@ const TRIPLANAR: Record<string, [string, number, number[], number]> = {
 };
 
 /** a map sampled from world position, blended over the three axes by the surface's facing */
-function triplanar(m: THREE.MeshStandardMaterial, scale: number) {
+function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false) {
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev.call(m, sh, r);
@@ -77,8 +77,8 @@ function triplanar(m: THREE.MeshStandardMaterial, scale: number) {
           triP = instanceMatrix * triP;
           triN = mat3( instanceMatrix ) * triN;
         #endif
-        vTriP = ( modelMatrix * triP ).xyz;
-        vTriN = mat3( modelMatrix ) * triN;`,
+        vTriP = ${local ? 'triP.xyz' : '( modelMatrix * triP ).xyz'};
+        vTriN = ${local ? 'triN' : 'mat3( modelMatrix ) * triN'};`,
       );
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vTriP;\nvarying vec3 vTriN;')
@@ -92,7 +92,7 @@ function triplanar(m: THREE.MeshStandardMaterial, scale: number) {
       );
   };
   const key = m.customProgramCacheKey.bind(m);
-  m.customProgramCacheKey = () => key() + '|tri' + scale;
+  m.customProgramCacheKey = () => key() + '|tri' + scale + (local ? 'L' : '');
 }
 
 export interface MapData {
@@ -670,8 +670,57 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       }
       return m;
     };
+    // shopping trolleys are not furniture: each is its own object on its own wheels, for the physics to push about
+    const cartMats = new Map<THREE.Material, THREE.Material>();
+    const cartMat = (m0: THREE.MeshStandardMaterial) => {
+      let m = cartMats.get(m0);
+      if (!m) {
+        const c = m0.clone();
+        c.side = THREE.DoubleSide;
+        const tri = TRIPLANAR[m0.name];
+        const tt = tri && texs.get(`tex/${tri[0]}_c.webp`);
+        if (tri && tt) {
+          c.map = tt;
+          c.color.setRGB(tri[2][0], tri[2][1], tri[2][2]);
+          c.roughness = tri[3];
+        }
+        if (c.metalness > 0.5) {
+          c.roughness = Math.max(c.roughness, 0.62);
+          c.metalness = 0.55;
+          c.color.multiplyScalar(0.7);
+        }
+        m = applyLF(c, {});
+        if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1], true);
+        cartMats.set(m0, m);
+      }
+      return m;
+    };
+    const isCart = (id: string) => /\|cart_\d+$/.test(id);
+    for (const u of map.units ?? []) {
+      if (!isCart(u.id)) continue;
+      const src = byId.get(u.id) ?? byId.get(u.id.replace(/[.\s|+]/g, '_')) ?? byId.get(u.id.replace(/[.\s|+]/g, ''));
+      if (!src) continue;
+      const body = new THREE.Group();
+      src.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const c = new THREE.Mesh(mesh.geometry, cartMat(mesh.material as THREE.MeshStandardMaterial));
+        c.applyMatrix4(mesh.matrixWorld);
+        body.add(c);
+      });
+      const bb = new THREE.Box3().setFromObject(body), ctr = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+      // the pivot at the middle of its box, the model hung from it
+      body.position.set(-ctr.x, -ctr.y, -ctr.z);
+      const obj = new THREE.Group();
+      obj.add(body);
+      const cs = Math.cos(u.rot), sn = Math.sin(u.rot);
+      loose.push({ obj, def: { kg: 26, surf: 'cart', shape: 'box', half: [sz.x / 2, sz.z / 2, sz.y / 2] }, x: u.pos[0] + ctr.x * cs + ctr.z * sn, y: u.pos[1] + bb.min.y, z: u.pos[2] - ctr.x * sn + ctr.z * cs, rot: u.rot });
+      // and nothing invisible left standing where it was parked
+      map.colliders = map.colliders.filter((c) => !(c[7] === 'inv' && c[3] - c[0] < 1.3 && c[5] - c[2] < 1.3 && u.pos[0] > c[0] && u.pos[0] < c[3] && u.pos[2] > c[2] && u.pos[2] < c[5]));
+    }
     const byCell = new Map<string, MapData['units']>();
     for (const u of map.units ?? []) {
+      if (isCart(u.id)) continue;
       const k = `${u.id}@${Math.floor(u.pos[0] / 24)},${Math.floor(u.pos[2] / 24)}${u.float ? 'f' : ''}`;
       const c = byCell.get(k);
       if (c) c.push(u);

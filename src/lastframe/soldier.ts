@@ -416,7 +416,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = -1.0;\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = -1.0;\n    if ( ( vPart < 2.5 && fra.x < 0.15 ) || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;

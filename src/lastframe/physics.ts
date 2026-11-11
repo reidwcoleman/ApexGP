@@ -38,12 +38,14 @@ export interface LooseDef {
 
 const SURFACE: Record<string, [number, number, number]> = {
   // friction, restitution, angular damping
-  metal: [0.42, 0.22, 0.5], wood: [0.6, 0.12, 0.6], plastic: [0.5, 0.26, 0.5], card: [0.7, 0.06, 1.1], bag: [0.95, 0.01, 2.2], rubber: [0.9, 0.45, 0.4],
+  metal: [0.42, 0.22, 0.5], wood: [0.6, 0.12, 0.6], plastic: [0.5, 0.26, 0.5], card: [0.7, 0.06, 1.1], bag: [0.95, 0.01, 2.2], rubber: [0.9, 0.45, 0.4], cart: [0.04, 0.1, 3.0],
 };
 
 export class Loose {
   moved = false;
   speed = 0;
+  cart = false;
+  rattle = 0;
   constructor(readonly body: RAPIER.RigidBody, readonly obj: THREE.Object3D, readonly surf: string, readonly kg: number, readonly home: { p: THREE.Vector3; q: THREE.Quaternion }) {}
 }
 
@@ -166,10 +168,18 @@ export class Phys {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y + hzUp + 0.004, z).setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }).setAngularDamping(ad).setLinearDamping(0.08).setCanSleep(true));
     const r = Math.max(hx, hy);
     const shape = def.shape === 'cyl' ? RAPIER.ColliderDesc.cylinder(hzUp, r) : RAPIER.ColliderDesc.cuboid(hx, hzUp, hy);
+    const cart = def.surf === 'cart';
+    if (cart) {
+      // on four castors: it rolls rather than drags, turns about where it stands, and does not go over
+      body.setEnabledRotations(false, true, false, false);
+      body.setLinearDamping(0.9);
+      shape.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min);
+    }
     const col = this.world.createCollider(shape.setMass(def.kg).setFriction(fr).setRestitution(re).setCollisionGroups(GRP.prop), body);
     body.sleep();
     const home = { p: new THREE.Vector3(x, y + hzUp + 0.004, z), q };
-    const L = new Loose(body, obj, def.surf, def.kg, home);
+    const L = new Loose(body, obj, cart ? 'metal' : def.surf, def.kg, home);
+    L.cart = cart;
     this.owners.set(col.handle, { kind: 'prop', prop: L });
     this.loose.push(L);
     obj.position.copy(home.p);
@@ -348,6 +358,10 @@ export class Phys {
       L.obj.quaternion.set(q.x, q.y, q.z, q.w);
       const s = Math.hypot(v.x, v.y, v.z);
       if (L.speed - s > 1.1) this.onKnock(t.x, t.y, t.z, L.surf, L.speed - s);
+      if (L.cart && s > 0.7 && (L.rattle -= dt) <= 0) {
+        L.rattle = 0.9 + Math.random() * 0.5;
+        this.onKnock(t.x, t.y, t.z, 'cart', s);
+      }
       L.speed = s;
       if (t.y < -6) {
         b.setTranslation(L.home.p, false);

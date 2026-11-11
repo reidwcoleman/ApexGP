@@ -119,7 +119,7 @@ export class Game {
   private drips: { x: number; y: number; z: number; vy: number; floor: number }[] = [];
   private dripAcc = 0;
   private breathT = 2;
-  private caBase = 0.014;
+  private caBase = 0.007;
   private whiteout = 0;
   private hurt = 0;
   private lensBlood = 0;
@@ -318,7 +318,7 @@ export class Game {
       this.post.mFinal.uniforms.grainK.value = 0.45;
     }
     if (sunInfo) {
-      this.post.mFinal.uniforms.caK.value = this.caBase = 0.0085;
+      this.post.mFinal.uniforms.caK.value = this.caBase = 0.005;
       this.post.mFinal.uniforms.satK.value = 0.97;
       this.sound.coast = true;
     }
@@ -407,10 +407,42 @@ export class Game {
     phys.onKnock = (x, y, z, surf, v) => {
       const p = this.tmp.set(x, y, z);
       if (p.distanceToSquared(this.cam.position) > 900) return;
-      if (surf === 'brass' || surf === 'shard') this.sound.tink(p);
+      if (surf === 'cart') this.sound.trolley(p);
+      else if (surf === 'brass' || surf === 'shard') this.sound.tink(p);
       else this.sound.impact(p, surf === 'metal' ? 'metal' : surf === 'flesh' ? 'flesh' : 'wood');
       void v;
     };
+  }
+
+  /** what a round knocks off a shelf: a few tins, bottles and cartons, thrown out into the aisle and left on the floor */
+  private stockGeo: THREE.BufferGeometry[] | null = null;
+  private stockMat: THREE.MeshStandardMaterial[] = [];
+  private stockN = 0;
+  private knockOff(x: number, y: number, z: number, nx: number, nz: number) {
+    if (this.stockN > 70 || !this.looseGroup) return;
+    if (!this.stockGeo) {
+      this.stockGeo = [new THREE.CylinderGeometry(0.037, 0.037, 0.11, 10), new THREE.CylinderGeometry(0.03, 0.034, 0.2, 10), new THREE.BoxGeometry(0.07, 0.19, 0.07), new THREE.BoxGeometry(0.16, 0.22, 0.06)];
+      for (const c of [0x8a1f1a, 0x1f4a7a, 0xb08a1e, 0x2f6a38, 0xb9b4a6, 0x6a3a1c, 0x3a3f46]) {
+        const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.1 });
+        m.color.multiplyScalar(0.55);
+        this.stockMat.push(applyLF(m, {}) as THREE.MeshStandardMaterial);
+      }
+    }
+    const len = Math.hypot(nx, nz), ox = len > 0.3 ? nx / len : 0, oz = len > 0.3 ? nz / len : 0;
+    const n = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor(Math.random() * this.stockGeo.length);
+      const geo = this.stockGeo[k];
+      const mesh = new THREE.Mesh(geo, this.stockMat[Math.floor(Math.random() * this.stockMat.length)]);
+      this.looseGroup.add(mesh);
+      geo.computeBoundingBox();
+      const b = geo.boundingBox!.max;
+      const p = new THREE.Vector3(x + ox * 0.12 + (Math.random() - 0.5) * 0.3 * Math.abs(oz), y + (Math.random() - 0.3) * 0.12, z + oz * 0.12 + (Math.random() - 0.5) * 0.3 * Math.abs(ox));
+      const v = new THREE.Vector3(ox * (0.7 + Math.random() * 1.6) + (Math.random() - 0.5) * 0.8, 0.6 + Math.random() * 1.4, oz * (0.7 + Math.random() * 1.6) + (Math.random() - 0.5) * 0.8);
+      this.stockN++;
+      this.phys.drop(mesh, [b.x, b.y, b.z], new THREE.Vector3(), p, new THREE.Quaternion(), v, 14, 0.4, 45, k < 2 ? 'metal' : 'wood');
+      setTimeout(() => this.stockN--, 45000);
+    }
   }
 
   /** the light capture only wants the architecture */
@@ -444,8 +476,8 @@ export class Game {
 
   resize() {
     const w = innerWidth, h = innerHeight;
-    const dpr = Math.min(devicePixelRatio || 1, 1.5);
-    const k = Math.min(1, 1920 / (w * dpr)) * dpr * this.scale * this.quality;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const k = Math.min(1, 2560 / (w * dpr)) * dpr * this.scale * this.quality;
     this.r.setSize(w, h, false);
     this.r.domElement.style.width = '100%';
     this.r.domElement.style.height = '100%';
@@ -1135,6 +1167,7 @@ export class Game {
       // a round into stocked shelving: something on it bursts, and something else goes on the floor
       if (MAP_ID === 'store' && surf !== 'flesh' && y > 0.15 && y < 2.1 && x > 15 && x < 45 && z < -10.8 && z > -25.8 && Math.abs(x - (16 + 4 * Math.round((x - 16) / 4))) < 0.75) {
         this.fx.spatter(x, y - 0.03, z, 1.5);
+        this.knockOff(x, y, z, nx, nz);
         if (Math.random() < 0.4) this.sound.tin(this.tmp.set(x, 0.3, z));
         else if (Math.random() < 0.3) this.sound.impact(this.tmp.set(x, y, z), 'glass');
       }
@@ -1148,7 +1181,7 @@ export class Game {
       const o = i * 6;
       const dx = e.e[o] - O[0], dy = e.e[o + 1] - O[1], dz = e.e[o + 2] - O[2], d = Math.hypot(dx, dy, dz) || 1;
       if (d > 120) continue;
-      const hit = this.phys.shot(O[0], O[1], O[2], dx / d, dy / d, dz / d, d, shove * 2.2);
+      const hit = this.phys.shot(O[0], O[1], O[2], dx / d, dy / d, dz / d, d, shove * 2.8);
       if (hit) {
         this.fx.impact(hit.x, hit.y, hit.z, -dx / d, -dy / d, -dz / d, hit.surf === 'flesh' ? 'flesh' : hit.surf);
         this.sound.impact(this.tmp.set(hit.x, hit.y, hit.z), hit.surf === 'metal' ? 'metal' : hit.surf === 'flesh' ? 'flesh' : 'wood');

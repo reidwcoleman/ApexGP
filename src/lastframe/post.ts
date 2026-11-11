@@ -555,12 +555,12 @@ void main() {
   vec3 soft = texture2D( tHalf, cg ).rgb;
   // a cheap wide lens is only sharp in the middle, and what's a hand's length from it (the wearer's own arms) is never in focus
   float zF = nfF.x * nfF.y / ( nfF.y - texture2D( tDepthF, cg ).r * ( nfF.y - nfF.x ) );
-  float nearK = smoothstep( 0.5, 0.16, zF );
-  float softK = clamp( smoothstep( 0.5, 1.0, edge ) * 0.8 + nearK * 0.85, 0.0, 1.0 );
+  float nearK = smoothstep( 0.3, 0.1, zF );
+  float softK = clamp( smoothstep( 0.72, 1.0, edge ) * 0.3 + nearK * 0.4, 0.0, 1.0 );
   vec3 softer = texture2D( tBlock, cg ).rgb;
   // a glint a hand from the lens must not swell into a ball of light: the blur can't hold much more than the sharp picture did
   softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
-  c = max( c + ( c - soft ) * 1.05 * ( 1.0 - softK ), vec3( 0.0 ) );
+  c = max( c + ( c - soft ) * 1.4 * ( 1.0 - softK ), vec3( 0.0 ) );
   c = mix( c, mix( soft, softer, nearK * 0.5 ), softK );
   // footage that has been through an office before anyone saw it: every head in it under a mosaic, the way the redaction
   // tool does it. Square blocks fixed to the frame, each one the average of what was under it, cut to the shape of the
@@ -611,7 +611,7 @@ void main() {
   vec3 bl = texture2D( tBlock, blk ).rgb;
   float lum0 = dot( hdr * expo, vec3( 0.3, 0.6, 0.1 ) );
   float blum = dot( bl * expo, vec3( 0.3, 0.6, 0.1 ) );
-  hdr = mix( hdr, bl, 0.18 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
+  hdr = mix( hdr, bl, 0.07 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
   hdr *= expo;
   // white balance: night through a cheap sensor is grey, with sodium in it, not blue
   hdr *= wb;
@@ -743,7 +743,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 0.5 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 0.5 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.007 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();
@@ -891,7 +891,7 @@ export class Post {
       u.tSrc.value = src;
       u.tDepth.value = this.scene.depthTexture;
       u.reproj.value.copy(uR.reproj.value);
-      u.amount.value = Math.min(1, (1 / 90) / Math.max(dt, 1e-3));
+      u.amount.value = Math.min(1, (1 / 240) / Math.max(dt, 1e-3));
       this.draw(this.mBlur, this.blur);
       src = this.blur.texture;
     }
