@@ -31,8 +31,10 @@ ROWS = (16.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0)
 SECT = ((12.5, 15.5), (21.0, 24.0))
 TRUSS = (10.2, 18.25, 26.3)   # the truss lines, on the column lines     # gondola module centres along y, either side of the cross aisle
 
-SKY = dict(hdri='rooftop_night', strength=1.0, tint=(0.34, 0.46, 0.7))
-WEATHER = dict(key=0.2, rain=1, wet=1, fog=1.3, sky=[0.3, 0.33, 0.4], wb=[0.96, 1.0, 1.02])
+# a bright, broken-cloud morning: the building is lit by what comes in through the front glass and the rooflights, the
+# way an empty one is, and the camera cannot hold the windows and the aisles at once
+SKY = dict(hdri='kloofendal_48d_partly_cloudy_puresky', strength=4.0, tint=(1.0, 1.0, 1.0))
+WEATHER = dict(key=0.2, day=1, rain=0, wet=1, fog=0.9, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -1.2, -52], dim=[39, 9, 31])
 
 TUBE = (0.8, 0.94, 1.0)
@@ -202,9 +204,10 @@ def build():
     box((X0 - 0.3, Y0 - 0.3, TOP), (X1 + 0.3, Y1 + 0.3, TOP + 0.35), 'roof', tag='floor', density=0.1)
     for a, b in (((X0 - 0.3, Y0 - 0.3), (X1 + 0.3, Y0)), ((X0 - 0.3, Y1), (X1 + 0.3, Y1 + 0.3)), ((X0 - 0.3, Y0), (X0, Y1)), ((X1, Y0), (X1 + 0.3, Y1))):
         box((a[0], a[1], TOP + 0.35), (b[0], b[1], TOP + 1.0), 'tin', density=0.1)
-    # rooflights over the hall, grey with dirt: the sky is only a little less dark than the deck
-    for (x, y) in ((10.0, 15.0), (22.0, 22.5), (34.0, 14.5), (46.0, 22.5), (54.0, 15.0), (40.0, 39.5), (52.0, 34.0)):
-        box((x, y, TOP - 0.02), (x + 1.2, y + 2.4, TOP - 0.005), 'nightglass', collide=False, density=0.1)
+    # rooflights over the hall: by day they are most of the light in it
+    for (x, y) in ((10.0, 15.0), (22.0, 22.5), (34.0, 14.5), (46.0, 22.5), (54.0, 15.0), (40.0, 39.5), (52.0, 34.0),
+                   (16.0, 8.0), (28.0, 9.0), (40.0, 7.5), (52.0, 8.0), (16.0, 24.0), (28.0, 17.0), (40.0, 19.5), (34.0, 24.5)):
+        box((x, y, TOP - 0.02), (x + 1.2, y + 2.4, TOP - 0.005), 'dayglass', collide=False, density=0.1)
 
     # ================= the outside walls =================
     EXT = 'hbrick'

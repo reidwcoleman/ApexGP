@@ -105,6 +105,8 @@ MATS = {
     'paint_b': M('concrete_pavement_02', 2.0, (0.16, 0.45, 1.5), rough=0.85, nrm=0.4),
     'paint_g': M('concrete_pavement_02', 2.0, (0.2, 1.1, 0.35), rough=0.85, nrm=0.4),
     'nightglass': M('metal_plate', 2.0, emit=(0.035, 0.05, 0.08)),
+    # a rooflight by day: the overcast itself, far past what the camera can hold
+    'dayglass': M('metal_plate', 2.0, emit=(6.0, 6.3, 6.8)),
     'meatsign': M('metal_plate', 1.0, emit=(0.5, 0.05, 0.035)),
     'exitsign': M('metal_plate', 1.0, emit=(0.07, 0.8, 0.24)),
     'lightbox': M('metal_plate', 1.0, emit=(0.8, 0.95, 1.05)),

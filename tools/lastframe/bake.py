@@ -111,7 +111,8 @@ def put(b, f, ax, sg, u, v, w, u0, u1, v0, v1):
     # interiors take the room's finish
     p = [0, 0, 0]; p[ax] = w + sg * 0.06; p[u] = cu; p[v] = cv
     r = room_of(p)
-    if r is not None and b.tag not in ('step', 'post', 'cargo', 'counter', 'container') and b.mat not in ('trim', 'shopframe', 'planks', 'grate', 'steel', 'wood_top'):
+    # (what gives light keeps its own face: a rooflight's underside is the rooflight, not the ceiling round it)
+    if r is not None and b.tag not in ('step', 'post', 'cargo', 'counter', 'container') and b.mat not in ('trim', 'shopframe', 'planks', 'grate', 'steel', 'wood_top') and b.mat not in UNLIT:
         if ax == 2:
             if f == '+z' and b.tag == 'floor':
                 mat = r['floor']

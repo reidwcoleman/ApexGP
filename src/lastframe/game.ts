@@ -311,10 +311,12 @@ export class Game {
     this.fx.rainOn = L.map.weather?.rain ?? 1;
     if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
     if (L.map.night) {
-      Bot.night = true;
+      // a shut building by day is still a shut building, but nobody is hidden by the dark in it
+      Bot.night = !L.map.weather?.day;
       // the dark is still dark, but the sensor is a better one: it opens further and brings far less noise up with it
       this.post.exposureMax = 7.5;
-      this.post.mFinal.uniforms.satK.value = 0.8;
+      // a small sensor's colour: most of it gone, the way this kind of footage always looks
+      this.post.mFinal.uniforms.satK.value = 0.7;
       this.post.mFinal.uniforms.grainK.value = 0.45;
     }
     if (sunInfo) {
@@ -723,7 +725,7 @@ export class Game {
         if (e.s === this.mySlot) {
           this.me.slot = e.s;
           this.me.spawn(e.p[0], e.p[1], e.p[2], e.yaw, e.primary);
-          if (this.L.map.night) this.me.light = true;
+          if (this.L.map.night && !this.L.map.weather?.day) this.me.light = true;
           this.lensBlood = 0;
           this.dead = -1;
           this.frozen = false;

@@ -629,11 +629,10 @@ void main() {
   // lens falloff and the housing's rounded corners, with a coloured rim
   float vig = 1.0 - smoothstep( 0.5, 1.1, edge ) * 0.5;
   col *= vig;
-  vec2 q = abs( p ) / vec2( aspect, 1.0 );
-  float corner = length( max( q - vec2( 0.86, 0.8 ), 0.0 ) / vec2( 0.14, 0.2 ) );
-  float rim = smoothstep( 0.86, 1.06, corner );
-  col = mix( col, col * vec3( 1.12, 0.96, 0.86 ), smoothstep( 0.6, 1.0, corner ) * 0.5 );
-  col *= 1.0 - rim;
+  // the lens does not cover the sensor: its image circle crosses the corners of the frame, and the edge of it is where the
+  // glass splits the light worst, red furthest out and blue cut off first, so the black corner has a warm rim
+  col *= mix( vec3( 1.0 ), vec3( 1.1, 0.97, 0.88 ), smoothstep( 0.8, 0.93, edge ) );
+  col *= 1.0 - vec3( smoothstep( 0.925, 0.985, edge ), smoothstep( 0.905, 0.962, edge ), smoothstep( 0.89, 0.945, edge ) );
   // what a starved encoder leaves: flat blocks in too few colours, the chroma gone wrong
   if ( gBlk > 0.0 ) col = mix( col, floor( col * 4.0 + 0.5 ) / 4.0 * vec3( 0.86, 1.06, 0.9 ), 0.85 );
   if ( lensBlood > 0.0 ) {

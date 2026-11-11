@@ -148,7 +148,7 @@ export interface MapData {
   /** a map in the dark: lights start on, old blood on the walls */
   night?: number;
   stains?: number[][];
-  weather?: { key?: number; rain: number; wet: number; fog: number; sky: number[]; wb: number[]; sun?: SunInfo; dim?: number; sunK?: number; skyTint?: number[]; expMax?: number; sat?: number };
+  weather?: { key?: number; day?: number; rain: number; wet: number; fog: number; sky: number[]; wb: number[]; sun?: SunInfo; dim?: number; sunK?: number; skyTint?: number[]; expMax?: number; sat?: number };
   /** what spawns face, and the shot behind the menu */
   centre?: number[];
   attract?: number[][];
