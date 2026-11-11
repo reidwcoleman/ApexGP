@@ -41,6 +41,56 @@ const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
 /** every face the brand boards use (boot waits for these before painting the atlases) */
 export const BRAND_FONTS = ['300', '400', '600', '700', '900', 'italic 600', 'italic 700'].map((f) => `${f} 20px "Titillium Web"`);
 
+/**
+ * Designed logo lockups (public/brands, cut from generated sheets by tools/build_brands.py): where a
+ * brand has one, its boards carry that artwork — an emblem and a custom word mark on the brand's
+ * colour — instead of the lockup set here in the shared typeface. Trimmed to the logo; `bg` is the
+ * flat colour it sits on.
+ */
+const ART = new Map<string, { img: ImageBitmap; bg: string }>();
+let artLoad: Promise<void> | null = null;
+
+/** fetch the logo artwork once (boards painted before it arrives, or without it, use the drawn lockups) */
+export function loadBrandArt(): Promise<void> {
+  if (artLoad) return artLoad;
+  const base = `${import.meta.env.BASE_URL}brands/`;
+  artLoad = fetch(`${base}index.json`)
+    .then((r): Promise<Record<string, { file: string; bg: string }>> => (r.ok ? r.json() : Promise.resolve({})))
+    .then((idx) =>
+      Promise.all(
+        Object.entries(idx).map(([name, a]) =>
+          fetch(base + a.file)
+            .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(a.file))))
+            .then((b) => createImageBitmap(b))
+            .then((img) => void ART.set(name, { img, bg: a.bg }))
+            .catch((e) => console.warn('[brands] logo failed to load', e)),
+        ),
+      ),
+    )
+    .then(() => undefined)
+    .catch(() => undefined);
+  return artLoad;
+}
+
+export const hasBrandArt = (b: Brand) => ART.has(b.name);
+
+/** the artwork on its colour: as large as fits, repeated along a long banner as hoardings are */
+function drawArt(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, a: { img: ImageBitmap; bg: string }) {
+  g.save();
+  g.beginPath();
+  g.rect(x, y, w, h);
+  g.clip();
+  g.fillStyle = a.bg;
+  g.fillRect(x, y, w, h);
+  const k = Math.min((h * 0.8) / a.img.height, (w * 0.88) / a.img.width);
+  const dw = a.img.width * k, dh = a.img.height * k;
+  const n = Math.max(1, Math.floor(w / (dw * 1.5)));
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  for (let i = 0; i < n; i++) g.drawImage(a.img, x + ((i + 0.5) * w) / n - dw / 2, y + (h - dh) / 2, dw, dh);
+  g.restore();
+}
+
 function setTrack(g: CanvasRenderingContext2D, px: number) {
   const c = g as CanvasRenderingContext2D & { letterSpacing?: string };
   if ('letterSpacing' in c) c.letterSpacing = `${px.toFixed(1)}px`;
@@ -218,6 +268,8 @@ function drawMark(g: CanvasRenderingContext2D, b: Brand, cx: number, cy: number,
  * word mark. `invert` swaps to the brand's light-on-dark (or dark-on-light) alternate.
  */
 export function drawBrand(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, b: Brand, invert = false) {
+  const art = invert ? undefined : ART.get(b.name);
+  if (art) return drawArt(g, x, y, w, h, art);
   const bg = invert ? b.fg : b.bg;
   const fg = invert ? b.bg : b.fg;
   g.save();

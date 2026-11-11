@@ -1,4 +1,4 @@
-import { drawBrand, drawWordmark, type Brand } from './brands.ts';
+import { drawBrand, drawWordmark, hasBrandArt, type Brand } from './brands.ts';
 import { SERIES } from './partners.ts';
 
 /**
@@ -137,7 +137,8 @@ function pop(b: Brand) {
  */
 export function drawCreative(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, b: Brand, v: number, series?: boolean) {
   const k = ((v % CREATIVES) + CREATIVES) % CREATIVES;
-  if (k === 0) return drawBrand(g, x, y, w, h, b);
+  // (a brand with designed artwork shows it on every board, as a circuit's hoardings do)
+  if (k === 0 || hasBrandArt(b)) return drawBrand(g, x, y, w, h, b);
   g.save();
   g.beginPath();
   g.rect(x, y, w, h);

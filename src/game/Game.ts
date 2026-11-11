@@ -45,7 +45,7 @@ import { Menu, aiLevel, GRID, CIRCUIT_INFO, circuitPath, type MotionBlurLevel, t
 import { Weather, planWeather, isLowSun, floodlit, WEATHER_LABEL, TIME_LABEL, type WeatherPlan, type WeatherState, type WeatherChoice, type TimeChoice } from '../world/Weather.ts';
 import { applyWeatherUniforms, suppressFloods } from '../world/weatherUniforms.ts';
 import { Headlights, type HeadlightCar } from '../world/env/headlights.ts';
-import { BRAND_FONTS } from '../world/brands.ts';
+import { BRAND_FONTS, loadBrandArt } from '../world/brands.ts';
 import { aerialGround, aerialLens, aerialParams } from '../world/env/fog.ts';
 import { buildGarageBox, pitComplexBuilder, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
@@ -458,7 +458,7 @@ export class Game {
     // (the scanned road and grass aren't needed until the circuit is built behind the garage: they
     // download after the garage's people, not alongside them)
     const asphalt = people.then(() => loadAsphaltScan());
-    const fonts = Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
+    const fonts = Promise.all([loadBrandArt(), ...BRAND_FONTS.map((f) => document.fonts.load(f))]).then(
       () => void mark('fonts'),
       () => undefined /* fallback fonts are fine */,
     );

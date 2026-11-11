@@ -59,9 +59,11 @@ const ID = (id: (typeof PROTO_INFO)[number]['id']) => PROTO_INFO.findIndex((p) =
 
 /** which prototypes stand in for each species (repeats weight the pick) */
 export const SPECIES_PROTOS: Record<SpeciesId, number[]> = {
-  plane: [ID('jacaranda'), ID('jacaranda'), ID('gnarl'), ID('dome')],
-  oak: [ID('gnarl'), ID('gnarl'), ID('dome'), ID('jacaranda')],
-  chestnut: [ID('dome'), ID('dome'), ID('jacaranda'), ID('gnarl')],
+  // (2026-11-11: the gnarled scan — a twisted, leaning bole — was one tree in three; a royal park's
+  // planes and oaks stand straight, so it is now the odd veteran among domes and feathery crowns)
+  plane: [ID('jacaranda'), ID('jacaranda'), ID('jacaranda'), ID('dome'), ID('dome')],
+  oak: [ID('dome'), ID('dome'), ID('dome'), ID('jacaranda'), ID('jacaranda'), ID('gnarl')],
+  chestnut: [ID('dome'), ID('dome'), ID('jacaranda')],
   poplar: [ID('poplar')],
   shrub: [ID('shrub_a'), ID('shrub_b'), ID('shrub_c')],
   // (the young fir keeps its branches to the ground: the dense dark wall of an Ardennes plantation edge)

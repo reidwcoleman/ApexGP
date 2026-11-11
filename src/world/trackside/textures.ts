@@ -29,8 +29,8 @@ import { keepData, loadData, pixelKey } from '../../core/pixelCache.ts';
  */
 export const ASPHALT_TILE = 2.0;
 export { ASPHALT_ALB_MAX };
-/** the photographed bed (public/textures/gravel_c.webp) is ~0.9 m of 10–20 mm chippings */
-export const GRAVEL_TILE = 0.9;
+/** the photographed bed (public/textures/gravel_c.webp) is ~1.3 m of 5–15 mm chippings */
+export const GRAVEL_TILE = 1.3;
 /** the grass scan's tile (ambientCG Grass 001 is 1.4 m; the procedural fallback was drawn for 1.5) */
 export const GRASS_TILE = 1.4;
 

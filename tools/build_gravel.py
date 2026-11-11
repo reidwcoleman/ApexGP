@@ -51,7 +51,8 @@ lin = tileable(lin)
 W = np.array([0.2126, 0.7152, 0.0722])
 m = lin.reshape(-1, 3).mean(0)
 grey = m * (MEAN @ W) / (m @ W)
-lin *= (grey * 0.65 + MEAN * 0.35) / m
+# (2026-11-11: 15 % now, with a paler pale-grey source: the 35 % mix still read as brown earth)
+lin *= (grey * 0.85 + MEAN * 0.15) / m
 lum = lin @ np.array([0.2126, 0.7152, 0.0722])
 # height: brightness, a little smoothed (a stone's top, not its speckle), stretched to the procedural's spread
 hgt = np.asarray(Image.fromarray(np.uint8(np.clip(lum / np.percentile(lum, 99.5), 0, 1) * 255)).filter(ImageFilter.GaussianBlur(1.2)), dtype=np.float64) / 255

@@ -246,6 +246,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     // the gums stand tall over the park
     if (map.venue === 'melbourne') scale *= sp === 'oak' ? 1.15 : 1;
     if (map.venue === 'yasmarina') scale *= sp === 'shrub' ? 0.9 : 0.6;
+    // Monza's park is old growth: the broadleaves stand 25–30 m over the fences
+    if (map.venue === 'park' && (sp === 'oak' || sp === 'plane' || sp === 'chestnut')) scale *= 1.22;
     if (map.scenic) scale *= scenicTreeLook(map.scenic, sp, hash2i(Math.floor(x * 2), Math.floor(z * 2), 77)).scale;
     const tint = tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2);
     if (tintK) tint.multiply(tintK);

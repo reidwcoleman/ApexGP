@@ -196,10 +196,12 @@ const RHO = 1.225;
 const V_MIN = 2.5;
 
 // per surface code: grip multiplier, rolling resistance coefficient, speed-dependent drag (per m/s), lateral bog
-const SURF_GRIP = [1.0, 0.93, 0.95, 0.56, 0.5];
-const SURF_RR = [0.012, 0.015, 0.016, 0.07, 0.2];
-const SURF_RR_V = [0, 0, 0, 0.0012, 0.006];
-const SURF_BOG = [0, 0, 0, 0.3, 1.6];
+// (2026-11-11: grass and gravel no longer drag the car to a crawl — a run wide costs grip and a little
+// speed, not the whole straight; rolling resistance was 0.07 / 0.2 and the gravel's speed drag 0.006)
+const SURF_GRIP = [1.0, 0.93, 0.95, 0.7, 0.64];
+const SURF_RR = [0.012, 0.015, 0.016, 0.024, 0.04];
+const SURF_RR_V = [0, 0, 0, 0.0002, 0.0006];
+const SURF_BOG = [0, 0, 0, 0.1, 0.35];
 
 /**
  * Grip on a wet track by tyre type (0 slick, 1 inter, 2 wet), tabulated over
@@ -409,6 +411,8 @@ export class CarPhysics {
   reverse = false;
   allowReverse = true;
   private reverseTimer = 0;
+  /** 0→1 over the half second after a change of direction: the drive comes in progressively */
+  private driveBlend = 1;
 
   /**
    * How rubbered-in the circuit is, 0 (green, dusty) … 1 (a thick black line), set by the race: the
@@ -741,12 +745,21 @@ export class CarPhysics {
     // reverse: hold the brake while stopped
     if (this.allowReverse && !this.reverse && Math.abs(this.vx) < 0.6 && brake > 0.6 && throttle < 0.05) {
       this.reverseTimer += dt;
-      if (this.reverseTimer > 0.5) this.reverse = true;
+      if (this.reverseTimer > 0.3) {
+        this.reverse = true;
+        this.driveBlend = 0;
+      }
     } else if (!this.reverse) this.reverseTimer = 0;
-    if (this.reverse && (throttle > 0.1 || this.vx > 1)) {
+    // back to forward: the throttle first brakes the car from its backward roll (below), and first gear
+    // only takes up once it has all but stopped — no snatch, no wheels spun against the roll
+    if (this.reverse && ((throttle > 0.1 && this.vx > -1.2) || this.vx > 1)) {
       this.reverse = false;
       this.reverseTimer = 0;
+      this.driveBlend = 0;
+      this.gear = 1;
     }
+    this.driveBlend = Math.min(1, this.driveBlend + dt / 0.5);
+    const ease = this.driveBlend * this.driveBlend * (3 - 2 * this.driveBlend);
 
     // ---- stability assist (steering side): automatic countersteer when the rear steps out
     let delta = Math.max(-sp.maxSteer, Math.min(sp.maxSteer, input.steer));
@@ -929,7 +942,9 @@ export class CarPhysics {
     let axleTorque = throttle * engTorque * Math.abs(ratio);
     if (this.limiter) axleTorque *= 0.2;
     if (this.shiftCut > 0) axleTorque *= 0.3;
-    if (this.reverse) axleTorque = brake * 2600;
+    // reverse: the brake pedal drives, fading out toward 15 m/s backward
+    if (this.reverse) axleTorque = throttle > 0.1 ? 0 : brake * 2600 * Math.max(0, Math.min(1, 1 + this.vx / 15));
+    axleTorque *= ease;
     // overrun: engine braking + MGU-K harvest
     if (!this.reverse && throttle < 0.05 && v > 3) axleTorque = -(0.035 + 0.11 * (engRpm / sp.rpmLimit) ** 2) * m * G * sp.wheelR;
 
@@ -943,9 +958,11 @@ export class CarPhysics {
 
     // ---- brakes (each corner's torque by its carbon's temperature)
     const Tb = [0, 0, 0, 0];
-    if (!this.reverse && brake > 0) {
-      const tf = brake * sp.brakeTorque * sp.brakeBias * 0.5;
-      const tr = brake * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
+    // (in reverse the pedals swap: the throttle is the brake, gently, so the car settles to a stop)
+    const brakeIn = this.reverse ? throttle * 0.45 : brake;
+    if (brakeIn > 0) {
+      const tf = brakeIn * sp.brakeTorque * sp.brakeBias * 0.5;
+      const tr = brakeIn * sp.brakeTorque * (1 - sp.brakeBias) * 0.5;
       for (let i = 0; i < 4; i++) Tb[i] = (i < 2 ? tf : tr) * brakeEff(this.brakeTemp[i]);
     }
     // a new set of tyres: no flat spots

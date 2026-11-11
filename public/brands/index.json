@@ -1,0 +1,82 @@
+{
+ "VALCOURT": {
+  "file": "valcourt.webp",
+  "bg": "#010100"
+ },
+ "VELTRA": {
+  "file": "veltra.webp",
+  "bg": "#fdf122"
+ },
+ "SWIFTLINE": {
+  "file": "swiftline.webp",
+  "bg": "#fef223"
+ },
+ "BRANDT 0.0": {
+  "file": "brandt_0_0.webp",
+  "bg": "#054923"
+ },
+ "MAISON DUVAL": {
+  "file": "maison_duval.webp",
+  "bg": "#07260d"
+ },
+ "TAURO": {
+  "file": "tauro.webp",
+  "bg": "#01144b"
+ },
+ "CORVINA AIR": {
+  "file": "corvina_air.webp",
+  "bg": "#650526"
+ },
+ "REDWOOD": {
+  "file": "redwood.webp",
+  "bg": "#c90203"
+ },
+ "stratus": {
+  "file": "stratus.webp",
+  "bg": "#252f40"
+ },
+ "PETRANOVA": {
+  "file": "petranova.webp",
+  "bg": "#fdfdfd"
+ },
+ "MAISON VERNET": {
+  "file": "maison_vernet.webp",
+  "bg": "#351b10"
+ },
+ "NOVACHAIN": {
+  "file": "novachain.webp",
+  "bg": "#07163d"
+ },
+ "MERIDIA CRUISES": {
+  "file": "meridia_cruises.webp",
+  "bg": "#051a42"
+ },
+ "Tessara": {
+  "file": "tessara.webp",
+  "bg": "#d40808"
+ },
+ "BRIANZA BANCA": {
+  "file": "brianza_banca.webp",
+  "bg": "#fbf3e3"
+ },
+ "LEONIDA": {
+  "file": "leonida.webp",
+  "bg": "#9a0513"
+ },
+ "Aurelia": {
+  "file": "aurelia.webp",
+  "bg": "#3b1a0a"
+ },
+ "FONTALBA": {
+  "file": "fontalba.webp",
+  "bg": "#ceeffd"
+ },
+ "TELVIA": {
+  "file": "telvia.webp",
+  "bg": "#01248d"
+ },
+ "ARDENZA": {
+  "file": "ardenza.webp",
+  "bg": "#010100"
+ }
+}

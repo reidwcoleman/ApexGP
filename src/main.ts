@@ -18,7 +18,7 @@ import { initUiScale } from './ui/scale.ts';
 import { loadPeople, setPeopleRestGate } from './people/Humans.ts';
 import { preloadPixels } from './core/pixelCache.ts';
 import { loadAsphaltScan } from './world/trackside/textures.ts';
-import { BRAND_FONTS } from './world/brands.ts';
+import { BRAND_FONTS, loadBrandArt } from './world/brands.ts';
 import { loadTreeKit } from './world/env/treeproto.ts';
 
 // boot milestones on the performance timeline (tools/loadbench.mjs reads them: ms since navigation)
@@ -63,6 +63,7 @@ const startLoads = () => {
       .then(() => Promise.all([loadAsphaltScan(), loadTreeKit()])),
   );
   void preloadPixels();
+  void loadBrandArt();
   Promise.all(BRAND_FONTS.map((f) => document.fonts.load(f))).then(
     () => performance.mark('apex:fonts'),
     () => undefined,

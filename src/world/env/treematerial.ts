@@ -370,7 +370,8 @@ float ignF( vec2 p ) { return ign( p + 5.588238 * mod( uFrame, 64.0 ) ); }
 const LEAF_LIGHT = /* glsl */ `
 // (2026-11-10: was (1.04, 1.12, 0.84) with a 0.62 yellow transmission — back-lit crowns came out a
 // neon lime no camera records. Still a full summer green, but a leaf's own: deeper, less yellow)
-const vec3 FOLIAGE_TINT = vec3( 0.9, 0.98, 0.84 );
+// (2026-11-11: a shade deeper again — sunlit crowns close to the camera still ran to lime)
+const vec3 FOLIAGE_TINT = vec3( 0.84, 0.95, 0.8 );
 varying float vLeafL;
 varying float vAOL;
 varying float vSunOcc;
@@ -392,7 +393,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
     // light through a leaf comes out a saturated yellow-green (albedo squared, renormalised)
     vec3 dc = material.diffuseColor;
     vec3 tc = dc * dc / max( max( dc.r, dc.g ), 1e-3 );
-    reflectedLight.directDiffuse += dl.color * tc * vec3( 0.92, 1.0, 0.62 ) * through * 0.36;
+    reflectedLight.directDiffuse += dl.color * tc * vec3( 0.86, 1.0, 0.6 ) * through * 0.28;
     // soft wrap on the lit side: a leafy mass never shows a hard N·L terminator
     float wrapL = saturate( ( dot( geometryNormal, directLight.direction ) + 0.35 ) / 1.35 ) - saturate( dot( geometryNormal, directLight.direction ) );
     reflectedLight.directDiffuse += dl.color * dc * wrapL * 0.25 * RECIPROCAL_PI;
@@ -561,7 +562,7 @@ if ( leafK > 0.5 ) {
   // park), a touch warmer than the scans; FOLIAGE_TINT is shared with the impostors so near and far match
   vec3 lc = lt.rgb * FOLIAGE_TINT;
   // (a leaf's own saturation: the scans', a shade under — in full sun they ran to a lime no camera sees)
-  lc = mix( vec3( dot( lc, vec3( 0.25, 0.6, 0.15 ) ) ), lc, 0.84 );
+  lc = mix( vec3( dot( lc, vec3( 0.25, 0.6, 0.15 ) ) ), lc, 0.78 );
   diffuseColor.rgb *= lc;
   // snow laden on the sprays: the paler, upper leaves carry it, the shaded inner ones stay dark
   if ( uSnowCover > 0.002 ) diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.7, 0.73, 0.78 ), uSnowCover * mix( 0.3, 0.72, smoothstep( 0.04, 0.2, lt.g ) ) );
@@ -569,6 +570,9 @@ if ( leafK > 0.5 ) {
   // the scan's own bark colour is in the vertex colour; the bark tile adds the detail around it
   vec4 bk = texture2D( uBark, vTUv );
   diffuseColor.rgb *= 0.45 + bk.a * 1.1;
+  // (the scans' boles are a warm orange-brown that reads as painted clay in sun: real park bark is a
+  // grey-brown, darker in its furrows)
+  diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.55, 0.15 ) ) ), diffuseColor.rgb, 0.45 ) * vec3( 0.74, 0.72, 0.69 ) * ( 0.7 + 0.45 * bk.a );
   diffuseColor.rgb *= mix( 1.0, 0.55, uWet );
 }
 `,
@@ -631,7 +635,7 @@ roughnessFactor *= mix( 1.0, mix( 0.8, 0.55, leafK ), uWet );`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-tree-3d-v14';
+  mat.customProgramCacheKey = () => 'apex-tree-3d-v16';
   return mat;
 }
 

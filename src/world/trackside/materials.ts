@@ -1135,7 +1135,7 @@ float gRake = 0.0;
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.11, 0.73));
   vec4 mC = texture2D(uMacro, vTrk * (1.0 / 7.0) + vec2(0.52, 0.33));
   // fresher, paler gravel in patches; darker, dirtier and finer elsewhere
-  col *= (0.72 + 0.46 * mA.r + 0.3 * (mB.b - 0.5) + 0.16 * (mC.b - 0.5)) * mix(vec3(1.06, 1.0, 0.9), vec3(0.95, 0.98, 1.04), mA.a);
+  col *= (0.72 + 0.46 * mA.r + 0.3 * (mB.b - 0.5) + 0.16 * (mC.b - 0.5)) * mix(vec3(1.03, 1.0, 0.95), vec3(0.97, 0.99, 1.03), mA.a);
   // jagged edge toward the grass (vA1.y = metres to the gravel's outer edge)
   float n = texture2D(uMacro, vTrk / 6.0 + vec2(0.3, 0.1)).b;
   if (vA1.y < n * 0.9 - 0.1 - gh * 0.25) discard;
@@ -1147,8 +1147,9 @@ float gRake = 0.0;
   float rk = vTrk.x * 6.2831 / 0.42 + 2.5 * mB.b + 1.6 * mC.b;
   float px = length(fwidth(vTrk));
   float rakeAmt = (1.0 - smoothstep(0.02, 0.07, px)) * (0.25 + 0.75 * mA.r) * smoothstep(0.25, 0.6, mB.r * 0.7 + mC.r * 0.5);
-  gRake = cos(rk) * rakeAmt * 0.45;
-  col *= 1.0 + 0.06 * sin(rk) * rakeAmt;
+  // (fainter: over the photographed stone the ridges read as dark bands painted on the bed)
+  gRake = cos(rk) * rakeAmt * 0.22;
+  col *= 1.0 + 0.03 * sin(rk) * rakeAmt;
   // furrows where cars ran wide into the bed (vA1.x = metres from the inner edge)
   {
     float cid = floor(vTrk.y / 40.0);
@@ -1178,12 +1179,14 @@ float gRake = 0.0;
     col *= 1.0 - far * 0.24 * smoothstep(0.5, 0.85, mB.g);
     // and the bed is never one stone: grey limestone in one load, brown river gravel in the next
     col = mix(col, col * vec3(0.86, 0.9, 0.98), smoothstep(0.4, 0.75, mA.g) * 0.6);
-    col = mix(col, col * vec3(1.08, 0.96, 0.82), smoothstep(0.55, 0.25, mA.g) * 0.25);
+    col = mix(col, col * vec3(1.05, 0.98, 0.9), smoothstep(0.55, 0.25, mA.g) * 0.2);
   }
   // (a grey-beige river gravel, not a sand-yellow: a shade deeper and greyer than it was — under the
   // richer grade a trap read as a pale beige plane, where the sims' (and the TV's) gravel is a
   // stony mid-grey-brown that holds its grain)
-  diffuseColor.rgb = col * vec3(0.72, 0.69, 0.64);
+  // (2026-11-11: paler and greyer with the new photograph — Monza's traps are a light grey-buff
+  // chipping; 0.72/0.69/0.64 over a warm texture came out an orange-brown earth)
+  diffuseColor.rgb = col * vec3(0.8, 0.785, 0.755);
   roughnessFactor = rough;
 }
 `;
@@ -1202,7 +1205,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-12', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
+  patchGround(m, 'apex-ts-gravel-13', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
