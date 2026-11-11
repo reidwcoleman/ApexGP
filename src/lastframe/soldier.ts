@@ -54,10 +54,49 @@ export async function loadGuns() {
           mat.normalScale.set(0.16, 0.16);
         }
         if (mat.map) mat.map.anisotropy = 8;
+        worn(mat);
       }
     }
   });
   for (const c of g.scene.children) template.set(c.name, c);
+}
+
+/**
+ * A gun that has been carried: the finish gone to bare metal along its edges and corners, scuffs and scratches along
+ * its length, dust settled where nothing rubs. Laid over whatever the model came with.
+ */
+function worn(mat: THREE.MeshStandardMaterial) {
+  const prev = mat.onBeforeCompile, key = mat.customProgramCacheKey?.() ?? '';
+  mat.onBeforeCompile = (s, r) => {
+    prev?.call(mat, s, r);
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGunP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGunP = position;');
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vGunP;
+float gWear;
+float gunH( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
+float gunN( vec3 p ) {
+  vec3 i = floor( p ), f = fract( p );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( gunH( i ), gunH( i + vec3( 1, 0, 0 ) ), f.x ), mix( gunH( i + vec3( 0, 1, 0 ) ), gunH( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+    mix( mix( gunH( i + vec3( 0, 0, 1 ) ), gunH( i + vec3( 1, 0, 1 ) ), f.x ), mix( gunH( i + vec3( 0, 1, 1 ) ), gunH( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+{
+  // how sharply the surface turns here: an edge or a corner is where the finish goes first
+  float turn = length( fwidth( normalize( vNormal ) ) ) / max( length( fwidth( vViewPosition ) ), 1e-5 );
+  float edge = smoothstep( 45.0, 190.0, turn );
+  float n1 = gunN( vGunP * 260.0 ), n2 = gunN( vGunP * vec3( 46.0, 46.0, 9.0 ) ), n3 = gunN( vGunP * vec3( 300.0, 300.0, 14.0 ) + 9.0 );
+  float scuff = smoothstep( 0.66, 0.86, n2 ) * ( 0.35 + 0.65 * n1 ) * 0.55 + smoothstep( 0.9, 0.97, n3 ) * 0.5;
+  gWear = clamp( edge * ( 0.35 + 0.65 * n1 ) + scuff, 0.0, 1.0 );
+  float dust = smoothstep( 0.45, 0.8, gunN( vGunP * 21.0 + 4.0 ) ) * ( 1.0 - gWear ) * 0.22;
+  diffuseColor.rgb = mix( diffuseColor.rgb * ( 0.85 + 0.3 * n1 ), vec3( 0.3, 0.3, 0.31 ), gWear * 0.6 );
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.16, 0.15, 0.13 ), dust );
+}`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, gWear * 0.8 );')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.9, gWear * 0.7 );');
+  };
+  mat.customProgramCacheKey = () => key + 'worn';
 }
 
 /** a tiling height field of fine grain, as a normal map: a few octaves of value noise, wrapped */
@@ -234,11 +273,48 @@ function weave() {
   return t;
 }
 const nylon = weave();
-const gearMat = [0x4a5264, 0x6e5e44].map((c) => {
-  const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, normalMap: nylon, vertexColors: true });
+const GEAR_COLOR = [0x4a5264, 0x6e5e44];
+const GEAR_NOISE = /* glsl */ `
+float gearH( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
+float gearN( vec3 p ) {
+  vec3 i = floor( p ), f = fract( p );
+  f = f * f * ( 3.0 - 2.0 * f );
+  return mix( mix( mix( gearH( i ), gearH( i + vec3( 1, 0, 0 ) ), f.x ), mix( gearH( i + vec3( 0, 1, 0 ) ), gearH( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+    mix( mix( gearH( i + vec3( 0, 0, 1 ) ), gearH( i + vec3( 1, 0, 1 ) ), f.x ), mix( gearH( i + vec3( 0, 1, 1 ) ), gearH( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z );
+}`;
+/** what's worn over the body, one material a soldier: it takes the blood of the wounds under it */
+function gearMaterial(team: number, wounds: { value: THREE.Vector4[] }) {
+  const m = new THREE.MeshStandardMaterial({ color: GEAR_COLOR[team] ?? GEAR_COLOR[0], roughness: 0.82, normalMap: nylon, vertexColors: true });
   m.normalScale.set(0.7, 0.7);
+  m.userData.gear = true;
+  m.onBeforeCompile = (s) => {
+    s.uniforms.lfWound = wounds;
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGearP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGearP = position;');
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGearP;\nuniform vec4 lfWound[ 4 ];\nfloat gSoak;' + GEAR_NOISE)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+gSoak = 0.0;
+for ( int wi = 0; wi < 4; wi++ ) {
+  vec4 w = lfWound[ wi ];
+  if ( w.w > 0.001 ) {
+    // the nylon over a wound: a hole, and what comes up through the weave round it, further down than up
+    vec3 dp = vGearP - w.xyz;
+    dp.y *= dp.y > 0.0 ? 1.7 : 0.55;
+    dp.z *= 0.45;
+    float r = w.w * 1.25;
+    float d = length( dp ) + ( gearN( vGearP * 48.0 ) - 0.5 ) * r * 0.7 + ( gearN( vGearP * 210.0 ) - 0.5 ) * 0.012;
+    float soak = smoothstep( r, r * 0.5, d );
+    float core = smoothstep( r * 0.42, r * 0.12, d );
+    vec3 bc = mix( vec3( 0.075, 0.006, 0.006 ), vec3( 0.11, 0.003, 0.004 ), core );
+    diffuseColor.rgb = mix( diffuseColor.rgb, mix( diffuseColor.rgb * vec3( 0.5, 0.1, 0.09 ), bc, 0.6 + 0.3 * core ), soak * 0.94 );
+    gSoak = max( gSoak, soak * ( 0.4 + 0.6 * core ) );
+  }
+}`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
+  };
+  m.customProgramCacheKey = () => 'lfgear';
   return applyLF(m);
-});
+}
 
 /** a body: walks, turns, holds a gun, falls */
 export class Soldier {
@@ -256,6 +332,9 @@ export class Soldier {
   kick = 0;
   /** 0 on the fore-end ... 1 down at the magazine */
   magHand = 0;
+  /** first person: the support hand leaves the gun and goes up to the camera on the chest, 0 to 1, and where that is */
+  camHand = 0;
+  readonly camAt = new THREE.Vector3();
   /** seconds since death, -1 alive */
   dead = -1;
   private clip = '';
@@ -275,13 +354,19 @@ export class Soldier {
   private hitDir = new THREE.Vector3();
   /** from inside, only the arms and legs are drawn */
   private fpHide = { value: 0 };
+  /** where rounds went in, in the body's own rest pose, and how far each has soaked: the cloth takes it up and it spreads */
+  private wounds = { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] };
+  private woundTo = [0, 0, 0, 0];
+  private woundI = 0;
+  private face = 0;
+  private marks: { neckY: number; chestY: number; waistY: number; wrist: THREE.Vector3 } | null = null;
 
   constructor(kit: PeopleKit, readonly team: number, slot: number) {
     this.person = new Person(kit, lookFor(team, slot));
     this.person.lively = true;
     this.root.add(this.person.root);
     this.root.add(this.holder);
-    const gm = gearMat[team] ?? gearMat[0];
+    const gm = gearMaterial(team, this.wounds);
     const P0 = this.person;
     const worn = new THREE.SkinnedMesh(outfitGeometry(team * 2 + (slot % 2), P0), gm);
     worn.bind(P0.skeleton, P0.body.bindMatrix);
@@ -294,12 +379,16 @@ export class Soldier {
         const bm = this.person.body.material as THREE.MeshStandardMaterial;
     const before = bm.onBeforeCompile, key = bm.customProgramCacheKey();
     const hide = this.fpHide;
+    const wounds = this.wounds;
+    const cl = bm.userData.cloth as { uL0: { value: THREE.Vector4 }; uL1: { value: THREE.Vector3 } } | undefined;
+    if (cl) this.marks = { neckY: cl.uL0.value.x, chestY: cl.uL0.value.y, waistY: cl.uL0.value.z, wrist: cl.uL1.value };
     const mask = { value: team === 0 ? new THREE.Vector4(0.015, 0.016, 0.02, 1) : new THREE.Vector4(0.07, 0.05, 0.035, 2) };
     bm.onBeforeCompile = (s, r) => {
       before.call(bm, s, r);
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nvoid main() {\n  if ( lfFP > 0.5 && vPart < 2.5 ) discard;');
+      s.uniforms.lfWound = wounds;
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.08 + 0.16 * fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -308,9 +397,64 @@ export class Soldier {
     gCloth = max( gCloth, cover );
     cloth = max( cloth, cover );
   }
+  gBump = 0.0;
+  // gloves in the hand: worn leather, paler where it creases and rubs, a fine grain all over
+  if ( part > 4.5 && part < 5.5 && uK.y > 0.5 ) {
+    float gr = apNoise( vRest * 1100.0 ) * 0.6 + apNoise( vRest * 380.0 ) * 0.4;
+    float crease = apNoise( vRest * 170.0 );
+    float wear = smoothstep( 0.98, 1.16, det ) * 0.5 + apNoise( vRest * 55.0 ) * 0.25;
+    col = col * ( 0.8 + 0.3 * gr ) * ( 0.85 + 0.3 * crease ) + vec3( 0.05, 0.045, 0.04 ) * wear;
+    gRough = mix( 0.46, 0.8, gr ) + wear * 0.1;
+    gBump = gr * 0.00035 + crease * 0.0012;
+    gSheen = 0.0;
+  } else if ( cloth > 0.5 && part > 0.5 && part < 7.5 ) {
+    // cloth that has been worn and slept in: it rucks up in folds across a limb, darker down in them, and the weave
+    // shows this close. (The avatar's own cloth is as smooth as a balloon.)
+    vec3 ra = vec3( abs( vRest.x ), vRest.y, vRest.z );
+    bool arm = part > 2.5 && part < 4.5;
+    vec3 ax = arm ? normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) ) : vec3( 0.0, 1.0, 0.0 );
+    float along = dot( ra, ax );
+    vec3 q = ra + ax * along * ( arm ? 2.6 : part > 5.5 ? 1.6 : 0.4 );
+    float f1 = apNoise( q * 9.0 ), f2 = apNoise( q * 23.0 + 7.0 ), f3 = apNoise( q * 61.0 + 3.0 );
+    float fold = f1 * 0.55 + f2 * 0.3 + f3 * 0.15;
+    float fine = apNoise( vRest * 1400.0 ) * 0.5 + 0.5 * ( 0.5 + 0.5 * sin( ( vRest.x + vRest.y * 0.6 + vRest.z ) * 5200.0 ) );
+    float seen = 1.0 / ( 1.0 + length( fwidth( vRest ) ) * 2600.0 );
+    col *= ( 0.7 + 0.46 * fold ) * mix( 1.0, 0.86 + 0.28 * fine, seen );
+    // dust and wear lighten what sticks out
+    col += vec3( 0.02, 0.019, 0.017 ) * smoothstep( 0.55, 0.9, fold );
+    gBump = fold * 0.006 + fine * 0.00022 * seen;
+    gRough = min( 1.0, gRough + 0.1 );
+    gSheen *= 0.3;
+  }
+  // rounds that went in: a dark wet patch where each did, soaked out through the cloth and run down from it
+  for ( int wi = 0; wi < 4; wi++ ) {
+    vec4 w = lfWound[ wi ];
+    if ( w.w > 0.001 ) {
+      vec3 dp = vRest - w.xyz;
+      dp.y *= dp.y > 0.0 ? 1.7 : 0.55;
+      dp.z *= 0.5;
+      float d = length( dp ) + ( apNoise( vRest * 48.0 ) - 0.5 ) * w.w * 0.7 + ( apNoise( vRest * 210.0 ) - 0.5 ) * 0.012;
+      float soak = smoothstep( w.w, w.w * 0.5, d );
+      float core = smoothstep( w.w * 0.42, w.w * 0.12, d );
+      // cloth that has drunk it goes dark and a dull red; only the middle, still coming, is wet and bright
+      vec3 bc = mix( vec3( 0.075, 0.006, 0.006 ), vec3( 0.11, 0.003, 0.004 ), core ) * ( 0.85 + 0.3 * apNoise( vRest * 300.0 ) );
+      col = mix( col, mix( col * vec3( 0.5, 0.1, 0.09 ), bc, 0.6 + 0.3 * core ), soak * 0.94 );
+      gRough = mix( gRough, mix( 0.5, 0.16, core ), soak );
+      gSheen *= 1.0 - soak;
+    }
+  }
   diffuseColor.rgb *= col;`);
+      // that height, onto the normal
+      s.fragmentShader = s.fragmentShader.replace('#include <lights_physical_fragment>', `{
+  vec3 bsx = dFdx( -vViewPosition ), bsy = dFdy( -vViewPosition );
+  vec3 br1 = cross( bsy, normal ), br2 = cross( normal, bsx );
+  float bdet = dot( bsx, br1 );
+  vec3 bgrad = sign( bdet ) * ( dFdx( gBump ) * br1 + dFdy( gBump ) * br2 );
+  normal = normalize( abs( bdet ) * normal - bgrad );
+}
+#include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp2';
+    bm.customProgramCacheKey = () => key + 'fp7';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
@@ -335,8 +479,33 @@ export class Soldier {
     this.holder.add(g.group);
   }
 
+  /** a round went in: `dir` the way it was going, `k` how bad. It shows on the body, and spreads */
+  wound(zone: number, dir: THREE.Vector3, k = 1) {
+    const M = this.marks;
+    if (!M) return;
+    const r = () => Math.random() - 0.5;
+    // from the front if it was coming at where they face
+    const front = dir.x * Math.sin(this.face) + dir.z * Math.cos(this.face) < 0 ? 1 : -1;
+    const side = Math.random() < 0.5 ? 1 : -1;
+    const at = new THREE.Vector3();
+    if (zone === 0) at.set(r() * 0.1, M.neckY + 0.11 + Math.random() * 0.1, front * 0.07);
+    else if (zone === 2) at.set(0.19, M.neckY - 0.06, -0.02).lerp(new THREE.Vector3(Math.abs(M.wrist.x), M.wrist.y, M.wrist.z), 0.2 + Math.random() * 0.6).multiply(new THREE.Vector3(side, 1, 1));
+    else if (zone === 4) at.set(side * (0.08 + Math.random() * 0.05), 0.32 + Math.random() * 0.5, front * 0.05);
+    else at.set(r() * 0.26, M.waistY + 0.04 + Math.random() * (M.chestY - M.waistY + 0.08), front * 0.09);
+    const put = (p: THREE.Vector3, to: number) => {
+      const i = this.woundI;
+      this.woundI = (i + 1) % 4;
+      this.wounds.value[i].set(p.x, p.y, p.z, 0.012);
+      this.woundTo[i] = to;
+    };
+    put(at, (0.045 + Math.random() * 0.03) * k);
+    // and out the other side, larger, when it had the power to go through
+    if (k > 1.2 && zone !== 2) put(at.clone().setZ(-at.z * 1.1), (0.07 + Math.random() * 0.04) * k);
+  }
+
   revive() {
     this.dead = -1;
+    for (const w of this.wounds.value) w.set(0, 0, 0, 0);
     this.rag?.dispose();
     this.rag = null;
     this.person.root.rotation.set(0, 0, 0);
@@ -392,6 +561,11 @@ export class Soldier {
     if (!this.firstPerson) this.magHand += (((flags & F.reload) ? 1 : 0) - this.magHand) * Math.min(1, dt * 7);
     // facing: yaw 0 looks down -z; the avatar faces +z
     const face = yaw + Math.PI;
+    this.face = face;
+    for (let i = 0; i < 4; i++) {
+      const w = this.wounds.value[i];
+      if (w.w > 0 && w.w < this.woundTo[i]) w.w = Math.min(this.woundTo[i], w.w + dt * (0.004 + (this.woundTo[i] - w.w) * 0.35));
+    }
     if (this.dead >= 0) {
       this.dead += dt;
       this.head.copy(this.rag?.head ?? this.head);
@@ -533,8 +707,16 @@ export class Soldier {
     const pistol = this.weapon === 'pistol';
     const mh = this.magHand;
     const sup = new THREE.Vector3(su[0] + (pistol ? 0.05 : 0.04), su[1] - (pistol ? 0.03 : 0.052) - mh * 0.14, su[2] - 0.06 - mh * (su[2] - 0.08)).applyMatrix4(g.matrixWorld);
+    const ch = this.firstPerson ? this.camHand : 0;
+    if (ch > 0) sup.lerp(this.camAt, ch * ch * (3 - 2 * ch));
     this.reach('L', sup, new THREE.Vector3().copy(right).negate(), 1);
-    this.hold('L', L(-0.62, -0.08, 0.78).normalize(), L(0, pistol ? -0.5 : 0, -1).normalize(), pistol ? 0.9 : 0.72);
+    // on the gun the fingers wrap the fore-end; at the camera they come up open, thumb under it
+    const hf = L(-0.62, -0.08, 0.78).normalize(), hs = L(0, pistol ? -0.5 : 0, -1).normalize();
+    if (ch > 0) {
+      hf.lerp(new THREE.Vector3(0, 1, 0).addScaledVector(right, 0.5).normalize(), ch).normalize();
+      hs.lerp(fwd, ch).normalize();
+    }
+    this.hold('L', hf, hs, (pistol ? 0.9 : 0.72) * (1 - ch * 0.45));
   }
 
   /** aim a hand along `f`, turn it so index-to-little-finger runs along `side`, close the fingers */
@@ -593,7 +775,7 @@ export class Soldier {
 
 const seenMat = new Set<THREE.Material>();
 function applyPeople(m: THREE.MeshStandardMaterial) {
-  if (!m || seenMat.has(m) || gearMat.includes(m as never)) return;
+  if (!m || seenMat.has(m) || m.userData.gear) return;
   seenMat.add(m);
   applyLF(m);
 }

@@ -14,14 +14,14 @@ import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
 import { Graffiti, graffitiFonts, markUp, trenchSigns } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
-const SHAFT_GAIN: Record<string, number> = { ward: 1, motel: 1, block: 1, mansion: 1.1, cove: 0.6, trenches: 0 };
+const SHAFT_GAIN: Record<string, number> = { ward: 0.55, motel: 0.65, block: 0.65, mansion: 0.7, cove: 0.5, trenches: 0 };
 import type { Body } from './hitbox.ts';
 
 interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; lean: number; flags: number; w: number }
@@ -190,7 +190,7 @@ export class Game {
     this.scene.add(this.flashPoint, this.bounce, this.fill);
     const gt = glareTex();
     for (let i = 0; i < 2; i++) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(8.2, 8.7, 9.6), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(3.0, 3.2, 3.5), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
       sp.visible = false;
       this.glares.push(sp);
       this.scene.add(sp);
@@ -323,7 +323,11 @@ export class Game {
     if (wx?.expMax) this.post.exposureMax = wx.expMax;
     if (wx?.sat) this.post.mFinal.uniforms.satK.value = wx.sat;
     this.fx.groundAt = (x, y, z) => L.world.floorAt(x, y, z, 0.01, 0.05, true);
-    this.fx.rayAt = (x, y, z, dx, dy, dz, far) => L.world.ray(x, y, z, dx, dy, dz, far, true, true);
+    // what blood can land on: any wall, thin or thick, but not a door that will swing away or a pane that will break
+    this.fx.rayAt = (x, y, z, dx, dy, dz, far) => {
+      const h = L.world.ray(x, y, z, dx, dy, dz, far, false, true);
+      return h && (h.box.tag === 'door' || h.box.tag === 'glass') ? L.world.ray(x, y, z, dx, dy, dz, far, true, true) : h;
+    };
     this.fx.lensHit = (k) => {
       this.lensBlood = Math.min(1.2, this.lensBlood + k);
       this.post.splat();
@@ -714,6 +718,7 @@ export class Game {
         if (a) a.info.hp = e.hp;
         if (e.s === this.mySlot) this.me.hp = e.hp;
         if (a?.soldier && e.s !== this.mySlot) a.soldier.flinch(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]));
+        if (a?.soldier && e.zone !== ZONE.blast && e.dmg > 0) a.soldier.wound(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]));
         if (e.s === this.mySlot) {
           this.hurt = Math.min(1, this.hurt + 0.42 + e.dmg / 90);
           this.me.hurt(e.dir, e.zone, e.dmg, e.bleed ?? 0);
@@ -747,10 +752,11 @@ export class Game {
           if (e.s === this.mySlot) running.set(this.me.m.vx, this.me.m.vy, this.me.m.vz);
           const spec = e.w >= 0 ? WEAPONS[WEAPON_LIST[e.w]] : null;
           const shove = spec ? spec.shove * (spec.pellets > 1 ? 9 : 1) * (e.dist < 6 ? 1.5 : 1) * 3 : 60;
+          if (e.zone !== ZONE.blast) s.wound(e.zone, d, 1.5);
           s.kill(this.phys, running, e.zone, d, shove);
           const y = e.zone === 0 ? 1.62 : e.zone === 4 ? 0.7 : 1.2;
           // what the round carries past lands on whatever is behind them
-          const h = this.L.world.ray(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2, true, true);
+          const h = this.fx.rayAt(a.x, a.y + y, a.z, d.x, d.y * 0.4 - 0.1, d.z, 3.2);
           this.fx.blood(a.x, a.y + y, a.z, d.x, d.y, d.z, h ? { x: a.x + d.x * h.t, y: a.y + y + (d.y * 0.4 - 0.1) * h.t, z: a.z + d.z * h.t, nx: h.nx, ny: h.ny, nz: h.nz } : undefined, e.zone === 0 ? 2.2 : 1.6);
           // it runs out of them onto the floor, then pools
           const died = a.deadAt;
@@ -873,10 +879,10 @@ export class Game {
     this.sound.dread(this.cam.position, this.cam.position.y < -1, dt, this.inMatch && !outside);
     this.thunderT -= dt;
     if (this.thunderT <= 0 && (this.L.map.weather?.rain ?? 1) > 0) {
-      this.thunderT = 22 + Math.random() * 40;
-      const near = Math.random();
-      const n = 1 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < n; i++) this.flashes.push(this.time + i * (0.09 + Math.random() * 0.25), 0.05 + Math.random() * 0.08, (3 + near * 9) * (i === 0 ? 1 : 0.6));
+      // now and then, one sheet of it a long way off: not a strobe
+      this.thunderT = 70 + Math.random() * 110;
+      const near = Math.random() * 0.6;
+      this.flashes.push(this.time, 0.35 + Math.random() * 0.25, 1.6 + near * 3);
       this.sound.thunder(0.4 + (1 - near) * 3.2, near);
     }
     let f = 0;
@@ -1136,7 +1142,7 @@ export class Game {
           a.dripD += md + dt * 0.12;
           if (a.dripD > 0.85) {
             a.dripD = 0;
-            this.fx.drip(body.x, body.y + 0.9, body.z);
+            this.fx.drip(body.x, body.y + 0.9, body.z, s === this.mySlot ? me.m.vx : -Math.sin(a.moveYaw) * a.speed, s === this.mySlot ? me.m.vz : -Math.cos(a.moveYaw) * a.speed);
           }
         }
       }
@@ -1177,6 +1183,7 @@ export class Game {
     u.whiteout.value = Math.min(1.4, this.whiteout);
     u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 + me.supK * 0.3 : 0.35));
     u.fish.value = THREE.MathUtils.lerp(0.85, 0.3, me.alive ? me.adsK : 0);
+    u.cover.value = me.alive ? me.fixK : 0;
     const outside = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street';
     this.wet += ((outside ? 1 : 0) - this.wet) * Math.min(1, dt * (outside ? 0.5 : 0.8));
     const wx = this.L.map.weather;
@@ -1284,6 +1291,7 @@ export class Game {
         a.step = 0;
         const quiet = (a.flags & F.crouch) ? 0.25 : 1;
         this.sound.step(this.tmp.set(a.x, a.y, a.z), this.surfaceAt(a.x, a.y, a.z), a.speed, quiet * 1.6);
+        this.fx.tread(s, a.x, a.y, a.z, a.moveYaw);
       }
     }
   }
@@ -1350,22 +1358,13 @@ export class Game {
       } else if (a <= 0) {
         continue;
       } else if (a > 0.3) {
-        // a tube: on, then a stutter, then dark for a while, then it catches again
-        if (f.t <= 0) {
-          if (f.off > 0) {
-            f.off = 0;
-            f.t = 0.6 + Math.random() * (7 - a * 4);
-          } else {
-            f.off = Math.random() < a * 0.5 ? 0.4 + Math.random() * 2.2 * a : 0.05 + Math.random() * 0.25;
-            f.t = f.off;
-          }
-        }
-        const stutter = f.off > 0 ? (Math.sin(performance.now() * 0.09 + f.base.r * 10) > 0.6 - (f.off > 0.4 ? 1 : 0) ? 0.15 : 1) : Math.random() < 0.01 * a ? 0.6 : 0;
-        f.k = Math.min(1, stutter) * Math.min(1, a + 0.2);
+        // a tube on its last legs: it used to stutter and go out, over and over, and that's all anyone saw of the place.
+        // Now it only wavers, slowly, a few parts in a hundred
+        f.k = Math.max(0, 0.035 + 0.035 * Math.sin(performance.now() * 0.0011 + f.base.r * 40) + 0.02 * Math.sin(performance.now() * 0.0047 + f.base.g * 23)) * Math.min(1, a);
       } else {
         // a flame: never out, never still
         const n = Math.sin(performance.now() * 0.011 + f.base.g * 31) * 0.5 + Math.sin(performance.now() * 0.027 + f.base.b * 17) * 0.5;
-        f.k = Math.max(0, n * a * 1.6 + (Math.random() - 0.5) * a * 0.6);
+        f.k = Math.max(0, n * a * 0.8 + 0.12 * a);
       }
       f.mat.color.copy(f.base).multiplyScalar(1 - f.k * 0.94);
     }
@@ -1457,7 +1456,7 @@ export class Game {
     this.flares(dt);
     // the air sees the same flashlight and the same flash
     if (me.alive && me.light) {
-      AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.09);
+      AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.12);
       AIR.beamD.value.copy(me.barrel);
     } else AIR.beamP.value.w = 0;
     this.shafts?.update(this.time, this.cam, (l) => { const f = this.flickOf.get(l as never); return f ? (f.dead ? 1 - f.k : 1 - f.k * 0.94) : 1; });
@@ -1466,7 +1465,7 @@ export class Game {
     if (me.alive && me.light) {
       const hit = this.L.world.ray(me.lightPos.x, me.lightPos.y, me.lightPos.z, me.barrel.x, me.barrel.y, me.barrel.z, 16);
       const t = hit ? hit.t : 16;
-      const wantI = 52 * Math.min(1, Math.pow(Math.min(t, 7) / 5, 1.25) + 0.05);
+      const wantI = 30 * Math.min(1, Math.pow(Math.min(t, 7) / 5, 1.25) + 0.05);
       s.intensity += (wantI - s.intensity) * Math.min(1, dt * 9);
       s.position.copy(me.lightPos);
       s.target.position.copy(me.lightPos).addScaledVector(me.barrel, 5);
@@ -1483,7 +1482,7 @@ export class Game {
       }
       const want = hit ? 1.5 * Math.min(1, t / 1.2) : 0;
       this.bounceK += (want - this.bounceK) * Math.min(1, dt * 10);
-      b.intensity = this.bounceK * (s.intensity / 52);
+      b.intensity = this.bounceK * (s.intensity / 30) * 0.8;
     } else {
       s.intensity = 0;
       this.bounceK = 0;
@@ -1502,7 +1501,7 @@ export class Game {
         o.intensity = 0;
         return;
       }
-      o.intensity = 40;
+      o.intensity = 22;
       const yaw = a.yaw, cp = Math.cos(a.pitch);
       const f = this.tmp.set(-Math.sin(yaw) * cp, Math.sin(a.pitch), -Math.cos(yaw) * cp);
       // the light is on the gun: forward of the chest, a little to the right, a little low
@@ -1525,7 +1524,7 @@ export class Game {
       u.time.value = this.time;
       u.axis.value.set(dx / dl, dy / dl, dz / dl);
     });
-    this.flashPoint.intensity = this.flashK * 14;
+    this.flashPoint.intensity = this.flashK * 7;
     this.flashK = Math.max(0, this.flashK - dt * 110);
     // the fill stands behind and above the lens: from there the near arm and the far hand get much the same of it,
     // where a light among the arms burnt whatever passed closest white
@@ -1552,7 +1551,7 @@ export class Game {
       if (!g.visible) return;
       g.position.copy(o.position);
       g.material.opacity = Math.min(1, kw * 0.75 + k) * this.glareVis[i];
-      g.scale.setScalar((0.1 + kw * 0.32 + k * 1.6) * Math.min(1.2, d / 3 + 0.45));
+      g.scale.setScalar((0.1 + kw * 0.3 + k * 0.85) * Math.min(1.2, d / 3 + 0.45));
     });
   }
 

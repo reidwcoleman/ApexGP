@@ -813,9 +813,9 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     return new Pane(i, mesh, box, g.axis as 'x' | 'y');
   });
   // what glows: tube covers and bulbs, so the bloom has something to hold on to
-  const tube = new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 8, 9) });
-  const bulb = new THREE.MeshBasicMaterial({ color: new THREE.Color(14, 9, 5) });
-  const sodium = new THREE.MeshBasicMaterial({ color: new THREE.Color(46, 26, 9) });
+  const tube = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.5, 2.8) });
+  const bulb = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.6, 2.5, 1.5) });
+  const sodium = new THREE.MeshBasicMaterial({ color: new THREE.Color(8, 4.6, 1.7) });
   const flicks: Flicker[] = [];
   for (const l of map.lights) {
     let mesh: THREE.Mesh;

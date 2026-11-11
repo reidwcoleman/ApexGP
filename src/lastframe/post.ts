@@ -289,7 +289,7 @@ void main() {
     B += rf * 0.25 * ssrK * fog.a * ( 1.0 - air.a );
   }
   vec2 uc = uv + jit;
-  vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 40.0 ) );
+  vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 24.0 ) );
   vec3 n = min( texture2D( tSrc, uc + vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) ), s = min( texture2D( tSrc, uc - vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) );
   vec3 e = min( texture2D( tSrc, uc + vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) ), w = min( texture2D( tSrc, uc - vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) );
   // a glint one pixel wide on chrome is brighter than the lamp it came from: hold it to a few times what's round it
@@ -434,6 +434,7 @@ uniform float feedCut;
 uniform float grainK;
 uniform float lensWet;
 uniform float lensBlood;
+uniform float cover;
 uniform vec3 bloodSeed;
 uniform vec2 shutter;
 uniform vec3 flare;
@@ -554,7 +555,7 @@ void main() {
   // grease and dust on the housing's window: nothing in the dark, a smeared glow round anything bright
   vec2 dq = vUv * vec2( aspect, 1.0 );
   float dirt = smoothstep( 0.42, 0.95, vnoise( dq * 3.1 + 7.0 ) * 0.65 + vnoise( dq * 7.3 ) * 0.35 ) + step( 0.9965, hash( floor( dq * 140.0 ) ) ) * 0.6;
-  vec3 hdr = c + bloom * ( 0.085 + dirt * 0.32 ) + whiteout * 9.0;
+  vec3 hdr = c + bloom * ( 0.06 + dirt * 0.16 ) + whiteout * 9.0;
   if ( flare.z > 0.003 ) {
     // the sun in a cheap plastic lens: a veil across the frame, the iris's star, and ghosts strung along the line through the centre
     vec2 A = vec2( aspect, 1.0 );
@@ -605,6 +606,12 @@ void main() {
     float bm = splatter( vec2( vUv.x * aspect, vUv.y ), aspect ) * clamp( lensBlood * 1.3, 0.0, 1.0 );
     // seen through: what's behind goes dark red, and a lamp still shines through it
     col = mix( col, col * vec3( 0.42, 0.03, 0.025 ) + vec3( 0.03, 0.0, 0.0 ), bm * 0.88 );
+  }
+  if ( cover > 0.0 ) {
+    // a gloved hand on the camera: too close to be anything but a dark shape coming up over the bottom of the picture
+    vec2 hq = vec2( ( vUv.x - 0.2 ) * aspect, vUv.y + 0.5 - cover * 0.42 );
+    float hm = smoothstep( 0.66, 0.3, length( hq * vec2( 0.7, 1.0 ) ) ) * smoothstep( 0.0, 0.3, cover );
+    col = mix( col, col * 0.04 + vec3( 0.004, 0.004, 0.005 ), hm * 0.95 );
   }
   // hurt: the world drains and the lens darkens
   float hl = dot( col, vec3( 0.3, 0.59, 0.11 ) );
@@ -669,7 +676,7 @@ export class Post {
   private qs = new THREE.Scene();
   private mDown = pass(DOWN, { tSrc: { value: null }, px: { value: new THREE.Vector2() }, first: { value: 0 } });
   private mUp = pass(UP, { tSrc: { value: null }, tAdd: { value: null }, px: { value: new THREE.Vector2() }, k: { value: 1 } });
-  private mExp = pass(EXPO, { tSrc: { value: null }, tFine: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 }, key: { value: 0.115 }, maxE: { value: 8.5 }, hiKey: { value: 0.75 } });
+  private mExp = pass(EXPO, { tSrc: { value: null }, tFine: { value: null }, tPrev: { value: null }, dt: { value: 0 }, cut: { value: 1 }, key: { value: 0.115 }, maxE: { value: 8.5 }, hiKey: { value: 0.6 } });
   /** how bright the camera wants the scene: a night street and an overcast noon aren't metered alike */
   set exposureKey(k: number) {
     this.mExp.uniforms.key.value = k;
@@ -696,7 +703,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();

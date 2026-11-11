@@ -116,7 +116,7 @@ def build():
         """a ceiling tube; flick > 0 means it can't make up its mind"""
         prop('mounted_fluorescent_lights', x, y, z=z - 0.03, rot=0 if along == 'x' else math.pi / 2, part='mounted_fluorescent_lights_a', collide=False)
         if lit:
-            light('area', (x, y, z - 0.06), TUBE, p, size=(1.2, 0.14) if along == 'x' else (0.14, 1.2), flicker=flick, reach=7.5)
+            light('area', (x, y, z - 0.06), TUBE, p * 0.7, size=(1.2, 0.14) if along == 'x' else (0.14, 1.2), flicker=flick, reach=7.5)
 
     def emerg(x, y, z, p=4.0):
         """the red lamp over a door: on its own battery"""
@@ -446,7 +446,7 @@ def build():
     prop('drawer_cabinet', 21.2, 0.5, rot=0, part='drawer_cabinet')
     D('potted_plant_02', 19.0, 5.2, r=1.0)
     D('potted_plant_04', 33.2, 5.3, r=2.0)
-    tube(26.0, 2.6, H1, 22, flick=0.8)
+    tube(26.0, 2.6, H1, 22)
     exit_sign('x', Y0, 26.0, 2.45, 1, t=EXT_T)
     stains((27.6, 4.6, 0.0, 0, 0, 1, 1.7), (24.2, 3.94, 0.6, 0, 1, 0, 1.0), (26.3, 5.0, 0.0, 0, 0, 1, 0.9))
     for i in range(7):
@@ -477,7 +477,7 @@ def build():
     K('gurney_2', 41.0, 4.5, r=1.2, solid=(0.36, 0.98, 0.95))
     D('medical_box', 44.9, 0.5, z=0.0, r=0.4)
     L('metal_stool_01', 38.4, 4.9, r=0.3, kg=4, sf='metal')
-    bulb(40.0, 3.0, H1, 5, WARM, flick=0.5)
+    bulb(40.0, 3.0, H1, 5, WARM)
     stains((39.7, 1.2, 0.62, 0, 0, 1, 0.9), (41.2, 4.4, 0.9, 0, 0, 1, 0.8), (42.6, 3.0, 0.0, 0, 0, 1, 1.5))
 
     # ---- the nurses' station: a counter under the hatch onto the corridor, charts, a lamp left on
@@ -539,7 +539,7 @@ def build():
     counter(X1 - 0.8, 9.2, X1 - 0.14, 14.6, h=0.92, top='plastic_black', body='steel')
     counter(46.6, 10.8, 49.4, 11.6, h=0.92, top='plastic_black', body='steel')
     D('desk_lamp_arm_01', 47.0, 11.2, z=0.97, r=2.0)
-    light('point', (47.1, 11.1, 1.4), WARM, 2.4, radius=0.03, flicker=0.35, reach=4.5)
+    light('point', (47.1, 11.1, 1.4), WARM, 2.4, radius=0.03, reach=4.5)
     D('vintage_microwave', 51.5, 12.0, z=0.97, r=-math.pi / 2)
     L('metal_stool_01', 47.8, 12.4, r=0.3, kg=4, sf='metal')
     L('metal_stool_02', 46.2, 10.2, r=2.0, kg=4, sf='metal')
@@ -549,7 +549,7 @@ def build():
     table(42.2, 19.0, 44.2, 19.8)
     box((43.12, 20.2, 0), (43.28, 20.36, 0.03), 'grate', collide=False, density=0.1)
     K('oplamp', 42.9, 19.6, z=H1, r=0.0)
-    light('spot', (43.2, 19.4, H1 - 1.2), (0.86, 0.96, 1.0), 150, spot=1.5, blend=0.6, radius=0.25, aim=(0.0, 0.0, -1), flicker=0.3, reach=7.5)
+    light('spot', (43.2, 19.4, H1 - 1.2), (0.86, 0.96, 1.0), 80, spot=1.5, blend=0.6, radius=0.25, aim=(0.0, 0.0, -1), reach=7.5)
     prop('industrial_storage_cart', 44.8, 17.0, rot=0.0, collide=(0.8, 0.55, 0.6))
     prop('metal_tool_chest', 45.3, 22.7, rot=math.pi)
     K('iv', 44.8, 20.6, r=1.0, solid=(0.25, 0.25, 1.9))
@@ -575,7 +575,7 @@ def build():
     table(3.0, 28.4, 6.2, 29.4)
     box((6.6, 31.0, 0.0), (8.86, 33.86, 2.5), 'steel', faces={'-y': 'steel'}, density=0.3)
     box((6.9, 30.92, 0.0), (7.9, 31.0, 2.1), 'plastic_black', collide=False, density=0.2)
-    light('point', (7.5, 30.6, 2.2), COLD, 3.0, radius=0.04, flicker=0.6, reach=5.0)
+    light('point', (7.5, 30.6, 2.2), COLD, 3.0, radius=0.04, reach=5.0)
     D('brass_pan_01', 4.0, 28.9, z=0.89)
     D('pot_enamel_01', 5.4, 28.8, z=0.89)
     D('wooden_cutting_board', 4.8, 29.1, z=0.89, r=0.3)
@@ -590,7 +590,7 @@ def build():
         L('dining_chair_02', x, y, r=r, kg=5)
     prop('CoffeeCart_01', 14.8, 32.9, rot=math.pi)
     D('vintage_microwave', 10.4, 31.95, z=1.0, r=math.pi)
-    bulb(14.0, 29.6, H1, 4.5, WARM, flick=0.55)
+    bulb(14.0, 29.6, H1, 4.5, WARM)
     # ---- the chapel: pews, the altar, candles someone lit tonight, the lancets with a fire burning outside them
     for row in range(4):
         for side in (-1, 1):
@@ -623,7 +623,7 @@ def build():
     table(38.2, 28.4, 39.1, 30.4, sheet=True)
     table(40.6, 28.4, 41.5, 30.4)
     box((39.8, 29.3, 0), (39.96, 29.46, 0.03), 'grate', collide=False, density=0.1)
-    tube(39.8, 29.4, H1, 30, along='y', flick=1.0)
+    tube(39.8, 29.4, H1, 30, along='y')
     m.stairs(MST[0], MST[1], MST[2] - 0.6, MST[3], BZ, 0.0, '-x', mat='concstep')
     guard('x', MST[1] - 0.05, MST[0], MST[2], 0.0, h=1.0)
     guard('y', MST[2] + 0.05, MST[1], MST[3], 0.0, h=1.0)
@@ -640,7 +640,7 @@ def build():
     prop('hand_truck', 50.4, 33.0, rot=0.4)
     prop('tool_cart', 44.2, 30.6, rot=1.5)
     prop('power_box_01', 43.2, 31.6, z=1.2, rot=math.pi / 2, part='power_box_01_box', collide=False)
-    bulb(47.0, 30.0, H1, 6, COLD, flick=0.0, cage=True)
+    bulb(47.0, 30.0, H1, 6, COLD, cage=True)
 
     # ---- the atrium: a planter round a dead tree, benches, the kiosk, a floor that came down from the north gallery
     for (x, y) in ((VX0, VY0), (26.0, VY0), (VX1, VY0), (VX0, VY1), (26.0, VY1), (VX1, VY1), (VX0, 16.0), (VX1, 16.0)):
@@ -691,11 +691,11 @@ def build():
         x = RX0 + 0.4 + i * 0.9
         box((x, VY1 - 0.3, F2 - SLAB - R.uniform(0.2, 0.9)), (x + 0.1, VY1 + 0.1, F2 - 0.02), 'ruststeel', collide=False, density=0.15)
     # a site light in the south-west corner, across the floor: every column throws a bar of shadow
-    site_light(16.6, 10.2, 0.0, (1.0, 0.62), p=300.0)
+    site_light(16.6, 10.2, 0.0, (1.0, 0.62), p=130.0)
     # and the chain lamp from the trusses, low over the tree
     box((25.19, 16.19, 4.74), (25.21, 16.21, LANT - 0.5), 'steel', collide=False, density=0.05)
     prop('caged_hanging_light', 25.2, 16.2, z=4.6, collide=False)
-    light('point', (25.2, 16.2, 4.33), COLD, 9, radius=0.08, flicker=0.45, reach=9.0)
+    light('point', (25.2, 16.2, 4.33), COLD, 6, radius=0.08, reach=9.0)
     exit_sign('x', SY1, 26.0, 2.62, 1, t=0.2)
     exit_sign('x', NY0, 26.0, 2.62, -1, t=0.2)
     stains((24.6, 12.2, 0.0, 0, 0, 1, 1.6), (27.3, 18.0, 0.9, 0, 0, 1, 0.8), (29.6, 17.0, 0.0, 0, 0, 1, 1.4), (20.2, 21.0 - 0.3, 1.1, 0, -1, 0, 1.1))
@@ -724,9 +724,9 @@ def build():
         K('sign', x, (SY0 + SY1) / 2, z=H1, r=math.pi / 2)
     for x in (11.0, 41.0):
         K('sign', x, (NY0 + NY1) / 2, z=H1, r=-math.pi / 2)
-    for x, p, f, lit in ((5.0, 0, 0, False), (12.0, 24, 0.0, True), (21.0, 0, 0, False), (31.0, 0, 0, False), (40.5, 22, 0.9, True), (48.0, 0, 0, False)):
+    for x, p, f, lit in ((5.0, 0, 0, False), (12.0, 24, 0, True), (21.0, 0, 0, False), (31.0, 0, 0, False), (40.5, 22, 0, True), (48.0, 0, 0, False)):
         tube(x, (SY0 + SY1) / 2 + 0.3, H1, p, flick=f, lit=lit)
-    for x, p, f, lit in ((5.0, 0, 0, False), (16.0, 20, 0.75, True), (26.0, 0, 0, False), (36.0, 0, 0, False), (46.0, 0, 0, False)):
+    for x, p, f, lit in ((5.0, 0, 0, False), (16.0, 20, 0, True), (26.0, 0, 0, False), (36.0, 0, 0, False), (46.0, 0, 0, False)):
         tube(x, (NY0 + NY1) / 2 - 0.3, H1, p, flick=f, lit=lit)
     emerg(26.0, NY1 - 0.14, 2.9, 4.5)
     emerg(X0 + 0.16, 7.3, 2.6, 3.5)
@@ -811,7 +811,7 @@ def build():
     K('screen', 9.0, 17.4, z=Z, r=0.4, solid=(0.95, 0.3, 1.7))
     for y in (11.0, 16.0, 21.0):
         tube(7.5, y, TOP, 0, along='y', lit=False)
-    bulb(7.5, 21.6, TOP, 4.5, WARM, flick=0.5)
+    bulb(7.5, 21.6, TOP, 4.5, WARM)
     stains((6.6, 15.8, Z, 0, 0, 1, 1.9), (1.2, 16.0, Z + 0.62, 0, 0, 1, 0.8), (X0 + 0.12, 18.4, Z + 1.2, 1, 0, 0, 1.4), (9.6, 12.2, Z, 0, 0, 1, 1.2))
     for i in range(8):
         stains((6.9 + i * 0.5, 16.2 + i * 0.42, Z, 0, 0, 1, 0.7))
@@ -843,7 +843,7 @@ def build():
     prop('wooden_bookshelf_worn', 16.5, 4.6, z=Z, rot=-math.pi / 2)
     prop('Sofa_01', 23.6, 0.7, z=Z, rot=0.0)
     D('desk_lamp_arm_01', 20.6, 2.5, z=Z + 0.79, r=2.2)
-    light('point', (20.5, 2.4, Z + 1.2), WARM, 2.4, radius=0.03, flicker=0.3, reach=4.5)
+    light('point', (20.5, 2.4, Z + 1.2), WARM, 2.4, radius=0.03, reach=4.5)
     for y in (1.2, 3.0, 4.8):
         for x in (28.4, 31.0, 33.6):
             if (x, y) == (31.0, 3.0):
@@ -866,9 +866,9 @@ def build():
         prop('worn_metal_rack', x, Y1 - 0.45, z=Z, rot=math.pi)
     L('cardboard_box_01', 45.0, 28.0, z=Z, r=0.6, kg=4, sf='card')
     L('cardboard_box_01', 45.4, 28.5, z=Z, r=1.4, kg=4, sf='card')
-    bulb(47.5, 29.6, TOP, 3.5, WARM, flick=0.6)
+    bulb(47.5, 29.6, TOP, 3.5, WARM)
     # ---- the gallery: a second site light looking down the north side, benches, a trolley at the rail
-    site_light(35.6, 24.6, Z, (-1.0, -0.12), p=220.0, flick=0.25)
+    site_light(35.6, 24.6, Z, (-1.0, -0.12), p=100.0)
     prop('painted_wooden_bench', 22.0, 6.6, z=Z, rot=0.0, collide=(0.6, 0.27, 0.45))
     prop('painted_wooden_bench', 16.0, 16.0, z=Z, rot=-math.pi / 2, collide=(0.6, 0.27, 0.45))
     K('gurney_2', 30.4, 9.4, z=Z, r=math.pi / 2 + 0.3, solid=(0.36, 0.98, 0.95))
@@ -876,7 +876,7 @@ def build():
     L('plastic_monobloc_chair_01', 19.6, 22.6, z=Z, r=2.1, kg=2.5, sf='plastic')
     for x, lit in ((4.0, False), (11.0, False), (41.0, False), (48.0, False)):
         tube(x, (SY0 + SY1) / 2, TOP, 0, lit=lit)
-    tube(8.0, (NY0 + NY1) / 2, TOP, 18, flick=0.85)
+    tube(8.0, (NY0 + NY1) / 2, TOP, 18)
     tube(45.0, (NY0 + NY1) / 2, TOP, 0, lit=False)
     emerg(X0 + 0.16, 24.7, Z + 2.7, 3.0)
     emerg(X1 - 0.16, 7.3, Z + 2.7, 3.0)
@@ -947,8 +947,8 @@ def build():
     for x in (12.0, 26.0, 40.0):
         emerg(x, SY1 - 0.14, BZ + 2.45, 3.2)
     emerg(BRX0 + 0.14, 16.0, BZ + 2.4, 3.0)
-    bulb(18.6, (SY0 + SY1) / 2, BC, 5, WARM, flick=0.5, cage=True)
-    bulb(BRX0 + 1.3, 21.0, BC, 4, COLD, flick=0.7, cage=True)
+    bulb(18.6, (SY0 + SY1) / 2, BC, 5, WARM, cage=True)
+    bulb(BRX0 + 1.3, 21.0, BC, 4, COLD, cage=True)
     K('gurney_1', 30.4, 8.1, z=BZ, r=math.pi / 2 + 0.05, solid=(0.36, 0.98, 0.95))
     L('wheelchair_01', 35.6, 12.0, z=BZ, r=1.0, kg=14, sf='metal')
     # the boiler room: the plant itself, the pilot still lit
@@ -965,7 +965,7 @@ def build():
         for k in range(3):
             box((x + 0.1, BN - 0.92, BZ + 0.2 + k * 0.75), (x + 1.4, BN - 0.9, BZ + 0.85 + k * 0.75), 'steel', tag='under', collide=False, density=0.12)
     table(24.4, 10.6, 25.3, 12.6, z=BZ, sheet=True)
-    tube(25.0, 11.6, TZ, 24, along='y', flick=1.0)
+    tube(25.0, 11.6, TZ, 24, along='y')
     stains((25.4, 12.0, BZ, 0, 0, 1, 2.2), (20.12, 11.0, BZ + 1.0, 1, 0, 0, 1.3), (24.9, 11.2, BZ + 1.1, 0, 0, 1, 0.6))
     # the flooded store: crates standing in black water, one lamp over it
     for (x, y, r) in ((40.0, 13.6, 0.2), (42.4, 14.0, 0.0), (45.4, 13.4, 0.4), (45.8, 10.2, 1.2)):
@@ -977,7 +977,7 @@ def build():
     box((33.0, FY1 - 2.2, BZ), (36.4, FY1 - 0.02, BZ + 2.5), 'hbrick_c', tag='under', density=0.3)
     box((34.2, FY1 - 2.26, BZ + 0.7), (35.2, FY1 - 2.2, BZ + 1.5), 'tar', tag='under', collide=False, density=0.2)
     box((34.3, FY1 - 2.24, BZ + 0.72), (35.1, FY1 - 2.21, BZ + 0.9), 'candle', collide=False, density=0.1)
-    light('point', (34.7, FY1 - 2.7, BZ + 1.0), EMBER, 16, radius=0.2, flicker=0.2, reach=8.0)
+    light('point', (34.7, FY1 - 2.7, BZ + 1.0), EMBER, 10, radius=0.2, flicker=0.2, reach=8.0)
     box((34.5, FY1 - 1.4, BZ + 2.5), (34.9, FY1 - 1.0, TZ), 'ruststeel', tag='under', collide=False, density=0.15)
     K('bodybag_5', 37.6, 29.0, BZ + 0.001, r=0.4)
     K('bodybag_7', 38.4, 28.0, BZ + 0.001, r=1.9)
@@ -1001,22 +1001,22 @@ def build():
     for (x, y) in ((AXc - 1.0, AYc - 2.5), (AXc + 1.0, AYc - 2.5), (AXc - 1.0, AYc + 1.3), (AXc + 1.0, AYc + 1.3)):
         box((x - 0.14, y - 0.4, 0), (x + 0.14, y + 0.4, 0.75), 'plastic_black', collide=False, density=0.15)
     for sx in (-0.7, 0.7):
-        light('spot', (AXc + sx, AYc + 2.2, 0.95), (0.9, 0.95, 1.0), 460, spot=1.15, blend=0.5, radius=0.07, aim=(sx * 0.95, 1.0, 0.09), reach=12.0)
+        light('spot', (AXc + sx, AYc + 2.2, 0.95), (0.9, 0.95, 1.0), 230, spot=1.15, blend=0.5, radius=0.07, aim=(sx * 0.95, 1.0, 0.09), reach=12.0)
     for (x, y, r) in ((6.0, -3.0, 0.0), (9.0, -2.6, 0.1), (44.0, -3.0, -0.1), (47.0, -3.2, 0.0)):
         prop('concrete_road_barrier', x, y, rot=r)
     # the car park's lamp, and the one that's out
     prop('street_lamp_01', 6.0, -5.0, rot=0.0)
-    light('spot', (6.0, -4.5, 6.1), SODIUM, 900, spot=2.3, blend=0.85, radius=0.15, aim=(0.3, 0.3, -1), reach=14.0)
+    light('spot', (6.0, -4.5, 6.1), SODIUM, 520, spot=2.3, blend=0.85, radius=0.15, aim=(0.3, 0.3, -1), reach=14.0)
     prop('street_lamp_01', 48.0, -5.0, rot=0.0)
     # a drum fire in the north yard, outside the chapel's glass
     prop('barrel_03', 26.6, 38.4, rot=0.3)
-    light('point', (26.6, 38.4, 1.25), (1.0, 0.42, 0.12), 110, radius=0.25, flicker=0.2, reach=12.0)
+    light('point', (26.6, 38.4, 1.25), (1.0, 0.42, 0.12), 60, radius=0.25, flicker=0.2, reach=12.0)
     for (x, y, r) in ((27.8, 38.9, 1.2), (25.6, 39.4, 2.5)):
         L('plastic_monobloc_chair_01', x, y, r=r, kg=2.5, sf='plastic')
     # security lights: one over the west door still working, cold, through the long ward's windows
     prop('security_light', X0 - 0.2, 16.0, z=6.6, rot=math.pi / 2, part='security_light', collide=False)
-    light('spot', (X0 - 3.6, 16.0, 6.4), COLD, 420, spot=2.1, blend=0.8, radius=0.1, aim=(0.75, 0.0, -0.5), reach=12.0)
-    light('spot', (X1 + 3.0, 12.0, 5.6), (1.0, 0.72, 0.4), 260, spot=2.2, blend=0.8, radius=0.1, aim=(-0.8, 0.05, -0.45), flicker=0.5, reach=11.0)
+    light('spot', (X0 - 3.6, 16.0, 6.4), COLD, 220, spot=2.1, blend=0.8, radius=0.1, aim=(0.75, 0.0, -0.5), reach=12.0)
+    light('spot', (X1 + 3.0, 12.0, 5.6), (1.0, 0.72, 0.4), 140, spot=2.2, blend=0.8, radius=0.1, aim=(-0.8, 0.05, -0.45), reach=11.0)
     for (x, y) in ((-7.0, 20.0), (60.0, 26.0)):
         box((x - 1.0, y - 2.0, 0), (x + 1.0, y + 2.0, 1.5), 'dumpster', density=0.3)
     m.container(58.0, 4.0, 0.0, rot90=True, tint='cont_b')
@@ -1032,6 +1032,71 @@ def build():
     for (x, y, z) in ((10.0, 7.2, 0.0), (30.0, 7.4, 0.0), (45.0, 7.0, 0.0), (20.0, 24.8, 0.0), (38.0, 24.6, 0.0), (26.0, 10.0, 0.0), (20.0, 20.0, 0.0), (3.0, 12.6, 0.0), (41.0, 12.0, 0.0), (5.0, 29.0, 0.0),
                       (47.0, 29.0, 0.0), (8.0, 7.2, F2), (44.0, 7.0, F2), (26.0, 23.0, F2), (16.6, 18.0, F2), (7.0, 12.0, F2), (30.0, 2.6, F2), (48.0, 30.0, F2), (20.0, 7.2, BZ), (44.0, 7.4, BZ), (35.6, 18.0, BZ)):
         K(f'litter_{int(x * 11 + y * 3 + z) % 6 + 1}', x, y, z=z + 0.001, r=R.uniform(0, 6.28))
+
+    # ---- what a hospital has on every wall: a bump rail at hip height down the corridors, broken at each way through
+    def spans(axis, c, z):
+        out = []
+        for d in m.doors:
+            hx, hy, hz = d['hinge']
+            if d['axis'] == axis and abs(hz - z) < 0.5 and abs((hy if axis == 'x' else hx) - c) < 0.2:
+                a, b = sorted((hx if axis == 'x' else hy, (hx if axis == 'x' else hy) + d['sign'] * d['w']))
+                out.append((a, b))
+        for (x, y, oz, w, ax) in m.openings:
+            if ax == axis and abs(oz - z) < 0.5 and abs((y if axis == 'x' else x) - c) < 0.2:
+                p = x if axis == 'x' else y
+                out.append((p - w / 2, p + w / 2))
+        for g in m.windows:
+            if g['axis'] == axis and abs(g['c'] - c) < 0.2 and g['z0'] < z + 1.1 and g['z1'] > z + 0.7:
+                out.append((g['a'], g['b']))
+        return sorted(out)
+
+    def bump_rail(axis, c, p0, p1, z, side, t=INT_T, mat='wood_top'):
+        cur = p0 + 0.12
+        for (a, b) in spans(axis, c, z) + [(p1 - 0.12, p1)]:
+            a2 = min(a - 0.2, p1 - 0.12)
+            if a2 - cur > 0.5:
+                f = c + side * (t / 2 + 0.045)
+                lo, hi = min(f - 0.03, f + 0.03), max(f - 0.03, f + 0.03)
+                if R.random() < 0.88:          # a length here and there has come off
+                    if axis == 'x':
+                        box((cur, lo, z + 0.84), (a2, hi, z + 0.96), mat, collide=False, density=0.25)
+                        box((cur, lo, z + 0.2), (a2, lo + 0.02, z + 0.34), 'steel', collide=False, density=0.12)
+                    else:
+                        box((lo, cur, z + 0.84), (hi, a2, z + 0.96), mat, collide=False, density=0.25)
+                        box((lo, cur, z + 0.2), (lo + 0.02, a2, z + 0.34), 'steel', collide=False, density=0.12)
+            cur = max(cur, b + 0.2)
+    for z in (0.0, F2):
+        bump_rail('x', SY0, X0 + 6.0, 18.0 if z == 0 else AX0, z, 1)
+        bump_rail('x', SY0, 34.0 if z == 0 else AX1, X1 - 6.0, z, 1)
+        bump_rail('x', SY1, X0, AX0, z, -1)
+        bump_rail('x', SY1, AX1, X1, z, -1)
+        bump_rail('x', NY0, X0, AX0, z, 1)
+        bump_rail('x', NY0, AX1, X1, z, 1)
+        bump_rail('x', NY1, X0, 20.0, z, -1)
+        bump_rail('x', NY1, 32.0, X1, z, -1)
+    # bed-head trunking behind the ward beds: a cream box along the wall with its sockets and a gas outlet or two
+    for (x0, x1, y, z) in ((6.3, 17.7, Y0 + EXT_T / 2 + 0.03, 0.0), (34.3, 45.7, Y0 + EXT_T / 2 + 0.03, 0.0), (32.3, 42.7, Y1 - EXT_T / 2 - 0.03, F2)):
+        yy = (y, y + 0.07) if y < 10 else (y - 0.07, y)
+        box((x0, yy[0], z + 1.32), (x1, yy[1], z + 1.5), 'trim', collide=False, density=0.25)
+        for k in range(int((x1 - x0) / 1.4)):
+            xx = x0 + 0.5 + k * 1.4
+            box((xx, yy[0] - (0.012 if y > 10 else 0), z + 1.37), (xx + 0.09, yy[1] + (0.012 if y < 10 else 0), z + 1.45), 'plastic_black' if k % 3 else 'steel', collide=False, density=0.08)
+    # ducts upstairs too, where the tiles have gone
+    for (x0, x1, y) in ((0.6, 14.4, SY0 + 0.45), (37.6, 51.4, SY0 + 0.45), (0.6, 14.4, NY1 - 0.5), (37.6, 51.4, NY1 - 0.5)):
+        n = int((x1 - x0) / 2.4)
+        for i in range(n):
+            if i in (1, n - 2):
+                continue
+            a = x0 + i * (x1 - x0) / n
+            box((a + 0.03, y - 0.2, TOP - 0.4), (a + (x1 - x0) / n - 0.03, y + 0.2, TOP - 0.08), 'tin_in', collide=False, density=0.2)
+    # the fall dressed: heaps of what it was made of along both edges and across the treads, bar sticking out of it
+    for i in range(9):
+        f = (i + 0.5) / 9
+        y = 15.6 + (VY1 - 15.6) * f
+        for x in (RX0 - 0.2, RX1 + 0.2):
+            K(f'rubble_{i % 3 + 1}', x + R.uniform(-0.3, 0.3), y, F2 * f * R.uniform(0.55, 0.95) + 0.001, r=R.uniform(0, 6.28))
+        if i % 2 == 0:
+            K(f'debris_{i % 5 + 1}', R.uniform(RX0 + 1.0, RX1 - 1.0), y, F2 * (int(f * NS) + 1) / NS + 0.002, R.uniform(0, 6.28))
 
     # finishes: a two-tone wall and a dropped ceiling wherever it was a hospital
     DADO = {'hosp_wall': 'hosp_dado', 'hosp_wall2': 'hosp_dado2', 'hosp_wall3': 'hosp_dado3'}

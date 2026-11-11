@@ -18,6 +18,12 @@ class Sp {
     this.x += this.v * dt;
     return this.x;
   }
+  /** a stiff one that rings: stepped finely enough to stay stable at any frame rate */
+  ring(dt: number, k: number, c: number) {
+    const n = Math.max(1, Math.ceil(dt / 0.008));
+    for (let i = 0; i < n; i++) this.step(dt / n, 0, k, c);
+    return this.x;
+  }
   reset() {
     this.x = this.v = 0;
   }
@@ -244,6 +250,29 @@ export class LocalPlayer {
   private breathT = 0;
   private heartT = 0;
   private chambered = false;
+  /** how wound up the wearer is, 0 to 1: rounds going past, a wound, a fight a moment ago. It's in the hands */
+  stress = 0;
+  private fight = 0;
+  private tremT = 0;
+  /** this reload is going to go wrong once */
+  private fumble = false;
+  /** the chest under the camera: its phase, faster and deeper when spent or scared */
+  private chest = 0;
+  private exert = 0;
+  /** the camera's clip on the vest: it rings after a knock, and slips: pitch, roll, yaw off true */
+  private jigP = new Sp();
+  private jigR = new Sp();
+  private mountP = 0;
+  private mountR = 0;
+  private mountY = 0;
+  /** a hand comes up and sets it straight: seconds left of that, when the next one is due, where it's being put */
+  private fixT = 0;
+  private fixWait = 60;
+  private fixTo = [0, 0, 0];
+  /** 0 to 1 while the support hand is up at the camera */
+  fixK = 0;
+  /** the wearer, without the camera's own slip: what the arms hang off */
+  private bodyQ = new THREE.Quaternion();
 
   get weapon() {
     return this.slots[this.cur];
@@ -274,7 +303,31 @@ export class LocalPlayer {
     this.stamina = 1;
     this.mantle = null;
     this.slideT = this.stun = this.climb = this.climbY = this.trauma = 0;
-    for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR]) q.reset();
+    for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR, this.jigP, this.jigR]) q.reset();
+    this.stress = this.fight = this.fixT = this.fixK = 0;
+    this.fumble = false;
+    // clipped on in a hurry: never quite level
+    this.mountR = (Math.random() - 0.5) * 0.03;
+    this.mountP = -Math.random() * 0.015;
+    this.mountY = 0;
+    this.fixWait = 45 + Math.random() * 60;
+  }
+
+  /** something jolts the camera on its clip: it rings, and may not come back to where it was */
+  private knock(k: number, slip = k) {
+    this.jigP.v += (Math.random() - 0.35) * k * 22;
+    this.jigR.v += (Math.random() - 0.5) * k * 26;
+    this.mountR = THREE.MathUtils.clamp(this.mountR + (Math.random() - 0.5) * 2 * slip, -0.075, 0.075);
+    this.mountP = THREE.MathUtils.clamp(this.mountP + (Math.random() - 0.72) * slip, -0.085, 0.03);
+    this.mountY = THREE.MathUtils.clamp(this.mountY + (Math.random() - 0.5) * slip * 0.6, -0.03, 0.03);
+  }
+
+  /** a boot comes down: the vest takes it and the lens with it */
+  private footfall(speed: number) {
+    const k = Math.min(1.6, speed / WALK) * (this.crouch ? 0.5 : 1);
+    this.jigP.v -= 0.22 * k * (0.7 + Math.random() * 0.6);
+    this.jigR.v += (Math.random() - 0.5) * 0.3 * k;
+    if (speed > 4) this.knock(0, 0.0016);
   }
 
   /** Gun Game hands you the next one: whatever you held is gone, this is loaded */
@@ -392,6 +445,7 @@ export class LocalPlayer {
       c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 5, 0.7 + Math.min(1, hit / 6));
       this.inY.v -= hit * 0.09;
       this.camP.v -= hit * 0.09;
+      this.knock(Math.min(0.06, hit * 0.008), hit > 3.5 ? Math.min(0.03, (hit - 3.5) * 0.008) : 0);
       if (hit > 5.5) {
         this.stun = Math.min(1, (hit - 5.5) / 3 + 0.5);
         m.vx *= 0.55;
@@ -407,6 +461,8 @@ export class LocalPlayer {
       if (this.stepAcc >= stride) {
         this.stepAcc = 0;
         c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), speed, this.crouch ? 0.45 : 1.05);
+        c.fx.tread(this.slot, m.x, m.y, m.z, Math.atan2(-m.vx, -m.vz));
+        this.footfall(speed);
       }
     }
     this.bobK += ((speed > 0.3 && m.grounded ? Math.min(1.25, speed / WALK) : 0) - this.bobK) * Math.min(1, dt * 9);
@@ -426,6 +482,9 @@ export class LocalPlayer {
     const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
     const bobX = Math.cos(this.bob) * 0.046 * this.bobK * (1 - this.adsK * 0.7);
     this.breath += dt;
+    this.exert += (Math.max(1 - this.stamina, this.stress * 0.75) - this.exert) * Math.min(1, dt * 1.5);
+    this.chest += dt * (1.55 + 2.6 * this.exert);
+    const heave = Math.sin(this.chest) * (1 + 2.6 * this.exert);
     this.landK = Math.max(0, this.landK - dt * 3.2);
     const lk = Math.sin(this.landK * Math.PI) * this.landK;
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
@@ -437,7 +496,7 @@ export class LocalPlayer {
       if (h) lean = sgn * Math.min(Math.abs(lean), Math.max(0, h.t - 0.2));
     }
     // a vest rises and falls with the breath under it
-    const eye = this.eye.set(m.x + rx * (lean + bobX), m.y + eyeH + m.stepEase + bobY - lk * 0.1 + Math.sin(this.breath * 1.55) * 0.006, m.z + rz * (lean + bobX));
+    const eye = this.eye.set(m.x + rx * (lean + bobX), m.y + eyeH + m.stepEase + bobY - lk * 0.1 + heave * 0.006, m.z + rz * (lean + bobX));
     // recoil settles; the camera takes some of it
     const rs = Math.exp(-dt * spec.settle);
     this.recP *= rs;
@@ -483,13 +542,43 @@ export class LocalPlayer {
     const shP = tr * 0.05 * (Math.sin(tt) + Math.sin(tt * 1.73 + 1)) * 0.5, shY = tr * 0.05 * Math.sin(tt * 1.31 + 2), shR = tr * 0.06 * Math.sin(tt * 0.87 + 4);
     const camK = 0.45;
     // tired, hurt, or under fire: nothing holds still
-    const shaky = 1 + (1 - this.stamina) * 1.7 + this.arm * 1.8 + this.supK * 2.2;
+    const shaky = 1 + (1 - this.stamina) * 1.7 + this.arm * 1.8 + this.supK * 1.4 + this.stress * 1.2;
     const swayP = (Math.sin(this.breath * 1.3) * 0.0042 + Math.sin(this.breath * 2.7 + 1) * 0.0016) * shaky + Math.sin(this.bob * 2) * 0.0058 * this.bobK;
     const swayY = (Math.sin(this.breath * 0.9) * 0.0036 + Math.sin(this.breath * 2.1) * 0.0014) * shaky + Math.cos(this.bob) * 0.0075 * this.bobK;
-    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.042 * this.bobK + Math.sin(this.breath * 1.55) * 0.004 + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
-    this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
+    const roll = -this.leanK * 0.2 + Math.cos(this.bob) * 0.042 * this.bobK + heave * 0.003 + this.punchR - s * 0.012 * (speed / WALK) + shR + this.camR.x + (this.slideT > 0 ? 0.07 : 0) + this.mantleK * 0.05 * Math.sin((this.mantle?.t ?? 0) * 6);
+    this.e.set(this.pitch + this.recP * camK + this.punchP + swayP * (1 - this.adsK * 0.75) + shP + this.camP.x - this.mantleK * 0.13 + heave * 0.0022, this.yaw + this.recY * camK + this.punchY + swayY * (1 - this.adsK * 0.75) + shY, roll, 'YXZ');
     cam.position.copy(eye);
-    cam.quaternion.setFromEuler(this.e);
+    this.bodyQ.setFromEuler(this.e);
+    // the lens is clipped to a vest, not screwed to a skull: it rings after every knock and sits wherever it has slipped
+    // to, until a hand comes up and squares it. The arms and the gun hang off the wearer, not off the picture
+    this.jigP.ring(dt, 3000, 15);
+    this.jigR.ring(dt, 2400, 13);
+    let fixP = 0, fixR = 0;
+    if (this.fixT > 0) {
+      const LEN = 1.3;
+      const kb = 1 - this.fixT / LEN;
+      this.fixT -= dt;
+      const k = 1 - Math.max(0, this.fixT) / LEN;
+      const held = THREE.MathUtils.smoothstep(k, 0.2, 0.3) * (1 - THREE.MathUtils.smoothstep(k, 0.76, 0.88));
+      this.fixK = THREE.MathUtils.smoothstep(k, 0, 0.24) * (1 - THREE.MathUtils.smoothstep(k, 0.78, 1));
+      if (kb < 0.24 && k >= 0.24) {
+        // fingers on it
+        c.sound.cloth();
+        this.jigP.v += 1.1;
+        this.jigR.v -= 0.9;
+      }
+      if (kb < 0.8 && k >= 0.8) this.jigP.v -= 0.5;
+      // pushed about while it's held, and left near enough true
+      const r = Math.min(1, dt * 7) * held;
+      this.mountP += (this.fixTo[0] - this.mountP) * r;
+      this.mountR += (this.fixTo[1] - this.mountR) * r;
+      this.mountY += (this.fixTo[2] - this.mountY) * r;
+      fixP = held * (Math.sin(k * 26) * 0.012 + Math.sin(k * 41 + 1) * 0.006);
+      fixR = held * (Math.sin(k * 21 + 2) * 0.016 + Math.sin(k * 35) * 0.007);
+      if (this.fixT <= 0) this.fixK = 0;
+    }
+    this.e.set(this.mountP + this.jigP.x + fixP, this.mountY, this.mountR + this.jigR.x + fixR, 'YXZ');
+    cam.quaternion.copy(this.bodyQ).multiply(this.q.setFromEuler(this.e));
     const fov = THREE.MathUtils.lerp(FOV, spec.adsFov, this.adsK) + this.sprintK * 3;
     if (Math.abs(cam.fov - fov) > 0.01) {
       cam.fov = fov;
@@ -544,10 +633,28 @@ export class LocalPlayer {
       pitchG -= Math.sin(t * Math.PI) * 0.9;
     }
     const cyc = this.cycleT > 0 ? Math.sin((1 - this.cycleT / this.cycleLen) * Math.PI) : 0;
-    this.gunPos.set(gx, gy, -gz).applyQuaternion(cam.quaternion).add(eye);
+    // ---- the hands under pressure: a fast fine tremor, in bursts, worst when they have something fiddly to do
+    {
+      const st = this.stress;
+      this.tremT += dt * (58 + 22 * st);
+      const tt2 = this.tremT;
+      const burst = 0.55 + 0.45 * Math.sin(this.breath * 2.3) * Math.sin(this.breath * 0.71 + 1);
+      const amp = st * st * burst * (this.reloadT > 0 ? 2.4 : 1) * (1 - a * 0.45) * (this.crouch ? 0.8 : 1) + this.arm * 0.25;
+      pitchG += amp * 0.0125 * (Math.sin(tt2) * 0.6 + Math.sin(tt2 * 1.618 + 1.3) * 0.4);
+      yawG += amp * 0.011 * (Math.sin(tt2 * 0.93 + 2) * 0.6 + Math.sin(tt2 * 1.47) * 0.4);
+      rollG += amp * 0.03 * Math.sin(tt2 * 1.21 + 4);
+      gx += amp * 0.0016 * Math.sin(tt2 * 1.13 + 0.5);
+      gy += amp * 0.0019 * Math.sin(tt2 * 0.87 + 3);
+      // one hand is up at the camera: the muzzle sags and the gun rolls out
+      gy -= this.fixK * 0.035;
+      pitchG -= this.fixK * 0.13;
+      rollG += this.fixK * 0.16;
+      yawG += this.fixK * 0.05;
+    }
+    this.gunPos.set(gx, gy, -gz).applyQuaternion(this.bodyQ).add(eye);
     this.e.set(pitchG, yawG, rollG, 'YXZ');
     this.q.setFromEuler(this.e);
-    this.gunQuat.copy(cam.quaternion).multiply(this.q).multiply(Q180);
+    this.gunQuat.copy(this.bodyQ).multiply(this.q).multiply(Q180);
     this.barrel.set(0, 0, 1).applyQuaternion(this.gunQuat);
     const gun = sol.gun;
     if (gun) {
@@ -599,6 +706,8 @@ export class LocalPlayer {
         sol.magHand = gun.mag ? Math.min(1, Math.min(t / 0.16, (1 - t) / 0.2)) : 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
       } else sol.magHand *= Math.exp(-dt * 12);
     }
+    sol.camHand = this.fixK;
+    sol.camAt.set(-0.1, -0.13, -0.06).applyQuaternion(cam.quaternion).add(eye);
     // a hot barrel smokes after a string of shots
     this.heat = Math.max(0, this.heat - dt * 0.2);
     if (this.heat > 0.22 && this.sinceShot > 0.1 && Math.random() < dt * 26 * this.heat) {
@@ -616,6 +725,26 @@ export class LocalPlayer {
     this.limp = Math.max(0, this.limp - dt / 80);
     this.arm = Math.max(0, this.arm - dt / 80);
     this.supK = Math.max(0, this.supK - dt * 0.42);
+    // nerves: up in a moment, a long time going down
+    this.fight = Math.max(0, this.fight - dt * 0.07);
+    const want = Math.min(1, this.supK * 0.95 + (this.hp < 60 ? ((60 - this.hp) / 60) * 0.55 : 0) + (this.bleed > 0 ? 0.15 : 0) + this.fight);
+    this.stress += (want - this.stress) * Math.min(1, dt * (want > this.stress ? 4 : 0.16));
+    // running works the clip loose, a little at a time
+    if (this.sprintK > 0.5) {
+      this.mountR = THREE.MathUtils.clamp(this.mountR + (Math.random() - 0.5) * dt * 0.012, -0.075, 0.075);
+      this.mountP = Math.max(-0.085, this.mountP - dt * 0.0011);
+    }
+    // now and then, when nothing else is going on, a hand comes up and squares it: sooner if it has slipped badly
+    this.fixWait -= dt;
+    const slip = Math.abs(this.mountR) + Math.abs(this.mountP) * 0.8 + Math.abs(this.mountY);
+    const calm = this.sinceShot > 3 && !this.busy && this.adsK < 0.15 && this.sprintK < 0.2 && this.supK < 0.08 && this.healT <= 0 && this.kickT <= 0 && !this.mantle && this.m.grounded && this.slideT <= 0;
+    if (this.fixT <= 0 && calm && (this.fixWait <= 0 || (slip > 0.07 && this.fixWait < 150))) {
+      this.fixT = 1.3;
+      this.fixWait = 110 + Math.random() * 110;
+      this.fixTo = [-Math.random() * 0.012, (Math.random() - 0.5) * 0.022, (Math.random() - 0.5) * 0.008];
+    }
+    // hands needed elsewhere: let go of it
+    if (this.fixT > 0.3 && !calm) this.fixT = 0.3;
     // the chest mic hears every breath: quiet at rest, ragged when spent, hurt or under fire
     const hard = Math.max(0.92 - this.stamina * 1.5, this.supK * 0.8, this.hp < 45 ? 0.45 : 0, Math.hypot(this.m.vx, this.m.vz) > 0.5 ? 0.12 : 0.04);
     this.breathT -= dt;
@@ -662,9 +791,20 @@ export class LocalPlayer {
         // one at a time, each one pushed home with the thumb
         const n = spec.mag;
         if (Math.floor(before * n) !== Math.floor(after * n)) {
-          c.sound.clack(null, 'shell');
-          this.rkZ.v -= 0.5;
-          this.rkR.v += 0.8;
+          if (this.fumble && after > 0.25 && after < 0.9) {
+            // it slips through the fingers: on the floor, and another one to find
+            this.fumble = false;
+            this.reloadT = Math.min(this.reloadLen, this.reloadT + this.reloadLen / n);
+            const at = new THREE.Vector3(0.01, -0.03, 0.12).applyQuaternion(this.gunQuat).add(this.gunPos);
+            c.fx.shell(at, new THREE.Vector3(this.m.vx + (Math.random() - 0.5) * 0.8, 0.3, this.m.vz + (Math.random() - 0.5) * 0.8), this.gunQuat, spec.brass);
+            this.rkR.v -= 1.6;
+            this.rkP.v -= 1.2;
+            this.inY.v -= 0.2;
+          } else {
+            c.sound.clack(null, 'shell');
+            this.rkZ.v -= 0.5;
+            this.rkR.v += 0.8;
+          }
         }
       } else {
         if (before < 0.02) this.magGone = false;
@@ -672,7 +812,16 @@ export class LocalPlayer {
           c.sound.clack(null, 'mag_out');
           this.rkP.v -= 0.9;
         }
-        if (before < 0.68 && after >= 0.68) {
+        if (this.fumble && before < 0.645 && after >= 0.645) {
+          // the magazine catches the lip of the well instead of going in: back out, look, try again
+          this.fumble = false;
+          this.reloadT = this.reloadLen * (1 - 0.47);
+          c.sound.clack(null, 'shell');
+          this.rkR.v += 2.6;
+          this.rkY.v += 1.6;
+          this.rkP.v -= 1.4;
+          this.inY.v -= 0.25;
+        } else if (before < 0.68 && after >= 0.68) {
           // seated with the heel of the hand: the whole gun jumps
           c.sound.clack(null, 'mag_in');
           this.rkP.v -= 3.2;
@@ -702,8 +851,10 @@ export class LocalPlayer {
       const single = w === 'shotgun' || w === 'rifle';
       this.chambered = !single && !dry;
       // from empty there's a bolt to send home as well; a shot arm fumbles it
-      this.reloadLen = (w === 'shotgun' ? 0.55 * (spec.mag - am.mag) + 0.3 : w === 'rifle' ? 0.6 * (spec.mag - am.mag) + 0.4 : spec.reload * (dry ? 1.24 : 1)) * (1 + this.arm * 0.35);
+      // and hands that won't keep still take longer over all of it, and sometimes miss
+      this.reloadLen = (w === 'shotgun' ? 0.55 * (spec.mag - am.mag) + 0.3 : w === 'rifle' ? 0.6 * (spec.mag - am.mag) + 0.4 : spec.reload * (dry ? 1.24 : 1)) * (1 + this.arm * 0.35) * (1 + this.stress * 0.4);
       this.reloadT = this.reloadLen;
+      this.fumble = Math.random() < THREE.MathUtils.clamp((this.stress - 0.3) * 1.1 + this.arm * 0.25, 0, 0.7);
     }
     if ((i.take('Digit1') && this.cur !== 0) || (i.take('Digit2') && this.cur !== 1) || i.take('KeyX')) {
       if (this.switchT <= 0) {
@@ -758,6 +909,7 @@ export class LocalPlayer {
       this.kicked = false;
       this.stamina = Math.max(0, this.stamina - 0.1);
       this.camP.v -= 0.5;
+      this.knock(0.02, 0.008);
       this.m.vx *= 0.4;
       this.m.vz *= 0.4;
     }
@@ -860,6 +1012,7 @@ export class LocalPlayer {
       this.slideT = 0;
       c.sound.step(null, 'hard', 4, 0.9);
       this.camP.v -= 0.5;
+      this.knock(0.02, 0.012);
       return;
     }
   }
@@ -944,6 +1097,10 @@ export class LocalPlayer {
     this.rkR.v += (Math.random() - 0.5) * hard * 0.5;
     this.camP.v += hard * 0.045;
     this.camR.v += (Math.random() - 0.5) * hard * 0.09;
+    // the stock is in the shoulder the camera hangs from
+    this.jigP.v += Math.sqrt(hard) * 0.5 * (1 - this.adsK * 0.3);
+    this.jigR.v += (Math.random() - 0.5) * Math.sqrt(hard) * 0.7;
+    this.fight = Math.min(0.3, this.fight + 0.012 * Math.sqrt(hard));
     sol.kick = 1;
     c.sound.shot(wi, null);
     c.fx.muzzle(muz, this.barrel, this.weapon === 'shotgun' || this.weapon === 'rifle' ? 1.5 : this.weapon === 'pistol' ? 0.7 : 1);
@@ -963,6 +1120,7 @@ export class LocalPlayer {
   suppress(k: number) {
     this.supK = Math.min(1, this.supK + k * 0.34);
     this.trauma = Math.min(1, this.trauma + k * 0.14);
+    this.fight = Math.min(0.6, this.fight + k * 0.1);
   }
 
   healed() {
@@ -970,6 +1128,7 @@ export class LocalPlayer {
     this.limp *= 0.35;
     this.arm *= 0.35;
     this.supK = 0;
+    this.fight *= 0.4;
   }
 
   hurt(dir: [number, number, number], zone: number, dmg: number, bleed: number) {
@@ -988,5 +1147,7 @@ export class LocalPlayer {
     this.m.vz += dir[2] * 0.8;
     this.stun = Math.max(this.stun, 0.5);
     this.inY.v -= 0.4;
+    this.fight = Math.min(0.8, this.fight + 0.3 + dmg / 150);
+    this.knock(0.05, 0.022);
   }
 }
