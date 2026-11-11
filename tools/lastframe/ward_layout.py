@@ -35,7 +35,7 @@ MY = 16.0                  # both blocks split here
 
 # a night with the storm on it: the city's glow low on the clouds, cold and green-grey
 SKY = dict(hdri='rooftop_night', strength=1.0, tint=(0.34, 0.46, 0.7))
-WEATHER = dict(key=0.125, rain=1, wet=1, fog=1.25, sky=[0.3, 0.33, 0.4], wb=[0.96, 1.0, 1.02])
+WEATHER = dict(key=0.16, rain=1, wet=1, fog=1.25, sky=[0.3, 0.33, 0.4], wb=[0.96, 1.0, 1.02])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -4.6, -44], dim=[35, 13, 28])
 
 TUBE = (0.8, 0.94, 1.0)

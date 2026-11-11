@@ -17,6 +17,7 @@ if (process.env.LIGHT === '0') await p.evaluate(() => { __lf.g.me.light = false;
 console.log('nav', await p.evaluate(() => { const n = __lf.g.nav.nodes; return JSON.stringify({ all: n.length, under: n.filter((q) => q.y < -3).length, ground: n.filter((q) => Math.abs(q.y) < 0.3).length, up: n.filter((q) => Math.abs(q.y - 3.6) < 0.3).length, lamps: __lf.g.L.flicks.length }); }));
 const stops = [
   ['front', 30, 0, -1.5, 0, 0.05], ['tills', 14.8, 0, -9.2, -1.57, 0], ['aisle', 22, 0, -10.4, 0, 0.05], ['aisle_e', 38, 0, -10.4, 0, 0.05], ['cross', 15, 0, -18.2, -1.57, 0], ['ring', 30, 0, -17.6, 0, 0],
+  ['shelf', 21.4, 0, -15.5, 1.57, 0], ['shelf2', 34.6, 0, -13, -1.57, 0], ['shelf_far', 18, 0, -11.5, 0.15, 0],
   ['ring_n', 34.6, 0, -26.6, 2.5, 0], ['produce', 8, 0, -9.4, 0.2, 0], ['frozen', 54.2, 0, -10.2, 0, 0], ['frozen_lit', 57.7, 0, -19.4, -0.3, 0], ['counters', 14, 0, -26.9, -1.57, 0], ['meatsign', 26.5, 0, -25.9, 0, 0.1],
   ['catwalk', 1, 3.6, -10, 0, -0.2], ['catwalk_view', 1, 3.6, -17, -1.3, -0.3], ['office', 9, 3.6, -4, 0.5, 0], ['office_win', 8, 3.6, -6.6, -0.6, -0.3], ['pharm', 9, 0, -4.6, 1.0, 0], ['cafe', 50, 0, -5.5, -0.6, 0],
   ['backcor', 2, 0, -31.3, -1.57, 0], ['kitchen', 5, 0, -34, 0.3, 0], ['meat', 15, 0, -33.6, 0, 0], ['meat_in', 19.6, 0, -40, 1.2, 0], ['freezer', 25.6, 0, -33.6, 0, 0], ['stock', 32, 0, -31.5, -0.9, 0.1],

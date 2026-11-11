@@ -1194,11 +1194,11 @@ SHELFD = lambda: mat('lfshelfd', (0.12, 0.13, 0.14), 0.6, 0.3)
 CARDB = lambda: mat('lfcardb', (0.24, 0.17, 0.1), 0.9)
 CARDB2 = lambda: mat('lfcardb2', (0.3, 0.23, 0.14), 0.9)
 TIN = lambda: mat('lftin', (0.3, 0.3, 0.3), 0.5, 0.5)
-LABEL_R = lambda: mat('lflabr', (0.2, 0.045, 0.04), 0.8)
-LABEL_B = lambda: mat('lflabb', (0.05, 0.085, 0.16), 0.6)
-LABEL_G = lambda: mat('lflabg', (0.06, 0.13, 0.07), 0.6)
-LABEL_Y = lambda: mat('lflaby', (0.27, 0.22, 0.07), 0.6)
-LABEL_W = lambda: mat('lflabw', (0.36, 0.35, 0.32), 0.6)
+LABEL_R = lambda: mat('lflabr', (0.34, 0.05, 0.04), 0.8)
+LABEL_B = lambda: mat('lflabb', (0.06, 0.13, 0.3), 0.6)
+LABEL_G = lambda: mat('lflabg', (0.07, 0.22, 0.09), 0.6)
+LABEL_Y = lambda: mat('lflaby', (0.45, 0.35, 0.07), 0.6)
+LABEL_W = lambda: mat('lflabw', (0.5, 0.5, 0.46), 0.6)
 ROT = lambda: mat('lfrot', (0.07, 0.055, 0.03), 0.95)
 ROT2 = lambda: mat('lfrot2', (0.13, 0.1, 0.045), 0.9)
 MOULD = lambda: mat('lfmould', (0.16, 0.2, 0.14), 1.0)
@@ -1208,39 +1208,144 @@ BELT = lambda: mat('lfbelt', (0.025, 0.025, 0.028), 0.75)
 STRIPP = lambda: mat('lfstrip', (0.4, 0.4, 0.3), 0.3)
 WRAP = lambda: mat('lfwrap', (0.4, 0.37, 0.33), 0.35)
 WRAPD = lambda: mat('lfwrapd', (0.22, 0.1, 0.08), 0.5)
+FRUIT_O = lambda: mat('lffro', (0.6, 0.24, 0.03), 0.55)
+FRUIT_R = lambda: mat('lffrr', (0.42, 0.05, 0.04), 0.45)
+FRUIT_G = lambda: mat('lffrg', (0.16, 0.32, 0.06), 0.55)
+FRUIT_Y = lambda: mat('lffry', (0.62, 0.5, 0.08), 0.5)
 LABELS = (LABEL_R, LABEL_B, LABEL_G, LABEL_Y, LABEL_W, TIN, CARDB, CARDB2)
 
 
-def _stock(b, rng, x0, x1, y, z, depth, h, fill):
-    """what's left on a length of shelf: a few boxes and tins pushed about, most of it gone"""
-    x = x0 + rng.uniform(0.02, 0.3)
-    while x < x1 - 0.12:
-        if rng.random() > fill:
-            x += rng.uniform(0.2, 0.9)
-            continue
-        kind = rng.random()
-        M = rng.choice(LABELS)()
-        n = rng.randint(1, 4)
-        if kind < 0.45:
-            w, hh = rng.uniform(0.1, 0.22), min(h - 0.04, rng.uniform(0.14, 0.3))
-            for k in range(n):
-                if x + w > x1:
-                    break
-                fallen = rng.random() < 0.15
-                obox(b, (x + w / 2, y + rng.uniform(-0.05, 0.03) * depth, z + (w if fallen else hh) / 2), (w - 0.012, depth * rng.uniform(0.4, 0.75), w - 0.012 if fallen else hh), rng.uniform(-0.25, 0.25) if rng.random() < 0.3 else 0, M)
-                x += w
+LAB_O = lambda: mat('lflabo', (0.5, 0.2, 0.04), 0.6)
+LAB_P = lambda: mat('lflabp', (0.2, 0.07, 0.28), 0.6)
+LAB_T = lambda: mat('lflabt', (0.05, 0.27, 0.27), 0.6)
+LAB_K = lambda: mat('lflabk', (0.03, 0.03, 0.035), 0.5)
+LAB_C = lambda: mat('lflabc', (0.55, 0.48, 0.34), 0.6)
+LAB_N = lambda: mat('lflabn', (0.2, 0.11, 0.05), 0.65)
+LAB_M = lambda: mat('lflabm', (0.45, 0.06, 0.16), 0.6)
+JAR_A = lambda: mat('lfjara', (0.2, 0.09, 0.02), 0.2)
+JAR_G = lambda: mat('lfjarg', (0.05, 0.13, 0.04), 0.2)
+JAR_R = lambda: mat('lfjarr', (0.26, 0.03, 0.02), 0.2)
+PAL = (LABEL_R, LABEL_B, LABEL_G, LABEL_Y, LABEL_W, LAB_O, LAB_P, LAB_T, LAB_K, LAB_C, LAB_N, LAB_M)
+SHELF_CATS = dict(cans=('can', 'can', 'can', 'jar', 'can2'), dry=('box', 'box', 'box', 'bag', 'boxs'), drinks=('bottle', 'bottle', 'carton', 'jug', 'bottle'),
+                  clean=('jug', 'jug', 'spray', 'rolls', 'box'), jars=('jar', 'jar', 'bottle', 'can', 'jar'), snacks=('bag', 'bag', 'boxs', 'bag'), paper=('rolls', 'rolls', 'box'),
+                  frozen=('boxs', 'bag', 'boxs', 'box'))
+CAT_LIST = ('cans', 'dry', 'drinks', 'clean', 'jars', 'snacks', 'paper', 'dry', 'cans', 'drinks')
+
+
+def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
+    """a shelf as a shop keeps it: each product in its own run of facings, a few deep, a ticket on the shelf edge under
+    each; some facings sold through to the back, some empty, one or two things knocked over. sgn: which way y the shelf faces"""
+    cat = cat or rng.choice(CAT_LIST)
+    kinds = SHELF_CATS[cat]
+    edge = y + sgn * depth / 2
+    x = x0 + rng.uniform(0.0, 0.05)
+
+    def ring(xc, yc, z0, z1, r, M, n=7):
+        rod(b, (xc, yc, z0), (xc, yc, z1), r, M, n)
+
+    while x < x1 - 0.07:
+        kind = rng.choice(kinds)
+        C1, C2 = rng.choice(PAL)(), rng.choice(PAL)()
+        Cw = LABEL_W() if rng.random() < 0.6 else LAB_C()
+        if kind == 'can':
+            w, dd, hh = rng.uniform(0.07, 0.085), 0.085, rng.uniform(0.1, 0.12)
+        elif kind == 'can2':
+            w, dd, hh = 0.105, 0.11, rng.uniform(0.12, 0.17)
+        elif kind == 'jar':
+            w, dd, hh = rng.uniform(0.075, 0.095), 0.095, rng.uniform(0.12, 0.17)
+        elif kind == 'bottle':
+            w, dd, hh = rng.uniform(0.07, 0.095), 0.095, min(h - 0.07, rng.uniform(0.2, 0.3))
+        elif kind == 'spray':
+            w, dd, hh = 0.09, 0.1, min(h - 0.08, rng.uniform(0.2, 0.25))
+        elif kind == 'jug':
+            w, dd, hh = rng.uniform(0.13, 0.17), 0.12, min(h - 0.06, rng.uniform(0.24, 0.3))
+        elif kind == 'carton':
+            w, dd, hh = 0.078, 0.082, min(h - 0.06, rng.uniform(0.19, 0.25))
+        elif kind == 'bag':
+            w, dd, hh = rng.uniform(0.17, 0.23), 0.07, min(h - 0.04, rng.uniform(0.22, 0.3))
+        elif kind == 'rolls':
+            w, dd, hh = rng.uniform(0.3, 0.42), 0.2, min(h - 0.04, rng.uniform(0.2, 0.3))
+        elif kind == 'boxs':
+            w, dd, hh = rng.uniform(0.18, 0.26), 0.06, min(h - 0.04, rng.uniform(0.05, 0.08))
         else:
-            r, hh = rng.uniform(0.034, 0.055), rng.uniform(0.09, 0.17)
-            for k in range(n + 1):
-                if x + 2 * r > x1:
-                    break
-                if rng.random() < 0.12:
-                    rod(b, (x, y - depth * 0.2, z + r), (x + hh, y + rng.uniform(-0.1, 0.1), z + r), r, M, 8)
-                    x += hh + 0.02
+            w, dd, hh = rng.uniform(0.14, 0.22), rng.uniform(0.055, 0.08), min(h - 0.04, rng.uniform(0.22, 0.31))
+        fits = max(1, int((depth - 0.03) / dd))
+        nf = rng.randint(2, 5) if w < 0.2 else rng.randint(1, 3)
+        stocked = rng.random() < fill
+        for f in range(nf):
+            if x + w > x1:
+                break
+            xc = x + w / 2
+            if rng.random() < 0.85:
+                obox(b, (xc, edge + sgn * 0.011, z - 0.02), (min(0.05, w * 0.6), 0.004, 0.028), 0, Cw)
+            lost = 0 if rng.random() < 0.55 else rng.randint(1, fits)
+            have = fits - lost if stocked else (1 if rng.random() < 0.12 else 0)
+            x += w + 0.006
+            if have <= 0:
+                continue
+            # the front-most one left stands this far back from the edge
+            yf = edge - sgn * (0.015 + lost * dd + dd / 2)
+            ymid = yf - sgn * (have - 1) * dd / 2
+            if kind in ('box', 'bag', 'rolls', 'boxs', 'jug', 'carton'):
+                if kind == 'boxs':
+                    # flat packs, stacked
+                    nst = max(1, min(int(h / hh) - 1, rng.randint(2, 5)))
+                    for k in range(nst):
+                        obox(b, (xc + rng.uniform(-0.008, 0.008), ymid, z + hh * (k + 0.5)), (w - 0.012, have * dd, hh - 0.004), rng.uniform(-0.03, 0.03), C1)
+                        obox(b, (xc, yf + sgn * dd / 2 * 1.0 + sgn * 0.002, z + hh * (k + 0.5)), ((w - 0.012) * 0.55, 0.003, hh * 0.6), 0, C2)
+                elif kind == 'bag':
+                    for k in range(min(have, 3)):
+                        yy = yf - sgn * k * dd
+                        obox(b, (xc, yy, z + hh / 2), (w - 0.02, dd * 0.7, hh), 0, C1, tilt=(sgn * 0.1, 0))
+                    obox(b, (xc, yf + sgn * dd * 0.37, z + hh * 0.5), ((w - 0.02) * 0.7, 0.003, hh * 0.34), 0, C2, tilt=(sgn * 0.1, 0))
+                    obox(b, (xc, yf + sgn * dd * 0.38, z + hh * 0.86), (w - 0.02, 0.004, hh * 0.05), 0, Cw, tilt=(sgn * 0.1, 0))
+                elif kind == 'rolls':
+                    obox(b, (xc, ymid, z + hh / 2), (w - 0.015, have * dd, hh), 0, Cw)
+                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.002, z + hh * 0.5), ((w - 0.015) * 0.9, 0.003, hh * 0.38), 0, C1)
+                elif kind == 'jug':
+                    obox(b, (xc, ymid, z + hh * 0.42), (w - 0.02, have * dd - 0.01, hh * 0.84), 0, C1)
+                    obox(b, (xc - w * 0.12, yf, z + hh * 0.9), ((w - 0.02) * 0.5, dd * 0.6, hh * 0.14), 0, C1)
+                    ring(xc - w * 0.12, yf, z + hh * 0.96, z + hh, 0.017, C2, 6)
+                    obox(b, (xc + w * 0.3, yf, z + hh * 0.8), (0.022, dd * 0.4, hh * 0.3), 0, C1)
+                    obox(b, (xc - 0.01, yf + sgn * (dd / 2 - 0.003), z + hh * 0.4), ((w - 0.02) * 0.7, 0.003, hh * 0.4), 0, C2)
+                elif kind == 'carton':
+                    obox(b, (xc, ymid, z + hh * 0.44), (w - 0.008, have * dd - 0.008, hh * 0.88), 0, Cw)
+                    obox(b, (xc, yf, z + hh * 0.93), (w - 0.008, 0.01, hh * 0.12), 0, Cw)
+                    obox(b, (xc, yf + sgn * (dd / 2 - 0.002), z + hh * 0.42), ((w - 0.008) * 0.86, 0.003, hh * 0.5), 0, C1)
+                    obox(b, (xc, yf + sgn * (dd / 2 - 0.001), z + hh * 0.42), ((w - 0.008) * 0.5, 0.003, hh * 0.16), 0, C2)
                 else:
-                    rod(b, (x + r, y + rng.uniform(-0.1, 0.06), z), (x + r, y + rng.uniform(-0.1, 0.06), z + hh), r, M, 8)
-                    x += 2 * r + 0.006
-        x += rng.uniform(0.03, 0.5)
+                    obox(b, (xc, ymid, z + hh / 2), (w - 0.012, have * dd, hh), 0, C1)
+                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.002, z + hh * 0.56), ((w - 0.012) * 0.84, 0.003, hh * 0.5), 0, C2)
+                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.003, z + hh * 0.22), ((w - 0.012) * 0.84, 0.003, hh * 0.1), 0, Cw)
+                continue
+            r = w / 2 - 0.004
+            for k in range(min(have, 2)):
+                yy = yf - sgn * k * dd
+                if rng.random() < 0.035 and k == 0:
+                    rod(b, (xc - 0.02, yy, z + r), (xc + hh * 0.6, yy + sgn * 0.02, z + r), r, C1, 7)
+                    continue
+                if kind in ('can', 'can2'):
+                    ring(xc, yy, z, z + hh, r, TIN())
+                    ring(xc, yy, z + 0.01, z + hh - 0.01, r + 0.0025, C1)
+                    if kind == 'can' and hh * 2 + 0.03 < h and rng.random() < 0.6:
+                        ring(xc, yy, z + hh + 0.002, z + 2 * hh + 0.002, r, TIN())
+                        ring(xc, yy, z + hh + 0.012, z + 2 * hh - 0.008, r + 0.0025, C1)
+                elif kind == 'jar':
+                    J = (JAR_A, JAR_G, JAR_R)[int(xc * 37) % 3]()
+                    ring(xc, yy, z, z + hh - 0.02, r, J)
+                    ring(xc, yy, z + 0.02, z + hh * 0.6, r + 0.002, Cw)
+                    ring(xc, yy, z + hh - 0.02, z + hh, r * 0.86, C2, 6)
+                elif kind == 'spray':
+                    ring(xc, yy, z, z + hh * 0.7, r, C1)
+                    ring(xc, yy, z + hh * 0.7, z + hh * 0.88, r * 0.4, C1, 6)
+                    obox(b, (xc, yy + sgn * 0.015, z + hh * 0.94), (0.03, 0.07, 0.035), 0, C2)
+                    ring(xc, yy, z + hh * 0.2, z + hh * 0.55, r + 0.002, Cw)
+                else:
+                    ring(xc, yy, z, z + hh * 0.66, r, C1)
+                    ring(xc, yy, z + hh * 0.66, z + hh * 0.93, r * 0.4, C1, 6)
+                    ring(xc, yy, z + hh * 0.93, z + hh, r * 0.48, C2, 6)
+                    ring(xc, yy, z + hh * 0.18, z + hh * 0.5, r + 0.002, C2 if rng.random() < 0.5 else Cw)
+        x += rng.uniform(0.0, 0.03)
 
 
 def gondola(b, rng):
@@ -1251,8 +1356,17 @@ def gondola(b, rng):
     obox(b, (0, 0, 0.08), (L, D, 0.16), 0, SHELFD())
     for x in (-L / 2 + 0.02, 0, L / 2 - 0.02):
         obox(b, (x, 0, H / 2), (0.04, 0.09, H), 0, SHELFD())
-    fill = rng.uniform(0.12, 0.5)
+    fill = rng.uniform(0.6, 0.97) if rng.random() < 0.85 else rng.uniform(0.15, 0.4)
+    # overstock left on the top, still in its cases
+    x = -L / 2 + rng.uniform(0.1, 0.8)
+    while x < L / 2 - 0.5:
+        if rng.random() < 0.45:
+            w, hh = rng.uniform(0.3, 0.5), rng.uniform(0.2, 0.34)
+            obox(b, (x + w / 2, rng.uniform(-0.1, 0.1), H + hh / 2), (w, rng.uniform(0.3, 0.42), hh), rng.uniform(-0.2, 0.2), rng.choice((CARDB, CARDB2))())
+            x += w
+        x += rng.uniform(0.1, 0.9)
     for sgn in (-1, 1):
+        cat = rng.choice(CAT_LIST)
         for k in range(5):
             z = 0.17 + k * 0.38
             d = 0.46 - k * 0.025
@@ -1265,7 +1379,7 @@ def gondola(b, rng):
                 continue
             obox(b, (0, yc, z), (L - 0.06, d, 0.022), 0, SHELFM())
             obox(b, (0, sgn * (0.015 + d + 0.004), z - 0.008), (L - 0.06, 0.008, 0.036), 0, LABEL_W() if rng.random() < 0.8 else LABEL_Y())
-            _stock(b, rng, -L / 2 + 0.05, L / 2 - 0.05, yc, z + 0.011, d, 0.34, fill * (1.3 if k == 0 else 1))
+            _stock(b, rng, -L / 2 + 0.05, L / 2 - 0.05, yc, z + 0.011, d, 0.34, fill, sgn, cat if rng.random() < 0.8 else None)
     # what came off, on the floor against the kick board
     for k in range(rng.randint(0, 5)):
         sgn = rng.choice((-1, 1))
@@ -1308,7 +1422,7 @@ def endcap(b, rng):
     for k in range(4):
         z = 0.17 + k * 0.4
         obox(b, (0, -0.2, z), (W - 0.04, 0.42, 0.022), 0, SHELFM())
-        _stock(b, rng, -W / 2 + 0.04, W / 2 - 0.04, -0.2, z + 0.011, 0.42, 0.36, rng.uniform(0.1, 0.6))
+        _stock(b, rng, -W / 2 + 0.04, W / 2 - 0.04, -0.2, z + 0.011, 0.42, 0.36, rng.uniform(0.6, 0.98))
     obox(b, (0, -0.01, H + 0.16), (W * 0.8, 0.012, 0.3), 0, rng.choice((LABEL_R, LABEL_Y))(), tilt=(rng.uniform(-0.1, 0.1), rng.uniform(-0.12, 0.12)))
 
 
@@ -1391,14 +1505,16 @@ def freezer(b, rng):
     obox(b, (0, 0, H - 0.09), (L, D, 0.18), 0, W)
     for x in (-L / 2 + 0.02, L / 2 - 0.02):
         obox(b, (x, 0, H / 2), (0.04, D, H), 0, W)
+    obox(b, (0, -D / 2 - 0.004, 0.09), (L - 0.1, 0.008, 0.12), 0, RUBBER())
+    obox(b, (0, -D / 2 - 0.004, H - 0.09), (L - 0.06, 0.008, 0.13), 0, LABEL_B())
     dw = (L - 0.08) / 4
     for k in range(4):
         x = -L / 2 + 0.04 + dw * (k + 0.5)
         obox(b, (x - dw / 2, -0.02, H / 2), (0.03, D - 0.1, H - 0.36), 0, W)
         for z in (0.5, 0.86, 1.22, 1.58):
             obox(b, (x, 0.02, z), (dw - 0.04, D - 0.16, 0.016), 0, STEEL())
-            if rng.random() < 0.5:
-                _stock(b, rng, x - dw / 2 + 0.04, x + dw / 2 - 0.04, 0.05, z + 0.008, 0.5, 0.3, 0.5)
+            if rng.random() < 0.9:
+                _stock(b, rng, x - dw / 2 + 0.04, x + dw / 2 - 0.04, 0.05, z + 0.008, 0.5, 0.3, 0.85, -1, 'frozen')
         state = rng.random()
         ang = rng.uniform(0.7, 1.7) if state < 0.22 else 0.0
         hx = x - dw / 2 + 0.02
@@ -1454,10 +1570,11 @@ def producebin(b, rng):
         z = 0.87 + 0.24 * (y + 0.1)
         for (dx, dy, sx, sy) in ((0, -0.17, 0.44, 0.02), (0, 0.17, 0.44, 0.02), (-0.21, 0, 0.02, 0.34), (0.21, 0, 0.02, 0.34)):
             obox(b, (x + dx, y + dy, z + 0.06), (sx, sy, 0.14), 0, rng.choice((LABEL_G, SHELFD, CARDB))(), tilt=(0.24, 0))
-        for j in range(rng.randint(2, 9)):
-            r = rng.uniform(0.035, 0.07)
+        FR = rng.choice((FRUIT_O, FRUIT_R, FRUIT_G, FRUIT_Y, FRUIT_G, ROT2))
+        for j in range(rng.randint(9, 18)):
+            r = rng.uniform(0.035, 0.06)
             px, py = x + rng.uniform(-0.15, 0.15), y + rng.uniform(-0.12, 0.12)
-            obox(b, (px, py, z + 0.04 + r * 0.5 + 0.24 * (py - y)), (r * 2, r * 2, r * rng.uniform(0.6, 1.4)), rng.uniform(0, 3), rng.choice((ROT, ROT, ROT2, MOULD))(), tilt=(rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)))
+            obox(b, (px, py, z + 0.04 + r * 0.5 + 0.24 * (py - y)), (r * 2, r * 2, r * rng.uniform(0.9, 1.6)), rng.uniform(0, 3), FR() if rng.random() < 0.8 else rng.choice((ROT, ROT2, MOULD))(), tilt=(rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5)))
     for j in range(rng.randint(4, 10)):
         r = rng.uniform(0.03, 0.06)
         obox(b, (rng.uniform(-1.0, 1.0), -D / 2 - rng.uniform(0.05, 0.6), r * 0.4), (r * 2, r * 2, r * 0.8), rng.uniform(0, 3), rng.choice((ROT, ROT2, MOULD))())
@@ -1625,6 +1742,103 @@ def cardstack(b, rng):
 
 
 
+GALV = lambda: mat('lfgalv', (0.3, 0.3, 0.31), 0.55, 0.3)
+BASKET = lambda: mat('lfbasket', (0.22, 0.035, 0.03), 0.5)
+
+
+def duct(b, rng):
+    """three metres of air duct under the deck, origin at the deck: a galvanised box on drop rods, a flange at each
+    joint, a diffuser under some; now and then a length has come off its rods at one end and hangs"""
+    z = -1.0
+    down = rng.random() < 0.08
+    tl = (0, 0.16) if down else (0, 0)
+    zz = z - (0.24 if down else 0)
+    obox(b, (1.5, 0, zz), (3.0, 0.7, 0.42), 0, GALV(), tilt=tl)
+    for x in (0.02, 1.5, 2.98):
+        obox(b, (x, 0, zz + (1.5 - x) * (0.16 if down else 0)), (0.04, 0.76, 0.48), 0, GALV(), tilt=tl)
+    for x in (0.5, 2.5):
+        if down and x > 1:
+            rod(b, (x, 0.4, 0), (x, 0.4, -0.5), 0.006, STEEL(), 4)
+            continue
+        for sy in (-0.4, 0.4):
+            rod(b, (x, sy, 0), (x, sy, z - 0.24), 0.006, STEEL(), 4)
+        obox(b, (x, 0, z - 0.24), (0.04, 0.84, 0.03), 0, STEEL())
+    if rng.random() < 0.4 and not down:
+        obox(b, (rng.uniform(0.8, 2.2), 0, z - 0.23), (0.5, 0.5, 0.04), 0, WHITEP())
+    if rng.random() < 0.3:
+        x = rng.uniform(0.4, 2.6)
+        quad(b, [(x - 0.2, 0.352, zz + 0.2), (x + 0.2, 0.352, zz + 0.2), (x + 0.12, 0.354, zz - 0.5), (x - 0.1, 0.354, zz - 0.36)], ROT())
+
+
+def banner(b, rng):
+    """a promotion's banner on two wires from the steel (origin there): 2.4 m of printed sheet, bellied, the bottom
+    hem weighted; some hang by one corner, the rest of it turned over on itself"""
+    drop = 1.3
+    W, Hh = 2.4, 0.9
+    M = rng.choice((LABEL_R, LABEL_Y, LABEL_B, LABEL_W))()
+    torn = rng.random() < 0.28
+    n = 8
+    rod(b, (-W / 2, 0, 0), (-W / 2, 0, -drop), 0.003, STEEL(), 4)
+    if not torn:
+        rod(b, (W / 2, 0, 0), (W / 2, 0, -drop), 0.003, STEEL(), 4)
+    else:
+        rod(b, (W / 2, 0, 0), (W / 2, 0, -0.5), 0.003, STEEL(), 4)
+    for k in range(n):
+        t0, t1 = k / n, (k + 1) / n
+
+        def P(t, v):
+            if torn:
+                # hangs from the left corner: the top edge swings down
+                a = 1.15
+                x = -W / 2 + math.sin(a) * 0 + (t * W) * math.cos(a) + v * Hh * math.sin(a) * 0.25
+                z = -drop - (t * W) * math.sin(a) - v * Hh * math.cos(a) * 0.9
+                return (x, 0.05 * math.sin(t * 7) + v * 0.04, z)
+            return (-W / 2 + t * W, 0.07 * math.sin(t * math.pi) * (0.4 + v), -drop - v * Hh - 0.05 * math.sin(t * math.pi) * (1 - v))
+        quad(b, [P(t0, 0), P(t1, 0), P(t1, 1), P(t0, 1)], M)
+        if k in (2, 3, 4, 5) and not torn:
+            quad(b, [P(t0, 0.3), P(t1, 0.3), P(t1, 0.7), P(t0, 0.7)][::1], LABEL_W() if M is not LABEL_W() else LABEL_R())
+
+
+def baskets(b, rng):
+    """a stack of hand baskets by the door, a few lying about beside it"""
+    def one(x, y, z, yaw, tl=(0, 0)):
+        Mb = BASKET()
+        obox(b, (x, y, z + 0.01), (0.4, 0.27, 0.02), yaw, Mb, tilt=tl)
+        for (dx, dy, sx, sy) in ((0, -0.14, 0.44, 0.012), (0, 0.14, 0.44, 0.012), (-0.22, 0, 0.012, 0.28), (0.22, 0, 0.012, 0.28)):
+            c, sn = math.cos(yaw), math.sin(yaw)
+            obox(b, (x + dx * c - dy * sn, y + dx * sn + dy * c, z + 0.12), (sx, sy, 0.22), yaw, Mb, tilt=tl)
+    nst = rng.randint(4, 10)
+    for k in range(nst):
+        one(rng.uniform(-0.01, 0.01), rng.uniform(-0.01, 0.01), k * 0.06, rng.uniform(-0.04, 0.04))
+    rod(b, (-0.2, 0, nst * 0.06 + 0.22), (0.2, 0, nst * 0.06 + 0.22), 0.008, RUBBER(), 5)
+    for k in range(rng.randint(1, 3)):
+        one(rng.uniform(0.5, 1.1) * rng.choice((-1, 1)), rng.uniform(-0.6, 0.6), 0.0, rng.uniform(0, 3.1))
+
+
+def promo(b, rng):
+    """a pallet of something on offer, stood in the aisle: cases in courses, a corner of it taken, a few on the floor,
+    the price on a card on a pole"""
+    for y in (-0.4, 0, 0.4):
+        obox(b, (0, y, 0.05), (1.15, 0.1, 0.09), 0, BOARD())
+    obox(b, (0, 0, 0.11), (1.15, 1.0, 0.022), 0, BOARD())
+    M = rng.choice((CARDB, CARDB2))()
+    Lb = rng.choice((LABEL_R, LABEL_B, LABEL_G, LABEL_Y))()
+    layers = rng.randint(2, 4)
+    for lz in range(layers):
+        for ix in range(3):
+            for iy in range(2):
+                if rng.random() < 0.12 + 0.2 * lz:
+                    continue
+                cx, cy, cz = -0.38 + ix * 0.38, -0.25 + iy * 0.5, 0.13 + lz * 0.26 + 0.125
+                obox(b, (cx + rng.uniform(-0.01, 0.01), cy, cz), (0.36, 0.47, 0.25), rng.uniform(-0.03, 0.03), M)
+                obox(b, (cx, cy - 0.24 if iy == 0 else cy + 0.24, cz), (0.24, 0.006, 0.12), 0, Lb)
+    for k in range(rng.randint(1, 4)):
+        obox(b, (rng.uniform(-1.1, 1.1), rng.choice((-1, 1)) * rng.uniform(0.75, 1.1), 0.125), (0.36, 0.47, 0.25), rng.uniform(0, 3), M, tilt=(rng.choice((0, 0, 1.57)), 0))
+    rod(b, (0.5, 0.45, 0.12), (0.5, 0.45, 1.75), 0.012, SHELFD(), 5)
+    obox(b, (0.5, 0.45, 1.95), (0.5, 0.012, 0.4), 0, LABEL_Y(), tilt=(0, rng.uniform(-0.15, 0.15)))
+
+
+
 KINDS_EXTRA = dict(sbwall=sbwall, wattle=wattle, duck=duck, pool=pool, spoil=spoil, helmet=helmet, stretcher=stretcher, picket=picket, fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
 
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
@@ -1633,7 +1847,7 @@ KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, h
              extinguisher=extinguisher, sanitiser=sanitiser, notice=notice, wallphone=wallphone, seats=seats, vending=vending, monitor=monitor,
              cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint, wetfloor=wetfloor,
              gondola=gondola, gondolax=gondolax, endcap=endcap, checkout=checkout, cart=cart, freezer=freezer, coffin=coffin, producebin=producebin,
-             rack=rack, strips=strips, hooks=hooks, aislesign=aislesign, trussbay=trussbay, cardstack=cardstack)
+             rack=rack, strips=strips, hooks=hooks, aislesign=aislesign, trussbay=trussbay, cardstack=cardstack, duct=duct, banner=banner, baskets=baskets, promo=promo)
 
 
 def make(name):

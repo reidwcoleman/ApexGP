@@ -320,7 +320,7 @@ for ( int wi = 0; wi < 4; wi++ ) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
   };
   m.customProgramCacheKey = () => 'lfgear2';
-  return applyLF(m);
+  return applyLF(m, { person: true });
 }
 
 /** a body: walks, turns, holds a gun, falls */
@@ -790,7 +790,7 @@ const seenMat = new Set<THREE.Material>();
 function applyPeople(m: THREE.MeshStandardMaterial) {
   if (!m || seenMat.has(m) || m.userData.gear) return;
   seenMat.add(m);
-  applyLF(m);
+  applyLF(m, { person: true });
 }
 
 export function angleDiff(a: number, b: number) {

@@ -28,10 +28,11 @@ WX = 14.0                  # the west front block
 EX = 46.0                  # the cafe
 KX, MX2 = 10.0, 21.0       # kitchen | meat | freezer
 ROWS = (16.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0)
-SECT = ((12.5, 15.5), (21.0, 24.0))     # gondola module centres along y, either side of the cross aisle
+SECT = ((12.5, 15.5), (21.0, 24.0))
+TRUSS = (10.2, 18.25, 26.3)   # the truss lines, on the column lines     # gondola module centres along y, either side of the cross aisle
 
 SKY = dict(hdri='rooftop_night', strength=1.0, tint=(0.34, 0.46, 0.7))
-WEATHER = dict(key=0.125, rain=1, wet=1, fog=1.3, sky=[0.3, 0.33, 0.4], wb=[0.96, 1.0, 1.02])
+WEATHER = dict(key=0.2, rain=1, wet=1, fog=1.3, sky=[0.3, 0.33, 0.4], wb=[0.96, 1.0, 1.02])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -1.2, -52], dim=[39, 9, 31])
 
 TUBE = (0.8, 0.94, 1.0)
@@ -260,7 +261,7 @@ def build():
     # pharmacy: the dispensing counter behind the hatch, shelves stripped, the controlled-drugs cabinet forced
     counter(5.0, 6.6, 9.0, 7.2, body='planks', top='wood_top')
     for (x, r) in ((4.6, 0.0), (8.0, 0.0), (11.4, 0.0)):
-        K(f'gondola_{int(x * 3)}', x, 2.6, r=r, solid=(1.5, 0.5, 1.95))
+        K(f'gondola_{int(x) % 12 + 1}', x, 2.6, r=r, solid=(1.5, 0.5, 1.95))
     K('lockers_2', 13.3, 1.2, r=-math.pi / 2, solid=(0.6, 0.3, 1.9))
     for k in range(5):
         K(f'bottles_{k + 1}', R.uniform(4.0, 13.0), R.uniform(4.0, 6.2), 0.001, R.uniform(0, 6.28))
@@ -292,11 +293,17 @@ def build():
     room('tills', WX, Y0, EX, FY, Z, TOP, 'hosp_wall3', 'mtile', ceil='tin_in')
     room('sales', X0, FY, X1, BY, Z, TOP, 'hosp_wall3', 'mtile', ceil='tin_in')
     # the roof steel: three lines of truss over the hall, a dead fitting on most bays
-    for ty in (12.0, 19.0, 26.0):
+    for ty in TRUSS:
         for k in range(20):
             K(f'trussbay_{k + int(ty)}', k * 3.0, ty, TOP - 0.001)
-    lit = {(21.0, 12.0): 42, (39.0, 26.0): 34, (9.0, 19.0): 30, (51.0, 19.0): 26, (33.0, 5.2): 30}
-    for ty in (12.0, 19.0, 26.0):
+    # most of the hall is still lit: every other fitting, a dark patch over the ring and the far corners
+    lit = {(x, ty): 46 for ty in TRUSS for x in (9.0, 21.0, 33.0, 45.0, 57.0)}
+    lit.update({(x, TRUSS[1]): 40 for x in (15.0, 39.0, 51.0)})
+    lit.update({(27.0, TRUSS[0]): 40, (51.0, TRUSS[0]): 40, (15.0, TRUSS[2]): 40})
+    for kk in ((33.0, TRUSS[1]), (33.0, TRUSS[2]), (57.0, TRUSS[2])):
+        del lit[kk]
+    lit[(33.0, 5.2)] = 34
+    for ty in TRUSS:
         for x in (9.0, 15.0, 21.0, 27.0, 33.0, 39.0, 45.0, 51.0, 57.0):
             if (x, ty) in lit:
                 tube(x, ty - 0.35, TOP - 0.9, lit[(x, ty)], reach=10.0)
@@ -304,7 +311,39 @@ def build():
                 tube(x, ty - 0.35, TOP - 0.9, 0, lit=False)
     tube(33.0, 5.2, H1 + 0.6, lit[(33.0, 5.2)], along='y', reach=8.0)
     for x in (18.0, 24.0, 40.0):
-        tube(x, 5.2, H1 + 0.6, 0, along='y', lit=False)
+        tube(x, 5.2, H1 + 0.6, 30 if x != 24.0 else 0, along='y', lit=x != 24.0, reach=8.0)
+    # ---- the structure: a column under each truss every twelve metres, in line with the shelving, a yellow sleeve round its foot
+    for cx in (8.0, 20.0, 32.0, 44.0, 56.0):
+        for cy in TRUSS:
+            box((cx - 0.13, cy - 0.13, 0.0), (cx + 0.13, cy + 0.13, TOP - 0.7), 'wall_conc', tag='post', density=0.3)
+            box((cx - 0.17, cy - 0.17, 0.0), (cx + 0.17, cy + 0.17, 1.2), 'paint_y', collide=False, density=0.2)
+    # the air: two runs of duct the length of the hall
+    for dy in (14.4, 22.6):
+        for k in range(20):
+            K(f'duct_{k + int(dy)}', k * 3.0, dy, TOP - 0.001)
+    # what was on offer the last week: banners off the steel, pallets stood in the aisles
+    for i, (x, ty) in enumerate(((14.0, 1), (22.0, 1), (38.0, 1), (46.0, 1), (12.0, 2), (26.0, 2), (34.0, 2), (48.0, 2), (5.0, 0), (52.0, 0))):
+        K(f'banner_{i + 1}', x, TRUSS[ty] + 0.02, TOP - 0.7)
+    for i, (x, y, r) in enumerate(((22.0, 9.0, 0.1), (37.6, 9.2, 1.5), (13.0, 18.3, 0.0), (54.2, 18.6, 1.6), (46.0, 9.6, 0.3))):
+        K(f'promo_{i + 1}', x, y, 0.0, r=r, solid=(0.62, 0.62, 0.9))
+    # a painted band round the hall above the fittings
+    box((WX, Y0 + 0.165, 3.75), (EX, Y0 + 0.18, 4.3), 'paint_g', collide=False, density=0.1)
+    box((X0, BY - 0.118, 3.75), (X1, BY - 0.105, 4.3), 'paint_g', collide=False, density=0.1)
+    box((X1 - 0.18, FY, 3.5), (X1 - 0.165, BY, 4.05), 'paint_g', collide=False, density=0.1)
+    # the way in: matting, the tag gates, baskets
+    box((27.6, 0.3, 0.0), (32.4, 2.2, 0.008), 'plastic_black', collide=False, density=0.2)
+    for gx in (28.5, 30.0, 31.5):
+        box((gx - 0.03, 2.4, 0.0), (gx + 0.03, 2.9, 1.5), 'trim', pen=True, tag='post', density=0.3)
+        box((gx - 0.06, 2.36, 0.0), (gx + 0.06, 2.94, 0.06), 'plastic_black', collide=False, density=0.2)
+    K('baskets_1', 26.6, 0.9, 0.0, r=0.2)
+    K('baskets_2', 33.4, 1.0, 0.0, r=2.0)
+    for i, x in enumerate((16.5, 22.5, 25.5, 37.5, 43.5)):
+        K(f'endcap_{i % 7 + 1}', x + 0.1, 7.75, 0.0, r=-math.pi / 2, solid=(0.5, 0.25, 1.7))
+    # where the roof lets the rain in: black water under the rooflights
+    for i, (x, y) in enumerate(((10.6, 16.6), (34.6, 16.0), (46.6, 23.7), (22.6, 18.4), (54.6, 16.2))):
+        K(f'pool_{i + 1}', x, y, 0.003, r=R.uniform(0, 6.28))
+    for i in range(22):
+        K(f'litter_{i % 6 + 1}', R.uniform(15.0, 45.0), R.uniform(1.0, 10.0), 0.001, R.uniform(0, 6.28))
     # ---- the tills: four lanes either side of the way in, one screen still asking for a card
     for i, x in enumerate((16.5, 19.5, 22.5, 25.5, 34.5, 37.5, 40.5, 43.5)):
         K(f'checkout_{i + 1}', x, 5.6, r=0.0, solid=(0.42, 1.35, 0.9))
@@ -326,18 +365,18 @@ def build():
                 continue
             for y in sect:
                 n += 1
-                if (x, y) in ((20.0, 12.5), (40.0, 24.0)):
+                if (x, y) in ((40.0, 24.0),):
                     K(f'gondolax_{n}', x, y, 0.0, r=math.pi / 2 if x < 30 else -math.pi / 2, solid=(1.5, 1.2, 0.55))
                     continue
-                if (x, y) in ((36.0, 15.5), (24.0, 21.0), (44.0, 12.5)):
+                if (x, y) in ((24.0, 21.0),):
                     K(f'debris_{n % 5 + 1}', x, y, 0.001, R.uniform(0, 6.28))
                     K(f'litter_{n % 6 + 1}', x + 0.4, y - 0.6, 0.001, R.uniform(0, 6.28))
                     continue
-                K(f'gondola_{n}', x, y, 0.0, r=math.pi / 2, solid=(1.5, 0.5, 1.95))
-            K(f'endcap_{n}', x, sect[0] - 1.53, 0.0, r=0.0, solid=(0.5, 0.25, 1.7))
-            K(f'endcap_{n + 50}', x, sect[1] + 1.53, 0.0, r=math.pi, solid=(0.5, 0.25, 1.7))
+                K(f'gondola_{n % 12 + 1}', x, y, 0.0, r=math.pi / 2 if n % 2 else -math.pi / 2, solid=(1.5, 0.5, 1.95))
+            K(f'endcap_{n % 7 + 1}', x, sect[0] - 1.53, 0.0, r=0.0, solid=(0.5, 0.25, 1.7))
+            K(f'endcap_{(n + 3) % 7 + 1}', x, sect[1] + 1.53, 0.0, r=math.pi, solid=(0.5, 0.25, 1.7))
     for i, x in enumerate((18.0, 22.0, 26.0, 30.0, 34.0, 38.0, 42.0)):
-        K(f'aislesign_{i + 1}', x, 12.0, TOP - 0.7)
+        K(f'aislesign_{i + 1}', x, TRUSS[0], TOP - 0.7)
     for i in range(26):
         x, y = R.choice((18.0, 22.0, 26.0, 30.0, 34.0, 38.0, 42.0)) + R.uniform(-1.0, 1.0), R.uniform(10.5, 26.0)
         K(f'litter_{i % 6 + 1}' if i % 3 else f'bottles_{i % 5 + 1}', x, y, 0.001, R.uniform(0, 6.28))
@@ -365,12 +404,12 @@ def build():
         K(f'cardstack_{i + 1}', 1.0, y, 0.0, r=math.pi / 2, solid=(0.8, 0.6, 1.2) if i != 1 else None)
     stains((7.8, 13.4, 0.0, 0, 0, 1, 1.3), (5.0, 22.4, 0.0, 0, 0, 1, 1.8), (X0 + 0.18, 16.8, 1.1, 1, 0, 0, 1.3))
     # ---- frozen: uprights down the east wall and a double bank mid-floor, chest freezers between. Two banks still lit
-    FLIT = {(59.4, 14.5), (59.4, 23.5), (51.6, 22.0)}
+    FLIT = {(59.4, 11.5), (59.4, 14.5), (59.4, 20.5), (59.4, 23.5), (51.6, 12.5), (51.6, 22.0), (52.4, 15.5), (52.4, 25.0)}
     k = 0
     for (x, r, ys) in ((59.4, -math.pi / 2, (11.5, 14.5, 17.5, 20.5, 23.5, 26.0)), (51.6, -math.pi / 2, (12.5, 15.5, 22.0, 25.0)), (52.4, math.pi / 2, (12.5, 15.5, 22.0, 25.0))):
         for y in ys:
             k += 1
-            K(f'freezer_{k}', x, y, 0.0, r=r, solid=(1.5, 0.4, 2.05))
+            K(f'freezer_{k % 6 + 1}', x, y, 0.0, r=r, solid=(1.5, 0.4, 2.05))
             if (x, y) in FLIT:
                 s = -1 if r < 0 else 1
                 box((x + s * 0.26, y - 1.4, 1.83), (x + s * 0.3, y + 1.4, 1.87), 'lightbox', collide=False, density=0.15)

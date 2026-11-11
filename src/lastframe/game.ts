@@ -311,9 +311,10 @@ export class Game {
     if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
     if (L.map.night) {
       Bot.night = true;
-      this.post.exposureMax = 3.2;
-      this.post.mFinal.uniforms.satK.value = 0.74;
-      this.post.mFinal.uniforms.grainK.value = 1.5;
+      // the dark is still dark, but the sensor is a better one: it opens further and brings far less noise up with it
+      this.post.exposureMax = 5.0;
+      this.post.mFinal.uniforms.satK.value = 0.8;
+      this.post.mFinal.uniforms.grainK.value = 0.45;
     }
     if (sunInfo) {
       this.post.mFinal.uniforms.caK.value = this.caBase = 0.0085;
@@ -1091,7 +1092,12 @@ export class Game {
       const a = Math.random() * 6.283, d = 14 + Math.random() * 18;
       const p = new THREE.Vector3(c.x + Math.cos(a) * d, c.y + (Math.random() - 0.4) * 3, c.z + Math.sin(a) * d);
       const r = Math.random();
-      if (r < 0.15) this.sound.groan(p);
+      // in the shop: a trolley moves, something comes off a shelf
+      if (MAP_ID === 'store' && r > 0.62) {
+        p.y = 0.4;
+        if (r > 0.82) this.sound.trolley(p);
+        else this.sound.tin(p);
+      } else if (r < 0.15) this.sound.groan(p);
       else if (r < 0.5) this.sound.creak(p);
       else if (r < 0.8) this.sound.impact(p, Math.random() < 0.5 ? 'metal' : 'wood');
       else this.sound.door(p, Math.random() < 0.5);

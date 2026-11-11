@@ -657,11 +657,11 @@ void main() {
   float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
   // the sensor gains up in the dark, and its noise comes up with it: finer grain, then blotches of colour a few pixels across
   float gain = clamp( expo / 1.1, 1.0, 3.2 );
-  float gk = mix( 0.03, 0.016, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut ) * ( 0.7 + 0.42 * gain );
+  float gk = mix( 0.022, 0.012, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut ) * ( 0.8 + 0.16 * gain );
   col += vec3( g + g2 * 0.2, g, g - g2 * 0.2 ) * gk;
   vec2 cbk = floor( gp / 3.0 );
   float c1 = hash( cbk + fract( time * 0.97 ) * 53.0 ) - 0.5, c2 = hash( cbk * 1.3 + fract( time * 1.13 ) * 17.0 ) - 0.5;
-  col += vec3( c1, -0.5 * ( c1 + c2 ), c2 ) * 0.014 * ( gain - 1.0 ) * ( 1.0 - smoothstep( 0.08, 0.5, l ) ) * ( 1.0 - feedCut );
+  col += vec3( c1, -0.5 * ( c1 + c2 ), c2 ) * 0.003 * ( gain - 1.0 ) * ( 1.0 - smoothstep( 0.08, 0.5, l ) ) * ( 1.0 - feedCut );
   gl_FragColor = vec4( col, 1.0 );
 }
 `;
@@ -737,7 +737,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 0.5 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();

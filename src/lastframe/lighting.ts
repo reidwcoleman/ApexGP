@@ -316,8 +316,15 @@ const FRAG_LIGHT = /* glsl */ `
     #endif
     radiance += lfRad * lfWorldLight;
   #else
-    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.0055, 0.0065, 0.0095 ) ) * PI * lfWorldLight * lfFlickDim( vLfW ) + lfFlash * PI;
+    irradiance += max( lfCube( vLfW + lfNw * 0.36, lfNw ), vec3( 0.009, 0.0105, 0.014 ) ) * PI * lfWorldLight * lfFlickDim( vLfW ) + lfFlash * PI;
     radiance += lfCube( vLfW + lfNw * 0.36, lfR ) * lfWorldLight * LF_SPEC;
+    #ifdef LF_PERSON
+    {
+      // people never sink into the black: a floor of light on them, and an edge of it where they turn away from the lens
+      float lfRim = pow( 1.0 - clamp( dot( lfNw, lfVw ), 0.0, 1.0 ), 2.5 );
+      irradiance += ( vec3( 0.02, 0.02, 0.021 ) + vec3( 0.06, 0.06, 0.064 ) * lfRim ) * PI;
+    }
+    #endif
     #ifdef LF_VIEW
     {
       // the room as seen from the gun: average light, picked up by anything turned toward the wearer
@@ -526,6 +533,8 @@ export interface LfOpts {
   tile?: boolean;
   /** what's held up to the lens: a little light off the wearer's own chest, so a dark gun isn't a hole in the picture */
   view?: number;
+  /** a body or what it wears: lifted off the dark so it can be picked out */
+  person?: boolean;
   /** out in the weather rather than in a room */
   outdoor?: boolean;
   /** lets the sun through from behind */
@@ -538,6 +547,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   if (o.wet) m.defines.LF_WET = 1;
   m.defines.LF_SPEC = (o.spec ?? 1).toFixed(2);
   if (o.view) m.defines.LF_VIEW = 1;
+  if (o.person) m.defines.LF_PERSON = 1;
   if (o.tile) m.defines.LF_TILE = 1;
   if (o.outdoor) m.defines.LF_OUT = 1;
   if (o.terrain) m.defines.LF_LAND = 1;

@@ -606,6 +606,36 @@ export class Sound {
 
   /** cloth and tape */
   /** a rat, put up */
+  /** a trolley somewhere in the shop, rolling a few metres on its own: the basket's rattle, one wheel that wants oil, slowing */
+  trolley(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.5, true);
+    let t = 0, gap = 0.045;
+    for (let i = 0; i < 46 && t < 3.2; i++) {
+      const k = 1 - t / 3.4;
+      this.burst(d, 0.02, 0.16 * k * (0.6 + Math.random() * 0.6), 1800, 7000, t);
+      if (i % 5 === 0) this.burst(d, 0.05, 0.07 * k, 4200, 6800, t + 0.01);
+      t += gap * (0.8 + Math.random() * 0.4);
+      gap *= 1.035;
+    }
+    this.thump(d, 190, 120, 0.09, 0.5, t + 0.05, 'triangle');
+    this.burst(d, 0.05, 0.3, 900, 5000, t + 0.05);
+  }
+
+  /** a tin comes off a shelf: the drop, two bounces, and it rolls until something stops it */
+  tin(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.55, true);
+    let t = 0, g = 0.5;
+    for (const dt of [0, 0.34, 0.2, 0.11]) {
+      t += dt;
+      this.thump(d, 1500 + Math.random() * 500, 900, 0.05, g, t, 'triangle');
+      this.burst(d, 0.03, g * 0.5, 1500, 6000, t);
+      g *= 0.55;
+    }
+    for (let i = 0; i < 16; i++) this.burst(d, 0.04, 0.06 * (1 - i / 16), 1200, 3800, t + 0.12 + i * 0.075);
+  }
+
   squeak(p: THREE.Vector3) {
     if (!this.ctx) return;
     const d = this.src(p, 0.3, false);
