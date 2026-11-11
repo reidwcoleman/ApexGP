@@ -328,6 +328,48 @@ def kit_of(name):
         for c in list(o.users_collection): c.objects.unlink(o)
     kits[name] = d
     return d
+def vertex_ao(o, reach=0.3):
+    """what stands close to what: how open each face corner is to the room round it, as a colour on the mesh. The kit is
+    lit from the volume alone, so without this a tin on a shelf is as bright at the back as at the front"""
+    from mathutils.bvhtree import BVHTree
+    me = o.data
+    if not me.polygons: return
+    bm = bmesh.new(); bm.from_mesh(me)
+    # the floor (or the ceiling it hangs from) is part of what shuts the light out
+    lo = min(v.co.z for v in bm.verts); hi = max(v.co.z for v in bm.verts)
+    zf = 0.0 if lo > -0.05 else (0.0 if hi < 0.05 else None)
+    if zf is not None:
+        s_ = 30.0
+        bmesh.ops.create_grid(bm, x_segments=1, y_segments=1, size=s_, matrix=Matrix.Translation((0, 0, zf - 0.002)))
+    tree = BVHTree.FromBMesh(bm); bm.free()
+    dirs = []
+    N = 12
+    for k in range(N):
+        u = (k + 0.5) / N; ph = k * 2.39996
+        st = math.sqrt(u); ct = math.sqrt(1 - u)
+        dirs.append((st * math.cos(ph), st * math.sin(ph), ct))
+    ca = me.color_attributes.get('Col') or me.color_attributes.new('Col', 'BYTE_COLOR', 'CORNER')
+    out = np.ones((len(me.loops), 4), np.float32)
+    for p in me.polygons:
+        n = p.normal
+        t = n.cross(Vector((0, 0, 1))) if abs(n.z) < 0.9 else n.cross(Vector((1, 0, 0)))
+        t.normalize(); bt = n.cross(t)
+        dw = [t * d[0] + bt * d[1] + n * d[2] for d in dirs]
+        c = p.center
+        for li in p.loop_indices:
+            co = me.vertices[me.loops[li].vertex_index].co
+            # from a little inside the face's own corner, so a neighbour sharing the edge does not count as cover
+            org = co + (c - co) * 0.12 + n * 0.003
+            occ = 0.0
+            for d in dw:
+                hit = tree.ray_cast(org, d, reach)
+                if hit[0] is not None: occ += 1.0 - hit[3] / reach
+            v = 1.0 - occ / N
+            out[li, :3] = 0.22 + 0.78 * v
+    ca.data.foreach_set('color', out.ravel())
+    me.color_attributes.active_color = ca
+    me.color_attributes.render_color_index = list(me.color_attributes).index(ca)
+
 units = {}
 def unit_obj(kit, parts, far):
     key = (kit, tuple(parts), far)
@@ -335,6 +377,7 @@ def unit_obj(kit, parts, far):
     if kit in ('cove', 'ward'):
         o = (cove_kit if kit == 'cove' else ward_kit).make(parts[0])
         o.name = f'UF|{kit}|' + parts[0]
+        vertex_ao(o)
         units[key] = o
         return o
     d = kit_of(kit)
@@ -609,7 +652,7 @@ if '--props' in argv:
     bpy.ops.object.select_all(action='DESELECT')
     for o in col.objects: o.select_set(True)
     bpy.ops.export_scene.gltf(filepath=f'{OUT}/props.glb', export_format='GLB', use_selection=True, export_image_format='JPEG', export_image_quality=70, export_apply=False,
-                              export_animations=False, export_cameras=False, export_lights=False, export_yup=True, export_tangents=False)
+                              export_animations=False, export_cameras=False, export_lights=False, export_yup=True, export_tangents=False, export_vertex_color='ACTIVE')
     log('props.glb', os.path.getsize(f'{OUT}/props.glb') // 1024, 'KB')
 # 350 MB of debugging aid: only on request
 if '--blend' in argv: bpy.ops.wm.save_as_mainfile(filepath=f'{OUT}/scene.blend')

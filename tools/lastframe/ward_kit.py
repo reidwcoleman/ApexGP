@@ -46,9 +46,27 @@ def rod(b, p0, p1, r, m, n=8):
         o = x * (r * math.cos(t)) + y * (r * math.sin(t))
         lo.append(b.bm.verts.new(a + o)); hi.append(b.bm.verts.new(c + o))
     for k in range(n):
-        b.bm.faces.new((lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k])).material_index = i
+        f = b.bm.faces.new((lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k]))
+        f.material_index = i
+        f.smooth = n >= 6
     b.bm.faces.new(list(reversed(lo))).material_index = i
     b.bm.faces.new(hi).material_index = i
+
+
+def lathe(b, xc, yc, prof, m, n=7, foot=False):
+    """something turned: prof is (z, r) from the foot up, closed top and bottom, shaded round"""
+    i = b.idx(m)
+    rings = []
+    for z, r in prof:
+        rings.append([b.bm.verts.new((xc + r * math.cos(k * 2 * math.pi / n), yc + r * math.sin(k * 2 * math.pi / n), z)) for k in range(n)])
+    for a0, a1 in zip(rings, rings[1:]):
+        for k in range(n):
+            f = b.bm.faces.new((a0[k], a0[(k + 1) % n], a1[(k + 1) % n], a1[k]))
+            f.material_index = i
+            f.smooth = True
+    # what stands on a shelf never shows its foot
+    if foot: b.bm.faces.new(list(reversed(rings[0]))).material_index = i
+    b.bm.faces.new(rings[-1]).material_index = i
 
 
 def quad(b, pts, m, two=True):
@@ -61,13 +79,14 @@ def quad(b, pts, m, two=True):
         b.bm.faces.new(w).material_index = i
 
 
-def obox(b, c, size, yaw, m, tilt=(0.0, 0.0)):
-    """a box turned about z (and tipped a little)"""
+def obox(b, c, size, yaw, m, tilt=(0.0, 0.0), top=(1.0, 1.0)):
+    """a box turned about z (and tipped a little); top: how much of its width and depth is left at the top"""
     i = b.idx(m)
     sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
+    tx, ty = sx * top[0], sy * top[1]
     R = Matrix.Rotation(yaw, 3, 'Z') @ Matrix.Rotation(tilt[0], 3, 'X') @ Matrix.Rotation(tilt[1], 3, 'Y')
     C = Vector(c)
-    v = [b.bm.verts.new(C + R @ Vector(p)) for p in ((-sx, -sy, -sz), (sx, -sy, -sz), (sx, sy, -sz), (-sx, sy, -sz), (-sx, -sy, sz), (sx, -sy, sz), (sx, sy, sz), (-sx, sy, sz))]
+    v = [b.bm.verts.new(C + R @ Vector(p)) for p in ((-sx, -sy, -sz), (sx, -sy, -sz), (sx, sy, -sz), (-sx, sy, -sz), (-tx, -ty, sz), (tx, -ty, sz), (tx, ty, sz), (-tx, ty, sz))]
     for f in ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
         b.bm.faces.new([v[k] for k in f]).material_index = i
 
@@ -1296,7 +1315,9 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                 elif kind == 'bag':
                     for k in range(min(have, 3)):
                         yy = yf - sgn * k * dd
-                        obox(b, (xc, yy, z + hh / 2), (w - 0.02, dd * 0.7, hh), 0, C1, tilt=(sgn * 0.1, 0))
+                        # a filled bag: fat in the belly, pinched flat where it is sealed
+                        obox(b, (xc, yy, z + hh * 0.3), (w - 0.02, dd * 0.62, hh * 0.6), 0, C1, tilt=(sgn * 0.1, 0), top=(1.0, 1.25))
+                        obox(b, (xc, yy - sgn * hh * 0.06, z + hh * 0.79), (w - 0.02, dd * 0.775, hh * 0.38), 0, C1, tilt=(sgn * 0.1, 0), top=(0.96, 0.08))
                     obox(b, (xc, yf + sgn * dd * 0.37, z + hh * 0.5), ((w - 0.02) * 0.7, 0.003, hh * 0.34), 0, C2, tilt=(sgn * 0.1, 0))
                     obox(b, (xc, yf + sgn * dd * 0.38, z + hh * 0.86), (w - 0.02, 0.004, hh * 0.05), 0, Cw, tilt=(sgn * 0.1, 0))
                 elif kind == 'rolls':
@@ -1324,27 +1345,43 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                 if rng.random() < 0.035 and k == 0:
                     rod(b, (xc - 0.02, yy, z + r), (xc + hh * 0.6, yy + sgn * 0.02, z + r), r, C1, 7)
                     continue
+                near = k == 0
                 if kind in ('can', 'can2'):
-                    ring(xc, yy, z, z + hh, r, TIN())
-                    ring(xc, yy, z + 0.01, z + hh - 0.01, r + 0.0025, C1)
+                    def tin(z0, z1):
+                        if near:
+                            lathe(b, xc, yy, ((z0, r * 0.95), (z0 + 0.006, r), (z1 - 0.006, r), (z1, r * 0.95)), TIN())
+                        else:
+                            ring(xc, yy, z0, z1, r, TIN())
+                        ring(xc, yy, z0 + 0.011, z1 - 0.011, r + 0.0015, C1, 7 if near else 6)
+                    tin(z, z + hh)
                     if kind == 'can' and hh * 2 + 0.03 < h and rng.random() < 0.6:
-                        ring(xc, yy, z + hh + 0.002, z + 2 * hh + 0.002, r, TIN())
-                        ring(xc, yy, z + hh + 0.012, z + 2 * hh - 0.008, r + 0.0025, C1)
+                        tin(z + hh + 0.002, z + 2 * hh + 0.002)
                 elif kind == 'jar':
                     J = (JAR_A, JAR_G, JAR_R)[int(xc * 37) % 3]()
-                    ring(xc, yy, z, z + hh - 0.02, r, J)
-                    ring(xc, yy, z + 0.02, z + hh * 0.6, r + 0.002, Cw)
-                    ring(xc, yy, z + hh - 0.02, z + hh, r * 0.86, C2, 6)
+                    if near:
+                        lathe(b, xc, yy, ((z, r), (z + hh * 0.7, r), (z + hh - 0.035, r * 0.84), (z + hh - 0.02, r * 0.8)), J)
+                        lathe(b, xc, yy, ((z + hh - 0.021, r * 0.9), (z + hh - 0.004, r * 0.9), (z + hh, r * 0.84)), C2, 7)
+                    else:
+                        ring(xc, yy, z, z + hh - 0.02, r, J)
+                        ring(xc, yy, z + hh - 0.02, z + hh, r * 0.86, C2, 6)
+                    ring(xc, yy, z + 0.02, z + hh * 0.6, r + 0.0015, Cw, 7 if near else 6)
                 elif kind == 'spray':
-                    ring(xc, yy, z, z + hh * 0.7, r, C1)
-                    ring(xc, yy, z + hh * 0.7, z + hh * 0.88, r * 0.4, C1, 6)
+                    if near:
+                        lathe(b, xc, yy, ((z, r), (z + hh * 0.62, r), (z + hh * 0.72, r * 0.62), (z + hh * 0.78, r * 0.4), (z + hh * 0.88, r * 0.4)), C1)
+                    else:
+                        ring(xc, yy, z, z + hh * 0.7, r, C1)
+                        ring(xc, yy, z + hh * 0.7, z + hh * 0.88, r * 0.4, C1, 6)
                     obox(b, (xc, yy + sgn * 0.015, z + hh * 0.94), (0.03, 0.07, 0.035), 0, C2)
-                    ring(xc, yy, z + hh * 0.2, z + hh * 0.55, r + 0.002, Cw)
+                    ring(xc, yy, z + hh * 0.2, z + hh * 0.55, r + 0.0015, Cw, 7 if near else 6)
                 else:
-                    ring(xc, yy, z, z + hh * 0.66, r, C1)
-                    ring(xc, yy, z + hh * 0.66, z + hh * 0.93, r * 0.4, C1, 6)
-                    ring(xc, yy, z + hh * 0.93, z + hh, r * 0.48, C2, 6)
-                    ring(xc, yy, z + hh * 0.18, z + hh * 0.5, r + 0.002, C2 if rng.random() < 0.5 else Cw)
+                    lab = C2 if rng.random() < 0.5 else Cw
+                    if near:
+                        lathe(b, xc, yy, ((z, r), (z + hh * 0.56, r), (z + hh * 0.66, r * 0.86), (z + hh * 0.75, r * 0.46), (z + hh * 0.93, r * 0.36)), C1)
+                        lathe(b, xc, yy, ((z + hh * 0.925, r * 0.46), (z + hh, r * 0.44)), C2, 6)
+                    else:
+                        ring(xc, yy, z, z + hh * 0.66, r, C1, 6)
+                        ring(xc, yy, z + hh * 0.66, z + hh, r * 0.4, C1, 5)
+                    ring(xc, yy, z + hh * 0.18, z + hh * 0.5, r + 0.0015, lab, 7 if near else 6)
         x += rng.uniform(0.0, 0.03)
 
 

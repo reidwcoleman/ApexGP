@@ -561,7 +561,7 @@ void main() {
   // a glint a hand from the lens must not swell into a ball of light: the blur can't hold much more than the sharp picture did
   softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
   c = max( c + ( c - soft ) * 1.4 * ( 1.0 - softK ), vec3( 0.0 ) );
-  c = mix( c, mix( soft, softer, nearK * 0.5 ), softK );
+  c = mix( c, soft, softK );
   // footage that has been through an office before anyone saw it: every head in it under a mosaic, the way the redaction
   // tool does it. Square blocks fixed to the frame, each one the average of what was under it, cut to the shape of the
   // head and no bigger
