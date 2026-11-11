@@ -51,6 +51,13 @@ export class Bot {
   private pending = false;
   /** rounds still to put through the corner someone just went behind */
   private supp = 0;
+  /** caught on a corner: a step to one side, then the other, before trying the way again */
+  private nudgeT = 0;
+  private nudgeS = 1;
+  /** a lamp this one has decided to put out, and how many rounds it will spend trying */
+  private lamp: Vec | null = null;
+  private lampShots = 0;
+  private lampAt = 4 + Math.random() * 20;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
 
@@ -116,7 +123,9 @@ export class Bot {
     let wx = 0, wz = 0, speed = 0;
     if (live) {
       const engaged = this.target >= 0 && this.t - this.seenAt < 0.4;
-      if (this.path.length && this.pi < this.path.length && (!engaged || this.t < this.coverT || this.weapon === 'shotgun')) {
+      if (this.lamp && !engaged) {
+        // stood still to take the shot
+      } else if (this.path.length && this.pi < this.path.length && (!engaged || this.t < this.coverT || this.weapon === 'shotgun')) {
         const n = this.path[this.pi];
         const dx = n.x - m.x, dz = n.z - m.z, d = Math.hypot(dx, dz);
         if (d < 0.55 && Math.abs(n.y - m.y) < 1.2) {
@@ -127,6 +136,11 @@ export class Bot {
         else {
           wx = dx / (d || 1);
           wz = dz / (d || 1);
+          if (this.t < this.nudgeT) {
+            const ox = wx;
+            wx = -wz * this.nudgeS * 0.9 - ox * 0.3;
+            wz = ox * this.nudgeS * 0.9 - wz * 0.3;
+          }
           const indoors = n.indoors;
           speed = engaged ? 2.4 : this.t < this.coverT ? 5 : indoors ? 2.5 + this.skill * 0.6 : 4.2;
           M.openDoorsNear(m.x, m.y, m.z, wx, wz);
@@ -227,6 +241,8 @@ export class Bot {
       if (this.stuck > 8) {
         this.stuck = 0;
         this.goalAt = 0;
+        this.nudgeT = this.t + 0.45;
+        this.nudgeS = -this.nudgeS;
         M.openDoorsNear(m.x, m.y, m.z, 0, 0);
       }
     } else this.stuck = 0;
@@ -235,6 +251,22 @@ export class Bot {
     const node = M.nav.nearest(m.x, m.y, m.z);
     // in the dark map everyone needs one; in a fight half of them still keep it on
     this.light = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
+    // standing in a pool of light with nobody in sight: some of them shoot the lamp out, as people do
+    if (Bot.night && this.target < 0 && !this.lamp && this.t > this.lampAt && this.ammo > 8) {
+      this.lampAt = this.t + 14 + Math.random() * 30;
+      if (Math.random() < 0.3 + this.skill * 0.3) {
+        const eye = { x: m.x, y: m.y + 1.5, z: m.z };
+        for (const q of M.pools) {
+          const d = Math.hypot(q[0] - m.x, q[2] - m.z);
+          if (d > 6 || d < 0.8 || q[1] - m.y > 4.5 || q[1] - m.y < 1.2) continue;
+          const at = { x: q[0], y: q[1] - 0.08, z: q[2] };
+          if (!M.world.sees(eye, at)) continue;
+          this.lamp = at;
+          this.lampShots = 7;
+          break;
+        }
+      }
+    }
     if (this.t < this.goalAt || this.pending) return;
     if (!node) return;
     let goal: Node | null = null;
@@ -275,6 +307,10 @@ export class Bot {
       const e = (this.err * Math.PI) / 180;
       ty = Math.atan2(-dx, -dz) + this.errYaw * e;
       tp = Math.atan2(aimY - eyeY, d) + this.errPitch * e * 0.7;
+    } else if (this.lamp) {
+      const dx = this.lamp.x - m.x, dz = this.lamp.z - m.z;
+      ty = Math.atan2(-dx, -dz);
+      tp = Math.atan2(this.lamp.y - (m.y + 1.5), Math.hypot(dx, dz) || 1);
     } else if (speed > 0.1) {
       // eyes on where the way leads: the doorway two steps on, not the floor in front
       const far = this.path[Math.min(this.path.length - 1, this.pi + 2)];
@@ -290,6 +326,13 @@ export class Bot {
     this.yaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
     this.pitch += (tp - this.pitch) * Math.min(1, dt * rate * 1.3);
     this.ads = engaged;
+    if (this.lamp && (this.target >= 0 || this.lampShots <= 0 || !M.pools.some((q) => Math.abs(q[0] - this.lamp!.x) < 0.01 && Math.abs(q[2] - this.lamp!.z) < 0.01))) this.lamp = null;
+    if (this.lamp && this.cool <= 0 && this.reload <= 0 && Math.abs(dy) < 0.03 && Math.abs(tp - this.pitch) < 0.03) {
+      this.lampShots--;
+      this.ammo--;
+      this.cool = 0.32 + Math.random() * 0.3;
+      M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
+    }
     if (!engaged) {
       // lost them a moment ago: a few rounds at where they were. Thin walls don't stop those
       const since = this.t - this.seenAt;

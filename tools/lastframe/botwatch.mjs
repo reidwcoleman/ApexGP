@@ -27,5 +27,6 @@ for (let t = 0; t < +secs; t += 2) {
 }
 console.log('time on each floor (bot samples):', JSON.stringify(Object.fromEntries(floors)));
 console.log('stood still 10 s with no target:', worst.length ? worst.join(' | ') : 'nobody');
+console.log('lamps shot out by bots:', await p.evaluate(() => __lf.g.L.flicks.filter((q) => q.dead).length));
 console.log('score', await p.evaluate(() => JSON.stringify(__lf.g.score)));
 await b.close();

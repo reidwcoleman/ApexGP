@@ -31,6 +31,8 @@ const bench = (label, setup) => p.evaluate(async ([label, setup]) => {
 await p.evaluate(() => { const g = __lf.g; for (const b of g.match.bots.values()) b.update = () => {}; Object.assign(g.me.m, { x: 30, y: 0, z: -6, vx: 0, vz: 0 }); g.me.yaw = -1.57; g.me.light = true; g.match.players.find((q) => q.slot === g.mySlot).hp = 1e6; });
 await p.waitForTimeout(400);
 await bench('street all on');
+await bench('no reflections', "g.post.reflections = 0;");
+await bench('reflections back', "g.post.reflections = 1;");
 await bench('no msaa', "g.scale = 0.94; g.resize();");
 await bench('+no planar', "g.planar.render = function(){}; ");
 await bench('+no blur', "g.post.motionBlur = false;");

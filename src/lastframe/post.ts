@@ -179,6 +179,68 @@ void main() {
 }
 `;
 
+/** what a hard floor gives back: lamps, a lit doorway, the pool of the weapon light, laid along the floor toward the lens.
+ *  Marched in the depth at half size, coloured from last frame's picture; only floors, and mostly at a low angle, as on any lino */
+const SSR = /* glsl */ `
+varying vec2 vUv;
+${DEPTH}
+uniform sampler2D tHist;
+uniform vec2 px;
+uniform float frame;
+uniform mat4 camW;
+vec2 toUv( vec3 p ) { return ( p.xy / -p.z ) / pInv * 0.5 + 0.5; }
+void main() {
+  float d0 = texture2D( tDepth, vUv ).r;
+  vec3 P = viewAt( vUv );
+  float z = -P.z;
+  gl_FragColor = vec4( 0.0 );
+  if ( d0 >= 1.0 || z < 1.3 || z > 34.0 ) return;
+  vec3 l = viewAt( vUv - vec2( px.x, 0.0 ) ), r = viewAt( vUv + vec2( px.x, 0.0 ) ), b = viewAt( vUv - vec2( 0.0, px.y ) ), t = viewAt( vUv + vec2( 0.0, px.y ) );
+  vec3 dx = abs( l.z - P.z ) < abs( r.z - P.z ) ? P - l : r - P;
+  vec3 dy = abs( b.z - P.z ) < abs( t.z - P.z ) ? P - b : t - P;
+  vec3 N = normalize( cross( dx, dy ) );
+  vec3 Nw = mat3( camW ) * N;
+  if ( Nw.y < 0.94 ) return;
+  vec3 V = normalize( P );
+  float n1 = ign( gl_FragCoord.xy + frame * 5.588238 ), n2 = ign( gl_FragCoord.yx + frame * 3.17 + 19.0 );
+  // a worn floor is no mirror: each ray leaves a little off true, and the frames average it into a smear
+  vec3 R = normalize( reflect( V, N ) + ( vec3( n1, n2, n1 * n2 ) - 0.5 ) * 0.045 );
+  float cosV = max( dot( -V, N ), 0.0 );
+  float F = 0.035 + 0.965 * pow( 1.0 - cosV, 5.0 );
+  if ( F < 0.045 || R.z > -0.02 ) return;
+  float step_ = 0.16, travelled = 0.0;
+  vec3 p = P + N * 0.03;
+  vec2 hit = vec2( -1.0 );
+  for ( int i = 0; i < 20; i++ ) {
+    float ds = step_ * ( 0.6 + n1 * 0.8 );
+    p += R * ds;
+    travelled += ds;
+    step_ *= 1.19;
+    vec2 uv = toUv( p );
+    if ( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ) break;
+    float zs = lin( texture2D( tDepth, uv ).r );
+    float behind = -p.z - zs;
+    if ( behind > 0.0 ) {
+      if ( behind < 0.35 + ds * 1.5 ) {
+        // back along the ray to where it went in
+        vec3 a = p - R * ds, q = p;
+        for ( int k = 0; k < 4; k++ ) {
+          vec3 m = ( a + q ) * 0.5;
+          if ( -m.z - lin( texture2D( tDepth, toUv( m ) ).r ) > 0.0 ) q = m; else a = m;
+        }
+        hit = toUv( q );
+      }
+      break;
+    }
+  }
+  if ( hit.x < 0.0 ) return;
+  vec2 e = smoothstep( vec2( 0.0 ), vec2( 0.08 ), hit ) * smoothstep( vec2( 0.0 ), vec2( 0.08 ), 1.0 - hit );
+  float fade = e.x * e.y * smoothstep( 16.0, 6.0, travelled ) * smoothstep( 34.0, 22.0, z ) * smoothstep( 1.3, 2.2, z );
+  vec3 c = min( texture2D( tHist, hit ).rgb, vec3( 14.0 ) );
+  gl_FragColor = vec4( c * F * fade, 1.0 );
+}
+`;
+
 /** everything onto the picture, blended with what this pixel was last frame */
 const RESOLVE = /* glsl */ `
 varying vec2 vUv;
@@ -188,6 +250,8 @@ uniform sampler2D tHist;
 uniform sampler2D tAO;
 uniform sampler2D tFog;
 uniform sampler2D tAir;
+uniform sampler2D tSSR;
+uniform float ssrK;
 uniform mat4 reproj;
 uniform vec2 px;
 uniform float cut;
@@ -218,10 +282,18 @@ void main() {
   vec4 air = texture2D( tAir, uv );
   float A = ao * fog.a * ( 1.0 - air.a );
   vec3 B = fog.rgb * ( 1.0 - air.a ) + air.rgb;
+  if ( ssrK > 0.0 && z > 1.3 ) {
+    // four taps across the half-size layer: the stipple of single rays becomes the smear a scuffed floor gives
+    vec2 o = px * 2.2;
+    vec3 rf = texture2D( tSSR, uv + vec2( o.x, o.y * 0.4 ) ).rgb + texture2D( tSSR, uv - vec2( o.x, o.y * 0.4 ) ).rgb + texture2D( tSSR, uv + vec2( -o.x * 0.4, o.y ) ).rgb + texture2D( tSSR, uv - vec2( -o.x * 0.4, o.y ) ).rgb;
+    B += rf * 0.25 * ssrK * fog.a * ( 1.0 - air.a );
+  }
   vec2 uc = uv + jit;
   vec3 c = min( texture2D( tSrc, uc ).rgb, vec3( 40.0 ) );
   vec3 n = min( texture2D( tSrc, uc + vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) ), s = min( texture2D( tSrc, uc - vec2( 0.0, px.y ) ).rgb, vec3( 40.0 ) );
   vec3 e = min( texture2D( tSrc, uc + vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) ), w = min( texture2D( tSrc, uc - vec2( px.x, 0.0 ) ).rgb, vec3( 40.0 ) );
+  // a glint one pixel wide on chrome is brighter than the lamp it came from: hold it to a few times what's round it
+  c = min( c, ( n + s + e + w ) * 0.8 + 0.6 );
   vec3 cur = c * A + B;
   vec3 mn = min( c, min( min( n, s ), min( e, w ) ) ) * A + B;
   vec3 mx = max( c, max( max( n, s ), max( e, w ) ) ) * A + B;
@@ -574,6 +646,9 @@ export class Post {
   private fogT!: THREE.WebGLRenderTarget;
   private fogB!: THREE.WebGLRenderTarget;
   private airT!: THREE.WebGLRenderTarget;
+  private ssrT!: THREE.WebGLRenderTarget;
+  /** floors give back what stands on them */
+  reflections = 1;
   private frame = 0;
   private liteDone = false;
   /** fog thickness, per metre */
@@ -615,8 +690,9 @@ export class Post {
   private mFog = pass(FOG, {
     ...this.common, tVol: LF.volAvg, volMin: LF.volMin, volInv: LF.volInv, lmK: LF.lmK, camW: this.camW, frame: { value: 0 }, time: { value: 0 }, density: { value: 0.02 }, spark: AIR.spark, beamP: AIR.beamP, beamD: AIR.beamD, lfFlickP: LF.flickP, lfFlickA: LF.flickA,
   });
+  private mSSR = pass(SSR, { ...this.common, tHist: { value: null }, px: { value: new THREE.Vector2() }, frame: { value: 0 }, camW: this.camW });
   private mFogBlur = pass(FOGBLUR, { tSrc: { value: null }, px: { value: new THREE.Vector2() } });
-  private mResolve = pass(RESOLVE, { ...this.common, tSrc: { value: null }, tHist: { value: null }, tAO: { value: null }, tFog: { value: null }, tAir: { value: null }, reproj: { value: new THREE.Matrix4() }, px: { value: new THREE.Vector2() }, cut: { value: 1 }, jit: { value: new THREE.Vector2() } });
+  private mResolve = pass(RESOLVE, { ...this.common, tSrc: { value: null }, tHist: { value: null }, tAO: { value: null }, tFog: { value: null }, tAir: { value: null }, tSSR: { value: null }, ssrK: { value: 0 }, reproj: { value: new THREE.Matrix4() }, px: { value: new THREE.Vector2() }, cut: { value: 1 }, jit: { value: new THREE.Vector2() } });
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
@@ -638,7 +714,7 @@ export class Post {
   }
 
   resize(w: number, h: number) {
-    for (const t of [this.scene, this.blur, this.aoA, this.aoB, this.fogT, this.fogB, this.airT, ...this.hist, ...this.down, ...this.up]) t?.dispose();
+    for (const t of [this.scene, this.blur, this.aoA, this.aoB, this.fogT, this.fogB, this.airT, this.ssrT, ...this.hist, ...this.down, ...this.up]) t?.dispose();
     const W = Math.round(w), H = Math.round(h);
     const depth = new THREE.DepthTexture(W, H, THREE.UnsignedIntType);
     depth.minFilter = depth.magFilter = THREE.NearestFilter;
@@ -653,6 +729,7 @@ export class Post {
     this.fogT = target(Math.ceil(W / 4), Math.ceil(H / 4));
     this.fogB = target(Math.ceil(W / 4), Math.ceil(H / 4));
     this.airT = target(hw, hh);
+    this.ssrT = target(hw, hh);
     AIR.inv.value.set(1 / hw, 1 / hh);
     this.down = [];
     this.up = [];
@@ -739,6 +816,16 @@ export class Post {
     // ---- one resolve: all of it, onto the last frames
     const uR = this.mResolve.uniforms;
     const h0 = this.hist[this.hi], h1 = this.hist[1 - this.hi];
+    const ssr = !this.lite && this.reflections > 0 && this.hadPrev;
+    if (ssr) {
+      const uS = this.mSSR.uniforms;
+      uS.tHist.value = h0.texture;
+      uS.px.value.set(1 / hw, 1 / hh);
+      uS.frame.value = this.frame;
+      this.draw(this.mSSR, this.ssrT);
+    }
+    uR.tSSR.value = this.ssrT.texture;
+    uR.ssrK.value = ssr ? this.reflections : 0;
     uR.tSrc.value = src;
     uR.tHist.value = h0.texture;
     uR.tAO.value = this.aoB.texture;

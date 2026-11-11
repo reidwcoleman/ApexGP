@@ -73,7 +73,18 @@ def build():
     m = Map()
     m.rng = random.Random(29)
     R = m.rng
-    box, wall, door, window, room, prop, light = m.box, m.wall, m.door, m.window, m.room, m.prop, m.light
+    box, wall, window, room, prop, light = m.box, m.wall, m.window, m.room, m.prop, m.light
+
+    def grid(p, w):
+        """the bots' path points stand a metre apart on whole numbers: a way through has to hold one with a body's width
+        to spare, or the room behind it is cut off for them. Slide it to the nearest whole metre if it doesn't"""
+        a, b = p - w / 2, p + w / 2
+        if any(a + 0.28 <= q <= b - 0.28 for q in range(int(math.floor(a)), int(math.ceil(b)) + 1)):
+            return p
+        return float(round(p))
+
+    def door(axis, c, p, z, w=0.92, **k):
+        return m.door(axis, c, grid(p, max(w, 1.1)), z, w=w, **k)
     m.stains = []      # blood, old and dark: x, y, z, nx, ny, nz, size
     H1 = F2 - SLAB
     H2 = TOP - F2
@@ -138,6 +149,7 @@ def build():
 
     def way(axis, c, p, z, w=1.5, h=2.3):
         """a doorway whose door went long ago: the frame is still there"""
+        p = grid(p, w)
         a, b = p - w / 2, p + w / 2
         m.casing(axis, c, a, b, z, z + h)
         m.openings.append((p, c, z, w, axis) if axis == 'x' else (c, p, z, w, axis))
@@ -145,6 +157,7 @@ def build():
 
     def breach(axis, c, p, z, w=1.6, h=1.9, t=INT_T):
         """a hole knocked through a wall, ragged: no frame, bricks showing at the edge, what came out of it on the floor"""
+        p = grid(p, w)
         a, b = p - w / 2, p + w / 2
         m.openings.append((p, c, z, w, axis) if axis == 'x' else (c, p, z, w, axis))
         # teeth left round the edge
