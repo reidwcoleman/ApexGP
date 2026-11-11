@@ -109,6 +109,7 @@ export class Game {
   private netT = 0;
   private dead = -1;
   private deadFrom = new THREE.Vector3();
+  private dropLight: { x: number; y: number; z: number; vy: number; yaw: number; pitch: number } | null = null;
   private killYaw = 0;
   private killer = '';
   private frozen = false;
@@ -799,6 +800,7 @@ export class Game {
           this.me.alive = false;
           this.dead = 0;
           this.deadFrom.set(a.x, a.y, a.z);
+          this.dropLight = this.me.light ? { x: this.me.lightPos.x, y: this.me.lightPos.y, z: this.me.lightPos.z, vy: 0, yaw: Math.atan2(-this.me.barrel.x, -this.me.barrel.z) + (Math.random() - 0.5) * 1.4, pitch: Math.asin(Math.max(-1, Math.min(1, this.me.barrel.y))) } : null;
           this.killYaw = Math.atan2(e.dir[0], e.dir[2]);
           this.killer = by && e.by !== e.s ? by.info.name : 'yourself';
           this.hud.down(this.killer, ZONE_NAME[e.zone], e.dist, e.w, this.cfg?.mode === 'rounds');
@@ -1034,7 +1036,7 @@ export class Game {
         if (v.z < 1 && dist > 0.25 && dist < 60 && Math.abs(v.x) < 1.25 && Math.abs(v.y) < 1.25) {
           x = v.x * 0.5 + 0.5;
           y = v.y * 0.5 + 0.5;
-          r = 0.31 / (2 * dist * tan);
+          r = 0.15 / (2 * dist * tan);
           seen = this.L.world.sees(cam.position, { x: h.x, y: h.y + 0.05, z: h.z });
         }
       }
@@ -1043,10 +1045,10 @@ export class Game {
         this.tracks.set(s, (tr = { x, y, r, w: 0 }));
       }
       if (seen) {
-        const k = Math.min(1, dt * 16);
+        const k = Math.min(1, dt * 26);
         tr.x += (x - tr.x) * k;
         tr.y += (y - tr.y) * k;
-        tr.r += (r - tr.r) * Math.min(1, dt * 10);
+        tr.r += (r - tr.r) * Math.min(1, dt * 14);
       }
       tr.w = Math.max(0, Math.min(1, tr.w + (seen ? dt * 7 : -dt * 4)));
       if (tr.w <= 0) this.tracks.delete(s);
@@ -1057,7 +1059,7 @@ export class Game {
     for (const [, s] of found) {
       if (n >= post.faces.length) break;
       const tr = this.tracks.get(s)!;
-      post.faces[n++].set(tr.x, tr.y, Math.max(0.012, tr.r), tr.w);
+      post.faces[n++].set(tr.x, tr.y, Math.max(0.008, tr.r), tr.w);
     }
     post.mFinal.uniforms.faceN.value = n;
   }
@@ -1382,7 +1384,7 @@ export class Game {
     this.hurt = Math.max(0, this.hurt - dt * 0.34);
     const hp = mine?.info.hp ?? 100;
     u.whiteout.value = Math.min(1.4, this.whiteout);
-    u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 + me.supK * 0.3 : 0.35));
+    u.hurt.value = Math.min(1, this.hurt * 0.7 + (me.alive ? Math.max(0, (45 - hp) / 45) * 0.5 + me.supK * 0.3 : 0.12));
     u.fish.value = THREE.MathUtils.lerp(0.85, 0.3, me.alive ? me.adsK : 0);
     u.cover.value = me.alive ? me.fixK : 0;
     const outside = this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street';
@@ -1399,7 +1401,7 @@ export class Game {
     if (this.dead >= 0) {
       // the feed tears at every knock, stutters now and then, and breaks up for good at the end
       const d = this.dead, j = this.dc.jolt;
-      u.glitch.value = Math.min(1, j * j * j * 0.5 + (d > 3.2 ? ((d - 3.2) / 1.1) ** 2 : 0) + (d > 1.2 && Math.sin(d * 7.3) * Math.sin(d * 2.9) > 0.9 ? 0.22 : 0));
+      u.glitch.value = Math.min(0.5, j * j * j * 0.3 + (d > 3.9 ? ((d - 3.9) / 0.55) ** 2 * 0.09 : 0) + (d > 1.2 && Math.sin(d * 7.3) * Math.sin(d * 2.9) > 0.93 ? 0.12 : 0));
       u.caK.value = this.caBase + j * 0.05 + Math.min(0.03, d * 0.007);
     } else {
       u.glitch.value = 0;
@@ -1665,14 +1667,22 @@ export class Game {
     if (me.alive && me.light) {
       AIR.beamP.value.set(me.lightPos.x, me.lightPos.y, me.lightPos.z, s.intensity * 0.12);
       AIR.beamD.value.copy(me.barrel);
-    } else AIR.beamP.value.w = 0;
+    } else if (!(this.dead >= 0 && me.light && this.dropLight)) AIR.beamP.value.w = 0;
     this.shafts?.update(this.time, this.cam, (l) => { const f = this.flickOf.get(l as never); return f ? (f.dead ? 1 - f.k : 1 - f.k * 0.94) : 1; });
     const fp = this.flashPoint.position;
     AIR.spark.value.set(fp.x, fp.y, fp.z, this.flashK * 0.022);
     if (me.alive && me.light) {
       const hit = this.L.world.ray(me.lightPos.x, me.lightPos.y, me.lightPos.z, me.barrel.x, me.barrel.y, me.barrel.z, 16);
-      const t = hit ? hit.t : 16;
-      const wantI = 30 * Math.min(1, Math.pow(Math.min(t, 7) / 5, 1.25) + 0.05);
+      let t = hit ? hit.t : 16;
+      // someone stood in the beam is nearer than the wall behind them: the lamp is turned down for them as it is for a wall,
+      // or a figure at arm's length is a white shape with nothing on it
+      for (const [k, a] of this.actors) {
+        if (k === this.mySlot || !a.soldier?.root.visible) continue;
+        const dx = a.x - me.lightPos.x, dy = a.y + 1.1 - me.lightPos.y, dz = a.z - me.lightPos.z;
+        const al = dx * me.barrel.x + dy * me.barrel.y + dz * me.barrel.z;
+        if (al > 0.3 && al < t && Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - al * al)) < 0.25 + al * 0.3) t = Math.min(t, al * 1.4 + 1.1);
+      }
+      const wantI = 30 * Math.min(1, Math.pow(Math.min(t, 7) / 5.5, 1.6) + 0.04);
       s.intensity += (wantI - s.intensity) * Math.min(1, dt * 9);
       s.position.copy(me.lightPos);
       s.target.position.copy(me.lightPos).addScaledVector(me.barrel, 5);
@@ -1690,6 +1700,20 @@ export class Game {
       const want = hit ? 1.5 * Math.min(1, t / 1.2) : 0;
       this.bounceK += (want - this.bounceK) * Math.min(1, dt * 10);
       b.intensity = this.bounceK * (s.intensity / 30) * 0.8;
+    } else if (this.dead >= 0 && me.light && this.dropLight) {
+      // the gun went down with its light still on: it lies where it fell and throws a long low fan across the floor
+      const d = this.dropLight, fl = this.L.world.floorAt(d.x, d.y + 0.3, d.z, 0.05) + 0.07;
+      d.vy -= 9.8 * dt;
+      d.y = Math.max(fl, d.y + d.vy * dt);
+      if (d.y <= fl) d.vy = 0, d.pitch += (0.05 - d.pitch) * Math.min(1, dt * 8);
+      s.intensity += (16 - s.intensity) * Math.min(1, dt * 6);
+      s.position.set(d.x, d.y, d.z);
+      const cp = Math.cos(d.pitch);
+      s.target.position.set(d.x - Math.sin(d.yaw) * cp * 5, d.y + Math.sin(d.pitch) * 5, d.z - Math.cos(d.yaw) * cp * 5);
+      AIR.beamP.value.set(d.x, d.y, d.z, s.intensity * 0.12);
+      AIR.beamD.value.set(-Math.sin(d.yaw) * cp, Math.sin(d.pitch), -Math.cos(d.yaw) * cp);
+      this.bounceK = 0;
+      this.bounce.intensity = 0;
     } else {
       s.intensity = 0;
       this.bounceK = 0;

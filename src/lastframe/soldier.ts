@@ -416,7 +416,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.115 + 0.012 * sin( vRest.z * 95.0 ) * sin( vRest.y * 70.0 + vRest.x * 40.0 );\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = -1.0;\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -441,7 +441,7 @@ export class Soldier {
     float knit = 0.5 + 0.5 * sin( hw.z * 2600.0 ) * sin( hd * 2600.0 );
     float seenG = 1.0 / ( 1.0 + length( fwidth( vRest ) ) * 2600.0 );
     vec3 backC = col * 0.7 * mix( 1.0, 0.8 + 0.4 * knit, seenG );
-    vec3 palmC = ( col * 1.25 + vec3( 0.035, 0.028, 0.02 ) ) * ( 0.75 + 0.4 * gr );
+    vec3 palmC = ( col * 0.95 + vec3( 0.012, 0.011, 0.01 ) ) * ( 0.75 + 0.4 * gr );
     col = mix( palmC, backC, top ) * ( 0.85 + 0.3 * crease ) + vec3( 0.05, 0.045, 0.04 ) * wear;
     gRough = mix( 0.5, 0.85, gr ) + wear * 0.1;
     gBump = gr * 0.00035 + crease * 0.0012;

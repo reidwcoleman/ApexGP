@@ -495,16 +495,16 @@ float splatter( vec2 q, float aspect ) {
     vec2 g = q * sc + bloodSeed.xy * ( float( k ) + 1.0 );
     vec2 id = floor( g ), f = fract( g ) - 0.5;
     float r = hash( id + bloodSeed.xy );
-    if ( r > dens ) continue;
+    if ( r > dens * ( k == 2 ? 0.45 : 0.8 ) ) continue;
     vec2 c = ( vec2( hash( id + 3.1 ), hash( id + 7.7 ) ) - 0.5 ) * 0.45;
     float rad = ( k == 0 ? 0.4 : k == 1 ? 0.3 : 0.2 ) * ( 0.35 + hash( id + 1.3 ) * 0.65 );
     vec2 d = f - c;
     float an = atan( d.y, d.x );
     float rr = rad * ( 1.0 + 0.07 * sin( an * 3.0 + r * 40.0 ) + 0.04 * sin( an * 7.0 + r * 13.0 ) );
-    float blob = smoothstep( rr, rr * 0.5, length( d ) );
+    float blob = smoothstep( rr * 1.2, rr * 0.1, length( d ) ) * ( 0.55 + 0.45 * hash( id + 2.2 ) );
     // a run: a thin line down from the drop, longer as time goes on
     float run = clamp( bloodSeed.z * 0.05 * ( 0.4 + hash( id + 5.5 ) ), 0.0, 1.0 ) * ( k == 2 ? 0.0 : 1.0 );
-    float trail = smoothstep( rad * 0.32, rad * 0.12, abs( d.x + d.y * 0.05 ) ) * step( -rad * ( 0.2 + run * 6.0 ), d.y ) * step( d.y, 0.0 ) * step( 0.35, hash( id + 9.9 ) );
+    float trail = smoothstep( rad * 0.4, rad * 0.02, abs( d.x + d.y * 0.05 ) ) * step( -rad * ( 0.2 + run * 6.0 ), d.y ) * step( d.y, 0.0 ) * step( 0.35, hash( id + 9.9 ) );
     m = max( m, max( blob, trail * 0.85 ) * ( k == 2 ? 0.7 : 1.0 ) );
   }
   return m;
@@ -562,26 +562,24 @@ void main() {
   softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
   c = max( c + ( c - soft ) * 1.05 * ( 1.0 - softK ), vec3( 0.0 ) );
   c = mix( c, mix( soft, softer, nearK * 0.5 ), softK );
-  // footage that has been through an office before anyone saw it: every head in it under an oval of blur that follows it
-  // about, a little late and a little too big
+  // footage that has been through an office before anyone saw it: every head in it under a mosaic, the way the redaction
+  // tool does it. Square blocks fixed to the frame, each one the average of what was under it, cut to the shape of the
+  // head and no bigger
   for ( int i = 0; i < 8; i++ ) {
     if ( i >= faceN ) break;
     vec4 f = faces[ i ];
-    vec2 fd = ( cg - f.xy ) * vec2( aspect, 1.15 ) / f.z;
-    float fm = smoothstep( 1.0, 0.7, length( fd ) ) * f.w;
-    if ( fm > 0.001 ) {
-      // a proper redaction blur: a wide, even gaussian from the small copy of the frame, the same taps every pixel so
-      // it is smooth and holds still. The face becomes a soft patch of its own colours with nothing left to read
-      vec3 fb = texture2D( tBlock, cg ).rgb * 2.0;
-      float fw = 2.0;
-      for ( int k = 0; k < 20; k++ ) {
-        float fk = ( float( k ) + 0.5 ) / 20.0;
-        float an = float( k ) * 2.3999632;
-        float wk = 1.0 - 0.55 * fk;
-        fb += texture2D( tBlock, cg + vec2( cos( an ), sin( an ) ) * f.z * 0.8 * sqrt( fk ) / vec2( aspect, 1.0 ) ).rgb * wk;
-        fw += wk;
-      }
-      c = mix( c, fb / fw, fm );
+    if ( f.w < 0.35 ) continue;
+    // about six blocks across a head, in whole steps so the grid does not swim as the head comes and goes
+    float cpx = max( 3.0, exp2( floor( log2( max( f.z * res.y * 0.36, 1.0 ) ) * 2.0 + 0.5 ) * 0.5 ) );
+    vec2 cs = vec2( cpx ) / res;
+    vec2 cu = ( floor( uv / cs ) + 0.5 ) * cs;
+    vec2 cp = ( cu - 0.5 ) * 2.0 * vec2( aspect, 1.0 );
+    vec2 cc = lens( cp, length( cp ), 1.0, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
+    vec2 fd = ( cc - f.xy ) * vec2( aspect * 1.2, 1.0 ) / f.z;
+    if ( dot( fd, fd ) < 1.0 ) {
+      vec2 o = cs * 0.25;
+      vec3 fb = texture2D( tBlock, cc + vec2( o.x, o.y ) ).rgb + texture2D( tBlock, cc + vec2( -o.x, o.y ) ).rgb + texture2D( tBlock, cc + vec2( o.x, -o.y ) ).rgb + texture2D( tBlock, cc - vec2( o.x, o.y ) ).rgb;
+      c = fb * 0.25;
     }
   }
   vec3 bloom = texture2D( tBloom, cg ).rgb;
@@ -641,7 +639,11 @@ void main() {
   if ( lensBlood > 0.0 ) {
     float bm = splatter( vec2( vUv.x * aspect, vUv.y ), aspect ) * clamp( lensBlood * 1.3, 0.0, 1.0 );
     // seen through: what's behind goes dark red, and a lamp still shines through it
-    col = mix( col, col * vec3( 0.42, 0.03, 0.025 ) + vec3( 0.03, 0.0, 0.0 ), bm * 0.88 );
+    // and a thin film of it round where it landed
+    vec2 bq = vec2( vUv.x * aspect, vUv.y ) - vec2( aspect * ( 0.22 + 0.56 * fract( bloodSeed.x * 0.37 ) ), 0.22 + 0.5 * fract( bloodSeed.y * 0.53 ) );
+    float haze = exp( -dot( bq, bq ) / 0.09 ) * smoothstep( 0.35, 0.8, vnoise( vUv * vec2( aspect, 1.0 ) * 6.0 + bloodSeed.xy ) ) * clamp( lensBlood, 0.0, 1.0 ) * 0.35;
+    bm = clamp( bm * 0.82 + haze, 0.0, 1.0 );
+    col = mix( col, col * vec3( 0.36, 0.045, 0.035 ) + vec3( 0.018, 0.001, 0.001 ), bm );
   }
   if ( cover > 0.0 ) {
     // a gloved hand on the camera: too close to be anything but a dark shape coming up over the bottom of the picture
