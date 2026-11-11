@@ -568,16 +568,20 @@ void main() {
     if ( i >= faceN ) break;
     vec4 f = faces[ i ];
     vec2 fd = ( cg - f.xy ) * vec2( aspect, 1.15 ) / f.z;
-    float fm = smoothstep( 1.0, 0.8, length( fd ) ) * f.w;
+    float fm = smoothstep( 1.0, 0.7, length( fd ) ) * f.w;
     if ( fm > 0.001 ) {
+      // a proper redaction blur: a wide, even gaussian from the small copy of the frame, the same taps every pixel so
+      // it is smooth and holds still. The face becomes a soft patch of its own colours with nothing left to read
       vec3 fb = texture2D( tBlock, cg ).rgb * 2.0;
-      float fa = hash( floor( gl_FragCoord.xy * 0.5 ) ) * 6.2831853;
-      for ( int k = 0; k < 12; k++ ) {
-        float an = fa + float( k ) * 0.5235988 * 2.4;
-        float rr = f.z * ( 0.28 + 0.34 * float( k - k / 3 * 3 ) );
-        fb += texture2D( tBlock, cg + vec2( cos( an ), sin( an ) ) * rr / vec2( aspect, 1.0 ) ).rgb;
+      float fw = 2.0;
+      for ( int k = 0; k < 20; k++ ) {
+        float fk = ( float( k ) + 0.5 ) / 20.0;
+        float an = float( k ) * 2.3999632;
+        float wk = 1.0 - 0.55 * fk;
+        fb += texture2D( tBlock, cg + vec2( cos( an ), sin( an ) ) * f.z * 0.8 * sqrt( fk ) / vec2( aspect, 1.0 ) ).rgb * wk;
+        fw += wk;
       }
-      c = mix( c, fb / 14.0, fm );
+      c = mix( c, fb / fw, fm );
     }
   }
   vec3 bloom = texture2D( tBloom, cg ).rgb;
