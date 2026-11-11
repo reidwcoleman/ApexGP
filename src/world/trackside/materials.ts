@@ -748,11 +748,14 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     if (vA1.z > 0.5) {
       // fresh anti-skid green paint: even and saturated, the grit gives it a fine matte texture
       // (the vivid green of the TV pictures: it reads as a colour, not a dark strip)
-      vec3 green = vec3(0.035, 0.2, 0.075) * (0.96 + 0.06 * m3.b) * (1.0 + 0.1 * albDev);
+      vec3 green = vec3(0.04, 0.165, 0.072) * (0.96 + 0.06 * m3.b) * (1.0 + 0.1 * albDev);
       // (weathered: the grit and the dirt cars drag across it dull and darken it in patches; a flat
       // emerald strip was the most video-game thing on every circuit)
       float wear = smoothstep(0.3, 0.8, m24.b) * 0.5 + smoothstep(0.55, 0.9, texture2D(uMacro, vTrk * vec2(1.0 / 1.3, 1.0 / 3.1) + vec2(0.17, 0.71)).r) * 0.5;
-      green = mix(green, vec3(0.06, 0.1, 0.06), 0.3 + 0.35 * wear) * (0.82 + 0.3 * m3.r);
+      green = mix(green, vec3(0.06, 0.1, 0.06), 0.38 + 0.42 * wear) * (0.82 + 0.3 * m3.r);
+      // (2026-11-11: sun-bleached in long patches, and grey with rubber dust and marbles along the track's edge)
+      green = mix(green, green * 1.25 + vec3(0.012), smoothstep(0.5, 0.85, m96.g) * 0.5);
+      green = mix(green, vec3(0.05, 0.055, 0.05), (1.0 - smoothstep(0.0, 0.55, d)) * (0.35 + 0.3 * m24.r));
       // the anti-skid grit in the paint: a coarse grain and grey specks where it has worn off the high points
       green *= 0.84 + 0.36 * albDev;
       col = mix(green, vec3(0.1, 0.098, 0.092) * (1.0 + albDev), smoothstep(0.6, 0.95, stone) * (1.0 - farK) * 0.35);
@@ -1070,7 +1073,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-18', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-19', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
@@ -1186,7 +1189,7 @@ float gRake = 0.0;
   // stony mid-grey-brown that holds its grain)
   // (2026-11-11: paler and greyer with the new photograph — Monza's traps are a light grey-buff
   // chipping; 0.72/0.69/0.64 over a warm texture came out an orange-brown earth)
-  diffuseColor.rgb = col * vec3(0.77, 0.785, 0.8);
+  diffuseColor.rgb = col * vec3(0.8, 0.79, 0.775);
   roughnessFactor = rough;
 }
 `;
@@ -1205,7 +1208,7 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-14', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
+  patchGround(m, 'apex-ts-gravel-15', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
