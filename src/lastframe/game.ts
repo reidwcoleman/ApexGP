@@ -19,7 +19,7 @@ import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
-import { Graffiti, graffitiFonts, markUp, trenchSigns } from './graffiti.ts';
+import { Graffiti, graffitiFonts, markUp, storeSigns, trenchSigns } from './graffiti.ts';
 
 /** how thick the air is with dust, by location */
 const SHAFT_GAIN: Record<string, number> = { ward: 0.3, store: 0.3 };
@@ -349,7 +349,7 @@ export class Game {
     for (const s of L.map.stains ?? []) this.fx.stain(s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
     // what people wrote on the walls, and the rooms where it went worst
     const signs = (L.map as unknown as { signs?: number[][] }).signs;
-    if (signs?.length) this.scene.add(trenchSigns(signs));
+    if (signs?.length) this.scene.add(MAP_ID === 'store' ? storeSigns(signs) : trenchSigns(signs));
     if (!LF.sunOn) {
       const gr = new Graffiti();
       this.scene.add(gr.group);
@@ -1130,6 +1130,12 @@ export class Game {
         continue;
       }
       this.fx.impact(x, y, z, nx, ny, nz, surf, out);
+      // a round into stocked shelving: something on it bursts, and something else goes on the floor
+      if (MAP_ID === 'store' && surf !== 'flesh' && y > 0.15 && y < 2.1 && x > 15 && x < 45 && z < -10.8 && z > -25.8 && Math.abs(x - (16 + 4 * Math.round((x - 16) / 4))) < 0.75) {
+        this.fx.spatter(x, y - 0.03, z, 1.5);
+        if (Math.random() < 0.4) this.sound.tin(this.tmp.set(x, 0.3, z));
+        else if (Math.random() < 0.3) this.sound.impact(this.tmp.set(x, y, z), 'glass');
+      }
       if (surf === 'flesh') this.fx.blood(x, y, z, -nx, -ny, -nz);
       if (i === e.surf.length - 1 || sounds) this.sound.impact(this.tmp.set(x, y, z), surf);
       if (surf === 'wood') this.doorHit(x, y, z, nx, nz, shove);

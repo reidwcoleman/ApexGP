@@ -60,6 +60,7 @@ def build():
     def door(axis, c, p, z, w=0.92, **k):
         return m.door(axis, c, grid(p, max(w, 1.1)), z, w=w, **k)
     m.stains = []
+    m.signs = []       # printed boards: x, y, z, nx, ny, which, how wide
     H1 = F2 - SLAB
     H2 = TOP - F2
 
@@ -344,6 +345,30 @@ def build():
         K(f'pool_{i + 1}', x, y, 0.003, r=R.uniform(0, 6.28))
     for i in range(22):
         K(f'litter_{i % 6 + 1}', R.uniform(15.0, 45.0), R.uniform(1.0, 10.0), 0.001, R.uniform(0, 6.28))
+    # ---- the signs: a board over each department, the thank-you over the doors, staff only by the curtains
+    m.signs += [(11.75, BY - 0.12, 5.25, 0, -1, 2, 3.6), (26.5, BY - 0.12, 5.25, 0, -1, 3, 3.6), (41.0, BY - 0.12, 5.25, 0, -1, 4, 3.6),
+                (X1 - 0.17, 15.0, 3.0, -1, 0, 1, 2.6), (X1 - 0.17, 21.0, 3.0, -1, 0, 1, 2.6), (X0 + 0.17, 18.25, 2.6, 1, 0, 0, 2.4), (X0 + 0.17, 13.75, 2.6, 1, 0, 0, 2.4),
+                (7.0, FY + 0.075, 2.82, 0, 1, 5, 2.0), (X1 - 0.17, 6.4, 3.3, -1, 0, 6, 2.4), (30.0, Y0 + 0.17, 3.05, 0, 1, 7, 2.4),
+                (6.6, BY - 0.12, 1.6, 0, -1, 8, 0.7), (35.6, BY - 0.12, 1.6, 0, -1, 8, 0.7), (19.0, BY - 0.12, 2.5, 0, -1, 8, 0.7), (55.0, BY - 0.12, 1.6, 0, -1, 8, 0.7)]
+    # ---- real things: a till on every lane, bins, what got dropped and kicked about (all of it loose)
+    for i, x in enumerate((16.5, 19.5, 22.5, 25.5, 34.5, 37.5, 40.5, 43.5)):
+        if i not in (2, 5):
+            D('CashRegister_01', x + 0.02, 5.05, z=0.89, r=math.pi / 2)
+    for (x, y) in ((17.6, 3.9), (26.6, 3.8), (35.6, 3.9), (44.4, 3.7), (13.2, 9.0), (46.8, 26.8)):
+        L('metal_trash_can', x, y, kg=6, sf='metal', shape='cyl')
+    for i in range(16):
+        x, y = R.choice((18.0, 22.0, 26.0, 34.0, 38.0, 42.0)) + R.uniform(-0.9, 0.9), R.uniform(11.0, 25.5)
+        L(('cardboard_box_01', 'plastic_bottle_gallon', 'multi_cleaner_5_litre', 'cardboard_box_01')[i % 4], x, y, r=R.uniform(0, 6.28), kg=(4, 1.5, 2.5, 4)[i % 4], sf=('card', 'plastic', 'plastic', 'card')[i % 4])
+    for i in range(8):
+        L('plastic_crate_01' if i % 2 else 'plastic_crate_02', R.uniform(3.4, 12.6), R.uniform(9.2, 27.0), r=R.uniform(0, 6.28), kg=1.5, sf='plastic')
+    for (x, y) in ((36.0, 32.2), (41.5, 36.8), (52.6, 35.0), (47.2, 42.6), (33.2, 40.4)):
+        L('cardboard_box_01', x, y, r=R.uniform(0, 6.28), kg=4, sf='card')
+        L('trashbag', x + 0.7, y + 0.3, r=R.uniform(0, 6.28), kg=7, sf='bag')
+    for i in range(14):
+        x, y = R.choice((18.0, 22.0, 26.0, 34.0, 38.0, 42.0, 46.5)) + R.uniform(-1.0, 1.0), R.uniform(9.0, 26.5)
+        L(('russian_food_cans_01', 'long_life_food', 'wine_bottles_01')[i % 3], x, y, r=R.uniform(0, 6.28), kg=(1.5, 1.5, 1)[i % 3], sf=('metal', 'card', 'glass')[i % 3])
+    D('WetFloorSign_01', 47.4, 20.0, r=0.4)
+    D('WetFloorSign_01', 21.6, 27.0, r=2.2)
     # ---- the tills: four lanes either side of the way in, one screen still asking for a card
     for i, x in enumerate((16.5, 19.5, 22.5, 25.5, 34.5, 37.5, 40.5, 43.5)):
         K(f'checkout_{i + 1}', x, 5.6, r=0.0, solid=(0.42, 1.35, 0.9))
@@ -375,8 +400,11 @@ def build():
                 K(f'gondola_{n % 12 + 1}', x, y, 0.0, r=math.pi / 2 if n % 2 else -math.pi / 2, solid=(1.5, 0.5, 1.95))
             K(f'endcap_{n % 7 + 1}', x, sect[0] - 1.53, 0.0, r=0.0, solid=(0.5, 0.25, 1.7))
             K(f'endcap_{(n + 3) % 7 + 1}', x, sect[1] + 1.53, 0.0, r=math.pi, solid=(0.5, 0.25, 1.7))
+    whole = [q for q in range(1, 60) if random.Random(q).random() >= 0.18]      # boards still on both chains
     for i, x in enumerate((18.0, 22.0, 26.0, 30.0, 34.0, 38.0, 42.0)):
-        K(f'aislesign_{i + 1}', x, TRUSS[0], TOP - 0.7)
+        K(f'aislesign_{whole[i]}', x, TRUSS[0], TOP - 0.7)
+        for sy in (-1, 1):
+            m.signs.append((x, TRUSS[0] + sy * 0.02, TOP - 0.7 - 2.6, 0, sy, 9 + i, 0.9))
     for i in range(26):
         x, y = R.choice((18.0, 22.0, 26.0, 30.0, 34.0, 38.0, 42.0)) + R.uniform(-1.0, 1.0), R.uniform(10.5, 26.0)
         K(f'litter_{i % 6 + 1}' if i % 3 else f'bottles_{i % 5 + 1}', x, y, 0.001, R.uniform(0, 6.28))

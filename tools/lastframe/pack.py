@@ -96,6 +96,8 @@ if WARD:
     out['night'] = 1
     # old blood: where, which way the surface faces, how big (game axes)
     out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in wm.stains]
+    if getattr(wm, 'signs', None):
+        out['signs'] = [[round(g[0], 3), round(g[2], 3), round(-g[1], 3), g[3], -g[4], g[5], g[6]] for g in wm.signs]
 if MOTEL:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import motel_layout as ML

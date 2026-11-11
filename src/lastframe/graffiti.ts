@@ -1036,6 +1036,86 @@ export function signAtlas(): THREE.CanvasTexture {
   return tex;
 }
 
+const STORE_SIGNS: [string, string, string][] = [
+  ['PRODUCE', 'fresh every day', '#2f6b34'], ['FROZEN', 'ice cream  ·  ready meals  ·  veg', '#2a5d86'], ['DELI', 'cut to order', '#2f6b34'], ['BUTCHER', 'meat  ·  poultry  ·  fish', '#8a2c22'],
+  ['BAKERY', 'baked in store', '#8a5a22'], ['PHARMACY', 'prescriptions  ·  health', '#2a5d86'], ['CAFE', 'hot drinks  ·  breakfast till 11', '#6b3f22'], ['THANK YOU', 'for shopping at Halden\u2019s', '#2f6b34'],
+  ['STAFF ONLY', 'no entry', '#30343a'],
+  ['1', 'Cereal\nTea & Coffee\nBiscuits', '#1f4f7c'], ['2', 'Tinned Goods\nSoup\nPasta & Rice', '#1f4f7c'], ['3', 'Sauces\nOils\nWorld Foods', '#1f4f7c'], ['4', 'Soft Drinks\nWater\nJuice', '#1f4f7c'],
+  ['5', 'Crisps & Snacks\nSweets\nNuts', '#1f4f7c'], ['6', 'Household\nLaundry\nPaper', '#1f4f7c'], ['7', 'Pet Food\nBaby\nToiletries', '#1f4f7c'],
+];
+
+/** the shop's own signs: department boards and the aisle markers, printed, sun-faded, grubby */
+function storeAtlas(): THREE.CanvasTexture {
+  const COLS = 4, ROWS = 4, W = 2048, H = 1024, cw = W / COLS, ch = H / ROWS;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const c = cv.getContext('2d')!;
+  const r = mulberry(4471);
+  STORE_SIGNS.forEach(([big, small, bg], i) => {
+    const x0 = (i % COLS) * cw, y0 = Math.floor(i / COLS) * ch;
+    c.save();
+    c.translate(x0, y0);
+    c.beginPath();
+    c.rect(0, 0, cw, ch);
+    c.clip();
+    c.fillStyle = bg;
+    c.fillRect(4, 4, cw - 8, ch - 8);
+    c.strokeStyle = 'rgba(255,255,255,0.75)';
+    c.lineWidth = 5;
+    c.strokeRect(14, 14, cw - 28, ch - 28);
+    c.fillStyle = '#f1efe6';
+    c.textBaseline = 'middle';
+    if (big.length <= 2) {
+      // an aisle marker: the number in a disc, what is down there beside it
+      c.beginPath();
+      c.arc(112, ch / 2, 78, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = bg;
+      c.font = '900 120px "Helvetica Neue", Arial, sans-serif';
+      c.textAlign = 'center';
+      c.fillText(big, 112, ch / 2 + 6);
+      c.fillStyle = '#f1efe6';
+      c.textAlign = 'left';
+      c.font = '700 40px "Helvetica Neue", Arial, sans-serif';
+      small.split('\n').forEach((ln, k) => c.fillText(ln, 216, ch / 2 - 56 + k * 56));
+    } else {
+      c.textAlign = 'center';
+      let size = 104;
+      c.font = `900 ${size}px "Helvetica Neue", Arial, sans-serif`;
+      while (c.measureText(big).width > cw - 70 && size > 40) c.font = `900 ${(size -= 6)}px "Helvetica Neue", Arial, sans-serif`;
+      c.fillText(big, cw / 2, ch * 0.42);
+      c.font = '500 30px "Helvetica Neue", Arial, sans-serif';
+      c.globalAlpha = 0.9;
+      c.fillText(small, cw / 2, ch * 0.76);
+      c.globalAlpha = 1;
+    }
+    // years of it: a grey bloom of dust, runs from the top edge, scuffs
+    for (let q = 0; q < 26; q++) {
+      c.fillStyle = `rgba(${r() < 0.5 ? '20,18,14' : '190,186,170'},${rnd(r, 0.03, 0.12)})`;
+      c.beginPath();
+      c.ellipse(rnd(r, 0, cw), rnd(r, 0, ch), rnd(r, 20, 120), rnd(r, 8, 50), rnd(r, 0, 3), 0, Math.PI * 2);
+      c.fill();
+    }
+    for (let q = 0; q < 7; q++) {
+      c.fillStyle = `rgba(24,20,14,${rnd(r, 0.08, 0.22)})`;
+      c.fillRect(rnd(r, 10, cw - 10), 4, rnd(r, 2, 6), rnd(r, 30, ch * 0.8));
+    }
+    c.restore();
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** the supermarket's signs: [x, y, z, nx, nz, cell, width] */
+export function storeSigns(list: number[][]): THREE.Mesh {
+  const sheet = new Sheet(storeAtlas(), 4, 4, 2, Math.max(1, list.length), 0.7, 'lfstoresign', 3);
+  for (const g of list) sheet.add(g[0], g[1], g[2], new THREE.Vector3(g[3], 0, g[4]), g[6], g[5], 0, 0.012);
+  return sheet.mesh;
+}
+
 /** the boards on a map's trench walls */
 export function trenchSigns(list: number[][]): THREE.Mesh {
   const sheet = new Sheet(signAtlas(), 4, 4, 2, Math.max(1, list.length), 0.85, 'lfsign', 3);

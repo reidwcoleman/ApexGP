@@ -416,7 +416,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.08 + 0.16 * fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.115 + 0.012 * sin( vRest.z * 95.0 ) * sin( vRest.y * 70.0 + vRest.x * 40.0 );\n    if ( vPart < 2.5 || ( vPart < 4.5 && dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax ) < fcut ) ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -428,12 +428,49 @@ export class Soldier {
   gBump = 0.0;
   // gloves in the hand: worn leather, paler where it creases and rubs, a fine grain all over
   if ( part > 4.5 && part < 5.5 && uK.y > 0.5 ) {
+    // a work glove, the kind sold for shooting: a knit back with a moulded guard over the knuckles, a suede palm sewn
+    // on with a visible stitch, a ribbed cuff with its strap, the fingers creased where they bend
     float gr = apNoise( vRest * 1100.0 ) * 0.6 + apNoise( vRest * 380.0 ) * 0.4;
     float crease = apNoise( vRest * 170.0 );
     float wear = smoothstep( 0.98, 1.16, det ) * 0.5 + apNoise( vRest * 55.0 ) * 0.25;
-    col = col * ( 0.8 + 0.3 * gr ) * ( 0.85 + 0.3 * crease ) + vec3( 0.05, 0.045, 0.04 ) * wear;
-    gRough = mix( 0.46, 0.8, gr ) + wear * 0.1;
+    vec3 hw = vec3( abs( vRest.x ) - abs( uL1.x ), vRest.y - uL1.y, vRest.z - uL1.z );
+    vec3 hax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );
+    float hd = dot( hw, hax );
+    float hup = dot( hw - hax * hd, vec3( -hax.y, hax.x, 0.0 ) );
+    float top = smoothstep( -0.003, 0.007, hup );
+    float knit = 0.5 + 0.5 * sin( hw.z * 2600.0 ) * sin( hd * 2600.0 );
+    float seenG = 1.0 / ( 1.0 + length( fwidth( vRest ) ) * 2600.0 );
+    vec3 backC = col * 0.7 * mix( 1.0, 0.8 + 0.4 * knit, seenG );
+    vec3 palmC = ( col * 1.25 + vec3( 0.035, 0.028, 0.02 ) ) * ( 0.75 + 0.4 * gr );
+    col = mix( palmC, backC, top ) * ( 0.85 + 0.3 * crease ) + vec3( 0.05, 0.045, 0.04 ) * wear;
+    gRough = mix( 0.5, 0.85, gr ) + wear * 0.1;
     gBump = gr * 0.00035 + crease * 0.0012;
+    // the seam between palm and back, stitched
+    float seam = 1.0 - smoothstep( 0.0, 0.0022, abs( hup - 0.002 ) );
+    col = mix( col, col * 0.45, seam * 0.8 );
+    col += vec3( 0.07, 0.065, 0.05 ) * seam * step( 0.55, fract( hd * 330.0 ) ) * seenG;
+    gBump -= seam * 0.0009;
+    // cuff: elastic rib, a strap across the back of the wrist with its tab
+    float cuff = 1.0 - smoothstep( 0.026, 0.034, hd );
+    float rib = 0.5 + 0.5 * sin( hw.z * 1300.0 );
+    col = mix( col, col * ( 0.55 + 0.35 * rib ), cuff );
+    gBump += cuff * rib * 0.0007;
+    float strap = smoothstep( 0.006, 0.009, hd ) * ( 1.0 - smoothstep( 0.021, 0.024, hd ) ) * top;
+    col = mix( col, vec3( 0.022, 0.022, 0.024 ) * ( 0.8 + 0.4 * gr ), strap );
+    gRough = mix( gRough, 0.55, strap );
+    gBump += strap * 0.0012;
+    // the knuckle guard: four moulded pads of hard rubber
+    float kn = smoothstep( 0.07, 0.077, hd ) * ( 1.0 - smoothstep( 0.098, 0.105, hd ) ) * smoothstep( 0.004, 0.012, hup );
+    float pad = smoothstep( 0.18, 0.5, abs( sin( hw.z * 150.0 + 0.6 ) ) ) * kn;
+    col = mix( col, vec3( 0.014, 0.014, 0.016 ), pad );
+    gRough = mix( gRough, 0.34, pad );
+    gBump += pad * 0.0032;
+    // fingers: a crease at each joint, the tips rubbed pale
+    float fin = smoothstep( 0.105, 0.115, hd );
+    float joint = pow( 0.5 + 0.5 * cos( ( hd - 0.108 ) * 6.2832 / 0.03 ), 14.0 ) * fin;
+    col *= 1.0 - 0.4 * joint;
+    gBump -= joint * 0.0016;
+    col += vec3( 0.03, 0.028, 0.024 ) * smoothstep( 0.165, 0.19, hd ) * ( 1.0 - top * 0.5 );
     gSheen = 0.0;
   } else if ( cloth > 0.5 && part > 0.5 && part < 7.5 ) {
     // cloth that has been worn and slept in: it rucks up in folds across a limb, darker down in them, and the weave
