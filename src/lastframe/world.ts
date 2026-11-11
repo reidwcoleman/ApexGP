@@ -61,8 +61,35 @@ const TRIPLANAR: Record<string, [string, number, number[], number]> = {
   lfgalv: ['concrete_pavement_02', 1.2, [1.25, 1.5, 1.9], 0.5],
 };
 
+/**
+ * Packaging is printed: on anything upright a block of small type in rows, broken into words, and on some a band of
+ * another ink across the top. Laid out in hand-sized cells of the world so no two facings carry the same, and gone to
+ * its average tone before the lines get finer than a pixel.
+ */
+const PRINT = /* glsl */ `{
+  vec3 pan = abs( normalize( vTriN ) );
+  if ( pan.y < 0.7 ) {
+    vec2 pu = pan.x > pan.z ? vTriP.zy : vTriP.xy;
+    float pfw = max( fwidth( pu.x ), fwidth( pu.y ) );
+    float pseen = clamp( 1.0 - pfw / 0.0045, 0.0, 1.0 );
+    vec2 pc = pu / vec2( 0.11, 0.075 );
+    vec2 pb = floor( pc ), pf = fract( pc );
+    float ph = fract( sin( dot( pb, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ), ph2 = fract( ph * 37.7 );
+    float prow = floor( pf.y * 8.0 );
+    float pline = step( 0.42, fract( pf.y * 8.0 ) );
+    float pword = step( fract( sin( dot( vec2( floor( pf.x * 18.0 ), prow ) + pb * 7.0, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ), 0.64 );
+    float prows = step( 0.12, pf.x ) * step( pf.x, 0.9 ) * step( 0.5, prow ) * step( prow, 1.5 + floor( ph * 4.0 ) );
+    float pband = step( 0.5, ph2 ) * step( 0.74, pf.y ) * step( pf.y, 0.93 );
+    vec3 pink = ph > 0.45 ? diffuseColor.rgb * 0.28 : mix( diffuseColor.rgb, vec3( 0.62, 0.6, 0.55 ), 0.8 );
+    vec3 pink2 = ph2 > 0.75 ? diffuseColor.rgb * 0.4 : mix( diffuseColor.rgb, vec3( 0.6, 0.58, 0.5 ), 0.6 );
+    float pk = pline * pword * prows * 0.85;
+    diffuseColor.rgb = mix( diffuseColor.rgb, pink, mix( prows * 0.3, pk, pseen ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, pink2, pband * 0.75 * mix( 0.5, 1.0, pseen ) );
+  }
+}`;
+
 /** a map sampled from world position, blended over the three axes by the surface's facing */
-function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false) {
+function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false, print = false) {
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev.call(m, sh, r);
@@ -88,11 +115,12 @@ function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false) 
         triW /= triW.x + triW.y + triW.z + 1e-5;
         vec3 tq = vTriP / ${scale.toFixed(2)};
         vec4 triC = texture2D( map, tq.zy ) * triW.x + texture2D( map, tq.xz ) * triW.y + texture2D( map, tq.xy ) * triW.z;
-        diffuseColor *= triC;`,
+        diffuseColor *= triC;
+        ${print ? PRINT : ''}`,
       );
   };
   const key = m.customProgramCacheKey.bind(m);
-  m.customProgramCacheKey = () => key() + '|tri' + scale + (local ? 'L' : '');
+  m.customProgramCacheKey = () => key() + '|tri' + scale + (local ? 'L' : '') + (print ? 'P' : '');
 }
 
 export interface MapData {
@@ -665,7 +693,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         }
         // the volume's light is from all round: in black water only a little of the sky should show
         m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : m0.name === 'lfpool' ? { spec: 0.22 } : {});
-        if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1]);
+        if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1], false, /^lflab/.test(m0.name));
         table.set(m0, m);
       }
       return m;

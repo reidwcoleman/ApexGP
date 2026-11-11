@@ -330,8 +330,8 @@ const FRAG_LIGHT = /* glsl */ `
       // the room as seen from the gun: average light, picked up by anything turned toward the wearer
       vec3 lfAmb = lfCube( vLfW, normalize( lfVw + vec3( 0.0, 0.6, 0.0 ) ) );
       float lfFace = pow( clamp( dot( lfNw, lfVw ) * 0.6 + 0.4, 0.0, 1.0 ), 1.5 );
-      irradiance += lfAmb * PI * lfFace * 0.4 + vec3( 0.006, 0.0065, 0.0075 ) * PI;
-      radiance += lfAmb * 0.08 * ( 1.0 - roughnessFactor * 0.6 );
+      irradiance += lfAmb * PI * lfFace * 0.58 + vec3( 0.006, 0.0065, 0.0075 ) * PI;
+      radiance += lfAmb * 0.14 * ( 1.0 - roughnessFactor * 0.6 );
     }
     #endif
     vec3 lfF0 = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );

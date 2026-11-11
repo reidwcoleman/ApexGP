@@ -313,7 +313,7 @@ export class Game {
     if (L.map.night) {
       Bot.night = true;
       // the dark is still dark, but the sensor is a better one: it opens further and brings far less noise up with it
-      this.post.exposureMax = 5.0;
+      this.post.exposureMax = 7.5;
       this.post.mFinal.uniforms.satK.value = 0.8;
       this.post.mFinal.uniforms.grainK.value = 0.45;
     }

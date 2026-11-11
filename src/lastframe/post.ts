@@ -376,7 +376,7 @@ void main() {
     vec2 uv = ( vec2( float( i ), float( j ) ) + 0.5 ) / vec2( 16.0, 9.0 );
     vec2 c = uv - 0.5;
     float w = exp( -dot( c, c ) * 3.2 );
-    float l = min( dot( texture2D( tFine, uv ).rgb, vec3( 0.3, 0.59, 0.11 ) ), 20.0 );
+    float l = min( dot( texture2D( tFine, uv ).rgb, vec3( 0.3, 0.59, 0.11 ) ), 5.0 );
     hi += l * l * w;
     hw += w;
   }
