@@ -382,6 +382,27 @@ export class Soldier {
     worn.userData.gear = true;
     P0.body.parent!.add(worn);
     this.person.body.traverse((o) => (o.castShadow = true));
+    // the recording light on the chest camera: a steady green LED, and the little bloom of it that carries across a dark room
+    {
+      const bone = P0.bones.Bip01_Spine2, bi = P0.skeleton.bones.indexOf(bone);
+      const cy = (P0.body.material as THREE.MeshStandardMaterial).userData.cloth?.uL0?.value?.y ?? 1.32;
+      if (bone && bi >= 0) {
+        const inv = P0.skeleton.boneInverses[bi];
+        const led = new THREE.Mesh(LED_GEO, LED_MAT);
+        led.position.set(0.075, cy - 0.02, 0.185).applyMatrix4(inv);
+        led.scale.setScalar(new THREE.Vector3().setFromMatrixColumn(inv, 0).length());
+        const halo = new THREE.Sprite(LED_HALO);
+        halo.scale.setScalar(0.26);
+        led.add(halo);
+        led.userData.gear = halo.userData.gear = true;
+        bone.add(led);
+        // and the battery light on the back of the rig, so they can be picked out from behind as well
+        const back = led.clone(true);
+        back.position.set(-0.05, cy + 0.0, -0.2).applyMatrix4(inv);
+        back.traverse((o) => (o.userData.gear = true));
+        bone.add(back);
+      }
+    }
     for (const o of this.root.children) o.traverse((m) => ((m as THREE.Mesh).isMesh && applyPeople((m as THREE.Mesh).material as THREE.MeshStandardMaterial)));
         const bm = this.person.body.material as THREE.MeshStandardMaterial;
     const before = bm.onBeforeCompile, key = bm.customProgramCacheKey();
@@ -785,6 +806,24 @@ export class Soldier {
     this.root.removeFromParent();
   }
 }
+
+const LED_GEO = new THREE.SphereGeometry(0.012, 8, 6);
+const LED_MAT = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 1.5, 0.4), toneMapped: false });
+LED_MAT.userData.gear = true;
+const LED_HALO = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(120,255,160,1)');
+  gr.addColorStop(0.25, 'rgba(40,220,90,0.35)');
+  gr.addColorStop(1, 'rgba(20,160,60,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.SpriteMaterial({ map: t, color: new THREE.Color(0.9, 0.9, 0.9), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+})();
 
 const seenMat = new Set<THREE.Material>();
 function applyPeople(m: THREE.MeshStandardMaterial) {
